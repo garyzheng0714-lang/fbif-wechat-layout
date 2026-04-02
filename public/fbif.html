@@ -112,7 +112,10 @@ const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
-const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
+const FONT_STACK = 'mp-quote, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif';
+const WRAP_OPEN = '<span style="color: rgba(0,0,0,0.9); font-size: 17px; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">';
+const WRAP_CLOSE = '</span>';
+const BLANK = '<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' + WRAP_OPEN + '<br>' + WRAP_CLOSE + '</section>';
 
 let footerHtml = '';
 fetch('/footer.html').then(r => r.ok ? r.text() : '').then(t => footerHtml = t).catch(() => {});
@@ -211,13 +214,14 @@ function classifyPara(p, ridToFile, ridToUrl) {
 }
 
 // ---- Inline Renderer (FBIF style) ----
-function renderInline(runs) {
-  return runs.filter(r => r.type !== 'img').map(r => {
+function renderInline(runs, color) {
+  const c = color || '#544545';
+  const inner = runs.filter(r => r.type !== 'img').map(r => {
     if (r.type === 'txt') {
       const t = esc(r.text);
       return r.bold
-        ? '<span style="font-size: 15px; color: #544545; font-weight: bold;">' + t + '</span>'
-        : '<span style="font-size: 15px; color: #544545;">' + t + '</span>';
+        ? '<span style="font-size: 15px; color: ' + c + '; font-weight: bold;">' + t + '</span>'
+        : '<span style="font-size: 15px; color: ' + c + ';">' + t + '</span>';
     }
     if (r.type === 'link') {
       return '<a style="color: rgb(0, 112, 192); text-decoration: none; font-size: 15px;" href="'
@@ -225,6 +229,7 @@ function renderInline(runs) {
     }
     return '';
   }).join('');
+  return WRAP_OPEN + inner + WRAP_CLOSE;
 }
 
 // ---- FBIF Layout Engine ----
@@ -269,11 +274,19 @@ async function processDocxFBIF(file) {
   for (let i = 0; i < pds.length; i++) {
     if (!pds[i].isHeading) continue;
     if (pds[i].text.trim().startsWith('标题')) {
-      contentStart = pds.length; // default: no content after meta
+      // Scan meta section for author, find where content begins
+      let foundNext = false;
       for (let j = i + 1; j < pds.length; j++) {
-        if (pds[j].isHeading) { contentStart = j; break; }
+        if (pds[j].isHeading) { contentStart = j; foundNext = true; break; }
         const m = pds[j].text.trim().match(/^作者[：:]\s*(.+)/);
         if (m) author = m[1].trim();
+      }
+      // If no heading after meta, content starts right after the last meta paragraph
+      if (!foundNext) {
+        contentStart = i + 1;
+        // Skip meta paragraphs (标题 text, 摘要, 作者)
+        while (contentStart < pds.length && !pds[contentStart].isHeading) contentStart++;
+        if (contentStart >= pds.length) contentStart = pds.length;
       }
     }
     break;
@@ -304,13 +317,15 @@ async function processDocxFBIF(file) {
         elems.push({ k: 'refH' });
         continue;
       }
-      elems.push({ k: 'h', text: ht });
+      // Strip leading number prefix like "01 ", "02 " etc.
+      const headingText = ht.replace(/^0?\d+\s+/, '');
+      elems.push({ k: 'h', text: headingText });
       continue;
     }
 
-    // Reference items
+    // Reference items (gray)
     if (inRef) {
-      elems.push({ k: 'ref', html: renderInline(pd.runs) });
+      elems.push({ k: 'ref', html: renderInline(pd.runs, '#888888') });
       continue;
     }
 
@@ -350,7 +365,7 @@ async function processDocxFBIF(file) {
   // Author line (blue, italic)
   if (author) {
     lines.push('<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' +
-      '<span style="font-size: 15px; color: rgb(0, 112, 192); font-style: italic;">作者：' +
+      '<span style="color: rgb(0, 112, 192); font-size: 15px; font-style: italic; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">作者：' +
       esc(author) + '</span></section>');
     lines.push(BLANK);
   }
@@ -362,8 +377,8 @@ async function processDocxFBIF(file) {
     switch (e.k) {
       case 'h':
         ensureBlank();
-        lines.push(sec('<span style="font-size: 18px; font-weight: bold; color: #544545;">' +
-          esc(e.text) + '</span>'));
+        lines.push(sec(WRAP_OPEN + '<span style="font-size: 18px; font-weight: bold; color: #544545;">' +
+          esc(e.text) + '</span>' + WRAP_CLOSE));
         lines.push(BLANK);
         break;
 
@@ -377,7 +392,7 @@ async function processDocxFBIF(file) {
       case 'cap':
         // No blank between image and caption, or between caption lines
         lines.push('<section style="text-align: center; margin: 0px 8px; line-height: 1.75em;">' +
-          '<span style="font-size: 12px; color: #888888;">' + esc(e.text) + '</span></section>');
+          WRAP_OPEN + '<span style="font-size: 12px; color: #888888;">' + esc(e.text) + '</span>' + WRAP_CLOSE + '</section>');
         break;
 
       case 'txt':
@@ -387,11 +402,11 @@ async function processDocxFBIF(file) {
 
       case 'refH':
         ensureBlank();
-        lines.push(sec('<span style="font-size: 15px; color: #888888;">参考来源：</span>'));
+        lines.push(sec(WRAP_OPEN + '<span style="font-size: 15px; color: #888888;">参考来源：</span>' + WRAP_CLOSE));
         break;
 
       case 'ref':
-        lines.push(sec('<span style="font-size: 15px; color: #888888;">' + e.html + '</span>'));
+        lines.push(sec(e.html));
         break;
     }
   }
