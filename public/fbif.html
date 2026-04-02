@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FBIF 公众号排版工具</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; min-height: 100vh; }
+.container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+h1 { font-size: 28px; color: #1a1a1a; margin-bottom: 8px; }
+.subtitle { color: #666; font-size: 15px; margin-bottom: 32px; }
+.back-link { color: #0070C0; text-decoration: none; font-size: 14px; display: inline-block; margin-bottom: 16px; }
+.back-link:hover { text-decoration: underline; }
+.upload-zone {
+  border: 2px dashed #d0d0d0; border-radius: 12px; padding: 60px 40px;
+  text-align: center; background: #fff; cursor: pointer; transition: all 0.2s;
+}
+.upload-zone:hover, .upload-zone.dragover { border-color: #0070C0; background: #f8fbff; }
+.upload-zone.processing { border-color: #faad14; background: #fffbe6; pointer-events: none; }
+.upload-icon { font-size: 48px; margin-bottom: 16px; }
+.upload-text { font-size: 16px; color: #333; margin-bottom: 8px; }
+.upload-hint { font-size: 13px; color: #999; }
+input[type="file"] { display: none; }
+.progress { display: none; margin-top: 24px; }
+.progress-bar { height: 4px; background: #e8e8e8; border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: #0070C0; width: 0%; transition: width 0.3s; }
+.progress-text { font-size: 13px; color: #666; margin-top: 8px; text-align: center; }
+.error { color: #ff4d4f; margin-top: 16px; font-size: 14px; display: none; }
+#previewView { display: none; }
+.toolbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: #fff; border-bottom: 1px solid #e8e8e8; padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px;
+}
+.toolbar h2 { font-size: 16px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn {
+  padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px;
+  cursor: pointer; transition: all 0.2s; font-weight: 500; white-space: nowrap;
+}
+.btn-primary { background: #0070C0; color: #fff; }
+.btn-primary:hover { background: #005a9e; }
+.btn-primary.copied { background: #27ae60; }
+.btn-secondary { background: #f0f0f0; color: #333; text-decoration: none; }
+.btn-secondary:hover { background: #e0e0e0; }
+.zoom-controls {
+  display: flex; align-items: center; gap: 4px; background: #f0f0f0;
+  border-radius: 6px; padding: 2px;
+}
+.zoom-controls .btn { padding: 6px 12px; font-size: 16px; min-width: 36px; }
+.zoom-label { font-size: 13px; color: #666; min-width: 45px; text-align: center; }
+.phone-frame {
+  max-width: 840px; margin: 72px auto 40px; background: #fff;
+  border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  overflow: hidden; transition: max-width 0.3s ease;
+}
+.phone-header { background: #ededed; padding: 8px 16px; text-align: center; }
+.phone-header span { font-size: 12px; color: #999; }
+.phone-body { padding: 16px 0; }
+.stats-bar {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.75); color: #fff; padding: 8px 20px;
+  border-radius: 20px; font-size: 13px; z-index: 100;
+}
+</style>
+</head>
+<body>
+
+<!-- Upload View -->
+<div id="uploadView">
+  <div class="container">
+    <a href="/" class="back-link">&larr; 返回选择</a>
+    <h1>FBIF 公众号排版</h1>
+    <p class="subtitle">上传 Word 文档，按 FBIF 排版规范一键生成微信公众号格式</p>
+    <div class="upload-zone" id="dropZone">
+      <div class="upload-icon">📄</div>
+      <div class="upload-text">点击上传或拖拽 .docx 文件到这里</div>
+      <div class="upload-hint">支持 .docx 格式，本地处理不上传服务器</div>
+      <input type="file" id="fileInput" accept=".docx">
+    </div>
+    <div class="progress" id="progress">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText">正在排版...</div>
+    </div>
+    <div class="error" id="error"></div>
+  </div>
+</div>
+
+<!-- Preview View -->
+<div id="previewView">
+  <div class="toolbar">
+    <h2 id="previewTitle"></h2>
+    <div class="zoom-controls">
+      <button class="btn btn-secondary" onclick="zoom(-1)">−</button>
+      <span class="zoom-label" id="zoomLabel">200%</span>
+      <button class="btn btn-secondary" onclick="zoom(1)">+</button>
+    </div>
+    <button class="btn btn-secondary" onclick="goBack()">← 重新上传</button>
+    <button class="btn btn-primary" id="copyBtn" onclick="copyContent()">复制正文</button>
+  </div>
+  <div class="phone-frame" id="phoneFrame">
+    <div class="phone-header"><span>微信公众号预览</span></div>
+    <div class="phone-body" id="contentArea"></div>
+  </div>
+  <div class="stats-bar" id="statsBar"></div>
+</div>
+
+<script>
+// ---- XML Namespaces ----
+const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
+
+let footerHtml = '';
+fetch('/footer.html').then(r => r.ok ? r.text() : '').then(t => footerHtml = t).catch(() => {});
+
+// ---- XML Helpers ----
+function findAll(el, ns, tag) {
+  const r = [];
+  if (!el) return r;
+  for (const c of el.children) if (c.localName === tag && c.namespaceURI === ns) r.push(c);
+  return r;
+}
+function findOne(el, ns, tag) {
+  if (!el) return null;
+  for (const c of el.children) if (c.localName === tag && c.namespaceURI === ns) return c;
+  return null;
+}
+function findDeep(el, ns, tag) {
+  if (!el) return null;
+  if (el.localName === tag && el.namespaceURI === ns) return el;
+  for (const c of el.children) { const f = findDeep(c, ns, tag); if (f) return f; }
+  return null;
+}
+function wattr(el, name) {
+  if (!el) return '';
+  return el.getAttributeNS(W, name) || el.getAttribute('w:' + name) || el.getAttribute(name) || '';
+}
+function rattr(el, name) {
+  if (!el) return '';
+  return el.getAttributeNS(R, name) || el.getAttribute('r:' + name) || '';
+}
+function esc(t) {
+  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---- Paragraph Classifier ----
+function classifyPara(p, ridToFile, ridToUrl) {
+  const pPr = findOne(p, W, 'pPr');
+  let isHeading = false, align = 'left';
+
+  if (pPr) {
+    if (findOne(pPr, W, 'outlineLvl')) isHeading = true;
+    const ps = findOne(pPr, W, 'pStyle');
+    if (ps && /^[1-9]$|^heading/i.test(wattr(ps, 'val'))) isHeading = true;
+    const jc = findOne(pPr, W, 'jc');
+    if (jc) align = wattr(jc, 'val') || 'left';
+  }
+
+  const runs = [];
+  for (const child of p.children) {
+    if (child.localName === 'r' && child.namespaceURI === W) {
+      const rPr = findOne(child, W, 'rPr');
+      let bold = false, hl = false;
+      if (rPr) {
+        if (findOne(rPr, W, 'b')) bold = true;
+        const shd = findOne(rPr, W, 'shd');
+        if (shd) {
+          const fill = wattr(shd, 'fill');
+          if (fill && !/^(auto|ffffff|FFFFFF)$/i.test(fill)) hl = true;
+        }
+        if (findOne(rPr, W, 'highlight')) hl = true;
+      }
+      const drw = findOne(child, W, 'drawing');
+      if (drw) {
+        const blip = findDeep(drw, A, 'blip');
+        const embed = blip ? (rattr(blip, 'embed')) : '';
+        const ext = findDeep(drw, WP, 'extent');
+        let w = '100%';
+        if (ext) {
+          const cx = parseInt(ext.getAttribute('cx') || '0');
+          if (cx > 0) w = Math.min(100, Math.round(cx / 5486400 * 100)) + '%';
+        }
+        runs.push({ type: 'img', file: ridToFile[embed] || '', w });
+      } else {
+        let txt = '';
+        for (const t of child.getElementsByTagNameNS(W, 't')) txt += t.textContent || '';
+        if (txt) runs.push({ type: 'txt', text: txt, bold, hl });
+      }
+    } else if (child.localName === 'hyperlink' && child.namespaceURI === W) {
+      const rid = rattr(child, 'id');
+      const href = ridToUrl[rid] || '';
+      for (const r of findAll(child, W, 'r')) {
+        let txt = '';
+        for (const t of r.getElementsByTagNameNS(W, 't')) txt += t.textContent || '';
+        if (txt) runs.push({ type: 'link', text: txt, href });
+      }
+    }
+  }
+
+  const text = runs.filter(r => r.type !== 'img').map(r => r.text).join('');
+  return {
+    isHeading, align, runs, text,
+    hasImg: runs.some(r => r.type === 'img'),
+    isEmpty: !runs.some(r => r.type === 'img') && !text.trim(),
+    hasHL: runs.some(r => r.hl)
+  };
+}
+
+// ---- Inline Renderer (FBIF style) ----
+function renderInline(runs) {
+  return runs.filter(r => r.type !== 'img').map(r => {
+    if (r.type === 'txt') {
+      const t = esc(r.text);
+      return r.bold
+        ? '<span style="font-size: 15px; color: #544545; font-weight: bold;">' + t + '</span>'
+        : '<span style="font-size: 15px; color: #544545;">' + t + '</span>';
+    }
+    if (r.type === 'link') {
+      return '<a style="color: rgb(0, 112, 192); text-decoration: none; font-size: 15px;" href="'
+        + (r.href || '').replace(/&/g, '&amp;') + '">' + esc(r.text) + '</a>';
+    }
+    return '';
+  }).join('');
+}
+
+// ---- FBIF Layout Engine ----
+async function processDocxFBIF(file) {
+  const t0 = performance.now();
+  const zip = await JSZip.loadAsync(file);
+
+  // Parse relationships
+  const relsXml = await zip.file('word/_rels/document.xml.rels').async('string');
+  const relsDom = new DOMParser().parseFromString(relsXml, 'text/xml');
+  const ridToFile = {}, ridToUrl = {};
+  for (const rel of relsDom.querySelectorAll('Relationship')) {
+    const rid = rel.getAttribute('Id'), target = rel.getAttribute('Target');
+    const rtype = rel.getAttribute('Type') || '';
+    if (rtype.includes('image')) ridToFile[rid] = target.replace('media/', '');
+    else if (rtype.includes('hyperlink')) ridToUrl[rid] = (target || '').replace(/&amp;/g, '&');
+  }
+
+  // Load images as base64
+  const imgCache = {};
+  for (const [rid, fn] of Object.entries(ridToFile)) {
+    const entry = zip.file('word/media/' + fn);
+    if (entry) {
+      const data = await entry.async('base64');
+      const ext = fn.split('.').pop().toLowerCase();
+      const mimeMap = { png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' };
+      imgCache[fn] = 'data:' + (mimeMap[ext] || 'image/jpeg') + ';base64,' + data;
+    }
+  }
+
+  // Parse document.xml
+  const docXml = await zip.file('word/document.xml').async('string');
+  const docDom = new DOMParser().parseFromString(docXml, 'text/xml');
+  const body = findOne(docDom.documentElement, W, 'body');
+  const allParas = findAll(body, W, 'p');
+
+  // Classify all paragraphs
+  const pds = allParas.map(p => classifyPara(p, ridToFile, ridToUrl));
+
+  // ---- Extract meta info (标题/摘要/作者) ----
+  let author = '', contentStart = 0;
+  for (let i = 0; i < pds.length; i++) {
+    if (!pds[i].isHeading) continue;
+    if (pds[i].text.trim().startsWith('标题')) {
+      contentStart = pds.length; // default: no content after meta
+      for (let j = i + 1; j < pds.length; j++) {
+        if (pds[j].isHeading) { contentStart = j; break; }
+        const m = pds[j].text.trim().match(/^作者[：:]\s*(.+)/);
+        if (m) author = m[1].trim();
+      }
+    }
+    break;
+  }
+  // Skip "引言" marker heading (not rendered)
+  if (contentStart < pds.length && pds[contentStart].isHeading &&
+      pds[contentStart].text.trim().replace(/[：:]$/, '') === '引言') {
+    contentStart++;
+  }
+
+  // ---- Build element list ----
+  const elems = [];
+  let inRef = false, imgN = 0;
+
+  for (let i = contentStart; i < pds.length; i++) {
+    const pd = pds[i];
+    if (pd.isEmpty) continue;
+
+    // Skip editorial highlight notes (e.g. "（插入视频）")
+    if (pd.hasHL && pd.text.includes('插入视频')) continue;
+
+    // Heading
+    if (pd.isHeading) {
+      const ht = pd.text.trim().replace(/[：:]$/, '');
+      if (ht === '引言' || ht === '标题') continue;
+      if (ht.startsWith('参考来源')) {
+        inRef = true;
+        elems.push({ k: 'refH' });
+        continue;
+      }
+      elems.push({ k: 'h', text: ht });
+      continue;
+    }
+
+    // Reference items
+    if (inRef) {
+      elems.push({ k: 'ref', html: renderInline(pd.runs) });
+      continue;
+    }
+
+    // Image + caption look-ahead
+    if (pd.hasImg) {
+      for (const r of pd.runs) {
+        if (r.type === 'img') { imgN++; elems.push({ k: 'img', file: r.file, w: r.w }); }
+      }
+      // Consume following center-aligned caption paragraphs
+      while (i + 1 < pds.length) {
+        const nx = pds[i + 1];
+        if (nx.isEmpty) { i++; continue; }
+        if (!nx.hasImg && !nx.isHeading && nx.align === 'center' && nx.text.trim()) {
+          let ct = nx.text.trim().replace(/^[（(]插入视频[）)]\s*/, '');
+          if (ct) elems.push({ k: 'cap', text: ct });
+          i++;
+        } else {
+          break;
+        }
+      }
+      continue;
+    }
+
+    // Regular body text
+    elems.push({ k: 'txt', html: renderInline(pd.runs) });
+  }
+
+  // ---- Generate HTML with spacing rules ----
+  const lines = [];
+  function ensureBlank() {
+    if (lines.length && lines[lines.length - 1] !== BLANK) lines.push(BLANK);
+  }
+  function sec(inner) {
+    return '<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' + inner + '</section>';
+  }
+
+  // Author line (blue, italic)
+  if (author) {
+    lines.push('<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' +
+      '<span style="font-size: 15px; color: rgb(0, 112, 192); font-style: italic;">作者：' +
+      esc(author) + '</span></section>');
+    lines.push(BLANK);
+  }
+
+  for (let i = 0; i < elems.length; i++) {
+    const e = elems[i];
+    const pk = i > 0 ? elems[i - 1].k : null;
+
+    switch (e.k) {
+      case 'h':
+        ensureBlank();
+        lines.push(sec('<span style="font-size: 18px; font-weight: bold; color: #544545;">' +
+          esc(e.text) + '</span>'));
+        lines.push(BLANK);
+        break;
+
+      case 'img':
+        if (pk !== 'img' && pk !== 'cap') ensureBlank();
+        lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;">' +
+          '<img src="' + (imgCache[e.file] || '') + '" style="width: ' + e.w +
+          '; display: block; margin: 0 auto;" /></section>');
+        break;
+
+      case 'cap':
+        // No blank between image and caption, or between caption lines
+        lines.push('<section style="text-align: center; margin: 0px 8px; line-height: 1.75em;">' +
+          '<span style="font-size: 12px; color: #888888;">' + esc(e.text) + '</span></section>');
+        break;
+
+      case 'txt':
+        if (pk && pk !== 'h') ensureBlank();
+        lines.push(sec(e.html));
+        break;
+
+      case 'refH':
+        ensureBlank();
+        lines.push(sec('<span style="font-size: 15px; color: #888888;">参考来源：</span>'));
+        break;
+
+      case 'ref':
+        lines.push(sec('<span style="font-size: 15px; color: #888888;">' + e.html + '</span>'));
+        break;
+    }
+  }
+
+  // Dedup consecutive blanks
+  const final = [];
+  for (const l of lines) {
+    if (l === BLANK && final.length && final[final.length - 1] === BLANK) continue;
+    final.push(l);
+  }
+
+  const contentHtml = final.join('\n') + '\n' + footerHtml;
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  const hCount = elems.filter(e => e.k === 'h').length;
+  const stats = '段落: ' + final.length + ' | 图片: ' + imgN + ' | 标题: ' + hCount + ' | 耗时: ' + elapsed + 's';
+  return { contentHtml, stats };
+}
+
+// ---- Upload Logic ----
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const progress = document.getElementById('progress');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const errorEl = document.getElementById('error');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.docx')) handleFile(f);
+  else showError('请上传 .docx 文件');
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+function showError(msg) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+
+async function handleFile(file) {
+  errorEl.style.display = 'none';
+  dropZone.classList.add('processing');
+  progress.style.display = 'block';
+  progressFill.style.width = '30%';
+  progressText.textContent = '正在解压 ' + file.name + '...';
+  try {
+    progressFill.style.width = '50%';
+    progressText.textContent = '正在排版...';
+    const { contentHtml, stats } = await processDocxFBIF(file);
+    progressFill.style.width = '100%';
+    progressText.textContent = '排版完成!';
+    setTimeout(() => showPreview(file.name.replace(/\.docx$/i, ''), contentHtml, stats), 300);
+  } catch (err) {
+    dropZone.classList.remove('processing');
+    progress.style.display = 'none';
+    showError('排版失败: ' + err.message);
+  }
+}
+
+// ---- Preview Logic ----
+function showPreview(title, content, stats) {
+  document.getElementById('uploadView').style.display = 'none';
+  document.getElementById('previewView').style.display = 'block';
+  document.getElementById('previewTitle').textContent = title;
+  document.getElementById('contentArea').innerHTML = content;
+  document.getElementById('statsBar').textContent = stats;
+}
+function goBack() {
+  document.getElementById('previewView').style.display = 'none';
+  document.getElementById('uploadView').style.display = 'block';
+  dropZone.classList.remove('processing');
+  progress.style.display = 'none';
+  progressFill.style.width = '0%';
+  fileInput.value = '';
+}
+const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
+let zoomIdx = 5;
+function zoom(dir) {
+  zoomIdx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, zoomIdx + dir));
+  const pct = ZOOM_STEPS[zoomIdx];
+  document.getElementById('phoneFrame').style.maxWidth = (420 * pct / 100) + 'px';
+  document.getElementById('zoomLabel').textContent = pct + '%';
+}
+function copyContent() {
+  const content = document.getElementById('contentArea');
+  const range = document.createRange();
+  range.selectNodeContents(content);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  document.execCommand('copy');
+  sel.removeAllRanges();
+  const btn = document.getElementById('copyBtn');
+  btn.textContent = '已复制!';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = '复制正文'; btn.classList.remove('copied'); }, 2000);
+}
+</script>
+</body>
+</html>
