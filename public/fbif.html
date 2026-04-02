@@ -112,10 +112,37 @@ const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
-const FONT_STACK = 'mp-quote, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif';
-const WRAP_OPEN = '<span style="color: rgba(0,0,0,0.9); font-size: 17px; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">';
-const WRAP_CLOSE = '</span>';
+const FONT_STACK = 'mp-quote, "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif';
 const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
+
+// ---- Gold-standard per-run wrapping helpers ----
+function leafWrap(inner) {
+  return '<span leaf="" style="color: rgba(0,0,0,0.9); font-size: 17px; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em; font-style: normal; font-weight: normal;">' + inner + '</span>';
+}
+function textSpan(text, opts) {
+  let s = 'font-size: ' + (opts.fontSize || '15px') + '; color: ' + (opts.color || 'rgb(84, 69, 69)');
+  if (opts.bold) s += '; font-weight: bold';
+  return '<span textstyle="" style="' + s + ';">' + text + '</span>';
+}
+function renderRuns(runs, opts) {
+  const c = (opts && opts.color) || 'rgb(84, 69, 69)';
+  const fs = (opts && opts.fontSize) || '15px';
+  return runs.filter(r => r.type !== 'img').map(r => {
+    if (r.type === 'txt') return leafWrap(textSpan(esc(r.text), { fontSize: fs, color: c, bold: r.bold }));
+    if (r.type === 'link') return leafWrap('<a style="color: rgb(0, 112, 192); text-decoration: none; font-size: ' + fs + ';" href="' + (r.href || '').replace(/&/g, '&amp;') + '">' + esc(r.text) + '</a>');
+    return '';
+  }).join('');
+}
+function parseMdRuns(text) {
+  text = text.replace(/\s*\n\s*/g, '');
+  const parts = text.split(/\*\*/);
+  const runs = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue;
+    runs.push({ type: 'txt', text: parts[i], bold: i % 2 === 1 });
+  }
+  return runs;
+}
 
 let footerHtml = '';
 fetch('/footer.html').then(r => r.ok ? r.text() : '').then(t => footerHtml = t).catch(() => {});
@@ -222,24 +249,6 @@ function classifyPara(p, ridToFile, ridToUrl) {
   };
 }
 
-// ---- Inline Renderer (FBIF style) ----
-function renderInline(runs, color) {
-  const c = color || '#544545';
-  const inner = runs.filter(r => r.type !== 'img').map(r => {
-    if (r.type === 'txt') {
-      const t = esc(r.text);
-      return r.bold
-        ? '<span style="font-size: 15px; color: ' + c + '; font-weight: bold;">' + t + '</span>'
-        : '<span style="font-size: 15px; color: ' + c + ';">' + t + '</span>';
-    }
-    if (r.type === 'link') {
-      return '<a style="color: rgb(0, 112, 192); text-decoration: none; font-size: 15px;" href="'
-        + (r.href || '').replace(/&/g, '&amp;') + '">' + esc(r.text) + '</a>';
-    }
-    return '';
-  }).join('');
-  return WRAP_OPEN + inner + WRAP_CLOSE;
-}
 
 // ---- FBIF Layout Engine ----
 async function processDocxFBIF(file) {
@@ -332,9 +341,9 @@ async function processDocxFBIF(file) {
       continue;
     }
 
-    // Reference items (gray)
+    // Reference items (store runs, rendered gray later)
     if (inRef) {
-      elems.push({ k: 'ref', html: renderInline(pd.runs, '#888888') });
+      elems.push({ k: 'ref', runs: pd.runs });
       continue;
     }
 
@@ -358,31 +367,11 @@ async function processDocxFBIF(file) {
       continue;
     }
 
-    // Regular body text
-    elems.push({ k: 'txt', html: renderInline(pd.runs) });
+    // Regular body text (store runs, rendered later)
+    elems.push({ k: 'txt', runs: pd.runs });
   }
 
   return generateFBIFHtml(elems, author, imgN, t0);
-}
-
-// ---- Markdown Parser ----
-function renderMdInline(text, color) {
-  const c = color || '#544545';
-  // Collapse line breaks within a paragraph
-  text = text.replace(/\s*\n\s*/g, '');
-  // Split by ** for bold
-  const parts = text.split(/\*\*/);
-  let html = '';
-  for (let i = 0; i < parts.length; i++) {
-    const t = esc(parts[i]);
-    if (!t) continue;
-    if (i % 2 === 1) {
-      html += '<span style="font-size: 15px; color: ' + c + '; font-weight: bold;">' + t + '</span>';
-    } else {
-      html += '<span style="font-size: 15px; color: ' + c + ';">' + t + '</span>';
-    }
-  }
-  return WRAP_OPEN + html + WRAP_CLOSE;
 }
 
 // Fetch external image and convert to base64 data URI via proxy
@@ -439,7 +428,7 @@ async function processMdFBIF(text) {
       continue;
     }
     if (inRef) {
-      elems.push({ k: 'ref', html: renderMdInline(para, '#888888') });
+      elems.push({ k: 'ref', runs: parseMdRuns(para) });
       continue;
     }
 
@@ -468,8 +457,8 @@ async function processMdFBIF(text) {
       expectHeading = false;
     }
 
-    // Regular text
-    elems.push({ k: 'txt', html: renderMdInline(para) });
+    // Regular text (store runs, rendered later)
+    elems.push({ k: 'txt', runs: parseMdRuns(para) });
   }
 
   // Convert external image URLs to base64 for WeChat paste compatibility
@@ -505,8 +494,7 @@ function generateFBIFHtml(elems, author, imgN, t0) {
     switch (e.k) {
       case 'h':
         ensureBlank();
-        lines.push(sec(WRAP_OPEN + '<span style="font-size: 18px; font-weight: bold; color: #544545;">' +
-          esc(e.text) + '</span>' + WRAP_CLOSE));
+        lines.push(sec(leafWrap(textSpan(esc(e.text), { fontSize: '18px', bold: true }))));
         lines.push(BLANK);
         break;
       case 'img':
@@ -517,18 +505,18 @@ function generateFBIFHtml(elems, author, imgN, t0) {
         break;
       case 'cap':
         lines.push('<section style="text-align: center; margin: 0px 8px; line-height: 1.75em;">' +
-          WRAP_OPEN + '<span style="font-size: 12px; color: #888888;">' + esc(e.text) + '</span>' + WRAP_CLOSE + '</section>');
+          leafWrap(textSpan(esc(e.text), { fontSize: '12px', color: 'rgb(136, 136, 136)' })) + '</section>');
         break;
       case 'txt':
         if (pk && pk !== 'h') ensureBlank();
-        lines.push(sec(e.html));
+        lines.push(sec(renderRuns(e.runs)));
         break;
       case 'refH':
         ensureBlank();
-        lines.push(sec(WRAP_OPEN + '<span style="font-size: 15px; color: #888888;">参考来源：</span>' + WRAP_CLOSE));
+        lines.push(sec(leafWrap(textSpan('参考来源：', { color: 'rgb(136, 136, 136)' }))));
         break;
       case 'ref':
-        lines.push(sec(e.html));
+        lines.push(sec(renderRuns(e.runs, { color: 'rgb(136, 136, 136)' })));
         break;
     }
   }
