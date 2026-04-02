@@ -75,9 +75,9 @@ input[type="file"] { display: none; }
     <p class="subtitle">上传 Word 文档，按 FBIF 排版规范一键生成微信公众号格式</p>
     <div class="upload-zone" id="dropZone">
       <div class="upload-icon">📄</div>
-      <div class="upload-text">点击上传或拖拽 .docx 文件到这里</div>
-      <div class="upload-hint">支持 .docx 格式，本地处理不上传服务器</div>
-      <input type="file" id="fileInput" accept=".docx">
+      <div class="upload-text">点击上传或拖拽文件到这里</div>
+      <div class="upload-hint">支持 .docx 和 .md 格式，本地处理不上传服务器</div>
+      <input type="file" id="fileInput" accept=".docx,.md,.txt">
     </div>
     <div class="progress" id="progress">
       <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
@@ -341,7 +341,7 @@ async function processDocxFBIF(file) {
     // Image + caption look-ahead
     if (pd.hasImg) {
       for (const r of pd.runs) {
-        if (r.type === 'img') { imgN++; elems.push({ k: 'img', file: r.file, w: r.w }); }
+        if (r.type === 'img') { imgN++; elems.push({ k: 'img', src: imgCache[r.file] || '', w: r.w }); }
       }
       // Consume following center-aligned caption paragraphs
       while (i + 1 < pds.length) {
@@ -362,7 +362,105 @@ async function processDocxFBIF(file) {
     elems.push({ k: 'txt', html: renderInline(pd.runs) });
   }
 
-  // ---- Generate HTML with spacing rules ----
+  return generateFBIFHtml(elems, author, imgN, t0);
+}
+
+// ---- Markdown Parser ----
+function renderMdInline(text, color) {
+  const c = color || '#544545';
+  // Collapse line breaks within a paragraph
+  text = text.replace(/\s*\n\s*/g, '');
+  // Split by ** for bold
+  const parts = text.split(/\*\*/);
+  let html = '';
+  for (let i = 0; i < parts.length; i++) {
+    const t = esc(parts[i]);
+    if (!t) continue;
+    if (i % 2 === 1) {
+      html += '<span style="font-size: 15px; color: ' + c + '; font-weight: bold;">' + t + '</span>';
+    } else {
+      html += '<span style="font-size: 15px; color: ' + c + ';">' + t + '</span>';
+    }
+  }
+  return WRAP_OPEN + html + WRAP_CLOSE;
+}
+
+async function processMdFBIF(text) {
+  const t0 = performance.now();
+
+  // Parse YAML frontmatter
+  let author = '', content = text;
+  const fmMatch = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  if (fmMatch) {
+    content = fmMatch[2];
+    const am = fmMatch[1].match(/author:\s*"?([^"\n]+)"?/);
+    if (am) author = am[1].trim();
+  }
+
+  // Split into paragraphs by blank lines
+  const rawParas = content.split(/\n\s*\n/).map(p => p.trim()).filter(p => p);
+
+  const elems = [];
+  let imgN = 0, expectHeading = false, stopped = false, inRef = false;
+
+  for (let i = 0; i < rawParas.length && !stopped; i++) {
+    const para = rawParas[i].replace(/\s+$/gm, '');
+
+    // Skip H1 title
+    if (/^#\s/.test(para)) continue;
+    // Skip blockquotes (metadata)
+    if (/^>\s/.test(para)) continue;
+    // Horizontal rules
+    if (/^[-*_\s]{3,}$/.test(para.replace(/\s/g, ''))) {
+      if (para.includes('*')) stopped = true; // * * * = footer separator
+      continue;
+    }
+
+    // Reference section
+    if (/^参考来源/.test(para)) {
+      inRef = true;
+      elems.push({ k: 'refH' });
+      continue;
+    }
+    if (inRef) {
+      elems.push({ k: 'ref', html: renderMdInline(para, '#888888') });
+      continue;
+    }
+
+    // Image: ![...](url)
+    const imgMatch = para.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
+    if (imgMatch) {
+      imgN++;
+      elems.push({ k: 'img', src: imgMatch[2], w: '100%' });
+      continue;
+    }
+
+    // Section number marker: **01**, **02**, etc.
+    if (/^\*\*0?\d+\*\*$/.test(para)) {
+      expectHeading = true;
+      continue;
+    }
+
+    // Heading after section marker
+    if (expectHeading) {
+      const hm = para.match(/^\*\*(.+)\*\*$/);
+      if (hm) {
+        elems.push({ k: 'h', text: hm[1] });
+        expectHeading = false;
+        continue;
+      }
+      expectHeading = false;
+    }
+
+    // Regular text
+    elems.push({ k: 'txt', html: renderMdInline(para) });
+  }
+
+  return generateFBIFHtml(elems, author, imgN, t0);
+}
+
+// ---- Shared HTML Generator ----
+function generateFBIFHtml(elems, author, imgN, t0) {
   const lines = [];
   function ensureBlank() {
     if (lines.length && lines[lines.length - 1] !== BLANK) lines.push(BLANK);
@@ -371,7 +469,6 @@ async function processDocxFBIF(file) {
     return '<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' + inner + '</section>';
   }
 
-  // Author line (blue, italic)
   if (author) {
     lines.push('<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' +
       '<span style="color: rgb(0, 112, 192); font-size: 15px; font-style: italic; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">作者：' +
@@ -382,7 +479,6 @@ async function processDocxFBIF(file) {
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
     const pk = i > 0 ? elems[i - 1].k : null;
-
     switch (e.k) {
       case 'h':
         ensureBlank();
@@ -390,37 +486,30 @@ async function processDocxFBIF(file) {
           esc(e.text) + '</span>' + WRAP_CLOSE));
         lines.push(BLANK);
         break;
-
       case 'img':
         if (pk !== 'img' && pk !== 'cap') ensureBlank();
         lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;">' +
-          '<img src="' + (imgCache[e.file] || '') + '" style="width: ' + e.w +
+          '<img src="' + (e.src || '') + '" style="width: ' + e.w +
           '; display: block; margin: 0 auto;" /></section>');
         break;
-
       case 'cap':
-        // No blank between image and caption, or between caption lines
         lines.push('<section style="text-align: center; margin: 0px 8px; line-height: 1.75em;">' +
           WRAP_OPEN + '<span style="font-size: 12px; color: #888888;">' + esc(e.text) + '</span>' + WRAP_CLOSE + '</section>');
         break;
-
       case 'txt':
         if (pk && pk !== 'h') ensureBlank();
         lines.push(sec(e.html));
         break;
-
       case 'refH':
         ensureBlank();
         lines.push(sec(WRAP_OPEN + '<span style="font-size: 15px; color: #888888;">参考来源：</span>' + WRAP_CLOSE));
         break;
-
       case 'ref':
         lines.push(sec(e.html));
         break;
     }
   }
 
-  // Dedup consecutive blanks
   const final = [];
   for (const l of lines) {
     if (l === BLANK && final.length && final[final.length - 1] === BLANK) continue;
@@ -448,8 +537,8 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover
 dropZone.addEventListener('drop', e => {
   e.preventDefault(); dropZone.classList.remove('dragover');
   const f = e.dataTransfer.files[0];
-  if (f && f.name.endsWith('.docx')) handleFile(f);
-  else showError('请上传 .docx 文件');
+  if (f && (f.name.endsWith('.docx') || f.name.endsWith('.md') || f.name.endsWith('.txt'))) handleFile(f);
+  else showError('请上传 .docx 或 .md 文件');
 });
 fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
 
@@ -464,7 +553,14 @@ async function handleFile(file) {
   try {
     progressFill.style.width = '50%';
     progressText.textContent = '正在排版...';
-    const { contentHtml, stats } = await processDocxFBIF(file);
+    let result;
+    if (file.name.endsWith('.docx')) {
+      result = await processDocxFBIF(file);
+    } else {
+      const text = await file.text();
+      result = await processMdFBIF(text);
+    }
+    const { contentHtml, stats } = result;
     progressFill.style.width = '100%';
     progressText.textContent = '排版完成!';
     setTimeout(() => showPreview(file.name.replace(/\.docx$/i, ''), contentHtml, stats), 300);
