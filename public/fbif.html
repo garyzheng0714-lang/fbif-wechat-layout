@@ -461,13 +461,6 @@ async function processMdFBIF(text) {
     elems.push({ k: 'txt', runs: parseMdRuns(para) });
   }
 
-  // Convert external image URLs to base64 for WeChat paste compatibility
-  const imgElems = elems.filter(e => e.k === 'img' && e.src.startsWith('http'));
-  if (imgElems.length > 0) {
-    const results = await Promise.all(imgElems.map(e => urlToBase64(e.src)));
-    imgElems.forEach((e, i) => { e.src = results[i]; });
-  }
-
   return generateFBIFHtml(elems, author, imgN, t0);
 }
 
@@ -499,8 +492,10 @@ function generateFBIFHtml(elems, author, imgN, t0) {
         break;
       case 'img':
         if (pk !== 'img' && pk !== 'cap') ensureBlank();
+        const imgSrc = e.src || '';
+        const rpol = imgSrc.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
         lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;">' +
-          '<img src="' + (e.src || '') + '" style="width: ' + e.w +
+          '<img src="' + imgSrc + '"' + rpol + ' style="width: ' + e.w +
           '; display: block; margin: 0 auto;" /></section>');
         break;
       case 'cap':
@@ -608,6 +603,17 @@ function zoom(dir) {
 }
 function copyContent() {
   const content = document.getElementById('contentArea');
+  const html = content.innerHTML;
+
+  // Intercept copy event to write raw innerHTML directly to clipboard.
+  // This preserves blank sections that browser's visual selection would skip.
+  const handler = function(e) {
+    e.clipboardData.setData('text/html', html);
+    e.clipboardData.setData('text/plain', content.textContent || '');
+    e.preventDefault();
+  };
+  document.addEventListener('copy', handler);
+  // execCommand('copy') needs a selection to fire the copy event
   const range = document.createRange();
   range.selectNodeContents(content);
   const sel = window.getSelection();
@@ -615,6 +621,8 @@ function copyContent() {
   sel.addRange(range);
   document.execCommand('copy');
   sel.removeAllRanges();
+  document.removeEventListener('copy', handler);
+
   const btn = document.getElementById('copyBtn');
   btn.textContent = '已复制!';
   btn.classList.add('copied');
