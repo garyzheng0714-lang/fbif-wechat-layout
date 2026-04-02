@@ -113,12 +113,12 @@ const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const FONT_STACK = 'mp-quote, "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif';
-const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
 
 // ---- Gold-standard per-run wrapping helpers ----
 function leafWrap(inner) {
   return '<span leaf="" style="color: rgba(0,0,0,0.9); font-size: 17px; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em; font-style: normal; font-weight: normal;">' + inner + '</span>';
 }
+const BLANK = '<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' + leafWrap('<br>') + '</section>';
 function textSpan(text, opts) {
   let s = 'font-size: ' + (opts.fontSize || '15px') + '; color: ' + (opts.color || 'rgb(84, 69, 69)');
   if (opts.bold) s += '; font-weight: bold';
@@ -482,9 +482,9 @@ function generateFBIFHtml(elems, author, imgN, t0) {
   }
 
   if (author) {
-    lines.push('<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' +
-      '<span style="color: rgb(0, 112, 192); font-size: 15px; font-style: italic; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">作者：' +
-      esc(author) + '</span></section>');
+    lines.push(sec('<span leaf="" style="color: rgb(0, 112, 192); font-size: 15px; font-style: italic; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">' +
+      '<span textstyle="" style="font-size: 15px; color: rgb(0, 112, 192); font-style: italic;">作者：' +
+      esc(author) + '</span></span>'));
     lines.push(BLANK);
   }
 
