@@ -115,7 +115,7 @@ const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const FONT_STACK = 'mp-quote, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif';
 const WRAP_OPEN = '<span style="color: rgba(0,0,0,0.9); font-size: 17px; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">';
 const WRAP_CLOSE = '</span>';
-const BLANK = '<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' + WRAP_OPEN + '<br>' + WRAP_CLOSE + '</section>';
+const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
 
 let footerHtml = '';
 fetch('/footer.html').then(r => r.ok ? r.text() : '').then(t => footerHtml = t).catch(() => {});
@@ -385,6 +385,22 @@ function renderMdInline(text, color) {
   return WRAP_OPEN + html + WRAP_CLOSE;
 }
 
+// Fetch external image and convert to base64 data URI via proxy
+async function urlToBase64(url) {
+  try {
+    const proxyUrl = 'https://images.weserv.nl/?url=' + encodeURIComponent(url);
+    const resp = await fetch(proxyUrl);
+    if (!resp.ok) return url;
+    const blob = await resp.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(url);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) { return url; }
+}
+
 async function processMdFBIF(text) {
   const t0 = performance.now();
 
@@ -456,6 +472,13 @@ async function processMdFBIF(text) {
     elems.push({ k: 'txt', html: renderMdInline(para) });
   }
 
+  // Convert external image URLs to base64 for WeChat paste compatibility
+  const imgElems = elems.filter(e => e.k === 'img' && e.src.startsWith('http'));
+  if (imgElems.length > 0) {
+    const results = await Promise.all(imgElems.map(e => urlToBase64(e.src)));
+    imgElems.forEach((e, i) => { e.src = results[i]; });
+  }
+
   return generateFBIFHtml(elems, author, imgN, t0);
 }
 
@@ -488,12 +511,8 @@ function generateFBIFHtml(elems, author, imgN, t0) {
         break;
       case 'img':
         if (pk !== 'img' && pk !== 'cap') ensureBlank();
-        // For external URLs (e.g. mmbiz.qpic.cn), add no-referrer to bypass hotlink protection
-        const imgSrc = e.src || '';
-        const isExternal = imgSrc.startsWith('http');
-        const refPolicy = isExternal ? ' referrerpolicy="no-referrer"' : '';
         lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;">' +
-          '<img src="' + imgSrc + '"' + refPolicy + ' style="width: ' + e.w +
+          '<img src="' + (e.src || '') + '" style="width: ' + e.w +
           '; display: block; margin: 0 auto;" /></section>');
         break;
       case 'cap':
