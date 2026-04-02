@@ -444,6 +444,26 @@ async function processMdFBIF(text) {
     elems.push({ k: 'txt', runs: parseMdRuns(para) });
   }
 
+  // Upload external images to OSS for reliable WeChat paste
+  const imgElems = elems.filter(e => e.k === 'img' && e.src.startsWith('http'));
+  if (imgElems.length > 0) {
+    try {
+      const resp = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: imgElems.map(e => e.src) })
+      });
+      if (resp.ok) {
+        const { results } = await resp.json();
+        for (const e of imgElems) {
+          if (results[e.src]) e.src = results[e.src];
+        }
+      }
+    } catch (err) {
+      console.warn('OSS upload failed, keeping original URLs:', err);
+    }
+  }
+
   return generateFBIFHtml(elems, author, imgN, t0);
 }
 
@@ -535,7 +555,7 @@ async function handleFile(file) {
   progressText.textContent = '正在解压 ' + file.name + '...';
   try {
     progressFill.style.width = '50%';
-    progressText.textContent = '正在排版...';
+    progressText.textContent = file.name.endsWith('.docx') ? '正在排版...' : '正在排版并上传图片到 OSS...';
     let result;
     if (file.name.endsWith('.docx')) {
       result = await processDocxFBIF(file);
