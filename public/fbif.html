@@ -502,7 +502,7 @@ function generateFBIFHtml(elems, author, imgN, t0) {
   const contentHtml = lines.join('\n') + '\n' + footerHtml;
   const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
   const hCount = elems.filter(e => e.k === 'h').length;
-  const stats = '段落: ' + final.length + ' | 图片: ' + imgN + ' | 标题: ' + hCount + ' | 耗时: ' + elapsed + 's';
+  const stats = '段落: ' + lines.length + ' | 图片: ' + imgN + ' | 标题: ' + hCount + ' | 耗时: ' + elapsed + 's';
   return { contentHtml, stats };
 }
 
