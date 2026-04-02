@@ -450,14 +450,14 @@ async function processMdFBIF(text) {
 // ---- Shared HTML Generator ----
 function generateFBIFHtml(elems, author, imgN, t0) {
   const lines = [];
-  // Spacing via margin-bottom on content sections (not empty sections).
-  // WeChat editor strips empty sections on paste, but preserves CSS on content elements.
-  const GAP = 'margin-bottom: 26px; ';
+  // Spacing via padding-bottom (NOT margin-bottom).
+  // WeChat editor collapses margins but preserves padding (same pattern as mdnice).
+  const GAP = 'padding-bottom: 20px; ';
   function sec(inner, gap) {
-    return '<section style="text-align: left; ' + (gap ? GAP : '') + 'margin-left: 8px; margin-right: 8px; line-height: 1.75em;">' + inner + '</section>';
+    return '<section style="text-align: left; ' + (gap ? GAP : '') + 'margin: 0px 8px; line-height: 1.75em;">' + inner + '</section>';
   }
   function secCenter(inner, gap) {
-    return '<section style="text-align: center; ' + (gap ? GAP : '') + 'margin-left: 8px; margin-right: 8px; line-height: 1.75em;">' + inner + '</section>';
+    return '<section style="text-align: center; ' + (gap ? GAP : '') + 'margin: 0px 8px; line-height: 1.75em;">' + inner + '</section>';
   }
 
   if (author) {
@@ -480,7 +480,7 @@ function generateFBIFHtml(elems, author, imgN, t0) {
       case 'img':
         const imgSrc = e.src || '';
         const rpol = imgSrc.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
-        lines.push('<section style="text-align: center; ' + (spaceAfter ? GAP : '') + 'margin-left: 8px; margin-right: 8px;">' +
+        lines.push('<section style="text-align: center; ' + (spaceAfter ? GAP : '') + 'margin: 0px 8px;">' +
           '<img src="' + imgSrc + '"' + rpol + ' style="width: ' + e.w +
           '; display: block; margin: 0 auto;" /></section>');
         break;
