@@ -118,7 +118,6 @@ const FONT_STACK = 'mp-quote, "PingFang SC", system-ui, -apple-system, BlinkMacS
 function leafWrap(inner) {
   return '<span leaf="" style="color: rgba(0,0,0,0.9); font-size: 17px; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em; font-style: normal; font-weight: normal;">' + inner + '</span>';
 }
-const BLANK = '<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' + leafWrap('<br>') + '</section>';
 function textSpan(text, opts) {
   let s = 'font-size: ' + (opts.fontSize || '15px') + '; color: ' + (opts.color || 'rgb(84, 69, 69)');
   if (opts.bold) s += '; font-weight: bold';
@@ -374,22 +373,6 @@ async function processDocxFBIF(file) {
   return generateFBIFHtml(elems, author, imgN, t0);
 }
 
-// Fetch external image and convert to base64 data URI via proxy
-async function urlToBase64(url) {
-  try {
-    const proxyUrl = 'https://images.weserv.nl/?url=' + encodeURIComponent(url);
-    const resp = await fetch(proxyUrl);
-    if (!resp.ok) return url;
-    const blob = await resp.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => resolve(url);
-      reader.readAsDataURL(blob);
-    });
-  } catch (e) { return url; }
-}
-
 async function processMdFBIF(text) {
   const t0 = performance.now();
 
@@ -467,62 +450,56 @@ async function processMdFBIF(text) {
 // ---- Shared HTML Generator ----
 function generateFBIFHtml(elems, author, imgN, t0) {
   const lines = [];
-  function ensureBlank() {
-    if (lines.length && lines[lines.length - 1] !== BLANK) lines.push(BLANK);
+  // Spacing via margin-bottom on content sections (not empty sections).
+  // WeChat editor strips empty sections on paste, but preserves CSS on content elements.
+  const GAP = 'margin-bottom: 26px; ';
+  function sec(inner, gap) {
+    return '<section style="text-align: left; ' + (gap ? GAP : '') + 'margin-left: 8px; margin-right: 8px; line-height: 1.75em;">' + inner + '</section>';
   }
-  function sec(inner) {
-    return '<section style="text-align: left; margin: 0px 8px; line-height: 1.75em;">' + inner + '</section>';
+  function secCenter(inner, gap) {
+    return '<section style="text-align: center; ' + (gap ? GAP : '') + 'margin-left: 8px; margin-right: 8px; line-height: 1.75em;">' + inner + '</section>';
   }
 
   if (author) {
     lines.push(sec('<span leaf="" style="color: rgb(0, 112, 192); font-size: 15px; font-style: italic; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">' +
       '<span textstyle="" style="font-size: 15px; color: rgb(0, 112, 192); font-style: italic;">作者：' +
-      esc(author) + '</span></span>'));
-    lines.push(BLANK);
+      esc(author) + '</span></span>', true));
   }
 
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
-    const pk = i > 0 ? elems[i - 1].k : null;
+    const next = i + 1 < elems.length ? elems[i + 1] : null;
+    const nextK = next ? next.k : null;
+    // Space after this element? Yes unless next is caption or same-type continuation
+    const spaceAfter = nextK && nextK !== 'cap' && !(e.k === 'ref' && nextK === 'ref') && !(e.k === 'img' && (nextK === 'cap' || nextK === 'img'));
+
     switch (e.k) {
       case 'h':
-        ensureBlank();
-        lines.push(sec(leafWrap(textSpan(esc(e.text), { fontSize: '18px', bold: true }))));
-        lines.push(BLANK);
+        lines.push(sec(leafWrap(textSpan(esc(e.text), { fontSize: '18px', bold: true })), spaceAfter));
         break;
       case 'img':
-        if (pk !== 'img' && pk !== 'cap') ensureBlank();
         const imgSrc = e.src || '';
         const rpol = imgSrc.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
-        lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;">' +
+        lines.push('<section style="text-align: center; ' + (spaceAfter ? GAP : '') + 'margin-left: 8px; margin-right: 8px;">' +
           '<img src="' + imgSrc + '"' + rpol + ' style="width: ' + e.w +
           '; display: block; margin: 0 auto;" /></section>');
         break;
       case 'cap':
-        lines.push('<section style="text-align: center; margin: 0px 8px; line-height: 1.75em;">' +
-          leafWrap(textSpan(esc(e.text), { fontSize: '12px', color: 'rgb(136, 136, 136)' })) + '</section>');
+        lines.push(secCenter(leafWrap(textSpan(esc(e.text), { fontSize: '12px', color: 'rgb(136, 136, 136)' })), spaceAfter));
         break;
       case 'txt':
-        if (pk && pk !== 'h') ensureBlank();
-        lines.push(sec(renderRuns(e.runs)));
+        lines.push(sec(renderRuns(e.runs), spaceAfter));
         break;
       case 'refH':
-        ensureBlank();
-        lines.push(sec(leafWrap(textSpan('参考来源：', { color: 'rgb(136, 136, 136)' }))));
+        lines.push(sec(leafWrap(textSpan('参考来源：', { color: 'rgb(136, 136, 136)' })), false));
         break;
       case 'ref':
-        lines.push(sec(renderRuns(e.runs, { color: 'rgb(136, 136, 136)' })));
+        lines.push(sec(renderRuns(e.runs, { color: 'rgb(136, 136, 136)' }), spaceAfter));
         break;
     }
   }
 
-  const final = [];
-  for (const l of lines) {
-    if (l === BLANK && final.length && final[final.length - 1] === BLANK) continue;
-    final.push(l);
-  }
-
-  const contentHtml = final.join('\n') + '\n' + footerHtml;
+  const contentHtml = lines.join('\n') + '\n' + footerHtml;
   const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
   const hCount = elems.filter(e => e.k === 'h').length;
   const stats = '段落: ' + final.length + ' | 图片: ' + imgN + ' | 标题: ' + hCount + ' | 耗时: ' + elapsed + 's';
