@@ -15,13 +15,14 @@ import oss2
 import requests
 
 
+def env(key):
+    return os.environ[key].strip()
+
+
 def get_oss_bucket():
-    auth = oss2.Auth(
-        os.environ["OSS_ACCESS_KEY_ID"],
-        os.environ["OSS_ACCESS_KEY_SECRET"],
-    )
-    endpoint = f"https://oss-{os.environ['OSS_REGION']}.aliyuncs.com"
-    return oss2.Bucket(auth, endpoint, os.environ["OSS_BUCKET"])
+    auth = oss2.Auth(env("OSS_ACCESS_KEY_ID"), env("OSS_ACCESS_KEY_SECRET"))
+    endpoint = f"https://oss-{env('OSS_REGION')}.aliyuncs.com"
+    return oss2.Bucket(auth, endpoint, env("OSS_BUCKET"))
 
 
 def fetch_image(url):
@@ -68,7 +69,7 @@ class handler(BaseHTTPRequestHandler):
 
                     # Check if already uploaded (avoid re-upload)
                     if bucket.object_exists(oss_key):
-                        cdn_url = f"https://{os.environ['OSS_BUCKET']}.oss-{os.environ['OSS_REGION']}.aliyuncs.com/{oss_key}"
+                        cdn_url = f"https://{env('OSS_BUCKET')}.oss-{env('OSS_REGION')}.aliyuncs.com/{oss_key}"
                         results[url] = cdn_url
                         continue
 
@@ -76,7 +77,7 @@ class handler(BaseHTTPRequestHandler):
                     img_data, content_type = fetch_image(url)
                     oss_key = url_to_oss_key(url, content_type)
                     bucket.put_object(oss_key, img_data, headers={"Content-Type": content_type})
-                    cdn_url = f"https://{os.environ['OSS_BUCKET']}.oss-{os.environ['OSS_REGION']}.aliyuncs.com/{oss_key}"
+                    cdn_url = f"https://{env('OSS_BUCKET')}.oss-{env('OSS_REGION')}.aliyuncs.com/{oss_key}"
                     results[url] = cdn_url
 
                 except Exception as e:
