@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FBIF 微信排版工具</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; min-height: 100vh; }
+
+/* ---- Upload View ---- */
+.container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+h1 { font-size: 28px; color: #1a1a1a; margin-bottom: 8px; }
+.subtitle { color: #666; font-size: 15px; margin-bottom: 32px; }
+.upload-zone {
+  border: 2px dashed #d0d0d0; border-radius: 12px; padding: 60px 40px;
+  text-align: center; background: #fff; cursor: pointer; transition: all 0.2s;
+}
+.upload-zone:hover, .upload-zone.dragover { border-color: #0070C0; background: #f8fbff; }
+.upload-zone.processing { border-color: #faad14; background: #fffbe6; pointer-events: none; }
+.upload-icon { font-size: 48px; margin-bottom: 16px; }
+.upload-text { font-size: 16px; color: #333; margin-bottom: 8px; }
+.upload-hint { font-size: 13px; color: #999; }
+input[type="file"] { display: none; }
+.progress { display: none; margin-top: 24px; }
+.progress-bar { height: 4px; background: #e8e8e8; border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: #0070C0; width: 0%; transition: width 0.3s; }
+.progress-text { font-size: 13px; color: #666; margin-top: 8px; text-align: center; }
+.error { color: #ff4d4f; margin-top: 16px; font-size: 14px; display: none; }
+
+/* ---- Preview View ---- */
+#previewView { display: none; }
+.toolbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: #fff; border-bottom: 1px solid #e8e8e8; padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px;
+}
+.toolbar h2 { font-size: 16px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn {
+  padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px;
+  cursor: pointer; transition: all 0.2s; font-weight: 500; white-space: nowrap;
+}
+.btn-primary { background: #0070C0; color: #fff; }
+.btn-primary:hover { background: #005a9e; }
+.btn-primary.copied { background: #27ae60; }
+.btn-secondary { background: #f0f0f0; color: #333; text-decoration: none; }
+.btn-secondary:hover { background: #e0e0e0; }
+.zoom-controls {
+  display: flex; align-items: center; gap: 4px; background: #f0f0f0;
+  border-radius: 6px; padding: 2px;
+}
+.zoom-controls .btn { padding: 6px 12px; font-size: 16px; min-width: 36px; }
+.zoom-label { font-size: 13px; color: #666; min-width: 45px; text-align: center; }
+.phone-frame {
+  max-width: 420px; margin: 72px auto 40px; background: #fff;
+  border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  overflow: hidden; transition: max-width 0.3s ease;
+}
+.phone-header { background: #ededed; padding: 8px 16px; text-align: center; }
+.phone-header span { font-size: 12px; color: #999; }
+.phone-body { padding: 16px 0; }
+.stats-bar {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.75); color: #fff; padding: 8px 20px;
+  border-radius: 20px; font-size: 13px; z-index: 100;
+}
+</style>
+</head>
+<body>
+
+<!-- Upload View -->
+<div id="uploadView">
+  <div class="container">
+    <h1>FBIF 微信排版工具</h1>
+    <p class="subtitle">上传 Word 文档，一键生成微信公众号排版</p>
+    <div class="upload-zone" id="dropZone">
+      <div class="upload-icon">📄</div>
+      <div class="upload-text">点击上传或拖拽 .docx 文件到这里</div>
+      <div class="upload-hint">支持 .docx 格式，最大 50MB</div>
+      <input type="file" id="fileInput" accept=".docx">
+    </div>
+    <div class="progress" id="progress">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText">正在排版...</div>
+    </div>
+    <div class="error" id="error"></div>
+  </div>
+</div>
+
+<!-- Preview View -->
+<div id="previewView">
+  <div class="toolbar">
+    <h2 id="previewTitle"></h2>
+    <div class="zoom-controls">
+      <button class="btn btn-secondary" onclick="zoom(-1)">−</button>
+      <span class="zoom-label" id="zoomLabel">100%</span>
+      <button class="btn btn-secondary" onclick="zoom(1)">+</button>
+    </div>
+    <button class="btn btn-secondary" onclick="goBack()">← 重新上传</button>
+    <button class="btn btn-primary" id="copyBtn" onclick="copyContent()">复制正文</button>
+  </div>
+  <div class="phone-frame" id="phoneFrame">
+    <div class="phone-header"><span>微信公众号预览</span></div>
+    <div class="phone-body" id="contentArea"></div>
+  </div>
+  <div class="stats-bar" id="statsBar"></div>
+</div>
+
+<script>
+// ---- Upload Logic ----
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const progress = document.getElementById('progress');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const errorEl = document.getElementById('error');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.docx')) upload(f);
+  else showError('请上传 .docx 文件');
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) upload(fileInput.files[0]); });
+
+function showError(msg) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+
+function upload(file) {
+  errorEl.style.display = 'none';
+  dropZone.classList.add('processing');
+  progress.style.display = 'block';
+  progressFill.style.width = '30%';
+  progressText.textContent = '正在上传 ' + file.name + '...';
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  fetch('/api/convert', { method: 'POST', body: fd })
+    .then(r => {
+      progressFill.style.width = '80%';
+      progressText.textContent = '正在排版...';
+      if (!r.ok) return r.json().then(d => { throw new Error(d.error || '排版失败'); });
+      return r.json();
+    })
+    .then(data => {
+      progressFill.style.width = '100%';
+      progressText.textContent = '排版完成!';
+      showPreview(data.title, data.content, data.stats);
+    })
+    .catch(err => {
+      dropZone.classList.remove('processing');
+      progress.style.display = 'none';
+      showError(err.message);
+    });
+}
+
+// ---- Preview Logic ----
+function showPreview(title, content, stats) {
+  document.getElementById('uploadView').style.display = 'none';
+  document.getElementById('previewView').style.display = 'block';
+  document.getElementById('previewTitle').textContent = title;
+  document.getElementById('contentArea').innerHTML = content;
+  document.getElementById('statsBar').textContent = stats;
+}
+
+function goBack() {
+  document.getElementById('previewView').style.display = 'none';
+  document.getElementById('uploadView').style.display = 'block';
+  dropZone.classList.remove('processing');
+  progress.style.display = 'none';
+  progressFill.style.width = '0%';
+  fileInput.value = '';
+}
+
+const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
+let zoomIdx = 2;
+function zoom(dir) {
+  zoomIdx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, zoomIdx + dir));
+  const pct = ZOOM_STEPS[zoomIdx];
+  document.getElementById('phoneFrame').style.maxWidth = (420 * pct / 100) + 'px';
+  document.getElementById('zoomLabel').textContent = pct + '%';
+}
+
+function copyContent() {
+  const content = document.getElementById('contentArea');
+  const range = document.createRange();
+  range.selectNodeContents(content);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  document.execCommand('copy');
+  sel.removeAllRanges();
+  const btn = document.getElementById('copyBtn');
+  btn.textContent = '已复制!';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = '复制正文'; btn.classList.remove('copied'); }, 2000);
+}
+</script>
+</body>
+</html>
