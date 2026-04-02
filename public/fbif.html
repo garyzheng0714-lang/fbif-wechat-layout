@@ -488,8 +488,12 @@ function generateFBIFHtml(elems, author, imgN, t0) {
         break;
       case 'img':
         if (pk !== 'img' && pk !== 'cap') ensureBlank();
+        // For external URLs (e.g. mmbiz.qpic.cn), add no-referrer to bypass hotlink protection
+        const imgSrc = e.src || '';
+        const isExternal = imgSrc.startsWith('http');
+        const refPolicy = isExternal ? ' referrerpolicy="no-referrer"' : '';
         lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;">' +
-          '<img src="' + (e.src || '') + '" style="width: ' + e.w +
+          '<img src="' + imgSrc + '"' + refPolicy + ' style="width: ' + e.w +
           '; display: block; margin: 0 auto;" /></section>');
         break;
       case 'cap':
