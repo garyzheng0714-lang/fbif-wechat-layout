@@ -1,12 +1,3 @@
 {
-  "rewrites": [
-    { "source": "/api/convert", "destination": "/api/convert" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "functions": {
-    "api/convert.py": {
-      "maxDuration": 60,
-      "memory": 1024
-    }
-  }
+  "outputDirectory": "public"
 }

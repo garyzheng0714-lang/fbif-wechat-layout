@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FBIF 微信排版工具</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; min-height: 100vh; }
@@ -76,7 +77,7 @@ input[type="file"] { display: none; }
     <div class="upload-zone" id="dropZone">
       <div class="upload-icon">📄</div>
       <div class="upload-text">点击上传或拖拽 .docx 文件到这里</div>
-      <div class="upload-hint">支持 .docx 格式，最大 50MB</div>
+      <div class="upload-hint">支持 .docx 格式，无大小限制（本地处理，不上传服务器）</div>
       <input type="file" id="fileInput" accept=".docx">
     </div>
     <div class="progress" id="progress">
@@ -107,6 +108,299 @@ input[type="file"] { display: none; }
 </div>
 
 <script>
+// ---- Namespaces ----
+const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const PKG_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
+
+let footerHtml = '';
+fetch('/footer.html').then(r => r.ok ? r.text() : '').then(t => footerHtml = t).catch(() => {});
+
+// ---- XML helpers ----
+function qn(ns, local) { return ns + ':' + local; }
+
+function findAll(el, ns, local) {
+  const results = [];
+  if (!el) return results;
+  for (const child of el.children) {
+    if (child.localName === local && child.namespaceURI === ns) results.push(child);
+  }
+  return results;
+}
+
+function findOne(el, ns, local) {
+  if (!el) return null;
+  for (const child of el.children) {
+    if (child.localName === local && child.namespaceURI === ns) return child;
+  }
+  return null;
+}
+
+function findDeep(el, ns, local) {
+  if (!el) return null;
+  if (el.localName === local && el.namespaceURI === ns) return el;
+  for (const child of el.children) {
+    const found = findDeep(child, ns, local);
+    if (found) return found;
+  }
+  return null;
+}
+
+function esc(t) {
+  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---- Layout Engine (browser port) ----
+async function processDocx(file) {
+  const t0 = performance.now();
+  const zip = await JSZip.loadAsync(file);
+
+  // Parse rels
+  const relsXml = await zip.file('word/_rels/document.xml.rels').async('string');
+  const relsDom = new DOMParser().parseFromString(relsXml, 'text/xml');
+  const ridToFile = {};
+  const ridToUrl = {};
+  for (const rel of relsDom.querySelectorAll('Relationship')) {
+    const rid = rel.getAttribute('Id');
+    const target = rel.getAttribute('Target');
+    const rtype = rel.getAttribute('Type') || '';
+    if (rtype.includes('image')) {
+      ridToFile[rid] = target.replace('media/', '');
+    } else if (rtype.includes('hyperlink')) {
+      ridToUrl[rid] = (target || '').replace(/&amp;/g, '&');
+    }
+  }
+
+  // Load images as base64
+  const imageCache = {};
+  for (const [rid, filename] of Object.entries(ridToFile)) {
+    const path = 'word/media/' + filename;
+    const entry = zip.file(path);
+    if (entry) {
+      const data = await entry.async('base64');
+      const mime = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
+      imageCache[filename] = 'data:' + mime + ';base64,' + data;
+    }
+  }
+
+  // Parse document.xml
+  const docXml = await zip.file('word/document.xml').async('string');
+  const docDom = new DOMParser().parseFromString(docXml, 'text/xml');
+  const body = findOne(docDom.documentElement, W_NS, 'body');
+  const allParas = findAll(body, W_NS, 'p');
+
+  // Find 正文 marker
+  let startIdx = 0;
+  for (let i = 0; i < allParas.length; i++) {
+    const text = getParaText(allParas[i]);
+    if (text.trim() === '正文') { startIdx = i + 1; break; }
+  }
+
+  function getParaText(p) {
+    let text = '';
+    const ts = p.getElementsByTagNameNS(W_NS, 't');
+    for (const t of ts) { text += t.textContent || ''; }
+    return text;
+  }
+
+  function getImageWidthPct(drawing) {
+    const extent = findDeep(drawing, WP_NS, 'extent');
+    if (extent) {
+      const cx = parseInt(extent.getAttribute('cx') || '0');
+      if (cx > 0) {
+        const pct = Math.min(100, Math.round(cx / 5486400 * 100));
+        return pct + '%';
+      }
+    }
+    return '100%';
+  }
+
+  function getParts(p) {
+    const pPr = findOne(p, W_NS, 'pPr');
+    let align = 'left';
+    let isList = false;
+    if (pPr) {
+      const jc = findOne(pPr, W_NS, 'jc');
+      if (jc) align = jc.getAttributeNS(W_NS, 'val') || jc.getAttribute('w:val') || 'left';
+      if (findOne(pPr, W_NS, 'numPr')) isList = true;
+    }
+    const parts = [];
+    for (const child of p.children) {
+      const tag = child.localName;
+      if (tag === 'r' && child.namespaceURI === W_NS) {
+        const rPr = findOne(child, W_NS, 'rPr');
+        let bold = false, sz = '', color = '';
+        if (rPr) {
+          if (findOne(rPr, W_NS, 'b')) bold = true;
+          const s = findOne(rPr, W_NS, 'sz');
+          if (s) sz = s.getAttributeNS(W_NS, 'val') || s.getAttribute('w:val') || '';
+          const c = findOne(rPr, W_NS, 'color');
+          if (c) color = c.getAttributeNS(W_NS, 'val') || c.getAttribute('w:val') || '';
+        }
+        // Collect all w:t text
+        const allT = child.getElementsByTagNameNS(W_NS, 't');
+        let runText = '';
+        for (const t of allT) runText += t.textContent || '';
+
+        const drw = findOne(child, W_NS, 'drawing');
+        if (drw) {
+          const blip = findDeep(drw, A_NS, 'blip');
+          const embed = blip ? (blip.getAttributeNS(R_NS, 'embed') || blip.getAttribute('r:embed') || '') : '';
+          const widthPct = getImageWidthPct(drw);
+          parts.push({ type: 'image', file: ridToFile[embed] || '', width: widthPct });
+        } else if (runText) {
+          parts.push({ type: 'text', text: runText, bold, sz, color });
+        }
+      } else if (tag === 'hyperlink' && child.namespaceURI === W_NS) {
+        const hrefRid = child.getAttributeNS(R_NS, 'id') || child.getAttribute('r:id') || '';
+        const href = ridToUrl[hrefRid] || '';
+        const runs = findAll(child, W_NS, 'r');
+        for (const r of runs) {
+          const allT = r.getElementsByTagNameNS(W_NS, 't');
+          let linkText = '';
+          for (const t of allT) linkText += t.textContent || '';
+          if (linkText) parts.push({ type: 'link', text: linkText, href });
+        }
+      }
+    }
+    return { align, parts, isList };
+  }
+
+  function classify(align, parts, isList) {
+    if (!parts.length) return 'blank';
+    if (parts.some(p => p.type === 'image')) return 'image';
+    const txt = parts.filter(p => p.type === 'text').map(p => p.text).join('');
+    if (txt.trim() === '') return 'blank';
+    if (txt.trim() === '参考来源') return 'ref_header';
+    const tp = parts.filter(p => p.type === 'text');
+    if (tp.length && tp.every(p => p.bold && (p.sz === '32' || p.sz === '36'))) return 'heading';
+    if (isList) return 'list';
+    if (align === 'center') return 'caption';
+    return 'text';
+  }
+
+  function renderInline(parts) {
+    return parts.map(p => {
+      if (p.type === 'text') {
+        const t = esc(p.text);
+        return p.bold ? '<strong>' + t + '</strong>' : t;
+      }
+      if (p.type === 'link') {
+        const t = esc(p.text);
+        const h = (p.href || '').replace(/&/g, '&amp;');
+        return '<a style="color: rgb(0, 112, 192); text-decoration: none;" href="' + h + '">' + t + '</a>';
+      }
+      return '';
+    }).join('');
+  }
+
+  // Collect elements
+  const elements = [];
+  let imgN = 0, listCounter = 0;
+  for (let i = startIdx; i < allParas.length; i++) {
+    const { align, parts, isList } = getParts(allParas[i]);
+    const kind = classify(align, parts, isList);
+    if (kind === 'blank') { listCounter = 0; continue; }
+    if (kind === 'image') {
+      for (const p of parts) {
+        if (p.type === 'image') { imgN++; elements.push({ kind: 'image', file: p.file, width: p.width || '100%' }); }
+      }
+    } else if (kind === 'heading') {
+      const txt = parts.filter(p => p.type === 'text').map(p => p.text).join('');
+      elements.push({ kind: 'heading', text: txt });
+    } else if (kind === 'caption') {
+      elements.push({ kind: 'caption', html: renderInline(parts) });
+    } else if (kind === 'ref_header') {
+      elements.push({ kind: 'ref_header' });
+    } else if (kind === 'list') {
+      listCounter++;
+      elements.push({ kind: 'list', html: renderInline(parts), num: listCounter });
+    } else if (kind === 'text') {
+      listCounter = 0;
+      elements.push({ kind: 'text', html: renderInline(parts) });
+    }
+  }
+
+  // Generate HTML lines
+  const lines = [];
+  let inRef = false;
+
+  function prevKind() {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const l = lines[i];
+      if (l !== BLANK) {
+        if (l.includes('font-size: 18px; font-weight: bold')) return 'heading';
+        if (l.includes('<img ')) return 'image';
+        if (l.includes('font-size: 12px; color: #888888')) return 'caption';
+        return 'text';
+      }
+    }
+    return null;
+  }
+
+  function ensureBlank() {
+    if (lines.length && lines[lines.length - 1] !== BLANK) lines.push(BLANK);
+  }
+
+  for (const elem of elements) {
+    const k = elem.kind;
+    const pk = prevKind();
+    if (k === 'ref_header') {
+      inRef = true; ensureBlank();
+      lines.push('<section style="margin-left: 8px; margin-right: 8px; line-height: 1.75em;"><span style="font-size: 15px; color: #888888;">参考来源：</span></section>');
+      continue;
+    }
+    if (inRef) {
+      lines.push('<section style="margin-left: 8px; margin-right: 8px; line-height: 1.75em;"><span style="font-size: 15px; color: #888888;">' + (elem.html || '') + '</span></section>');
+      continue;
+    }
+    if (k === 'heading') {
+      ensureBlank();
+      lines.push('<section style="margin-left: 8px; margin-right: 8px; line-height: 1.75em;"><span style="font-size: 18px; font-weight: bold; color: #544545;">' + esc(elem.text) + '</span></section>');
+      lines.push(BLANK);
+      continue;
+    }
+    if (k === 'image') {
+      if (pk !== 'image' && pk !== 'caption' && pk !== null) ensureBlank();
+      const src = imageCache[elem.file] || '';
+      lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;"><img src="' + src + '" style="width: ' + elem.width + '; display: block; margin: 0 auto;" /></section>');
+      continue;
+    }
+    if (k === 'caption') {
+      lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;"><span style="font-size: 12px; color: #888888;">' + elem.html + '</span></section>');
+      continue;
+    }
+    if (k === 'list') {
+      if (pk === 'text' && elem.num === 1) ensureBlank();
+      lines.push('<section style="margin-left: 8px; margin-right: 8px; line-height: 1.75em;"><span style="font-size: 15px; color: #544545;">' + elem.num + '、' + elem.html + '</span></section>');
+      continue;
+    }
+    if (k === 'text') {
+      if (pk === 'text' || pk === 'caption' || pk === 'image') ensureBlank();
+      lines.push('<section style="margin-left: 8px; margin-right: 8px; line-height: 1.75em;"><span style="font-size: 15px; color: #544545;">' + elem.html + '</span></section>');
+    }
+  }
+
+  // Dedup blanks
+  const final = [];
+  for (const l of lines) {
+    if (l === BLANK && final.length && final[final.length - 1] === BLANK) continue;
+    final.push(l);
+  }
+
+  const authorLine = '<section style="margin-left: 8px; margin-right: 8px; line-height: 1.75em;"><span style="font-size: 15px; color: rgb(0, 112, 192);">作者：Mote莫特</span></section>';
+  const contentHtml = authorLine + '\n' + BLANK + '\n' + final.join('\n') + '\n' + footerHtml;
+
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  const headingCount = elements.filter(e => e.kind === 'heading').length;
+  const stats = '段落: ' + final.length + ' | 图片: ' + imgN + ' | 标题: ' + headingCount + ' | 耗时: ' + elapsed + 's';
+
+  return { contentHtml, stats };
+}
+
 // ---- Upload Logic ----
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
@@ -121,40 +415,33 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover
 dropZone.addEventListener('drop', e => {
   e.preventDefault(); dropZone.classList.remove('dragover');
   const f = e.dataTransfer.files[0];
-  if (f && f.name.endsWith('.docx')) upload(f);
+  if (f && f.name.endsWith('.docx')) handleFile(f);
   else showError('请上传 .docx 文件');
 });
-fileInput.addEventListener('change', () => { if (fileInput.files[0]) upload(fileInput.files[0]); });
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
 
 function showError(msg) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
 
-function upload(file) {
+async function handleFile(file) {
   errorEl.style.display = 'none';
   dropZone.classList.add('processing');
   progress.style.display = 'block';
   progressFill.style.width = '30%';
-  progressText.textContent = '正在上传 ' + file.name + '...';
+  progressText.textContent = '正在解压 ' + file.name + '...';
 
-  const fd = new FormData();
-  fd.append('file', file);
-
-  fetch('/api/convert', { method: 'POST', body: fd })
-    .then(r => {
-      progressFill.style.width = '80%';
-      progressText.textContent = '正在排版...';
-      if (!r.ok) return r.json().then(d => { throw new Error(d.error || '排版失败'); });
-      return r.json();
-    })
-    .then(data => {
-      progressFill.style.width = '100%';
-      progressText.textContent = '排版完成!';
-      showPreview(data.title, data.content, data.stats);
-    })
-    .catch(err => {
-      dropZone.classList.remove('processing');
-      progress.style.display = 'none';
-      showError(err.message);
-    });
+  try {
+    progressFill.style.width = '50%';
+    progressText.textContent = '正在排版...';
+    const title = file.name.replace(/\.docx$/i, '');
+    const { contentHtml, stats } = await processDocx(file);
+    progressFill.style.width = '100%';
+    progressText.textContent = '排版完成!';
+    setTimeout(() => showPreview(title, contentHtml, stats), 300);
+  } catch (err) {
+    dropZone.classList.remove('processing');
+    progress.style.display = 'none';
+    showError('排版失败: ' + err.message);
+  }
 }
 
 // ---- Preview Logic ----
