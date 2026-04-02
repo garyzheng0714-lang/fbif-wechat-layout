@@ -158,7 +158,9 @@ function classifyPara(p, ridToFile, ridToUrl) {
   if (pPr) {
     if (findOne(pPr, W, 'outlineLvl')) isHeading = true;
     const ps = findOne(pPr, W, 'pStyle');
-    if (ps && /^[1-9]$|^heading/i.test(wattr(ps, 'val'))) isHeading = true;
+    // Only match style names that explicitly contain "heading", not bare numbers
+    // (numeric IDs like "2", "3" can be any style e.g. "Normal (Web)")
+    if (ps && /heading/i.test(wattr(ps, 'val'))) isHeading = true;
     const jc = findOne(pPr, W, 'jc');
     if (jc) align = wattr(jc, 'val') || 'left';
   }
@@ -169,7 +171,14 @@ function classifyPara(p, ridToFile, ridToUrl) {
       const rPr = findOne(child, W, 'rPr');
       let bold = false, hl = false;
       if (rPr) {
-        if (findOne(rPr, W, 'b')) bold = true;
+        const bEl = findOne(rPr, W, 'b');
+        if (bEl) {
+          const bVal = wattr(bEl, 'val');
+          if (bVal !== '0' && bVal !== 'false') bold = true;
+        }
+        // Character style "Strong" also means bold
+        const rStyle = findOne(rPr, W, 'rStyle');
+        if (rStyle && /strong/i.test(wattr(rStyle, 'val'))) bold = true;
         const shd = findOne(rPr, W, 'shd');
         if (shd) {
           const fill = wattr(shd, 'fill');
