@@ -155,7 +155,7 @@ input[type="file"] { display: none; }
     </div>
     <button class="btn btn-secondary" onclick="goBack()">&#8592; 重新上传</button>
     <button class="btn btn-primary" id="copyBtn" onclick="copyContent()">复制正文</button>
-    <button class="btn btn-draft" id="draftBtn" onclick="pushToDraft()">推送到草稿箱</button>
+    <button class="btn btn-draft" id="draftBtn" onclick="pushToDraft()">推送到公众号草稿箱</button>
   </div>
 
   <div class="preview-layout">
@@ -245,7 +245,7 @@ window._buildTOC = function() {
     li.className = 'toc-item';
     li.textContent = text;
     li.addEventListener('click', () => {
-      sec.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      sec.scrollIntoView({ behavior: 'instant', block: 'start' });
       tocList.querySelectorAll('.toc-item').forEach(t => t.classList.remove('active'));
       li.classList.add('active');
     });

@@ -289,9 +289,11 @@ export function initApp(template) {
     }
   }
 
-  // Track content and footer separately
-  let _articleHtml = '';
-  let _footerHtml = '';
+  // Two-layer rendering: display (original images) + push (WeChat CDN images)
+  let _articleDisplay = '';  // original URLs — for preview (no watermarks)
+  let _articlePush = '';     // mmbiz URLs — for push to WeChat
+  let _footerDisplay = '';
+  let _footerPush = '';
   let _uploadPromise = null;
   let _uploadDone = false;
   let _uploadTotal = 0;
@@ -299,8 +301,10 @@ export function initApp(template) {
   let _uploadFailed = 0;
 
   function showPreview(title, articleContent, footerContent, stats) {
-    _articleHtml = articleContent;
-    _footerHtml = footerContent;
+    _articleDisplay = articleContent;
+    _articlePush = articleContent;
+    _footerDisplay = footerContent;
+    _footerPush = footerContent;
 
     document.getElementById('uploadView').style.display = 'none';
     document.getElementById('previewView').style.display = 'block';
@@ -309,20 +313,20 @@ export function initApp(template) {
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
 
-    // Content (base64 images show fine for preview)
-    document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
+    // Render with original images (no WeChat watermarks)
+    document.getElementById('contentArea').innerHTML = _articleDisplay + '\n' + _footerDisplay;
     document.getElementById('statsBar').textContent = stats;
 
     // Thumbnails and TOC are populated by MutationObserver in app.html
-    // Footer stored in hidden div for reference
-    const fp = document.getElementById('footerPreview');
-    if (fp) fp.innerHTML = _footerHtml;
 
-    // Footer update — newHtml updates stored footer, toggle controls display
+    // Footer update
     window._updateFooter = function(newHtml) {
-      if (typeof newHtml === 'string' && newHtml !== '') _footerHtml = newHtml;
+      if (typeof newHtml === 'string' && newHtml !== '') {
+        _footerDisplay = newHtml;
+        _footerPush = newHtml;
+      }
       const enabled = document.getElementById('footerEnabled').checked;
-      document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      document.getElementById('contentArea').innerHTML = _articleDisplay + '\n' + (enabled ? _footerDisplay : '');
     };
 
     // Step 3: Background upload
@@ -345,16 +349,16 @@ export function initApp(template) {
     } else {
       draftBtn.disabled = false;
       if (_uploadFailed > 0) {
-        draftBtn.textContent = '推送到草稿箱 (' + _uploadFailed + '张失败)';
+        draftBtn.textContent = '推送到公众号草稿箱 (' + _uploadFailed + '张失败)';
       } else {
-        draftBtn.textContent = '推送到草稿箱';
+        draftBtn.textContent = '推送到公众号草稿箱';
       }
       copyBtn.title = '';
     }
   }
 
   async function backgroundUploadImages(statsBar, originalStats) {
-    const allHtml = _articleHtml + '\n' + _footerHtml;
+    const allHtml = _articlePush + '\n' + _footerPush;
 
     // Collect data: URIs (DOCX images + footer)
     const base64Map = {};
@@ -367,7 +371,7 @@ export function initApp(template) {
     // Collect http URLs (MD external images)
     const httpUrls = [];
     const httpRe = /src="(https?:\/\/[^"]+)"/g;
-    while ((m3 = httpRe.exec(_articleHtml)) !== null) {
+    while ((m3 = httpRe.exec(_articlePush)) !== null) {
       if (!m3[1].includes('mmbiz.qpic.cn')) httpUrls.push(m3[1]);
     }
 
@@ -381,16 +385,13 @@ export function initApp(template) {
     updateButtonStates();
     let done = 0;
 
-    function refreshDOM() {
-      const enabled = document.getElementById('footerEnabled').checked;
-      document.getElementById('contentArea').innerHTML =
-        _articleHtml + '\n' + (enabled ? _footerHtml : '');
+    function updateProgress() {
       _uploadCurrent = done;
       statsBar.textContent = '上传图片 (' + done + '/' + _uploadTotal + ')...';
       updateButtonStates();
     }
 
-    // Upload base64 images in batches of 10
+    // Upload base64 images in batches of 10 — only update PUSH layer, not display
     const b64Entries = Object.entries(base64Map);
     for (let i = 0; i < b64Entries.length; i += 10) {
       const batch = Object.fromEntries(b64Entries.slice(i, i + 10));
@@ -405,16 +406,16 @@ export function initApp(template) {
           for (const [key, wechatUrl] of Object.entries(results)) {
             if (!wechatUrl) _uploadFailed++;
             else {
-              _articleHtml = _articleHtml.split(base64Map[key]).join(wechatUrl);
-              _footerHtml = _footerHtml.split(base64Map[key]).join(wechatUrl);
+              _articlePush = _articlePush.split(base64Map[key]).join(wechatUrl);
+              _footerPush = _footerPush.split(base64Map[key]).join(wechatUrl);
             }
             done++;
           }
         } else {
           done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length;
         }
-        refreshDOM();
-      } catch (e) { done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length; refreshDOM(); }
+        updateProgress();
+      } catch (e) { done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length; updateProgress(); }
     }
 
     // Upload http URLs in batches of 10
@@ -430,14 +431,14 @@ export function initApp(template) {
           const { results } = await resp.json();
           for (const [origUrl, wechatUrl] of Object.entries(results)) {
             if (!wechatUrl) _uploadFailed++;
-            else _articleHtml = _articleHtml.split(origUrl).join(wechatUrl);
+            else _articlePush = _articlePush.split(origUrl).join(wechatUrl);
             done++;
           }
         } else {
           done += batch.length; _uploadFailed += batch.length;
         }
-        refreshDOM();
-      } catch (e) { done += batch.length; _uploadFailed += batch.length; refreshDOM(); }
+        updateProgress();
+      } catch (e) { done += batch.length; _uploadFailed += batch.length; updateProgress(); }
     }
 
     _uploadDone = true;
@@ -524,8 +525,9 @@ export function initApp(template) {
         await _uploadPromise;
       }
 
-      // Read latest content (with CDN URLs)
-      const content = document.getElementById('contentArea').innerHTML;
+      // Use push layer (WeChat CDN URLs), not display layer
+      const enabled = document.getElementById('footerEnabled').checked;
+      const content = _articlePush + '\n' + (enabled ? _footerPush : '');
 
       const resp = await fetch('/api/wechat-draft', {
         method: 'POST',
@@ -541,13 +543,13 @@ export function initApp(template) {
       setTimeout(() => {
         // 直接跳转到草稿箱列表页，新草稿在最顶部
         window.open('https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_list&type=10&action=list&lang=zh_CN', '_blank');
-        btn.textContent = '推送到草稿箱';
+        btn.textContent = '推送到公众号草稿箱';
         btn.classList.remove('pushed');
         btn.disabled = false;
       }, 1000);
     } catch (err) {
       btn.textContent = '失败: ' + err.message;
-      setTimeout(() => { btn.textContent = '推送到草稿箱'; btn.disabled = false; }, 3000);
+      setTimeout(() => { btn.textContent = '推送到公众号草稿箱'; btn.disabled = false; }, 3000);
     }
   };
 }
