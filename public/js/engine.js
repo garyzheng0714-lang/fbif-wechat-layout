@@ -317,36 +317,16 @@ export function initApp(template) {
     document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
     document.getElementById('statsBar').textContent = stats;
 
-    // Cover: extract first image
-    const firstImg = document.getElementById('contentArea').querySelector('img');
-    const coverImg = document.getElementById('coverImg');
-    const coverPlaceholder = document.getElementById('coverPlaceholder');
-    if (firstImg && firstImg.src && (firstImg.src.startsWith('http') || firstImg.src.startsWith('data:'))) {
-      coverImg.src = firstImg.src;
-      coverImg.style.display = 'block';
-      if (coverPlaceholder) coverPlaceholder.style.display = 'none';
-    }
+    // Thumbnails and TOC are populated by MutationObserver in app.html
+    // Footer stored in hidden div for reference
+    const fp = document.getElementById('footerPreview');
+    if (fp) fp.innerHTML = _footerHtml;
 
-    // Auto-fill digest from first 54 chars of text content
-    const digestEl = document.getElementById('digestPreview');
-    if (digestEl) {
-      const textOnly = document.getElementById('contentArea').textContent.trim();
-      digestEl.textContent = textOnly.slice(0, 80) + (textOnly.length > 80 ? '...' : '');
-    }
-
-    // Thumbnail grid and footer parts are populated by MutationObserver in app.html
-
-    // Footer preview
-    document.getElementById('footerPreview').innerHTML = _footerHtml;
-    if (window._initFooterEditor && !document._footerEditorDone) { document._footerEditorDone = true; window._initFooterEditor(); }
-
-    // Footer update function — newHtml updates the stored footer, toggle only affects display
+    // Footer update — newHtml updates stored footer, toggle controls display
     window._updateFooter = function(newHtml) {
       if (typeof newHtml === 'string' && newHtml !== '') _footerHtml = newHtml;
       const enabled = document.getElementById('footerEnabled').checked;
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
-      document.getElementById('footerPreview').innerHTML = _footerHtml;
-      if (window._initFooterEditor && !document._footerEditorDone) { document._footerEditorDone = true; window._initFooterEditor(); }
     };
 
     // Step 3: Background upload
@@ -409,8 +389,6 @@ export function initApp(template) {
       const enabled = document.getElementById('footerEnabled').checked;
       document.getElementById('contentArea').innerHTML =
         _articleHtml + '\n' + (enabled ? _footerHtml : '');
-      document.getElementById('footerPreview').innerHTML = _footerHtml;
-      if (window._initFooterEditor && !document._footerEditorDone) { document._footerEditorDone = true; window._initFooterEditor(); }
       _uploadCurrent = done;
       statsBar.textContent = '上传图片 (' + done + '/' + _uploadTotal + ')...';
       updateButtonStates();
@@ -565,11 +543,12 @@ export function initApp(template) {
       btn.textContent = '推送成功!';
       btn.classList.add('pushed');
       setTimeout(() => {
-        window.open('https://mp.weixin.qq.com/', '_blank');
+        // 直接跳转到草稿箱列表页，新草稿在最顶部
+        window.open('https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_list&type=10&action=list&lang=zh_CN', '_blank');
         btn.textContent = '推送到草稿箱';
         btn.classList.remove('pushed');
         btn.disabled = false;
-      }, 1500);
+      }, 1000);
     } catch (err) {
       btn.textContent = '失败: ' + err.message;
       setTimeout(() => { btn.textContent = '推送到草稿箱'; btn.disabled = false; }, 3000);

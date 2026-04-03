@@ -29,7 +29,6 @@ input[type="file"] { display: none; }
 .progress-text { font-size: 13px; color: #666; margin-top: 8px; text-align: center; }
 .error { color: #ff4d4f; margin-top: 16px; font-size: 14px; display: none; }
 
-/* ---- Preview Layout: toolbar + main (phone + sidebar) ---- */
 #previewView { display: none; }
 .toolbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -58,10 +57,34 @@ input[type="file"] { display: none; }
 .zoom-controls .btn { padding: 6px 12px; font-size: 16px; min-width: 36px; }
 .zoom-label { font-size: 13px; color: #666; min-width: 45px; text-align: center; }
 
+/* ---- Three-column layout: TOC | Preview | Settings ---- */
 .preview-layout {
   display: flex; margin-top: 60px; min-height: calc(100vh - 60px);
 }
-.preview-main { flex: 1; padding: 12px; overflow-y: auto; }
+
+/* Left TOC */
+.toc-sidebar {
+  width: 220px; min-width: 220px; background: #fff; border-right: 1px solid #e8e8e8;
+  padding: 16px 12px; overflow-y: auto; position: sticky; top: 60px;
+  height: calc(100vh - 60px);
+}
+.toc-title { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 12px; }
+.toc-list { list-style: none; }
+.toc-item {
+  padding: 6px 8px; font-size: 13px; color: #666; cursor: pointer;
+  border-radius: 4px; margin-bottom: 2px; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: all 0.15s;
+}
+.toc-item:hover { background: #f0f6ff; color: #0070C0; }
+.toc-item.active { background: #e6f0ff; color: #0070C0; font-weight: 500; }
+.toc-empty { font-size: 12px; color: #bbb; padding: 8px; }
+
+/* Center preview */
+.preview-main {
+  flex: 1; padding: 12px; overflow-y: auto;
+  height: calc(100vh - 60px);
+}
 .phone-frame {
   max-width: 840px; margin: 0 auto; background: #fff;
   border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
@@ -71,158 +94,69 @@ input[type="file"] { display: none; }
 .phone-header span { font-size: 12px; color: #999; }
 .phone-body { padding: 16px 0; }
 
-/* ---- Right Sidebar ---- */
-.sidebar {
-  width: 300px; min-width: 300px; background: #fff; border-left: 1px solid #e8e8e8;
-  padding: 0; overflow-y: auto; display: flex; flex-direction: column;
+/* Right settings panel */
+.settings-sidebar {
+  width: 260px; min-width: 260px; background: #fff; border-left: 1px solid #e8e8e8;
+  padding: 16px; overflow-y: auto; position: sticky; top: 60px;
+  height: calc(100vh - 60px); display: flex; flex-direction: column; gap: 16px;
 }
-.sidebar-section {
-  padding: 16px;
+.settings-section { display: flex; flex-direction: column; gap: 8px; }
+.settings-label {
+  font-size: 12px; font-weight: 600; color: #999; text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
-.sidebar-section + .sidebar-section {
-  border-top: 1px solid #f0f0f0;
+.settings-input {
+  width: 100%; padding: 8px 10px; border: 1px solid #e0e0e0; border-radius: 6px;
+  font-size: 13px; font-family: inherit; outline: none; background: #fafafa;
 }
-.sidebar-section-header {
-  font-size: 13px; font-weight: 600; color: #333; margin-bottom: 12px;
-  display: flex; align-items: center; justify-content: space-between;
+.settings-input:focus { border-color: #0070C0; background: #fff; }
+.cover-select {
+  display: flex; flex-wrap: wrap; gap: 6px;
 }
-.sidebar-section-header .actions { display: flex; gap: 6px; align-items: center; }
-
-/* Article card — WeChat style */
-.article-card {
-  background: #fff; border-radius: 8px; overflow: hidden;
-  box-shadow: 0 1px 6px rgba(0,0,0,0.08); cursor: default;
-}
-.article-card-cover {
-  width: 100%; aspect-ratio: 2.35/1; background: #e8e8e8; position: relative;
-  overflow: hidden; cursor: pointer;
-}
-.article-card-cover img {
-  width: 100%; height: 100%; object-fit: cover; display: block;
-}
-.article-card-cover .cover-empty {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  width: 100%; height: 100%; color: #bbb; font-size: 13px;
-}
-.article-card-cover .cover-empty svg { width: 28px; height: 28px; margin-bottom: 4px; opacity: 0.4; }
-.article-card-cover:hover::after {
-  content: '点击更换封面'; position: absolute; inset: 0;
-  background: rgba(0,0,0,0.4); color: #fff; display: flex;
-  align-items: center; justify-content: center; font-size: 13px;
-}
-.article-card-body { padding: 12px 14px; }
-.article-card-title {
-  width: 100%; border: none; outline: none; font-size: 16px; font-weight: 600;
-  color: #1a1a1a; font-family: inherit; padding: 0; margin-bottom: 6px;
-  line-height: 1.4; background: transparent; resize: none; overflow: hidden;
-}
-.article-card-title::placeholder { color: #ccc; }
-.article-card-digest {
-  font-size: 13px; color: #999; line-height: 1.5; margin-bottom: 8px;
-  max-height: 40px; overflow: hidden;
-}
-.article-card-meta {
-  font-size: 11px; color: #bbb;
-}
-
-/* Thumbnail grid */
-.thumb-grid {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
-}
-.thumb-item {
-  width: 48px; height: 48px; border-radius: 4px; overflow: hidden;
+.cover-thumb {
+  width: 44px; height: 44px; border-radius: 4px; overflow: hidden;
   cursor: pointer; border: 2px solid transparent; transition: border-color 0.15s;
-  flex-shrink: 0; background: #f5f5f5;
+  background: #f5f5f5;
 }
-.thumb-item:hover { border-color: #a0c4e8; }
-.thumb-item.selected { border-color: #0070C0; }
-.thumb-item img {
-  width: 100%; height: 100%; object-fit: cover; display: block;
-}
-.thumb-upload-btn {
-  width: 48px; height: 48px; border-radius: 4px; border: 1.5px dashed #ccc;
+.cover-thumb:hover { border-color: #a0c4e8; }
+.cover-thumb.selected { border-color: #0070C0; }
+.cover-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover-upload-btn {
+  width: 44px; height: 44px; border-radius: 4px; border: 1.5px dashed #ccc;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; background: #fafafa; transition: all 0.15s;
-  flex-shrink: 0; color: #999; font-size: 12px;
+  cursor: pointer; background: #fafafa; font-size: 18px; color: #bbb;
 }
-.thumb-upload-btn:hover {
-  border-color: #0070C0; color: #0070C0; background: #f0f6ff;
-}
+.cover-upload-btn:hover { border-color: #0070C0; color: #0070C0; }
 
-/* Title input */
-.title-input {
-  width: 100%; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px;
-  font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.2s;
-  background: #fafafa;
-}
-.title-input:focus { border-color: #0070C0; background: #fff; }
-.title-char-count {
-  font-size: 11px; color: #bbb; text-align: right; margin-top: 4px;
-}
-
-/* Footer editor — WYSIWYG inline editing */
-.footer-controls {
+/* Footer toggle */
+.footer-row {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px;
 }
-.footer-editor {
-  width: 100%; background: #fff; border-radius: 8px;
-  border: 1px solid #eee; overflow-y: auto; max-height: 500px;
-  padding: 4px;
-}
-.footer-editor img {
-  cursor: pointer; outline: 2px solid transparent;
-  transition: outline-color 0.15s; border-radius: 2px;
-}
-.footer-editor img:hover {
-  outline-color: #0070C0; outline-offset: 2px;
-}
-.footer-editor span:hover, .footer-editor p:hover, .footer-editor a:hover,
-.footer-editor section:not(:has(img)):not(:has(section)):hover {
-  background: rgba(0, 112, 192, 0.05); outline: 1px dashed rgba(0,112,192,0.3);
-  border-radius: 2px; cursor: text;
-}
-
-/* Toggle switch */
 .toggle-switch {
-  position: relative; display: inline-block; width: 40px; height: 22px;
-  flex-shrink: 0;
+  position: relative; display: inline-block; width: 36px; height: 20px;
 }
 .toggle-switch input { opacity: 0; width: 0; height: 0; }
 .toggle-slider {
   position: absolute; cursor: pointer; inset: 0;
-  background: #ccc; border-radius: 22px; transition: 0.2s;
+  background: #ccc; border-radius: 20px; transition: 0.2s;
 }
 .toggle-slider::before {
-  content: ""; position: absolute; width: 18px; height: 18px;
+  content: ""; position: absolute; width: 16px; height: 16px;
   left: 2px; bottom: 2px; background: #fff; border-radius: 50%;
-  transition: 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  transition: 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.15);
 }
-.toggle-switch input:checked + .toggle-slider { background: #0070C0; }
-.toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
-
-.toggle-label {
-  display: flex; align-items: center; gap: 8px; cursor: pointer;
-}
-.toggle-label span { font-size: 13px; color: #666; }
-
-/* Footer editor tooltip */
-.footer-edit-tip {
-  position: fixed; background: rgba(0,0,0,0.75); color: #fff;
-  padding: 4px 10px; border-radius: 4px; font-size: 11px;
-  pointer-events: none; z-index: 200; display: none;
-}
-.btn-xs {
-  padding: 2px 8px; font-size: 11px; border: 1px solid #ddd;
-  border-radius: 4px; background: #fff; color: #666;
-  cursor: pointer; transition: all 0.15s; white-space: nowrap;
-}
-.btn-xs:hover { border-color: #0070C0; color: #0070C0; }
+.toggle-switch input:checked + .toggle-slider { background: #07c160; }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
 
 .stats-bar {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
   background: rgba(0,0,0,0.75); color: #fff; padding: 8px 20px;
   border-radius: 20px; font-size: 13px; z-index: 100;
+}
+.footer-edit-tip {
+  position: fixed; background: rgba(0,0,0,0.75); color: #fff;
+  padding: 4px 10px; border-radius: 4px; font-size: 11px;
+  pointer-events: none; z-index: 200; display: none;
 }
 </style>
 </head>
@@ -263,74 +197,63 @@ input[type="file"] { display: none; }
   </div>
 
   <div class="preview-layout">
-    <div class="preview-main">
+    <!-- Left: Table of Contents -->
+    <div class="toc-sidebar">
+      <div class="toc-title">目录</div>
+      <ul class="toc-list" id="tocList">
+        <li class="toc-empty">上传文件后显示目录</li>
+      </ul>
+    </div>
+
+    <!-- Center: Article Preview -->
+    <div class="preview-main" id="previewMain">
       <div class="phone-frame" id="phoneFrame">
         <div class="phone-header"><span>微信公众号预览</span></div>
         <div class="phone-body" id="contentArea"></div>
       </div>
     </div>
 
-    <!-- Right Sidebar -->
-    <div class="sidebar">
-
-      <!-- Article Card — WeChat style cover + title -->
-      <div class="sidebar-section" style="padding:12px;">
-        <div class="article-card">
-          <div class="article-card-cover" id="coverPreview" onclick="document.getElementById('coverInput').click()">
-            <div class="cover-empty" id="coverPlaceholder">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                <circle cx="8.5" cy="8.5" r="1.5"/>
-                <path d="M21 15l-5-5L5 21"/>
-              </svg>
-              点击选择封面
-            </div>
-            <img id="coverImg" style="display:none;">
-          </div>
-          <div class="article-card-body">
-            <textarea class="article-card-title" id="titleInput" maxlength="32"
-              rows="1" placeholder="请输入标题"
-              oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px';document.getElementById('previewTitleDisplay').textContent=this.value;document.getElementById('titleCharCount').textContent=this.value.length"></textarea>
-            <div class="article-card-digest" id="digestPreview"></div>
-            <div class="article-card-meta"><span id="titleCharCount">0</span>/32</div>
-          </div>
-        </div>
-        <input type="file" id="coverInput" accept="image/*" style="display:none">
-        <div class="thumb-grid" id="articleThumbnails"></div>
+    <!-- Right: Settings -->
+    <div class="settings-sidebar">
+      <!-- Title -->
+      <div class="settings-section">
+        <div class="settings-label">标题</div>
+        <input type="text" class="settings-input" id="titleInput" maxlength="32"
+          placeholder="文章标题（最多32字）">
       </div>
 
-      <!-- Footer Template Section -->
-      <div class="sidebar-section">
-        <div class="sidebar-section-header">
-          底部模板
-          <span class="actions">
-            <button class="btn-xs" onclick="document.getElementById('footerFileInput').click()">更换</button>
-          </span>
-        </div>
+      <!-- Cover -->
+      <div class="settings-section">
+        <div class="settings-label">封面图</div>
+        <div class="cover-select" id="articleThumbnails"></div>
+        <input type="file" id="coverInput" accept="image/*" style="display:none">
+        <img id="coverImg" style="display:none;">
+      </div>
 
-        <div class="footer-controls">
-          <label class="toggle-label">
-            <span class="toggle-switch">
-              <input type="checkbox" id="footerEnabled" checked onchange="toggleFooter()">
-              <span class="toggle-slider"></span>
-            </span>
-            <span>启用</span>
+      <!-- Footer -->
+      <div class="settings-section">
+        <div class="footer-row">
+          <div class="settings-label">底部模板</div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="footerEnabled" checked onchange="toggleFooter()">
+            <span class="toggle-slider"></span>
           </label>
         </div>
-
-        <div class="footer-editor" id="footerPreview">
-          <!-- Footer rendered here — click images to replace, click text to edit -->
-        </div>
-
-        <input type="file" id="footerFileInput" accept=".html,.htm" style="display:none">
       </div>
 
+      <!-- Spacer -->
+      <div style="flex:1;"></div>
+
+      <!-- Stats -->
+      <div style="font-size:12px; color:#bbb; text-align:center;" id="sidebarStats"></div>
     </div>
   </div>
 
   <div class="stats-bar" id="statsBar"></div>
   <div class="footer-edit-tip" id="footerEditTip"></div>
   <input type="file" id="footerImgReplace" accept="image/*" style="display:none">
+  <!-- Hidden elements for footer WYSIWYG -->
+  <div id="footerPreview" style="display:none;"></div>
 </div>
 
 <script type="module">
@@ -357,187 +280,112 @@ if (!TEMPLATES.includes(templateId)) {
 document.getElementById('coverInput').addEventListener('change', function() {
   if (this.files[0]) {
     const r = new FileReader();
-    r.onload = e => {
-      setCoverImage(e.target.result);
-    };
+    r.onload = e => { setCoverImage(e.target.result); };
     r.readAsDataURL(this.files[0]);
   }
 });
 
-// Set cover image helper
 function setCoverImage(src) {
   const img = document.getElementById('coverImg');
-  const preview = document.getElementById('coverPreview');
-  const placeholder = document.getElementById('coverPlaceholder');
   img.src = src;
   img.style.display = 'block';
-  placeholder.style.display = 'none';
-  preview.classList.remove('cover-card--empty');
-  preview.classList.add('cover-card--filled');
-
-  // Update thumbnail selection state
-  document.querySelectorAll('.thumb-item').forEach(t => {
+  document.querySelectorAll('.cover-thumb').forEach(t => {
     t.classList.toggle('selected', t.dataset.src === src);
   });
 }
 
-// Populate article thumbnails
-function populateArticleThumbnails() {
+// Populate article thumbnails for cover selection
+window._populateArticleThumbnails = function() {
   const grid = document.getElementById('articleThumbnails');
   grid.innerHTML = '';
-  const contentArea = document.getElementById('contentArea');
-  const imgs = contentArea.querySelectorAll('img');
+  const imgs = document.getElementById('contentArea').querySelectorAll('img');
   const seen = new Set();
+  let first = true;
 
   imgs.forEach(img => {
     const src = img.src;
     if (!src || seen.has(src)) return;
     seen.add(src);
-
     const thumb = document.createElement('div');
-    thumb.className = 'thumb-item';
+    thumb.className = 'cover-thumb' + (first ? ' selected' : '');
     thumb.dataset.src = src;
     thumb.innerHTML = '<img src="' + src.replace(/"/g, '&quot;') + '">';
     thumb.addEventListener('click', () => setCoverImage(src));
-
-    // Mark current cover as selected
-    const coverImg = document.getElementById('coverImg');
-    if (coverImg.src === src) thumb.classList.add('selected');
-
     grid.appendChild(thumb);
+    if (first) { setCoverImage(src); first = false; }
   });
 
-  // Upload button at end
+  // Upload button
   const uploadBtn = document.createElement('div');
-  uploadBtn.className = 'thumb-upload-btn';
-  uploadBtn.textContent = '上传';
+  uploadBtn.className = 'cover-upload-btn';
+  uploadBtn.textContent = '+';
   uploadBtn.addEventListener('click', () => document.getElementById('coverInput').click());
   grid.appendChild(uploadBtn);
-}
+};
 
-// Expose populateArticleThumbnails globally so engine can call it after DOM update
-window._populateArticleThumbnails = populateArticleThumbnails;
-
-// Title is now a textarea with inline oninput handler
-
-// Footer file change handler
-document.getElementById('footerFileInput').addEventListener('change', function() {
-  if (this.files[0]) {
-    const r = new FileReader();
-    r.onload = e => {
-      const html = e.target.result;
-      localStorage.setItem('custom_footer', html);
-      document.getElementById('footerPreview').innerHTML = html;
-      window._updateFooter && window._updateFooter(html);
-      // Re-init WYSIWYG editor for new footer content
-      if (window._initFooterEditor) window._initFooterEditor();
-    };
-    r.readAsText(this.files[0]);
-  }
+// Title sync
+document.getElementById('titleInput').addEventListener('input', function() {
+  document.getElementById('previewTitleDisplay').textContent = this.value;
 });
 
-// WYSIWYG footer editing — click images to replace, click text to edit inline
-function initFooterEditor() {
-  const editor = document.getElementById('footerPreview');
-  const tip = document.getElementById('footerEditTip');
-  const fileInput = document.getElementById('footerImgReplace');
-  let _targetImg = null;
+// Build TOC from headings in content
+window._buildTOC = function() {
+  const tocList = document.getElementById('tocList');
+  const previewMain = document.getElementById('previewMain');
+  tocList.innerHTML = '';
 
-  // Tooltip on hover
-  editor.addEventListener('mousemove', (e) => {
-    const el = e.target;
-    if (el.tagName === 'IMG') {
-      tip.textContent = '点击更换图片';
-      tip.style.display = 'block';
-      tip.style.left = (e.clientX + 12) + 'px';
-      tip.style.top = (e.clientY - 30) + 'px';
-    } else if (el.closest && !el.querySelector('img') && el.textContent.trim()) {
-      tip.textContent = '点击编辑文字';
-      tip.style.display = 'block';
-      tip.style.left = (e.clientX + 12) + 'px';
-      tip.style.top = (e.clientY - 30) + 'px';
-    } else {
-      tip.style.display = 'none';
-    }
-  });
-  editor.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  // Find all heading sections (font-size: 18px or font-weight: bold with larger size)
+  const sections = document.getElementById('contentArea').querySelectorAll('section');
+  let headingIdx = 0;
 
-  // Click to edit
-  editor.addEventListener('click', (e) => {
-    const el = e.target;
-    tip.style.display = 'none';
+  sections.forEach(sec => {
+    const span = sec.querySelector('span[textstyle]') || sec.querySelector('span');
+    if (!span) return;
+    const style = span.getAttribute('style') || '';
+    const isBoldHeading = (style.includes('font-weight: bold') || style.includes('font-weight:bold')) &&
+      (style.includes('font-size: 18px') || style.includes('font-size:18px'));
+    if (!isBoldHeading) return;
 
-    // Image: open file picker
-    if (el.tagName === 'IMG') {
-      e.preventDefault();
-      _targetImg = el;
-      fileInput.value = '';
-      fileInput.click();
-      return;
-    }
+    const text = sec.textContent.trim();
+    if (!text) return;
 
-    // Text: make contenteditable
-    const textEl = el.closest('span, p, a, section');
-    if (textEl && !textEl.querySelector('img') && textEl.textContent.trim()) {
-      textEl.contentEditable = 'true';
-      textEl.focus();
-      textEl.style.outline = '2px solid #0070C0';
-      textEl.style.borderRadius = '2px';
-      textEl.style.background = 'rgba(0,112,192,0.05)';
-
-      const onBlur = () => {
-        textEl.contentEditable = 'false';
-        textEl.style.outline = '';
-        textEl.style.background = '';
-        syncFooter();
-        textEl.removeEventListener('blur', onBlur);
-      };
-      textEl.addEventListener('blur', onBlur);
-    }
+    sec.id = 'heading-' + headingIdx;
+    const li = document.createElement('li');
+    li.className = 'toc-item';
+    li.textContent = text;
+    li.addEventListener('click', () => {
+      sec.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      tocList.querySelectorAll('.toc-item').forEach(t => t.classList.remove('active'));
+      li.classList.add('active');
+    });
+    tocList.appendChild(li);
+    headingIdx++;
   });
 
-  // File input change: replace image
-  fileInput.addEventListener('change', () => {
-    if (!fileInput.files[0] || !_targetImg) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      _targetImg.src = ev.target.result;
-      _targetImg = null;
-      syncFooter();
-    };
-    reader.readAsDataURL(fileInput.files[0]);
-  });
-
-  function syncFooter() {
-    window._updateFooter && window._updateFooter(editor.innerHTML);
+  if (headingIdx === 0) {
+    tocList.innerHTML = '<li class="toc-empty">无标题</li>';
   }
-}
+};
 
-// Initialize once DOM has footer content
-window._initFooterEditor = initFooterEditor;
-
-// Toggle footer
+// Footer toggle
 window.toggleFooter = function() {
   const enabled = document.getElementById('footerEnabled').checked;
-  const editor = document.getElementById('footerPreview');
-  if (editor) editor.style.opacity = enabled ? '1' : '0.35';
-  if (editor) editor.style.pointerEvents = enabled ? 'auto' : 'none';
-  // Pass null to trigger re-render without changing stored footer
   window._updateFooter && window._updateFooter(null);
 };
 
-// After content changes, refresh thumbnails and init footer editor
-let _sidebarUpdateTimer = null;
-let _footerEditorInitialized = false;
+// WYSIWYG footer editing on content area images (footer part)
+window._initFooterEditor = function() {
+  // Footer images in contentArea are editable via click
+};
+
+// MutationObserver for content changes
+let _updateTimer = null;
 const observer = new MutationObserver(() => {
-  if (_sidebarUpdateTimer) clearTimeout(_sidebarUpdateTimer);
-  _sidebarUpdateTimer = setTimeout(() => {
-    populateArticleThumbnails();
-    if (!_footerEditorInitialized && document.getElementById('footerPreview').innerHTML.trim()) {
-      _footerEditorInitialized = true;
-      initFooterEditor();
-    }
-  }, 150);
+  if (_updateTimer) clearTimeout(_updateTimer);
+  _updateTimer = setTimeout(() => {
+    window._populateArticleThumbnails();
+    window._buildTOC();
+  }, 200);
 });
 observer.observe(document.getElementById('contentArea'), { childList: true });
 </script>
