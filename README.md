@@ -29,20 +29,24 @@ docs/
 docx/                  # 测试用 Word 文档
 ```
 
-## 使用方式
+## 线上地址
+
+https://fbifmp-layout.garyzheng.com
+
+## 部署
+
+推送到 `main` 分支后，GitHub Actions 自动通过 rsync 将 `public/` 同步到服务器 `/var/www/wechat-layout/`。
+
+服务器使用 Caddy 托管静态文件，API 代理到 `localhost:9000`。
+
+## 本地开发
 
 纯静态项目，用任意 HTTP 服务器托管 `public/` 目录即可：
 
 ```bash
-# 例如用 Python
 cd public && python3 -m http.server 8080
-
-# 或用 Node
-npx serve public
 ```
-
-打开浏览器访问首页，选择模板，上传 .docx 文件。
 
 ## 环境变量
 
-需要在 `.env` 中配置微信公众号相关凭据（用于图片上传至微信 CDN）。
+服务器端需要配置微信公众号相关凭据（用于图片上传至微信 CDN）。
