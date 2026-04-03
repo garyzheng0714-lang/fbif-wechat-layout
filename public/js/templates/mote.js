@@ -136,8 +136,6 @@ export default {
   id: 'mote',
   name: 'Mote 排版',
   description: 'Mote 莫特专用排版格式，自动添加作者栏和底部模板',
-  icon: '✍️',
-  badge: { text: 'Mote 专用', class: 'badge-green' },
   formats: ['.docx'],
 
   processDocx({ paragraphs, imgCache }) {

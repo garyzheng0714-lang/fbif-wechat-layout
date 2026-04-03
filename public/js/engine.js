@@ -158,44 +158,7 @@ export async function parseDocx(file) {
   return { paragraphs, imgCache };
 }
 
-// ---- Image Upload (to WeChat CDN directly) ----
-async function uploadBase64Images(imgCache) {
-  const entries = Object.entries(imgCache);
-  for (let i = 0; i < entries.length; i += 20) {
-    const batch = Object.fromEntries(entries.slice(i, i + 20));
-    try {
-      const resp = await fetch('/api/wechat-upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64_images: batch })
-      });
-      if (resp.ok) {
-        const { results } = await resp.json();
-        for (const [fn, url] of Object.entries(results)) {
-          if (url) imgCache[fn] = url;
-        }
-      }
-    } catch (err) { console.warn('Image upload failed', err); }
-  }
-}
-
-export async function uploadUrlImages(elems) {
-  const imgElems = elems.filter(e => e.k === 'img' && e.src && e.src.startsWith('http'));
-  for (let i = 0; i < imgElems.length; i += 20) {
-    const batch = imgElems.slice(i, i + 20);
-    try {
-      const resp = await fetch('/api/wechat-upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: batch.map(e => e.src) })
-      });
-      if (resp.ok) {
-        const { results } = await resp.json();
-        for (const e of batch) { if (results[e.src]) e.src = results[e.src]; }
-      }
-    } catch (err) { console.warn('Image upload failed', err); }
-  }
-}
+// Image upload functions removed — backgroundUploadImages handles all uploads
 
 // ---- Markdown Utilities ----
 export function parseMdRuns(text) {
@@ -469,6 +432,7 @@ export function initApp(template) {
     const pct = ZOOM_STEPS[zoomIdx];
     document.getElementById('phoneFrame').style.maxWidth = (420 * pct / 100) + 'px';
     document.getElementById('zoomLabel').textContent = pct + '%';
+    if (window._positionTOC) window._positionTOC();
   };
 
   window.copyContent = async function() {

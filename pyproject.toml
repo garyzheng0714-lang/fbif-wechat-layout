@@ -1,5 +1,0 @@
-[project]
-name = "fbif-wechat-layout"
-version = "1.0.0"
-requires-python = ">=3.12"
-dependencies = ["oss2", "requests"]

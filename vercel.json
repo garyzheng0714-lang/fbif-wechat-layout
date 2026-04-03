@@ -1,7 +1,0 @@
-{
-  "outputDirectory": "public",
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "handle": "filesystem" }
-  ]
-}

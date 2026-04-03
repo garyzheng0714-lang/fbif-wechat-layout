@@ -188,8 +188,6 @@ export default {
   id: 'fbif',
   name: 'FBIF 公众号排版',
   description: '按 FBIF 排版规范格式化，支持标题/引言/图片说明/参考来源',
-  icon: '📰',
-  badge: { text: 'FBIF 规范', class: 'badge-blue' },
   formats: ['.docx', '.md', '.txt'],
 
   processDocx({ paragraphs, imgCache }) {
