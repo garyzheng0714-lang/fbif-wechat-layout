@@ -17,7 +17,7 @@ function renderRuns(runs, opts) {
   const fs = (opts && opts.fontSize) || '15px';
   return runs.filter(r => r.type !== 'img').map(r => {
     if (r.type === 'txt') return leafWrap(textSpan(esc(r.text), { fontSize: fs, color: c, bold: r.bold }));
-    if (r.type === 'link') return leafWrap('<a style="color: rgb(0, 112, 192); text-decoration: none; font-size: ' + fs + ';" href="' + escAttr(r.href || '') + '">' + esc(r.text) + '</a>');
+    if (r.type === 'link') { const h = (r.href || ''); if (!/^https?:\/\//i.test(h)) return leafWrap(esc(r.text)); return leafWrap('<a style="color: rgb(0, 112, 192); text-decoration: none; font-size: ' + fs + ';" href="' + escAttr(h) + '">' + esc(r.text) + '</a>'); }
     return '';
   }).join('');
 }

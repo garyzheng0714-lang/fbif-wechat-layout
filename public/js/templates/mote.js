@@ -11,8 +11,10 @@ function renderInline(parts) {
       return p.bold ? '<strong>' + t + '</strong>' : t;
     }
     if (p.type === 'link') {
+      const h = (p.href || '');
+      if (!/^https?:\/\//i.test(h)) return esc(p.text);
       return '<a style="color: rgb(0, 112, 192); text-decoration: none;" href="' +
-        escAttr(p.href || '') + '">' + esc(p.text) + '</a>';
+        escAttr(h) + '">' + esc(p.text) + '</a>';
     }
     return '';
   }).join('');
