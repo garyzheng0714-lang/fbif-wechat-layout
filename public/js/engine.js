@@ -437,8 +437,18 @@ export function initApp(template) {
 
   window.copyContent = async function() {
     const content = document.getElementById('contentArea');
-    const html = content.innerHTML;
     const btn = document.getElementById('copyBtn');
+
+    // Wait for background image upload to finish — must use CDN URLs
+    if (_uploadPromise && !_uploadDone) {
+      btn.textContent = '等待图片上传...';
+      await _uploadPromise;
+    }
+
+    // Use PUSH layer (WeChat CDN URLs), not display layer (base64/original)
+    const enabled = document.getElementById('footerEnabled').checked;
+    const html = _articlePush + '\n' + (enabled ? _footerPush : '');
+
     let ok = false;
     if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
       try {
