@@ -113,14 +113,18 @@ async function classifyMd(text) {
     if (/^#\s/.test(para)) continue;
     if (/^>\s/.test(para)) continue;
     if (/^[-*_\s]{3,}$/.test(para.replace(/\s/g, ''))) {
-      if (para.includes('*')) stopped = true;
+      // Only stop on "* * *" with spaces (FBIF footer separator), not "***" or "---"
+      if (/^\*\s+\*\s+\*/.test(para.trim())) stopped = true;
       continue;
     }
     if (/^参考来源/.test(para)) { inRef = true; elems.push({ k: 'refH' }); continue; }
     if (inRef) { elems.push({ k: 'ref', runs: parseMdRuns(para) }); continue; }
 
     const imgMatch = para.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
-    if (imgMatch) { imgN++; elems.push({ k: 'img', src: imgMatch[2], w: '100%' }); continue; }
+    if (imgMatch) {
+      const imgSrc = imgMatch[2].replace(/"/g, '').replace(/</g, '').replace(/>/g, '');
+      imgN++; elems.push({ k: 'img', src: imgSrc, w: '100%' }); continue;
+    }
 
     if (/^\*\*0?\d+\*\*$/.test(para)) { expectHeading = true; continue; }
     if (expectHeading) {

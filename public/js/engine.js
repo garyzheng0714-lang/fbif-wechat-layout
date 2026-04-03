@@ -246,7 +246,7 @@ export function initApp(template) {
   dropZone.addEventListener('drop', e => {
     e.preventDefault(); dropZone.classList.remove('dragover');
     const f = e.dataTransfer.files[0];
-    if (f && template.formats.some(fmt => f.name.endsWith(fmt))) handleFile(f);
+    if (f && template.formats.some(fmt => f.name.toLowerCase().endsWith(fmt))) handleFile(f);
     else showError('请上传 ' + template.formats.join(' 或 ') + ' 文件');
   });
   fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
@@ -262,7 +262,7 @@ export function initApp(template) {
 
       // Step 1: Parse and format (NO network calls — instant)
       let result;
-      if (file.name.endsWith('.docx')) {
+      if (file.name.toLowerCase().endsWith('.docx')) {
         const docxData = await parseDocx(file);
         result = template.processDocx(docxData);
       } else if (typeof template.processMd === 'function') {
@@ -340,12 +340,12 @@ export function initApp(template) {
     document.getElementById('footerPreview').innerHTML = _footerHtml;
     if (window._initFooterEditor && !document._footerEditorDone) { document._footerEditorDone = true; window._initFooterEditor(); }
 
-    // Footer update function
+    // Footer update function — newHtml updates the stored footer, toggle only affects display
     window._updateFooter = function(newHtml) {
-      if (newHtml !== null && newHtml !== undefined) _footerHtml = newHtml;
+      if (typeof newHtml === 'string' && newHtml !== '') _footerHtml = newHtml;
       const enabled = document.getElementById('footerEnabled').checked;
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
-      document.getElementById('footerPreview').innerHTML = enabled ? _footerHtml : _footerHtml;
+      document.getElementById('footerPreview').innerHTML = _footerHtml;
       if (window._initFooterEditor && !document._footerEditorDone) { document._footerEditorDone = true; window._initFooterEditor(); }
     };
 
@@ -436,9 +436,11 @@ export function initApp(template) {
             }
             done++;
           }
-          refreshDOM();
+        } else {
+          done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length;
         }
-      } catch (e) { done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length; }
+        refreshDOM();
+      } catch (e) { done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length; refreshDOM(); }
     }
 
     // Upload http URLs in batches of 10
@@ -457,9 +459,11 @@ export function initApp(template) {
             else _articleHtml = _articleHtml.split(origUrl).join(wechatUrl);
             done++;
           }
-          refreshDOM();
+        } else {
+          done += batch.length; _uploadFailed += batch.length;
         }
-      } catch (e) { done += batch.length; _uploadFailed += batch.length; }
+        refreshDOM();
+      } catch (e) { done += batch.length; _uploadFailed += batch.length; refreshDOM(); }
     }
 
     _uploadDone = true;

@@ -428,10 +428,9 @@ document.getElementById('footerFileInput').addEventListener('change', function()
       const html = e.target.result;
       localStorage.setItem('custom_footer', html);
       document.getElementById('footerPreview').innerHTML = html;
-      updateFooterPreviewHeight();
-      parseFooterParts();
-      // Update content area footer
       window._updateFooter && window._updateFooter(html);
+      // Re-init WYSIWYG editor for new footer content
+      if (window._initFooterEditor) window._initFooterEditor();
     };
     r.readAsText(this.files[0]);
   }
@@ -523,7 +522,8 @@ window.toggleFooter = function() {
   const editor = document.getElementById('footerPreview');
   if (editor) editor.style.opacity = enabled ? '1' : '0.35';
   if (editor) editor.style.pointerEvents = enabled ? 'auto' : 'none';
-  window._updateFooter && window._updateFooter(enabled ? null : '');
+  // Pass null to trigger re-render without changing stored footer
+  window._updateFooter && window._updateFooter(null);
 };
 
 // After content changes, refresh thumbnails and init footer editor
