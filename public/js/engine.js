@@ -349,26 +349,19 @@ export function initApp(template) {
       base64Map['img_' + Object.keys(base64Map).length] = m3[1];
     }
 
-    // Collect http URLs (MD external images) — skip existing mmbiz URLs
+    // Collect http URLs (MD external images) — re-upload ALL including mmbiz
+    // Even mmbiz URLs must be re-uploaded to the user's own account CDN,
+    // otherwise cross-account images lose GIF animation when pasted into editor
     const httpUrls = [];
-    const skippedMmbiz = [];
     const httpRe = /src="(https?:\/\/[^"]+)"/g;
-    while ((m3 = httpRe.exec(_articlePush)) !== null) {
-      if (m3[1].includes('mmbiz.qpic.cn')) {
-        skippedMmbiz.push(m3[1]);
-      } else {
-        httpUrls.push(m3[1]);
-      }
+    while ((m3 = httpRe.exec(allHtml)) !== null) {
+      httpUrls.push(m3[1]);
     }
 
     logConv('info', '图片扫描完成', {
       base64: Object.keys(base64Map).length,
       httpUrls: httpUrls.length,
-      mmbizSkipped: skippedMmbiz.length,
     });
-    if (skippedMmbiz.length > 0) {
-      logConv('info', skippedMmbiz.length + '张图片已在微信CDN，跳过上传');
-    }
 
     _uploadTotal = Object.keys(base64Map).length + httpUrls.length;
     _uploadCurrent = 0;
@@ -445,6 +438,7 @@ export function initApp(template) {
               logConv('error', 'URL图片上传失败', { url: origUrl.substring(0, 80) });
             } else {
               _articlePush = _articlePush.split(origUrl).join(wechatUrl);
+              _footerPush = _footerPush.split(origUrl).join(wechatUrl);
               logConv('info', 'URL图片上传成功', { url: origUrl.substring(0, 60), cdn: wechatUrl.substring(0, 60) + '...' });
             }
             done++;
