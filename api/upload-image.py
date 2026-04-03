@@ -1,15 +1,15 @@
-"""Upload external image to Alibaba Cloud OSS.
+"""Upload images to Alibaba Cloud OSS for WeChat paste compatibility.
 
-Fetches an image from a given URL (e.g. mmbiz.qpic.cn) and uploads it
-to OSS, returning the public CDN URL. Used by the FBIF formatter to
-make images paste-compatible with the WeChat editor.
+Supports two modes:
+1. URL mode: fetch from external URL (e.g. mmbiz.qpic.cn) and upload
+2. Base64 mode: upload base64-encoded images directly (for DOCX embedded images)
 """
 
+import base64 as b64mod
 import hashlib
 import json
 import os
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import urlparse
 
 import oss2
 import requests
@@ -25,6 +25,10 @@ def get_oss_bucket():
     return oss2.Bucket(auth, endpoint, env("OSS_BUCKET"))
 
 
+def make_cdn_url(oss_key):
+    return f"https://{env('OSS_BUCKET')}.oss-{env('OSS_REGION')}.aliyuncs.com/{oss_key}"
+
+
 def fetch_image(url):
     """Fetch image bytes from URL, bypassing WeChat hotlink protection."""
     headers = {
@@ -36,17 +40,26 @@ def fetch_image(url):
     return resp.content, resp.headers.get("Content-Type", "image/jpeg")
 
 
-def url_to_oss_key(url, content_type):
-    """Generate a stable OSS key from the URL hash."""
+EXT_MAP = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+
+
+def url_to_oss_key(url, content_type="image/jpeg"):
+    """Stable OSS key from URL hash with correct extension."""
     url_hash = hashlib.md5(url.encode()).hexdigest()
-    ext_map = {
-        "image/png": ".png",
-        "image/jpeg": ".jpg",
-        "image/gif": ".gif",
-        "image/webp": ".webp",
-    }
-    ext = ext_map.get(content_type, ".jpg")
+    ext = EXT_MAP.get(content_type, ".jpg")
     return f"wechat-images/{url_hash}{ext}"
+
+
+def data_to_oss_key(img_bytes, content_type):
+    """OSS key from image data hash with correct extension."""
+    data_hash = hashlib.md5(img_bytes).hexdigest()
+    ext = EXT_MAP.get(content_type, ".jpg")
+    return f"wechat-images/{data_hash}{ext}"
 
 
 class handler(BaseHTTPRequestHandler):
@@ -55,33 +68,56 @@ class handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             urls = body.get("urls", [])
+            base64_images = body.get("base64_images", {})
 
-            if not urls:
-                self._respond(400, {"error": "No urls provided"})
+            if not urls and not base64_images:
+                self._respond(400, {"error": "No urls or base64_images provided"})
                 return
 
             bucket = get_oss_bucket()
             results = {}
 
-            for url in urls[:20]:  # cap at 20 images per request
+            # URL-based upload (for markdown external images)
+            for url in urls[:20]:
                 try:
-                    oss_key = url_to_oss_key(url, "image/jpeg")
-
-                    # Check if already uploaded (avoid re-upload)
+                    img_data, content_type = fetch_image(url)
+                    if len(img_data) > 10 * 1024 * 1024:
+                        results[url] = None
+                        continue
+                    oss_key = url_to_oss_key(url, content_type)
                     if bucket.object_exists(oss_key):
-                        cdn_url = f"https://{env('OSS_BUCKET')}.oss-{env('OSS_REGION')}.aliyuncs.com/{oss_key}"
-                        results[url] = cdn_url
+                        results[url] = make_cdn_url(oss_key)
+                        continue
+                    bucket.put_object(oss_key, img_data, headers={"Content-Type": content_type})
+                    results[url] = make_cdn_url(oss_key)
+
+                except Exception:
+                    results[url] = None
+
+            # Base64 direct upload (for DOCX embedded images)
+            for name, data_uri in list(base64_images.items())[:20]:
+                try:
+                    header, b64data = data_uri.split(",", 1)
+                    content_type = header.split(":")[1].split(";")[0]
+                    if content_type not in EXT_MAP:
+                        results[name] = None
+                        continue
+                    img_data = b64mod.b64decode(b64data)
+                    if len(img_data) > 10 * 1024 * 1024:
+                        results[name] = None
                         continue
 
-                    # Fetch and upload
-                    img_data, content_type = fetch_image(url)
-                    oss_key = url_to_oss_key(url, content_type)
-                    bucket.put_object(oss_key, img_data, headers={"Content-Type": content_type})
-                    cdn_url = f"https://{env('OSS_BUCKET')}.oss-{env('OSS_REGION')}.aliyuncs.com/{oss_key}"
-                    results[url] = cdn_url
+                    oss_key = data_to_oss_key(img_data, content_type)
 
-                except Exception as e:
-                    results[url] = None  # failed, frontend keeps original
+                    if bucket.object_exists(oss_key):
+                        results[name] = make_cdn_url(oss_key)
+                        continue
+
+                    bucket.put_object(oss_key, img_data, headers={"Content-Type": content_type})
+                    results[name] = make_cdn_url(oss_key)
+
+                except Exception:
+                    results[name] = None
 
             self._respond(200, {"results": results})
 

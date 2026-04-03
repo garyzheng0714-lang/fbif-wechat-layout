@@ -77,7 +77,7 @@ input[type="file"] { display: none; }
     <div class="upload-zone" id="dropZone">
       <div class="upload-icon">📄</div>
       <div class="upload-text">点击上传或拖拽 .docx 文件到这里</div>
-      <div class="upload-hint">支持 .docx 格式，无大小限制（本地处理，不上传服务器）</div>
+      <div class="upload-hint">支持 .docx 格式，图片会上传至 CDN 以兼容微信</div>
       <input type="file" id="fileInput" accept=".docx">
     </div>
     <div class="progress" id="progress">
@@ -116,8 +116,8 @@ const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDr
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
 
+const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
 let footerHtml = '';
-fetch('/footer.html').then(r => r.ok ? r.text() : '').then(t => footerHtml = t).catch(() => {});
 
 // ---- XML helpers ----
 function qn(ns, local) { return ns + ':' + local; }
@@ -174,15 +174,40 @@ async function processDocx(file) {
     }
   }
 
-  // Load images as base64
+  // Load images as base64, then upload to OSS for WeChat paste compatibility
   const imageCache = {};
   for (const [rid, filename] of Object.entries(ridToFile)) {
     const path = 'word/media/' + filename;
     const entry = zip.file(path);
     if (entry) {
       const data = await entry.async('base64');
-      const mime = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
-      imageCache[filename] = 'data:' + mime + ';base64,' + data;
+      const ext = filename.split('.').pop().toLowerCase();
+      const mimeMap = { png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' };
+      imageCache[filename] = 'data:' + (mimeMap[ext] || 'image/jpeg') + ';base64,' + data;
+    }
+  }
+
+  // Batch upload all images to OSS in one request (API supports up to 20)
+  const imgEntries = Object.entries(imageCache);
+  if (imgEntries.length > 0) {
+    // Split into batches of 20 (API limit)
+    for (let i = 0; i < imgEntries.length; i += 20) {
+      const batch = Object.fromEntries(imgEntries.slice(i, i + 20));
+      try {
+        const resp = await fetch('/api/upload-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64_images: batch })
+        });
+        if (resp.ok) {
+          const { results } = await resp.json();
+          for (const [fn, url] of Object.entries(results)) {
+            if (url) imageCache[fn] = url;
+          }
+        }
+      } catch (err) {
+        console.warn('OSS batch upload failed', err);
+      }
     }
   }
 
@@ -391,6 +416,7 @@ async function processDocx(file) {
     final.push(l);
   }
 
+  footerHtml = await footerReady;
   const authorLine = '<section style="margin-left: 8px; margin-right: 8px; line-height: 1.75em;"><span style="font-size: 15px; color: rgb(0, 112, 192);">作者：Mote莫特</span></section>';
   const contentHtml = authorLine + '\n' + BLANK + '\n' + final.join('\n') + '\n' + footerHtml;
 
@@ -471,17 +497,42 @@ function zoom(dir) {
   document.getElementById('zoomLabel').textContent = pct + '%';
 }
 
-function copyContent() {
+async function copyContent() {
   const content = document.getElementById('contentArea');
-  const range = document.createRange();
-  range.selectNodeContents(content);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  document.execCommand('copy');
-  sel.removeAllRanges();
+  const html = content.innerHTML;
   const btn = document.getElementById('copyBtn');
-  btn.textContent = '已复制!';
+  let ok = false;
+
+  // Modern Clipboard API (preferred)
+  if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([content.textContent || ''], { type: 'text/plain' }),
+      })]);
+      ok = true;
+    } catch (e) { /* fall through to legacy */ }
+  }
+
+  // Legacy fallback: intercept copy event to write raw innerHTML
+  if (!ok) {
+    const handler = function(e) {
+      e.clipboardData.setData('text/html', html);
+      e.clipboardData.setData('text/plain', content.textContent || '');
+      e.preventDefault();
+    };
+    document.addEventListener('copy', handler);
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    ok = document.execCommand('copy');
+    sel.removeAllRanges();
+    document.removeEventListener('copy', handler);
+  }
+
+  btn.textContent = ok ? '已复制!' : '复制失败';
   btn.classList.add('copied');
   setTimeout(() => { btn.textContent = '复制正文'; btn.classList.remove('copied'); }, 2000);
 }

@@ -76,7 +76,7 @@ input[type="file"] { display: none; }
     <div class="upload-zone" id="dropZone">
       <div class="upload-icon">📄</div>
       <div class="upload-text">点击上传或拖拽文件到这里</div>
-      <div class="upload-hint">支持 .docx 和 .md 格式，本地处理不上传服务器</div>
+      <div class="upload-hint">支持 .docx 和 .md 格式，图片会上传至 CDN 以兼容微信</div>
       <input type="file" id="fileInput" accept=".docx,.md,.txt">
     </div>
     <div class="progress" id="progress">
@@ -143,8 +143,8 @@ function parseMdRuns(text) {
   return runs;
 }
 
+const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
 let footerHtml = '';
-fetch('/footer.html').then(r => r.ok ? r.text() : '').then(t => footerHtml = t).catch(() => {});
 
 // ---- XML Helpers ----
 function findAll(el, ns, tag) {
@@ -265,7 +265,7 @@ async function processDocxFBIF(file) {
     else if (rtype.includes('hyperlink')) ridToUrl[rid] = (target || '').replace(/&amp;/g, '&');
   }
 
-  // Load images as base64
+  // Load images as base64, then upload to OSS for WeChat paste compatibility
   const imgCache = {};
   for (const [rid, fn] of Object.entries(ridToFile)) {
     const entry = zip.file('word/media/' + fn);
@@ -274,6 +274,29 @@ async function processDocxFBIF(file) {
       const ext = fn.split('.').pop().toLowerCase();
       const mimeMap = { png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' };
       imgCache[fn] = 'data:' + (mimeMap[ext] || 'image/jpeg') + ';base64,' + data;
+    }
+  }
+
+  // Batch upload all images to OSS in one request (API supports up to 20)
+  const imgEntries = Object.entries(imgCache);
+  if (imgEntries.length > 0) {
+    for (let i = 0; i < imgEntries.length; i += 20) {
+      const batch = Object.fromEntries(imgEntries.slice(i, i + 20));
+      try {
+        const resp = await fetch('/api/upload-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64_images: batch })
+        });
+        if (resp.ok) {
+          const { results } = await resp.json();
+          for (const [fn, url] of Object.entries(results)) {
+            if (url) imgCache[fn] = url;
+          }
+        }
+      } catch (err) {
+        console.warn('OSS batch upload failed', err);
+      }
     }
   }
 
@@ -444,24 +467,28 @@ async function processMdFBIF(text) {
     elems.push({ k: 'txt', runs: parseMdRuns(para) });
   }
 
-  // Upload external images to OSS one-by-one in parallel (Vercel 10s timeout per request)
+  // Batch upload external images to OSS (API supports up to 20)
   const imgElems = elems.filter(e => e.k === 'img' && e.src.startsWith('http'));
   if (imgElems.length > 0) {
-    await Promise.all(imgElems.map(async (e) => {
+    for (let i = 0; i < imgElems.length; i += 20) {
+      const batch = imgElems.slice(i, i + 20);
+      const urls = batch.map(e => e.src);
       try {
         const resp = await fetch('/api/upload-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ urls: [e.src] })
+          body: JSON.stringify({ urls })
         });
         if (resp.ok) {
           const { results } = await resp.json();
-          if (results[e.src]) e.src = results[e.src];
+          for (const e of batch) {
+            if (results[e.src]) e.src = results[e.src];
+          }
         }
       } catch (err) {
-        console.warn('OSS upload failed for', e.src, err);
+        console.warn('OSS batch upload failed', err);
       }
-    }));
+    }
   }
 
   return generateFBIFHtml(elems, author, imgN, t0);
@@ -519,6 +546,7 @@ function generateFBIFHtml(elems, author, imgN, t0) {
     }
   }
 
+  footerHtml = await footerReady;
   const contentHtml = lines.join('\n') + '\n' + footerHtml;
   const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
   const hCount = elems.filter(e => e.k === 'h').length;
@@ -555,7 +583,7 @@ async function handleFile(file) {
   progressText.textContent = '正在解压 ' + file.name + '...';
   try {
     progressFill.style.width = '50%';
-    progressText.textContent = file.name.endsWith('.docx') ? '正在排版...' : '正在排版并上传图片到 OSS...';
+    progressText.textContent = '正在排版并上传图片...';
     let result;
     if (file.name.endsWith('.docx')) {
       result = await processDocxFBIF(file);
@@ -598,30 +626,42 @@ function zoom(dir) {
   document.getElementById('phoneFrame').style.maxWidth = (420 * pct / 100) + 'px';
   document.getElementById('zoomLabel').textContent = pct + '%';
 }
-function copyContent() {
+async function copyContent() {
   const content = document.getElementById('contentArea');
   const html = content.innerHTML;
-
-  // Intercept copy event to write raw innerHTML directly to clipboard.
-  // This preserves blank sections that browser's visual selection would skip.
-  const handler = function(e) {
-    e.clipboardData.setData('text/html', html);
-    e.clipboardData.setData('text/plain', content.textContent || '');
-    e.preventDefault();
-  };
-  document.addEventListener('copy', handler);
-  // execCommand('copy') needs a selection to fire the copy event
-  const range = document.createRange();
-  range.selectNodeContents(content);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  document.execCommand('copy');
-  sel.removeAllRanges();
-  document.removeEventListener('copy', handler);
-
   const btn = document.getElementById('copyBtn');
-  btn.textContent = '已复制!';
+  let ok = false;
+
+  // Modern Clipboard API (preferred)
+  if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([content.textContent || ''], { type: 'text/plain' }),
+      })]);
+      ok = true;
+    } catch (e) { /* fall through to legacy */ }
+  }
+
+  // Legacy fallback: intercept copy event to write raw innerHTML
+  if (!ok) {
+    const handler = function(e) {
+      e.clipboardData.setData('text/html', html);
+      e.clipboardData.setData('text/plain', content.textContent || '');
+      e.preventDefault();
+    };
+    document.addEventListener('copy', handler);
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    ok = document.execCommand('copy');
+    sel.removeAllRanges();
+    document.removeEventListener('copy', handler);
+  }
+
+  btn.textContent = ok ? '已复制!' : '复制失败';
   btn.classList.add('copied');
   setTimeout(() => { btn.textContent = '复制正文'; btn.classList.remove('copied'); }, 2000);
 }
