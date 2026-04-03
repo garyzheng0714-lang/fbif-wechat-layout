@@ -292,7 +292,11 @@ export function initApp(template) {
   // Track content and footer separately
   let _articleHtml = '';
   let _footerHtml = '';
-  let _uploadPromise = null; // background upload tracker
+  let _uploadPromise = null;
+  let _uploadDone = false;
+  let _uploadTotal = 0;
+  let _uploadCurrent = 0;
+  let _uploadFailed = 0;
 
   function showPreview(title, articleContent, footerContent, stats) {
     _articleHtml = articleContent;
@@ -332,7 +336,7 @@ export function initApp(template) {
 
     // Footer preview
     document.getElementById('footerPreview').innerHTML = _footerHtml;
-    if (window._updateFooterPreviewHeight) window._updateFooterPreviewHeight();
+    if (window._initFooterEditor && !document._footerEditorDone) { document._footerEditorDone = true; window._initFooterEditor(); }
 
     // Footer update function
     window._updateFooter = function(newHtml) {
@@ -340,12 +344,35 @@ export function initApp(template) {
       const enabled = document.getElementById('footerEnabled').checked;
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
       document.getElementById('footerPreview').innerHTML = enabled ? _footerHtml : _footerHtml;
-      if (window._updateFooterPreviewHeight) window._updateFooterPreviewHeight();
+      if (window._initFooterEditor && !document._footerEditorDone) { document._footerEditorDone = true; window._initFooterEditor(); }
     };
 
-    // Step 3: Background upload — find all data: URIs in article + footer, upload to WeChat CDN
+    // Step 3: Background upload
     const statsBar = document.getElementById('statsBar');
+    _uploadDone = false;
+    _uploadFailed = 0;
+    updateButtonStates();
     _uploadPromise = backgroundUploadImages(statsBar, stats);
+  }
+
+  function updateButtonStates() {
+    const draftBtn = document.getElementById('draftBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    if (!draftBtn) return;
+
+    if (!_uploadDone && _uploadTotal > 0) {
+      draftBtn.textContent = '上传中 (' + _uploadCurrent + '/' + _uploadTotal + ')...';
+      draftBtn.disabled = true;
+      copyBtn.title = '图片上传中，粘贴后部分图片可能缺失';
+    } else {
+      draftBtn.disabled = false;
+      if (_uploadFailed > 0) {
+        draftBtn.textContent = '推送到草稿箱 (' + _uploadFailed + '张失败)';
+      } else {
+        draftBtn.textContent = '推送到草稿箱';
+      }
+      copyBtn.title = '';
+    }
   }
 
   async function backgroundUploadImages(statsBar, originalStats) {
@@ -363,13 +390,17 @@ export function initApp(template) {
     const httpUrls = [];
     const httpRe = /src="(https?:\/\/[^"]+)"/g;
     while ((m3 = httpRe.exec(_articleHtml)) !== null) {
-      if (!m3[1].includes('mmbiz.qpic.cn')) httpUrls.push(m3[1]); // skip already-uploaded
+      if (!m3[1].includes('mmbiz.qpic.cn')) httpUrls.push(m3[1]);
     }
 
-    const total = Object.keys(base64Map).length + httpUrls.length;
-    if (total === 0) return;
+    _uploadTotal = Object.keys(base64Map).length + httpUrls.length;
+    _uploadCurrent = 0;
+    _uploadFailed = 0;
 
-    statsBar.textContent = '上传图片 (0/' + total + ')...';
+    if (_uploadTotal === 0) { _uploadDone = true; updateButtonStates(); return; }
+
+    statsBar.textContent = '上传图片 (0/' + _uploadTotal + ')...';
+    updateButtonStates();
     let done = 0;
 
     function refreshDOM() {
@@ -377,8 +408,10 @@ export function initApp(template) {
       document.getElementById('contentArea').innerHTML =
         _articleHtml + '\n' + (enabled ? _footerHtml : '');
       document.getElementById('footerPreview').innerHTML = _footerHtml;
-      if (window._updateFooterPreviewHeight) window._updateFooterPreviewHeight();
-      statsBar.textContent = '上传图片 (' + done + '/' + total + ')...';
+      if (window._initFooterEditor && !document._footerEditorDone) { document._footerEditorDone = true; window._initFooterEditor(); }
+      _uploadCurrent = done;
+      statsBar.textContent = '上传图片 (' + done + '/' + _uploadTotal + ')...';
+      updateButtonStates();
     }
 
     // Upload base64 images in batches of 10
@@ -394,7 +427,8 @@ export function initApp(template) {
         if (resp.ok) {
           const { results } = await resp.json();
           for (const [key, wechatUrl] of Object.entries(results)) {
-            if (wechatUrl) {
+            if (!wechatUrl) _uploadFailed++;
+            else {
               _articleHtml = _articleHtml.split(base64Map[key]).join(wechatUrl);
               _footerHtml = _footerHtml.split(base64Map[key]).join(wechatUrl);
             }
@@ -402,7 +436,7 @@ export function initApp(template) {
           }
           refreshDOM();
         }
-      } catch (e) { done += Object.keys(batch).length; }
+      } catch (e) { done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length; }
     }
 
     // Upload http URLs in batches of 10
@@ -417,15 +451,23 @@ export function initApp(template) {
         if (resp.ok) {
           const { results } = await resp.json();
           for (const [origUrl, wechatUrl] of Object.entries(results)) {
-            if (wechatUrl) _articleHtml = _articleHtml.split(origUrl).join(wechatUrl);
+            if (!wechatUrl) _uploadFailed++;
+            else _articleHtml = _articleHtml.split(origUrl).join(wechatUrl);
             done++;
           }
           refreshDOM();
         }
-      } catch (e) { done += batch.length; }
+      } catch (e) { done += batch.length; _uploadFailed += batch.length; }
     }
 
-    statsBar.textContent = originalStats + ' | 图片已同步';
+    _uploadDone = true;
+    _uploadCurrent = done;
+    updateButtonStates();
+    if (_uploadFailed > 0) {
+      statsBar.textContent = originalStats + ' | ' + _uploadFailed + '张图片上传失败';
+    } else {
+      statsBar.textContent = originalStats + ' | 图片已同步';
+    }
   }
 
   // Expose global handlers for onclick attributes

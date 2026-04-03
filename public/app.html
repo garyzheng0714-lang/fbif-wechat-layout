@@ -150,23 +150,27 @@ input[type="file"] { display: none; }
   font-size: 11px; color: #bbb; text-align: right; margin-top: 4px;
 }
 
-/* Footer section */
-.footer-card {
-  background: #f7f8fa; border-radius: 8px; overflow: hidden;
-  border: 1px solid #eee;
-}
-.footer-preview-wrapper {
-  width: 100%; height: 0; overflow: hidden; position: relative;
-}
-.footer-preview-inner {
-  transform-origin: top left;
-  transform: scale(0.35);
-  width: 285.7%; /* 100% / 0.35 */
-  position: absolute; top: 0; left: 0;
-}
+/* Footer editor — WYSIWYG inline editing */
 .footer-controls {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 12px;
+}
+.footer-editor {
+  width: 100%; background: #fff; border-radius: 8px;
+  border: 1px solid #eee; overflow-y: auto; max-height: 500px;
+  padding: 4px;
+}
+.footer-editor img {
+  cursor: pointer; outline: 2px solid transparent;
+  transition: outline-color 0.15s; border-radius: 2px;
+}
+.footer-editor img:hover {
+  outline-color: #0070C0; outline-offset: 2px;
+}
+.footer-editor span:hover, .footer-editor p:hover, .footer-editor a:hover,
+.footer-editor section:not(:has(img)):not(:has(section)):hover {
+  background: rgba(0, 112, 192, 0.05); outline: 1px dashed rgba(0,112,192,0.3);
+  border-radius: 2px; cursor: text;
 }
 
 /* Toggle switch */
@@ -192,33 +196,11 @@ input[type="file"] { display: none; }
 }
 .toggle-label span { font-size: 13px; color: #666; }
 
-/* Footer parts editor */
-.footer-parts {
-  display: flex; flex-direction: column; gap: 8px; margin-top: 12px;
-}
-.footer-part {
-  display: flex; align-items: center; gap: 8px;
-  background: #fff; border: 1px solid #eee; border-radius: 6px;
-  padding: 6px 8px;
-}
-.footer-part-thumb {
-  width: 40px; height: 40px; border-radius: 4px; overflow: hidden;
-  flex-shrink: 0; background: #f0f0f0;
-}
-.footer-part-thumb img {
-  width: 100%; height: 100%; object-fit: cover; display: block;
-}
-.footer-part-text {
-  flex: 1; font-size: 12px; color: #555; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.footer-part-text input {
-  width: 100%; border: none; outline: none; font-size: 12px;
-  color: #333; background: transparent; padding: 2px 0;
-  border-bottom: 1px solid transparent; transition: border-color 0.2s;
-}
-.footer-part-text input:focus {
-  border-bottom-color: #0070C0;
+/* Footer editor tooltip */
+.footer-edit-tip {
+  position: fixed; background: rgba(0,0,0,0.75); color: #fff;
+  padding: 4px 10px; border-radius: 4px; font-size: 11px;
+  pointer-events: none; z-index: 200; display: none;
 }
 .btn-xs {
   padding: 2px 8px; font-size: 11px; border: 1px solid #ddd;
@@ -328,14 +310,8 @@ input[type="file"] { display: none; }
           </label>
         </div>
 
-        <div class="footer-card">
-          <div class="footer-preview-wrapper" id="footerPreviewWrapper">
-            <div class="footer-preview-inner" id="footerPreview"></div>
-          </div>
-        </div>
-
-        <div class="footer-parts" id="footerParts">
-          <!-- Populated by JS: editable images and text from footer -->
+        <div class="footer-editor" id="footerPreview">
+          <!-- Footer rendered here — click images to replace, click text to edit -->
         </div>
 
         <input type="file" id="footerFileInput" accept=".html,.htm" style="display:none">
@@ -345,6 +321,8 @@ input[type="file"] { display: none; }
   </div>
 
   <div class="stats-bar" id="statsBar"></div>
+  <div class="footer-edit-tip" id="footerEditTip"></div>
+  <input type="file" id="footerImgReplace" accept="image/*" style="display:none">
 </div>
 
 <script type="module">
@@ -456,135 +434,106 @@ document.getElementById('footerFileInput').addEventListener('change', function()
   }
 });
 
-// Measure footer preview inner height and set wrapper height accordingly
-function updateFooterPreviewHeight() {
-  requestAnimationFrame(() => {
-    const inner = document.getElementById('footerPreview');
-    const wrapper = document.getElementById('footerPreviewWrapper');
-    if (inner && wrapper) {
-      const h = inner.scrollHeight * 0.35;
-      wrapper.style.height = Math.min(h, 200) + 'px';
+// WYSIWYG footer editing — click images to replace, click text to edit inline
+function initFooterEditor() {
+  const editor = document.getElementById('footerPreview');
+  const tip = document.getElementById('footerEditTip');
+  const fileInput = document.getElementById('footerImgReplace');
+  let _targetImg = null;
+
+  // Tooltip on hover
+  editor.addEventListener('mousemove', (e) => {
+    const el = e.target;
+    if (el.tagName === 'IMG') {
+      tip.textContent = '点击更换图片';
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY - 30) + 'px';
+    } else if (el.closest && !el.querySelector('img') && el.textContent.trim()) {
+      tip.textContent = '点击编辑文字';
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY - 30) + 'px';
+    } else {
+      tip.style.display = 'none';
     }
   });
-}
-window._updateFooterPreviewHeight = updateFooterPreviewHeight;
+  editor.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
 
-// Parse footer HTML to find editable images and text blocks
-function parseFooterParts() {
-  const container = document.getElementById('footerParts');
-  container.innerHTML = '';
-  const footerEl = document.getElementById('footerPreview');
-  if (!footerEl || !footerEl.innerHTML.trim()) return;
+  // Click to edit
+  editor.addEventListener('click', (e) => {
+    const el = e.target;
+    tip.style.display = 'none';
 
-  // Find images in footer
-  const footerImgs = footerEl.querySelectorAll('img');
-  footerImgs.forEach((img, idx) => {
-    const part = document.createElement('div');
-    part.className = 'footer-part';
+    // Image: open file picker
+    if (el.tagName === 'IMG') {
+      e.preventDefault();
+      _targetImg = el;
+      fileInput.value = '';
+      fileInput.click();
+      return;
+    }
 
-    const thumbDiv = document.createElement('div');
-    thumbDiv.className = 'footer-part-thumb';
-    const thumbImg = document.createElement('img');
-    thumbImg.src = img.src;
-    thumbDiv.appendChild(thumbImg);
+    // Text: make contenteditable
+    const textEl = el.closest('span, p, a, section');
+    if (textEl && !textEl.querySelector('img') && textEl.textContent.trim()) {
+      textEl.contentEditable = 'true';
+      textEl.focus();
+      textEl.style.outline = '2px solid #0070C0';
+      textEl.style.borderRadius = '2px';
+      textEl.style.background = 'rgba(0,112,192,0.05)';
 
-    const textDiv = document.createElement('div');
-    textDiv.className = 'footer-part-text';
-    textDiv.textContent = '图片 ' + (idx + 1);
-
-    const changeBtn = document.createElement('button');
-    changeBtn.className = 'btn-xs';
-    changeBtn.textContent = '换';
-    const fileId = 'footerPartImg_' + idx;
-    changeBtn.addEventListener('click', () => {
-      let input = document.getElementById(fileId);
-      if (!input) {
-        input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.id = fileId;
-        input.style.display = 'none';
-        document.body.appendChild(input);
-        input.addEventListener('change', function() {
-          if (this.files[0]) {
-            const reader = new FileReader();
-            reader.onload = ev => {
-              img.src = ev.target.result;
-              thumbImg.src = ev.target.result;
-              // Sync to content area
-              window._updateFooter && window._updateFooter(footerEl.innerHTML);
-            };
-            reader.readAsDataURL(this.files[0]);
-          }
-        });
-      }
-      input.click();
-    });
-
-    part.appendChild(thumbDiv);
-    part.appendChild(textDiv);
-    part.appendChild(changeBtn);
-    container.appendChild(part);
+      const onBlur = () => {
+        textEl.contentEditable = 'false';
+        textEl.style.outline = '';
+        textEl.style.background = '';
+        syncFooter();
+        textEl.removeEventListener('blur', onBlur);
+      };
+      textEl.addEventListener('blur', onBlur);
+    }
   });
 
-  // Find text blocks with content
-  const walker = document.createTreeWalker(footerEl, NodeFilter.SHOW_TEXT, null, false);
-  let textIdx = 0;
-  let node;
-  while ((node = walker.nextNode())) {
-    const text = node.textContent.trim();
-    if (!text || text.length < 2) continue;
+  // File input change: replace image
+  fileInput.addEventListener('change', () => {
+    if (!fileInput.files[0] || !_targetImg) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      _targetImg.src = ev.target.result;
+      _targetImg = null;
+      syncFooter();
+    };
+    reader.readAsDataURL(fileInput.files[0]);
+  });
 
-    const part = document.createElement('div');
-    part.className = 'footer-part';
-
-    const iconDiv = document.createElement('div');
-    iconDiv.className = 'footer-part-thumb';
-    iconDiv.style.display = 'flex';
-    iconDiv.style.alignItems = 'center';
-    iconDiv.style.justifyContent = 'center';
-    iconDiv.style.fontSize = '16px';
-    iconDiv.style.color = '#bbb';
-    iconDiv.textContent = 'T';
-
-    const textDiv = document.createElement('div');
-    textDiv.className = 'footer-part-text';
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = text;
-    const capturedNode = node;
-    input.addEventListener('change', () => {
-      capturedNode.textContent = input.value;
-      window._updateFooter && window._updateFooter(footerEl.innerHTML);
-    });
-    textDiv.appendChild(input);
-
-    part.appendChild(iconDiv);
-    part.appendChild(textDiv);
-    container.appendChild(part);
-    textIdx++;
+  function syncFooter() {
+    window._updateFooter && window._updateFooter(editor.innerHTML);
   }
 }
-window._parseFooterParts = parseFooterParts;
+
+// Initialize once DOM has footer content
+window._initFooterEditor = initFooterEditor;
 
 // Toggle footer
 window.toggleFooter = function() {
   const enabled = document.getElementById('footerEnabled').checked;
-  const card = document.querySelector('.footer-card');
-  const parts = document.getElementById('footerParts');
-  if (card) card.style.opacity = enabled ? '1' : '0.35';
-  if (parts) parts.style.opacity = enabled ? '1' : '0.35';
+  const editor = document.getElementById('footerPreview');
+  if (editor) editor.style.opacity = enabled ? '1' : '0.35';
+  if (editor) editor.style.pointerEvents = enabled ? 'auto' : 'none';
   window._updateFooter && window._updateFooter(enabled ? null : '');
 };
 
-// After content is loaded, populate thumbnails and footer parts (debounced)
+// After content changes, refresh thumbnails and init footer editor
 let _sidebarUpdateTimer = null;
+let _footerEditorInitialized = false;
 const observer = new MutationObserver(() => {
   if (_sidebarUpdateTimer) clearTimeout(_sidebarUpdateTimer);
   _sidebarUpdateTimer = setTimeout(() => {
     populateArticleThumbnails();
-    updateFooterPreviewHeight();
-    parseFooterParts();
+    if (!_footerEditorInitialized && document.getElementById('footerPreview').innerHTML.trim()) {
+      _footerEditorInitialized = true;
+      initFooterEditor();
+    }
   }, 150);
 });
 observer.observe(document.getElementById('contentArea'), { childList: true });
