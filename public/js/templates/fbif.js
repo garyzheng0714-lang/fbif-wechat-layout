@@ -81,7 +81,7 @@ function classifyDocx(paragraphs, imgCache) {
     if (inRef) { elems.push({ k: 'ref', runs: pd.runs }); continue; }
     if (pd.hasImg) {
       for (const r of pd.runs) {
-        if (r.type === 'img') { imgN++; elems.push({ k: 'img', src: imgCache[r.file] || '', w: r.w }); }
+        if (r.type === 'img') { imgN++; elems.push({ k: 'img', src: imgCache[r.file] || '', w: r.w, gif: /\.gif$/i.test(r.file) }); }
       }
       while (i + 1 < pds.length) {
         const nx = pds[i + 1];
@@ -123,7 +123,7 @@ async function classifyMd(text) {
     const imgMatch = para.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (imgMatch) {
       const imgSrc = imgMatch[2].replace(/"/g, '').replace(/</g, '').replace(/>/g, '');
-      imgN++; elems.push({ k: 'img', src: imgSrc, w: '100%' }); continue;
+      imgN++; elems.push({ k: 'img', src: imgSrc, w: '100%', gif: /\.gif(\?|$)/i.test(imgSrc) }); continue;
     }
 
     if (/^\*\*0?\d+\*\*$/.test(para)) { expectHeading = true; continue; }
@@ -162,9 +162,11 @@ function render(elems, author) {
         break;
       case 'img': {
         const src = e.src || '';
+        const isGif = e.gif || /\.gif(\?|$)/i.test(src) || /mmbiz_gif/.test(src) || /^data:image\/gif/.test(src);
         const rpol = src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
+        const gifAttr = isGif ? ' data-type="gif"' : '';
         lines.push('<section style="text-align: center; ' + (spaceAfter ? GAP : '') + 'margin: 0px 8px;">' +
-          '<img src="' + src + '"' + rpol + ' style="width: ' + e.w + '; display: block; margin: 0 auto;" /></section>');
+          '<img src="' + src + '"' + gifAttr + rpol + ' style="width: ' + e.w + '; display: block; margin: 0 auto;" /></section>');
         break;
       }
       case 'cap':
