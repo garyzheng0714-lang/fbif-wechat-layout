@@ -1,8 +1,6 @@
 __pycache__/
 *.pyc
-.vercel/
 node_modules/
 .env
-.vercel
 .DS_Store
 .context/
