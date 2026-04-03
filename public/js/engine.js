@@ -317,19 +317,21 @@ export function initApp(template) {
     document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
     document.getElementById('statsBar').textContent = stats;
 
-    // Cover: extract first image and update cover card
+    // Cover: extract first image
     const firstImg = document.getElementById('contentArea').querySelector('img');
     const coverImg = document.getElementById('coverImg');
     const coverPlaceholder = document.getElementById('coverPlaceholder');
-    const coverPreview = document.getElementById('coverPreview');
     if (firstImg && firstImg.src && (firstImg.src.startsWith('http') || firstImg.src.startsWith('data:'))) {
       coverImg.src = firstImg.src;
       coverImg.style.display = 'block';
-      coverPlaceholder.style.display = 'none';
-      if (coverPreview) {
-        coverPreview.classList.remove('cover-card--empty');
-        coverPreview.classList.add('cover-card--filled');
-      }
+      if (coverPlaceholder) coverPlaceholder.style.display = 'none';
+    }
+
+    // Auto-fill digest from first 54 chars of text content
+    const digestEl = document.getElementById('digestPreview');
+    if (digestEl) {
+      const textOnly = document.getElementById('contentArea').textContent.trim();
+      digestEl.textContent = textOnly.slice(0, 80) + (textOnly.length > 80 ? '...' : '');
     }
 
     // Thumbnail grid and footer parts are populated by MutationObserver in app.html
