@@ -57,33 +57,34 @@ input[type="file"] { display: none; }
 .zoom-controls .btn { padding: 6px 12px; font-size: 16px; min-width: 36px; }
 .zoom-label { font-size: 13px; color: #666; min-width: 45px; text-align: center; }
 
-/* ---- Three-column layout: TOC | Preview | Settings ---- */
+/* ---- Layout: Preview with floating TOC ---- */
 .preview-layout {
-  display: flex; margin-top: 60px; min-height: calc(100vh - 60px);
+  margin-top: 60px; min-height: calc(100vh - 60px);
+  position: relative;
 }
 
-/* Left TOC */
-.toc-sidebar {
-  width: 220px; min-width: 220px; background: #fff; border-right: 1px solid #e8e8e8;
-  padding: 16px 12px; overflow-y: auto; position: sticky; top: 60px;
-  height: calc(100vh - 60px);
+/* Floating TOC — sticks to left of phone frame */
+.toc-float {
+  position: fixed; top: 80px; z-index: 50;
+  background: #fff; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  padding: 12px; max-width: 180px; max-height: calc(100vh - 120px);
+  overflow-y: auto; border: 1px solid #eee;
 }
-.toc-title { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 12px; }
+.toc-title { font-size: 12px; font-weight: 600; color: #999; margin-bottom: 8px; }
 .toc-list { list-style: none; }
 .toc-item {
-  padding: 6px 8px; font-size: 13px; color: #666; cursor: pointer;
-  border-radius: 4px; margin-bottom: 2px; line-height: 1.4;
+  padding: 5px 8px; font-size: 12px; color: #666; cursor: pointer;
+  border-radius: 4px; margin-bottom: 1px; line-height: 1.4;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: all 0.15s;
+  transition: all 0.15s; border-left: 2px solid transparent;
 }
-.toc-item:hover { background: #f0f6ff; color: #0070C0; }
-.toc-item.active { background: #e6f0ff; color: #0070C0; font-weight: 500; }
-.toc-empty { font-size: 12px; color: #bbb; padding: 8px; }
+.toc-item:hover { color: #0070C0; background: #f8fbff; }
+.toc-item.active { color: #0070C0; font-weight: 500; border-left-color: #0070C0; }
+.toc-empty { font-size: 11px; color: #ccc; padding: 4px 8px; }
 
-/* Center preview */
+/* Preview center */
 .preview-main {
-  flex: 1; padding: 12px; overflow-y: auto;
-  height: calc(100vh - 60px);
+  padding: 12px; overflow-y: auto; height: calc(100vh - 60px);
 }
 .phone-frame {
   max-width: 840px; margin: 0 auto; background: #fff;
@@ -93,45 +94,6 @@ input[type="file"] { display: none; }
 .phone-header { background: #ededed; padding: 8px 16px; text-align: center; }
 .phone-header span { font-size: 12px; color: #999; }
 .phone-body { padding: 16px 0; }
-
-/* Right settings panel */
-.settings-sidebar {
-  width: 260px; min-width: 260px; background: #fff; border-left: 1px solid #e8e8e8;
-  padding: 16px; overflow-y: auto; position: sticky; top: 60px;
-  height: calc(100vh - 60px); display: flex; flex-direction: column; gap: 16px;
-}
-.settings-section { display: flex; flex-direction: column; gap: 8px; }
-.settings-label {
-  font-size: 12px; font-weight: 600; color: #999; text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.settings-input {
-  width: 100%; padding: 8px 10px; border: 1px solid #e0e0e0; border-radius: 6px;
-  font-size: 13px; font-family: inherit; outline: none; background: #fafafa;
-}
-.settings-input:focus { border-color: #0070C0; background: #fff; }
-.cover-select {
-  display: flex; flex-wrap: wrap; gap: 6px;
-}
-.cover-thumb {
-  width: 44px; height: 44px; border-radius: 4px; overflow: hidden;
-  cursor: pointer; border: 2px solid transparent; transition: border-color 0.15s;
-  background: #f5f5f5;
-}
-.cover-thumb:hover { border-color: #a0c4e8; }
-.cover-thumb.selected { border-color: #0070C0; }
-.cover-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cover-upload-btn {
-  width: 44px; height: 44px; border-radius: 4px; border: 1.5px dashed #ccc;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; background: #fafafa; font-size: 18px; color: #bbb;
-}
-.cover-upload-btn:hover { border-color: #0070C0; color: #0070C0; }
-
-/* Footer toggle */
-.footer-row {
-  display: flex; align-items: center; justify-content: space-between;
-}
 .toggle-switch {
   position: relative; display: inline-block; width: 36px; height: 20px;
 }
@@ -197,57 +159,28 @@ input[type="file"] { display: none; }
   </div>
 
   <div class="preview-layout">
-    <!-- Left: Table of Contents -->
-    <div class="toc-sidebar">
+    <!-- Floating TOC -->
+    <div class="toc-float" id="tocFloat">
       <div class="toc-title">目录</div>
       <ul class="toc-list" id="tocList">
-        <li class="toc-empty">上传文件后显示目录</li>
+        <li class="toc-empty">解析后显示</li>
       </ul>
     </div>
 
-    <!-- Center: Article Preview -->
+    <!-- Article Preview -->
     <div class="preview-main" id="previewMain">
       <div class="phone-frame" id="phoneFrame">
         <div class="phone-header"><span>微信公众号预览</span></div>
         <div class="phone-body" id="contentArea"></div>
       </div>
     </div>
-
-    <!-- Right: Settings -->
-    <div class="settings-sidebar">
-      <!-- Title -->
-      <div class="settings-section">
-        <div class="settings-label">标题</div>
-        <input type="text" class="settings-input" id="titleInput" maxlength="32"
-          placeholder="文章标题（最多32字）">
-      </div>
-
-      <!-- Cover -->
-      <div class="settings-section">
-        <div class="settings-label">封面图</div>
-        <div class="cover-select" id="articleThumbnails"></div>
-        <input type="file" id="coverInput" accept="image/*" style="display:none">
-        <img id="coverImg" style="display:none;">
-      </div>
-
-      <!-- Footer -->
-      <div class="settings-section">
-        <div class="footer-row">
-          <div class="settings-label">底部模板</div>
-          <label class="toggle-switch">
-            <input type="checkbox" id="footerEnabled" checked onchange="toggleFooter()">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-      </div>
-
-      <!-- Spacer -->
-      <div style="flex:1;"></div>
-
-      <!-- Stats -->
-      <div style="font-size:12px; color:#bbb; text-align:center;" id="sidebarStats"></div>
-    </div>
   </div>
+
+  <!-- Hidden elements -->
+  <input type="file" id="coverInput" accept="image/*" style="display:none">
+  <img id="coverImg" style="display:none;">
+  <input type="text" id="titleInput" maxlength="32" style="display:none;">
+  <input type="checkbox" id="footerEnabled" checked style="display:none;">
 
   <div class="stats-bar" id="statsBar"></div>
   <div class="footer-edit-tip" id="footerEditTip"></div>
@@ -276,57 +209,15 @@ if (!TEMPLATES.includes(templateId)) {
   }
 }
 
-// Cover image change handler
-document.getElementById('coverInput').addEventListener('change', function() {
-  if (this.files[0]) {
-    const r = new FileReader();
-    r.onload = e => { setCoverImage(e.target.result); };
-    r.readAsDataURL(this.files[0]);
-  }
-});
-
-function setCoverImage(src) {
-  const img = document.getElementById('coverImg');
-  img.src = src;
-  img.style.display = 'block';
-  document.querySelectorAll('.cover-thumb').forEach(t => {
-    t.classList.toggle('selected', t.dataset.src === src);
-  });
-}
-
-// Populate article thumbnails for cover selection
+// Auto-set first image as cover
 window._populateArticleThumbnails = function() {
-  const grid = document.getElementById('articleThumbnails');
-  grid.innerHTML = '';
   const imgs = document.getElementById('contentArea').querySelectorAll('img');
-  const seen = new Set();
-  let first = true;
-
-  imgs.forEach(img => {
-    const src = img.src;
-    if (!src || seen.has(src)) return;
-    seen.add(src);
-    const thumb = document.createElement('div');
-    thumb.className = 'cover-thumb' + (first ? ' selected' : '');
-    thumb.dataset.src = src;
-    thumb.innerHTML = '<img src="' + src.replace(/"/g, '&quot;') + '">';
-    thumb.addEventListener('click', () => setCoverImage(src));
-    grid.appendChild(thumb);
-    if (first) { setCoverImage(src); first = false; }
-  });
-
-  // Upload button
-  const uploadBtn = document.createElement('div');
-  uploadBtn.className = 'cover-upload-btn';
-  uploadBtn.textContent = '+';
-  uploadBtn.addEventListener('click', () => document.getElementById('coverInput').click());
-  grid.appendChild(uploadBtn);
+  const coverImg = document.getElementById('coverImg');
+  if (imgs.length > 0 && imgs[0].src) {
+    coverImg.src = imgs[0].src;
+    coverImg.style.display = 'block';
+  }
 };
-
-// Title sync
-document.getElementById('titleInput').addEventListener('input', function() {
-  document.getElementById('previewTitleDisplay').textContent = this.value;
-});
 
 // Build TOC from headings in content
 window._buildTOC = function() {
@@ -369,25 +260,53 @@ window._buildTOC = function() {
 
 // Footer toggle
 window.toggleFooter = function() {
-  const enabled = document.getElementById('footerEnabled').checked;
   window._updateFooter && window._updateFooter(null);
 };
 
-// WYSIWYG footer editing on content area images (footer part)
-window._initFooterEditor = function() {
-  // Footer images in contentArea are editable via click
-};
+// Position TOC float next to phone frame
+function positionTOC() {
+  const toc = document.getElementById('tocFloat');
+  const frame = document.getElementById('phoneFrame');
+  if (!toc || !frame) return;
+  const rect = frame.getBoundingClientRect();
+  const tocWidth = toc.offsetWidth;
+  const left = rect.left - tocWidth - 16;
+  toc.style.left = Math.max(8, left) + 'px';
+  toc.style.display = left > 0 ? 'block' : 'none';
+}
 
-// MutationObserver for content changes
+// Scroll spy — highlight active TOC item based on scroll position
+function updateScrollSpy() {
+  const items = document.querySelectorAll('.toc-item');
+  const previewMain = document.getElementById('previewMain');
+  if (!previewMain || !items.length) return;
+  const scrollTop = previewMain.scrollTop;
+  let activeIdx = 0;
+  items.forEach((item, idx) => {
+    const headingId = 'heading-' + idx;
+    const heading = document.getElementById(headingId);
+    if (heading && heading.offsetTop - 100 <= scrollTop) activeIdx = idx;
+  });
+  items.forEach((item, idx) => item.classList.toggle('active', idx === activeIdx));
+}
+
+// Update TOC position on resize and zoom
+window.addEventListener('resize', positionTOC);
+
+// Initial and content-change observers
 let _updateTimer = null;
 const observer = new MutationObserver(() => {
   if (_updateTimer) clearTimeout(_updateTimer);
   _updateTimer = setTimeout(() => {
     window._populateArticleThumbnails();
     window._buildTOC();
+    positionTOC();
   }, 200);
 });
 observer.observe(document.getElementById('contentArea'), { childList: true });
+
+// Scroll spy
+document.getElementById('previewMain').addEventListener('scroll', updateScrollSpy);
 </script>
 </body>
 </html>

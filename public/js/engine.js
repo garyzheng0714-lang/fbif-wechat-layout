@@ -305,13 +305,9 @@ export function initApp(template) {
     document.getElementById('uploadView').style.display = 'none';
     document.getElementById('previewView').style.display = 'block';
 
-    // Title
-    const titleInput = document.getElementById('titleInput');
-    titleInput.value = title;
+    // Title — set in toolbar and hidden input (for push)
+    document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
-    titleInput.addEventListener('input', () => {
-      document.getElementById('previewTitleDisplay').textContent = titleInput.value;
-    });
 
     // Content (base64 images show fine for preview)
     document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
