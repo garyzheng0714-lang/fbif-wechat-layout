@@ -215,6 +215,8 @@ export function initApp(template) {
   fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
 
   async function handleFile(file) {
+    _convLog.length = 0; // reset log for each new file
+    logConv('info', '开始转化', { file: file.name, size: (file.size / 1024).toFixed(1) + 'KB' });
     errorEl.style.display = 'none';
     dropZone.classList.add('processing');
     progress.style.display = 'block';
@@ -228,9 +230,11 @@ export function initApp(template) {
       if (file.name.toLowerCase().endsWith('.docx')) {
         const docxData = await parseDocx(file);
         result = template.processDocx(docxData);
+        logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else if (typeof template.processMd === 'function') {
         const text = await file.text();
         result = await template.processMd(text);
+        logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else {
         throw new Error('此模板不支持该文件格式');
       }
@@ -240,12 +244,14 @@ export function initApp(template) {
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
+      logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
 
       // Step 2: Show preview IMMEDIATELY (with base64 images for display)
       progressFill.style.width = '100%';
       progressText.textContent = '排版完成!';
       setTimeout(() => showPreview(file.name.replace(/\.\w+$/i, ''), articleHtml, footerHtml, stats), 200);
     } catch (err) {
+      logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
       progress.style.display = 'none';
       showError('排版失败: ' + err.message);
@@ -320,6 +326,18 @@ export function initApp(template) {
     }
   }
 
+  // ---- Conversion Log ----
+  const _convLog = [];
+  function logConv(level, msg, detail) {
+    const entry = { time: new Date().toISOString(), level, msg };
+    if (detail) entry.detail = detail;
+    _convLog.push(entry);
+    const prefix = level === 'error' ? '❌' : level === 'warn' ? '⚠️' : '✅';
+    console.log('[排版日志] ' + prefix + ' ' + msg, detail || '');
+  }
+  // Expose log for debugging — type getConvLog() in console
+  window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
+
   async function backgroundUploadImages(statsBar, originalStats) {
     const allHtml = _articlePush + '\n' + _footerPush;
 
@@ -331,11 +349,25 @@ export function initApp(template) {
       base64Map['img_' + Object.keys(base64Map).length] = m3[1];
     }
 
-    // Collect http URLs (MD external images)
+    // Collect http URLs (MD external images) — skip existing mmbiz URLs
     const httpUrls = [];
+    const skippedMmbiz = [];
     const httpRe = /src="(https?:\/\/[^"]+)"/g;
     while ((m3 = httpRe.exec(_articlePush)) !== null) {
-      if (!m3[1].includes('mmbiz.qpic.cn')) httpUrls.push(m3[1]);
+      if (m3[1].includes('mmbiz.qpic.cn')) {
+        skippedMmbiz.push(m3[1]);
+      } else {
+        httpUrls.push(m3[1]);
+      }
+    }
+
+    logConv('info', '图片扫描完成', {
+      base64: Object.keys(base64Map).length,
+      httpUrls: httpUrls.length,
+      mmbizSkipped: skippedMmbiz.length,
+    });
+    if (skippedMmbiz.length > 0) {
+      logConv('info', skippedMmbiz.length + '张图片已在微信CDN，跳过上传');
     }
 
     _uploadTotal = Object.keys(base64Map).length + httpUrls.length;
@@ -347,6 +379,7 @@ export function initApp(template) {
     statsBar.textContent = '上传图片 (0/' + _uploadTotal + ')...';
     updateButtonStates();
     let done = 0;
+    const failedDetails = [];
 
     function updateProgress() {
       _uploadCurrent = done;
@@ -367,18 +400,31 @@ export function initApp(template) {
         if (resp.ok) {
           const { results } = await resp.json();
           for (const [key, wechatUrl] of Object.entries(results)) {
-            if (!wechatUrl) _uploadFailed++;
-            else {
+            if (!wechatUrl) {
+              _uploadFailed++;
+              const mime = (base64Map[key] || '').split(';')[0].split(':')[1] || 'unknown';
+              failedDetails.push({ type: 'base64', key, mime });
+              logConv('error', 'base64图片上传失败', { key, mime });
+            } else {
               _articlePush = _articlePush.split(base64Map[key]).join(wechatUrl);
               _footerPush = _footerPush.split(base64Map[key]).join(wechatUrl);
+              logConv('info', 'base64图片上传成功', { key, cdn: wechatUrl.substring(0, 60) + '...' });
             }
             done++;
           }
         } else {
+          const errText = await resp.text().catch(() => 'unknown');
+          logConv('error', 'base64批次上传HTTP错误', { status: resp.status, body: errText.substring(0, 200) });
           done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length;
+          Object.keys(batch).forEach(k => failedDetails.push({ type: 'base64', key: k, error: 'HTTP ' + resp.status }));
         }
         updateProgress();
-      } catch (e) { done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length; updateProgress(); }
+      } catch (e) {
+        logConv('error', 'base64批次上传网络错误', { error: e.message });
+        done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length;
+        Object.keys(batch).forEach(k => failedDetails.push({ type: 'base64', key: k, error: e.message }));
+        updateProgress();
+      }
     }
 
     // Upload http URLs in batches of 10
@@ -393,15 +439,29 @@ export function initApp(template) {
         if (resp.ok) {
           const { results } = await resp.json();
           for (const [origUrl, wechatUrl] of Object.entries(results)) {
-            if (!wechatUrl) _uploadFailed++;
-            else _articlePush = _articlePush.split(origUrl).join(wechatUrl);
+            if (!wechatUrl) {
+              _uploadFailed++;
+              failedDetails.push({ type: 'url', url: origUrl });
+              logConv('error', 'URL图片上传失败', { url: origUrl.substring(0, 80) });
+            } else {
+              _articlePush = _articlePush.split(origUrl).join(wechatUrl);
+              logConv('info', 'URL图片上传成功', { url: origUrl.substring(0, 60), cdn: wechatUrl.substring(0, 60) + '...' });
+            }
             done++;
           }
         } else {
+          const errText = await resp.text().catch(() => 'unknown');
+          logConv('error', 'URL批次上传HTTP错误', { status: resp.status, body: errText.substring(0, 200) });
           done += batch.length; _uploadFailed += batch.length;
+          batch.forEach(u => failedDetails.push({ type: 'url', url: u, error: 'HTTP ' + resp.status }));
         }
         updateProgress();
-      } catch (e) { done += batch.length; _uploadFailed += batch.length; updateProgress(); }
+      } catch (e) {
+        logConv('error', 'URL批次上传网络错误', { error: e.message });
+        done += batch.length; _uploadFailed += batch.length;
+        batch.forEach(u => failedDetails.push({ type: 'url', url: u, error: e.message }));
+        updateProgress();
+      }
     }
 
     _uploadDone = true;
@@ -409,8 +469,10 @@ export function initApp(template) {
     updateButtonStates();
     if (_uploadFailed > 0) {
       statsBar.textContent = originalStats + ' | ' + _uploadFailed + '张图片上传失败';
+      logConv('warn', '上传完成，' + _uploadFailed + '张失败', failedDetails);
     } else {
       statsBar.textContent = originalStats + ' | 图片已同步';
+      logConv('info', '全部图片上传成功', { total: done });
     }
   }
 
