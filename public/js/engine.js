@@ -541,8 +541,7 @@ export function initApp(template) {
       btn.textContent = '推送成功!';
       btn.classList.add('pushed');
       setTimeout(() => {
-        // 直接跳转到草稿箱列表页，新草稿在最顶部
-        window.open('https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_list&type=10&action=list&lang=zh_CN', '_blank');
+        window.open('https://mp.weixin.qq.com/', '_blank');
         btn.textContent = '推送到公众号草稿箱';
         btn.classList.remove('pushed');
         btn.disabled = false;
