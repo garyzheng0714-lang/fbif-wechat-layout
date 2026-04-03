@@ -73,43 +73,159 @@ input[type="file"] { display: none; }
 
 /* ---- Right Sidebar ---- */
 .sidebar {
-  width: 280px; min-width: 280px; background: #fff; border-left: 1px solid #e8e8e8;
-  padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px;
+  width: 300px; min-width: 300px; background: #fff; border-left: 1px solid #e8e8e8;
+  padding: 0; overflow-y: auto; display: flex; flex-direction: column;
 }
-.sidebar-section { display: flex; flex-direction: column; gap: 8px; }
-.sidebar-section label {
-  font-size: 13px; font-weight: 600; color: #333;
+.sidebar-section {
+  padding: 16px;
+}
+.sidebar-section + .sidebar-section {
+  border-top: 1px solid #f0f0f0;
+}
+.sidebar-section-header {
+  font-size: 13px; font-weight: 600; color: #333; margin-bottom: 12px;
   display: flex; align-items: center; justify-content: space-between;
 }
-.sidebar-section label .actions { display: flex; gap: 4px; }
+.sidebar-section-header .actions { display: flex; gap: 6px; align-items: center; }
 
 /* Cover */
-.cover-preview {
-  width: 100%; aspect-ratio: 2.35/1; background: #f5f5f5; border-radius: 8px;
-  overflow: hidden; cursor: pointer; border: 2px dashed #d0d0d0; display: flex;
-  align-items: center; justify-content: center; color: #999; font-size: 13px;
+.cover-card {
+  width: 100%; aspect-ratio: 2.35/1; border-radius: 8px; overflow: hidden;
+  position: relative; background: #f7f8fa;
 }
-.cover-preview img {
+.cover-card--empty {
+  border: 2px dashed #d0d7de; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.cover-card--empty:hover {
+  border-color: #0070C0; background: #f0f6ff;
+}
+.cover-card--empty .cover-icon {
+  width: 32px; height: 32px; margin-bottom: 6px; opacity: 0.35;
+}
+.cover-card--empty span {
+  font-size: 12px; color: #999;
+}
+.cover-card--filled {
+  border: none; cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.cover-card--filled img {
   width: 100%; height: 100%; object-fit: cover; display: block;
 }
-.cover-preview:hover { border-color: #0070C0; }
+
+/* Thumbnail grid */
+.thumb-grid {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+}
+.thumb-item {
+  width: 48px; height: 48px; border-radius: 4px; overflow: hidden;
+  cursor: pointer; border: 2px solid transparent; transition: border-color 0.15s;
+  flex-shrink: 0; background: #f5f5f5;
+}
+.thumb-item:hover { border-color: #a0c4e8; }
+.thumb-item.selected { border-color: #0070C0; }
+.thumb-item img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.thumb-upload-btn {
+  width: 48px; height: 48px; border-radius: 4px; border: 1.5px dashed #ccc;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; background: #fafafa; transition: all 0.15s;
+  flex-shrink: 0; color: #999; font-size: 12px;
+}
+.thumb-upload-btn:hover {
+  border-color: #0070C0; color: #0070C0; background: #f0f6ff;
+}
 
 /* Title input */
 .title-input {
-  width: 100%; padding: 8px 12px; border: 1px solid #d0d0d0; border-radius: 6px;
-  font-size: 14px; font-family: inherit; outline: none;
+  width: 100%; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px;
+  font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.2s;
+  background: #fafafa;
 }
-.title-input:focus { border-color: #0070C0; }
+.title-input:focus { border-color: #0070C0; background: #fff; }
+.title-char-count {
+  font-size: 11px; color: #bbb; text-align: right; margin-top: 4px;
+}
 
-/* Footer preview */
-.footer-preview {
-  width: 100%; max-height: 200px; overflow-y: auto; background: #fafafa;
-  border-radius: 8px; border: 1px solid #e8e8e8; padding: 8px;
-  transform-origin: top left; transform: scale(0.5); width: 200%;
-  margin-bottom: -100px;
+/* Footer section */
+.footer-card {
+  background: #f7f8fa; border-radius: 8px; overflow: hidden;
+  border: 1px solid #eee;
 }
-.footer-toggle { display: flex; align-items: center; gap: 6px; }
-.footer-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.footer-preview-wrapper {
+  width: 100%; height: 0; overflow: hidden; position: relative;
+}
+.footer-preview-inner {
+  transform-origin: top left;
+  transform: scale(0.35);
+  width: 285.7%; /* 100% / 0.35 */
+  position: absolute; top: 0; left: 0;
+}
+.footer-controls {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative; display: inline-block; width: 40px; height: 22px;
+  flex-shrink: 0;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background: #ccc; border-radius: 22px; transition: 0.2s;
+}
+.toggle-slider::before {
+  content: ""; position: absolute; width: 18px; height: 18px;
+  left: 2px; bottom: 2px; background: #fff; border-radius: 50%;
+  transition: 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.toggle-switch input:checked + .toggle-slider { background: #0070C0; }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+.toggle-label {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+}
+.toggle-label span { font-size: 13px; color: #666; }
+
+/* Footer parts editor */
+.footer-parts {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 12px;
+}
+.footer-part {
+  display: flex; align-items: center; gap: 8px;
+  background: #fff; border: 1px solid #eee; border-radius: 6px;
+  padding: 6px 8px;
+}
+.footer-part-thumb {
+  width: 40px; height: 40px; border-radius: 4px; overflow: hidden;
+  flex-shrink: 0; background: #f0f0f0;
+}
+.footer-part-thumb img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.footer-part-text {
+  flex: 1; font-size: 12px; color: #555; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.footer-part-text input {
+  width: 100%; border: none; outline: none; font-size: 12px;
+  color: #333; background: transparent; padding: 2px 0;
+  border-bottom: 1px solid transparent; transition: border-color 0.2s;
+}
+.footer-part-text input:focus {
+  border-bottom-color: #0070C0;
+}
+.btn-xs {
+  padding: 2px 8px; font-size: 11px; border: 1px solid #ddd;
+  border-radius: 4px; background: #fff; color: #666;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.btn-xs:hover { border-color: #0070C0; color: #0070C0; }
 
 .stats-bar {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -164,42 +280,67 @@ input[type="file"] { display: none; }
 
     <!-- Right Sidebar -->
     <div class="sidebar">
-      <!-- Title -->
-      <div class="sidebar-section">
-        <label>文章标题</label>
-        <input type="text" class="title-input" id="titleInput" maxlength="32" placeholder="请输入标题">
-      </div>
 
-      <!-- Cover -->
+      <!-- Cover Image Section -->
       <div class="sidebar-section">
-        <label>
-          封面图
-          <span class="actions">
-            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('coverInput').click()">更换</button>
-          </span>
-        </label>
-        <div class="cover-preview" id="coverPreview" onclick="document.getElementById('coverInput').click()">
+        <div class="sidebar-section-header">
+          封面图 (2.35:1)
+        </div>
+        <div class="cover-card cover-card--empty" id="coverPreview" onclick="document.getElementById('coverInput').click()">
+          <svg class="cover-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <path d="M21 15l-5-5L5 21"/>
+          </svg>
           <span id="coverPlaceholder">点击选择封面图</span>
-          <img id="coverImg" style="display:none">
+          <img id="coverImg" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
         </div>
         <input type="file" id="coverInput" accept="image/*" style="display:none">
+
+        <div class="thumb-grid" id="articleThumbnails">
+          <!-- Populated by JS: article images as selectable cover options -->
+        </div>
       </div>
 
-      <!-- Footer -->
+      <!-- Title Section -->
       <div class="sidebar-section">
-        <label>
+        <div class="sidebar-section-header">文章标题</div>
+        <input type="text" class="title-input" id="titleInput" maxlength="32" placeholder="请输入标题（最多32字）">
+        <div class="title-char-count"><span id="titleCharCount">0</span>/32</div>
+      </div>
+
+      <!-- Footer Template Section -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-header">
           底部模板
           <span class="actions">
-            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('footerFileInput').click()">更换</button>
+            <button class="btn-xs" onclick="document.getElementById('footerFileInput').click()">更换</button>
           </span>
-        </label>
-        <div class="footer-toggle">
-          <input type="checkbox" id="footerEnabled" checked onchange="toggleFooter()">
-          <span style="font-size:13px;color:#666;">启用底部模板</span>
         </div>
-        <div class="footer-preview" id="footerPreview"></div>
+
+        <div class="footer-controls">
+          <label class="toggle-label">
+            <span class="toggle-switch">
+              <input type="checkbox" id="footerEnabled" checked onchange="toggleFooter()">
+              <span class="toggle-slider"></span>
+            </span>
+            <span>启用</span>
+          </label>
+        </div>
+
+        <div class="footer-card">
+          <div class="footer-preview-wrapper" id="footerPreviewWrapper">
+            <div class="footer-preview-inner" id="footerPreview"></div>
+          </div>
+        </div>
+
+        <div class="footer-parts" id="footerParts">
+          <!-- Populated by JS: editable images and text from footer -->
+        </div>
+
         <input type="file" id="footerFileInput" accept=".html,.htm" style="display:none">
       </div>
+
     </div>
   </div>
 
@@ -231,13 +372,71 @@ document.getElementById('coverInput').addEventListener('change', function() {
   if (this.files[0]) {
     const r = new FileReader();
     r.onload = e => {
-      const img = document.getElementById('coverImg');
-      img.src = e.target.result;
-      img.style.display = 'block';
-      document.getElementById('coverPlaceholder').style.display = 'none';
+      setCoverImage(e.target.result);
     };
     r.readAsDataURL(this.files[0]);
   }
+});
+
+// Set cover image helper
+function setCoverImage(src) {
+  const img = document.getElementById('coverImg');
+  const preview = document.getElementById('coverPreview');
+  const placeholder = document.getElementById('coverPlaceholder');
+  img.src = src;
+  img.style.display = 'block';
+  placeholder.style.display = 'none';
+  preview.classList.remove('cover-card--empty');
+  preview.classList.add('cover-card--filled');
+
+  // Update thumbnail selection state
+  document.querySelectorAll('.thumb-item').forEach(t => {
+    t.classList.toggle('selected', t.dataset.src === src);
+  });
+}
+
+// Populate article thumbnails
+function populateArticleThumbnails() {
+  const grid = document.getElementById('articleThumbnails');
+  grid.innerHTML = '';
+  const contentArea = document.getElementById('contentArea');
+  const imgs = contentArea.querySelectorAll('img');
+  const seen = new Set();
+
+  imgs.forEach(img => {
+    const src = img.src;
+    if (!src || seen.has(src)) return;
+    seen.add(src);
+
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb-item';
+    thumb.dataset.src = src;
+    thumb.innerHTML = '<img src="' + src.replace(/"/g, '&quot;') + '">';
+    thumb.addEventListener('click', () => setCoverImage(src));
+
+    // Mark current cover as selected
+    const coverImg = document.getElementById('coverImg');
+    if (coverImg.src === src) thumb.classList.add('selected');
+
+    grid.appendChild(thumb);
+  });
+
+  // Upload button at end
+  const uploadBtn = document.createElement('div');
+  uploadBtn.className = 'thumb-upload-btn';
+  uploadBtn.textContent = '上传';
+  uploadBtn.addEventListener('click', () => document.getElementById('coverInput').click());
+  grid.appendChild(uploadBtn);
+}
+
+// Expose populateArticleThumbnails globally so engine can call it after DOM update
+window._populateArticleThumbnails = populateArticleThumbnails;
+
+// Title character count
+const titleInput = document.getElementById('titleInput');
+const titleCharCount = document.getElementById('titleCharCount');
+titleInput.addEventListener('input', () => {
+  titleCharCount.textContent = titleInput.value.length;
 });
 
 // Footer file change handler
@@ -248,6 +447,8 @@ document.getElementById('footerFileInput').addEventListener('change', function()
       const html = e.target.result;
       localStorage.setItem('custom_footer', html);
       document.getElementById('footerPreview').innerHTML = html;
+      updateFooterPreviewHeight();
+      parseFooterParts();
       // Update content area footer
       window._updateFooter && window._updateFooter(html);
     };
@@ -255,12 +456,138 @@ document.getElementById('footerFileInput').addEventListener('change', function()
   }
 });
 
+// Measure footer preview inner height and set wrapper height accordingly
+function updateFooterPreviewHeight() {
+  requestAnimationFrame(() => {
+    const inner = document.getElementById('footerPreview');
+    const wrapper = document.getElementById('footerPreviewWrapper');
+    if (inner && wrapper) {
+      const h = inner.scrollHeight * 0.35;
+      wrapper.style.height = Math.min(h, 200) + 'px';
+    }
+  });
+}
+window._updateFooterPreviewHeight = updateFooterPreviewHeight;
+
+// Parse footer HTML to find editable images and text blocks
+function parseFooterParts() {
+  const container = document.getElementById('footerParts');
+  container.innerHTML = '';
+  const footerEl = document.getElementById('footerPreview');
+  if (!footerEl || !footerEl.innerHTML.trim()) return;
+
+  // Find images in footer
+  const footerImgs = footerEl.querySelectorAll('img');
+  footerImgs.forEach((img, idx) => {
+    const part = document.createElement('div');
+    part.className = 'footer-part';
+
+    const thumbDiv = document.createElement('div');
+    thumbDiv.className = 'footer-part-thumb';
+    const thumbImg = document.createElement('img');
+    thumbImg.src = img.src;
+    thumbDiv.appendChild(thumbImg);
+
+    const textDiv = document.createElement('div');
+    textDiv.className = 'footer-part-text';
+    textDiv.textContent = '图片 ' + (idx + 1);
+
+    const changeBtn = document.createElement('button');
+    changeBtn.className = 'btn-xs';
+    changeBtn.textContent = '换';
+    const fileId = 'footerPartImg_' + idx;
+    changeBtn.addEventListener('click', () => {
+      let input = document.getElementById(fileId);
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.id = fileId;
+        input.style.display = 'none';
+        document.body.appendChild(input);
+        input.addEventListener('change', function() {
+          if (this.files[0]) {
+            const reader = new FileReader();
+            reader.onload = ev => {
+              img.src = ev.target.result;
+              thumbImg.src = ev.target.result;
+              // Sync to content area
+              window._updateFooter && window._updateFooter(footerEl.innerHTML);
+            };
+            reader.readAsDataURL(this.files[0]);
+          }
+        });
+      }
+      input.click();
+    });
+
+    part.appendChild(thumbDiv);
+    part.appendChild(textDiv);
+    part.appendChild(changeBtn);
+    container.appendChild(part);
+  });
+
+  // Find text blocks with content
+  const walker = document.createTreeWalker(footerEl, NodeFilter.SHOW_TEXT, null, false);
+  let textIdx = 0;
+  let node;
+  while ((node = walker.nextNode())) {
+    const text = node.textContent.trim();
+    if (!text || text.length < 2) continue;
+
+    const part = document.createElement('div');
+    part.className = 'footer-part';
+
+    const iconDiv = document.createElement('div');
+    iconDiv.className = 'footer-part-thumb';
+    iconDiv.style.display = 'flex';
+    iconDiv.style.alignItems = 'center';
+    iconDiv.style.justifyContent = 'center';
+    iconDiv.style.fontSize = '16px';
+    iconDiv.style.color = '#bbb';
+    iconDiv.textContent = 'T';
+
+    const textDiv = document.createElement('div');
+    textDiv.className = 'footer-part-text';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = text;
+    const capturedNode = node;
+    input.addEventListener('change', () => {
+      capturedNode.textContent = input.value;
+      window._updateFooter && window._updateFooter(footerEl.innerHTML);
+    });
+    textDiv.appendChild(input);
+
+    part.appendChild(iconDiv);
+    part.appendChild(textDiv);
+    container.appendChild(part);
+    textIdx++;
+  }
+}
+window._parseFooterParts = parseFooterParts;
+
 // Toggle footer
 window.toggleFooter = function() {
   const enabled = document.getElementById('footerEnabled').checked;
-  document.getElementById('footerPreview').style.opacity = enabled ? '1' : '0.3';
+  const card = document.querySelector('.footer-card');
+  const parts = document.getElementById('footerParts');
+  if (card) card.style.opacity = enabled ? '1' : '0.35';
+  if (parts) parts.style.opacity = enabled ? '1' : '0.35';
   window._updateFooter && window._updateFooter(enabled ? null : '');
 };
+
+// After content is loaded, populate thumbnails and footer parts (debounced)
+let _sidebarUpdateTimer = null;
+const observer = new MutationObserver(() => {
+  if (_sidebarUpdateTimer) clearTimeout(_sidebarUpdateTimer);
+  _sidebarUpdateTimer = setTimeout(() => {
+    populateArticleThumbnails();
+    updateFooterPreviewHeight();
+    parseFooterParts();
+  }, 150);
+});
+observer.observe(document.getElementById('contentArea'), { childList: true });
 </script>
 </body>
 </html>

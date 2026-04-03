@@ -1,5 +1,5 @@
 // FBIF 公众号排版模板
-import { esc, escAttr, parseMdRuns, parseMdFrontmatter, uploadUrlImages } from '../engine.js';
+import { esc, escAttr, parseMdRuns, parseMdFrontmatter } from '../engine.js';
 
 const FONT_STACK = 'mp-quote, "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif';
 
@@ -131,7 +131,7 @@ async function classifyMd(text) {
     elems.push({ k: 'txt', runs: parseMdRuns(para) });
   }
 
-  await uploadUrlImages(elems);
+  // No upload here — background upload in engine handles it after preview
   return { elems, author, imgN };
 }
 

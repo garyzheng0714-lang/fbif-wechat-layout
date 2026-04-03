@@ -147,11 +147,8 @@ export async function parseDocx(file) {
     }
   }));
 
-  // Upload images to OSS and parse document.xml concurrently
-  const [, docXml] = await Promise.all([
-    uploadBase64Images(imgCache),
-    docEntry.async('string'),
-  ]);
+  // Parse document.xml (NO image upload here — done after preview)
+  const docXml = await docEntry.async('string');
 
   const docDom = new DOMParser().parseFromString(docXml, 'text/xml');
   const body = findOne(docDom.documentElement, W, 'body');
@@ -258,13 +255,12 @@ export function initApp(template) {
     errorEl.style.display = 'none';
     dropZone.classList.add('processing');
     progress.style.display = 'block';
-    progressFill.style.width = '30%';
-    progressText.textContent = '正在解压 ' + file.name + '...';
+    progressFill.style.width = '50%';
+    progressText.textContent = '正在解析...';
     try {
-      progressFill.style.width = '50%';
-      progressText.textContent = '正在排版并上传图片...';
       const t0 = performance.now();
 
+      // Step 1: Parse and format (NO network calls — instant)
       let result;
       if (file.name.endsWith('.docx')) {
         const docxData = await parseDocx(file);
@@ -276,42 +272,16 @@ export function initApp(template) {
         throw new Error('此模板不支持该文件格式');
       }
 
-      // Use custom footer from localStorage if available
-      let footerHtml = localStorage.getItem('custom_footer') || await footerReady;
-
-      // Upload footer base64 images to WeChat CDN
-      const dataUriRe = /src="(data:image\/[^"]+)"/g;
-      const footerDataUris = {};
-      let m2;
-      while ((m2 = dataUriRe.exec(footerHtml)) !== null) {
-        const uri = m2[1];
-        footerDataUris['footer_' + Object.keys(footerDataUris).length] = uri;
-      }
-      if (Object.keys(footerDataUris).length > 0) {
-        progressText.textContent = '正在上传底部图片...';
-        try {
-          const fResp = await fetch('/api/wechat-upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base64_images: footerDataUris })
-          });
-          if (fResp.ok) {
-            const { results } = await fResp.json();
-            for (const [key, wechatUrl] of Object.entries(results)) {
-              if (wechatUrl) footerHtml = footerHtml.replace(footerDataUris[key], wechatUrl);
-            }
-          }
-        } catch (e) { console.warn('Footer image upload failed', e); }
-      }
-
       const articleHtml = result.lines.join('\n');
+      const footerHtml = localStorage.getItem('custom_footer') || await footerReady;
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
 
+      // Step 2: Show preview IMMEDIATELY (with base64 images for display)
       progressFill.style.width = '100%';
       progressText.textContent = '排版完成!';
-      setTimeout(() => showPreview(file.name.replace(/\.\w+$/i, ''), articleHtml, footerHtml, stats), 300);
+      setTimeout(() => showPreview(file.name.replace(/\.\w+$/i, ''), articleHtml, footerHtml, stats), 200);
     } catch (err) {
       dropZone.classList.remove('processing');
       progress.style.display = 'none';
@@ -319,9 +289,10 @@ export function initApp(template) {
     }
   }
 
-  // Track content and footer separately for footer toggle/replace
+  // Track content and footer separately
   let _articleHtml = '';
   let _footerHtml = '';
+  let _uploadPromise = null; // background upload tracker
 
   function showPreview(title, articleContent, footerContent, stats) {
     _articleHtml = articleContent;
@@ -338,29 +309,123 @@ export function initApp(template) {
       document.getElementById('previewTitleDisplay').textContent = titleInput.value;
     });
 
-    // Content
+    // Content (base64 images show fine for preview)
     document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
     document.getElementById('statsBar').textContent = stats;
 
-    // Cover: extract first image
+    // Cover: extract first image and update cover card
     const firstImg = document.getElementById('contentArea').querySelector('img');
     const coverImg = document.getElementById('coverImg');
     const coverPlaceholder = document.getElementById('coverPlaceholder');
+    const coverPreview = document.getElementById('coverPreview');
     if (firstImg && firstImg.src && (firstImg.src.startsWith('http') || firstImg.src.startsWith('data:'))) {
       coverImg.src = firstImg.src;
       coverImg.style.display = 'block';
       coverPlaceholder.style.display = 'none';
+      if (coverPreview) {
+        coverPreview.classList.remove('cover-card--empty');
+        coverPreview.classList.add('cover-card--filled');
+      }
     }
+
+    // Thumbnail grid and footer parts are populated by MutationObserver in app.html
 
     // Footer preview
     document.getElementById('footerPreview').innerHTML = _footerHtml;
+    if (window._updateFooterPreviewHeight) window._updateFooterPreviewHeight();
 
-    // Footer update function (called by toggle and file replace)
+    // Footer update function
     window._updateFooter = function(newHtml) {
       if (newHtml !== null && newHtml !== undefined) _footerHtml = newHtml;
       const enabled = document.getElementById('footerEnabled').checked;
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      document.getElementById('footerPreview').innerHTML = enabled ? _footerHtml : _footerHtml;
+      if (window._updateFooterPreviewHeight) window._updateFooterPreviewHeight();
     };
+
+    // Step 3: Background upload — find all data: URIs in article + footer, upload to WeChat CDN
+    const statsBar = document.getElementById('statsBar');
+    _uploadPromise = backgroundUploadImages(statsBar, stats);
+  }
+
+  async function backgroundUploadImages(statsBar, originalStats) {
+    const allHtml = _articleHtml + '\n' + _footerHtml;
+
+    // Collect data: URIs (DOCX images + footer)
+    const base64Map = {};
+    const b64Re = /src="(data:image\/[^"]+)"/g;
+    let m3;
+    while ((m3 = b64Re.exec(allHtml)) !== null) {
+      base64Map['img_' + Object.keys(base64Map).length] = m3[1];
+    }
+
+    // Collect http URLs (MD external images)
+    const httpUrls = [];
+    const httpRe = /src="(https?:\/\/[^"]+)"/g;
+    while ((m3 = httpRe.exec(_articleHtml)) !== null) {
+      if (!m3[1].includes('mmbiz.qpic.cn')) httpUrls.push(m3[1]); // skip already-uploaded
+    }
+
+    const total = Object.keys(base64Map).length + httpUrls.length;
+    if (total === 0) return;
+
+    statsBar.textContent = '上传图片 (0/' + total + ')...';
+    let done = 0;
+
+    function refreshDOM() {
+      const enabled = document.getElementById('footerEnabled').checked;
+      document.getElementById('contentArea').innerHTML =
+        _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      document.getElementById('footerPreview').innerHTML = _footerHtml;
+      if (window._updateFooterPreviewHeight) window._updateFooterPreviewHeight();
+      statsBar.textContent = '上传图片 (' + done + '/' + total + ')...';
+    }
+
+    // Upload base64 images in batches of 10
+    const b64Entries = Object.entries(base64Map);
+    for (let i = 0; i < b64Entries.length; i += 10) {
+      const batch = Object.fromEntries(b64Entries.slice(i, i + 10));
+      try {
+        const resp = await fetch('/api/wechat-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64_images: batch })
+        });
+        if (resp.ok) {
+          const { results } = await resp.json();
+          for (const [key, wechatUrl] of Object.entries(results)) {
+            if (wechatUrl) {
+              _articleHtml = _articleHtml.split(base64Map[key]).join(wechatUrl);
+              _footerHtml = _footerHtml.split(base64Map[key]).join(wechatUrl);
+            }
+            done++;
+          }
+          refreshDOM();
+        }
+      } catch (e) { done += Object.keys(batch).length; }
+    }
+
+    // Upload http URLs in batches of 10
+    for (let i = 0; i < httpUrls.length; i += 10) {
+      const batch = httpUrls.slice(i, i + 10);
+      try {
+        const resp = await fetch('/api/wechat-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls: batch })
+        });
+        if (resp.ok) {
+          const { results } = await resp.json();
+          for (const [origUrl, wechatUrl] of Object.entries(results)) {
+            if (wechatUrl) _articleHtml = _articleHtml.split(origUrl).join(wechatUrl);
+            done++;
+          }
+          refreshDOM();
+        }
+      } catch (e) { done += batch.length; }
+    }
+
+    statsBar.textContent = originalStats + ' | 图片已同步';
   }
 
   // Expose global handlers for onclick attributes
@@ -421,7 +486,6 @@ export function initApp(template) {
   window.pushToDraft = async function() {
     const btn = document.getElementById('draftBtn');
     const title = document.getElementById('titleInput').value.trim() || '未命名文章';
-    const content = document.getElementById('contentArea').innerHTML;
 
     // Get cover from sidebar
     const coverEl = document.getElementById('coverImg');
@@ -432,6 +496,15 @@ export function initApp(template) {
     btn.disabled = true;
 
     try {
+      // Wait for background image upload to finish
+      if (_uploadPromise) {
+        btn.textContent = '等待图片上传完成...';
+        await _uploadPromise;
+      }
+
+      // Read latest content (with CDN URLs)
+      const content = document.getElementById('contentArea').innerHTML;
+
       const resp = await fetch('/api/wechat-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
