@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FBIF 微信排版工具</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; min-height: 100vh; }
+.container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+h1 { font-size: 28px; color: #1a1a1a; margin-bottom: 8px; }
+.subtitle { color: #666; font-size: 15px; margin-bottom: 32px; }
+.back-link { color: #0070C0; text-decoration: none; font-size: 14px; display: inline-block; margin-bottom: 16px; }
+.back-link:hover { text-decoration: underline; }
+.upload-zone {
+  border: 2px dashed #d0d0d0; border-radius: 12px; padding: 60px 40px;
+  text-align: center; background: #fff; cursor: pointer; transition: all 0.2s;
+}
+.upload-zone:hover, .upload-zone.dragover { border-color: #0070C0; background: #f8fbff; }
+.upload-zone.processing { border-color: #faad14; background: #fffbe6; pointer-events: none; }
+.upload-icon { font-size: 48px; margin-bottom: 16px; }
+.upload-text { font-size: 16px; color: #333; margin-bottom: 8px; }
+.upload-hint { font-size: 13px; color: #999; }
+input[type="file"] { display: none; }
+.progress { display: none; margin-top: 24px; }
+.progress-bar { height: 4px; background: #e8e8e8; border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: #0070C0; width: 0%; transition: width 0.3s; }
+.progress-text { font-size: 13px; color: #666; margin-top: 8px; text-align: center; }
+.error { color: #ff4d4f; margin-top: 16px; font-size: 14px; display: none; }
+
+/* ---- Preview Layout: toolbar + main (phone + sidebar) ---- */
+#previewView { display: none; }
+.toolbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: #fff; border-bottom: 1px solid #e8e8e8; padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px;
+}
+.toolbar h2 { font-size: 16px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn {
+  padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px;
+  cursor: pointer; transition: all 0.2s; font-weight: 500; white-space: nowrap;
+}
+.btn-primary { background: #0070C0; color: #fff; }
+.btn-primary:hover { background: #005a9e; }
+.btn-primary.copied { background: #27ae60; }
+.btn-draft { background: #07c160; color: #fff; }
+.btn-draft:hover { background: #06ad56; }
+.btn-draft.pushed { background: #27ae60; }
+.btn-draft:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-secondary { background: #f0f0f0; color: #333; text-decoration: none; }
+.btn-secondary:hover { background: #e0e0e0; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.zoom-controls {
+  display: flex; align-items: center; gap: 4px; background: #f0f0f0;
+  border-radius: 6px; padding: 2px;
+}
+.zoom-controls .btn { padding: 6px 12px; font-size: 16px; min-width: 36px; }
+.zoom-label { font-size: 13px; color: #666; min-width: 45px; text-align: center; }
+
+.preview-layout {
+  display: flex; margin-top: 60px; min-height: calc(100vh - 60px);
+}
+.preview-main { flex: 1; padding: 12px; overflow-y: auto; }
+.phone-frame {
+  max-width: 840px; margin: 0 auto; background: #fff;
+  border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  overflow: hidden; transition: max-width 0.3s ease;
+}
+.phone-header { background: #ededed; padding: 8px 16px; text-align: center; }
+.phone-header span { font-size: 12px; color: #999; }
+.phone-body { padding: 16px 0; }
+
+/* ---- Right Sidebar ---- */
+.sidebar {
+  width: 280px; min-width: 280px; background: #fff; border-left: 1px solid #e8e8e8;
+  padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px;
+}
+.sidebar-section { display: flex; flex-direction: column; gap: 8px; }
+.sidebar-section label {
+  font-size: 13px; font-weight: 600; color: #333;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sidebar-section label .actions { display: flex; gap: 4px; }
+
+/* Cover */
+.cover-preview {
+  width: 100%; aspect-ratio: 2.35/1; background: #f5f5f5; border-radius: 8px;
+  overflow: hidden; cursor: pointer; border: 2px dashed #d0d0d0; display: flex;
+  align-items: center; justify-content: center; color: #999; font-size: 13px;
+}
+.cover-preview img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.cover-preview:hover { border-color: #0070C0; }
+
+/* Title input */
+.title-input {
+  width: 100%; padding: 8px 12px; border: 1px solid #d0d0d0; border-radius: 6px;
+  font-size: 14px; font-family: inherit; outline: none;
+}
+.title-input:focus { border-color: #0070C0; }
+
+/* Footer preview */
+.footer-preview {
+  width: 100%; max-height: 200px; overflow-y: auto; background: #fafafa;
+  border-radius: 8px; border: 1px solid #e8e8e8; padding: 8px;
+  transform-origin: top left; transform: scale(0.5); width: 200%;
+  margin-bottom: -100px;
+}
+.footer-toggle { display: flex; align-items: center; gap: 6px; }
+.footer-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+
+.stats-bar {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.75); color: #fff; padding: 8px 20px;
+  border-radius: 20px; font-size: 13px; z-index: 100;
+}
+</style>
+</head>
+<body>
+
+<!-- Upload View -->
+<div id="uploadView">
+  <div class="container">
+    <a href="/" class="back-link">&larr; 返回选择</a>
+    <h1 id="pageTitle"></h1>
+    <p class="subtitle" id="pageSubtitle"></p>
+    <div class="upload-zone" id="dropZone">
+      <div class="upload-icon">📄</div>
+      <div class="upload-text">点击上传或拖拽文件到这里</div>
+      <div class="upload-hint" id="fileHint"></div>
+      <input type="file" id="fileInput">
+    </div>
+    <div class="progress" id="progress">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText">正在排版...</div>
+    </div>
+    <div class="error" id="error"></div>
+  </div>
+</div>
+
+<!-- Preview View -->
+<div id="previewView">
+  <div class="toolbar">
+    <h2 id="previewTitleDisplay"></h2>
+    <div class="zoom-controls">
+      <button class="btn btn-secondary" onclick="zoom(-1)">-</button>
+      <span class="zoom-label" id="zoomLabel">200%</span>
+      <button class="btn btn-secondary" onclick="zoom(1)">+</button>
+    </div>
+    <button class="btn btn-secondary" onclick="goBack()">&#8592; 重新上传</button>
+    <button class="btn btn-primary" id="copyBtn" onclick="copyContent()">复制正文</button>
+    <button class="btn btn-draft" id="draftBtn" onclick="pushToDraft()">推送到草稿箱</button>
+  </div>
+
+  <div class="preview-layout">
+    <div class="preview-main">
+      <div class="phone-frame" id="phoneFrame">
+        <div class="phone-header"><span>微信公众号预览</span></div>
+        <div class="phone-body" id="contentArea"></div>
+      </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="sidebar">
+      <!-- Title -->
+      <div class="sidebar-section">
+        <label>文章标题</label>
+        <input type="text" class="title-input" id="titleInput" maxlength="32" placeholder="请输入标题">
+      </div>
+
+      <!-- Cover -->
+      <div class="sidebar-section">
+        <label>
+          封面图
+          <span class="actions">
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('coverInput').click()">更换</button>
+          </span>
+        </label>
+        <div class="cover-preview" id="coverPreview" onclick="document.getElementById('coverInput').click()">
+          <span id="coverPlaceholder">点击选择封面图</span>
+          <img id="coverImg" style="display:none">
+        </div>
+        <input type="file" id="coverInput" accept="image/*" style="display:none">
+      </div>
+
+      <!-- Footer -->
+      <div class="sidebar-section">
+        <label>
+          底部模板
+          <span class="actions">
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('footerFileInput').click()">更换</button>
+          </span>
+        </label>
+        <div class="footer-toggle">
+          <input type="checkbox" id="footerEnabled" checked onchange="toggleFooter()">
+          <span style="font-size:13px;color:#666;">启用底部模板</span>
+        </div>
+        <div class="footer-preview" id="footerPreview"></div>
+        <input type="file" id="footerFileInput" accept=".html,.htm" style="display:none">
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-bar" id="statsBar"></div>
+</div>
+
+<script type="module">
+import { initApp } from './js/engine.js';
+
+const TEMPLATES = ['fbif', 'mote'];
+const params = new URLSearchParams(location.search);
+const templateId = params.get('t') || 'fbif';
+
+if (!TEMPLATES.includes(templateId)) {
+  document.getElementById('error').textContent = '未知模板: ' + templateId;
+  document.getElementById('error').style.display = 'block';
+} else {
+  try {
+    const mod = await import('./js/templates/' + templateId + '.js');
+    initApp(mod.default);
+  } catch (err) {
+    document.getElementById('error').textContent = '模板加载失败: ' + templateId;
+    document.getElementById('error').style.display = 'block';
+  }
+}
+
+// Cover image change handler
+document.getElementById('coverInput').addEventListener('change', function() {
+  if (this.files[0]) {
+    const r = new FileReader();
+    r.onload = e => {
+      const img = document.getElementById('coverImg');
+      img.src = e.target.result;
+      img.style.display = 'block';
+      document.getElementById('coverPlaceholder').style.display = 'none';
+    };
+    r.readAsDataURL(this.files[0]);
+  }
+});
+
+// Footer file change handler
+document.getElementById('footerFileInput').addEventListener('change', function() {
+  if (this.files[0]) {
+    const r = new FileReader();
+    r.onload = e => {
+      const html = e.target.result;
+      localStorage.setItem('custom_footer', html);
+      document.getElementById('footerPreview').innerHTML = html;
+      // Update content area footer
+      window._updateFooter && window._updateFooter(html);
+    };
+    r.readAsText(this.files[0]);
+  }
+});
+
+// Toggle footer
+window.toggleFooter = function() {
+  const enabled = document.getElementById('footerEnabled').checked;
+  document.getElementById('footerPreview').style.opacity = enabled ? '1' : '0.3';
+  window._updateFooter && window._updateFooter(enabled ? null : '');
+};
+</script>
+</body>
+</html>
