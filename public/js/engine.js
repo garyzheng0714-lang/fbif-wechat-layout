@@ -1,183 +1,18 @@
-// Shared WeChat formatting engine
-// Handles: XML parsing, DOCX extraction, MD parsing, copy, UI
+// Shared WeChat formatting engine — UI coordination layer
+// Delegates: parsing → parser.js, upload → uploader.js, copy → clipboard.js
 const assetQuery = new URL(import.meta.url).search;
+
+// Re-export parser utilities for templates
+export { esc, escAttr, parseMdRuns, parseMdFrontmatter, parseDocx, extractParagraph,
+         W, R, WP, A, findAll, findOne, findDeep, wattr, rattr } from './parser.js';
+
+import { parseDocx } from './parser.js';
+import { uploadNonCdnImages } from './uploader.js';
+import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
+
 const imageUtilsModule = await import('./image-utils.mjs' + assetQuery);
-const { inferImageMimeFromBase64, inferWechatImageType, looksLikeGifSource } = imageUtilsModule;
+const { inferWechatImageType, looksLikeGifSource } = imageUtilsModule;
 export { inferWechatImageType, looksLikeGifSource };
-
-// ---- XML Namespaces ----
-export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-export const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-export const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
-export const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
-
-// ---- XML Helpers ----
-export function findAll(el, ns, tag) {
-  const r = [];
-  if (!el) return r;
-  for (const c of el.children) if (c.localName === tag && c.namespaceURI === ns) r.push(c);
-  return r;
-}
-export function findOne(el, ns, tag) {
-  if (!el) return null;
-  for (const c of el.children) if (c.localName === tag && c.namespaceURI === ns) return c;
-  return null;
-}
-export function findDeep(el, ns, tag) {
-  if (!el) return null;
-  if (el.localName === tag && el.namespaceURI === ns) return el;
-  for (const c of el.children) { const f = findDeep(c, ns, tag); if (f) return f; }
-  return null;
-}
-export function wattr(el, name) {
-  if (!el) return '';
-  return el.getAttributeNS(W, name) || el.getAttribute('w:' + name) || el.getAttribute(name) || '';
-}
-export function rattr(el, name) {
-  if (!el) return '';
-  return el.getAttributeNS(R, name) || el.getAttribute('r:' + name) || '';
-}
-export function esc(t) {
-  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-export function escAttr(t) {
-  return t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// ---- Generic Paragraph Data Extraction ----
-export function extractParagraph(p, ridToFile, ridToUrl) {
-  const pPr = findOne(p, W, 'pPr');
-  let align = 'left', isList = false, hasOutlineLevel = false, hasHeadingStyle = false;
-
-  if (pPr) {
-    if (findOne(pPr, W, 'outlineLvl')) hasOutlineLevel = true;
-    const ps = findOne(pPr, W, 'pStyle');
-    if (ps && /heading/i.test(wattr(ps, 'val'))) hasHeadingStyle = true;
-    const jc = findOne(pPr, W, 'jc');
-    if (jc) align = wattr(jc, 'val') || 'left';
-    if (findOne(pPr, W, 'numPr')) isList = true;
-  }
-
-  const runs = [];
-  for (const child of p.children) {
-    if (child.localName === 'r' && child.namespaceURI === W) {
-      const rPr = findOne(child, W, 'rPr');
-      let bold = false, hl = false, sz = '', color = '';
-      if (rPr) {
-        const bEl = findOne(rPr, W, 'b');
-        if (bEl) { const v = wattr(bEl, 'val'); if (v !== '0' && v !== 'false') bold = true; }
-        const rStyle = findOne(rPr, W, 'rStyle');
-        if (rStyle && /strong/i.test(wattr(rStyle, 'val'))) bold = true;
-        const shd = findOne(rPr, W, 'shd');
-        if (shd) { const fill = wattr(shd, 'fill'); if (fill && !/^(auto|ffffff|FFFFFF)$/i.test(fill)) hl = true; }
-        if (findOne(rPr, W, 'highlight')) hl = true;
-        const s = findOne(rPr, W, 'sz');
-        if (s) sz = wattr(s, 'val');
-        const c = findOne(rPr, W, 'color');
-        if (c) color = wattr(c, 'val');
-      }
-      const drw = findOne(child, W, 'drawing');
-      if (drw) {
-        const blip = findDeep(drw, A, 'blip');
-        const embed = blip ? rattr(blip, 'embed') : '';
-        const ext = findDeep(drw, WP, 'extent');
-        let w = '100%';
-        if (ext) {
-          const cx = parseInt(ext.getAttribute('cx') || '0');
-          if (cx > 0) w = Math.min(100, Math.round(cx / 5486400 * 100)) + '%';
-        }
-        runs.push({ type: 'img', file: ridToFile[embed] || '', w });
-      } else {
-        let txt = '';
-        for (const t of child.getElementsByTagNameNS(W, 't')) txt += t.textContent || '';
-        if (txt) runs.push({ type: 'txt', text: txt, bold, hl, sz, color });
-      }
-    } else if (child.localName === 'hyperlink' && child.namespaceURI === W) {
-      const rid = rattr(child, 'id');
-      const href = ridToUrl[rid] || '';
-      for (const r of findAll(child, W, 'r')) {
-        let txt = '';
-        for (const t of r.getElementsByTagNameNS(W, 't')) txt += t.textContent || '';
-        if (txt) runs.push({ type: 'link', text: txt, href });
-      }
-    }
-  }
-
-  const text = runs.filter(r => r.type !== 'img').map(r => r.text || '').join('');
-  const textRuns = runs.filter(r => r.type === 'txt');
-
-  return {
-    align, runs, text,
-    hasImg: runs.some(r => r.type === 'img'),
-    isEmpty: !runs.some(r => r.type === 'img') && !text.trim(),
-    isList, hasHL: runs.some(r => r.hl),
-    hasOutlineLevel, hasHeadingStyle,
-    allBold: textRuns.length > 0 && textRuns.every(r => r.bold),
-    fontSizes: [...new Set(textRuns.filter(r => r.sz).map(r => r.sz))],
-  };
-}
-
-// ---- DOCX Infrastructure ----
-export async function parseDocx(file) {
-  const zip = await JSZip.loadAsync(file);
-
-  const relsEntry = zip.file('word/_rels/document.xml.rels');
-  const docEntry = zip.file('word/document.xml');
-  if (!relsEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml.rels');
-  if (!docEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml');
-
-  const relsXml = await relsEntry.async('string');
-  const relsDom = new DOMParser().parseFromString(relsXml, 'text/xml');
-  const ridToFile = {}, ridToUrl = {};
-  for (const rel of relsDom.querySelectorAll('Relationship')) {
-    const rid = rel.getAttribute('Id'), target = rel.getAttribute('Target');
-    const rtype = rel.getAttribute('Type') || '';
-    if (rtype.includes('image')) ridToFile[rid] = target.replace('media/', '');
-    else if (rtype.includes('hyperlink')) ridToUrl[rid] = (target || '').replace(/&amp;/g, '&');
-  }
-
-  const imgCache = {};
-  await Promise.all(Object.values(ridToFile).map(async (fn) => {
-    const entry = zip.file('word/media/' + fn);
-    if (entry) {
-      const data = await entry.async('base64');
-      const ext = fn.split('.').pop().toLowerCase();
-      const mime = inferImageMimeFromBase64(data, ext);
-      imgCache[fn] = 'data:' + mime + ';base64,' + data;
-    }
-  }));
-
-  const docXml = await docEntry.async('string');
-  const docDom = new DOMParser().parseFromString(docXml, 'text/xml');
-  const body = findOne(docDom.documentElement, W, 'body');
-  const allParas = findAll(body, W, 'p');
-  const paragraphs = allParas.map(p => extractParagraph(p, ridToFile, ridToUrl));
-
-  return { paragraphs, imgCache };
-}
-
-// ---- Markdown Utilities ----
-export function parseMdRuns(text) {
-  text = text.replace(/\s*\n\s*/g, '');
-  const parts = text.split(/\*\*/);
-  const runs = [];
-  for (let i = 0; i < parts.length; i++) {
-    if (!parts[i]) continue;
-    runs.push({ type: 'txt', text: parts[i], bold: i % 2 === 1 });
-  }
-  return runs;
-}
-
-export function parseMdFrontmatter(text) {
-  let author = '', content = text;
-  const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
-  if (m) {
-    content = m[2];
-    const am = m[1].match(/author:\s*"?([^"\n]+)"?/);
-    if (am) author = am[1].trim();
-  }
-  return { author, content };
-}
 
 // ---- Footer ----
 const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
@@ -255,8 +90,8 @@ export function initApp(template) {
   // Dual-layer rendering:
   //   Display layer (_articleHtml) — original URLs for browser preview
   //   Copy layer (_articleCopy)   — ALL images re-uploaded to WeChat CDN for paste
-  let _articleHtml = '';   // preview: original URLs (browser can load them)
-  let _articleCopy = '';   // copy: WeChat CDN URLs (editor can load them)
+  let _articleHtml = '';
+  let _articleCopy = '';
   let _footerHtml = '';
   let _footerCopy = '';
   let _uploadPromise = null;
@@ -274,7 +109,6 @@ export function initApp(template) {
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
 
-    // Preview uses original URLs (works in browser)
     document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
     document.getElementById('statsBar').textContent = stats;
 
@@ -288,102 +122,25 @@ export function initApp(template) {
     };
 
     // Background: upload non-mmbiz images to WeChat CDN for the copy layer
-    // mmbiz URLs are ALREADY on WeChat CDN — keep them (especially GIF animations)
     _uploadDone = false;
-    _uploadPromise = uploadNonCdnImages(document.getElementById('statsBar'), stats);
-  }
+    const statsBar = document.getElementById('statsBar');
+    const originalStats = stats;
 
-  function isMmbizUrl(url) {
-    return /^https?:\/\/mmbiz\.qpic\.cn\//i.test(url);
-  }
-
-  async function uploadNonCdnImages(statsBar, originalStats) {
-    const allHtml = _articleCopy + '\n' + _footerCopy;
-
-    // Collect images that need uploading (skip mmbiz — already on WeChat CDN)
-    const tasks = [];
-    let m, mmbizCount = 0;
-
-    // base64 data URIs (from DOCX) — must upload
-    const b64Re = /src="(data:image\/[^"]+)"/g;
-    while ((m = b64Re.exec(allHtml)) !== null) {
-      tasks.push({ type: 'base64', src: m[1], key: 'img_' + tasks.length });
-    }
-
-    // HTTP URLs — only upload non-mmbiz (external images)
-    const urlRe = /src="(https?:\/\/[^"]+)"/g;
-    while ((m = urlRe.exec(allHtml)) !== null) {
-      if (isMmbizUrl(m[1])) {
-        mmbizCount++;  // already on WeChat CDN, skip
-      } else {
-        tasks.push({ type: 'url', src: m[1] });
-      }
-    }
-
-    if (tasks.length === 0) {
+    _uploadPromise = uploadNonCdnImages(_articleCopy, _footerCopy, {
+      onProgress(done, total) {
+        statsBar.textContent = '上传图片 (' + done + '/' + total + ')...';
+      },
+      onLog: logConv,
+    }).then(result => {
+      _articleCopy = result.articleCopy;
+      _footerCopy = result.footerCopy;
       _uploadDone = true;
-      logConv('info', '无需上传', { mmbiz已有: mmbizCount });
-      return;
-    }
-
-    const b64Count = tasks.filter(t => t.type === 'base64').length;
-    const extCount = tasks.filter(t => t.type === 'url').length;
-    logConv('info', '开始上传图片到微信CDN', { base64: b64Count, 外链: extCount, mmbiz跳过: mmbizCount });
-    statsBar.textContent = '上传图片 (0/' + tasks.length + ')...';
-    let done = 0, failed = 0;
-
-    const CONCURRENCY = 5;
-    let next = 0;
-
-    async function worker() {
-      while (next < tasks.length) {
-        const task = tasks[next++];
-        try {
-          const body = task.type === 'base64'
-            ? JSON.stringify({ base64_images: { [task.key]: task.src } })
-            : JSON.stringify({ urls: [task.src] });
-          const resp = await fetch('/api/wechat-upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body,
-          });
-          if (resp.ok) {
-            const { results } = await resp.json();
-            const cdnUrl = task.type === 'base64'
-              ? (results[task.key] || Object.values(results)[0])
-              : (results[task.src] || Object.values(results)[0]);
-            if (cdnUrl) {
-              // Replace in copy layer only — display layer keeps original URLs
-              _articleCopy = _articleCopy.split(task.src).join(cdnUrl);
-              _footerCopy = _footerCopy.split(task.src).join(cdnUrl);
-              logConv('info', '图片上传成功', { cdn: cdnUrl.substring(0, 60) + '...' });
-            } else {
-              failed++;
-              logConv('error', '图片上传返回空', { src: task.src.substring(0, 80) });
-            }
-          } else {
-            failed++;
-            logConv('error', '图片上传HTTP错误', { status: resp.status, src: task.src.substring(0, 80) });
-          }
-        } catch (e) {
-          failed++;
-          logConv('error', '图片上传网络错误', { error: e.message });
-        }
-        done++;
-        statsBar.textContent = '上传图片 (' + done + '/' + tasks.length + ')...';
+      if (result.failed > 0) {
+        statsBar.textContent = originalStats + ' | ' + result.failed + '张图片上传失败';
+      } else {
+        statsBar.textContent = originalStats + ' | 全部图片已就绪';
       }
-    }
-
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker()));
-
-    _uploadDone = true;
-    if (failed > 0) {
-      statsBar.textContent = originalStats + ' | ' + failed + '张图片上传失败';
-      logConv('warn', '上传完成，' + failed + '张失败');
-    } else {
-      statsBar.textContent = originalStats + ' | 全部图片已就绪';
-      logConv('info', '全部图片上传成功', { total: tasks.length });
-    }
+    });
   }
 
   // ---- Conversion Log ----
@@ -399,56 +156,17 @@ export function initApp(template) {
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
 
   // ---- Copy ----
-  async function copyByClipboardApi(html, plainText) {
-    if (!(navigator.clipboard && typeof ClipboardItem !== 'undefined')) return false;
-    await navigator.clipboard.write([new ClipboardItem({
-      'text/html': new Blob([html], { type: 'text/html' }),
-      'text/plain': new Blob([plainText], { type: 'text/plain' }),
-    })]);
-    return true;
-  }
-
-  async function copyByClipboardEvent(html, plainText) {
-    const handler = function(e) {
-      e.clipboardData.setData('text/html', html);
-      e.clipboardData.setData('text/plain', plainText);
-      e.preventDefault();
-    };
-    document.addEventListener('copy', handler, true);
-    const temp = document.createElement('div');
-    temp.style.position = 'fixed';
-    temp.style.left = '-99999px';
-    temp.style.top = '0';
-    temp.innerHTML = html;
-    document.body.appendChild(temp);
-    try {
-      const range = document.createRange();
-      range.selectNodeContents(temp);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-      const ok = document.execCommand('copy');
-      sel.removeAllRanges();
-      return !!ok;
-    } finally {
-      document.body.removeChild(temp);
-      document.removeEventListener('copy', handler, true);
-    }
-  }
-
   let _lastCopiedHtml = '';
 
   window.copyContent = async function() {
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
 
-    // Wait for base64 upload if DOCX images are still uploading
     if (_uploadPromise && !_uploadDone) {
       btn.textContent = '等待图片上传...';
       await _uploadPromise;
     }
 
-    // Use copy layer — ALL images replaced with WeChat CDN URLs
     const enabled = document.getElementById('footerEnabled').checked;
     const html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
     const plainText = content.textContent || '';
@@ -494,6 +212,10 @@ export function initApp(template) {
     progress.style.display = 'none';
     progressFill.style.width = '0%';
     fileInput.value = '';
+    // Reset zoom to default
+    zoomIdx = ZOOM_STEPS.length - 1;
+    document.getElementById('phoneFrame').style.maxWidth = (420 * ZOOM_STEPS[zoomIdx] / 100) + 'px';
+    document.getElementById('zoomLabel').textContent = ZOOM_STEPS[zoomIdx] + '%';
   };
 
   window.zoom = function(dir) {
