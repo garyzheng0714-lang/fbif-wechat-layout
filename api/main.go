@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -50,6 +51,9 @@ func main() {
 
 	// Config versions (history for a profile)
 	mux.HandleFunc("GET /api/config/profiles/{id}/versions", handleListVersions)
+
+	// Image upload to WeChat CDN
+	mux.HandleFunc("POST /api/wechat-upload", handleWechatUpload)
 
 	// Article fetch (URL repost via x-reader)
 	mux.HandleFunc("POST /api/fetch-article", handleFetchArticle)
@@ -277,7 +281,10 @@ func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	if req.Name != "" {
-		db.Exec("UPDATE profiles SET name = ?, updated_at = ? WHERE id = ?", req.Name, now, id)
+		if _, err := db.Exec("UPDATE profiles SET name = ?, updated_at = ? WHERE id = ?", req.Name, now, id); err != nil {
+			writeError(w, 409, "profile name already exists")
+			return
+		}
 	}
 
 	if req.Config != nil {
@@ -327,8 +334,12 @@ func handleGetActiveConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p Profile
-	db.QueryRow("SELECT id, name, is_default, created_at, updated_at FROM profiles WHERE id = ?", profileIDStr).
+	err = db.QueryRow("SELECT id, name, is_default, created_at, updated_at FROM profiles WHERE id = ?", profileIDStr).
 		Scan(&p.ID, &p.Name, &p.IsDefault, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		writeError(w, 404, "active profile not found")
+		return
+	}
 	if v, err := getLatestVersion(p.ID); err == nil {
 		p.Config = v.Config
 		p.Version = v.Version
@@ -376,6 +387,39 @@ func handleListVersions(w http.ResponseWriter, r *http.Request) {
 		versions = append(versions, cv)
 	}
 	writeJSON(w, 200, versions)
+}
+
+// ---- WeChat Image Upload ----
+// TODO: Implement with actual WeChat Media Upload API credentials.
+// For now, this proxies to the legacy upload endpoint if configured,
+// or returns an error explaining setup is needed.
+
+func handleWechatUpload(w http.ResponseWriter, r *http.Request) {
+	// Check for legacy upload endpoint env var
+	legacyURL := os.Getenv("WECHAT_UPLOAD_ENDPOINT")
+	if legacyURL == "" {
+		writeError(w, 503, "WeChat upload not configured. Set WECHAT_UPLOAD_ENDPOINT env var.")
+		return
+	}
+
+	// Proxy the request to the legacy endpoint
+	proxyReq, err := http.NewRequestWithContext(r.Context(), "POST", legacyURL, r.Body)
+	if err != nil {
+		writeError(w, 500, "proxy error: "+err.Error())
+		return
+	}
+	proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+
+	resp, err := http.DefaultClient.Do(proxyReq)
+	if err != nil {
+		writeError(w, 502, "upstream error: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // ---- Article Fetch (URL repost via x-reader) ----
@@ -458,10 +502,12 @@ func fetchDirect(url string) (content, title string, err error) {
 		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// Read body (limit 5MB)
-	buf := make([]byte, 5*1024*1024)
-	n, _ := resp.Body.Read(buf)
-	body := string(buf[:n])
+	// Read full body (limit 5MB)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	if err != nil {
+		return "", "", fmt.Errorf("read body: %w", err)
+	}
+	body := string(bodyBytes)
 
 	// Simple title extraction
 	if idx := strings.Index(body, "<title>"); idx >= 0 {
