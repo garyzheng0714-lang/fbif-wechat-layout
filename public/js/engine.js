@@ -527,17 +527,22 @@ export function initApp(template) {
     return { html: root.innerHTML, stats };
   }
 
-  async function copyByClipboardEvent(html, plainText, contentNode) {
+  async function copyByClipboardEvent(html, plainText) {
     const handler = function(e) {
       e.clipboardData.setData('text/html', html);
       e.clipboardData.setData('text/plain', plainText);
       e.preventDefault();
     };
     document.addEventListener('copy', handler, true);
+    const temp = document.createElement('div');
+    temp.style.position = 'fixed';
+    temp.style.left = '-99999px';
+    temp.style.top = '0';
+    temp.innerHTML = html;
+    document.body.appendChild(temp);
     try {
-      const target = contentNode || document.body;
       const range = document.createRange();
-      range.selectNodeContents(target);
+      range.selectNodeContents(temp);
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
@@ -545,6 +550,7 @@ export function initApp(template) {
       sel.removeAllRanges();
       return !!ok;
     } finally {
+      document.body.removeChild(temp);
       document.removeEventListener('copy', handler, true);
     }
   }
@@ -789,7 +795,7 @@ export function initApp(template) {
     let ok = false;
 
     try {
-      ok = await copyByClipboardEvent(html, plainText, content);
+      ok = await copyByClipboardEvent(html, plainText);
     } catch {}
 
     if (!ok) {
