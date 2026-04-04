@@ -4,3 +4,6 @@ node_modules/
 .env
 .DS_Store
 .context/
+api/fbif-api
+api/data/
+*.db

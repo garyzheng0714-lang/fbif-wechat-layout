@@ -48,6 +48,16 @@ input[type="file"] { display: none; }
 .btn-retry { background: #fff1f0; color: #ff4d4f; border: 1px solid #ff4d4f; }
 .btn-retry:hover { background: #ff4d4f; color: #fff; }
 .btn-retry:disabled { opacity: 0.5; cursor: not-allowed; }
+.toolbar input[type="text"] {
+  flex: 1; min-width: 120px; padding: 6px 12px; border: 1px solid #ddd;
+  border-radius: 6px; font-size: 14px; background: #f8f8f8;
+}
+.toolbar input[type="text"]:focus { outline: none; border-color: #0070C0; background: #fff; }
+.footer-toggle {
+  display: flex; align-items: center; gap: 4px; cursor: pointer;
+  font-size: 13px; color: #666; white-space: nowrap; user-select: none;
+}
+.footer-toggle input { cursor: pointer; }
 .zoom-controls {
   display: flex; align-items: center; gap: 4px; background: #f0f0f0;
   border-radius: 6px; padding: 2px;
@@ -165,7 +175,12 @@ input[type="file"] { display: none; }
 <!-- Preview View -->
 <div id="previewView">
   <div class="toolbar">
-    <h2 id="previewTitleDisplay"></h2>
+    <input type="text" id="titleInput" maxlength="64" placeholder="文章标题"
+      oninput="document.getElementById('previewTitleDisplay').textContent = this.value">
+    <label class="footer-toggle" title="显示/隐藏页脚">
+      <input type="checkbox" id="footerEnabled" checked onchange="toggleFooter()">
+      <span class="footer-label">页脚</span>
+    </label>
     <div class="zoom-controls">
       <button class="btn btn-secondary" onclick="zoom(-1)">-</button>
       <span class="zoom-label" id="zoomLabel">200%</span>
@@ -175,6 +190,7 @@ input[type="file"] { display: none; }
     <button class="btn btn-retry" id="retryBtn" onclick="retryUpload()" style="display:none;">重试上传</button>
     <button class="btn btn-primary" id="copyBtn" onclick="copyContent()">复制正文</button>
   </div>
+  <h2 id="previewTitleDisplay" style="display:none;"></h2>
 
   <div class="preview-layout">
     <!-- Floating TOC -->
@@ -193,8 +209,6 @@ input[type="file"] { display: none; }
     </div>
   </div>
 
-  <input type="text" id="titleInput" maxlength="32" style="display:none;">
-  <input type="checkbox" id="footerEnabled" checked style="display:none;">
   <div class="stats-bar" id="statsBar"></div>
 
 </div>
@@ -304,6 +318,38 @@ if (!TEMPLATES.includes(templateId)) {
   }
 }
 
+// Load active config from server (footer toggle, etc.)
+// Falls back to defaults if API is unavailable
+window._activeConfig = null;
+async function loadActiveConfig() {
+  try {
+    const resp = await fetch('/api/config/active');
+    if (resp.ok) {
+      window._activeConfig = await resp.json();
+      const cfg = window._activeConfig.config;
+      if (cfg) {
+        document.getElementById('footerEnabled').checked = cfg.footer_enabled !== false;
+      }
+    }
+  } catch {
+    // API not available, use defaults
+  }
+}
+async function saveFooterToggle(enabled) {
+  if (!window._activeConfig) return;
+  const cfg = { ...window._activeConfig.config, footer_enabled: enabled };
+  try {
+    await fetch('/api/config/profiles/' + window._activeConfig.id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: cfg }),
+    });
+  } catch {
+    // save failed silently, local toggle still works
+  }
+}
+loadActiveConfig();
+
 // Build TOC from headings in content
 window._buildTOC = function() {
   const tocList = document.getElementById('tocList');
@@ -345,6 +391,8 @@ window._buildTOC = function() {
 // Footer toggle
 window.toggleFooter = function() {
   window._updateFooter && window._updateFooter(null);
+  const enabled = document.getElementById('footerEnabled').checked;
+  saveFooterToggle(enabled);
 };
 
 // Position TOC float next to phone frame

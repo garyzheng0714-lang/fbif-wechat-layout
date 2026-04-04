@@ -10,6 +10,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build API server
+        run: |
+          cd api
+          GOOS=linux GOARCH=amd64 go build -o fbif-api .
+
       - name: Generate deploy version file
         run: |
           cat > public/version.json <<EOF
@@ -32,7 +42,18 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
+          # Deploy static files
           rsync -avz --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
             public/ \
             "${USER}@${HOST}:${DEPLOY_PATH}/"
+
+          # Deploy API binary
+          rsync -avz \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            api/fbif-api \
+            "${USER}@${HOST}:${DEPLOY_PATH}/../api/"
+
+          # Restart API service
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
+            "sudo systemctl restart fbif-api 2>/dev/null || true"
