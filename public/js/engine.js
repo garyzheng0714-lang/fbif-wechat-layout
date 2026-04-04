@@ -287,37 +287,48 @@ export function initApp(template) {
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
     };
 
-    // Background: upload ALL images to WeChat CDN for the copy layer
+    // Background: upload non-mmbiz images to WeChat CDN for the copy layer
+    // mmbiz URLs are ALREADY on WeChat CDN — keep them (especially GIF animations)
     _uploadDone = false;
-    _uploadPromise = uploadAllImages(document.getElementById('statsBar'), stats);
+    _uploadPromise = uploadNonCdnImages(document.getElementById('statsBar'), stats);
   }
 
-  async function uploadAllImages(statsBar, originalStats) {
+  function isMmbizUrl(url) {
+    return /^https?:\/\/mmbiz\.qpic\.cn\//i.test(url);
+  }
+
+  async function uploadNonCdnImages(statsBar, originalStats) {
     const allHtml = _articleCopy + '\n' + _footerCopy;
 
-    // Collect ALL images: base64 (DOCX) + http URLs (mmbiz + external)
+    // Collect images that need uploading (skip mmbiz — already on WeChat CDN)
     const tasks = [];
-    let m;
+    let m, mmbizCount = 0;
 
+    // base64 data URIs (from DOCX) — must upload
     const b64Re = /src="(data:image\/[^"]+)"/g;
     while ((m = b64Re.exec(allHtml)) !== null) {
       tasks.push({ type: 'base64', src: m[1], key: 'img_' + tasks.length });
     }
 
+    // HTTP URLs — only upload non-mmbiz (external images)
     const urlRe = /src="(https?:\/\/[^"]+)"/g;
     while ((m = urlRe.exec(allHtml)) !== null) {
-      tasks.push({ type: 'url', src: m[1] });
+      if (isMmbizUrl(m[1])) {
+        mmbizCount++;  // already on WeChat CDN, skip
+      } else {
+        tasks.push({ type: 'url', src: m[1] });
+      }
     }
 
     if (tasks.length === 0) {
       _uploadDone = true;
-      logConv('info', '无图片需上传');
+      logConv('info', '无需上传', { mmbiz已有: mmbizCount });
       return;
     }
 
     const b64Count = tasks.filter(t => t.type === 'base64').length;
-    const urlCount = tasks.filter(t => t.type === 'url').length;
-    logConv('info', '开始上传全部图片到微信CDN', { base64: b64Count, url: urlCount });
+    const extCount = tasks.filter(t => t.type === 'url').length;
+    logConv('info', '开始上传图片到微信CDN', { base64: b64Count, 外链: extCount, mmbiz跳过: mmbizCount });
     statsBar.textContent = '上传图片 (0/' + tasks.length + ')...';
     let done = 0, failed = 0;
 
