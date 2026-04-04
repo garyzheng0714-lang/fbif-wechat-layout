@@ -672,7 +672,7 @@ export function initApp(template) {
 
     let ok = false;
     // Prefer legacy copy path for WeChat editor compatibility.
-    // Use a hidden temp container with PUSH HTML so browser default copy never falls back to display layer.
+    // Use a hidden temp container with PUSH HTML and let browser generate native clipboard formats (CF_HTML).
     {
       const temp = document.createElement('div');
       temp.style.position = 'fixed';
@@ -681,12 +681,6 @@ export function initApp(template) {
       temp.innerHTML = html;
       document.body.appendChild(temp);
 
-      const handler = function(e) {
-        e.clipboardData.setData('text/html', html);
-        e.clipboardData.setData('text/plain', temp.textContent || content.textContent || '');
-        e.preventDefault();
-      };
-      document.addEventListener('copy', handler);
       const range = document.createRange();
       range.selectNodeContents(temp);
       const sel = window.getSelection();
@@ -694,7 +688,6 @@ export function initApp(template) {
       sel.addRange(range);
       ok = document.execCommand('copy');
       sel.removeAllRanges();
-      document.removeEventListener('copy', handler);
       document.body.removeChild(temp);
     }
 
