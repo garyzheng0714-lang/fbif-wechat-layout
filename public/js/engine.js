@@ -611,7 +611,7 @@ export function initApp(template) {
 
     // Upload URLs with concurrency pool — keeps 5 in-flight at a time
     // Scales to any number of images without overwhelming the server
-    const CONCURRENCY = 5;
+    const CONCURRENCY = 10;
     let next = 0;
     async function uploadOneUrl() {
       while (next < httpUrls.length) {
