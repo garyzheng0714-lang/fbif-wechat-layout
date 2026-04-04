@@ -316,9 +316,10 @@ export function initApp(template) {
     if (!draftBtn) return;
 
     if (!_uploadDone && _uploadTotal > 0) {
+      // Draft push needs upload; copy can proceed with original mmbiz URLs
       draftBtn.textContent = '上传中 (' + _uploadCurrent + '/' + _uploadTotal + ')...';
       draftBtn.disabled = true;
-      copyBtn.title = '图片上传中，粘贴后部分图片可能缺失';
+      copyBtn.title = '';  // Copy works immediately — mmbiz URLs are valid
     } else {
       draftBtn.disabled = false;
       if (_uploadFailed > 0) {
@@ -687,10 +688,12 @@ export function initApp(template) {
       }
     }
 
-    // Upload http URLs in batches of 3 — smaller batches give more responsive
-    // progress updates and avoid long stalls at 0/N when the server re-uploads
+    // Upload http URLs in PARALLEL batches of 3 — all batches fire concurrently
+    const urlBatches = [];
     for (let i = 0; i < httpUrls.length; i += 3) {
-      const batch = httpUrls.slice(i, i + 3);
+      urlBatches.push(httpUrls.slice(i, i + 3));
+    }
+    await Promise.all(urlBatches.map(async (batch) => {
       try {
         const resp = await fetch('/api/wechat-upload', {
           method: 'POST',
@@ -724,7 +727,7 @@ export function initApp(template) {
         batch.forEach(u => failedDetails.push({ type: 'url', url: u, error: e.message }));
         updateProgress();
       }
-    }
+    }));
 
     // Final pass: normalize GIF attributes after URL replacements
     const previewMeta = collectPreviewImageMeta(document.getElementById('contentArea'));
@@ -838,26 +841,21 @@ export function initApp(template) {
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
 
-    // Wait for background image upload to finish — must use CDN URLs
-    if (_uploadPromise && !_uploadDone) {
+    // Check if there are any data: URIs (DOCX base64 images) that MUST be uploaded.
+    // For Markdown files, all images are already mmbiz.qpic.cn URLs — they work
+    // directly in the WeChat editor without re-upload. No need to wait.
+    const pushHtml = _articlePush + '\n' + _footerPush;
+    const hasDataUri = /src="data:image\//i.test(pushHtml);
+
+    if (hasDataUri && _uploadPromise && !_uploadDone) {
+      // Only wait for DOCX base64 images that have no URL yet
       btn.textContent = '等待图片上传...';
       await _uploadPromise;
     }
-    if (_uploadFailed > 0) {
-      btn.textContent = '有图片上传失败，无法复制';
-      setTimeout(() => { btn.textContent = '复制正文'; }, 2400);
-      return;
-    }
 
-    // Use PUSH layer (WeChat CDN URLs), not display layer (base64/original)
+    // Use PUSH layer — already has mmbiz URLs (original or re-uploaded)
     const enabled = document.getElementById('footerEnabled').checked;
     const payload = getReadyCopyPayload(enabled, collectPreviewImageMeta(content));
-    if (payload.stats.dataUri > 0 || payload.stats.missingSrc > 0) {
-      logConv('error', '复制前校验失败', payload.stats);
-      btn.textContent = '图片未就绪，无法复制';
-      setTimeout(() => { btn.textContent = '复制正文'; }, 2400);
-      return;
-    }
     const html = payload.html;
 
     // Content integrity check — compare section count between display and copy
