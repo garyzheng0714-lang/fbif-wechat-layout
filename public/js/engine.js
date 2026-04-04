@@ -280,71 +280,97 @@ export function initApp(template) {
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
     };
 
-    // Upload base64 images in background (DOCX only — Markdown uses URLs that work directly)
+    // Upload images that WeChat editor can't use directly:
+    //   - base64 data: URIs (from DOCX) — editor doesn't support inline data
+    //   - Non-mmbiz external URLs — editor may block or can't fetch them
+    //   - mmbiz.qpic.cn URLs are kept as-is (WeChat's own CDN, always works)
     _uploadDone = false;
-    _uploadPromise = uploadBase64Images(document.getElementById('statsBar'), stats);
+    _uploadPromise = uploadImagesForCopy(document.getElementById('statsBar'), stats);
   }
 
-  async function uploadBase64Images(statsBar, originalStats) {
-    // Collect data: URIs from article + footer
+  function isMmbizUrl(url) {
+    return /^https?:\/\/mmbiz\.qpic\.cn\//i.test(url);
+  }
+
+  async function uploadImagesForCopy(statsBar, originalStats) {
     const allHtml = _articleCopy + '\n' + _footerHtml;
-    const base64Map = {};
-    const re = /src="(data:image\/[^"]+)"/g;
+
+    // 1) Collect base64 data: URIs (DOCX embedded images)
+    const base64List = [];
+    const b64Re = /src="(data:image\/[^"]+)"/g;
     let m;
-    while ((m = re.exec(allHtml)) !== null) {
-      base64Map['img_' + Object.keys(base64Map).length] = m[1];
+    while ((m = b64Re.exec(allHtml)) !== null) {
+      base64List.push({ type: 'base64', src: m[1], key: 'img_' + base64List.length });
     }
 
-    const total = Object.keys(base64Map).length;
+    // 2) Collect non-mmbiz http URLs (external images WeChat might not access)
+    const extUrls = [];
+    const urlRe = /src="(https?:\/\/[^"]+)"/g;
+    while ((m = urlRe.exec(allHtml)) !== null) {
+      if (!isMmbizUrl(m[1])) extUrls.push(m[1]);
+    }
+
+    const total = base64List.length + extUrls.length;
     if (total === 0) {
-      // No base64 images (Markdown file) — copy is ready immediately
       _uploadDone = true;
-      logConv('info', '无需上传图片（全部为 URL）');
+      logConv('info', '无需上传（全部为微信 CDN 图片）');
       return;
     }
 
-    logConv('info', '开始上传 DOCX 图片', { total });
+    logConv('info', '需上传图片', { base64: base64List.length, 外链: extUrls.length });
     statsBar.textContent = '上传图片 (0/' + total + ')...';
     let done = 0, failed = 0;
 
-    // Upload in parallel, 5 at a time
-    const entries = Object.entries(base64Map);
+    // Build a unified task list
+    const tasks = [
+      ...base64List.map(b => ({ type: 'base64', key: b.key, src: b.src })),
+      ...extUrls.map(u => ({ type: 'url', src: u })),
+    ];
+
     const CONCURRENCY = 5;
     let next = 0;
 
     async function worker() {
-      while (next < entries.length) {
-        const [key, dataUri] = entries[next++];
+      while (next < tasks.length) {
+        const task = tasks[next++];
         try {
+          let body;
+          if (task.type === 'base64') {
+            body = JSON.stringify({ base64_images: { [task.key]: task.src } });
+          } else {
+            body = JSON.stringify({ urls: [task.src] });
+          }
           const resp = await fetch('/api/wechat-upload', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base64_images: { [key]: dataUri } })
+            body,
           });
           if (resp.ok) {
             const { results } = await resp.json();
-            const cdnUrl = results[key] || Object.values(results)[0];
+            const cdnUrl = task.type === 'base64'
+              ? (results[task.key] || Object.values(results)[0])
+              : (results[task.src] || Object.values(results)[0]);
             if (cdnUrl) {
-              _articleCopy = _articleCopy.split(dataUri).join(cdnUrl);
-              logConv('info', '图片上传成功', { key, cdn: cdnUrl.substring(0, 60) + '...' });
+              _articleCopy = _articleCopy.split(task.src).join(cdnUrl);
+              logConv('info', '图片上传成功', { cdn: cdnUrl.substring(0, 60) + '...' });
             } else {
               failed++;
-              logConv('error', '图片上传失败（空URL）', { key });
+              logConv('error', '图片上传返回空', { src: task.src.substring(0, 80) });
             }
           } else {
             failed++;
-            logConv('error', '图片上传HTTP错误', { key, status: resp.status });
+            logConv('error', '图片上传HTTP错误', { status: resp.status, src: task.src.substring(0, 80) });
           }
         } catch (e) {
           failed++;
-          logConv('error', '图片上传网络错误', { key, error: e.message });
+          logConv('error', '图片上传网络错误', { error: e.message });
         }
         done++;
         statsBar.textContent = '上传图片 (' + done + '/' + total + ')...';
       }
     }
 
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, entries.length) }, () => worker()));
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker()));
 
     _uploadDone = true;
     if (failed > 0) {
