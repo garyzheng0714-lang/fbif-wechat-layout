@@ -338,6 +338,8 @@ export function initApp(template) {
     _convLog.push(entry);
     const prefix = level === 'error' ? '❌' : level === 'warn' ? '⚠️' : '✅';
     console.log('[排版日志] ' + prefix + ' ' + msg, detail || '');
+    // Push to UI log panel
+    if (window._pushLog) window._pushLog(level, msg, detail);
   }
   // Expose log for debugging — type getConvLog() in console
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
