@@ -23,27 +23,115 @@ export function initApp(template) {
   document.getElementById('pageSubtitle').textContent = template.description;
   document.getElementById('fileHint').textContent =
     '支持 ' + template.formats.join('、') + ' 格式';
-  document.getElementById('fileInput').accept = template.formats.join(',');
+  const fileInputEl = document.getElementById('fileInput');
+  fileInputEl.accept = template.formats.join(',');
+  fileInputEl.multiple = true;
 
   const dropZone = document.getElementById('dropZone');
-  const fileInput = document.getElementById('fileInput');
+  const fileInput = fileInputEl;
   const progress = document.getElementById('progress');
   const progressFill = document.getElementById('progressFill');
   const progressText = document.getElementById('progressText');
   const errorEl = document.getElementById('error');
+  const batchList = document.getElementById('batchList');
 
   function showError(msg) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+
+  function isValidFile(f) {
+    return template.formats.some(fmt => f.name.toLowerCase().endsWith(fmt));
+  }
+
+  // Batch file queue
+  let _batchFiles = [];
+  let _batchResults = [];
+
+  function showBatchList(files) {
+    _batchFiles = files;
+    _batchResults = files.map(() => null);
+    if (!batchList) return;
+    if (files.length <= 1) { batchList.style.display = 'none'; return; }
+
+    batchList.style.display = 'block';
+    batchList.innerHTML = '<div class="batch-title">文件队列 (' + files.length + ')</div>';
+    files.forEach((f, i) => {
+      const item = document.createElement('div');
+      item.className = 'batch-item';
+      item.id = 'batch-' + i;
+      item.innerHTML = '<span class="batch-name">' + f.name + '</span>' +
+        '<span class="batch-status" id="batch-status-' + i + '">等待中</span>';
+      item.addEventListener('click', () => {
+        if (_batchResults[i]) {
+          const r = _batchResults[i];
+          showPreview(f.name.replace(/\.\w+$/i, ''), r.articleHtml, r.footerHtml, r.stats);
+        }
+      });
+      batchList.appendChild(item);
+    });
+  }
+
+  function updateBatchStatus(idx, status, cls) {
+    const el = document.getElementById('batch-status-' + idx);
+    if (el) { el.textContent = status; el.className = 'batch-status ' + (cls || ''); }
+  }
+
+  async function handleFiles(files) {
+    const valid = Array.from(files).filter(isValidFile);
+    if (valid.length === 0) {
+      showError('请上传 ' + template.formats.join(' 或 ') + ' 文件');
+      return;
+    }
+    if (valid.length === 1) {
+      handleFile(valid[0]);
+      return;
+    }
+    // Batch mode
+    showBatchList(valid);
+    errorEl.style.display = 'none';
+    for (let i = 0; i < valid.length; i++) {
+      updateBatchStatus(i, '处理中...', 'processing');
+      try {
+        const result = await processFile(valid[i]);
+        _batchResults[i] = result;
+        updateBatchStatus(i, '✓ 完成', 'done');
+      } catch (err) {
+        updateBatchStatus(i, '✗ 失败', 'failed');
+      }
+    }
+    // Auto-show first result
+    if (_batchResults[0]) {
+      const r = _batchResults[0];
+      showPreview(valid[0].name.replace(/\.\w+$/i, ''), r.articleHtml, r.footerHtml, r.stats);
+    }
+  }
+
+  async function processFile(file) {
+    const t0 = performance.now();
+    let result;
+    if (file.name.toLowerCase().endsWith('.docx')) {
+      const docxData = await parseDocx(file);
+      result = template.processDocx(docxData);
+    } else if (typeof template.processMd === 'function') {
+      const text = await file.text();
+      result = await template.processMd(text);
+    } else {
+      throw new Error('此模板不支持该文件格式');
+    }
+    const articleHtml = result.lines.join('\n');
+    const footerHtml = localStorage.getItem('custom_footer') || await footerReady;
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
+      ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
+    return { articleHtml, footerHtml, stats };
+  }
 
   dropZone.addEventListener('click', () => fileInput.click());
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone.addEventListener('drop', e => {
     e.preventDefault(); dropZone.classList.remove('dragover');
-    const f = e.dataTransfer.files[0];
-    if (f && template.formats.some(fmt => f.name.toLowerCase().endsWith(fmt))) handleFile(f);
-    else showError('请上传 ' + template.formats.join(' 或 ') + ' 文件');
+    handleFiles(e.dataTransfer.files);
   });
-  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+  fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles(fileInput.files); });
 
   async function handleFile(file) {
     _convLog.length = 0;

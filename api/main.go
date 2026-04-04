@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"flag"
@@ -8,6 +10,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -46,6 +50,9 @@ func main() {
 
 	// Config versions (history for a profile)
 	mux.HandleFunc("GET /api/config/profiles/{id}/versions", handleListVersions)
+
+	// Article fetch (URL repost via x-reader)
+	mux.HandleFunc("POST /api/fetch-article", handleFetchArticle)
 
 	// Health check
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -369,6 +376,102 @@ func handleListVersions(w http.ResponseWriter, r *http.Request) {
 		versions = append(versions, cv)
 	}
 	writeJSON(w, 200, versions)
+}
+
+// ---- Article Fetch (URL repost via x-reader) ----
+
+func handleFetchArticle(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+		writeError(w, 400, "url is required")
+		return
+	}
+
+	// Validate URL format
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+		writeError(w, 400, "invalid URL: must start with http:// or https://")
+		return
+	}
+
+	// Try x-reader first, fall back to simple fetch
+	content, title, err := fetchWithXReader(req.URL)
+	if err != nil {
+		// Fall back: try direct HTTP fetch + simple HTML extraction
+		content, title, err = fetchDirect(req.URL)
+		if err != nil {
+			writeError(w, 502, "failed to fetch article: "+err.Error())
+			return
+		}
+	}
+
+	writeJSON(w, 200, map[string]string{
+		"title":   title,
+		"content": content,
+		"source":  req.URL,
+	})
+}
+
+func fetchWithXReader(url string) (content, title string, err error) {
+	// x-reader outputs markdown by default
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "x-reader", url, "--format", "markdown")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", "", fmt.Errorf("x-reader failed: %s %v", stderr.String(), err)
+	}
+
+	output := stdout.String()
+	// Extract title from first # heading
+	lines := strings.SplitN(output, "\n", 3)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			title = strings.TrimPrefix(line, "# ")
+			break
+		}
+	}
+
+	return output, title, nil
+}
+
+func fetchDirect(url string) (content, title string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; FBIF-Layout/1.0)")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	// Read body (limit 5MB)
+	buf := make([]byte, 5*1024*1024)
+	n, _ := resp.Body.Read(buf)
+	body := string(buf[:n])
+
+	// Simple title extraction
+	if idx := strings.Index(body, "<title>"); idx >= 0 {
+		end := strings.Index(body[idx:], "</title>")
+		if end > 0 {
+			title = body[idx+7 : idx+end]
+		}
+	}
+
+	return body, title, nil
 }
 
 func init() {

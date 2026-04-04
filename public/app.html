@@ -132,6 +132,23 @@ input[type="file"] { display: none; }
 .log-warn { color: #ffb74d; }
 .log-error { color: #ef5350; }
 
+/* ---- Batch File List ---- */
+.batch-list {
+  margin-top: 16px; background: #fff; border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden;
+}
+.batch-title { padding: 10px 16px; font-size: 13px; color: #999; border-bottom: 1px solid #f0f0f0; }
+.batch-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px; cursor: pointer; border-bottom: 1px solid #f8f8f8;
+}
+.batch-item:hover { background: #f8fbff; }
+.batch-name { font-size: 14px; color: #333; }
+.batch-status { font-size: 12px; color: #999; }
+.batch-status.processing { color: #faad14; }
+.batch-status.done { color: #52c41a; }
+.batch-status.failed { color: #ff4d4f; }
+
 /* ---- Mobile Responsive (< 768px) ---- */
 @media (max-width: 768px) {
   .container { padding: 20px 12px; }
@@ -147,7 +164,34 @@ input[type="file"] { display: none; }
   .preview-main { padding: 8px; }
   .phone-frame { max-width: 100% !important; border-radius: 0; }
   .stats-bar { font-size: 11px; padding: 6px 14px; bottom: 46px; }
+  .url-input-row { flex-direction: column; }
+  .url-input-row input { min-width: 0; }
 }
+/* ---- URL Repost ---- */
+.url-section {
+  margin-top: 24px; text-align: center;
+}
+.url-divider {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+  color: #999; font-size: 13px;
+}
+.url-divider::before, .url-divider::after {
+  content: ''; flex: 1; height: 1px; background: #e0e0e0;
+}
+.url-input-row {
+  display: flex; gap: 8px; max-width: 600px; margin: 0 auto;
+}
+.url-input-row input {
+  flex: 1; padding: 10px 14px; border: 1px solid #d0d0d0; border-radius: 8px;
+  font-size: 14px;
+}
+.url-input-row input:focus { outline: none; border-color: #0070C0; }
+.url-input-row button {
+  padding: 10px 20px; background: #0070C0; color: #fff; border: none;
+  border-radius: 8px; font-size: 14px; cursor: pointer; white-space: nowrap;
+}
+.url-input-row button:hover { background: #005a9e; }
+.url-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -169,6 +213,14 @@ input[type="file"] { display: none; }
       <div class="progress-text" id="progressText">正在排版...</div>
     </div>
     <div class="error" id="error"></div>
+    <div class="batch-list" id="batchList" style="display:none;"></div>
+    <div class="url-section">
+      <div class="url-divider">或粘贴文章链接转载</div>
+      <div class="url-input-row">
+        <input type="url" id="urlInput" placeholder="粘贴微信文章或网页链接">
+        <button id="urlFetchBtn" onclick="fetchArticle()">抓取转载</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -393,6 +445,48 @@ window.toggleFooter = function() {
   window._updateFooter && window._updateFooter(null);
   const enabled = document.getElementById('footerEnabled').checked;
   saveFooterToggle(enabled);
+};
+
+// URL repost: fetch article → process as Markdown → show preview
+window.fetchArticle = async function() {
+  const urlInput = document.getElementById('urlInput');
+  const btn = document.getElementById('urlFetchBtn');
+  const errorEl = document.getElementById('error');
+  const url = (urlInput.value || '').trim();
+  if (!url) return;
+
+  errorEl.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = '抓取中...';
+
+  try {
+    const resp = await fetch('/api/fetch-article', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status }));
+      throw new Error(err.error || '抓取失败');
+    }
+    const { title, content } = await resp.json();
+    if (!content) throw new Error('文章内容为空');
+
+    // Create a virtual .md file and feed it through the template pipeline
+    const file = new File([content], (title || 'article') + '.md', { type: 'text/markdown' });
+    // Trigger the file handler in engine.js
+    const fileInput = document.getElementById('fileInput');
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fileInput.files = dt.files;
+    fileInput.dispatchEvent(new Event('change'));
+  } catch (e) {
+    errorEl.textContent = '转载失败: ' + e.message;
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '抓取转载';
+  }
 };
 
 // Position TOC float next to phone frame
