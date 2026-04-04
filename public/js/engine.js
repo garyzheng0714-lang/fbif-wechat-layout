@@ -493,10 +493,9 @@ export function initApp(template) {
         img.setAttribute('src', src);
       }
 
+      // Strip only non-essential WeChat metadata; keep class, data-w, data-ratio
+      // which the WeChat editor needs to recognise images as its own content
       for (const attr of [
-        'class',
-        'data-ratio',
-        'data-w',
         'data-s',
         'data-index',
         'data-report-img-idx',
@@ -510,6 +509,12 @@ export function initApp(template) {
         img.removeAttribute(attr);
       }
 
+      // Ensure WeChat editor image classes are present
+      const cls = (img.getAttribute('class') || '').split(/\s+/).filter(Boolean);
+      if (!cls.includes('rich_pages')) cls.push('rich_pages');
+      if (!cls.includes('wxw-img')) cls.push('wxw-img');
+      img.setAttribute('class', cls.join(' '));
+
       const inferred = inferWechatImageType(src);
       const isGif = inferred === 'gif' || looksLikeGifSource(src);
       img.setAttribute('data-src', src);
@@ -517,11 +522,12 @@ export function initApp(template) {
       img.removeAttribute('decoding');
       img.removeAttribute('referrerpolicy');
 
+      // Set data-type for all detected formats (not just GIF)
       if (isGif) {
         stats.gif++;
         img.setAttribute('data-type', 'gif');
-      } else {
-        img.removeAttribute('data-type');
+      } else if (inferred) {
+        img.setAttribute('data-type', inferred);
       }
     }
     return { html: root.innerHTML, stats };
@@ -676,9 +682,10 @@ export function initApp(template) {
       }
     }
 
-    // Upload http URLs in batches of 10
-    for (let i = 0; i < httpUrls.length; i += 10) {
-      const batch = httpUrls.slice(i, i + 10);
+    // Upload http URLs in batches of 3 — smaller batches give more responsive
+    // progress updates and avoid long stalls at 0/N when the server re-uploads
+    for (let i = 0; i < httpUrls.length; i += 3) {
+      const batch = httpUrls.slice(i, i + 3);
       try {
         const resp = await fetch('/api/wechat-upload', {
           method: 'POST',
@@ -765,6 +772,63 @@ export function initApp(template) {
     if (window._positionTOC) window._positionTOC();
   };
 
+  // ---- Clipboard Diagnostics ----
+  // Stores the last copied HTML for inspection via inspectClipboard() or the UI panel
+  let _lastCopiedHtml = '';
+  let _lastCopyMethod = '';
+
+  function analyzeHtml(html) {
+    const doc = new DOMParser().parseFromString('<div id="r">' + html + '</div>', 'text/html');
+    const root = doc.getElementById('r');
+    const imgs = root ? root.querySelectorAll('img') : [];
+    const details = [];
+    for (const img of imgs) {
+      const src = img.getAttribute('src') || '';
+      const dataSrc = img.getAttribute('data-src') || '';
+      const dataType = img.getAttribute('data-type') || '';
+      const cls = img.getAttribute('class') || '';
+      const isMmbiz = src.includes('mmbiz.qpic.cn');
+      const isDataUri = src.startsWith('data:');
+      details.push({
+        src: src.substring(0, 100) + (src.length > 100 ? '...' : ''),
+        dataSrc: dataSrc ? 'yes' : 'NO',
+        dataType: dataType || 'NONE',
+        class: cls || 'NONE',
+        isMmbiz, isDataUri,
+        hasSrc: !!src,
+      });
+    }
+    return {
+      htmlLength: html.length,
+      imgCount: imgs.length,
+      gifCount: details.filter(d => d.dataType === 'gif').length,
+      mmbizCount: details.filter(d => d.isMmbiz).length,
+      dataUriCount: details.filter(d => d.isDataUri).length,
+      missingSrcCount: details.filter(d => !d.hasSrc).length,
+      images: details,
+    };
+  }
+
+  // Console API: type inspectClipboard() to get full diagnostics
+  window.inspectClipboard = function() {
+    if (!_lastCopiedHtml) { console.log('还没有复制过内容'); return null; }
+    const analysis = analyzeHtml(_lastCopiedHtml);
+    console.log('%c[剪贴板诊断]', 'color: #0070C0; font-weight: bold;');
+    console.log('复制方法:', _lastCopyMethod);
+    console.log('HTML 大小:', (analysis.htmlLength / 1024).toFixed(1) + 'KB');
+    console.log('图片总数:', analysis.imgCount);
+    console.log('GIF 数:', analysis.gifCount);
+    console.log('mmbiz CDN:', analysis.mmbizCount);
+    console.log('data:URI (未上传):', analysis.dataUriCount);
+    console.log('缺失 src:', analysis.missingSrcCount);
+    console.table(analysis.images);
+    console.log('完整 HTML (前2000字符):', _lastCopiedHtml.substring(0, 2000));
+    return analysis;
+  };
+
+  // Console API: type getClipboardHtml() to get the raw HTML string
+  window.getClipboardHtml = function() { return _lastCopiedHtml; };
+
   window.copyContent = async function() {
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
@@ -793,24 +857,44 @@ export function initApp(template) {
 
     const plainText = content.textContent || '';
     let ok = false;
+    _lastCopyMethod = '';
 
+    // Clipboard API first — writes exact HTML blob without DOM rendering,
+    // most reliable for preserving all image tags and attributes
     try {
-      ok = await copyByClipboardEvent(html, plainText);
+      ok = await copyByClipboardApi(html, plainText);
+      if (ok) _lastCopyMethod = 'ClipboardAPI';
     } catch {}
 
     if (!ok) {
       try {
-        ok = await copyByNativeTempSelection(html);
+        ok = await copyByClipboardEvent(html, plainText);
+        if (ok) _lastCopyMethod = 'ClipboardEvent';
       } catch {}
     }
 
     if (!ok) {
       try {
-        ok = await copyByClipboardApi(html, plainText);
+        ok = await copyByNativeTempSelection(html);
+        if (ok) _lastCopyMethod = 'NativeTempSelection';
       } catch {}
     }
 
-    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', payload.stats);
+    // Save for diagnostics
+    _lastCopiedHtml = html;
+    const analysis = analyzeHtml(html);
+    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', {
+      method: _lastCopyMethod,
+      htmlSize: (analysis.htmlLength / 1024).toFixed(1) + 'KB',
+      imgCount: analysis.imgCount,
+      gifCount: analysis.gifCount,
+      mmbizCount: analysis.mmbizCount,
+      dataUriCount: analysis.dataUriCount,
+      missingSrcCount: analysis.missingSrcCount,
+    });
+
+    // Update diagnostic panel if visible
+    if (window._updateDiagPanel) window._updateDiagPanel(analysis);
 
     btn.textContent = ok ? '已复制!' : '复制失败';
     btn.classList.add('copied');
