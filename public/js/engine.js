@@ -252,11 +252,17 @@ export function initApp(template) {
     }
   }
 
-  let _articleHtml = '';
+  // Article HTML — display layer always uses original images (base64 or mmbiz URLs).
+  // Copy layer: mmbiz URLs work directly in WeChat editor; base64 must be uploaded first.
+  let _articleHtml = '';   // display (original)
+  let _articleCopy = '';   // copy (base64 replaced with CDN URLs after upload)
   let _footerHtml = '';
+  let _uploadPromise = null;
+  let _uploadDone = false;
 
   function showPreview(title, articleContent, footerContent, stats) {
     _articleHtml = articleContent;
+    _articleCopy = articleContent;
     _footerHtml = footerContent;
 
     document.getElementById('uploadView').style.display = 'none';
@@ -273,6 +279,81 @@ export function initApp(template) {
       const enabled = document.getElementById('footerEnabled').checked;
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
     };
+
+    // Upload base64 images in background (DOCX only — Markdown uses URLs that work directly)
+    _uploadDone = false;
+    _uploadPromise = uploadBase64Images(document.getElementById('statsBar'), stats);
+  }
+
+  async function uploadBase64Images(statsBar, originalStats) {
+    // Collect data: URIs from article + footer
+    const allHtml = _articleCopy + '\n' + _footerHtml;
+    const base64Map = {};
+    const re = /src="(data:image\/[^"]+)"/g;
+    let m;
+    while ((m = re.exec(allHtml)) !== null) {
+      base64Map['img_' + Object.keys(base64Map).length] = m[1];
+    }
+
+    const total = Object.keys(base64Map).length;
+    if (total === 0) {
+      // No base64 images (Markdown file) — copy is ready immediately
+      _uploadDone = true;
+      logConv('info', '无需上传图片（全部为 URL）');
+      return;
+    }
+
+    logConv('info', '开始上传 DOCX 图片', { total });
+    statsBar.textContent = '上传图片 (0/' + total + ')...';
+    let done = 0, failed = 0;
+
+    // Upload in parallel, 5 at a time
+    const entries = Object.entries(base64Map);
+    const CONCURRENCY = 5;
+    let next = 0;
+
+    async function worker() {
+      while (next < entries.length) {
+        const [key, dataUri] = entries[next++];
+        try {
+          const resp = await fetch('/api/wechat-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64_images: { [key]: dataUri } })
+          });
+          if (resp.ok) {
+            const { results } = await resp.json();
+            const cdnUrl = results[key] || Object.values(results)[0];
+            if (cdnUrl) {
+              _articleCopy = _articleCopy.split(dataUri).join(cdnUrl);
+              logConv('info', '图片上传成功', { key, cdn: cdnUrl.substring(0, 60) + '...' });
+            } else {
+              failed++;
+              logConv('error', '图片上传失败（空URL）', { key });
+            }
+          } else {
+            failed++;
+            logConv('error', '图片上传HTTP错误', { key, status: resp.status });
+          }
+        } catch (e) {
+          failed++;
+          logConv('error', '图片上传网络错误', { key, error: e.message });
+        }
+        done++;
+        statsBar.textContent = '上传图片 (' + done + '/' + total + ')...';
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, entries.length) }, () => worker()));
+
+    _uploadDone = true;
+    if (failed > 0) {
+      statsBar.textContent = originalStats + ' | ' + failed + '张图片上传失败';
+      logConv('warn', '上传完成，' + failed + '张失败');
+    } else {
+      statsBar.textContent = originalStats + ' | 图片已就绪';
+      logConv('info', '全部图片上传成功', { total });
+    }
   }
 
   // ---- Conversion Log ----
@@ -331,9 +412,15 @@ export function initApp(template) {
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
 
-    // Use rendered HTML directly — no normalization, no DOMParser, no upload
+    // Wait for base64 upload if DOCX images are still uploading
+    if (_uploadPromise && !_uploadDone) {
+      btn.textContent = '等待图片上传...';
+      await _uploadPromise;
+    }
+
+    // Use copy layer — base64 replaced with CDN URLs, mmbiz URLs kept as-is
     const enabled = document.getElementById('footerEnabled').checked;
-    const html = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+    const html = _articleCopy + '\n' + (enabled ? _footerHtml : '');
     const plainText = content.textContent || '';
 
     let ok = false;
