@@ -522,30 +522,36 @@ export function initApp(template) {
         img.setAttribute('src', src);
       }
 
-      const cls = (img.getAttribute('class') || '').split(/\s+/).filter(Boolean);
-      if (!cls.includes('rich_pages')) cls.push('rich_pages');
-      if (!cls.includes('wxw-img')) cls.push('wxw-img');
-      if (!cls.includes('js_insertlocalimg')) cls.push('js_insertlocalimg');
+      for (const attr of [
+        'class',
+        'data-ratio',
+        'data-w',
+        'data-s',
+        'data-index',
+        'data-report-img-idx',
+        '_width',
+        'data-fail',
+        'data-imgfileid',
+        'data-original-style',
+        'data-gif-singleurl',
+        'data-cover',
+      ]) {
+        img.removeAttribute(attr);
+      }
 
       const inferred = inferWechatImageType(src);
-      const explicit = (img.getAttribute('data-type') || '').trim().toLowerCase();
-      const imgType = explicit || inferred;
-      if (imgType) img.setAttribute('data-type', imgType);
-
+      const isGif = inferred === 'gif' || looksLikeGifSource(src);
       img.setAttribute('data-src', src);
       img.removeAttribute('loading');
       img.removeAttribute('decoding');
       img.removeAttribute('referrerpolicy');
 
-      if ((imgType || '').toLowerCase() === 'gif' || looksLikeGifSource(src)) {
+      if (isGif) {
         stats.gif++;
         img.setAttribute('data-type', 'gif');
-        if (!cls.includes('__bg_gif')) cls.push('__bg_gif');
-        if (!img.getAttribute('data-gif-singleurl')) img.setAttribute('data-gif-singleurl', src);
-        if (!img.getAttribute('data-cover')) img.setAttribute('data-cover', src);
+      } else {
+        img.removeAttribute('data-type');
       }
-
-      img.setAttribute('class', cls.join(' '));
     }
     return { html: root.innerHTML, stats };
   }
