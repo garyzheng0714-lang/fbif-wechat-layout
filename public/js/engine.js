@@ -1,7 +1,7 @@
 // Shared WeChat formatting engine
 // Handles: XML parsing, DOCX extraction, image upload, MD parsing, UI
-import { inferImageMimeFromBase64, looksLikeGifSource } from './image-utils.mjs';
-export { looksLikeGifSource } from './image-utils.mjs';
+import { inferImageMimeFromBase64, inferWechatImageType, looksLikeGifSource } from './image-utils.mjs';
+export { inferWechatImageType, looksLikeGifSource } from './image-utils.mjs';
 
 // ---- XML Namespaces ----
 export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -358,10 +358,25 @@ export function initApp(template) {
         stats.missingSrc++;
         continue;
       }
-      if (src.startsWith('data:image/')) stats.dataUri++;
+      let normalizedSrc = src;
+      if (normalizedSrc.startsWith('http://mmbiz.qpic.cn/')) {
+        normalizedSrc = 'https://' + normalizedSrc.slice('http://'.length);
+        img.setAttribute('src', normalizedSrc);
+      }
+      if (normalizedSrc.startsWith('data:image/')) stats.dataUri++;
+
+      // WeChat editor compatibility: keep key metadata fields and class names.
+      img.removeAttribute('referrerpolicy');
+      img.setAttribute('data-src', normalizedSrc);
+      const cls = (img.getAttribute('class') || '').split(/\s+/).filter(Boolean);
+      if (!cls.includes('rich_pages')) cls.push('rich_pages');
+      if (!cls.includes('wxw-img')) cls.push('wxw-img');
+      img.setAttribute('class', cls.join(' '));
 
       const tagged = (img.getAttribute('data-type') || '').toLowerCase() === 'gif';
-      const likelyGif = looksLikeGifSource(src);
+      const inferredType = inferWechatImageType(normalizedSrc);
+      if (inferredType) img.setAttribute('data-type', inferredType);
+      const likelyGif = inferredType === 'gif' || looksLikeGifSource(normalizedSrc);
       if (tagged) stats.taggedGif++;
       if (likelyGif) {
         stats.likelyGif++;

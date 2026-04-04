@@ -49,3 +49,20 @@ export function inferImageMimeFromBase64(base64Data, ext) {
   if (sig.startsWith('UklGR')) return 'image/webp';
   return EXT_TO_MIME[(ext || '').toLowerCase()] || 'image/jpeg';
 }
+
+export function inferWechatImageType(src) {
+  if (looksLikeGifSource(src)) return 'gif';
+  const lower = (src || '').toLowerCase();
+  const decoded = safeDecode(lower);
+
+  if (lower.includes('/mmbiz_png/') || /\.png(?:$|[?#])/i.test(lower) ||
+      /[?&](wx_fmt|fmt|format|tp|type|mime|ext)=png(?:&|$)/i.test(decoded)) {
+    return 'png';
+  }
+  if (lower.includes('/mmbiz_jpg/') || lower.includes('/mmbiz_jpeg/') ||
+      /\.jpe?g(?:$|[?#])/i.test(lower) ||
+      /[?&](wx_fmt|fmt|format|tp|type|mime|ext)=jpe?g(?:&|$)/i.test(decoded)) {
+    return 'jpg';
+  }
+  return '';
+}
