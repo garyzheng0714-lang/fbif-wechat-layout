@@ -5,6 +5,7 @@ import { inferImageMimeFromBase64, inferWechatImageType, looksLikeGifSource } fr
 test('looksLikeGifSource detects common gif URL variants', () => {
   assert.equal(looksLikeGifSource('https://example.com/a.gif'), true);
   assert.equal(looksLikeGifSource('https://mmbiz.qpic.cn/mmbiz_gif/abc/640'), true);
+  assert.equal(looksLikeGifSource('https://mmbiz.qpic.cn/sz_mmbiz_gif/abc/640'), true);
   assert.equal(looksLikeGifSource('https://mmbiz.qpic.cn/mmbiz_jpg/abc/640?wx_fmt=gif'), true);
   assert.equal(looksLikeGifSource('https://mmbiz.qpic.cn/mmbiz_png/abc/640?fmt=gif'), true);
   assert.equal(looksLikeGifSource('https://example.com/a.png?wx_fmt=png'), false);
@@ -30,6 +31,9 @@ test('inferImageMimeFromBase64 falls back to extension when signature unknown', 
 
 test('inferWechatImageType infers gif/png/jpg for wechat URLs', () => {
   assert.equal(inferWechatImageType('https://mmbiz.qpic.cn/mmbiz_gif/abc/0?from=appmsg'), 'gif');
+  assert.equal(inferWechatImageType('https://mmbiz.qpic.cn/sz_mmbiz_gif/abc/0?from=appmsg'), 'gif');
+  assert.equal(inferWechatImageType('https://mmbiz.qpic.cn/sz_mmbiz_png/abc/0?from=appmsg'), 'png');
+  assert.equal(inferWechatImageType('https://mmbiz.qpic.cn/sz_mmbiz_jpg/abc/0?from=appmsg'), 'jpg');
   assert.equal(inferWechatImageType('https://mmbiz.qpic.cn/mmbiz_png/abc/0?from=appmsg'), 'png');
   assert.equal(inferWechatImageType('https://mmbiz.qpic.cn/mmbiz_jpg/abc/0?from=appmsg'), 'jpg');
   assert.equal(inferWechatImageType('https://x.com/a.jpg?wx_fmt=jpeg'), 'jpg');

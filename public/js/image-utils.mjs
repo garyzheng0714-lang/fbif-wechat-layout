@@ -16,6 +16,13 @@ function safeDecode(value) {
   }
 }
 
+function inferWechatPathType(lower) {
+  if (/(?:^|\/)(?:[a-z0-9]+_)?mmbiz_gif\//i.test(lower)) return 'gif';
+  if (/(?:^|\/)(?:[a-z0-9]+_)?mmbiz_png\//i.test(lower)) return 'png';
+  if (/(?:^|\/)(?:[a-z0-9]+_)?mmbiz_jpe?g\//i.test(lower)) return 'jpg';
+  return '';
+}
+
 export function looksLikeGifSource(src) {
   if (typeof src !== 'string') return false;
   const raw = src.trim();
@@ -23,7 +30,7 @@ export function looksLikeGifSource(src) {
 
   const lower = raw.toLowerCase();
   if (lower.startsWith('data:image/gif')) return true;
-  if (lower.includes('/mmbiz_gif/')) return true;
+  if (inferWechatPathType(lower) === 'gif') return true;
   if (/\.gif(?:$|[?#])/i.test(lower)) return true;
 
   const decoded = safeDecode(lower);
@@ -54,13 +61,14 @@ export function inferWechatImageType(src) {
   if (looksLikeGifSource(src)) return 'gif';
   const lower = (src || '').toLowerCase();
   const decoded = safeDecode(lower);
+  const byPath = inferWechatPathType(lower);
+  if (byPath) return byPath;
 
-  if (lower.includes('/mmbiz_png/') || /\.png(?:$|[?#])/i.test(lower) ||
+  if (/\.png(?:$|[?#])/i.test(lower) ||
       /[?&](wx_fmt|fmt|format|tp|type|mime|ext)=png(?:&|$)/i.test(decoded)) {
     return 'png';
   }
-  if (lower.includes('/mmbiz_jpg/') || lower.includes('/mmbiz_jpeg/') ||
-      /\.jpe?g(?:$|[?#])/i.test(lower) ||
+  if (/\.jpe?g(?:$|[?#])/i.test(lower) ||
       /[?&](wx_fmt|fmt|format|tp|type|mime|ext)=jpe?g(?:&|$)/i.test(decoded)) {
     return 'jpg';
   }

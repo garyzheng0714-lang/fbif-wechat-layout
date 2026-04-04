@@ -444,7 +444,7 @@ export function initApp(template) {
     };
   }
 
-  function getReadyPushPayload(enabled, previewMeta = []) {
+  function getReadyDraftPayload(enabled, previewMeta = []) {
     const articleNorm = normalizePushHtmlForWechat(_articlePush, { metaList: previewMeta, metaOffset: 0 });
     _articlePush = articleNorm.html;
 
@@ -470,6 +470,166 @@ export function initApp(template) {
     return {
       html: _articlePush + '\n' + (enabled ? _footerPush : ''),
       stats,
+    };
+  }
+
+  function inspectImageStatsFromHtml(html) {
+    const out = {
+      total: 0,
+      gif: 0,
+      missingSrc: 0,
+      dataUri: 0,
+      sample: [],
+    };
+    const doc = new DOMParser().parseFromString('<div id="root">' + html + '</div>', 'text/html');
+    const root = doc.getElementById('root');
+    if (!root) return out;
+    for (const img of root.querySelectorAll('img')) {
+      out.total++;
+      const src = (img.getAttribute('src') || '').trim();
+      const type = (img.getAttribute('data-type') || '').trim().toLowerCase();
+      const dataSrc = (img.getAttribute('data-src') || '').trim();
+      if (!src) out.missingSrc++;
+      if (src.startsWith('data:image/')) out.dataUri++;
+      if (type === 'gif' || looksLikeGifSource(src) || looksLikeGifSource(dataSrc)) out.gif++;
+      if (out.sample.length < 6) {
+        out.sample.push({
+          src: src.slice(0, 180),
+          dataSrc: dataSrc.slice(0, 180),
+          type,
+          cls: (img.getAttribute('class') || '').trim(),
+        });
+      }
+    }
+    return out;
+  }
+
+  function normalizeCopyHtmlForWechat(html) {
+    const doc = new DOMParser().parseFromString('<div id="root">' + html + '</div>', 'text/html');
+    const root = doc.getElementById('root');
+    if (!root) return { html, stats: { total: 0, gif: 0, missingSrc: 0 } };
+
+    const stats = { total: 0, gif: 0, missingSrc: 0 };
+    for (const img of root.querySelectorAll('img')) {
+      stats.total++;
+      let src = (img.getAttribute('src') || '').trim();
+      if (!src) {
+        stats.missingSrc++;
+        continue;
+      }
+      if (src.startsWith('http://mmbiz.qpic.cn/')) {
+        src = 'https://' + src.slice('http://'.length);
+        img.setAttribute('src', src);
+      }
+
+      const cls = (img.getAttribute('class') || '').split(/\s+/).filter(Boolean);
+      if (!cls.includes('rich_pages')) cls.push('rich_pages');
+      if (!cls.includes('wxw-img')) cls.push('wxw-img');
+      if (!cls.includes('js_insertlocalimg')) cls.push('js_insertlocalimg');
+
+      const inferred = inferWechatImageType(src);
+      const explicit = (img.getAttribute('data-type') || '').trim().toLowerCase();
+      const imgType = explicit || inferred;
+      if (imgType) img.setAttribute('data-type', imgType);
+
+      img.setAttribute('data-src', src);
+      img.removeAttribute('loading');
+      img.removeAttribute('decoding');
+      img.removeAttribute('referrerpolicy');
+
+      if ((imgType || '').toLowerCase() === 'gif' || looksLikeGifSource(src)) {
+        stats.gif++;
+        img.setAttribute('data-type', 'gif');
+        if (!cls.includes('__bg_gif')) cls.push('__bg_gif');
+        if (!img.getAttribute('data-gif-singleurl')) img.setAttribute('data-gif-singleurl', src);
+        if (!img.getAttribute('data-cover')) img.setAttribute('data-cover', src);
+      }
+
+      img.setAttribute('class', cls.join(' '));
+    }
+    return { html: root.innerHTML, stats };
+  }
+
+  async function copyByClipboardEvent(html, plainText, contentNode) {
+    const handler = function(e) {
+      e.clipboardData.setData('text/html', html);
+      e.clipboardData.setData('text/plain', plainText);
+      e.preventDefault();
+    };
+    document.addEventListener('copy', handler, true);
+    try {
+      const target = contentNode || document.body;
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      const ok = document.execCommand('copy');
+      sel.removeAllRanges();
+      return !!ok;
+    } finally {
+      document.removeEventListener('copy', handler, true);
+    }
+  }
+
+  async function copyByNativeTempSelection(html) {
+    const temp = document.createElement('div');
+    temp.style.position = 'fixed';
+    temp.style.left = '-99999px';
+    temp.style.top = '0';
+    temp.innerHTML = html;
+    document.body.appendChild(temp);
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(temp);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      const ok = document.execCommand('copy');
+      sel.removeAllRanges();
+      return !!ok;
+    } finally {
+      document.body.removeChild(temp);
+    }
+  }
+
+  async function copyByClipboardApi(html, plainText) {
+    if (!(navigator.clipboard && typeof ClipboardItem !== 'undefined')) return false;
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([plainText], { type: 'text/plain' }),
+    })]);
+    return true;
+  }
+
+  async function probeClipboardHtmlStats() {
+    if (!(navigator.clipboard && typeof navigator.clipboard.read === 'function')) return null;
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        if (!item.types.includes('text/html')) continue;
+        const blob = await item.getType('text/html');
+        const text = await blob.text();
+        return inspectImageStatsFromHtml(text);
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  let _lastCopyDebug = null;
+  window.getLastCopyDebug = function() {
+    return _lastCopyDebug ? JSON.parse(JSON.stringify(_lastCopyDebug)) : null;
+  };
+
+  function getReadyCopyPayload(enabled, previewMeta = []) {
+    const base = getReadyDraftPayload(enabled, previewMeta);
+    const copyNorm = normalizeCopyHtmlForWechat(base.html);
+    return {
+      html: copyNorm.html,
+      stats: base.stats,
+      copyStats: copyNorm.stats,
     };
   }
 
@@ -661,7 +821,7 @@ export function initApp(template) {
 
     // Use PUSH layer (WeChat CDN URLs), not display layer (base64/original)
     const enabled = document.getElementById('footerEnabled').checked;
-    const payload = getReadyPushPayload(enabled, collectPreviewImageMeta(content));
+    const payload = getReadyCopyPayload(enabled, collectPreviewImageMeta(content));
     if (payload.stats.dataUri > 0 || payload.stats.missingSrc > 0) {
       logConv('error', '复制前校验失败', payload.stats);
       btn.textContent = '图片未就绪，无法复制';
@@ -670,36 +830,52 @@ export function initApp(template) {
     }
     const html = payload.html;
 
+    const plainText = content.textContent || '';
     let ok = false;
-    // Prefer legacy copy path for WeChat editor compatibility.
-    // Use a hidden temp container with PUSH HTML and let browser generate native clipboard formats (CF_HTML).
-    {
-      const temp = document.createElement('div');
-      temp.style.position = 'fixed';
-      temp.style.left = '-99999px';
-      temp.style.top = '0';
-      temp.innerHTML = html;
-      document.body.appendChild(temp);
+    let strategy = '';
+    const attempts = [];
 
-      const range = document.createRange();
-      range.selectNodeContents(temp);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-      ok = document.execCommand('copy');
-      sel.removeAllRanges();
-      document.body.removeChild(temp);
+    try {
+      ok = await copyByClipboardEvent(html, plainText, content);
+      attempts.push({ strategy: 'clipboard-event', ok });
+      if (ok) strategy = 'clipboard-event';
+    } catch (e) {
+      attempts.push({ strategy: 'clipboard-event', ok: false, error: e.message });
     }
 
-    if (!ok && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+    if (!ok) {
       try {
-        await navigator.clipboard.write([new ClipboardItem({
-          'text/html': new Blob([html], { type: 'text/html' }),
-          'text/plain': new Blob([content.textContent || ''], { type: 'text/plain' }),
-        })]);
-        ok = true;
-      } catch (e) { /* keep failed state */ }
+        ok = await copyByNativeTempSelection(html);
+        attempts.push({ strategy: 'native-temp-selection', ok });
+        if (ok) strategy = 'native-temp-selection';
+      } catch (e) {
+        attempts.push({ strategy: 'native-temp-selection', ok: false, error: e.message });
+      }
     }
+
+    if (!ok) {
+      try {
+        ok = await copyByClipboardApi(html, plainText);
+        attempts.push({ strategy: 'clipboard-api', ok });
+        if (ok) strategy = 'clipboard-api';
+      } catch (e) {
+        attempts.push({ strategy: 'clipboard-api', ok: false, error: e.message });
+      }
+    }
+
+    const copiedProbe = ok ? await probeClipboardHtmlStats() : null;
+    _lastCopyDebug = {
+      time: new Date().toISOString(),
+      ok,
+      strategy,
+      attempts,
+      normalizeStats: payload.stats,
+      copyStats: payload.copyStats,
+      payloadProbe: inspectImageStatsFromHtml(html),
+      clipboardProbe: copiedProbe,
+    };
+    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', _lastCopyDebug);
+
     btn.textContent = ok ? '已复制!' : '复制失败';
     btn.classList.add('copied');
     setTimeout(() => { btn.textContent = '复制正文'; btn.classList.remove('copied'); }, 2000);
@@ -730,7 +906,7 @@ export function initApp(template) {
 
       // Use push layer (WeChat CDN URLs), not display layer
       const enabled = document.getElementById('footerEnabled').checked;
-      const payload = getReadyPushPayload(enabled, collectPreviewImageMeta(document.getElementById('contentArea')));
+      const payload = getReadyDraftPayload(enabled, collectPreviewImageMeta(document.getElementById('contentArea')));
       if (payload.stats.dataUri > 0 || payload.stats.missingSrc > 0) {
         throw new Error('图片未就绪，请重新上传');
       }
