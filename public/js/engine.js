@@ -671,29 +671,41 @@ export function initApp(template) {
     const html = payload.html;
 
     let ok = false;
-    if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+    // Prefer legacy copy path for WeChat editor compatibility.
+    // Use a hidden temp container with PUSH HTML so browser default copy never falls back to display layer.
+    {
+      const temp = document.createElement('div');
+      temp.style.position = 'fixed';
+      temp.style.left = '-99999px';
+      temp.style.top = '0';
+      temp.innerHTML = html;
+      document.body.appendChild(temp);
+
+      const handler = function(e) {
+        e.clipboardData.setData('text/html', html);
+        e.clipboardData.setData('text/plain', temp.textContent || content.textContent || '');
+        e.preventDefault();
+      };
+      document.addEventListener('copy', handler);
+      const range = document.createRange();
+      range.selectNodeContents(temp);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      ok = document.execCommand('copy');
+      sel.removeAllRanges();
+      document.removeEventListener('copy', handler);
+      document.body.removeChild(temp);
+    }
+
+    if (!ok && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
       try {
         await navigator.clipboard.write([new ClipboardItem({
           'text/html': new Blob([html], { type: 'text/html' }),
           'text/plain': new Blob([content.textContent || ''], { type: 'text/plain' }),
         })]);
         ok = true;
-      } catch (e) { /* fallback */ }
-    }
-    if (!ok) {
-      const handler = function(e) {
-        e.clipboardData.setData('text/html', html);
-        e.clipboardData.setData('text/plain', content.textContent || '');
-        e.preventDefault();
-      };
-      document.addEventListener('copy', handler);
-      const range = document.createRange();
-      range.selectNodeContents(content);
-      const sel = window.getSelection();
-      sel.removeAllRanges(); sel.addRange(range);
-      ok = document.execCommand('copy');
-      sel.removeAllRanges();
-      document.removeEventListener('copy', handler);
+      } catch (e) { /* keep failed state */ }
     }
     btn.textContent = ok ? '已复制!' : '复制失败';
     btn.classList.add('copied');
