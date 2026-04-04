@@ -7,96 +7,209 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; min-height: 100vh; }
-.container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
-h1 { font-size: 28px; color: #1a1a1a; margin-bottom: 8px; }
-.subtitle { color: #666; font-size: 15px; margin-bottom: 32px; }
-.back-link { color: #0070C0; text-decoration: none; font-size: 14px; display: inline-block; margin-bottom: 16px; }
-.back-link:hover { text-decoration: underline; }
-.upload-zone {
-  border: 2px dashed #d0d0d0; border-radius: 12px; padding: 60px 40px;
-  text-align: center; background: #fff; cursor: pointer; transition: all 0.2s;
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #F8F9FA; min-height: 100vh;
 }
-.upload-zone:hover, .upload-zone.dragover { border-color: #0070C0; background: #f8fbff; }
-.upload-zone.processing { border-color: #faad14; background: #fffbe6; pointer-events: none; }
-.upload-icon { font-size: 48px; margin-bottom: 16px; }
-.upload-text { font-size: 16px; color: #333; margin-bottom: 8px; }
-.upload-hint { font-size: 13px; color: #999; }
-input[type="file"] { display: none; }
-.progress { display: none; margin-top: 24px; }
-.progress-bar { height: 4px; background: #e8e8e8; border-radius: 2px; overflow: hidden; }
-.progress-fill { height: 100%; background: #0070C0; width: 0%; transition: width 0.3s; }
-.progress-text { font-size: 13px; color: #666; margin-top: 8px; text-align: center; }
-.error { color: #ff4d4f; margin-top: 16px; font-size: 14px; display: none; }
 
+/* ---- Upload View ---- */
+.container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+h1 { font-size: 22px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+.subtitle { color: #6B7280; font-size: 14px; margin-bottom: 24px; }
+
+/* Template pill switcher */
+.template-pills {
+  display: inline-flex; gap: 4px; background: #F3F4F6; border-radius: 6px;
+  padding: 3px; margin-bottom: 24px;
+}
+.template-pill {
+  padding: 6px 16px; border-radius: 4px; border: none; background: transparent;
+  font-size: 14px; font-weight: 500; color: #6B7280; cursor: pointer;
+  transition: all 150ms ease-out;
+}
+.template-pill:hover { color: #111827; }
+.template-pill.active {
+  background: #FFFFFF; color: #1D4ED8; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* Upload zone */
+.upload-zone {
+  border: 2px dashed #E5E7EB; border-radius: 8px; padding: 36px 40px;
+  text-align: center; background: #FFFFFF; cursor: pointer; transition: all 150ms ease-out;
+}
+.upload-zone:hover, .upload-zone.dragover { border-color: #1D4ED8; background: #EFF6FF; }
+.upload-zone.processing { border-color: #D97706; background: #FFFBEB; pointer-events: none; }
+.upload-icon { font-size: 40px; margin-bottom: 12px; }
+.upload-text { font-size: 14px; color: #111827; margin-bottom: 4px; }
+.upload-hint { font-size: 12px; color: #9CA3AF; margin-bottom: 16px; }
+input[type="file"] { display: none; }
+
+/* Inline URL input inside upload zone */
+.upload-url-row {
+  display: flex; gap: 8px; max-width: 480px; margin: 0 auto;
+  border-top: 1px solid #F3F4F6; padding-top: 16px;
+}
+.upload-url-row input {
+  flex: 1; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px;
+  font-size: 13px; background: #F8F9FA; color: #111827;
+}
+.upload-url-row input:focus { outline: none; border-color: #1D4ED8; background: #FFFFFF; }
+.upload-url-row input::placeholder { color: #9CA3AF; }
+.upload-url-row button {
+  padding: 8px 16px; background: #1D4ED8; color: #FFFFFF; border: none;
+  border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+  white-space: nowrap; transition: background 150ms ease-out;
+}
+.upload-url-row button:hover { background: #1E40AF; }
+.upload-url-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Progress */
+.progress { display: none; margin-top: 24px; }
+.progress-bar { height: 4px; background: #F3F4F6; border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: #1D4ED8; width: 0%; transition: width 0.3s; }
+.progress-text { font-size: 12px; color: #6B7280; margin-top: 8px; text-align: center; }
+.error { color: #DC2626; margin-top: 16px; font-size: 14px; display: none; }
+
+/* ---- Preview View ---- */
 #previewView { display: none; }
+
+/* Dark toolbar */
 .toolbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  background: #fff; border-bottom: 1px solid #e8e8e8; padding: 12px 20px;
-  display: flex; align-items: center; gap: 12px;
+  background: #1F2937; padding: 0 16px; height: 48px;
+  display: flex; align-items: center; gap: 8px;
 }
-.toolbar h2 { font-size: 16px; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.btn {
-  padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px;
-  cursor: pointer; transition: all 0.2s; font-weight: 500; white-space: nowrap;
+.toolbar-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* Back button */
+.tb-back {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 6px; border: none;
+  background: transparent; color: #F9FAFB; cursor: pointer;
+  font-size: 18px; transition: background 150ms ease-out;
 }
-.btn-primary { background: #0070C0; color: #fff; }
-.btn-primary:hover { background: #005a9e; }
-.btn-primary.copied { background: #27ae60; }
-.btn-secondary { background: #f0f0f0; color: #333; text-decoration: none; }
-.btn-secondary:hover { background: #e0e0e0; }
-.btn-retry { background: #fff1f0; color: #ff4d4f; border: 1px solid #ff4d4f; }
-.btn-retry:hover { background: #ff4d4f; color: #fff; }
-.btn-retry:disabled { opacity: 0.5; cursor: not-allowed; }
-.toolbar input[type="text"] {
-  flex: 1; min-width: 120px; padding: 6px 12px; border: 1px solid #ddd;
-  border-radius: 6px; font-size: 14px; background: #f8f8f8;
+.tb-back:hover { background: rgba(255,255,255,0.1); }
+
+/* Filename display */
+.tb-filename {
+  font-size: 14px; color: #F9FAFB; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 280px;
 }
-.toolbar input[type="text"]:focus { outline: none; border-color: #0070C0; background: #fff; }
-.footer-toggle {
-  display: flex; align-items: center; gap: 4px; cursor: pointer;
-  font-size: 13px; color: #666; white-space: nowrap; user-select: none;
+
+/* Template chip in toolbar */
+.tb-template-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15);
+  background: transparent; color: #9CA3AF; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
 }
-.footer-toggle input { cursor: pointer; }
-.zoom-controls {
-  display: flex; align-items: center; gap: 4px; background: #f0f0f0;
-  border-radius: 6px; padding: 2px;
+.tb-template-chip:hover { border-color: rgba(255,255,255,0.3); color: #F9FAFB; }
+.tb-template-chip .chip-arrow { font-size: 10px; opacity: 0.6; }
+
+/* Template chip dropdown */
+.tb-chip-dropdown {
+  position: absolute; top: 44px; background: #FFFFFF; border: 1px solid #E5E7EB;
+  border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); z-index: 200;
+  display: none; overflow: hidden;
 }
-.zoom-controls .btn { padding: 6px 12px; font-size: 16px; min-width: 36px; }
-.zoom-label { font-size: 13px; color: #666; min-width: 45px; text-align: center; }
+.tb-chip-dropdown.open { display: block; }
+.tb-chip-option {
+  padding: 8px 16px; font-size: 13px; color: #111827; cursor: pointer;
+  border: none; background: none; width: 100%; text-align: left;
+  transition: background 150ms ease-out;
+}
+.tb-chip-option:hover { background: #EFF6FF; }
+.tb-chip-option.active { color: #1D4ED8; font-weight: 500; }
+
+/* Icon buttons in toolbar */
+.tb-icon-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 6px; border: none;
+  background: transparent; color: #9CA3AF; cursor: pointer;
+  font-size: 16px; transition: all 150ms ease-out; position: relative;
+}
+.tb-icon-btn:hover { background: rgba(255,255,255,0.1); color: #F9FAFB; }
+.tb-icon-btn.active { color: #1D4ED8; }
+.tb-icon-btn[title]:hover::after {
+  content: attr(title); position: absolute; bottom: -28px; left: 50%;
+  transform: translateX(-50%); background: #111827; color: #F9FAFB;
+  padding: 3px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Zoom display */
+.tb-zoom-label {
+  font-size: 11px; color: #6B7280; min-width: 32px; text-align: center;
+  user-select: none;
+}
+
+/* Copy button — primary in toolbar */
+.tb-copy-btn {
+  padding: 6px 16px; border-radius: 6px; border: none;
+  background: #1D4ED8; color: #FFFFFF; font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
+}
+.tb-copy-btn:hover { background: #1E40AF; }
+.tb-copy-btn:active { transform: scale(0.98); }
+.tb-copy-btn.copied { background: #059669; }
+
+/* Retry button */
+.tb-retry-btn {
+  padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
+  background: rgba(220,38,38,0.15); color: #FCA5A5; border: none;
+  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
+}
+.tb-retry-btn:hover { background: rgba(220,38,38,0.25); }
+.tb-retry-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Success bar */
+.copy-success-bar {
+  position: fixed; top: 48px; left: 0; right: 0; z-index: 99;
+  background: #ECFDF5; color: #059669; font-size: 13px;
+  padding: 8px 16px; text-align: center; display: none;
+  border-bottom: 1px solid #A7F3D0;
+}
+.copy-success-bar.visible { display: block; }
+
+/* Hidden elements preserved for engine.js */
+#titleInput { display: none; }
+#previewTitleDisplay { display: none; }
 
 /* ---- Layout: Preview with floating TOC ---- */
 .preview-layout {
-  margin-top: 60px; min-height: calc(100vh - 60px);
-  position: relative;
+  margin-top: 48px; min-height: calc(100vh - 48px); position: relative;
 }
+.preview-layout.with-success-bar { margin-top: 84px; }
 
-/* Floating TOC — sticks to left of phone frame */
+/* Floating TOC */
 .toc-float {
-  position: fixed; top: 80px; z-index: 50;
-  background: #fff; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  padding: 12px; max-width: 180px; max-height: calc(100vh - 120px);
-  overflow-y: auto; border: 1px solid #eee;
+  position: fixed; top: 68px; z-index: 50;
+  background: #FFFFFF; border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  padding: 12px; max-width: 180px; max-height: calc(100vh - 108px);
+  overflow-y: auto; border: 1px solid #E5E7EB;
 }
-.toc-title { font-size: 12px; font-weight: 600; color: #999; margin-bottom: 8px; }
+.toc-title { font-size: 12px; font-weight: 600; color: #9CA3AF; margin-bottom: 8px; }
 .toc-list { list-style: none; }
 .toc-item {
-  padding: 5px 8px; font-size: 12px; color: #666; cursor: pointer;
+  padding: 5px 8px; font-size: 12px; color: #6B7280; cursor: pointer;
   border-radius: 4px; margin-bottom: 1px; line-height: 1.4;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: all 0.15s; border-left: 2px solid transparent;
+  transition: all 150ms ease-out; border-left: 2px solid transparent;
 }
-.toc-item:hover { color: #0070C0; background: #f8fbff; }
-.toc-item.active { color: #0070C0; font-weight: 500; border-left-color: #0070C0; }
-.toc-empty { font-size: 11px; color: #ccc; padding: 4px 8px; }
+.toc-item:hover { color: #1D4ED8; background: #EFF6FF; }
+.toc-item.active { color: #1D4ED8; font-weight: 500; border-left-color: #1D4ED8; }
+.toc-empty { font-size: 11px; color: #9CA3AF; padding: 4px 8px; }
 
 /* Preview center */
 .preview-main {
-  padding: 12px; overflow-y: auto; height: calc(100vh - 60px);
+  padding: 12px; overflow-y: auto; height: calc(100vh - 48px);
 }
+.preview-main.with-success-bar { height: calc(100vh - 84px); }
 .phone-frame {
-  max-width: 840px; margin: 0 auto; background: #fff;
-  border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  max-width: 840px; margin: 0 auto; background: #FFFFFF;
+  border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
   overflow: hidden; transition: max-width 0.3s ease;
 }
 .phone-frame img { max-width: 100%; height: auto; }
@@ -105,7 +218,8 @@ input[type="file"] { display: none; }
   background: rgba(0,0,0,0.75); color: #fff; padding: 8px 20px;
   border-radius: 20px; font-size: 13px; z-index: 100;
 }
-/* ---- Global Status Bar (always visible) ---- */
+
+/* ---- Global Status Bar ---- */
 #globalStatusBar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 999;
   background: #1a1a2e; color: #ccc; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
@@ -134,64 +248,38 @@ input[type="file"] { display: none; }
 
 /* ---- Batch File List ---- */
 .batch-list {
-  margin-top: 16px; background: #fff; border-radius: 8px;
+  margin-top: 16px; background: #FFFFFF; border-radius: 6px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden;
 }
-.batch-title { padding: 10px 16px; font-size: 13px; color: #999; border-bottom: 1px solid #f0f0f0; }
+.batch-title { padding: 10px 16px; font-size: 12px; color: #9CA3AF; border-bottom: 1px solid #F3F4F6; }
 .batch-item {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 16px; cursor: pointer; border-bottom: 1px solid #f8f8f8;
+  padding: 10px 16px; cursor: pointer; border-bottom: 1px solid #F3F4F6;
 }
-.batch-item:hover { background: #f8fbff; }
-.batch-name { font-size: 14px; color: #333; }
-.batch-status { font-size: 12px; color: #999; }
-.batch-status.processing { color: #faad14; }
-.batch-status.done { color: #52c41a; }
-.batch-status.failed { color: #ff4d4f; }
+.batch-item:hover { background: #EFF6FF; }
+.batch-name { font-size: 14px; color: #111827; }
+.batch-status { font-size: 12px; color: #9CA3AF; }
+.batch-status.processing { color: #D97706; }
+.batch-status.done { color: #059669; }
+.batch-status.failed { color: #DC2626; }
 
-/* ---- Mobile Responsive (< 768px) ---- */
+/* ---- Mobile ---- */
 @media (max-width: 768px) {
   .container { padding: 20px 12px; }
-  h1 { font-size: 22px; }
-  .upload-zone { padding: 40px 20px; }
-  .toolbar {
-    flex-wrap: wrap; gap: 8px; padding: 8px 12px;
-  }
-  .toolbar h2 { font-size: 14px; min-width: 0; flex-basis: 100%; }
-  .zoom-controls { display: none; }
-  .btn { padding: 6px 14px; font-size: 13px; }
+  h1 { font-size: 18px; }
+  .upload-zone { padding: 24px 16px; }
+  .toolbar { padding: 0 8px; gap: 4px; }
+  .tb-filename { max-width: 120px; font-size: 13px; }
+  .tb-copy-btn { padding: 6px 12px; font-size: 12px; }
+  .tb-zoom-label, .tb-icon-btn.zoom-btn { display: none; }
   .toc-float { display: none !important; }
   .preview-main { padding: 8px; }
   .phone-frame { max-width: 100% !important; border-radius: 0; }
   .stats-bar { font-size: 11px; padding: 6px 14px; bottom: 46px; }
-  .url-input-row { flex-direction: column; }
-  .url-input-row input { min-width: 0; }
+  .upload-url-row { flex-direction: column; }
+  .upload-url-row input { min-width: 0; }
+  .template-pills { margin-bottom: 16px; }
 }
-/* ---- URL Repost ---- */
-.url-section {
-  margin-top: 24px; text-align: center;
-}
-.url-divider {
-  display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
-  color: #999; font-size: 13px;
-}
-.url-divider::before, .url-divider::after {
-  content: ''; flex: 1; height: 1px; background: #e0e0e0;
-}
-.url-input-row {
-  display: flex; gap: 8px; max-width: 600px; margin: 0 auto;
-}
-.url-input-row input {
-  flex: 1; padding: 10px 14px; border: 1px solid #d0d0d0; border-radius: 8px;
-  font-size: 14px;
-}
-.url-input-row input:focus { outline: none; border-color: #0070C0; }
-.url-input-row button {
-  padding: 10px 20px; background: #0070C0; color: #fff; border: none;
-  border-radius: 8px; font-size: 14px; cursor: pointer; white-space: nowrap;
-}
-.url-input-row button:hover { background: #005a9e; }
-.url-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -199,52 +287,75 @@ input[type="file"] { display: none; }
 <!-- Upload View -->
 <div id="uploadView">
   <div class="container">
-    <a href="/" class="back-link">&larr; 返回选择</a>
-    <h1 id="pageTitle"></h1>
-    <p class="subtitle" id="pageSubtitle"></p>
+    <h1>FBIF 微信排版工具</h1>
+    <p class="subtitle" id="pageSubtitle">选择模板，上传文档一键生成微信公众号格式</p>
+
+    <div class="template-pills" id="templatePills">
+      <button class="template-pill active" data-template="fbif">FBIF 公众号</button>
+      <button class="template-pill" data-template="mote">Mote 排版</button>
+    </div>
+
+    <!-- Hidden element for engine.js compatibility -->
+    <span id="pageTitle" style="display:none;"></span>
+
     <div class="upload-zone" id="dropZone">
       <div class="upload-icon">📄</div>
       <div class="upload-text">点击上传或拖拽文件到这里</div>
-      <div class="upload-hint" id="fileHint"></div>
+      <div class="upload-hint" id="fileHint">支持 .docx、.md、.txt 格式</div>
       <input type="file" id="fileInput">
+      <div class="upload-url-row" onclick="event.stopPropagation()">
+        <input type="url" id="urlInput" placeholder="或粘贴微信文章 / 网页链接">
+        <button id="urlFetchBtn" onclick="fetchArticle()">抓取</button>
+      </div>
     </div>
+
     <div class="progress" id="progress">
       <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
       <div class="progress-text" id="progressText">正在排版...</div>
     </div>
     <div class="error" id="error"></div>
     <div class="batch-list" id="batchList" style="display:none;"></div>
-    <div class="url-section">
-      <div class="url-divider">或粘贴文章链接转载</div>
-      <div class="url-input-row">
-        <input type="url" id="urlInput" placeholder="粘贴微信文章或网页链接">
-        <button id="urlFetchBtn" onclick="fetchArticle()">抓取转载</button>
-      </div>
-    </div>
   </div>
 </div>
 
 <!-- Preview View -->
 <div id="previewView">
   <div class="toolbar">
-    <input type="text" id="titleInput" maxlength="64" placeholder="文章标题"
-      oninput="document.getElementById('previewTitleDisplay').textContent = this.value">
-    <label class="footer-toggle" title="显示/隐藏页脚">
-      <input type="checkbox" id="footerEnabled" checked onchange="toggleFooter()">
-      <span class="footer-label">页脚</span>
-    </label>
-    <div class="zoom-controls">
-      <button class="btn btn-secondary" onclick="zoom(-1)">-</button>
-      <span class="zoom-label" id="zoomLabel">200%</span>
-      <button class="btn btn-secondary" onclick="zoom(1)">+</button>
+    <div class="toolbar-left">
+      <button class="tb-back" id="backBtn" title="返回">&#8592;</button>
+      <span class="tb-filename" id="filenameDisplay"></span>
+      <button class="tb-template-chip" id="templateChip">
+        <span id="templateChipLabel">FBIF</span>
+        <span class="chip-arrow">&#9662;</span>
+      </button>
+      <div class="tb-chip-dropdown" id="templateChipDropdown">
+        <button class="tb-chip-option active" data-template="fbif">FBIF 公众号</button>
+        <button class="tb-chip-option" data-template="mote">Mote 排版</button>
+      </div>
     </div>
-    <button class="btn btn-secondary" onclick="goBack()">&#8592; 重新上传</button>
-    <button class="btn btn-retry" id="retryBtn" onclick="retryUpload()" style="display:none;">重试上传</button>
-    <button class="btn btn-primary" id="copyBtn" onclick="copyContent()">复制正文</button>
+    <div class="toolbar-right">
+      <button class="tb-retry-btn" id="retryBtn" onclick="retryUpload()" style="display:none;">重试上传</button>
+      <button class="tb-icon-btn" id="footerToggleBtn" title="页脚">
+        <span id="footerToggleIcon">&#9745;</span>
+      </button>
+      <button class="tb-icon-btn zoom-btn" onclick="zoom(-1)" title="缩小">&#8722;</button>
+      <span class="tb-zoom-label" id="zoomLabel">200%</span>
+      <button class="tb-icon-btn zoom-btn" onclick="zoom(1)" title="放大">&#43;</button>
+      <button class="tb-copy-btn" id="copyBtn" onclick="copyContent()">复制正文</button>
+    </div>
   </div>
-  <h2 id="previewTitleDisplay" style="display:none;"></h2>
 
-  <div class="preview-layout">
+  <!-- Hidden elements preserved for engine.js compatibility -->
+  <input type="hidden" id="titleInput" value="">
+  <span id="previewTitleDisplay" style="display:none;"></span>
+  <input type="checkbox" id="footerEnabled" checked style="display:none;">
+
+  <!-- Copy success bar -->
+  <div class="copy-success-bar" id="copySuccessBar">
+    已复制到剪贴板 — 打开微信公众号后台，粘贴到编辑器即可
+  </div>
+
+  <div class="preview-layout" id="previewLayout">
     <!-- Floating TOC -->
     <div class="toc-float" id="tocFloat">
       <div class="toc-title">目录</div>
@@ -262,26 +373,24 @@ input[type="file"] { display: none; }
   </div>
 
   <div class="stats-bar" id="statsBar"></div>
-
 </div>
 
-<!-- Global Status Bar — always visible at bottom -->
+<!-- Global Status Bar -->
 <div id="globalStatusBar">
-  <div id="statusHeader" onclick="document.getElementById('logPanel').classList.toggle('open'); this.querySelector('#statusToggle').textContent = document.getElementById('logPanel').classList.contains('open') ? '▼ 收起' : '▲ 展开日志'">
+  <div id="statusHeader" onclick="document.getElementById('logPanel').classList.toggle('open'); this.querySelector('#statusToggle').textContent = document.getElementById('logPanel').classList.contains('open') ? '&#9660; 收起' : '&#9650; 展开日志'">
     <span id="statusVersion">加载中...</span>
-    <span id="statusToggle">▲ 展开日志</span>
+    <span id="statusToggle">&#9650; 展开日志</span>
   </div>
   <div id="logPanel"></div>
 </div>
 
 <script type="module">
+// ---- Version check ----
 async function loadVersionInfo() {
   try {
     const resp = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' });
     if (resp.ok) return await resp.json();
-  } catch {
-    // fall through to runtime fallback
-  }
+  } catch {}
   return { build: 'runtime-' + Date.now(), commit: 'runtime' };
 }
 
@@ -307,13 +416,13 @@ if (!new URLSearchParams(location.search).get('v')) {
   if (el) el.textContent = 'v' + short + ' | ' + timeStr;
 }
 
-// Global log system — engine.js pushes logs here via window._pushLog
+// ---- Global log system ----
 window._pushLog = function(level, msg, detail) {
   const panel = document.getElementById('logPanel');
   if (!panel) return;
   const now = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
   const cls = level === 'error' ? 'log-error' : level === 'warn' ? 'log-warn' : 'log-info';
-  const icon = level === 'error' ? '✗' : level === 'warn' ? '!' : '✓';
+  const icon = level === 'error' ? '\u2717' : level === 'warn' ? '!' : '\u2713';
   let text = icon + ' ' + msg;
   if (detail && typeof detail === 'object') {
     const parts = [];
@@ -331,7 +440,7 @@ window._pushLog = function(level, msg, detail) {
   panel.scrollTop = panel.scrollHeight;
 };
 
-// Force refresh: check every 30s + on focus/visibility
+// ---- Version auto-refresh ----
 async function reloadIfUpdated() {
   try {
     const latest = await loadVersionInfo();
@@ -340,29 +449,70 @@ async function reloadIfUpdated() {
       console.log('[版本更新] ' + buildId + ' → ' + latestBuild + '，强制刷新');
       location.reload();
     }
-  } catch {
-    // ignore transient check failures
-  }
+  } catch {}
 }
-
 window.addEventListener('focus', reloadIfUpdated);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) reloadIfUpdated();
 });
 
+// ---- Template definitions ----
+const TEMPLATES = {
+  fbif: { id: 'fbif', label: 'FBIF 公众号', chipLabel: 'FBIF' },
+  mote: { id: 'mote', label: 'Mote 排版', chipLabel: 'Mote' },
+};
+
+// ---- localStorage preferences ----
+function loadPref(key, fallback) {
+  try { const v = localStorage.getItem(key); return v !== null ? v : fallback; } catch { return fallback; }
+}
+function savePref(key, val) {
+  try { localStorage.setItem(key, val); } catch {}
+}
+
+let currentTemplateId = loadPref('preferred_template', 'fbif');
+// Also accept ?t= param for backward compat
+const urlTemplate = new URLSearchParams(location.search).get('t');
+if (urlTemplate && TEMPLATES[urlTemplate]) currentTemplateId = urlTemplate;
+if (!TEMPLATES[currentTemplateId]) currentTemplateId = 'fbif';
+
+let footerEnabledPref = loadPref('footer_enabled', 'true') === 'true';
+let zoomIdxPref = parseInt(loadPref('zoom_index', ''), 10);
+
+// ---- Load engine + template ----
 const { initApp } = await import('./js/engine.js?v=' + assetVersion);
 
-const TEMPLATES = ['fbif', 'mote'];
-const params = new URLSearchParams(location.search);
-const templateId = params.get('t') || 'fbif';
+let _currentModule = null;
+let _engineInitialized = false;
 
-if (!TEMPLATES.includes(templateId)) {
-  document.getElementById('error').textContent = '未知模板: ' + templateId;
-  document.getElementById('error').style.display = 'block';
-} else {
+async function loadTemplate(templateId) {
+  currentTemplateId = templateId;
+  savePref('preferred_template', templateId);
+
+  // Update pill UI
+  document.querySelectorAll('.template-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.template === templateId);
+  });
+  // Update chip UI
+  const chipLabel = document.getElementById('templateChipLabel');
+  if (chipLabel) chipLabel.textContent = TEMPLATES[templateId].chipLabel;
+  document.querySelectorAll('.tb-chip-option').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.template === templateId);
+  });
+
   try {
     const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
-    initApp(mod.default);
+    _currentModule = mod.default;
+    initApp(_currentModule);
+    _engineInitialized = true;
+
+    // Wrap engine functions for UI hooks (success bar, zoom persist, etc.)
+    wrapEngineFunctions();
+
+    // Apply saved preferences after engine init
+    const footerEl = document.getElementById('footerEnabled');
+    footerEl.checked = footerEnabledPref;
+    updateFooterIcon();
   } catch (err) {
     console.error('模板加载失败', templateId, err);
     document.getElementById('error').textContent = '模板加载失败: ' + templateId;
@@ -370,8 +520,94 @@ if (!TEMPLATES.includes(templateId)) {
   }
 }
 
-// Load active config from server (footer toggle, etc.)
-// Falls back to defaults if API is unavailable
+// ---- Template pill click handlers ----
+document.querySelectorAll('.template-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tid = btn.dataset.template;
+    if (tid !== currentTemplateId) loadTemplate(tid);
+  });
+});
+
+// ---- Template chip in toolbar ----
+const templateChip = document.getElementById('templateChip');
+const templateChipDropdown = document.getElementById('templateChipDropdown');
+
+templateChip.addEventListener('click', (e) => {
+  e.stopPropagation();
+  templateChipDropdown.classList.toggle('open');
+});
+
+document.addEventListener('click', () => {
+  templateChipDropdown.classList.remove('open');
+});
+
+document.querySelectorAll('.tb-chip-option').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const tid = btn.dataset.template;
+    templateChipDropdown.classList.remove('open');
+    if (tid !== currentTemplateId) loadTemplate(tid);
+  });
+});
+
+// ---- Back button ----
+document.getElementById('backBtn').addEventListener('click', () => {
+  window.goBack && window.goBack();
+  hideCopySuccess();
+});
+
+// ---- Footer toggle button ----
+const footerToggleBtn = document.getElementById('footerToggleBtn');
+function updateFooterIcon() {
+  const enabled = document.getElementById('footerEnabled').checked;
+  document.getElementById('footerToggleIcon').innerHTML = enabled ? '&#9745;' : '&#9744;';
+  footerToggleBtn.classList.toggle('active', enabled);
+}
+
+footerToggleBtn.addEventListener('click', () => {
+  const el = document.getElementById('footerEnabled');
+  el.checked = !el.checked;
+  footerEnabledPref = el.checked;
+  savePref('footer_enabled', String(el.checked));
+  updateFooterIcon();
+  window.toggleFooter && window.toggleFooter();
+});
+
+// ---- Copy success bar ----
+function showCopySuccess() {
+  const bar = document.getElementById('copySuccessBar');
+  bar.classList.add('visible');
+  document.getElementById('previewLayout').classList.add('with-success-bar');
+  document.getElementById('previewMain').classList.add('with-success-bar');
+  // Adjust TOC position
+  const toc = document.getElementById('tocFloat');
+  if (toc) toc.style.top = '104px';
+}
+function hideCopySuccess() {
+  const bar = document.getElementById('copySuccessBar');
+  bar.classList.remove('visible');
+  document.getElementById('previewLayout').classList.remove('with-success-bar');
+  document.getElementById('previewMain').classList.remove('with-success-bar');
+  const toc = document.getElementById('tocFloat');
+  if (toc) toc.style.top = '68px';
+}
+
+// ---- Filename display in toolbar ----
+// engine.js sets titleInput.value, so we observe it
+const titleInput = document.getElementById('titleInput');
+const filenameDisplay = document.getElementById('filenameDisplay');
+
+// Intercept engine.js setting titleInput.value
+const _origTitleDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+Object.defineProperty(titleInput, 'value', {
+  get() { return _origTitleDescriptor.get.call(this); },
+  set(v) {
+    _origTitleDescriptor.set.call(this, v);
+    filenameDisplay.textContent = v;
+  },
+});
+
+// ---- Load active config from server ----
 window._activeConfig = null;
 async function loadActiveConfig() {
   try {
@@ -380,12 +616,12 @@ async function loadActiveConfig() {
       window._activeConfig = await resp.json();
       const cfg = window._activeConfig.config;
       if (cfg) {
-        document.getElementById('footerEnabled').checked = cfg.footer_enabled !== false;
+        const serverFooter = cfg.footer_enabled !== false;
+        document.getElementById('footerEnabled').checked = footerEnabledPref;
+        updateFooterIcon();
       }
     }
-  } catch {
-    // API not available, use defaults
-  }
+  } catch {}
 }
 async function saveFooterToggle(enabled) {
   if (!window._activeConfig) return;
@@ -396,18 +632,21 @@ async function saveFooterToggle(enabled) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config: cfg }),
     });
-  } catch {
-    // save failed silently, local toggle still works
-  }
+  } catch {}
 }
 loadActiveConfig();
 
-// Build TOC from headings in content
+// ---- Footer toggle (called by engine.js) ----
+window.toggleFooter = function() {
+  window._updateFooter && window._updateFooter(null);
+  const enabled = document.getElementById('footerEnabled').checked;
+  saveFooterToggle(enabled);
+};
+
+// ---- Build TOC from headings ----
 window._buildTOC = function() {
   const tocList = document.getElementById('tocList');
   tocList.innerHTML = '';
-
-  // Find all heading sections (font-size: 18px or font-weight: bold with larger size)
   const sections = document.getElementById('contentArea').querySelectorAll('section');
   let headingIdx = 0;
 
@@ -440,14 +679,7 @@ window._buildTOC = function() {
   }
 };
 
-// Footer toggle
-window.toggleFooter = function() {
-  window._updateFooter && window._updateFooter(null);
-  const enabled = document.getElementById('footerEnabled').checked;
-  saveFooterToggle(enabled);
-};
-
-// URL repost: fetch article → process as Markdown → show preview
+// ---- URL repost ----
 window.fetchArticle = async function() {
   const urlInput = document.getElementById('urlInput');
   const btn = document.getElementById('urlFetchBtn');
@@ -472,9 +704,7 @@ window.fetchArticle = async function() {
     const { title, content } = await resp.json();
     if (!content) throw new Error('文章内容为空');
 
-    // Create a virtual .md file and feed it through the template pipeline
     const file = new File([content], (title || 'article') + '.md', { type: 'text/markdown' });
-    // Trigger the file handler in engine.js
     const fileInput = document.getElementById('fileInput');
     const dt = new DataTransfer();
     dt.items.add(file);
@@ -485,11 +715,11 @@ window.fetchArticle = async function() {
     errorEl.style.display = 'block';
   } finally {
     btn.disabled = false;
-    btn.textContent = '抓取转载';
+    btn.textContent = '抓取';
   }
 };
 
-// Position TOC float next to phone frame
+// ---- TOC positioning ----
 function positionTOC() {
   const toc = document.getElementById('tocFloat');
   const frame = document.getElementById('phoneFrame');
@@ -501,7 +731,6 @@ function positionTOC() {
   toc.style.display = left > 0 ? 'block' : 'none';
 }
 
-// Scroll spy — highlight active TOC item based on scroll position
 function updateScrollSpy() {
   const items = document.querySelectorAll('.toc-item');
   const previewMain = document.getElementById('previewMain');
@@ -516,11 +745,9 @@ function updateScrollSpy() {
   items.forEach((item, idx) => item.classList.toggle('active', idx === activeIdx));
 }
 
-// Expose positionTOC for engine.js zoom callback
 window._positionTOC = positionTOC;
 window.addEventListener('resize', positionTOC);
 
-// Initial and content-change observers
 let _updateTimer = null;
 const observer = new MutationObserver(() => {
   if (_updateTimer) clearTimeout(_updateTimer);
@@ -530,9 +757,94 @@ const observer = new MutationObserver(() => {
   }, 200);
 });
 observer.observe(document.getElementById('contentArea'), { childList: true });
-
-// Scroll spy
 document.getElementById('previewMain').addEventListener('scroll', updateScrollSpy);
+
+// ---- Keyboard shortcuts ----
+document.addEventListener('keydown', (e) => {
+  const isPreview = document.getElementById('previewView').style.display === 'block';
+
+  // Cmd/Ctrl+Enter — copy in preview mode
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && isPreview) {
+    e.preventDefault();
+    window.copyContent && window.copyContent();
+    return;
+  }
+
+  // Escape — go back from preview to upload
+  if (e.key === 'Escape' && isPreview) {
+    e.preventDefault();
+    window.goBack && window.goBack();
+    hideCopySuccess();
+    return;
+  }
+});
+
+// Smart paste: if clipboard contains URL in upload mode, auto-fill URL input
+document.addEventListener('paste', (e) => {
+  const isUpload = document.getElementById('uploadView').style.display !== 'none';
+  if (!isUpload) return;
+
+  // Don't intercept if user is typing in the URL input already
+  if (document.activeElement === document.getElementById('urlInput')) return;
+
+  const text = (e.clipboardData || window.clipboardData).getData('text').trim();
+  if (text && /^https?:\/\//i.test(text)) {
+    e.preventDefault();
+    const urlInput = document.getElementById('urlInput');
+    urlInput.value = text;
+    urlInput.focus();
+    window.fetchArticle();
+  }
+});
+
+const copyBtn = document.getElementById('copyBtn');
+
+// ---- Wrap engine functions after each loadTemplate call ----
+// Called after initApp() sets window.copyContent / goBack / zoom
+function wrapEngineFunctions() {
+  // Wrap copyContent to show success bar
+  if (window.copyContent) {
+    const origCopy = window.copyContent;
+    window.copyContent = async function() {
+      await origCopy();
+      // engine.js already sets green + stays; we add the success bar
+      showCopySuccess();
+    };
+  }
+
+  // Wrap goBack to hide success bar
+  if (window.goBack) {
+    const origGoBack = window.goBack;
+    window.goBack = function() {
+      origGoBack();
+      hideCopySuccess();
+    };
+  }
+
+  // Wrap zoom to persist preference
+  if (window.zoom) {
+    const origZoom = window.zoom;
+
+    // Apply saved zoom preference
+    if (!isNaN(zoomIdxPref) && zoomIdxPref >= 0) {
+      const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
+      const diff = zoomIdxPref - (ZOOM_STEPS.length - 1);
+      if (diff !== 0) origZoom(diff);
+    }
+
+    window.zoom = function(dir) {
+      origZoom(dir);
+      const label = document.getElementById('zoomLabel').textContent;
+      const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
+      const pct = parseInt(label, 10);
+      const idx = ZOOM_STEPS.indexOf(pct);
+      if (idx >= 0) savePref('zoom_index', String(idx));
+    };
+  }
+}
+
+// ---- Initialize first template ----
+await loadTemplate(currentTemplateId);
 
 </script>
 </body>

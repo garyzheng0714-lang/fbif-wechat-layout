@@ -2,76 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FBIF 微信排版工具</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-.container { max-width: 720px; width: 100%; padding: 40px 20px; text-align: center; }
-h1 { font-size: 32px; color: #1a1a1a; margin-bottom: 8px; }
-.subtitle { color: #666; font-size: 15px; margin-bottom: 48px; }
-.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-.card {
-  background: #fff; border-radius: 16px; padding: 40px 28px; text-align: center;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.06); cursor: pointer; transition: all 0.2s;
-  text-decoration: none; color: inherit; border: 2px solid transparent;
-}
-.card:hover { border-color: #0070C0; box-shadow: 0 4px 20px rgba(0,112,192,0.15); transform: translateY(-2px); }
-.card-icon { font-size: 48px; margin-bottom: 16px; }
-.card-title { font-size: 20px; font-weight: 600; color: #1a1a1a; margin-bottom: 8px; }
-.card-desc { font-size: 14px; color: #888; line-height: 1.6; }
-.card-badge {
-  display: inline-block; margin-top: 16px; padding: 4px 12px; border-radius: 12px;
-  font-size: 12px; font-weight: 500;
-}
-.badge-blue { background: #e6f3ff; color: #0070C0; }
-.badge-green { background: #e6f7e6; color: #389e0d; }
-
-@media (max-width: 768px) {
-  .container { padding: 24px 16px; }
-  h1 { font-size: 24px; }
-  .subtitle { margin-bottom: 32px; }
-  .cards { grid-template-columns: 1fr; gap: 16px; }
-  .card { padding: 28px 20px; }
-}
-</style>
+<script>location.replace('/app.html')</script>
 </head>
-<body>
-<div class="container">
-  <h1>FBIF 微信排版工具</h1>
-  <p class="subtitle">选择排版模板，上传 Word 文档一键生成微信公众号格式</p>
-  <div class="cards">
-    <a href="/app.html?t=fbif" class="card" data-app-link>
-      <div class="card-icon">📰</div>
-      <div class="card-title">FBIF 公众号排版</div>
-      <div class="card-desc">按 FBIF 排版规范格式化<br>支持标题/引言/图片说明/参考来源</div>
-      <span class="card-badge badge-blue">FBIF 规范</span>
-    </a>
-    <a href="/app.html?t=mote" class="card" data-app-link>
-      <div class="card-icon">✍️</div>
-      <div class="card-title">Mote 排版</div>
-      <div class="card-desc">Mote 莫特专用排版格式<br>自动添加作者栏和底部模板</div>
-      <span class="card-badge badge-green">Mote 专用</span>
-    </a>
-  </div>
-</div>
-<script type="module">
-try {
-  const resp = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' });
-  if (resp.ok) {
-    const info = await resp.json();
-    const buildId = String(info.build || info.commit || '').trim();
-    if (buildId) {
-      document.querySelectorAll('[data-app-link]').forEach((link) => {
-        const next = new URL(link.href, location.origin);
-        next.searchParams.set('v', buildId);
-        link.href = next.pathname + next.search;
-      });
-    }
-  }
-} catch {
-  // keep default links if version file is temporarily unavailable
-}
-</script>
-</body>
+<body></body>
 </html>

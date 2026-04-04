@@ -337,9 +337,9 @@ export function initApp(template) {
       imgCount,
     });
 
-    btn.textContent = ok ? '已复制!' : '复制失败';
+    btn.textContent = ok ? '\u2713 已复制' : '复制失败';
     btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = '复制正文'; btn.classList.remove('copied'); }, 2000);
+    // Stay green — don't auto-reset. goBack() resets the button.
   };
 
   window.getClipboardHtml = function() { return _lastCopiedHtml; };
@@ -355,6 +355,9 @@ export function initApp(template) {
     progress.style.display = 'none';
     progressFill.style.width = '0%';
     fileInput.value = '';
+    // Reset copy button state
+    const copyBtn = document.getElementById('copyBtn');
+    if (copyBtn) { copyBtn.textContent = '复制正文'; copyBtn.classList.remove('copied'); }
     // Reset zoom to default
     zoomIdx = ZOOM_STEPS.length - 1;
     document.getElementById('phoneFrame').style.maxWidth = (420 * ZOOM_STEPS[zoomIdx] / 100) + 'px';
