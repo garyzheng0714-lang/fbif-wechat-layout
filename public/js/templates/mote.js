@@ -1,7 +1,7 @@
 // Mote 莫特专用排版模板
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, looksLikeGifSource } = engineModule;
+const { esc, escAttr, looksLikeGifSource, parseMdRuns, parseMdFrontmatter } = engineModule;
 
 const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
 
@@ -141,11 +141,73 @@ function render(elements) {
   return final;
 }
 
+// ---- Markdown Processing ----
+function classifyMd(text) {
+  const { author, content } = parseMdFrontmatter(text);
+  const rawParas = content.split(/\n\s*\n/).map(p => p.trim()).filter(p => p);
+
+  const elements = [];
+  let imgN = 0, inRef = false, listCounter = 0;
+
+  for (const para of rawParas) {
+    // Skip top-level title (# xxx)
+    if (/^#\s/.test(para)) continue;
+    // Skip blockquotes
+    if (/^>\s/.test(para)) continue;
+    // Stop at * * * separator
+    if (/^\*\s+\*\s+\*/.test(para.trim())) break;
+    // Horizontal rules (--- or ***) as separator, skip
+    if (/^[-*_\s]{3,}$/.test(para.replace(/\s/g, ''))) continue;
+
+    // Reference section
+    if (/^参考来源/.test(para)) {
+      inRef = true;
+      elements.push({ kind: 'ref_header' });
+      continue;
+    }
+    if (inRef) {
+      elements.push({ kind: 'text', html: renderInline(parseMdRuns(para)) });
+      continue;
+    }
+
+    // Heading: ## xxx
+    const headingMatch = para.match(/^##\s+(.+)$/);
+    if (headingMatch) {
+      listCounter = 0;
+      elements.push({ kind: 'heading', text: headingMatch[1].replace(/\*\*/g, '') });
+      continue;
+    }
+
+    // Image: ![alt](url)
+    const imgMatch = para.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
+    if (imgMatch) {
+      const imgSrc = imgMatch[2].replace(/"/g, '').replace(/</g, '').replace(/>/g, '');
+      imgN++;
+      elements.push({ kind: 'image', src: imgSrc, width: '100%', gif: looksLikeGifSource(imgSrc) });
+      continue;
+    }
+
+    // Numbered list: 1. xxx or 1、xxx
+    const listMatch = para.match(/^\d+[.、]\s*(.+)$/);
+    if (listMatch) {
+      listCounter++;
+      elements.push({ kind: 'list', html: renderInline(parseMdRuns(listMatch[1])), num: listCounter });
+      continue;
+    }
+
+    // Regular text
+    listCounter = 0;
+    elements.push({ kind: 'text', html: renderInline(parseMdRuns(para)) });
+  }
+
+  return { elements, imgN };
+}
+
 export default {
   id: 'mote',
   name: 'Mote 排版',
   description: 'Mote 莫特专用排版格式，自动添加作者栏和底部模板',
-  formats: ['.docx'],
+  formats: ['.docx', '.md', '.txt'],
 
   processDocx({ paragraphs, imgCache }) {
     const { elements, imgN } = classifyDocx(paragraphs, imgCache);
@@ -153,6 +215,9 @@ export default {
     return { lines, imgN, headingN: elements.filter(e => e.kind === 'heading').length };
   },
 
-  // Mote 暂不支持 Markdown
-  processMd: null,
+  async processMd(text) {
+    const { elements, imgN } = classifyMd(text);
+    const lines = render(elements);
+    return { lines, imgN, headingN: elements.filter(e => e.kind === 'heading').length };
+  },
 };

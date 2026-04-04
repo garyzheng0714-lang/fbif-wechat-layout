@@ -7,7 +7,7 @@ export { esc, escAttr, parseMdRuns, parseMdFrontmatter, parseDocx, extractParagr
          W, R, WP, A, findAll, findOne, findDeep, wattr, rattr } from './parser.js';
 
 import { parseDocx } from './parser.js';
-import { uploadNonCdnImages } from './uploader.js';
+import { uploadNonCdnImages, retryFailedImages } from './uploader.js';
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
 
 const imageUtilsModule = await import('./image-utils.mjs' + assetQuery);
@@ -96,12 +96,31 @@ export function initApp(template) {
   let _footerCopy = '';
   let _uploadPromise = null;
   let _uploadDone = false;
+  let _failedSrcs = [];
+
+  // Mark failed images with red border in preview
+  function markFailedImages(failedSrcs) {
+    if (!failedSrcs.length) return;
+    const imgs = document.getElementById('contentArea').querySelectorAll('img');
+    imgs.forEach(img => {
+      const src = img.getAttribute('src') || '';
+      if (failedSrcs.some(fs => src.includes(fs.substring(0, 60)))) {
+        img.style.outline = '3px solid #ff4d4f';
+        img.style.outlineOffset = '-3px';
+        img.title = '上传失败 — 点击"重试上传"';
+      } else {
+        img.style.outline = '';
+        img.title = '';
+      }
+    });
+  }
 
   function showPreview(title, articleContent, footerContent, stats) {
     _articleHtml = articleContent;
     _articleCopy = articleContent;
     _footerHtml = footerContent;
     _footerCopy = footerContent;
+    _failedSrcs = [];
 
     document.getElementById('uploadView').style.display = 'none';
     document.getElementById('previewView').style.display = 'block';
@@ -112,6 +131,10 @@ export function initApp(template) {
     document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
     document.getElementById('statsBar').textContent = stats;
 
+    // Hide retry button initially
+    const retryBtn = document.getElementById('retryBtn');
+    if (retryBtn) retryBtn.style.display = 'none';
+
     window._updateFooter = function(newHtml) {
       if (typeof newHtml === 'string' && newHtml !== '') {
         _footerHtml = newHtml;
@@ -119,6 +142,7 @@ export function initApp(template) {
       }
       const enabled = document.getElementById('footerEnabled').checked;
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      markFailedImages(_failedSrcs);
     };
 
     // Background: upload non-mmbiz images to WeChat CDN for the copy layer
@@ -134,14 +158,45 @@ export function initApp(template) {
     }).then(result => {
       _articleCopy = result.articleCopy;
       _footerCopy = result.footerCopy;
+      _failedSrcs = result.failedSrcs || [];
       _uploadDone = true;
       if (result.failed > 0) {
         statsBar.textContent = originalStats + ' | ' + result.failed + '张图片上传失败';
+        markFailedImages(_failedSrcs);
+        if (retryBtn) retryBtn.style.display = 'inline-block';
       } else {
         statsBar.textContent = originalStats + ' | 全部图片已就绪';
       }
     });
   }
+
+  // Retry failed image uploads
+  window.retryUpload = async function() {
+    if (!_failedSrcs.length) return;
+    const retryBtn = document.getElementById('retryBtn');
+    const statsBar = document.getElementById('statsBar');
+    if (retryBtn) { retryBtn.textContent = '重试中...'; retryBtn.disabled = true; }
+
+    const result = await retryFailedImages(_articleCopy, _footerCopy, _failedSrcs, {
+      onProgress(done, total) {
+        statsBar.textContent = '重试上传 (' + done + '/' + total + ')...';
+      },
+      onLog: logConv,
+    });
+    _articleCopy = result.articleCopy;
+    _footerCopy = result.footerCopy;
+    _failedSrcs = result.failedSrcs;
+
+    if (result.failed > 0) {
+      statsBar.textContent = result.failed + '张图片仍然失败';
+      markFailedImages(_failedSrcs);
+    } else {
+      statsBar.textContent = '全部图片已就绪';
+      markFailedImages([]);
+      if (retryBtn) retryBtn.style.display = 'none';
+    }
+    if (retryBtn) { retryBtn.textContent = '重试上传'; retryBtn.disabled = false; }
+  };
 
   // ---- Conversion Log ----
   const _convLog = [];

@@ -45,6 +45,9 @@ input[type="file"] { display: none; }
 .btn-primary.copied { background: #27ae60; }
 .btn-secondary { background: #f0f0f0; color: #333; text-decoration: none; }
 .btn-secondary:hover { background: #e0e0e0; }
+.btn-retry { background: #fff1f0; color: #ff4d4f; border: 1px solid #ff4d4f; }
+.btn-retry:hover { background: #ff4d4f; color: #fff; }
+.btn-retry:disabled { opacity: 0.5; cursor: not-allowed; }
 .zoom-controls {
   display: flex; align-items: center; gap: 4px; background: #f0f0f0;
   border-radius: 6px; padding: 2px;
@@ -118,6 +121,23 @@ input[type="file"] { display: none; }
 .log-info { color: #4fc3f7; }
 .log-warn { color: #ffb74d; }
 .log-error { color: #ef5350; }
+
+/* ---- Mobile Responsive (< 768px) ---- */
+@media (max-width: 768px) {
+  .container { padding: 20px 12px; }
+  h1 { font-size: 22px; }
+  .upload-zone { padding: 40px 20px; }
+  .toolbar {
+    flex-wrap: wrap; gap: 8px; padding: 8px 12px;
+  }
+  .toolbar h2 { font-size: 14px; min-width: 0; flex-basis: 100%; }
+  .zoom-controls { display: none; }
+  .btn { padding: 6px 14px; font-size: 13px; }
+  .toc-float { display: none !important; }
+  .preview-main { padding: 8px; }
+  .phone-frame { max-width: 100% !important; border-radius: 0; }
+  .stats-bar { font-size: 11px; padding: 6px 14px; bottom: 46px; }
+}
 </style>
 </head>
 <body>
@@ -152,6 +172,7 @@ input[type="file"] { display: none; }
       <button class="btn btn-secondary" onclick="zoom(1)">+</button>
     </div>
     <button class="btn btn-secondary" onclick="goBack()">&#8592; 重新上传</button>
+    <button class="btn btn-retry" id="retryBtn" onclick="retryUpload()" style="display:none;">重试上传</button>
     <button class="btn btn-primary" id="copyBtn" onclick="copyContent()">复制正文</button>
   </div>
 
