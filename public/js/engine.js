@@ -1,5 +1,7 @@
 // Shared WeChat formatting engine
 // Handles: XML parsing, DOCX extraction, image upload, MD parsing, UI
+import { inferImageMimeFromBase64, looksLikeGifSource } from './image-utils.mjs';
+export { looksLikeGifSource } from './image-utils.mjs';
 
 // ---- XML Namespaces ----
 export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -137,13 +139,13 @@ export async function parseDocx(file) {
 
   // Load images as base64 (concurrently)
   const imgCache = {};
-  const mimeMap = { png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' };
   await Promise.all(Object.values(ridToFile).map(async (fn) => {
     const entry = zip.file('word/media/' + fn);
     if (entry) {
       const data = await entry.async('base64');
       const ext = fn.split('.').pop().toLowerCase();
-      imgCache[fn] = 'data:' + (mimeMap[ext] || 'image/jpeg') + ';base64,' + data;
+      const mime = inferImageMimeFromBase64(data, ext);
+      imgCache[fn] = 'data:' + mime + ';base64,' + data;
     }
   }));
 
@@ -338,6 +340,78 @@ export function initApp(template) {
   // Expose log for debugging — type getConvLog() in console
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
 
+  function normalizePushHtmlForWechat(html) {
+    const doc = new DOMParser().parseFromString('<div id="root">' + html + '</div>', 'text/html');
+    const root = doc.getElementById('root');
+    if (!root) {
+      return {
+        html,
+        stats: { total: 0, taggedGif: 0, likelyGif: 0, patchedGif: 0, dataUri: 0, missingSrc: 0 },
+      };
+    }
+
+    const stats = { total: 0, taggedGif: 0, likelyGif: 0, patchedGif: 0, dataUri: 0, missingSrc: 0 };
+    for (const img of root.querySelectorAll('img')) {
+      stats.total++;
+      const src = (img.getAttribute('src') || '').trim();
+      if (!src) {
+        stats.missingSrc++;
+        continue;
+      }
+      if (src.startsWith('data:image/')) stats.dataUri++;
+
+      const tagged = (img.getAttribute('data-type') || '').toLowerCase() === 'gif';
+      const likelyGif = looksLikeGifSource(src);
+      if (tagged) stats.taggedGif++;
+      if (likelyGif) {
+        stats.likelyGif++;
+        if (!tagged) {
+          img.setAttribute('data-type', 'gif');
+          stats.patchedGif++;
+          stats.taggedGif++;
+        }
+      }
+    }
+    return { html: root.innerHTML, stats };
+  }
+
+  function mergeNormalizeStats(a, b) {
+    return {
+      total: a.total + b.total,
+      taggedGif: a.taggedGif + b.taggedGif,
+      likelyGif: a.likelyGif + b.likelyGif,
+      patchedGif: a.patchedGif + b.patchedGif,
+      dataUri: a.dataUri + b.dataUri,
+      missingSrc: a.missingSrc + b.missingSrc,
+    };
+  }
+
+  function getReadyPushPayload(enabled) {
+    const articleNorm = normalizePushHtmlForWechat(_articlePush);
+    _articlePush = articleNorm.html;
+
+    const empty = { total: 0, taggedGif: 0, likelyGif: 0, patchedGif: 0, dataUri: 0, missingSrc: 0 };
+    let footerNorm = { html: '', stats: empty };
+    if (enabled) {
+      footerNorm = normalizePushHtmlForWechat(_footerPush);
+      _footerPush = footerNorm.html;
+    }
+
+    const stats = mergeNormalizeStats(articleNorm.stats, footerNorm.stats);
+    if (stats.patchedGif > 0) {
+      logConv('warn', '自动补齐GIF标记', {
+        patched: stats.patchedGif,
+        likelyGif: stats.likelyGif,
+        taggedGif: stats.taggedGif,
+      });
+    }
+
+    return {
+      html: _articlePush + '\n' + (enabled ? _footerPush : ''),
+      stats,
+    };
+  }
+
   async function backgroundUploadImages(statsBar, originalStats) {
     const allHtml = _articlePush + '\n' + _footerPush;
 
@@ -458,6 +532,20 @@ export function initApp(template) {
       }
     }
 
+    // Final pass: normalize GIF attributes after URL replacements
+    const articleNorm = normalizePushHtmlForWechat(_articlePush);
+    const footerNorm = normalizePushHtmlForWechat(_footerPush);
+    _articlePush = articleNorm.html;
+    _footerPush = footerNorm.html;
+    const finalNorm = mergeNormalizeStats(articleNorm.stats, footerNorm.stats);
+    if (finalNorm.patchedGif > 0) {
+      logConv('warn', '上传后自动补齐GIF标记', {
+        patched: finalNorm.patchedGif,
+        likelyGif: finalNorm.likelyGif,
+        taggedGif: finalNorm.taggedGif,
+      });
+    }
+
     _uploadDone = true;
     _uploadCurrent = done;
     updateButtonStates();
@@ -500,10 +588,22 @@ export function initApp(template) {
       btn.textContent = '等待图片上传...';
       await _uploadPromise;
     }
+    if (_uploadFailed > 0) {
+      btn.textContent = '有图片上传失败，无法复制';
+      setTimeout(() => { btn.textContent = '复制正文'; }, 2400);
+      return;
+    }
 
     // Use PUSH layer (WeChat CDN URLs), not display layer (base64/original)
     const enabled = document.getElementById('footerEnabled').checked;
-    const html = _articlePush + '\n' + (enabled ? _footerPush : '');
+    const payload = getReadyPushPayload(enabled);
+    if (payload.stats.dataUri > 0 || payload.stats.missingSrc > 0) {
+      logConv('error', '复制前校验失败', payload.stats);
+      btn.textContent = '图片未就绪，无法复制';
+      setTimeout(() => { btn.textContent = '复制正文'; }, 2400);
+      return;
+    }
+    const html = payload.html;
 
     let ok = false;
     if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
@@ -554,10 +654,17 @@ export function initApp(template) {
         btn.textContent = '等待图片上传完成...';
         await _uploadPromise;
       }
+      if (_uploadFailed > 0) {
+        throw new Error('仍有' + _uploadFailed + '张图片上传失败');
+      }
 
       // Use push layer (WeChat CDN URLs), not display layer
       const enabled = document.getElementById('footerEnabled').checked;
-      const content = _articlePush + '\n' + (enabled ? _footerPush : '');
+      const payload = getReadyPushPayload(enabled);
+      if (payload.stats.dataUri > 0 || payload.stats.missingSrc > 0) {
+        throw new Error('图片未就绪，请重新上传');
+      }
+      const content = payload.html;
 
       const resp = await fetch('/api/wechat-draft', {
         method: 'POST',

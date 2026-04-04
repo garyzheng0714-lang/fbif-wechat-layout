@@ -1,5 +1,5 @@
 // Mote 莫特专用排版模板
-import { esc, escAttr } from '../engine.js';
+import { esc, escAttr, looksLikeGifSource } from '../engine.js';
 
 const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
 
@@ -50,7 +50,11 @@ function classifyDocx(paragraphs, imgCache) {
     if (kind === 'blank') { listCounter = 0; continue; }
     if (kind === 'image') {
       for (const r of pd.runs) {
-        if (r.type === 'img') { imgN++; elements.push({ kind: 'image', src: imgCache[r.file] || '', width: r.w || '100%', gif: /\.gif$/i.test(r.file) }); }
+        if (r.type === 'img') {
+          const src = imgCache[r.file] || '';
+          imgN++;
+          elements.push({ kind: 'image', src, width: r.w || '100%', gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file) });
+        }
       }
     } else if (kind === 'heading') {
       elements.push({ kind: 'heading', text: pd.text });
@@ -105,7 +109,7 @@ function render(elements) {
     if (k === 'image') {
       if (prevK !== 'image' && prevK !== 'caption' && prevK !== null) ensureBlank();
       const mSrc = elem.src || '';
-      const mIsGif = elem.gif || /\.gif(\?|$)/i.test(mSrc) || /mmbiz_gif/.test(mSrc) || /^data:image\/gif/.test(mSrc);
+      const mIsGif = elem.gif || looksLikeGifSource(mSrc);
       const mGifAttr = mIsGif ? ' data-type="gif"' : '';
       lines.push('<section style="text-align: center; margin-left: 8px; margin-right: 8px;"><img src="' + mSrc + '"' + mGifAttr + ' style="width: ' + elem.width + '; display: block; margin: 0 auto;" /></section>');
       prevK = k; continue;
