@@ -490,7 +490,7 @@ func fetchDirect(url string) (content, title string, err error) {
 	defer cancel()
 
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; FBIF-Layout/1.0)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -502,22 +502,14 @@ func fetchDirect(url string) (content, title string, err error) {
 		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// Read full body (limit 5MB)
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return "", "", fmt.Errorf("read body: %w", err)
 	}
-	body := string(bodyBytes)
 
-	// Simple title extraction
-	if idx := strings.Index(body, "<title>"); idx >= 0 {
-		end := strings.Index(body[idx:], "</title>")
-		if end > 0 {
-			title = body[idx+7 : idx+end]
-		}
-	}
-
-	return body, title, nil
+	// Extract article content and convert to Markdown
+	markdown, extractedTitle := extractArticle(string(bodyBytes))
+	return markdown, extractedTitle, nil
 }
 
 func init() {
