@@ -159,7 +159,43 @@ input[type="file"] { display: none; }
 </div>
 
 <script type="module">
-import { initApp } from './js/engine.js';
+async function loadVersionInfo() {
+  try {
+    const resp = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' });
+    if (resp.ok) return await resp.json();
+  } catch {
+    // fall through to runtime fallback
+  }
+  return { build: 'runtime-' + Date.now(), commit: 'runtime' };
+}
+
+const versionInfo = await loadVersionInfo();
+const buildId = String(versionInfo.build || versionInfo.commit || Date.now());
+const assetVersion = encodeURIComponent(buildId);
+window.__APP_BUILD_INFO = versionInfo;
+
+if (!new URLSearchParams(location.search).get('v')) {
+  const next = new URL(location.href);
+  next.searchParams.set('v', buildId);
+  history.replaceState(null, '', next);
+}
+
+async function reloadIfUpdated() {
+  try {
+    const latest = await loadVersionInfo();
+    const latestBuild = String(latest.build || latest.commit || '');
+    if (latestBuild && latestBuild !== buildId) location.reload();
+  } catch {
+    // ignore transient check failures
+  }
+}
+
+window.addEventListener('focus', reloadIfUpdated);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) reloadIfUpdated();
+});
+
+const { initApp } = await import('./js/engine.js?v=' + assetVersion);
 
 const TEMPLATES = ['fbif', 'mote'];
 const params = new URLSearchParams(location.search);
@@ -170,7 +206,7 @@ if (!TEMPLATES.includes(templateId)) {
   document.getElementById('error').style.display = 'block';
 } else {
   try {
-    const mod = await import('./js/templates/' + templateId + '.js');
+    const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
     initApp(mod.default);
   } catch (err) {
     document.getElementById('error').textContent = '模板加载失败: ' + templateId;
