@@ -609,39 +609,44 @@ export function initApp(template) {
       }
     }
 
-    // Upload each URL individually in parallel — maximum concurrency
-    await Promise.all(httpUrls.map(async (url) => {
-      try {
-        const resp = await fetch('/api/wechat-upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ urls: [url] })
-        });
-        if (resp.ok) {
-          const { results } = await resp.json();
-          const wechatUrl = results[url] || Object.values(results)[0];
-          if (!wechatUrl) {
-            _uploadFailed++;
-            failedDetails.push({ type: 'url', url });
-            logConv('error', 'URL图片上传失败', { url: url.substring(0, 80) });
+    // Upload URLs with concurrency pool — keeps 5 in-flight at a time
+    // Scales to any number of images without overwhelming the server
+    const CONCURRENCY = 5;
+    let next = 0;
+    async function uploadOneUrl() {
+      while (next < httpUrls.length) {
+        const url = httpUrls[next++];
+        try {
+          const resp = await fetch('/api/wechat-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls: [url] })
+          });
+          if (resp.ok) {
+            const { results } = await resp.json();
+            const wechatUrl = results[url] || Object.values(results)[0];
+            if (!wechatUrl) {
+              _uploadFailed++;
+              failedDetails.push({ type: 'url', url });
+              logConv('error', 'URL图片上传失败', { url: url.substring(0, 80) });
+            } else {
+              _articlePush = _articlePush.split(url).join(wechatUrl);
+              _footerPush = _footerPush.split(url).join(wechatUrl);
+              logConv('info', 'URL图片上传成功', { url: url.substring(0, 60), cdn: wechatUrl.substring(0, 60) + '...' });
+            }
           } else {
-            _articlePush = _articlePush.split(url).join(wechatUrl);
-            _footerPush = _footerPush.split(url).join(wechatUrl);
-            logConv('info', 'URL图片上传成功', { url: url.substring(0, 60), cdn: wechatUrl.substring(0, 60) + '...' });
+            _uploadFailed++;
+            failedDetails.push({ type: 'url', url, error: 'HTTP ' + resp.status });
           }
-        } else {
+        } catch (e) {
           _uploadFailed++;
-          failedDetails.push({ type: 'url', url, error: 'HTTP ' + resp.status });
+          failedDetails.push({ type: 'url', url, error: e.message });
         }
         done++;
         updateProgress();
-      } catch (e) {
-        _uploadFailed++;
-        done++;
-        failedDetails.push({ type: 'url', url, error: e.message });
-        updateProgress();
       }
-    }));
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, httpUrls.length) }, () => uploadOneUrl()));
 
     // normalizePushHtmlForWechat runs on-demand in getReadyDraftPayload — no need here
 
