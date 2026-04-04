@@ -340,7 +340,26 @@ export function initApp(template) {
   // Expose log for debugging — type getConvLog() in console
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
 
-  function normalizePushHtmlForWechat(html) {
+  function formatRatio(v) {
+    if (!v || !isFinite(v) || v <= 0) return '1';
+    return v.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function collectPreviewImageMeta(rootEl) {
+    if (!rootEl) return [];
+    const out = [];
+    for (const img of rootEl.querySelectorAll('img')) {
+      const w = img.naturalWidth || img.width || 0;
+      const h = img.naturalHeight || img.height || 0;
+      const ratio = (w > 0 && h > 0) ? (h / w) : 1;
+      out.push({ width: w, height: h, ratio });
+    }
+    return out;
+  }
+
+  function normalizePushHtmlForWechat(html, options = {}) {
+    const metaList = Array.isArray(options.metaList) ? options.metaList : [];
+    const metaOffset = Number.isFinite(options.metaOffset) ? options.metaOffset : 0;
     const doc = new DOMParser().parseFromString('<div id="root">' + html + '</div>', 'text/html');
     const root = doc.getElementById('root');
     if (!root) {
@@ -351,7 +370,10 @@ export function initApp(template) {
     }
 
     const stats = { total: 0, taggedGif: 0, likelyGif: 0, patchedGif: 0, dataUri: 0, missingSrc: 0 };
+    let localIndex = 0;
     for (const img of root.querySelectorAll('img')) {
+      const globalIndex = metaOffset + localIndex;
+      localIndex++;
       stats.total++;
       const src = (img.getAttribute('src') || '').trim();
       if (!src) {
@@ -372,6 +394,27 @@ export function initApp(template) {
       if (!cls.includes('rich_pages')) cls.push('rich_pages');
       if (!cls.includes('wxw-img')) cls.push('wxw-img');
       img.setAttribute('class', cls.join(' '));
+      img.setAttribute('alt', '图片');
+
+      const meta = metaList[globalIndex] || {};
+      const width = Math.max(1, Number(meta.width) || Number(img.getAttribute('data-w')) || 640);
+      const ratio = Number(meta.ratio) > 0 ? Number(meta.ratio) :
+        (Number(meta.height) > 0 ? Number(meta.height) / width : Number(img.getAttribute('data-ratio')) || 1);
+      const ratioText = formatRatio(ratio);
+      const height = Math.max(1, Math.round(width * (ratio > 0 ? ratio : 1)));
+      img.setAttribute('data-ratio', ratioText);
+      img.setAttribute('data-w', String(width));
+      img.setAttribute('data-s', `${height},${width}`);
+      img.setAttribute('data-index', String(globalIndex));
+      img.setAttribute('data-report-img-idx', String(globalIndex));
+      img.setAttribute('_width', String(width));
+      img.setAttribute('data-fail', '0');
+      if (!img.getAttribute('data-imgfileid')) {
+        img.setAttribute('data-imgfileid', String(100000000 + Math.floor(Math.random() * 900000000)));
+      }
+      if (!img.getAttribute('data-original-style')) {
+        img.setAttribute('data-original-style', img.getAttribute('style') || '');
+      }
 
       const tagged = (img.getAttribute('data-type') || '').toLowerCase() === 'gif';
       const inferredType = inferWechatImageType(normalizedSrc);
@@ -401,14 +444,17 @@ export function initApp(template) {
     };
   }
 
-  function getReadyPushPayload(enabled) {
-    const articleNorm = normalizePushHtmlForWechat(_articlePush);
+  function getReadyPushPayload(enabled, previewMeta = []) {
+    const articleNorm = normalizePushHtmlForWechat(_articlePush, { metaList: previewMeta, metaOffset: 0 });
     _articlePush = articleNorm.html;
 
     const empty = { total: 0, taggedGif: 0, likelyGif: 0, patchedGif: 0, dataUri: 0, missingSrc: 0 };
     let footerNorm = { html: '', stats: empty };
     if (enabled) {
-      footerNorm = normalizePushHtmlForWechat(_footerPush);
+      footerNorm = normalizePushHtmlForWechat(_footerPush, {
+        metaList: previewMeta,
+        metaOffset: articleNorm.stats.total,
+      });
       _footerPush = footerNorm.html;
     }
 
@@ -548,8 +594,12 @@ export function initApp(template) {
     }
 
     // Final pass: normalize GIF attributes after URL replacements
-    const articleNorm = normalizePushHtmlForWechat(_articlePush);
-    const footerNorm = normalizePushHtmlForWechat(_footerPush);
+    const previewMeta = collectPreviewImageMeta(document.getElementById('contentArea'));
+    const articleNorm = normalizePushHtmlForWechat(_articlePush, { metaList: previewMeta, metaOffset: 0 });
+    const footerNorm = normalizePushHtmlForWechat(_footerPush, {
+      metaList: previewMeta,
+      metaOffset: articleNorm.stats.total,
+    });
     _articlePush = articleNorm.html;
     _footerPush = footerNorm.html;
     const finalNorm = mergeNormalizeStats(articleNorm.stats, footerNorm.stats);
@@ -611,7 +661,7 @@ export function initApp(template) {
 
     // Use PUSH layer (WeChat CDN URLs), not display layer (base64/original)
     const enabled = document.getElementById('footerEnabled').checked;
-    const payload = getReadyPushPayload(enabled);
+    const payload = getReadyPushPayload(enabled, collectPreviewImageMeta(content));
     if (payload.stats.dataUri > 0 || payload.stats.missingSrc > 0) {
       logConv('error', '复制前校验失败', payload.stats);
       btn.textContent = '图片未就绪，无法复制';
@@ -675,7 +725,7 @@ export function initApp(template) {
 
       // Use push layer (WeChat CDN URLs), not display layer
       const enabled = document.getElementById('footerEnabled').checked;
-      const payload = getReadyPushPayload(enabled);
+      const payload = getReadyPushPayload(enabled, collectPreviewImageMeta(document.getElementById('contentArea')));
       if (payload.stats.dataUri > 0 || payload.stats.missingSrc > 0) {
         throw new Error('图片未就绪，请重新上传');
       }
