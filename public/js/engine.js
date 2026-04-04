@@ -478,64 +478,6 @@ export function initApp(template) {
     };
   }
 
-  function normalizeCopyHtmlForWechat(html) {
-    const doc = new DOMParser().parseFromString('<div id="root">' + html + '</div>', 'text/html');
-    const root = doc.getElementById('root');
-    if (!root) return { html, stats: { total: 0, gif: 0, missingSrc: 0 } };
-
-    const stats = { total: 0, gif: 0, missingSrc: 0 };
-    for (const img of root.querySelectorAll('img')) {
-      stats.total++;
-      let src = (img.getAttribute('src') || '').trim();
-      if (!src) {
-        stats.missingSrc++;
-        continue;
-      }
-      if (src.startsWith('http://mmbiz.qpic.cn/')) {
-        src = 'https://' + src.slice('http://'.length);
-        img.setAttribute('src', src);
-      }
-
-      // Strip only non-essential WeChat metadata; keep class, data-w, data-ratio
-      // which the WeChat editor needs to recognise images as its own content
-      for (const attr of [
-        'data-s',
-        'data-index',
-        'data-report-img-idx',
-        '_width',
-        'data-fail',
-        'data-imgfileid',
-        'data-original-style',
-        'data-gif-singleurl',
-        'data-cover',
-      ]) {
-        img.removeAttribute(attr);
-      }
-
-      // Ensure WeChat editor image classes are present
-      const cls = (img.getAttribute('class') || '').split(/\s+/).filter(Boolean);
-      if (!cls.includes('rich_pages')) cls.push('rich_pages');
-      if (!cls.includes('wxw-img')) cls.push('wxw-img');
-      img.setAttribute('class', cls.join(' '));
-
-      const inferred = inferWechatImageType(src);
-      const isGif = inferred === 'gif' || looksLikeGifSource(src);
-      img.setAttribute('data-src', src);
-      img.removeAttribute('loading');
-      img.removeAttribute('decoding');
-      img.removeAttribute('referrerpolicy');
-
-      // Set data-type for all detected formats (not just GIF)
-      if (isGif) {
-        stats.gif++;
-        img.setAttribute('data-type', 'gif');
-      } else if (inferred) {
-        img.setAttribute('data-type', inferred);
-      }
-    }
-    return { html: root.innerHTML, stats };
-  }
-
   async function copyByClipboardEvent(html, plainText) {
     const handler = function(e) {
       e.clipboardData.setData('text/html', html);
@@ -561,27 +503,6 @@ export function initApp(template) {
     } finally {
       document.body.removeChild(temp);
       document.removeEventListener('copy', handler, true);
-    }
-  }
-
-  async function copyByNativeTempSelection(html) {
-    const temp = document.createElement('div');
-    temp.style.position = 'fixed';
-    temp.style.left = '-99999px';
-    temp.style.top = '0';
-    temp.innerHTML = html;
-    document.body.appendChild(temp);
-    try {
-      const range = document.createRange();
-      range.selectNodeContents(temp);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-      const ok = document.execCommand('copy');
-      sel.removeAllRanges();
-      return !!ok;
-    } finally {
-      document.body.removeChild(temp);
     }
   }
 
@@ -688,64 +609,41 @@ export function initApp(template) {
       }
     }
 
-    // Upload http URLs in PARALLEL batches of 3 — all batches fire concurrently
-    const urlBatches = [];
-    for (let i = 0; i < httpUrls.length; i += 3) {
-      urlBatches.push(httpUrls.slice(i, i + 3));
-    }
-    await Promise.all(urlBatches.map(async (batch) => {
+    // Upload each URL individually in parallel — maximum concurrency
+    await Promise.all(httpUrls.map(async (url) => {
       try {
         const resp = await fetch('/api/wechat-upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ urls: batch })
+          body: JSON.stringify({ urls: [url] })
         });
         if (resp.ok) {
           const { results } = await resp.json();
-          for (const [origUrl, wechatUrl] of Object.entries(results)) {
-            if (!wechatUrl) {
-              _uploadFailed++;
-              failedDetails.push({ type: 'url', url: origUrl });
-              logConv('error', 'URL图片上传失败', { url: origUrl.substring(0, 80) });
-            } else {
-              _articlePush = _articlePush.split(origUrl).join(wechatUrl);
-              _footerPush = _footerPush.split(origUrl).join(wechatUrl);
-              logConv('info', 'URL图片上传成功', { url: origUrl.substring(0, 60), cdn: wechatUrl.substring(0, 60) + '...' });
-            }
-            done++;
+          const wechatUrl = results[url] || Object.values(results)[0];
+          if (!wechatUrl) {
+            _uploadFailed++;
+            failedDetails.push({ type: 'url', url });
+            logConv('error', 'URL图片上传失败', { url: url.substring(0, 80) });
+          } else {
+            _articlePush = _articlePush.split(url).join(wechatUrl);
+            _footerPush = _footerPush.split(url).join(wechatUrl);
+            logConv('info', 'URL图片上传成功', { url: url.substring(0, 60), cdn: wechatUrl.substring(0, 60) + '...' });
           }
         } else {
-          const errText = await resp.text().catch(() => 'unknown');
-          logConv('error', 'URL批次上传HTTP错误', { status: resp.status, body: errText.substring(0, 200) });
-          done += batch.length; _uploadFailed += batch.length;
-          batch.forEach(u => failedDetails.push({ type: 'url', url: u, error: 'HTTP ' + resp.status }));
+          _uploadFailed++;
+          failedDetails.push({ type: 'url', url, error: 'HTTP ' + resp.status });
         }
+        done++;
         updateProgress();
       } catch (e) {
-        logConv('error', 'URL批次上传网络错误', { error: e.message });
-        done += batch.length; _uploadFailed += batch.length;
-        batch.forEach(u => failedDetails.push({ type: 'url', url: u, error: e.message }));
+        _uploadFailed++;
+        done++;
+        failedDetails.push({ type: 'url', url, error: e.message });
         updateProgress();
       }
     }));
 
-    // Final pass: normalize GIF attributes after URL replacements
-    const previewMeta = collectPreviewImageMeta(document.getElementById('contentArea'));
-    const articleNorm = normalizePushHtmlForWechat(_articlePush, { metaList: previewMeta, metaOffset: 0 });
-    const footerNorm = normalizePushHtmlForWechat(_footerPush, {
-      metaList: previewMeta,
-      metaOffset: articleNorm.stats.total,
-    });
-    _articlePush = articleNorm.html;
-    _footerPush = footerNorm.html;
-    const finalNorm = mergeNormalizeStats(articleNorm.stats, footerNorm.stats);
-    if (finalNorm.patchedGif > 0) {
-      logConv('warn', '上传后自动补齐GIF标记', {
-        patched: finalNorm.patchedGif,
-        likelyGif: finalNorm.likelyGif,
-        taggedGif: finalNorm.taggedGif,
-      });
-    }
+    // normalizePushHtmlForWechat runs on-demand in getReadyDraftPayload — no need here
 
     _uploadDone = true;
     _uploadCurrent = done;
@@ -884,13 +782,6 @@ export function initApp(template) {
       try {
         ok = await copyByClipboardEvent(html, plainText);
         if (ok) _lastCopyMethod = 'ClipboardEvent';
-      } catch {}
-    }
-
-    if (!ok) {
-      try {
-        ok = await copyByNativeTempSelection(html);
-        if (ok) _lastCopyMethod = 'NativeTempSelection';
       } catch {}
     }
 
