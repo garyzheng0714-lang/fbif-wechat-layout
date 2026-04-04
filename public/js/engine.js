@@ -594,10 +594,13 @@ export function initApp(template) {
   }
 
   function getReadyCopyPayload(enabled, previewMeta = []) {
+    // Use the push-layer HTML directly — it already has all WeChat attributes
+    // (class, data-src, data-type, data-w, data-ratio) from normalizePushHtmlForWechat.
+    // NO additional DOMParser pass — avoids re-serialization that can corrupt
+    // content with special characters (≧∇≦, curly quotes, etc.)
     const base = getReadyDraftPayload(enabled, previewMeta);
-    const copyNorm = normalizeCopyHtmlForWechat(base.html);
     return {
-      html: copyNorm.html,
+      html: base.html,
       stats: base.stats,
     };
   }
@@ -856,6 +859,17 @@ export function initApp(template) {
       return;
     }
     const html = payload.html;
+
+    // Content integrity check — compare section count between display and copy
+    const displaySections = (_articleDisplay + '\n' + (enabled ? _footerDisplay : '')).split(/<section[\s>]/gi).length - 1;
+    const copySections = html.split(/<section[\s>]/gi).length - 1;
+    const displayImgs = (_articleDisplay + '\n' + (enabled ? _footerDisplay : '')).split(/<img[\s>]/gi).length - 1;
+    const copyImgs = html.split(/<img[\s>]/gi).length - 1;
+    logConv(
+      displaySections === copySections ? 'info' : 'error',
+      '内容完整性校验',
+      { displaySections, copySections, displayImgs, copyImgs }
+    );
 
     const plainText = content.textContent || '';
     let ok = false;
