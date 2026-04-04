@@ -1,7 +1,9 @@
 // Shared WeChat formatting engine
 // Handles: XML parsing, DOCX extraction, image upload, MD parsing, UI
-import { inferImageMimeFromBase64, inferWechatImageType, looksLikeGifSource } from './image-utils.mjs';
-export { inferWechatImageType, looksLikeGifSource } from './image-utils.mjs';
+const assetQuery = new URL(import.meta.url).search;
+const imageUtilsModule = await import('./image-utils.mjs' + assetQuery);
+const { inferImageMimeFromBase64, inferWechatImageType, looksLikeGifSource } = imageUtilsModule;
+export { inferWechatImageType, looksLikeGifSource };
 
 // ---- XML Namespaces ----
 export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';

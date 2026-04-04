@@ -1,5 +1,7 @@
 // Mote 莫特专用排版模板
-import { esc, escAttr, looksLikeGifSource } from '../engine.js';
+const assetQuery = new URL(import.meta.url).search;
+const engineModule = await import('../engine.js' + assetQuery);
+const { esc, escAttr, looksLikeGifSource } = engineModule;
 
 const BLANK = '<section><span style="font-size: 15px;"><br></span></section>';
 

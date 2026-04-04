@@ -209,6 +209,7 @@ if (!TEMPLATES.includes(templateId)) {
     const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
     initApp(mod.default);
   } catch (err) {
+    console.error('模板加载失败', templateId, err);
     document.getElementById('error').textContent = '模板加载失败: ' + templateId;
     document.getElementById('error').style.display = 'block';
   }

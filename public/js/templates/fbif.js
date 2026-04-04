@@ -1,5 +1,7 @@
 // FBIF 公众号排版模板
-import { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource } from '../engine.js';
+const assetQuery = new URL(import.meta.url).search;
+const engineModule = await import('../engine.js' + assetQuery);
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource } = engineModule;
 
 const FONT_STACK = 'mp-quote, "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif';
 
