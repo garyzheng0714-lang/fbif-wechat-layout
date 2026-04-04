@@ -473,37 +473,6 @@ export function initApp(template) {
     };
   }
 
-  function inspectImageStatsFromHtml(html) {
-    const out = {
-      total: 0,
-      gif: 0,
-      missingSrc: 0,
-      dataUri: 0,
-      sample: [],
-    };
-    const doc = new DOMParser().parseFromString('<div id="root">' + html + '</div>', 'text/html');
-    const root = doc.getElementById('root');
-    if (!root) return out;
-    for (const img of root.querySelectorAll('img')) {
-      out.total++;
-      const src = (img.getAttribute('src') || '').trim();
-      const type = (img.getAttribute('data-type') || '').trim().toLowerCase();
-      const dataSrc = (img.getAttribute('data-src') || '').trim();
-      if (!src) out.missingSrc++;
-      if (src.startsWith('data:image/')) out.dataUri++;
-      if (type === 'gif' || looksLikeGifSource(src) || looksLikeGifSource(dataSrc)) out.gif++;
-      if (out.sample.length < 6) {
-        out.sample.push({
-          src: src.slice(0, 180),
-          dataSrc: dataSrc.slice(0, 180),
-          type,
-          cls: (img.getAttribute('class') || '').trim(),
-        });
-      }
-    }
-    return out;
-  }
-
   function normalizeCopyHtmlForWechat(html) {
     const doc = new DOMParser().parseFromString('<div id="root">' + html + '</div>', 'text/html');
     const root = doc.getElementById('root');
@@ -608,34 +577,12 @@ export function initApp(template) {
     return true;
   }
 
-  async function probeClipboardHtmlStats() {
-    if (!(navigator.clipboard && typeof navigator.clipboard.read === 'function')) return null;
-    try {
-      const items = await navigator.clipboard.read();
-      for (const item of items) {
-        if (!item.types.includes('text/html')) continue;
-        const blob = await item.getType('text/html');
-        const text = await blob.text();
-        return inspectImageStatsFromHtml(text);
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  }
-
-  let _lastCopyDebug = null;
-  window.getLastCopyDebug = function() {
-    return _lastCopyDebug ? JSON.parse(JSON.stringify(_lastCopyDebug)) : null;
-  };
-
   function getReadyCopyPayload(enabled, previewMeta = []) {
     const base = getReadyDraftPayload(enabled, previewMeta);
     const copyNorm = normalizeCopyHtmlForWechat(base.html);
     return {
       html: copyNorm.html,
       stats: base.stats,
-      copyStats: copyNorm.stats,
     };
   }
 
@@ -838,49 +785,24 @@ export function initApp(template) {
 
     const plainText = content.textContent || '';
     let ok = false;
-    let strategy = '';
-    const attempts = [];
 
     try {
       ok = await copyByClipboardEvent(html, plainText, content);
-      attempts.push({ strategy: 'clipboard-event', ok });
-      if (ok) strategy = 'clipboard-event';
-    } catch (e) {
-      attempts.push({ strategy: 'clipboard-event', ok: false, error: e.message });
-    }
+    } catch {}
 
     if (!ok) {
       try {
         ok = await copyByNativeTempSelection(html);
-        attempts.push({ strategy: 'native-temp-selection', ok });
-        if (ok) strategy = 'native-temp-selection';
-      } catch (e) {
-        attempts.push({ strategy: 'native-temp-selection', ok: false, error: e.message });
-      }
+      } catch {}
     }
 
     if (!ok) {
       try {
         ok = await copyByClipboardApi(html, plainText);
-        attempts.push({ strategy: 'clipboard-api', ok });
-        if (ok) strategy = 'clipboard-api';
-      } catch (e) {
-        attempts.push({ strategy: 'clipboard-api', ok: false, error: e.message });
-      }
+      } catch {}
     }
 
-    const copiedProbe = ok ? await probeClipboardHtmlStats() : null;
-    _lastCopyDebug = {
-      time: new Date().toISOString(),
-      ok,
-      strategy,
-      attempts,
-      normalizeStats: payload.stats,
-      copyStats: payload.copyStats,
-      payloadProbe: inspectImageStatsFromHtml(html),
-      clipboardProbe: copiedProbe,
-    };
-    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', _lastCopyDebug);
+    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', payload.stats);
 
     btn.textContent = ok ? '已复制!' : '复制失败';
     btn.classList.add('copied');
