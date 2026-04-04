@@ -43,10 +43,6 @@ input[type="file"] { display: none; }
 .btn-primary { background: #0070C0; color: #fff; }
 .btn-primary:hover { background: #005a9e; }
 .btn-primary.copied { background: #27ae60; }
-.btn-draft { background: #07c160; color: #fff; }
-.btn-draft:hover { background: #06ad56; }
-.btn-draft.pushed { background: #27ae60; }
-.btn-draft:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-secondary { background: #f0f0f0; color: #333; text-decoration: none; }
 .btn-secondary:hover { background: #e0e0e0; }
 .zoom-controls {
@@ -157,8 +153,6 @@ input[type="file"] { display: none; }
     </div>
     <button class="btn btn-secondary" onclick="goBack()">&#8592; 重新上传</button>
     <button class="btn btn-primary" id="copyBtn" onclick="copyContent()">复制正文</button>
-    <button class="btn btn-secondary" id="diagBtn" onclick="toggleDiag()" title="查看剪贴板诊断">🔍</button>
-    <button class="btn btn-draft" id="draftBtn" onclick="pushToDraft()">推送到公众号草稿箱</button>
   </div>
 
   <div class="preview-layout">
@@ -178,22 +172,10 @@ input[type="file"] { display: none; }
     </div>
   </div>
 
-  <!-- Hidden state elements (used by engine.js) -->
-  <img id="coverImg" style="display:none;">
   <input type="text" id="titleInput" maxlength="32" style="display:none;">
   <input type="checkbox" id="footerEnabled" checked style="display:none;">
   <div class="stats-bar" id="statsBar"></div>
 
-  <!-- Clipboard Diagnostic Panel -->
-  <div id="diagPanel" style="display:none; position:fixed; top:60px; right:16px; z-index:200; width:420px; max-height:calc(100vh - 80px); background:#fff; border-radius:10px; box-shadow:0 4px 24px rgba(0,0,0,0.15); overflow:hidden; font-size:13px;">
-    <div style="padding:12px 16px; background:#f8f8f8; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between;">
-      <strong>剪贴板诊断</strong>
-      <button onclick="toggleDiag()" style="border:none; background:none; font-size:18px; cursor:pointer; color:#999;">&times;</button>
-    </div>
-    <div id="diagContent" style="padding:16px; overflow-y:auto; max-height:calc(100vh - 140px);">
-      <div style="color:#999; text-align:center; padding:20px;">点击「复制正文」后这里会显示诊断信息</div>
-    </div>
-  </div>
 </div>
 
 <!-- Global Status Bar — always visible at bottom -->
@@ -302,15 +284,6 @@ if (!TEMPLATES.includes(templateId)) {
   }
 }
 
-// Auto-set first image as cover
-window._populateArticleThumbnails = function() {
-  const imgs = document.getElementById('contentArea').querySelectorAll('img');
-  const coverImg = document.getElementById('coverImg');
-  if (imgs.length > 0 && imgs[0].src) {
-    coverImg.src = imgs[0].src;
-  }
-};
-
 // Build TOC from headings in content
 window._buildTOC = function() {
   const tocList = document.getElementById('tocList');
@@ -390,7 +363,6 @@ let _updateTimer = null;
 const observer = new MutationObserver(() => {
   if (_updateTimer) clearTimeout(_updateTimer);
   _updateTimer = setTimeout(() => {
-    window._populateArticleThumbnails();
     window._buildTOC();
     positionTOC();
   }, 200);
@@ -400,57 +372,6 @@ observer.observe(document.getElementById('contentArea'), { childList: true });
 // Scroll spy
 document.getElementById('previewMain').addEventListener('scroll', updateScrollSpy);
 
-// ---- Diagnostic Panel ----
-window.toggleDiag = function() {
-  const panel = document.getElementById('diagPanel');
-  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-};
-
-window._updateDiagPanel = function(analysis) {
-  const el = document.getElementById('diagContent');
-  if (!el) return;
-  const method = window.getClipboardHtml ? '✓' : '—';
-  const statusColor = analysis.dataUriCount > 0 || analysis.missingSrcCount > 0 ? '#ff4d4f' : '#27ae60';
-  let html = '<div style="margin-bottom:12px;">' +
-    '<div style="display:inline-block;padding:4px 10px;border-radius:4px;background:' + statusColor + ';color:#fff;font-weight:500;margin-bottom:8px;">' +
-    (analysis.dataUriCount > 0 || analysis.missingSrcCount > 0 ? '⚠ 有问题' : '✓ 正常') + '</div>' +
-    '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
-  const rows = [
-    ['HTML 大小', (analysis.htmlLength / 1024).toFixed(1) + ' KB'],
-    ['图片总数', analysis.imgCount],
-    ['GIF 动图', analysis.gifCount],
-    ['mmbiz CDN', analysis.mmbizCount],
-    ['data:URI (未上传)', analysis.dataUriCount, analysis.dataUriCount > 0 ? '#ff4d4f' : ''],
-    ['缺失 src', analysis.missingSrcCount, analysis.missingSrcCount > 0 ? '#ff4d4f' : ''],
-  ];
-  for (const [label, value, color] of rows) {
-    html += '<tr><td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;color:#666;">' + label +
-      '</td><td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;font-weight:500;' +
-      (color ? 'color:' + color : '') + ';">' + value + '</td></tr>';
-  }
-  html += '</table></div>';
-
-  // Image list
-  html += '<div style="margin-top:8px;"><strong style="font-size:12px;">图片详情：</strong>';
-  html += '<div style="max-height:300px;overflow-y:auto;margin-top:6px;">';
-  for (let i = 0; i < analysis.images.length; i++) {
-    const img = analysis.images[i];
-    const icon = img.dataType === 'gif' ? '🎞' : '🖼';
-    const status = !img.hasSrc ? '❌ 无src' : img.isDataUri ? '❌ 未上传' : img.isMmbiz ? '✅' : '⚠ 非CDN';
-    html += '<div style="padding:6px 8px;border-bottom:1px solid #f5f5f5;font-size:11px;line-height:1.5;">' +
-      '<div>' + icon + ' #' + (i + 1) + ' ' + status + ' <code style="color:#666;">' + (img.dataType || '—') + '</code></div>' +
-      '<div style="color:#999;word-break:break-all;">' + img.src + '</div>' +
-      '</div>';
-  }
-  html += '</div></div>';
-
-  // Copy raw HTML button
-  html += '<div style="margin-top:12px;text-align:center;">' +
-    '<button onclick="navigator.clipboard.writeText(window.getClipboardHtml()).then(()=>this.textContent=\'已复制HTML源码!\')" ' +
-    'style="padding:6px 16px;border:1px solid #d9d9d9;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;">复制 HTML 源码 (调试用)</button></div>';
-
-  el.innerHTML = html;
-};
 </script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 // Shared WeChat formatting engine
-// Handles: XML parsing, DOCX extraction, image upload, MD parsing, UI
+// Handles: XML parsing, DOCX extraction, MD parsing, copy, UI
 const assetQuery = new URL(import.meta.url).search;
 const imageUtilsModule = await import('./image-utils.mjs' + assetQuery);
 const { inferImageMimeFromBase64, inferWechatImageType, looksLikeGifSource } = imageUtilsModule;
@@ -45,7 +45,6 @@ export function escAttr(t) {
 }
 
 // ---- Generic Paragraph Data Extraction ----
-// Returns a superset of signals that any template can use for classification
 export function extractParagraph(p, ridToFile, ridToUrl) {
   const pPr = findOne(p, W, 'pPr');
   let align = 'left', isList = false, hasOutlineLevel = false, hasHeadingStyle = false;
@@ -122,13 +121,11 @@ export function extractParagraph(p, ridToFile, ridToUrl) {
 export async function parseDocx(file) {
   const zip = await JSZip.loadAsync(file);
 
-  // Validate DOCX structure
   const relsEntry = zip.file('word/_rels/document.xml.rels');
   const docEntry = zip.file('word/document.xml');
   if (!relsEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml.rels');
   if (!docEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml');
 
-  // Parse relationships
   const relsXml = await relsEntry.async('string');
   const relsDom = new DOMParser().parseFromString(relsXml, 'text/xml');
   const ridToFile = {}, ridToUrl = {};
@@ -139,7 +136,6 @@ export async function parseDocx(file) {
     else if (rtype.includes('hyperlink')) ridToUrl[rid] = (target || '').replace(/&amp;/g, '&');
   }
 
-  // Load images as base64 (concurrently)
   const imgCache = {};
   await Promise.all(Object.values(ridToFile).map(async (fn) => {
     const entry = zip.file('word/media/' + fn);
@@ -151,9 +147,7 @@ export async function parseDocx(file) {
     }
   }));
 
-  // Parse document.xml (NO image upload here — done after preview)
   const docXml = await docEntry.async('string');
-
   const docDom = new DOMParser().parseFromString(docXml, 'text/xml');
   const body = findOne(docDom.documentElement, W, 'body');
   const allParas = findAll(body, W, 'p');
@@ -161,8 +155,6 @@ export async function parseDocx(file) {
 
   return { paragraphs, imgCache };
 }
-
-// Image upload functions removed — backgroundUploadImages handles all uploads
 
 // ---- Markdown Utilities ----
 export function parseMdRuns(text) {
@@ -195,7 +187,7 @@ export function initApp(template) {
   document.getElementById('pageTitle').textContent = template.name;
   document.getElementById('pageSubtitle').textContent = template.description;
   document.getElementById('fileHint').textContent =
-    '支持 ' + template.formats.join('、') + ' 格式，图片会上传至 CDN 以兼容微信';
+    '支持 ' + template.formats.join('、') + ' 格式';
   document.getElementById('fileInput').accept = template.formats.join(',');
 
   const dropZone = document.getElementById('dropZone');
@@ -219,7 +211,7 @@ export function initApp(template) {
   fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
 
   async function handleFile(file) {
-    _convLog.length = 0; // reset log for each new file
+    _convLog.length = 0;
     logConv('info', '开始转化', { file: file.name, size: (file.size / 1024).toFixed(1) + 'KB' });
     errorEl.style.display = 'none';
     dropZone.classList.add('processing');
@@ -229,7 +221,6 @@ export function initApp(template) {
     try {
       const t0 = performance.now();
 
-      // Step 1: Parse and format (NO network calls — instant)
       let result;
       if (file.name.toLowerCase().endsWith('.docx')) {
         const docxData = await parseDocx(file);
@@ -250,7 +241,6 @@ export function initApp(template) {
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
 
-      // Step 2: Show preview IMMEDIATELY (with base64 images for display)
       progressFill.style.width = '100%';
       progressText.textContent = '排版完成!';
       setTimeout(() => showPreview(file.name.replace(/\.\w+$/i, ''), articleHtml, footerHtml, stats), 200);
@@ -262,73 +252,27 @@ export function initApp(template) {
     }
   }
 
-  // Two-layer rendering: display (original images) + push (WeChat CDN images)
-  let _articleDisplay = '';  // original URLs — for preview (no watermarks)
-  let _articlePush = '';     // mmbiz URLs — for push to WeChat
-  let _footerDisplay = '';
-  let _footerPush = '';
-  let _uploadPromise = null;
-  let _uploadDone = false;
-  let _uploadTotal = 0;
-  let _uploadCurrent = 0;
-  let _uploadFailed = 0;
+  let _articleHtml = '';
+  let _footerHtml = '';
 
   function showPreview(title, articleContent, footerContent, stats) {
-    _articleDisplay = articleContent;
-    _articlePush = articleContent;
-    _footerDisplay = footerContent;
-    _footerPush = footerContent;
+    _articleHtml = articleContent;
+    _footerHtml = footerContent;
 
     document.getElementById('uploadView').style.display = 'none';
     document.getElementById('previewView').style.display = 'block';
 
-    // Title — set in toolbar and hidden input (for push)
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
 
-    // Render with original images (no WeChat watermarks)
-    document.getElementById('contentArea').innerHTML = _articleDisplay + '\n' + _footerDisplay;
+    document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
     document.getElementById('statsBar').textContent = stats;
 
-    // Thumbnails and TOC are populated by MutationObserver in app.html
-
-    // Footer update
     window._updateFooter = function(newHtml) {
-      if (typeof newHtml === 'string' && newHtml !== '') {
-        _footerDisplay = newHtml;
-        _footerPush = newHtml;
-      }
+      if (typeof newHtml === 'string' && newHtml !== '') _footerHtml = newHtml;
       const enabled = document.getElementById('footerEnabled').checked;
-      document.getElementById('contentArea').innerHTML = _articleDisplay + '\n' + (enabled ? _footerDisplay : '');
+      document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
     };
-
-    // Step 3: Background upload
-    const statsBar = document.getElementById('statsBar');
-    _uploadDone = false;
-    _uploadFailed = 0;
-    updateButtonStates();
-    _uploadPromise = backgroundUploadImages(statsBar, stats);
-  }
-
-  function updateButtonStates() {
-    const draftBtn = document.getElementById('draftBtn');
-    const copyBtn = document.getElementById('copyBtn');
-    if (!draftBtn) return;
-
-    if (!_uploadDone && _uploadTotal > 0) {
-      // Draft push needs upload; copy can proceed with original mmbiz URLs
-      draftBtn.textContent = '上传中 (' + _uploadCurrent + '/' + _uploadTotal + ')...';
-      draftBtn.disabled = true;
-      copyBtn.title = '';  // Copy works immediately — mmbiz URLs are valid
-    } else {
-      draftBtn.disabled = false;
-      if (_uploadFailed > 0) {
-        draftBtn.textContent = '推送到公众号草稿箱 (' + _uploadFailed + '张失败)';
-      } else {
-        draftBtn.textContent = '推送到公众号草稿箱';
-      }
-      copyBtn.title = '';
-    }
   }
 
   // ---- Conversion Log ----
@@ -339,143 +283,18 @@ export function initApp(template) {
     _convLog.push(entry);
     const prefix = level === 'error' ? '❌' : level === 'warn' ? '⚠️' : '✅';
     console.log('[排版日志] ' + prefix + ' ' + msg, detail || '');
-    // Push to UI log panel
     if (window._pushLog) window._pushLog(level, msg, detail);
   }
-  // Expose log for debugging — type getConvLog() in console
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
 
-  function formatRatio(v) {
-    if (!v || !isFinite(v) || v <= 0) return '1';
-    return v.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
-  }
-
-  function collectPreviewImageMeta(rootEl) {
-    if (!rootEl) return [];
-    const out = [];
-    for (const img of rootEl.querySelectorAll('img')) {
-      const w = img.naturalWidth || img.width || 0;
-      const h = img.naturalHeight || img.height || 0;
-      const ratio = (w > 0 && h > 0) ? (h / w) : 1;
-      out.push({ width: w, height: h, ratio });
-    }
-    return out;
-  }
-
-  function normalizePushHtmlForWechat(html, options = {}) {
-    const metaList = Array.isArray(options.metaList) ? options.metaList : [];
-    const metaOffset = Number.isFinite(options.metaOffset) ? options.metaOffset : 0;
-    const doc = new DOMParser().parseFromString('<div id="root">' + html + '</div>', 'text/html');
-    const root = doc.getElementById('root');
-    if (!root) {
-      return {
-        html,
-        stats: { total: 0, taggedGif: 0, likelyGif: 0, patchedGif: 0, dataUri: 0, missingSrc: 0 },
-      };
-    }
-
-    const stats = { total: 0, taggedGif: 0, likelyGif: 0, patchedGif: 0, dataUri: 0, missingSrc: 0 };
-    let localIndex = 0;
-    for (const img of root.querySelectorAll('img')) {
-      const globalIndex = metaOffset + localIndex;
-      localIndex++;
-      stats.total++;
-      const src = (img.getAttribute('src') || '').trim();
-      if (!src) {
-        stats.missingSrc++;
-        continue;
-      }
-      let normalizedSrc = src;
-      if (normalizedSrc.startsWith('http://mmbiz.qpic.cn/')) {
-        normalizedSrc = 'https://' + normalizedSrc.slice('http://'.length);
-        img.setAttribute('src', normalizedSrc);
-      }
-      if (normalizedSrc.startsWith('data:image/')) stats.dataUri++;
-
-      // WeChat editor compatibility: keep key metadata fields and class names.
-      img.removeAttribute('referrerpolicy');
-      img.setAttribute('data-src', normalizedSrc);
-      const cls = (img.getAttribute('class') || '').split(/\s+/).filter(Boolean);
-      if (!cls.includes('rich_pages')) cls.push('rich_pages');
-      if (!cls.includes('wxw-img')) cls.push('wxw-img');
-      img.setAttribute('class', cls.join(' '));
-      img.setAttribute('alt', '图片');
-
-      const meta = metaList[globalIndex] || {};
-      const width = Math.max(1, Number(meta.width) || Number(img.getAttribute('data-w')) || 640);
-      const ratio = Number(meta.ratio) > 0 ? Number(meta.ratio) :
-        (Number(meta.height) > 0 ? Number(meta.height) / width : Number(img.getAttribute('data-ratio')) || 1);
-      const ratioText = formatRatio(ratio);
-      const height = Math.max(1, Math.round(width * (ratio > 0 ? ratio : 1)));
-      img.setAttribute('data-ratio', ratioText);
-      img.setAttribute('data-w', String(width));
-      img.setAttribute('data-s', `${height},${width}`);
-      img.setAttribute('data-index', String(globalIndex));
-      img.setAttribute('data-report-img-idx', String(globalIndex));
-      img.setAttribute('_width', String(width));
-      img.setAttribute('data-fail', '0');
-      if (!img.getAttribute('data-imgfileid')) {
-        img.setAttribute('data-imgfileid', String(100000000 + Math.floor(Math.random() * 900000000)));
-      }
-      if (!img.getAttribute('data-original-style')) {
-        img.setAttribute('data-original-style', img.getAttribute('style') || '');
-      }
-
-      const tagged = (img.getAttribute('data-type') || '').toLowerCase() === 'gif';
-      const inferredType = inferWechatImageType(normalizedSrc);
-      if (inferredType) img.setAttribute('data-type', inferredType);
-      const likelyGif = inferredType === 'gif' || looksLikeGifSource(normalizedSrc);
-      if (tagged) stats.taggedGif++;
-      if (likelyGif) {
-        stats.likelyGif++;
-        if (!tagged) {
-          img.setAttribute('data-type', 'gif');
-          stats.patchedGif++;
-          stats.taggedGif++;
-        }
-      }
-    }
-    return { html: root.innerHTML, stats };
-  }
-
-  function mergeNormalizeStats(a, b) {
-    return {
-      total: a.total + b.total,
-      taggedGif: a.taggedGif + b.taggedGif,
-      likelyGif: a.likelyGif + b.likelyGif,
-      patchedGif: a.patchedGif + b.patchedGif,
-      dataUri: a.dataUri + b.dataUri,
-      missingSrc: a.missingSrc + b.missingSrc,
-    };
-  }
-
-  function getReadyDraftPayload(enabled, previewMeta = []) {
-    const articleNorm = normalizePushHtmlForWechat(_articlePush, { metaList: previewMeta, metaOffset: 0 });
-    _articlePush = articleNorm.html;
-
-    const empty = { total: 0, taggedGif: 0, likelyGif: 0, patchedGif: 0, dataUri: 0, missingSrc: 0 };
-    let footerNorm = { html: '', stats: empty };
-    if (enabled) {
-      footerNorm = normalizePushHtmlForWechat(_footerPush, {
-        metaList: previewMeta,
-        metaOffset: articleNorm.stats.total,
-      });
-      _footerPush = footerNorm.html;
-    }
-
-    const stats = mergeNormalizeStats(articleNorm.stats, footerNorm.stats);
-    if (stats.patchedGif > 0) {
-      logConv('warn', '自动补齐GIF标记', {
-        patched: stats.patchedGif,
-        likelyGif: stats.likelyGif,
-        taggedGif: stats.taggedGif,
-      });
-    }
-
-    return {
-      html: _articlePush + '\n' + (enabled ? _footerPush : ''),
-      stats,
-    };
+  // ---- Copy ----
+  async function copyByClipboardApi(html, plainText) {
+    if (!(navigator.clipboard && typeof ClipboardItem !== 'undefined')) return false;
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([plainText], { type: 'text/plain' }),
+    })]);
+    return true;
   }
 
   async function copyByClipboardEvent(html, plainText) {
@@ -506,163 +325,48 @@ export function initApp(template) {
     }
   }
 
-  async function copyByClipboardApi(html, plainText) {
-    if (!(navigator.clipboard && typeof ClipboardItem !== 'undefined')) return false;
-    await navigator.clipboard.write([new ClipboardItem({
-      'text/html': new Blob([html], { type: 'text/html' }),
-      'text/plain': new Blob([plainText], { type: 'text/plain' }),
-    })]);
-    return true;
-  }
+  let _lastCopiedHtml = '';
 
-  function getReadyCopyPayload(enabled, previewMeta = []) {
-    // Use the push-layer HTML directly — it already has all WeChat attributes
-    // (class, data-src, data-type, data-w, data-ratio) from normalizePushHtmlForWechat.
-    // NO additional DOMParser pass — avoids re-serialization that can corrupt
-    // content with special characters (≧∇≦, curly quotes, etc.)
-    const base = getReadyDraftPayload(enabled, previewMeta);
-    return {
-      html: base.html,
-      stats: base.stats,
-    };
-  }
+  window.copyContent = async function() {
+    const content = document.getElementById('contentArea');
+    const btn = document.getElementById('copyBtn');
 
-  async function backgroundUploadImages(statsBar, originalStats) {
-    const allHtml = _articlePush + '\n' + _footerPush;
+    // Use rendered HTML directly — no normalization, no DOMParser, no upload
+    const enabled = document.getElementById('footerEnabled').checked;
+    const html = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+    const plainText = content.textContent || '';
 
-    // Collect data: URIs (DOCX images + footer)
-    const base64Map = {};
-    const b64Re = /src="(data:image\/[^"]+)"/g;
-    let m3;
-    while ((m3 = b64Re.exec(allHtml)) !== null) {
-      base64Map['img_' + Object.keys(base64Map).length] = m3[1];
+    let ok = false;
+    let method = '';
+
+    try {
+      ok = await copyByClipboardApi(html, plainText);
+      if (ok) method = 'ClipboardAPI';
+    } catch {}
+
+    if (!ok) {
+      try {
+        ok = await copyByClipboardEvent(html, plainText);
+        if (ok) method = 'ClipboardEvent';
+      } catch {}
     }
 
-    // Collect http URLs (MD external images) — re-upload ALL including mmbiz
-    // Even mmbiz URLs must be re-uploaded to the user's own account CDN,
-    // otherwise cross-account images lose GIF animation when pasted into editor
-    const httpUrls = [];
-    const httpRe = /src="(https?:\/\/[^"]+)"/g;
-    while ((m3 = httpRe.exec(allHtml)) !== null) {
-      httpUrls.push(m3[1]);
-    }
-
-    logConv('info', '图片扫描完成', {
-      base64: Object.keys(base64Map).length,
-      httpUrls: httpUrls.length,
+    _lastCopiedHtml = html;
+    const imgCount = (html.match(/<img[\s>]/gi) || []).length;
+    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', {
+      method,
+      htmlSize: (html.length / 1024).toFixed(1) + 'KB',
+      imgCount,
     });
 
-    _uploadTotal = Object.keys(base64Map).length + httpUrls.length;
-    _uploadCurrent = 0;
-    _uploadFailed = 0;
+    btn.textContent = ok ? '已复制!' : '复制失败';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '复制正文'; btn.classList.remove('copied'); }, 2000);
+  };
 
-    if (_uploadTotal === 0) { _uploadDone = true; updateButtonStates(); return; }
+  window.getClipboardHtml = function() { return _lastCopiedHtml; };
 
-    statsBar.textContent = '上传图片 (0/' + _uploadTotal + ')...';
-    updateButtonStates();
-    let done = 0;
-    const failedDetails = [];
-
-    function updateProgress() {
-      _uploadCurrent = done;
-      statsBar.textContent = '上传图片 (' + done + '/' + _uploadTotal + ')...';
-      updateButtonStates();
-    }
-
-    // Upload base64 images in batches of 10 — only update PUSH layer, not display
-    const b64Entries = Object.entries(base64Map);
-    for (let i = 0; i < b64Entries.length; i += 10) {
-      const batch = Object.fromEntries(b64Entries.slice(i, i + 10));
-      try {
-        const resp = await fetch('/api/wechat-upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64_images: batch })
-        });
-        if (resp.ok) {
-          const { results } = await resp.json();
-          for (const [key, wechatUrl] of Object.entries(results)) {
-            if (!wechatUrl) {
-              _uploadFailed++;
-              const mime = (base64Map[key] || '').split(';')[0].split(':')[1] || 'unknown';
-              failedDetails.push({ type: 'base64', key, mime });
-              logConv('error', 'base64图片上传失败', { key, mime });
-            } else {
-              _articlePush = _articlePush.split(base64Map[key]).join(wechatUrl);
-              _footerPush = _footerPush.split(base64Map[key]).join(wechatUrl);
-              logConv('info', 'base64图片上传成功', { key, cdn: wechatUrl.substring(0, 60) + '...' });
-            }
-            done++;
-          }
-        } else {
-          const errText = await resp.text().catch(() => 'unknown');
-          logConv('error', 'base64批次上传HTTP错误', { status: resp.status, body: errText.substring(0, 200) });
-          done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length;
-          Object.keys(batch).forEach(k => failedDetails.push({ type: 'base64', key: k, error: 'HTTP ' + resp.status }));
-        }
-        updateProgress();
-      } catch (e) {
-        logConv('error', 'base64批次上传网络错误', { error: e.message });
-        done += Object.keys(batch).length; _uploadFailed += Object.keys(batch).length;
-        Object.keys(batch).forEach(k => failedDetails.push({ type: 'base64', key: k, error: e.message }));
-        updateProgress();
-      }
-    }
-
-    // Upload URLs with concurrency pool — keeps 5 in-flight at a time
-    // Scales to any number of images without overwhelming the server
-    const CONCURRENCY = 10;
-    let next = 0;
-    async function uploadOneUrl() {
-      while (next < httpUrls.length) {
-        const url = httpUrls[next++];
-        try {
-          const resp = await fetch('/api/wechat-upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ urls: [url] })
-          });
-          if (resp.ok) {
-            const { results } = await resp.json();
-            const wechatUrl = results[url] || Object.values(results)[0];
-            if (!wechatUrl) {
-              _uploadFailed++;
-              failedDetails.push({ type: 'url', url });
-              logConv('error', 'URL图片上传失败', { url: url.substring(0, 80) });
-            } else {
-              _articlePush = _articlePush.split(url).join(wechatUrl);
-              _footerPush = _footerPush.split(url).join(wechatUrl);
-              logConv('info', 'URL图片上传成功', { url: url.substring(0, 60), cdn: wechatUrl.substring(0, 60) + '...' });
-            }
-          } else {
-            _uploadFailed++;
-            failedDetails.push({ type: 'url', url, error: 'HTTP ' + resp.status });
-          }
-        } catch (e) {
-          _uploadFailed++;
-          failedDetails.push({ type: 'url', url, error: e.message });
-        }
-        done++;
-        updateProgress();
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, httpUrls.length) }, () => uploadOneUrl()));
-
-    // normalizePushHtmlForWechat runs on-demand in getReadyDraftPayload — no need here
-
-    _uploadDone = true;
-    _uploadCurrent = done;
-    updateButtonStates();
-    if (_uploadFailed > 0) {
-      statsBar.textContent = originalStats + ' | ' + _uploadFailed + '张图片上传失败';
-      logConv('warn', '上传完成，' + _uploadFailed + '张失败', failedDetails);
-    } else {
-      statsBar.textContent = originalStats + ' | 图片已同步';
-      logConv('info', '全部图片上传成功', { total: done });
-    }
-  }
-
-  // Expose global handlers for onclick attributes
+  // ---- UI Controls ----
   const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
   let zoomIdx = ZOOM_STEPS.length - 1;
 
@@ -681,187 +385,5 @@ export function initApp(template) {
     document.getElementById('phoneFrame').style.maxWidth = (420 * pct / 100) + 'px';
     document.getElementById('zoomLabel').textContent = pct + '%';
     if (window._positionTOC) window._positionTOC();
-  };
-
-  // ---- Clipboard Diagnostics ----
-  // Stores the last copied HTML for inspection via inspectClipboard() or the UI panel
-  let _lastCopiedHtml = '';
-  let _lastCopyMethod = '';
-
-  function analyzeHtml(html) {
-    const doc = new DOMParser().parseFromString('<div id="r">' + html + '</div>', 'text/html');
-    const root = doc.getElementById('r');
-    const imgs = root ? root.querySelectorAll('img') : [];
-    const details = [];
-    for (const img of imgs) {
-      const src = img.getAttribute('src') || '';
-      const dataSrc = img.getAttribute('data-src') || '';
-      const dataType = img.getAttribute('data-type') || '';
-      const cls = img.getAttribute('class') || '';
-      const isMmbiz = src.includes('mmbiz.qpic.cn');
-      const isDataUri = src.startsWith('data:');
-      details.push({
-        src: src.substring(0, 100) + (src.length > 100 ? '...' : ''),
-        dataSrc: dataSrc ? 'yes' : 'NO',
-        dataType: dataType || 'NONE',
-        class: cls || 'NONE',
-        isMmbiz, isDataUri,
-        hasSrc: !!src,
-      });
-    }
-    return {
-      htmlLength: html.length,
-      imgCount: imgs.length,
-      gifCount: details.filter(d => d.dataType === 'gif').length,
-      mmbizCount: details.filter(d => d.isMmbiz).length,
-      dataUriCount: details.filter(d => d.isDataUri).length,
-      missingSrcCount: details.filter(d => !d.hasSrc).length,
-      images: details,
-    };
-  }
-
-  // Console API: type inspectClipboard() to get full diagnostics
-  window.inspectClipboard = function() {
-    if (!_lastCopiedHtml) { console.log('还没有复制过内容'); return null; }
-    const analysis = analyzeHtml(_lastCopiedHtml);
-    console.log('%c[剪贴板诊断]', 'color: #0070C0; font-weight: bold;');
-    console.log('复制方法:', _lastCopyMethod);
-    console.log('HTML 大小:', (analysis.htmlLength / 1024).toFixed(1) + 'KB');
-    console.log('图片总数:', analysis.imgCount);
-    console.log('GIF 数:', analysis.gifCount);
-    console.log('mmbiz CDN:', analysis.mmbizCount);
-    console.log('data:URI (未上传):', analysis.dataUriCount);
-    console.log('缺失 src:', analysis.missingSrcCount);
-    console.table(analysis.images);
-    console.log('完整 HTML (前2000字符):', _lastCopiedHtml.substring(0, 2000));
-    return analysis;
-  };
-
-  // Console API: type getClipboardHtml() to get the raw HTML string
-  window.getClipboardHtml = function() { return _lastCopiedHtml; };
-
-  window.copyContent = async function() {
-    const content = document.getElementById('contentArea');
-    const btn = document.getElementById('copyBtn');
-
-    // Check if there are any data: URIs (DOCX base64 images) that MUST be uploaded.
-    // For Markdown files, all images are already mmbiz.qpic.cn URLs — they work
-    // directly in the WeChat editor without re-upload. No need to wait.
-    const pushHtml = _articlePush + '\n' + _footerPush;
-    const hasDataUri = /src="data:image\//i.test(pushHtml);
-
-    if (hasDataUri && _uploadPromise && !_uploadDone) {
-      // Only wait for DOCX base64 images that have no URL yet
-      btn.textContent = '等待图片上传...';
-      await _uploadPromise;
-    }
-
-    // Use PUSH layer — already has mmbiz URLs (original or re-uploaded)
-    const enabled = document.getElementById('footerEnabled').checked;
-    const payload = getReadyCopyPayload(enabled, collectPreviewImageMeta(content));
-    const html = payload.html;
-
-    // Content integrity check — compare section count between display and copy
-    const displaySections = (_articleDisplay + '\n' + (enabled ? _footerDisplay : '')).split(/<section[\s>]/gi).length - 1;
-    const copySections = html.split(/<section[\s>]/gi).length - 1;
-    const displayImgs = (_articleDisplay + '\n' + (enabled ? _footerDisplay : '')).split(/<img[\s>]/gi).length - 1;
-    const copyImgs = html.split(/<img[\s>]/gi).length - 1;
-    logConv(
-      displaySections === copySections ? 'info' : 'error',
-      '内容完整性校验',
-      { displaySections, copySections, displayImgs, copyImgs }
-    );
-
-    const plainText = content.textContent || '';
-    let ok = false;
-    _lastCopyMethod = '';
-
-    // Clipboard API first — writes exact HTML blob without DOM rendering,
-    // most reliable for preserving all image tags and attributes
-    try {
-      ok = await copyByClipboardApi(html, plainText);
-      if (ok) _lastCopyMethod = 'ClipboardAPI';
-    } catch {}
-
-    if (!ok) {
-      try {
-        ok = await copyByClipboardEvent(html, plainText);
-        if (ok) _lastCopyMethod = 'ClipboardEvent';
-      } catch {}
-    }
-
-    // Save for diagnostics
-    _lastCopiedHtml = html;
-    const analysis = analyzeHtml(html);
-    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', {
-      method: _lastCopyMethod,
-      htmlSize: (analysis.htmlLength / 1024).toFixed(1) + 'KB',
-      imgCount: analysis.imgCount,
-      gifCount: analysis.gifCount,
-      mmbizCount: analysis.mmbizCount,
-      dataUriCount: analysis.dataUriCount,
-      missingSrcCount: analysis.missingSrcCount,
-    });
-
-    // Update diagnostic panel if visible
-    if (window._updateDiagPanel) window._updateDiagPanel(analysis);
-
-    btn.textContent = ok ? '已复制!' : '复制失败';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = '复制正文'; btn.classList.remove('copied'); }, 2000);
-  };
-
-  // Push to WeChat drafts (images already on WeChat CDN, push is instant)
-  window.pushToDraft = async function() {
-    const btn = document.getElementById('draftBtn');
-    const title = document.getElementById('titleInput').value.trim() || '未命名文章';
-
-    // Get cover from sidebar
-    const coverEl = document.getElementById('coverImg');
-    const coverSrc = coverEl ? coverEl.src : '';
-    const cover = (coverSrc.startsWith('http') || coverSrc.startsWith('data:')) ? coverSrc : null;
-
-    btn.textContent = '推送中...';
-    btn.disabled = true;
-
-    try {
-      // Wait for background image upload to finish
-      if (_uploadPromise) {
-        btn.textContent = '等待图片上传完成...';
-        await _uploadPromise;
-      }
-      if (_uploadFailed > 0) {
-        throw new Error('仍有' + _uploadFailed + '张图片上传失败');
-      }
-
-      // Use push layer (WeChat CDN URLs), not display layer
-      const enabled = document.getElementById('footerEnabled').checked;
-      const payload = getReadyDraftPayload(enabled, collectPreviewImageMeta(document.getElementById('contentArea')));
-      if (payload.stats.dataUri > 0 || payload.stats.missingSrc > 0) {
-        throw new Error('图片未就绪，请重新上传');
-      }
-      const content = payload.html;
-
-      const resp = await fetch('/api/wechat-draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content, cover }),
-      });
-      const data = await resp.json();
-
-      if (!resp.ok) throw new Error(data.error || '推送失败');
-
-      btn.textContent = '推送成功!';
-      btn.classList.add('pushed');
-      setTimeout(() => {
-        window.open('https://mp.weixin.qq.com/', '_blank');
-        btn.textContent = '推送到公众号草稿箱';
-        btn.classList.remove('pushed');
-        btn.disabled = false;
-      }, 1000);
-    } catch (err) {
-      btn.textContent = '失败: ' + err.message;
-      setTimeout(() => { btn.textContent = '推送到公众号草稿箱'; btn.disabled = false; }, 3000);
-    }
   };
 }
