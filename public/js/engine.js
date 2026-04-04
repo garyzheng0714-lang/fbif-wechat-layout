@@ -252,11 +252,13 @@ export function initApp(template) {
     }
   }
 
-  // Article HTML — display layer always uses original images (base64 or mmbiz URLs).
-  // Copy layer: mmbiz URLs work directly in WeChat editor; base64 must be uploaded first.
-  let _articleHtml = '';   // display (original)
-  let _articleCopy = '';   // copy (base64 replaced with CDN URLs after upload)
+  // Dual-layer rendering:
+  //   Display layer (_articleHtml) — original URLs for browser preview
+  //   Copy layer (_articleCopy)   — ALL images re-uploaded to WeChat CDN for paste
+  let _articleHtml = '';   // preview: original URLs (browser can load them)
+  let _articleCopy = '';   // copy: WeChat CDN URLs (editor can load them)
   let _footerHtml = '';
+  let _footerCopy = '';
   let _uploadPromise = null;
   let _uploadDone = false;
 
@@ -264,6 +266,7 @@ export function initApp(template) {
     _articleHtml = articleContent;
     _articleCopy = articleContent;
     _footerHtml = footerContent;
+    _footerCopy = footerContent;
 
     document.getElementById('uploadView').style.display = 'none';
     document.getElementById('previewView').style.display = 'block';
@@ -271,61 +274,52 @@ export function initApp(template) {
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
 
+    // Preview uses original URLs (works in browser)
     document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
     document.getElementById('statsBar').textContent = stats;
 
     window._updateFooter = function(newHtml) {
-      if (typeof newHtml === 'string' && newHtml !== '') _footerHtml = newHtml;
+      if (typeof newHtml === 'string' && newHtml !== '') {
+        _footerHtml = newHtml;
+        _footerCopy = newHtml;
+      }
       const enabled = document.getElementById('footerEnabled').checked;
       document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
     };
 
-    // Upload images that WeChat editor can't use directly:
-    //   - base64 data: URIs (from DOCX) — editor doesn't support inline data
-    //   - Non-mmbiz external URLs — editor may block or can't fetch them
-    //   - mmbiz.qpic.cn URLs are kept as-is (WeChat's own CDN, always works)
+    // Background: upload ALL images to WeChat CDN for the copy layer
     _uploadDone = false;
-    _uploadPromise = uploadImagesForCopy(document.getElementById('statsBar'), stats);
+    _uploadPromise = uploadAllImages(document.getElementById('statsBar'), stats);
   }
 
-  function isMmbizUrl(url) {
-    return /^https?:\/\/mmbiz\.qpic\.cn\//i.test(url);
-  }
+  async function uploadAllImages(statsBar, originalStats) {
+    const allHtml = _articleCopy + '\n' + _footerCopy;
 
-  async function uploadImagesForCopy(statsBar, originalStats) {
-    const allHtml = _articleCopy + '\n' + _footerHtml;
-
-    // 1) Collect base64 data: URIs (DOCX embedded images)
-    const base64List = [];
-    const b64Re = /src="(data:image\/[^"]+)"/g;
+    // Collect ALL images: base64 (DOCX) + http URLs (mmbiz + external)
+    const tasks = [];
     let m;
+
+    const b64Re = /src="(data:image\/[^"]+)"/g;
     while ((m = b64Re.exec(allHtml)) !== null) {
-      base64List.push({ type: 'base64', src: m[1], key: 'img_' + base64List.length });
+      tasks.push({ type: 'base64', src: m[1], key: 'img_' + tasks.length });
     }
 
-    // 2) Collect non-mmbiz http URLs (external images WeChat might not access)
-    const extUrls = [];
     const urlRe = /src="(https?:\/\/[^"]+)"/g;
     while ((m = urlRe.exec(allHtml)) !== null) {
-      if (!isMmbizUrl(m[1])) extUrls.push(m[1]);
+      tasks.push({ type: 'url', src: m[1] });
     }
 
-    const total = base64List.length + extUrls.length;
-    if (total === 0) {
+    if (tasks.length === 0) {
       _uploadDone = true;
-      logConv('info', '无需上传（全部为微信 CDN 图片）');
+      logConv('info', '无图片需上传');
       return;
     }
 
-    logConv('info', '需上传图片', { base64: base64List.length, 外链: extUrls.length });
-    statsBar.textContent = '上传图片 (0/' + total + ')...';
+    const b64Count = tasks.filter(t => t.type === 'base64').length;
+    const urlCount = tasks.filter(t => t.type === 'url').length;
+    logConv('info', '开始上传全部图片到微信CDN', { base64: b64Count, url: urlCount });
+    statsBar.textContent = '上传图片 (0/' + tasks.length + ')...';
     let done = 0, failed = 0;
-
-    // Build a unified task list
-    const tasks = [
-      ...base64List.map(b => ({ type: 'base64', key: b.key, src: b.src })),
-      ...extUrls.map(u => ({ type: 'url', src: u })),
-    ];
 
     const CONCURRENCY = 5;
     let next = 0;
@@ -334,12 +328,9 @@ export function initApp(template) {
       while (next < tasks.length) {
         const task = tasks[next++];
         try {
-          let body;
-          if (task.type === 'base64') {
-            body = JSON.stringify({ base64_images: { [task.key]: task.src } });
-          } else {
-            body = JSON.stringify({ urls: [task.src] });
-          }
+          const body = task.type === 'base64'
+            ? JSON.stringify({ base64_images: { [task.key]: task.src } })
+            : JSON.stringify({ urls: [task.src] });
           const resp = await fetch('/api/wechat-upload', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -351,7 +342,9 @@ export function initApp(template) {
               ? (results[task.key] || Object.values(results)[0])
               : (results[task.src] || Object.values(results)[0]);
             if (cdnUrl) {
+              // Replace in copy layer only — display layer keeps original URLs
               _articleCopy = _articleCopy.split(task.src).join(cdnUrl);
+              _footerCopy = _footerCopy.split(task.src).join(cdnUrl);
               logConv('info', '图片上传成功', { cdn: cdnUrl.substring(0, 60) + '...' });
             } else {
               failed++;
@@ -366,7 +359,7 @@ export function initApp(template) {
           logConv('error', '图片上传网络错误', { error: e.message });
         }
         done++;
-        statsBar.textContent = '上传图片 (' + done + '/' + total + ')...';
+        statsBar.textContent = '上传图片 (' + done + '/' + tasks.length + ')...';
       }
     }
 
@@ -377,8 +370,8 @@ export function initApp(template) {
       statsBar.textContent = originalStats + ' | ' + failed + '张图片上传失败';
       logConv('warn', '上传完成，' + failed + '张失败');
     } else {
-      statsBar.textContent = originalStats + ' | 图片已就绪';
-      logConv('info', '全部图片上传成功', { total });
+      statsBar.textContent = originalStats + ' | 全部图片已就绪';
+      logConv('info', '全部图片上传成功', { total: tasks.length });
     }
   }
 
@@ -444,9 +437,9 @@ export function initApp(template) {
       await _uploadPromise;
     }
 
-    // Use copy layer — base64 replaced with CDN URLs, mmbiz URLs kept as-is
+    // Use copy layer — ALL images replaced with WeChat CDN URLs
     const enabled = document.getElementById('footerEnabled').checked;
-    const html = _articleCopy + '\n' + (enabled ? _footerHtml : '');
+    const html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
     const plainText = content.textContent || '';
 
     let ok = false;
