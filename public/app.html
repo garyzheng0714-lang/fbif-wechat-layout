@@ -47,7 +47,11 @@
 <div id="previewView">
   <div class="toolbar">
     <div class="toolbar-left">
-      <button class="tb-back" id="backBtn" title="返回">&#8592;</button>
+      <button class="tb-back" id="backBtn" title="返回上传">← 返回</button>
+      <span class="tb-title" id="filenameDisplay"></span>
+    </div>
+    <div class="toolbar-right">
+      <button class="tb-retry-btn" id="retryBtn" onclick="retryUpload()" style="display:none;">重试上传</button>
       <button class="tb-template-chip" id="templateChip">
         <span id="templateChipLabel">FBIF</span>
         <span class="chip-arrow">&#9662;</span>
@@ -56,15 +60,10 @@
         <button class="tb-chip-option active" data-template="fbif">FBIF 公众号</button>
         <button class="tb-chip-option" data-template="mote">Mote 排版</button>
       </div>
-    </div>
-    <div class="toolbar-right">
-      <button class="tb-retry-btn" id="retryBtn" onclick="retryUpload()" style="display:none;">重试上传</button>
       <button class="tb-text-btn" id="settingsBtn" title="设置">⚙ 设置</button>
       <button class="tb-copy-btn" id="copyBtn" onclick="copyContent()">复制正文</button>
     </div>
-    <!-- Hidden: kept for engine.js and JS references -->
-    <span class="tb-filename" id="filenameDisplay" style="display:none"></span>
-    <span class="tb-zoom-label" id="zoomLabel" style="display:none">200%</span>
+    <span id="zoomLabel" style="display:none">200%</span>
   </div>
 
   <!-- Hidden elements preserved for engine.js compatibility -->

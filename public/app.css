@@ -65,33 +65,42 @@ input[type="file"] { display: none; }
 /* ---- Preview View ---- */
 #previewView { display: none; }
 
-/* Dark toolbar */
+/* Toolbar — light, matches content */
 .toolbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  background: #1F2937; padding: 0 16px; height: 48px;
-  display: flex; align-items: center; gap: 8px;
+  background: #FFFFFF; border-bottom: 1px solid #E5E7EB;
+  padding: 0 20px; height: 48px;
+  display: flex; align-items: center; gap: 12px;
 }
-.toolbar-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.toolbar-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
 .toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-/* Back button */
+/* Back link */
 .tb-back {
   display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border-radius: 6px; border: none;
-  background: transparent; color: #F9FAFB; cursor: pointer;
-  font-size: 18px; transition: background 150ms ease-out;
+  border: none; background: transparent; color: #6B7280; cursor: pointer;
+  font-size: 14px; transition: color 150ms ease-out; padding: 4px;
+  font-family: inherit;
 }
-.tb-back:hover { background: rgba(255,255,255,0.1); }
+.tb-back:hover { color: #1D4ED8; }
+
+/* Title in toolbar */
+.tb-title {
+  font-size: 15px; font-weight: 600; color: #111827;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 400px;
+}
 
 /* Template chip in toolbar */
 .tb-template-chip {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15);
-  background: transparent; color: #9CA3AF; font-size: 12px; font-weight: 500;
+  padding: 4px 10px; border-radius: 4px; border: 1px solid #E5E7EB;
+  background: #F8F9FA; color: #6B7280; font-size: 12px; font-weight: 500;
   cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
+  font-family: inherit;
 }
-.tb-template-chip:hover { border-color: rgba(255,255,255,0.3); color: #F9FAFB; }
-.tb-template-chip .chip-arrow { font-size: 10px; opacity: 0.6; }
+.tb-template-chip:hover { border-color: #1D4ED8; color: #1D4ED8; }
+.tb-template-chip .chip-arrow { font-size: 10px; opacity: 0.5; }
 
 /* Template chip dropdown */
 .tb-chip-dropdown {
@@ -112,12 +121,12 @@ input[type="file"] { display: none; }
 .tb-text-btn {
   display: flex; align-items: center; gap: 4px;
   padding: 4px 10px; border-radius: 4px; border: none;
-  background: transparent; color: #9CA3AF; cursor: pointer;
+  background: transparent; color: #6B7280; cursor: pointer;
   font-size: 12px; transition: all 150ms ease-out; white-space: nowrap;
   font-family: inherit;
 }
-.tb-text-btn:hover { background: rgba(255,255,255,0.1); color: #F9FAFB; }
-.tb-text-btn.active { color: #60A5FA; }
+.tb-text-btn:hover { background: #F3F4F6; color: #111827; }
+.tb-text-btn.active { color: #1D4ED8; }
 
 /* Copy button — primary in toolbar */
 .tb-copy-btn {
@@ -133,11 +142,11 @@ input[type="file"] { display: none; }
 /* Retry button */
 .tb-retry-btn {
   padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 500;
-  background: rgba(220,38,38,0.15); color: #FCA5A5; border: none;
+  background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA;
   cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
   font-family: inherit;
 }
-.tb-retry-btn:hover { background: rgba(220,38,38,0.25); }
+.tb-retry-btn:hover { background: #FEE2E2; }
 .tb-retry-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Settings panel */
@@ -235,10 +244,10 @@ input[type="file"] { display: none; }
 
 /* Success bar */
 .copy-success-bar {
-  position: fixed; top: 48px; left: 0; right: 0; z-index: 99;
+  position: fixed; top: 49px; left: 0; right: 0; z-index: 99;
   background: #ECFDF5; color: #059669; font-size: 13px;
   padding: 8px 16px; text-align: center; display: none;
-  border-bottom: 1px solid #A7F3D0;
+  border-bottom: 1px solid #D1FAE5;
 }
 .copy-success-bar.visible { display: block; }
 
