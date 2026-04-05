@@ -237,6 +237,37 @@ input[type="file"] { display: none; }
   padding: 1px 6px; border-radius: 3px;
 }
 
+/* Settings edit controls */
+.settings-edit-btn {
+  width: 100%; padding: 8px; border: 1px solid #E5E7EB; border-radius: 6px;
+  background: #F8F9FA; color: #111827; font-size: 13px; cursor: pointer;
+  font-family: inherit; transition: all 150ms ease-out;
+}
+.settings-edit-btn:hover { background: #EFF6FF; border-color: #1D4ED8; color: #1D4ED8; }
+.settings-textarea {
+  width: 100%; padding: 10px; border: 1px solid #E5E7EB; border-radius: 6px;
+  font-size: 12px; font-family: 'SF Mono', 'Menlo', monospace; color: #111827;
+  background: #F8F9FA; resize: vertical; line-height: 1.5;
+}
+.settings-textarea:focus { outline: none; border-color: #1D4ED8; background: #FFFFFF; }
+.settings-pwd-input {
+  flex: 1; padding: 6px 10px; border: 1px solid #E5E7EB; border-radius: 4px;
+  font-size: 13px; font-family: inherit; color: #111827;
+}
+.settings-pwd-input:focus { outline: none; border-color: #1D4ED8; }
+.settings-save-btn {
+  padding: 6px 14px; border: none; border-radius: 4px;
+  background: #1D4ED8; color: #FFFFFF; font-size: 13px;
+  cursor: pointer; font-family: inherit; white-space: nowrap;
+}
+.settings-save-btn:hover { background: #1E40AF; }
+.settings-cancel-btn {
+  padding: 6px 14px; border: 1px solid #E5E7EB; border-radius: 4px;
+  background: transparent; color: #6B7280; font-size: 13px;
+  cursor: pointer; font-family: inherit; white-space: nowrap;
+}
+.settings-cancel-btn:hover { background: #F3F4F6; }
+
 /* Success bar */
 .copy-success-bar {
   position: fixed; top: 48px; left: 0; right: 0; z-index: 99;

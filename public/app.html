@@ -118,12 +118,25 @@
     <div class="settings-section">
       <div class="settings-section-title">配置方案</div>
       <div class="settings-profiles" id="settingsProfiles">
-        <div class="settings-profile-item active">
-          <span class="settings-profile-name">默认配置</span>
-          <span class="settings-profile-badge">使用中</span>
-        </div>
+        <div style="font-size:12px;color:#9CA3AF;padding:8px 0">加载中...</div>
       </div>
-      <div class="settings-row-hint" style="margin-top:8px">配置方案通过 API 管理，支持多版本切换</div>
+    </div>
+    <div class="settings-section" id="settingsConfigSection" style="display:none">
+      <div class="settings-section-title">当前配置详情</div>
+      <div id="settingsConfigDetails" style="font-size:12px;color:#6B7280;line-height:1.6"></div>
+      <div style="margin-top:12px">
+        <button class="settings-edit-btn" id="settingsEditBtn">编辑配置</button>
+      </div>
+    </div>
+    <div class="settings-section" id="settingsEditSection" style="display:none">
+      <div class="settings-section-title">编辑配置</div>
+      <textarea class="settings-textarea" id="settingsConfigEditor" rows="10"></textarea>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+        <input class="settings-pwd-input" id="settingsPwd" type="password" placeholder="输入密码">
+        <button class="settings-save-btn" id="settingsSaveBtn">保存</button>
+        <button class="settings-cancel-btn" id="settingsCancelBtn">取消</button>
+      </div>
+      <div id="settingsEditMsg" style="font-size:11px;margin-top:6px;display:none"></div>
     </div>
   </div>
 
@@ -385,42 +398,115 @@ settingsZoom.addEventListener('change', () => {
   savePref('zoom_index', String(targetIdx));
 });
 
-// Load config profiles from API
+// ---- Config profile management ----
+const CONFIG_PASSWORD = 'FBIF2026';
+let _activeProfileId = null;
+let _activeProfileConfig = null;
+
 async function loadConfigProfiles() {
+  const container = document.getElementById('settingsProfiles');
   try {
     const resp = await fetch('/api/config/profiles');
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      container.innerHTML = '<div style="font-size:12px;color:#9CA3AF;padding:8px 0">API 不可用</div>';
+      return;
+    }
     const profiles = await resp.json();
     const activeResp = await fetch('/api/config/active');
-    let activeId = null;
     if (activeResp.ok) {
       const active = await activeResp.json();
-      activeId = active.id;
+      _activeProfileId = active.id;
+      _activeProfileConfig = active.config;
     }
-    const container = document.getElementById('settingsProfiles');
+
     container.innerHTML = '';
     profiles.forEach(p => {
+      const isActive = p.id === _activeProfileId;
       const div = document.createElement('div');
-      div.className = 'settings-profile-item' + (p.id === activeId ? ' active' : '');
+      div.className = 'settings-profile-item' + (isActive ? ' active' : '');
       div.innerHTML = '<span class="settings-profile-name">' + (p.name || '配置 ' + p.id) + '</span>' +
-        (p.id === activeId ? '<span class="settings-profile-badge">使用中</span>' : '');
+        (isActive ? '<span class="settings-profile-badge">使用中</span>' : '');
       div.addEventListener('click', async () => {
-        try {
-          await fetch('/api/config/active', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ profile_id: p.id }),
-          });
-          loadConfigProfiles();
-          loadActiveConfig();
-        } catch {}
+        await fetch('/api/config/active', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profile_id: p.id }),
+        }).catch(() => {});
+        loadConfigProfiles();
+        loadActiveConfig();
       });
       container.appendChild(div);
     });
+
+    // Show config details
+    if (_activeProfileConfig) {
+      document.getElementById('settingsConfigSection').style.display = 'block';
+      const details = document.getElementById('settingsConfigDetails');
+      const cfg = _activeProfileConfig;
+      details.innerHTML = Object.entries(cfg).map(([k, v]) =>
+        '<div><strong>' + k + ':</strong> ' + (typeof v === 'object' ? JSON.stringify(v) : v) + '</div>'
+      ).join('');
+    }
   } catch {
-    // API not available
+    container.innerHTML = '<div style="font-size:12px;color:#9CA3AF;padding:8px 0">API 不可用</div>';
   }
 }
+
+// Edit config
+document.getElementById('settingsEditBtn').addEventListener('click', () => {
+  const editor = document.getElementById('settingsConfigEditor');
+  editor.value = JSON.stringify(_activeProfileConfig || {}, null, 2);
+  document.getElementById('settingsEditSection').style.display = 'block';
+  document.getElementById('settingsEditMsg').style.display = 'none';
+});
+
+document.getElementById('settingsCancelBtn').addEventListener('click', () => {
+  document.getElementById('settingsEditSection').style.display = 'none';
+});
+
+document.getElementById('settingsSaveBtn').addEventListener('click', async () => {
+  const pwd = document.getElementById('settingsPwd').value;
+  const msg = document.getElementById('settingsEditMsg');
+
+  if (pwd !== CONFIG_PASSWORD) {
+    msg.style.display = 'block';
+    msg.style.color = '#DC2626';
+    msg.textContent = '密码错误';
+    return;
+  }
+
+  let newConfig;
+  try {
+    newConfig = JSON.parse(document.getElementById('settingsConfigEditor').value);
+  } catch (e) {
+    msg.style.display = 'block';
+    msg.style.color = '#DC2626';
+    msg.textContent = 'JSON 格式错误: ' + e.message;
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/config/profiles/' + _activeProfileId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: newConfig }),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    msg.style.display = 'block';
+    msg.style.color = '#059669';
+    msg.textContent = '保存成功';
+    document.getElementById('settingsPwd').value = '';
+    document.getElementById('settingsEditSection').style.display = 'none';
+    loadConfigProfiles();
+    loadActiveConfig();
+  } catch (e) {
+    msg.style.display = 'block';
+    msg.style.color = '#DC2626';
+    msg.textContent = '保存失败: ' + e.message;
+  }
+});
+
 loadConfigProfiles();
 
 // ---- Copy success bar ----
@@ -577,8 +663,13 @@ function positionTOC() {
   const rect = frame.getBoundingClientRect();
   const tocWidth = toc.offsetWidth;
   const left = rect.left - tocWidth - 16;
-  toc.style.left = Math.max(8, left) + 'px';
-  toc.style.display = left > 0 ? 'block' : 'none';
+  // Only show TOC if there's enough space (tocWidth + 24px margin)
+  if (left < 24) {
+    toc.style.display = 'none';
+  } else {
+    toc.style.left = left + 'px';
+    toc.style.display = 'block';
+  }
 }
 
 function updateScrollSpy() {
