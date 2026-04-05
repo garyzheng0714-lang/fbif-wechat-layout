@@ -1,0 +1,356 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #F8F9FA; min-height: 100vh;
+}
+
+/* ---- Upload View ---- */
+.container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+h1 { font-size: 22px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+.subtitle { color: #6B7280; font-size: 14px; margin-bottom: 24px; }
+
+/* Template pill switcher */
+.template-pills {
+  display: inline-flex; gap: 4px; background: #F3F4F6; border-radius: 6px;
+  padding: 3px; margin-bottom: 24px;
+}
+.template-pill {
+  padding: 6px 16px; border-radius: 4px; border: none; background: transparent;
+  font-size: 14px; font-weight: 500; color: #6B7280; cursor: pointer;
+  transition: all 150ms ease-out;
+}
+.template-pill:hover { color: #111827; }
+.template-pill.active {
+  background: #FFFFFF; color: #1D4ED8; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* Upload zone */
+.upload-zone {
+  border: 2px dashed #E5E7EB; border-radius: 8px; padding: 36px 40px;
+  text-align: center; background: #FFFFFF; cursor: pointer; transition: all 150ms ease-out;
+}
+.upload-zone:hover, .upload-zone.dragover { border-color: #1D4ED8; background: #EFF6FF; }
+.upload-zone.processing { border-color: #D97706; background: #FFFBEB; pointer-events: none; }
+.upload-icon { font-size: 40px; margin-bottom: 12px; }
+.upload-text { font-size: 14px; color: #111827; margin-bottom: 4px; }
+.upload-hint { font-size: 12px; color: #9CA3AF; margin-bottom: 16px; }
+input[type="file"] { display: none; }
+
+/* Inline URL input inside upload zone */
+.upload-url-row {
+  display: flex; gap: 8px; max-width: 480px; margin: 0 auto;
+  border-top: 1px solid #F3F4F6; padding-top: 16px;
+}
+.upload-url-row input {
+  flex: 1; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px;
+  font-size: 13px; background: #F8F9FA; color: #111827;
+}
+.upload-url-row input:focus { outline: none; border-color: #1D4ED8; background: #FFFFFF; }
+.upload-url-row input::placeholder { color: #9CA3AF; }
+.upload-url-row button {
+  padding: 8px 16px; background: #1D4ED8; color: #FFFFFF; border: none;
+  border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+  white-space: nowrap; transition: background 150ms ease-out;
+}
+.upload-url-row button:hover { background: #1E40AF; }
+.upload-url-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Progress */
+.progress { display: none; margin-top: 24px; }
+.progress-bar { height: 4px; background: #F3F4F6; border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: #1D4ED8; width: 0%; transition: width 0.3s; }
+.progress-text { font-size: 12px; color: #6B7280; margin-top: 8px; text-align: center; }
+.error { color: #DC2626; margin-top: 16px; font-size: 14px; display: none; }
+
+/* ---- Preview View ---- */
+#previewView { display: none; }
+
+/* Dark toolbar */
+.toolbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: #1F2937; padding: 0 16px; height: 48px;
+  display: flex; align-items: center; gap: 8px;
+}
+.toolbar-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* Back button */
+.tb-back {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 6px; border: none;
+  background: transparent; color: #F9FAFB; cursor: pointer;
+  font-size: 18px; transition: background 150ms ease-out;
+}
+.tb-back:hover { background: rgba(255,255,255,0.1); }
+
+/* Filename display */
+.tb-filename {
+  font-size: 14px; color: #F9FAFB; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 280px;
+}
+
+/* Template chip in toolbar */
+.tb-template-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15);
+  background: transparent; color: #9CA3AF; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
+}
+.tb-template-chip:hover { border-color: rgba(255,255,255,0.3); color: #F9FAFB; }
+.tb-template-chip .chip-arrow { font-size: 10px; opacity: 0.6; }
+
+/* Template chip dropdown */
+.tb-chip-dropdown {
+  position: absolute; top: 44px; background: #FFFFFF; border: 1px solid #E5E7EB;
+  border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); z-index: 200;
+  display: none; overflow: hidden;
+}
+.tb-chip-dropdown.open { display: block; }
+.tb-chip-option {
+  padding: 8px 16px; font-size: 13px; color: #111827; cursor: pointer;
+  border: none; background: none; width: 100%; text-align: left;
+  transition: background 150ms ease-out;
+}
+.tb-chip-option:hover { background: #EFF6FF; }
+.tb-chip-option.active { color: #1D4ED8; font-weight: 500; }
+
+/* Text buttons in toolbar */
+.tb-text-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 4px; border: none;
+  background: transparent; color: #9CA3AF; cursor: pointer;
+  font-size: 12px; transition: all 150ms ease-out; white-space: nowrap;
+  font-family: inherit;
+}
+.tb-text-btn:hover { background: rgba(255,255,255,0.1); color: #F9FAFB; }
+.tb-text-btn.active { color: #60A5FA; }
+
+/* Zoom group — visually grouped */
+.tb-zoom-group {
+  display: flex; align-items: center;
+  background: rgba(255,255,255,0.06); border-radius: 4px;
+  padding: 0 2px;
+}
+.tb-zoom-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 4px; border: none;
+  background: transparent; color: #9CA3AF; cursor: pointer;
+  font-size: 15px; transition: all 150ms ease-out;
+  font-family: inherit;
+}
+.tb-zoom-btn:hover { background: rgba(255,255,255,0.1); color: #F9FAFB; }
+.tb-zoom-label {
+  font-size: 11px; color: #6B7280; min-width: 36px; text-align: center;
+  user-select: none;
+}
+
+/* Separator */
+.tb-sep {
+  width: 1px; height: 20px; background: rgba(255,255,255,0.1);
+  margin: 0 4px; flex-shrink: 0;
+}
+
+/* Copy button — primary in toolbar */
+.tb-copy-btn {
+  padding: 6px 16px; border-radius: 6px; border: none;
+  background: #1D4ED8; color: #FFFFFF; font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
+  font-family: inherit;
+}
+.tb-copy-btn:hover { background: #1E40AF; }
+.tb-copy-btn:active { transform: scale(0.98); }
+.tb-copy-btn.copied { background: #059669; }
+
+/* Retry button */
+.tb-retry-btn {
+  padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 500;
+  background: rgba(220,38,38,0.15); color: #FCA5A5; border: none;
+  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
+  font-family: inherit;
+}
+.tb-retry-btn:hover { background: rgba(220,38,38,0.25); }
+.tb-retry-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Settings panel */
+.settings-panel {
+  position: fixed; top: 48px; right: 0; width: 320px; max-height: calc(100vh - 48px);
+  background: #FFFFFF; border-left: 1px solid #E5E7EB; z-index: 150;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.08); overflow-y: auto;
+  transform: translateX(100%); transition: transform 200ms ease-out;
+}
+.settings-panel.open { transform: translateX(0); }
+.settings-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px; border-bottom: 1px solid #F3F4F6;
+}
+.settings-header h3 { font-size: 14px; font-weight: 600; color: #111827; }
+.settings-close {
+  width: 28px; height: 28px; border: none; background: transparent;
+  color: #9CA3AF; cursor: pointer; font-size: 18px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+}
+.settings-close:hover { background: #F3F4F6; color: #111827; }
+.settings-section {
+  padding: 16px; border-bottom: 1px solid #F3F4F6;
+}
+.settings-section-title {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: #9CA3AF; margin-bottom: 12px;
+}
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 0;
+}
+.settings-row-label { font-size: 13px; color: #111827; }
+.settings-row-hint { font-size: 11px; color: #9CA3AF; margin-top: 2px; }
+.settings-toggle {
+  width: 36px; height: 20px; border-radius: 10px; border: none;
+  background: #E5E7EB; cursor: pointer; position: relative;
+  transition: background 150ms ease-out;
+}
+.settings-toggle.on { background: #1D4ED8; }
+.settings-toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF;
+  transition: transform 150ms ease-out; box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+.settings-toggle.on::after { transform: translateX(16px); }
+.settings-select {
+  padding: 6px 10px; border: 1px solid #E5E7EB; border-radius: 4px;
+  font-size: 13px; color: #111827; background: #FFFFFF;
+  font-family: inherit; cursor: pointer;
+}
+.settings-profiles {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.settings-profile-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; border: 1px solid #E5E7EB; border-radius: 6px;
+  cursor: pointer; transition: all 150ms ease-out; font-size: 13px;
+}
+.settings-profile-item:hover { border-color: #1D4ED8; background: #EFF6FF; }
+.settings-profile-item.active { border-color: #1D4ED8; background: #EFF6FF; }
+.settings-profile-name { color: #111827; font-weight: 500; }
+.settings-profile-badge {
+  font-size: 10px; color: #1D4ED8; background: #DBEAFE;
+  padding: 1px 6px; border-radius: 3px;
+}
+
+/* Success bar */
+.copy-success-bar {
+  position: fixed; top: 48px; left: 0; right: 0; z-index: 99;
+  background: #ECFDF5; color: #059669; font-size: 13px;
+  padding: 8px 16px; text-align: center; display: none;
+  border-bottom: 1px solid #A7F3D0;
+}
+.copy-success-bar.visible { display: block; }
+
+/* Hidden elements preserved for engine.js */
+#titleInput { display: none; }
+#previewTitleDisplay { display: none; }
+
+/* ---- Layout: Preview with floating TOC ---- */
+.preview-layout {
+  margin-top: 48px; min-height: calc(100vh - 48px); position: relative;
+}
+.preview-layout.with-success-bar { margin-top: 84px; }
+
+/* Floating TOC */
+.toc-float {
+  position: fixed; top: 68px; z-index: 50;
+  background: #FFFFFF; border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  padding: 12px; max-width: 180px; max-height: calc(100vh - 108px);
+  overflow-y: auto; border: 1px solid #E5E7EB;
+}
+.toc-title { font-size: 12px; font-weight: 600; color: #9CA3AF; margin-bottom: 8px; }
+.toc-list { list-style: none; }
+.toc-item {
+  padding: 5px 8px; font-size: 12px; color: #6B7280; cursor: pointer;
+  border-radius: 4px; margin-bottom: 1px; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: all 150ms ease-out; border-left: 2px solid transparent;
+}
+.toc-item:hover { color: #1D4ED8; background: #EFF6FF; }
+.toc-item.active { color: #1D4ED8; font-weight: 500; border-left-color: #1D4ED8; }
+.toc-empty { font-size: 11px; color: #9CA3AF; padding: 4px 8px; }
+
+/* Preview center */
+.preview-main {
+  padding: 12px; overflow-y: auto; height: calc(100vh - 48px);
+}
+.preview-main.with-success-bar { height: calc(100vh - 84px); }
+.phone-frame {
+  max-width: 840px; margin: 0 auto; background: #FFFFFF;
+  border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  overflow: hidden; transition: max-width 0.3s ease;
+}
+.phone-frame img { max-width: 100%; height: auto; }
+.stats-bar {
+  position: fixed; bottom: 46px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.75); color: #fff; padding: 8px 20px;
+  border-radius: 20px; font-size: 13px; z-index: 100;
+}
+
+/* ---- Global Status Bar ---- */
+#globalStatusBar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 999;
+  background: #1a1a2e; color: #ccc; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 12px; border-top: 1px solid #333;
+}
+#statusHeader {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 16px; cursor: pointer; user-select: none;
+}
+#statusHeader:hover { background: #252540; }
+#statusVersion { color: #4fc3f7; font-weight: 600; }
+#statusToggle { color: #888; font-size: 10px; }
+#logPanel {
+  max-height: 220px; overflow-y: auto; border-top: 1px solid #333;
+  padding: 4px 0; display: none;
+}
+#logPanel.open { display: block; }
+.log-entry {
+  padding: 3px 16px; line-height: 1.5; border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.log-entry:hover { background: rgba(255,255,255,0.03); }
+.log-time { color: #666; margin-right: 8px; }
+.log-info { color: #4fc3f7; }
+.log-warn { color: #ffb74d; }
+.log-error { color: #ef5350; }
+
+/* ---- Batch File List ---- */
+.batch-list {
+  margin-top: 16px; background: #FFFFFF; border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden;
+}
+.batch-title { padding: 10px 16px; font-size: 12px; color: #9CA3AF; border-bottom: 1px solid #F3F4F6; }
+.batch-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px; cursor: pointer; border-bottom: 1px solid #F3F4F6;
+}
+.batch-item:hover { background: #EFF6FF; }
+.batch-name { font-size: 14px; color: #111827; }
+.batch-status { font-size: 12px; color: #9CA3AF; }
+.batch-status.processing { color: #D97706; }
+.batch-status.done { color: #059669; }
+.batch-status.failed { color: #DC2626; }
+
+/* ---- Mobile ---- */
+@media (max-width: 768px) {
+  .container { padding: 20px 12px; }
+  h1 { font-size: 18px; }
+  .upload-zone { padding: 24px 16px; }
+  .toolbar { padding: 0 8px; gap: 4px; }
+  .tb-filename { max-width: 120px; font-size: 13px; }
+  .tb-copy-btn { padding: 6px 12px; font-size: 12px; }
+  .tb-zoom-group { display: none; }
+  .tb-sep { display: none; }
+  .toc-float { display: none !important; }
+  .preview-main { padding: 8px; }
+  .phone-frame { max-width: 100% !important; border-radius: 0; }
+  .stats-bar { font-size: 11px; padding: 6px 14px; bottom: 46px; }
+  .upload-url-row { flex-direction: column; }
+  .upload-url-row input { min-width: 0; }
+  .template-pills { margin-bottom: 16px; }
+}

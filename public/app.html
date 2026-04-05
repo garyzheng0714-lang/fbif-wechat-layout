@@ -5,282 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FBIF 微信排版工具</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #F8F9FA; min-height: 100vh;
-}
-
-/* ---- Upload View ---- */
-.container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
-h1 { font-size: 22px; font-weight: 700; color: #111827; margin-bottom: 8px; }
-.subtitle { color: #6B7280; font-size: 14px; margin-bottom: 24px; }
-
-/* Template pill switcher */
-.template-pills {
-  display: inline-flex; gap: 4px; background: #F3F4F6; border-radius: 6px;
-  padding: 3px; margin-bottom: 24px;
-}
-.template-pill {
-  padding: 6px 16px; border-radius: 4px; border: none; background: transparent;
-  font-size: 14px; font-weight: 500; color: #6B7280; cursor: pointer;
-  transition: all 150ms ease-out;
-}
-.template-pill:hover { color: #111827; }
-.template-pill.active {
-  background: #FFFFFF; color: #1D4ED8; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
-
-/* Upload zone */
-.upload-zone {
-  border: 2px dashed #E5E7EB; border-radius: 8px; padding: 36px 40px;
-  text-align: center; background: #FFFFFF; cursor: pointer; transition: all 150ms ease-out;
-}
-.upload-zone:hover, .upload-zone.dragover { border-color: #1D4ED8; background: #EFF6FF; }
-.upload-zone.processing { border-color: #D97706; background: #FFFBEB; pointer-events: none; }
-.upload-icon { font-size: 40px; margin-bottom: 12px; }
-.upload-text { font-size: 14px; color: #111827; margin-bottom: 4px; }
-.upload-hint { font-size: 12px; color: #9CA3AF; margin-bottom: 16px; }
-input[type="file"] { display: none; }
-
-/* Inline URL input inside upload zone */
-.upload-url-row {
-  display: flex; gap: 8px; max-width: 480px; margin: 0 auto;
-  border-top: 1px solid #F3F4F6; padding-top: 16px;
-}
-.upload-url-row input {
-  flex: 1; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px;
-  font-size: 13px; background: #F8F9FA; color: #111827;
-}
-.upload-url-row input:focus { outline: none; border-color: #1D4ED8; background: #FFFFFF; }
-.upload-url-row input::placeholder { color: #9CA3AF; }
-.upload-url-row button {
-  padding: 8px 16px; background: #1D4ED8; color: #FFFFFF; border: none;
-  border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
-  white-space: nowrap; transition: background 150ms ease-out;
-}
-.upload-url-row button:hover { background: #1E40AF; }
-.upload-url-row button:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* Progress */
-.progress { display: none; margin-top: 24px; }
-.progress-bar { height: 4px; background: #F3F4F6; border-radius: 2px; overflow: hidden; }
-.progress-fill { height: 100%; background: #1D4ED8; width: 0%; transition: width 0.3s; }
-.progress-text { font-size: 12px; color: #6B7280; margin-top: 8px; text-align: center; }
-.error { color: #DC2626; margin-top: 16px; font-size: 14px; display: none; }
-
-/* ---- Preview View ---- */
-#previewView { display: none; }
-
-/* Dark toolbar */
-.toolbar {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  background: #1F2937; padding: 0 16px; height: 48px;
-  display: flex; align-items: center; gap: 8px;
-}
-.toolbar-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-
-/* Back button */
-.tb-back {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border-radius: 6px; border: none;
-  background: transparent; color: #F9FAFB; cursor: pointer;
-  font-size: 18px; transition: background 150ms ease-out;
-}
-.tb-back:hover { background: rgba(255,255,255,0.1); }
-
-/* Filename display */
-.tb-filename {
-  font-size: 14px; color: #F9FAFB; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: 280px;
-}
-
-/* Template chip in toolbar */
-.tb-template-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15);
-  background: transparent; color: #9CA3AF; font-size: 12px; font-weight: 500;
-  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
-}
-.tb-template-chip:hover { border-color: rgba(255,255,255,0.3); color: #F9FAFB; }
-.tb-template-chip .chip-arrow { font-size: 10px; opacity: 0.6; }
-
-/* Template chip dropdown */
-.tb-chip-dropdown {
-  position: absolute; top: 44px; background: #FFFFFF; border: 1px solid #E5E7EB;
-  border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); z-index: 200;
-  display: none; overflow: hidden;
-}
-.tb-chip-dropdown.open { display: block; }
-.tb-chip-option {
-  padding: 8px 16px; font-size: 13px; color: #111827; cursor: pointer;
-  border: none; background: none; width: 100%; text-align: left;
-  transition: background 150ms ease-out;
-}
-.tb-chip-option:hover { background: #EFF6FF; }
-.tb-chip-option.active { color: #1D4ED8; font-weight: 500; }
-
-/* Icon buttons in toolbar */
-.tb-icon-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border-radius: 6px; border: none;
-  background: transparent; color: #9CA3AF; cursor: pointer;
-  font-size: 16px; transition: all 150ms ease-out; position: relative;
-}
-.tb-icon-btn:hover { background: rgba(255,255,255,0.1); color: #F9FAFB; }
-.tb-icon-btn.active { color: #1D4ED8; }
-.tb-icon-btn[title]:hover::after {
-  content: attr(title); position: absolute; bottom: -28px; left: 50%;
-  transform: translateX(-50%); background: #111827; color: #F9FAFB;
-  padding: 3px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap;
-  pointer-events: none;
-}
-
-/* Zoom display */
-.tb-zoom-label {
-  font-size: 11px; color: #6B7280; min-width: 32px; text-align: center;
-  user-select: none;
-}
-
-/* Copy button — primary in toolbar */
-.tb-copy-btn {
-  padding: 6px 16px; border-radius: 6px; border: none;
-  background: #1D4ED8; color: #FFFFFF; font-size: 13px; font-weight: 500;
-  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
-}
-.tb-copy-btn:hover { background: #1E40AF; }
-.tb-copy-btn:active { transform: scale(0.98); }
-.tb-copy-btn.copied { background: #059669; }
-
-/* Retry button */
-.tb-retry-btn {
-  padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
-  background: rgba(220,38,38,0.15); color: #FCA5A5; border: none;
-  cursor: pointer; transition: all 150ms ease-out; white-space: nowrap;
-}
-.tb-retry-btn:hover { background: rgba(220,38,38,0.25); }
-.tb-retry-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* Success bar */
-.copy-success-bar {
-  position: fixed; top: 48px; left: 0; right: 0; z-index: 99;
-  background: #ECFDF5; color: #059669; font-size: 13px;
-  padding: 8px 16px; text-align: center; display: none;
-  border-bottom: 1px solid #A7F3D0;
-}
-.copy-success-bar.visible { display: block; }
-
-/* Hidden elements preserved for engine.js */
-#titleInput { display: none; }
-#previewTitleDisplay { display: none; }
-
-/* ---- Layout: Preview with floating TOC ---- */
-.preview-layout {
-  margin-top: 48px; min-height: calc(100vh - 48px); position: relative;
-}
-.preview-layout.with-success-bar { margin-top: 84px; }
-
-/* Floating TOC */
-.toc-float {
-  position: fixed; top: 68px; z-index: 50;
-  background: #FFFFFF; border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  padding: 12px; max-width: 180px; max-height: calc(100vh - 108px);
-  overflow-y: auto; border: 1px solid #E5E7EB;
-}
-.toc-title { font-size: 12px; font-weight: 600; color: #9CA3AF; margin-bottom: 8px; }
-.toc-list { list-style: none; }
-.toc-item {
-  padding: 5px 8px; font-size: 12px; color: #6B7280; cursor: pointer;
-  border-radius: 4px; margin-bottom: 1px; line-height: 1.4;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: all 150ms ease-out; border-left: 2px solid transparent;
-}
-.toc-item:hover { color: #1D4ED8; background: #EFF6FF; }
-.toc-item.active { color: #1D4ED8; font-weight: 500; border-left-color: #1D4ED8; }
-.toc-empty { font-size: 11px; color: #9CA3AF; padding: 4px 8px; }
-
-/* Preview center */
-.preview-main {
-  padding: 12px; overflow-y: auto; height: calc(100vh - 48px);
-}
-.preview-main.with-success-bar { height: calc(100vh - 84px); }
-.phone-frame {
-  max-width: 840px; margin: 0 auto; background: #FFFFFF;
-  border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  overflow: hidden; transition: max-width 0.3s ease;
-}
-.phone-frame img { max-width: 100%; height: auto; }
-.stats-bar {
-  position: fixed; bottom: 46px; left: 50%; transform: translateX(-50%);
-  background: rgba(0,0,0,0.75); color: #fff; padding: 8px 20px;
-  border-radius: 20px; font-size: 13px; z-index: 100;
-}
-
-/* ---- Global Status Bar ---- */
-#globalStatusBar {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 999;
-  background: #1a1a2e; color: #ccc; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
-  font-size: 12px; border-top: 1px solid #333;
-}
-#statusHeader {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 16px; cursor: pointer; user-select: none;
-}
-#statusHeader:hover { background: #252540; }
-#statusVersion { color: #4fc3f7; font-weight: 600; }
-#statusToggle { color: #888; font-size: 10px; }
-#logPanel {
-  max-height: 220px; overflow-y: auto; border-top: 1px solid #333;
-  padding: 4px 0; display: none;
-}
-#logPanel.open { display: block; }
-.log-entry {
-  padding: 3px 16px; line-height: 1.5; border-bottom: 1px solid rgba(255,255,255,0.04);
-}
-.log-entry:hover { background: rgba(255,255,255,0.03); }
-.log-time { color: #666; margin-right: 8px; }
-.log-info { color: #4fc3f7; }
-.log-warn { color: #ffb74d; }
-.log-error { color: #ef5350; }
-
-/* ---- Batch File List ---- */
-.batch-list {
-  margin-top: 16px; background: #FFFFFF; border-radius: 6px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden;
-}
-.batch-title { padding: 10px 16px; font-size: 12px; color: #9CA3AF; border-bottom: 1px solid #F3F4F6; }
-.batch-item {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 16px; cursor: pointer; border-bottom: 1px solid #F3F4F6;
-}
-.batch-item:hover { background: #EFF6FF; }
-.batch-name { font-size: 14px; color: #111827; }
-.batch-status { font-size: 12px; color: #9CA3AF; }
-.batch-status.processing { color: #D97706; }
-.batch-status.done { color: #059669; }
-.batch-status.failed { color: #DC2626; }
-
-/* ---- Mobile ---- */
-@media (max-width: 768px) {
-  .container { padding: 20px 12px; }
-  h1 { font-size: 18px; }
-  .upload-zone { padding: 24px 16px; }
-  .toolbar { padding: 0 8px; gap: 4px; }
-  .tb-filename { max-width: 120px; font-size: 13px; }
-  .tb-copy-btn { padding: 6px 12px; font-size: 12px; }
-  .tb-zoom-label, .tb-icon-btn.zoom-btn { display: none; }
-  .toc-float { display: none !important; }
-  .preview-main { padding: 8px; }
-  .phone-frame { max-width: 100% !important; border-radius: 0; }
-  .stats-bar { font-size: 11px; padding: 6px 14px; bottom: 46px; }
-  .upload-url-row { flex-direction: column; }
-  .upload-url-row input { min-width: 0; }
-  .template-pills { margin-bottom: 16px; }
-}
-</style>
+<link rel="stylesheet" href="/app.css">
 </head>
 <body>
 
@@ -335,12 +60,17 @@ input[type="file"] { display: none; }
     </div>
     <div class="toolbar-right">
       <button class="tb-retry-btn" id="retryBtn" onclick="retryUpload()" style="display:none;">重试上传</button>
-      <button class="tb-icon-btn" id="footerToggleBtn" title="页脚">
-        <span id="footerToggleIcon">&#9745;</span>
+      <button class="tb-text-btn" id="footerToggleBtn">
+        <span id="footerToggleIcon">☑</span> 页脚
       </button>
-      <button class="tb-icon-btn zoom-btn" onclick="zoom(-1)" title="缩小">&#8722;</button>
-      <span class="tb-zoom-label" id="zoomLabel">200%</span>
-      <button class="tb-icon-btn zoom-btn" onclick="zoom(1)" title="放大">&#43;</button>
+      <div class="tb-sep"></div>
+      <div class="tb-zoom-group">
+        <button class="tb-zoom-btn" onclick="zoom(-1)">−</button>
+        <span class="tb-zoom-label" id="zoomLabel">200%</span>
+        <button class="tb-zoom-btn" onclick="zoom(1)">+</button>
+      </div>
+      <div class="tb-sep"></div>
+      <button class="tb-text-btn" id="settingsBtn" title="设置">⚙ 设置</button>
       <button class="tb-copy-btn" id="copyBtn" onclick="copyContent()">复制正文</button>
     </div>
   </div>
@@ -353,6 +83,48 @@ input[type="file"] { display: none; }
   <!-- Copy success bar -->
   <div class="copy-success-bar" id="copySuccessBar">
     已复制到剪贴板 — 打开微信公众号后台，粘贴到编辑器即可
+  </div>
+
+  <!-- Settings Panel (slide-in from right) -->
+  <div class="settings-panel" id="settingsPanel">
+    <div class="settings-header">
+      <h3>设置</h3>
+      <button class="settings-close" id="settingsClose">&times;</button>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">显示</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">页脚模板</div>
+          <div class="settings-row-hint">文章底部的品牌区块</div>
+        </div>
+        <button class="settings-toggle on" id="settingsFooterToggle"></button>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">预览宽度</div>
+          <div class="settings-row-hint">模拟手机屏幕宽度</div>
+        </div>
+        <select class="settings-select" id="settingsZoom">
+          <option value="50">50%</option>
+          <option value="75">75%</option>
+          <option value="100">100%</option>
+          <option value="125">125%</option>
+          <option value="150">150%</option>
+          <option value="200" selected>200%</option>
+        </select>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">配置方案</div>
+      <div class="settings-profiles" id="settingsProfiles">
+        <div class="settings-profile-item active">
+          <span class="settings-profile-name">默认配置</span>
+          <span class="settings-profile-badge">使用中</span>
+        </div>
+      </div>
+      <div class="settings-row-hint" style="margin-top:8px">配置方案通过 API 管理，支持多版本切换</div>
+    </div>
   </div>
 
   <div class="preview-layout" id="previewLayout">
@@ -558,20 +330,98 @@ document.getElementById('backBtn').addEventListener('click', () => {
 
 // ---- Footer toggle button ----
 const footerToggleBtn = document.getElementById('footerToggleBtn');
+const settingsFooterToggle = document.getElementById('settingsFooterToggle');
+
 function updateFooterIcon() {
   const enabled = document.getElementById('footerEnabled').checked;
-  document.getElementById('footerToggleIcon').innerHTML = enabled ? '&#9745;' : '&#9744;';
+  document.getElementById('footerToggleIcon').textContent = enabled ? '☑' : '☐';
   footerToggleBtn.classList.toggle('active', enabled);
+  // Sync settings panel toggle
+  settingsFooterToggle.classList.toggle('on', enabled);
 }
 
-footerToggleBtn.addEventListener('click', () => {
+function toggleFooterState() {
   const el = document.getElementById('footerEnabled');
   el.checked = !el.checked;
   footerEnabledPref = el.checked;
   savePref('footer_enabled', String(el.checked));
   updateFooterIcon();
   window.toggleFooter && window.toggleFooter();
+}
+
+footerToggleBtn.addEventListener('click', toggleFooterState);
+settingsFooterToggle.addEventListener('click', toggleFooterState);
+
+// ---- Settings panel ----
+const settingsPanel = document.getElementById('settingsPanel');
+document.getElementById('settingsBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  settingsPanel.classList.toggle('open');
 });
+document.getElementById('settingsClose').addEventListener('click', () => {
+  settingsPanel.classList.remove('open');
+});
+// Close settings when clicking outside
+document.addEventListener('click', (e) => {
+  if (settingsPanel.classList.contains('open') &&
+      !settingsPanel.contains(e.target) &&
+      e.target.id !== 'settingsBtn') {
+    settingsPanel.classList.remove('open');
+  }
+});
+
+// Zoom select in settings
+const settingsZoom = document.getElementById('settingsZoom');
+settingsZoom.addEventListener('change', () => {
+  const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
+  const target = parseInt(settingsZoom.value, 10);
+  const currentLabel = document.getElementById('zoomLabel').textContent;
+  const current = parseInt(currentLabel, 10);
+  const currentIdx = ZOOM_STEPS.indexOf(current);
+  const targetIdx = ZOOM_STEPS.indexOf(target);
+  if (currentIdx >= 0 && targetIdx >= 0 && window.zoom) {
+    window.zoom(targetIdx - currentIdx);
+  }
+  savePref('zoom_index', String(targetIdx));
+});
+
+// Load config profiles from API
+async function loadConfigProfiles() {
+  try {
+    const resp = await fetch('/api/config/profiles');
+    if (!resp.ok) return;
+    const profiles = await resp.json();
+    const activeResp = await fetch('/api/config/active');
+    let activeId = null;
+    if (activeResp.ok) {
+      const active = await activeResp.json();
+      activeId = active.id;
+    }
+    const container = document.getElementById('settingsProfiles');
+    container.innerHTML = '';
+    profiles.forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'settings-profile-item' + (p.id === activeId ? ' active' : '');
+      div.innerHTML = '<span class="settings-profile-name">' + (p.name || '配置 ' + p.id) + '</span>' +
+        (p.id === activeId ? '<span class="settings-profile-badge">使用中</span>' : '');
+      div.addEventListener('click', async () => {
+        try {
+          await fetch('/api/config/active', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_id: p.id }),
+          });
+          loadConfigProfiles();
+          loadActiveConfig();
+        } catch {}
+      });
+      container.appendChild(div);
+    });
+  } catch {
+    // API not available
+  }
+}
+loadConfigProfiles();
 
 // ---- Copy success bar ----
 function showCopySuccess() {
