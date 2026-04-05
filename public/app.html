@@ -122,19 +122,40 @@
       </div>
     </div>
     <div class="settings-section" id="settingsConfigSection" style="display:none">
-      <div class="settings-section-title">当前配置详情</div>
-      <div id="settingsConfigDetails" style="font-size:12px;color:#6B7280;line-height:1.6"></div>
-      <div style="margin-top:12px">
-        <button class="settings-edit-btn" id="settingsEditBtn">编辑配置</button>
+      <div class="settings-section-title">排版参数</div>
+      <div class="cfg-form" id="settingsConfigForm">
+        <label class="cfg-field">
+          <span class="cfg-label">正文字号</span>
+          <input class="cfg-input" id="cfg-font_size" placeholder="15px">
+        </label>
+        <label class="cfg-field">
+          <span class="cfg-label">标题字号</span>
+          <input class="cfg-input" id="cfg-heading_size" placeholder="18px">
+        </label>
+        <label class="cfg-field">
+          <span class="cfg-label">正文颜色</span>
+          <input class="cfg-input" id="cfg-text_color" placeholder="rgb(84, 69, 69)">
+        </label>
+        <label class="cfg-field">
+          <span class="cfg-label">链接颜色</span>
+          <input class="cfg-input" id="cfg-link_color" placeholder="rgb(0, 112, 192)">
+        </label>
+        <label class="cfg-field">
+          <span class="cfg-label">行高</span>
+          <input class="cfg-input" id="cfg-line_height" placeholder="1.75em">
+        </label>
+        <label class="cfg-field">
+          <span class="cfg-label">字间距</span>
+          <input class="cfg-input" id="cfg-letter_spacing" placeholder="0.034em">
+        </label>
+        <label class="cfg-field">
+          <span class="cfg-label">字体</span>
+          <input class="cfg-input cfg-input-wide" id="cfg-font_family" placeholder="PingFang SC, sans-serif">
+        </label>
       </div>
-    </div>
-    <div class="settings-section" id="settingsEditSection" style="display:none">
-      <div class="settings-section-title">编辑配置</div>
-      <textarea class="settings-textarea" id="settingsConfigEditor" rows="10"></textarea>
-      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
-        <input class="settings-pwd-input" id="settingsPwd" type="password" placeholder="输入密码">
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+        <input class="cfg-pwd" id="settingsPwd" type="password" placeholder="输入密码后保存">
         <button class="settings-save-btn" id="settingsSaveBtn">保存</button>
-        <button class="settings-cancel-btn" id="settingsCancelBtn">取消</button>
       </div>
       <div id="settingsEditMsg" style="font-size:11px;margin-top:6px;display:none"></div>
     </div>
@@ -438,32 +459,22 @@ async function loadConfigProfiles() {
       container.appendChild(div);
     });
 
-    // Show config details
+    // Populate config form fields
     if (_activeProfileConfig) {
       document.getElementById('settingsConfigSection').style.display = 'block';
-      const details = document.getElementById('settingsConfigDetails');
       const cfg = _activeProfileConfig;
-      details.innerHTML = Object.entries(cfg).map(([k, v]) =>
-        '<div><strong>' + k + ':</strong> ' + (typeof v === 'object' ? JSON.stringify(v) : v) + '</div>'
-      ).join('');
+      const fields = ['font_size', 'heading_size', 'text_color', 'link_color', 'line_height', 'letter_spacing', 'font_family'];
+      fields.forEach(f => {
+        const el = document.getElementById('cfg-' + f);
+        if (el && cfg[f] !== undefined) el.value = cfg[f];
+      });
     }
   } catch {
     container.innerHTML = '<div style="font-size:12px;color:#9CA3AF;padding:8px 0">API 不可用</div>';
   }
 }
 
-// Edit config
-document.getElementById('settingsEditBtn').addEventListener('click', () => {
-  const editor = document.getElementById('settingsConfigEditor');
-  editor.value = JSON.stringify(_activeProfileConfig || {}, null, 2);
-  document.getElementById('settingsEditSection').style.display = 'block';
-  document.getElementById('settingsEditMsg').style.display = 'none';
-});
-
-document.getElementById('settingsCancelBtn').addEventListener('click', () => {
-  document.getElementById('settingsEditSection').style.display = 'none';
-});
-
+// Save config from form fields
 document.getElementById('settingsSaveBtn').addEventListener('click', async () => {
   const pwd = document.getElementById('settingsPwd').value;
   const msg = document.getElementById('settingsEditMsg');
@@ -475,15 +486,12 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
     return;
   }
 
-  let newConfig;
-  try {
-    newConfig = JSON.parse(document.getElementById('settingsConfigEditor').value);
-  } catch (e) {
-    msg.style.display = 'block';
-    msg.style.color = '#DC2626';
-    msg.textContent = 'JSON 格式错误: ' + e.message;
-    return;
-  }
+  const fields = ['font_size', 'heading_size', 'text_color', 'link_color', 'line_height', 'letter_spacing', 'font_family'];
+  const newConfig = { footer_enabled: document.getElementById('footerEnabled').checked };
+  fields.forEach(f => {
+    const el = document.getElementById('cfg-' + f);
+    if (el) newConfig[f] = el.value;
+  });
 
   try {
     const resp = await fetch('/api/config/profiles/' + _activeProfileId, {
@@ -495,9 +503,9 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
 
     msg.style.display = 'block';
     msg.style.color = '#059669';
-    msg.textContent = '保存成功';
+    msg.textContent = '已保存';
     document.getElementById('settingsPwd').value = '';
-    document.getElementById('settingsEditSection').style.display = 'none';
+    setTimeout(() => { msg.style.display = 'none'; }, 2000);
     loadConfigProfiles();
     loadActiveConfig();
   } catch (e) {
