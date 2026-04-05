@@ -64,8 +64,16 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	// Serve static files from ../public
+	publicDir := "../public"
+	if _, err := os.Stat(publicDir); err != nil {
+		publicDir = "public"
+	}
+	fs := http.FileServer(http.Dir(publicDir))
+	mux.Handle("/", fs)
+
 	addr := fmt.Sprintf(":%d", *port)
-	log.Printf("FBIF API server listening on %s", addr)
+	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
 	if err := http.ListenAndServe(addr, withCORS(mux)); err != nil {
 		log.Fatal(err)
 	}
@@ -395,31 +403,54 @@ func handleListVersions(w http.ResponseWriter, r *http.Request) {
 // or returns an error explaining setup is needed.
 
 func handleWechatUpload(w http.ResponseWriter, r *http.Request) {
+	// Parse request body
+	body, err := io.ReadAll(io.LimitReader(r.Body, 50<<20)) // 50MB limit
+	if err != nil {
+		writeError(w, 400, "failed to read body")
+		return
+	}
+
 	// Check for legacy upload endpoint env var
 	legacyURL := os.Getenv("WECHAT_UPLOAD_ENDPOINT")
-	if legacyURL == "" {
-		writeError(w, 503, "WeChat upload not configured. Set WECHAT_UPLOAD_ENDPOINT env var.")
+	if legacyURL != "" {
+		// Proxy to legacy endpoint
+		proxyReq, err := http.NewRequestWithContext(r.Context(), "POST", legacyURL, bytes.NewReader(body))
+		if err != nil {
+			writeError(w, 500, "proxy error: "+err.Error())
+			return
+		}
+		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+		resp, err := http.DefaultClient.Do(proxyReq)
+		if err != nil {
+			writeError(w, 502, "upstream error: "+err.Error())
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
 		return
 	}
 
-	// Proxy the request to the legacy endpoint
-	proxyReq, err := http.NewRequestWithContext(r.Context(), "POST", legacyURL, r.Body)
-	if err != nil {
-		writeError(w, 500, "proxy error: "+err.Error())
+	// No upload endpoint configured — pass through original URLs as-is.
+	// Images will display fine in preview; WeChat editor re-hosts on paste.
+	var req struct {
+		Base64Images map[string]string `json:"base64_images"`
+		URLs         []string          `json:"urls"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, 400, "invalid JSON")
 		return
 	}
-	proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 
-	resp, err := http.DefaultClient.Do(proxyReq)
-	if err != nil {
-		writeError(w, 502, "upstream error: "+err.Error())
-		return
+	results := make(map[string]string)
+	for key, val := range req.Base64Images {
+		results[key] = val // return base64 as-is
 	}
-	defer resp.Body.Close()
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	for _, u := range req.URLs {
+		results[u] = u // return URL as-is
+	}
+	writeJSON(w, 200, map[string]interface{}{"results": results})
 }
 
 // ---- Article Fetch (URL repost via x-reader) ----

@@ -13,25 +13,26 @@
 <div id="uploadView">
   <div class="container">
     <h1>FBIF 微信排版工具</h1>
-    <p class="subtitle" id="pageSubtitle">选择模板，上传文档一键生成微信公众号格式</p>
+    <p class="subtitle" id="pageSubtitle">上传文档，一键生成微信公众号格式</p>
+    <span id="pageTitle" style="display:none;"></span>
 
     <div class="template-pills" id="templatePills">
       <button class="template-pill active" data-template="fbif">FBIF 公众号</button>
       <button class="template-pill" data-template="mote">Mote 排版</button>
     </div>
 
-    <!-- Hidden element for engine.js compatibility -->
-    <span id="pageTitle" style="display:none;"></span>
-
     <div class="upload-zone" id="dropZone">
-      <div class="upload-icon">📄</div>
-      <div class="upload-text">点击上传或拖拽文件到这里</div>
+      <div class="upload-icon"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+      <div class="upload-text">点击或拖拽文件到这里</div>
       <div class="upload-hint" id="fileHint">支持 .docx、.md、.txt 格式</div>
       <input type="file" id="fileInput">
-      <div class="upload-url-row" onclick="event.stopPropagation()">
-        <input type="url" id="urlInput" placeholder="或粘贴微信文章 / 网页链接">
-        <button id="urlFetchBtn" onclick="fetchArticle()">抓取</button>
-      </div>
+    </div>
+
+    <div class="divider-or"><span>或</span></div>
+
+    <div class="url-row">
+      <input type="url" id="urlInput" class="url-input" placeholder="粘贴文章链接，⌘V 自动抓取">
+      <button id="urlFetchBtn" class="url-btn" onclick="fetchArticle()">抓取</button>
     </div>
 
     <div class="progress" id="progress">
@@ -45,152 +46,135 @@
 
 <!-- Preview View -->
 <div id="previewView">
+  <!-- Toolbar: back + all action buttons -->
   <div class="toolbar">
     <div class="toolbar-left">
-      <button class="tb-back" id="backBtn" title="返回上传">← 返回</button>
-      <span class="tb-title" id="filenameDisplay"></span>
+      <button class="tb-back" id="backBtn" title="Esc">← 返回</button>
+    </div>
+    <div class="toolbar-center">
+      <span class="tb-stats" id="statsBar"></span>
     </div>
     <div class="toolbar-right">
-      <button class="tb-retry-btn" id="retryBtn" onclick="retryUpload()" style="display:none;">重试上传</button>
-      <button class="tb-template-chip" id="templateChip">
-        <span id="templateChipLabel">FBIF</span>
-        <span class="chip-arrow">&#9662;</span>
-      </button>
-      <div class="tb-chip-dropdown" id="templateChipDropdown">
-        <button class="tb-chip-option active" data-template="fbif">FBIF 公众号</button>
-        <button class="tb-chip-option" data-template="mote">Mote 排版</button>
-      </div>
-      <button class="tb-text-btn" id="settingsBtn" title="设置">⚙ 设置</button>
-      <button class="tb-copy-btn" id="copyBtn" onclick="copyContent()">复制正文</button>
+      <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制到公众号</button>
+      <button class="tb-icon" id="settingsBtn" onclick="toggleSettingsPanel()" title="设置"><svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M512 352c-88.4 0-160 71.6-160 160s71.6 160 160 160 160-71.6 160-160-71.6-160-160-160z m0 256c-53 0-96-43-96-96s43-96 96-96 96 43 96 96-43 96-96 96z" fill="#888"/><path d="M924.8 385.6l-89.6-15.2c-7.2-24-16.8-46.4-28.8-68l52-74.4c8-11.2 6.4-27.2-3.2-36.8l-90.4-90.4c-9.6-9.6-25.6-11.2-36.8-3.2l-74.4 52c-21.6-12-44-21.6-68-28.8l-15.2-89.6C568 17.6 556 8 542.4 8h-128c-13.6 0-25.6 9.6-28 23.2l-15.2 89.6c-24 7.2-46.4 16.8-68 28.8l-74.4-52c-11.2-8-27.2-6.4-36.8 3.2L102 191.2c-9.6 9.6-11.2 25.6-3.2 36.8l52 74.4c-12 21.6-21.6 44-28.8 68l-89.6 15.2C18.8 388 8 400 8 413.6v128c0 13.6 9.6 25.6 23.2 28l89.6 15.2c7.2 24 16.8 46.4 28.8 68l-52 74.4c-8 11.2-6.4 27.2 3.2 36.8l90.4 90.4c9.6 9.6 25.6 11.2 36.8 3.2l74.4-52c21.6 12 44 21.6 68 28.8l15.2 89.6c2.4 13.6 14.4 23.2 28 23.2h128c13.6 0 25.6-9.6 28-23.2l15.2-89.6c24-7.2 46.4-16.8 68-28.8l74.4 52c11.2 8 27.2 6.4 36.8-3.2l90.4-90.4c9.6-9.6 11.2-25.6 3.2-36.8l-52-74.4c12-21.6 21.6-44 28.8-68l89.6-15.2c13.6-2.4 23.2-14.4 23.2-28v-128c0-13.6-10.4-25.6-24-28zM884 536l-84 14.4c-10.4 1.6-18.4 8.8-21.6 18.4-8 24-19.2 46.4-33.6 67.2-5.6 8-6.4 19.2-1.6 28l48.8 69.6-60 60-69.6-48.8c-8.8-6.4-20-5.6-28 1.6-20.8 14.4-43.2 25.6-67.2 33.6-9.6 3.2-16.8 11.2-18.4 21.6L534.4 886h-84l-14.4-84c-1.6-10.4-8.8-18.4-18.4-21.6-24-8-46.4-19.2-67.2-33.6-8-5.6-19.2-6.4-28-1.6l-69.6 48.8-60-60 48.8-69.6c6.4-8.8 5.6-20-1.6-28-14.4-20.8-25.6-43.2-33.6-67.2-3.2-9.6-11.2-16.8-21.6-18.4L100 536v-84l84-14.4c10.4-1.6 18.4-8.8 21.6-18.4 8-24 19.2-46.4 33.6-67.2 5.6-8 6.4-19.2 1.6-28l-48.8-69.6 60-60 69.6 48.8c8.8 6.4 20 5.6 28-1.6 20.8-14.4 43.2-25.6 67.2-33.6 9.6-3.2 16.8-11.2 18.4-21.6L450.4 102h84l14.4 84c1.6 10.4 8.8 18.4 18.4 21.6 24 8 46.4 19.2 67.2 33.6 8 5.6 19.2 6.4 28 1.6l69.6-48.8 60 60-48.8 69.6c-6.4 8.8-5.6 20 1.6 28 14.4 20.8 25.6 43.2 33.6 67.2 3.2 9.6 11.2 16.8 21.6 18.4l84 14.4v84z" fill="#888"/></svg></button>
     </div>
-    <span id="zoomLabel" style="display:none">200%</span>
+    <!-- Hidden compat for engine.js -->
+    <button id="retryBtn" style="display:none;"></button>
   </div>
 
-  <!-- Hidden elements preserved for engine.js compatibility -->
+  <!-- Hidden compat elements -->
   <input type="hidden" id="titleInput" value="">
   <span id="previewTitleDisplay" style="display:none;"></span>
   <input type="checkbox" id="footerEnabled" checked style="display:none;">
+  <span id="zoomLabel" style="display:none;">200%</span>
 
-  <!-- Copy success bar -->
-  <div class="copy-success-bar" id="copySuccessBar">
-    已复制到剪贴板 — 打开微信公众号后台，粘贴到编辑器即可
-  </div>
-
-  <!-- Settings Panel (slide-in from right) -->
-  <div class="settings-panel" id="settingsPanel">
-    <div class="settings-header">
-      <h3>设置</h3>
-      <button class="settings-close" id="settingsClose">&times;</button>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">显示</div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">页脚模板</div>
-          <div class="settings-row-hint">文章底部的品牌区块</div>
+  <!-- Settings dropdown panel -->
+  <div class="dropdown-panel settings-panel" id="settingsPanel">
+    <div class="panel-header">排版设置<button class="panel-close" onclick="toggleSettingsPanel()">×</button></div>
+    <div class="settings-form" id="settingsForm">
+      <div class="form-row">
+        <label>正文字号</label>
+        <input type="number" id="cfg-font_size" value="15" min="12" max="24" step="1">
+      </div>
+      <div class="form-row">
+        <label>标题字号</label>
+        <input type="number" id="cfg-heading_size" value="18" min="14" max="32" step="1">
+      </div>
+      <div class="form-row">
+        <label>行高</label>
+        <input type="number" id="cfg-line_height" value="1.75" min="1" max="3" step="0.05">
+      </div>
+      <div class="form-row">
+        <label>字间距</label>
+        <input type="number" id="cfg-letter_spacing" value="0.034" min="0" max="0.2" step="0.002">
+      </div>
+      <div class="form-row">
+        <label>正文颜色</label>
+        <div class="color-field">
+          <input type="color" id="cfg-text_color_picker" value="#544545">
+          <span class="color-hex" id="cfg-text_color_hex">#544545</span>
         </div>
-        <button class="settings-toggle on" id="settingsFooterToggle"></button>
       </div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">预览宽度</div>
-          <div class="settings-row-hint">模拟手机屏幕宽度</div>
+      <div class="form-row">
+        <label>链接颜色</label>
+        <div class="color-field">
+          <input type="color" id="cfg-link_color_picker" value="#0070C0">
+          <span class="color-hex" id="cfg-link_color_hex">#0070C0</span>
         </div>
-        <select class="settings-select" id="settingsZoom">
-          <option value="50">50%</option>
-          <option value="75">75%</option>
-          <option value="100">100%</option>
-          <option value="125">125%</option>
-          <option value="150">150%</option>
-          <option value="200" selected>200%</option>
-        </select>
       </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">配置方案</div>
-      <div class="settings-profiles" id="settingsProfiles">
-        <div style="font-size:12px;color:#9CA3AF;padding:8px 0">加载中...</div>
+      <div class="form-row">
+        <label>字体</label>
+        <input type="text" id="cfg-font_family" value="PingFang SC" class="font-input">
       </div>
-    </div>
-    <div class="settings-section" id="settingsConfigSection" style="display:none">
-      <div class="settings-section-title">排版参数</div>
-      <div class="cfg-form" id="settingsConfigForm">
-        <label class="cfg-field">
-          <span class="cfg-label">正文字号</span>
-          <input class="cfg-input" id="cfg-font_size" placeholder="15px">
-        </label>
-        <label class="cfg-field">
-          <span class="cfg-label">标题字号</span>
-          <input class="cfg-input" id="cfg-heading_size" placeholder="18px">
-        </label>
-        <label class="cfg-field">
-          <span class="cfg-label">正文颜色</span>
-          <input class="cfg-input" id="cfg-text_color" placeholder="rgb(84, 69, 69)">
-        </label>
-        <label class="cfg-field">
-          <span class="cfg-label">链接颜色</span>
-          <input class="cfg-input" id="cfg-link_color" placeholder="rgb(0, 112, 192)">
-        </label>
-        <label class="cfg-field">
-          <span class="cfg-label">行高</span>
-          <input class="cfg-input" id="cfg-line_height" placeholder="1.75em">
-        </label>
-        <label class="cfg-field">
-          <span class="cfg-label">字间距</span>
-          <input class="cfg-input" id="cfg-letter_spacing" placeholder="0.034em">
-        </label>
-        <label class="cfg-field">
-          <span class="cfg-label">字体</span>
-          <input class="cfg-input cfg-input-wide" id="cfg-font_family" placeholder="PingFang SC, sans-serif">
-        </label>
-      </div>
-      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
-        <input class="cfg-pwd" id="settingsPwd" type="password" placeholder="输入密码后保存">
-        <button class="settings-save-btn" id="settingsSaveBtn">保存</button>
-      </div>
-      <div id="settingsEditMsg" style="font-size:11px;margin-top:6px;display:none"></div>
-    </div>
-  </div>
-
-  <div class="preview-layout" id="previewLayout">
-    <!-- Floating TOC -->
-    <div class="toc-float" id="tocFloat">
-      <div class="toc-title">目录</div>
-      <ul class="toc-list" id="tocList">
-        <li class="toc-empty">解析后显示</li>
-      </ul>
-    </div>
-
-    <!-- Article Preview -->
-    <div class="preview-main" id="previewMain">
-      <div class="phone-frame" id="phoneFrame">
-        <div id="contentArea"></div>
+      <div class="form-row">
+        <label>页脚</label>
+        <div class="toggle-switch on" id="footerToggleBtn"><div class="toggle-knob"></div></div>
       </div>
     </div>
   </div>
 
-  <div class="stats-bar" id="statsBar"></div>
-</div>
+  <!-- Overlay for closing panels -->
+  <div class="panel-overlay" id="panelOverlay" onclick="closeAllPanels()"></div>
 
-<!-- Global Status Bar -->
-<div id="globalStatusBar">
-  <div id="statusHeader" onclick="document.getElementById('logPanel').classList.toggle('open'); this.querySelector('#statusToggle').textContent = document.getElementById('logPanel').classList.contains('open') ? '&#9660; 收起' : '&#9650; 展开日志'">
-    <span id="statusVersion">加载中...</span>
-    <span id="statusToggle">&#9650; 展开日志</span>
+  <!-- Main content: WeChat article replica -->
+  <div class="preview-content">
+    <!-- WeChat header: title + author line -->
+    <div class="wx-header">
+      <h2 class="wx-title" id="articleTitle"></h2>
+      <div class="wx-meta">
+        <span class="wx-meta-account">FBIF食品饮料创新</span>
+        <span class="wx-meta-gray" id="wxDate"></span>
+        <span class="wx-meta-gray">上海</span>
+      </div>
+    </div>
+
+    <!-- Article body -->
+    <div class="phone-frame" id="phoneFrame">
+      <div id="contentArea"></div>
+    </div>
+
+    <!-- WeChat footer: fixed bottom bar -->
+    <div class="wx-footer">
+      <div class="wx-footer-inner">
+        <div class="wx-footer-left">
+          <img class="wx-avatar" src="/fbif-avatar.webp" alt="FBIF">
+          <span class="wx-footer-name">FBIF食品饮料创新</span>
+          <svg class="wx-verified" viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="7" fill="#576b95"/><path d="M5 8.2l2.2 2.2L11.5 6" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="wx-footer-actions">
+          <span class="wx-action">
+            <svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M832 364.8h-147.2s19.2-64 32-179.2c6.4-57.6-38.4-115.2-102.4-121.6h-12.8c-51.2 0-83.2 32-102.4 76.8l-38.4 96c-32 64-57.6 102.4-76.8 115.2-25.6 12.8-121.6 12.8-128 12.8H128c-38.4 0-64 25.6-64 57.6v480c0 32 25.6 57.6 64 57.6h646.4c96 0 121.6-64 134.4-153.6l51.2-307.2c6.4-70.4-6.4-134.4-128-134.4z m-576 537.6H128V422.4h128v480z m640-409.6l-51.2 307.2c-12.8 57.6-12.8 102.4-76.8 102.4H320V422.4c44.8 0 70.4-6.4 89.6-19.2 32-12.8 64-64 108.8-147.2 25.6-64 38.4-96 44.8-102.4 6.4-19.2 19.2-32 44.8-32h6.4c32 0 44.8 32 44.8 51.2-12.8 102.4-32 166.4-32 166.4l-25.6 83.2h243.2c19.2 0 32 0 44.8 12.8 12.8 12.8 6.4 38.4 6.4 57.6z" fill="#7F7F7F"/></svg>
+            <span class="wx-count">59</span>
+          </span>
+          <span class="wx-action">
+            <svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M922.026667 439.04l-267.221334-282.368v185.258667h-85.333333c-250.325333 0-455.253333 181.504-481.322667 413.44 115.157333-133.674667 291.925333-218.922667 480.682667-218.922667h85.077333l0.554667 185.173333 267.52-282.581333z m-438.528 189.44C268.8 662.570667 87.04 821.76 47.232 1024A529.664 529.664 0 0 1 0 805.461333C0 502.272 254.976 256.597333 569.472 256.597333V40.96a35.242667 35.242667 0 0 1 10.368-30.208 39.68 39.68 0 0 1 54.4 0l378.794667 400.298667a35.413333 35.413333 0 0 1 10.88 27.861333 35.498667 35.498667 0 0 1-10.88 27.904l-376.704 398.08a37.973333 37.973333 0 0 1-56.448 2.133333 35.114667 35.114667 0 0 1-10.410667-30.208l-0.64-215.082666c-26.88 0-53.546667 2.005333-79.701333 5.845333l-5.632 0.853333z" fill="#7F7F7F"/></svg>
+            <span class="wx-count">117</span>
+          </span>
+          <span class="wx-action">
+            <svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M692.524005 125.502365c-67.141166 0-131.468241 23.717168-180.524516 65.896826-49.056276-42.179658-113.437585-65.896826-180.524516-65.896826-145.924487 0-264.61368 107.859543-264.61368 240.411465 0 236.403175 415.087786 516.232394 432.794054 528.036231 4.547573 3.032056 9.854439 4.547573 15.052834 4.547573 5.360078 0 10.721179-1.569752 15.268752-4.656043 17.435091-11.859096 427.161776-292.662503 427.161776-527.927761C957.137685 233.361909 838.449515 125.502365 692.524005 125.502365zM514.598686 838.123592c-74.18049-52.252061-393.320017-287.896966-393.320017-472.210785 0-102.553701 94.269014-186.048323 210.196303-186.048323 61.619406 0 120.205733 24.691355 160.707169 67.73673 10.288321 10.937097 29.348422 10.937097 39.634696 0 40.501436-43.045375 99.088786-67.73673 160.707169-67.73673 115.927289 0 210.196303 83.494623 210.196303 186.048323C902.720308 549.306674 588.021929 785.547143 514.598686 838.123592z" fill="#7F7F7F"/></svg>
+            <span class="wx-count">17</span>
+          </span>
+          <span class="wx-action">
+            <svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M337.36192 914.688c-3.5584 0-7.13728-0.75776-10.496-2.304-8.89856-4.096-14.61248-12.99968-14.61248-22.8096L312.25344 782.5408c0-13.29152-10.81344-24.09984-24.12544-24.09984l-122.88 0c-41.00096 0-74.35264-33.3568-74.35264-74.33216L90.89536 235.6992c0-40.9856 33.35168-74.33728 74.35264-74.33728l708.80768 0c40.97536 0 74.32704 33.35168 74.32704 74.33728l0 448.41472c0 40.97536-33.35168 74.33216-74.32704 74.33216l-336.19968 0c-5.76 0-11.35104 2.048-15.73888 5.8368l-168.41728 144.3584C349.06112 912.62464 343.24992 914.688 337.36192 914.688zM179.7888 222.72c-12.86656 0-23.31648 10.1632-23.31648 22.67136l0 421.5552c0 12.48768 10.44992 22.656 23.31648 22.656l118.72256 0c39.61344 0 71.83872 31.36 71.83872 69.87264l0 49.29536 122.7008-102.33856c13.05088-10.8544 29.63968-16.82944 46.7456-16.82944l324.82816 0c12.84096 0 23.28576-10.1632 23.28576-22.656L887.9104 245.39136c0-12.50304-10.4448-22.67136-23.28576-22.67136L179.7888 222.72z" fill="#7F7F7F"/></svg>
+            <span class="wx-count">13</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="copy-success" id="copySuccess">✓ 已复制到剪贴板，正在打开微信后台...</div>
   </div>
-  <div id="logPanel"></div>
 </div>
 
 <script type="module">
-// ---- Version check ----
+// ---- Version ----
 async function loadVersionInfo() {
   try {
-    const resp = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' });
-    if (resp.ok) return await resp.json();
+    const r = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' });
+    if (r.ok) return await r.json();
   } catch {}
-  return { build: 'runtime-' + Date.now(), commit: 'runtime' };
+  return { build: 'runtime-' + Date.now() };
 }
-
 const versionInfo = await loadVersionInfo();
 const buildId = String(versionInfo.build || versionInfo.commit || Date.now());
 const assetVersion = encodeURIComponent(buildId);
@@ -202,122 +186,49 @@ if (!new URLSearchParams(location.search).get('v')) {
   history.replaceState(null, '', next);
 }
 
-// Show version in global status bar
-{
-  const short = buildId.length > 8 ? buildId.substring(0, 7) : buildId;
-  const deployedAt = versionInfo.deployed_at || '';
-  const timeStr = deployedAt && deployedAt !== 'local'
-    ? new Date(deployedAt).toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' })
-    : 'local';
-  const el = document.getElementById('statusVersion');
-  if (el) el.textContent = 'v' + short + ' | ' + timeStr;
-}
-
-// ---- Global log system ----
-window._pushLog = function(level, msg, detail) {
-  const panel = document.getElementById('logPanel');
-  if (!panel) return;
-  const now = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-  const cls = level === 'error' ? 'log-error' : level === 'warn' ? 'log-warn' : 'log-info';
-  const icon = level === 'error' ? '\u2717' : level === 'warn' ? '!' : '\u2713';
-  let text = icon + ' ' + msg;
-  if (detail && typeof detail === 'object') {
-    const parts = [];
-    for (const [k, v] of Object.entries(detail)) {
-      if (typeof v === 'string' && v.length > 60) parts.push(k + '=' + v.substring(0, 57) + '...');
-      else parts.push(k + '=' + v);
-    }
-    if (parts.length) text += ' (' + parts.join(', ') + ')';
-  }
-  const div = document.createElement('div');
-  div.className = 'log-entry';
-  div.innerHTML = '<span class="log-time">' + now + '</span><span class="' + cls + '">' +
-    text.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
-  panel.appendChild(div);
-  panel.scrollTop = panel.scrollHeight;
-};
-
-// ---- Version auto-refresh ----
+// Auto-refresh on version change
 async function reloadIfUpdated() {
   try {
     const latest = await loadVersionInfo();
-    const latestBuild = String(latest.build || latest.commit || '');
-    if (latestBuild && latestBuild !== buildId) {
-      console.log('[版本更新] ' + buildId + ' → ' + latestBuild + '，强制刷新');
-      location.reload();
-    }
+    if (String(latest.build || latest.commit || '') !== buildId) location.reload();
   } catch {}
 }
 window.addEventListener('focus', reloadIfUpdated);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) reloadIfUpdated();
-});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadIfUpdated(); });
 
-// ---- Template definitions ----
-const TEMPLATES = {
-  fbif: { id: 'fbif', label: 'FBIF 公众号', chipLabel: 'FBIF' },
-  mote: { id: 'mote', label: 'Mote 排版', chipLabel: 'Mote' },
+// ---- Log (console only) ----
+window._pushLog = function(level, msg, detail) {
+  console.log('[FBIF]', level === 'error' ? '❌' : '✅', msg, detail || '');
 };
 
-// ---- localStorage preferences ----
-function loadPref(key, fallback) {
-  try { const v = localStorage.getItem(key); return v !== null ? v : fallback; } catch { return fallback; }
-}
-function savePref(key, val) {
-  try { localStorage.setItem(key, val); } catch {}
-}
+// ---- Prefs ----
+function loadPref(k, fb) { try { const v = localStorage.getItem(k); return v !== null ? v : fb; } catch { return fb; } }
+function savePref(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
-let currentTemplateId = loadPref('preferred_template', 'fbif');
-// Also accept ?t= param for backward compat
-const urlTemplate = new URLSearchParams(location.search).get('t');
-if (urlTemplate && TEMPLATES[urlTemplate]) currentTemplateId = urlTemplate;
-if (!TEMPLATES[currentTemplateId]) currentTemplateId = 'fbif';
+// ---- Config: pure localStorage ----
+const DEFAULT_CFG = { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' };
+function loadConfig() { try { const r = localStorage.getItem('fbif_config'); if (r) return { ...DEFAULT_CFG, ...JSON.parse(r) }; } catch {} return { ...DEFAULT_CFG }; }
+function saveConfig(c) { try { localStorage.setItem('fbif_config', JSON.stringify(c)); } catch {} window._activeConfig = { config: c }; }
+window._activeConfig = { config: loadConfig() };
 
 let footerEnabledPref = loadPref('footer_enabled', 'true') === 'true';
-let zoomIdxPref = parseInt(loadPref('zoom_index', ''), 10);
 
 // ---- Load engine + template ----
+let currentTemplateId = loadPref('preferred_template', 'fbif');
 const { initApp } = await import('./js/engine.js?v=' + assetVersion);
-
-let _currentModule = null;
-let _engineInitialized = false;
 
 async function loadTemplate(templateId) {
   currentTemplateId = templateId;
   savePref('preferred_template', templateId);
-
-  // Update pill UI
   document.querySelectorAll('.template-pill').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.template === templateId);
   });
-  // Update chip UI
-  const chipLabel = document.getElementById('templateChipLabel');
-  if (chipLabel) chipLabel.textContent = TEMPLATES[templateId].chipLabel;
-  document.querySelectorAll('.tb-chip-option').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.template === templateId);
-  });
-
-  try {
-    const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
-    _currentModule = mod.default;
-    initApp(_currentModule);
-    _engineInitialized = true;
-
-    // Wrap engine functions for UI hooks (success bar, zoom persist, etc.)
-    wrapEngineFunctions();
-
-    // Apply saved preferences after engine init
-    const footerEl = document.getElementById('footerEnabled');
-    footerEl.checked = footerEnabledPref;
-    updateFooterIcon();
-  } catch (err) {
-    console.error('模板加载失败', templateId, err);
-    document.getElementById('error').textContent = '模板加载失败: ' + templateId;
-    document.getElementById('error').style.display = 'block';
-  }
+  const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
+  initApp(mod.default);
+  wrapEngineFunctions();
 }
 
-// ---- Template pill click handlers ----
+// Template pill click handlers
 document.querySelectorAll('.template-pill').forEach(btn => {
   btn.addEventListener('click', () => {
     const tid = btn.dataset.template;
@@ -325,289 +236,148 @@ document.querySelectorAll('.template-pill').forEach(btn => {
   });
 });
 
-// ---- Template chip in toolbar ----
-const templateChip = document.getElementById('templateChip');
-const templateChipDropdown = document.getElementById('templateChipDropdown');
+await loadTemplate(currentTemplateId);
 
-templateChip.addEventListener('click', (e) => {
-  e.stopPropagation();
-  templateChipDropdown.classList.toggle('open');
-});
+document.getElementById('footerEnabled').checked = footerEnabledPref;
+updateFooterBtn();
 
-document.addEventListener('click', () => {
-  templateChipDropdown.classList.remove('open');
-});
-
-document.querySelectorAll('.tb-chip-option').forEach(btn => {
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const tid = btn.dataset.template;
-    templateChipDropdown.classList.remove('open');
-    if (tid !== currentTemplateId) loadTemplate(tid);
-  });
-});
-
-// ---- Back button ----
+// ---- Toolbar: back ----
 document.getElementById('backBtn').addEventListener('click', () => {
   window.goBack && window.goBack();
-  hideCopySuccess();
+  document.getElementById('copySuccess').style.display = 'none';
+  closeAllPanels();
 });
 
-// ---- Footer toggle (in settings panel) ----
-const settingsFooterToggle = document.getElementById('settingsFooterToggle');
+// ---- Panel toggles ----
+window.toggleTocPanel = function() {};
+window.toggleSettingsPanel = function() {
+  const sp = document.getElementById('settingsPanel');
+  const open = sp.classList.toggle('open');
+  document.getElementById('tocPanel').classList.remove('open');
+  document.getElementById('panelOverlay').classList.toggle('open', open);
+};
+window.closeAllPanels = function() {
+  document.getElementById('tocPanel').classList.remove('open');
+  document.getElementById('settingsPanel').classList.remove('open');
+  document.getElementById('panelOverlay').classList.remove('open');
+};
 
-function updateFooterIcon() {
-  const enabled = document.getElementById('footerEnabled').checked;
-  settingsFooterToggle.classList.toggle('on', enabled);
+// ---- Footer toggle ----
+function updateFooterBtn() {
+  const on = document.getElementById('footerEnabled').checked;
+  document.getElementById('footerToggleBtn').classList.toggle('on', on);
 }
-
-function toggleFooterState() {
+document.getElementById('footerToggleBtn').addEventListener('click', () => {
   const el = document.getElementById('footerEnabled');
   el.checked = !el.checked;
   footerEnabledPref = el.checked;
   savePref('footer_enabled', String(el.checked));
-  updateFooterIcon();
-  window.toggleFooter && window.toggleFooter();
-}
-
-settingsFooterToggle.addEventListener('click', toggleFooterState);
-
-// ---- Settings panel ----
-const settingsPanel = document.getElementById('settingsPanel');
-document.getElementById('settingsBtn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  settingsPanel.classList.toggle('open');
-});
-document.getElementById('settingsClose').addEventListener('click', () => {
-  settingsPanel.classList.remove('open');
-});
-// Close settings when clicking outside
-document.addEventListener('click', (e) => {
-  if (settingsPanel.classList.contains('open') &&
-      !settingsPanel.contains(e.target) &&
-      e.target.id !== 'settingsBtn') {
-    settingsPanel.classList.remove('open');
-  }
-});
-
-// Zoom select in settings
-const settingsZoom = document.getElementById('settingsZoom');
-settingsZoom.addEventListener('change', () => {
-  const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
-  const target = parseInt(settingsZoom.value, 10);
-  const currentLabel = document.getElementById('zoomLabel').textContent;
-  const current = parseInt(currentLabel, 10);
-  const currentIdx = ZOOM_STEPS.indexOf(current);
-  const targetIdx = ZOOM_STEPS.indexOf(target);
-  if (currentIdx >= 0 && targetIdx >= 0 && window.zoom) {
-    window.zoom(targetIdx - currentIdx);
-  }
-  savePref('zoom_index', String(targetIdx));
-});
-
-// ---- Config profile management ----
-const CONFIG_PASSWORD = 'FBIF2026';
-let _activeProfileId = null;
-let _activeProfileConfig = null;
-
-async function loadConfigProfiles() {
-  const container = document.getElementById('settingsProfiles');
-  try {
-    const resp = await fetch('/api/config/profiles');
-    if (!resp.ok) {
-      container.innerHTML = '<div style="font-size:12px;color:#9CA3AF;padding:8px 0">API 不可用</div>';
-      return;
-    }
-    const profiles = await resp.json();
-    const activeResp = await fetch('/api/config/active');
-    if (activeResp.ok) {
-      const active = await activeResp.json();
-      _activeProfileId = active.id;
-      _activeProfileConfig = active.config;
-    }
-
-    container.innerHTML = '';
-    profiles.forEach(p => {
-      const isActive = p.id === _activeProfileId;
-      const div = document.createElement('div');
-      div.className = 'settings-profile-item' + (isActive ? ' active' : '');
-      div.innerHTML = '<span class="settings-profile-name">' + (p.name || '配置 ' + p.id) + '</span>' +
-        (isActive ? '<span class="settings-profile-badge">使用中</span>' : '');
-      div.addEventListener('click', async () => {
-        await fetch('/api/config/active', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profile_id: p.id }),
-        }).catch(() => {});
-        loadConfigProfiles();
-        loadActiveConfig();
-      });
-      container.appendChild(div);
-    });
-
-    // Populate config form fields
-    if (_activeProfileConfig) {
-      document.getElementById('settingsConfigSection').style.display = 'block';
-      const cfg = _activeProfileConfig;
-      const fields = ['font_size', 'heading_size', 'text_color', 'link_color', 'line_height', 'letter_spacing', 'font_family'];
-      fields.forEach(f => {
-        const el = document.getElementById('cfg-' + f);
-        if (el && cfg[f] !== undefined) el.value = cfg[f];
-      });
-    }
-  } catch {
-    container.innerHTML = '<div style="font-size:12px;color:#9CA3AF;padding:8px 0">API 不可用</div>';
-  }
-}
-
-// Save config from form fields
-document.getElementById('settingsSaveBtn').addEventListener('click', async () => {
-  const pwd = document.getElementById('settingsPwd').value;
-  const msg = document.getElementById('settingsEditMsg');
-
-  if (pwd !== CONFIG_PASSWORD) {
-    msg.style.display = 'block';
-    msg.style.color = '#DC2626';
-    msg.textContent = '密码错误';
-    return;
-  }
-
-  const fields = ['font_size', 'heading_size', 'text_color', 'link_color', 'line_height', 'letter_spacing', 'font_family'];
-  const newConfig = { footer_enabled: document.getElementById('footerEnabled').checked };
-  fields.forEach(f => {
-    const el = document.getElementById('cfg-' + f);
-    if (el) newConfig[f] = el.value;
-  });
-
-  try {
-    const resp = await fetch('/api/config/profiles/' + _activeProfileId, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: newConfig }),
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-
-    msg.style.display = 'block';
-    msg.style.color = '#059669';
-    msg.textContent = '已保存';
-    document.getElementById('settingsPwd').value = '';
-    setTimeout(() => { msg.style.display = 'none'; }, 2000);
-    loadConfigProfiles();
-    loadActiveConfig();
-  } catch (e) {
-    msg.style.display = 'block';
-    msg.style.color = '#DC2626';
-    msg.textContent = '保存失败: ' + e.message;
-  }
-});
-
-loadConfigProfiles();
-
-// ---- Copy success bar ----
-function showCopySuccess() {
-  const bar = document.getElementById('copySuccessBar');
-  bar.classList.add('visible');
-  document.getElementById('previewLayout').classList.add('with-success-bar');
-  document.getElementById('previewMain').classList.add('with-success-bar');
-  // Adjust TOC position
-  const toc = document.getElementById('tocFloat');
-  if (toc) toc.style.top = '104px';
-}
-function hideCopySuccess() {
-  const bar = document.getElementById('copySuccessBar');
-  bar.classList.remove('visible');
-  document.getElementById('previewLayout').classList.remove('with-success-bar');
-  document.getElementById('previewMain').classList.remove('with-success-bar');
-  const toc = document.getElementById('tocFloat');
-  if (toc) toc.style.top = '68px';
-}
-
-// ---- Filename display in toolbar ----
-// engine.js sets titleInput.value, so we observe it
-const titleInput = document.getElementById('titleInput');
-const filenameDisplay = document.getElementById('filenameDisplay');
-
-// Intercept engine.js setting titleInput.value
-const _origTitleDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-Object.defineProperty(titleInput, 'value', {
-  get() { return _origTitleDescriptor.get.call(this); },
-  set(v) {
-    _origTitleDescriptor.set.call(this, v);
-    filenameDisplay.textContent = v;
-  },
-});
-
-// ---- Load active config from server ----
-window._activeConfig = null;
-async function loadActiveConfig() {
-  try {
-    const resp = await fetch('/api/config/active');
-    if (resp.ok) {
-      window._activeConfig = await resp.json();
-      const cfg = window._activeConfig.config;
-      if (cfg) {
-        const serverFooter = cfg.footer_enabled !== false;
-        document.getElementById('footerEnabled').checked = footerEnabledPref;
-        updateFooterIcon();
-      }
-    }
-  } catch {}
-}
-async function saveFooterToggle(enabled) {
-  if (!window._activeConfig) return;
-  const cfg = { ...window._activeConfig.config, footer_enabled: enabled };
-  try {
-    await fetch('/api/config/profiles/' + window._activeConfig.id, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: cfg }),
-    });
-  } catch {}
-}
-loadActiveConfig();
-
-// ---- Footer toggle (called by engine.js) ----
-window.toggleFooter = function() {
+  updateFooterBtn();
   window._updateFooter && window._updateFooter(null);
-  const enabled = document.getElementById('footerEnabled').checked;
-  saveFooterToggle(enabled);
-};
+});
 
-// ---- Build TOC from headings ----
+// ---- Config form ----
+function populateConfigForm() {
+  const c = loadConfig();
+  document.getElementById('cfg-font_size').value = parseFloat(c.font_size) || 15;
+  document.getElementById('cfg-heading_size').value = parseFloat(c.heading_size) || 18;
+  document.getElementById('cfg-line_height').value = parseFloat(c.line_height) || 1.75;
+  document.getElementById('cfg-letter_spacing').value = parseFloat(c.letter_spacing) || 0.034;
+  document.getElementById('cfg-font_family').value = c.font_family || 'PingFang SC';
+  document.getElementById('cfg-text_color_picker').value = c.text_color || '#544545';
+  document.getElementById('cfg-text_color_hex').textContent = c.text_color || '#544545';
+  document.getElementById('cfg-link_color_picker').value = c.link_color || '#0070C0';
+  document.getElementById('cfg-link_color_hex').textContent = c.link_color || '#0070C0';
+}
+populateConfigForm();
+
+document.getElementById('settingsForm').addEventListener('input', (e) => {
+  const c = loadConfig(), id = e.target.id;
+  if (id === 'cfg-font_size') c.font_size = e.target.value;
+  else if (id === 'cfg-heading_size') c.heading_size = e.target.value;
+  else if (id === 'cfg-line_height') c.line_height = e.target.value;
+  else if (id === 'cfg-letter_spacing') c.letter_spacing = e.target.value;
+  else if (id === 'cfg-font_family') c.font_family = e.target.value;
+  else if (id === 'cfg-text_color_picker') { c.text_color = e.target.value; document.getElementById('cfg-text_color_hex').textContent = e.target.value; }
+  else if (id === 'cfg-link_color_picker') { c.link_color = e.target.value; document.getElementById('cfg-link_color_hex').textContent = e.target.value; }
+  saveConfig(c);
+});
+
+// ---- Title display ----
+const titleInput = document.getElementById('titleInput');
+const articleTitle = document.getElementById('articleTitle');
+const _od = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+Object.defineProperty(titleInput, 'value', {
+  get() { return _od.get.call(this); },
+  set(v) { _od.set.call(this, v); articleTitle.textContent = v; },
+});
+
+// ---- Set date in WeChat header ----
+{
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
+  const h = String(now.getHours()).padStart(2, '0'), mi = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('wxDate').textContent = y + '年' + m + '月' + d + '日 ' + h + ':' + mi;
+}
+
+// ---- Wrap engine functions (called after every loadTemplate) ----
+function wrapEngineFunctions() {
+  if (window.copyContent) {
+    const origCopy = window.copyContent;
+    window.copyContent = async function() {
+      const btn = document.getElementById('copyBtn');
+      await origCopy();
+      document.getElementById('copySuccess').style.display = 'block';
+      setTimeout(() => { window.open('https://mp.weixin.qq.com', '_blank'); }, 400);
+      // Auto-reset after 10 seconds
+      setTimeout(() => {
+        btn.textContent = '复制到公众号';
+        btn.classList.remove('copied');
+        document.getElementById('copySuccess').style.display = 'none';
+      }, 10000);
+    };
+  }
+  if (window.goBack) {
+    const origGoBack = window.goBack;
+    window.goBack = function() {
+      origGoBack();
+      document.getElementById('copySuccess').style.display = 'none';
+      closeAllPanels();
+    };
+  }
+}
+
+// ---- Build TOC ----
 window._buildTOC = function() {
   const tocList = document.getElementById('tocList');
   tocList.innerHTML = '';
   const sections = document.getElementById('contentArea').querySelectorAll('section');
-  let headingIdx = 0;
-
+  let idx = 0;
   sections.forEach(sec => {
     const span = sec.querySelector('span[textstyle]') || sec.querySelector('span');
     if (!span) return;
     const style = span.getAttribute('style') || '';
-    const isBoldHeading = (style.includes('font-weight: bold') || style.includes('font-weight:bold')) &&
+    const isBold = (style.includes('font-weight: bold') || style.includes('font-weight:bold')) &&
       (style.includes('font-size: 18px') || style.includes('font-size:18px'));
-    if (!isBoldHeading) return;
-
+    if (!isBold) return;
     const text = sec.textContent.trim();
     if (!text) return;
-
-    sec.id = 'heading-' + headingIdx;
+    sec.id = 'heading-' + idx;
     const li = document.createElement('li');
     li.className = 'toc-item';
     li.textContent = text;
     li.addEventListener('click', () => {
-      sec.scrollIntoView({ behavior: 'instant', block: 'start' });
+      sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
       tocList.querySelectorAll('.toc-item').forEach(t => t.classList.remove('active'));
       li.classList.add('active');
+      closeAllPanels();
     });
     tocList.appendChild(li);
-    headingIdx++;
+    idx++;
   });
-
-  if (headingIdx === 0) {
-    tocList.innerHTML = '<li class="toc-empty">无标题</li>';
-  }
+  if (idx === 0) tocList.innerHTML = '<li class="toc-empty">无标题</li>';
 };
+window._positionTOC = function() {};
 
 // ---- URL repost ----
 window.fetchArticle = async function() {
@@ -616,171 +386,37 @@ window.fetchArticle = async function() {
   const errorEl = document.getElementById('error');
   const url = (urlInput.value || '').trim();
   if (!url) return;
-
   errorEl.style.display = 'none';
-  btn.disabled = true;
-  btn.textContent = '抓取中...';
-
+  btn.disabled = true; btn.textContent = '抓取中...';
   try {
-    const resp = await fetch('/api/fetch-article', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status }));
-      throw new Error(err.error || '抓取失败');
-    }
+    const resp = await fetch('/api/fetch-article', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    if (!resp.ok) { const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status })); throw new Error(err.error || '抓取失败'); }
     const { title, content } = await resp.json();
     if (!content) throw new Error('文章内容为空');
-
     const file = new File([content], (title || 'article') + '.md', { type: 'text/markdown' });
-    const fileInput = document.getElementById('fileInput');
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    fileInput.files = dt.files;
-    fileInput.dispatchEvent(new Event('change'));
-  } catch (e) {
-    errorEl.textContent = '转载失败: ' + e.message;
-    errorEl.style.display = 'block';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '抓取';
-  }
+    const fi = document.getElementById('fileInput');
+    const dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files;
+    fi.dispatchEvent(new Event('change'));
+  } catch (e) { errorEl.textContent = '转载失败: ' + e.message; errorEl.style.display = 'block'; }
+  finally { btn.disabled = false; btn.textContent = '抓取'; }
 };
-
-// ---- TOC positioning ----
-function positionTOC() {
-  const toc = document.getElementById('tocFloat');
-  const frame = document.getElementById('phoneFrame');
-  if (!toc || !frame) return;
-  const rect = frame.getBoundingClientRect();
-  const tocWidth = toc.offsetWidth;
-  const left = rect.left - tocWidth - 16;
-  // Only show TOC if there's enough space (tocWidth + 24px margin)
-  if (left < 24) {
-    toc.style.display = 'none';
-  } else {
-    toc.style.left = left + 'px';
-    toc.style.display = 'block';
-  }
-}
-
-function updateScrollSpy() {
-  const items = document.querySelectorAll('.toc-item');
-  const previewMain = document.getElementById('previewMain');
-  if (!previewMain || !items.length) return;
-  const scrollTop = previewMain.scrollTop;
-  let activeIdx = 0;
-  items.forEach((item, idx) => {
-    const headingId = 'heading-' + idx;
-    const heading = document.getElementById(headingId);
-    if (heading && heading.offsetTop - 100 <= scrollTop) activeIdx = idx;
-  });
-  items.forEach((item, idx) => item.classList.toggle('active', idx === activeIdx));
-}
-
-window._positionTOC = positionTOC;
-window.addEventListener('resize', positionTOC);
-
-let _updateTimer = null;
-const observer = new MutationObserver(() => {
-  if (_updateTimer) clearTimeout(_updateTimer);
-  _updateTimer = setTimeout(() => {
-    window._buildTOC();
-    positionTOC();
-  }, 200);
-});
-observer.observe(document.getElementById('contentArea'), { childList: true });
-document.getElementById('previewMain').addEventListener('scroll', updateScrollSpy);
 
 // ---- Keyboard shortcuts ----
 document.addEventListener('keydown', (e) => {
   const isPreview = document.getElementById('previewView').style.display === 'block';
-
-  // Cmd/Ctrl+Enter — copy in preview mode
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && isPreview) {
-    e.preventDefault();
-    window.copyContent && window.copyContent();
-    return;
-  }
-
-  // Escape — go back from preview to upload
-  if (e.key === 'Escape' && isPreview) {
-    e.preventDefault();
-    window.goBack && window.goBack();
-    hideCopySuccess();
-    return;
-  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && isPreview) { e.preventDefault(); window.copyContent && window.copyContent(); }
+  if (e.key === 'Escape' && isPreview) { e.preventDefault(); window.goBack && window.goBack(); }
 });
-
-// Smart paste: if clipboard contains URL in upload mode, auto-fill URL input
 document.addEventListener('paste', (e) => {
   const isUpload = document.getElementById('uploadView').style.display !== 'none';
-  if (!isUpload) return;
-
-  // Don't intercept if user is typing in the URL input already
-  if (document.activeElement === document.getElementById('urlInput')) return;
-
+  if (!isUpload || document.activeElement === document.getElementById('urlInput')) return;
   const text = (e.clipboardData || window.clipboardData).getData('text').trim();
   if (text && /^https?:\/\//i.test(text)) {
     e.preventDefault();
-    const urlInput = document.getElementById('urlInput');
-    urlInput.value = text;
-    urlInput.focus();
+    document.getElementById('urlInput').value = text;
     window.fetchArticle();
   }
 });
-
-const copyBtn = document.getElementById('copyBtn');
-
-// ---- Wrap engine functions after each loadTemplate call ----
-// Called after initApp() sets window.copyContent / goBack / zoom
-function wrapEngineFunctions() {
-  // Wrap copyContent to show success bar
-  if (window.copyContent) {
-    const origCopy = window.copyContent;
-    window.copyContent = async function() {
-      await origCopy();
-      // engine.js already sets green + stays; we add the success bar
-      showCopySuccess();
-    };
-  }
-
-  // Wrap goBack to hide success bar
-  if (window.goBack) {
-    const origGoBack = window.goBack;
-    window.goBack = function() {
-      origGoBack();
-      hideCopySuccess();
-    };
-  }
-
-  // Wrap zoom to persist preference
-  if (window.zoom) {
-    const origZoom = window.zoom;
-
-    // Apply saved zoom preference
-    if (!isNaN(zoomIdxPref) && zoomIdxPref >= 0) {
-      const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
-      const diff = zoomIdxPref - (ZOOM_STEPS.length - 1);
-      if (diff !== 0) origZoom(diff);
-    }
-
-    window.zoom = function(dir) {
-      origZoom(dir);
-      const label = document.getElementById('zoomLabel').textContent;
-      const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
-      const pct = parseInt(label, 10);
-      const idx = ZOOM_STEPS.indexOf(pct);
-      if (idx >= 0) savePref('zoom_index', String(idx));
-    };
-  }
-}
-
-// ---- Initialize first template ----
-await loadTemplate(currentTemplateId);
-
 </script>
 </body>
 </html>
