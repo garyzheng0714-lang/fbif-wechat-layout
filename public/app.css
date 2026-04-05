@@ -83,13 +83,6 @@ input[type="file"] { display: none; }
 }
 .tb-back:hover { background: rgba(255,255,255,0.1); }
 
-/* Filename display */
-.tb-filename {
-  font-size: 14px; color: #F9FAFB; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: 280px;
-}
-
 /* Template chip in toolbar */
 .tb-template-chip {
   display: inline-flex; align-items: center; gap: 4px;
@@ -125,31 +118,6 @@ input[type="file"] { display: none; }
 }
 .tb-text-btn:hover { background: rgba(255,255,255,0.1); color: #F9FAFB; }
 .tb-text-btn.active { color: #60A5FA; }
-
-/* Zoom group — visually grouped */
-.tb-zoom-group {
-  display: flex; align-items: center;
-  background: rgba(255,255,255,0.06); border-radius: 4px;
-  padding: 0 2px;
-}
-.tb-zoom-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 4px; border: none;
-  background: transparent; color: #9CA3AF; cursor: pointer;
-  font-size: 15px; transition: all 150ms ease-out;
-  font-family: inherit;
-}
-.tb-zoom-btn:hover { background: rgba(255,255,255,0.1); color: #F9FAFB; }
-.tb-zoom-label {
-  font-size: 11px; color: #6B7280; min-width: 36px; text-align: center;
-  user-select: none;
-}
-
-/* Separator */
-.tb-sep {
-  width: 1px; height: 20px; background: rgba(255,255,255,0.1);
-  margin: 0 4px; flex-shrink: 0;
-}
 
 /* Copy button — primary in toolbar */
 .tb-copy-btn {
@@ -370,10 +338,7 @@ input[type="file"] { display: none; }
   h1 { font-size: 18px; }
   .upload-zone { padding: 24px 16px; }
   .toolbar { padding: 0 8px; gap: 4px; }
-  .tb-filename { max-width: 120px; font-size: 13px; }
   .tb-copy-btn { padding: 6px 12px; font-size: 12px; }
-  .tb-zoom-group { display: none; }
-  .tb-sep { display: none; }
   .toc-float { display: none !important; }
   .preview-main { padding: 8px; }
   .phone-frame { max-width: 100% !important; border-radius: 0; }
