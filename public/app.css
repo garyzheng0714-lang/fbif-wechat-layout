@@ -246,9 +246,9 @@ input[type="file"] { display: none; }
 }
 .phone-frame img { max-width: 100%; height: auto; }
 
-/* WeChat footer — inside preview panel */
+/* WeChat footer — sticky bottom of scroll area */
 .wx-footer {
-  position: absolute; bottom: 0; left: 0; right: 0; z-index: 10;
+  position: sticky; bottom: 0; z-index: 10;
   background: #FFFFFF; padding: 10px 24px;
 }
 .wx-footer::before {
