@@ -49,6 +49,7 @@
         <div class="progress-text" id="progressText">正在排版...</div>
       </div>
       <div class="error" id="error"></div>
+      <div class="sidebar-stats" id="statsBar"></div>
       <div class="batch-list" id="batchList" style="display:none;"></div>
 
       <div class="sidebar-divider"></div>
@@ -100,7 +101,6 @@
   <!-- ======== Preview Panel ======== -->
   <main class="preview-panel">
     <div class="preview-toolbar" id="previewToolbar">
-      <span class="tb-stats" id="statsBar"></span>
       <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
       <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制到公众号</button>
     </div>
