@@ -1,0 +1,42 @@
+/* wx-theme.css — WeChat article theme
+ * CSS variables define configurable properties.
+ * Classes are used in templates; at copy time, variables are resolved
+ * and classes are converted to inline styles for WeChat compatibility.
+ */
+
+:root {
+  --wx-font-size: 15px;
+  --wx-heading-size: 18px;
+  --wx-text-color: #544545;
+  --wx-link-color: #0070C0;
+  --wx-muted-color: #888888;
+  --wx-line-height: 1.75em;
+  --wx-letter-spacing: 0.034em;
+  --wx-font-stack: mp-quote, 'PingFang SC', system-ui, -apple-system,
+    BlinkMacSystemFont, 'Helvetica Neue', 'Hiragino Sans GB',
+    'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif;
+}
+
+/* ---- Section containers ---- */
+.wx-p   { text-align: left; margin: 0px 8px; line-height: var(--wx-line-height); }
+.wx-pc  { text-align: center; margin: 0px 8px; line-height: var(--wx-line-height); }
+.wx-pi  { text-align: center; margin: 0px 8px; }
+.wx-gap { padding-bottom: 20px; }
+.wx-bq  { text-align: left; margin: 0px 8px; padding-left: 12px; border-left: 3px solid var(--wx-link-color); line-height: var(--wx-line-height); }
+
+/* ---- FBIF ProseMirror leaf wrappers ---- */
+.wx-leaf { color: rgba(0,0,0,0.9); font-size: 17px; font-family: var(--wx-font-stack); letter-spacing: var(--wx-letter-spacing); font-style: normal; font-weight: normal; }
+.wx-la   { color: var(--wx-link-color); font-size: 15px; font-style: italic; font-family: var(--wx-font-stack); letter-spacing: var(--wx-letter-spacing); }
+
+/* ---- Text styles ---- */
+.wx-t    { font-size: var(--wx-font-size); color: var(--wx-text-color); }
+.wx-bold { font-weight: bold; }
+.wx-th   { font-size: var(--wx-heading-size); font-weight: bold; color: var(--wx-text-color); }
+.wx-tc   { font-size: 12px; color: var(--wx-muted-color); }
+.wx-tr   { font-size: var(--wx-font-size); color: var(--wx-muted-color); }
+.wx-ta   { font-size: 15px; color: var(--wx-link-color); font-style: italic; }
+.wx-auth { font-size: 15px; color: var(--wx-link-color); }
+.wx-a    { color: var(--wx-link-color); text-decoration: none; font-size: var(--wx-font-size); }
+
+/* ---- Mote blank spacer ---- */
+.wx-bls  { font-size: 15px; }

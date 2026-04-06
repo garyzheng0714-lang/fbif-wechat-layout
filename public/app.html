@@ -5,7 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FBIF 微信排版工具</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5/400.css" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5/500.css" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5/600.css" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-mono@5/500.css" crossorigin="anonymous">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/css/wx-theme.css">
 </head>
 <body>
 
@@ -253,11 +259,9 @@ window.toggleTocPanel = function() {};
 window.toggleSettingsPanel = function() {
   const sp = document.getElementById('settingsPanel');
   const open = sp.classList.toggle('open');
-  document.getElementById('tocPanel').classList.remove('open');
   document.getElementById('panelOverlay').classList.toggle('open', open);
 };
 window.closeAllPanels = function() {
-  document.getElementById('tocPanel').classList.remove('open');
   document.getElementById('settingsPanel').classList.remove('open');
   document.getElementById('panelOverlay').classList.remove('open');
 };
@@ -301,6 +305,8 @@ document.getElementById('settingsForm').addEventListener('input', (e) => {
   else if (id === 'cfg-text_color_picker') { c.text_color = e.target.value; document.getElementById('cfg-text_color_hex').textContent = e.target.value; }
   else if (id === 'cfg-link_color_picker') { c.link_color = e.target.value; document.getElementById('cfg-link_color_hex').textContent = e.target.value; }
   saveConfig(c);
+  // Real-time theme update via CSS variables
+  if (window.updateThemePreview) window.updateThemePreview(c);
 });
 
 // ---- Title display ----
@@ -347,36 +353,7 @@ function wrapEngineFunctions() {
   }
 }
 
-// ---- Build TOC ----
-window._buildTOC = function() {
-  const tocList = document.getElementById('tocList');
-  tocList.innerHTML = '';
-  const sections = document.getElementById('contentArea').querySelectorAll('section');
-  let idx = 0;
-  sections.forEach(sec => {
-    const span = sec.querySelector('span[textstyle]') || sec.querySelector('span');
-    if (!span) return;
-    const style = span.getAttribute('style') || '';
-    const isBold = (style.includes('font-weight: bold') || style.includes('font-weight:bold')) &&
-      (style.includes('font-size: 18px') || style.includes('font-size:18px'));
-    if (!isBold) return;
-    const text = sec.textContent.trim();
-    if (!text) return;
-    sec.id = 'heading-' + idx;
-    const li = document.createElement('li');
-    li.className = 'toc-item';
-    li.textContent = text;
-    li.addEventListener('click', () => {
-      sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      tocList.querySelectorAll('.toc-item').forEach(t => t.classList.remove('active'));
-      li.classList.add('active');
-      closeAllPanels();
-    });
-    tocList.appendChild(li);
-    idx++;
-  });
-  if (idx === 0) tocList.innerHTML = '<li class="toc-empty">无标题</li>';
-};
+window._buildTOC = function() {};
 window._positionTOC = function() {};
 
 // ---- URL repost ----

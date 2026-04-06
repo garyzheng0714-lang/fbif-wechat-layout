@@ -1,85 +1,95 @@
-# Design System — FBIF 微信排版工具
+# Design System — Vercel-inspired + WeChat Replica
 
-## Product Context
-- **What this is:** 内部编辑工具，将 DOCX/Markdown 转换为微信公众号格式 HTML
-- **Who it's for:** FBIF 编辑团队（食品饮料行业内容生产者），每天高频使用
-- **Core workflow:** 上传 → 预览 → 复制 → 自动打开微信后台粘贴
+## Visual Identity
+- **Style**: Vercel — monochrome, shadow-as-border, compressed typography
+- **Font**: Geist Sans (headings/UI) + Geist Mono (stats/code labels)
+- **OpenType**: `"liga"` enabled globally, `"tnum"` for numeric labels
 
-## 预览页：一比一复刻微信公众号
+## Color Palette
 
-### 整体布局
-- **背景色：全白 `#FFFFFF`**，不要灰色，不要任何其他颜色
-- **内容区：** max-width 680px 居中，白色背景
-- **无 phone-frame 边框：** 文章直接在白底上流动
-- **无 TOC/目录：** 已删除，不要加回来
+| Role | Value | Usage |
+|------|-------|-------|
+| Primary Text | `#171717` | Headings, body text, dark buttons |
+| Secondary Text | `#666666` | Descriptions, labels |
+| Muted Text | `#808080` | Placeholders, disabled |
+| Background | `#ffffff` | Page, cards, surfaces |
+| Surface Tint | `#fafafa` | Hover states, subtle backgrounds |
+| Border (shadow) | `rgba(0,0,0,0.08)` | Shadow-as-border on all elements |
+| Focus Ring | `hsla(212, 100%, 48%, 1)` | Focus state on inputs/buttons |
+| Error | `#ff5b4f` | Error text, failed states |
+| Divider | `#ebebeb` | Horizontal rules, separators |
 
-### 顶部工具栏（固定）
-- **只保留必要按钮：** ← 返回 | [重试上传] [设置] [复制到公众号]
-- **毛玻璃效果：** `backdrop-filter: blur(12px)`, 半透明白底
-- **统计信息（段落/图片/标题）** 显示在文章标题下方 meta 行，不在工具栏里
+## Typography
 
-### 文章头部（仿微信）
-- **标题：** 27px, font-weight 700, color #222, 左对齐
-- **Meta 行：** "FBIF食品饮料创新"（蓝灰 #576b95）+ 日期时间（灰 #b2b2b2）+ "上海"（灰 #b2b2b2）
-- **无"原创"标签**
-- **无独立背景色** — 继承页面白色
+| Role | Size | Weight | Letter Spacing |
+|------|------|--------|---------------|
+| Page Title | 40px | 600 | -2.4px |
+| Section Heading | 32px | 600 | -1.28px |
+| Card Title | 24px | 600 | -0.96px |
+| Body | 16px | 400 | normal |
+| UI Label | 14px | 500 | normal |
+| Caption / Stats | 12-13px | 500 | normal |
+| Mono Label | 12px | 500 | uppercase, Geist Mono |
 
-### 文章底部栏（固定在底部，仿微信）
-- **`position: fixed; bottom: 0`**，始终可见
-- **白色背景 `#FFFFFF`**，和内容无色差
-- **分隔线：** `::before` 伪元素，`max-width: 680px` 居中，**不贯穿到屏幕两边**，颜色 `#E5E5E5`，高度 0.5px
-- **左侧：** FBIF 头像（webp，圆形 36px）+ "FBIF食品饮料创新" + 蓝色认证徽标
-- **右侧：** 点赞/转发/喜爱/评论 四个图标（用户提供的 SVG），颜色 `#7F7F7F`，数字 `#7F7F7F` 13px
-- **头像文件：** `/fbif-avatar.webp`
+## Shadow System (NO traditional CSS borders)
 
-### 图标规范
-- 点赞：竖拇指 SVG（iconfont 来源）
-- 转发：弯箭头 SVG（iconfont 来源）
-- 喜爱：心形轮廓 SVG（iconfont 来源）
-- 评论：对话气泡 SVG（iconfont 来源）
-- 统一 fill 颜色 `#7F7F7F`
+| Level | Shadow | Usage |
+|-------|--------|-------|
+| Ring | `rgba(0,0,0,0.08) 0px 0px 0px 1px` | Default border for cards, inputs, buttons |
+| Ring Hover | `rgba(0,0,0,0.15) 0px 0px 0px 1px` | Hover state |
+| Subtle Card | Ring + `rgba(0,0,0,0.04) 0px 2px 2px` | Cards with minimal lift |
+| Full Card | Ring + Subtle + `rgba(0,0,0,0.06) 0px 8px 16px -4px` | Panels, dropdowns |
+| Focus | `hsla(212, 100%, 48%, 1) 0px 0px 0px 2px` | Keyboard/mouse focus |
+| Bottom Border | `rgba(0,0,0,0.08) 0px 1px 0px 0px` | Toolbar bottom, list items |
 
-## 上传页
-- **居中单列，max-width 480px**
-- **白色背景**
-- **上传区：** 实线边框 `#E8E8ED`，圆角 16px，蓝色上传箭头图标
-- **URL 输入：** 和上传区平级，用"或"分隔线隔开
-- **模板切换：** 顶部 pill 按钮切换 FBIF 公众号 / Mote 排版
+## Component Rules
 
-## 设置面板
-- **从工具栏"设置"按钮点击展开**，dropdown 面板
-- **纯前端 localStorage 存储**，不走 API
-- **表单字段只填数字**，不要带 px/em 后缀
-- **颜色用原生 `<input type="color">`** 色板
-- **复制后自动打开微信公众号后台** (mp.weixin.qq.com)
+- **Buttons**: 6px radius, padding 8px 16px, weight 500
+  - Primary: `#171717` bg, white text
+  - Secondary: white bg, shadow-border ring
+  - Pill/Badge: 9999px radius (tags only, NOT action buttons)
+- **Cards**: 8px radius, shadow-ring border, white bg
+- **Inputs**: 6px radius, shadow-ring border, focus = blue ring
+- **Toggle**: 36x20px, #ebebeb off → #171717 on
+- **Border Radius Scale**: 6px (buttons/inputs), 8px (cards), 9999px (badges)
 
-## 绝对禁止
-- ❌ 灰色页面背景（预览页必须全白）
-- ✅ 模板切换（FBIF/Mote）— 已允许
-- ❌ 深色工具栏
-- ❌ 浮动 TOC/目录
-- ❌ 底部黑色状态栏
-- ❌ phone-frame 边框/卡片
-- ❌ 设置走 API
-- ❌ emoji 做图标
-- ❌ 底部放按钮（所有按钮在顶部工具栏）
-- ❌ 底部栏分隔线贯穿全屏
+## Do / Don't
+- DO use shadow-as-border instead of CSS `border`
+- DO use negative letter-spacing on headings (-2.4px at 40px, -1.28px at 32px)
+- DO use 3 weights only: 400 (body), 500 (UI), 600 (headings)
+- DON'T use backdrop-filter blur
+- DON'T use traditional CSS borders on cards
+- DON'T use warm colors (orange, yellow, green) in UI chrome
+- DON'T use weight 700 on body text
 
-## 图片上传
-- **需要设置环境变量 `WECHAT_UPLOAD_ENDPOINT`** 才能上传图片到微信 CDN
-- 不设置时图片会显示红色边框（上传失败标记）
-- 启动命令：`WECHAT_UPLOAD_ENDPOINT=<url> go run . -port 19090`
+---
+
+## WeChat Preview Area (unchanged)
+
+The article preview area replicates WeChat's actual appearance:
+- **Background**: Pure white `#FFFFFF` (全白，不要灰色)
+- **Title**: 27px, weight 700, color #222, 左对齐, PingFang SC font
+- **Meta**: "FBIF食品饮料创新" (#576b95) + date (#b2b2b2)
+- **Footer**: fixed bottom, white bg, centered 0.5px divider (#E5E5E5), icon color #7F7F7F
+- **Content width**: max-width 680px centered
+- **No phone-frame border**
+
+## Critical Rules (from user)
+1. 预览页背景必须全白
+2. 保留模板切换（FBIF + Mote）
+3. 设置纯前端 localStorage
+4. 所有按钮在顶部工具栏
+5. 不要 TOC/目录
+6. 底部栏复刻微信（白底，分隔线不贯穿）
+7. 文章标题左对齐 27px 粗体
+8. 复制后自动打开微信后台
+9. 表单只填数字
+10. 不要 phone-frame 边框
 
 ## Decisions Log
 | Date | Decision | Rationale |
 |------|----------|-----------|
-| 2026-04-05 | 去掉模板切换 | 用户要求：切换无刷新机制，直接删除 |
-| 2026-04-06 | 恢复模板切换 | 用户允许：FBIF/Mote 双模板 pill 按钮切换 |
 | 2026-04-05 | 设置改为 localStorage | 用户要求：不走 API，前端直接编辑 |
-| 2026-04-05 | 标题在文章上方左对齐 | 复刻微信公众号排版 |
-| 2026-04-05 | 删除底部状态栏 | 用户要求 |
-| 2026-04-05 | 删除 TOC 目录 | 用户要求 |
-| 2026-04-05 | 复制后自动打开微信后台 | 减少手动步骤 |
-| 2026-04-05 | 预览页全白背景 | 用户明确要求，不要灰色 |
-| 2026-04-05 | 底部栏白底+居中短分隔线 | 复刻微信公众号底部栏 |
-| 2026-04-05 | Go 服务器同时提供静态文件和 API | 统一端口，避免跨域 |
+| 2026-04-06 | 恢复模板切换 | 用户允许：FBIF/Mote 双模板 pill 按钮切换 |
+| 2026-04-07 | Vercel 设计系统 | 用户要求：UI 外壳用 Vercel 风格，文章排版不变 |
+| 2026-04-07 | CSS 架构升级 | 借鉴 doocs/md：CSS 变量 + 类 → 复制时内联 |

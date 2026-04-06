@@ -1,47 +1,47 @@
-// FBIF 公众号排版模板
+// FBIF 公众号排版模板 — CSS class-based rendering
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource } = engineModule;
 
-const FONT_STACK = "mp-quote, 'PingFang SC', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif";
-
-// ---- Gold-standard WeChat ProseMirror wrapping ----
+// ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
 function leafWrap(inner) {
-  return '<span leaf="" style="color: rgba(0,0,0,0.9); font-size: 17px; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em; font-style: normal; font-weight: normal;">' + inner + '</span>';
+  return '<span leaf="" class="wx-leaf">' + inner + '</span>';
 }
-function textSpan(text, opts) {
-  let s = 'font-size: ' + (opts.fontSize || '15px') + '; color: ' + (opts.color || 'rgb(84, 69, 69)');
-  if (opts.bold) s += '; font-weight: bold';
-  return '<span textstyle="" style="' + s + ';">' + text + '</span>';
+function leafWrapAuthor(inner) {
+  return '<span leaf="" class="wx-la">' + inner + '</span>';
 }
+
 function renderRuns(runs, opts) {
-  const c = (opts && opts.color) || 'rgb(84, 69, 69)';
-  const fs = (opts && opts.fontSize) || '15px';
+  const textCls = (opts && opts.textCls) || 'wx-t';
   return runs.filter(r => r.type !== 'img').map(r => {
-    if (r.type === 'txt') return leafWrap(textSpan(esc(r.text), { fontSize: fs, color: c, bold: r.bold }));
-    if (r.type === 'link') { const h = (r.href || ''); if (!/^https?:\/\//i.test(h)) return leafWrap(esc(r.text)); return leafWrap('<a style="color: rgb(0, 112, 192); text-decoration: none; font-size: ' + fs + ';" href="' + escAttr(h) + '">' + esc(r.text) + '</a>'); }
+    if (r.type === 'txt') {
+      const cls = r.bold ? textCls + ' wx-bold' : textCls;
+      return leafWrap('<span textstyle="" class="' + cls + '">' + esc(r.text) + '</span>');
+    }
+    if (r.type === 'link') {
+      const h = (r.href || '');
+      if (!/^https?:\/\//i.test(h)) return leafWrap(esc(r.text));
+      return leafWrap('<a class="wx-a" href="' + escAttr(h) + '">' + esc(r.text) + '</a>');
+    }
     return '';
   }).join('');
 }
 
 // ---- Spacing & Section Helpers ----
-const GAP = 'padding-bottom: 20px; ';
 function sec(inner, gap) {
-  return '<section style="text-align: left; ' + (gap ? GAP : '') + 'margin: 0px 8px; line-height: 1.75em;">' + inner + '</section>';
+  return '<section class="wx-p' + (gap ? ' wx-gap' : '') + '">' + inner + '</section>';
 }
 function secCenter(inner, gap) {
-  return '<section style="text-align: center; ' + (gap ? GAP : '') + 'margin: 0px 8px; line-height: 1.75em;">' + inner + '</section>';
+  return '<section class="wx-pc' + (gap ? ' wx-gap' : '') + '">' + inner + '</section>';
 }
 
 // ---- DOCX Classification ----
 function classifyDocx(paragraphs, imgCache) {
-  // Detect headings using outline level / pStyle
   const pds = paragraphs.map(p => ({
     ...p,
     isHeading: p.hasOutlineLevel || p.hasHeadingStyle,
   }));
 
-  // Extract meta info (标题/摘要/作者)
   let author = '', contentStart = 0;
   for (let i = 0; i < pds.length; i++) {
     if (!pds[i].isHeading) continue;
@@ -60,11 +60,9 @@ function classifyDocx(paragraphs, imgCache) {
     }
     break;
   }
-  // Skip "引言" marker
   if (contentStart < pds.length && pds[contentStart].isHeading &&
       pds[contentStart].text.trim().replace(/[：:]$/, '') === '引言') contentStart++;
 
-  // Build element list
   const elems = [];
   let inRef = false, imgN = 0;
 
@@ -108,7 +106,7 @@ function classifyDocx(paragraphs, imgCache) {
 
 // ---- Markdown Classification ----
 async function classifyMd(text) {
-  const { author, content } = parseMdFrontmatter(text);
+  const { author, title, content } = parseMdFrontmatter(text);
   const rawParas = content.split(/\n\s*\n/).map(p => p.trim()).filter(p => p);
 
   const elems = [];
@@ -117,9 +115,12 @@ async function classifyMd(text) {
   for (let i = 0; i < rawParas.length && !stopped; i++) {
     const para = rawParas[i].replace(/\s+$/gm, '');
     if (/^#\s/.test(para)) continue;
-    if (/^>\s/.test(para)) continue;
+    if (/^>\s/.test(para)) {
+      const bqText = para.split('\n').map(l => l.replace(/^>\s*/, '')).join(' ').trim();
+      if (bqText) elems.push({ k: 'bq', runs: parseMdRuns(bqText) });
+      continue;
+    }
     if (/^[-*_\s]{3,}$/.test(para.replace(/\s/g, ''))) {
-      // Only stop on "* * *" with spaces (FBIF footer separator), not "***" or "---"
       if (/^\*\s+\*\s+\*/.test(para.trim())) stopped = true;
       continue;
     }
@@ -141,18 +142,15 @@ async function classifyMd(text) {
     elems.push({ k: 'txt', runs: parseMdRuns(para) });
   }
 
-  // No upload here — background upload in engine handles it after preview
-  return { elems, author, imgN };
+  return { elems, author, title, imgN };
 }
 
-// ---- HTML Rendering ----
+// ---- HTML Rendering (class-based) ----
 function render(elems, author) {
   const lines = [];
 
   if (author) {
-    lines.push(sec('<span leaf="" style="color: rgb(0, 112, 192); font-size: 15px; font-style: italic; font-family: ' + FONT_STACK + '; letter-spacing: 0.034em;">' +
-      '<span textstyle="" style="font-size: 15px; color: rgb(0, 112, 192); font-style: italic;">作者：' +
-      esc(author) + '</span></span>', true));
+    lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">作者：' + esc(author) + '</span>'), true));
   }
 
   for (let i = 0; i < elems.length; i++) {
@@ -164,28 +162,32 @@ function render(elems, author) {
 
     switch (e.k) {
       case 'h':
-        lines.push(sec(leafWrap(textSpan(esc(e.text), { fontSize: '18px', bold: true })), spaceAfter));
+        lines.push(sec(leafWrap('<span textstyle="" class="wx-th">' + esc(e.text) + '</span>'), spaceAfter));
         break;
       case 'img': {
         const src = e.src || '';
         const isGif = e.gif || looksLikeGifSource(src);
         const rpol = src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
         const gifAttr = isGif ? ' data-type="gif"' : '';
-        lines.push('<section style="text-align: center; ' + (spaceAfter ? GAP : '') + 'margin: 0px 8px;">' +
+        lines.push('<section class="wx-pi' + (spaceAfter ? ' wx-gap' : '') + '">' +
           '<img src="' + src + '"' + gifAttr + rpol + ' style="width: ' + e.w + '; display: block; margin: 0 auto;" /></section>');
         break;
       }
       case 'cap':
-        lines.push(secCenter(leafWrap(textSpan(esc(e.text), { fontSize: '12px', color: 'rgb(136, 136, 136)' })), spaceAfter));
+        lines.push(secCenter(leafWrap('<span textstyle="" class="wx-tc">' + esc(e.text) + '</span>'), spaceAfter));
         break;
       case 'txt':
         lines.push(sec(renderRuns(e.runs), spaceAfter));
         break;
       case 'refH':
-        lines.push(sec(leafWrap(textSpan('参考来源：', { color: 'rgb(136, 136, 136)' })), false));
+        lines.push(sec(leafWrap('<span textstyle="" class="wx-tr">参考来源：</span>'), false));
         break;
       case 'ref':
-        lines.push(sec(renderRuns(e.runs, { color: 'rgb(136, 136, 136)' }), spaceAfter));
+        lines.push(sec(renderRuns(e.runs, { textCls: 'wx-tr' }), spaceAfter));
+        break;
+      case 'bq':
+        lines.push('<section class="wx-bq' + (spaceAfter ? ' wx-gap' : '') + '">' +
+          renderRuns(e.runs, { textCls: 'wx-tr' }) + '</section>');
         break;
     }
   }
@@ -203,7 +205,7 @@ export default {
     return { lines: render(elems, author), imgN, headingN: elems.filter(e => e.k === 'h').length };
   },
   async processMd(text) {
-    const { elems, author, imgN } = await classifyMd(text);
-    return { lines: render(elems, author), imgN, headingN: elems.filter(e => e.k === 'h').length };
+    const { elems, author, title, imgN } = await classifyMd(text);
+    return { lines: render(elems, author), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 };

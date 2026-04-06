@@ -1,5 +1,5 @@
 // Shared WeChat formatting engine — UI coordination layer
-// Delegates: parsing → parser.js, upload → uploader.js, copy → clipboard.js
+// Delegates: parsing → parser.js, upload → uploader.js, copy → clipboard.js, CSS → css-inline.js
 const assetQuery = new URL(import.meta.url).search;
 
 // Re-export parser utilities for templates
@@ -9,10 +9,14 @@ export { esc, escAttr, parseMdRuns, parseMdFrontmatter, parseDocx, extractParagr
 import { parseDocx } from './parser.js';
 import { uploadNonCdnImages, retryFailedImages } from './uploader.js';
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
+import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
 
 const imageUtilsModule = await import('./image-utils.mjs' + assetQuery);
 const { inferWechatImageType, looksLikeGifSource } = imageUtilsModule;
 export { inferWechatImageType, looksLikeGifSource };
+
+// Pre-load theme CSS
+const _themeCSSReady = loadThemeCSS();
 
 // ---- Footer ----
 const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
@@ -62,7 +66,7 @@ export function initApp(template) {
       item.addEventListener('click', () => {
         if (_batchResults[i]) {
           const r = _batchResults[i];
-          showPreview(f.name.replace(/\.\w+$/i, ''), r.articleHtml, r.footerHtml, r.stats);
+          showPreview(r.title || f.name.replace(/\.\w+$/i, ''), r.articleHtml, r.footerHtml, r.stats);
         }
       });
       batchList.appendChild(item);
@@ -97,10 +101,9 @@ export function initApp(template) {
         updateBatchStatus(i, '✗ 失败', 'failed');
       }
     }
-    // Auto-show first result
     if (_batchResults[0]) {
       const r = _batchResults[0];
-      showPreview(valid[0].name.replace(/\.\w+$/i, ''), r.articleHtml, r.footerHtml, r.stats);
+      showPreview(r.title || valid[0].name.replace(/\.\w+$/i, ''), r.articleHtml, r.footerHtml, r.stats);
     }
   }
 
@@ -121,7 +124,7 @@ export function initApp(template) {
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
     const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
       ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
-    return { articleHtml, footerHtml, stats };
+    return { articleHtml, footerHtml, stats, title: result.title };
   }
 
   dropZone.addEventListener('click', () => fileInput.click());
@@ -166,7 +169,8 @@ export function initApp(template) {
 
       progressFill.style.width = '100%';
       progressText.textContent = '排版完成!';
-      setTimeout(() => showPreview(file.name.replace(/\.\w+$/i, ''), articleHtml, footerHtml, stats), 200);
+      const displayTitle = result.title || file.name.replace(/\.\w+$/i, '');
+      setTimeout(() => showPreview(displayTitle, articleHtml, footerHtml, stats), 200);
     } catch (err) {
       logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
@@ -176,8 +180,8 @@ export function initApp(template) {
   }
 
   // Dual-layer rendering:
-  //   Display layer (_articleHtml) — original URLs for browser preview
-  //   Copy layer (_articleCopy)   — ALL images re-uploaded to WeChat CDN for paste
+  //   Display layer (_articleHtml) — CSS classes, rendered by browser via <link> to wx-theme.css
+  //   Copy layer (_articleCopy)   — classes inlined to style="" via css-inline.js, images on CDN
   let _articleHtml = '';
   let _articleCopy = '';
   let _footerHtml = '';
@@ -186,7 +190,6 @@ export function initApp(template) {
   let _uploadDone = false;
   let _failedSrcs = [];
 
-  // Mark failed images with red border in preview
   function markFailedImages(failedSrcs) {
     if (!failedSrcs.length) return;
     const imgs = document.getElementById('contentArea').querySelectorAll('img');
@@ -216,10 +219,12 @@ export function initApp(template) {
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
 
-    document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + _footerHtml;
+    // Apply theme CSS variables to contentArea for preview
+    const contentArea = document.getElementById('contentArea');
+    if (window._activeConfig) applyThemeVars(contentArea, window._activeConfig.config);
+    contentArea.innerHTML = _articleHtml + '\n' + _footerHtml;
     document.getElementById('statsBar').textContent = stats;
 
-    // Hide retry button initially
     const retryBtn = document.getElementById('retryBtn');
     if (retryBtn) retryBtn.style.display = 'none';
 
@@ -229,7 +234,7 @@ export function initApp(template) {
         _footerCopy = newHtml;
       }
       const enabled = document.getElementById('footerEnabled').checked;
-      document.getElementById('contentArea').innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
       markFailedImages(_failedSrcs);
     };
 
@@ -258,7 +263,6 @@ export function initApp(template) {
     });
   }
 
-  // Retry failed image uploads
   window.retryUpload = async function() {
     if (!_failedSrcs.length) return;
     const retryBtn = document.getElementById('retryBtn');
@@ -298,7 +302,7 @@ export function initApp(template) {
   }
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
 
-  // ---- Copy ----
+  // ---- Copy (with CSS inlining) ----
   let _lastCopiedHtml = '';
 
   window.copyContent = async function() {
@@ -311,7 +315,13 @@ export function initApp(template) {
     }
 
     const enabled = document.getElementById('footerEnabled').checked;
-    const html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
+    let html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
+
+    // Inline CSS classes → style attributes for WeChat compatibility
+    const config = (window._activeConfig && window._activeConfig.config) || {};
+    const themeCSS = await _themeCSSReady;
+    html = processForCopy(html, themeCSS, config);
+
     const plainText = content.textContent || '';
 
     let ok = false;
@@ -339,7 +349,6 @@ export function initApp(template) {
 
     btn.textContent = ok ? '\u2713 已复制' : '复制失败';
     btn.classList.add('copied');
-    // Stay green — don't auto-reset. goBack() resets the button.
   };
 
   window.getClipboardHtml = function() { return _lastCopiedHtml; };
@@ -355,10 +364,8 @@ export function initApp(template) {
     progress.style.display = 'none';
     progressFill.style.width = '0%';
     fileInput.value = '';
-    // Reset copy button state
     const copyBtn = document.getElementById('copyBtn');
-    if (copyBtn) { copyBtn.textContent = '复制正文'; copyBtn.classList.remove('copied'); }
-    // Reset zoom to default
+    if (copyBtn) { copyBtn.textContent = '复制到公众号'; copyBtn.classList.remove('copied'); }
     zoomIdx = ZOOM_STEPS.length - 1;
     document.getElementById('phoneFrame').style.maxWidth = (420 * ZOOM_STEPS[zoomIdx] / 100) + 'px';
     document.getElementById('zoomLabel').textContent = ZOOM_STEPS[zoomIdx] + '%';
@@ -370,5 +377,11 @@ export function initApp(template) {
     document.getElementById('phoneFrame').style.maxWidth = (420 * pct / 100) + 'px';
     document.getElementById('zoomLabel').textContent = pct + '%';
     if (window._positionTOC) window._positionTOC();
+  };
+
+  // ---- Real-time theme updates ----
+  window.updateThemePreview = function(config) {
+    const contentArea = document.getElementById('contentArea');
+    if (contentArea) applyThemeVars(contentArea, config);
   };
 }

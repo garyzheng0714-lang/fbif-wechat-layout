@@ -170,12 +170,14 @@ export function parseMdRuns(text) {
 }
 
 export function parseMdFrontmatter(text) {
-  let author = '', content = text;
+  let author = '', title = '', content = text;
   const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
   if (m) {
     content = m[2];
     const am = m[1].match(/author:\s*"?([^"\n]+)"?/);
     if (am) author = am[1].trim();
+    const tm = m[1].match(/^title:\s*"?([^"\n]+)"?/m);
+    if (tm) title = tm[1].trim().replace(/"$/, '');
   }
-  return { author, content };
+  return { author, title, content };
 }
