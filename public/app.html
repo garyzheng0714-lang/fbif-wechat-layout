@@ -34,11 +34,14 @@
       <input type="file" id="fileInput">
     </div>
 
-    <div class="divider-or"><span>或</span></div>
+    <button class="mode-link" id="showUrlMode" onclick="toggleInputMode()">或从公众号文章链接提取</button>
 
-    <div class="url-row">
-      <input type="url" id="urlInput" class="url-input" placeholder="粘贴微信公众号文章链接提取">
-      <button id="urlFetchBtn" class="url-btn" onclick="fetchArticle()">抓取</button>
+    <div class="url-mode" id="urlMode" style="display:none;">
+      <div class="url-row">
+        <input type="url" id="urlInput" class="url-input" placeholder="粘贴微信公众号文章链接">
+        <button id="urlFetchBtn" class="url-btn" onclick="fetchArticle()">提取</button>
+      </div>
+      <button class="mode-link" id="showUploadMode" onclick="toggleInputMode()">返回上传文件</button>
     </div>
 
     <div class="progress" id="progress">
@@ -356,6 +359,18 @@ function wrapEngineFunctions() {
 window._buildTOC = function() {};
 window._positionTOC = function() {};
 
+// ---- Input mode toggle: upload ↔ URL ----
+window.toggleInputMode = function() {
+  const dropZone = document.getElementById('dropZone');
+  const urlMode = document.getElementById('urlMode');
+  const showUrlBtn = document.getElementById('showUrlMode');
+  const isUpload = dropZone.style.display !== 'none';
+  dropZone.style.display = isUpload ? 'none' : '';
+  showUrlBtn.style.display = isUpload ? 'none' : '';
+  urlMode.style.display = isUpload ? '' : 'none';
+  if (!isUpload) document.getElementById('urlInput').value = '';
+};
+
 // ---- URL repost ----
 window.fetchArticle = async function() {
   const urlInput = document.getElementById('urlInput');
@@ -390,6 +405,10 @@ document.addEventListener('paste', (e) => {
   const text = (e.clipboardData || window.clipboardData).getData('text').trim();
   if (text && /^https?:\/\//i.test(text)) {
     e.preventDefault();
+    // Switch to URL mode if not already
+    if (document.getElementById('urlMode').style.display === 'none') {
+      window.toggleInputMode();
+    }
     document.getElementById('urlInput').value = text;
     window.fetchArticle();
   }

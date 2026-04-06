@@ -72,14 +72,15 @@ h1 {
 .upload-hint { font-size: 14px; color: #808080; font-weight: 400; }
 input[type="file"] { display: none; }
 
-/* Divider */
-.divider-or {
-  display: flex; align-items: center; gap: 16px;
-  margin: 16px 0; color: #808080; font-size: 12px; font-weight: 400;
+/* Mode toggle link */
+.mode-link {
+  display: inline-block; margin-top: 16px;
+  background: none; border: none; color: #666666; cursor: pointer;
+  font-size: 14px; font-weight: 400; font-family: inherit;
+  transition: color 150ms ease;
 }
-.divider-or::before, .divider-or::after {
-  content: ''; flex: 1; height: 1px; background: #ebebeb;
-}
+.mode-link:hover { color: #171717; }
+.url-mode { margin-top: 16px; }
 
 /* URL row */
 .url-row { display: flex; gap: 8px; }
