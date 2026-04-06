@@ -1,78 +1,70 @@
-# Design System — Vercel-inspired + WeChat Replica
+# Design System — Notion-inspired + WeChat Replica
 
 ## Visual Identity
-- **Style**: Vercel — monochrome, shadow-as-border, compressed typography
-- **Font**: Geist Sans (headings/UI) + Geist Mono (stats/code labels)
-- **OpenType**: `"liga"` enabled globally, `"tnum"` for numeric labels
+- **Style**: Notion — warm neutrals, whisper borders, approachable minimalism
+- **Font**: Inter (400/500/600/700) + SF Mono (monospace labels)
+- **Tone**: Warm, tactile, analog-feeling — not cold or sterile
 
 ## Color Palette
 
 | Role | Value | Usage |
 |------|-------|-------|
-| Primary Text | `#171717` | Headings, body text, dark buttons |
-| Secondary Text | `#666666` | Descriptions, labels |
-| Muted Text | `#808080` | Placeholders, disabled |
+| Primary Text | `rgba(0,0,0,0.95)` | Headings, body — not pure black |
+| Secondary Text | `#615d59` | Descriptions, labels |
+| Muted Text | `#a39e98` | Placeholders, disabled, captions |
 | Background | `#ffffff` | Page, cards, surfaces |
-| Surface Tint | `#fafafa` | Hover states, subtle backgrounds |
-| Border (shadow) | `rgba(0,0,0,0.08)` | Shadow-as-border on all elements |
-| Focus Ring | `hsla(212, 100%, 48%, 1)` | Focus state on inputs/buttons |
-| Error | `#ff5b4f` | Error text, failed states |
-| Divider | `#ebebeb` | Horizontal rules, separators |
+| Warm White | `#f6f5f4` | Alt background, section alternation |
+| Border | `rgba(0,0,0,0.1)` | Whisper border — 1px solid throughout |
+| Accent Blue | `#0075de` | CTA buttons, links, focus, toggle on |
+| Active Blue | `#005bab` | Button hover/pressed |
+| Success | `#1aae39` | Confirmation, done states |
+| Warning | `#dd5b00` | Errors, attention |
+| Badge Bg | `#f2f9ff` | Pill badge tinted blue surface |
+| Badge Text | `#097fe8` | Pill badge text |
 
 ## Typography
 
 | Role | Size | Weight | Letter Spacing |
 |------|------|--------|---------------|
-| Page Title | 40px | 600 | -2.4px |
-| Section Heading | 32px | 600 | -1.28px |
-| Card Title | 24px | 600 | -0.96px |
 | Body | 16px | 400 | normal |
-| UI Label | 14px | 500 | normal |
-| Caption / Stats | 12-13px | 500 | normal |
-| Mono Label | 12px | 500 | uppercase, Geist Mono |
+| UI Label | 14-15px | 500-600 | normal |
+| Caption | 12px | 600 | 0.125px |
+| Sidebar Label | 12px | 600 | 0.125px (warm gray) |
 
-## Shadow System (NO traditional CSS borders)
+## Border & Shadow
 
-| Level | Shadow | Usage |
-|-------|--------|-------|
-| Ring | `rgba(0,0,0,0.08) 0px 0px 0px 1px` | Default border for cards, inputs, buttons |
-| Ring Hover | `rgba(0,0,0,0.15) 0px 0px 0px 1px` | Hover state |
-| Subtle Card | Ring + `rgba(0,0,0,0.04) 0px 2px 2px` | Cards with minimal lift |
-| Full Card | Ring + Subtle + `rgba(0,0,0,0.06) 0px 8px 16px -4px` | Panels, dropdowns |
-| Focus | `hsla(212, 100%, 48%, 1) 0px 0px 0px 2px` | Keyboard/mouse focus |
-| Bottom Border | `rgba(0,0,0,0.08) 0px 1px 0px 0px` | Toolbar bottom, list items |
+- **Whisper Border**: `1px solid rgba(0,0,0,0.1)` — used everywhere
+- **Card Shadow**: `rgba(0,0,0,0.04) 0px 4px 18px, rgba(0,0,0,0.02) 0px 0.8px 2.925px, rgba(0,0,0,0.01) 0px 0.175px 1.04px`
+- **Focus Ring**: `0 0 0 2px rgba(0,117,222,0.15)` + blue border
+- **Border Radius**: 4px (buttons/inputs), 8px (cards), 9999px (badges)
 
 ## Component Rules
 
-- **Buttons**: 6px radius, padding 8px 16px, weight 500
-  - Primary: `#171717` bg, white text
-  - Secondary: white bg, shadow-border ring
-  - Pill/Badge: 9999px radius (tags only, NOT action buttons)
-- **Cards**: 8px radius, shadow-ring border, white bg
-- **Inputs**: 6px radius, shadow-ring border, focus = blue ring
-- **Toggle**: 36x20px, #ebebeb off → #171717 on
-- **Border Radius Scale**: 6px (buttons/inputs), 8px (cards), 9999px (badges)
+- **Buttons**: 4px radius, 8px 16px padding
+  - Primary: `#0075de` bg, white text, hover `#005bab`
+  - Secondary: `rgba(0,0,0,0.05)` bg, near-black text
+  - Active: `scale(0.95)` transform
+- **Cards**: 8-12px radius, whisper border, multi-layer shadow
+- **Inputs**: 4px radius, `1px solid #dddddd`, focus = blue ring
+- **Toggle**: 36x20px, `rgba(0,0,0,0.1)` off → `#0075de` on
 
 ## Do / Don't
-- DO use shadow-as-border instead of CSS `border`
-- DO use negative letter-spacing on headings (-2.4px at 40px, -1.28px at 32px)
-- DO use 3 weights only: 400 (body), 500 (UI), 600 (headings)
-- DON'T use backdrop-filter blur
-- DON'T use traditional CSS borders on cards
-- DON'T use warm colors (orange, yellow, green) in UI chrome
-- DON'T use weight 700 on body text
+- DO use warm neutrals with yellow-brown undertones
+- DO use `rgba(0,0,0,0.95)` for text, not pure `#000`
+- DO use whisper borders `1px solid rgba(0,0,0,0.1)`
+- DO use `#f6f5f4` for alternate section backgrounds
+- DON'T use cold blue-grays
+- DON'T use heavy borders or shadows (keep opacity < 0.05)
+- DON'T use bright colors except `#0075de` for CTAs
 
 ---
 
 ## WeChat Preview Area (unchanged)
-
-The article preview area replicates WeChat's actual appearance:
-- **Background**: Pure white `#FFFFFF` (全白，不要灰色)
-- **Title**: 27px, weight 700, color #222, 左对齐, PingFang SC font
+- **Background**: Pure white `#FFFFFF`
+- **Title**: 27px, weight 700, color #222, PingFang SC
 - **Meta**: "FBIF食品饮料创新" (#576b95) + date (#b2b2b2)
-- **Footer**: fixed bottom, white bg, centered 0.5px divider (#E5E5E5), icon color #7F7F7F
+- **Footer**: sticky bottom, white bg, centered 0.5px divider (#E5E5E5)
 - **Content width**: max-width 680px centered
-- **No phone-frame border**
 
 ## Critical Rules (from user)
 1. 预览页背景必须全白
@@ -85,11 +77,3 @@ The article preview area replicates WeChat's actual appearance:
 8. 复制后自动打开微信后台
 9. 表单只填数字
 10. 不要 phone-frame 边框
-
-## Decisions Log
-| Date | Decision | Rationale |
-|------|----------|-----------|
-| 2026-04-05 | 设置改为 localStorage | 用户要求：不走 API，前端直接编辑 |
-| 2026-04-06 | 恢复模板切换 | 用户允许：FBIF/Mote 双模板 pill 按钮切换 |
-| 2026-04-07 | Vercel 设计系统 | 用户要求：UI 外壳用 Vercel 风格，文章排版不变 |
-| 2026-04-07 | CSS 架构升级 | 借鉴 doocs/md：CSS 变量 + 类 → 复制时内联 |
