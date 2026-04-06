@@ -12,7 +12,8 @@ body {
 
 /* ======== Upload View ======== */
 #uploadView {
-  display: flex; align-items: center; justify-content: center; min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; min-height: 100dvh;
 }
 .container {
   max-width: 480px; width: 100%; margin: 0 auto; padding: 0 32px; text-align: center;
