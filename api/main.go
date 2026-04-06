@@ -503,17 +503,26 @@ func fetchWithXReader(url string) (content, title string, err error) {
 	}
 
 	output := stdout.String()
-	// Extract title from first # heading
-	lines := strings.SplitN(output, "\n", 3)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "# ") {
-			title = strings.TrimPrefix(line, "# ")
-			break
+	// Extract title from first # heading and strip x-reader metadata lines
+	var cleaned []string
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if title == "" && strings.HasPrefix(trimmed, "# ") {
+			title = strings.TrimPrefix(trimmed, "# ")
 		}
+		// Skip x-reader metadata lines (Author: xxx, Published: xxx, Source: xxx)
+		if strings.HasPrefix(trimmed, "Author:") || strings.HasPrefix(trimmed, "Published:") ||
+			strings.HasPrefix(trimmed, "Source:") {
+			continue
+		}
+		// Skip combined metadata like "Author: xxx | Published: xxx"
+		if strings.Contains(trimmed, "Author:") && strings.Contains(trimmed, "Published:") {
+			continue
+		}
+		cleaned = append(cleaned, line)
 	}
 
-	return output, title, nil
+	return strings.Join(cleaned, "\n"), title, nil
 }
 
 func fetchDirect(url string) (content, title string, err error) {
