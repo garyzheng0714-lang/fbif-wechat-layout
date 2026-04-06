@@ -72,15 +72,28 @@ h1 {
 .upload-hint { font-size: 14px; color: #808080; font-weight: 400; }
 input[type="file"] { display: none; }
 
-/* Mode toggle link */
-.mode-link {
-  display: inline-block; margin-top: 16px;
-  background: none; border: none; color: #666666; cursor: pointer;
-  font-size: 14px; font-weight: 400; font-family: inherit;
-  transition: color 150ms ease;
+/* Inline URL row — lightweight, always visible */
+.url-row-inline {
+  display: flex; gap: 6px; margin-top: 16px; align-items: center;
 }
-.mode-link:hover { color: #171717; }
-.url-mode { margin-top: 16px; }
+.url-input-inline {
+  flex: 1; padding: 8px 10px; border: none;
+  box-shadow: rgba(0,0,0,0.06) 0px 0px 0px 1px;
+  border-radius: 6px; font-size: 13px; font-family: inherit;
+  color: #171717; background: #ffffff; transition: all 150ms ease;
+}
+.url-input-inline:focus {
+  outline: none; box-shadow: hsla(212, 100%, 48%, 1) 0px 0px 0px 2px;
+}
+.url-input-inline::placeholder { color: #b0b0b0; }
+.url-btn-inline {
+  padding: 8px 14px; background: #ffffff; color: #666666; border: none;
+  box-shadow: rgba(0,0,0,0.06) 0px 0px 0px 1px;
+  border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+  font-family: inherit; transition: all 150ms ease; white-space: nowrap;
+}
+.url-btn-inline:hover { color: #171717; box-shadow: rgba(0,0,0,0.12) 0px 0px 0px 1px; }
+.url-btn-inline:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* URL row */
 .url-row { display: flex; gap: 8px; }
