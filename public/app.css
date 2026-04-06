@@ -19,6 +19,7 @@ body {
 }
 .sidebar-header {
   height: 48px; padding: 0 20px; flex-shrink: 0;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
   display: flex; align-items: center; gap: 8px;
 }
 .sidebar-logo-img { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; }
