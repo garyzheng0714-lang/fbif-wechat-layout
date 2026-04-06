@@ -115,6 +115,9 @@ async function classifyMd(text) {
   for (let i = 0; i < rawParas.length && !stopped; i++) {
     const para = rawParas[i].replace(/\s+$/gm, '');
     if (/^#\s/.test(para)) continue;
+    // Skip x-reader metadata lines
+    if (/^Author:\s|^Published:\s|^Source:\s/i.test(para)) continue;
+    if (/Author:.*\|.*Published:/i.test(para)) continue;
     if (/^>\s/.test(para)) {
       const bqText = para.split('\n').map(l => l.replace(/^>\s*/, '')).join(' ').trim();
       if (bqText) elems.push({ k: 'bq', runs: parseMdRuns(bqText) });

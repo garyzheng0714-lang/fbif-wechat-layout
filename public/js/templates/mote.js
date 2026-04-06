@@ -148,6 +148,9 @@ function classifyMd(text) {
   for (const para of rawParas) {
     if (/^#\s/.test(para)) continue;
     if (/^>\s/.test(para)) continue;
+    // Skip x-reader metadata lines
+    if (/^Author:\s|^Published:\s|^Source:\s/i.test(para)) continue;
+    if (/Author:.*\|.*Published:/i.test(para)) continue;
     if (/^\*\s+\*\s+\*/.test(para.trim())) break;
     if (/^[-*_\s]{3,}$/.test(para.replace(/\s/g, ''))) continue;
 
