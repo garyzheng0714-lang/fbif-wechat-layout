@@ -15,201 +15,174 @@
 </head>
 <body>
 
-<!-- Upload View -->
-<div id="uploadView">
-  <div class="container">
-    <h1>FBIF 微信排版工具</h1>
-    <p class="subtitle" id="pageSubtitle"></p>
-    <span id="pageTitle" style="display:none;"></span>
-
-    <div class="template-pills" id="templatePills">
-      <button class="template-pill active" data-template="fbif">FBIF 公众号</button>
-      <button class="template-pill" data-template="mote">Mote 排版</button>
+<div class="app-layout">
+  <!-- ======== Sidebar ======== -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-logo">FBIF</span>
+      <span class="sidebar-title">微信排版工具</span>
     </div>
+    <div class="sidebar-body">
+      <!-- Hidden compat for engine.js -->
+      <span id="pageTitle" style="display:none;"></span>
+      <span id="pageSubtitle" style="display:none;"></span>
 
-    <div class="upload-zone" id="dropZone">
-      <div class="upload-icon"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
-      <div class="upload-text">点击或拖拽文件到这里</div>
-      <div class="upload-hint" id="fileHint">支持 .docx、.md、.txt 格式</div>
-      <input type="file" id="fileInput">
-    </div>
+      <div class="template-pills" id="templatePills">
+        <button class="template-pill active" data-template="fbif">FBIF 公众号</button>
+        <button class="template-pill" data-template="mote">Mote 排版</button>
+      </div>
 
-    <div class="url-row-inline">
-      <input type="url" id="urlInput" class="url-input-inline" placeholder="公众号文章链接">
-      <button id="urlFetchBtn" class="url-btn-inline" onclick="fetchArticle()">提取</button>
-    </div>
+      <div class="upload-zone" id="dropZone">
+        <div class="upload-icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+        <div class="upload-text">点击或拖拽文件</div>
+        <div class="upload-hint" id="fileHint">支持 .docx、.md、.txt</div>
+        <input type="file" id="fileInput">
+      </div>
 
-    <div class="progress" id="progress">
-      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-      <div class="progress-text" id="progressText">正在排版...</div>
-    </div>
-    <div class="error" id="error"></div>
-    <div class="batch-list" id="batchList" style="display:none;"></div>
-  </div>
-</div>
+      <div class="url-row-inline">
+        <input type="url" id="urlInput" class="url-input-inline" placeholder="公众号文章链接">
+        <button id="urlFetchBtn" class="url-btn-inline" onclick="fetchArticle()">提取</button>
+      </div>
 
-<!-- Preview View -->
-<div id="previewView">
-  <!-- Toolbar: back + all action buttons -->
-  <div class="toolbar">
-    <div class="toolbar-left">
-      <button class="tb-back" id="backBtn" title="Esc">← 返回</button>
+      <div class="progress" id="progress">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-text" id="progressText">正在排版...</div>
+      </div>
+      <div class="error" id="error"></div>
+      <div class="batch-list" id="batchList" style="display:none;"></div>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-label">排版设置</div>
+
+      <div class="settings-form" id="settingsForm">
+        <div class="form-row">
+          <label>正文字号</label>
+          <input type="number" id="cfg-font_size" value="15" min="12" max="24" step="1">
+        </div>
+        <div class="form-row">
+          <label>标题字号</label>
+          <input type="number" id="cfg-heading_size" value="18" min="14" max="32" step="1">
+        </div>
+        <div class="form-row">
+          <label>行高</label>
+          <input type="number" id="cfg-line_height" value="1.75" min="1" max="3" step="0.05">
+        </div>
+        <div class="form-row">
+          <label>字间距</label>
+          <input type="number" id="cfg-letter_spacing" value="0.034" min="0" max="0.2" step="0.002">
+        </div>
+        <div class="form-row">
+          <label>正文颜色</label>
+          <div class="color-field">
+            <input type="color" id="cfg-text_color_picker" value="#544545">
+            <span class="color-hex" id="cfg-text_color_hex">#544545</span>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>链接颜色</label>
+          <div class="color-field">
+            <input type="color" id="cfg-link_color_picker" value="#0070C0">
+            <span class="color-hex" id="cfg-link_color_hex">#0070C0</span>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>字体</label>
+          <input type="text" id="cfg-font_family" value="PingFang SC" class="font-input">
+        </div>
+        <div class="form-row">
+          <label>页脚</label>
+          <div class="toggle-switch on" id="footerToggleBtn"><div class="toggle-knob"></div></div>
+        </div>
+      </div>
     </div>
-    <div class="toolbar-center">
+  </aside>
+
+  <!-- ======== Preview Panel ======== -->
+  <main class="preview-panel">
+    <div class="preview-toolbar" id="previewToolbar">
       <span class="tb-stats" id="statsBar"></span>
-    </div>
-    <div class="toolbar-right">
+      <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
       <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制到公众号</button>
-      <button class="tb-icon" id="settingsBtn" onclick="toggleSettingsPanel()" title="设置"><svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M512 352c-88.4 0-160 71.6-160 160s71.6 160 160 160 160-71.6 160-160-71.6-160-160-160z m0 256c-53 0-96-43-96-96s43-96 96-96 96 43 96 96-43 96-96 96z" fill="#888"/><path d="M924.8 385.6l-89.6-15.2c-7.2-24-16.8-46.4-28.8-68l52-74.4c8-11.2 6.4-27.2-3.2-36.8l-90.4-90.4c-9.6-9.6-25.6-11.2-36.8-3.2l-74.4 52c-21.6-12-44-21.6-68-28.8l-15.2-89.6C568 17.6 556 8 542.4 8h-128c-13.6 0-25.6 9.6-28 23.2l-15.2 89.6c-24 7.2-46.4 16.8-68 28.8l-74.4-52c-11.2-8-27.2-6.4-36.8 3.2L102 191.2c-9.6 9.6-11.2 25.6-3.2 36.8l52 74.4c-12 21.6-21.6 44-28.8 68l-89.6 15.2C18.8 388 8 400 8 413.6v128c0 13.6 9.6 25.6 23.2 28l89.6 15.2c7.2 24 16.8 46.4 28.8 68l-52 74.4c-8 11.2-6.4 27.2 3.2 36.8l90.4 90.4c9.6 9.6 25.6 11.2 36.8 3.2l74.4-52c21.6 12 44 21.6 68 28.8l15.2 89.6c2.4 13.6 14.4 23.2 28 23.2h128c13.6 0 25.6-9.6 28-23.2l15.2-89.6c24-7.2 46.4-16.8 68-28.8l74.4 52c11.2 8 27.2 6.4 36.8-3.2l90.4-90.4c9.6-9.6 11.2-25.6 3.2-36.8l-52-74.4c12-21.6 21.6-44 28.8-68l89.6-15.2c13.6-2.4 23.2-14.4 23.2-28v-128c0-13.6-10.4-25.6-24-28zM884 536l-84 14.4c-10.4 1.6-18.4 8.8-21.6 18.4-8 24-19.2 46.4-33.6 67.2-5.6 8-6.4 19.2-1.6 28l48.8 69.6-60 60-69.6-48.8c-8.8-6.4-20-5.6-28 1.6-20.8 14.4-43.2 25.6-67.2 33.6-9.6 3.2-16.8 11.2-18.4 21.6L534.4 886h-84l-14.4-84c-1.6-10.4-8.8-18.4-18.4-21.6-24-8-46.4-19.2-67.2-33.6-8-5.6-19.2-6.4-28-1.6l-69.6 48.8-60-60 48.8-69.6c6.4-8.8 5.6-20-1.6-28-14.4-20.8-25.6-43.2-33.6-67.2-3.2-9.6-11.2-16.8-21.6-18.4L100 536v-84l84-14.4c10.4-1.6 18.4-8.8 21.6-18.4 8-24 19.2-46.4 33.6-67.2 5.6-8 6.4-19.2 1.6-28l-48.8-69.6 60-60 69.6 48.8c8.8 6.4 20 5.6 28-1.6 20.8-14.4 43.2-25.6 67.2-33.6 9.6-3.2 16.8-11.2 18.4-21.6L450.4 102h84l14.4 84c1.6 10.4 8.8 18.4 18.4 21.6 24 8 46.4 19.2 67.2 33.6 8 5.6 19.2 6.4 28 1.6l69.6-48.8 60 60-48.8 69.6c-6.4 8.8-5.6 20 1.6 28 14.4 20.8 25.6 43.2 33.6 67.2 3.2 9.6 11.2 16.8 21.6 18.4l84 14.4v84z" fill="#888"/></svg></button>
     </div>
-    <!-- Hidden compat for engine.js -->
-    <button id="retryBtn" style="display:none;"></button>
-  </div>
 
-  <!-- Hidden compat elements -->
-  <input type="hidden" id="titleInput" value="">
-  <span id="previewTitleDisplay" style="display:none;"></span>
-  <input type="checkbox" id="footerEnabled" checked style="display:none;">
-  <span id="zoomLabel" style="display:none;">200%</span>
+    <div class="preview-scroll" id="previewScroll">
+      <!-- Empty state -->
+      <div class="empty-state" id="emptyState">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        <p>上传文件开始预览</p>
+      </div>
 
-  <!-- Settings dropdown panel -->
-  <div class="dropdown-panel settings-panel" id="settingsPanel">
-    <div class="panel-header">排版设置<button class="panel-close" onclick="toggleSettingsPanel()">×</button></div>
-    <div class="settings-form" id="settingsForm">
-      <div class="form-row">
-        <label>正文字号</label>
-        <input type="number" id="cfg-font_size" value="15" min="12" max="24" step="1">
-      </div>
-      <div class="form-row">
-        <label>标题字号</label>
-        <input type="number" id="cfg-heading_size" value="18" min="14" max="32" step="1">
-      </div>
-      <div class="form-row">
-        <label>行高</label>
-        <input type="number" id="cfg-line_height" value="1.75" min="1" max="3" step="0.05">
-      </div>
-      <div class="form-row">
-        <label>字间距</label>
-        <input type="number" id="cfg-letter_spacing" value="0.034" min="0" max="0.2" step="0.002">
-      </div>
-      <div class="form-row">
-        <label>正文颜色</label>
-        <div class="color-field">
-          <input type="color" id="cfg-text_color_picker" value="#544545">
-          <span class="color-hex" id="cfg-text_color_hex">#544545</span>
+      <!-- Preview content -->
+      <div class="preview-content" id="previewContent" style="display:none;">
+        <div class="wx-header">
+          <h2 class="wx-title" id="articleTitle"></h2>
+          <div class="wx-meta">
+            <span class="wx-meta-account">FBIF食品饮料创新</span>
+            <span class="wx-meta-gray" id="wxDate"></span>
+            <span class="wx-meta-gray">上海</span>
+          </div>
         </div>
-      </div>
-      <div class="form-row">
-        <label>链接颜色</label>
-        <div class="color-field">
-          <input type="color" id="cfg-link_color_picker" value="#0070C0">
-          <span class="color-hex" id="cfg-link_color_hex">#0070C0</span>
+        <div class="phone-frame" id="phoneFrame">
+          <div id="contentArea"></div>
         </div>
+        <div class="copy-success" id="copySuccess">已复制到剪贴板，正在打开微信后台...</div>
       </div>
-      <div class="form-row">
-        <label>字体</label>
-        <input type="text" id="cfg-font_family" value="PingFang SC" class="font-input">
-      </div>
-      <div class="form-row">
-        <label>页脚</label>
-        <div class="toggle-switch on" id="footerToggleBtn"><div class="toggle-knob"></div></div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Overlay for closing panels -->
-  <div class="panel-overlay" id="panelOverlay" onclick="closeAllPanels()"></div>
-
-  <!-- Main content: WeChat article replica -->
-  <div class="preview-content">
-    <!-- WeChat header: title + author line -->
-    <div class="wx-header">
-      <h2 class="wx-title" id="articleTitle"></h2>
-      <div class="wx-meta">
-        <span class="wx-meta-account">FBIF食品饮料创新</span>
-        <span class="wx-meta-gray" id="wxDate"></span>
-        <span class="wx-meta-gray">上海</span>
-      </div>
-    </div>
-
-    <!-- Article body -->
-    <div class="phone-frame" id="phoneFrame">
-      <div id="contentArea"></div>
-    </div>
-
-    <!-- WeChat footer: fixed bottom bar -->
-    <div class="wx-footer">
-      <div class="wx-footer-inner">
-        <div class="wx-footer-left">
-          <img class="wx-avatar" src="/fbif-avatar.webp" alt="FBIF">
-          <span class="wx-footer-name">FBIF食品饮料创新</span>
-          <svg class="wx-verified" viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="7" fill="#576b95"/><path d="M5 8.2l2.2 2.2L11.5 6" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-        <div class="wx-footer-actions">
-          <span class="wx-action">
-            <svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M832 364.8h-147.2s19.2-64 32-179.2c6.4-57.6-38.4-115.2-102.4-121.6h-12.8c-51.2 0-83.2 32-102.4 76.8l-38.4 96c-32 64-57.6 102.4-76.8 115.2-25.6 12.8-121.6 12.8-128 12.8H128c-38.4 0-64 25.6-64 57.6v480c0 32 25.6 57.6 64 57.6h646.4c96 0 121.6-64 134.4-153.6l51.2-307.2c6.4-70.4-6.4-134.4-128-134.4z m-576 537.6H128V422.4h128v480z m640-409.6l-51.2 307.2c-12.8 57.6-12.8 102.4-76.8 102.4H320V422.4c44.8 0 70.4-6.4 89.6-19.2 32-12.8 64-64 108.8-147.2 25.6-64 38.4-96 44.8-102.4 6.4-19.2 19.2-32 44.8-32h6.4c32 0 44.8 32 44.8 51.2-12.8 102.4-32 166.4-32 166.4l-25.6 83.2h243.2c19.2 0 32 0 44.8 12.8 12.8 12.8 6.4 38.4 6.4 57.6z" fill="#7F7F7F"/></svg>
-            <span class="wx-count">59</span>
-          </span>
-          <span class="wx-action">
-            <svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M922.026667 439.04l-267.221334-282.368v185.258667h-85.333333c-250.325333 0-455.253333 181.504-481.322667 413.44 115.157333-133.674667 291.925333-218.922667 480.682667-218.922667h85.077333l0.554667 185.173333 267.52-282.581333z m-438.528 189.44C268.8 662.570667 87.04 821.76 47.232 1024A529.664 529.664 0 0 1 0 805.461333C0 502.272 254.976 256.597333 569.472 256.597333V40.96a35.242667 35.242667 0 0 1 10.368-30.208 39.68 39.68 0 0 1 54.4 0l378.794667 400.298667a35.413333 35.413333 0 0 1 10.88 27.861333 35.498667 35.498667 0 0 1-10.88 27.904l-376.704 398.08a37.973333 37.973333 0 0 1-56.448 2.133333 35.114667 35.114667 0 0 1-10.410667-30.208l-0.64-215.082666c-26.88 0-53.546667 2.005333-79.701333 5.845333l-5.632 0.853333z" fill="#7F7F7F"/></svg>
-            <span class="wx-count">117</span>
-          </span>
-          <span class="wx-action">
-            <svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M692.524005 125.502365c-67.141166 0-131.468241 23.717168-180.524516 65.896826-49.056276-42.179658-113.437585-65.896826-180.524516-65.896826-145.924487 0-264.61368 107.859543-264.61368 240.411465 0 236.403175 415.087786 516.232394 432.794054 528.036231 4.547573 3.032056 9.854439 4.547573 15.052834 4.547573 5.360078 0 10.721179-1.569752 15.268752-4.656043 17.435091-11.859096 427.161776-292.662503 427.161776-527.927761C957.137685 233.361909 838.449515 125.502365 692.524005 125.502365zM514.598686 838.123592c-74.18049-52.252061-393.320017-287.896966-393.320017-472.210785 0-102.553701 94.269014-186.048323 210.196303-186.048323 61.619406 0 120.205733 24.691355 160.707169 67.73673 10.288321 10.937097 29.348422 10.937097 39.634696 0 40.501436-43.045375 99.088786-67.73673 160.707169-67.73673 115.927289 0 210.196303 83.494623 210.196303 186.048323C902.720308 549.306674 588.021929 785.547143 514.598686 838.123592z" fill="#7F7F7F"/></svg>
-            <span class="wx-count">17</span>
-          </span>
-          <span class="wx-action">
-            <svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M337.36192 914.688c-3.5584 0-7.13728-0.75776-10.496-2.304-8.89856-4.096-14.61248-12.99968-14.61248-22.8096L312.25344 782.5408c0-13.29152-10.81344-24.09984-24.12544-24.09984l-122.88 0c-41.00096 0-74.35264-33.3568-74.35264-74.33216L90.89536 235.6992c0-40.9856 33.35168-74.33728 74.35264-74.33728l708.80768 0c40.97536 0 74.32704 33.35168 74.32704 74.33728l0 448.41472c0 40.97536-33.35168 74.33216-74.32704 74.33216l-336.19968 0c-5.76 0-11.35104 2.048-15.73888 5.8368l-168.41728 144.3584C349.06112 912.62464 343.24992 914.688 337.36192 914.688zM179.7888 222.72c-12.86656 0-23.31648 10.1632-23.31648 22.67136l0 421.5552c0 12.48768 10.44992 22.656 23.31648 22.656l118.72256 0c39.61344 0 71.83872 31.36 71.83872 69.87264l0 49.29536 122.7008-102.33856c13.05088-10.8544 29.63968-16.82944 46.7456-16.82944l324.82816 0c12.84096 0 23.28576-10.1632 23.28576-22.656L887.9104 245.39136c0-12.50304-10.4448-22.67136-23.28576-22.67136L179.7888 222.72z" fill="#7F7F7F"/></svg>
-            <span class="wx-count">13</span>
-          </span>
+      <!-- WeChat footer -->
+      <div class="wx-footer" id="wxFooter" style="display:none;">
+        <div class="wx-footer-inner">
+          <div class="wx-footer-left">
+            <img class="wx-avatar" src="/fbif-avatar.webp" alt="FBIF">
+            <span class="wx-footer-name">FBIF食品饮料创新</span>
+            <svg class="wx-verified" viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="7" fill="#576b95"/><path d="M5 8.2l2.2 2.2L11.5 6" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="wx-footer-actions">
+            <span class="wx-action"><svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M832 364.8h-147.2s19.2-64 32-179.2c6.4-57.6-38.4-115.2-102.4-121.6h-12.8c-51.2 0-83.2 32-102.4 76.8l-38.4 96c-32 64-57.6 102.4-76.8 115.2-25.6 12.8-121.6 12.8-128 12.8H128c-38.4 0-64 25.6-64 57.6v480c0 32 25.6 57.6 64 57.6h646.4c96 0 121.6-64 134.4-153.6l51.2-307.2c6.4-70.4-6.4-134.4-128-134.4z m-576 537.6H128V422.4h128v480z m640-409.6l-51.2 307.2c-12.8 57.6-12.8 102.4-76.8 102.4H320V422.4c44.8 0 70.4-6.4 89.6-19.2 32-12.8 64-64 108.8-147.2 25.6-64 38.4-96 44.8-102.4 6.4-19.2 19.2-32 44.8-32h6.4c32 0 44.8 32 44.8 51.2-12.8 102.4-32 166.4-32 166.4l-25.6 83.2h243.2c19.2 0 32 0 44.8 12.8 12.8 12.8 6.4 38.4 6.4 57.6z" fill="#7F7F7F"/></svg><span class="wx-count">59</span></span>
+            <span class="wx-action"><svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M922.026667 439.04l-267.221334-282.368v185.258667h-85.333333c-250.325333 0-455.253333 181.504-481.322667 413.44 115.157333-133.674667 291.925333-218.922667 480.682667-218.922667h85.077333l0.554667 185.173333 267.52-282.581333z m-438.528 189.44C268.8 662.570667 87.04 821.76 47.232 1024A529.664 529.664 0 0 1 0 805.461333C0 502.272 254.976 256.597333 569.472 256.597333V40.96a35.242667 35.242667 0 0 1 10.368-30.208 39.68 39.68 0 0 1 54.4 0l378.794667 400.298667a35.413333 35.413333 0 0 1 10.88 27.861333 35.498667 35.498667 0 0 1-10.88 27.904l-376.704 398.08a37.973333 37.973333 0 0 1-56.448 2.133333 35.114667 35.114667 0 0 1-10.410667-30.208l-0.64-215.082666c-26.88 0-53.546667 2.005333-79.701333 5.845333l-5.632 0.853333z" fill="#7F7F7F"/></svg><span class="wx-count">117</span></span>
+            <span class="wx-action"><svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M692.524005 125.502365c-67.141166 0-131.468241 23.717168-180.524516 65.896826-49.056276-42.179658-113.437585-65.896826-180.524516-65.896826-145.924487 0-264.61368 107.859543-264.61368 240.411465 0 236.403175 415.087786 516.232394 432.794054 528.036231 4.547573 3.032056 9.854439 4.547573 15.052834 4.547573 5.360078 0 10.721179-1.569752 15.268752-4.656043 17.435091-11.859096 427.161776-292.662503 427.161776-527.927761C957.137685 233.361909 838.449515 125.502365 692.524005 125.502365zM514.598686 838.123592c-74.18049-52.252061-393.320017-287.896966-393.320017-472.210785 0-102.553701 94.269014-186.048323 210.196303-186.048323 61.619406 0 120.205733 24.691355 160.707169 67.73673 10.288321 10.937097 29.348422 10.937097 39.634696 0 40.501436-43.045375 99.088786-67.73673 160.707169-67.73673 115.927289 0 210.196303 83.494623 210.196303 186.048323C902.720308 549.306674 588.021929 785.547143 514.598686 838.123592z" fill="#7F7F7F"/></svg><span class="wx-count">17</span></span>
+            <span class="wx-action"><svg viewBox="0 0 1024 1024" width="20" height="20"><path d="M337.36192 914.688c-3.5584 0-7.13728-0.75776-10.496-2.304-8.89856-4.096-14.61248-12.99968-14.61248-22.8096L312.25344 782.5408c0-13.29152-10.81344-24.09984-24.12544-24.09984l-122.88 0c-41.00096 0-74.35264-33.3568-74.35264-74.33216L90.89536 235.6992c0-40.9856 33.35168-74.33728 74.35264-74.33728l708.80768 0c40.97536 0 74.32704 33.35168 74.32704 74.33728l0 448.41472c0 40.97536-33.35168 74.33216-74.32704 74.33216l-336.19968 0c-5.76 0-11.35104 2.048-15.73888 5.8368l-168.41728 144.3584C349.06112 912.62464 343.24992 914.688 337.36192 914.688zM179.7888 222.72c-12.86656 0-23.31648 10.1632-23.31648 22.67136l0 421.5552c0 12.48768 10.44992 22.656 23.31648 22.656l118.72256 0c39.61344 0 71.83872 31.36 71.83872 69.87264l0 49.29536 122.7008-102.33856c13.05088-10.8544 29.63968-16.82944 46.7456-16.82944l324.82816 0c12.84096 0 23.28576-10.1632 23.28576-22.656L887.9104 245.39136c0-12.50304-10.4448-22.67136-23.28576-22.67136L179.7888 222.72z" fill="#7F7F7F"/></svg><span class="wx-count">13</span></span>
+          </div>
         </div>
       </div>
     </div>
-
-    <div class="copy-success" id="copySuccess">✓ 已复制到剪贴板，正在打开微信后台...</div>
-  </div>
+  </main>
 </div>
+
+<!-- Hidden compat elements for engine.js -->
+<input type="hidden" id="titleInput" value="">
+<span id="previewTitleDisplay" style="display:none;"></span>
+<input type="checkbox" id="footerEnabled" checked style="display:none;">
+<span id="zoomLabel" style="display:none;">200%</span>
 
 <script type="module">
 // ---- Version ----
 async function loadVersionInfo() {
-  try {
-    const r = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' });
-    if (r.ok) return await r.json();
-  } catch {}
+  try { const r = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' }); if (r.ok) return await r.json(); } catch {}
   return { build: 'runtime-' + Date.now() };
 }
 const versionInfo = await loadVersionInfo();
 const buildId = String(versionInfo.build || versionInfo.commit || Date.now());
 const assetVersion = encodeURIComponent(buildId);
 window.__APP_BUILD_INFO = versionInfo;
-
 if (!new URLSearchParams(location.search).get('v')) {
-  const next = new URL(location.href);
-  next.searchParams.set('v', buildId);
-  history.replaceState(null, '', next);
+  const next = new URL(location.href); next.searchParams.set('v', buildId); history.replaceState(null, '', next);
 }
-
-// Auto-refresh on version change
 async function reloadIfUpdated() {
-  try {
-    const latest = await loadVersionInfo();
-    if (String(latest.build || latest.commit || '') !== buildId) location.reload();
-  } catch {}
+  try { const latest = await loadVersionInfo(); if (String(latest.build || latest.commit || '') !== buildId) location.reload(); } catch {}
 }
 window.addEventListener('focus', reloadIfUpdated);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadIfUpdated(); });
 
-// ---- Log (console only) ----
+// ---- Log ----
 window._pushLog = function(level, msg, detail) {
-  console.log('[FBIF]', level === 'error' ? '❌' : '✅', msg, detail || '');
+  console.log('[FBIF]', level === 'error' ? '!' : '+', msg, detail || '');
 };
 
 // ---- Prefs ----
 function loadPref(k, fb) { try { const v = localStorage.getItem(k); return v !== null ? v : fb; } catch { return fb; } }
 function savePref(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
-// ---- Config: pure localStorage ----
+// ---- Config ----
 const DEFAULT_CFG = { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' };
 function loadConfig() { try { const r = localStorage.getItem('fbif_config'); if (r) return { ...DEFAULT_CFG, ...JSON.parse(r) }; } catch {} return { ...DEFAULT_CFG }; }
 function saveConfig(c) { try { localStorage.setItem('fbif_config', JSON.stringify(c)); } catch {} window._activeConfig = { config: c }; }
@@ -232,7 +205,6 @@ async function loadTemplate(templateId) {
   wrapEngineFunctions();
 }
 
-// Template pill click handlers
 document.querySelectorAll('.template-pill').forEach(btn => {
   btn.addEventListener('click', () => {
     const tid = btn.dataset.template;
@@ -244,25 +216,6 @@ await loadTemplate(currentTemplateId);
 
 document.getElementById('footerEnabled').checked = footerEnabledPref;
 updateFooterBtn();
-
-// ---- Toolbar: back ----
-document.getElementById('backBtn').addEventListener('click', () => {
-  window.goBack && window.goBack();
-  document.getElementById('copySuccess').style.display = 'none';
-  closeAllPanels();
-});
-
-// ---- Panel toggles ----
-window.toggleTocPanel = function() {};
-window.toggleSettingsPanel = function() {
-  const sp = document.getElementById('settingsPanel');
-  const open = sp.classList.toggle('open');
-  document.getElementById('panelOverlay').classList.toggle('open', open);
-};
-window.closeAllPanels = function() {
-  document.getElementById('settingsPanel').classList.remove('open');
-  document.getElementById('panelOverlay').classList.remove('open');
-};
 
 // ---- Footer toggle ----
 function updateFooterBtn() {
@@ -303,7 +256,6 @@ document.getElementById('settingsForm').addEventListener('input', (e) => {
   else if (id === 'cfg-text_color_picker') { c.text_color = e.target.value; document.getElementById('cfg-text_color_hex').textContent = e.target.value; }
   else if (id === 'cfg-link_color_picker') { c.link_color = e.target.value; document.getElementById('cfg-link_color_hex').textContent = e.target.value; }
   saveConfig(c);
-  // Real-time theme update via CSS variables
   if (window.updateThemePreview) window.updateThemePreview(c);
 });
 
@@ -316,7 +268,7 @@ Object.defineProperty(titleInput, 'value', {
   set(v) { _od.set.call(this, v); articleTitle.textContent = v; },
 });
 
-// ---- Set date in WeChat header ----
+// ---- Set date ----
 {
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
@@ -324,7 +276,7 @@ Object.defineProperty(titleInput, 'value', {
   document.getElementById('wxDate').textContent = y + '年' + m + '月' + d + '日 ' + h + ':' + mi;
 }
 
-// ---- Wrap engine functions (called after every loadTemplate) ----
+// ---- Wrap engine functions for split layout ----
 function wrapEngineFunctions() {
   if (window.copyContent) {
     const origCopy = window.copyContent;
@@ -333,10 +285,8 @@ function wrapEngineFunctions() {
       await origCopy();
       document.getElementById('copySuccess').style.display = 'block';
       setTimeout(() => { window.open('https://mp.weixin.qq.com', '_blank'); }, 400);
-      // Auto-reset after 10 seconds
       setTimeout(() => {
-        btn.textContent = '复制到公众号';
-        btn.classList.remove('copied');
+        btn.textContent = '复制到公众号'; btn.classList.remove('copied');
         document.getElementById('copySuccess').style.display = 'none';
       }, 10000);
     };
@@ -346,15 +296,12 @@ function wrapEngineFunctions() {
     window.goBack = function() {
       origGoBack();
       document.getElementById('copySuccess').style.display = 'none';
-      closeAllPanels();
     };
   }
 }
 
 window._buildTOC = function() {};
 window._positionTOC = function() {};
-
-
 
 // ---- URL repost ----
 window.fetchArticle = async function() {
@@ -364,7 +311,7 @@ window.fetchArticle = async function() {
   const url = (urlInput.value || '').trim();
   if (!url) return;
   errorEl.style.display = 'none';
-  btn.disabled = true; btn.textContent = '抓取中...';
+  btn.disabled = true; btn.textContent = '提取中...';
   try {
     const resp = await fetch('/api/fetch-article', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
     if (!resp.ok) { const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status })); throw new Error(err.error || '抓取失败'); }
@@ -374,19 +321,17 @@ window.fetchArticle = async function() {
     const fi = document.getElementById('fileInput');
     const dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files;
     fi.dispatchEvent(new Event('change'));
-  } catch (e) { errorEl.textContent = '转载失败: ' + e.message; errorEl.style.display = 'block'; }
-  finally { btn.disabled = false; btn.textContent = '抓取'; }
+  } catch (e) { errorEl.textContent = '提取失败: ' + e.message; errorEl.style.display = 'block'; }
+  finally { btn.disabled = false; btn.textContent = '提取'; }
 };
 
 // ---- Keyboard shortcuts ----
 document.addEventListener('keydown', (e) => {
-  const isPreview = document.getElementById('previewView').style.display === 'block';
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && isPreview) { e.preventDefault(); window.copyContent && window.copyContent(); }
-  if (e.key === 'Escape' && isPreview) { e.preventDefault(); window.goBack && window.goBack(); }
+  const hasPreview = document.getElementById('previewContent').style.display !== 'none';
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && hasPreview) { e.preventDefault(); window.copyContent && window.copyContent(); }
 });
 document.addEventListener('paste', (e) => {
-  const isUpload = document.getElementById('uploadView').style.display !== 'none';
-  if (!isUpload) return;
+  if (document.activeElement === document.getElementById('urlInput')) return;
   const text = (e.clipboardData || window.clipboardData).getData('text').trim();
   if (text && /^https?:\/\//i.test(text)) {
     e.preventDefault();

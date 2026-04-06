@@ -213,8 +213,13 @@ export function initApp(template) {
     _footerCopy = footerContent;
     _failedSrcs = [];
 
-    document.getElementById('uploadView').style.display = 'none';
-    document.getElementById('previewView').style.display = 'block';
+    // Split layout: show preview content, hide empty state
+    const emptyState = document.getElementById('emptyState');
+    const previewContent = document.getElementById('previewContent');
+    const wxFooter = document.getElementById('wxFooter');
+    if (emptyState) emptyState.style.display = 'none';
+    if (previewContent) previewContent.style.display = '';
+    if (wxFooter) wxFooter.style.display = '';
 
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
@@ -358,17 +363,21 @@ export function initApp(template) {
   let zoomIdx = ZOOM_STEPS.length - 1;
 
   window.goBack = function() {
-    document.getElementById('previewView').style.display = 'none';
-    document.getElementById('uploadView').style.display = 'block';
+    // Split layout: hide preview, show empty state
+    const emptyState = document.getElementById('emptyState');
+    const previewContent = document.getElementById('previewContent');
+    const wxFooter = document.getElementById('wxFooter');
+    if (emptyState) emptyState.style.display = '';
+    if (previewContent) previewContent.style.display = 'none';
+    if (wxFooter) wxFooter.style.display = 'none';
+
     dropZone.classList.remove('processing');
     progress.style.display = 'none';
     progressFill.style.width = '0%';
     fileInput.value = '';
     const copyBtn = document.getElementById('copyBtn');
     if (copyBtn) { copyBtn.textContent = '复制到公众号'; copyBtn.classList.remove('copied'); }
-    zoomIdx = ZOOM_STEPS.length - 1;
-    document.getElementById('phoneFrame').style.maxWidth = (420 * ZOOM_STEPS[zoomIdx] / 100) + 'px';
-    document.getElementById('zoomLabel').textContent = ZOOM_STEPS[zoomIdx] + '%';
+    document.getElementById('statsBar').textContent = '';
   };
 
   window.zoom = function(dir) {
