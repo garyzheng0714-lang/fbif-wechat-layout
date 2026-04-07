@@ -10,7 +10,7 @@ async function uploadOne(task) {
   const body = task.type === 'base64'
     ? JSON.stringify({ base64_images: { [task.key]: task.src } })
     : JSON.stringify({ urls: [task.src] });
-  const resp = await fetch('/api/wechat-upload', {
+  const resp = await fetch('/api/oss-upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
