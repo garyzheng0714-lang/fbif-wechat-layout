@@ -29,6 +29,13 @@ body {
   display: flex; flex-direction: column; gap: 12px;
 }
 .sidebar-divider { height: 1px; background: rgba(0,0,0,0.06); margin: 4px 0; }
+.sidebar-footer {
+  padding: 12px 20px; border-top: 1px solid rgba(0,0,0,0.06); flex-shrink: 0;
+}
+.mp-link {
+  font-size: 12px; color: #a39e98; text-decoration: none;
+}
+.mp-link:hover { color: #2383e2; }
 .sidebar-label {
   font-size: 12px; font-weight: 600; color: #a39e98;
   letter-spacing: 0.125px;

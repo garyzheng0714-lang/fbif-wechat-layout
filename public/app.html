@@ -97,13 +97,16 @@
         </div>
       </div>
     </div>
+    <div class="sidebar-footer">
+      <a href="https://mp.weixin.qq.com" target="_blank" class="mp-link">微信公众号后台 →</a>
+    </div>
   </aside>
 
   <!-- ======== Preview Panel ======== -->
   <main class="preview-panel">
     <div class="preview-toolbar" id="previewToolbar">
       <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
-      <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制到公众号</button>
+      <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制全文</button>
     </div>
 
     <div class="preview-scroll" id="previewScroll">
@@ -285,9 +288,9 @@ function wrapEngineFunctions() {
       const btn = document.getElementById('copyBtn');
       await origCopy();
       document.getElementById('copySuccess').style.display = 'block';
-      setTimeout(() => { window.open('https://mp.weixin.qq.com', '_blank'); }, 400);
+      // No longer auto-opens WeChat backend
       setTimeout(() => {
-        btn.textContent = '复制到公众号'; btn.classList.remove('copied');
+        btn.textContent = '复制全文'; btn.classList.remove('copied');
         document.getElementById('copySuccess').style.display = 'none';
       }, 10000);
     };

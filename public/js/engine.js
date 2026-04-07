@@ -376,7 +376,7 @@ export function initApp(template) {
     progressFill.style.width = '0%';
     fileInput.value = '';
     const copyBtn = document.getElementById('copyBtn');
-    if (copyBtn) { copyBtn.textContent = '复制到公众号'; copyBtn.classList.remove('copied'); }
+    if (copyBtn) { copyBtn.textContent = '复制全文'; copyBtn.classList.remove('copied'); }
     document.getElementById('statsBar').textContent = '';
   };
 
