@@ -1,5 +1,3 @@
-__pycache__/
-*.pyc
 node_modules/
 .env
 .DS_Store
@@ -8,3 +6,5 @@ api/fbif-api
 api/data/
 *.db
 .gstack/
+docx/
+docs/

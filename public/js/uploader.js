@@ -61,7 +61,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
 
   let done = 0;
   const failedTasks = [];
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 10;
   let next = 0;
 
   async function worker() {
