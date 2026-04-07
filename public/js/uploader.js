@@ -65,47 +65,36 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   const failedSrcs = [];
   let done = 0;
 
-  // Split into batches of 10 to keep request size manageable
-  const BATCH_SIZE = 10;
+  // Split into batches of 5 — WeChat API can't handle more concurrent uploads
+  const BATCH_SIZE = 5;
   const allTasks = [...b64Tasks, ...urlTasks];
   const batches = [];
   for (let i = 0; i < allTasks.length; i += BATCH_SIZE) {
     batches.push(allTasks.slice(i, i + BATCH_SIZE));
   }
 
-  // Process batches — 2 concurrent batches at a time
-  const BATCH_CONCURRENCY = 2;
-  let batchIdx = 0;
+  // Process batches sequentially to avoid overloading WeChat API
+  for (const batch of batches) {
+    let results = {};
+    try {
+      results = await uploadBatch(batch);
+    } catch (e) {
+      try { results = await uploadBatch(batch); } catch {}
+    }
 
-  async function batchWorker() {
-    while (batchIdx < batches.length) {
-      const batch = batches[batchIdx++];
-      let results = {};
-      try {
-        results = await uploadBatch(batch);
-      } catch (e) {
-        // Retry the whole batch once
-        try { results = await uploadBatch(batch); } catch {}
+    for (const task of batch) {
+      const key = task.type === 'base64' ? task.key : task.src;
+      const cdnUrl = results[key];
+      if (cdnUrl) {
+        articleCopy = articleCopy.split(task.src).join(cdnUrl);
+        footerCopy = footerCopy.split(task.src).join(cdnUrl);
+      } else {
+        failedSrcs.push(task.src);
       }
-
-      for (const task of batch) {
-        const key = task.type === 'base64' ? task.key : task.src;
-        const cdnUrl = results[key];
-        if (cdnUrl) {
-          articleCopy = articleCopy.split(task.src).join(cdnUrl);
-          footerCopy = footerCopy.split(task.src).join(cdnUrl);
-        } else {
-          failedSrcs.push(task.src);
-        }
-        done++;
-        onProgress && onProgress(done, total);
-      }
+      done++;
+      onProgress && onProgress(done, total);
     }
   }
-
-  await Promise.all(
-    Array.from({ length: Math.min(BATCH_CONCURRENCY, batches.length) }, () => batchWorker())
-  );
 
   if (failedSrcs.length > 0) {
     onLog && onLog('warn', '上传完成，' + failedSrcs.length + '张失败');
