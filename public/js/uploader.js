@@ -65,8 +65,8 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   const failedSrcs = [];
   let done = 0;
 
-  // Split into batches of 5 — WeChat API can't handle more concurrent uploads
-  const BATCH_SIZE = 5;
+  // Split into batches of 10 — server-side compression keeps upload data small
+  const BATCH_SIZE = 10;
   const allTasks = [...b64Tasks, ...urlTasks];
   const batches = [];
   for (let i = 0; i < allTasks.length; i += BATCH_SIZE) {
