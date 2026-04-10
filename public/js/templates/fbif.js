@@ -104,13 +104,38 @@ function classifyDocx(paragraphs, imgCache) {
   return { elems, author, imgN };
 }
 
+// ---- Attribution Patterns ----
+// 作者/撰文/撰稿 → "作者", 出品/来源/出处 → "来源"
+const RE_AUTHOR = /^(?:\*\*)?(?:作者|撰文|撰稿|文)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
+const RE_SOURCE = /^(?:\*\*)?(?:出品|来源|出处)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
+const RE_EDITOR = /^(?:\*\*)?(?:编辑|责编)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
+
+function parseAttribution(para) {
+  const clean = para.replace(/\*\*/g, '').trim();
+  let m = para.match(RE_AUTHOR);
+  if (m) return { role: '作者', name: m[1].replace(/\*\*/g, '').trim() };
+  m = para.match(RE_SOURCE);
+  if (m) return { role: '来源', name: m[1].replace(/\*\*/g, '').trim() };
+  m = para.match(RE_EDITOR);
+  if (m) return { role: '编辑', name: m[1].replace(/\*\*/g, '').trim() };
+  // Bottom-of-article pattern: "作者 | xxx" without bold markers
+  m = clean.match(/^(?:作者|撰文|撰稿)[：:/|｜]\s*(.+)/);
+  if (m) return { role: '作者', name: m[1].trim() };
+  m = clean.match(/^(?:出品|来源|出处)[：:/|｜]\s*(.+)/);
+  if (m) return { role: '来源', name: m[1].trim() };
+  m = clean.match(/^(?:编辑|责编)[：:/|｜]\s*(.+)/);
+  if (m) return { role: '编辑', name: m[1].trim() };
+  return null;
+}
+
 // ---- Markdown Classification ----
 async function classifyMd(text) {
-  const { author, title, content } = parseMdFrontmatter(text);
+  const { author: fmAuthor, title, content } = parseMdFrontmatter(text);
   const rawParas = content.split(/\n\s*\n/).map(p => p.trim()).filter(p => p);
 
   const elems = [];
   let imgN = 0, expectHeading = false, stopped = false, inRef = false;
+  let author = fmAuthor, source = '';
 
   for (let i = 0; i < rawParas.length && !stopped; i++) {
     const para = rawParas[i].replace(/\s+$/gm, '');
@@ -118,6 +143,17 @@ async function classifyMd(text) {
     // Skip x-reader metadata lines
     if (/^Author:\s|^Published:\s|^Source:\s/i.test(para)) continue;
     if (/Author:.*\|.*Published:/i.test(para)) continue;
+
+    // Detect author/source/editor attribution
+    const attr = parseAttribution(para);
+    if (attr) {
+      if (attr.role === '作者' && !author) author = attr.name;
+      if (attr.role === '来源') source = attr.name;
+      // Render attribution as styled text
+      elems.push({ k: 'attr', role: attr.role, name: attr.name });
+      continue;
+    }
+
     if (/^>\s/.test(para)) {
       const bqText = para.split('\n').map(l => l.replace(/^>\s*/, '')).join(' ').trim();
       if (bqText) elems.push({ k: 'bq', runs: parseMdRuns(bqText) });
@@ -136,24 +172,36 @@ async function classifyMd(text) {
       imgN++; elems.push({ k: 'img', src: imgSrc, w: '100%', gif: looksLikeGifSource(imgSrc) }); continue;
     }
 
+    // Section number (e.g. **01**) followed by bold heading
     if (/^\*\*0?\d+\*\*$/.test(para)) { expectHeading = true; continue; }
     if (expectHeading) {
       const hm = para.match(/^\*\*(.+)\*\*$/);
       if (hm) { elems.push({ k: 'h', text: hm[1] }); expectHeading = false; continue; }
       expectHeading = false;
     }
+    // Standalone bold line (centered heading) → treat as heading
+    const boldOnly = para.match(/^\*\*(.+)\*\*$/);
+    if (boldOnly && para.length < 60) {
+      elems.push({ k: 'h', text: boldOnly[1] });
+      continue;
+    }
+
     elems.push({ k: 'txt', runs: parseMdRuns(para) });
   }
 
-  return { elems, author, title, imgN };
+  return { elems, author, source, title, imgN };
 }
 
 // ---- HTML Rendering (class-based) ----
-function render(elems, author) {
+function render(elems, author, source) {
   const lines = [];
 
+  // Author and source lines at the top
   if (author) {
-    lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">作者：' + esc(author) + '</span>'), true));
+    lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">作者：' + esc(author) + '</span>'), !source));
+  }
+  if (source) {
+    lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">来源：' + esc(source) + '</span>'), true));
   }
 
   for (let i = 0; i < elems.length; i++) {
@@ -161,6 +209,7 @@ function render(elems, author) {
     const nextK = i + 1 < elems.length ? elems[i + 1].k : null;
     const spaceAfter = nextK && nextK !== 'cap' &&
       !(e.k === 'ref' && nextK === 'ref') &&
+      !(e.k === 'attr' && nextK === 'attr') &&
       !(e.k === 'img' && (nextK === 'cap' || nextK === 'img'));
 
     switch (e.k) {
@@ -181,6 +230,9 @@ function render(elems, author) {
         break;
       case 'txt':
         lines.push(sec(renderRuns(e.runs), spaceAfter));
+        break;
+      case 'attr':
+        lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' + esc(e.role) + '：' + esc(e.name) + '</span>'), spaceAfter));
         break;
       case 'refH':
         lines.push(sec(leafWrap('<span textstyle="" class="wx-tr">参考来源：</span>'), false));
@@ -205,10 +257,10 @@ export default {
 
   processDocx({ paragraphs, imgCache }) {
     const { elems, author, imgN } = classifyDocx(paragraphs, imgCache);
-    return { lines: render(elems, author), imgN, headingN: elems.filter(e => e.k === 'h').length };
+    return { lines: render(elems, author, ''), imgN, headingN: elems.filter(e => e.k === 'h').length };
   },
   async processMd(text) {
-    const { elems, author, title, imgN } = await classifyMd(text);
-    return { lines: render(elems, author), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    const { elems, author, source, title, imgN } = await classifyMd(text);
+    return { lines: render(elems, author, source), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 };
