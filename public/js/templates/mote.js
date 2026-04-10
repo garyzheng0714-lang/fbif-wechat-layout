@@ -74,7 +74,7 @@ function classifyDocx(paragraphs, imgCache) {
 }
 
 // ---- HTML Rendering (class-based, blank-section spacing) ----
-function render(elements) {
+function render(elements, author) {
   const lines = [];
   let inRef = false;
   let prevK = null;
@@ -83,8 +83,9 @@ function render(elements) {
     if (lines.length && lines[lines.length - 1] !== BLANK) lines.push(BLANK);
   }
 
-  // Author line (hardcoded for Mote)
-  lines.push('<section class="wx-p"><span class="wx-auth">作者：Mote莫特</span></section>');
+  // Author line — use detected author or default to Mote莫特
+  const displayAuthor = author || 'Mote莫特';
+  lines.push('<section class="wx-p"><span class="wx-auth">作者：' + esc(displayAuthor) + '</span></section>');
   lines.push(BLANK);
 
   for (const elem of elements) {
@@ -117,6 +118,10 @@ function render(elements) {
       lines.push('<section class="wx-pc"><span class="wx-tc">' + elem.html + '</span></section>');
       prevK = k; continue;
     }
+    if (k === 'attr') {
+      lines.push('<section class="wx-p"><span class="wx-auth">' + esc(elem.role) + '：' + esc(elem.name) + '</span></section>');
+      prevK = k; continue;
+    }
     if (k === 'list') {
       if (prevK === 'text' && elem.num === 1) ensureBlank();
       lines.push('<section class="wx-p"><span class="wx-t">' + elem.num + '、' + elem.html + '</span></section>');
@@ -137,13 +142,37 @@ function render(elements) {
   return final;
 }
 
+// ---- Attribution Patterns ----
+// 作者/撰文/撰稿 → "作者", 出品/来源/出处 → "来源"
+const RE_AUTHOR = /^(?:\*\*)?(?:作者|撰文|撰稿|文)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
+const RE_SOURCE = /^(?:\*\*)?(?:出品|来源|出处)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
+const RE_EDITOR = /^(?:\*\*)?(?:编辑|责编)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
+
+function parseAttribution(para) {
+  const clean = para.replace(/\*\*/g, '').trim();
+  let m = para.match(RE_AUTHOR);
+  if (m) return { role: '作者', name: m[1].replace(/\*\*/g, '').trim() };
+  m = para.match(RE_SOURCE);
+  if (m) return { role: '来源', name: m[1].replace(/\*\*/g, '').trim() };
+  m = para.match(RE_EDITOR);
+  if (m) return { role: '编辑', name: m[1].replace(/\*\*/g, '').trim() };
+  m = clean.match(/^(?:作者|撰文|撰稿)[：:/|｜]\s*(.+)/);
+  if (m) return { role: '作者', name: m[1].trim() };
+  m = clean.match(/^(?:出品|来源|出处)[：:/|｜]\s*(.+)/);
+  if (m) return { role: '来源', name: m[1].trim() };
+  m = clean.match(/^(?:编辑|责编)[：:/|｜]\s*(.+)/);
+  if (m) return { role: '编辑', name: m[1].trim() };
+  return null;
+}
+
 // ---- Markdown Processing ----
 function classifyMd(text) {
-  const { author, content } = parseMdFrontmatter(text);
+  const { author: fmAuthor, content } = parseMdFrontmatter(text);
   const rawParas = content.split(/\n\s*\n/).map(p => p.trim()).filter(p => p);
 
   const elements = [];
-  let imgN = 0, inRef = false, listCounter = 0;
+  let imgN = 0, inRef = false, listCounter = 0, expectHeading = false;
+  let author = fmAuthor;
 
   for (const para of rawParas) {
     if (/^#\s/.test(para)) continue;
@@ -153,6 +182,14 @@ function classifyMd(text) {
     if (/Author:.*\|.*Published:/i.test(para)) continue;
     if (/^\*\s+\*\s+\*/.test(para.trim())) break;
     if (/^[-*_\s]{3,}$/.test(para.replace(/\s/g, ''))) continue;
+
+    // Detect author/source/editor attribution
+    const attr = parseAttribution(para);
+    if (attr) {
+      if (attr.role === '作者' && !author) author = attr.name;
+      elements.push({ kind: 'attr', role: attr.role, name: attr.name });
+      continue;
+    }
 
     if (/^参考来源/.test(para)) {
       inRef = true;
@@ -179,6 +216,20 @@ function classifyMd(text) {
       continue;
     }
 
+    // Section number (e.g. **01**) followed by bold heading
+    if (/^\*\*0?\d+\*\*$/.test(para)) { expectHeading = true; continue; }
+    if (expectHeading) {
+      const hm = para.match(/^\*\*(.+)\*\*$/);
+      if (hm) { elements.push({ kind: 'heading', text: hm[1] }); expectHeading = false; continue; }
+      expectHeading = false;
+    }
+    // Standalone bold line → treat as heading
+    const boldOnly = para.match(/^\*\*(.+)\*\*$/);
+    if (boldOnly && para.length < 60) {
+      elements.push({ kind: 'heading', text: boldOnly[1] });
+      continue;
+    }
+
     const listMatch = para.match(/^\d+[.、]\s*(.+)$/);
     if (listMatch) {
       listCounter++;
@@ -190,7 +241,7 @@ function classifyMd(text) {
     elements.push({ kind: 'text', html: renderInline(parseMdRuns(para)) });
   }
 
-  return { elements, imgN };
+  return { elements, imgN, author };
 }
 
 export default {
@@ -201,13 +252,13 @@ export default {
 
   processDocx({ paragraphs, imgCache }) {
     const { elements, imgN } = classifyDocx(paragraphs, imgCache);
-    const lines = render(elements);
+    const lines = render(elements, '');
     return { lines, imgN, headingN: elements.filter(e => e.kind === 'heading').length };
   },
 
   async processMd(text) {
-    const { elements, imgN } = classifyMd(text);
-    const lines = render(elements);
+    const { elements, imgN, author } = classifyMd(text);
+    const lines = render(elements, author);
     return { lines, imgN, headingN: elements.filter(e => e.kind === 'heading').length };
   },
 };
