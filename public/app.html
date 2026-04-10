@@ -191,10 +191,6 @@ const TEMPLATE_DEFAULTS = {
   fbif: { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' },
   mote: { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' },
 };
-const TEMPLATE_META = {
-  fbif: { account: 'FBIF食品饮料创新', avatar: '/fbif-avatar.webp' },
-  mote: { account: 'Mote莫特', avatar: '/fbif-avatar.webp' },
-};
 function getDefaultCfg(tid) { return TEMPLATE_DEFAULTS[tid] || TEMPLATE_DEFAULTS.fbif; }
 function loadConfig(tid) { try { const r = localStorage.getItem('config_' + (tid || 'fbif')); if (r) return { ...getDefaultCfg(tid), ...JSON.parse(r) }; } catch {} return { ...getDefaultCfg(tid) }; }
 function saveConfig(c, tid) { try { localStorage.setItem('config_' + (tid || currentTemplateId || 'fbif'), JSON.stringify(c)); } catch {} window._activeConfig = { config: c }; }
@@ -212,14 +208,6 @@ async function loadTemplate(templateId) {
   document.querySelectorAll('.template-pill').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.template === templateId);
   });
-  // Switch meta info (account name, avatar)
-  const meta = TEMPLATE_META[templateId] || TEMPLATE_META.fbif;
-  const metaAccount = document.querySelector('.wx-meta-account');
-  if (metaAccount) metaAccount.textContent = meta.account;
-  const footerName = document.querySelector('.wx-footer-name');
-  if (footerName) footerName.textContent = meta.account;
-  const footerAvatar = document.querySelector('.wx-avatar');
-  if (footerAvatar) footerAvatar.alt = meta.account;
   // Load per-template config and update form
   const cfg = loadConfig(templateId);
   saveConfig(cfg, templateId);
