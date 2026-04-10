@@ -1,15 +1,13 @@
-// Image upload to WeChat CDN — dual-layer architecture
-// Preview layer keeps original URLs; copy layer gets CDN URLs.
+// Image upload — only base64 images (from DOCX) are uploaded to OSS.
+// External URLs are used directly; mmbiz URLs are already on WeChat CDN.
 
 export function isMmbizUrl(url) {
   return /^https?:\/\/mmbiz\.qpic\.cn\//i.test(url);
 }
 
-// Upload a single image to WeChat CDN. Returns CDN URL or null on failure.
+// Upload a single base64 image to OSS. Returns OSS URL or null on failure.
 async function uploadOne(task) {
-  const body = task.type === 'base64'
-    ? JSON.stringify({ base64_images: { [task.key]: task.src } })
-    : JSON.stringify({ urls: [task.src] });
+  const body = JSON.stringify({ base64_images: { [task.key]: task.src } });
   const resp = await fetch('/api/oss-upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -17,12 +15,10 @@ async function uploadOne(task) {
   });
   if (!resp.ok) return null;
   const { results } = await resp.json();
-  return task.type === 'base64'
-    ? (results[task.key] || Object.values(results)[0] || null)
-    : (results[task.src] || Object.values(results)[0] || null);
+  return results[task.key] || Object.values(results)[0] || null;
 }
 
-// Upload non-CDN images (base64 from DOCX + external HTTP URLs).
+// Upload base64 images from DOCX to OSS. External URLs are used directly.
 // mmbiz URLs are already on WeChat CDN — skip them (preserves GIF animations).
 //
 // Returns { articleCopy, footerCopy, total, failed, failedSrcs }.
@@ -33,20 +29,17 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   const tasks = [];
   let m, mmbizCount = 0;
 
-  // base64 data URIs (from DOCX) — must upload
+  // base64 data URIs (from DOCX) — must upload to OSS
   const b64Re = /src="(data:image\/[^"]+)"/g;
   while ((m = b64Re.exec(allHtml)) !== null) {
     tasks.push({ type: 'base64', src: m[1], key: 'img_' + tasks.length });
   }
 
-  // HTTP URLs — only upload non-mmbiz (external images)
+  // HTTP URLs — use directly, no upload needed
+  // (mmbiz URLs are already on WeChat CDN; other external URLs work as-is)
   const urlRe = /src="(https?:\/\/[^"]+)"/g;
   while ((m = urlRe.exec(allHtml)) !== null) {
-    if (isMmbizUrl(m[1])) {
-      mmbizCount++;
-    } else {
-      tasks.push({ type: 'url', src: m[1] });
-    }
+    if (isMmbizUrl(m[1])) mmbizCount++;
   }
 
   if (tasks.length === 0) {
@@ -54,9 +47,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
     return { articleCopy, footerCopy, total: 0, failed: 0, failedSrcs: [] };
   }
 
-  const b64Count = tasks.filter(t => t.type === 'base64').length;
-  const extCount = tasks.filter(t => t.type === 'url').length;
-  onLog && onLog('info', '开始上传图片到微信CDN', { base64: b64Count, 外链: extCount, mmbiz跳过: mmbizCount });
+  onLog && onLog('info', '开始上传Base64图片到OSS', { base64: tasks.length, 外链直接使用: true, mmbiz跳过: mmbizCount });
   onProgress && onProgress(0, tasks.length);
 
   let done = 0;
@@ -104,12 +95,9 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   return { articleCopy, footerCopy, total: tasks.length, failed: failedTasks.length, failedSrcs };
 }
 
-// Retry specific failed images. Call with the failedSrcs from a previous upload.
+// Retry specific failed base64 images. Call with the failedSrcs from a previous upload.
 export async function retryFailedImages(articleCopy, footerCopy, failedSrcs, { onProgress, onLog }) {
-  const tasks = failedSrcs.map((src, i) => {
-    if (src.startsWith('data:')) return { type: 'base64', src, key: 'retry_' + i };
-    return { type: 'url', src };
-  });
+  const tasks = failedSrcs.map((src, i) => ({ type: 'base64', src, key: 'retry_' + i }));
 
   let done = 0;
   const stillFailed = [];

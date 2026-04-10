@@ -52,8 +52,9 @@ func main() {
 	// Config versions (history for a profile)
 	mux.HandleFunc("GET /api/config/profiles/{id}/versions", handleListVersions)
 
-	// Image upload to WeChat CDN
-	mux.HandleFunc("POST /api/wechat-upload", handleWechatUpload)
+	// Image upload to OSS (base64 from DOCX)
+	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
+	mux.HandleFunc("POST /api/wechat-upload", handleImageUpload) // legacy alias
 
 	// Article fetch (URL repost via x-reader)
 	mux.HandleFunc("POST /api/fetch-article", handleFetchArticle)
@@ -397,23 +398,18 @@ func handleListVersions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, versions)
 }
 
-// ---- WeChat Image Upload ----
-// TODO: Implement with actual WeChat Media Upload API credentials.
-// For now, this proxies to the legacy upload endpoint if configured,
-// or returns an error explaining setup is needed.
+// ---- Image Upload (base64 from DOCX → OSS or legacy proxy) ----
 
-func handleWechatUpload(w http.ResponseWriter, r *http.Request) {
-	// Parse request body
+func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 50<<20)) // 50MB limit
 	if err != nil {
 		writeError(w, 400, "failed to read body")
 		return
 	}
 
-	// Check for legacy upload endpoint env var
+	// Proxy to upload endpoint if configured
 	legacyURL := os.Getenv("WECHAT_UPLOAD_ENDPOINT")
 	if legacyURL != "" {
-		// Proxy to legacy endpoint
 		proxyReq, err := http.NewRequestWithContext(r.Context(), "POST", legacyURL, bytes.NewReader(body))
 		if err != nil {
 			writeError(w, 500, "proxy error: "+err.Error())
@@ -432,11 +428,9 @@ func handleWechatUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// No upload endpoint configured — pass through original URLs as-is.
-	// Images will display fine in preview; WeChat editor re-hosts on paste.
+	// No upload endpoint — return base64 as-is (preview works; WeChat re-hosts on paste)
 	var req struct {
 		Base64Images map[string]string `json:"base64_images"`
-		URLs         []string          `json:"urls"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, 400, "invalid JSON")
@@ -445,10 +439,7 @@ func handleWechatUpload(w http.ResponseWriter, r *http.Request) {
 
 	results := make(map[string]string)
 	for key, val := range req.Base64Images {
-		results[key] = val // return base64 as-is
-	}
-	for _, u := range req.URLs {
-		results[u] = u // return URL as-is
+		results[key] = val
 	}
 	writeJSON(w, 200, map[string]interface{}{"results": results})
 }
