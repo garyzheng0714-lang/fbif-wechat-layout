@@ -186,16 +186,24 @@ window._pushLog = function(level, msg, detail) {
 function loadPref(k, fb) { try { const v = localStorage.getItem(k); return v !== null ? v : fb; } catch { return fb; } }
 function savePref(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
-// ---- Config ----
-const DEFAULT_CFG = { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' };
-function loadConfig() { try { const r = localStorage.getItem('fbif_config'); if (r) return { ...DEFAULT_CFG, ...JSON.parse(r) }; } catch {} return { ...DEFAULT_CFG }; }
-function saveConfig(c) { try { localStorage.setItem('fbif_config', JSON.stringify(c)); } catch {} window._activeConfig = { config: c }; }
-window._activeConfig = { config: loadConfig() };
+// ---- Config (per-template defaults) ----
+const TEMPLATE_DEFAULTS = {
+  fbif: { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' },
+  mote: { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' },
+};
+const TEMPLATE_META = {
+  fbif: { account: 'FBIF食品饮料创新', avatar: '/fbif-avatar.webp' },
+  mote: { account: 'Mote莫特', avatar: '/fbif-avatar.webp' },
+};
+function getDefaultCfg(tid) { return TEMPLATE_DEFAULTS[tid] || TEMPLATE_DEFAULTS.fbif; }
+function loadConfig(tid) { try { const r = localStorage.getItem('config_' + (tid || 'fbif')); if (r) return { ...getDefaultCfg(tid), ...JSON.parse(r) }; } catch {} return { ...getDefaultCfg(tid) }; }
+function saveConfig(c, tid) { try { localStorage.setItem('config_' + (tid || currentTemplateId || 'fbif'), JSON.stringify(c)); } catch {} window._activeConfig = { config: c }; }
+let currentTemplateId = loadPref('preferred_template', 'fbif');
+window._activeConfig = { config: loadConfig(currentTemplateId) };
 
 let footerEnabledPref = loadPref('footer_enabled', 'true') === 'true';
 
 // ---- Load engine + template ----
-let currentTemplateId = loadPref('preferred_template', 'fbif');
 const { initApp } = await import('./js/engine.js?v=' + assetVersion);
 
 async function loadTemplate(templateId) {
@@ -204,6 +212,18 @@ async function loadTemplate(templateId) {
   document.querySelectorAll('.template-pill').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.template === templateId);
   });
+  // Switch meta info (account name, avatar)
+  const meta = TEMPLATE_META[templateId] || TEMPLATE_META.fbif;
+  const metaAccount = document.querySelector('.wx-meta-account');
+  if (metaAccount) metaAccount.textContent = meta.account;
+  const footerName = document.querySelector('.wx-footer-name');
+  if (footerName) footerName.textContent = meta.account;
+  const footerAvatar = document.querySelector('.wx-avatar');
+  if (footerAvatar) footerAvatar.alt = meta.account;
+  // Load per-template config and update form
+  const cfg = loadConfig(templateId);
+  saveConfig(cfg, templateId);
+  populateConfigForm();
   const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
   initApp(mod.default);
   wrapEngineFunctions();
@@ -237,7 +257,7 @@ document.getElementById('footerToggleBtn').addEventListener('click', () => {
 
 // ---- Config form ----
 function populateConfigForm() {
-  const c = loadConfig();
+  const c = loadConfig(currentTemplateId);
   document.getElementById('cfg-font_size').value = parseFloat(c.font_size) || 15;
   document.getElementById('cfg-heading_size').value = parseFloat(c.heading_size) || 18;
   document.getElementById('cfg-line_height').value = parseFloat(c.line_height) || 1.75;
@@ -251,7 +271,7 @@ function populateConfigForm() {
 populateConfigForm();
 
 document.getElementById('settingsForm').addEventListener('input', (e) => {
-  const c = loadConfig(), id = e.target.id;
+  const c = loadConfig(currentTemplateId), id = e.target.id;
   if (id === 'cfg-font_size') c.font_size = e.target.value;
   else if (id === 'cfg-heading_size') c.heading_size = e.target.value;
   else if (id === 'cfg-line_height') c.line_height = e.target.value;
@@ -259,7 +279,7 @@ document.getElementById('settingsForm').addEventListener('input', (e) => {
   else if (id === 'cfg-font_family') c.font_family = e.target.value;
   else if (id === 'cfg-text_color_picker') { c.text_color = e.target.value; document.getElementById('cfg-text_color_hex').textContent = e.target.value; }
   else if (id === 'cfg-link_color_picker') { c.link_color = e.target.value; document.getElementById('cfg-link_color_hex').textContent = e.target.value; }
-  saveConfig(c);
+  saveConfig(c, currentTemplateId);
   if (window.updateThemePreview) window.updateThemePreview(c);
 });
 
