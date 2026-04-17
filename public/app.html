@@ -95,6 +95,10 @@
           <label>页脚</label>
           <div class="toggle-switch on" id="footerToggleBtn"><div class="toggle-knob"></div></div>
         </div>
+        <div class="form-row" title="开启后 docx 导入的文档复制时不等待图片上传，直接把 base64 图片嵌入 HTML 粘到微信后台，由微信在粘贴时自动转存。md/txt 和链接提取不受此开关影响。">
+          <label>docx 跳过上传</label>
+          <div class="toggle-switch" id="skipUploadToggleBtn"><div class="toggle-knob"></div></div>
+        </div>
       </div>
     </div>
     <div class="sidebar-footer">
@@ -198,6 +202,8 @@ let currentTemplateId = loadPref('preferred_template', 'fbif');
 window._activeConfig = { config: loadConfig(currentTemplateId) };
 
 let footerEnabledPref = loadPref('footer_enabled', 'true') === 'true';
+let skipUploadPref = loadPref('skip_upload', 'true') === 'true';
+window._skipUpload = skipUploadPref;
 
 // ---- Load engine + template ----
 const { initApp } = await import('./js/engine.js?v=' + assetVersion);
@@ -241,6 +247,16 @@ document.getElementById('footerToggleBtn').addEventListener('click', () => {
   savePref('footer_enabled', String(el.checked));
   updateFooterBtn();
   window._updateFooter && window._updateFooter(null);
+});
+
+// ---- Skip-upload toggle (experimental) ----
+const skipUploadBtn = document.getElementById('skipUploadToggleBtn');
+skipUploadBtn.classList.toggle('on', skipUploadPref);
+skipUploadBtn.addEventListener('click', () => {
+  skipUploadPref = !skipUploadPref;
+  window._skipUpload = skipUploadPref;
+  savePref('skip_upload', String(skipUploadPref));
+  skipUploadBtn.classList.toggle('on', skipUploadPref);
 });
 
 // ---- Config form ----

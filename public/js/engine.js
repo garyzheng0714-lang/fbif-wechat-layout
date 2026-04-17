@@ -110,7 +110,9 @@ export function initApp(template) {
   async function processFile(file) {
     const t0 = performance.now();
     let result;
-    if (file.name.toLowerCase().endsWith('.docx')) {
+    const isDocx = file.name.toLowerCase().endsWith('.docx');
+    _sourceIsDocx = isDocx;
+    if (isDocx) {
       const docxData = await parseDocx(file);
       result = template.processDocx(docxData);
     } else if (typeof template.processMd === 'function') {
@@ -148,7 +150,9 @@ export function initApp(template) {
       const t0 = performance.now();
 
       let result;
-      if (file.name.toLowerCase().endsWith('.docx')) {
+      const isDocx = file.name.toLowerCase().endsWith('.docx');
+      _sourceIsDocx = isDocx;
+      if (isDocx) {
         const docxData = await parseDocx(file);
         result = template.processDocx(docxData);
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
@@ -189,6 +193,7 @@ export function initApp(template) {
   let _uploadPromise = null;
   let _uploadDone = false;
   let _failedSrcs = [];
+  let _sourceIsDocx = false;
 
   function markFailedImages(failedSrcs) {
     if (!failedSrcs.length) return;
@@ -245,8 +250,16 @@ export function initApp(template) {
 
     // Background: upload non-mmbiz images to WeChat CDN for the copy layer
     _uploadDone = false;
+    _uploadPromise = null;
     const statsBar = document.getElementById('statsBar');
     const originalStats = stats;
+
+    const skipUploadForThisFile = !!window._skipUpload && _sourceIsDocx;
+    if (skipUploadForThisFile) {
+      _uploadDone = true;
+      logConv('info', 'DOCX 跳过上传：不启动后台上传');
+      return;
+    }
 
     _uploadPromise = uploadNonCdnImages(_articleCopy, _footerCopy, {
       onProgress(done, total) {
@@ -314,9 +327,13 @@ export function initApp(template) {
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
 
-    if (_uploadPromise && !_uploadDone) {
+    const skipUpload = !!window._skipUpload && _sourceIsDocx;
+    if (_uploadPromise && !_uploadDone && !skipUpload) {
       btn.textContent = '等待图片上传...';
       await _uploadPromise;
+    }
+    if (skipUpload) {
+      logConv('info', 'DOCX 跳过上传：base64 直接写入剪贴板');
     }
 
     const enabled = document.getElementById('footerEnabled').checked;
