@@ -111,7 +111,10 @@ function render(elements, author) {
       const mSrc = elem.src || '';
       const mIsGif = elem.gif || looksLikeGifSource(mSrc);
       const mGifAttr = mIsGif ? ' data-type="gif"' : '';
-      lines.push('<section class="wx-pi"><img src="' + mSrc + '"' + mGifAttr + ' style="width: ' + elem.width + '; display: block; margin: 0 auto;" /></section>');
+      const mSize = elem.maxPx
+        ? 'max-width: ' + elem.maxPx + 'px; width: 100%; height: auto; display: block; margin: 0 auto;'
+        : 'width: ' + elem.width + '; display: block; margin: 0 auto;';
+      lines.push('<section class="wx-pi"><img src="' + mSrc + '"' + mGifAttr + ' style="' + mSize + '" /></section>');
       prevK = k; continue;
     }
     if (k === 'caption') {
@@ -211,8 +214,11 @@ function classifyMd(text) {
     const imgMatch = para.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (imgMatch) {
       const imgSrc = imgMatch[2].replace(/"/g, '').replace(/</g, '').replace(/>/g, '');
+      const dwMatch = imgSrc.match(/[#&]dataW=(\d+)/);
+      const maxPx = dwMatch && Number(dwMatch[1]) > 0 && Number(dwMatch[1]) < 640
+        ? Number(dwMatch[1]) : 0;
       imgN++;
-      elements.push({ kind: 'image', src: imgSrc, width: '100%', gif: looksLikeGifSource(imgSrc) });
+      elements.push({ kind: 'image', src: imgSrc, width: '100%', maxPx, gif: looksLikeGifSource(imgSrc) });
       continue;
     }
 

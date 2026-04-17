@@ -169,7 +169,15 @@ async function classifyMd(text) {
     const imgMatch = para.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (imgMatch) {
       const imgSrc = imgMatch[2].replace(/"/g, '').replace(/</g, '').replace(/>/g, '');
-      imgN++; elems.push({ k: 'img', src: imgSrc, w: '100%', gif: looksLikeGifSource(imgSrc) }); continue;
+      // Respect WeChat's data-w when it signals a decorative narrow image
+      // (e.g. section-number banners at 279px). Without this, small images
+      // get stretched to 100% of the content column.
+      const dwMatch = imgSrc.match(/[#&]dataW=(\d+)/);
+      const maxPx = dwMatch && Number(dwMatch[1]) > 0 && Number(dwMatch[1]) < 640
+        ? Number(dwMatch[1]) : 0;
+      imgN++;
+      elems.push({ k: 'img', src: imgSrc, w: '100%', maxPx, gif: looksLikeGifSource(imgSrc) });
+      continue;
     }
 
     // Section number (e.g. **01**) followed by bold heading
@@ -221,8 +229,11 @@ function render(elems, author, source) {
         const isGif = e.gif || looksLikeGifSource(src);
         const rpol = src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
         const gifAttr = isGif ? ' data-type="gif"' : '';
+        const sizeStyle = e.maxPx
+          ? 'max-width: ' + e.maxPx + 'px; width: 100%; height: auto; display: block; margin: 0 auto;'
+          : 'width: ' + e.w + '; display: block; margin: 0 auto;';
         lines.push('<section class="wx-pi' + (spaceAfter ? ' wx-gap' : '') + '">' +
-          '<img src="' + src + '"' + gifAttr + rpol + ' style="width: ' + e.w + '; display: block; margin: 0 auto;" /></section>');
+          '<img src="' + src + '"' + gifAttr + rpol + ' style="' + sizeStyle + '" /></section>');
         break;
       }
       case 'cap':

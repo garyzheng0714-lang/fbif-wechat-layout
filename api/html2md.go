@@ -100,16 +100,25 @@ func htmlToMarkdown(h string) string {
 		return stripTags(h)
 	}
 
+	ctx := &walkCtx{}
 	var sb strings.Builder
-	walkNode(doc, &sb)
+	walkNode(doc, &sb, ctx)
 	result := sb.String()
 
-	// Clean up excessive blank lines
+	// Clean up excessive blank lines. Don't collapse asterisk runs —
+	// parseMdRuns on the frontend splits on **, so adjacent bold fragments
+	// like **A****B** correctly alternate (empty parts get skipped).
 	result = regexp.MustCompile(`\n{3,}`).ReplaceAllString(result, "\n\n")
 	return strings.TrimSpace(result)
 }
 
-func walkNode(n *html.Node, sb *strings.Builder) {
+// walkCtx tracks nesting depth so nested <strong>/<b> emit a single **...**
+// pair instead of stacking markers.
+type walkCtx struct {
+	boldDepth int
+}
+
+func walkNode(n *html.Node, sb *strings.Builder, ctx *walkCtx) {
 	if n == nil {
 		return
 	}
@@ -139,74 +148,93 @@ func walkNode(n *html.Node, sb *strings.Builder) {
 			}
 			if src != "" && !strings.Contains(src, "data:image") {
 				alt := getAttr(n, "alt")
+				// Preserve WeChat's data-w hint via URL fragment so the
+				// frontend can render decorative narrow images at their
+				// natural size instead of stretching them to 100%.
+				if dw := getAttr(n, "data-w"); dw != "" {
+					sep := "#"
+					if strings.Contains(src, "#") {
+						sep = "&"
+					}
+					src = src + sep + "dataW=" + dw
+				}
 				sb.WriteString("\n\n![" + alt + "](" + src + ")\n\n")
 			}
 			return
 		case "h1":
 			sb.WriteString("\n\n# ")
-			walkChildren(n, sb)
+			walkChildren(n, sb, ctx)
 			sb.WriteString("\n\n")
 			return
 		case "h2":
 			sb.WriteString("\n\n## ")
-			walkChildren(n, sb)
+			walkChildren(n, sb, ctx)
 			sb.WriteString("\n\n")
 			return
 		case "h3":
 			sb.WriteString("\n\n### ")
-			walkChildren(n, sb)
+			walkChildren(n, sb, ctx)
 			sb.WriteString("\n\n")
 			return
 		case "p", "section":
 			sb.WriteString("\n\n")
-			walkChildren(n, sb)
+			walkChildren(n, sb, ctx)
 			sb.WriteString("\n\n")
 			return
 		case "strong", "b":
-			sb.WriteString("**")
-			walkChildren(n, sb)
-			sb.WriteString("**")
+			// Only emit ** on the outermost bold boundary — avoids the
+			// ****/****** runs that come from WeChat's nested <b><b>...
+			if ctx.boldDepth == 0 {
+				sb.WriteString("**")
+			}
+			ctx.boldDepth++
+			walkChildren(n, sb, ctx)
+			ctx.boldDepth--
+			if ctx.boldDepth == 0 {
+				sb.WriteString("**")
+			}
 			return
 		case "em", "i":
-			sb.WriteString("*")
-			walkChildren(n, sb)
-			sb.WriteString("*")
+			// Drop italic emphasis entirely. WeChat frequently mixes <i>
+			// with <b> as pure visual styling; emitting *...* leaves stray
+			// asterisks that the frontend's **-only parser renders literally.
+			walkChildren(n, sb, ctx)
 			return
 		case "a":
 			href := getAttr(n, "href")
 			if href != "" && !strings.HasPrefix(href, "javascript:") {
 				sb.WriteString("[")
-				walkChildren(n, sb)
+				walkChildren(n, sb, ctx)
 				sb.WriteString("](" + href + ")")
 			} else {
-				walkChildren(n, sb)
+				walkChildren(n, sb, ctx)
 			}
 			return
 		case "li":
 			sb.WriteString("\n- ")
-			walkChildren(n, sb)
+			walkChildren(n, sb, ctx)
 			return
 		case "blockquote":
 			sb.WriteString("\n\n> ")
-			walkChildren(n, sb)
+			walkChildren(n, sb, ctx)
 			sb.WriteString("\n\n")
 			return
 		case "script", "style", "noscript", "iframe":
 			return // skip entirely
 		case "span":
 			// Just pass through spans, they're styling only
-			walkChildren(n, sb)
+			walkChildren(n, sb, ctx)
 			return
 		}
 	}
 
 	// Default: walk children
-	walkChildren(n, sb)
+	walkChildren(n, sb, ctx)
 }
 
-func walkChildren(n *html.Node, sb *strings.Builder) {
+func walkChildren(n *html.Node, sb *strings.Builder, ctx *walkCtx) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		walkNode(c, sb)
+		walkNode(c, sb, ctx)
 	}
 }
 
