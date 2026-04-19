@@ -63,27 +63,31 @@ function extractRunProps(r) {
   return { bold, hl, sz, color };
 }
 
-// Collect text content from a run in document order, translating
-// structural whitespace (br/tab/noBreakHyphen/sym) into text equivalents
-// so adjacent segments don't silently glue together.
-function collectRunText(r) {
-  let txt = '';
+// Collect text/break content from a run in document order. Returns a list of
+// segments — text fragments interleaved with {br:true} markers — so callers
+// can later split a paragraph on <w:br/> (WPS exports use soft breaks instead
+// of separate <w:p> elements).
+function collectRunSegments(r) {
+  const segments = [];
+  let buf = '';
+  const flush = () => { if (buf) { segments.push({ text: buf }); buf = ''; } };
   for (const c of r.children) {
     if (c.namespaceURI !== W) continue;
     switch (c.localName) {
-      case 't': txt += c.textContent || ''; break;
-      case 'br':
-      case 'tab': txt += ' '; break;
-      case 'noBreakHyphen': txt += '-'; break;
+      case 't': buf += c.textContent || ''; break;
+      case 'br': flush(); segments.push({ br: true }); break;
+      case 'tab': buf += ' '; break;
+      case 'noBreakHyphen': buf += '-'; break;
       case 'softHyphen': break;
       case 'sym': {
         const ch = wattr(c, 'char');
-        if (ch) { const n = parseInt(ch, 16); if (!isNaN(n)) txt += String.fromCodePoint(n); }
+        if (ch) { const n = parseInt(ch, 16); if (!isNaN(n)) buf += String.fromCodePoint(n); }
         break;
       }
     }
   }
-  return txt;
+  flush();
+  return segments;
 }
 
 function visitRun(r, ctx, runs, ridToFile) {
@@ -121,16 +125,21 @@ function visitRun(r, ctx, runs, ridToFile) {
     return;
   }
 
-  const txt = collectRunText(r);
-  if (!txt) return;
+  const segments = collectRunSegments(r);
+  if (!segments.length) return;
   if (ctx.fieldState === 'instruction') return;
 
   const href = (ctx.fieldState === 'result' && ctx.fieldHref) ? ctx.fieldHref : ctx.linkHref;
-  if (href) {
-    runs.push({ type: 'link', text: txt, href });
-  } else {
-    const { bold, hl, sz, color } = extractRunProps(r);
-    runs.push({ type: 'txt', text: txt, bold, hl, sz, color });
+  const props = href ? null : extractRunProps(r);
+
+  for (const seg of segments) {
+    if (seg.br) {
+      runs.push({ type: 'br' });
+    } else if (href) {
+      runs.push({ type: 'link', text: seg.text, href });
+    } else {
+      runs.push({ type: 'txt', text: seg.text, bold: props.bold, hl: props.hl, sz: props.sz, color: props.color });
+    }
   }
 }
 
@@ -182,7 +191,32 @@ function walkParagraph(node, ctx, runs, ridToFile, ridToUrl) {
   }
 }
 
+// Build a Paragraph data object from a list of runs and shared block-level
+// properties. Heading/outline flags are passed in so split paragraphs can
+// downgrade trailing slices to plain body text.
+function buildParagraph(runs, base) {
+  const text = runs.filter(r => r.type !== 'img' && r.type !== 'br').map(r => r.text || '').join('');
+  const textRuns = runs.filter(r => r.type === 'txt');
+  return {
+    align: base.align,
+    runs,
+    text,
+    hasImg: runs.some(r => r.type === 'img'),
+    isEmpty: !runs.some(r => r.type === 'img') && !text.trim(),
+    isList: base.isList,
+    hasHL: runs.some(r => r.hl),
+    hasOutlineLevel: base.hasOutlineLevel,
+    hasHeadingStyle: base.hasHeadingStyle,
+    allBold: textRuns.length > 0 && textRuns.every(r => r.bold),
+    fontSizes: [...new Set(textRuns.filter(r => r.sz).map(r => r.sz))],
+  };
+}
+
 // ---- Generic Paragraph Data Extraction ----
+// Returns one or more Paragraph objects. WPS-exported docx files often pack
+// multiple visual paragraphs into a single <w:p> with <w:br/> separators —
+// we split on those breaks so downstream rendering treats each line as its
+// own paragraph. Heading/outline style only applies to the first slice.
 export function extractParagraph(p, ridToFile, ridToUrl) {
   const pPr = findOne(p, W, 'pPr');
   let align = 'left', isList = false, hasOutlineLevel = false, hasHeadingStyle = false;
@@ -200,18 +234,25 @@ export function extractParagraph(p, ridToFile, ridToUrl) {
   const ctx = { fieldState: 'none', fieldInstr: '', fieldHref: '', linkHref: '' };
   walkParagraph(p, ctx, runs, ridToFile, ridToUrl);
 
-  const text = runs.filter(r => r.type !== 'img').map(r => r.text || '').join('');
-  const textRuns = runs.filter(r => r.type === 'txt');
+  const base = { align, isList, hasOutlineLevel, hasHeadingStyle };
+  if (!runs.some(r => r.type === 'br')) {
+    return [buildParagraph(runs, base)];
+  }
 
-  return {
-    align, runs, text,
-    hasImg: runs.some(r => r.type === 'img'),
-    isEmpty: !runs.some(r => r.type === 'img') && !text.trim(),
-    isList, hasHL: runs.some(r => r.hl),
-    hasOutlineLevel, hasHeadingStyle,
-    allBold: textRuns.length > 0 && textRuns.every(r => r.bold),
-    fontSizes: [...new Set(textRuns.filter(r => r.sz).map(r => r.sz))],
-  };
+  const groups = [];
+  let cur = [];
+  for (const r of runs) {
+    if (r.type === 'br') { groups.push(cur); cur = []; } else { cur.push(r); }
+  }
+  groups.push(cur);
+
+  // Heading style applies to the first slice that actually has content. Leading
+  // empty <w:br/>-only slices (common in WPS exports — e.g. blank line before
+  // "信息来源" heading) would otherwise consume and lose the heading flags.
+  const firstNonEmptyIdx = groups.findIndex(g => g.length > 0);
+  return groups.map((g, i) => buildParagraph(g, i === firstNonEmptyIdx
+    ? base
+    : { ...base, hasOutlineLevel: false, hasHeadingStyle: false }));
 }
 
 // ---- DOCX Infrastructure ----
@@ -264,7 +305,7 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out) {
     if (child.namespaceURI === W) {
       const tag = child.localName;
       if (tag === 'p') {
-        out.push(extractParagraph(child, ridToFile, ridToUrl));
+        out.push(...extractParagraph(child, ridToFile, ridToUrl));
         continue;
       }
       if (tag === 'tbl') {

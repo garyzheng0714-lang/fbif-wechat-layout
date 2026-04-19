@@ -74,7 +74,7 @@ function classifyDocx(paragraphs, imgCache) {
     if (pd.isHeading) {
       const ht = pd.text.trim().replace(/[：:]$/, '');
       if (ht === '引言' || ht === '标题') continue;
-      if (ht.startsWith('参考来源')) { inRef = true; elems.push({ k: 'refH' }); continue; }
+      if (/^(参考|信息)来源/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht }); continue; }
       elems.push({ k: 'h', text: ht.replace(/^0?\d+\s+/, '') });
       continue;
     }
@@ -245,9 +245,11 @@ function render(elems, author, source) {
       case 'attr':
         lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' + esc(e.role) + '：' + esc(e.name) + '</span>'), spaceAfter));
         break;
-      case 'refH':
-        lines.push(sec(leafWrap('<span textstyle="" class="wx-tr">参考来源：</span>'), false));
+      case 'refH': {
+        const refHeadText = (e.text || '参考来源').replace(/[：:]?$/, '：');
+        lines.push(sec(leafWrap('<span textstyle="" class="wx-tr">' + esc(refHeadText) + '</span>'), false));
         break;
+      }
       case 'ref':
         lines.push(sec(renderRuns(e.runs, { textCls: 'wx-tr' }), spaceAfter));
         break;

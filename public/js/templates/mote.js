@@ -25,7 +25,7 @@ function renderInline(parts) {
 function classify(pd) {
   if (pd.isEmpty) return 'blank';
   if (pd.hasImg) return 'image';
-  if (pd.text.trim() === '参考来源') return 'ref_header';
+  if (/^(参考|信息)来源[：:]?$/.test(pd.text.trim())) return 'ref_header';
   if (pd.allBold && pd.fontSizes.some(s => s === '32' || s === '36')) return 'heading';
   if (pd.isList) return 'list';
   if (pd.align === 'center') return 'caption';
@@ -60,7 +60,7 @@ function classifyDocx(paragraphs, imgCache) {
     } else if (kind === 'caption') {
       elements.push({ kind: 'caption', html: renderInline(pd.runs) });
     } else if (kind === 'ref_header') {
-      elements.push({ kind: 'ref_header' });
+      elements.push({ kind: 'ref_header', text: pd.text.trim() });
     } else if (kind === 'list') {
       listCounter++;
       elements.push({ kind: 'list', html: renderInline(pd.runs), num: listCounter });
@@ -93,7 +93,8 @@ function render(elements, author) {
 
     if (k === 'ref_header') {
       inRef = true; ensureBlank();
-      lines.push('<section class="wx-p"><span class="wx-tr">参考来源：</span></section>');
+      const refLabel = (elem.text || '参考来源').replace(/[：:]?$/, '：');
+      lines.push('<section class="wx-p"><span class="wx-tr">' + esc(refLabel) + '</span></section>');
       prevK = k; continue;
     }
     if (inRef) {
