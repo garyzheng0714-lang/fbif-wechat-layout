@@ -71,14 +71,29 @@ function classifyDocx(paragraphs, imgCache) {
     if (pd.isEmpty) continue;
     if (pd.hasHL && pd.text.includes('插入视频')) continue;
 
+    // WPS exports often leave "参考来源：" as a plain paragraph (no heading
+    // style / outlineLvl), so detect it by text content too — otherwise the
+    // marker and every citation below it fall through to the txt branch and
+    // render with 正文 styling plus wx-gap between each entry.
+    const trimmed = pd.text.trim();
+    if (/^(参考|信息)来源[：:]?$/.test(trimmed)) {
+      inRef = true;
+      elems.push({ k: 'refH', text: trimmed.replace(/[：:]$/, '') });
+      continue;
+    }
+
     if (pd.isHeading) {
-      const ht = pd.text.trim().replace(/[：:]$/, '');
+      const ht = trimmed.replace(/[：:]$/, '');
       if (ht === '引言' || ht === '标题') continue;
       if (/^(参考|信息)来源/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht }); continue; }
       elems.push({ k: 'h', text: ht.replace(/^0?\d+\s+/, '') });
       continue;
     }
-    if (inRef) { elems.push({ k: 'ref', runs: pd.runs }); continue; }
+    if (inRef) {
+      if (!trimmed) continue;
+      elems.push({ k: 'ref', runs: pd.runs });
+      continue;
+    }
     if (pd.hasImg) {
       for (const r of pd.runs) {
         if (r.type === 'img') {
