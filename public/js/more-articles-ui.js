@@ -342,13 +342,14 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     $('url').addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); triggerFetch(); }
     });
-    // Paste: fire on the next tick so the pasted text is in `.value`.
-    // Using microtask (queueMicrotask) + rAF keeps latency sub-frame.
+    // Paste: run on a task (setTimeout 0), NOT a microtask — the browser
+    // inserts the pasted text as a task AFTER the paste event fires, so a
+    // microtask would still see `.value === ''` and silently skip the fetch.
     $('url').addEventListener('paste', () => {
-      queueMicrotask(() => {
+      setTimeout(() => {
         const v = $('url').value.trim();
         if (isValidMpUrl(v)) triggerFetch();
-      });
+      }, 0);
     });
 
     const applyPickedDataUrl = async (dataUrl) => {
