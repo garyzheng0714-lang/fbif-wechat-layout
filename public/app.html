@@ -11,6 +11,8 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/500.css" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/600.css" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/700.css" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/400.css" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/700.css" crossorigin="anonymous">
 <link rel="stylesheet" href="/app.css">
 <link rel="stylesheet" href="/css/wx-theme.css">
 </head>
@@ -54,9 +56,12 @@
       <div class="batch-list" id="batchList" style="display:none;"></div>
 
       <div class="sidebar-divider"></div>
-      <div class="sidebar-label">排版设置</div>
+      <div class="sidebar-label settings-label">
+        <span>排版设置</span>
+        <button id="settingsEditBtn" class="settings-edit-btn" type="button">编辑</button>
+      </div>
 
-      <div class="settings-form" id="settingsForm">
+      <div class="settings-form" id="settingsForm" style="display: none;">
         <div class="form-row">
           <label>正文字号</label>
           <input type="number" id="cfg-font_size" value="15" min="12" max="24" step="1">
@@ -99,6 +104,22 @@
           <label>docx 跳过上传</label>
           <div class="toggle-switch" id="skipUploadToggleBtn"><div class="toggle-knob"></div></div>
         </div>
+        <div class="settings-actions">
+          <button id="settingsCancelBtn" type="button" class="settings-btn secondary">取消</button>
+          <button id="settingsSaveBtn" type="button" class="settings-btn primary">保存</button>
+        </div>
+      </div>
+
+      <div class="ma-section" id="moreArticlesSection">
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-label ma-section-label">
+          <span>更多文章</span>
+          <button class="ma-reset-btn" id="maResetBtn" type="button" title="清空所有卡片">清空</button>
+        </div>
+        <div class="more-articles-editor" id="moreArticlesEditor">
+          <!-- N card editors (dynamic, injected by more-articles-ui.js) -->
+        </div>
+        <div class="ma-hint" id="maHint">粘贴公众号链接自动抓取头图和标题。拖动卡片可重排顺序。</div>
       </div>
     </div>
     <div class="sidebar-footer">
@@ -207,6 +228,9 @@ window._skipUpload = skipUploadPref;
 
 // ---- Load engine + template ----
 const { initApp } = await import('./js/engine.js?v=' + assetVersion);
+const { initMoreArticlesEditor } = await import('./js/more-articles-ui.js?v=' + assetVersion);
+const { openCropEditor } = await import('./js/crop-editor.js?v=' + assetVersion);
+initMoreArticlesEditor({ openCropEditor });
 
 async function loadTemplate(templateId) {
   currentTemplateId = templateId;
@@ -274,17 +298,49 @@ function populateConfigForm() {
 }
 populateConfigForm();
 
+// Typography settings are gated behind an explicit "编辑 → 保存" flow so the
+// user isn't accidentally changing things while scrolling. Changes only
+// reach the preview after the user clicks 保存.
+function readFormIntoConfig(c) {
+  c.font_size = document.getElementById('cfg-font_size').value;
+  c.heading_size = document.getElementById('cfg-heading_size').value;
+  c.line_height = document.getElementById('cfg-line_height').value;
+  c.letter_spacing = document.getElementById('cfg-letter_spacing').value;
+  c.font_family = document.getElementById('cfg-font_family').value;
+  c.text_color = document.getElementById('cfg-text_color_picker').value;
+  c.link_color = document.getElementById('cfg-link_color_picker').value;
+  return c;
+}
+
+// Live-update the hex label next to color pickers during editing, purely visual.
 document.getElementById('settingsForm').addEventListener('input', (e) => {
-  const c = loadConfig(currentTemplateId), id = e.target.id;
-  if (id === 'cfg-font_size') c.font_size = e.target.value;
-  else if (id === 'cfg-heading_size') c.heading_size = e.target.value;
-  else if (id === 'cfg-line_height') c.line_height = e.target.value;
-  else if (id === 'cfg-letter_spacing') c.letter_spacing = e.target.value;
-  else if (id === 'cfg-font_family') c.font_family = e.target.value;
-  else if (id === 'cfg-text_color_picker') { c.text_color = e.target.value; document.getElementById('cfg-text_color_hex').textContent = e.target.value; }
-  else if (id === 'cfg-link_color_picker') { c.link_color = e.target.value; document.getElementById('cfg-link_color_hex').textContent = e.target.value; }
+  if (e.target.id === 'cfg-text_color_picker') {
+    document.getElementById('cfg-text_color_hex').textContent = e.target.value;
+  } else if (e.target.id === 'cfg-link_color_picker') {
+    document.getElementById('cfg-link_color_hex').textContent = e.target.value;
+  }
+});
+
+function setSettingsOpen(open) {
+  document.getElementById('settingsForm').style.display = open ? '' : 'none';
+  document.getElementById('settingsEditBtn').style.display = open ? 'none' : '';
+}
+
+document.getElementById('settingsEditBtn').addEventListener('click', () => {
+  populateConfigForm();
+  setSettingsOpen(true);
+});
+
+document.getElementById('settingsCancelBtn').addEventListener('click', () => {
+  populateConfigForm();
+  setSettingsOpen(false);
+});
+
+document.getElementById('settingsSaveBtn').addEventListener('click', () => {
+  const c = readFormIntoConfig(loadConfig(currentTemplateId));
   saveConfig(c, currentTemplateId);
   if (window.updateThemePreview) window.updateThemePreview(c);
+  setSettingsOpen(false);
 });
 
 // ---- Title display ----
@@ -359,7 +415,14 @@ document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && hasPreview) { e.preventDefault(); window.copyContent && window.copyContent(); }
 });
 document.addEventListener('paste', (e) => {
-  if (document.activeElement === document.getElementById('urlInput')) return;
+  const ae = document.activeElement;
+  if (ae === document.getElementById('urlInput')) return;
+  // Don't hijack pastes destined for the "更多文章" card URL inputs —
+  // those have their own fetch flow.
+  if (ae && ae.classList && ae.classList.contains('ma-url')) return;
+  // Don't hijack pastes inside any other text input either.
+  const tag = ae && ae.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
   const text = (e.clipboardData || window.clipboardData).getData('text').trim();
   if (text && /^https?:\/\//i.test(text)) {
     e.preventDefault();

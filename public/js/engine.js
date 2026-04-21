@@ -10,6 +10,14 @@ import { parseDocx } from './parser.js';
 import { uploadNonCdnImages, retryFailedImages } from './uploader.js';
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
 import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
+import {
+  loadCards as loadMoreArticlesCards,
+  saveCards as saveMoreArticlesCards,
+  mergeIntoFooter as mergeMoreArticlesIntoFooter,
+  compositePreviewDataUrl,
+  ensureCompositeReady,
+  makeFreshUploadCards,
+} from './more-articles.js';
 
 const imageUtilsModule = await import('./image-utils.mjs' + assetQuery);
 const { inferWechatImageType, looksLikeGifSource } = imageUtilsModule;
@@ -20,6 +28,17 @@ const _themeCSSReady = loadThemeCSS();
 
 // ---- Footer ----
 const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
+
+// Build a footer HTML that has the "更多文章" section replaced with the user's
+// current card config. Each customized card is composited to a data URL for
+// instant preview (no upload). Copy-time will re-run with uploaded OSS URLs.
+async function buildFooterWithMoreArticles(baseFooterHtml) {
+  const cards = loadMoreArticlesCards();
+  const cardsForPreview = await Promise.all(
+    cards.map(async c => ({ ...c, final_url: await compositePreviewDataUrl(c) }))
+  );
+  return mergeMoreArticlesIntoFooter(baseFooterHtml, cardsForPreview);
+}
 
 // ---- App Initialization ----
 export function initApp(template) {
@@ -122,7 +141,12 @@ export function initApp(template) {
       throw new Error('此模板不支持该文件格式');
     }
     const articleHtml = result.lines.join('\n');
-    const footerHtml = localStorage.getItem('custom_footer') || await footerReady;
+    // New article upload resets the "更多文章" section to blank placeholder
+    // slots — cards are a per-article curation, filled in manually each time.
+    saveMoreArticlesCards(makeFreshUploadCards());
+    if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+    const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
+    const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
     const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
       ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -165,7 +189,13 @@ export function initApp(template) {
       }
 
       const articleHtml = result.lines.join('\n');
-      const footerHtml = localStorage.getItem('custom_footer') || await footerReady;
+      // Single-file upload path — same reset behavior as batch path: wipe
+      // any prior article's "更多文章" cards to blank placeholder slots, so
+      // sidebar shows empty inputs and footer renders gray placeholders.
+      saveMoreArticlesCards(makeFreshUploadCards());
+      if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+      const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
+      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -225,6 +255,7 @@ export function initApp(template) {
     if (emptyState) emptyState.style.display = 'none';
     if (previewContent) previewContent.style.display = '';
     if (wxFooter) wxFooter.style.display = '';
+    document.body.classList.add('has-preview');
 
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
@@ -243,6 +274,37 @@ export function initApp(template) {
         _footerHtml = newHtml;
         _footerCopy = newHtml;
       }
+      const enabled = document.getElementById('footerEnabled').checked;
+      contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      markFailedImages(_failedSrcs);
+    };
+
+    // Expose the article's image URLs so the sidebar's cover-picker modal
+    // can offer them as thumbnails. Footer images are intentionally excluded
+    // — we only want images from the uploaded article, not the FBIF footer
+    // assets (QR code, avatar, etc).
+    window._getArticleImageSrcs = function() {
+      const srcs = [];
+      const seen = new Set();
+      const re = /<img\b[^>]*?\bsrc=["']([^"']+)["']/gi;
+      let m;
+      while ((m = re.exec(_articleHtml)) !== null) {
+        const src = m[1];
+        if (!src || seen.has(src)) continue;
+        seen.add(src);
+        srcs.push(src);
+      }
+      return srcs;
+    };
+
+    // Re-render the "更多文章" section after the user edits card config.
+    // Uses fast preview data URLs; real OSS URLs are swapped in at copy time.
+    window._updateMoreArticles = async function(cardsOverride) {
+      if (cardsOverride) saveMoreArticlesCards(cardsOverride);
+      const base = localStorage.getItem('custom_footer') || await footerReady;
+      const merged = await buildFooterWithMoreArticles(base);
+      _footerHtml = merged;
+      _footerCopy = merged;
       const enabled = document.getElementById('footerEnabled').checked;
       contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
       markFailedImages(_failedSrcs);
@@ -336,6 +398,22 @@ export function initApp(template) {
       logConv('info', 'DOCX 跳过上传：base64 直接写入剪贴板');
     }
 
+    // Upload any customized "更多文章" composites to OSS and rebuild _footerCopy
+    // with public URLs before writing to clipboard.
+    try {
+      const cards = loadMoreArticlesCards();
+      const needsWork = cards.some(c => (c.title && c.title.trim()) || c.cover_data_url);
+      if (needsWork) {
+        btn.textContent = '上传更多文章...';
+        const uploaded = await ensureCompositeReady(cards);
+        saveMoreArticlesCards(uploaded);
+        const baseFooter = localStorage.getItem('custom_footer') || await footerReady;
+        _footerCopy = mergeMoreArticlesIntoFooter(baseFooter, uploaded);
+      }
+    } catch (err) {
+      logConv('warn', '更多文章上传失败，使用本地预览版', { error: err.message });
+    }
+
     const enabled = document.getElementById('footerEnabled').checked;
     let html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
 
@@ -387,6 +465,7 @@ export function initApp(template) {
     if (emptyState) emptyState.style.display = '';
     if (previewContent) previewContent.style.display = 'none';
     if (wxFooter) wxFooter.style.display = 'none';
+    document.body.classList.remove('has-preview');
 
     dropZone.classList.remove('processing');
     progress.style.display = 'none';

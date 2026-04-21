@@ -10,8 +10,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -58,6 +60,12 @@ func main() {
 
 	// Article fetch (URL repost via x-reader)
 	mux.HandleFunc("POST /api/fetch-article", handleFetchArticle)
+
+	// Article meta fetch (lightweight: title + cover image for "更多文章" cards)
+	mux.HandleFunc("POST /api/fetch-article-meta", handleFetchArticleMeta)
+
+	// Image proxy (bypass CORS for Canvas compositing)
+	mux.HandleFunc("GET /api/image-proxy", handleImageProxy)
 
 	// Health check
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -541,6 +549,194 @@ func fetchDirect(url string) (content, title string, err error) {
 	// Extract article content and convert to Markdown
 	markdown, extractedTitle := extractArticle(string(bodyBytes))
 	return markdown, extractedTitle, nil
+}
+
+// ---- Article Meta (lightweight: title + cover for "更多文章" cards) ----
+
+var (
+	reMsgCdnURL    = regexp.MustCompile(`var\s+msg_cdn_url\s*=\s*"([^"]+)"`)
+	reMsgTitle     = regexp.MustCompile(`var\s+msg_title\s*=\s*"((?:[^"\\]|\\.)*)"`)
+	reTitleTag     = regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
+	reImgDataSrc   = regexp.MustCompile(`<img[^>]+data-src="(https?://[^"]+)"`)
+	hostAllowlistCDN = []string{
+		"mmbiz.qpic.cn",
+		"mmbiz.qlogo.cn",
+		"wx.qlogo.cn",
+		"mp.weixin.qq.com",
+	}
+)
+
+// handleFetchArticleMeta fetches a WeChat (or generic) article URL and returns
+// just the title and cover image URL — cheap, bounded response, for the
+// "更多文章" card editor in the sidebar.
+func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+		writeError(w, 400, "url is required")
+		return
+	}
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+		writeError(w, 400, "invalid URL: must start with http:// or https://")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	httpReq, _ := http.NewRequestWithContext(ctx, "GET", req.URL, nil)
+	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	httpReq.Header.Set("Accept", "text/html,application/xhtml+xml")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		writeError(w, 502, "failed to fetch: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		writeError(w, 502, fmt.Sprintf("upstream HTTP %d", resp.StatusCode))
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024)) // 2MB cap
+	if err != nil {
+		writeError(w, 502, "read body: "+err.Error())
+		return
+	}
+	raw := string(body)
+
+	// Cover priority: msg_cdn_url → og:image → twitter:image → first data-src img
+	cover := ""
+	if m := reMsgCdnURL.FindStringSubmatch(raw); len(m) > 1 {
+		cover = m[1]
+	}
+	if cover == "" {
+		cover = extractMeta(raw, "og:image")
+	}
+	if cover == "" {
+		cover = extractMeta(raw, "twitter:image")
+	}
+	if cover == "" {
+		if m := reImgDataSrc.FindStringSubmatch(raw); len(m) > 1 {
+			cover = m[1]
+		}
+	}
+
+	// Title priority: msg_title → og:title → <title>
+	title := ""
+	if m := reMsgTitle.FindStringSubmatch(raw); len(m) > 1 {
+		title = decodeJSString(m[1])
+	}
+	if title == "" {
+		title = extractMeta(raw, "og:title")
+	}
+	if title == "" {
+		if m := reTitleTag.FindStringSubmatch(raw); len(m) > 1 {
+			title = strings.TrimSpace(m[1])
+		}
+	}
+	title = strings.TrimSpace(title)
+
+	writeJSON(w, 200, map[string]string{
+		"title":      title,
+		"cover_url":  cover,
+		"source_url": req.URL,
+	})
+}
+
+// decodeJSString handles simple backslash escapes found in WeChat's var msg_title
+// (e.g. \", \\, \n, 中).
+func decodeJSString(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '\\' || i+1 >= len(s) {
+			b.WriteByte(c)
+			continue
+		}
+		nc := s[i+1]
+		switch nc {
+		case '"', '\\', '/':
+			b.WriteByte(nc)
+			i++
+		case 'n':
+			b.WriteByte('\n')
+			i++
+		case 't':
+			b.WriteByte('\t')
+			i++
+		case 'r':
+			b.WriteByte('\r')
+			i++
+		case 'u':
+			if i+5 < len(s) {
+				var code int
+				fmt.Sscanf(s[i+2:i+6], "%x", &code)
+				b.WriteRune(rune(code))
+				i += 5
+			} else {
+				b.WriteByte(c)
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// ---- Image Proxy (bypass CORS for Canvas compositing) ----
+
+// handleImageProxy streams an allowlisted image URL so the frontend Canvas can
+// read its pixels without tainting. Only WeChat CDN hosts are allowed so this
+// cannot be abused as an open proxy.
+func handleImageProxy(w http.ResponseWriter, r *http.Request) {
+	target := r.URL.Query().Get("url")
+	if target == "" {
+		writeError(w, 400, "url query param required")
+		return
+	}
+	u, err := url.Parse(target)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		writeError(w, 400, "invalid URL")
+		return
+	}
+	hostOK := false
+	for _, h := range hostAllowlistCDN {
+		if u.Host == h || strings.HasSuffix(u.Host, "."+h) {
+			hostOK = true
+			break
+		}
+	}
+	if !hostOK {
+		writeError(w, 403, "host not allowed: "+u.Host)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://mp.weixin.qq.com/")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, 502, "fetch failed: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		writeError(w, 502, fmt.Sprintf("upstream HTTP %d", resp.StatusCode))
+		return
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "image/jpeg"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	io.Copy(w, io.LimitReader(resp.Body, 10*1024*1024)) // 10MB cap
 }
 
 func init() {

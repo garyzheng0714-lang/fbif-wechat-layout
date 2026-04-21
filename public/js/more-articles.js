@@ -1,0 +1,417 @@
+// More-articles card module for the "更多文章" section near the footer.
+// Handles: state (localStorage), cover image loading (with CORS proxy fallback),
+// Canvas compositing of cover + title overlay, upload to OSS, and merging the
+// resulting 3-card HTML into the existing footer.html in place of the default
+// 3 cards.
+//
+// Used by: public/js/engine.js (injects into footer before render + copy)
+//          public/app.html (sidebar editor UI)
+
+const LS_KEY = 'more_articles_v1';
+
+// Composite canvas: 1000×300 landscape (10:3) per spec. All cards use the
+// same shape regardless of source image aspect. Portrait sources are
+// cover-cropped — the user can shift the focal point via the crop editor.
+const COMPOSITE_W = 1000;
+const COMPOSITE_H = 300;
+const COMPOSITE_PAD_X = 60;       // left/right inset for title text
+const COMPOSITE_PAD_BOTTOM = 44;  // bottom inset for title baseline
+const COMPOSITE_TITLE_SIZE = 48;  // default font size (auto-shrinks if too wide)
+const COMPOSITE_FONT_STACK = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif';
+
+// No hardcoded defaults — the user curates the full list. Cards array is
+// dynamic length (can be 0..N).
+export const DEFAULT_CARDS = [];
+
+// Number of blank card slots to seed on a fresh article upload. Sidebar
+// shows empty input rows; footer renders gray "待补充文章链接" placeholders
+// via cardHTML's empty-imgurl branch. The user fills these in by hand.
+export const FRESH_UPLOAD_PLACEHOLDER_COUNT = 3;
+
+export function emptyCard() {
+  return {
+    href: '',
+    imgurl: '',
+    title: '',
+    cover_data_url: null,
+    crop: { x: 0.5, y: 0.5, scale: 1 },
+    composite_url: null,
+    composite_hash: null,
+  };
+}
+
+export function makeFreshUploadCards(n = FRESH_UPLOAD_PLACEHOLDER_COUNT) {
+  return Array.from({ length: n }, () => emptyCard());
+}
+
+function normalizeCard(c) {
+  const base = emptyCard();
+  if (!c || typeof c !== 'object') return base;
+  return {
+    ...base,
+    ...c,
+    crop: { ...base.crop, ...(c.crop || {}) },
+  };
+}
+
+export function loadCards() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeCard);
+  } catch {
+    return [];
+  }
+}
+
+export function saveCards(cards) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(cards));
+  } catch (err) {
+    console.warn('[more-articles] saveCards failed', err);
+  }
+}
+
+export function resetCards() {
+  try { localStorage.removeItem(LS_KEY); } catch {}
+}
+
+// ---- Image loading with CORS-proxy fallback ----
+// mmbiz.qpic.cn usually does NOT send CORS headers, so a direct <img
+// crossOrigin=anonymous> would taint the canvas. Prefer the server-side
+// image-proxy endpoint for http(s) URLs; data URLs load directly.
+export function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    if (!src) return reject(new Error('empty src'));
+    const attempt = (url, useCrossOrigin) => new Promise((res, rej) => {
+      const img = new Image();
+      if (useCrossOrigin) img.crossOrigin = 'anonymous';
+      img.onload = () => res(img);
+      img.onerror = () => rej(new Error('image load failed: ' + url));
+      img.src = url;
+    });
+    if (src.startsWith('data:')) {
+      attempt(src, false).then(resolve, reject);
+      return;
+    }
+    const proxied = '/api/image-proxy?url=' + encodeURIComponent(src);
+    attempt(proxied, true).then(resolve, () => attempt(src, true).then(resolve, reject));
+  });
+}
+
+// ---- Text wrapping (CJK-friendly, Canvas measureText based) ----
+function wrapTextForCanvas(ctx, text, maxWidth) {
+  const chars = Array.from(text || '');
+  const lines = [];
+  let line = '';
+  for (const ch of chars) {
+    if (ch === '\n') { lines.push(line); line = ''; continue; }
+    const next = line + ch;
+    if (ctx.measureText(next).width > maxWidth && line) {
+      lines.push(line);
+      line = ch;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// ---- Composite: cover + dark overlay + title text ----
+export async function compositeCard(card) {
+  const src = card.cover_data_url || card.imgurl;
+  if (!src) throw new Error('card has no cover');
+  const img = await loadImage(src);
+
+  const imgW = img.naturalWidth || img.width;
+  const imgH = img.naturalHeight || img.height;
+
+  // Fixed landscape output for visual consistency across the 3 cards.
+  const W = COMPOSITE_W;
+  const H = COMPOSITE_H;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const c = card.crop || { x: 0.5, y: 0.5, scale: 1 };
+  // Cover-crop baseline: image is scaled to completely fill the 10:3 canvas.
+  // For portrait sources the top/bottom get cropped; for very-wide sources the
+  // sides get cropped. User's crop.x/crop.y picks the focal point.
+  const baseScale = Math.max(W / imgW, H / imgH);
+  const finalScale = baseScale * Math.max(0.5, Math.min(3, c.scale || 1));
+  const drawW = imgW * finalScale;
+  const drawH = imgH * finalScale;
+  const fx = Math.max(0, Math.min(1, c.x == null ? 0.5 : c.x));
+  const fy = Math.max(0, Math.min(1, c.y == null ? 0.5 : c.y));
+  const dx = W / 2 - drawW * fx;
+  const dy = H / 2 - drawH * fy;
+  // Clamp so the image always covers the full canvas (no black edges)
+  const clampedDx = Math.min(0, Math.max(W - drawW, dx));
+  const clampedDy = Math.min(0, Math.max(H - drawH, dy));
+
+  ctx.fillStyle = '#333';
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, clampedDx, clampedDy, drawW, drawH);
+
+  // Dark gradient overlay — stronger at bottom so title is legible on any cover
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, 'rgba(0,0,0,0.28)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0.42)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.62)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Title: white bold, 48px Noto Sans SC per spec. Auto-shrink if > 2 lines.
+  const title = String(card.title || '').trim();
+  if (title) {
+    // Ensure Noto Sans SC is loaded before drawing — otherwise Canvas silently
+    // falls back to a system font and the first composite looks off.
+    if (document.fonts && document.fonts.load) {
+      try { await document.fonts.load(`700 ${COMPOSITE_TITLE_SIZE}px "Noto Sans SC"`); } catch {}
+    }
+    const PAD_X = COMPOSITE_PAD_X;
+    const PAD_BOTTOM = COMPOSITE_PAD_BOTTOM;
+    const maxW = W - PAD_X * 2;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textBaseline = 'alphabetic';
+    let size = COMPOSITE_TITLE_SIZE;
+    const minSize = 30;
+    let lines = [];
+    while (size >= minSize) {
+      ctx.font = `700 ${size}px ${COMPOSITE_FONT_STACK}`;
+      lines = wrapTextForCanvas(ctx, title, maxW);
+      if (lines.length <= 2) break;
+      size -= 2;
+    }
+    if (lines.length > 2) {
+      lines = lines.slice(0, 2);
+      let last = lines[1];
+      while (last.length > 1 && ctx.measureText(last + '…').width > maxW) {
+        last = last.slice(0, -1);
+      }
+      lines[1] = last + '…';
+    }
+    // Vertically center the title block within the canvas.
+    ctx.textBaseline = 'middle';
+    const lineHeight = size * 1.22;
+    const blockH = (lines.length - 1) * lineHeight + size;
+    let yCenter = (H - blockH) / 2 + size / 2;
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+    for (const line of lines) {
+      ctx.fillText(line, PAD_X, yCenter);
+      yCenter += lineHeight;
+    }
+    ctx.shadowColor = 'transparent';
+    // PAD_BOTTOM is reserved for future use but kept referenced to avoid a
+    // "declared but never read" diagnostic on some linters.
+    void PAD_BOTTOM;
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.88);
+}
+
+// ---- Fingerprint for skip-upload ----
+async function sha1Hex(str) {
+  const buf = new TextEncoder().encode(str);
+  const digest = await crypto.subtle.digest('SHA-1', buf);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export async function computeCardHash(card) {
+  const input = JSON.stringify({
+    title: card.title || '',
+    imgurl: card.imgurl || '',
+    cover_data_url_len: card.cover_data_url ? card.cover_data_url.length : 0,
+    cover_data_url_head: card.cover_data_url ? card.cover_data_url.slice(0, 120) : '',
+    crop: card.crop || null,
+  });
+  return sha1Hex(input);
+}
+
+// ---- Upload to OSS (reuses existing /api/oss-upload endpoint) ----
+export async function uploadDataUrl(dataUrl, key) {
+  const resp = await fetch('/api/oss-upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64_images: { [key]: dataUrl } }),
+  });
+  if (!resp.ok) {
+    const err = await resp.text().catch(() => '');
+    throw new Error('oss-upload HTTP ' + resp.status + ' ' + err);
+  }
+  const json = await resp.json();
+  const url = json && json.results && json.results[key];
+  return url || dataUrl;
+}
+
+// ---- Ensure each card has a usable final image URL ----
+// If the card has a title set OR a custom cover, we composite + upload.
+// Otherwise we keep the original imgurl untouched.
+export async function ensureCompositeReady(cards, { onProgress } = {}) {
+  const out = cards.map(c => ({ ...c, crop: { ...(c.crop || {}) } }));
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i];
+    const hasTitle = !!(c.title && c.title.trim());
+    const hasCustomCover = !!c.cover_data_url;
+    const needsComposite = hasTitle || hasCustomCover;
+    if (!needsComposite) {
+      c.final_url = c.imgurl;
+      continue;
+    }
+    const hash = await computeCardHash(c);
+    if (c.composite_url && c.composite_hash === hash && !c.force_recompose) {
+      c.final_url = c.composite_url;
+      continue;
+    }
+    if (onProgress) onProgress(i, out.length);
+    try {
+      const dataUrl = await compositeCard(c);
+      const uploaded = await uploadDataUrl(dataUrl, `more_article_${i}_${hash.slice(0, 10)}`);
+      c.composite_url = uploaded;
+      c.composite_hash = hash;
+      c.final_url = uploaded;
+      c.force_recompose = false;
+    } catch (err) {
+      console.warn('[more-articles] composite/upload failed for card', i, err);
+      c.final_url = c.imgurl || '';
+    }
+  }
+  return out;
+}
+
+// Same-origin preview data URL (no upload). Used by sidebar thumbnail and by
+// the live preview so the user sees title overlays instantly.
+//
+// If the card has no title and no custom cover, we don't need a composite —
+// just return a URL the browser can display. Remote WeChat CDN URLs are
+// routed through /api/image-proxy so WeChat's anti-hotlinking placeholder
+// doesn't show up; the proxy sets the right Referer header.
+export async function compositePreviewDataUrl(card) {
+  const hasTitle = !!(card.title && card.title.trim());
+  const hasCustomCover = !!card.cover_data_url;
+  if (!hasTitle && !hasCustomCover) {
+    const raw = card.imgurl || '';
+    if (!raw) return '';
+    if (raw.startsWith('data:') || raw.startsWith('/')) return raw;
+    return '/api/image-proxy?url=' + encodeURIComponent(raw);
+  }
+  try { return await compositeCard(card); }
+  catch (err) { console.warn('[more-articles] preview composite failed', err); return card.imgurl || ''; }
+}
+
+// ---- HTML generation ----
+function escAttr(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function cardHTML(card, index) {
+  const rawImgurl = card.final_url || card.composite_url || card.imgurl || '';
+  const href = escAttr(card.href || '');
+  const marginTop = index === 0 ? 'margin-top: 0px;' : '';
+
+  // Empty card (user added a slot but hasn't pasted a URL yet): render a
+  // neutral-gray placeholder block matching the card proportions. Real cards
+  // get their card-to-card gap from the inline <img>'s baseline leading
+  // inside a line-height:1.6 span — the block-level placeholder would collapse
+  // that gap, so we add an explicit margin-top on non-first slots to match.
+  if (!rawImgurl) {
+    const phGap = index === 0 ? '' : ' margin-top: 16px;';
+    const PH_STYLE = 'display: block; width: 100%; aspect-ratio: 10 / 3; background: #e8e6e4; color: #a39e98; font-size: 15px; text-align: center; line-height: 1; border-radius: 4px;' + phGap;
+    const INNER_STYLE = 'display: flex; align-items: center; justify-content: center; height: 100%; width: 100%;';
+    return (
+      `<section><p style="margin:0;padding:0;${marginTop}">` +
+      `<span style="${PH_STYLE}"><span style="${INNER_STYLE}">待补充文章链接</span></span>` +
+      `</p></section>`
+    );
+  }
+
+  const imgurl = escAttr(rawImgurl);
+  const SPAN_STYLE = 'color:rgba(0, 0, 0, 0.9);font-size:17px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.6;letter-spacing:0.034em;font-style:normal;font-weight:normal;width:100%;';
+  const IMG_STYLE = 'width: 661px !important; vertical-align: baseline; box-sizing: border-box; height: auto !important; max-width: 100% !important; visibility: visible !important;';
+  return (
+    `<section><p style="margin:0;padding:0;${marginTop}"><strong>` +
+    `<a href="${href}" imgurl="${imgurl}" linktype="image" tab="innerlink" data-itemshowtype="0" target="_blank" data-linktype="1">` +
+    `<span style="${SPAN_STYLE}" class="js_jump_icon h5_image_link">` +
+    `<img alt="图片" class="rich_pages wxw-img" style="${IMG_STYLE}" src="${imgurl}">` +
+    `</span></a></strong></p></section>`
+  );
+}
+
+function buildCardsInnerHTML(cards) {
+  return cards.map((c, i) => cardHTML(c, i)).join('');
+}
+
+// ---- Merge into footer.html (replaces the outer wrapper's inner content) ----
+const OUTER_WRAPPER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
+
+function findMatchingClose(html, openIdx) {
+  const OPEN = '<section';
+  const CLOSE = '</section>';
+  let depth = 0;
+  let i = openIdx;
+  const n = html.length;
+  while (i < n) {
+    const ni = html.indexOf(OPEN, i);
+    const nc = html.indexOf(CLOSE, i);
+    if (nc === -1) return -1;
+    if (ni !== -1 && ni < nc) {
+      depth++;
+      i = ni + OPEN.length;
+    } else {
+      depth--;
+      if (depth === 0) return nc;
+      i = nc + CLOSE.length;
+    }
+  }
+  return -1;
+}
+
+// Paragraph section that wraps BOTH the "/ 更多文章 /" title AND the outer
+// cards wrapper. Found by scanning backwards from the cards wrapper.
+const PARAGRAPH_WRAPPER_OPEN = '<section data-role="paragraph">';
+
+function findMoreArticlesSectionBounds(footerHtml) {
+  const outerStart = footerHtml.indexOf(OUTER_WRAPPER_OPEN);
+  if (outerStart === -1) return null;
+  const paraStart = footerHtml.lastIndexOf(PARAGRAPH_WRAPPER_OPEN, outerStart);
+  if (paraStart === -1) return null;
+  const paraEnd = findMatchingClose(footerHtml, paraStart);
+  if (paraEnd === -1 || paraEnd < outerStart) return null;
+  return { paraStart, paraEnd, outerStart };
+}
+
+export function mergeIntoFooter(footerHtml, cards) {
+  if (!footerHtml) return footerHtml;
+  const list = Array.isArray(cards) ? cards : [];
+
+  // Empty list → remove the entire "更多文章" section (title + cards wrapper).
+  if (list.length === 0) {
+    const bounds = findMoreArticlesSectionBounds(footerHtml);
+    if (!bounds) return footerHtml;
+    return footerHtml.slice(0, bounds.paraStart)
+      + footerHtml.slice(bounds.paraEnd + '</section>'.length);
+  }
+
+  // Non-empty → replace the inner content of the outer cards wrapper with
+  // the user's N cards.
+  const start = footerHtml.indexOf(OUTER_WRAPPER_OPEN);
+  if (start === -1) return footerHtml;
+  const end = findMatchingClose(footerHtml, start);
+  if (end === -1) return footerHtml;
+  const wrapperInnerStart = start + OUTER_WRAPPER_OPEN.length;
+  const before = footerHtml.slice(0, wrapperInnerStart);
+  const after = footerHtml.slice(end);
+  return before + buildCardsInnerHTML(list) + after;
+}
