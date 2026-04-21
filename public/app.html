@@ -430,6 +430,23 @@ document.addEventListener('paste', (e) => {
     window.fetchArticle();
   }
 });
+
+// Paste directly into the URL input: auto-fetch without pressing Enter / 提取.
+// setTimeout 0 waits for the browser to insert the pasted text as a task;
+// a microtask would read .value === '' and silently skip.
+(() => {
+  const urlInput = document.getElementById('urlInput');
+  if (!urlInput) return;
+  urlInput.addEventListener('paste', () => {
+    setTimeout(() => {
+      const v = (urlInput.value || '').trim();
+      if (/^https?:\/\//i.test(v)) window.fetchArticle();
+    }, 0);
+  });
+  urlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); window.fetchArticle(); }
+  });
+})();
 </script>
 </body>
 </html>

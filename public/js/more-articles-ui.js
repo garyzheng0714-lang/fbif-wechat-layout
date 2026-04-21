@@ -11,6 +11,7 @@ import {
   resetCards,
   compositePreviewDataUrl,
   emptyCard,
+  makeFreshUploadCards,
 } from './more-articles.js';
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -208,25 +209,17 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
   // ---- Rendering ----------------------------------------------------------
 
   function renderAll() {
-    container.innerHTML = '';
+    // Default state is 3 placeholder slots (never an empty editor). Seed on
+    // demand so first-visit, 清空, and delete-to-zero all converge to "3 blank
+    // cards to fill in" instead of a separate empty-state UI.
     if (cards.length === 0) {
-      container.appendChild(renderEmptyPlaceholder());
-      return;
+      cards = makeFreshUploadCards();
+      saveCards(cards);
+      pushLivePreview();
     }
+    container.innerHTML = '';
     cards.forEach((_, i) => container.appendChild(renderCardEditor(i)));
     container.appendChild(renderAddButton());
-  }
-
-  function renderEmptyPlaceholder() {
-    const el = document.createElement('div');
-    el.className = 'ma-empty-placeholder';
-    el.innerHTML = `
-      <div class="ma-empty-icon">+</div>
-      <div class="ma-empty-text">需要补充更多文章推荐</div>
-      <button type="button" class="ma-empty-add">添加第一张卡片</button>
-    `;
-    el.querySelector('.ma-empty-add').addEventListener('click', addCard);
-    return el;
   }
 
   function renderAddButton() {
@@ -428,9 +421,23 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
         e.dataTransfer.setData('text/plain', 'reorder');
       } catch {}
     });
+    // Commit on dragend — it fires even when the user releases the mouse
+    // outside any valid dropzone (the "+ 添加" button, gaps between cards,
+    // the empty placeholder). drop-only silently dropped those orderings
+    // while the DOM already looked reordered, so the preview went stale.
     root.addEventListener('dragend', () => {
       root.classList.remove('dragging');
+      const orderIndexes = Array.from(container.querySelectorAll('.ma-card'))
+        .map(el => Number(el.dataset.idx))
+        .filter(n => Number.isFinite(n));
+      const reordered = orderIndexes.map(i => cards[i]);
+      const wellFormed = reordered.length === cards.length && reordered.every(c => c !== undefined);
+      const changed = wellFormed && reordered.some((c, i) => c !== cards[i]);
       draggedEl = null;
+      if (changed) {
+        cards = reordered;
+        persistAndRefresh();
+      }
     });
     root.addEventListener('dragover', e => {
       if (!draggedEl || draggedEl === root) return;
@@ -446,17 +453,6 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     });
     root.addEventListener('drop', e => {
       e.preventDefault();
-      if (!draggedEl) return;
-      const orderIndexes = Array.from(container.querySelectorAll('.ma-card'))
-        .map(el => Number(el.dataset.idx))
-        .filter(n => Number.isFinite(n));
-      const reordered = orderIndexes.map(i => cards[i]);
-      // Sanity guard: only commit if we got exactly one entry per card.
-      if (reordered.length === cards.length && reordered.every(c => c !== undefined)) {
-        cards = reordered;
-      }
-      draggedEl = null;
-      persistAndRefresh();
     });
 
     refreshThumb();
