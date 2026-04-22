@@ -59,13 +59,9 @@ jobs:
 
           # Write env file for the fbif-api systemd service (loaded via EnvironmentFile=)
           # Tempfile + atomic rename so the service never sees a half-written file.
+          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" | base64)
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
-            "cat > /var/www/api/.env.tmp <<'ENVEOF'
-LIBREOFFICE_URL=${LIBREOFFICE_URL}
-LIBREOFFICE_TOKEN=${LIBREOFFICE_TOKEN}
-CLOUDCONVERT_API_KEY=${CLOUDCONVERT_API_KEY}
-ENVEOF
-chmod 600 /var/www/api/.env.tmp && mv /var/www/api/.env.tmp /var/www/api/.env"
+            "echo '$ENV_CONTENT' | base64 -d > /var/www/api/.env.tmp && chmod 600 /var/www/api/.env.tmp && mv /var/www/api/.env.tmp /var/www/api/.env"
 
           # Restart API service
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
