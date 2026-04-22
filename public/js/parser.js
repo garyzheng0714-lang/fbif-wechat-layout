@@ -2,6 +2,7 @@
 // (except DOMParser which is available in Node 20+ via jsdom if needed)
 
 import { inferImageMimeFromBase64, looksLikeGifSource } from './image-utils.mjs';
+import { convertRuns } from './punctuation.js';
 
 // ---- XML Namespaces ----
 export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -195,6 +196,7 @@ function walkParagraph(node, ctx, runs, ridToFile, ridToUrl) {
 // properties. Heading/outline flags are passed in so split paragraphs can
 // downgrade trailing slices to plain body text.
 function buildParagraph(runs, base) {
+  runs = convertRuns(runs);
   const text = runs.filter(r => r.type !== 'img' && r.type !== 'br').map(r => r.text || '').join('');
   const textRuns = runs.filter(r => r.type === 'txt');
   return {
@@ -358,7 +360,7 @@ export function parseMdRuns(text) {
   }
   const rest = text.slice(lastIdx);
   if (rest) pushBoldSplit(runs, rest);
-  return runs;
+  return convertRuns(runs);
 }
 
 export function parseMdFrontmatter(text) {
