@@ -26,6 +26,75 @@ export { inferWechatImageType, looksLikeGifSource };
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
 
+// ---- Legacy .doc (OLE2) → .docx bridge ----
+// Sniff first 8 bytes for the OLE2 Compound Document magic. Detect by bytes,
+// not filename: some files have `.doc` extension, others ship legacy binary
+// content inside a `.docx`-named wrapper.
+async function sniffIsOle2(file) {
+  try {
+    const buf = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    return buf.length >= 8 &&
+      buf[0] === 0xD0 && buf[1] === 0xCF && buf[2] === 0x11 && buf[3] === 0xE0 &&
+      buf[4] === 0xA1 && buf[5] === 0xB1 && buf[6] === 0x1A && buf[7] === 0xE1;
+  } catch {
+    return false;
+  }
+}
+
+// Use XHR (not fetch) so we get upload+download byte-level progress events.
+// Budget: 0-45% upload, 45-50% server processing, 50-95% download.
+function convertDocToDocxFile(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.responseType = 'blob';
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        const pct = Math.round((e.loaded / e.total) * 45);
+        onProgress(pct, `上传中 ${pct}%`);
+      }
+    };
+    xhr.upload.onload = () => { if (onProgress) onProgress(47, '服务器转换中...'); };
+    xhr.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        const pct = 50 + Math.round((e.loaded / e.total) * 45);
+        onProgress(pct, `下载中 ${pct}%`);
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const newName = file.name.replace(/\.docx?$/i, '') + '.docx';
+        resolve(new File([xhr.response], newName, {
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }));
+      } else {
+        let msg = '';
+        try { msg = JSON.parse(xhr.responseText || '').error || ''; } catch {}
+        reject(new Error('DOC 转换失败: ' + (msg || xhr.status)));
+      }
+    };
+    xhr.onerror = () => reject(new Error('DOC 转换失败: 网络错误'));
+    xhr.open('POST', '/api/doc-to-docx');
+    const fd = new FormData();
+    fd.append('file', file);
+    xhr.send(fd);
+  });
+}
+
+async function normalizeToDocx(file, onProgress) {
+  if (await sniffIsOle2(file)) {
+    if (onProgress) onProgress(0, '正在转换 DOC → DOCX...');
+    return await convertDocToDocxFile(file, onProgress);
+  }
+  // A `.doc`-named file that isn't OLE2 is an unsupported legacy variant
+  // (RTF / HTML / WordPerfect saved with the .doc extension). Reject it
+  // here rather than letting it fall through to processMd, which would
+  // feed binary bytes to the Markdown parser and produce garbage output.
+  if (/\.doc$/i.test(file.name)) {
+    throw new Error('不支持的 .doc 格式（非 Word OLE2 容器）。请在 Word 里"另存为 .docx"后重试。');
+  }
+  return file;
+}
+
 // ---- Footer ----
 const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
 
@@ -128,6 +197,7 @@ export function initApp(template) {
 
   async function processFile(file) {
     const t0 = performance.now();
+    file = await normalizeToDocx(file);
     let result;
     const isDocx = file.name.toLowerCase().endsWith('.docx');
     _sourceIsDocx = isDocx;
@@ -172,6 +242,13 @@ export function initApp(template) {
     progressText.textContent = '正在解析...';
     try {
       const t0 = performance.now();
+
+      file = await normalizeToDocx(file, (pct, msg) => {
+        progressText.textContent = msg;
+        progressFill.style.width = pct + '%';
+      });
+      progressFill.style.width = '97%';
+      progressText.textContent = '正在解析...';
 
       let result;
       const isDocx = file.name.toLowerCase().endsWith('.docx');
