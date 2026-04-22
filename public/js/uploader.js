@@ -5,6 +5,20 @@ export function isMmbizUrl(url) {
   return /^https?:\/\/mmbiz\.qpic\.cn\//i.test(url);
 }
 
+// Fetch a blob: URL (backed by an in-memory Blob created by parser.js) and
+// encode it as a base64 data URL so the OSS upload path can consume it.
+async function blobUrlToDataUrl(blobUrl) {
+  const resp = await fetch(blobUrl);
+  if (!resp.ok) throw new Error('fetch ' + blobUrl + ' → ' + resp.status);
+  const blob = await resp.blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 // Upload a single base64 image to OSS. Returns OSS URL or null on failure.
 async function uploadOne(task) {
   const body = JSON.stringify({ base64_images: { [task.key]: task.src } });
@@ -29,9 +43,28 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   const tasks = [];
   let m, mmbizCount = 0;
 
-  // base64 data URIs (from DOCX) — must upload to OSS
+  // blob: URLs (DOCX images held in memory — parser.js skips expensive
+  // base64 encoding at parse time). Materialize to base64 here, only for
+  // images actually still referenced in the HTML.
+  const blobRe = /src="(blob:[^"]+)"/g;
+  const blobUrls = new Set();
+  while ((m = blobRe.exec(allHtml)) !== null) blobUrls.add(m[1]);
+  for (const blobUrl of blobUrls) {
+    try {
+      const dataUrl = await blobUrlToDataUrl(blobUrl);
+      articleCopy = articleCopy.split(blobUrl).join(dataUrl);
+      footerCopy = footerCopy.split(blobUrl).join(dataUrl);
+    } catch (err) {
+      onLog && onLog('error', 'blob 转 base64 失败', { url: blobUrl.slice(0, 60), err: String(err) });
+    }
+  }
+
+  // Refresh combined HTML if any blob: → data: substitutions happened.
+  const refreshedHtml = blobUrls.size ? (articleCopy + '\n' + footerCopy) : allHtml;
+
+  // base64 data URIs (from DOCX, plus any we just materialized) — upload to OSS
   const b64Re = /src="(data:image\/[^"]+)"/g;
-  while ((m = b64Re.exec(allHtml)) !== null) {
+  while ((m = b64Re.exec(refreshedHtml)) !== null) {
     tasks.push({ type: 'base64', src: m[1], key: 'img_' + tasks.length });
   }
 

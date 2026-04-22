@@ -1,8 +1,19 @@
 // DOCX/Markdown parsing — pure functions, no browser dependencies
 // (except DOMParser which is available in Node 20+ via jsdom if needed)
 
-import { inferImageMimeFromBase64, looksLikeGifSource } from './image-utils.mjs';
 import { convertRuns } from './punctuation.js';
+
+const EXT_TO_MIME = {
+  gif: 'image/gif',
+  png: 'image/png',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  bmp: 'image/bmp',
+  tiff: 'image/tiff',
+  tif: 'image/tiff',
+};
 
 // ---- XML Namespaces ----
 export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -279,15 +290,20 @@ export async function parseDocx(file) {
     else if (rtype.includes('hyperlink')) ridToUrl[rid] = (target || '').replace(/&amp;/g, '&');
   }
 
+  // imgCache values are blob: URLs, NOT base64 data URLs. Base64 encoding
+  // 14 MB of embedded PNGs blocks the main thread for 5–15 s on mid-range
+  // machines and doubles memory pressure. Blob URLs are created in O(1),
+  // decode natively, and cache better in the image pipeline.
+  // Downstream uploader (uploader.js) converts blob: URLs back to base64
+  // on demand when the user clicks "复制" (only images not on CDN).
   const imgCache = {};
   await Promise.all(Object.values(ridToFile).map(async (fn) => {
     const entry = zip.file('word/media/' + fn);
-    if (entry) {
-      const data = await entry.async('base64');
-      const ext = fn.split('.').pop().toLowerCase();
-      const mime = inferImageMimeFromBase64(data, ext);
-      imgCache[fn] = 'data:' + mime + ';base64,' + data;
-    }
+    if (!entry) return;
+    const blob = await entry.async('blob');
+    const mime = EXT_TO_MIME[(fn.split('.').pop() || '').toLowerCase()] || blob.type || 'image/png';
+    const typed = blob.type === mime ? blob : blob.slice(0, blob.size, mime);
+    imgCache[fn] = URL.createObjectURL(typed);
   }));
 
   const docXml = await docEntry.async('string');
@@ -337,12 +353,20 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out) {
 }
 
 // ---- Markdown Utilities ----
-function pushBoldSplit(runs, text) {
+// Splits `text` on ** and emits txt runs with the correct bold flag. The
+// `startBold` param lets callers carry bold state across a boundary that
+// doesn't go through this function (e.g. a [link](url) token sits between
+// two pushBoldSplit calls). Returns the bold state AFTER this chunk so the
+// next chunk can resume. Without this, `**A [link](url) B**` loses bold on
+// B because each chunk otherwise starts from bold=false.
+function pushBoldSplit(runs, text, startBold = false) {
   const parts = text.split(/\*\*/);
+  let bold = startBold;
   for (let i = 0; i < parts.length; i++) {
-    if (!parts[i]) continue;
-    runs.push({ type: 'txt', text: parts[i], bold: i % 2 === 1 });
+    if (parts[i]) runs.push({ type: 'txt', text: parts[i], bold });
+    if (i < parts.length - 1) bold = !bold;
   }
+  return bold;
 }
 
 export function parseMdRuns(text) {
@@ -352,14 +376,15 @@ export function parseMdRuns(text) {
   const re = /\[([^\]]+)\]\(([^)\s]+)\)/g;
   let lastIdx = 0;
   let m;
+  let curBold = false;
   while ((m = re.exec(text)) !== null) {
     const before = text.slice(lastIdx, m.index);
-    if (before) pushBoldSplit(runs, before);
-    runs.push({ type: 'link', text: m[1], href: m[2] });
+    if (before) curBold = pushBoldSplit(runs, before, curBold);
+    runs.push({ type: 'link', text: m[1], href: m[2], bold: curBold });
     lastIdx = m.index + m[0].length;
   }
   const rest = text.slice(lastIdx);
-  if (rest) pushBoldSplit(runs, rest);
+  if (rest) pushBoldSplit(runs, rest, curBold);
   return convertRuns(runs);
 }
 
