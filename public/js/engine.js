@@ -98,15 +98,52 @@ async function normalizeToDocx(file, onProgress) {
 // ---- Footer ----
 const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
 
+// Module-level flag: true when the current article was fetched from a URL
+// (i.e. it is a repost). Set explicitly by handleFile/processFile at each
+// entry so flags never leak across articles. Read by applyRepostTransform
+// at every footer-rebuild site.
+let _isRepost = false;
+
+// Rewrites the stock FBIF footer from 原创 → 转载 when _isRepost is true.
+// Anchors: four <!--REPOST_BULLET{1,2}_{START,END}--> HTML comments embedded
+// in footer.html. If the user customized the footer and removed the sentinels
+// or the bullet text, transform no-ops (logged) — custom footers are the
+// user's responsibility.
+function applyRepostTransform(html) {
+  if (!_isRepost) return html;
+  if (typeof html !== 'string' || !html) return html;
+  let out = html;
+  let changed = false;
+  const before = '* 本文为FBIF原创，欢迎转发朋友圈；';
+  const after = '* 本文为转载，不代表FBIF立场。';
+  if (out.includes(before)) {
+    out = out.replace(before, after);
+    changed = true;
+  }
+  const s = '<!--REPOST_BULLET2_START-->';
+  const e = '<!--REPOST_BULLET2_END-->';
+  const i = out.indexOf(s);
+  const j = out.indexOf(e);
+  if (i >= 0 && j > i) {
+    out = out.slice(0, i) + out.slice(j + e.length);
+    changed = true;
+  }
+  if (!changed) {
+    console.warn('[engine] repost transform no-op: footer sentinels/anchors not found (custom footer?)');
+  }
+  return out;
+}
+
 // Build a footer HTML that has the "更多文章" section replaced with the user's
 // current card config. Each customized card is composited to a data URL for
 // instant preview (no upload). Copy-time will re-run with uploaded OSS URLs.
 async function buildFooterWithMoreArticles(baseFooterHtml) {
+  const transformed = applyRepostTransform(baseFooterHtml);
   const cards = loadMoreArticlesCards();
   const cardsForPreview = await Promise.all(
     cards.map(async c => ({ ...c, final_url: await compositePreviewDataUrl(c) }))
   );
-  return mergeMoreArticlesIntoFooter(baseFooterHtml, cardsForPreview);
+  return mergeMoreArticlesIntoFooter(transformed, cardsForPreview);
 }
 
 // ---- App Initialization ----
@@ -166,14 +203,14 @@ export function initApp(template) {
     if (el) { el.textContent = status; el.className = 'batch-status ' + (cls || ''); }
   }
 
-  async function handleFiles(files) {
+  async function handleFiles(files, opts) {
     const valid = Array.from(files).filter(isValidFile);
     if (valid.length === 0) {
       showError('请上传 ' + template.formats.join(' 或 ') + ' 文件');
       return;
     }
     if (valid.length === 1) {
-      handleFile(valid[0]);
+      handleFile(valid[0], opts);
       return;
     }
     // Batch mode
@@ -182,7 +219,7 @@ export function initApp(template) {
     for (let i = 0; i < valid.length; i++) {
       updateBatchStatus(i, '处理中...', 'processing');
       try {
-        const result = await processFile(valid[i]);
+        const result = await processFile(valid[i], opts);
         _batchResults[i] = result;
         updateBatchStatus(i, '✓ 完成', 'done');
       } catch (err) {
@@ -195,7 +232,9 @@ export function initApp(template) {
     }
   }
 
-  async function processFile(file) {
+  async function processFile(file, opts) {
+    // Set repost flag per-call so it never leaks across articles.
+    _isRepost = !!(opts && opts.isRepost);
     const t0 = performance.now();
     file = await normalizeToDocx(file);
     let result;
@@ -228,11 +267,18 @@ export function initApp(template) {
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone.addEventListener('drop', e => {
     e.preventDefault(); dropZone.classList.remove('dragover');
-    handleFiles(e.dataTransfer.files);
+    handleFiles(e.dataTransfer.files, { isRepost: false });
   });
-  fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles(fileInput.files); });
+  fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles(fileInput.files, { isRepost: false }); });
 
-  async function handleFile(file) {
+  // Exposed so app.html fetchArticle() can feed the synthetic File produced
+  // from a URL fetch through the same pipeline as a local upload, but with
+  // isRepost=true so the footer swaps to the 转载 variant.
+  window._handleFile = (file, opts) => handleFile(file, opts);
+
+  async function handleFile(file, opts) {
+    // Set repost flag per-call so it never leaks across articles.
+    _isRepost = !!(opts && opts.isRepost);
     _convLog.length = 0;
     logConv('info', '开始转化', { file: file.name, size: (file.size / 1024).toFixed(1) + 'KB' });
     errorEl.style.display = 'none';
@@ -484,7 +530,7 @@ export function initApp(template) {
         btn.textContent = '上传更多文章...';
         const uploaded = await ensureCompositeReady(cards);
         saveMoreArticlesCards(uploaded);
-        const baseFooter = localStorage.getItem('custom_footer') || await footerReady;
+        const baseFooter = applyRepostTransform(localStorage.getItem('custom_footer') || await footerReady);
         _footerCopy = mergeMoreArticlesIntoFooter(baseFooter, uploaded);
       }
     } catch (err) {

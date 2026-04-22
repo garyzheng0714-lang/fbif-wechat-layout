@@ -383,9 +383,16 @@ window.fetchArticle = async function() {
     const { title, content } = await resp.json();
     if (!content) throw new Error('文章内容为空');
     const file = new File([content], (title || 'article') + '.md', { type: 'text/markdown' });
-    const fi = document.getElementById('fileInput');
-    const dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files;
-    fi.dispatchEvent(new Event('change'));
+    // Bypass fileInput change event — call engine directly with isRepost=true
+    // so the footer swaps to the 转载 variant. Going through fileInput would
+    // hit the 'change' listener which defaults to { isRepost: false }.
+    if (window._handleFile) {
+      window._handleFile(file, { isRepost: true });
+    } else {
+      const fi = document.getElementById('fileInput');
+      const dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files;
+      fi.dispatchEvent(new Event('change'));
+    }
   } catch (e) { errorEl.textContent = '提取失败: ' + e.message; errorEl.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = '提取'; }
 };

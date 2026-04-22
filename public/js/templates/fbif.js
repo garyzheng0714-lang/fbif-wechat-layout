@@ -76,7 +76,7 @@ function classifyDocx(paragraphs, imgCache) {
     // marker and every citation below it fall through to the txt branch and
     // render with 正文 styling plus wx-gap between each entry.
     const trimmed = pd.text.trim();
-    if (/^(参考|信息)来源[：:]?$/.test(trimmed)) {
+    if (/^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/.test(trimmed)) {
       inRef = true;
       elems.push({ k: 'refH', text: trimmed.replace(/[：:]$/, '') });
       continue;
@@ -85,7 +85,9 @@ function classifyDocx(paragraphs, imgCache) {
     if (pd.isHeading) {
       const ht = trimmed.replace(/[：:]$/, '');
       if (ht === '引言' || ht === '标题') continue;
-      if (/^(参考|信息)来源/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht }); continue; }
+      if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht }); continue; }
+      // A real non-ref heading closes any prior ref section.
+      inRef = false;
       elems.push({ k: 'h', text: ht.replace(/^0?\d+\s+/, '') });
       continue;
     }
@@ -165,20 +167,40 @@ async function classifyMd(text) {
       if (attr.role === '作者' && !author) author = attr.name;
       if (attr.role === '来源') source = attr.name;
       // Render attribution as styled text
+      inRef = false;
       elems.push({ k: 'attr', role: attr.role, name: attr.name });
       continue;
     }
 
     if (/^>\s/.test(para)) {
       const bqText = para.split('\n').map(l => l.replace(/^>\s*/, '')).join(' ').trim();
-      if (bqText) elems.push({ k: 'bq', runs: parseMdRuns(bqText) });
+      if (bqText) { inRef = false; elems.push({ k: 'bq', runs: parseMdRuns(bqText) }); }
       continue;
     }
     if (/^[-*_\s]{3,}$/.test(para.replace(/\s/g, ''))) {
       if (/^\*\s+\*\s+\*/.test(para.trim())) stopped = true;
       continue;
     }
-    if (/^参考来源/.test(para)) { inRef = true; elems.push({ k: 'refH' }); continue; }
+
+    // Section number (e.g. **01**) followed by bold heading — match BEFORE
+    // the ref regex so "**01**" / "**参考文献**" don't get mistaken for body text.
+    if (/^\*\*0?\d+\*\*$/.test(para)) { expectHeading = true; continue; }
+    if (expectHeading) {
+      const hm = para.match(/^\*\*(.+)\*\*$/);
+      if (hm) { inRef = false; elems.push({ k: 'h', text: hm[1] }); expectHeading = false; continue; }
+      expectHeading = false;
+    }
+    // Standalone bold line (centered heading) → treat as heading. Runs before
+    // the plain-text "参考X" regex so that "**参考文献**" becomes a heading
+    // (bold emphasis marker) rather than opening a reference section.
+    const boldOnly = para.match(/^\*\*(.+)\*\*$/);
+    if (boldOnly && para.length < 60) {
+      inRef = false;
+      elems.push({ k: 'h', text: boldOnly[1] });
+      continue;
+    }
+
+    if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(para)) { inRef = true; elems.push({ k: 'refH', text: para.replace(/[：:].*$/, '').trim() }); continue; }
     if (inRef) { elems.push({ k: 'ref', runs: parseMdRuns(para) }); continue; }
 
     const imgMatch = para.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
@@ -191,21 +213,8 @@ async function classifyMd(text) {
       const maxPx = dwMatch && Number(dwMatch[1]) > 0 && Number(dwMatch[1]) < 640
         ? Number(dwMatch[1]) : 0;
       imgN++;
+      inRef = false;
       elems.push({ k: 'img', src: imgSrc, w: '100%', maxPx, gif: looksLikeGifSource(imgSrc) });
-      continue;
-    }
-
-    // Section number (e.g. **01**) followed by bold heading
-    if (/^\*\*0?\d+\*\*$/.test(para)) { expectHeading = true; continue; }
-    if (expectHeading) {
-      const hm = para.match(/^\*\*(.+)\*\*$/);
-      if (hm) { elems.push({ k: 'h', text: hm[1] }); expectHeading = false; continue; }
-      expectHeading = false;
-    }
-    // Standalone bold line (centered heading) → treat as heading
-    const boldOnly = para.match(/^\*\*(.+)\*\*$/);
-    if (boldOnly && para.length < 60) {
-      elems.push({ k: 'h', text: boldOnly[1] });
       continue;
     }
 
