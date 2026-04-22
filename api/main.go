@@ -1,9 +1,12 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -15,8 +18,10 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -69,8 +74,14 @@ func main() {
 	// Image proxy (bypass CORS for Canvas compositing)
 	mux.HandleFunc("GET /api/image-proxy", handleImageProxy)
 
-	// Legacy .doc (OLE2) → .docx conversion via CloudConvert
+	// Legacy .doc (OLE2) → stub .docx conversion via LibreOffice + image cache
 	mux.HandleFunc("POST /api/doc-to-docx", handleDocToDocx)
+
+	// Cached image payload for images stripped from converted docx
+	mux.HandleFunc("GET /api/doc-cache/{hash}/{filename}", handleDocImageCache)
+
+	// Kick off the in-memory image cache GC loop
+	startDocImageCacheGC()
 
 	// Health check
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -751,6 +762,181 @@ func init() {
 	}
 }
 
+// ---- Doc image cache (strip from .docx, serve on demand) ----
+
+type docCacheEntry struct {
+	files   map[string][]byte
+	expires time.Time
+}
+
+var (
+	docImageCacheMu sync.Mutex
+	docImageCache   = map[string]docCacheEntry{}
+)
+
+const docCacheTTL = 15 * time.Minute
+
+func docCachePut(hash string, files map[string][]byte) {
+	docImageCacheMu.Lock()
+	defer docImageCacheMu.Unlock()
+	docImageCache[hash] = docCacheEntry{files: files, expires: time.Now().Add(docCacheTTL)}
+}
+
+func docCacheGet(hash, filename string) ([]byte, bool) {
+	docImageCacheMu.Lock()
+	defer docImageCacheMu.Unlock()
+	e, ok := docImageCache[hash]
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(e.expires) {
+		delete(docImageCache, hash)
+		return nil, false
+	}
+	data, ok := e.files[filename]
+	return data, ok
+}
+
+func startDocImageCacheGC() {
+	go func() {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			docImageCacheMu.Lock()
+			now := time.Now()
+			for k, e := range docImageCache {
+				if now.After(e.expires) {
+					delete(docImageCache, k)
+				}
+			}
+			docImageCacheMu.Unlock()
+		}
+	}()
+}
+
+// stripImagesFromDocx opens the docx zip, extracts every word/media/* entry
+// into the in-memory cache (keyed by a sha256-prefix hash of the original
+// docx bytes), and rewrites the zip with those entries removed. It injects
+// word/_fbif_imageUrls.json mapping filename → /api/doc-cache/<hash>/<filename>
+// so the frontend parseDocx can wire <img src> without fetching bytes again.
+func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(docxBytes), int64(len(docxBytes)))
+	if err != nil {
+		return nil, fmt.Errorf("open zip: %w", err)
+	}
+
+	sum := sha256.Sum256(docxBytes)
+	hash := hex.EncodeToString(sum[:])[:16]
+
+	images := map[string][]byte{}
+	imageUrls := map[string]string{}
+
+	var out bytes.Buffer
+	zw := zip.NewWriter(&out)
+	for _, f := range zr.File {
+		if strings.HasPrefix(f.Name, "word/media/") && !f.FileInfo().IsDir() {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", f.Name, err)
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", f.Name, err)
+			}
+			base := strings.TrimPrefix(f.Name, "word/media/")
+			images[base] = data
+			imageUrls[base] = "/api/doc-cache/" + hash + "/" + base
+			continue
+		}
+		// Copy every other entry verbatim
+		hdr := f.FileHeader
+		w, err := zw.CreateHeader(&hdr)
+		if err != nil {
+			return nil, fmt.Errorf("create %s: %w", f.Name, err)
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, fmt.Errorf("open %s: %w", f.Name, err)
+		}
+		_, err = io.Copy(w, rc)
+		rc.Close()
+		if err != nil {
+			return nil, fmt.Errorf("copy %s: %w", f.Name, err)
+		}
+	}
+
+	if len(imageUrls) > 0 {
+		urlsJSON, err := json.Marshal(imageUrls)
+		if err != nil {
+			return nil, fmt.Errorf("encode imageUrls: %w", err)
+		}
+		uw, err := zw.Create("word/_fbif_imageUrls.json")
+		if err != nil {
+			return nil, fmt.Errorf("create imageUrls file: %w", err)
+		}
+		if _, err := uw.Write(urlsJSON); err != nil {
+			return nil, fmt.Errorf("write imageUrls: %w", err)
+		}
+	}
+
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("close zip: %w", err)
+	}
+
+	if len(images) > 0 {
+		docCachePut(hash, images)
+	}
+	return out.Bytes(), nil
+}
+
+func handleDocImageCache(w http.ResponseWriter, r *http.Request) {
+	hash := r.PathValue("hash")
+	filename := r.PathValue("filename")
+	// Sanitize: filename must be plain (no slashes, no parent refs).
+	if filename == "" || strings.ContainsAny(filename, "/\\") || strings.HasPrefix(filename, ".") {
+		http.NotFound(w, r)
+		return
+	}
+	data, ok := docCacheGet(hash, filename)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	mime := docImageMimeFromExt(strings.ToLower(path.Ext(filename)))
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Cache-Control", "private, max-age=900")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Write(data)
+}
+
+func docImageMimeFromExt(ext string) string {
+	switch ext {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".tif", ".tiff":
+		return "image/tiff"
+	case ".svg":
+		return "image/svg+xml"
+	case ".emf":
+		return "image/x-emf"
+	case ".wmf":
+		return "image/x-wmf"
+	}
+	return ""
+}
+
 // ---- Legacy .doc → .docx via CloudConvert ----
 
 var ole2Magic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
@@ -855,6 +1041,16 @@ func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		usedPath = "cloudconvert"
+	}
+
+	// Strip embedded images out of the docx and replace them with URL refs
+	// served from an in-memory cache. This shaves the client download from
+	// ~14 MB to ~200 KB for the stub, lets the browser render text before
+	// images finish transferring, and preserves image bytes verbatim.
+	if stub, stripErr := stripImagesFromDocx(docx); stripErr == nil {
+		docx = stub
+	} else {
+		log.Printf("strip images failed (%v), returning full docx", stripErr)
 	}
 
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")

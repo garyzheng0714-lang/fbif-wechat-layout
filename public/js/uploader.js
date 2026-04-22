@@ -43,24 +43,27 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   const tasks = [];
   let m, mmbizCount = 0;
 
-  // blob: URLs (DOCX images held in memory — parser.js skips expensive
-  // base64 encoding at parse time). Materialize to base64 here, only for
-  // images actually still referenced in the HTML.
-  const blobRe = /src="(blob:[^"]+)"/g;
-  const blobUrls = new Set();
-  while ((m = blobRe.exec(allHtml)) !== null) blobUrls.add(m[1]);
-  for (const blobUrl of blobUrls) {
+  // Materialize in-browser and server-cached image refs to base64 at copy time.
+  //  - blob: URLs  → in-memory Blobs created by parser.js for local .docx
+  //  - /api/doc-cache/* → server-side cache for images stripped from .doc→.docx
+  //    conversions (preserves original bytes, parallel download, fast text render)
+  // In both cases a one-time fetch + FileReader roundtrip yields the data URL
+  // that the OSS upload path can consume.
+  const lazyRe = /src="(blob:[^"]+|\/api\/doc-cache\/[^"]+)"/g;
+  const lazyUrls = new Set();
+  while ((m = lazyRe.exec(allHtml)) !== null) lazyUrls.add(m[1]);
+  for (const src of lazyUrls) {
     try {
-      const dataUrl = await blobUrlToDataUrl(blobUrl);
-      articleCopy = articleCopy.split(blobUrl).join(dataUrl);
-      footerCopy = footerCopy.split(blobUrl).join(dataUrl);
+      const dataUrl = await blobUrlToDataUrl(src);
+      articleCopy = articleCopy.split(src).join(dataUrl);
+      footerCopy = footerCopy.split(src).join(dataUrl);
     } catch (err) {
-      onLog && onLog('error', 'blob 转 base64 失败', { url: blobUrl.slice(0, 60), err: String(err) });
+      onLog && onLog('error', '图片转 base64 失败', { url: src.slice(0, 60), err: String(err) });
     }
   }
 
-  // Refresh combined HTML if any blob: → data: substitutions happened.
-  const refreshedHtml = blobUrls.size ? (articleCopy + '\n' + footerCopy) : allHtml;
+  // Refresh combined HTML if any lazy → data: substitutions happened.
+  const refreshedHtml = lazyUrls.size ? (articleCopy + '\n' + footerCopy) : allHtml;
 
   // base64 data URIs (from DOCX, plus any we just materialized) — upload to OSS
   const b64Re = /src="(data:image\/[^"]+)"/g;

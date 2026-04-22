@@ -290,21 +290,41 @@ export async function parseDocx(file) {
     else if (rtype.includes('hyperlink')) ridToUrl[rid] = (target || '').replace(/&amp;/g, '&');
   }
 
-  // imgCache values are blob: URLs, NOT base64 data URLs. Base64 encoding
-  // 14 MB of embedded PNGs blocks the main thread for 5–15 s on mid-range
-  // machines and doubles memory pressure. Blob URLs are created in O(1),
-  // decode natively, and cache better in the image pipeline.
-  // Downstream uploader (uploader.js) converts blob: URLs back to base64
-  // on demand when the user clicks "复制" (only images not on CDN).
+  // imgCache values are strings usable as <img src>. Two paths:
+  //  (1) SERVER-STRIPPED DOCX: the backend removes word/media/* and injects
+  //      word/_fbif_imageUrls.json pointing to cached URLs. We use those
+  //      URLs verbatim — browser fetches images in parallel via HTTP/2,
+  //      so text renders before all image bytes arrive (big UX win for
+  //      14 MB .doc uploads where server-to-client bandwidth dominates).
+  //  (2) LOCAL DOCX: images embedded in word/media/*. We read each as a
+  //      Blob and expose via URL.createObjectURL — zero base64 encoding,
+  //      parseDocx stays at ~0.1 s regardless of image count.
+  // Downstream uploader (uploader.js) materializes blob: / http(s): URLs
+  // to base64 only at copy time (OSS upload) — quality is never touched.
   const imgCache = {};
-  await Promise.all(Object.values(ridToFile).map(async (fn) => {
-    const entry = zip.file('word/media/' + fn);
-    if (!entry) return;
-    const blob = await entry.async('blob');
-    const mime = EXT_TO_MIME[(fn.split('.').pop() || '').toLowerCase()] || blob.type || 'image/png';
-    const typed = blob.type === mime ? blob : blob.slice(0, blob.size, mime);
-    imgCache[fn] = URL.createObjectURL(typed);
-  }));
+  const urlsEntry = zip.file('word/_fbif_imageUrls.json');
+  let externalUrls = null;
+  if (urlsEntry) {
+    try {
+      externalUrls = JSON.parse(await urlsEntry.async('string'));
+    } catch (e) {
+      externalUrls = null;
+    }
+  }
+  if (externalUrls) {
+    for (const fn of Object.values(ridToFile)) {
+      if (externalUrls[fn]) imgCache[fn] = externalUrls[fn];
+    }
+  } else {
+    await Promise.all(Object.values(ridToFile).map(async (fn) => {
+      const entry = zip.file('word/media/' + fn);
+      if (!entry) return;
+      const blob = await entry.async('blob');
+      const mime = EXT_TO_MIME[(fn.split('.').pop() || '').toLowerCase()] || blob.type || 'image/png';
+      const typed = blob.type === mime ? blob : blob.slice(0, blob.size, mime);
+      imgCache[fn] = URL.createObjectURL(typed);
+    }));
+  }
 
   const docXml = await docEntry.async('string');
   const docDom = new DOMParser().parseFromString(docXml, 'text/xml');
