@@ -157,12 +157,9 @@ export async function compositeCard(card) {
   ctx.fillRect(0, 0, W, H);
   ctx.drawImage(img, clampedDx, clampedDy, drawW, drawH);
 
-  // Dark gradient overlay — stronger at bottom so title is legible on any cover
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, 'rgba(0,0,0,0.28)');
-  grad.addColorStop(0.55, 'rgba(0,0,0,0.42)');
-  grad.addColorStop(1, 'rgba(0,0,0,0.62)');
-  ctx.fillStyle = grad;
+  // Flat dark overlay — uniform tint so title stays legible on any cover
+  // (matches 推文底部 banner 模板 PSD reference).
+  ctx.fillStyle = 'rgba(0,0,0,0.40)';
   ctx.fillRect(0, 0, W, H);
 
   // Title: white bold, 48px Noto Sans SC per spec. Auto-shrink if > 2 lines.
@@ -200,14 +197,10 @@ export async function compositeCard(card) {
     const lineHeight = size * 1.22;
     const blockH = (lines.length - 1) * lineHeight + size;
     let yCenter = (H - blockH) / 2 + size / 2;
-    ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur = 6;
-    ctx.shadowOffsetY = 2;
     for (const line of lines) {
       ctx.fillText(line, PAD_X, yCenter);
       yCenter += lineHeight;
     }
-    ctx.shadowColor = 'transparent';
     // PAD_BOTTOM is reserved for future use but kept referenced to avoid a
     // "declared but never read" diagnostic on some linters.
     void PAD_BOTTOM;

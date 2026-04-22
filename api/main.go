@@ -832,7 +832,9 @@ func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
 	var usedPath string
 	loURL := os.Getenv("LIBREOFFICE_URL")
 	loToken := os.Getenv("LIBREOFFICE_TOKEN")
-	if loURL != "" && loToken != "" {
+	// Token is optional: when LibreOffice is reached via localhost (same-box
+	// deploy), no auth layer is needed. A public URL still needs one.
+	if loURL != "" {
 		docx, err = convertViaLibreOffice(ctx, loURL, loToken, data, header.Filename)
 		if err == nil {
 			usedPath = "libreoffice"
@@ -890,7 +892,9 @@ func convertViaLibreOffice(ctx context.Context, baseURL, token string, docBytes 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	client := &http.Client{Timeout: 90 * time.Second}
 	resp, err := client.Do(req)
