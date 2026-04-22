@@ -68,7 +68,7 @@
 
 ## Critical Rules (from user)
 1. 预览页背景必须全白
-2. 保留模板切换（FBIF + Mote）
+2. 仅保留 FBIF 公众号排版（已移除 Mote 模板）
 3. 设置纯前端 localStorage
 4. 所有按钮在顶部工具栏
 5. 不要 TOC/目录

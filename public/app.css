@@ -41,19 +41,6 @@ body {
   letter-spacing: 0.125px;
 }
 
-/* Template pills */
-.template-pills { display: flex; gap: 6px; }
-.template-pill {
-  flex: 1; padding: 7px 0; text-align: center;
-  background: #ffffff; border: 1px solid rgba(0,0,0,0.1);
-  font-size: 13px; font-weight: 500; color: #615d59; cursor: pointer;
-  transition: all 150ms ease; font-family: inherit; border-radius: 4px;
-}
-.template-pill:hover { color: rgba(0,0,0,0.95); border-color: rgba(0,0,0,0.2); }
-.template-pill.active {
-  background: rgba(0,0,0,0.95); color: #ffffff; border-color: transparent;
-}
-
 /* Upload zone — whisper border card */
 .upload-zone {
   border: 1px solid rgba(0,0,0,0.1);

@@ -5,10 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -66,6 +68,9 @@ func main() {
 
 	// Image proxy (bypass CORS for Canvas compositing)
 	mux.HandleFunc("GET /api/image-proxy", handleImageProxy)
+
+	// Legacy .doc (OLE2) → .docx conversion via CloudConvert
+	mux.HandleFunc("POST /api/doc-to-docx", handleDocToDocx)
 
 	// Health check
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -744,4 +749,335 @@ func init() {
 	if err := os.MkdirAll("data", 0755); err != nil {
 		log.Printf("Warning: could not create data directory: %v", err)
 	}
+}
+
+// ---- Legacy .doc → .docx via CloudConvert ----
+
+var ole2Magic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+
+const maxDocUploadBytes = 50 << 20 // 50 MB cap for /api/doc-to-docx
+
+// sameOrigin enforces a CSRF-style check for endpoints that may spend
+// paid backend quota (CloudConvert). A cross-site <form>/fetch from a
+// third-party page always ships an Origin header; same-origin fetches
+// from our own app match r.Host. curl / server-to-server traffic omits
+// both headers and is allowed.
+func sameOrigin(r *http.Request) bool {
+	check := func(raw string) (matched, decided bool) {
+		if raw == "" {
+			return false, false
+		}
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			return false, true
+		}
+		return u.Host == r.Host, true
+	}
+	if ok, decided := check(r.Header.Get("Origin")); decided {
+		return ok
+	}
+	if ok, decided := check(r.Header.Get("Referer")); decided {
+		return ok
+	}
+	return true
+}
+
+// handleDocToDocx accepts a multipart upload with field "file" containing an
+// OLE2 (.doc) binary and returns real .docx bytes. Tries the self-hosted
+// LibreOffice service first (fast, unlimited, private); falls back to
+// CloudConvert if that's not configured or fails (network/5xx).
+func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		writeError(w, 403, "cross-origin request not allowed")
+		return
+	}
+	// Hard cap the request body before ParseMultipartForm so Go doesn't
+	// spill arbitrarily large uploads to temp files.
+	r.Body = http.MaxBytesReader(w, r.Body, maxDocUploadBytes)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeError(w, 413, fmt.Sprintf("file too large (max %d MB)", maxDocUploadBytes>>20))
+			return
+		}
+		writeError(w, 400, "failed to parse multipart: "+err.Error())
+		return
+	}
+	upload, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, 400, "file field required")
+		return
+	}
+	defer upload.Close()
+
+	data, err := io.ReadAll(upload)
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeError(w, 413, fmt.Sprintf("file too large (max %d MB)", maxDocUploadBytes>>20))
+			return
+		}
+		writeError(w, 400, "read file: "+err.Error())
+		return
+	}
+	if len(data) < 8 || !bytes.Equal(data[:8], ole2Magic) {
+		writeError(w, 400, "not an OLE2 .doc file (missing magic bytes)")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	var docx []byte
+	var usedPath string
+	loURL := os.Getenv("LIBREOFFICE_URL")
+	loToken := os.Getenv("LIBREOFFICE_TOKEN")
+	if loURL != "" && loToken != "" {
+		docx, err = convertViaLibreOffice(ctx, loURL, loToken, data, header.Filename)
+		if err == nil {
+			usedPath = "libreoffice"
+		} else {
+			log.Printf("libreoffice failed (%v), falling back to cloudconvert", err)
+		}
+	}
+	if docx == nil {
+		apiKey := os.Getenv("CLOUDCONVERT_API_KEY")
+		if apiKey == "" {
+			writeError(w, 500, "no converter available: LIBREOFFICE_URL/TOKEN and CLOUDCONVERT_API_KEY both unset")
+			return
+		}
+		docx, err = cloudConvertDocToDocx(ctx, apiKey, data, header.Filename)
+		if err != nil {
+			log.Printf("cloudconvert error: %v", err)
+			writeError(w, 502, "conversion failed: "+err.Error())
+			return
+		}
+		usedPath = "cloudconvert"
+	}
+
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	w.Header().Set("Content-Disposition", `inline; filename="converted.docx"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Conversion-Path", usedPath)
+	w.Write(docx)
+}
+
+// convertViaLibreOffice POSTs the .doc to the self-hosted unoserver HTTP API
+// (reached via Caddy reverse proxy with Bearer auth) and returns .docx bytes.
+func convertViaLibreOffice(ctx context.Context, baseURL, token string, docBytes []byte, filename string) ([]byte, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("convert-to", "docx"); err != nil {
+		return nil, err
+	}
+	safe := filename
+	if safe == "" {
+		safe = "input.doc"
+	}
+	fw, err := mw.CreateFormFile("file", safe)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := fw.Write(docBytes); err != nil {
+		return nil, err
+	}
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(baseURL, "/")+"/request", &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{Timeout: 90 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("post: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, fmt.Errorf("libreoffice status %d: %s", resp.StatusCode, string(body))
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 100<<20))
+}
+
+// cloudConvertDocToDocx drives a CloudConvert job: create → upload → poll → download.
+// Returns the converted .docx bytes.
+func cloudConvertDocToDocx(ctx context.Context, apiKey string, docBytes []byte, filename string) ([]byte, error) {
+	const base = "https://api.cloudconvert.com/v2"
+
+	// 1) Create job
+	jobBody := `{"tasks":{"import-1":{"operation":"import/upload"},"convert-1":{"operation":"convert","input":"import-1","input_format":"doc","output_format":"docx"},"export-1":{"operation":"export/url","input":"convert-1"}}}`
+	req, _ := http.NewRequestWithContext(ctx, "POST", base+"/jobs", strings.NewReader(jobBody))
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("create job: %w", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("create job status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var jobResp struct {
+		Data struct {
+			ID    string `json:"id"`
+			Tasks []struct {
+				Name      string `json:"name"`
+				Operation string `json:"operation"`
+				Status    string `json:"status"`
+				Result    struct {
+					Form *struct {
+						URL        string            `json:"url"`
+						Parameters map[string]string `json:"parameters"`
+					} `json:"form"`
+				} `json:"result"`
+			} `json:"tasks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &jobResp); err != nil {
+		return nil, fmt.Errorf("decode job: %w", err)
+	}
+	jobID := jobResp.Data.ID
+	var form *struct {
+		URL        string            `json:"url"`
+		Parameters map[string]string `json:"parameters"`
+	}
+	for _, t := range jobResp.Data.Tasks {
+		if t.Operation == "import/upload" && t.Result.Form != nil {
+			form = t.Result.Form
+			break
+		}
+	}
+	if form == nil {
+		return nil, fmt.Errorf("no import/upload form in job response")
+	}
+
+	// 2) Upload file as multipart to CloudConvert's storage (order matters: file last)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for k, v := range form.Parameters {
+		if err := mw.WriteField(k, v); err != nil {
+			return nil, fmt.Errorf("write field %s: %w", k, err)
+		}
+	}
+	safeName := filename
+	if safeName == "" {
+		safeName = "input.doc"
+	}
+	fw, err := mw.CreateFormFile("file", safeName)
+	if err != nil {
+		return nil, fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := fw.Write(docBytes); err != nil {
+		return nil, fmt.Errorf("write file part: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("close multipart: %w", err)
+	}
+
+	upReq, _ := http.NewRequestWithContext(ctx, "POST", form.URL, &buf)
+	upReq.Header.Set("Content-Type", mw.FormDataContentType())
+	upResp, err := http.DefaultClient.Do(upReq)
+	if err != nil {
+		return nil, fmt.Errorf("upload: %w", err)
+	}
+	upBody, _ := io.ReadAll(upResp.Body)
+	upResp.Body.Close()
+	if upResp.StatusCode >= 300 {
+		return nil, fmt.Errorf("upload status %d: %s", upResp.StatusCode, string(upBody))
+	}
+
+	// 3) Poll job until finished, errored, or the request context expires.
+	var exportURL string
+pollLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		pollReq, _ := http.NewRequestWithContext(ctx, "GET", base+"/jobs/"+jobID, nil)
+		pollReq.Header.Set("Authorization", "Bearer "+apiKey)
+		pollResp, err := http.DefaultClient.Do(pollReq)
+		if err != nil {
+			return nil, fmt.Errorf("poll: %w", err)
+		}
+		pollBody, _ := io.ReadAll(pollResp.Body)
+		pollResp.Body.Close()
+		if pollResp.StatusCode >= 300 {
+			return nil, fmt.Errorf("poll status %d: %s", pollResp.StatusCode, string(pollBody))
+		}
+
+		var pr struct {
+			Data struct {
+				Status string `json:"status"`
+				Tasks  []struct {
+					Operation string `json:"operation"`
+					Status    string `json:"status"`
+					Message   string `json:"message"`
+					Code      string `json:"code"`
+					Result    struct {
+						Files []struct {
+							Filename string `json:"filename"`
+							URL      string `json:"url"`
+						} `json:"files"`
+					} `json:"result"`
+				} `json:"tasks"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(pollBody, &pr); err != nil {
+			return nil, fmt.Errorf("decode poll: %w", err)
+		}
+
+		switch pr.Data.Status {
+		case "finished":
+			for _, t := range pr.Data.Tasks {
+				if t.Operation == "export/url" && len(t.Result.Files) > 0 {
+					exportURL = t.Result.Files[0].URL
+					break
+				}
+			}
+			if exportURL == "" {
+				return nil, fmt.Errorf("job finished but no export URL")
+			}
+			break pollLoop
+		case "error":
+			msg := "job failed"
+			for _, t := range pr.Data.Tasks {
+				if t.Status == "error" && t.Message != "" {
+					msg = t.Operation + ": " + t.Message
+					break
+				}
+			}
+			return nil, fmt.Errorf("%s", msg)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(1 * time.Second):
+		}
+	}
+	if exportURL == "" {
+		return nil, fmt.Errorf("timed out waiting for conversion")
+	}
+
+	// 4) Download converted .docx
+	dlReq, _ := http.NewRequestWithContext(ctx, "GET", exportURL, nil)
+	dlResp, err := http.DefaultClient.Do(dlReq)
+	if err != nil {
+		return nil, fmt.Errorf("download: %w", err)
+	}
+	defer dlResp.Body.Close()
+	if dlResp.StatusCode >= 300 {
+		return nil, fmt.Errorf("download status %d", dlResp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(dlResp.Body, 100<<20))
 }

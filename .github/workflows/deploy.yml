@@ -36,6 +36,9 @@ jobs:
           HOST: ${{ secrets.SERVER_HOST }}
           USER: ${{ secrets.SERVER_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          LIBREOFFICE_URL: ${{ secrets.LIBREOFFICE_URL }}
+          LIBREOFFICE_TOKEN: ${{ secrets.LIBREOFFICE_TOKEN }}
+          CLOUDCONVERT_API_KEY: ${{ secrets.CLOUDCONVERT_API_KEY }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/deploy_key
@@ -53,6 +56,16 @@ jobs:
             -e "ssh -i ~/.ssh/deploy_key" \
             api/fbif-api \
             "${USER}@${HOST}:${DEPLOY_PATH}/../api/"
+
+          # Write env file for the fbif-api systemd service (loaded via EnvironmentFile=)
+          # Tempfile + atomic rename so the service never sees a half-written file.
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
+            "cat > /var/www/api/.env.tmp <<'ENVEOF'
+LIBREOFFICE_URL=${LIBREOFFICE_URL}
+LIBREOFFICE_TOKEN=${LIBREOFFICE_TOKEN}
+CLOUDCONVERT_API_KEY=${CLOUDCONVERT_API_KEY}
+ENVEOF
+chmod 600 /var/www/api/.env.tmp && mv /var/www/api/.env.tmp /var/www/api/.env"
 
           # Restart API service
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \

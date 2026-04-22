@@ -30,11 +30,6 @@
       <span id="pageTitle" style="display:none;"></span>
       <span id="pageSubtitle" style="display:none;"></span>
 
-      <div class="template-pills" id="templatePills">
-        <button class="template-pill active" data-template="fbif">FBIF 公众号</button>
-        <button class="template-pill" data-template="mote">Mote 排版</button>
-      </div>
-
       <div class="upload-zone" id="dropZone">
         <div class="upload-icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
         <div class="upload-text">点击或拖拽文件</div>
@@ -214,12 +209,11 @@ function savePref(k, v) { try { localStorage.setItem(k, v); } catch {} }
 // ---- Config (per-template defaults) ----
 const TEMPLATE_DEFAULTS = {
   fbif: { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' },
-  mote: { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' },
 };
 function getDefaultCfg(tid) { return TEMPLATE_DEFAULTS[tid] || TEMPLATE_DEFAULTS.fbif; }
 function loadConfig(tid) { try { const r = localStorage.getItem('config_' + (tid || 'fbif')); if (r) return { ...getDefaultCfg(tid), ...JSON.parse(r) }; } catch {} return { ...getDefaultCfg(tid) }; }
 function saveConfig(c, tid) { try { localStorage.setItem('config_' + (tid || currentTemplateId || 'fbif'), JSON.stringify(c)); } catch {} window._activeConfig = { config: c }; }
-let currentTemplateId = loadPref('preferred_template', 'fbif');
+const currentTemplateId = 'fbif';
 window._activeConfig = { config: loadConfig(currentTemplateId) };
 
 let footerEnabledPref = loadPref('footer_enabled', 'true') === 'true';
@@ -233,12 +227,6 @@ const { openCropEditor } = await import('./js/crop-editor.js?v=' + assetVersion)
 initMoreArticlesEditor({ openCropEditor });
 
 async function loadTemplate(templateId) {
-  currentTemplateId = templateId;
-  savePref('preferred_template', templateId);
-  document.querySelectorAll('.template-pill').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.template === templateId);
-  });
-  // Load per-template config and update form
   const cfg = loadConfig(templateId);
   saveConfig(cfg, templateId);
   populateConfigForm();
@@ -246,13 +234,6 @@ async function loadTemplate(templateId) {
   initApp(mod.default);
   wrapEngineFunctions();
 }
-
-document.querySelectorAll('.template-pill').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const tid = btn.dataset.template;
-    if (tid !== currentTemplateId) loadTemplate(tid);
-  });
-});
 
 await loadTemplate(currentTemplateId);
 

@@ -29,7 +29,7 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 These have been explicitly confirmed by the user. Breaking any of these is unacceptable:
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
-2. **保留模板切换** — 支持 FBIF 和 Mote 两种模板
+2. **仅保留 FBIF 公众号排版** — Mote 模板已移除，不再做模板切换
 3. **设置纯前端 localStorage** — 不走 API，不要 fetch /api/config/*
 4. **所有按钮在顶部工具栏** — 底部不放按钮
 5. **不要 TOC/目录** — 已删除

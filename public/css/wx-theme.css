@@ -37,6 +37,3 @@
 .wx-ta   { font-size: 15px; color: var(--wx-link-color); font-style: italic; }
 .wx-auth { font-size: 15px; color: var(--wx-link-color); }
 .wx-a    { color: var(--wx-link-color); text-decoration: none; font-size: var(--wx-font-size); }
-
-/* ---- Mote blank spacer ---- */
-.wx-bls  { font-size: 15px; }
