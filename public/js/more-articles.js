@@ -9,14 +9,19 @@
 
 const LS_KEY = 'more_articles_v1';
 
-// Composite canvas: 1000×300 landscape (10:3) per spec. All cards use the
-// same shape regardless of source image aspect. Portrait sources are
-// cover-cropped — the user can shift the focal point via the crop editor.
+// Composite canvas: 1000×300 landscape (10:3), geometry mirrors the
+// 推文底部 banner 模板 PSD layer-by-layer. Cover image on bottom, flat black
+// overlay at 50%, white Noto Sans SC Bold title top-aligned on the left.
 const COMPOSITE_W = 1000;
 const COMPOSITE_H = 300;
-const COMPOSITE_PAD_X = 60;       // left/right inset for title text
-const COMPOSITE_PAD_BOTTOM = 44;  // bottom inset for title baseline
-const COMPOSITE_TITLE_SIZE = 48;  // default font size (auto-shrinks if too wide)
+// Title block taken verbatim from PSD: left inset 61, text top 92,
+// text-box width 803, leading 70, font size 48, fill #FFFFFF.
+const COMPOSITE_PAD_X = 61;
+const COMPOSITE_TEXT_TOP = 92;
+const COMPOSITE_TEXT_MAX_W = 803;
+const COMPOSITE_TITLE_SIZE = 48;
+const COMPOSITE_LINE_HEIGHT = 70;
+const COMPOSITE_OVERLAY_ALPHA = 0.5; // PSD 矩形 1 opacity = 128/255
 const COMPOSITE_FONT_STACK = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif';
 
 // No hardcoded defaults — the user curates the full list. Cards array is
@@ -157,24 +162,24 @@ export async function compositeCard(card) {
   ctx.fillRect(0, 0, W, H);
   ctx.drawImage(img, clampedDx, clampedDy, drawW, drawH);
 
-  // Flat dark overlay — uniform tint so title stays legible on any cover
-  // (matches 推文底部 banner 模板 PSD reference).
-  ctx.fillStyle = 'rgba(0,0,0,0.40)';
+  // Flat dark overlay — PSD 矩形 1 is pure black filled at 50% opacity across
+  // the full 1000×300 artboard.
+  ctx.fillStyle = `rgba(0,0,0,${COMPOSITE_OVERLAY_ALPHA})`;
   ctx.fillRect(0, 0, W, H);
 
-  // Title: white bold, 48px Noto Sans SC per spec. Auto-shrink if > 2 lines.
+  // Title: white, Noto Sans SC Bold (NotoSansHans-Bold in the PSD font set),
+  // 48px with 70px leading, top-aligned at x=61, y=92 inside the artboard.
+  // Auto-shrink proportionally if the title exceeds 2 lines so overflow still
+  // fits without breaking the PSD composition.
   const title = String(card.title || '').trim();
   if (title) {
-    // Ensure Noto Sans SC is loaded before drawing — otherwise Canvas silently
-    // falls back to a system font and the first composite looks off.
     if (document.fonts && document.fonts.load) {
       try { await document.fonts.load(`700 ${COMPOSITE_TITLE_SIZE}px "Noto Sans SC"`); } catch {}
     }
-    const PAD_X = COMPOSITE_PAD_X;
-    const PAD_BOTTOM = COMPOSITE_PAD_BOTTOM;
-    const maxW = W - PAD_X * 2;
+    const maxW = COMPOSITE_TEXT_MAX_W;
+    const leadingRatio = COMPOSITE_LINE_HEIGHT / COMPOSITE_TITLE_SIZE; // PSD 70/48
     ctx.fillStyle = '#FFFFFF';
-    ctx.textBaseline = 'alphabetic';
+    ctx.textBaseline = 'top';
     let size = COMPOSITE_TITLE_SIZE;
     const minSize = 30;
     let lines = [];
@@ -192,18 +197,12 @@ export async function compositeCard(card) {
       }
       lines[1] = last + '…';
     }
-    // Vertically center the title block within the canvas.
-    ctx.textBaseline = 'middle';
-    const lineHeight = size * 1.22;
-    const blockH = (lines.length - 1) * lineHeight + size;
-    let yCenter = (H - blockH) / 2 + size / 2;
+    const lineHeight = size * leadingRatio;
+    let y = COMPOSITE_TEXT_TOP;
     for (const line of lines) {
-      ctx.fillText(line, PAD_X, yCenter);
-      yCenter += lineHeight;
+      ctx.fillText(line, COMPOSITE_PAD_X, y);
+      y += lineHeight;
     }
-    // PAD_BOTTOM is reserved for future use but kept referenced to avoid a
-    // "declared but never read" diagnostic on some linters.
-    void PAD_BOTTOM;
   }
 
   return canvas.toDataURL('image/jpeg', 0.88);
