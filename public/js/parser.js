@@ -275,15 +275,28 @@ export function extractParagraph(p, ridToFile, ridToUrl) {
 export async function parseDocx(file) {
   const zip = await JSZip.loadAsync(file);
 
-  // Some Windows-generated .docx files store entries with backslashes
-  // (e.g. `word\document.xml`) instead of the spec-required forward slashes.
-  // JSZip does exact-match lookups, so fall back to the backslash form when
-  // the forward-slash path misses.
-  const zipFile = (p) => zip.file(p) || zip.file(p.replace(/\//g, '\\'));
+  // Some writers (Windows tooling, older Pages/Keynote exports, WPS variants)
+  // store zip entries with backslashes or unusual casing instead of the
+  // spec-required forward-slash lowercased form. JSZip does exact-match
+  // lookups, so we build a normalized index once and resolve every lookup
+  // through it — forward slashes, backslashes, and case all collapse to a
+  // single canonical key.
+  const canonicalize = (k) => k.replace(/\\/g, '/').toLowerCase();
+  const zipIndex = {};
+  for (const key of Object.keys(zip.files)) {
+    zipIndex[canonicalize(key)] = zip.files[key];
+  }
+  const zipFile = (p) => {
+    const entry = zipIndex[canonicalize(p)];
+    return entry && !entry.dir ? entry : null;
+  };
 
   const relsEntry = zipFile('word/_rels/document.xml.rels');
   const docEntry = zipFile('word/document.xml');
-  if (!relsEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml.rels');
+  if (!relsEntry) {
+    const keys = Object.keys(zip.files).slice(0, 20).join(', ');
+    throw new Error('无效的 DOCX 文件：缺少 document.xml.rels（zip keys: ' + keys + '）');
+  }
   if (!docEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml');
 
   const relsXml = await relsEntry.async('string');
