@@ -275,8 +275,14 @@ export function extractParagraph(p, ridToFile, ridToUrl) {
 export async function parseDocx(file) {
   const zip = await JSZip.loadAsync(file);
 
-  const relsEntry = zip.file('word/_rels/document.xml.rels');
-  const docEntry = zip.file('word/document.xml');
+  // Some Windows-generated .docx files store entries with backslashes
+  // (e.g. `word\document.xml`) instead of the spec-required forward slashes.
+  // JSZip does exact-match lookups, so fall back to the backslash form when
+  // the forward-slash path misses.
+  const zipFile = (p) => zip.file(p) || zip.file(p.replace(/\//g, '\\'));
+
+  const relsEntry = zipFile('word/_rels/document.xml.rels');
+  const docEntry = zipFile('word/document.xml');
   if (!relsEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml.rels');
   if (!docEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml');
 
@@ -302,7 +308,7 @@ export async function parseDocx(file) {
   // Downstream uploader (uploader.js) materializes blob: / http(s): URLs
   // to base64 only at copy time (OSS upload) — quality is never touched.
   const imgCache = {};
-  const urlsEntry = zip.file('word/_fbif_imageUrls.json');
+  const urlsEntry = zipFile('word/_fbif_imageUrls.json');
   let externalUrls = null;
   if (urlsEntry) {
     try {
@@ -317,7 +323,7 @@ export async function parseDocx(file) {
     }
   } else {
     await Promise.all(Object.values(ridToFile).map(async (fn) => {
-      const entry = zip.file('word/media/' + fn);
+      const entry = zipFile('word/media/' + fn);
       if (!entry) return;
       const blob = await entry.async('blob');
       const mime = EXT_TO_MIME[(fn.split('.').pop() || '').toLowerCase()] || blob.type || 'image/png';
