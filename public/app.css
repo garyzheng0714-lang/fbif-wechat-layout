@@ -250,6 +250,28 @@ input[type="file"] { display: none; }
 }
 .phone-frame img { max-width: 100%; height: auto; }
 
+/* Defer <img> paint until full bytes arrive — browsers otherwise render
+   PNG/JPEG top-down while bytes stream, which looks like "half an image"
+   for 1–2 s on server-cached .doc conversions. engine.js:hookPreviewImages
+   adds .wx-img-loading before the image loads (so it's invisible) and
+   drops it on the load event; the element still reserves layout space
+   via min-height, and the section wrapper (.wx-p) shows a skeleton pulse. */
+#contentArea img { transition: opacity 200ms ease-out; }
+#contentArea img.wx-img-loading {
+  opacity: 0;
+  min-height: 140px;
+}
+#contentArea .wx-p:has(img.wx-img-loading) {
+  background: linear-gradient(110deg, #f0f0f0 8%, #f7f7f7 20%, #f0f0f0 34%);
+  background-size: 220% 100%;
+  animation: wx-img-skeleton 1.3s linear infinite;
+  border-radius: 4px;
+}
+@keyframes wx-img-skeleton {
+  0% { background-position: 220% 0; }
+  100% { background-position: -220% 0; }
+}
+
 /* WeChat footer — sticky bottom */
 .wx-footer {
   position: sticky; bottom: 0; z-index: 10;

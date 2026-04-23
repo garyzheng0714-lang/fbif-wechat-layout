@@ -95,6 +95,24 @@ async function normalizeToDocx(file, onProgress) {
   return file;
 }
 
+// Defer <img> display until the full bytes land. By default browsers paint
+// PNG/JPEG top-down as bytes arrive, which looks like "half an image" for
+// 1–2 s on any noticeable round-trip — especially for server-cached .doc
+// images pulled via /api/doc-cache/. We add `wx-img-loading` before the
+// image has finished loading, and drop the class on `load` so CSS can
+// fade it in atomically.
+function hookPreviewImages(container) {
+  if (!container) return;
+  const imgs = container.querySelectorAll('img');
+  for (const img of imgs) {
+    if (img.complete && img.naturalWidth > 0) continue;
+    img.classList.add('wx-img-loading');
+    const clear = () => img.classList.remove('wx-img-loading');
+    img.addEventListener('load', clear, { once: true });
+    img.addEventListener('error', clear, { once: true });
+  }
+}
+
 // ---- Footer ----
 const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
 
@@ -387,6 +405,7 @@ export function initApp(template) {
     const contentArea = document.getElementById('contentArea');
     if (window._activeConfig) applyThemeVars(contentArea, window._activeConfig.config);
     contentArea.innerHTML = _articleHtml + '\n' + _footerHtml;
+    hookPreviewImages(contentArea);
     document.getElementById('statsBar').textContent = stats;
 
     const retryBtn = document.getElementById('retryBtn');
@@ -399,6 +418,7 @@ export function initApp(template) {
       }
       const enabled = document.getElementById('footerEnabled').checked;
       contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      hookPreviewImages(contentArea);
       markFailedImages(_failedSrcs);
     };
 
@@ -430,6 +450,7 @@ export function initApp(template) {
       _footerCopy = merged;
       const enabled = document.getElementById('footerEnabled').checked;
       contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      hookPreviewImages(contentArea);
       markFailedImages(_failedSrcs);
     };
 
