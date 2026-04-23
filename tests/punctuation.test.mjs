@@ -156,6 +156,63 @@ test('screenshot: 用勺子挖着吃的沙拉 case', () => {
   assert.equal(convertText(input), '2021 年直接定位成“用勺子挖着吃的沙拉”。');
 });
 
+// ---- Pre-existing wrong-direction curly quotes (Word/WPS output) ----
+
+test('curly: all-right double quotes get re-paired', () => {
+  const input = '围美多用\u201D汤用豆腐\u201D\u201D煎用豆腐\u201D';
+  const out = convertText(input);
+  assert.ok(!out.includes('\u201D\u201D'), 'no adjacent right-right pairs');
+  assert.ok(!out.includes('\u201C\u201C'), 'no adjacent left-left pairs');
+  assert.equal(out, '围美多用\u201C汤用豆腐\u201D\u201C煎用豆腐\u201D');
+});
+
+test('curly: all-left double quotes get re-paired', () => {
+  const input = '他叫\u201C豆碟豆腐\u201C';
+  const out = convertText(input);
+  assert.equal(out, '他叫\u201C豆碟豆腐\u201D');
+});
+
+test('curly: mixed wrong direction gets fixed', () => {
+  const input = '他说\u201D你好\u201C';
+  assert.equal(convertText(input), '他说\u201C你好\u201D');
+});
+
+test('curly: all-right single quotes inside double get re-paired', () => {
+  const input = '他说\u201D再见\u2019朋友\u2019就走了\u201D';
+  const out = convertText(input);
+  assert.ok(out.includes('\u201C') && out.includes('\u201D'));
+  assert.ok(out.includes('\u2018') && out.includes('\u2019'));
+  assert.ok(!out.includes('\u201D\u201D'));
+  assert.ok(!out.includes('\u2019\u2019'));
+});
+
+test("curly: mid-word U+2019 kept as apostrophe, not a closing quote", () => {
+  const input = '他说 it\u2019s not true 但其实是真的';
+  const out = convertText(input);
+  assert.ok(out.includes('it\u2019s'));
+});
+
+test('curly: screenshot line — 汤用豆腐/煎用豆腐 no same-direction pairs remain', () => {
+  const input = '圍美多用\u201D汤用豆腐\u201D\u201D煎用豆腐\u201D，把的\u201D\u201D炒的\u201D\u201D煎的\u201D、\u201D麻婆豆腐专用\u201D。';
+  const out = convertText(input);
+  assert.ok(!out.includes('\u201D\u201D'));
+  assert.ok(!out.includes('\u201C\u201C'));
+});
+
+test('curly: closing quote after 。 is correctly closed, not reopened', () => {
+  // Real screenshot: both quotes are U+201C (left-curly) in Word's output.
+  // The closer sits right after `。`, which naive context rules misread as
+  // an "opening context". Strict alternation gets it right.
+  const input = '\u201C山姆的豆腐也能撕开，因为供货商也是圃美多。\u201C';
+  const out = convertText(input);
+  assert.equal(out, '\u201C山姆的豆腐也能撕开，因为供货商也是圃美多。\u201D');
+});
+
+test('alternation: closing quote after 。 with ASCII input', () => {
+  const input = '"山姆的豆腐也能撕开，因为供货商也是圃美多。"';
+  assert.equal(convertText(input), '\u201C山姆的豆腐也能撕开，因为供货商也是圃美多。\u201D');
+});
+
 // ---- Ellipsis and dash ----
 
 test('ellipsis: ... becomes …… in Chinese context', () => {

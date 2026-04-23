@@ -5,11 +5,16 @@
 //   2. Chinese paragraphs convert ASCII punctuation to full-width, EXCEPT where
 //      both neighboring non-space chars are ASCII alphanumeric (protects `Co., Ltd.`,
 //      numbers like `35,000`, decimals, etc.).
-//   3. Double and single quotes use stack-based directional pairing — never emits
-//      same-direction pairs like `"你好"` or `"你好"`. Pre-existing curly quotes in
-//      the input are registered on the same stack so ASCII and curly mix correctly.
-//   4. Quote stack resets on paragraph breaks (two or more consecutive newlines)
-//      so an unclosed quote in one paragraph does not corrupt the next.
+//   3. Double and single quotes strictly alternate open → close → open → ...
+//      per type, independently. The emitted direction depends only on the
+//      direction of the previous same-type quote in the paragraph; context
+//      (surrounding punctuation, whitespace) is never used to guess. Pre-existing
+//      curly quotes are normalized to ASCII first, then re-emitted by the same
+//      rule — Word / WPS frequently stores every quote as the same direction,
+//      so trusting the input direction is unsafe. Mid-word `'` / `'` is
+//      preserved as an apostrophe without flipping state.
+//   4. Alternation state resets on paragraph breaks (two or more consecutive
+//      newlines) so an unclosed quote in one paragraph does not corrupt the next.
 //   5. Fenced/inline code, URLs, emails, and HTML tags are masked before conversion
 //      and restored after, so their contents are never modified. URL masks stop at
 //      trailing CJK punctuation like `。，；：？！、）】」』》` so a Chinese period
@@ -237,66 +242,48 @@ function convertEllipsisAndDash(text) {
 }
 
 // ---- Smart quote pairing ----
-// Stack-based directional conversion for `"` and `'`.
-// - Pre-existing curly quotes in the input are pushed/popped on the same stack
-//   so ASCII quotes mixed with already-curly quotes still pair correctly.
-// - Apostrophes inside a word (`it's`, `don't`) are detected first and never
-//   affect the stack.
+// Strict alternation per quote type: the direction of each quote is decided
+// only by the direction of the previous same-type quote in the paragraph.
+// No context sniffing (no isOpeningPunct, no whitespace heuristics) — those
+// guesses misfire on inputs like `"山姆的豆腐。"` where the closing quote sits
+// after `。`, which looks like an "opening context" but clearly isn't.
+//
+// Pre-existing curly quotes are normalized back to ASCII first, so Word /
+// WPS outputs with uniformly-wrong direction still get paired correctly.
+//
+// Mid-word `'` (including U+2019 normalized from Word's auto-apostrophe) is
+// preserved as U+2019 and does NOT flip alternation state.
 
 function convertQuotes(text) {
-  const chars = Array.from(text);
+  const normalized = text
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+  const chars = Array.from(normalized);
   const out = [];
-  const stack = [];
+  // Per-type next-direction: false = emit opening, true = emit closing.
+  const nextIsClose = { '"': false, "'": false };
 
   for (let i = 0; i < chars.length; i++) {
     const ch = chars[i];
 
-    // Pre-existing curly opening quotes: pass through, register on stack so
-    // subsequent ASCII quotes pair correctly.
-    if (ch === '\u201C' || ch === '\u2018') {
-      out.push(ch);
-      stack.push(ch === '\u201C' ? '"' : "'");
-      continue;
-    }
-
-    // Pre-existing curly closing double quote: pass through, pop matching.
-    if (ch === '\u201D') {
-      out.push(ch);
-      popMatching(stack, '"');
-      continue;
-    }
-
-    // Pre-existing curly right single quote: ambiguous (real closing quote OR
-    // in-word apostrophe). Mid-word → treat as apostrophe (do not touch stack).
-    if (ch === '\u2019') {
-      const prev = neighborArr(chars, i, -1);
-      const next = neighborArr(chars, i, +1);
-      out.push(ch);
-      if (!(isWordChar(prev) && isWordChar(next))) {
-        popMatching(stack, "'");
-      }
-      continue;
-    }
-
-    // ASCII quotes
     if (ch === '"' || ch === "'") {
-      const prev = neighborArr(chars, i, -1);
-      const next = neighborArr(chars, i, +1);
-
-      // Mid-word apostrophe: `it's`, `don't`, `O'Brien`.
-      if (ch === "'" && isWordChar(prev) && isWordChar(next)) {
-        out.push('\u2019');
-        continue;
+      // Mid-word apostrophe: `it's`, `don't`, `O'Brien`. Emit U+2019 without
+      // touching alternation state — it is not a quote.
+      if (ch === "'") {
+        const prev = neighborArr(chars, i, -1);
+        const next = neighborArr(chars, i, +1);
+        if (isWordChar(prev) && isWordChar(next)) {
+          out.push('\u2019');
+          continue;
+        }
       }
 
-      const isOpening = shouldOpen(prev, stack, ch);
-      if (isOpening) {
-        out.push(ch === '"' ? '\u201C' : '\u2018');
-        stack.push(ch);
-      } else {
+      if (nextIsClose[ch]) {
         out.push(ch === '"' ? '\u201D' : '\u2019');
-        popMatching(stack, ch);
+      } else {
+        out.push(ch === '"' ? '\u201C' : '\u2018');
       }
+      nextIsClose[ch] = !nextIsClose[ch];
       continue;
     }
 
@@ -304,12 +291,6 @@ function convertQuotes(text) {
   }
 
   return out.join('');
-}
-
-function popMatching(stack, kind) {
-  for (let s = stack.length - 1; s >= 0; s--) {
-    if (stack[s] === kind) { stack.splice(s, 1); return; }
-  }
 }
 
 function neighborArr(chars, i, dir) {
@@ -322,28 +303,8 @@ function neighborArr(chars, i, dir) {
   return '';
 }
 
-function shouldOpen(prev, stack, kind) {
-  if (prev === '') return true;
-  const hasMatchingOpen = stack.includes(kind);
-  // Whitespace before a quote is normally an opening context. BUT if there is
-  // an unclosed matching quote on the stack, prefer closing it — this fixes
-  // pairs where the closer sits right after a soft newline or fullwidth space,
-  // e.g. `"你好\n世界"` where the second quote's prev is `\n`.
-  if (/[\s\n\r\u3000\u00A0]/.test(prev)) {
-    return !hasMatchingOpen;
-  }
-  if (isOpeningPunct(prev)) return true;
-  if (hasMatchingOpen) return false;
-  return true;
-}
-
-// Punctuation that typically precedes an opening quote.
-function isOpeningPunct(ch) {
-  return /[（(\[\{「『《【〈—,，。：:；;？?！!、\u201C\u2018]/.test(ch);
-}
-
 // ASCII word chars only. CJK is intentionally excluded — `男's` is not a real
-// construct; pairing for CJK + ASCII apostrophe goes through the stack path.
+// construct; CJK + ASCII apostrophe pairs via plain alternation instead.
 function isWordChar(ch) {
   return /[A-Za-z0-9_]/.test(ch);
 }

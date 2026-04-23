@@ -95,12 +95,12 @@ func main() {
 		publicDir = "public"
 	}
 	fs := http.FileServer(http.Dir(publicDir))
-	// Force browsers to revalidate HTML on every load so a new deploy picks up
-	// the latest JS/CSS immediately (HTML references modules with ?v=<commit>;
-	// a cached HTML would load a stale bundle and surface already-fixed bugs).
-	// JS/CSS already send Cache-Control: no-cache via their own logic, but the
-	// default http.FileServer sends none, so browsers apply heuristic caching.
-	mux.Handle("/", noCacheHTML(fs))
+	// Force browsers to revalidate HTML + all JS/CSS on every load so a deploy
+	// picks up the latest code immediately. Top-level modules are pinned with
+	// ?v=<commit>, but nested imports (e.g. parser.js → punctuation.js) are
+	// bare paths — without a server-side no-cache, an updated inner module
+	// keeps serving from the browser's heuristic cache for hours.
+	mux.Handle("/", noCacheStatic(fs))
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
@@ -109,14 +109,18 @@ func main() {
 	}
 }
 
-// noCacheHTML forces revalidation of HTML responses. JS/CSS are hashed via
-// ?v=<commit> query strings so the browser cache is safe for them. HTML is
-// the entry point — if it's cached, the ?v= pin stays old and the user keeps
-// loading a stale bundle after a deploy.
-func noCacheHTML(next http.Handler) http.Handler {
+// noCacheStatic forces revalidation of HTML / JS / CSS on every load.
+// Top-level HTML and hashed modules are re-fetched so a deploy takes effect
+// immediately; bare-path nested imports (e.g. parser.js → punctuation.js)
+// also stay fresh without relying on query-string pins the author may forget
+// to add. "no-cache" still allows 304s via If-Modified-Since, so repeat loads
+// are cheap when nothing changed.
+func noCacheStatic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/" || strings.HasSuffix(p, ".html") {
+		if p == "/" || strings.HasSuffix(p, ".html") ||
+			strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".mjs") ||
+			strings.HasSuffix(p, ".css") {
 			w.Header().Set("Cache-Control", "no-cache")
 		}
 		next.ServeHTTP(w, r)
