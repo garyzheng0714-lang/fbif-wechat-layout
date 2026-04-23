@@ -380,18 +380,27 @@ window.fetchArticle = async function() {
   try {
     const resp = await fetch('/api/fetch-article', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
     if (!resp.ok) { const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status })); throw new Error(err.error || '抓取失败'); }
-    const { title, content } = await resp.json();
-    if (!content) throw new Error('文章内容为空');
-    const file = new File([content], (title || 'article') + '.md', { type: 'text/markdown' });
-    // Bypass fileInput change event — call engine directly with isRepost=true
-    // so the footer swaps to the 转载 variant. Going through fileInput would
-    // hit the 'change' listener which defaults to { isRepost: false }.
-    if (window._handleFile) {
-      window._handleFile(file, { isRepost: true });
+    const payload = await resp.json();
+    const { title, blocks, content } = payload;
+    // Preferred: structured blocks from direct HTML parse. Preserves visual
+    // signals (font-size/color/align/bold) so headings vs pullquotes vs
+    // captions are classified deterministically — no lossy MD intermediate.
+    if (Array.isArray(blocks) && blocks.length > 0) {
+      if (!window._handleBlocks) throw new Error('blocks 路径未就绪');
+      window._handleBlocks({ title, blocks }, { isRepost: true });
+    } else if (content) {
+      // Fallback: x-reader returned Markdown. Push it through the legacy
+      // classifyMd pipeline via a synthetic File.
+      const file = new File([content], (title || 'article') + '.md', { type: 'text/markdown' });
+      if (window._handleFile) {
+        window._handleFile(file, { isRepost: true });
+      } else {
+        const fi = document.getElementById('fileInput');
+        const dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files;
+        fi.dispatchEvent(new Event('change'));
+      }
     } else {
-      const fi = document.getElementById('fileInput');
-      const dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files;
-      fi.dispatchEvent(new Event('change'));
+      throw new Error('文章内容为空');
     }
   } catch (e) { errorEl.textContent = '提取失败: ' + e.message; errorEl.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = '提取'; }

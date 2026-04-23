@@ -508,22 +508,74 @@ func handleFetchArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try x-reader first, fall back to simple fetch
-	content, title, err := fetchWithXReader(req.URL)
-	if err != nil {
-		// Fall back: try direct HTTP fetch + simple HTML extraction
-		content, title, err = fetchDirect(req.URL)
-		if err != nil {
-			writeError(w, 502, "failed to fetch article: "+err.Error())
-			return
-		}
+	// Preferred path: direct HTTP → structured Blocks. Preserves visual
+	// signals (font-size, color, align, bold) so heading/caption/body
+	// classification is deterministic, not inferred from a lossy MD
+	// intermediate. See wechat_blocks.go.
+	title, blocks, derr := fetchDirectBlocks(req.URL)
+	if derr == nil && len(blocks) > 0 {
+		writeJSON(w, 200, map[string]interface{}{
+			"title":  title,
+			"blocks": blocks,
+			"source": req.URL,
+		})
+		return
 	}
+	// Fall back to x-reader only if direct fetch failed. Ship its
+	// Markdown to the frontend so the legacy classifyMd path can still
+	// handle non-WeChat URLs that x-reader renders better.
+	content, xrTitle, xrErr := fetchWithXReader(req.URL)
+	if xrErr == nil {
+		writeJSON(w, 200, map[string]interface{}{
+			"title":   xrTitle,
+			"content": content,
+			"source":  req.URL,
+		})
+		return
+	}
+	reportErr := derr
+	if reportErr == nil {
+		reportErr = xrErr
+	}
+	writeError(w, 502, "failed to fetch article: "+reportErr.Error())
+}
 
-	writeJSON(w, 200, map[string]string{
-		"title":   title,
-		"content": content,
-		"source":  req.URL,
-	})
+// fetchDirectBlocks is the new primary URL-import path: GET the raw HTML
+// and walk it into a Block slice via extractArticleBlocks. Shares the
+// HTTP boilerplate with fetchDirect via fetchRawHTML so the two paths
+// can't drift on timeouts, UA, or body-size limits.
+//
+// Contract: returns a non-nil err only for transport-level failures.
+// An empty `blocks` slice with err==nil is a valid (non-error) outcome —
+// e.g. a valid-HTML page with no article content. The caller at
+// handleFetchArticle gates on `len(blocks) > 0` before preferring this
+// path over the x-reader fallback.
+func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
+	bodyBytes, err := fetchRawHTML(url)
+	if err != nil {
+		return "", nil, err
+	}
+	t, bs, _ := extractArticleBlocks(string(bodyBytes))
+	return t, bs, nil
+}
+
+func fetchRawHTML(url string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 }
 
 func fetchWithXReader(url string) (content, title string, err error) {

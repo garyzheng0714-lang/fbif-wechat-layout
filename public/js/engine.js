@@ -18,6 +18,12 @@ export {
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 };
 
+// Re-export convertRuns so templates can apply punctuation rules to runs
+// that arrive pre-formed (e.g. the new URL→blocks path, where runs come
+// from the Go backend and bypass parseMdRuns).
+const punctuationModule = await import('./punctuation.js' + assetQuery);
+export const { convertRuns } = punctuationModule;
+
 import { uploadNonCdnImages, retryFailedImages } from './uploader.js';
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
 import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
@@ -304,6 +310,54 @@ export function initApp(template) {
   // from a URL fetch through the same pipeline as a local upload, but with
   // isRepost=true so the footer swaps to the 转载 variant.
   window._handleFile = (file, opts) => handleFile(file, opts);
+
+  // URL-import structured-blocks entry point. Used when the server responds
+  // to /api/fetch-article with {title, blocks} (preferred path — preserves
+  // visual signals). Falls back to _handleFile with a synthetic .md File
+  // when the server returns {title, content} (x-reader fallback).
+  window._handleBlocks = async (data, opts) => {
+    _isRepost = !!(opts && opts.isRepost);
+    _convLog.length = 0;
+    logConv('info', '开始转化', { source: 'blocks', blocks: (data.blocks || []).length });
+    errorEl.style.display = 'none';
+    dropZone.classList.add('processing');
+    progress.style.display = 'block';
+    progressFill.style.width = '70%';
+    progressText.textContent = '正在排版...';
+    try {
+      const t0 = performance.now();
+      if (typeof template.processBlocks !== 'function') {
+        throw new Error('当前模板不支持 blocks 路径');
+      }
+      _sourceIsDocx = false;
+      // await: processBlocks is synchronous today but we're inside an
+      // async context anyway, and future work (e.g. image pre-fetch)
+      // might make it async. The await has zero cost on plain returns.
+      const result = await template.processBlocks(data);
+      logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
+
+      const articleHtml = result.lines.join('\n');
+      saveMoreArticlesCards(makeFreshUploadCards());
+      if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+      const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
+      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
+        ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
+      logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
+
+      progressFill.style.width = '100%';
+      progressText.textContent = '排版完成!';
+      const displayTitle = result.title || data.title || '转载文章';
+      dropZone.classList.remove('processing');
+      setTimeout(() => showPreview(displayTitle, articleHtml, footerHtml, stats), 200);
+    } catch (err) {
+      logConv('error', '排版失败', { error: err.message });
+      dropZone.classList.remove('processing');
+      progress.style.display = 'none';
+      showError('排版失败: ' + err.message);
+    }
+  };
 
   async function handleFile(file, opts) {
     // Set repost flag per-call so it never leaks across articles.

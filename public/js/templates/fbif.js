@@ -1,7 +1,7 @@
 // FBIF 公众号排版模板 — CSS class-based rendering
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource, convertRuns } = engineModule;
 
 // ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
 function leafWrap(inner) {
@@ -286,6 +286,93 @@ function render(elems, author, source) {
   return lines;
 }
 
+// ---- Blocks Classification (URL-import path) ----
+// Input is already structurally classified by the Go DOM walker, so this
+// step is light: apply punctuation conversion to runs, promote attribution
+// paragraphs to 'attr' blocks, and track 参考文献/信息来源 sections. No
+// visual-heuristic role-guessing — that was the whole point of moving to
+// structured blocks. See api/wechat_blocks.go for the upstream contract.
+function classifyBlocks({ title, blocks }) {
+  const elems = [];
+  let author = '', source = '', imgN = 0, inRef = false;
+
+  for (const b of (blocks || [])) {
+    if (!b || !b.k) continue;
+
+    if (b.k === 'img') {
+      const w = Number(b.dataW || 0);
+      const maxPx = w > 0 && w < 640 ? w : 0;
+      imgN++;
+      inRef = false;
+      elems.push({ k: 'img', src: b.src || '', w: '100%', maxPx, gif: looksLikeGifSource(b.src || '') });
+      continue;
+    }
+
+    if (b.k === 'cap') {
+      elems.push({ k: 'cap', text: b.text || '' });
+      continue;
+    }
+
+    if (b.k === 'h') {
+      const ht = (b.text || '').trim();
+      if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(ht)) {
+        inRef = true;
+        elems.push({ k: 'refH', text: ht.replace(/[：:].*$/, '').trim() });
+      } else {
+        inRef = false;
+        elems.push({ k: 'h', text: ht });
+      }
+      continue;
+    }
+
+    // txt / bq / li — all carry runs. Apply punctuation pass.
+    const runs = convertRuns(b.runs || []);
+    // Text used for attribution / 参考文献 regex matching. Include both
+    // txt and link run types so "作者：<a>张三</a>" still yields
+    // "作者：张三" (link runs carry display text, not the URL).
+    const text = runs
+      .filter(r => r && (r.type === 'txt' || r.type === 'link'))
+      .map(r => r.text || '')
+      .join('')
+      .trim();
+
+    if (b.k === 'bq') {
+      inRef = false;
+      elems.push({ k: 'bq', runs });
+      continue;
+    }
+
+    // Attribution — 作者 / 来源 / 编辑. Matches the classifyMd path exactly
+    // so URL-import and MD-import produce the same attr blocks.
+    const attr = parseAttribution(text);
+    if (attr) {
+      if (attr.role === '作者' && !author) author = attr.name;
+      if (attr.role === '来源') source = attr.name;
+      inRef = false;
+      elems.push({ k: 'attr', role: attr.role, name: attr.name });
+      continue;
+    }
+
+    // Reference section marker. Text-level, not style-level — same rule as MD path.
+    if (/^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/.test(text)) {
+      inRef = true;
+      elems.push({ k: 'refH', text: text.replace(/[：:]$/, '') });
+      continue;
+    }
+
+    if (inRef) {
+      elems.push({ k: 'ref', runs });
+      continue;
+    }
+
+    // li and txt render the same (FBIF template has no dedicated list style);
+    // collapsing them here keeps the renderer's switch simple.
+    elems.push({ k: 'txt', runs });
+  }
+
+  return { elems, author, source, title: title || '', imgN };
+}
+
 export default {
   id: 'fbif',
   name: 'FBIF 公众号排版',
@@ -298,6 +385,10 @@ export default {
   },
   async processMd(text) {
     const { elems, author, source, title, imgN } = await classifyMd(text);
+    return { lines: render(elems, author, source), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+  },
+  processBlocks(data) {
+    const { elems, author, source, title, imgN } = classifyBlocks(data);
     return { lines: render(elems, author, source), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 };
