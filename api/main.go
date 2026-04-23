@@ -95,13 +95,32 @@ func main() {
 		publicDir = "public"
 	}
 	fs := http.FileServer(http.Dir(publicDir))
-	mux.Handle("/", fs)
+	// Force browsers to revalidate HTML on every load so a new deploy picks up
+	// the latest JS/CSS immediately (HTML references modules with ?v=<commit>;
+	// a cached HTML would load a stale bundle and surface already-fixed bugs).
+	// JS/CSS already send Cache-Control: no-cache via their own logic, but the
+	// default http.FileServer sends none, so browsers apply heuristic caching.
+	mux.Handle("/", noCacheHTML(fs))
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
 	if err := http.ListenAndServe(addr, withCORS(mux)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// noCacheHTML forces revalidation of HTML responses. JS/CSS are hashed via
+// ?v=<commit> query strings so the browser cache is safe for them. HTML is
+// the entry point — if it's cached, the ?v= pin stays old and the user keeps
+// loading a stale bundle after a deploy.
+func noCacheHTML(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/" || strings.HasSuffix(p, ".html") {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func withCORS(next http.Handler) http.Handler {
