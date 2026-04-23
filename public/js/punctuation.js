@@ -1,14 +1,21 @@
 // Smart CJK punctuation converter.
 //
-// Rules (see design notes in plan):
-//   1. Paragraphs with < 30% CJK characters are treated as English and left alone.
+// Rules:
+//   1. Paragraphs with < 20% CJK characters are treated as English and left alone.
 //   2. Chinese paragraphs convert ASCII punctuation to full-width, EXCEPT where
 //      both neighboring non-space chars are ASCII alphanumeric (protects `Co., Ltd.`,
 //      numbers like `35,000`, decimals, etc.).
 //   3. Double and single quotes use stack-based directional pairing — never emits
-//      same-direction pairs like `"你好"` or `"你好"`.
-//   4. Fenced/inline code, URLs, emails, and HTML tags are masked before conversion
-//      and restored after, so their contents are never modified.
+//      same-direction pairs like `"你好"` or `"你好"`. Pre-existing curly quotes in
+//      the input are registered on the same stack so ASCII and curly mix correctly.
+//   4. Quote stack resets on paragraph breaks (two or more consecutive newlines)
+//      so an unclosed quote in one paragraph does not corrupt the next.
+//   5. Fenced/inline code, URLs, emails, and HTML tags are masked before conversion
+//      and restored after, so their contents are never modified. URL masks stop at
+//      trailing CJK punctuation like `。，；：？！、）】」』》` so a Chinese period
+//      after a URL is never eaten.
+//   6. Whitespace probes (neighbor lookup) skip ` \t\n\r\u3000\u00A0` so pairing
+//      does not break on fullwidth / no-break spaces or soft line breaks.
 
 const CJK_THRESHOLD = 0.20;
 
@@ -19,6 +26,16 @@ export function convertText(text, { locale = 'auto' } = {}) {
   const lang = locale === 'auto' ? detectLanguage(text) : locale;
   if (lang === 'en') return text;
 
+  // Split on hard paragraph breaks (two+ newlines, spaces allowed between) and
+  // convert each paragraph in isolation so the quote stack resets.
+  // The split pattern is captured, so separators are preserved in the rejoin.
+  const parts = text.split(/(\r?\n[ \t]*(?:\r?\n[ \t]*)+)/);
+  if (parts.length === 1) return convertSingleParagraph(text);
+  return parts.map((part, i) => (i % 2 === 1 ? part : convertSingleParagraph(part))).join('');
+}
+
+function convertSingleParagraph(text) {
+  if (!text) return text;
   const { masked, slots } = mask(text);
   let out = masked;
   out = convertEllipsisAndDash(out);
@@ -37,29 +54,36 @@ export function convertRuns(runs) {
   if (lang === 'en') return runs;
 
   const converted = convertText(joined, { locale: 'zh' });
-  // convertText preserves total code-point count for all passes (1:1 mapping),
-  // so we can split back to runs by their original text lengths.
-  if (Array.from(converted).length !== Array.from(joined).length) {
-    // Length mismatch (e.g. `...` → `……` collapses 3→2). Fall back to skipping
-    // run-aware conversion to stay safe on format runs.
-    return runs;
+
+  // Fast path: joined conversion preserved codepoint count (1:1 per char).
+  // We can slice `converted` back into the original run boundaries while
+  // keeping cross-run quote pairing (e.g. quote opens in one bold run and
+  // closes in the next).
+  const origCount = Array.from(joined).length;
+  const convCount = Array.from(converted).length;
+  if (convCount === origCount) {
+    const codePoints = Array.from(converted);
+    let cursor = 0;
+    return runs.map(r => {
+      if (r && r.type === 'txt' && typeof r.text === 'string') {
+        const len = Array.from(r.text).length;
+        const next = { ...r, text: codePoints.slice(cursor, cursor + len).join('') };
+        cursor += len;
+        return next;
+      }
+      return r;
+    });
   }
 
-  const pieces = [];
-  const codePoints = Array.from(converted);
-  let cursor = 0;
-  for (const r of textRuns) {
-    const len = Array.from(r.text).length;
-    pieces.push(codePoints.slice(cursor, cursor + len).join(''));
-    cursor += len;
-  }
-
-  let tIdx = 0;
+  // Slow path: codepoint count changed (e.g. `...` → `……` collapses 3→2, or
+  // mask sentinels inflated an HTML fragment). Previously we bailed with an
+  // unconverted copy — that silently dropped every quote in the paragraph.
+  // Instead, convert each text run independently. Cross-run quote pairing is
+  // lost in this mode, but per-run quotes, ellipses and basic punctuation
+  // still get converted, which is strictly better than no conversion.
   return runs.map(r => {
     if (r && r.type === 'txt' && typeof r.text === 'string') {
-      const next = { ...r, text: pieces[tIdx] };
-      tIdx++;
-      return next;
+      return { ...r, text: convertText(r.text, { locale: 'zh' }) };
     }
     return r;
   });
@@ -95,12 +119,23 @@ function isCJK(ch) {
 }
 
 // ---- Mask / Unmask ----
-// Replace protected regions with placeholders N where N is an index.
-// The sentinel byte U+E000 is in the Private Use Area and never occurs in
-// legitimate text — it survives our punctuation passes unchanged.
+// Replace protected regions with placeholders so their contents are never
+// touched by punctuation passes.
+//
+// Sentinels use a 2-codepoint prefix (U+E000 U+E001) + 4-digit zero-padded
+// index + 2-codepoint suffix (U+E002 U+E003), all in the Private Use Area.
+// A stray single PUA char in the input (rare but real — some legacy Chinese
+// fonts use U+E000) cannot collide with the multi-codepoint sentinel. If an
+// out-of-range sentinel does appear, unmask preserves the raw chars instead
+// of silently dropping them.
 
-const MASK_OPEN = '';
-const MASK_CLOSE = '';
+const MASK_OPEN = '\uE000\uE001';
+const MASK_CLOSE = '\uE002\uE003';
+const MASK_INDEX_WIDTH = 4;
+
+function maskSlot(index) {
+  return `${MASK_OPEN}${String(index).padStart(MASK_INDEX_WIDTH, '0')}${MASK_CLOSE}`;
+}
 
 function mask(text) {
   const slots = [];
@@ -108,7 +143,9 @@ function mask(text) {
     /```[\s\S]*?```/g,
     /`[^`\n]+`/g,
     /<[^<>]+>/g,
-    /https?:\/\/[^\s<>"']+/g,
+    // Stop URL at whitespace, angle brackets, ASCII quotes, AND trailing CJK
+    // punctuation so a sentence-ending `。` after a URL is never eaten.
+    /https?:\/\/[^\s<>"'，。；：？！、）】」』》〉]+/g,
     /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g,
   ];
   let out = text;
@@ -116,15 +153,19 @@ function mask(text) {
     out = out.replace(re, (m) => {
       const i = slots.length;
       slots.push(m);
-      return `${MASK_OPEN}${i}${MASK_CLOSE}`;
+      return maskSlot(i);
     });
   }
   return { masked: out, slots };
 }
 
 function unmask(text, slots) {
-  const re = new RegExp(`${MASK_OPEN}(\\d+)${MASK_CLOSE}`, 'g');
-  return text.replace(re, (_, n) => slots[Number(n)] ?? '');
+  const re = new RegExp(`${MASK_OPEN}(\\d{${MASK_INDEX_WIDTH}})${MASK_CLOSE}`, 'g');
+  return text.replace(re, (match, n) => {
+    const idx = Number(n);
+    if (idx < 0 || idx >= slots.length) return match;
+    return slots[idx];
+  });
 }
 
 // ---- Basic punctuation conversion ----
@@ -174,16 +215,18 @@ function isAsciiTight(ch) {
   return c >= 0x21 && c <= 0x7E;
 }
 
+// Skip horizontal space, tab, line breaks, fullwidth space, and no-break space.
+const NEIGHBOR_SKIP = /[ \t\n\r\u3000\u00A0]/;
+
 function neighbor(text, i, dir) {
   let j = i + dir;
   while (j >= 0 && j < text.length) {
     const c = text[j];
-    if (!/[ \t]/.test(c)) return c;
+    if (!NEIGHBOR_SKIP.test(c)) return c;
     j += dir;
   }
   return '';
 }
-
 
 // ---- Ellipsis and em-dash ----
 
@@ -195,7 +238,10 @@ function convertEllipsisAndDash(text) {
 
 // ---- Smart quote pairing ----
 // Stack-based directional conversion for `"` and `'`.
-// Apostrophes inside a word (`it's`, `don't`) are detected first.
+// - Pre-existing curly quotes in the input are pushed/popped on the same stack
+//   so ASCII quotes mixed with already-curly quotes still pair correctly.
+// - Apostrophes inside a word (`it's`, `don't`) are detected first and never
+//   affect the stack.
 
 function convertQuotes(text) {
   const chars = Array.from(text);
@@ -205,24 +251,51 @@ function convertQuotes(text) {
   for (let i = 0; i < chars.length; i++) {
     const ch = chars[i];
 
+    // Pre-existing curly opening quotes: pass through, register on stack so
+    // subsequent ASCII quotes pair correctly.
+    if (ch === '\u201C' || ch === '\u2018') {
+      out.push(ch);
+      stack.push(ch === '\u201C' ? '"' : "'");
+      continue;
+    }
+
+    // Pre-existing curly closing double quote: pass through, pop matching.
+    if (ch === '\u201D') {
+      out.push(ch);
+      popMatching(stack, '"');
+      continue;
+    }
+
+    // Pre-existing curly right single quote: ambiguous (real closing quote OR
+    // in-word apostrophe). Mid-word → treat as apostrophe (do not touch stack).
+    if (ch === '\u2019') {
+      const prev = neighborArr(chars, i, -1);
+      const next = neighborArr(chars, i, +1);
+      out.push(ch);
+      if (!(isWordChar(prev) && isWordChar(next))) {
+        popMatching(stack, "'");
+      }
+      continue;
+    }
+
+    // ASCII quotes
     if (ch === '"' || ch === "'") {
       const prev = neighborArr(chars, i, -1);
       const next = neighborArr(chars, i, +1);
 
+      // Mid-word apostrophe: `it's`, `don't`, `O'Brien`.
       if (ch === "'" && isWordChar(prev) && isWordChar(next)) {
-        out.push('’');
+        out.push('\u2019');
         continue;
       }
 
       const isOpening = shouldOpen(prev, stack, ch);
       if (isOpening) {
-        out.push(ch === '"' ? '“' : '‘');
+        out.push(ch === '"' ? '\u201C' : '\u2018');
         stack.push(ch);
       } else {
-        out.push(ch === '"' ? '”' : '’');
-        for (let s = stack.length - 1; s >= 0; s--) {
-          if (stack[s] === ch) { stack.splice(s, 1); break; }
-        }
+        out.push(ch === '"' ? '\u201D' : '\u2019');
+        popMatching(stack, ch);
       }
       continue;
     }
@@ -233,11 +306,17 @@ function convertQuotes(text) {
   return out.join('');
 }
 
+function popMatching(stack, kind) {
+  for (let s = stack.length - 1; s >= 0; s--) {
+    if (stack[s] === kind) { stack.splice(s, 1); return; }
+  }
+}
+
 function neighborArr(chars, i, dir) {
   let j = i + dir;
   while (j >= 0 && j < chars.length) {
     const c = chars[j];
-    if (!/[ \t]/.test(c)) return c;
+    if (!NEIGHBOR_SKIP.test(c)) return c;
     j += dir;
   }
   return '';
@@ -245,17 +324,26 @@ function neighborArr(chars, i, dir) {
 
 function shouldOpen(prev, stack, kind) {
   if (prev === '') return true;
-  if (/[\s\n\r]/.test(prev)) return true;
-  if (isOpeningPunct(prev)) return true;
   const hasMatchingOpen = stack.includes(kind);
+  // Whitespace before a quote is normally an opening context. BUT if there is
+  // an unclosed matching quote on the stack, prefer closing it — this fixes
+  // pairs where the closer sits right after a soft newline or fullwidth space,
+  // e.g. `"你好\n世界"` where the second quote's prev is `\n`.
+  if (/[\s\n\r\u3000\u00A0]/.test(prev)) {
+    return !hasMatchingOpen;
+  }
+  if (isOpeningPunct(prev)) return true;
   if (hasMatchingOpen) return false;
   return true;
 }
 
+// Punctuation that typically precedes an opening quote.
 function isOpeningPunct(ch) {
-  return /[（(\[\{「『《【〈—,，。：:；;？?！!、“‘]/.test(ch);
+  return /[（(\[\{「『《【〈—,，。：:；;？?！!、\u201C\u2018]/.test(ch);
 }
 
+// ASCII word chars only. CJK is intentionally excluded — `男's` is not a real
+// construct; pairing for CJK + ASCII apostrophe goes through the stack path.
 function isWordChar(ch) {
   return /[A-Za-z0-9_]/.test(ch);
 }

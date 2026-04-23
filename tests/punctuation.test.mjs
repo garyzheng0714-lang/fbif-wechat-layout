@@ -219,3 +219,144 @@ test('runs: idempotent on already-converted text', () => {
   const out = convertRuns(runs);
   assert.equal(out[0].text, '他叫“豆碟豆腐”，35 克一小盒。');
 });
+
+// ---- Paragraph break resets quote stack (#4) ----
+
+test('paragraphs: unclosed quote in para 1 does not swallow para 2 opening', () => {
+  const input = '他说"你好。\n\n他又说"这不对"。';
+  const out = convertText(input);
+  assert.ok(out.includes('他又说“这不对”。'));
+});
+
+test('paragraphs: multiple paragraphs each get independent pairing', () => {
+  const input = '"第一段"。\n\n"第二段"。\n\n"第三段"。';
+  const out = convertText(input);
+  assert.equal(out, '“第一段”。\n\n“第二段”。\n\n“第三段”。');
+});
+
+test('paragraphs: paragraph break with spaces between newlines', () => {
+  const input = '上段"甲"\n  \n下段"乙"';
+  const out = convertText(input);
+  assert.equal(out, '上段“甲”\n  \n下段“乙”');
+});
+
+test('paragraphs: CRLF (Windows) paragraph break resets the quote stack', () => {
+  const input = '上段"甲"\r\n\r\n下段"乙"';
+  const out = convertText(input);
+  assert.equal(out, '上段“甲”\r\n\r\n下段“乙”');
+});
+
+// ---- Pre-existing curly quotes mixed with ASCII (#2) ----
+
+test('curly+ASCII: already-curly stays intact and threads the stack', () => {
+  const input = '他说“你好”，然后"再见"';
+  const out = convertText(input);
+  assert.equal(out, '他说“你好”，然后“再见”');
+});
+
+test('curly+ASCII: ASCII pair right after a curly pair', () => {
+  const input = '“前文”，然后"后文"的内容';
+  const out = convertText(input);
+  assert.equal(out, '“前文”，然后“后文”的内容');
+});
+
+test('curly+ASCII: curly right double does not push a phantom opener', () => {
+  const input = '”A”';
+  const out = convertText(input);
+  assert.equal(out, '”A”');
+});
+
+// ---- URL trailing CJK punctuation (#6) ----
+
+test('mask: URL is not eaten by trailing Chinese period', () => {
+  const out = convertText('参考 https://example.com。很好');
+  assert.ok(out.includes('https://example.com'));
+  assert.ok(out.endsWith('。很好'));
+});
+
+test('mask: URL stops before CJK comma and bracket', () => {
+  const out = convertText('链接 https://example.com，或 https://b.org）结束');
+  assert.ok(out.includes('https://example.com'));
+  assert.ok(out.includes('https://b.org'));
+  assert.ok(out.includes('，'));
+  assert.ok(out.includes('）'));
+});
+
+// ---- PUA sentinel collision (#5) ----
+
+test('mask: stray U+E000 in input survives unmask unchanged', () => {
+  const input = '你好\uE000世界。';
+  const out = convertText(input);
+  assert.ok(out.includes('\uE000'), 'user PUA preserved');
+  assert.ok(out.includes('世界。'));
+});
+
+test('mask: sentinel-shaped sequence with out-of-range index is preserved', () => {
+  const origWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const input = '前\uE000\uE0019999\uE002\uE003后。';
+    const out = convertText(input);
+    assert.ok(out.includes('\uE000\uE0019999\uE002\uE003'), 'out-of-range sentinel preserved, not dropped');
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
+// ---- Neighbor skipping: newline / fullwidth / nbsp (#3) ----
+
+test('neighbor: quote pair closes across a soft newline', () => {
+  const input = '"你好\n世界"';
+  const out = convertText(input);
+  assert.equal(out, '“你好\n世界”');
+});
+
+test('neighbor: quote pair closes across a fullwidth space', () => {
+  const input = '"你好\u3000世界"';
+  const out = convertText(input);
+  assert.equal(out, '“你好\u3000世界”');
+});
+
+test('neighbor: quote pair closes across a no-break space', () => {
+  const input = '"你好\u00A0世界"';
+  const out = convertText(input);
+  assert.equal(out, '“你好\u00A0世界”');
+});
+
+// ---- convertRuns fallback now converts (#1) ----
+
+test('runs: ellipsis in joined text no longer disables quote conversion', () => {
+  const runs = [
+    { type: 'txt', text: '他说...然后' },
+    { type: 'txt', text: '"这不对"，' },
+    { type: 'txt', text: '就走了。' },
+  ];
+  const out = convertRuns(runs);
+  const joined = out.map(r => r.text).join('');
+  assert.ok(joined.includes('……'), 'ellipsis converted');
+  assert.ok(joined.includes('“这不对”'), 'quotes converted in slow path');
+});
+
+test('runs: HTML in joined text still yields quote conversion on slow path', () => {
+  const runs = [
+    { type: 'txt', text: '看<b>这</b>段"重点"，' },
+    { type: 'txt', text: '明白吗?' },
+  ];
+  const out = convertRuns(runs);
+  const joined = out.map(r => r.text).join('');
+  assert.ok(joined.includes('“重点”'), 'quotes converted even with HTML in joined text');
+  assert.ok(joined.includes('？'), 'question mark converted');
+});
+
+// ---- Unbalanced / orphan quotes ----
+
+test('orphan: lone opening quote stays curly-open, no crash', () => {
+  const out = convertText('他说"你好');
+  assert.equal(out, '他说“你好');
+});
+
+test('orphan: never emits identical-direction adjacent pair', () => {
+  const out = convertText('你好"，完了');
+  assert.ok(!out.includes('““'));
+  assert.ok(!out.includes('””'));
+});
