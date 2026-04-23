@@ -345,6 +345,10 @@ export function initApp(template) {
       progressFill.style.width = '100%';
       progressText.textContent = '排版完成!';
       const displayTitle = result.title || file.name.replace(/\.\w+$/i, '');
+      // Drop the processing state so the upload zone is clickable again for
+      // the next file. (Previously only the error branch cleared it, so a
+      // successful upload left pointer-events:none on the drop zone.)
+      dropZone.classList.remove('processing');
       setTimeout(() => showPreview(displayTitle, articleHtml, footerHtml, stats), 200);
     } catch (err) {
       logConv('error', '排版失败', { error: err.message });
