@@ -537,7 +537,37 @@ func fetchWithXReader(url string) (content, title string, err error) {
 		cleaned = append(cleaned, line)
 	}
 
-	return strings.Join(cleaned, "\n"), title, nil
+	joined := strings.Join(cleaned, "\n")
+
+	// x-reader returns HTTP 200 even when WeChat serves a CAPTCHA/env-exception
+	// stub. Surface those as errors so handleFetchArticle falls back to the
+	// direct HTTP + extractArticle path (which preserves bold/refs).
+	if looksLikeWeChatBlock(joined) {
+		return "", "", fmt.Errorf("x-reader returned wechat block page")
+	}
+
+	return joined, title, nil
+}
+
+// looksLikeWeChatBlock reports whether the x-reader output is a WeChat
+// anti-scrape stub (CAPTCHA / 环境异常) rather than real article content.
+// Heuristic: short output containing any of the known block markers.
+func looksLikeWeChatBlock(s string) bool {
+	if len(s) > 2000 {
+		return false
+	}
+	markers := []string{
+		"环境异常",
+		"完成验证后即可继续访问",
+		"requiring CAPTCHA",
+		"CAPTCHA",
+	}
+	for _, m := range markers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
 }
 
 func fetchDirect(url string) (content, title string, err error) {
