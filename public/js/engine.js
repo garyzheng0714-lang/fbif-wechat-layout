@@ -2,11 +2,22 @@
 // Delegates: parsing → parser.js, upload → uploader.js, copy → clipboard.js, CSS → css-inline.js
 const assetQuery = new URL(import.meta.url).search;
 
-// Re-export parser utilities for templates
-export { esc, escAttr, parseMdRuns, parseMdFrontmatter, parseDocx, extractParagraph,
-         W, R, WP, A, findAll, findOne, findDeep, wattr, rattr } from './parser.js';
+// Load parser.js through assetQuery so the browser cache can't serve a stale
+// copy across deploys. Static `import './parser.js'` would resolve to
+// `/js/parser.js` (no version) and, under some proxy/cache conditions, keep
+// returning an old revision even with `Cache-Control: no-cache`. Engine.js is
+// the only consumer of parser.js; everyone else reaches it through engine's
+// re-exports below, so one dynamic import here fixes the whole chain.
+const parserModule = await import('./parser.js' + assetQuery);
+const {
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, parseDocx, extractParagraph,
+  W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
+} = parserModule;
+export {
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, parseDocx, extractParagraph,
+  W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
+};
 
-import { parseDocx } from './parser.js';
 import { uploadNonCdnImages, retryFailedImages } from './uploader.js';
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
 import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
