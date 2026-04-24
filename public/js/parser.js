@@ -26,18 +26,18 @@ export const MC = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
 export function findAll(el, ns, tag) {
   const r = [];
   if (!el) return r;
-  for (const c of el.children) if (c.localName === tag && c.namespaceURI === ns) r.push(c);
+  for (const c of elementChildren(el)) if (c.localName === tag && c.namespaceURI === ns) r.push(c);
   return r;
 }
 export function findOne(el, ns, tag) {
   if (!el) return null;
-  for (const c of el.children) if (c.localName === tag && c.namespaceURI === ns) return c;
+  for (const c of elementChildren(el)) if (c.localName === tag && c.namespaceURI === ns) return c;
   return null;
 }
 export function findDeep(el, ns, tag) {
   if (!el) return null;
   if (el.localName === tag && el.namespaceURI === ns) return el;
-  for (const c of el.children) { const f = findDeep(c, ns, tag); if (f) return f; }
+  for (const c of elementChildren(el)) { const f = findDeep(c, ns, tag); if (f) return f; }
   return null;
 }
 export function wattr(el, name) {
@@ -53,6 +53,127 @@ export function esc(t) {
 }
 export function escAttr(t) {
   return t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function elementChildren(el) {
+  if (!el) return [];
+  if (el.children) return Array.from(el.children);
+  return Array.from(el.childNodes || []).filter(n => n.nodeType === 1);
+}
+
+function readOnOff(el) {
+  if (!el) return undefined;
+  const v = wattr(el, 'val');
+  if (v === '0' || /^false$/i.test(v) || /^off$/i.test(v)) return false;
+  return true;
+}
+
+function readSpacing(spacingEl) {
+  const out = {};
+  if (!spacingEl) return out;
+  for (const k of ['before', 'after', 'beforeLines', 'afterLines', 'line', 'lineRule']) {
+    const v = wattr(spacingEl, k);
+    if (v !== '') out[k] = v;
+  }
+  return out;
+}
+
+function readPPr(pPr) {
+  const out = { spacing: {} };
+  if (!pPr) return out;
+
+  out.spacing = readSpacing(findOne(pPr, W, 'spacing'));
+  const contextualSpacing = readOnOff(findOne(pPr, W, 'contextualSpacing'));
+  if (contextualSpacing !== undefined) out.contextualSpacing = contextualSpacing;
+  const widowControl = readOnOff(findOne(pPr, W, 'widowControl'));
+  if (widowControl !== undefined) out.widowControl = widowControl;
+  if (findOne(pPr, W, 'numPr')) out.numPr = true;
+  if (findOne(pPr, W, 'outlineLvl')) out.outlineLevel = true;
+
+  const jc = findOne(pPr, W, 'jc');
+  if (jc) out.align = wattr(jc, 'val') || 'left';
+  return out;
+}
+
+function mergePPr(base, next) {
+  return {
+    ...base,
+    ...next,
+    spacing: { ...(base && base.spacing ? base.spacing : {}), ...(next && next.spacing ? next.spacing : {}) },
+    numPr: Boolean((base && base.numPr) || (next && next.numPr)),
+    outlineLevel: Boolean((base && base.outlineLevel) || (next && next.outlineLevel)),
+  };
+}
+
+function normalizeStyleText(v) {
+  return String(v || '').trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+}
+
+function compactStyleText(v) {
+  return normalizeStyleText(v).replace(/\s+/g, '');
+}
+
+function looksLikeHeadingStyle(styleId, styleName) {
+  const name = normalizeStyleText(styleName);
+  const id = compactStyleText(styleId);
+  return /^heading\b/.test(name) || /^标题\s*\d*/.test(name) ||
+    /^heading\d*$/.test(id) || /^title\d*$/.test(id);
+}
+
+function looksLikeListStyle(styleId, styleName) {
+  const name = normalizeStyleText(styleName);
+  const id = compactStyleText(styleId);
+  return /^list\b/.test(name) || /^(列表|清单)/.test(name) ||
+    /^list/.test(id) || /^(列表|清单)/.test(id);
+}
+
+export function parseDocxStyles(stylesDom) {
+  const root = stylesDom && (stylesDom.documentElement || stylesDom);
+  const empty = { docDefaults: { spacing: {} }, styles: {} };
+  if (!root) return empty;
+
+  const docDefaults = findOne(root, W, 'docDefaults');
+  const pPrDefault = findOne(findOne(docDefaults, W, 'pPrDefault'), W, 'pPr');
+  const out = { docDefaults: readPPr(pPrDefault), styles: {} };
+
+  for (const style of findAll(root, W, 'style')) {
+    const type = wattr(style, 'type');
+    if (type && type !== 'paragraph') continue;
+    const id = wattr(style, 'styleId');
+    if (!id) continue;
+    out.styles[id] = {
+      id,
+      type,
+      name: wattr(findOne(style, W, 'name'), 'val'),
+      basedOn: wattr(findOne(style, W, 'basedOn'), 'val'),
+      pPr: readPPr(findOne(style, W, 'pPr')),
+    };
+  }
+  return out;
+}
+
+export function resolveDocxStyle(styleSheet, styleId) {
+  const sheet = styleSheet || { docDefaults: { spacing: {} }, styles: {} };
+  const seen = new Set();
+  const chain = [];
+  let cur = styleId;
+  while (cur && !seen.has(cur) && sheet.styles && sheet.styles[cur]) {
+    seen.add(cur);
+    chain.unshift(sheet.styles[cur]);
+    cur = sheet.styles[cur].basedOn;
+  }
+
+  let pPr = sheet.docDefaults || { spacing: {} };
+  for (const style of chain) pPr = mergePPr(pPr, style.pPr || { spacing: {} });
+
+  const own = styleId && sheet.styles ? sheet.styles[styleId] : null;
+  return {
+    id: styleId || '',
+    name: own ? own.name : '',
+    basedOn: own ? own.basedOn : '',
+    chain: chain.map(s => s.id),
+    pPr,
+  };
 }
 
 // ---- Run-level helpers ----
@@ -83,7 +204,7 @@ function collectRunSegments(r) {
   const segments = [];
   let buf = '';
   const flush = () => { if (buf) { segments.push({ text: buf }); buf = ''; } };
-  for (const c of r.children) {
+  for (const c of elementChildren(r)) {
     if (c.namespaceURI !== W) continue;
     switch (c.localName) {
       case 't': buf += c.textContent || ''; break;
@@ -159,7 +280,7 @@ function visitRun(r, ctx, runs, ridToFile) {
 // <w:ins>, <w:fldSimple>, <mc:AlternateContent>, etc. so we never lose
 // runs hidden inside wrapper elements (common in WPS / 飞书 / 腾讯文档 exports).
 function walkParagraph(node, ctx, runs, ridToFile, ridToUrl) {
-  for (const child of node.children) {
+  for (const child of elementChildren(node)) {
     if (child.namespaceURI === W) {
       const tag = child.localName;
       if (tag === 'pPr' || tag === 'sdtPr' || tag === 'sdtEndPr' || tag === 'rPr') continue;
@@ -188,11 +309,11 @@ function walkParagraph(node, ctx, runs, ridToFile, ridToUrl) {
       walkParagraph(child, ctx, runs, ridToFile, ridToUrl);
     } else if (child.namespaceURI === MC && child.localName === 'AlternateContent') {
       let pick = null;
-      for (const c of child.children) {
+      for (const c of elementChildren(child)) {
         if (c.localName === 'Choice') { pick = c; break; }
       }
       if (!pick) {
-        for (const c of child.children) {
+        for (const c of elementChildren(child)) {
           if (c.localName === 'Fallback') { pick = c; break; }
         }
       }
@@ -217,6 +338,12 @@ function buildParagraph(runs, base) {
     hasImg: runs.some(r => r.type === 'img'),
     isEmpty: !runs.some(r => r.type === 'img') && !text.trim(),
     isList: base.isList,
+    styleId: base.styleId,
+    styleName: base.styleName,
+    styleChain: base.styleChain,
+    isListStyle: base.isListStyle,
+    contextualSpacing: base.contextualSpacing,
+    spacing: base.spacing,
     hasHL: runs.some(r => r.hl),
     hasOutlineLevel: base.hasOutlineLevel,
     hasHeadingStyle: base.hasHeadingStyle,
@@ -230,24 +357,36 @@ function buildParagraph(runs, base) {
 // multiple visual paragraphs into a single <w:p> with <w:br/> separators —
 // we split on those breaks so downstream rendering treats each line as its
 // own paragraph. Heading/outline style only applies to the first slice.
-export function extractParagraph(p, ridToFile, ridToUrl) {
+export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null) {
   const pPr = findOne(p, W, 'pPr');
   let align = 'left', isList = false, hasOutlineLevel = false, hasHeadingStyle = false;
+  let styleId = '', styleName = '', isListStyle = false, contextualSpacing = false, spacing = {}, styleChain = [];
 
+  const directPPr = readPPr(pPr);
   if (pPr) {
-    if (findOne(pPr, W, 'outlineLvl')) hasOutlineLevel = true;
     const ps = findOne(pPr, W, 'pStyle');
-    if (ps && /heading/i.test(wattr(ps, 'val'))) hasHeadingStyle = true;
-    const jc = findOne(pPr, W, 'jc');
-    if (jc) align = wattr(jc, 'val') || 'left';
-    if (findOne(pPr, W, 'numPr')) isList = true;
+    styleId = ps ? wattr(ps, 'val') : '';
   }
+  const resolvedStyle = resolveDocxStyle(styleSheet, styleId);
+  const effectivePPr = mergePPr(resolvedStyle.pPr || { spacing: {} }, directPPr);
+  styleName = resolvedStyle.name || '';
+  styleChain = resolvedStyle.chain || [];
+  align = effectivePPr.align || 'left';
+  isListStyle = looksLikeListStyle(styleId, styleName);
+  isList = Boolean(effectivePPr.numPr || isListStyle);
+  hasOutlineLevel = Boolean(effectivePPr.outlineLevel);
+  hasHeadingStyle = looksLikeHeadingStyle(styleId, styleName);
+  contextualSpacing = Boolean(effectivePPr.contextualSpacing);
+  spacing = effectivePPr.spacing || {};
 
   const runs = [];
   const ctx = { fieldState: 'none', fieldInstr: '', fieldHref: '', linkHref: '' };
   walkParagraph(p, ctx, runs, ridToFile, ridToUrl);
 
-  const base = { align, isList, hasOutlineLevel, hasHeadingStyle };
+  const base = {
+    align, isList, styleId, styleName, styleChain, isListStyle,
+    contextualSpacing, spacing, hasOutlineLevel, hasHeadingStyle
+  };
   if (!runs.some(r => r.type === 'br')) {
     return [buildParagraph(runs, base)];
   }
@@ -347,9 +486,13 @@ export async function parseDocx(file) {
 
   const docXml = await docEntry.async('string');
   const docDom = new DOMParser().parseFromString(docXml, 'text/xml');
+  const stylesEntry = zipFile('word/styles.xml');
+  const styleSheet = stylesEntry
+    ? parseDocxStyles(new DOMParser().parseFromString(await stylesEntry.async('string'), 'text/xml'))
+    : parseDocxStyles(null);
   const body = findOne(docDom.documentElement, W, 'body');
   const paragraphs = [];
-  collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs);
+  collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs, styleSheet);
 
   return { paragraphs, imgCache };
 }
@@ -357,18 +500,18 @@ export async function parseDocx(file) {
 // Walk block-level content collecting paragraphs. Descends into tables
 // (flattening cells row-by-row), sdt wrappers, and mc:AlternateContent
 // so table text and SDT-wrapped paragraphs aren't silently dropped.
-export function collectBlockParagraphs(container, ridToFile, ridToUrl, out) {
-  for (const child of container.children) {
+export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styleSheet = null) {
+  for (const child of elementChildren(container)) {
     if (child.namespaceURI === W) {
       const tag = child.localName;
       if (tag === 'p') {
-        out.push(...extractParagraph(child, ridToFile, ridToUrl));
+        out.push(...extractParagraph(child, ridToFile, ridToUrl, styleSheet));
         continue;
       }
       if (tag === 'tbl') {
         for (const tr of findAll(child, W, 'tr')) {
           for (const tc of findAll(tr, W, 'tc')) {
-            collectBlockParagraphs(tc, ridToFile, ridToUrl, out);
+            collectBlockParagraphs(tc, ridToFile, ridToUrl, out, styleSheet);
           }
         }
         continue;
@@ -379,14 +522,14 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out) {
           tag === 'sdtEndPr' || tag === 'bookmarkStart' ||
           tag === 'bookmarkEnd' || tag === 'proofErr') continue;
       // Other w:* wrappers (sdt, sdtContent, ins, etc.) — recurse.
-      collectBlockParagraphs(child, ridToFile, ridToUrl, out);
+      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet);
     } else if (child.namespaceURI === MC && child.localName === 'AlternateContent') {
       let pick = null;
-      for (const c of child.children) { if (c.localName === 'Choice') { pick = c; break; } }
-      if (!pick) for (const c of child.children) { if (c.localName === 'Fallback') { pick = c; break; } }
-      if (pick) collectBlockParagraphs(pick, ridToFile, ridToUrl, out);
+      for (const c of elementChildren(child)) { if (c.localName === 'Choice') { pick = c; break; } }
+      if (!pick) for (const c of elementChildren(child)) { if (c.localName === 'Fallback') { pick = c; break; } }
+      if (pick) collectBlockParagraphs(pick, ridToFile, ridToUrl, out, styleSheet);
     } else {
-      collectBlockParagraphs(child, ridToFile, ridToUrl, out);
+      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet);
     }
   }
 }

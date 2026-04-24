@@ -35,6 +35,40 @@ function secCenter(inner, gap) {
   return '<section class="wx-pc' + (gap ? ' wx-gap' : '') + '">' + inner + '</section>';
 }
 
+function docxMeta(pd) {
+  return {
+    isList: !!pd.isList,
+    styleId: pd.styleId || '',
+    styleName: pd.styleName || '',
+    contextualSpacing: !!pd.contextualSpacing,
+    spacing: pd.spacing || {},
+  };
+}
+
+function sameDocxStyle(a, b) {
+  if (!a || !b) return false;
+  if (a.styleId && b.styleId) return a.styleId === b.styleId;
+  if (a.styleName && b.styleName) return a.styleName === b.styleName;
+  return false;
+}
+
+function isCompactDocxPair(a, b) {
+  if (!a || !b) return false;
+  if ((a.k !== 'txt' && a.k !== 'ref') || (b.k !== 'txt' && b.k !== 'ref')) return false;
+  if (a.isList && b.isList) return true;
+  return sameDocxStyle(a, b) && (a.contextualSpacing || b.contextualSpacing);
+}
+
+function shouldSpaceAfter(e, next) {
+  if (!next) return false;
+  if (next.k === 'cap') return false;
+  if (e.k === 'ref' && next.k === 'ref') return false;
+  if (e.k === 'attr' && next.k === 'attr') return false;
+  if (e.k === 'img' && (next.k === 'cap' || next.k === 'img')) return false;
+  if (isCompactDocxPair(e, next)) return false;
+  return true;
+}
+
 // ---- DOCX Classification ----
 function classifyDocx(paragraphs, imgCache) {
   const pds = paragraphs.map(p => ({
@@ -78,22 +112,22 @@ function classifyDocx(paragraphs, imgCache) {
     const trimmed = pd.text.trim();
     if (/^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/.test(trimmed)) {
       inRef = true;
-      elems.push({ k: 'refH', text: trimmed.replace(/[：:]$/, '') });
+      elems.push({ k: 'refH', text: trimmed.replace(/[：:]$/, ''), ...docxMeta(pd) });
       continue;
     }
 
     if (pd.isHeading) {
       const ht = trimmed.replace(/[：:]$/, '');
       if (ht === '引言' || ht === '标题') continue;
-      if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht }); continue; }
+      if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht, ...docxMeta(pd) }); continue; }
       // A real non-ref heading closes any prior ref section.
       inRef = false;
-      elems.push({ k: 'h', text: ht.replace(/^0?\d+\s+/, '') });
+      elems.push({ k: 'h', text: ht.replace(/^0?\d+\s+/, ''), ...docxMeta(pd) });
       continue;
     }
     if (inRef) {
       if (!trimmed) continue;
-      elems.push({ k: 'ref', runs: pd.runs });
+      elems.push({ k: 'ref', runs: pd.runs, ...docxMeta(pd) });
       continue;
     }
     if (pd.hasImg) {
@@ -115,7 +149,7 @@ function classifyDocx(paragraphs, imgCache) {
       }
       continue;
     }
-    elems.push({ k: 'txt', runs: pd.runs });
+    elems.push({ k: 'txt', runs: pd.runs, ...docxMeta(pd) });
   }
 
   return { elems, author, imgN };
@@ -238,11 +272,8 @@ function render(elems, author, source) {
 
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
-    const nextK = i + 1 < elems.length ? elems[i + 1].k : null;
-    const spaceAfter = nextK && nextK !== 'cap' &&
-      !(e.k === 'ref' && nextK === 'ref') &&
-      !(e.k === 'attr' && nextK === 'attr') &&
-      !(e.k === 'img' && (nextK === 'cap' || nextK === 'img'));
+    const next = i + 1 < elems.length ? elems[i + 1] : null;
+    const spaceAfter = shouldSpaceAfter(e, next);
 
     switch (e.k) {
       case 'h':
