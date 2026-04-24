@@ -104,7 +104,7 @@ export function openCropEditor(card) {
       if (tp) {
         const SCALE = W / BANNER_STYLE_SPEC.width;
         const title = BANNER_STYLE_SPEC.title;
-        const fontFamily = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
+        const fontFamily = '"NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
         let fontSize = Math.max(12, title.fontSize * SCALE);
         const minFontSize = Math.max(10, 30 * SCALE);
         const step = Math.max(1, 2 * SCALE);

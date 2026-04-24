@@ -24,7 +24,7 @@ export const BANNER_STYLE_SPEC = Object.freeze({
     height: 116,
     fontSize: 48,
     lineHeight: 70,
-    fontWeight: 650,
+    fontWeight: 700,
     fill: '#FFFFFF',
     maxLines: 2,
   }),
@@ -38,6 +38,8 @@ const COMPOSITE_LINE_HEIGHT = BANNER_STYLE_SPEC.title.lineHeight;
 const COMPOSITE_OVERLAY_ALPHA = BANNER_STYLE_SPEC.overlayAlpha;
 const COMPOSITE_OUTPUT_TYPE = 'image/png';
 const COMPOSITE_FONT_FAMILIES = [
+  'NotoSansHans',
+  'Noto Sans CJK SC',
   'Noto Sans SC',
   'PingFang SC',
   'Microsoft YaHei',

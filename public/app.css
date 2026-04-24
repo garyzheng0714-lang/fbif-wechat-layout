@@ -1,5 +1,13 @@
 /* FBIF 排版工具 — Split Layout, Notion Design System */
 
+@font-face {
+  font-family: 'NotoSansHans';
+  src: url('/fonts/NotoSansHans-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Inter', -apple-system, system-ui, 'PingFang SC',
@@ -582,10 +590,10 @@ input[type="file"] { display: none; }
 }
 .crop-title-preview {
   position: absolute; left: 0; top: 0;
-  color: #fff; font-weight: 650; font-size: 22px;
+  color: #fff; font-weight: 700; font-size: 22px;
   text-shadow: none;
   line-height: 1.4583333333; pointer-events: none;
-  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   overflow: hidden;
   display: block;
 }
