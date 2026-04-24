@@ -9,41 +9,35 @@
 
 const LS_KEY = 'more_articles_v1';
 
-// Composite canvas: geometry mirrors 推文底部banner模板(9).psd.
-// Extracted with psd-tools from the visible 1000×300 artboards:
-// - shape layer "矩形 1": black, opacity 128/255
-// - type layer: NotoSansHans-Bold, 48px, 70px leading, #FFFFFF
-// - type bbox relative to artboard: (61, 92, 864, 208), width 803
-export const PSD_BANNER_SPEC = Object.freeze({
+// Composite canvas style values taken from the approved bottom-banner reference.
+export const BANNER_STYLE_SPEC = Object.freeze({
   width: 1000,
   height: 300,
-  overlayAlpha: 128 / 255,
+  overlayAlpha: 120 / 255,
   title: Object.freeze({
     x: 61,
     y: 92,
-    width: 803,
+    // Symmetric to title.x so the text block isn't visually pulled left when
+    // it wraps to fill the row: right padding = width - x - title.width = 61.
+    width: 878,
     wrapTolerance: 2,
     height: 116,
     fontSize: 48,
     lineHeight: 70,
-    fontWeight: 700,
+    fontWeight: 650,
     fill: '#FFFFFF',
     maxLines: 2,
   }),
 });
 
-const COMPOSITE_W = PSD_BANNER_SPEC.width;
-const COMPOSITE_H = PSD_BANNER_SPEC.height;
-const COMPOSITE_PAD_X = PSD_BANNER_SPEC.title.x;
-const COMPOSITE_TEXT_TOP = PSD_BANNER_SPEC.title.y;
-const COMPOSITE_TEXT_MAX_W = PSD_BANNER_SPEC.title.width + PSD_BANNER_SPEC.title.wrapTolerance;
-const COMPOSITE_TITLE_SIZE = PSD_BANNER_SPEC.title.fontSize;
-const COMPOSITE_LINE_HEIGHT = PSD_BANNER_SPEC.title.lineHeight;
-const COMPOSITE_OVERLAY_ALPHA = PSD_BANNER_SPEC.overlayAlpha;
+const COMPOSITE_W = BANNER_STYLE_SPEC.width;
+const COMPOSITE_H = BANNER_STYLE_SPEC.height;
+const COMPOSITE_TEXT_MAX_W = BANNER_STYLE_SPEC.title.width + BANNER_STYLE_SPEC.title.wrapTolerance;
+const COMPOSITE_TITLE_SIZE = BANNER_STYLE_SPEC.title.fontSize;
+const COMPOSITE_LINE_HEIGHT = BANNER_STYLE_SPEC.title.lineHeight;
+const COMPOSITE_OVERLAY_ALPHA = BANNER_STYLE_SPEC.overlayAlpha;
 const COMPOSITE_OUTPUT_TYPE = 'image/png';
 const COMPOSITE_FONT_FAMILIES = [
-  'NotoSansHans',
-  'Noto Sans CJK SC',
   'Noto Sans SC',
   'PingFang SC',
   'Microsoft YaHei',
@@ -51,6 +45,13 @@ const COMPOSITE_FONT_FAMILIES = [
   'sans-serif',
 ];
 const COMPOSITE_FONT_STACK = COMPOSITE_FONT_FAMILIES.map(f => /\s/.test(f) ? `"${f}"` : f).join(', ');
+const COMPOSITE_STYLE_VERSION = '2026-04-24-psd-punctuation-v2';
+const LINE_START_FORBIDDEN_PUNCTUATION = new Set(Array.from(
+  '，。！？；：、,.!?;:)]}）】》〉」』”’"\''
+));
+const LINE_END_FORBIDDEN_PUNCTUATION = new Set(Array.from(
+  '“‘「『'
+));
 
 // No hardcoded defaults — the user curates the full list. Cards array is
 // dynamic length (can be 0..N).
@@ -153,12 +154,29 @@ function wrapTextForCanvas(ctx, text, maxWidth) {
   return lines;
 }
 
-async function loadCompositeFonts(size = COMPOSITE_TITLE_SIZE) {
-  if (!document.fonts || !document.fonts.load) return;
-  await Promise.allSettled(
-    COMPOSITE_FONT_FAMILIES.slice(0, 3)
-      .map(family => document.fonts.load(`${PSD_BANNER_SPEC.title.fontWeight} ${size}px "${family}"`))
-  );
+function balanceLinePunctuation(lines) {
+  const out = lines.slice();
+  for (let i = 1; i < out.length; i++) {
+    let chars = Array.from(out[i] || '');
+    while (chars.length && LINE_START_FORBIDDEN_PUNCTUATION.has(chars[0])) {
+      out[i - 1] = (out[i - 1] || '') + chars.shift();
+    }
+    out[i] = chars.join('');
+  }
+  for (let i = 0; i < out.length - 1; i++) {
+    let prev = Array.from(out[i] || '');
+    let next = Array.from(out[i + 1] || '');
+    while (prev.length && LINE_END_FORBIDDEN_PUNCTUATION.has(prev[prev.length - 1])) {
+      next.unshift(prev.pop());
+    }
+    out[i] = prev.join('');
+    out[i + 1] = next.join('');
+  }
+  return out.filter(line => line !== '');
+}
+
+export function wrapBannerTitleLines(ctx, text, maxWidth) {
+  return balanceLinePunctuation(wrapTextForCanvas(ctx, text, maxWidth));
 }
 
 // ---- Composite: cover + dark overlay + title text ----
@@ -203,38 +221,38 @@ export async function compositeCard(card) {
   ctx.fillStyle = `rgba(0,0,0,${COMPOSITE_OVERLAY_ALPHA})`;
   ctx.fillRect(0, 0, W, H);
 
-  // Title: white, Noto Sans SC Bold (NotoSansHans-Bold in the PSD font set),
-  // 48px with 70px leading, top-aligned at x=61, y=92 inside the artboard.
+  // Title: white, bold Chinese sans-serif, 48px with 70px leading.
   // Auto-shrink proportionally if the title exceeds 2 lines so overflow still
   // fits without breaking the PSD composition.
   const title = String(card.title || '').trim();
   if (title) {
-    await loadCompositeFonts(COMPOSITE_TITLE_SIZE);
     const maxW = COMPOSITE_TEXT_MAX_W;
     const leadingRatio = COMPOSITE_LINE_HEIGHT / COMPOSITE_TITLE_SIZE; // PSD 70/48
-    ctx.fillStyle = PSD_BANNER_SPEC.title.fill;
+    ctx.fillStyle = BANNER_STYLE_SPEC.title.fill;
     ctx.textBaseline = 'top';
     let size = COMPOSITE_TITLE_SIZE;
     const minSize = 30;
     let lines = [];
     while (size >= minSize) {
-      ctx.font = `${PSD_BANNER_SPEC.title.fontWeight} ${size}px ${COMPOSITE_FONT_STACK}`;
-      lines = wrapTextForCanvas(ctx, title, maxW);
-      if (lines.length <= PSD_BANNER_SPEC.title.maxLines) break;
+      ctx.font = `${BANNER_STYLE_SPEC.title.fontWeight} ${size}px ${COMPOSITE_FONT_STACK}`;
+      lines = wrapBannerTitleLines(ctx, title, maxW);
+      if (lines.length <= BANNER_STYLE_SPEC.title.maxLines) break;
       size -= 2;
     }
-    if (lines.length > PSD_BANNER_SPEC.title.maxLines) {
-      lines = lines.slice(0, PSD_BANNER_SPEC.title.maxLines);
-      let last = lines[PSD_BANNER_SPEC.title.maxLines - 1];
+    if (lines.length > BANNER_STYLE_SPEC.title.maxLines) {
+      lines = lines.slice(0, BANNER_STYLE_SPEC.title.maxLines);
+      lines = balanceLinePunctuation(lines);
+      const lastIndex = Math.max(0, lines.length - 1);
+      let last = lines[lastIndex] || '';
       while (last.length > 1 && ctx.measureText(last + '…').width > maxW) {
         last = last.slice(0, -1);
       }
-      lines[PSD_BANNER_SPEC.title.maxLines - 1] = last + '…';
+      lines[lastIndex] = last + '…';
     }
     const lineHeight = size * leadingRatio;
-    let y = COMPOSITE_TEXT_TOP;
+    let y = BANNER_STYLE_SPEC.title.y;
     for (const line of lines) {
-      ctx.fillText(line, COMPOSITE_PAD_X, y);
+      ctx.fillText(line, BANNER_STYLE_SPEC.title.x, y);
       y += lineHeight;
     }
   }
@@ -258,6 +276,11 @@ export async function computeCardHash(card) {
     cover_data_url_len: card.cover_data_url ? card.cover_data_url.length : 0,
     cover_data_url_head: card.cover_data_url ? card.cover_data_url.slice(0, 120) : '',
     crop: card.crop || null,
+    style: {
+      version: COMPOSITE_STYLE_VERSION,
+      overlayAlpha: BANNER_STYLE_SPEC.overlayAlpha,
+      title: BANNER_STYLE_SPEC.title,
+    },
   });
   return sha1Hex(input);
 }

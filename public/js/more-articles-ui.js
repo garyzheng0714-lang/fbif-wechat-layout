@@ -46,7 +46,11 @@ async function fetchArticleMetaCached(url) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.error || ('HTTP ' + resp.status));
     }
-    return resp.json();
+    const meta = await resp.json();
+    if (!meta || (!meta.title && !meta.cover_url)) {
+      throw new Error('未提取到标题或头图，请检查链接是否完整');
+    }
+    return meta;
   })().catch(err => { metaCache.delete(url); throw err; });
   metaCache.set(url, p);
   return p;

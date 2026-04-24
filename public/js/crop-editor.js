@@ -3,7 +3,7 @@
 // wired through public/app.html.
 // Returns: Promise<{x, y, scale} | null>  (null = user cancelled)
 
-import { PSD_BANNER_SPEC } from './more-articles.js';
+import { BANNER_STYLE_SPEC, wrapBannerTitleLines } from './more-articles.js';
 
 export function openCropEditor(card) {
   return new Promise((resolve) => {
@@ -33,9 +33,13 @@ export function openCropEditor(card) {
     const stage = $('stage');
     const imgEl = $('img');
     const tp = $('tp');
+    const tint = overlay.querySelector('.crop-tint');
     const scaleEl = $('scale');
+    const previewCanvas = document.createElement('canvas');
+    const previewCtx = previewCanvas.getContext('2d');
+    const titleText = (card.title || '').trim();
 
-    tp.textContent = (card.title || '').trim();
+    tp.textContent = titleText;
 
     const initialCrop = card.crop && typeof card.crop === 'object'
       ? { x: 0.5, y: 0.5, scale: 1, ...card.crop }
@@ -98,18 +102,42 @@ export function openCropEditor(card) {
       // Title overlay: separate layer, never affected by image zoom. Mirrors
       // the PSD text layer geometry, scaled from the 1000×300 artboard.
       if (tp) {
-        const SCALE = W / PSD_BANNER_SPEC.width;
-        const title = PSD_BANNER_SPEC.title;
-        tp.style.fontSize = Math.max(12, title.fontSize * SCALE) + 'px';
+        const SCALE = W / BANNER_STYLE_SPEC.width;
+        const title = BANNER_STYLE_SPEC.title;
+        const fontFamily = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
+        let fontSize = Math.max(12, title.fontSize * SCALE);
+        const minFontSize = Math.max(10, 30 * SCALE);
+        const step = Math.max(1, 2 * SCALE);
+        const maxWidth = (title.width + title.wrapTolerance) * SCALE;
+        let lines = [];
+        while (fontSize >= minFontSize) {
+          previewCtx.font = `${title.fontWeight} ${fontSize}px ${fontFamily}`;
+          lines = wrapBannerTitleLines(previewCtx, titleText, maxWidth);
+          if (lines.length <= title.maxLines) break;
+          fontSize -= step;
+        }
+        if (lines.length > title.maxLines) lines = lines.slice(0, title.maxLines);
+
+        tp.style.fontSize = fontSize + 'px';
         tp.style.left = (title.x * SCALE) + 'px';
-        tp.style.width = ((title.width + title.wrapTolerance) * SCALE) + 'px';
+        tp.style.width = maxWidth + 'px';
         tp.style.right = 'auto';
         tp.style.top = (title.y * SCALE) + 'px';
         tp.style.bottom = 'auto';
         tp.style.transform = 'none';
-        tp.style.lineHeight = (title.lineHeight / title.fontSize);
+        tp.style.lineHeight = String(title.lineHeight / title.fontSize);
         tp.style.fontWeight = String(title.fontWeight);
-        tp.style.fontFamily = '"NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
+        tp.style.fontFamily = fontFamily;
+        tp.replaceChildren(...lines.map(line => {
+          const span = document.createElement('span');
+          span.textContent = line;
+          span.style.display = 'block';
+          span.style.textAlign = 'left';
+          return span;
+        }));
+      }
+      if (tint) {
+        tint.style.background = `rgba(0,0,0,${BANNER_STYLE_SPEC.overlayAlpha})`;
       }
     }
 

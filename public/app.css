@@ -1,13 +1,5 @@
 /* FBIF 排版工具 — Split Layout, Notion Design System */
 
-@font-face {
-  font-family: 'NotoSansHans';
-  src: url('/fonts/NotoSansHans-Bold.otf') format('opentype');
-  font-weight: 700;
-  font-style: normal;
-  font-display: block;
-}
-
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Inter', -apple-system, system-ui, 'PingFang SC',
@@ -238,9 +230,9 @@ input[type="file"] { display: none; }
 
 /* Preview content — WeChat replica */
 .preview-content {
-  max-width: 680px; margin: 0 auto; padding: 32px 24px 100px; background: #FFFFFF;
+  max-width: 680px; margin: 0 auto; padding: 32px 0 100px; background: #FFFFFF;
 }
-.wx-header { margin-bottom: 16px; padding: 0 0 16px; }
+.wx-header { margin: 0 8px 16px; padding: 0 0 16px; }
 .wx-title {
   font-size: 27px; font-weight: 700; color: #222;
   line-height: 1.35; margin-bottom: 16px; text-align: left;
@@ -586,18 +578,16 @@ input[type="file"] { display: none; }
 }
 .crop-tint {
   position: absolute; inset: 0; pointer-events: none;
-  background: rgba(0,0,0,0.5019607843137255);
+  background: rgba(0,0,0,0.47058823529411764);
 }
 .crop-title-preview {
   position: absolute; left: 0; top: 0;
-  color: #fff; font-weight: 700; font-size: 22px;
+  color: #fff; font-weight: 650; font-size: 22px;
   text-shadow: none;
   line-height: 1.4583333333; pointer-events: none;
-  font-family: "NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
 }
 .crop-controls {
   display: flex; gap: 12px; align-items: center;
