@@ -209,13 +209,13 @@ type ConfigData struct {
 }
 
 type Profile struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	IsDefault bool   `json:"is_default"`
+	ID        int64       `json:"id"`
+	Name      string      `json:"name"`
+	IsDefault bool        `json:"is_default"`
 	Config    *ConfigData `json:"config,omitempty"`
-	Version   int    `json:"version,omitempty"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Version   int         `json:"version,omitempty"`
+	CreatedAt string      `json:"created_at"`
+	UpdatedAt string      `json:"updated_at"`
 }
 
 type ConfigVersion struct {
@@ -675,10 +675,10 @@ func fetchDirect(url string) (content, title string, err error) {
 // ---- Article Meta (lightweight: title + cover for "更多文章" cards) ----
 
 var (
-	reMsgCdnURL    = regexp.MustCompile(`var\s+msg_cdn_url\s*=\s*"([^"]+)"`)
-	reMsgTitle     = regexp.MustCompile(`var\s+msg_title\s*=\s*"((?:[^"\\]|\\.)*)"`)
-	reTitleTag     = regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
-	reImgDataSrc   = regexp.MustCompile(`<img[^>]+data-src="(https?://[^"]+)"`)
+	reMsgCdnURL      = regexp.MustCompile(`var\s+msg_cdn_url\s*=\s*"([^"]+)"`)
+	reMsgTitle       = regexp.MustCompile(`var\s+msg_title\s*=\s*"((?:[^"\\]|\\.)*)"`)
+	reTitleTag       = regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
+	reImgDataSrc     = regexp.MustCompile(`<img[^>]+data-src="(https?://[^"]+)"`)
 	hostAllowlistCDN = []string{
 		"mmbiz.qpic.cn",
 		"mmbiz.qlogo.cn",
@@ -757,6 +757,10 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	title = strings.TrimSpace(title)
+	if title == "" && cover == "" {
+		writeError(w, 422, "未提取到标题或头图，请检查链接是否完整")
+		return
+	}
 
 	writeJSON(w, 200, map[string]string{
 		"title":      title,
