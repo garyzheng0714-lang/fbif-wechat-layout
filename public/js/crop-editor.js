@@ -3,7 +3,7 @@
 // wired through public/app.html.
 // Returns: Promise<{x, y, scale} | null>  (null = user cancelled)
 
-import { BANNER_STYLE_SPEC, wrapBannerTitleLines } from './more-articles.js';
+import { BANNER_STYLE_SPEC, computeBannerTitleLayout } from './more-articles.js';
 
 export function openCropEditor(card) {
   return new Promise((resolve) => {
@@ -103,32 +103,20 @@ export function openCropEditor(card) {
       // the PSD text layer geometry, scaled from the 1000×300 artboard.
       if (tp) {
         const SCALE = W / BANNER_STYLE_SPEC.width;
-        const title = BANNER_STYLE_SPEC.title;
         const fontFamily = '"NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
-        let fontSize = Math.max(12, title.fontSize * SCALE);
-        const minFontSize = Math.max(10, 30 * SCALE);
-        const step = Math.max(1, 2 * SCALE);
-        const maxWidth = (title.width + title.wrapTolerance) * SCALE;
-        let lines = [];
-        while (fontSize >= minFontSize) {
-          previewCtx.font = `${title.fontWeight} ${fontSize}px ${fontFamily}`;
-          lines = wrapBannerTitleLines(previewCtx, titleText, maxWidth);
-          if (lines.length <= title.maxLines) break;
-          fontSize -= step;
-        }
-        if (lines.length > title.maxLines) lines = lines.slice(0, title.maxLines);
+        const layout = computeBannerTitleLayout(previewCtx, titleText, { scale: SCALE, fontFamily });
 
-        tp.style.fontSize = fontSize + 'px';
-        tp.style.left = (title.x * SCALE) + 'px';
-        tp.style.width = maxWidth + 'px';
+        tp.style.fontSize = layout.fontSize + 'px';
+        tp.style.left = layout.x + 'px';
+        tp.style.width = layout.maxWidth + 'px';
         tp.style.right = 'auto';
-        tp.style.top = (title.y * SCALE) + 'px';
+        tp.style.top = layout.y + 'px';
         tp.style.bottom = 'auto';
         tp.style.transform = 'none';
-        tp.style.lineHeight = String(title.lineHeight / title.fontSize);
-        tp.style.fontWeight = String(title.fontWeight);
-        tp.style.fontFamily = fontFamily;
-        tp.replaceChildren(...lines.map(line => {
+        tp.style.lineHeight = String(layout.lineHeight / layout.fontSize);
+        tp.style.fontWeight = String(layout.fontWeight);
+        tp.style.fontFamily = layout.fontFamily;
+        tp.replaceChildren(...layout.lines.map(line => {
           const span = document.createElement('span');
           span.textContent = line;
           span.style.display = 'block';

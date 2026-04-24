@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,42 +23,14 @@ import (
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"golang.org/x/net/html"
 )
-
-var db *sql.DB
 
 func main() {
 	port := flag.Int("port", 9000, "API server port")
-	dbPath := flag.String("db", "config.db", "SQLite database path")
 	flag.Parse()
 
-	var err error
-	db, err = sql.Open("sqlite", *dbPath+"?_journal_mode=WAL")
-	if err != nil {
-		log.Fatal("Failed to open database:", err)
-	}
-	defer db.Close()
-
-	if err := initDB(); err != nil {
-		log.Fatal("Failed to initialize database:", err)
-	}
-
 	mux := http.NewServeMux()
-
-	// Config profiles
-	mux.HandleFunc("GET /api/config/profiles", handleListProfiles)
-	mux.HandleFunc("POST /api/config/profiles", handleCreateProfile)
-	mux.HandleFunc("GET /api/config/profiles/{id}", handleGetProfile)
-	mux.HandleFunc("PUT /api/config/profiles/{id}", handleUpdateProfile)
-	mux.HandleFunc("DELETE /api/config/profiles/{id}", handleDeleteProfile)
-
-	// Active config (what the frontend loads on startup)
-	mux.HandleFunc("GET /api/config/active", handleGetActiveConfig)
-	mux.HandleFunc("PUT /api/config/active", handleSetActiveConfig)
-
-	// Config versions (history for a profile)
-	mux.HandleFunc("GET /api/config/profiles/{id}/versions", handleListVersions)
 
 	// Image upload to OSS (base64 from DOCX)
 	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
@@ -140,91 +111,6 @@ func withCORS(next http.Handler) http.Handler {
 	})
 }
 
-func initDB() error {
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS profiles (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			name       TEXT    NOT NULL UNIQUE,
-			is_default INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT    NOT NULL,
-			updated_at TEXT    NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS config_versions (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-			version    INTEGER NOT NULL,
-			config     TEXT    NOT NULL,
-			created_at TEXT    NOT NULL,
-			UNIQUE(profile_id, version)
-		);
-		CREATE TABLE IF NOT EXISTS active_config (
-			key   TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		);
-	`)
-	if err != nil {
-		return err
-	}
-
-	// Ensure a default profile exists
-	var count int
-	db.QueryRow("SELECT COUNT(*) FROM profiles").Scan(&count)
-	if count == 0 {
-		now := time.Now().UTC().Format(time.RFC3339)
-		defaultConfig := ConfigData{
-			FooterEnabled: true,
-			FontFamily:    "mp-quote, 'PingFang SC', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif",
-			FontSize:      "15px",
-			HeadingSize:   "18px",
-			TextColor:     "rgb(84, 69, 69)",
-			LinkColor:     "rgb(0, 112, 192)",
-			LineHeight:    "1.75em",
-			LetterSpacing: "0.034em",
-		}
-		configJSON, _ := json.Marshal(defaultConfig)
-		res, err := db.Exec("INSERT INTO profiles (name, is_default, created_at, updated_at) VALUES (?, 1, ?, ?)",
-			"默认配置", now, now)
-		if err != nil {
-			return err
-		}
-		pid, _ := res.LastInsertId()
-		db.Exec("INSERT INTO config_versions (profile_id, version, config, created_at) VALUES (?, 1, ?, ?)",
-			pid, string(configJSON), now)
-		db.Exec("INSERT OR REPLACE INTO active_config (key, value) VALUES ('profile_id', ?)", fmt.Sprintf("%d", pid))
-	}
-	return nil
-}
-
-// ---- Data Types ----
-
-type ConfigData struct {
-	FooterEnabled bool   `json:"footer_enabled"`
-	FontFamily    string `json:"font_family"`
-	FontSize      string `json:"font_size"`
-	HeadingSize   string `json:"heading_size"`
-	TextColor     string `json:"text_color"`
-	LinkColor     string `json:"link_color"`
-	LineHeight    string `json:"line_height"`
-	LetterSpacing string `json:"letter_spacing"`
-}
-
-type Profile struct {
-	ID        int64       `json:"id"`
-	Name      string      `json:"name"`
-	IsDefault bool        `json:"is_default"`
-	Config    *ConfigData `json:"config,omitempty"`
-	Version   int         `json:"version,omitempty"`
-	CreatedAt string      `json:"created_at"`
-	UpdatedAt string      `json:"updated_at"`
-}
-
-type ConfigVersion struct {
-	ID        int64       `json:"id"`
-	Version   int         `json:"version"`
-	Config    *ConfigData `json:"config"`
-	CreatedAt string      `json:"created_at"`
-}
-
 // ---- Helpers ----
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -235,214 +121,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-func getLatestVersion(profileID int64) (*ConfigVersion, error) {
-	row := db.QueryRow(
-		"SELECT id, version, config, created_at FROM config_versions WHERE profile_id = ? ORDER BY version DESC LIMIT 1",
-		profileID)
-	var cv ConfigVersion
-	var configStr string
-	if err := row.Scan(&cv.ID, &cv.Version, &configStr, &cv.CreatedAt); err != nil {
-		return nil, err
-	}
-	cv.Config = &ConfigData{}
-	json.Unmarshal([]byte(configStr), cv.Config)
-	return &cv, nil
-}
-
-// ---- Handlers ----
-
-func handleListProfiles(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, name, is_default, created_at, updated_at FROM profiles ORDER BY is_default DESC, id")
-	if err != nil {
-		writeError(w, 500, err.Error())
-		return
-	}
-	defer rows.Close()
-
-	profiles := []Profile{}
-	for rows.Next() {
-		var p Profile
-		rows.Scan(&p.ID, &p.Name, &p.IsDefault, &p.CreatedAt, &p.UpdatedAt)
-		if v, err := getLatestVersion(p.ID); err == nil {
-			p.Config = v.Config
-			p.Version = v.Version
-		}
-		profiles = append(profiles, p)
-	}
-	writeJSON(w, 200, profiles)
-}
-
-func handleCreateProfile(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name   string      `json:"name"`
-		Config *ConfigData `json:"config"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		writeError(w, 400, "name is required")
-		return
-	}
-	if req.Config == nil {
-		req.Config = &ConfigData{FooterEnabled: true, FontSize: "15px", HeadingSize: "18px", TextColor: "rgb(84, 69, 69)", LinkColor: "rgb(0, 112, 192)", LineHeight: "1.75em"}
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := db.Exec("INSERT INTO profiles (name, is_default, created_at, updated_at) VALUES (?, 0, ?, ?)", req.Name, now, now)
-	if err != nil {
-		writeError(w, 409, "profile name already exists")
-		return
-	}
-	pid, _ := res.LastInsertId()
-	configJSON, _ := json.Marshal(req.Config)
-	db.Exec("INSERT INTO config_versions (profile_id, version, config, created_at) VALUES (?, 1, ?, ?)", pid, string(configJSON), now)
-
-	writeJSON(w, 201, Profile{ID: pid, Name: req.Name, Config: req.Config, Version: 1, CreatedAt: now, UpdatedAt: now})
-}
-
-func handleGetProfile(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var p Profile
-	err := db.QueryRow("SELECT id, name, is_default, created_at, updated_at FROM profiles WHERE id = ?", id).
-		Scan(&p.ID, &p.Name, &p.IsDefault, &p.CreatedAt, &p.UpdatedAt)
-	if err != nil {
-		writeError(w, 404, "profile not found")
-		return
-	}
-	if v, err := getLatestVersion(p.ID); err == nil {
-		p.Config = v.Config
-		p.Version = v.Version
-	}
-	writeJSON(w, 200, p)
-}
-
-func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req struct {
-		Name   string      `json:"name,omitempty"`
-		Config *ConfigData `json:"config"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, 400, "invalid request body")
-		return
-	}
-
-	var profileID int64
-	err := db.QueryRow("SELECT id FROM profiles WHERE id = ?", id).Scan(&profileID)
-	if err != nil {
-		writeError(w, 404, "profile not found")
-		return
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	if req.Name != "" {
-		if _, err := db.Exec("UPDATE profiles SET name = ?, updated_at = ? WHERE id = ?", req.Name, now, id); err != nil {
-			writeError(w, 409, "profile name already exists")
-			return
-		}
-	}
-
-	if req.Config != nil {
-		// Get current max version
-		var maxVersion int
-		db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE profile_id = ?", id).Scan(&maxVersion)
-		newVersion := maxVersion + 1
-		configJSON, _ := json.Marshal(req.Config)
-		db.Exec("INSERT INTO config_versions (profile_id, version, config, created_at) VALUES (?, ?, ?, ?)",
-			id, newVersion, string(configJSON), now)
-		db.Exec("UPDATE profiles SET updated_at = ? WHERE id = ?", now, id)
-	}
-
-	// Return updated profile
-	var p Profile
-	db.QueryRow("SELECT id, name, is_default, created_at, updated_at FROM profiles WHERE id = ?", id).
-		Scan(&p.ID, &p.Name, &p.IsDefault, &p.CreatedAt, &p.UpdatedAt)
-	if v, err := getLatestVersion(p.ID); err == nil {
-		p.Config = v.Config
-		p.Version = v.Version
-	}
-	writeJSON(w, 200, p)
-}
-
-func handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var isDefault int
-	err := db.QueryRow("SELECT is_default FROM profiles WHERE id = ?", id).Scan(&isDefault)
-	if err != nil {
-		writeError(w, 404, "profile not found")
-		return
-	}
-	if isDefault == 1 {
-		writeError(w, 400, "cannot delete default profile")
-		return
-	}
-	db.Exec("DELETE FROM config_versions WHERE profile_id = ?", id)
-	db.Exec("DELETE FROM profiles WHERE id = ?", id)
-	w.WriteHeader(204)
-}
-
-func handleGetActiveConfig(w http.ResponseWriter, r *http.Request) {
-	var profileIDStr string
-	err := db.QueryRow("SELECT value FROM active_config WHERE key = 'profile_id'").Scan(&profileIDStr)
-	if err != nil {
-		writeError(w, 404, "no active config")
-		return
-	}
-	var p Profile
-	err = db.QueryRow("SELECT id, name, is_default, created_at, updated_at FROM profiles WHERE id = ?", profileIDStr).
-		Scan(&p.ID, &p.Name, &p.IsDefault, &p.CreatedAt, &p.UpdatedAt)
-	if err != nil {
-		writeError(w, 404, "active profile not found")
-		return
-	}
-	if v, err := getLatestVersion(p.ID); err == nil {
-		p.Config = v.Config
-		p.Version = v.Version
-	}
-	writeJSON(w, 200, p)
-}
-
-func handleSetActiveConfig(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ProfileID int64 `json:"profile_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ProfileID == 0 {
-		writeError(w, 400, "profile_id is required")
-		return
-	}
-	var exists int
-	db.QueryRow("SELECT COUNT(*) FROM profiles WHERE id = ?", req.ProfileID).Scan(&exists)
-	if exists == 0 {
-		writeError(w, 404, "profile not found")
-		return
-	}
-	db.Exec("INSERT OR REPLACE INTO active_config (key, value) VALUES ('profile_id', ?)", fmt.Sprintf("%d", req.ProfileID))
-	// Return the now-active profile
-	handleGetActiveConfig(w, r)
-}
-
-func handleListVersions(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	rows, err := db.Query(
-		"SELECT id, version, config, created_at FROM config_versions WHERE profile_id = ? ORDER BY version DESC",
-		id)
-	if err != nil {
-		writeError(w, 500, err.Error())
-		return
-	}
-	defer rows.Close()
-
-	versions := []ConfigVersion{}
-	for rows.Next() {
-		var cv ConfigVersion
-		var configStr string
-		rows.Scan(&cv.ID, &cv.Version, &configStr, &cv.CreatedAt)
-		cv.Config = &ConfigData{}
-		json.Unmarshal([]byte(configStr), cv.Config)
-		versions = append(versions, cv)
-	}
-	writeJSON(w, 200, versions)
 }
 
 // ---- Image Upload (base64 from DOCX → OSS or legacy proxy) ----
@@ -542,8 +220,8 @@ func handleFetchArticle(w http.ResponseWriter, r *http.Request) {
 
 // fetchDirectBlocks is the new primary URL-import path: GET the raw HTML
 // and walk it into a Block slice via extractArticleBlocks. Shares the
-// HTTP boilerplate with fetchDirect via fetchRawHTML so the two paths
-// can't drift on timeouts, UA, or body-size limits.
+// HTTP boilerplate via fetchRawHTML so the paths can't drift on timeouts,
+// UA, or body-size limits.
 //
 // Contract: returns a non-nil err only for transport-level failures.
 // An empty `blocks` slice with err==nil is a valid (non-error) outcome —
@@ -645,40 +323,13 @@ func looksLikeWeChatBlock(s string) bool {
 	return false
 }
 
-func fetchDirect(url string) (content, title string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
-	if err != nil {
-		return "", "", fmt.Errorf("read body: %w", err)
-	}
-
-	// Extract article content and convert to Markdown
-	markdown, extractedTitle := extractArticle(string(bodyBytes))
-	return markdown, extractedTitle, nil
-}
-
 // ---- Article Meta (lightweight: title + cover for "更多文章" cards) ----
 
 var (
-	reMsgCdnURL      = regexp.MustCompile(`var\s+msg_cdn_url\s*=\s*"([^"]+)"`)
-	reMsgTitle       = regexp.MustCompile(`var\s+msg_title\s*=\s*"((?:[^"\\]|\\.)*)"`)
+	reMsgCdnURL      = regexp.MustCompile(`var\s+msg_cdn_url\s*=\s*["']((?:[^"'\\]|\\.)*)["']`)
+	reMsgTitle       = regexp.MustCompile(`var\s+msg_title\s*=\s*["']((?:[^"'\\]|\\.)*)["']`)
 	reTitleTag       = regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
-	reImgDataSrc     = regexp.MustCompile(`<img[^>]+data-src="(https?://[^"]+)"`)
+	reImgDataSrc     = regexp.MustCompile(`(?is)<img\b[^>]+(?:data-src|data-original|data-url|src)\s*=\s*["']([^"']+)["']`)
 	hostAllowlistCDN = []string{
 		"mmbiz.qpic.cn",
 		"mmbiz.qlogo.cn",
@@ -726,22 +377,7 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	raw := string(body)
 
-	// Cover priority: msg_cdn_url → og:image → twitter:image → first data-src img
-	cover := ""
-	if m := reMsgCdnURL.FindStringSubmatch(raw); len(m) > 1 {
-		cover = m[1]
-	}
-	if cover == "" {
-		cover = extractMeta(raw, "og:image")
-	}
-	if cover == "" {
-		cover = extractMeta(raw, "twitter:image")
-	}
-	if cover == "" {
-		if m := reImgDataSrc.FindStringSubmatch(raw); len(m) > 1 {
-			cover = m[1]
-		}
-	}
+	cover := extractArticleCover(raw)
 
 	// Title priority: msg_title → og:title → <title>
 	title := ""
@@ -753,7 +389,7 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	if title == "" {
 		if m := reTitleTag.FindStringSubmatch(raw); len(m) > 1 {
-			title = strings.TrimSpace(m[1])
+			title = strings.TrimSpace(html.UnescapeString(m[1]))
 		}
 	}
 	title = strings.TrimSpace(title)
@@ -767,6 +403,73 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 		"cover_url":  cover,
 		"source_url": req.URL,
 	})
+}
+
+// extractArticleCover accepts the common shapes seen in WeChat and generic
+// article pages: JS vars, Open Graph/Twitter cards, and lazy-loaded images.
+func extractArticleCover(raw string) string {
+	if m := reMsgCdnURL.FindStringSubmatch(raw); len(m) > 1 {
+		if cover := normalizeArticleImageURL(m[1]); cover != "" {
+			return cover
+		}
+	}
+	for _, key := range []string{
+		"og:image",
+		"og:image:url",
+		"og:image:secure_url",
+		"twitter:image",
+		"twitter:image:src",
+	} {
+		if cover := normalizeArticleImageURL(extractMeta(raw, key)); cover != "" {
+			return cover
+		}
+	}
+	return extractFirstArticleImageURL(raw)
+}
+
+func extractFirstArticleImageURL(raw string) string {
+	doc, err := html.Parse(strings.NewReader(raw))
+	if err == nil {
+		var walk func(*html.Node) string
+		walk = func(n *html.Node) string {
+			if n.Type == html.ElementNode && strings.EqualFold(n.Data, "img") {
+				for _, name := range []string{"data-src", "data-original", "data-url", "src"} {
+					for _, a := range n.Attr {
+						if strings.EqualFold(a.Key, name) {
+							if src := normalizeArticleImageURL(a.Val); src != "" {
+								return src
+							}
+						}
+					}
+				}
+			}
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if v := walk(c); v != "" {
+					return v
+				}
+			}
+			return ""
+		}
+		if src := walk(doc); src != "" {
+			return src
+		}
+	}
+
+	if m := reImgDataSrc.FindStringSubmatch(raw); len(m) > 1 {
+		return normalizeArticleImageURL(m[1])
+	}
+	return ""
+}
+
+func normalizeArticleImageURL(raw string) string {
+	s := strings.TrimSpace(html.UnescapeString(decodeJSString(raw)))
+	if strings.HasPrefix(s, "//") {
+		s = "https:" + s
+	}
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		return s
+	}
+	return ""
 }
 
 // decodeJSString handles simple backslash escapes found in WeChat's var msg_title

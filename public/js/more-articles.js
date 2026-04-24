@@ -32,9 +32,6 @@ export const BANNER_STYLE_SPEC = Object.freeze({
 
 const COMPOSITE_W = BANNER_STYLE_SPEC.width;
 const COMPOSITE_H = BANNER_STYLE_SPEC.height;
-const COMPOSITE_TEXT_MAX_W = BANNER_STYLE_SPEC.title.width + BANNER_STYLE_SPEC.title.wrapTolerance;
-const COMPOSITE_TITLE_SIZE = BANNER_STYLE_SPEC.title.fontSize;
-const COMPOSITE_LINE_HEIGHT = BANNER_STYLE_SPEC.title.lineHeight;
 const COMPOSITE_OVERLAY_ALPHA = BANNER_STYLE_SPEC.overlayAlpha;
 const COMPOSITE_OUTPUT_TYPE = 'image/png';
 const COMPOSITE_FONT_FAMILIES = [
@@ -47,7 +44,7 @@ const COMPOSITE_FONT_FAMILIES = [
   'sans-serif',
 ];
 const COMPOSITE_FONT_STACK = COMPOSITE_FONT_FAMILIES.map(f => /\s/.test(f) ? `"${f}"` : f).join(', ');
-const COMPOSITE_STYLE_VERSION = '2026-04-24-psd-punctuation-v2';
+const COMPOSITE_STYLE_VERSION = '2026-04-25-single-line-title-v1';
 const LINE_START_FORBIDDEN_PUNCTUATION = new Set(Array.from(
   '，。！？；：、,.!?;:)]}）】》〉」』”’"\''
 ));
@@ -181,6 +178,53 @@ export function wrapBannerTitleLines(ctx, text, maxWidth) {
   return balanceLinePunctuation(wrapTextForCanvas(ctx, text, maxWidth));
 }
 
+export function computeBannerTitleLayout(ctx, text, { scale = 1, fontFamily = COMPOSITE_FONT_STACK } = {}) {
+  const title = BANNER_STYLE_SPEC.title;
+  const maxWidth = (title.width + title.wrapTolerance) * scale;
+  const leadingRatio = title.lineHeight / title.fontSize;
+  let fontSize = Math.max(12, title.fontSize * scale);
+  const minFontSize = Math.max(10, 30 * scale);
+  const step = Math.max(1, 2 * scale);
+  let lines = [];
+
+  while (fontSize >= minFontSize) {
+    ctx.font = `${title.fontWeight} ${fontSize}px ${fontFamily}`;
+    lines = wrapBannerTitleLines(ctx, text, maxWidth);
+    if (lines.length <= title.maxLines) break;
+    fontSize -= step;
+  }
+
+  if (lines.length > title.maxLines) {
+    lines = lines.slice(0, title.maxLines);
+    lines = balanceLinePunctuation(lines);
+    const lastIndex = Math.max(0, lines.length - 1);
+    let last = lines[lastIndex] || '';
+    while (last.length > 1 && ctx.measureText(last + '…').width > maxWidth) {
+      last = last.slice(0, -1);
+    }
+    lines[lastIndex] = last + '…';
+  }
+
+  ctx.font = `${title.fontWeight} ${fontSize}px ${fontFamily}`;
+  const lineHeight = fontSize * leadingRatio;
+  let y = title.y * scale;
+  if (lines.length === 1) {
+    y += Math.max(0, (title.height * scale - lineHeight) / 2);
+  }
+
+  return {
+    lines,
+    fontSize,
+    lineHeight,
+    x: title.x * scale,
+    y,
+    maxWidth,
+    fontFamily,
+    fontWeight: title.fontWeight,
+    fill: title.fill,
+  };
+}
+
 // ---- Composite: cover + dark overlay + title text ----
 export async function compositeCard(card) {
   const src = card.cover_data_url || card.imgurl;
@@ -228,34 +272,14 @@ export async function compositeCard(card) {
   // fits without breaking the PSD composition.
   const title = String(card.title || '').trim();
   if (title) {
-    const maxW = COMPOSITE_TEXT_MAX_W;
-    const leadingRatio = COMPOSITE_LINE_HEIGHT / COMPOSITE_TITLE_SIZE; // PSD 70/48
-    ctx.fillStyle = BANNER_STYLE_SPEC.title.fill;
     ctx.textBaseline = 'top';
-    let size = COMPOSITE_TITLE_SIZE;
-    const minSize = 30;
-    let lines = [];
-    while (size >= minSize) {
-      ctx.font = `${BANNER_STYLE_SPEC.title.fontWeight} ${size}px ${COMPOSITE_FONT_STACK}`;
-      lines = wrapBannerTitleLines(ctx, title, maxW);
-      if (lines.length <= BANNER_STYLE_SPEC.title.maxLines) break;
-      size -= 2;
-    }
-    if (lines.length > BANNER_STYLE_SPEC.title.maxLines) {
-      lines = lines.slice(0, BANNER_STYLE_SPEC.title.maxLines);
-      lines = balanceLinePunctuation(lines);
-      const lastIndex = Math.max(0, lines.length - 1);
-      let last = lines[lastIndex] || '';
-      while (last.length > 1 && ctx.measureText(last + '…').width > maxW) {
-        last = last.slice(0, -1);
-      }
-      lines[lastIndex] = last + '…';
-    }
-    const lineHeight = size * leadingRatio;
-    let y = BANNER_STYLE_SPEC.title.y;
-    for (const line of lines) {
-      ctx.fillText(line, BANNER_STYLE_SPEC.title.x, y);
-      y += lineHeight;
+    const layout = computeBannerTitleLayout(ctx, title);
+    ctx.fillStyle = layout.fill;
+    ctx.font = `${layout.fontWeight} ${layout.fontSize}px ${layout.fontFamily}`;
+    let y = layout.y;
+    for (const line of layout.lines) {
+      ctx.fillText(line, layout.x, y);
+      y += layout.lineHeight;
     }
   }
 

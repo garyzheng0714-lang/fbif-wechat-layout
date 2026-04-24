@@ -44,16 +44,60 @@ func extractArticle(rawHTML string) (markdown, title string) {
 }
 
 func extractMeta(rawHTML, property string) string {
-	re := regexp.MustCompile(`<meta\s+[^>]*property="` + regexp.QuoteMeta(property) + `"[^>]*content="([^"]*)"`)
-	if m := re.FindStringSubmatch(rawHTML); len(m) > 1 {
-		return html.UnescapeString(m[1])
+	target := strings.ToLower(strings.TrimSpace(property))
+	if target == "" {
+		return ""
 	}
-	// Try reversed order (content before property)
-	re2 := regexp.MustCompile(`<meta\s+[^>]*content="([^"]*)"[^>]*property="` + regexp.QuoteMeta(property) + `"`)
+	if v := extractMetaParsed(rawHTML, target); v != "" {
+		return v
+	}
+
+	re := regexp.MustCompile(`(?is)<meta\s+[^>]*(?:property|name|itemprop)\s*=\s*["']` + regexp.QuoteMeta(target) + `["'][^>]*content\s*=\s*["']([^"']*)["']`)
+	if m := re.FindStringSubmatch(rawHTML); len(m) > 1 {
+		return strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	// Try reversed order (content before property/name/itemprop).
+	re2 := regexp.MustCompile(`(?is)<meta\s+[^>]*content\s*=\s*["']([^"']*)["'][^>]*(?:property|name|itemprop)\s*=\s*["']` + regexp.QuoteMeta(target) + `["']`)
 	if m := re2.FindStringSubmatch(rawHTML); len(m) > 1 {
-		return html.UnescapeString(m[1])
+		return strings.TrimSpace(html.UnescapeString(m[1]))
 	}
 	return ""
+}
+
+func extractMetaParsed(rawHTML, target string) string {
+	doc, err := html.Parse(strings.NewReader(rawHTML))
+	if err != nil {
+		return ""
+	}
+	var walk func(*html.Node) string
+	walk = func(n *html.Node) string {
+		if n.Type == html.ElementNode && strings.EqualFold(n.Data, "meta") {
+			var content string
+			matched := false
+			for _, a := range n.Attr {
+				key := strings.ToLower(a.Key)
+				val := strings.TrimSpace(a.Val)
+				switch key {
+				case "content":
+					content = val
+				case "property", "name", "itemprop":
+					if strings.EqualFold(val, target) {
+						matched = true
+					}
+				}
+			}
+			if matched && content != "" {
+				return strings.TrimSpace(html.UnescapeString(content))
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if v := walk(c); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	return walk(doc)
 }
 
 func extractJsContent(rawHTML string) string {
