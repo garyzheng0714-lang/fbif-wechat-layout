@@ -22,7 +22,7 @@ export function resolveVars(css, config) {
     .replace(/var\(--wx-text-color\)/g, config.text_color || '#544545')
     .replace(/var\(--wx-link-color\)/g, config.link_color || '#0070C0')
     .replace(/var\(--wx-muted-color\)/g, '#888888')
-    .replace(/var\(--wx-line-height\)/g, (config.line_height || '1.75') + 'em')
+    .replace(/var\(--wx-line-height\)/g, config.line_height || '1.75')
     .replace(/var\(--wx-letter-spacing\)/g, (config.letter_spacing || '0.034') + 'em')
     .replace(/var\(--wx-font-stack\)/g, fontStack);
 }
@@ -62,7 +62,7 @@ export function applyThemeVars(el, config) {
   el.style.setProperty('--wx-heading-size', (config.heading_size || '18') + 'px');
   el.style.setProperty('--wx-text-color', config.text_color || '#544545');
   el.style.setProperty('--wx-link-color', config.link_color || '#0070C0');
-  el.style.setProperty('--wx-line-height', (config.line_height || '1.75') + 'em');
+  el.style.setProperty('--wx-line-height', config.line_height || '1.75');
   el.style.setProperty('--wx-letter-spacing', (config.letter_spacing || '0.034') + 'em');
   el.style.setProperty('--wx-font-stack', fontStack);
 }
