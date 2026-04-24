@@ -2,9 +2,16 @@ node_modules/
 .env
 .DS_Store
 .context/
+api/api
 api/fbif-api
 api/data/
 *.db
 .gstack/
 docx/
 docs/
+
+# Local debug captures and test artifacts (never commit)
+.playwright-mcp/
+verify-*.png
+unified_inbox.json
+api/unified_inbox.json
