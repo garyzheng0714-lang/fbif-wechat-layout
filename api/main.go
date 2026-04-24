@@ -28,6 +28,7 @@ import (
 
 func main() {
 	port := flag.Int("port", 9000, "API server port")
+	_ = flag.String("db", "", "legacy ignored SQLite database path")
 	flag.Parse()
 
 	mux := http.NewServeMux()
