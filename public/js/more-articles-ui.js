@@ -268,7 +268,16 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       el.className = 'ma-card-status' + (kind ? ' ' + kind : '');
     };
 
+    const hasCroppableCover = () => !!(state.cover_data_url || state.imgurl);
+    const syncCropButton = () => {
+      const btn = $('crop');
+      const canCrop = hasCroppableCover();
+      btn.disabled = !canCrop;
+      btn.title = canCrop ? '调整裁剪位置' : '请先抓取头图或替换图片';
+    };
+
     const refreshThumb = async () => {
+      syncCropButton();
       const thumb = $('thumb');
       const hasAny = !!(state.href || state.imgurl || state.cover_data_url || state.title);
       if (!hasAny) {
@@ -389,6 +398,11 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     });
 
     $('crop').addEventListener('click', async () => {
+      if (!hasCroppableCover()) {
+        setStatus('请先抓取头图或替换图片', 'err');
+        syncCropButton();
+        return;
+      }
       if (!openCropEditor) { setStatus('裁剪功能未就绪', 'err'); return; }
       try {
         const result = await openCropEditor(state);

@@ -456,6 +456,12 @@ input[type="file"] { display: none; }
 }
 .ma-action-btn:hover { background: rgba(0,0,0,0.08); }
 .ma-action-btn:active { transform: scale(0.95); }
+.ma-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ma-action-btn:disabled:hover { background: rgba(0,0,0,0.04); }
+.ma-action-btn:disabled:active { transform: none; }
 
 .ma-hint {
   font-size: 11px; color: #a39e98; line-height: 1.55;
