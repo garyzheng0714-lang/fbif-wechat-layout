@@ -9,20 +9,48 @@
 
 const LS_KEY = 'more_articles_v1';
 
-// Composite canvas: 1000×300 landscape (10:3), geometry mirrors the
-// 推文底部 banner 模板 PSD layer-by-layer. Cover image on bottom, flat black
-// overlay at 50%, white Noto Sans SC Bold title top-aligned on the left.
-const COMPOSITE_W = 1000;
-const COMPOSITE_H = 300;
-// Title block taken verbatim from PSD: left inset 61, text top 92,
-// text-box width 803, leading 70, font size 48, fill #FFFFFF.
-const COMPOSITE_PAD_X = 61;
-const COMPOSITE_TEXT_TOP = 92;
-const COMPOSITE_TEXT_MAX_W = 803;
-const COMPOSITE_TITLE_SIZE = 48;
-const COMPOSITE_LINE_HEIGHT = 70;
-const COMPOSITE_OVERLAY_ALPHA = 0.5; // PSD 矩形 1 opacity = 128/255
-const COMPOSITE_FONT_STACK = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif';
+// Composite canvas: geometry mirrors 推文底部banner模板(9).psd.
+// Extracted with psd-tools from the visible 1000×300 artboards:
+// - shape layer "矩形 1": black, opacity 128/255
+// - type layer: NotoSansHans-Bold, 48px, 70px leading, #FFFFFF
+// - type bbox relative to artboard: (61, 92, 864, 208), width 803
+export const PSD_BANNER_SPEC = Object.freeze({
+  width: 1000,
+  height: 300,
+  overlayAlpha: 128 / 255,
+  title: Object.freeze({
+    x: 61,
+    y: 92,
+    width: 803,
+    wrapTolerance: 2,
+    height: 116,
+    fontSize: 48,
+    lineHeight: 70,
+    fontWeight: 700,
+    fill: '#FFFFFF',
+    maxLines: 2,
+  }),
+});
+
+const COMPOSITE_W = PSD_BANNER_SPEC.width;
+const COMPOSITE_H = PSD_BANNER_SPEC.height;
+const COMPOSITE_PAD_X = PSD_BANNER_SPEC.title.x;
+const COMPOSITE_TEXT_TOP = PSD_BANNER_SPEC.title.y;
+const COMPOSITE_TEXT_MAX_W = PSD_BANNER_SPEC.title.width + PSD_BANNER_SPEC.title.wrapTolerance;
+const COMPOSITE_TITLE_SIZE = PSD_BANNER_SPEC.title.fontSize;
+const COMPOSITE_LINE_HEIGHT = PSD_BANNER_SPEC.title.lineHeight;
+const COMPOSITE_OVERLAY_ALPHA = PSD_BANNER_SPEC.overlayAlpha;
+const COMPOSITE_OUTPUT_TYPE = 'image/png';
+const COMPOSITE_FONT_FAMILIES = [
+  'NotoSansHans',
+  'Noto Sans CJK SC',
+  'Noto Sans SC',
+  'PingFang SC',
+  'Microsoft YaHei',
+  'Hiragino Sans GB',
+  'sans-serif',
+];
+const COMPOSITE_FONT_STACK = COMPOSITE_FONT_FAMILIES.map(f => /\s/.test(f) ? `"${f}"` : f).join(', ');
 
 // No hardcoded defaults — the user curates the full list. Cards array is
 // dynamic length (can be 0..N).
@@ -108,7 +136,7 @@ export function loadImage(src) {
 
 // ---- Text wrapping (CJK-friendly, Canvas measureText based) ----
 function wrapTextForCanvas(ctx, text, maxWidth) {
-  const chars = Array.from(text || '');
+  const chars = Array.from(String(text || '').replace(/\r\n?/g, '\n'));
   const lines = [];
   let line = '';
   for (const ch of chars) {
@@ -123,6 +151,14 @@ function wrapTextForCanvas(ctx, text, maxWidth) {
   }
   if (line) lines.push(line);
   return lines;
+}
+
+async function loadCompositeFonts(size = COMPOSITE_TITLE_SIZE) {
+  if (!document.fonts || !document.fonts.load) return;
+  await Promise.allSettled(
+    COMPOSITE_FONT_FAMILIES.slice(0, 3)
+      .map(family => document.fonts.load(`${PSD_BANNER_SPEC.title.fontWeight} ${size}px "${family}"`))
+  );
 }
 
 // ---- Composite: cover + dark overlay + title text ----
@@ -173,29 +209,27 @@ export async function compositeCard(card) {
   // fits without breaking the PSD composition.
   const title = String(card.title || '').trim();
   if (title) {
-    if (document.fonts && document.fonts.load) {
-      try { await document.fonts.load(`700 ${COMPOSITE_TITLE_SIZE}px "Noto Sans SC"`); } catch {}
-    }
+    await loadCompositeFonts(COMPOSITE_TITLE_SIZE);
     const maxW = COMPOSITE_TEXT_MAX_W;
     const leadingRatio = COMPOSITE_LINE_HEIGHT / COMPOSITE_TITLE_SIZE; // PSD 70/48
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = PSD_BANNER_SPEC.title.fill;
     ctx.textBaseline = 'top';
     let size = COMPOSITE_TITLE_SIZE;
     const minSize = 30;
     let lines = [];
     while (size >= minSize) {
-      ctx.font = `700 ${size}px ${COMPOSITE_FONT_STACK}`;
+      ctx.font = `${PSD_BANNER_SPEC.title.fontWeight} ${size}px ${COMPOSITE_FONT_STACK}`;
       lines = wrapTextForCanvas(ctx, title, maxW);
-      if (lines.length <= 2) break;
+      if (lines.length <= PSD_BANNER_SPEC.title.maxLines) break;
       size -= 2;
     }
-    if (lines.length > 2) {
-      lines = lines.slice(0, 2);
-      let last = lines[1];
+    if (lines.length > PSD_BANNER_SPEC.title.maxLines) {
+      lines = lines.slice(0, PSD_BANNER_SPEC.title.maxLines);
+      let last = lines[PSD_BANNER_SPEC.title.maxLines - 1];
       while (last.length > 1 && ctx.measureText(last + '…').width > maxW) {
         last = last.slice(0, -1);
       }
-      lines[1] = last + '…';
+      lines[PSD_BANNER_SPEC.title.maxLines - 1] = last + '…';
     }
     const lineHeight = size * leadingRatio;
     let y = COMPOSITE_TEXT_TOP;
@@ -205,7 +239,7 @@ export async function compositeCard(card) {
     }
   }
 
-  return canvas.toDataURL('image/jpeg', 0.88);
+  return canvas.toDataURL(COMPOSITE_OUTPUT_TYPE);
 }
 
 // ---- Fingerprint for skip-upload ----

@@ -1,5 +1,13 @@
 /* FBIF 排版工具 — Split Layout, Notion Design System */
 
+@font-face {
+  font-family: 'NotoSansHans';
+  src: url('/fonts/NotoSansHans-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Inter', -apple-system, system-ui, 'PingFang SC',
@@ -578,14 +586,18 @@ input[type="file"] { display: none; }
 }
 .crop-tint {
   position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.42) 55%, rgba(0,0,0,0.62) 100%);
+  background: rgba(0,0,0,0.5019607843137255);
 }
 .crop-title-preview {
-  position: absolute; left: 6%; right: 6%; bottom: 12%;
+  position: absolute; left: 0; top: 0;
   color: #fff; font-weight: 700; font-size: 22px;
-  text-shadow: 0 2px 6px rgba(0,0,0,0.55);
-  line-height: 1.25; pointer-events: none;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  text-shadow: none;
+  line-height: 1.4583333333; pointer-events: none;
+  font-family: "NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .crop-controls {
   display: flex; gap: 12px; align-items: center;

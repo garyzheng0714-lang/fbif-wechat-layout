@@ -349,7 +349,7 @@ function wrapEngineFunctions() {
       const btn = document.getElementById('copyBtn');
       await origCopy();
       document.getElementById('copySuccess').style.display = 'block';
-      // No longer auto-opens WeChat backend
+      window.open('https://mp.weixin.qq.com');
       setTimeout(() => {
         btn.textContent = '复制全文'; btn.classList.remove('copied');
         document.getElementById('copySuccess').style.display = 'none';

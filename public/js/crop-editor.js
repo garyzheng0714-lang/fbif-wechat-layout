@@ -3,6 +3,8 @@
 // wired through public/app.html.
 // Returns: Promise<{x, y, scale} | null>  (null = user cancelled)
 
+import { PSD_BANNER_SPEC } from './more-articles.js';
+
 export function openCropEditor(card) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
@@ -93,19 +95,21 @@ export function openCropEditor(card) {
       imgEl.style.height = drawH + 'px';
       imgEl.style.transform = `translate(${dx}px, ${dy}px)`;
 
-      // Title overlay: SEPARATE layer, never affected by image zoom. Mirrors
-      // the final composite: vertically centered, 48px font, 60px left/right
-      // pad at 1000w output — scaled to stage width for true WYSIWYG.
+      // Title overlay: separate layer, never affected by image zoom. Mirrors
+      // the PSD text layer geometry, scaled from the 1000×300 artboard.
       if (tp) {
-        const SCALE = W / 1000;
-        tp.style.fontSize = Math.max(12, Math.round(48 * SCALE)) + 'px';
-        tp.style.left = Math.round(60 * SCALE) + 'px';
-        tp.style.right = Math.round(60 * SCALE) + 'px';
-        tp.style.top = '50%';
+        const SCALE = W / PSD_BANNER_SPEC.width;
+        const title = PSD_BANNER_SPEC.title;
+        tp.style.fontSize = Math.max(12, title.fontSize * SCALE) + 'px';
+        tp.style.left = (title.x * SCALE) + 'px';
+        tp.style.width = ((title.width + title.wrapTolerance) * SCALE) + 'px';
+        tp.style.right = 'auto';
+        tp.style.top = (title.y * SCALE) + 'px';
         tp.style.bottom = 'auto';
-        tp.style.transform = 'translateY(-50%)';
-        tp.style.lineHeight = '1.22';
-        tp.style.fontFamily = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
+        tp.style.transform = 'none';
+        tp.style.lineHeight = (title.lineHeight / title.fontSize);
+        tp.style.fontWeight = String(title.fontWeight);
+        tp.style.fontFamily = '"NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
       }
     }
 

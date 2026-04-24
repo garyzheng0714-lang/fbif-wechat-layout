@@ -4,7 +4,7 @@
   "description": "FBIF 微信公众号排版工具 — DOCX/Markdown 转微信 HTML",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test tests/*.test.mjs"
   },
   "license": "UNLICENSED",
   "private": true
