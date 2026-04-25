@@ -12,28 +12,34 @@
   --wx-muted-color: #888888;
   --wx-line-height: 1.75;
   --wx-letter-spacing: 0.034em;
+  --wx-paragraph-margin-x: 8px;
+  --wx-paragraph-gap: 20px;
+  --wx-caption-font-size: 12px;
+  --wx-attribution-font-size: 15px;
+  --wx-blockquote-padding-left: 12px;
+  --wx-blockquote-border-width: 3px;
   --wx-font-stack: mp-quote, 'PingFang SC', system-ui, -apple-system,
     BlinkMacSystemFont, 'Helvetica Neue', 'Hiragino Sans GB',
     'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif;
 }
 
 /* ---- Section containers ---- */
-.wx-p   { text-align: left; margin: 0px 8px; line-height: var(--wx-line-height); }
-.wx-pc  { text-align: center; margin: 0px 8px; line-height: var(--wx-line-height); }
-.wx-pi  { text-align: center; margin: 0px 8px; }
-.wx-gap { padding-bottom: 20px; }
-.wx-bq  { text-align: left; margin: 0px 8px; padding-left: 12px; border-left: 3px solid var(--wx-link-color); line-height: var(--wx-line-height); }
+.wx-p   { text-align: left; margin: 0px var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
+.wx-pc  { text-align: center; margin: 0px var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
+.wx-pi  { text-align: center; margin: 0px var(--wx-paragraph-margin-x); }
+.wx-gap { padding-bottom: var(--wx-paragraph-gap); }
+.wx-bq  { text-align: left; margin: 0px var(--wx-paragraph-margin-x); padding-left: var(--wx-blockquote-padding-left); border-left: var(--wx-blockquote-border-width) solid var(--wx-link-color); line-height: var(--wx-line-height); }
 
 /* ---- FBIF ProseMirror leaf wrappers ---- */
 .wx-leaf { color: rgba(0,0,0,0.9); font-size: 17px; font-family: var(--wx-font-stack); letter-spacing: var(--wx-letter-spacing); font-style: normal; font-weight: normal; }
-.wx-la   { color: var(--wx-link-color); font-size: 15px; font-style: italic; font-family: var(--wx-font-stack); letter-spacing: var(--wx-letter-spacing); }
+.wx-la   { color: var(--wx-link-color); font-size: var(--wx-attribution-font-size); font-style: italic; font-family: var(--wx-font-stack); letter-spacing: var(--wx-letter-spacing); }
 
 /* ---- Text styles ---- */
 .wx-t    { font-size: var(--wx-font-size); color: var(--wx-text-color); }
 .wx-bold { font-weight: bold; }
 .wx-th   { font-size: var(--wx-heading-size); font-weight: bold; color: var(--wx-text-color); }
-.wx-tc   { font-size: 12px; color: var(--wx-muted-color); }
+.wx-tc   { font-size: var(--wx-caption-font-size); color: var(--wx-muted-color); }
 .wx-tr   { font-size: var(--wx-font-size); color: var(--wx-muted-color); }
-.wx-ta   { font-size: 15px; color: var(--wx-link-color); font-style: italic; }
-.wx-auth { font-size: 15px; color: var(--wx-link-color); }
+.wx-ta   { font-size: var(--wx-attribution-font-size); color: var(--wx-link-color); font-style: italic; }
+.wx-auth { font-size: var(--wx-attribution-font-size); color: var(--wx-link-color); }
 .wx-a    { color: var(--wx-link-color); text-decoration: none; font-size: var(--wx-font-size); }

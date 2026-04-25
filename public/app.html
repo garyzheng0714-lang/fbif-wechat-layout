@@ -126,6 +126,9 @@
   <main class="preview-panel">
     <div class="preview-toolbar" id="previewToolbar">
       <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
+      <button class="tb-icon" id="adminLockBtn" type="button" title="规则后台" aria-label="规则后台">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
       <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制全文</button>
     </div>
 
@@ -202,34 +205,53 @@ window._pushLog = function(level, msg, detail) {
   console.log('[FBIF]', level === 'error' ? '!' : '+', msg, detail || '');
 };
 
-// ---- Prefs ----
-function loadPref(k, fb) { try { const v = localStorage.getItem(k); return v !== null ? v : fb; } catch { return fb; } }
-function savePref(k, v) { try { localStorage.setItem(k, v); } catch {} }
-function loadSkipUploadPref() {
-  try {
-    if (localStorage.getItem('skip_upload_migrated_v2') === 'true' &&
-        localStorage.getItem('skip_upload_restored_v3') !== 'true') {
-      localStorage.setItem('skip_upload', 'true');
-      localStorage.setItem('skip_upload_restored_v3', 'true');
-      return true;
-    }
-  } catch {}
-  return loadPref('skip_upload', 'true') === 'true';
+// ---- Rule preset config ----
+const currentTemplateId = 'fbif';
+const ruleModule = await import('./js/rule-presets.js?v=' + assetVersion);
+const {
+  loadActiveRulePreset,
+  loadLocalRuleConfig,
+  saveLocalRuleConfig,
+  applyActiveRuleConfig,
+  normalizeRuleConfig,
+} = ruleModule;
+const initialRule = await loadActiveRulePreset();
+let activeRuleSource = initialRule.source;
+applyActiveRuleConfig(initialRule.preset.config, initialRule.preset);
+if (activeRuleSource === 'server') {
+  // Cache the server rule only as the offline fallback. Online edits below stay
+  // session-only unless the rule backend is unavailable.
+  saveLocalRuleConfig(initialRule.preset.config);
 }
 
-// ---- Config (per-template defaults) ----
-const TEMPLATE_DEFAULTS = {
-  fbif: { font_size:'15', heading_size:'18', text_color:'#544545', link_color:'#0070C0', line_height:'1.75', letter_spacing:'0.034', font_family:'PingFang SC' },
-};
-function getDefaultCfg(tid) { return TEMPLATE_DEFAULTS[tid] || TEMPLATE_DEFAULTS.fbif; }
-function loadConfig(tid) { try { const r = localStorage.getItem('config_' + (tid || 'fbif')); if (r) return { ...getDefaultCfg(tid), ...JSON.parse(r) }; } catch {} return { ...getDefaultCfg(tid) }; }
-function saveConfig(c, tid) { try { localStorage.setItem('config_' + (tid || currentTemplateId || 'fbif'), JSON.stringify(c)); } catch {} window._activeConfig = { config: c }; }
-const currentTemplateId = 'fbif';
-window._activeConfig = { config: loadConfig(currentTemplateId) };
+function loadConfig() {
+  return normalizeRuleConfig((window._activeConfig && window._activeConfig.config) || loadLocalRuleConfig());
+}
 
-let footerEnabledPref = loadPref('footer_enabled', 'true') === 'true';
-let skipUploadPref = loadSkipUploadPref();
-window._skipUpload = skipUploadPref;
+function cacheServerRuleFallback(config) {
+  saveLocalRuleConfig(config);
+}
+
+function saveConfig(config, preset, options = {}) {
+  const normalized = normalizeRuleConfig(config);
+  if (options.persistLocal || activeRuleSource !== 'server') {
+    saveLocalRuleConfig(normalized);
+  }
+  applyActiveRuleConfig(normalized, preset || (window._activeConfig && window._activeConfig.preset));
+  syncWorkflowControls();
+  return normalized;
+}
+
+function syncWorkflowControls() {
+  const c = loadConfig();
+  const footerEl = document.getElementById('footerEnabled');
+  if (footerEl) footerEl.checked = c.footer_enabled === true;
+  const footerToggle = document.getElementById('footerToggleBtn');
+  if (footerToggle) footerToggle.classList.toggle('on', c.footer_enabled === true);
+  const skipUploadBtn = document.getElementById('skipUploadToggleBtn');
+  if (skipUploadBtn) skipUploadBtn.classList.toggle('on', c.skip_upload === true);
+  window._skipUpload = c.skip_upload === true;
+}
 
 // ---- Load engine + template ----
 const { initApp } = await import('./js/engine.js?v=' + assetVersion);
@@ -238,8 +260,8 @@ const { openCropEditor } = await import('./js/crop-editor.js?v=' + assetVersion)
 initMoreArticlesEditor({ openCropEditor });
 
 async function loadTemplate(templateId) {
-  const cfg = loadConfig(templateId);
-  saveConfig(cfg, templateId);
+  const cfg = loadConfig();
+  saveConfig(cfg, null, { persistLocal: activeRuleSource !== 'server' });
   populateConfigForm();
   const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
   initApp(mod.default);
@@ -248,8 +270,7 @@ async function loadTemplate(templateId) {
 
 await loadTemplate(currentTemplateId);
 
-document.getElementById('footerEnabled').checked = footerEnabledPref;
-updateFooterBtn();
+syncWorkflowControls();
 
 // ---- Footer toggle ----
 function updateFooterBtn() {
@@ -259,25 +280,25 @@ function updateFooterBtn() {
 document.getElementById('footerToggleBtn').addEventListener('click', () => {
   const el = document.getElementById('footerEnabled');
   el.checked = !el.checked;
-  footerEnabledPref = el.checked;
-  savePref('footer_enabled', String(el.checked));
+  const c = loadConfig();
+  c.footer_enabled = el.checked;
+  saveConfig(c);
   updateFooterBtn();
   window._updateFooter && window._updateFooter(null);
 });
 
 // ---- Skip-upload toggle (experimental) ----
 const skipUploadBtn = document.getElementById('skipUploadToggleBtn');
-skipUploadBtn.classList.toggle('on', skipUploadPref);
+skipUploadBtn.classList.toggle('on', loadConfig().skip_upload === true);
 skipUploadBtn.addEventListener('click', () => {
-  skipUploadPref = !skipUploadPref;
-  window._skipUpload = skipUploadPref;
-  savePref('skip_upload', String(skipUploadPref));
-  skipUploadBtn.classList.toggle('on', skipUploadPref);
+  const c = loadConfig();
+  c.skip_upload = c.skip_upload !== true;
+  saveConfig(c);
 });
 
 // ---- Config form ----
 function populateConfigForm() {
-  const c = loadConfig(currentTemplateId);
+  const c = loadConfig();
   document.getElementById('cfg-font_size').value = parseFloat(c.font_size) || 15;
   document.getElementById('cfg-heading_size').value = parseFloat(c.heading_size) || 18;
   document.getElementById('cfg-line_height').value = parseFloat(c.line_height) || 1.75;
@@ -329,10 +350,28 @@ document.getElementById('settingsCancelBtn').addEventListener('click', () => {
 });
 
 document.getElementById('settingsSaveBtn').addEventListener('click', () => {
-  const c = readFormIntoConfig(loadConfig(currentTemplateId));
-  saveConfig(c, currentTemplateId);
+  const c = saveConfig(readFormIntoConfig(loadConfig()));
   if (window.updateThemePreview) window.updateThemePreview(c);
   setSettingsOpen(false);
+});
+
+const { initAdminPanel } = await import('./js/admin-panel.js?v=' + assetVersion);
+initAdminPanel({
+  getConfig: loadConfig,
+  getPreset: () => (window._activeConfig && window._activeConfig.preset) || null,
+  applyConfig(config, preset, meta = {}) {
+    if (meta.source === 'server') {
+      activeRuleSource = 'server';
+      cacheServerRuleFallback(config);
+    }
+    const c = saveConfig(config, preset, { persistLocal: meta.persistLocal === true });
+    populateConfigForm();
+    if (window.updateThemePreview) window.updateThemePreview(c);
+    if (window._updateFooter) window._updateFooter(null);
+    if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+    if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
+    return c;
+  },
 });
 
 // ---- Title display ----
@@ -375,9 +414,6 @@ function wrapEngineFunctions() {
     };
   }
 }
-
-window._buildTOC = function() {};
-window._positionTOC = function() {};
 
 // ---- URL repost ----
 window.fetchArticle = async function() {

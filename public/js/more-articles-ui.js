@@ -213,9 +213,9 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
   // ---- Rendering ----------------------------------------------------------
 
   function renderAll() {
-    // Default state is 3 placeholder slots (never an empty editor). Seed on
-    // demand so first-visit, 清空, and delete-to-zero all converge to "3 blank
-    // cards to fill in" instead of a separate empty-state UI.
+    // Default state uses the active rule preset's placeholder slot count.
+    // Seed on demand so first-visit, 清空, and delete-to-zero all converge to
+    // the same blank-card editing flow instead of a separate empty-state UI.
     if (cards.length === 0) {
       cards = makeFreshUploadCards();
       saveCards(cards);

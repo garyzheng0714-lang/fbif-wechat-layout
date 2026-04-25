@@ -29,9 +29,14 @@ import (
 func main() {
 	port := flag.Int("port", 9000, "API server port")
 	_ = flag.String("db", "", "legacy ignored SQLite database path")
+	rulesPath := flag.String("rules", os.Getenv("RULES_STORE_PATH"), "rule preset JSON store path")
 	flag.Parse()
 
 	mux := http.NewServeMux()
+	publicDir := "../public"
+	if _, err := os.Stat(publicDir); err != nil {
+		publicDir = "public"
+	}
 
 	// Image upload to OSS (base64 from DOCX)
 	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
@@ -52,6 +57,8 @@ func main() {
 	// Cached image payload for images stripped from converted docx
 	mux.HandleFunc("GET /api/doc-cache/{hash}/{filename}", handleDocImageCache)
 
+	registerRulePresetHandlers(mux, newRulePresetStore(*rulesPath))
+
 	// Kick off the in-memory image cache GC loop
 	startDocImageCacheGC()
 
@@ -61,11 +68,12 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	mux.HandleFunc("GET /app", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, path.Join(publicDir, "app.html"))
+	})
+
 	// Serve static files from ../public
-	publicDir := "../public"
-	if _, err := os.Stat(publicDir); err != nil {
-		publicDir = "public"
-	}
 	fs := http.FileServer(http.Dir(publicDir))
 	// Force browsers to revalidate HTML + all JS/CSS on every load so a deploy
 	// picks up the latest code immediately. Top-level modules are pinned with
@@ -103,7 +111,7 @@ func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Admin-Password")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(204)
 			return
@@ -569,7 +577,7 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
-	// Ensure data directory exists for SQLite
+	// Ensure data directory exists for persisted rule presets and caches.
 	if err := os.MkdirAll("data", 0755); err != nil {
 		log.Printf("Warning: could not create data directory: %v", err)
 	}

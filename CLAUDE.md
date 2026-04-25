@@ -30,7 +30,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
 2. **仅保留 FBIF 公众号排版** — Mote 模板已移除，不再做模板切换
-3. **设置纯前端 localStorage** — 不走 API，不要 fetch /api/config/*
+3. **规则服务端保存 + 本地降级** — 参数预设以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
 4. **所有按钮在顶部工具栏** — 底部不放按钮
 5. **不要 TOC/目录** — 已删除
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F

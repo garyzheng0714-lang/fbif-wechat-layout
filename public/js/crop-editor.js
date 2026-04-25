@@ -3,7 +3,7 @@
 // wired through public/app.html.
 // Returns: Promise<{x, y, scale} | null>  (null = user cancelled)
 
-import { BANNER_STYLE_SPEC, computeBannerTitleLayout } from './more-articles.js';
+import { computeBannerTitleLayout, getBannerStyleSpec } from './more-articles.js';
 
 export function openCropEditor(card) {
   return new Promise((resolve) => {
@@ -102,9 +102,10 @@ export function openCropEditor(card) {
       // Title overlay: separate layer, never affected by image zoom. Mirrors
       // the PSD text layer geometry, scaled from the 1000×300 artboard.
       if (tp) {
-        const SCALE = W / BANNER_STYLE_SPEC.width;
+        const styleSpec = getBannerStyleSpec();
+        const SCALE = W / styleSpec.width;
         const fontFamily = '"NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
-        const layout = computeBannerTitleLayout(previewCtx, titleText, { scale: SCALE, fontFamily });
+        const layout = computeBannerTitleLayout(previewCtx, titleText, { scale: SCALE, fontFamily, styleSpec });
 
         tp.style.fontSize = layout.fontSize + 'px';
         tp.style.left = layout.x + 'px';
@@ -125,7 +126,7 @@ export function openCropEditor(card) {
         }));
       }
       if (tint) {
-        tint.style.background = `rgba(0,0,0,${BANNER_STYLE_SPEC.overlayAlpha})`;
+        tint.style.background = `rgba(0,0,0,${styleSpec.overlayAlpha})`;
       }
     }
 

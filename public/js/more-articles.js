@@ -1,16 +1,18 @@
 // More-articles card module for the "更多文章" section near the footer.
 // Handles: state (localStorage), cover image loading (with CORS proxy fallback),
 // Canvas compositing of cover + title overlay, upload to OSS, and merging the
-// resulting 3-card HTML into the existing footer.html in place of the default
-// 3 cards.
+// resulting card HTML into the existing footer.html in place of the default
+// card group.
 //
 // Used by: public/js/engine.js (injects into footer before render + copy)
 //          public/app.html (sidebar editor UI)
 
+import { getActiveRuleConfig, getRuleNumber } from './rule-presets.js';
+
 const LS_KEY = 'more_articles_v1';
 
 // Composite canvas style values taken from the approved bottom-banner reference.
-export const BANNER_STYLE_SPEC = Object.freeze({
+const BANNER_STYLE_SPEC = Object.freeze({
   width: 1000,
   height: 300,
   overlayAlpha: 120 / 255,
@@ -30,9 +32,6 @@ export const BANNER_STYLE_SPEC = Object.freeze({
   }),
 });
 
-const COMPOSITE_W = BANNER_STYLE_SPEC.width;
-const COMPOSITE_H = BANNER_STYLE_SPEC.height;
-const COMPOSITE_OVERLAY_ALPHA = BANNER_STYLE_SPEC.overlayAlpha;
 const COMPOSITE_OUTPUT_TYPE = 'image/png';
 const COMPOSITE_FONT_FAMILIES = [
   'NotoSansHans',
@@ -44,7 +43,7 @@ const COMPOSITE_FONT_FAMILIES = [
   'sans-serif',
 ];
 const COMPOSITE_FONT_STACK = COMPOSITE_FONT_FAMILIES.map(f => /\s/.test(f) ? `"${f}"` : f).join(', ');
-const COMPOSITE_STYLE_VERSION = '2026-04-25-single-line-title-v1';
+const COMPOSITE_STYLE_VERSION = '2026-04-25-rule-presets-v2';
 const LINE_START_FORBIDDEN_PUNCTUATION = new Set(Array.from(
   '，。！？；：、,.!?;:)]}）】》〉」』”’"\''
 ));
@@ -52,14 +51,25 @@ const LINE_END_FORBIDDEN_PUNCTUATION = new Set(Array.from(
   '“‘「『'
 ));
 
-// No hardcoded defaults — the user curates the full list. Cards array is
-// dynamic length (can be 0..N).
-export const DEFAULT_CARDS = [];
-
-// Number of blank card slots to seed on a fresh article upload. Sidebar
-// shows empty input rows; footer renders gray "待补充文章链接" placeholders
-// via cardHTML's empty-imgurl branch. The user fills these in by hand.
-export const FRESH_UPLOAD_PLACEHOLDER_COUNT = 3;
+export function getBannerStyleSpec(config = getActiveRuleConfig()) {
+  const overlayAlpha = Math.max(0, Math.min(1, getRuleNumber(config, 'banner_overlay_alpha')));
+  const maxLines = Math.max(1, Math.round(getRuleNumber(config, 'banner_title_max_lines')));
+  return {
+    width: BANNER_STYLE_SPEC.width,
+    height: BANNER_STYLE_SPEC.height,
+    overlayAlpha,
+    title: {
+      ...BANNER_STYLE_SPEC.title,
+      x: getRuleNumber(config, 'banner_title_x'),
+      y: getRuleNumber(config, 'banner_title_y'),
+      width: getRuleNumber(config, 'banner_title_width'),
+      height: getRuleNumber(config, 'banner_title_box_height'),
+      fontSize: getRuleNumber(config, 'banner_title_font_size'),
+      lineHeight: getRuleNumber(config, 'banner_title_line_height'),
+      maxLines,
+    },
+  };
+}
 
 export function emptyCard() {
   return {
@@ -73,8 +83,8 @@ export function emptyCard() {
   };
 }
 
-export function makeFreshUploadCards(n = FRESH_UPLOAD_PLACEHOLDER_COUNT) {
-  return Array.from({ length: n }, () => emptyCard());
+export function makeFreshUploadCards(n = getRuleNumber(getActiveRuleConfig(), 'more_articles_slots')) {
+  return Array.from({ length: Math.max(0, Math.round(Number(n) || 0)) }, () => emptyCard());
 }
 
 function normalizeCard(c) {
@@ -178,8 +188,8 @@ export function wrapBannerTitleLines(ctx, text, maxWidth) {
   return balanceLinePunctuation(wrapTextForCanvas(ctx, text, maxWidth));
 }
 
-export function computeBannerTitleLayout(ctx, text, { scale = 1, fontFamily = COMPOSITE_FONT_STACK } = {}) {
-  const title = BANNER_STYLE_SPEC.title;
+export function computeBannerTitleLayout(ctx, text, { scale = 1, fontFamily = COMPOSITE_FONT_STACK, styleSpec = getBannerStyleSpec() } = {}) {
+  const title = styleSpec.title;
   const maxWidth = (title.width + title.wrapTolerance) * scale;
   const leadingRatio = title.lineHeight / title.fontSize;
   let fontSize = Math.max(12, title.fontSize * scale);
@@ -234,9 +244,10 @@ export async function compositeCard(card) {
   const imgW = img.naturalWidth || img.width;
   const imgH = img.naturalHeight || img.height;
 
-  // Fixed landscape output for visual consistency across the 3 cards.
-  const W = COMPOSITE_W;
-  const H = COMPOSITE_H;
+  // Fixed landscape output for visual consistency across cards.
+  const styleSpec = getBannerStyleSpec();
+  const W = styleSpec.width;
+  const H = styleSpec.height;
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -264,7 +275,7 @@ export async function compositeCard(card) {
 
   // Flat dark overlay — PSD 矩形 1 is pure black filled at 50% opacity across
   // the full 1000×300 artboard.
-  ctx.fillStyle = `rgba(0,0,0,${COMPOSITE_OVERLAY_ALPHA})`;
+  ctx.fillStyle = `rgba(0,0,0,${styleSpec.overlayAlpha})`;
   ctx.fillRect(0, 0, W, H);
 
   // Title: white, bold Chinese sans-serif, 48px with 70px leading.
@@ -273,7 +284,7 @@ export async function compositeCard(card) {
   const title = String(card.title || '').trim();
   if (title) {
     ctx.textBaseline = 'top';
-    const layout = computeBannerTitleLayout(ctx, title);
+    const layout = computeBannerTitleLayout(ctx, title, { styleSpec });
     ctx.fillStyle = layout.fill;
     ctx.font = `${layout.fontWeight} ${layout.fontSize}px ${layout.fontFamily}`;
     let y = layout.y;
@@ -296,6 +307,7 @@ async function sha1Hex(str) {
 }
 
 export async function computeCardHash(card) {
+  const styleSpec = getBannerStyleSpec();
   const input = JSON.stringify({
     title: card.title || '',
     imgurl: card.imgurl || '',
@@ -304,8 +316,8 @@ export async function computeCardHash(card) {
     crop: card.crop || null,
     style: {
       version: COMPOSITE_STYLE_VERSION,
-      overlayAlpha: BANNER_STYLE_SPEC.overlayAlpha,
-      title: BANNER_STYLE_SPEC.title,
+      overlayAlpha: styleSpec.overlayAlpha,
+      title: styleSpec.title,
     },
   });
   return sha1Hex(input);

@@ -2,6 +2,8 @@
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource, convertRuns } = engineModule;
+const ruleModule = await import('../rule-presets.js' + assetQuery);
+const { getActiveRuleConfig, getRuleNumber } = ruleModule;
 
 // ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
 function leafWrap(inner) {
@@ -9,6 +11,10 @@ function leafWrap(inner) {
 }
 function leafWrapAuthor(inner) {
   return '<span leaf="" class="wx-la">' + inner + '</span>';
+}
+
+function ruleNumber(key) {
+  return getRuleNumber(getActiveRuleConfig(), key);
 }
 
 function renderRuns(runs, opts) {
@@ -228,7 +234,7 @@ async function classifyMd(text) {
     // the plain-text "参考X" regex so that "**参考文献**" becomes a heading
     // (bold emphasis marker) rather than opening a reference section.
     const boldOnly = para.match(/^\*\*(.+)\*\*$/);
-    if (boldOnly && para.length < 60) {
+    if (boldOnly && para.length < ruleNumber('md_heading_max_chars')) {
       inRef = false;
       elems.push({ k: 'h', text: boldOnly[1] });
       continue;
@@ -244,7 +250,8 @@ async function classifyMd(text) {
       // (e.g. section-number banners at 279px). Without this, small images
       // get stretched to 100% of the content column.
       const dwMatch = imgSrc.match(/[#&]dataW=(\d+)/);
-      const maxPx = dwMatch && Number(dwMatch[1]) > 0 && Number(dwMatch[1]) < 640
+      const decorativeLimit = ruleNumber('decorative_image_max_px');
+      const maxPx = dwMatch && Number(dwMatch[1]) > 0 && Number(dwMatch[1]) < decorativeLimit
         ? Number(dwMatch[1]) : 0;
       imgN++;
       inRef = false;
@@ -332,7 +339,7 @@ function classifyBlocks({ title, blocks }) {
 
     if (b.k === 'img') {
       const w = Number(b.dataW || 0);
-      const maxPx = w > 0 && w < 640 ? w : 0;
+      const maxPx = w > 0 && w < ruleNumber('decorative_image_max_px') ? w : 0;
       imgN++;
       inRef = false;
       elems.push({ k: 'img', src: b.src || '', w: '100%', maxPx, gif: looksLikeGifSource(b.src || '') });
