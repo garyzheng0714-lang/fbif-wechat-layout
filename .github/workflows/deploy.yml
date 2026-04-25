@@ -71,7 +71,7 @@ jobs:
               "\n"
               "  @fbifRulesApi path /api/rules /api/rules/*\n"
               "  handle @fbifRulesApi {\n"
-              "    reverse_proxy 127.0.0.1:9000\n"
+              "    reverse_proxy 127.0.0.1:19090\n"
               "  }\n"
           )
 
@@ -108,12 +108,12 @@ jobs:
 
           original = target.read_text()
           text = re.sub(
-              r"\n\s*@fbifRulesApi path /api/rules /api/rules/\*\n\s*reverse_proxy @fbifRulesApi 127\.0\.0\.1:9000\n",
+              r"\n\s*@fbifRulesApi path /api/rules /api/rules/\*\n\s*reverse_proxy @fbifRulesApi 127\.0\.0\.1:\d+\n",
               "\n",
               original,
           )
           text = re.sub(
-              r"\n\s*@fbifRulesApi path /api/rules /api/rules/\*\n\s*handle @fbifRulesApi \{\n\s*reverse_proxy 127\.0\.0\.1:9000\n\s*\}\n",
+              r"\n\s*@fbifRulesApi path /api/rules /api/rules/\*\n\s*handle @fbifRulesApi \{\n\s*reverse_proxy 127\.0\.0\.1:\d+\n\s*\}\n",
               "\n",
               text,
           )
