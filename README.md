@@ -1,27 +1,35 @@
-# FBIF 微信公众号排版工具
+# fbif-wechat-layout
 
-FBIF 微信公众号排版工具用于把 Word 文档、Markdown 或文章链接转换成符合 FBIF 公众号样式的 HTML。生成结果可预览、处理图片、组合页脚和“更多文章”卡片，并一键复制到微信公众号编辑器。
+![类型](https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E5%BE%AE%E4%BF%A1%E5%B7%A5%E5%85%B7-2563eb)
+![技术栈](https://img.shields.io/badge/%E6%8A%80%E6%9C%AF%E6%A0%88-Go%20%2B%20Vanilla%20JS-0f766e)
+![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a)
+![README](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-brightgreen)
+
+FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转换成可复制到微信公众号编辑器的 FBIF 风格 HTML。
+
+## 仓库定位
+
+- **分类**：微信工具 / FBIF 内容排版工具。
+- **服务对象**：FBIF 公众号编辑、内容运营和需要快速统一文章样式的协作人员。
+- **服务宿主**：输出内容面向微信公众号编辑器；本仓库不是浏览器插件，也不是飞书多维表格插件。
 
 ## 功能
 
-- DOCX / Markdown 解析：提取标题、正文、图片、超链接、列表、引用、参考来源等结构。
-- URL 转载：粘贴微信公众号文章或网页链接后，由 Go API 抓取内容并转换为结构化块；失败时回退到 x-reader 路径。
-- FBIF 公众号模板：使用 `public/js/templates/fbif.js` 和 `public/css/wx-theme.css` 输出微信编辑器可粘贴的 HTML。
-- 预览与复制分层：预览层可使用原始图片，复制层可处理图片上传、CSS 内联和微信兼容结构。
-- 图片处理：支持图片代理、裁剪编辑、格式检测、上传重试和“更多文章”卡片合成。
-- 旧版 `.doc` 转换：通过 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
-- 批量处理：支持多文件队列式处理。
-- 页脚模板：可开关品牌页脚，并可合并“更多文章”卡片。
-- 本地偏好：字体、字号、颜色、行高、字距、页脚开关和上传开关保存在 `localStorage`。
-- 快捷键：支持复制、粘贴链接抓取和返回上传页。
+- 解析 DOCX / Markdown，保留标题、正文、图片、超链接、列表、引用和参考来源等结构。
+- 粘贴微信公众号文章或网页链接后，由 Go API 抓取并转换为结构化内容；失败时回退到备用读取路径。
+- 使用 `public/js/templates/fbif.js` 和 `public/css/wx-theme.css` 生成 FBIF 公众号样式。
+- 区分预览层与复制层：预览可使用原图，复制前可处理图片上传、CSS 内联和微信兼容结构。
+- 支持图片代理、裁剪编辑、格式检测、上传重试和“更多文章”卡片合成。
+- 支持旧版 `.doc` 经 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
+- 支持多文件队列处理、品牌页脚开关和“更多文章”组合页脚。
+- 本地保存字体、字号、颜色、行高、字距、页脚开关和上传开关等偏好。
 
 ## 技术栈
 
-- 前端：原生 HTML/CSS/JavaScript ES modules
-- 文档解析与渲染：浏览器端 JS 模块
-- 后端 API：Go 1.26，标准库 `net/http`
+- 前端：原生 HTML / CSS / JavaScript ES modules
+- 后端：Go 1.26，标准库 `net/http`
 - 测试：Node.js `node --test`、Go test
-- 部署：GitHub Actions + rsync + systemd API 服务
+- 部署：GitHub Actions、rsync、systemd API 服务
 
 ## 项目结构
 
@@ -40,7 +48,7 @@ FBIF 微信公众号排版工具用于把 Word 文档、Markdown 或文章链接
 │   │   ├── clipboard.js            # 剪贴板复制
 │   │   ├── css-inline.js           # 复制前 CSS 内联
 │   │   ├── crop-editor.js          # 图片裁剪编辑
-│   │   ├── more-articles*.js       # “更多文章”卡片配置与合成
+│   │   ├── more-articles*.js       # “更多文章”配置与合成
 │   │   └── templates/fbif.js       # FBIF 模板
 │   ├── fonts/                      # Noto Sans Hans 字体文件和许可证
 │   └── version.json                # 部署版本信息
@@ -54,37 +62,47 @@ FBIF 微信公众号排版工具用于把 Word 文档、Markdown 或文章链接
 └── README.md
 ```
 
-## 本地开发
+## 快速开始
 
 ### 仅运行静态页面
 
-适合查看前端界面和不依赖 API 的流程：
+适合查看界面和测试不依赖后端 API 的流程：
 
 ```bash
 cd public
 python3 -m http.server 8080
 ```
 
-访问 `http://localhost:8080/app.html`。
+访问：
+
+```text
+http://localhost:8080/app.html
+```
 
 ### 运行 Go API 与静态文件服务
 
-适合测试文章抓取、图片代理、旧版 `.doc` 转换等 API：
+适合测试文章抓取、图片代理、旧版 `.doc` 转换等后端能力：
 
 ```bash
 cd api
 go run . -port 9000
 ```
 
-服务会同时提供 API 和 `public/` 静态文件。健康检查：
+健康检查：
 
 ```bash
 curl http://127.0.0.1:9000/api/health
 ```
 
-## API
+## 使用流程
 
-Go 服务提供以下主要接口：
+1. 上传 DOCX / Markdown，或粘贴文章链接。
+2. 检查预览层中的正文、图片、引用和“更多文章”卡片。
+3. 按需裁剪图片、调整排版偏好或切换页脚。
+4. 复制生成结果到微信公众号编辑器。
+5. 在微信公众号后台做最后预览和发布前检查。
+
+## API
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -97,7 +115,7 @@ Go 服务提供以下主要接口：
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
 
-## 环境变量
+## 配置
 
 后端按需读取以下环境变量：
 
@@ -108,9 +126,9 @@ Go 服务提供以下主要接口：
 | `LIBREOFFICE_TOKEN` | LibreOffice 转换服务鉴权 token |
 | `CLOUDCONVERT_API_KEY` | LibreOffice 不可用时的 CloudConvert fallback |
 
-部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH` 等 GitHub Secrets。
+部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH` 等 GitHub Secrets。不要把微信、LibreOffice、CloudConvert 或服务器密钥提交到仓库。
 
-## 测试
+## 脚本与测试
 
 前端模块测试：
 
@@ -144,8 +162,8 @@ go test ./...
 5. 写入 API 服务使用的 `.env` 文件。
 6. 重启 `fbif-api` systemd 服务。
 
-## Notes
+## 维护说明
 
-- `DESIGN.md` 记录了当前界面和公众号预览页的设计约束。
-- 当前代码只加载 `fbif` 模板；README 中描述的功能应以 `public/app.html`、`public/js/engine.js` 和 `public/js/templates/fbif.js` 为准。
-- 不要把微信、LibreOffice、CloudConvert 或服务器部署密钥提交到仓库。
+- `DESIGN.md` 记录界面和公众号预览页的设计约束。
+- 当前主模板为 `fbif`；功能描述应以 `public/app.html`、`public/js/engine.js` 和 `public/js/templates/fbif.js` 为准。
+- 复制到微信前的兼容处理集中在 `clipboard.js`、`css-inline.js` 和上传相关模块中。
