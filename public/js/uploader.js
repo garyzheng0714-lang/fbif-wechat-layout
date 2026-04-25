@@ -5,18 +5,25 @@ export function isMmbizUrl(url) {
   return /^https?:\/\/mmbiz\.qpic\.cn\//i.test(url);
 }
 
-// Fetch a blob: URL (backed by an in-memory Blob created by parser.js) and
-// encode it as a base64 data URL so the OSS upload path can consume it.
-async function blobUrlToDataUrl(blobUrl) {
-  const resp = await fetch(blobUrl);
-  if (!resp.ok) throw new Error('fetch ' + blobUrl + ' → ' + resp.status);
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+// Fetch a blob: or server cache URL and encode it as a base64 data URL so the
+// skip-upload copy path can paste usable image bytes instead of page-local URLs.
+async function imageRefToDataUrl(src) {
+  const resp = await fetch(src);
+  if (!resp.ok) throw new Error('fetch ' + src + ' -> ' + resp.status);
   const blob = await resp.blob();
-  return await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
-    reader.readAsDataURL(blob);
-  });
+  const mime = blob.type || 'image/png';
+  const base64 = arrayBufferToBase64(await blob.arrayBuffer());
+  return 'data:' + mime + ';base64,' + base64;
 }
 
 // Upload a single base64 image to OSS. Returns OSS URL or null on failure.
@@ -32,16 +39,9 @@ async function uploadOne(task) {
   return results[task.key] || Object.values(results)[0] || null;
 }
 
-// Upload base64 images from DOCX to OSS. External URLs are used directly.
-// mmbiz URLs are already on WeChat CDN — skip them (preserves GIF animations).
-//
-// Returns { articleCopy, footerCopy, total, failed, failedSrcs }.
-// failedSrcs contains original src strings of images that failed even after retry.
-export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, onLog }) {
+export async function materializeLazyImages(articleCopy, footerCopy, { onProgress, onLog } = {}) {
   const allHtml = articleCopy + '\n' + footerCopy;
-
-  const tasks = [];
-  let m, mmbizCount = 0;
+  let m;
 
   // Materialize in-browser and server-cached image refs to base64 at copy time.
   //  - blob: URLs  → in-memory Blobs created by parser.js for local .docx
@@ -49,21 +49,45 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   //    conversions (preserves original bytes, parallel download, fast text render)
   // In both cases a one-time fetch + FileReader roundtrip yields the data URL
   // that the OSS upload path can consume.
-  const lazyRe = /src="(blob:[^"]+|\/api\/doc-cache\/[^"]+)"/g;
+  const lazyRe = /src=(["'])(blob:[^"']+|\/api\/doc-cache\/[^"']+)\1/g;
   const lazyUrls = new Set();
-  while ((m = lazyRe.exec(allHtml)) !== null) lazyUrls.add(m[1]);
+  while ((m = lazyRe.exec(allHtml)) !== null) lazyUrls.add(m[2]);
+  onProgress && onProgress(0, lazyUrls.size);
+
+  let done = 0;
+  const failedSrcs = [];
   for (const src of lazyUrls) {
     try {
-      const dataUrl = await blobUrlToDataUrl(src);
+      const dataUrl = await imageRefToDataUrl(src);
       articleCopy = articleCopy.split(src).join(dataUrl);
       footerCopy = footerCopy.split(src).join(dataUrl);
     } catch (err) {
       onLog && onLog('error', '图片转 base64 失败', { url: src.slice(0, 60), err: String(err) });
+      failedSrcs.push(src);
     }
+    done++;
+    onProgress && onProgress(done, lazyUrls.size);
   }
 
+  return { articleCopy, footerCopy, total: lazyUrls.size, failed: failedSrcs.length, failedSrcs };
+}
+
+// Upload base64 images from DOCX to OSS. External URLs are used directly.
+// mmbiz URLs are already on WeChat CDN — skip them (preserves GIF animations).
+//
+// Returns { articleCopy, footerCopy, total, failed, failedSrcs }.
+// failedSrcs contains original src strings of images that failed even after retry.
+export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, onLog }) {
+  const materialized = await materializeLazyImages(articleCopy, footerCopy, { onLog });
+  articleCopy = materialized.articleCopy;
+  footerCopy = materialized.footerCopy;
+  const lazyFailedSrcs = materialized.failedSrcs || [];
+
+  const tasks = [];
+  let m, mmbizCount = 0;
+
   // Refresh combined HTML if any lazy → data: substitutions happened.
-  const refreshedHtml = lazyUrls.size ? (articleCopy + '\n' + footerCopy) : allHtml;
+  const refreshedHtml = articleCopy + '\n' + footerCopy;
 
   // base64 data URIs (from DOCX, plus any we just materialized) — upload to OSS
   const b64Re = /src="(data:image\/[^"]+)"/g;
@@ -80,7 +104,13 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
 
   if (tasks.length === 0) {
     onLog && onLog('info', '无需上传', { mmbiz已有: mmbizCount });
-    return { articleCopy, footerCopy, total: 0, failed: 0, failedSrcs: [] };
+    return {
+      articleCopy,
+      footerCopy,
+      total: 0,
+      failed: lazyFailedSrcs.length,
+      failedSrcs: lazyFailedSrcs,
+    };
   }
 
   onLog && onLog('info', '开始上传Base64图片到OSS', { base64: tasks.length, 外链直接使用: true, mmbiz跳过: mmbizCount });
@@ -121,14 +151,14 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
 
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker()));
 
-  const failedSrcs = failedTasks.map(t => t.src);
-  if (failedTasks.length > 0) {
-    onLog && onLog('warn', '上传完成，' + failedTasks.length + '张失败（已自动重试1次）');
+  const failedSrcs = lazyFailedSrcs.concat(failedTasks.map(t => t.src));
+  if (failedSrcs.length > 0) {
+    onLog && onLog('warn', '上传完成，' + failedSrcs.length + '张失败（已自动重试1次）');
   } else {
     onLog && onLog('info', '全部图片上传成功', { total: tasks.length });
   }
 
-  return { articleCopy, footerCopy, total: tasks.length, failed: failedTasks.length, failedSrcs };
+  return { articleCopy, footerCopy, total: tasks.length, failed: failedSrcs.length, failedSrcs };
 }
 
 // Retry specific failed base64 images. Call with the failedSrcs from a previous upload.

@@ -24,7 +24,6 @@ export {
 const punctuationModule = await import('./punctuation.js' + assetQuery);
 export const { convertRuns } = punctuationModule;
 
-import { uploadNonCdnImages, retryFailedImages } from './uploader.js';
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
 import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
 import {
@@ -39,6 +38,9 @@ import {
 const imageUtilsModule = await import('./image-utils.mjs' + assetQuery);
 const { inferWechatImageType, looksLikeGifSource } = imageUtilsModule;
 export { inferWechatImageType, looksLikeGifSource };
+
+const uploaderModule = await import('./uploader.js' + assetQuery);
+const { uploadNonCdnImages, retryFailedImages, materializeLazyImages } = uploaderModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -531,8 +533,24 @@ export function initApp(template) {
 
     const skipUploadForThisFile = !!window._skipUpload && _sourceIsDocx;
     if (skipUploadForThisFile) {
-      _uploadDone = true;
-      logConv('info', 'DOCX 跳过上传：不启动后台上传');
+      _uploadPromise = materializeLazyImages(_articleCopy, _footerCopy, {
+        onProgress(done, total) {
+          if (total > 0) statsBar.textContent = '准备图片 (' + done + '/' + total + ')...';
+        },
+        onLog: logConv,
+      }).then(result => {
+        _articleCopy = result.articleCopy;
+        _footerCopy = result.footerCopy;
+        _failedSrcs = result.failedSrcs || [];
+        _uploadDone = true;
+        if (result.failed > 0) {
+          statsBar.textContent = originalStats + ' | ' + result.failed + '张图片准备失败';
+          markFailedImages(_failedSrcs);
+        } else {
+          statsBar.textContent = originalStats;
+        }
+      });
+      logConv('info', 'DOCX 跳过上传：仅准备本地图片，不上传');
       return;
     }
 
@@ -603,12 +621,12 @@ export function initApp(template) {
     const btn = document.getElementById('copyBtn');
 
     const skipUpload = !!window._skipUpload && _sourceIsDocx;
-    if (_uploadPromise && !_uploadDone && !skipUpload) {
-      btn.textContent = '等待图片上传...';
+    if (_uploadPromise && !_uploadDone) {
+      btn.textContent = skipUpload ? '准备图片...' : '等待图片上传...';
       await _uploadPromise;
     }
     if (skipUpload) {
-      logConv('info', 'DOCX 跳过上传：base64 直接写入剪贴板');
+      logConv('info', 'DOCX 跳过上传：data/base64 直接写入剪贴板');
     }
 
     // Upload any customized "更多文章" composites to OSS and rebuild _footerCopy

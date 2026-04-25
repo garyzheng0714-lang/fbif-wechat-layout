@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isMmbizUrl } from '../public/js/uploader.js';
+import { isMmbizUrl, materializeLazyImages } from '../public/js/uploader.js';
 
 // ---- isMmbizUrl ----
 
@@ -17,6 +17,28 @@ test('isMmbizUrl rejects non-mmbiz URLs', () => {
 
 test('isMmbizUrl is case insensitive', () => {
   assert.equal(isMmbizUrl('HTTPS://MMBIZ.QPIC.CN/test'), true);
+});
+
+test('materializeLazyImages replaces DOCX blob/cache refs with data URLs', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const bytes = String(url).startsWith('blob:')
+      ? new Uint8Array([1, 2, 3])
+      : new Uint8Array([4, 5, 6]);
+    return new Response(new Blob([bytes], { type: 'image/png' }));
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const result = await materializeLazyImages(
+    '<p><img src="blob:local-image"></p>',
+    '<p><img src="/api/doc-cache/hash/image.png"></p>'
+  );
+
+  assert.equal(result.failed, 0);
+  assert.doesNotMatch(result.articleCopy, /blob:/);
+  assert.doesNotMatch(result.footerCopy, /\/api\/doc-cache\//);
+  assert.match(result.articleCopy, /src="data:image\/png;base64,AQID"/);
+  assert.match(result.footerCopy, /src="data:image\/png;base64,BAUG"/);
 });
 
 // Note: uploadNonCdnImages requires fetch() which is only available in
