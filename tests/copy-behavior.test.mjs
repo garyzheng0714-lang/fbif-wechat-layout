@@ -6,13 +6,13 @@ test('copy button does not auto-open WeChat backend', async () => {
   const html = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   assert.doesNotMatch(html, /window\.open\s*\(/);
   assert.doesNotMatch(html, /正在打开微信后台/);
-  assert.match(html, /loadSkipUploadPref/);
-  assert.doesNotMatch(html, /loadPref\('skip_upload', 'true'\)/);
+  assert.match(html, /loadPref\('skip_upload', 'true'\)/);
 });
 
-test('copy skips DOCX upload only when copy HTML has no deferred images', async () => {
+test('copy keeps legacy DOCX skip-upload behavior', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
-  assert.match(engine, /function hasDeferredCopyImages/);
-  assert.match(engine, /!hasDeferredCopyImages\(_articleCopy, _footerCopy\)/);
+  assert.doesNotMatch(engine, /hasDeferredCopyImages/);
+  assert.match(engine, /const skipUploadForThisFile = !!window\._skipUpload && _sourceIsDocx;/);
+  assert.match(engine, /const skipUpload = !!window\._skipUpload && _sourceIsDocx;/);
   assert.match(engine, /return ok;/);
 });
