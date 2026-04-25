@@ -181,6 +181,11 @@ async function buildFooterWithMoreArticles(baseFooterHtml) {
   return mergeMoreArticlesIntoFooter(transformed, cardsForPreview);
 }
 
+function hasDeferredCopyImages(articleCopy, footerCopy) {
+  return /<img\b[^>]*\bsrc=["'](?:blob:|\/api\/doc-cache\/)/i
+    .test((articleCopy || '') + '\n' + (footerCopy || ''));
+}
+
 // ---- App Initialization ----
 export function initApp(template) {
   document.getElementById('pageTitle').textContent = template.name;
@@ -529,11 +534,15 @@ export function initApp(template) {
     const statsBar = document.getElementById('statsBar');
     const originalStats = stats;
 
-    const skipUploadForThisFile = !!window._skipUpload && _sourceIsDocx;
+    const skipUploadForThisFile =
+      !!window._skipUpload && _sourceIsDocx && !hasDeferredCopyImages(_articleCopy, _footerCopy);
     if (skipUploadForThisFile) {
       _uploadDone = true;
       logConv('info', 'DOCX 跳过上传：不启动后台上传');
       return;
+    }
+    if (!!window._skipUpload && _sourceIsDocx) {
+      logConv('info', 'DOCX 图片需要先上传：检测到临时图片地址，跳过上传会导致微信不可用');
     }
 
     _uploadPromise = uploadNonCdnImages(_articleCopy, _footerCopy, {
@@ -602,7 +611,8 @@ export function initApp(template) {
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
 
-    const skipUpload = !!window._skipUpload && _sourceIsDocx;
+    const skipUpload =
+      !!window._skipUpload && _sourceIsDocx && !hasDeferredCopyImages(_articleCopy, _footerCopy);
     if (_uploadPromise && !_uploadDone && !skipUpload) {
       btn.textContent = '等待图片上传...';
       await _uploadPromise;
@@ -662,6 +672,7 @@ export function initApp(template) {
 
     btn.textContent = ok ? '\u2713 已复制' : '复制失败';
     btn.classList.add('copied');
+    return ok;
   };
 
   window.getClipboardHtml = function() { return _lastCopiedHtml; };

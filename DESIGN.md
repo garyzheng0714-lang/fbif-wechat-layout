@@ -66,7 +66,7 @@
 - **Footer**: sticky bottom, white bg, centered 0.5px divider (#E5E5E5)
 - **Content width**: max-width 680px centered
 
-## Critical Rules (from user)
+## Current Rules
 1. 预览页背景必须全白
 2. 仅保留 FBIF 公众号排版（已移除 Mote 模板）
 3. 设置纯前端 localStorage
@@ -74,6 +74,8 @@
 5. 不要 TOC/目录
 6. 底部栏复刻微信（白底，分隔线不贯穿）
 7. 文章标题左对齐 27px 粗体
-8. 复制后自动打开微信后台
+8. 复制后不自动打开微信后台；只显示复制成功提示
 9. 表单只填数字
 10. 不要 phone-frame 边框
+
+规则说明：这里记录当前设计约束。旧需求不能因为出现在历史记录里就被当成当前规则。

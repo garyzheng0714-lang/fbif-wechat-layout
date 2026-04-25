@@ -25,8 +25,10 @@ All font choices, colors, spacing, and aesthetic direction are defined there.
 Do not deviate without explicit user approval.
 In QA mode, flag any code that doesn't match DESIGN.md.
 
-## Critical Design Rules (DO NOT VIOLATE)
-These have been explicitly confirmed by the user. Breaking any of these is unacceptable:
+## Current Project Rules
+These are current guardrails for this repo. If a user gives a newer instruction
+in the active thread, the newer instruction wins. Do not promote old product
+requests into this list unless the user explicitly reconfirms them as current.
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
 2. **仅保留 FBIF 公众号排版** — Mote 模板已移除，不再做模板切换
@@ -35,7 +37,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 5. **不要 TOC/目录** — 已删除
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F
 7. **文章标题左对齐** — 在文章正上方，27px 粗体
-8. **复制后自动打开微信后台** — window.open('https://mp.weixin.qq.com')
+8. **复制后不自动打开外部网站** — 复制按钮只复制内容；微信公众号后台只能通过显式链接手动打开
 9. **表单只填数字** — 不要 px/em 后缀，颜色用 color picker
 10. **不要 phone-frame 边框** — 文章直接在白底上流动
 
@@ -43,3 +45,8 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 WECHAT_UPLOAD_ENDPOINT 环境变量
 - 启动：`cd api && go run . -port 19090`
+
+## Rule Hygiene
+- Rules in this file must describe current behavior, not historical requests.
+- Mutable product preferences need source/date/status before being treated as stable.
+- Copy behavior must not navigate away from the editor unless the current user request explicitly asks for it.

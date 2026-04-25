@@ -95,7 +95,7 @@
           <label>页脚</label>
           <div class="toggle-switch on" id="footerToggleBtn"><div class="toggle-knob"></div></div>
         </div>
-        <div class="form-row" title="开启后 docx 导入的文档复制时不等待图片上传，直接把 base64 图片嵌入 HTML 粘到微信后台，由微信在粘贴时自动转存。md/txt 和链接提取不受此开关影响。">
+        <div class="form-row" title="仅当 DOCX 图片已经是可直接复制的 base64 时才跳过上传；如果图片仍是 blob 或服务端缓存地址，复制前会自动上传，避免图片失效。md/txt 和链接提取不受此开关影响。">
           <label>docx 跳过上传</label>
           <div class="toggle-switch" id="skipUploadToggleBtn"><div class="toggle-knob"></div></div>
         </div>
@@ -149,7 +149,7 @@
         <div class="phone-frame" id="phoneFrame">
           <div id="contentArea"></div>
         </div>
-        <div class="copy-success" id="copySuccess">已复制到剪贴板，正在打开微信后台...</div>
+        <div class="copy-success" id="copySuccess">已复制到剪贴板</div>
       </div>
 
       <!-- WeChat footer -->
@@ -205,6 +205,18 @@ window._pushLog = function(level, msg, detail) {
 // ---- Prefs ----
 function loadPref(k, fb) { try { const v = localStorage.getItem(k); return v !== null ? v : fb; } catch { return fb; } }
 function savePref(k, v) { try { localStorage.setItem(k, v); } catch {} }
+function loadSkipUploadPref() {
+  try {
+    if (localStorage.getItem('skip_upload_migrated_v2') !== 'true') {
+      localStorage.setItem('skip_upload', 'false');
+      localStorage.setItem('skip_upload_migrated_v2', 'true');
+      return false;
+    }
+    return localStorage.getItem('skip_upload') === 'true';
+  } catch {
+    return false;
+  }
+}
 
 // ---- Config (per-template defaults) ----
 const TEMPLATE_DEFAULTS = {
@@ -217,7 +229,7 @@ const currentTemplateId = 'fbif';
 window._activeConfig = { config: loadConfig(currentTemplateId) };
 
 let footerEnabledPref = loadPref('footer_enabled', 'true') === 'true';
-let skipUploadPref = loadPref('skip_upload', 'true') === 'true';
+let skipUploadPref = loadSkipUploadPref();
 window._skipUpload = skipUploadPref;
 
 // ---- Load engine + template ----
@@ -347,9 +359,9 @@ function wrapEngineFunctions() {
     const origCopy = window.copyContent;
     window.copyContent = async function() {
       const btn = document.getElementById('copyBtn');
-      await origCopy();
+      const ok = await origCopy();
+      if (ok === false) return;
       document.getElementById('copySuccess').style.display = 'block';
-      window.open('https://mp.weixin.qq.com');
       setTimeout(() => {
         btn.textContent = '复制全文'; btn.classList.remove('copied');
         document.getElementById('copySuccess').style.display = 'none';

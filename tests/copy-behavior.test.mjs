@@ -1,0 +1,18 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+test('copy button does not auto-open WeChat backend', async () => {
+  const html = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /window\.open\s*\(/);
+  assert.doesNotMatch(html, /正在打开微信后台/);
+  assert.match(html, /loadSkipUploadPref/);
+  assert.doesNotMatch(html, /loadPref\('skip_upload', 'true'\)/);
+});
+
+test('copy skips DOCX upload only when copy HTML has no deferred images', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  assert.match(engine, /function hasDeferredCopyImages/);
+  assert.match(engine, /!hasDeferredCopyImages\(_articleCopy, _footerCopy\)/);
+  assert.match(engine, /return ok;/);
+});
