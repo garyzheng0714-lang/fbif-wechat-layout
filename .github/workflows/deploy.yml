@@ -57,6 +57,60 @@ jobs:
             api/fbif-api \
             "${USER}@${HOST}:${DEPLOY_PATH}/../api/"
 
+          # Ensure the rule preset API is routed to the Go service. The server's
+          # Caddy config proxies only selected /api paths, so new API namespaces
+          # must be added explicitly or they fall through to the static app.
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "sudo python3 -" <<'PY'
+          from pathlib import Path
+          import sys
+
+          site = "fbifmp-layout.foodtalks.cn"
+          marker = "@fbifRulesApi"
+          route = (
+              "\n"
+              "  @fbifRulesApi path /api/rules /api/rules/*\n"
+              "  reverse_proxy @fbifRulesApi 127.0.0.1:9000\n"
+          )
+
+          files = []
+          root = Path("/etc/caddy")
+          if root.exists():
+              files = [p for p in root.rglob("*") if p.is_file()]
+
+          target = None
+          for path in files:
+              try:
+                  text = path.read_text()
+              except UnicodeDecodeError:
+                  continue
+              if site in text:
+                  target = path
+                  break
+
+          if target is None:
+              print("Could not find Caddy site config for " + site, file=sys.stderr)
+              sys.exit(1)
+
+          text = target.read_text()
+          if marker in text or "/api/rules/*" in text:
+              print("Caddy rule API route already present in " + str(target))
+              sys.exit(0)
+
+          site_at = text.find(site)
+          open_at = text.find("{", site_at)
+          if open_at == -1:
+              print("Could not find site block opening brace in " + str(target), file=sys.stderr)
+              sys.exit(1)
+
+          backup = target.with_suffix(target.suffix + ".bak-rules")
+          backup.write_text(text)
+          target.write_text(text[:open_at + 1] + route + text[open_at + 1:])
+          print("Inserted Caddy rule API route into " + str(target))
+          PY
+
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
+            "sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy"
+
           # Write env file for the fbif-api systemd service (loaded via EnvironmentFile=)
           # Tempfile + atomic rename so the service never sees a half-written file.
           ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" | base64)
