@@ -62,6 +62,7 @@ jobs:
           # must be added explicitly or they fall through to the static app.
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "sudo python3 -" <<'PY'
           from pathlib import Path
+          import re
           import sys
 
           site = "fbifmp-layout.foodtalks.cn"
@@ -69,7 +70,9 @@ jobs:
           route = (
               "\n"
               "  @fbifRulesApi path /api/rules /api/rules/*\n"
-              "  reverse_proxy @fbifRulesApi 127.0.0.1:9000\n"
+              "  handle @fbifRulesApi {\n"
+              "    reverse_proxy 127.0.0.1:9000\n"
+              "  }\n"
           )
 
           root = Path("/etc/caddy")
@@ -103,21 +106,39 @@ jobs:
               print("Could not find Caddy site config for " + site, file=sys.stderr)
               sys.exit(1)
 
-          text = target.read_text()
-          if marker in text or "/api/rules/*" in text:
-              print("Caddy rule API route already present in " + str(target))
-              sys.exit(0)
+          original = target.read_text()
+          text = re.sub(
+              r"\n\s*@fbifRulesApi path /api/rules /api/rules/\*\n\s*reverse_proxy @fbifRulesApi 127\.0\.0\.1:9000\n",
+              "\n",
+              original,
+          )
+          text = re.sub(
+              r"\n\s*@fbifRulesApi path /api/rules /api/rules/\*\n\s*handle @fbifRulesApi \{\n\s*reverse_proxy 127\.0\.0\.1:9000\n\s*\}\n",
+              "\n",
+              text,
+          )
 
-          site_at = text.find(site)
-          open_at = text.find("{", site_at)
-          if open_at == -1:
+          insert_points = []
+          scan_from = 0
+          while True:
+              site_at = text.find(site, scan_from)
+              if site_at == -1:
+                  break
+              open_at = text.find("{", site_at)
+              if open_at != -1:
+                  insert_points.append(open_at + 1)
+              scan_from = site_at + len(site)
+
+          if not insert_points:
               print("Could not find site block opening brace in " + str(target), file=sys.stderr)
               sys.exit(1)
 
           backup = target.with_suffix(target.suffix + ".bak-rules")
-          backup.write_text(text)
-          target.write_text(text[:open_at + 1] + route + text[open_at + 1:])
-          print("Inserted Caddy rule API route into " + str(target))
+          backup.write_text(original)
+          for open_after in sorted(set(insert_points), reverse=True):
+              text = text[:open_after] + route + text[open_after:]
+          target.write_text(text)
+          print("Ensured Caddy rule API handle in " + str(target))
           PY
 
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
