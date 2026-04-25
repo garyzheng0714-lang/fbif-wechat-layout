@@ -205,6 +205,17 @@ window._pushLog = function(level, msg, detail) {
 // ---- Prefs ----
 function loadPref(k, fb) { try { const v = localStorage.getItem(k); return v !== null ? v : fb; } catch { return fb; } }
 function savePref(k, v) { try { localStorage.setItem(k, v); } catch {} }
+function loadSkipUploadPref() {
+  try {
+    if (localStorage.getItem('skip_upload_migrated_v2') === 'true' &&
+        localStorage.getItem('skip_upload_restored_v3') !== 'true') {
+      localStorage.setItem('skip_upload', 'true');
+      localStorage.setItem('skip_upload_restored_v3', 'true');
+      return true;
+    }
+  } catch {}
+  return loadPref('skip_upload', 'true') === 'true';
+}
 
 // ---- Config (per-template defaults) ----
 const TEMPLATE_DEFAULTS = {
@@ -217,7 +228,7 @@ const currentTemplateId = 'fbif';
 window._activeConfig = { config: loadConfig(currentTemplateId) };
 
 let footerEnabledPref = loadPref('footer_enabled', 'true') === 'true';
-let skipUploadPref = loadPref('skip_upload', 'true') === 'true';
+let skipUploadPref = loadSkipUploadPref();
 window._skipUpload = skipUploadPref;
 
 // ---- Load engine + template ----
