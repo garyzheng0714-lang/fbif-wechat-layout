@@ -64,6 +64,7 @@ jobs:
           from pathlib import Path
           import re
           import sys
+          import urllib.request
 
           site = "fbifmp-layout.foodtalks.cn"
           marker = "@fbifRulesApi"
@@ -100,7 +101,8 @@ jobs:
               sys.exit(1)
 
           original = target.read_text()
-          def extract_upstream(config):
+          def extract_upstreams(config):
+              found = []
               for token in ("/api/fetch-article-meta", "/api/fetch-article", "/api/health"):
                   at = config.find(token)
                   if at == -1:
@@ -113,12 +115,39 @@ jobs:
                       for part in stripped.split()[1:]:
                           if part.startswith("@") or part.startswith("/") or part == "{":
                               continue
-                          return part
-              return ""
+                          if part not in found:
+                              found.append(part)
+              return found
 
-          upstream = extract_upstream(original)
+          def health_url(upstream):
+              if upstream.startswith("http://") or upstream.startswith("https://"):
+                  base = upstream.rstrip("/")
+              else:
+                  base = "http://" + upstream.rstrip("/")
+              return base + "/api/health"
+
+          def is_go_api(upstream):
+              try:
+                  with urllib.request.urlopen(health_url(upstream), timeout=2) as resp:
+                      body = resp.read(200).decode("utf-8", "replace")
+                      return resp.status == 200 and '"status":"ok"' in body.replace(" ", "")
+              except Exception:
+                  return False
+
+          candidates = extract_upstreams(original)
+          for fallback in (
+              "127.0.0.1:19090",
+              "127.0.0.1:9000",
+              "127.0.0.1:8080",
+              "127.0.0.1:9090",
+              "127.0.0.1:3000",
+          ):
+              if fallback not in candidates:
+                  candidates.append(fallback)
+
+          upstream = next((candidate for candidate in candidates if is_go_api(candidate)), "")
           if not upstream:
-              print("Could not infer Go API upstream from existing Caddy routes", file=sys.stderr)
+              print("Could not find a local Go API upstream with /api/health", file=sys.stderr)
               sys.exit(1)
 
           route = (
