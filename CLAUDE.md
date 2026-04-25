@@ -35,7 +35,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 5. **不要 TOC/目录** — 已删除
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F
 7. **文章标题左对齐** — 在文章正上方，27px 粗体
-8. **复制后自动打开微信后台** — window.open('https://mp.weixin.qq.com')
+8. **复制后不自动打开微信后台** — 只显示复制成功提示，保留手动打开入口
 9. **表单只填数字** — 不要 px/em 后缀，颜色用 color picker
 10. **不要 phone-frame 边框** — 文章直接在白底上流动
 
