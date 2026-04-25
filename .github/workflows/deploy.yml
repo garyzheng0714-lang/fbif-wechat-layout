@@ -72,10 +72,22 @@ jobs:
               "  reverse_proxy @fbifRulesApi 127.0.0.1:9000\n"
           )
 
-          files = []
           root = Path("/etc/caddy")
-          if root.exists():
-              files = [p for p in root.rglob("*") if p.is_file()]
+          if not root.exists():
+              print("/etc/caddy does not exist", file=sys.stderr)
+              sys.exit(1)
+
+          files = []
+          primary = root / "Caddyfile"
+          if primary.exists():
+              files.append(primary)
+          files.extend(
+              p for p in root.rglob("*")
+              if p.is_file()
+              and p != primary
+              and ".bak" not in p.name
+              and not p.name.endswith("~")
+          )
 
           target = None
           for path in files:
