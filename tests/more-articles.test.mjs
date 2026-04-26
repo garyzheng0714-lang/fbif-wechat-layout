@@ -23,7 +23,11 @@ test('more articles single-line title is vertically centered in the PSD text box
   const layout = computeBannerTitleLayout(monoCtx, '单行标题');
   assert.deepEqual(layout.lines, ['单行标题']);
   assert.equal(layout.lineHeight, 70);
-  assert.equal(layout.y, 115);
+  // y = title.y + (title.height - fontSize) / 2 = 92 + (116-48)/2 = 126.
+  // We center the glyph (fontSize tall) inside the title box rather than
+  // the line box (lineHeight tall) so the visible text lands on the canvas
+  // vertical center instead of being shifted ~11px above it.
+  assert.equal(layout.y, 126);
 });
 
 test('more articles two-line title keeps the PSD top anchor', () => {

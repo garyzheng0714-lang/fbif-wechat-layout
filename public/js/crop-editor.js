@@ -104,8 +104,10 @@ export function openCropEditor(card) {
       if (tp) {
         const styleSpec = getBannerStyleSpec();
         const SCALE = W / styleSpec.width;
-        const fontFamily = '"NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
-        const layout = computeBannerTitleLayout(previewCtx, titleText, { scale: SCALE, fontFamily, styleSpec });
+        // Let computeBannerTitleLayout pick the default stack (now without
+        // the locally-loaded NotoSansHans-Bold face) so the preview's measured
+        // wrap and rendered weight match the canvas composite at weight 650.
+        const layout = computeBannerTitleLayout(previewCtx, titleText, { scale: SCALE, styleSpec });
 
         tp.style.fontSize = layout.fontSize + 'px';
         tp.style.left = layout.x + 'px';

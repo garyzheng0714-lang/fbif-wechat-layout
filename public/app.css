@@ -610,10 +610,12 @@ input[type="file"] { display: none; }
 }
 .crop-title-preview {
   position: absolute; left: 0; top: 0;
-  color: #fff; font-weight: 700; font-size: 22px;
+  color: #fff; font-weight: 650; font-size: 22px;
   text-shadow: none;
   line-height: 1.4583333333; pointer-events: none;
-  font-family: "NotoSansHans", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Skip the locally-loaded NotoSansHans (Bold-only) face so the preview
+     can actually render the lighter 650 weight via system Noto / PingFang. */
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   overflow: hidden;
   display: block;
 }

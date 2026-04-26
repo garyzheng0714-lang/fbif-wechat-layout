@@ -26,16 +26,18 @@ const BANNER_STYLE_SPEC = Object.freeze({
     height: 116,
     fontSize: 48,
     lineHeight: 70,
-    fontWeight: 700,
+    fontWeight: 650,
     fill: '#FFFFFF',
     maxLines: 2,
   }),
 });
 
 const COMPOSITE_OUTPUT_TYPE = 'image/png';
+// Skipping the locally-loaded NotoSansHans / Noto Sans CJK SC: the @font-face
+// for NotoSansHans is bound to the Bold (700) cut, so any weight request
+// against that family snaps back to the Bold file. Falling through to the
+// system Noto / PingFang faces lets weight 650 actually render lighter.
 const COMPOSITE_FONT_FAMILIES = [
-  'NotoSansHans',
-  'Noto Sans CJK SC',
   'Noto Sans SC',
   'PingFang SC',
   'Microsoft YaHei',
@@ -43,7 +45,7 @@ const COMPOSITE_FONT_FAMILIES = [
   'sans-serif',
 ];
 const COMPOSITE_FONT_STACK = COMPOSITE_FONT_FAMILIES.map(f => /\s/.test(f) ? `"${f}"` : f).join(', ');
-const COMPOSITE_STYLE_VERSION = '2026-04-25-rule-presets-v2';
+const COMPOSITE_STYLE_VERSION = '2026-04-26-weight-650-center-fix';
 const LINE_START_FORBIDDEN_PUNCTUATION = new Set(Array.from(
   '，。！？；：、,.!?;:)]}）】》〉」』”’"\''
 ));
@@ -219,7 +221,12 @@ export function computeBannerTitleLayout(ctx, text, { scale = 1, fontFamily = CO
   const lineHeight = fontSize * leadingRatio;
   let y = title.y * scale;
   if (lines.length === 1) {
-    y += Math.max(0, (title.height * scale - lineHeight) / 2);
+    // Center the glyph (em-box, fontSize tall) inside the title box —
+    // NOT the line box (lineHeight tall). With textBaseline='top' the glyph
+    // sits at the top of the line box, so centering the line box leaves the
+    // bottom (lineHeight - fontSize) of leading as empty space below the
+    // text and shifts the visible glyph upward.
+    y += Math.max(0, (title.height * scale - fontSize) / 2);
   }
 
   return {
