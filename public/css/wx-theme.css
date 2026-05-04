@@ -24,11 +24,11 @@
 }
 
 /* ---- Section containers ---- */
-.wx-p   { text-align: left; margin: 0px var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
-.wx-pc  { text-align: center; margin: 0px var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
-.wx-pi  { text-align: center; margin: 0px var(--wx-paragraph-margin-x); }
-.wx-gap { padding-bottom: var(--wx-paragraph-gap); }
-.wx-bq  { text-align: left; margin: 0px var(--wx-paragraph-margin-x); padding-left: var(--wx-blockquote-padding-left); border-left: var(--wx-blockquote-border-width) solid var(--wx-link-color); line-height: var(--wx-line-height); }
+.wx-p   { text-align: left; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
+.wx-pc  { text-align: center; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
+.wx-pi  { text-align: center; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); }
+.wx-gap { margin-bottom: var(--wx-paragraph-gap); }
+.wx-bq  { text-align: left; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); padding-left: var(--wx-blockquote-padding-left); border-left: var(--wx-blockquote-border-width) solid var(--wx-link-color); line-height: var(--wx-line-height); }
 
 /* ---- FBIF ProseMirror leaf wrappers ---- */
 .wx-leaf { color: rgba(0,0,0,0.9); font-size: 17px; font-family: var(--wx-font-stack); letter-spacing: var(--wx-letter-spacing); font-style: normal; font-weight: normal; }
