@@ -158,16 +158,30 @@ jobs:
               "  }\n"
           )
 
-          text = re.sub(
-              r"\n\s*@fbifRulesApi path /api/rules /api/rules/\*\n\s*reverse_proxy @fbifRulesApi 127\.0\.0\.1:\d+\n",
-              "\n",
-              original,
+          # Remove any prior @fbifRulesApi route, regardless of upstream form
+          # (127.0.0.1, localhost, or other host:port) and regardless of
+          # rendering style (one-line `reverse_proxy @matcher upstream` or
+          # `handle @matcher { reverse_proxy upstream }`). Earlier deploys
+          # used patterns that hardcoded `127\.0\.0\.1`, so when the resolved
+          # upstream switched to `localhost:9001` the cleanup stopped matching
+          # and every run appended another duplicate matcher block until
+          # `caddy validate` rejected the file with "matcher is defined more
+          # than once: @fbifRulesApi". The block below tolerates both
+          # historical forms in a single sweep, in a loop so multiple
+          # accumulated copies all get removed.
+          rules_route_re = re.compile(
+              r"\n[ \t]*@fbifRulesApi[ \t]+path[ \t]+/api/rules[ \t]+/api/rules/\*[ \t]*\n"
+              r"(?:[ \t]*reverse_proxy[ \t]+@fbifRulesApi[ \t]+\S+[ \t]*\n)?"
+              r"(?:[ \t]*handle[ \t]+@fbifRulesApi[ \t]*\{[ \t]*\n"
+              r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
+              r"[ \t]*\}[ \t]*\n)?"
           )
-          text = re.sub(
-              r"\n\s*@fbifRulesApi path /api/rules /api/rules/\*\n\s*handle @fbifRulesApi \{\n\s*reverse_proxy 127\.0\.0\.1:\d+\n\s*\}\n",
-              "\n",
-              text,
-          )
+          text = original
+          while True:
+              new_text = rules_route_re.sub("\n", text)
+              if new_text == text:
+                  break
+              text = new_text
 
           insert_points = []
           scan_from = 0
