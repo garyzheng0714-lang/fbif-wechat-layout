@@ -23,12 +23,15 @@
     'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif;
 }
 
-/* ---- Section containers ---- */
-.wx-p   { text-align: left; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
-.wx-pc  { text-align: center; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
-.wx-pi  { text-align: center; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); }
+/* ---- Section containers ----
+ * margin-top/bottom 必须显式写 0：微信编辑器粘贴 section 时若未声明则会注入
+ * 默认段间距，导致引用列表 / 紧凑段之间出现多余空行。wx-gap 用 margin-bottom
+ * 在后覆盖，仍能给需要间距的段落留 20px。 */
+.wx-p   { text-align: left; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
+.wx-pc  { text-align: center; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
+.wx-pi  { text-align: center; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); }
 .wx-gap { margin-bottom: var(--wx-paragraph-gap); }
-.wx-bq  { text-align: left; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); padding-left: var(--wx-blockquote-padding-left); border-left: var(--wx-blockquote-border-width) solid var(--wx-link-color); line-height: var(--wx-line-height); }
+.wx-bq  { text-align: left; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); padding-left: var(--wx-blockquote-padding-left); border-left: var(--wx-blockquote-border-width) solid var(--wx-link-color); line-height: var(--wx-line-height); }
 
 /* ---- FBIF ProseMirror leaf wrappers ---- */
 .wx-leaf { color: rgba(0,0,0,0.9); font-size: 17px; font-family: var(--wx-font-stack); letter-spacing: var(--wx-letter-spacing); font-style: normal; font-weight: normal; }
