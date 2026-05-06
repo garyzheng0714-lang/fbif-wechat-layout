@@ -653,6 +653,12 @@ export function initApp(template) {
     const themeCSS = await _themeCSSReady;
     html = processForCopy(html, themeCSS, config);
 
+    // 公众号 ProseMirror 在粘贴 HTML 末尾若是 <img>/<section> 而无段落节点，
+    // 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次
+    // 都要手动删的"二维码图下方空行"。在这里附一个零高度 <p>，让编辑器认
+    // 为尾部已有可定位段，不再追加可见空段。
+    html += '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
+
     const plainText = content.textContent || '';
 
     let ok = false;
