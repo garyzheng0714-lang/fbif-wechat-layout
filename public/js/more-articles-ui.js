@@ -215,8 +215,13 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
   function renderAll() {
     // Default state uses the active rule preset's placeholder slot count.
     // Seed on demand so first-visit, 清空, and delete-to-zero all converge to
-    // the same blank-card editing flow instead of a separate empty-state UI.
-    if (cards.length === 0) {
+    // the same recommended-articles default. Saved cards that are all empty
+    // (legacy state from before defaults existed) get reseeded too — empty
+    // placeholders are functionally identical to "no cards saved".
+    const allEmpty = cards.length > 0 && cards.every(c =>
+      !c.href && !c.imgurl && !c.title && !c.cover_data_url
+    );
+    if (cards.length === 0 || allEmpty) {
       cards = makeFreshUploadCards();
       saveCards(cards);
       pushLivePreview();

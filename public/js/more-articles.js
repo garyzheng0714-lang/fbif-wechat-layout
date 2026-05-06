@@ -85,8 +85,34 @@ export function emptyCard() {
   };
 }
 
+// Default recommended articles seeded into every new "更多文章" section.
+// Cover URLs are mmbiz.qpic.cn CDN links that don't expire; titles are the
+// fetched article titles. Override per-article by editing the sidebar cards.
+const DEFAULT_RECOMMENDED_CARDS = Object.freeze([
+  Object.freeze({
+    href: 'https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652909589&idx=1&sn=d0bdeacee2b1ba7f03e48b38f91bbefa&scene=21',
+    imgurl: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTRHibhuMnzJTuvhqr6Neq7ib00icPLXRyof5H9ARUnw9eWIshgyHibyfVXtgSRkWmOP2MWZjHLLbFec9VAFSYH6ZsarKf2LUC4ONEkE/0?wx_fmt=jpeg',
+    title: '没想到！英国人把豆腐做到英国第一，还像卖衣服一样出XXL超大号！',
+  }),
+  Object.freeze({
+    href: 'https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652916388&idx=1&sn=b5605734c9c27ce2f8d54a6534b6543d&scene=21',
+    imgurl: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTREtc1dUPY9VokWQTtQsdevBIcfoMMavrQNSVFoce8gDOtTqlWhciadMP6VJwzErl7HnzECBECMMILEXt653GCeub3nDZ8VrvTsM/0?wx_fmt=jpeg',
+    title: '做了20年糖，她把豆腐棒放在鸡胸肉旁边，5年卖出1亿根',
+  }),
+  Object.freeze({
+    href: 'https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652906407&idx=1&sn=7ede62b74d3a5750c2c95ca40c216290&scene=21',
+    imgurl: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTRGEHDwCvfSmEXO9VBXpibZHE3ZqLYicsIyhfiajfq9MNduKq03KbDeqU0iaj3WEQeBEY2j0mSCetzD1Jdic1iciaL7M1KZjHu8x5TLdmM/0?wx_fmt=jpeg',
+    title: '日本最牛包子铺，单店年销2329万，怎么做到的？',
+  }),
+]);
+
 export function makeFreshUploadCards(n = getRuleNumber(getActiveRuleConfig(), 'more_articles_slots')) {
-  return Array.from({ length: Math.max(0, Math.round(Number(n) || 0)) }, () => emptyCard());
+  const count = Math.max(0, Math.round(Number(n) || 0));
+  return Array.from({ length: count }, (_, i) => {
+    const seed = DEFAULT_RECOMMENDED_CARDS[i];
+    if (!seed) return emptyCard();
+    return { ...emptyCard(), href: seed.href, imgurl: seed.imgurl, title: seed.title };
+  });
 }
 
 function normalizeCard(c) {
@@ -410,30 +436,34 @@ function escAttr(s) {
     .replace(/>/g, '&gt;');
 }
 
+// Inline SVG placeholder for empty card slots. Rendered as the <img src> so
+// the empty card has the same DOM shape as a real card — copy the HTML to
+// WeChat, then swap each placeholder image via WeChat's "替换图片" UI.
+const PLACEHOLDER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300"><rect x="0" y="0" width="1000" height="300" rx="6" ry="6" fill="#e8e6e4"/><text x="500" y="150" fill="#a39e98" font-size="23" text-anchor="middle" dominant-baseline="middle" font-family="PingFang SC, Microsoft YaHei, sans-serif">待补充文章链接</text></svg>';
+const PLACEHOLDER_DATA_URL = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(PLACEHOLDER_SVG);
+
+const SPAN_STYLE = 'color:rgba(0, 0, 0, 0.9);font-size:17px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.6;letter-spacing:0.034em;font-style:normal;font-weight:normal;width:100%;';
+const IMG_STYLE = 'width: 661px !important; vertical-align: baseline; box-sizing: border-box; height: auto !important; max-width: 100% !important; visibility: visible !important;';
+
 function cardHTML(card, index) {
   const rawImgurl = card.final_url || card.composite_url || card.imgurl || '';
   const href = escAttr(card.href || '');
   const marginTop = index === 0 ? 'margin-top: 0px;' : '';
 
-  // Empty card (user added a slot but hasn't pasted a URL yet): render a
-  // neutral-gray placeholder block matching the card proportions. Real cards
-  // get their card-to-card gap from the inline <img>'s baseline leading
-  // inside a line-height:1.6 span — the block-level placeholder would collapse
-  // that gap, so we add an explicit margin-top on non-first slots to match.
+  // Empty card (no URL pasted yet): render the same <img>-in-<span> shape as
+  // a real card, with a neutral-gray SVG as the src. Same structure means the
+  // card-to-card gap from line-height:1.6 baseline leading still applies, and
+  // the <img> is in place for direct replacement in WeChat's editor.
   if (!rawImgurl) {
-    const phGap = index === 0 ? '' : ' margin-top: 16px;';
-    const PH_STYLE = 'display: block; width: 100%; aspect-ratio: 10 / 3; background: #e8e6e4; color: #a39e98; font-size: 15px; text-align: center; line-height: 1; border-radius: 4px;' + phGap;
-    const INNER_STYLE = 'display: flex; align-items: center; justify-content: center; height: 100%; width: 100%;';
     return (
       `<section><p style="margin:0;padding:0;${marginTop}">` +
-      `<span style="${PH_STYLE}"><span style="${INNER_STYLE}">待补充文章链接</span></span>` +
-      `</p></section>`
+      `<span style="${SPAN_STYLE}">` +
+      `<img alt="图片" class="rich_pages wxw-img" style="${IMG_STYLE}" src="${PLACEHOLDER_DATA_URL}">` +
+      `</span></p></section>`
     );
   }
 
   const imgurl = escAttr(rawImgurl);
-  const SPAN_STYLE = 'color:rgba(0, 0, 0, 0.9);font-size:17px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.6;letter-spacing:0.034em;font-style:normal;font-weight:normal;width:100%;';
-  const IMG_STYLE = 'width: 661px !important; vertical-align: baseline; box-sizing: border-box; height: auto !important; max-width: 100% !important; visibility: visible !important;';
   return (
     `<section><p style="margin:0;padding:0;${marginTop}"><strong>` +
     `<a href="${href}" imgurl="${imgurl}" linktype="image" tab="innerlink" data-itemshowtype="0" target="_blank" data-linktype="1">` +
