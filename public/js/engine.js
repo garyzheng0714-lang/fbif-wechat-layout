@@ -279,10 +279,10 @@ export function initApp(template) {
     _sourceIsDocx = isDocx;
     if (isDocx) {
       const docxData = await parseDocx(file);
-      result = template.processDocx(docxData);
+      result = template.processDocx({ ...docxData, isRepost: _isRepost });
     } else if (typeof template.processMd === 'function') {
       const text = await file.text();
-      result = await template.processMd(text);
+      result = await template.processMd(text, { isRepost: _isRepost });
     } else {
       throw new Error('此模板不支持该文件格式');
     }
@@ -335,7 +335,7 @@ export function initApp(template) {
       // await: processBlocks is synchronous today but we're inside an
       // async context anyway, and future work (e.g. image pre-fetch)
       // might make it async. The await has zero cost on plain returns.
-      const result = await template.processBlocks(data);
+      const result = await template.processBlocks(data, { isRepost: _isRepost });
       logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
 
       const articleHtml = result.lines.join('\n');
@@ -386,11 +386,11 @@ export function initApp(template) {
       _sourceIsDocx = isDocx;
       if (isDocx) {
         const docxData = await parseDocx(file);
-        result = template.processDocx(docxData);
+        result = template.processDocx({ ...docxData, isRepost: _isRepost });
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else if (typeof template.processMd === 'function') {
         const text = await file.text();
-        result = await template.processMd(text);
+        result = await template.processMd(text, { isRepost: _isRepost });
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else {
         throw new Error('此模板不支持该文件格式');

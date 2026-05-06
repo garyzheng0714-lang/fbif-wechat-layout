@@ -265,13 +265,34 @@ async function classifyMd(text) {
   return { elems, author, source, title, imgN };
 }
 
+// FBIF 内部作者 Mote 排版规范要求在「参考来源」段落上方插入固定的署名图片。
+const MOTE_REF_HEAD_IMAGE_URL = 'https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/fbif-attachment-to-url/2026/05/tblMQeXvSGd7Hebf_-CkOuPdpNzb-_3u9Rxc5KA_1778028720411/img_v3_0211e_8b79127d-72a5-4011-9f01-fe3b30c7548g_1778028720565.png';
+
+function isMoteAuthor(author) {
+  if (!author) return false;
+  return /Mote/i.test(author) || author.includes('莫特');
+}
+
+function maybeInsertMoteImage(elems, author) {
+  if (!isMoteAuthor(author)) return elems;
+  const idx = elems.findIndex(e => e && e.k === 'refH');
+  if (idx < 0) return elems;
+  const moteImg = { k: 'img', src: MOTE_REF_HEAD_IMAGE_URL, w: '100%', maxPx: 0 };
+  return elems.slice(0, idx).concat([moteImg], elems.slice(idx));
+}
+
 // ---- HTML Rendering (class-based) ----
-function render(elems, author, source) {
+// opts.isRepost — 转载路径保持微信原色（var(--wx-link-color)）；原创路径
+// 给作者行加 wx-ta-author，覆盖为 #547CAF（FBIF 视觉规范）。
+function render(elems, author, source, opts) {
+  const isRepost = !!(opts && opts.isRepost);
+  elems = maybeInsertMoteImage(elems, author);
   const lines = [];
 
   // Author and source lines at the top
   if (author) {
-    lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">作者：' + esc(author) + '</span>'), !source));
+    const authorCls = isRepost ? 'wx-ta' : 'wx-ta wx-ta-author';
+    lines.push(sec(leafWrapAuthor('<span textstyle="" class="' + authorCls + '">作者：' + esc(author) + '</span>'), !source));
   }
   if (source) {
     lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">来源：' + esc(source) + '</span>'), true));
@@ -417,16 +438,16 @@ export default {
   description: '按 FBIF 排版规范格式化，支持标题/引言/图片说明/参考来源',
   formats: ['.docx', '.doc', '.md', '.txt'],
 
-  processDocx({ paragraphs, imgCache }) {
+  processDocx({ paragraphs, imgCache, isRepost }) {
     const { elems, author, imgN } = classifyDocx(paragraphs, imgCache);
-    return { lines: render(elems, author, ''), imgN, headingN: elems.filter(e => e.k === 'h').length };
+    return { lines: render(elems, author, '', { isRepost }), imgN, headingN: elems.filter(e => e.k === 'h').length };
   },
-  async processMd(text) {
+  async processMd(text, opts) {
     const { elems, author, source, title, imgN } = await classifyMd(text);
-    return { lines: render(elems, author, source), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return { lines: render(elems, author, source, opts), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
-  processBlocks(data) {
+  processBlocks(data, opts) {
     const { elems, author, source, title, imgN } = classifyBlocks(data);
-    return { lines: render(elems, author, source), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return { lines: render(elems, author, source, opts), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 };

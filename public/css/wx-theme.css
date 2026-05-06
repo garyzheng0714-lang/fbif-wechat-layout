@@ -41,5 +41,6 @@
 .wx-tc   { font-size: var(--wx-caption-font-size); color: var(--wx-muted-color); }
 .wx-tr   { font-size: var(--wx-font-size); color: var(--wx-muted-color); }
 .wx-ta   { font-size: var(--wx-attribution-font-size); color: var(--wx-link-color); font-style: italic; }
+.wx-ta-author { color: #547CAF; }
 .wx-auth { font-size: var(--wx-attribution-font-size); color: var(--wx-link-color); }
 .wx-a    { color: var(--wx-link-color); text-decoration: none; font-size: var(--wx-font-size); }
