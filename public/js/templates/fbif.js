@@ -75,6 +75,11 @@ function shouldSpaceAfter(e, next) {
   return true;
 }
 
+function parseAuthorLine(text) {
+  const m = String(text || '').trim().match(/^作者[：:]\s*(.+)$/);
+  return m ? m[1].trim() : '';
+}
+
 // ---- DOCX Classification ----
 function classifyDocx(paragraphs, imgCache) {
   const pds = paragraphs.map(p => ({
@@ -83,14 +88,29 @@ function classifyDocx(paragraphs, imgCache) {
   }));
 
   let author = '', contentStart = 0;
+  let nonEmptySeen = 0;
+  // Front matter before 作者： is editorial setup, not article body.
   for (let i = 0; i < pds.length; i++) {
+    if (pds[i].isEmpty) continue;
+    nonEmptySeen++;
+    const leadAuthor = parseAuthorLine(pds[i].text);
+    if (leadAuthor) {
+      author = leadAuthor;
+      contentStart = i + 1;
+      break;
+    }
+    if (nonEmptySeen >= 25) break;
+  }
+
+  for (let i = 0; i < pds.length; i++) {
+    if (author && contentStart > 0) break;
     if (!pds[i].isHeading) continue;
     if (pds[i].text.trim().startsWith('标题')) {
       let foundNext = false;
       for (let j = i + 1; j < pds.length; j++) {
         if (pds[j].isHeading) { contentStart = j; foundNext = true; break; }
-        const m = pds[j].text.trim().match(/^作者[：:]\s*(.+)/);
-        if (m) author = m[1].trim();
+        const byline = parseAuthorLine(pds[j].text);
+        if (byline) author = byline;
       }
       if (!foundNext) {
         contentStart = i + 1;
@@ -270,7 +290,7 @@ const MOTE_REF_HEAD_IMAGE_URL = 'https://fbif-feishu-base.oss-cn-shanghai.aliyun
 
 function isMoteAuthor(author) {
   if (!author) return false;
-  return /Mote/i.test(author) || author.includes('莫特');
+  return author.replace(/\s+/g, '').toLowerCase() === 'mote莫特';
 }
 
 function maybeInsertMoteImage(elems, author) {
@@ -283,7 +303,7 @@ function maybeInsertMoteImage(elems, author) {
 
 // ---- HTML Rendering (class-based) ----
 // opts.isRepost — 转载路径保持微信原色（var(--wx-link-color)）；原创路径
-// 给作者行加 wx-ta-author，覆盖为 #547CAF（FBIF 视觉规范）。
+// 给作者行加 wx-ta-author，覆盖为 #396FBC（FBIF 视觉规范）。
 function render(elems, author, source, opts) {
   const isRepost = !!(opts && opts.isRepost);
   elems = maybeInsertMoteImage(elems, author);

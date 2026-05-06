@@ -26,3 +26,10 @@ test('copy keeps legacy DOCX skip-upload behavior', async () => {
   assert.match(engine, /const skipUpload = !!window\._skipUpload && _sourceIsDocx;/);
   assert.match(engine, /return ok;/);
 });
+
+test('deploy writes rule admin password to production env', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /ADMIN_PASSWORD:\s*\$\{\{ secrets\.ADMIN_PASSWORD \}\}/);
+  assert.match(workflow, /ADMIN_PASSWORD GitHub secret is required/);
+  assert.match(workflow, /ADMIN_PASSWORD=%s\\n/);
+});

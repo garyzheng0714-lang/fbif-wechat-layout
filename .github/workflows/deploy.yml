@@ -39,6 +39,7 @@ jobs:
           LIBREOFFICE_URL: ${{ secrets.LIBREOFFICE_URL }}
           LIBREOFFICE_TOKEN: ${{ secrets.LIBREOFFICE_TOKEN }}
           CLOUDCONVERT_API_KEY: ${{ secrets.CLOUDCONVERT_API_KEY }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/deploy_key
@@ -211,7 +212,11 @@ jobs:
 
           # Write env file for the fbif-api systemd service (loaded via EnvironmentFile=)
           # Tempfile + atomic rename so the service never sees a half-written file.
-          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" | base64)
+          if [ -z "$ADMIN_PASSWORD" ]; then
+            echo "ADMIN_PASSWORD GitHub secret is required for the rule admin backend" >&2
+            exit 1
+          fi
+          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" | base64)
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
             "echo '$ENV_CONTENT' | base64 -d > /var/www/api/.env.tmp && chmod 600 /var/www/api/.env.tmp && mv /var/www/api/.env.tmp /var/www/api/.env"
 
