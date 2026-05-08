@@ -29,7 +29,7 @@
  * 在后覆盖，仍能给需要间距的段落留 20px。 */
 .wx-p   { text-align: left; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
 .wx-pc  { text-align: center; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: var(--wx-line-height); }
-.wx-pi  { text-align: center; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); }
+.wx-pi  { text-align: center; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); line-height: 0; font-size: 0; }
 .wx-gap { margin-bottom: var(--wx-paragraph-gap); }
 .wx-bq  { text-align: left; margin-top: 0; margin-bottom: 0; margin-left: var(--wx-paragraph-margin-x); margin-right: var(--wx-paragraph-margin-x); padding-left: var(--wx-blockquote-padding-left); border-left: var(--wx-blockquote-border-width) solid var(--wx-link-color); line-height: var(--wx-line-height); }
 

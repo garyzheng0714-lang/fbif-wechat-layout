@@ -34,7 +34,7 @@ function h(text) {
 function renderDocx(paragraphs, opts = {}) {
   return template.processDocx({
     paragraphs,
-    imgCache: {},
+    imgCache: opts.imgCache || {},
     isRepost: !!opts.isRepost,
   }).lines.join('\n');
 }
@@ -78,4 +78,16 @@ test('docx Mote author accepts the spaced name form', () => {
 test('original author color matches RGB 57,111,188', async () => {
   const css = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
   assert.match(css, /\.wx-ta-author\s*\{\s*color:\s*#396FBC;\s*font-style:\s*normal;\s*\}/);
+});
+
+test('article images render as zero-line-height blocks for manual copy', async () => {
+  const css = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
+  const html = renderDocx([
+    p('作者：Mote莫特'),
+    { text: '', runs: [{ type: 'img', file: 'pic.png', w: '100%' }], isEmpty: false, hasImg: true },
+  ], { imgCache: { 'pic.png': 'https://example.com/pic.png' } });
+
+  assert.match(css, /\.wx-pi\s*\{[^}]*line-height:\s*0;[^}]*font-size:\s*0;/);
+  assert.match(html, /<section class="wx-pi/);
+  assert.match(html, /display: block; margin: 0 auto; vertical-align: top/);
 });

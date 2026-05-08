@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isMmbizUrl, materializeLazyImages } from '../public/js/uploader.js';
+import { isMmbizUrl, materializeLazyImages, uploadNonCdnImages } from '../public/js/uploader.js';
 
 // ---- isMmbizUrl ----
 
@@ -41,7 +41,30 @@ test('materializeLazyImages replaces DOCX blob/cache refs with data URLs', async
   assert.match(result.footerCopy, /src="data:image\/png;base64,BAUG"/);
 });
 
-// Note: uploadNonCdnImages requires fetch() which is only available in
-// Node 18+ with --experimental-fetch or Node 21+. The core logic is
-// tested via isMmbizUrl; integration tests for upload need a browser or
-// a mock server environment.
+test('uploadNonCdnImages uses refreshed HTML after lazy image materialization', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const uploads = [];
+  globalThis.fetch = async (url, opts = {}) => {
+    if (String(url) === '/api/oss-upload') {
+      uploads.push(JSON.parse(opts.body));
+      return new Response(JSON.stringify({ results: { img_0: 'https://oss.example/img_0.png' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(new Blob([new Uint8Array([7, 8, 9])], { type: 'image/png' }));
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  let materialized = null;
+  const result = await uploadNonCdnImages(
+    '<p><img src="blob:local-image"></p><p><img src="https://mmbiz.qpic.cn/a.png"></p>',
+    '',
+    { onMaterialized: r => { materialized = r; } }
+  );
+
+  assert.equal(materialized.failed, 0);
+  assert.equal(uploads.length, 1);
+  assert.doesNotMatch(result.articleCopy, /blob:/);
+  assert.match(result.articleCopy, /https:\/\/oss\.example\/img_0\.png/);
+});

@@ -442,21 +442,22 @@ function escAttr(s) {
 const PLACEHOLDER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300"><rect x="0" y="0" width="1000" height="300" rx="6" ry="6" fill="#e8e6e4"/><text x="500" y="150" fill="#a39e98" font-size="23" text-anchor="middle" dominant-baseline="middle" font-family="PingFang SC, Microsoft YaHei, sans-serif">待补充文章链接</text></svg>';
 const PLACEHOLDER_DATA_URL = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(PLACEHOLDER_SVG);
 
-const SPAN_STYLE = 'color:rgba(0, 0, 0, 0.9);font-size:17px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.6;letter-spacing:0.034em;font-style:normal;font-weight:normal;width:100%;';
-const IMG_STYLE = 'width: 661px !important; vertical-align: baseline; box-sizing: border-box; height: auto !important; max-width: 100% !important; visibility: visible !important;';
+const CARD_SECTION_STYLE = 'margin:0;padding:0;text-align:center;line-height:0;font-size:0;';
+const CARD_P_STYLE = 'margin:0;padding:0;line-height:0;font-size:0;';
+const SPAN_STYLE = 'display:block;line-height:0;font-size:0;width:100%;';
+const IMG_STYLE = 'display:block;width: 661px !important; max-width: 100% !important; height: auto !important; margin: 0 auto; vertical-align: top; box-sizing: border-box; visibility: visible !important;';
 
 function cardHTML(card, index) {
   const rawImgurl = card.final_url || card.composite_url || card.imgurl || '';
   const href = escAttr(card.href || '');
-  const marginTop = index === 0 ? 'margin-top: 0px;' : '';
+  const marginTop = index === 0 ? 'margin-top:0px;' : 'margin-top:12px;';
 
-  // Empty card (no URL pasted yet): render the same <img>-in-<span> shape as
-  // a real card, with a neutral-gray SVG as the src. Same structure means the
-  // card-to-card gap from line-height:1.6 baseline leading still applies, and
-  // the <img> is in place for direct replacement in WeChat's editor.
+  // Empty card (no URL pasted yet): render the same block image shape as a real
+  // card, with a neutral-gray SVG as the src. The <img> stays in place for
+  // direct replacement in WeChat's editor.
   if (!rawImgurl) {
     return (
-      `<section><p style="margin:0;padding:0;${marginTop}">` +
+      `<section style="${CARD_SECTION_STYLE}${marginTop}"><p style="${CARD_P_STYLE}">` +
       `<span style="${SPAN_STYLE}">` +
       `<img alt="图片" class="rich_pages wxw-img" style="${IMG_STYLE}" src="${PLACEHOLDER_DATA_URL}">` +
       `</span></p></section>`
@@ -465,7 +466,7 @@ function cardHTML(card, index) {
 
   const imgurl = escAttr(rawImgurl);
   return (
-    `<section><p style="margin:0;padding:0;${marginTop}"><strong>` +
+    `<section style="${CARD_SECTION_STYLE}${marginTop}"><p style="${CARD_P_STYLE}"><strong>` +
     `<a href="${href}" imgurl="${imgurl}" linktype="image" tab="innerlink" data-itemshowtype="0" target="_blank" data-linktype="1">` +
     `<span style="${SPAN_STYLE}" class="js_jump_icon h5_image_link">` +
     `<img alt="图片" class="rich_pages wxw-img" style="${IMG_STYLE}" src="${imgurl}">` +

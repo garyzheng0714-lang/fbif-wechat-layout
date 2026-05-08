@@ -77,11 +77,12 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
 //
 // Returns { articleCopy, footerCopy, total, failed, failedSrcs }.
 // failedSrcs contains original src strings of images that failed even after retry.
-export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, onLog }) {
+export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, onLog, onMaterialized } = {}) {
   const materialized = await materializeLazyImages(articleCopy, footerCopy, { onLog });
   articleCopy = materialized.articleCopy;
   footerCopy = materialized.footerCopy;
   const lazyFailedSrcs = materialized.failedSrcs || [];
+  onMaterialized && onMaterialized(materialized);
 
   const tasks = [];
   let m, mmbizCount = 0;
@@ -98,7 +99,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   // HTTP URLs — use directly, no upload needed
   // (mmbiz URLs are already on WeChat CDN; other external URLs work as-is)
   const urlRe = /src="(https?:\/\/[^"]+)"/g;
-  while ((m = urlRe.exec(allHtml)) !== null) {
+  while ((m = urlRe.exec(refreshedHtml)) !== null) {
     if (isMmbizUrl(m[1])) mmbizCount++;
   }
 

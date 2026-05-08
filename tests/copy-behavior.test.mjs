@@ -23,8 +23,22 @@ test('copy keeps legacy DOCX skip-upload behavior', async () => {
   assert.doesNotMatch(engine, /hasDeferredCopyImages/);
   assert.match(engine, /materializeLazyImages/);
   assert.match(engine, /const skipUploadForThisFile = !!window\._skipUpload && _sourceIsDocx;/);
-  assert.match(engine, /const skipUpload = !!window\._skipUpload && _sourceIsDocx;/);
   assert.match(engine, /return ok;/);
+});
+
+test('copy click does not wait on background image or more-articles preparation', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));
+  assert.doesNotMatch(copyFn, /await _uploadPromise/);
+  assert.doesNotMatch(copyFn, /await ensureCompositeReady/);
+  assert.doesNotMatch(copyFn, /上传更多文章/);
+  assert.match(copyFn, /prepareMoreArticlesForCopy\('copy-click'\)/);
+});
+
+test('copy keeps the final WeChat cursor paragraph zero-height', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));
+  assert.ok(copyFn.includes('html += \'<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>\';'));
 });
 
 test('deploy writes rule admin password to production env', async () => {
