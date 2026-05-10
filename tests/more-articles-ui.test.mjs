@@ -1,0 +1,51 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { coverPickerImageSource } from '../public/js/more-articles-ui.js';
+
+test('cover picker loads page-local article images directly', () => {
+  assert.deepEqual(
+    coverPickerImageSource('blob:http://127.0.0.1:19092/abc'),
+    { src: 'blob:http://127.0.0.1:19092/abc', crossOrigin: false }
+  );
+  assert.deepEqual(
+    coverPickerImageSource('/api/doc-cache/hash/image.png'),
+    { src: '/api/doc-cache/hash/image.png', crossOrigin: false }
+  );
+});
+
+test('cover picker loads same-origin absolute URLs directly', () => {
+  const previous = globalThis.location;
+  Object.defineProperty(globalThis, 'location', {
+    value: { origin: 'http://127.0.0.1:19092' },
+    configurable: true,
+  });
+  try {
+    assert.deepEqual(
+      coverPickerImageSource('http://127.0.0.1:19092/api/doc-cache/hash/image.png'),
+      { src: 'http://127.0.0.1:19092/api/doc-cache/hash/image.png', crossOrigin: false }
+    );
+  } finally {
+    if (previous === undefined) {
+      delete globalThis.location;
+    } else {
+      Object.defineProperty(globalThis, 'location', { value: previous, configurable: true });
+    }
+  }
+});
+
+test('cover picker proxies remote article images for canvas access', () => {
+  assert.deepEqual(
+    coverPickerImageSource('https://mmbiz.qpic.cn/sz_mmbiz_jpg/cover/0?wx_fmt=jpeg'),
+    {
+      src: '/api/image-proxy?url=https%3A%2F%2Fmmbiz.qpic.cn%2Fsz_mmbiz_jpg%2Fcover%2F0%3Fwx_fmt%3Djpeg',
+      crossOrigin: true,
+    }
+  );
+  assert.deepEqual(
+    coverPickerImageSource('//mmbiz.qpic.cn/sz_mmbiz_jpg/cover/0?wx_fmt=jpeg'),
+    {
+      src: '/api/image-proxy?url=https%3A%2F%2Fmmbiz.qpic.cn%2Fsz_mmbiz_jpg%2Fcover%2F0%3Fwx_fmt%3Djpeg',
+      crossOrigin: true,
+    }
+  );
+});

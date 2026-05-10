@@ -70,19 +70,35 @@ async function resizeImageToDataUrl(file, maxEdge = 1600, quality = 0.85) {
   return canvas.toDataURL('image/jpeg', quality);
 }
 
-// Fetch an existing image URL (data: or remote mmbiz via image-proxy) and
-// re-encode to a resized data URL we can save in localStorage as the card
-// cover. Same pipeline as resizeImageToDataUrl but sourced from a URL.
+export function coverPickerImageSource(rawUrl) {
+  const url = String(rawUrl || '');
+  const absoluteUrl = url.startsWith('//') ? 'https:' + url : url;
+  if (
+    absoluteUrl.startsWith('data:') ||
+    absoluteUrl.startsWith('blob:') ||
+    (absoluteUrl.startsWith('/') && !absoluteUrl.startsWith('//')) ||
+    (typeof location !== 'undefined' && absoluteUrl.startsWith(location.origin + '/'))
+  ) {
+    return { src: absoluteUrl, crossOrigin: false };
+  }
+  return {
+    src: '/api/image-proxy?url=' + encodeURIComponent(absoluteUrl),
+    crossOrigin: true,
+  };
+}
+
+// Fetch an existing image URL and re-encode to a resized data URL we can save
+// in localStorage as the card cover. Page-local image refs (blob: and
+// /api/doc-cache/*) must load directly; only remote article images need the
+// CORS proxy.
 async function urlToResizedDataUrl(rawUrl, maxEdge = 1600, quality = 0.85) {
-  const src = rawUrl.startsWith('data:')
-    ? rawUrl
-    : '/api/image-proxy?url=' + encodeURIComponent(rawUrl);
+  const imageSource = coverPickerImageSource(rawUrl);
   const img = await new Promise((res, rej) => {
     const i = new Image();
-    if (!rawUrl.startsWith('data:')) i.crossOrigin = 'anonymous';
+    if (imageSource.crossOrigin) i.crossOrigin = 'anonymous';
     i.onload = () => res(i);
     i.onerror = () => rej(new Error('image load failed'));
-    i.src = src;
+    i.src = imageSource.src;
   });
   const w = img.naturalWidth || img.width;
   const h = img.naturalHeight || img.height;
@@ -128,9 +144,7 @@ function openCoverPicker() {
   overlay.className = 'ma-gallery-overlay';
   const safeAttr = s => String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const tile = (src, i) => {
-    const thumbSrc = src.startsWith('data:') || src.startsWith('/')
-      ? src
-      : '/api/image-proxy?url=' + encodeURIComponent(src);
+    const thumbSrc = coverPickerImageSource(src).src;
     return `<button type="button" class="ma-gallery-tile" data-src-idx="${i}">` +
       `<img loading="lazy" src="${safeAttr(thumbSrc)}" alt="">` +
       `</button>`;

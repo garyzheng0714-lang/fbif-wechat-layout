@@ -36,10 +36,21 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F
 7. **文章标题左对齐** — 在文章正上方，27px 粗体
 8. **复制后不自动打开微信后台** — 只显示复制成功提示，保留手动打开入口
-9. **表单只填数字** — 不要 px/em 后缀，颜色用 color picker
-10. **不要 phone-frame 边框** — 文章直接在白底上流动
+9. **复制按钮必须立即反馈** — `copyContent()` 不得等待图片上传或“更多文章”合成；这些准备工作只能提前或后台刷新复制层，点击后应立刻写剪贴板并显示复制结果
+10. **表单只填数字** — 不要 px/em 后缀，颜色用 color picker
+11. **不要 phone-frame 边框** — 文章直接在白底上流动
+12. **原创 DOCX 作者行规则** — 首个 `作者：` 行是文章正文起点；它之前的编辑前置材料默认不显示在编辑器里
+13. **Mote 作者特殊排版** — `Mote莫特` / `Mote 莫特` 触发参考来源上方固定署名图；原创作者行颜色为 `#396FBC` 且不斜体
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
-- 图片上传需要 WECHAT_UPLOAD_ENDPOINT 环境变量
+- 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
+- 规则后台需要 `ADMIN_PASSWORD` 环境变量；生产值只能放 GitHub Secret 和本地忽略提交的 `.env`
+- 规则预设默认写入 `data/rule-presets.json`；可用 `RULES_STORE_PATH` 覆盖
 - 启动：`cd api && go run . -port 19090`
+
+## Deploy
+- 推送 `main` 触发 `.github/workflows/deploy.yml`
+- 部署会把 `LIBREOFFICE_URL`、`LIBREOFFICE_TOKEN`、`CLOUDCONVERT_API_KEY`、`ADMIN_PASSWORD` 写入服务器 `/var/www/api/.env`
+- `ADMIN_PASSWORD` 缺失时部署必须失败，不能让正式端进入“规则后台未配置密码”状态
+- 修改正式后台密码时，更新 GitHub Secret 后重跑部署，并用 `/api/rules/admin/login` 做 200/401 双向验证

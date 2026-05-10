@@ -63,6 +63,7 @@
 - **Background**: Pure white `#FFFFFF`
 - **Title**: 27px, weight 700, color #222, PingFang SC
 - **Meta**: "FBIF食品饮料创新" (#576b95) + date (#b2b2b2)
+- **Original Author Line**: `作者：` attribution uses `#396FBC`, normal style, not italic
 - **Footer**: sticky bottom, white bg, centered 0.5px divider (#E5E5E5)
 - **Content width**: max-width 680px centered
 
@@ -75,7 +76,10 @@
 6. 底部栏复刻微信（白底，分隔线不贯穿）
 7. 文章标题左对齐 27px 粗体
 8. 复制后不自动打开微信后台；只显示复制成功提示
-9. 表单只填数字
-10. 不要 phone-frame 边框
+9. 复制按钮必须立即反馈；图片上传和“更多文章”合成只能提前或后台进行，不能把按钮文案切成上传/准备状态
+10. 表单只填数字
+11. 不要 phone-frame 边框
+12. 原创 DOCX 的首个 `作者：` 行是正文起点，它之前的编辑前置材料不显示在编辑器里
+13. `Mote莫特` / `Mote 莫特` 作者在参考来源上方插入固定署名图；原创作者行 `#396FBC` 且不斜体
 
 规则说明：这里记录当前设计约束。旧需求不能因为出现在历史记录里就被当成当前规则。

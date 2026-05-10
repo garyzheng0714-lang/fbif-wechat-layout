@@ -18,11 +18,13 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - 解析 DOCX / Markdown，保留标题、正文、图片、超链接、列表、引用和参考来源等结构。
 - 粘贴微信公众号文章或网页链接后，由 Go API 抓取并转换为结构化内容；失败时回退到备用读取路径。
 - 使用 `public/js/templates/fbif.js` 和 `public/css/wx-theme.css` 生成 FBIF 公众号样式。
-- 区分预览层与复制层：预览可使用原图，复制前可处理图片上传、CSS 内联和微信兼容结构。
-- 支持图片代理、裁剪编辑、格式检测、上传重试和“更多文章”卡片合成。
+- 区分预览层与复制层：预览可使用原图；复制按钮点击时立即写入当前可粘贴 HTML，CSS 内联、微信兼容结构和已准备好的图片结果会进入复制层。
+- 支持图片代理、裁剪编辑、格式检测、上传重试和“更多文章”卡片合成；图片与“更多文章”合成结果在后台准备，不能阻塞复制按钮。
 - 支持旧版 `.doc` 经 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
 - 支持多文件队列处理、品牌页脚开关和“更多文章”组合页脚。
 - 支持服务端规则预设保存与切换；本地设置保留为离线降级和兼容兜底。
+- 原创 DOCX 以首个 `作者：` 行作为正文起点；该行之前的编辑前置材料不进入编辑器预览。
+- 作者为 `Mote莫特` 或 `Mote 莫特` 时，会在“参考来源”上方自动插入固定署名图片。
 
 ## 技术栈
 
@@ -100,9 +102,10 @@ curl http://127.0.0.1:9000/api/health
 
 1. 上传 DOCX / Markdown，或粘贴文章链接。
 2. 检查预览层中的正文、图片、引用和“更多文章”卡片。
-3. 按需裁剪图片、调整排版偏好或切换页脚。
-4. 复制生成结果到微信公众号编辑器。
-5. 在微信公众号后台做最后预览和发布前检查。
+3. 原创 DOCX 默认读取首个 `作者：` 行作为作者信息；作者行会显示为蓝色、非斜体，不要在正文中重复保留。
+4. 按需裁剪图片、调整排版偏好或切换页脚。
+5. 点击复制按钮后立即切换到微信公众号编辑器粘贴；图片上传和“更多文章”合成会提前或后台刷新复制层，不应让复制按钮等待。
+6. 在微信公众号后台做最后预览和发布前检查。
 
 ## API
 
@@ -117,7 +120,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
 | `GET` | `/api/rules/active` | 读取当前服务端规则预设；前端失败时降级到本地设置 |
-| `POST` | `/api/rules/admin/login` | 校验规则后台密码 |
+| `POST` | `/api/rules/admin/login` | 校验规则后台密码；成功返回 `{ "ok": true }` |
 | `GET` | `/api/rules/admin/presets` | 列出规则预设，需 `X-Admin-Password` |
 | `POST` | `/api/rules/admin/presets` | 保存规则预设，需 `X-Admin-Password` |
 | `PUT` | `/api/rules/admin/active` | 切换当前规则预设，需 `X-Admin-Password` |
@@ -133,10 +136,10 @@ curl http://127.0.0.1:9000/api/health
 | `LIBREOFFICE_URL` | `.doc` 转 `.docx` 的 LibreOffice 转换服务地址 |
 | `LIBREOFFICE_TOKEN` | LibreOffice 转换服务鉴权 token |
 | `CLOUDCONVERT_API_KEY` | LibreOffice 不可用时的 CloudConvert fallback |
-| `ADMIN_PASSWORD` | 规则后台密码；未设置时后台写操作不可用 |
+| `ADMIN_PASSWORD` | 规则后台密码；未设置时登录返回 503，后台写操作不可用 |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
 
-部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH` 等 GitHub Secrets。不要把微信、LibreOffice、CloudConvert 或服务器密钥提交到仓库。
+部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`ADMIN_PASSWORD` 等 GitHub Secrets。生产规则后台密码只存放在 GitHub Secret 和本地忽略提交的 `.env` 中；不要把微信、LibreOffice、CloudConvert、服务器密钥或后台密码提交到仓库。
 
 ## 脚本与测试
 
@@ -169,11 +172,19 @@ go test ./...
 2. 写入 `public/version.json`，用于浏览器端检测新版并刷新缓存。
 3. 通过 rsync 同步 `public/` 到服务器静态目录。
 4. 同步 API 二进制到服务器 API 目录。
-5. 写入 API 服务使用的 `.env` 文件。
+5. 写入 API 服务使用的 `.env` 文件；`ADMIN_PASSWORD` 缺失时部署会失败，避免正式端出现“规则后台未配置密码”。
 6. 重启 `fbif-api` systemd 服务。
+
+生产规则后台密码变更流程：
+
+1. 更新仓库的 GitHub Actions Secret：`ADMIN_PASSWORD`。
+2. 同步更新本地 `.env`，便于本机冒烟验证；`.env` 已被 `.gitignore` 忽略。
+3. 重跑 `Deploy to server` 工作流或推送 `main` 触发部署。
+4. 用 `/api/rules/admin/login` 验证新密码返回 `200`，并用旧密码确认返回 `401`。
 
 ## 维护说明
 
 - `DESIGN.md` 记录界面和公众号预览页的设计约束。
 - 当前主模板为 `fbif`；功能描述应以 `public/app.html`、`public/js/engine.js` 和 `public/js/templates/fbif.js` 为准。
-- 复制到微信前的兼容处理集中在 `clipboard.js`、`css-inline.js` 和上传相关模块中。
+- 复制到微信前的兼容处理集中在 `engine.js`、`clipboard.js`、`css-inline.js`、`uploader.js` 和 `more-articles.js`。`copyContent()` 不应等待图片上传或“更多文章”合成；后台准备完成后刷新复制层，下一次复制自然使用新结果。
+- DOCX 作者规则集中在 `public/js/templates/fbif.js`：首个 `作者：` 行之前内容默认隐藏；`Mote莫特` / `Mote 莫特` 会触发参考来源上方的固定署名图片。
