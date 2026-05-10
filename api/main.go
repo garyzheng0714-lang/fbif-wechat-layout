@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -339,6 +340,7 @@ var (
 	reMsgTitle       = regexp.MustCompile(`var\s+msg_title\s*=\s*["']((?:[^"'\\]|\\.)*)["']`)
 	reTitleTag       = regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
 	reImgDataSrc     = regexp.MustCompile(`(?is)<img\b[^>]+(?:data-src|data-original|data-url|src)\s*=\s*["']([^"']+)["']`)
+	reCaptchaTarget  = regexp.MustCompile(`target_url\s*:\s*["']((?:[^"'\\]|\\.)*)["']`)
 	hostAllowlistCDN = []string{
 		"mmbiz.qpic.cn",
 		"mmbiz.qlogo.cn",
@@ -358,6 +360,7 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "url is required")
 		return
 	}
+	req.URL = strings.Join(strings.Fields(req.URL), "")
 	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
 		writeError(w, 400, "invalid URL: must start with http:// or https://")
 		return
@@ -365,27 +368,61 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	httpReq, _ := http.NewRequestWithContext(ctx, "GET", req.URL, nil)
+	raw, finalURL, err := fetchArticleHTML(ctx, req.URL)
+	if err != nil {
+		writeError(w, 502, "failed to fetch: "+err.Error())
+		return
+	}
+
+	title, cover := extractArticleMeta(raw)
+	sourceURL := articleSourceURL(req.URL, finalURL, raw)
+	if title == "" && cover == "" {
+		if fallbackURL := weChatMetaFallbackURL(req.URL, finalURL, raw); fallbackURL != "" && fallbackURL != req.URL && fallbackURL != finalURL {
+			if fallbackRaw, fallbackFinalURL, fetchErr := fetchArticleHTML(ctx, fallbackURL); fetchErr == nil {
+				if fallbackTitle, fallbackCover := extractArticleMeta(fallbackRaw); fallbackTitle != "" || fallbackCover != "" {
+					title, cover = fallbackTitle, fallbackCover
+					sourceURL = articleSourceURL(fallbackURL, fallbackFinalURL, fallbackRaw)
+				}
+			}
+		}
+	}
+	title = strings.TrimSpace(title)
+	if title == "" && cover == "" {
+		writeError(w, 422, "未提取到标题或头图，请检查链接是否完整")
+		return
+	}
+
+	writeJSON(w, 200, map[string]string{
+		"title":      title,
+		"cover_url":  cover,
+		"source_url": sourceURL,
+	})
+}
+
+func fetchArticleHTML(ctx context.Context, rawURL string) (string, string, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return "", "", err
+	}
 	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	httpReq.Header.Set("Accept", "text/html,application/xhtml+xml")
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		writeError(w, 502, "failed to fetch: "+err.Error())
-		return
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		writeError(w, 502, fmt.Sprintf("upstream HTTP %d", resp.StatusCode))
-		return
+		return "", resp.Request.URL.String(), fmt.Errorf("upstream HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024)) // 2MB cap
 	if err != nil {
-		writeError(w, 502, "read body: "+err.Error())
-		return
+		return "", resp.Request.URL.String(), fmt.Errorf("read body: %w", err)
 	}
-	raw := string(body)
+	return string(body), resp.Request.URL.String(), nil
+}
 
+func extractArticleMeta(raw string) (string, string) {
 	cover := extractArticleCover(raw)
 
 	// Title priority: msg_title → og:title → <title>
@@ -401,17 +438,61 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 			title = strings.TrimSpace(html.UnescapeString(m[1]))
 		}
 	}
-	title = strings.TrimSpace(title)
-	if title == "" && cover == "" {
-		writeError(w, 422, "未提取到标题或头图，请检查链接是否完整")
-		return
-	}
+	return strings.TrimSpace(title), cover
+}
 
-	writeJSON(w, 200, map[string]string{
-		"title":      title,
-		"cover_url":  cover,
-		"source_url": req.URL,
-	})
+func articleSourceURL(requestURL, finalURL, raw string) string {
+	if v := extractMeta(raw, "og:url"); v != "" {
+		return v
+	}
+	if v := extractWeChatCaptchaTargetURL(raw); v != "" {
+		return v
+	}
+	if finalURL != "" {
+		return finalURL
+	}
+	return requestURL
+}
+
+func extractWeChatCaptchaTargetURL(raw string) string {
+	if m := reCaptchaTarget.FindStringSubmatch(raw); len(m) > 1 {
+		return strings.TrimSpace(html.UnescapeString(decodeJSString(m[1])))
+	}
+	return ""
+}
+
+func weChatMetaFallbackURL(requestURL, finalURL, raw string) string {
+	for _, candidate := range []string{extractWeChatCaptchaTargetURL(raw), finalURL, requestURL} {
+		if fallback := addWeChatMetaFallbackParams(candidate); fallback != "" {
+			return fallback
+		}
+	}
+	return ""
+}
+
+func addWeChatMetaFallbackParams(rawURL string) string {
+	rawURL = strings.TrimSpace(html.UnescapeString(decodeJSString(rawURL)))
+	if rawURL == "" {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	if u.Host != "mp.weixin.qq.com" || u.Path != "/s" {
+		return ""
+	}
+	q := u.Query()
+	if q.Get("__biz") == "" || q.Get("mid") == "" || q.Get("sn") == "" {
+		return ""
+	}
+	q.Del("poc_token")
+	if q.Get("chksm") == "" {
+		q.Set("chksm", strings.Repeat("0", 32))
+	}
+	u.RawQuery = q.Encode()
+	u.Fragment = ""
+	return u.String()
 }
 
 // extractArticleCover accepts the common shapes seen in WeChat and generic
@@ -508,10 +589,23 @@ func decodeJSString(s string) string {
 			i++
 		case 'u':
 			if i+5 < len(s) {
-				var code int
-				fmt.Sscanf(s[i+2:i+6], "%x", &code)
-				b.WriteRune(rune(code))
-				i += 5
+				if code, err := strconv.ParseInt(s[i+2:i+6], 16, 32); err == nil {
+					b.WriteRune(rune(code))
+					i += 5
+				} else {
+					b.WriteByte(c)
+				}
+			} else {
+				b.WriteByte(c)
+			}
+		case 'x':
+			if i+3 < len(s) {
+				if code, err := strconv.ParseInt(s[i+2:i+4], 16, 8); err == nil {
+					b.WriteByte(byte(code))
+					i += 3
+				} else {
+					b.WriteByte(c)
+				}
 			} else {
 				b.WriteByte(c)
 			}

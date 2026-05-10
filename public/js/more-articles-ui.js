@@ -332,7 +332,7 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       setStatus('抓取中…', 'info');
       try {
         const meta = await fetchArticleMetaCached(url);
-        state.href = url;
+        state.href = meta.source_url || url;
         if (meta.title) state.title = meta.title;
         if (meta.cover_url) state.imgurl = meta.cover_url;
         state.cover_data_url = null;
