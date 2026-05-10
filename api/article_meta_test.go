@@ -29,6 +29,31 @@ func TestExtractArticleCoverFallsBackToSingleQuotedDataSrc(t *testing.T) {
 	}
 }
 
+func TestExtractArticleImageURLsUsesJsContentAndFiltersPlaceholders(t *testing.T) {
+	raw := `<html><body>
+		<img src="https://mmbiz.qlogo.cn/avatar.png">
+		<div id="js_content" class="rich_media_content">
+			<p><img data-src="//mmbiz.qpic.cn/first.jpg?wx_fmt=jpeg&amp;from=appmsg"></p>
+			<p><img src="https://res.wx.qq.com/mmbizappmsg/zh_CN/images/pic/pic_blank.gif"></p>
+			<p><img data-original='https:\/\/mmbiz.qpic.cn\/second.png?wx_fmt=png&amp;x=1'></p>
+			<p><img data-src="//mmbiz.qpic.cn/first.jpg?wx_fmt=jpeg&amp;from=appmsg"></p>
+		</div><div class="rich_media_tool"></div>
+	</body></html>`
+	got := extractArticleImageURLs(raw)
+	want := []string{
+		"https://mmbiz.qpic.cn/first.jpg?wx_fmt=jpeg&from=appmsg",
+		"https://mmbiz.qpic.cn/second.png?wx_fmt=png&x=1",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("extractArticleImageURLs() len = %d (%v), want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("extractArticleImageURLs()[%d] = %q, want %q (all: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestExtractWeChatCaptchaTargetURLHandlesHexEscapes(t *testing.T) {
 	raw := `<script>window.cgiData = {
 		target_url : "https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==\x26amp;mid=2652903792\x26amp;idx=1\x26amp;sn=01016d83a8b08bcecfba26c57cb89198\x26amp;scene=21",

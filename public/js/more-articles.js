@@ -78,6 +78,7 @@ export function emptyCard() {
     href: '',
     imgurl: '',
     title: '',
+    image_urls: [],
     cover_data_url: null,
     crop: { x: 0.5, y: 0.5, scale: 1 },
     composite_url: null,
@@ -118,9 +119,13 @@ export function makeFreshUploadCards(n = getRuleNumber(getActiveRuleConfig(), 'm
 function normalizeCard(c) {
   const base = emptyCard();
   if (!c || typeof c !== 'object') return base;
+  const imageUrls = Array.isArray(c.image_urls)
+    ? Array.from(new Set(c.image_urls.map(v => String(v || '').trim()).filter(Boolean)))
+    : [];
   return {
     ...base,
     ...c,
+    image_urls: imageUrls,
     crop: { ...base.crop, ...(c.crop || {}) },
   };
 }

@@ -350,8 +350,7 @@ var (
 )
 
 // handleFetchArticleMeta fetches a WeChat (or generic) article URL and returns
-// just the title and cover image URL — cheap, bounded response, for the
-// "更多文章" card editor in the sidebar.
+// the title, cover image, and article body images for the "更多文章" card editor.
 func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
@@ -375,12 +374,23 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	title, cover := extractArticleMeta(raw)
+	imageURLs := extractArticleImageURLs(raw)
 	sourceURL := articleSourceURL(req.URL, finalURL, raw)
-	if title == "" && cover == "" {
+	if (title == "" && cover == "") || len(imageURLs) == 0 {
 		if fallbackURL := weChatMetaFallbackURL(req.URL, finalURL, raw); fallbackURL != "" && fallbackURL != req.URL && fallbackURL != finalURL {
 			if fallbackRaw, fallbackFinalURL, fetchErr := fetchArticleHTML(ctx, fallbackURL); fetchErr == nil {
-				if fallbackTitle, fallbackCover := extractArticleMeta(fallbackRaw); fallbackTitle != "" || fallbackCover != "" {
-					title, cover = fallbackTitle, fallbackCover
+				fallbackTitle, fallbackCover := extractArticleMeta(fallbackRaw)
+				fallbackImageURLs := extractArticleImageURLs(fallbackRaw)
+				if fallbackTitle != "" || fallbackCover != "" || len(fallbackImageURLs) > 0 {
+					if fallbackTitle != "" {
+						title = fallbackTitle
+					}
+					if fallbackCover != "" {
+						cover = fallbackCover
+					}
+					if len(fallbackImageURLs) > 0 {
+						imageURLs = fallbackImageURLs
+					}
 					sourceURL = articleSourceURL(fallbackURL, fallbackFinalURL, fallbackRaw)
 				}
 			}
@@ -392,10 +402,11 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, 200, map[string]string{
+	writeJSON(w, 200, map[string]any{
 		"title":      title,
 		"cover_url":  cover,
 		"source_url": sourceURL,
+		"image_urls": imageURLs,
 	})
 }
 
@@ -415,7 +426,7 @@ func fetchArticleHTML(ctx context.Context, rawURL string) (string, string, error
 	if resp.StatusCode != 200 {
 		return "", resp.Request.URL.String(), fmt.Errorf("upstream HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024)) // 2MB cap
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024)) // 8MB cap
 	if err != nil {
 		return "", resp.Request.URL.String(), fmt.Errorf("read body: %w", err)
 	}
@@ -549,6 +560,71 @@ func extractFirstArticleImageURL(raw string) string {
 		return normalizeArticleImageURL(m[1])
 	}
 	return ""
+}
+
+func extractArticleImageURLs(raw string) []string {
+	content := extractJsContent(raw)
+	if content == "" {
+		content = raw
+	}
+
+	const maxImages = 80
+	out := make([]string, 0, 16)
+	seen := map[string]bool{}
+	add := func(src string) {
+		src = normalizeArticleImageURL(src)
+		if src == "" || isIgnoredArticleImageURL(src) || seen[src] {
+			return
+		}
+		seen[src] = true
+		out = append(out, src)
+	}
+
+	if doc, err := html.Parse(strings.NewReader(content)); err == nil {
+		var walk func(*html.Node)
+		walk = func(n *html.Node) {
+			if len(out) >= maxImages {
+				return
+			}
+			if n.Type == html.ElementNode && strings.EqualFold(n.Data, "img") {
+				for _, name := range []string{"data-src", "data-original", "data-url", "src"} {
+					for _, a := range n.Attr {
+						if strings.EqualFold(a.Key, name) {
+							add(a.Val)
+							return
+						}
+					}
+				}
+			}
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				walk(c)
+				if len(out) >= maxImages {
+					return
+				}
+			}
+		}
+		walk(doc)
+	}
+
+	if len(out) < maxImages {
+		for _, m := range reImgDataSrc.FindAllStringSubmatch(content, -1) {
+			if len(m) > 1 {
+				add(m[1])
+			}
+			if len(out) >= maxImages {
+				break
+			}
+		}
+	}
+
+	return out
+}
+
+func isIgnoredArticleImageURL(src string) bool {
+	lower := strings.ToLower(src)
+	return strings.Contains(lower, "/pic_blank.gif") ||
+		strings.Contains(lower, "res.wx.qq.com/mmbizappmsg") ||
+		strings.HasPrefix(lower, "data:image")
 }
 
 func normalizeArticleImageURL(raw string) string {

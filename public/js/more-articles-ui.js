@@ -87,6 +87,29 @@ export function coverPickerImageSource(rawUrl) {
   };
 }
 
+export function buildCoverPickerSources(card = {}, articleSrcs = []) {
+  const srcs = [];
+  const seen = new Set();
+  const add = (raw) => {
+    let src = String(raw || '').trim();
+    if (!src) return;
+    if (src.startsWith('//')) src = 'https:' + src;
+    if (seen.has(src)) return;
+    seen.add(src);
+    srcs.push(src);
+  };
+
+  add(card.cover_data_url);
+  add(card.imgurl);
+  if (Array.isArray(card.image_urls)) {
+    card.image_urls.forEach(add);
+  }
+  if (Array.isArray(articleSrcs)) {
+    articleSrcs.forEach(add);
+  }
+  return srcs;
+}
+
 // Fetch an existing image URL and re-encode to a resized data URL we can save
 // in localStorage as the card cover. Page-local image refs (blob: and
 // /api/doc-cache/*) must load directly; only remote article images need the
@@ -134,12 +157,12 @@ function flipReorder(container, mutator) {
   });
 }
 
-// Minimal modal for picking a cover image. Shows every img src from the
-// currently-rendered article (via window._getArticleImageSrcs) as a grid,
-// plus an "upload local" escape hatch. Resolves to { type: 'url', url } or
-// { type: 'file' } or null (closed).
-function openCoverPicker() {
-  const srcs = (window._getArticleImageSrcs && window._getArticleImageSrcs()) || [];
+// Minimal modal for picking a cover image. Current-card media comes first; the
+// currently-rendered article's images stay as a fallback for legacy workflows.
+// Resolves to { type: 'url', url } or { type: 'file' } or null (closed).
+function openCoverPicker(card = {}) {
+  const articleSrcs = (window._getArticleImageSrcs && window._getArticleImageSrcs()) || [];
+  const srcs = buildCoverPickerSources(card, articleSrcs);
   const overlay = document.createElement('div');
   overlay.className = 'ma-gallery-overlay';
   const safeAttr = s => String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -157,8 +180,8 @@ function openCoverPicker() {
       </div>
       <div class="ma-gallery-body">
         ${srcs.length === 0
-          ? '<div class="ma-gallery-empty">本文暂无图片 — 请使用"上传本地图片"</div>'
-          : `<div class="ma-gallery-hint">点击选择本文中的图片作为封面</div>
+          ? '<div class="ma-gallery-empty">暂无可选图片 — 请使用"上传本地图片"</div>'
+          : `<div class="ma-gallery-hint">点击选择图片作为封面</div>
              <div class="ma-gallery-grid">${srcs.map(tile).join('')}</div>`}
       </div>
       <div class="ma-gallery-foot">
@@ -349,6 +372,7 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
         state.href = meta.source_url || url;
         if (meta.title) state.title = meta.title;
         if (meta.cover_url) state.imgurl = meta.cover_url;
+        state.image_urls = Array.isArray(meta.image_urls) ? meta.image_urls : [];
         state.cover_data_url = null;
         state.crop = { x: 0.5, y: 0.5, scale: 1 };
         state.composite_url = null;
@@ -388,8 +412,30 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       await refreshThumb();
     };
 
+    const ensureImageLibrary = async () => {
+      if (Array.isArray(state.image_urls) && state.image_urls.length > 0) return;
+      const url = (state.href || $('url').value || '').trim();
+      if (!isValidMpUrl(url)) return;
+      setStatus('加载图片库中…', 'info');
+      try {
+        const meta = await fetchArticleMetaCached(url);
+        state.href = meta.source_url || url;
+        if (meta.title && !state.title) state.title = meta.title;
+        if (meta.cover_url && !state.imgurl) state.imgurl = meta.cover_url;
+        state.image_urls = Array.isArray(meta.image_urls) ? meta.image_urls : [];
+        $('url').value = state.href;
+        saveCards(cards);
+        await refreshThumb();
+        setStatus(state.image_urls.length > 0 ? `✓ 已加载${state.image_urls.length}张图片` : '', state.image_urls.length > 0 ? 'ok' : '');
+      } catch (err) {
+        setStatus('', '');
+        console.warn('[more-articles] fetch image library failed', err);
+      }
+    };
+
     $('replace').addEventListener('click', async () => {
-      const pick = await openCoverPicker();
+      await ensureImageLibrary();
+      const pick = await openCoverPicker(state);
       if (!pick) return;
       if (pick.type === 'file') { $('file').click(); return; }
       setStatus('处理图片中…', 'info');

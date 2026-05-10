@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { coverPickerImageSource } from '../public/js/more-articles-ui.js';
+import { buildCoverPickerSources, coverPickerImageSource } from '../public/js/more-articles-ui.js';
 
 test('cover picker loads page-local article images directly', () => {
   assert.deepEqual(
@@ -48,4 +48,28 @@ test('cover picker proxies remote article images for canvas access', () => {
       crossOrigin: true,
     }
   );
+});
+
+test('cover picker uses the current more-article media library before main article images', () => {
+  const sources = buildCoverPickerSources(
+    {
+      cover_data_url: 'data:image/jpeg;base64,custom',
+      imgurl: 'https://mmbiz.qpic.cn/cover.jpg?wx_fmt=jpeg',
+      image_urls: [
+        'https://mmbiz.qpic.cn/body-1.jpg?wx_fmt=jpeg',
+        'https://mmbiz.qpic.cn/cover.jpg?wx_fmt=jpeg',
+      ],
+    },
+    [
+      'https://mmbiz.qpic.cn/body-2.jpg?wx_fmt=jpeg',
+      'https://mmbiz.qpic.cn/body-1.jpg?wx_fmt=jpeg',
+    ]
+  );
+
+  assert.deepEqual(sources, [
+    'data:image/jpeg;base64,custom',
+    'https://mmbiz.qpic.cn/cover.jpg?wx_fmt=jpeg',
+    'https://mmbiz.qpic.cn/body-1.jpg?wx_fmt=jpeg',
+    'https://mmbiz.qpic.cn/body-2.jpg?wx_fmt=jpeg',
+  ]);
 });
