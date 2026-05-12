@@ -80,6 +80,13 @@ test('original author color matches RGB 57,111,188', async () => {
   assert.match(css, /\.wx-ta-author\s*\{\s*color:\s*#396FBC;\s*font-style:\s*normal;\s*\}/);
 });
 
+test('text styles carry explicit line-height for WeChat paste', async () => {
+  const css = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
+  for (const cls of ['wx-t', 'wx-th', 'wx-tc', 'wx-tr', 'wx-ta', 'wx-auth', 'wx-a']) {
+    assert.match(css, new RegExp(`\\.${cls}\\s*\\{[^}]*line-height:\\s*var\\(--wx-line-height\\)`));
+  }
+});
+
 test('article images render as zero-line-height blocks for manual copy', async () => {
   const css = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
   const html = renderDocx([

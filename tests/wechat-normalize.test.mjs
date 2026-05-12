@@ -27,5 +27,12 @@ test('footer source is already a normalized component, not pasted editor html', 
   assert.doesNotMatch(footer, /line-height:\s*1\.6/i);
   assert.match(footer, /<!--REPOST_BULLET1_START-->/);
   assert.match(footer, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;">/);
-});
 
+  for (const text of ['* 本文为', '* 转载请', '* FBIF投稿']) {
+    const idx = footer.indexOf(text);
+    assert.ok(idx >= 0, `footer should contain ${text}`);
+    const segment = footer.slice(Math.max(0, idx - 500), idx + 120);
+    assert.match(segment, /color:\s*rgb\(136,\s*136,\s*136\)/);
+    assert.doesNotMatch(segment, /color:\s*rgb\(84,\s*69,\s*69\)/);
+  }
+});
