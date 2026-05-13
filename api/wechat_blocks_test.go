@@ -107,6 +107,45 @@ func TestImageCaptionByCenterShort(t *testing.T) {
 	}
 }
 
+func TestImageCaptionGroupKeepsImageSourceAsCaption(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
+			`<p style="font-size: 12px; color: rgb(136, 136, 136); text-align: center;">星巴克高蛋白咖啡（美国市场）</p>` +
+			`<p style="font-size: 12px; color: rgb(136, 136, 136); text-align: center;">图片来源：Facebook@Emily Velasco</p>` +
+			`<p>正文开始</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	caption := findBlockByText(blocks, "星巴克高蛋白咖啡")
+	if caption == nil || caption.K != "cap" {
+		t.Fatalf("image caption must be cap, got %v; kinds=%v", caption, findKinds(blocks))
+	}
+	source := findBlockByText(blocks, "图片来源：Facebook")
+	if source == nil || source.K != "cap" {
+		t.Fatalf("image source following a caption must stay cap, got %v; kinds=%v", source, findKinds(blocks))
+	}
+	body := findBlockByText(blocks, "正文开始")
+	if body == nil || body.K != "txt" {
+		t.Fatalf("body after caption group must return to txt, got %v; kinds=%v", body, findKinds(blocks))
+	}
+}
+
+func TestCaptionContinuationRequiresCaptionStyle(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
+			`<p style="text-align: center;">图注</p>` +
+			`<p style="text-align: center;">短正文</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	caption := findBlockByText(blocks, "图注")
+	if caption == nil || caption.K != "cap" {
+		t.Fatalf("first center-short post-image line must be cap, got %v", caption)
+	}
+	body := findBlockByText(blocks, "短正文")
+	if body == nil || body.K != "txt" {
+		t.Fatalf("center-short text after a caption needs stronger caption styling, got %v; kinds=%v", body, findKinds(blocks))
+	}
+}
+
 // Real WeChat pattern: <p> holds both the <img> and a trailing styled
 // <span> with the caption. The block's own style is empty; the caption
 // signal lives on the inner span. Must still classify as cap.

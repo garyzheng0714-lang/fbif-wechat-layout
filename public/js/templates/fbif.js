@@ -205,6 +205,35 @@ function parseAttribution(para) {
   return null;
 }
 
+function pushUniqueAttribution(attrs, attr) {
+  if (!attr || !attr.role || !attr.name) return;
+  if (attrs.some(a => a.role === attr.role && a.name === attr.name)) return;
+  attrs.push({ k: 'attr', role: attr.role, name: attr.name });
+}
+
+function isFooterPromptText(text) {
+  return /^提示[：:]$/.test(String(text || '').trim());
+}
+
+function rawBlockText(block) {
+  if (!block) return '';
+  if (block.text) return String(block.text).trim();
+  return (block.runs || [])
+    .filter(r => r && (r.type === 'txt' || r.type === 'link'))
+    .map(r => r.text || '')
+    .join('')
+    .trim();
+}
+
+function isStandardFooterPrompt(blocks, index) {
+  const tail = (blocks || [])
+    .slice(index + 1, index + 6)
+    .map(rawBlockText)
+    .filter(Boolean)
+    .join('\n');
+  return /本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1/i.test(tail);
+}
+
 // ---- Markdown Classification ----
 async function classifyMd(text) {
   const { author: fmAuthor, title, content } = parseMdFrontmatter(text);
@@ -373,9 +402,12 @@ function render(elems, author, source, opts) {
 // structured blocks. See api/wechat_blocks.go for the upstream contract.
 function classifyBlocks({ title, blocks }) {
   const elems = [];
-  let author = '', source = '', imgN = 0, inRef = false;
+  const attrs = [];
+  let imgN = 0, inRef = false;
+  const inputBlocks = blocks || [];
 
-  for (const b of (blocks || [])) {
+  for (let blockIndex = 0; blockIndex < inputBlocks.length; blockIndex++) {
+    const b = inputBlocks[blockIndex];
     if (!b || !b.k) continue;
 
     if (b.k === 'img') {
@@ -415,20 +447,22 @@ function classifyBlocks({ title, blocks }) {
       .join('')
       .trim();
 
+    if (attrs.length && isFooterPromptText(text) && isStandardFooterPrompt(inputBlocks, blockIndex)) {
+      break;
+    }
+
     if (b.k === 'bq') {
       inRef = false;
       elems.push({ k: 'bq', runs });
       continue;
     }
 
-    // Attribution — 作者 / 来源 / 编辑. Matches the classifyMd path exactly
-    // so URL-import and MD-import produce the same attr blocks.
+    // URL imports use the standard FBIF footer, so article-level attribution
+    // is collected and emitted once at the article tail before that footer.
     const attr = parseAttribution(text);
     if (attr) {
-      if (attr.role === '作者' && !author) author = attr.name;
-      if (attr.role === '来源') source = attr.name;
+      pushUniqueAttribution(attrs, attr);
       inRef = false;
-      elems.push({ k: 'attr', role: attr.role, name: attr.name });
       continue;
     }
 
@@ -449,7 +483,7 @@ function classifyBlocks({ title, blocks }) {
     elems.push({ k: 'txt', runs });
   }
 
-  return { elems, author, source, title: title || '', imgN };
+  return { elems: elems.concat(attrs), author: '', source: '', title: title || '', imgN };
 }
 
 export default {

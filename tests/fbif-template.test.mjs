@@ -39,6 +39,17 @@ function renderDocx(paragraphs, opts = {}) {
   }).lines.join('\n');
 }
 
+function txtBlock(text) {
+  return { k: 'txt', runs: [{ type: 'txt', text }] };
+}
+
+function renderBlocks(blocks, opts = {}) {
+  return template.processBlocks({
+    title: opts.title || '测试文章',
+    blocks,
+  }, { isRepost: opts.isRepost !== false }).lines.join('\n');
+}
+
 test('docx lead author starts the article and hides front matter', () => {
   const html = renderDocx([
     p('不应显示的标题'),
@@ -97,4 +108,43 @@ test('article images render as zero-line-height blocks for manual copy', async (
   assert.match(css, /\.wx-pi\s*\{[^}]*line-height:\s*0;[^}]*font-size:\s*0;/);
   assert.match(html, /<section class="wx-pi/);
   assert.match(html, /display: block; margin: 0 auto; vertical-align: top/);
+});
+
+test('url-import image source captions render with muted caption styling', () => {
+  const html = renderBlocks([
+    { k: 'img', src: 'https://example.com/a.jpg' },
+    { k: 'cap', text: '星巴克高蛋白咖啡（美国市场）' },
+    { k: 'cap', text: '图片来源：Facebook@Emily Velasco' },
+  ]);
+
+  assert.match(html, /class="wx-tc">图片来源：Facebook@Emily Velasco/);
+  assert.doesNotMatch(html, /class="wx-t">图片来源：Facebook@Emily Velasco/);
+});
+
+test('url-import attribution is emitted once at article tail before the standard footer', () => {
+  const html = renderBlocks([
+    txtBlock('正文第一段'),
+    txtBlock('来源：剁椒Spicy'),
+    txtBlock('作者：亚娜'),
+    txtBlock('提示：'),
+    txtBlock('* 本文为转载。'),
+  ]);
+
+  assert.equal((html.match(/来源：剁椒Spicy/g) || []).length, 1);
+  assert.equal((html.match(/作者：亚娜/g) || []).length, 1);
+  assert.doesNotMatch(html, /提示：/);
+  assert.ok(html.indexOf('正文第一段') < html.indexOf('来源：剁椒Spicy'));
+  assert.ok(html.indexOf('来源：剁椒Spicy') < html.indexOf('作者：亚娜'));
+});
+
+test('url-import keeps body prompt sections that are not the standard footer', () => {
+  const html = renderBlocks([
+    txtBlock('来源：剁椒Spicy'),
+    txtBlock('提示：'),
+    txtBlock('这里是正文里的提示内容，不是页脚。'),
+  ]);
+
+  assert.match(html, /提示：/);
+  assert.match(html, /这里是正文里的提示内容/);
+  assert.equal((html.match(/来源：剁椒Spicy/g) || []).length, 1);
 });

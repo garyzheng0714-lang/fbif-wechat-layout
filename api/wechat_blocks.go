@@ -80,8 +80,9 @@ func extractArticleBlocks(rawHTML string) (title string, blocks []Block, author 
 // ---- Walker ----
 
 type blockWalker struct {
-	blocks       []Block
-	lastWasImage bool
+	blocks         []Block
+	captionContext bool
+	captionLines   int
 }
 
 type blockCtx struct {
@@ -144,8 +145,8 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			if src == "" || strings.Contains(src, "data:image") {
 				return
 			}
-			// Ordering matters: emit() resets lastWasImage=false, so we must
-			// append the image and set lastWasImage=true AFTER the flush.
+			// Ordering matters: emit() closes caption context, so we must
+			// append the image and open caption context AFTER the flush.
 			// Don't reorder without preserving this invariant, or the
 			// caption immediately after the image will be misclassified.
 			if cur != nil && hasContent(cur.runs) {
@@ -154,7 +155,8 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.textStyles = nil
 			}
 			w.blocks = append(w.blocks, Block{K: "img", Src: src, DataW: getAttr(n, "data-w")})
-			w.lastWasImage = true
+			w.captionContext = true
+			w.captionLines = 0
 			return
 		case "a":
 			href := getAttr(n, "href")
@@ -245,7 +247,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 
 	if isHeadingTag(cx.tag) {
 		w.blocks = append(w.blocks, Block{K: "h", Text: text})
-		w.lastWasImage = false
+		w.closeCaptionContext()
 		return
 	}
 
@@ -253,7 +255,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 		lc := strings.ToLower(c)
 		if lc == "rich_media_title" || lc == "js_article_title" {
 			w.blocks = append(w.blocks, Block{K: "h", Text: text})
-			w.lastWasImage = false
+			w.closeCaptionContext()
 			return
 		}
 	}
@@ -262,13 +264,13 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	// Pullquotes stay at body font-size → fail this gate → remain txt with bold inline.
 	if cx.style.FontSizeSet && cx.style.FontSize >= 18 && allBold && textLen > 0 && textLen <= 80 {
 		w.blocks = append(w.blocks, Block{K: "h", Text: text})
-		w.lastWasImage = false
+		w.closeCaptionContext()
 		return
 	}
 
-	if w.lastWasImage && isCaption(cx, textLen) {
+	if w.captionContext && shouldAttachToCaptionGroup(cx, text, textLen, w.captionLines) {
 		w.blocks = append(w.blocks, Block{K: "cap", Text: text})
-		w.lastWasImage = false
+		w.captionLines++
 		return
 	}
 
@@ -280,7 +282,19 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	default:
 		w.blocks = append(w.blocks, Block{K: "txt", Runs: runs})
 	}
-	w.lastWasImage = false
+	w.closeCaptionContext()
+}
+
+func (w *blockWalker) closeCaptionContext() {
+	w.captionContext = false
+	w.captionLines = 0
+}
+
+func shouldAttachToCaptionGroup(cx *blockCtx, text string, textLen int, captionLines int) bool {
+	if captionLines == 0 {
+		return isCaption(cx, textLen)
+	}
+	return isCaptionContinuation(cx, text, textLen)
 }
 
 func isCaption(cx *blockCtx, textLen int) bool {
@@ -288,8 +302,7 @@ func isCaption(cx *blockCtx, textLen int) bool {
 		return false
 	}
 	for _, c := range cx.classes {
-		lc := strings.ToLower(c)
-		if strings.Contains(lc, "caption") || strings.Contains(lc, "img_des") || strings.Contains(lc, "imgdesc") {
+		if classSignalsCaption(c) {
 			return true
 		}
 	}
@@ -308,6 +321,47 @@ func isCaption(cx *blockCtx, textLen int) bool {
 	return false
 }
 
+func isCaptionContinuation(cx *blockCtx, text string, textLen int) bool {
+	if textLen == 0 || textLen > 80 {
+		return false
+	}
+	if isImageSourceLine(text) {
+		return true
+	}
+	for _, c := range cx.classes {
+		if classSignalsCaption(c) {
+			return true
+		}
+	}
+	if strongStyleSignalsCaption(cx.style) {
+		return true
+	}
+	for _, s := range cx.textStyles {
+		if strongStyleSignalsCaption(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func classSignalsCaption(className string) bool {
+	lc := strings.ToLower(className)
+	return strings.Contains(lc, "caption") ||
+		strings.Contains(lc, "img_des") ||
+		strings.Contains(lc, "imgdesc")
+}
+
+func isImageSourceLine(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	t = strings.TrimLeft(t, "（([【 ")
+	return strings.HasPrefix(t, "图片来源") ||
+		strings.HasPrefix(t, "图源") ||
+		strings.HasPrefix(t, "图片源") ||
+		strings.HasPrefix(t, "image source") ||
+		strings.HasPrefix(t, "photo source") ||
+		strings.HasPrefix(t, "source:")
+}
+
 func styleSignalsCaption(s computedStyle, textLen int) bool {
 	if s.FontSizeSet && s.FontSize > 0 && s.FontSize <= 14 {
 		return true
@@ -316,6 +370,16 @@ func styleSignalsCaption(s computedStyle, textLen int) bool {
 		return true
 	}
 	if s.Align == "center" && textLen <= 40 {
+		return true
+	}
+	return false
+}
+
+func strongStyleSignalsCaption(s computedStyle) bool {
+	if s.FontSizeSet && s.FontSize > 0 && s.FontSize <= 14 {
+		return true
+	}
+	if s.ColorSet && isGreyHex(s.Color) {
 		return true
 	}
 	return false
