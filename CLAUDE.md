@@ -35,7 +35,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 5. **不要 TOC/目录** — 已删除
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F
 7. **文章标题左对齐** — 在文章正上方，27px 粗体
-8. **复制后不自动打开微信后台** — 只显示复制成功提示，保留手动打开入口
+8. **复制后不自动打开外部网站** — 复制按钮只复制内容；微信公众号后台只能通过显式链接手动打开
 9. **复制按钮必须立即反馈** — `copyContent()` 不得等待图片上传或“更多文章”合成；这些准备工作只能提前或后台刷新复制层，点击后应立刻写剪贴板并显示复制结果
 10. **表单只填数字** — 不要 px/em 后缀，颜色用 color picker
 11. **不要 phone-frame 边框** — 文章直接在白底上流动
@@ -43,6 +43,8 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 13. **Mote 作者特殊排版** — `Mote莫特` / `Mote 莫特` 触发参考来源上方固定署名图；原创作者行颜色为 `#396FBC` 且不斜体
 
 14. **更多文章选图使用当前卡片媒体库** — `/api/fetch-article-meta` 必须返回 `image_urls`；“替换图片”候选顺序为当前卡片自定义封面、抓取头图、当前卡片正文媒体图，主文章图片只做兜底。旧卡片缺少 `image_urls` 时点击替换要按卡片链接补抓，不要显示“本文暂无图片”。
+15. **URL 导入图片说明组不可拆散** — `图片 -> 图注 -> 图片来源` 必须连续归为图注；`图片来源：` / `图源：` 不能被当成正文或文章级来源
+16. **URL 导入作者来源固定在提示前** — 文章级 `来源：` / `作者：` / `编辑：` 只渲染一次，位置固定在标准 `提示：` 页脚前
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
@@ -55,4 +57,12 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 - 推送 `main` 触发 `.github/workflows/deploy.yml`
 - 部署会把 `LIBREOFFICE_URL`、`LIBREOFFICE_TOKEN`、`CLOUDCONVERT_API_KEY`、`ADMIN_PASSWORD` 写入服务器 `/var/www/api/.env`
 - `ADMIN_PASSWORD` 缺失时部署必须失败，不能让正式端进入“规则后台未配置密码”状态
+- 部署工作流必须确保 `/`、`/index.html`、`/app.html`、`/version.json` 响应头为 `Cache-Control: no-cache`
 - 修改正式后台密码时，更新 GitHub Secret 后重跑部署，并用 `/api/rules/admin/login` 做 200/401 双向验证
+
+## Rule Hygiene
+- Rules in this file must describe current behavior, not historical requests.
+- Mutable product preferences need source/date/status before being treated as stable.
+- Copy behavior must not navigate away from the editor unless the current user request explicitly asks for it.
+- Copy speed is a product contract: do not hide background work behind the copy button or change the button text to upload/preparation states.
+- URL 导入和复制链路的排版契约必须有测试保护；新增解析规则时至少跑 `cd api && go test ./...`、`npm test`，并用真实浏览器验证用户给出的样例文章。

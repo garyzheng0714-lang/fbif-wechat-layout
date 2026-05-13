@@ -67,6 +67,19 @@
 - **Footer**: sticky bottom, white bg, centered 0.5px divider (#E5E5E5)
 - **Content width**: max-width 680px centered
 
+## WeChat Article Content Contract
+
+These values are product contracts, not incidental CSS. Any parser, renderer, copy, or deploy change must keep them covered by tests and browser verification.
+
+| Role | Contract |
+|------|----------|
+| Body text | `15px`, color `#544545`, line-height `1.75`, paragraph side margin `8px` |
+| Image block | Centered, `line-height: 0`, `font-size: 0`, image `display: block` |
+| Image caption | `12px`, color `#888888`, line-height `1.75`, centered |
+| Image source | Treat `图片来源：` / `图源：` after an image as image caption metadata, not body text and not article-level source |
+| Article attribution | URL-imported `来源：` / `作者：` / `编辑：` renders once at the article tail before the standard `提示：` footer |
+| Attribution style | `15px`, color `#0070C0`, line-height `1.75`; original DOCX author additionally uses `#396FBC`, normal style |
+
 ## Current Rules
 1. 预览页背景必须全白
 2. 仅保留 FBIF 公众号排版（已移除 Mote 模板）
@@ -81,5 +94,7 @@
 11. 不要 phone-frame 边框
 12. 原创 DOCX 的首个 `作者：` 行是正文起点，它之前的编辑前置材料不显示在编辑器里
 13. `Mote莫特` / `Mote 莫特` 作者在参考来源上方插入固定署名图；原创作者行 `#396FBC` 且不斜体
+14. URL 导入的图片说明组必须保留浅灰图注样式；`图片来源：` 不能掉成正文
+15. URL 导入的文章级来源、作者、编辑固定在标准 `提示：` 前，且只出现一次
 
 规则说明：这里记录当前设计约束。旧需求不能因为出现在历史记录里就被当成当前规则。
