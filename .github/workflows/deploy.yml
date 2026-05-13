@@ -159,6 +159,12 @@ jobs:
               "  }\n"
           )
 
+          app_shell_header = (
+              "\n"
+              "  @fbifAppShell path / /index.html /app.html /version.json\n"
+              "  header @fbifAppShell Cache-Control \"no-cache\"\n"
+          )
+
           # Remove any prior @fbifRulesApi route, regardless of upstream form
           # (127.0.0.1, localhost, or other host:port) and regardless of
           # rendering style (one-line `reverse_proxy @matcher upstream` or
@@ -184,6 +190,16 @@ jobs:
                   break
               text = new_text
 
+          app_shell_header_re = re.compile(
+              r"\n[ \t]*@fbifAppShell[ \t]+path[^\n]*\n"
+              r"[ \t]*header[ \t]+@fbifAppShell[ \t]+Cache-Control[ \t]+\"?[^\n\"]+\"?[ \t]*\n"
+          )
+          while True:
+              new_text = app_shell_header_re.sub("\n", text)
+              if new_text == text:
+                  break
+              text = new_text
+
           insert_points = []
           scan_from = 0
           while True:
@@ -202,7 +218,7 @@ jobs:
           backup = target.with_suffix(target.suffix + ".bak-rules")
           backup.write_text(original)
           for open_after in sorted(set(insert_points), reverse=True):
-              text = text[:open_after] + route + text[open_after:]
+              text = text[:open_after] + app_shell_header + route + text[open_after:]
           target.write_text(text)
           print("Ensured Caddy rule API handle in " + str(target) + " -> " + upstream)
           PY
