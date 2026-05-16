@@ -66,7 +66,11 @@ function isCompactDocxPair(a, b) {
 }
 
 function shouldSpaceAfter(e, next) {
-  if (!next) return false;
+  // No `next` means this is the article body's tail. The FBIF footer is
+  // concatenated afterwards with `margin:0;padding:0;` on its outer section,
+  // so without `wx-gap` here the last paragraph (often a [n] reference) sits
+  // flush against the 「提示：」 line. Emit the standard 20px gap.
+  if (!next) return true;
   if (next.k === 'cap') return false;
   if (e.k === 'ref' && next.k === 'ref') return false;
   if (e.k === 'attr' && next.k === 'attr') return false;
