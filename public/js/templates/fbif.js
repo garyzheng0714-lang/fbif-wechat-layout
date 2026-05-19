@@ -43,6 +43,7 @@ function secCenter(inner, gap) {
 
 function docxMeta(pd) {
   return {
+    fromDocx: true,
     isList: !!pd.isList,
     styleId: pd.styleId || '',
     styleName: pd.styleName || '',
@@ -61,8 +62,14 @@ function sameDocxStyle(a, b) {
 function isCompactDocxPair(a, b) {
   if (!a || !b) return false;
   if ((a.k !== 'txt' && a.k !== 'ref') || (b.k !== 'txt' && b.k !== 'ref')) return false;
+  if (!a.fromDocx || !b.fromDocx || b.blankBefore) return false;
   if (a.isList && b.isList) return true;
-  return sameDocxStyle(a, b) && (a.contextualSpacing || b.contextualSpacing);
+  if (sameDocxStyle(a, b) && (a.contextualSpacing || b.contextualSpacing)) return true;
+
+  const after = Number(a.spacing && a.spacing.after);
+  const before = Number(b.spacing && b.spacing.before);
+  return Number.isFinite(after) && after <= 160 &&
+    (!Number.isFinite(before) || before <= 160);
 }
 
 function shouldSpaceAfter(e, next) {
@@ -129,10 +136,16 @@ function classifyDocx(paragraphs, imgCache) {
 
   const elems = [];
   let inRef = false, imgN = 0;
+  let blankBefore = false;
+  const takeDocxMeta = (pd) => {
+    const meta = { ...docxMeta(pd), blankBefore };
+    blankBefore = false;
+    return meta;
+  };
 
   for (let i = contentStart; i < pds.length; i++) {
     const pd = pds[i];
-    if (pd.isEmpty) continue;
+    if (pd.isEmpty) { if (elems.length) blankBefore = true; continue; }
     if (pd.hasHL && pd.text.includes('插入视频')) continue;
 
     // WPS exports often leave "参考来源：" as a plain paragraph (no heading
@@ -142,30 +155,31 @@ function classifyDocx(paragraphs, imgCache) {
     const trimmed = pd.text.trim();
     if (/^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/.test(trimmed)) {
       inRef = true;
-      elems.push({ k: 'refH', text: trimmed.replace(/[：:]$/, ''), ...docxMeta(pd) });
+      elems.push({ k: 'refH', text: trimmed.replace(/[：:]$/, ''), ...takeDocxMeta(pd) });
       continue;
     }
 
     if (pd.isHeading) {
       const ht = trimmed.replace(/[：:]$/, '');
       if (ht === '引言' || ht === '标题') continue;
-      if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht, ...docxMeta(pd) }); continue; }
+      if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht, ...takeDocxMeta(pd) }); continue; }
       // A real non-ref heading closes any prior ref section.
       inRef = false;
-      elems.push({ k: 'h', text: ht.replace(/^0?\d+\s+/, ''), ...docxMeta(pd) });
+      elems.push({ k: 'h', text: ht.replace(/^0?\d+\s+/, ''), ...takeDocxMeta(pd) });
       continue;
     }
     if (inRef) {
       if (!trimmed) continue;
-      elems.push({ k: 'ref', runs: pd.runs, ...docxMeta(pd) });
+      elems.push({ k: 'ref', runs: pd.runs, ...takeDocxMeta(pd) });
       continue;
     }
     if (pd.hasImg) {
+      const meta = takeDocxMeta(pd);
       for (const r of pd.runs) {
         if (r.type === 'img') {
           const src = imgCache[r.file] || '';
           imgN++;
-          elems.push({ k: 'img', src, w: r.w, gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file) });
+          elems.push({ k: 'img', src, w: r.w, gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file), ...meta });
         }
       }
       while (i + 1 < pds.length) {
@@ -179,7 +193,7 @@ function classifyDocx(paragraphs, imgCache) {
       }
       continue;
     }
-    elems.push({ k: 'txt', runs: pd.runs, ...docxMeta(pd) });
+    elems.push({ k: 'txt', runs: pd.runs, ...takeDocxMeta(pd) });
   }
 
   return { elems, author, imgN };

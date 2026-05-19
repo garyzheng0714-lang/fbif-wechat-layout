@@ -31,6 +31,13 @@ function h(text) {
   return p(text, { hasHeadingStyle: true });
 }
 
+function docxBody(text, extra = {}) {
+  return p(text, {
+    spacing: { before: '120', after: '120', line: '288' },
+    ...extra,
+  });
+}
+
 function renderDocx(paragraphs, opts = {}) {
   return template.processDocx({
     paragraphs,
@@ -84,6 +91,26 @@ test('docx Mote author accepts the spaced name form', () => {
 
   assert.match(html, /作者：Mote 莫特/);
   assert.match(html, new RegExp(moteImageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('docx consecutive body paragraphs stay compact until a blank paragraph separates them', () => {
+  const html = renderDocx([
+    docxBody('作者：张三'),
+    docxBody('Tea Forté的设计太棒了，去它的官网、Facebook或者Instagram上欣赏它的设计吧：'),
+    docxBody('www.teaforte.com'),
+    docxBody('www.facebook.com/teaforteofficial/photos'),
+    docxBody('www.instagram.com/teaforteofficial/'),
+    docxBody(''),
+    docxBody('这是我茶叶系列第9篇。下一篇我写美国最大的本土茶叶品牌Bigelow Tea。'),
+  ]);
+  const classesByText = Object.fromEntries([...html.matchAll(/<section class="([^"]+)">([\s\S]*?)<\/section>/g)]
+    .map((m) => [m[2].replace(/<[^>]+>/g, ''), m[1]]));
+
+  assert.equal(classesByText['Tea Forté的设计太棒了，去它的官网、Facebook或者Instagram上欣赏它的设计吧：'], 'wx-p');
+  assert.equal(classesByText['www.teaforte.com'], 'wx-p');
+  assert.equal(classesByText['www.facebook.com/teaforteofficial/photos'], 'wx-p');
+  assert.equal(classesByText['www.instagram.com/teaforteofficial/'], 'wx-p wx-gap');
+  assert.equal(classesByText['这是我茶叶系列第9篇。下一篇我写美国最大的本土茶叶品牌Bigelow Tea。'], 'wx-p wx-gap');
 });
 
 test('original author color matches RGB 57,111,188', async () => {
