@@ -25,7 +25,9 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - 支持多文件队列处理、品牌页脚开关和“更多文章”组合页脚。
 - 支持服务端规则预设保存与切换；本地设置保留为离线降级和兼容兜底。
 - 原创 DOCX 以首个 `作者：` 行作为正文起点；该行之前的编辑前置材料不进入编辑器预览。
+- DOCX 连续正文段落会保留紧凑排版；只有原文空段分隔的位置才恢复标准段后间距。
 - URL 导入的文章级 `来源：`、`作者：`、`编辑：` 会收集到正文末尾，并在标准 FBIF `提示：` 页脚前只渲染一次。
+- 正文最后一段（包括参考来源末行）与标准 FBIF `提示：` 页脚之间保留标准段落间距，避免正文尾部贴住页脚。
 - 作者为 `Mote莫特` 或 `Mote 莫特` 时，会在“参考来源”上方自动插入固定署名图片。
 
 ## 技术栈
@@ -193,5 +195,6 @@ go test ./...
 - 复制到微信前的兼容处理集中在 `engine.js`、`clipboard.js`、`css-inline.js`、`uploader.js` 和 `more-articles.js`。`copyContent()` 不应等待图片上传或“更多文章”合成；后台准备完成后刷新复制层，下一次复制自然使用新结果。
 - “更多文章”选图链路由 `api/main.go` 的 `/api/fetch-article-meta` 返回 `image_urls`，`public/js/more-articles.js` 持久化到卡片状态，`public/js/more-articles-ui.js` 合并为选图候选。候选顺序为自定义封面、抓取头图、当前卡片正文媒体图、主文章图片兜底。
 - DOCX 作者规则集中在 `public/js/templates/fbif.js`：首个 `作者：` 行之前内容默认隐藏；`Mote莫特` / `Mote 莫特` 会触发参考来源上方的固定署名图片。
-- URL 导入结构化块由 `api/wechat_blocks.go` 输出，`public/js/templates/fbif.js` 渲染。图片说明组必须保留为 `cap`；文章级来源、作者、编辑必须在正文尾部、标准页脚前只渲染一次。
-- 排版契约需要测试保护：`api/wechat_blocks_test.go` 覆盖连续图注和图片来源，`tests/fbif-template.test.mjs` 覆盖图注样式、作者来源去重和页脚位置。
+- DOCX 段距规则也在 `public/js/templates/fbif.js`：连续非空正文段落在 Word 段距较小时保持紧凑；如果中间出现空段，则下一段前恢复标准 `wx-gap`。
+- URL 导入结构化块由 `api/wechat_blocks.go` 输出，`public/js/templates/fbif.js` 渲染。图片说明组必须保留为 `cap`；文章级来源、作者、编辑必须在正文尾部、标准页脚前只渲染一次；正文尾段即使没有后续正文块，也必须带 `wx-gap`，给标准 `提示：` 页脚留出段落间距。
+- 排版契约需要测试保护：`api/wechat_blocks_test.go` 覆盖连续图注和图片来源，`tests/fbif-template.test.mjs` 覆盖图注样式、作者来源去重、页脚位置和 DOCX 连续段落紧凑规则。

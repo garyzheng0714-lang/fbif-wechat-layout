@@ -74,6 +74,7 @@ These values are product contracts, not incidental CSS. Any parser, renderer, co
 | Role | Contract |
 |------|----------|
 | Body text | `15px`, color `#544545`, line-height `1.75`, paragraph side margin `8px` |
+| DOCX paragraph rhythm | Consecutive non-empty body paragraphs with compact Word spacing stay tight; a blank paragraph in the source restores the standard `wx-gap` before the next paragraph |
 | Image block | Centered, `line-height: 0`, `font-size: 0`, image `display: block` |
 | Image caption | `12px`, color `#888888`, line-height `1.75`, centered |
 | Image source | Treat `图片来源：` / `图源：` after an image as image caption metadata, not body text and not article-level source |
@@ -96,5 +97,6 @@ These values are product contracts, not incidental CSS. Any parser, renderer, co
 13. `Mote莫特` / `Mote 莫特` 作者在参考来源上方插入固定署名图；原创作者行 `#396FBC` 且不斜体
 14. URL 导入的图片说明组必须保留浅灰图注样式；`图片来源：` 不能掉成正文
 15. URL 导入的文章级来源、作者、编辑固定在标准 `提示：` 前，且只出现一次
+16. DOCX 连续非空正文段落保留紧凑节奏；原文空段分隔才恢复标准段后间距
 
 规则说明：这里记录当前设计约束。旧需求不能因为出现在历史记录里就被当成当前规则。
