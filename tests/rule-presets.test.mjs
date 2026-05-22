@@ -92,6 +92,33 @@ test('rule config JSON validation rejects values that would be silently normaliz
       },
     },
   })), /字体/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      surprise: {
+        font_size: '16',
+      },
+    },
+  })), /未知规则模块/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      workflow: {
+        font_size: '16',
+      },
+    },
+  })), /不能放在 workflow 模块/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      theme: {
+        font_size: '16',
+      },
+      supporting: {
+        font_size: '17',
+      },
+    },
+  })), /重复规则字段|不能放在 supporting 模块/);
 });
 
 test('local fallback keeps legacy skip-upload preference', () => {

@@ -251,8 +251,8 @@ export function initAdminPanel(options = {}) {
   function syncDirtyJSONBeforePersist() {
     if (!jsonDirty) return;
     const parsed = parseRuleConfigDocument(jsonText);
-    if (parsed.name) workingName = parsed.name;
-    if (parsed.description) workingDescription = parsed.description;
+    workingName = parsed.name || '未命名规则';
+    workingDescription = parsed.description;
     workingConfig = parsed.config;
     jsonDirty = false;
     syncJSONText();
@@ -370,10 +370,10 @@ export function initAdminPanel(options = {}) {
         const parsed = parseRuleConfigDocument(jsonText);
         const nameInput = overlay.querySelector('[data-role="preset-name"]');
         const descriptionInput = overlay.querySelector('[data-role="preset-description"]');
-        if (parsed.name) workingName = parsed.name;
-        if (parsed.description) workingDescription = parsed.description;
-        if (parsed.name && nameInput) nameInput.value = parsed.name;
-        if (parsed.description && descriptionInput) descriptionInput.value = parsed.description;
+        workingName = parsed.name || '未命名规则';
+        workingDescription = parsed.description;
+        if (nameInput) nameInput.value = workingName;
+        if (descriptionInput) descriptionInput.value = parsed.description;
         workingConfig = parsed.config;
         const selected = selectedPreset();
         jsonDirty = false;

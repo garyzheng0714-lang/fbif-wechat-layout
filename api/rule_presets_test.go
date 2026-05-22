@@ -184,6 +184,46 @@ func TestRulePresetStoreMigratesLegacyV1FileToV2OnWriteKeepingLegacyFacade(t *te
 	}
 }
 
+func TestRulePresetStoreWritesRollbackReadableLegacyShadowFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rule-presets.json")
+	store := newRulePresetStore(path)
+	if _, err := store.upsert(rulePreset{
+		ID:     "campaign",
+		Name:   "Campaign Rule",
+		Config: map[string]any{"font_size": "17"},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := store.setActive("campaign"); err != nil {
+		t.Fatalf("set active: %v", err)
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read v2 file: %v", err)
+	}
+	var rollbackDoc rulePresetDocument
+	if err := json.Unmarshal(b, &rollbackDoc); err != nil {
+		t.Fatalf("old backend unmarshal shape: %v", err)
+	}
+	if rollbackDoc.ActiveID != "campaign" {
+		t.Fatalf("rollback active_id = %q, want campaign", rollbackDoc.ActiveID)
+	}
+	var found *rulePreset
+	for i := range rollbackDoc.Presets {
+		if rollbackDoc.Presets[i].ID == "campaign" {
+			found = &rollbackDoc.Presets[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("rollback presets missing campaign: %#v", rollbackDoc.Presets)
+	}
+	if found.Config["font_size"] != "17" {
+		t.Fatalf("rollback font_size = %v, want 17", found.Config["font_size"])
+	}
+}
+
 func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", "secret")
 	path := filepath.Join(t.TempDir(), "rules.json")
@@ -277,6 +317,34 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 				"html":      "<img src=x>",
 			},
 		},
+		{
+			name: "unknown module",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"surprise": map[string]any{"font_size": "16"},
+				},
+			},
+		},
+		{
+			name: "field in wrong module",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"workflow": map[string]any{"font_size": "16"},
+				},
+			},
+		},
+		{
+			name: "duplicate field in modules",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"theme":      map[string]any{"font_size": "16"},
+					"supporting": map[string]any{"font_size": "17"},
+				},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -294,6 +362,32 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 				t.Fatalf("invalid config code = %d, want 400 body=%s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestRulePresetStoreCapsSavedVersionsPerRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rules.json")
+	store := newRulePresetStore(path)
+	for i := 0; i < maxRulePresetVersions+5; i++ {
+		if _, err := store.upsert(rulePreset{
+			ID:     "campaign",
+			Name:   "Campaign Rule",
+			Config: map[string]any{"font_size": "16"},
+		}); err != nil {
+			t.Fatalf("upsert %d: %v", i, err)
+		}
+	}
+
+	var raw ruleStoreDocumentV2
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read store: %v", err)
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("unmarshal store: %v", err)
+	}
+	if got := len(raw.Rules["campaign"].Versions); got != maxRulePresetVersions {
+		t.Fatalf("versions = %d, want %d", got, maxRulePresetVersions)
 	}
 }
 

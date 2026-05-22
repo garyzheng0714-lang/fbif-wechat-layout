@@ -53,6 +53,46 @@ var ruleTextFields = map[string]bool{
 	"font_family": true,
 }
 
+var ruleModuleOrder = []string{"theme", "supporting", "more_articles", "workflow"}
+
+var ruleModuleFields = map[string]map[string]bool{
+	"theme": {
+		"font_size":          true,
+		"heading_size":       true,
+		"line_height":        true,
+		"letter_spacing":     true,
+		"paragraph_margin_x": true,
+		"paragraph_gap":      true,
+		"font_family":        true,
+		"text_color":         true,
+		"link_color":         true,
+		"muted_color":        true,
+	},
+	"supporting": {
+		"caption_font_size":       true,
+		"attribution_font_size":   true,
+		"blockquote_padding_left": true,
+		"blockquote_border_width": true,
+		"md_heading_max_chars":    true,
+		"decorative_image_max_px": true,
+	},
+	"more_articles": {
+		"more_articles_slots":      true,
+		"banner_overlay_alpha":     true,
+		"banner_title_x":           true,
+		"banner_title_y":           true,
+		"banner_title_width":       true,
+		"banner_title_box_height":  true,
+		"banner_title_font_size":   true,
+		"banner_title_line_height": true,
+		"banner_title_max_lines":   true,
+	},
+	"workflow": {
+		"footer_enabled": true,
+		"skip_upload":    true,
+	},
+}
+
 var ruleHexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 var ruleFontFamily = regexp.MustCompile(`^[A-Za-z0-9一-龥 -]{1,40}$`)
 
@@ -125,14 +165,36 @@ func validateRuleConfigKeys(config map[string]any) error {
 			return fmt.Errorf("modules must be an object")
 		}
 		for moduleName, rawModule := range modules {
+			allowedFields, ok := ruleModuleFields[moduleName]
+			if !ok {
+				return fmt.Errorf("unknown rule module: %s", moduleName)
+			}
 			module, ok := rawModule.(map[string]any)
 			if !ok {
 				return fmt.Errorf("%s module must be an object", moduleName)
 			}
+			seenModuleFields := map[string]bool{}
 			for key := range module {
 				if !isKnownRuleField(key) {
 					return fmt.Errorf("unknown rule field: %s", key)
 				}
+				if !allowedFields[key] {
+					return fmt.Errorf("%s field is not allowed in %s module", key, moduleName)
+				}
+				if seenModuleFields[key] {
+					return fmt.Errorf("duplicate rule field: %s", key)
+				}
+				seenModuleFields[key] = true
+			}
+		}
+		seenAcrossModules := map[string]bool{}
+		for _, moduleName := range ruleModuleOrder {
+			module, _ := modules[moduleName].(map[string]any)
+			for key := range module {
+				if seenAcrossModules[key] {
+					return fmt.Errorf("duplicate rule field: %s", key)
+				}
+				seenAcrossModules[key] = true
 			}
 		}
 	}
@@ -158,7 +220,8 @@ func flattenRuleConfig(config map[string]any) map[string]any {
 		flat[k] = v
 	}
 	modules, _ := config["modules"].(map[string]any)
-	for _, rawModule := range modules {
+	for _, moduleName := range ruleModuleOrder {
+		rawModule := modules[moduleName]
 		module, ok := rawModule.(map[string]any)
 		if !ok {
 			continue

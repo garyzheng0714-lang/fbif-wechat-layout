@@ -79,6 +79,18 @@ const RULE_MODULE_GROUPS = Object.freeze([
   { id: 'workflow', groupIds: Object.freeze(['workflow']) },
 ]);
 
+const RULE_MODULE_FIELDS = new Map(
+  RULE_MODULE_GROUPS.map(moduleGroup => {
+    const keys = new Set();
+    for (const groupID of moduleGroup.groupIds) {
+      const group = RULE_SCHEMA.find(item => item.id === groupID);
+      if (!group) continue;
+      for (const field of group.fields) keys.add(field.key);
+    }
+    return [moduleGroup.id, keys];
+  })
+);
+
 function hasWindowStorage() {
   return typeof window !== 'undefined' && window.localStorage;
 }
@@ -123,7 +135,8 @@ function flattenRuleConfigInput(raw) {
   }
   const modules = isPlainObject(input.modules) ? input.modules : {};
   const flat = {};
-  for (const moduleConfig of Object.values(modules)) {
+  for (const moduleGroup of RULE_MODULE_GROUPS) {
+    const moduleConfig = modules[moduleGroup.id];
     if (isPlainObject(moduleConfig)) Object.assign(flat, moduleConfig);
   }
   return { ...input, ...flat };
@@ -219,13 +232,26 @@ function validateRuleConfigSource(source) {
     validateRawField(key, value, errors);
   }
   if (modules) {
+    const seenModuleFields = new Set();
     for (const [moduleName, moduleConfig] of Object.entries(modules)) {
+      const allowedFields = RULE_MODULE_FIELDS.get(moduleName);
+      if (!allowedFields) {
+        errors.push('未知规则模块：' + moduleName);
+        continue;
+      }
       if (!isPlainObject(moduleConfig)) {
         errors.push(moduleName + ' 模块必须是对象');
         continue;
       }
       for (const [key, value] of Object.entries(moduleConfig)) {
         validateRawField(key, value, errors);
+        if (!allowedFields.has(key)) {
+          errors.push(key + ' 不能放在 ' + moduleName + ' 模块');
+        }
+        if (seenModuleFields.has(key)) {
+          errors.push('重复规则字段：' + key);
+        }
+        seenModuleFields.add(key);
       }
     }
   }

@@ -14,3 +14,12 @@ test('rule admin exposes JSON editing and new-rule controls', async () => {
   assert.match(adminPanel, /syncDirtyJSONBeforePersist/);
   assert.match(adminPanel, /syncDirtyJSONBeforePersist\(\);[\s\S]*saveRulePreset/);
 });
+
+test('rule admin lets JSON explicitly clear a saved description', async () => {
+  const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
+
+  assert.match(adminPanel, /workingDescription = parsed\.description;/);
+  assert.match(adminPanel, /descriptionInput\.value = parsed\.description;/);
+  assert.doesNotMatch(adminPanel, /if \(parsed\.description\) workingDescription/);
+  assert.doesNotMatch(adminPanel, /if \(parsed\.description && descriptionInput\)/);
+});

@@ -16,6 +16,7 @@ import (
 
 const defaultRulePresetID = "default"
 const defaultRuleAccountID = "fbif"
+const maxRulePresetVersions = 20
 
 type rulePreset struct {
 	ID          string         `json:"id"`
@@ -56,6 +57,8 @@ type ruleStoreDocumentV2 struct {
 	SchemaVersion int                       `json:"schema_version"`
 	Accounts      map[string]ruleAccount    `json:"accounts"`
 	Rules         map[string]ruleDefinition `json:"rules"`
+	ActiveID      string                    `json:"active_id,omitempty"`
+	Presets       []rulePreset              `json:"presets,omitempty"`
 	UpdatedAt     string                    `json:"updated_at"`
 }
 
@@ -325,6 +328,9 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 		sort.SliceStable(versions, func(i, j int) bool {
 			return versions[i].Version < versions[j].Version
 		})
+		if len(versions) > maxRulePresetVersions {
+			versions = versions[len(versions)-maxRulePresetVersions:]
+		}
 		rule.Versions = versions
 		if rule.UpdatedAt == "" {
 			rule.UpdatedAt = latestRuleVersion(rule).CreatedAt
@@ -451,6 +457,9 @@ func seenRulePreset(presets []rulePreset, id string) bool {
 func (s *rulePresetStore) writeStoreLocked(doc ruleStoreDocumentV2) error {
 	doc = normalizeRuleStoreDocument(doc)
 	doc.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	shadow := legacyDocumentFromStore(doc)
+	doc.ActiveID = shadow.ActiveID
+	doc.Presets = shadow.Presets
 	if err := os.MkdirAll(filepath.Dir(s.path), 0755); err != nil {
 		return err
 	}
