@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_RULE_CONFIG,
+  buildRuleConfigDocument,
   loadLocalRuleConfig,
   normalizeRuleConfig,
+  parseRuleConfigDocument,
   saveLocalRuleConfig,
   validateRuleConfig,
 } from '../public/js/rule-presets.js';
@@ -15,6 +17,52 @@ test('rule config keeps legacy defaults when optional fields are missing', () =>
   assert.equal(config.link_color, '#0070C0');
   assert.equal(config.footer_enabled, false);
   assert.equal(config.skip_upload, true);
+});
+
+test('rule config accepts modular JSON documents without changing flat consumers', () => {
+  const config = normalizeRuleConfig({
+    schema_version: 2,
+    modules: {
+      theme: {
+        font_size: '16',
+        text_color: '#123abc',
+      },
+      more_articles: {
+        more_articles_slots: '4',
+      },
+      workflow: {
+        footer_enabled: false,
+      },
+    },
+  });
+
+  assert.equal(config.font_size, '16');
+  assert.equal(config.text_color, '#123ABC');
+  assert.equal(config.more_articles_slots, '4');
+  assert.equal(config.footer_enabled, false);
+  assert.equal(config.heading_size, DEFAULT_RULE_CONFIG.heading_size);
+});
+
+test('rule config JSON document round-trips through modules', () => {
+  const doc = buildRuleConfigDocument({
+    ...DEFAULT_RULE_CONFIG,
+    font_size: '16',
+    footer_enabled: false,
+  }, {
+    name: '测试规则',
+    description: '用于 JSON 编辑框',
+  });
+  assert.equal(doc.schema_version, 2);
+  assert.equal(doc.name, '测试规则');
+  assert.equal(doc.description, '用于 JSON 编辑框');
+  assert.equal(doc.modules.theme.font_size, '16');
+  assert.equal(doc.modules.workflow.footer_enabled, false);
+
+  const parsed = parseRuleConfigDocument(JSON.stringify(doc));
+  assert.equal(parsed.name, '测试规则');
+  assert.equal(parsed.description, '用于 JSON 编辑框');
+  assert.equal(parsed.config.font_size, '16');
+  assert.equal(parsed.config.footer_enabled, false);
 });
 
 test('local fallback keeps legacy skip-upload preference', () => {

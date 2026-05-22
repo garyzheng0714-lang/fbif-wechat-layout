@@ -70,8 +70,19 @@ export const DEFAULT_RULE_CONFIG = Object.freeze(
   Object.fromEntries(Array.from(FIELD_BY_KEY.values()).map(field => [field.key, field.default]))
 );
 
+const RULE_MODULE_GROUPS = Object.freeze([
+  { id: 'theme', groupIds: Object.freeze(['article']) },
+  { id: 'supporting', groupIds: Object.freeze(['supporting']) },
+  { id: 'more_articles', groupIds: Object.freeze(['more_articles']) },
+  { id: 'workflow', groupIds: Object.freeze(['workflow']) },
+]);
+
 function hasWindowStorage() {
   return typeof window !== 'undefined' && window.localStorage;
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function numberToString(value, field) {
@@ -102,13 +113,67 @@ function normalizeFieldValue(value, field) {
   return value == null ? field.default : value;
 }
 
+function flattenRuleConfigInput(raw) {
+  let input = isPlainObject(raw) ? raw : {};
+  if (isPlainObject(input.config) && (input.config.schema_version === 2 || isPlainObject(input.config.modules))) {
+    input = input.config;
+  }
+  const modules = isPlainObject(input.modules) ? input.modules : {};
+  const flat = {};
+  for (const moduleConfig of Object.values(modules)) {
+    if (isPlainObject(moduleConfig)) Object.assign(flat, moduleConfig);
+  }
+  return { ...flat, ...input };
+}
+
 export function normalizeRuleConfig(raw) {
-  const input = raw && typeof raw === 'object' ? raw : {};
+  const input = flattenRuleConfigInput(raw);
   const out = {};
   for (const field of FIELD_BY_KEY.values()) {
     out[field.key] = normalizeFieldValue(input[field.key], field);
   }
   return out;
+}
+
+export function buildRuleConfigDocument(config, meta = {}) {
+  const normalized = normalizeRuleConfig(config);
+  const modules = {};
+  for (const moduleGroup of RULE_MODULE_GROUPS) {
+    modules[moduleGroup.id] = {};
+    for (const groupID of moduleGroup.groupIds) {
+      const group = RULE_SCHEMA.find(item => item.id === groupID);
+      if (!group) continue;
+      for (const field of group.fields) {
+        modules[moduleGroup.id][field.key] = normalized[field.key];
+      }
+    }
+  }
+  return {
+    schema_version: 2,
+    name: String(meta.name || '未命名规则').trim() || '未命名规则',
+    description: String(meta.description || '').trim(),
+    modules,
+  };
+}
+
+export function parseRuleConfigDocument(input) {
+  let raw = input;
+  if (typeof input === 'string') {
+    try {
+      raw = JSON.parse(input);
+    } catch {
+      throw new Error('规则 JSON 格式不正确');
+    }
+  }
+  if (!isPlainObject(raw)) {
+    throw new Error('规则 JSON 必须是对象');
+  }
+  return {
+    name: String(raw.name || '').trim(),
+    description: String(raw.description || '').trim(),
+    config: normalizeRuleConfig(isPlainObject(raw.config) ? raw.config : raw),
+    document: raw,
+  };
 }
 
 export function getRuleNumber(config, key) {

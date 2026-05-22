@@ -15,6 +15,7 @@ import (
 )
 
 const defaultRulePresetID = "default"
+const defaultRuleAccountID = "fbif"
 
 type rulePreset struct {
 	ID          string         `json:"id"`
@@ -28,6 +29,34 @@ type rulePresetDocument struct {
 	ActiveID  string       `json:"active_id"`
 	Presets   []rulePreset `json:"presets"`
 	UpdatedAt string       `json:"updated_at"`
+}
+
+type rulePresetVersion struct {
+	Version   int            `json:"version"`
+	Config    map[string]any `json:"config"`
+	CreatedAt string         `json:"created_at"`
+}
+
+type ruleDefinition struct {
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	Versions    []rulePresetVersion `json:"versions"`
+	UpdatedAt   string              `json:"updated_at"`
+}
+
+type ruleAccount struct {
+	Name              string `json:"name"`
+	ActiveRuleID      string `json:"active_rule_id"`
+	ActiveRuleVersion int    `json:"active_rule_version"`
+	UpdatedAt         string `json:"updated_at"`
+}
+
+type ruleStoreDocumentV2 struct {
+	SchemaVersion int                       `json:"schema_version"`
+	Accounts      map[string]ruleAccount    `json:"accounts"`
+	Rules         map[string]ruleDefinition `json:"rules"`
+	UpdatedAt     string                    `json:"updated_at"`
 }
 
 type rulePresetStore struct {
@@ -89,6 +118,35 @@ func defaultRuleDocument() rulePresetDocument {
 	}
 }
 
+func defaultRuleStoreDocumentV2() ruleStoreDocumentV2 {
+	now := time.Now().UTC().Format(time.RFC3339)
+	return ruleStoreDocumentV2{
+		SchemaVersion: 2,
+		Accounts: map[string]ruleAccount{
+			defaultRuleAccountID: {
+				Name:              "FBIF 公众号排版",
+				ActiveRuleID:      defaultRulePresetID,
+				ActiveRuleVersion: 1,
+				UpdatedAt:         now,
+			},
+		},
+		Rules: map[string]ruleDefinition{
+			defaultRulePresetID: {
+				ID:          defaultRulePresetID,
+				Name:        "默认规则",
+				Description: "当前 FBIF 公众号排版默认参数",
+				Versions: []rulePresetVersion{{
+					Version:   1,
+					Config:    defaultRuleConfig(),
+					CreatedAt: now,
+				}},
+				UpdatedAt: now,
+			},
+		},
+		UpdatedAt: now,
+	}
+}
+
 func mergeRuleDefaults(config map[string]any) map[string]any {
 	merged := defaultRuleConfig()
 	for k, v := range config {
@@ -97,8 +155,8 @@ func mergeRuleDefaults(config map[string]any) map[string]any {
 	return merged
 }
 
-func (s *rulePresetStore) readLocked() (rulePresetDocument, error) {
-	doc := defaultRuleDocument()
+func (s *rulePresetStore) readStoreLocked() (ruleStoreDocumentV2, error) {
+	doc := defaultRuleStoreDocumentV2()
 	b, err := os.ReadFile(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -106,11 +164,35 @@ func (s *rulePresetStore) readLocked() (rulePresetDocument, error) {
 		}
 		return doc, err
 	}
-	if err := json.Unmarshal(b, &doc); err != nil {
-		return defaultRuleDocument(), err
+
+	var probe struct {
+		SchemaVersion int             `json:"schema_version"`
+		Accounts      json.RawMessage `json:"accounts"`
+		Rules         json.RawMessage `json:"rules"`
 	}
-	doc = normalizeRuleDocument(doc)
-	return doc, nil
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return defaultRuleStoreDocumentV2(), err
+	}
+	if probe.SchemaVersion == 2 || len(probe.Accounts) > 0 || len(probe.Rules) > 0 {
+		if err := json.Unmarshal(b, &doc); err != nil {
+			return defaultRuleStoreDocumentV2(), err
+		}
+		return normalizeRuleStoreDocument(doc), nil
+	}
+
+	var legacy rulePresetDocument
+	if err := json.Unmarshal(b, &legacy); err != nil {
+		return defaultRuleStoreDocumentV2(), err
+	}
+	return legacyDocumentToStore(legacy), nil
+}
+
+func (s *rulePresetStore) readLocked() (rulePresetDocument, error) {
+	doc, err := s.readStoreLocked()
+	if err != nil {
+		return rulePresetDocument{}, err
+	}
+	return legacyDocumentFromStore(doc), nil
 }
 
 func normalizeRuleDocument(doc rulePresetDocument) rulePresetDocument {
@@ -163,6 +245,200 @@ func normalizeRuleDocument(doc rulePresetDocument) rulePresetDocument {
 	return doc
 }
 
+func legacyDocumentToStore(doc rulePresetDocument) ruleStoreDocumentV2 {
+	doc = normalizeRuleDocument(doc)
+	now := time.Now().UTC().Format(time.RFC3339)
+	out := ruleStoreDocumentV2{
+		SchemaVersion: 2,
+		Accounts: map[string]ruleAccount{
+			defaultRuleAccountID: {
+				Name:              "FBIF 公众号排版",
+				ActiveRuleID:      doc.ActiveID,
+				ActiveRuleVersion: 1,
+				UpdatedAt:         doc.UpdatedAt,
+			},
+		},
+		Rules:     make(map[string]ruleDefinition, len(doc.Presets)),
+		UpdatedAt: doc.UpdatedAt,
+	}
+	if out.UpdatedAt == "" {
+		out.UpdatedAt = now
+	}
+	for _, p := range doc.Presets {
+		updatedAt := p.UpdatedAt
+		if updatedAt == "" {
+			updatedAt = now
+		}
+		out.Rules[p.ID] = ruleDefinition{
+			ID:          p.ID,
+			Name:        p.Name,
+			Description: p.Description,
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    mergeRuleDefaults(p.Config),
+				CreatedAt: updatedAt,
+			}},
+			UpdatedAt: updatedAt,
+		}
+	}
+	return normalizeRuleStoreDocument(out)
+}
+
+func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if doc.Rules == nil {
+		doc.Rules = map[string]ruleDefinition{}
+	}
+	normalizedRules := make(map[string]ruleDefinition, len(doc.Rules)+1)
+	for id, rule := range doc.Rules {
+		rule.ID = sanitizeRulePresetID(firstNonEmpty(rule.ID, id))
+		if rule.ID == "" {
+			continue
+		}
+		if rule.Name == "" {
+			rule.Name = "未命名规则"
+		}
+		if len(rule.Versions) == 0 {
+			rule.Versions = []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultRuleConfig(),
+				CreatedAt: now,
+			}}
+		}
+		seenVersions := map[int]bool{}
+		versions := make([]rulePresetVersion, 0, len(rule.Versions))
+		nextVersion := 1
+		for _, version := range rule.Versions {
+			if version.Version <= 0 || seenVersions[version.Version] {
+				for seenVersions[nextVersion] {
+					nextVersion++
+				}
+				version.Version = nextVersion
+			}
+			seenVersions[version.Version] = true
+			if version.CreatedAt == "" {
+				version.CreatedAt = now
+			}
+			version.Config = mergeRuleDefaults(version.Config)
+			versions = append(versions, version)
+		}
+		sort.SliceStable(versions, func(i, j int) bool {
+			return versions[i].Version < versions[j].Version
+		})
+		rule.Versions = versions
+		if rule.UpdatedAt == "" {
+			rule.UpdatedAt = latestRuleVersion(rule).CreatedAt
+		}
+		normalizedRules[rule.ID] = rule
+	}
+	if _, ok := normalizedRules[defaultRulePresetID]; !ok {
+		d := defaultRuleStoreDocumentV2().Rules[defaultRulePresetID]
+		normalizedRules[defaultRulePresetID] = d
+	}
+	doc.SchemaVersion = 2
+	doc.Rules = normalizedRules
+	if doc.Accounts == nil {
+		doc.Accounts = map[string]ruleAccount{}
+	}
+	account := doc.Accounts[defaultRuleAccountID]
+	if account.Name == "" {
+		account.Name = "FBIF 公众号排版"
+	}
+	account.ActiveRuleID = sanitizeRulePresetID(account.ActiveRuleID)
+	if account.ActiveRuleID == "" || doc.Rules[account.ActiveRuleID].ID == "" {
+		account.ActiveRuleID = defaultRulePresetID
+	}
+	if !ruleHasVersion(doc.Rules[account.ActiveRuleID], account.ActiveRuleVersion) {
+		account.ActiveRuleVersion = latestRuleVersion(doc.Rules[account.ActiveRuleID]).Version
+	}
+	if account.UpdatedAt == "" {
+		account.UpdatedAt = now
+	}
+	doc.Accounts[defaultRuleAccountID] = account
+	if doc.UpdatedAt == "" {
+		doc.UpdatedAt = now
+	}
+	return doc
+}
+
+func legacyDocumentFromStore(doc ruleStoreDocumentV2) rulePresetDocument {
+	doc = normalizeRuleStoreDocument(doc)
+	account := doc.Accounts[defaultRuleAccountID]
+	ids := make([]string, 0, len(doc.Rules))
+	for id := range doc.Rules {
+		ids = append(ids, id)
+	}
+	sort.SliceStable(ids, func(i, j int) bool {
+		if ids[i] == defaultRulePresetID {
+			return true
+		}
+		if ids[j] == defaultRulePresetID {
+			return false
+		}
+		return doc.Rules[ids[i]].Name < doc.Rules[ids[j]].Name
+	})
+	presets := make([]rulePreset, 0, len(ids))
+	for _, id := range ids {
+		rule := doc.Rules[id]
+		version := latestRuleVersion(rule)
+		if id == account.ActiveRuleID {
+			version = ruleVersionOrLatest(rule, account.ActiveRuleVersion)
+		}
+		presets = append(presets, rulePreset{
+			ID:          rule.ID,
+			Name:        rule.Name,
+			Description: rule.Description,
+			Config:      mergeRuleDefaults(version.Config),
+			UpdatedAt:   rule.UpdatedAt,
+		})
+	}
+	return rulePresetDocument{
+		ActiveID:  account.ActiveRuleID,
+		Presets:   presets,
+		UpdatedAt: doc.UpdatedAt,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func latestRuleVersion(rule ruleDefinition) rulePresetVersion {
+	if len(rule.Versions) == 0 {
+		return rulePresetVersion{Version: 1, Config: defaultRuleConfig(), CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	}
+	latest := rule.Versions[0]
+	for _, version := range rule.Versions[1:] {
+		if version.Version > latest.Version {
+			latest = version
+		}
+	}
+	return latest
+}
+
+func ruleVersionOrLatest(rule ruleDefinition, versionNumber int) rulePresetVersion {
+	for _, version := range rule.Versions {
+		if version.Version == versionNumber {
+			return version
+		}
+	}
+	return latestRuleVersion(rule)
+}
+
+func ruleHasVersion(rule ruleDefinition, versionNumber int) bool {
+	for _, version := range rule.Versions {
+		if version.Version == versionNumber {
+			return true
+		}
+	}
+	return false
+}
+
 func seenRulePreset(presets []rulePreset, id string) bool {
 	for _, p := range presets {
 		if p.ID == id {
@@ -172,8 +448,8 @@ func seenRulePreset(presets []rulePreset, id string) bool {
 	return false
 }
 
-func (s *rulePresetStore) writeLocked(doc rulePresetDocument) error {
-	doc = normalizeRuleDocument(doc)
+func (s *rulePresetStore) writeStoreLocked(doc ruleStoreDocumentV2) error {
+	doc = normalizeRuleStoreDocument(doc)
 	doc.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := os.MkdirAll(filepath.Dir(s.path), 0755); err != nil {
 		return err
@@ -195,6 +471,10 @@ func (s *rulePresetStore) writeLocked(doc rulePresetDocument) error {
 		return err
 	}
 	return os.Rename(tmpName, s.path)
+}
+
+func (s *rulePresetStore) writeLocked(doc rulePresetDocument) error {
+	return s.writeStoreLocked(legacyDocumentToStore(doc))
 }
 
 func (s *rulePresetStore) list() (rulePresetDocument, error) {
@@ -219,9 +499,9 @@ func (s *rulePresetStore) active() (rulePreset, error) {
 func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	doc, err := s.readLocked()
+	doc, err := s.readStoreLocked()
 	if err != nil {
-		return doc, err
+		return legacyDocumentFromStore(doc), err
 	}
 	if strings.TrimSpace(p.ID) == "" {
 		p.ID = makeRulePresetID(p.Name)
@@ -235,72 +515,82 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	}
 	p.Config = mergeRuleDefaults(p.Config)
 	p.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	replaced := false
-	for i := range doc.Presets {
-		if doc.Presets[i].ID == p.ID {
-			doc.Presets[i] = p
-			replaced = true
-			break
-		}
+	rule := doc.Rules[p.ID]
+	nextVersion := 1
+	if rule.ID != "" {
+		nextVersion = latestRuleVersion(rule).Version + 1
 	}
-	if !replaced {
-		doc.Presets = append(doc.Presets, p)
+	rule.ID = p.ID
+	rule.Name = p.Name
+	rule.Description = p.Description
+	rule.Versions = append(rule.Versions, rulePresetVersion{
+		Version:   nextVersion,
+		Config:    p.Config,
+		CreatedAt: p.UpdatedAt,
+	})
+	rule.UpdatedAt = p.UpdatedAt
+	doc.Rules[p.ID] = rule
+	account := doc.Accounts[defaultRuleAccountID]
+	if account.ActiveRuleID == p.ID {
+		account.ActiveRuleVersion = nextVersion
+		account.UpdatedAt = p.UpdatedAt
+		doc.Accounts[defaultRuleAccountID] = account
 	}
-	if err := s.writeLocked(doc); err != nil {
-		return doc, err
+	if err := s.writeStoreLocked(doc); err != nil {
+		return legacyDocumentFromStore(doc), err
 	}
-	return normalizeRuleDocument(doc), nil
+	return legacyDocumentFromStore(doc), nil
 }
 
 func (s *rulePresetStore) setActive(id string) (rulePresetDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	doc, err := s.readLocked()
+	doc, err := s.readStoreLocked()
 	if err != nil {
-		return doc, err
+		return legacyDocumentFromStore(doc), err
 	}
 	id = sanitizeRulePresetID(id)
-	if !seenRulePreset(doc.Presets, id) {
-		return doc, fmt.Errorf("rule preset not found")
+	rule, ok := doc.Rules[id]
+	if !ok || rule.ID == "" {
+		return legacyDocumentFromStore(doc), fmt.Errorf("rule preset not found")
 	}
-	doc.ActiveID = id
-	if err := s.writeLocked(doc); err != nil {
-		return doc, err
+	account := doc.Accounts[defaultRuleAccountID]
+	account.ActiveRuleID = id
+	account.ActiveRuleVersion = latestRuleVersion(rule).Version
+	account.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	doc.Accounts[defaultRuleAccountID] = account
+	if err := s.writeStoreLocked(doc); err != nil {
+		return legacyDocumentFromStore(doc), err
 	}
-	return normalizeRuleDocument(doc), nil
+	return legacyDocumentFromStore(doc), nil
 }
 
 func (s *rulePresetStore) delete(id string) (rulePresetDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	doc, err := s.readLocked()
+	doc, err := s.readStoreLocked()
 	if err != nil {
-		return doc, err
+		return legacyDocumentFromStore(doc), err
 	}
 	id = sanitizeRulePresetID(id)
 	if id == defaultRulePresetID {
-		return doc, fmt.Errorf("default preset cannot be deleted")
+		return legacyDocumentFromStore(doc), fmt.Errorf("default preset cannot be deleted")
 	}
-	next := doc.Presets[:0]
-	found := false
-	for _, p := range doc.Presets {
-		if p.ID == id {
-			found = true
-			continue
-		}
-		next = append(next, p)
+	if _, ok := doc.Rules[id]; !ok {
+		return legacyDocumentFromStore(doc), fmt.Errorf("rule preset not found")
 	}
-	if !found {
-		return doc, fmt.Errorf("rule preset not found")
+	delete(doc.Rules, id)
+	account := doc.Accounts[defaultRuleAccountID]
+	if account.ActiveRuleID == id {
+		account.ActiveRuleID = defaultRulePresetID
+		account.ActiveRuleVersion = latestRuleVersion(doc.Rules[defaultRulePresetID]).Version
+		account.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		doc.Accounts[defaultRuleAccountID] = account
 	}
-	doc.Presets = next
-	if doc.ActiveID == id {
-		doc.ActiveID = defaultRulePresetID
+	if err := s.writeStoreLocked(doc); err != nil {
+		return legacyDocumentFromStore(doc), err
 	}
-	if err := s.writeLocked(doc); err != nil {
-		return doc, err
-	}
-	return normalizeRuleDocument(doc), nil
+	return legacyDocumentFromStore(doc), nil
 }
 
 var rulePresetIDUnsafe = regexp.MustCompile(`[^a-z0-9_-]+`)
