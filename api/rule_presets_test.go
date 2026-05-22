@@ -242,3 +242,103 @@ func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
 		t.Fatalf("active response leaked rules")
 	}
 }
+
+func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "secret")
+	mux := http.NewServeMux()
+	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
+
+	cases := []struct {
+		name   string
+		config map[string]any
+	}{
+		{
+			name: "bad color",
+			config: map[string]any{
+				"text_color": "red",
+			},
+		},
+		{
+			name: "NaN number",
+			config: map[string]any{
+				"font_size": "NaN",
+			},
+		},
+		{
+			name: "font injection",
+			config: map[string]any{
+				"font_family": "PingFang';<img src=x>",
+			},
+		},
+		{
+			name: "unknown field",
+			config: map[string]any{
+				"font_size": "15",
+				"html":      "<img src=x>",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(rulePreset{
+				ID:     "bad-config",
+				Name:   "Bad Config",
+				Config: tc.config,
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Admin-Password", "secret")
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("invalid config code = %d, want 400 body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestRulePresetAdminAcceptsModularConfigAndProjectsFlatLegacyPreset(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "secret")
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+	mux := http.NewServeMux()
+	registerRulePresetHandlers(mux, store)
+
+	body, _ := json.Marshal(rulePreset{
+		ID:   "modular",
+		Name: "Modular",
+		Config: map[string]any{
+			"schema_version": float64(2),
+			"font_size":      "15",
+			"modules": map[string]any{
+				"theme": map[string]any{
+					"font_size": "16",
+				},
+				"workflow": map[string]any{
+					"footer_enabled": false,
+				},
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Admin-Password", "secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("modular config code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+
+	if _, err := store.setActive("modular"); err != nil {
+		t.Fatalf("setActive: %v", err)
+	}
+	active, err := store.active()
+	if err != nil {
+		t.Fatalf("active: %v", err)
+	}
+	if active.Config["font_size"] != "16" {
+		t.Fatalf("font_size = %v, want modular override 16", active.Config["font_size"])
+	}
+	if active.Config["footer_enabled"] != false {
+		t.Fatalf("footer_enabled = %v, want false", active.Config["footer_enabled"])
+	}
+}

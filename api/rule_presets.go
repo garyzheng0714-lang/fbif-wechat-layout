@@ -149,7 +149,7 @@ func defaultRuleStoreDocumentV2() ruleStoreDocumentV2 {
 
 func mergeRuleDefaults(config map[string]any) map[string]any {
 	merged := defaultRuleConfig()
-	for k, v := range config {
+	for k, v := range flattenRuleConfig(config) {
 		merged[k] = v
 	}
 	return merged
@@ -684,8 +684,13 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 			return
 		}
 		var req rulePreset
+		r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		if err := validateRulePresetPayload(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		doc, err := store.upsert(req)

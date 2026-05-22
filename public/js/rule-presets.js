@@ -66,6 +66,8 @@ const FIELD_BY_KEY = new Map(
   RULE_SCHEMA.flatMap(group => group.fields.map(field => [field.key, field]))
 );
 
+const SAFE_FONT_FAMILY_RE = /^[A-Za-z0-9\u4e00-\u9fff -]{1,40}$/;
+
 export const DEFAULT_RULE_CONFIG = Object.freeze(
   Object.fromEntries(Array.from(FIELD_BY_KEY.values()).map(field => [field.key, field.default]))
 );
@@ -108,6 +110,7 @@ function normalizeFieldValue(value, field) {
   }
   if (field.type === 'text') {
     const s = String(value == null ? '' : value).trim();
+    if (field.key === 'font_family' && !SAFE_FONT_FAMILY_RE.test(s)) return field.default;
     return s || field.default;
   }
   return value == null ? field.default : value;
@@ -123,7 +126,7 @@ function flattenRuleConfigInput(raw) {
   for (const moduleConfig of Object.values(modules)) {
     if (isPlainObject(moduleConfig)) Object.assign(flat, moduleConfig);
   }
-  return { ...flat, ...input };
+  return { ...input, ...flat };
 }
 
 export function normalizeRuleConfig(raw) {
@@ -156,7 +159,7 @@ export function buildRuleConfigDocument(config, meta = {}) {
   };
 }
 
-export function parseRuleConfigDocument(input) {
+function parseRuleConfigJSON(input) {
   let raw = input;
   if (typeof input === 'string') {
     try {
@@ -168,12 +171,81 @@ export function parseRuleConfigDocument(input) {
   if (!isPlainObject(raw)) {
     throw new Error('规则 JSON 必须是对象');
   }
+  return raw;
+}
+
+function validateRawField(key, value, errors) {
+  const field = FIELD_BY_KEY.get(key);
+  if (!field) {
+    errors.push('未知规则字段：' + key);
+    return;
+  }
+  if (field.type === 'number') {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      errors.push(field.label + '必须是数字');
+      return;
+    }
+    if (Number.isFinite(field.min) && n < field.min) {
+      errors.push(field.label + '不能小于 ' + field.min);
+      return;
+    }
+    if (Number.isFinite(field.max) && n > field.max) {
+      errors.push(field.label + '不能大于 ' + field.max);
+    }
+    return;
+  }
+  if (field.type === 'color' && !/^#[0-9a-f]{6}$/i.test(String(value || '').trim())) {
+    errors.push(field.label + '必须是 #RRGGBB 颜色');
+    return;
+  }
+  if (field.type === 'boolean' && !(value === true || value === false || value === 'true' || value === 'false')) {
+    errors.push(field.label + '必须是布尔值');
+    return;
+  }
+  if (field.key === 'font_family' && !SAFE_FONT_FAMILY_RE.test(String(value || '').trim())) {
+    errors.push('字体只能包含中英文、数字、空格和连字符，且不超过 40 个字符');
+  }
+}
+
+function validateRuleConfigSource(source) {
+  const errors = [];
+  const modules = isPlainObject(source.modules) ? source.modules : null;
+  if (source.schema_version === 2 && !modules) {
+    errors.push('modules 必须是对象');
+  }
+  for (const [key, value] of Object.entries(source)) {
+    if (['schema_version', 'name', 'description', 'modules', 'config'].includes(key)) continue;
+    validateRawField(key, value, errors);
+  }
+  if (modules) {
+    for (const [moduleName, moduleConfig] of Object.entries(modules)) {
+      if (!isPlainObject(moduleConfig)) {
+        errors.push(moduleName + ' 模块必须是对象');
+        continue;
+      }
+      for (const [key, value] of Object.entries(moduleConfig)) {
+        validateRawField(key, value, errors);
+      }
+    }
+  }
+  if (errors.length) throw new Error(errors[0]);
+}
+
+export function validateRuleConfigDocument(input) {
+  const raw = parseRuleConfigJSON(input);
+  const source = isPlainObject(raw.config) ? raw.config : raw;
+  validateRuleConfigSource(source);
   return {
     name: String(raw.name || '').trim(),
     description: String(raw.description || '').trim(),
-    config: normalizeRuleConfig(isPlainObject(raw.config) ? raw.config : raw),
+    config: normalizeRuleConfig(source),
     document: raw,
   };
+}
+
+export function parseRuleConfigDocument(input) {
+  return validateRuleConfigDocument(input);
 }
 
 export function getRuleNumber(config, key) {

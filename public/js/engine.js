@@ -134,7 +134,9 @@ function hookPreviewImages(container) {
 }
 
 // ---- Footer ----
-const footerReady = fetch('/footer.html').then(r => r.ok ? r.text() : '').catch(() => '');
+const activeRulePack = typeof window !== 'undefined' ? window._activeRulePack : null;
+const footerUrl = activeRulePack && activeRulePack.footerUrl ? activeRulePack.footerUrl : '/footer.html';
+const footerReady = fetch(footerUrl).then(r => r.ok ? r.text() : '').catch(() => '');
 
 // Module-level flag: true when the current article was fetched from a URL
 // (i.e. it is a repost). Set explicitly by handleFile/processFile at each

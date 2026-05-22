@@ -7,6 +7,7 @@ import {
   normalizeRuleConfig,
   parseRuleConfigDocument,
   saveLocalRuleConfig,
+  validateRuleConfigDocument,
   validateRuleConfig,
 } from '../public/js/rule-presets.js';
 
@@ -22,6 +23,7 @@ test('rule config keeps legacy defaults when optional fields are missing', () =>
 test('rule config accepts modular JSON documents without changing flat consumers', () => {
   const config = normalizeRuleConfig({
     schema_version: 2,
+    font_size: DEFAULT_RULE_CONFIG.font_size,
     modules: {
       theme: {
         font_size: '16',
@@ -63,6 +65,33 @@ test('rule config JSON document round-trips through modules', () => {
   assert.equal(parsed.description, '用于 JSON 编辑框');
   assert.equal(parsed.config.font_size, '16');
   assert.equal(parsed.config.footer_enabled, false);
+});
+
+test('rule config JSON validation rejects values that would be silently normalized', () => {
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      theme: {
+        text_color: 'red',
+      },
+    },
+  })), /颜色/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      theme: {
+        font_size: '999',
+      },
+    },
+  })), /不能大于/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      theme: {
+        font_family: "PingFang';<img src=x>",
+      },
+    },
+  })), /字体/);
 });
 
 test('local fallback keeps legacy skip-upload preference', () => {

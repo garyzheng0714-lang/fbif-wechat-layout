@@ -206,7 +206,10 @@ window._pushLog = function(level, msg, detail) {
 };
 
 // ---- Rule preset config ----
-const currentTemplateId = 'fbif';
+const rulePackModule = await import('./js/rule-packs/registry.js?v=' + assetVersion);
+const activeRulePack = rulePackModule.getRulePack(rulePackModule.getRulePackIDFromLocation(location));
+window._activeRulePack = activeRulePack;
+const currentTemplateId = activeRulePack.templateId;
 const ruleModule = await import('./js/rule-presets.js?v=' + assetVersion);
 const {
   loadActiveRulePreset,
@@ -223,6 +226,18 @@ if (activeRuleSource === 'server') {
   // session-only unless the rule backend is unavailable.
   saveLocalRuleConfig(initialRule.preset.config);
 }
+
+function applyRulePackChrome(pack) {
+  document.querySelectorAll('.wx-meta-account').forEach(el => { el.textContent = pack.accountName; });
+  document.querySelectorAll('.wx-footer-name').forEach(el => { el.textContent = pack.accountName; });
+  document.querySelectorAll('.wx-avatar').forEach(el => {
+    el.src = pack.avatarUrl;
+    el.alt = pack.accountName;
+  });
+  const locationEl = document.querySelector('.wx-meta .wx-meta-gray:last-child');
+  if (locationEl) locationEl.textContent = pack.location || '上海';
+}
+applyRulePackChrome(activeRulePack);
 
 function loadConfig() {
   return normalizeRuleConfig((window._activeConfig && window._activeConfig.config) || loadLocalRuleConfig());

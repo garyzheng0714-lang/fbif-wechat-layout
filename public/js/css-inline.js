@@ -11,6 +11,12 @@ export async function loadThemeCSS() {
 }
 
 const FALLBACK_FONTS = "system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif";
+const SAFE_FONT_FAMILY_RE = /^[A-Za-z0-9\u4e00-\u9fff -]{1,40}$/;
+
+function safeFontFamily(value) {
+  const family = String(value || '').trim();
+  return SAFE_FONT_FAMILY_RE.test(family) ? family : 'PingFang SC';
+}
 
 function cssPx(value, fallback) {
   const n = Number(value);
@@ -18,7 +24,7 @@ function cssPx(value, fallback) {
 }
 
 export function resolveVars(css, config) {
-  const family = config.font_family || 'PingFang SC';
+  const family = safeFontFamily(config.font_family);
   const fontStack = "mp-quote, '" + family + "', " + FALLBACK_FONTS;
 
   return css
@@ -67,7 +73,7 @@ export function processForCopy(html, rawCSS, config) {
 }
 
 export function applyThemeVars(el, config) {
-  const family = config.font_family || 'PingFang SC';
+  const family = safeFontFamily(config.font_family);
   const fontStack = "mp-quote, '" + family + "', " + FALLBACK_FONTS;
   el.style.setProperty('--wx-font-size', cssPx(config.font_size, 15));
   el.style.setProperty('--wx-heading-size', cssPx(config.heading_size, 18));
