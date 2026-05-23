@@ -31,6 +31,11 @@ function isValidMpUrl(s) {
          /^https?:\/\/([^/]+\.)?weixin\.qq\.com\//i.test(s);
 }
 
+export function shouldAutoFetchMoreArticleUrl(value, lastFetchedUrl = '') {
+  const url = String(value || '').trim();
+  return isValidMpUrl(url) && url !== lastFetchedUrl;
+}
+
 // Per-URL in-flight + success cache. Re-pasting the same link resolves
 // instantly; a pending fetch is shared, not re-fired.
 const metaCache = new Map();
@@ -348,11 +353,6 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       refreshThumb();
     }, SAVE_DEBOUNCE_MS);
 
-    $('url').addEventListener('input', () => {
-      state.href = $('url').value.trim();
-      debouncedSave();
-    });
-
     // Track the URL we last auto-fetched so repeated paste/input events for
     // the same string don't re-fire (cache still short-circuits them, but
     // avoiding the duplicate status flicker matters).
@@ -388,6 +388,19 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
         setStatus('抓取失败: ' + err.message, 'err');
       }
     };
+
+    const scheduleAutoFetch = debounce(() => {
+      if (shouldAutoFetchMoreArticleUrl($('url').value, lastFetchedUrl)) {
+        triggerFetch();
+      }
+    }, SAVE_DEBOUNCE_MS);
+
+    $('url').addEventListener('input', () => {
+      state.href = $('url').value.trim();
+      debouncedSave();
+      scheduleAutoFetch();
+    });
+
     $('url').addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); triggerFetch(); }
     });

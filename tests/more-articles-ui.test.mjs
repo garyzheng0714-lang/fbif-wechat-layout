@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCoverPickerSources, coverPickerImageSource } from '../public/js/more-articles-ui.js';
+import { readFile } from 'node:fs/promises';
+import {
+  buildCoverPickerSources,
+  coverPickerImageSource,
+  shouldAutoFetchMoreArticleUrl,
+} from '../public/js/more-articles-ui.js';
 
 test('cover picker loads page-local article images directly', () => {
   assert.deepEqual(
@@ -72,4 +77,22 @@ test('cover picker uses the current more-article media library before main artic
     'https://mmbiz.qpic.cn/body-1.jpg?wx_fmt=jpeg',
     'https://mmbiz.qpic.cn/body-2.jpg?wx_fmt=jpeg',
   ]);
+});
+
+test('more article URL input auto-fetches when mobile paste only fires input', async () => {
+  assert.equal(
+    shouldAutoFetchMoreArticleUrl('https://mp.weixin.qq.com/s/mobile-input-only', ''),
+    true
+  );
+  assert.equal(
+    shouldAutoFetchMoreArticleUrl(
+      'https://mp.weixin.qq.com/s/mobile-input-only',
+      'https://mp.weixin.qq.com/s/mobile-input-only'
+    ),
+    false
+  );
+
+  const source = await readFile(new URL('../public/js/more-articles-ui.js', import.meta.url), 'utf8');
+  const inputHandler = source.slice(source.indexOf("$('url').addEventListener('input'"));
+  assert.match(inputHandler, /scheduleAutoFetch\(\)/);
 });
