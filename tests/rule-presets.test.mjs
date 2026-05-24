@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_RULE_CONFIG,
   buildRuleConfigDocument,
+  loadActiveRulePreset,
   loadLocalRuleConfig,
   normalizeRuleConfig,
   parseRuleConfigDocument,
   saveLocalRuleConfig,
+  setActiveRulePreset,
   validateRuleConfigDocument,
   validateRuleConfig,
 } from '../public/js/rule-presets.js';
@@ -186,4 +188,78 @@ test('rule config validation reports cross-rule conflicts', () => {
   });
   assert.ok(warnings.some(w => w.includes('标题字号小于正文字号')));
   assert.ok(warnings.some(w => w.includes('标题宽度超出')));
+});
+
+test('active rule fetch includes the selected account id', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return {
+      ok: true,
+      async json() {
+        return {
+          preset: {
+            id: 'foodtalks-series-default',
+            name: 'FoodTalks什么是系列默认规则',
+            config: DEFAULT_RULE_CONFIG,
+          },
+        };
+      },
+    };
+  };
+
+  try {
+    const loaded = await loadActiveRulePreset('foodtalks-series');
+    assert.equal(loaded.source, 'server');
+    assert.equal(loaded.preset.id, 'foodtalks-series-default');
+    assert.equal(calls[0].url, '/api/rules/active?account=foodtalks-series');
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test('admin active rule writes include the selected account id', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return {
+      ok: true,
+      async json() {
+        return { active_id: 'default', presets: [], accounts: [] };
+      },
+    };
+  };
+
+  try {
+    await setActiveRulePreset('secret', 'foodtalks-rule', 'foodtalks-series');
+    assert.equal(calls[0].url, '/api/rules/admin/active');
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      id: 'foodtalks-rule',
+      account_id: 'foodtalks-series',
+    });
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test('local rule fallback is isolated by account while preserving FBIF legacy keys', () => {
+  const store = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem(key) { return store.has(key) ? store.get(key) : null; },
+      setItem(key, value) { store.set(key, String(value)); },
+    },
+  };
+
+  try {
+    saveLocalRuleConfig({ ...DEFAULT_RULE_CONFIG, font_size: '16' }, 'fbif');
+    saveLocalRuleConfig({ ...DEFAULT_RULE_CONFIG, font_size: '18' }, 'foodtalks-series');
+
+    assert.equal(JSON.parse(store.get('config_fbif')).font_size, '16');
+    assert.equal(JSON.parse(store.get('config_foodtalks-series')).font_size, '18');
+    assert.equal(loadLocalRuleConfig('fbif').font_size, '16');
+    assert.equal(loadLocalRuleConfig('foodtalks-series').font_size, '18');
+  } finally {
+    delete globalThis.window;
+  }
 });

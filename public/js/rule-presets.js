@@ -3,6 +3,7 @@
 // same rule object to the Go server as named presets.
 
 const LOCAL_CONFIG_KEY = 'config_fbif';
+const DEFAULT_RULE_ACCOUNT_ID = 'fbif';
 const LEGACY_FOOTER_KEY = 'footer_enabled';
 const LEGACY_SKIP_UPLOAD_KEY = 'skip_upload';
 const BAD_SKIP_UPLOAD_MIGRATION_KEY = 'skip_upload_migrated_v2';
@@ -93,6 +94,16 @@ const RULE_MODULE_FIELDS = new Map(
 
 function hasWindowStorage() {
   return typeof window !== 'undefined' && window.localStorage;
+}
+
+function normalizeAccountID(accountID) {
+  const id = String(accountID || DEFAULT_RULE_ACCOUNT_ID).trim().toLowerCase();
+  return id.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || DEFAULT_RULE_ACCOUNT_ID;
+}
+
+function localConfigKey(accountID) {
+  const id = normalizeAccountID(accountID);
+  return id === DEFAULT_RULE_ACCOUNT_ID ? LOCAL_CONFIG_KEY : 'config_' + id;
 }
 
 function isPlainObject(value) {
@@ -291,37 +302,43 @@ export function getActiveRuleConfig() {
   return normalizeRuleConfig(DEFAULT_RULE_CONFIG);
 }
 
-export function loadLocalRuleConfig() {
+export function loadLocalRuleConfig(accountID = DEFAULT_RULE_ACCOUNT_ID) {
   let raw = {};
+  const account = normalizeAccountID(accountID);
   if (hasWindowStorage()) {
     try {
-      raw = JSON.parse(window.localStorage.getItem(LOCAL_CONFIG_KEY) || '{}') || {};
+      raw = JSON.parse(window.localStorage.getItem(localConfigKey(account)) || '{}') || {};
     } catch {
       raw = {};
     }
-    if (raw.footer_enabled == null) {
-      raw.footer_enabled = window.localStorage.getItem(LEGACY_FOOTER_KEY) !== 'false';
-    }
-    if (raw.skip_upload == null) {
-      raw.skip_upload = window.localStorage.getItem(LEGACY_SKIP_UPLOAD_KEY) !== 'false';
-    }
-    if (window.localStorage.getItem(BAD_SKIP_UPLOAD_MIGRATION_KEY) === 'true' &&
-        window.localStorage.getItem(RESTORED_SKIP_UPLOAD_KEY) !== 'true') {
-      raw.skip_upload = true;
-      window.localStorage.setItem(LEGACY_SKIP_UPLOAD_KEY, 'true');
-      window.localStorage.setItem(RESTORED_SKIP_UPLOAD_KEY, 'true');
+    if (account === DEFAULT_RULE_ACCOUNT_ID) {
+      if (raw.footer_enabled == null) {
+        raw.footer_enabled = window.localStorage.getItem(LEGACY_FOOTER_KEY) !== 'false';
+      }
+      if (raw.skip_upload == null) {
+        raw.skip_upload = window.localStorage.getItem(LEGACY_SKIP_UPLOAD_KEY) !== 'false';
+      }
+      if (window.localStorage.getItem(BAD_SKIP_UPLOAD_MIGRATION_KEY) === 'true' &&
+          window.localStorage.getItem(RESTORED_SKIP_UPLOAD_KEY) !== 'true') {
+        raw.skip_upload = true;
+        window.localStorage.setItem(LEGACY_SKIP_UPLOAD_KEY, 'true');
+        window.localStorage.setItem(RESTORED_SKIP_UPLOAD_KEY, 'true');
+      }
     }
   }
   return normalizeRuleConfig(raw);
 }
 
-export function saveLocalRuleConfig(config) {
+export function saveLocalRuleConfig(config, accountID = DEFAULT_RULE_ACCOUNT_ID) {
   const normalized = normalizeRuleConfig(config);
+  const account = normalizeAccountID(accountID);
   if (hasWindowStorage()) {
     try {
-      window.localStorage.setItem(LOCAL_CONFIG_KEY, JSON.stringify(normalized));
-      window.localStorage.setItem(LEGACY_FOOTER_KEY, String(normalized.footer_enabled));
-      window.localStorage.setItem(LEGACY_SKIP_UPLOAD_KEY, String(normalized.skip_upload));
+      window.localStorage.setItem(localConfigKey(account), JSON.stringify(normalized));
+      if (account === DEFAULT_RULE_ACCOUNT_ID) {
+        window.localStorage.setItem(LEGACY_FOOTER_KEY, String(normalized.footer_enabled));
+        window.localStorage.setItem(LEGACY_SKIP_UPLOAD_KEY, String(normalized.skip_upload));
+      }
     } catch {}
   }
   return normalized;
@@ -344,14 +361,15 @@ async function parseJSONResponse(resp) {
   return data;
 }
 
-export async function loadActiveRulePreset() {
+export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) {
+  const account = normalizeAccountID(accountID);
   const fallback = {
     id: 'local',
     name: '本机设置',
-    config: loadLocalRuleConfig(),
+    config: loadLocalRuleConfig(account),
   };
   try {
-    const resp = await fetch('/api/rules/active', { cache: 'no-store' });
+    const resp = await fetch('/api/rules/active?account=' + encodeURIComponent(account), { cache: 'no-store' });
     const data = await parseJSONResponse(resp);
     const preset = data.preset || fallback;
     return {
@@ -403,11 +421,14 @@ export async function saveRulePreset(password, preset) {
   return parseJSONResponse(resp);
 }
 
-export async function setActiveRulePreset(password, id) {
+export async function setActiveRulePreset(password, id, accountID = DEFAULT_RULE_ACCOUNT_ID) {
   const resp = await fetch('/api/rules/admin/active', {
     method: 'PUT',
     headers: adminHeaders(password),
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({
+      id,
+      account_id: normalizeAccountID(accountID),
+    }),
   });
   return parseJSONResponse(resp);
 }
