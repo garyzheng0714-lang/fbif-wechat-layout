@@ -444,6 +444,7 @@ document.getElementById('settingsSaveBtn').addEventListener('click', () => {
 
 const { initAdminPanel } = await import('./js/admin-panel.js?v=' + assetVersion);
 initAdminPanel({
+  rulePacks: rulePackModule.listRulePacks(),
   getConfig: loadConfig,
   getPreset: () => (window._activeConfig && window._activeConfig.preset) || null,
   applyConfig(config, preset, meta = {}) {

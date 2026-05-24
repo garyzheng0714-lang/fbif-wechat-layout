@@ -23,3 +23,22 @@ test('rule admin lets JSON explicitly clear a saved description', async () => {
   assert.doesNotMatch(adminPanel, /if \(parsed\.description\) workingDescription/);
   assert.doesNotMatch(adminPanel, /if \(parsed\.description && descriptionInput\)/);
 });
+
+test('rule admin has configuration and rule-management views', async () => {
+  const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
+
+  assert.match(app, /rulePacks:\s*rulePackModule\.listRulePacks\(\)/);
+  assert.match(adminPanel, /activeView = 'assignments'/);
+  assert.match(adminPanel, /data-view="assignments"/);
+  assert.match(adminPanel, /data-view="rules"/);
+  assert.match(adminPanel, /规则配置/);
+  assert.match(adminPanel, /已应用到：/);
+  assert.match(adminPanel, /未应用/);
+  assert.match(adminPanel, /renderApplicationBadges/);
+  assert.match(adminPanel, /setActiveRulePreset\(password, ruleID, accountID\)/);
+  assert.match(css, /\.admin-layout/);
+  assert.match(css, /\.admin-side-nav/);
+  assert.match(css, /\.admin-applied-badges/);
+});

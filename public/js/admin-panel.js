@@ -103,6 +103,7 @@ export function initAdminPanel(options = {}) {
   const applyConfig = options.applyConfig || ((config, preset) => {
     window._activeConfig = { config: normalizeRuleConfig(config), preset };
   });
+  const rulePacks = Array.isArray(options.rulePacks) ? options.rulePacks : [];
 
   let overlay = null;
   let password = '';
@@ -116,6 +117,7 @@ export function initAdminPanel(options = {}) {
   let jsonDirty = false;
   let status = '';
   let busy = false;
+  let activeView = 'assignments';
 
   function setStatus(text) {
     status = text || '';
@@ -258,6 +260,109 @@ export function initAdminPanel(options = {}) {
     syncJSONText();
   }
 
+  function visibleRulePacks() {
+    return rulePacks.length ? rulePacks : [{ id: 'fbif', accountName: 'FBIF公众号' }];
+  }
+
+  function accountBindings() {
+    const byID = new Map((doc && doc.accounts || []).map(account => [account.id, account]));
+    return visibleRulePacks().map(pack => {
+      const binding = byID.get(pack.id) || {};
+      return {
+        id: pack.id,
+        name: pack.accountName,
+        activeID: binding.active_id || binding.activeID || (doc && doc.active_id) || 'default',
+      };
+    });
+  }
+
+  function accountsUsingRule(ruleID) {
+    return accountBindings().filter(account => account.activeID === ruleID);
+  }
+
+  function renderApplicationBadges(ruleID) {
+    const accounts = accountsUsingRule(ruleID);
+    if (accounts.length === 0) {
+      return '<div class="admin-applied-empty">未应用</div>';
+    }
+    return `
+      <div class="admin-applied-badges" aria-label="规则应用位置">
+        <span class="admin-applied-label">已应用到：</span>
+        ${accounts.map(account => `<span class="admin-applied-badge">${esc(account.name)}</span>`).join('')}
+      </div>`;
+  }
+
+  function renderSideNav() {
+    return `
+      <nav class="admin-side-nav" aria-label="规则后台导航">
+        <button type="button" data-view="assignments" class="${activeView === 'assignments' ? 'active' : ''}">规则配置</button>
+        <button type="button" data-view="rules" class="${activeView === 'rules' ? 'active' : ''}">规则</button>
+      </nav>`;
+  }
+
+  function renderPresetOptions(activeID) {
+    const presets = (doc && doc.presets) || [];
+    return presets.map(p => {
+      const activeMark = p.id === (doc && doc.active_id) ? ' · 当前预览' : '';
+      return `<option value="${esc(p.id)}" ${p.id === activeID ? 'selected' : ''}>${esc(p.name + activeMark)}</option>`;
+    }).join('');
+  }
+
+  function currentAccountID() {
+    return (window._activeRulePack && window._activeRulePack.id) || 'fbif';
+  }
+
+  function renderAssignments() {
+    return `
+      <section class="admin-assignment-panel">
+        <h3>规则配置</h3>
+        <p class="admin-panel-note">选择每个公众号当前应用的规则。</p>
+        ${accountBindings().map(account => `
+          <label class="admin-account-row">
+            <span>${esc(account.name)}</span>
+            <select data-account-rule="${esc(account.id)}">
+              ${renderPresetOptions(account.activeID)}
+            </select>
+          </label>
+        `).join('')}
+      </section>`;
+  }
+
+  function renderRulesEditor(optionsHTML) {
+    return `
+      <div class="admin-rule-bar">
+        <label>
+          <span>规则预设</span>
+          <select data-role="preset-select">${optionsHTML}</select>
+        </label>
+        <button type="button" class="admin-secondary" data-action="new">新建规则</button>
+        <button type="button" class="admin-secondary" data-action="set-active">设为当前规则</button>
+      </div>
+      ${renderApplicationBadges(selectedID)}
+      <div class="admin-meta-grid">
+        <label>
+          <span>规则名称</span>
+          <input type="text" data-role="preset-name" value="${esc(workingName)}">
+        </label>
+        <label>
+          <span>说明</span>
+          <input type="text" data-role="preset-description" value="${esc(workingDescription)}">
+        </label>
+      </div>
+      <div data-role="rule-warnings">${renderWarningsHTML()}</div>
+      <section class="admin-rule-group admin-json-panel">
+        <div class="admin-json-head">
+          <h3>JSON 规则</h3>
+          <div class="admin-json-actions">
+            <button type="button" class="admin-secondary" data-action="validate-json">校验 JSON</button>
+            <button type="button" class="admin-secondary" data-action="apply-json">应用到预览</button>
+          </div>
+        </div>
+        <textarea data-role="rule-json" spellcheck="false">${esc(jsonText)}</textarea>
+      </section>
+      ${renderGroups(workingConfig)}`;
+  }
+
   function renderMain() {
     const presets = (doc && doc.presets) || [];
     const selected = selectedPreset();
@@ -269,6 +374,9 @@ export function initAdminPanel(options = {}) {
       const activeMark = p.id === (doc && doc.active_id) ? ' · 当前' : '';
       return `<option value="${esc(p.id)}" ${p.id === selectedID ? 'selected' : ''}>${esc(p.name + activeMark)}</option>`;
     }).join('');
+    const contentHTML = activeView === 'assignments'
+      ? renderAssignments()
+      : renderRulesEditor(optionsHTML);
     overlay.innerHTML = `
       <div class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
         <div class="admin-head">
@@ -278,43 +386,17 @@ export function initAdminPanel(options = {}) {
           </div>
           <button type="button" class="admin-close" aria-label="关闭">×</button>
         </div>
-        <div class="admin-body">
-          <div class="admin-rule-bar">
-            <label>
-              <span>规则预设</span>
-              <select data-role="preset-select">${optionsHTML}</select>
-            </label>
-            <button type="button" class="admin-secondary" data-action="new">新建规则</button>
-            <button type="button" class="admin-secondary" data-action="set-active">设为当前规则</button>
-          </div>
-          <div class="admin-meta-grid">
-            <label>
-              <span>规则名称</span>
-              <input type="text" data-role="preset-name" value="${esc(workingName)}">
-            </label>
-            <label>
-              <span>说明</span>
-              <input type="text" data-role="preset-description" value="${esc(workingDescription)}">
-            </label>
-          </div>
-          <div data-role="rule-warnings">${renderWarningsHTML()}</div>
-          <section class="admin-rule-group admin-json-panel">
-            <div class="admin-json-head">
-              <h3>JSON 规则</h3>
-              <div class="admin-json-actions">
-                <button type="button" class="admin-secondary" data-action="validate-json">校验 JSON</button>
-                <button type="button" class="admin-secondary" data-action="apply-json">应用到预览</button>
-              </div>
-            </div>
-            <textarea data-role="rule-json" spellcheck="false">${esc(jsonText)}</textarea>
-          </section>
-          ${renderGroups(workingConfig)}
+        <div class="admin-layout">
+          ${renderSideNav()}
+          <div class="admin-body">${contentHTML}</div>
         </div>
         <div class="admin-foot">
           <div class="admin-status">${esc(status)}</div>
-          <button type="button" class="admin-secondary danger" data-action="delete" ${selectedID === 'default' ? 'disabled' : ''}>删除</button>
-          <button type="button" class="admin-secondary" data-action="save-as">另存为规则</button>
-          <button type="button" class="admin-primary" data-action="save">保存到服务器</button>
+          ${activeView === 'rules' ? `
+            <button type="button" class="admin-secondary danger" data-action="delete" ${selectedID === 'default' ? 'disabled' : ''}>删除</button>
+            <button type="button" class="admin-secondary" data-action="save-as">另存为规则</button>
+            <button type="button" class="admin-primary" data-action="save">保存到服务器</button>
+          ` : ''}
         </div>
       </div>`;
     bindMain();
@@ -331,6 +413,28 @@ export function initAdminPanel(options = {}) {
 
   function bindMain() {
     overlay.querySelector('.admin-close').addEventListener('click', close);
+    overlay.querySelectorAll('[data-view]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeView = btn.dataset.view;
+        renderMain();
+      });
+    });
+    overlay.querySelectorAll('[data-account-rule]').forEach(select => {
+      select.addEventListener('change', () => {
+        const accountID = select.dataset.accountRule;
+        const ruleID = select.value;
+        run(async () => {
+          doc = await setActiveRulePreset(password, ruleID, accountID);
+          const selected = presetByID(doc, ruleID);
+          if (accountID === ((window._activeRulePack && window._activeRulePack.id) || 'fbif')) {
+            workingConfig = normalizeRuleConfig(selected ? selected.config : workingConfig);
+            selectedID = ruleID;
+            applyConfig(workingConfig, selected, { source: 'server' });
+          }
+        }, '已更新规则配置');
+      });
+    });
+    if (activeView !== 'rules') return;
     overlay.querySelector('[data-role="preset-select"]').addEventListener('change', e => {
       selectedID = e.target.value;
       const selected = selectedPreset();
@@ -430,7 +534,7 @@ export function initAdminPanel(options = {}) {
           description,
           config: workingConfig,
         });
-        await setActiveRulePreset(password, selected.id);
+        await setActiveRulePreset(password, selected.id, currentAccountID());
         doc = await listRulePresets(password);
         draftPreset = null;
         applyConfig(workingConfig, presetByID(doc, selected.id), { source: 'server' });
@@ -443,7 +547,7 @@ export function initAdminPanel(options = {}) {
         const id = clientRuleID(name);
         const description = workingDescription.trim();
         doc = await saveRulePreset(password, { id, name, description, config: workingConfig });
-        await setActiveRulePreset(password, id);
+        await setActiveRulePreset(password, id, currentAccountID());
         doc = await listRulePresets(password);
         draftPreset = null;
         selectedID = id;
@@ -454,10 +558,11 @@ export function initAdminPanel(options = {}) {
       if (draftPreset && draftPreset.id === selectedID) {
         throw new Error('新规则需要先保存');
       }
-      await setActiveRulePreset(password, selectedID);
+      const accountID = currentAccountID();
+      await setActiveRulePreset(password, selectedID, accountID);
       doc = await listRulePresets(password);
       applyConfig(workingConfig, presetByID(doc, selectedID), { source: 'server' });
-    }, '已设为当前规则'));
+    }, '已设为当前公众号规则'));
     overlay.querySelector('[data-action="delete"]').addEventListener('click', () => run(async () => {
       if (draftPreset && draftPreset.id === selectedID) {
         draftPreset = null;
