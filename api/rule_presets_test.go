@@ -79,6 +79,49 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 	}
 }
 
+func TestDefaultRulePresetIncludesBehavior(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+
+	active, err := store.activeForAccount("fbif")
+	if err != nil {
+		t.Fatalf("active default rule: %v", err)
+	}
+	if active.Behavior == nil {
+		t.Fatal("default active rule should include behavior")
+	}
+	templates, _ := active.Behavior["templates"].(map[string]any)
+	if templates["author_line"] == "" {
+		t.Fatalf("default behavior missing author_line template: %#v", active.Behavior)
+	}
+	params, _ := active.Behavior["params"].(map[string]any)
+	moteParam, _ := params["mote_ref_image_url"].(map[string]any)
+	if moteParam["default"] == "" {
+		t.Fatalf("default behavior missing Mote image param: %#v", active.Behavior)
+	}
+}
+
+func TestRulePresetRejectsInvalidBehavior(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+
+	_, err := store.upsert(rulePreset{
+		ID:     "bad-behavior",
+		Name:   "Bad behavior",
+		Config: defaultRuleConfig(),
+		Behavior: map[string]any{
+			"schema_version": float64(1),
+			"params": map[string]any{
+				"mote_ref_image_url": map[string]any{"type": "url", "required": true, "default": "http://example.com/a.png"},
+			},
+			"templates": map[string]any{
+				"author_line": `<span onclick="alert(1)">作者：{{ article.author }}</span>`,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid behavior to be rejected")
+	}
+}
+
 func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", "secret")
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))

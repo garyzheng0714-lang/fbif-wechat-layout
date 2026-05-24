@@ -25,6 +25,7 @@ type rulePreset struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Config      map[string]any `json:"config"`
+	Behavior    map[string]any `json:"behavior,omitempty"`
 	UpdatedAt   string         `json:"updated_at"`
 }
 
@@ -45,6 +46,7 @@ type ruleAccountBinding struct {
 type rulePresetVersion struct {
 	Version   int            `json:"version"`
 	Config    map[string]any `json:"config"`
+	Behavior  map[string]any `json:"behavior,omitempty"`
 	CreatedAt string         `json:"created_at"`
 }
 
@@ -125,6 +127,7 @@ func defaultRuleDocument() rulePresetDocument {
 			Name:        "FBIF默认规则",
 			Description: "当前 FBIF 公众号排版默认参数",
 			Config:      defaultRuleConfig(),
+			Behavior:    defaultRuleBehavior(),
 			UpdatedAt:   now,
 		}},
 		UpdatedAt: now,
@@ -157,6 +160,7 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 			Versions: []rulePresetVersion{{
 				Version:   1,
 				Config:    defaultRuleConfig(),
+				Behavior:  defaultRuleBehavior(),
 				CreatedAt: now,
 			}},
 			UpdatedAt: now,
@@ -168,6 +172,7 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 			Versions: []rulePresetVersion{{
 				Version:   1,
 				Config:    defaultRuleConfig(),
+				Behavior:  defaultRuleBehavior(),
 				CreatedAt: now,
 			}},
 			UpdatedAt: now,
@@ -250,6 +255,7 @@ func normalizeRuleDocument(doc rulePresetDocument) rulePresetDocument {
 			p.Name = "未命名规则"
 		}
 		p.Config = mergeRuleDefaults(p.Config)
+		p.Behavior = mergeRuleBehavior(p.Behavior)
 		if p.UpdatedAt == "" {
 			p.UpdatedAt = now
 		}
@@ -314,6 +320,7 @@ func legacyDocumentToStore(doc rulePresetDocument) ruleStoreDocumentV2 {
 			Versions: []rulePresetVersion{{
 				Version:   1,
 				Config:    mergeRuleDefaults(p.Config),
+				Behavior:  mergeRuleBehavior(p.Behavior),
 				CreatedAt: updatedAt,
 			}},
 			UpdatedAt: updatedAt,
@@ -340,6 +347,7 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 			rule.Versions = []rulePresetVersion{{
 				Version:   1,
 				Config:    defaultRuleConfig(),
+				Behavior:  defaultRuleBehavior(),
 				CreatedAt: now,
 			}}
 		}
@@ -358,6 +366,7 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 				version.CreatedAt = now
 			}
 			version.Config = mergeRuleDefaults(version.Config)
+			version.Behavior = mergeRuleBehavior(version.Behavior)
 			versions = append(versions, version)
 		}
 		sort.SliceStable(versions, func(i, j int) bool {
@@ -463,6 +472,7 @@ func legacyDocumentFromStore(doc ruleStoreDocumentV2) rulePresetDocument {
 			Name:        rule.Name,
 			Description: rule.Description,
 			Config:      mergeRuleDefaults(version.Config),
+			Behavior:    mergeRuleBehavior(version.Behavior),
 			UpdatedAt:   rule.UpdatedAt,
 		})
 	}
@@ -485,7 +495,7 @@ func firstNonEmpty(values ...string) string {
 
 func latestRuleVersion(rule ruleDefinition) rulePresetVersion {
 	if len(rule.Versions) == 0 {
-		return rulePresetVersion{Version: 1, Config: defaultRuleConfig(), CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+		return rulePresetVersion{Version: 1, Config: defaultRuleConfig(), Behavior: defaultRuleBehavior(), CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 	}
 	latest := rule.Versions[0]
 	for _, version := range rule.Versions[1:] {
@@ -587,6 +597,7 @@ func (s *rulePresetStore) activeForAccount(accountID string) (rulePreset, error)
 		Name:        rule.Name,
 		Description: rule.Description,
 		Config:      mergeRuleDefaults(version.Config),
+		Behavior:    mergeRuleBehavior(version.Behavior),
 		UpdatedAt:   rule.UpdatedAt,
 	}, nil
 }
@@ -608,7 +619,11 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	if strings.TrimSpace(p.Name) == "" {
 		p.Name = "未命名规则"
 	}
+	if err := validateRulePresetPayload(p); err != nil {
+		return legacyDocumentFromStore(doc), err
+	}
 	p.Config = mergeRuleDefaults(p.Config)
+	p.Behavior = mergeRuleBehavior(p.Behavior)
 	p.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	rule := doc.Rules[p.ID]
 	nextVersion := 1
@@ -621,6 +636,7 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	rule.Versions = append(rule.Versions, rulePresetVersion{
 		Version:   nextVersion,
 		Config:    p.Config,
+		Behavior:  p.Behavior,
 		CreatedAt: p.UpdatedAt,
 	})
 	rule.UpdatedAt = p.UpdatedAt
