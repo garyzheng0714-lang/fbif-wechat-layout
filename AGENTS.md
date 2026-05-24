@@ -31,8 +31,8 @@ in the active thread, the newer instruction wins. Do not promote old product
 requests into this list unless the user explicitly reconfirms them as current.
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
-2. **仅保留 FBIF 公众号排版** — Mote 模板已移除，不再做模板切换
-3. **规则服务端保存 + 本地降级** — 参数预设以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
+2. **多公众号规则绑定，单模板起步** — 默认公众号为 `FBIF公众号`，上传区胶囊可切到 `FoodTalks什么是系列`；公众号是规则应用对象，规则是可复用资产，新增公众号必须先进入 `public/js/rule-packs/registry.js`
+3. **规则服务端保存 + 本地降级** — 参数预设和 `behavior` 行为配置以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
 4. **所有按钮在顶部工具栏** — 底部不放按钮
 5. **不要 TOC/目录** — 已删除
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F
@@ -42,7 +42,7 @@ requests into this list unless the user explicitly reconfirms them as current.
 10. **表单只填数字** — 不要 px/em 后缀，颜色用 color picker
 11. **不要 phone-frame 边框** — 文章直接在白底上流动
 12. **原创 DOCX 作者行规则** — 首个 `作者：` 行是文章正文起点；它之前的编辑前置材料默认不显示在编辑器里
-13. **Mote 作者特殊排版** — `Mote莫特` / `Mote 莫特` 触发参考来源上方固定署名图；原创作者行颜色为 `#396FBC` 且不斜体
+13. **Mote 作者特殊排版** — 默认 `behavior` 下，`Mote莫特` / `Mote 莫特` 触发参考来源上方固定署名图；原创作者行颜色为 `#396FBC` 且不斜体
 14. **更多文章选图使用当前卡片媒体库** — `/api/fetch-article-meta` 必须返回 `image_urls`；“替换图片”候选顺序为当前卡片自定义封面、抓取头图、当前卡片正文媒体图，主文章图片只做兜底。旧卡片缺少 `image_urls` 时点击替换要按卡片链接补抓，不要显示“本文暂无图片”。
 15. **URL 导入图片说明组不可拆散** — `图片 -> 图注 -> 图片来源` 必须连续归为图注；`图片来源：` / `图源：` 不能被当成正文或文章级来源
 16. **URL 导入作者来源固定在提示前** — 文章级 `来源：` / `作者：` / `编辑：` 只渲染一次，位置固定在标准 `提示：` 页脚前
@@ -65,6 +65,7 @@ requests into this list unless the user explicitly reconfirms them as current.
 ## Rule Hygiene
 - Rules in this file must describe current behavior, not historical requests.
 - Mutable product preferences need source/date/status before being treated as stable.
+- `behavior` 是受限规则文档，不是任意 JS 执行入口；只用于作者/来源行、Mote 署名图、原创/转载页脚提示等轻量业务规则。
 - Copy behavior must not navigate away from the editor unless the current user request explicitly asks for it.
 - Copy speed is a product contract: do not hide background work behind the copy button or change the button text to upload/preparation states.
 - URL 导入、DOCX 段距和复制链路的排版契约必须有测试保护；新增解析规则时至少跑 `cd api && go test ./...`、`npm test`，并用真实浏览器验证用户给出的样例文章。

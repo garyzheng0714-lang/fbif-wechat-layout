@@ -41,6 +41,16 @@ test('copy keeps the final WeChat cursor paragraph zero-height', async () => {
   assert.ok(copyFn.includes('html += \'<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>\';'));
 });
 
+test('footer original and repost notices come from behavior rules', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+
+  assert.match(engine, /getActiveRuleBehavior/);
+  assert.match(engine, /footer_original_notice/);
+  assert.match(engine, /footer_repost_notice/);
+  assert.match(engine, /renderBehaviorTemplate/);
+  assert.doesNotMatch(engine, /const after = '\* 本文为转载，不代表FBIF立场。'/);
+});
+
 test('deploy writes rule admin password to production env', async () => {
   const workflow = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
   assert.match(workflow, /ADMIN_PASSWORD:\s*\$\{\{ secrets\.ADMIN_PASSWORD \}\}/);

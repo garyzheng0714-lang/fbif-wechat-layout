@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -95,6 +96,8 @@ var ruleModuleFields = map[string]map[string]bool{
 
 var ruleHexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 var ruleFontFamily = regexp.MustCompile(`^[A-Za-z0-9一-龥 -]{1,40}$`)
+var behaviorUnsafeTemplate = regexp.MustCompile(`(?i)<script|on\w+\s*=|javascript:`)
+var behaviorUnsafeURL = regexp.MustCompile(`[\x00-\x20\x7F"'<>\\]`)
 
 func validateRuleConfig(config map[string]any) error {
 	if err := validateRuleConfigKeys(config); err != nil {
@@ -147,7 +150,222 @@ func validateRulePresetPayload(p rulePreset) error {
 	if len([]rune(p.Description)) > 500 {
 		return fmt.Errorf("description is too long")
 	}
-	return validateRuleConfig(p.Config)
+	if err := validateRuleConfig(p.Config); err != nil {
+		return err
+	}
+	return validateRuleBehaviorPayload(p.Behavior)
+}
+
+func validateRuleBehaviorPayload(raw map[string]any) error {
+	for key := range raw {
+		switch key {
+		case "schema_version", "params", "conditions", "actions", "templates", "output_contracts":
+		default:
+			return fmt.Errorf("unknown behavior field: %s", key)
+		}
+	}
+	for _, key := range []string{"params", "templates", "output_contracts"} {
+		if value, ok := raw[key]; ok {
+			if _, ok := value.(map[string]any); !ok {
+				return fmt.Errorf("behavior %s must be an object", key)
+			}
+		}
+	}
+	for _, key := range []string{"conditions", "actions"} {
+		if value, ok := raw[key]; ok {
+			if _, ok := value.([]any); !ok {
+				return fmt.Errorf("behavior %s must be an array", key)
+			}
+		}
+	}
+	if version, ok := raw["schema_version"]; ok && int(ruleBehaviorNumber(version)) != 1 {
+		return fmt.Errorf("unsupported behavior schema_version")
+	}
+	behavior := mergeRuleBehavior(raw)
+	params, ok := behavior["params"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("behavior params must be an object")
+	}
+	for key, value := range params {
+		spec, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("behavior param %s must be an object", key)
+		}
+		if err := validateRuleBehaviorParam(key, spec); err != nil {
+			return err
+		}
+	}
+	conditionIDs, err := validateRuleBehaviorConditions(behavior["conditions"])
+	if err != nil {
+		return err
+	}
+	if err := validateRuleBehaviorActions(behavior["actions"], conditionIDs, params); err != nil {
+		return err
+	}
+	templates, ok := behavior["templates"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("behavior templates must be an object")
+	}
+	contracts, _ := behavior["output_contracts"].(map[string]any)
+	for key, value := range templates {
+		template, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("behavior template %s must be a string", key)
+		}
+		maxLength := 2000
+		if contract, ok := contracts[key].(map[string]any); ok {
+			if n := int(ruleBehaviorNumber(contract["max_length"])); n > 0 {
+				maxLength = n
+			}
+			if allowHTML, ok := contract["allow_html"].(bool); ok && allowHTML {
+				return fmt.Errorf("behavior template %s cannot allow raw html", key)
+			}
+		}
+		if len([]rune(template)) > maxLength || len([]rune(template)) > 2000 {
+			return fmt.Errorf("behavior template %s is too long", key)
+		}
+		if behaviorUnsafeTemplate.MatchString(template) {
+			return fmt.Errorf("behavior template %s contains unsafe HTML", key)
+		}
+	}
+	if contracts != nil {
+		for key, value := range contracts {
+			contract, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("behavior output contract %s must be an object", key)
+			}
+			if n := int(ruleBehaviorNumber(contract["max_length"])); n < 0 || n > 2000 {
+				return fmt.Errorf("behavior output contract %s has invalid max_length", key)
+			}
+		}
+	}
+	return nil
+}
+
+func validateRuleBehaviorParam(key string, spec map[string]any) error {
+	typ, _ := spec["type"].(string)
+	switch typ {
+	case "url", "string", "boolean", "number":
+	default:
+		return fmt.Errorf("unknown behavior param type: %s", key)
+	}
+	required, _ := spec["required"].(bool)
+	defaultValue := ""
+	if rawDefault, ok := spec["default"]; ok && rawDefault != nil {
+		defaultValue = strings.TrimSpace(fmt.Sprint(rawDefault))
+	}
+	if required && defaultValue == "" {
+		return fmt.Errorf("missing required behavior param default: %s", key)
+	}
+	if typ == "url" && defaultValue != "" && !isSafeRuleBehaviorURL(defaultValue) {
+		return fmt.Errorf("behavior url param must be a site path or HTTPS URL: %s", key)
+	}
+	return nil
+}
+
+func isSafeRuleBehaviorURL(value string) bool {
+	source := strings.TrimSpace(value)
+	if source == "" || behaviorUnsafeURL.MatchString(source) {
+		return false
+	}
+	if strings.HasPrefix(source, "/") {
+		return !strings.HasPrefix(source, "//")
+	}
+	parsed, err := url.Parse(source)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil
+}
+
+func validateRuleBehaviorConditions(raw any) (map[string]bool, error) {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("behavior conditions must be an array")
+	}
+	ids := map[string]bool{}
+	for _, item := range items {
+		condition, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("behavior condition must be an object")
+		}
+		id := strings.TrimSpace(fmt.Sprint(condition["id"]))
+		if id == "" {
+			return nil, fmt.Errorf("behavior condition missing id")
+		}
+		if ids[id] {
+			return nil, fmt.Errorf("duplicate behavior condition: %s", id)
+		}
+		ids[id] = true
+		groups := 0
+		var entries []any
+		for _, key := range []string{"all", "any"} {
+			if rawEntries, ok := condition[key]; ok {
+				groups++
+				entries, ok = rawEntries.([]any)
+				if !ok || len(entries) == 0 {
+					return nil, fmt.Errorf("behavior condition %s has invalid %s", id, key)
+				}
+			}
+		}
+		if groups != 1 {
+			return nil, fmt.Errorf("behavior condition %s must have exactly one of all or any", id)
+		}
+		for _, entry := range entries {
+			conditionEntry, ok := entry.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("behavior condition %s entry must be an object", id)
+			}
+			if strings.TrimSpace(fmt.Sprint(conditionEntry["path"])) == "" {
+				return nil, fmt.Errorf("behavior condition %s entry missing path", id)
+			}
+			switch fmt.Sprint(conditionEntry["op"]) {
+			case "eq", "neq", "exists", "includes":
+			default:
+				return nil, fmt.Errorf("unknown behavior condition op: %v", conditionEntry["op"])
+			}
+		}
+	}
+	return ids, nil
+}
+
+func validateRuleBehaviorActions(raw any, conditionIDs map[string]bool, params map[string]any) error {
+	items, ok := raw.([]any)
+	if !ok {
+		return fmt.Errorf("behavior actions must be an array")
+	}
+	for _, item := range items {
+		action, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("behavior action must be an object")
+		}
+		when := strings.TrimSpace(fmt.Sprint(action["when"]))
+		if !conditionIDs[when] {
+			return fmt.Errorf("behavior action references unknown condition: %s", when)
+		}
+		if fmt.Sprint(action["type"]) != "insert_image_before" {
+			return fmt.Errorf("unknown behavior action type: %v", action["type"])
+		}
+		if fmt.Sprint(action["target"]) != "first_ref_heading" {
+			return fmt.Errorf("unknown behavior action target: %v", action["target"])
+		}
+		srcParam := strings.TrimSpace(fmt.Sprint(action["src_param"]))
+		if srcParam == "" {
+			return fmt.Errorf("behavior insert image action missing src_param")
+		}
+		if _, ok := params[srcParam]; !ok {
+			return fmt.Errorf("behavior action references unknown param: %s", srcParam)
+		}
+	}
+	return nil
+}
+
+func ruleBehaviorNumber(value any) float64 {
+	n, err := ruleValueAsFloat(value)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func validateRuleConfigKeys(config map[string]any) error {

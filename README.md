@@ -15,9 +15,9 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 
 ## 最新状态（2026-05-24）
 
-- 规则配置已从单一预设扩展为模块化规则库：前端以 `public/js/rule-presets.js` 作为 schema 和本地兜底，服务端以 `api/rule_presets.go` 兼容旧版 preset 文档和 v2 rule store。
-- 密码保护的规则后台支持选择、新建、编辑、JSON 校验和应用规则；规则写入前会在前后端同时校验字段、颜色、数字范围、布尔值和模块名。
-- `public/js/rule-packs/registry.js` 已收拢账号 chrome、页脚和模板入口，目前默认只注册 FBIF 账号包，后续新增账号包应先扩展该注册表。
+- 规则配置已扩展为多公众号模块化规则库：前端以 `public/js/rule-presets.js` 作为 schema 和本地兜底，服务端以 `api/rule_presets.go` 兼容旧版 preset 文档和 v2 rule store。
+- 密码保护的规则后台支持 `规则配置` 和 `规则` 两个视图：`规则配置` 绑定公众号当前应用的规则，`规则` 内含 `参数`、`代码化规则`、`校验预览` 三个分区，可编辑参数 JSON 和受限行为 JSON。
+- `public/js/rule-packs/registry.js` 已收拢账号 chrome、页脚和模板入口，当前注册 `FBIF公众号` 与 `FoodTalks什么是系列`；新增公众号必须先扩展该注册表。
 - “更多文章”URL 输入框已支持移动端粘贴只触发 `input` 事件的场景：合法微信文章链接会自动抓取元信息，同一链接不会重复触发抓取。
 - DOCX golden 输出、规则后台、规则 schema、CSS 内联和规则包注册都有 Node / Go 测试保护。
 
@@ -32,12 +32,12 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - “更多文章”URL 粘贴支持移动端 input-only 行为；输入合法微信文章链接后会自动抓取，重复输入同一链接不闪烁状态。
 - 支持旧版 `.doc` 经 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
 - 支持多文件队列处理、品牌页脚开关和“更多文章”组合页脚。
-- 支持服务端规则预设保存与切换；规则库 v2 文档可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等配置，本地设置保留为离线降级和兼容兜底。
+- 支持多公众号规则绑定：`FBIF公众号` 与 `FoodTalks什么是系列` 可分别选择当前应用的规则；规则库 v2 文档可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数配置，并为每条规则保存 `behavior` 行为配置，本地设置保留为离线降级和兼容兜底。
 - 原创 DOCX 以首个 `作者：` 行作为正文起点；该行之前的编辑前置材料不进入编辑器预览。
 - DOCX 连续正文段落会保留紧凑排版；只有原文空段分隔的位置才恢复标准段后间距。
 - URL 导入的文章级 `来源：`、`作者：`、`编辑：` 会收集到正文末尾，并在标准 FBIF `提示：` 页脚前只渲染一次。
 - 正文最后一段（包括参考来源末行）与标准 FBIF `提示：` 页脚之间保留标准段落间距，避免正文尾部贴住页脚。
-- 作者为 `Mote莫特` 或 `Mote 莫特` 时，会在“参考来源”上方自动插入固定署名图片。
+- 默认行为规则下，作者为 `Mote莫特` 或 `Mote 莫特` 时，会在“参考来源”上方自动插入固定署名图片；后台 `代码化规则` 可调整作者/来源/页脚文案和这类受限插图动作。
 
 ## 技术栈
 
@@ -64,7 +64,8 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 │   │   ├── css-inline.js           # 复制前 CSS 内联
 │   │   ├── crop-editor.js          # 图片裁剪编辑
 │   │   ├── more-articles*.js       # “更多文章”配置与合成
-│   │   ├── rule-presets.js         # 规则参数 schema 和 API 封装
+│   │   ├── rule-presets.js         # 规则参数 schema、行为加载和 API 封装
+│   │   ├── rule-behavior.js        # 受限行为规则 schema、校验和执行
 │   │   ├── rule-packs/registry.js  # 账号包、页脚和模板注册表
 │   │   ├── admin-panel.js          # 密码保护的规则后台 UI
 │   │   └── templates/fbif.js       # FBIF 模板
@@ -74,7 +75,8 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 │   ├── main.go                     # API + 静态文件服务
 │   ├── html2md.go                  # HTML 转 Markdown 辅助
 │   ├── rule_presets.go             # 规则预设存储、后台 API 和 v1/v2 兼容
-│   ├── rule_config_validation.go   # 规则字段、模块和取值校验
+│   ├── rule_behavior.go            # 默认行为规则和服务端合并逻辑
+│   ├── rule_config_validation.go   # 规则字段、模块、行为和取值校验
 │   └── wechat_blocks.go            # 微信文章块提取
 ├── tests/                          # 前端模块测试
 ├── DESIGN.md                       # 设计系统和交互约束
@@ -136,11 +138,11 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
-| `GET` | `/api/rules/active` | 读取当前服务端规则预设；前端失败时降级到本地设置 |
+| `GET` | `/api/rules/active?account=foodtalks-series` | 读取指定公众号当前规则；未传 `account` 时默认读取 FBIF |
 | `POST` | `/api/rules/admin/login` | 校验规则后台密码；成功返回 `{ "ok": true }` |
 | `GET` | `/api/rules/admin/presets` | 列出规则预设，需 `X-Admin-Password` |
 | `POST` | `/api/rules/admin/presets` | 保存规则预设，需 `X-Admin-Password` |
-| `PUT` | `/api/rules/admin/active` | 切换当前规则预设，需 `X-Admin-Password` |
+| `PUT` | `/api/rules/admin/active` | 绑定某个公众号当前应用的规则，支持 `{ "account_id": "...", "id": "..." }`，需 `X-Admin-Password` |
 | `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需 `X-Admin-Password` |
 
 ## 配置
@@ -204,11 +206,12 @@ go test ./...
 
 - `DESIGN.md` 记录界面和公众号预览页的设计约束。
 - 当前主模板为 `fbif`；功能描述应以 `public/app.html`、`public/js/engine.js` 和 `public/js/templates/fbif.js` 为准。
-- 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；服务端持久化、v1/v2 兼容和写入校验集中在 `api/rule_presets.go`、`api/rule_config_validation.go`。
-- 账号包入口集中在 `public/js/rule-packs/registry.js`；新增账号包时应同时确认页脚、头像、账号名、模板 ID 和测试覆盖。
+- 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；受限行为规则集中在 `public/js/rule-behavior.js`。服务端持久化、v1/v2 兼容、公众号绑定和写入校验集中在 `api/rule_presets.go`、`api/rule_behavior.go`、`api/rule_config_validation.go`。
+- `behavior` 不是任意 JavaScript。第一阶段只允许 schema 校验过的参数、条件、动作和模板槽位，用于作者/来源行、Mote 署名图、原创/转载页脚提示等轻量业务规则；解析、上传、复制、重试和图片处理仍必须留在代码里并由测试保护。
+- 账号包入口集中在 `public/js/rule-packs/registry.js`；新增账号包时应同时确认页脚、头像、账号名、模板 ID 和测试覆盖。`FoodTalks什么是系列` 第一阶段复用现有 FBIF 模板和页脚资产，但拥有独立默认规则绑定，避免编辑 FoodTalks 规则时影响 FBIF。
 - 复制到微信前的兼容处理集中在 `engine.js`、`clipboard.js`、`css-inline.js`、`uploader.js` 和 `more-articles.js`。`copyContent()` 不应等待图片上传或“更多文章”合成；后台准备完成后刷新复制层，下一次复制自然使用新结果。
 - “更多文章”选图链路由 `api/main.go` 的 `/api/fetch-article-meta` 返回 `image_urls`，`public/js/more-articles.js` 持久化到卡片状态，`public/js/more-articles-ui.js` 合并为选图候选并处理 URL 输入自动抓取。候选顺序为自定义封面、抓取头图、当前卡片正文媒体图、主文章图片兜底。
-- DOCX 作者规则集中在 `public/js/templates/fbif.js`：首个 `作者：` 行之前内容默认隐藏；`Mote莫特` / `Mote 莫特` 会触发参考来源上方的固定署名图片。
+- DOCX 作者规则集中在 `public/js/templates/fbif.js`：首个 `作者：` 行之前内容默认隐藏；作者/来源输出和 `Mote莫特` / `Mote 莫特` 署名图由当前规则的 `behavior` 控制，默认行为保持原 FBIF 输出。
 - DOCX 段距规则也在 `public/js/templates/fbif.js`：连续非空正文段落在 Word 段距较小时保持紧凑；如果中间出现空段，则下一段前恢复标准 `wx-gap`。
 - URL 导入结构化块由 `api/wechat_blocks.go` 输出，`public/js/templates/fbif.js` 渲染。图片说明组必须保留为 `cap`；文章级来源、作者、编辑必须在正文尾部、标准页脚前只渲染一次；正文尾段即使没有后续正文块，也必须带 `wx-gap`，给标准 `提示：` 页脚留出段落间距。
 - 排版契约需要测试保护：`api/wechat_blocks_test.go` 覆盖连续图注和图片来源，`tests/fbif-template.test.mjs` 覆盖图注样式、作者来源去重、页脚位置和 DOCX 连续段落紧凑规则。
