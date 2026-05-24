@@ -1,6 +1,7 @@
 // rule-presets.js — single source of truth for configurable layout rules.
 // The normal editor keeps a local fallback; the admin panel can persist the
 // same rule object to the Go server as named presets.
+import { DEFAULT_BEHAVIOR, normalizeRuleBehavior } from './rule-behavior.js';
 
 const LOCAL_CONFIG_KEY = 'config_fbif';
 const DEFAULT_RULE_ACCOUNT_ID = 'fbif';
@@ -302,6 +303,13 @@ export function getActiveRuleConfig() {
   return normalizeRuleConfig(DEFAULT_RULE_CONFIG);
 }
 
+export function getActiveRuleBehavior() {
+  if (typeof window !== 'undefined' && window._activeConfig && window._activeConfig.behavior) {
+    return normalizeRuleBehavior(window._activeConfig.behavior);
+  }
+  return normalizeRuleBehavior(DEFAULT_BEHAVIOR);
+}
+
 export function loadLocalRuleConfig(accountID = DEFAULT_RULE_ACCOUNT_ID) {
   let raw = {};
   const account = normalizeAccountID(accountID);
@@ -346,8 +354,9 @@ export function saveLocalRuleConfig(config, accountID = DEFAULT_RULE_ACCOUNT_ID)
 
 export function applyActiveRuleConfig(config, preset) {
   const normalized = normalizeRuleConfig(config);
+  const behavior = normalizeRuleBehavior(preset && preset.behavior);
   if (typeof window !== 'undefined') {
-    window._activeConfig = { preset: preset || null, config: normalized };
+    window._activeConfig = { preset: preset || null, config: normalized, behavior };
     window._skipUpload = normalized.skip_upload === true;
   }
   return normalized;
@@ -367,6 +376,7 @@ export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) 
     id: 'local',
     name: '本机设置',
     config: loadLocalRuleConfig(account),
+    behavior: normalizeRuleBehavior(DEFAULT_BEHAVIOR),
   };
   try {
     const resp = await fetch('/api/rules/active?account=' + encodeURIComponent(account), { cache: 'no-store' });
@@ -377,6 +387,7 @@ export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) 
       preset: {
         ...preset,
         config: normalizeRuleConfig(preset.config),
+        behavior: normalizeRuleBehavior(preset.behavior),
       },
     };
   } catch (err) {
@@ -416,6 +427,7 @@ export async function saveRulePreset(password, preset) {
     body: JSON.stringify({
       ...preset,
       config: normalizeRuleConfig(preset.config),
+      behavior: normalizeRuleBehavior(preset.behavior),
     }),
   });
   return parseJSONResponse(resp);

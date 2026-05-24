@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_RULE_CONFIG,
+  applyActiveRuleConfig,
   buildRuleConfigDocument,
+  getActiveRuleBehavior,
   loadActiveRulePreset,
   loadLocalRuleConfig,
   normalizeRuleConfig,
@@ -12,6 +14,7 @@ import {
   validateRuleConfigDocument,
   validateRuleConfig,
 } from '../public/js/rule-presets.js';
+import { DEFAULT_BEHAVIOR } from '../public/js/rule-behavior.js';
 
 test('rule config keeps legacy defaults when optional fields are missing', () => {
   const config = normalizeRuleConfig({ font_size: '16', footer_enabled: false });
@@ -202,6 +205,11 @@ test('active rule fetch includes the selected account id', async () => {
             id: 'foodtalks-series-default',
             name: 'FoodTalks什么是系列默认规则',
             config: DEFAULT_RULE_CONFIG,
+            behavior: {
+              templates: {
+                author_line: '撰文：{{ article.author }}',
+              },
+            },
           },
         };
       },
@@ -212,9 +220,51 @@ test('active rule fetch includes the selected account id', async () => {
     const loaded = await loadActiveRulePreset('foodtalks-series');
     assert.equal(loaded.source, 'server');
     assert.equal(loaded.preset.id, 'foodtalks-series-default');
+    assert.equal(loaded.preset.behavior.templates.author_line, '撰文：{{ article.author }}');
     assert.equal(calls[0].url, '/api/rules/active?account=foodtalks-series');
   } finally {
     delete globalThis.fetch;
+  }
+});
+
+test('active rule fallback includes default behavior', async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  globalThis.fetch = async () => {
+    throw new Error('offline');
+  };
+  globalThis.window = {
+    localStorage: {
+      getItem() { return null; },
+      setItem() {},
+    },
+  };
+
+  try {
+    const loaded = await loadActiveRulePreset('foodtalks-series');
+    assert.equal(loaded.source, 'local');
+    assert.equal(loaded.preset.behavior.templates.author_line, DEFAULT_BEHAVIOR.templates.author_line);
+  } finally {
+    console.warn = originalWarn;
+    delete globalThis.fetch;
+    delete globalThis.window;
+  }
+});
+
+test('applyActiveRuleConfig stores active behavior for renderers', () => {
+  globalThis.window = {};
+  try {
+    applyActiveRuleConfig(DEFAULT_RULE_CONFIG, {
+      id: 'custom',
+      behavior: {
+        templates: {
+          source_line: '出品：{{ article.source }}',
+        },
+      },
+    });
+    assert.equal(getActiveRuleBehavior().templates.source_line, '出品：{{ article.source }}');
+  } finally {
+    delete globalThis.window;
   }
 });
 
