@@ -42,3 +42,23 @@ test('rule admin has configuration and rule-management views', async () => {
   assert.match(css, /\.admin-side-nav/);
   assert.match(css, /\.admin-applied-badges/);
 });
+
+test('rule admin exposes behavior-code editing and validation preview', async () => {
+  const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
+
+  assert.match(adminPanel, /validateRuleBehavior/);
+  assert.match(adminPanel, /renderBehaviorTemplate/);
+  assert.match(adminPanel, /\['behavior', '代码化规则'\]/);
+  assert.match(adminPanel, /data-rule-tab="\$\{id\}"/);
+  assert.match(adminPanel, /代码化规则/);
+  assert.match(adminPanel, /data-role="behavior-json"/);
+  assert.match(adminPanel, /data-action="validate-behavior"/);
+  assert.match(adminPanel, /data-action="apply-behavior"/);
+  assert.match(adminPanel, /\['validation', '校验预览'\]/);
+  assert.match(adminPanel, /校验预览/);
+  assert.match(adminPanel, /syncDirtyBehaviorBeforePersist\(\);[\s\S]*saveRulePreset/);
+  assert.match(adminPanel, /behavior:\s*workingBehavior/);
+  assert.match(css, /\.admin-rule-tabs/);
+  assert.match(css, /\.admin-preview-grid/);
+});

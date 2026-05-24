@@ -188,6 +188,34 @@
   gap: 10px;
   margin-bottom: 14px;
 }
+.admin-rule-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 9999px;
+  background: #f6f5f4;
+}
+.admin-rule-tabs button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 9999px;
+  padding: 0 12px;
+  background: transparent;
+  color: #615d59;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.admin-rule-tabs button.active {
+  background: #ffffff;
+  color: rgba(0,0,0,0.95);
+  box-shadow: rgba(0,0,0,0.04) 0 2px 10px;
+}
 .admin-rule-ok {
   margin-bottom: 14px;
   padding: 9px 10px;
@@ -248,6 +276,39 @@
   outline: none;
   border-color: #0075de;
   box-shadow: 0 0 0 2px rgba(0,117,222,0.15);
+}
+.admin-validation-panel h3 {
+  margin-top: 14px;
+}
+.admin-validation-panel h3:first-child {
+  margin-top: 0;
+}
+.admin-preview-grid {
+  display: grid;
+  gap: 8px;
+}
+.admin-preview-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 6px;
+}
+.admin-preview-row span {
+  color: #615d59;
+  font-size: 12px;
+  font-weight: 700;
+}
+.admin-preview-row code {
+  min-width: 0;
+  color: rgba(0,0,0,0.9);
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .admin-field-grid {
   display: grid;
@@ -338,8 +399,14 @@
   .admin-rule-bar,
   .admin-meta-grid,
   .admin-field-grid { grid-template-columns: 1fr; }
+  .admin-rule-tabs {
+    display: flex;
+    overflow-x: auto;
+    max-width: 100%;
+  }
   .admin-json-head { align-items: flex-start; flex-direction: column; }
   .admin-json-actions { width: 100%; }
+  .admin-preview-row { grid-template-columns: 1fr; }
   .admin-field { grid-template-columns: minmax(0, 1fr) 112px; }
   .admin-foot { flex-wrap: wrap; }
   .admin-status { flex-basis: 100%; }
