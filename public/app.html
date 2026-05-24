@@ -262,7 +262,7 @@ function renderAccountSwitcher() {
   const root = document.getElementById('accountSwitcher');
   if (!root) return;
   root.innerHTML = rulePackModule.listRulePacks().map(pack => `
-    <button type="button" class="account-switcher-btn ${pack.id === activeRulePack.id ? 'active' : ''}" data-account-id="${pack.id}">
+    <button type="button" class="account-switcher-btn ${pack.id === activeRulePack.id ? 'active' : ''}" data-account-id="${pack.id}" aria-pressed="${pack.id === activeRulePack.id ? 'true' : 'false'}">
       ${pack.accountName}
     </button>
   `).join('');
