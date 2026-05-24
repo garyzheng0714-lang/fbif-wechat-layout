@@ -7,6 +7,7 @@ api/fbif-api
 api/data/
 *.db
 .gstack/
+.worktrees/
 docx/
 docs/
 
