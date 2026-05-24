@@ -232,8 +232,17 @@ export function initAdminPanel(options = {}) {
     if (el) el.innerHTML = renderWarningsHTML();
   }
 
+  function validateBehaviorDraft() {
+    if (!behaviorDirty) return validateRuleBehavior(workingBehavior);
+    try {
+      return validateRuleBehavior(JSON.parse(behaviorText));
+    } catch {
+      return { ok: false, errors: ['代码化规则 JSON 格式不正确'], behavior: workingBehavior };
+    }
+  }
+
   function renderBehaviorWarningsHTML() {
-    const result = validateRuleBehavior(workingBehavior);
+    const result = validateBehaviorDraft();
     if (result.ok) {
       return '<div class="admin-rule-ok">代码化规则校验通过。</div>';
     }
@@ -253,7 +262,8 @@ export function initAdminPanel(options = {}) {
 
   function renderBehaviorPreviewHTML() {
     const context = sampleBehaviorContext();
-    const behavior = normalizeRuleBehavior(workingBehavior);
+    const validation = validateBehaviorDraft();
+    const behavior = normalizeRuleBehavior(validation.ok ? validation.behavior : workingBehavior);
     const rows = [
       ['作者行', renderBehaviorTemplate(behavior.templates.author_line, context)],
       ['来源行', renderBehaviorTemplate(behavior.templates.source_line, context)],

@@ -48,6 +48,8 @@ test('rule admin exposes behavior-code editing and validation preview', async ()
   const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
 
   assert.match(adminPanel, /validateRuleBehavior/);
+  assert.match(adminPanel, /validateBehaviorDraft/);
+  assert.match(adminPanel, /behaviorDirty/);
   assert.match(adminPanel, /renderBehaviorTemplate/);
   assert.match(adminPanel, /\['behavior', '代码化规则'\]/);
   assert.match(adminPanel, /data-rule-tab="\$\{id\}"/);
