@@ -73,6 +73,8 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 ├── api/
 │   ├── main.go                     # API + 静态文件服务
 │   ├── html2md.go                  # HTML 转 Markdown 辅助
+│   ├── rule_presets.go             # 规则预设存储、后台 API 和 v1/v2 兼容
+│   ├── rule_config_validation.go   # 规则字段、模块和取值校验
 │   └── wechat_blocks.go            # 微信文章块提取
 ├── tests/                          # 前端模块测试
 ├── DESIGN.md                       # 设计系统和交互约束
