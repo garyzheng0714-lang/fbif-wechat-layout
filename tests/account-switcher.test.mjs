@@ -13,6 +13,12 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(app, /aria-pressed/);
   assert.match(app, /loadActiveRulePreset\(activeRulePack\.id\)/);
   assert.match(app, /saveLocalRuleConfig\(initialRule\.preset\.config,\s*activeRulePack\.id\)/);
+  assert.match(app, /id="activeRuleCard"/);
+  assert.match(app, /renderActiveRuleCard/);
+  assert.match(app, /当前规则/);
+  assert.doesNotMatch(app, /id="settingsEditBtn"/);
+  assert.doesNotMatch(app, /id="settingsForm"/);
   assert.match(css, /\.account-switcher/);
   assert.match(css, /\.account-switcher-btn\.active/);
+  assert.match(css, /\.active-rule-card/);
 });

@@ -13,6 +13,11 @@ test('rule admin exposes JSON editing and new-rule controls', async () => {
   assert.match(adminPanel, /data-action="new"/);
   assert.match(adminPanel, /syncDirtyJSONBeforePersist/);
   assert.match(adminPanel, /syncDirtyJSONBeforePersist\(\);[\s\S]*saveRulePreset/);
+  assert.match(adminPanel, /应用到当前公众号/);
+  assert.match(adminPanel, /复制为新规则/);
+  assert.match(adminPanel, /保存修改/);
+  assert.doesNotMatch(adminPanel, />设为当前规则</);
+  assert.doesNotMatch(adminPanel, />另存为规则</);
 });
 
 test('rule admin save-as generates a unique id instead of overwriting same-name rules', async () => {
@@ -55,9 +60,23 @@ test('rule admin has configuration and rule-management views', async () => {
   assert.match(adminPanel, /未应用/);
   assert.match(adminPanel, /renderApplicationBadges/);
   assert.match(adminPanel, /setActiveRulePreset\(password, ruleID, accountID\)/);
+  assert.match(adminPanel, /仅在预览中查看，未改变公众号应用规则/);
   assert.match(css, /\.admin-layout/);
   assert.match(css, /\.admin-side-nav/);
   assert.match(css, /\.admin-applied-badges/);
+});
+
+test('rule admin deletes from the rule row with explicit confirmation', async () => {
+  const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
+
+  assert.match(adminPanel, /class="admin-icon-danger"/);
+  assert.match(adminPanel, /aria-label="删除当前规则"/);
+  assert.match(adminPanel, /window\.confirm/);
+  assert.match(adminPanel, /删除后无法恢复，正在使用它的公众号会回到默认规则/);
+  assert.doesNotMatch(adminPanel, /class="admin-secondary danger" data-action="delete"/);
+  assert.match(css, /\.admin-preset-control/);
+  assert.match(css, /\.admin-icon-danger/);
 });
 
 test('rule admin exposes behavior-code editing and validation preview', async () => {

@@ -39,6 +39,10 @@
         <div class="upload-hint" id="fileHint">支持 .docx、.md、.txt</div>
         <input type="file" id="fileInput">
       </div>
+      <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
+        <span class="active-rule-label">当前规则</span>
+        <span class="active-rule-name">加载中...</span>
+      </div>
 
       <div class="url-row-inline">
         <input type="url" id="urlInput" class="url-input-inline" placeholder="公众号文章链接">
@@ -52,61 +56,6 @@
       <div class="error" id="error"></div>
       <div class="sidebar-stats" id="statsBar"></div>
       <div class="batch-list" id="batchList" style="display:none;"></div>
-
-      <div class="sidebar-divider"></div>
-      <div class="sidebar-label settings-label">
-        <span>排版设置</span>
-        <button id="settingsEditBtn" class="settings-edit-btn" type="button">编辑</button>
-      </div>
-
-      <div class="settings-form" id="settingsForm" style="display: none;">
-        <div class="form-row">
-          <label>正文字号</label>
-          <input type="number" id="cfg-font_size" value="15" min="12" max="24" step="1">
-        </div>
-        <div class="form-row">
-          <label>标题字号</label>
-          <input type="number" id="cfg-heading_size" value="18" min="14" max="32" step="1">
-        </div>
-        <div class="form-row">
-          <label>行高</label>
-          <input type="number" id="cfg-line_height" value="1.75" min="1" max="3" step="0.05">
-        </div>
-        <div class="form-row">
-          <label>字间距</label>
-          <input type="number" id="cfg-letter_spacing" value="0.034" min="0" max="0.2" step="0.002">
-        </div>
-        <div class="form-row">
-          <label>正文颜色</label>
-          <div class="color-field">
-            <input type="color" id="cfg-text_color_picker" value="#544545">
-            <span class="color-hex" id="cfg-text_color_hex">#544545</span>
-          </div>
-        </div>
-        <div class="form-row">
-          <label>链接颜色</label>
-          <div class="color-field">
-            <input type="color" id="cfg-link_color_picker" value="#0070C0">
-            <span class="color-hex" id="cfg-link_color_hex">#0070C0</span>
-          </div>
-        </div>
-        <div class="form-row">
-          <label>字体</label>
-          <input type="text" id="cfg-font_family" value="PingFang SC" class="font-input">
-        </div>
-        <div class="form-row">
-          <label>页脚</label>
-          <div class="toggle-switch on" id="footerToggleBtn"><div class="toggle-knob"></div></div>
-        </div>
-        <div class="form-row" title="开启后 docx 导入的文档复制时不等待远端上传；复制前会把本地图片转成可粘贴格式。md/txt 和链接提取不受此开关影响。">
-          <label>docx 跳过上传</label>
-          <div class="toggle-switch" id="skipUploadToggleBtn"><div class="toggle-knob"></div></div>
-        </div>
-        <div class="settings-actions">
-          <button id="settingsCancelBtn" type="button" class="settings-btn secondary">取消</button>
-          <button id="settingsSaveBtn" type="button" class="settings-btn primary">保存</button>
-        </div>
-      </div>
 
       <div class="ma-section" id="moreArticlesSection">
         <div class="sidebar-divider"></div>
@@ -245,6 +194,27 @@ if (activeRuleSource === 'server') {
   saveLocalRuleConfig(initialRule.preset.config, activeRulePack.id);
 }
 
+function escText(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderActiveRuleCard() {
+  const card = document.getElementById('activeRuleCard');
+  if (!card) return;
+  const preset = (window._activeConfig && window._activeConfig.preset) || {};
+  const ruleName = preset.name || '默认规则';
+  const sourceText = activeRuleSource === 'server' ? '服务器规则' : '本地备用规则';
+  card.innerHTML = `
+    <span class="active-rule-label">当前规则</span>
+    <span class="active-rule-name">${escText(ruleName)}</span>
+    <span class="active-rule-source">${escText(activeRulePack.accountName)} · ${escText(sourceText)}</span>
+  `;
+}
+
 function applyRulePackChrome(pack) {
   const displayName = pack.previewAccountName || pack.accountName;
   document.querySelectorAll('.wx-meta-account').forEach(el => { el.textContent = displayName; });
@@ -257,6 +227,7 @@ function applyRulePackChrome(pack) {
   if (locationEl) locationEl.textContent = pack.location || '上海';
 }
 applyRulePackChrome(activeRulePack);
+renderActiveRuleCard();
 
 function renderAccountSwitcher() {
   const root = document.getElementById('accountSwitcher');
@@ -301,8 +272,8 @@ async function switchAccount(accountID) {
   if (activeRuleSource === 'server') {
     saveLocalRuleConfig(loaded.preset.config, activeRulePack.id);
   }
-  populateConfigForm();
   syncWorkflowControls();
+  renderActiveRuleCard();
   if (window.updateThemePreview) window.updateThemePreview(loadConfig());
   if (window._updateFooter) window._updateFooter(null);
   if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
@@ -326,6 +297,7 @@ function saveConfig(config, preset, options = {}) {
   }
   applyActiveRuleConfig(normalized, preset || (window._activeConfig && window._activeConfig.preset));
   syncWorkflowControls();
+  renderActiveRuleCard();
   return normalized;
 }
 
@@ -333,10 +305,6 @@ function syncWorkflowControls() {
   const c = loadConfig();
   const footerEl = document.getElementById('footerEnabled');
   if (footerEl) footerEl.checked = c.footer_enabled === true;
-  const footerToggle = document.getElementById('footerToggleBtn');
-  if (footerToggle) footerToggle.classList.toggle('on', c.footer_enabled === true);
-  const skipUploadBtn = document.getElementById('skipUploadToggleBtn');
-  if (skipUploadBtn) skipUploadBtn.classList.toggle('on', c.skip_upload === true);
   window._skipUpload = c.skip_upload === true;
 }
 
@@ -349,7 +317,6 @@ initMoreArticlesEditor({ openCropEditor });
 async function loadTemplate(templateId) {
   const cfg = loadConfig();
   saveConfig(cfg, null, { persistLocal: activeRuleSource !== 'server' });
-  populateConfigForm();
   const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
   initApp(mod.default);
   wrapEngineFunctions();
@@ -358,89 +325,7 @@ async function loadTemplate(templateId) {
 await loadTemplate(currentTemplateId);
 
 syncWorkflowControls();
-
-// ---- Footer toggle ----
-function updateFooterBtn() {
-  const on = document.getElementById('footerEnabled').checked;
-  document.getElementById('footerToggleBtn').classList.toggle('on', on);
-}
-document.getElementById('footerToggleBtn').addEventListener('click', () => {
-  const el = document.getElementById('footerEnabled');
-  el.checked = !el.checked;
-  const c = loadConfig();
-  c.footer_enabled = el.checked;
-  saveConfig(c);
-  updateFooterBtn();
-  window._updateFooter && window._updateFooter(null);
-});
-
-// ---- Skip-upload toggle (experimental) ----
-const skipUploadBtn = document.getElementById('skipUploadToggleBtn');
-skipUploadBtn.classList.toggle('on', loadConfig().skip_upload === true);
-skipUploadBtn.addEventListener('click', () => {
-  const c = loadConfig();
-  c.skip_upload = c.skip_upload !== true;
-  saveConfig(c);
-});
-
-// ---- Config form ----
-function populateConfigForm() {
-  const c = loadConfig();
-  document.getElementById('cfg-font_size').value = parseFloat(c.font_size) || 15;
-  document.getElementById('cfg-heading_size').value = parseFloat(c.heading_size) || 18;
-  document.getElementById('cfg-line_height').value = parseFloat(c.line_height) || 1.75;
-  document.getElementById('cfg-letter_spacing').value = parseFloat(c.letter_spacing) || 0.034;
-  document.getElementById('cfg-font_family').value = c.font_family || 'PingFang SC';
-  document.getElementById('cfg-text_color_picker').value = c.text_color || '#544545';
-  document.getElementById('cfg-text_color_hex').textContent = c.text_color || '#544545';
-  document.getElementById('cfg-link_color_picker').value = c.link_color || '#0070C0';
-  document.getElementById('cfg-link_color_hex').textContent = c.link_color || '#0070C0';
-}
-populateConfigForm();
-
-// Typography settings are gated behind an explicit "编辑 → 保存" flow so the
-// user isn't accidentally changing things while scrolling. Changes only
-// reach the preview after the user clicks 保存.
-function readFormIntoConfig(c) {
-  c.font_size = document.getElementById('cfg-font_size').value;
-  c.heading_size = document.getElementById('cfg-heading_size').value;
-  c.line_height = document.getElementById('cfg-line_height').value;
-  c.letter_spacing = document.getElementById('cfg-letter_spacing').value;
-  c.font_family = document.getElementById('cfg-font_family').value;
-  c.text_color = document.getElementById('cfg-text_color_picker').value;
-  c.link_color = document.getElementById('cfg-link_color_picker').value;
-  return c;
-}
-
-// Live-update the hex label next to color pickers during editing, purely visual.
-document.getElementById('settingsForm').addEventListener('input', (e) => {
-  if (e.target.id === 'cfg-text_color_picker') {
-    document.getElementById('cfg-text_color_hex').textContent = e.target.value;
-  } else if (e.target.id === 'cfg-link_color_picker') {
-    document.getElementById('cfg-link_color_hex').textContent = e.target.value;
-  }
-});
-
-function setSettingsOpen(open) {
-  document.getElementById('settingsForm').style.display = open ? '' : 'none';
-  document.getElementById('settingsEditBtn').style.display = open ? 'none' : '';
-}
-
-document.getElementById('settingsEditBtn').addEventListener('click', () => {
-  populateConfigForm();
-  setSettingsOpen(true);
-});
-
-document.getElementById('settingsCancelBtn').addEventListener('click', () => {
-  populateConfigForm();
-  setSettingsOpen(false);
-});
-
-document.getElementById('settingsSaveBtn').addEventListener('click', () => {
-  const c = saveConfig(readFormIntoConfig(loadConfig()));
-  if (window.updateThemePreview) window.updateThemePreview(c);
-  setSettingsOpen(false);
-});
+renderActiveRuleCard();
 
 const { initAdminPanel } = await import('./js/admin-panel.js?v=' + assetVersion);
 initAdminPanel({
@@ -453,7 +338,6 @@ initAdminPanel({
       cacheServerRuleFallback(config);
     }
     const c = saveConfig(config, preset, { persistLocal: meta.persistLocal === true });
-    populateConfigForm();
     if (window.updateThemePreview) window.updateThemePreview(c);
     if (window._updateFooter) window._updateFooter(null);
     if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();

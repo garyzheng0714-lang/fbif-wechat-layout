@@ -497,14 +497,20 @@ export function initAdminPanel(options = {}) {
   }
 
   function renderRulesEditor(optionsHTML) {
+    const isDefaultRule = selectedID === 'default';
     return `
       <div class="admin-rule-bar">
         <label>
           <span>规则预设</span>
-          <select data-role="preset-select">${optionsHTML}</select>
+          <span class="admin-preset-control">
+            <select data-role="preset-select">${optionsHTML}</select>
+            <button type="button" class="admin-icon-danger" data-action="delete" ${isDefaultRule ? 'disabled' : ''} title="删除当前规则" aria-label="删除当前规则">
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M9 4h6l1 2h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 6h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 9l1 10h8l1-10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+          </span>
         </label>
         <button type="button" class="admin-secondary" data-action="new">新建规则</button>
-        <button type="button" class="admin-secondary" data-action="set-active">设为当前规则</button>
+        <button type="button" class="admin-secondary" data-action="set-active">应用到当前公众号</button>
       </div>
       ${renderApplicationBadges(selectedID)}
       <div class="admin-meta-grid">
@@ -551,9 +557,8 @@ export function initAdminPanel(options = {}) {
         <div class="admin-foot">
           <div class="admin-status">${esc(status)}</div>
           ${activeView === 'rules' ? `
-            <button type="button" class="admin-secondary danger" data-action="delete" ${selectedID === 'default' ? 'disabled' : ''}>删除</button>
-            <button type="button" class="admin-secondary" data-action="save-as">另存为规则</button>
-            <button type="button" class="admin-primary" data-action="save">保存到服务器</button>
+            <button type="button" class="admin-secondary" data-action="save-as">复制为新规则</button>
+            <button type="button" class="admin-primary" data-action="save">保存修改</button>
           ` : ''}
         </div>
       </div>`;
@@ -611,7 +616,7 @@ export function initAdminPanel(options = {}) {
       syncJSONText();
       syncBehaviorText();
       applyConfig(workingConfig, presetWithBehavior(selected));
-      status = '已应用到当前预览';
+      status = '仅在预览中查看，未改变公众号应用规则';
       renderMain();
     });
     overlay.querySelector('[data-role="preset-name"]').addEventListener('input', e => {
@@ -755,7 +760,7 @@ export function initAdminPanel(options = {}) {
         draftPreset = null;
         selectedID = id;
         applyConfig(workingConfig, presetWithBehavior(presetByID(doc, id)), { source: 'server' });
-      }, '已另存并设为当前规则');
+      }, '已复制为新规则，并应用到当前公众号');
     });
     overlay.querySelector('[data-action="set-active"]').addEventListener('click', () => run(async () => {
       if (draftPreset && draftPreset.id === selectedID) {
@@ -765,8 +770,15 @@ export function initAdminPanel(options = {}) {
       await setActiveRulePreset(password, selectedID, accountID);
       doc = await listRulePresets(password);
       applyConfig(workingConfig, presetWithBehavior(presetByID(doc, selectedID)), { source: 'server' });
-    }, '已设为当前公众号规则'));
-    overlay.querySelector('[data-action="delete"]').addEventListener('click', () => run(async () => {
+    }, '已应用到当前公众号'));
+    const deleteBtn = overlay.querySelector('[data-action="delete"]');
+    if (deleteBtn) deleteBtn.addEventListener('click', () => {
+      const selectedName = workingName || '当前规则';
+      if (!(draftPreset && draftPreset.id === selectedID)) {
+        const ok = window.confirm('确定删除规则「' + selectedName + '」？删除后无法恢复，正在使用它的公众号会回到默认规则。');
+        if (!ok) return;
+      }
+      run(async () => {
       if (draftPreset && draftPreset.id === selectedID) {
         draftPreset = null;
         selectedID = doc.active_id;
@@ -791,7 +803,8 @@ export function initAdminPanel(options = {}) {
       syncJSONText();
       syncBehaviorText();
       applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' });
-    }, '已删除'));
+      }, '已删除');
+    });
   }
 
   function render() {

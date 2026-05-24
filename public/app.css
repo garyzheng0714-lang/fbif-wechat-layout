@@ -104,6 +104,41 @@ body {
 .upload-hint { font-size: 12px; color: #a39e98; }
 input[type="file"] { display: none; }
 
+.active-rule-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: -4px;
+  padding: 9px 10px;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 8px;
+  background: #fbfaf9;
+}
+.active-rule-label {
+  color: #a39e98;
+  font-size: 11px;
+  font-weight: 700;
+}
+.active-rule-name {
+  min-width: 0;
+  color: rgba(0,0,0,0.95);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.active-rule-source {
+  grid-column: 2;
+  min-width: 0;
+  color: #615d59;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* URL input */
 .url-row-inline { display: flex; gap: 6px; }
 .url-input-inline {
@@ -137,62 +172,6 @@ input[type="file"] { display: none; }
   font-feature-settings: "lnum";
 }
 .sidebar-stats:empty { display: none; }
-
-/* Settings form (collapsible) */
-.settings-label {
-  display: flex; align-items: center; justify-content: space-between;
-}
-.settings-edit-btn {
-  font-size: 11px; font-weight: 500; color: #a39e98;
-  background: none; border: none; padding: 0; cursor: pointer;
-  font-family: inherit; letter-spacing: 0;
-}
-.settings-edit-btn:hover { color: #0075de; }
-.settings-actions {
-  display: flex; gap: 8px; justify-content: flex-end; padding-top: 8px;
-}
-.settings-btn {
-  padding: 6px 14px; border-radius: 5px;
-  font-size: 12px; font-weight: 600; cursor: pointer;
-  font-family: inherit; border: 1px solid transparent;
-  transition: all 150ms ease;
-}
-.settings-btn.secondary {
-  background: rgba(0,0,0,0.05); color: rgba(0,0,0,0.85);
-}
-.settings-btn.secondary:hover { background: rgba(0,0,0,0.08); }
-.settings-btn.primary {
-  background: #0075de; color: #fff;
-}
-.settings-btn.primary:hover { background: #005bab; }
-.settings-form { display: flex; flex-direction: column; gap: 0; }
-.form-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 5px 0; gap: 8px;
-}
-.form-row label { font-size: 12px; color: #615d59; white-space: nowrap; font-weight: 400; }
-.form-row input[type="number"], .form-row input[type="text"] {
-  width: 72px; padding: 5px 8px; border: 1px solid #dddddd;
-  border-radius: 4px; font-size: 12px;
-  font-family: 'SF Mono', ui-monospace, monospace;
-  color: rgba(0,0,0,0.9); background: #ffffff;
-  text-align: right; transition: all 150ms ease;
-}
-.form-row input:focus {
-  outline: none; border-color: #0075de;
-  box-shadow: 0 0 0 2px rgba(0,117,222,0.15);
-}
-.form-row .font-input { width: 100px; text-align: left; font-family: inherit; }
-
-.color-field { display: flex; align-items: center; gap: 6px; }
-.color-field input[type="color"] {
-  width: 24px; height: 24px; border: 1px solid rgba(0,0,0,0.1);
-  border-radius: 4px; padding: 2px; cursor: pointer; background: none;
-}
-.color-hex {
-  font-size: 11px; color: #a39e98;
-  font-family: 'SF Mono', ui-monospace, monospace;
-}
 
 .toggle-switch {
   width: 36px; height: 20px; border-radius: 10px;
