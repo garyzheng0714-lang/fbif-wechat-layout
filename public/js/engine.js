@@ -42,6 +42,10 @@ export { inferWechatImageType, looksLikeGifSource };
 
 const uploaderModule = await import('./uploader.js' + assetQuery);
 const { uploadNonCdnImages, retryFailedImages, materializeLazyImages } = uploaderModule;
+const rulePresetModule = await import('./rule-presets.js' + assetQuery);
+const { getActiveRuleBehavior } = rulePresetModule;
+const behaviorModule = await import('./rule-behavior.js' + assetQuery);
+const { renderBehaviorTemplate } = behaviorModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -144,20 +148,44 @@ const footerReady = fetch(footerUrl).then(r => r.ok ? r.text() : '').catch(() =>
 // at every footer-rebuild site.
 let _isRepost = false;
 
-// Rewrites the stock FBIF footer from 原创 → 转载 when _isRepost is true.
+function footerBehaviorContext() {
+  const pack = typeof window !== 'undefined' ? window._activeRulePack : null;
+  return {
+    article: {},
+    account: {
+      name: (pack && pack.behaviorAccountName) || 'FBIF',
+      id: (pack && pack.id) || 'fbif',
+    },
+  };
+}
+
+function footerBehaviorText(slot, fallback) {
+  const behavior = getActiveRuleBehavior();
+  const text = renderBehaviorTemplate(behavior.templates && behavior.templates[slot], footerBehaviorContext());
+  return text || fallback;
+}
+
+// Rewrites the stock footer notice from the active behavior rule. URL imports
+// still remove the second stock bullet because it only applies to originals.
 // Anchors: four <!--REPOST_BULLET{1,2}_{START,END}--> HTML comments embedded
 // in footer.html. If the user customized the footer and removed the sentinels
 // or the bullet text, transform no-ops (logged) — custom footers are the
 // user's responsibility.
 function applyRepostTransform(html) {
-  if (!_isRepost) return html;
   if (typeof html !== 'string' || !html) return html;
   let out = html;
   let changed = false;
-  const before = '* 本文为FBIF原创，欢迎转发朋友圈；';
-  const after = '* 本文为转载，不代表FBIF立场。';
+  const before = footerBehaviorText('footer_original_notice', '* 本文为FBIF原创，欢迎转发朋友圈；');
+  const after = footerBehaviorText('footer_repost_notice', '* 本文为转载，不代表FBIF立场。');
+  const stockOriginal = '* 本文为FBIF原创，欢迎转发朋友圈；';
+  const nextNotice = _isRepost ? after : before;
+  if (out.includes(stockOriginal)) {
+    out = out.replace(stockOriginal, esc(nextNotice));
+    changed = true;
+  }
+  if (!_isRepost) return out;
   if (out.includes(before)) {
-    out = out.replace(before, after);
+    out = out.replace(before, esc(after));
     changed = true;
   }
   const s = '<!--REPOST_BULLET2_START-->';

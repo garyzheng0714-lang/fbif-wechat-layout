@@ -93,6 +93,33 @@ test('docx Mote author accepts the spaced name form', () => {
   assert.match(html, new RegExp(moteImageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
+test('behavior rules control author label and Mote image insertion', () => {
+  const previous = globalThis.window._activeConfig;
+  globalThis.window._activeConfig = {
+    config: {},
+    behavior: {
+      actions: [],
+      templates: {
+        author_line: '撰文：{{ article.author }}',
+      },
+    },
+  };
+  try {
+    const html = renderDocx([
+      p('作者：Mote莫特'),
+      p('正文内容'),
+      h('参考来源'),
+      p('[1] source'),
+    ]);
+
+    assert.match(html, /撰文：Mote莫特/);
+    assert.doesNotMatch(html, /作者：Mote莫特/);
+    assert.doesNotMatch(html, new RegExp(moteImageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    globalThis.window._activeConfig = previous;
+  }
+});
+
 test('docx consecutive body paragraphs stay compact until a blank paragraph separates them', () => {
   const html = renderDocx([
     docxBody('作者：张三'),

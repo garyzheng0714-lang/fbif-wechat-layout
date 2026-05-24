@@ -3,7 +3,9 @@ const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource, convertRuns } = engineModule;
 const ruleModule = await import('../rule-presets.js' + assetQuery);
-const { getActiveRuleConfig, getRuleNumber } = ruleModule;
+const { getActiveRuleConfig, getActiveRuleBehavior, getRuleNumber } = ruleModule;
+const behaviorModule = await import('../rule-behavior.js' + assetQuery);
+const { applyBehaviorToElems, normalizeAuthorName, renderBehaviorTemplate } = behaviorModule;
 
 // ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
 function leafWrap(inner) {
@@ -15,6 +17,43 @@ function leafWrapAuthor(inner) {
 
 function ruleNumber(key) {
   return getRuleNumber(getActiveRuleConfig(), key);
+}
+
+function activeBehaviorAccount() {
+  const pack = typeof window !== 'undefined' ? window._activeRulePack : null;
+  return {
+    name: (pack && pack.behaviorAccountName) || 'FBIF',
+    id: (pack && pack.id) || 'fbif',
+  };
+}
+
+function behaviorContext(author, source) {
+  return {
+    article: {
+      author: author || '',
+      source: source || '',
+      author_normalized: normalizeAuthorName(author),
+    },
+    account: activeBehaviorAccount(),
+  };
+}
+
+function attributionText(role, name, baseContext, behavior) {
+  if (role === '作者') {
+    const context = {
+      ...baseContext,
+      article: { ...baseContext.article, author: name || '', author_normalized: normalizeAuthorName(name) },
+    };
+    return renderBehaviorTemplate(behavior.templates.author_line, context);
+  }
+  if (role === '来源') {
+    const context = {
+      ...baseContext,
+      article: { ...baseContext.article, source: name || '' },
+    };
+    return renderBehaviorTemplate(behavior.templates.source_line, context);
+  }
+  return role + '：' + name;
 }
 
 function renderRuns(runs, opts) {
@@ -332,37 +371,23 @@ async function classifyMd(text) {
   return { elems, author, source, title, imgN };
 }
 
-// FBIF 内部作者 Mote 排版规范要求在「参考来源」段落上方插入固定的署名图片。
-const MOTE_REF_HEAD_IMAGE_URL = 'https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/fbif-attachment-to-url/2026/05/tblMQeXvSGd7Hebf_-CkOuPdpNzb-_3u9Rxc5KA_1778028720411/img_v3_0211e_8b79127d-72a5-4011-9f01-fe3b30c7548g_1778028720565.png';
-
-function isMoteAuthor(author) {
-  if (!author) return false;
-  return author.replace(/\s+/g, '').toLowerCase() === 'mote莫特';
-}
-
-function maybeInsertMoteImage(elems, author) {
-  if (!isMoteAuthor(author)) return elems;
-  const idx = elems.findIndex(e => e && e.k === 'refH');
-  if (idx < 0) return elems;
-  const moteImg = { k: 'img', src: MOTE_REF_HEAD_IMAGE_URL, w: '100%', maxPx: 0 };
-  return elems.slice(0, idx).concat([moteImg], elems.slice(idx));
-}
-
 // ---- HTML Rendering (class-based) ----
 // opts.isRepost — 转载路径保持微信原色（var(--wx-link-color)）；原创路径
 // 给作者行加 wx-ta-author，覆盖为 #396FBC（FBIF 视觉规范）。
 function render(elems, author, source, opts) {
   const isRepost = !!(opts && opts.isRepost);
-  elems = maybeInsertMoteImage(elems, author);
+  const behavior = getActiveRuleBehavior();
+  const context = behaviorContext(author, source);
+  elems = applyBehaviorToElems(elems, context, behavior);
   const lines = [];
 
   // Author and source lines at the top
   if (author) {
     const authorCls = isRepost ? 'wx-ta' : 'wx-ta wx-ta-author';
-    lines.push(sec(leafWrapAuthor('<span textstyle="" class="' + authorCls + '">作者：' + esc(author) + '</span>'), !source));
+    lines.push(sec(leafWrapAuthor('<span textstyle="" class="' + authorCls + '">' + esc(attributionText('作者', author, context, behavior)) + '</span>'), !source));
   }
   if (source) {
-    lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">来源：' + esc(source) + '</span>'), true));
+    lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' + esc(attributionText('来源', source, context, behavior)) + '</span>'), true));
   }
 
   for (let i = 0; i < elems.length; i++) {
@@ -393,7 +418,7 @@ function render(elems, author, source, opts) {
         lines.push(sec(renderRuns(e.runs), spaceAfter));
         break;
       case 'attr':
-        lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' + esc(e.role) + '：' + esc(e.name) + '</span>'), spaceAfter));
+        lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' + esc(attributionText(e.role, e.name, context, behavior)) + '</span>'), spaceAfter));
         break;
       case 'refH': {
         const refHeadText = (e.text || '参考来源').replace(/[：:]?$/, '：');
