@@ -66,12 +66,37 @@ const FIELD_BY_KEY = new Map(
   RULE_SCHEMA.flatMap(group => group.fields.map(field => [field.key, field]))
 );
 
+const SAFE_FONT_FAMILY_RE = /^[A-Za-z0-9\u4e00-\u9fff -]{1,40}$/;
+
 export const DEFAULT_RULE_CONFIG = Object.freeze(
   Object.fromEntries(Array.from(FIELD_BY_KEY.values()).map(field => [field.key, field.default]))
 );
 
+const RULE_MODULE_GROUPS = Object.freeze([
+  { id: 'theme', groupIds: Object.freeze(['article']) },
+  { id: 'supporting', groupIds: Object.freeze(['supporting']) },
+  { id: 'more_articles', groupIds: Object.freeze(['more_articles']) },
+  { id: 'workflow', groupIds: Object.freeze(['workflow']) },
+]);
+
+const RULE_MODULE_FIELDS = new Map(
+  RULE_MODULE_GROUPS.map(moduleGroup => {
+    const keys = new Set();
+    for (const groupID of moduleGroup.groupIds) {
+      const group = RULE_SCHEMA.find(item => item.id === groupID);
+      if (!group) continue;
+      for (const field of group.fields) keys.add(field.key);
+    }
+    return [moduleGroup.id, keys];
+  })
+);
+
 function hasWindowStorage() {
   return typeof window !== 'undefined' && window.localStorage;
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function numberToString(value, field) {
@@ -97,18 +122,156 @@ function normalizeFieldValue(value, field) {
   }
   if (field.type === 'text') {
     const s = String(value == null ? '' : value).trim();
+    if (field.key === 'font_family' && !SAFE_FONT_FAMILY_RE.test(s)) return field.default;
     return s || field.default;
   }
   return value == null ? field.default : value;
 }
 
+function flattenRuleConfigInput(raw) {
+  let input = isPlainObject(raw) ? raw : {};
+  if (isPlainObject(input.config) && (input.config.schema_version === 2 || isPlainObject(input.config.modules))) {
+    input = input.config;
+  }
+  const modules = isPlainObject(input.modules) ? input.modules : {};
+  const flat = {};
+  for (const moduleGroup of RULE_MODULE_GROUPS) {
+    const moduleConfig = modules[moduleGroup.id];
+    if (isPlainObject(moduleConfig)) Object.assign(flat, moduleConfig);
+  }
+  return { ...input, ...flat };
+}
+
 export function normalizeRuleConfig(raw) {
-  const input = raw && typeof raw === 'object' ? raw : {};
+  const input = flattenRuleConfigInput(raw);
   const out = {};
   for (const field of FIELD_BY_KEY.values()) {
     out[field.key] = normalizeFieldValue(input[field.key], field);
   }
   return out;
+}
+
+export function buildRuleConfigDocument(config, meta = {}) {
+  const normalized = normalizeRuleConfig(config);
+  const modules = {};
+  for (const moduleGroup of RULE_MODULE_GROUPS) {
+    modules[moduleGroup.id] = {};
+    for (const groupID of moduleGroup.groupIds) {
+      const group = RULE_SCHEMA.find(item => item.id === groupID);
+      if (!group) continue;
+      for (const field of group.fields) {
+        modules[moduleGroup.id][field.key] = normalized[field.key];
+      }
+    }
+  }
+  return {
+    schema_version: 2,
+    name: String(meta.name || '未命名规则').trim() || '未命名规则',
+    description: String(meta.description || '').trim(),
+    modules,
+  };
+}
+
+function parseRuleConfigJSON(input) {
+  let raw = input;
+  if (typeof input === 'string') {
+    try {
+      raw = JSON.parse(input);
+    } catch {
+      throw new Error('规则 JSON 格式不正确');
+    }
+  }
+  if (!isPlainObject(raw)) {
+    throw new Error('规则 JSON 必须是对象');
+  }
+  return raw;
+}
+
+function validateRawField(key, value, errors) {
+  const field = FIELD_BY_KEY.get(key);
+  if (!field) {
+    errors.push('未知规则字段：' + key);
+    return;
+  }
+  if (field.type === 'number') {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      errors.push(field.label + '必须是数字');
+      return;
+    }
+    if (Number.isFinite(field.min) && n < field.min) {
+      errors.push(field.label + '不能小于 ' + field.min);
+      return;
+    }
+    if (Number.isFinite(field.max) && n > field.max) {
+      errors.push(field.label + '不能大于 ' + field.max);
+    }
+    return;
+  }
+  if (field.type === 'color' && !/^#[0-9a-f]{6}$/i.test(String(value || '').trim())) {
+    errors.push(field.label + '必须是 #RRGGBB 颜色');
+    return;
+  }
+  if (field.type === 'boolean' && !(value === true || value === false || value === 'true' || value === 'false')) {
+    errors.push(field.label + '必须是布尔值');
+    return;
+  }
+  if (field.key === 'font_family' && !SAFE_FONT_FAMILY_RE.test(String(value || '').trim())) {
+    errors.push('字体只能包含中英文、数字、空格和连字符，且不超过 40 个字符');
+  }
+}
+
+function validateRuleConfigSource(source) {
+  const errors = [];
+  const modules = isPlainObject(source.modules) ? source.modules : null;
+  if (source.schema_version === 2 && !modules) {
+    errors.push('modules 必须是对象');
+  }
+  for (const [key, value] of Object.entries(source)) {
+    if (['schema_version', 'name', 'description', 'modules', 'config'].includes(key)) continue;
+    validateRawField(key, value, errors);
+  }
+  if (modules) {
+    const seenModuleFields = new Set();
+    for (const [moduleName, moduleConfig] of Object.entries(modules)) {
+      const allowedFields = RULE_MODULE_FIELDS.get(moduleName);
+      if (!allowedFields) {
+        errors.push('未知规则模块：' + moduleName);
+        continue;
+      }
+      if (!isPlainObject(moduleConfig)) {
+        errors.push(moduleName + ' 模块必须是对象');
+        continue;
+      }
+      for (const [key, value] of Object.entries(moduleConfig)) {
+        validateRawField(key, value, errors);
+        if (!allowedFields.has(key)) {
+          errors.push(key + ' 不能放在 ' + moduleName + ' 模块');
+        }
+        if (seenModuleFields.has(key)) {
+          errors.push('重复规则字段：' + key);
+        }
+        seenModuleFields.add(key);
+      }
+    }
+  }
+  if (errors.length) throw new Error(errors[0]);
+}
+
+export function validateRuleConfigDocument(input) {
+  const raw = parseRuleConfigJSON(input);
+  const source = isPlainObject(raw.config) ? raw.config : raw;
+  validateRuleConfigSource(source);
+  return {
+    name: String(raw.name || '').trim(),
+    description: String(raw.description || '').trim(),
+    config: normalizeRuleConfig(source),
+    document: raw,
+  };
+}
+
+export function parseRuleConfigDocument(input) {
+  return validateRuleConfigDocument(input);
 }
 
 export function getRuleNumber(config, key) {

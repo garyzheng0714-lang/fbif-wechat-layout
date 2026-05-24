@@ -3,11 +3,14 @@
 // engine, so adding a rule means updating rule-presets.js first.
 
 import {
+  DEFAULT_RULE_CONFIG,
   RULE_SCHEMA,
   adminLogin,
+  buildRuleConfigDocument,
   deleteRulePreset,
   listRulePresets,
   normalizeRuleConfig,
+  parseRuleConfigDocument,
   saveRulePreset,
   setActiveRulePreset,
   validateRuleConfig,
@@ -105,7 +108,12 @@ export function initAdminPanel(options = {}) {
   let password = '';
   let doc = null;
   let selectedID = '';
+  let draftPreset = null;
   let workingConfig = normalizeRuleConfig(getConfig());
+  let workingName = '未命名规则';
+  let workingDescription = '';
+  let jsonText = '';
+  let jsonDirty = false;
   let status = '';
   let busy = false;
 
@@ -119,7 +127,11 @@ export function initAdminPanel(options = {}) {
     const current = getPreset();
     selectedID = current && presetByID(doc, current.id) ? current.id : (doc.active_id || 'default');
     const selected = presetByID(doc, selectedID) || activePresetFromDoc(doc);
+    draftPreset = null;
     workingConfig = normalizeRuleConfig(selected ? selected.config : getConfig());
+    workingName = selected && selected.name ? selected.name : '未命名规则';
+    workingDescription = selected && selected.description ? selected.description : '';
+    syncJSONText();
     applyConfig(workingConfig, selected, { source: 'server' });
   }
 
@@ -204,12 +216,56 @@ export function initAdminPanel(options = {}) {
     if (el) el.innerHTML = renderWarningsHTML();
   }
 
+  function selectedPreset() {
+    return presetByID(doc, selectedID) ||
+      (draftPreset && draftPreset.id === selectedID ? draftPreset : null) ||
+      activePresetFromDoc(doc) ||
+      getPreset();
+  }
+
+  function syncJSONText() {
+    jsonText = JSON.stringify(buildRuleConfigDocument(workingConfig, {
+      name: workingName || '未命名规则',
+      description: workingDescription || '',
+    }), null, 2);
+    jsonDirty = false;
+  }
+
+  function syncJSONEditorFromInputs() {
+    if (jsonDirty || !overlay) return;
+    const nameInput = overlay.querySelector('[data-role="preset-name"]');
+    const descriptionInput = overlay.querySelector('[data-role="preset-description"]');
+    workingName = nameInput ? nameInput.value : workingName;
+    workingDescription = descriptionInput ? descriptionInput.value : workingDescription;
+    syncJSONText();
+    const textarea = overlay.querySelector('[data-role="rule-json"]');
+    if (textarea) textarea.value = jsonText;
+  }
+
+  function updateStatusInline(text) {
+    status = text || '';
+    const el = overlay && overlay.querySelector('.admin-status');
+    if (el) el.textContent = status;
+  }
+
+  function syncDirtyJSONBeforePersist() {
+    if (!jsonDirty) return;
+    const parsed = parseRuleConfigDocument(jsonText);
+    workingName = parsed.name || '未命名规则';
+    workingDescription = parsed.description;
+    workingConfig = parsed.config;
+    jsonDirty = false;
+    syncJSONText();
+  }
+
   function renderMain() {
     const presets = (doc && doc.presets) || [];
-    const selected = presetByID(doc, selectedID) || activePresetFromDoc(doc) || getPreset();
-    const name = selected && selected.name ? selected.name : '未命名规则';
-    const description = selected && selected.description ? selected.description : '';
-    const optionsHTML = presets.map(p => {
+    const selected = selectedPreset();
+    if (!jsonDirty) syncJSONText();
+    const listPresets = draftPreset && !presetByID(doc, draftPreset.id)
+      ? presets.concat([draftPreset])
+      : presets;
+    const optionsHTML = listPresets.map(p => {
       const activeMark = p.id === (doc && doc.active_id) ? ' · 当前' : '';
       return `<option value="${esc(p.id)}" ${p.id === selectedID ? 'selected' : ''}>${esc(p.name + activeMark)}</option>`;
     }).join('');
@@ -228,19 +284,30 @@ export function initAdminPanel(options = {}) {
               <span>规则预设</span>
               <select data-role="preset-select">${optionsHTML}</select>
             </label>
+            <button type="button" class="admin-secondary" data-action="new">新建规则</button>
             <button type="button" class="admin-secondary" data-action="set-active">设为当前规则</button>
           </div>
           <div class="admin-meta-grid">
             <label>
               <span>规则名称</span>
-              <input type="text" data-role="preset-name" value="${esc(name)}">
+              <input type="text" data-role="preset-name" value="${esc(workingName)}">
             </label>
             <label>
               <span>说明</span>
-              <input type="text" data-role="preset-description" value="${esc(description)}">
+              <input type="text" data-role="preset-description" value="${esc(workingDescription)}">
             </label>
           </div>
           <div data-role="rule-warnings">${renderWarningsHTML()}</div>
+          <section class="admin-rule-group admin-json-panel">
+            <div class="admin-json-head">
+              <h3>JSON 规则</h3>
+              <div class="admin-json-actions">
+                <button type="button" class="admin-secondary" data-action="validate-json">校验 JSON</button>
+                <button type="button" class="admin-secondary" data-action="apply-json">应用到预览</button>
+              </div>
+            </div>
+            <textarea data-role="rule-json" spellcheck="false">${esc(jsonText)}</textarea>
+          </section>
           ${renderGroups(workingConfig)}
         </div>
         <div class="admin-foot">
@@ -255,19 +322,82 @@ export function initAdminPanel(options = {}) {
 
   function updateWorkingField(key, value) {
     workingConfig = normalizeRuleConfig({ ...workingConfig, [key]: value });
-    const selected = presetByID(doc, selectedID) || getPreset();
+    const selected = selectedPreset();
+    jsonDirty = false;
     applyConfig(workingConfig, selected);
     refreshWarnings();
+    syncJSONEditorFromInputs();
   }
 
   function bindMain() {
     overlay.querySelector('.admin-close').addEventListener('click', close);
     overlay.querySelector('[data-role="preset-select"]').addEventListener('change', e => {
       selectedID = e.target.value;
-      const selected = presetByID(doc, selectedID);
+      const selected = selectedPreset();
       workingConfig = normalizeRuleConfig(selected ? selected.config : getConfig());
+      workingName = selected && selected.name ? selected.name : '未命名规则';
+      workingDescription = selected && selected.description ? selected.description : '';
+      syncJSONText();
       applyConfig(workingConfig, selected);
       status = '已应用到当前预览';
+      renderMain();
+    });
+    overlay.querySelector('[data-role="preset-name"]').addEventListener('input', e => {
+      workingName = e.target.value;
+      jsonDirty = false;
+      syncJSONEditorFromInputs();
+    });
+    overlay.querySelector('[data-role="preset-description"]').addEventListener('input', e => {
+      workingDescription = e.target.value;
+      jsonDirty = false;
+      syncJSONEditorFromInputs();
+    });
+    overlay.querySelector('[data-role="rule-json"]').addEventListener('input', e => {
+      jsonText = e.target.value;
+      jsonDirty = true;
+    });
+    overlay.querySelector('[data-action="validate-json"]').addEventListener('click', () => {
+      try {
+        const parsed = parseRuleConfigDocument(jsonText);
+        const warnings = validateRuleConfig(parsed.config);
+        updateStatusInline(warnings.length ? 'JSON 可用，但存在规则提醒' : 'JSON 校验通过');
+      } catch (err) {
+        updateStatusInline(err.message || 'JSON 校验失败');
+      }
+    });
+    overlay.querySelector('[data-action="apply-json"]').addEventListener('click', () => {
+      try {
+        const parsed = parseRuleConfigDocument(jsonText);
+        const nameInput = overlay.querySelector('[data-role="preset-name"]');
+        const descriptionInput = overlay.querySelector('[data-role="preset-description"]');
+        workingName = parsed.name || '未命名规则';
+        workingDescription = parsed.description;
+        if (nameInput) nameInput.value = workingName;
+        if (descriptionInput) descriptionInput.value = parsed.description;
+        workingConfig = parsed.config;
+        const selected = selectedPreset();
+        jsonDirty = false;
+        applyConfig(workingConfig, selected);
+        updateStatusInline('已应用 JSON 到当前预览，保存后才会持久生效');
+        renderMain();
+      } catch (err) {
+        updateStatusInline(err.message || 'JSON 应用失败');
+      }
+    });
+    overlay.querySelector('[data-action="new"]').addEventListener('click', () => {
+      draftPreset = {
+        id: clientRuleID('新规则'),
+        name: '新规则',
+        description: '',
+        config: normalizeRuleConfig(DEFAULT_RULE_CONFIG),
+      };
+      selectedID = draftPreset.id;
+      workingConfig = normalizeRuleConfig(draftPreset.config);
+      workingName = draftPreset.name;
+      workingDescription = draftPreset.description;
+      syncJSONText();
+      applyConfig(workingConfig, draftPreset);
+      status = '已新建规则草稿，保存后才会持久生效';
       renderMain();
     });
     overlay.querySelectorAll('input[data-rule-key]').forEach(input => {
@@ -289,10 +419,11 @@ export function initAdminPanel(options = {}) {
       });
     });
     overlay.querySelector('[data-action="save"]').addEventListener('click', () => {
-      const selected = presetByID(doc, selectedID) || { id: selectedID };
-      const name = overlay.querySelector('[data-role="preset-name"]').value.trim() || selected.name || '未命名规则';
-      const description = overlay.querySelector('[data-role="preset-description"]').value.trim();
       run(async () => {
+        syncDirtyJSONBeforePersist();
+        const selected = presetByID(doc, selectedID) || { id: selectedID };
+        const name = workingName.trim() || selected.name || '未命名规则';
+        const description = workingDescription.trim();
         doc = await saveRulePreset(password, {
           id: selected.id,
           name,
@@ -301,31 +432,52 @@ export function initAdminPanel(options = {}) {
         });
         await setActiveRulePreset(password, selected.id);
         doc = await listRulePresets(password);
+        draftPreset = null;
         applyConfig(workingConfig, presetByID(doc, selected.id), { source: 'server' });
       }, '已保存到服务器');
     });
     overlay.querySelector('[data-action="save-as"]').addEventListener('click', () => {
-      const name = overlay.querySelector('[data-role="preset-name"]').value.trim() || '新规则';
-      const id = clientRuleID(name);
-      const description = overlay.querySelector('[data-role="preset-description"]').value.trim();
       run(async () => {
+        syncDirtyJSONBeforePersist();
+        const name = workingName.trim() || '新规则';
+        const id = clientRuleID(name);
+        const description = workingDescription.trim();
         doc = await saveRulePreset(password, { id, name, description, config: workingConfig });
         await setActiveRulePreset(password, id);
         doc = await listRulePresets(password);
+        draftPreset = null;
         selectedID = id;
         applyConfig(workingConfig, presetByID(doc, id), { source: 'server' });
       }, '已另存并设为当前规则');
     });
     overlay.querySelector('[data-action="set-active"]').addEventListener('click', () => run(async () => {
+      if (draftPreset && draftPreset.id === selectedID) {
+        throw new Error('新规则需要先保存');
+      }
       await setActiveRulePreset(password, selectedID);
       doc = await listRulePresets(password);
       applyConfig(workingConfig, presetByID(doc, selectedID), { source: 'server' });
     }, '已设为当前规则'));
     overlay.querySelector('[data-action="delete"]').addEventListener('click', () => run(async () => {
+      if (draftPreset && draftPreset.id === selectedID) {
+        draftPreset = null;
+        selectedID = doc.active_id;
+        const selected = activePresetFromDoc(doc);
+        workingConfig = normalizeRuleConfig(selected ? selected.config : getConfig());
+        workingName = selected && selected.name ? selected.name : '未命名规则';
+        workingDescription = selected && selected.description ? selected.description : '';
+        syncJSONText();
+        applyConfig(workingConfig, selected, { source: 'server' });
+        return;
+      }
       doc = await deleteRulePreset(password, selectedID);
+      draftPreset = null;
       selectedID = doc.active_id;
       const selected = activePresetFromDoc(doc);
       workingConfig = normalizeRuleConfig(selected ? selected.config : getConfig());
+      workingName = selected && selected.name ? selected.name : '未命名规则';
+      workingDescription = selected && selected.description ? selected.description : '';
+      syncJSONText();
       applyConfig(workingConfig, selected, { source: 'server' });
     }, '已删除'));
   }

@@ -45,6 +45,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 14. **更多文章选图使用当前卡片媒体库** — `/api/fetch-article-meta` 必须返回 `image_urls`；“替换图片”候选顺序为当前卡片自定义封面、抓取头图、当前卡片正文媒体图，主文章图片只做兜底。旧卡片缺少 `image_urls` 时点击替换要按卡片链接补抓，不要显示“本文暂无图片”。
 15. **URL 导入图片说明组不可拆散** — `图片 -> 图注 -> 图片来源` 必须连续归为图注；`图片来源：` / `图源：` 不能被当成正文或文章级来源
 16. **URL 导入作者来源固定在提示前** — 文章级 `来源：` / `作者：` / `编辑：` 只渲染一次，位置固定在标准 `提示：` 页脚前
+17. **DOCX 连续段落尊重空段语义** — 连续非空正文段落在 Word 段距较小时保持紧凑；只有原文中间有空段时，下一段前才恢复标准 `wx-gap`
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
@@ -65,4 +66,4 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 - Mutable product preferences need source/date/status before being treated as stable.
 - Copy behavior must not navigate away from the editor unless the current user request explicitly asks for it.
 - Copy speed is a product contract: do not hide background work behind the copy button or change the button text to upload/preparation states.
-- URL 导入和复制链路的排版契约必须有测试保护；新增解析规则时至少跑 `cd api && go test ./...`、`npm test`，并用真实浏览器验证用户给出的样例文章。
+- URL 导入、DOCX 段距和复制链路的排版契约必须有测试保护；新增解析规则时至少跑 `cd api && go test ./...`、`npm test`，并用真实浏览器验证用户给出的样例文章。

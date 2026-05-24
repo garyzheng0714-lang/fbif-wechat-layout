@@ -733,7 +733,7 @@ input[type="file"] { display: none; }
 }
 .admin-rule-bar {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   gap: 10px;
   align-items: end;
   margin-bottom: 14px;
@@ -771,6 +771,39 @@ input[type="file"] { display: none; }
   font-size: 13px; font-weight: 700;
   color: rgba(0,0,0,0.9);
   margin-bottom: 10px;
+}
+.admin-json-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.admin-json-head h3 {
+  margin-bottom: 0;
+}
+.admin-json-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-json-panel textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid #dddddd;
+  border-radius: 4px;
+  background: #ffffff;
+  color: rgba(0,0,0,0.9);
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.admin-json-panel textarea:focus {
+  outline: none;
+  border-color: #0075de;
+  box-shadow: 0 0 0 2px rgba(0,117,222,0.15);
 }
 .admin-field-grid {
   display: grid;
@@ -857,6 +890,8 @@ input[type="file"] { display: none; }
   .admin-rule-bar,
   .admin-meta-grid,
   .admin-field-grid { grid-template-columns: 1fr; }
+  .admin-json-head { align-items: flex-start; flex-direction: column; }
+  .admin-json-actions { width: 100%; }
   .admin-field { grid-template-columns: minmax(0, 1fr) 112px; }
   .admin-foot { flex-wrap: wrap; }
   .admin-status { flex-basis: 100%; }
