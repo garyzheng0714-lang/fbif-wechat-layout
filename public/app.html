@@ -31,6 +31,8 @@
       <span id="pageTitle" style="display:none;"></span>
       <span id="pageSubtitle" style="display:none;"></span>
 
+      <div class="account-switcher" id="accountSwitcher" aria-label="公众号选择"></div>
+
       <div class="upload-zone" id="dropZone">
         <div class="upload-icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
         <div class="upload-text">点击或拖拽文件</div>
@@ -208,9 +210,24 @@ window._pushLog = function(level, msg, detail) {
 
 // ---- Rule preset config ----
 const rulePackModule = await import('./js/rule-packs/registry.js?v=' + assetVersion);
-const activeRulePack = rulePackModule.getRulePack(rulePackModule.getRulePackIDFromLocation(location));
+const ACCOUNT_STORAGE_KEY = 'active_rule_pack';
+
+function storedRulePackID() {
+  try {
+    return window.localStorage.getItem(ACCOUNT_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function initialRulePackID() {
+  const storedID = storedRulePackID();
+  return rulePackModule.getRulePackIDFromLocation({ search: location.search || (storedID ? '?account=' + storedID : '') });
+}
+
+let activeRulePack = rulePackModule.getRulePack(initialRulePackID());
 window._activeRulePack = activeRulePack;
-const currentTemplateId = activeRulePack.templateId;
+let currentTemplateId = activeRulePack.templateId;
 const ruleModule = await import('./js/rule-presets.js?v=' + assetVersion);
 const {
   loadActiveRulePreset,
@@ -219,39 +236,93 @@ const {
   applyActiveRuleConfig,
   normalizeRuleConfig,
 } = ruleModule;
-const initialRule = await loadActiveRulePreset();
+const initialRule = await loadActiveRulePreset(activeRulePack.id);
 let activeRuleSource = initialRule.source;
 applyActiveRuleConfig(initialRule.preset.config, initialRule.preset);
 if (activeRuleSource === 'server') {
   // Cache the server rule only as the offline fallback. Online edits below stay
   // session-only unless the rule backend is unavailable.
-  saveLocalRuleConfig(initialRule.preset.config);
+  saveLocalRuleConfig(initialRule.preset.config, activeRulePack.id);
 }
 
 function applyRulePackChrome(pack) {
-  document.querySelectorAll('.wx-meta-account').forEach(el => { el.textContent = pack.accountName; });
-  document.querySelectorAll('.wx-footer-name').forEach(el => { el.textContent = pack.accountName; });
+  const displayName = pack.previewAccountName || pack.accountName;
+  document.querySelectorAll('.wx-meta-account').forEach(el => { el.textContent = displayName; });
+  document.querySelectorAll('.wx-footer-name').forEach(el => { el.textContent = displayName; });
   document.querySelectorAll('.wx-avatar').forEach(el => {
     el.src = pack.avatarUrl;
-    el.alt = pack.accountName;
+    el.alt = displayName;
   });
   const locationEl = document.querySelector('.wx-meta .wx-meta-gray:last-child');
   if (locationEl) locationEl.textContent = pack.location || '上海';
 }
 applyRulePackChrome(activeRulePack);
 
+function renderAccountSwitcher() {
+  const root = document.getElementById('accountSwitcher');
+  if (!root) return;
+  root.innerHTML = rulePackModule.listRulePacks().map(pack => `
+    <button type="button" class="account-switcher-btn ${pack.id === activeRulePack.id ? 'active' : ''}" data-account-id="${pack.id}">
+      ${pack.accountName}
+    </button>
+  `).join('');
+  root.querySelectorAll('[data-account-id]').forEach(btn => {
+    btn.addEventListener('click', () => switchAccount(btn.dataset.accountId));
+  });
+}
+
+function persistAccountSelection(id) {
+  try {
+    window.localStorage.setItem(ACCOUNT_STORAGE_KEY, id);
+  } catch {}
+  const next = new URL(location.href);
+  next.searchParams.set('account', id);
+  history.replaceState(null, '', next);
+}
+
+async function switchAccount(accountID) {
+  const nextPack = rulePackModule.getRulePack(accountID);
+  if (nextPack.id === activeRulePack.id) return;
+  if (nextPack.templateId !== currentTemplateId) {
+    const next = new URL(location.href);
+    next.searchParams.set('account', nextPack.id);
+    location.href = next.toString();
+    return;
+  }
+  activeRulePack = nextPack;
+  window._activeRulePack = activeRulePack;
+  persistAccountSelection(activeRulePack.id);
+  applyRulePackChrome(activeRulePack);
+  renderAccountSwitcher();
+
+  const loaded = await loadActiveRulePreset(activeRulePack.id);
+  activeRuleSource = loaded.source;
+  applyActiveRuleConfig(loaded.preset.config, loaded.preset);
+  if (activeRuleSource === 'server') {
+    saveLocalRuleConfig(loaded.preset.config, activeRulePack.id);
+  }
+  populateConfigForm();
+  syncWorkflowControls();
+  if (window.updateThemePreview) window.updateThemePreview(loadConfig());
+  if (window._updateFooter) window._updateFooter(null);
+  if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+  if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
+}
+
+renderAccountSwitcher();
+
 function loadConfig() {
-  return normalizeRuleConfig((window._activeConfig && window._activeConfig.config) || loadLocalRuleConfig());
+  return normalizeRuleConfig((window._activeConfig && window._activeConfig.config) || loadLocalRuleConfig(activeRulePack.id));
 }
 
 function cacheServerRuleFallback(config) {
-  saveLocalRuleConfig(config);
+  saveLocalRuleConfig(config, activeRulePack.id);
 }
 
 function saveConfig(config, preset, options = {}) {
   const normalized = normalizeRuleConfig(config);
   if (options.persistLocal || activeRuleSource !== 'server') {
-    saveLocalRuleConfig(normalized);
+    saveLocalRuleConfig(normalized, activeRulePack.id);
   }
   applyActiveRuleConfig(normalized, preset || (window._activeConfig && window._activeConfig.preset));
   syncWorkflowControls();
