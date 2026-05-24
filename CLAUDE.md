@@ -29,7 +29,7 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 These have been explicitly confirmed by the user. Breaking any of these is unacceptable:
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
-2. **仅保留 FBIF 公众号排版** — Mote 模板已移除，不再做模板切换
+2. **多公众号规则绑定，单模板起步** — 默认公众号为 `FBIF公众号`，上传区胶囊可切到 `FoodTalks什么是系列`；公众号是规则应用对象，规则是可复用资产，新增公众号必须先进入 `public/js/rule-packs/registry.js`
 3. **规则服务端保存 + 本地降级** — 参数预设以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
 4. **所有按钮在顶部工具栏** — 底部不放按钮
 5. **不要 TOC/目录** — 已删除

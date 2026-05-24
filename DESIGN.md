@@ -83,7 +83,7 @@ These values are product contracts, not incidental CSS. Any parser, renderer, co
 
 ## Current Rules
 1. 预览页背景必须全白
-2. 仅保留 FBIF 公众号排版（已移除 Mote 模板）
+2. 多公众号规则绑定，单模板起步：默认 `FBIF公众号`，上传区胶囊可切到 `FoodTalks什么是系列`；公众号是规则应用对象，规则是可复用资产
 3. 规则服务端保存 + 本地降级（服务器 `/api/rules/*` 为准，localStorage 只做兼容与离线降级）
 4. 所有按钮在顶部工具栏
 5. 不要 TOC/目录
