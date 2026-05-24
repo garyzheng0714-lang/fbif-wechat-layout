@@ -408,7 +408,7 @@ function render(elems, author, source, opts) {
           ? 'max-width: ' + e.maxPx + 'px; width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;'
           : 'width: ' + e.w + '; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;';
         lines.push('<section class="wx-pi' + (spaceAfter ? ' wx-gap' : '') + '">' +
-          '<img src="' + src + '"' + gifAttr + rpol + ' style="' + sizeStyle + '" /></section>');
+          '<img src="' + escAttr(src) + '"' + gifAttr + rpol + ' style="' + sizeStyle + '" /></section>');
         break;
       }
       case 'cap':

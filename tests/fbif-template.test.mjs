@@ -120,6 +120,35 @@ test('behavior rules control author label and Mote image insertion', () => {
   }
 });
 
+test('behavior image URL is escaped before rendering into img attributes', () => {
+  const previous = globalThis.window._activeConfig;
+  globalThis.window._activeConfig = {
+    config: {},
+    behavior: {
+      params: {
+        mote_ref_image_url: {
+          type: 'url',
+          required: true,
+          default: 'https://example.com/a.png" onerror="alert(1)',
+        },
+      },
+    },
+  };
+  try {
+    const html = renderDocx([
+      p('作者：Mote莫特'),
+      p('正文内容'),
+      h('参考来源'),
+      p('[1] source'),
+    ]);
+
+    assert.match(html, /src="https:\/\/example\.com\/a\.png&quot; onerror=&quot;alert\(1\)"/);
+    assert.doesNotMatch(html, /src="[^"]*"\s+onerror=/i);
+  } finally {
+    globalThis.window._activeConfig = previous;
+  }
+});
+
 test('docx consecutive body paragraphs stay compact until a blank paragraph separates them', () => {
   const html = renderDocx([
     docxBody('作者：张三'),

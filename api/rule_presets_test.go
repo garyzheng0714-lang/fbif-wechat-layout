@@ -120,6 +120,51 @@ func TestRulePresetRejectsInvalidBehavior(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid behavior to be rejected")
 	}
+
+	_, err = store.upsert(rulePreset{
+		ID:     "bad-behavior-url",
+		Name:   "Bad behavior URL",
+		Config: defaultRuleConfig(),
+		Behavior: map[string]any{
+			"params": map[string]any{
+				"mote_ref_image_url": map[string]any{"type": "url", "required": true, "default": `https://example.com/a.png" onerror="alert(1)`},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected attribute-breaking behavior URL to be rejected")
+	}
+
+	_, err = store.upsert(rulePreset{
+		ID:     "bad-behavior-action",
+		Name:   "Bad behavior action",
+		Config: defaultRuleConfig(),
+		Behavior: map[string]any{
+			"actions": []any{
+				map[string]any{
+					"when":      "is_mote_author",
+					"type":      "insert_image_before",
+					"target":    "first_ref_heading",
+					"src_param": "missing_image",
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected unknown behavior action param to be rejected")
+	}
+
+	_, err = store.upsert(rulePreset{
+		ID:     "bad-behavior-shape",
+		Name:   "Bad behavior shape",
+		Config: defaultRuleConfig(),
+		Behavior: map[string]any{
+			"params": []any{"not-object"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected malformed behavior sections to be rejected")
+	}
 }
 
 func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {

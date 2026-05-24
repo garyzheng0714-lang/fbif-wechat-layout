@@ -42,6 +42,24 @@ function clientRuleID(name) {
   return id && id !== 'default' ? id : 'rule-' + Date.now();
 }
 
+function ruleListFromDoc(doc) {
+  if (doc && Array.isArray(doc.presets)) return doc.presets;
+  if (doc && Array.isArray(doc.rules)) return doc.rules;
+  if (doc && doc.rules && typeof doc.rules === 'object') return Object.values(doc.rules);
+  return [];
+}
+
+export function uniqueClientRuleID(name, doc) {
+  const base = clientRuleID(name);
+  const used = new Set(ruleListFromDoc(doc)
+    .map(rule => rule && rule.id)
+    .filter(Boolean));
+  if (!used.has(base)) return base;
+  let suffix = 2;
+  while (used.has(base + '-' + suffix)) suffix++;
+  return base + '-' + suffix;
+}
+
 function fieldValue(config, field) {
   const normalized = normalizeRuleConfig(config);
   return normalized[field.key];
@@ -669,7 +687,7 @@ export function initAdminPanel(options = {}) {
     });
     overlay.querySelector('[data-action="new"]').addEventListener('click', () => {
       draftPreset = {
-        id: clientRuleID('新规则'),
+        id: uniqueClientRuleID('新规则', doc),
         name: '新规则',
         description: '',
         config: normalizeRuleConfig(DEFAULT_RULE_CONFIG),
@@ -729,7 +747,7 @@ export function initAdminPanel(options = {}) {
         syncDirtyJSONBeforePersist();
         syncDirtyBehaviorBeforePersist();
         const name = workingName.trim() || '新规则';
-        const id = clientRuleID(name);
+        const id = uniqueClientRuleID(name, doc);
         const description = workingDescription.trim();
         doc = await saveRulePreset(password, { id, name, description, config: workingConfig, behavior: workingBehavior });
         await setActiveRulePreset(password, id, currentAccountID());

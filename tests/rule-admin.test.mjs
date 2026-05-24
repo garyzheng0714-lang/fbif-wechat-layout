@@ -15,6 +15,23 @@ test('rule admin exposes JSON editing and new-rule controls', async () => {
   assert.match(adminPanel, /syncDirtyJSONBeforePersist\(\);[\s\S]*saveRulePreset/);
 });
 
+test('rule admin save-as generates a unique id instead of overwriting same-name rules', async () => {
+  const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
+  const { uniqueClientRuleID } = await import('../public/js/admin-panel.js?unique=' + Date.now());
+
+  assert.equal(uniqueClientRuleID('foodtalks series default', {
+    presets: [{ id: 'foodtalks-series-default' }],
+  }), 'foodtalks-series-default-2');
+  assert.equal(uniqueClientRuleID('foodtalks series default', {
+    rules: { 'foodtalks-series-default': { id: 'foodtalks-series-default' } },
+  }), 'foodtalks-series-default-2');
+  assert.match(adminPanel, /function ruleListFromDoc\(doc\)/);
+  assert.match(adminPanel, /Array\.isArray\(doc\.presets\)/);
+  assert.match(adminPanel, /while \(used\.has\(base \+ '-' \+ suffix\)\) suffix\+\+;/);
+  assert.match(adminPanel, /const id = uniqueClientRuleID\(name, doc\);/);
+  assert.doesNotMatch(adminPanel, /data-action="save-as"[\s\S]*const id = clientRuleID\(name\);/);
+});
+
 test('rule admin lets JSON explicitly clear a saved description', async () => {
   const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
 

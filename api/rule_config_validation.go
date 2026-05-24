@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -96,6 +97,7 @@ var ruleModuleFields = map[string]map[string]bool{
 var ruleHexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 var ruleFontFamily = regexp.MustCompile(`^[A-Za-z0-9一-龥 -]{1,40}$`)
 var behaviorUnsafeTemplate = regexp.MustCompile(`(?i)<script|on\w+\s*=|javascript:`)
+var behaviorUnsafeURL = regexp.MustCompile(`[\x00-\x20\x7F"'<>\\]`)
 
 func validateRuleConfig(config map[string]any) error {
 	if err := validateRuleConfigKeys(config); err != nil {
@@ -160,6 +162,20 @@ func validateRuleBehaviorPayload(raw map[string]any) error {
 		case "schema_version", "params", "conditions", "actions", "templates", "output_contracts":
 		default:
 			return fmt.Errorf("unknown behavior field: %s", key)
+		}
+	}
+	for _, key := range []string{"params", "templates", "output_contracts"} {
+		if value, ok := raw[key]; ok {
+			if _, ok := value.(map[string]any); !ok {
+				return fmt.Errorf("behavior %s must be an object", key)
+			}
+		}
+	}
+	for _, key := range []string{"conditions", "actions"} {
+		if value, ok := raw[key]; ok {
+			if _, ok := value.([]any); !ok {
+				return fmt.Errorf("behavior %s must be an array", key)
+			}
 		}
 	}
 	if version, ok := raw["schema_version"]; ok && int(ruleBehaviorNumber(version)) != 1 {
@@ -241,10 +257,25 @@ func validateRuleBehaviorParam(key string, spec map[string]any) error {
 	if required && defaultValue == "" {
 		return fmt.Errorf("missing required behavior param default: %s", key)
 	}
-	if typ == "url" && defaultValue != "" && !strings.HasPrefix(defaultValue, "/") && !strings.HasPrefix(defaultValue, "https://") {
+	if typ == "url" && defaultValue != "" && !isSafeRuleBehaviorURL(defaultValue) {
 		return fmt.Errorf("behavior url param must be a site path or HTTPS URL: %s", key)
 	}
 	return nil
+}
+
+func isSafeRuleBehaviorURL(value string) bool {
+	source := strings.TrimSpace(value)
+	if source == "" || behaviorUnsafeURL.MatchString(source) {
+		return false
+	}
+	if strings.HasPrefix(source, "/") {
+		return !strings.HasPrefix(source, "//")
+	}
+	parsed, err := url.Parse(source)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil
 }
 
 func validateRuleBehaviorConditions(raw any) (map[string]bool, error) {

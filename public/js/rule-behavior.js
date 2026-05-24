@@ -41,6 +41,15 @@ export const DEFAULT_BEHAVIOR = Object.freeze({
 const ALLOWED_ACTION_TYPES = new Set(['insert_image_before']);
 const ALLOWED_TARGETS = new Set(['first_ref_heading']);
 const ALLOWED_OPS = new Set(['eq', 'neq', 'exists', 'includes']);
+const ALLOWED_TOP_LEVEL_KEYS = new Set([
+  'schema_version',
+  'params',
+  'conditions',
+  'actions',
+  'templates',
+  'output_contracts',
+]);
+const UNSAFE_URL_CHARS = /[\u0000-\u0020\u007f"'<>\\]/;
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -52,6 +61,18 @@ function cloneJSON(value) {
 
 export function normalizeAuthorName(author) {
   return String(author || '').replace(/\s+/g, '').toLowerCase();
+}
+
+export function isSafeBehaviorURL(value) {
+  const source = String(value || '').trim();
+  if (!source || UNSAFE_URL_CHARS.test(source)) return false;
+  if (source.startsWith('/')) return !source.startsWith('//');
+  try {
+    const parsed = new URL(source);
+    return parsed.protocol === 'https:' && !!parsed.hostname && !parsed.username && !parsed.password;
+  } catch (_err) {
+    return false;
+  }
 }
 
 export function normalizeRuleBehavior(raw = {}) {
@@ -94,7 +115,7 @@ function validateParam(key, spec, errors) {
   if (spec.required && !value) {
     errors.push('缺少必填参数默认值：' + key);
   }
-  if (spec.type === 'url' && value && !/^(\/|https:\/\/)/.test(value)) {
+  if (spec.type === 'url' && value && !isSafeBehaviorURL(value)) {
     errors.push('URL 参数只允许站内路径或 HTTPS：' + key);
   }
 }
@@ -125,7 +146,7 @@ function validateCondition(condition, errors) {
   }
 }
 
-function validateAction(action, conditionIDs, errors) {
+function validateAction(action, conditionIDs, params, errors) {
   if (!isPlainObject(action)) {
     errors.push('动作必须是对象');
     return;
@@ -133,28 +154,67 @@ function validateAction(action, conditionIDs, errors) {
   if (!conditionIDs.has(action.when)) errors.push('动作引用了不存在的条件：' + String(action.when || ''));
   if (!ALLOWED_ACTION_TYPES.has(action.type)) errors.push('未知动作类型：' + String(action.type || ''));
   if (!ALLOWED_TARGETS.has(action.target)) errors.push('未知动作目标：' + String(action.target || ''));
-  if (action.type === 'insert_image_before' && !String(action.src_param || '').trim()) {
+  const srcParam = String(action.src_param || '').trim();
+  if (action.type === 'insert_image_before' && !srcParam) {
     errors.push('插图动作缺少 src_param');
+  }
+  if (action.type === 'insert_image_before' && srcParam && !Object.prototype.hasOwnProperty.call(params, srcParam)) {
+    errors.push('动作引用了不存在的参数：' + srcParam);
   }
 }
 
 function validateTemplate(slot, template, contract, errors) {
   const source = String(template == null ? '' : template);
-  const maxLength = Number(contract && contract.max_length) || 2000;
-  if (source.length > Math.max(maxLength, 2000)) errors.push('模板过长：' + slot);
+  const maxLength = Number(contract && contract.max_length) > 0 ? Number(contract.max_length) : 2000;
+  if (source.length > maxLength || source.length > 2000) errors.push('模板过长：' + slot);
   if (/<script|on\w+\s*=|javascript:/i.test(source)) errors.push('模板包含不允许的 HTML 或脚本：' + slot);
+}
+
+function validateOutputContracts(contracts, errors) {
+  for (const [slot, contract] of Object.entries(contracts || {})) {
+    if (!isPlainObject(contract)) {
+      errors.push('输出约束必须是对象：' + slot);
+      continue;
+    }
+    const rawMaxLength = contract.max_length;
+    const maxLength = Number(rawMaxLength);
+    if (rawMaxLength != null && (!Number.isFinite(maxLength) || maxLength < 0 || maxLength > 2000)) {
+      errors.push('输出约束长度无效：' + slot);
+    }
+    if (contract.allow_html === true) {
+      errors.push('模板不允许开启 HTML：' + slot);
+    }
+  }
+}
+
+function validateRawBehaviorShape(raw, errors) {
+  if (raw == null) return;
+  if (!isPlainObject(raw)) {
+    errors.push('代码化规则必须是对象');
+    return;
+  }
+  for (const key of Object.keys(raw)) {
+    if (!ALLOWED_TOP_LEVEL_KEYS.has(key)) errors.push('未知行为规则字段：' + key);
+  }
+  if (raw.params != null && !isPlainObject(raw.params)) errors.push('行为参数必须是对象');
+  if (raw.templates != null && !isPlainObject(raw.templates)) errors.push('行为模板必须是对象');
+  if (raw.output_contracts != null && !isPlainObject(raw.output_contracts)) errors.push('行为输出约束必须是对象');
+  if (raw.conditions != null && !Array.isArray(raw.conditions)) errors.push('行为条件必须是数组');
+  if (raw.actions != null && !Array.isArray(raw.actions)) errors.push('行为动作必须是数组');
 }
 
 export function validateRuleBehavior(raw) {
   const behavior = normalizeRuleBehavior(raw);
   const errors = [];
+  validateRawBehaviorShape(raw, errors);
   if (raw && isPlainObject(raw) && raw.schema_version != null && Number(raw.schema_version) !== 1) {
     errors.push('不支持的行为规则版本：' + raw.schema_version);
   }
   for (const [key, spec] of Object.entries(behavior.params)) validateParam(key, spec, errors);
   for (const condition of behavior.conditions) validateCondition(condition, errors);
   const conditionIDs = new Set(behavior.conditions.map(item => item && item.id).filter(Boolean));
-  for (const action of behavior.actions) validateAction(action, conditionIDs, errors);
+  for (const action of behavior.actions) validateAction(action, conditionIDs, behavior.params, errors);
+  validateOutputContracts(behavior.output_contracts, errors);
   for (const [slot, template] of Object.entries(behavior.templates)) {
     validateTemplate(slot, template, behavior.output_contracts[slot], errors);
   }

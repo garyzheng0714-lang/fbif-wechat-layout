@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_BEHAVIOR,
   applyBehaviorToElems,
+  isSafeBehaviorURL,
   normalizeAuthorName,
   normalizeRuleBehavior,
   renderBehaviorTemplate,
@@ -32,7 +33,7 @@ test('behavior validation rejects missing required params', () => {
 test('behavior validation rejects script-like templates and unsafe URLs', () => {
   const result = validateRuleBehavior({
     params: {
-      mote_ref_image_url: { type: 'url', required: true, default: 'http://example.com/a.png' },
+      mote_ref_image_url: { type: 'url', required: true, default: 'https://example.com/a.png" onerror="alert(1)' },
     },
     templates: {
       author_line: '<span onclick="alert(1)">作者：{{ article.author }}</span>',
@@ -41,6 +42,54 @@ test('behavior validation rejects script-like templates and unsafe URLs', () => 
   assert.equal(result.ok, false);
   assert.match(result.errors.join('\n'), /URL 参数/);
   assert.match(result.errors.join('\n'), /模板包含不允许/);
+});
+
+test('behavior URL validation rejects attribute-breaking sources', () => {
+  assert.equal(isSafeBehaviorURL('/assets/mote.png'), true);
+  assert.equal(isSafeBehaviorURL('https://example.com/assets/mote.png'), true);
+  assert.equal(isSafeBehaviorURL('https://example.com/a.png" onerror="alert(1)'), false);
+  assert.equal(isSafeBehaviorURL('//example.com/a.png'), false);
+});
+
+test('behavior validation matches server-side action and output contracts', () => {
+  const result = validateRuleBehavior({
+    actions: [{
+      when: 'is_mote_author',
+      type: 'insert_image_before',
+      target: 'first_ref_heading',
+      src_param: 'missing_image',
+    }],
+    templates: {
+      author_line: '作者：' + '很长'.repeat(50),
+    },
+    output_contracts: {
+      author_line: { max_length: 80, allow_html: true },
+    },
+  });
+  const errors = result.errors.join('\n');
+  assert.equal(result.ok, false);
+  assert.match(errors, /不存在的参数：missing_image/);
+  assert.match(errors, /模板不允许开启 HTML：author_line/);
+  assert.match(errors, /模板过长：author_line/);
+});
+
+test('behavior validation rejects malformed top-level sections', () => {
+  const result = validateRuleBehavior({
+    params: [],
+    templates: [],
+    output_contracts: [],
+    conditions: {},
+    actions: {},
+    extra: true,
+  });
+  const errors = result.errors.join('\n');
+  assert.equal(result.ok, false);
+  assert.match(errors, /行为参数必须是对象/);
+  assert.match(errors, /行为模板必须是对象/);
+  assert.match(errors, /行为输出约束必须是对象/);
+  assert.match(errors, /行为条件必须是数组/);
+  assert.match(errors, /行为动作必须是数组/);
+  assert.match(errors, /未知行为规则字段：extra/);
 });
 
 test('behavior template slots interpolate only explicit context paths', () => {
