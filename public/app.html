@@ -165,7 +165,8 @@ window._pushLog = function(level, msg, detail) {
 };
 
 // ---- Rule preset config ----
-const rulePackModule = await import('./js/rule-packs/registry.js?v=' + assetVersion);
+const rulePackModule = await import('/js/rule-packs/registry.js?v=' + assetVersion);
+const rulePackUrlModule = await import('/js/rule-packs/url.js?v=' + assetVersion);
 const ACCOUNT_STORAGE_KEY = 'active_rule_pack';
 
 function storedRulePackID() {
@@ -177,14 +178,21 @@ function storedRulePackID() {
 }
 
 function initialRulePackID() {
+  // 优先级：URL 路径 (/mp/fbif) > query (?account=) > localStorage > 默认
+  const parsed = rulePackUrlModule.parsePath(location.pathname);
+  if (parsed && parsed.packId) {
+    return parsed.packId;
+  }
   const storedID = storedRulePackID();
-  return rulePackModule.getRulePackIDFromLocation({ search: location.search || (storedID ? '?account=' + storedID : '') });
+  return rulePackModule.getRulePackIDFromLocation({
+    search: location.search || (storedID ? '?account=' + storedID : ''),
+  });
 }
 
 let activeRulePack = rulePackModule.getRulePack(initialRulePackID());
 window._activeRulePack = activeRulePack;
 let currentTemplateId = activeRulePack.templateId;
-const ruleModule = await import('./js/rule-presets.js?v=' + assetVersion);
+const ruleModule = await import('/js/rule-presets.js?v=' + assetVersion);
 const {
   loadActiveRulePreset,
   loadLocalRuleConfig,
@@ -547,15 +555,15 @@ function syncWorkflowControls() {
 }
 
 // ---- Load engine + template ----
-const { initApp } = await import('./js/engine.js?v=' + assetVersion);
-const { initMoreArticlesEditor } = await import('./js/more-articles-ui.js?v=' + assetVersion);
-const { openCropEditor } = await import('./js/crop-editor.js?v=' + assetVersion);
+const { initApp } = await import('/js/engine.js?v=' + assetVersion);
+const { initMoreArticlesEditor } = await import('/js/more-articles-ui.js?v=' + assetVersion);
+const { openCropEditor } = await import('/js/crop-editor.js?v=' + assetVersion);
 initMoreArticlesEditor({ openCropEditor });
 
 async function loadTemplate(templateId) {
   const cfg = loadConfig();
   saveConfig(cfg, null, { persistLocal: activeRuleSource !== 'server' });
-  const mod = await import('./js/templates/' + templateId + '.js?v=' + assetVersion);
+  const mod = await import('/js/templates/' + templateId + '.js?v=' + assetVersion);
   initApp(mod.default);
   wrapEngineFunctions();
 }
@@ -565,7 +573,7 @@ await loadTemplate(currentTemplateId);
 syncWorkflowControls();
 renderActiveRuleCard();
 
-const { initAdminPanel } = await import('./js/admin-panel.js?v=' + assetVersion);
+const { initAdminPanel } = await import('/js/admin-panel.js?v=' + assetVersion);
 initAdminPanel({
   rulePacks: rulePackModule.listRulePacks(),
   getConfig: loadConfig,

@@ -47,3 +47,23 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(css, /\.active-rule-save/);
   assert.match(css, /\.active-rule-cancel/);
 });
+
+test('app shell prefers pathname over query for initial rule pack selection', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  // 必须 import 新的 path 解析器（绝对路径）
+  assert.match(app, /import\(['"]\/js\/rule-packs\/url\.js/);
+  // 必须先用 parsePath(location.pathname)，再 fallback ?account
+  assert.match(app, /parsePath\s*\(\s*location\.pathname\s*\)/);
+  // 旧 ?account 兼容仍存在
+  assert.match(app, /getRulePackIDFromLocation/);
+});
+
+test('app shell uses absolute /js/ paths for dynamic imports (path-safe under /mp/...)', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  // 不允许任何相对路径的 dynamic import（会在 /mp/fbif 下被解析为 /mp/js/...）
+  const matches = app.match(/import\(['"]\.\//g);
+  assert.equal(matches, null, 'app.html should not contain relative "./..." dynamic imports');
+  // 至少要有几个绝对路径 /js/ import 在
+  assert.match(app, /import\(['"]\/js\/engine\.js/);
+  assert.match(app, /import\(['"]\/js\/rule-packs\/registry\.js/);
+});
