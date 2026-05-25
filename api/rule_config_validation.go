@@ -337,15 +337,30 @@ func isSafeWeChatArticleURL(raw string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	return host == "mp.weixin.qq.com" || strings.HasSuffix(host, ".weixin.qq.com")
+	if host != "mp.weixin.qq.com" && host != "weixin.qq.com" {
+		return false
+	}
+	return u.Path == "/s" || strings.HasPrefix(u.Path, "/s/")
 }
 
 func isSafeImageURL(raw string) bool {
-	value := strings.ToLower(strings.TrimSpace(raw))
-	return strings.HasPrefix(value, "http://") ||
-		strings.HasPrefix(value, "https://") ||
-		strings.HasPrefix(value, "//") ||
-		strings.HasPrefix(value, "data:image/")
+	value := strings.TrimSpace(raw)
+	u, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return u.Hostname() != ""
+	case "":
+		return strings.HasPrefix(value, "//") && u.Hostname() != ""
+	case "data":
+		data := u.Opaque
+		comma := strings.Index(data, ",")
+		return strings.HasPrefix(strings.ToLower(data), "image/") && comma > len("image/") && comma < len(data)-1
+	default:
+		return false
+	}
 }
 
 func ruleValueAsFloat(value any) (float64, error) {

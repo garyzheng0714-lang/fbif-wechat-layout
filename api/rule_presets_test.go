@@ -371,6 +371,21 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "bad more articles article path",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"more_articles": map[string]any{
+						"default_cards": []any{
+							map[string]any{
+								"href": "https://mp.weixin.qq.com/not-an-article",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "bad more articles imgurl",
 			config: map[string]any{
 				"schema_version": float64(2),
@@ -387,6 +402,38 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "bad more articles imgurl host",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"more_articles": map[string]any{
+						"default_cards": []any{
+							map[string]any{
+								"href":   "https://mp.weixin.qq.com/s/custom-a",
+								"imgurl": "https://",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "bad more articles data image",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"more_articles": map[string]any{
+						"default_cards": []any{
+							map[string]any{
+								"href":   "https://mp.weixin.qq.com/s/custom-a",
+								"imgurl": "data:image/",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "bad more articles image_urls",
 			config: map[string]any{
 				"schema_version": float64(2),
@@ -396,6 +443,22 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 							map[string]any{
 								"href":       "https://mp.weixin.qq.com/s/custom-a",
 								"image_urls": []any{"https://mmbiz.qpic.cn/a.jpg", "javascript:alert(1)"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "bad more articles protocol relative image_urls",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"more_articles": map[string]any{
+						"default_cards": []any{
+							map[string]any{
+								"href":       "https://mp.weixin.qq.com/s/custom-a",
+								"image_urls": []any{"//"},
 							},
 						},
 					},
