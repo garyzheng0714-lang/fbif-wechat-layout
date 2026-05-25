@@ -52,24 +52,6 @@
       <div class="sidebar-stats" id="statsBar"></div>
       <div class="batch-list" id="batchList" style="display:none;"></div>
 
-      <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
-        <div class="active-rule-caption">
-          <span class="active-rule-label">当前规则</span>
-          <span class="active-rule-badge">已锁定</span>
-        </div>
-        <div class="active-rule-line">
-          <span class="active-rule-select-wrap">
-            <button type="button" id="activeRuleSelect" class="active-rule-trigger" disabled>
-              <span class="active-rule-value">加载中...</span>
-            </button>
-            <svg class="active-rule-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </span>
-          <button type="button" class="active-rule-icon" aria-label="修改当前规则" title="修改当前规则">
-            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-          </button>
-        </div>
-      </div>
-
       <div class="ma-section" id="moreArticlesSection">
         <div class="sidebar-divider"></div>
         <div class="sidebar-label ma-section-label">
@@ -80,6 +62,18 @@
           <!-- N card editors (dynamic, injected by more-articles-ui.js) -->
         </div>
         <div class="ma-hint" id="maHint">粘贴公众号链接自动抓取头图和标题。拖动卡片可重排顺序。</div>
+      </div>
+      <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
+        <div class="active-rule-readline">
+          <span class="active-rule-readmeta">
+            <span class="active-rule-label">规则</span>
+            <span class="active-rule-readvalue">加载中...</span>
+            <span class="active-rule-badge">已锁定</span>
+          </span>
+          <button type="button" class="active-rule-icon" aria-label="修改当前规则" title="修改当前规则">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+        </div>
       </div>
     </div>
     <div class="sidebar-footer">
@@ -235,6 +229,7 @@ function renderActiveRuleCard() {
   const selectedRule = options.find(rule => rule.id === selectedID) || options[0];
   const canSave = activeRuleSelectorEditing && selectedID && selectedID !== currentID;
   const statusHTML = activeRuleSelectorStatus ? `<div class="active-rule-status">${escText(activeRuleSelectorStatus)}</div>` : '';
+  const ruleName = escText(selectedRule.name || selectedRule.id);
   const menuHTML = activeRuleSelectorEditing && activeRuleSelectorOpen ? `
         <div class="active-rule-menu" id="activeRuleMenu" role="listbox" aria-label="当前规则">
           ${options.map(rule => `
@@ -246,45 +241,53 @@ function renderActiveRuleCard() {
         </div>
       ` : '';
   card.className = 'active-rule-card' + (activeRuleSelectorEditing ? ' editing' : '') + (activeRuleSelectorOpen ? ' menu-open' : '');
-  card.innerHTML = `
+  card.innerHTML = activeRuleSelectorEditing ? `
     <div class="active-rule-caption">
       <span class="active-rule-label">当前规则</span>
-      <span class="active-rule-badge">${activeRuleSelectorEditing ? '编辑中' : '已锁定'}</span>
+      <span class="active-rule-badge">编辑中</span>
     </div>
     <div class="active-rule-line">
       <span class="active-rule-select-wrap">
         <button type="button" id="activeRuleSelect" class="active-rule-trigger" data-value="${escText(selectedRule.id)}" aria-haspopup="listbox" aria-expanded="${activeRuleSelectorOpen ? 'true' : 'false'}" ${activeRuleSelectorEditing ? '' : 'disabled'}>
-          <span class="active-rule-value">${escText(selectedRule.name || selectedRule.id)}</span>
+          <span class="active-rule-value">${ruleName}</span>
         </button>
         <svg class="active-rule-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${menuHTML}
       </span>
-      ${activeRuleSelectorEditing ? `
-        <button type="button" class="active-rule-save" data-action="save-active-rule" ${canSave ? '' : 'disabled'}>保存</button>
-        <button type="button" class="active-rule-cancel" data-action="cancel-active-rule">取消</button>
-      ` : `
-        <button type="button" class="active-rule-icon" data-action="edit-active-rule" aria-label="修改当前规则" title="修改当前规则">
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </button>
-      `}
+      <button type="button" class="active-rule-save" data-action="save-active-rule" ${canSave ? '' : 'disabled'}>保存</button>
+      <button type="button" class="active-rule-cancel" data-action="cancel-active-rule">取消</button>
+    </div>
+    ${statusHTML}
+  ` : `
+    <div class="active-rule-readline">
+      <span class="active-rule-readmeta">
+        <span class="active-rule-label">规则</span>
+        <span class="active-rule-readvalue">${ruleName}</span>
+        <span class="active-rule-badge">已锁定</span>
+      </span>
+      <button type="button" class="active-rule-icon" data-action="edit-active-rule" aria-label="修改当前规则" title="修改当前规则">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
     </div>
     ${statusHTML}
   `;
   const trigger = card.querySelector('#activeRuleSelect');
-  trigger.addEventListener('click', () => toggleActiveRuleMenu());
-  trigger.addEventListener('keydown', event => {
-    if (!activeRuleSelectorEditing) return;
-    if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
-      event.preventDefault();
-      activeRuleSelectorOpen = true;
-      activeRuleSelectorStatus = '';
-      renderActiveRuleCard();
-    }
-    if (event.key === 'Escape') {
-      activeRuleSelectorOpen = false;
-      renderActiveRuleCard();
-    }
-  });
+  if (trigger) {
+    trigger.addEventListener('click', () => toggleActiveRuleMenu());
+    trigger.addEventListener('keydown', event => {
+      if (!activeRuleSelectorEditing) return;
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        activeRuleSelectorOpen = true;
+        activeRuleSelectorStatus = '';
+        renderActiveRuleCard();
+      }
+      if (event.key === 'Escape') {
+        activeRuleSelectorOpen = false;
+        renderActiveRuleCard();
+      }
+    });
+  }
   card.querySelectorAll('[data-rule-option]').forEach(button => {
     button.addEventListener('click', () => chooseActiveRuleOption(button.getAttribute('data-rule-option')));
     button.addEventListener('keydown', event => handleActiveRuleOptionKeydown(event, button));

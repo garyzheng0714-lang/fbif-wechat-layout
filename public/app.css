@@ -107,9 +107,12 @@ input[type="file"] { display: none; }
 .active-rule-card {
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+}
+.active-rule-card.editing {
   gap: 7px;
-  padding-bottom: 11px;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
+  padding-top: 6px;
 }
 .active-rule-caption {
   display: flex;
@@ -122,6 +125,29 @@ input[type="file"] { display: none; }
   font-size: 11px;
   font-weight: 700;
 }
+.active-rule-readline {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.active-rule-readmeta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.active-rule-readvalue {
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #615d59;
+  font-size: 12px;
+  font-weight: 600;
+}
 .active-rule-badge {
   padding: 1px 6px;
   border-radius: 9999px;
@@ -133,6 +159,11 @@ input[type="file"] { display: none; }
 .active-rule-card.editing .active-rule-badge {
   background: #f2f9ff;
   color: #097fe8;
+}
+.active-rule-card:not(.editing) .active-rule-badge {
+  padding: 0;
+  background: transparent;
+  color: #a39e98;
 }
 .active-rule-line {
   display: flex;
@@ -207,7 +238,7 @@ input[type="file"] { display: none; }
 }
 .active-rule-menu {
   position: absolute;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   left: 0;
   right: 0;
   z-index: 40;
@@ -279,10 +310,20 @@ input[type="file"] { display: none; }
   justify-content: center;
   color: #615d59;
 }
+.active-rule-card:not(.editing) .active-rule-icon {
+  width: 28px;
+  height: 28px;
+  border-color: transparent;
+  background: transparent;
+  color: #a39e98;
+}
 .active-rule-icon:hover,
 .active-rule-cancel:hover,
 .active-rule-save:hover:not(:disabled) {
   background: rgba(0,0,0,0.05);
+}
+.active-rule-card:not(.editing) .active-rule-icon:hover {
+  border-color: rgba(0,0,0,0.06);
 }
 .active-rule-save {
   padding: 0 12px;

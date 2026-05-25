@@ -27,9 +27,9 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(app, /setActiveRulePreset\(password,\s*nextID,\s*activeRulePack\.id\)/);
   assert.match(app, /当前规则/);
   assert.ok(
-    app.indexOf('id="activeRuleCard"') > app.indexOf('id="batchList"') &&
-      app.indexOf('id="activeRuleCard"') < app.indexOf('id="moreArticlesSection"'),
-    'current rule selector should sit immediately above the more-articles section',
+    app.indexOf('id="activeRuleCard"') > app.indexOf('id="moreArticlesSection"') &&
+      app.indexOf('id="activeRuleCard"') < app.indexOf('class="sidebar-footer"'),
+    'current rule selector should sit below the more-articles section as secondary metadata',
   );
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
@@ -37,6 +37,8 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(css, /\.account-switcher-btn\.active/);
   assert.match(css, /\.active-rule-card/);
   assert.match(css, /\.active-rule-card\.editing/);
+  assert.match(css, /\.active-rule-readline/);
+  assert.match(css, /\.active-rule-readvalue/);
   assert.match(css, /\.active-rule-select-wrap/);
   assert.match(css, /\.active-rule-trigger:disabled/);
   assert.match(css, /\.active-rule-menu/);
