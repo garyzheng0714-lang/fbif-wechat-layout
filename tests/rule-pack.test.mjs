@@ -17,6 +17,8 @@ test('rule pack registry keeps FBIF as the default account pack', () => {
   assert.equal(pack.previewAccountName, 'FBIF食品饮料创新');
   assert.equal(pack.behaviorAccountName, 'FBIF');
   assert.equal(pack.footerUrl, '/footer.html');
+  assert.equal(pack.channel, 'mp');
+  assert.equal(pack.location, '上海');
 });
 
 test('rule pack registry exposes FoodTalks what-is series as a selectable account', () => {
@@ -37,6 +39,22 @@ test('rule pack can be selected by account query without adding visible template
   assert.equal(getRulePackIDFromLocation({ search: '?account=foodtalks-series' }), 'foodtalks-series');
   assert.equal(getRulePackIDFromLocation({ search: '?rule_pack=foodtalks-series' }), 'foodtalks-series');
   assert.equal(getRulePack('unknown').id, 'fbif');
+});
+
+test('rule pack registry assigns channel=mp to FoodTalks 什么是系列', () => {
+  const pack = getRulePack('foodtalks-series');
+  assert.equal(pack.id, 'foodtalks-series');
+  assert.equal(pack.channel, 'mp');
+  assert.equal(pack.templateId, 'fbif');
+});
+
+test('listRulePacks returns all packs with a channel field set', () => {
+  const packs = listRulePacks();
+  assert.ok(packs.length >= 2, 'expected at least 2 rule packs');
+  for (const pack of packs) {
+    assert.ok(pack.channel, `pack ${pack.id} missing channel`);
+    assert.ok(['mp', 'ft'].includes(pack.channel), `pack ${pack.id} channel must be mp|ft`);
+  }
 });
 
 test('app and engine read account chrome and footer from the rule pack registry', async () => {

@@ -13,6 +13,7 @@ export const RULE_PACKS = Object.freeze({
     avatarUrl: '/fbif-avatar.webp',
     footerUrl: '/footer.html',
     location: '上海',
+    channel: 'mp',
   }),
   'foodtalks-series': Object.freeze({
     id: 'foodtalks-series',
@@ -23,6 +24,7 @@ export const RULE_PACKS = Object.freeze({
     avatarUrl: '/fbif-avatar.webp',
     footerUrl: '/footer.html',
     location: '上海',
+    channel: 'mp',
   }),
 });
 
