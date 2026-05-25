@@ -396,6 +396,11 @@ export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) 
   }
 }
 
+export async function listPublicRulePresets() {
+  const resp = await fetch('/api/rules/presets', { cache: 'no-store' });
+  return parseJSONResponse(resp);
+}
+
 export async function adminLogin(password) {
   const resp = await fetch('/api/rules/admin/login', {
     method: 'POST',

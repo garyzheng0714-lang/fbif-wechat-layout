@@ -105,38 +105,88 @@ body {
 input[type="file"] { display: none; }
 
 .active-rule-card {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 4px 8px;
-  margin-top: -4px;
-  padding: 9px 10px;
-  border: 1px solid rgba(0,0,0,0.08);
-  border-radius: 8px;
-  background: #fbfaf9;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .active-rule-label {
   color: #a39e98;
   font-size: 11px;
   font-weight: 700;
 }
-.active-rule-name {
-  min-width: 0;
-  color: rgba(0,0,0,0.95);
-  font-size: 13px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.active-rule-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-.active-rule-source {
-  grid-column: 2;
+.active-rule-select {
+  flex: 1;
   min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #dddddd;
+  border-radius: 4px;
+  background: #ffffff;
+  color: rgba(0,0,0,0.95);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+.active-rule-select:disabled {
+  color: #615d59;
+  background: #f6f5f4;
+  opacity: 1;
+  cursor: not-allowed;
+}
+.active-rule-select:focus {
+  outline: none;
+  border-color: #0075de;
+  box-shadow: 0 0 0 2px rgba(0,117,222,0.15);
+}
+.active-rule-icon,
+.active-rule-save {
+  height: 32px;
+  border-radius: 4px;
+  border: 1px solid rgba(0,0,0,0.1);
+  background: #ffffff;
+  color: rgba(0,0,0,0.95);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+.active-rule-icon {
+  width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #615d59;
+}
+.active-rule-icon:hover,
+.active-rule-save:hover:not(:disabled) {
+  background: rgba(0,0,0,0.05);
+}
+.active-rule-icon.active {
+  color: #0075de;
+  border-color: rgba(0,117,222,0.35);
+  background: #f2f9ff;
+}
+.active-rule-save {
+  padding: 0 10px;
+}
+.active-rule-save:disabled {
+  color: #a39e98;
+  background: #f6f5f4;
+  cursor: not-allowed;
+}
+.active-rule-icon:active,
+.active-rule-save:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.active-rule-status {
   color: #615d59;
   font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* URL input */

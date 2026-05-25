@@ -39,11 +39,6 @@
         <div class="upload-hint" id="fileHint">支持 .docx、.md、.txt</div>
         <input type="file" id="fileInput">
       </div>
-      <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
-        <span class="active-rule-label">当前规则</span>
-        <span class="active-rule-name">加载中...</span>
-      </div>
-
       <div class="url-row-inline">
         <input type="url" id="urlInput" class="url-input-inline" placeholder="公众号文章链接">
         <button id="urlFetchBtn" class="url-btn-inline" onclick="fetchArticle()">提取</button>
@@ -56,6 +51,19 @@
       <div class="error" id="error"></div>
       <div class="sidebar-stats" id="statsBar"></div>
       <div class="batch-list" id="batchList" style="display:none;"></div>
+
+      <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
+        <span class="active-rule-label">当前规则</span>
+        <div class="active-rule-line">
+          <select id="activeRuleSelect" class="active-rule-select" disabled>
+            <option>加载中...</option>
+          </select>
+          <button type="button" class="active-rule-icon" aria-label="修改当前规则" title="修改当前规则">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <button type="button" class="active-rule-save" disabled>保存</button>
+        </div>
+      </div>
 
       <div class="ma-section" id="moreArticlesSection">
         <div class="sidebar-divider"></div>
@@ -183,7 +191,10 @@ const {
   loadLocalRuleConfig,
   saveLocalRuleConfig,
   applyActiveRuleConfig,
+  adminLogin,
+  listPublicRulePresets,
   normalizeRuleConfig,
+  setActiveRulePreset,
 } = ruleModule;
 const initialRule = await loadActiveRulePreset(activeRulePack.id);
 let activeRuleSource = initialRule.source;
@@ -193,6 +204,11 @@ if (activeRuleSource === 'server') {
   // session-only unless the rule backend is unavailable.
   saveLocalRuleConfig(initialRule.preset.config, activeRulePack.id);
 }
+let activeRuleCatalog = await loadRuleCatalog();
+let activeRuleSelectorEditing = false;
+let activeRuleSelectorDraftID = initialRule.preset.id || 'default';
+let activeRuleSelectorStatus = '';
+let activeRuleAdminPassword = '';
 
 function escText(value) {
   return String(value == null ? '' : value)
@@ -206,13 +222,114 @@ function renderActiveRuleCard() {
   const card = document.getElementById('activeRuleCard');
   if (!card) return;
   const preset = (window._activeConfig && window._activeConfig.preset) || {};
-  const ruleName = preset.name || '默认规则';
-  const sourceText = activeRuleSource === 'server' ? '服务器规则' : '本地备用规则';
+  const currentID = preset.id || 'default';
+  const selectedID = activeRuleSelectorEditing ? (activeRuleSelectorDraftID || currentID) : currentID;
+  const options = ruleSelectorOptions(preset);
+  const canSave = activeRuleSelectorEditing && selectedID && selectedID !== currentID;
+  const statusHTML = activeRuleSelectorStatus ? `<div class="active-rule-status">${escText(activeRuleSelectorStatus)}</div>` : '';
   card.innerHTML = `
-    <span class="active-rule-label">当前规则</span>
-    <span class="active-rule-name">${escText(ruleName)}</span>
-    <span class="active-rule-source">${escText(activeRulePack.accountName)} · ${escText(sourceText)}</span>
+    <label class="active-rule-label" for="activeRuleSelect">当前规则</label>
+    <div class="active-rule-line">
+      <select id="activeRuleSelect" class="active-rule-select" ${activeRuleSelectorEditing ? '' : 'disabled'}>
+        ${options.map(rule => `<option value="${escText(rule.id)}" ${rule.id === selectedID ? 'selected' : ''}>${escText(rule.name || rule.id)}</option>`).join('')}
+      </select>
+      <button type="button" class="active-rule-icon ${activeRuleSelectorEditing ? 'active' : ''}" data-action="edit-active-rule" aria-label="修改当前规则" title="修改当前规则">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <button type="button" class="active-rule-save" data-action="save-active-rule" ${canSave ? '' : 'disabled'}>保存</button>
+    </div>
+    ${statusHTML}
   `;
+  const select = card.querySelector('#activeRuleSelect');
+  select.addEventListener('change', () => {
+    activeRuleSelectorDraftID = select.value;
+    activeRuleSelectorStatus = '';
+    renderActiveRuleCard();
+  });
+  card.querySelector('[data-action="edit-active-rule"]').addEventListener('click', () => beginActiveRuleEdit());
+  card.querySelector('[data-action="save-active-rule"]').addEventListener('click', () => saveActiveRuleSelection());
+}
+
+async function loadRuleCatalog() {
+  try {
+    const data = await listPublicRulePresets();
+    return { presets: Array.isArray(data.presets) ? data.presets : [] };
+  } catch {
+    const preset = (window._activeConfig && window._activeConfig.preset) || {};
+    return { presets: preset.id ? [{ id: preset.id, name: preset.name || preset.id }] : [] };
+  }
+}
+
+function ruleSelectorOptions(currentPreset) {
+  const seen = new Set();
+  const rules = [];
+  for (const rule of activeRuleCatalog.presets || []) {
+    if (!rule || !rule.id || seen.has(rule.id)) continue;
+    seen.add(rule.id);
+    rules.push({ id: rule.id, name: rule.name || rule.id });
+  }
+  if (currentPreset && currentPreset.id && !seen.has(currentPreset.id)) {
+    rules.unshift({ id: currentPreset.id, name: currentPreset.name || currentPreset.id });
+  }
+  return rules.length ? rules : [{ id: 'default', name: '默认规则' }];
+}
+
+async function beginActiveRuleEdit() {
+  const preset = (window._activeConfig && window._activeConfig.preset) || {};
+  activeRuleSelectorDraftID = preset.id || 'default';
+  activeRuleSelectorStatus = '';
+  activeRuleCatalog = await loadRuleCatalog();
+  activeRuleSelectorEditing = true;
+  renderActiveRuleCard();
+  const select = document.getElementById('activeRuleSelect');
+  if (select) select.focus();
+}
+
+async function ensureRuleAdminPassword() {
+  if (activeRuleAdminPassword) return activeRuleAdminPassword;
+  const input = window.prompt('请输入规则后台密码');
+  if (!input) throw new Error('需要规则后台密码');
+  activeRuleAdminPassword = input.trim();
+  await adminLogin(activeRuleAdminPassword);
+  return activeRuleAdminPassword;
+}
+
+function refreshRuleConsumers() {
+  syncWorkflowControls();
+  renderActiveRuleCard();
+  if (window.updateThemePreview) window.updateThemePreview(loadConfig());
+  if (window._updateFooter) window._updateFooter(null);
+  if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+  if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
+}
+
+async function saveActiveRuleSelection() {
+  const preset = (window._activeConfig && window._activeConfig.preset) || {};
+  const nextID = activeRuleSelectorDraftID || preset.id || 'default';
+  if (nextID === preset.id) {
+    activeRuleSelectorEditing = false;
+    renderActiveRuleCard();
+    return;
+  }
+  activeRuleSelectorStatus = '保存中...';
+  renderActiveRuleCard();
+  try {
+    const password = await ensureRuleAdminPassword();
+    await setActiveRulePreset(password, nextID, activeRulePack.id);
+    const loaded = await loadActiveRulePreset(activeRulePack.id);
+    activeRuleSource = loaded.source;
+    applyActiveRuleConfig(loaded.preset.config, loaded.preset);
+    if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config);
+    activeRuleCatalog = await loadRuleCatalog();
+    activeRuleSelectorEditing = false;
+    activeRuleSelectorDraftID = loaded.preset.id || nextID;
+    activeRuleSelectorStatus = '已保存';
+    refreshRuleConsumers();
+  } catch (err) {
+    if (/password|密码|401|unauthorized/i.test(String(err && err.message))) activeRuleAdminPassword = '';
+    activeRuleSelectorStatus = err.message || '保存失败';
+    renderActiveRuleCard();
+  }
 }
 
 function applyRulePackChrome(pack) {
@@ -272,12 +389,11 @@ async function switchAccount(accountID) {
   if (activeRuleSource === 'server') {
     saveLocalRuleConfig(loaded.preset.config, activeRulePack.id);
   }
-  syncWorkflowControls();
-  renderActiveRuleCard();
-  if (window.updateThemePreview) window.updateThemePreview(loadConfig());
-  if (window._updateFooter) window._updateFooter(null);
-  if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-  if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
+  activeRuleCatalog = await loadRuleCatalog();
+  activeRuleSelectorEditing = false;
+  activeRuleSelectorDraftID = loaded.preset.id || 'default';
+  activeRuleSelectorStatus = '';
+  refreshRuleConsumers();
 }
 
 renderAccountSwitcher();
@@ -296,8 +412,7 @@ function saveConfig(config, preset, options = {}) {
     saveLocalRuleConfig(normalized, activeRulePack.id);
   }
   applyActiveRuleConfig(normalized, preset || (window._activeConfig && window._activeConfig.preset));
-  syncWorkflowControls();
-  renderActiveRuleCard();
+  refreshRuleConsumers();
   return normalized;
 }
 
@@ -332,6 +447,9 @@ initAdminPanel({
   rulePacks: rulePackModule.listRulePacks(),
   getConfig: loadConfig,
   getPreset: () => (window._activeConfig && window._activeConfig.preset) || null,
+  onAuthenticated(password) {
+    activeRuleAdminPassword = String(password || '').trim();
+  },
   applyConfig(config, preset, meta = {}) {
     if (meta.source === 'server') {
       activeRuleSource = 'server';

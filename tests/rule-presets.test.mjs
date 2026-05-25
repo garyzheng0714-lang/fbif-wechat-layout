@@ -5,6 +5,7 @@ import {
   applyActiveRuleConfig,
   buildRuleConfigDocument,
   getActiveRuleBehavior,
+  listPublicRulePresets,
   loadActiveRulePreset,
   loadLocalRuleConfig,
   normalizeRuleConfig,
@@ -287,6 +288,29 @@ test('admin active rule writes include the selected account id', async () => {
       id: 'foodtalks-rule',
       account_id: 'foodtalks-series',
     });
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test('public rule catalog fetches the rule list without admin headers', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return {
+      ok: true,
+      async json() {
+        return { presets: [{ id: 'default', name: 'FBIF默认规则' }], accounts: [] };
+      },
+    };
+  };
+
+  try {
+    const catalog = await listPublicRulePresets();
+    assert.equal(catalog.presets[0].id, 'default');
+    assert.equal(calls[0].url, '/api/rules/presets');
+    assert.equal(calls[0].options.cache, 'no-store');
+    assert.equal(calls[0].options.headers, undefined);
   } finally {
     delete globalThis.fetch;
   }

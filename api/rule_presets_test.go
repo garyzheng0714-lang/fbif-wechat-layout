@@ -221,6 +221,42 @@ func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
 	}
 }
 
+func TestRulePresetPublicCatalogOmitsRuleBodies(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+	mux := http.NewServeMux()
+	registerRulePresetHandlers(mux, store)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rules/presets", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("catalog code = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Presets  []map[string]any     `json:"presets"`
+		Accounts []ruleAccountBinding `json:"accounts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal catalog payload: %v", err)
+	}
+	if len(payload.Presets) < 2 {
+		t.Fatalf("catalog presets = %d, want account defaults", len(payload.Presets))
+	}
+	if payload.Presets[0]["id"] == "" || payload.Presets[0]["name"] == "" {
+		t.Fatalf("catalog should expose rule id and name: %#v", payload.Presets[0])
+	}
+	if _, ok := payload.Presets[0]["config"]; ok {
+		t.Fatalf("catalog must not expose editable config body: %#v", payload.Presets[0])
+	}
+	if _, ok := payload.Presets[0]["behavior"]; ok {
+		t.Fatalf("catalog must not expose behavior code body: %#v", payload.Presets[0])
+	}
+	if len(payload.Accounts) != 2 {
+		t.Fatalf("catalog accounts = %d, want 2", len(payload.Accounts))
+	}
+}
+
 func TestRulePresetAdminHandlersRequirePassword(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", "secret")
 	mux := http.NewServeMux()

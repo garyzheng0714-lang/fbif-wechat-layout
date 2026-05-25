@@ -795,6 +795,15 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 		writeJSON(w, http.StatusOK, map[string]any{"preset": preset})
 	})
 
+	mux.HandleFunc("GET /api/rules/presets", func(w http.ResponseWriter, r *http.Request) {
+		doc, err := store.list()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRulePresetCatalog(w, http.StatusOK, doc)
+	})
+
 	mux.HandleFunc("POST /api/rules/admin/login", func(w http.ResponseWriter, r *http.Request) {
 		if !adminPasswordConfigured() {
 			writeError(w, http.StatusServiceUnavailable, "规则后台未配置密码")

@@ -15,10 +15,23 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(app, /saveLocalRuleConfig\(initialRule\.preset\.config,\s*activeRulePack\.id\)/);
   assert.match(app, /id="activeRuleCard"/);
   assert.match(app, /renderActiveRuleCard/);
+  assert.match(app, /id="activeRuleSelect"/);
+  assert.match(app, /data-action="edit-active-rule"/);
+  assert.match(app, /data-action="save-active-rule"/);
+  assert.match(app, /listPublicRulePresets/);
+  assert.match(app, /setActiveRulePreset\(password,\s*nextID,\s*activeRulePack\.id\)/);
   assert.match(app, /当前规则/);
+  assert.ok(
+    app.indexOf('id="activeRuleCard"') > app.indexOf('id="batchList"') &&
+      app.indexOf('id="activeRuleCard"') < app.indexOf('id="moreArticlesSection"'),
+    'current rule selector should sit immediately above the more-articles section',
+  );
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
   assert.match(css, /\.account-switcher/);
   assert.match(css, /\.account-switcher-btn\.active/);
   assert.match(css, /\.active-rule-card/);
+  assert.match(css, /\.active-rule-select:disabled/);
+  assert.match(css, /\.active-rule-icon/);
+  assert.match(css, /\.active-rule-save/);
 });

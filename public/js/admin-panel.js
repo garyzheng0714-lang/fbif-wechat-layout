@@ -232,6 +232,7 @@ export function initAdminPanel(options = {}) {
       password = input.value.trim();
       await run(async () => {
         await adminLogin(password);
+        if (typeof options.onAuthenticated === 'function') options.onAuthenticated(password);
         await refreshDoc();
       }, '已进入后台');
     });
