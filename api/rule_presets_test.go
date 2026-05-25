@@ -10,6 +10,16 @@ import (
 	"testing"
 )
 
+func validMoreArticlesDefaultCards() []any {
+	return []any{
+		map[string]any{
+			"href":   "https://mp.weixin.qq.com/s/custom-a",
+			"title":  "自定义 A",
+			"imgurl": "https://mmbiz.qpic.cn/custom-a.jpg",
+		},
+	}
+}
+
 func TestRulePresetStorePersistsActivePreset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rule-presets.json")
 	store := newRulePresetStore(path)
@@ -345,6 +355,69 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "bad more articles card href",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"more_articles": map[string]any{
+						"default_cards": []any{
+							map[string]any{
+								"href": "javascript:alert(1)",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "bad more articles imgurl",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"more_articles": map[string]any{
+						"default_cards": []any{
+							map[string]any{
+								"href":   "https://mp.weixin.qq.com/s/custom-a",
+								"imgurl": "javascript:alert(1)",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "bad more articles image_urls",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"more_articles": map[string]any{
+						"default_cards": []any{
+							map[string]any{
+								"href":       "https://mp.weixin.qq.com/s/custom-a",
+								"image_urls": []any{"https://mmbiz.qpic.cn/a.jpg", "javascript:alert(1)"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "bad more articles title type",
+			config: map[string]any{
+				"schema_version": float64(2),
+				"modules": map[string]any{
+					"more_articles": map[string]any{
+						"default_cards": []any{
+							map[string]any{
+								"href":  "https://mp.weixin.qq.com/s/custom-a",
+								"title": map[string]any{"bad": "value"},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -362,6 +435,59 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 				t.Fatalf("invalid config code = %d, want 400 body=%s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestRulePresetAcceptsMoreArticlesDefaultCards(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "secret")
+	path := filepath.Join(t.TempDir(), "rules.json")
+	store := newRulePresetStore(path)
+	mux := http.NewServeMux()
+	registerRulePresetHandlers(mux, store)
+
+	body, _ := json.Marshal(rulePreset{
+		ID:   "custom-more-articles",
+		Name: "Custom More Articles",
+		Config: map[string]any{
+			"schema_version": float64(2),
+			"modules": map[string]any{
+				"more_articles": map[string]any{
+					"enabled":       false,
+					"default_cards": validMoreArticlesDefaultCards(),
+				},
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Admin-Password", "secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+
+	var doc rulePresetDocument
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var found *rulePreset
+	for i := range doc.Presets {
+		if doc.Presets[i].ID == "custom-more-articles" {
+			found = &doc.Presets[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("saved preset not found: %#v", doc.Presets)
+	}
+	if found.Config["more_articles_enabled"] != false {
+		t.Fatalf("more_articles_enabled = %#v, want false", found.Config["more_articles_enabled"])
+	}
+	cards, ok := found.Config["more_articles_default_cards"].([]any)
+	if !ok || len(cards) != 1 {
+		t.Fatalf("default cards = %#v, want one card", found.Config["more_articles_default_cards"])
 	}
 }
 

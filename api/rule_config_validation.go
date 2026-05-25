@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -45,12 +46,17 @@ var ruleColorFields = map[string]bool{
 }
 
 var ruleBooleanFields = map[string]bool{
-	"footer_enabled": true,
-	"skip_upload":    true,
+	"footer_enabled":        true,
+	"skip_upload":           true,
+	"more_articles_enabled": true,
 }
 
 var ruleTextFields = map[string]bool{
 	"font_family": true,
+}
+
+var ruleStructuredFields = map[string]bool{
+	"more_articles_default_cards": true,
 }
 
 var ruleModuleOrder = []string{"theme", "supporting", "more_articles", "workflow"}
@@ -77,15 +83,17 @@ var ruleModuleFields = map[string]map[string]bool{
 		"decorative_image_max_px": true,
 	},
 	"more_articles": {
-		"more_articles_slots":      true,
-		"banner_overlay_alpha":     true,
-		"banner_title_x":           true,
-		"banner_title_y":           true,
-		"banner_title_width":       true,
-		"banner_title_box_height":  true,
-		"banner_title_font_size":   true,
-		"banner_title_line_height": true,
-		"banner_title_max_lines":   true,
+		"more_articles_enabled":       true,
+		"more_articles_slots":         true,
+		"more_articles_default_cards": true,
+		"banner_overlay_alpha":        true,
+		"banner_title_x":              true,
+		"banner_title_y":              true,
+		"banner_title_width":          true,
+		"banner_title_box_height":     true,
+		"banner_title_font_size":      true,
+		"banner_title_line_height":    true,
+		"banner_title_max_lines":      true,
 	},
 	"workflow": {
 		"footer_enabled": true,
@@ -136,6 +144,11 @@ func validateRuleConfig(config map[string]any) error {
 				return fmt.Errorf("%s contains invalid characters", key)
 			}
 		}
+		if ruleStructuredFields[key] {
+			if err := validateRuleStructuredField(key, value); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -175,26 +188,28 @@ func validateRuleConfigKeys(config map[string]any) error {
 			}
 			seenModuleFields := map[string]bool{}
 			for key := range module {
-				if !isKnownRuleField(key) {
+				canonicalKey := canonicalRuleModuleField(moduleName, key)
+				if !isKnownRuleField(canonicalKey) {
 					return fmt.Errorf("unknown rule field: %s", key)
 				}
-				if !allowedFields[key] {
+				if !allowedFields[canonicalKey] {
 					return fmt.Errorf("%s field is not allowed in %s module", key, moduleName)
 				}
-				if seenModuleFields[key] {
-					return fmt.Errorf("duplicate rule field: %s", key)
+				if seenModuleFields[canonicalKey] {
+					return fmt.Errorf("duplicate rule field: %s", canonicalKey)
 				}
-				seenModuleFields[key] = true
+				seenModuleFields[canonicalKey] = true
 			}
 		}
 		seenAcrossModules := map[string]bool{}
 		for _, moduleName := range ruleModuleOrder {
 			module, _ := modules[moduleName].(map[string]any)
 			for key := range module {
-				if seenAcrossModules[key] {
-					return fmt.Errorf("duplicate rule field: %s", key)
+				canonicalKey := canonicalRuleModuleField(moduleName, key)
+				if seenAcrossModules[canonicalKey] {
+					return fmt.Errorf("duplicate rule field: %s", canonicalKey)
 				}
-				seenAcrossModules[key] = true
+				seenAcrossModules[canonicalKey] = true
 			}
 		}
 	}
@@ -205,7 +220,19 @@ func isKnownRuleField(key string) bool {
 	if _, ok := ruleNumberFields[key]; ok {
 		return true
 	}
-	return ruleColorFields[key] || ruleBooleanFields[key] || ruleTextFields[key]
+	return ruleColorFields[key] || ruleBooleanFields[key] || ruleTextFields[key] || ruleStructuredFields[key]
+}
+
+func canonicalRuleModuleField(moduleName, key string) string {
+	if moduleName == "more_articles" {
+		switch key {
+		case "enabled":
+			return "more_articles_enabled"
+		case "default_cards":
+			return "more_articles_default_cards"
+		}
+	}
+	return key
 }
 
 func flattenRuleConfig(config map[string]any) map[string]any {
@@ -227,13 +254,98 @@ func flattenRuleConfig(config map[string]any) map[string]any {
 			continue
 		}
 		for k, v := range module {
-			if !isKnownRuleField(k) {
+			canonicalKey := canonicalRuleModuleField(moduleName, k)
+			if !isKnownRuleField(canonicalKey) {
 				continue
 			}
-			flat[k] = v
+			flat[canonicalKey] = v
 		}
 	}
 	return flat
+}
+
+func validateRuleStructuredField(key string, value any) error {
+	if key == "more_articles_default_cards" {
+		return validateMoreArticlesDefaultCards(value)
+	}
+	return nil
+}
+
+func validateMoreArticlesDefaultCards(value any) error {
+	cards, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("more_articles_default_cards must be an array")
+	}
+	for i, rawCard := range cards {
+		card, ok := rawCard.(map[string]any)
+		if !ok {
+			return fmt.Errorf("more_articles_default_cards[%d] must be an object", i)
+		}
+		if err := validateMoreArticleCardString(card, "href", i, isSafeWeChatArticleURL); err != nil {
+			return err
+		}
+		if err := validateMoreArticleCardString(card, "imgurl", i, isSafeImageURL); err != nil {
+			return err
+		}
+		if title, ok := card["title"]; ok {
+			if _, ok := title.(string); !ok {
+				return fmt.Errorf("more_articles_default_cards[%d].title must be a string", i)
+			}
+		}
+		if rawImages, ok := card["image_urls"]; ok {
+			images, ok := rawImages.([]any)
+			if !ok {
+				return fmt.Errorf("more_articles_default_cards[%d].image_urls must be an array", i)
+			}
+			for imageIndex, rawImage := range images {
+				image, ok := rawImage.(string)
+				if !ok {
+					return fmt.Errorf("more_articles_default_cards[%d].image_urls[%d] must be a string", i, imageIndex)
+				}
+				image = strings.TrimSpace(image)
+				if image != "" && !isSafeImageURL(image) {
+					return fmt.Errorf("more_articles_default_cards[%d].image_urls[%d] must be a safe image URL", i, imageIndex)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateMoreArticleCardString(card map[string]any, key string, index int, valid func(string) bool) error {
+	rawValue, ok := card[key]
+	if !ok {
+		return nil
+	}
+	value, ok := rawValue.(string)
+	if !ok {
+		return fmt.Errorf("more_articles_default_cards[%d].%s must be a string", index, key)
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if !valid(value) {
+		return fmt.Errorf("more_articles_default_cards[%d].%s is invalid", index, key)
+	}
+	return nil
+}
+
+func isSafeWeChatArticleURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "mp.weixin.qq.com" || strings.HasSuffix(host, ".weixin.qq.com")
+}
+
+func isSafeImageURL(raw string) bool {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(value, "http://") ||
+		strings.HasPrefix(value, "https://") ||
+		strings.HasPrefix(value, "//") ||
+		strings.HasPrefix(value, "data:image/")
 }
 
 func ruleValueAsFloat(value any) (float64, error) {
