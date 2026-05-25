@@ -58,6 +58,16 @@ test('app shell prefers pathname over query for initial rule pack selection', as
   assert.match(app, /getRulePackIDFromLocation/);
 });
 
+test('app.html writes path-based URL when switching rule packs', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  // 必须用 buildPath 构造新 URL
+  assert.match(app, /buildPath\s*\(/);
+  // rule-packs/url.js 已 import（Task 5 引入，Task 6 复用）
+  assert.match(app, /rule-packs\/url\.js/);
+  // 切换分支必须先判断 parsePath !== null
+  assert.match(app, /rulePackUrlModule\.parsePath\(\s*location\.pathname\s*\)/);
+});
+
 test('app shell uses absolute /js/ paths for dynamic imports (path-safe under /mp/...)', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   // 不允许任何相对路径的 dynamic import（会在 /mp/fbif 下被解析为 /mp/js/...）

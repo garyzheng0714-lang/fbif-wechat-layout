@@ -494,7 +494,13 @@ function persistAccountSelection(id) {
     window.localStorage.setItem(ACCOUNT_STORAGE_KEY, id);
   } catch {}
   const next = new URL(location.href);
-  next.searchParams.set('account', id);
+  if (rulePackUrlModule.parsePath(location.pathname) !== null) {
+    const pack = rulePackModule.getRulePack(id);
+    next.pathname = rulePackUrlModule.buildPath(pack.channel, id);
+    next.searchParams.delete('account');
+  } else {
+    next.searchParams.set('account', id);
+  }
   history.replaceState(null, '', next);
 }
 
@@ -503,7 +509,12 @@ async function switchAccount(accountID) {
   if (nextPack.id === activeRulePack.id) return;
   if (nextPack.templateId !== currentTemplateId) {
     const next = new URL(location.href);
-    next.searchParams.set('account', nextPack.id);
+    if (rulePackUrlModule.parsePath(location.pathname) !== null) {
+      next.pathname = rulePackUrlModule.buildPath(nextPack.channel, nextPack.id);
+      next.searchParams.delete('account');
+    } else {
+      next.searchParams.set('account', nextPack.id);
+    }
     location.href = next.toString();
     return;
   }
