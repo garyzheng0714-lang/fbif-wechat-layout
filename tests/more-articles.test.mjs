@@ -1,7 +1,11 @@
-import test from 'node:test';
+import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { computeBannerTitleLayout, mergeIntoFooter, wrapBannerTitleLines } from '../public/js/more-articles.js';
+import { computeBannerTitleLayout, makeFreshUploadCards, mergeIntoFooter, wrapBannerTitleLines } from '../public/js/more-articles.js';
+
+afterEach(() => {
+  delete globalThis.window;
+});
 
 const monoCtx = {
   measureText(text) {
@@ -61,4 +65,94 @@ test('footer section titles keep symmetric image rhythm with block images', asyn
   assert.match(html, /margin:20px 8px 20px;padding:0;text-align:center;"><span[^>]*><strong>\/ 1000个食品创新案例 \/<\/strong>/);
   assert.match(html, /\/ 1000个食品创新案例 \/<\/strong>[\s\S]*<section style="margin:0 8px 0;padding:0;text-align:center;line-height:0;font-size:0;"><img/);
   assert.doesNotMatch(html, /(?:<span\b[^>]*>\s*)?<br\s*\/?>\s*(?:<\/span>\s*)?<\/section>\s*$/i);
+});
+
+test('fresh more-articles cards seed from the active rule default cards', () => {
+  globalThis.window = {
+    _activeConfig: {
+      config: {
+        more_articles_enabled: true,
+        more_articles_slots: '2',
+        more_articles_default_cards: [
+          {
+            href: 'https://mp.weixin.qq.com/s/custom-a',
+            imgurl: 'https://example.com/a.jpg',
+            title: '自定义 A',
+          },
+          {
+            href: 'https://mp.weixin.qq.com/s/custom-b',
+            imgurl: 'https://example.com/b.jpg',
+            title: '自定义 B',
+          },
+        ],
+      },
+    },
+  };
+
+  const cards = makeFreshUploadCards();
+
+  assert.equal(cards.length, 2);
+  assert.deepEqual(cards.map(card => card.href), [
+    'https://mp.weixin.qq.com/s/custom-a',
+    'https://mp.weixin.qq.com/s/custom-b',
+  ]);
+  assert.deepEqual(cards.map(card => card.composite_url), [null, null]);
+  assert.deepEqual(cards.map(card => card.composite_hash), [null, null]);
+});
+
+test('fresh more-articles cards use active rule slots when count is omitted', () => {
+  globalThis.window = {
+    _activeConfig: {
+      config: {
+        more_articles_enabled: true,
+        more_articles_slots: '4',
+        more_articles_default_cards: [
+          { href: 'https://mp.weixin.qq.com/s/one' },
+        ],
+      },
+    },
+  };
+
+  const cards = makeFreshUploadCards();
+
+  assert.equal(cards.length, 4);
+  assert.equal(cards[0].href, 'https://mp.weixin.qq.com/s/one');
+  assert.equal(cards[1].href, '');
+  assert.equal(cards[2].href, '');
+  assert.equal(cards[3].href, '');
+});
+
+test('fresh more-articles cards are empty when the active rule disables the section', () => {
+  globalThis.window = {
+    _activeConfig: {
+      config: {
+        more_articles_enabled: false,
+        more_articles_default_cards: [
+          { href: 'https://mp.weixin.qq.com/s/disabled' },
+        ],
+      },
+    },
+  };
+
+  assert.deepEqual(makeFreshUploadCards(), []);
+});
+
+test('fresh more-articles cards pad explicit count after active rule defaults', () => {
+  globalThis.window = {
+    _activeConfig: {
+      config: {
+        more_articles_enabled: true,
+        more_articles_default_cards: [
+          { href: 'https://mp.weixin.qq.com/s/one' },
+        ],
+      },
+    },
+  };
+
+  const cards = makeFreshUploadCards(3);
+
+  assert.equal(cards.length, 3);
+  assert.equal(cards[0].href, 'https://mp.weixin.qq.com/s/one');
+  assert.equal(cards[1].href, '');
+  assert.equal(cards[2].href, '');
 });
