@@ -29,6 +29,7 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - 使用 `public/js/templates/fbif.js` 和 `public/css/wx-theme.css` 生成 FBIF 公众号样式。
 - 区分预览层与复制层：预览可使用原图；复制按钮点击时立即写入当前可粘贴 HTML，CSS 内联、微信兼容结构和已准备好的图片结果会进入复制层。
 - 支持图片代理、裁剪编辑、格式检测、上传重试和“更多文章”卡片合成；“更多文章”链接会抓取标题、头图和正文媒体图，选图弹窗优先使用当前卡片自己的媒体库；图片与“更多文章”合成结果在后台准备，不能阻塞复制按钮。
+- “更多文章”是规则里的可选模块：规则后台可开启/关闭，并用卡片编辑器维护新文章默认推荐列表；JSON 中对应 `modules.more_articles.enabled` 和 `modules.more_articles.default_cards`。
 - “更多文章”URL 粘贴支持移动端 input-only 行为；输入合法微信文章链接后会自动抓取，重复输入同一链接不闪烁状态。
 - 支持旧版 `.doc` 经 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
 - 支持多文件队列处理、品牌页脚开关和“更多文章”组合页脚。
@@ -207,7 +208,8 @@ go test ./...
 - 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；服务端持久化、v1/v2 兼容和写入校验集中在 `api/rule_presets.go`、`api/rule_config_validation.go`。
 - 账号包入口集中在 `public/js/rule-packs/registry.js`；新增账号包时应同时确认页脚、头像、账号名、模板 ID 和测试覆盖。
 - 复制到微信前的兼容处理集中在 `engine.js`、`clipboard.js`、`css-inline.js`、`uploader.js` 和 `more-articles.js`。`copyContent()` 不应等待图片上传或“更多文章”合成；后台准备完成后刷新复制层，下一次复制自然使用新结果。
-- “更多文章”选图链路由 `api/main.go` 的 `/api/fetch-article-meta` 返回 `image_urls`，`public/js/more-articles.js` 持久化到卡片状态，`public/js/more-articles-ui.js` 合并为选图候选并处理 URL 输入自动抓取。候选顺序为自定义封面、抓取头图、当前卡片正文媒体图、主文章图片兜底。
+- 默认“更多文章”列表由规则配置驱动：`public/js/rule-presets.js` 负责 JSON 读写，`public/js/more-articles-config.js` 负责卡片归一化，`public/js/more-articles-rule-editor.js` 负责规则后台卡片编辑器，`public/js/more-articles.js` 在新文章导入时按当前规则生成默认卡片。
+- “更多文章”选图链路由 `api/main.go` 的 `/api/fetch-article-meta` 返回 `image_urls`，`public/js/more-articles.js` 持久化到卡片状态，`public/js/more-articles-ui.js` 合并为选图候选并处理 URL 输入自动抓取。候选顺序为自定义封面、抓取头图、当前卡片正文媒体图、主文章图片兜底；旧卡片缺少 `image_urls` 时，点击替换会按卡片链接补抓一次。
 - DOCX 作者规则集中在 `public/js/templates/fbif.js`：首个 `作者：` 行之前内容默认隐藏；`Mote莫特` / `Mote 莫特` 会触发参考来源上方的固定署名图片。
 - DOCX 段距规则也在 `public/js/templates/fbif.js`：连续非空正文段落在 Word 段距较小时保持紧凑；如果中间出现空段，则下一段前恢复标准 `wx-gap`。
 - URL 导入结构化块由 `api/wechat_blocks.go` 输出，`public/js/templates/fbif.js` 渲染。图片说明组必须保留为 `cap`；文章级来源、作者、编辑必须在正文尾部、标准页脚前只渲染一次；正文尾段即使没有后续正文块，也必须带 `wx-gap`，给标准 `提示：` 页脚留出段落间距。
