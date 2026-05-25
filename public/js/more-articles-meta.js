@@ -1,7 +1,15 @@
 export function isValidMoreArticleUrl(value) {
   const url = String(value || '').trim();
-  return /^https?:\/\/mp\.weixin\.qq\.com\//i.test(url) ||
-         /^https?:\/\/([^/]+\.)?weixin\.qq\.com\//i.test(url);
+  try {
+    const parsed = new URL(url);
+    const protocol = parsed.protocol.toLowerCase();
+    const host = parsed.hostname.toLowerCase();
+    return (protocol === 'http:' || protocol === 'https:') &&
+           (host === 'mp.weixin.qq.com' || host === 'weixin.qq.com') &&
+           (parsed.pathname === '/s' || parsed.pathname.startsWith('/s/'));
+  } catch {
+    return false;
+  }
 }
 
 export function shouldAutoFetchMoreArticleUrl(value, lastFetchedUrl = '') {

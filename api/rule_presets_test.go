@@ -552,6 +552,33 @@ func TestRulePresetAcceptsMoreArticlesDefaultCards(t *testing.T) {
 	if !ok || len(cards) != 1 {
 		t.Fatalf("default cards = %#v, want one card", found.Config["more_articles_default_cards"])
 	}
+
+	reloaded := newRulePresetStore(path)
+	reloadedDoc, err := reloaded.list()
+	if err != nil {
+		t.Fatalf("reload list: %v", err)
+	}
+	found = nil
+	for i := range reloadedDoc.Presets {
+		if reloadedDoc.Presets[i].ID == "custom-more-articles" {
+			found = &reloadedDoc.Presets[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("reloaded preset not found: %#v", reloadedDoc.Presets)
+	}
+	cards, ok = found.Config["more_articles_default_cards"].([]any)
+	if !ok || len(cards) != 1 {
+		t.Fatalf("reloaded default cards = %#v, want one card", found.Config["more_articles_default_cards"])
+	}
+	card, ok := cards[0].(map[string]any)
+	if !ok {
+		t.Fatalf("reloaded default card = %#v, want object", cards[0])
+	}
+	if card["href"] != "https://mp.weixin.qq.com/s/custom-a" {
+		t.Fatalf("reloaded default card href = %#v, want custom-a", card["href"])
+	}
 }
 
 func TestRulePresetStoreCapsSavedVersionsPerRule(t *testing.T) {

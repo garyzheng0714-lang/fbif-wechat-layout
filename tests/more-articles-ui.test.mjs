@@ -102,6 +102,9 @@ test('more article URL input auto-fetches when mobile paste only fires input', a
 
 test('more article URL helper accepts only WeChat article hosts', () => {
   assert.equal(isValidMoreArticleUrl('https://mp.weixin.qq.com/s/example'), true);
+  assert.equal(isValidMoreArticleUrl('https://mp.weixin.qq.com/s?__biz=example'), true);
   assert.equal(isValidMoreArticleUrl('https://weixin.qq.com/s/example'), true);
+  assert.equal(isValidMoreArticleUrl('https://mp.weixin.qq.com/not-an-article'), false);
+  assert.equal(isValidMoreArticleUrl('https://foo.weixin.qq.com/s/example'), false);
   assert.equal(isValidMoreArticleUrl('https://not-wechat.example.com/s/example'), false);
 });
