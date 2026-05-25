@@ -4,8 +4,11 @@ import { readFile } from 'node:fs/promises';
 import {
   buildCoverPickerSources,
   coverPickerImageSource,
-  shouldAutoFetchMoreArticleUrl,
 } from '../public/js/more-articles-ui.js';
+import {
+  isValidMoreArticleUrl,
+  shouldAutoFetchMoreArticleUrl,
+} from '../public/js/more-articles-meta.js';
 
 test('cover picker loads page-local article images directly', () => {
   assert.deepEqual(
@@ -95,4 +98,10 @@ test('more article URL input auto-fetches when mobile paste only fires input', a
   const source = await readFile(new URL('../public/js/more-articles-ui.js', import.meta.url), 'utf8');
   const inputHandler = source.slice(source.indexOf("$('url').addEventListener('input'"));
   assert.match(inputHandler, /scheduleAutoFetch\(\)/);
+});
+
+test('more article URL helper accepts only WeChat article hosts', () => {
+  assert.equal(isValidMoreArticleUrl('https://mp.weixin.qq.com/s/example'), true);
+  assert.equal(isValidMoreArticleUrl('https://weixin.qq.com/s/example'), true);
+  assert.equal(isValidMoreArticleUrl('https://not-wechat.example.com/s/example'), false);
 });
