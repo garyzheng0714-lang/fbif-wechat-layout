@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import {
   DEFAULT_RULE_PACK_ID,
   getRulePack,
+  getRulePackByPath,
   getRulePackIDFromLocation,
   listRulePacks,
 } from '../public/js/rule-packs/registry.js';
@@ -65,4 +66,29 @@ test('app and engine read account chrome and footer from the rule pack registry'
   assert.match(app, /window\._activeRulePack = activeRulePack/);
   assert.match(app, /applyRulePackChrome\(activeRulePack\)/);
   assert.match(engine, /activeRulePack\.footerUrl/);
+});
+
+test('getRulePackByPath resolves /mp/fbif to fbif pack', () => {
+  const pack = getRulePackByPath('/mp/fbif');
+  assert.equal(pack.id, 'fbif');
+});
+
+test('getRulePackByPath resolves /mp/foodtalks-series', () => {
+  const pack = getRulePackByPath('/mp/foodtalks-series');
+  assert.equal(pack.id, 'foodtalks-series');
+});
+
+test('getRulePackByPath falls back to channel default when packId missing', () => {
+  const pack = getRulePackByPath('/mp');
+  assert.equal(pack.id, 'fbif');
+});
+
+test('getRulePackByPath returns DEFAULT_RULE_PACK_ID for non-channel paths', () => {
+  const pack = getRulePackByPath('/');
+  assert.equal(pack.id, 'fbif');
+});
+
+test('getRulePackByPath returns DEFAULT when packId unknown in channel', () => {
+  const pack = getRulePackByPath('/mp/does-not-exist');
+  assert.equal(pack.id, 'fbif');
 });
