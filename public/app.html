@@ -53,12 +53,15 @@
       <div class="batch-list" id="batchList" style="display:none;"></div>
 
       <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
-        <span class="active-rule-label">当前规则</span>
+        <div class="active-rule-caption">
+          <span class="active-rule-label">当前规则</span>
+          <span class="active-rule-badge">已锁定</span>
+        </div>
         <div class="active-rule-line">
           <span class="active-rule-select-wrap">
-            <select id="activeRuleSelect" class="active-rule-select" disabled>
-              <option>加载中...</option>
-            </select>
+            <button type="button" id="activeRuleSelect" class="active-rule-trigger" disabled>
+              <span class="active-rule-value">加载中...</span>
+            </button>
             <svg class="active-rule-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </span>
           <button type="button" class="active-rule-icon" aria-label="修改当前规则" title="修改当前规则">
@@ -208,9 +211,11 @@ if (activeRuleSource === 'server') {
 }
 let activeRuleCatalog = await loadRuleCatalog();
 let activeRuleSelectorEditing = false;
+let activeRuleSelectorOpen = false;
 let activeRuleSelectorDraftID = initialRule.preset.id || 'default';
 let activeRuleSelectorStatus = '';
 let activeRuleAdminPassword = '';
+let activeRuleOutsideHandler = null;
 
 function escText(value) {
   return String(value == null ? '' : value)
@@ -227,20 +232,32 @@ function renderActiveRuleCard() {
   const currentID = preset.id || 'default';
   const selectedID = activeRuleSelectorEditing ? (activeRuleSelectorDraftID || currentID) : currentID;
   const options = ruleSelectorOptions(preset);
+  const selectedRule = options.find(rule => rule.id === selectedID) || options[0];
   const canSave = activeRuleSelectorEditing && selectedID && selectedID !== currentID;
   const statusHTML = activeRuleSelectorStatus ? `<div class="active-rule-status">${escText(activeRuleSelectorStatus)}</div>` : '';
-  card.className = 'active-rule-card' + (activeRuleSelectorEditing ? ' editing' : '');
+  const menuHTML = activeRuleSelectorEditing && activeRuleSelectorOpen ? `
+        <div class="active-rule-menu" id="activeRuleMenu" role="listbox" aria-label="当前规则">
+          ${options.map(rule => `
+            <button type="button" class="active-rule-option" role="option" aria-selected="${rule.id === selectedID ? 'true' : 'false'}" data-rule-option="${escText(rule.id)}">
+              <span class="active-rule-option-name">${escText(rule.name || rule.id)}</span>
+              <span class="active-rule-option-check" aria-hidden="true">✓</span>
+            </button>
+          `).join('')}
+        </div>
+      ` : '';
+  card.className = 'active-rule-card' + (activeRuleSelectorEditing ? ' editing' : '') + (activeRuleSelectorOpen ? ' menu-open' : '');
   card.innerHTML = `
     <div class="active-rule-caption">
-      <label class="active-rule-label" for="activeRuleSelect">当前规则</label>
+      <span class="active-rule-label">当前规则</span>
       <span class="active-rule-badge">${activeRuleSelectorEditing ? '编辑中' : '已锁定'}</span>
     </div>
     <div class="active-rule-line">
       <span class="active-rule-select-wrap">
-        <select id="activeRuleSelect" class="active-rule-select" ${activeRuleSelectorEditing ? '' : 'disabled'}>
-          ${options.map(rule => `<option value="${escText(rule.id)}" ${rule.id === selectedID ? 'selected' : ''}>${escText(rule.name || rule.id)}</option>`).join('')}
-        </select>
+        <button type="button" id="activeRuleSelect" class="active-rule-trigger" data-value="${escText(selectedRule.id)}" aria-haspopup="listbox" aria-expanded="${activeRuleSelectorOpen ? 'true' : 'false'}" ${activeRuleSelectorEditing ? '' : 'disabled'}>
+          <span class="active-rule-value">${escText(selectedRule.name || selectedRule.id)}</span>
+        </button>
         <svg class="active-rule-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        ${menuHTML}
       </span>
       ${activeRuleSelectorEditing ? `
         <button type="button" class="active-rule-save" data-action="save-active-rule" ${canSave ? '' : 'disabled'}>保存</button>
@@ -253,11 +270,24 @@ function renderActiveRuleCard() {
     </div>
     ${statusHTML}
   `;
-  const select = card.querySelector('#activeRuleSelect');
-  select.addEventListener('change', () => {
-    activeRuleSelectorDraftID = select.value;
-    activeRuleSelectorStatus = '';
-    renderActiveRuleCard();
+  const trigger = card.querySelector('#activeRuleSelect');
+  trigger.addEventListener('click', () => toggleActiveRuleMenu());
+  trigger.addEventListener('keydown', event => {
+    if (!activeRuleSelectorEditing) return;
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      activeRuleSelectorOpen = true;
+      activeRuleSelectorStatus = '';
+      renderActiveRuleCard();
+    }
+    if (event.key === 'Escape') {
+      activeRuleSelectorOpen = false;
+      renderActiveRuleCard();
+    }
+  });
+  card.querySelectorAll('[data-rule-option]').forEach(button => {
+    button.addEventListener('click', () => chooseActiveRuleOption(button.getAttribute('data-rule-option')));
+    button.addEventListener('keydown', event => handleActiveRuleOptionKeydown(event, button));
   });
   const editButton = card.querySelector('[data-action="edit-active-rule"]');
   if (editButton) editButton.addEventListener('click', () => beginActiveRuleEdit());
@@ -265,6 +295,11 @@ function renderActiveRuleCard() {
   if (saveButton) saveButton.addEventListener('click', () => saveActiveRuleSelection());
   const cancelButton = card.querySelector('[data-action="cancel-active-rule"]');
   if (cancelButton) cancelButton.addEventListener('click', () => cancelActiveRuleEdit());
+  syncActiveRuleOutsideHandler(card);
+  if (activeRuleSelectorOpen) {
+    const selectedOption = card.querySelector('[data-rule-option][aria-selected="true"]');
+    if (selectedOption) selectedOption.focus();
+  }
 }
 
 async function loadRuleCatalog() {
@@ -291,15 +326,70 @@ function ruleSelectorOptions(currentPreset) {
   return rules.length ? rules : [{ id: 'default', name: '默认规则' }];
 }
 
+function clearActiveRuleOutsideHandler() {
+  if (!activeRuleOutsideHandler) return;
+  document.removeEventListener('pointerdown', activeRuleOutsideHandler);
+  activeRuleOutsideHandler = null;
+}
+
+function syncActiveRuleOutsideHandler(card) {
+  clearActiveRuleOutsideHandler();
+  if (!activeRuleSelectorOpen) return;
+  activeRuleOutsideHandler = event => {
+    if (card.contains(event.target)) return;
+    activeRuleSelectorOpen = false;
+    renderActiveRuleCard();
+  };
+  setTimeout(() => document.addEventListener('pointerdown', activeRuleOutsideHandler), 0);
+}
+
+function toggleActiveRuleMenu() {
+  if (!activeRuleSelectorEditing) return;
+  activeRuleSelectorOpen = !activeRuleSelectorOpen;
+  activeRuleSelectorStatus = '';
+  renderActiveRuleCard();
+}
+
+function chooseActiveRuleOption(ruleID) {
+  if (!ruleID) return;
+  activeRuleSelectorDraftID = ruleID;
+  activeRuleSelectorOpen = false;
+  activeRuleSelectorStatus = '';
+  renderActiveRuleCard();
+}
+
+function handleActiveRuleOptionKeydown(event, currentButton) {
+  const options = Array.from(document.querySelectorAll('[data-rule-option]'));
+  const index = options.indexOf(currentButton);
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    const next = options[(index + direction + options.length) % options.length];
+    if (next) next.focus();
+  }
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    chooseActiveRuleOption(currentButton.getAttribute('data-rule-option'));
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    activeRuleSelectorOpen = false;
+    renderActiveRuleCard();
+    const trigger = document.getElementById('activeRuleSelect');
+    if (trigger) trigger.focus();
+  }
+}
+
 async function beginActiveRuleEdit() {
   const preset = (window._activeConfig && window._activeConfig.preset) || {};
   activeRuleSelectorDraftID = preset.id || 'default';
   activeRuleSelectorStatus = '';
   activeRuleCatalog = await loadRuleCatalog();
   activeRuleSelectorEditing = true;
+  activeRuleSelectorOpen = false;
   renderActiveRuleCard();
-  const select = document.getElementById('activeRuleSelect');
-  if (select) select.focus();
+  const trigger = document.getElementById('activeRuleSelect');
+  if (trigger) trigger.focus();
 }
 
 function cancelActiveRuleEdit() {
@@ -307,6 +397,7 @@ function cancelActiveRuleEdit() {
   activeRuleSelectorDraftID = preset.id || 'default';
   activeRuleSelectorStatus = '';
   activeRuleSelectorEditing = false;
+  activeRuleSelectorOpen = false;
   renderActiveRuleCard();
 }
 
@@ -333,10 +424,12 @@ async function saveActiveRuleSelection() {
   const nextID = activeRuleSelectorDraftID || preset.id || 'default';
   if (nextID === preset.id) {
     activeRuleSelectorEditing = false;
+    activeRuleSelectorOpen = false;
     renderActiveRuleCard();
     return;
   }
   activeRuleSelectorStatus = '保存中...';
+  activeRuleSelectorOpen = false;
   renderActiveRuleCard();
   try {
     const password = await ensureRuleAdminPassword();
@@ -347,6 +440,7 @@ async function saveActiveRuleSelection() {
     if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config);
     activeRuleCatalog = await loadRuleCatalog();
     activeRuleSelectorEditing = false;
+    activeRuleSelectorOpen = false;
     activeRuleSelectorDraftID = loaded.preset.id || nextID;
     activeRuleSelectorStatus = '已保存';
     refreshRuleConsumers();
@@ -416,6 +510,7 @@ async function switchAccount(accountID) {
   }
   activeRuleCatalog = await loadRuleCatalog();
   activeRuleSelectorEditing = false;
+  activeRuleSelectorOpen = false;
   activeRuleSelectorDraftID = loaded.preset.id || 'default';
   activeRuleSelectorStatus = '';
   refreshRuleConsumers();

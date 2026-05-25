@@ -20,6 +20,9 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(app, /data-action="save-active-rule"/);
   assert.match(app, /data-action="cancel-active-rule"/);
   assert.match(app, /cancelActiveRuleEdit/);
+  assert.match(app, /activeRuleSelectorOpen/);
+  assert.match(app, /data-rule-option/);
+  assert.doesNotMatch(app, /<select id="activeRuleSelect"/);
   assert.match(app, /listPublicRulePresets/);
   assert.match(app, /setActiveRulePreset\(password,\s*nextID,\s*activeRulePack\.id\)/);
   assert.match(app, /当前规则/);
@@ -35,7 +38,9 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(css, /\.active-rule-card/);
   assert.match(css, /\.active-rule-card\.editing/);
   assert.match(css, /\.active-rule-select-wrap/);
-  assert.match(css, /\.active-rule-select:disabled/);
+  assert.match(css, /\.active-rule-trigger:disabled/);
+  assert.match(css, /\.active-rule-menu/);
+  assert.match(css, /\.active-rule-option/);
   assert.match(css, /\.active-rule-icon/);
   assert.match(css, /\.active-rule-save/);
   assert.match(css, /\.active-rule-cancel/);
