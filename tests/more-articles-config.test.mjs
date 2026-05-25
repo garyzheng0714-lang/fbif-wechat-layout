@@ -6,6 +6,7 @@ import {
   normalizeMoreArticleDefaultCard,
   normalizeMoreArticleDefaultCards,
   moveMoreArticleDefaultCard,
+  moreArticleCardsForRule,
 } from '../public/js/more-articles-config.js';
 
 test('system defaults keep the current three recommended articles', () => {
@@ -74,4 +75,81 @@ test('card reorder helper moves one card without mutating the input', () => {
     'https://mp.weixin.qq.com/s/b',
     'https://mp.weixin.qq.com/s/c',
   ]);
+});
+
+test('rule card lookup uses the plural default-cards field', () => {
+  assert.deepEqual(
+    moreArticleCardsForRule({
+      more_articles_enabled: true,
+      more_articles_default_cards: [
+        {
+          href: 'https://mp.weixin.qq.com/s/custom',
+          title: '自定义卡',
+          imgurl: '//mmbiz.qpic.cn/custom.jpg',
+        },
+      ],
+    }),
+    [{
+      href: 'https://mp.weixin.qq.com/s/custom',
+      title: '自定义卡',
+      imgurl: 'https://mmbiz.qpic.cn/custom.jpg',
+      image_urls: [],
+      cover_data_url: null,
+      crop: { x: 0.5, y: 0.5, scale: 1 },
+    }]
+  );
+});
+
+test('card normalization rejects non-string URL and title values', () => {
+  assert.deepEqual(
+    normalizeMoreArticleDefaultCard({
+      href: { href: 'https://mp.weixin.qq.com/s/object' },
+      title: ['数组标题'],
+      imgurl: null,
+      image_urls: [
+        'https://mmbiz.qpic.cn/keep.jpg',
+        { url: 'https://mmbiz.qpic.cn/object.jpg' },
+        null,
+        ['https://mmbiz.qpic.cn/array.jpg'],
+        '//mmbiz.qpic.cn/keep-2.jpg',
+      ],
+    }),
+    {
+      href: '',
+      title: '',
+      imgurl: '',
+      image_urls: [
+        'https://mmbiz.qpic.cn/keep.jpg',
+        'https://mmbiz.qpic.cn/keep-2.jpg',
+      ],
+      cover_data_url: null,
+      crop: { x: 0.5, y: 0.5, scale: 1 },
+    }
+  );
+});
+
+test('crop normalization rejects empty coercions and clamps ranges', () => {
+  assert.deepEqual(
+    normalizeMoreArticleDefaultCard({
+      href: 'https://mp.weixin.qq.com/s/crop',
+      crop: { x: null, y: '', scale: false },
+    }).crop,
+    { x: 0.5, y: 0.5, scale: 1 }
+  );
+
+  assert.deepEqual(
+    normalizeMoreArticleDefaultCard({
+      href: 'https://mp.weixin.qq.com/s/crop',
+      crop: { x: -1, y: 2, scale: 8 },
+    }).crop,
+    { x: 0, y: 1, scale: 3 }
+  );
+
+  assert.deepEqual(
+    normalizeMoreArticleDefaultCard({
+      href: 'https://mp.weixin.qq.com/s/crop',
+      crop: { x: 0.2, y: 0.8, scale: 0.2 },
+    }).crop,
+    { x: 0.2, y: 0.8, scale: 0.5 }
+  );
 });

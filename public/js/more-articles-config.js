@@ -19,9 +19,15 @@ export const SYSTEM_DEFAULT_RECOMMENDED_CARDS = Object.freeze([
 ]);
 
 function normalizeUrl(value) {
+  if (typeof value !== 'string') return '';
   const url = String(value || '').trim();
   if (url.startsWith('//')) return `https:${url}`;
   return url;
+}
+
+function normalizeText(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim();
 }
 
 function normalizeImageUrls(values) {
@@ -39,10 +45,17 @@ function normalizeImageUrls(values) {
 
 function normalizeCrop(value) {
   if (!value || typeof value !== 'object') return { ...DEFAULT_CROP };
+  const cropNumber = (raw, fallback, min, max) => {
+    if (typeof raw !== 'number' && typeof raw !== 'string') return fallback;
+    if (typeof raw === 'string' && raw.trim() === '') return fallback;
+    const number = Number(raw);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(min, Math.min(max, number));
+  };
   return {
-    x: Number.isFinite(Number(value.x)) ? Number(value.x) : DEFAULT_CROP.x,
-    y: Number.isFinite(Number(value.y)) ? Number(value.y) : DEFAULT_CROP.y,
-    scale: Number.isFinite(Number(value.scale)) ? Number(value.scale) : DEFAULT_CROP.scale,
+    x: cropNumber(value.x, DEFAULT_CROP.x, 0, 1),
+    y: cropNumber(value.y, DEFAULT_CROP.y, 0, 1),
+    scale: cropNumber(value.scale, DEFAULT_CROP.scale, 0.5, 3),
   };
 }
 
@@ -61,7 +74,7 @@ export function normalizeMoreArticleDefaultCard(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
   return {
     href: normalizeUrl(source.href),
-    title: String(source.title || '').trim(),
+    title: normalizeText(source.title),
     imgurl: normalizeUrl(source.imgurl),
     image_urls: normalizeImageUrls(source.image_urls),
     cover_data_url: null,
@@ -72,10 +85,10 @@ export function normalizeMoreArticleDefaultCard(raw) {
 export function hasMoreArticleCardContent(card) {
   if (!card || typeof card !== 'object') return false;
   return Boolean(
-    String(card.href || '').trim()
-    || String(card.title || '').trim()
-    || String(card.imgurl || '').trim()
-    || String(card.cover_data_url || '').trim()
+    normalizeUrl(card.href)
+    || normalizeText(card.title)
+    || normalizeUrl(card.imgurl)
+    || normalizeText(card.cover_data_url)
     || normalizeImageUrls(card.image_urls).length
   );
 }
@@ -107,5 +120,5 @@ export function moveMoreArticleDefaultCard(cards, index, delta) {
 
 export function moreArticleCardsForRule(config = {}) {
   if (config.more_articles_enabled === false) return [];
-  return normalizeMoreArticleDefaultCards(config.more_article_default_cards);
+  return normalizeMoreArticleDefaultCards(config.more_articles_default_cards);
 }
