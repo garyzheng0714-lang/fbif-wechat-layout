@@ -263,6 +263,15 @@ function validateRawField(key, value, errors) {
   }
 }
 
+function isSafeMoreArticleImageUrl(value) {
+  if (typeof value !== 'string') return false;
+  const url = value.trim();
+  if (!url) return true;
+  return /^https?:\/\//i.test(url) ||
+         /^\/\//.test(url) ||
+         /^data:image\//i.test(url);
+}
+
 function validateMoreArticleDefaultCards(value, errors) {
   if (!Array.isArray(value)) {
     errors.push('默认更多文章卡片必须是数组');
@@ -277,6 +286,26 @@ function validateMoreArticleDefaultCards(value, errors) {
     if (href && !isValidMoreArticleUrl(href)) {
       errors.push('默认更多文章卡片链接必须是公众号链接');
       return;
+    }
+    if (card.title != null && typeof card.title !== 'string') {
+      errors.push('默认更多文章卡片 title 必须是字符串');
+      return;
+    }
+    if (card.imgurl != null && !isSafeMoreArticleImageUrl(card.imgurl)) {
+      errors.push('默认更多文章卡片 imgurl 必须是安全图片 URL');
+      return;
+    }
+    if (card.image_urls != null) {
+      if (!Array.isArray(card.image_urls)) {
+        errors.push('默认更多文章卡片 image_urls 必须是数组');
+        return;
+      }
+      for (const imageUrl of card.image_urls) {
+        if (!isSafeMoreArticleImageUrl(imageUrl)) {
+          errors.push('默认更多文章卡片 image_urls 必须都是安全图片 URL');
+          return;
+        }
+      }
     }
   }
 }

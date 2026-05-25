@@ -202,6 +202,47 @@ test('rule config JSON validation rejects values that would be silently normaliz
       },
     },
   })), /公众号链接/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        default_cards: [
+          {
+            href: '',
+            title: '坏图片',
+            imgurl: 'javascript:alert(1)',
+          },
+        ],
+      },
+    },
+  })), /默认更多文章.*imgurl/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        default_cards: [
+          {
+            href: '',
+            title: '坏候选图',
+            image_urls: ['https://mmbiz.qpic.cn/a.jpg', 'javascript:alert(1)'],
+          },
+        ],
+      },
+    },
+  })), /默认更多文章.*image_urls/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        default_cards: [
+          {
+            href: '',
+            title: { text: '坏标题' },
+          },
+        ],
+      },
+    },
+  })), /默认更多文章.*title/);
 });
 
 test('local fallback keeps legacy skip-upload preference', () => {
@@ -221,6 +262,38 @@ test('local fallback keeps legacy skip-upload preference', () => {
     saveLocalRuleConfig({ ...DEFAULT_RULE_CONFIG, skip_upload: false });
     assert.equal(JSON.parse(store.get('config_fbif')).skip_upload, false);
     assert.equal(store.get('skip_upload'), 'false');
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test('local fallback preserves custom more articles default cards', () => {
+  const store = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem(key) { return store.has(key) ? store.get(key) : null; },
+      setItem(key, value) { store.set(key, String(value)); },
+    },
+  };
+  try {
+    saveLocalRuleConfig({
+      ...DEFAULT_RULE_CONFIG,
+      more_articles_default_cards: [{
+        href: 'https://mp.weixin.qq.com/s/custom-local',
+        title: '本地自定义',
+        imgurl: '//mmbiz.qpic.cn/custom-local.jpg',
+      }],
+    });
+
+    const loaded = loadLocalRuleConfig();
+    assert.deepEqual(loaded.more_articles_default_cards, [{
+      href: 'https://mp.weixin.qq.com/s/custom-local',
+      title: '本地自定义',
+      imgurl: 'https://mmbiz.qpic.cn/custom-local.jpg',
+      image_urls: [],
+      cover_data_url: null,
+      crop: { x: 0.5, y: 0.5, scale: 1 },
+    }]);
   } finally {
     delete globalThis.window;
   }
