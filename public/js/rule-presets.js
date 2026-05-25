@@ -2,6 +2,12 @@
 // The normal editor keeps a local fallback; the admin panel can persist the
 // same rule object to the Go server as named presets.
 
+import {
+  SYSTEM_DEFAULT_RECOMMENDED_CARDS,
+  normalizeMoreArticleDefaultCards,
+} from './more-articles-config.js';
+import { isValidMoreArticleUrl } from './more-articles-meta.js';
+
 const LOCAL_CONFIG_KEY = 'config_fbif';
 const LEGACY_FOOTER_KEY = 'footer_enabled';
 const LEGACY_SKIP_UPLOAD_KEY = 'skip_upload';
@@ -41,6 +47,7 @@ export const RULE_SCHEMA = Object.freeze([
     id: 'more_articles',
     label: '更多文章',
     fields: Object.freeze([
+      { key: 'more_articles_enabled', label: '启用底部更多文章', type: 'boolean', default: true },
       { key: 'more_articles_slots', label: '新文章默认卡片数', type: 'number', min: 0, max: 8, step: 1, default: '3' },
       { key: 'banner_overlay_alpha', label: '封面遮罩透明度', type: 'number', min: 0, max: 1, step: 0.01, default: '0.47058823529411764' },
       { key: 'banner_title_x', label: '标题 X', type: 'number', min: 0, max: 400, step: 1, default: '61' },
@@ -69,7 +76,10 @@ const FIELD_BY_KEY = new Map(
 const SAFE_FONT_FAMILY_RE = /^[A-Za-z0-9\u4e00-\u9fff -]{1,40}$/;
 
 export const DEFAULT_RULE_CONFIG = Object.freeze(
-  Object.fromEntries(Array.from(FIELD_BY_KEY.values()).map(field => [field.key, field.default]))
+  {
+    ...Object.fromEntries(Array.from(FIELD_BY_KEY.values()).map(field => [field.key, field.default])),
+    more_articles_default_cards: normalizeMoreArticleDefaultCards(SYSTEM_DEFAULT_RECOMMENDED_CARDS),
+  }
 );
 
 const RULE_MODULE_GROUPS = Object.freeze([
@@ -97,6 +107,20 @@ function hasWindowStorage() {
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readableMoreArticlesKey(key) {
+  if (key === 'enabled') return 'more_articles_enabled';
+  if (key === 'default_cards') return 'more_articles_default_cards';
+  return key;
+}
+
+function normalizeReadableMoreArticlesAliases(moduleConfig) {
+  const out = {};
+  for (const [key, value] of Object.entries(moduleConfig)) {
+    out[readableMoreArticlesKey(key)] = value;
+  }
+  return out;
 }
 
 function numberToString(value, field) {
@@ -137,7 +161,14 @@ function flattenRuleConfigInput(raw) {
   const flat = {};
   for (const moduleGroup of RULE_MODULE_GROUPS) {
     const moduleConfig = modules[moduleGroup.id];
-    if (isPlainObject(moduleConfig)) Object.assign(flat, moduleConfig);
+    if (isPlainObject(moduleConfig)) {
+      Object.assign(
+        flat,
+        moduleGroup.id === 'more_articles'
+          ? normalizeReadableMoreArticlesAliases(moduleConfig)
+          : moduleConfig
+      );
+    }
   }
   return { ...input, ...flat };
 }
@@ -148,6 +179,7 @@ export function normalizeRuleConfig(raw) {
   for (const field of FIELD_BY_KEY.values()) {
     out[field.key] = normalizeFieldValue(input[field.key], field);
   }
+  out.more_articles_default_cards = normalizeMoreArticleDefaultCards(input.more_articles_default_cards);
   return out;
 }
 
@@ -160,8 +192,18 @@ export function buildRuleConfigDocument(config, meta = {}) {
       const group = RULE_SCHEMA.find(item => item.id === groupID);
       if (!group) continue;
       for (const field of group.fields) {
+        if (moduleGroup.id === 'more_articles' && field.key === 'more_articles_enabled') {
+          modules[moduleGroup.id].enabled = normalized.more_articles_enabled;
+          continue;
+        }
         modules[moduleGroup.id][field.key] = normalized[field.key];
       }
+    }
+    if (moduleGroup.id === 'more_articles') {
+      modules[moduleGroup.id].default_cards = normalizeMoreArticleDefaultCards(
+        normalized.more_articles_default_cards,
+        []
+      );
     }
   }
   return {
@@ -221,6 +263,32 @@ function validateRawField(key, value, errors) {
   }
 }
 
+function validateMoreArticleDefaultCards(value, errors) {
+  if (!Array.isArray(value)) {
+    errors.push('默认更多文章卡片必须是数组');
+    return;
+  }
+  for (const card of value) {
+    if (!isPlainObject(card)) {
+      errors.push('默认更多文章卡片必须是对象');
+      return;
+    }
+    const href = String(card.href || '').trim();
+    if (href && !isValidMoreArticleUrl(href)) {
+      errors.push('默认更多文章卡片链接必须是公众号链接');
+      return;
+    }
+  }
+}
+
+function validateRawConfigEntry(key, value, errors) {
+  if (key === 'more_articles_default_cards') {
+    validateMoreArticleDefaultCards(value, errors);
+    return;
+  }
+  validateRawField(key, value, errors);
+}
+
 function validateRuleConfigSource(source) {
   const errors = [];
   const modules = isPlainObject(source.modules) ? source.modules : null;
@@ -229,7 +297,7 @@ function validateRuleConfigSource(source) {
   }
   for (const [key, value] of Object.entries(source)) {
     if (['schema_version', 'name', 'description', 'modules', 'config'].includes(key)) continue;
-    validateRawField(key, value, errors);
+    validateRawConfigEntry(key, value, errors);
   }
   if (modules) {
     const seenModuleFields = new Set();
@@ -244,14 +312,16 @@ function validateRuleConfigSource(source) {
         continue;
       }
       for (const [key, value] of Object.entries(moduleConfig)) {
-        validateRawField(key, value, errors);
-        if (!allowedFields.has(key)) {
+        const canonicalKey = moduleName === 'more_articles' ? readableMoreArticlesKey(key) : key;
+        validateRawConfigEntry(canonicalKey, value, errors);
+        const isMoreArticleCards = moduleName === 'more_articles' && canonicalKey === 'more_articles_default_cards';
+        if (!isMoreArticleCards && !allowedFields.has(canonicalKey)) {
           errors.push(key + ' 不能放在 ' + moduleName + ' 模块');
         }
-        if (seenModuleFields.has(key)) {
-          errors.push('重复规则字段：' + key);
+        if (seenModuleFields.has(canonicalKey)) {
+          errors.push('重复规则字段：' + canonicalKey);
         }
-        seenModuleFields.add(key);
+        seenModuleFields.add(canonicalKey);
       }
     }
   }
