@@ -1,0 +1,101 @@
+/* Rule admin card editor */
+.ma-rule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 4px 0 2px;
+}
+
+.ma-rule-editor h3 {
+  margin: 0;
+}
+
+.ma-rule-editor p {
+  margin: -4px 0 2px;
+  color: #615d59;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ma-rule-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 8px;
+  background: #fcfcfc;
+}
+
+.ma-rule-toggle-row .admin-toggle {
+  flex: 0 0 auto;
+}
+
+.ma-rule-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 8px;
+  background: #fcfcfc;
+}
+
+.ma-rule-field {
+  grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.ma-rule-field input,
+.ma-rule-field textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.ma-rule-field input[type="text"],
+.ma-rule-field input[type="url"],
+.ma-rule-field textarea {
+  padding: 7px 9px;
+  border: 1px solid #dddddd;
+  border-radius: 4px;
+  background: #ffffff;
+  color: rgba(0,0,0,0.9);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.ma-rule-field input[type="text"]:focus,
+.ma-rule-field input[type="url"]:focus,
+.ma-rule-field textarea:focus {
+  outline: none;
+  border-color: #0075de;
+  box-shadow: 0 0 0 2px rgba(0,117,222,0.15);
+}
+
+.ma-rule-field textarea {
+  min-height: 86px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.ma-rule-card .admin-json-actions {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+@media (max-width: 768px) {
+  .ma-rule-field {
+    grid-template-columns: 1fr;
+  }
+
+  .ma-rule-toggle-row,
+  .ma-rule-card .admin-json-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .ma-rule-card .admin-json-actions .admin-secondary {
+    flex: 1 1 136px;
+  }
+}
