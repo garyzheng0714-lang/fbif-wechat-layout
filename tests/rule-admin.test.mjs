@@ -13,6 +13,9 @@ test('rule admin exposes JSON editing and new-rule controls', async () => {
   assert.match(adminPanel, /data-action="new"/);
   assert.match(adminPanel, /syncDirtyJSONBeforePersist/);
   assert.match(adminPanel, /syncDirtyJSONBeforePersist\(\);[\s\S]*saveRulePreset/);
+  assert.match(adminPanel, /createMoreArticlesRuleEditor/);
+  assert.match(adminPanel, /data-role="more-articles-rule-editor"/);
+  assert.match(adminPanel, /syncJSONEditorFromInputs/);
 });
 
 test('rule admin lets JSON explicitly clear a saved description', async () => {
