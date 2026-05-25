@@ -18,6 +18,8 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(app, /id="activeRuleSelect"/);
   assert.match(app, /data-action="edit-active-rule"/);
   assert.match(app, /data-action="save-active-rule"/);
+  assert.match(app, /data-action="cancel-active-rule"/);
+  assert.match(app, /cancelActiveRuleEdit/);
   assert.match(app, /listPublicRulePresets/);
   assert.match(app, /setActiveRulePreset\(password,\s*nextID,\s*activeRulePack\.id\)/);
   assert.match(app, /当前规则/);
@@ -31,7 +33,10 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(css, /\.account-switcher/);
   assert.match(css, /\.account-switcher-btn\.active/);
   assert.match(css, /\.active-rule-card/);
+  assert.match(css, /\.active-rule-card\.editing/);
+  assert.match(css, /\.active-rule-select-wrap/);
   assert.match(css, /\.active-rule-select:disabled/);
   assert.match(css, /\.active-rule-icon/);
   assert.match(css, /\.active-rule-save/);
+  assert.match(css, /\.active-rule-cancel/);
 });

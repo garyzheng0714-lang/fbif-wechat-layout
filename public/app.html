@@ -55,13 +55,15 @@
       <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
         <span class="active-rule-label">当前规则</span>
         <div class="active-rule-line">
-          <select id="activeRuleSelect" class="active-rule-select" disabled>
-            <option>加载中...</option>
-          </select>
+          <span class="active-rule-select-wrap">
+            <select id="activeRuleSelect" class="active-rule-select" disabled>
+              <option>加载中...</option>
+            </select>
+            <svg class="active-rule-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
           <button type="button" class="active-rule-icon" aria-label="修改当前规则" title="修改当前规则">
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
           </button>
-          <button type="button" class="active-rule-save" disabled>保存</button>
         </div>
       </div>
 
@@ -227,16 +229,27 @@ function renderActiveRuleCard() {
   const options = ruleSelectorOptions(preset);
   const canSave = activeRuleSelectorEditing && selectedID && selectedID !== currentID;
   const statusHTML = activeRuleSelectorStatus ? `<div class="active-rule-status">${escText(activeRuleSelectorStatus)}</div>` : '';
+  card.className = 'active-rule-card' + (activeRuleSelectorEditing ? ' editing' : '');
   card.innerHTML = `
-    <label class="active-rule-label" for="activeRuleSelect">当前规则</label>
+    <div class="active-rule-caption">
+      <label class="active-rule-label" for="activeRuleSelect">当前规则</label>
+      <span class="active-rule-badge">${activeRuleSelectorEditing ? '编辑中' : '已锁定'}</span>
+    </div>
     <div class="active-rule-line">
-      <select id="activeRuleSelect" class="active-rule-select" ${activeRuleSelectorEditing ? '' : 'disabled'}>
-        ${options.map(rule => `<option value="${escText(rule.id)}" ${rule.id === selectedID ? 'selected' : ''}>${escText(rule.name || rule.id)}</option>`).join('')}
-      </select>
-      <button type="button" class="active-rule-icon ${activeRuleSelectorEditing ? 'active' : ''}" data-action="edit-active-rule" aria-label="修改当前规则" title="修改当前规则">
-        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </button>
-      <button type="button" class="active-rule-save" data-action="save-active-rule" ${canSave ? '' : 'disabled'}>保存</button>
+      <span class="active-rule-select-wrap">
+        <select id="activeRuleSelect" class="active-rule-select" ${activeRuleSelectorEditing ? '' : 'disabled'}>
+          ${options.map(rule => `<option value="${escText(rule.id)}" ${rule.id === selectedID ? 'selected' : ''}>${escText(rule.name || rule.id)}</option>`).join('')}
+        </select>
+        <svg class="active-rule-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      ${activeRuleSelectorEditing ? `
+        <button type="button" class="active-rule-save" data-action="save-active-rule" ${canSave ? '' : 'disabled'}>保存</button>
+        <button type="button" class="active-rule-cancel" data-action="cancel-active-rule">取消</button>
+      ` : `
+        <button type="button" class="active-rule-icon" data-action="edit-active-rule" aria-label="修改当前规则" title="修改当前规则">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      `}
     </div>
     ${statusHTML}
   `;
@@ -246,8 +259,12 @@ function renderActiveRuleCard() {
     activeRuleSelectorStatus = '';
     renderActiveRuleCard();
   });
-  card.querySelector('[data-action="edit-active-rule"]').addEventListener('click', () => beginActiveRuleEdit());
-  card.querySelector('[data-action="save-active-rule"]').addEventListener('click', () => saveActiveRuleSelection());
+  const editButton = card.querySelector('[data-action="edit-active-rule"]');
+  if (editButton) editButton.addEventListener('click', () => beginActiveRuleEdit());
+  const saveButton = card.querySelector('[data-action="save-active-rule"]');
+  if (saveButton) saveButton.addEventListener('click', () => saveActiveRuleSelection());
+  const cancelButton = card.querySelector('[data-action="cancel-active-rule"]');
+  if (cancelButton) cancelButton.addEventListener('click', () => cancelActiveRuleEdit());
 }
 
 async function loadRuleCatalog() {
@@ -283,6 +300,14 @@ async function beginActiveRuleEdit() {
   renderActiveRuleCard();
   const select = document.getElementById('activeRuleSelect');
   if (select) select.focus();
+}
+
+function cancelActiveRuleEdit() {
+  const preset = (window._activeConfig && window._activeConfig.preset) || {};
+  activeRuleSelectorDraftID = preset.id || 'default';
+  activeRuleSelectorStatus = '';
+  activeRuleSelectorEditing = false;
+  renderActiveRuleCard();
 }
 
 async function ensureRuleAdminPassword() {
