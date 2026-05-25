@@ -13,6 +13,18 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - **服务对象**：FBIF 公众号编辑、内容运营和需要快速统一文章样式的协作人员。
 - **服务宿主**：输出内容面向微信公众号编辑器；本仓库不是浏览器插件，也不是飞书多维表格插件。
 
+## URL 路径化（2026-05-25）
+
+排版工具入口 URL 已从 `/app.html?account=<id>` 改为路径化 `/mp/<id>`。老 URL 仍可用，作为过渡 alias。后续接入"网站"渠道时路径为 `/ft/<id>`。
+
+| 旧 URL | 新 URL |
+|---|---|
+| `/` | `/mp/fbif`（自动跳转） |
+| `/app.html?account=fbif` | `/mp/fbif` |
+| `/app.html?account=foodtalks-series` | `/mp/foodtalks-series` |
+
+切换胶囊时，地址栏会根据当前 URL 形态写入新 URL：进 `/mp/...` 路径的，切完仍是 `/mp/...`；进老 `?account=` URL 的，切完仍是 `?account=`，不会被强升级。
+
 ## 最新状态（2026-05-24）
 
 - 规则配置已扩展为多公众号模块化规则库：前端以 `public/js/rule-presets.js` 作为 schema 和本地兜底，服务端以 `api/rule_presets.go` 兼容旧版 preset 文档和 v2 rule store。
@@ -51,7 +63,7 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 ```text
 .
 ├── public/
-│   ├── index.html                  # 入口，重定向到 app.html
+│   ├── index.html                  # 入口，重定向到 /mp/fbif
 │   ├── app.html                    # 主工具页面
 │   ├── app.css                     # 页面样式
 │   ├── footer.html                 # 页脚模板
