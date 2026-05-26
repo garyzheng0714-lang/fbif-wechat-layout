@@ -13,17 +13,27 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - **服务对象**：FBIF 公众号编辑、内容运营和需要快速统一文章样式的协作人员。
 - **服务宿主**：输出内容面向微信公众号编辑器；本仓库不是浏览器插件，也不是飞书多维表格插件。
 
-## URL 路径化（2026-05-25）
+## 渠道隔离（2026-05-26）
 
-排版工具入口 URL 已从 `/app.html?account=<id>` 改为路径化 `/mp/<id>`。老 URL 仍可用，作为过渡 alias。后续接入"网站"渠道时路径为 `/ft/<id>`。
+排版工具进入方式：
 
-| 旧 URL | 新 URL |
-|---|---|
-| `/` | `/mp/fbif`（自动跳转） |
-| `/app.html?account=fbif` | `/mp/fbif` |
-| `/app.html?account=foodtalks-series` | `/mp/foodtalks-series` |
+- 打开 `/` 显示**渠道选择门户**（两个大框：公众号 / 网站），点哪个进哪个，**不**自动跳转。
+- 点"公众号"进入 `/mp/fbif`（FBIF 公众号工具，胶囊、更多文章、底部公众号链接都在）。
+- 点"网站"进入 `/ft/default`（FoodTalks 网站工具，独立页面，无胶囊、无"更多文章"、输出 inline-style HTML 给 FoodTalks 网站后台粘贴）。
 
-切换胶囊时，地址栏会根据当前 URL 形态写入新 URL：进 `/mp/...` 路径的，切完仍是 `/mp/...`；进老 `?account=` URL 的，切完仍是 `?account=`，不会被强升级。
+老 URL（`/app.html?account=fbif`）仍可用，作为公众号工具的过渡 alias。
+
+**网站工具的排版规则**（参考 [VanilMsou/FoodtalksArticleLayout](https://github.com/VanilMsou/FoodtalksArticleLayout) 已移植）：
+
+- `<h2>` / `<h3>` 纯标签输出，无 inline style
+- 正文 `<p>` 无 style，空行用显式 `<p><br /></p>`
+- 图片 600px 居中（极端狭长图自适应：宽高比 ≥3→280px / ≥2.2→360px / ≥1.6→480px）
+- 图片注释 `<span style="font-size: 12px; color: #7f7f7f;">`，13 个关键词智能识别（图片来源/资料来源/数据来源/来源/制图/截图/图注/注/Source/Photo/Image/Credit）
+- 参考文献 `<span style="font-size: 16px; color: #7f7f7f;">`，自动补 `[1]` `[2]` `[3]` 编号
+- 标题自动等级识别：`一二三 + 中文标点` → h2、`（一）（二）` → h3、9 个关键词（背景/简介/总结/分析/案例/介绍/概述/结论/展望）+ 短句 → h2
+- 中文标点转换：跟 CJK 字符邻接的 ASCII 标点 `,:;?!().` 转为中文形态，保留小数和域名里的点
+- 连续独立链接段之间不插空行
+- DOCX 首个"作者："行之前的前置材料默认剥离
 
 ## 最新状态（2026-05-24）
 
@@ -63,8 +73,10 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 ```text
 .
 ├── public/
-│   ├── index.html                  # 入口，重定向到 /mp/fbif
-│   ├── app.html                    # 主工具页面
+│   ├── index.html                  # 渠道选择门户（公众号 / 网站）
+│   ├── app.html                    # 公众号排版工具页（路径 /mp/*）
+│   ├── site.html                   # 网站排版工具页（路径 /ft/*）
+│   ├── site.css                    # 门户 + 网站工具页特有样式
 │   ├── app.css                     # 页面样式
 │   ├── footer.html                 # 页脚模板
 │   ├── css/wx-theme.css            # 微信内容样式
