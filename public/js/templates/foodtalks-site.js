@@ -306,9 +306,26 @@ function isStandaloneLinkParagraph(runs) {
 
 // ---- DOCX 分类（M1 最小版） ----
 
+// 找到首个"作者：" / "Author:" 段，剥离该段之前的所有前置材料。无匹配返回原数组。
+function stripDocxPreambleBeforeAuthor(paragraphs) {
+  if (!Array.isArray(paragraphs)) return paragraphs;
+  const authorRegex = /^[\s　]*(作者|Author)\s*[:：]/i;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const text = (paragraphs[i].runs || [])
+      .filter(r => r.type === 'txt')
+      .map(r => r.text)
+      .join('');
+    if (authorRegex.test(text)) {
+      return paragraphs.slice(i);
+    }
+  }
+  return paragraphs;
+}
+
 function classifyDocx(paragraphs, imgCache) {
+  paragraphs = stripDocxPreambleBeforeAuthor(paragraphs || []);
   const elems = [];
-  for (const pd of paragraphs || []) {
+  for (const pd of paragraphs) {
     const runs = pd.runs || [];
     const imgRun = runs.find(r => r.type === 'img');
     if (imgRun) {

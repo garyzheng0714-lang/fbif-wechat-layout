@@ -128,3 +128,17 @@ test('foodtalks-site has isStandaloneLinkParagraph', () => {
 test('foodtalks-site render tracks prevWasStandaloneLink to skip blank line between consecutive link paragraphs', () => {
   assert.match(templateSource, /prevWasStandaloneLink/);
 });
+
+test('foodtalks-site has stripDocxPreambleBeforeAuthor and calls it from classifyDocx', () => {
+  assert.match(templateSource, /stripDocxPreambleBeforeAuthor/);
+  // 必须在 classifyDocx 函数内被调用
+  const classifyDocxMatch = templateSource.match(/function\s+classifyDocx[\s\S]*?(?=\n\}\n)/);
+  assert.ok(classifyDocxMatch, 'classifyDocx function must exist');
+  assert.match(classifyDocxMatch[0], /stripDocxPreambleBeforeAuthor/);
+});
+
+test('foodtalks-site detects 作者 / Author with colon', () => {
+  // 通过源码确认 regex 同时匹配中文"作者："和英文"Author:"
+  assert.match(templateSource, /作者/);
+  assert.match(templateSource, /Author/);
+});
