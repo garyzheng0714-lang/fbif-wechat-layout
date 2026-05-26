@@ -22,6 +22,7 @@ import {
   renderBehaviorTemplate,
   validateRuleBehavior,
 } from './rule-behavior.js';
+import { createMoreArticlesRuleEditor } from './more-articles-rule-editor.js';
 
 const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
 
@@ -105,8 +106,12 @@ function renderGroups(config) {
     <section class="admin-rule-group">
       <h3>${esc(group.label)}</h3>
       <div class="admin-field-grid">
-        ${group.fields.map(field => renderField(config, field)).join('')}
+        ${group.fields
+          .filter(field => group.id !== 'more_articles' || field.key !== 'more_articles_enabled')
+          .map(field => renderField(config, field))
+          .join('')}
       </div>
+      ${group.id === 'more_articles' ? '<div data-role="more-articles-rule-editor"></div>' : ''}
     </section>
   `).join('');
 }
@@ -575,6 +580,23 @@ export function initAdminPanel(options = {}) {
     syncJSONEditorFromInputs();
   }
 
+  function bindMoreArticlesRuleEditor() {
+    const mount = overlay.querySelector('[data-role="more-articles-rule-editor"]');
+    if (!mount) return;
+    const editor = createMoreArticlesRuleEditor({
+      config: workingConfig,
+      onChange(nextConfig) {
+        workingConfig = normalizeRuleConfig({ ...workingConfig, ...nextConfig });
+        const selected = selectedPreset();
+        jsonDirty = false;
+        applyConfig(workingConfig, selected);
+        refreshWarnings();
+        syncJSONEditorFromInputs();
+      },
+    });
+    mount.replaceChildren(editor);
+  }
+
   function bindMain() {
     overlay.querySelector('.admin-close').addEventListener('click', close);
     overlay.querySelectorAll('[data-view]').forEach(btn => {
@@ -607,6 +629,7 @@ export function initAdminPanel(options = {}) {
       });
     });
     if (activeView !== 'rules') return;
+    bindMoreArticlesRuleEditor();
     overlay.querySelector('[data-role="preset-select"]').addEventListener('change', e => {
       selectedID = e.target.value;
       const selected = selectedPreset();

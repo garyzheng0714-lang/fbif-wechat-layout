@@ -13,6 +13,11 @@ import {
   emptyCard,
   makeFreshUploadCards,
 } from './more-articles.js';
+import {
+  fetchMoreArticleMetaCached,
+  isValidMoreArticleUrl,
+  shouldAutoFetchMoreArticleUrl,
+} from './more-articles-meta.js';
 
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -22,43 +27,6 @@ function debounce(fn, ms) {
     if (t) clearTimeout(t);
     t = setTimeout(() => fn.apply(this, args), ms);
   };
-}
-
-function isValidMpUrl(s) {
-  if (!s) return false;
-  s = s.trim();
-  return /^https?:\/\/mp\.weixin\.qq\.com\//i.test(s) ||
-         /^https?:\/\/([^/]+\.)?weixin\.qq\.com\//i.test(s);
-}
-
-export function shouldAutoFetchMoreArticleUrl(value, lastFetchedUrl = '') {
-  const url = String(value || '').trim();
-  return isValidMpUrl(url) && url !== lastFetchedUrl;
-}
-
-// Per-URL in-flight + success cache. Re-pasting the same link resolves
-// instantly; a pending fetch is shared, not re-fired.
-const metaCache = new Map();
-async function fetchArticleMetaCached(url) {
-  if (metaCache.has(url)) return metaCache.get(url);
-  const p = (async () => {
-    const resp = await fetch('/api/fetch-article-meta', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error || ('HTTP ' + resp.status));
-    }
-    const meta = await resp.json();
-    if (!meta || (!meta.title && !meta.cover_url)) {
-      throw new Error('未提取到标题或头图，请检查链接是否完整');
-    }
-    return meta;
-  })().catch(err => { metaCache.delete(url); throw err; });
-  metaCache.set(url, p);
-  return p;
 }
 
 async function resizeImageToDataUrl(file, maxEdge = 1600, quality = 0.85) {
@@ -360,7 +328,7 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
 
     const triggerFetch = async () => {
       const url = $('url').value.trim();
-      if (!isValidMpUrl(url)) {
+      if (!isValidMoreArticleUrl(url)) {
         setStatus('需要公众号链接', 'err');
         return;
       }
@@ -368,7 +336,7 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       lastFetchedUrl = url;
       setStatus('抓取中…', 'info');
       try {
-        const meta = await fetchArticleMetaCached(url);
+        const meta = await fetchMoreArticleMetaCached(url);
         state.href = meta.source_url || url;
         if (meta.title) state.title = meta.title;
         if (meta.cover_url) state.imgurl = meta.cover_url;
@@ -410,7 +378,7 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     $('url').addEventListener('paste', () => {
       setTimeout(() => {
         const v = $('url').value.trim();
-        if (isValidMpUrl(v)) triggerFetch();
+        if (isValidMoreArticleUrl(v)) triggerFetch();
       }, 0);
     });
 
@@ -428,10 +396,10 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     const ensureImageLibrary = async () => {
       if (Array.isArray(state.image_urls) && state.image_urls.length > 0) return;
       const url = (state.href || $('url').value || '').trim();
-      if (!isValidMpUrl(url)) return;
+      if (!isValidMoreArticleUrl(url)) return;
       setStatus('加载图片库中…', 'info');
       try {
-        const meta = await fetchArticleMetaCached(url);
+        const meta = await fetchMoreArticleMetaCached(url);
         state.href = meta.source_url || url;
         if (meta.title && !state.title) state.title = meta.title;
         if (meta.cover_url && !state.imgurl) state.imgurl = meta.cover_url;

@@ -16,6 +16,7 @@ import {
   validateRuleConfig,
 } from '../public/js/rule-presets.js';
 import { DEFAULT_BEHAVIOR } from '../public/js/rule-behavior.js';
+import { SYSTEM_DEFAULT_RECOMMENDED_CARDS } from '../public/js/more-articles-config.js';
 
 test('rule config keeps legacy defaults when optional fields are missing', () => {
   const config = normalizeRuleConfig({ font_size: '16', footer_enabled: false });
@@ -73,6 +74,78 @@ test('rule config JSON document round-trips through modules', () => {
   assert.equal(parsed.config.footer_enabled, false);
 });
 
+test('rule config accepts readable more_articles enabled and default_cards fields', () => {
+  const parsed = parseRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        enabled: false,
+        default_cards: [
+          {
+            href: 'https://mp.weixin.qq.com/s/custom-a',
+            title: '自定义 A',
+            imgurl: '//mmbiz.qpic.cn/custom-a.jpg',
+          },
+        ],
+        more_articles_slots: '1',
+      },
+    },
+  }));
+
+  assert.equal(parsed.config.more_articles_enabled, false);
+  assert.deepEqual(parsed.config.more_articles_default_cards, [{
+    href: 'https://mp.weixin.qq.com/s/custom-a',
+    title: '自定义 A',
+    imgurl: 'https://mmbiz.qpic.cn/custom-a.jpg',
+    image_urls: [],
+    cover_data_url: null,
+    crop: { x: 0.5, y: 0.5, scale: 1 },
+  }]);
+  assert.equal(parsed.config.more_articles_slots, '1');
+});
+
+test('rule config JSON document emits readable more_articles fields', () => {
+  const doc = buildRuleConfigDocument({
+    ...DEFAULT_RULE_CONFIG,
+    more_articles_enabled: false,
+    more_articles_default_cards: [{
+      href: 'https://mp.weixin.qq.com/s/custom-b',
+      title: '自定义 B',
+      imgurl: 'https://mmbiz.qpic.cn/custom-b.jpg',
+    }],
+  }, {
+    name: '更多文章测试',
+  });
+
+  assert.equal(doc.modules.more_articles.enabled, false);
+  assert.deepEqual(doc.modules.more_articles.default_cards, [{
+    href: 'https://mp.weixin.qq.com/s/custom-b',
+    title: '自定义 B',
+    imgurl: 'https://mmbiz.qpic.cn/custom-b.jpg',
+    image_urls: [],
+    cover_data_url: null,
+    crop: { x: 0.5, y: 0.5, scale: 1 },
+  }]);
+  assert.equal(doc.modules.more_articles.more_articles_default_cards, undefined);
+});
+
+test('rule config keeps legacy defaults when more_articles default_cards are missing', () => {
+  const config = normalizeRuleConfig({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        more_articles_slots: '3',
+      },
+    },
+  });
+
+  assert.equal(config.more_articles_enabled, true);
+  assert.deepEqual(
+    config.more_articles_default_cards.map(card => card.href),
+    SYSTEM_DEFAULT_RECOMMENDED_CARDS.map(card => card.href)
+  );
+});
+
 test('rule config JSON validation rejects values that would be silently normalized', () => {
   assert.throws(() => validateRuleConfigDocument(JSON.stringify({
     schema_version: 2,
@@ -125,6 +198,57 @@ test('rule config JSON validation rejects values that would be silently normaliz
       },
     },
   })), /重复规则字段|不能放在 supporting 模块/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        default_cards: [
+          { href: 'javascript:alert(1)', title: '坏链接' },
+        ],
+      },
+    },
+  })), /公众号链接/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        default_cards: [
+          {
+            href: '',
+            title: '坏图片',
+            imgurl: 'javascript:alert(1)',
+          },
+        ],
+      },
+    },
+  })), /默认更多文章.*imgurl/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        default_cards: [
+          {
+            href: '',
+            title: '坏候选图',
+            image_urls: ['https://mmbiz.qpic.cn/a.jpg', 'javascript:alert(1)'],
+          },
+        ],
+      },
+    },
+  })), /默认更多文章.*image_urls/);
+  assert.throws(() => validateRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      more_articles: {
+        default_cards: [
+          {
+            href: '',
+            title: { text: '坏标题' },
+          },
+        ],
+      },
+    },
+  })), /默认更多文章.*title/);
 });
 
 test('local fallback keeps legacy skip-upload preference', () => {
@@ -144,6 +268,38 @@ test('local fallback keeps legacy skip-upload preference', () => {
     saveLocalRuleConfig({ ...DEFAULT_RULE_CONFIG, skip_upload: false });
     assert.equal(JSON.parse(store.get('config_fbif')).skip_upload, false);
     assert.equal(store.get('skip_upload'), 'false');
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test('local fallback preserves custom more articles default cards', () => {
+  const store = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem(key) { return store.has(key) ? store.get(key) : null; },
+      setItem(key, value) { store.set(key, String(value)); },
+    },
+  };
+  try {
+    saveLocalRuleConfig({
+      ...DEFAULT_RULE_CONFIG,
+      more_articles_default_cards: [{
+        href: 'https://mp.weixin.qq.com/s/custom-local',
+        title: '本地自定义',
+        imgurl: '//mmbiz.qpic.cn/custom-local.jpg',
+      }],
+    });
+
+    const loaded = loadLocalRuleConfig();
+    assert.deepEqual(loaded.more_articles_default_cards, [{
+      href: 'https://mp.weixin.qq.com/s/custom-local',
+      title: '本地自定义',
+      imgurl: 'https://mmbiz.qpic.cn/custom-local.jpg',
+      image_urls: [],
+      cover_data_url: null,
+      crop: { x: 0.5, y: 0.5, scale: 1 },
+    }]);
   } finally {
     delete globalThis.window;
   }

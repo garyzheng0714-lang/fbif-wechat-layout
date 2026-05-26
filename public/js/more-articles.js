@@ -8,6 +8,11 @@
 //          public/app.html (sidebar editor UI)
 
 import { getActiveRuleConfig, getRuleNumber } from './rule-presets.js';
+import {
+  emptyMoreArticleCard,
+  moreArticleCardsForRule,
+  normalizeMoreArticleDefaultCard,
+} from './more-articles-config.js';
 
 const LS_KEY = 'more_articles_v1';
 
@@ -75,44 +80,32 @@ export function getBannerStyleSpec(config = getActiveRuleConfig()) {
 
 export function emptyCard() {
   return {
-    href: '',
-    imgurl: '',
-    title: '',
-    image_urls: [],
-    cover_data_url: null,
-    crop: { x: 0.5, y: 0.5, scale: 1 },
+    ...emptyMoreArticleCard(),
     composite_url: null,
     composite_hash: null,
   };
 }
 
-// Default recommended articles seeded into every new "更多文章" section.
-// Cover URLs are mmbiz.qpic.cn CDN links that don't expire; titles are the
-// fetched article titles. Override per-article by editing the sidebar cards.
-const DEFAULT_RECOMMENDED_CARDS = Object.freeze([
-  Object.freeze({
-    href: 'https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652909589&idx=1&sn=d0bdeacee2b1ba7f03e48b38f91bbefa&scene=21',
-    imgurl: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTRHibhuMnzJTuvhqr6Neq7ib00icPLXRyof5H9ARUnw9eWIshgyHibyfVXtgSRkWmOP2MWZjHLLbFec9VAFSYH6ZsarKf2LUC4ONEkE/0?wx_fmt=jpeg',
-    title: '没想到！英国人把豆腐做到英国第一，还像卖衣服一样出XXL超大号！',
-  }),
-  Object.freeze({
-    href: 'https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652916388&idx=1&sn=b5605734c9c27ce2f8d54a6534b6543d&scene=21',
-    imgurl: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTREtc1dUPY9VokWQTtQsdevBIcfoMMavrQNSVFoce8gDOtTqlWhciadMP6VJwzErl7HnzECBECMMILEXt653GCeub3nDZ8VrvTsM/0?wx_fmt=jpeg',
-    title: '做了20年糖，她把豆腐棒放在鸡胸肉旁边，5年卖出1亿根',
-  }),
-  Object.freeze({
-    href: 'https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652906407&idx=1&sn=7ede62b74d3a5750c2c95ca40c216290&scene=21',
-    imgurl: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTRGEHDwCvfSmEXO9VBXpibZHE3ZqLYicsIyhfiajfq9MNduKq03KbDeqU0iaj3WEQeBEY2j0mSCetzD1Jdic1iciaL7M1KZjHu8x5TLdmM/0?wx_fmt=jpeg',
-    title: '日本最牛包子铺，单店年销2329万，怎么做到的？',
-  }),
-]);
+function seedDefaultCard(card) {
+  return {
+    ...emptyCard(),
+    ...normalizeMoreArticleDefaultCard(card),
+    composite_url: null,
+    composite_hash: null,
+  };
+}
 
-export function makeFreshUploadCards(n = getRuleNumber(getActiveRuleConfig(), 'more_articles_slots')) {
-  const count = Math.max(0, Math.round(Number(n) || 0));
+export function makeFreshUploadCards(n = null) {
+  const config = getActiveRuleConfig();
+  const defaultCards = moreArticleCardsForRule(config);
+  if (config.more_articles_enabled === false) return [];
+  const count = n == null
+    ? Math.max(0, Math.round(getRuleNumber(config, 'more_articles_slots')))
+    : Math.max(0, Math.round(Number(n) || 0));
   return Array.from({ length: count }, (_, i) => {
-    const seed = DEFAULT_RECOMMENDED_CARDS[i];
+    const seed = defaultCards[i];
     if (!seed) return emptyCard();
-    return { ...emptyCard(), href: seed.href, imgurl: seed.imgurl, title: seed.title };
+    return seedDefaultCard(seed);
   });
 }
 
