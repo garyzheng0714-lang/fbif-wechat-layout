@@ -250,32 +250,43 @@ function render(elems) {
   const lines = [];
   let refIndex = 0;
   let prevWasHeading = false;
+  let prevWasStandaloneLink = false;
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
     if (e.k === 'h') {
       if (!prevWasHeading && lines.length > 0) lines.push(BLANK_LINE);
       lines.push(renderHeading(e.level === 3 ? 3 : 2, runsToPlain(e.runs)));
       prevWasHeading = true;
+      prevWasStandaloneLink = false;
       continue;
     }
     if (e.k === 'img') {
       lines.push(renderImage(e.src, e.alt, e.width, e.height));
       prevWasHeading = false;
+      prevWasStandaloneLink = false;
       continue;
     }
     if (e.k === 'cap') {
       lines.push(renderImageCaption(runsToPlain(e.runs)));
       prevWasHeading = false;
+      prevWasStandaloneLink = false;
       continue;
     }
     if (e.k === 'ref') {
       refIndex += 1;
       lines.push(renderReference(runsToPlain(e.runs), refIndex));
       prevWasHeading = false;
+      prevWasStandaloneLink = false;
       continue;
     }
+    // p
+    const standalone = isStandaloneLinkParagraph(e.runs);
     lines.push(renderParagraph(e.runs || []));
-    lines.push(BLANK_LINE);
+    // 如果当前是独立链接 + 上一段也是独立链接，不插空行
+    if (!(standalone && prevWasStandaloneLink)) {
+      lines.push(BLANK_LINE);
+    }
+    prevWasStandaloneLink = standalone;
     prevWasHeading = false;
   }
   return lines;
@@ -283,6 +294,14 @@ function render(elems) {
 
 function runsToPlain(runs) {
   return (runs || []).filter(r => r.type === 'txt').map(r => r.text).join('');
+}
+
+// 判断段是不是"独立链接段"：runs 里只有 1 个 link、其他没有可见内容（image 也算 hidden）
+function isStandaloneLinkParagraph(runs) {
+  if (!Array.isArray(runs)) return false;
+  const visible = runs.filter(r => r.type !== 'img');
+  if (visible.length !== 1) return false;
+  return visible[0].type === 'link';
 }
 
 // ---- DOCX 分类（M1 最小版） ----

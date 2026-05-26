@@ -120,3 +120,11 @@ test('foodtalks-site only applies CJK punctuation conversion to txt runs (not hr
   // 通过源码检查 renderRuns 里 esc(normalizeChinesePunctuation(r.text)) 出现
   assert.match(templateSource, /esc\(normalizeChinesePunctuation\(/);
 });
+
+test('foodtalks-site has isStandaloneLinkParagraph', () => {
+  assert.match(templateSource, /isStandaloneLinkParagraph/);
+});
+
+test('foodtalks-site render tracks prevWasStandaloneLink to skip blank line between consecutive link paragraphs', () => {
+  assert.match(templateSource, /prevWasStandaloneLink/);
+});
