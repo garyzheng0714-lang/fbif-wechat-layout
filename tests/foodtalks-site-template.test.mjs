@@ -108,3 +108,15 @@ test('foodtalks-site recognizes 一/二/三 + Chinese punctuation as h2', () => 
 test('foodtalks-site recognizes （一）/（二） as h3', () => {
   assert.match(templateSource, /[（(]\s*\[?[一二三四五六七八九十]/);
 });
+
+test('foodtalks-site has normalizeChinesePunctuation with CJK-adjacent rule', () => {
+  assert.match(templateSource, /normalizeChinesePunctuation/);
+  assert.match(templateSource, /isCjk/);
+  assert.match(templateSource, /isDigit/);
+  assert.match(templateSource, /isAsciiLetter/);
+});
+
+test('foodtalks-site only applies CJK punctuation conversion to txt runs (not href / alt)', () => {
+  // 通过源码检查 renderRuns 里 esc(normalizeChinesePunctuation(r.text)) 出现
+  assert.match(templateSource, /esc\(normalizeChinesePunctuation\(/);
+});

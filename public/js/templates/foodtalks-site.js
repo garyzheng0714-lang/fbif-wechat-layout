@@ -72,6 +72,50 @@ function stripHtml(text) {
   return String(text || '').replace(/<[^>]+>/g, '');
 }
 
+function isCjk(ch) {
+  if (!ch) return false;
+  const c = ch.charCodeAt(0);
+  return (c >= 0x4e00 && c <= 0x9fff) ||
+    (c >= 0x3400 && c <= 0x4dbf) ||
+    (c >= 0x3000 && c <= 0x303f) ||
+    (c >= 0xff00 && c <= 0xffef);
+}
+function isAsciiLetter(ch) { return !!ch && /[a-zA-Z]/.test(ch); }
+function isDigit(ch) { return !!ch && /[0-9]/.test(ch); }
+
+function normalizeChinesePunctuation(text) {
+  const chars = String(text || '').split('');
+  const findTextChar = (i, step) => {
+    let j = i + step;
+    while (j >= 0 && j < chars.length && /\s/.test(chars[j])) j += step;
+    return j >= 0 && j < chars.length ? chars[j] : '';
+  };
+  const touchesChinese = (i) => {
+    const prev = findTextChar(i, -1);
+    const next = findTextChar(i, +1);
+    return isCjk(prev) || isCjk(next);
+  };
+  return chars.map((ch, i) => {
+    if (!touchesChinese(i)) return ch;
+    const prev = findTextChar(i, -1);
+    const next = findTextChar(i, +1);
+    if (ch === ',') return '，';
+    if (ch === ':') return '：';
+    if (ch === ';') return '；';
+    if (ch === '?') return '？';
+    if (ch === '!') return '！';
+    if (ch === '(') return '（';
+    if (ch === ')') return '）';
+    if (ch === '.') {
+      if ((isDigit(prev) && isDigit(next)) || (isAsciiLetter(prev) && isAsciiLetter(next))) {
+        return ch;
+      }
+      return '。';
+    }
+    return ch;
+  }).join('');
+}
+
 function isImageCaption(text) {
   const plain = stripHtml(text || '').trim();
   if (!plain || plain.length > 120) return false;
@@ -92,7 +136,7 @@ const BLANK_LINE = '<p><br /></p>';
 function renderRuns(runs) {
   return (runs || []).filter(r => r.type !== 'img').map(r => {
     if (r.type === 'txt') {
-      let s = esc(r.text);
+      let s = esc(normalizeChinesePunctuation(r.text));
       if (r.bold) s = '<strong>' + s + '</strong>';
       if (r.italic) s = '<em>' + s + '</em>';
       return s;
