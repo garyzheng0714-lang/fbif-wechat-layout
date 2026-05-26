@@ -8,7 +8,7 @@ test('app shell renders a capsule account switcher above the upload area', async
 
   assert.match(app, /id="accountSwitcher"/);
   assert.match(app, /class="account-switcher"/);
-  assert.match(app, /listRulePacks/);
+  assert.match(app, /getRulePacksByChannel\(['"]mp['"]\)/);
   assert.match(app, /switchAccount/);
   assert.match(app, /aria-pressed/);
   assert.match(app, /loadActiveRulePreset\(activeRulePack\.id\)/);
