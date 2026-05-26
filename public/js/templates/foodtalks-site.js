@@ -43,13 +43,26 @@ function renderParagraph(runs) {
   return `<p>${inner}</p>`;
 }
 
-function renderImage(src, alt) {
+// 极端狭长图自适应宽度（参考 /tmp/foodtalks-research/FoodtalksArticleLayout/layout-tool.html:2808-2818）
+function adaptiveImageWidth(naturalWidth, naturalHeight) {
+  const w = Number(naturalWidth || 0);
+  const h = Number(naturalHeight || 0);
+  if (!w || !h) return 600;
+  const ratio = h / w;
+  if (ratio >= 3) return 280;
+  if (ratio >= 2.2) return 360;
+  if (ratio >= 1.6) return 480;
+  return 600;
+}
+
+function renderImage(src, alt, naturalWidth, naturalHeight) {
   const safeSrc = escAttr(src || '');
   const safeAlt = escAttr(alt || '');
+  const width = adaptiveImageWidth(naturalWidth, naturalHeight);
   return (
     `<p style="text-align: center;">` +
-    `<img src="${safeSrc}" alt="${safeAlt}" width="600" ` +
-    `style="width: 600px; max-width: 100%; height: auto; display: inline-block;">` +
+    `<img src="${safeSrc}" alt="${safeAlt}" width="${width}" ` +
+    `style="width: ${width}px; max-width: 100%; height: auto; display: inline-block;">` +
     `</p>`
   );
 }
@@ -97,7 +110,7 @@ function render(elems) {
       continue;
     }
     if (e.k === 'img') {
-      lines.push(renderImage(e.src, e.alt));
+      lines.push(renderImage(e.src, e.alt, e.width, e.height));
       prevWasHeading = false;
       continue;
     }
@@ -132,7 +145,13 @@ function classifyDocx(paragraphs, imgCache) {
     const imgRun = runs.find(r => r.type === 'img');
     if (imgRun) {
       const src = imgCache && imgCache[imgRun.id] ? imgCache[imgRun.id] : (imgRun.src || '');
-      elems.push({ k: 'img', src, alt: imgRun.alt || '' });
+      elems.push({
+        k: 'img',
+        src,
+        alt: imgRun.alt || '',
+        width: imgRun.width || 0,
+        height: imgRun.height || 0,
+      });
       continue;
     }
     const text = runs.filter(r => r.type === 'txt').map(r => r.text).join('').trim();
@@ -195,7 +214,13 @@ function classifyBlocks(data) {
       continue;
     }
     if (b.type === 'img') {
-      elems.push({ k: 'img', src: b.src || '', alt: b.alt || '' });
+      elems.push({
+        k: 'img',
+        src: b.src || '',
+        alt: b.alt || '',
+        width: b.width || 0,
+        height: b.height || 0,
+      });
       imgN += 1;
       continue;
     }
