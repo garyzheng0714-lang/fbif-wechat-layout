@@ -479,7 +479,7 @@ renderActiveRuleCard();
 function renderAccountSwitcher() {
   const root = document.getElementById('accountSwitcher');
   if (!root) return;
-  root.innerHTML = rulePackModule.listRulePacks().map(pack => `
+  root.innerHTML = rulePackModule.getRulePacksByChannel('mp').map(pack => `
     <button type="button" class="account-switcher-btn ${pack.id === activeRulePack.id ? 'active' : ''}" data-account-id="${pack.id}" aria-pressed="${pack.id === activeRulePack.id ? 'true' : 'false'}">
       ${pack.accountName}
     </button>
@@ -586,7 +586,7 @@ renderActiveRuleCard();
 
 const { initAdminPanel } = await import('/js/admin-panel.js?v=' + assetVersion);
 initAdminPanel({
-  rulePacks: rulePackModule.listRulePacks(),
+  rulePacks: rulePackModule.getRulePacksByChannel('mp'),
   getConfig: loadConfig,
   getPreset: () => (window._activeConfig && window._activeConfig.preset) || null,
   onAuthenticated(password) {

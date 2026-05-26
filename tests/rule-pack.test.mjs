@@ -6,6 +6,7 @@ import {
   getRulePack,
   getRulePackByPath,
   getRulePackIDFromLocation,
+  getRulePacksByChannel,
   listRulePacks,
 } from '../public/js/rule-packs/registry.js';
 
@@ -114,4 +115,23 @@ test('getRulePackByPath /ft falls back to ft-default (channel default)', () => {
 test('getRulePackByPath /ft/unknown falls back to ft-default in same channel', () => {
   const pack = getRulePackByPath('/ft/unknown');
   assert.equal(pack.id, 'ft-default');
+});
+
+test('getRulePacksByChannel mp returns only public-account packs', () => {
+  const packs = getRulePacksByChannel('mp');
+  const ids = packs.map(p => p.id).sort();
+  assert.deepEqual(ids, ['fbif', 'foodtalks-series']);
+  assert.ok(packs.every(p => p.channel === 'mp'));
+});
+
+test('getRulePacksByChannel ft returns only website packs', () => {
+  const packs = getRulePacksByChannel('ft');
+  const ids = packs.map(p => p.id).sort();
+  assert.deepEqual(ids, ['ft-default']);
+  assert.ok(packs.every(p => p.channel === 'ft'));
+});
+
+test('getRulePacksByChannel unknown channel returns empty array', () => {
+  const packs = getRulePacksByChannel('xx');
+  assert.deepEqual(packs, []);
 });

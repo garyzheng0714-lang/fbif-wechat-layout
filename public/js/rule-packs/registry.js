@@ -45,6 +45,10 @@ export function listRulePacks() {
   return Object.values(RULE_PACKS);
 }
 
+export function getRulePacksByChannel(channel) {
+  return Object.values(RULE_PACKS).filter(pack => pack.channel === channel);
+}
+
 export function getRulePack(id = DEFAULT_RULE_PACK_ID) {
   return RULE_PACKS[id] || RULE_PACKS[DEFAULT_RULE_PACK_ID];
 }
