@@ -71,3 +71,7 @@ body.channel-portal-body {
   .channel-card { width: 80vw; max-width: 320px; height: 200px; }
   .channel-portal-title { font-size: 22px; margin-bottom: 32px; }
 }
+
+/* ========== 网站工具页（site.html） ========== */
+
+.sidebar-site .sidebar-divider { display: none; }

@@ -24,3 +24,35 @@ test('site.css exists and defines .channel-portal layout', async () => {
   assert.match(css, /\.channel-portal\b/);
   assert.match(css, /\.channel-card\b/);
 });
+
+test('site.html exists and shares fonts/css with app.html', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  assert.match(html, /href=['"]\/site\.css['"]/);
+  // 标题告诉用户这是网站工具，不是微信工具
+  assert.match(html, /<title>[^<]*网站[^<]*<\/title>/);
+});
+
+test('site.html removes public-account specific DOM', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /id=['"]accountSwitcher['"]/);
+  assert.doesNotMatch(html, /id=['"]moreArticlesEditor['"]/);
+  assert.doesNotMatch(html, /id=['"]moreArticlesSection['"]/);
+  assert.doesNotMatch(html, /mp\.weixin\.qq\.com/);
+  assert.doesNotMatch(html, /微信公众号后台/);
+});
+
+test('site.html keeps upload + URL + preview + copy button', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  assert.match(html, /id=['"]dropZone['"]/);
+  assert.match(html, /id=['"]urlInput['"]/);
+  assert.match(html, /id=['"]previewContent['"]/);
+  assert.match(html, /id=['"]copyBtn['"]/);
+});
+
+test('site.html uses absolute /js/ paths for dynamic imports', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const relMatches = html.match(/import\(['"]\.\//g);
+  assert.equal(relMatches, null, 'site.html should not contain relative "./..." dynamic imports');
+  assert.match(html, /import\(['"]\/js\/engine\.js/);
+  assert.match(html, /import\(['"]\/js\/rule-packs\/url\.js/);
+});
