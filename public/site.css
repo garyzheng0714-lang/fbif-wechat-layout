@@ -1,0 +1,73 @@
+/* site.css —— 渠道选择门户 + 网站工具页特有样式 */
+
+/* ========== 渠道选择门户 ========== */
+
+body.channel-portal-body {
+  margin: 0;
+  background: #ffffff;
+  font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #1a1a1a;
+}
+
+.channel-portal {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.channel-portal-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0 0 48px 0;
+  color: #1a1a1a;
+}
+
+.channel-cards {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.channel-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 240px;
+  height: 240px;
+  border: 1px solid #e5e5e5;
+  border-radius: 16px;
+  background: #ffffff;
+  text-decoration: none;
+  color: #1a1a1a;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+}
+
+.channel-card:hover {
+  border-color: #1a1a1a;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+.channel-card-label {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.channel-card-sub {
+  font-size: 13px;
+  color: #7a7a7a;
+  margin-top: 8px;
+}
+
+@media (max-width: 600px) {
+  .channel-cards { flex-direction: column; }
+  .channel-card { width: 80vw; max-width: 320px; height: 200px; }
+  .channel-portal-title { font-size: 22px; margin-bottom: 32px; }
+}

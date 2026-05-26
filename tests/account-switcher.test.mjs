@@ -77,8 +77,3 @@ test('app shell uses absolute /js/ paths for dynamic imports (path-safe under /m
   assert.match(app, /import\(['"]\/js\/engine\.js/);
   assert.match(app, /import\(['"]\/js\/rule-packs\/registry\.js/);
 });
-
-test('index.html redirects to default channel path /mp/fbif', async () => {
-  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  assert.match(html, /location\.replace\(['"]\/mp\/fbif['"]\)/);
-});
