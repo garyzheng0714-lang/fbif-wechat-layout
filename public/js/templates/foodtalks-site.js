@@ -20,6 +20,44 @@ const IMAGE_CAPTION_KEYWORDS = [
   'Source', 'Photo', 'Image', 'Credit',
 ];
 
+// ---- 标题启发式识别 ----
+
+const TITLE_KEYWORDS = [
+  '背景', '简介', '总结', '分析', '案例', '介绍', '概述', '结论', '展望',
+];
+
+// detectHeadingLevel: 返回 2 / 3 / 0（不是标题）
+function detectHeadingLevel(text) {
+  const t = String(text || '').trim();
+  if (!t) return 0;
+
+  // （一）（二）→ h3
+  if (/^[（(]\s*[一二三四五六七八九十]+\s*[)）]/.test(t)) return 3;
+
+  // 一、二、三...（中文标点：、：．: 后跟内容）→ h2
+  if (/^[一二三四五六七八九十]+\s*[、：．:\s]/.test(t)) return 2;
+
+  // 关键词 + 短句 + 无尾句号 → h2
+  if (t.length <= 30 && !/[。.]$/.test(t)) {
+    for (const kw of TITLE_KEYWORDS) {
+      if (t.startsWith(kw)) return 2;
+    }
+  }
+
+  return 0;
+}
+
+// 把被启发式识别为标题的普通段转换成 'h' 元素
+function promoteHeuristicHeadings(elems) {
+  return elems.map(e => {
+    if (e.k !== 'p') return e;
+    const plain = (e.runs || []).filter(r => r.type === 'txt').map(r => r.text).join('');
+    const level = detectHeadingLevel(plain);
+    if (level === 0) return e;
+    return { k: 'h', level, runs: e.runs };
+  });
+}
+
 function hasImageCaptionKeyword(text) {
   if (!text) return false;
   const lower = String(text).toLowerCase();
@@ -317,16 +355,16 @@ export default {
 
   processDocx({ paragraphs, imgCache }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache);
-    return { lines: render(promoteImageCaptions(elems)), imgN, headingN: elems.filter(e => e.k === 'h').length };
+    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length };
   },
 
   async processMd(text) {
     const { elems, imgN, title } = await classifyMd(text);
-    return { lines: render(promoteImageCaptions(elems)), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 
   processBlocks(data) {
     const { elems, imgN, title } = classifyBlocks(data);
-    return { lines: render(promoteImageCaptions(elems)), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 };

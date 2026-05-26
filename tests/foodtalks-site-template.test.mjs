@@ -82,3 +82,29 @@ test('foodtalks-site has isImageCaption and hasImageCaptionKeyword and promoteIm
   assert.match(templateSource, /hasImageCaptionKeyword/);
   assert.match(templateSource, /promoteImageCaptions/);
 });
+
+test('foodtalks-site has detectHeadingLevel and promoteHeuristicHeadings', () => {
+  assert.match(templateSource, /detectHeadingLevel/);
+  assert.match(templateSource, /promoteHeuristicHeadings/);
+  assert.match(templateSource, /TITLE_KEYWORDS/);
+});
+
+test('foodtalks-site title keywords cover FoodTalks 9 items', () => {
+  assert.match(templateSource, /['"]背景['"]/);
+  assert.match(templateSource, /['"]简介['"]/);
+  assert.match(templateSource, /['"]总结['"]/);
+  assert.match(templateSource, /['"]分析['"]/);
+  assert.match(templateSource, /['"]案例['"]/);
+  assert.match(templateSource, /['"]介绍['"]/);
+  assert.match(templateSource, /['"]概述['"]/);
+  assert.match(templateSource, /['"]结论['"]/);
+  assert.match(templateSource, /['"]展望['"]/);
+});
+
+test('foodtalks-site recognizes 一/二/三 + Chinese punctuation as h2', () => {
+  assert.match(templateSource, /[一二三四五六七八九十]/);
+});
+
+test('foodtalks-site recognizes （一）/（二） as h3', () => {
+  assert.match(templateSource, /[（(]\s*\[?[一二三四五六七八九十]/);
+});
