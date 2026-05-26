@@ -28,6 +28,17 @@ export const RULE_PACKS = Object.freeze({
     location: '上海',
     channel: 'mp',
   }),
+  'ft-default': Object.freeze({
+    id: 'ft-default',
+    templateId: 'foodtalks-site',
+    accountName: '网站默认',
+    previewAccountName: 'FoodTalks',
+    behaviorAccountName: 'FoodTalks',
+    avatarUrl: '/fbif-avatar.webp',
+    footerUrl: '',
+    location: '',
+    channel: 'ft',
+  }),
 });
 
 export function listRulePacks() {
@@ -50,7 +61,7 @@ export function getRulePackIDFromLocation(locationLike = globalThis.location) {
 
 const CHANNEL_DEFAULTS = Object.freeze({
   mp: 'fbif',
-  // ft channel has no default pack yet; added in a later stage.
+  ft: 'ft-default',
 });
 
 export function getRulePackByPath(pathname) {

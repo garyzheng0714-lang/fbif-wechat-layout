@@ -24,7 +24,8 @@ test('rule pack registry keeps FBIF as the default account pack', () => {
 
 test('rule pack registry exposes FoodTalks what-is series as a selectable account', () => {
   const packs = listRulePacks();
-  assert.deepEqual(packs.map(pack => pack.id), ['fbif', 'foodtalks-series']);
+  assert.ok(packs.some(p => p.id === 'fbif'), 'fbif should be in the list');
+  assert.ok(packs.some(p => p.id === 'foodtalks-series'), 'foodtalks-series should be in the list');
 
   const pack = getRulePack('foodtalks-series');
   assert.equal(pack.id, 'foodtalks-series');
@@ -91,4 +92,26 @@ test('getRulePackByPath returns DEFAULT_RULE_PACK_ID for non-channel paths', () 
 test('getRulePackByPath returns DEFAULT when packId unknown in channel', () => {
   const pack = getRulePackByPath('/mp/does-not-exist');
   assert.equal(pack.id, 'fbif');
+});
+
+test('rule pack registry assigns ft-default to the website channel', () => {
+  const pack = getRulePack('ft-default');
+  assert.equal(pack.id, 'ft-default');
+  assert.equal(pack.channel, 'ft');
+  assert.equal(pack.templateId, 'foodtalks-site');
+});
+
+test('getRulePackByPath /ft/default resolves to ft-default', () => {
+  const pack = getRulePackByPath('/ft/default');
+  assert.equal(pack.id, 'ft-default');
+});
+
+test('getRulePackByPath /ft falls back to ft-default (channel default)', () => {
+  const pack = getRulePackByPath('/ft');
+  assert.equal(pack.id, 'ft-default');
+});
+
+test('getRulePackByPath /ft/unknown falls back to ft-default in same channel', () => {
+  const pack = getRulePackByPath('/ft/unknown');
+  assert.equal(pack.id, 'ft-default');
 });
