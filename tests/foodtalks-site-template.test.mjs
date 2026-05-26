@@ -61,3 +61,24 @@ test('foodtalks-site template uses aspect ratio thresholds 3 / 2.2 / 1.6', () =>
   assert.match(templateSource, /ratio\s*>=\s*2\.2/);
   assert.match(templateSource, /ratio\s*>=\s*1\.6/);
 });
+
+test('foodtalks-site has 13 image-caption keywords', () => {
+  assert.match(templateSource, /['"]图片来源['"]/);
+  assert.match(templateSource, /['"]资料来源['"]/);
+  assert.match(templateSource, /['"]数据来源['"]/);
+  assert.match(templateSource, /['"]来源['"]/);
+  assert.match(templateSource, /['"]制图['"]/);
+  assert.match(templateSource, /['"]截图['"]/);
+  assert.match(templateSource, /['"]图注['"]/);
+  assert.match(templateSource, /['"]注：['"]/);
+  assert.match(templateSource, /['"]Source['"]/);
+  assert.match(templateSource, /['"]Photo['"]/);
+  assert.match(templateSource, /['"]Image['"]/);
+  assert.match(templateSource, /['"]Credit['"]/);
+});
+
+test('foodtalks-site has isImageCaption and hasImageCaptionKeyword and promoteImageCaptions', () => {
+  assert.match(templateSource, /isImageCaption/);
+  assert.match(templateSource, /hasImageCaptionKeyword/);
+  assert.match(templateSource, /promoteImageCaptions/);
+});

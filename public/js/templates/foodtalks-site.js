@@ -11,6 +11,42 @@ const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
 
+// ---- 图片注释智能识别 ----
+
+// 图片注释关键词（参考 /tmp/foodtalks-research/FoodtalksArticleLayout/layout-tool.html:1061-1074）
+const IMAGE_CAPTION_KEYWORDS = [
+  '图片来源', '资料来源', '数据来源', '来源',
+  '制图', '截图', '图注', '注：',
+  'Source', 'Photo', 'Image', 'Credit',
+];
+
+function hasImageCaptionKeyword(text) {
+  if (!text) return false;
+  const lower = String(text).toLowerCase();
+  for (const kw of IMAGE_CAPTION_KEYWORDS) {
+    if (text.indexOf(kw) >= 0) return true;
+    if (kw.length <= 8 && lower.indexOf(kw.toLowerCase()) >= 0) return true;
+  }
+  return false;
+}
+
+function stripHtml(text) {
+  return String(text || '').replace(/<[^>]+>/g, '');
+}
+
+function isImageCaption(text) {
+  const plain = stripHtml(text || '').trim();
+  if (!plain || plain.length > 120) return false;
+  if (hasImageCaptionKeyword(plain)) return true;
+  if (/^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\s*[：:\s\d]/i.test(plain)) {
+    return true;
+  }
+  if (/^[▲△▵▽▼]/.test(plain)) return true;
+  const sentenceEnd = (plain.match(/[。！？!?]/g) || []).length;
+  const commaCount = (plain.match(/[，,；;]/g) || []).length;
+  return plain.length <= 45 && sentenceEnd === 0 && commaCount <= 1;
+}
+
 // ---- 输出基本元 ----
 
 const BLANK_LINE = '<p><br /></p>';
@@ -93,6 +129,37 @@ function ensureReferenceNumber(content, indexOneBased) {
     return `[${m[1]}] ${m[2]}`;
   }
   return `[${indexOneBased}] ${text}`;
+}
+
+// 把图片后 3 段内最多 2 段"看起来像图注"的普通段提升为图注块
+function promoteImageCaptions(elems) {
+  const out = elems.slice();
+  for (let i = 0; i < out.length; i++) {
+    if (out[i].k !== 'img') continue;
+    let promoted = 0;
+    let scanned = 0;
+    for (let j = i + 1; j < out.length && scanned < 3 && promoted < 2; j++) {
+      const e = out[j];
+      if (e.k === 'img' || e.k === 'h' || e.k === 'ref') break;
+      if (e.k !== 'p') continue;
+      scanned += 1;
+      const plain = (e.runs || []).filter(r => r.type === 'txt').map(r => r.text).join('').trim();
+      const isFirst = promoted === 0;
+      let promote = false;
+      if (isFirst) {
+        promote = isImageCaption(plain);
+      } else {
+        promote = hasImageCaptionKeyword(plain);
+      }
+      if (promote) {
+        out[j] = { k: 'cap', runs: e.runs };
+        promoted += 1;
+      } else {
+        if (isFirst) break;
+      }
+    }
+  }
+  return out;
 }
 
 // ---- 渲染主入口：把分类后的 elems 拼装成 HTML 行数组 ----
@@ -250,16 +317,16 @@ export default {
 
   processDocx({ paragraphs, imgCache }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache);
-    return { lines: render(elems), imgN, headingN: elems.filter(e => e.k === 'h').length };
+    return { lines: render(promoteImageCaptions(elems)), imgN, headingN: elems.filter(e => e.k === 'h').length };
   },
 
   async processMd(text) {
     const { elems, imgN, title } = await classifyMd(text);
-    return { lines: render(elems), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return { lines: render(promoteImageCaptions(elems)), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 
   processBlocks(data) {
     const { elems, imgN, title } = classifyBlocks(data);
-    return { lines: render(elems), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return { lines: render(promoteImageCaptions(elems)), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 };
