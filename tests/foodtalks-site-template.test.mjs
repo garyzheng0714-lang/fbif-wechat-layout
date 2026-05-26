@@ -27,7 +27,8 @@ test('foodtalks-site template outputs h2/h3 without inline style', () => {
 });
 
 test('foodtalks-site template uses explicit <p><br /></p> as blank line', () => {
-  assert.match(templateSource, /<p><br \/>\?<\/p>/);
+  // 标准 XHTML 自闭合形式：<p><br /></p>
+  assert.match(templateSource, /BLANK_LINE\s*=\s*['"]<p><br \/><\/p>['"]/);
 });
 
 test('foodtalks-site template renders images at 600px centered', () => {

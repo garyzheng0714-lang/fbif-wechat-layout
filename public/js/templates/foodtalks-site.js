@@ -13,7 +13,6 @@ const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
 
 // ---- 输出基本元 ----
 
-// 空行形态：<p><br />?</p>（? 表示兼容不带闭合斜杠的变体；模板输出标准 XHTML 形式）
 const BLANK_LINE = '<p><br /></p>';
 
 function renderRuns(runs) {
