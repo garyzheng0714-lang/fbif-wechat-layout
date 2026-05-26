@@ -1094,24 +1094,34 @@ func convertViaLibreOffice(ctx context.Context, baseURL, token string, docBytes 
 	return io.ReadAll(io.LimitReader(resp.Body, 100<<20))
 }
 
-// registerChannelRoutes 注册 /mp[/{packId}] 和 /ft[/{packId}] 路由，
-// 以及兼容的 /app 路由。所有这些路径都 serve 同一个 app.html，
-// 真正的 channel/pack 解析由前端 JS 完成（rule-packs/url.js）。
+// registerChannelRoutes 注册渠道路由：
+//
+//	/mp 系列 serve app.html（公众号工具）
+//	/ft 系列 serve site.html（网站工具）
+//	/app, /app.html 兼容 serve app.html
+//
+// 路径下的 channel/packId 解析由前端 JS 完成（rule-packs/url.js）。
 func registerChannelRoutes(mux *http.ServeMux, publicDir string) {
-	serveApp := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		http.ServeFile(w, r, filepath.Join(publicDir, "app.html"))
+	serveFile := func(filename string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFile(w, r, filepath.Join(publicDir, filename))
+		}
 	}
+	serveApp := serveFile("app.html")
+	serveSite := serveFile("site.html")
 
 	// 兼容旧 URL
 	mux.HandleFunc("GET /app", serveApp)
 	mux.HandleFunc("GET /app.html", serveApp)
 
-	// 新路径化 URL
+	// 公众号渠道
 	mux.HandleFunc("GET /mp", serveApp)
 	mux.HandleFunc("GET /mp/{packId}", serveApp)
-	mux.HandleFunc("GET /ft", serveApp)
-	mux.HandleFunc("GET /ft/{packId}", serveApp)
+
+	// 网站渠道
+	mux.HandleFunc("GET /ft", serveSite)
+	mux.HandleFunc("GET /ft/{packId}", serveSite)
 }
 
 // cloudConvertDocToDocx drives a CloudConvert job: create → upload → poll → download.

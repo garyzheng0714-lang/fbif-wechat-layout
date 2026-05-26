@@ -55,8 +55,8 @@ func TestChannelRoute_MPWithHyphenatedPackID(t *testing.T) {
 	}
 }
 
-func TestChannelRoute_FT_ServesAppHTML(t *testing.T) {
-	publicDir := mustWriteAppHTML(t)
+func TestChannelRoute_FT_ServesSiteHTML(t *testing.T) {
+	publicDir := mustWriteBothHTML(t)
 	mux := newRoutingMux(t, publicDir)
 	req := httptest.NewRequest(http.MethodGet, "/ft/default", nil)
 	rec := httptest.NewRecorder()
@@ -86,5 +86,63 @@ func TestChannelRoute_SetsNoCacheHeader(t *testing.T) {
 	got := rec.Header().Get("Cache-Control")
 	if got != "no-cache" {
 		t.Fatalf("Cache-Control = %q, want no-cache", got)
+	}
+}
+
+// mustWriteBothHTML 写一份 app.html（带 APP marker）和 site.html（带 SITE marker），
+// 用于验证 /mp 系列 serve app.html、/ft 系列 serve site.html。
+func mustWriteBothHTML(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	appContent := []byte("<!doctype html><html><body><!--APP-HTML-MARKER--></body></html>")
+	siteContent := []byte("<!doctype html><html><body><!--SITE-HTML-MARKER--></body></html>")
+	if err := os.WriteFile(filepath.Join(dir, "app.html"), appContent, 0644); err != nil {
+		t.Fatalf("write app.html: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "site.html"), siteContent, 0644); err != nil {
+		t.Fatalf("write site.html: %v", err)
+	}
+	return dir
+}
+
+func TestChannelRoute_MP_StillServesAppHTML(t *testing.T) {
+	publicDir := mustWriteBothHTML(t)
+	mux := newRoutingMux(t, publicDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/mp/fbif", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "<!--APP-HTML-MARKER-->") {
+		t.Fatalf("/mp/fbif should serve app.html; got=%q", rec.Body.String())
+	}
+}
+
+func TestChannelRoute_FTWithPackID_ServesSiteHTML(t *testing.T) {
+	publicDir := mustWriteBothHTML(t)
+	mux := newRoutingMux(t, publicDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/ft/default", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "<!--SITE-HTML-MARKER-->") {
+		t.Fatalf("/ft/default should serve site.html; got=%q", rec.Body.String())
+	}
+}
+
+func TestChannelRoute_FTWithoutPackID_ServesSiteHTML(t *testing.T) {
+	publicDir := mustWriteBothHTML(t)
+	mux := newRoutingMux(t, publicDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/ft", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "<!--SITE-HTML-MARKER-->") {
+		t.Fatalf("/ft should serve site.html; got=%q", rec.Body.String())
 	}
 }
