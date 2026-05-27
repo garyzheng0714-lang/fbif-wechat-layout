@@ -131,7 +131,7 @@ function isImageCaption(text) {
 
 // ---- 输出基本元 ----
 
-const BLANK_LINE = '<p><br /></p>';
+const BLANK_LINE = '<p style="text-align: justify;"><br></p>';
 
 function renderRuns(runs) {
   return (runs || []).filter(r => r.type !== 'img').map(r => {
@@ -158,7 +158,7 @@ function renderHeading(level, text) {
 function renderParagraph(runs) {
   const inner = renderRuns(runs);
   if (!inner) return BLANK_LINE;
-  return `<p>${inner}</p>`;
+  return `<p style="text-align: justify;">${inner}</p>`;
 }
 
 // 极端狭长图自适应宽度（参考 /tmp/foodtalks-research/FoodtalksArticleLayout/layout-tool.html:2808-2818）
