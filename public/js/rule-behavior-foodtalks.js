@@ -70,8 +70,10 @@ export function applyFoodTalksBehavior(elems, config = {}) {
   for (let i = 0; i < out.length; i++) {
     const e = out[i];
     if (e.k !== 'p') {
-      // 标题或图片中断 refMode
-      if (refMode && (e.k === 'h' || e.k === 'img')) refMode = false;
+      // 任何不是 p 的元素（包括前面阶段提升出来的 author/tip，以及 h/img）
+      // 都中断 refMode —— 否则参考段中间夹一个提示行会让其后的 [n] 仍然被
+      // 误识别为 ref-item。
+      if (refMode) refMode = false;
       continue;
     }
     const text = runsToText(e.runs).trim();

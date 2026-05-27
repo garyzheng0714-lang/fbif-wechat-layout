@@ -685,17 +685,26 @@ document.addEventListener('paste', (e) => {
   toggle.checked = saved;
 
   function pushToEngine(triggerRerender) {
-    const cfg = (window._engineApi && window._engineApi.getActiveConfig)
-      ? window._engineApi.getActiveConfig()
-      : {};
-    cfg.modules = cfg.modules || {};
-    cfg.modules.fbif_footer = { enabled: toggle.checked };
-    // mctoc 锚点：与真实 foodtalks.cn 文章页对齐，默认开启
-    cfg.modules.mctoc = cfg.modules.mctoc || { enabled: true };
-    if (window._engineApi && window._engineApi.setActiveConfig) {
-      window._engineApi.setActiveConfig(cfg);
-    }
-    if (triggerRerender && window._engineApi && typeof window._engineApi.rerender === 'function') {
+    if (!window._engineApi || !window._engineApi.setActiveConfig) return;
+    // 用不可变 spread 构造新对象，避免直接突变 engine 内部 _activeConfig 引用
+    // （getActiveConfig 返回的是引用本身）。
+    const prev = (window._engineApi.getActiveConfig && window._engineApi.getActiveConfig()) || {};
+    const prevModules = prev.modules || {};
+    // server-side 规则预设里的 behavior（识别正则等）由 rule-presets 模块加载到
+    // window._activeConfig.behavior；这里同步过来，让网站行为模板能用到 admin
+    // 后台改的自定义正则，不再永远只走代码内置默认。
+    const serverBehavior = (window._activeConfig && window._activeConfig.behavior) || {};
+    const cfg = {
+      ...prev,
+      behavior: serverBehavior,
+      modules: {
+        ...prevModules,
+        fbif_footer: { enabled: toggle.checked },
+        mctoc: prevModules.mctoc || { enabled: true },
+      },
+    };
+    window._engineApi.setActiveConfig(cfg);
+    if (triggerRerender && typeof window._engineApi.rerender === 'function') {
       window._engineApi.rerender();
     }
   }

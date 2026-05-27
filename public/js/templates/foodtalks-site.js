@@ -191,9 +191,11 @@ function renderImage(src, alt, naturalWidth, naturalHeight) {
   const safeSrc = escAttr(src || '');
   const safeAlt = escAttr(alt || '');
   const width = adaptiveImageWidth(naturalWidth, naturalHeight);
+  // 内联 max-width:100% 是给外部 CMS / 邮件客户端用的兜底——本工具的 .mc-img 仅
+  // 在预览页 CSS 中生效，复制粘贴到不带样式的容器时大图会溢出。
   return (
     `<p>` +
-    `<img style="display: block; margin-left: auto; margin-right: auto;" ` +
+    `<img style="display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;" ` +
     `src="${safeSrc}" alt="${safeAlt}" width="${width}" class="mc-img">` +
     `</p>`
   );
@@ -301,10 +303,12 @@ function render(elems, config = {}) {
       continue;
     }
     if (e.k === 'ref-item') {
-      const text = runsToPlain(e.runs);
+      // 用 renderRuns 而不是 runsToPlain：参考条目可能含超链接（如 [1] 论文标题 https://...），
+      // runsToPlain 仅保留 txt 类型 run，会把 link 文本吃掉。
+      const inner = renderRuns(e.runs);
       lines.push(
         '<p style="text-align: justify;"><span style="color: #888888; font-size: 14px;">' +
-        esc(text) +
+        inner +
         '</span></p>'
       );
       prevWasHeading = false;

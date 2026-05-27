@@ -322,14 +322,15 @@ export function initApp(template) {
     let result;
     const isDocx = file.name.toLowerCase().endsWith('.docx');
     _sourceIsDocx = isDocx;
+    const fallbackTitle = file.name.replace(/\.\w+$/i, '');
     if (isDocx) {
       const docxData = await parseDocx(file);
       result = template.processDocx({ ...docxData, isRepost: _isRepost, config: _activeConfig });
-      _lastRenderInput = { kind: 'docx', payload: docxData, isRepost: _isRepost };
+      _lastRenderInput = { kind: 'docx', payload: docxData, isRepost: _isRepost, title: result.title || fallbackTitle };
     } else if (typeof template.processMd === 'function') {
       const text = await file.text();
       result = await template.processMd(text, { isRepost: _isRepost, config: _activeConfig });
-      _lastRenderInput = { kind: 'md', payload: text, isRepost: _isRepost };
+      _lastRenderInput = { kind: 'md', payload: text, isRepost: _isRepost, title: result.title || fallbackTitle };
     } else {
       throw new Error('此模板不支持该文件格式');
     }
@@ -415,24 +416,27 @@ export function initApp(template) {
   async function _engineRerender() {
     if (!_lastRenderInput) return;
     const cached = _lastRenderInput;
+    // Use a local repost flag so we don't pollute the module-level _isRepost,
+    // which handleFile / _handleBlocks set per upload and other code paths read.
+    const isRepost = cached.isRepost;
     try {
+      const t0 = performance.now();
       let result;
-      _isRepost = cached.isRepost;
       if (cached.kind === 'docx') {
-        result = template.processDocx({ ...cached.payload, isRepost: _isRepost, config: _activeConfig });
+        result = template.processDocx({ ...cached.payload, isRepost, config: _activeConfig });
       } else if (cached.kind === 'md') {
         if (typeof template.processMd !== 'function') return;
-        result = await template.processMd(cached.payload, { isRepost: _isRepost, config: _activeConfig });
+        result = await template.processMd(cached.payload, { isRepost, config: _activeConfig });
       } else if (cached.kind === 'blocks') {
         if (typeof template.processBlocks !== 'function') return;
-        result = await template.processBlocks(cached.payload, { isRepost: _isRepost, config: _activeConfig });
+        result = await template.processBlocks(cached.payload, { isRepost, config: _activeConfig });
       } else {
         return;
       }
       const articleHtml = result.lines.join('\n');
       const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
       const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
-      const elapsed = '0.0';
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
       const displayTitle = result.title || cached.title || '';
@@ -468,15 +472,16 @@ export function initApp(template) {
       let result;
       const isDocx = file.name.toLowerCase().endsWith('.docx');
       _sourceIsDocx = isDocx;
+      const fallbackTitle = file.name.replace(/\.\w+$/i, '');
       if (isDocx) {
         const docxData = await parseDocx(file);
         result = template.processDocx({ ...docxData, isRepost: _isRepost, config: _activeConfig });
-        _lastRenderInput = { kind: 'docx', payload: docxData, isRepost: _isRepost };
+        _lastRenderInput = { kind: 'docx', payload: docxData, isRepost: _isRepost, title: result.title || fallbackTitle };
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else if (typeof template.processMd === 'function') {
         const text = await file.text();
         result = await template.processMd(text, { isRepost: _isRepost, config: _activeConfig });
-        _lastRenderInput = { kind: 'md', payload: text, isRepost: _isRepost };
+        _lastRenderInput = { kind: 'md', payload: text, isRepost: _isRepost, title: result.title || fallbackTitle };
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else {
         throw new Error('此模板不支持该文件格式');
