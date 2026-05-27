@@ -433,17 +433,19 @@ export default {
   description: '按 FoodTalks 网站后台规范输出 inline-style HTML',
   formats: ['.docx', '.doc', '.md', '.txt'],
 
-  processDocx({ paragraphs, imgCache }) {
+  processDocx({ paragraphs, imgCache, config = {} }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache);
     return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length };
   },
 
-  async processMd(text) {
+  async processMd(text, opts) {
+    const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
     return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 
-  processBlocks(data) {
+  processBlocks(data, opts) {
+    const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
     return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },

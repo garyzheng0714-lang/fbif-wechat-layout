@@ -148,6 +148,15 @@ const footerReady = fetch(footerUrl).then(r => r.ok ? r.text() : '').catch(() =>
 // at every footer-rebuild site.
 let _isRepost = false;
 
+// 渲染调度层活跃配置 —— site.html / app.html 启动时通过 setActiveConfig 注入
+let _activeConfig = {};
+export function setActiveConfig(cfg) {
+  _activeConfig = cfg || {};
+}
+export function getActiveConfig() {
+  return _activeConfig;
+}
+
 function footerBehaviorContext() {
   const pack = typeof window !== 'undefined' ? window._activeRulePack : null;
   return {
@@ -310,10 +319,10 @@ export function initApp(template) {
     _sourceIsDocx = isDocx;
     if (isDocx) {
       const docxData = await parseDocx(file);
-      result = template.processDocx({ ...docxData, isRepost: _isRepost });
+      result = template.processDocx({ ...docxData, isRepost: _isRepost, config: _activeConfig });
     } else if (typeof template.processMd === 'function') {
       const text = await file.text();
-      result = await template.processMd(text, { isRepost: _isRepost });
+      result = await template.processMd(text, { isRepost: _isRepost, config: _activeConfig });
     } else {
       throw new Error('此模板不支持该文件格式');
     }
@@ -366,7 +375,7 @@ export function initApp(template) {
       // await: processBlocks is synchronous today but we're inside an
       // async context anyway, and future work (e.g. image pre-fetch)
       // might make it async. The await has zero cost on plain returns.
-      const result = await template.processBlocks(data, { isRepost: _isRepost });
+      const result = await template.processBlocks(data, { isRepost: _isRepost, config: _activeConfig });
       logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
 
       const articleHtml = result.lines.join('\n');
@@ -417,11 +426,11 @@ export function initApp(template) {
       _sourceIsDocx = isDocx;
       if (isDocx) {
         const docxData = await parseDocx(file);
-        result = template.processDocx({ ...docxData, isRepost: _isRepost });
+        result = template.processDocx({ ...docxData, isRepost: _isRepost, config: _activeConfig });
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else if (typeof template.processMd === 'function') {
         const text = await file.text();
-        result = await template.processMd(text, { isRepost: _isRepost });
+        result = await template.processMd(text, { isRepost: _isRepost, config: _activeConfig });
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else {
         throw new Error('此模板不支持该文件格式');

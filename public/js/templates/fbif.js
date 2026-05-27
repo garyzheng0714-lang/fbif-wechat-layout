@@ -535,15 +535,18 @@ export default {
   description: '按 FBIF 排版规范格式化，支持标题/引言/图片说明/参考来源',
   formats: ['.docx', '.doc', '.md', '.txt'],
 
-  processDocx({ paragraphs, imgCache, isRepost }) {
+  processDocx({ paragraphs, imgCache, isRepost, config: _config }) {
+    // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, imgN } = classifyDocx(paragraphs, imgCache);
     return { lines: render(elems, author, '', { isRepost }), imgN, headingN: elems.filter(e => e.k === 'h').length };
   },
-  async processMd(text, opts) {
+  async processMd(text, { config: _config, ...opts } = {}) {
+    // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, source, title, imgN } = await classifyMd(text);
     return { lines: render(elems, author, source, opts), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
-  processBlocks(data, opts) {
+  processBlocks(data, { config: _config, ...opts } = {}) {
+    // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, source, title, imgN } = classifyBlocks(data);
     return { lines: render(elems, author, source, opts), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
