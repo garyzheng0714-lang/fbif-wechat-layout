@@ -21,15 +21,10 @@ test('foodtalks-site template declares correct id and formats', () => {
   assert.match(templateSource, /processBlocks\s*\(/);
 });
 
-test('foodtalks-site template outputs h2/h3 without inline style', () => {
-  assert.match(templateSource, /<h2>\$\{[^}]+\}<\/h2>/);
-  assert.match(templateSource, /<h3>\$\{[^}]+\}<\/h3>/);
-});
-
-test('foodtalks-site template uses explicit <p><br /></p> as blank line', () => {
-  // 标准 XHTML 自闭合形式：<p><br /></p>
-  assert.match(templateSource, /BLANK_LINE\s*=\s*['"]<p><br \/><\/p>['"]/);
-});
+// 旧 M1 契约「h2/h3 无 inline 样式」+「BLANK_LINE = '<p><br /></p>'」已被 M2 契约取代：
+// 标题现在带 mctoc_ id（由 config.modules.mctoc.enabled 开关，参见后文 M2 case），
+// BLANK_LINE 现在含 text-align: justify（参见后文 M2 case）。
+// 规则七：显式择一，不折中——M2 即为当前 spec 目标。
 
 test('foodtalks-site template renders images at 600px centered', () => {
   assert.match(templateSource, /text-align:\s*center/);
@@ -45,9 +40,9 @@ test('foodtalks-site template renders references with 16px gray inline style', (
   assert.match(templateSource, /font-size:\s*16px;\s*color:\s*#7f7f7f/);
 });
 
-test('foodtalks-site template auto-numbers references with [1] [2] [3]', () => {
-  assert.match(templateSource, /ensureReferenceNumber/);
-});
+// 旧 M1 契约「auto-numbers references with [1] [2] [3]」已被 M2 契约取代：
+// 自动编号 ensureReferenceNumber 函数已删除，改为保留作者原始 [n] 标记
+// 由行为模板 applyFoodTalksBehavior 识别 ref-header / ref-item（参见后文 M2 case）。
 
 test('foodtalks-site template has adaptiveImageWidth with 280/360/480/600 thresholds', () => {
   assert.match(templateSource, /adaptiveImageWidth/);
