@@ -191,10 +191,12 @@ function storedRulePackID() {
 }
 
 function initialRulePackID() {
-  // 优先级：URL 路径 (/mp/fbif) > query (?account=) > localStorage > 默认
+  // 优先级：URL 路径 (/mp/fbif、/ft/ft-default) > query (?account=) > localStorage > 默认
+  // 路径走 getRulePackByPath：包 id 不存在时按渠道 fallback 到该渠道默认包
+  // （/ft/default → 'ft-default'；/ft/ft-default → 'ft-default'；/mp/fbif → 'fbif'）。
   const parsed = rulePackUrlModule.parsePath(location.pathname);
-  if (parsed && parsed.packId) {
-    return parsed.packId;
+  if (parsed && parsed.channel) {
+    return rulePackModule.getRulePackByPath(location.pathname).id;
   }
   const storedID = storedRulePackID();
   return rulePackModule.getRulePackIDFromLocation({
