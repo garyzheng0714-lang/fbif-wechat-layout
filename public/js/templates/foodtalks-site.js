@@ -199,26 +199,6 @@ function renderImageCaption(text) {
   );
 }
 
-function renderReference(text, indexOneBased) {
-  const numbered = ensureReferenceNumber(text, indexOneBased);
-  return (
-    `<p>` +
-    `<span style="font-size: 16px; color: #7f7f7f;">${esc(numbered)}</span>` +
-    `</p>`
-  );
-}
-
-// ---- 参考文献编号 ----
-
-function ensureReferenceNumber(content, indexOneBased) {
-  const text = String(content || '').trim();
-  const m = text.match(/^\[(\d+)\]\s*(.*)$/);
-  if (m) {
-    return `[${m[1]}] ${m[2]}`;
-  }
-  return `[${indexOneBased}] ${text}`;
-}
-
 // 把图片后 3 段内最多 2 段"看起来像图注"的普通段提升为图注块
 function promoteImageCaptions(elems) {
   const out = elems.slice();
@@ -228,7 +208,7 @@ function promoteImageCaptions(elems) {
     let scanned = 0;
     for (let j = i + 1; j < out.length && scanned < 3 && promoted < 2; j++) {
       const e = out[j];
-      if (e.k === 'img' || e.k === 'h' || e.k === 'ref') break;
+      if (e.k === 'img' || e.k === 'h' || e.k === 'ref-header' || e.k === 'ref-item') break;
       if (e.k !== 'p') continue;
       scanned += 1;
       const plain = (e.runs || []).filter(r => r.type === 'txt').map(r => r.text).join('').trim();
@@ -254,7 +234,6 @@ function promoteImageCaptions(elems) {
 
 function render(elems, config = {}) {
   const lines = [];
-  let refIndex = 0;
   let prevWasHeading = false;
   let prevWasStandaloneLink = false;
   for (let i = 0; i < elems.length; i++) {
@@ -278,9 +257,19 @@ function render(elems, config = {}) {
       prevWasStandaloneLink = false;
       continue;
     }
-    if (e.k === 'ref') {
-      refIndex += 1;
-      lines.push(renderReference(runsToPlain(e.runs), refIndex));
+    if (e.k === 'ref-header') {
+      lines.push('<p style="text-align: justify;"><span style="color: #888888; font-size: 14px;">参考来源：</span></p>');
+      prevWasHeading = false;
+      prevWasStandaloneLink = false;
+      continue;
+    }
+    if (e.k === 'ref-item') {
+      const text = runsToPlain(e.runs);
+      lines.push(
+        '<p style="text-align: justify;"><span style="color: #888888; font-size: 14px;">' +
+        esc(text) +
+        '</span></p>'
+      );
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
@@ -420,7 +409,7 @@ function classifyBlocks(data) {
       continue;
     }
     if (b.type === 'ref' || b.type === 'reference') {
-      elems.push({ k: 'ref', runs: [{ type: 'txt', text: b.text || '' }] });
+      elems.push({ k: 'p', runs: [{ type: 'txt', text: b.text || '' }] });
       continue;
     }
     const runs = Array.isArray(b.runs) && b.runs.length
