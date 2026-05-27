@@ -34,8 +34,8 @@ func TestRulePresetStorePersistsActivePreset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if len(doc.Presets) != 3 {
-		t.Fatalf("expected two account defaults + custom preset, got %d", len(doc.Presets))
+	if len(doc.Presets) != 4 {
+		t.Fatalf("expected three account defaults + custom preset, got %d", len(doc.Presets))
 	}
 
 	if _, err := store.setActive("campaign"); err != nil {
@@ -66,8 +66,9 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 		t.Fatalf("list default store: %v", err)
 	}
 
-	if len(doc.Accounts) != 2 {
-		t.Fatalf("accounts = %d, want 2: %#v", len(doc.Accounts), doc.Accounts)
+	// Now 3 accounts: fbif, foodtalks-series, ft-default (FoodTalks website)
+	if len(doc.Accounts) != 3 {
+		t.Fatalf("accounts = %d, want 3: %#v", len(doc.Accounts), doc.Accounts)
 	}
 	if doc.Accounts[0].ID != "fbif" {
 		t.Fatalf("first account id = %q, want fbif", doc.Accounts[0].ID)
@@ -81,11 +82,24 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 	if doc.Accounts[1].Name != "FoodTalks什么是系列" {
 		t.Fatalf("second account name = %q, want FoodTalks什么是系列", doc.Accounts[1].Name)
 	}
-	if doc.Accounts[0].ActiveID == "" || doc.Accounts[1].ActiveID == "" {
-		t.Fatalf("accounts must expose active rule ids: %#v", doc.Accounts)
+	if doc.Accounts[2].ID != "ft-default" {
+		t.Fatalf("third account id = %q, want ft-default", doc.Accounts[2].ID)
 	}
-	if doc.Accounts[0].ActiveID == doc.Accounts[1].ActiveID {
-		t.Fatalf("default accounts should start with independent rule ids: %#v", doc.Accounts)
+	if doc.Accounts[2].Name != "FoodTalks 网站默认" {
+		t.Fatalf("third account name = %q, want FoodTalks 网站默认", doc.Accounts[2].Name)
+	}
+	for _, a := range doc.Accounts {
+		if a.ActiveID == "" {
+			t.Fatalf("account %q must expose active rule id: %#v", a.ID, doc.Accounts)
+		}
+	}
+	// All three accounts must have distinct active rule IDs
+	seen := map[string]bool{}
+	for _, a := range doc.Accounts {
+		if seen[a.ActiveID] {
+			t.Fatalf("default accounts should start with independent rule ids: %#v", doc.Accounts)
+		}
+		seen[a.ActiveID] = true
 	}
 }
 
@@ -262,8 +276,9 @@ func TestRulePresetPublicCatalogOmitsRuleBodies(t *testing.T) {
 	if _, ok := payload.Presets[0]["behavior"]; ok {
 		t.Fatalf("catalog must not expose behavior code body: %#v", payload.Presets[0])
 	}
-	if len(payload.Accounts) != 2 {
-		t.Fatalf("catalog accounts = %d, want 2", len(payload.Accounts))
+	// Now 3 accounts: fbif, foodtalks-series, ft-default (FoodTalks website)
+	if len(payload.Accounts) != 3 {
+		t.Fatalf("catalog accounts = %d, want 3", len(payload.Accounts))
 	}
 }
 
@@ -391,7 +406,7 @@ func TestRulePresetStoreMigratesLegacyV1FileToV2OnWriteKeepingLegacyFacade(t *te
 	if doc.ActiveID != "campaign" {
 		t.Fatalf("legacy facade active_id = %q, want campaign", doc.ActiveID)
 	}
-	if len(doc.Presets) != 3 {
+	if len(doc.Presets) != 4 {
 		t.Fatalf("legacy facade presets = %d, want account defaults + campaign", len(doc.Presets))
 	}
 	active, err = reloaded.active()
@@ -475,8 +490,9 @@ func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
 		t.Fatalf("admin list missing presets")
 	}
 	accounts, ok := docPayload["accounts"].([]any)
-	if !ok || len(accounts) != 2 {
-		t.Fatalf("admin list accounts = %#v, want two account bindings", docPayload["accounts"])
+	// Now 3 accounts: fbif, foodtalks-series, ft-default (FoodTalks website)
+	if !ok || len(accounts) != 3 {
+		t.Fatalf("admin list accounts = %#v, want three account bindings", docPayload["accounts"])
 	}
 	if _, ok := docPayload["rules"]; ok {
 		t.Fatalf("admin list leaked v2 rules")
@@ -814,6 +830,57 @@ func TestRulePresetStoreCapsSavedVersionsPerRule(t *testing.T) {
 	}
 	if got := len(raw.Rules["campaign"].Versions); got != maxRulePresetVersions {
 		t.Fatalf("versions = %d, want %d", got, maxRulePresetVersions)
+	}
+}
+
+func TestDefaultRuleStoreDocumentIncludesFoodTalksSite(t *testing.T) {
+	doc := defaultRuleStoreDocumentV2()
+
+	siteAccount, ok := doc.Accounts[foodTalksSiteRuleAccountID]
+	if !ok {
+		t.Fatalf("expected FoodTalks site account %q in default doc", foodTalksSiteRuleAccountID)
+	}
+	if siteAccount.ActiveRuleID != foodTalksSiteDefaultRulePresetID {
+		t.Errorf("FoodTalks site account active rule = %q, want %q",
+			siteAccount.ActiveRuleID, foodTalksSiteDefaultRulePresetID)
+	}
+	if siteAccount.ActiveRuleVersion != 1 {
+		t.Errorf("FoodTalks site account active version = %d, want 1", siteAccount.ActiveRuleVersion)
+	}
+
+	rule, ok := doc.Rules[foodTalksSiteDefaultRulePresetID]
+	if !ok {
+		t.Fatalf("expected rule definition %q in default doc", foodTalksSiteDefaultRulePresetID)
+	}
+	if len(rule.Versions) == 0 {
+		t.Fatal("FoodTalks site rule has no versions")
+	}
+	v := rule.Versions[0]
+
+	// 必须的 behavior key
+	for _, k := range []string{"author_regex", "tip_regex", "ref_header_regex", "ref_item_regex"} {
+		if _, ok := v.Behavior[k]; !ok {
+			t.Errorf("missing behavior.%s", k)
+		}
+	}
+
+	// 必须的 config key
+	if _, ok := v.Config["modules"]; !ok {
+		t.Error("missing config.modules")
+	}
+	modules, _ := v.Config["modules"].(map[string]any)
+	if modules == nil {
+		t.Fatal("config.modules is not a map")
+	}
+	if mctoc, ok := modules["mctoc"].(map[string]any); !ok {
+		t.Error("modules.mctoc not present or not a map")
+	} else if mctoc["enabled"] != true {
+		t.Errorf("modules.mctoc.enabled = %v, want true", mctoc["enabled"])
+	}
+	if footer, ok := modules["fbif_footer"].(map[string]any); !ok {
+		t.Error("modules.fbif_footer not present or not a map")
+	} else if footer["enabled"] != false {
+		t.Errorf("modules.fbif_footer.enabled = %v, want false", footer["enabled"])
 	}
 }
 

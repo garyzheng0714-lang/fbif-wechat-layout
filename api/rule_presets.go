@@ -18,6 +18,8 @@ const defaultRulePresetID = "default"
 const defaultRuleAccountID = "fbif"
 const foodTalksRuleAccountID = "foodtalks-series"
 const foodTalksDefaultRulePresetID = "foodtalks-series-default"
+const foodTalksSiteRuleAccountID = "ft-default"
+const foodTalksSiteDefaultRulePresetID = "ft-default-v1"
 const maxRulePresetVersions = 20
 
 type rulePreset struct {
@@ -170,6 +172,12 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 			ActiveRuleVersion: 1,
 			UpdatedAt:         now,
 		},
+		foodTalksSiteRuleAccountID: {
+			Name:              "FoodTalks 网站默认",
+			ActiveRuleID:      foodTalksSiteDefaultRulePresetID,
+			ActiveRuleVersion: 1,
+			UpdatedAt:         now,
+		},
 	}
 }
 
@@ -199,6 +207,47 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 			}},
 			UpdatedAt: now,
 		},
+		foodTalksSiteDefaultRulePresetID: {
+			ID:          foodTalksSiteDefaultRulePresetID,
+			Name:        "FoodTalks 网站默认规则",
+			Description: "FoodTalks 网站排版的独立默认参数（基于 8 篇真实文章采样）",
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultFoodTalksSiteRuleConfig(),
+				Behavior:  defaultFoodTalksSiteRuleBehavior(),
+				CreatedAt: now,
+			}},
+			UpdatedAt: now,
+		},
+	}
+}
+
+// defaultFoodTalksSiteRuleConfig 返回 FoodTalks 网站排版的默认参数配置。
+// 规则细节见 docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md
+func defaultFoodTalksSiteRuleConfig() map[string]any {
+	return map[string]any{
+		"image": map[string]any{
+			"width": 600,
+		},
+		"modules": map[string]any{
+			"mctoc": map[string]any{
+				"enabled": true,
+			},
+			"fbif_footer": map[string]any{
+				"enabled": false,
+			},
+		},
+	}
+}
+
+// defaultFoodTalksSiteRuleBehavior 返回 FoodTalks 网站行为模板的默认配置。
+// 三条识别正则：作者署名、提示行、参考来源段。
+func defaultFoodTalksSiteRuleBehavior() map[string]any {
+	return map[string]any{
+		"author_regex":     `^\s*作者[：:]\s*`,
+		"tip_regex":        `^\s*提示[：:]`,
+		"ref_header_regex": `^\s*参考(?:来源|资料)[：:]\s*$`,
+		"ref_item_regex":   `^\s*\[\d+\]`,
 	}
 }
 
@@ -437,7 +486,7 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 }
 
 func accountBindingsFromStore(doc ruleStoreDocumentV2) []ruleAccountBinding {
-	order := []string{defaultRuleAccountID, foodTalksRuleAccountID}
+	order := []string{defaultRuleAccountID, foodTalksRuleAccountID, foodTalksSiteRuleAccountID}
 	for id := range doc.Accounts {
 		found := false
 		for _, known := range order {
@@ -727,6 +776,9 @@ func (s *rulePresetStore) delete(id string) (rulePresetDocument, error) {
 			fallbackID := defaultRulePresetID
 			if accountID == foodTalksRuleAccountID {
 				fallbackID = foodTalksDefaultRulePresetID
+			}
+			if accountID == foodTalksSiteRuleAccountID {
+				fallbackID = foodTalksSiteDefaultRulePresetID
 			}
 			account.ActiveRuleID = fallbackID
 			account.ActiveRuleVersion = latestRuleVersion(doc.Rules[fallbackID]).Version
