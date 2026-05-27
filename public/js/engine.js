@@ -777,4 +777,102 @@ export function initApp(template) {
     const contentArea = document.getElementById('contentArea');
     if (contentArea) applyThemeVars(contentArea, config);
   };
+
+  // ---- Session snapshot (cross-channel navigation) ----
+  // Captures all closure + DOM state needed to restore the editor after a top
+  // pill switches channel. Closure copies of _articleHtml/_articleCopy/etc.
+  // are the source of truth for `copyContent`; DOM is the source of truth for
+  // preview. Both must be persisted, otherwise restore yields a broken
+  // editor (preview shows but copy is empty, or vice versa).
+  window._captureSessionSnapshot = function() {
+    const ca = document.getElementById('contentArea');
+    const titleDisplay = document.getElementById('previewTitleDisplay');
+    const titleInput = document.getElementById('titleInput');
+    const date = document.getElementById('wxDate');
+    const previewContent = document.getElementById('previewContent');
+    const emptyState = document.getElementById('emptyState');
+    const wxFooter = document.getElementById('wxFooter');
+    const batchListEl = document.getElementById('batchList');
+    return {
+      schema_version: 1,
+      timestamp: Date.now(),
+      closure_state: {
+        article_html: _articleHtml,
+        article_copy: _articleCopy,
+        footer_html: _footerHtml,
+        footer_copy: _footerCopy,
+        is_repost: _isRepost,
+        source_is_docx: _sourceIsDocx,
+        failed_srcs: _failedSrcs ? _failedSrcs.slice() : [],
+        upload_done: _uploadDone,
+      },
+      batch_state: {
+        // File objects can't be serialized; persist only result metadata so a
+        // restored editor can still display the batch list. Re-running a batch
+        // requires re-uploading the files.
+        file_meta: _batchFiles ? _batchFiles.map(f => ({ name: f.name, size: f.size })) : [],
+        results: _batchResults ? JSON.parse(JSON.stringify(_batchResults)) : [],
+      },
+      dom: {
+        content_area_html: ca ? ca.innerHTML : '',
+        content_area_style: ca ? (ca.getAttribute('style') || '') : '',
+        title_display: titleDisplay ? titleDisplay.textContent : '',
+        title_input_value: titleInput ? titleInput.value : '',
+        article_title_text: (document.getElementById('articleTitle') || {}).textContent || '',
+        date_text: date ? date.textContent : '',
+        preview_visible: previewContent ? previewContent.style.display !== 'none' : false,
+        empty_visible: emptyState ? emptyState.style.display !== 'none' : true,
+        footer_visible: wxFooter ? wxFooter.style.display !== 'none' : false,
+        batch_visible: batchListEl ? batchListEl.style.display !== 'none' : false,
+        batch_html: batchListEl ? batchListEl.innerHTML : '',
+        has_preview_class: document.body.classList.contains('has-preview'),
+      },
+    };
+  };
+
+  window._restoreSessionSnapshot = function(snap) {
+    if (!snap || snap.schema_version !== 1) return false;
+    const cs = snap.closure_state || {};
+    _articleHtml = cs.article_html || '';
+    _articleCopy = cs.article_copy || '';
+    _footerHtml = cs.footer_html || '';
+    _footerCopy = cs.footer_copy || '';
+    _isRepost = !!cs.is_repost;
+    _sourceIsDocx = !!cs.source_is_docx;
+    _failedSrcs = cs.failed_srcs || [];
+    _uploadDone = !!cs.upload_done;
+    if (snap.batch_state) {
+      _batchFiles = [];
+      _batchResults = snap.batch_state.results || [];
+    }
+    const dom = snap.dom || {};
+    const ca = document.getElementById('contentArea');
+    if (ca) {
+      ca.innerHTML = dom.content_area_html || '';
+      if (dom.content_area_style) ca.setAttribute('style', dom.content_area_style);
+    }
+    const titleDisplay = document.getElementById('previewTitleDisplay');
+    if (titleDisplay) titleDisplay.textContent = dom.title_display || '';
+    const titleInput = document.getElementById('titleInput');
+    if (titleInput) titleInput.value = dom.title_input_value || '';
+    // titleInput → articleTitle setter is defined later in app.html, so we set
+    // h2#articleTitle directly here to avoid order-of-init breakage.
+    const articleTitleEl = document.getElementById('articleTitle');
+    if (articleTitleEl) articleTitleEl.textContent = dom.article_title_text || dom.title_input_value || '';
+    const date = document.getElementById('wxDate');
+    if (date) date.textContent = dom.date_text || '';
+    const previewContent = document.getElementById('previewContent');
+    if (previewContent) previewContent.style.display = dom.preview_visible ? '' : 'none';
+    const emptyState = document.getElementById('emptyState');
+    if (emptyState) emptyState.style.display = dom.empty_visible ? '' : 'none';
+    const wxFooter = document.getElementById('wxFooter');
+    if (wxFooter) wxFooter.style.display = dom.footer_visible ? '' : 'none';
+    const batchListEl = document.getElementById('batchList');
+    if (batchListEl) {
+      batchListEl.innerHTML = dom.batch_html || '';
+      batchListEl.style.display = dom.batch_visible ? '' : 'none';
+    }
+    if (dom.has_preview_class) document.body.classList.add('has-preview');
+    return true;
+  };
 }

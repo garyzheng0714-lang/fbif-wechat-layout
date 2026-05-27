@@ -1,0 +1,110 @@
+/* Top global channel pill — primary navigation between /mp/* and /ft/* editors.
+   Visually distinct from the secondary square rule-pack switcher inside the
+   sidebar: round corners, larger touch area, centered above the split layout. */
+
+.global-channel-bar {
+  height: 56px;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+}
+
+.channel-switcher {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 9999px;
+  background: #f6f5f4;
+}
+
+.channel-switcher-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: #615d59;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.channel-switcher-btn:hover:not(.is-active):not(.is-disabled) {
+  color: rgba(0,0,0,0.95);
+}
+
+.channel-switcher-btn.is-active {
+  background: #ffffff;
+  color: rgba(0,0,0,0.95);
+  box-shadow: rgba(0,0,0,0.04) 0 2px 10px;
+  cursor: default;
+}
+
+.channel-switcher-btn.is-disabled {
+  color: #b5b5b5;
+  cursor: not-allowed;
+}
+
+/* Rule-pack switcher — secondary segmented control inside the sidebar.
+   Square corners + label + smaller footprint make the two layers
+   (channel vs rule pack) read as visually different. */
+.rule-pack-switcher {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.rule-pack-switcher-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #a39e98;
+  letter-spacing: 0.125px;
+  flex-shrink: 0;
+}
+.account-switcher {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 6px;
+  background: #f6f5f4;
+  flex: 1;
+  min-width: 0;
+}
+.account-switcher-btn {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #615d59;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.account-switcher-btn:hover:not(.active) {
+  color: rgba(0,0,0,0.95);
+}
+.account-switcher-btn.active {
+  background: #ffffff;
+  color: rgba(0,0,0,0.95);
+  box-shadow: rgba(0,0,0,0.04) 0 1px 3px;
+}

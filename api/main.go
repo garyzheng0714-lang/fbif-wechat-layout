@@ -76,6 +76,11 @@ func main() {
 
 	registerChannelRoutes(mux, publicDir)
 
+	// Root → /mp/fbif (portal removed; landing goes straight to the WeChat editor)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/mp/fbif", http.StatusFound)
+	})
+
 	// Serve static files from ../public
 	fs := http.FileServer(http.Dir(publicDir))
 	// Force browsers to revalidate HTML + all JS/CSS on every load so a deploy

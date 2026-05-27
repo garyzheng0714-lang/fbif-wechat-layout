@@ -5,6 +5,11 @@ import { readFile } from 'node:fs/promises';
 test('app shell renders a capsule account switcher above the upload area', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/app.css', import.meta.url), 'utf8');
+  // .account-switcher / .account-switcher-btn styles moved to channel-bar.css
+  // alongside the top channel pill (both are "switcher controls"). Tests below
+  // that reference `css` now check the merged stylesheet.
+  const channelBarCss = await readFile(new URL('../public/css/channel-bar.css', import.meta.url), 'utf8');
+  const allCss = css + '\n' + channelBarCss;
 
   assert.match(app, /id="accountSwitcher"/);
   assert.match(app, /class="account-switcher"/);
@@ -33,8 +38,8 @@ test('app shell renders a capsule account switcher above the upload area', async
   );
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
-  assert.match(css, /\.account-switcher/);
-  assert.match(css, /\.account-switcher-btn\.active/);
+  assert.match(allCss, /\.account-switcher/);
+  assert.match(allCss, /\.account-switcher-btn\.active/);
   assert.match(css, /\.active-rule-card/);
   assert.match(css, /\.active-rule-card\.editing/);
   assert.match(css, /\.active-rule-readline/);

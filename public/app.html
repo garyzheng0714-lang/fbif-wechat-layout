@@ -14,11 +14,19 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/400.css" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/700.css" crossorigin="anonymous">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/css/channel-bar.css">
 <link rel="stylesheet" href="/admin-panel.css">
 <link rel="stylesheet" href="/css/rule-admin.css">
 <link rel="stylesheet" href="/css/wx-theme.css">
 </head>
 <body>
+
+<header class="global-channel-bar">
+  <nav class="channel-switcher" role="tablist" aria-label="选择渠道">
+    <a href="/mp/fbif" class="channel-switcher-btn is-active" data-channel="mp" role="tab" aria-selected="true" aria-current="page">公众号</a>
+    <button type="button" class="channel-switcher-btn is-disabled" data-channel="ft" role="tab" aria-selected="false" aria-disabled="true" disabled title="维护中">FoodTalks 网站</button>
+  </nav>
+</header>
 
 <div class="app-layout">
   <!-- ======== Sidebar ======== -->
@@ -32,7 +40,10 @@
       <span id="pageTitle" style="display:none;"></span>
       <span id="pageSubtitle" style="display:none;"></span>
 
-      <div class="account-switcher" id="accountSwitcher" aria-label="公众号选择"></div>
+      <div class="rule-pack-switcher">
+        <span class="rule-pack-switcher-label">规则包</span>
+        <div class="account-switcher" id="accountSwitcher" aria-label="规则包选择"></div>
+      </div>
 
       <div class="upload-zone" id="dropZone">
         <div class="upload-icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
@@ -581,6 +592,12 @@ async function loadTemplate(templateId) {
 }
 
 await loadTemplate(currentTemplateId);
+
+// Cross-channel state restore — must come after initApp so engine.js has
+// wired up window._captureSessionSnapshot / _restoreSessionSnapshot.
+const { restoreCurrentChannel, bindChannelSwitcher } = await import('/js/session-restore.js?v=' + assetVersion);
+restoreCurrentChannel();
+bindChannelSwitcher();
 
 syncWorkflowControls();
 renderActiveRuleCard();

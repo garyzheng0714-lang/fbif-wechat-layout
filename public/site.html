@@ -14,11 +14,19 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/400.css" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/700.css" crossorigin="anonymous">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/css/channel-bar.css">
 <link rel="stylesheet" href="/admin-panel.css">
 <link rel="stylesheet" href="/css/wx-theme.css">
 <link rel="stylesheet" href="/site.css">
 </head>
 <body>
+
+<header class="global-channel-bar">
+  <nav class="channel-switcher" role="tablist" aria-label="选择渠道">
+    <a href="/mp/fbif" class="channel-switcher-btn" data-channel="mp" role="tab" aria-selected="false">公众号</a>
+    <a href="/ft/default" class="channel-switcher-btn is-active" data-channel="ft" role="tab" aria-selected="true" aria-current="page">FoodTalks 网站</a>
+  </nav>
+</header>
 
 <div class="app-layout">
   <!-- ======== Sidebar ======== -->
@@ -497,6 +505,12 @@ async function loadTemplate(templateId) {
 }
 
 await loadTemplate(currentTemplateId);
+
+// Cross-channel state restore — must come after initApp so engine.js has
+// wired up window._captureSessionSnapshot / _restoreSessionSnapshot.
+const { restoreCurrentChannel, bindChannelSwitcher } = await import('/js/session-restore.js?v=' + assetVersion);
+restoreCurrentChannel();
+bindChannelSwitcher();
 
 syncWorkflowControls();
 renderActiveRuleCard();

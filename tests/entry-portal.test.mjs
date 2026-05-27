@@ -2,21 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('index.html is a channel-picker portal (no auto-redirect)', async () => {
+test('index.html redirects to /mp/fbif (portal removed)', async () => {
+  // Portal selection page was retired in favor of the top channel pill inside
+  // the editors. `/` now redirects to /mp/fbif at the server level, and
+  // index.html provides a meta-refresh + JS fallback for direct hits.
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  // 不再有 location.replace
-  assert.doesNotMatch(html, /location\.replace\(/);
-  // 必须有 mp 入口和 ft 入口的链接
-  assert.match(html, /href=['"]\/mp\/fbif['"]/);
-  assert.match(html, /href=['"]\/ft\/default['"]/);
-  // 必须显示"公众号"和"网站"两个文案
-  assert.match(html, /公众号/);
-  assert.match(html, /网站/);
-});
-
-test('index.html links to shared site.css for portal styles', async () => {
-  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  assert.match(html, /href=['"]\/site\.css['"]/);
+  // Must redirect to the public-account editor on both meta-refresh and JS paths.
+  assert.match(html, /<meta\s+http-equiv=['"]refresh['"][^>]*\/mp\/fbif/);
+  assert.match(html, /location\.replace\(['"]\/mp\/fbif['"]\)/);
+  // Must not still render the old portal cards/labels.
+  assert.doesNotMatch(html, /channel-card-disabled/);
+  assert.doesNotMatch(html, /class=['"]channel-card['"]/);
 });
 
 test('site.css exists and defines .channel-portal layout', async () => {
