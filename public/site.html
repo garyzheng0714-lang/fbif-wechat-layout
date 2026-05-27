@@ -690,6 +690,8 @@ document.addEventListener('paste', (e) => {
       : {};
     cfg.modules = cfg.modules || {};
     cfg.modules.fbif_footer = { enabled: toggle.checked };
+    // mctoc 锚点：与真实 foodtalks.cn 文章页对齐，默认开启
+    cfg.modules.mctoc = cfg.modules.mctoc || { enabled: true };
     if (window._engineApi && window._engineApi.setActiveConfig) {
       window._engineApi.setActiveConfig(cfg);
     }

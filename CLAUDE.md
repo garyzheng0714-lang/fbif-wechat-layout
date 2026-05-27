@@ -48,6 +48,12 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 17. **URL 导入作者来源固定在提示前** — 文章级 `来源：` / `作者：` / `编辑：` 只渲染一次，位置固定在标准 `提示：` 页脚前
 18. **DOCX 连续段落尊重空段语义** — 连续非空正文段落在 Word 段距较小时保持紧凑；只有原文中间有空段时，下一段前才恢复标准 `wx-gap`
 
+19. **FoodTalks 网站规则与公众号物理隔离** — 渲染器（`public/js/templates/foodtalks-site.js`）、行为模板（`public/js/rule-behavior-foodtalks.js`）、页脚模块、署名颜色全套分离。公众号 Mote `#396FBC` 蓝色斜体不复用到网站；网站署名走 `#7f7f7f` 14px 斜体；公众号渲染器与网站渲染器之间不互相 import。修改任一侧规则不能波及另一侧——`public/js/templates/fbif.js` 在网站任务中必须字节级不动。
+
+20. **FBIF 页脚开关默认关** — 网站文章不输出"加入微信群+商务合作"段；只有手动打开侧栏「输出 FBIF 公众号原创页脚」开关才输出。开关状态写入 `localStorage` key=`ft.outputFbifFooter` (`'1'`/`'0'`)。FoodTalks 系统会自动追加"关注公众号 + FoodTalks logo + 点击获取更多"，**我们永远不输出这段**（否则会和系统页脚重复）。
+
+21. **网站渠道默认走 ft-default 规则包** — site.html 通过 `getRulePackByPath(location.pathname)` 做渠道感知 fallback：`/ft/<任意 id>` 都会落到该渠道默认包 `ft-default`（templateId 是 `foodtalks-site`）。**禁止**裸用 `parsed.packId`——`/ft/default` 这种链接里的 `default` 在 registry 不存在，裸用会 fallback 到公众号 `fbif`，整套网站模板失效。
+
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
