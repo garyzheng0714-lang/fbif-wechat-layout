@@ -10,6 +10,10 @@
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
+// 等价于: import { applyFoodTalksBehavior, FBIF_FOOTER_HTML } from '../rule-behavior-foodtalks.js'
+// 用动态 import 是为了配合浏览器端的 cache-busting assetQuery
+const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery);
+const { applyFoodTalksBehavior, FBIF_FOOTER_HTML } = behaviorModule;
 
 // ---- 图片注释智能识别 ----
 
@@ -245,6 +249,35 @@ function render(elems, config = {}) {
       prevWasStandaloneLink = false;
       continue;
     }
+    if (e.k === 'author') {
+      lines.push(
+        '<p style="text-align: justify;">' +
+        '<span style="font-size: 14px;"><span style="color: #7f7f7f;"><em>' +
+        esc(e.text) +
+        '</em></span></span></p>'
+      );
+      prevWasHeading = false;
+      prevWasStandaloneLink = false;
+      continue;
+    }
+    if (e.k === 'tip') {
+      const fullText = runsToPlain(e.runs);
+      // 把"提示："这 3 个字符切出来加蓝色，剩余文本保持普通色
+      const tipHead = fullText.match(/^(\s*提示[：:])(.*)$/);
+      const head = tipHead ? tipHead[1] : '提示：';
+      const rest = tipHead ? tipHead[2] : fullText;
+      lines.push(
+        '<p style="text-align: justify;">' +
+        '<strong><span style="color: #01396a;"><em><span style="font-size: 14px;">' +
+        esc(head) +
+        '</span></em></span></strong>' +
+        esc(rest) +
+        '</p>'
+      );
+      prevWasHeading = false;
+      prevWasStandaloneLink = false;
+      continue;
+    }
     if (e.k === 'img') {
       lines.push(renderImage(e.src, e.alt, e.width, e.height));
       prevWasHeading = false;
@@ -430,18 +463,35 @@ export default {
 
   processDocx({ paragraphs, imgCache, config = {} }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache);
-    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems)), config), imgN, headingN: elems.filter(e => e.k === 'h').length };
+    const behaved = applyFoodTalksBehavior(elems, config);
+    return {
+      lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
+      imgN,
+      headingN: behaved.filter(e => e.k === 'h').length,
+    };
   },
 
   async processMd(text, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
-    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems)), config), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    const behaved = applyFoodTalksBehavior(elems, config);
+    return {
+      lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
+      imgN,
+      headingN: behaved.filter(e => e.k === 'h').length,
+      title,
+    };
   },
 
   processBlocks(data, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
-    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems)), config), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    const behaved = applyFoodTalksBehavior(elems, config);
+    return {
+      lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
+      imgN,
+      headingN: behaved.filter(e => e.k === 'h').length,
+      title,
+    };
   },
 };
