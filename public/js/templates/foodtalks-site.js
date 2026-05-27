@@ -1,11 +1,15 @@
 // FoodTalks 网站排版模板 — 输出 inline-style HTML，给 FoodTalks 网站后台编辑器粘贴用
-// 输出契约（参考 /tmp/foodtalks-research/FoodtalksArticleLayout/layout-tool.html）：
-//   - <h2>/<h3> 纯标签，无 style
-//   - <p> 纯标签，无 style
-//   - 空行：<p><br /></p>（显式标签，不是 CSS margin）
-//   - 图片：<p style="text-align: center;"><img width="600" style="width: 600px; max-width: 100%; height: auto; display: inline-block;"></p>
-//   - 图注：<p style="text-align: center;"><span style="font-size: 12px; color: #7f7f7f;">...</span></p>
-//   - 参考文献：<p><span style="font-size: 16px; color: #7f7f7f;">[1] ...</span></p>，自动补编号
+// 输出契约（M2，基于 8 篇真实 foodtalks.cn 文章采样对齐，参见
+// docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md）：
+//   - <h2 id="mctoc_xxxxxxxxxxxx">/<h3 id=...> 当 config.modules.mctoc.enabled 开启时带锚点 ID，否则纯标签
+//   - <p style="text-align: justify;"> 所有段落两端对齐
+//   - 空行：<p style="text-align: justify;"><br></p>（显式标签）
+//   - 图片：<p><img style="display: block; margin-left: auto; margin-right: auto;" class="mc-img" width=...></p>
+//   - 图注：<p style="text-align: center;"><span style="font-size: 12px; color: #888888;">...</span></p>
+//   - 参考来源：ref-header / ref-item 分支，14px #888888 段落，保留作者原始 [n] 编号（不再自动补）
+//   - 链接：a 标签补 target="_blank" rel="noopener"
+//   - 作者署名 / 提示行：由 applyFoodTalksBehavior 行为模板从文档中提升识别
+//   - 可选 FBIF 公众号原创页脚：config.modules.fbif_footer.enabled 开启时在文末追加
 
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);

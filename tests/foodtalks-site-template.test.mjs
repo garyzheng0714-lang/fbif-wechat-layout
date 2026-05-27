@@ -26,19 +26,15 @@ test('foodtalks-site template declares correct id and formats', () => {
 // BLANK_LINE 现在含 text-align: justify（参见后文 M2 case）。
 // 规则七：显式择一，不折中——M2 即为当前 spec 目标。
 
-test('foodtalks-site template renders images at 600px centered', () => {
-  assert.match(templateSource, /text-align:\s*center/);
-  assert.match(templateSource, /width:\s*600px/);
-  assert.match(templateSource, /max-width:\s*100%/);
-});
+// 旧 M1 契约「图片 600px centered」已被 M2 契约取代：
+// 图片现在用 display:block + margin:auto + class="mc-img"，
+// 宽度走 adaptiveImageWidth 自适应，不再硬编码 600px style 字符串
+// （参见后文 M2 case「图片 wrapper display:block + margin:auto + mc-img」）。
 
-test('foodtalks-site template renders image captions with 12px gray inline style', () => {
-  assert.match(templateSource, /font-size:\s*12px;\s*color:\s*#7f7f7f/);
-});
-
-test('foodtalks-site template renders references with 16px gray inline style', () => {
-  assert.match(templateSource, /font-size:\s*16px;\s*color:\s*#7f7f7f/);
-});
+// 旧 M1 契约「图注 12px #7f7f7f」+「参考来源 16px #7f7f7f」已被 M2 契约取代：
+// 图注现在用 #888888（参见后文 M2 case「图注颜色 #888888」），
+// 参考来源改为 14px #888888 走 ref-header / ref-item 分支。
+// 文件头注释也同步更新到 M2，避免 ghost-pass。
 
 // 旧 M1 契约「auto-numbers references with [1] [2] [3]」已被 M2 契约取代：
 // 自动编号 ensureReferenceNumber 函数已删除，改为保留作者原始 [n] 标记
