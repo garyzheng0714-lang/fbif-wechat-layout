@@ -22,19 +22,26 @@
 <body>
 
 <header class="global-channel-bar">
+  <div class="channel-bar-side channel-bar-side-left" aria-hidden="true"></div>
   <nav class="channel-switcher" role="tablist" aria-label="选择渠道">
-    <a href="/mp/fbif" class="channel-switcher-btn" data-channel="mp" role="tab" aria-selected="false">公众号</a>
-    <a href="/ft/default" class="channel-switcher-btn is-active" data-channel="ft" role="tab" aria-selected="true" aria-current="page">FoodTalks 网站</a>
+    <a href="/mp/fbif" class="channel-switcher-btn" data-channel="mp" role="tab" aria-selected="false">
+      <img class="channel-switcher-icon" src="/wechat-logo.svg" alt="" aria-hidden="true">
+      <span>公众号</span>
+    </a>
+    <a href="/ft/default" class="channel-switcher-btn is-active" data-channel="ft" role="tab" aria-selected="true" aria-current="page">
+      <img class="channel-switcher-icon" src="/foodtalks-logo.svg" alt="" aria-hidden="true">
+      <span>FoodTalks 网站</span>
+    </a>
   </nav>
+  <div class="channel-bar-side channel-bar-side-right">
+    <img class="channel-bar-logo" src="/fbif-logo.png" alt="FBIF">
+    <span class="channel-bar-title">网站排版工具</span>
+  </div>
 </header>
 
 <div class="app-layout">
   <!-- ======== Sidebar ======== -->
   <aside class="sidebar sidebar-site">
-    <div class="sidebar-header">
-      <img class="sidebar-logo-img" src="/fbif-logo.png" alt="FBIF">
-      <span class="sidebar-title">网站排版工具</span>
-    </div>
     <div class="sidebar-body">
       <!-- Hidden compat for engine.js -->
       <span id="pageTitle" style="display:none;"></span>
