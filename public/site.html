@@ -78,6 +78,19 @@
           </button>
         </div>
       </div>
+
+      <details class="ft-advanced-options" style="margin-top: 16px;">
+        <summary style="cursor: pointer; user-select: none;">高级选项</summary>
+        <div style="padding: 8px 0;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="fbifFooterToggle">
+            <span>输出 FBIF 公众号原创页脚</span>
+          </label>
+          <p style="margin: 6px 0 0 24px; color: #888; font-size: 12px;">
+            仅搬运 FBIF 公众号原创到 FoodTalks 网站时打开
+          </p>
+        </div>
+      </details>
     </div>
   </aside>
 
@@ -657,6 +670,38 @@ document.addEventListener('paste', (e) => {
   });
   urlInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); window.fetchArticle(); }
+  });
+})();
+
+// FBIF 公众号原创页脚开关：浏览器本地存储 + engine config 同步
+(() => {
+  const STORAGE_KEY = 'ft.outputFbifFooter';
+  const toggle = document.getElementById('fbifFooterToggle');
+  if (!toggle) return;
+
+  const saved = localStorage.getItem(STORAGE_KEY) === '1';
+  toggle.checked = saved;
+
+  function pushToEngine(triggerRerender) {
+    const cfg = (window._engineApi && window._engineApi.getActiveConfig)
+      ? window._engineApi.getActiveConfig()
+      : {};
+    cfg.modules = cfg.modules || {};
+    cfg.modules.fbif_footer = { enabled: toggle.checked };
+    if (window._engineApi && window._engineApi.setActiveConfig) {
+      window._engineApi.setActiveConfig(cfg);
+    }
+    if (triggerRerender && window._engineApi && typeof window._engineApi.rerender === 'function') {
+      window._engineApi.rerender();
+    }
+  }
+
+  // Initial push (no rerender — no article loaded yet)
+  pushToEngine(false);
+
+  toggle.addEventListener('change', () => {
+    localStorage.setItem(STORAGE_KEY, toggle.checked ? '1' : '0');
+    pushToEngine(true);
   });
 })();
 </script>

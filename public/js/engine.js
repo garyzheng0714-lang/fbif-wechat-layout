@@ -247,6 +247,11 @@ export function initApp(template) {
     return template.formats.some(fmt => f.name.toLowerCase().endsWith(fmt));
   }
 
+  // Cache the latest parsed inputs so rerender() can re-run template.process*
+  // with the new config without re-parsing the source file.
+  let _lastRenderInput = null;
+  // shape: { kind: 'docx'|'md'|'blocks', payload: <data>, isRepost, title? }
+
   // Batch file queue
   let _batchFiles = [];
   let _batchResults = [];
@@ -320,9 +325,11 @@ export function initApp(template) {
     if (isDocx) {
       const docxData = await parseDocx(file);
       result = template.processDocx({ ...docxData, isRepost: _isRepost, config: _activeConfig });
+      _lastRenderInput = { kind: 'docx', payload: docxData, isRepost: _isRepost };
     } else if (typeof template.processMd === 'function') {
       const text = await file.text();
       result = await template.processMd(text, { isRepost: _isRepost, config: _activeConfig });
+      _lastRenderInput = { kind: 'md', payload: text, isRepost: _isRepost };
     } else {
       throw new Error('此模板不支持该文件格式');
     }
@@ -376,6 +383,7 @@ export function initApp(template) {
       // async context anyway, and future work (e.g. image pre-fetch)
       // might make it async. The await has zero cost on plain returns.
       const result = await template.processBlocks(data, { isRepost: _isRepost, config: _activeConfig });
+      _lastRenderInput = { kind: 'blocks', payload: data, isRepost: _isRepost, title: data.title };
       logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
 
       const articleHtml = result.lines.join('\n');
@@ -400,6 +408,42 @@ export function initApp(template) {
       showError('排版失败: ' + err.message);
     }
   };
+
+  // Re-render the current article with the latest _activeConfig without
+  // re-parsing the source file. Safe to call before any file is loaded
+  // (returns silently when _lastRenderInput is null).
+  async function _engineRerender() {
+    if (!_lastRenderInput) return;
+    const cached = _lastRenderInput;
+    try {
+      let result;
+      _isRepost = cached.isRepost;
+      if (cached.kind === 'docx') {
+        result = template.processDocx({ ...cached.payload, isRepost: _isRepost, config: _activeConfig });
+      } else if (cached.kind === 'md') {
+        if (typeof template.processMd !== 'function') return;
+        result = await template.processMd(cached.payload, { isRepost: _isRepost, config: _activeConfig });
+      } else if (cached.kind === 'blocks') {
+        if (typeof template.processBlocks !== 'function') return;
+        result = await template.processBlocks(cached.payload, { isRepost: _isRepost, config: _activeConfig });
+      } else {
+        return;
+      }
+      const articleHtml = result.lines.join('\n');
+      const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
+      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
+      const elapsed = '0.0';
+      const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
+        ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
+      const displayTitle = result.title || cached.title || '';
+      showPreview(displayTitle, articleHtml, footerHtml, stats);
+    } catch (err) {
+      console.error('[engine] rerender failed:', err);
+    }
+  }
+
+  // Make rerender callable from inline scripts (site.html / app.html sidebar)
+  window._engineRerender = _engineRerender;
 
   async function handleFile(file, opts) {
     // Set repost flag per-call so it never leaks across articles.
@@ -427,10 +471,12 @@ export function initApp(template) {
       if (isDocx) {
         const docxData = await parseDocx(file);
         result = template.processDocx({ ...docxData, isRepost: _isRepost, config: _activeConfig });
+        _lastRenderInput = { kind: 'docx', payload: docxData, isRepost: _isRepost };
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else if (typeof template.processMd === 'function') {
         const text = await file.text();
         result = await template.processMd(text, { isRepost: _isRepost, config: _activeConfig });
+        _lastRenderInput = { kind: 'md', payload: text, isRepost: _isRepost };
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else {
         throw new Error('此模板不支持该文件格式');
@@ -883,5 +929,20 @@ export function initApp(template) {
     }
     if (dom.has_preview_class) document.body.classList.add('has-preview');
     return true;
+  };
+}
+
+// Inline scripts (site.html / app.html) push config / trigger rerender
+// through this small surface. Defined at module scope so it's set even if
+// initApp hasn't been called yet (e.g., before file is uploaded).
+if (typeof window !== 'undefined') {
+  window._engineApi = {
+    setActiveConfig,
+    getActiveConfig,
+    rerender: () => {
+      if (typeof window._engineRerender === 'function') {
+        return window._engineRerender();
+      }
+    },
   };
 }
