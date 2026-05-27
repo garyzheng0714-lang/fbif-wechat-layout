@@ -188,7 +188,7 @@ function renderImage(src, alt, naturalWidth, naturalHeight) {
 function renderImageCaption(text) {
   return (
     `<p style="text-align: center;">` +
-    `<span style="font-size: 12px; color: #7f7f7f;">${esc(text)}</span>` +
+    `<span style="font-size: 12px; color: #888888;">${esc(text)}</span>` +
     `</p>`
   );
 }
