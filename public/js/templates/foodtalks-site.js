@@ -317,6 +317,16 @@ function render(elems, config = {}) {
     prevWasStandaloneLink = standalone;
     prevWasHeading = false;
   }
+  // FBIF 公众号原创页脚（可选输出）
+  const fbifFooterEnabled = !!(
+    config.modules &&
+    config.modules.fbif_footer &&
+    config.modules.fbif_footer.enabled
+  );
+  if (fbifFooterEnabled) {
+    lines.push(BLANK_LINE);
+    lines.push(FBIF_FOOTER_HTML);
+  }
   return lines;
 }
 
