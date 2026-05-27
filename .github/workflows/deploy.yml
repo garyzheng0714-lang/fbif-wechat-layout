@@ -160,6 +160,14 @@ jobs:
               "  }\n"
           )
 
+          channels_route = (
+              "\n"
+              "  @fbifChannels path /mp /mp/* /ft /ft/*\n"
+              "  handle @fbifChannels {\n"
+              "    reverse_proxy " + upstream + "\n"
+              "  }\n"
+          )
+
           app_shell_header = (
               "\n"
               "  @fbifAppShell path / /index.html /app.html /version.json\n"
@@ -184,9 +192,20 @@ jobs:
               r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
               r"[ \t]*\}[ \t]*\n)?"
           )
+          channels_route_re = re.compile(
+              r"\n[ \t]*@fbifChannels[ \t]+path[^\n]*\n"
+              r"(?:[ \t]*handle[ \t]+@fbifChannels[ \t]*\{[ \t]*\n"
+              r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
+              r"[ \t]*\}[ \t]*\n)?"
+          )
           text = original
           while True:
               new_text = rules_route_re.sub("\n", text)
+              if new_text == text:
+                  break
+              text = new_text
+          while True:
+              new_text = channels_route_re.sub("\n", text)
               if new_text == text:
                   break
               text = new_text
@@ -219,9 +238,9 @@ jobs:
           backup = target.with_suffix(target.suffix + ".bak-rules")
           backup.write_text(original)
           for open_after in sorted(set(insert_points), reverse=True):
-              text = text[:open_after] + app_shell_header + route + text[open_after:]
+              text = text[:open_after] + app_shell_header + route + channels_route + text[open_after:]
           target.write_text(text)
-          print("Ensured Caddy rule API handle in " + str(target) + " -> " + upstream)
+          print("Ensured Caddy rule API + channel handles in " + str(target) + " -> " + upstream)
           PY
 
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
