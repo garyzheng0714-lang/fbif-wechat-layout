@@ -178,9 +178,9 @@ function renderImage(src, alt, naturalWidth, naturalHeight) {
   const safeAlt = escAttr(alt || '');
   const width = adaptiveImageWidth(naturalWidth, naturalHeight);
   return (
-    `<p style="text-align: center;">` +
-    `<img src="${safeSrc}" alt="${safeAlt}" width="${width}" ` +
-    `style="width: ${width}px; max-width: 100%; height: auto; display: inline-block;">` +
+    `<p>` +
+    `<img style="display: block; margin-left: auto; margin-right: auto;" ` +
+    `src="${safeSrc}" alt="${safeAlt}" width="${width}" class="mc-img">` +
     `</p>`
   );
 }
