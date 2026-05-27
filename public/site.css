@@ -132,3 +132,77 @@ body.channel-portal-body {
 /* ========== 网站工具页（site.html） ========== */
 
 .sidebar-site .sidebar-divider { display: none; }
+
+/* ========== FoodTalks 网站预览样式：模拟 foodtalks.cn 文章页 ========== */
+/* 仅作用于 .preview-site 容器（site.html 的 <main class="preview-panel preview-site">） */
+/* 公众号 app.html 不带 .preview-site modifier，因此样式完全隔离 */
+
+/* 隐藏公众号专属卡片包装：account header + 底部栏 */
+.preview-site .wx-header,
+.preview-site .wx-footer {
+  display: none !important;
+}
+
+/* 文章标题：FoodTalks 网站文章页风格（左对齐、27px 粗体） */
+.preview-site .preview-content {
+  background: #ffffff;
+  padding: 24px 0;
+}
+
+/* 取消 phone-frame 边框，让正文直接在白底上流动（CLAUDE.md 红线 11） */
+.preview-site .phone-frame {
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0 16px;
+  background: #ffffff !important;
+}
+
+/* 正文容器 #contentArea 模拟 foodtalks.cn 文章页 */
+.preview-site #contentArea {
+  background: #ffffff;
+  color: rgba(0, 0, 0, 0.9);
+  font-family: 'PingFang SC', system-ui, -apple-system, BlinkMacSystemFont,
+               'Helvetica Neue', 'Hiragino Sans GB', 'Microsoft YaHei UI',
+               'Microsoft YaHei', Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+/* FoodTalks 段落紧凑：靠空 <p><br></p> 撑空行（不是 margin） */
+.preview-site #contentArea p {
+  margin: 0;
+}
+
+/* 标题：FoodTalks 蓝色 #01396a */
+.preview-site #contentArea h2 {
+  color: #01396a;
+  font-size: 20px;
+  margin: 16px 0 8px;
+  font-weight: bold;
+}
+.preview-site #contentArea h3 {
+  color: #01396a;
+  font-size: 18px;
+  margin: 12px 0 8px;
+  font-weight: bold;
+}
+
+/* 链接：FoodTalks 蓝色 + 下划线 */
+.preview-site #contentArea a {
+  color: #105b89;
+  text-decoration: underline;
+}
+
+/* 图片：渲染器已输出 display:block + margin:auto + class=mc-img，这里只补 max-width 兜底 */
+.preview-site #contentArea img {
+  max-width: 100%;
+  height: auto;
+}
+.preview-site #contentArea .mc-img {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
