@@ -144,7 +144,7 @@ function renderRuns(runs) {
     if (r.type === 'link') {
       const h = r.href || '';
       if (!/^https?:\/\//i.test(h)) return esc(r.text);
-      return '<a href="' + escAttr(h) + '">' + esc(r.text) + '</a>';
+      return '<a href="' + escAttr(h) + '" target="_blank" rel="noopener">' + esc(r.text) + '</a>';
     }
     return '';
   }).join('');
