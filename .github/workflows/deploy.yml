@@ -248,13 +248,23 @@ jobs:
 
           # Write env file for the fbif-api systemd service (loaded via EnvironmentFile=)
           # Tempfile + atomic rename so the service never sees a half-written file.
+          # PUBLIC_DIR points the Go binary at the rsync target so /mp/* /ft/*
+          # ServeFile lookups succeed even though the binary's cwd does not
+          # contain a `public/` sibling. See README "Production layout".
           if [ -z "$ADMIN_PASSWORD" ]; then
             echo "ADMIN_PASSWORD GitHub secret is required for the rule admin backend" >&2
             exit 1
           fi
-          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" | base64)
+          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nPUBLIC_DIR=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "${DEPLOY_PATH}" | base64)
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
             "echo '$ENV_CONTENT' | base64 -d > /var/www/api/.env.tmp && chmod 600 /var/www/api/.env.tmp && mv /var/www/api/.env.tmp /var/www/api/.env"
+
+          # Belt-and-suspenders: keep /var/www/public as a symlink to the
+          # actual static deploy path so a binary started WITHOUT PUBLIC_DIR
+          # (manual run, ad-hoc test) still finds app.html via the legacy
+          # `../public` fallback in main.go.
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
+            "ln -snf '${DEPLOY_PATH}' /var/www/public"
 
           # Restart API service. Previously this line carried `2>/dev/null || true`
           # which swallowed real failures — a failed restart leaves the OLD

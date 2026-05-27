@@ -32,12 +32,16 @@ func main() {
 	port := flag.Int("port", 9000, "API server port")
 	_ = flag.String("db", "", "legacy ignored SQLite database path")
 	rulesPath := flag.String("rules", os.Getenv("RULES_STORE_PATH"), "rule preset JSON store path")
+	publicFlag := flag.String("public", os.Getenv("PUBLIC_DIR"), "static files directory; if empty falls back to ../public then public relative to cwd")
 	flag.Parse()
 
 	mux := http.NewServeMux()
-	publicDir := "../public"
-	if _, err := os.Stat(publicDir); err != nil {
-		publicDir = "public"
+	publicDir := *publicFlag
+	if publicDir == "" {
+		publicDir = "../public"
+		if _, err := os.Stat(publicDir); err != nil {
+			publicDir = "public"
+		}
 	}
 
 	// Image upload to OSS (base64 from DOCX)
