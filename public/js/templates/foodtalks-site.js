@@ -150,9 +150,15 @@ function renderRuns(runs) {
   }).join('');
 }
 
-function renderHeading(level, text) {
-  if (level === 3) return `<h3>${esc(text)}</h3>`;
-  return `<h2>${esc(text)}</h2>`;
+function genMctocId() {
+  return 'mctoc_' + Math.random().toString(36).slice(2, 14);
+}
+
+function renderHeading(level, text, config = {}) {
+  const mctocEnabled = !!(config.modules && config.modules.mctoc && config.modules.mctoc.enabled);
+  const idAttr = mctocEnabled ? ` id="${genMctocId()}"` : '';
+  if (level === 3) return `<h3${idAttr}>${esc(text)}</h3>`;
+  return `<h2${idAttr}>${esc(text)}</h2>`;
 }
 
 function renderParagraph(runs) {
@@ -246,7 +252,7 @@ function promoteImageCaptions(elems) {
 
 // ---- 渲染主入口：把分类后的 elems 拼装成 HTML 行数组 ----
 
-function render(elems) {
+function render(elems, config = {}) {
   const lines = [];
   let refIndex = 0;
   let prevWasHeading = false;
@@ -255,7 +261,7 @@ function render(elems) {
     const e = elems[i];
     if (e.k === 'h') {
       if (!prevWasHeading && lines.length > 0) lines.push(BLANK_LINE);
-      lines.push(renderHeading(e.level === 3 ? 3 : 2, runsToPlain(e.runs)));
+      lines.push(renderHeading(e.level === 3 ? 3 : 2, runsToPlain(e.runs), config));
       prevWasHeading = true;
       prevWasStandaloneLink = false;
       continue;
@@ -435,18 +441,18 @@ export default {
 
   processDocx({ paragraphs, imgCache, config = {} }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache);
-    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length };
+    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems)), config), imgN, headingN: elems.filter(e => e.k === 'h').length };
   },
 
   async processMd(text, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
-    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems)), config), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 
   processBlocks(data, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
-    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems))), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return { lines: render(promoteImageCaptions(promoteHeuristicHeadings(elems)), config), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
   },
 };
