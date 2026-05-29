@@ -201,10 +201,11 @@ function renderImage(src, alt, naturalWidth, naturalHeight) {
   );
 }
 
-function renderImageCaption(text) {
+function renderImageCaption(text, config = {}) {
+  const color = (config && config.muted_color) || '#888888';
   return (
     `<p style="text-align: center;">` +
-    `<span style="font-size: 12px; color: #888888;">${esc(text)}</span>` +
+    `<span style="font-size: 12px; color: ${color};">${esc(text)}</span>` +
     `</p>`
   );
 }
@@ -256,9 +257,10 @@ function render(elems, config = {}) {
       continue;
     }
     if (e.k === 'author') {
+      const authorColor = (config && config.muted_color) || '#888888';
       lines.push(
         '<p style="text-align: justify;">' +
-        '<span style="font-size: 14px;"><span style="color: #7f7f7f;"><em>' +
+        `<span style="font-size: 14px;"><span style="color: ${authorColor};"><em>` +
         esc(e.text) +
         '</em></span></span></p>'
       );
@@ -291,13 +293,14 @@ function render(elems, config = {}) {
       continue;
     }
     if (e.k === 'cap') {
-      lines.push(renderImageCaption(runsToPlain(e.runs)));
+      lines.push(renderImageCaption(runsToPlain(e.runs), config));
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
     }
     if (e.k === 'ref-header') {
-      lines.push('<p style="text-align: justify;"><span style="color: #888888; font-size: 14px;">参考来源：</span></p>');
+      const refColor = (config && config.muted_color) || '#888888';
+      lines.push(`<p style="text-align: justify;"><span style="color: ${refColor};">参考来源：</span></p>`);
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
@@ -306,8 +309,9 @@ function render(elems, config = {}) {
       // 用 renderRuns 而不是 runsToPlain：参考条目可能含超链接（如 [1] 论文标题 https://...），
       // runsToPlain 仅保留 txt 类型 run，会把 link 文本吃掉。
       const inner = renderRuns(e.runs);
+      const refColor = (config && config.muted_color) || '#888888';
       lines.push(
-        '<p style="text-align: justify;"><span style="color: #888888; font-size: 14px;">' +
+        `<p style="text-align: justify;"><span style="color: ${refColor};">` +
         inner +
         '</span></p>'
       );

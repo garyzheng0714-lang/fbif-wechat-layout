@@ -56,3 +56,23 @@ test('foodtalks-site.js: 3 process entries accept config param', async () => {
   assert.match(src, /processMd[\s\S]{0,200}config\s*=/, 'foodtalks-site processMd 须从 opts 提取 config');
   assert.match(src, /processBlocks[\s\S]{0,200}config\s*=/, 'foodtalks-site processBlocks 须从 opts 提取 config');
 });
+
+test('site.html: 注入 engine 的 config 并入扁平参数（loadConfig）', async () => {
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /function\s+syncEngineConfig/, 'site.html 应有 syncEngineConfig');
+  const fn = src.match(/function\s+syncEngineConfig[\s\S]+?\n\}/);
+  assert.ok(fn, '找不到 syncEngineConfig 函数体');
+  assert.match(fn[0], /\.\.\.\s*flat\b|\.\.\.\s*loadConfig\(\)/, 'syncEngineConfig 必须 spread loadConfig() 的扁平字段');
+  assert.match(fn[0], /setActiveConfig/, 'syncEngineConfig 必须调 setActiveConfig');
+});
+
+test('site.html: admin applyConfig 改规则后触发 engine 同步（验收线1必要环）', async () => {
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /applyConfig\s*\([\s\S]{0,500}syncEngineConfig/, 'applyConfig 内须调 syncEngineConfig（否则后台改规则不重排）');
+});

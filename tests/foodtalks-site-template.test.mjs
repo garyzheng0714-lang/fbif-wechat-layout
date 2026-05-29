@@ -242,3 +242,33 @@ test('M2: 三个 process 入口都接受 config 参数', () => {
   const blocksSig = templateSource.match(/processBlocks\s*\(\s*[a-z]+\s*,\s*([a-z]+)\s*\)/);
   assert.ok(blocksSig, '找不到 processBlocks');
 });
+
+// ========== 颜色规则驱动 + 原生口径修正（2026-05-28） ==========
+
+test('图注: renderImageCaption 读 config.muted_color 且调用点传 config', () => {
+  const fn = templateSource.match(/function\s+renderImageCaption\s*\([\s\S]+?\n\}/);
+  assert.ok(fn, '找不到 renderImageCaption');
+  assert.match(fn[0], /config/, 'renderImageCaption 必须接受 config');
+  assert.match(fn[0], /muted_color/, '图注颜色必须读 config.muted_color');
+  // 调用点必须传 config（防止"改了签名没改调用"）。用 lines.push(...) 锚定调用，
+  // 避免误匹配函数定义；[^;]* 跨括号但不跨语句分号。
+  assert.match(templateSource, /lines\.push\(renderImageCaption\([^;]*config/, 'renderImageCaption 调用点必须传 config');
+});
+
+test('参考来源: 读 config.muted_color 且不写死 font-size', () => {
+  // 锚定 render() 里的分支（'ref-header') {），避开 promoteImageCaptions 里
+  // 的 break 条件（e.k === 'ref-header' || e.k === 'ref-item') break;）。
+  const head = templateSource.match(/e\.k === 'ref-header'\)\s*\{[\s\S]+?continue;/);
+  const item = templateSource.match(/e\.k === 'ref-item'\)\s*\{[\s\S]+?continue;/);
+  assert.ok(head && item, '找不到 ref-header / ref-item 分支');
+  const both = head[0] + item[0];
+  assert.match(both, /muted_color/, '参考颜色必须读 config.muted_color');
+  assert.doesNotMatch(both, /font-size\s*:/, '参考来源不能写死任何 font-size（原生继承正文）');
+});
+
+test('署名: 读 config.muted_color 且不再 #7f7f7f', () => {
+  const fn = templateSource.match(/e\.k === 'author'[\s\S]+?continue;/);
+  assert.ok(fn, '找不到 author 分支');
+  assert.match(fn[0], /muted_color/, '署名颜色必须读 config.muted_color');
+  assert.doesNotMatch(fn[0], /#7f7f7f/i, '署名不能再用 #7f7f7f（搬运痕迹色）');
+});
