@@ -191,12 +191,16 @@ function renderImage(src, alt, naturalWidth, naturalHeight) {
   const safeSrc = escAttr(src || '');
   const safeAlt = escAttr(alt || '');
   const width = adaptiveImageWidth(naturalWidth, naturalHeight);
+  // mmbiz 等公众号图带防盗链：浏览器若发 Referer 头会被换成"未经允许不可引用"
+  // 占位图。referrerpolicy="no-referrer" 让加载图片时不发 Referer，绕过防盗链。
+  // 与公众号渲染（fbif.js）保持一致。
+  const rpol = (src || '').startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
   // 内联 max-width:100% 是给外部 CMS / 邮件客户端用的兜底——本工具的 .mc-img 仅
   // 在预览页 CSS 中生效，复制粘贴到不带样式的容器时大图会溢出。
   return (
     `<p>` +
     `<img style="display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;" ` +
-    `src="${safeSrc}" alt="${safeAlt}" width="${width}" class="mc-img">` +
+    `src="${safeSrc}" alt="${safeAlt}" width="${width}" class="mc-img"${rpol}>` +
     `</p>`
   );
 }
@@ -436,37 +440,35 @@ async function classifyMd(text) {
 
 // ---- Blocks 分类（从后端 /api/fetch-article 来的结构化块） ----
 
+// 服务端 /api/fetch-article 返回的 block 字段契约见 api/wechat_blocks.go：
+// 类型在 `b.k`（img/h/cap/txt/bq/li），图片地址 `b.src`、宽度 `b.dataW`（字符串），
+// 文本在 `b.runs` 或 `b.text`。产出的 elem 结构与 classifyDocx 一致，下游 render
+// 直接消费（图片读 src/alt/width，标题/图注/正文读 runs）。
 function classifyBlocks(data) {
   const elems = [];
   let imgN = 0;
   for (const b of (data && data.blocks) || []) {
-    if (b.type === 'h1' || b.type === 'h2') {
-      elems.push({ k: 'h', level: 2, runs: [{ type: 'txt', text: b.text || '' }] });
-      continue;
-    }
-    if (b.type === 'h3' || b.type === 'h4' || b.type === 'h5' || b.type === 'h6') {
-      elems.push({ k: 'h', level: 3, runs: [{ type: 'txt', text: b.text || '' }] });
-      continue;
-    }
-    if (b.type === 'img') {
+    if (!b || !b.k) continue;
+    if (b.k === 'img') {
       elems.push({
         k: 'img',
         src: b.src || '',
-        alt: b.alt || '',
-        width: b.width || 0,
-        height: b.height || 0,
+        alt: '',
+        width: Number(b.dataW || 0) || 0,
+        height: 0,
       });
       imgN += 1;
       continue;
     }
-    if (b.type === 'cap' || b.type === 'caption') {
+    if (b.k === 'h') {
+      elems.push({ k: 'h', level: 2, runs: [{ type: 'txt', text: b.text || '' }] });
+      continue;
+    }
+    if (b.k === 'cap') {
       elems.push({ k: 'cap', runs: [{ type: 'txt', text: b.text || '' }] });
       continue;
     }
-    if (b.type === 'ref' || b.type === 'reference') {
-      elems.push({ k: 'p', runs: [{ type: 'txt', text: b.text || '' }] });
-      continue;
-    }
+    // txt / bq / li 都带 runs；缺 runs 时回退到 text。
     const runs = Array.isArray(b.runs) && b.runs.length
       ? b.runs
       : [{ type: 'txt', text: b.text || '' }];
