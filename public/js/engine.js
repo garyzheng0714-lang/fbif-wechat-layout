@@ -138,9 +138,18 @@ function hookPreviewImages(container) {
 }
 
 // ---- Footer ----
+// footerUrl 语义：字段未声明（undefined）→ 用默认公众号页脚 /footer.html；
+// 显式空串 '' → 该渠道无公众号页脚（网站渠道 ft-default 即如此，footer 内容
+// 由 FoodTalks 系统在发布时自动追加，工具侧不得再拼公众号那套）。此前用 `||`
+// 会把显式空串也 fallback 到 /footer.html，导致网站渠道误带公众号页脚。
 const activeRulePack = typeof window !== 'undefined' ? window._activeRulePack : null;
-const footerUrl = activeRulePack && activeRulePack.footerUrl ? activeRulePack.footerUrl : '/footer.html';
-const footerReady = fetch(footerUrl).then(r => r.ok ? r.text() : '').catch(() => '');
+const footerUrl =
+  activeRulePack && activeRulePack.footerUrl != null
+    ? activeRulePack.footerUrl
+    : '/footer.html';
+const footerReady = footerUrl
+  ? fetch(footerUrl).then(r => r.ok ? r.text() : '').catch(() => '')
+  : Promise.resolve('');
 
 // Module-level flag: true when the current article was fetched from a URL
 // (i.e. it is a repost). Set explicitly by handleFile/processFile at each

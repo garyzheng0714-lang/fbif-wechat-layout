@@ -102,6 +102,13 @@ test('rule pack registry assigns ft-default to the website channel', () => {
   assert.equal(pack.templateId, 'foodtalks-site');
 });
 
+test('ft-default 显式空 footerUrl —— 网站渠道不带公众号页脚', () => {
+  // footerUrl='' 表示"该渠道无公众号页脚"（系统发布时自动追加）。engine.js 必须
+  // 区分显式空串与 undefined：空串不得 fallback 到 /footer.html。
+  const pack = getRulePack('ft-default');
+  assert.equal(pack.footerUrl, '', 'ft-default footerUrl 必须是显式空串');
+});
+
 test('getRulePackByPath /ft/default resolves to ft-default', () => {
   const pack = getRulePackByPath('/ft/default');
   assert.equal(pack.id, 'ft-default');
