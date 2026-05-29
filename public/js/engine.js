@@ -677,9 +677,13 @@ export function initApp(template) {
       return;
     }
 
+    // 网站渠道（foodtalks-site）：mmbiz 图必须转存到自有 CDN，否则粘进
+    // foodtalks.cn 会触发微信防盗链占位图。公众号渠道保持 mmbiz 直用。
+    const transferMmbiz = template.id === 'foodtalks-site';
     _uploadPromise = uploadNonCdnImages(_articleCopy, _footerCopy, {
+      transferMmbiz,
       onProgress(done, total) {
-        statsBar.textContent = '上传图片 (' + done + '/' + total + ')...';
+        statsBar.textContent = (transferMmbiz ? '转存图片 (' : '上传图片 (') + done + '/' + total + ')...';
       },
       onLog: logConv,
       onMaterialized(result) {

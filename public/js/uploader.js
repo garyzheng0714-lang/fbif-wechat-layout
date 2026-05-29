@@ -26,6 +26,22 @@ async function imageRefToDataUrl(src) {
   return 'data:' + mime + ';base64,' + base64;
 }
 
+// Fetch a mmbiz (WeChat CDN) image THROUGH the server image-proxy and encode it
+// as base64. Direct fetch is blocked by WeChat anti-hotlinking (Referer check);
+// /api/image-proxy injects the right Referer server-side and adds CORS so the
+// bytes are readable here. Used by the website channel, which must re-host every
+// image on its own CDN — pasting raw mmbiz URLs into foodtalks.cn would hotlink
+// and render the "未经允许不可引用" placeholder.
+async function mmbizUrlToDataUrl(url) {
+  const proxied = '/api/image-proxy?url=' + encodeURIComponent(url);
+  const resp = await fetch(proxied);
+  if (!resp.ok) throw new Error('proxy ' + url + ' -> ' + resp.status);
+  const blob = await resp.blob();
+  const mime = blob.type || 'image/png';
+  const base64 = arrayBufferToBase64(await blob.arrayBuffer());
+  return 'data:' + mime + ';base64,' + base64;
+}
+
 // Upload a single base64 image to OSS. Returns OSS URL or null on failure.
 async function uploadOne(task) {
   const body = JSON.stringify({ base64_images: { [task.key]: task.src } });
@@ -77,40 +93,77 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
 //
 // Returns { articleCopy, footerCopy, total, failed, failedSrcs }.
 // failedSrcs contains original src strings of images that failed even after retry.
-export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, onLog, onMaterialized } = {}) {
+export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, onLog, onMaterialized, transferMmbiz = false } = {}) {
   const materialized = await materializeLazyImages(articleCopy, footerCopy, { onLog });
   articleCopy = materialized.articleCopy;
   footerCopy = materialized.footerCopy;
   const lazyFailedSrcs = materialized.failedSrcs || [];
-  onMaterialized && onMaterialized(materialized);
+
+  // Website channel: re-host mmbiz images on our CDN. Pull each mmbiz URL through
+  // the server proxy → base64, so the upload pass below re-hosts it and replaces
+  // the mmbiz src. The WeChat channel keeps transferMmbiz=false: mmbiz URLs work
+  // as-is inside mp.weixin.qq.com and re-hosting would strip GIF animation.
+  const mmbizFailedSrcs = [];
+  if (transferMmbiz) {
+    const mmbizUrls = new Set();
+    let mm;
+    const mmRe = /src="(https?:\/\/[^"]+)"/g;
+    const combined = articleCopy + '\n' + footerCopy;
+    while ((mm = mmRe.exec(combined)) !== null) {
+      if (isMmbizUrl(mm[1])) mmbizUrls.add(mm[1]);
+    }
+    if (mmbizUrls.size > 0) {
+      onLog && onLog('info', '网站渠道：转存 mmbiz 图到 CDN', { count: mmbizUrls.size });
+      for (const url of mmbizUrls) {
+        try {
+          const dataUrl = await mmbizUrlToDataUrl(url);
+          articleCopy = articleCopy.split(url).join(dataUrl);
+          footerCopy = footerCopy.split(url).join(dataUrl);
+        } catch (err) {
+          onLog && onLog('error', 'mmbiz 取图失败', { url: url.slice(0, 60), err: String(err) });
+          mmbizFailedSrcs.push(url);
+        }
+      }
+    }
+  }
+
+  const preUploadFailed = lazyFailedSrcs.concat(mmbizFailedSrcs);
+  onMaterialized && onMaterialized({
+    articleCopy,
+    footerCopy,
+    failed: preUploadFailed.length,
+    failedSrcs: preUploadFailed,
+  });
 
   const tasks = [];
   let m, mmbizCount = 0;
 
-  // Refresh combined HTML if any lazy → data: substitutions happened.
+  // Refresh combined HTML if any lazy / mmbiz → data: substitutions happened.
   const refreshedHtml = articleCopy + '\n' + footerCopy;
 
-  // base64 data URIs (from DOCX, plus any we just materialized) — upload to OSS
+  // base64 data URIs (from DOCX, materialized lazy refs, and any mmbiz we just
+  // converted above) — upload to OSS
   const b64Re = /src="(data:image\/[^"]+)"/g;
   while ((m = b64Re.exec(refreshedHtml)) !== null) {
     tasks.push({ type: 'base64', src: m[1], key: 'img_' + tasks.length });
   }
 
   // HTTP URLs — use directly, no upload needed
-  // (mmbiz URLs are already on WeChat CDN; other external URLs work as-is)
+  // (any remaining mmbiz URLs are kept as-is; other external URLs work as-is)
   const urlRe = /src="(https?:\/\/[^"]+)"/g;
   while ((m = urlRe.exec(refreshedHtml)) !== null) {
     if (isMmbizUrl(m[1])) mmbizCount++;
   }
 
   if (tasks.length === 0) {
-    onLog && onLog('info', '无需上传', { mmbiz已有: mmbizCount });
+    const earlyFailed = lazyFailedSrcs.concat(mmbizFailedSrcs);
+    onLog && onLog('info', '无需上传', { mmbiz剩余: mmbizCount });
     return {
       articleCopy,
       footerCopy,
       total: 0,
-      failed: lazyFailedSrcs.length,
-      failedSrcs: lazyFailedSrcs,
+      failed: earlyFailed.length,
+      failedSrcs: earlyFailed,
     };
   }
 
@@ -152,7 +205,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
 
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker()));
 
-  const failedSrcs = lazyFailedSrcs.concat(failedTasks.map(t => t.src));
+  const failedSrcs = lazyFailedSrcs.concat(mmbizFailedSrcs, failedTasks.map(t => t.src));
   if (failedSrcs.length > 0) {
     onLog && onLog('warn', '上传完成，' + failedSrcs.length + '张失败（已自动重试1次）');
   } else {

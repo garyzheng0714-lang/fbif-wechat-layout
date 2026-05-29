@@ -485,9 +485,9 @@ export default {
   description: '按 FoodTalks 网站后台规范输出 inline-style HTML',
   formats: ['.docx', '.doc', '.md', '.txt'],
 
-  processDocx({ paragraphs, imgCache, config = {} }) {
+  processDocx({ paragraphs, imgCache, config = {}, isRepost = false }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache);
-    const behaved = applyFoodTalksBehavior(elems, config);
+    const behaved = applyFoodTalksBehavior(elems, config, { isRepost });
     return {
       lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
       imgN,
@@ -498,7 +498,7 @@ export default {
   async processMd(text, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
-    const behaved = applyFoodTalksBehavior(elems, config);
+    const behaved = applyFoodTalksBehavior(elems, config, { isRepost: !!(opts && opts.isRepost), title });
     return {
       lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
       imgN,
@@ -510,7 +510,7 @@ export default {
   processBlocks(data, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
-    const behaved = applyFoodTalksBehavior(elems, config);
+    const behaved = applyFoodTalksBehavior(elems, config, { isRepost: !!(opts && opts.isRepost), title });
     return {
       lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
       imgN,

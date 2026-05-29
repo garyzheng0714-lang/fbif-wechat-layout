@@ -68,3 +68,71 @@ test('uploadNonCdnImages uses refreshed HTML after lazy image materialization', 
   assert.doesNotMatch(result.articleCopy, /blob:/);
   assert.match(result.articleCopy, /https:\/\/oss\.example\/img_0\.png/);
 });
+
+test('uploadNonCdnImages: WeChat channel (transferMmbiz=false) leaves mmbiz URLs untouched', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response('', { status: 200 }); };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const result = await uploadNonCdnImages(
+    '<p><img src="https://mmbiz.qpic.cn/a.png"></p>',
+    ''
+  );
+
+  assert.match(result.articleCopy, /mmbiz\.qpic\.cn\/a\.png/, 'mmbiz URL 应原样保留');
+  assert.ok(!calls.some(u => u.includes('image-proxy')), '不应调用 image-proxy');
+  assert.ok(!calls.some(u => u.includes('oss-upload')), '不应上传');
+});
+
+test('uploadNonCdnImages: website channel (transferMmbiz=true) re-hosts mmbiz via proxy→OSS', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const proxied = [];
+  globalThis.fetch = async (url) => {
+    if (String(url) === '/api/oss-upload') {
+      return new Response(JSON.stringify({ results: { img_0: 'https://static.foodtalks.cn/image/post/abc.png' } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (String(url).startsWith('/api/image-proxy')) {
+      proxied.push(String(url));
+      return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
+    }
+    return new Response('');
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const result = await uploadNonCdnImages(
+    '<p><img src="https://mmbiz.qpic.cn/a.png"></p>',
+    '',
+    { transferMmbiz: true }
+  );
+
+  assert.equal(result.failed, 0, '无失败');
+  assert.equal(proxied.length, 1, 'mmbiz 图经 image-proxy 取回一次');
+  assert.ok(proxied[0].includes(encodeURIComponent('https://mmbiz.qpic.cn/a.png')), 'image-proxy 带上 mmbiz URL');
+  assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn/, 'mmbiz URL 应被替换');
+  assert.match(result.articleCopy, /static\.foodtalks\.cn|oss/, '替换为 CDN URL');
+});
+
+test('uploadNonCdnImages: website channel dedupes repeated mmbiz URL (proxy once)', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let proxyCount = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url) === '/api/oss-upload') {
+      return new Response(JSON.stringify({ results: { img_0: 'https://static.foodtalks.cn/x.png' } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (String(url).startsWith('/api/image-proxy')) { proxyCount++; return new Response(new Blob([new Uint8Array([1])], { type: 'image/png' })); }
+    return new Response('');
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  await uploadNonCdnImages(
+    '<p><img src="https://mmbiz.qpic.cn/same.png"></p><p><img src="https://mmbiz.qpic.cn/same.png"></p>',
+    '',
+    { transferMmbiz: true }
+  );
+  assert.equal(proxyCount, 1, '同一 mmbiz URL 只取回一次');
+});
