@@ -52,16 +52,7 @@ func extractArticleBlocks(rawHTML string) (title string, blocks []Block, author 
 		}
 	}
 
-	contentHTML := extractJsContent(rawHTML)
-	if contentHTML == "" {
-		contentHTML = extractTag(rawHTML, "article")
-		if contentHTML == "" {
-			contentHTML = extractTag(rawHTML, "main")
-		}
-		if contentHTML == "" {
-			contentHTML = rawHTML
-		}
-	}
+	contentHTML := resolveContentHTML(rawHTML)
 
 	contentHTML = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`).ReplaceAllString(contentHTML, "")
 	contentHTML = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`).ReplaceAllString(contentHTML, "")

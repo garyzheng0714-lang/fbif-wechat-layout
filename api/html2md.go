@@ -7,6 +7,26 @@ import (
 	"golang.org/x/net/html"
 )
 
+// resolveContentHTML 按 WeChat js_content → <article> → <main> → 整页兜底的
+// 顺序取出文章正文 HTML。WeChat 文章页正文在 js_content div；非 WeChat 页退到
+// 语义标签；都取不到时返回 rawHTML，由调用方自己 strip。extractArticle 和
+// extractArticleBlocks 共用这一条 fallback，避免两处分叉。
+func resolveContentHTML(rawHTML string) string {
+	contentHTML := extractJsContent(rawHTML)
+	if contentHTML == "" {
+		// Not a WeChat page, try <article> or <main>
+		contentHTML = extractTag(rawHTML, "article")
+		if contentHTML == "" {
+			contentHTML = extractTag(rawHTML, "main")
+		}
+		if contentHTML == "" {
+			// Last resort: hand back the whole page
+			contentHTML = rawHTML
+		}
+	}
+	return contentHTML
+}
+
 // extractArticle extracts the main article content from a WeChat HTML page
 // and converts it to clean Markdown.
 func extractArticle(rawHTML string) (markdown, title string) {
@@ -18,19 +38,7 @@ func extractArticle(rawHTML string) (markdown, title string) {
 		}
 	}
 
-	// Extract js_content div (WeChat article body)
-	contentHTML := extractJsContent(rawHTML)
-	if contentHTML == "" {
-		// Not a WeChat page, try <article> or <main>
-		contentHTML = extractTag(rawHTML, "article")
-		if contentHTML == "" {
-			contentHTML = extractTag(rawHTML, "main")
-		}
-		if contentHTML == "" {
-			// Last resort: just strip all tags
-			contentHTML = rawHTML
-		}
-	}
+	contentHTML := resolveContentHTML(rawHTML)
 
 	// Parse HTML and convert to Markdown
 	markdown = htmlToMarkdown(contentHTML)
