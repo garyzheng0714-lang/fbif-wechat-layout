@@ -160,11 +160,13 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
       }
       continue;
     }
-    // refMode 已开启：期待 [n] 开头
-    if (refItemRe.test(text)) {
+    // refMode 已开启：[n] 开头是新条目；破折号/连字符开头（— – ─ -）是上一条的
+    // 说明延续行（基石 news/62285 参考来源里每条 [n] 下紧跟一行「—说明」，整块连续
+    // 无空行）。两者都归 ref-item，避免说明行 fallback 成正文段而被插入空行。
+    if (refItemRe.test(text) || /^[—–─-]/.test(text)) {
       out[i] = { k: 'ref-item', runs: e.runs };
     } else {
-      refMode = false;  // 遇到非 [n] 段，停止识别
+      refMode = false;  // 遇到既非 [n] 也非说明行的段，停止识别
     }
   }
 

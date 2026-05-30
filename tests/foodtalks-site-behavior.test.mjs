@@ -106,6 +106,25 @@ test('参考来源识别：header 段 + 后续 [n] 条目', () => {
   assert.equal(out[4].k, 'p', '非 [n] 开头的段不再被识别为 ref-item');
 });
 
+test('参考来源：[n] 条目下的「—说明」延续行也归 ref-item（基石 62285 结构）', () => {
+  // 基石 news/62285 参考来源每条 [n] 下紧跟一行破折号说明，整块连续无空行。
+  const elems = [
+    p('参考来源：'),
+    p('[1] Starbucks’ tea party, 2013.12, Fortune'),
+    p('—记者Beth Kowitt实地探访NYC Tea Bar'),
+    p('[2] Starbucks: The Art of Endless Transformation'),
+    p('—Schultz与Oprah婚礼偶遇故事的原始出处'),
+    p('提示：之后的正文。'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG);
+  assert.equal(out[0].k, 'ref-header');
+  assert.equal(out[1].k, 'ref-item', '[1] 条目');
+  assert.equal(out[2].k, 'ref-item', '—说明行也是 ref-item（不 fallback 成正文段）');
+  assert.equal(out[3].k, 'ref-item', '[2] 条目');
+  assert.equal(out[4].k, 'ref-item', '第二条说明行');
+  assert.notEqual(out[5].k, 'ref-item', '说明行之外的段中断 refMode');
+});
+
 test('参考来源：保留原编号，不重新编号', () => {
   const elems = [
     p('参考来源：'),
