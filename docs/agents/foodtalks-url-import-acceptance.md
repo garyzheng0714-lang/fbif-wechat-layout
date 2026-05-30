@@ -149,10 +149,49 @@ footerUrl='' 契约）共多项；`npm test` 264 全过、`go test ./...` 全过
 - 根因：`WECHAT_UPLOAD_ENDPOINT` 指向的上游上传服务**串行写 OSS**（≈165KB/s），
   该服务不在本仓库，前端并发 / 后端 batch 均被它串行化。
 
-**结论**：转存提速在本仓库可改范围内做不到。已把前端 mmbiz 并发改造**回退为串行**
-（避免无效复杂度，规则二/三）。真要提速只有两条仓库外路径，均需另行评估：
-(a) 加速上游上传服务（并行写 OSS / 提带宽）；(b) 前端凭 STS 临时凭证直传 OSS
-（另一套架构 + 凭证安全评估）。
+~~**结论**：转存提速在本仓库可改范围内做不到。~~（此结论已被 §12 推翻——真因不是
+"上游串行"，而是跨地域公网慢，换同地域内网即解。）
+
+## 12. 转存提速已解决：图床迁到杭州内网（2026-05-30，正式方案）
+
+§11 的"上游串行"判断不准。真因是**地理 + 网络**：上传服务在杭州 ECS（cn-hangzhou），
+但图床 OSS 桶 `fbif-html-share` 在北京（cn-beijing）且走**公网**——跨地域公网上传仅
+~124KB/s，750KB 的图要 3.7s，14 张串行 ≈ 40s。
+
+**解法**：新建**杭州同地域**桶 `fbif-gary-img-hz`（cn-hangzhou，公共读），上传走
+**内网** endpoint，实测 **2825KB/s（提速 ~23x）**，单张 400KB 上传从 ~3000ms 降到
+**145ms**。真机验证：`/ft/default` 导入 MATCH，14 张图全走
+`fbif-gary-img-hz.oss-cn-hangzhou`、公网 HTTP 200 可访问、排版正确性全保持。
+
+### 运维细节（改的是服务器，不在本仓库；重装/接手必看）
+
+- **改动对象**：服务器 `aliyun-prod-real`（121.40.214.5，杭州）上的上传服务
+  `/opt/wechat-api/server.py`（"WeChat Draft API"，端口 9000，非 git 仓库，手动部署）。
+  Go 后端 `WECHAT_UPLOAD_ENDPOINT=http://localhost:9000/api/wechat-upload` 转发到它。
+- **server.py 改动**：`upload_to_oss` 上传 endpoint 与返回 URL 域名分离——
+  `OSS_UPLOAD_ENDPOINT`（内网，传）/ `OSS_PUBLIC_HOST`（公网，读）两个新环境变量驱动，
+  未设则回退旧公网行为。备份在 `/opt/wechat-api/server.py.bak.before-hz-*`。
+- **服务环境变量**：用 systemd drop-in `/etc/systemd/system/wechat-api.service.d/oss-hangzhou.conf`
+  注入 `OSS_BUCKET=fbif-gary-img-hz` / `OSS_UPLOAD_ENDPOINT=https://oss-cn-hangzhou-internal.aliyuncs.com`
+  / `OSS_PUBLIC_HOST=fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com`。
+  **`OSS_REGION=cn-beijing` 保持不变**（公众号微信 CDN 上传 `_handle_upload` 仍依赖它；
+  OSS 上传链路已不读 OSS_REGION）。
+- **回滚**（如需换回老桶）：删 drop-in 文件 + `systemctl daemon-reload && systemctl restart wechat-api`。
+- **桶现状**：新图进杭州新桶；历史已发布文章的图仍在北京老桶 `fbif-html-share`（照常显示，
+  用户决定暂不迁移）。两桶共存，互不影响。
+
+### 待办（非本次，需用户处理）
+
+- ⚠️ **密钥轮换**：`wechat-api.service` 内 OSS AccessKey Secret / 微信 AppSecret / API_SECRET
+  为明文，且排障过程中在对话里出现过，建议轮换。
+- 微信渠道（`/mp`）**确认无需改**：预览用 mmbiz + `no-referrer` 秒显（0.1s），复制用 mmbiz
+  直链（公众号后台可显示 + 保 GIF），本就最优，不转存 OSS。
+
+### 剩余瓶颈（可选优化）
+
+后端上传已非瓶颈（145ms/张）。整体导入仍十几秒的瓶颈在**前端逐张取 mmbiz 图**——
+冷缓存被微信防盗链限流。如需进一步提速：前端取图并行化 + 退避，避免触发微信限流。
+（用户反馈当前已"快非常多"，此项按需。）
 
 实务建议：导入后等侧栏「全部图片已就绪」再点复制；复制按钮本身不阻塞（规则 9），
 但就绪前复制会带未转存的 mmbiz（粘进 foodtalks.cn 会裂）。
