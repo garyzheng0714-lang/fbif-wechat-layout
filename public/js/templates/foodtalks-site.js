@@ -245,6 +245,14 @@ function render(elems, config = {}) {
       continue;
     }
     if (e.k === 'tip') {
+      // 提示声明受页脚库 segments.tip 控制：仅当用户显式取消勾选（=0）时不输出。
+      // 默认（未设 / 未配页脚）仍输出，保证转载版权声明默认在（基石所有文章都有）。
+      const ftSeg = config.modules && config.modules.fbif_footer && config.modules.fbif_footer.segments;
+      if (ftSeg && ftSeg.tip === 0) {
+        prevWasHeading = false;
+        prevWasStandaloneLink = false;
+        continue;
+      }
       // 提示段前补 1 个空行（基石：参考来源末项 / 正文 与「提示：」之间有空行）
       if (lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
         lines.push(BLANK_LINE);

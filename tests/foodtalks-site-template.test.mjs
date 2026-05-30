@@ -262,3 +262,15 @@ test('署名: 读 config.muted_color 且不再 #7f7f7f', () => {
   assert.match(fn[0], /muted_color/, '署名颜色必须读 config.muted_color');
   assert.doesNotMatch(fn[0], /#7f7f7f/i, '署名不能再用 #7f7f7f（搬运痕迹色）');
 });
+
+// 页脚库：render 按 config.modules.fbif_footer.segments 输出，每个勾选片段即时生效
+test('页脚库: render 末尾按 segments 拼接页脚（buildFooterHtml）', () => {
+  assert.match(templateSource, /buildFooterHtml\s*\(\s*footerCfg\.segments\s*\)/, 'render 用 buildFooterHtml(segments) 拼页脚');
+  assert.match(templateSource, /footerCfg\.enabled/, '页脚营销段受 enabled 总开关控制');
+});
+
+test('页脚库: 提示声明受 segments.tip 控制（=0 不输出，默认保留版权）', () => {
+  const tipBranch = templateSource.match(/e\.k === 'tip'[\s\S]{0,500}/);
+  assert.ok(tipBranch, '找到 tip 分支');
+  assert.match(tipBranch[0], /segments[\s\S]{0,60}tip\s*===\s*0/, '提示声明受 segments.tip===0 控制（取消勾选生效）');
+});
