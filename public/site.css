@@ -137,8 +137,12 @@ body.channel-portal-body {
 /* 仅作用于 .preview-site 容器（site.html 的 <main class="preview-panel preview-site">） */
 /* 公众号 app.html 不带 .preview-site modifier，因此样式完全隔离 */
 
-/* 隐藏公众号专属卡片包装：account header + 底部栏 */
-.preview-site .wx-header,
+/* 隐藏公众号专属卡片包装：账号信息行（公众号名/日期/地点）+ 底部栏。
+ * 标题（.wx-title）保留显示——FoodTalks 文章页同样有大标题，藏掉它会让预览
+ * 看起来割裂（用户 2026-05-30 确认：预览只显示标题，不要公众号账号行）。
+ * 注意：这是“显示层”改动，复制层(_articleCopy)不含标题（标题单独填后台输入框），
+ * 不受影响。 */
+.preview-site .wx-meta,
 .preview-site .wx-footer {
   display: none !important;
 }
