@@ -251,3 +251,41 @@ h2 这个维度。验收必须以 `docs/agents/baselines/62285-foodtalks-backend
 **测试**：`tests/heading-detect.test.mjs` 真实行为测试（含两篇真实标题正样本、加粗强调
 正文/超长/混排/图注/疑问句边界负样本）；取代原 `foodtalks-site-template.test.mjs` 里
 grep 源码字符串的弱契约（规则九）。`npm test` 291 全过、`go test ./...` 全过。
+
+## 14. 第二轮深查（2026-05-30，build f3b2c46）：三源交叉核对 + 4 个真实差异
+
+用户反馈"底部不一致、你没认真改、没反映规则后台"。彻底重查，以**三个真相来源交叉核对**
+（不再只信自定义指标）：
+1. 基石后台源码 `docs/agents/baselines/62285-foodtalks-backend.html`
+2. 参考仓库 github.com/VanilMsou/FoodtalksArticleLayout（layout-tool.html，本轮 WebFetch 读了）
+3. 规则后台线上配置 `/api/rules/active?account=ft-default`
+
+### 查证清楚的关键事实（之前靠臆断的）
+- **底部「加群/关注/二维码/logo/点击获取更多/商务合作Bobo」是 FoodTalks 平台对每篇自动追加的**。
+  证据：打开非 FBIF 来源文章（正和岛 news/62286）尾部一模一样。→ 我们切掉是对的。
+- **正文段/链接在基石里不带 color/font-size**（裸 `<p style="text-align: justify;">`），
+  #333/#105b89 是平台 CSS 渲染的。→ 复制层正文段不写颜色是对的。
+- **规则后台 ft-default**：muted_color=#888888、caption_font_size=12、heading_size=18、
+  link_color=#0070C0、text_color=#544545（仅预览用）。署名 14px/图注 12px 是基石源码值
+  （**基石 > 规则配置**：以终为始，基石源码是终点）。
+
+### 修的 4 个真实差异（本轮 commit）
+| commit | 差异 | 修复 |
+|---|---|---|
+| 222f375 等 | 加粗小标题塌成 `<p><strong>` | heading-detect.js：整段加粗→h2（见 §13） |
+| cbae6cc | h2 带自造 mctoc id | 默认不输出 id（后台自动加） |
+| 74d65b5 | 竖图宽度 600（基石 400） | 后端抓 data-h/data-ratio；adaptiveImageWidth 竖图400/横图600；image-width.js |
+| 80a2269+f3b2c46 | 参考来源被拆散（前几条误标 cap、后几条带空行） | 后端 inRefSection 强制参考区走 txt（不被图注启发式吞）；前端 refMode 纳入「—说明」延续行 |
+
+### 验证结论（真机 + processBlocks 实测）
+基石 vs 复制层逐项对齐：h2=10（justify 无 id）✅；图宽 {400:1,600:11} ✅（新模块
+processBlocks 实测真实数据，与基石一致）；参考来源连续无空行 ✅；图全转杭州 CDN
+mmbiz=0 ✅；底部营销段不输出 ✅；#7f7f7f=0/#888888 ✅。
+
+### 教训（写给未来会话）
+- **缓存陷阱**：长期开着的 tab 运行时用首次加载的模块；改代码后必须用**全新 tab**
+  （URL 自动带 `?v=<build>`）验证，或 import('/js/x.js?t='+Date.now()) 实测纯函数。
+  曾因此误判图宽修复"没生效"（实际复制层用了旧缓存模块，新模块输出是对的）。
+- **频繁提取触发微信反爬限流**：连续多次提取同一文章会被限流（后端抓不到正文，卡"上传"）。
+  验证之间留间隔。
+- **断言要有证据**：底部"平台自动加"早该用非 FBIF 文章对比证明，而非空口反复说。
