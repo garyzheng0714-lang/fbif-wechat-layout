@@ -228,11 +228,16 @@ func handleFetchArticle(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	reportErr := derr
-	if reportErr == nil {
-		reportErr = xrErr
+	// 两条路径都没拿到内容。内部错误（x-reader 未安装、传输细节等）只记日志，
+	// 不抛给终端用户——给一句可操作的中文提示。
+	internalErr := derr
+	if internalErr == nil {
+		internalErr = xrErr
 	}
-	writeError(w, 502, "failed to fetch article: "+reportErr.Error())
+	if internalErr != nil {
+		log.Printf("handleFetchArticle failed for %s: direct=%v xreader=%v", req.URL, derr, xrErr)
+	}
+	writeError(w, 502, "文章抓取失败，请稍后重试（公众号可能临时限流）")
 }
 
 // fetchDirectBlocks is the new primary URL-import path: GET the raw HTML
@@ -240,18 +245,41 @@ func handleFetchArticle(w http.ResponseWriter, r *http.Request) {
 // HTTP boilerplate via fetchRawHTML so the paths can't drift on timeouts,
 // UA, or body-size limits.
 //
-// Contract: returns a non-nil err only for transport-level failures.
-// An empty `blocks` slice with err==nil is a valid (non-error) outcome —
-// e.g. a valid-HTML page with no article content. The caller at
-// handleFetchArticle gates on `len(blocks) > 0` before preferring this
-// path over the x-reader fallback.
+// Retries with backoff on transport failure OR empty blocks: WeChat
+// rate-limits/serves an anti-scrape interstitial intermittently, and a
+// plain retry a moment later almost always succeeds — far more reliable
+// than the x-reader fallback (which isn't installed in production). Only
+// after all attempts come up empty do we let the caller fall through.
+//
+// Contract: returns a non-nil err only when every attempt hit a
+// transport-level failure. An empty `blocks` slice with err==nil is a
+// valid (non-error) outcome — a page genuinely without article content.
+// The caller at handleFetchArticle gates on `len(blocks) > 0`.
 func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
-	bodyBytes, err := fetchRawHTML(url)
-	if err != nil {
-		return "", nil, err
+	// 3 attempts, exponential-ish backoff. WeChat 限流通常几百毫秒内恢复。
+	backoffs := []time.Duration{0, 600 * time.Millisecond, 1500 * time.Millisecond}
+	var transportErr error // 最后一次的传输错误；为 nil 表示最后一次拿到了页面但内容为空
+	for i, wait := range backoffs {
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		bodyBytes, ferr := fetchRawHTML(url)
+		if ferr != nil {
+			transportErr = ferr
+			log.Printf("fetchDirectBlocks attempt %d/%d transport error: %v", i+1, len(backoffs), ferr)
+			continue
+		}
+		t, bs, _ := extractArticleBlocks(string(bodyBytes))
+		if len(bs) > 0 {
+			return t, bs, nil
+		}
+		// 传输成功但无内容：可能是反爬中间页，重试一次可能拿到真正文。
+		transportErr = nil
+		log.Printf("fetchDirectBlocks attempt %d/%d: empty content (possible anti-scrape page)", i+1, len(backoffs))
 	}
-	t, bs, _ := extractArticleBlocks(string(bodyBytes))
-	return t, bs, nil
+	// 全部尝试都没拿到内容：最后一次是传输失败则返回该 err；否则（拿到页面但空）
+	// 返回空 blocks 无 err，让调用方决定是否走 x-reader。
+	return "", nil, transportErr
 }
 
 func fetchRawHTML(url string) ([]byte, error) {

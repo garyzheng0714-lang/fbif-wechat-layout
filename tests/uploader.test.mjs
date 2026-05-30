@@ -136,3 +136,33 @@ test('uploadNonCdnImages: website channel dedupes repeated mmbiz URL (proxy once
   );
   assert.equal(proxyCount, 1, '同一 mmbiz URL 只取回一次');
 });
+
+test('uploadNonCdnImages: website channel 并发转存多图无丢更新（每张都被替换）', async (t) => {
+  const originalFetch = globalThis.fetch;
+  // 每张图上传返回各自唯一的 CDN URL；image-proxy 加随机微延迟，放大并发竞态风险
+  let uploadSeq = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url) === '/api/oss-upload') {
+      const id = uploadSeq++;
+      return new Response(JSON.stringify({ results: { ['img_' + id]: 'https://static.foodtalks.cn/cdn-' + id + '.png' } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (String(url).startsWith('/api/image-proxy')) {
+      await new Promise(r => setTimeout(r, 5));
+      return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
+    }
+    return new Response('');
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const N = 10;
+  const html = Array.from({ length: N }, (_, i) => `<p><img src="https://mmbiz.qpic.cn/img${i}.png"></p>`).join('');
+  const result = await uploadNonCdnImages(html, '', { transferMmbiz: true });
+
+  assert.equal(result.failed, 0, '无失败');
+  assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn/, '所有 mmbiz URL 都被替换（无丢更新）');
+  // 10 张不同图都应被替换成 CDN URL
+  const cdnCount = (result.articleCopy.match(/static\.foodtalks\.cn\/cdn-/g) || []).length;
+  assert.equal(cdnCount, N, `${N} 张图应全部替换为 CDN URL，实际 ${cdnCount}`);
+});

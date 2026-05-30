@@ -114,15 +114,33 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
     }
     if (mmbizUrls.size > 0) {
       onLog && onLog('info', '网站渠道：转存 mmbiz 图到 CDN', { count: mmbizUrls.size });
-      for (const url of mmbizUrls) {
-        try {
-          const dataUrl = await mmbizUrlToDataUrl(url);
-          articleCopy = articleCopy.split(url).join(dataUrl);
-          footerCopy = footerCopy.split(url).join(dataUrl);
-        } catch (err) {
-          onLog && onLog('error', 'mmbiz 取图失败', { url: url.slice(0, 60), err: String(err) });
-          mmbizFailedSrcs.push(url);
+      // 并发取图转 base64（IO 密集，可并行）；字符串替换收集后串行做（避免并发改
+      // articleCopy 引用导致丢更新）。并发上限防止一次性打爆 image-proxy。
+      const urlList = [...mmbizUrls];
+      const MMBIZ_CONCURRENCY = Math.min(urlList.length, 6);
+      const fetched = []; // { url, dataUrl }
+      let done = 0;
+      onProgress && onProgress(0, urlList.length);
+      let next = 0;
+      async function mmbizWorker() {
+        while (next < urlList.length) {
+          const url = urlList[next++];
+          try {
+            const dataUrl = await mmbizUrlToDataUrl(url);
+            fetched.push({ url, dataUrl });
+          } catch (err) {
+            onLog && onLog('error', 'mmbiz 取图失败', { url: url.slice(0, 60), err: String(err) });
+            mmbizFailedSrcs.push(url);
+          }
+          done++;
+          onProgress && onProgress(done, urlList.length);
         }
+      }
+      await Promise.all(Array.from({ length: MMBIZ_CONCURRENCY }, () => mmbizWorker()));
+      // 串行替换：每个 url 全局替换为其 base64，无并发竞态。
+      for (const { url, dataUrl } of fetched) {
+        articleCopy = articleCopy.split(url).join(dataUrl);
+        footerCopy = footerCopy.split(url).join(dataUrl);
       }
     }
   }

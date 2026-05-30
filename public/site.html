@@ -631,7 +631,7 @@ window.fetchArticle = async function() {
   const errorEl = document.getElementById('error');
   const url = (urlInput.value || '').trim();
   if (!url) return;
-  errorEl.style.display = 'none';
+  errorEl.textContent = ''; errorEl.style.display = 'none';
   btn.disabled = true; btn.textContent = '提取中...';
   try {
     const resp = await fetch('/api/fetch-article', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
@@ -658,7 +658,16 @@ window.fetchArticle = async function() {
     } else {
       throw new Error('文章内容为空');
     }
-  } catch (e) { errorEl.textContent = '提取失败: ' + e.message; errorEl.style.display = 'block'; }
+  } catch (e) {
+    // 后端已对内部错误脱敏（返回中文友好提示）；前端兜底再脱一层，避免任何
+    // 技术细节（HTTP 码、栈、可执行文件路径等）泄漏给用户。
+    const raw = String(e && e.message || '');
+    const friendly = /失败|重试|为空|限流/.test(raw) && !/HTTP|exec|PATH|undefined|\$/.test(raw)
+      ? raw
+      : '文章抓取失败，请稍后重试';
+    errorEl.textContent = friendly;
+    errorEl.style.display = 'block';
+  }
   finally { btn.disabled = false; btn.textContent = '提取'; }
 };
 
