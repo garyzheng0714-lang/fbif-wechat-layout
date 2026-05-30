@@ -85,22 +85,29 @@ test('uploadNonCdnImages: WeChat channel (transferMmbiz=false) leaves mmbiz URLs
   assert.ok(!calls.some(u => u.includes('oss-upload')), '不应上传');
 });
 
-test('uploadNonCdnImages: website channel (transferMmbiz=true) re-hosts mmbiz via proxy→OSS', async (t) => {
+// 网站渠道把 mmbiz URL 列表整体发给 /api/oss-upload 的 urls 模式，后端并发取图+传 OSS，
+// 返回 {mmbiz_url: oss_url} 映射；前端用映射替换 src。下列测试 mock 这个后端契约。
+function mockOssUploadUrls(t, { mapper, capture } = {}) {
   const originalFetch = globalThis.fetch;
-  const proxied = [];
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, opts = {}) => {
     if (String(url) === '/api/oss-upload') {
-      return new Response(JSON.stringify({ results: { img_0: 'https://static.foodtalks.cn/image/post/abc.png' } }), {
-        status: 200, headers: { 'content-type': 'application/json' },
-      });
-    }
-    if (String(url).startsWith('/api/image-proxy')) {
-      proxied.push(String(url));
-      return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
+      const body = JSON.parse(opts.body || '{}');
+      capture && capture(body);
+      const results = {};
+      for (const u of body.urls || []) {
+        results[u] = mapper ? mapper(u) : ('https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/' + Math.abs(hashStr(u)) + '.png');
+      }
+      return new Response(JSON.stringify({ results }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     return new Response('');
   };
   t.after(() => { globalThis.fetch = originalFetch; });
+}
+function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; }
+
+test('uploadNonCdnImages: website channel (transferMmbiz=true) 发 urls 给后端并用映射替换', async (t) => {
+  let captured = null;
+  mockOssUploadUrls(t, { mapper: () => 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/abc.png', capture: b => (captured = b) });
 
   const result = await uploadNonCdnImages(
     '<p><img src="https://mmbiz.qpic.cn/a.png"></p>',
@@ -109,60 +116,48 @@ test('uploadNonCdnImages: website channel (transferMmbiz=true) re-hosts mmbiz vi
   );
 
   assert.equal(result.failed, 0, '无失败');
-  assert.equal(proxied.length, 1, 'mmbiz 图经 image-proxy 取回一次');
-  assert.ok(proxied[0].includes(encodeURIComponent('https://mmbiz.qpic.cn/a.png')), 'image-proxy 带上 mmbiz URL');
+  assert.deepEqual(captured.urls, ['https://mmbiz.qpic.cn/a.png'], '把 mmbiz URL 列表发给后端 urls 模式');
   assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn/, 'mmbiz URL 应被替换');
-  assert.match(result.articleCopy, /static\.foodtalks\.cn|oss/, '替换为 CDN URL');
+  assert.match(result.articleCopy, /fbif-gary-img-hz\.oss-cn-hangzhou/, '替换为新桶 CDN URL');
 });
 
-test('uploadNonCdnImages: website channel dedupes repeated mmbiz URL (proxy once)', async (t) => {
-  const originalFetch = globalThis.fetch;
-  let proxyCount = 0;
-  globalThis.fetch = async (url) => {
-    if (String(url) === '/api/oss-upload') {
-      return new Response(JSON.stringify({ results: { img_0: 'https://static.foodtalks.cn/x.png' } }), {
-        status: 200, headers: { 'content-type': 'application/json' },
-      });
-    }
-    if (String(url).startsWith('/api/image-proxy')) { proxyCount++; return new Response(new Blob([new Uint8Array([1])], { type: 'image/png' })); }
-    return new Response('');
-  };
-  t.after(() => { globalThis.fetch = originalFetch; });
+test('uploadNonCdnImages: website channel 同一 mmbiz URL 去重（只发一次）', async (t) => {
+  let captured = null;
+  mockOssUploadUrls(t, { capture: b => (captured = b) });
 
   await uploadNonCdnImages(
     '<p><img src="https://mmbiz.qpic.cn/same.png"></p><p><img src="https://mmbiz.qpic.cn/same.png"></p>',
     '',
     { transferMmbiz: true }
   );
-  assert.equal(proxyCount, 1, '同一 mmbiz URL 只取回一次');
+  assert.equal(captured.urls.length, 1, '重复 mmbiz URL 去重后只发一次');
 });
 
-test('uploadNonCdnImages: website channel 并发转存多图无丢更新（每张都被替换）', async (t) => {
-  const originalFetch = globalThis.fetch;
-  // 每张图上传返回各自唯一的 CDN URL；image-proxy 加随机微延迟，放大并发竞态风险
-  let uploadSeq = 0;
-  globalThis.fetch = async (url) => {
-    if (String(url) === '/api/oss-upload') {
-      const id = uploadSeq++;
-      return new Response(JSON.stringify({ results: { ['img_' + id]: 'https://static.foodtalks.cn/cdn-' + id + '.png' } }), {
-        status: 200, headers: { 'content-type': 'application/json' },
-      });
-    }
-    if (String(url).startsWith('/api/image-proxy')) {
-      await new Promise(r => setTimeout(r, 5));
-      return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
-    }
-    return new Response('');
-  };
-  t.after(() => { globalThis.fetch = originalFetch; });
+test('uploadNonCdnImages: website channel 多图全部正确替换（不串号）', async (t) => {
+  // 每个 url 映射到含自身索引的唯一 CDN URL，验证替换没有张冠李戴
+  mockOssUploadUrls(t, { mapper: u => 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/cdn-' + u.match(/img(\d+)/)[1] + '.png' });
 
   const N = 10;
   const html = Array.from({ length: N }, (_, i) => `<p><img src="https://mmbiz.qpic.cn/img${i}.png"></p>`).join('');
   const result = await uploadNonCdnImages(html, '', { transferMmbiz: true });
 
   assert.equal(result.failed, 0, '无失败');
-  assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn/, '所有 mmbiz URL 都被替换（无丢更新）');
-  // 10 张不同图都应被替换成 CDN URL
-  const cdnCount = (result.articleCopy.match(/static\.foodtalks\.cn\/cdn-/g) || []).length;
-  assert.equal(cdnCount, N, `${N} 张图应全部替换为 CDN URL，实际 ${cdnCount}`);
+  assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn/, '所有 mmbiz URL 都被替换');
+  for (let i = 0; i < N; i++) {
+    assert.match(result.articleCopy, new RegExp('cdn-' + i + '\\.png'), `第 ${i} 张映射到正确的 CDN URL`);
+  }
+});
+
+test('uploadNonCdnImages: website channel 后端转存失败的图保留原 mmbiz 链接并计入 failed', async (t) => {
+  // 后端对某张返回 null（转存失败）→ 前端保留原 mmbiz、计 failed
+  mockOssUploadUrls(t, { mapper: u => u.includes('bad') ? null : 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/ok.png' });
+
+  const result = await uploadNonCdnImages(
+    '<p><img src="https://mmbiz.qpic.cn/good.png"></p><p><img src="https://mmbiz.qpic.cn/bad.png"></p>',
+    '',
+    { transferMmbiz: true }
+  );
+  assert.equal(result.failed, 1, '1 张失败');
+  assert.match(result.articleCopy, /mmbiz\.qpic\.cn\/bad\.png/, '失败的图保留原 mmbiz 链接');
+  assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn\/good\.png/, '成功的图被替换');
 });
