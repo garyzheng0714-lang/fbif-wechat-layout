@@ -115,10 +115,20 @@
       <div class="preview-content" id="previewContent" style="display:none;">
         <div class="wx-header">
           <h2 class="wx-title" id="articleTitle"></h2>
-          <div class="wx-meta">
+          <!-- 网站渠道作者行：仿 foodtalks.cn 文章页（账号名 + 日期）。纯预览
+               装饰，不进复制层。账号名写死、日期用当天——都是真数据；不放
+               阅读数/标签（抓取数据无此字段，编占位会误导）。.wx-meta-loc
+               (上海) 由 .preview-site 样式隐藏：FoodTalks 作者行无地点。 -->
+          <div class="wx-meta ft-byline">
+            <span class="ft-byline-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 8a3 3 0 100-6 3 3 0 000 6zm0 1.5c-2.5 0-5 1.25-5 3.25V14h10v-1.25C13 10.75 10.5 9.5 8 9.5z"/></svg>
+            </span>
             <span class="wx-meta-account">FBIF食品饮料创新</span>
+            <span class="ft-byline-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.3"/><path d="M8 4.4V8l2.6 1.6" stroke-linecap="round"/></svg>
+            </span>
             <span class="wx-meta-gray" id="wxDate"></span>
-            <span class="wx-meta-gray">上海</span>
+            <span class="wx-meta-gray wx-meta-loc">上海</span>
           </div>
         </div>
         <div class="phone-frame" id="phoneFrame">
