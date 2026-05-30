@@ -510,7 +510,9 @@ function syncEngineConfig(triggerRerender) {
     modules: {
       ...prevModules,
       fbif_footer: { enabled: footerOn },
-      mctoc: prevModules.mctoc || { enabled: true },
+      // 网站渠道 h2 默认不输出 mctoc 锚点 id —— FoodTalks 后台生成目录时会自己加
+      // （用户 2026-05-30 确认），基石 news/62285 的 h2 也不带 id。默认关，避免与后台冲突。
+      mctoc: prevModules.mctoc || { enabled: false },
     },
   };
   window._engineApi.setActiveConfig(cfg);
