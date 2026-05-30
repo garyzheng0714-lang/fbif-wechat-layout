@@ -220,9 +220,9 @@ input[type="file"] { display: none; }
   min-width: 0;
   height: 34px;
   padding: 0 30px 0 10px;
-  border: 1px solid rgba(0,0,0,0.08);
-  border-radius: 7px;
-  background: #ffffff;
+  border: 1px solid var(--fs-border-control);
+  border-radius: var(--fs-r-s);
+  background: var(--fs-bg-card);
   color: var(--fs-text-1);
   font: inherit;
   font-size: 12px;
@@ -230,9 +230,8 @@ input[type="file"] { display: none; }
   text-align: left;
   display: flex;
   align-items: center;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.6);
   cursor: pointer;
-  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+  transition: border-color var(--fs-t-fast) var(--fs-ease-out), box-shadow var(--fs-t-fast) var(--fs-ease-out), background var(--fs-t-fast) var(--fs-ease-out);
 }
 .active-rule-trigger:disabled {
   color: var(--fs-text-2);
@@ -279,10 +278,10 @@ input[type="file"] { display: none; }
   right: 0;
   z-index: 40;
   padding: 4px;
-  border: 1px solid rgba(0,0,0,0.1);
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: rgba(0,0,0,0.05) 0 10px 28px, rgba(0,0,0,0.03) 0 2px 8px;
+  border: 1px solid var(--fs-border-card);
+  border-radius: var(--fs-r-m);
+  background: var(--fs-bg-card);
+  box-shadow: var(--fs-sh-s2);
 }
 .active-rule-option {
   width: 100%;
@@ -329,15 +328,15 @@ input[type="file"] { display: none; }
 .active-rule-save,
 .active-rule-cancel {
   height: 34px;
-  border-radius: 4px;
-  border: 1px solid rgba(0,0,0,0.1);
-  background: #ffffff;
+  border-radius: var(--fs-r-xs);
+  border: 1px solid var(--fs-border-control);
+  background: var(--fs-bg-card);
   color: var(--fs-text-1);
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: all var(--fs-t-fast) var(--fs-ease-out);
 }
 .active-rule-icon {
   width: 34px;
@@ -356,10 +355,10 @@ input[type="file"] { display: none; }
 .active-rule-icon:hover,
 .active-rule-cancel:hover,
 .active-rule-save:hover:not(:disabled) {
-  background: rgba(0,0,0,0.05);
+  background: var(--fs-bg-hover);
 }
 .active-rule-card:not(.editing) .active-rule-icon:hover {
-  border-color: rgba(0,0,0,0.06);
+  border-color: var(--fs-border-card);
 }
 .active-rule-save {
   padding: 0 12px;
@@ -368,7 +367,7 @@ input[type="file"] { display: none; }
   color: #ffffff;
 }
 .active-rule-save:disabled {
-  border-color: rgba(0,0,0,0.08);
+  border-color: var(--fs-border-control);
   color: var(--fs-text-3);
   background: var(--fs-bg-sunken);
   cursor: not-allowed;
@@ -443,14 +442,12 @@ input[type="file"] { display: none; }
 }
 .batch-title {
   padding: 8px 12px; font-size: 12px; font-weight: 500; color: var(--fs-text-3);
-  border-bottom: 1px solid var(--fs-divider);
 }
 .batch-item {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 12px; cursor: pointer;
-  border-bottom: 1px solid var(--fs-divider); transition: background var(--fs-t-fast);
+  padding: 8px 12px; cursor: pointer; border-radius: var(--fs-r-xs);
+  transition: background var(--fs-t-fast);
 }
-.batch-item:last-child { border-bottom: none; }
 .batch-item:hover { background: var(--fs-bg-hover); }
 .batch-name { font-size: 13px; font-weight: 500; }
 .batch-status { font-size: 11px; font-weight: 500; color: var(--fs-text-3); }
