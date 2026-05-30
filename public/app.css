@@ -8,6 +8,60 @@
   font-display: block;
 }
 
+/* ============================================================
+   飞书风设计 token 底座（阶段0新增，壳样式逐步引用；正文 .wx-* 不受影响）
+   冷中性灰阶取自飞书 Universe Design；品牌色保留 FBIF 蓝向飞书 2025 主蓝靠拢。
+   ============================================================ */
+:root {
+  /* 品牌色 */
+  --fs-brand:        #1456F0;
+  --fs-brand-hover:  #0F4DD1;
+  --fs-brand-active: #0B3FBA;
+  --fs-brand-soft:   #EBF1FF;
+  --fs-brand-on:     #FFFFFF;
+  /* 冷中性灰阶 */
+  --fs-text-1: #1F2329;
+  --fs-text-2: #646A73;
+  --fs-text-3: #8F959E;
+  --fs-text-disabled: #BBBFC4;
+  /* 背景层（减线条：背景分区代替边框） */
+  --fs-bg-card:   #FFFFFF;
+  --fs-bg-nested: #F7F8FA;
+  --fs-bg-sunken: #F2F3F5;
+  --fs-bg-hover:  rgba(31,35,39,0.04);
+  --fs-bg-press:  rgba(31,35,39,0.08);
+  --fs-bg-overlay: rgba(0,0,0,0.45);
+  /* 边框/分隔 */
+  --fs-border-control: #D9DCE0;
+  --fs-border-card:    #E5E6EB;
+  --fs-divider:        rgba(31,35,39,0.08);
+  /* 状态色 */
+  --fs-success: #00A870;
+  --fs-success-soft: #E5F7F0;
+  --fs-warning: #FF8800;
+  --fs-danger:  #F54A45;
+  --fs-danger-soft: #FEECEC;
+  /* 圆角体系 */
+  --fs-r-xs: 4px;
+  --fs-r-s:  6px;
+  --fs-r-m:  8px;
+  --fs-r-l:  10px;
+  --fs-r-full: 9999px;
+  /* 阴影（极轻、有方向） */
+  --fs-sh-s1: 0 1px 3px rgba(31,35,39,0.04), 0 1px 2px rgba(31,35,39,0.03);
+  --fs-sh-s2: 0 2px 8px rgba(31,35,39,0.06), 0 1px 3px rgba(31,35,39,0.04);
+  --fs-sh-s3: 0 12px 32px rgba(31,35,39,0.12), 0 4px 12px rgba(31,35,39,0.06);
+  /* 动效 */
+  --fs-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --fs-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --fs-t-fast: 150ms;
+  --fs-t-mid: 200ms;
+  --fs-t-slow: 250ms;
+  /* 字体栈（壳用；正文用 wx-theme 自己的 mp-quote 栈，不受影响） */
+  --fs-font: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI",
+             "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Inter', -apple-system, system-ui, 'PingFang SC',
