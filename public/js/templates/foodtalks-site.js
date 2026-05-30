@@ -18,6 +18,10 @@ const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
 // 用动态 import 是为了配合浏览器端的 cache-busting assetQuery
 const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery);
 const { applyFoodTalksBehavior, FBIF_FOOTER_HTML } = behaviorModule;
+// 标题识别（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）抽到无依赖
+// 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
+const headingModule = await import('../heading-detect.js' + assetQuery);
+const { promoteHeuristicHeadings } = headingModule;
 
 // ---- 图片注释智能识别 ----
 
@@ -29,42 +33,8 @@ const IMAGE_CAPTION_KEYWORDS = [
 ];
 
 // ---- 标题启发式识别 ----
-
-const TITLE_KEYWORDS = [
-  '背景', '简介', '总结', '分析', '案例', '介绍', '概述', '结论', '展望',
-];
-
-// detectHeadingLevel: 返回 2 / 3 / 0（不是标题）
-function detectHeadingLevel(text) {
-  const t = String(text || '').trim();
-  if (!t) return 0;
-
-  // （一）（二）→ h3
-  if (/^[（(]\s*[一二三四五六七八九十]+\s*[)）]/.test(t)) return 3;
-
-  // 一、二、三...（中文标点：、：．: 后跟内容）→ h2
-  if (/^[一二三四五六七八九十]+\s*[、：．:\s]/.test(t)) return 2;
-
-  // 关键词 + 短句 + 无尾句号 → h2
-  if (t.length <= 30 && !/[。.]$/.test(t)) {
-    for (const kw of TITLE_KEYWORDS) {
-      if (t.startsWith(kw)) return 2;
-    }
-  }
-
-  return 0;
-}
-
-// 把被启发式识别为标题的普通段转换成 'h' 元素
-function promoteHeuristicHeadings(elems) {
-  return elems.map(e => {
-    if (e.k !== 'p') return e;
-    const plain = (e.runs || []).filter(r => r.type === 'txt').map(r => r.text).join('');
-    const level = detectHeadingLevel(plain);
-    if (level === 0) return e;
-    return { k: 'h', level, runs: e.runs };
-  });
-}
+// detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings 已抽到 heading-detect.js
+// （顶部 import）。这里只保留图注识别等模板本地逻辑。
 
 function hasImageCaptionKeyword(text) {
   if (!text) return false;
@@ -163,10 +133,13 @@ function genMctocId() {
 }
 
 function renderHeading(level, text, config = {}) {
+  // 基石 news/62285 的标题是 <h2 style="text-align: justify;">…</h2>；id="mctoc_xxx" 是
+  // FoodTalks 后台生成目录时自动注入的锚点，默认不输出（用户 2026-05-30 确认），仅在
+  // mctoc 模块显式开启时补 id。
   const mctocEnabled = !!(config.modules && config.modules.mctoc && config.modules.mctoc.enabled);
   const idAttr = mctocEnabled ? ` id="${genMctocId()}"` : '';
-  if (level === 3) return `<h3${idAttr}>${esc(text)}</h3>`;
-  return `<h2${idAttr}>${esc(text)}</h2>`;
+  const tag = level === 3 ? 'h3' : 'h2';
+  return `<${tag}${idAttr} style="text-align: justify;">${esc(text)}</${tag}>`;
 }
 
 function renderParagraph(runs) {

@@ -74,30 +74,19 @@ test('foodtalks-site has isImageCaption and hasImageCaptionKeyword and promoteIm
   assert.match(templateSource, /promoteImageCaptions/);
 });
 
-test('foodtalks-site has detectHeadingLevel and promoteHeuristicHeadings', () => {
-  assert.match(templateSource, /detectHeadingLevel/);
+// 标题识别逻辑（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）已抽到
+// heading-detect.js，由 tests/heading-detect.test.mjs 做真实行为测试（含加粗段升级、
+// 编号/关键词标题、负样本排除）。这里只校验模板确实从该模块引入并应用 promoteHeuristicHeadings。
+test('foodtalks-site imports heading detection from heading-detect.js', () => {
+  assert.match(templateSource, /heading-detect\.js/);
   assert.match(templateSource, /promoteHeuristicHeadings/);
-  assert.match(templateSource, /TITLE_KEYWORDS/);
 });
 
-test('foodtalks-site title keywords cover FoodTalks 9 items', () => {
-  assert.match(templateSource, /['"]背景['"]/);
-  assert.match(templateSource, /['"]简介['"]/);
-  assert.match(templateSource, /['"]总结['"]/);
-  assert.match(templateSource, /['"]分析['"]/);
-  assert.match(templateSource, /['"]案例['"]/);
-  assert.match(templateSource, /['"]介绍['"]/);
-  assert.match(templateSource, /['"]概述['"]/);
-  assert.match(templateSource, /['"]结论['"]/);
-  assert.match(templateSource, /['"]展望['"]/);
-});
-
-test('foodtalks-site recognizes 一/二/三 + Chinese punctuation as h2', () => {
-  assert.match(templateSource, /[一二三四五六七八九十]/);
-});
-
-test('foodtalks-site recognizes （一）/（二） as h3', () => {
-  assert.match(templateSource, /[（(]\s*\[?[一二三四五六七八九十]/);
+// h2/h3 输出契约（金标准 news/62285）：<h2 style="text-align: justify;">…</h2>，
+// 默认不带 id（id 仅在 mctoc 模块开启时注入）。
+test('foodtalks-site renderHeading outputs text-align: justify and conditional mctoc id', () => {
+  assert.match(templateSource, /style="text-align: justify;">\$\{esc\(text\)\}/);
+  assert.match(templateSource, /mctocEnabled\s*\?\s*` id="\$\{genMctocId\(\)\}"`/);
 });
 
 test('foodtalks-site has normalizeChinesePunctuation with CJK-adjacent rule', () => {
