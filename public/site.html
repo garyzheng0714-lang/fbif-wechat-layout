@@ -79,16 +79,29 @@
         </div>
       </div>
 
-      <details class="ft-advanced-options" style="margin-top: 16px;">
-        <summary style="cursor: pointer; user-select: none;">高级选项</summary>
+      <details class="ft-advanced-options" id="footerLib" style="margin-top: 16px;">
+        <summary style="cursor: pointer; user-select: none;">页脚</summary>
         <div style="padding: 8px 0;">
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <input type="checkbox" id="fbifFooterToggle">
-            <span>输出 FBIF 公众号原创页脚</span>
+            <input type="checkbox" id="footerEnableToggle">
+            <span>输出 FoodTalks 页脚</span>
           </label>
-          <p style="margin: 6px 0 0 24px; color: #888; font-size: 12px;">
-            仅搬运 FBIF 公众号原创到 FoodTalks 网站时打开
-          </p>
+          <!-- 页脚预设（方角分段控件——与顶部圆角渠道胶囊区分语义层级）-->
+          <div class="ft-footer-presets" id="footerPresets">
+            <button type="button" class="ft-footer-preset" data-preset="fbif-original">FBIF原创</button>
+            <button type="button" class="ft-footer-preset" data-preset="repost-simple">转载简版</button>
+            <button type="button" class="ft-footer-preset" data-preset="tip-only">仅提示</button>
+            <button type="button" class="ft-footer-preset" data-preset="none">无</button>
+          </div>
+          <!-- 细粒度片段勾选：不同文章勾不同组合 -->
+          <div class="ft-footer-segments" id="footerSegments">
+            <label><input type="checkbox" data-seg="tip"><span>提示声明</span></label>
+            <label><input type="checkbox" data-seg="biz_coop"><span>资讯投稿 &amp; 商务合作</span></label>
+            <label><input type="checkbox" data-seg="join_group"><span>加入微信群（含二维码）</span></label>
+            <label><input type="checkbox" data-seg="follow_account"><span>关注公众号（含二维码）</span></label>
+            <label><input type="checkbox" data-seg="logo"><span>FoodTalks logo</span></label>
+            <label><input type="checkbox" data-seg="more_info"><span>点击获取更多</span></label>
+          </div>
         </div>
       </details>
     </div>
@@ -513,13 +526,15 @@ function syncEngineConfig(triggerRerender) {
   const prev = (window._engineApi.getActiveConfig && window._engineApi.getActiveConfig()) || {};
   const prevModules = prev.modules || {};
   const serverBehavior = (window._activeConfig && window._activeConfig.behavior) || {};
-  const footerOn = localStorage.getItem('ft.outputFbifFooter') === '1';
+  const footerEnabled = localStorage.getItem('ft.footer.enabled') === '1';
+  let footerSegments = {};
+  try { footerSegments = JSON.parse(localStorage.getItem('ft.footer.segments') || '{}'); } catch (e) {}
   const cfg = {
     ...flat,
     behavior: serverBehavior,
     modules: {
       ...prevModules,
-      fbif_footer: { enabled: footerOn },
+      fbif_footer: { enabled: footerEnabled, segments: footerSegments },
       // 网站渠道 h2 默认不输出 mctoc 锚点 id —— FoodTalks 后台生成目录时会自己加
       // （用户 2026-05-30 确认），基石 news/62285 的 h2 也不带 id。默认关，避免与后台冲突。
       mctoc: prevModules.mctoc || { enabled: false },
@@ -722,21 +737,77 @@ document.addEventListener('paste', (e) => {
   });
 })();
 
-// FBIF 公众号原创页脚开关：浏览器本地存储 + engine config 同步
+// 页脚库：本地存储 + engine config 同步。enabled 总开关 + segments 细粒度勾选 +
+// 4 套预设快选。不同文章可勾不同组合（用户 2026-05-31 需求）。localStorage 是离线/
+// 兼容降级；服务端 /api/rules 下发的 behavior 仍优先。
 (() => {
-  const STORAGE_KEY = 'ft.outputFbifFooter';
-  const toggle = document.getElementById('fbifFooterToggle');
-  if (!toggle) return;
+  const K_EN = 'ft.footer.enabled';
+  const K_SEG = 'ft.footer.segments';
+  const SEG_KEYS = ['tip', 'biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
+  const PRESETS = {
+    'fbif-original': { tip: 1, biz_coop: 1, join_group: 1, follow_account: 1, logo: 1, more_info: 1 },
+    'repost-simple': { tip: 1, biz_coop: 1, join_group: 0, follow_account: 0, logo: 0, more_info: 0 },
+    'tip-only':      { tip: 1, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 },
+    'none':          { tip: 0, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 },
+  };
+  const toggle = document.getElementById('footerEnableToggle');
+  const presetsEl = document.getElementById('footerPresets');
+  const segsEl = document.getElementById('footerSegments');
+  if (!toggle || !presetsEl || !segsEl) return;
 
-  toggle.checked = localStorage.getItem(STORAGE_KEY) === '1';
+  // 一次性迁移旧 key（ft.outputFbifFooter='1' → 启用 + FBIF原创预设）
+  if (localStorage.getItem(K_EN) === null && localStorage.getItem('ft.outputFbifFooter') === '1') {
+    localStorage.setItem(K_EN, '1');
+    localStorage.setItem(K_SEG, JSON.stringify(PRESETS['fbif-original']));
+  }
 
-  // 初始推送（尚无文章，不 rerender）。复用外层 syncEngineConfig，确保扁平
-  // 参数（muted_color 等）一并注入 engine，而不仅是 behavior + modules。
+  let enabled = localStorage.getItem(K_EN) === '1';
+  let segments = {};
+  try { segments = JSON.parse(localStorage.getItem(K_SEG) || 'null') || {}; } catch (e) {}
+  if (!Object.keys(segments).length) segments = { ...PRESETS['fbif-original'] };
+
+  const checkboxes = () => Array.from(segsEl.querySelectorAll('input[type="checkbox"]'));
+  function matchPreset() {
+    for (const [id, segs] of Object.entries(PRESETS)) {
+      if (SEG_KEYS.every(k => !!segments[k] === !!segs[k])) return id;
+    }
+    return null;
+  }
+  function paint() {
+    toggle.checked = enabled;
+    segsEl.classList.toggle('ft-footer-disabled', !enabled);
+    presetsEl.classList.toggle('ft-footer-disabled', !enabled);
+    const active = matchPreset();
+    presetsEl.querySelectorAll('.ft-footer-preset').forEach(b =>
+      b.classList.toggle('active', b.dataset.preset === active));
+    checkboxes().forEach(cb => { cb.checked = !!segments[cb.dataset.seg]; });
+  }
+  function persist(rerender) {
+    localStorage.setItem(K_EN, enabled ? '1' : '0');
+    localStorage.setItem(K_SEG, JSON.stringify(segments));
+    syncEngineConfig(rerender);
+  }
+
+  paint();
   syncEngineConfig(false);
 
   toggle.addEventListener('change', () => {
-    localStorage.setItem(STORAGE_KEY, toggle.checked ? '1' : '0');
-    syncEngineConfig(true);
+    enabled = toggle.checked;
+    if (enabled && !SEG_KEYS.some(k => segments[k])) segments = { ...PRESETS['fbif-original'] };
+    paint(); persist(true);
+  });
+  presetsEl.querySelectorAll('.ft-footer-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!enabled) enabled = true;
+      segments = { ...PRESETS[btn.dataset.preset] };
+      paint(); persist(true);
+    });
+  });
+  segsEl.addEventListener('change', (e) => {
+    const cb = e.target.closest('input[type="checkbox"]');
+    if (!cb) return;
+    segments[cb.dataset.seg] = cb.checked ? 1 : 0;
+    paint(); persist(true);
   });
 })();
 </script>

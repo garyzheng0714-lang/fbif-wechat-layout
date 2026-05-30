@@ -224,3 +224,48 @@ body.channel-portal-body {
   margin-left: auto;
   margin-right: auto;
 }
+
+/* ========== 页脚库（footer library）：预设分段 + 片段勾选 ========== */
+/* 自包含样式，契合 site.css 极简黑白风，不依赖飞书 token */
+.ft-footer-presets {
+  display: flex;
+  margin: 12px 0;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.ft-footer-preset {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 12px;
+  color: #4a4a4a;
+  background: #fff;
+  border: none;
+  border-right: 1px solid #e5e5e5;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.ft-footer-preset:last-child { border-right: none; }
+.ft-footer-preset:hover { background: #f5f5f5; }
+.ft-footer-preset.active { background: #1a1a1a; color: #fff; }
+.ft-footer-segments {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ft-footer-segments label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #1a1a1a;
+  cursor: pointer;
+}
+.ft-footer-segments input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #1a1a1a;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ft-footer-disabled { opacity: .42; pointer-events: none; }

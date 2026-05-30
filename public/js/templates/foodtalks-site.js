@@ -17,7 +17,7 @@ const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
 // 等价于: import { applyFoodTalksBehavior, FBIF_FOOTER_HTML } from '../rule-behavior-foodtalks.js'
 // 用动态 import 是为了配合浏览器端的 cache-busting assetQuery
 const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery);
-const { applyFoodTalksBehavior, FBIF_FOOTER_HTML } = behaviorModule;
+const { applyFoodTalksBehavior, buildFooterHtml } = behaviorModule;
 // 标题识别（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）抽到无依赖
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
@@ -112,6 +112,8 @@ function isImageCaption(text) {
 // ---- 输出基本元 ----
 
 const BLANK_LINE = '<p style="text-align: justify;"><br></p>';
+// 图注后的空行与图注同为 center 对齐（基石规律：图注块后空行是 text-align:center）
+const CENTER_BLANK_LINE = '<p style="text-align: center;"><br></p>';
 
 function renderRuns(runs) {
   return (runs || []).filter(r => r.type !== 'img').map(r => {
@@ -219,50 +221,72 @@ function render(elems, config = {}) {
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
     if (e.k === 'h') {
-      if (!prevWasHeading && lines.length > 0) lines.push(BLANK_LINE);
+      // 标题前 1 个空行。p 分支已在每段后留空行，这里避免再叠加成双空行。
+      if (!prevWasHeading && lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
+        lines.push(BLANK_LINE);
+      }
       lines.push(renderHeading(e.level === 3 ? 3 : 2, runsToPlain(e.runs), config));
       prevWasHeading = true;
       prevWasStandaloneLink = false;
       continue;
     }
     if (e.k === 'author') {
+      // 嵌套顺序对齐基石：<em><span style="font-size:14px; color:..."> 文本 </span></em>
       const authorColor = (config && config.muted_color) || '#888888';
       lines.push(
-        '<p style="text-align: justify;">' +
-        `<span style="font-size: 14px;"><span style="color: ${authorColor};"><em>` +
+        '<p style="text-align: justify;"><em>' +
+        `<span style="font-size: 14px; color: ${authorColor};">` +
         esc(e.text) +
-        '</em></span></span></p>'
+        '</span></em></p>'
       );
+      lines.push(BLANK_LINE);
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
     }
     if (e.k === 'tip') {
-      const fullText = runsToPlain(e.runs);
-      // 把"提示："这 3 个字符切出来加蓝色，剩余文本保持普通色
-      const tipHead = fullText.match(/^(\s*提示[：:])(.*)$/);
-      const head = tipHead ? tipHead[1] : '提示：';
-      const rest = tipHead ? tipHead[2] : fullText;
+      // 提示段前补 1 个空行（基石：参考来源末项 / 正文 与「提示：」之间有空行）
+      if (lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
+        lines.push(BLANK_LINE);
+      }
+      // 两段式：第一段 "提示：" 独占一行（蓝色加粗斜体），第二段正文（灰色斜体）
+      const head = e.title || '提示：';
       lines.push(
         '<p style="text-align: justify;">' +
         '<strong><span style="color: #01396a;"><em><span style="font-size: 14px;">' +
         esc(head) +
-        '</span></em></span></strong>' +
-        esc(rest) +
-        '</p>'
+        '</span></em></span></strong></p>'
       );
+      // 第二段：正文（灰色斜体，保留链接）
+      const restRuns = e.rest_runs || e.runs || [];
+      const restInner = renderRuns(restRuns);
+      if (restInner) {
+        lines.push(
+          '<p style="text-align: justify;"><em><span style="font-size: 14px; color: #7f7f7f;">' +
+          restInner +
+          '</span></em></p>'
+        );
+      }
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
     }
     if (e.k === 'img') {
       lines.push(renderImage(e.src, e.alt, e.width, e.height));
+      // 图片后若不是图注，补空行（基石：图→正文间有空行；图→图注紧贴无空行）
+      if (!elems[i + 1] || elems[i + 1].k !== 'cap') {
+        lines.push(BLANK_LINE);
+      }
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
     }
     if (e.k === 'cap') {
       lines.push(renderImageCaption(runsToPlain(e.runs), config));
+      // 连续图注（图注 + 图片来源）之间不插空行；最后一个图注后用 center 对齐空行
+      if (!elems[i + 1] || elems[i + 1].k !== 'cap') {
+        lines.push(CENTER_BLANK_LINE);
+      }
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
@@ -298,15 +322,16 @@ function render(elems, config = {}) {
     prevWasStandaloneLink = standalone;
     prevWasHeading = false;
   }
-  // FBIF 公众号原创页脚（可选输出）
-  const fbifFooterEnabled = !!(
-    config.modules &&
-    config.modules.fbif_footer &&
-    config.modules.fbif_footer.enabled
-  );
-  if (fbifFooterEnabled) {
-    lines.push(BLANK_LINE);
-    lines.push(FBIF_FOOTER_HTML);
+  // 页脚库：按 config.modules.fbif_footer.segments 输出开启的固定营销段
+  // （商务合作 / 加群 / 关注公众号 / logo / 点击获取更多）。tip 提示声明不在此处，
+  // 它走正文流（参考来源之后），由 behavior 提升为 tip elem 渲染。
+  const footerCfg = (config.modules && config.modules.fbif_footer) || {};
+  if (footerCfg.enabled) {
+    const footerHtml = buildFooterHtml(footerCfg.segments);
+    if (footerHtml) {
+      lines.push(BLANK_LINE);
+      lines.push(footerHtml);
+    }
   }
   return lines;
 }
@@ -485,7 +510,12 @@ export default {
   processBlocks(data, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
-    const behaved = applyFoodTalksBehavior(elems, config, { isRepost: !!(opts && opts.isRepost), title });
+    // data.source 是后端抓取的原文 URL（公众号链接），用于提示声明的标题超链接。
+    const behaved = applyFoodTalksBehavior(elems, config, {
+      isRepost: !!(opts && opts.isRepost),
+      title,
+      sourceUrl: (data && data.source) || '',
+    });
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved));
     return {
       lines: render(promoted, config),

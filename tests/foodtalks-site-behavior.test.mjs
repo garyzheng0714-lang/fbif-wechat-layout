@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   applyFoodTalksBehavior,
   buildSiteFooterTipElem,
-  FBIF_FOOTER_HTML,
+  extractRepostSource,
+  buildAuthorLineFromSource,
+  buildFooterHtml,
+  FOOTER_PRESETS,
 } from '../public/js/rule-behavior-foodtalks.js';
 
 const DEFAULT_CONFIG = {
@@ -151,15 +154,109 @@ test('参考来源识别：遇到非 [n] 开头的段就停止', () => {
   assert.equal(out[3].k, 'p', '中断后即使再出现 [2] 也不识别');
 });
 
-test('FBIF_FOOTER_HTML 是常量字符串', () => {
-  assert.equal(typeof FBIF_FOOTER_HTML, 'string');
-  assert.ok(FBIF_FOOTER_HTML.length > 100, 'FBIF_FOOTER_HTML 应该有合理长度');
-  assert.match(FBIF_FOOTER_HTML, /商务合作/, '应包含商务合作引导');
-  assert.match(FBIF_FOOTER_HTML, /Lemon/, '应包含 Lemon 微信号');
-  assert.match(FBIF_FOOTER_HTML, /加入微信群/, '应包含加入微信群占位');
-  assert.doesNotMatch(FBIF_FOOTER_HTML, /关注公众号/, 'FBIF footer 不应含"关注公众号"标题');
-  assert.doesNotMatch(FBIF_FOOTER_HTML, /点击获取更多/, 'FBIF footer 不应含"点击获取更多"');
-  assert.doesNotMatch(FBIF_FOOTER_HTML, /FoodTalks logo/i, 'FBIF footer 不应含 FoodTalks logo');
+// 用户 2026-05-31 裁定：页脚必须由本工具【完整输出】（含关注公众号/logo/点击获取更多），
+// 旧「不输出这段」契约（及 CLAUDE.md 规则 20）作废。页脚拆为可勾选片段。
+test('页脚库：buildFooterHtml 全开 = 完整页脚（含关注公众号/logo/点击获取更多，真实二维码）', () => {
+  const full = buildFooterHtml({ biz_coop: true, join_group: true, follow_account: true, logo: true, more_info: true });
+  assert.match(full, /商务合作/, '含商务合作');
+  assert.match(full, /news\/30752/, '商务合作带真实链接');
+  assert.match(full, /加入微信群/, '含加入微信群');
+  assert.match(full, /Lemon/, '含 Lemon 微信号');
+  assert.match(full, /image\/news\/6e309987/, '含真实加群二维码（非占位符）');
+  assert.match(full, /关注公众号/, '含关注公众号（裁定：完整输出）');
+  assert.match(full, /b5b448f324a53820/, '含关注公众号真实二维码');
+  assert.match(full, /FoodTalks logo/, '含 FoodTalks logo');
+  assert.match(full, /点击获取更多/, '含点击获取更多');
+  assert.match(full, /www\.foodtalks\.cn\//, '点击获取更多带链接');
+  assert.doesNotMatch(full, /\[加入微信群二维码请在/, '不再有占位符');
+});
+
+test('页脚库：segments 关闭则不输出对应片段，全关返回空串', () => {
+  const simple = buildFooterHtml({ biz_coop: true });
+  assert.match(simple, /商务合作/);
+  assert.doesNotMatch(simple, /加入微信群/, 'join_group 关则无加群');
+  assert.doesNotMatch(simple, /关注公众号/, 'follow_account 关则无关注公众号');
+  assert.equal(buildFooterHtml({}), '', '全关返回空串');
+  assert.equal(buildFooterHtml(), '', 'segments 缺省返回空串');
+});
+
+test('页脚库：FOOTER_PRESETS 含预设，fbif-original 全开含关注公众号', () => {
+  const ids = FOOTER_PRESETS.map(x => x.id);
+  assert.ok(ids.includes('fbif-original') && ids.includes('none'));
+  const orig = FOOTER_PRESETS.find(x => x.id === 'fbif-original');
+  assert.equal(orig.segments.follow_account, true, 'fbif-original 含关注公众号');
+});
+
+test('作者识别：转载整行「本文为X原创…作者…」也提升为 author', () => {
+  const elems = [p('本文为食品内参原创，作者：内参君，编审：橘子，转载请联系出处。'), p('正文。')];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG);
+  assert.equal(out[0].k, 'author', '转载整行应提升为 author');
+});
+
+test('作者识别：开头「作者：X」+「编辑：Y」分两段 → 合并为单 author 行', () => {
+  const elems = [p('作者：Pride'), p('编辑：Bobo'), p('正文。')];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG);
+  assert.equal(out[0].k, 'author');
+  assert.match(out[0].text, /作者：Pride，编辑：Bobo。/, '作者+编辑合并为一行');
+  assert.equal(out.length, 2, '编辑段被并入，数组长度 -1');
+  assert.equal(out[1].k, 'p');
+});
+
+test('buildSiteFooterTipElem：转载文用提取的来源机构名替换 FBIF，标题带原文链接', () => {
+  const e = buildSiteFooterTipElem('某标题', { source: '食品内参', sourceUrl: 'https://mp.weixin.qq.com/s/abc' });
+  const text = e.rest_runs.map(r => r.text).join('');
+  assert.match(text, /本文为食品内参原创/, '用原来源机构');
+  assert.doesNotMatch(text, /FBIF食品饮料创新/, '转载文不写 FBIF');
+  const link = e.rest_runs.find(r => r.type === 'link');
+  assert.ok(link && link.href === 'https://mp.weixin.qq.com/s/abc', '标题带原文链接');
+});
+
+test('extractRepostSource：从「来源：X（ID：y）」提取纯机构名（去 ID）', () => {
+  const elems = [p('正文'), p('来源：品牌几何（ID：brand-vista）'), p('* 本文为转载文章。')];
+  assert.equal(extractRepostSource(elems), '品牌几何');
+});
+
+test('作者合成：开头无作者行但尾部有「来源：X」「作者：Y」→ 合成开头作者行（基石 62245）', () => {
+  const elems = [
+    p('正文开头。'), p('更多正文。'),
+    p('来源：食品内参'),
+    p('作者：内参君，编审：橘子'),
+    p('* 本文为转载文章。'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true });
+  assert.equal(out[0].k, 'author', '开头应插入合成作者行');
+  assert.match(out[0].text, /本文为食品内参原创/);
+  assert.match(out[0].text, /作者：内参君，编审：橘子/);
+  assert.match(out[0].text, /转载请联系出处。$/);
+});
+
+test('作者合成：仅有来源、无独立作者段时合成「本文为X原创，转载请联系出处。」', () => {
+  const elems = [p('正文。'), p('来源：零售圈（ID: retaileco）'), p('* 本文为转载文章。')];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true });
+  assert.equal(out[0].k, 'author');
+  assert.equal(out[0].text, '本文为零售圈原创，转载请联系出处。');
+});
+
+test('作者合成：开头已有作者行时不重复合成', () => {
+  const elems = [p('作者：张三'), p('来源：某媒体'), p('作者：李四')];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true });
+  assert.equal(out[0].k, 'author');
+  assert.equal(out[0].text, '作者：张三');
+  assert.ok(!out.slice(1).some(e => e.k === 'author'), '不应额外合成作者行');
+});
+
+test('作者合成：非 isRepost 不合成', () => {
+  const elems = [p('正文。'), p('来源：X'), p('作者：Y')];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: false });
+  assert.notEqual(out[0].k, 'author');
+});
+
+test('buildAuthorLineFromSource：纯函数直测', () => {
+  assert.equal(
+    buildAuthorLineFromSource([p('来源：食品内参'), p('作者：内参君')]),
+    '本文为食品内参原创，作者：内参君，转载请联系出处。'
+  );
+  assert.equal(buildAuthorLineFromSource([p('正文无来源作者')]), '');
 });
 
 test('尾部清理：公众号"提示："页脚起全切，并补网站口径页脚（isRepost）', () => {
@@ -183,7 +280,8 @@ test('尾部清理：公众号"提示："页脚起全切，并补网站口径页
   // 末尾补了网站口径提示页脚
   const last = out[out.length - 1];
   assert.equal(last.k, 'tip', '末尾应是网站口径提示页脚');
-  const lastText = last.runs.map(r => r.text).join('');
+  assert.equal(last.title, '提示：', 'tip 应有 title 字段');
+  const lastText = last.rest_runs.map(r => r.text).join('');
   assert.match(lastText, /本文为FBIF食品饮料创新（ID：FoodInnovation）原创/, '网站口径声明');
   assert.match(lastText, /《星巴克曾花45亿买了茶品牌》/, '页脚带文章标题');
   assert.match(lastText, /不代表FoodTalks立场，转载请联系出处/, '网站口径立场声明');
@@ -222,8 +320,9 @@ test('尾部清理：正文里偶现"提示："（非公众号页脚）不被误
 
 test('buildSiteFooterTipElem：无标题时省略书名号段', () => {
   const e = buildSiteFooterTipElem('');
-  const text = e.runs.map(r => r.text).join('');
+  const text = e.rest_runs.map(r => r.text).join('');
   assert.equal(e.k, 'tip');
+  assert.equal(e.title, '提示：');
   assert.match(text, /原创，不代表FoodTalks立场/, '无标题时不应出现空书名号');
   assert.doesNotMatch(text, /《》/, '不应出现空书名号');
 });
