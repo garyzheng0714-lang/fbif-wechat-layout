@@ -32,7 +32,10 @@ export const RULE_PACKS = Object.freeze({
     id: 'ft-default',
     templateId: 'foodtalks-site',
     accountName: '网站默认',
-    previewAccountName: 'FoodTalks',
+    // 预览作者行显示名：对齐 foodtalks.cn 发布页（基石 62285 作者行为
+    // 「FBIF食品饮料创新」——文章是 FBIF 公众号搬运到网站，署名是 FBIF 而非
+    // FoodTalks 平台本身）。此前误配为「FoodTalks」，作者行显示错。
+    previewAccountName: 'FBIF食品饮料创新',
     behaviorAccountName: 'FoodTalks',
     avatarUrl: '/fbif-avatar.webp',
     footerUrl: '',
