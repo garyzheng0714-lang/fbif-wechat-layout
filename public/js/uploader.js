@@ -114,33 +114,23 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
     }
     if (mmbizUrls.size > 0) {
       onLog && onLog('info', '网站渠道：转存 mmbiz 图到 CDN', { count: mmbizUrls.size });
-      // 并发取图转 base64（IO 密集，可并行）；字符串替换收集后串行做（避免并发改
-      // articleCopy 引用导致丢更新）。并发上限防止一次性打爆 image-proxy。
+      // 串行取图转 base64。实测瓶颈不在取图（image-proxy 热缓存 ~3ms），而在后续
+      // 上游上传服务，且上游会串行化并发上传（实测 6 张并发 1.01x，无提速）。冷取
+      // mmbiz 并发还会触发微信反爬限流反而更慢。故此处保持串行，简单可靠。
       const urlList = [...mmbizUrls];
-      const MMBIZ_CONCURRENCY = Math.min(urlList.length, 6);
-      const fetched = []; // { url, dataUrl }
       let done = 0;
       onProgress && onProgress(0, urlList.length);
-      let next = 0;
-      async function mmbizWorker() {
-        while (next < urlList.length) {
-          const url = urlList[next++];
-          try {
-            const dataUrl = await mmbizUrlToDataUrl(url);
-            fetched.push({ url, dataUrl });
-          } catch (err) {
-            onLog && onLog('error', 'mmbiz 取图失败', { url: url.slice(0, 60), err: String(err) });
-            mmbizFailedSrcs.push(url);
-          }
-          done++;
-          onProgress && onProgress(done, urlList.length);
+      for (const url of urlList) {
+        try {
+          const dataUrl = await mmbizUrlToDataUrl(url);
+          articleCopy = articleCopy.split(url).join(dataUrl);
+          footerCopy = footerCopy.split(url).join(dataUrl);
+        } catch (err) {
+          onLog && onLog('error', 'mmbiz 取图失败', { url: url.slice(0, 60), err: String(err) });
+          mmbizFailedSrcs.push(url);
         }
-      }
-      await Promise.all(Array.from({ length: MMBIZ_CONCURRENCY }, () => mmbizWorker()));
-      // 串行替换：每个 url 全局替换为其 base64，无并发竞态。
-      for (const { url, dataUrl } of fetched) {
-        articleCopy = articleCopy.split(url).join(dataUrl);
-        footerCopy = footerCopy.split(url).join(dataUrl);
+        done++;
+        onProgress && onProgress(done, urlList.length);
       }
     }
   }
