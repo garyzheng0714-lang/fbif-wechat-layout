@@ -137,15 +137,29 @@ body.channel-portal-body {
 /* 仅作用于 .preview-site 容器（site.html 的 <main class="preview-panel preview-site">） */
 /* 公众号 app.html 不带 .preview-site modifier，因此样式完全隔离 */
 
-/* 隐藏公众号专属卡片包装：账号信息行（公众号名/日期/地点）+ 底部栏。
- * 标题（.wx-title）保留显示——FoodTalks 文章页同样有大标题，藏掉它会让预览
- * 看起来割裂（用户 2026-05-30 确认：预览只显示标题，不要公众号账号行）。
- * 注意：这是“显示层”改动，复制层(_articleCopy)不含标题（标题单独填后台输入框），
- * 不受影响。 */
-.preview-site .wx-meta,
+/* 隐藏公众号底部栏（点赞/在看图标那一坨）——FoodTalks 文章页没有。 */
 .preview-site .wx-footer {
   display: none !important;
 }
+
+/* 标题下作者行：仿 foodtalks.cn 文章页（账号名 + 日期）。纯预览装饰，复制层
+ * 不含（标题/作者都单独填后台字段）。账号名 + 日期是真数据；不渲染阅读数/标签
+ * （抓取无此字段）。地点(.wx-meta-loc「上海」)隐藏——FoodTalks 作者行无地点。
+ * 用户 2026-05-31 确认：预览仿真外壳只到作者行这一档。 */
+.preview-site .wx-meta {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+.preview-site .wx-meta .wx-meta-account { color: #1a1a1a; font-weight: 500; }
+.preview-site .wx-meta .wx-meta-gray { color: #9a9a9a; }
+.preview-site .wx-meta .ft-byline-icon {
+  display: inline-flex; align-items: center; color: #9a9a9a; margin-left: 6px;
+}
+.preview-site .wx-meta .ft-byline-icon:first-child { margin-left: 0; }
+.preview-site .wx-meta .wx-meta-loc { display: none; }
 
 /* 文章标题：FoodTalks 网站文章页风格（左对齐、27px 粗体） */
 .preview-site .preview-content {
