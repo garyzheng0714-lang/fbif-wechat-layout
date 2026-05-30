@@ -424,3 +424,28 @@ func TestInheritedFontSizePromotesBoldChild(t *testing.T) {
 		t.Errorf("inherited 20px + bold → h, got %s", b.K)
 	}
 }
+
+// ---- 参考来源块不被图注启发式误吞为 cap（基石 news/62285 结构）----
+// 真实文章里「参考来源：」前常有图（封面/配图），caption context 处于开启状态，
+// 参考来源行字号小、灰色、短，会被误标 cap 拆散。期望：整块走 txt。
+func TestReferenceSectionNotCaptioned(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/x.png" data-w="1080" data-ratio="0.5"></p>` +
+			`<p><span style="font-size:14px;color:#888888;">参考来源：</span></p>` +
+			`<p><span style="font-size:14px;color:#888888;">[1] Starbucks tea party, 2013, Fortune</span></p>` +
+			`<p><span style="font-size:14px;color:#888888;">—记者实地探访</span></p>` +
+			`<p><span style="font-size:14px;color:#888888;">[2] Teavana S-1, 2011, SEC</span></p>` +
+			`<p><span style="font-size:14px;color:#888888;">—IPO前财务数据</span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	// 参考来源头及之后所有 [n]/说明行都应是 txt，不能是 cap
+	for _, needle := range []string{"参考来源", "[1]", "—记者实地探访", "[2]", "—IPO前财务数据"} {
+		b := findBlockByText(blocks, needle)
+		if b == nil {
+			t.Fatalf("block %q not found", needle)
+		}
+		if b.K == "cap" {
+			t.Errorf("block %q 被误标为 cap，应为 txt（参考来源不是图注）", needle)
+		}
+	}
+}

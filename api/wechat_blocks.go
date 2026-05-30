@@ -76,6 +76,10 @@ type blockWalker struct {
 	blocks         []Block
 	captionContext bool
 	captionLines   int
+	// inRefSection: 进入「参考来源：」区后置真。该区内的 [n] 条目与「—说明」延续行
+	// 字号小、颜色灰，会被 caption 启发式误吞成 cap（拆散参考来源块）。置真后强制
+	// 这些行走 txt，交前端 refMode 统一识别为连续的 ref-item（无空行）。
+	inRefSection bool
 }
 
 type blockCtx struct {
@@ -150,6 +154,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			w.blocks = append(w.blocks, Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
 			w.captionContext = true
 			w.captionLines = 0
+			w.inRefSection = false
 			return
 		case "a":
 			href := getAttr(n, "href")
@@ -259,6 +264,25 @@ func (w *blockWalker) emit(cx *blockCtx) {
 		w.blocks = append(w.blocks, Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
+	}
+
+	// 参考来源区：「参考来源：」/「参考资料：」头开启该区；区内 [n] 条目与
+	// 「—说明」延续行强制走 txt（不进 caption 分支），避免被图注启发式误吞拆散。
+	trimmed := strings.TrimSpace(text)
+	if refSectionHeadRe.MatchString(trimmed) {
+		w.inRefSection = true
+		w.closeCaptionContext()
+		w.blocks = append(w.blocks, Block{K: "txt", Runs: runs})
+		return
+	}
+	if w.inRefSection {
+		if refItemRe.MatchString(trimmed) || refContinuationRe.MatchString(trimmed) {
+			w.closeCaptionContext()
+			w.blocks = append(w.blocks, Block{K: "txt", Runs: runs})
+			return
+		}
+		// 既非条目也非说明行 → 参考来源区结束
+		w.inRefSection = false
 	}
 
 	if w.captionContext && shouldAttachToCaptionGroup(cx, text, textLen, w.captionLines) {
@@ -389,6 +413,11 @@ type parsedStyle struct {
 // front (instead of running regexes over the whole string) makes it
 // impossible for a substring like `background-color` to accidentally
 // match the `color` rule, and makes per-property logic trivial.
+// 参考来源识别：头部「参考来源：/参考资料：」、条目「[n]」、说明延续行「— – ─ -」开头。
+var refSectionHeadRe = regexp.MustCompile(`^参考(?:来源|资料)[：:]?\s*$`)
+var refItemRe = regexp.MustCompile(`^\[\d+\]`)
+var refContinuationRe = regexp.MustCompile(`^[—–─-]`)
+
 var reFontSizeValue = regexp.MustCompile(`^\s*([0-9]*\.?[0-9]+)\s*(px|pt|em|rem|%)?`)
 var reFontWeightValue = regexp.MustCompile(`^(bold|bolder|[6-9]\d\d)\b`)
 
