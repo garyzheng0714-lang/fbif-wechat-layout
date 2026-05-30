@@ -461,10 +461,13 @@ export default {
   processDocx({ paragraphs, imgCache, config = {}, isRepost = false }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache);
     const behaved = applyFoodTalksBehavior(elems, config, { isRepost });
+    // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
+    // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
+    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved));
     return {
-      lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
+      lines: render(promoted, config),
       imgN,
-      headingN: behaved.filter(e => e.k === 'h').length,
+      headingN: promoted.filter(e => e.k === 'h').length,
     };
   },
 
@@ -472,10 +475,11 @@ export default {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
     const behaved = applyFoodTalksBehavior(elems, config, { isRepost: !!(opts && opts.isRepost), title });
+    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved));
     return {
-      lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
+      lines: render(promoted, config),
       imgN,
-      headingN: behaved.filter(e => e.k === 'h').length,
+      headingN: promoted.filter(e => e.k === 'h').length,
       title,
     };
   },
@@ -484,10 +488,11 @@ export default {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
     const behaved = applyFoodTalksBehavior(elems, config, { isRepost: !!(opts && opts.isRepost), title });
+    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved));
     return {
-      lines: render(promoteImageCaptions(promoteHeuristicHeadings(behaved)), config),
+      lines: render(promoted, config),
       imgN,
-      headingN: behaved.filter(e => e.k === 'h').length,
+      headingN: promoted.filter(e => e.k === 'h').length,
       title,
     };
   },
