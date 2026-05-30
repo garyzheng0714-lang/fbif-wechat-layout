@@ -22,6 +22,8 @@ const { applyFoodTalksBehavior, FBIF_FOOTER_HTML } = behaviorModule;
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
 const { promoteHeuristicHeadings } = headingModule;
+const imageWidthModule = await import('../image-width.js' + assetQuery);
+const { adaptiveImageWidth } = imageWidthModule;
 
 // ---- 图片注释智能识别 ----
 
@@ -148,17 +150,7 @@ function renderParagraph(runs) {
   return `<p style="text-align: justify;">${inner}</p>`;
 }
 
-// 极端狭长图自适应宽度（参考 /tmp/foodtalks-research/FoodtalksArticleLayout/layout-tool.html:2808-2818）
-function adaptiveImageWidth(naturalWidth, naturalHeight) {
-  const w = Number(naturalWidth || 0);
-  const h = Number(naturalHeight || 0);
-  if (!w || !h) return 600;
-  const ratio = h / w;
-  if (ratio >= 3) return 280;
-  if (ratio >= 2.2) return 360;
-  if (ratio >= 1.6) return 480;
-  return 600;
-}
+// adaptiveImageWidth（竖图400/横图600）已抽到 image-width.js（顶部 import），可独立单测。
 
 function renderImage(src, alt, naturalWidth, naturalHeight) {
   const safeSrc = escAttr(src || '');
@@ -423,12 +415,18 @@ function classifyBlocks(data) {
   for (const b of (data && data.blocks) || []) {
     if (!b || !b.k) continue;
     if (b.k === 'img') {
+      // 自适应宽度（adaptiveImageWidth）按 height/width 比例缩窄竖长图。URL 导入此前
+      // 只传 dataW、height=0，导致自适应完全不生效（恒返回 600）。这里补出 height：
+      // 优先 data-h，否则用 data-ratio（微信 = 高/宽）× 宽度反推。
+      const w = Number(b.dataW || 0) || 0;
+      const ratio = Number(b.dataRatio || 0) || 0;
+      const h = Number(b.dataH || 0) || (w && ratio ? Math.round(w * ratio) : 0);
       elems.push({
         k: 'img',
         src: b.src || '',
         alt: '',
-        width: Number(b.dataW || 0) || 0,
-        height: 0,
+        width: w,
+        height: h,
       });
       imgN += 1;
       continue;

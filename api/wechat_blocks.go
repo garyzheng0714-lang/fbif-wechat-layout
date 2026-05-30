@@ -13,12 +13,14 @@ import (
 // Shape matches the `elems` array produced by classifyMd in fbif.js so the
 // renderer can consume them without translation.
 type Block struct {
-	K       string `json:"k"`
-	Text    string `json:"text,omitempty"`
-	Runs    []Run  `json:"runs,omitempty"`
-	Src     string `json:"src,omitempty"`
-	DataW   string `json:"dataW,omitempty"`
-	Ordered bool   `json:"ordered,omitempty"`
+	K         string `json:"k"`
+	Text      string `json:"text,omitempty"`
+	Runs      []Run  `json:"runs,omitempty"`
+	Src       string `json:"src,omitempty"`
+	DataW     string `json:"dataW,omitempty"`
+	DataH     string `json:"dataH,omitempty"`
+	DataRatio string `json:"dataRatio,omitempty"`
+	Ordered   bool   `json:"ordered,omitempty"`
 }
 
 // Run is an inline fragment. Type ∈ {"txt", "link"}.
@@ -145,7 +147,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.blocks = append(w.blocks, Block{K: "img", Src: src, DataW: getAttr(n, "data-w")})
+			w.blocks = append(w.blocks, Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
 			w.captionContext = true
 			w.captionLines = 0
 			return

@@ -40,17 +40,18 @@ test('foodtalks-site template declares correct id and formats', () => {
 // 自动编号 ensureReferenceNumber 函数已删除，改为保留作者原始 [n] 标记
 // 由行为模板 applyFoodTalksBehavior 识别 ref-header / ref-item（参见后文 M2 case）。
 
-test('foodtalks-site template has adaptiveImageWidth with 280/360/480/600 thresholds', () => {
+// 图宽规则（用户 2026-05-30 确认，依据基石 news/62285）：竖图(高>宽)400，横图600。
+// adaptiveImageWidth 抽到 image-width.js，真实行为单测见 tests/image-width.test.mjs。
+test('foodtalks-site imports adaptiveImageWidth from image-width.js', () => {
+  assert.match(templateSource, /image-width\.js/);
   assert.match(templateSource, /adaptiveImageWidth/);
-  assert.match(templateSource, /\b280\b/);
-  assert.match(templateSource, /\b360\b/);
-  assert.match(templateSource, /\b480\b/);
 });
 
-test('foodtalks-site template uses aspect ratio thresholds 3 / 2.2 / 1.6', () => {
-  assert.match(templateSource, /ratio\s*>=\s*3/);
-  assert.match(templateSource, /ratio\s*>=\s*2\.2/);
-  assert.match(templateSource, /ratio\s*>=\s*1\.6/);
+// classifyBlocks 必须补出图片 height（data-h 或 data-w×data-ratio），否则自适应宽度
+// 对 URL 导入恒返回 600（拿不到比例）。
+test('foodtalks-site classifyBlocks derives image height from dataH or dataW×dataRatio', () => {
+  assert.match(templateSource, /dataRatio/);
+  assert.match(templateSource, /dataH/);
 });
 
 test('foodtalks-site has 13 image-caption keywords', () => {
