@@ -36,7 +36,9 @@ export function detectHeadingLevel(text) {
 // isBoldHeading: 整段加粗 → 标题。判据收紧到只认真标题，避开"整段加粗的强调正文"：
 //   1. 段内每个可见文本 run 都 bold（不能混排非粗体文本）
 //   2. 纯文本短（<= 36 字；实测两篇基准标题最长 25 字，正文段动辄上百字）
-//   3. 不以句末标点（。！？.!?）结尾——标题不收尾，强调正文句往往收尾
+//   3. 不以句号（。.）结尾——陈述句正文常以句号收尾；但问号/感叹号结尾要放行，
+//      因为疑问/感叹句标题真实存在（如基石 news/62244「毕业20年的老粉凭什么"回坑"？」）。
+//      实测两篇里被排除的"加粗强调正文"都是 43~45 字 + 句号结尾，靠句号 + 长度双重拦截。
 //   4. 不是图注/来源行
 // 段内允许逗号/顿号/冒号（"疯狂的梦想：5年要开到1000家店"是标题）。
 export function isBoldHeading(runs) {
@@ -45,7 +47,7 @@ export function isBoldHeading(runs) {
   if (!txtRuns.every(r => r.bold)) return false;
   const plain = txtRuns.map(r => r.text).join('').trim();
   if (plain.length === 0 || plain.length > 36) return false;
-  if (/[。！？!?.]$/.test(plain)) return false;
+  if (/[。.]$/.test(plain)) return false;
   if (CAPTION_LEAD_RE.test(plain)) return false;
   return true;
 }

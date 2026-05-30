@@ -32,6 +32,8 @@ const REAL_HEADINGS = [
   // MATCH/62244 的真实标题
   '一瓶能“大口畅饮”的碳酸饮料',
   '聚焦高中生群体，All in校园场景',
+  '毕业20年的老粉凭什么“回坑”？', // 疑问句标题：以问号结尾也要识别
+  '结语',
 ];
 
 for (const t of REAL_HEADINGS) {
@@ -50,6 +52,14 @@ test('isBoldHeading 拒绝加粗但以句号结尾的强调正文（MATCH 真实
   // "如今的增长，多亏了17年前，MATCH主动将品牌的目标人群…" 整段加粗、45字、以句号结尾 → 不是标题
   const t = '如今的增长，多亏了17年前，MATCH主动将品牌的目标人群，从“年轻人”收窄至“高中生”。';
   assert.equal(isBoldHeading([{ type: 'txt', text: t, bold: true }]), false);
+});
+
+test('isBoldHeading 放行短疑问句标题，但仍按长度拦截超长疑问句', () => {
+  // 短疑问句标题（基石 news/62244 真实标题）→ 升级
+  assert.equal(isBoldHeading([{ type: 'txt', text: '毕业20年的老粉凭什么“回坑”？', bold: true }]), true);
+  // 超长疑问句（>36 字）→ 仍被长度拦截，不误升级
+  const longQ = '这是一段非常长的加粗疑问句用来测试长度边界是否能正确拦截它吗真的能拦住吗？';
+  assert.equal(isBoldHeading([{ type: 'txt', text: longQ, bold: true }]), false);
 });
 
 test('isBoldHeading 拒绝超长加粗段（>36 字）', () => {
