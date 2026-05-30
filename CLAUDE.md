@@ -50,7 +50,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 19. **FoodTalks 网站规则与公众号物理隔离** — 渲染器（`public/js/templates/foodtalks-site.js`）、行为模板（`public/js/rule-behavior-foodtalks.js`）、页脚模块、署名颜色全套分离。公众号 Mote `#396FBC` 蓝色斜体不复用到网站；网站署名走 `#888888` 14px 斜体（2026-05-28 经 5 篇真实原生文章复核修正：`#7f7f7f` 是公众号搬运文痕迹色，非 FoodTalks 编辑部原生口径，依据见 `docs/superpowers/specs/2026-05-28-unified-rule-engine-design.md` §1.2）；公众号渲染器与网站渲染器之间不互相 import。修改任一侧规则不能波及另一侧——`public/js/templates/fbif.js` 在网站任务中必须字节级不动。
 
-20. **FBIF 页脚开关默认关** — 网站文章不输出"加入微信群+商务合作"段；只有手动打开侧栏「输出 FBIF 公众号原创页脚」开关才输出。开关状态写入 `localStorage` key=`ft.outputFbifFooter` (`'1'`/`'0'`)。FoodTalks 系统会自动追加"关注公众号 + FoodTalks logo + 点击获取更多"，**我们永远不输出这段**（否则会和系统页脚重复）。
+20. **页脚库（footer library）— 完整输出 + 可勾选片段**（2026-05-31 用户裁定，**推翻**旧"系统自动追加、永不输出关注公众号段"契约——经 6 篇真实基石复核，FoodTalks 后台源码本就带完整页脚，需由本工具复刻输出）。网站文章底部页脚由本工具**完整输出**，拆为 6 个可独立勾选片段：`tip`(提示声明) / `biz_coop`(商务合作) / `join_group`(加入微信群+二维码) / `follow_account`(关注公众号+二维码) / `logo`(FoodTalks logo) / `more_info`(点击获取更多)。固定资源 URL（6 篇基石核对 100% 一致）定义在 `public/js/rule-behavior-foodtalks.js` 的 `FOOTER_SEGMENTS`，由 `buildFooterHtml(segments)` 按开关拼接（tip 走正文流、其余在文末）。由 `config.modules.fbif_footer.segments.<key>` 控制；4 套预设 `FOOTER_PRESETS`(fbif-original/repost-simple/tip-only/none) + 左侧栏「页脚」面板勾选，不同文章选不同组合。状态写 `localStorage` key=`ft.footer.enabled`/`ft.footer.segments`（旧 `ft.outputFbifFooter` 自动迁移）。依据见 `docs/superpowers/specs/2026-05-31-ft-footer-library-and-fidelity.md`。
 
 21. **网站渠道默认走 ft-default 规则包** — site.html 通过 `getRulePackByPath(location.pathname)` 做渠道感知 fallback：`/ft/<任意 id>` 都会落到该渠道默认包 `ft-default`（templateId 是 `foodtalks-site`）。**禁止**裸用 `parsed.packId`——`/ft/default` 这种链接里的 `default` 在 registry 不存在，裸用会 fallback 到公众号 `fbif`，整套网站模板失效。
 
