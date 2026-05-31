@@ -87,7 +87,6 @@ body {
 }
 .sidebar-header {
   height: 48px; padding: 0 16px; flex-shrink: 0;
-  border-bottom: 1px solid var(--fs-divider);
   display: flex; align-items: center; gap: 8px;
 }
 .sidebar-logo-img { width: 28px; height: 28px; border-radius: var(--fs-r-s); object-fit: cover; }
@@ -96,9 +95,9 @@ body {
   flex: 1; overflow-y: auto; padding: 16px;
   display: flex; flex-direction: column; gap: 16px;
 }
-.sidebar-divider { height: 1px; background: var(--fs-divider); margin: 4px 0; }
+.sidebar-divider { height: 8px; }
 .sidebar-footer {
-  padding: 8px; border-top: 1px solid var(--fs-divider); flex-shrink: 0;
+  padding: 12px 8px 8px; flex-shrink: 0;
 }
 .mp-link {
   display: flex; align-items: center; gap: 6px;
@@ -119,19 +118,16 @@ body {
 
 /* Upload zone — 减线条：常驻虚线弱化为背景分区，保留拖拽功能性蓝边 */
 .upload-zone {
-  border: 1px dashed var(--fs-border-control);
   border-radius: var(--fs-r-m); padding: 24px 16px 20px;
   text-align: center; background: var(--fs-bg-nested); cursor: pointer;
-  transition: border-color var(--fs-t-mid) var(--fs-ease-out),
-              background var(--fs-t-mid) var(--fs-ease-out);
+  transition: background var(--fs-t-mid) var(--fs-ease-out);
 }
 .upload-zone:hover {
-  border-color: var(--fs-brand);
-  background: var(--fs-brand-soft);
+  background: var(--fs-bg-sunken);
 }
 .upload-zone.dragover {
-  border-color: var(--fs-brand); background: var(--fs-brand-soft);
-  border-style: solid;
+  background: var(--fs-brand-soft);
+  box-shadow: inset 0 0 0 1px var(--fs-brand);
 }
 .upload-zone.processing {
   pointer-events: none; opacity: 0.6;
@@ -147,9 +143,7 @@ input[type="file"] { display: none; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 4px;
-  padding-top: 14px;
-  border-top: 1px solid var(--fs-divider);
+  margin-top: 12px;
 }
 .active-rule-card.editing {
   gap: 7px;
@@ -442,7 +436,6 @@ input[type="file"] { display: none; }
 /* Batch list — 减线条：去外框，改背景分区 */
 .batch-list {
   background: var(--fs-bg-nested); border-radius: var(--fs-r-m); overflow: hidden;
-  box-shadow: var(--fs-sh-s1);
 }
 .batch-title {
   padding: 8px 12px; font-size: 12px; font-weight: 500; color: var(--fs-text-3);
@@ -603,11 +596,10 @@ input[type="file"] { display: none; }
 .ma-card {
   display: flex; flex-direction: column; gap: 8px;
   padding: 12px; border: 1px solid transparent;
-  border-radius: var(--fs-r-m); background: var(--fs-bg-card);
-  box-shadow: var(--fs-sh-s1);
-  transition: border-color var(--fs-t-fast) var(--fs-ease-out), background var(--fs-t-fast) var(--fs-ease-out), box-shadow var(--fs-t-fast) var(--fs-ease-out), transform var(--fs-t-fast) var(--fs-ease-out);
+  border-radius: var(--fs-r-m); background: var(--fs-bg-nested);
+  transition: border-color var(--fs-t-fast) var(--fs-ease-out), background var(--fs-t-fast) var(--fs-ease-out);
 }
-.ma-card:hover { background: var(--fs-bg-card); box-shadow: var(--fs-sh-s2); transform: translateY(-1px); }
+.ma-card:hover { background: var(--fs-bg-sunken); }
 .ma-card.dragging { opacity: 0.4; }
 .ma-card.drag-over {
   border-color: var(--fs-brand);
@@ -641,14 +633,14 @@ input[type="file"] { display: none; }
 
 /* Add button — 保留虚线（添加区语义信号） */
 .ma-add-btn {
-  padding: 12px; border: 1px dashed var(--fs-border-control);
+  padding: 12px; border: none;
   border-radius: var(--fs-r-m); background: var(--fs-bg-nested);
   color: var(--fs-text-2); font-size: 13px; font-weight: 500;
   font-family: inherit; cursor: pointer;
   transition: all var(--fs-t-fast) var(--fs-ease-out);
 }
 .ma-add-btn:hover {
-  border-color: var(--fs-brand); color: var(--fs-brand); background: var(--fs-brand-soft);
+  color: var(--fs-brand); background: var(--fs-bg-sunken);
 }
 .ma-add-btn:active { transform: scale(0.98); }
 

@@ -135,9 +135,7 @@ body.channel-portal-body {
 
 /* 高级选项折叠 — 飞书风（工具页侧栏，复用 app.css 共享的 --fs- token） */
 .ft-advanced-options {
-  margin-top: 4px;
-  border-top: 1px solid var(--fs-divider);
-  padding-top: 8px;
+  margin-top: 16px;
 }
 .ft-adv-summary {
   list-style: none;
