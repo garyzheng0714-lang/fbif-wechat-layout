@@ -34,7 +34,15 @@
       <span>FoodTalks 网站（测试中）</span>
     </a>
   </nav>
-  <div class="channel-bar-side channel-bar-side-right"></div>
+  <div class="channel-bar-side channel-bar-side-right">
+    <div class="preview-toolbar" id="previewToolbar">
+      <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
+      <button class="tb-icon" id="adminLockBtn" type="button" title="规则后台" aria-label="规则后台">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制全文</button>
+    </div>
+  </div>
 </header>
 
 <div class="app-layout">
@@ -97,14 +105,6 @@
 
   <!-- ======== Preview Panel ======== -->
   <main class="preview-panel">
-    <div class="preview-toolbar" id="previewToolbar">
-      <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
-      <button class="tb-icon" id="adminLockBtn" type="button" title="规则后台" aria-label="规则后台">
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </button>
-      <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制全文</button>
-    </div>
-
     <div class="preview-scroll" id="previewScroll">
       <!-- Empty state -->
       <div class="empty-state" id="emptyState">
