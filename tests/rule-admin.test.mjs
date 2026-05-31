@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { serverRuleConfigDocument } from '../public/js/admin-rule-payload.js';
 import { syncRuleVisualEditor } from '../public/js/admin-rule-visual-sync.js';
 
 async function readProjectFile(path) {
@@ -98,6 +99,20 @@ test('rule visual sync updates metadata, fields, colors, and toggles', () => {
   assert.equal(nodes.get('[data-color-hex="text_color"]').textContent, '#544545');
   assert.equal(toggle.attrs['aria-pressed'], 'true');
   assert.equal(toggled.has('on'), true);
+});
+
+test('rule admin strips JSON metadata before sending config to the server', () => {
+  const config = serverRuleConfigDocument({
+    schema_version: 2,
+    name: '只属于规则名称输入框',
+    description: '只属于说明输入框',
+    modules: { theme: { font_size: '16' } },
+  });
+
+  assert.deepEqual(config, {
+    schema_version: 2,
+    modules: { theme: { font_size: '16' } },
+  });
 });
 
 test('rule admin has configuration and rule-management views', async () => {
@@ -205,6 +220,7 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   // 保存注入：savePresetWithFooter 函数中含 fbif_footer
   assert.match(adminPanel, /savePresetWithFooter/);
   assert.match(adminPanel, /configDoc\.modules\.fbif_footer/);
+  assert.match(adminPanel, /serverRuleConfigDocument\(configDoc\)/);
 
   // 两处保存都调用 savePresetWithFooter 而非裸 saveRulePreset
   const saveCount = (adminPanel.match(/await savePresetWithFooter/g) || []).length;

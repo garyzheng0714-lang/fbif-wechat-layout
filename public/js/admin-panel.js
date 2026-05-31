@@ -24,6 +24,7 @@ import {
 import { createMoreArticlesRuleEditor } from './more-articles-rule-editor.js';
 import { createFooterLibraryEditor } from './footer-library-rule-editor.js';
 import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
+import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 
@@ -372,8 +373,7 @@ export function initAdminPanel(options = {}) {
   function updateStatusInline(text) {
     status = text || '';
     const el = overlay && overlay.querySelector('.admin-foot .admin-status');
-    if (el) el.textContent = status;
-  }
+    if (el) el.textContent = status; }
   function refreshVisualEditorFromConfig() {
     syncRuleVisualEditor({ overlay, schema: RULE_SCHEMA, config: workingConfig, name: workingName, description: workingDescription, fieldValue });
     bindMoreArticlesRuleEditor(); refreshWarnings();
@@ -803,7 +803,7 @@ export function initAdminPanel(options = {}) {
         if (oc.modules && oc.modules.mctoc) configDoc.modules.mctoc = oc.modules.mctoc;
         configDoc.modules.fbif_footer = JSON.parse(JSON.stringify(workingFooter || defaultFooterData()));
       }
-      const body = { id: preset.id, name: preset.name, description: preset.description, config: configDoc, behavior: preset.behavior };
+      const body = { id: preset.id, name: preset.name, description: preset.description, config: serverRuleConfigDocument(configDoc), behavior: preset.behavior };
       const resp = await fetch('/api/rules/admin/presets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': String(password || '').trim() }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
