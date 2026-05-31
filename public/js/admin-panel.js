@@ -11,7 +11,6 @@ import {
   listRulePresets,
   normalizeRuleConfig,
   parseRuleConfigDocument,
-  saveRulePreset,
   setActiveRulePreset,
   validateRuleConfig,
 } from './rule-presets.js';
@@ -24,7 +23,8 @@ import {
 } from './rule-behavior.js';
 import { createMoreArticlesRuleEditor } from './more-articles-rule-editor.js';
 import { createFooterLibraryEditor } from './footer-library-rule-editor.js';
-import { FOOTER_SEGMENTS_DEFAULT, FOOTER_SEGMENT_ORDER_DEFAULT, FOOTER_PRESETS_DEFAULT } from './footer-segments-defaults.js';
+import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
+import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 
 const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
@@ -152,6 +152,7 @@ export function initAdminPanel(options = {}) {
   let workingDescription = '';
   let jsonText = '';
   let jsonDirty = false;
+  let jsonSyncTimer = 0;
   let behaviorText = '';
   let behaviorDirty = false;
   let status = '';
@@ -182,6 +183,7 @@ export function initAdminPanel(options = {}) {
 
   function close() {
     if (!overlay) return;
+    window.clearTimeout(jsonSyncTimer);
     overlay.remove();
     overlay = null;
     document.removeEventListener('keydown', onKey);
@@ -369,8 +371,22 @@ export function initAdminPanel(options = {}) {
 
   function updateStatusInline(text) {
     status = text || '';
-    const el = overlay && overlay.querySelector('.admin-status');
+    const el = overlay && overlay.querySelector('.admin-foot .admin-status');
     if (el) el.textContent = status;
+  }
+  function refreshVisualEditorFromConfig() {
+    syncRuleVisualEditor({ overlay, schema: RULE_SCHEMA, config: workingConfig, name: workingName, description: workingDescription, fieldValue });
+    bindMoreArticlesRuleEditor(); refreshWarnings();
+  }
+
+  function applyJSONDraftToVisual(showStatus = false) {
+    const parsed = parseRuleConfigDocument(jsonText);
+    workingName = parsed.name || '未命名规则';
+    workingDescription = parsed.description;
+    workingConfig = parsed.config;
+    applyConfig(workingConfig, presetWithBehavior(selectedPreset()));
+    refreshVisualEditorFromConfig();
+    if (showStatus) updateStatusInline('JSON 已同步到表单');
   }
 
   function syncDirtyJSONBeforePersist() {
@@ -404,18 +420,6 @@ export function initAdminPanel(options = {}) {
   function isFtDefaultPack() {
     const pack = RULE_PACKS[currentAccountID()];
     return !!(pack && pack.templateId === 'foodtalks-site');
-  }
-
-  function defaultFooterData() {
-    return { enabled: false, active_preset_id: 'fbif-original',
-      segment_order: [...FOOTER_SEGMENT_ORDER_DEFAULT],
-      segments: Object.fromEntries(Object.entries(FOOTER_SEGMENTS_DEFAULT).map(([k, v]) => [k, { html_lines: [...v.html_lines] }])),
-      presets: FOOTER_PRESETS_DEFAULT.map(p => ({ ...p, segments: { ...p.segments } })) };
-  }
-
-  function footerFromPreset(preset) {
-    const raw = preset && preset.config && preset.config.modules && preset.config.modules.fbif_footer;
-    return raw ? JSON.parse(JSON.stringify(raw)) : defaultFooterData();
   }
 
   function visibleRulePacks() {
@@ -515,18 +519,21 @@ export function initAdminPanel(options = {}) {
         </section>`;
     }
     return `
-      <div data-role="rule-warnings">${renderWarningsHTML()}</div>
-      <section class="admin-rule-group admin-json-panel">
-        <div class="admin-json-head">
-          <h3>JSON 规则</h3>
-          <div class="admin-json-actions">
-            <button type="button" class="admin-secondary" data-action="validate-json">校验 JSON</button>
-            <button type="button" class="admin-secondary" data-action="apply-json">应用到预览</button>
+      <div class="admin-editor-split">
+        <section class="admin-code-zone admin-rule-group admin-json-panel">
+          <div class="admin-json-head">
+            <h3>JSON 规则</h3>
+            <div class="admin-json-actions">
+              <button type="button" class="admin-secondary" data-action="validate-json">校验</button>
+              <button type="button" class="admin-secondary" data-action="apply-json">同步</button>
+            </div>
           </div>
-        </div>
-        <textarea data-role="rule-json" spellcheck="false">${esc(jsonText)}</textarea>
-      </section>
-      ${renderGroups(workingConfig)}`;
+          <textarea data-role="rule-json" spellcheck="false">${esc(jsonText)}</textarea>
+        </section>
+        <section class="admin-visual-zone" aria-label="前端修改区"><div data-role="rule-warnings">${renderWarningsHTML()}</div>
+          ${renderGroups(workingConfig)}
+        </section>
+      </div>`;
   }
 
   function renderRulesEditor(optionsHTML) {
@@ -544,6 +551,8 @@ export function initAdminPanel(options = {}) {
         </label>
         <button type="button" class="admin-secondary" data-action="new">新建规则</button>
         <button type="button" class="admin-secondary" data-action="set-active">应用到当前公众号</button>
+        <button type="button" class="admin-secondary" data-action="save-as">复制为新规则</button>
+        <button type="button" class="admin-primary" data-action="save">保存修改</button>
       </div>
       ${renderApplicationBadges(selectedID)}
       <div class="admin-meta-grid">
@@ -589,10 +598,6 @@ export function initAdminPanel(options = {}) {
         </div>
         <div class="admin-foot">
           <div class="admin-status">${esc(status)}</div>
-          ${activeView === 'rules' ? `
-            <button type="button" class="admin-secondary" data-action="save-as">复制为新规则</button>
-            <button type="button" class="admin-primary" data-action="save">保存修改</button>
-          ` : ''}
         </div>
       </div>`;
     bindMain();
@@ -698,6 +703,14 @@ export function initAdminPanel(options = {}) {
     if (ruleJSON) ruleJSON.addEventListener('input', e => {
       jsonText = e.target.value;
       jsonDirty = true;
+      window.clearTimeout(jsonSyncTimer);
+      jsonSyncTimer = window.setTimeout(() => {
+        try {
+          applyJSONDraftToVisual(true);
+        } catch {
+          updateStatusInline('JSON 尚未同步');
+        }
+      }, 450);
     });
     const behaviorJSON = overlay.querySelector('[data-role="behavior-json"]');
     if (behaviorJSON) behaviorJSON.addEventListener('input', e => {
@@ -717,19 +730,8 @@ export function initAdminPanel(options = {}) {
     const applyJSONBtn = overlay.querySelector('[data-action="apply-json"]');
     if (applyJSONBtn) applyJSONBtn.addEventListener('click', () => {
       try {
-        const parsed = parseRuleConfigDocument(jsonText);
-        const nameInput = overlay.querySelector('[data-role="preset-name"]');
-        const descriptionInput = overlay.querySelector('[data-role="preset-description"]');
-        workingName = parsed.name || '未命名规则';
-        workingDescription = parsed.description;
-        if (nameInput) nameInput.value = workingName;
-        if (descriptionInput) descriptionInput.value = parsed.description;
-        workingConfig = parsed.config;
-        const selected = selectedPreset();
-        jsonDirty = false;
-        applyConfig(workingConfig, presetWithBehavior(selected));
+        applyJSONDraftToVisual(false);
         updateStatusInline('已应用 JSON 到当前预览，保存后才会持久生效');
-        renderMain();
       } catch (err) {
         updateStatusInline(err.message || 'JSON 应用失败');
       }

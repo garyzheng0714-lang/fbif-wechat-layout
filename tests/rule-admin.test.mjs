@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { syncRuleVisualEditor } from '../public/js/admin-rule-visual-sync.js';
 
 async function readProjectFile(path) {
   return readFile(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -14,6 +15,9 @@ test('rule admin exposes JSON editing and new-rule controls', async () => {
   assert.match(adminPanel, /data-role="rule-json"/);
   assert.match(adminPanel, /data-action="validate-json"/);
   assert.match(adminPanel, /data-action="apply-json"/);
+  assert.match(adminPanel, /admin-editor-split/);
+  assert.match(adminPanel, /syncRuleVisualEditor/);
+  assert.match(adminPanel, /JSON 已同步到表单/);
   assert.match(adminPanel, /data-action="new"/);
   assert.match(adminPanel, /syncDirtyJSONBeforePersist/);
   assert.match(adminPanel, /syncDirtyJSONBeforePersist\(\);[\s\S]*savePresetWithFooter|syncDirtyJSONBeforePersist\(\);[\s\S]*saveRulePreset/);
@@ -46,11 +50,54 @@ test('rule admin save-as generates a unique id instead of overwriting same-name 
 
 test('rule admin lets JSON explicitly clear a saved description', async () => {
   const adminPanel = await readProjectFile('public/js/admin-panel.js');
+  const visualSync = await readProjectFile('public/js/admin-rule-visual-sync.js');
 
   assert.match(adminPanel, /workingDescription = parsed\.description;/);
-  assert.match(adminPanel, /descriptionInput\.value = parsed\.description;/);
+  assert.match(visualSync, /descriptionInput\.value = description;/);
   assert.doesNotMatch(adminPanel, /if \(parsed\.description\) workingDescription/);
-  assert.doesNotMatch(adminPanel, /if \(parsed\.description && descriptionInput\)/);
+  assert.doesNotMatch(visualSync, /if \(description\) descriptionInput/);
+});
+
+test('rule visual sync updates metadata, fields, colors, and toggles', () => {
+  const nodes = new Map();
+  const addNode = (selector, node = {}) => {
+    nodes.set(selector, node);
+    return node;
+  };
+  addNode('[data-role="preset-name"]', { value: 'old' });
+  addNode('[data-role="preset-description"]', { value: 'old' });
+  addNode('input[data-rule-key="font_size"]', { value: '15' });
+  addNode('input[data-rule-key="text_color"]', { value: '#000000' });
+  addNode('[data-color-hex="text_color"]', { textContent: '#000000' });
+  const toggled = new Set();
+  const toggle = addNode('.admin-toggle[data-rule-key="footer_enabled"]', {
+    classList: { toggle(name, on) { if (on) toggled.add(name); else toggled.delete(name); } },
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = value; },
+  });
+
+  syncRuleVisualEditor({
+    overlay: { querySelector: selector => nodes.get(selector) || null },
+    schema: [
+      { fields: [
+        { key: 'font_size', type: 'number' },
+        { key: 'text_color', type: 'color' },
+        { key: 'footer_enabled', type: 'boolean' },
+      ] },
+    ],
+    config: { font_size: '16', text_color: '#544545', footer_enabled: true },
+    name: '新规则',
+    description: '',
+    fieldValue: (config, field) => config[field.key],
+  });
+
+  assert.equal(nodes.get('[data-role="preset-name"]').value, '新规则');
+  assert.equal(nodes.get('[data-role="preset-description"]').value, '');
+  assert.equal(nodes.get('input[data-rule-key="font_size"]').value, '16');
+  assert.equal(nodes.get('input[data-rule-key="text_color"]').value, '#544545');
+  assert.equal(nodes.get('[data-color-hex="text_color"]').textContent, '#544545');
+  assert.equal(toggle.attrs['aria-pressed'], 'true');
+  assert.equal(toggled.has('on'), true);
 });
 
 test('rule admin has configuration and rule-management views', async () => {
@@ -110,15 +157,18 @@ test('rule admin exposes behavior-code editing and validation preview', async ()
 
 test('rule admin card editor has dedicated layout styles', async () => {
   const appHTML = await readProjectFile('public/app.html');
+  const siteHTML = await readProjectFile('public/site.html');
   const appCSS = await readProjectFile('public/app.css');
   const ruleAdminCSS = await readProjectFile('public/css/rule-admin.css');
 
   assert.match(appHTML, /<link rel="stylesheet" href="\/css\/rule-admin\.css">/);
+  assert.match(siteHTML, /<link rel="stylesheet" href="\/css\/rule-admin\.css">/);
   assert.match(appHTML, /href="\/app\.css"[\s\S]*href="\/css\/rule-admin\.css"[\s\S]*href="\/css\/wx-theme\.css"/);
   assert.match(ruleAdminCSS, /\.ma-rule-field\s+input\[type="url"\]/);
   assert.match(ruleAdminCSS, /\.ma-rule-field\s+textarea:focus/);
   assert.match(ruleAdminCSS, /@media[\s\S]*\.ma-rule-field\s*\{[^}]*grid-template-columns:\s*1fr;/);
-  assert.match(ruleAdminCSS, /\.ma-rule-card\s+\.admin-json-actions\s*\{[^}]*flex-wrap:\s*wrap;/);
+  assert.match(ruleAdminCSS, /\.ma-rule-card-head/);
+  assert.match(ruleAdminCSS, /\.ma-rule-card-foot\s*\{[^}]*flex-wrap:\s*wrap;/);
   assert.doesNotMatch(appCSS, /\.ma-rule-/);
   assert.ok(appCSS.split('\n').length <= 900);
 });

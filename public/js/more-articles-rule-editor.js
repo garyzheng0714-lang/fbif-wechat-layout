@@ -42,6 +42,10 @@ function draftMoreArticleCard() {
   });
 }
 
+function cardSummary(card) {
+  return card.title || card.href || '未命名文章';
+}
+
 export function sameMoreArticleCardSnapshot(a, b) {
   return JSON.stringify(normalizeMoreArticleDefaultCard(a)) ===
     JSON.stringify(normalizeMoreArticleDefaultCard(b));
@@ -91,38 +95,50 @@ function cardFromItem(item, card) {
   });
 }
 
-function renderCard(card, index, total) {
+function renderCard(card, index, total, isOpen) {
   return `
-    <div class="ma-rule-card" data-index="${index}">
-      <label class="admin-field ma-rule-field">
-        <span>公众号文章链接</span>
-        <input type="url" data-role="ma-rule-url" value="${esc(card.href)}">
-      </label>
-      <label class="admin-field ma-rule-field">
-        <span>标题</span>
-        <input type="text" data-role="ma-rule-title" value="${esc(card.title)}">
-      </label>
-      <label class="admin-field ma-rule-field">
-        <span>封面图链接</span>
-        <input type="url" data-role="ma-rule-cover" value="${esc(card.imgurl)}">
-      </label>
-      <label class="admin-field ma-rule-field">
-        <span>候选图片链接（每行一个）</span>
-        <textarea data-role="ma-rule-image-urls" spellcheck="false">${esc((card.image_urls || []).join('\n'))}</textarea>
-      </label>
-      <div class="admin-json-actions">
-        <button type="button" class="admin-secondary" data-action="fetch-meta">抓取标题和图片</button>
-        <button type="button" class="admin-secondary" data-action="move-up" ${index === 0 ? 'disabled' : ''}>上移</button>
-        <button type="button" class="admin-secondary" data-action="move-down" ${index >= total - 1 ? 'disabled' : ''}>下移</button>
-        <button type="button" class="admin-secondary danger" data-action="remove-card">删除</button>
+    <div class="ma-rule-card ${isOpen ? 'open' : ''}" data-index="${index}">
+      <div class="ma-rule-card-head">
+        <button type="button" class="ma-rule-card-toggle" data-action="toggle-card">
+          <span class="ma-rule-card-index">${index + 1}</span>
+          <span class="ma-rule-card-title">${esc(cardSummary(card))}</span>
+        </button>
+        <div class="ma-rule-card-actions">
+          <button type="button" class="admin-secondary" data-action="move-up" ${index === 0 ? 'disabled' : ''}>上移</button>
+          <button type="button" class="admin-secondary" data-action="move-down" ${index >= total - 1 ? 'disabled' : ''}>下移</button>
+          <button type="button" class="admin-secondary danger" data-action="remove-card">删除</button>
+        </div>
       </div>
-      <div class="admin-status" data-role="ma-rule-status"></div>
+      ${isOpen ? `
+        <div class="ma-rule-card-body">
+          <label class="admin-field ma-rule-field">
+            <span>文章链接</span>
+            <input type="url" data-role="ma-rule-url" value="${esc(card.href)}">
+          </label>
+          <label class="admin-field ma-rule-field">
+            <span>标题</span>
+            <input type="text" data-role="ma-rule-title" value="${esc(card.title)}">
+          </label>
+          <label class="admin-field ma-rule-field">
+            <span>封面图</span>
+            <input type="url" data-role="ma-rule-cover" value="${esc(card.imgurl)}">
+          </label>
+          <label class="admin-field ma-rule-field">
+            <span>候选图片</span>
+            <textarea data-role="ma-rule-image-urls" spellcheck="false">${esc((card.image_urls || []).join('\n'))}</textarea>
+          </label>
+          <div class="ma-rule-card-foot">
+            <button type="button" class="admin-secondary" data-action="fetch-meta">抓取标题和图片</button>
+            <div class="admin-status" data-role="ma-rule-status"></div>
+          </div>
+        </div>` : ''}
     </div>`;
 }
 
 export function createMoreArticlesRuleEditor({ config, onChange } = {}) {
   const root = document.createElement('div');
   let currentConfig = configWithCards(config || {}, cardsFromConfig(config || {}));
+  let openIndex = cardsFromConfig(currentConfig).length ? 0 : -1;
 
   function emit(nextConfig, shouldRender = true) {
     currentConfig = nextConfig;
@@ -135,7 +151,6 @@ export function createMoreArticlesRuleEditor({ config, onChange } = {}) {
     root.innerHTML = `
       <div class="ma-rule-editor" data-role="more-articles-rule-card-editor">
         <h3>默认推荐文章</h3>
-        <p>保存后，新导入文章会默认使用这组推荐文章；之后仍可在编辑器里单篇调整。</p>
         <label class="admin-field ma-rule-field ma-rule-toggle-row">
           <span>启用底部更多文章</span>
           <button type="button" class="toggle-switch admin-toggle ${currentConfig.more_articles_enabled === false ? '' : 'on'}" data-action="toggle-enabled" aria-pressed="${currentConfig.more_articles_enabled === false ? 'false' : 'true'}">
@@ -143,7 +158,7 @@ export function createMoreArticlesRuleEditor({ config, onChange } = {}) {
           </button>
         </label>
         <div data-role="ma-rule-list">
-          ${cards.length ? cards.map((card, index) => renderCard(card, index, cards.length)).join('') : '<div class="admin-rule-ok">还没有默认文章。可以先添加一篇，再粘贴公众号链接。</div>'}
+          ${cards.length ? cards.map((card, index) => renderCard(card, index, cards.length, index === openIndex)).join('') : '<div class="admin-rule-ok">还没有默认文章。</div>'}
         </div>
         <button type="button" class="admin-secondary" data-action="add-card">添加文章</button>
       </div>`;
@@ -165,6 +180,7 @@ export function createMoreArticlesRuleEditor({ config, onChange } = {}) {
       return;
     }
     if (action === 'add-card') {
+      openIndex = cardsFromConfig(currentConfig).length;
       emit(addDefaultMoreArticleCard(currentConfig));
       return;
     }
@@ -172,15 +188,23 @@ export function createMoreArticlesRuleEditor({ config, onChange } = {}) {
     const item = e.target.closest('[data-index]');
     const index = Number(item && item.dataset.index);
     if (!item || !Number.isInteger(index)) return;
+    if (action === 'toggle-card') {
+      openIndex = openIndex === index ? -1 : index;
+      render();
+      return;
+    }
     if (action === 'remove-card') {
+      openIndex = Math.min(openIndex, cardsFromConfig(currentConfig).length - 2);
       emit(removeDefaultMoreArticleCard(currentConfig, index));
       return;
     }
     if (action === 'move-up') {
+      openIndex = Math.max(0, index - 1);
       emit(moveDefaultMoreArticleCard(currentConfig, index, -1));
       return;
     }
     if (action === 'move-down') {
+      openIndex = Math.min(cardsFromConfig(currentConfig).length - 1, index + 1);
       emit(moveDefaultMoreArticleCard(currentConfig, index, 1));
       return;
     }

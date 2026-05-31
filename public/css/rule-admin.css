@@ -10,13 +10,6 @@
   margin: 0;
 }
 
-.ma-rule-editor p {
-  margin: -4px 0 2px;
-  color: var(--fs-text-2, #646A73);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 .ma-rule-toggle-row {
   display: flex;
   align-items: center;
@@ -33,13 +26,72 @@
 }
 
 .ma-rule-card {
+  overflow: hidden;
+  border-radius: var(--fs-r-m, 8px);
+  background: var(--fs-bg-card, #ffffff);
+  box-shadow: var(--fs-sh-s1, 0 1px 3px rgba(31,35,39,0.04), 0 1px 2px rgba(31,35,39,0.03));
+}
+
+.ma-rule-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--fs-bg-nested, #F7F8FA);
+}
+
+.ma-rule-card-toggle {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--fs-text-1, #1F2329);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ma-rule-card-index {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--fs-r-full, 9999px);
+  background: var(--fs-brand-soft, #EBF1FF);
+  color: var(--fs-brand, #1456F0);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.ma-rule-card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ma-rule-card-actions,
+.ma-rule-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ma-rule-card-actions .admin-secondary {
+  padding: 6px 10px;
+}
+
+.ma-rule-card-body {
+  display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--fs-border-card, #E5E6EB);
-  border-radius: var(--fs-r-m, 8px);
-  background: var(--fs-bg-nested, #F7F8FA);
 }
 
 .ma-rule-field {
@@ -79,9 +131,9 @@
   line-height: 1.5;
 }
 
-.ma-rule-card .admin-json-actions {
+.ma-rule-card-foot {
+  justify-content: space-between;
   flex-wrap: wrap;
-  align-items: flex-start;
 }
 
 @media (max-width: 768px) {
@@ -90,12 +142,19 @@
   }
 
   .ma-rule-toggle-row,
-  .ma-rule-card .admin-json-actions {
+  .ma-rule-card-head,
+  .ma-rule-card-foot {
+    grid-template-columns: 1fr;
     align-items: stretch;
     flex-wrap: wrap;
   }
 
-  .ma-rule-card .admin-json-actions .admin-secondary {
+  .ma-rule-card-actions {
+    flex-wrap: wrap;
+  }
+
+  .ma-rule-card-actions .admin-secondary,
+  .ma-rule-card-foot .admin-secondary {
     flex: 1 1 136px;
   }
 }

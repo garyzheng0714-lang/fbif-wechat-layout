@@ -54,6 +54,16 @@ function fakeActionTarget(action) {
   };
 }
 
+function fakeIndexedActionTarget(action, index) {
+  return {
+    closest(selector) {
+      if (selector === '[data-action]') return { dataset: { action } };
+      if (selector === '[data-index]') return { dataset: { index: String(index) } };
+      return null;
+    },
+  };
+}
+
 test('more articles rule helpers update config without mutating the source object', () => {
   const source = {
     more_articles_enabled: false,
@@ -165,16 +175,38 @@ test('more article fetch snapshot detects edits beyond the URL', () => {
   assert.equal(sameMoreArticleCardSnapshot(requestCard, editedTitle), false);
 });
 
+test('more articles rule editor expands one card without losing the others', () => {
+  const base = {
+    more_articles_enabled: true,
+    more_articles_default_cards: [
+      { href: 'https://mp.weixin.qq.com/s/one', title: '第一篇' },
+      { href: 'https://mp.weixin.qq.com/s/two', title: '第二篇' },
+    ],
+  };
+
+  withFakeDocument(() => {
+    const editor = createMoreArticlesRuleEditor({ config: base });
+    assert.match(editor.innerHTML, /https:\/\/mp\.weixin\.qq\.com\/s\/one/);
+    assert.doesNotMatch(editor.innerHTML, /https:\/\/mp\.weixin\.qq\.com\/s\/two/);
+
+    editor.listeners.click({ target: fakeIndexedActionTarget('toggle-card', 1) });
+    assert.doesNotMatch(editor.innerHTML, /https:\/\/mp\.weixin\.qq\.com\/s\/one/);
+    assert.match(editor.innerHTML, /https:\/\/mp\.weixin\.qq\.com\/s\/two/);
+    assert.match(editor.innerHTML, /第一篇/);
+  });
+});
+
 test('more articles rule editor source exposes non-technical card editing controls', async () => {
   const source = await readFile(new URL('../public/js/more-articles-rule-editor.js', import.meta.url), 'utf8');
 
   assert.match(source, /createMoreArticlesRuleEditor/);
   assert.match(source, /data-role="ma-rule-url"/);
   assert.match(source, /data-action="fetch-meta"/);
+  assert.match(source, /data-action="toggle-card"/);
   assert.match(source, /fetchMoreArticleMetaCached/);
-  assert.match(source, /保存后，新导入文章会默认使用这组/);
   assert.match(source, /ma-rule-editor/);
   assert.match(source, /ma-rule-toggle-row/);
+  assert.match(source, /ma-rule-card-head/);
   assert.match(source, /ma-rule-field/);
   assert.doesNotMatch(source, /<section class="admin-rule-group/);
 });
