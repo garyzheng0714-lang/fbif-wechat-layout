@@ -517,6 +517,17 @@ function loadConfig() {
   return normalizeRuleConfig((window._activeConfig && window._activeConfig.config) || loadLocalRuleConfig(activeRulePack.id));
 }
 
+// 从服务端激活规则取页脚库【内容】（segments html_lines / presets / segment_order）。
+// 绕过 normalizeRuleConfig——它只重建已知 module（theme/supporting/...），会丢弃结构化的
+// fbif_footer。无服务端内容时返回空对象，由 buildFooterHtml 降级到 footer-segments-defaults。
+function serverFooterLibrary() {
+  const ac = window._activeConfig || {};
+  let cfg = ac.config || {};
+  if (cfg && cfg.config && cfg.config.modules) cfg = cfg.config; // 兼容 schema_version 2 嵌套
+  const mods = (cfg && cfg.modules) || {};
+  return (mods.fbif_footer && typeof mods.fbif_footer === 'object') ? mods.fbif_footer : {};
+}
+
 // 把当前规则（扁平参数 + 行为 + 模块开关）注入排版引擎的渲染配置。
 // 命门：扁平参数（muted_color 等）必须并进去，否则网站模板读不到，
 // 后台改颜色不生效（见 specs/2026-05-28-unified-rule-engine-design.md §3）。
@@ -527,14 +538,18 @@ function syncEngineConfig(triggerRerender) {
   const prevModules = prev.modules || {};
   const serverBehavior = (window._activeConfig && window._activeConfig.behavior) || {};
   const footerEnabled = localStorage.getItem('ft.footer.enabled') === '1';
-  let footerSegments = {};
-  try { footerSegments = JSON.parse(localStorage.getItem('ft.footer.segments') || '{}'); } catch (e) {}
+  let footerActiveSegments = {};
+  try { footerActiveSegments = JSON.parse(localStorage.getItem('ft.footer.segments') || '{}'); } catch (e) {}
+  // 页脚库【内容】（segments html_lines / presets / segment_order）以服务端 /api/rules
+  // 为准——直接从 raw _activeConfig.config 取，绕过 normalizeRuleConfig（它只认已知
+  // module、会丢弃结构化的 fbif_footer）。服务端无内容时由 buildFooterHtml 降级默认。
+  const serverFooter = serverFooterLibrary();
   const cfg = {
     ...flat,
     behavior: serverBehavior,
     modules: {
       ...prevModules,
-      fbif_footer: { enabled: footerEnabled, segments: footerSegments },
+      fbif_footer: { ...serverFooter, enabled: footerEnabled, active_segments: footerActiveSegments },
       // 网站渠道 h2 默认不输出 mctoc 锚点 id —— FoodTalks 后台生成目录时会自己加
       // （用户 2026-05-30 确认），基石 news/62285 的 h2 也不带 id。默认关，避免与后台冲突。
       mctoc: prevModules.mctoc || { enabled: false },

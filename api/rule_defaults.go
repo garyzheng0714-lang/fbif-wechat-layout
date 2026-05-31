@@ -1,0 +1,231 @@
+package main
+
+// rule_defaults.go — 规则默认值生成（从 rule_presets.go 拆出，保持单文件 ≤900 行）。
+// 仅含 default* 默认值构造函数；存储读写/校验/HTTP 逻辑仍在 rule_presets.go。
+
+import "time"
+
+func defaultRuleConfig() map[string]any {
+	return map[string]any{
+		"font_size":                   "15",
+		"heading_size":                "18",
+		"text_color":                  "#544545",
+		"link_color":                  "#0070C0",
+		"muted_color":                 "#888888",
+		"line_height":                 "1.75",
+		"letter_spacing":              "0.034",
+		"font_family":                 "PingFang SC",
+		"footer_enabled":              true,
+		"skip_upload":                 true,
+		"paragraph_margin_x":          "8",
+		"paragraph_gap":               "20",
+		"caption_font_size":           "12",
+		"attribution_font_size":       "15",
+		"blockquote_padding_left":     "12",
+		"blockquote_border_width":     "3",
+		"md_heading_max_chars":        "60",
+		"decorative_image_max_px":     "640",
+		"more_articles_enabled":       true,
+		"more_articles_slots":         "3",
+		"more_articles_default_cards": defaultMoreArticleCards(),
+		"banner_overlay_alpha":        "0.47058823529411764",
+		"banner_title_x":              "61",
+		"banner_title_y":              "92",
+		"banner_title_width":          "878",
+		"banner_title_box_height":     "116",
+		"banner_title_font_size":      "48",
+		"banner_title_line_height":    "70",
+		"banner_title_max_lines":      "2",
+	}
+}
+
+func defaultMoreArticleCards() []any {
+	return []any{
+		map[string]any{
+			"href":   "https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652909589&idx=1&sn=d0bdeacee2b1ba7f03e48b38f91bbefa&scene=21",
+			"imgurl": "https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTRHibhuMnzJTuvhqr6Neq7ib00icPLXRyof5H9ARUnw9eWIshgyHibyfVXtgSRkWmOP2MWZjHLLbFec9VAFSYH6ZsarKf2LUC4ONEkE/0?wx_fmt=jpeg",
+			"title":  "没想到！英国人把豆腐做到英国第一，还像卖衣服一样出XXL超大号！",
+		},
+		map[string]any{
+			"href":   "https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652916388&idx=1&sn=b5605734c9c27ce2f8d54a6534b6543d&scene=21",
+			"imgurl": "https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTREtc1dUPY9VokWQTtQsdevBIcfoMMavrQNSVFoce8gDOtTqlWhciadMP6VJwzErl7HnzECBECMMILEXt653GCeub3nDZ8VrvTsM/0?wx_fmt=jpeg",
+			"title":  "做了20年糖，她把豆腐棒放在鸡胸肉旁边，5年卖出1亿根",
+		},
+		map[string]any{
+			"href":   "https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652906407&idx=1&sn=7ede62b74d3a5750c2c95ca40c216290&scene=21",
+			"imgurl": "https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTRGEHDwCvfSmEXO9VBXpibZHE3ZqLYicsIyhfiajfq9MNduKq03KbDeqU0iaj3WEQeBEY2j0mSCetzD1Jdic1iciaL7M1KZjHu8x5TLdmM/0?wx_fmt=jpeg",
+			"title":  "日本最牛包子铺，单店年销2329万，怎么做到的？",
+		},
+	}
+}
+
+func defaultRuleDocument() rulePresetDocument {
+	now := time.Now().UTC().Format(time.RFC3339)
+	return rulePresetDocument{
+		ActiveID: defaultRulePresetID,
+		Presets: []rulePreset{{
+			ID:          defaultRulePresetID,
+			Name:        "FBIF默认规则",
+			Description: "当前 FBIF 公众号排版默认参数",
+			Config:      defaultRuleConfig(),
+			Behavior:    defaultRuleBehavior(),
+			UpdatedAt:   now,
+		}},
+		UpdatedAt: now,
+	}
+}
+
+func defaultRuleAccounts(now string) map[string]ruleAccount {
+	return map[string]ruleAccount{
+		defaultRuleAccountID: {
+			Name:              "FBIF公众号",
+			ActiveRuleID:      defaultRulePresetID,
+			ActiveRuleVersion: 1,
+			UpdatedAt:         now,
+		},
+		foodTalksRuleAccountID: {
+			Name:              "FoodTalks什么是系列",
+			ActiveRuleID:      foodTalksDefaultRulePresetID,
+			ActiveRuleVersion: 1,
+			UpdatedAt:         now,
+		},
+		foodTalksSiteRuleAccountID: {
+			Name:              "FoodTalks 网站默认",
+			ActiveRuleID:      foodTalksSiteDefaultRulePresetID,
+			ActiveRuleVersion: 1,
+			UpdatedAt:         now,
+		},
+	}
+}
+
+func defaultRuleDefinitions(now string) map[string]ruleDefinition {
+	return map[string]ruleDefinition{
+		defaultRulePresetID: {
+			ID:          defaultRulePresetID,
+			Name:        "FBIF默认规则",
+			Description: "当前 FBIF 公众号排版默认参数",
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultRuleConfig(),
+				Behavior:  defaultRuleBehavior(),
+				CreatedAt: now,
+			}},
+			UpdatedAt: now,
+		},
+		foodTalksDefaultRulePresetID: {
+			ID:          foodTalksDefaultRulePresetID,
+			Name:        "FoodTalks什么是系列默认规则",
+			Description: "FoodTalks什么是系列的独立默认参数",
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultRuleConfig(),
+				Behavior:  defaultRuleBehavior(),
+				CreatedAt: now,
+			}},
+			UpdatedAt: now,
+		},
+		foodTalksSiteDefaultRulePresetID: {
+			ID:          foodTalksSiteDefaultRulePresetID,
+			Name:        "FoodTalks 网站默认规则",
+			Description: "FoodTalks 网站排版的独立默认参数（基于 8 篇真实文章采样）",
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultFoodTalksSiteRuleConfig(),
+				Behavior:  defaultFoodTalksSiteRuleBehavior(),
+				CreatedAt: now,
+			}},
+			UpdatedAt: now,
+		},
+	}
+}
+
+// defaultFoodTalksSiteRuleConfig 返回 FoodTalks 网站排版的默认参数配置。
+// 规则细节见 docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md
+func defaultFoodTalksSiteRuleConfig() map[string]any {
+	return map[string]any{
+		"image": map[string]any{
+			"width": 600,
+		},
+		"modules": map[string]any{
+			"mctoc": map[string]any{
+				"enabled": true,
+			},
+			"fbif_footer": defaultFBIFFooterModule(),
+		},
+	}
+}
+
+// 页脚库固定资源 URL（6 篇真实基石核对 100% 一致）。
+const (
+	ftFooterDecorImg  = "https://static.foodtalks.cn/image/post/07079a66940e1ff57e71b140e7e36357.webp"
+	ftFooterGroupQR   = "https://static.foodtalks.cn/image/news/6e309987660da9af009b89be08c4aa74ed78.png"
+	ftFooterAccountQR = "https://static.foodtalks.cn/image/post/b5b448f324a538209eb53379bef8dea9a7bf.jpg"
+	ftFooterLogo      = "https://static.foodtalks.cn/uploads/images/202007/e155b7852c10a72f7b73157fdf9c4bf0.png"
+)
+
+// defaultFBIFFooterModule 返回页脚库的服务端默认种子（规则后台可编辑、可增删预设）。
+// 与前端 public/js/footer-segments-defaults.js 的降级常量保持一致；真相以 /api/rules 为准。
+func defaultFBIFFooterModule() map[string]any {
+	seg := func(lines ...string) map[string]any {
+		arr := make([]any, len(lines))
+		for i, l := range lines {
+			arr[i] = l
+		}
+		return map[string]any{"html_lines": arr}
+	}
+	return map[string]any{
+		"enabled":          false,
+		"active_preset_id": "fbif-original",
+		"segment_order":    []any{"biz_coop", "join_group", "follow_account", "logo", "more_info"},
+		"segments": map[string]any{
+			"biz_coop": seg(
+				`<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*资讯投稿与商务合作，请查看&ldquo;<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/news/30752" target="_blank" rel="noopener">FoodTalks商务合作方案</a>&rdquo;，并联系Bobo。</span></em></p>`,
+			),
+			"join_group": seg(
+				`<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="`+ftFooterDecorImg+`" alt="" width="600" /></p>`,
+				`<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>`,
+				`<p><br /></p>`,
+				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+ftFooterGroupQR+`" alt="00" width="600" height="267" /></p>`,
+				`<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。</span></em></p>`,
+			),
+			"follow_account": seg(
+				`<p style="color: #01396a; font-size: 20px;"><strong>关注公众号</strong></p>`,
+				`<p><br /></p>`,
+				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+ftFooterAccountQR+`" alt="" width="600" height="221" /></p>`,
+			),
+			"logo": seg(
+				`<p><img style="max-width: 100%; height: 27px; width: 126px;" src="` + ftFooterLogo + `" alt="FoodTalks logo" width="130" height="27" border="0" /></p>`,
+			),
+			"more_info": seg(
+				`<p>点击获取更多<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/" target="_blank" rel="noopener">全球食品资讯</a></p>`,
+			),
+		},
+		"presets": []any{
+			map[string]any{"id": "fbif-original", "name": "FBIF原创完整页脚", "segments": map[string]any{"tip": true, "biz_coop": true, "join_group": true, "follow_account": true, "logo": true, "more_info": true}},
+			map[string]any{"id": "repost-simple", "name": "转载简版（提示+商务）", "segments": map[string]any{"tip": true, "biz_coop": true, "join_group": false, "follow_account": false, "logo": false, "more_info": false}},
+			map[string]any{"id": "tip-only", "name": "仅提示声明", "segments": map[string]any{"tip": true, "biz_coop": false, "join_group": false, "follow_account": false, "logo": false, "more_info": false}},
+			map[string]any{"id": "none", "name": "无页脚", "segments": map[string]any{"tip": false, "biz_coop": false, "join_group": false, "follow_account": false, "logo": false, "more_info": false}},
+		},
+	}
+}
+
+// defaultFoodTalksSiteRuleBehavior 返回 FoodTalks 网站行为模板的默认配置。
+// 三条识别正则：作者署名、提示行、参考来源段。
+func defaultFoodTalksSiteRuleBehavior() map[string]any {
+	return map[string]any{
+		"author_regex":     `^\s*作者[：:]\s*`,
+		"tip_regex":        `^\s*提示[：:]`,
+		"ref_header_regex": `^\s*参考(?:来源|资料)[：:]\s*$`,
+		"ref_item_regex":   `^\s*\[\d+\]`,
+	}
+}
+
+func defaultRuleStoreDocumentV2() ruleStoreDocumentV2 {
+	now := time.Now().UTC().Format(time.RFC3339)
+	return ruleStoreDocumentV2{
+		SchemaVersion: 2,
+		Accounts:      defaultRuleAccounts(now),
+		Rules:         defaultRuleDefinitions(now),
+		UpdatedAt:     now,
+	}
+}

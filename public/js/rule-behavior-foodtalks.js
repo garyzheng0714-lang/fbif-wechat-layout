@@ -12,6 +12,12 @@
 //
 // 规则来源：docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md §4
 
+import {
+  FOOTER_SEGMENTS_DEFAULT,
+  FOOTER_SEGMENT_ORDER_DEFAULT,
+  FOOTER_PRESETS_DEFAULT,
+} from './footer-segments-defaults.js';
+
 function runsToText(runs) {
   return (runs || [])
     .filter(r => r.type === 'txt' || r.type === 'link')
@@ -274,63 +280,34 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
 // ─────────────────────────────────────────────────────────────────────────
 // 页脚库（footer library）
 //
-// 用户 2026-05-31 裁定：网站文章底部页脚必须由本工具【完整输出】（含「关注公众号
-// + FoodTalks logo + 点击获取更多」），用固定 static.foodtalks.cn 资源复刻——
-// 不再依赖 FoodTalks 系统自动追加（旧 CLAUDE.md 规则 20 据此作废）。页脚拆成可
-// 独立勾选的片段，由 config.modules.fbif_footer.segments.<key> 控制；不同文章可
-// 用不同预设组合（见 docs/superpowers/specs/2026-05-31-ft-footer-library-and-fidelity.md）。
-//
-// 下列资源 URL 已核对 6 篇真实发布版基石（62285/62244/62245/62246/62238/62243）
-// 100% 一致，可安全固化为常量。
-const FT_FOOTER_DECOR_IMG  = 'https://static.foodtalks.cn/image/post/07079a66940e1ff57e71b140e7e36357.webp';
-const FT_FOOTER_GROUP_QR   = 'https://static.foodtalks.cn/image/news/6e309987660da9af009b89be08c4aa74ed78.png';
-const FT_FOOTER_ACCOUNT_QR = 'https://static.foodtalks.cn/image/post/b5b448f324a538209eb53379bef8dea9a7bf.jpg';
-const FT_FOOTER_LOGO       = 'https://static.foodtalks.cn/uploads/images/202007/e155b7852c10a72f7b73157fdf9c4bf0.png';
+// 用户 2026-05-31 裁定：网站文章底部页脚由本工具【完整输出】（含「关注公众号 +
+// FoodTalks logo + 点击获取更多」）。页脚【内容与预设】以服务端 /api/rules 的
+// config.modules.fbif_footer 为准（规则后台可编辑——红线：规则不硬编码）；
+// FOOTER_*_DEFAULT（footer-segments-defaults.js）仅作离线/接口异常时的降级兜底。
 
-// 每个 segment 是一组连续输出的 HTML 行。tip（提示声明）不在此处——它内容动态、
-// 位置在正文参考来源之后，由 applyFoodTalksBehavior 提升为 tip elem 走正文流。
-// 这里只放 tip 之后的固定营销段。
-export const FOOTER_SEGMENTS = {
-  biz_coop: [
-    '<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*资讯投稿与商务合作，请查看&ldquo;<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/news/30752" target="_blank" rel="noopener">FoodTalks商务合作方案</a>&rdquo;，并联系Bobo。</span></em></p>',
-  ],
-  join_group: [
-    `<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="${FT_FOOTER_DECOR_IMG}" alt="" width="600" /></p>`,
-    '<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>',
-    '<p><br /></p>',
-    `<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="${FT_FOOTER_GROUP_QR}" alt="00" width="600" height="267" /></p>`,
-    '<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。</span></em></p>',
-  ],
-  follow_account: [
-    '<p style="color: #01396a; font-size: 20px;"><strong>关注公众号</strong></p>',
-    '<p><br /></p>',
-    `<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="${FT_FOOTER_ACCOUNT_QR}" alt="" width="600" height="221" /></p>`,
-  ],
-  logo: [
-    `<p><img style="max-width: 100%; height: 27px; width: 126px;" src="${FT_FOOTER_LOGO}" alt="FoodTalks logo" width="130" height="27" border="0" /></p>`,
-  ],
-  more_info: [
-    '<p>点击获取更多<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/" target="_blank" rel="noopener">全球食品资讯</a></p>',
-  ],
-};
-
-// 片段输出顺序（对齐基石：商务合作 → 加群 → 关注公众号 → logo → 点击获取更多）
-export const FOOTER_SEGMENT_ORDER = ['biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
-
-// 按 segments 开关拼接页脚 HTML（不含 tip）。segments 缺省或全 false 时返回空串。
-export function buildFooterHtml(segments) {
-  const seg = segments || {};
+// 按 segments 勾选 + 页脚库内容拼接页脚 HTML（不含 tip）。
+//   enabledSegments: { biz_coop:1, join_group:1, ... } 当前文章勾选了哪些片段
+//   library: 服务端 config.modules.fbif_footer（提供 segments 内容 + segment_order），
+//            缺省时降级到 FOOTER_SEGMENTS_DEFAULT。
+// 勾选全 false / 缺省时返回空串。
+export function buildFooterHtml(enabledSegments, library) {
+  const seg = enabledSegments || {};
+  const lib = library || {};
+  const segments = (lib.segments && typeof lib.segments === 'object') ? lib.segments : FOOTER_SEGMENTS_DEFAULT;
+  const order = (Array.isArray(lib.segment_order) && lib.segment_order.length)
+    ? lib.segment_order : FOOTER_SEGMENT_ORDER_DEFAULT;
   const lines = [];
-  for (const key of FOOTER_SEGMENT_ORDER) {
-    if (seg[key] && FOOTER_SEGMENTS[key]) lines.push(...FOOTER_SEGMENTS[key]);
+  for (const key of order) {
+    if (!seg[key]) continue;
+    const entry = segments[key];
+    if (!entry) continue;
+    // 兼容服务端 {html_lines:[...]} 与纯数组两种结构
+    const htmlLines = Array.isArray(entry) ? entry : (Array.isArray(entry.html_lines) ? entry.html_lines : []);
+    lines.push(...htmlLines);
   }
   return lines.join('\n');
 }
 
-// 页脚预设库：积累常用组合，左侧栏一键切换。后端 /api/rules 可覆盖。
-export const FOOTER_PRESETS = [
-  { id: 'fbif-original', name: 'FBIF原创完整页脚', segments: { tip: true, biz_coop: true, join_group: true, follow_account: true, logo: true, more_info: true } },
-  { id: 'repost-simple', name: '转载简版（提示+商务）', segments: { tip: true, biz_coop: true, join_group: false, follow_account: false, logo: false, more_info: false } },
-  { id: 'tip-only',      name: '仅提示声明',          segments: { tip: true, biz_coop: false, join_group: false, follow_account: false, logo: false, more_info: false } },
-  { id: 'none',          name: '无页脚',              segments: { tip: false, biz_coop: false, join_group: false, follow_account: false, logo: false, more_info: false } },
-];
+// 兼容旧导出名（降级默认值，真相以服务端为准）。
+export const FOOTER_PRESETS = FOOTER_PRESETS_DEFAULT;
+export const FOOTER_SEGMENT_ORDER = FOOTER_SEGMENT_ORDER_DEFAULT;

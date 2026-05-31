@@ -88,183 +88,38 @@ func newRulePresetStore(path string) *rulePresetStore {
 	return &rulePresetStore{path: path}
 }
 
-func defaultRuleConfig() map[string]any {
-	return map[string]any{
-		"font_size":                   "15",
-		"heading_size":                "18",
-		"text_color":                  "#544545",
-		"link_color":                  "#0070C0",
-		"muted_color":                 "#888888",
-		"line_height":                 "1.75",
-		"letter_spacing":              "0.034",
-		"font_family":                 "PingFang SC",
-		"footer_enabled":              true,
-		"skip_upload":                 true,
-		"paragraph_margin_x":          "8",
-		"paragraph_gap":               "20",
-		"caption_font_size":           "12",
-		"attribution_font_size":       "15",
-		"blockquote_padding_left":     "12",
-		"blockquote_border_width":     "3",
-		"md_heading_max_chars":        "60",
-		"decorative_image_max_px":     "640",
-		"more_articles_enabled":       true,
-		"more_articles_slots":         "3",
-		"more_articles_default_cards": defaultMoreArticleCards(),
-		"banner_overlay_alpha":        "0.47058823529411764",
-		"banner_title_x":              "61",
-		"banner_title_y":              "92",
-		"banner_title_width":          "878",
-		"banner_title_box_height":     "116",
-		"banner_title_font_size":      "48",
-		"banner_title_line_height":    "70",
-		"banner_title_max_lines":      "2",
-	}
-}
-
-func defaultMoreArticleCards() []any {
-	return []any{
-		map[string]any{
-			"href":   "https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652909589&idx=1&sn=d0bdeacee2b1ba7f03e48b38f91bbefa&scene=21",
-			"imgurl": "https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTRHibhuMnzJTuvhqr6Neq7ib00icPLXRyof5H9ARUnw9eWIshgyHibyfVXtgSRkWmOP2MWZjHLLbFec9VAFSYH6ZsarKf2LUC4ONEkE/0?wx_fmt=jpeg",
-			"title":  "没想到！英国人把豆腐做到英国第一，还像卖衣服一样出XXL超大号！",
-		},
-		map[string]any{
-			"href":   "https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652916388&idx=1&sn=b5605734c9c27ce2f8d54a6534b6543d&scene=21",
-			"imgurl": "https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTREtc1dUPY9VokWQTtQsdevBIcfoMMavrQNSVFoce8gDOtTqlWhciadMP6VJwzErl7HnzECBECMMILEXt653GCeub3nDZ8VrvTsM/0?wx_fmt=jpeg",
-			"title":  "做了20年糖，她把豆腐棒放在鸡胸肉旁边，5年卖出1亿根",
-		},
-		map[string]any{
-			"href":   "https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652906407&idx=1&sn=7ede62b74d3a5750c2c95ca40c216290&scene=21",
-			"imgurl": "https://mmbiz.qpic.cn/sz_mmbiz_jpg/6JHhlvvjTRGEHDwCvfSmEXO9VBXpibZHE3ZqLYicsIyhfiajfq9MNduKq03KbDeqU0iaj3WEQeBEY2j0mSCetzD1Jdic1iciaL7M1KZjHu8x5TLdmM/0?wx_fmt=jpeg",
-			"title":  "日本最牛包子铺，单店年销2329万，怎么做到的？",
-		},
-	}
-}
-
-func defaultRuleDocument() rulePresetDocument {
-	now := time.Now().UTC().Format(time.RFC3339)
-	return rulePresetDocument{
-		ActiveID: defaultRulePresetID,
-		Presets: []rulePreset{{
-			ID:          defaultRulePresetID,
-			Name:        "FBIF默认规则",
-			Description: "当前 FBIF 公众号排版默认参数",
-			Config:      defaultRuleConfig(),
-			Behavior:    defaultRuleBehavior(),
-			UpdatedAt:   now,
-		}},
-		UpdatedAt: now,
-	}
-}
-
-func defaultRuleAccounts(now string) map[string]ruleAccount {
-	return map[string]ruleAccount{
-		defaultRuleAccountID: {
-			Name:              "FBIF公众号",
-			ActiveRuleID:      defaultRulePresetID,
-			ActiveRuleVersion: 1,
-			UpdatedAt:         now,
-		},
-		foodTalksRuleAccountID: {
-			Name:              "FoodTalks什么是系列",
-			ActiveRuleID:      foodTalksDefaultRulePresetID,
-			ActiveRuleVersion: 1,
-			UpdatedAt:         now,
-		},
-		foodTalksSiteRuleAccountID: {
-			Name:              "FoodTalks 网站默认",
-			ActiveRuleID:      foodTalksSiteDefaultRulePresetID,
-			ActiveRuleVersion: 1,
-			UpdatedAt:         now,
-		},
-	}
-}
-
-func defaultRuleDefinitions(now string) map[string]ruleDefinition {
-	return map[string]ruleDefinition{
-		defaultRulePresetID: {
-			ID:          defaultRulePresetID,
-			Name:        "FBIF默认规则",
-			Description: "当前 FBIF 公众号排版默认参数",
-			Versions: []rulePresetVersion{{
-				Version:   1,
-				Config:    defaultRuleConfig(),
-				Behavior:  defaultRuleBehavior(),
-				CreatedAt: now,
-			}},
-			UpdatedAt: now,
-		},
-		foodTalksDefaultRulePresetID: {
-			ID:          foodTalksDefaultRulePresetID,
-			Name:        "FoodTalks什么是系列默认规则",
-			Description: "FoodTalks什么是系列的独立默认参数",
-			Versions: []rulePresetVersion{{
-				Version:   1,
-				Config:    defaultRuleConfig(),
-				Behavior:  defaultRuleBehavior(),
-				CreatedAt: now,
-			}},
-			UpdatedAt: now,
-		},
-		foodTalksSiteDefaultRulePresetID: {
-			ID:          foodTalksSiteDefaultRulePresetID,
-			Name:        "FoodTalks 网站默认规则",
-			Description: "FoodTalks 网站排版的独立默认参数（基于 8 篇真实文章采样）",
-			Versions: []rulePresetVersion{{
-				Version:   1,
-				Config:    defaultFoodTalksSiteRuleConfig(),
-				Behavior:  defaultFoodTalksSiteRuleBehavior(),
-				CreatedAt: now,
-			}},
-			UpdatedAt: now,
-		},
-	}
-}
-
-// defaultFoodTalksSiteRuleConfig 返回 FoodTalks 网站排版的默认参数配置。
-// 规则细节见 docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md
-func defaultFoodTalksSiteRuleConfig() map[string]any {
-	return map[string]any{
-		"image": map[string]any{
-			"width": 600,
-		},
-		"modules": map[string]any{
-			"mctoc": map[string]any{
-				"enabled": true,
-			},
-			"fbif_footer": map[string]any{
-				"enabled": false,
-			},
-		},
-	}
-}
-
-// defaultFoodTalksSiteRuleBehavior 返回 FoodTalks 网站行为模板的默认配置。
-// 三条识别正则：作者署名、提示行、参考来源段。
-func defaultFoodTalksSiteRuleBehavior() map[string]any {
-	return map[string]any{
-		"author_regex":     `^\s*作者[：:]\s*`,
-		"tip_regex":        `^\s*提示[：:]`,
-		"ref_header_regex": `^\s*参考(?:来源|资料)[：:]\s*$`,
-		"ref_item_regex":   `^\s*\[\d+\]`,
-	}
-}
-
-func defaultRuleStoreDocumentV2() ruleStoreDocumentV2 {
-	now := time.Now().UTC().Format(time.RFC3339)
-	return ruleStoreDocumentV2{
-		SchemaVersion: 2,
-		Accounts:      defaultRuleAccounts(now),
-		Rules:         defaultRuleDefinitions(now),
-		UpdatedAt:     now,
-	}
-}
-
 func mergeRuleDefaults(config map[string]any) map[string]any {
 	merged := defaultRuleConfig()
 	for k, v := range flattenRuleConfig(config) {
 		merged[k] = v
+	}
+	// 透传 flattenRuleConfig 不处理的结构化嵌套字段，否则会被丢弃：
+	//   - 顶层 image（网站渲染器图片配置）
+	//   - modules 下不在 ruleModuleOrder 的结构化 module（mctoc 目录、fbif_footer 页脚库）
+	// 这些是「规则数据」而非可展平的扁平参数，必须整体保留传给前端渲染器。
+	if img, ok := config["image"]; ok {
+		merged["image"] = img
+	}
+	if mods, ok := config["modules"].(map[string]any); ok {
+		mergedMods, _ := merged["modules"].(map[string]any)
+		if mergedMods == nil {
+			mergedMods = map[string]any{}
+		}
+		for mk, mv := range mods {
+			isFlatModule := false
+			for _, fm := range ruleModuleOrder {
+				if fm == mk {
+					isFlatModule = true
+					break
+				}
+			}
+			if !isFlatModule {
+				mergedMods[mk] = mv
+			}
+		}
+		if len(mergedMods) > 0 {
+			merged["modules"] = mergedMods
+		}
 	}
 	return merged
 }

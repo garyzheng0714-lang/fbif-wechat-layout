@@ -245,9 +245,9 @@ function render(elems, config = {}) {
       continue;
     }
     if (e.k === 'tip') {
-      // 提示声明受页脚库 segments.tip 控制：仅当用户显式取消勾选（=0）时不输出。
+      // 提示声明受页脚库勾选 active_segments.tip 控制：仅当用户显式取消勾选（=0）时不输出。
       // 默认（未设 / 未配页脚）仍输出，保证转载版权声明默认在（基石所有文章都有）。
-      const ftSeg = config.modules && config.modules.fbif_footer && config.modules.fbif_footer.segments;
+      const ftSeg = config.modules && config.modules.fbif_footer && config.modules.fbif_footer.active_segments;
       if (ftSeg && ftSeg.tip === 0) {
         prevWasHeading = false;
         prevWasStandaloneLink = false;
@@ -335,7 +335,9 @@ function render(elems, config = {}) {
   // 它走正文流（参考来源之后），由 behavior 提升为 tip elem 渲染。
   const footerCfg = (config.modules && config.modules.fbif_footer) || {};
   if (footerCfg.enabled) {
-    const footerHtml = buildFooterHtml(footerCfg.segments);
+    // active_segments = 当前文章勾选了哪些片段；footerCfg 提供页脚库内容
+    // （segments 的 html_lines + segment_order，来自服务端 /api/rules，缺省降级默认）。
+    const footerHtml = buildFooterHtml(footerCfg.active_segments, footerCfg);
     if (footerHtml) {
       lines.push(BLANK_LINE);
       lines.push(footerHtml);

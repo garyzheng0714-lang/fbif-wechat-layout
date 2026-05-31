@@ -169,11 +169,30 @@ func validateRulePresetPayload(p rulePreset) error {
 }
 
 func validateRuleBehaviorPayload(raw map[string]any) error {
+	regexFields := map[string]bool{"author_regex": true, "tip_regex": true, "ref_header_regex": true, "ref_item_regex": true}
 	for key := range raw {
 		switch key {
 		case "schema_version", "params", "conditions", "actions", "templates", "output_contracts":
 		default:
-			return fmt.Errorf("unknown behavior field: %s", key)
+			if !regexFields[key] {
+				return fmt.Errorf("unknown behavior field: %s", key)
+			}
+		}
+	}
+	// FoodTalks 网站 behavior 的识别正则（作者/提示/参考来源行）——红线：规则后台可配。
+	// 校验为长度受限、可编译的合法 RE2 正则。
+	for key := range regexFields {
+		if v, ok := raw[key]; ok {
+			s, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("behavior %s must be a string", key)
+			}
+			if len([]rune(s)) > 200 {
+				return fmt.Errorf("behavior %s too long", key)
+			}
+			if _, err := regexp.Compile(s); err != nil {
+				return fmt.Errorf("behavior %s is not a valid regex", key)
+			}
 		}
 	}
 	for _, key := range []string{"params", "templates", "output_contracts"} {
@@ -382,7 +401,8 @@ func ruleBehaviorNumber(value any) float64 {
 
 func validateRuleConfigKeys(config map[string]any) error {
 	for key := range config {
-		if key == "modules" || key == "schema_version" {
+		// image 是网站渲染器的结构化字段（{width:...}），不走扁平白名单
+		if key == "modules" || key == "schema_version" || key == "image" {
 			continue
 		}
 		if !isKnownRuleField(key) {
@@ -395,6 +415,17 @@ func validateRuleConfigKeys(config map[string]any) error {
 			return fmt.Errorf("modules must be an object")
 		}
 		for moduleName, rawModule := range modules {
+			// 结构化模块单独校验（不走扁平字段白名单）：
+			//   mctoc 仅 {enabled}；fbif_footer 是页脚库（segments/presets，规则数据）
+			if moduleName == "mctoc" {
+				continue
+			}
+			if moduleName == "fbif_footer" {
+				if err := validateFBIFFooterModule(rawModule); err != nil {
+					return err
+				}
+				continue
+			}
 			allowedFields, ok := ruleModuleFields[moduleName]
 			if !ok {
 				return fmt.Errorf("unknown rule module: %s", moduleName)
@@ -484,6 +515,57 @@ func flattenRuleConfig(config map[string]any) map[string]any {
 func validateRuleStructuredField(key string, value any) error {
 	if key == "more_articles_default_cards" {
 		return validateMoreArticlesDefaultCards(value)
+	}
+	return nil
+}
+
+// validateFBIFFooterModule 校验页脚库（config.modules.fbif_footer）结构：
+//
+//	{ enabled?, active_preset_id?, segment_order?[], segments?{key:{html_lines:[]string}}, presets?[{id,name,segments{key:bool}}] }
+//
+// html_lines 做 XSS 防护（禁 <script>/on*=/javascript:）；保留 inline style/<img>/<a> 等正常排版标签。
+func validateFBIFFooterModule(raw any) error {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("fbif_footer module must be an object")
+	}
+	allowed := map[string]bool{"enabled": true, "active_preset_id": true, "segment_order": true, "segments": true, "presets": true}
+	for k := range m {
+		if !allowed[k] {
+			return fmt.Errorf("unknown fbif_footer field: %s", k)
+		}
+	}
+	if segs, ok := m["segments"].(map[string]any); ok {
+		for segKey, segVal := range segs {
+			sv, ok := segVal.(map[string]any)
+			if !ok {
+				return fmt.Errorf("fbif_footer segment %q must be an object", segKey)
+			}
+			lines, ok := sv["html_lines"].([]any)
+			if !ok {
+				return fmt.Errorf("fbif_footer segment %q html_lines must be an array", segKey)
+			}
+			for _, l := range lines {
+				s, ok := l.(string)
+				if !ok {
+					return fmt.Errorf("fbif_footer segment %q html_lines must be strings", segKey)
+				}
+				if behaviorUnsafeTemplate.MatchString(s) {
+					return fmt.Errorf("fbif_footer segment %q 含不安全 HTML（script/on*=/javascript:）", segKey)
+				}
+			}
+		}
+	}
+	if presets, ok := m["presets"].([]any); ok {
+		for _, p := range presets {
+			pm, ok := p.(map[string]any)
+			if !ok {
+				return fmt.Errorf("fbif_footer preset must be an object")
+			}
+			if id, ok := pm["id"].(string); !ok || strings.TrimSpace(id) == "" {
+				return fmt.Errorf("fbif_footer preset 缺少 id")
+			}
+		}
 	}
 	return nil
 }

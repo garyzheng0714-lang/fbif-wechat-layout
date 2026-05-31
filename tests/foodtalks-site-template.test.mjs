@@ -265,7 +265,7 @@ test('署名: 读 config.muted_color 且不再 #7f7f7f', () => {
 
 // 页脚库：render 按 config.modules.fbif_footer.segments 输出，每个勾选片段即时生效
 test('页脚库: render 末尾按 segments 拼接页脚（buildFooterHtml）', () => {
-  assert.match(templateSource, /buildFooterHtml\s*\(\s*footerCfg\.segments\s*\)/, 'render 用 buildFooterHtml(segments) 拼页脚');
+  assert.match(templateSource, /buildFooterHtml\s*\(\s*footerCfg\.active_segments\s*,\s*footerCfg\s*\)/, 'render 用 buildFooterHtml(勾选, 页脚库内容) 拼页脚');
   assert.match(templateSource, /footerCfg\.enabled/, '页脚营销段受 enabled 总开关控制');
 });
 
