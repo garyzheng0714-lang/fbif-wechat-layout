@@ -1,0 +1,1332 @@
+{
+  "scans": [
+    {
+      "file": "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-behavior-foodtalks.js",
+      "summary": "共发现 18 条硬编码规则数据，分布于：WECHAT_TRAILER_MARKERS（尾部切除正则列表）、WECHAT_TIP_SIGNATURES（提示页脚特征正则列表）、buildSiteFooterTipElem（机构名/ID/声明句式前缀/后缀/书名号结构）、buildAuthorLineFromSource（合成句式模板）、applyFoodTalksBehavior 内的 4 条正则默认值（已有 behavior.* 降级，但默认字符串仍为硬编码）、extractRepostSource 内的来源正则模式、以及来源 ID 注去掉逻辑的正则。引擎算法（DOM拼装、splice、refMode 状态机、URL 格式校验）一律标 false。页脚库已通过 FOOTER_*_DEFAULT 降级 + 服务端 config.modules.fbif_footer 走服务端，不重复列出。",
+      "items": [
+        {
+          "location": "第35-44行 WECHAT_TRAILER_MARKERS[0]",
+          "category": "识别正则",
+          "current_value": "/\\/\\s*更多文章\\s*\\//",
+          "is_rule_data": true,
+          "rationale": "「/ 更多文章 /」是公众号导流段的标记词，属于业务识别内容，不同公众号/不同期可能新增/调整。",
+          "suggested_target": "behavior.wechat_trailer_markers（数组，每项为正则字符串）",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第35-44行 WECHAT_TRAILER_MARKERS[1]",
+          "category": "识别正则",
+          "current_value": "/\\/\\s*1000\\s*个食品创新案例\\s*\\//",
+          "is_rule_data": true,
+          "rationale": "「/ 1000个食品创新案例 /」是FBIF特定栏目导流词，属于可变业务标记，数字/名称将来可能修改。",
+          "suggested_target": "behavior.wechat_trailer_markers",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第35-44行 WECHAT_TRAILER_MARKERS[2]",
+          "category": "识别关键词",
+          "current_value": "/预览时标签不可点/",
+          "is_rule_data": true,
+          "rationale": "微信公众号预览水印特征文本，属于平台特征识别词，未来平台措辞可能变化。",
+          "suggested_target": "behavior.wechat_trailer_markers",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第35-44行 WECHAT_TRAILER_MARKERS[3]",
+          "category": "识别关键词",
+          "current_value": "/加入微信群/",
+          "is_rule_data": true,
+          "rationale": "公众号导流词，属于业务标记词列表，应可在后台维护。",
+          "suggested_target": "behavior.wechat_trailer_markers",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第35-44行 WECHAT_TRAILER_MARKERS[4]",
+          "category": "识别关键词",
+          "current_value": "/关注公众号/",
+          "is_rule_data": true,
+          "rationale": "公众号导流词，属于业务标记词列表，应可在后台维护。",
+          "suggested_target": "behavior.wechat_trailer_markers",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第35-44行 WECHAT_TRAILER_MARKERS[5]",
+          "category": "识别关键词",
+          "current_value": "/点击获取更多/",
+          "is_rule_data": true,
+          "rationale": "公众号导流词，属于业务标记词列表，应可在后台维护。",
+          "suggested_target": "behavior.wechat_trailer_markers",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第35-44行 WECHAT_TRAILER_MARKERS[6]",
+          "category": "识别正则",
+          "current_value": "/长按.{0,4}识别.{0,2}二维码/",
+          "is_rule_data": true,
+          "rationale": "二维码引导文本识别正则，量词范围 {0,4}/{0,2} 是业务经验参数，应可配置。",
+          "suggested_target": "behavior.wechat_trailer_markers",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第35-44行 WECHAT_TRAILER_MARKERS[7]",
+          "category": "识别正则",
+          "current_value": "/扫码.{0,4}(?:加群|关注|进群)/",
+          "is_rule_data": true,
+          "rationale": "扫码引导文本识别正则，候选词「加群|关注|进群」是业务词表，应可后台维护。",
+          "suggested_target": "behavior.wechat_trailer_markers",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第48-54行 WECHAT_TIP_SIGNATURES[0-4]",
+          "category": "识别正则",
+          "current_value": "/欢迎转发朋友圈/ /后台回复.{0,4}转载/ /投稿与商务合作/ /fbifmedia/i /微信[：:]\\s*FBIF_/i",
+          "is_rule_data": true,
+          "rationale": "公众号转载声明页脚特征句列表，包含 fbifmedia / FBIF_ 等机构专属标识，业务层面可维护。",
+          "suggested_target": "behavior.wechat_tip_signatures（数组，每项为正则字符串）",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第101行 buildSiteFooterTipElem — prefix（FBIF分支）",
+          "category": "句式模板",
+          "current_value": "'*本文为FBIF食品饮料创新（ID：FoodInnovation）原创'",
+          "is_rule_data": true,
+          "rationale": "含机构全称和 ID，是网站提示页脚的正式表述，应从服务端 behavior.templates 或 behavior.output_contracts 读取，以便统一修改机构名/ID。",
+          "suggested_target": "behavior.templates.site_tip_prefix_fbif 或 behavior.output_contracts.site_footer_tip_prefix",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第103行 buildSiteFooterTipElem — suffix",
+          "category": "句式模板",
+          "current_value": "'，不代表FoodTalks立场，转载请联系出处。'",
+          "is_rule_data": true,
+          "rationale": "网站提示页脚后缀声明，「FoodTalks立场」是品牌文案，法律措辞，应可后台配置。",
+          "suggested_target": "behavior.templates.site_tip_suffix 或 behavior.output_contracts.site_footer_tip_suffix",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第99行 buildSiteFooterTipElem — FBIF 判断正则",
+          "category": "识别正则",
+          "current_value": "/FBIF|食品饮料创新|FoodInnovation/i",
+          "is_rule_data": true,
+          "rationale": "用于判断来源是否属于 FBIF 自身的关键词列表，机构名/ID 变化时需同步维护，属规则数据。",
+          "suggested_target": "behavior.conditions.fbif_source_pattern（正则字符串）",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第118行 buildSiteFooterTipElem — title字段值",
+          "category": "句式模板",
+          "current_value": "'提示：'",
+          "is_rule_data": false,
+          "rationale": "「提示：」是段头固定标签，不同文章/频道不会变，是输出结构常量而非业务可变参数；此处已有 tip_regex 控制识别，标签本身输出结构固定。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "第154行 buildAuthorLineFromSource — 合成句式「本文为X原创」",
+          "category": "句式模板",
+          "current_value": "'本文为${source}原创'（字符串模板）",
+          "is_rule_data": true,
+          "rationale": "转载来源作者行的固定句式前缀，与 buildSiteFooterTipElem 的 prefix 逻辑平行，属于可配置声明文案，应与 site_tip_prefix_* 统一管理。",
+          "suggested_target": "behavior.templates.author_line_repost_prefix",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第157行 buildAuthorLineFromSource — 合成句式「转载请联系出处」",
+          "category": "句式模板",
+          "current_value": "'，转载请联系出处。'",
+          "is_rule_data": true,
+          "rationale": "转载作者行的法律声明后缀，与 site_tip_suffix 文案高度相关，应可后台统一配置。",
+          "suggested_target": "behavior.templates.author_line_repost_suffix",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第179行 applyFoodTalksBehavior — author_regex 默认值",
+          "category": "识别正则",
+          "current_value": "'^\\\\s*作者[：:]\\\\s*'（behavior.author_regex 缺省时的硬编码字符串）",
+          "is_rule_data": true,
+          "rationale": "虽然已有 behavior.author_regex 覆盖路径，但默认值硬编码在引擎中；默认值本身是规则数据，应从服务端 behavior 下发而非 fallback 到代码内常量。",
+          "suggested_target": "behavior.author_regex（服务端必须下发默认值，代码不应有 fallback 字符串）",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第180行 applyFoodTalksBehavior — tip_regex 默认值",
+          "category": "识别正则",
+          "current_value": "'^\\\\s*提示[：:]'（behavior.tip_regex 缺省时的硬编码字符串）",
+          "is_rule_data": true,
+          "rationale": "同 author_regex，默认值属于规则数据，应从服务端下发。",
+          "suggested_target": "behavior.tip_regex（服务端必须下发默认值）",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第181行 applyFoodTalksBehavior — ref_header_regex 默认值",
+          "category": "识别正则",
+          "current_value": "'^\\\\s*参考(?:来源|资料)[：:]\\\\s*$'（behavior.ref_header_regex 缺省时的硬编码字符串）",
+          "is_rule_data": true,
+          "rationale": "参考来源段头识别正则默认值，候选词「来源|资料」是业务词表，应从服务端下发。",
+          "suggested_target": "behavior.ref_header_regex（服务端必须下发默认值）",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第182行 applyFoodTalksBehavior — ref_item_regex 默认值",
+          "category": "识别正则",
+          "current_value": "'^\\\\s*\\\\[\\\\d+\\\\]'（behavior.ref_item_regex 缺省时的硬编码字符串）",
+          "is_rule_data": true,
+          "rationale": "参考条目 [n] 识别正则默认值，虽然 [数字] 格式相对通用，但与前三条一致应统一从服务端下发。",
+          "suggested_target": "behavior.ref_item_regex（服务端必须下发默认值）",
+          "priority": "low",
+          "channel": "网站"
+        }
+      ]
+    },
+    {
+      "file": "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/templates/foodtalks-site.js",
+      "items": [
+        {
+          "location": "第31-35行 IMAGE_CAPTION_KEYWORDS 常量",
+          "category": "识别关键词",
+          "current_value": "['图片来源', '资料来源', '数据来源', '来源', '制图', '截图', '图注', '注：', 'Source', 'Photo', 'Image', 'Credit']",
+          "is_rule_data": true,
+          "rationale": "这是图注识别的关键词列表，属于「内容/参数」而非「匹配算法」。关键词增减不改变匹配逻辑（for 循环），是典型规则数据，应允许在规则后台新增/删除词条。",
+          "suggested_target": "behavior.params.image_caption_keywords（数组字段）",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第103行 isImageCaption 内联正则",
+          "category": "识别正则",
+          "current_value": "/^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\\s*[：:\\s\\d]/i",
+          "is_rule_data": true,
+          "rationale": "正则中的枚举词是识别词表的默认值，属于规则数据。正则引擎逻辑（test 调用）留代码，但词表本身（也是 IMAGE_CAPTION_KEYWORDS 的超集）应可配。",
+          "suggested_target": "behavior.params.image_caption_prefix_regex（字符串，正则默认值）",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第103行 isImageCaption 内联正则（三角符号前缀）",
+          "category": "识别正则",
+          "current_value": "/^[▲△▵▽▼]/",
+          "is_rule_data": true,
+          "rationale": "图注触发符号集是规则参数，编辑人员可能需要增减特殊符号。",
+          "suggested_target": "behavior.params.image_caption_arrow_chars（字符串或数组）",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "第109行 isImageCaption 短文本阈值",
+          "category": "其他",
+          "current_value": "plain.length <= 45 && sentenceEnd === 0 && commaCount <= 1",
+          "is_rule_data": true,
+          "rationale": "字符数上限 45、句子结束符上限 0、逗号上限 1 均是可调参数，影响图注识别灵敏度，属于规则参数而非算法结构。",
+          "suggested_target": "behavior.params.image_caption_max_len / image_caption_max_sentence_end / image_caption_max_comma",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "第114行 BLANK_LINE 常量",
+          "category": "其他",
+          "current_value": "<p style=\"text-align: justify;\"><br></p>",
+          "is_rule_data": false,
+          "rationale": "这是引擎输出格式常量，表示「空行的 HTML 结构」。text-align:justify 是规范要求的固定结构，不是可变样式参数——所有段落统一 justify，改动会破坏 FoodTalks 后台契约。留在引擎代码。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "第116行 CENTER_BLANK_LINE 常量",
+          "category": "其他",
+          "current_value": "<p style=\"text-align: center;\"><br></p>",
+          "is_rule_data": false,
+          "rationale": "图注后空行 center 对齐是基石平台输出规范，属于引擎输出结构契约。与 BLANK_LINE 一样，不是可变参数。留在引擎代码。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "第176-182行 renderImageCaption 函数：字号 12px",
+          "category": "字号",
+          "current_value": "font-size: 12px",
+          "is_rule_data": true,
+          "rationale": "图注文字字号是视觉规则参数，应允许在规则后台调整。当前从 config.muted_color 读颜色但字号硬编码，不一致。",
+          "suggested_target": "config.caption_font_size（或 behavior.params.caption_font_size）",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第176-182行 renderImageCaption 函数：颜色回退 #888888",
+          "category": "颜色",
+          "current_value": "(config && config.muted_color) || '#888888'",
+          "is_rule_data": true,
+          "rationale": "颜色已从 config.muted_color 读取，但硬编码的回退值 #888888 是规则数据（图注灰色口径）。该回退值应进入服务端 config 默认值，而非内联在代码里。",
+          "suggested_target": "config.muted_color 服务端默认值设为 #888888，代码侧移除内联回退",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第235-244行 render 函数 author 分支：颜色回退 #888888",
+          "category": "颜色",
+          "current_value": "(config && config.muted_color) || '#888888'",
+          "is_rule_data": true,
+          "rationale": "同 renderImageCaption，作者行颜色回退值硬编码，应由服务端 config 提供默认值，代码侧不内联。",
+          "suggested_target": "config.muted_color 服务端默认值",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第235-244行 render 函数 author 分支：字号 14px",
+          "category": "字号",
+          "current_value": "font-size: 14px",
+          "is_rule_data": true,
+          "rationale": "作者署名字号是视觉规则参数，应与图注字号一起可配。",
+          "suggested_target": "config.author_font_size 或 behavior.params.author_font_size",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第261行 render 函数 tip 分支：提示标题默认文案 '提示：'",
+          "category": "句式模板",
+          "current_value": "e.title || '提示：'",
+          "is_rule_data": true,
+          "rationale": "「提示：」是提示声明的标题文案，属于内容规则参数，不是算法结构。不同公众号/渠道可能有不同默认文案（如「温馨提示：」「版权声明：」）。",
+          "suggested_target": "behavior.params.tip_title_default 或 behavior.templates.tip_title",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第263-267行 render 函数 tip 分支：提示标题颜色 #01396a",
+          "category": "颜色",
+          "current_value": "color: #01396a",
+          "is_rule_data": true,
+          "rationale": "提示标题蓝色是 FoodTalks 网站的品牌色，属于规则数据，应可在规则后台配置，便于不同场景或品牌调整。",
+          "suggested_target": "config.tip_title_color 或 behavior.params.tip_title_color",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第263-267行 render 函数 tip 分支：提示标题字号 14px",
+          "category": "字号",
+          "current_value": "font-size: 14px（提示标题）",
+          "is_rule_data": true,
+          "rationale": "提示标题字号是可变样式参数，应与其他字号参数统一走 config 可配。",
+          "suggested_target": "config.tip_font_size 或 behavior.params.tip_font_size",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "第272-276行 render 函数 tip 分支：提示正文颜色 #7f7f7f",
+          "category": "颜色",
+          "current_value": "color: #7f7f7f",
+          "is_rule_data": true,
+          "rationale": "#7f7f7f 是 FoodTalks 网站提示正文灰色（CLAUDE.md 规则19明确说明这是网站编辑部原生口径，非搬运文痕迹色）。颜色属于规则参数，应可配。",
+          "suggested_target": "behavior.params.tip_body_color 或 config.muted_color（若统一），当前与 muted_color #888888 不同需显式区分",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "第272-276行 render 函数 tip 分支：提示正文字号 14px",
+          "category": "字号",
+          "current_value": "font-size: 14px（提示正文）",
+          "is_rule_data": true,
+          "rationale": "提示正文字号是可变样式参数，应可配。",
+          "suggested_target": "behavior.params.tip_font_size（与标题共用）或独立字段",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "第303-308行 render 函数 ref-header 分支：颜色回退 #888888 + 硬编码文案 '参考来源：'",
+          "category": "颜色",
+          "current_value": "(config && config.muted_color) || '#888888'",
+          "is_rule_data": true,
+          "rationale": "颜色回退值同前，属规则数据。",
+          "suggested_target": "config.muted_color 服务端默认值",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第304行 render 函数 ref-header 分支：文案 '参考来源：'",
+          "category": "句式模板",
+          "current_value": "参考来源：",
+          "is_rule_data": true,
+          "rationale": "「参考来源：」是参考资料区块的标题文案，不同场景可能用「参考资料：」「References:」等，属于内容规则参数。",
+          "suggested_target": "behavior.params.ref_header_label 或 behavior.templates.ref_header",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第313-319行 render 函数 ref-item 分支：颜色回退 #888888",
+          "category": "颜色",
+          "current_value": "(config && config.muted_color) || '#888888'",
+          "is_rule_data": true,
+          "rationale": "颜色回退值同前，属规则数据。",
+          "suggested_target": "config.muted_color 服务端默认值",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第367行 stripDocxPreambleBeforeAuthor 内联正则",
+          "category": "识别正则",
+          "current_value": "/^[\\s　]*(作者|Author)\\s*[:：]/i",
+          "is_rule_data": true,
+          "rationale": "DOCX 前置材料剥离的触发词「作者」/「Author」是规则词表的默认值，属于规则数据（正则引擎逻辑留代码，词表/正则字符串可配）。",
+          "suggested_target": "behavior.params.docx_preamble_author_regex（字符串，正则默认值）",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "第99-110行 isImageCaption：图注最大长度阈值 120",
+          "category": "其他",
+          "current_value": "plain.length > 120 return false",
+          "is_rule_data": true,
+          "rationale": "120字符上限是图注识别的长度过滤阈值，属于可调参数，不同媒体机构的图注风格长短不同。",
+          "suggested_target": "behavior.params.image_caption_max_total_len",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "第185-213行 promoteImageCaptions：窗口 3 段、最多 2 段提升阈值",
+          "category": "其他",
+          "current_value": "scanned < 3 && promoted < 2",
+          "is_rule_data": true,
+          "rationale": "图注提升的段落扫描窗口（3）和最多提升数（2）是业务参数，影响识别范围，不同媒体的排版习惯可能不同，应可配。",
+          "suggested_target": "behavior.params.caption_promote_scan_window / caption_promote_max",
+          "priority": "low",
+          "channel": "网站"
+        }
+      ],
+      "summary": "在 /public/js/templates/foodtalks-site.js（FoodTalks 网站渲染器，channel=网站）中共识别出 21 条硬编码规则数据，无引擎逻辑误判。\n\n高优先级（3条）：\n1. IMAGE_CAPTION_KEYWORDS 图注识别词列表（第31-35行）→ behavior.params.image_caption_keywords\n2. 提示标题颜色 #01396a（第264行）→ config.tip_title_color\n3. 提示正文颜色 #7f7f7f（第273行）→ behavior.params.tip_body_color（注意：与 muted_color #888888 不同，需显式区分，CLAUDE.md 规则19有明确说明）\n\n中优先级（9条）：\n- isImageCaption 中图注前缀识别正则（第103行）词表部分\n- 图注字号 12px（第179行）\n- muted_color 颜色回退值 #888888（共出现4处：renderImageCaption/author/ref-header/ref-item）→ 统一走 config.muted_color 服务端默认值，代码侧移除内联回退\n- 作者行字号 14px（第238行）\n- 「提示：」默认标题文案（第261行）→ behavior.params.tip_title_default\n- 「参考来源：」文案（第304行）→ behavior.params.ref_header_label\n- DOCX 前置材料识别正则（第367行）词表部分\n\n低优先级（9条）：\n- 三角符号前缀正则、短文本阈值（45/0/1）、长文本阈值（120）、图注提升窗口（3/2）、提示字号（14px×2）\n\n已判定为引擎逻辑留代码（2条）：\n- BLANK_LINE（第114行）— 引擎输出格式契约\n- CENTER_BLANK_LINE（第116行）— 图注后空行格式契约\n\n#888888 回退值问题特别说明：虽然 config.muted_color 字段已存在，但代码里仍有4处 || '#888888' 内联回退，意味着若服务端未配置该字段，颜色仍由代码决定而非规则后台。建议统一在服务端 config 默认值中设置，代码侧去掉内联回退。"
+    },
+    {
+      "file": "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-behavior.js",
+      "items": [
+        {
+          "location": "行1 / MOTE_REF_HEAD_IMAGE_URL",
+          "category": "图片URL",
+          "current_value": "https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/fbif-attachment-to-url/2026/05/tblMQeXvSGd7Hebf_-CkOuPdpNzb-_3u9Rxc5KA_1778028720411/img_v3_0211e_8b79127d-72a5-4011-9f01-fe3b30c7548g_1778028720565.png",
+          "is_rule_data": true,
+          "rationale": "Mote 署名图的 OSS 图片地址，当图片更换/迁移时需在后台修改，不应在代码里硬编码。已通过 params.mote_ref_image_url.default 暴露，但 default 值本身是硬编码常量，未从服务端 behavior 读取。",
+          "suggested_target": "behavior.params.mote_ref_image_url.default（从 /api/rules/… 服务端 behavior 下发，代码端仅保留空字符串或空占位作为离线兜底）",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "行16 / conditions[0].all[0].value",
+          "category": "标记词",
+          "current_value": "mote莫特",
+          "is_rule_data": true,
+          "rationale": "触发 Mote 署名图的作者名匹配值。若作者名称格式变化或需新增触发词（如英文别名），应在后台条件配置中修改，而非改代码。目前硬编码在 DEFAULT_BEHAVIOR.conditions 里；服务端 behavior 可覆盖 conditions 数组，但本地兜底值仍是硬编码。",
+          "suggested_target": "behavior.conditions[is_mote_author].all[0].value（通过服务端 behavior JSON 覆盖）",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "行30 / templates.author_line",
+          "category": "句式模板",
+          "current_value": "作者：{{ article.author }}",
+          "is_rule_data": true,
+          "rationale": "作者行显示格式，属于可由运营自定义的文案模板（如改为「撰文：」「By：」等），应在规则后台可配。",
+          "suggested_target": "behavior.templates.author_line",
+          "priority": "medium",
+          "channel": "公众号"
+        },
+        {
+          "location": "行31 / templates.source_line",
+          "category": "句式模板",
+          "current_value": "来源：{{ article.source }}",
+          "is_rule_data": true,
+          "rationale": "来源行显示格式，属于可由运营自定义的文案模板（如改为「出处：」），应在规则后台可配。",
+          "suggested_target": "behavior.templates.source_line",
+          "priority": "medium",
+          "channel": "公众号"
+        },
+        {
+          "location": "行32 / templates.footer_original_notice",
+          "category": "句式模板",
+          "current_value": "* 本文为{{ account.name }}原创，欢迎转发朋友圈；",
+          "is_rule_data": true,
+          "rationale": "原创声明页脚文案，运营侧随时可能调整措辞（如加版权声明、修改鼓励语），是典型规则数据，必须从后台可配。",
+          "suggested_target": "behavior.templates.footer_original_notice",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "行33 / templates.footer_repost_notice",
+          "category": "句式模板",
+          "current_value": "* 本文为转载，不代表{{ account.name }}立场。",
+          "is_rule_data": true,
+          "rationale": "转载声明页脚文案，同上，措辞随时可能调整，属于规则数据。",
+          "suggested_target": "behavior.templates.footer_repost_notice",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "行36 / output_contracts.author_line.max_length",
+          "category": "其他",
+          "current_value": "80",
+          "is_rule_data": true,
+          "rationale": "作者行最大字符长度限制，是内容约束参数而非算法逻辑；不同规则包可能需要不同上限，应可在后台配置。",
+          "suggested_target": "behavior.output_contracts.author_line.max_length",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "行37 / output_contracts.source_line.max_length",
+          "category": "其他",
+          "current_value": "120",
+          "is_rule_data": true,
+          "rationale": "来源行最大字符长度限制，同上，属内容约束参数。",
+          "suggested_target": "behavior.output_contracts.source_line.max_length",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "行41 / ALLOWED_ACTION_TYPES",
+          "category": "其他",
+          "current_value": "insert_image_before",
+          "is_rule_data": false,
+          "rationale": "引擎白名单：定义 behavior 合法动作类型的安全集合，是验证引擎逻辑的一部分，不是业务规则数据；扩展动作类型需改引擎代码，不能仅配置后台。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "行42 / ALLOWED_TARGETS",
+          "category": "其他",
+          "current_value": "first_ref_heading",
+          "is_rule_data": false,
+          "rationale": "引擎白名单：定义合法插入目标的安全集合，扩展新目标需改 findInsertIndex 函数逻辑，是引擎能力边界声明，而非规则数据。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "行43 / ALLOWED_OPS",
+          "category": "其他",
+          "current_value": "eq, neq, exists, includes",
+          "is_rule_data": false,
+          "rationale": "引擎白名单：定义条件操作符的安全集合，与 compareCondition 函数实现一一对应，属于引擎算法声明，不是规则数据。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "行52 / UNSAFE_URL_CHARS 正则",
+          "category": "其他",
+          "current_value": "/[\u0000- \"'<>\\\\]/",
+          "is_rule_data": false,
+          "rationale": "URL 安全校验正则，是安全引擎逻辑（防 XSS），字符集由安全策略固化，不应暴露给后台用户修改。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "行82 / normalizeRuleBehavior — schema_version: 1",
+          "category": "其他",
+          "current_value": "1",
+          "is_rule_data": false,
+          "rationale": "协议版本号，是引擎兼容性约束，不是业务规则参数；升级需同时修改引擎验证逻辑。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "行169 / validateTemplate — max 2000 兜底",
+          "category": "其他",
+          "current_value": "2000",
+          "is_rule_data": false,
+          "rationale": "模板长度的引擎硬上限（安全兜底），防止恶意超长模板；是引擎安全约束，不是业务参数，不应开放后台修改。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "行265 / applyBehaviorToElems — { k: 'img', w: '100%', maxPx: 0 }",
+          "category": "其他",
+          "current_value": "w: '100%', maxPx: 0",
+          "is_rule_data": false,
+          "rationale": "插入图片元素的 DOM 结构常量（宽度全宽、无最大像素限制），是引擎输出结构的固定格式；Mote 署名图始终全宽展示，无需后台配置。若将来需要可配宽度，可在 action 里加 width_param，但当前属引擎输出格式。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        }
+      ],
+      "summary": "文件共 269 行，包含公众号行为规则引擎的默认值、验证逻辑和执行逻辑。\n\n**需下放（is_rule_data=true）共 8 条，全部属于公众号渠道：**\n\n- **高优先级（3条）**：Mote 署名图 OSS URL（行1）、Mote 作者名触发词 \"mote莫特\"（行16）、原创页脚文案模板（行32）、转载页脚文案模板（行33）——这4条是最可能变化的运营内容，其中 URL 和触发词影响 Mote 功能开关，页脚文案措辞频繁调整。（注：原创/转载页脚各算1条，合计4条高优）\n- **中优先级（2条）**：作者行模板 \"作者：{{ article.author }}\"（行30）、来源行模板 \"来源：{{ article.source }}\"（行31）——固定前缀有可能因栏目差异需调整。\n- **低优先级（2条）**：author_line.max_length=80、source_line.max_length=120（行36-37）——内容长度约束参数，目前无实际配置需求，可择机下放。\n\n**留引擎代码（is_rule_data=false）共 7 条**：ALLOWED_ACTION_TYPES / ALLOWED_TARGETS / ALLOWED_OPS 三个白名单（引擎能力边界声明）、UNSAFE_URL_CHARS 安全正则、schema_version、模板长度安全上限 2000、插入图片的 DOM 宽度结构常量。\n\n**关键观察**：DEFAULT_BEHAVIOR 的结构本身已设计为可被服务端 behavior JSON 覆盖（normalizeRuleBehavior 做合并），因此下放路径是：服务端 /api/rules/… 存储完整 behavior JSON，客户端代码把当前硬编码的 default 值清空或改为占位，真实值全部从服务端下发。图片 URL 和条件触发词是最高优先级，因为它们直接决定 Mote 功能是否正确触发。"
+    },
+    {
+      "file": "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/templates/fbif.js",
+      "items": [
+        {
+          "location": "第243行 RE_AUTHOR",
+          "category": "识别正则",
+          "current_value": "/^(?:\\*\\*)?(?:作者|撰文|撰稿|文)(?:\\*\\*)?[\\s]*[：:/|｜]\\s*(.+)/",
+          "is_rule_data": true,
+          "rationale": "识别「作者」归属行的标记词列表（作者/撰文/撰稿/文）是规则数据，可配置；整个正则的默认值也属规则参数。引擎调用正则的逻辑留代码。",
+          "suggested_target": "behavior.conditions.author_line_regex 或 behavior.params.author_keywords",
+          "channel": "公众号",
+          "priority": "high"
+        },
+        {
+          "location": "第244行 RE_SOURCE",
+          "category": "识别正则",
+          "current_value": "/^(?:\\*\\*)?(?:出品|来源|出处)(?:\\*\\*)?[\\s]*[：:/|｜]\\s*(.+)/",
+          "is_rule_data": true,
+          "rationale": "识别「来源」归属行的标记词列表（出品/来源/出处）是规则数据。",
+          "suggested_target": "behavior.conditions.source_line_regex 或 behavior.params.source_keywords",
+          "channel": "公众号",
+          "priority": "high"
+        },
+        {
+          "location": "第245行 RE_EDITOR",
+          "category": "识别正则",
+          "current_value": "/^(?:\\*\\*)?(?:编辑|责编)(?:\\*\\*)?[\\s]*[：:/|｜]\\s*(.+)/",
+          "is_rule_data": true,
+          "rationale": "识别「编辑」归属行的标记词列表（编辑/责编）是规则数据。",
+          "suggested_target": "behavior.conditions.editor_line_regex 或 behavior.params.editor_keywords",
+          "channel": "公众号",
+          "priority": "medium"
+        },
+        {
+          "location": "第129行 parseAuthorLine",
+          "category": "识别正则",
+          "current_value": "/^作者[：:]\\s*(.+)$/",
+          "is_rule_data": true,
+          "rationale": "DOCX 路径专用「作者：」前置行识别正则，标记词「作者」是规则数据，引擎匹配逻辑留代码。",
+          "suggested_target": "behavior.params.docx_author_line_regex",
+          "channel": "公众号",
+          "priority": "medium"
+        },
+        {
+          "location": "第195行 classifyDocx",
+          "category": "识别正则",
+          "current_value": "/^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/",
+          "is_rule_data": true,
+          "rationale": "「参考来源」节标题识别正则，其中的标记词集合（参考来源/文献/资料/链接/信息来源）属规则数据。",
+          "suggested_target": "behavior.params.ref_section_regex",
+          "channel": "公众号",
+          "priority": "medium"
+        },
+        {
+          "location": "第204行 classifyDocx（heading 路径）",
+          "category": "识别正则",
+          "current_value": "/^(参考(来源|文献|资料|链接)|信息来源)/",
+          "is_rule_data": true,
+          "rationale": "Heading 路径的参考节识别正则，与195行同源，标记词属规则数据（重复使用）。",
+          "suggested_target": "behavior.params.ref_section_regex（复用同一参数）",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第291行 isStandardFooterPrompt",
+          "category": "识别正则",
+          "current_value": "/本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1/i",
+          "is_rule_data": true,
+          "rationale": "识别 FBIF 标准页脚的关键词列表（本文为…转载/转载请/FBIF投稿/商务合作/fbifmedia1）属规则数据，不同公众号/版本可变。",
+          "suggested_target": "behavior.params.footer_prompt_detection_regex 或 config.modules.fbif_footer.detection_keywords",
+          "channel": "公众号",
+          "priority": "high"
+        },
+        {
+          "location": "第349行 classifyMd 参考节",
+          "category": "识别正则",
+          "current_value": "/^(参考(来源|文献|资料|链接)|信息来源)/",
+          "is_rule_data": true,
+          "rationale": "Markdown 路径中参考节头识别正则，标记词与 DOCX 路径一致，属规则数据（同 behavior.params.ref_section_regex）。",
+          "suggested_target": "behavior.params.ref_section_regex（复用）",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第472行 classifyBlocks 参考节（h 分支）",
+          "category": "识别正则",
+          "current_value": "/^(参考(来源|文献|资料|链接)|信息来源)/",
+          "is_rule_data": true,
+          "rationale": "URL 导入路径中参考节识别正则，同源规则数据，应统一引用同一参数。",
+          "suggested_target": "behavior.params.ref_section_regex（复用）",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第513行 classifyBlocks txt 分支",
+          "category": "识别正则",
+          "current_value": "/^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/",
+          "is_rule_data": true,
+          "rationale": "URL 导入 txt 分支的参考节文本识别正则，同 behavior.params.ref_section_regex。",
+          "suggested_target": "behavior.params.ref_section_regex（复用）",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第256行 parseAttribution 底部作者行",
+          "category": "标记词",
+          "current_value": "/^(?:作者|撰文|撰稿)[：:/|｜]\\s*(.+)/",
+          "is_rule_data": true,
+          "rationale": "文章尾部无粗体标记的「作者|撰文|撰稿」归属行识别标记词，属规则数据（与 RE_AUTHOR 合并下放）。",
+          "suggested_target": "behavior.params.author_keywords（与 RE_AUTHOR 合并）",
+          "channel": "公众号",
+          "priority": "medium"
+        },
+        {
+          "location": "第259行 parseAttribution 底部来源行",
+          "category": "标记词",
+          "current_value": "/^(?:出品|来源|出处)[：:/|｜]\\s*(.+)/",
+          "is_rule_data": true,
+          "rationale": "文章尾部无粗体标记的「出品|来源|出处」识别标记词，与 RE_SOURCE 合并下放。",
+          "suggested_target": "behavior.params.source_keywords（与 RE_SOURCE 合并）",
+          "channel": "公众号",
+          "priority": "medium"
+        },
+        {
+          "location": "第261行 parseAttribution 底部编辑行",
+          "category": "标记词",
+          "current_value": "/^(?:编辑|责编)[：:/|｜]\\s*(.+)/",
+          "is_rule_data": true,
+          "rationale": "文章尾部无粗体标记的「编辑|责编」识别标记词，与 RE_EDITOR 合并下放。",
+          "suggested_target": "behavior.params.editor_keywords（与 RE_EDITOR 合并）",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第272行 isFooterPromptText",
+          "category": "标记词",
+          "current_value": "/^提示[：:]$/",
+          "is_rule_data": true,
+          "rationale": "「提示：」页脚分界词是 FBIF 排版规范中的特定标记词，属规则数据，不同公众号/版本可能不同。",
+          "suggested_target": "behavior.params.footer_prompt_marker 或 config.modules.fbif_footer.prompt_marker",
+          "channel": "公众号",
+          "priority": "high"
+        },
+        {
+          "location": "第424行 refH 默认文本",
+          "category": "句式模板",
+          "current_value": "e.text || '参考来源'",
+          "is_rule_data": true,
+          "rationale": "当参考节标题缺失时回退的默认文本「参考来源」属规则数据（可改为「参考文献」等），与后缀「：」拼装逻辑分离。",
+          "suggested_target": "behavior.params.ref_section_default_label 或 config 中的文本常量",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第307行 classifyMd x-reader 元数据过滤",
+          "category": "识别正则",
+          "current_value": "/^Author:\\s|^Published:\\s|^Source:\\s/i 及 /Author:.*\\|.*Published:/i",
+          "is_rule_data": true,
+          "rationale": "过滤 x-reader 元数据行的英文字段名（Author/Published/Source）是特定导入源的识别关键词，属规则数据，换导入工具时需更新。",
+          "suggested_target": "behavior.params.md_metadata_skip_regex",
+          "channel": "公众号",
+          "priority": "medium"
+        },
+        {
+          "location": "第110行 isCompactDocxPair spacing 阈值",
+          "category": "其他",
+          "current_value": "after <= 160 && before <= 160（twips 阈值）",
+          "is_rule_data": true,
+          "rationale": "DOCX 紧凑行间距阈值 160 twips 是排版参数，不同规范或公众号可能需要调整，属规则参数而非算法逻辑。",
+          "suggested_target": "config.docx_compact_spacing_threshold 或 behavior.params.docx_compact_twips_threshold",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第152行 classifyDocx nonEmptySeen 上限",
+          "category": "其他",
+          "current_value": "nonEmptySeen >= 25",
+          "is_rule_data": true,
+          "rationale": "DOCX 前置材料扫描上限（25 段内找不到「作者：」则停止）是可配调参数，不同稿件结构可能需要调整。",
+          "suggested_target": "behavior.params.docx_frontmatter_scan_limit",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第376行 render isRepost 判断注释",
+          "category": "颜色",
+          "current_value": "注释中提及 '#396FBC'（FBIF 视觉规范作者行颜色）",
+          "is_rule_data": false,
+          "rationale": "此处只是注释说明，#396FBC 实际值定义在 CSS（app.css/rule-admin.css）而非本文件代码中，fbif.js 只通过 class `wx-ta-author` 引用，颜色下放在 CSS 变量/config 层，本行不需要再下放。",
+          "suggested_target": "N/A",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第158行 classifyDocx 标题文本匹配",
+          "category": "标记词",
+          "current_value": "pds[i].text.trim().startsWith('标题')",
+          "is_rule_data": true,
+          "rationale": "识别 DOCX 模板中「标题」占位符段的关键词，属规则数据（不同模板可能用不同占位词）。",
+          "suggested_target": "behavior.params.docx_title_placeholder_keyword",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第174行 classifyDocx 引言跳过",
+          "category": "标记词",
+          "current_value": "replace(/[：:]$/, '') === '引言'",
+          "is_rule_data": true,
+          "rationale": "「引言」作为 DOCX heading 被跳过的标记词，属规则数据，可配置。",
+          "suggested_target": "behavior.params.docx_skip_headings（列表）",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第188行 classifyDocx 视频占位符",
+          "category": "标记词",
+          "current_value": "pd.text.includes('插入视频')",
+          "is_rule_data": true,
+          "rationale": "「插入视频」是 DOCX 模板占位符文本，属规则数据，模板变更时需更新。",
+          "suggested_target": "behavior.params.docx_skip_text_markers（列表）",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第229行 classifyDocx 视频图注清理",
+          "category": "标记词",
+          "current_value": "replace(/^[（(]插入视频[）)]\\s*/, '')",
+          "is_rule_data": true,
+          "rationale": "「(插入视频)」括号占位符的清理匹配词，与上条同源，属规则数据。",
+          "suggested_target": "behavior.params.docx_skip_text_markers（复用）",
+          "channel": "公众号",
+          "priority": "low"
+        },
+        {
+          "location": "第25行 activeBehaviorAccount 默认值",
+          "category": "机构名",
+          "current_value": "name: (pack && pack.behaviorAccountName) || 'FBIF'",
+          "is_rule_data": true,
+          "rationale": "当 rule pack 未提供 behaviorAccountName 时回退的默认账号名「FBIF」属规则数据（各公众号规则包应自行配置，此处兜底值也应可配）。",
+          "suggested_target": "config 或 registry 全局 fallback 字段 defaultBehaviorAccountName",
+          "channel": "公众号",
+          "priority": "medium"
+        },
+        {
+          "location": "第533-536行 export default 元数据",
+          "category": "其他",
+          "current_value": "id: 'fbif', name: 'FBIF 公众号排版', description: '按 FBIF 排版规范格式化，支持标题/引言/图片说明/参考来源', formats: ['.docx', '.doc', '.md', '.txt']",
+          "is_rule_data": false,
+          "rationale": "模板 id/name/description/formats 是引擎注册元数据，用于模板发现和路由，属引擎配置常量而非排版规则数据，不需要下放到 rules API。",
+          "suggested_target": "N/A",
+          "channel": "公众号",
+          "priority": "low"
+        }
+      ],
+      "summary": "共发现 25 项条目，其中 23 项为 is_rule_data=true（应下放），2 项为引擎逻辑/元数据（留代码）。\n\n高优先级（3项）：\n1. isStandardFooterPrompt 的 FBIF 关键词正则（fbifmedia1/商务合作/FBIF投稿）— 与具体公众号强绑定，最易因规则变更而失效。\n2. isFooterPromptText「提示：」标记词 — 页脚分界词，公众号切换时必改。\n3. RE_AUTHOR / RE_SOURCE 作者来源识别正则 — 已有同类正则在 behavior FoodTalks 侧下放，公众号侧同等需要。\n\n中优先级（5项）：\nRE_EDITOR 编辑正则、parseAuthorLine DOCX「作者：」正则、参考节正则（195行）、底部无粗体归属行标记词（256/259行）、activeBehaviorAccount 默认名「FBIF」。\n\n低优先级（15项）：\n多处重复引用的参考节正则（可合并为一个 behavior.params.ref_section_regex）、DOCX 引言/标题/插入视频占位符标记词、spacing 阈值、frontmatter 扫描上限、refH 默认标签文本、x-reader 元数据过滤正则。\n\n主要建议下放位置：\n- behavior.params：author_line_regex / source_line_regex / editor_line_regex / ref_section_regex / footer_prompt_detection_regex / footer_prompt_marker / docx_* 系列参数\n- config 全局 fallback：defaultBehaviorAccountName\n\n已在 FoodTalks 侧下放的 author/tip/ref_* 正则模式可作为公众号侧的下放模板直接复用。"
+    },
+    {
+      "file": "/Users/simba/Agentic-Engineering/FBIF公众号排版/api/rule_behavior.go",
+      "items": [
+        {
+          "location": "第5行 / const defaultMoteRefHeadImageURL",
+          "category": "图片URL",
+          "current_value": "https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/fbif-attachment-to-url/2026/05/tblMQeXvSGd7Hebf_-CkOuPdpNzb-_3u9Rxc5KA_1778028720411/img_v3_0211e_8b79127d-72a5-4011-9f01-fe3b30c7548g_1778028720565.png",
+          "is_rule_data": true,
+          "rationale": "Mote 署名头图的 OSS URL 是内容参数，图片可能随时更换（重新上传/迁移），且已通过 params.mote_ref_image_url.default 暴露为可配项，但实际默认值仍 hard-code 在 Go 常量里，没有落入 behavior 服务端存储。应把这个 URL 的默认值写入 behavior 的 params 字段保存到 rule-presets.json，Go 侧只保留「没有时用空字符串」的兜底，不再写死 URL。",
+          "suggested_target": "behavior.params.mote_ref_image_url.default（在服务端 data/rule-presets.json 的 behavior 块中持久化）",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "第21行 / conditions[0].all[0].value",
+          "category": "识别关键词",
+          "current_value": "mote莫特",
+          "is_rule_data": true,
+          "rationale": "用于匹配 article.author_normalized 的标记词字符串是规则数据。若笔名变更（如增加「Mote 莫特」变体），需要改代码。应下放为 behavior.conditions 里的可配 value，或单独提取为 behavior.params.mote_author_keyword。",
+          "suggested_target": "behavior.conditions[is_mote_author].all[0].value（在 behavior 配置块中，通过规则后台可编辑）",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "第35行 / templates.author_line",
+          "category": "句式模板",
+          "current_value": "作者：{{ article.author }}",
+          "is_rule_data": true,
+          "rationale": "作者行渲染模板是典型的句式/文案规则数据。虽然 mergeRuleBehavior 允许外部覆盖，但默认值硬编码在 Go 函数体内，服务端 behavior 配置为空时无法从后台修改此默认值。应把默认值迁入 behavior 数据层（rule-presets.json）存储，引擎只读配置。",
+          "suggested_target": "behavior.templates.author_line（服务端存储，已有字段，迁默认值即可）",
+          "priority": "medium",
+          "channel": "公众号"
+        },
+        {
+          "location": "第36行 / templates.source_line",
+          "category": "句式模板",
+          "current_value": "来源：{{ article.source }}",
+          "is_rule_data": true,
+          "rationale": "来源行模板与 author_line 同理，属于可变句式规则数据。",
+          "suggested_target": "behavior.templates.source_line（服务端存储，迁默认值）",
+          "priority": "medium",
+          "channel": "公众号"
+        },
+        {
+          "location": "第37行 / templates.footer_original_notice",
+          "category": "句式模板",
+          "current_value": "* 本文为{{ account.name }}原创，欢迎转发朋友圈；",
+          "is_rule_data": true,
+          "rationale": "原创声明文案属于编辑规则数据，公众号名称通过变量插入，但整句措辞（「原创」「欢迎转发朋友圈」）是内容层决策，应可从后台修改而不改代码。",
+          "suggested_target": "behavior.templates.footer_original_notice（服务端存储，迁默认值）",
+          "priority": "medium",
+          "channel": "公众号"
+        },
+        {
+          "location": "第38行 / templates.footer_repost_notice",
+          "category": "句式模板",
+          "current_value": "* 本文为转载，不代表{{ account.name }}立场。",
+          "is_rule_data": true,
+          "rationale": "转载声明文案与 footer_original_notice 同理，是内容层规则数据。",
+          "suggested_target": "behavior.templates.footer_repost_notice（服务端存储，迁默认值）",
+          "priority": "medium",
+          "channel": "公众号"
+        },
+        {
+          "location": "第41行 / output_contracts.author_line.max_length: 80",
+          "category": "其他",
+          "current_value": "80",
+          "is_rule_data": false,
+          "rationale": "max_length 是引擎对输出的约束参数（防止作者行超长导致排版崩坏），属于引擎安全阈值而非编辑内容规则。同理 allow_html 是渲染能力开关，不是编辑规则数据。这两项目前已支持通过 behavior 覆盖（mergeRuleBehavior 的 output_contracts 合并），默认值写在引擎里是合理的技术防线。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "第42行 / output_contracts.source_line.max_length: 120",
+          "category": "其他",
+          "current_value": "120",
+          "is_rule_data": false,
+          "rationale": "与 author_line.max_length 同理，是引擎安全阈值，allow_html 是渲染能力开关，不是内容规则数据。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "第9行 / schema_version: 1",
+          "category": "其他",
+          "current_value": "1",
+          "is_rule_data": false,
+          "rationale": "schema_version 是引擎版本控制字段，用于兼容性路由判断，属于引擎逻辑元数据，不是可配规则数据。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "第28-32行 / actions[0]（insert_image_before 动作结构）",
+          "category": "其他",
+          "current_value": "type: insert_image_before, target: first_ref_heading, src_param: mote_ref_image_url, class: wx-mote-author",
+          "is_rule_data": false,
+          "rationale": "action 的 type/target/src_param/class 是引擎行为指令结构（DOM 操作描述符），属于行为算法配置。class 名 wx-mote-author 是 CSS 钩子常量，属于输出结构。target 值 first_ref_heading 是引擎内部定位语义。这些已通过 mergeRuleBehavior 支持外部 behavior 覆盖 actions 数组，默认写在引擎里合理。若未来需要后台自定义动作类型，可整体把 actions 迁入 behavior 存储；当前优先级不高。",
+          "suggested_target": "N/A（已可通过 behavior.actions 整体覆盖，现有机制已满足）",
+          "priority": "low",
+          "channel": "公众号"
+        }
+      ],
+      "summary": "rule_behavior.go 共 96 行，defaultRuleBehavior() 函数内存在 6 处应下放的规则数据硬编码：\n\n1. 【高优先级】const defaultMoteRefHeadImageURL（第5行）：Mote 署名头图 OSS URL。虽已通过 params.mote_ref_image_url.default 暴露，但实际默认值仍 hard-code 在 Go 常量里；一旦图片迁移或更换就必须改代码。应将该 URL 的默认值迁入 behavior 服务端存储（rule-presets.json），Go 侧兜底空字符串即可。\n\n2. 【高优先级】conditions[0].all[0].value = \"mote莫特\"（第21行）：Mote 作者识别标记词。笔名变体（大小写/空格）若变化就需改代码。应下放为 behavior.conditions 中的可配 value。\n\n3-6. 【中优先级】templates 下 4 条句式模板（第35-38行）：author_line / source_line / footer_original_notice / footer_repost_notice。这些都是内容文案，mergeRuleBehavior 已支持外部覆盖，但 Go 默认值无法通过规则后台修改。应将默认值迁入 data/rule-presets.json 的 behavior.templates 块，引擎侧不再持有内容语义。\n\noutput_contracts 的 max_length（80/120）、allow_html、schema_version、actions 结构（type/target/class）均属引擎安全阈值或输出结构常量，判定为 is_rule_data=false，留引擎代码合理。\n\n所有条目均属公众号渠道（channel=公众号），与网站侧物理隔离。"
+    },
+    {
+      "file": "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/heading-detect.js, /Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/image-width.js, /Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/engine.js",
+      "items": [
+        {
+          "location": "heading-detect.js 行8-10: TITLE_KEYWORDS",
+          "category": "识别关键词",
+          "current_value": "['背景', '简介', '总结', '分析', '案例', '介绍', '概述', '结论', '展望']",
+          "is_rule_data": true,
+          "rationale": "标题识别关键词列表是「内容参数」，不同渠道/客户可能有不同行业关键词，属于可配置的识别规则。引擎逻辑（startsWith 匹配 + 长度限制）留代码，关键词本身下放。",
+          "suggested_target": "config.modules.heading_detect.title_keywords（数组字段）",
+          "priority": "high",
+          "channel": "共用"
+        },
+        {
+          "location": "heading-detect.js 行13: CAPTION_LEAD_RE",
+          "category": "识别正则",
+          "current_value": "/^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|Source|Photo|Image|Credit)\\s*[：:]/i",
+          "is_rule_data": true,
+          "rationale": "图注/来源类排除词列表是识别规则的默认参数，正则本身的测试逻辑留引擎，但正则字符串（含备选词）是可配置的规则数据，可扩展到其他语言或业务场景。",
+          "suggested_target": "config.modules.heading_detect.caption_lead_regex（字符串字段）",
+          "priority": "medium",
+          "channel": "共用"
+        },
+        {
+          "location": "heading-detect.js 行49: isBoldHeading 长度阈值 36",
+          "category": "其他",
+          "current_value": "plain.length > 36",
+          "is_rule_data": true,
+          "rationale": "整段加粗视为标题的最大字符数上限是识别参数，注释里明确写「实测两篇基准标题最长25字」，属于基于数据定下的经验阈值，业务场景变化时需可调。",
+          "suggested_target": "config.modules.heading_detect.bold_heading_max_len（整数字段）",
+          "priority": "medium",
+          "channel": "共用"
+        },
+        {
+          "location": "heading-detect.js 行27: detectHeadingLevel 关键词短句长度上限 30",
+          "category": "其他",
+          "current_value": "t.length <= 30",
+          "is_rule_data": true,
+          "rationale": "显式关键词命中时允许视为标题的最大字符数，是经验阈值参数，与 bold_heading_max_len 同类，应一起下放。",
+          "suggested_target": "config.modules.heading_detect.keyword_heading_max_len（整数字段）",
+          "priority": "medium",
+          "channel": "共用"
+        },
+        {
+          "location": "image-width.js 行9: adaptiveImageWidth 竖图宽度 400",
+          "category": "字号",
+          "current_value": "return h > w ? 400 : 600",
+          "is_rule_data": true,
+          "rationale": "竖图渲染宽度 400px 是用户（2026-05-30）基于基石文章实测确认的数值参数，设计口径变化即需调整，属于可配置的视觉规则参数而非算法逻辑。",
+          "suggested_target": "config.modules.image_width.portrait_px（整数字段）",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "image-width.js 行9: adaptiveImageWidth 横图宽度 600",
+          "category": "字号",
+          "current_value": "return h > w ? 400 : 600",
+          "is_rule_data": true,
+          "rationale": "横图渲染宽度 600px 同属基石实测参数，与竖图宽度对称，应一起下放为可配。",
+          "suggested_target": "config.modules.image_width.landscape_px（整数字段）",
+          "priority": "high",
+          "channel": "网站"
+        },
+        {
+          "location": "image-width.js 行8: adaptiveImageWidth 缺尺寸默认值 600",
+          "category": "字号",
+          "current_value": "if (!w || !h) return 600;",
+          "is_rule_data": true,
+          "rationale": "缺少尺寸信息时的兜底宽度与 landscape_px 保持一致，逻辑上是「未知图默认当横图」，该默认值是可配参数。",
+          "suggested_target": "config.modules.image_width.fallback_px（整数字段，可默认等于 landscape_px）",
+          "priority": "low",
+          "channel": "网站"
+        },
+        {
+          "location": "engine.js 行198: applyRepostTransform stockOriginal 文案",
+          "category": "句式模板",
+          "current_value": "'* 本文为FBIF原创，欢迎转发朋友圈；'",
+          "is_rule_data": true,
+          "rationale": "stockOriginal 是 footer.html 里嵌入的原创声明文案，用于在转载时做字面替换。但它在引擎里作为「已知旧版文案」被硬编码，当 footer.html 内容被更新后会失效。这段文案应纳入 behavior.templates.footer_original_notice（已有同名 slot），引擎只需读 behavior，不应再有硬编码的旧版字面量。",
+          "suggested_target": "behavior.templates.footer_original_notice（已有字段，将硬编码副本清理）",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "engine.js 行197: footerBehaviorText footer_original_notice fallback 文案",
+          "category": "句式模板",
+          "current_value": "'* 本文为FBIF原创，欢迎转发朋友圈；'",
+          "is_rule_data": true,
+          "rationale": "作为 behavior 模板缺失时的硬编码 fallback，与 stockOriginal 同文，意味着「机构名」FBIF 写死在引擎 fallback 里，切换公众号后 fallback 仍显示 FBIF，应由 behavior 字段承载或通过 footerBehaviorContext 的 account.name 动态组合。",
+          "suggested_target": "behavior.templates.footer_original_notice（fallback 改为动态构造或从 behavior 读取）",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "engine.js 行197: footerBehaviorText footer_repost_notice fallback 文案",
+          "category": "句式模板",
+          "current_value": "'* 本文为转载，不代表FBIF立场。'",
+          "is_rule_data": true,
+          "rationale": "转载声明文案的硬编码 fallback，机构名 FBIF 写死，原因同上。",
+          "suggested_target": "behavior.templates.footer_repost_notice（fallback 改为动态构造或从 behavior 读取）",
+          "priority": "high",
+          "channel": "公众号"
+        },
+        {
+          "location": "engine.js 行149: footerUrl fallback '/footer.html'",
+          "category": "链接",
+          "current_value": "'/footer.html'",
+          "is_rule_data": true,
+          "rationale": "公众号默认页脚 HTML 路径在规则包 footerUrl 未声明时作为 fallback 硬编码在引擎里，新增渠道或更换页脚路径时需改代码。应由各 rule-pack 在 registry 显式声明，引擎不持有任何默认路径。",
+          "suggested_target": "rule-pack registry 中各包的 footerUrl 字段（fbif 包显式写 '/footer.html'，引擎 fallback 改为空串）",
+          "priority": "medium",
+          "channel": "公众号"
+        },
+        {
+          "location": "engine.js 行691: template.id 字面量 'foodtalks-site'",
+          "category": "识别关键词",
+          "current_value": "template.id === 'foodtalks-site'",
+          "is_rule_data": true,
+          "rationale": "通过硬编码 template.id 字符串来决定是否 transferMmbiz，属于渠道能力标记，应由 rule-pack 或 template 本身声明 transferMmbiz: true，引擎读该标志而非比对字符串 ID。",
+          "suggested_target": "rule-pack / template 新增 transferMmbiz 布尔字段，引擎改为 template.transferMmbiz",
+          "priority": "medium",
+          "channel": "网站"
+        },
+        {
+          "location": "engine.js 行818: ZOOM_STEPS 数组",
+          "category": "其他",
+          "current_value": "[50, 75, 100, 125, 150, 200]",
+          "is_rule_data": false,
+          "rationale": "缩放档位是纯 UI 交互参数，不影响任何排版规则或内容输出，属于视图层控制逻辑，留引擎代码合理。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "共用"
+        },
+        {
+          "location": "engine.js 行843: zoom phoneFrame maxWidth 基准值 420",
+          "category": "字号",
+          "current_value": "document.getElementById('phoneFrame').style.maxWidth = (420 * pct / 100) + 'px'",
+          "is_rule_data": false,
+          "rationale": "420px 是手机预览框的基准宽度，属于 UI 预览容器尺寸设计参数而非内容排版规则；它控制的是工具自身的预览壳，不影响生成内容，留引擎/CSS合理。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "共用"
+        },
+        {
+          "location": "engine.js 行783: 末尾零高度占位 <p> HTML 片段",
+          "category": "其他",
+          "current_value": "'<p style=\"margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;\"><br/></p>'",
+          "is_rule_data": false,
+          "rationale": "这是为解决微信公众号编辑器光标占位 bug 的引擎级 workaround，属于输出结构兼容性补丁，不是内容/样式规则。留引擎代码。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "公众号"
+        },
+        {
+          "location": "engine.js 行549: markFailedImages outline 颜色 '#ff4d4f'",
+          "category": "颜色",
+          "current_value": "img.style.outline = '3px solid #ff4d4f'",
+          "is_rule_data": false,
+          "rationale": "上传失败的图片错误高亮色 #ff4d4f 是工具内部 UI 反馈颜色，不是内容排版规则数据，属于工具界面逻辑，留代码合理。",
+          "suggested_target": "N/A",
+          "priority": "low",
+          "channel": "共用"
+        }
+      ],
+      "summary": "扫描三个文件，共发现 16 条硬编码项，其中 13 条判定为 is_rule_data=true（应下放）、3 条判定为 is_rule_data=false（引擎逻辑/UI 常量，留代码）。\n\n重点问题（高优先级）：\n\n1. heading-detect.js: TITLE_KEYWORDS 标题关键词列表（行8-10）硬编码在引擎，不同渠道/行业的关键词会不同，建议下放到 config.modules.heading_detect.title_keywords。\n\n2. image-width.js: 竖图 400px / 横图 600px 两个宽度阈值（行9）是用户基于基石文章实测确认的参数，网站渠道专用，应下放到 config.modules.image_width.portrait_px / landscape_px。\n\n3. engine.js 行 197-198: applyRepostTransform 里 stockOriginal 文案和两个 footerBehaviorText fallback 文案均把「FBIF」机构名硬编码在引擎，切换公众号时 fallback 依然显示 FBIF，应彻底交由 behavior.templates.footer_original_notice / footer_repost_notice 承载，引擎不保留硬编码副本。\n\n物理隔离：TITLE_KEYWORDS / CAPTION_LEAD_RE / 长度阈值为 heading-detect.js 独有，该模块目前仅被网站渲染器 foodtalks-site.js 引用（channel=共用待确认），建议下放前先用 codegraph_callers 确认调用方。image-width.js 同属网站渠道。engine.js 逻辑（footer 文案 fallback / footerUrl fallback / transferMmbiz 识别）涉及公众号渠道。"
+    }
+  ],
+  "synthesis": {
+    "by_category": [
+      {
+        "category": "识别正则",
+        "count": 23,
+        "channel_split": "公众号12条(fbif.js/rule-behavior.js/engine.js)；网站8条(rule-behavior-foodtalks.js/foodtalks-site.js/heading-detect.js)；共用3条(heading-detect.js CAPTION_LEAD_RE 被两侧引用)",
+        "examples": [
+          "fbif.js RE_AUTHOR /^(?:**)?(?:作者|撰文|撰稿|文)(?:**)?[\\s]*[：:/|｜]\\s*(.+)/",
+          "fbif.js RE_SOURCE /^(?:**)?(?:出品|来源|出处)(?:**)?[\\s]*[：:/|｜]\\s*(.+)/",
+          "fbif.js isStandardFooterPrompt /本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1/i",
+          "fbif.js isFooterPromptText /^提示[：:]$/",
+          "fbif.js classifyDocx 参考节 /^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/ (出现4次)",
+          "fbif.js x-reader元数据过滤 /^Author:\\s|^Published:\\s|^Source:\\s/i",
+          "rule-behavior-foodtalks.js WECHAT_TRAILER_MARKERS (8条)",
+          "rule-behavior-foodtalks.js WECHAT_TIP_SIGNATURES (5条)",
+          "rule-behavior-foodtalks.js buildSiteFooterTipElem FBIF判断正则 /FBIF|食品饮料创新|FoodInnovation/i",
+          "rule-behavior-foodtalks.js extractRepostSource /^来源[：:]\\s*(.+)$/",
+          "foodtalks-site.js isImageCaption内联正则词表部分",
+          "heading-detect.js CAPTION_LEAD_RE词表部分"
+        ],
+        "target": "公众号侧：behavior.params.author_line_regex / source_line_regex / editor_line_regex / ref_section_regex / footer_prompt_detection_regex / footer_prompt_marker / docx_preamble_author_regex / md_metadata_skip_regex；网站侧：behavior.wechat_trailer_markers(数组) / behavior.wechat_tip_signatures(数组) / behavior.conditions.fbif_source_pattern / behavior.params.image_caption_prefix_regex / behavior.params.image_caption_arrow_chars；共用侧：config.modules.heading_detect.caption_lead_regex"
+      },
+      {
+        "category": "识别关键词（词列表）",
+        "count": 6,
+        "channel_split": "公众号3条(fbif.js：作者/来源/编辑关键词列表，Mote触发词，标题占位词)；网站1条(foodtalks-site.js IMAGE_CAPTION_KEYWORDS)；共用2条(heading-detect.js TITLE_KEYWORDS，engine.js foodtalks-site字符串判断)",
+        "examples": [
+          "heading-detect.js TITLE_KEYWORDS ['背景','简介','总结','分析','案例','介绍','概述','结论','展望']",
+          "foodtalks-site.js IMAGE_CAPTION_KEYWORDS ['图片来源','资料来源','数据来源','来源','制图','截图','图注','注：','Source','Photo','Image','Credit']",
+          "rule-behavior.js conditions[0].all[0].value 'mote莫特'",
+          "fbif.js '标题' 占位词 / '引言' 跳过词 / '插入视频' 占位词",
+          "engine.js template.id === 'foodtalks-site'（应改为声明式标志）"
+        ],
+        "target": "公众号侧：behavior.conditions中的value字段 / behavior.params.docx_title_placeholder_keyword / behavior.params.docx_skip_headings / behavior.params.docx_skip_text_markers；网站侧：behavior.params.image_caption_keywords；共用侧：config.modules.heading_detect.title_keywords；engine.js：rule-pack/template声明 transferMmbiz:true 布尔字段"
+      },
+      {
+        "category": "句式模板",
+        "count": 10,
+        "channel_split": "公众号6条(rule-behavior.js/api/rule_behavior.go/engine.js)；网站4条(rule-behavior-foodtalks.js buildSiteFooterTipElem/buildAuthorLineFromSource)",
+        "examples": [
+          "rule-behavior.js templates.footer_original_notice '* 本文为{{ account.name }}原创，欢迎转发朋友圈；'",
+          "rule-behavior.js templates.footer_repost_notice '* 本文为转载，不代表{{ account.name }}立场。'",
+          "rule-behavior.js templates.author_line '作者：{{ article.author }}'",
+          "rule-behavior.js templates.source_line '来源：{{ article.source }}'",
+          "engine.js applyRepostTransform stockOriginal/fallback硬编码副本 '* 本文为FBIF原创，欢迎转发朋友圈；'",
+          "engine.js footer_repost_notice fallback '* 本文为转载，不代表FBIF立场。'",
+          "rule-behavior-foodtalks.js buildSiteFooterTipElem prefix '*本文为FBIF食品饮料创新（ID：FoodInnovation）原创'",
+          "rule-behavior-foodtalks.js buildSiteFooterTipElem suffix '，不代表FoodTalks立场，转载请联系出处。'",
+          "rule-behavior-foodtalks.js buildAuthorLineFromSource '本文为${source}原创' / '，转载请联系出处。'",
+          "foodtalks-site.js render tip分支 '提示：'默认标题 / '参考来源：'标题"
+        ],
+        "target": "公众号侧：behavior.templates.footer_original_notice / footer_repost_notice / author_line / source_line（已有字段，把默认值迁入服务端rule-presets.json，engine.js的硬编码副本清除）；网站侧：behavior.templates.site_tip_prefix_fbif / site_tip_suffix / author_line_repost_prefix / author_line_repost_suffix / tip_title_default / ref_header_label"
+      },
+      {
+        "category": "图片URL",
+        "count": 1,
+        "channel_split": "公众号1条(rule-behavior.js/api/rule_behavior.go 两处同值)",
+        "examples": [
+          "rule-behavior.js MOTE_REF_HEAD_IMAGE_URL (OSS图片地址，同时在Go端defaultMoteRefHeadImageURL重复)"
+        ],
+        "target": "behavior.params.mote_ref_image_url.default — 把默认值迁入服务端data/rule-presets.json的behavior块，JS/Go端兜底改为空字符串"
+      },
+      {
+        "category": "颜色",
+        "count": 7,
+        "channel_split": "网站7条(foodtalks-site.js 共5处#888888回退值 + 1处#01396a提示标题色 + 1处#7f7f7f提示正文色)",
+        "examples": [
+          "foodtalks-site.js renderImageCaption (config && config.muted_color) || '#888888'",
+          "foodtalks-site.js render author分支 (config && config.muted_color) || '#888888'",
+          "foodtalks-site.js render ref-header/ref-item各一处 (config && config.muted_color) || '#888888'",
+          "foodtalks-site.js render tip标题 color: #01396a",
+          "foodtalks-site.js render tip正文 color: #7f7f7f"
+        ],
+        "target": "#888888系列：config.muted_color 服务端默认值设为#888888，代码侧移除||内联回退；#01396a：config.tip_title_color；#7f7f7f：behavior.params.tip_body_color（与muted_color显式区分，CLAUDE.md规则19说明二者不同）"
+      },
+      {
+        "category": "字号",
+        "count": 7,
+        "channel_split": "网站5条(foodtalks-site.js：图注12px、作者署名14px、提示标题14px、提示正文14px)；共用2条(image-width.js：竖图400px、横图600px)",
+        "examples": [
+          "foodtalks-site.js renderImageCaption font-size: 12px",
+          "foodtalks-site.js render author分支 font-size: 14px",
+          "foodtalks-site.js render tip标题/正文 font-size: 14px (共2处)",
+          "image-width.js h>w ? 400 : 600 (竖图/横图宽度，网站渠道专用)",
+          "image-width.js fallback 600 (缺尺寸时)"
+        ],
+        "target": "config.caption_font_size / config.author_font_size / behavior.params.tip_font_size；config.modules.image_width.portrait_px / landscape_px / fallback_px"
+      },
+      {
+        "category": "机构名",
+        "count": 2,
+        "channel_split": "公众号2条(fbif.js activeBehaviorAccount默认'FBIF'；engine.js footerBehaviorContext account.name fallback 'FBIF')",
+        "examples": [
+          "fbif.js 行25: (pack && pack.behaviorAccountName) || 'FBIF'",
+          "engine.js 行174: (pack && pack.behaviorAccountName) || 'FBIF'"
+        ],
+        "target": "rule-pack registry（registry.js）中各pack显式声明behaviorAccountName，引擎fallback改为空串；不新建额外字段，复用现有pack.behaviorAccountName路径"
+      },
+      {
+        "category": "链接",
+        "count": 1,
+        "channel_split": "公众号1条(engine.js footerUrl fallback '/footer.html')",
+        "examples": [
+          "engine.js 行149: footerUrl fallback '/footer.html'"
+        ],
+        "target": "rule-pack registry中fbif包显式声明footerUrl:'/footer.html'，引擎fallback改为空串（无footerUrl则不加载页脚）"
+      },
+      {
+        "category": "其他（数值参数/阈值）",
+        "count": 9,
+        "channel_split": "共用4条(heading-detect.js：bold_heading_max_len=36，keyword_heading_max_len=30)；网站4条(foodtalks-site.js：image_caption_max_total_len=120，短文本阈值45/0/1，caption提升窗口3/2)；公众号1条(fbif.js：docx_compact_twips_threshold=160，docx_frontmatter_scan_limit=25)",
+        "examples": [
+          "heading-detect.js isBoldHeading plain.length > 36",
+          "heading-detect.js detectHeadingLevel t.length <= 30",
+          "foodtalks-site.js isImageCaption plain.length > 120 / plain.length <= 45 / sentenceEnd === 0 / commaCount <= 1",
+          "foodtalks-site.js promoteImageCaptions scanned < 3 && promoted < 2",
+          "fbif.js isCompactDocxPair after <= 160 && before <= 160 (twips)",
+          "fbif.js classifyDocx nonEmptySeen >= 25"
+        ],
+        "target": "config.modules.heading_detect.bold_heading_max_len / keyword_heading_max_len；behavior.params.image_caption_max_total_len / image_caption_max_len / image_caption_max_sentence_end / image_caption_max_comma / caption_promote_scan_window / caption_promote_max；behavior.params.docx_compact_twips_threshold / docx_frontmatter_scan_limit"
+      }
+    ],
+    "already_downstreamed": [
+      "FoodTalks 网站 author_regex（behavior.author_regex，已在rule-behavior-foodtalks.js行178从behavior读取，服务端下发默认值后代码侧仍有fallback字符串待清理）",
+      "FoodTalks 网站 tip_regex（behavior.tip_regex，同上）",
+      "FoodTalks 网站 ref_header_regex（behavior.ref_header_regex，同上）",
+      "FoodTalks 网站 ref_item_regex（behavior.ref_item_regex，同上）",
+      "FBIF 页脚库 FOOTER_SEGMENTS / FOOTER_SEGMENT_ORDER / FOOTER_PRESETS（已在footer-segments-defaults.js定义并通过config.modules.fbif_footer从服务端下发，buildFooterHtml读服务端配置）"
+    ],
+    "schema_extension": "## 统一 schema 扩展方案（公众号侧 vs 网站侧完全分离）\n\n### 一、公众号侧（behavior JSON，存 data/rule-presets.json 中 fbif 包的 behavior 字段）\n\n**现有 behavior 结构不变，在以下位置新增/迁移默认值：**\n\n```jsonc\n{\n  \"schema_version\": 1,\n  \"params\": {\n    \"mote_ref_image_url\": { \"type\": \"url\", \"required\": true, \"default\": \"...迁入实际URL...\" },\n    // 新增\n    \"author_line_regex\":      { \"type\": \"string\", \"default\": \"^(?:**)?(?:作者|撰文|撰稿|文)(?:**)?[\\\\s]*[：:/|｜]\\\\s*(.+)\" },\n    \"source_line_regex\":      { \"type\": \"string\", \"default\": \"^(?:**)?(?:出品|来源|出处)(?:**)?[\\\\s]*[：:/|｜]\\\\s*(.+)\" },\n    \"editor_line_regex\":      { \"type\": \"string\", \"default\": \"^(?:**)?(?:编辑|责编)(?:**)?[\\\\s]*[：:/|｜]\\\\s*(.+)\" },\n    \"ref_section_regex\":      { \"type\": \"string\", \"default\": \"^(参考(来源|文献|资料|链接)|信息来源)[：:]?$\" },\n    \"footer_prompt_marker\":   { \"type\": \"string\", \"default\": \"^提示[：:]$\" },\n    \"footer_prompt_detection_regex\": { \"type\": \"string\", \"default\": \"本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1\" },\n    \"docx_preamble_author_regex\":    { \"type\": \"string\", \"default\": \"^作者[：:]\\\\s*(.+)$\" },\n    \"md_metadata_skip_regex\":        { \"type\": \"string\", \"default\": \"^Author:\\\\s|^Published:\\\\s|^Source:\\\\s\" },\n    \"docx_compact_twips_threshold\":  { \"type\": \"number\", \"default\": 160 },\n    \"docx_frontmatter_scan_limit\":   { \"type\": \"number\", \"default\": 25 }\n  },\n  \"conditions\": [\n    { \"id\": \"is_mote_author\", \"all\": [{ \"path\": \"article.author_normalized\", \"op\": \"eq\", \"value\": \"mote莫特\" }] }\n    // value 字段由服务端下发，引擎不再硬编码\n  ],\n  \"templates\": {\n    // 以下四条现有字段，把默认值从Go/JS代码中迁入此处存储\n    \"author_line\":            \"作者：{{ article.author }}\",\n    \"source_line\":            \"来源：{{ article.source }}\",\n    \"footer_original_notice\": \"* 本文为{{ account.name }}原创，欢迎转发朋友圈；\",\n    \"footer_repost_notice\":   \"* 本文为转载，不代表{{ account.name }}立场。\"\n  }\n}\n```\n\n**对应代码侧改动：**\n- `api/rule_behavior.go`：`defaultMoteRefHeadImageURL` 常量改为空字符串，URL值迁入 rule-presets.json\n- `public/js/rule-behavior.js`：`MOTE_REF_HEAD_IMAGE_URL` 常量改为空串\n- `public/js/engine.js`：`stockOriginal` 字面量删除，`footerBehaviorText` fallback 参数改为动态构造（用 account.name 变量）而非机构名硬编码；`footerUrl` fallback 删除，改由 registry fbif 包显式声明\n- `public/js/templates/fbif.js`：RE_AUTHOR / RE_SOURCE / RE_EDITOR 改从 `behavior.params.*_line_regex` 读取；`isStandardFooterPrompt` / `isFooterPromptText` 改从 `behavior.params.footer_prompt_*` 读取；`classifyDocx` 各正则改从 `behavior.params.*` 读取\n\n### 二、网站侧（behavior JSON，存 ft-default 包的 behavior 字段，与公众号包完全分离）\n\n**在现有 author_regex / tip_regex / ref_*_regex 基础上新增：**\n\n```jsonc\n{\n  \"wechat_trailer_markers\":   [\"\\/\\\\s*更多文章\\\\s*\\/\", \"\\/\\\\s*1000\\\\s*个食品创新案例\\\\s*\\/\", \"预览时标签不可点\", \"加入微信群\", \"关注公众号\", \"点击获取更多\", \"长按.{0,4}识别.{0,2}二维码\", \"扫码.{0,4}(?:加群|关注|进群)\"],\n  \"wechat_tip_signatures\":    [\"欢迎转发朋友圈\", \"后台回复.{0,4}转载\", \"投稿与商务合作\", \"fbifmedia\", \"微信[：:]\\\\s*FBIF_\"],\n  \"conditions\": {\n    \"fbif_source_pattern\": \"FBIF|食品饮料创新|FoodInnovation\"\n  },\n  \"params\": {\n    \"image_caption_keywords\":       [\"图片来源\",\"资料来源\",\"数据来源\",\"来源\",\"制图\",\"截图\",\"图注\",\"注：\",\"Source\",\"Photo\",\"Image\",\"Credit\"],\n    \"image_caption_prefix_regex\":   \"^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\\\\s*[：:\\\\s\\\\d]\",\n    \"image_caption_arrow_chars\":    \"▲△▵▽▼\",\n    \"image_caption_max_total_len\":  120,\n    \"image_caption_max_len\":        45,\n    \"image_caption_max_sentence_end\": 0,\n    \"image_caption_max_comma\":      1,\n    \"caption_promote_scan_window\":  3,\n    \"caption_promote_max\":          2,\n    \"tip_title_default\":            \"提示：\",\n    \"tip_body_color\":               \"#7f7f7f\",\n    \"ref_header_label\":             \"参考来源：\",\n    \"docx_preamble_author_regex\":   \"^[\\\\s　]*(作者|Author)\\\\s*[:：]\"\n  },\n  \"templates\": {\n    \"site_tip_prefix_fbif\":        \"*本文为FBIF食品饮料创新（ID：FoodInnovation）原创\",\n    \"site_tip_suffix\":             \"，不代表FoodTalks立场，转载请联系出处。\",\n    \"author_line_repost_prefix\":   \"本文为${source}原创\",\n    \"author_line_repost_suffix\":   \"，转载请联系出处。\"\n  }\n}\n```\n\n### 三、config（服务端扁平config字段，两侧各自读各自包的config）\n\n**新增字段（颜色/字号/数值，公众号/网站共用结构，但各包取值独立）：**\n\n```jsonc\n{\n  // 已有 muted_color，新增默认值 #888888（代码侧移除 || '#888888' 内联回退）\n  \"muted_color\": \"#888888\",\n  // 新增\n  \"tip_title_color\":  \"#01396a\",\n  \"caption_font_size\": 12,\n  \"author_font_size\":  14,\n  \"tip_font_size\":     14,\n  // 网站专用（在 ft-default 包 config）\n  \"modules\": {\n    \"image_width\": {\n      \"portrait_px\":  400,\n      \"landscape_px\": 600,\n      \"fallback_px\":  600\n    },\n    \"heading_detect\": {\n      \"title_keywords\":         [\"背景\",\"简介\",\"总结\",\"分析\",\"案例\",\"介绍\",\"概述\",\"结论\",\"展望\"],\n      \"caption_lead_regex\":     \"^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|Source|Photo|Image|Credit)\\\\s*[：:]\",\n      \"bold_heading_max_len\":   36,\n      \"keyword_heading_max_len\": 30\n    }\n  }\n}\n```\n\n**扩展原则：**\n1. 复用现有 behavior.params / behavior.templates / behavior.conditions 结构，不新建平行路径\n2. 颜色/字号走 config（已有机制），数值阈值/识别词表/句式模板走 behavior\n3. 公众号包（fbif）和网站包（ft-default）的 behavior 字段完全独立存储，互不引用\n4. 代码侧 fallback 只允许空字符串/0/null，机构名/URL/文案不再出现在引擎代码里",
+    "priority_plan": [
+      {
+        "batch": "Batch 1（高价值，最高风险，优先）",
+        "items": [
+          "Mote署名图URL从engine代码完全迁出：rule-presets.json写入behavior.params.mote_ref_image_url.default，api/rule_behavior.go和rule-behavior.js两处常量改为空字符串",
+          "engine.js footer fallback去除FBIF硬编码：stockOriginal字面量删除，footerBehaviorText两处fallback改为动态构造'* 本文为'+account.name+'原创…'",
+          "engine.js footerUrl fallback去除：registry.js fbif包显式加footerUrl:'/footer.html'，engine fallback改为空串",
+          "rule-behavior-foodtalks.js WECHAT_TRAILER_MARKERS/WECHAT_TIP_SIGNATURES下放：从服务端ft-default behavior的wechat_trailer_markers/wechat_tip_signatures字段读取，代码数组改为服务端未配置时的离线兜底（保留原始数组作const，但用behavior覆盖）",
+          "fbif.js isStandardFooterPrompt正则下放：从behavior.params.footer_prompt_detection_regex读取",
+          "fbif.js isFooterPromptText '提示：'标记词下放：从behavior.params.footer_prompt_marker读取"
+        ],
+        "files": [
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/api/rule_behavior.go",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/data/rule-presets.json",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-behavior.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/engine.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-packs/registry.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-behavior-foodtalks.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/templates/fbif.js"
+        ],
+        "effort": "M（3-4天）：主要风险在engine.js的fallback改动会影响页脚转载逻辑，必须跑完 npm test + 真实浏览器原创/转载各1篇验证"
+      },
+      {
+        "batch": "Batch 2（高价值，中风险）",
+        "items": [
+          "fbif.js RE_AUTHOR/RE_SOURCE识别正则下放到behavior.params.author_line_regex/source_line_regex（公众号侧）",
+          "fbif.js RE_EDITOR下放到behavior.params.editor_line_regex",
+          "fbif.js classifyDocx参考节正则（4处重复）统一为behavior.params.ref_section_regex",
+          "rule-behavior-foodtalks.js buildSiteFooterTipElem prefix/suffix下放到behavior.templates.site_tip_prefix_fbif/site_tip_suffix",
+          "rule-behavior-foodtalks.js buildSiteFooterTipElem FBIF判断正则下放到behavior.conditions.fbif_source_pattern",
+          "rule-behavior-foodtalks.js buildAuthorLineFromSource句式模板下放到behavior.templates.author_line_repost_prefix/suffix",
+          "foodtalks-site.js IMAGE_CAPTION_KEYWORDS下放到behavior.params.image_caption_keywords",
+          "foodtalks-site.js tip标题颜色#01396a下放到config.tip_title_color",
+          "foodtalks-site.js tip正文颜色#7f7f7f下放到behavior.params.tip_body_color"
+        ],
+        "files": [
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/templates/fbif.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-behavior-foodtalks.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/templates/foodtalks-site.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/api/handlers.go"
+        ],
+        "effort": "M（3-4天）：fbif.js RE_*正则改动影响公众号所有来源/作者识别，必须用真实DOCX和URL导入各验证1篇；颜色字段改动通过浏览器截图验证"
+      },
+      {
+        "batch": "Batch 3（中价值，低风险）",
+        "items": [
+          "foodtalks-site.js muted_color回退值（4处||'#888888'）清除，依赖服务端config.muted_color默认值",
+          "foodtalks-site.js 图注12px/作者14px/提示14px字号下放到config.caption_font_size/author_font_size/tip_font_size",
+          "foodtalks-site.js render tip '提示：'默认文案下放到behavior.params.tip_title_default",
+          "foodtalks-site.js render ref-header '参考来源：'文案下放到behavior.params.ref_header_label",
+          "rule-behavior-foodtalks.js author_regex/tip_regex/ref_*_regex代码侧fallback字符串清除（已下放但代码仍有||默认值，服务端确保必下发）",
+          "heading-detect.js TITLE_KEYWORDS下放到config.modules.heading_detect.title_keywords",
+          "heading-detect.js CAPTION_LEAD_RE词表下放到config.modules.heading_detect.caption_lead_regex",
+          "image-width.js 400/600宽度下放到config.modules.image_width.portrait_px/landscape_px",
+          "engine.js template.id==='foodtalks-site'改为template.transferMmbiz标志"
+        ],
+        "files": [
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/templates/foodtalks-site.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-behavior-foodtalks.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/heading-detect.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/image-width.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/engine.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-packs/registry.js"
+        ],
+        "effort": "S-M（2-3天）：颜色/字号改动需浏览器截图回归；heading/image-width参数化需重跑heading-detect.test.mjs和foodtalks-site-behavior.test.mjs"
+      },
+      {
+        "batch": "Batch 4（低价值，可选）",
+        "items": [
+          "fbif.js parseAuthorLine DOCX专用正则下放到behavior.params.docx_preamble_author_regex",
+          "fbif.js x-reader元数据过滤正则下放到behavior.params.md_metadata_skip_regex",
+          "fbif.js activeBehaviorAccount默认名'FBIF'：registry各包显式声明behaviorAccountName（已有路径，只是补全兜底）",
+          "fbif.js docx_compact_twips_threshold=160下放到behavior.params",
+          "fbif.js docx_frontmatter_scan_limit=25下放到behavior.params",
+          "foodtalks-site.js isImageCaption正则前缀词表下放到behavior.params.image_caption_prefix_regex",
+          "foodtalks-site.js 三角符号前缀下放到behavior.params.image_caption_arrow_chars",
+          "foodtalks-site.js 短/长文本阈值参数化",
+          "foodtalks-site.js promoteImageCaptions窗口参数化",
+          "heading-detect.js bold_heading_max_len/keyword_heading_max_len参数化",
+          "rule-behavior.js output_contracts.author_line.max_length=80/source_line.max_length=120（视需求择机下放）"
+        ],
+        "files": [
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/templates/fbif.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/templates/foodtalks-site.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/heading-detect.js",
+          "/Users/simba/Agentic-Engineering/FBIF公众号排版/public/js/rule-behavior.js"
+        ],
+        "effort": "S（1-2天）：改动局部、低频、纯参数化，风险最低；可在空档期分散处理"
+      }
+    ],
+    "isolation_notes": "## 公众号/网站物理隔离要点（CLAUDE.md 规则19）\n\n### 两侧规则各自独立，禁止跨侧引用的范围：\n\n1. **行为引擎文件**：公众号 `public/js/rule-behavior.js` 与网站 `public/js/rule-behavior-foodtalks.js` 不互相 import。下放规则时必须分别写入两侧各自对应的服务端 behavior 字段，不能共享同一 JSON key。\n\n2. **渲染器文件**：`public/js/templates/fbif.js`（公众号）与 `public/js/templates/foodtalks-site.js`（网站）不互相 import，规则19明确「fbif.js 在网站任务中必须字节级不动」。Batch 1-4 所有对 fbif.js 的改动必须单独进行，不得以「两侧通用」为由合并。\n\n3. **颜色口径强制区分**：\n   - 作者署名色：公众号 `#396FBC`（蓝色粗体，在 app.css 通过 `.wx-ta-author` 定义），网站 `#888888`（muted_color config）。两者不能合并，不能共享 config key。\n   - 提示正文色：网站专用 `#7f7f7f`（behavior.params.tip_body_color），不能复用公众号的 muted_color（规则19说明 #7f7f7f 是网站编辑部原生口径，非 #888888 的别名）。\n\n4. **服务端规则包隔离**：公众号规则（fbif/fbif-foodtalks系列包）的 behavior 字段与网站包（ft-default）的 behavior 字段分属不同 JSON 对象，存于 data/rule-presets.json 的不同 key 下。API 下发时按包 ID 各自取值，不合并。\n\n5. **WECHAT_TRAILER_MARKERS / WECHAT_TIP_SIGNATURES**：这两个列表只属于网站侧（用于从公众号原文切除导流尾段），公众号渲染器不需要也不应引用。下放后存入 ft-default 包的 behavior，fbif 包无此字段。\n\n6. **heading-detect.js / image-width.js 的渠道归属**：这两个模块当前只被 `foodtalks-site.js` 调用（网站渠道），若将来公众号渲染器需要标题识别，应单独复制并分别参数化，不能共用同一 config 路径（两侧标题判据不同）。下放 Batch 3 时需先用 codegraph_callers 确认调用方，防止公众号侧意外引用。\n\n7. **rule-packs/registry.js 中的渠道声明**：新增 `transferMmbiz` 布尔字段时（Batch 3 engine.js改动），公众号包默认 false，网站包（ft-default）设为 true，引擎读标志而非比对字符串 ID，确保规则语义在 registry 层而非引擎层区分渠道。",
+    "risks": [
+      "【高】engine.js footer fallback改动（Batch 1）：applyRepostTransform的stockOriginal字面量删除后，若behavior.templates.footer_original_notice在服务端未正确配置或rule-presets.json未迁入，转载文章页脚替换会静默失败（no-op，而非报错），运营人员可能注意不到。缓解：改动前先写集成测试锁定原创/转载页脚逻辑，改后用真实文章浏览器验证，服务器启动时断言behavior必含footer_*字段。",
+      "【高】fbif.js RE_AUTHOR/RE_SOURCE下放后（Batch 2）：若服务端behavior.params字段返回空/null时引擎fallback不兜底，会导致所有公众号文章的作者行和来源行识别失败，排版彻底损坏。缓解：必须保留const常量作为离线兜底（读不到服务端时用原始字符串），并在行为参数读取函数里加明确的非空断言+console.warn。",
+      "【中】muted_color回退值删除（Batch 3）：代码侧 ||'#888888' 删除后，若服务端config.muted_color字段缺失，图注/作者行/参考来源颜色全部失效（变默认黑色）。缓解：Go API的config合并逻辑必须保证muted_color有默认值，在initConfig函数里添加显式defaults。",
+      "【中】WECHAT_TRAILER_MARKERS下放后（Batch 1）：数组从服务端读取，网络请求失败或后台误删时，网站文章不再裁剪公众号导流尾段，导致「关注公众号」「加入微信群」等尾部出现在网站发布版。缓解：保留原始数组作const离线兜底，行为读取逻辑：优先服务端，失败时warning+用离线const兜底，不能空数组兜底。",
+      "【中】物理隔离被破坏的风险：Batch 2改动fbif.js正则参数化时，若开发者误用网站侧behavior路径，或共享config key，会导致规则19违规。缓解：每次改动fbif.js后用代码审查检查import链，确认没有引入任何来自foodtalks-site.js或rule-behavior-foodtalks.js的依赖。",
+      "【低】heading-detect.js TITLE_KEYWORDS/CAPTION_LEAD_RE参数化（Batch 3）：config.modules.heading_detect字段服务端未配时，标题识别词表为空，所有「背景」「总结」等关键词开头的短句不再被识别为h2。缓解：config合并层在Go端提供完整defaults，前端读取时如发现数组为空则fallback到代码内const。",
+      "【低】规则后台（/api/rules）误配风险：把正则字符串暴露给后台管理员后，若输入格式错误（如非法正则），new RegExp()会抛异常导致整篇文章渲染崩溃。缓解：服务端接收behavior.params时对所有type==='string'的正则字段做try-catch预校验，失败时拒绝保存并返回400。",
+      "【低】rule-presets.json迁入URL后数据安全：Mote署名图URL存在服务端JSON，若OSS链接含敏感token（目前URL看起来是公开路径），则落入版本库风险较低；但若未来换成有签名的URL，需注意不要提交到git。缓解：检查URL是否包含?签名参数，若有则必须走环境变量而非rule-presets.json存储。"
+    ]
+  }
+}

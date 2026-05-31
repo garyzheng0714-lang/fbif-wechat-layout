@@ -6,8 +6,8 @@ FoodTalks 网站后台「正确」源码 · 金标准基石（用户 2026-05-30 
 
 用途: FoodTalks 网站渠道 URL 导入复制结果的逐块 diff 金标准。
 注意:
-  - 文末「加入微信群 / 关注公众号 / FoodTalks logo / 点击获取更多」+ 二维码图 + 空 js_content div
-    是 FoodTalks 系统发布后自动追加的，我们渲染器永远不输出（规则 20）。正文主体终点是「提示：」段。
+  - 文末「加入微信群 / 关注公众号 / FoodTalks logo / 点击获取更多」+ 二维码图
+    是当前 FoodTalks 页脚库目标结构，排版工具需要按规则 20 完整输出；空 js_content div 是微信导出残留，不输出。
   - h2 的 id="mctoc_xxx" 是后台自动加的锚点，我们不输出 id（用户 2026-05-30 确认）。
   - 图片域名 static.foodtalks.cn 是发布后 FoodTalks 自己的 CDN；我们导入时转存到
     fbif-gary-img-hz.oss-cn-hangzhou，域名不同但都是可访问 CDN，属预期差异。
@@ -46,4 +46,4 @@ FoodTalks 网站后台「正确」源码 · 金标准基石（用户 2026-05-30 
 <!-- … 参考来源 [2]~[10] 同款格式 … -->
 <p style="text-align: justify;"><span style="color: #888888;">本文封面图来源：Starbucks官网</span></p>
 <p style="text-align: justify;"><strong><span style="color: #01396a;"><em><span style="font-size: 14px;">提示：</span></em></span></strong><span style="font-size: 14px;">*本文为FBIF食品饮料创新（ID：FoodInnovation）原创《星巴克曾花45亿买了茶品牌，想做茶叶版星巴克，5年后379家店全关了》，不代表FoodTalks立场，转载请联系出处。</span></p>
-<!-- 正文主体到此为止。下面是 FoodTalks 系统自动追加的页脚，我们不输出。 -->
+<!-- 提示声明之后继续输出 FoodTalks 页脚库片段；空 js_content 残留不输出。 -->
