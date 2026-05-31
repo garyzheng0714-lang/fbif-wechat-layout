@@ -111,11 +111,19 @@ const WECHAT_TIP_SIGNATURES = [
 // 从 index i 起收集随后若干段文本，用于判断 i 处"提示："是否公众号页脚（其转载
 // 声明常分散在"提示："之后的相邻几段）。
 function collectFollowingText(elems, i) {
-  let s = runsToText(elems[i] && elems[i].runs);
+  let s = elemText(elems[i]);
   for (let j = i + 1; j < elems.length && j < i + 5; j++) {
-    if (elems[j] && elems[j].k === 'p') s += '\n' + runsToText(elems[j].runs);
+    if (elems[j] && (elems[j].k === 'p' || elems[j].k === 'h' || elems[j].k === 'cap')) {
+      s += '\n' + elemText(elems[j]);
+    }
   }
   return s;
+}
+
+function elemText(e) {
+  if (!e) return '';
+  if (Array.isArray(e.runs)) return runsToText(e.runs);
+  return typeof e.text === 'string' ? e.text : '';
 }
 
 function isNearTail(elems, i) {
@@ -143,7 +151,7 @@ function stripWechatTrailer(elems, markers, signatures, externalMarkers) {
     const e = elems[i];
     // 导流标记可能落在正文段(p)或图注(cap，如 "/ 更多文章 /")里，两者都要检查；
     // 图(img)无文本，跳过其文本判定但不阻断扫描。
-    const text = (e.k === 'p' || e.k === 'cap') ? runsToText(e.runs) : '';
+    const text = (e.k === 'p' || e.k === 'h' || e.k === 'cap') ? elemText(e) : '';
     // 公众号"提示："页脚：从这一段起切除，并标记需补网站页脚
     if (e.k === 'p' && /^\s*提示[：:]/.test(text) &&
         tipSignatures.some(re => re.test(collectFollowingText(elems, i)))) {
