@@ -53,6 +53,9 @@ test('site.html renders the FoodTalks article preview shell', async () => {
   assert.match(html, /id=['"]ftPreviewTags['"]/);
   assert.match(html, /id=['"]ftShareButton['"]/);
   assert.match(html, /id=['"]ftSharePopover['"]/);
+  assert.match(html, /class=['"]ft-time-svg['"]/);
+  assert.match(html, /#C9C9C9/);
+  assert.match(html, /#CACCCD/);
   assert.match(html, /dataset\.previewTagKey/);
   assert.match(css, /\.preview-site \.ft-preview-tag:hover/);
   assert.match(css, /\.preview-site \.ft-share-popover/);

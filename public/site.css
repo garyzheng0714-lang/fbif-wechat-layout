@@ -284,42 +284,22 @@ body.channel-portal-body {
   flex: 0 0 auto;
 }
 .preview-site .ft-share-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
+  display: block;
+  width: 59px;
   height: 24px;
-  padding: 0 0 0 12px;
-  color: #c7cbd0;
-  background: #f5f8fb;
+  padding: 0;
+  color: #cacccd;
+  background: transparent;
   border: none;
-  border-radius: 13px;
-  font-size: 14px;
-  line-height: 24px;
   cursor: pointer;
-  transition: color 160ms ease, background 160ms ease;
+  transition: opacity 160ms ease;
 }
 .preview-site .ft-share-button:hover,
 .preview-site .ft-share-button[aria-expanded="true"] {
-  color: #9aa1a8;
-  background: #eef3f8;
+  opacity: 0.92;
 }
-.preview-site .ft-share-arrow {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  margin-left: 4px;
-  color: #c7cbd0;
-  background: #d1d5da;
-  border-radius: 50%;
-  transition: transform 160ms ease, color 160ms ease, background 160ms ease;
-}
-.preview-site .ft-share-button:hover .ft-share-arrow,
-.preview-site .ft-share-button[aria-expanded="true"] .ft-share-arrow {
-  color: #ffffff;
-  background: #b8bec4;
-  transform: translateX(1px);
+.preview-site .ft-share-svg {
+  display: block;
 }
 .preview-site .ft-share-popover {
   position: absolute;
