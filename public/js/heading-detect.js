@@ -11,9 +11,13 @@ const TITLE_KEYWORDS = [
 
 // 图注/来源类开头词——标题判据要排除它们，避免把"图片来源：xx"之类误升级。
 const CAPTION_LEAD_RE = /^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|Source|Photo|Image|Credit)\s*[：:]/i;
+const DECORATIVE_LINE_RE = /^[\s\-_=—–━·•*]+$/;
+const ARABIC_LIST_PREFIX_RE = /^\d+\s*[.、．]\s*\S/;
 
 // detectHeadingLevel: 基于纯文本的显式标题识别。返回 2 / 3 / 0（不是标题）。
-export function detectHeadingLevel(text) {
+// opts（可选，红线下放：调用方从 config 解析后注入，缺省降级到代码内 const）：
+//   { titleKeywords }。
+export function detectHeadingLevel(text, opts) {
   const t = String(text || '').trim();
   if (!t) return 0;
 
@@ -24,8 +28,10 @@ export function detectHeadingLevel(text) {
   if (/^[一二三四五六七八九十]+\s*[、：．:\s]/.test(t)) return 2;
 
   // 关键词 + 短句 + 无尾句号 → h2
+  const kws = (opts && Array.isArray(opts.titleKeywords) && opts.titleKeywords.length)
+    ? opts.titleKeywords : TITLE_KEYWORDS;
   if (t.length <= 30 && !/[。.]$/.test(t)) {
-    for (const kw of TITLE_KEYWORDS) {
+    for (const kw of kws) {
       if (t.startsWith(kw)) return 2;
     }
   }
@@ -41,26 +47,31 @@ export function detectHeadingLevel(text) {
 //      实测两篇里被排除的"加粗强调正文"都是 43~45 字 + 句号结尾，靠句号 + 长度双重拦截。
 //   4. 不是图注/来源行
 // 段内允许逗号/顿号/冒号（"疯狂的梦想：5年要开到1000家店"是标题）。
-export function isBoldHeading(runs) {
+export function isBoldHeading(runs, opts) {
+  const captionRe = (opts && opts.captionLeadRe) || CAPTION_LEAD_RE;
   const txtRuns = (runs || []).filter(r => r && r.type === 'txt' && r.text && r.text.trim());
   if (!txtRuns.length) return false;
   if (!txtRuns.every(r => r.bold)) return false;
   const plain = txtRuns.map(r => r.text).join('').trim();
   if (plain.length === 0 || plain.length > 36) return false;
+  if (DECORATIVE_LINE_RE.test(plain)) return false;
+  if (ARABIC_LIST_PREFIX_RE.test(plain)) return false;
   if (/[。.]$/.test(plain)) return false;
-  if (CAPTION_LEAD_RE.test(plain)) return false;
+  if (/[，,；;]$/.test(plain)) return false;
+  if (/^(?:最后|那么|所以|因此|总之|说到底)[，,].*[：:]$/.test(plain)) return false;
+  if (captionRe.test(plain)) return false;
   return true;
 }
 
 // promoteHeuristicHeadings: 把被启发式识别为标题的普通段（k:'p'）转换成 'h' 元素。
 // 先认显式编号/关键词标题，再认整段加粗标题。已是 author/tip/cap/ref 等非 'p' 块不动。
-export function promoteHeuristicHeadings(elems) {
+export function promoteHeuristicHeadings(elems, opts) {
   return (elems || []).map(e => {
     if (!e || e.k !== 'p') return e;
     const plain = (e.runs || []).filter(r => r.type === 'txt').map(r => r.text).join('');
-    const level = detectHeadingLevel(plain);
+    const level = detectHeadingLevel(plain, opts);
     if (level !== 0) return { k: 'h', level, runs: e.runs };
-    if (isBoldHeading(e.runs)) return { k: 'h', level: 2, runs: e.runs };
+    if (isBoldHeading(e.runs, opts)) return { k: 'h', level: 2, runs: e.runs };
     return e;
   });
 }

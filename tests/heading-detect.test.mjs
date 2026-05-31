@@ -83,6 +83,13 @@ test('isBoldHeading 拒绝加粗的图注/来源行', () => {
   assert.equal(isBoldHeading([{ type: 'txt', text: '拍摄：Mote莫特', bold: true }]), false);
 });
 
+test('isBoldHeading 拒绝编号步骤、装饰线和未完句（黄仁勋样本误判防护）', () => {
+  assert.equal(isBoldHeading([{ type: 'txt', text: '1. 当天下午官微发博，英伟达创始人黄仁勋来到门店；', bold: true }]), false);
+  assert.equal(isBoldHeading([{ type: 'txt', text: '价格不傲慢，人人可消费；', bold: true }]), false);
+  assert.equal(isBoldHeading([{ type: 'txt', text: '━ ━ ━ ━ ━', bold: true }]), false);
+  assert.equal(isBoldHeading([{ type: 'txt', text: '最后，想问问你：', bold: true }]), false);
+});
+
 test('isBoldHeading 拒绝空 runs', () => {
   assert.equal(isBoldHeading([]), false);
   assert.equal(isBoldHeading([{ type: 'txt', text: '   ', bold: true }]), false);

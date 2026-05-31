@@ -13,6 +13,18 @@ func defaultRuleBehavior() map[string]any {
 				"required": true,
 				"default":  defaultMoteRefHeadImageURL,
 			},
+			// 公众号识别正则（红线下放：规则后台可配；客户端 fbif.js 读 .default，
+			// 读不到/非法时降级到代码内同值 const 离线兜底）。
+			"author_line_regex":             map[string]any{"type": "string", "default": `^(?:\*\*)?(?:作者|撰文|撰稿|文)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
+			"source_line_regex":             map[string]any{"type": "string", "default": `^(?:\*\*)?(?:出品|来源|出处)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
+			"editor_line_regex":             map[string]any{"type": "string", "default": `^(?:\*\*)?(?:编辑|责编)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
+			"ref_section_regex":             map[string]any{"type": "string", "default": `^(参考(来源|文献|资料|链接)|信息来源)[：:]?$`},
+			"footer_prompt_marker":          map[string]any{"type": "string", "default": `^提示[：:]$`},
+			"footer_prompt_detection_regex": map[string]any{"type": "string", "default": `(?i)本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1`},
+			"docx_author_line_regex":        map[string]any{"type": "string", "default": `^作者[：:]\s*(.+)$`},
+			"md_metadata_skip_regex":        map[string]any{"type": "string", "default": `(?i)^Author:\s|^Published:\s|^Source:\s`},
+			// footer.html 内嵌的存量原创声明（engine.js 转载改写时按此字面量定位替换）。
+			"footer_stock_original_text": map[string]any{"type": "string", "default": "* 本文为FBIF原创，欢迎转发朋友圈；"},
 		},
 		"conditions": []any{
 			map[string]any{
@@ -72,7 +84,10 @@ func mergeRuleBehavior(behavior map[string]any) map[string]any {
 	if behavior == nil {
 		return merged
 	}
-	for _, key := range []string{"params", "templates", "output_contracts"} {
+	// 对象类字段按 key 合并（外部覆盖默认）。lists 是网站识别词表/标记（红线下放），
+	// 默认 behavior（公众号）无此字段，合并后即等于存储值——必须透传，否则网站
+	// wechat_trailer_markers / image_caption_keywords 等永远传不到客户端。
+	for _, key := range []string{"params", "templates", "output_contracts", "lists"} {
 		raw, ok := behavior[key].(map[string]any)
 		if !ok {
 			continue
@@ -86,7 +101,10 @@ func mergeRuleBehavior(behavior map[string]any) map[string]any {
 		}
 		merged[key] = base
 	}
-	for _, key := range []string{"schema_version", "conditions", "actions"} {
+	// 标量/数组类字段直接覆盖。author_regex/tip_regex/ref_*_regex 是 FoodTalks 网站
+	// 识别正则（红线下放）——默认 behavior 无此字段，必须透传，否则服务端配置无法生效。
+	for _, key := range []string{"schema_version", "conditions", "actions",
+		"author_regex", "tip_regex", "ref_header_regex", "ref_item_regex"} {
 		if value, ok := behavior[key]; ok {
 			merged[key] = value
 		}

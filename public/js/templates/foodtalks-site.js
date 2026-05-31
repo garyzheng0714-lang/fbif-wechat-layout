@@ -17,7 +17,33 @@ const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
 // 等价于: import { applyFoodTalksBehavior, FBIF_FOOTER_HTML } from '../rule-behavior-foodtalks.js'
 // 用动态 import 是为了配合浏览器端的 cache-busting assetQuery
 const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery);
-const { applyFoodTalksBehavior, buildFooterHtml } = behaviorModule;
+const { applyFoodTalksBehavior, buildFooterHtml, compileSiteRegex } = behaviorModule;
+
+// ── 规则读取助手（红线下放：优先服务端 config / config.behavior，缺省/非法降级 const）──
+function behOf(config) { return (config && config.behavior) || {}; }
+function cfgNum(config, key, fallback) {
+  const n = Number(config && config[key]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+function cfgColor(config, key, fallback) {
+  // 颜色进 style，做 hex 白名单防 XSS；非法/缺省降级 const。
+  const v = config && config[key];
+  return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(String(v).trim())) ? String(v).trim() : fallback;
+}
+function behTemplate(config, key, fallback) {
+  const t = behOf(config).templates;
+  const v = t && t[key];
+  return (typeof v === 'string' && v) ? v : fallback;
+}
+function behParamStr(config, key, fallback) {
+  const p = behOf(config).params;
+  const s = p && p[key] && p[key].default;
+  return (typeof s === 'string' && s) ? s : fallback;
+}
+function behList(config, key, fallback) {
+  const v = behOf(config).lists && behOf(config).lists[key];
+  return (Array.isArray(v) && v.length) ? v : fallback;
+}
 // 标题识别（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）抽到无依赖
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
@@ -38,14 +64,41 @@ const IMAGE_CAPTION_KEYWORDS = [
 // detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings 已抽到 heading-detect.js
 // （顶部 import）。这里只保留图注识别等模板本地逻辑。
 
-function hasImageCaptionKeyword(text) {
+function hasImageCaptionKeyword(text, keywords) {
   if (!text) return false;
+  const kws = (Array.isArray(keywords) && keywords.length) ? keywords : IMAGE_CAPTION_KEYWORDS;
   const lower = String(text).toLowerCase();
-  for (const kw of IMAGE_CAPTION_KEYWORDS) {
+  for (const kw of kws) {
     if (text.indexOf(kw) >= 0) return true;
     if (kw.length <= 8 && lower.indexOf(kw.toLowerCase()) >= 0) return true;
   }
   return false;
+}
+
+// 图注前缀正则默认值（红线下放 behavior.params.image_caption_prefix_regex 的离线兜底）。
+const IMAGE_CAPTION_PREFIX_RE = /^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\s*[：:\s\d]/i;
+
+// 从 config 解析图注识别规则（关键词列表 + 前缀正则），缺省/非法降级到代码内 const。
+function buildCaptionOpts(config) {
+  let prefixRe = IMAGE_CAPTION_PREFIX_RE;
+  const src = behParamStr(config, 'image_caption_prefix_regex', '');
+  if (src) { try { prefixRe = compileSiteRegex(src); } catch (e) { /* 非法降级 */ } }
+  return {
+    keywords: behList(config, 'image_caption_keywords', IMAGE_CAPTION_KEYWORDS),
+    prefixRe,
+  };
+}
+
+// 从 config 解析标题识别规则（关键词列表 + 图注排除正则），传给 heading-detect.js。
+// 缺省项为 null/undefined，heading-detect 内部各自降级到其代码内 const。
+function buildHeadingOpts(config) {
+  let captionLeadRe;
+  const src = behParamStr(config, 'caption_lead_regex', '');
+  if (src) { try { captionLeadRe = compileSiteRegex(src); } catch (e) { /* 非法降级 */ } }
+  return {
+    titleKeywords: behList(config, 'title_keywords', undefined),
+    captionLeadRe,
+  };
 }
 
 function stripHtml(text) {
@@ -96,11 +149,13 @@ function normalizeChinesePunctuation(text) {
   }).join('');
 }
 
-function isImageCaption(text) {
+function isImageCaption(text, capOpts) {
+  const opts = capOpts || {};
+  const prefixRe = opts.prefixRe || IMAGE_CAPTION_PREFIX_RE;
   const plain = stripHtml(text || '').trim();
   if (!plain || plain.length > 120) return false;
-  if (hasImageCaptionKeyword(plain)) return true;
-  if (/^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\s*[：:\s\d]/i.test(plain)) {
+  if (hasImageCaptionKeyword(plain, opts.keywords)) return true;
+  if (prefixRe.test(plain)) {
     return true;
   }
   if (/^[▲△▵▽▼]/.test(plain)) return true;
@@ -154,10 +209,15 @@ function renderParagraph(runs) {
 
 // adaptiveImageWidth（竖图400/横图600）已抽到 image-width.js（顶部 import），可独立单测。
 
-function renderImage(src, alt, naturalWidth, naturalHeight) {
+function renderImage(src, alt, naturalWidth, naturalHeight, config = {}) {
   const safeSrc = escAttr(src || '');
   const safeAlt = escAttr(alt || '');
-  const width = adaptiveImageWidth(naturalWidth, naturalHeight);
+  // 图宽规则（红线下放：config.image.portrait_px/landscape_px，缺省降级 400/600）。
+  const imgCfg = (config && config.image) || {};
+  const width = adaptiveImageWidth(naturalWidth, naturalHeight, {
+    portrait: Number(imgCfg.portrait_px) || 400,
+    landscape: Number(imgCfg.landscape_px) || 600,
+  });
   // mmbiz 等公众号图带防盗链：浏览器若发 Referer 头会被换成"未经允许不可引用"
   // 占位图。referrerpolicy="no-referrer" 让加载图片时不发 Referer，绕过防盗链。
   // 与公众号渲染（fbif.js）保持一致。
@@ -174,15 +234,17 @@ function renderImage(src, alt, naturalWidth, naturalHeight) {
 
 function renderImageCaption(text, config = {}) {
   const color = (config && config.muted_color) || '#888888';
+  const fs = cfgNum(config, 'caption_font_size', 12);
   return (
     `<p style="text-align: center;">` +
-    `<span style="font-size: 12px; color: ${color};">${esc(text)}</span>` +
+    `<span style="font-size: ${fs}px; color: ${color};">${esc(text)}</span>` +
     `</p>`
   );
 }
 
 // 把图片后 3 段内最多 2 段"看起来像图注"的普通段提升为图注块
-function promoteImageCaptions(elems) {
+function promoteImageCaptions(elems, capOpts) {
+  const opts = capOpts || {};
   const out = elems.slice();
   for (let i = 0; i < out.length; i++) {
     if (out[i].k !== 'img') continue;
@@ -197,9 +259,9 @@ function promoteImageCaptions(elems) {
       const isFirst = promoted === 0;
       let promote = false;
       if (isFirst) {
-        promote = isImageCaption(plain);
+        promote = isImageCaption(plain, opts);
       } else {
-        promote = hasImageCaptionKeyword(plain);
+        promote = hasImageCaptionKeyword(plain, opts.keywords);
       }
       if (promote) {
         out[j] = { k: 'cap', runs: e.runs };
@@ -233,9 +295,10 @@ function render(elems, config = {}) {
     if (e.k === 'author') {
       // 嵌套顺序对齐基石：<em><span style="font-size:14px; color:..."> 文本 </span></em>
       const authorColor = (config && config.muted_color) || '#888888';
+      const authorFs = cfgNum(config, 'author_font_size', 14);
       lines.push(
         '<p style="text-align: justify;"><em>' +
-        `<span style="font-size: 14px; color: ${authorColor};">` +
+        `<span style="font-size: ${authorFs}px; color: ${authorColor};">` +
         esc(e.text) +
         '</span></em></p>'
       );
@@ -257,11 +320,16 @@ function render(elems, config = {}) {
       if (lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
         lines.push(BLANK_LINE);
       }
-      // 两段式：第一段 "提示：" 独占一行（蓝色加粗斜体），第二段正文（灰色斜体）
-      const head = e.title || '提示：';
+      // 两段式：第一段 "提示：" 独占一行（蓝色加粗斜体），第二段正文（灰色斜体）。
+      // 颜色/字号/标题文案均红线下放（config.tip_title_color/tip_font_size/tip_body_color
+      // + behavior.templates.tip_title_default），缺省降级 #01396a / 14 / #7f7f7f / 提示：。
+      const head = e.title || behTemplate(config, 'tip_title_default', '提示：');
+      const tipTitleColor = cfgColor(config, 'tip_title_color', '#01396a');
+      const tipBodyColor = cfgColor(config, 'tip_body_color', '#7f7f7f');
+      const tipFs = cfgNum(config, 'tip_font_size', 14);
       lines.push(
         '<p style="text-align: justify;">' +
-        '<strong><span style="color: #01396a;"><em><span style="font-size: 14px;">' +
+        `<strong><span style="color: ${tipTitleColor};"><em><span style="font-size: ${tipFs}px;">` +
         esc(head) +
         '</span></em></span></strong></p>'
       );
@@ -270,7 +338,7 @@ function render(elems, config = {}) {
       const restInner = renderRuns(restRuns);
       if (restInner) {
         lines.push(
-          '<p style="text-align: justify;"><em><span style="font-size: 14px; color: #7f7f7f;">' +
+          `<p style="text-align: justify;"><em><span style="font-size: ${tipFs}px; color: ${tipBodyColor};">` +
           restInner +
           '</span></em></p>'
         );
@@ -280,7 +348,7 @@ function render(elems, config = {}) {
       continue;
     }
     if (e.k === 'img') {
-      lines.push(renderImage(e.src, e.alt, e.width, e.height));
+      lines.push(renderImage(e.src, e.alt, e.width, e.height, config));
       // 图片后若不是图注，补空行（基石：图→正文间有空行；图→图注紧贴无空行）
       if (!elems[i + 1] || elems[i + 1].k !== 'cap') {
         lines.push(BLANK_LINE);
@@ -301,7 +369,8 @@ function render(elems, config = {}) {
     }
     if (e.k === 'ref-header') {
       const refColor = (config && config.muted_color) || '#888888';
-      lines.push(`<p style="text-align: justify;"><span style="color: ${refColor};">参考来源：</span></p>`);
+      const refLabel = behTemplate(config, 'ref_header_label', '参考来源：');
+      lines.push(`<p style="text-align: justify;"><span style="color: ${refColor};">${esc(refLabel)}</span></p>`);
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
@@ -361,9 +430,12 @@ function isStandaloneLinkParagraph(runs) {
 // ---- DOCX 分类（M1 最小版） ----
 
 // 找到首个"作者：" / "Author:" 段，剥离该段之前的所有前置材料。无匹配返回原数组。
-function stripDocxPreambleBeforeAuthor(paragraphs) {
+function stripDocxPreambleBeforeAuthor(paragraphs, config = {}) {
   if (!Array.isArray(paragraphs)) return paragraphs;
-  const authorRegex = /^[\s　]*(作者|Author)\s*[:：]/i;
+  // DOCX 前置材料剥离触发词（红线下放：behavior.params.docx_preamble_author_regex）。
+  let authorRegex = /^[\s　]*(作者|Author)\s*[:：]/i;
+  const src = behParamStr(config, 'docx_preamble_author_regex', '');
+  if (src) { try { authorRegex = compileSiteRegex(src); } catch (e) { /* 非法降级 */ } }
   for (let i = 0; i < paragraphs.length; i++) {
     const text = (paragraphs[i].runs || [])
       .filter(r => r.type === 'txt')
@@ -376,8 +448,8 @@ function stripDocxPreambleBeforeAuthor(paragraphs) {
   return paragraphs;
 }
 
-function classifyDocx(paragraphs, imgCache) {
-  paragraphs = stripDocxPreambleBeforeAuthor(paragraphs || []);
+function classifyDocx(paragraphs, imgCache, config = {}) {
+  paragraphs = stripDocxPreambleBeforeAuthor(paragraphs || [], config);
   const elems = [];
   for (const pd of paragraphs) {
     const runs = pd.runs || [];
@@ -490,13 +562,15 @@ export default {
   name: 'FoodTalks 网站排版',
   description: '按 FoodTalks 网站后台规范输出 inline-style HTML',
   formats: ['.docx', '.doc', '.md', '.txt'],
+  // 渠道能力声明：网站渠道 mmbiz 图需转存自有 CDN（engine.js 读此标志，替代硬编码 id 判断）。
+  transferMmbiz: true,
 
   processDocx({ paragraphs, imgCache, config = {}, isRepost = false }) {
-    const { elems, imgN } = classifyDocx(paragraphs, imgCache);
+    const { elems, imgN } = classifyDocx(paragraphs, imgCache, config);
     const behaved = applyFoodTalksBehavior(elems, config, { isRepost });
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
-    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved));
+    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     return {
       lines: render(promoted, config),
       imgN,
@@ -508,7 +582,7 @@ export default {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
     const behaved = applyFoodTalksBehavior(elems, config, { isRepost: !!(opts && opts.isRepost), title });
-    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved));
+    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     return {
       lines: render(promoted, config),
       imgN,
@@ -526,7 +600,7 @@ export default {
       title,
       sourceUrl: (data && data.source) || '',
     });
-    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved));
+    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     return {
       lines: render(promoted, config),
       imgN,

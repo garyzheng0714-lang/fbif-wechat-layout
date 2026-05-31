@@ -50,3 +50,62 @@ func TestBehaviorRejectsBadRegex(t *testing.T) {
 		t.Fatal("非法正则应被拒绝")
 	}
 }
+
+// 红线下放：公众号识别正则进 behavior.params（{type:string,default}），默认值应通过保存校验。
+func TestValidatePublicAccountRegexParams(t *testing.T) {
+	beh := defaultRuleBehavior() // 含 author_line_regex / source_line_regex / footer_prompt_* 等
+	if err := validateRuleBehaviorPayload(beh); err != nil {
+		t.Fatalf("公众号默认 behavior（含识别正则 params）应通过校验，却报错: %v", err)
+	}
+}
+
+// 红线下放：behavior.lists（网站识别词表/标记）应能编辑后保存（往返）。
+func TestBehaviorListsRoundTrip(t *testing.T) {
+	beh := map[string]any{
+		"lists": map[string]any{
+			"wechat_trailer_markers": []any{`/\s*更多文章\s*/`, `(?i)fbifmedia`},
+			"image_caption_keywords": []any{"图片来源", "Source"},
+		},
+	}
+	if err := validateRuleBehaviorPayload(beh); err != nil {
+		t.Fatalf("编辑后的 behavior.lists 应通过校验，却报错: %v", err)
+	}
+}
+
+// behavior.lists 中标记/正则项若非法正则，应被拒绝（防后台误配导致整篇渲染崩）。
+func TestBehaviorListsRejectsBadRegex(t *testing.T) {
+	beh := map[string]any{"lists": map[string]any{"wechat_trailer_markers": []any{"([unclosed"}}}
+	if err := validateRuleBehaviorPayload(beh); err == nil {
+		t.Fatal("behavior.lists 中非法正则应被拒绝")
+	}
+}
+
+// 红线下放：mergeRuleBehavior（下发链路）必须透传网站 lists + 扁平识别正则，
+// 否则服务端配置传不到客户端，规则"后台可配"名存实亡。
+func TestMergeRuleBehaviorPreservesSiteFields(t *testing.T) {
+	stored := defaultFoodTalksSiteRuleBehavior()
+	merged := mergeRuleBehavior(stored)
+	lists, ok := merged["lists"].(map[string]any)
+	if !ok || lists["wechat_trailer_markers"] == nil {
+		t.Fatalf("下发后应保留 behavior.lists.wechat_trailer_markers，实际 lists=%v", merged["lists"])
+	}
+	if merged["author_regex"] == nil || merged["ref_header_regex"] == nil {
+		t.Fatalf("下发后应保留网站扁平识别正则 author_regex/ref_header_regex")
+	}
+	// 客户端编辑 lists 后下发也应保留覆盖值。
+	edited := map[string]any{"lists": map[string]any{"title_keywords": []any{"自定义标题词"}}}
+	m2 := mergeRuleBehavior(edited)
+	got, _ := m2["lists"].(map[string]any)
+	arr, _ := got["title_keywords"].([]any)
+	if len(arr) != 1 || arr[0] != "自定义标题词" {
+		t.Fatalf("下发应保留编辑后的 lists.title_keywords，实际=%v", got["title_keywords"])
+	}
+}
+
+// behavior.lists 中含不安全 HTML 的词条应被拒绝（XSS 防护）。
+func TestBehaviorListsRejectsUnsafeHTML(t *testing.T) {
+	beh := map[string]any{"lists": map[string]any{"image_caption_keywords": []any{`<script>x</script>`}}}
+	if err := validateRuleBehaviorPayload(beh); err == nil {
+		t.Fatal("behavior.lists 中含 <script> 的词条应被拒绝")
+	}
+}

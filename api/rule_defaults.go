@@ -143,8 +143,17 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 // 规则细节见 docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md
 func defaultFoodTalksSiteRuleConfig() map[string]any {
 	return map[string]any{
+		// 网站视觉规则（红线下放：规则后台可配；客户端读不到时降级到代码内同值兜底）。
+		// muted_color/caption_font_size 由 defaultRuleConfig 经 mergeRuleDefaults 继承，
+		// 这里只补网站独有的：提示标题色/提示正文色、作者/提示字号。
+		"tip_title_color":  "#01396a",
+		"tip_body_color":   "#7f7f7f",
+		"author_font_size": "14",
+		"tip_font_size":    "14",
 		"image": map[string]any{
-			"width": 600,
+			"width":        600,
+			"portrait_px":  400, // 竖图宽度（高>宽）
+			"landscape_px": 600, // 横图宽度
 		},
 		"modules": map[string]any{
 			"mctoc": map[string]any{
@@ -217,6 +226,51 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 		"tip_regex":        `^\s*提示[：:]`,
 		"ref_header_regex": `^\s*参考(?:来源|资料)[：:]\s*$`,
 		"ref_item_regex":   `^\s*\[\d+\]`,
+		// 网站句式模板（红线下放：规则后台可配；客户端读 templates.<key>，缺省降级同值 const）。
+		"templates": map[string]any{
+			"site_tip_prefix_fbif":      "*本文为FBIF食品饮料创新（ID：FoodInnovation）原创",
+			"site_tip_suffix":           "，不代表FoodTalks立场，转载请联系出处。",
+			"author_line_repost_prefix": "本文为{source}原创",
+			"author_line_repost_suffix": "，转载请联系出处。",
+			"tip_title_default":         "提示：",
+			"ref_header_label":          "参考来源：",
+		},
+		// 网站识别正则（红线下放；客户端读 params.<key>.default，非法/缺省降级同值 const）。
+		"params": map[string]any{
+			"fbif_source_pattern":        map[string]any{"type": "string", "default": `(?i)FBIF|食品饮料创新|FoodInnovation`},
+			"image_caption_prefix_regex": map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\s*[：:\s\d]`},
+			"docx_preamble_author_regex": map[string]any{"type": "string", "default": `(?i)^[\s　]*(作者|Author)\s*[:：]`},
+			"caption_lead_regex":         map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|Source|Photo|Image|Credit)\s*[：:]`},
+			"repost_source_regex":        map[string]any{"type": "string", "default": `^来源[：:]\s*(.+)$`},
+		},
+		// 网站识别词表/标记列表（红线下放；客户端读 lists.<key>，缺省降级同值 const）。
+		"lists": map[string]any{
+			"wechat_trailer_markers": []any{
+				`/\s*更多文章\s*/`,
+				`/\s*1000\s*个食品创新案例\s*/`,
+				`预览时标签不可点`,
+				`加入微信群`,
+				`关注公众号`,
+				`点击获取更多`,
+				`长按.{0,4}识别.{0,2}二维码`,
+				`扫码.{0,4}(?:加群|关注|进群)`,
+			},
+			"wechat_tip_signatures": []any{
+				`欢迎转发朋友圈`,
+				`后台回复.{0,4}转载`,
+				`投稿与商务合作`,
+				`(?i)fbifmedia`,
+				`(?i)微信[：:]\s*FBIF_`,
+			},
+			"image_caption_keywords": []any{
+				"图片来源", "资料来源", "数据来源", "来源",
+				"制图", "截图", "图注", "注：",
+				"Source", "Photo", "Image", "Credit",
+			},
+			"title_keywords": []any{
+				"背景", "简介", "总结", "分析", "案例", "介绍", "概述", "结论", "展望",
+			},
+		},
 	}
 }
 

@@ -305,6 +305,64 @@ test('尾部清理：仅有导流模块、无公众号"提示："页脚时，切
   assert.ok(!out.some(e => e.k === 'tip'), '无公众号页脚来源时不应补网站页脚');
 });
 
+test('尾部清理：红餐网尾部媒体矩阵从"延伸阅读"起切除', () => {
+  const elems = [
+    p('正文第一段。'),
+    p('Gelato在中国市场继续增长。'),
+    p('这部分仍然是正文。'),
+    ...Array.from({ length: 6 }, (_, i) => p('正文继续 ' + i)),
+    p('延伸阅读'),
+    p('一年狂开900店，茶咖品牌都在跟。'),
+    p('红餐网已同步入驻多平台。'),
+    p('来源：红餐网（ID：hongcan18）'),
+    p('作者：小食代，编辑：Bobo'),
+    p('内容交流/采访/转载 | 微信：hongcango'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { ...REPOST, title: 'Gelato在中国野蛮生长' });
+  const joined = out.map(e => (e.runs || []).map(r => r.text).join('') + (e.text || '')).join('\n');
+  assert.match(joined, /Gelato在中国市场继续增长/, '正文保留');
+  assert.match(joined, /本文为红餐网原创/, '仍可从原始尾部合成转载作者行');
+  assert.doesNotMatch(joined, /延伸阅读/, '延伸阅读起的原媒体尾巴应删除');
+  assert.doesNotMatch(joined, /红餐网已同步入驻/, '媒体矩阵应删除');
+  assert.doesNotMatch(joined, /内容交流\/采访\/转载/, '联系方式应删除');
+});
+
+test('尾部清理：品牌几何 END/版权/矩阵尾巴切除', () => {
+  const elems = [
+    p('正文第一段。'),
+    p('黄仁勋走进蜜雪冰城。'),
+    p('这部分仍然是正文。'),
+    ...Array.from({ length: 6 }, (_, i) => p('正文继续 ' + i)),
+    p('END'),
+    p('来源：品牌几何（ID：brand-vista）'),
+    p('作者：几何研究员'),
+    p('品牌几何资讯矩阵'),
+    p('版权声明'),
+    p('商务合作 | 电话/微信：123456'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { ...REPOST, title: '黄仁勋喝爆蜜雪冰城' });
+  const joined = out.map(e => (e.runs || []).map(r => r.text).join('') + (e.text || '')).join('\n');
+  assert.match(joined, /黄仁勋走进蜜雪冰城/, '正文保留');
+  assert.match(joined, /本文为品牌几何原创/, '仍可从原始尾部合成转载作者行');
+  assert.doesNotMatch(joined, /\nEND\n/, 'END 起的原媒体尾巴应删除');
+  assert.doesNotMatch(joined, /品牌几何资讯矩阵/, '媒体矩阵应删除');
+  assert.doesNotMatch(joined, /版权声明/, '版权声明应删除');
+  assert.doesNotMatch(joined, /商务合作 \| 电话\/微信/, '商务合作尾巴应删除');
+});
+
+test('尾部清理：正文前段偶现 END 不误切', () => {
+  const elems = [
+    p('正文第一段。'),
+    p('END'),
+    ...Array.from({ length: 12 }, (_, i) => p('正文继续 ' + i)),
+    p('真实结尾。'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { ...REPOST, title: 'X' });
+  const joined = out.map(e => (e.runs || []).map(r => r.text).join('')).join('\n');
+  assert.match(joined, /\nEND\n/, '正文里的 END 应保留');
+  assert.match(joined, /正文继续 11/, 'END 后正文应保留');
+});
+
 test('尾部清理：正文里偶现"提示："（非公众号页脚）不被误切', () => {
   const elems = [
     p('提示：记得喝茶。'),  // 正文里的提示，后续无公众号特征句

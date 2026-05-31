@@ -35,6 +35,15 @@ test('copy click does not wait on background image or more-articles preparation'
   assert.match(copyFn, /prepareMoreArticlesForCopy\('copy-click'\)/);
 });
 
+test('website copy blocks when WeChat image CDN URLs still remain', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));
+  assert.match(engine, /findWechatImageSrcs/);
+  assert.match(engine, /_copyRequiresWechatImageTransfer/);
+  assert.match(copyFn, /仍有微信图床图片未转存，已阻止复制/);
+  assert.doesNotMatch(copyFn, /本次复制使用当前可粘贴内容/);
+});
+
 test('copy keeps the final WeChat cursor paragraph zero-height', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));

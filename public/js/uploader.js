@@ -1,8 +1,20 @@
-// Image upload — only base64 images (from DOCX) are uploaded to OSS.
-// External URLs are used directly; mmbiz URLs are already on WeChat CDN.
+// Image upload — base64 images (from DOCX) are uploaded to OSS.
+// Website-channel WeChat image CDN URLs are optionally re-hosted to our CDN.
+
+const WECHAT_IMAGE_HOSTS = new Set([
+  'mmbiz.qpic.cn',
+  'mmecoa.qpic.cn',
+  'mmbiz.qlogo.cn',
+  'wx.qlogo.cn',
+]);
 
 export function isMmbizUrl(url) {
-  return /^https?:\/\/mmbiz\.qpic\.cn\//i.test(url);
+  try {
+    const u = new URL(String(url || ''));
+    return /^https?:$/i.test(u.protocol) && WECHAT_IMAGE_HOSTS.has(u.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
 }
 
 function arrayBufferToBase64(buffer) {
@@ -74,7 +86,8 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
 }
 
 // Upload base64 images from DOCX to OSS. External URLs are used directly.
-// mmbiz URLs are already on WeChat CDN — skip them (preserves GIF animations).
+// WeChat image URLs are skipped unless transferMmbiz=true (preserves GIF animations
+// for the WeChat account channel; re-hosts them for the website channel).
 //
 // Returns { articleCopy, footerCopy, total, failed, failedSrcs }.
 // failedSrcs contains original src strings of images that failed even after retry.
@@ -84,7 +97,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   footerCopy = materialized.footerCopy;
   const lazyFailedSrcs = materialized.failedSrcs || [];
 
-  // Website channel: re-host mmbiz images on our CDN. Pull each mmbiz URL through
+  // Website channel: re-host WeChat image CDN images on our CDN. Pull each URL through
   // the server proxy → base64, so the upload pass below re-hosts it and replaces
   // the mmbiz src. The WeChat channel keeps transferMmbiz=false: mmbiz URLs work
   // as-is inside mp.weixin.qq.com and re-hosting would strip GIF animation.
@@ -99,7 +112,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
     }
     if (mmbizUrls.size > 0) {
       const urlList = [...mmbizUrls];
-      onLog && onLog('info', '网站渠道：转存 mmbiz 图到 CDN', { count: urlList.length });
+      onLog && onLog('info', '网站渠道：转存微信图床到 CDN', { count: urlList.length });
       onProgress && onProgress(0, urlList.length);
       // 把 mmbiz URL 列表整体交给后端 /api/oss-upload 的 urls 模式：后端在服务器内部
       // 并发「取图 + 传 OSS」，直接返回 {mmbiz_url: oss_url}。比前端逐张「取图→base64
@@ -120,7 +133,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
             articleCopy = articleCopy.split(url).join(ossUrl);
             footerCopy = footerCopy.split(url).join(ossUrl);
           } else {
-            onLog && onLog('error', 'mmbiz 转存失败（保留原链接）', { url: url.slice(0, 60) });
+            onLog && onLog('error', '微信图床转存失败（保留原链接）', { url: url.slice(0, 60) });
             mmbizFailedSrcs.push(url);
           }
           done++;
@@ -128,7 +141,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
         }
       } catch (err) {
         // 整体请求失败：全部保留原 mmbiz 链接，标记失败（可重试）。
-        onLog && onLog('error', 'mmbiz 批量转存请求失败', { err: String(err) });
+        onLog && onLog('error', '微信图床批量转存请求失败', { err: String(err) });
         for (const url of urlList) mmbizFailedSrcs.push(url);
         onProgress && onProgress(urlList.length, urlList.length);
       }

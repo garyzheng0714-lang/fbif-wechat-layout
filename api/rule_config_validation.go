@@ -23,6 +23,8 @@ var ruleNumberFields = map[string]ruleNumberField{
 	"paragraph_margin_x":       {min: 0, max: 28},
 	"paragraph_gap":            {min: 0, max: 48},
 	"caption_font_size":        {min: 10, max: 18},
+	"author_font_size":         {min: 10, max: 20},
+	"tip_font_size":            {min: 10, max: 20},
 	"attribution_font_size":    {min: 10, max: 20},
 	"blockquote_padding_left":  {min: 0, max: 32},
 	"blockquote_border_width":  {min: 0, max: 8},
@@ -40,9 +42,11 @@ var ruleNumberFields = map[string]ruleNumberField{
 }
 
 var ruleColorFields = map[string]bool{
-	"text_color":  true,
-	"link_color":  true,
-	"muted_color": true,
+	"text_color":      true,
+	"link_color":      true,
+	"muted_color":     true,
+	"tip_title_color": true, // 网站提示标题色（红线下放）
+	"tip_body_color":  true, // 网站提示正文色（红线下放）
 }
 
 var ruleBooleanFields = map[string]bool{
@@ -73,9 +77,13 @@ var ruleModuleFields = map[string]map[string]bool{
 		"text_color":         true,
 		"link_color":         true,
 		"muted_color":        true,
+		"tip_title_color":    true,
+		"tip_body_color":     true,
 	},
 	"supporting": {
 		"caption_font_size":       true,
+		"author_font_size":        true,
+		"tip_font_size":           true,
 		"attribution_font_size":   true,
 		"blockquote_padding_left": true,
 		"blockquote_border_width": true,
@@ -172,12 +180,17 @@ func validateRuleBehaviorPayload(raw map[string]any) error {
 	regexFields := map[string]bool{"author_regex": true, "tip_regex": true, "ref_header_regex": true, "ref_item_regex": true}
 	for key := range raw {
 		switch key {
-		case "schema_version", "params", "conditions", "actions", "templates", "output_contracts":
+		case "schema_version", "params", "conditions", "actions", "templates", "output_contracts", "lists":
 		default:
 			if !regexFields[key] {
 				return fmt.Errorf("unknown behavior field: %s", key)
 			}
 		}
+	}
+	// behavior.lists：网站识别词表/标记列表（红线下放）。每项 []string；
+	// 名含 marker/signature/regex 的做 RE2 可编译校验；全部做 XSS 防护与长度上限。
+	if err := validateRuleBehaviorLists(raw["lists"]); err != nil {
+		return err
 	}
 	// FoodTalks 网站 behavior 的识别正则（作者/提示/参考来源行）——红线：规则后台可配。
 	// 校验为长度受限、可编译的合法 RE2 正则。
@@ -564,6 +577,54 @@ func validateFBIFFooterModule(raw any) error {
 			}
 			if id, ok := pm["id"].(string); !ok || strings.TrimSpace(id) == "" {
 				return fmt.Errorf("fbif_footer preset 缺少 id")
+			}
+		}
+	}
+	return nil
+}
+
+// validateRuleBehaviorLists 校验 behavior.lists（网站识别词表/标记列表，红线下放）。
+//
+//	{ wechat_trailer_markers?:[]string, wechat_tip_signatures?:[]string,
+//	  image_caption_keywords?:[]string, title_keywords?:[]string, ... }
+//
+// 缺省（nil）允许。每个 list 值必须为字符串数组；做 XSS 防护与长度上限；
+// 名含 marker/signature/regex/pattern 的项额外做 RE2 可编译校验
+//（客户端用 new RegExp 编译，开头 (?i) 由客户端适配为 i flag）。
+func validateRuleBehaviorLists(raw any) error {
+	if raw == nil {
+		return nil
+	}
+	lists, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("behavior lists must be an object")
+	}
+	for key, value := range lists {
+		items, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("behavior list %q must be an array", key)
+		}
+		if len(items) > 200 {
+			return fmt.Errorf("behavior list %q has too many items", key)
+		}
+		isRegex := strings.Contains(key, "marker") || strings.Contains(key, "signature") ||
+			strings.Contains(key, "regex") || strings.Contains(key, "pattern")
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("behavior list %q items must be strings", key)
+			}
+			if len([]rune(s)) > 300 {
+				return fmt.Errorf("behavior list %q item too long", key)
+			}
+			if behaviorUnsafeTemplate.MatchString(s) {
+				return fmt.Errorf("behavior list %q item contains unsafe HTML", key)
+			}
+			if isRegex {
+				// 客户端可能以 (?i) 前缀表达大小写不敏感；RE2 原生支持，可直接编译校验。
+				if _, err := regexp.Compile(s); err != nil {
+					return fmt.Errorf("behavior list %q item is not a valid regex", key)
+				}
 			}
 		}
 	}

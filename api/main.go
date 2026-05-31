@@ -378,6 +378,7 @@ var (
 	reCaptchaTarget  = regexp.MustCompile(`target_url\s*:\s*["']((?:[^"'\\]|\\.)*)["']`)
 	hostAllowlistCDN = []string{
 		"mmbiz.qpic.cn",
+		"mmecoa.qpic.cn",
 		"mmbiz.qlogo.cn",
 		"wx.qlogo.cn",
 		"mp.weixin.qq.com",

@@ -7,11 +7,13 @@ import { isMmbizUrl, materializeLazyImages, uploadNonCdnImages } from '../public
 test('isMmbizUrl detects mmbiz CDN URLs', () => {
   assert.equal(isMmbizUrl('https://mmbiz.qpic.cn/mmbiz_jpg/abc/640'), true);
   assert.equal(isMmbizUrl('http://mmbiz.qpic.cn/sz_mmbiz_gif/abc/640'), true);
+  assert.equal(isMmbizUrl('https://mmecoa.qpic.cn/mmecoa_jpg/abc/640'), true);
 });
 
 test('isMmbizUrl rejects non-mmbiz URLs', () => {
   assert.equal(isMmbizUrl('https://example.com/image.jpg'), false);
   assert.equal(isMmbizUrl('https://cdn.example.com/mmbiz.jpg'), false);
+  assert.equal(isMmbizUrl('https://other.qpic.cn/image.jpg'), false);
   assert.equal(isMmbizUrl(''), false);
 });
 
@@ -119,6 +121,21 @@ test('uploadNonCdnImages: website channel (transferMmbiz=true) 发 urls 给后�
   assert.deepEqual(captured.urls, ['https://mmbiz.qpic.cn/a.png'], '把 mmbiz URL 列表发给后端 urls 模式');
   assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn/, 'mmbiz URL 应被替换');
   assert.match(result.articleCopy, /fbif-gary-img-hz\.oss-cn-hangzhou/, '替换为新桶 CDN URL');
+});
+
+test('uploadNonCdnImages: website channel 覆盖 mmecoa.qpic.cn 微信图床', async (t) => {
+  let captured = null;
+  mockOssUploadUrls(t, { mapper: () => 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/mmecoa.png', capture: b => (captured = b) });
+
+  const result = await uploadNonCdnImages(
+    '<p><img src="https://mmecoa.qpic.cn/mmecoa_jpg/abc/640"></p>',
+    '',
+    { transferMmbiz: true }
+  );
+
+  assert.deepEqual(captured.urls, ['https://mmecoa.qpic.cn/mmecoa_jpg/abc/640']);
+  assert.equal(result.failed, 0);
+  assert.doesNotMatch(result.articleCopy, /mmecoa\.qpic\.cn/, 'mmecoa URL 应被替换');
 });
 
 test('uploadNonCdnImages: website channel 同一 mmbiz URL 去重（只发一次）', async (t) => {

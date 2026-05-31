@@ -25,6 +25,46 @@ function runsToText(runs) {
     .join('');
 }
 
+// ── 规则读取助手（红线下放：优先服务端 config.behavior，缺省/非法降级到代码内 const）──
+// behavior = config.behavior（服务端 raw 下发：{templates, params, lists, *_regex}）。
+function behaviorTemplate(behavior, key, fallback) {
+  const v = behavior && behavior.templates && behavior.templates[key];
+  return (typeof v === 'string' && v) ? v : fallback;
+}
+function behaviorParamStr(behavior, key, fallback) {
+  const p = behavior && behavior.params && behavior.params[key];
+  const v = p && p.default;
+  return (typeof v === 'string' && v) ? v : fallback;
+}
+function behaviorListRaw(behavior, key) {
+  const v = behavior && behavior.lists && behavior.lists[key];
+  return (Array.isArray(v) && v.length) ? v : null;
+}
+// 正则字符串 → RegExp。识别开头 (?i) 等内联 flag（JS new RegExp 不支持内联 flag 组，
+// 服务端用 RE2 (?i) 表达大小写不敏感，这里转成构造函数 flag）。
+export function compileSiteRegex(src) {
+  if (src instanceof RegExp) return src;
+  let s = String(src), flags = '';
+  const m = s.match(/^\(\?([a-z]+)\)/);
+  if (m) { flags = m[1].replace(/[^gimsuy]/g, ''); s = s.slice(m[0].length); }
+  return new RegExp(s, flags);
+}
+// 编译 behavior.lists 里的正则字符串列表；缺省/全部非法时降级到 fallback RegExp 数组。
+function compileMarkerList(behavior, key, fallback) {
+  const strs = behaviorListRaw(behavior, key);
+  if (strs) {
+    const out = [];
+    for (const x of strs) { try { out.push(compileSiteRegex(x)); } catch (e) { /* 跳过非法项 */ } }
+    if (out.length) return out;
+  }
+  return fallback;
+}
+// 单条正则：优先 behavior.params.<key>.default，非法/缺省降级 fallback 字符串。
+function behaviorRegex(behavior, key, fallback) {
+  const src = behaviorParamStr(behavior, key, fallback);
+  try { return compileSiteRegex(src); } catch (e) { return compileSiteRegex(fallback); }
+}
+
 // 公众号原文尾部专属标记 —— 网站发布版会把这一整段删除（更多文章导流、案例库
 // 导流、加群/关注公众号引导、二维码、公众号口径的"提示："页脚）。只要正文里
 // 出现下列任一标记，就把它及其后的所有元素全部切掉，正文主体到此为止。
@@ -42,6 +82,21 @@ const WECHAT_TRAILER_MARKERS = [
   /长按.{0,4}识别.{0,2}二维码/,
   /扫码.{0,4}(?:加群|关注|进群)/,
 ];
+
+// 外部媒体公众号的尾巴（矩阵、版权、商务合作等）。这类词在正文中偶尔也可能出现，
+// 所以只在靠近文章尾部且有尾部确认信号时触发。
+const EXTERNAL_MEDIA_TRAILER_MARKERS = [
+  /^\s*延伸阅读\s*$/,
+  /^\s*END\s*$/i,
+  /^\s*版权声明[：:]?\s*$/,
+  /红餐网已同步入驻/,
+  /内容交流\s*[\/／]\s*采访\s*[\/／]\s*转载/,
+  /品牌几何资讯矩阵/,
+  /商务合作\s*[|｜]\s*(?:电话|微信)/,
+];
+
+const EXTERNAL_MEDIA_TAIL_CONFIRM_RE =
+  /(?:来源[：:]|作者[：:]|版权声明|红餐网已同步入驻|内容交流\s*[\/／]\s*采访\s*[\/／]\s*转载|品牌几何资讯矩阵|商务合作\s*[|｜]\s*(?:电话|微信))/;
 
 // 公众号口径的"提示："页脚特征句 —— "提示："段其后相邻几段命中其一，即认定它是
 // 公众号原文自带的转载声明（而非正文里偶然出现的"提示："），应被网站口径页脚替换。
@@ -63,9 +118,27 @@ function collectFollowingText(elems, i) {
   return s;
 }
 
+function isNearTail(elems, i) {
+  const len = Array.isArray(elems) ? elems.length : 0;
+  if (len <= 0) return false;
+  if (len <= 8) return i >= Math.max(1, len - 3);
+  return i >= Math.floor(len * 0.65);
+}
+
+function isExternalMediaTrailer(elems, i, text, markers) {
+  if (!text || !isNearTail(elems, i)) return false;
+  if (!markers.some(re => re.test(text))) return false;
+  const following = collectFollowingText(elems, i);
+  if (/^\s*END\s*$/i.test(text)) return EXTERNAL_MEDIA_TAIL_CONFIRM_RE.test(following);
+  return true;
+}
+
 // 从尾部裁掉公众号导流段。返回 { elems, cutWechatTip } ——cutWechatTip 表示是否
 // 切掉了公众号口径的"提示："页脚（决定后续是否要补一段网站口径页脚）。
-function stripWechatTrailer(elems) {
+function stripWechatTrailer(elems, markers, signatures, externalMarkers) {
+  const trailerMarkers = markers || WECHAT_TRAILER_MARKERS;
+  const tipSignatures = signatures || WECHAT_TIP_SIGNATURES;
+  const mediaMarkers = externalMarkers || EXTERNAL_MEDIA_TRAILER_MARKERS;
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
     // 导流标记可能落在正文段(p)或图注(cap，如 "/ 更多文章 /")里，两者都要检查；
@@ -73,11 +146,14 @@ function stripWechatTrailer(elems) {
     const text = (e.k === 'p' || e.k === 'cap') ? runsToText(e.runs) : '';
     // 公众号"提示："页脚：从这一段起切除，并标记需补网站页脚
     if (e.k === 'p' && /^\s*提示[：:]/.test(text) &&
-        WECHAT_TIP_SIGNATURES.some(re => re.test(collectFollowingText(elems, i)))) {
+        tipSignatures.some(re => re.test(collectFollowingText(elems, i)))) {
       return { elems: elems.slice(0, i), cutWechatTip: true };
     }
     // 其余导流标记：命中即从此切除（不补页脚——这类切点不代表原文有转载声明）
-    if (text && WECHAT_TRAILER_MARKERS.some(re => re.test(text))) {
+    if (text && trailerMarkers.some(re => re.test(text))) {
+      return { elems: elems.slice(0, i), cutWechatTip: false };
+    }
+    if (isExternalMediaTrailer(elems, i, text, mediaMarkers)) {
       return { elems: elems.slice(0, i), cutWechatTip: false };
     }
   }
@@ -93,14 +169,16 @@ function stripWechatTrailer(elems) {
 // 供 foodtalks-site.js 的 tip 分支渲染为两段式。
 export function buildSiteFooterTipElem(title, opts = {}) {
   const t = String(title || '').trim();
+  const behavior = opts.behavior || {};
   // 来源机构：转载文章用提取到的原始来源（如「食品内参」），FBIF 原创 / 无来源
   // 用默认全称。基石实测：转载文提示声明为「*本文为{来源}原创…」。
   const source = String(opts.source || '').trim();
-  const isFbif = !source || /FBIF|食品饮料创新|FoodInnovation/i.test(source);
+  const fbifSourceRe = behaviorRegex(behavior, 'fbif_source_pattern', '(?i)FBIF|食品饮料创新|FoodInnovation');
+  const isFbif = !source || fbifSourceRe.test(source);
   const prefix = isFbif
-    ? '*本文为FBIF食品饮料创新（ID：FoodInnovation）原创'
+    ? behaviorTemplate(behavior, 'site_tip_prefix_fbif', '*本文为FBIF食品饮料创新（ID：FoodInnovation）原创')
     : `*本文为${source}原创`;
-  const suffix = '，不代表FoodTalks立场，转载请联系出处。';
+  const suffix = behaviorTemplate(behavior, 'site_tip_suffix', '，不代表FoodTalks立场，转载请联系出处。');
   const runs = [{ type: 'txt', text: prefix }];
   if (t) {
     const label = `《${t}》`;
@@ -115,18 +193,19 @@ export function buildSiteFooterTipElem(title, opts = {}) {
     }
   }
   runs.push({ type: 'txt', text: suffix });
-  return { k: 'tip', title: '提示：', rest_runs: runs };
+  return { k: 'tip', title: behaviorTemplate(behavior, 'tip_title_default', '提示：'), rest_runs: runs };
 }
 
 // 从 elems 中提取转载来源机构名（用于提示声明 prefix）。扫描「来源：XX」整行段，
 // 去掉「（ID：xxx）」尾注保留纯机构名。在 stripWechatTrailer 切尾【之前】调用，
 // 因为来源行常紧邻被切掉的导流段。无匹配返回空串。
-export function extractRepostSource(elems) {
+export function extractRepostSource(elems, behavior = {}) {
   if (!Array.isArray(elems)) return '';
+  const sourceRe = behaviorRegex(behavior, 'repost_source_regex', '^来源[：:]\\s*(.+)$');
   for (const e of elems) {
     if (!e || e.k !== 'p') continue;
     const text = runsToText(e.runs).trim();
-    const m = text.match(/^来源[：:]\s*(.+)$/);
+    const m = text.match(sourceRe);
     if (m) return m[1].replace(/[（(]\s*ID[：:].*$/i, '').trim();
   }
   return '';
@@ -136,25 +215,29 @@ export function extractRepostSource(elems) {
 // 编审：Z」重写成统一格式放到文章【开头】（基石 62245/62246/62238 即如此）。当公众号
 // 开头没有作者行、但正文里能提取到来源/作者时，据此合成一行，渲染成 14px 灰斜体署名。
 // 格式：「本文为{来源}原创，{作者：Y，编审：Z}，转载请联系出处。」缺项自动省略。
-export function buildAuthorLineFromSource(elems) {
+export function buildAuthorLineFromSource(elems, behavior = {}) {
   if (!Array.isArray(elems)) return '';
+  const sourceRe = behaviorRegex(behavior, 'repost_source_regex', '^来源[：:]\\s*(.+)$');
   let source = '', authorSeg = '';
   for (const e of elems) {
     if (!e || e.k !== 'p') continue;
     const text = runsToText(e.runs).replace(/[​-‏⁠﻿]/g, '').trim();
     let m;
-    if (!source && (m = text.match(/^来源[：:]\s*(.+)$/))) {
+    if (!source && (m = text.match(sourceRe))) {
       source = m[1].replace(/[（(]\s*ID[：:].*$/i, '').trim();
     }
     // 作者整行（含其后「编审/编辑/主编/美编：…」），原样保留
     if (!authorSeg && /^作者[：:]/.test(text)) authorSeg = text.replace(/[。\s]*$/, '');
   }
   if (!source && !authorSeg) return '';
+  // 转载来源作者行句式（红线下放：{source} 占位，缺省降级同值 const）。
+  const prefixTpl = behaviorTemplate(behavior, 'author_line_repost_prefix', '本文为{source}原创');
+  const suffixTpl = behaviorTemplate(behavior, 'author_line_repost_suffix', '，转载请联系出处。');
   const parts = [];
-  if (source) parts.push(`本文为${source}原创`);
+  if (source) parts.push(prefixTpl.replace('{source}', source));
   if (authorSeg) parts.push(authorSeg);
   let line = parts.join('，');
-  if (source) line += '，转载请联系出处。';
+  if (source) line += suffixTpl;
   else if (!/[。.]$/.test(line)) line += '。';
   return line;
 }
@@ -179,11 +262,15 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   const tipRe       = new RegExp(behavior.tip_regex        || '^\\s*提示[：:]');
   const refHeaderRe = new RegExp(behavior.ref_header_regex || '^\\s*参考(?:来源|资料)[：:]\\s*$');
   const refItemRe   = new RegExp(behavior.ref_item_regex   || '^\\s*\\[\\d+\\]');
+  // 公众号导流尾段标记 / 提示页脚特征句（红线下放：behavior.lists，缺省降级 const）。
+  const trailerMarkers = compileMarkerList(behavior, 'wechat_trailer_markers', WECHAT_TRAILER_MARKERS);
+  const tipSignatures  = compileMarkerList(behavior, 'wechat_tip_signatures', WECHAT_TIP_SIGNATURES);
+  const externalMarkers = compileMarkerList(behavior, 'external_media_trailer_markers', EXTERNAL_MEDIA_TRAILER_MARKERS);
 
   // 阶段 0：切掉公众号原文尾部导流段（更多文章 / 案例库 / 加群 / 公众号"提示："
   // 页脚 / 二维码）。网站发布版不保留这些；若切掉的是公众号转载声明页脚，则在
   // 正文末尾补一段网站口径页脚。仅对从公众号 URL 导入的文章生效（isRepost）。
-  const trimmed = opts.isRepost ? stripWechatTrailer(elems) : { elems, cutWechatTip: false };
+  const trimmed = opts.isRepost ? stripWechatTrailer(elems, trailerMarkers, tipSignatures, externalMarkers) : { elems, cutWechatTip: false };
 
   // 浅拷贝每个元素（runs 数组本身也新建），保证不原地修改输入
   const out = trimmed.elems.map(e => ({
@@ -220,7 +307,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   if (opts.isRepost) {
     const headIsAuthor = firstIdx >= 0 && out[firstIdx] && out[firstIdx].k === 'author';
     if (!headIsAuthor) {
-      const synthesized = buildAuthorLineFromSource(elems);
+      const synthesized = buildAuthorLineFromSource(elems, behavior);
       if (synthesized) out.unshift({ k: 'author', text: synthesized });
     }
   }
@@ -269,8 +356,9 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   if (trimmed.cutWechatTip) {
     // 来源从【原始 elems】提取（切尾前），因为「来源：XX」行常紧邻被切的导流段。
     out.push(buildSiteFooterTipElem(opts.title, {
-      source: opts.isRepost ? extractRepostSource(elems) : '',
+      source: opts.isRepost ? extractRepostSource(elems, behavior) : '',
       sourceUrl: opts.sourceUrl || '',
+      behavior,
     }));
   }
 

@@ -27,6 +27,23 @@ function activeBehaviorAccount() {
   };
 }
 
+// 读 behavior.params.<key>.default 编译为正则（红线下放：公众号识别正则规则后台可配；
+// 读不到/非法时降级到传入的 fallback RegExp const）。识别开头 (?i) 内联 flag —— 服务端
+// 用 RE2 (?i) 表达大小写不敏感，JS new RegExp 不支持内联 flag 组，这里转为构造函数 flag。
+function behaviorRegexParam(key, fallbackRe) {
+  try {
+    const params = getActiveRuleBehavior().params || {};
+    const src = params[key] && params[key].default;
+    if (typeof src === 'string' && src) {
+      let s = src, flags = '';
+      const m = s.match(/^\(\?([a-z]+)\)/);
+      if (m) { flags = m[1].replace(/[^gimsuy]/g, ''); s = s.slice(m[0].length); }
+      return new RegExp(s, flags);
+    }
+  } catch (e) { /* 降级到 const */ }
+  return fallbackRe;
+}
+
 function behaviorContext(author, source) {
   return {
     article: {
@@ -125,8 +142,11 @@ function shouldSpaceAfter(e, next) {
   return true;
 }
 
+// DOCX 前置「作者：」行识别正则默认值（红线下放 behavior.params.docx_author_line_regex）。
+const RE_DOCX_AUTHOR_LINE = /^作者[：:]\s*(.+)$/;
 function parseAuthorLine(text) {
-  const m = String(text || '').trim().match(/^作者[：:]\s*(.+)$/);
+  const re = behaviorRegexParam('docx_author_line_regex', RE_DOCX_AUTHOR_LINE);
+  const m = String(text || '').trim().match(re);
   return m ? m[1].trim() : '';
 }
 
@@ -192,7 +212,7 @@ function classifyDocx(paragraphs, imgCache) {
     // marker and every citation below it fall through to the txt branch and
     // render with 正文 styling plus wx-gap between each entry.
     const trimmed = pd.text.trim();
-    if (/^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/.test(trimmed)) {
+    if (behaviorRegexParam('ref_section_regex', RE_REF_SECTION).test(trimmed)) {
       inRef = true;
       elems.push({ k: 'refH', text: trimmed.replace(/[：:]$/, ''), ...takeDocxMeta(pd) });
       continue;
@@ -243,14 +263,21 @@ function classifyDocx(paragraphs, imgCache) {
 const RE_AUTHOR = /^(?:\*\*)?(?:作者|撰文|撰稿|文)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
 const RE_SOURCE = /^(?:\*\*)?(?:出品|来源|出处)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
 const RE_EDITOR = /^(?:\*\*)?(?:编辑|责编)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)/;
+// 参考来源段头（锚定整行）默认正则 + x-reader 元数据过滤默认正则（红线下放）。
+const RE_REF_SECTION = /^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/;
+const RE_MD_METADATA_SKIP = /^Author:\s|^Published:\s|^Source:\s/i;
 
 function parseAttribution(para) {
   const clean = para.replace(/\*\*/g, '').trim();
-  let m = para.match(RE_AUTHOR);
+  // 作者/来源/编辑识别正则（红线下放 behavior.params.*_line_regex，缺省降级同值 const）。
+  const reAuthor = behaviorRegexParam('author_line_regex', RE_AUTHOR);
+  const reSource = behaviorRegexParam('source_line_regex', RE_SOURCE);
+  const reEditor = behaviorRegexParam('editor_line_regex', RE_EDITOR);
+  let m = para.match(reAuthor);
   if (m) return { role: '作者', name: m[1].replace(/\*\*/g, '').trim() };
-  m = para.match(RE_SOURCE);
+  m = para.match(reSource);
   if (m) return { role: '来源', name: m[1].replace(/\*\*/g, '').trim() };
-  m = para.match(RE_EDITOR);
+  m = para.match(reEditor);
   if (m) return { role: '编辑', name: m[1].replace(/\*\*/g, '').trim() };
   // Bottom-of-article pattern: "作者 | xxx" without bold markers
   m = clean.match(/^(?:作者|撰文|撰稿)[：:/|｜]\s*(.+)/);
@@ -268,8 +295,11 @@ function pushUniqueAttribution(attrs, attr) {
   attrs.push({ k: 'attr', role: attr.role, name: attr.name });
 }
 
+// 页脚分界词「提示：」默认正则（红线下放 behavior.params.footer_prompt_marker）。
+const RE_FOOTER_PROMPT_MARKER = /^提示[：:]$/;
 function isFooterPromptText(text) {
-  return /^提示[：:]$/.test(String(text || '').trim());
+  const re = behaviorRegexParam('footer_prompt_marker', RE_FOOTER_PROMPT_MARKER);
+  return re.test(String(text || '').trim());
 }
 
 function rawBlockText(block) {
@@ -282,13 +312,16 @@ function rawBlockText(block) {
     .trim();
 }
 
+// FBIF 标准页脚特征词正则默认值（红线下放 behavior.params.footer_prompt_detection_regex）。
+const RE_FOOTER_PROMPT_DETECTION = /本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1/i;
 function isStandardFooterPrompt(blocks, index) {
   const tail = (blocks || [])
     .slice(index + 1, index + 6)
     .map(rawBlockText)
     .filter(Boolean)
     .join('\n');
-  return /本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1/i.test(tail);
+  const re = behaviorRegexParam('footer_prompt_detection_regex', RE_FOOTER_PROMPT_DETECTION);
+  return re.test(tail);
 }
 
 // ---- Markdown Classification ----
@@ -303,8 +336,8 @@ async function classifyMd(text) {
   for (let i = 0; i < rawParas.length && !stopped; i++) {
     const para = rawParas[i].replace(/\s+$/gm, '');
     if (/^#\s/.test(para)) continue;
-    // Skip x-reader metadata lines
-    if (/^Author:\s|^Published:\s|^Source:\s/i.test(para)) continue;
+    // Skip x-reader metadata lines（红线下放 behavior.params.md_metadata_skip_regex）
+    if (behaviorRegexParam('md_metadata_skip_regex', RE_MD_METADATA_SKIP).test(para)) continue;
     if (/Author:.*\|.*Published:/i.test(para)) continue;
 
     // Detect author/source/editor attribution
@@ -510,7 +543,7 @@ function classifyBlocks({ title, blocks }) {
     }
 
     // Reference section marker. Text-level, not style-level — same rule as MD path.
-    if (/^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/.test(text)) {
+    if (behaviorRegexParam('ref_section_regex', RE_REF_SECTION).test(text)) {
       inRef = true;
       elems.push({ k: 'refH', text: text.replace(/[：:]$/, '') });
       continue;

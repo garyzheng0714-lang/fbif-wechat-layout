@@ -41,7 +41,7 @@ const { inferWechatImageType, looksLikeGifSource } = imageUtilsModule;
 export { inferWechatImageType, looksLikeGifSource };
 
 const uploaderModule = await import('./uploader.js' + assetQuery);
-const { uploadNonCdnImages, retryFailedImages, materializeLazyImages } = uploaderModule;
+const { uploadNonCdnImages, retryFailedImages, materializeLazyImages, isMmbizUrl } = uploaderModule;
 const rulePresetModule = await import('./rule-presets.js' + assetQuery);
 const { getActiveRuleBehavior } = rulePresetModule;
 const behaviorModule = await import('./rule-behavior.js' + assetQuery);
@@ -183,6 +183,16 @@ function footerBehaviorText(slot, fallback) {
   return text || fallback;
 }
 
+// 读 behavior.params.<key>.default（红线下放：规则后台可配；读不到降级 fallback）。
+function footerBehaviorParam(key, fallback) {
+  try {
+    const params = getActiveRuleBehavior().params || {};
+    const v = params[key] && params[key].default;
+    if (typeof v === 'string' && v) return v;
+  } catch (e) { /* 降级 */ }
+  return fallback;
+}
+
 // Rewrites the stock footer notice from the active behavior rule. URL imports
 // still remove the second stock bullet because it only applies to originals.
 // Anchors: four <!--REPOST_BULLET{1,2}_{START,END}--> HTML comments embedded
@@ -193,9 +203,13 @@ function applyRepostTransform(html) {
   if (typeof html !== 'string' || !html) return html;
   let out = html;
   let changed = false;
-  const before = footerBehaviorText('footer_original_notice', '* 本文为FBIF原创，欢迎转发朋友圈；');
-  const after = footerBehaviorText('footer_repost_notice', '* 本文为转载，不代表FBIF立场。');
-  const stockOriginal = '* 本文为FBIF原创，欢迎转发朋友圈；';
+  // 机构名走 account.name（红线下放：fallback 不再写死 FBIF；模板缺省时按账号名动态构造）。
+  const acctName = footerBehaviorContext().account.name || 'FBIF';
+  const before = footerBehaviorText('footer_original_notice', '* 本文为' + acctName + '原创，欢迎转发朋友圈；');
+  const after = footerBehaviorText('footer_repost_notice', '* 本文为转载，不代表' + acctName + '立场。');
+  // footer.html 内嵌存量原创声明（红线下放 behavior.params.footer_stock_original_text，
+  // 默认即 footer.html 中的 FBIF 文案；按此字面量在静态页脚里定位替换）。
+  const stockOriginal = footerBehaviorParam('footer_stock_original_text', '* 本文为FBIF原创，欢迎转发朋友圈；');
   const nextNotice = _isRepost ? after : before;
   if (out.includes(stockOriginal)) {
     out = out.replace(stockOriginal, esc(nextNotice));
@@ -536,8 +550,19 @@ export function initApp(template) {
   let _uploadDone = false;
   let _failedSrcs = [];
   let _sourceIsDocx = false;
+  let _copyRequiresWechatImageTransfer = false;
   let _moreArticlesCopySeq = 0;
   let _moreArticlesCopyJob = null;
+
+  function findWechatImageSrcs(html) {
+    const urls = [];
+    const re = /<img\b[^>]*\bsrc=(["'])(https?:\/\/[^"']+)\1/gi;
+    let m;
+    while ((m = re.exec(String(html || ''))) !== null) {
+      if (isMmbizUrl(m[2])) urls.push(m[2]);
+    }
+    return urls;
+  }
 
   function markFailedImages(failedSrcs) {
     if (!failedSrcs.length) return;
@@ -587,6 +612,7 @@ export function initApp(template) {
     _footerHtml = normalizeWechatRichHtml(footerContent);
     _footerCopy = _footerHtml;
     _failedSrcs = [];
+    _copyRequiresWechatImageTransfer = false;
 
     // Split layout: show preview content, hide empty state
     const emptyState = document.getElementById('emptyState');
@@ -688,7 +714,12 @@ export function initApp(template) {
 
     // 网站渠道（foodtalks-site）：mmbiz 图必须转存到自有 CDN，否则粘进
     // foodtalks.cn 会触发微信防盗链占位图。公众号渠道保持 mmbiz 直用。
-    const transferMmbiz = template.id === 'foodtalks-site';
+    // 渠道能力由模板声明 transferMmbiz 标志（红线下放：不再比对硬编码 id 字符串；
+    // 旧模板未声明时降级到原 id 判断兜底）。
+    const transferMmbiz = template.transferMmbiz != null
+      ? !!template.transferMmbiz
+      : template.id === 'foodtalks-site';
+    _copyRequiresWechatImageTransfer = transferMmbiz;
     _uploadPromise = uploadNonCdnImages(_articleCopy, _footerCopy, {
       transferMmbiz,
       onProgress(done, total) {
@@ -762,13 +793,24 @@ export function initApp(template) {
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
 
-    if (_uploadPromise && !_uploadDone) {
-      logConv('info', '图片仍在后台准备，本次复制使用当前可粘贴内容');
-    }
     prepareMoreArticlesForCopy('copy-click');
 
     const enabled = document.getElementById('footerEnabled').checked;
     let html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
+    const pendingWechatSrcs = _copyRequiresWechatImageTransfer ? findWechatImageSrcs(html) : [];
+    if (pendingWechatSrcs.length > 0) {
+      const waiting = _uploadPromise && !_uploadDone;
+      logConv(waiting ? 'warn' : 'error', waiting
+        ? '网站图片仍在转存，请稍后再复制'
+        : '仍有微信图床图片未转存，已阻止复制', {
+        count: pendingWechatSrcs.length,
+        first: pendingWechatSrcs[0].slice(0, 80),
+      });
+      const originalText = btn.textContent || '复制全文';
+      btn.textContent = waiting ? '图片准备中' : '图片需重试';
+      setTimeout(() => { btn.textContent = originalText; }, 1600);
+      return false;
+    }
 
     // Inline CSS classes → style attributes for WeChat compatibility
     const config = (window._activeConfig && window._activeConfig.config) || {};
@@ -876,6 +918,7 @@ export function initApp(template) {
         footer_copy: _footerCopy,
         is_repost: _isRepost,
         source_is_docx: _sourceIsDocx,
+        copy_requires_wechat_image_transfer: _copyRequiresWechatImageTransfer,
         failed_srcs: _failedSrcs ? _failedSrcs.slice() : [],
         upload_done: _uploadDone,
       },
@@ -912,6 +955,7 @@ export function initApp(template) {
     _footerCopy = cs.footer_copy || '';
     _isRepost = !!cs.is_repost;
     _sourceIsDocx = !!cs.source_is_docx;
+    _copyRequiresWechatImageTransfer = !!cs.copy_requires_wechat_image_transfer;
     _failedSrcs = cs.failed_srcs || [];
     _uploadDone = !!cs.upload_done;
     if (snap.batch_state) {
