@@ -1,13 +1,28 @@
-// rule-presets.js — single source of truth for configurable layout rules.
+// rule-presets.js — rule document normalization and persistence.
 // The normal editor keeps a local fallback; the admin panel can persist the
-// same rule object to the Go server as named presets.
+// same rule object to the Go server as named presets. Editable field facts live
+// in rule-document.js.
 import { DEFAULT_BEHAVIOR, normalizeRuleBehavior } from './rule-behavior.js';
 
 import {
-  SYSTEM_DEFAULT_RECOMMENDED_CARDS,
   normalizeMoreArticleDefaultCards,
 } from './more-articles-config.js';
 import { isValidMoreArticleUrl } from './more-articles-meta.js';
+export {
+  DEFAULT_RULE_CONFIG,
+  FIELD_BY_KEY,
+  RULE_MODULE_FIELDS,
+  RULE_MODULE_GROUPS,
+  RULE_SCHEMA,
+} from './rule-document.js';
+import {
+  DEFAULT_RULE_CONFIG,
+  FIELD_BY_KEY,
+  RULE_MODULE_FIELDS,
+  RULE_MODULE_GROUPS,
+  RULE_SCHEMA,
+  SAFE_FONT_FAMILY_RE,
+} from './rule-document.js';
 
 const LOCAL_CONFIG_KEY = 'config_fbif';
 const DEFAULT_RULE_ACCOUNT_ID = 'fbif';
@@ -15,93 +30,6 @@ const LEGACY_FOOTER_KEY = 'footer_enabled';
 const LEGACY_SKIP_UPLOAD_KEY = 'skip_upload';
 const BAD_SKIP_UPLOAD_MIGRATION_KEY = 'skip_upload_migrated_v2';
 const RESTORED_SKIP_UPLOAD_KEY = 'skip_upload_restored_v3';
-
-export const RULE_SCHEMA = Object.freeze([
-  {
-    id: 'article',
-    label: '文章排版',
-    fields: Object.freeze([
-      { key: 'font_size', label: '正文字号', type: 'number', min: 12, max: 24, step: 1, default: '15' },
-      { key: 'heading_size', label: '标题字号', type: 'number', min: 14, max: 32, step: 1, default: '18' },
-      { key: 'line_height', label: '行高', type: 'number', min: 1, max: 3, step: 0.05, default: '1.75' },
-      { key: 'letter_spacing', label: '字间距', type: 'number', min: 0, max: 0.2, step: 0.002, default: '0.034' },
-      { key: 'paragraph_margin_x', label: '段落横向边距', type: 'number', min: 0, max: 28, step: 1, default: '8' },
-      { key: 'paragraph_gap', label: '段后间距', type: 'number', min: 0, max: 48, step: 1, default: '20' },
-      { key: 'font_family', label: '字体', type: 'text', default: 'PingFang SC' },
-      { key: 'text_color', label: '正文颜色', type: 'color', default: '#544545' },
-      { key: 'link_color', label: '链接颜色', type: 'color', default: '#0070C0' },
-      { key: 'muted_color', label: '辅助文字颜色', type: 'color', default: '#888888' },
-    ]),
-  },
-  {
-    id: 'supporting',
-    label: '说明与引用',
-    fields: Object.freeze([
-      { key: 'caption_font_size', label: '图片说明字号', type: 'number', min: 10, max: 18, step: 1, default: '12' },
-      { key: 'attribution_font_size', label: '作者来源字号', type: 'number', min: 10, max: 20, step: 1, default: '15' },
-      { key: 'blockquote_padding_left', label: '引用左缩进', type: 'number', min: 0, max: 32, step: 1, default: '12' },
-      { key: 'blockquote_border_width', label: '引用线宽', type: 'number', min: 0, max: 8, step: 1, default: '3' },
-      { key: 'md_heading_max_chars', label: 'Markdown 粗体标题字数上限', type: 'number', min: 10, max: 120, step: 1, default: '60' },
-      { key: 'decorative_image_max_px', label: '小图保持原宽阈值', type: 'number', min: 120, max: 1000, step: 10, default: '640' },
-    ]),
-  },
-  {
-    id: 'more_articles',
-    label: '更多文章',
-    fields: Object.freeze([
-      { key: 'more_articles_enabled', label: '启用底部更多文章', type: 'boolean', default: true },
-      { key: 'more_articles_slots', label: '新文章默认卡片数', type: 'number', min: 0, max: 8, step: 1, default: '3' },
-      { key: 'banner_overlay_alpha', label: '封面遮罩透明度', type: 'number', min: 0, max: 1, step: 0.01, default: '0.47058823529411764' },
-      { key: 'banner_title_x', label: '标题 X', type: 'number', min: 0, max: 400, step: 1, default: '61' },
-      { key: 'banner_title_y', label: '标题 Y', type: 'number', min: 0, max: 220, step: 1, default: '92' },
-      { key: 'banner_title_width', label: '标题宽度', type: 'number', min: 300, max: 1000, step: 1, default: '878' },
-      { key: 'banner_title_box_height', label: '标题框高度', type: 'number', min: 40, max: 220, step: 1, default: '116' },
-      { key: 'banner_title_font_size', label: '标题字号', type: 'number', min: 24, max: 80, step: 1, default: '48' },
-      { key: 'banner_title_line_height', label: '标题行高', type: 'number', min: 32, max: 100, step: 1, default: '70' },
-      { key: 'banner_title_max_lines', label: '标题最多行数', type: 'number', min: 1, max: 4, step: 1, default: '2' },
-    ]),
-  },
-  {
-    id: 'workflow',
-    label: '工作流',
-    fields: Object.freeze([
-      { key: 'footer_enabled', label: '默认显示页脚', type: 'boolean', default: true },
-      { key: 'skip_upload', label: 'DOCX 跳过上传', type: 'boolean', default: true },
-    ]),
-  },
-]);
-
-const FIELD_BY_KEY = new Map(
-  RULE_SCHEMA.flatMap(group => group.fields.map(field => [field.key, field]))
-);
-
-const SAFE_FONT_FAMILY_RE = /^[A-Za-z0-9\u4e00-\u9fff -]{1,40}$/;
-
-export const DEFAULT_RULE_CONFIG = Object.freeze(
-  {
-    ...Object.fromEntries(Array.from(FIELD_BY_KEY.values()).map(field => [field.key, field.default])),
-    more_articles_default_cards: normalizeMoreArticleDefaultCards(SYSTEM_DEFAULT_RECOMMENDED_CARDS),
-  }
-);
-
-const RULE_MODULE_GROUPS = Object.freeze([
-  { id: 'theme', groupIds: Object.freeze(['article']) },
-  { id: 'supporting', groupIds: Object.freeze(['supporting']) },
-  { id: 'more_articles', groupIds: Object.freeze(['more_articles']) },
-  { id: 'workflow', groupIds: Object.freeze(['workflow']) },
-]);
-
-const RULE_MODULE_FIELDS = new Map(
-  RULE_MODULE_GROUPS.map(moduleGroup => {
-    const keys = new Set();
-    for (const groupID of moduleGroup.groupIds) {
-      const group = RULE_SCHEMA.find(item => item.id === groupID);
-      if (!group) continue;
-      for (const field of group.fields) keys.add(field.key);
-    }
-    return [moduleGroup.id, keys];
-  })
-);
 
 function hasWindowStorage() {
   return typeof window !== 'undefined' && window.localStorage;

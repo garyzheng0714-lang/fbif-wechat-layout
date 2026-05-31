@@ -1,6 +1,6 @@
 // admin-panel.js — password-gated rule preset editor.
 // Keeps UI orchestration separate from the rule schema and from the rendering
-// engine, so adding a rule means updating rule-presets.js first.
+// engine, so adding an editable field means updating rule-document.js first.
 
 import {
   DEFAULT_RULE_CONFIG,

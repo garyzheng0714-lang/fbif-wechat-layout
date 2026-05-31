@@ -201,27 +201,25 @@ window._pushLog = function(level, msg, detail) {
 // ---- Rule preset config ----
 const rulePackModule = await import('/js/rule-packs/registry.js?v=' + assetVersion);
 const rulePackUrlModule = await import('/js/rule-packs/url.js?v=' + assetVersion);
+const editorShell = await import('/js/editor-shell.js?v=' + assetVersion);
+const {
+  bindUrlImportShortcuts,
+  createUrlImportHandler,
+  foodTalksFetchErrorMessage,
+  resolveInitialRulePackID,
+  wrapBackFeedback,
+  wrapCopyFeedback,
+} = editorShell;
 const ACCOUNT_STORAGE_KEY = 'active_rule_pack';
 
-function storedRulePackID() {
-  try {
-    return window.localStorage.getItem(ACCOUNT_STORAGE_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
 function initialRulePackID() {
-  // 优先级：URL 路径 (/mp/fbif、/ft/ft-default) > query (?account=) > localStorage > 默认
-  // 路径走 getRulePackByPath：包 id 不存在时按渠道 fallback 到该渠道默认包
-  // （/ft/default → 'ft-default'；/ft/ft-default → 'ft-default'；/mp/fbif → 'fbif'）。
-  const parsed = rulePackUrlModule.parsePath(location.pathname);
-  if (parsed && parsed.channel) {
-    return rulePackModule.getRulePackByPath(location.pathname).id;
-  }
-  const storedID = storedRulePackID();
-  return rulePackModule.getRulePackIDFromLocation({
-    search: location.search || (storedID ? '?account=' + storedID : ''),
+  return resolveInitialRulePackID({
+    locationLike: location,
+    storage: window.localStorage,
+    storageKey: ACCOUNT_STORAGE_KEY,
+    rulePackModule,
+    rulePackUrlModule,
+    useChannelDefaultPath: true,
   });
 }
 
@@ -642,113 +640,24 @@ Object.defineProperty(titleInput, 'value', {
 
 // ---- Wrap engine functions for split layout ----
 function wrapEngineFunctions() {
-  if (window.copyContent) {
-    const origCopy = window.copyContent;
-    window.copyContent = async function() {
-      const btn = document.getElementById('copyBtn');
-      const ok = await origCopy();
-      if (ok === false) return;
-      document.getElementById('copySuccess').style.display = 'block';
-      setTimeout(() => {
-        btn.textContent = '复制全文'; btn.classList.remove('copied');
-        document.getElementById('copySuccess').style.display = 'none';
-      }, 10000);
-    };
-  }
-  if (window.goBack) {
-    const origGoBack = window.goBack;
-    window.goBack = function() {
-      origGoBack();
-      document.getElementById('copySuccess').style.display = 'none';
-    };
-  }
+  wrapCopyFeedback({ windowRef: window, documentRef: document });
+  wrapBackFeedback({ windowRef: window, documentRef: document });
 }
 
 // ---- URL repost ----
-window.fetchArticle = async function() {
-  const urlInput = document.getElementById('urlInput');
-  const btn = document.getElementById('urlFetchBtn');
-  const errorEl = document.getElementById('error');
-  const url = (urlInput.value || '').trim();
-  if (!url) return;
-  errorEl.textContent = ''; errorEl.style.display = 'none';
-  btn.disabled = true; btn.textContent = '提取中...';
-  try {
-    const resp = await fetch('/api/fetch-article', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
-    if (!resp.ok) { const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status })); throw new Error(err.error || '抓取失败'); }
-    const payload = await resp.json();
-    const { title, blocks, content } = payload;
-    // Preferred: structured blocks from direct HTML parse. Preserves visual
-    // signals (font-size/color/align/bold) so headings vs pullquotes vs
-    // captions are classified deterministically — no lossy MD intermediate.
-    if (Array.isArray(blocks) && blocks.length > 0) {
-      if (!window._handleBlocks) throw new Error('blocks 路径未就绪');
-      window._handleBlocks({ title, blocks }, { isRepost: true });
-    } else if (content) {
-      // Fallback: x-reader returned Markdown. Push it through the legacy
-      // classifyMd pipeline via a synthetic File.
-      const file = new File([content], (title || 'article') + '.md', { type: 'text/markdown' });
-      if (window._handleFile) {
-        window._handleFile(file, { isRepost: true });
-      } else {
-        const fi = document.getElementById('fileInput');
-        const dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files;
-        fi.dispatchEvent(new Event('change'));
-      }
-    } else {
-      throw new Error('文章内容为空');
-    }
-  } catch (e) {
-    // 后端已对内部错误脱敏（返回中文友好提示）；前端兜底再脱一层，避免任何
-    // 技术细节（HTTP 码、栈、可执行文件路径等）泄漏给用户。
-    const raw = String(e && e.message || '');
-    const friendly = /失败|重试|为空|限流/.test(raw) && !/HTTP|exec|PATH|undefined|\$/.test(raw)
-      ? raw
-      : '文章抓取失败，请稍后重试';
-    errorEl.textContent = friendly;
-    errorEl.style.display = 'block';
-  }
-  finally { btn.disabled = false; btn.textContent = '提取'; }
-};
+window.fetchArticle = createUrlImportHandler({
+  documentRef: document,
+  fetchImpl: fetch,
+  errorMessage: foodTalksFetchErrorMessage,
+  onArticleUrl(url) { window._currentArticleUrl = url; },
+});
 
 // ---- Keyboard shortcuts ----
-document.addEventListener('keydown', (e) => {
-  const hasPreview = document.getElementById('previewContent').style.display !== 'none';
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && hasPreview) { e.preventDefault(); window.copyContent && window.copyContent(); }
+bindUrlImportShortcuts({
+  documentRef: document,
+  fetchArticle: () => window.fetchArticle(),
+  ignoreClassNames: ['ma-url'],
 });
-document.addEventListener('paste', (e) => {
-  const ae = document.activeElement;
-  if (ae === document.getElementById('urlInput')) return;
-  // Don't hijack pastes destined for the "更多文章" card URL inputs —
-  // those have their own fetch flow.
-  if (ae && ae.classList && ae.classList.contains('ma-url')) return;
-  // Don't hijack pastes inside any other text input either.
-  const tag = ae && ae.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  const text = (e.clipboardData || window.clipboardData).getData('text').trim();
-  if (text && /^https?:\/\//i.test(text)) {
-    e.preventDefault();
-    document.getElementById('urlInput').value = text;
-    window.fetchArticle();
-  }
-});
-
-// Paste directly into the URL input: auto-fetch without pressing Enter / 提取.
-// setTimeout 0 waits for the browser to insert the pasted text as a task;
-// a microtask would read .value === '' and silently skip.
-(() => {
-  const urlInput = document.getElementById('urlInput');
-  if (!urlInput) return;
-  urlInput.addEventListener('paste', () => {
-    setTimeout(() => {
-      const v = (urlInput.value || '').trim();
-      if (/^https?:\/\//i.test(v)) window.fetchArticle();
-    }, 0);
-  });
-  urlInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); window.fetchArticle(); }
-  });
-})();
 
 // 页脚库：本地存储 + engine config 同步。enabled 总开关 + segments 细粒度勾选 +
 // 4 套预设快选。不同文章可勾不同组合（用户 2026-05-31 需求）。localStorage 是离线/

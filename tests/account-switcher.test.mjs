@@ -55,12 +55,13 @@ test('app shell renders a capsule account switcher above the upload area', async
 
 test('app shell prefers pathname over query for initial rule pack selection', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const editorShell = await readFile(new URL('../public/js/editor-shell.js', import.meta.url), 'utf8');
   // 必须 import 新的 path 解析器（绝对路径）
   assert.match(app, /import\(['"]\/js\/rule-packs\/url\.js/);
-  // 必须先用 parsePath(location.pathname)，再 fallback ?account
-  assert.match(app, /parsePath\s*\(\s*location\.pathname\s*\)/);
-  // 旧 ?account 兼容仍存在
-  assert.match(app, /getRulePackIDFromLocation/);
+  // 入口页只负责接线；路径优先和旧 ?account 兼容统一由 editor-shell 承担。
+  assert.match(app, /resolveInitialRulePackID/);
+  assert.match(editorShell, /parsePath\s*\(\s*loc\.pathname/);
+  assert.match(editorShell, /getRulePackIDFromLocation/);
 });
 
 test('app.html writes path-based URL when switching rule packs', async () => {
