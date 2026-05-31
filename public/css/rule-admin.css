@@ -1,4 +1,4 @@
-/* Rule admin card editor */
+/* Rule admin card editor — Feishu design tokens (stage 3) */
 .ma-rule-editor {
   display: flex;
   flex-direction: column;
@@ -12,7 +12,7 @@
 
 .ma-rule-editor p {
   margin: -4px 0 2px;
-  color: #615d59;
+  color: var(--fs-text-2, #646A73);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -23,9 +23,9 @@
   justify-content: space-between;
   gap: 14px;
   padding: 10px 12px;
-  border: 1px solid rgba(0,0,0,0.08);
-  border-radius: 8px;
-  background: #fcfcfc;
+  border: 1px solid var(--fs-divider, rgba(31,35,39,0.08));
+  border-radius: var(--fs-r-m, 8px);
+  background: var(--fs-bg-nested, #F7F8FA);
 }
 
 .ma-rule-toggle-row .admin-toggle {
@@ -37,9 +37,9 @@
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border: 1px solid rgba(0,0,0,0.1);
-  border-radius: 8px;
-  background: #fcfcfc;
+  border: 1px solid var(--fs-border-card, #E5E6EB);
+  border-radius: var(--fs-r-m, 8px);
+  background: var(--fs-bg-nested, #F7F8FA);
 }
 
 .ma-rule-field {
@@ -57,10 +57,10 @@
 .ma-rule-field input[type="url"],
 .ma-rule-field textarea {
   padding: 7px 9px;
-  border: 1px solid #dddddd;
-  border-radius: 4px;
-  background: #ffffff;
-  color: rgba(0,0,0,0.9);
+  border: 1px solid var(--fs-border-control, #D9DCE0);
+  border-radius: var(--fs-r-xs, 4px);
+  background: var(--fs-bg-card, #ffffff);
+  color: var(--fs-text-1, #1F2329);
   font-family: inherit;
   font-size: 13px;
 }
@@ -69,8 +69,8 @@
 .ma-rule-field input[type="url"]:focus,
 .ma-rule-field textarea:focus {
   outline: none;
-  border-color: #0075de;
-  box-shadow: 0 0 0 2px rgba(0,117,222,0.15);
+  border-color: var(--fs-brand, #1456F0);
+  box-shadow: 0 0 0 2px var(--fs-brand-soft, #EBF1FF);
 }
 
 .ma-rule-field textarea {

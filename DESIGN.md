@@ -1,61 +1,56 @@
-# Design System — Notion-inspired + WeChat Replica
+# Design System — 飞书 Universe Design（编辑器外壳）+ 微信/FoodTalks 正文复刻
+
+> 编辑器**外壳**（顶栏、侧栏、卡片、按钮、弹窗）走飞书 Universe Design 冷中性灰体系，
+> 全部引用 `public/css/feishu-tokens.css` 的 `--fs-*` token。
+> **正文预览区**（`.wx-*` 微信复刻 / `#contentArea` FoodTalks 复刻）是内容契约红线，
+> **不属于本设计系统**，见下方「WeChat Preview Area」「Content Contract」——像素级冻结。
 
 ## Visual Identity
-- **Style**: Notion — warm neutrals, whisper borders, approachable minimalism
-- **Font**: Inter (400/500/600/700) + SF Mono (monospace labels)
-- **Tone**: Warm, tactile, analog-feeling — not cold or sterile
+- **Style**: 飞书 Universe Design — 冷中性灰阶、减线条用背景分区、克制精确
+- **Font**: PingFang SC 打头（`--fs-font`）；正文区用各自的 mp-quote / FoodTalks 字体栈，不受影响
+- **Tone**: 冷静、干净、有层次 — 极轻阴影托起 elevation，而非靠硬边框切块
 
-## Color Palette
+## Color Palette（`--fs-*` token，定义在 `public/css/feishu-tokens.css`）
 
-| Role | Value | Usage |
+| Role | Token | Value |
 |------|-------|-------|
-| Primary Text | `rgba(0,0,0,0.95)` | Headings, body — not pure black |
-| Secondary Text | `#615d59` | Descriptions, labels |
-| Muted Text | `#a39e98` | Placeholders, disabled, captions |
-| Background | `#ffffff` | Page, cards, surfaces |
-| Warm White | `#f6f5f4` | Alt background, section alternation |
-| Border | `rgba(0,0,0,0.1)` | Whisper border — 1px solid throughout |
-| Accent Blue | `#0075de` | CTA buttons, links, focus, toggle on |
-| Active Blue | `#005bab` | Button hover/pressed |
-| Success | `#1aae39` | Confirmation, done states |
-| Warning | `#dd5b00` | Errors, attention |
-| Badge Bg | `#f2f9ff` | Pill badge tinted blue surface |
-| Badge Text | `#097fe8` | Pill badge text |
+| 品牌主蓝 | `--fs-brand` | `#1456F0` |
+| 主蓝 hover / active | `--fs-brand-hover` / `--fs-brand-active` | `#0F4DD1` / `#0B3FBA` |
+| 主蓝浅底（badge/icon 软底） | `--fs-brand-soft` | `#EBF1FF` |
+| 主文字 | `--fs-text-1` | `#1F2329` |
+| 次文字（描述/标签） | `--fs-text-2` | `#646A73` |
+| 弱文字（占位/caption/状态） | `--fs-text-3` | `#8F959E` |
+| 卡片 / 页面底 | `--fs-bg-card` | `#FFFFFF` |
+| 嵌套分区底 | `--fs-bg-nested` | `#F7F8FA` |
+| 凹槽 / sunken | `--fs-bg-sunken` | `#F2F3F5` |
+| hover / press 叠加 | `--fs-bg-hover` / `--fs-bg-press` | `rgba(31,35,39,0.04)` / `.08` |
+| 浮层遮罩 | `--fs-bg-overlay` | `rgba(0,0,0,0.45)` |
+| 控件描边 | `--fs-border-control` | `#D9DCE0` |
+| 卡片描边 | `--fs-border-card` | `#E5E6EB` |
+| 分隔线 | `--fs-divider` | `rgba(31,35,39,0.08)` |
+| 成功 / 警告 / 危险 | `--fs-success` / `--fs-warning` / `--fs-danger` | `#00A870` / `#FF8800` / `#F54A45` |
 
-## Typography
+## Radius / Shadow / Motion（token）
 
-| Role | Size | Weight | Letter Spacing |
-|------|------|--------|---------------|
-| Body | 16px | 400 | normal |
-| UI Label | 14-15px | 500-600 | normal |
-| Caption | 12px | 600 | 0.125px |
-| Sidebar Label | 12px | 600 | 0.125px (warm gray) |
-
-## Border & Shadow
-
-- **Whisper Border**: `1px solid rgba(0,0,0,0.1)` — used everywhere
-- **Card Shadow**: `rgba(0,0,0,0.04) 0px 4px 18px, rgba(0,0,0,0.02) 0px 0.8px 2.925px, rgba(0,0,0,0.01) 0px 0.175px 1.04px`
-- **Focus Ring**: `0 0 0 2px rgba(0,117,222,0.15)` + blue border
-- **Border Radius**: 4px (buttons/inputs), 8px (cards), 9999px (badges)
+- **圆角**: `--fs-r-xs/s/m/l` = `4 / 6 / 8 / 10px`，`--fs-r-full` = `9999px`。**只用这四级，不写体系外值（5/7/12px）**
+- **阴影（极轻、有方向）**: `--fs-sh-s1`（卡片静止）/ `--fs-sh-s2`（hover 升起）/ `--fs-sh-s3`（弹窗浮层）。**不手写浓黑投影**
+- **动效**: `--fs-ease-out` / `--fs-ease-spring`；时长 `--fs-t-fast/mid/slow` = `150/200/250ms`
 
 ## Component Rules
 
-- **Buttons**: 4px radius, 8px 16px padding
-  - Primary: `#0075de` bg, white text, hover `#005bab`
-  - Secondary: `rgba(0,0,0,0.05)` bg, near-black text
-  - Active: `scale(0.95)` transform
-- **Cards**: 8-12px radius, whisper border, multi-layer shadow
-- **Inputs**: 4px radius, `1px solid #dddddd`, focus = blue ring
-- **Toggle**: 36x20px, `rgba(0,0,0,0.1)` off → `#0075de` on
+- **主按钮**: `--fs-brand` 底 + 白字，hover `--fs-brand-hover`，radius `--fs-r-s`，active `scale(0.95)`
+- **次按钮 / 控件**: `--fs-bg-card` 底 + `--fs-border-card`/`--fs-border-control` 描边，hover `--fs-bg-hover`
+- **卡片**: `--fs-bg-card` 底 + `--fs-sh-s1` 极轻阴影托起，hover 升 `--fs-sh-s2` + `translateY(-1px)`；**减线条——分区靠背景色差 + 阴影，不靠常驻边框**
+- **输入框**: `--fs-border-control` 描边，focus = `--fs-brand` 边 + `0 0 0 2px var(--fs-brand-soft)` 聚焦环
+- **弹窗浮层**: `--fs-bg-card` + `--fs-r-l` + `--fs-sh-s3`，遮罩 `--fs-bg-overlay`
 
 ## Do / Don't
-- DO use warm neutrals with yellow-brown undertones
-- DO use `rgba(0,0,0,0.95)` for text, not pure `#000`
-- DO use whisper borders `1px solid rgba(0,0,0,0.1)`
-- DO use `#f6f5f4` for alternate section backgrounds
-- DON'T use cold blue-grays
-- DON'T use heavy borders or shadows (keep opacity < 0.05)
-- DON'T use bright colors except `#0075de` for CTAs
+- DO 用 `--fs-*` token，不硬编码颜色 / 圆角 / 阴影
+- DO 减线条：能用 `--fs-bg-nested/sunken` 背景分区就不画灰边框
+- DO 卡片配 `--fs-sh-s1~3` 极轻阴影拉 elevation
+- DON'T 残留旧 Notion 体系：旧蓝 `#0075de`、暖橙 `#dd5b00`、暖灰 `#f0ebe5 / #a39e98 / #615d59`
+- DON'T 手写浓黑投影 `rgba(0,0,0,0.28)`、体系外圆角 `5/7/12px`、`inset` 白高光 hack
+- DON'T 把外壳 token 用到正文预览区（正文是独立契约，见下）
 
 ---
 

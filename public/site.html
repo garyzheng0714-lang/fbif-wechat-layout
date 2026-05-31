@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/700.css" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/400.css" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/700.css" crossorigin="anonymous">
+<link rel="stylesheet" href="/css/feishu-tokens.css">
 <link rel="stylesheet" href="/app.css">
 <link rel="stylesheet" href="/css/channel-bar.css">
 <link rel="stylesheet" href="/admin-panel.css">
@@ -33,10 +34,7 @@
       <span>FoodTalks 网站</span>
     </a>
   </nav>
-  <div class="channel-bar-side channel-bar-side-right">
-    <img class="channel-bar-logo" src="/fbif-logo.png" alt="FBIF">
-    <span class="channel-bar-title">网站排版工具</span>
-  </div>
+  <div class="channel-bar-side channel-bar-side-right"></div>
 </header>
 
 <div class="app-layout">
@@ -79,10 +77,10 @@
         </div>
       </div>
 
-      <details class="ft-advanced-options" id="footerLib" style="margin-top: 16px;">
-        <summary style="cursor: pointer; user-select: none;">页脚</summary>
-        <div style="padding: 8px 0;">
-          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+      <details class="ft-advanced-options" id="footerLib">
+        <summary class="ft-adv-summary">页脚</summary>
+        <div class="ft-adv-body">
+          <label class="ft-adv-toggle">
             <input type="checkbox" id="footerEnableToggle">
             <span>输出 FoodTalks 页脚</span>
           </label>
