@@ -98,13 +98,16 @@ body {
 }
 .sidebar-divider { height: 1px; background: var(--fs-divider); margin: 4px 0; }
 .sidebar-footer {
-  padding: 12px 16px; border-top: 1px solid var(--fs-divider); flex-shrink: 0;
+  padding: 8px; border-top: 1px solid var(--fs-divider); flex-shrink: 0;
 }
 .mp-link {
-  font-size: 12px; color: var(--fs-text-3); text-decoration: none;
-  transition: color var(--fs-t-fast) var(--fs-ease-out);
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; border-radius: var(--fs-r-s);
+  font-size: 13px; color: var(--fs-text-2); text-decoration: none;
+  transition: background var(--fs-t-fast) var(--fs-ease-out),
+              color var(--fs-t-fast) var(--fs-ease-out);
 }
-.mp-link:hover { color: var(--fs-brand); }
+.mp-link:hover { background: var(--fs-bg-hover); color: var(--fs-text-1); }
 .sidebar-label {
   font-size: 12px; font-weight: 500; color: var(--fs-text-3);
   letter-spacing: 0.125px;
@@ -144,11 +147,12 @@ input[type="file"] { display: none; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-top: 2px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--fs-divider);
 }
 .active-rule-card.editing {
   gap: 7px;
-  padding-top: 6px;
 }
 .active-rule-caption {
   display: flex;
@@ -158,8 +162,8 @@ input[type="file"] { display: none; }
 }
 .active-rule-label {
   color: var(--fs-text-3);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
 }
 .active-rule-readline {
   min-height: 28px;
@@ -189,8 +193,8 @@ input[type="file"] { display: none; }
   border-radius: 9999px;
   background: var(--fs-bg-sunken);
   color: var(--fs-text-3);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 500;
 }
 .active-rule-card.editing .active-rule-badge {
   background: var(--fs-brand-soft);
@@ -318,7 +322,7 @@ input[type="file"] { display: none; }
 .active-rule-option-check {
   width: 14px;
   color: var(--fs-brand);
-  font-weight: 700;
+  font-weight: 500;
   visibility: hidden;
 }
 .active-rule-option[aria-selected="true"] .active-rule-option-check {
