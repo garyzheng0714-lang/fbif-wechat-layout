@@ -133,6 +133,71 @@ body.channel-portal-body {
 
 .sidebar-site .sidebar-divider { display: none; }
 
+/* 高级选项折叠 — 飞书风（工具页侧栏，复用 app.css 共享的 --fs- token） */
+.ft-advanced-options {
+  margin-top: 4px;
+  border-top: 1px solid var(--fs-divider);
+  padding-top: 8px;
+}
+.ft-adv-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: var(--fs-r-s);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fs-text-2);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--fs-t-fast) var(--fs-ease-out),
+              color var(--fs-t-fast) var(--fs-ease-out);
+}
+.ft-adv-summary::-webkit-details-marker { display: none; }
+.ft-adv-summary::before {
+  content: "";
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  opacity: 0.55;
+  transition: transform var(--fs-t-fast) var(--fs-ease-out);
+}
+.ft-advanced-options[open] .ft-adv-summary::before {
+  transform: rotate(90deg);
+}
+.ft-adv-summary:hover {
+  background: var(--fs-bg-hover);
+  color: var(--fs-text-1);
+}
+.ft-adv-body {
+  padding: 6px 10px 2px;
+}
+.ft-adv-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fs-text-1);
+  cursor: pointer;
+}
+.ft-adv-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--fs-brand);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ft-adv-hint {
+  margin: 6px 0 0 22px;
+  color: var(--fs-text-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* ========== FoodTalks 网站预览样式：模拟 foodtalks.cn 文章页 ========== */
 /* 仅作用于 .preview-site 容器（site.html 的 <main class="preview-panel preview-site">） */
 /* 公众号 app.html 不带 .preview-site modifier，因此样式完全隔离 */
