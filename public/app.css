@@ -633,16 +633,15 @@ input[type="file"] { display: none; }
 
 /* Add button — 保留虚线（添加区语义信号） */
 .ma-add-btn {
-  padding: 12px; border: none;
-  border-radius: var(--fs-r-m); background: var(--fs-bg-nested);
-  color: var(--fs-text-2); font-size: 13px; font-weight: 500;
+  padding: 10px; border: none;
+  border-radius: var(--fs-r-s); background: transparent;
+  color: var(--fs-text-3); font-size: 13px; font-weight: 500;
   font-family: inherit; cursor: pointer;
-  transition: all var(--fs-t-fast) var(--fs-ease-out);
+  transition: background var(--fs-t-fast) var(--fs-ease-out), color var(--fs-t-fast) var(--fs-ease-out);
 }
 .ma-add-btn:hover {
-  color: var(--fs-brand); background: var(--fs-bg-sunken);
+  color: var(--fs-brand); background: var(--fs-bg-hover);
 }
-.ma-add-btn:active { transform: scale(0.98); }
 
 /* Empty state (no cards yet) */
 .ma-empty-placeholder {
