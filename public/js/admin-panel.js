@@ -23,6 +23,9 @@ import {
   validateRuleBehavior,
 } from './rule-behavior.js';
 import { createMoreArticlesRuleEditor } from './more-articles-rule-editor.js';
+import { createFooterLibraryEditor } from './footer-library-rule-editor.js';
+import { FOOTER_SEGMENTS_DEFAULT, FOOTER_SEGMENT_ORDER_DEFAULT, FOOTER_PRESETS_DEFAULT } from './footer-segments-defaults.js';
+import { RULE_PACKS } from './rule-packs/registry.js';
 
 const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
 
@@ -143,6 +146,8 @@ export function initAdminPanel(options = {}) {
   let draftPreset = null;
   let workingConfig = normalizeRuleConfig(getConfig());
   let workingBehavior = normalizeRuleBehavior(getBehavior());
+  let workingFooter = null;
+  let footerEditorInstance = null;
   let workingName = '未命名规则';
   let workingDescription = '';
   let jsonText = '';
@@ -169,6 +174,7 @@ export function initAdminPanel(options = {}) {
     workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : getBehavior());
     workingName = selected && selected.name ? selected.name : '未命名规则';
     workingDescription = selected && selected.description ? selected.description : '';
+    workingFooter = footerFromPreset(selected);
     syncJSONText();
     syncBehaviorText();
     applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' });
@@ -316,6 +322,7 @@ export function initAdminPanel(options = {}) {
       ['behavior', '代码化规则'],
       ['validation', '校验预览'],
     ];
+    if (isFtDefaultPack()) tabs.push(['footer', '页脚库']);
     return `
       <div class="admin-rule-tabs" role="tablist" aria-label="规则编辑分区">
         ${tabs.map(([id, label]) => `
@@ -394,6 +401,23 @@ export function initAdminPanel(options = {}) {
     syncBehaviorText();
   }
 
+  function isFtDefaultPack() {
+    const pack = RULE_PACKS[currentAccountID()];
+    return !!(pack && pack.templateId === 'foodtalks-site');
+  }
+
+  function defaultFooterData() {
+    return { enabled: false, active_preset_id: 'fbif-original',
+      segment_order: [...FOOTER_SEGMENT_ORDER_DEFAULT],
+      segments: Object.fromEntries(Object.entries(FOOTER_SEGMENTS_DEFAULT).map(([k, v]) => [k, { html_lines: [...v.html_lines] }])),
+      presets: FOOTER_PRESETS_DEFAULT.map(p => ({ ...p, segments: { ...p.segments } })) };
+  }
+
+  function footerFromPreset(preset) {
+    const raw = preset && preset.config && preset.config.modules && preset.config.modules.fbif_footer;
+    return raw ? JSON.parse(JSON.stringify(raw)) : defaultFooterData();
+  }
+
   function visibleRulePacks() {
     return rulePacks.length ? rulePacks : [{ id: 'fbif', accountName: 'FBIF公众号' }];
   }
@@ -463,6 +487,9 @@ export function initAdminPanel(options = {}) {
   }
 
   function renderRuleTabContent() {
+    if (activeRuleTab === 'footer') {
+      return `<section class="admin-rule-group"><div data-role="footer-library-editor"></div></section>`;
+    }
     if (activeRuleTab === 'behavior') {
       return `
         <section class="admin-rule-group admin-json-panel">
@@ -597,6 +624,17 @@ export function initAdminPanel(options = {}) {
     mount.replaceChildren(editor);
   }
 
+  function bindFooterLibraryEditor() {
+    const mount = overlay && overlay.querySelector('[data-role="footer-library-editor"]');
+    if (!mount) return;
+    if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
+    footerEditorInstance = createFooterLibraryEditor({
+      container: mount,
+      footerData: workingFooter || defaultFooterData(),
+      onChange(next) { workingFooter = next; },
+    });
+  }
+
   function bindMain() {
     overlay.querySelector('.admin-close').addEventListener('click', close);
     overlay.querySelectorAll('[data-view]').forEach(btn => {
@@ -607,6 +645,7 @@ export function initAdminPanel(options = {}) {
     });
     overlay.querySelectorAll('[data-rule-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
+        if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
         activeRuleTab = btn.dataset.ruleTab;
         renderMain();
       });
@@ -630,11 +669,13 @@ export function initAdminPanel(options = {}) {
     });
     if (activeView !== 'rules') return;
     bindMoreArticlesRuleEditor();
+    bindFooterLibraryEditor();
     overlay.querySelector('[data-role="preset-select"]').addEventListener('change', e => {
       selectedID = e.target.value;
       const selected = selectedPreset();
       workingConfig = normalizeRuleConfig(selected ? selected.config : getConfig());
       workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : getBehavior());
+      workingFooter = footerFromPreset(selected);
       workingName = selected && selected.name ? selected.name : '未命名规则';
       workingDescription = selected && selected.description ? selected.description : '';
       syncJSONText();
@@ -751,6 +792,21 @@ export function initAdminPanel(options = {}) {
         updateWorkingField(key, next);
       });
     });
+    async function savePresetWithFooter(preset) {
+      const configDoc = buildRuleConfigDocument(preset.config, { name: preset.name, description: preset.description });
+      if (isFtDefaultPack()) {
+        // 保留 buildRuleConfigDocument 丢弃的网站结构化字段（顶层 image、mctoc、fbif_footer）
+        const oc = (presetByID(doc, preset.id) || {}).config || {};
+        if (oc.image) configDoc.image = oc.image;
+        if (oc.modules && oc.modules.mctoc) configDoc.modules.mctoc = oc.modules.mctoc;
+        configDoc.modules.fbif_footer = JSON.parse(JSON.stringify(workingFooter || defaultFooterData()));
+      }
+      const body = { id: preset.id, name: preset.name, description: preset.description, config: configDoc, behavior: preset.behavior };
+      const resp = await fetch('/api/rules/admin/presets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': String(password || '').trim() }, body: JSON.stringify(body) });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+      return data;
+    }
     overlay.querySelector('[data-action="save"]').addEventListener('click', () => {
       run(async () => {
         syncDirtyJSONBeforePersist();
@@ -758,7 +814,7 @@ export function initAdminPanel(options = {}) {
         const selected = presetByID(doc, selectedID) || { id: selectedID };
         const name = workingName.trim() || selected.name || '未命名规则';
         const description = workingDescription.trim();
-        doc = await saveRulePreset(password, {
+        doc = await savePresetWithFooter({
           id: selected.id,
           name,
           description,
@@ -778,7 +834,7 @@ export function initAdminPanel(options = {}) {
         const name = workingName.trim() || '新规则';
         const id = uniqueClientRuleID(name, doc);
         const description = workingDescription.trim();
-        doc = await saveRulePreset(password, { id, name, description, config: workingConfig, behavior: workingBehavior });
+        doc = await savePresetWithFooter({ id, name, description, config: workingConfig, behavior: workingBehavior });
         await setActiveRulePreset(password, id, currentAccountID());
         doc = await listRulePresets(password);
         draftPreset = null;

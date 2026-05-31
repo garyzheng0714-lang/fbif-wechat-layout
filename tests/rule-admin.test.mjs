@@ -16,7 +16,7 @@ test('rule admin exposes JSON editing and new-rule controls', async () => {
   assert.match(adminPanel, /data-action="apply-json"/);
   assert.match(adminPanel, /data-action="new"/);
   assert.match(adminPanel, /syncDirtyJSONBeforePersist/);
-  assert.match(adminPanel, /syncDirtyJSONBeforePersist\(\);[\s\S]*saveRulePreset/);
+  assert.match(adminPanel, /syncDirtyJSONBeforePersist\(\);[\s\S]*savePresetWithFooter|syncDirtyJSONBeforePersist\(\);[\s\S]*saveRulePreset/);
   assert.match(adminPanel, /应用到当前公众号/);
   assert.match(adminPanel, /复制为新规则/);
   assert.match(adminPanel, /保存修改/);
@@ -102,7 +102,7 @@ test('rule admin exposes behavior-code editing and validation preview', async ()
   assert.match(adminPanel, /data-action="apply-behavior"/);
   assert.match(adminPanel, /\['validation', '校验预览'\]/);
   assert.match(adminPanel, /校验预览/);
-  assert.match(adminPanel, /syncDirtyBehaviorBeforePersist\(\);[\s\S]*saveRulePreset/);
+  assert.match(adminPanel, /syncDirtyBehaviorBeforePersist\(\);[\s\S]*savePresetWithFooter|syncDirtyBehaviorBeforePersist\(\);[\s\S]*saveRulePreset/);
   assert.match(adminPanel, /behavior:\s*workingBehavior/);
   assert.match(css, /\.admin-rule-tabs/);
   assert.match(css, /\.admin-preview-grid/);
@@ -121,4 +121,45 @@ test('rule admin card editor has dedicated layout styles', async () => {
   assert.match(ruleAdminCSS, /\.ma-rule-card\s+\.admin-json-actions\s*\{[^}]*flex-wrap:\s*wrap;/);
   assert.doesNotMatch(appCSS, /\.ma-rule-/);
   assert.ok(appCSS.split('\n').length <= 900);
+});
+
+test('rule admin has footer-library tab and workingFooter save injection', async () => {
+  const adminPanel = await readProjectFile('public/js/admin-panel.js');
+
+  // import
+  assert.match(adminPanel, /import\s*\{[^}]*createFooterLibraryEditor[^}]*\}\s*from\s*['"]\.\/footer-library-rule-editor\.js['"]/);
+
+  // ft-default 系判断
+  assert.match(adminPanel, /isFtDefaultPack\(\)/);
+  assert.match(adminPanel, /templateId.*foodtalks-site|foodtalks-site.*templateId/);
+
+  // 页脚库 Tab 仅对 ft-default 系追加
+  assert.match(adminPanel, /isFtDefaultPack\(\).*tabs\.push.*\['footer', '页脚库'\]|tabs\.push.*\['footer', '页脚库'\].*isFtDefaultPack/s);
+
+  // workingFooter 变量声明
+  assert.match(adminPanel, /let workingFooter\s*=/);
+
+  // refreshDoc 同步 workingFooter
+  assert.match(adminPanel, /workingFooter\s*=\s*footerFromPreset\(selected\)/);
+
+  // preset-select change 同步 workingFooter（全文出现 ≥2 次 footerFromPreset：refreshDoc + preset-select）
+  const footerFromPresetCount = (adminPanel.match(/footerFromPreset/g) || []).length;
+  assert.ok(footerFromPresetCount >= 2, `footerFromPreset 应至少出现 2 次，实际 ${footerFromPresetCount}`);
+
+  // Footer Tab 挂载点
+  assert.match(adminPanel, /data-role="footer-library-editor"/);
+
+  // bindFooterLibraryEditor 调用 createFooterLibraryEditor
+  assert.match(adminPanel, /createFooterLibraryEditor\(\{[\s\S]*?container[\s\S]*?footerData[\s\S]*?onChange[\s\S]*?\}\)/);
+
+  // 保存注入：savePresetWithFooter 函数中含 fbif_footer
+  assert.match(adminPanel, /savePresetWithFooter/);
+  assert.match(adminPanel, /configDoc\.modules\.fbif_footer/);
+
+  // 两处保存都调用 savePresetWithFooter 而非裸 saveRulePreset
+  const saveCount = (adminPanel.match(/await savePresetWithFooter/g) || []).length;
+  assert.ok(saveCount >= 2, `应有至少 2 处 savePresetWithFooter 调用，实际 ${saveCount}`);
+
+  // 行数守护
+  assert.ok(adminPanel.split('\n').length <= 900, `admin-panel.js 超过 900 行`);
 });
