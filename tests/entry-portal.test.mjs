@@ -45,6 +45,19 @@ test('site.html keeps upload + URL + preview + copy button', async () => {
   assert.match(html, /id=['"]copyBtn['"]/);
 });
 
+test('site.html renders the FoodTalks article preview shell', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../public/site.css', import.meta.url), 'utf8');
+  assert.match(html, /FOODTALKS_PREVIEW_META/);
+  assert.match(html, /id=['"]ftReadCount['"]/);
+  assert.match(html, /id=['"]ftPreviewTags['"]/);
+  assert.match(html, /id=['"]ftShareButton['"]/);
+  assert.match(html, /id=['"]ftSharePopover['"]/);
+  assert.match(html, /dataset\.previewTagKey/);
+  assert.match(css, /\.preview-site \.ft-preview-tag:hover/);
+  assert.match(css, /\.preview-site \.ft-share-popover/);
+});
+
 test('site.html uses absolute /js/ paths for dynamic imports', async () => {
   const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
   const relMatches = html.match(/import\(['"]\.\//g);

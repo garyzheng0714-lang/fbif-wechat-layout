@@ -124,23 +124,57 @@
 
       <!-- Preview content -->
       <div class="preview-content" id="previewContent" style="display:none;">
-        <div class="wx-header">
+        <div class="wx-header ft-article-header">
           <h2 class="wx-title" id="articleTitle"></h2>
-          <!-- 网站渠道作者行：仿 foodtalks.cn 文章页（账号名 + 日期）。纯预览
-               装饰，不进复制层。账号名写死、日期用当天——都是真数据；不放
-               阅读数/标签（抓取数据无此字段，编占位会误导）。.wx-meta-loc
-               (上海) 由 .preview-site 样式隐藏：FoodTalks 作者行无地点。 -->
-          <div class="wx-meta ft-byline">
-            <span class="ft-byline-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 8a3 3 0 100-6 3 3 0 000 6zm0 1.5c-2.5 0-5 1.25-5 3.25V14h10v-1.25C13 10.75 10.5 9.5 8 9.5z"/></svg>
-            </span>
-            <span class="wx-meta-account">FBIF食品饮料创新</span>
-            <span class="ft-byline-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.3"/><path d="M8 4.4V8l2.6 1.6" stroke-linecap="round"/></svg>
-            </span>
-            <span class="wx-meta-gray" id="wxDate"></span>
-            <span class="wx-meta-gray wx-meta-loc">上海</span>
+          <!-- 网站渠道文章头：仿 foodtalks.cn 文章页。纯预览装饰，不进复制层。 -->
+          <div class="ft-article-info">
+            <div class="wx-meta ft-byline ft-article-info-left">
+              <span class="ft-meta-item ft-meta-author">
+                <span class="ft-byline-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="15" height="14" fill="currentColor"><path d="M8 7.8a3.4 3.4 0 100-6.8 3.4 3.4 0 000 6.8zm0 1.35c-3.15 0-6.35 1.55-6.35 3.65V15h12.7v-2.2c0-2.1-3.2-3.65-6.35-3.65z"/></svg>
+                </span>
+                <span class="wx-meta-account">FBIF食品饮料创新</span>
+              </span>
+              <span class="ft-meta-item">
+                <span class="ft-byline-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M8 1.2A6.8 6.8 0 108 14.8 6.8 6.8 0 008 1.2zm.65 7.1V4.05h-1.3v4.9l3.75 2.2.65-1.1-3.1-1.75z"/></svg>
+                </span>
+                <span class="wx-meta-gray" id="wxDate"></span>
+              </span>
+              <span class="ft-meta-item">
+                <span class="ft-byline-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 16" width="20" height="16" fill="currentColor"><path d="M10 2.2c4.2 0 7.2 3.25 8.1 5.8-.9 2.55-3.9 5.8-8.1 5.8S2.8 10.55 1.9 8C2.8 5.45 5.8 2.2 10 2.2zm0 1.25C6.65 3.45 4.1 5.9 3.25 8c.85 2.1 3.4 4.55 6.75 4.55S16.9 10.1 17.75 8C16.9 5.9 13.35 3.45 10 3.45zm0 1.55a3 3 0 110 6 3 3 0 010-6z"/></svg>
+                </span>
+                <span class="wx-meta-gray" id="ftReadCount"></span>
+              </span>
+              <span class="wx-meta-gray wx-meta-loc">上海</span>
+            </div>
+            <div class="ft-article-info-right">
+              <button type="button" class="ft-share-button" id="ftShareButton" aria-expanded="false" aria-controls="ftSharePopover">
+                <span>分享</span>
+                <span class="ft-share-arrow" aria-hidden="true">
+                  <svg viewBox="0 0 18 18" width="18" height="18" fill="currentColor"><path d="M11.6 4.4v2.45C6.95 7.15 4.25 9.7 3.2 13.7c1.75-2.25 4.35-3.35 8.4-3.35v2.8L16 8.75 11.6 4.4z"/></svg>
+                </span>
+              </button>
+              <div class="ft-share-popover" id="ftSharePopover" hidden role="dialog" aria-label="分享二维码">
+                <div class="ft-qr-frame" aria-hidden="true">
+                  <span class="ft-qr-corner ft-qr-corner-tl"></span>
+                  <span class="ft-qr-corner ft-qr-corner-tr"></span>
+                  <span class="ft-qr-corner ft-qr-corner-bl"></span>
+                  <span class="ft-qr-corner ft-qr-corner-br"></span>
+                  <svg class="ft-fake-qr" viewBox="0 0 116 116" width="116" height="116" aria-hidden="true">
+                    <rect width="116" height="116" fill="#fff"/>
+                    <path fill="#000" d="M8 8h28v28H8V8zm6 6v16h16V14H14zm66-6h28v28H80V8zm6 6v16h16V14H86zM8 80h28v28H8V80zm6 6v16h16V86H14zM44 8h8v8h-8V8zm16 0h8v8h-8V8zM44 20h8v8h-8v-8zm24 0h8v8h-8v-8zM44 32h16v8H44v-8zm24 8h8v8h-8v-8zM8 44h8v8H8v-8zm16 0h16v8H24v-8zm24 0h8v8h-8v-8zm16 0h16v8H64v-8zm32 0h12v8H96v-8zM16 56h8v8h-8v-8zm16 0h8v8h-8v-8zm24 0h16v8H56v-8zm24 0h8v8h-8v-8zm16 0h8v8h-8v-8zM8 68h24v8H8v-8zm40 0h8v8h-8v-8zm16 0h8v8h-8v-8zm24 0h20v8H88v-8zM44 80h8v8h-8v-8zm16 0h24v8H60v-8zm36 0h12v8H96v-8zM44 92h20v8H44v-8zm28 0h8v8h-8v-8zm16 0h8v8h-8v-8zM56 104h8v8h-8v-8zm16 0h20v8H72v-8zm28 0h8v8h-8v-8z"/>
+                  </svg>
+                </div>
+                <div class="ft-share-caption" id="ftShareQrCaption"></div>
+                <div class="ft-share-separator"></div>
+                <button type="button" class="ft-copy-link" id="ftShareCopyText"></button>
+              </div>
+            </div>
           </div>
+          <div class="ft-preview-tags" id="ftPreviewTags" aria-label="文章标签"></div>
+          <blockquote class="ft-summary" id="ftSummary"></blockquote>
         </div>
         <div class="phone-frame" id="phoneFrame">
           <div id="contentArea"></div>
@@ -630,12 +664,79 @@ Object.defineProperty(titleInput, 'value', {
   set(v) { _od.set.call(this, v); articleTitle.textContent = v; },
 });
 
-// ---- Set date ----
+// ---- FoodTalks article preview shell ----
+const FOODTALKS_PREVIEW_META = Object.freeze({
+  articleDate: '2026-05-26',
+  readCount: '8888',
+  summary: '这是一段摘要',
+  shareQrCaption: '微信扫一扫',
+  shareCopyText: '复制链接',
+  tags: Object.freeze([
+    Object.freeze({ key: 'preview_tag_1', label: '标签1' }),
+    Object.freeze({ key: 'preview_tag_2', label: '标签2' }),
+    Object.freeze({ key: 'preview_tag_3', label: '标签3' }),
+  ]),
+});
+window._foodTalksPreviewMeta = FOODTALKS_PREVIEW_META;
+
+function renderFoodTalksPreviewMeta(meta) {
+  const dateEl = document.getElementById('wxDate');
+  const readEl = document.getElementById('ftReadCount');
+  const summaryEl = document.getElementById('ftSummary');
+  const tagsEl = document.getElementById('ftPreviewTags');
+  const qrCaptionEl = document.getElementById('ftShareQrCaption');
+  const copyTextEl = document.getElementById('ftShareCopyText');
+  if (dateEl) dateEl.textContent = meta.articleDate;
+  if (readEl) readEl.textContent = meta.readCount;
+  if (summaryEl) summaryEl.textContent = meta.summary;
+  if (qrCaptionEl) qrCaptionEl.textContent = meta.shareQrCaption;
+  if (copyTextEl) copyTextEl.textContent = meta.shareCopyText;
+  if (tagsEl) {
+    tagsEl.replaceChildren();
+    meta.tags.forEach(tag => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ft-preview-tag';
+      button.dataset.previewTagKey = tag.key;
+      button.textContent = tag.label;
+      tagsEl.appendChild(button);
+    });
+  }
+}
+renderFoodTalksPreviewMeta(FOODTALKS_PREVIEW_META);
+
 {
-  const now = new Date();
-  const y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
-  const h = String(now.getHours()).padStart(2, '0'), mi = String(now.getMinutes()).padStart(2, '0');
-  document.getElementById('wxDate').textContent = y + '年' + m + '月' + d + '日 ' + h + ':' + mi;
+  const shareButton = document.getElementById('ftShareButton');
+  const sharePopover = document.getElementById('ftSharePopover');
+  const shareCopyButton = document.getElementById('ftShareCopyText');
+  function setShareOpen(open) {
+    if (!shareButton || !sharePopover) return;
+    shareButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+    sharePopover.hidden = !open;
+  }
+  if (shareButton && sharePopover) {
+    shareButton.addEventListener('click', event => {
+      event.stopPropagation();
+      setShareOpen(sharePopover.hidden);
+    });
+    sharePopover.addEventListener('click', event => event.stopPropagation());
+    document.addEventListener('click', () => setShareOpen(false));
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') setShareOpen(false);
+    });
+  }
+  if (shareCopyButton) {
+    shareCopyButton.addEventListener('click', async () => {
+      const text = window._currentArticleUrl || location.href;
+      try {
+        await navigator.clipboard.writeText(text);
+        shareCopyButton.textContent = '已复制';
+        window.setTimeout(() => { shareCopyButton.textContent = FOODTALKS_PREVIEW_META.shareCopyText; }, 1200);
+      } catch {
+        shareCopyButton.textContent = FOODTALKS_PREVIEW_META.shareCopyText;
+      }
+    });
+  }
 }
 
 // ---- Wrap engine functions for split layout ----
