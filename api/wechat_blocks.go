@@ -13,14 +13,24 @@ import (
 // Shape matches the `elems` array produced by classifyMd in fbif.js so the
 // renderer can consume them without translation.
 type Block struct {
-	K         string `json:"k"`
-	Text      string `json:"text,omitempty"`
-	Runs      []Run  `json:"runs,omitempty"`
-	Src       string `json:"src,omitempty"`
-	DataW     string `json:"dataW,omitempty"`
-	DataH     string `json:"dataH,omitempty"`
-	DataRatio string `json:"dataRatio,omitempty"`
-	Ordered   bool   `json:"ordered,omitempty"`
+	K         string        `json:"k"`
+	Text      string        `json:"text,omitempty"`
+	Runs      []Run         `json:"runs,omitempty"`
+	Src       string        `json:"src,omitempty"`
+	DataW     string        `json:"dataW,omitempty"`
+	DataH     string        `json:"dataH,omitempty"`
+	DataRatio string        `json:"dataRatio,omitempty"`
+	Ordered   bool          `json:"ordered,omitempty"`
+	Rows      [][]TableCell `json:"rows,omitempty"` // K=="table": 二维行/列，保住表格结构
+}
+
+// TableCell is one cell of a K=="table" block. Header marks heading-row /
+// <th> cells so renderers apply the header style. Matches the neutral table
+// elem the DOCX path produces ({runs, header}) so both import paths feed the
+// same renderTable on each side.
+type TableCell struct {
+	Runs   []Run `json:"runs,omitempty"`
+	Header bool  `json:"header,omitempty"`
 }
 
 // Run is an inline fragment. Type ∈ {"txt", "link"}.
@@ -156,6 +166,17 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			w.captionLines = 0
 			w.inRefSection = false
 			return
+		case "table":
+			// 表格保结构：拦在通用 block 拍平之前。先冲掉未结块，再整表走 walkTable。
+			if cur != nil && hasContent(cur.runs) {
+				w.emit(cur)
+				cur.runs = nil
+				cur.textStyles = nil
+			}
+			w.closeCaptionContext()
+			w.inRefSection = false
+			w.walkTable(n, inherited)
+			return
 		case "a":
 			href := getAttr(n, "href")
 			if cur != nil && href != "" && !strings.HasPrefix(href, "javascript:") {
@@ -220,6 +241,110 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 func (w *blockWalker) walkChildren(n *html.Node, cur *blockCtx, style computedStyle) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		w.walk(c, cur, style)
+	}
+}
+
+// walkTable builds a structured K=="table" Block from a <table> subtree,
+// preserving the row/cell grid the generic block walker would otherwise
+// flatten into one paragraph per cell. Header cells are <th> or any cell
+// inside <thead>.
+func (w *blockWalker) walkTable(n *html.Node, inherited computedStyle) {
+	var rows [][]TableCell
+	var walkRows func(node *html.Node, inThead bool)
+	walkRows = func(node *html.Node, inThead bool) {
+		for c := node.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type != html.ElementNode {
+				continue
+			}
+			switch strings.ToLower(c.Data) {
+			case "thead":
+				walkRows(c, true)
+			case "tbody", "tfoot", "colgroup":
+				walkRows(c, false)
+			case "tr":
+				if row := w.buildTableRow(c, inThead, inherited); len(row) > 0 {
+					rows = append(rows, row)
+				}
+			default:
+				walkRows(c, inThead)
+			}
+		}
+	}
+	walkRows(n, false)
+	if len(rows) > 0 {
+		w.blocks = append(w.blocks, Block{K: "table", Rows: rows})
+	}
+}
+
+func (w *blockWalker) buildTableRow(tr *html.Node, inThead bool, inherited computedStyle) []TableCell {
+	var cells []TableCell
+	for c := tr.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != html.ElementNode {
+			continue
+		}
+		tag := strings.ToLower(c.Data)
+		if tag != "td" && tag != "th" {
+			continue
+		}
+		cell := &blockCtx{style: mergeStyle(inherited, parseInlineStyle(getAttr(c, "style")))}
+		w.collectCellRuns(c, cell, cell.style)
+		cells = append(cells, TableCell{Runs: normalizeRuns(cell.runs), Header: inThead || tag == "th"})
+	}
+	return cells
+}
+
+// collectCellRuns gathers inline runs from a table-cell subtree WITHOUT
+// emitting separate blocks. Block-level descendants (section/p/div) are
+// flattened into the cell's runs; <br> becomes a space (table cells are
+// single-line in practice); <img> inside cells is dropped.
+func (w *blockWalker) collectCellRuns(n *html.Node, cur *blockCtx, inherited computedStyle) {
+	switch n.Type {
+	case html.TextNode:
+		if cur.runs == nil && strings.TrimSpace(n.Data) == "" {
+			return
+		}
+		cur.runs = append(cur.runs, w.makeTextRun(cur, n.Data))
+		return
+	case html.ElementNode:
+		switch strings.ToLower(n.Data) {
+		case "script", "style", "noscript", "iframe", "img":
+			return
+		case "br":
+			cur.runs = append(cur.runs, Run{Type: "txt", Text: " "})
+			return
+		case "a":
+			href := getAttr(n, "href")
+			if href != "" && !strings.HasPrefix(href, "javascript:") {
+				cur.hrefStack = append(cur.hrefStack, href)
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					w.collectCellRuns(c, cur, inherited)
+				}
+				cur.hrefStack = cur.hrefStack[:len(cur.hrefStack)-1]
+				return
+			}
+		case "strong", "b":
+			cur.boldDepth++
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				w.collectCellRuns(c, cur, inherited)
+			}
+			cur.boldDepth--
+			return
+		}
+		nodeStyle := parseInlineStyle(getAttr(n, "style"))
+		merged := mergeStyle(inherited, nodeStyle)
+		if nodeStyle.fontWeightBold {
+			cur.boldDepth++
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			w.collectCellRuns(c, cur, merged)
+		}
+		if nodeStyle.fontWeightBold {
+			cur.boldDepth--
+		}
+		return
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		w.collectCellRuns(c, cur, inherited)
 	}
 }
 

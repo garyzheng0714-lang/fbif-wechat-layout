@@ -231,3 +231,42 @@ test('url-import keeps body prompt sections that are not the standard footer', (
   assert.match(html, /这里是正文里的提示内容/);
   assert.equal((html.match(/来源：剁椒Spicy/g) || []).length, 1);
 });
+
+// ---- 统一表格样式（公众号渲染：全 inline-style，css-inline 不碰裸 table） ----
+// WHY：旧路径表格被拍平丢结构；这里锁住公众号侧渲成真正的 <table>，样式默认复刻既有
+// 公众号表格（蓝底白字表头 + 浅灰网格线），且全部 inline（复制到微信不丢样式）。
+function tablePara(rows) {
+  return { text: '', runs: [], isEmpty: false, type: 'table', rows };
+}
+const tcell = (text, header = false) => ({ runs: [{ type: 'txt', text }], header });
+
+test('公众号 DOCX 表格渲成 inline-style <table>（蓝底白字表头 + 网格线）', () => {
+  const html = renderDocx([
+    tablePara([
+      [tcell('产品名称', true), tcell('价格', true)],
+      [tcell('话梅'), tcell('¥11.9')],
+    ]),
+  ]);
+  assert.match(html, /<table[^>]*border-collapse: collapse/, '真正的 table 且 border-collapse');
+  assert.match(html, /background-color: #01396a/i, '表头底色默认 FoodTalks 蓝（hex 大小写不敏感）');
+  assert.match(html, /color: #ffffff/i, '表头白字');
+  assert.match(html, /border: 1px solid #e5e7eb/i, '浅灰网格线');
+  assert.match(html, /font-weight: bold/, '表头加粗');
+  assert.match(html, /产品名称/);
+  assert.match(html, /¥11\.9/);
+  // 单元格文本不走 wx-t（那会被 css-inline 套正文色，与表格自有色冲突）
+  assert.ok(!/<td[^>]*>[^<]*<span[^>]*class="wx-t"/.test(html), '单元格不用 wx-t class');
+});
+
+test('公众号 URL 导入表格块（processBlocks）也渲成 <table>', () => {
+  const html = renderBlocks([
+    { k: 'table', rows: [
+      [tcell('品牌', true), tcell('产地', true)],
+      [tcell('SENSE ASIA'), tcell('越南')],
+    ] },
+  ]);
+  assert.match(html, /<table[^>]*border-collapse/);
+  assert.match(html, /background-color: #01396a/i);
+  assert.match(html, /SENSE ASIA/);
+  assert.match(html, /越南/);
+});

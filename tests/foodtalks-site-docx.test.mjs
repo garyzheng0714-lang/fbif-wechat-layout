@@ -117,6 +117,48 @@ test('网站 DOCX：参考来源仍由网站行为层按 [n] 口径识别（口�
   assert.match(html, /#888888/, '参考区块走 muted 灰色口径');
 });
 
+// ---- 统一表格样式（网站渲染：本就 inline-style，与公众号物理隔离各写各的 renderTable） ----
+// WHY：网站渠道也要支持表格，默认样式与公众号同一套（蓝底白字表头 + 浅灰网格线 = 统一），
+// 但渲染函数物理隔离；样式读扁平 config 键，缺省降级与服务端 defaultRuleConfig 逐字一致。
+function tablePara(rows) {
+  return para({ type: 'table', rows, isEmpty: false });
+}
+const stcell = (text, header = false) => ({ runs: [{ type: 'txt', text }], header });
+
+test('网站 DOCX 表格渲成 inline-style <table>（默认与公众号同一套蓝底白字）', () => {
+  const result = template.processDocx({
+    paragraphs: [
+      tablePara([
+        [stcell('产品名称', true), stcell('价格', true)],
+        [stcell('话梅'), stcell('¥11.9')],
+      ]),
+    ],
+    imgCache: {},
+    config: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<table[^>]*border-collapse: collapse/);
+  assert.match(html, /background-color: #01396a/, '表头默认 FoodTalks 蓝');
+  assert.match(html, /color: #ffffff/, '表头白字');
+  assert.match(html, /border: 1px solid #e5e7eb/, '浅灰网格线');
+  assert.match(html, /产品名称/);
+  assert.match(html, /¥11\.9/);
+});
+
+test('网站表格样式可被规则后台 config 覆盖（红线：不可写死）', () => {
+  const result = template.processDocx({
+    paragraphs: [tablePara([[stcell('h', true)], [stcell('x')]])],
+    imgCache: {},
+    config: { table_header_bg: '#123456', table_border_color: '#abcdef', table_font_size: '18' },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /background-color: #123456/, '表头底色走 config 覆盖');
+  assert.match(html, /border: 1px solid #abcdef/, '边框色走 config 覆盖');
+  assert.match(html, /font-size: 18px/, '字号走 config 覆盖');
+});
+
 test('网站 DOCX：带标题样式的「参考来源：」仍渲染成 #888 灰色 ref（不退化为大标题）', () => {
   // WHY 回归守卫：中文 DOCX 常给「参考来源：」打『标题3』样式/大纲级别。共享层 isHeading
   // 比旧网站宽，若把它升成 <h2>，会逃逸 applyFoodTalksBehavior 的参考识别（只扫 k:'p'），

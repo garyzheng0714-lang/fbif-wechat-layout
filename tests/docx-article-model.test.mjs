@@ -183,3 +183,60 @@ test('consumeAuthorLine=false + 空作者名「作者：」：仍剥离其前置
   assert.ok(!texts.some(t => t.includes('勿外传')), '空作者名也要剥离前置材料');
   assert.ok(texts.some(t => t.includes('正文第一段')), '正文保留');
 });
+
+// ---- 表格块透传（k:'table'） ----
+// WHY：parser.buildTableBlock 产出的 {type:'table', rows} 是公众号与网站共用的表格结构来源，
+// 分类层必须原样透传成中性 k:'table' 元素，且不能让表格块污染作者行/正文起点扫描。
+const tableCell = (text, header = false) => ({ runs: [{ type: 'txt', text }], header });
+const tablePara = (rows, extra = {}) => para({ type: 'table', rows, ...extra });
+
+test("表格块透传成 k:'table'，二维 rows 原样保留", () => {
+  const { elems } = classifyDocxArticle(
+    [
+      txt('作者：张三'),
+      tablePara([
+        [tableCell('产品名称', true), tableCell('价格', true)],
+        [tableCell('话梅'), tableCell('¥11.9')],
+      ]),
+    ],
+    {},
+    {}
+  );
+  const tbl = elems.find(e => e.k === 'table');
+  assert.ok(tbl, '产出 k:table 元素');
+  assert.equal(tbl.rows.length, 2);
+  assert.equal(tbl.rows[0][0].header, true, '表头标记保留');
+  assert.equal(tbl.rows[1][1].runs[0].text, '¥11.9');
+});
+
+test('正文中的表格块被保留，且不破坏作者行扫描', () => {
+  // 作者行后的表格属正文，必须保留。表格自身不应被误判成作者行（text:'' 不命中正则）。
+  const { elems, author } = classifyDocxArticle(
+    [
+      txt('作者：李四'),
+      txt('正文。'),
+      tablePara([[tableCell('A'), tableCell('B')]]),
+    ],
+    {},
+    {}
+  );
+  assert.equal(author, '李四', '作者行正常识别');
+  assert.ok(elems.some(e => e.k === 'table'), '正文表格保留');
+  assert.ok(
+    elems.some(e => e.k === 'txt' && (e.runs || []).map(r => r.text).join('') === '正文。'),
+    '正文保留'
+  );
+});
+
+test('作者行之前的表格按前置材料剥离（红线#12：作者行是正文起点）', () => {
+  const { elems } = classifyDocxArticle(
+    [
+      tablePara([[tableCell('前置占位')]]),
+      txt('作者：王五'),
+      txt('正文。'),
+    ],
+    {},
+    {}
+  );
+  assert.ok(!elems.some(e => e.k === 'table'), '作者行之前的表格作为前置材料被剥离');
+});

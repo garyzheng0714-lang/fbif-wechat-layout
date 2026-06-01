@@ -449,3 +449,73 @@ func TestReferenceSectionNotCaptioned(t *testing.T) {
 		}
 	}
 }
+
+func findTableBlock(blocks []Block) *Block {
+	for i := range blocks {
+		if blocks[i].K == "table" {
+			return &blocks[i]
+		}
+	}
+	return nil
+}
+
+// ---- 表格保结构：URL 导入不再把表格拍平成每格一段 ----
+// 结构对齐参考公众号文章（thead 蓝底白字表头 + tbody 居中正文），见
+// https://mp.weixin.qq.com/s/rVkNAkekkMYRc1Sw3EaNtA。
+func TestTablePreservesRowsAndHeader(t *testing.T) {
+	html := jsContentWrap(
+		`<table style="width: 556px;"><thead><tr>` +
+			`<td style="background-color: rgb(2, 57, 107);"><strong>产品名称</strong></td>` +
+			`<td style="background-color: rgb(2, 57, 107);"><strong>价格</strong></td>` +
+			`</tr></thead><tbody><tr>` +
+			`<td><section style="text-align: center;">话梅</section></td>` +
+			`<td><section style="text-align: center;">¥11.9</section></td>` +
+			`</tr></tbody></table>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	tbl := findTableBlock(blocks)
+	if tbl == nil {
+		t.Fatalf("表格未保留为 K=table block，实际 kinds=%v", findKinds(blocks))
+	}
+	if len(tbl.Rows) != 2 {
+		t.Fatalf("应有 2 行，实得 %d", len(tbl.Rows))
+	}
+	if len(tbl.Rows[0]) != 2 || len(tbl.Rows[1]) != 2 {
+		t.Fatalf("每行应 2 列，实得 %d / %d", len(tbl.Rows[0]), len(tbl.Rows[1]))
+	}
+	// thead 单元格必须标 header
+	if !tbl.Rows[0][0].Header || !tbl.Rows[0][1].Header {
+		t.Errorf("thead 单元格应标 Header=true")
+	}
+	if tbl.Rows[1][0].Header {
+		t.Errorf("tbody 单元格不应是 Header")
+	}
+	// 单元格文本取出正确（section 包裹被拍进 runs）
+	cellText := func(c TableCell) string {
+		var sb strings.Builder
+		for _, r := range c.Runs {
+			sb.WriteString(r.Text)
+		}
+		return strings.TrimSpace(sb.String())
+	}
+	if got := cellText(tbl.Rows[0][0]); got != "产品名称" {
+		t.Errorf("表头首格 = %q，应为 产品名称", got)
+	}
+	if got := cellText(tbl.Rows[1][1]); got != "¥11.9" {
+		t.Errorf("正文末格 = %q，应为 ¥11.9", got)
+	}
+}
+
+// <th> 单元格即使不在 thead 里也算表头。
+func TestTableThCellsAreHeader(t *testing.T) {
+	html := jsContentWrap(
+		`<table><tr><th>列一</th><th>列二</th></tr><tr><td>a</td><td>b</td></tr></table>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	tbl := findTableBlock(blocks)
+	if tbl == nil {
+		t.Fatalf("表格未保留，kinds=%v", findKinds(blocks))
+	}
+	if !tbl.Rows[0][0].Header || !tbl.Rows[0][1].Header {
+		t.Errorf("<th> 单元格应标 Header=true")
+	}
+}

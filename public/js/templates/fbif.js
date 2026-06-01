@@ -3,7 +3,7 @@ const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource, convertRuns } = engineModule;
 const ruleModule = await import('../rule-presets.js' + assetQuery);
-const { getActiveRuleConfig, getActiveRuleBehavior, getRuleNumber } = ruleModule;
+const { getActiveRuleConfig, getActiveRuleBehavior, getRuleNumber, getRuleBoolean } = ruleModule;
 const behaviorModule = await import('../rule-behavior.js' + assetQuery);
 const { applyBehaviorToElems, normalizeAuthorName, renderBehaviorTemplate } = behaviorModule;
 // DOCX 内容结构分类已抽到共享模块（公众号与 FoodTalks 网站共用一套，红线#19：
@@ -92,6 +92,52 @@ function renderRuns(runs, opts) {
     }
     return '';
   }).join('');
+}
+
+// ---- Table rendering (统一表格样式) ----
+// 公众号表格【必须全 inline-style】：css-inline.js 只内联 .wx-* class，碰不到裸 <table>/<td>，
+// 复制到微信会丢样式。单元格文本也不走 wx-t（那会被 css-inline 套上正文色 #544545，与
+// 表格自有色冲突），而是输出极简 inline HTML（<strong>/<a>/纯文本），样式全由 <td> 内联控制。
+// 颜色/字号/边框/内距全部读 getActiveRuleConfig() 的扁平规则键（红线下放，规则后台可配），
+// 读不到/非法时降级到与服务端 defaultRuleConfig 逐字一致的 const。
+function ruleColor(key, fallback) {
+  const v = getActiveRuleConfig()[key];
+  return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v.trim())) ? v.trim() : fallback;
+}
+function renderTableCellRuns(runs) {
+  const segs = [[]];
+  for (const r of (runs || [])) {
+    if (r.type === 'br') segs.push([]);
+    else segs[segs.length - 1].push(r);
+  }
+  return segs.map(seg => seg.filter(r => r.type !== 'img').map(r => {
+    if (r.type === 'txt') { const t = esc(r.text); return r.bold ? '<strong>' + t + '</strong>' : t; }
+    if (r.type === 'link') {
+      const h = r.href || '';
+      return /^https?:\/\//i.test(h) ? '<a href="' + escAttr(h) + '">' + esc(r.text) + '</a>' : esc(r.text);
+    }
+    return '';
+  }).join('')).join('<br>');
+}
+function renderTable(elem) {
+  const cfg = getActiveRuleConfig();
+  const headerBg = ruleColor('table_header_bg', '#01396a');
+  const headerColor = ruleColor('table_header_text_color', '#ffffff');
+  const borderColor = ruleColor('table_border_color', '#e5e7eb');
+  const fs = getRuleNumber(cfg, 'table_font_size') || 15;
+  const padRaw = getRuleNumber(cfg, 'table_cell_padding');
+  const pad = Number.isFinite(padRaw) && padRaw >= 0 ? padRaw : 8;
+  const headerBold = getRuleBoolean(cfg, 'table_header_bold');
+  const cellBase = 'border: 1px solid ' + borderColor + '; padding: ' + pad + 'px; font-size: ' + fs +
+    'px; text-align: center; word-break: break-word;';
+  const body = (elem.rows || []).map(row => '<tr>' + (row || []).map(cell => {
+    const style = cellBase + (cell.header
+      ? ' background-color: ' + headerBg + '; color: ' + headerColor + (headerBold ? '; font-weight: bold' : '') + ';'
+      : ' color: rgba(0, 0, 0, 0.9);');
+    return '<td style="' + style + '">' + (renderTableCellRuns(cell.runs) || '<br>') + '</td>';
+  }).join('') + '</tr>').join('');
+  return '<table style="border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0 auto;"><tbody>' +
+    body + '</tbody></table>';
 }
 
 // ---- Spacing & Section Helpers ----
@@ -360,6 +406,13 @@ function render(elems, author, source, opts) {
         lines.push('<section class="wx-bq' + (spaceAfter ? ' wx-gap' : '') + '">' +
           renderRuns(e.runs, { textCls: 'wx-tr' }) + '</section>');
         break;
+      case 'table': {
+        // 表格整体走 inline-style（含外层间距）：css-inline 不碰裸 table，间距也得内联。
+        const gapPx = spaceAfter ? (getRuleNumber(getActiveRuleConfig(), 'paragraph_gap') || 20) : 0;
+        lines.push('<section style="margin: 0 0 ' + gapPx + 'px; overflow-x: auto;">' +
+          renderTable(e) + '</section>');
+        break;
+      }
     }
   }
   return lines;
@@ -392,6 +445,18 @@ function classifyBlocks({ title, blocks }) {
 
     if (b.k === 'cap') {
       elems.push({ k: 'cap', text: b.text || '' });
+      continue;
+    }
+
+    if (b.k === 'table') {
+      inRef = false;
+      elems.push({
+        k: 'table',
+        rows: (b.rows || []).map(row => (row || []).map(c => ({
+          runs: convertRuns(c.runs || []),
+          header: !!c.header,
+        }))),
+      });
       continue;
     }
 

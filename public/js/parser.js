@@ -509,11 +509,7 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styl
         continue;
       }
       if (tag === 'tbl') {
-        for (const tr of findAll(child, W, 'tr')) {
-          for (const tc of findAll(tr, W, 'tc')) {
-            collectBlockParagraphs(tc, ridToFile, ridToUrl, out, styleSheet);
-          }
-        }
+        out.push(buildTableBlock(child, ridToFile, ridToUrl, styleSheet));
         continue;
       }
       // Skip metadata / bookkeeping elements that never hold content.
@@ -532,6 +528,49 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styl
       collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet);
     }
   }
+}
+
+// Build a structured table block from a <w:tbl>. The block keeps the row/cell
+// grid (lost by the old flatten-into-paragraphs path) so renderers can emit a
+// real <table>. Each cell reuses collectBlockParagraphs to gather its own
+// paragraphs, then flattens their runs into one runs array (paragraph breaks
+// become {type:'br'}). The first row is marked header when the table's tblLook
+// opts in (w:firstRow="1") — Word's standard heading-row signal. The block
+// carries the same fallback fields a paragraph has so downstream paragraph
+// scans (classifyDocxArticle) see a safe, non-empty, non-heading element.
+export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null) {
+  let headerRow = false;
+  const tblPr = findOne(tbl, W, 'tblPr');
+  if (tblPr) {
+    const look = findOne(tblPr, W, 'tblLook');
+    if (look && wattr(look, 'firstRow') === '1') headerRow = true;
+  }
+  const rows = [];
+  let anyImg = false;
+  for (const tr of findAll(tbl, W, 'tr')) {
+    const cells = [];
+    for (const tc of findAll(tr, W, 'tc')) {
+      const cellParas = [];
+      collectBlockParagraphs(tc, ridToFile, ridToUrl, cellParas, styleSheet);
+      const runs = [];
+      for (let p = 0; p < cellParas.length; p++) {
+        if (p > 0 && runs.length) runs.push({ type: 'br' });
+        for (const r of (cellParas[p].runs || [])) runs.push(r);
+        if (cellParas[p].hasImg) anyImg = true;
+      }
+      cells.push({ runs, header: headerRow && rows.length === 0 });
+    }
+    if (cells.length) rows.push(cells);
+  }
+  return {
+    type: 'table', rows,
+    // 段落兜底字段：让下游段落扫描零改动也不崩（isEmpty/isHeading 安全默认）。
+    align: 'left', runs: [], text: '', hasImg: anyImg, isEmpty: false,
+    isList: false, styleId: '', styleName: '', styleChain: [],
+    isListStyle: false, contextualSpacing: false, spacing: {},
+    hasHL: false, hasOutlineLevel: false, hasHeadingStyle: false,
+    allBold: false, fontSizes: [],
+  };
 }
 
 // ---- Markdown Utilities ----

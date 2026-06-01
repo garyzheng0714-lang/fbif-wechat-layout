@@ -246,6 +246,36 @@ function renderImageCaption(text, config = {}) {
   );
 }
 
+// ---- 表格渲染（统一表格样式，与公众号物理隔离：各写各的 renderTable，仅共享中性 rows 结构）----
+// 网站渲染器本就全 inline-style（粘进 FoodTalks 后台编辑器），表格同样把 border/底色/字号/
+// 内距内联到每个 td。颜色/字号/边框/内距读扁平 config 键（cfgColor/cfgNum，红线下放规则后台
+// 可配），缺省降级到与服务端 defaultRuleConfig 逐字一致的 const（与公众号同一套默认值=统一）。
+function renderTableCellRuns(runs) {
+  const segs = [[]];
+  for (const r of (runs || [])) {
+    if (r.type === 'br') segs.push([]);
+    else segs[segs.length - 1].push(r);
+  }
+  return segs.map(seg => renderRuns(seg)).join('<br>');
+}
+function renderTable(elem, config = {}) {
+  const headerBg = cfgColor(config, 'table_header_bg', '#01396a');
+  const headerColor = cfgColor(config, 'table_header_text_color', '#ffffff');
+  const borderColor = cfgColor(config, 'table_border_color', '#e5e7eb');
+  const fs = cfgNum(config, 'table_font_size', 15);
+  const padRaw = Number(config && config.table_cell_padding);
+  const pad = Number.isFinite(padRaw) && padRaw >= 0 ? padRaw : 8;
+  const headerBold = !(config && config.table_header_bold === false);
+  const cellBase = `border: 1px solid ${borderColor}; padding: ${pad}px; font-size: ${fs}px; text-align: center; word-break: break-word;`;
+  const body = (elem.rows || []).map(row => '<tr>' + (row || []).map(cell => {
+    const style = cellBase + (cell.header
+      ? ` background-color: ${headerBg}; color: ${headerColor};${headerBold ? ' font-weight: bold;' : ''}`
+      : ' color: rgba(0, 0, 0, 0.9);');
+    return `<td style="${style}">${renderTableCellRuns(cell.runs) || '<br>'}</td>`;
+  }).join('') + '</tr>').join('');
+  return `<table style="border-collapse: collapse; width: 100%; table-layout: fixed;"><tbody>${body}</tbody></table>`;
+}
+
 // 把图片后 3 段内最多 2 段"看起来像图注"的普通段提升为图注块
 function promoteImageCaptions(elems, capOpts) {
   const opts = capOpts || {};
@@ -393,6 +423,13 @@ function render(elems, config = {}) {
       prevWasStandaloneLink = false;
       continue;
     }
+    if (e.k === 'table') {
+      lines.push(renderTable(e, config));
+      lines.push(BLANK_LINE);
+      prevWasHeading = false;
+      prevWasStandaloneLink = false;
+      continue;
+    }
     // p
     const standalone = isStandaloneLinkParagraph(e.runs);
     lines.push(renderParagraph(e.runs || []));
@@ -462,6 +499,7 @@ function adaptNeutralToSite(e) {
     return { k: 'h', level, runs: [{ type: 'txt', text: e.text }] };
   }
   if (e.k === 'cap') return { k: 'cap', runs: [{ type: 'txt', text: e.text }] };
+  if (e.k === 'table') return { k: 'table', rows: e.rows || [] };
   return { k: 'p', runs: e.runs || [] };
 }
 
@@ -536,6 +574,16 @@ function classifyBlocks(data) {
     }
     if (b.k === 'cap') {
       elems.push({ k: 'cap', runs: [{ type: 'txt', text: b.text || '' }] });
+      continue;
+    }
+    if (b.k === 'table') {
+      elems.push({
+        k: 'table',
+        rows: (b.rows || []).map(row => (row || []).map(c => ({
+          runs: Array.isArray(c.runs) ? c.runs : [],
+          header: !!c.header,
+        }))),
+      });
       continue;
     }
     // txt / bq / li 都带 runs；缺 runs 时回退到 text。

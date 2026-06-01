@@ -39,20 +39,26 @@ var ruleNumberFields = map[string]ruleNumberField{
 	"banner_title_font_size":   {min: 24, max: 80},
 	"banner_title_line_height": {min: 32, max: 100},
 	"banner_title_max_lines":   {min: 1, max: 4},
+	"table_font_size":          {min: 12, max: 24},
+	"table_cell_padding":       {min: 0, max: 24},
 }
 
 var ruleColorFields = map[string]bool{
-	"text_color":      true,
-	"link_color":      true,
-	"muted_color":     true,
-	"tip_title_color": true, // 网站提示标题色（红线下放）
-	"tip_body_color":  true, // 网站提示正文色（红线下放）
+	"text_color":              true,
+	"link_color":              true,
+	"muted_color":             true,
+	"tip_title_color":         true, // 网站提示标题色（红线下放）
+	"tip_body_color":          true, // 网站提示正文色（红线下放）
+	"table_header_bg":         true, // 表头底色（统一表格样式，红线下放）
+	"table_header_text_color": true, // 表头文字色
+	"table_border_color":      true, // 表格边框色
 }
 
 var ruleBooleanFields = map[string]bool{
 	"footer_enabled":        true,
 	"skip_upload":           true,
 	"more_articles_enabled": true,
+	"table_header_bold":     true, // 表头加粗（统一表格样式，红线下放）
 }
 
 var ruleTextFields = map[string]bool{
@@ -63,7 +69,7 @@ var ruleStructuredFields = map[string]bool{
 	"more_articles_default_cards": true,
 }
 
-var ruleModuleOrder = []string{"theme", "supporting", "more_articles", "workflow"}
+var ruleModuleOrder = []string{"theme", "supporting", "more_articles", "table", "workflow"}
 
 var ruleModuleFields = map[string]map[string]bool{
 	"theme": {
@@ -102,6 +108,14 @@ var ruleModuleFields = map[string]map[string]bool{
 		"banner_title_font_size":      true,
 		"banner_title_line_height":    true,
 		"banner_title_max_lines":      true,
+	},
+	"table": {
+		"table_header_bg":         true,
+		"table_header_text_color": true,
+		"table_header_bold":       true,
+		"table_border_color":      true,
+		"table_font_size":         true,
+		"table_cell_padding":      true,
 	},
 	"workflow": {
 		"footer_enabled": true,

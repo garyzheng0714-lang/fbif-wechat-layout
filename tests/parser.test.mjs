@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DOMParser } from '@xmldom/xmldom';
 import {
-  esc, escAttr, extractParagraph, parseDocxStyles, parseMdRuns, parseMdFrontmatter
+  esc, escAttr, extractParagraph, parseDocxStyles, parseMdRuns, parseMdFrontmatter,
+  buildTableBlock
 } from '../public/js/parser.js';
 
 const WNS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -159,4 +160,52 @@ test('extractParagraph recognizes heading by style name when style id is opaque'
   assert.equal(para.styleName, 'heading 1');
   assert.equal(para.hasHeadingStyle, true);
   assert.equal(para.spacing.after, '330');
+});
+
+// ---- buildTableBlock ----
+// WHY：旧路径把 <w:tbl> 拍平成一维段落（行列归属全丢），表格在解析第一步就消失。
+// 这些 case 锁住「表格保结构」契约：rows 二维网格、单元格 runs、首行表头标记。
+
+function tableXml(inner, attrs = '') {
+  return xml(`<w:tbl xmlns:w="${WNS}">${attrs}${inner}</w:tbl>`);
+}
+const tc = (text) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+const tr = (...cells) => `<w:tr>${cells.join('')}</w:tr>`;
+
+test('buildTableBlock 保住二维行列结构（不再拍平）', () => {
+  const tbl = tableXml(
+    tr(tc('产品名称'), tc('价格')) + tr(tc('话梅'), tc('¥11.9'))
+  );
+  const block = buildTableBlock(tbl, {}, {}, null);
+  assert.equal(block.type, 'table');
+  assert.equal(block.rows.length, 2, '两行');
+  assert.equal(block.rows[0].length, 2, '每行两列');
+  assert.equal(block.rows[0][0].runs.map(r => r.text).join(''), '产品名称');
+  assert.equal(block.rows[1][1].runs.map(r => r.text).join(''), '¥11.9');
+});
+
+test('buildTableBlock 在 tblLook w:firstRow=1 时把首行标为表头', () => {
+  const tbl = tableXml(
+    tr(tc('产品名称'), tc('价格')) + tr(tc('话梅'), tc('¥11.9')),
+    '<w:tblPr><w:tblLook w:firstRow="1"/></w:tblPr>'
+  );
+  const block = buildTableBlock(tbl, {}, {}, null);
+  assert.equal(block.rows[0][0].header, true, '首行是表头');
+  assert.equal(block.rows[0][1].header, true);
+  assert.equal(block.rows[1][0].header, false, '正文行不是表头');
+});
+
+test('buildTableBlock 无 firstRow 标记时不强行设表头', () => {
+  const tbl = tableXml(tr(tc('a'), tc('b')));
+  const block = buildTableBlock(tbl, {}, {}, null);
+  assert.equal(block.rows[0][0].header, false);
+});
+
+test('buildTableBlock 携带段落兜底字段（下游段落扫描不崩）', () => {
+  const block = buildTableBlock(tableXml(tr(tc('x'))), {}, {}, null);
+  assert.equal(block.isEmpty, false);
+  assert.equal(block.isHeading ?? false, false);
+  assert.equal(block.text, '');
+  assert.equal(block.hasOutlineLevel, false);
+  assert.equal(block.hasHeadingStyle, false);
 });

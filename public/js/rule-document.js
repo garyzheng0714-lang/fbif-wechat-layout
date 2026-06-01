@@ -54,6 +54,18 @@ export const RULE_SCHEMA = Object.freeze([
     ]),
   },
   {
+    id: 'table',
+    label: '表格样式',
+    fields: Object.freeze([
+      { key: 'table_header_bg', label: '表头底色', type: 'color', default: '#01396a' },
+      { key: 'table_header_text_color', label: '表头文字色', type: 'color', default: '#ffffff' },
+      { key: 'table_header_bold', label: '表头加粗', type: 'boolean', default: true },
+      { key: 'table_border_color', label: '边框颜色', type: 'color', default: '#e5e7eb' },
+      { key: 'table_font_size', label: '表格字号', type: 'number', min: 12, max: 24, step: 1, default: '15' },
+      { key: 'table_cell_padding', label: '单元格内距', type: 'number', min: 0, max: 24, step: 1, default: '8' },
+    ]),
+  },
+  {
     id: 'workflow',
     label: '工作流',
     fields: Object.freeze([
@@ -78,6 +90,7 @@ export const RULE_MODULE_GROUPS = Object.freeze([
   { id: 'theme', groupIds: Object.freeze(['article']) },
   { id: 'supporting', groupIds: Object.freeze(['supporting']) },
   { id: 'more_articles', groupIds: Object.freeze(['more_articles']) },
+  { id: 'table', groupIds: Object.freeze(['table']) },
   { id: 'workflow', groupIds: Object.freeze(['workflow']) },
 ]);
 

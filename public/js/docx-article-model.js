@@ -75,6 +75,7 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
   // 首个「作者：」行之前的前置材料是编辑前置材料，不是文章正文。
   for (let i = 0; i < pds.length; i++) {
     if (pds[i].isEmpty) continue;
+    if (pds[i].type === 'table') continue; // 表格块不是前置材料，不参与作者行/起点扫描
     nonEmptySeen++;
     // 把「是否作者行（=正文起点/前置剥离触发）」与「捕获到的作者名」解耦：用 .test() 判定
     // 命中，作者名另取。这样「作者：」后无内容（网站正则 (.*) 允许空名）也能触发前置剥离，
@@ -130,6 +131,14 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
     const pd = pds[i];
     if (pd.isEmpty) { if (elems.length) blankBefore = true; continue; }
     if (pd.hasHL && pd.text.includes('插入视频')) continue;
+
+    // 表格块：parser.buildTableBlock 产出的二维 rows 直接透传成中性 k:'table' 元素，
+    // 两侧渲染器各自渲成 <table>（红线#19：渲染各写各的，只共享此结构层）。
+    if (pd.type === 'table') {
+      inRef = false;
+      elems.push({ k: 'table', rows: pd.rows || [], ...takeDocxMeta(pd) });
+      continue;
+    }
 
     // WPS 导出常把「参考来源：」留成无样式普通段（无 heading 样式 / outlineLvl），
     // 故也按文本内容识别。classifyReferences=false（网站）时不在此分类，让参考段落

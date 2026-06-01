@@ -28,6 +28,14 @@ func defaultRuleConfig() map[string]any {
 		"more_articles_enabled":       true,
 		"more_articles_slots":         "3",
 		"more_articles_default_cards": defaultMoreArticleCards(),
+		// 统一表格样式（公众号与网站共享这一套默认；各 preset 可在规则后台独立覆盖）。
+		// 默认复刻 FBIF/FoodTalks 既有公众号表格：FoodTalks 蓝表头 + 白字 + 浅灰网格线。
+		"table_header_bg":         "#01396a",
+		"table_header_text_color": "#ffffff",
+		"table_header_bold":       true,
+		"table_border_color":      "#e5e7eb",
+		"table_font_size":         "15",
+		"table_cell_padding":      "8",
 		"banner_overlay_alpha":        "0.47058823529411764",
 		"banner_title_x":              "61",
 		"banner_title_y":              "92",
