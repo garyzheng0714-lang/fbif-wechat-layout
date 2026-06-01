@@ -110,12 +110,22 @@ test('foodtalks-site render tracks prevWasStandaloneLink to skip blank line betw
   assert.match(templateSource, /prevWasStandaloneLink/);
 });
 
-test('foodtalks-site has stripDocxPreambleBeforeAuthor and calls it from classifyDocx', () => {
-  assert.match(templateSource, /stripDocxPreambleBeforeAuthor/);
-  // 必须在 classifyDocx 函数内被调用
-  const classifyDocxMatch = templateSource.match(/function\s+classifyDocx[\s\S]*?(?=\n\}\n)/);
+test('foodtalks-site DOCX 分类委托共享模块 docx-article-model（与公众号共用结构层）', () => {
+  // 旧契约「源码含 stripDocxPreambleBeforeAuthor」已过时：前置剥离等结构分类已下沉到
+  // 共享模块 docx-article-model.js（公众号与网站共用一套）。前置剥离/图片取图等行为
+  // 改由真实端到端测试 tests/foodtalks-site-docx.test.mjs 覆盖（规则九：测意图非实现）。
+  assert.match(templateSource, /classifyDocxArticle/, '必须 import 共享分类函数');
+  assert.match(templateSource, /docx-article-model/, '必须 import 自共享数据模块（红线#19：不互相 import 渲染器）');
+  const classifyDocxMatch = templateSource.match(/function\s+classifyDocx[\s\S]*?\n\}/);
   assert.ok(classifyDocxMatch, 'classifyDocx function must exist');
-  assert.match(classifyDocxMatch[0], /stripDocxPreambleBeforeAuthor/);
+  assert.match(classifyDocxMatch[0], /classifyDocxArticle/, 'classifyDocx 必须委托共享模块');
+});
+
+test('foodtalks-site DOCX 走网站口径：consumeAuthorLine/classifyReferences 均 false', () => {
+  // 红线：结构共用 + 网站口径保留。作者行留正文流交行为层渲署名；参考来源仍由行为层
+  // 按 [n] 口径识别——故注入共享模块的开关必须都是 false。
+  assert.match(templateSource, /consumeAuthorLine:\s*false/);
+  assert.match(templateSource, /classifyReferences:\s*false/);
 });
 
 test('foodtalks-site detects 作者 / Author with colon', () => {

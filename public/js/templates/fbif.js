@@ -6,6 +6,11 @@ const ruleModule = await import('../rule-presets.js' + assetQuery);
 const { getActiveRuleConfig, getActiveRuleBehavior, getRuleNumber } = ruleModule;
 const behaviorModule = await import('../rule-behavior.js' + assetQuery);
 const { applyBehaviorToElems, normalizeAuthorName, renderBehaviorTemplate } = behaviorModule;
+// DOCX 内容结构分类已抽到共享模块（公众号与 FoodTalks 网站共用一套，红线#19：
+// 两渲染器不互相 import，都只 import 本数据模块）。公众号走默认 opts（consumeAuthorLine
+// / classifyReferences 均为 true），输出与抽取前逐字节一致（golden tea-pyramid 守卫）。
+const docxModelModule = await import('../docx-article-model.js' + assetQuery);
+const { classifyDocxArticle } = docxModelModule;
 
 // ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
 function leafWrap(inner) {
@@ -97,17 +102,6 @@ function secCenter(inner, gap) {
   return '<section class="wx-pc' + (gap ? ' wx-gap' : '') + '">' + inner + '</section>';
 }
 
-function docxMeta(pd) {
-  return {
-    fromDocx: true,
-    isList: !!pd.isList,
-    styleId: pd.styleId || '',
-    styleName: pd.styleName || '',
-    contextualSpacing: !!pd.contextualSpacing,
-    spacing: pd.spacing || {},
-  };
-}
-
 function sameDocxStyle(a, b) {
   if (!a || !b) return false;
   if (a.styleId && b.styleId) return a.styleId === b.styleId;
@@ -144,118 +138,19 @@ function shouldSpaceAfter(e, next) {
 
 // DOCX 前置「作者：」行识别正则默认值（红线下放 behavior.params.docx_author_line_regex）。
 const RE_DOCX_AUTHOR_LINE = /^作者[：:]\s*(.+)$/;
-function parseAuthorLine(text) {
-  const re = behaviorRegexParam('docx_author_line_regex', RE_DOCX_AUTHOR_LINE);
-  const m = String(text || '').trim().match(re);
-  return m ? m[1].trim() : '';
-}
 
 // ---- DOCX Classification ----
+// 内容结构分类下沉到共享模块 docx-article-model.js（与 FoodTalks 网站共用一套）。
+// 公众号走默认 opts：consumeAuthorLine=true（吃掉作者行、顶部单独渲染）、
+// classifyReferences=true（分类 refH/ref）。正则仍由本模板从全局 behavior 解析后注入
+// （规则源无关边界）；ref_heading_prefix_regex 是把旧 line 224 写死正则下放为可配项，
+// 缺省 fallback 与旧值逐字一致——故公众号输出逐字节不变（golden tea-pyramid 守卫）。
 function classifyDocx(paragraphs, imgCache) {
-  const pds = paragraphs.map(p => ({
-    ...p,
-    isHeading: p.hasOutlineLevel || p.hasHeadingStyle,
-  }));
-
-  let author = '', contentStart = 0;
-  let nonEmptySeen = 0;
-  // Front matter before 作者： is editorial setup, not article body.
-  for (let i = 0; i < pds.length; i++) {
-    if (pds[i].isEmpty) continue;
-    nonEmptySeen++;
-    const leadAuthor = parseAuthorLine(pds[i].text);
-    if (leadAuthor) {
-      author = leadAuthor;
-      contentStart = i + 1;
-      break;
-    }
-    if (nonEmptySeen >= 25) break;
-  }
-
-  for (let i = 0; i < pds.length; i++) {
-    if (author && contentStart > 0) break;
-    if (!pds[i].isHeading) continue;
-    if (pds[i].text.trim().startsWith('标题')) {
-      let foundNext = false;
-      for (let j = i + 1; j < pds.length; j++) {
-        if (pds[j].isHeading) { contentStart = j; foundNext = true; break; }
-        const byline = parseAuthorLine(pds[j].text);
-        if (byline) author = byline;
-      }
-      if (!foundNext) {
-        contentStart = i + 1;
-        while (contentStart < pds.length && !pds[contentStart].isHeading) contentStart++;
-        if (contentStart >= pds.length) contentStart = pds.length;
-      }
-    }
-    break;
-  }
-  if (contentStart < pds.length && pds[contentStart].isHeading &&
-      pds[contentStart].text.trim().replace(/[：:]$/, '') === '引言') contentStart++;
-
-  const elems = [];
-  let inRef = false, imgN = 0;
-  let blankBefore = false;
-  const takeDocxMeta = (pd) => {
-    const meta = { ...docxMeta(pd), blankBefore };
-    blankBefore = false;
-    return meta;
-  };
-
-  for (let i = contentStart; i < pds.length; i++) {
-    const pd = pds[i];
-    if (pd.isEmpty) { if (elems.length) blankBefore = true; continue; }
-    if (pd.hasHL && pd.text.includes('插入视频')) continue;
-
-    // WPS exports often leave "参考来源：" as a plain paragraph (no heading
-    // style / outlineLvl), so detect it by text content too — otherwise the
-    // marker and every citation below it fall through to the txt branch and
-    // render with 正文 styling plus wx-gap between each entry.
-    const trimmed = pd.text.trim();
-    if (behaviorRegexParam('ref_section_regex', RE_REF_SECTION).test(trimmed)) {
-      inRef = true;
-      elems.push({ k: 'refH', text: trimmed.replace(/[：:]$/, ''), ...takeDocxMeta(pd) });
-      continue;
-    }
-
-    if (pd.isHeading) {
-      const ht = trimmed.replace(/[：:]$/, '');
-      if (ht === '引言' || ht === '标题') continue;
-      if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(ht)) { inRef = true; elems.push({ k: 'refH', text: ht, ...takeDocxMeta(pd) }); continue; }
-      // A real non-ref heading closes any prior ref section.
-      inRef = false;
-      elems.push({ k: 'h', text: ht.replace(/^0?\d+\s+/, ''), ...takeDocxMeta(pd) });
-      continue;
-    }
-    if (inRef) {
-      if (!trimmed) continue;
-      elems.push({ k: 'ref', runs: pd.runs, ...takeDocxMeta(pd) });
-      continue;
-    }
-    if (pd.hasImg) {
-      const meta = takeDocxMeta(pd);
-      for (const r of pd.runs) {
-        if (r.type === 'img') {
-          const src = imgCache[r.file] || '';
-          imgN++;
-          elems.push({ k: 'img', src, w: r.w, gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file), ...meta });
-        }
-      }
-      while (i + 1 < pds.length) {
-        const nx = pds[i + 1];
-        if (nx.isEmpty) { i++; continue; }
-        if (!nx.hasImg && !nx.isHeading && nx.align === 'center' && nx.text.trim()) {
-          let ct = nx.text.trim().replace(/^[（(]插入视频[）)]\s*/, '');
-          if (ct) elems.push({ k: 'cap', text: ct });
-          i++;
-        } else break;
-      }
-      continue;
-    }
-    elems.push({ k: 'txt', runs: pd.runs, ...takeDocxMeta(pd) });
-  }
-
-  return { elems, author, imgN };
+  return classifyDocxArticle(paragraphs, imgCache, {
+    authorLineRegex: behaviorRegexParam('docx_author_line_regex', RE_DOCX_AUTHOR_LINE),
+    refSectionRegex: behaviorRegexParam('ref_section_regex', RE_REF_SECTION),
+    refHeadingPrefixRegex: behaviorRegexParam('ref_heading_prefix_regex', /^(参考(来源|文献|资料|链接)|信息来源)/),
+  });
 }
 
 // ---- Attribution Patterns ----

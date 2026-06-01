@@ -50,6 +50,10 @@ const headingModule = await import('../heading-detect.js' + assetQuery);
 const { promoteHeuristicHeadings } = headingModule;
 const imageWidthModule = await import('../image-width.js' + assetQuery);
 const { adaptiveImageWidth } = imageWidthModule;
+// DOCX 内容结构分类与公众号共用一套（红线#19：两渲染器不互相 import，都只 import
+// 本数据模块）。网站口径保留：consumeAuthorLine/classifyReferences 均 false（见 classifyDocx）。
+const docxModelModule = await import('../docx-article-model.js' + assetQuery);
+const { classifyDocxArticle } = docxModelModule;
 
 // ---- 图片注释智能识别 ----
 
@@ -427,58 +431,46 @@ function isStandaloneLinkParagraph(runs) {
   return visible[0].type === 'link';
 }
 
-// ---- DOCX 分类（M1 最小版） ----
+// ---- DOCX 分类（共用结构层 + 网站口径适配） ----
+// DOCX 内容结构分类下沉到共享模块 docx-article-model.js（与公众号共用一套）：前置材料
+// 剥离、标题识别（outlineLvl/heading 样式，比旧版仅认 styleName 更全）、图片按 file 字段
+// 取图（根治旧版 imgCache[imgRun.id] 导致 src 恒空的 bug）、图注 look-ahead。
+//
+// 网站口径保留（用户 2026-06-01 裁定「结构共用 + 网站口径保留」）：
+//   - consumeAuthorLine=false —— 作者行留在正文流，交给 applyFoodTalksBehavior 渲成
+//     #888 14px 斜体署名（网站口径，非公众号 #396FBC）。
+//   - classifyReferences=false —— 参考来源不在共享层分类，仍由 applyFoodTalksBehavior
+//     按网站更保守的 [n]/— 口径识别（对 8 篇基石调过）。
 
-// 找到首个"作者：" / "Author:" 段，剥离该段之前的所有前置材料。无匹配返回原数组。
-function stripDocxPreambleBeforeAuthor(paragraphs, config = {}) {
-  if (!Array.isArray(paragraphs)) return paragraphs;
-  // DOCX 前置材料剥离触发词（红线下放：behavior.params.docx_preamble_author_regex）。
-  let authorRegex = /^[\s　]*(作者|Author)\s*[:：]/i;
+// 从 config 解析共享分类所需的注入项（规则源无关边界：共享模块只接已编译 RegExp）。
+function buildDocxOpts(config) {
+  let authorLineRegex = /^[\s　]*(?:作者|Author)\s*[:：]\s*(.*)$/i;
   const src = behParamStr(config, 'docx_preamble_author_regex', '');
-  if (src) { try { authorRegex = compileSiteRegex(src); } catch (e) { /* 非法降级 */ } }
-  for (let i = 0; i < paragraphs.length; i++) {
-    const text = (paragraphs[i].runs || [])
-      .filter(r => r.type === 'txt')
-      .map(r => r.text)
-      .join('');
-    if (authorRegex.test(text)) {
-      return paragraphs.slice(i);
-    }
+  if (src) { try { authorLineRegex = compileSiteRegex(src); } catch (e) { /* 非法降级 */ } }
+  return { authorLineRegex, consumeAuthorLine: false, classifyReferences: false };
+}
+
+// 中性元素 → 网站本地 elem。网站渲染结构与公众号物理隔离（红线#19）：图片走像素 width
+// 属性（renderImage 的 adaptiveImageWidth；DOCX 无像素尺寸 → width/height=0 → 默认 600，
+// 与改动前一致），标题层级沿用旧版按 styleName 区分 h2/h3，图注/正文包成 runs。参考来源
+// 因 classifyReferences=false 不出现在中性序列里，落为 p 交行为层识别。
+function adaptNeutralToSite(e) {
+  // 缓存未命中（src 空）→ 丢弃该图，绝不输出 <img src="">（坏 HTML 会污染网站后台）。
+  if (e.k === 'img') return e.src ? { k: 'img', src: e.src, alt: '', width: 0, height: 0 } : null;
+  if (e.k === 'h') {
+    const level = /heading\s*[3-6]/.test(String(e.styleName || '').toLowerCase()) ? 3 : 2;
+    return { k: 'h', level, runs: [{ type: 'txt', text: e.text }] };
   }
-  return paragraphs;
+  if (e.k === 'cap') return { k: 'cap', runs: [{ type: 'txt', text: e.text }] };
+  return { k: 'p', runs: e.runs || [] };
 }
 
 function classifyDocx(paragraphs, imgCache, config = {}) {
-  paragraphs = stripDocxPreambleBeforeAuthor(paragraphs || [], config);
-  const elems = [];
-  for (const pd of paragraphs) {
-    const runs = pd.runs || [];
-    const imgRun = runs.find(r => r.type === 'img');
-    if (imgRun) {
-      const src = imgCache && imgCache[imgRun.id] ? imgCache[imgRun.id] : (imgRun.src || '');
-      elems.push({
-        k: 'img',
-        src,
-        alt: imgRun.alt || '',
-        width: imgRun.width || 0,
-        height: imgRun.height || 0,
-      });
-      continue;
-    }
-    const text = runs.filter(r => r.type === 'txt').map(r => r.text).join('').trim();
-    if (!text) continue;
-    const styleName = (pd.styleName || '').toLowerCase();
-    if (/heading\s*1|heading\s*2/.test(styleName)) {
-      elems.push({ k: 'h', level: 2, runs });
-      continue;
-    }
-    if (/heading\s*[3-6]/.test(styleName)) {
-      elems.push({ k: 'h', level: 3, runs });
-      continue;
-    }
-    elems.push({ k: 'p', runs });
-  }
-  return { elems, imgN: elems.filter(e => e.k === 'img').length };
+  const { elems } = classifyDocxArticle(paragraphs || [], imgCache || {}, buildDocxOpts(config));
+  // imgN 按【实际渲染】的图计数：共享层无条件计每个 img run，但空 src 图在 adapter 被
+  // filter 丢弃不渲染，故缓存未命中时重算，避免状态栏「图片：N」高估（与旧版口径一致）。
+  const siteElems = elems.map(adaptNeutralToSite).filter(Boolean);
+  return { elems: siteElems, imgN: siteElems.filter(e => e.k === 'img').length };
 }
 
 // ---- Markdown 分类（最小版） ----
