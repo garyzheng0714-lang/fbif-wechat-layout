@@ -83,6 +83,12 @@
         </div>
         <div class="ma-hint">本篇尾部 = 作者名片 + BD 名片 + 所属群二维码。</div>
       </div>
+      <!-- 底部区块（统一模型）单篇面板：仅当该账号有 bottom_blocks 时显示；JS 控制显隐 -->
+      <div class="ma-section" id="blockPanelSection" style="display:none;">
+        <div class="sidebar-divider"></div>
+        <div class="block-panel-mount" id="blockPanel"></div>
+        <div class="ma-hint">勾选显示/隐藏，拖拽排序，展开改本篇字段；改动只影响当前文章，可一键恢复后台默认。</div>
+      </div>
       <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
         <div class="active-rule-readline">
           <span class="active-rule-readmeta">
@@ -187,6 +193,7 @@ const rulePackModule = await import('/js/rule-packs/registry.js?v=' + assetVersi
 const rulePackUrlModule = await import('/js/rule-packs/url.js?v=' + assetVersion);
 const { mountAccountMenu } = await import('/js/account-menu.js?v=' + assetVersion);
 const editorShell = await import('/js/editor-shell.js?v=' + assetVersion);
+const { mountBlockPanel } = await import('/js/blocks/block-panel.js?v=' + assetVersion);
 const {
   bindUrlImportShortcuts,
   createUrlImportHandler,
@@ -452,6 +459,8 @@ async function ensureRuleAdminPassword() {
 
 function syncEngineConfig(triggerRerender) {
   if (!window._engineApi || !window._engineApi.setActiveConfig) return;
+  // 本篇底部区块覆盖（公众号 fbif.js 读 window._bottomBlocksOverride；面板写 bb.override::<acct>）。
+  try { window._bottomBlocksOverride = JSON.parse(localStorage.getItem('bb.override::' + activeRulePack.id) || 'null') || undefined; } catch { window._bottomBlocksOverride = undefined; }
   const flat = loadConfig();
   const serverBehavior = (window._activeConfig && window._activeConfig.behavior) || {};
   window._engineApi.setActiveConfig({
@@ -481,6 +490,7 @@ async function hydrateActiveRulePreset(accountID = activeRulePack.id) {
   if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config);
   activeRuleSelectorDraftID = loaded.preset.id || 'default';
   activeRuleSelectorStatus = '';
+  await applyAccountCapabilityUI(activeRulePack);
   refreshRuleConsumers({ rerender: true });
   return loaded;
 }
@@ -542,6 +552,40 @@ const accountMenu = mountAccountMenu({
   onSwitch: (id) => switchAccount(id),
 });
 
+let ftSeriesFooterModulePromise = null;
+async function applyAccountCapabilityUI(pack) {
+  const maSec = document.getElementById('moreArticlesSection');
+  const ftSec = document.getElementById('ftSeriesFooterSection');
+  const isSeries = pack && pack.footerPicker === 'ft-series';
+  if (maSec) maSec.style.display = isSeries ? 'none' : '';
+  if (ftSec) ftSec.style.display = isSeries ? '' : 'none';
+  // 底部区块单篇面板：账号有 bottom_blocks 且非「什么是」系列时显示。
+  const bbSec = document.getElementById('blockPanelSection');
+  const bbMount = document.getElementById('blockPanel');
+  const bbMod = window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks;
+  if (bbSec && bbMount) {
+    if (bbMod && !isSeries) {
+      bbSec.style.display = '';
+      const inst = mountBlockPanel({
+        mount: bbMount,
+        accountId: pack.id,
+        getModule: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks) || {},
+        onChange: (ov) => { window._bottomBlocksOverride = ov; if (window._engineApi && typeof window._engineApi.rerender === 'function') window._engineApi.rerender(); },
+      });
+      if (inst) window._bottomBlocksOverride = inst.getOverride();
+    } else {
+      bbSec.style.display = 'none';
+      window._bottomBlocksOverride = undefined;
+    }
+  }
+  if (!isSeries) return;
+  if (!ftSeriesFooterModulePromise) {
+    ftSeriesFooterModulePromise = import('/js/ft-series-footer-ui.js?v=' + assetVersion);
+  }
+  const { initFtSeriesFooter } = await ftSeriesFooterModulePromise;
+  initFtSeriesFooter();
+}
+
 function persistAccountSelection(id) {
   try {
     window.localStorage.setItem(ACCOUNT_STORAGE_KEY, id);
@@ -560,7 +604,7 @@ function persistAccountSelection(id) {
 async function switchAccount(accountID) {
   const nextPack = rulePackModule.getRulePack(accountID);
   if (nextPack.id === activeRulePack.id) return;
-  if (nextPack.templateId !== currentTemplateId) {
+  if (nextPack.channel !== activeRulePack.channel) {
     const next = new URL(location.href);
     if (rulePackUrlModule.parsePath(location.pathname) !== null) {
       next.pathname = rulePackUrlModule.buildPath(nextPack.channel, nextPack.id);
@@ -576,6 +620,9 @@ async function switchAccount(accountID) {
   persistAccountSelection(activeRulePack.id);
   applyRulePackChrome(activeRulePack);
   accountMenu.setActive(activeRulePack.id);
+  if (activeRulePack.templateId !== currentTemplateId) {
+    await loadTemplate(activeRulePack.templateId, { rerender: false });
+  }
 
   const [loaded, catalog] = await Promise.all([
     loadActiveRulePreset(activeRulePack.id),
@@ -591,6 +638,7 @@ async function switchAccount(accountID) {
   activeRuleSelectorOpen = false;
   activeRuleSelectorDraftID = loaded.preset.id || 'default';
   activeRuleSelectorStatus = '';
+  await applyAccountCapabilityUI(activeRulePack);
   refreshRuleConsumers({ rerender: true });
 }
 
@@ -624,30 +672,23 @@ const { initApp } = await import('/js/engine.js?v=' + assetVersion);
 const { initMoreArticlesEditor } = await import('/js/more-articles-ui.js?v=' + assetVersion);
 const { openCropEditor } = await import('/js/crop-editor.js?v=' + assetVersion);
 initMoreArticlesEditor({ openCropEditor });
-// FoodTalks「什么是」系列：侧栏显示名片/群尾部选择器、隐藏 FBIF「更多文章」。
-// 由 registry 包能力标志 footerPicker 驱动（非硬编码 id）；其它公众号包保持原样。
-// fbif↔series 切换会整页 reload，故加载时设一次即可（红线 #19：隔离）。
-if (activeRulePack.footerPicker === 'ft-series') {
-  const maSec = document.getElementById('moreArticlesSection');
-  const ftSec = document.getElementById('ftSeriesFooterSection');
-  if (maSec) maSec.style.display = 'none';
-  if (ftSec) ftSec.style.display = '';
-  const { initFtSeriesFooter } = await import('/js/ft-series-footer-ui.js?v=' + assetVersion);
-  initFtSeriesFooter();
-}
 hydrateActiveRulePreset(activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
 refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));
 
-async function loadTemplate(templateId) {
-  const cfg = loadConfig();
-  saveConfig(cfg, null, { persistLocal: activeRuleSource !== 'server' });
+async function loadTemplate(templateId, options = {}) {
   const mod = await import('/js/templates/' + templateId + '.js?v=' + assetVersion);
+  currentTemplateId = templateId;
   syncEngineConfig(false);
-  initApp(mod.default);
-  wrapEngineFunctions();
+  if (window._engineApi && typeof window._engineApi.switchTemplate === 'function') {
+    await window._engineApi.switchTemplate(mod.default, { rerender: options.rerender === true });
+  } else {
+    initApp(mod.default);
+    wrapEngineFunctions();
+  }
 }
 
 await loadTemplate(currentTemplateId);
+await applyAccountCapabilityUI(activeRulePack);
 
 // Cross-channel state restore — must come after initApp so engine.js has
 // wired up window._captureSessionSnapshot / _restoreSessionSnapshot.
