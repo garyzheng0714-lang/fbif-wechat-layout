@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -143,6 +144,50 @@ func TestCaptionContinuationRequiresCaptionStyle(t *testing.T) {
 	body := findBlockByText(blocks, "短正文")
 	if body == nil || body.K != "txt" {
 		t.Fatalf("center-short text after a caption needs stronger caption styling, got %v; kinds=%v", body, findKinds(blocks))
+	}
+}
+
+func TestCaptionCenterThresholdCanBeConfigured(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
+			`<p style="text-align: center;">abcdef</p>`)
+	_, defaultBlocks, _ := extractArticleBlocks(html)
+	if b := findBlockByText(defaultBlocks, "abcdef"); b == nil || b.K != "cap" {
+		t.Fatalf("default center-short threshold should classify caption, got %v; kinds=%v", b, findKinds(defaultBlocks))
+	}
+
+	_, strictBlocks, _ := extractArticleBlocksWithOptions(html, articleBlockOptions{
+		CaptionMaxChars:       80,
+		CaptionCenterMaxChars: 3,
+	})
+	if b := findBlockByText(strictBlocks, "abcdef"); b == nil || b.K != "txt" {
+		t.Fatalf("configured center threshold should keep longer centered text as body, got %v; kinds=%v", b, findKinds(strictBlocks))
+	}
+}
+
+func TestArticleBlockOptionsReadActiveAccountBehavior(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+	preset := rulePreset{
+		ID:     "site-tight-caption",
+		Name:   "网站短图注阈值",
+		Config: defaultFoodTalksSiteRuleConfig(),
+		Behavior: map[string]any{
+			"params": map[string]any{
+				"image_caption_max_chars":        map[string]any{"type": "number", "default": 20},
+				"image_caption_center_max_chars": map[string]any{"type": "number", "default": 6},
+			},
+		},
+	}
+	if _, err := store.upsert(preset); err != nil {
+		t.Fatalf("upsert custom preset: %v", err)
+	}
+	if _, err := store.setActiveForAccount(foodTalksSiteRuleAccountID, preset.ID); err != nil {
+		t.Fatalf("set active: %v", err)
+	}
+
+	opts := articleBlockOptionsForAccount(store, foodTalksSiteRuleAccountID)
+	if opts.CaptionMaxChars != 20 || opts.CaptionCenterMaxChars != 6 {
+		t.Fatalf("options = %#v, want behavior params 20/6", opts)
 	}
 }
 

@@ -1,6 +1,7 @@
 // footer-library-rule-editor.js — 页脚库编辑器（方案Y：表单主导 + JSON 折叠兜底）。
 // 导出：createFooterLibraryEditor({ container, footerData, onChange })
 import { FOOTER_SEGMENTS_DEFAULT, FOOTER_SEGMENT_ORDER_DEFAULT, FOOTER_PRESETS_DEFAULT } from './footer-segments-defaults.js';
+import { buildFooterHtml } from './rule-behavior-foodtalks.js';
 
 const SEGMENT_LABELS = { biz_coop: '商务合作', join_group: '加入微信群', follow_account: '关注公众号', logo: 'FoodTalks logo', more_info: '点击获取更多' };
 const ALL_SEG_KEYS = ['biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
@@ -11,6 +12,11 @@ const esc = v => String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'
 
 function extractImgSrc(lines) { const m = lines.join('\n').match(/<img[^>]+src\s*=\s*["']([^"']+)["']/i); return m ? m[1] : null; }
 function replaceImgSrc(lines, src) { return lines.map(l => l.replace(/(<img[^>]+src\s*=\s*["'])([^"']+)(["'])/i, `$1${src}$3`)); }
+function assetIDFromSrc(src) { const m = String(src || '').match(/^\{\{asset#([a-z0-9_-]+)\}\}$/i); return m ? m[1] : ''; }
+function normalizeAssets(assetLibrary) {
+  const list = assetLibrary && Array.isArray(assetLibrary.assets) ? assetLibrary.assets : [];
+  return list.filter(a => a && a.type === 'image' && (a.scope === 'global' || a.scope === 'ft-default'));
+}
 
 function validateImgUrl(url) {
   if (!url) return '请输入图片链接';
@@ -30,11 +36,12 @@ function isSegChanged(key, lines) {
 
 function genId() { return 'preset-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6); }
 
-export function createFooterLibraryEditor({ container, footerData, onChange }) {
+export function createFooterLibraryEditor({ container, footerData, assetLibrary, onChange }) {
   if (!container) throw new Error('createFooterLibraryEditor: container is required');
   const snapshot = clone(footerData || {});
   let state = clone(footerData || {});
   const openCards = {};
+  let draggingKey = '';
 
   // 补全 state
   if (!state.segments) state.segments = {};
@@ -53,7 +60,21 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
     const dirty = JSON.stringify(state) !== JSON.stringify(snapshot);
     return `<div class="footer-lib-status-bar">
       <span class="footer-lib-sync-label ${dirty?'dirty':'synced'}">${dirty?'有未保存改动':'已同步 ✓'}</span>
+      <button type="button" class="admin-secondary footer-lib-toggle-enabled ${state.enabled?'on':''}" data-action="toggle-enabled">${state.enabled?'默认输出页脚':'默认不输出页脚'}</button>
       <button type="button" class="admin-secondary footer-lib-undo-btn" data-action="undo-all" ${dirty?'':'disabled'}>撤销所有修改</button>
+    </div>`;
+  }
+
+  function renderAssetPicker(key, imgSrc) {
+    const assets = normalizeAssets(assetLibrary);
+    if (!assets.length) return '';
+    const current = assetIDFromSrc(imgSrc);
+    return `<div class="footer-lib-img-row">
+      <label class="footer-lib-img-label">从素材库选图</label>
+      <select class="footer-lib-img-input" data-action="pick-asset" data-seg-key="${esc(key)}">
+        <option value="">保持当前链接</option>
+        ${assets.map(asset => `<option value="${esc(asset.id)}" ${asset.id === current ? 'selected' : ''}>${esc(asset.label || asset.id)} · ${esc(asset.usage || 'custom')}</option>`).join('')}
+      </select>
     </div>`;
   }
 
@@ -63,9 +84,9 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
     const open = !!openCards[key];
     const imgSrc = extractImgSrc(lines);
     const xssErr = validateHtmlLines(lines);
-    return `<div class="footer-lib-card${open?' open':''}" data-seg-key="${esc(key)}">
+    return `<div class="footer-lib-card${open?' open':''}" data-seg-key="${esc(key)}" draggable="true">
       <button type="button" class="footer-lib-card-head" data-action="toggle-card" data-seg-key="${esc(key)}">
-        <span class="footer-lib-card-label">${esc(label)}${isSegChanged(key,lines)?'<span class="footer-lib-changed-dot" title="与默认值不同">● 已改</span>':''}</span>
+        <span class="footer-lib-card-label"><span class="footer-lib-drag-handle" title="拖拽排序">⠿</span>${esc(label)}${isSegChanged(key,lines)?'<span class="footer-lib-changed-dot" title="与默认值不同">● 已改</span>':''}</span>
         <span class="footer-lib-card-arrow">${open?'▲':'▼'}</span>
       </button>
       ${open?`<div class="footer-lib-card-body">
@@ -73,7 +94,7 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
           <label class="footer-lib-img-label">图片链接快速替换</label>
           <input type="url" class="footer-lib-img-input" data-action="replace-img" data-seg-key="${esc(key)}" value="${esc(imgSrc)}" placeholder="https://..." />
           <span class="footer-lib-err" data-role="img-err-${esc(key)}"></span>
-        </div>`:''}
+        </div>${renderAssetPicker(key,imgSrc)}`:''}
         <div class="footer-lib-textarea-row">
           <label class="footer-lib-textarea-label">HTML 内容（每行一段）</label>
           <textarea class="footer-lib-html-area" data-action="edit-html" data-seg-key="${esc(key)}" spellcheck="false" rows="6">${esc(lines.join('\n'))}</textarea>
@@ -84,6 +105,15 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
           <a href="#" class="footer-lib-reset-link" data-action="reset-seg" data-seg-key="${esc(key)}">重置为默认</a>
         </div>
       </div>`:''}
+    </div>`;
+  }
+
+  function renderPreview() {
+    const preset = (state.presets || []).find(p => p.id === state.active_preset_id) || {};
+    const html = state.enabled ? buildFooterHtml(preset.segments || {}, state, assetLibrary, 'ft-default') : '';
+    return `<div class="footer-lib-preview">
+      <h3 class="footer-lib-section-title">即时预览</h3>
+      <div class="footer-lib-preview-box">${html || '<p style="color:#8F959E;font-size:13px;">当前默认不输出页脚。</p>'}</div>
     </div>`;
   }
 
@@ -127,9 +157,12 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
     const order = Array.isArray(state.segment_order) ? state.segment_order : FOOTER_SEGMENT_ORDER_DEFAULT;
     container.innerHTML = `<div class="footer-lib-editor">
       ${renderStatusBar()}
-      <div class="footer-lib-segments-section">
-        <h3 class="footer-lib-section-title">片段库</h3>
-        ${order.map(renderCard).join('')}
+      <div class="footer-lib-main">
+        <div class="footer-lib-segments-section">
+          <h3 class="footer-lib-section-title">片段库</h3>
+          ${order.map(renderCard).join('')}
+        </div>
+        ${renderPreview()}
       </div>
       ${renderPresetTable()}
       ${renderJsonPanel()}
@@ -144,6 +177,7 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
     if (!btn) return;
     const { action } = btn.dataset;
     if (action === 'undo-all') { emit(clone(snapshot)); return; }
+    if (action === 'toggle-enabled') { const next = clone(state); next.enabled = !next.enabled; emit(next); return; }
     if (action === 'toggle-card') { openCards[btn.dataset.segKey] = !openCards[btn.dataset.segKey]; emit(clone(state)); return; }
     if (action === 'reset-seg') {
       e.preventDefault();
@@ -194,6 +228,13 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
 
   function handleChange(e) {
     const el = e.target; const { action } = el.dataset;
+    if (action === 'pick-asset') {
+      const key = el.dataset.segKey;
+      if (!key || !el.value) return;
+      const next = clone(state);
+      next.segments[key].html_lines = replaceImgSrc(next.segments[key].html_lines, `{{asset#${el.value}}}`);
+      emit(next); return;
+    }
     if (action === 'toggle-preset-seg') {
       const next = clone(state); const idx = Number(el.dataset.presetIdx);
       if (!next.presets[idx]) return;
@@ -230,12 +271,42 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
     }
   }
 
+  function moveSegment(fromKey, toKey) {
+    if (!fromKey || !toKey || fromKey === toKey) return;
+    const order = Array.isArray(state.segment_order) ? state.segment_order.slice() : FOOTER_SEGMENT_ORDER_DEFAULT.slice();
+    const from = order.indexOf(fromKey);
+    const to = order.indexOf(toKey);
+    if (from < 0 || to < 0) return;
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    const next = clone(state);
+    next.segment_order = order;
+    emit(next);
+  }
+
+  function handleDragStart(e) {
+    const card = e.target.closest('.footer-lib-card');
+    draggingKey = card && card.dataset.segKey || '';
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleDragOver(e) {
+    if (draggingKey && e.target.closest('.footer-lib-card')) e.preventDefault();
+  }
+
+  function handleDrop(e) {
+    const card = e.target.closest('.footer-lib-card');
+    if (!card) return;
+    e.preventDefault();
+    moveSegment(draggingKey, card.dataset.segKey);
+    draggingKey = '';
+  }
+
   let stylesInjected = false;
   function injectStyles() {
     if (stylesInjected || document.getElementById('footer-lib-styles')) return;
     stylesInjected = true;
     const s = document.createElement('style'); s.id = 'footer-lib-styles';
-    s.textContent = `.footer-lib-editor{display:grid;gap:16px}.footer-lib-status-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:6px;background:#f9f9f8;font-size:12px}.footer-lib-sync-label.synced{color:#1b7f36}.footer-lib-sync-label.dirty{color:#9a4600}.footer-lib-undo-btn{margin-left:auto}.footer-lib-section-title{font-size:13px;font-weight:700;color:rgba(0,0,0,.9);margin:12px 0 8px}.footer-lib-card{border:1px solid rgba(0,0,0,.08);border-radius:6px;overflow:hidden;margin-bottom:6px}.footer-lib-card-head{display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 12px;background:#f6f5f4;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;color:rgba(0,0,0,.85);text-align:left}.footer-lib-card-head:hover{background:#eeedec}.footer-lib-card.open .footer-lib-card-head{background:#eeeeee}.footer-lib-card-label{display:flex;align-items:center;gap:8px}.footer-lib-changed-dot{color:#9a4600;font-size:11px;font-weight:700}.footer-lib-card-arrow{font-size:11px;color:#a39e98}.footer-lib-card-body{padding:12px;background:#fff;border-top:1px solid rgba(0,0,0,.06);display:grid;gap:10px}.footer-lib-img-label,.footer-lib-textarea-label{font-size:12px;color:#615d59}.footer-lib-img-input{width:100%;padding:7px 9px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:inherit;font-size:13px}.footer-lib-img-input:focus,.footer-lib-html-area:focus{outline:none;border-color:#0075de;box-shadow:0 0 0 2px rgba(0,117,222,.15)}.footer-lib-html-area{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:'SF Mono',ui-monospace,monospace;font-size:12px;line-height:1.55;resize:vertical}.footer-lib-err{font-size:12px;color:#dd5b00}.footer-lib-card-actions{display:flex;gap:12px}.footer-lib-reset-link{font-size:12px;color:#0075de;text-decoration:underline;cursor:pointer}.footer-lib-preset-section{display:grid;gap:10px}.footer-lib-table-wrap{overflow-x:auto}.footer-lib-preset-table{width:100%;border-collapse:collapse;font-size:12px}.footer-lib-preset-table th{padding:6px 8px;text-align:center;background:#f6f5f4;font-weight:700;color:rgba(0,0,0,.7);border-bottom:1px solid rgba(0,0,0,.1);white-space:nowrap}.footer-lib-preset-table th:first-child{text-align:left}.footer-lib-preset-table td{padding:6px 8px;vertical-align:middle;border-bottom:1px solid rgba(0,0,0,.05)}.footer-lib-preset-row.footer-lib-preset-active td{background:rgba(0,117,222,.04)}.footer-lib-preset-name{width:100%;min-width:120px;padding:5px 7px;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:12px}.footer-lib-preset-cell{text-align:center}.footer-lib-preset-chk{cursor:pointer}.footer-lib-set-default-btn,.footer-lib-del-preset-btn{font-size:11px;padding:4px 8px;white-space:nowrap}.footer-lib-add-preset-btn{font-size:12px}.footer-lib-json-details{margin-top:4px}.footer-lib-json-summary{cursor:pointer;font-size:12px;font-weight:600;color:#615d59;user-select:none;padding:4px 0}.footer-lib-json-summary:hover{color:rgba(0,0,0,.85)}.footer-lib-json-body{padding:10px 0;display:grid;gap:6px}.footer-lib-json-area{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:'SF Mono',ui-monospace,monospace;font-size:12px;line-height:1.55;resize:vertical}.footer-lib-json-area:focus{outline:none;border-color:#0075de;box-shadow:0 0 0 2px rgba(0,117,222,.15)}`;
+    s.textContent = `.footer-lib-editor{display:grid;gap:16px}.footer-lib-status-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:6px;background:#f9f9f8;font-size:12px}.footer-lib-sync-label.synced{color:#1b7f36}.footer-lib-sync-label.dirty{color:#9a4600}.footer-lib-toggle-enabled.on{border-color:var(--fs-brand,#1456F0);color:var(--fs-brand,#1456F0);background:var(--fs-brand-soft,#EBF1FF)}.footer-lib-undo-btn{margin-left:auto}.footer-lib-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.42fr);gap:16px;align-items:start}.footer-lib-section-title{font-size:13px;font-weight:700;color:rgba(0,0,0,.9);margin:12px 0 8px}.footer-lib-card{border:1px solid rgba(0,0,0,.08);border-radius:6px;overflow:hidden;margin-bottom:6px}.footer-lib-card[draggable=true]{cursor:grab}.footer-lib-card-head{display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 12px;background:#f6f5f4;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;color:rgba(0,0,0,.85);text-align:left}.footer-lib-card-head:hover{background:#eeedec}.footer-lib-card.open .footer-lib-card-head{background:#eeeeee}.footer-lib-card-label{display:flex;align-items:center;gap:8px}.footer-lib-drag-handle{color:#8F959E;font-size:14px}.footer-lib-changed-dot{color:#9a4600;font-size:11px;font-weight:700}.footer-lib-card-arrow{font-size:11px;color:#a39e98}.footer-lib-card-body{padding:12px;background:#fff;border-top:1px solid rgba(0,0,0,.06);display:grid;gap:10px}.footer-lib-img-label,.footer-lib-textarea-label{font-size:12px;color:#615d59}.footer-lib-img-input{width:100%;padding:7px 9px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:inherit;font-size:13px}.footer-lib-img-input:focus,.footer-lib-html-area:focus{outline:none;border-color:#0075de;box-shadow:0 0 0 2px rgba(0,117,222,.15)}.footer-lib-html-area{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:'SF Mono',ui-monospace,monospace;font-size:12px;line-height:1.55;resize:vertical}.footer-lib-err{font-size:12px;color:#dd5b00}.footer-lib-card-actions{display:flex;gap:12px}.footer-lib-reset-link{font-size:12px;color:#0075de;text-decoration:underline;cursor:pointer}.footer-lib-preview{position:sticky;top:0}.footer-lib-preview-box{max-height:56vh;overflow:auto;padding:12px;border-radius:6px;background:#fff;box-shadow:var(--fs-sh-s1,0 1px 3px rgba(31,35,39,.04));font-size:13px}.footer-lib-preview-box img{max-width:100%;height:auto}.footer-lib-preset-section{display:grid;gap:10px}.footer-lib-table-wrap{overflow-x:auto}.footer-lib-preset-table{width:100%;border-collapse:collapse;font-size:12px}.footer-lib-preset-table th{padding:6px 8px;text-align:center;background:#f6f5f4;font-weight:700;color:rgba(0,0,0,.7);border-bottom:1px solid rgba(0,0,0,.1);white-space:nowrap}.footer-lib-preset-table th:first-child{text-align:left}.footer-lib-preset-table td{padding:6px 8px;vertical-align:middle;border-bottom:1px solid rgba(0,0,0,.05)}.footer-lib-preset-row.footer-lib-preset-active td{background:rgba(0,117,222,.04)}.footer-lib-preset-name{width:100%;min-width:120px;padding:5px 7px;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:12px}.footer-lib-preset-cell{text-align:center}.footer-lib-preset-chk{cursor:pointer}.footer-lib-set-default-btn,.footer-lib-del-preset-btn{font-size:11px;padding:4px 8px;white-space:nowrap}.footer-lib-add-preset-btn{font-size:12px}.footer-lib-json-details{margin-top:4px}.footer-lib-json-summary{cursor:pointer;font-size:12px;font-weight:600;color:#615d59;user-select:none;padding:4px 0}.footer-lib-json-summary:hover{color:rgba(0,0,0,.85)}.footer-lib-json-body{padding:10px 0;display:grid;gap:6px}.footer-lib-json-area{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:'SF Mono',ui-monospace,monospace;font-size:12px;line-height:1.55;resize:vertical}.footer-lib-json-area:focus{outline:none;border-color:#0075de;box-shadow:0 0 0 2px rgba(0,117,222,.15)}@media(max-width:900px){.footer-lib-main{grid-template-columns:1fr}.footer-lib-preview{position:static}}`;
     document.head.appendChild(s);
   }
 
@@ -243,12 +314,18 @@ export function createFooterLibraryEditor({ container, footerData, onChange }) {
   container.addEventListener('click', handleClick);
   container.addEventListener('change', handleChange);
   container.addEventListener('blur', handleBlur, true); // capture：blur 不冒泡
+  container.addEventListener('dragstart', handleDragStart);
+  container.addEventListener('dragover', handleDragOver);
+  container.addEventListener('drop', handleDrop);
   render();
   return {
     destroy() {
       container.removeEventListener('click', handleClick);
       container.removeEventListener('change', handleChange);
       container.removeEventListener('blur', handleBlur, true);
+      container.removeEventListener('dragstart', handleDragStart);
+      container.removeEventListener('dragover', handleDragOver);
+      container.removeEventListener('drop', handleDrop);
       container.innerHTML = '';
     },
   };

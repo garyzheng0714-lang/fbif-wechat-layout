@@ -61,12 +61,14 @@ func main() {
 		}
 	}
 
+	ruleStore := newRulePresetStore(*rulesPath)
+
 	// Image upload to OSS (base64 from DOCX)
 	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
 	mux.HandleFunc("POST /api/wechat-upload", handleImageUpload) // legacy alias
 
 	// Article fetch (URL repost via x-reader)
-	mux.HandleFunc("POST /api/fetch-article", handleFetchArticle)
+	mux.HandleFunc("POST /api/fetch-article", handleFetchArticleWithStore(ruleStore))
 
 	// Article meta fetch (lightweight: title + cover image for "更多文章" cards)
 	mux.HandleFunc("POST /api/fetch-article-meta", handleFetchArticleMeta)
@@ -80,7 +82,7 @@ func main() {
 	// Cached image payload for images stripped from converted docx
 	mux.HandleFunc("GET /api/doc-cache/{hash}/{filename}", handleDocImageCache)
 
-	registerRulePresetHandlers(mux, newRulePresetStore(*rulesPath))
+	registerRulePresetHandlers(mux, ruleStore)
 
 	// Kick off the in-memory image cache GC loop
 	startDocImageCacheGC()
@@ -206,55 +208,64 @@ func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 // ---- Article Fetch (URL repost via x-reader) ----
 
 func handleFetchArticle(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		URL string `json:"url"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
-		writeError(w, 400, "url is required")
-		return
-	}
+	handleFetchArticleWithStore(nil)(w, r)
+}
 
-	// Validate URL format
-	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-		writeError(w, 400, "invalid URL: must start with http:// or https://")
-		return
-	}
+func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			URL       string `json:"url"`
+			Account   string `json:"account"`
+			AccountID string `json:"account_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+			writeError(w, 400, "url is required")
+			return
+		}
 
-	// Preferred path: direct HTTP → structured Blocks. Preserves visual
-	// signals (font-size, color, align, bold) so heading/caption/body
-	// classification is deterministic, not inferred from a lossy MD
-	// intermediate. See wechat_blocks.go.
-	title, blocks, derr := fetchDirectBlocks(req.URL)
-	if derr == nil && len(blocks) > 0 {
-		writeJSON(w, 200, map[string]interface{}{
-			"title":  title,
-			"blocks": blocks,
-			"source": req.URL,
-		})
-		return
+		// Validate URL format
+		if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+			writeError(w, 400, "invalid URL: must start with http:// or https://")
+			return
+		}
+
+		// Preferred path: direct HTTP → structured Blocks. Preserves visual
+		// signals (font-size, color, align, bold) so heading/caption/body
+		// classification is deterministic, not inferred from a lossy MD
+		// intermediate. See wechat_blocks.go.
+		accountID := firstNonEmpty(req.AccountID, req.Account)
+		title, blocks, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
+		if derr == nil && len(blocks) > 0 {
+			writeJSON(w, 200, map[string]interface{}{
+				"title":  title,
+				"blocks": blocks,
+				"source": req.URL,
+			})
+			return
+		}
+		// Fall back to x-reader only if direct fetch failed. Ship its
+		// Markdown to the frontend so the legacy classifyMd path can still
+		// handle non-WeChat URLs that x-reader renders better.
+		content, xrTitle, xrErr := fetchWithXReader(req.URL)
+		if xrErr == nil {
+			writeJSON(w, 200, map[string]interface{}{
+				"title":   xrTitle,
+				"content": content,
+				"source":  req.URL,
+			})
+			return
+		}
+		// 两条路径都没拿到内容。内部错误（x-reader 未安装、传输细节等）只记日志，
+		// 不抛给终端用户——给一句可操作的中文提示。
+		internalErr := derr
+		if internalErr == nil {
+			internalErr = xrErr
+		}
+		if internalErr != nil {
+			log.Printf("handleFetchArticle failed for %s: direct=%v xreader=%v", req.URL, derr, xrErr)
+		}
+		writeError(w, 502, "文章抓取失败，请稍后重试（公众号可能临时限流）")
 	}
-	// Fall back to x-reader only if direct fetch failed. Ship its
-	// Markdown to the frontend so the legacy classifyMd path can still
-	// handle non-WeChat URLs that x-reader renders better.
-	content, xrTitle, xrErr := fetchWithXReader(req.URL)
-	if xrErr == nil {
-		writeJSON(w, 200, map[string]interface{}{
-			"title":   xrTitle,
-			"content": content,
-			"source":  req.URL,
-		})
-		return
-	}
-	// 两条路径都没拿到内容。内部错误（x-reader 未安装、传输细节等）只记日志，
-	// 不抛给终端用户——给一句可操作的中文提示。
-	internalErr := derr
-	if internalErr == nil {
-		internalErr = xrErr
-	}
-	if internalErr != nil {
-		log.Printf("handleFetchArticle failed for %s: direct=%v xreader=%v", req.URL, derr, xrErr)
-	}
-	writeError(w, 502, "文章抓取失败，请稍后重试（公众号可能临时限流）")
 }
 
 // fetchDirectBlocks is the new primary URL-import path: GET the raw HTML
@@ -273,6 +284,11 @@ func handleFetchArticle(w http.ResponseWriter, r *http.Request) {
 // valid (non-error) outcome — a page genuinely without article content.
 // The caller at handleFetchArticle gates on `len(blocks) > 0`.
 func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
+	return fetchDirectBlocksWithOptions(url, defaultArticleBlockOptions())
+}
+
+func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title string, blocks []Block, err error) {
+	opts = normalizeArticleBlockOptions(opts)
 	// 3 attempts, exponential-ish backoff. WeChat 限流通常几百毫秒内恢复。
 	backoffs := []time.Duration{0, 600 * time.Millisecond, 1500 * time.Millisecond}
 	var transportErr error // 最后一次的传输错误；为 nil 表示最后一次拿到了页面但内容为空
@@ -286,7 +302,7 @@ func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
 			log.Printf("fetchDirectBlocks attempt %d/%d transport error: %v", i+1, len(backoffs), ferr)
 			continue
 		}
-		t, bs, _ := extractArticleBlocks(string(bodyBytes))
+		t, bs, _ := extractArticleBlocksWithOptions(string(bodyBytes), opts)
 		if len(bs) > 0 {
 			return t, bs, nil
 		}
@@ -297,6 +313,44 @@ func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
 	// 全部尝试都没拿到内容：最后一次是传输失败则返回该 err；否则（拿到页面但空）
 	// 返回空 blocks 无 err，让调用方决定是否走 x-reader。
 	return "", nil, transportErr
+}
+
+func articleBlockOptionsForAccount(store *rulePresetStore, accountID string) articleBlockOptions {
+	opts := defaultArticleBlockOptions()
+	if store == nil {
+		return opts
+	}
+	preset, err := store.activeForAccount(accountID)
+	if err != nil {
+		return opts
+	}
+	params, _ := preset.Behavior["params"].(map[string]any)
+	opts.CaptionMaxChars = behaviorParamInt(params, "image_caption_max_chars", opts.CaptionMaxChars)
+	opts.CaptionCenterMaxChars = behaviorParamInt(params, "image_caption_center_max_chars", opts.CaptionCenterMaxChars)
+	return normalizeArticleBlockOptions(opts)
+}
+
+func behaviorParamInt(params map[string]any, key string, fallback int) int {
+	spec, _ := params[key].(map[string]any)
+	if spec == nil {
+		return fallback
+	}
+	raw, ok := spec["default"]
+	if !ok || raw == nil {
+		return fallback
+	}
+	switch v := raw.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil {
+			return n
+		}
+	}
+	return fallback
 }
 
 func fetchRawHTML(url string) ([]byte, error) {

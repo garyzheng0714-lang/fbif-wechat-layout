@@ -52,6 +52,15 @@ async function uploadOne(task) {
   return results[task.key] || Object.values(results)[0] || null;
 }
 
+export async function uploadAssetFile(file) {
+  if (!file || !/^image\//i.test(file.type || '')) throw new Error('请选择图片文件');
+  const base64 = arrayBufferToBase64(await file.arrayBuffer());
+  const src = 'data:' + (file.type || 'image/png') + ';base64,' + base64;
+  const url = await uploadOne({ key: 'asset_' + Date.now().toString(36), src });
+  if (!url) throw new Error('图片上传失败');
+  return url;
+}
+
 export async function materializeLazyImages(articleCopy, footerCopy, { onProgress, onLog } = {}) {
   const allHtml = articleCopy + '\n' + footerCopy;
   let m;

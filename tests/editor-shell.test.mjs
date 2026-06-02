@@ -93,6 +93,7 @@ test('resolveInitialRulePackID falls back by channel for website shell', () => {
 
 test('createUrlImportHandler passes source URL with structured blocks', async () => {
   const calls = [];
+  const requests = [];
   const elements = new Map();
   const makeElement = value => ({ value, textContent: '', disabled: false, style: { display: '' } });
   elements.set('urlInput', makeElement('https://mp.weixin.qq.com/s/abc'));
@@ -104,13 +105,17 @@ test('createUrlImportHandler passes source URL with structured blocks', async ()
       return elements.get(id);
     },
   };
-  const fetchImpl = async () => ({
-    ok: true,
-    json: async () => ({ title: '标题', blocks: [{ type: 'p', text: '正文' }] }),
-  });
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) });
+    return {
+      ok: true,
+      json: async () => ({ title: '标题', blocks: [{ type: 'p', text: '正文' }] }),
+    };
+  };
   const handler = createUrlImportHandler({
     documentRef,
     fetchImpl,
+    getAccountID: () => 'ft-default',
     getHandleBlocks: () => (payload, options) => calls.push({ payload, options }),
     onArticleUrl(url) {
       calls.push({ currentUrl: url });
@@ -120,6 +125,10 @@ test('createUrlImportHandler passes source URL with structured blocks', async ()
   await handler();
 
   assert.equal(calls[0].currentUrl, 'https://mp.weixin.qq.com/s/abc');
+  assert.deepEqual(requests[0], {
+    url: '/api/fetch-article',
+    body: { url: 'https://mp.weixin.qq.com/s/abc', account: 'ft-default' },
+  });
   assert.deepEqual(calls[1].payload, {
     title: '标题',
     blocks: [{ type: 'p', text: '正文' }],

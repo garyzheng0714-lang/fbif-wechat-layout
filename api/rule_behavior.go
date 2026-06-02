@@ -23,6 +23,11 @@ func defaultRuleBehavior() map[string]any {
 			"footer_prompt_detection_regex": map[string]any{"type": "string", "default": `(?i)本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1`},
 			"docx_author_line_regex":        map[string]any{"type": "string", "default": `^作者[：:]\s*(.+)$`},
 			"md_metadata_skip_regex":        map[string]any{"type": "string", "default": `(?i)^Author:\s|^Published:\s|^Source:\s`},
+			"image_caption_max_chars":       map[string]any{"type": "number", "default": defaultImageCaptionMaxChars},
+			"image_caption_center_max_chars": map[string]any{
+				"type":    "number",
+				"default": defaultImageCaptionCenterMaxChars,
+			},
 			// footer.html 内嵌的存量原创声明（engine.js 转载改写时按此字面量定位替换）。
 			"footer_stock_original_text": map[string]any{"type": "string", "default": "* 本文为FBIF原创，欢迎转发朋友圈；"},
 		},

@@ -11,6 +11,8 @@ const { applyBehaviorToElems, normalizeAuthorName, renderBehaviorTemplate } = be
 // / classifyReferences 均为 true），输出与抽取前逐字节一致（golden tea-pyramid 守卫）。
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
+const tableModule = await import('./shared/table-renderer.js' + assetQuery);
+const { renderTable: renderSharedTable } = tableModule;
 
 // ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
 function leafWrap(inner) {
@@ -104,48 +106,46 @@ function ruleColor(key, fallback) {
   const v = getActiveRuleConfig()[key];
   return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v.trim())) ? v.trim() : fallback;
 }
-function renderTableCellRuns(runs) {
-  const segs = [[]];
-  for (const r of (runs || [])) {
-    if (r.type === 'br') segs.push([]);
-    else segs[segs.length - 1].push(r);
-  }
-  return segs.map(seg => seg.map(r => {
-    if (r.type === 'txt') { const t = esc(r.text); return r.bold ? '<strong>' + t + '</strong>' : t; }
-    if (r.type === 'link') {
-      const h = r.href || '';
-      return /^https?:\/\//i.test(h) ? '<a href="' + escAttr(h) + '">' + esc(r.text) + '</a>' : esc(r.text);
-    }
-    // 单元格内图片：inline <img>，尺寸受单元格约束（不用 run 的 w 百分比——那相对页宽，
-    // 放进窄列会撑爆 table-layout:fixed）。src 由共享层注入；空 src 跳过避免破图。
-    if (r.type === 'img' && r.src) {
-      const rpol = r.src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
-      const gifAttr = r.gif ? ' data-type="gif"' : '';
-      return '<img src="' + escAttr(r.src) + '"' + gifAttr + rpol +
-        ' style="max-width: 100%; height: auto; display: block; margin: 0 auto;" />';
-    }
-    return '';
-  }).join('')).join('<br>');
+function tableRunRenderers() {
+  return {
+    text(r) {
+      if (r.type === 'txt') { const t = esc(r.text); return r.bold ? '<strong>' + t + '</strong>' : t; }
+      return '';
+    },
+    link(r) {
+      if (r.type === 'link') {
+        const h = r.href || '';
+        return /^https?:\/\//i.test(h) ? '<a href="' + escAttr(h) + '">' + esc(r.text) + '</a>' : esc(r.text);
+      }
+      return '';
+    },
+    image(r) {
+      if (r.type === 'img' && r.src) {
+        const rpol = r.src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
+        const gifAttr = r.gif ? ' data-type="gif"' : '';
+        return '<img src="' + escAttr(r.src) + '"' + gifAttr + rpol +
+          ' style="max-width: 100%; height: auto; display: block; margin: 0 auto;" />';
+      }
+      return '';
+    },
+  };
 }
+
 function renderTable(elem) {
   const cfg = getActiveRuleConfig();
-  const headerBg = ruleColor('table_header_bg', '#01396a');
-  const headerColor = ruleColor('table_header_text_color', '#ffffff');
-  const borderColor = ruleColor('table_border_color', '#e5e7eb');
   const fs = getRuleNumber(cfg, 'table_font_size') || 15;
   const padRaw = getRuleNumber(cfg, 'table_cell_padding');
   const pad = Number.isFinite(padRaw) && padRaw >= 0 ? padRaw : 8;
-  const headerBold = getRuleBoolean(cfg, 'table_header_bold');
-  const cellBase = 'border: 1px solid ' + borderColor + '; padding: ' + pad + 'px; font-size: ' + fs +
-    'px; text-align: center; word-break: break-word;';
-  const body = (elem.rows || []).map(row => '<tr>' + (row || []).map(cell => {
-    const style = cellBase + (cell.header
-      ? ' background-color: ' + headerBg + '; color: ' + headerColor + (headerBold ? '; font-weight: bold' : '') + ';'
-      : ' color: rgba(0, 0, 0, 0.9);');
-    return '<td style="' + style + '">' + (renderTableCellRuns(cell.runs) || '<br>') + '</td>';
-  }).join('') + '</tr>').join('');
-  return '<table style="border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0 auto;"><tbody>' +
-    body + '</tbody></table>';
+  return renderSharedTable(elem, {
+    headerBg: ruleColor('table_header_bg', '#01396a'),
+    headerColor: ruleColor('table_header_text_color', '#ffffff'),
+    borderColor: ruleColor('table_border_color', '#e5e7eb'),
+    fontSize: fs,
+    padding: pad,
+    headerBold: getRuleBoolean(cfg, 'table_header_bold'),
+    marginAuto: true,
+    renderers: tableRunRenderers(),
+  });
 }
 
 // ---- Spacing & Section Helpers ----

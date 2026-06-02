@@ -54,6 +54,7 @@ export function createUrlImportHandler({
   DataTransferCtor = globalThis.DataTransfer,
   getHandleBlocks = () => globalThis.window && globalThis.window._handleBlocks,
   getHandleFile = () => globalThis.window && globalThis.window._handleFile,
+  getAccountID = () => '',
   onArticleUrl = () => {},
   errorMessage = defaultFetchErrorMessage,
 } = {}) {
@@ -76,7 +77,7 @@ export function createUrlImportHandler({
       const resp = await fetchImpl('/api/fetch-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, account: getAccountID() || undefined }),
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status }));

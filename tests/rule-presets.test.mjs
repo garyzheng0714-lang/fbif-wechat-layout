@@ -361,7 +361,7 @@ test('active rule fetch includes the selected account id', async () => {
           preset: {
             id: 'foodtalks-series-default',
             name: 'FoodTalks什么是系列默认规则',
-            config: DEFAULT_RULE_CONFIG,
+            config: { ...DEFAULT_RULE_CONFIG, modules: { asset_library: { assets: [] } } },
             behavior: {
               templates: {
                 author_line: '撰文：{{ article.author }}',
@@ -377,6 +377,7 @@ test('active rule fetch includes the selected account id', async () => {
     const loaded = await loadActiveRulePreset('foodtalks-series');
     assert.equal(loaded.source, 'server');
     assert.equal(loaded.preset.id, 'foodtalks-series-default');
+    assert.deepEqual(loaded.preset.raw_config.modules.asset_library.assets, []);
     assert.equal(loaded.preset.behavior.templates.author_line, '撰文：{{ article.author }}');
     assert.equal(calls[0].url, '/api/rules/active?account=foodtalks-series');
   } finally {
@@ -420,6 +421,21 @@ test('applyActiveRuleConfig stores active behavior for renderers', () => {
       },
     });
     assert.equal(getActiveRuleBehavior().templates.source_line, '出品：{{ article.source }}');
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test('applyActiveRuleConfig preserves structured modules for runtime UIs', () => {
+  globalThis.window = {};
+  try {
+    applyActiveRuleConfig(DEFAULT_RULE_CONFIG, {
+      id: 'structured',
+      raw_config: { modules: { asset_library: { assets: [{ id: 'x' }] }, ft_series_materials: { groups: { 包装: '/a.png' } } } },
+      behavior: DEFAULT_BEHAVIOR,
+    });
+    assert.deepEqual(window._activeConfig.config.modules.asset_library.assets, [{ id: 'x' }]);
+    assert.equal(window._activeConfig.config.modules.ft_series_materials.groups['包装'], '/a.png');
   } finally {
     delete globalThis.window;
   }

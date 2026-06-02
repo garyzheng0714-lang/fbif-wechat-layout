@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isMmbizUrl, materializeLazyImages, uploadNonCdnImages } from '../public/js/uploader.js';
+import { isMmbizUrl, materializeLazyImages, uploadAssetFile, uploadNonCdnImages } from '../public/js/uploader.js';
 
 // ---- isMmbizUrl ----
 
@@ -19,6 +19,13 @@ test('isMmbizUrl rejects non-mmbiz URLs', () => {
 
 test('isMmbizUrl is case insensitive', () => {
   assert.equal(isMmbizUrl('HTTPS://MMBIZ.QPIC.CN/test'), true);
+});
+
+test('uploadAssetFile rejects non-image files before hitting upload endpoint', async () => {
+  await assert.rejects(
+    () => uploadAssetFile(new Blob(['txt'], { type: 'text/plain' })),
+    /请选择图片文件/
+  );
 });
 
 test('materializeLazyImages replaces DOCX blob/cache refs with data URLs', async (t) => {

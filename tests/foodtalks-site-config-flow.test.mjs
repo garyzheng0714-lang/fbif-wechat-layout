@@ -76,3 +76,17 @@ test('site.html: admin applyConfig 改规则后触发 engine 同步（验收线1
   );
   assert.match(src, /applyConfig\s*\([\s\S]{0,500}syncEngineConfig/, 'applyConfig 内须调 syncEngineConfig（否则后台改规则不重排）');
 });
+
+test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并支持拖拽排序', async () => {
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /serverFooterLibrary\(\)/, '页脚侧栏应读取服务端页脚库');
+  assert.match(src, /footerLib\.presets/, '预设按钮应由服务端 presets 渲染');
+  assert.match(src, /footerLib\.segment_order/, '片段顺序应由服务端 segment_order 渲染');
+  assert.match(src, /ft\.footer\.order/, '当前文章排序应本地保存为临时选择');
+  assert.match(src, /data-seg-row/, '片段行应有拖拽目标');
+  assert.match(src, /dragstart/, '应支持拖拽排序');
+  assert.doesNotMatch(src, /<button type="button" class="ft-footer-preset" data-preset="fbif-original">FBIF原创<\/button>/, '不应在 HTML 静态写死预设按钮');
+});

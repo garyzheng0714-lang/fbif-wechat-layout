@@ -52,11 +52,44 @@ type computedStyle struct {
 	Align       string
 }
 
+const (
+	defaultImageCaptionMaxChars       = 80
+	defaultImageCaptionCenterMaxChars = 40
+)
+
+type articleBlockOptions struct {
+	CaptionMaxChars       int
+	CaptionCenterMaxChars int
+}
+
+func defaultArticleBlockOptions() articleBlockOptions {
+	return articleBlockOptions{
+		CaptionMaxChars:       defaultImageCaptionMaxChars,
+		CaptionCenterMaxChars: defaultImageCaptionCenterMaxChars,
+	}
+}
+
+func normalizeArticleBlockOptions(opts articleBlockOptions) articleBlockOptions {
+	defaults := defaultArticleBlockOptions()
+	if opts.CaptionMaxChars <= 0 || opts.CaptionMaxChars > 500 {
+		opts.CaptionMaxChars = defaults.CaptionMaxChars
+	}
+	if opts.CaptionCenterMaxChars <= 0 || opts.CaptionCenterMaxChars > opts.CaptionMaxChars {
+		opts.CaptionCenterMaxChars = defaults.CaptionCenterMaxChars
+	}
+	return opts
+}
+
 // extractArticleBlocks walks WeChat article HTML into a sequence of Blocks.
 // Unlike extractArticle (html2md.go), it preserves the visual signals
 // (font-size, color, align, bold) needed to distinguish heading vs pullquote
 // vs caption vs body — classification that Markdown can no longer represent.
 func extractArticleBlocks(rawHTML string) (title string, blocks []Block, author string) {
+	return extractArticleBlocksWithOptions(rawHTML, defaultArticleBlockOptions())
+}
+
+func extractArticleBlocksWithOptions(rawHTML string, opts articleBlockOptions) (title string, blocks []Block, author string) {
+	opts = normalizeArticleBlockOptions(opts)
 	title = extractMeta(rawHTML, "og:title")
 	if title == "" {
 		if m := regexp.MustCompile(`<title[^>]*>([^<]+)</title>`).FindStringSubmatch(rawHTML); len(m) > 1 {
@@ -75,7 +108,7 @@ func extractArticleBlocks(rawHTML string) (title string, blocks []Block, author 
 		return title, nil, ""
 	}
 
-	w := &blockWalker{}
+	w := &blockWalker{opts: opts}
 	w.walk(doc, nil, computedStyle{FontSize: 16})
 	return title, w.blocks, ""
 }
@@ -83,6 +116,7 @@ func extractArticleBlocks(rawHTML string) (title string, blocks []Block, author 
 // ---- Walker ----
 
 type blockWalker struct {
+	opts           articleBlockOptions
 	blocks         []Block
 	captionContext bool
 	captionLines   int
@@ -410,7 +444,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 		w.inRefSection = false
 	}
 
-	if w.captionContext && shouldAttachToCaptionGroup(cx, text, textLen, w.captionLines) {
+	if w.captionContext && shouldAttachToCaptionGroup(cx, text, textLen, w.captionLines, w.opts) {
 		w.blocks = append(w.blocks, Block{K: "cap", Text: text})
 		w.captionLines++
 		return
@@ -432,15 +466,15 @@ func (w *blockWalker) closeCaptionContext() {
 	w.captionLines = 0
 }
 
-func shouldAttachToCaptionGroup(cx *blockCtx, text string, textLen int, captionLines int) bool {
+func shouldAttachToCaptionGroup(cx *blockCtx, text string, textLen int, captionLines int, opts articleBlockOptions) bool {
 	if captionLines == 0 {
-		return isCaption(cx, textLen)
+		return isCaption(cx, textLen, opts)
 	}
-	return isCaptionContinuation(cx, text, textLen)
+	return isCaptionContinuation(cx, text, textLen, opts)
 }
 
-func isCaption(cx *blockCtx, textLen int) bool {
-	if textLen == 0 || textLen > 80 {
+func isCaption(cx *blockCtx, textLen int, opts articleBlockOptions) bool {
+	if textLen == 0 || textLen > opts.CaptionMaxChars {
 		return false
 	}
 	for _, c := range cx.classes {
@@ -448,7 +482,7 @@ func isCaption(cx *blockCtx, textLen int) bool {
 			return true
 		}
 	}
-	if styleSignalsCaption(cx.style, textLen) {
+	if styleSignalsCaption(cx.style, textLen, opts) {
 		return true
 	}
 	// Also scan the styles observed at each text node. WeChat puts the
@@ -456,15 +490,15 @@ func isCaption(cx *blockCtx, textLen int) bool {
 	// <p>, so the block-level style often carries no signal even though
 	// the visible style clearly marks the text as a caption.
 	for _, s := range cx.textStyles {
-		if styleSignalsCaption(s, textLen) {
+		if styleSignalsCaption(s, textLen, opts) {
 			return true
 		}
 	}
 	return false
 }
 
-func isCaptionContinuation(cx *blockCtx, text string, textLen int) bool {
-	if textLen == 0 || textLen > 80 {
+func isCaptionContinuation(cx *blockCtx, text string, textLen int, opts articleBlockOptions) bool {
+	if textLen == 0 || textLen > opts.CaptionMaxChars {
 		return false
 	}
 	if isImageSourceLine(text) {
@@ -504,14 +538,14 @@ func isImageSourceLine(text string) bool {
 		strings.HasPrefix(t, "source:")
 }
 
-func styleSignalsCaption(s computedStyle, textLen int) bool {
+func styleSignalsCaption(s computedStyle, textLen int, opts articleBlockOptions) bool {
 	if s.FontSizeSet && s.FontSize > 0 && s.FontSize <= 14 {
 		return true
 	}
 	if s.ColorSet && isGreyHex(s.Color) {
 		return true
 	}
-	if s.Align == "center" && textLen <= 40 {
+	if s.Align == "center" && textLen <= opts.CaptionCenterMaxChars {
 		return true
 	}
 	return false

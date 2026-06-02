@@ -76,22 +76,9 @@
             <input type="checkbox" id="footerEnableToggle">
             <span>输出 FoodTalks 页脚</span>
           </label>
-          <!-- 页脚预设（方角分段控件——与顶部圆角渠道胶囊区分语义层级）-->
-          <div class="ft-footer-presets" id="footerPresets">
-            <button type="button" class="ft-footer-preset" data-preset="fbif-original">FBIF原创</button>
-            <button type="button" class="ft-footer-preset" data-preset="repost-simple">转载简版</button>
-            <button type="button" class="ft-footer-preset" data-preset="tip-only">仅提示</button>
-            <button type="button" class="ft-footer-preset" data-preset="none">无</button>
-          </div>
-          <!-- 细粒度片段勾选：不同文章勾不同组合 -->
-          <div class="ft-footer-segments" id="footerSegments">
-            <label><input type="checkbox" data-seg="tip"><span>提示声明</span></label>
-            <label><input type="checkbox" data-seg="biz_coop"><span>资讯投稿 &amp; 商务合作</span></label>
-            <label><input type="checkbox" data-seg="join_group"><span>加入微信群（含二维码）</span></label>
-            <label><input type="checkbox" data-seg="follow_account"><span>关注公众号（含二维码）</span></label>
-            <label><input type="checkbox" data-seg="logo"><span>FoodTalks logo</span></label>
-            <label><input type="checkbox" data-seg="more_info"><span>点击获取更多</span></label>
-          </div>
+          <!-- 页脚预设和片段由服务端规则模块动态渲染 -->
+          <div class="ft-footer-presets" id="footerPresets"></div>
+          <div class="ft-footer-segments" id="footerSegments"></div>
         </div>
       </details>
     </div>
@@ -599,12 +586,21 @@ function loadConfig() {
 // 从服务端激活规则取页脚库【内容】（segments html_lines / presets / segment_order）。
 // 绕过 normalizeRuleConfig——它只重建已知 module（theme/supporting/...），会丢弃结构化的
 // fbif_footer。无服务端内容时返回空对象，由 buildFooterHtml 降级到 footer-segments-defaults。
-function serverFooterLibrary() {
+function serverRuleModules() {
   const ac = window._activeConfig || {};
-  let cfg = ac.config || {};
+  let cfg = (ac.preset && (ac.preset.raw_config || ac.preset.config)) || ac.config || {};
   if (cfg && cfg.config && cfg.config.modules) cfg = cfg.config; // 兼容 schema_version 2 嵌套
-  const mods = (cfg && cfg.modules) || {};
+  return (cfg && cfg.modules && typeof cfg.modules === 'object') ? cfg.modules : {};
+}
+
+function serverFooterLibrary() {
+  const mods = serverRuleModules();
   return (mods.fbif_footer && typeof mods.fbif_footer === 'object') ? mods.fbif_footer : {};
+}
+
+function serverAssetLibrary() {
+  const mods = serverRuleModules();
+  return (mods.asset_library && typeof mods.asset_library === 'object') ? mods.asset_library : {};
 }
 
 // 把当前规则（扁平参数 + 行为 + 模块开关）注入排版引擎的渲染配置。
@@ -619,16 +615,23 @@ function syncEngineConfig(triggerRerender) {
   const footerEnabled = localStorage.getItem('ft.footer.enabled') === '1';
   let footerActiveSegments = {};
   try { footerActiveSegments = JSON.parse(localStorage.getItem('ft.footer.segments') || '{}'); } catch (e) {}
+  let footerOrder = [];
+  try { footerOrder = JSON.parse(localStorage.getItem('ft.footer.order') || '[]'); } catch (e) {}
   // 页脚库【内容】（segments html_lines / presets / segment_order）以服务端 /api/rules
   // 为准——直接从 raw _activeConfig.config 取，绕过 normalizeRuleConfig（它只认已知
   // module、会丢弃结构化的 fbif_footer）。服务端无内容时由 buildFooterHtml 降级默认。
   const serverFooter = serverFooterLibrary();
+  const serverAssets = serverAssetLibrary();
+  const footerForRender = Array.isArray(footerOrder) && footerOrder.length
+    ? { ...serverFooter, segment_order: footerOrder.filter(k => k !== 'tip') }
+    : serverFooter;
   const cfg = {
     ...flat,
     behavior: serverBehavior,
     modules: {
       ...prevModules,
-      fbif_footer: { ...serverFooter, enabled: footerEnabled, active_segments: footerActiveSegments },
+      fbif_footer: { ...footerForRender, enabled: footerEnabled, active_segments: footerActiveSegments },
+      asset_library: serverAssets,
       // 网站渠道 h2 默认不输出 mctoc 锚点 id —— FoodTalks 后台生成目录时会自己加
       // （用户 2026-05-30 确认），基石 news/62285 的 h2 也不带 id。默认关，避免与后台冲突。
       mctoc: prevModules.mctoc || { enabled: false },
@@ -801,6 +804,7 @@ function wrapEngineFunctions() {
 window.fetchArticle = createUrlImportHandler({
   documentRef: document,
   fetchImpl: fetch,
+  getAccountID: () => activeRulePack.id,
   errorMessage: foodTalksFetchErrorMessage,
   onArticleUrl(url) { window._currentArticleUrl = url; },
 });
@@ -812,77 +816,71 @@ bindUrlImportShortcuts({
   ignoreClassNames: ['ma-url'],
 });
 
-// 页脚库：本地存储 + engine config 同步。enabled 总开关 + segments 细粒度勾选 +
-// 4 套预设快选。不同文章可勾不同组合（用户 2026-05-31 需求）。localStorage 是离线/
-// 兼容降级；服务端 /api/rules 下发的 behavior 仍优先。
 (() => {
-  const K_EN = 'ft.footer.enabled';
-  const K_SEG = 'ft.footer.segments';
-  const SEG_KEYS = ['tip', 'biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
-  const PRESETS = {
-    'fbif-original': { tip: 1, biz_coop: 1, join_group: 1, follow_account: 1, logo: 1, more_info: 1 },
-    'repost-simple': { tip: 1, biz_coop: 1, join_group: 0, follow_account: 0, logo: 0, more_info: 0 },
-    'tip-only':      { tip: 1, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 },
-    'none':          { tip: 0, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 },
-  };
-  const toggle = document.getElementById('footerEnableToggle');
-  const presetsEl = document.getElementById('footerPresets');
-  const segsEl = document.getElementById('footerSegments');
+  const K_EN = 'ft.footer.enabled', K_SEG = 'ft.footer.segments', K_ORDER = 'ft.footer.order';
+  const LABELS = { tip: '提示声明', biz_coop: '资讯投稿 & 商务合作', join_group: '加入微信群（含二维码）', follow_account: '关注公众号（含二维码）', logo: 'FoodTalks logo', more_info: '点击获取更多' };
+  const FALLBACK_PRESETS = [{ id: 'fbif-original', name: 'FBIF原创', segments: { tip: 1, biz_coop: 1, join_group: 1, follow_account: 1, logo: 1, more_info: 1 } }, { id: 'repost-simple', name: '转载简版', segments: { tip: 1, biz_coop: 1, join_group: 0, follow_account: 0, logo: 0, more_info: 0 } }, { id: 'tip-only', name: '仅提示', segments: { tip: 1, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 } }, { id: 'none', name: '无', segments: { tip: 0, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 } }];
+  const toggle = document.getElementById('footerEnableToggle'), presetsEl = document.getElementById('footerPresets'), segsEl = document.getElementById('footerSegments');
   if (!toggle || !presetsEl || !segsEl) return;
+  const footerLib = serverFooterLibrary();
+  const presetList = Array.isArray(footerLib.presets) && footerLib.presets.length ? footerLib.presets : FALLBACK_PRESETS;
+  const PRESETS = Object.fromEntries(presetList.map(p => [p.id, p.segments || {}]));
+  const serverOrder = Array.isArray(footerLib.segment_order) && footerLib.segment_order.length ? footerLib.segment_order : ['biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
+  const defaultOrder = ['tip', ...serverOrder.filter(k => k !== 'tip')];
+  let order = []; try { order = JSON.parse(localStorage.getItem(K_ORDER) || '[]'); } catch (e) {}
+  if (!Array.isArray(order) || !order.length) order = defaultOrder.slice();
 
-  // 一次性迁移旧 key（ft.outputFbifFooter='1' → 启用 + FBIF原创预设）
+  function renderControls() {
+    presetsEl.innerHTML = presetList.map(p => `<button type="button" class="ft-footer-preset" data-preset="${escText(p.id)}">${escText(p.name || p.id)}</button>`).join('');
+    segsEl.innerHTML = order.map(key => `<label data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}"><input type="checkbox" data-seg="${escText(key)}"><span>${escText(LABELS[key] || key)}</span></label>`).join('');
+  }
+  renderControls();
   if (localStorage.getItem(K_EN) === null && localStorage.getItem('ft.outputFbifFooter') === '1') {
     localStorage.setItem(K_EN, '1');
-    localStorage.setItem(K_SEG, JSON.stringify(PRESETS['fbif-original']));
+    localStorage.setItem(K_SEG, JSON.stringify(PRESETS['fbif-original'] || FALLBACK_PRESETS[0].segments));
   }
 
   let enabled = localStorage.getItem(K_EN) === '1';
-  let segments = {};
-  try { segments = JSON.parse(localStorage.getItem(K_SEG) || 'null') || {}; } catch (e) {}
-  if (!Object.keys(segments).length) segments = { ...PRESETS['fbif-original'] };
+  let segments = {}; try { segments = JSON.parse(localStorage.getItem(K_SEG) || 'null') || {}; } catch (e) {}
+  if (!Object.keys(segments).length) segments = { ...(PRESETS['fbif-original'] || FALLBACK_PRESETS[0].segments) };
 
   const checkboxes = () => Array.from(segsEl.querySelectorAll('input[type="checkbox"]'));
-  function matchPreset() {
-    for (const [id, segs] of Object.entries(PRESETS)) {
-      if (SEG_KEYS.every(k => !!segments[k] === !!segs[k])) return id;
-    }
-    return null;
-  }
-  function paint() {
-    toggle.checked = enabled;
-    segsEl.classList.toggle('ft-footer-disabled', !enabled);
-    presetsEl.classList.toggle('ft-footer-disabled', !enabled);
-    const active = matchPreset();
-    presetsEl.querySelectorAll('.ft-footer-preset').forEach(b =>
-      b.classList.toggle('active', b.dataset.preset === active));
-    checkboxes().forEach(cb => { cb.checked = !!segments[cb.dataset.seg]; });
-  }
-  function persist(rerender) {
-    localStorage.setItem(K_EN, enabled ? '1' : '0');
-    localStorage.setItem(K_SEG, JSON.stringify(segments));
-    syncEngineConfig(rerender);
-  }
+  const segmentKeys = () => order.slice();
+  function matchPreset() { for (const [id, segs] of Object.entries(PRESETS)) if (segmentKeys().every(k => !!segments[k] === !!segs[k])) return id; return null; }
+  function paint() { toggle.checked = enabled; segsEl.classList.toggle('ft-footer-disabled', !enabled); presetsEl.classList.toggle('ft-footer-disabled', !enabled); const active = matchPreset(); presetsEl.querySelectorAll('.ft-footer-preset').forEach(b => b.classList.toggle('active', b.dataset.preset === active)); checkboxes().forEach(cb => { cb.checked = !!segments[cb.dataset.seg]; }); }
+  function persist(rerender) { localStorage.setItem(K_EN, enabled ? '1' : '0'); localStorage.setItem(K_SEG, JSON.stringify(segments)); localStorage.setItem(K_ORDER, JSON.stringify(order)); syncEngineConfig(rerender); }
 
   paint();
   syncEngineConfig(false);
 
   toggle.addEventListener('change', () => {
     enabled = toggle.checked;
-    if (enabled && !SEG_KEYS.some(k => segments[k])) segments = { ...PRESETS['fbif-original'] };
+    if (enabled && !segmentKeys().some(k => segments[k])) segments = { ...(PRESETS['fbif-original'] || FALLBACK_PRESETS[0].segments) };
     paint(); persist(true);
   });
-  presetsEl.querySelectorAll('.ft-footer-preset').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (!enabled) enabled = true;
-      segments = { ...PRESETS[btn.dataset.preset] };
-      paint(); persist(true);
-    });
+  presetsEl.addEventListener('click', e => {
+    const btn = e.target.closest('.ft-footer-preset');
+    if (!btn) return;
+    if (!enabled) enabled = true;
+    segments = { ...(PRESETS[btn.dataset.preset] || {}) };
+    paint(); persist(true);
   });
   segsEl.addEventListener('change', (e) => {
     const cb = e.target.closest('input[type="checkbox"]');
     if (!cb) return;
     segments[cb.dataset.seg] = cb.checked ? 1 : 0;
     paint(); persist(true);
+  });
+  let dragging = '';
+  segsEl.addEventListener('dragstart', e => { const row = e.target.closest('[data-seg-row]'); dragging = row && row.dataset.segRow || ''; });
+  segsEl.addEventListener('dragover', e => { if (dragging && e.target.closest('[data-seg-row]')) e.preventDefault(); });
+  segsEl.addEventListener('drop', e => {
+    const row = e.target.closest('[data-seg-row]');
+    if (!row || !dragging || dragging === row.dataset.segRow) return;
+    e.preventDefault();
+    const from = order.indexOf(dragging), to = order.indexOf(row.dataset.segRow);
+    if (from >= 0 && to >= 0) order.splice(to, 0, order.splice(from, 1)[0]);
+    renderControls(); paint(); persist(true);
   });
 })();
 </script>

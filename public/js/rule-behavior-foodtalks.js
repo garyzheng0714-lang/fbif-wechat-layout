@@ -13,10 +13,12 @@
 // 规则来源：docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md §4
 
 import {
+  ASSET_LIBRARY_DEFAULT,
   FOOTER_SEGMENTS_DEFAULT,
   FOOTER_SEGMENT_ORDER_DEFAULT,
   FOOTER_PRESETS_DEFAULT,
 } from './footer-segments-defaults.js';
+import { resolveAssetRefs } from './asset-library.js';
 
 function runsToText(runs) {
   return (runs || [])
@@ -385,13 +387,17 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
 //   enabledSegments: { biz_coop:1, join_group:1, ... } 当前文章勾选了哪些片段
 //   library: 服务端 config.modules.fbif_footer（提供 segments 内容 + segment_order），
 //            缺省时降级到 FOOTER_SEGMENTS_DEFAULT。
+//   assetLibrary: 服务端 config.modules.asset_library，缺省时降级到 ASSET_LIBRARY_DEFAULT。
 // 勾选全 false / 缺省时返回空串。
-export function buildFooterHtml(enabledSegments, library) {
+export function buildFooterHtml(enabledSegments, library, assetLibrary, scope = 'global') {
   const seg = enabledSegments || {};
   const lib = library || {};
   const segments = (lib.segments && typeof lib.segments === 'object') ? lib.segments : FOOTER_SEGMENTS_DEFAULT;
   const order = (Array.isArray(lib.segment_order) && lib.segment_order.length)
     ? lib.segment_order : FOOTER_SEGMENT_ORDER_DEFAULT;
+  const assets = (assetLibrary && (Array.isArray(assetLibrary) || Array.isArray(assetLibrary.assets)))
+    ? assetLibrary
+    : ASSET_LIBRARY_DEFAULT;
   const lines = [];
   for (const key of order) {
     if (!seg[key]) continue;
@@ -399,7 +405,7 @@ export function buildFooterHtml(enabledSegments, library) {
     if (!entry) continue;
     // 兼容服务端 {html_lines:[...]} 与纯数组两种结构
     const htmlLines = Array.isArray(entry) ? entry : (Array.isArray(entry.html_lines) ? entry.html_lines : []);
-    lines.push(...htmlLines);
+    lines.push(...resolveAssetRefs(htmlLines, assets, scope));
   }
   return lines.join('\n');
 }

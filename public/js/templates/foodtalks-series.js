@@ -17,6 +17,8 @@ const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
 const defaultsModule = await import('../foodtalks-series-defaults.js' + assetQuery);
 const { SERIES_COLORS, SERIES_SIZES, SERIES_LAYOUT, SERIES_FRONTMATTER } = defaultsModule;
+const tableModule = await import('./shared/table-renderer.js' + assetQuery);
+const { renderTable: renderSharedTable } = tableModule;
 
 // ── config 读取（优先扁平 config 键，缺省降级系列常量）──
 function cfgNum(config, key, fallback) {
@@ -124,71 +126,40 @@ function runsToPlain(runs) {
 }
 
 // ── 表格（统一表格样式，内联；表头底色读 table_header_bg，系列默认 #02396b）──
-function renderTableCellRuns(runs) {
-  const segs = [[]];
-  for (const r of (runs || [])) {
-    if (r.type === 'br') segs.push([]);
-    else segs[segs.length - 1].push(r);
-  }
-  return segs.map(seg => seg.filter(r => r.type !== 'img').map(r => {
-    if (r.type === 'txt') { const t = esc(r.text); return r.bold ? '<strong>' + t + '</strong>' : t; }
-    if (r.type === 'link') {
-      const h = r.href || '';
-      return HTTP_RE.test(h) ? `<a href="${escAttr(h)}">${esc(r.text)}</a>` : esc(r.text);
-    }
-    return '';
-  }).join('')).join('<br>');
+function tableRunRenderers() {
+  return {
+    text(r) {
+      if (r.type === 'txt') { const t = esc(r.text); return r.bold ? '<strong>' + t + '</strong>' : t; }
+      return '';
+    },
+    link(r) {
+      if (r.type === 'link') {
+        const h = r.href || '';
+        return HTTP_RE.test(h) ? `<a href="${escAttr(h)}">${esc(r.text)}</a>` : esc(r.text);
+      }
+      return '';
+    },
+  };
 }
 // 信息表（成品标准）：首行=标题文字+其余空 → 渲成跨整行的深蓝实心横幅（白字加粗居中、无内框）；
 // 列宽按 DOCX gridCol 比例（左窄右宽）走 colgroup + table-layout:fixed；正文格细灰边框居中、多行。
 function renderTable(elem, config) {
-  const headerBg = cfgColor(config, 'table_header_bg', '#02396b');
-  const headerColor = cfgColor(config, 'table_header_text_color', '#ffffff');
-  const borderColor = cfgColor(config, 'table_border_color', '#888888');
   const fs = cfgNum(config, 'table_font_size', 15);
   const padRaw = Number(config && config.table_cell_padding);
   const pad = Number.isFinite(padRaw) && padRaw >= 0 ? padRaw : 8;
-  const headerBold = !(config && config.table_header_bold === false);
-  const rows = elem.rows || [];
-  const colCount = rows.reduce((m, r) => Math.max(m, (r || []).length), 0);
-  const cellHtml = (cell) => renderTableCellRuns(cell && cell.runs);
-
-  // 列宽：DOCX gridCol 比例下发（左窄右宽）；否则等宽 fallback。
-  // 微信公众号粘贴会剥离 <col> 上的 style，但保留 width 属性（135 编辑器同款方案，否则
-  // 跨列表头 + table-layout:fixed 会让列宽被首行决定 → 后台均分）。故 width 属性承载列宽
-  // （整数百分比、末列吸收舍入误差保证合计 100），style 仅供浏览器预览精确显示。
-  const cw = (Array.isArray(elem.colWidths) ? elem.colWidths : []).filter(n => n > 0);
-  let colgroup = '';
-  if (cw.length === colCount && colCount > 1) {
-    const total = cw.reduce((a, b) => a + b, 0);
-    const pcts = cw.map(w => w / total * 100);
-    const ints = pcts.map(p => Math.round(p));
-    ints[ints.length - 1] += 100 - ints.reduce((a, b) => a + b, 0);
-    colgroup = '<colgroup>' + pcts.map((p, i) => `<col width="${ints[i]}%" style="width: ${p.toFixed(2)}%;" />`).join('') + '</colgroup>';
-  }
-
-  const headStyle = (extraBorder) =>
-    `padding: ${pad}px; font-size: ${fs}px; text-align: center; background-color: ${headerBg}; color: ${headerColor};` +
-    (headerBold ? ' font-weight: bold;' : '') + ` border: 1px solid ${extraBorder};`;
-  const cellBase = `border: 1px solid ${borderColor}; padding: ${pad}px; font-size: ${fs}px; text-align: center; word-break: break-word; vertical-align: middle;`;
-  // 横幅表头：首行仅首格有内容、其余皆空。
-  const isBanner = (row) => Array.isArray(row) && row.length >= 1 && (cellHtml(row[0]) || '').trim() &&
-    row.slice(1).every(c => !(cellHtml(c) || '').trim());
-
-  const body = rows.map((row, ri) => {
-    if (ri === 0 && colCount > 1 && isBanner(row)) {
-      // 跨整行深蓝横幅（边框同底色 → 视觉无内框，与成品一致）。
-      return `<tr><td colspan="${colCount}" style="${headStyle(headerBg)}">${cellHtml(row[0]) || '<br>'}</td></tr>`;
-    }
-    return '<tr>' + (row || []).map(cell => {
-      const style = cell && cell.header
-        ? cellBase.replace('vertical-align: middle;', `vertical-align: middle; background-color: ${headerBg}; color: ${headerColor};${headerBold ? ' font-weight: bold;' : ''}`)
-        : cellBase + ' color: rgba(0, 0, 0, 0.9);';
-      return `<td style="${style}">${cellHtml(cell) || '<br>'}</td>`;
-    }).join('') + '</tr>';
-  }).join('');
-
-  return `<table style="border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0 auto;">${colgroup}<tbody>${body}</tbody></table>`;
+  return renderSharedTable(elem, {
+    headerBg: cfgColor(config, 'table_header_bg', '#02396b'),
+    headerColor: cfgColor(config, 'table_header_text_color', '#ffffff'),
+    borderColor: cfgColor(config, 'table_border_color', '#888888'),
+    fontSize: fs,
+    padding: pad,
+    headerBold: !(config && config.table_header_bold === false),
+    marginAuto: true,
+    verticalAlignMiddle: true,
+    useColgroup: true,
+    bannerHeader: true,
+    renderers: tableRunRenderers(),
+  });
 }
 
 // 连续正文紧凑判定（红线#18）：移植 fbif.js 的同名口径（不跨渲染器 import——红线#19），

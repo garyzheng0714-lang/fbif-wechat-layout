@@ -708,6 +708,7 @@ function wrapEngineFunctions() {
 window.fetchArticle = createUrlImportHandler({
   documentRef: document,
   fetchImpl: fetch,
+  getAccountID: () => activeRulePack.id,
   onArticleUrl(url) { window._currentArticleUrl = url; },
 });
 

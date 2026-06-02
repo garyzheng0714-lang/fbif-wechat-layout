@@ -54,6 +54,8 @@ const { adaptiveImageWidth } = imageWidthModule;
 // 本数据模块）。网站口径保留：consumeAuthorLine/classifyReferences 均 false（见 classifyDocx）。
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
+const tableModule = await import('./shared/table-renderer.js' + assetQuery);
+const { renderTable: renderSharedTable } = tableModule;
 
 // ---- 图片注释智能识别 ----
 
@@ -250,40 +252,34 @@ function renderImageCaption(text, config = {}) {
 // 网站渲染器本就全 inline-style（粘进 FoodTalks 后台编辑器），表格同样把 border/底色/字号/
 // 内距内联到每个 td。颜色/字号/边框/内距读扁平 config 键（cfgColor/cfgNum，红线下放规则后台
 // 可配），缺省降级到与服务端 defaultRuleConfig 逐字一致的 const（与公众号同一套默认值=统一）。
-function renderTableCellRuns(runs) {
-  const segs = [[]];
-  for (const r of (runs || [])) {
-    if (r.type === 'br') segs.push([]);
-    else segs[segs.length - 1].push(r);
-  }
-  // 单元格内图片单独渲成受单元格约束的 inline <img>（renderRuns 会过滤 img）；
-  // 空 src 跳过（红线：网站绝不输出 <img src="">，坏 HTML 会污染 FoodTalks 后台）。
-  return segs.map(seg => seg.map(r => {
+function tableRunRenderers() {
+  return {
+    text: r => renderRuns([r]),
+    link: r => renderRuns([r]),
+    image(r) {
     if (r.type === 'img') {
       if (!r.src) return '';
       const rpol = r.src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
       return '<img style="display: block; margin: 0 auto; max-width: 100%; height: auto;" src="' +
         escAttr(r.src) + '"' + rpol + '>';
     }
-    return renderRuns([r]);
-  }).join('')).join('<br>');
+      return '';
+    },
+  };
 }
 function renderTable(elem, config = {}) {
-  const headerBg = cfgColor(config, 'table_header_bg', '#01396a');
-  const headerColor = cfgColor(config, 'table_header_text_color', '#ffffff');
-  const borderColor = cfgColor(config, 'table_border_color', '#e5e7eb');
   const fs = cfgNum(config, 'table_font_size', 15);
   const padRaw = Number(config && config.table_cell_padding);
   const pad = Number.isFinite(padRaw) && padRaw >= 0 ? padRaw : 8;
-  const headerBold = !(config && config.table_header_bold === false);
-  const cellBase = `border: 1px solid ${borderColor}; padding: ${pad}px; font-size: ${fs}px; text-align: center; word-break: break-word;`;
-  const body = (elem.rows || []).map(row => '<tr>' + (row || []).map(cell => {
-    const style = cellBase + (cell.header
-      ? ` background-color: ${headerBg}; color: ${headerColor};${headerBold ? ' font-weight: bold;' : ''}`
-      : ' color: rgba(0, 0, 0, 0.9);');
-    return `<td style="${style}">${renderTableCellRuns(cell.runs) || '<br>'}</td>`;
-  }).join('') + '</tr>').join('');
-  return `<table style="border-collapse: collapse; width: 100%; table-layout: fixed;"><tbody>${body}</tbody></table>`;
+  return renderSharedTable(elem, {
+    headerBg: cfgColor(config, 'table_header_bg', '#01396a'),
+    headerColor: cfgColor(config, 'table_header_text_color', '#ffffff'),
+    borderColor: cfgColor(config, 'table_border_color', '#e5e7eb'),
+    fontSize: fs,
+    padding: pad,
+    headerBold: !(config && config.table_header_bold === false),
+    renderers: tableRunRenderers(),
+  });
 }
 
 // 把图片后 3 段内最多 2 段"看起来像图注"的普通段提升为图注块
@@ -457,7 +453,7 @@ function render(elems, config = {}) {
   if (footerCfg.enabled) {
     // active_segments = 当前文章勾选了哪些片段；footerCfg 提供页脚库内容
     // （segments 的 html_lines + segment_order，来自服务端 /api/rules，缺省降级默认）。
-    const footerHtml = buildFooterHtml(footerCfg.active_segments, footerCfg);
+    const footerHtml = buildFooterHtml(footerCfg.active_segments, footerCfg, config.modules && config.modules.asset_library, 'ft-default');
     if (footerHtml) {
       lines.push(BLANK_LINE);
       lines.push(footerHtml);

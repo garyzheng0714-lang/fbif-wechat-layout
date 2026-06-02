@@ -464,6 +464,12 @@ func validateRuleConfigKeys(config map[string]any) error {
 				}
 				continue
 			}
+			if moduleName == "asset_library" {
+				if err := validateAssetLibraryModule(rawModule); err != nil {
+					return err
+				}
+				continue
+			}
 			allowedFields, ok := ruleModuleFields[moduleName]
 			if !ok {
 				return fmt.Errorf("unknown rule module: %s", moduleName)
@@ -671,7 +677,7 @@ func validateFtSeriesMaterialsModule(raw any) error {
 //
 // 缺省（nil）允许。每个 list 值必须为字符串数组；做 XSS 防护与长度上限；
 // 名含 marker/signature/regex/pattern 的项额外做 RE2 可编译校验
-//（客户端用 new RegExp 编译，开头 (?i) 由客户端适配为 i flag）。
+// （客户端用 new RegExp 编译，开头 (?i) 由客户端适配为 i flag）。
 func validateRuleBehaviorLists(raw any) error {
 	if raw == nil {
 		return nil

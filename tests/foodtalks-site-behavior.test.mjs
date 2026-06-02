@@ -8,6 +8,7 @@ import {
   buildFooterHtml,
   FOOTER_PRESETS,
 } from '../public/js/rule-behavior-foodtalks.js';
+import { ASSET_LIBRARY_DEFAULT } from '../public/js/footer-segments-defaults.js';
 
 const DEFAULT_CONFIG = {
   behavior: {
@@ -178,6 +179,33 @@ test('页脚库：segments 关闭则不输出对应片段，全关返回空串',
   assert.doesNotMatch(simple, /关注公众号/, 'follow_account 关则无关注公众号');
   assert.equal(buildFooterHtml({}), '', '全关返回空串');
   assert.equal(buildFooterHtml(), '', 'segments 缺省返回空串');
+});
+
+test('页脚库：默认占位符迁移后输出 HTML 与旧固定 URL 字节一致', () => {
+  const html = buildFooterHtml({ join_group: true, follow_account: true, logo: true });
+  const expected = [
+    '<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="https://static.foodtalks.cn/image/post/07079a66940e1ff57e71b140e7e36357.webp" alt="" width="600" /></p>',
+    '<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>',
+    '<p><br /></p>',
+    '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="https://static.foodtalks.cn/image/news/6e309987660da9af009b89be08c4aa74ed78.png" alt="00" width="600" height="267" /></p>',
+    '<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。</span></em></p>',
+    '<p style="color: #01396a; font-size: 20px;"><strong>关注公众号</strong></p>',
+    '<p><br /></p>',
+    '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="https://static.foodtalks.cn/image/post/b5b448f324a538209eb53379bef8dea9a7bf.jpg" alt="" width="600" height="221" /></p>',
+    '<p><img style="max-width: 100%; height: 27px; width: 126px;" src="https://static.foodtalks.cn/uploads/images/202007/e155b7852c10a72f7b73157fdf9c4bf0.png" alt="FoodTalks logo" width="130" height="27" border="0" /></p>',
+  ].join('\n');
+  assert.equal(html, expected);
+  assert.doesNotMatch(html, /\{\{asset/, '渲染结果不得残留 asset 占位符');
+});
+
+test('页脚库：改素材库里 qr_group 一处，所有 usage 引用自动换图', () => {
+  const assetLibrary = JSON.parse(JSON.stringify(ASSET_LIBRARY_DEFAULT));
+  const qr = assetLibrary.assets.find(asset => asset.usage === 'qr_group');
+  qr.url = 'https://static.foodtalks.cn/image/news/replaced-qr.png';
+
+  const html = buildFooterHtml({ join_group: true }, undefined, assetLibrary, 'ft-default');
+  assert.match(html, /replaced-qr\.png/, '页脚引用 qr_group 的位置应使用素材库新 URL');
+  assert.doesNotMatch(html, /6e309987660da9af/, '旧二维码 URL 不应继续输出');
 });
 
 test('页脚库：FOOTER_PRESETS 含预设，fbif-original 全开含关注公众号', () => {

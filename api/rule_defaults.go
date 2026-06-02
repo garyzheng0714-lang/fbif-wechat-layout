@@ -35,20 +35,23 @@ func defaultRuleConfig() map[string]any {
 		"more_articles_default_cards": defaultMoreArticleCards(),
 		// 统一表格样式（公众号与网站共享这一套默认；各 preset 可在规则后台独立覆盖）。
 		// 默认复刻 FBIF/FoodTalks 既有公众号表格：FoodTalks 蓝表头 + 白字 + 浅灰网格线。
-		"table_header_bg":         "#01396a",
-		"table_header_text_color": "#ffffff",
-		"table_header_bold":       true,
-		"table_border_color":      "#e5e7eb",
-		"table_font_size":         "15",
-		"table_cell_padding":      "8",
-		"banner_overlay_alpha":        "0.47058823529411764",
-		"banner_title_x":              "61",
-		"banner_title_y":              "92",
-		"banner_title_width":          "878",
-		"banner_title_box_height":     "116",
-		"banner_title_font_size":      "48",
-		"banner_title_line_height":    "70",
-		"banner_title_max_lines":      "2",
+		"table_header_bg":          "#01396a",
+		"table_header_text_color":  "#ffffff",
+		"table_header_bold":        true,
+		"table_border_color":       "#e5e7eb",
+		"table_font_size":          "15",
+		"table_cell_padding":       "8",
+		"banner_overlay_alpha":     "0.47058823529411764",
+		"banner_title_x":           "61",
+		"banner_title_y":           "92",
+		"banner_title_width":       "878",
+		"banner_title_box_height":  "116",
+		"banner_title_font_size":   "48",
+		"banner_title_line_height": "70",
+		"banner_title_max_lines":   "2",
+		"modules": map[string]any{
+			"asset_library": defaultAssetLibraryModule(),
+		},
 	}
 }
 
@@ -108,7 +111,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // BuiltinVersion 落后的内置 preset，绕过「已持久化则代码默认永不覆盖」的旧行为。
 // v1→v2（2026-06-02）：FoodTalks「什么是」系列改为独立默认（深蓝 #02396b、表格边框 #888888、
 // 18 群 ft_series_materials、BD 名片 bd_card），修复 5/26 持久化的 FBIF 派生旧版。
-const currentBuiltinRuleVersion = 2
+// v2→v3（2026-06-02）：新增 asset_library 素材库种子，并把 FoodTalks 网站页脚图片 URL
+// 从 html_lines 内联迁为 {{asset:usage}} 引用。
+const currentBuiltinRuleVersion = 3
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -206,21 +211,12 @@ func defaultFoodTalksSiteRuleConfig() map[string]any {
 			"landscape_px": 600, // 横图宽度
 		},
 		"modules": map[string]any{
-			"mctoc": map[string]any{
-				"enabled": true,
-			},
-			"fbif_footer": defaultFBIFFooterModule(),
+			"mctoc":         map[string]any{"enabled": true},
+			"fbif_footer":   defaultFBIFFooterModule(),
+			"asset_library": defaultAssetLibraryModule(),
 		},
 	}
 }
-
-// 页脚库固定资源 URL（6 篇真实基石核对 100% 一致）。
-const (
-	ftFooterDecorImg  = "https://static.foodtalks.cn/image/post/07079a66940e1ff57e71b140e7e36357.webp"
-	ftFooterGroupQR   = "https://static.foodtalks.cn/image/news/6e309987660da9af009b89be08c4aa74ed78.png"
-	ftFooterAccountQR = "https://static.foodtalks.cn/image/post/b5b448f324a538209eb53379bef8dea9a7bf.jpg"
-	ftFooterLogo      = "https://static.foodtalks.cn/uploads/images/202007/e155b7852c10a72f7b73157fdf9c4bf0.png"
-)
 
 // defaultFBIFFooterModule 返回页脚库的服务端默认种子（规则后台可编辑、可增删预设）。
 // 与前端 public/js/footer-segments-defaults.js 的降级常量保持一致；真相以 /api/rules 为准。
@@ -241,19 +237,19 @@ func defaultFBIFFooterModule() map[string]any {
 				`<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*资讯投稿与商务合作，请查看&ldquo;<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/news/30752" target="_blank" rel="noopener">FoodTalks商务合作方案</a>&rdquo;，并联系Bobo。</span></em></p>`,
 			),
 			"join_group": seg(
-				`<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="`+ftFooterDecorImg+`" alt="" width="600" /></p>`,
+				`<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefUsage("banner")+`" alt="" width="600" /></p>`,
 				`<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>`,
 				`<p><br /></p>`,
-				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+ftFooterGroupQR+`" alt="00" width="600" height="267" /></p>`,
+				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefUsage("qr_group")+`" alt="00" width="600" height="267" /></p>`,
 				`<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。</span></em></p>`,
 			),
 			"follow_account": seg(
 				`<p style="color: #01396a; font-size: 20px;"><strong>关注公众号</strong></p>`,
 				`<p><br /></p>`,
-				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+ftFooterAccountQR+`" alt="" width="600" height="221" /></p>`,
+				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefUsage("qr_account")+`" alt="" width="600" height="221" /></p>`,
 			),
 			"logo": seg(
-				`<p><img style="max-width: 100%; height: 27px; width: 126px;" src="` + ftFooterLogo + `" alt="FoodTalks logo" width="130" height="27" border="0" /></p>`,
+				`<p><img style="max-width: 100%; height: 27px; width: 126px;" src="` + assetRefUsage("logo") + `" alt="FoodTalks logo" width="130" height="27" border="0" /></p>`,
 			),
 			"more_info": seg(
 				`<p>点击获取更多<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/" target="_blank" rel="noopener">全球食品资讯</a></p>`,
@@ -330,18 +326,18 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 func defaultFoodTalksSeriesRuleConfig() map[string]any {
 	return map[string]any{
 		// 视觉：深蓝主色 + 棕灰正文 + 灰辅助（继承未列项由 mergeRuleDefaults 取 FBIF 基线）
-		"heading_color":          "#02396b", // 一级/二级标题、目录标题、超链接
-		"text_color":             "#544545", // 正文
-		"muted_color":            "#888888", // 推荐阅读/参考来源/图注/作者说明
-		"link_color":             "#02396b", // 超链接（下划线）
-		"font_size":              "15",
-		"h1_font_size":           "20", // 一级标题文字（序号图下方居中）
-		"h2_font_size":           "16", // 二级标题
-		"toc_title_size":         "16", // 「目录」二字
-		"caption_font_size":      "12", // 图片说明 & 图片来源
-		"attribution_font_size":  "14", // 作者、文末图源说明（斜体）
-		"paragraph_margin_x":     "8",  // 两端缩进 8
-		"paragraph_gap":          "20",
+		"heading_color":         "#02396b", // 一级/二级标题、目录标题、超链接
+		"text_color":            "#544545", // 正文
+		"muted_color":           "#888888", // 推荐阅读/参考来源/图注/作者说明
+		"link_color":            "#02396b", // 超链接（下划线）
+		"font_size":             "15",
+		"h1_font_size":          "20", // 一级标题文字（序号图下方居中）
+		"h2_font_size":          "16", // 二级标题
+		"toc_title_size":        "16", // 「目录」二字
+		"caption_font_size":     "12", // 图片说明 & 图片来源
+		"attribution_font_size": "14", // 作者、文末图源说明（斜体）
+		"paragraph_margin_x":    "8",  // 两端缩进 8
+		"paragraph_gap":         "20",
 		// 统一表格样式：表头深蓝
 		"table_header_bg":         "#02396b",
 		"table_header_text_color": "#ffffff",
@@ -368,24 +364,24 @@ func defaultFtSeriesMaterialsModule() map[string]any {
 		sections[strconv.Itoa(i)] = fmt.Sprintf("/assets/foodtalks-series/sections/%02d.png", i)
 	}
 	groups := map[string]any{
-		"调味品": "/assets/foodtalks-series/groups/seasoning.png",
-		"乳品": "/assets/foodtalks-series/groups/dairy.png",
-		"零食": "/assets/foodtalks-series/groups/snack.png",
-		"饮料": "/assets/foodtalks-series/groups/beverage.png",
-		"包装": "/assets/foodtalks-series/groups/packaging.png",
-		"奶酪": "/assets/foodtalks-series/groups/cheese.png",
+		"调味品":    "/assets/foodtalks-series/groups/seasoning.png",
+		"乳品":     "/assets/foodtalks-series/groups/dairy.png",
+		"零食":     "/assets/foodtalks-series/groups/snack.png",
+		"饮料":     "/assets/foodtalks-series/groups/beverage.png",
+		"包装":     "/assets/foodtalks-series/groups/packaging.png",
+		"奶酪":     "/assets/foodtalks-series/groups/cheese.png",
 		"食品供需对接": "/assets/foodtalks-series/groups/supply-demand.png",
-		"烘焙": "/assets/foodtalks-series/groups/bakery.png",
-		"功能性食品": "/assets/foodtalks-series/groups/functional.png",
-		"新茶饮": "/assets/foodtalks-series/groups/tea.png",
-		"冰淇淋": "/assets/foodtalks-series/groups/icecream.png",
-		"配料": "/assets/foodtalks-series/groups/ingredient.png",
-		"营销": "/assets/foodtalks-series/groups/marketing.png",
-		"渠道": "/assets/foodtalks-series/groups/channel.png",
-		"代工": "/assets/foodtalks-series/groups/oem.png",
-		"酒类": "/assets/foodtalks-series/groups/alcohol.png",
-		"食品资讯": "/assets/foodtalks-series/groups/news.png",
-		"方便速食": "/assets/foodtalks-series/groups/convenience.png",
+		"烘焙":     "/assets/foodtalks-series/groups/bakery.png",
+		"功能性食品":  "/assets/foodtalks-series/groups/functional.png",
+		"新茶饮":    "/assets/foodtalks-series/groups/tea.png",
+		"冰淇淋":    "/assets/foodtalks-series/groups/icecream.png",
+		"配料":     "/assets/foodtalks-series/groups/ingredient.png",
+		"营销":     "/assets/foodtalks-series/groups/marketing.png",
+		"渠道":     "/assets/foodtalks-series/groups/channel.png",
+		"代工":     "/assets/foodtalks-series/groups/oem.png",
+		"酒类":     "/assets/foodtalks-series/groups/alcohol.png",
+		"食品资讯":   "/assets/foodtalks-series/groups/news.png",
+		"方便速食":   "/assets/foodtalks-series/groups/convenience.png",
 	}
 	cardNames := []string{"Aimee", "Charlie", "Eileen", "Erica", "Estelle", "Isaac", "Justine", "Kee", "Lan", "Rain", "Renee", "Soso", "Tiki", "Tina", "Yisa"}
 	cards := map[string]any{}
@@ -421,8 +417,8 @@ func defaultFoodTalksSeriesRuleBehavior() map[string]any {
 			"ref_item_regex":            map[string]any{"type": "string", "default": `^\s*\[\d+\]`},
 			// 前置物料剥离：系列文章无「作者：」行，正文以头图为锚点。'firstImage' = 头图之前的
 			// 标题段 + 单格副标题表格都是编辑前置物料（进微信后台标题/摘要），不进正文。
-			"content_start_signal":      map[string]any{"type": "string", "default": "firstImage"},
-			"front_matter_scan_limit":   map[string]any{"type": "number", "default": 25},
+			"content_start_signal":    map[string]any{"type": "string", "default": "firstImage"},
+			"front_matter_scan_limit": map[string]any{"type": "number", "default": 25},
 		},
 		"lists": map[string]any{
 			"image_caption_keywords": []any{

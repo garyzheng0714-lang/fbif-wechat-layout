@@ -24,12 +24,13 @@ import {
 import { createMoreArticlesRuleEditor } from './more-articles-rule-editor.js';
 import { createFooterLibraryEditor } from './footer-library-rule-editor.js';
 import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
+import { createAssetLibraryEditor } from './asset-library-rule-editor.js';
+import { assetLibraryFromPreset, defaultAssetLibraryData } from './admin-asset-data.js';
 import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 
 const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
-
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -53,7 +54,6 @@ function ruleListFromDoc(doc) {
   if (doc && doc.rules && typeof doc.rules === 'object') return Object.values(doc.rules);
   return [];
 }
-
 export function uniqueClientRuleID(name, doc) {
   const base = clientRuleID(name);
   const used = new Set(ruleListFromDoc(doc)
@@ -148,7 +148,8 @@ export function initAdminPanel(options = {}) {
   let workingConfig = normalizeRuleConfig(getConfig());
   let workingBehavior = normalizeRuleBehavior(getBehavior());
   let workingFooter = null;
-  let footerEditorInstance = null;
+  let workingAssets = null;
+  let footerEditorInstance = null, assetEditorInstance = null;
   let workingName = '未命名规则';
   let workingDescription = '';
   let jsonText = '';
@@ -177,6 +178,7 @@ export function initAdminPanel(options = {}) {
     workingName = selected && selected.name ? selected.name : '未命名规则';
     workingDescription = selected && selected.description ? selected.description : '';
     workingFooter = footerFromPreset(selected);
+    workingAssets = assetLibraryFromPreset(selected);
     syncJSONText();
     syncBehaviorText();
     applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' });
@@ -283,48 +285,20 @@ export function initAdminPanel(options = {}) {
   }
 
   function sampleBehaviorContext() {
-    return {
-      article: {
-        author: 'Mote莫特',
-        source: 'FoodTalks',
-        author_normalized: normalizeAuthorName('Mote莫特'),
-      },
-      account: { name: 'FBIF' },
-    };
+    return { article: { author: 'Mote莫特', source: 'FoodTalks', author_normalized: normalizeAuthorName('Mote莫特') }, account: { name: 'FBIF' } };
   }
 
   function renderBehaviorPreviewHTML() {
     const context = sampleBehaviorContext();
     const validation = validateBehaviorDraft();
     const behavior = normalizeRuleBehavior(validation.ok ? validation.behavior : workingBehavior);
-    const rows = [
-      ['作者行', renderBehaviorTemplate(behavior.templates.author_line, context)],
-      ['来源行', renderBehaviorTemplate(behavior.templates.source_line, context)],
-      ['原创提示', renderBehaviorTemplate(behavior.templates.footer_original_notice, context)],
-      ['转载提示', renderBehaviorTemplate(behavior.templates.footer_repost_notice, context)],
-    ];
+    const rows = [['作者行', behavior.templates.author_line], ['来源行', behavior.templates.source_line], ['原创提示', behavior.templates.footer_original_notice], ['转载提示', behavior.templates.footer_repost_notice]];
     const insertImage = behavior.actions.some(action => action.type === 'insert_image_before' && action.when === 'is_mote_author');
-    return `
-      <div class="admin-preview-grid">
-        ${rows.map(([label, value]) => `
-          <div class="admin-preview-row">
-            <span>${esc(label)}</span>
-            <code>${esc(value)}</code>
-          </div>
-        `).join('')}
-        <div class="admin-preview-row">
-          <span>Mote 署名图</span>
-          <code>${insertImage ? '会在参考来源前插入' : '不会插入'}</code>
-        </div>
-      </div>`;
+    return `<div class="admin-preview-grid">${rows.map(([label, tpl]) => `<div class="admin-preview-row"><span>${esc(label)}</span><code>${esc(renderBehaviorTemplate(tpl, context))}</code></div>`).join('')}<div class="admin-preview-row"><span>Mote 署名图</span><code>${insertImage ? '会在参考来源前插入' : '不会插入'}</code></div></div>`;
   }
 
   function renderRuleTabs() {
-    const tabs = [
-      ['params', '参数'],
-      ['behavior', '代码化规则'],
-      ['validation', '校验预览'],
-    ];
+    const tabs = [['params', '参数'], ['assets', '素材库'], ['behavior', '代码化规则'], ['validation', '校验预览']];
     if (isFtDefaultPack()) tabs.push(['footer', '页脚库']);
     return `
       <div class="admin-rule-tabs" role="tablist" aria-label="规则编辑分区">
@@ -494,6 +468,9 @@ export function initAdminPanel(options = {}) {
     if (activeRuleTab === 'footer') {
       return `<section class="admin-rule-group"><div data-role="footer-library-editor"></div></section>`;
     }
+    if (activeRuleTab === 'assets') {
+      return `<section class="admin-rule-group"><div data-role="asset-library-editor"></div></section>`;
+    }
     if (activeRuleTab === 'behavior') {
       return `
         <section class="admin-rule-group admin-json-panel">
@@ -636,8 +613,16 @@ export function initAdminPanel(options = {}) {
     footerEditorInstance = createFooterLibraryEditor({
       container: mount,
       footerData: workingFooter || defaultFooterData(),
+      assetLibrary: workingAssets || defaultAssetLibraryData(),
       onChange(next) { workingFooter = next; },
     });
+  }
+
+  function bindAssetLibraryEditor() {
+    const mount = overlay && overlay.querySelector('[data-role="asset-library-editor"]');
+    if (!mount) return;
+    if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
+    assetEditorInstance = createAssetLibraryEditor({ container: mount, assetLibrary: workingAssets || defaultAssetLibraryData(), onChange(next) { workingAssets = next; } });
   }
 
   function bindMain() {
@@ -651,6 +636,7 @@ export function initAdminPanel(options = {}) {
     overlay.querySelectorAll('[data-rule-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
         if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
+        if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
         activeRuleTab = btn.dataset.ruleTab;
         renderMain();
       });
@@ -665,6 +651,7 @@ export function initAdminPanel(options = {}) {
           if (accountID === ((window._activeRulePack && window._activeRulePack.id) || 'fbif')) {
             workingConfig = normalizeRuleConfig(selected ? selected.config : workingConfig);
             workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : workingBehavior);
+            workingAssets = assetLibraryFromPreset(selected);
             selectedID = ruleID;
             syncBehaviorText();
             applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' });
@@ -675,12 +662,14 @@ export function initAdminPanel(options = {}) {
     if (activeView !== 'rules') return;
     bindMoreArticlesRuleEditor();
     bindFooterLibraryEditor();
+    bindAssetLibraryEditor();
     overlay.querySelector('[data-role="preset-select"]').addEventListener('change', e => {
       selectedID = e.target.value;
       const selected = selectedPreset();
       workingConfig = normalizeRuleConfig(selected ? selected.config : getConfig());
       workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : getBehavior());
       workingFooter = footerFromPreset(selected);
+      workingAssets = assetLibraryFromPreset(selected);
       workingName = selected && selected.name ? selected.name : '未命名规则';
       workingDescription = selected && selected.description ? selected.description : '';
       syncJSONText();
@@ -770,6 +759,7 @@ export function initAdminPanel(options = {}) {
       workingBehavior = normalizeRuleBehavior(draftPreset.behavior);
       workingName = draftPreset.name;
       workingDescription = draftPreset.description;
+      workingAssets = defaultAssetLibraryData();
       syncJSONText();
       syncBehaviorText();
       applyConfig(workingConfig, draftPreset);
@@ -796,11 +786,13 @@ export function initAdminPanel(options = {}) {
     });
     async function savePresetWithFooter(preset) {
       const configDoc = buildRuleConfigDocument(preset.config, { name: preset.name, description: preset.description });
+      const oc = (presetByID(doc, preset.id) || {}).config || {};
+      const ocModules = oc.modules || {};
+      configDoc.modules.asset_library = JSON.parse(JSON.stringify(workingAssets || ocModules.asset_library || defaultAssetLibraryData()));
       if (isFtDefaultPack()) {
         // 保留 buildRuleConfigDocument 丢弃的网站结构化字段（顶层 image、mctoc、fbif_footer）
-        const oc = (presetByID(doc, preset.id) || {}).config || {};
         if (oc.image) configDoc.image = oc.image;
-        if (oc.modules && oc.modules.mctoc) configDoc.modules.mctoc = oc.modules.mctoc;
+        if (ocModules.mctoc) configDoc.modules.mctoc = ocModules.mctoc;
         configDoc.modules.fbif_footer = JSON.parse(JSON.stringify(workingFooter || defaultFooterData()));
       }
       const body = { id: preset.id, name: preset.name, description: preset.description, config: serverRuleConfigDocument(configDoc), behavior: preset.behavior };

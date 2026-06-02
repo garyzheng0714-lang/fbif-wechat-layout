@@ -381,6 +381,9 @@ export function saveLocalRuleConfig(config, accountID = DEFAULT_RULE_ACCOUNT_ID)
 
 export function applyActiveRuleConfig(config, preset) {
   const normalized = normalizeRuleConfig(config);
+  const rawConfig = isPlainObject(preset && preset.raw_config) ? preset.raw_config : config;
+  if (isPlainObject(rawConfig) && isPlainObject(rawConfig.modules)) normalized.modules = rawConfig.modules;
+  if (isPlainObject(rawConfig) && isPlainObject(rawConfig.image)) normalized.image = rawConfig.image;
   const behavior = normalizeRuleBehavior(preset && preset.behavior);
   if (typeof window !== 'undefined') {
     window._activeConfig = { preset: preset || null, config: normalized, behavior };
@@ -413,6 +416,7 @@ export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) 
       source: 'server',
       preset: {
         ...preset,
+        raw_config: preset.config,
         config: normalizeRuleConfig(preset.config),
         behavior: normalizeRuleBehavior(preset.behavior),
       },
