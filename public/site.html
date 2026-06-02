@@ -622,16 +622,34 @@ function syncEngineConfig(triggerRerender) {
   // module、会丢弃结构化的 fbif_footer）。服务端无内容时由 buildFooterHtml 降级默认。
   const serverFooter = serverFooterLibrary();
   const serverAssets = serverAssetLibrary();
+  const serverBottomBlocks = serverRuleModules().bottom_blocks;
   const footerForRender = Array.isArray(footerOrder) && footerOrder.length
     ? { ...serverFooter, segment_order: footerOrder.filter(k => k !== 'tip') }
     : serverFooter;
+  // 统一区块模型：把现有 ft.footer.* 单篇信号映射成 bottom_blocks 覆盖（开关/排序/逐块启用）。
+  // 逐块 enabled = !!active_segments[id]（缺失视为关），与旧 buildFooterHtml 的 `if(!seg[key])continue` 一致。
+  let bottomBlocksOverride;
+  if (serverBottomBlocks && typeof serverBottomBlocks === 'object') {
+    const bbOrder = Array.isArray(serverBottomBlocks.order) ? serverBottomBlocks.order : [];
+    const overrides = {};
+    for (const id of bbOrder) {
+      if (id === 'tip') continue;
+      overrides[id] = { enabled: !!footerActiveSegments[id] };
+    }
+    bottomBlocksOverride = { enabled: footerEnabled, overrides };
+    if (Array.isArray(footerOrder) && footerOrder.length) {
+      bottomBlocksOverride.order = footerOrder.filter(k => k !== 'tip');
+    }
+  }
   const cfg = {
     ...flat,
     behavior: serverBehavior,
+    _bottomBlocksOverride: bottomBlocksOverride,
     modules: {
       ...prevModules,
       fbif_footer: { ...footerForRender, enabled: footerEnabled, active_segments: footerActiveSegments },
       asset_library: serverAssets,
+      ...(serverBottomBlocks && typeof serverBottomBlocks === 'object' ? { bottom_blocks: serverBottomBlocks } : {}),
       // 网站渠道 h2 默认不输出 mctoc 锚点 id —— FoodTalks 后台生成目录时会自己加
       // （用户 2026-05-30 确认），基石 news/62285 的 h2 也不带 id。默认关，避免与后台冲突。
       mctoc: prevModules.mctoc || { enabled: false },

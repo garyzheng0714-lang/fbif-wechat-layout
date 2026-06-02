@@ -56,6 +56,11 @@ const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
 const tableModule = await import('./shared/table-renderer.js' + assetQuery);
 const { renderTable: renderSharedTable } = tableModule;
+// 底部区块（统一模型）：中性编排器 + 网站渲染器（红线 #19：不 import 公众号渲染器）。
+const blockRenderModule = await import('../blocks/block-render.js' + assetQuery);
+const { renderBottomBlocksHtml } = blockRenderModule;
+const siteBlocksModule = await import('./site-blocks.js' + assetQuery);
+const { siteBlockRenderers } = siteBlocksModule;
 
 // ---- 图片注释智能识别 ----
 
@@ -446,17 +451,27 @@ function render(elems, config = {}) {
     prevWasStandaloneLink = standalone;
     prevWasHeading = false;
   }
-  // 页脚库：按 config.modules.fbif_footer.segments 输出开启的固定营销段
-  // （商务合作 / 加群 / 关注公众号 / logo / 点击获取更多）。tip 提示声明不在此处，
-  // 它走正文流（参考来源之后），由 behavior 提升为 tip elem 渲染。
-  const footerCfg = (config.modules && config.modules.fbif_footer) || {};
-  if (footerCfg.enabled) {
-    // active_segments = 当前文章勾选了哪些片段；footerCfg 提供页脚库内容
-    // （segments 的 html_lines + segment_order，来自服务端 /api/rules，缺省降级默认）。
-    const footerHtml = buildFooterHtml(footerCfg.active_segments, footerCfg, config.modules && config.modules.asset_library, 'ft-default');
+  // 底部：统一区块模型（config.modules.bottom_blocks）优先；缺省回退历史页脚库（fbif_footer）。
+  // tip 提示声明不在此处——它走正文流（参考来源之后），由 behavior 提升为 tip elem 渲染。
+  const mods = config.modules || {};
+  const bottomBlocks = mods.bottom_blocks;
+  if (bottomBlocks && typeof bottomBlocks === 'object') {
+    // 单篇覆盖由 site.html syncEngineConfig 从 localStorage 映射进来（开关/排序/字段）。
+    const override = config._bottomBlocksOverride || {};
+    const footerHtml = renderBottomBlocksHtml(bottomBlocks, override, siteBlockRenderers(mods.asset_library, 'ft-default'));
     if (footerHtml) {
       lines.push(BLANK_LINE);
       lines.push(footerHtml);
+    }
+  } else {
+    // 回退：历史页脚库渲染（与旧行为字节一致；bottom_blocks 缺省时仍可用）。
+    const footerCfg = mods.fbif_footer || {};
+    if (footerCfg.enabled) {
+      const footerHtml = buildFooterHtml(footerCfg.active_segments, footerCfg, mods.asset_library, 'ft-default');
+      if (footerHtml) {
+        lines.push(BLANK_LINE);
+        lines.push(footerHtml);
+      }
     }
   }
   return lines;

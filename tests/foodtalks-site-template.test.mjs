@@ -274,9 +274,12 @@ test('署名: 读 config.muted_color 且不再 #7f7f7f', () => {
 });
 
 // 页脚库：render 按 config.modules.fbif_footer.segments 输出，每个勾选片段即时生效
-test('页脚库: render 末尾按 segments 拼接页脚（buildFooterHtml）', () => {
-  assert.match(templateSource, /buildFooterHtml\s*\(\s*footerCfg\.active_segments\s*,\s*footerCfg\s*,\s*config\.modules\s*&&\s*config\.modules\.asset_library/, 'render 用 buildFooterHtml(勾选, 页脚库内容, 素材库) 拼页脚');
-  assert.match(templateSource, /footerCfg\.enabled/, '页脚营销段受 enabled 总开关控制');
+test('页脚库: render 末尾优先走统一区块模型(bottom_blocks)，缺省回退 buildFooterHtml', () => {
+  // P3：底部统一为 bottom_blocks 区块模型；rich_html 区块复刻原页脚段（字节一致见 site-blocks-fidelity 测试）。
+  assert.match(templateSource, /renderBottomBlocksHtml\s*\(\s*bottomBlocks\s*,\s*override\s*,\s*siteBlockRenderers/, 'render 优先用 renderBottomBlocksHtml(bottom_blocks, 单篇override, 网站渲染器)');
+  // 回退路径保留：旧规则无 bottom_blocks 时仍走 buildFooterHtml（兼容不炸）。
+  assert.match(templateSource, /buildFooterHtml\s*\(\s*footerCfg\.active_segments\s*,\s*footerCfg\s*,\s*mods\.asset_library/, '回退：无 bottom_blocks 时用 buildFooterHtml(勾选, 页脚库内容, 素材库)');
+  assert.match(templateSource, /footerCfg\.enabled/, '回退页脚营销段受 enabled 总开关控制');
 });
 
 test('页脚库: 提示声明受 segments.tip 控制（=0 不输出，默认保留版权）', () => {
