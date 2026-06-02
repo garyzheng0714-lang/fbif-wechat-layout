@@ -33,7 +33,14 @@ func main() {
 	_ = flag.String("db", "", "legacy ignored SQLite database path")
 	rulesPath := flag.String("rules", os.Getenv("RULES_STORE_PATH"), "rule preset JSON store path")
 	publicFlag := flag.String("public", os.Getenv("PUBLIC_DIR"), "static files directory; if empty falls back to ../public then public relative to cwd")
+	emitRegistry := flag.Bool("emit-registry", false, "print generated public/js/rule-packs/registry.js from accountCatalog and exit")
 	flag.Parse()
+
+	// codegen：从账号单一真相源生成 registry.js（`npm run gen:registry`）。
+	if *emitRegistry {
+		fmt.Print(renderRegistryJS())
+		return
+	}
 
 	mux := http.NewServeMux()
 	publicDir := *publicFlag
@@ -41,6 +48,16 @@ func main() {
 		publicDir = "../public"
 		if _, err := os.Stat(publicDir); err != nil {
 			publicDir = "public"
+		}
+	}
+
+	// 启动期账号一致性校验：registry.js 与 accountCatalog 漂移则 fail loud（消灭 D1/D3 静默降级）。
+	// 文件缺失（部署路径差异）只告警，不 brick 生产。
+	if err := validateRegistryConsistency(publicDir); err != nil {
+		if strings.HasPrefix(err.Error(), "warn:") {
+			log.Printf("账号一致性校验：%v", err)
+		} else {
+			log.Fatalf("账号一致性校验失败：%v", err)
 		}
 	}
 

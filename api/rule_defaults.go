@@ -88,33 +88,19 @@ func defaultRuleDocument() rulePresetDocument {
 	}
 }
 
+// defaultRuleAccounts 从 accountCatalog（单一真相源）派生账号绑定种子。
+// 账号 Name / 默认 ActiveRuleID 不再写死在此，新增账号只改 accountCatalog()。
 func defaultRuleAccounts(now string) map[string]ruleAccount {
-	return map[string]ruleAccount{
-		defaultRuleAccountID: {
-			Name:              "FBIF公众号",
-			ActiveRuleID:      defaultRulePresetID,
+	out := make(map[string]ruleAccount, len(accountCatalog()))
+	for _, m := range accountCatalog() {
+		out[m.ID] = ruleAccount{
+			Name:              m.AccountName,
+			ActiveRuleID:      m.DefaultPresetID,
 			ActiveRuleVersion: 1,
 			UpdatedAt:         now,
-		},
-		foodTalksRuleAccountID: {
-			Name:              "FoodTalks什么是系列",
-			ActiveRuleID:      foodTalksDefaultRulePresetID,
-			ActiveRuleVersion: 1,
-			UpdatedAt:         now,
-		},
-		foodTalksSiteRuleAccountID: {
-			Name:              "FoodTalks 网站默认",
-			ActiveRuleID:      foodTalksSiteDefaultRulePresetID,
-			ActiveRuleVersion: 1,
-			UpdatedAt:         now,
-		},
-		wowFoodRuleAccountID: {
-			Name:              "WowFood爆品超市",
-			ActiveRuleID:      wowFoodDefaultRulePresetID,
-			ActiveRuleVersion: 1,
-			UpdatedAt:         now,
-		},
+		}
 	}
+	return out
 }
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
@@ -175,7 +161,13 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 // 其余视觉键经 mergeRuleDefaults 继承 FBIF 基线；用户可在规则后台进一步定制 WowFood 尾部。
 func defaultWowFoodRuleConfig() map[string]any {
 	cfg := defaultRuleConfig()
+	// WowFood 底部默认「无任何排版规则」（用户 2026-06-02 裁定）：
+	// 关更多文章、清空继承自 FBIF 的默认推荐卡、关页脚开关。
+	// 公众号端底部追加本由 registry.js 的 footerUrl='' 阻断，这里把 config 一并设空，
+	// 让规则后台与离线降级都呈现「底部无内容」的一致语义；表格等正文规则不受影响。
 	cfg["more_articles_enabled"] = false
+	cfg["more_articles_default_cards"] = []any{}
+	cfg["footer_enabled"] = false
 	return cfg
 }
 
@@ -342,7 +334,7 @@ func defaultFoodTalksSeriesRuleConfig() map[string]any {
 		"table_header_bg":         "#02396b",
 		"table_header_text_color": "#ffffff",
 		"table_header_bold":       true,
-		"table_border_color":      "#e5e7eb",
+		"table_border_color":      "#888888", // 正文格框线 = 灰 RGB 136 136 136（成品口径）
 		"table_font_size":         "15",
 		"table_cell_padding":      "8",
 		// 关闭 FBIF 专属模块：系列尾部用模板自渲的名片/群二维码，不要更多文章/案例库页脚

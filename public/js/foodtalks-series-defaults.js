@@ -84,7 +84,6 @@ export const SERIES_GROUPS = Object.freeze({
   '饮料':   '/assets/foodtalks-series/groups/beverage.png',
   '包装':   '/assets/foodtalks-series/groups/packaging.png',
   '奶酪':   '/assets/foodtalks-series/groups/cheese.png',
-  '零售':   '/assets/foodtalks-series/groups/retail.png',
   '食品供需对接': '/assets/foodtalks-series/groups/supply-demand.png',
   '烘焙':   '/assets/foodtalks-series/groups/bakery.png',
   '功能性食品': '/assets/foodtalks-series/groups/functional.png',
@@ -92,6 +91,11 @@ export const SERIES_GROUPS = Object.freeze({
   '冰淇淋': '/assets/foodtalks-series/groups/icecream.png',
   '配料':   '/assets/foodtalks-series/groups/ingredient.png',
   '营销':   '/assets/foodtalks-series/groups/marketing.png',
+  '渠道':   '/assets/foodtalks-series/groups/channel.png',
+  '代工':   '/assets/foodtalks-series/groups/oem.png',
+  '酒类':   '/assets/foodtalks-series/groups/alcohol.png',
+  '食品资讯': '/assets/foodtalks-series/groups/news.png',
+  '方便速食': '/assets/foodtalks-series/groups/convenience.png',
 });
 
 // 尾部作者名片：每篇文章选本文作者的名片（key = 名片人名）。
@@ -113,14 +117,11 @@ export const SERIES_CARDS = Object.freeze({
   Yisa:    '/assets/foodtalks-series/cards/yisa.jpg',
 });
 
-// 固定带上的 Eileen 销售名片（规范《三·尾部》：作者名片 + Eileen 名片）。
-export const SERIES_EILEEN_CARD = '/assets/foodtalks-series/cards/eileen.jpg';
-
 // 尾部默认组合（规则后台 footer_default 可改；侧栏每篇可临时覆盖）。
 export const SERIES_FOOTER_DEFAULT = Object.freeze({
-  author_card: '',      // 默认不预选作者名片（侧栏每篇手选）
-  group: '包装',         // 本系列首篇（安姆科）默认品类
-  include_eileen: true, // 固定带 Eileen 名片
+  author_card: '',     // 默认不预选作者名片（侧栏每篇手选）
+  group: '包装',        // 本系列首篇（安姆科）默认品类
+  bd_card: 'Eileen',   // 默认 BD 名片（复用 cards 名片库，规则后台 footer_default.bd_card 可改）
 });
 
 // 完整素材模块默认（镜像服务端 config.modules.ft_series_materials）。
@@ -128,6 +129,5 @@ export const SERIES_MATERIALS_DEFAULT = Object.freeze({
   sections: SERIES_SECTIONS,
   groups: SERIES_GROUPS,
   cards: SERIES_CARDS,
-  eileen_card_url: SERIES_EILEEN_CARD,
   footer_default: SERIES_FOOTER_DEFAULT,
 });

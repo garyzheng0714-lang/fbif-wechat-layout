@@ -343,7 +343,8 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 }
 
 func accountBindingsFromStore(doc ruleStoreDocumentV2) []ruleAccountBinding {
-	order := []string{defaultRuleAccountID, wowFoodRuleAccountID, foodTalksRuleAccountID, foodTalksSiteRuleAccountID}
+	// 展示顺序读 accountCatalog（单一真相源），不再写死切片（消灭 D4）。
+	order := catalogOrderIDs()
 	for id := range doc.Accounts {
 		found := false
 		for _, known := range order {
@@ -621,7 +622,8 @@ func (s *rulePresetStore) delete(id string) (rulePresetDocument, error) {
 		return legacyDocumentFromStore(doc), err
 	}
 	id = sanitizeRulePresetID(id)
-	if id == defaultRulePresetID {
+	// 保护所有账号的 catalog 默认 preset（含 FBIF default）：删了会让账号回退目标悬空。
+	if id == defaultRulePresetID || isProtectedDefaultPreset(id) {
 		return legacyDocumentFromStore(doc), fmt.Errorf("default preset cannot be deleted")
 	}
 	if _, ok := doc.Rules[id]; !ok {
@@ -630,15 +632,10 @@ func (s *rulePresetStore) delete(id string) (rulePresetDocument, error) {
 	delete(doc.Rules, id)
 	for accountID, account := range doc.Accounts {
 		if account.ActiveRuleID == id {
+			// 回退 preset 读 accountCatalog（单一真相源），不再逐账号 if-chain（消灭 D5）。
 			fallbackID := defaultRulePresetID
-			if accountID == foodTalksRuleAccountID {
-				fallbackID = foodTalksDefaultRulePresetID
-			}
-			if accountID == foodTalksSiteRuleAccountID {
-				fallbackID = foodTalksSiteDefaultRulePresetID
-			}
-			if accountID == wowFoodRuleAccountID {
-				fallbackID = wowFoodDefaultRulePresetID
+			if meta, ok := accountMetaByID(accountID); ok {
+				fallbackID = meta.DefaultPresetID
 			}
 			account.ActiveRuleID = fallbackID
 			account.ActiveRuleVersion = latestRuleVersion(doc.Rules[fallbackID]).Version

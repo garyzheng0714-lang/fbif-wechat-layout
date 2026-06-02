@@ -44,7 +44,7 @@ test('render: 连续正文无空段→紧凑(0)，原文有空段→恢复 gap(2
   assert.equal(marginBottomOf(html, '乙段落文本'), 20, '乙→丙 间有空段 → 恢复 20px gap');
 });
 
-test('render: 信息表首行=标题+空 → 跨列深蓝横幅 + colgroup 左窄右宽', () => {
+test('render: 信息表首行=标题+空 → 跨列深蓝横幅 + colgroup 左窄右宽（width 属性存活微信）', () => {
   const rows = [
     [{ runs: [{ type: 'txt', text: '安姆科挤出复合工艺' }] }, { runs: [] }],
     [{ runs: [{ type: 'txt', text: '效率提升' }] }, { runs: [{ type: 'txt', text: '生产速度翻倍' }] }],
@@ -53,8 +53,12 @@ test('render: 信息表首行=标题+空 → 跨列深蓝横幅 + colgroup 左�
   assert.match(html, /colspan="2"/, '表头跨整行');
   assert.match(html, /background-color: #02396b/, '表头深蓝实心 bar');
   assert.match(html, /<colgroup>/, '按 gridCol 下发列宽');
-  assert.match(html, /width: 23\.37%/, '左列窄');
-  assert.match(html, /width: 76\.63%/, '右列宽');
+  // 微信公众号粘贴剥离 <col> 的 style，但保留 width 属性 → 列宽必须用 width 属性承载，否则后台均分。
+  assert.match(html, /<col width="23%"/, '左列窄：整数百分比走 width 属性（微信存活）');
+  assert.match(html, /<col width="77%"/, '右列宽：末列吸收舍入误差合计 100');
+  assert.match(html, /width: 23\.37%/, 'style 保留精确小数供浏览器预览');
+  assert.match(html, /width: 76\.63%/, '右列预览精确值');
+  assert.match(html, /border: 1px solid #888888/, '正文格框线 = 灰 #888888（成品口径）');
 });
 
 test('render: 头图满宽 100%、方形小图=二维码 → 140px', () => {

@@ -248,7 +248,7 @@ export function getSeriesFooterSelection(config = {}) {
   return {
     author_card: (live && live.author_card != null) ? live.author_card : def.author_card,
     group: (live && live.group != null) ? live.group : def.group,
-    include_eileen: (live && live.include_eileen != null) ? live.include_eileen : def.include_eileen,
+    bd_card: (live && live.bd_card != null) ? live.bd_card : def.bd_card,
   };
 }
 
@@ -259,7 +259,8 @@ export function sectionImageUrl(config, n) {
   return (typeof url === 'string' && url) ? url : '';
 }
 
-// 合成尾部图片 elem 序列：作者名片 →（空行）→ Eileen 名片 → 群二维码。
+// 合成尾部图片 elem 序列：作者名片 →（空行）→ BD 名片 → 群二维码。
+// BD 名片复用 cards 名片库（默认 Eileen，规则后台 footer_default.bd_card 可改）。
 // 缺图项自动跳过；返回 [{k:'footer-img', src}] 序列（render 各自渲成自适应图）。
 export function buildSeriesFooterElems(config = {}) {
   const mats = getSeriesMaterials(config);
@@ -268,7 +269,8 @@ export function buildSeriesFooterElems(config = {}) {
   // getSeriesMaterials 始终返回含 cards/groups 的完整对象，故无需再 `|| {}` 兜底。
   const authorUrl = sel.author_card && mats.cards[sel.author_card];
   if (authorUrl) out.push({ k: 'footer-img', src: authorUrl, gap: true });
-  if (sel.include_eileen && mats.eileen_card_url) out.push({ k: 'footer-img', src: mats.eileen_card_url, gap: true });
+  const bdUrl = sel.bd_card && mats.cards[sel.bd_card];
+  if (bdUrl) out.push({ k: 'footer-img', src: bdUrl, gap: true });
   const groupUrl = sel.group && mats.groups[sel.group];
   if (groupUrl) out.push({ k: 'footer-img', src: groupUrl, gap: true });
   return out;

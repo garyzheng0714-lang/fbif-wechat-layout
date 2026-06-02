@@ -13,8 +13,24 @@ import {
   moreArticleCardsForRule,
   normalizeMoreArticleDefaultCard,
 } from './more-articles-config.js';
+import { getRulePackByPath, DEFAULT_RULE_PACK_ID } from './rule-packs/registry.js';
 
 const LS_KEY = 'more_articles_v1';
+
+// 卡片状态按账号隔离（修复跨账号覆盖 Bug：旧版用单一全局 key，FBIF↔WowFood
+// 切换会互相覆盖对方的「更多文章」自定义卡片）。账号由当前 URL 路径派生。
+function activeAccountId() {
+  try {
+    const path = (typeof globalThis !== 'undefined' && globalThis.location && globalThis.location.pathname) || '';
+    const pack = getRulePackByPath(path);
+    return (pack && pack.id) || DEFAULT_RULE_PACK_ID;
+  } catch {
+    return DEFAULT_RULE_PACK_ID;
+  }
+}
+function lsKey() {
+  return LS_KEY + '::' + activeAccountId();
+}
 
 // Composite canvas style values taken from the approved bottom-banner reference.
 const BANNER_STYLE_SPEC = Object.freeze({
@@ -125,7 +141,18 @@ function normalizeCard(c) {
 
 export function loadCards() {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const key = lsKey();
+    let raw = localStorage.getItem(key);
+    // 旧版单 key 一次性迁移：仅默认账号继承遗留数据（旧全局 key 历史上被各账号互相
+    // 覆盖，只能归给默认账号，避免把脏状态扩散到其它账号）。迁移后【删除】遗留 key，
+    // 否则它永久残留、且 resetCards 清空后会被再次复活（清空形同无效）。
+    if (activeAccountId() === DEFAULT_RULE_PACK_ID) {
+      const legacy = localStorage.getItem(LS_KEY);
+      if (legacy != null) {
+        if (!raw) { localStorage.setItem(key, legacy); raw = legacy; }
+        localStorage.removeItem(LS_KEY);
+      }
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -137,14 +164,18 @@ export function loadCards() {
 
 export function saveCards(cards) {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(cards));
+    localStorage.setItem(lsKey(), JSON.stringify(cards));
   } catch (err) {
     console.warn('[more-articles] saveCards failed', err);
   }
 }
 
 export function resetCards() {
-  try { localStorage.removeItem(LS_KEY); } catch {}
+  try {
+    localStorage.removeItem(lsKey());
+    // 默认账号一并清掉旧版全局 key，否则下次 loadCards 会从它复活已被清空的数据。
+    if (activeAccountId() === DEFAULT_RULE_PACK_ID) localStorage.removeItem(LS_KEY);
+  } catch {}
 }
 
 // ---- Image loading with CORS-proxy fallback ----

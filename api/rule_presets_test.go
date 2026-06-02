@@ -66,15 +66,16 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 		t.Fatalf("list default store: %v", err)
 	}
 
-	// Now 4 accounts (fixed order): fbif, wowfood, foodtalks-series, ft-default
+	// 4 个账号，顺序由 accountCatalog（单一真相源）派生，与前端账号菜单一致：
+	// fbif, foodtalks-series, wowfood, ft-default。
 	if len(doc.Accounts) != 4 {
 		t.Fatalf("accounts = %d, want 4: %#v", len(doc.Accounts), doc.Accounts)
 	}
 	wantOrder := []struct{ id, name string }{
 		{"fbif", "FBIF公众号"},
-		{"wowfood", "WowFood爆品超市"},
 		{"foodtalks-series", "FoodTalks什么是系列"},
-		{"ft-default", "FoodTalks 网站默认"},
+		{"wowfood", "WowFood爆品超市"},
+		{"ft-default", "网站默认"},
 	}
 	for i, want := range wantOrder {
 		if doc.Accounts[i].ID != want.id {
@@ -85,8 +86,8 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 		}
 	}
 	// WowFood 账号绑定自己的独立 preset（wowfood-default），不复用 FBIF default。
-	if doc.Accounts[1].ActiveID != "wowfood-default" {
-		t.Fatalf("wowfood active rule = %q, want wowfood-default", doc.Accounts[1].ActiveID)
+	if doc.Accounts[2].ActiveID != "wowfood-default" {
+		t.Fatalf("wowfood active rule = %q, want wowfood-default", doc.Accounts[2].ActiveID)
 	}
 	for _, a := range doc.Accounts {
 		if a.ActiveID == "" {
@@ -119,6 +120,19 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 	}
 	if v := presetByID("default").Config["more_articles_enabled"]; v != true {
 		t.Fatalf("fbif default more_articles_enabled = %#v, want true（差异即意图）", v)
+	}
+	// 用户裁定：WowFood 底部默认「无任何排版规则」。锁住三条——更多文章关、
+	// 不继承 FBIF 的默认推荐卡（清空）、页脚开关关。防有人把 WowFood 退回 FBIF 基线。
+	wow := presetByID("wowfood-default").Config
+	if cards, ok := wow["more_articles_default_cards"].([]any); !ok || len(cards) != 0 {
+		t.Fatalf("wowfood-default more_articles_default_cards = %#v, want empty []", wow["more_articles_default_cards"])
+	}
+	if v := wow["footer_enabled"]; v != false {
+		t.Fatalf("wowfood-default footer_enabled = %#v, want false（底部无排版规则）", v)
+	}
+	// 对照：FBIF 基线仍带 3 张默认卡，证明 WowFood 的空是显式覆盖、非全局退化。
+	if cards, ok := presetByID("default").Config["more_articles_default_cards"].([]any); !ok || len(cards) == 0 {
+		t.Fatalf("fbif default more_articles_default_cards 应保留默认卡（差异即意图），got %#v", presetByID("default").Config["more_articles_default_cards"])
 	}
 }
 

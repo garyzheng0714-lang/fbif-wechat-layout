@@ -144,7 +144,7 @@ function renderTableCellRuns(runs) {
 function renderTable(elem, config) {
   const headerBg = cfgColor(config, 'table_header_bg', '#02396b');
   const headerColor = cfgColor(config, 'table_header_text_color', '#ffffff');
-  const borderColor = cfgColor(config, 'table_border_color', '#e5e7eb');
+  const borderColor = cfgColor(config, 'table_border_color', '#888888');
   const fs = cfgNum(config, 'table_font_size', 15);
   const padRaw = Number(config && config.table_cell_padding);
   const pad = Number.isFinite(padRaw) && padRaw >= 0 ? padRaw : 8;
@@ -153,12 +153,18 @@ function renderTable(elem, config) {
   const colCount = rows.reduce((m, r) => Math.max(m, (r || []).length), 0);
   const cellHtml = (cell) => renderTableCellRuns(cell && cell.runs);
 
-  // colgroup：DOCX gridCol 列宽齐全且多列时按比例下发（左窄右宽）；否则等宽 fallback。
+  // 列宽：DOCX gridCol 比例下发（左窄右宽）；否则等宽 fallback。
+  // 微信公众号粘贴会剥离 <col> 上的 style，但保留 width 属性（135 编辑器同款方案，否则
+  // 跨列表头 + table-layout:fixed 会让列宽被首行决定 → 后台均分）。故 width 属性承载列宽
+  // （整数百分比、末列吸收舍入误差保证合计 100），style 仅供浏览器预览精确显示。
   const cw = (Array.isArray(elem.colWidths) ? elem.colWidths : []).filter(n => n > 0);
   let colgroup = '';
   if (cw.length === colCount && colCount > 1) {
     const total = cw.reduce((a, b) => a + b, 0);
-    colgroup = '<colgroup>' + cw.map(w => `<col style="width: ${(w / total * 100).toFixed(2)}%;" />`).join('') + '</colgroup>';
+    const pcts = cw.map(w => w / total * 100);
+    const ints = pcts.map(p => Math.round(p));
+    ints[ints.length - 1] += 100 - ints.reduce((a, b) => a + b, 0);
+    colgroup = '<colgroup>' + pcts.map((p, i) => `<col width="${ints[i]}%" style="width: ${p.toFixed(2)}%;" />`).join('') + '</colgroup>';
   }
 
   const headStyle = (extraBorder) =>
