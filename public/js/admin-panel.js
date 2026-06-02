@@ -26,6 +26,7 @@ import { createFooterLibraryEditor } from './footer-library-rule-editor.js';
 import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
 import { createAssetLibraryEditor } from './asset-library-rule-editor.js';
 import { assetLibraryFromPreset, defaultAssetLibraryData } from './admin-asset-data.js';
+import { bottomBlocksFromPreset, createBlockEditorBinder } from './admin-block-data.js';
 import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
@@ -149,6 +150,7 @@ export function initAdminPanel(options = {}) {
   let workingBehavior = normalizeRuleBehavior(getBehavior());
   let workingFooter = null;
   let workingAssets = null;
+  let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp') });
   let footerEditorInstance = null, assetEditorInstance = null;
   let workingName = '未命名规则';
   let workingDescription = '';
@@ -179,6 +181,7 @@ export function initAdminPanel(options = {}) {
     workingDescription = selected && selected.description ? selected.description : '';
     workingFooter = footerFromPreset(selected);
     workingAssets = assetLibraryFromPreset(selected);
+    workingBottomBlocks = bottomBlocksFromPreset(selected);
     syncJSONText();
     syncBehaviorText();
     applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' });
@@ -298,7 +301,7 @@ export function initAdminPanel(options = {}) {
   }
 
   function renderRuleTabs() {
-    const tabs = [['params', '参数'], ['assets', '素材库'], ['behavior', '代码化规则'], ['validation', '校验预览']];
+    const tabs = [['params', '参数'], ['assets', '素材库'], ['blocks', '底部区块'], ['behavior', '代码化规则'], ['validation', '校验预览']];
     if (isFtDefaultPack()) tabs.push(['footer', '页脚库']);
     return `
       <div class="admin-rule-tabs" role="tablist" aria-label="规则编辑分区">
@@ -471,6 +474,7 @@ export function initAdminPanel(options = {}) {
     if (activeRuleTab === 'assets') {
       return `<section class="admin-rule-group"><div data-role="asset-library-editor"></div></section>`;
     }
+    if (activeRuleTab === 'blocks') return `<section class="admin-rule-group"><div data-role="block-editor"></div></section>`;
     if (activeRuleTab === 'behavior') {
       return `
         <section class="admin-rule-group admin-json-panel">
@@ -548,7 +552,6 @@ export function initAdminPanel(options = {}) {
 
   function renderMain() {
     const presets = (doc && doc.presets) || [];
-    const selected = selectedPreset();
     if (!jsonDirty) syncJSONText();
     const listPresets = draftPreset && !presetByID(doc, draftPreset.id)
       ? presets.concat([draftPreset])
@@ -637,6 +640,7 @@ export function initAdminPanel(options = {}) {
       btn.addEventListener('click', () => {
         if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
         if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
+        blockBinder.destroy();
         activeRuleTab = btn.dataset.ruleTab;
         renderMain();
       });
@@ -652,6 +656,7 @@ export function initAdminPanel(options = {}) {
             workingConfig = normalizeRuleConfig(selected ? selected.config : workingConfig);
             workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : workingBehavior);
             workingAssets = assetLibraryFromPreset(selected);
+            workingBottomBlocks = bottomBlocksFromPreset(selected);
             selectedID = ruleID;
             syncBehaviorText();
             applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' });
@@ -663,6 +668,7 @@ export function initAdminPanel(options = {}) {
     bindMoreArticlesRuleEditor();
     bindFooterLibraryEditor();
     bindAssetLibraryEditor();
+    blockBinder.bind(overlay);
     overlay.querySelector('[data-role="preset-select"]').addEventListener('change', e => {
       selectedID = e.target.value;
       const selected = selectedPreset();
@@ -760,6 +766,7 @@ export function initAdminPanel(options = {}) {
       workingName = draftPreset.name;
       workingDescription = draftPreset.description;
       workingAssets = defaultAssetLibraryData();
+      workingBottomBlocks = bottomBlocksFromPreset(draftPreset);
       syncJSONText();
       syncBehaviorText();
       applyConfig(workingConfig, draftPreset);
@@ -789,6 +796,7 @@ export function initAdminPanel(options = {}) {
       const oc = (presetByID(doc, preset.id) || {}).config || {};
       const ocModules = oc.modules || {};
       configDoc.modules.asset_library = JSON.parse(JSON.stringify(workingAssets || ocModules.asset_library || defaultAssetLibraryData()));
+      configDoc.modules.bottom_blocks = JSON.parse(JSON.stringify(workingBottomBlocks || ocModules.bottom_blocks || { enabled: false, order: [], blocks: {}, presets: [] }));
       if (isFtDefaultPack()) {
         // 保留 buildRuleConfigDocument 丢弃的网站结构化字段（顶层 image、mctoc、fbif_footer）
         if (oc.image) configDoc.image = oc.image;
