@@ -610,7 +610,7 @@ func validateFBIFFooterModule(raw any) error {
 
 // validateFtSeriesMaterialsModule 校验「什么是」系列素材库（config.modules.ft_series_materials）：
 //
-//	{ sections?{n:url}, groups?{name:url}, cards?{name:url}, eileen_card_url?, footer_default?{author_card,group,include_eileen} }
+//	{ sections?{n:url}, groups?{name:url}, cards?{name:url}, footer_default?{author_card,group,bd_card} }
 //
 // 所有 URL 允许站内相对路径（/assets/...）或 HTTPS；走 isSafeRuleBehaviorURL 防注入。
 func validateFtSeriesMaterialsModule(raw any) error {
@@ -618,7 +618,7 @@ func validateFtSeriesMaterialsModule(raw any) error {
 	if !ok {
 		return fmt.Errorf("ft_series_materials module must be an object")
 	}
-	allowed := map[string]bool{"sections": true, "groups": true, "cards": true, "eileen_card_url": true, "footer_default": true}
+	allowed := map[string]bool{"sections": true, "groups": true, "cards": true, "footer_default": true}
 	for k := range m {
 		if !allowed[k] {
 			return fmt.Errorf("unknown ft_series_materials field: %s", k)
@@ -649,18 +649,12 @@ func validateFtSeriesMaterialsModule(raw any) error {
 			return err
 		}
 	}
-	if v, ok := m["eileen_card_url"]; ok {
-		s, ok := v.(string)
-		if !ok || (s != "" && !isSafeRuleBehaviorURL(s)) {
-			return fmt.Errorf("ft_series_materials eileen_card_url must be a site path or HTTPS URL")
-		}
-	}
 	if v, ok := m["footer_default"]; ok {
 		fd, ok := v.(map[string]any)
 		if !ok {
 			return fmt.Errorf("ft_series_materials footer_default must be an object")
 		}
-		fdAllowed := map[string]bool{"author_card": true, "group": true, "include_eileen": true}
+		fdAllowed := map[string]bool{"author_card": true, "group": true, "bd_card": true}
 		for k := range fd {
 			if !fdAllowed[k] {
 				return fmt.Errorf("unknown ft_series_materials footer_default field: %s", k)

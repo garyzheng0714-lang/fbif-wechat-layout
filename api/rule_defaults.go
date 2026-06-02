@@ -362,7 +362,6 @@ func defaultFtSeriesMaterialsModule() map[string]any {
 		"饮料": "/assets/foodtalks-series/groups/beverage.png",
 		"包装": "/assets/foodtalks-series/groups/packaging.png",
 		"奶酪": "/assets/foodtalks-series/groups/cheese.png",
-		"零售": "/assets/foodtalks-series/groups/retail.png",
 		"食品供需对接": "/assets/foodtalks-series/groups/supply-demand.png",
 		"烘焙": "/assets/foodtalks-series/groups/bakery.png",
 		"功能性食品": "/assets/foodtalks-series/groups/functional.png",
@@ -370,6 +369,11 @@ func defaultFtSeriesMaterialsModule() map[string]any {
 		"冰淇淋": "/assets/foodtalks-series/groups/icecream.png",
 		"配料": "/assets/foodtalks-series/groups/ingredient.png",
 		"营销": "/assets/foodtalks-series/groups/marketing.png",
+		"渠道": "/assets/foodtalks-series/groups/channel.png",
+		"代工": "/assets/foodtalks-series/groups/oem.png",
+		"酒类": "/assets/foodtalks-series/groups/alcohol.png",
+		"食品资讯": "/assets/foodtalks-series/groups/news.png",
+		"方便速食": "/assets/foodtalks-series/groups/convenience.png",
 	}
 	cardNames := []string{"Aimee", "Charlie", "Eileen", "Erica", "Estelle", "Isaac", "Justine", "Kee", "Lan", "Rain", "Renee", "Soso", "Tiki", "Tina", "Yisa"}
 	cards := map[string]any{}
@@ -377,14 +381,13 @@ func defaultFtSeriesMaterialsModule() map[string]any {
 		cards[n] = "/assets/foodtalks-series/cards/" + strings.ToLower(n) + ".jpg"
 	}
 	return map[string]any{
-		"sections":        sections,
-		"groups":          groups,
-		"cards":           cards,
-		"eileen_card_url": "/assets/foodtalks-series/cards/eileen.jpg",
+		"sections": sections,
+		"groups":   groups,
+		"cards":    cards,
 		"footer_default": map[string]any{
-			"author_card":    "",
-			"group":          "包装",
-			"include_eileen": true,
+			"author_card": "",
+			"group":       "包装",
+			"bd_card":     "Eileen", // BD 名片复用 cards 库，默认 Eileen（规则后台可改）
 		},
 	}
 }
