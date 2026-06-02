@@ -214,7 +214,7 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
         if (r.type === 'img') {
           const src = cache[r.file] || '';
           imgN++;
-          elems.push({ k: 'img', src, w: r.w, gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file), ...meta });
+          elems.push({ k: 'img', src, w: r.w, aspect: r.aspect, gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file), ...meta });
         }
       }
       while (i + 1 < pds.length) {

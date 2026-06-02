@@ -83,6 +83,18 @@ function imageSection(src, gap, sp, { alt = '', width = '100%' } = {}) {
   );
 }
 
+// 图片显示宽度（规范《五·图片》）：头图满宽 1411 → 100%；方形小图=二维码 → 固定 qr_size
+// （默认 140×140）；其余横图/纵图保留 DOCX 显示宽度百分比。qr_size 走 config 可配。
+function seriesImageWidth(e, isHead, config) {
+  if (isHead) return '100%';
+  const a = Number(e.aspect) || 0;
+  const pct = parseInt(e.w, 10);
+  if (a >= 0.85 && a <= 1.18 && Number.isFinite(pct) && pct <= 40) {
+    return cfgNum(config, 'qr_size', 140) + 'px';
+  }
+  return e.w || '100%';
+}
+
 // 文本 span（内联字号/颜色/字体）。
 function span(text, { size, color, bold, italic, sp }) {
   const s =
@@ -173,6 +185,27 @@ function renderTable(elem, config) {
   return `<table style="border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0 auto;">${colgroup}<tbody>${body}</tbody></table>`;
 }
 
+// 连续正文紧凑判定（红线#18）：移植 fbif.js 的同名口径（不跨渲染器 import——红线#19），
+// 阈值 160 与 fbif 逐字一致。只作用于正文类块（p / ref-item）：Word 段距小、无空段、
+// contextualSpacing 列表、同样式时不留 gap；原文有空段（blankBefore）则恢复标准间距。
+function sameDocxStyle(a, b) {
+  if (!a || !b) return false;
+  if (a.styleId && b.styleId) return a.styleId === b.styleId;
+  if (a.styleName && b.styleName) return a.styleName === b.styleName;
+  return false;
+}
+function isCompactDocxPair(a, b) {
+  if (!a || !b) return false;
+  if ((a.k !== 'p' && a.k !== 'ref-item') || (b.k !== 'p' && b.k !== 'ref-item')) return false;
+  if (!a.fromDocx || !b.fromDocx || b.blankBefore) return false;
+  if (a.isList && b.isList) return true;
+  if (sameDocxStyle(a, b) && (a.contextualSpacing || b.contextualSpacing)) return true;
+  const after = Number(a.spacing && a.spacing.after);
+  const before = Number(b.spacing && b.spacing.before);
+  return Number.isFinite(after) && after <= 160 &&
+    (!Number.isFinite(before) || before <= 160);
+}
+
 // ── 间距：默认每块后留 1 行空（gap）；紧凑成对例外不留 ──
 function gapAfter(e, next) {
   if (!next) return true;
@@ -184,6 +217,7 @@ function gapAfter(e, next) {
   if (e.k === 'rec-item' && next.k === 'rec-note') return false; // 说明行紧贴最后一条 ○
   if (e.k === 'toc-title') return false;                      // 「目录」紧贴首条
   if (e.k === 'toc-item' && next.k === 'toc-item') return false;
+  if (isCompactDocxPair(e, next)) return false;               // 连续紧凑正文（红线#18）
   return true;
 }
 
@@ -191,6 +225,7 @@ function gapAfter(e, next) {
 function render(elems, config = {}) {
   const sp = styleProps(config);
   const lines = [];
+  let headImageDone = false; // 首个正文图 = 头图（满宽）；其后按 aspect/DOCX 宽度
 
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
@@ -227,10 +262,13 @@ function render(elems, config = {}) {
           span(e.text, { size: sp.bodySize, color: sp.text, sp }),
           { align: 'left', gap, sp }));
         break;
-      case 'img':
-        // 正文图用 DOCX 原始宽度百分比（小图如二维码不拉满，与微信成品一致）。
-        lines.push(imageSection(e.src, gap, sp, { width: e.w || '100%' }));
+      case 'img': {
+        // 头图满宽；方形小图=二维码 → 140；其余横图/纵图按 DOCX 显示宽度（见 seriesImageWidth）。
+        const isHead = !headImageDone;
+        headImageDone = true;
+        lines.push(imageSection(e.src, gap, sp, { width: seriesImageWidth(e, isHead, config) }));
         break;
+      }
       case 'cap':
         lines.push(section(
           span(e.text || runsToPlain(e.runs), { size: sp.capSize, color: sp.muted, sp }),

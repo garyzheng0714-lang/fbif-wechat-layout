@@ -250,11 +250,14 @@ function visitRun(r, ctx, runs, ridToFile) {
     const embed = blip ? rattr(blip, 'embed') : '';
     const ext = findDeep(drw, WP, 'extent');
     let w = '100%';
+    let aspect = 0; // 显示宽高比 cx/cy（>1 横图 / <1 纵图 / ≈1 方形=二维码）；0=未知
     if (ext) {
       const cx = parseInt(ext.getAttribute('cx') || '0');
+      const cy = parseInt(ext.getAttribute('cy') || '0');
       if (cx > 0) w = Math.min(100, Math.round(cx / 5486400 * 100)) + '%';
+      if (cx > 0 && cy > 0) aspect = cx / cy;
     }
-    runs.push({ type: 'img', file: ridToFile[embed] || '', w });
+    runs.push({ type: 'img', file: ridToFile[embed] || '', w, aspect });
     return;
   }
 

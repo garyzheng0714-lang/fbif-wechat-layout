@@ -96,6 +96,15 @@ function isBoldLine(runs) {
   return true;
 }
 
+// 透传共享层 docxMeta（连续紧凑段距判定 isCompactDocxPair 的输入，红线#18）。
+function carryDocxMeta(e) {
+  return {
+    blankBefore: e.blankBefore, fromDocx: e.fromDocx,
+    styleId: e.styleId, styleName: e.styleName,
+    contextualSpacing: e.contextualSpacing, spacing: e.spacing, isList: e.isList,
+  };
+}
+
 // ── 主分类：中性 elem → 系列 elem ──
 export function classifySeries(neutralElems, config = {}) {
   const elems = Array.isArray(neutralElems) ? neutralElems : [];
@@ -119,7 +128,7 @@ export function classifySeries(neutralElems, config = {}) {
     const plain = elemText(e).trim();
 
     // 图片：透传（保留 blankBefore 供间距判断）
-    if (e.k === 'img') { refMode = false; out.push({ k: 'img', src: e.src || '', w: e.w, blankBefore: e.blankBefore }); continue; }
+    if (e.k === 'img') { refMode = false; out.push({ k: 'img', src: e.src || '', w: e.w, aspect: e.aspect, blankBefore: e.blankBefore }); continue; }
     // 共享层已配对的图注
     if (e.k === 'cap') { out.push({ k: 'cap', text: e.text || '', runs: e.runs }); continue; }
     // 表格透传
@@ -200,10 +209,10 @@ export function classifySeries(neutralElems, config = {}) {
       }
     }
 
-    // 参考来源条目
+    // 参考来源条目（规范《六·超链接》：非本公众号链接全部清除 → 参考外链降级纯文本）
     if (refMode) {
       if (refItemRe.test(plain) || /^[—–─-]/.test(plain)) {
-        out.push({ k: 'ref-item', runs: e.runs });
+        out.push({ k: 'ref-item', runs: stripLinks(e.runs), ...carryDocxMeta(e) });
         continue;
       }
       refMode = false; // 遇非 [n] / 非延续行，退出参考模式
@@ -215,8 +224,9 @@ export function classifySeries(neutralElems, config = {}) {
       continue;
     }
 
-    // 普通正文（runs 缺失时从 text 兜底合成，防止 text-only 元素被静默吞字）
-    out.push({ k: 'p', runs: (Array.isArray(e.runs) && e.runs.length) ? e.runs : [{ type: 'txt', text: plain }] });
+    // 普通正文（runs 缺失时从 text 兜底合成，防止 text-only 元素被静默吞字）；
+    // 透传 docxMeta 供连续紧凑段距判定（红线#18）。
+    out.push({ k: 'p', runs: (Array.isArray(e.runs) && e.runs.length) ? e.runs : [{ type: 'txt', text: plain }], ...carryDocxMeta(e) });
   }
 
   return out;

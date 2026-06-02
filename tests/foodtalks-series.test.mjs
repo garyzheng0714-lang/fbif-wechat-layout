@@ -140,6 +140,18 @@ test('classifySeries: 推荐阅读条目清除超链接（无 link run）', () =
   assert.ok(rec.runs.every(r => r.type !== 'link'), '推荐条目不应保留 link run');
 });
 
+test('classifySeries: 参考来源条目清除超链接（规范§六 非本号链接全部清除）', () => {
+  const elems = [
+    P('六、参考来源'),
+    { k: 'txt', runs: [{ type: 'txt', text: '[1] iiMedia (2026), ' }, { type: 'link', text: '报告链接', href: 'https://e.com/r' }], text: '[1] iiMedia (2026), 报告链接' },
+  ];
+  const out = classifySeries(elems, {});
+  const ref = out.find(e => e.k === 'ref-item');
+  assert.ok(ref, '应识别为参考条目');
+  assert.ok(ref.runs.every(r => r.type !== 'link'), '参考条目外链必须降级为纯文本');
+  assert.match(ref.runs.map(r => r.text).join(''), /报告链接/, '链接文字保留为纯文本');
+});
+
 test('buildSeriesFooterElems: 默认带 Eileen + 包装群，无作者名片', () => {
   const sel = getSeriesFooterSelection({});
   assert.equal(sel.group, '包装');
