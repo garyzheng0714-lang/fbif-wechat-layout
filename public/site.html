@@ -229,6 +229,11 @@ async function reloadIfUpdated() {
 }
 window.addEventListener('focus', reloadIfUpdated);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadIfUpdated(); });
+// bfcache 还原（前进/后退）不会重跑模块加载，可能停在旧构建——补 pageshow 校验。
+window.addEventListener('pageshow', (e) => { if (e.persisted) reloadIfUpdated(); });
+// 长期前台 tab 永不触发 focus/visibilitychange，新部署后会持续跑旧 JS。定时轮询 version.json，
+// build 变化时自动刷到最新构建（reload 前 beforeunload 兜底保存快照）。与 app.html 对称。
+setInterval(reloadIfUpdated, 5 * 60 * 1000);
 
 // ---- Log ----
 window._pushLog = function(level, msg, detail) {
@@ -244,6 +249,7 @@ const {
   bindUrlImportShortcuts,
   createUrlImportHandler,
   foodTalksFetchErrorMessage,
+  pasteTargetsForChannel,
   resolveInitialRulePackID,
   wrapBackFeedback,
   wrapCopyFeedback,
@@ -787,7 +793,7 @@ renderFoodTalksPreviewMeta(FOODTALKS_PREVIEW_META);
 
 // ---- Wrap engine functions for split layout ----
 function wrapEngineFunctions() {
-  wrapCopyFeedback({ windowRef: window, documentRef: document });
+  wrapCopyFeedback({ windowRef: window, documentRef: document, pasteTargets: pasteTargetsForChannel('ft') });
   wrapBackFeedback({ windowRef: window, documentRef: document });
 }
 

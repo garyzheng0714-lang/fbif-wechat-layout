@@ -170,6 +170,12 @@ async function reloadIfUpdated() {
 }
 window.addEventListener('focus', reloadIfUpdated);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadIfUpdated(); });
+// bfcache 还原（前进/后退）不会重跑模块加载，可能停在旧构建——补 pageshow 校验。
+window.addEventListener('pageshow', (e) => { if (e.persisted) reloadIfUpdated(); });
+// 长期开着且一直前台的 tab 永远不触发 focus/visibilitychange，会在新部署后持续跑旧 JS
+// （正是同事「白表头」最可能的成因）。定时轮询 version.json，部署后几分钟内自动刷到最新构建。
+// 只有 build 真变了才 reload；reload 前 session-restore 的 beforeunload 会兜底保存当前文章快照。
+setInterval(reloadIfUpdated, 5 * 60 * 1000);
 
 // ---- Log ----
 window._pushLog = function(level, msg, detail) {
@@ -184,6 +190,7 @@ const editorShell = await import('/js/editor-shell.js?v=' + assetVersion);
 const {
   bindUrlImportShortcuts,
   createUrlImportHandler,
+  pasteTargetsForChannel,
   resolveInitialRulePackID,
   wrapBackFeedback,
   wrapCopyFeedback,
@@ -693,7 +700,7 @@ Object.defineProperty(titleInput, 'value', {
 
 // ---- Wrap engine functions for split layout ----
 function wrapEngineFunctions() {
-  wrapCopyFeedback({ windowRef: window, documentRef: document });
+  wrapCopyFeedback({ windowRef: window, documentRef: document, pasteTargets: pasteTargetsForChannel('mp') });
   wrapBackFeedback({ windowRef: window, documentRef: document });
 }
 

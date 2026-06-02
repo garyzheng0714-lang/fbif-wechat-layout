@@ -532,6 +532,19 @@ input[type="file"] { display: none; }
   border: 1px solid rgba(0,0,0,0.1);
 }
 
+/* 复制后「去后台粘贴」入口（概念A：复制键右侧内联，非弹窗，持续到下次动作）。 */
+.copy-paste-hint {
+  display: none; align-items: center; gap: 7px;
+  margin-left: 10px; font-size: 13px; white-space: nowrap;
+}
+.copy-paste-link {
+  color: var(--fs-text-2); text-decoration: none;
+  transition: color var(--fs-t-fast) var(--fs-ease-out);
+}
+.copy-paste-link:hover { color: var(--fs-brand); text-decoration: underline; }
+.copy-paste-link.is-primary { color: var(--fs-brand); font-weight: 500; }
+.copy-paste-sep { color: var(--fs-text-3); }
+
 /* ======== More Articles Editor (sidebar) ======== */
 .ma-section { display: flex; flex-direction: column; gap: 12px; }
 .ma-section-label {

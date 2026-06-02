@@ -607,6 +607,8 @@ export function initApp(template) {
   }
 
   function showPreview(title, articleContent, footerContent, stats) {
+    // 渲染新文章 → 复位上一篇的复制状态（按钮变身 + 后台入口），避免显示陈旧的「✓已复制」。
+    if (window._resetCopyFeedback) window._resetCopyFeedback();
     _articleHtml = normalizeWechatRichHtml(articleContent);
     _articleCopy = _articleHtml;
     _footerHtml = normalizeWechatRichHtml(footerContent);

@@ -160,29 +160,77 @@ export function bindUrlImportShortcuts({
   });
 }
 
+// 复制后的「去后台粘贴」引导（概念 A：复制键就地变身 + 旁边内联出现后台入口）。
+// 两个后台是「粘贴目标入口」——应用基础设施地址、几乎不变，按用户 2026-06-02 裁定写死，
+// 不进规则后台（区别于页脚/正则/颜色等排版规则数据）。
+const PASTE_BACKENDS = {
+  weixin: { label: '公众号后台', url: 'https://mp.weixin.qq.com/' },
+  foodtalks: { label: '管理后台', url: 'https://admin-we.foodtalks.cn/#/wel/index' },
+};
+
+// 渠道 → [主目标, 次目标]。主目标 = 该渠道文章应粘贴去的后台（公众号渠道→公众号后台，
+// 网站渠道→管理后台）；次目标作一条轻文字链一并给出，满足「两个地址都给到」。
+export function pasteTargetsForChannel(channel) {
+  return channel === 'ft'
+    ? [PASTE_BACKENDS.foodtalks, PASTE_BACKENDS.weixin]
+    : [PASTE_BACKENDS.weixin, PASTE_BACKENDS.foodtalks];
+}
+
 export function wrapCopyFeedback({
   windowRef = globalThis.window,
   documentRef = globalThis.document,
   buttonID = 'copyBtn',
   successID = 'copySuccess',
   resetText = '复制全文',
+  hintID = 'copyPasteHint',
+  pasteTargets = [],
   timeoutMs = 10000,
 } = {}) {
   if (!windowRef || !windowRef.copyContent) return;
+
+  // 复位：按钮回「复制全文」、收起后台入口、隐藏底部 pill。挂到 window 上，供新文章
+  // 渲染(showPreview)与返回(goBack)调用——实现「状态保持到下一次动作才复位」。
+  function resetCopyFeedback() {
+    const btn = documentRef.getElementById(buttonID);
+    if (btn) { btn.textContent = resetText; btn.classList.remove('copied'); }
+    const hint = documentRef.getElementById(hintID);
+    if (hint) hint.style.display = 'none';
+    const success = documentRef.getElementById(successID);
+    if (success) success.style.display = 'none';
+  }
+  windowRef._resetCopyFeedback = resetCopyFeedback;
+
+  // 在复制键右侧内联渲染后台入口：主目标「去X后台 ↗」+ 次目标轻文字链。
+  // 仅 target=_blank 的 <a>，只有用户手动点击才打开外部后台（守红线 #8）。
+  function showPasteHint(btn) {
+    if (!btn || !pasteTargets.length) return;
+    let hint = documentRef.getElementById(hintID);
+    if (!hint) {
+      hint = documentRef.createElement('span');
+      hint.id = hintID;
+      hint.className = 'copy-paste-hint';
+      btn.insertAdjacentElement('afterend', hint);
+    }
+    hint.title = '已复制，可在编辑器中粘贴 ⌘/Ctrl + V'; // 粘贴说明走最轻的 hover 提示
+    hint.innerHTML = pasteTargets.map((t, i) =>
+      `<a class="copy-paste-link${i === 0 ? ' is-primary' : ''}" href="${t.url}"`
+      + ` target="_blank" rel="noopener">${i === 0 ? '去' + t.label + ' ↗' : t.label}</a>`
+    ).join('<span class="copy-paste-sep">·</span>');
+    hint.style.display = 'inline-flex';
+  }
+
   const originalCopy = windowRef.copyContent;
   windowRef.copyContent = async function copyWithFeedback() {
     const btn = documentRef.getElementById(buttonID);
     const ok = await originalCopy();
     if (ok === false) return false;
+    // 底部 pill 维持原有 10s 自动消失；按钮变身 + 后台入口则保持到下次动作。
     const success = documentRef.getElementById(successID);
-    if (success) success.style.display = 'block';
-    setTimeout(() => {
-      if (btn) {
-        btn.textContent = resetText;
-        btn.classList.remove('copied');
-      }
-      if (success) success.style.display = 'none';
-    }, timeoutMs);
+    if (success) {
+      success.style.display = 'block';
+      setTimeout(() => { if (success) success.style.display = 'none'; }, timeoutMs);
+    }
+    showPasteHint(btn);
     return ok;
   };
 }
@@ -196,6 +244,10 @@ export function wrapBackFeedback({
   const originalGoBack = windowRef.goBack;
   windowRef.goBack = function goBackWithFeedbackReset() {
     originalGoBack();
+    if (typeof windowRef._resetCopyFeedback === 'function') {
+      windowRef._resetCopyFeedback();
+      return;
+    }
     const success = documentRef.getElementById(successID);
     if (success) success.style.display = 'none';
   };
