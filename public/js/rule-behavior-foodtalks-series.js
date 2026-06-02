@@ -18,6 +18,7 @@ import {
   SERIES_CAPTION_KEYWORDS,
   SERIES_MATERIALS_DEFAULT,
   SERIES_FOOTER_DEFAULT,
+  SERIES_TEMPLATES,
 } from './foodtalks-series-defaults.js';
 
 // ── 规则读取助手（优先 config.behavior，缺省/非法降级 const）──
@@ -30,6 +31,12 @@ function behParamStr(config, key, fallback) {
 function behList(config, key, fallback) {
   const v = behOf(config).lists && behOf(config).lists[key];
   return (Array.isArray(v) && v.length) ? v : fallback;
+}
+// 行为文案：优先 config.behavior.templates.<key>，缺省/非法降级 fallback（仿网站 behaviorTemplate）。
+function behTemplate(config, key, fallback) {
+  const t = behOf(config).templates;
+  const v = t && t[key];
+  return (typeof v === 'string' && v) ? v : fallback;
 }
 
 // 正则字符串 → RegExp。识别开头 (?i) 内联 flag（服务端 RE2 用 (?i) 表达大小写不敏感，
@@ -116,7 +123,7 @@ export function classifySeries(neutralElems, config = {}) {
     // 共享层已配对的图注
     if (e.k === 'cap') { out.push({ k: 'cap', text: e.text || '', runs: e.runs }); continue; }
     // 表格透传
-    if (e.k === 'table') { refMode = false; out.push({ k: 'table', rows: e.rows || [] }); continue; }
+    if (e.k === 'table') { refMode = false; out.push({ k: 'table', rows: e.rows || [], colWidths: e.colWidths || [] }); continue; }
 
     // 目录：标题 + 其后连续的一级序号行（遇 blankBefore 视为正文起点，停止收集）
     if (isHeadingLike(e) && tocRe.test(plain)) {
@@ -143,6 +150,7 @@ export function classifySeries(neutralElems, config = {}) {
       out.push({ k: 'rec-title', text: plain.replace(/[：:]\s*$/, '：') });
       refMode = false;
       let j = i + 1;
+      let recItems = 0;
       while (j < elems.length) {
         const ej = elems[j];
         if (!ej) break;
@@ -155,7 +163,12 @@ export function classifySeries(neutralElems, config = {}) {
         if (/^\s*\d+\s*[、.．]/.test(pj)) break;            // 阿拉伯数字小标题（1、2、…）= 下一节
         if (isBoldLine(ej.runs)) break;                   // 加粗小标题 = 下一节，不并入推荐
         out.push({ k: 'rec-item', runs: stripLinks(ej.runs) });
+        recItems++;
         j++;
+      }
+      // 规范《二·七》：每个推荐阅读块（有条目时）下方补一行 14px 灰斜体说明文字。
+      if (recItems > 0) {
+        out.push({ k: 'rec-note', text: behTemplate(config, 'recommended_reading_note', SERIES_TEMPLATES.recommended_reading_note) });
       }
       i = j - 1;
       continue;

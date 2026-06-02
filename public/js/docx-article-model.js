@@ -63,6 +63,10 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
   const frontMatterScanLimit = opts.frontMatterScanLimit || DEFAULT_FRONT_MATTER_SCAN_LIMIT;
   const consumeAuthorLine = opts.consumeAuthorLine !== false; // 默认 true（公众号语义）
   const classifyReferences = opts.classifyReferences !== false; // 默认 true（公众号语义）
+  // 正文起点信号：'authorLine'（默认，公众号——首个「作者：」行之前=前置材料）；
+  // 'firstImage'（FoodTalks「什么是」系列——文章无作者行、固定以头图为正文锚点，头图之前的
+  // 标题段 + 单格副标题表格都是编辑前置物料，须剥离。见红线#12 的系列变体）。
+  const contentStartSignal = opts.contentStartSignal || 'authorLine';
   const cache = imgCache || {};
 
   const pds = (paragraphs || []).map(p => ({
@@ -88,6 +92,19 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
       break;
     }
     if (nonEmptySeen >= frontMatterScanLimit) break;
+  }
+
+  // 'firstImage' 信号：无作者行时，扫描前 frontMatterScanLimit 个非空块（含 table 块——
+  // 副标题是单格表格，必须能跨过），遇首个带图块即设为正文起点（头图本身留作正文第一元素）。
+  // 其前所有非空块（标题段、单格副标题表格）作为前置物料被剥离。扫描内无图则回退不剥离
+  // （contentStart 维持 0，不静默吞内容）。只在系列侧启用；公众号默认 'authorLine' 不受影响。
+  if (!resolved && contentStartSignal === 'firstImage') {
+    let scanned = 0;
+    for (let i = 0; i < pds.length; i++) {
+      if (pds[i].isEmpty) continue;
+      if (pds[i].hasImg) { contentStart = i; resolved = true; break; }
+      if (++scanned >= frontMatterScanLimit) break;
+    }
   }
 
   // 「标题/引言」结构标记的正文起点回退是公众号 DOCX front-matter 约定（属公众号内容标记
@@ -148,7 +165,7 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
           return { ...r, src, gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file || '') };
         }),
       })));
-      elems.push({ k: 'table', rows, ...takeDocxMeta(pd) });
+      elems.push({ k: 'table', rows, colWidths: pd.colWidths || [], ...takeDocxMeta(pd) });
       continue;
     }
 

@@ -58,6 +58,46 @@ test('consumeAuthorLine=false（网站口径）：保留作者行在正文流，
   assert.ok(texts.some(t => t.includes('作者：李四')), 'consumeAuthorLine=false 保留作者行交给下游');
 });
 
+// FoodTalks「什么是」系列：无作者行，正文以头图为锚点。contentStartSignal='firstImage' 时
+// 头图之前的标题段 + 单格副标题表格都是编辑前置物料（进微信后台标题/摘要字段），须剥离。
+const tableBlock = (cellText) => para({ type: 'table', rows: [[{ runs: [{ type: 'txt', text: cellText }] }]] });
+
+test('contentStartSignal=firstImage：剥离头图前的标题段 + 副标题表格，正文从头图起', () => {
+  const { elems } = classifyDocxArticle(
+    [txt('膨化食品包装生产效率翻倍？什么是…'), tableBlock('包装交付周期缩短20%，能耗降低30%'), img('head.png'), txt('正文首段。')],
+    { 'head.png': 'blob:head' },
+    { contentStartSignal: 'firstImage', consumeAuthorLine: false, classifyReferences: false }
+  );
+  assert.equal(elems[0].k, 'img', '正文第一元素必须是头图');
+  assert.equal(elems[0].src, 'blob:head');
+  const texts = elems.map(e => e.text || (e.runs || []).map(r => r.text).join(''));
+  assert.ok(!texts.some(t => t.includes('生产效率翻倍')), '标题段（前置物料）被剥离');
+  assert.ok(!texts.some(t => t.includes('包装交付周期缩短')), '副标题表格（前置物料）被剥离');
+  assert.ok(!elems.some(e => e.k === 'table'), '副标题单格表格不得作为表格落入正文');
+  assert.ok(texts.some(t => t.includes('正文首段')), '正文保留');
+});
+
+test('contentStartSignal 默认 authorLine：无作者行不按头图剥离（逐字节维持公众号行为）', () => {
+  const { elems } = classifyDocxArticle(
+    [txt('标题行'), img('head.png'), txt('正文。')],
+    { 'head.png': 'blob:head' },
+    { consumeAuthorLine: false, classifyReferences: false } // 不传 contentStartSignal
+  );
+  const texts = elems.map(e => e.text || (e.runs || []).map(r => r.text).join(''));
+  assert.ok(texts.some(t => t.includes('标题行')), '默认信号下标题段不被剥离');
+});
+
+test('contentStartSignal=firstImage 但无头图：回退不剥离，不静默吞内容', () => {
+  const { elems } = classifyDocxArticle(
+    [txt('第一段'), txt('第二段。')],
+    {},
+    { contentStartSignal: 'firstImage', consumeAuthorLine: false, classifyReferences: false }
+  );
+  const texts = elems.map(e => (e.runs || []).map(r => r.text).join(''));
+  assert.ok(texts.some(t => t.includes('第一段')), '无头图时不剥离首段（内容不丢）');
+  assert.ok(texts.some(t => t.includes('第二段')), '正文保留');
+});
+
 test('classifyReferences 默认 true：参考来源头/条目分类为 refH/ref', () => {
   const { elems } = classifyDocxArticle(
     [txt('作者：张三'), txt('正文。'), txt('参考来源：'), txt('[1] 某文献. 2020.')],

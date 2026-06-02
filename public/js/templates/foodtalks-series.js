@@ -16,7 +16,7 @@ const {
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
 const defaultsModule = await import('../foodtalks-series-defaults.js' + assetQuery);
-const { SERIES_COLORS, SERIES_SIZES, SERIES_LAYOUT } = defaultsModule;
+const { SERIES_COLORS, SERIES_SIZES, SERIES_LAYOUT, SERIES_FRONTMATTER } = defaultsModule;
 
 // ── config 读取（优先扁平 config 键，缺省降级系列常量）──
 function cfgNum(config, key, fallback) {
@@ -66,8 +66,10 @@ function section(inner, opts) {
   return `<section style="${style}">${inner}</section>`;
 }
 
-// 图片块（横图自适应 100% 宽）。line-height:0 防图下基线空隙。
-function imageSection(src, gap, sp, alt = '') {
+// 图片块。width 取自 DOCX 原始百分比（如二维码 27%），缺省 100%（序号图/尾部名片等满列资源）；
+// 始终配 max-width:100% 防溢出，居中。沿用 fbif.js 口径（小图不拉满，与微信成品一致）。
+// line-height:0 防图下基线空隙。
+function imageSection(src, gap, sp, { alt = '', width = '100%' } = {}) {
   const url = absUrl(src);
   const isGif = looksLikeGifSource(url);
   const rpol = HTTP_RE.test(url) ? ' referrerpolicy="no-referrer"' : '';
@@ -76,7 +78,7 @@ function imageSection(src, gap, sp, alt = '') {
   return (
     `<section style="${style}">` +
     `<img src="${escAttr(url)}"${gifAttr}${rpol} alt="${escAttr(alt)}" ` +
-    `style="width: 100%; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;" />` +
+    `style="width: ${width}; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;" />` +
     `</section>`
   );
 }
@@ -125,6 +127,8 @@ function renderTableCellRuns(runs) {
     return '';
   }).join('')).join('<br>');
 }
+// 信息表（成品标准）：首行=标题文字+其余空 → 渲成跨整行的深蓝实心横幅（白字加粗居中、无内框）；
+// 列宽按 DOCX gridCol 比例（左窄右宽）走 colgroup + table-layout:fixed；正文格细灰边框居中、多行。
 function renderTable(elem, config) {
   const headerBg = cfgColor(config, 'table_header_bg', '#02396b');
   const headerColor = cfgColor(config, 'table_header_text_color', '#ffffff');
@@ -133,14 +137,40 @@ function renderTable(elem, config) {
   const padRaw = Number(config && config.table_cell_padding);
   const pad = Number.isFinite(padRaw) && padRaw >= 0 ? padRaw : 8;
   const headerBold = !(config && config.table_header_bold === false);
-  const cellBase = `border: 1px solid ${borderColor}; padding: ${pad}px; font-size: ${fs}px; text-align: center; word-break: break-word;`;
-  const body = (elem.rows || []).map(row => '<tr>' + (row || []).map(cell => {
-    const style = cellBase + (cell.header
-      ? ` background-color: ${headerBg}; color: ${headerColor};${headerBold ? ' font-weight: bold;' : ''}`
-      : ' color: rgba(0, 0, 0, 0.9);');
-    return `<td style="${style}">${renderTableCellRuns(cell.runs) || '<br>'}</td>`;
-  }).join('') + '</tr>').join('');
-  return `<table style="border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0 auto;"><tbody>${body}</tbody></table>`;
+  const rows = elem.rows || [];
+  const colCount = rows.reduce((m, r) => Math.max(m, (r || []).length), 0);
+  const cellHtml = (cell) => renderTableCellRuns(cell && cell.runs);
+
+  // colgroup：DOCX gridCol 列宽齐全且多列时按比例下发（左窄右宽）；否则等宽 fallback。
+  const cw = (Array.isArray(elem.colWidths) ? elem.colWidths : []).filter(n => n > 0);
+  let colgroup = '';
+  if (cw.length === colCount && colCount > 1) {
+    const total = cw.reduce((a, b) => a + b, 0);
+    colgroup = '<colgroup>' + cw.map(w => `<col style="width: ${(w / total * 100).toFixed(2)}%;" />`).join('') + '</colgroup>';
+  }
+
+  const headStyle = (extraBorder) =>
+    `padding: ${pad}px; font-size: ${fs}px; text-align: center; background-color: ${headerBg}; color: ${headerColor};` +
+    (headerBold ? ' font-weight: bold;' : '') + ` border: 1px solid ${extraBorder};`;
+  const cellBase = `border: 1px solid ${borderColor}; padding: ${pad}px; font-size: ${fs}px; text-align: center; word-break: break-word; vertical-align: middle;`;
+  // 横幅表头：首行仅首格有内容、其余皆空。
+  const isBanner = (row) => Array.isArray(row) && row.length >= 1 && (cellHtml(row[0]) || '').trim() &&
+    row.slice(1).every(c => !(cellHtml(c) || '').trim());
+
+  const body = rows.map((row, ri) => {
+    if (ri === 0 && colCount > 1 && isBanner(row)) {
+      // 跨整行深蓝横幅（边框同底色 → 视觉无内框，与成品一致）。
+      return `<tr><td colspan="${colCount}" style="${headStyle(headerBg)}">${cellHtml(row[0]) || '<br>'}</td></tr>`;
+    }
+    return '<tr>' + (row || []).map(cell => {
+      const style = cell && cell.header
+        ? cellBase.replace('vertical-align: middle;', `vertical-align: middle; background-color: ${headerBg}; color: ${headerColor};${headerBold ? ' font-weight: bold;' : ''}`)
+        : cellBase + ' color: rgba(0, 0, 0, 0.9);';
+      return `<td style="${style}">${cellHtml(cell) || '<br>'}</td>`;
+    }).join('') + '</tr>';
+  }).join('');
+
+  return `<table style="border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0 auto;">${colgroup}<tbody>${body}</tbody></table>`;
 }
 
 // ── 间距：默认每块后留 1 行空（gap）；紧凑成对例外不留 ──
@@ -151,6 +181,7 @@ function gapAfter(e, next) {
   if (e.k === 'ref-item' && next.k === 'ref-item') return false;
   if (e.k === 'rec-title') return false;                      // 段头紧贴首条
   if (e.k === 'rec-item' && next.k === 'rec-item') return false;
+  if (e.k === 'rec-item' && next.k === 'rec-note') return false; // 说明行紧贴最后一条 ○
   if (e.k === 'toc-title') return false;                      // 「目录」紧贴首条
   if (e.k === 'toc-item' && next.k === 'toc-item') return false;
   return true;
@@ -170,7 +201,7 @@ function render(elems, config = {}) {
       case 'h1': {
         // 序号图（前空行由上一块 gap 提供；序号图与文字间不空行）+ 居中标题文字（后空行）
         const imgUrl = sectionImageUrl(config, e.index);
-        if (imgUrl) lines.push(imageSection(imgUrl, false, sp, e.text));
+        if (imgUrl) lines.push(imageSection(imgUrl, false, sp, { alt: e.text }));
         lines.push(section(
           span(e.text, { size: sp.h1Size, color: sp.heading, bold: true, sp }),
           { align: 'center', gap, sp }));
@@ -197,7 +228,8 @@ function render(elems, config = {}) {
           { align: 'left', gap, sp }));
         break;
       case 'img':
-        lines.push(imageSection(e.src, gap, sp));
+        // 正文图用 DOCX 原始宽度百分比（小图如二维码不拉满，与微信成品一致）。
+        lines.push(imageSection(e.src, gap, sp, { width: e.w || '100%' }));
         break;
       case 'cap':
         lines.push(section(
@@ -217,6 +249,12 @@ function render(elems, config = {}) {
           { align: 'left', gap, sp }));
         break;
       }
+      case 'rec-note':
+        // 规范《二·七》：推荐阅读块下方补充说明，14px 灰斜体左对齐（同作者/图源说明口径）。
+        lines.push(section(
+          span(e.text, { size: sp.attrSize, color: sp.muted, italic: true, sp }),
+          { align: 'left', gap, sp }));
+        break;
       case 'ref-item':
         lines.push(section(
           renderRuns(e.runs, { size: sp.bodySize, color: sp.muted, sp }),
@@ -242,12 +280,17 @@ function render(elems, config = {}) {
 // ── DOCX 分类（共享中性层 + 系列口径）──
 // consumeAuthorLine=false：系列文章无「作者：」前置行，正文从标题/副标题起。
 // classifyReferences=false：参考来源是一级标题（「六、参考来源」），由 classifySeries 自己识别。
-function buildDocxOpts() {
-  return { consumeAuthorLine: false, classifyReferences: false };
+// 正文起点信号 + 扫描上限走 config.behavior.params（红线：规则后台可配），缺省降级系列常量。
+function buildDocxOpts(config) {
+  const params = (config && config.behavior && config.behavior.params) || {};
+  const sig = (params.content_start_signal && params.content_start_signal.default) || SERIES_FRONTMATTER.content_start_signal;
+  const limRaw = Number(params.front_matter_scan_limit && params.front_matter_scan_limit.default);
+  const lim = Number.isFinite(limRaw) && limRaw > 0 ? limRaw : SERIES_FRONTMATTER.front_matter_scan_limit;
+  return { consumeAuthorLine: false, classifyReferences: false, contentStartSignal: sig, frontMatterScanLimit: lim };
 }
 
 function processDocxInternal(paragraphs, imgCache, config) {
-  const neutral = classifyDocxArticle(paragraphs || [], imgCache || {}, buildDocxOpts());
+  const neutral = classifyDocxArticle(paragraphs || [], imgCache || {}, buildDocxOpts(config));
   const elems = classifySeries(neutral.elems, config);
   const footer = buildSeriesFooterElems(config);
   const all = elems.concat(footer);

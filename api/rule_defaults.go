@@ -412,6 +412,10 @@ func defaultFoodTalksSeriesRuleBehavior() map[string]any {
 			"recommended_reading_regex": map[string]any{"type": "string", "default": `^\s*(相关阅读|推荐阅读)\s*[：:]\s*$`},
 			"ref_section_regex":         map[string]any{"type": "string", "default": `^(参考(来源|文献|资料|链接)|信息来源)\s*[：:]?\s*$`},
 			"ref_item_regex":            map[string]any{"type": "string", "default": `^\s*\[\d+\]`},
+			// 前置物料剥离：系列文章无「作者：」行，正文以头图为锚点。'firstImage' = 头图之前的
+			// 标题段 + 单格副标题表格都是编辑前置物料（进微信后台标题/摘要），不进正文。
+			"content_start_signal":      map[string]any{"type": "string", "default": "firstImage"},
+			"front_matter_scan_limit":   map[string]any{"type": "number", "default": 25},
 		},
 		"lists": map[string]any{
 			"image_caption_keywords": []any{

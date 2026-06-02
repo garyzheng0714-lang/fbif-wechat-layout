@@ -100,6 +100,34 @@ test('classifySeries: DOCX 标题样式段(k:h 仅 text 无 runs)不丢字，归
   assert.ok(allText.includes('个性与定制化'), '小标题文字不能丢失');
 });
 
+test('classifySeries: 推荐阅读块末尾补 14px 灰斜体说明（规范§二·七，可配文案）', () => {
+  // 规范要求每个推荐阅读块下方补一行说明；此前被误删，本测试守护其回归。
+  const out = classifySeries(build(), {});
+  const notes = out.filter(e => e.k === 'rec-note');
+  assert.equal(notes.length, 1, '本块有条目 → 补一条说明');
+  assert.match(notes[0].text, /查看更多推荐阅读/);
+  // 说明必须紧跟在推荐条目之后（块尾），不在条目之前
+  const lastRecItem = out.map(e => e.k).lastIndexOf('rec-item');
+  const noteIdx = out.map(e => e.k).indexOf('rec-note');
+  assert.ok(noteIdx > lastRecItem, '说明行在最后一条 rec-item 之后');
+});
+
+test('classifySeries: 推荐阅读说明文案走 behavior.templates 可覆盖（红线：规则后台可配）', () => {
+  const cfg = { behavior: { templates: { recommended_reading_note: '自定义说明X' } } };
+  const out = classifySeries(build(), cfg);
+  const note = out.find(e => e.k === 'rec-note');
+  assert.equal(note.text, '自定义说明X');
+});
+
+test('classifySeries: 无条目的推荐阅读块不补孤立说明行', () => {
+  const elems = [
+    { k: 'txt', runs: [{ type: 'txt', text: '相关阅读：' }], text: '相关阅读：' },
+    { k: 'h', text: '正文标题' }, // 紧跟标题 → 推荐块无条目
+  ];
+  const out = classifySeries(elems, {});
+  assert.equal(out.filter(e => e.k === 'rec-note').length, 0, '无条目不补说明');
+});
+
 test('classifySeries: 推荐阅读条目清除超链接（无 link run）', () => {
   const elems = [
     { k: 'txt', runs: [{ type: 'txt', text: '相关阅读：' }], text: '相关阅读：' },

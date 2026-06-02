@@ -545,6 +545,16 @@ export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null) {
     const look = findOne(tblPr, W, 'tblLook');
     if (look && wattr(look, 'firstRow') === '1') headerRow = true;
   }
+  // 列宽（twips，来自 <w:tblGrid><w:gridCol w="..">）。可选附加字段：渲染器决定是否消费
+  // （FoodTalks 系列信息表按此设左窄右宽列宽；公众号/网站渲染器忽略——红线#19 不受影响）。
+  const colWidths = [];
+  const grid = findOne(tbl, W, 'tblGrid');
+  if (grid) {
+    for (const gc of findAll(grid, W, 'gridCol')) {
+      const cw = parseInt(wattr(gc, 'w') || '0', 10);
+      colWidths.push(cw > 0 ? cw : 0);
+    }
+  }
   const rows = [];
   let anyImg = false;
   for (const tr of findAll(tbl, W, 'tr')) {
@@ -563,7 +573,7 @@ export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null) {
     if (cells.length) rows.push(cells);
   }
   return {
-    type: 'table', rows,
+    type: 'table', rows, colWidths,
     // 段落兜底字段：让下游段落扫描零改动也不崩（isEmpty/isHeading 安全默认）。
     align: 'left', runs: [], text: '', hasImg: anyImg, isEmpty: false,
     isList: false, styleId: '', styleName: '', styleChain: [],

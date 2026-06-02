@@ -50,6 +50,20 @@ export const SERIES_REGEX = Object.freeze({
   ref_item_regex: '^\\s*\\[\\d+\\]',
 });
 
+// ── 前置物料剥离默认（红线下放：behavior.params.content_start_signal / front_matter_scan_limit）──
+// 「什么是」系列文章无「作者：」行，正文以头图为锚点：头图之前的标题段 + 单格副标题表格
+// 都是编辑前置物料（进微信后台标题/摘要字段），不进正文。须与 api/rule_defaults.go 默认一致。
+export const SERIES_FRONTMATTER = Object.freeze({
+  content_start_signal: 'firstImage', // 'firstImage' = 头图为正文起点；'authorLine' = 旧公众号语义
+  front_matter_scan_limit: 25,        // 找头图的最大非空块扫描数，超出则不剥离（不吞内容）
+});
+
+// ── 行为文案默认（红线下放：behavior.templates.<key>）──
+// 推荐阅读块下方补充说明（规范《二·七·推荐阅读》：14px 灰斜体）。须与 api/rule_defaults.go 一致。
+export const SERIES_TEMPLATES = Object.freeze({
+  recommended_reading_note: '查看更多推荐阅读，请拉至文末点击“阅读原文”访问FoodTalks网站',
+});
+
 // 图注关键词（紧跟图片、或含来源前缀的短段 → 12px 灰居中图注）。
 export const SERIES_CAPTION_KEYWORDS = Object.freeze([
   '图片来源', '资料来源', '数据来源', '图源', '来源',
