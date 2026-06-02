@@ -29,7 +29,7 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 These have been explicitly confirmed by the user. Breaking any of these is unacceptable:
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
-2. **多公众号规则绑定，单模板起步** — 默认公众号为 `FBIF公众号`，侧栏"规则包"方角分段控件可切到 `FoodTalks什么是系列`；公众号是规则应用对象，规则是可复用资产，新增公众号必须先进入 `public/js/rule-packs/registry.js`。规则包切换器和顶部圆形渠道胶囊（公众号 / FoodTalks 网站）是**两层不同语义**：渠道 = 去哪个编辑器，规则包 = 编辑器内用哪套规则；视觉上必须保持分层（方角 vs 圆角）
+2. **多账号绑定，统一顶栏账号菜单（单层）** — 公众号是规则应用对象，规则是可复用资产，新增账号必须先进入 `public/js/rule-packs/registry.js`（唯一入口），并在 `api/rule_defaults.go` 成对登记账号/preset（id 字节一致）。账号切换走**单层顶栏头像菜单**（`public/js/account-menu.js` 的 `mountAccountMenu`，挂载点 `#acctMenu`）：列出全部账号，渠道（公众号 / 网站）降为菜单内的**分组标签**，不再是独立控件。点击同模板账号（如 `FBIF公众号`↔`WowFood爆品超市`，templateId 都是 `fbif`）原地切换；跨模板账号（`FoodTalks什么是系列` / `网站默认`）整页 reload 到其 URL（红线 #19 隔离）。跨渠道编辑器快照由 `session-restore.js` 的 `beforeunload` 兜底保存（无条件注册，不依赖旧 `.channel-switcher`）。**2026-06-02 用户裁定「不要两层」，推翻旧"圆角渠道胶囊 + 方角规则包分段 两层分离（方角 vs 圆角）"契约**——旧的两层切换器（顶部 `.channel-switcher` 圆胶囊、侧栏 `.account-switcher` 方角分段）已删除，不要恢复
 3. **规则服务端保存 + 本地降级** — 参数预设和 `behavior` 行为配置以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
 4. **所有按钮在顶部工具栏** — 底部不放按钮
 5. **不要 TOC/目录** — 已删除

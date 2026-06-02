@@ -16,17 +16,7 @@
 <body>
 
 <header class="global-channel-bar">
-  <div class="channel-bar-side channel-bar-side-left" aria-hidden="true"></div>
-  <nav class="channel-switcher" role="tablist" aria-label="选择渠道">
-    <a href="/mp/fbif" class="channel-switcher-btn is-active" data-channel="mp" role="tab" aria-selected="true" aria-current="page">
-      <img class="channel-switcher-icon" src="/wechat-logo.svg" alt="" aria-hidden="true">
-      <span>公众号</span>
-    </a>
-    <a href="/ft/default" class="channel-switcher-btn" data-channel="ft" role="tab" aria-selected="false">
-      <img class="channel-switcher-icon" src="/foodtalks-logo.svg" alt="" aria-hidden="true">
-      <span>FoodTalks 网站（测试中）</span>
-    </a>
-  </nav>
+  <div class="acct-menu" id="acctMenu" aria-label="切换账号"></div>
   <div class="channel-bar-side channel-bar-side-right">
     <div class="preview-toolbar" id="previewToolbar">
       <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
@@ -45,8 +35,6 @@
       <!-- Hidden compat for engine.js -->
       <span id="pageTitle" style="display:none;"></span>
       <span id="pageSubtitle" style="display:none;"></span>
-
-      <div class="account-switcher" id="accountSwitcher" aria-label="规则包选择"></div>
 
       <div class="upload-zone" id="dropZone">
         <div class="upload-icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
@@ -191,6 +179,7 @@ window._pushLog = function(level, msg, detail) {
 // ---- Rule preset config ----
 const rulePackModule = await import('/js/rule-packs/registry.js?v=' + assetVersion);
 const rulePackUrlModule = await import('/js/rule-packs/url.js?v=' + assetVersion);
+const { mountAccountMenu } = await import('/js/account-menu.js?v=' + assetVersion);
 const editorShell = await import('/js/editor-shell.js?v=' + assetVersion);
 const {
   bindUrlImportShortcuts,
@@ -538,19 +527,13 @@ function applyRulePackChrome(pack) {
 applyRulePackChrome(activeRulePack);
 renderActiveRuleCard();
 
-function renderAccountSwitcher() {
-  const root = document.getElementById('accountSwitcher');
-  if (!root) return;
-  root.innerHTML = rulePackModule.getRulePacksByChannel('mp').map(pack => `
-    <button type="button" class="account-switcher-btn ${pack.id === activeRulePack.id ? 'active' : ''}" data-account-id="${pack.id}" aria-pressed="${pack.id === activeRulePack.id ? 'true' : 'false'}">
-      <img class="account-switcher-icon" src="/wechat-logo.svg" alt="" aria-hidden="true">
-      <span>${pack.accountName}</span>
-    </button>
-  `).join('');
-  root.querySelectorAll('[data-account-id]').forEach(btn => {
-    btn.addEventListener('click', () => switchAccount(btn.dataset.accountId));
-  });
-}
+// 统一顶栏账号菜单：列出全部账号（渠道做分组标签），点击走 switchAccount
+// （同模板原地切 / 跨模板整页 reload）。取代原侧栏方角分段控件。
+const accountMenu = mountAccountMenu({
+  container: document.getElementById('acctMenu'),
+  activeId: activeRulePack.id,
+  onSwitch: (id) => switchAccount(id),
+});
 
 function persistAccountSelection(id) {
   try {
@@ -585,7 +568,7 @@ async function switchAccount(accountID) {
   window._activeRulePack = activeRulePack;
   persistAccountSelection(activeRulePack.id);
   applyRulePackChrome(activeRulePack);
-  renderAccountSwitcher();
+  accountMenu.setActive(activeRulePack.id);
 
   const [loaded, catalog] = await Promise.all([
     loadActiveRulePreset(activeRulePack.id),
@@ -603,8 +586,6 @@ async function switchAccount(accountID) {
   activeRuleSelectorStatus = '';
   refreshRuleConsumers({ rerender: true });
 }
-
-renderAccountSwitcher();
 
 function loadConfig() {
   return normalizeRuleConfig((window._activeConfig && window._activeConfig.config) || loadLocalRuleConfig(activeRulePack.id));

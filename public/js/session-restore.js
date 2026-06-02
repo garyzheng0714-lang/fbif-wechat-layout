@@ -133,6 +133,17 @@ export function clearChannel(channel) {
 
 // Wire up the top channel pill so clicks flush state before navigating.
 export function bindChannelSwitcher() {
+  // Beforeunload fallback registered FIRST and unconditionally so it survives
+  // the removal of the old `.channel-switcher` anchors (replaced by the unified
+  // top-bar account menu, which navigates via location.href — captured here on
+  // unload). Catches closing tab, manual URL change, and every in-tab nav path.
+  window.addEventListener('beforeunload', () => {
+    const ch = currentChannel();
+    if (ch) captureChannel(ch);
+  });
+
+  // Legacy anchor-based channel switcher (kept for back-compat if still present):
+  // intercept its click to flush the snapshot before the anchor navigates.
   const switcher = document.querySelector('.channel-switcher');
   if (!switcher) return;
   switcher.addEventListener('click', (ev) => {
@@ -149,14 +160,6 @@ export function bindChannelSwitcher() {
     const ch = currentChannel();
     if (ch) captureChannel(ch);
     location.href = href;
-  });
-
-  // Beforeunload fallback (closing tab, manual URL change, etc.). sessionStorage
-  // doesn't survive tab close anyway, but this catches in-tab navigation paths
-  // that bypass the click handler above.
-  window.addEventListener('beforeunload', () => {
-    const ch = currentChannel();
-    if (ch) captureChannel(ch);
   });
 }
 

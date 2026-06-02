@@ -2,20 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('app shell renders a capsule account switcher above the upload area', async () => {
+test('app shell renders a unified top-bar account menu (single layer)', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/app.css', import.meta.url), 'utf8');
-  // .account-switcher / .account-switcher-btn styles moved to channel-bar.css
-  // alongside the top channel pill (both are "switcher controls"). Tests below
-  // that reference `css` now check the merged stylesheet.
   const channelBarCss = await readFile(new URL('../public/css/channel-bar.css', import.meta.url), 'utf8');
+  const menuJs = await readFile(new URL('../public/js/account-menu.js', import.meta.url), 'utf8');
   const allCss = css + '\n' + channelBarCss;
 
-  assert.match(app, /id="accountSwitcher"/);
-  assert.match(app, /class="account-switcher"/);
-  assert.match(app, /getRulePacksByChannel\(['"]mp['"]\)/);
+  // 单层账号菜单（2026-06-02 用户裁定「不要两层」）：顶栏头像菜单取代旧的
+  // 侧栏方角分段 + 顶部圆形渠道胶囊。渲染逻辑在 account-menu.js，挂载点 #acctMenu。
+  assert.match(app, /id="acctMenu"/);
+  assert.match(app, /mountAccountMenu/);
+  assert.match(app, /account-menu\.js/);
+  // 旧的两层切换器残骸必须清掉
+  assert.doesNotMatch(app, /id="accountSwitcher"/, '旧侧栏方角分段已移除');
+  assert.doesNotMatch(app, /class="channel-switcher"/, '旧顶部圆形渠道胶囊已移除');
+  // account-menu.js 契约：按渠道分组、列出全部账号、标记当前账号
+  assert.match(menuJs, /listRulePacks/);
+  assert.match(menuJs, /CHANNEL_LABEL/);
+  assert.match(menuJs, /is-active/);
+  assert.match(menuJs, /setActive/);
   assert.match(app, /switchAccount/);
-  assert.match(app, /aria-pressed/);
   assert.match(app, /loadActiveRulePreset\(activeRulePack\.id\)/);
   assert.match(app, /hydrateActiveRulePreset\(activeRulePack\.id\)/);
   assert.match(app, /cacheServerRuleFallback\(loaded\.preset\.config\)/);
@@ -39,8 +46,9 @@ test('app shell renders a capsule account switcher above the upload area', async
   );
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
-  assert.match(allCss, /\.account-switcher/);
-  assert.match(allCss, /\.account-switcher-btn\.active/);
+  assert.match(allCss, /\.acct-trigger/);
+  assert.match(allCss, /\.acct-panel/);
+  assert.match(allCss, /\.acct-item\.is-active/);
   assert.match(css, /\.active-rule-card/);
   assert.match(css, /\.active-rule-card\.editing/);
   assert.match(css, /\.active-rule-readline/);

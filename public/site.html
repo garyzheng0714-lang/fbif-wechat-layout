@@ -17,17 +17,7 @@
 <body>
 
 <header class="global-channel-bar">
-  <div class="channel-bar-side channel-bar-side-left" aria-hidden="true"></div>
-  <nav class="channel-switcher" role="tablist" aria-label="选择渠道">
-    <a href="/mp/fbif" class="channel-switcher-btn" data-channel="mp" role="tab" aria-selected="false">
-      <img class="channel-switcher-icon" src="/wechat-logo.svg" alt="" aria-hidden="true">
-      <span>公众号</span>
-    </a>
-    <a href="/ft/default" class="channel-switcher-btn is-active" data-channel="ft" role="tab" aria-selected="true" aria-current="page">
-      <img class="channel-switcher-icon" src="/foodtalks-logo.svg" alt="" aria-hidden="true">
-      <span>FoodTalks 网站</span>
-    </a>
-  </nav>
+  <div class="acct-menu" id="acctMenu" aria-label="切换账号"></div>
   <div class="channel-bar-side channel-bar-side-right">
     <div class="preview-toolbar" id="previewToolbar">
       <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
@@ -248,6 +238,7 @@ window._pushLog = function(level, msg, detail) {
 // ---- Rule preset config ----
 const rulePackModule = await import('/js/rule-packs/registry.js?v=' + assetVersion);
 const rulePackUrlModule = await import('/js/rule-packs/url.js?v=' + assetVersion);
+const { mountAccountMenu } = await import('/js/account-menu.js?v=' + assetVersion);
 const editorShell = await import('/js/editor-shell.js?v=' + assetVersion);
 const {
   bindUrlImportShortcuts,
@@ -273,6 +264,18 @@ function initialRulePackID() {
 let activeRulePack = rulePackModule.getRulePack(initialRulePackID());
 window._activeRulePack = activeRulePack;
 let currentTemplateId = activeRulePack.templateId;
+
+// 统一顶栏账号菜单：网站侧无同模板同伴，任何账号切换都是跨模板，直接跳转到目标
+// 账号 URL（跨渠道编辑器快照由 session-restore 的 beforeunload 兜底保存）。
+mountAccountMenu({
+  container: document.getElementById('acctMenu'),
+  activeId: activeRulePack.id,
+  onSwitch: (id) => {
+    const pack = rulePackModule.getRulePack(id);
+    location.href = rulePackUrlModule.buildPath(pack.channel, pack.id);
+  },
+});
+
 const ruleModule = await import('/js/rule-presets.js?v=' + assetVersion);
 const {
   loadActiveRulePreset,
