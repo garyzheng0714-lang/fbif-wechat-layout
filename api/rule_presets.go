@@ -60,6 +60,11 @@ type ruleDefinition struct {
 	Description string              `json:"description,omitempty"`
 	Versions    []rulePresetVersion `json:"versions"`
 	UpdatedAt   string              `json:"updated_at"`
+	// BuiltinVersion 标记该内置默认 preset 对应的代码版本。store 加载时若持久化值
+	// 落后于代码 currentBuiltinRuleVersion，则用代码默认覆盖（修复历史持久化旧数据 +
+	// 防代码更新被旧持久化挡住）。仅作用于 defaultRuleDefinitions 里的固定 id；
+	// 用户自建的新 id preset 不在其中，BuiltinVersion 留 0、永不被覆盖。
+	BuiltinVersion int `json:"builtin_version,omitempty"`
 }
 
 type ruleAccount struct {
@@ -309,9 +314,18 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 		}
 		normalizedRules[rule.ID] = rule
 	}
-	for id, rule := range defaultRuleDefinitions(now) {
-		if _, ok := normalizedRules[id]; !ok {
-			normalizedRules[id] = rule
+	for id, def := range defaultRuleDefinitions(now) {
+		existing, ok := normalizedRules[id]
+		if !ok {
+			normalizedRules[id] = def
+			continue
+		}
+		// 内置默认 preset 的代码版本领先持久化 → 用代码默认覆盖（修复历史持久化旧数据，
+		// 并让后续对内置默认的代码更新能落地已部署环境）。只覆盖 defaultRuleDefinitions 里
+		// 的固定 id；用户自建 preset 的 id 不在其中，永不被波及。账号 active 绑定不在此处改
+		// （下方 accounts 循环会把失效的 ActiveRuleVersion 校正到最新）。
+		if existing.BuiltinVersion < def.BuiltinVersion {
+			normalizedRules[id] = def
 		}
 	}
 	doc.SchemaVersion = 2
@@ -562,6 +576,9 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	rule.ID = p.ID
 	rule.Name = p.Name
 	rule.Description = p.Description
+	// 用户保存即视为接受当前代码基线：标记 BuiltinVersion=当前，避免下次加载被内置默认覆盖
+	// （内置 id preset 的后台编辑得以保留，直到开发者再次 bump 代码版本）。
+	rule.BuiltinVersion = currentBuiltinRuleVersion
 	rule.Versions = append(rule.Versions, rulePresetVersion{
 		Version:   nextVersion,
 		Config:    p.Config,

@@ -103,8 +103,15 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 	return out
 }
 
+// currentBuiltinRuleVersion：内置默认 preset 的代码版本。修改任一 default*RuleConfig/Behavior
+// 且想把新默认推到已部署环境（store 已持久化旧 preset）时 +1——store 加载会用代码默认覆盖
+// BuiltinVersion 落后的内置 preset，绕过「已持久化则代码默认永不覆盖」的旧行为。
+// v1→v2（2026-06-02）：FoodTalks「什么是」系列改为独立默认（深蓝 #02396b、表格边框 #888888、
+// 18 群 ft_series_materials、BD 名片 bd_card），修复 5/26 持久化的 FBIF 派生旧版。
+const currentBuiltinRuleVersion = 2
+
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
-	return map[string]ruleDefinition{
+	defs := map[string]ruleDefinition{
 		defaultRulePresetID: {
 			ID:          defaultRulePresetID,
 			Name:        "FBIF默认规则",
@@ -154,6 +161,11 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 			UpdatedAt: now,
 		},
 	}
+	for id, d := range defs {
+		d.BuiltinVersion = currentBuiltinRuleVersion
+		defs[id] = d
+	}
+	return defs
 }
 
 // defaultWowFoodRuleConfig 返回 WowFood爆品超市 的默认参数。复用公众号(FBIF)基线，
