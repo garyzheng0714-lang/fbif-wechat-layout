@@ -518,7 +518,14 @@ function classifyDocx(paragraphs, imgCache, config = {}) {
   // imgN 按【实际渲染】的图计数：共享层无条件计每个 img run，但空 src 图在 adapter 被
   // filter 丢弃不渲染，故缓存未命中时重算，避免状态栏「图片：N」高估（与旧版口径一致）。
   const siteElems = elems.map(adaptNeutralToSite).filter(Boolean);
-  return { elems: siteElems, imgN: siteElems.filter(e => e.k === 'img').length };
+  // 表格内图片藏在 k:'table' 的 rows.runs 里（不在顶层 k:'img'），单独累加有 src 的，
+  // 与公众号口径一致（否则『顶层无图、表格有图』的文章状态栏会显示图片:0）。
+  const tableImgN = siteElems
+    .filter(e => e.k === 'table')
+    .reduce((n, t) => n + (t.rows || []).reduce((rn, row) =>
+      rn + (row || []).reduce((cn, cell) =>
+        cn + (cell.runs || []).filter(r => r.type === 'img' && r.src).length, 0), 0), 0);
+  return { elems: siteElems, imgN: siteElems.filter(e => e.k === 'img').length + tableImgN };
 }
 
 // ---- Markdown 分类（最小版） ----

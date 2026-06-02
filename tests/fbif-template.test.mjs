@@ -279,5 +279,19 @@ test('公众号 DOCX 表格单元格内图片渲成受约束 inline <img>（不�
   );
   assert.match(html, /<td[^>]*>\s*<img src="blob:p1"/, '单元格首位是图片');
   assert.match(html, /<img src="blob:p1"[^>]*max-width: 100%/, '图片尺寸受单元格约束');
+  // 负向断言：单元格图绝不吃 run 的 w 百分比（那相对页宽，放进窄列会撑爆 table-layout:fixed）。
+  // 锁住 WHY，防有人照常规图片路径 'width: '+e.w 把 width:80% 加回来（正向断言仍会过）。
+  assert.doesNotMatch(html, /<img[^>]*\bwidth:\s*80%/, '单元格图不复用 run 宽度');
   assert.match(html, /话梅/, '同行文本单元格保留');
+});
+
+test('公众号表格单元格 GIF / http 图：data-type=gif + referrerpolicy 分支', () => {
+  const imgCell = (file) => ({ runs: [{ type: 'img', file, w: '80%' }], header: false });
+  const html = renderDocx(
+    [tablePara([[imgCell('anim.gif'), imgCell('p2.png')]])],
+    { imgCache: { 'anim.gif': 'https://cdn.example.com/anim.gif', 'p2.png': 'blob:p2' } }
+  );
+  assert.match(html, /<img src="https:\/\/cdn\.example\.com\/anim\.gif"[^>]*data-type="gif"/, 'gif 标 data-type');
+  assert.match(html, /<img src="https:\/\/cdn\.example\.com\/anim\.gif"[^>]*referrerpolicy="no-referrer"/, 'http 图加防盗链');
+  assert.doesNotMatch(html, /src="blob:p2"[^>]*referrerpolicy/, '本地 blob 图不加 referrerpolicy');
 });

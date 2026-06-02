@@ -174,7 +174,22 @@ test('网站 DOCX 表格单元格内图片渲成 inline <img>（src 注入；空
   assert.match(html, /<img[^>]*src="blob:p1"/, '有缓存的单元格图渲成 inline <img>');
   assert.match(html, /<img[^>]*max-width: 100%/, '单元格图尺寸受约束');
   assert.doesNotMatch(html, /<img[^>]*src="">/, '网站绝不输出空 src 图');
+  // 负向断言：单元格图不吃 run 的 w 百分比（撑爆 table-layout:fixed），只走 max-width:100%。
+  assert.doesNotMatch(html, /<img[^>]*\bwidth:\s*80%/, '单元格图不复用 run 宽度');
   assert.match(html, /话梅/);
+});
+
+test('网站表格单元格 http 图加 referrerpolicy（绕防盗链）；blob 图不加', () => {
+  const imgCell = (file) => ({ runs: [{ type: 'img', file, w: '80%' }], header: false });
+  const result = template.processDocx({
+    paragraphs: [tablePara([[imgCell('remote.png'), imgCell('local.png')]])],
+    imgCache: { 'remote.png': 'https://mmbiz.qpic.cn/x.png', 'local.png': 'blob:local' },
+    config: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<img[^>]*src="https:\/\/mmbiz\.qpic\.cn\/x\.png"[^>]*referrerpolicy="no-referrer"/, 'http 图加防盗链');
+  assert.doesNotMatch(html, /src="blob:local"[^>]*referrerpolicy/, '本地 blob 图不加 referrerpolicy');
 });
 
 test('网站 DOCX：带标题样式的「参考来源：」仍渲染成 #888 灰色 ref（不退化为大标题）', () => {

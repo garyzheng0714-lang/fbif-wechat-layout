@@ -132,34 +132,14 @@ export function clearChannel(channel) {
 }
 
 // Wire up the top channel pill so clicks flush state before navigating.
+// 跨渠道编辑器快照兜底：账号切换走统一顶栏菜单（account-menu.js），跨模板时用
+// location.href 整页导航——这里在 beforeunload 时 captureChannel 保存当前渠道快照。
+// 覆盖关 tab、手动改 URL、菜单导航等所有 in-tab 离开路径。旧的 .channel-switcher
+// 锚点切换器已删（2026-06-02 单层账号菜单），不再有 click 拦截分支。
 export function bindChannelSwitcher() {
-  // Beforeunload fallback registered FIRST and unconditionally so it survives
-  // the removal of the old `.channel-switcher` anchors (replaced by the unified
-  // top-bar account menu, which navigates via location.href — captured here on
-  // unload). Catches closing tab, manual URL change, and every in-tab nav path.
   window.addEventListener('beforeunload', () => {
     const ch = currentChannel();
     if (ch) captureChannel(ch);
-  });
-
-  // Legacy anchor-based channel switcher (kept for back-compat if still present):
-  // intercept its click to flush the snapshot before the anchor navigates.
-  const switcher = document.querySelector('.channel-switcher');
-  if (!switcher) return;
-  switcher.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('.channel-switcher-btn');
-    if (!btn) return;
-    if (btn.classList.contains('is-active') || btn.classList.contains('is-disabled')) {
-      ev.preventDefault();
-      return;
-    }
-    const href = btn.getAttribute('href');
-    if (!href) return;
-    // Anchor default would navigate before we run; intercept and flush first.
-    ev.preventDefault();
-    const ch = currentChannel();
-    if (ch) captureChannel(ch);
-    location.href = href;
   });
 }
 

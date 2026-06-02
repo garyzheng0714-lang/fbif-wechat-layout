@@ -93,13 +93,32 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 			t.Fatalf("account %q must expose active rule id: %#v", a.ID, doc.Accounts)
 		}
 	}
-	// All three accounts must have distinct active rule IDs
+	// All four accounts must have distinct active rule IDs
 	seen := map[string]bool{}
 	for _, a := range doc.Accounts {
 		if seen[a.ActiveID] {
 			t.Fatalf("default accounts should start with independent rule ids: %#v", doc.Accounts)
 		}
 		seen[a.ActiveID] = true
+	}
+
+	// WowFood 与 FBIF 唯一的默认差异：WowFood 不带 FBIF 的「更多文章」推荐位
+	// （红线 #14 + 品牌隔离）。锁住这条意图，防有人把 defaultWowFoodRuleConfig
+	// 退化成直接 return defaultRuleConfig() 而 CI 仍绿。
+	presetByID := func(id string) rulePreset {
+		for _, p := range doc.Presets {
+			if p.ID == id {
+				return p
+			}
+		}
+		t.Fatalf("preset %q not found in default store", id)
+		return rulePreset{}
+	}
+	if v := presetByID("wowfood-default").Config["more_articles_enabled"]; v != false {
+		t.Fatalf("wowfood-default more_articles_enabled = %#v, want false", v)
+	}
+	if v := presetByID("default").Config["more_articles_enabled"]; v != true {
+		t.Fatalf("fbif default more_articles_enabled = %#v, want true（差异即意图）", v)
 	}
 }
 
@@ -927,5 +946,48 @@ func TestRulePresetAdminAcceptsModularConfigAndProjectsFlatLegacyPreset(t *testi
 	}
 	if active.Config["footer_enabled"] != false {
 		t.Fatalf("footer_enabled = %v, want false", active.Config["footer_enabled"])
+	}
+}
+
+// 删除某账号当前激活的自定义 preset 后，该账号必须回落到【自己的】默认 preset，
+// 不能悬空、不能串到别的账号默认（store.delete 的 per-account fallback 分支）。
+// WHY：delete 是用户可触发的破坏性操作；fallback id 写错（如复制粘贴漏改）会让账号
+// 静默绑到错误规则且 go test 全过——本测试钉死「删激活规则=回落到自己的默认」意图。
+func TestRulePresetStoreDeleteFallsBackToAccountDefault(t *testing.T) {
+	cases := []struct{ account, wantDefault string }{
+		{"fbif", "default"},
+		{"wowfood", "wowfood-default"},
+		{"foodtalks-series", "foodtalks-series-default"},
+		{"ft-default", "ft-default-v1"},
+	}
+	for _, c := range cases {
+		t.Run(c.account, func(t *testing.T) {
+			store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+			customID := c.account + "-custom"
+			if _, err := store.upsert(rulePreset{
+				ID:     customID,
+				Name:   "临时自定义",
+				Config: map[string]any{"font_size": "16"},
+			}); err != nil {
+				t.Fatalf("upsert: %v", err)
+			}
+			if _, err := store.setActiveForAccount(c.account, customID); err != nil {
+				t.Fatalf("setActiveForAccount: %v", err)
+			}
+			if got, err := store.activeForAccount(c.account); err != nil || got.ID != customID {
+				t.Fatalf("active before delete = %q (err %v), want %q", got.ID, err, customID)
+			}
+			if _, err := store.delete(customID); err != nil {
+				t.Fatalf("delete: %v", err)
+			}
+			got, err := store.activeForAccount(c.account)
+			if err != nil {
+				t.Fatalf("activeForAccount after delete: %v", err)
+			}
+			if got.ID != c.wantDefault {
+				t.Fatalf("%s fallback = %q, want %q（删激活规则后必须回落到自己的默认，不得串号/悬空）",
+					c.account, got.ID, c.wantDefault)
+			}
+		})
 	}
 }

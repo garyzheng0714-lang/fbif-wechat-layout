@@ -21,19 +21,37 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// 纯函数：把账号包按渠道分组（CHANNEL_ORDER 顺序、过滤空组），并标出当前账号。
+// 抽出来便于行为测试——锁住分组顺序/成员/active 标记，避免源码 grep 的 ghost-pass
+// （render 只是把它转 HTML）。
+export function buildAccountGroups(packs, activeId) {
+  return CHANNEL_ORDER
+    .map(ch => ({
+      channel: ch,
+      label: CHANNEL_LABEL[ch] || ch,
+      items: (packs || [])
+        .filter(p => p.channel === ch)
+        .map(p => ({
+          id: p.id,
+          name: p.accountName,
+          avatarUrl: p.avatarUrl || FALLBACK_AVATAR,
+          active: p.id === activeId,
+        })),
+    }))
+    .filter(g => g.items.length);
+}
+
 // 渲染并挂载账号菜单。返回 { setActive(id) } 供页面在原地切换后更新高亮/触发器。
 export function mountAccountMenu({ container, activeId, onSwitch }) {
   if (!container) return { setActive() {} };
   const packs = listRulePacks();
-  const groups = CHANNEL_ORDER
-    .map(ch => ({ ch, items: packs.filter(p => p.channel === ch) }))
-    .filter(g => g.items.length);
   let isOpen = false;
 
   const activePack = () => packs.find(p => p.id === activeId) || packs[0];
 
   function render() {
     const cur = activePack();
+    const groups = buildAccountGroups(packs, activeId);
     container.innerHTML =
       `<button type="button" class="acct-trigger" aria-haspopup="menu" aria-expanded="${isOpen}">` +
         `<img class="acct-trigger-avatar" src="${esc(cur.avatarUrl || FALLBACK_AVATAR)}" alt="">` +
@@ -43,13 +61,13 @@ export function mountAccountMenu({ container, activeId, onSwitch }) {
       `</button>` +
       `<div class="acct-panel" role="menu"${isOpen ? '' : ' hidden'}>` +
         groups.map(g =>
-          `<div class="acct-group-label">${esc(CHANNEL_LABEL[g.ch] || g.ch)}</div>` +
-          g.items.map(p =>
-            `<button type="button" class="acct-item${p.id === activeId ? ' is-active' : ''}" role="menuitemradio"` +
-              ` aria-checked="${p.id === activeId}" data-account-id="${esc(p.id)}">` +
-              `<img class="acct-item-avatar" src="${esc(p.avatarUrl || FALLBACK_AVATAR)}" alt="">` +
-              `<span class="acct-item-name">${esc(p.accountName)}</span>` +
-              (p.id === activeId
+          `<div class="acct-group-label">${esc(g.label)}</div>` +
+          g.items.map(it =>
+            `<button type="button" class="acct-item${it.active ? ' is-active' : ''}" role="menuitemradio"` +
+              ` aria-checked="${it.active}" data-account-id="${esc(it.id)}">` +
+              `<img class="acct-item-avatar" src="${esc(it.avatarUrl)}" alt="">` +
+              `<span class="acct-item-name">${esc(it.name)}</span>` +
+              (it.active
                 ? `<svg class="acct-item-check" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">` +
                   `<path d="M5 12l5 5L20 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
                 : '') +

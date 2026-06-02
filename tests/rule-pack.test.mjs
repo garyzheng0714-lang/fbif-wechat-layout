@@ -127,10 +127,10 @@ test('getRulePackByPath /ft/unknown falls back to ft-default in same channel', (
   assert.equal(pack.id, 'ft-default');
 });
 
-test('getRulePacksByChannel mp returns only public-account packs', () => {
+test('getRulePacksByChannel mp returns public-account packs in registry 声明顺序', () => {
   const packs = getRulePacksByChannel('mp');
-  const ids = packs.map(p => p.id).sort();
-  assert.deepEqual(ids, ['fbif', 'foodtalks-series', 'wowfood']);
+  // 不 sort：账号菜单按 registry 声明顺序渲染分组内 item，顺序本身是契约。
+  assert.deepEqual(packs.map(p => p.id), ['fbif', 'foodtalks-series', 'wowfood']);
   assert.ok(packs.every(p => p.channel === 'mp'));
 });
 
