@@ -27,6 +27,7 @@ import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
 import { createAssetLibraryEditor } from './asset-library-rule-editor.js';
 import { assetLibraryFromPreset, defaultAssetLibraryData } from './admin-asset-data.js';
 import { bottomBlocksFromPreset, createBlockEditorBinder } from './admin-block-data.js';
+import { createBehaviorFormBinder } from './admin-behavior-data.js';
 import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
@@ -151,6 +152,7 @@ export function initAdminPanel(options = {}) {
   let workingFooter = null;
   let workingAssets = null;
   let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp') });
+  const behaviorBinder = createBehaviorFormBinder({ getBehavior: () => workingBehavior, setBehavior: (b) => { workingBehavior = b; syncBehaviorText(); const ta = overlay && overlay.querySelector('[data-role="behavior-json"]'); if (ta) ta.value = behaviorText; } });
   let footerEditorInstance = null, assetEditorInstance = null;
   let workingName = '未命名规则';
   let workingDescription = '';
@@ -476,17 +478,10 @@ export function initAdminPanel(options = {}) {
     }
     if (activeRuleTab === 'blocks') return `<section class="admin-rule-group"><div data-role="block-editor"></div></section>`;
     if (activeRuleTab === 'behavior') {
-      return `
-        <section class="admin-rule-group admin-json-panel">
-          <div class="admin-json-head">
-            <h3>代码化规则</h3>
-            <div class="admin-json-actions">
-              <button type="button" class="admin-secondary" data-action="validate-behavior">校验代码</button>
-              <button type="button" class="admin-secondary" data-action="apply-behavior">应用到预览</button>
-            </div>
-          </div>
-          <textarea data-role="behavior-json" spellcheck="false">${esc(behaviorText)}</textarea>
-        </section>`;
+      return `<section class="admin-rule-group admin-json-panel"><div data-role="behavior-editor"></div>
+        <details class="admin-adv"><summary>高级 · 原始 JSON（条件/动作在此编辑）</summary>
+          <div class="admin-json-actions"><button type="button" class="admin-secondary" data-action="validate-behavior">校验代码</button><button type="button" class="admin-secondary" data-action="apply-behavior">应用到预览</button></div>
+          <textarea data-role="behavior-json" spellcheck="false">${esc(behaviorText)}</textarea></details></section>`;
     }
     if (activeRuleTab === 'validation') {
       return `
@@ -641,6 +636,7 @@ export function initAdminPanel(options = {}) {
         if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
         if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
         blockBinder.destroy();
+        behaviorBinder.destroy();
         activeRuleTab = btn.dataset.ruleTab;
         renderMain();
       });
@@ -669,6 +665,7 @@ export function initAdminPanel(options = {}) {
     bindFooterLibraryEditor();
     bindAssetLibraryEditor();
     blockBinder.bind(overlay);
+    behaviorBinder.bind(overlay);
     overlay.querySelector('[data-role="preset-select"]').addEventListener('change', e => {
       selectedID = e.target.value;
       const selected = selectedPreset();
