@@ -455,7 +455,12 @@ function render(elems, config = {}) {
   // tip 提示声明不在此处——它走正文流（参考来源之后），由 behavior 提升为 tip elem 渲染。
   const mods = config.modules || {};
   const bottomBlocks = mods.bottom_blocks;
-  if (bottomBlocks && typeof bottomBlocks === 'object') {
+  // 防泄漏：mergeRuleDefaults 以公众号基线(含 mp 的 name_card bottom_blocks)为合并底，
+  // 无 bottom_blocks 的网站旧规则会被塞进公众号版。网站页脚段是 rich_html，故仅当存在
+  // rich_html 区块时才认其为「网站底部」走区块渲染；否则回退 fbif_footer（保住页脚）。
+  const bbBlocks = bottomBlocks && typeof bottomBlocks.blocks === 'object' ? bottomBlocks.blocks : null;
+  const bbIsSiteFooter = bbBlocks && Object.keys(bbBlocks).some(k => bbBlocks[k] && bbBlocks[k].type === 'rich_html');
+  if (bottomBlocks && typeof bottomBlocks === 'object' && bbIsSiteFooter) {
     // 单篇覆盖由 site.html syncEngineConfig 从 localStorage 映射进来（开关/排序/字段）。
     const override = config._bottomBlocksOverride || {};
     const footerHtml = renderBottomBlocksHtml(bottomBlocks, override, siteBlockRenderers(mods.asset_library, 'ft-default'));
