@@ -108,6 +108,12 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 			ActiveRuleVersion: 1,
 			UpdatedAt:         now,
 		},
+		wowFoodRuleAccountID: {
+			Name:              "WowFood爆品超市",
+			ActiveRuleID:      wowFoodDefaultRulePresetID,
+			ActiveRuleVersion: 1,
+			UpdatedAt:         now,
+		},
 	}
 }
 
@@ -149,7 +155,34 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 			}},
 			UpdatedAt: now,
 		},
+		wowFoodDefaultRulePresetID: {
+			ID:          wowFoodDefaultRulePresetID,
+			Name:        "WowFood爆品超市默认规则",
+			Description: "WowFood爆品超市公众号的独立默认参数（复用公众号渲染器，独立尾部规则）",
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultWowFoodRuleConfig(),
+				Behavior:  defaultWowFoodRuleBehavior(),
+				CreatedAt: now,
+			}},
+			UpdatedAt: now,
+		},
 	}
+}
+
+// defaultWowFoodRuleConfig 返回 WowFood爆品超市 的默认参数。复用公众号(FBIF)基线，
+// 只覆盖尾部/页脚差异：WowFood 是独立品牌，不带 FBIF 的「更多文章」推荐位（默认关）。
+// 其余视觉键经 mergeRuleDefaults 继承 FBIF 基线；用户可在规则后台进一步定制 WowFood 尾部。
+func defaultWowFoodRuleConfig() map[string]any {
+	cfg := defaultRuleConfig()
+	cfg["more_articles_enabled"] = false
+	return cfg
+}
+
+// defaultWowFoodRuleBehavior 复用 FBIF 公众号行为基线（作者/来源/Mote 署名规则一致）；
+// 若 WowFood 需独立尾部文案/正则，可在此覆盖差异项或在规则后台配置。
+func defaultWowFoodRuleBehavior() map[string]any {
+	return defaultRuleBehavior()
 }
 
 // defaultFoodTalksSiteRuleConfig 返回 FoodTalks 网站排版的默认参数配置。

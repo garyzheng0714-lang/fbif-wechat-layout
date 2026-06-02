@@ -34,8 +34,8 @@ func TestRulePresetStorePersistsActivePreset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if len(doc.Presets) != 4 {
-		t.Fatalf("expected three account defaults + custom preset, got %d", len(doc.Presets))
+	if len(doc.Presets) != 5 {
+		t.Fatalf("expected four account defaults + custom preset, got %d", len(doc.Presets))
 	}
 
 	if _, err := store.setActive("campaign"); err != nil {
@@ -66,27 +66,27 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 		t.Fatalf("list default store: %v", err)
 	}
 
-	// Now 3 accounts: fbif, foodtalks-series, ft-default (FoodTalks website)
-	if len(doc.Accounts) != 3 {
-		t.Fatalf("accounts = %d, want 3: %#v", len(doc.Accounts), doc.Accounts)
+	// Now 4 accounts (fixed order): fbif, wowfood, foodtalks-series, ft-default
+	if len(doc.Accounts) != 4 {
+		t.Fatalf("accounts = %d, want 4: %#v", len(doc.Accounts), doc.Accounts)
 	}
-	if doc.Accounts[0].ID != "fbif" {
-		t.Fatalf("first account id = %q, want fbif", doc.Accounts[0].ID)
+	wantOrder := []struct{ id, name string }{
+		{"fbif", "FBIF公众号"},
+		{"wowfood", "WowFood爆品超市"},
+		{"foodtalks-series", "FoodTalks什么是系列"},
+		{"ft-default", "FoodTalks 网站默认"},
 	}
-	if doc.Accounts[0].Name != "FBIF公众号" {
-		t.Fatalf("first account name = %q, want FBIF公众号", doc.Accounts[0].Name)
+	for i, want := range wantOrder {
+		if doc.Accounts[i].ID != want.id {
+			t.Fatalf("account[%d] id = %q, want %q", i, doc.Accounts[i].ID, want.id)
+		}
+		if doc.Accounts[i].Name != want.name {
+			t.Fatalf("account[%d] name = %q, want %q", i, doc.Accounts[i].Name, want.name)
+		}
 	}
-	if doc.Accounts[1].ID != "foodtalks-series" {
-		t.Fatalf("second account id = %q, want foodtalks-series", doc.Accounts[1].ID)
-	}
-	if doc.Accounts[1].Name != "FoodTalks什么是系列" {
-		t.Fatalf("second account name = %q, want FoodTalks什么是系列", doc.Accounts[1].Name)
-	}
-	if doc.Accounts[2].ID != "ft-default" {
-		t.Fatalf("third account id = %q, want ft-default", doc.Accounts[2].ID)
-	}
-	if doc.Accounts[2].Name != "FoodTalks 网站默认" {
-		t.Fatalf("third account name = %q, want FoodTalks 网站默认", doc.Accounts[2].Name)
+	// WowFood 账号绑定自己的独立 preset（wowfood-default），不复用 FBIF default。
+	if doc.Accounts[1].ActiveID != "wowfood-default" {
+		t.Fatalf("wowfood active rule = %q, want wowfood-default", doc.Accounts[1].ActiveID)
 	}
 	for _, a := range doc.Accounts {
 		if a.ActiveID == "" {
@@ -276,9 +276,9 @@ func TestRulePresetPublicCatalogOmitsRuleBodies(t *testing.T) {
 	if _, ok := payload.Presets[0]["behavior"]; ok {
 		t.Fatalf("catalog must not expose behavior code body: %#v", payload.Presets[0])
 	}
-	// Now 3 accounts: fbif, foodtalks-series, ft-default (FoodTalks website)
-	if len(payload.Accounts) != 3 {
-		t.Fatalf("catalog accounts = %d, want 3", len(payload.Accounts))
+	// Now 4 accounts: fbif, wowfood, foodtalks-series, ft-default (FoodTalks website)
+	if len(payload.Accounts) != 4 {
+		t.Fatalf("catalog accounts = %d, want 4", len(payload.Accounts))
 	}
 }
 
@@ -406,7 +406,7 @@ func TestRulePresetStoreMigratesLegacyV1FileToV2OnWriteKeepingLegacyFacade(t *te
 	if doc.ActiveID != "campaign" {
 		t.Fatalf("legacy facade active_id = %q, want campaign", doc.ActiveID)
 	}
-	if len(doc.Presets) != 4 {
+	if len(doc.Presets) != 5 {
 		t.Fatalf("legacy facade presets = %d, want account defaults + campaign", len(doc.Presets))
 	}
 	active, err = reloaded.active()
@@ -490,9 +490,9 @@ func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
 		t.Fatalf("admin list missing presets")
 	}
 	accounts, ok := docPayload["accounts"].([]any)
-	// Now 3 accounts: fbif, foodtalks-series, ft-default (FoodTalks website)
-	if !ok || len(accounts) != 3 {
-		t.Fatalf("admin list accounts = %#v, want three account bindings", docPayload["accounts"])
+	// Now 4 accounts: fbif, wowfood (WowFood爆品超市), foodtalks-series, ft-default (FoodTalks website)
+	if !ok || len(accounts) != 4 {
+		t.Fatalf("admin list accounts = %#v, want four account bindings", docPayload["accounts"])
 	}
 	if _, ok := docPayload["rules"]; ok {
 		t.Fatalf("admin list leaked v2 rules")

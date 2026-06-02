@@ -20,6 +20,8 @@ const foodTalksRuleAccountID = "foodtalks-series"
 const foodTalksDefaultRulePresetID = "foodtalks-series-default"
 const foodTalksSiteRuleAccountID = "ft-default"
 const foodTalksSiteDefaultRulePresetID = "ft-default-v1"
+const wowFoodRuleAccountID = "wowfood"               // = registry pack.id
+const wowFoodDefaultRulePresetID = "wowfood-default" // WowFood爆品超市 独立 preset
 const maxRulePresetVersions = 20
 
 type rulePreset struct {
@@ -341,7 +343,7 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 }
 
 func accountBindingsFromStore(doc ruleStoreDocumentV2) []ruleAccountBinding {
-	order := []string{defaultRuleAccountID, foodTalksRuleAccountID, foodTalksSiteRuleAccountID}
+	order := []string{defaultRuleAccountID, wowFoodRuleAccountID, foodTalksRuleAccountID, foodTalksSiteRuleAccountID}
 	for id := range doc.Accounts {
 		found := false
 		for _, known := range order {
@@ -634,6 +636,9 @@ func (s *rulePresetStore) delete(id string) (rulePresetDocument, error) {
 			}
 			if accountID == foodTalksSiteRuleAccountID {
 				fallbackID = foodTalksSiteDefaultRulePresetID
+			}
+			if accountID == wowFoodRuleAccountID {
+				fallbackID = wowFoodDefaultRulePresetID
 			}
 			account.ActiveRuleID = fallbackID
 			account.ActiveRuleVersion = latestRuleVersion(doc.Rules[fallbackID]).Version

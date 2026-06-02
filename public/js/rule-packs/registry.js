@@ -34,6 +34,18 @@ export const RULE_PACKS = Object.freeze({
     location: '上海',
     channel: 'mp',
   }),
+  wowfood: Object.freeze({
+    id: 'wowfood',
+    templateId: 'fbif', // 复用公众号渲染器（DOCX/表格/表格内图片底层能力共用）
+    accountName: 'WowFood爆品超市',
+    previewAccountName: 'WowFood爆品超市',
+    behaviorAccountName: 'WowFood爆品超市',
+    avatarUrl: '/fbif-avatar.webp', // TODO: 待 WowFood 头像资源就位后替换
+    // 空串 = 不追加 FBIF 公众号页脚；WowFood 自己的尾部规则走它独立的 preset（规则后台可配）。
+    footerUrl: '',
+    location: '上海',
+    channel: 'mp',
+  }),
   'ft-default': Object.freeze({
     id: 'ft-default',
     templateId: 'foodtalks-site',

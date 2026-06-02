@@ -130,8 +130,16 @@ test('getRulePackByPath /ft/unknown falls back to ft-default in same channel', (
 test('getRulePacksByChannel mp returns only public-account packs', () => {
   const packs = getRulePacksByChannel('mp');
   const ids = packs.map(p => p.id).sort();
-  assert.deepEqual(ids, ['fbif', 'foodtalks-series']);
+  assert.deepEqual(ids, ['fbif', 'foodtalks-series', 'wowfood']);
   assert.ok(packs.every(p => p.channel === 'mp'));
+});
+
+test('WowFood 爆品超市 是公众号渠道账号，复用 fbif 渲染器', () => {
+  const wow = getRulePacksByChannel('mp').find(p => p.id === 'wowfood');
+  assert.ok(wow, 'wowfood 在 mp 渠道');
+  assert.equal(wow.templateId, 'fbif', '复用公众号渲染器');
+  assert.equal(wow.accountName, 'WowFood爆品超市');
+  assert.equal(wow.footerUrl, '', '不追加 FBIF 页脚（独立尾部走自己 preset）');
 });
 
 test('getRulePacksByChannel ft returns only website packs', () => {
