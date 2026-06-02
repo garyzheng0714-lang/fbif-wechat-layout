@@ -147,6 +147,7 @@ export function classifySeries(neutralElems, config = {}) {
         const ej = elems[j];
         if (!ej) break;
         if (ej.k === 'img' || ej.k === 'cap' || ej.k === 'table') break;
+        if (ej.k === 'h') break;                          // DOCX 标题样式段（含数字小标题）= 块结束
         const pj = elemText(ej).trim();
         if (!pj) break;                                   // 空段 = 推荐块结束
         if (ej.blankBefore) break;                        // 原文有空行 = 块结束
@@ -175,9 +176,13 @@ export function classifySeries(neutralElems, config = {}) {
         out.push({ k: 'h2', text: normalizeParens(plain) });
         continue;
       }
-      if (isBoldLine(e.runs)) {
+      // 其余：DOCX 标题样式段（k:'h'，如阿拉伯数字小标题「2、个性与定制化」，标了标题样式
+      // 但不匹配 一、/（一）），或整段加粗短句 → 三级标题（正文加粗）。共享层 k:'h' 只带 text
+      // 不带 runs，缺失时从纯文本合成 runs，避免文字丢失（红线：失败要响，不能静默吞字）。
+      if (e.k === 'h' || isBoldLine(e.runs)) {
         refMode = false;
-        out.push({ k: 'h3', runs: e.runs });
+        const runs = (Array.isArray(e.runs) && e.runs.length) ? e.runs : [{ type: 'txt', text: plain }];
+        out.push({ k: 'h3', runs });
         continue;
       }
     }
@@ -197,8 +202,8 @@ export function classifySeries(neutralElems, config = {}) {
       continue;
     }
 
-    // 普通正文
-    out.push({ k: 'p', runs: e.runs });
+    // 普通正文（runs 缺失时从 text 兜底合成，防止 text-only 元素被静默吞字）
+    out.push({ k: 'p', runs: (Array.isArray(e.runs) && e.runs.length) ? e.runs : [{ type: 'txt', text: plain }] });
   }
 
   return out;

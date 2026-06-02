@@ -32,8 +32,9 @@ function build() {
     P('相关阅读：'),
     P('什么是安姆科纸基包装？碳足迹减半，重新定义食品纸包装'),
     P('打破不可回收"魔咒"，什么是安姆科可回收蒸煮包装？'),
-    // 推荐阅读后的下一节正文：不应被并进 ○ 列表
-    P('2、个性与定制化', { runs: [{ type: 'txt', text: '2、个性与定制化', bold: true }] }),
+    // 数字小标题：DOCX 标了标题样式 → 共享层产出 k:'h' 且只有 text、无 runs（真实形态）。
+    // 它结束上面的推荐块，且本身不能被静默吞字（曾经的 bug）。
+    { k: 'h', text: '2、个性与定制化' },
     P('在包装视觉和感官体验方面，安姆科可提供开窗设计、感官印刷、触感油墨等方案，这一段是正文不应进推荐列表。'),
     P('六、参考来源', { k: 'h', blankBefore: true }),
     P('[1] iimedia (2026), 《报告A》'),
@@ -80,6 +81,23 @@ test('classifySeries: 推荐阅读不贪婪——遇加粗小标题/正文即停
   // 正文「在包装视觉…」不应被并入推荐
   const recTexts = recItems.map(e => (e.runs || []).map(r => r.text).join(''));
   assert.ok(recTexts.every(t => !t.includes('正文不应进推荐列表')));
+});
+
+test('classifySeries: DOCX 标题样式段(k:h 仅 text 无 runs)不丢字，归三级标题', () => {
+  // 回归：共享 classifyDocxArticle 给标题段产出 {k:"h", text} 而非 runs。数字小标题
+  // 「2、个性与定制化」不匹配 一、/（一），曾因渲染只读 runs 而被静默吞字。
+  const elems = [
+    { k: 'txt', runs: [{ type: 'txt', text: '相关阅读：' }], text: '相关阅读：' },
+    { k: 'txt', runs: [{ type: 'txt', text: '什么是X？' }], text: '什么是X？' },
+    { k: 'h', text: '2、个性与定制化' },
+    { k: 'txt', runs: [{ type: 'txt', text: '正文段落。' }], text: '正文段落。', blankBefore: true },
+  ];
+  const out = classifySeries(elems, {});
+  const h3 = out.find(e => e.k === 'h3');
+  assert.ok(h3, '数字小标题应归为三级标题(h3)');
+  assert.equal((h3.runs || []).map(r => r.text).join(''), '2、个性与定制化');
+  const allText = out.map(e => e.text || (e.runs || []).map(r => r.text).join('')).join('|');
+  assert.ok(allText.includes('个性与定制化'), '小标题文字不能丢失');
 });
 
 test('classifySeries: 推荐阅读条目清除超链接（无 link run）', () => {
