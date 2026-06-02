@@ -5,14 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FBIF 文章排版工具</title>
 <link rel="icon" type="image/png" href="/fbif-logo.png">
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/400.css" crossorigin="anonymous">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/500.css" crossorigin="anonymous">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/600.css" crossorigin="anonymous">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/700.css" crossorigin="anonymous">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/400.css" crossorigin="anonymous">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/700.css" crossorigin="anonymous">
+<script src="/vendor/jszip.min.js"></script>
 <link rel="stylesheet" href="/css/feishu-tokens.css">
 <link rel="stylesheet" href="/app.css">
 <link rel="stylesheet" href="/css/channel-bar.css">
@@ -215,15 +208,18 @@ const {
   normalizeRuleConfig,
   setActiveRulePreset,
 } = ruleModule;
-const initialRule = await loadActiveRulePreset(activeRulePack.id);
+function localActiveRulePreset(accountID) {
+  return {
+    id: 'local',
+    name: '本机设置',
+    config: loadLocalRuleConfig(accountID),
+  };
+}
+
+const initialRule = { source: 'local', preset: localActiveRulePreset(activeRulePack.id) };
 let activeRuleSource = initialRule.source;
 applyActiveRuleConfig(initialRule.preset.config, initialRule.preset);
-if (activeRuleSource === 'server') {
-  // Cache the server rule only as the offline fallback. Online edits below stay
-  // session-only unless the rule backend is unavailable.
-  saveLocalRuleConfig(initialRule.preset.config, activeRulePack.id);
-}
-let activeRuleCatalog = await loadRuleCatalog();
+let activeRuleCatalog = { presets: [] };
 let activeRuleSelectorEditing = false;
 let activeRuleSelectorOpen = false;
 let activeRuleSelectorDraftID = initialRule.preset.id || 'default';
@@ -335,6 +331,14 @@ async function loadRuleCatalog() {
   }
 }
 
+async function refreshActiveRuleCatalog(accountID = activeRulePack.id) {
+  const catalog = await loadRuleCatalog();
+  if (accountID !== activeRulePack.id) return catalog;
+  activeRuleCatalog = catalog;
+  renderActiveRuleCard();
+  return catalog;
+}
+
 function ruleSelectorOptions(currentPreset) {
   const seen = new Set();
   const rules = [];
@@ -433,13 +437,39 @@ async function ensureRuleAdminPassword() {
   return activeRuleAdminPassword;
 }
 
-function refreshRuleConsumers() {
+function syncEngineConfig(triggerRerender) {
+  if (!window._engineApi || !window._engineApi.setActiveConfig) return;
+  const flat = loadConfig();
+  const serverBehavior = (window._activeConfig && window._activeConfig.behavior) || {};
+  window._engineApi.setActiveConfig({
+    ...flat,
+    behavior: serverBehavior,
+  });
+  if (triggerRerender && typeof window._engineApi.rerender === 'function') {
+    window._engineApi.rerender();
+  }
+}
+
+function refreshRuleConsumers(options = {}) {
   syncWorkflowControls();
+  syncEngineConfig(options.rerender === true);
   renderActiveRuleCard();
   if (window.updateThemePreview) window.updateThemePreview(loadConfig());
   if (window._updateFooter) window._updateFooter(null);
   if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
   if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
+}
+
+async function hydrateActiveRulePreset(accountID = activeRulePack.id) {
+  const loaded = await loadActiveRulePreset(accountID);
+  if (accountID !== activeRulePack.id) return loaded;
+  activeRuleSource = loaded.source;
+  applyActiveRuleConfig(loaded.preset.config, loaded.preset);
+  if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config);
+  activeRuleSelectorDraftID = loaded.preset.id || 'default';
+  activeRuleSelectorStatus = '';
+  refreshRuleConsumers({ rerender: true });
+  return loaded;
 }
 
 async function saveActiveRuleSelection() {
@@ -457,16 +487,19 @@ async function saveActiveRuleSelection() {
   try {
     const password = await ensureRuleAdminPassword();
     await setActiveRulePreset(password, nextID, activeRulePack.id);
-    const loaded = await loadActiveRulePreset(activeRulePack.id);
+    const [loaded, catalog] = await Promise.all([
+      loadActiveRulePreset(activeRulePack.id),
+      loadRuleCatalog(),
+    ]);
     activeRuleSource = loaded.source;
     applyActiveRuleConfig(loaded.preset.config, loaded.preset);
     if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config);
-    activeRuleCatalog = await loadRuleCatalog();
+    activeRuleCatalog = catalog;
     activeRuleSelectorEditing = false;
     activeRuleSelectorOpen = false;
     activeRuleSelectorDraftID = loaded.preset.id || nextID;
     activeRuleSelectorStatus = '已保存';
-    refreshRuleConsumers();
+    refreshRuleConsumers({ rerender: true });
   } catch (err) {
     if (/password|密码|401|unauthorized/i.test(String(err && err.message))) activeRuleAdminPassword = '';
     activeRuleSelectorStatus = err.message || '保存失败';
@@ -537,18 +570,21 @@ async function switchAccount(accountID) {
   applyRulePackChrome(activeRulePack);
   renderAccountSwitcher();
 
-  const loaded = await loadActiveRulePreset(activeRulePack.id);
+  const [loaded, catalog] = await Promise.all([
+    loadActiveRulePreset(activeRulePack.id),
+    loadRuleCatalog(),
+  ]);
   activeRuleSource = loaded.source;
   applyActiveRuleConfig(loaded.preset.config, loaded.preset);
   if (activeRuleSource === 'server') {
     saveLocalRuleConfig(loaded.preset.config, activeRulePack.id);
   }
-  activeRuleCatalog = await loadRuleCatalog();
+  activeRuleCatalog = catalog;
   activeRuleSelectorEditing = false;
   activeRuleSelectorOpen = false;
   activeRuleSelectorDraftID = loaded.preset.id || 'default';
   activeRuleSelectorStatus = '';
-  refreshRuleConsumers();
+  refreshRuleConsumers({ rerender: true });
 }
 
 renderAccountSwitcher();
@@ -583,11 +619,14 @@ const { initApp } = await import('/js/engine.js?v=' + assetVersion);
 const { initMoreArticlesEditor } = await import('/js/more-articles-ui.js?v=' + assetVersion);
 const { openCropEditor } = await import('/js/crop-editor.js?v=' + assetVersion);
 initMoreArticlesEditor({ openCropEditor });
+hydrateActiveRulePreset(activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
+refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));
 
 async function loadTemplate(templateId) {
   const cfg = loadConfig();
   saveConfig(cfg, null, { persistLocal: activeRuleSource !== 'server' });
   const mod = await import('/js/templates/' + templateId + '.js?v=' + assetVersion);
+  syncEngineConfig(false);
   initApp(mod.default);
   wrapEngineFunctions();
 }
@@ -617,6 +656,7 @@ initAdminPanel({
       cacheServerRuleFallback(config);
     }
     const c = saveConfig(config, preset, { persistLocal: meta.persistLocal === true });
+    syncEngineConfig(true);
     if (window.updateThemePreview) window.updateThemePreview(c);
     if (window._updateFooter) window._updateFooter(null);
     if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();

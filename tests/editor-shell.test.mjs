@@ -22,6 +22,52 @@ test('editor shells both import the shared editor-shell helpers', async () => {
   assert.match(site, /bindUrlImportShortcuts/);
 });
 
+test('editor shells bind upload before remote rule hydration settles', async () => {
+  for (const name of ['app.html', 'site.html']) {
+    const source = await readFile(new URL('../public/' + name, import.meta.url), 'utf8');
+    const initIndex = source.indexOf('await loadTemplate(currentTemplateId)');
+    assert.ok(initIndex > 0, `${name} should initialize its template`);
+
+    const beforeInit = source.slice(0, initIndex);
+    assert.doesNotMatch(
+      beforeInit,
+      /const\s+initialRule\s*=\s*await\s+loadActiveRulePreset/,
+      `${name} must not block upload binding on the active rule request`
+    );
+    assert.doesNotMatch(
+      beforeInit,
+      /let\s+activeRuleCatalog\s*=\s*await\s+loadRuleCatalog/,
+      `${name} must not block upload binding on the rule catalog request`
+    );
+    assert.match(
+      beforeInit,
+      /hydrateActiveRulePreset\(activeRulePack\.id\)\.catch/,
+      `${name} should hydrate the active rule in the background`
+    );
+    assert.match(
+      beforeInit,
+      /refreshActiveRuleCatalog\(activeRulePack\.id\)\.catch/,
+      `${name} should hydrate the rule catalog in the background`
+    );
+  }
+});
+
+test('editor shells load JSZip from the same-origin vendor asset', async () => {
+  for (const name of ['app.html', 'site.html']) {
+    const source = await readFile(new URL('../public/' + name, import.meta.url), 'utf8');
+    assert.match(source, /<script src="\/vendor\/jszip\.min\.js"><\/script>/);
+    assert.doesNotMatch(source, /cdn\.jsdelivr\.net\/npm\/jszip/);
+  }
+});
+
+test('editor shells do not block startup on external font stylesheets', async () => {
+  for (const name of ['app.html', 'site.html']) {
+    const source = await readFile(new URL('../public/' + name, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /fontsource/);
+    assert.doesNotMatch(source, /cdn\.jsdelivr\.net/);
+  }
+});
+
 test('resolveInitialRulePackID preserves app path behavior', () => {
   const id = resolveInitialRulePackID({
     locationLike: { pathname: '/mp/foodtalks-series', search: '?account=fbif' },

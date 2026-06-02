@@ -17,7 +17,8 @@ test('app shell renders a capsule account switcher above the upload area', async
   assert.match(app, /switchAccount/);
   assert.match(app, /aria-pressed/);
   assert.match(app, /loadActiveRulePreset\(activeRulePack\.id\)/);
-  assert.match(app, /saveLocalRuleConfig\(initialRule\.preset\.config,\s*activeRulePack\.id\)/);
+  assert.match(app, /hydrateActiveRulePreset\(activeRulePack\.id\)/);
+  assert.match(app, /cacheServerRuleFallback\(loaded\.preset\.config\)/);
   assert.match(app, /id="activeRuleCard"/);
   assert.match(app, /renderActiveRuleCard/);
   assert.match(app, /id="activeRuleSelect"/);
