@@ -51,6 +51,8 @@ func defaultRuleConfig() map[string]any {
 		"banner_title_max_lines":   "2",
 		"modules": map[string]any{
 			"asset_library": defaultAssetLibraryModule(),
+			// 公众号底部追加式区块（默认整体关 = 对现有输出零改动）；预置禁用 name_card 作运营起点。
+			"bottom_blocks": defaultMpBottomBlocksModule(),
 		},
 	}
 }

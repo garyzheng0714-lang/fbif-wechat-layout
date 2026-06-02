@@ -13,6 +13,11 @@ const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
 const tableModule = await import('./shared/table-renderer.js' + assetQuery);
 const { renderTable: renderSharedTable } = tableModule;
+// 底部追加式区块（统一模型）：中性编排器 + 公众号渲染器（红线 #19：不 import 网站渲染器）。
+const blockRenderModule = await import('../blocks/block-render.js' + assetQuery);
+const { renderBottomBlocksHtml } = blockRenderModule;
+const mpBlocksModule = await import('./mp-blocks.js' + assetQuery);
+const { mpBlockRenderers } = mpBlocksModule;
 
 // ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
 function leafWrap(inner) {
@@ -24,6 +29,15 @@ function leafWrapAuthor(inner) {
 
 function ruleNumber(key) {
   return getRuleNumber(getActiveRuleConfig(), key);
+}
+
+// rawActiveModules 读【原始】服务端规则模块（绕过 normalizeRuleConfig 丢 .modules 的行为）。
+// 与网站 site.html serverRuleModules 同源做法——底部区块/素材库等结构化模块必须从原始 config 取。
+function rawActiveModules() {
+  const ac = (typeof window !== 'undefined' && window._activeConfig) || {};
+  let cfg = (ac.preset && (ac.preset.raw_config || ac.preset.config)) || ac.config || {};
+  if (cfg && cfg.config && cfg.config.modules) cfg = cfg.config;
+  return (cfg && cfg.modules && typeof cfg.modules === 'object') ? cfg.modules : {};
 }
 
 function activeBehaviorAccount() {
@@ -422,6 +436,19 @@ function render(elems, author, source, opts) {
         break;
       }
     }
+  }
+
+  // 追加式底部区块（参考来源/正文之后，footer.html 提示/更多文章之前）。
+  // 命门：getActiveRuleConfig() 经 normalizeRuleConfig 会丢 .modules，故读【原始】服务端模块
+  // （与网站 serverRuleModules 同源做法）；单篇覆盖由 app.html 写 window._bottomBlocksOverride。
+  // 默认 bottom_blocks 模块禁用 → 返回空串 → 对现有公众号输出零改动（golden 守卫）。
+  const mods = rawActiveModules();
+  const bb = mods.bottom_blocks;
+  if (bb && typeof bb === 'object') {
+    const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'fbif';
+    const ov = (typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined;
+    const bbHtml = renderBottomBlocksHtml(bb, ov, mpBlockRenderers(mods.asset_library, scope));
+    if (bbHtml) lines.push(bbHtml);
   }
   return lines;
 }

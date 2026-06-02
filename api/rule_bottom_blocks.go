@@ -118,6 +118,29 @@ func defaultBottomBlocksModule() map[string]any {
 	return bottomBlocksFromFooterModule(defaultFBIFFooterModule())
 }
 
+// defaultMpBottomBlocksModule 是公众号渠道的追加式区块默认种子。
+// 模块默认关（enabled=false）→ 对现有公众号输出零改动（追加段整体不渲染）；
+// 预置一个禁用的 name_card 作为运营起点（在后台/前台开启并改字段即可用）。
+func defaultMpBottomBlocksModule() map[string]any {
+	return map[string]any{
+		"enabled": false,
+		"order":   []any{"name_card"},
+		"blocks": map[string]any{
+			"name_card": map[string]any{
+				"type":    "name_card",
+				"enabled": false,
+				"fields": map[string]any{
+					"intro_text":  "找谁谁谁",
+					"intro_size":  14,
+					"intro_color": "#888888",
+					"image":       "",
+				},
+			},
+		},
+		"presets": []any{},
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // 校验
 
