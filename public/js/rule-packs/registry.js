@@ -50,7 +50,7 @@ export const RULE_PACKS = Object.freeze({
     accountName: '网站默认',
     previewAccountName: 'FBIF食品饮料创新',
     behaviorAccountName: 'FoodTalks',
-    avatarUrl: '/fbif-avatar.webp',
+    avatarUrl: '/foodtalks-logo.svg',
     footerUrl: '',
     location: '',
     channel: 'ft',

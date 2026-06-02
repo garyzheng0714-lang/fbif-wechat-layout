@@ -87,7 +87,7 @@ func accountCatalog() []accountMeta {
 			AccountName:         "网站默认",
 			PreviewAccountName:  "FBIF食品饮料创新", // 基石 62285 作者行是 FBIF（公众号搬运到网站），非 FoodTalks 平台
 			BehaviorAccountName: "FoodTalks",
-			AvatarURL:           "/fbif-avatar.webp",
+			AvatarURL:           "/foodtalks-logo.svg", // 网站渠道按品牌用 FoodTalks 标（与公众号 FBIF 头像区分，用户 2026-06 裁定）
 			FooterURL:           "",
 			Location:            "",
 			DefaultPresetID:     foodTalksSiteDefaultRulePresetID, // "ft-default-v1"
