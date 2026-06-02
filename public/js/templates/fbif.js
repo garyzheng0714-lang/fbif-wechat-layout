@@ -110,11 +110,19 @@ function renderTableCellRuns(runs) {
     if (r.type === 'br') segs.push([]);
     else segs[segs.length - 1].push(r);
   }
-  return segs.map(seg => seg.filter(r => r.type !== 'img').map(r => {
+  return segs.map(seg => seg.map(r => {
     if (r.type === 'txt') { const t = esc(r.text); return r.bold ? '<strong>' + t + '</strong>' : t; }
     if (r.type === 'link') {
       const h = r.href || '';
       return /^https?:\/\//i.test(h) ? '<a href="' + escAttr(h) + '">' + esc(r.text) + '</a>' : esc(r.text);
+    }
+    // 单元格内图片：inline <img>，尺寸受单元格约束（不用 run 的 w 百分比——那相对页宽，
+    // 放进窄列会撑爆 table-layout:fixed）。src 由共享层注入；空 src 跳过避免破图。
+    if (r.type === 'img' && r.src) {
+      const rpol = r.src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
+      const gifAttr = r.gif ? ' data-type="gif"' : '';
+      return '<img src="' + escAttr(r.src) + '"' + gifAttr + rpol +
+        ' style="max-width: 100%; height: auto; display: block; margin: 0 auto;" />';
     }
     return '';
   }).join('')).join('<br>');

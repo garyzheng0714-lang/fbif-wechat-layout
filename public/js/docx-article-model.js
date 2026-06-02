@@ -132,11 +132,23 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
     if (pd.isEmpty) { if (elems.length) blankBefore = true; continue; }
     if (pd.hasHL && pd.text.includes('插入视频')) continue;
 
-    // 表格块：parser.buildTableBlock 产出的二维 rows 直接透传成中性 k:'table' 元素，
+    // 表格块：parser.buildTableBlock 产出的二维 rows 透传成中性 k:'table' 元素，
     // 两侧渲染器各自渲成 <table>（红线#19：渲染各写各的，只共享此结构层）。
+    // 单元格内的图片 run（{type:'img', file}）在此按 cache[r.file] 注入 src（与顶层图同款
+    // 取图，键是 file 不是 id），并计入 imgN；浅拷贝 rows/cell/runs，避免改到 parser 原始
+    // 对象（同一 docxData 会被多次 rerender 复用，原地改会累积重复注入）。
     if (pd.type === 'table') {
       inRef = false;
-      elems.push({ k: 'table', rows: pd.rows || [], ...takeDocxMeta(pd) });
+      const rows = (pd.rows || []).map(row => (row || []).map(cell => ({
+        ...cell,
+        runs: (cell.runs || []).map(r => {
+          if (r.type !== 'img') return r;
+          const src = cache[r.file] || '';
+          imgN++;
+          return { ...r, src, gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file || '') };
+        }),
+      })));
+      elems.push({ k: 'table', rows, ...takeDocxMeta(pd) });
       continue;
     }
 

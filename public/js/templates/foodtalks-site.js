@@ -256,7 +256,17 @@ function renderTableCellRuns(runs) {
     if (r.type === 'br') segs.push([]);
     else segs[segs.length - 1].push(r);
   }
-  return segs.map(seg => renderRuns(seg)).join('<br>');
+  // 单元格内图片单独渲成受单元格约束的 inline <img>（renderRuns 会过滤 img）；
+  // 空 src 跳过（红线：网站绝不输出 <img src="">，坏 HTML 会污染 FoodTalks 后台）。
+  return segs.map(seg => seg.map(r => {
+    if (r.type === 'img') {
+      if (!r.src) return '';
+      const rpol = r.src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
+      return '<img style="display: block; margin: 0 auto; max-width: 100%; height: auto;" src="' +
+        escAttr(r.src) + '"' + rpol + '>';
+    }
+    return renderRuns([r]);
+  }).join('')).join('<br>');
 }
 function renderTable(elem, config = {}) {
   const headerBg = cfgColor(config, 'table_header_bg', '#01396a');

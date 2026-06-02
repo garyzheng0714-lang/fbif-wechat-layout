@@ -240,3 +240,34 @@ test('作者行之前的表格按前置材料剥离（红线#12：作者行是�
   );
   assert.ok(!elems.some(e => e.k === 'table'), '作者行之前的表格作为前置材料被剥离');
 });
+
+// ---- 表格单元格内图片：注入 src + 计入 imgN ----
+// WHY：新样例 DOCX 表格首列是 87px 产品缩略图（185 格含图）。parser 已把 cell 内 img run
+// 解析进 cell.runs，但分类层必须按 cache[r.file] 注入 src 并计数，否则渲染器拿不到 src、
+// 表格图渲成 <img src=""> 或被丢弃。
+const imgCell = (file) => ({ runs: [{ type: 'img', file, w: '80%' }], header: false });
+
+test('表格单元格图片：按 cache[file] 注入 src 并计入 imgN', () => {
+  const { elems, imgN } = classifyDocxArticle(
+    [
+      txt('作者：张三'),
+      tablePara([
+        [imgCell('image1.png'), tableCell('话梅')],
+        [imgCell('image2.png'), tableCell('芒果干')],
+      ]),
+    ],
+    { 'image1.png': 'blob:img1', 'image2.png': 'blob:img2' },
+    {}
+  );
+  const tbl = elems.find(e => e.k === 'table');
+  assert.equal(tbl.rows[0][0].runs[0].src, 'blob:img1', '单元格图片注入 imgCache 的 src');
+  assert.equal(tbl.rows[1][0].runs[0].src, 'blob:img2');
+  assert.equal(imgN, 2, '两张表格图都计入 imgN');
+});
+
+test('表格单元格图片：浅拷贝，不污染传入的 parser 原始对象（多次 rerender 安全）', () => {
+  const original = tablePara([[imgCell('image1.png')]]);
+  classifyDocxArticle([txt('作者：张三'), original], { 'image1.png': 'blob:x' }, {});
+  // 原始 run 不应被注入 src（共享层应浅拷贝后再注入）
+  assert.equal('src' in original.rows[0][0].runs[0], false, 'parser 原始对象未被原地改');
+});

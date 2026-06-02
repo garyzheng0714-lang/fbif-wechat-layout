@@ -159,6 +159,24 @@ test('网站表格样式可被规则后台 config 覆盖（红线：不可写死
   assert.match(html, /font-size: 18px/, '字号走 config 覆盖');
 });
 
+test('网站 DOCX 表格单元格内图片渲成 inline <img>（src 注入；空 src 跳过）', () => {
+  const imgCell = (file) => ({ runs: [{ type: 'img', file, w: '80%' }], header: false });
+  const result = template.processDocx({
+    paragraphs: [tablePara([
+      [imgCell('p1.png'), stcell('话梅')],
+      [imgCell('missing.png'), stcell('芒果干')],
+    ])],
+    imgCache: { 'p1.png': 'blob:p1' }, // missing.png 不在缓存 → 空 src
+    config: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<img[^>]*src="blob:p1"/, '有缓存的单元格图渲成 inline <img>');
+  assert.match(html, /<img[^>]*max-width: 100%/, '单元格图尺寸受约束');
+  assert.doesNotMatch(html, /<img[^>]*src="">/, '网站绝不输出空 src 图');
+  assert.match(html, /话梅/);
+});
+
 test('网站 DOCX：带标题样式的「参考来源：」仍渲染成 #888 灰色 ref（不退化为大标题）', () => {
   // WHY 回归守卫：中文 DOCX 常给「参考来源：」打『标题3』样式/大纲级别。共享层 isHeading
   // 比旧网站宽，若把它升成 <h2>，会逃逸 applyFoodTalksBehavior 的参考识别（只扫 k:'p'），

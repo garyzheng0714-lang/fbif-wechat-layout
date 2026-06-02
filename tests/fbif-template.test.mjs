@@ -270,3 +270,14 @@ test('公众号 URL 导入表格块（processBlocks）也渲成 <table>', () => 
   assert.match(html, /SENSE ASIA/);
   assert.match(html, /越南/);
 });
+
+test('公众号 DOCX 表格单元格内图片渲成受约束 inline <img>（不再被过滤）', () => {
+  const imgCell = (file) => ({ runs: [{ type: 'img', file, w: '80%' }], header: false });
+  const html = renderDocx(
+    [tablePara([[imgCell('p1.png'), tcell('话梅')]])],
+    { imgCache: { 'p1.png': 'blob:p1' } }
+  );
+  assert.match(html, /<td[^>]*>\s*<img src="blob:p1"/, '单元格首位是图片');
+  assert.match(html, /<img src="blob:p1"[^>]*max-width: 100%/, '图片尺寸受单元格约束');
+  assert.match(html, /话梅/, '同行文本单元格保留');
+});
