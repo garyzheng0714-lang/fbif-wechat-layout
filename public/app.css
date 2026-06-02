@@ -865,3 +865,11 @@ input[type="file"] { display: none; }
   .preview-scroll { min-height: 400px; }
   .wx-footer { position: sticky; }
 }
+
+/* FoodTalks「什么是」系列侧栏尾部选择器（仅 foodtalks-series 渠道显示） */
+.ft-series-footer-fields { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.ft-series-footer-row { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.ft-series-footer-row > span { color: #666; }
+.ft-series-footer-row select { width: 100%; padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 13px; background: #fff; color: #333; }
+.ft-series-footer-check { flex-direction: row; align-items: center; gap: 6px; cursor: pointer; }
+.ft-series-footer-check input { margin: 0; width: auto; }

@@ -30,11 +30,13 @@ test('rule pack registry exposes FoodTalks what-is series as a selectable accoun
 
   const pack = getRulePack('foodtalks-series');
   assert.equal(pack.id, 'foodtalks-series');
-  assert.equal(pack.templateId, 'fbif');
+  // 「什么是」系列有独立隔离渲染器（序号图标题/深蓝/目录/尾部名片），不再复用 fbif 模板。
+  assert.equal(pack.templateId, 'foodtalks-series');
   assert.equal(pack.accountName, 'FoodTalks什么是系列');
   assert.equal(pack.previewAccountName, 'FoodTalks什么是系列');
   assert.equal(pack.behaviorAccountName, 'FoodTalks什么是系列');
-  assert.equal(pack.footerUrl, '/footer.html');
+  // 空 footerUrl = 不追加 FBIF 公众号页脚；系列尾部（名片/群）由模板自身渲染。
+  assert.equal(pack.footerUrl, '');
 });
 
 test('rule pack can be selected by account query without adding visible template switching', () => {
@@ -48,7 +50,8 @@ test('rule pack registry assigns channel=mp to FoodTalks 什么是系列', () =>
   const pack = getRulePack('foodtalks-series');
   assert.equal(pack.id, 'foodtalks-series');
   assert.equal(pack.channel, 'mp');
-  assert.equal(pack.templateId, 'fbif');
+  // 渠道仍是公众号(mp)，但用自己的隔离模板。
+  assert.equal(pack.templateId, 'foodtalks-series');
 });
 
 test('listRulePacks returns all packs with a channel field set', () => {

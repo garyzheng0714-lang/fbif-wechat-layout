@@ -78,6 +78,23 @@
         </div>
         <div class="ma-hint" id="maHint">粘贴公众号链接自动抓取头图和标题。拖动卡片可重排顺序。</div>
       </div>
+      <!-- FoodTalks「什么是」系列专属尾部选择器（仅 foodtalks-series 渠道显示；JS 控制显隐） -->
+      <div class="ma-section" id="ftSeriesFooterSection" style="display:none;">
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-label"><span>尾部名片 / 群</span></div>
+        <div class="ft-series-footer-fields">
+          <label class="ft-series-footer-row"><span>作者名片</span>
+            <select id="ftSeriesAuthorCard"></select>
+          </label>
+          <label class="ft-series-footer-row"><span>所属群</span>
+            <select id="ftSeriesGroup"></select>
+          </label>
+          <label class="ft-series-footer-row ft-series-footer-check">
+            <input type="checkbox" id="ftSeriesEileen"> <span>带上 Eileen 名片</span>
+          </label>
+        </div>
+        <div class="ma-hint">本篇尾部 = 作者名片 +（Eileen 名片）+ 所属群二维码。</div>
+      </div>
       <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
         <div class="active-rule-readline">
           <span class="active-rule-readmeta">
@@ -619,6 +636,17 @@ const { initApp } = await import('/js/engine.js?v=' + assetVersion);
 const { initMoreArticlesEditor } = await import('/js/more-articles-ui.js?v=' + assetVersion);
 const { openCropEditor } = await import('/js/crop-editor.js?v=' + assetVersion);
 initMoreArticlesEditor({ openCropEditor });
+// FoodTalks「什么是」系列：侧栏显示名片/群尾部选择器、隐藏 FBIF「更多文章」。
+// 由 registry 包能力标志 footerPicker 驱动（非硬编码 id）；其它公众号包保持原样。
+// fbif↔series 切换会整页 reload，故加载时设一次即可（红线 #19：隔离）。
+if (activeRulePack.footerPicker === 'ft-series') {
+  const maSec = document.getElementById('moreArticlesSection');
+  const ftSec = document.getElementById('ftSeriesFooterSection');
+  if (maSec) maSec.style.display = 'none';
+  if (ftSec) ftSec.style.display = '';
+  const { initFtSeriesFooter } = await import('/js/ft-series-footer-ui.js?v=' + assetVersion);
+  initFtSeriesFooter();
+}
 hydrateActiveRulePreset(activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
 refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));
 

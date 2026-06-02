@@ -3,7 +3,12 @@ package main
 // rule_defaults.go — 规则默认值生成（从 rule_presets.go 拆出，保持单文件 ≤900 行）。
 // 仅含 default* 默认值构造函数；存储读写/校验/HTTP 逻辑仍在 rule_presets.go。
 
-import "time"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
 
 func defaultRuleConfig() map[string]any {
 	return map[string]any{
@@ -123,11 +128,11 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 		foodTalksDefaultRulePresetID: {
 			ID:          foodTalksDefaultRulePresetID,
 			Name:        "FoodTalks什么是系列默认规则",
-			Description: "FoodTalks什么是系列的独立默认参数",
+			Description: "FoodTalks什么是系列的独立默认参数（序号图标题/深蓝主色/目录/尾部名片）",
 			Versions: []rulePresetVersion{{
 				Version:   1,
-				Config:    defaultRuleConfig(),
-				Behavior:  defaultRuleBehavior(),
+				Config:    defaultFoodTalksSeriesRuleConfig(),
+				Behavior:  defaultFoodTalksSeriesRuleBehavior(),
 				CreatedAt: now,
 			}},
 			UpdatedAt: now,
@@ -277,6 +282,108 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 			},
 			"title_keywords": []any{
 				"背景", "简介", "总结", "分析", "案例", "介绍", "概述", "结论", "展望",
+			},
+		},
+	}
+}
+
+// defaultFoodTalksSeriesRuleConfig 返回 FoodTalks「什么是」系列的默认参数配置。
+// 规则来源：飞书《策划文公众号排版标准》。与前端降级常量 foodtalks-series-defaults.js 对齐；
+// 真相以 /api/rules 为准（红线：不硬编码，规则后台可改）。
+func defaultFoodTalksSeriesRuleConfig() map[string]any {
+	return map[string]any{
+		// 视觉：深蓝主色 + 棕灰正文 + 灰辅助（继承未列项由 mergeRuleDefaults 取 FBIF 基线）
+		"heading_color":          "#02396b", // 一级/二级标题、目录标题、超链接
+		"text_color":             "#544545", // 正文
+		"muted_color":            "#888888", // 推荐阅读/参考来源/图注/作者说明
+		"link_color":             "#02396b", // 超链接（下划线）
+		"font_size":              "15",
+		"h1_font_size":           "20", // 一级标题文字（序号图下方居中）
+		"h2_font_size":           "16", // 二级标题
+		"toc_title_size":         "16", // 「目录」二字
+		"caption_font_size":      "12", // 图片说明 & 图片来源
+		"attribution_font_size":  "14", // 作者、文末图源说明（斜体）
+		"paragraph_margin_x":     "8",  // 两端缩进 8
+		"paragraph_gap":          "20",
+		// 统一表格样式：表头深蓝
+		"table_header_bg":         "#02396b",
+		"table_header_text_color": "#ffffff",
+		"table_header_bold":       true,
+		"table_border_color":      "#e5e7eb",
+		"table_font_size":         "15",
+		"table_cell_padding":      "8",
+		// 关闭 FBIF 专属模块：系列尾部用模板自渲的名片/群二维码，不要更多文章/案例库页脚
+		"footer_enabled":        false,
+		"more_articles_enabled": false,
+		"more_articles_slots":   "0",
+		// 素材库（序号图 / 群二维码 / 名片 + 尾部默认组合）—— 结构化模块，规则后台可改 URL
+		"modules": map[string]any{
+			"ft_series_materials": defaultFtSeriesMaterialsModule(),
+		},
+	}
+}
+
+// defaultFtSeriesMaterialsModule 返回「什么是」系列素材库默认（站内相对路径；
+// 前端渲染时按 origin 解析为绝对地址，复制时自动上传微信 CDN；规则后台可改成 CDN/mmbiz URL）。
+func defaultFtSeriesMaterialsModule() map[string]any {
+	sections := map[string]any{}
+	for i := 1; i <= 12; i++ {
+		sections[strconv.Itoa(i)] = fmt.Sprintf("/assets/foodtalks-series/sections/%02d.png", i)
+	}
+	groups := map[string]any{
+		"调味品": "/assets/foodtalks-series/groups/seasoning.png",
+		"乳品": "/assets/foodtalks-series/groups/dairy.png",
+		"零食": "/assets/foodtalks-series/groups/snack.png",
+		"饮料": "/assets/foodtalks-series/groups/beverage.png",
+		"包装": "/assets/foodtalks-series/groups/packaging.png",
+		"奶酪": "/assets/foodtalks-series/groups/cheese.png",
+		"零售": "/assets/foodtalks-series/groups/retail.png",
+		"食品供需对接": "/assets/foodtalks-series/groups/supply-demand.png",
+		"烘焙": "/assets/foodtalks-series/groups/bakery.png",
+		"功能性食品": "/assets/foodtalks-series/groups/functional.png",
+		"新茶饮": "/assets/foodtalks-series/groups/tea.png",
+		"冰淇淋": "/assets/foodtalks-series/groups/icecream.png",
+		"配料": "/assets/foodtalks-series/groups/ingredient.png",
+		"营销": "/assets/foodtalks-series/groups/marketing.png",
+	}
+	cardNames := []string{"Aimee", "Charlie", "Eileen", "Erica", "Estelle", "Isaac", "Justine", "Kee", "Lan", "Rain", "Renee", "Soso", "Tiki", "Tina", "Yisa"}
+	cards := map[string]any{}
+	for _, n := range cardNames {
+		cards[n] = "/assets/foodtalks-series/cards/" + strings.ToLower(n) + ".jpg"
+	}
+	return map[string]any{
+		"sections":        sections,
+		"groups":          groups,
+		"cards":           cards,
+		"eileen_card_url": "/assets/foodtalks-series/cards/eileen.jpg",
+		"footer_default": map[string]any{
+			"author_card":    "",
+			"group":          "包装",
+			"include_eileen": true,
+		},
+	}
+}
+
+// defaultFoodTalksSeriesRuleBehavior 返回「什么是」系列识别正则 / 文案默认（红线下放：规则后台可配）。
+// 系列专属正则放 params（顶层只允许 author/tip/ref_header/ref_item 4 个正则字段）。
+func defaultFoodTalksSeriesRuleBehavior() map[string]any {
+	return map[string]any{
+		"templates": map[string]any{
+			"recommended_reading_note": "查看更多推荐阅读，请拉至文末点击“阅读原文”访问FoodTalks网站",
+			"ref_header_label":         "参考来源：",
+		},
+		"params": map[string]any{
+			"level1_regex":              map[string]any{"type": "string", "default": `^[一二三四五六七八九十百零]+\s*[、.．]\s*`},
+			"level2_regex":              map[string]any{"type": "string", "default": `^[（(]\s*[一二三四五六七八九十百零]+\s*[)）]`},
+			"toc_marker_regex":          map[string]any{"type": "string", "default": `^目录\s*$`},
+			"recommended_reading_regex": map[string]any{"type": "string", "default": `^\s*(相关阅读|推荐阅读)\s*[：:]\s*$`},
+			"ref_section_regex":         map[string]any{"type": "string", "default": `^(参考(来源|文献|资料|链接)|信息来源)\s*[：:]?\s*$`},
+			"ref_item_regex":            map[string]any{"type": "string", "default": `^\s*\[\d+\]`},
+		},
+		"lists": map[string]any{
+			"image_caption_keywords": []any{
+				"图片来源", "资料来源", "数据来源", "图源", "来源",
+				"制图", "截图", "图注", "注：", "Source", "Photo", "Image", "Credit",
 			},
 		},
 	}

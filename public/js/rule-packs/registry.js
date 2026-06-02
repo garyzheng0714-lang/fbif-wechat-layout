@@ -19,12 +19,18 @@ export const RULE_PACKS = Object.freeze({
   }),
   'foodtalks-series': Object.freeze({
     id: 'foodtalks-series',
-    templateId: 'fbif',
+    templateId: 'foodtalks-series',
     accountName: 'FoodTalks什么是系列',
     previewAccountName: 'FoodTalks什么是系列',
     behaviorAccountName: 'FoodTalks什么是系列',
     avatarUrl: '/fbif-avatar.webp',
-    footerUrl: '/footer.html',
+    // 空串 = 不追加 FBIF 公众号页脚（更多文章 / 案例库 QR / 关注引导）。
+    // 「什么是」系列的尾部（作者名片 + Eileen + 群二维码）由模板自身在正文末渲染，
+    // 与网站渠道 ft-default 同理（mergeIntoFooter 对空 base 直接返回空，故不再注入更多文章）。
+    footerUrl: '',
+    // 声明该包用「什么是」系列侧栏尾部选择器（名片/群）；app.html 据此显隐，
+    // 取代硬编码 id 比较（对齐模板 transferMmbiz 这类「声明能力」范式）。
+    footerPicker: 'ft-series',
     location: '上海',
     channel: 'mp',
   }),

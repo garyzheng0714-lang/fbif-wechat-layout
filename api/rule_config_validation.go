@@ -41,6 +41,10 @@ var ruleNumberFields = map[string]ruleNumberField{
 	"banner_title_max_lines":   {min: 1, max: 4},
 	"table_font_size":          {min: 12, max: 24},
 	"table_cell_padding":       {min: 0, max: 24},
+	// FoodTalks「什么是」系列专属字号（红线下放：规则后台可配）
+	"h1_font_size":   {min: 14, max: 32},
+	"h2_font_size":   {min: 12, max: 24},
+	"toc_title_size": {min: 12, max: 24},
 }
 
 var ruleColorFields = map[string]bool{
@@ -52,6 +56,7 @@ var ruleColorFields = map[string]bool{
 	"table_header_bg":         true, // 表头底色（统一表格样式，红线下放）
 	"table_header_text_color": true, // 表头文字色
 	"table_border_color":      true, // 表格边框色
+	"heading_color":           true, // FoodTalks「什么是」系列标题/链接主色（红线下放）
 }
 
 var ruleBooleanFields = map[string]bool{
@@ -453,6 +458,12 @@ func validateRuleConfigKeys(config map[string]any) error {
 				}
 				continue
 			}
+			if moduleName == "ft_series_materials" {
+				if err := validateFtSeriesMaterialsModule(rawModule); err != nil {
+					return err
+				}
+				continue
+			}
 			allowedFields, ok := ruleModuleFields[moduleName]
 			if !ok {
 				return fmt.Errorf("unknown rule module: %s", moduleName)
@@ -591,6 +602,68 @@ func validateFBIFFooterModule(raw any) error {
 			}
 			if id, ok := pm["id"].(string); !ok || strings.TrimSpace(id) == "" {
 				return fmt.Errorf("fbif_footer preset 缺少 id")
+			}
+		}
+	}
+	return nil
+}
+
+// validateFtSeriesMaterialsModule 校验「什么是」系列素材库（config.modules.ft_series_materials）：
+//
+//	{ sections?{n:url}, groups?{name:url}, cards?{name:url}, eileen_card_url?, footer_default?{author_card,group,include_eileen} }
+//
+// 所有 URL 允许站内相对路径（/assets/...）或 HTTPS；走 isSafeRuleBehaviorURL 防注入。
+func validateFtSeriesMaterialsModule(raw any) error {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("ft_series_materials module must be an object")
+	}
+	allowed := map[string]bool{"sections": true, "groups": true, "cards": true, "eileen_card_url": true, "footer_default": true}
+	for k := range m {
+		if !allowed[k] {
+			return fmt.Errorf("unknown ft_series_materials field: %s", k)
+		}
+	}
+	checkURLMap := func(key string) error {
+		v, ok := m[key]
+		if !ok {
+			return nil
+		}
+		mm, ok := v.(map[string]any)
+		if !ok {
+			return fmt.Errorf("ft_series_materials %s must be an object", key)
+		}
+		for ik, iv := range mm {
+			s, ok := iv.(string)
+			if !ok {
+				return fmt.Errorf("ft_series_materials %s.%s must be a string URL", key, ik)
+			}
+			if s != "" && !isSafeRuleBehaviorURL(s) {
+				return fmt.Errorf("ft_series_materials %s.%s must be a site path or HTTPS URL", key, ik)
+			}
+		}
+		return nil
+	}
+	for _, key := range []string{"sections", "groups", "cards"} {
+		if err := checkURLMap(key); err != nil {
+			return err
+		}
+	}
+	if v, ok := m["eileen_card_url"]; ok {
+		s, ok := v.(string)
+		if !ok || (s != "" && !isSafeRuleBehaviorURL(s)) {
+			return fmt.Errorf("ft_series_materials eileen_card_url must be a site path or HTTPS URL")
+		}
+	}
+	if v, ok := m["footer_default"]; ok {
+		fd, ok := v.(map[string]any)
+		if !ok {
+			return fmt.Errorf("ft_series_materials footer_default must be an object")
+		}
+		fdAllowed := map[string]bool{"author_card": true, "group": true, "include_eileen": true}
+		for k := range fd {
+			if !fdAllowed[k] {
+				return fmt.Errorf("unknown ft_series_materials footer_default field: %s", k)
 			}
 		}
 	}
