@@ -214,6 +214,8 @@ func defaultFoodTalksSiteRuleConfig() map[string]any {
 			"mctoc":         map[string]any{"enabled": true},
 			"fbif_footer":   defaultFBIFFooterModule(),
 			"asset_library": defaultAssetLibraryModule(),
+			// 区块模块：由页脚库无损迁移而来（统一底部模型）。P3 渲染器接入前仅为数据，不改输出。
+			"bottom_blocks": defaultBottomBlocksModule(),
 		},
 	}
 }

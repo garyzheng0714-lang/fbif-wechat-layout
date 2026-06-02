@@ -470,6 +470,12 @@ func validateRuleConfigKeys(config map[string]any) error {
 				}
 				continue
 			}
+			if moduleName == "bottom_blocks" {
+				if err := validateBottomBlocksModule(rawModule); err != nil {
+					return err
+				}
+				continue
+			}
 			allowedFields, ok := ruleModuleFields[moduleName]
 			if !ok {
 				return fmt.Errorf("unknown rule module: %s", moduleName)

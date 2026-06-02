@@ -34,11 +34,17 @@ func main() {
 	rulesPath := flag.String("rules", os.Getenv("RULES_STORE_PATH"), "rule preset JSON store path")
 	publicFlag := flag.String("public", os.Getenv("PUBLIC_DIR"), "static files directory; if empty falls back to ../public then public relative to cwd")
 	emitRegistry := flag.Bool("emit-registry", false, "print generated public/js/rule-packs/registry.js from accountCatalog and exit")
+	emitBlocks := flag.Bool("emit-blocks", false, "print generated public/js/blocks/block-registry.gen.js from blockTypeCatalog and exit")
 	flag.Parse()
 
 	// codegen：从账号单一真相源生成 registry.js（`npm run gen:registry`）。
 	if *emitRegistry {
 		fmt.Print(renderRegistryJS())
+		return
+	}
+	// codegen：从区块类型单一真相源生成 block-registry.gen.js（`npm run gen:blocks`）。
+	if *emitBlocks {
+		fmt.Print(renderBlockRegistryJS())
 		return
 	}
 
@@ -58,6 +64,16 @@ func main() {
 			log.Printf("账号一致性校验：%v", err)
 		} else {
 			log.Fatalf("账号一致性校验失败：%v", err)
+		}
+	}
+
+	// 启动期区块注册表一致性校验：block-registry.gen.js 与 blockTypeCatalog 漂移则 fail loud。
+	// 文件缺失（部署路径差异）只告警，不 brick 生产。
+	if err := validateBlockRegistryConsistency(publicDir); err != nil {
+		if strings.HasPrefix(err.Error(), "warn:") {
+			log.Printf("区块注册表一致性校验：%v", err)
+		} else {
+			log.Fatalf("区块注册表一致性校验失败：%v", err)
 		}
 	}
 
