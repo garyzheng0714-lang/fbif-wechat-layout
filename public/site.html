@@ -20,16 +20,6 @@
 <body>
 
 <header class="global-channel-bar">
-  <button class="btn-icon rail-toggle" id="railToggle" type="button" aria-label="菜单">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
-  </button>
-  <div class="brand">
-    <img class="brand-mark" src="/foodtalks-logo.svg" alt="FoodTalks">
-    <span class="brand-name">排版工具</span>
-    <span class="brand-sub" id="brandSub">· 资讯网站</span>
-  </div>
-  <div class="topbar-divider"></div>
-
   <div class="acct-menu" id="acctMenu" aria-label="切换账号"></div>
 
   <div class="topbar-spacer"></div>
@@ -105,18 +95,6 @@
 
   <!-- ======== Preview Panel ======== -->
   <main class="preview-panel preview-site" data-screen-label="预览区">
-    <div class="stage-bar">
-      <button class="btn-icon btn-ghost rail-toggle" id="railToggle2" type="button" aria-label="菜单" style="margin-left:-6px;">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
-      </button>
-      <div class="seg" id="viewSeg">
-        <span class="seg-pill" id="segPill"></span>
-        <button class="seg-btn active" data-view="preview" type="button"><span>预览</span></button>
-        <button class="seg-btn" data-view="source" type="button"><span>源码</span></button>
-      </div>
-      <div class="stage-spacer"></div>
-      <div class="stage-stat" id="stageStat"></div>
-    </div>
     <div class="preview-scroll scroll-y" id="previewScroll">
       <!-- Empty state -->
       <div class="empty empty-state" id="emptyState">
@@ -202,9 +180,6 @@
         </div>
         <div class="copy-success" id="copySuccess">已复制到剪贴板</div>
       </div>
-
-      <!-- 源码视图（方案A 新增） -->
-      <div class="source-view" id="sourceView" style="display:none;"><pre id="sourceCode"></pre></div>
 
       <!-- WeChat footer -->
       <div class="wx-footer" id="wxFooter" style="display:none;">

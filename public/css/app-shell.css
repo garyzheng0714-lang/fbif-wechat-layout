@@ -268,16 +268,10 @@
   :root { --rail-w: 268px; }
 }
 @media (max-width: 820px) {
-  .brand-sub, .topbar-divider { display: none; }
-  .rail {
-    position: fixed; top: var(--topbar-h); left: 0; bottom: 0; width: 300px;
-    transform: translateX(-100%); box-shadow: var(--fs-sh-s3);
-    transition: transform var(--fs-t-slow) var(--fs-ease-out);
-  }
-  .rail.open { transform: translateX(0); }
-  .rail-toggle { display: inline-flex; }
-  .scrim-rail { display: block; position: fixed; inset: var(--topbar-h) 0 0 0; background: var(--fs-bg-overlay); z-index: 19; opacity: 0; pointer-events: none; transition: opacity var(--fs-t-mid); }
-  .scrim-rail.show { opacity: 1; pointer-events: auto; }
+  /* 无汉堡抽屉：左栏直接竖向堆在预览上方 */
+  .app-layout { flex-direction: column; height: auto; min-height: calc(100dvh - var(--topbar-h)); }
+  .rail { width: auto; border-right: none; border-bottom: 1px solid var(--fs-divider); }
+  .preview-panel { min-height: 60vh; }
 }
 @media (max-width: 520px) {
   .global-channel-bar { padding: 0 10px; gap: 8px; }

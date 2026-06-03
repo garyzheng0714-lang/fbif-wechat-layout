@@ -38,7 +38,12 @@ function ensureStyle(doc) {
 .bp-master{display:flex;align-items:center;gap:6px;cursor:pointer;}
 .bp-resetall{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;font-size:12px;text-decoration:underline;padding:0;}
 .bp-resetall:hover{color:var(--fs-brand,#1456f0);}
-.bp-card{border:1px solid var(--fs-border-card,#e5e6eb);border-radius:var(--fs-r-s,6px);margin-bottom:6px;background:var(--fs-bg-card,#fff);}
+.bp-card{border:none;border-radius:var(--fs-r-s,6px);margin-bottom:2px;background:transparent;}
+.bp-card:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045));}
+.bp-switch{appearance:none;-webkit-appearance:none;width:34px;height:20px;border-radius:9999px;background:var(--fs-border-control,#d9dce0);position:relative;cursor:pointer;flex:none;transition:background .2s;margin:0;}
+.bp-switch:checked{background:var(--fs-brand,#1456f0);}
+.bp-switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(31,35,39,.2);transition:transform .2s;}
+.bp-switch:checked::after{transform:translateX(14px);}
 .bp-card.bp-disabled{opacity:.62;}
 .bp-row{display:flex;align-items:center;gap:8px;padding:8px 10px;}
 .bp-grip{cursor:grab;color:var(--fs-text-3,#8f959e);user-select:none;font-size:14px;line-height:1;}
@@ -286,7 +291,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     head.className = 'bp-head';
     const master = doc.createElement('label');
     master.className = 'bp-master';
-    const mcb = doc.createElement('input'); mcb.type = 'checkbox'; mcb.checked = resolved.enabled;
+    const mcb = doc.createElement('input'); mcb.type = 'checkbox'; mcb.className = 'bp-switch'; mcb.checked = resolved.enabled;
     const moduleDefault = mod.enabled !== false;
     mcb.onchange = () => setMaster(mcb.checked, moduleDefault);
     master.appendChild(mcb);
@@ -312,7 +317,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
 
       const row = doc.createElement('div'); row.className = 'bp-row';
       const grip = doc.createElement('span'); grip.className = 'bp-grip'; grip.textContent = '⠿'; grip.title = '拖拽排序';
-      const cb = doc.createElement('input'); cb.type = 'checkbox'; cb.checked = block.enabled;
+      const cb = doc.createElement('input'); cb.type = 'checkbox'; cb.className = 'bp-switch'; cb.checked = block.enabled;
       cb.title = '在本篇显示/隐藏该区块';
       cb.onchange = () => setEnabled(block.id, cb.checked, block.enabledDefault);
       const name = doc.createElement('span'); name.className = 'bp-name';
@@ -326,14 +331,14 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
         render();
       };
       name.onclick = toggle; caret.onclick = toggle;
-      row.appendChild(grip); row.appendChild(cb); row.appendChild(name);
+      row.appendChild(grip); row.appendChild(name);
       if (blockHasOverride(block.id)) {
         const rb = doc.createElement('button');
         rb.type = 'button'; rb.className = 'bp-reset'; rb.textContent = '⟲'; rb.title = '此区块恢复后台默认';
         rb.onclick = (ev) => { ev.stopPropagation(); resetBlock(block.id); };
         row.appendChild(rb);
       }
-      row.appendChild(caret);
+      row.appendChild(cb); row.appendChild(caret);
       card.appendChild(row);
 
       if (isOpenNow(block)) {
