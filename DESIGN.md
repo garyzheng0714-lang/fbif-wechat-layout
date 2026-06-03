@@ -78,7 +78,7 @@ These values are product contracts, not incidental CSS. Any parser, renderer, co
 
 ## Current Rules
 1. 预览页背景必须全白
-2. 多公众号规则绑定，单模板起步：默认 `FBIF公众号`，侧栏"规则包"方角分段控件可切到 `FoodTalks什么是系列`；公众号是规则应用对象，规则是可复用资产。顶部圆形渠道胶囊（公众号 / FoodTalks 网站）和侧栏方角规则包分段控件是两层不同语义，视觉上必须保持分层
+2. 多账号绑定，统一顶栏账号菜单（单层）：账号切换走顶栏头像菜单（`account-menu.js` 的 `mountAccountMenu`，挂载点 `#acctMenu`），列出全部账号，渠道（公众号 / 网站）降为菜单内的分组标签，不再是独立控件。公众号是规则应用对象，规则是可复用资产。（2026-06-02 用户裁定「不要两层」，旧的"顶部圆角渠道胶囊 + 侧栏方角规则包分段"两层切换器已删除，勿恢复。）
 3. 规则服务端保存 + 本地降级（服务器 `/api/rules/*` 为准，包含参数配置与受限 `behavior` 行为配置；localStorage 只做兼容与离线降级）
 4. 所有按钮在顶部工具栏
 5. 不要 TOC/目录

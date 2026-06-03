@@ -48,6 +48,12 @@ func main() {
 		return
 	}
 
+	// 启动期 fail loud：缺 ADMIN_PASSWORD 拒绝启动，杜绝正式端进入「规则后台未配置密码」状态
+	// （CLAUDE.md Deploy 契约）。codegen 模式 -emit-* 已在上方 return，不受此限；本地开发设任意值即可。
+	if strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")) == "" {
+		log.Fatal("ADMIN_PASSWORD 未设置：拒绝以无规则后台密码的状态启动（正式端必须配置；本地开发可临时设任意值）")
+	}
+
 	mux := http.NewServeMux()
 	publicDir := *publicFlag
 	if publicDir == "" {
