@@ -31,6 +31,8 @@ import { createBehaviorFormBinder } from './admin-behavior-data.js';
 import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { adminDirtyCount, updateDirtyChip } from './admin-dirty-state.js';
+import { numberField, bindSteppers } from './admin-field-controls.js';
+import { livePreviewHTML, applyLivePreview } from './admin-live-preview.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 
 const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
@@ -101,11 +103,7 @@ function renderField(config, field) {
         <input type="text" data-rule-key="${esc(field.key)}" value="${esc(value)}">
       </label>`;
   }
-  return `
-    <label class="admin-field">
-      <span>${esc(field.label)}</span>
-      <input type="number" data-rule-key="${esc(field.key)}" value="${esc(value)}" min="${field.min}" max="${field.max}" step="${field.step}">
-    </label>`;
+  return numberField(field, value, esc);
 }
 
 function renderGroups(config) {
@@ -506,8 +504,9 @@ export function initAdminPanel(options = {}) {
           </div>
           <textarea data-role="rule-json" spellcheck="false">${esc(jsonText)}</textarea>
         </section>
-        <section class="admin-visual-zone" aria-label="前端修改区"><div data-role="rule-warnings">${renderWarningsHTML()}</div>
-          ${renderGroups(workingConfig)}
+        <section class="admin-visual-zone" aria-label="前端修改区">
+          <div class="admin-form-col"><div data-role="rule-warnings">${renderWarningsHTML()}</div>${renderGroups(workingConfig)}</div>
+          ${livePreviewHTML()}
         </section>
       </div>`;
   }
@@ -584,6 +583,7 @@ export function initAdminPanel(options = {}) {
     const selected = selectedPreset();
     jsonDirty = false;
     applyConfig(workingConfig, presetWithBehavior(selected));
+    applyLivePreview(overlay, workingConfig, { tween: true, target: /heading/.test(key) ? 'title' : /caption|muted/.test(key) ? 'cap' : /attribution/.test(key) ? 'attr' : /link/.test(key) ? 'link' : 'p1' });
     refreshWarnings();
     syncJSONEditorFromInputs(); updateStatusInline('有未保存改动，点击「保存修改」后生效');
   }
@@ -789,6 +789,8 @@ export function initAdminPanel(options = {}) {
         updateWorkingField(key, next);
       });
     });
+    bindSteppers(overlay);
+    applyLivePreview(overlay, workingConfig);
     async function savePresetWithFooter(preset) {
       const configDoc = buildRuleConfigDocument(preset.config, { name: preset.name, description: preset.description });
       const oc = (presetByID(doc, preset.id) || {}).config || {};

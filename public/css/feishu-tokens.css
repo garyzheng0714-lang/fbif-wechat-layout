@@ -14,9 +14,9 @@
   --fs-bg-card: #FFFFFF;
   --fs-bg-nested: #F7F8FA;
   --fs-bg-sunken: #F2F3F5;
-  --fs-bg-hover: rgba(31,35,39,0.04);
+  --fs-bg-hover: rgba(31,35,39,0.045);
   --fs-bg-press: rgba(31,35,39,0.08);
-  --fs-bg-overlay: rgba(0,0,0,0.45);
+  --fs-bg-overlay: rgba(17,20,24,0.42);
 
   --fs-border-control: #D9DCE0;
   --fs-border-card: #E5E6EB;
@@ -25,6 +25,7 @@
   --fs-success: #00A870;
   --fs-success-soft: #E5F7F0;
   --fs-warning: #FF8800;
+  --fs-warning-soft: #FFF3E5;
   --fs-danger: #F54A45;
   --fs-danger-soft: #FEECEC;
 
@@ -46,4 +47,11 @@
 
   --fs-font: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --fs-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* 方案A 外壳布局 + FBIF 品牌色（方案A 检视台引入） */
+  --rail-w: 300px;
+  --topbar-h: 56px;
+  --fbif-logo-blue: #1F5995;
+  --fbif-logo-yellow: #FFC60B;
 }

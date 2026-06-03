@@ -1,21 +1,30 @@
 /* ======== Rule admin panel — Feishu design tokens (stage 3) ======== */
+/* 规则工作台：右滑面板（方案A「检视台」）。原居中模态改为右侧 slide-over，
+   把吓人的裸 JSON 弹窗变成顺手的工作台；内部布局/选择器保持不变（测试锁定）。 */
 .admin-overlay {
   position: fixed; inset: 0;
   z-index: 140;
   background: var(--fs-bg-overlay, rgba(0,0,0,0.45));
-  display: flex; align-items: center; justify-content: center;
-  padding: 24px;
+  display: flex; align-items: stretch; justify-content: flex-end;
+  padding: 0;
+  animation: admin-overlay-in var(--fs-t-mid, 200ms) var(--fs-ease-out, ease);
 }
+@keyframes admin-overlay-in { from { opacity: 0; } to { opacity: 1; } }
 .admin-dialog {
-  width: min(1180px, calc(100vw - 48px)); max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 48px);
+  width: min(1080px, 100vw); max-width: 100vw;
+  height: 100dvh; max-height: 100dvh;
   background: var(--fs-bg-card, #ffffff);
-  border-radius: var(--fs-r-m, 8px);
+  border-radius: 0;
   box-shadow: var(--fs-sh-s3, 0 12px 32px rgba(31,35,39,0.12), 0 4px 12px rgba(31,35,39,0.06));
   display: flex; flex-direction: column;
   overflow: hidden;
+  animation: admin-slide-in var(--fs-t-slow, 250ms) var(--fs-ease-spring, cubic-bezier(0.16,1,0.3,1));
 }
-.admin-dialog.compact { width: 420px; }
+.admin-dialog.compact { width: min(440px, 100vw); }
+@keyframes admin-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .admin-overlay, .admin-dialog { animation: none; }
+}
 .admin-head {
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 16px;
@@ -304,15 +313,17 @@
 .admin-json-head h3 {
   margin-bottom: 0;
 }
+/* 规则工作台右滑面板较窄：参数区改竖向堆叠、表单在上（form-first，方案A），
+   JSON 收到下方，避免双栏挤压导致标签与输入框重叠。 */
 .admin-editor-split {
   display: grid;
-  grid-template-columns: minmax(340px, 0.44fr) minmax(420px, 0.56fr);
+  grid-template-columns: 1fr;
   gap: 18px;
   align-items: start;
 }
+.admin-editor-split .admin-visual-zone { order: -1; }
 .admin-code-zone {
-  position: sticky;
-  top: 0;
+  position: static;
   padding-top: 0;
   border-top: 0;
 }
@@ -493,4 +504,55 @@
   .admin-field { grid-template-columns: minmax(0, 1fr) 112px; }
   .admin-foot { flex-wrap: wrap; }
   .admin-status { flex-basis: 100%; }
+}
+
+/* ===== 规则工作台：表单 + 右侧实时预览 + ± 步进器（方案A 检视台）===== */
+.admin-visual-zone {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+.admin-form-col { min-width: 0; }
+.admin-live { position: sticky; top: 0; align-self: start; }
+.admin-live-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500; color: var(--fs-text-2, #646A73); margin-bottom: 8px;
+}
+.admin-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fs-success, #00A870); }
+.admin-live-paper {
+  background: var(--fs-bg-card, #fff);
+  border: 1px solid var(--fs-divider, rgba(31,35,39,0.08));
+  border-radius: var(--fs-r-m, 8px);
+  box-shadow: var(--fs-sh-s1, 0 1px 3px rgba(31,35,39,0.04));
+  padding: 18px 16px;
+}
+.admin-live-title { font-weight: 700; color: #222; line-height: 1.35; margin-bottom: 10px; }
+.admin-live-p { margin: 0 0 12px; color: #544545; }
+.admin-live-p strong { font-weight: 600; }
+.admin-live-p a { text-decoration: none; }
+.admin-live-figure { aspect-ratio: 16/9; background: linear-gradient(120deg,#eef1f4,#e3e8ee); border-radius: 3px; margin: 4px 0 8px; display: flex; align-items: center; justify-content: center; color: #b6bcc4; font-size: 12px; }
+.admin-live-cap { text-align: center; margin: 0 0 12px; }
+.admin-live-attr { margin: 0; }
+
+.admin-stepper { display: inline-flex; align-items: center; justify-content: flex-end; }
+.admin-stepper input[type="number"] {
+  width: 56px; text-align: center; border-radius: 0; position: relative; z-index: 1; -moz-appearance: textfield;
+}
+.admin-stepper input[type="number"]::-webkit-outer-spin-button,
+.admin-stepper input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.admin-step {
+  width: 26px; height: 32px; flex-shrink: 0;
+  border: 1px solid var(--fs-border-control, #D9DCE0);
+  background: var(--fs-bg-card, #fff); color: var(--fs-text-2, #646A73);
+  font-size: 15px; line-height: 1; cursor: pointer; font-family: inherit; padding: 0;
+  transition: background var(--fs-t-fast, 150ms), color var(--fs-t-fast, 150ms);
+}
+.admin-step:first-child { border-radius: var(--fs-r-xs, 4px) 0 0 var(--fs-r-xs, 4px); border-right: 0; }
+.admin-step:last-child { border-radius: 0 var(--fs-r-xs, 4px) var(--fs-r-xs, 4px) 0; border-left: 0; }
+.admin-step:hover { background: var(--fs-bg-hover, rgba(31,35,39,0.04)); color: var(--fs-brand, #1456F0); }
+
+@media (max-width: 900px) {
+  .admin-visual-zone { grid-template-columns: 1fr; }
+  .admin-live { position: static; }
 }

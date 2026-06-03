@@ -2,37 +2,56 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>FoodTalks 网站排版工具</title>
 <link rel="icon" type="image/svg+xml" href="/foodtalks-logo.svg">
 <script src="/vendor/jszip.min.js"></script>
+<script src="/vendor/gsap.min.js"></script>
+<script src="/vendor/Flip.min.js"></script>
 <link rel="stylesheet" href="/css/feishu-tokens.css">
 <link rel="stylesheet" href="/app.css">
 <link rel="stylesheet" href="/css/channel-bar.css">
 <link rel="stylesheet" href="/admin-panel.css">
 <link rel="stylesheet" href="/css/rule-admin.css">
+<link rel="stylesheet" href="/css/app-shell.css">
 <link rel="stylesheet" href="/css/wx-theme.css">
 <link rel="stylesheet" href="/site.css">
 </head>
 <body>
 
 <header class="global-channel-bar">
+  <button class="btn-icon rail-toggle" id="railToggle" type="button" aria-label="菜单">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
+  </button>
+  <div class="brand">
+    <img class="brand-mark" src="/foodtalks-logo.svg" alt="FoodTalks">
+    <span class="brand-name">排版工具</span>
+    <span class="brand-sub" id="brandSub">· 资讯网站</span>
+  </div>
+  <div class="topbar-divider"></div>
+
   <div class="acct-menu" id="acctMenu" aria-label="切换账号"></div>
-  <div class="channel-bar-side channel-bar-side-right">
-    <div class="preview-toolbar" id="previewToolbar">
-      <button class="tb-retry" id="retryBtn" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
-      <button class="tb-icon" id="adminLockBtn" type="button" title="规则后台" aria-label="规则后台">
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </button>
-      <button class="tb-primary" id="copyBtn" onclick="copyContent()">复制全文</button>
-    </div>
+
+  <div class="topbar-spacer"></div>
+
+  <div class="tb-actions preview-toolbar" id="previewToolbar">
+    <button class="tb-retry" id="retryBtn" type="button" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
+    <button class="btn btn-secondary" id="adminLockBtn" type="button" title="规则后台" aria-label="规则后台">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+      <span>规则</span>
+    </button>
+    <button class="btn btn-primary tb-primary" id="copyBtn" type="button" onclick="copyContent()">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span>复制全文</span>
+    </button>
   </div>
 </header>
 
 <div class="app-layout">
+  <div class="scrim-rail" id="scrimRail"></div>
   <!-- ======== Sidebar ======== -->
-  <aside class="sidebar sidebar-site">
-    <div class="sidebar-body">
+  <aside class="rail sidebar sidebar-site" id="rail" data-screen-label="左栏">
+    <div class="rail-body sidebar-body scroll-y">
       <!-- Hidden compat for engine.js -->
       <span id="pageTitle" style="display:none;"></span>
       <span id="pageSubtitle" style="display:none;"></span>
@@ -85,10 +104,22 @@
   </aside>
 
   <!-- ======== Preview Panel ======== -->
-  <main class="preview-panel preview-site">
-    <div class="preview-scroll" id="previewScroll">
+  <main class="preview-panel preview-site" data-screen-label="预览区">
+    <div class="stage-bar">
+      <button class="btn-icon btn-ghost rail-toggle" id="railToggle2" type="button" aria-label="菜单" style="margin-left:-6px;">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
+      </button>
+      <div class="seg" id="viewSeg">
+        <span class="seg-pill" id="segPill"></span>
+        <button class="seg-btn active" data-view="preview" type="button"><span>预览</span></button>
+        <button class="seg-btn" data-view="source" type="button"><span>源码</span></button>
+      </div>
+      <div class="stage-spacer"></div>
+      <div class="stage-stat" id="stageStat"></div>
+    </div>
+    <div class="preview-scroll scroll-y" id="previewScroll">
       <!-- Empty state -->
-      <div class="empty-state" id="emptyState">
+      <div class="empty empty-state" id="emptyState">
         <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
         <p>上传文件开始预览</p>
       </div>
@@ -172,6 +203,9 @@
         <div class="copy-success" id="copySuccess">已复制到剪贴板</div>
       </div>
 
+      <!-- 源码视图（方案A 新增） -->
+      <div class="source-view" id="sourceView" style="display:none;"><pre id="sourceCode"></pre></div>
+
       <!-- WeChat footer -->
       <div class="wx-footer" id="wxFooter" style="display:none;">
         <div class="wx-footer-inner">
@@ -191,6 +225,9 @@
     </div>
   </main>
 </div>
+
+<!-- ======================= Toasts ======================= -->
+<div class="toast-wrap" id="toastWrap"></div>
 
 <!-- Hidden compat elements for engine.js -->
 <input type="hidden" id="titleInput" value="">
@@ -902,5 +939,6 @@ bindUrlImportShortcuts({
   });
 })();
 </script>
+<script type="module" src="/js/app-shell-ui.js"></script>
 </body>
 </html>
