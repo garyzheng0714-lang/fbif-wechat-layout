@@ -76,7 +76,22 @@ function ensureStyle(doc) {
 //   getModule: () => 后台默认 bottom_blocks 模块（原始服务端模块）
 //   onChange: (override) => void —— 宿主据此注入渲染并重渲
 //   initialOverride: 可选，外部已加载的覆盖（否则从 localStorage 读）
-export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, onChange, doc = document }) {
+// blockDisplayLabel：左侧列表显示「这个块是什么」而非通用类型名。优先用块的 title 字段值
+// （剥掉 "/ … /" 装饰），缺省退回类型 label。让运营看到「提示 / 1000个食品创新案例 / 更多文章」
+// 这类有意义的描述，而不是「声明/提示 / 标题+图片」。
+function blockDisplayLabel(block, type) {
+  const t = block && block.fields && block.fields.title && block.fields.title.value;
+  if (typeof t === 'string') {
+    const cleaned = t.replace(/^[\s/]+|[\s/]+$/g, '').trim();
+    if (cleaned) return cleaned;
+  }
+  return (type && type.label) || (block && block.type) || '';
+}
+
+// mountBlockPanel 参数 getBlockExtra(block) => HTMLElement|null：宿主可为某些块（如 more_articles）
+// 返回一个【稳定持有的】DOM 元素，挂进该块展开区。宿主必须持引用（非 getElementById），
+// 这样 render() 的 mount.innerHTML='' 把它从 DOM 摘下后元素对象仍存活，下次 render 再 append 即复位。
+export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, getBlockExtra, onChange, doc = document }) {
   if (!mount) return null;
   ensureStyle(doc);
   let override = loadOverride(accountId);
@@ -272,7 +287,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       cb.title = '在本篇显示/隐藏该区块';
       cb.onchange = () => setEnabled(block.id, cb.checked, block.enabledDefault);
       const name = doc.createElement('span'); name.className = 'bp-name';
-      name.innerHTML = esc(type.label) + (block.enabledOverridden ? '<span class="bp-sub">本篇已改开关</span>' : '');
+      name.innerHTML = esc(blockDisplayLabel(block, type)) + (block.enabledOverridden ? '<span class="bp-sub">本篇已改开关</span>' : '');
       const caret = doc.createElement('span');
       const isOpen = expanded.has(block.id) || (block.enabled && !expanded.has('__c__' + block.id));
       caret.className = 'bp-caret' + (isOpen ? ' bp-open' : ''); caret.textContent = '▸';
@@ -292,10 +307,13 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       row.appendChild(caret);
       card.appendChild(row);
 
-      if (isOpenNow(block) && (type.fields || []).length) {
+      if (isOpenNow(block)) {
         const fields = doc.createElement('div'); fields.className = 'bp-fields';
-        for (const f of type.fields) fields.appendChild(fieldControl(block, f));
-        card.appendChild(fields);
+        for (const f of (type.fields || [])) fields.appendChild(fieldControl(block, f));
+        // 宿主注入的内嵌编辑器（more_articles 的卡片列表搬进区块展开区，消除并列的独立面板）。
+        const extra = getBlockExtra ? getBlockExtra(block) : null;
+        if (extra) fields.appendChild(extra);
+        if (fields.childNodes.length) card.appendChild(fields);
       }
       wrap.appendChild(card);
     }

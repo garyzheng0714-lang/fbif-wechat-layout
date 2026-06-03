@@ -56,16 +56,19 @@
       <div class="sidebar-stats" id="statsBar"></div>
       <div class="batch-list" id="batchList" style="display:none;"></div>
 
-      <div class="ma-section" id="moreArticlesSection">
-        <div class="sidebar-divider"></div>
-        <div class="sidebar-label ma-section-label">
-          <span>更多文章</span>
-          <button class="ma-reset-btn" id="maResetBtn" type="button" title="清空所有卡片">清空</button>
+      <!-- 更多文章卡片编辑器（B6）：内容包进 #moreArticlesEmbed，由 mountBlockPanel 的 getBlockExtra
+           搬进底部区块的「更多文章」块展开区。本 section 仅作隐藏 home —— initMoreArticlesEditor 在此
+           初始化挂载，随后元素被移入区块；不再作为独立侧栏分区显示（消除与区块并列的重复面板）。 -->
+      <div class="ma-section" id="moreArticlesSection" style="display:none;">
+        <div id="moreArticlesEmbed">
+          <div class="ma-embed-head" style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+            <button class="ma-reset-btn" id="maResetBtn" type="button" title="清空所有卡片">清空更多文章</button>
+          </div>
+          <div class="more-articles-editor" id="moreArticlesEditor">
+            <!-- N card editors (dynamic, injected by more-articles-ui.js) -->
+          </div>
+          <div class="ma-hint" id="maHint">粘贴公众号链接自动抓取头图和标题。拖动卡片可重排顺序。</div>
         </div>
-        <div class="more-articles-editor" id="moreArticlesEditor">
-          <!-- N card editors (dynamic, injected by more-articles-ui.js) -->
-        </div>
-        <div class="ma-hint" id="maHint">粘贴公众号链接自动抓取头图和标题。拖动卡片可重排顺序。</div>
       </div>
       <!-- FoodTalks「什么是」系列专属尾部选择器（仅 foodtalks-series 渠道显示；JS 控制显隐） -->
       <div class="ma-section" id="ftSeriesFooterSection" style="display:none;">
@@ -553,12 +556,17 @@ const accountMenu = mountAccountMenu({
   onSwitch: (id) => switchAccount(id),
 });
 
+// #moreArticlesEmbed 的稳定引用：缓存一次，之后即使被 block-panel 的 innerHTML='' 摘下 DOM，
+// 元素对象仍存活，可再 append 复位（不能用 getElementById——detached 时找不到）。
+function moreArticlesEmbedEl() {
+  if (!window._maEmbedRef) window._maEmbedRef = document.getElementById('moreArticlesEmbed');
+  return window._maEmbedRef || null;
+}
+
 async function applyAccountCapabilityUI(pack) {
-  const maSec = document.getElementById('moreArticlesSection');
   const ftSec = document.getElementById('ftSeriesFooterSection');
-  const isSeries = pack && pack.footerPicker === 'ft-series';
-  if (maSec) maSec.style.display = isSeries ? 'none' : '';
-  // 旧系列专属页脚选择器（作者/BD/群下拉）已被统一底部区块面板取代（P1-B4）：始终隐藏，不再初始化。
+  // 更多文章卡片编辑器已并入底部区块「更多文章」块（B6）；#moreArticlesSection 仅作隐藏 home
+  // （inline display:none），不在此取消隐藏。旧系列页脚选择器（作者/BD/群下拉）已被统一面板取代（B4）：始终隐藏。
   if (ftSec) ftSec.style.display = 'none';
   // 底部区块单篇面板：所有公众号账号（含 FoodTalks 系列）统一走 mountBlockPanel，差异只在服务端默认。
   const bbSec = document.getElementById('blockPanelSection');
@@ -578,6 +586,8 @@ async function applyAccountCapabilityUI(pack) {
           accountId: pack.id,
           getModule: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks) || {},
           getAssetLibrary: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.asset_library) || null,
+          // 更多文章块展开时，把卡片编辑器（#moreArticlesEmbed）搬进展开区，消除并列的独立面板。
+          getBlockExtra: (block) => (block && block.type === 'more_articles') ? moreArticlesEmbedEl() : null,
           onChange: (ov) => { window._bottomBlocksOverride = ov; if (window._engineApi && typeof window._engineApi.rerender === 'function') window._engineApi.rerender(); },
         });
         window._blockPanelAcct = pack.id;
