@@ -57,7 +57,7 @@ function ensureStyle(doc) {
 .be-add button{background:var(--fs-brand,#1456f0);color:#fff;border:none;border-radius:var(--fs-r-s,6px);padding:5px 10px;font-size:12px;cursor:pointer;}
 .be-card{border:1px solid var(--fs-border-card,#e5e6eb);border-radius:var(--fs-r-s,6px);margin-bottom:8px;background:var(--fs-bg-card,#fff);}
 .be-row{display:flex;align-items:center;gap:8px;padding:8px 10px;}
-.be-grip{cursor:grab;color:var(--fs-text-3,#8f959e);font-size:14px;}
+.be-grip{cursor:grab;color:var(--fs-text-disabled,#bbbfc4);display:inline-flex;align-items:center;}
 .be-name{flex:1;font-weight:500;cursor:pointer;}
 .be-name .be-type{font-weight:400;color:var(--fs-text-3,#8f959e);font-size:12px;margin-left:6px;}
 .be-del{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;font-size:13px;}
@@ -224,7 +224,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
       card.addEventListener('drop', ev => { ev.preventDefault(); if (dragId && dragId !== id) reorder(dragId, id); dragId = ''; });
 
       const row = doc.createElement('div'); row.className = 'be-row';
-      const grip = doc.createElement('span'); grip.className = 'be-grip'; grip.textContent = '⠿'; grip.title = '拖拽排序';
+      const grip = doc.createElement('span'); grip.className = 'be-grip'; grip.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>'; grip.title = '拖拽排序';
       const en = doc.createElement('input'); en.type = 'checkbox'; en.checked = block.enabled !== false; en.title = '默认是否启用';
       en.onchange = () => setBlockEnabled(id, en.checked);
       const name = doc.createElement('span'); name.className = 'be-name';

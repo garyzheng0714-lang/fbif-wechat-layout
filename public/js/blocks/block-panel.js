@@ -26,6 +26,11 @@ function saveOverride(accountId, ov) {
   } catch {}
 }
 
+// 统一线性图标（替代 ▸/⠿/⟲ 文本字形，匹配编辑器其余 SVG 图标集；currentColor 跟随）
+const ICON_CHEVRON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+const ICON_GRIP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>';
+const ICON_RESET = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 3v5h5"/></svg>';
+
 const STYLE_ID = 'bp-style';
 function ensureStyle(doc) {
   if (doc.getElementById(STYLE_ID)) return;
@@ -46,10 +51,12 @@ function ensureStyle(doc) {
 .bp-switch:checked::after{transform:translateX(14px);}
 .bp-card.bp-disabled{opacity:.62;}
 .bp-row{display:flex;align-items:center;gap:8px;padding:8px 10px;}
-.bp-grip{cursor:grab;color:var(--fs-text-3,#8f959e);user-select:none;font-size:14px;line-height:1;}
+.bp-grip{cursor:grab;color:var(--fs-text-disabled,#bbbfc4);user-select:none;display:inline-flex;align-items:center;}
+.bp-grip:hover{color:var(--fs-text-3,#8f959e);}
 .bp-name{flex:1;font-weight:500;cursor:pointer;}
 .bp-name .bp-sub{font-weight:400;color:var(--fs-text-3,#8f959e);font-size:12px;margin-left:6px;}
-.bp-caret{color:var(--fs-text-3,#8f959e);cursor:pointer;transition:transform .15s;font-size:11px;}
+.bp-caret{color:var(--fs-text-3,#8f959e);cursor:pointer;transition:transform .18s var(--fs-ease-out,ease),background .15s,color .15s;display:inline-flex;align-items:center;padding:4px;border-radius:var(--fs-r-xs,4px);}
+.bp-caret:hover{color:var(--fs-brand,#1456f0);background:var(--fs-bg-hover,rgba(31,35,39,.045));}
 .bp-caret.bp-open{transform:rotate(90deg);}
 .bp-fields{padding:2px 12px 12px 32px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));}
 .bp-field{margin-top:10px;}
@@ -57,7 +64,7 @@ function ensureStyle(doc) {
 .bp-badge{font-size:11px;padding:1px 6px;border-radius:9999px;}
 .bp-badge.inherit{background:var(--fs-bg-sunken,#f2f3f5);color:var(--fs-text-3,#8f959e);}
 .bp-badge.over{background:var(--fs-brand-soft,#ebf1ff);color:var(--fs-brand,#1456f0);}
-.bp-reset{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;font-size:11px;text-decoration:underline;padding:0;margin-left:auto;}
+.bp-reset{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;display:inline-flex;align-items:center;padding:2px;margin-left:auto;}
 .bp-reset:hover{color:var(--fs-brand,#1456f0);}
 .bp-input,.bp-textarea,.bp-select{width:100%;box-sizing:border-box;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:5px 8px;font-size:13px;font-family:inherit;}
 .bp-textarea{min-height:60px;resize:vertical;}
@@ -316,7 +323,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       card.dataset.id = block.id;
 
       const row = doc.createElement('div'); row.className = 'bp-row';
-      const grip = doc.createElement('span'); grip.className = 'bp-grip'; grip.textContent = '⠿'; grip.title = '拖拽排序';
+      const grip = doc.createElement('span'); grip.className = 'bp-grip'; grip.innerHTML = ICON_GRIP; grip.title = '拖拽排序';
       const cb = doc.createElement('input'); cb.type = 'checkbox'; cb.className = 'bp-switch'; cb.checked = block.enabled;
       cb.title = '在本篇显示/隐藏该区块';
       cb.onchange = () => setEnabled(block.id, cb.checked, block.enabledDefault);
@@ -324,7 +331,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       name.innerHTML = esc(blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, accountId)) + (block.enabledOverridden ? '<span class="bp-sub">本篇已改开关</span>' : '');
       const caret = doc.createElement('span');
       const isOpen = expanded.has(block.id) || (block.enabled && !expanded.has('__c__' + block.id));
-      caret.className = 'bp-caret' + (isOpen ? ' bp-open' : ''); caret.textContent = '▸';
+      caret.className = 'bp-caret' + (isOpen ? ' bp-open' : ''); caret.innerHTML = ICON_CHEVRON;
       const toggle = () => {
         if (isOpenNow(block)) { expanded.delete(block.id); expanded.add('__c__' + block.id); }
         else { expanded.add(block.id); expanded.delete('__c__' + block.id); }
@@ -334,7 +341,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       row.appendChild(grip); row.appendChild(name);
       if (blockHasOverride(block.id)) {
         const rb = doc.createElement('button');
-        rb.type = 'button'; rb.className = 'bp-reset'; rb.textContent = '⟲'; rb.title = '此区块恢复后台默认';
+        rb.type = 'button'; rb.className = 'bp-reset'; rb.innerHTML = ICON_RESET; rb.title = '此区块恢复后台默认';
         rb.onclick = (ev) => { ev.stopPropagation(); resetBlock(block.id); };
         row.appendChild(rb);
       }
