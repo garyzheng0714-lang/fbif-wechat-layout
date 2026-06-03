@@ -368,6 +368,9 @@ func defaultFoodTalksSeriesRuleConfig() map[string]any {
 		// 素材库（序号图 / 群二维码 / 名片 + 尾部默认组合）—— 结构化模块，规则后台可改 URL
 		"modules": map[string]any{
 			"ft_series_materials": defaultFtSeriesMaterialsModule(),
+			// 显式覆盖：系列与 FBIF 共用 bottom_blocks 结构但默认不同（名片/群二维码满宽图 + 可显隐更多文章）。
+			// 不覆盖则经 mergeRuleDefaults 继承 FBIF 基线 → renderBottomFooter 会错渲 FBIF 提示/波波/1000。
+			"bottom_blocks": defaultSeriesBottomBlocksModule(),
 		},
 	}
 }

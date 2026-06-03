@@ -172,6 +172,43 @@ func defaultMpBottomBlocksModule() map[string]any {
 	}
 }
 
+// defaultSeriesBottomBlocksModule 是 FoodTalks「什么是」系列底部默认布局：把原 buildSeriesFooterElems
+// 的「作者名片 → BD 名片 → 群二维码」3 张满宽 banner 表达成 image 区块（引用素材库 {{asset#id}}），
+// 外加一个默认隐藏、可显隐的「更多文章」区块——让系列与 FBIF 共用同一 bottom_blocks 结构，
+// 差异只在默认值（红线#2：规则是可复用资产）。默认选择对齐 defaultFtSeriesMaterialsModule 的
+// footer_default：author 留空（运营单篇点选）、bd=Eileen、group=包装。系列必须显式覆盖此模块，
+// 否则经 mergeRuleDefaults 继承 FBIF 基线的 defaultMpBottomBlocksModule → 错渲 FBIF 页脚。
+// 渲染走系列专属 renderBottomFooter（foodtalks-series.js），字节口径区别于 FBIF（满宽 100% 而非 661px）。
+func defaultSeriesBottomBlocksModule() map[string]any {
+	return map[string]any{
+		"enabled": true,
+		"order":   []any{"author_card", "bd_card", "group_qr", "more_articles"},
+		"blocks": map[string]any{
+			"author_card": map[string]any{
+				"type":    "image",
+				"enabled": true,
+				"fields":  map[string]any{"image": ""}, // 默认空：运营单篇从素材库点选作者名片
+			},
+			"bd_card": map[string]any{
+				"type":    "image",
+				"enabled": true,
+				"fields":  map[string]any{"image": "{{asset#ft_series_card_eileen}}"},
+			},
+			"group_qr": map[string]any{
+				"type":    "image",
+				"enabled": true,
+				"fields":  map[string]any{"image": "{{asset#ft_series_group_packaging}}"},
+			},
+			"more_articles": map[string]any{
+				"type":    "more_articles",
+				"enabled": false, // 系列默认不出更多文章；结构里保留，运营可显隐（用户诉求：结构统一）
+				"fields":  map[string]any{"title": "/ 更多文章 /"},
+			},
+		},
+		"presets": []any{},
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // 校验
 

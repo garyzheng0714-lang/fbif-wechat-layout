@@ -11,7 +11,7 @@ const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter, convertRuns, looksLikeGifSource } = engineModule;
 const behaviorModule = await import('../rule-behavior-foodtalks-series.js' + assetQuery);
 const {
-  classifySeries, buildSeriesFooterElems, sectionImageUrl,
+  classifySeries, sectionImageUrl,
 } = behaviorModule;
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
@@ -19,6 +19,12 @@ const defaultsModule = await import('../foodtalks-series-defaults.js' + assetQue
 const { SERIES_COLORS, SERIES_SIZES, SERIES_LAYOUT, SERIES_FRONTMATTER } = defaultsModule;
 const tableModule = await import('./shared/table-renderer.js' + assetQuery);
 const { renderTable: renderSharedTable } = tableModule;
+// 底部统一区块模型：中性编排器 + 系列专属渲染器（红线#19：系列(公众号)渲染器独立，
+// 不 import mp-blocks/site-blocks；只 import 中性的 block-render 编排层与 asset-library 解析）。
+const blockRenderModule = await import('../blocks/block-render.js' + assetQuery);
+const { renderBottomBlocksHtml } = blockRenderModule;
+const assetLibModule = await import('../asset-library.js' + assetQuery);
+const { resolveAssetRefs } = assetLibModule;
 
 // ── config 读取（优先扁平 config 键，缺省降级系列常量）──
 function cfgNum(config, key, fallback) {
@@ -85,6 +91,27 @@ function imageSection(src, gap, sp, { alt = '', width = '100%' } = {}) {
     `style="width: ${width}; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;" />` +
     `</section>`
   );
+}
+
+// 系列底部区块渲染器（type → HTML）。复用本模板的 imageSection，保持与正文同一字节口径
+// （满宽 100%，区别于 FBIF mp-blocks 的 661px）。图片字段走素材库 {{asset#id}}；解析失败/为空
+// → 不渲染（对齐旧 buildSeriesFooterElems 跳过空选的语义）。more_articles 渲染待 B6 接入。
+function seriesBlockRenderers(sp, assetLibrary, scope) {
+  const toUrl = (raw) => {
+    const v = String(raw == null ? '' : raw).trim();
+    if (!v) return '';
+    const url = resolveAssetRefs([v], assetLibrary, scope)[0] || '';
+    if (!url || url.startsWith('data:')) return ''; // 解析回退透明图 → 视为无图
+    return url;
+  };
+  return {
+    image: (f) => {
+      const url = toUrl(f.image);
+      if (!url) return '';
+      const w = Number(f.width) || 0;
+      return imageSection(url, true, sp, { width: w > 0 ? w + 'px' : '100%' });
+    },
+  };
 }
 
 // 图片显示宽度（规范《五·图片》）：头图满宽 1411 → 100%；方形小图=二维码 → 固定 qr_size
@@ -330,12 +357,11 @@ function buildDocxOpts(config) {
 function processDocxInternal(paragraphs, imgCache, config) {
   const neutral = classifyDocxArticle(paragraphs || [], imgCache || {}, buildDocxOpts(config));
   const elems = classifySeries(neutral.elems, config);
-  const footer = buildSeriesFooterElems(config);
-  const all = elems.concat(footer);
+  // 底部页脚不再 concat 进正文——改由 export default 的 renderBottomFooter() 经 engine footer 链路渲染。
   return {
-    elems: all,
-    imgN: all.filter(e => e.k === 'img').length,
-    headingN: all.filter(e => e.k === 'h1' || e.k === 'h2' || e.k === 'h3').length,
+    elems,
+    imgN: elems.filter(e => e.k === 'img').length,
+    headingN: elems.filter(e => e.k === 'h1' || e.k === 'h2' || e.k === 'h3').length,
   };
 }
 
@@ -357,7 +383,7 @@ export default {
     // 最小 MD 支持：按段落转 runs，交给同一分类/渲染（标题靠正文编号正则识别）。
     const paras = String(body).split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
     const neutral = paras.map(p => ({ k: 'txt', runs: parseMdRuns(p), text: p }));
-    const elems = classifySeries(neutral, config).concat(buildSeriesFooterElems(config));
+    const elems = classifySeries(neutral, config);
     return {
       lines: render(elems, config),
       imgN: elems.filter(e => e.k === 'img').length,
@@ -380,12 +406,28 @@ export default {
       if (b.k === 'h') return { k: 'h', text: b.text || '', runs: [{ type: 'txt', text: b.text || '' }] };
       return { k: 'txt', runs: convertRuns(b.runs || []) };
     }).filter(Boolean);
-    const elems = classifySeries(neutral, config).concat(buildSeriesFooterElems(config));
+    const elems = classifySeries(neutral, config);
     return {
       lines: render(elems, config),
       imgN: elems.filter(e => e.k === 'img').length,
       headingN: elems.filter(e => e.k === 'h1' || e.k === 'h2' || e.k === 'h3').length,
       title: (data && data.title) || '',
     };
+  },
+
+  // 整段底部由统一区块模型渲染（替代旧 buildSeriesFooterElems 的 body-concat）。
+  // engine.loadBaseFooterHtml 接管时调用；bottom_blocks 缺失/禁用返回 null → fallback footerUrl
+  // （系列 footerUrl='' → 空）。红线#19：seriesBlockRenderers 只在系列侧定义，engine 经此回调拿结果。
+  renderBottomFooter() {
+    const ac = (typeof window !== 'undefined' && window._activeConfig) || {};
+    let cfg = (ac.preset && (ac.preset.raw_config || ac.preset.config)) || ac.config || {};
+    if (cfg && cfg.config && cfg.config.modules) cfg = cfg.config;
+    const mods = (cfg && cfg.modules && typeof cfg.modules === 'object') ? cfg.modules : {};
+    const bb = mods.bottom_blocks;
+    if (!bb || typeof bb !== 'object' || bb.enabled === false) return null;
+    const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'foodtalks-series';
+    const ov = (typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined;
+    const sp = styleProps((ac.config && typeof ac.config === 'object') ? ac.config : {});
+    return renderBottomBlocksHtml(bb, ov, seriesBlockRenderers(sp, mods.asset_library, scope));
   },
 };

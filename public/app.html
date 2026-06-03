@@ -553,19 +553,19 @@ const accountMenu = mountAccountMenu({
   onSwitch: (id) => switchAccount(id),
 });
 
-let ftSeriesFooterModulePromise = null;
 async function applyAccountCapabilityUI(pack) {
   const maSec = document.getElementById('moreArticlesSection');
   const ftSec = document.getElementById('ftSeriesFooterSection');
   const isSeries = pack && pack.footerPicker === 'ft-series';
   if (maSec) maSec.style.display = isSeries ? 'none' : '';
-  if (ftSec) ftSec.style.display = isSeries ? '' : 'none';
-  // 底部区块单篇面板：账号有 bottom_blocks 且非「什么是」系列时显示。
+  // 旧系列专属页脚选择器（作者/BD/群下拉）已被统一底部区块面板取代（P1-B4）：始终隐藏，不再初始化。
+  if (ftSec) ftSec.style.display = 'none';
+  // 底部区块单篇面板：所有公众号账号（含 FoodTalks 系列）统一走 mountBlockPanel，差异只在服务端默认。
   const bbSec = document.getElementById('blockPanelSection');
   const bbMount = document.getElementById('blockPanel');
   const bbMod = window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks;
   if (bbSec && bbMount) {
-    if (bbMod && !isSeries) {
+    if (bbMod) {
       bbSec.style.display = '';
       // 幂等挂载：同账号已挂载则只 refresh，避免初始时序竞态下被调用两次而挂出双实例
       // （双实例各持一份内存 override，互相打架 → “改了又被打回”）。换账号则销毁旧实例再挂新。
@@ -589,12 +589,6 @@ async function applyAccountCapabilityUI(pack) {
       window._bottomBlocksOverride = undefined;
     }
   }
-  if (!isSeries) return;
-  if (!ftSeriesFooterModulePromise) {
-    ftSeriesFooterModulePromise = import('/js/ft-series-footer-ui.js?v=' + assetVersion);
-  }
-  const { initFtSeriesFooter } = await ftSeriesFooterModulePromise;
-  initFtSeriesFooter();
 }
 
 function persistAccountSelection(id) {
