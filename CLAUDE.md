@@ -54,6 +54,8 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 21. **网站渠道默认走 ft-default 规则包** — site.html 通过 `getRulePackByPath(location.pathname)` 做渠道感知 fallback：`/ft/<任意 id>` 都会落到该渠道默认包 `ft-default`（templateId 是 `foodtalks-site`）。**禁止**裸用 `parsed.packId`——`/ft/default` 这种链接里的 `default` 在 registry 不存在，裸用会 fallback 到公众号 `fbif`，整套网站模板失效。
 
+22. **所有公众号账号共用同一 `bottom_blocks` 底部结构，差异只在服务端默认**（2026-06-03 用户裁定一次性根治，**推翻**旧"FoodTalks系列底部走 bespoke ft-series-footer-ui 作者/BD/群下拉"做法）。FBIF / WowFood / **FoodTalks系列** 都走统一 `mountBlockPanel`（`app.html` 已删 `isSeries` 守卫）；每账号在 `api/rule_defaults.go` 的 config 显式覆盖 `modules.bottom_blocks`（系列=`defaultSeriesBottomBlocksModule`：作者/BD名片/群二维码为 `image` 块满宽 banner，作者默认空，more_articles 默认隐藏可显隐），**不覆盖则经 `mergeRuleDefaults` 继承 FBIF 基线→错渲 FBIF 页脚**。系列页脚渲染走 `foodtalks-series.js` 的 `renderBottomFooter()`+`seriesBlockRenderers`（复用本模板 `imageSection`，**满宽 100% 系列口径，区别于 FBIF mp-blocks 的 661px**；红线#19：只 import 中性 `block-render`/`asset-library`，**不碰 `mp-blocks`**）。旧 `ftSeriesFooterSection`（侧栏作者/BD/群下拉）+ `public/js/ft-series-footer-ui.js` + `rule-behavior-foodtalks-series.js` 的 `buildSeriesFooterElems` 已退役（始终隐藏/不再 import），**勿当历史功能恢复**。字节保真由 `tests/series-blocks-fidelity.test.mjs` golden 守。拖拽排序统一用 vendor 的 SortableJS（`public/vendor/Sortable.min.js`，仅 app.html 引入；`block-panel.js`/`more-articles-ui.js` 拖完按 DOM 顺序回写，脏 id 过滤防卡片消失）。
+
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
