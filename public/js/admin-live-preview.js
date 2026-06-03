@@ -2,7 +2,7 @@
 // 改任意参数立刻反映在样张上，GSAP tween 高亮（reduced-motion / 无 GSAP 时降级为直接生效）。
 // 读真实归一化 config（rule-document.js 字段名）；attribution_color 无真实 sink，
 // 来源行颜色绑 link_color（与渲染器一致，见迁移计划字段映射）。
-import { normalizeRuleConfig } from './rule-presets.js';
+import { reduced } from './anim.js';
 
 export function livePreviewHTML() {
   return `
@@ -24,7 +24,7 @@ const px = (v, d) => ((v == null || v === '') ? d : v) + 'px';
 export function applyLivePreview(overlay, rawConfig, opts = {}) {
   const root = overlay && overlay.querySelector('.admin-live-paper');
   if (!root) return;
-  const c = normalizeRuleConfig(rawConfig || {});
+  const c = rawConfig || {};
   const q = (s) => root.querySelector(s);
   const title = q('[data-lv="title"]'), p1 = q('[data-lv="p1"]'), p2 = q('[data-lv="p2"]');
   const cap = q('[data-lv="cap"]'), attr = q('[data-lv="attr"]');
@@ -44,11 +44,19 @@ export function applyLivePreview(overlay, rawConfig, opts = {}) {
   if (cap) { cap.style.fontSize = px(c.caption_font_size, '12'); cap.style.color = c.muted_color || '#888888'; }
   if (attr) { attr.style.fontSize = px(c.attribution_font_size, '15'); attr.style.color = c.link_color || '#0070C0'; }
 
-  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (opts.tween && window.gsap && !reduced) {
+  if (opts.tween && window.gsap && !reduced()) {
     const tgt = (opts.target && q('[data-lv="' + opts.target + '"]')) || root;
     try {
       gsap.fromTo(tgt, { backgroundColor: 'rgba(20,86,240,0.12)' }, { backgroundColor: 'rgba(20,86,240,0)', duration: 0.6, ease: 'power2.out' });
     } catch (e) {}
   }
+}
+
+// 字段 key → 实时预览高亮目标（与样张元素 data-lv 对应；映射归这个模块，避免散落在调用方）
+export function targetForKey(key) {
+  if (/heading/.test(key)) return 'title';
+  if (/caption|muted/.test(key)) return 'cap';
+  if (/attribution/.test(key)) return 'attr';
+  if (/link/.test(key)) return 'link';
+  return 'p1';
 }

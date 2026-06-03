@@ -32,7 +32,7 @@ import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { adminDirtyCount, updateDirtyChip } from './admin-dirty-state.js';
 import { numberField, bindSteppers } from './admin-field-controls.js';
-import { livePreviewHTML, applyLivePreview } from './admin-live-preview.js';
+import { livePreviewHTML, applyLivePreview, targetForKey } from './admin-live-preview.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 
 const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
@@ -583,7 +583,7 @@ export function initAdminPanel(options = {}) {
     const selected = selectedPreset();
     jsonDirty = false;
     applyConfig(workingConfig, presetWithBehavior(selected));
-    applyLivePreview(overlay, workingConfig, { tween: true, target: /heading/.test(key) ? 'title' : /caption|muted/.test(key) ? 'cap' : /attribution/.test(key) ? 'attr' : /link/.test(key) ? 'link' : 'p1' });
+    applyLivePreview(overlay, workingConfig, { tween: true, target: targetForKey(key) });
     refreshWarnings();
     syncJSONEditorFromInputs(); updateStatusInline('有未保存改动，点击「保存修改」后生效');
   }

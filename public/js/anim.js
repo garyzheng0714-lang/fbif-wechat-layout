@@ -23,6 +23,10 @@ export function gTo(t, vars) { return failsafe(window.gsap ? gsap.to(t, vars) : 
 export function gFromTo(t, a, b) { return failsafe(window.gsap ? gsap.fromTo(t, a, b) : null, b); }
 
 // 同时挂 window，供内联脚本 / 经典脚本 / 非模块消费方使用
-window.gFrom = gFrom;
-window.gTo = gTo;
-window.gFromTo = gFromTo;
+// （guard：本模块会被 admin-live-preview.js 引入，而 admin-panel.js 在 node 测试里被
+//  导入取 uniqueClientRuleID——无 window 环境下顶层赋值会抛错，故守一下）
+if (typeof window !== 'undefined') {
+  window.gFrom = gFrom;
+  window.gTo = gTo;
+  window.gFromTo = gFromTo;
+}
