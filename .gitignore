@@ -20,3 +20,8 @@ verify-*.png
 unified_inbox.json
 api/unified_inbox.json
 .claude/
+# 本地会话日志 / 抓取源 / 阶段截图 / e2e 截图产物（Codex review #3/#4：勿入库，防泄漏本机路径与大二进制）
+conversation-*.txt
+news62285_source.html
+stage*.png
+tests/e2e-screenshots/
