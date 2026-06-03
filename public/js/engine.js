@@ -142,14 +142,22 @@ function hookPreviewImages(container) {
 // 显式空串 '' → 该渠道无公众号页脚（网站渠道 ft-default 即如此，footer 内容
 // 由 FoodTalks 系统在发布时自动追加，工具侧不得再拼公众号那套）。此前用 `||`
 // 会把显式空串也 fallback 到 /footer.html，导致网站渠道误带公众号页脚。
-const activeRulePack = typeof window !== 'undefined' ? window._activeRulePack : null;
-const footerUrl =
-  activeRulePack && activeRulePack.footerUrl != null
-    ? activeRulePack.footerUrl
-    : '/footer.html';
-const footerReady = footerUrl
-  ? fetch(footerUrl).then(r => r.ok ? r.text() : '').catch(() => '')
-  : Promise.resolve('');
+const _stockFooterCache = new Map();
+function currentStockFooterUrl() {
+  const activeRulePack = typeof window !== 'undefined' ? window._activeRulePack : null;
+  return activeRulePack && activeRulePack.footerUrl != null ? activeRulePack.footerUrl : '/footer.html';
+}
+function stockFooterReady() {
+  const url = currentStockFooterUrl();
+  if (!url) return Promise.resolve('');
+  if (!_stockFooterCache.has(url)) {
+    _stockFooterCache.set(url, fetch(url).then(r => r.ok ? r.text() : '').catch(() => ''));
+  }
+  return _stockFooterCache.get(url);
+}
+async function loadBaseFooterHtml() {
+  return localStorage.getItem('custom_footer') || await stockFooterReady();
+}
 
 // Module-level flag: true when the current article was fetched from a URL
 // (i.e. it is a repost). Set explicitly by handleFile/processFile at each
@@ -247,13 +255,17 @@ async function buildFooterWithMoreArticles(baseFooterHtml) {
 }
 
 // ---- App Initialization ----
-export function initApp(template) {
-  document.getElementById('pageTitle').textContent = template.name;
-  document.getElementById('pageSubtitle').textContent = template.description;
-  document.getElementById('fileHint').textContent =
-    '支持 ' + template.formats.join('、') + ' 格式';
+export function initApp(initialTemplate) {
+  let template = initialTemplate;
+  function applyTemplateShell(nextTemplate) {
+    document.getElementById('pageTitle').textContent = nextTemplate.name;
+    document.getElementById('pageSubtitle').textContent = nextTemplate.description;
+    document.getElementById('fileHint').textContent =
+      '支持 ' + nextTemplate.formats.join('、') + ' 格式';
+    fileInputEl.accept = nextTemplate.formats.join(',');
+  }
   const fileInputEl = document.getElementById('fileInput');
-  fileInputEl.accept = template.formats.join(',');
+  applyTemplateShell(template);
   fileInputEl.multiple = true;
 
   const dropZone = document.getElementById('dropZone');
@@ -362,7 +374,7 @@ export function initApp(template) {
     // slots — cards are a per-article curation, filled in manually each time.
     saveMoreArticlesCards(makeFreshUploadCards());
     if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-    const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
+    const baseFooterHtml = await loadBaseFooterHtml();
     const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
     const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
@@ -413,7 +425,7 @@ export function initApp(template) {
       const articleHtml = result.lines.join('\n');
       saveMoreArticlesCards(makeFreshUploadCards());
       if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-      const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
+      const baseFooterHtml = await loadBaseFooterHtml();
       const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
@@ -457,7 +469,7 @@ export function initApp(template) {
         return;
       }
       const articleHtml = result.lines.join('\n');
-      const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
+      const baseFooterHtml = await loadBaseFooterHtml();
       const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
@@ -471,6 +483,20 @@ export function initApp(template) {
 
   // Make rerender callable from inline scripts (site.html / app.html sidebar)
   window._engineRerender = _engineRerender;
+  window._engineSwitchTemplate = async function(nextTemplate, options = {}) {
+    if (!nextTemplate) return false;
+    template = nextTemplate;
+    applyTemplateShell(template);
+    if (options.rerender !== false) await _engineRerender();
+    return true;
+  };
+  window._engineApi = {
+    ...window._engineApi,
+    setActiveConfig,
+    getActiveConfig,
+    rerender: () => _engineRerender(),
+    switchTemplate: window._engineSwitchTemplate,
+  };
 
   async function handleFile(file, opts) {
     // Set repost flag per-call so it never leaks across articles.
@@ -516,7 +542,7 @@ export function initApp(template) {
       // sidebar shows empty inputs and footer renders gray placeholders.
       saveMoreArticlesCards(makeFreshUploadCards());
       if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-      const baseFooterHtml = localStorage.getItem('custom_footer') || await footerReady;
+      const baseFooterHtml = await loadBaseFooterHtml();
       const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
@@ -592,7 +618,7 @@ export function initApp(template) {
     _moreArticlesCopyJob = ensureCompositeReady(cards).then(async uploaded => {
       if (seq !== _moreArticlesCopySeq) return false;
       saveMoreArticlesCards(uploaded);
-      const baseFooter = normalizeWechatRichHtml(applyRepostTransform(localStorage.getItem('custom_footer') || await footerReady));
+      const baseFooter = normalizeWechatRichHtml(applyRepostTransform(await loadBaseFooterHtml()));
       if (seq !== _moreArticlesCopySeq) return false;
       _footerCopy = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, uploaded));
       logConv('info', '更多文章图片已后台准备完成', { reason });
@@ -673,7 +699,7 @@ export function initApp(template) {
       if (cardsOverride) saveMoreArticlesCards(cardsOverride);
       _moreArticlesCopySeq++;
       _moreArticlesCopyJob = null;
-      const base = localStorage.getItem('custom_footer') || await footerReady;
+      const base = await loadBaseFooterHtml();
       const merged = await buildFooterWithMoreArticles(base);
       _footerHtml = merged;
       _footerCopy = merged;
@@ -1001,6 +1027,7 @@ export function initApp(template) {
 // initApp hasn't been called yet (e.g., before file is uploaded).
 if (typeof window !== 'undefined') {
   window._engineApi = {
+    ...window._engineApi,
     setActiveConfig,
     getActiveConfig,
     rerender: () => {

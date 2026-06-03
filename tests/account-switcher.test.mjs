@@ -92,3 +92,36 @@ test('app shell uses absolute /js/ paths for dynamic imports (path-safe under /m
   assert.match(app, /import\(['"]\/js\/engine\.js/);
   assert.match(app, /import\(['"]\/js\/rule-packs\/registry\.js/);
 });
+
+test('mp accounts hot-swap templates instead of reloading the page', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  // WHY：本地 DOCX 图片是当前页面创建的 blob: URL；同渠道换账号若整页 reload，
+  // 新页面只能恢复失效的 blob 字符串，预览里的图片会全部消失。
+  assert.match(
+    app,
+    /nextPack\.channel !== activeRulePack\.channel[\s\S]{0,500}location\.href = next\.toString\(\)/,
+    '只有跨渠道账号切换才允许整页导航',
+  );
+  assert.match(
+    app,
+    /activeRulePack\.templateId !== currentTemplateId[\s\S]{0,160}await loadTemplate\(activeRulePack\.templateId,\s*\{\s*rerender:\s*false\s*\}\)/,
+    '同渠道跨模板账号切换应热加载模板，保留当前页面里的 DOCX 图片 blob',
+  );
+  assert.doesNotMatch(
+    app,
+    /templateId !== currentTemplateId[\s\S]{0,240}location\.href/,
+    '不能再用模板差异触发整页 reload',
+  );
+});
+
+test('engine supports template hot-swap and reads footer from the current account', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  // WHY：账号切换后当前文章必须用新模板/新规则重排，但不能重建编辑会话。
+  assert.match(engine, /export function initApp\(initialTemplate\)/);
+  assert.match(engine, /let template = initialTemplate/);
+  assert.match(engine, /window\._engineSwitchTemplate/);
+  assert.match(engine, /switchTemplate: window\._engineSwitchTemplate/);
+  assert.match(engine, /await _engineRerender\(\)/);
+  assert.match(engine, /function currentStockFooterUrl\(\)[\s\S]{0,220}window\._activeRulePack/);
+  assert.doesNotMatch(engine, /const footerReady\s*=/, '页脚不能在模块加载时按初始账号锁死');
+});

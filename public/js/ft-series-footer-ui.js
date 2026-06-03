@@ -94,7 +94,10 @@ export function initFtSeriesFooter() {
     });
     if (typeof window._engineRerender === 'function') window._engineRerender();
   };
-  authorSel.addEventListener('change', apply);
-  groupSel.addEventListener('change', apply);
-  bdSel.addEventListener('change', apply);
+  if (section.dataset.ftSeriesFooterBound !== 'true') {
+    authorSel.addEventListener('change', apply);
+    groupSel.addEventListener('change', apply);
+    bdSel.addEventListener('change', apply);
+    section.dataset.ftSeriesFooterBound = 'true';
+  }
 }
