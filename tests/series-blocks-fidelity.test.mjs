@@ -79,6 +79,14 @@ test('renderBottomFooter: 单篇 override 显隐生效（隐藏 bd_card → 只�
   assert.match(html, /packaging\.png/, '群二维码仍在');
 });
 
+test('renderBottomFooter: 系列启用 more_articles 时输出复制链路识别的锚点', () => {
+  setActive(seriesBottomBlocks(), { overrides: { more_articles: { enabled: true } } });
+  const html = template.renderBottomFooter();
+  assert.match(html, /<section data-role="paragraph">/, '保留 paragraph 包裹锚点');
+  assert.match(html, /\/ 更多文章 \//, '渲染更多文章标题');
+  assert.match(html, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;"><\/section>/, '保留 more-articles.js 合成卡片的外层锚点');
+});
+
 test('renderBottomFooter: 模块禁用 → 返回 null（engine fallback footerUrl）', () => {
   const bb = seriesBottomBlocks(); bb.enabled = false;
   setActive(bb, undefined);

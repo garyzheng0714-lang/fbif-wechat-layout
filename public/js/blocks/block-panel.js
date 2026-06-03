@@ -76,15 +76,43 @@ function ensureStyle(doc) {
 //   getModule: () => 后台默认 bottom_blocks 模块（原始服务端模块）
 //   onChange: (override) => void —— 宿主据此注入渲染并重渲
 //   initialOverride: 可选，外部已加载的覆盖（否则从 localStorage 读）
-// blockDisplayLabel：左侧列表显示「这个块是什么」而非通用类型名。优先用块的 title 字段值
-// （剥掉 "/ … /" 装饰），缺省退回类型 label。让运营看到「提示 / 1000个食品创新案例 / 更多文章」
-// 这类有意义的描述，而不是「声明/提示 / 标题+图片」。
-function blockDisplayLabel(block, type) {
+function assetsOf(lib) {
+  if (Array.isArray(lib)) return lib;
+  if (isObj(lib) && Array.isArray(lib.assets)) return lib.assets;
+  return [];
+}
+
+function assetIDFromRef(value) {
+  const m = /^\{\{asset#([a-z0-9_-]+)\}\}$/i.exec(String(value == null ? '' : value).trim());
+  return m ? m[1] : '';
+}
+
+function assetLabelFor(block, assetLibrary, accountId) {
+  const ref = block && block.fields && block.fields.image && block.fields.image.value;
+  const id = assetIDFromRef(ref);
+  if (!id) return '';
+  for (const asset of assetsOf(assetLibrary)) {
+    const scope = asset && (asset.scope || 'global');
+    if (asset && asset.id === id && (scope === 'global' || scope === accountId)) {
+      return String(asset.label || '').trim();
+    }
+  }
+  return '';
+}
+
+// blockDisplayLabel：左侧列表显示「这个块是什么」而非通用类型名。优先用标题字段，
+// 再用上方说明/素材名，缺省才退回类型 label。让运营看到「提示 / FBIF 波波名片 /
+// 1000个食品创新案例 / 更多文章」，而不是「声明/提示 / 名片 / 标题+图片」。
+function blockDisplayLabel(block, type, assetLibrary, accountId) {
   const t = block && block.fields && block.fields.title && block.fields.title.value;
   if (typeof t === 'string') {
     const cleaned = t.replace(/^[\s/]+|[\s/]+$/g, '').trim();
     if (cleaned) return cleaned;
   }
+  const intro = block && block.fields && block.fields.intro_text && block.fields.intro_text.value;
+  if (typeof intro === 'string' && intro.trim()) return intro.trim();
+  const label = assetLabelFor(block, assetLibrary, accountId);
+  if (label) return label;
   return (type && type.label) || (block && block.type) || '';
 }
 
@@ -287,7 +315,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       cb.title = '在本篇显示/隐藏该区块';
       cb.onchange = () => setEnabled(block.id, cb.checked, block.enabledDefault);
       const name = doc.createElement('span'); name.className = 'bp-name';
-      name.innerHTML = esc(blockDisplayLabel(block, type)) + (block.enabledOverridden ? '<span class="bp-sub">本篇已改开关</span>' : '');
+      name.innerHTML = esc(blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, accountId)) + (block.enabledOverridden ? '<span class="bp-sub">本篇已改开关</span>' : '');
       const caret = doc.createElement('span');
       const isOpen = expanded.has(block.id) || (block.enabled && !expanded.has('__c__' + block.id));
       caret.className = 'bp-caret' + (isOpen ? ' bp-open' : ''); caret.textContent = '▸';
@@ -335,11 +363,11 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     }
   }
 
-  // 默认展开规则：启用的块默认展开，未启用默认折叠；用户手动开合后以 expanded 记录为准。
+  // 默认开合规则：全部默认折叠，避免底部面板一打开就过长；用户手动开合后以 expanded 记录为准。
   function isOpenNow(block) {
     if (expanded.has(block.id)) return true;
     if (expanded.has('__c__' + block.id)) return false;
-    return block.enabled;
+    return false;
   }
 
   render();

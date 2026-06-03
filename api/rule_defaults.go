@@ -115,7 +115,7 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v1→v2（2026-06-02）：FoodTalks「什么是」系列改为独立默认（深蓝 #02396b、表格边框 #888888、
 // 18 群 ft_series_materials、BD 名片 bd_card），修复 5/26 持久化的 FBIF 派生旧版。
 // v2→v3（2026-06-02）：新增 asset_library 素材库种子，并把 FoodTalks 网站页脚图片 URL
-// 从 html_lines 内联迁为 {{asset:usage}} 引用。
+// 从 html_lines 内联迁为 {{asset#id}} 引用。
 // v3→v4（2026-06-03）：「什么是」系列文末区块对齐成品——文末署名/图源说明 12px #7f7f7f 斜体
 // （footer_note_color/footer_note_font_size + footer_note_regex），「提示：/* 声明」块（tip_*_regex），
 // 联系小节公司信息居中（contact_section_regex/contact_field_regex）。
@@ -251,19 +251,19 @@ func defaultFBIFFooterModule() map[string]any {
 				`<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*资讯投稿与商务合作，请查看&ldquo;<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/news/30752" target="_blank" rel="noopener">FoodTalks商务合作方案</a>&rdquo;，并联系Bobo。</span></em></p>`,
 			),
 			"join_group": seg(
-				`<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefUsage("banner")+`" alt="" width="600" /></p>`,
+				`<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefID("ft_footer_banner")+`" alt="" width="600" /></p>`,
 				`<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>`,
 				`<p><br /></p>`,
-				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefUsage("qr_group")+`" alt="00" width="600" height="267" /></p>`,
+				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefID("ft_footer_group_qr")+`" alt="00" width="600" height="267" /></p>`,
 				`<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。</span></em></p>`,
 			),
 			"follow_account": seg(
 				`<p style="color: #01396a; font-size: 20px;"><strong>关注公众号</strong></p>`,
 				`<p><br /></p>`,
-				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefUsage("qr_account")+`" alt="" width="600" height="221" /></p>`,
+				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefID("ft_footer_account_qr")+`" alt="" width="600" height="221" /></p>`,
 			),
 			"logo": seg(
-				`<p><img style="max-width: 100%; height: 27px; width: 126px;" src="` + assetRefUsage("logo") + `" alt="FoodTalks logo" width="130" height="27" border="0" /></p>`,
+				`<p><img style="max-width: 100%; height: 27px; width: 126px;" src="` + assetRefID("ft_footer_logo") + `" alt="FoodTalks logo" width="130" height="27" border="0" /></p>`,
 			),
 			"more_info": seg(
 				`<p>点击获取更多<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/" target="_blank" rel="noopener">全球食品资讯</a></p>`,

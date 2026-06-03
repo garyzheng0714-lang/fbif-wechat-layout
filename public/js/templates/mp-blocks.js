@@ -1,7 +1,7 @@
 // mp-blocks.js — 微信公众号渠道的底部区块渲染器（type → HTML）。
 //
 // 红线 #19：公众号渲染器与网站渲染器物理隔离——本文件不 import foodtalks-site.js / site-blocks.js，
-// 只 import 中性的 asset-library（{{asset:…}} 占位符解析）。输出自包含 inline 样式 section。
+// 只 import 中性的 asset-library（{{asset#id}} 占位符解析，兼容旧 {{asset:usage}}）。输出自包含 inline 样式 section。
 //
 // 各 type 的 inline style 字节级复刻 public/footer.html（FBIF 公众号成品页脚）：
 //   - 可配字段（文字/字号/颜色/居中/图）填入；固定排版（font-family / 间距 / 661px）写在模板常量；
@@ -66,7 +66,7 @@ function centerCss(center) {
 }
 
 // mpBlockRenderers 返回公众号渠道的「type → 渲染函数」表。
-//   assetLibrary: config.modules.asset_library（解析 {{asset:…}}）
+//   assetLibrary: config.modules.asset_library（解析 {{asset#id}}）
 //   scope: 资产作用域，公众号用账号 id（如 'fbif'）；缺省 'global'
 export function mpBlockRenderers(assetLibrary, scope = 'global') {
   const resolve = (lines) => resolveAssetRefs(lines, assetLibrary, scope).join('\n');

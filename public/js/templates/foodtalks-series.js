@@ -93,9 +93,24 @@ function imageSection(src, gap, sp, { alt = '', width = '100%' } = {}) {
   );
 }
 
+const MORE_CARDS_WRAPPER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
+
+function centerCss(center) {
+  return center === false ? '' : 'text-align:center;';
+}
+
+function moreArticlesTitle(f, sp) {
+  const title = String(f.title == null ? '' : f.title).trim();
+  if (!title) return '';
+  const size = cfgNum(f, 'title_size', 17);
+  const color = /^#[0-9a-fA-F]{6}$/.test(String(f.title_color || '')) ? f.title_color : sp.text;
+  return `<section style="margin:20px 8px 20px;padding:0;${centerCss(f.center)}"><span style="color:${color};font-size:${size}px;font-family:${sp.font};line-height:${sp.lh};font-style:normal;font-weight:normal;"><strong>${esc(title)}</strong></span></section>`;
+}
+
 // 系列底部区块渲染器（type → HTML）。复用本模板的 imageSection，保持与正文同一字节口径
 // （满宽 100%，区别于 FBIF mp-blocks 的 661px）。图片字段走素材库 {{asset#id}}；解析失败/为空
-// → 不渲染（对齐旧 buildSeriesFooterElems 跳过空选的语义）。more_articles 渲染待 B6 接入。
+// → 不渲染（对齐旧 buildSeriesFooterElems 跳过空选的语义）。more_articles 输出现有复制链路
+// 识别的两个锚点，卡片仍由 more-articles.js 非阻塞合成（红线 #9）。
 function seriesBlockRenderers(sp, assetLibrary, scope) {
   const toUrl = (raw) => {
     const v = String(raw == null ? '' : raw).trim();
@@ -110,6 +125,14 @@ function seriesBlockRenderers(sp, assetLibrary, scope) {
       if (!url) return '';
       const w = Number(f.width) || 0;
       return imageSection(url, true, sp, { width: w > 0 ? w + 'px' : '100%' });
+    },
+    more_articles: (f) => {
+      const parts = ['<section data-role="paragraph">'];
+      const title = moreArticlesTitle(f, sp);
+      if (title) parts.push(title);
+      parts.push(MORE_CARDS_WRAPPER_OPEN + '</section>');
+      parts.push('</section>');
+      return parts.join('\n');
     },
   };
 }

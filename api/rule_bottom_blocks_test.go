@@ -97,11 +97,11 @@ func TestValidateBottomBlocksRejectsBad(t *testing.T) {
 	}
 }
 
-// name_card 图片字段接受素材库占位符（{{asset:...}}）与站内路径，合法 number 通过。
+// name_card 图片字段接受素材库占位符（{{asset#id}}）与站内路径，合法 number 通过。
 func TestValidateBottomBlocksAcceptsValid(t *testing.T) {
 	ok := map[string]any{"blocks": map[string]any{
 		"c": map[string]any{"type": "name_card", "fields": map[string]any{
-			"image":      "{{asset:ft_footer_logo}}",
+			"image":      "{{asset#ft_footer_logo}}",
 			"intro_size": float64(16),
 			"intro_text": "联系 Eileen",
 		}},

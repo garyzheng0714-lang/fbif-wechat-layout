@@ -13,19 +13,19 @@ export const FOOTER_SEGMENTS_DEFAULT = {
     '<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*资讯投稿与商务合作，请查看&ldquo;<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/news/30752" target="_blank" rel="noopener">FoodTalks商务合作方案</a>&rdquo;，并联系Bobo。</span></em></p>',
   ] },
   join_group: { html_lines: [
-    '<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="{{asset:banner}}" alt="" width="600" /></p>',
+    '<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="{{asset#ft_footer_banner}}" alt="" width="600" /></p>',
     '<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>',
     '<p><br /></p>',
-    '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="{{asset:qr_group}}" alt="00" width="600" height="267" /></p>',
+    '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="{{asset#ft_footer_group_qr}}" alt="00" width="600" height="267" /></p>',
     '<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。</span></em></p>',
   ] },
   follow_account: { html_lines: [
     '<p style="color: #01396a; font-size: 20px;"><strong>关注公众号</strong></p>',
     '<p><br /></p>',
-    '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="{{asset:qr_account}}" alt="" width="600" height="221" /></p>',
+    '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="{{asset#ft_footer_account_qr}}" alt="" width="600" height="221" /></p>',
   ] },
   logo: { html_lines: [
-    '<p><img style="max-width: 100%; height: 27px; width: 126px;" src="{{asset:logo}}" alt="FoodTalks logo" width="130" height="27" border="0" /></p>',
+    '<p><img style="max-width: 100%; height: 27px; width: 126px;" src="{{asset#ft_footer_logo}}" alt="FoodTalks logo" width="130" height="27" border="0" /></p>',
   ] },
   more_info: { html_lines: [
     '<p>点击获取更多<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/" target="_blank" rel="noopener">全球食品资讯</a></p>',

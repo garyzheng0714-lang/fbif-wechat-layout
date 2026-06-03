@@ -259,6 +259,13 @@
   color: var(--fs-brand, #1456F0);
   box-shadow: var(--fs-sh-s1, 0 1px 3px rgba(31,35,39,0.04), 0 1px 2px rgba(31,35,39,0.03));
 }
+.admin-bottom-stack {
+  display: grid;
+  gap: 14px;
+}
+.admin-bottom-stack h3:not(:first-child) {
+  margin-top: 10px;
+}
 .admin-rule-ok {
   margin-bottom: 14px;
   padding: 9px 10px;
@@ -411,6 +418,19 @@
   min-height: 18px;
   font-size: 12px; color: var(--fs-text-2, #646A73);
   line-height: 1.4;
+}
+.admin-dirty-chip {
+  flex: 0 0 auto;
+  border-radius: var(--fs-r-full, 9999px);
+  padding: 4px 9px;
+  background: var(--fs-bg-sunken, #F2F3F5);
+  color: var(--fs-text-3, #8F959E);
+  font-size: 12px;
+  font-weight: 700;
+}
+.admin-dirty-chip.dirty {
+  background: rgba(255,136,0,0.08);
+  color: var(--fs-warning, #FF8800);
 }
 .admin-primary,
 .admin-secondary {

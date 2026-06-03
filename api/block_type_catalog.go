@@ -60,7 +60,7 @@ func intp(n int) *int { return &n }
 
 // blockTypeCatalog 是底部区块类型的单一真相源。
 // 语义化多类型（用户裁定 2026-06-03）：从各账号真实底部结构抽共性，做成少数通用可配置类型，
-// 每账号靠字段值 + 显隐 + 排序组合出自己的底部。图片字段一律走素材库（{{asset:id}}）。
+// 每账号靠字段值 + 显隐 + 排序组合出自己的底部。图片字段一律走素材库（{{asset#id}}）。
 // 新增类型 = 在此加一条 + 跑 npm run gen:blocks（+ 在各渠道渲染器补 type→html_lines），启动校验兜底。
 func blockTypeCatalog() []blockType {
 	return []blockType{

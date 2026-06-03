@@ -120,7 +120,7 @@ test('rule admin has configuration and rule-management views', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
 
-  assert.match(app, /rulePacks:\s*rulePackModule\.getRulePacksByChannel\(['"]mp['"]\)/);
+  assert.match(app, /rulePacks:\s*rulePackModule\.listRulePacks\(\)/);
   assert.match(adminPanel, /activeView = 'assignments'/);
   assert.match(adminPanel, /data-view="assignments"/);
   assert.match(adminPanel, /data-view="rules"/);
@@ -198,8 +198,9 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   assert.match(adminPanel, /isFtDefaultPack\(\)/);
   assert.match(adminPanel, /templateId.*foodtalks-site|foodtalks-site.*templateId/);
 
-  // 页脚库 Tab 仅对 ft-default 系追加
-  assert.match(adminPanel, /isFtDefaultPack\(\).*tabs\.push.*\['footer', '页脚库'\]|tabs\.push.*\['footer', '页脚库'\].*isFtDefaultPack/s);
+  // 网站页脚库收敛到统一「底部」分区里，仅对 ft-default 系展示
+  assert.match(adminPanel, /\['bottom', '底部'\]/);
+  assert.match(adminPanel, /isFtDefaultPack\(\) \? '<h3>网站页脚库<\/h3><div data-role="footer-library-editor"><\/div>'/);
 
   // workingFooter 变量声明
   assert.match(adminPanel, /let workingFooter\s*=/);
@@ -228,4 +229,20 @@ test('rule admin has footer-library tab and workingFooter save injection', async
 
   // 行数守护
   assert.ok(adminPanel.split('\n').length <= 900, `admin-panel.js 超过 900 行`);
+});
+
+test('rule admin bottom section combines assets, bottom blocks, and dirty status', async () => {
+  const adminPanel = await readProjectFile('public/js/admin-panel.js');
+  const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
+
+  assert.match(adminPanel, /\['bottom', '底部'\]/);
+  assert.match(adminPanel, /admin-bottom-stack/);
+  assert.match(adminPanel, /data-role="asset-library-editor"/);
+  assert.match(adminPanel, /data-role="block-editor"/);
+  assert.doesNotMatch(adminPanel, /\['assets', '素材库'\]/);
+  assert.doesNotMatch(adminPanel, /\['blocks', '底部区块'\]/);
+  assert.match(adminPanel, /data-role="dirty-chip"/);
+  assert.match(adminPanel, /adminDirtyCount/);
+  assert.match(css, /\.admin-bottom-stack/);
+  assert.match(css, /\.admin-dirty-chip/);
 });

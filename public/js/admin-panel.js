@@ -30,6 +30,7 @@ import { bottomBlocksFromPreset, createBlockEditorBinder } from './admin-block-d
 import { createBehaviorFormBinder } from './admin-behavior-data.js';
 import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
+import { adminDirtyCount, updateDirtyChip } from './admin-dirty-state.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 
 const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
@@ -151,8 +152,8 @@ export function initAdminPanel(options = {}) {
   let workingBehavior = normalizeRuleBehavior(getBehavior());
   let workingFooter = null;
   let workingAssets = null;
-  let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp'), getScope: () => currentAccountID(), getAssetLibrary: () => workingAssets || defaultAssetLibraryData() });
-  const behaviorBinder = createBehaviorFormBinder({ getBehavior: () => workingBehavior, setBehavior: (b) => { workingBehavior = b; syncBehaviorText(); const ta = overlay && overlay.querySelector('[data-role="behavior-json"]'); if (ta) ta.value = behaviorText; } });
+  let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; updateStatusInline('有未保存改动，点击「保存修改」后生效'); }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp'), getScope: () => currentAccountID(), getAssetLibrary: () => workingAssets || defaultAssetLibraryData() });
+  const behaviorBinder = createBehaviorFormBinder({ getBehavior: () => workingBehavior, setBehavior: (b) => { workingBehavior = b; syncBehaviorText(); const ta = overlay && overlay.querySelector('[data-role="behavior-json"]'); if (ta) ta.value = behaviorText; updateStatusInline('有未保存改动，点击「保存修改」后生效'); } });
   let footerEditorInstance = null, assetEditorInstance = null;
   let workingName = '未命名规则';
   let workingDescription = '';
@@ -303,8 +304,7 @@ export function initAdminPanel(options = {}) {
   }
 
   function renderRuleTabs() {
-    const tabs = [['params', '参数'], ['assets', '素材库'], ['blocks', '底部区块'], ['behavior', '代码化规则'], ['validation', '校验预览']];
-    if (isFtDefaultPack()) tabs.push(['footer', '页脚库']);
+    const tabs = [['params', '参数'], ['bottom', '底部'], ['behavior', '代码化规则'], ['validation', '校验预览']];
     return `
       <div class="admin-rule-tabs" role="tablist" aria-label="规则编辑分区">
         ${tabs.map(([id, label]) => `
@@ -319,6 +319,9 @@ export function initAdminPanel(options = {}) {
       activePresetFromDoc(doc) ||
       getPreset();
   }
+
+  function dirtyCount() { return adminDirtyCount({ draftPreset, selectedID, selected: selectedPreset(), workingName, workingDescription, workingConfig, workingBehavior, workingAssets, workingBottomBlocks, workingFooter, isFtDefault: isFtDefaultPack() }); }
+  function refreshDirtyChip() { updateDirtyChip(overlay, dirtyCount()); }
 
   function presetWithBehavior(preset) {
     if (!preset) return { behavior: workingBehavior };
@@ -352,7 +355,8 @@ export function initAdminPanel(options = {}) {
   function updateStatusInline(text) {
     status = text || '';
     const el = overlay && overlay.querySelector('.admin-foot .admin-status');
-    if (el) el.textContent = status; }
+    if (el) el.textContent = status;
+    refreshDirtyChip(); }
   function refreshVisualEditorFromConfig() {
     syncRuleVisualEditor({ overlay, schema: RULE_SCHEMA, config: workingConfig, name: workingName, description: workingDescription, fieldValue });
     bindMoreArticlesRuleEditor(); refreshWarnings();
@@ -470,13 +474,9 @@ export function initAdminPanel(options = {}) {
   }
 
   function renderRuleTabContent() {
-    if (activeRuleTab === 'footer') {
-      return `<section class="admin-rule-group"><div data-role="footer-library-editor"></div></section>`;
+    if (activeRuleTab === 'bottom') {
+      return `<section class="admin-rule-group admin-bottom-stack"><h3>素材库</h3><div data-role="asset-library-editor"></div><h3>底部区块默认</h3><div data-role="block-editor"></div>${isFtDefaultPack() ? '<h3>网站页脚库</h3><div data-role="footer-library-editor"></div>' : ''}</section>`;
     }
-    if (activeRuleTab === 'assets') {
-      return `<section class="admin-rule-group"><div data-role="asset-library-editor"></div></section>`;
-    }
-    if (activeRuleTab === 'blocks') return `<section class="admin-rule-group"><div data-role="block-editor"></div></section>`;
     if (activeRuleTab === 'behavior') {
       return `<section class="admin-rule-group admin-json-panel"><div data-role="behavior-editor"></div>
         <details class="admin-adv"><summary>高级 · 原始 JSON（条件/动作在此编辑）</summary>
@@ -573,6 +573,7 @@ export function initAdminPanel(options = {}) {
         </div>
         <div class="admin-foot">
           <div class="admin-status">${esc(status)}</div>
+          <span class="admin-dirty-chip ${dirtyCount() ? 'dirty' : ''}" data-role="dirty-chip">${dirtyCount() ? dirtyCount() + ' 项未保存' : '无未保存改动'}</span>
         </div>
       </div>`;
     bindMain();
@@ -584,7 +585,7 @@ export function initAdminPanel(options = {}) {
     jsonDirty = false;
     applyConfig(workingConfig, presetWithBehavior(selected));
     refreshWarnings();
-    syncJSONEditorFromInputs();
+    syncJSONEditorFromInputs(); updateStatusInline('有未保存改动，点击「保存修改」后生效');
   }
 
   function bindMoreArticlesRuleEditor() {
@@ -598,7 +599,7 @@ export function initAdminPanel(options = {}) {
         jsonDirty = false;
         applyConfig(workingConfig, selected);
         refreshWarnings();
-        syncJSONEditorFromInputs();
+        syncJSONEditorFromInputs(); updateStatusInline('有未保存改动，点击「保存修改」后生效');
       },
     });
     mount.replaceChildren(editor);
@@ -612,7 +613,7 @@ export function initAdminPanel(options = {}) {
       container: mount,
       footerData: workingFooter || defaultFooterData(),
       assetLibrary: workingAssets || defaultAssetLibraryData(),
-      onChange(next) { workingFooter = next; },
+      onChange(next) { workingFooter = next; updateStatusInline('有未保存改动，点击「保存修改」后生效'); },
     });
   }
 
@@ -620,7 +621,7 @@ export function initAdminPanel(options = {}) {
     const mount = overlay && overlay.querySelector('[data-role="asset-library-editor"]');
     if (!mount) return;
     if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
-    assetEditorInstance = createAssetLibraryEditor({ container: mount, assetLibrary: workingAssets || defaultAssetLibraryData(), onChange(next) { workingAssets = next; } });
+    assetEditorInstance = createAssetLibraryEditor({ container: mount, assetLibrary: workingAssets || defaultAssetLibraryData(), referencePresets: (doc && doc.presets) || [], currentScope: currentAccountID(), onChange(next) { workingAssets = next; updateStatusInline('有未保存改动，点击「保存修改」后生效'); } });
   }
 
   function bindMain() {
@@ -684,12 +685,12 @@ export function initAdminPanel(options = {}) {
     overlay.querySelector('[data-role="preset-name"]').addEventListener('input', e => {
       workingName = e.target.value;
       jsonDirty = false;
-      syncJSONEditorFromInputs();
+      syncJSONEditorFromInputs(); updateStatusInline('有未保存改动，点击「保存修改」后生效');
     });
     overlay.querySelector('[data-role="preset-description"]').addEventListener('input', e => {
       workingDescription = e.target.value;
       jsonDirty = false;
-      syncJSONEditorFromInputs();
+      syncJSONEditorFromInputs(); updateStatusInline('有未保存改动，点击「保存修改」后生效');
     });
     const ruleJSON = overlay.querySelector('[data-role="rule-json"]');
     if (ruleJSON) ruleJSON.addEventListener('input', e => {
@@ -707,7 +708,7 @@ export function initAdminPanel(options = {}) {
     const behaviorJSON = overlay.querySelector('[data-role="behavior-json"]');
     if (behaviorJSON) behaviorJSON.addEventListener('input', e => {
       behaviorText = e.target.value;
-      behaviorDirty = true;
+      behaviorDirty = true; updateStatusInline('有未保存改动，点击「保存修改」后生效');
     });
     const validateJSONBtn = overlay.querySelector('[data-action="validate-json"]');
     if (validateJSONBtn) validateJSONBtn.addEventListener('click', () => {

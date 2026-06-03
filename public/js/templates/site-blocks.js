@@ -39,7 +39,7 @@ function siteText(text, size, color) {
 }
 
 // siteBlockRenderers 返回网站渠道的「type → 渲染函数」表。
-//   assetLibrary: config.modules.asset_library（用于解析 {{asset:…}} 占位符）
+//   assetLibrary: config.modules.asset_library（用于解析 {{asset#id}} 占位符，兼容旧 {{asset:usage}}）
 //   scope: 资产作用域，网站默认 'ft-default'
 export function siteBlockRenderers(assetLibrary, scope = 'ft-default') {
   const resolve = (lines) => resolveAssetRefs(lines, assetLibrary, scope).join('\n');

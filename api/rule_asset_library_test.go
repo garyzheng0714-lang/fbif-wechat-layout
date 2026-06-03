@@ -87,7 +87,7 @@ func TestAssetLibraryRejectsUnsafeOrAmbiguousAssets(t *testing.T) {
 	}
 }
 
-// 意图：页脚迁移为 {{asset:usage}} 引用后，默认 html_lines 不再内联 CDN URL；
+// 意图：页脚迁移为 {{asset#id}} 引用后，默认 html_lines 不再内联 CDN URL；
 // 保真由前端 resolveAssetRefs 在渲染期恢复。
 func TestDefaultFooterUsesAssetReferences(t *testing.T) {
 	footer := defaultFBIFFooterModule()
@@ -97,7 +97,7 @@ func TestDefaultFooterUsesAssetReferences(t *testing.T) {
 	foundQR := false
 	for _, line := range lines {
 		s := line.(string)
-		if s == `<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefUsage("qr_group")+`" alt="00" width="600" height="267" /></p>` {
+		if s == `<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefID("ft_footer_group_qr")+`" alt="00" width="600" height="267" /></p>` {
 			foundQR = true
 		}
 		if strings.Contains(s, ftFooterGroupQR) {
@@ -105,6 +105,6 @@ func TestDefaultFooterUsesAssetReferences(t *testing.T) {
 		}
 	}
 	if !foundQR {
-		t.Fatal("默认页脚应通过 {{asset:qr_group}} 引用加群二维码")
+		t.Fatal("默认页脚应通过 {{asset#ft_footer_group_qr}} 引用加群二维码")
 	}
 }

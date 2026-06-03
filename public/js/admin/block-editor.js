@@ -19,6 +19,28 @@ function uid(type, existing) {
   while (existing[id]) { id = type + '_' + (++i); }
   return id;
 }
+function assetsOf(lib) {
+  if (Array.isArray(lib)) return lib;
+  if (isObj(lib) && Array.isArray(lib.assets)) return lib.assets;
+  return [];
+}
+function assetIDFromRef(value) {
+  const m = /^\{\{asset#([a-z0-9_-]+)\}\}$/i.exec(String(value == null ? '' : value).trim());
+  return m ? m[1] : '';
+}
+function blockDisplayLabel(block, type, assetLibrary, scope) {
+  const f = isObj(block && block.fields) ? block.fields : {};
+  const title = typeof f.title === 'string' ? f.title.replace(/^[\s/]+|[\s/]+$/g, '').trim() : '';
+  if (title) return title;
+  const intro = String(f.intro_text || f.caption || '').trim();
+  if (intro) return intro;
+  const id = assetIDFromRef(f.image);
+  for (const asset of assetsOf(assetLibrary)) {
+    const assetScope = asset && (asset.scope || 'global');
+    if (asset && asset.id === id && (assetScope === 'global' || assetScope === scope)) return String(asset.label || '').trim();
+  }
+  return (type && type.label) || (block && block.type) || '';
+}
 
 const STYLE_ID = 'be-style';
 function ensureStyle(doc) {
@@ -205,7 +227,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
       const en = doc.createElement('input'); en.type = 'checkbox'; en.checked = block.enabled !== false; en.title = '默认是否启用';
       en.onchange = () => setBlockEnabled(id, en.checked);
       const name = doc.createElement('span'); name.className = 'be-name';
-      name.innerHTML = esc(type.label) + `<span class="be-type">${esc(block.type)} · ${esc(id)}</span>`;
+      name.innerHTML = esc(blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, getScope ? getScope() : '')) + `<span class="be-type">${esc(block.type)} · ${esc(id)}</span>`;
       const open = expanded.has(id);
       const caret = doc.createElement('span'); caret.className = 'be-caret'; caret.textContent = open ? '▾' : '▸';
       const toggle = () => { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); render(); };

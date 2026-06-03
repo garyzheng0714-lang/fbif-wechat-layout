@@ -17,8 +17,8 @@ const (
 
 var assetLibraryID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-func assetRefUsage(usage string) string {
-	return "{{asset:" + usage + "}}"
+func assetRefID(id string) string {
+	return "{{asset#" + id + "}}"
 }
 
 func assetLibraryImage(id, usage, label, url, scope string, width, height int, tags ...any) map[string]any {
