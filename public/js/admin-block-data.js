@@ -19,7 +19,7 @@ export function createBlockEditorBinder(deps) {
       const mount = overlay && overlay.querySelector('[data-role="block-editor"]');
       if (!mount) return;
       if (instance) { instance.destroy(); instance = null; }
-      instance = createBlockEditor({ container: mount, module: deps.getModule(), channel: deps.getChannel(), onChange: deps.setModule });
+      instance = createBlockEditor({ container: mount, module: deps.getModule(), channel: deps.getChannel(), getAssetLibrary: deps.getAssetLibrary, onChange: deps.setModule });
     },
     destroy() { if (instance) { instance.destroy(); instance = null; } },
   };

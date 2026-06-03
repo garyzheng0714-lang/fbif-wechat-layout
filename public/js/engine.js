@@ -155,8 +155,20 @@ function stockFooterReady() {
   }
   return _stockFooterCache.get(url);
 }
+// 当前渠道模板（initApp/switchTemplate 设置）。footer 链路据此调用模板的 renderBottomFooter()——
+// engine 渠道共用、不可 import 公众号渲染器，故通过模板回调接管底部渲染（红线 #19）。
+let _activeTemplate = null;
+
 async function loadBaseFooterHtml() {
-  return localStorage.getItem('custom_footer') || await stockFooterReady();
+  const custom = localStorage.getItem('custom_footer');
+  if (custom) return custom;
+  // 公众号 bottom_blocks 启用时，整段底部由区块渲染（替代 footer.html）。
+  // 返回 null/'' → 模块未接管，fallback 到 footerUrl(footer.html)。
+  if (_activeTemplate && typeof _activeTemplate.renderBottomFooter === 'function') {
+    const html = _activeTemplate.renderBottomFooter();
+    if (html != null && html !== '') return html;
+  }
+  return await stockFooterReady();
 }
 
 // Module-level flag: true when the current article was fetched from a URL
@@ -257,6 +269,7 @@ async function buildFooterWithMoreArticles(baseFooterHtml) {
 // ---- App Initialization ----
 export function initApp(initialTemplate) {
   let template = initialTemplate;
+  _activeTemplate = initialTemplate;
   function applyTemplateShell(nextTemplate) {
     document.getElementById('pageTitle').textContent = nextTemplate.name;
     document.getElementById('pageSubtitle').textContent = nextTemplate.description;
@@ -486,6 +499,7 @@ export function initApp(initialTemplate) {
   window._engineSwitchTemplate = async function(nextTemplate, options = {}) {
     if (!nextTemplate) return false;
     template = nextTemplate;
+    _activeTemplate = nextTemplate;
     applyTemplateShell(template);
     if (options.rerender !== false) await _engineRerender();
     return true;

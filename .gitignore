@@ -8,6 +8,7 @@ api/data/
 *.db
 .gstack/
 .worktrees/
+.codegraph/
 docx/
 # docs/ 整体忽略，但放行工程技能配置文档（issue-tracker / triage-labels / domain）。
 # gitignore 规则：父目录被排除时子目录例外不生效，故先放行 docs/ 本身再排除其内容。

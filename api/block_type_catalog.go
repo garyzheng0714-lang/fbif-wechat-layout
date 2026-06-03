@@ -59,9 +59,9 @@ type blockType struct {
 func intp(n int) *int { return &n }
 
 // blockTypeCatalog 是底部区块类型的单一真相源。
-// P1 初始三类，覆盖三种原型：原始 HTML（rich_html，历史段无损迁移目标）、
-// 字段化区块（name_card，用户旗舰示例）、委托渲染（more_articles，委托 more-articles.js）。
-// 后续阶段按需增补 qr_card / link_text / image / tip 等（仅需在此加条目 + 渠道渲染器）。
+// 语义化多类型（用户裁定 2026-06-03）：从各账号真实底部结构抽共性，做成少数通用可配置类型，
+// 每账号靠字段值 + 显隐 + 排序组合出自己的底部。图片字段一律走素材库（{{asset:id}}）。
+// 新增类型 = 在此加一条 + 跑 npm run gen:blocks（+ 在各渠道渲染器补 type→html_lines），启动校验兜底。
 func blockTypeCatalog() []blockType {
 	return []blockType{
 		{
@@ -74,23 +74,74 @@ func blockTypeCatalog() []blockType {
 			},
 		},
 		{
+			Type:     "declaration",
+			Label:    "声明/提示",
+			Channels: []string{"mp", "ft"},
+			Note:     "声明区块：一行标题（如「提示：」）+ 若干条目行（html_lines，可含转载替换锚点）。FBIF 提示段即此型。",
+			Fields: []blockField{
+				{Key: "title", Label: "标题", Type: "text", Default: "提示：", Tooltip: "声明标题，可留空。"},
+				{Key: "lines", Label: "条目", Type: "html_lines", Default: []any{}, Tooltip: "每行一条声明 HTML；可含 <!--REPOST_*--> 转载替换锚点。"},
+			},
+		},
+		{
 			Type:     "name_card",
 			Label:    "名片",
 			Channels: []string{"mp", "ft"},
-			Note:     "字段化名片：上方一行说明文字（可改文案/字号/颜色）+ 名片图。",
+			Note:     "字段化名片：上方一行说明文字（可留空，可改文案/字号/颜色）+ 名片图（素材库）。覆盖 FBIF 波波名片、系列作者/BD 名片。",
 			Fields: []blockField{
-				{Key: "intro_text", Label: "上方文字", Type: "text", Default: "找谁谁谁", Tooltip: "名片上方显示的一行说明文字。"},
+				{Key: "intro_text", Label: "上方文字", Type: "text", Default: "", Tooltip: "名片上方一行说明文字，可留空。"},
 				{Key: "intro_size", Label: "文字字号", Type: "number", Default: 14, Min: intp(12), Max: intp(28), Tooltip: "上方文字字号（纯数字，无需单位）。"},
 				{Key: "intro_color", Label: "文字颜色", Type: "color", Default: "#888888", Tooltip: "上方文字颜色。"},
 				{Key: "image", Label: "名片图", Type: "image", Default: "", Tooltip: "从素材库选择名片图片。"},
 			},
 		},
 		{
+			Type:     "qr_card",
+			Label:    "二维码卡",
+			Channels: []string{"mp", "ft"},
+			Note:     "二维码/图片卡：一行说明文字（可留空）+ 二维码图（素材库）。覆盖系列群二维码、关注公众号。",
+			Fields: []blockField{
+				{Key: "caption", Label: "说明文字", Type: "text", Default: "", Tooltip: "二维码上方说明，可留空。"},
+				{Key: "caption_size", Label: "说明字号", Type: "number", Default: 14, Min: intp(12), Max: intp(28), Tooltip: "说明文字字号。"},
+				{Key: "caption_color", Label: "说明颜色", Type: "color", Default: "#888888", Tooltip: "说明文字颜色。"},
+				{Key: "image", Label: "二维码图", Type: "image", Default: "", Tooltip: "从素材库选择二维码图片。"},
+			},
+		},
+		{
+			Type:     "titled_media",
+			Label:    "标题+图片",
+			Channels: []string{"mp", "ft"},
+			Note:     "栏目标题（如「/ 1000个食品创新案例 /」，可改文字/字号/颜色/居中）+ 一张引流图（素材库）。",
+			Fields: []blockField{
+				{Key: "title", Label: "标题文字", Type: "text", Default: "", Tooltip: "栏目标题，如 / 更多文章 /；可留空。"},
+				{Key: "title_size", Label: "标题字号", Type: "number", Default: 17, Min: intp(12), Max: intp(28), Tooltip: "标题字号。"},
+				{Key: "title_color", Label: "标题颜色", Type: "color", Default: "#544545", Tooltip: "标题颜色。"},
+				{Key: "center", Label: "标题居中", Type: "switch", Default: true, Tooltip: "标题是否居中。"},
+				{Key: "image", Label: "图片", Type: "image", Default: "", Tooltip: "从素材库选择图片。"},
+			},
+		},
+		{
 			Type:     "more_articles",
 			Label:    "更多文章",
 			Channels: []string{"mp"},
-			Note:     "委托现有 more-articles.js 渲染推荐卡片；卡片在「更多文章」编辑器/侧栏管理，本区块只控制是否启用与排序。",
-			Fields:   []blockField{},
+			Note:     "栏目标题（如「/ 更多文章 /」，可改文字/字号/颜色/居中）+ 委托现有 more-articles.js 渲染推荐卡片；卡片在「更多文章」编辑器/侧栏管理。",
+			Fields: []blockField{
+				{Key: "title", Label: "标题文字", Type: "text", Default: "/ 更多文章 /", Tooltip: "栏目标题。"},
+				{Key: "title_size", Label: "标题字号", Type: "number", Default: 17, Min: intp(12), Max: intp(28), Tooltip: "标题字号。"},
+				{Key: "title_color", Label: "标题颜色", Type: "color", Default: "#544545", Tooltip: "标题颜色。"},
+				{Key: "center", Label: "标题居中", Type: "switch", Default: true, Tooltip: "标题是否居中。"},
+			},
+		},
+		{
+			Type:     "image",
+			Label:    "图片",
+			Channels: []string{"mp", "ft"},
+			Note:     "单张图片（素材库），可设宽度/居中。覆盖 FoodTalks logo 等纯图区块。",
+			Fields: []blockField{
+				{Key: "image", Label: "图片", Type: "image", Default: "", Tooltip: "从素材库选择图片。"},
+				{Key: "width", Label: "宽度", Type: "number", Default: 0, Min: intp(0), Max: intp(1080), Tooltip: "图片宽度（px，0=自适应满宽）。"},
+				{Key: "center", Label: "居中", Type: "switch", Default: true, Tooltip: "是否居中。"},
+			},
 		},
 	}
 }

@@ -51,7 +51,8 @@ func defaultRuleConfig() map[string]any {
 		"banner_title_max_lines":   "2",
 		"modules": map[string]any{
 			"asset_library": defaultAssetLibraryModule(),
-			// 公众号底部追加式区块（默认整体关 = 对现有输出零改动）；预置禁用 name_card 作运营起点。
+			// 公众号(FBIF)底部区块：由 footer.html 4 块逆向、enabled=true，经 template.renderBottomFooter
+			// 接管底部渲染（见 defaultMpBottomBlocksModule）。复用此基线的账号若不要 FBIF 底部需显式覆盖。
 			"bottom_blocks": defaultMpBottomBlocksModule(),
 		},
 	}
@@ -190,6 +191,12 @@ func defaultWowFoodRuleConfig() map[string]any {
 	cfg["more_articles_enabled"] = false
 	cfg["more_articles_default_cards"] = []any{}
 	cfg["footer_enabled"] = false
+	// 关掉继承自 FBIF 基线的 bottom_blocks：WowFood 复用 templateId=fbif，其 renderBottomFooter
+	// 会读 bottom_blocks；不清空则 WowFood 文末会错渲 FBIF 的提示/名片/更多文章/1000案例，且
+	// fbif-scope 素材在 wowfood-scope 解析为破图。清空 = 与 footerUrl='' 一致的「底部无内容」。
+	if mods, ok := cfg["modules"].(map[string]any); ok {
+		mods["bottom_blocks"] = map[string]any{"enabled": false, "order": []any{}, "blocks": map[string]any{}, "presets": []any{}}
+	}
 	return cfg
 }
 

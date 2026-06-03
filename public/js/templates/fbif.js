@@ -438,18 +438,8 @@ function render(elems, author, source, opts) {
     }
   }
 
-  // 追加式底部区块（参考来源/正文之后，footer.html 提示/更多文章之前）。
-  // 命门：getActiveRuleConfig() 经 normalizeRuleConfig 会丢 .modules，故读【原始】服务端模块
-  // （与网站 serverRuleModules 同源做法）；单篇覆盖由 app.html 写 window._bottomBlocksOverride。
-  // 默认 bottom_blocks 模块禁用 → 返回空串 → 对现有公众号输出零改动（golden 守卫）。
-  const mods = rawActiveModules();
-  const bb = mods.bottom_blocks;
-  if (bb && typeof bb === 'object') {
-    const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'fbif';
-    const ov = (typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined;
-    const bbHtml = renderBottomBlocksHtml(bb, ov, mpBlockRenderers(mods.asset_library, scope));
-    if (bbHtml) lines.push(bbHtml);
-  }
+  // 底部区块不再追加到正文末——改由 export default 的 renderBottomFooter() 作为整段页脚渲染，
+  // 经 engine footer 链路接管（替代 footer.html；更多文章卡片复制链路在其输出上委托工作）。
   return lines;
 }
 
@@ -577,5 +567,17 @@ export default {
     // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, source, title, imgN } = classifyBlocks(data);
     return { lines: render(elems, author, source, opts), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+  },
+
+  // 整段底部由统一区块模型渲染（替代 footer.html）。engine.loadBaseFooterHtml 接管时调用：
+  // 模块缺失/禁用返回 null → engine fallback 到 footerUrl(footer.html)。
+  // 红线 #19：mpBlockRenderers 只在公众号侧 import；engine 通过此回调拿结果、不直接依赖渲染器。
+  renderBottomFooter() {
+    const mods = rawActiveModules();
+    const bb = mods.bottom_blocks;
+    if (!bb || typeof bb !== 'object' || bb.enabled === false) return null;
+    const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'fbif';
+    const ov = (typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined;
+    return renderBottomBlocksHtml(bb, ov, mpBlockRenderers(mods.asset_library, scope));
   },
 };

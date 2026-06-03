@@ -34,6 +34,7 @@ func truthyRuleValue(v any) bool {
 //   - 每个页脚段 → 一个 rich_html 区块（html_lines 原样保留）；
 //   - segment_order → order（排除 tip——tip 在网站走正文流 buildSiteFooterTipElem，不属 buildFooterHtml 渲染范围）；
 //   - presets 的 segment 开关 → 区块 enabled 开关（同样排除 tip）。
+//
 // 同时作为运行时 fallback：旧规则只有 fbif_footer、缺 bottom_blocks 时现场迁移（spec §10）。
 func bottomBlocksFromFooterModule(footer map[string]any) map[string]any {
 	if footer == nil {
@@ -118,22 +119,52 @@ func defaultBottomBlocksModule() map[string]any {
 	return bottomBlocksFromFooterModule(defaultFBIFFooterModule())
 }
 
-// defaultMpBottomBlocksModule 是公众号渠道的追加式区块默认种子。
-// 模块默认关（enabled=false）→ 对现有公众号输出零改动（追加段整体不渲染）；
-// 预置一个禁用的 name_card 作为运营起点（在后台/前台开启并改字段即可用）。
+// defaultMpBottomBlocksModule 是公众号(FBIF)底部区块默认布局：由 footer.html 的 4 块逆向而来
+// （提示声明 declaration / 波波名片 name_card / 更多文章 more_articles / 1000案例 titled_media）。
+// 图字段引用素材库 {{asset#id}}。模块 enabled 暂为 false：待 engine footer 链路改由 bottom_blocks
+// engine footer 链路已通过 template.renderBottomFooter 接管（替代 footer.html）；
+// 渲染保真由 tests/mp-blocks-fidelity.test.mjs golden 守。
 func defaultMpBottomBlocksModule() map[string]any {
 	return map[string]any{
-		"enabled": false,
-		"order":   []any{"name_card"},
+		"enabled": true,
+		"order":   []any{"tip", "byline", "more_articles", "promo"},
 		"blocks": map[string]any{
-			"name_card": map[string]any{
-				"type":    "name_card",
-				"enabled": false,
+			"tip": map[string]any{
+				"type":    "declaration",
+				"enabled": true,
 				"fields": map[string]any{
-					"intro_text":  "找谁谁谁",
-					"intro_size":  14,
-					"intro_color": "#888888",
-					"image":       "",
+					"title": "提示：",
+					"lines": []any{
+						`<!--REPOST_BULLET1_START-->`,
+						`<p style="margin:0 8px;padding:0;"><span style="color:rgb(136, 136, 136);font-size:15px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;">* 本文为FBIF原创，欢迎转发朋友圈；</span></p>`,
+						`<!--REPOST_BULLET1_END--><!--REPOST_BULLET2_START-->`,
+						`<p style="margin:0 8px;padding:0;"><span style="color:rgb(136, 136, 136);font-size:15px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;">* 转载请在后台回复“转载”了解规则；</span></p>`,
+						`<!--REPOST_BULLET2_END-->`,
+						`<p style="margin:0 8px;padding:0;"><span style="color:rgb(136, 136, 136);font-size:15px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;">* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）</span></p>`,
+					},
+				},
+			},
+			"byline": map[string]any{
+				"type":    "name_card",
+				"enabled": true,
+				"fields": map[string]any{
+					"intro_text": "",
+					"image":      "{{asset#fbif_bobo_card}}",
+				},
+			},
+			"more_articles": map[string]any{
+				"type":    "more_articles",
+				"enabled": true,
+				"fields": map[string]any{
+					"title": "/ 更多文章 /",
+				},
+			},
+			"promo": map[string]any{
+				"type":    "titled_media",
+				"enabled": true,
+				"fields": map[string]any{
+					"title": "/ 1000个食品创新案例 /",
+					"image": "{{asset#fbif_promo_1000}}",
 				},
 			},
 		},

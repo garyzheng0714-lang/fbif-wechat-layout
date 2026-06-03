@@ -130,6 +130,19 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 	if v := wow["footer_enabled"]; v != false {
 		t.Fatalf("wowfood-default footer_enabled = %#v, want false（底部无排版规则）", v)
 	}
+	// 锁住 bottom_blocks 也关：WowFood 复用 templateId=fbif，其 renderBottomFooter 会直接渲染
+	// bottom_blocks；若继承 FBIF 基线的 enabled=true，WowFood 文末会错渲 FBIF 提示/名片/更多文章。
+	wowMods, ok := wow["modules"].(map[string]any)
+	if !ok {
+		t.Fatalf("wowfood-default modules missing")
+	}
+	wowBB, ok := wowMods["bottom_blocks"].(map[string]any)
+	if !ok {
+		t.Fatalf("wowfood-default modules.bottom_blocks missing")
+	}
+	if wowBB["enabled"] != false {
+		t.Fatalf("wowfood-default bottom_blocks.enabled = %#v, want false（否则错渲 FBIF 底部+破图）", wowBB["enabled"])
+	}
 	// 对照：FBIF 基线仍带 3 张默认卡，证明 WowFood 的空是显式覆盖、非全局退化。
 	if cards, ok := presetByID("default").Config["more_articles_default_cards"].([]any); !ok || len(cards) == 0 {
 		t.Fatalf("fbif default more_articles_default_cards 应保留默认卡（差异即意图），got %#v", presetByID("default").Config["more_articles_default_cards"])

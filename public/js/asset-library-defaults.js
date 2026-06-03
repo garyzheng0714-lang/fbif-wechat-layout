@@ -99,6 +99,10 @@ export const ASSET_LIBRARY_DEFAULT = {
       ['logo', '页脚'],
       { width: 130, height: 27 }
     ),
+    // FBIF 公众号底部素材（footer.html 内联 base64 提取为站内静态文件；复制时自动上传微信 CDN）。
+    // 不设 width/height：保留原 <img> 仅 style 控宽，避免补属性破坏字节级保真。
+    asset('fbif_bobo_card', 'avatar', 'FBIF 波波名片', '/assets/fbif/bobo-card.webp', 'fbif', ['FBIF', '名片']),
+    asset('fbif_promo_1000', 'decor', 'FBIF 1000个食品创新案例引流图', '/assets/fbif/promo-1000.webp', 'fbif', ['FBIF', '引流图']),
     ...SERIES_SECTION_ASSETS,
     ...SERIES_GROUP_ASSETS,
     ...SERIES_CARD_ASSETS,

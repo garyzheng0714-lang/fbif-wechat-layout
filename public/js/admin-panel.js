@@ -151,7 +151,7 @@ export function initAdminPanel(options = {}) {
   let workingBehavior = normalizeRuleBehavior(getBehavior());
   let workingFooter = null;
   let workingAssets = null;
-  let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp') });
+  let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp'), getAssetLibrary: () => workingAssets || defaultAssetLibraryData() });
   const behaviorBinder = createBehaviorFormBinder({ getBehavior: () => workingBehavior, setBehavior: (b) => { workingBehavior = b; syncBehaviorText(); const ta = overlay && overlay.querySelector('[data-role="behavior-json"]'); if (ta) ta.value = behaviorText; } });
   let footerEditorInstance = null, assetEditorInstance = null;
   let workingName = '未命名规则';

@@ -570,6 +570,7 @@ async function applyAccountCapabilityUI(pack) {
         mount: bbMount,
         accountId: pack.id,
         getModule: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks) || {},
+        getAssetLibrary: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.asset_library) || null,
         onChange: (ov) => { window._bottomBlocksOverride = ov; if (window._engineApi && typeof window._engineApi.rerender === 'function') window._engineApi.rerender(); },
       });
       if (inst) window._bottomBlocksOverride = inst.getOverride();

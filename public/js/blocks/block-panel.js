@@ -9,6 +9,7 @@
 
 import { resolveBlocks, hasAnyOverride } from './block-merge.js';
 import { getBlockType } from './block-registry.gen.js';
+import { openAssetPicker, resolveAssetThumb } from './asset-picker.js';
 
 function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
 function esc(s) {
@@ -59,6 +60,12 @@ function ensureStyle(doc) {
 .bp-color input[type=color]{width:34px;height:26px;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:0;background:none;cursor:pointer;}
 .bp-tip{color:var(--fs-text-3,#8f959e);font-size:11px;margin-top:3px;}
 .bp-empty{color:var(--fs-text-3,#8f959e);font-size:12px;padding:6px 2px;}
+.bp-image{display:flex;align-items:center;gap:10px;}
+.bp-image-preview{width:64px;height:48px;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--fs-bg-sunken,#f7f8fa);flex:none;}
+.bp-image-preview img{max-width:100%;max-height:100%;object-fit:contain;}
+.bp-image-empty{font-size:11px;color:var(--fs-text-3,#8f959e);}
+.bp-image-btn{border:1px solid var(--fs-border-control,#d9dce0);background:#fff;border-radius:var(--fs-r-xs,4px);padding:5px 10px;font-size:12px;cursor:pointer;color:var(--fs-text-1,#1f2329);}
+.bp-image-btn:hover{border-color:var(--fs-brand,#1456f0);color:var(--fs-brand,#1456f0);}
 `;
   (doc.head || doc.documentElement).appendChild(st);
 }
@@ -69,7 +76,7 @@ function ensureStyle(doc) {
 //   getModule: () => 后台默认 bottom_blocks 模块（原始服务端模块）
 //   onChange: (override) => void —— 宿主据此注入渲染并重渲
 //   initialOverride: 可选，外部已加载的覆盖（否则从 localStorage 读）
-export function mountBlockPanel({ mount, accountId, getModule, onChange, doc = document }) {
+export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, onChange, doc = document }) {
   if (!mount) return null;
   ensureStyle(doc);
   let override = loadOverride(accountId);
@@ -185,10 +192,26 @@ export function mountBlockPanel({ mount, accountId, getModule, onChange, doc = d
     } else if (field.type === 'switch') {
       ctrl = doc.createElement('input'); ctrl.type = 'checkbox'; ctrl.checked = !!val;
       ctrl.onchange = () => setField(id, key, ctrl.checked, ctrl.checked === !!def);
-    } else { // text | image
+    } else if (field.type === 'image') {
+      // 素材库选图（不再让用户手填 URL / {{asset}} 语法）：缩略图 + 「从素材库选择」按钮。
+      ctrl = doc.createElement('div'); ctrl.className = 'bp-image';
+      const lib = getAssetLibrary ? getAssetLibrary() : null;
+      const thumb = resolveAssetThumb(val, lib, accountId);
+      const preview = doc.createElement('div'); preview.className = 'bp-image-preview' + (thumb ? '' : ' bp-image-empty');
+      if (thumb) { const im = doc.createElement('img'); im.src = thumb; im.alt = ''; preview.appendChild(im); }
+      else { preview.textContent = '未选择'; }
+      const btn = doc.createElement('button'); btn.type = 'button'; btn.className = 'bp-image-btn';
+      btn.textContent = thumb ? '更换图片' : '从素材库选择';
+      btn.onclick = () => openAssetPicker({
+        assetLibrary: getAssetLibrary ? getAssetLibrary() : null,
+        scope: accountId, doc,
+        onPick: (assetId) => { const ref = '{{asset#' + assetId + '}}'; setField(id, key, ref, ref === def); },
+        onClear: () => setField(id, key, '', '' === def),
+      });
+      ctrl.appendChild(preview); ctrl.appendChild(btn);
+    } else { // text
       ctrl = doc.createElement('input'); ctrl.className = 'bp-input'; ctrl.type = 'text';
       ctrl.value = String(val == null ? '' : val);
-      if (field.type === 'image') ctrl.placeholder = '图片 URL 或 {{asset:用途}}';
       ctrl.oninput = () => setField(id, key, ctrl.value, ctrl.value === def);
     }
     wrap.appendChild(ctrl);

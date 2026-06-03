@@ -7,6 +7,7 @@
 // 中性：只 import 中性注册表，不 import 渠道渲染器（红线 #19）。
 
 import { getBlockType, blockTypesForChannel, defaultFieldsForType } from '../blocks/block-registry.gen.js';
+import { openAssetPicker, resolveAssetThumb } from '../blocks/asset-picker.js';
 
 function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
 function esc(s) {
@@ -62,7 +63,7 @@ function ensureStyle(doc) {
 //   channel: 'mp' | 'ft'（决定「新增区块」可选类型）
 //   onChange: (module) => void
 //   doc: 文档（测试可注入）
-export function createBlockEditor({ container, module, channel = 'mp', onChange, doc = document }) {
+export function createBlockEditor({ container, module, channel = 'mp', getAssetLibrary, onChange, doc = document }) {
   if (!container) return null;
   ensureStyle(doc);
   let mod = isObj(module) ? clone(module) : { enabled: false, order: [], blocks: {}, presets: [] };
@@ -134,10 +135,27 @@ export function createBlockEditor({ container, module, channel = 'mp', onChange,
     } else if (field.type === 'switch') {
       ctrl = doc.createElement('input'); ctrl.type = 'checkbox'; ctrl.checked = !!value;
       ctrl.onchange = () => setField(id, field.key, ctrl.checked);
+    } else if (field.type === 'image') {
+      // 后台素材库选图（对称前台，不让管理员手填 URL）。后台管理员视图列全部素材（scope=''）。
+      ctrl = doc.createElement('div');
+      ctrl.style.cssText = 'display:flex;align-items:center;gap:8px;';
+      const thumb = resolveAssetThumb(value, getAssetLibrary ? getAssetLibrary() : null, '');
+      const preview = doc.createElement('div');
+      preview.style.cssText = 'width:64px;height:48px;border:1px solid #d9dce0;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f7f8fa;flex:none;font-size:11px;color:#8f959e;';
+      if (thumb) { const im = doc.createElement('img'); im.src = thumb; im.alt = ''; im.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;'; preview.appendChild(im); }
+      else { preview.textContent = '未选择'; }
+      const btn = doc.createElement('button'); btn.type = 'button';
+      btn.style.cssText = 'border:1px solid #d9dce0;background:#fff;border-radius:4px;padding:5px 10px;font-size:12px;cursor:pointer;';
+      btn.textContent = thumb ? '更换图片' : '从素材库选择';
+      btn.onclick = () => openAssetPicker({
+        assetLibrary: getAssetLibrary ? getAssetLibrary() : null, scope: '', doc,
+        onPick: (assetId) => setField(id, field.key, '{{asset#' + assetId + '}}'),
+        onClear: () => setField(id, field.key, ''),
+      });
+      ctrl.appendChild(preview); ctrl.appendChild(btn);
     } else {
       ctrl = doc.createElement('input'); ctrl.className = 'be-input'; ctrl.type = 'text';
       ctrl.value = String(value == null ? '' : value);
-      if (field.type === 'image') ctrl.placeholder = '图片 URL 或 {{asset:用途}}';
       ctrl.oninput = () => setField(id, field.key, ctrl.value);
     }
     wrap.appendChild(ctrl);
