@@ -81,7 +81,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
   ensureStyle(doc);
   let override = loadOverride(accountId);
   const expanded = new Set();
-  let dragId = '';
+  let sortable = null;
 
   function emit() { saveOverride(accountId, override); if (onChange) onChange(override); }
   function ensureBlock(id) {
@@ -129,12 +129,15 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
   }
   function resetAll() { override = {}; emit(); render(); }
 
-  function reorder(fromId, toId, baseOrder) {
-    const cur = Array.isArray(override.order) && override.order.length ? override.order.slice() : baseOrder.slice();
-    const fi = cur.indexOf(fromId), ti = cur.indexOf(toId);
-    if (fi < 0 || ti < 0 || fi === ti) return;
-    cur.splice(ti, 0, cur.splice(fi, 1)[0]);
-    override.order = cur;
+  // SortableJS 拖完后回调：domIds 是拖拽后 DOM 里 .bp-card 的新顺序。
+  // 只接受合法 block id（过滤脏 id，再补回缺失项，避免 resolveBlocks 静默丢块 → 卡片“消失”），
+  // 与拖拽前的当前顺序一致（拖了又放回原位）时直接返回不落盘，否则存为单篇 order 覆盖。
+  function applyOrder(domIds, baseOrder) {
+    const valid = domIds.filter(id => baseOrder.includes(id));
+    for (const id of baseOrder) if (!valid.includes(id)) valid.push(id);
+    const same = valid.length === baseOrder.length && valid.every((id, i) => id === baseOrder[i]);
+    if (same) return;
+    override.order = valid;
     emit(); render();
   }
 
@@ -230,6 +233,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     const mod = getModule() || {};
     const resolved = resolveBlocks(mod, override);
     const baseOrder = resolved.blocks.map(b => b.id);
+    if (sortable) { try { sortable.destroy(); } catch {} sortable = null; }
     mount.innerHTML = '';
     const wrap = doc.createElement('div');
     wrap.className = 'bp-wrap';
@@ -260,11 +264,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       const type = getBlockType(block.type) || { label: block.type, fields: [] };
       const card = doc.createElement('div');
       card.className = 'bp-card' + (block.enabled ? '' : ' bp-disabled');
-      card.setAttribute('draggable', 'true');
       card.dataset.id = block.id;
-      card.addEventListener('dragstart', () => { dragId = block.id; });
-      card.addEventListener('dragover', (ev) => { ev.preventDefault(); });
-      card.addEventListener('drop', (ev) => { ev.preventDefault(); if (dragId && dragId !== block.id) reorder(dragId, block.id, baseOrder); dragId = ''; });
 
       const row = doc.createElement('div'); row.className = 'bp-row';
       const grip = doc.createElement('span'); grip.className = 'bp-grip'; grip.textContent = '⠿'; grip.title = '拖拽排序';
@@ -300,6 +300,21 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       wrap.appendChild(card);
     }
     mount.appendChild(wrap);
+
+    // 拖拽排序交给 SortableJS（grip 为唯一把手；只对 .bp-card 排序，head 不动）。
+    // 拖完一次性按 DOM 顺序回写 override.order 并重建——拖拽会话已结束，render() 销毁旧实例安全。
+    if (window.Sortable && resolved.blocks.length > 1) {
+      sortable = window.Sortable.create(wrap, {
+        handle: '.bp-grip',
+        draggable: '.bp-card',
+        animation: 150,
+        forceFallback: true,
+        onEnd: () => applyOrder(
+          Array.from(wrap.querySelectorAll('.bp-card')).map(c => c.dataset.id),
+          baseOrder
+        ),
+      });
+    }
   }
 
   // 默认展开规则：启用的块默认展开，未启用默认折叠；用户手动开合后以 expanded 记录为准。
@@ -313,5 +328,9 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
   return {
     getOverride: () => override,
     refresh: render,
+    destroy: () => {
+      if (sortable) { try { sortable.destroy(); } catch {} sortable = null; }
+      mount.innerHTML = '';
+    },
   };
 }

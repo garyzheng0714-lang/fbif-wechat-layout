@@ -6,6 +6,7 @@
 <title>FBIF 文章排版工具</title>
 <link rel="icon" type="image/png" href="/fbif-logo.png">
 <script src="/vendor/jszip.min.js"></script>
+<script src="/vendor/Sortable.min.js"></script>
 <link rel="stylesheet" href="/css/feishu-tokens.css">
 <link rel="stylesheet" href="/app.css">
 <link rel="stylesheet" href="/css/channel-bar.css">
@@ -566,15 +567,24 @@ async function applyAccountCapabilityUI(pack) {
   if (bbSec && bbMount) {
     if (bbMod && !isSeries) {
       bbSec.style.display = '';
-      const inst = mountBlockPanel({
-        mount: bbMount,
-        accountId: pack.id,
-        getModule: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks) || {},
-        getAssetLibrary: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.asset_library) || null,
-        onChange: (ov) => { window._bottomBlocksOverride = ov; if (window._engineApi && typeof window._engineApi.rerender === 'function') window._engineApi.rerender(); },
-      });
-      if (inst) window._bottomBlocksOverride = inst.getOverride();
+      // 幂等挂载：同账号已挂载则只 refresh，避免初始时序竞态下被调用两次而挂出双实例
+      // （双实例各持一份内存 override，互相打架 → “改了又被打回”）。换账号则销毁旧实例再挂新。
+      if (window._blockPanelInst && window._blockPanelAcct === pack.id) {
+        window._blockPanelInst.refresh();
+      } else {
+        if (window._blockPanelInst) { try { window._blockPanelInst.destroy(); } catch {} }
+        window._blockPanelInst = mountBlockPanel({
+          mount: bbMount,
+          accountId: pack.id,
+          getModule: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks) || {},
+          getAssetLibrary: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.asset_library) || null,
+          onChange: (ov) => { window._bottomBlocksOverride = ov; if (window._engineApi && typeof window._engineApi.rerender === 'function') window._engineApi.rerender(); },
+        });
+        window._blockPanelAcct = pack.id;
+      }
+      if (window._blockPanelInst) window._bottomBlocksOverride = window._blockPanelInst.getOverride();
     } else {
+      if (window._blockPanelInst) { try { window._blockPanelInst.destroy(); } catch {} window._blockPanelInst = null; window._blockPanelAcct = null; }
       bbSec.style.display = 'none';
       window._bottomBlocksOverride = undefined;
     }
@@ -689,7 +699,9 @@ async function loadTemplate(templateId, options = {}) {
 }
 
 await loadTemplate(currentTemplateId);
-await applyAccountCapabilityUI(activeRulePack);
+// 底部能力 UI（含 mountBlockPanel）只由 hydrateActiveRulePreset 在 /api/rules/active
+// 返回、window._activeConfig 就绪后单次触发（见 hydrate 内 applyAccountCapabilityUI）。
+// 此处不再抢跑——抢跑时 _activeConfig 未就绪会判空隐藏面板，并与 hydrate 重复挂载。
 
 // Cross-channel state restore — must come after initApp so engine.js has
 // wired up window._captureSessionSnapshot / _restoreSessionSnapshot.

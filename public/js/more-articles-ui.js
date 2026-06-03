@@ -107,29 +107,6 @@ async function urlToResizedDataUrl(rawUrl, maxEdge = 1600, quality = 0.85) {
   return canvas.toDataURL('image/jpeg', quality);
 }
 
-// FLIP (First-Last-Invert-Play): snapshot pre-mutation positions, run the
-// DOM mutation, then transition every moved sibling back from its old spot.
-// Used during drag-reorder so untouched cards slide into their new slots
-// instead of jumping.
-function flipReorder(container, mutator) {
-  const children = Array.from(container.querySelectorAll('.ma-card'));
-  const firstTops = new Map(children.map(el => [el, el.getBoundingClientRect().top]));
-  mutator();
-  children.forEach(el => {
-    if (el.classList.contains('dragging')) return;
-    const oldTop = firstTops.get(el);
-    const newTop = el.getBoundingClientRect().top;
-    const dy = oldTop - newTop;
-    if (!dy) return;
-    el.style.transition = 'none';
-    el.style.transform = `translateY(${dy}px)`;
-    requestAnimationFrame(() => {
-      el.style.transition = 'transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1)';
-      el.style.transform = '';
-    });
-  });
-}
-
 // Minimal modal for picking a cover image. Current-card media comes first; the
 // currently-rendered article's images stay as a fallback for legacy workflows.
 // Resolves to { type: 'url', url } or { type: 'file' } or null (closed).
@@ -193,10 +170,29 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
   if (!container) return;
 
   let cards = loadCards();
-  // During drag we mutate the DOM directly (for FLIP animation) without
-  // re-rendering; `draggedEl` tracks the live element being moved. The
-  // `cards` array is only re-synced from the DOM order on drop.
-  let draggedEl = null;
+  // 拖拽排序交给 SortableJS（见 renderAll 末尾 + commitDragOrder）；maSortable 持当前实例，重渲前销毁。
+  let maSortable = null;
+
+  // SortableJS 拖完一次性按 DOM 顺序回写 cards。每张卡片渲染时写死 dataset.idx，
+  // Sortable 只移动 DOM 不动 dataset，所以按当前 DOM 顺序映射回 cards[原idx] 即新顺序。
+  // 严格校验（无重复、无缺项、长度一致）后才落盘；异常则还原 DOM 且绝不 saveCards（显式失败）。
+  function commitDragOrder() {
+    const reordered = Array.from(container.querySelectorAll('.ma-card'))
+      .map(el => cards[Number(el.dataset.idx)]);
+    const wellFormed = reordered.length === cards.length
+      && reordered.every(c => c !== undefined)
+      && new Set(reordered).size === cards.length;
+    if (!wellFormed) {
+      console.warn('[more-articles] 拖拽顺序异常，已放弃本次重排并还原');
+      renderAll();
+      return;
+    }
+    const changed = reordered.some((c, i) => c !== cards[i]);
+    if (changed) {
+      cards = reordered;
+      persistAndRefresh();
+    }
+  }
 
   function pushLivePreview() {
     if (window._updateMoreArticles) {
@@ -236,9 +232,20 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       saveCards(cards);
       pushLivePreview();
     }
+    if (maSortable) { try { maSortable.destroy(); } catch {} maSortable = null; }
     container.innerHTML = '';
     cards.forEach((_, i) => container.appendChild(renderCardEditor(i)));
     container.appendChild(renderAddButton());
+    // 拖拽排序：grip 为唯一把手；只对 .ma-card 排序（“+ 添加”按钮不参与）。
+    if (window.Sortable && cards.length > 1) {
+      maSortable = window.Sortable.create(container, {
+        handle: '.ma-drag-handle',
+        draggable: '.ma-card',
+        animation: 150,
+        forceFallback: true,
+        onEnd: commitDragOrder,
+      });
+    }
   }
 
   function renderAddButton() {
@@ -254,7 +261,6 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     const state = cards[index];
     const root = document.createElement('div');
     root.className = 'ma-card';
-    root.draggable = true;
     root.dataset.idx = String(index);
     root.innerHTML = `
       <div class="ma-card-head">
@@ -470,54 +476,7 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       removeCard(index);
     });
 
-    // ---- Drag & drop reorder (FLIP) ----------------------------------------
-    // On every dragover we reorder the DOM in place (before/after based on
-    // pointer midpoint) and run FLIP so the displaced siblings slide to
-    // their new slots. We never re-render during drag. On drop we commit
-    // the final DOM order back into the `cards` array and then re-render
-    // once to refresh the #N labels.
-    root.addEventListener('dragstart', e => {
-      if (e.target && e.target.tagName === 'INPUT') { e.preventDefault(); return; }
-      draggedEl = root;
-      root.classList.add('dragging');
-      try {
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', 'reorder');
-      } catch {}
-    });
-    // Commit on dragend — it fires even when the user releases the mouse
-    // outside any valid dropzone (the "+ 添加" button, gaps between cards,
-    // the empty placeholder). drop-only silently dropped those orderings
-    // while the DOM already looked reordered, so the preview went stale.
-    root.addEventListener('dragend', () => {
-      root.classList.remove('dragging');
-      const orderIndexes = Array.from(container.querySelectorAll('.ma-card'))
-        .map(el => Number(el.dataset.idx))
-        .filter(n => Number.isFinite(n));
-      const reordered = orderIndexes.map(i => cards[i]);
-      const wellFormed = reordered.length === cards.length && reordered.every(c => c !== undefined);
-      const changed = wellFormed && reordered.some((c, i) => c !== cards[i]);
-      draggedEl = null;
-      if (changed) {
-        cards = reordered;
-        persistAndRefresh();
-      }
-    });
-    root.addEventListener('dragover', e => {
-      if (!draggedEl || draggedEl === root) return;
-      e.preventDefault();
-      try { e.dataTransfer.dropEffect = 'move'; } catch {}
-      const rect = root.getBoundingClientRect();
-      const goBefore = e.clientY < rect.top + rect.height / 2;
-      const target = goBefore ? root : root.nextSibling;
-      if (draggedEl === target || draggedEl.nextSibling === target) return;
-      flipReorder(container, () => {
-        container.insertBefore(draggedEl, target);
-      });
-    });
-    root.addEventListener('drop', e => {
-      e.preventDefault();
-    });
+    // 拖拽排序由容器级 SortableJS 统一处理（见 renderAll + commitDragOrder），卡片本身不再绑原生 DnD。
 
     refreshThumb();
     return root;

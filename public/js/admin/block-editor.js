@@ -63,7 +63,7 @@ function ensureStyle(doc) {
 //   channel: 'mp' | 'ft'（决定「新增区块」可选类型）
 //   onChange: (module) => void
 //   doc: 文档（测试可注入）
-export function createBlockEditor({ container, module, channel = 'mp', getAssetLibrary, onChange, doc = document }) {
+export function createBlockEditor({ container, module, channel = 'mp', getAssetLibrary, getScope, onChange, doc = document }) {
   if (!container) return null;
   ensureStyle(doc);
   let mod = isObj(module) ? clone(module) : { enabled: false, order: [], blocks: {}, presets: [] };
@@ -136,10 +136,12 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
       ctrl = doc.createElement('input'); ctrl.type = 'checkbox'; ctrl.checked = !!value;
       ctrl.onchange = () => setField(id, field.key, ctrl.checked);
     } else if (field.type === 'image') {
-      // 后台素材库选图（对称前台，不让管理员手填 URL）。后台管理员视图列全部素材（scope=''）。
+      // 后台素材库选图：限定当前编辑账号的 scope（global + 该账号），避免选到跨账号私有素材
+      // → 渲染端 assetAllowedInScope 不放行 → 静默退化透明图（“改了不显示”根因）。不让管理员手填 URL。
+      const scope = getScope ? getScope() : '';
       ctrl = doc.createElement('div');
       ctrl.style.cssText = 'display:flex;align-items:center;gap:8px;';
-      const thumb = resolveAssetThumb(value, getAssetLibrary ? getAssetLibrary() : null, '');
+      const thumb = resolveAssetThumb(value, getAssetLibrary ? getAssetLibrary() : null, scope);
       const preview = doc.createElement('div');
       preview.style.cssText = 'width:64px;height:48px;border:1px solid #d9dce0;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f7f8fa;flex:none;font-size:11px;color:#8f959e;';
       if (thumb) { const im = doc.createElement('img'); im.src = thumb; im.alt = ''; im.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;'; preview.appendChild(im); }
@@ -148,7 +150,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
       btn.style.cssText = 'border:1px solid #d9dce0;background:#fff;border-radius:4px;padding:5px 10px;font-size:12px;cursor:pointer;';
       btn.textContent = thumb ? '更换图片' : '从素材库选择';
       btn.onclick = () => openAssetPicker({
-        assetLibrary: getAssetLibrary ? getAssetLibrary() : null, scope: '', doc,
+        assetLibrary: getAssetLibrary ? getAssetLibrary() : null, scope, doc,
         onPick: (assetId) => setField(id, field.key, '{{asset#' + assetId + '}}'),
         onClear: () => setField(id, field.key, ''),
       });
