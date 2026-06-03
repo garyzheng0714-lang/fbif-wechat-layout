@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const editorSrc = await readFile(new URL('../public/js/asset-library-rule-editor.js', import.meta.url), 'utf8');
 const adminSrc = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
 const blockEditorSrc = await readFile(new URL('../public/js/admin/block-editor.js', import.meta.url), 'utf8');
+const blockPanelSrc = await readFile(new URL('../public/js/blocks/block-panel.js', import.meta.url), 'utf8');
 const footerEditorSrc = await readFile(new URL('../public/js/footer-library-rule-editor.js', import.meta.url), 'utf8');
 const uploaderSrc = await readFile(new URL('../public/js/uploader.js', import.meta.url), 'utf8');
 
@@ -46,11 +47,13 @@ test('素材库编辑器按引用索引阻断删除，并把素材 ID 设为只�
   assert.doesNotMatch(editorSrc, /if \(field === 'id'\) asset\.id/);
 });
 
-test('后台底部区块编辑器显示标题、说明或素材标签，而不是只显示通用类型名', () => {
+test('底部区块编辑器显示标题、说明或素材标签，但 name_card 空说明保留「名片」', () => {
   assert.match(blockEditorSrc, /function blockDisplayLabel/);
   assert.match(blockEditorSrc, /assetIDFromRef/);
+  assert.match(blockEditorSrc, /block\.type === 'name_card'/);
   assert.match(blockEditorSrc, /getAssetLibrary \? getAssetLibrary\(\)/);
   assert.match(blockEditorSrc, /blockDisplayLabel\(block, type/);
+  assert.match(blockPanelSrc, /block\.type === 'name_card'/);
 });
 
 test('素材库引用索引能扫描规则模块里的 #id 与旧 usage token', async () => {

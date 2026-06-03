@@ -100,9 +100,9 @@ function assetLabelFor(block, assetLibrary, accountId) {
   return '';
 }
 
-// blockDisplayLabel：左侧列表显示「这个块是什么」而非通用类型名。优先用标题字段，
-// 再用上方说明/素材名，缺省才退回类型 label。让运营看到「提示 / FBIF 波波名片 /
-// 1000个食品创新案例 / 更多文章」，而不是「声明/提示 / 名片 / 标题+图片」。
+// blockDisplayLabel：左侧列表显示「这个块是什么」。优先用标题字段，再用上方说明；
+// name_card 的上方说明可空，此时保留类型名「名片」（比素材文件名更像一个可编辑块）。
+// 其他图片型区块可退到素材名，便于区分系列名片/二维码。
 function blockDisplayLabel(block, type, assetLibrary, accountId) {
   const t = block && block.fields && block.fields.title && block.fields.title.value;
   if (typeof t === 'string') {
@@ -111,6 +111,7 @@ function blockDisplayLabel(block, type, assetLibrary, accountId) {
   }
   const intro = block && block.fields && block.fields.intro_text && block.fields.intro_text.value;
   if (typeof intro === 'string' && intro.trim()) return intro.trim();
+  if (block && block.type === 'name_card') return (type && type.label) || block.type;
   const label = assetLabelFor(block, assetLibrary, accountId);
   if (label) return label;
   return (type && type.label) || (block && block.type) || '';
