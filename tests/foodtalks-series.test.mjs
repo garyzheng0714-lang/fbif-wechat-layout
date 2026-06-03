@@ -192,6 +192,75 @@ test('sectionImageUrl: 按序数返回序号图，缺号返回空串', () => {
   assert.equal(sectionImageUrl({}, 99), '');
 });
 
+test('classifySeries: 文末署名/图源说明 → footer-note（成品 12px #7f7f7f 斜体），不算正文', () => {
+  // WHY：成品文末「本文作者：X」「本文为标注来源的图片均来自X」是 12px #7f7f7f 斜体小字，
+  // 此前误渲成 15px #544545 普通正文（用户报「引用来源字体格式不对」）。
+  const out = classifySeries([
+    P('正文引子。'),
+    P('本文为标注来源的图片均来自安姆科'),
+    P('本文作者：Isaac, FoodTalks'),
+  ], {});
+  assert.equal(out.filter(e => e.k === 'footer-note').length, 2);
+  assert.equal(out.filter(e => e.k === 'p').length, 1, '只有引子是正文');
+});
+
+test('classifySeries: 文末「提示：」→ tip-title，「* …」声明 → tip-item', () => {
+  const out = classifySeries([P('提示：'), P('* 本文为FoodTalks原创首发，欢迎无条件转发朋友圈。')], {});
+  assert.ok(out.find(e => e.k === 'tip-title'), '「提示：」标签');
+  assert.ok(out.find(e => e.k === 'tip-item'), '「* …」声明条目');
+});
+
+test('classifySeries: 无序号「参考来源：」段兜底进入参考模式 → [n] 归 ref-item（灰色）', () => {
+  // WHY：WPS 导出常把「参考来源：」丢成无序号普通段，一级标题正则不命中。若不兜底，
+  // [n] 条目会渲成 #544545 正文而非 #888888 灰，参考来源「字体格式不对」。
+  const out = classifySeries([P('参考来源：'), P('[1] 报告A'), P('[2] 报告B')], {});
+  assert.equal(out.filter(e => e.k === 'ref-item').length, 2);
+});
+
+test('classifySeries: 联系小节（倒数第二个一级标题含「联系」）公司信息居中、描述左对齐', () => {
+  // WHY：成品「联系XXX」下方公司信息（办公室名/地址/官网/电话）居中，描述性正文左对齐。
+  const out = classifySeries([
+    P('五、联系安姆科'),
+    P('安姆科总部位于上海，热诚欢迎各位前来参观交流。'),                              // 描述 → 左
+    { k: 'txt', runs: [{ type: 'txt', text: '上海总部办公室', bold: true }], text: '上海总部办公室' }, // 加粗 → 居中
+    P('地址：上海市闵行区申长路988弄'),                                            // 字段 → 居中
+    P('官网：https://www.amcor.com/'),
+    P('六、参考来源'),
+    P('[1] 报告A'),
+  ], {});
+  const txt = e => e.text || (e.runs || []).map(r => r.text).join('');
+  const desc = out.find(e => txt(e).startsWith('安姆科总部'));
+  const office = out.find(e => txt(e) === '上海总部办公室');
+  const addr = out.find(e => txt(e).startsWith('地址'));
+  const web = out.find(e => txt(e).startsWith('官网'));
+  assert.ok(!desc.center, '描述性正文不居中');
+  assert.equal(office.center, true, '办公室名（加粗 h3）居中');
+  assert.equal(addr.center, true, '地址行居中');
+  assert.equal(web.center, true, '官网行居中');
+});
+
+test('classifySeries: 联系为最后一个一级标题（无参考来源在后）时不触发居中', () => {
+  // WHY：用户约定「且此标题为倒数第二个标题时」。联系是最后一个一级标题 → 不居中。
+  const txt = e => e.text || (e.runs || []).map(r => r.text).join('');
+  const out = classifySeries([
+    P('五、产品方案'), P('正文'),
+    P('六、联系安姆科'), P('地址：上海市'),
+  ], {});
+  const addr = out.find(e => txt(e).startsWith('地址'));
+  assert.ok(!addr.center, '联系为最后一个一级标题时不触发');
+});
+
+test('classifySeries: 联系字段正则走规则后台可配（红线：不硬编码）', () => {
+  const txt = e => e.text || (e.runs || []).map(r => r.text).join('');
+  const cfg = { behavior: { params: { contact_field_regex: { default: '^邮编' } } } };
+  const out = classifySeries([
+    P('五、联系我们'), P('邮编：200000'), P('地址：上海'),
+    P('六、参考来源'), P('[1] A'),
+  ], cfg);
+  assert.equal(out.find(e => txt(e).startsWith('邮编')).center, true, '自定义字段命中→居中');
+  assert.ok(!out.find(e => txt(e).startsWith('地址')).center, '默认地址正则被覆盖→不再命中');
+});
+
 test('classifySeries: config.behavior 正则可覆盖默认（红线：规则后台可配）', () => {
   // 用自定义 level1 正则（仅认「第N章」），默认的「一、」就不再当一级标题
   const cfg = { behavior: { params: { level1_regex: { default: '^第[一二三]章\\s*' } } } };

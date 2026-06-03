@@ -115,7 +115,10 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 18 群 ft_series_materials、BD 名片 bd_card），修复 5/26 持久化的 FBIF 派生旧版。
 // v2→v3（2026-06-02）：新增 asset_library 素材库种子，并把 FoodTalks 网站页脚图片 URL
 // 从 html_lines 内联迁为 {{asset:usage}} 引用。
-const currentBuiltinRuleVersion = 3
+// v3→v4（2026-06-03）：「什么是」系列文末区块对齐成品——文末署名/图源说明 12px #7f7f7f 斜体
+// （footer_note_color/footer_note_font_size + footer_note_regex），「提示：/* 声明」块（tip_*_regex），
+// 联系小节公司信息居中（contact_section_regex/contact_field_regex）。
+const currentBuiltinRuleVersion = 4
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -332,14 +335,16 @@ func defaultFoodTalksSeriesRuleConfig() map[string]any {
 		// 视觉：深蓝主色 + 棕灰正文 + 灰辅助（继承未列项由 mergeRuleDefaults 取 FBIF 基线）
 		"heading_color":         "#02396b", // 一级/二级标题、目录标题、超链接
 		"text_color":            "#544545", // 正文
-		"muted_color":           "#888888", // 推荐阅读/参考来源/图注/作者说明
+		"muted_color":           "#888888", // 推荐阅读/参考来源/图注/原创声明
 		"link_color":            "#02396b", // 超链接（下划线）
+		"footer_note_color":     "#7f7f7f", // 文末署名 / 图源说明小字（成品实测口径）
 		"font_size":             "15",
 		"h1_font_size":          "20", // 一级标题文字（序号图下方居中）
 		"h2_font_size":          "16", // 二级标题
 		"toc_title_size":        "16", // 「目录」二字
 		"caption_font_size":     "12", // 图片说明 & 图片来源
-		"attribution_font_size": "14", // 作者、文末图源说明（斜体）
+		"attribution_font_size": "14", // 推荐阅读块说明（斜体）
+		"footer_note_font_size": "12", // 文末署名 / 图源说明小字（斜体）
 		"paragraph_margin_x":    "8",  // 两端缩进 8
 		"paragraph_gap":         "20",
 		// 统一表格样式：表头深蓝
@@ -419,6 +424,13 @@ func defaultFoodTalksSeriesRuleBehavior() map[string]any {
 			"recommended_reading_regex": map[string]any{"type": "string", "default": `^\s*(相关阅读|推荐阅读)\s*[：:]\s*$`},
 			"ref_section_regex":         map[string]any{"type": "string", "default": `^(参考(来源|文献|资料|链接)|信息来源)\s*[：:]?\s*$`},
 			"ref_item_regex":            map[string]any{"type": "string", "default": `^\s*\[\d+\]`},
+			// 联系小节公司信息居中（倒数第二个一级标题含「联系」→ 其下公司信息块居中，描述正文左对齐）
+			"contact_section_regex": map[string]any{"type": "string", "default": `联系`},
+			"contact_field_regex":   map[string]any{"type": "string", "default": `^(地址|地點|地点|官网|官網|网址|網址|网站|網站|电话|電話|联系电话|联系方式|邮箱|郵箱|邮件|手机|手機|微信|公众号|公眾號|传真|傳真|Tel|Phone|Email|E-?mail|Add|Address|Web|Website)\s*[：:]`},
+			// 文末区块识别（成品实测口径）：「提示：」标签 / 「* …」声明条目 / 文末署名·图源说明
+			"tip_label_regex":   map[string]any{"type": "string", "default": `^提示\s*[：:]\s*$`},
+			"tip_item_regex":    map[string]any{"type": "string", "default": `^\s*[*＊·]`},
+			"footer_note_regex": map[string]any{"type": "string", "default": `^本文作者\s*[：:]|图片均来自|^本文图片来源`},
 			// 前置物料剥离：系列文章无「作者：」行，正文以头图为锚点。'firstImage' = 头图之前的
 			// 标题段 + 单格副标题表格都是编辑前置物料（进微信后台标题/摘要），不进正文。
 			"content_start_signal":    map[string]any{"type": "string", "default": "firstImage"},

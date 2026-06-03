@@ -72,3 +72,68 @@ test('render: 头图满宽 100%、方形小图=二维码 → 140px', () => {
   assert.match(html, /src="blob:qr"[^>]*style="width: 140px/, '二维码固定 140px');
   assert.match(html, /src="blob:photo"[^>]*style="width: 82%/, '普通横图保留 DOCX 宽度');
 });
+
+// 取含指定文字的 <section> 的 text-align（"text-align: <align>;"）。
+function sectionAlignOf(html, text) {
+  const re = new RegExp(`<section style="[^"]*text-align: (left|center)[^"]*">(?:(?!</section>)[\\s\\S])*?${text}`);
+  const m = html.match(re);
+  return m ? m[1] : null;
+}
+// 取含指定文字的 <span> 的内联 style。
+function spanStyleOf(html, text) {
+  const re = new RegExp(`<span style="([^"]*)">${text}`);
+  const m = html.match(re);
+  return m ? m[1] : null;
+}
+
+test('render: 文末署名/图源说明 = 12px #7f7f7f 斜体小字（成品实测口径）', () => {
+  // WHY：成品文末「本文作者：X」「本文为标注来源的图片均来自X」是 12px #7f7f7f 斜体；
+  // 此前误渲成 15px #544545 普通正文（用户报「底部引用来源字体格式不对」）。
+  const html = render([
+    imgP('h.png', '96%', 1.6),
+    p('正文引子。'),
+    p('本文为标注来源的图片均来自安姆科'),
+    p('本文作者：Isaac, FoodTalks'),
+  ], { 'h.png': 'blob:h' });
+  for (const t of ['本文为标注来源的图片均来自安姆科', '本文作者：Isaac, FoodTalks']) {
+    const s = spanStyleOf(html, t);
+    assert.ok(s, `应找到「${t}」的 span`);
+    assert.match(s, /font-size: 12px/, '12px 小字');
+    assert.match(s, /color: #7f7f7f/, '#7f7f7f 灰');
+    assert.match(s, /font-style: italic/, '斜体');
+  }
+});
+
+test('render: 文末「提示：」深蓝粗体、「* 声明」#888888 斜体（成品口径）', () => {
+  const html = render([
+    imgP('h.png', '96%', 1.6),
+    p('正文引子。'),
+    p('提示：'),
+    p('* 本文为FoodTalks原创首发，欢迎无条件转发朋友圈。'),
+  ], { 'h.png': 'blob:h' });
+  const tip = spanStyleOf(html, '提示：');
+  assert.match(tip, /color: #02396b/, '提示标签深蓝');
+  assert.match(tip, /font-weight: bold/, '提示标签粗体');
+  const item = spanStyleOf(html, '\\* 本文为FoodTalks原创首发，欢迎无条件转发朋友圈。');
+  assert.match(item, /color: #888888/, '声明条目灰');
+  assert.match(item, /font-style: italic/, '声明条目斜体');
+});
+
+test('render: 联系小节公司信息居中、描述性正文左对齐（成品口径）', () => {
+  // WHY：成品「联系XXX」下方公司信息（办公室名/地址/官网）居中，描述性正文左对齐。
+  const html = render([
+    imgP('h.png', '96%', 1.6),
+    p('正文引子。'),
+    p('五、联系安姆科'),
+    p('安姆科总部位于上海，热诚欢迎各位前来参观交流。'),
+    p('上海总部办公室', { runs: [{ type: 'txt', text: '上海总部办公室', bold: true }] }),
+    p('地址：上海市闵行区申长路988弄'),
+    p('官网：https://www.amcor.com/'),
+    p('六、参考来源'),
+    p('[1] 报告A'),
+  ], { 'h.png': 'blob:h' });
+  assert.equal(sectionAlignOf(html, '安姆科总部位于上海'), 'left', '描述性正文左对齐');
+  assert.equal(sectionAlignOf(html, '上海总部办公室'), 'center', '办公室名居中');
+  assert.equal(sectionAlignOf(html, '地址：上海市闵行区申长路988弄'), 'center', '地址行居中');
+  assert.equal(sectionAlignOf(html, '官网：https://www\\.amcor\\.com/'), 'center', '官网行居中');
+});

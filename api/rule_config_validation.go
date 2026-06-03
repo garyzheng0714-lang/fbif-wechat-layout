@@ -26,6 +26,7 @@ var ruleNumberFields = map[string]ruleNumberField{
 	"author_font_size":         {min: 10, max: 20},
 	"tip_font_size":            {min: 10, max: 20},
 	"attribution_font_size":    {min: 10, max: 20},
+	"footer_note_font_size":    {min: 10, max: 20}, // 系列文末署名/图源说明小字（红线下放）
 	"blockquote_padding_left":  {min: 0, max: 32},
 	"blockquote_border_width":  {min: 0, max: 8},
 	"md_heading_max_chars":     {min: 10, max: 120},
@@ -57,6 +58,7 @@ var ruleColorFields = map[string]bool{
 	"table_header_text_color": true, // 表头文字色
 	"table_border_color":      true, // 表格边框色
 	"heading_color":           true, // FoodTalks「什么是」系列标题/链接主色（红线下放）
+	"footer_note_color":       true, // 系列文末署名/图源说明小字色（红线下放）
 }
 
 var ruleBooleanFields = map[string]bool{

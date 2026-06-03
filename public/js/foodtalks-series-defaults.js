@@ -10,10 +10,11 @@
 
 // ── 视觉默认（《策划文公众号排版标准》）──
 export const SERIES_COLORS = Object.freeze({
-  heading_color: '#02396b', // 一级/二级标题、目录标题、超链接：RGB 2 57 107
-  text_color:    '#544545', // 正文：RGB 84 69 69
-  muted_color:   '#888888', // 推荐阅读/参考来源/图注/作者说明：RGB 136 136 136
-  link_color:    '#02396b', // 超链接同主色，带下划线
+  heading_color:     '#02396b', // 一级/二级标题、目录标题、超链接：RGB 2 57 107
+  text_color:        '#544545', // 正文：RGB 84 69 69
+  muted_color:       '#888888', // 推荐阅读/参考来源/图注/原创声明：RGB 136 136 136
+  link_color:        '#02396b', // 超链接同主色，带下划线
+  footer_note_color: '#7f7f7f', // 文末署名 / 图源说明小字：RGB 127 127 127（成品实测口径）
 });
 
 export const SERIES_SIZES = Object.freeze({
@@ -22,7 +23,8 @@ export const SERIES_SIZES = Object.freeze({
   h2_font_size:          16, // 二级标题
   toc_title_size:        16, // 「目录」二字
   caption_font_size:     12, // 图片说明 & 图片来源
-  attribution_font_size: 14, // 作者、文末图源说明（斜体）
+  attribution_font_size: 14, // 推荐阅读块说明（斜体）
+  footer_note_font_size: 12, // 文末署名 / 图源说明小字（斜体，成品实测口径）
 });
 
 // 正文行高 / 两端缩进 / 段后空行间距（与 wx-theme.css 默认一致 = 统一观感）。
@@ -44,10 +46,20 @@ export const SERIES_REGEX = Object.freeze({
   toc_marker_regex: '^目录\\s*$',
   // 推荐阅读 / 相关阅读 段头
   recommended_reading_regex: '^\\s*(相关阅读|推荐阅读)\\s*[：:]\\s*$',
-  // 参考来源段头（一级标题去掉「六、」前缀后命中）
+  // 参考来源段头（一级标题去掉「六、」前缀后命中；也用于无序号的「参考来源：」段兜底）
   ref_section_regex: '^(参考(来源|文献|资料|链接)|信息来源)\\s*[：:]?\\s*$',
   // 参考来源条目（[1] [2] …）
   ref_item_regex: '^\\s*\\[\\d+\\]',
+  // 联系小节标题（含「联系」二字 + 倒数第二个一级标题 → 其下公司信息居中）
+  contact_section_regex: '联系',
+  // 公司信息行（地址 / 官网 / 电话 …）→ 居中；描述性正文不匹配 → 保持左对齐
+  contact_field_regex: '^(地址|地點|地点|官网|官網|网址|網址|网站|網站|电话|電話|联系电话|联系方式|邮箱|郵箱|邮件|手机|手機|微信|公众号|公眾號|传真|傳真|Tel|Phone|Email|E-?mail|Add|Address|Web|Website)\\s*[：:]',
+  // 文末「提示：」标签行（成品：15px 深蓝粗体）
+  tip_label_regex: '^提示\\s*[：:]\\s*$',
+  // 文末「* …」原创/转载声明条目（成品：15px #888888 斜体）
+  tip_item_regex: '^\\s*[*＊·]',
+  // 文末署名 / 图源说明（成品：12px #7f7f7f 斜体小字）
+  footer_note_regex: '^本文作者\\s*[：:]|图片均来自|^本文图片来源',
 });
 
 // ── 前置物料剥离默认（红线下放：behavior.params.content_start_signal / front_matter_scan_limit）──

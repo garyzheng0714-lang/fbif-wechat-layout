@@ -54,6 +54,8 @@ function styleProps(config) {
     tocTitleSize: cfgNum(config, 'toc_title_size', SERIES_SIZES.toc_title_size),
     capSize: cfgNum(config, 'caption_font_size', SERIES_SIZES.caption_font_size),
     attrSize: cfgNum(config, 'attribution_font_size', SERIES_SIZES.attribution_font_size),
+    noteSize: cfgNum(config, 'footer_note_font_size', SERIES_SIZES.footer_note_font_size),
+    noteColor: cfgColor(config, 'footer_note_color', SERIES_COLORS.footer_note_color),
     lh: SERIES_LAYOUT.line_height,
     marginX: SERIES_LAYOUT.margin_x,
     gap: SERIES_LAYOUT.gap,
@@ -194,6 +196,9 @@ function gapAfter(e, next) {
   if (e.k === 'rec-item' && next.k === 'rec-note') return false; // 说明行紧贴最后一条 ○
   if (e.k === 'toc-title') return false;                      // 「目录」紧贴首条
   if (e.k === 'toc-item' && next.k === 'toc-item') return false;
+  if (e.k === 'footer-note' && next.k === 'footer-note') return false; // 文末署名 / 图源说明紧贴
+  if (e.k === 'tip-title') return false;                      // 「提示：」紧贴首条声明
+  if (e.k === 'tip-item' && next.k === 'tip-item') return false;
   if (isCompactDocxPair(e, next)) return false;               // 连续紧凑正文（红线#18）
   return true;
 }
@@ -227,7 +232,7 @@ function render(elems, config = {}) {
       case 'h3':
         lines.push(section(
           renderRuns((e.runs || []).map(r => ({ ...r, bold: true })), { size: sp.bodySize, color: sp.text, sp }),
-          { align: 'left', gap, sp }));
+          { align: e.center ? 'center' : 'left', gap, sp }));
         break;
       case 'toc-title':
         lines.push(section(
@@ -275,6 +280,24 @@ function render(elems, config = {}) {
           renderRuns(e.runs, { size: sp.bodySize, color: sp.muted, sp }),
           { align: 'left', gap, sp }));
         break;
+      case 'footer-note':
+        // 文末署名 / 图源说明：12px #7f7f7f 斜体小字（成品实测口径）。
+        lines.push(section(
+          span(e.text || runsToPlain(e.runs), { size: sp.noteSize, color: sp.noteColor, italic: true, sp }),
+          { align: 'left', gap, sp }));
+        break;
+      case 'tip-title':
+        // 文末「提示：」标签：15px 深蓝粗体左对齐。
+        lines.push(section(
+          span(e.text || '提示：', { size: sp.bodySize, color: sp.heading, bold: true, sp }),
+          { align: 'left', gap, sp }));
+        break;
+      case 'tip-item':
+        // 文末「* …」原创/转载声明条目：15px #888888 斜体左对齐。
+        lines.push(section(
+          span(e.text || runsToPlain(e.runs), { size: sp.bodySize, color: sp.muted, italic: true, sp }),
+          { align: 'left', gap, sp }));
+        break;
       case 'footer-img':
         lines.push(imageSection(e.src, e.gap !== false, sp));
         break;
@@ -285,7 +308,7 @@ function render(elems, config = {}) {
       default:
         lines.push(section(
           renderRuns(e.runs, { size: sp.bodySize, color: sp.text, sp }) || '<br>',
-          { align: 'left', gap, sp }));
+          { align: e.center ? 'center' : 'left', gap, sp }));
         break;
     }
   }

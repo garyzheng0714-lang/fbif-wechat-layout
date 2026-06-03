@@ -114,6 +114,9 @@ export function classifySeries(neutralElems, config = {}) {
   const recRe    = seriesRegex(config, 'recommended_reading_regex', SERIES_REGEX.recommended_reading_regex);
   const refSecRe = seriesRegex(config, 'ref_section_regex', SERIES_REGEX.ref_section_regex);
   const refItemRe = seriesRegex(config, 'ref_item_regex', SERIES_REGEX.ref_item_regex);
+  const tipLabelRe = seriesRegex(config, 'tip_label_regex', SERIES_REGEX.tip_label_regex);
+  const tipItemRe = seriesRegex(config, 'tip_item_regex', SERIES_REGEX.tip_item_regex);
+  const footerNoteRe = seriesRegex(config, 'footer_note_regex', SERIES_REGEX.footer_note_regex);
   const capKeywords = behList(config, 'image_caption_keywords', SERIES_CAPTION_KEYWORDS);
 
   const isHeadingLike = (e) => e && (e.k === 'h' || e.k === 'txt');
@@ -198,6 +201,13 @@ export function classifySeries(neutralElems, config = {}) {
         out.push({ k: 'h2', text: normalizeParens(plain) });
         continue;
       }
+      // 无序号的「参考来源：」段兜底（WPS 导出常丢标题样式 → 一级标题正则不命中）：
+      // 仍进入参考模式，保证其后 [n] 条目渲成 15px 灰色（红线：参考来源识别要稳）。
+      if (refSecRe.test(plain)) {
+        refMode = true;
+        out.push({ k: 'h3', runs: [{ type: 'txt', text: plain.replace(/\s*[：:]\s*$/, ''), bold: true }] });
+        continue;
+      }
       // 其余：DOCX 标题样式段（k:'h'，如阿拉伯数字小标题「2、个性与定制化」，标了标题样式
       // 但不匹配 一、/（一）），或整段加粗短句 → 三级标题（正文加粗）。共享层 k:'h' 只带 text
       // 不带 runs，缺失时从纯文本合成 runs，避免文字丢失（红线：失败要响，不能静默吞字）。
@@ -218,6 +228,22 @@ export function classifySeries(neutralElems, config = {}) {
       refMode = false; // 遇非 [n] / 非延续行，退出参考模式
     }
 
+    // 文末署名 / 图源说明（规范《十》，成品实测：12px #7f7f7f 斜体小字）
+    if (footerNoteRe.test(plain)) {
+      out.push({ k: 'footer-note', runs: stripLinks(e.runs), text: plain });
+      continue;
+    }
+    // 文末「提示：」标签（成品：15px 深蓝粗体）
+    if (tipLabelRe.test(plain)) {
+      out.push({ k: 'tip-title', text: plain });
+      continue;
+    }
+    // 文末「* …」原创/转载声明条目（成品：15px #888888 斜体；外链清除）
+    if (tipItemRe.test(plain)) {
+      out.push({ k: 'tip-item', runs: stripLinks(e.runs), text: plain });
+      continue;
+    }
+
     // 紧跟图片但共享层没配上的来源说明行 → 图注
     if (isHeadingLike(e) && out.length && out[out.length - 1].k === 'img' && looksLikeCaption(plain, capKeywords)) {
       out.push({ k: 'cap', runs: e.runs });
@@ -229,7 +255,29 @@ export function classifySeries(neutralElems, config = {}) {
     out.push({ k: 'p', runs: (Array.isArray(e.runs) && e.runs.length) ? e.runs : [{ type: 'txt', text: plain }], ...carryDocxMeta(e) });
   }
 
+  applyContactCentering(out, config);
   return out;
+}
+
+// 「联系XXX」公司信息居中：当倒数第二个一级标题含「联系」二字时，其与最后一个一级标题
+// （参考来源）之间的【公司信息块】居中——办公室名（加粗 → h3）、地址/官网/电话（命中
+// contact_field_regex 的正文）、图注本就居中；而「联系XXX」下方偶尔的【描述性正文】不命中
+// 字段正则 → 保持左对齐（成品实测：描述段左、公司信息居中）。规则后台可配两条正则。
+function applyContactCentering(out, config) {
+  const h1Pos = [];
+  for (let i = 0; i < out.length; i++) if (out[i].k === 'h1') h1Pos.push(i);
+  if (h1Pos.length < 2) return;
+  const secIdx = h1Pos[h1Pos.length - 2]; // 倒数第二个一级标题
+  const sectionRe = seriesRegex(config, 'contact_section_regex', SERIES_REGEX.contact_section_regex);
+  const title = out[secIdx].full || out[secIdx].text || '';
+  if (!sectionRe.test(title)) return;
+  const endIdx = h1Pos[h1Pos.length - 1]; // 最后一个一级标题（参考来源）= 区间右界
+  const fieldRe = seriesRegex(config, 'contact_field_regex', SERIES_REGEX.contact_field_regex);
+  for (let i = secIdx + 1; i < endIdx; i++) {
+    const e = out[i];
+    if (e.k === 'h3') e.center = true;                      // 加粗公司信息行（办公室名/微信公众号/商务合作）
+    else if (e.k === 'p' && fieldRe.test(elemText(e).trim())) e.center = true; // 地址/官网/电话 …
+  }
 }
 
 // ── 尾部素材读取 / 合成 ──
