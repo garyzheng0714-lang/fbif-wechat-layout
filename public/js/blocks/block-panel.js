@@ -1,21 +1,22 @@
-// block-panel.js — 前台「底部区块」单篇面板（公众号 + 网站共用）。
+// block-panel.js — 前台「底部区块」单篇内容编辑区（公众号 + 网站共用）。
 //
-// 两层模型的【前台单篇】侧：后台默认（bottom_blocks 模块）只读，本面板把用户这一篇的改动
-// 存成 override（localStorage `bb.override::<accountId>`），未覆盖项实时跟随后台默认。
-// 交互：卡片列表 + 拖拽排序 + 显隐开关 + 展开字段表单 + 继承/已覆盖徽标 + 分层恢复默认。
+// 设计（2026-06-04 用户裁定）：底部区块的结构/显隐/排序/字号/调色对绝大多数排版人员是「既定不变」的，
+// 应在规则后台预先配好。前端不再做结构编辑，退化为【固定展开、无折叠】的内容位编辑区，只暴露排版员
+// 真正要改的内容：
+//   (a) more_articles 块：永远显示其内容编辑器（换链接/换封面/裁剪/增删/排序，红线#14，不挂任何开关）；
+//   (b) 被后台标记 frontend_editable=true 的块：只暴露其图片字段的「更换图片」（走素材库，红线#10）。
+// 其余块（提示/署名/栏目图…）在编辑区不出现，仅在右侧正文预览里按后台默认渲染。
+// 「哪块可前端编辑」由块实例级 frontend_editable 驱动（服务端默认 rule_defaults.go + 校验 rule_bottom_blocks.go），
+// 前端零硬编码（block-merge.js:resolveOneBlock 透传 frontendEditable 布尔）。
 //
-// 中性：只 import 中性合并引擎与注册表，不 import 任何渠道渲染器（红线 #19）。
-// 宿主（app.html / site.html）通过 onChange(override) 把 override 注入各自渲染配置并重渲。
+// 中性：只 import 中性合并引擎/注册表/素材选择器，不 import 任何渠道渲染器（红线 #19）。
+// 宿主（app.html）通过 onChange(override) 把 override 注入渲染并重渲；据 hasEditableContent() 决定整段显隐。
 
-import { resolveBlocks, hasAnyOverride } from './block-merge.js';
+import { resolveBlocks, hasAnyOverride, stripReadonlyOverride } from './block-merge.js';
 import { getBlockType } from './block-registry.gen.js';
 import { openAssetPicker, resolveAssetThumb } from './asset-picker.js';
-import { createTitleFormatControl, closeOpenFormatPopovers } from './block-format-control.js';
 
 function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
-function esc(s) {
-  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 function ovKey(accountId) { return 'bb.override::' + accountId; }
 function loadOverride(accountId) {
   try { return JSON.parse(localStorage.getItem(ovKey(accountId)) || 'null') || {}; } catch { return {}; }
@@ -27,66 +28,15 @@ function saveOverride(accountId, ov) {
   } catch {}
 }
 
-// 统一线性图标（替代 ▸/⠿/⟲ 文本字形，匹配编辑器其余 SVG 图标集；currentColor 跟随）
-const ICON_CHEVRON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
-const ICON_GRIP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>';
-const ICON_RESET = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 3v5h5"/></svg>';
-// 手风琴头的层叠图标（方案A 参考稿 I('layers')）。
-const ICON_LAYERS = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>';
-
-// reduced-motion 探测（无 window 时安全返回 false，与 anim.js 一致语义但不引入 import）。
-function prefersReduced() {
-  return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
 const STYLE_ID = 'bp-style';
 function ensureStyle(doc) {
   if (doc.getElementById(STYLE_ID)) return;
   const st = doc.createElement('style');
   st.id = STYLE_ID;
   st.textContent = `
-.bp-wrap{font-size:13px;color:var(--fs-text-1,#1f2329);}
-.bp-acc{border-radius:var(--fs-r-m,8px);}
-.bp-acc-head{display:flex;align-items:center;gap:10px;width:100%;height:40px;padding:0 8px;border:none;background:none;border-radius:var(--fs-r-s,6px);text-align:left;cursor:pointer;font-family:inherit;transition:background .12s var(--fs-ease-out,ease);}
-.bp-acc-head:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045));}
-.bp-ico{width:18px;height:18px;color:var(--fs-text-2,#646a73);flex-shrink:0;display:flex;}
-.bp-acc-title{flex:1;font-size:13px;font-weight:600;color:var(--fs-text-1,#1f2329);}
-.bp-count{min-width:18px;height:18px;padding:0 5px;border-radius:9999px;background:var(--fs-bg-sunken,#f2f3f5);color:var(--fs-text-2,#646a73);font-size:11px;font-weight:500;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,color .15s;}
-.bp-acc.is-open .bp-count{background:var(--fs-brand-soft,#ebf1ff);color:var(--fs-brand,#1456f0);}
-.bp-chevron{color:var(--fs-text-3,#8f959e);flex-shrink:0;display:inline-flex;transition:transform .2s var(--fs-ease-out,ease);}
-.bp-acc.is-open .bp-chevron{transform:rotate(90deg);}
-.bp-acc-body{overflow:hidden;}
-.bp-acc-inner{padding-top:4px;}
-.bp-list{display:flex;flex-direction:column;gap:2px;}
-.bp-hint{color:var(--fs-text-3,#8f959e);font-size:11px;line-height:1.6;margin-top:8px;padding:0 8px;}
-.bp-resetall{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;font-size:12px;text-decoration:underline;padding:4px 8px 0;}
-.bp-resetall:hover{color:var(--fs-brand,#1456f0);}
-.bp-card{border:none;border-radius:var(--fs-r-s,6px);margin-bottom:2px;background:transparent;}
-.bp-card:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045));}
-.bp-switch{appearance:none;-webkit-appearance:none;width:34px;height:20px;border-radius:9999px;background:var(--fs-border-control,#d9dce0);position:relative;cursor:pointer;flex:none;transition:background .2s;margin:0;}
-.bp-switch:checked{background:var(--fs-brand,#1456f0);}
-.bp-switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(31,35,39,.2);transition:transform .2s;}
-.bp-switch:checked::after{transform:translateX(14px);}
-.bp-card.bp-disabled{opacity:.62;}
-.bp-row{display:flex;align-items:center;gap:8px;padding:8px 10px;}
-.bp-grip{cursor:grab;color:var(--fs-text-disabled,#bbbfc4);user-select:none;display:inline-flex;align-items:center;}
-.bp-grip:hover{color:var(--fs-text-3,#8f959e);}
-.bp-name{flex:1;font-weight:500;cursor:pointer;}
-.bp-name .bp-sub{font-weight:400;color:var(--fs-text-3,#8f959e);font-size:12px;margin-left:6px;}
-.bp-caret{color:var(--fs-text-3,#8f959e);cursor:pointer;transition:transform .18s var(--fs-ease-out,ease),background .15s,color .15s;display:inline-flex;align-items:center;padding:4px;border-radius:var(--fs-r-xs,4px);}
-.bp-caret:hover{color:var(--fs-brand,#1456f0);background:var(--fs-bg-hover,rgba(31,35,39,.045));}
-.bp-caret.bp-open{transform:rotate(90deg);}
-.bp-fields{padding:2px 12px 12px 32px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));}
-.bp-field{margin-top:10px;}
-.bp-flabel{display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--fs-text-2,#646a73);font-size:12px;}
-.bp-badge{font-size:11px;padding:1px 6px;border-radius:9999px;}
-.bp-badge.over{background:var(--fs-brand-soft,#ebf1ff);color:var(--fs-brand,#1456f0);}
-.bp-reset{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;display:inline-flex;align-items:center;padding:2px;margin-left:auto;}
-.bp-reset:hover{color:var(--fs-brand,#1456f0);}
-.bp-input,.bp-textarea,.bp-select{width:100%;box-sizing:border-box;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:5px 8px;font-size:13px;font-family:inherit;}
-.bp-textarea{min-height:60px;resize:vertical;}
-.bp-color{display:flex;align-items:center;gap:8px;}
-.bp-color input[type=color]{width:34px;height:26px;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:0;background:none;cursor:pointer;}
+.bp-wrap{font-size:13px;color:var(--fs-text-1,#1f2329);display:flex;flex-direction:column;gap:16px;}
+.bp-sec-title{font-weight:600;font-size:13px;color:var(--fs-text-1,#1f2329);margin-bottom:8px;}
+.bp-hint{color:var(--fs-text-3,#8f959e);font-size:11px;line-height:1.6;}
 .bp-empty{color:var(--fs-text-3,#8f959e);font-size:12px;padding:6px 2px;}
 .bp-image{display:flex;align-items:center;gap:10px;}
 .bp-image-preview{width:64px;height:48px;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--fs-bg-sunken,#f7f8fa);flex:none;}
@@ -98,23 +48,15 @@ function ensureStyle(doc) {
   (doc.head || doc.documentElement).appendChild(st);
 }
 
-// mountBlockPanel 挂载面板。
-//   mount: 容器元素
-//   accountId: 账号 id（决定 localStorage 覆盖 key）
-//   getModule: () => 后台默认 bottom_blocks 模块（原始服务端模块）
-//   onChange: (override) => void —— 宿主据此注入渲染并重渲
-//   initialOverride: 可选，外部已加载的覆盖（否则从 localStorage 读）
 function assetsOf(lib) {
   if (Array.isArray(lib)) return lib;
   if (isObj(lib) && Array.isArray(lib.assets)) return lib.assets;
   return [];
 }
-
 function assetIDFromRef(value) {
   const m = /^\{\{asset#([a-z0-9_-]+)\}\}$/i.exec(String(value == null ? '' : value).trim());
   return m ? m[1] : '';
 }
-
 function assetLabelFor(block, assetLibrary, accountId) {
   const ref = block && block.fields && block.fields.image && block.fields.image.value;
   const id = assetIDFromRef(ref);
@@ -128,9 +70,7 @@ function assetLabelFor(block, assetLibrary, accountId) {
   return '';
 }
 
-// blockDisplayLabel：左侧列表显示「这个块是什么」。优先用标题字段，再用上方说明；
-// name_card 的上方说明可空，此时保留类型名「名片」（比素材文件名更像一个可编辑块）。
-// 其他图片型区块可退到素材名，便于区分系列名片/二维码。
+// blockDisplayLabel：该可编辑块的只读小标题。优先标题字段，再上方说明，name_card 用类型名，图片块退到素材名。
 function blockDisplayLabel(block, type, assetLibrary, accountId) {
   const t = block && block.fields && block.fields.title && block.fields.title.value;
   if (typeof t === 'string') {
@@ -139,26 +79,31 @@ function blockDisplayLabel(block, type, assetLibrary, accountId) {
   }
   const intro = block && block.fields && block.fields.intro_text && block.fields.intro_text.value;
   if (typeof intro === 'string' && intro.trim()) return intro.trim();
+  // name_card 空说明保留类型名「名片」（比素材文件名更像一个可编辑块）。
   if (block && block.type === 'name_card') return (type && type.label) || block.type;
   const label = assetLabelFor(block, assetLibrary, accountId);
   if (label) return label;
   return (type && type.label) || (block && block.type) || '';
 }
 
-// mountBlockPanel 参数 getBlockExtra(block) => HTMLElement|null：宿主可为某些块（如 more_articles）
-// 返回一个【稳定持有的】DOM 元素，挂进该块展开区。宿主必须持引用（非 getElementById），
-// 这样 render() 的 mount.innerHTML='' 把它从 DOM 摘下后元素对象仍存活，下次 render 再 append 即复位。
+// 该块在前端编辑区是否产出可编辑内容位：more_articles（恒为内容编辑器）或 frontend_editable 且含 image 字段。
+// 仅对 enabled（会渲进正文）的块判定——隐藏块没有可编辑内容。
+function blockEditableKind(block, type) {
+  if (!block.enabled) return null;
+  if (block.type === 'more_articles') return 'more_articles';
+  if (block.frontendEditable && (type.fields || []).some(f => f.type === 'image')) return 'image';
+  return null;
+}
+
+// mountBlockPanel 挂载内容编辑区。
+//   mount, accountId, getModule, getAssetLibrary
+//   getBlockExtra(block) => HTMLElement|null：宿主为 more_articles 返回稳定持有的卡片编辑器元素
+//   onChange(override) => void：宿主据此注入渲染并重渲
 export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, getBlockExtra, onChange, doc = document }) {
   if (!mount) return null;
   ensureStyle(doc);
   let override = loadOverride(accountId);
-  const expanded = new Set();
-  let sortable = null;
-  let panelOpen = true;      // 手风琴整段默认展开，chevron 折叠
-  let justExpanded = null;   // 刚点开字段的区块 id，render 后做一次淡入
-  // 迁移：旧版「主开关」可写 override.enabled=false（整段隐藏）。新版去掉主开关、改用每块开关+计数，
-  // 清掉遗留 enabled，避免老文章卡在「整段关闭且无 UI 可恢复」。order/overrides 保留。
-  if (override && 'enabled' in override) { delete override.enabled; saveOverride(accountId, override); }
+  let editableCount = 0;
 
   function emit() { saveOverride(accountId, override); if (onChange) onChange(override); }
   function ensureBlock(id) {
@@ -171,325 +116,104 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     const b = o[id];
     if (b) {
       if (isObj(b.fields) && !Object.keys(b.fields).length) delete b.fields;
-      if (!('enabled' in b) && !b.fields) delete o[id];
+      if (!b.fields) delete o[id];
     }
     if (override.overrides && !Object.keys(override.overrides).length) delete override.overrides;
   }
-
-  function setEnabled(id, val, def) {
-    const b = ensureBlock(id);
-    if (val === def) delete b.enabled; else b.enabled = val;
-    prune(id); emit(); render();
-  }
-  // 第 4 参 same = 新值是否等于默认（各调用处已算好，与下方 setFieldSoft 同约定）：
-  // 相同则不落盘（恢复继承默认），否则记为本篇覆盖。
-  // 旧实现误写 `val === def`——对布尔型 switch 会把「关掉默认开的开关」(val=false, same=false)
-  // 判成 false===false 而删除覆盖，导致默认开的开关关不掉、回弹。改用 same 与 setEnabled/setFieldSoft 对齐。
+  // 写图片字段覆盖（同等于默认则不落盘=恢复后台默认）。这是新版前端唯一会写的 override 形状：
+  // {overrides:{<frontend_editable块>:{fields:{<imageKey>:val}}}}。
   function setField(id, key, val, same) {
     const b = ensureBlock(id);
     if (!isObj(b.fields)) b.fields = {};
     if (same) delete b.fields[key]; else b.fields[key] = val;
     prune(id); emit(); render();
   }
-  // 静默版：写覆盖 + 持久化 + 刷正文预览，但不重渲面板——供格式浮层用，避免每次改值重建 DOM 关掉浮层。
-  function setFieldQuiet(id, key, val, same) {
-    const b = ensureBlock(id);
-    if (!isObj(b.fields)) b.fields = {};
-    if (same) delete b.fields[key]; else b.fields[key] = val;
-    prune(id); emit();
-  }
-  function resetField(id, key) {
-    const b = override.overrides && override.overrides[id];
-    if (b && b.fields) delete b.fields[key];
-    prune(id); emit(); render();
-  }
-  function resetBlock(id) {
-    if (override.overrides) delete override.overrides[id];
-    prune(id); emit(); render();
-  }
-  function blockHasOverride(id) {
-    const b = override.overrides && override.overrides[id];
-    return !!(isObj(b) && (('enabled' in b) || (isObj(b.fields) && Object.keys(b.fields).length)));
-  }
-  function resetAll() { override = {}; emit(); render(); }
 
-  // SortableJS 拖完后回调：domIds 是拖拽后 DOM 里 .bp-card 的新顺序。
-  // 只接受合法 block id（过滤脏 id，再补回缺失项，避免 resolveBlocks 静默丢块 → 卡片“消失”），
-  // 与拖拽前的当前顺序一致（拖了又放回原位）时直接返回不落盘，否则存为单篇 order 覆盖。
-  function applyOrder(domIds, baseOrder) {
-    const valid = domIds.filter(id => baseOrder.includes(id));
-    for (const id of baseOrder) if (!valid.includes(id)) valid.push(id);
-    const same = valid.length === baseOrder.length && valid.every((id, i) => id === baseOrder[i]);
-    if (same) return;
-    override.order = valid;
-    emit(); render();
+  // 存量覆盖迁移（确定性、幂等）：旧版前端可写整段显隐(enabled)/排序(order)/任意块字段(显隐/字号/调色)。
+  // 新版结构归后台，前端只保留 frontend_editable 块的图片字段覆盖。加载时一次性剥离已不可前端编辑的残留，
+  // 避免老文章底部与后台默认不一致且无 UI 可恢复（红线#22 口径以后台默认为准）。
+  function migrateStaleOverride() {
+    const mod = getModule() || {};
+    const base = resolveBlocks(mod, {}); // 用空覆盖解析，frontendEditable 取后台默认，与当前 order 无关
+    if (!base.blocks.length) {
+      // 模块未就绪：只安全剥离与块无关的结构性 enabled/order，块级覆盖待模块就绪再处理。
+      let changed = false;
+      if ('enabled' in override) { delete override.enabled; changed = true; }
+      if ('order' in override) { delete override.order; changed = true; }
+      if (changed) saveOverride(accountId, override);
+      return;
+    }
+    const editable = new Set(base.blocks.filter(b => b.frontendEditable).map(b => b.id));
+    const next = stripReadonlyOverride(override, editable);
+    if (JSON.stringify(next) !== JSON.stringify(override)) { override = next; saveOverride(accountId, override); }
   }
 
-  function fieldControl(block, field) {
+  // 单个图片字段的「缩略图 + 更换图片」（走素材库，红线#10 不手填 URL）。
+  function imageSwap(block, field) {
     const id = block.id, key = field.key;
-    const rf = block.fields[key] || { value: field.default, default: field.default, overridden: false };
-    const val = rf.value;
-    const def = rf.default;
-    const overridden = rf.overridden;
-    const wrap = doc.createElement('div');
-    wrap.className = 'bp-field';
-    const label = doc.createElement('div');
-    label.className = 'bp-flabel';
-    // 徽标只在本篇已覆盖后台默认时出现；未覆盖（绝大多数字段）保持干净，无常驻「继承默认」药丸。
-    label.innerHTML = `<span>${esc(field.label || key)}</span>` +
-      (overridden ? `<span class="bp-badge over">本篇已覆盖</span>` : '');
-    if (overridden) {
-      const rb = doc.createElement('button');
-      rb.type = 'button'; rb.className = 'bp-reset'; rb.textContent = '⟲ 恢复默认';
-      rb.onclick = () => resetField(id, key);
-      label.appendChild(rb);
-    }
-    wrap.appendChild(label);
-
-    let ctrl;
-    if (field.type === 'longText' || field.type === 'html_lines') {
-      ctrl = doc.createElement('textarea');
-      ctrl.className = 'bp-textarea';
-      ctrl.value = field.type === 'html_lines' ? (Array.isArray(val) ? val.join('\n') : '') : String(val == null ? '' : val);
-      ctrl.oninput = () => {
-        const v = field.type === 'html_lines' ? ctrl.value.split('\n') : ctrl.value;
-        const d = field.type === 'html_lines' ? (Array.isArray(def) ? def : []) : def;
-        const same = field.type === 'html_lines' ? JSON.stringify(v) === JSON.stringify(d) : v === d;
-        setFieldSoft(id, key, v, same);
-      };
-    } else if (field.type === 'number') {
-      ctrl = doc.createElement('input');
-      ctrl.className = 'bp-input'; ctrl.type = 'number';
-      if (field.min != null) ctrl.min = field.min;
-      if (field.max != null) ctrl.max = field.max;
-      ctrl.value = val == null ? '' : val;
-      ctrl.oninput = () => { const n = Number(ctrl.value); setField(id, key, Number.isFinite(n) ? n : def, n === Number(def)); };
-    } else if (field.type === 'color') {
-      ctrl = doc.createElement('div'); ctrl.className = 'bp-color';
-      const picker = doc.createElement('input'); picker.type = 'color';
-      picker.value = /^#[0-9a-f]{6}$/i.test(String(val)) ? val : '#888888';
-      const hex = doc.createElement('input'); hex.className = 'bp-input'; hex.style.flex = '1'; hex.value = String(val == null ? '' : val);
-      picker.oninput = () => { hex.value = picker.value; setField(id, key, picker.value, picker.value === def); };
-      hex.oninput = () => { setField(id, key, hex.value, hex.value === def); };
-      ctrl.appendChild(picker); ctrl.appendChild(hex);
-    } else if (field.type === 'select') {
-      ctrl = doc.createElement('select'); ctrl.className = 'bp-select';
-      (field.options || []).forEach(o => { const op = doc.createElement('option'); op.value = o.value; op.textContent = o.label || o.value; ctrl.appendChild(op); });
-      ctrl.value = val == null ? '' : val;
-      ctrl.onchange = () => setField(id, key, ctrl.value, ctrl.value === def);
-    } else if (field.type === 'switch') {
-      // 拨动开关（与主开关/显隐开关同款 .bp-switch），label 同行右对齐，不再是裸 checkbox。
-      ctrl = doc.createElement('input'); ctrl.type = 'checkbox'; ctrl.className = 'bp-switch'; ctrl.checked = !!val;
-      ctrl.style.marginLeft = 'auto';
-      ctrl.onchange = () => setField(id, key, ctrl.checked, ctrl.checked === !!def);
-    } else if (field.type === 'image') {
-      // 素材库选图（不再让用户手填 URL / {{asset}} 语法）：缩略图 + 「从素材库选择」按钮。
-      ctrl = doc.createElement('div'); ctrl.className = 'bp-image';
-      const lib = getAssetLibrary ? getAssetLibrary() : null;
-      const thumb = resolveAssetThumb(val, lib, accountId);
-      const preview = doc.createElement('div'); preview.className = 'bp-image-preview' + (thumb ? '' : ' bp-image-empty');
-      if (thumb) { const im = doc.createElement('img'); im.src = thumb; im.alt = ''; preview.appendChild(im); }
-      else { preview.textContent = '未选择'; }
-      const btn = doc.createElement('button'); btn.type = 'button'; btn.className = 'bp-image-btn';
-      btn.textContent = thumb ? '更换图片' : '从素材库选择';
-      btn.onclick = () => openAssetPicker({
-        assetLibrary: getAssetLibrary ? getAssetLibrary() : null,
-        scope: accountId, doc,
-        onPick: (assetId) => { const ref = '{{asset#' + assetId + '}}'; setField(id, key, ref, ref === def); },
-        onClear: () => setField(id, key, '', '' === def),
-      });
-      ctrl.appendChild(preview); ctrl.appendChild(btn);
-    } else { // text
-      ctrl = doc.createElement('input'); ctrl.className = 'bp-input'; ctrl.type = 'text';
-      ctrl.value = String(val == null ? '' : val);
-      ctrl.oninput = () => setField(id, key, ctrl.value, ctrl.value === def);
-    }
-    // switch 的开关并入 label 行右侧；其余控件另起一行。tooltip 不再常驻一行（多为 label 回显的噪音），
-    // 改挂 hover title——需要时悬停可见，平时「不显性化」，面板更干净。
-    if (field.type === 'switch') {
-      if (field.tooltip) ctrl.title = field.tooltip;
-      label.appendChild(ctrl);
-    } else {
-      wrap.appendChild(ctrl);
-      if (field.tooltip) wrap.title = field.tooltip;
-    }
+    const rf = block.fields[key] || { value: field.default, default: field.default };
+    const val = rf.value, def = rf.default;
+    const wrap = doc.createElement('div'); wrap.className = 'bp-image';
+    const thumb = resolveAssetThumb(val, getAssetLibrary ? getAssetLibrary() : null, accountId);
+    const preview = doc.createElement('div'); preview.className = 'bp-image-preview' + (thumb ? '' : ' bp-image-empty');
+    if (thumb) { const im = doc.createElement('img'); im.src = thumb; im.alt = ''; preview.appendChild(im); }
+    else { preview.textContent = '未选择'; }
+    const btn = doc.createElement('button'); btn.type = 'button'; btn.className = 'bp-image-btn';
+    btn.textContent = thumb ? '更换图片' : '从素材库选择';
+    btn.onclick = () => openAssetPicker({
+      assetLibrary: getAssetLibrary ? getAssetLibrary() : null,
+      scope: accountId, doc,
+      onPick: (assetId) => { const ref = '{{asset#' + assetId + '}}'; setField(id, key, ref, ref === def); },
+      onClear: () => setField(id, key, '', '' === def),
+    });
+    wrap.appendChild(preview); wrap.appendChild(btn);
     return wrap;
-  }
-  // setField 的薄封装：html_lines 的“等于默认”判断在调用处算好后传入 same
-  function setFieldSoft(id, key, val, same) {
-    const b = ensureBlock(id);
-    if (!isObj(b.fields)) b.fields = {};
-    if (same) delete b.fields[key]; else b.fields[key] = val;
-    prune(id); emit(); render();
   }
 
   function render() {
+    migrateStaleOverride();
     const mod = getModule() || {};
     const resolved = resolveBlocks(mod, override);
-    const baseOrder = resolved.blocks.map(b => b.id);
-    if (sortable) { try { sortable.destroy(); } catch {} sortable = null; }
-    closeOpenFormatPopovers();   // 关掉挂在 body 上的格式浮层，避免重渲后变孤儿
     mount.innerHTML = '';
     const wrap = doc.createElement('div');
     wrap.className = 'bp-wrap';
+    editableCount = 0;
 
-    // 手风琴头：层叠图标 +「底部区块」+ 启用/总数计数 + 折叠 chevron（整段可折叠，无主开关；
-    // 全关=0/N 即等价隐藏整段，参考稿口径）。
-    const acc = doc.createElement('div');
-    acc.className = 'bp-acc' + (panelOpen ? ' is-open' : '');
-    const accHead = doc.createElement('button');
-    accHead.type = 'button'; accHead.className = 'bp-acc-head';
-    const enabledCount = resolved.blocks.filter(b => b.enabled).length;
-    accHead.innerHTML =
-      `<span class="bp-ico">${ICON_LAYERS}</span>` +
-      `<span class="bp-acc-title">底部区块</span>` +
-      `<span class="bp-count">${enabledCount}/${resolved.blocks.length}</span>` +
-      `<span class="bp-chevron">${ICON_CHEVRON}</span>`;
-    acc.appendChild(accHead);
-
-    const body = doc.createElement('div'); body.className = 'bp-acc-body';
-    body.style.height = panelOpen ? 'auto' : '0';
-    const inner = doc.createElement('div'); inner.className = 'bp-acc-inner';
-    body.appendChild(inner);
-    acc.appendChild(body);
-    wrap.appendChild(acc);
-
-    // chevron 折叠：只动 body 高度 + 旋转，不整树重渲（保留内容/输入态）。
-    accHead.onclick = () => {
-      panelOpen = !panelOpen;
-      acc.classList.toggle('is-open', panelOpen);
-      if (prefersReduced() || !window.gsap) { body.style.height = panelOpen ? 'auto' : '0'; return; }
-      if (panelOpen) {
-        window.gsap.set(body, { height: 'auto' });
-        if (window.gFrom) window.gFrom(body, { height: 0, duration: 0.3, ease: 'power3.out' });
-        if (window.gFrom) window.gFrom(inner.querySelectorAll('.bp-card, .bp-hint, .bp-resetall'),
-          { y: 8, opacity: 0, duration: 0.26, stagger: 0.035, delay: 0.04, ease: 'power2.out' });
-      } else if (window.gTo) {
-        window.gTo(body, { height: 0, duration: 0.24, ease: 'power2.inOut' });
-      }
-    };
-
-    if (!resolved.blocks.length) {
-      const e = doc.createElement('div'); e.className = 'bp-empty'; e.textContent = '该规则暂无可配置的底部区块。';
-      inner.appendChild(e); mount.appendChild(wrap); return;
-    }
-
-    const list = doc.createElement('div'); list.className = 'bp-list';
     for (const block of resolved.blocks) {
       const type = getBlockType(block.type) || { label: block.type, fields: [] };
-      const card = doc.createElement('div');
-      card.className = 'bp-card' + (block.enabled ? '' : ' bp-disabled');
-      card.dataset.id = block.id;
+      const kind = blockEditableKind(block, type);
+      if (!kind) continue; // 只读结构块：编辑区不出现（仅正文预览渲染）
 
-      const row = doc.createElement('div'); row.className = 'bp-row';
-      const grip = doc.createElement('span'); grip.className = 'bp-grip'; grip.innerHTML = ICON_GRIP; grip.title = '拖拽排序';
-      const cb = doc.createElement('input'); cb.type = 'checkbox'; cb.className = 'bp-switch'; cb.checked = block.enabled;
-      cb.title = '在本篇显示/隐藏该区块';
-      cb.onchange = () => setEnabled(block.id, cb.checked, block.enabledDefault);
-      const name = doc.createElement('span'); name.className = 'bp-name';
-      name.innerHTML = esc(blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, accountId)) + (block.enabledOverridden ? '<span class="bp-sub">本篇已改开关</span>' : '');
-      const caret = doc.createElement('span');
-      const isOpen = expanded.has(block.id) || (block.enabled && !expanded.has('__c__' + block.id));
-      caret.className = 'bp-caret' + (isOpen ? ' bp-open' : ''); caret.innerHTML = ICON_CHEVRON;
-      const toggle = () => {
-        if (isOpenNow(block)) { expanded.delete(block.id); expanded.add('__c__' + block.id); }
-        else { expanded.add(block.id); expanded.delete('__c__' + block.id); justExpanded = block.id; }
-        render();
-      };
-      name.onclick = toggle; caret.onclick = toggle;
-      row.appendChild(grip); row.appendChild(name);
-      if (blockHasOverride(block.id)) {
-        const rb = doc.createElement('button');
-        rb.type = 'button'; rb.className = 'bp-reset'; rb.innerHTML = ICON_RESET; rb.title = '此区块恢复后台默认';
-        rb.onclick = (ev) => { ev.stopPropagation(); resetBlock(block.id); };
-        row.appendChild(rb);
-      }
-      row.appendChild(cb); row.appendChild(caret);
-      card.appendChild(row);
+      const sec = doc.createElement('div'); sec.className = 'bp-sec'; sec.dataset.id = block.id;
+      const title = doc.createElement('div'); title.className = 'bp-sec-title';
+      title.textContent = blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, accountId);
+      sec.appendChild(title);
 
-      if (isOpenNow(block)) {
-        const fields = doc.createElement('div'); fields.className = 'bp-fields';
-        const defs = type.fields || [];
-        const consumed = new Set();
-        for (const f of defs) {
-          if (consumed.has(f.key)) continue;
-          // 文本字段 + 其格式兄弟（<base>_size / <base>_color，可选 center 对齐）→ 收成「格式片+浮层」，
-          // 不再平铺字号/颜色/居中三行（参考稿 format-editor.html）。base 去掉 _text 后缀以兼容 intro_text。
-          if (f.type === 'text') {
-            const base = f.key.replace(/_text$/, '');
-            const sizeF = defs.find(x => x.key === base + '_size' && x.type === 'number');
-            const colorF = defs.find(x => x.key === base + '_color' && x.type === 'color');
-            const alignF = defs.find(x => x.key === 'center' && x.type === 'switch');
-            if (sizeF || colorF) {
-              fields.appendChild(createTitleFormatControl({
-                doc, esc, block, textField: f, sizeField: sizeF, colorField: colorF, alignField: alignF,
-                setField: (key, val, same) => setFieldQuiet(block.id, key, val, same),
-              }));
-              consumed.add(f.key);
-              if (sizeF) consumed.add(sizeF.key);
-              if (colorF) consumed.add(colorF.key);
-              if (alignF) consumed.add(alignF.key);
-              continue;
-            }
-          }
-          fields.appendChild(fieldControl(block, f));
-        }
-        // 宿主注入的内嵌编辑器（more_articles 的卡片列表搬进区块展开区，消除并列的独立面板）。
+      if (kind === 'more_articles') {
+        // 更多文章内容编辑器恒显（红线#14，与 frontend_editable 解耦）；宿主返回稳定持有的元素。
         const extra = getBlockExtra ? getBlockExtra(block) : null;
-        if (extra) fields.appendChild(extra);
-        if (fields.childNodes.length) card.appendChild(fields);
+        if (extra) sec.appendChild(extra);
+      } else {
+        // frontend_editable 图片块：仅暴露图片字段换图，结构/其余字段归后台只读。
+        for (const f of (type.fields || [])) if (f.type === 'image') sec.appendChild(imageSwap(block, f));
       }
-      list.appendChild(card);
+      wrap.appendChild(sec);
+      editableCount++;
     }
-    inner.appendChild(list);
 
-    const hint = doc.createElement('div'); hint.className = 'bp-hint';
-    hint.textContent = '勾选显示/隐藏，拖拽排序，展开可改本篇字段；改动只影响当前文章。';
-    inner.appendChild(hint);
-    if (hasAnyOverride(override)) {
-      const ra = doc.createElement('button'); ra.type = 'button'; ra.className = 'bp-resetall'; ra.textContent = '全部恢复默认';
-      ra.onclick = resetAll; inner.appendChild(ra);
+    if (editableCount) {
+      const hint = doc.createElement('div'); hint.className = 'bp-hint';
+      hint.textContent = '底部版式由后台预设；此处只改本篇可替换的内容（更多文章链接 / 封面图），改动只影响当前文章。';
+      wrap.appendChild(hint);
     }
     mount.appendChild(wrap);
-
-    // 拖拽排序交给 SortableJS（grip 为唯一把手；只对 .bp-list 内 .bp-card 排序，仅展开时启用）。
-    // 拖完一次性按 DOM 顺序回写 override.order 并重建——拖拽会话已结束，render() 销毁旧实例安全。
-    if (window.Sortable && resolved.blocks.length > 1 && panelOpen) {
-      sortable = window.Sortable.create(list, {
-        handle: '.bp-grip',
-        draggable: '.bp-card',
-        animation: 150,
-        forceFallback: true,
-        onEnd: () => applyOrder(
-          Array.from(list.querySelectorAll('.bp-card')).map(c => c.dataset.id),
-          baseOrder
-        ),
-      });
-    }
-
-    // 刚点开字段的区块：fields 高度+透明淡入一次（每块展开的微动效）。
-    if (justExpanded && window.gFrom && window.gsap && !prefersReduced()) {
-      const card = Array.from(list.querySelectorAll('.bp-card')).find(c => c.dataset.id === justExpanded);
-      const f = card && card.querySelector('.bp-fields');
-      if (f) window.gFrom(f, { height: 0, opacity: 0, duration: 0.28, ease: 'power3.out', clearProps: 'height' });
-    }
-    justExpanded = null;
-  }
-
-  // 默认开合规则：全部默认折叠，避免底部面板一打开就过长；用户手动开合后以 expanded 记录为准。
-  function isOpenNow(block) {
-    if (expanded.has(block.id)) return true;
-    if (expanded.has('__c__' + block.id)) return false;
-    return false;
   }
 
   render();
   return {
     getOverride: () => override,
     refresh: render,
-    destroy: () => {
-      if (sortable) { try { sortable.destroy(); } catch {} sortable = null; }
-      mount.innerHTML = '';
-    },
+    hasEditableContent: () => editableCount > 0,
+    destroy: () => { mount.innerHTML = ''; },
   };
 }

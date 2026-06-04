@@ -185,9 +185,10 @@ func defaultSeriesBottomBlocksModule() map[string]any {
 		"order":   []any{"author_card", "bd_card", "group_qr", "more_articles"},
 		"blocks": map[string]any{
 			"author_card": map[string]any{
-				"type":    "image",
-				"enabled": true,
-				"fields":  map[string]any{"image": ""}, // 默认空：运营单篇从素材库点选作者名片
+				"type":              "image",
+				"enabled":           true,
+				"frontend_editable": true,                  // 系列作者名片随篇不同，前端放开换图（运营单篇从素材库点选）
+				"fields":            map[string]any{"image": ""}, // 默认空：运营单篇从素材库点选作者名片
 			},
 			"bd_card": map[string]any{
 				"type":    "image",
@@ -293,7 +294,7 @@ func validateBottomBlocksBlock(id string, raw any) error {
 	if !ok {
 		return fmt.Errorf("bottom_blocks block %q must be an object", id)
 	}
-	allowed := map[string]bool{"type": true, "enabled": true, "fields": true}
+	allowed := map[string]bool{"type": true, "enabled": true, "fields": true, "frontend_editable": true}
 	for k := range block {
 		if !allowed[k] {
 			return fmt.Errorf("bottom_blocks block %q has unknown field: %s", id, k)
@@ -307,6 +308,13 @@ func validateBottomBlocksBlock(id string, raw any) error {
 	if v, ok := block["enabled"]; ok {
 		if _, ok := v.(bool); !ok {
 			return fmt.Errorf("bottom_blocks block %q enabled must be boolean", id)
+		}
+	}
+	// frontend_editable：块实例级「允许前端编辑此块」（缺省 false=前端只读）。按账号差异化，
+	// 落服务端默认（rule_defaults.go），不进全账号一致的 catalog（红线#22）。
+	if v, ok := block["frontend_editable"]; ok {
+		if _, ok := v.(bool); !ok {
+			return fmt.Errorf("bottom_blocks block %q frontend_editable must be boolean", id)
 		}
 	}
 	if rawFields, ok := block["fields"]; ok && rawFields != nil {

@@ -63,6 +63,9 @@ function resolveOneBlock(id, base, ov) {
     enabled,
     enabledDefault,
     enabledOverridden: enabledOv != null && enabledOv !== enabledDefault,
+    // 块级「允许前端编辑」：缺省 false=前端只读（结构/样式归后台预配）。前端据此决定是否长出换图入口。
+    // 服务端默认（rule_defaults.go 按账号写）+ rule_bottom_blocks.go 白名单校验；前端零硬编码哪块可改。
+    frontendEditable: base.frontend_editable === true,
     fields,
   };
 }
@@ -110,6 +113,29 @@ export function flattenFields(block) {
   const out = {};
   const fields = (block && block.fields) || {};
   for (const k in fields) out[k] = fields[k].value;
+  return out;
+}
+
+// stripReadonlyOverride 剥离「已不可前端编辑」的存量单篇覆盖，返回新 override（纯函数）。
+//   - 删整段 enabled / order（结构与排序移后台预配，前端不再可改）；
+//   - 删 editableIds 之外块的整条覆盖（这些块前端只读，残留覆盖会渲出与后台默认不一致的孤儿态）；
+//   - 删 editable 块里的 enabled（块级显隐也移后台），只保留其 fields（前端唯一会写的图片覆盖）。
+// 用于前端简化后的存量迁移：老文章可能存了显隐/排序/字段覆盖，加载时一次性剥离，幂等。
+export function stripReadonlyOverride(override, editableIds) {
+  const ov = isObj(override) ? override : {};
+  const ids = editableIds instanceof Set ? editableIds : new Set(editableIds || []);
+  const out = {};
+  if (isObj(ov.overrides)) {
+    const overrides = {};
+    for (const id of Object.keys(ov.overrides)) {
+      if (!ids.has(id)) continue;
+      const b = ov.overrides[id];
+      if (isObj(b) && isObj(b.fields) && Object.keys(b.fields).length) {
+        overrides[id] = { fields: { ...b.fields } };
+      }
+    }
+    if (Object.keys(overrides).length) out.overrides = overrides;
+  }
   return out;
 }
 

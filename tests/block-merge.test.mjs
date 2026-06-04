@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveBlocks, flattenFields, hasAnyOverride } from '../public/js/blocks/block-merge.js';
+import { resolveBlocks, flattenFields, hasAnyOverride, stripReadonlyOverride } from '../public/js/blocks/block-merge.js';
 
 function baseModule() {
   return {
@@ -97,6 +97,37 @@ test('审计修复：override 独有字段不被丢弃（出现在结果与 flat
   assert.equal(card.fields.extra_note.value, '临时备注');
   assert.equal(card.fields.extra_note.overridden, true);
   assert.equal(flattenFields(card).extra_note, '临时备注');
+});
+
+test('frontendEditable 透传：块级 frontend_editable 反映到解析结果（缺省 false=前端只读）', () => {
+  // WHY：前端简化后据此判定哪块出换图入口；缺省只读，避免脏数据误开放结构编辑。
+  const mod = {
+    order: ['a', 'b'],
+    blocks: {
+      a: { type: 'image', enabled: true, frontend_editable: true, fields: { image: '' } },
+      b: { type: 'image', enabled: true, fields: { image: '' } },
+    },
+  };
+  const r = resolveBlocks(mod, {});
+  assert.equal(r.blocks.find(x => x.id === 'a').frontendEditable, true);
+  assert.equal(r.blocks.find(x => x.id === 'b').frontendEditable, false); // 未标记=只读
+});
+
+test('stripReadonlyOverride：剥离结构性(enabled/order)与只读块的存量覆盖，仅留 editable 块 fields，幂等', () => {
+  // WHY：前端简化后结构/排序/显隐归后台；老文章存量覆盖须确定性剥离，否则渲出与后台默认不一致且无 UI 可恢复。
+  const stale = {
+    enabled: false,             // 整段显隐 → 删（移后台）
+    order: ['x', 'y'],          // 排序 → 删（移后台）
+    overrides: {
+      a: { enabled: true, fields: { image: '{{asset#x}}' } }, // editable：删块级 enabled、留 fields
+      b: { fields: { image: '{{asset#y}}' } },                // 只读块 → 整条删
+      c: { enabled: false },                                  // editable 但无 fields → 删
+    },
+  };
+  const out = stripReadonlyOverride(stale, new Set(['a', 'c']));
+  assert.deepEqual(out, { overrides: { a: { fields: { image: '{{asset#x}}' } } } });
+  assert.deepEqual(stripReadonlyOverride(out, new Set(['a', 'c'])), out); // 幂等
+  assert.deepEqual(stripReadonlyOverride(stale, new Set()), {});          // 全只读 → 空（不落盘）
 });
 
 test('hasAnyOverride 正确判定是否存在单篇改动', () => {

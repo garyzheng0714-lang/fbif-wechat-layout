@@ -56,6 +56,8 @@ function ensureStyle(doc) {
 .be-add select{border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:4px 6px;font-size:12px;}
 .be-add button{background:var(--fs-brand,#1456f0);color:#fff;border:none;border-radius:var(--fs-r-s,6px);padding:5px 10px;font-size:12px;cursor:pointer;}
 .be-card{border:1px solid var(--fs-border-card,#e5e6eb);border-radius:var(--fs-r-s,6px);margin-bottom:8px;background:var(--fs-bg-card,#fff);}
+.be-fe{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:var(--fs-text-2,#646a73);cursor:pointer;}
+.be-fe input[disabled]{cursor:default;}
 .be-row{display:flex;align-items:center;gap:8px;padding:8px 10px;}
 .be-grip{cursor:grab;color:var(--fs-text-disabled,#bbbfc4);display:inline-flex;align-items:center;}
 .be-name{flex:1;font-weight:500;cursor:pointer;}
@@ -99,6 +101,8 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
 
   function setMaster(v) { mod.enabled = v; emit(); render(); }
   function setBlockEnabled(id, v) { if (mod.blocks[id]) { mod.blocks[id].enabled = v; emit(); render(); } }
+  // 块实例级「允许前端编辑此块」：勾选写 frontend_editable=true（前端出现换图入口），不勾删除（缺省 false=前端只读）。
+  function setBlockFrontendEditable(id, v) { if (mod.blocks[id]) { if (v) mod.blocks[id].frontend_editable = true; else delete mod.blocks[id].frontend_editable; emit(); render(); } }
   function setField(id, key, v) {
     if (!mod.blocks[id]) return;
     if (!isObj(mod.blocks[id].fields)) mod.blocks[id].fields = {};
@@ -240,6 +244,20 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
 
       if (open) {
         const fields = doc.createElement('div'); fields.className = 'be-fields';
+        // 「允许前端编辑此块」：勾=该块在前端内容编辑区出现换图入口；不勾=前端只读（仍渲进正文预览）。
+        // more_articles 的内容编辑器在前端永久可用（红线#14），不受此开关控制——故禁用并注明。
+        const feRow = doc.createElement('label'); feRow.className = 'be-fe';
+        const fe = doc.createElement('input'); fe.type = 'checkbox';
+        const isMore = block.type === 'more_articles';
+        fe.checked = isMore ? true : block.frontend_editable === true;
+        fe.disabled = isMore;
+        fe.onchange = () => setBlockFrontendEditable(id, fe.checked);
+        const feTxt = doc.createElement('span');
+        feTxt.textContent = isMore
+          ? '更多文章内容编辑器在前端永久可用（不受此开关控制）'
+          : '允许前端编辑此块（前端出现「更换图片」入口；不勾＝前端只读）';
+        feRow.appendChild(fe); feRow.appendChild(feTxt);
+        fields.appendChild(feRow);
         const fdefs = type.fields || [];
         const fv = isObj(block.fields) ? block.fields : {};
         if (!fdefs.length) { const e = doc.createElement('div'); e.className = 'be-empty'; e.textContent = '该类型无可编辑字段（如「更多文章」委托卡片编辑器）。'; fields.appendChild(e); }
