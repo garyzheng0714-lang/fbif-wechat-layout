@@ -10,6 +10,7 @@
 import { resolveBlocks, hasAnyOverride } from './block-merge.js';
 import { getBlockType } from './block-registry.gen.js';
 import { openAssetPicker, resolveAssetThumb } from './asset-picker.js';
+import { createTitleFormatControl, closeOpenFormatPopovers } from './block-format-control.js';
 
 function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
 function esc(s) {
@@ -190,6 +191,13 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     if (same) delete b.fields[key]; else b.fields[key] = val;
     prune(id); emit(); render();
   }
+  // 静默版：写覆盖 + 持久化 + 刷正文预览，但不重渲面板——供格式浮层用，避免每次改值重建 DOM 关掉浮层。
+  function setFieldQuiet(id, key, val, same) {
+    const b = ensureBlock(id);
+    if (!isObj(b.fields)) b.fields = {};
+    if (same) delete b.fields[key]; else b.fields[key] = val;
+    prune(id); emit();
+  }
   function resetField(id, key) {
     const b = override.overrides && override.overrides[id];
     if (b && b.fields) delete b.fields[key];
@@ -320,6 +328,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     const resolved = resolveBlocks(mod, override);
     const baseOrder = resolved.blocks.map(b => b.id);
     if (sortable) { try { sortable.destroy(); } catch {} sortable = null; }
+    closeOpenFormatPopovers();   // 关掉挂在 body 上的格式浮层，避免重渲后变孤儿
     mount.innerHTML = '';
     const wrap = doc.createElement('div');
     wrap.className = 'bp-wrap';
@@ -400,7 +409,31 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
 
       if (isOpenNow(block)) {
         const fields = doc.createElement('div'); fields.className = 'bp-fields';
-        for (const f of (type.fields || [])) fields.appendChild(fieldControl(block, f));
+        const defs = type.fields || [];
+        const consumed = new Set();
+        for (const f of defs) {
+          if (consumed.has(f.key)) continue;
+          // 文本字段 + 其格式兄弟（<base>_size / <base>_color，可选 center 对齐）→ 收成「格式片+浮层」，
+          // 不再平铺字号/颜色/居中三行（参考稿 format-editor.html）。base 去掉 _text 后缀以兼容 intro_text。
+          if (f.type === 'text') {
+            const base = f.key.replace(/_text$/, '');
+            const sizeF = defs.find(x => x.key === base + '_size' && x.type === 'number');
+            const colorF = defs.find(x => x.key === base + '_color' && x.type === 'color');
+            const alignF = defs.find(x => x.key === 'center' && x.type === 'switch');
+            if (sizeF || colorF) {
+              fields.appendChild(createTitleFormatControl({
+                doc, esc, block, textField: f, sizeField: sizeF, colorField: colorF, alignField: alignF,
+                setField: (key, val, same) => setFieldQuiet(block.id, key, val, same),
+              }));
+              consumed.add(f.key);
+              if (sizeF) consumed.add(sizeF.key);
+              if (colorF) consumed.add(colorF.key);
+              if (alignF) consumed.add(alignF.key);
+              continue;
+            }
+          }
+          fields.appendChild(fieldControl(block, f));
+        }
         // 宿主注入的内嵌编辑器（more_articles 的卡片列表搬进区块展开区，消除并列的独立面板）。
         const extra = getBlockExtra ? getBlockExtra(block) : null;
         if (extra) fields.appendChild(extra);
