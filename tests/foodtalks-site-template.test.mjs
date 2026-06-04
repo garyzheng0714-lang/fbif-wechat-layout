@@ -110,6 +110,19 @@ test('foodtalks-site render tracks prevWasStandaloneLink to skip blank line betw
   assert.match(templateSource, /prevWasStandaloneLink/);
 });
 
+test('正文以 tip 提示声明收尾时，底部页脚前不插分隔空行（红线#20：提示声明与商务合作行连续）', () => {
+  // 提示声明（tip）走正文流且总在末尾；它与底部首块（商务合作 biz_coop）同属一组声明，
+  // FoodTalks 原生口径里两条「*」声明连续无空行。此前正文→页脚无条件插 BLANK_LINE，把它们
+  // 拆开了（用户实测样例 foodtalks.cn/news/62295）。tip 分支须置 endedWithTip，页脚分隔空行
+  // 须以 !endedWithTip 守门。
+  assert.match(templateSource, /endedWithTip\s*=\s*true/, 'tip 渲染分支必须标记 endedWithTip');
+  assert.match(
+    templateSource,
+    /if\s*\(\s*!endedWithTip\s*\)\s*lines\.push\(BLANK_LINE\)/,
+    '正文→页脚分隔空行必须以 !endedWithTip 守门，tip 收尾时不插'
+  );
+});
+
 test('foodtalks-site DOCX 分类委托共享模块 docx-article-model（与公众号共用结构层）', () => {
   // 旧契约「源码含 stripDocxPreambleBeforeAuthor」已过时：前置剥离等结构分类已下沉到
   // 共享模块 docx-article-model.js（公众号与网站共用一套）。前置剥离/图片取图等行为

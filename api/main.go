@@ -349,6 +349,7 @@ func articleBlockOptionsForAccount(store *rulePresetStore, accountID string) art
 	params, _ := preset.Behavior["params"].(map[string]any)
 	opts.CaptionMaxChars = behaviorParamInt(params, "image_caption_max_chars", opts.CaptionMaxChars)
 	opts.CaptionCenterMaxChars = behaviorParamInt(params, "image_caption_center_max_chars", opts.CaptionCenterMaxChars)
+	opts.CaptionStrongMaxChars = behaviorParamInt(params, "image_caption_strong_max_chars", opts.CaptionStrongMaxChars)
 	return normalizeArticleBlockOptions(opts)
 }
 

@@ -28,6 +28,10 @@ func defaultRuleBehavior() map[string]any {
 				"type":    "number",
 				"default": defaultImageCaptionCenterMaxChars,
 			},
+			"image_caption_strong_max_chars": map[string]any{
+				"type":    "number",
+				"default": defaultImageCaptionStrongMaxChars,
+			},
 			// footer.html 内嵌的存量原创声明（engine.js 转载改写时按此字面量定位替换）。
 			"footer_stock_original_text": map[string]any{"type": "string", "default": "* 本文为FBIF原创，欢迎转发朋友圈；"},
 		},

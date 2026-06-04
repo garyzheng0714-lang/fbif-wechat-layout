@@ -325,8 +325,12 @@ function render(elems, config = {}) {
   const lines = [];
   let prevWasHeading = false;
   let prevWasStandaloneLink = false;
+  // 正文末元素是否为 tip 提示声明——决定底部页脚前是否插分隔空行（红线#20：提示声明
+  // 与商务合作行同属一组，应连续无空行）。tip 总被 behavior 置于 elems 末尾。
+  let endedWithTip = false;
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
+    endedWithTip = false;
     if (e.k === 'h') {
       // 标题前 1 个空行。p 分支已在每段后留空行，这里避免再叠加成双空行。
       if (!prevWasHeading && lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
@@ -388,6 +392,7 @@ function render(elems, config = {}) {
           '</span></em></p>'
         );
       }
+      endedWithTip = true;
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
@@ -465,7 +470,9 @@ function render(elems, config = {}) {
     const override = config._bottomBlocksOverride || {};
     const footerHtml = renderBottomBlocksHtml(bottomBlocks, override, siteBlockRenderers(mods.asset_library, 'ft-default'));
     if (footerHtml) {
-      lines.push(BLANK_LINE);
+      // 正文以 tip 提示声明收尾时，它与底部首块（商务合作）同属一组声明，应连续无空行
+      // （红线#20）。仅当正文不是以 tip 收尾时才插正文→页脚分隔空行。
+      if (!endedWithTip) lines.push(BLANK_LINE);
       lines.push(footerHtml);
     }
   } else {
@@ -474,7 +481,7 @@ function render(elems, config = {}) {
     if (footerCfg.enabled) {
       const footerHtml = buildFooterHtml(footerCfg.active_segments, footerCfg, mods.asset_library, 'ft-default');
       if (footerHtml) {
-        lines.push(BLANK_LINE);
+        if (!endedWithTip) lines.push(BLANK_LINE);
         lines.push(footerHtml);
       }
     }

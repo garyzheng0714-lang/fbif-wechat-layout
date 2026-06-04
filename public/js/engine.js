@@ -159,6 +159,16 @@ function stockFooterReady() {
 // engine 渠道共用、不可 import 公众号渲染器，故通过模板回调接管底部渲染（红线 #19）。
 let _activeTemplate = null;
 
+// 网站渲染器（foodtalks-site）输出已是完整 inline-style 的干净 HTML：正文图自带
+// display:block + margin:0 auto 居中、内联 logo 故意左对齐。公众号导向的
+// normalizeWechatRichHtml 会给所有 <img> 强制套 margin:0 auto，把网站页脚的内联 logo
+// 误居中（预览与复制路径都中招）。网站渠道整体跳过归一化（红线#19/#20：与公众号物理
+// 隔离、页脚字节保真），其余渠道照常归一化。
+function normalizeRich(html) {
+  if (_activeTemplate && _activeTemplate.id === 'foodtalks-site') return html;
+  return normalizeWechatRichHtml(html);
+}
+
 async function loadBaseFooterHtml() {
   const custom = localStorage.getItem('custom_footer');
   if (custom) return custom;
@@ -704,9 +714,9 @@ export function initApp(initialTemplate) {
   function showPreview(title, articleContent, footerContent, stats) {
     // 渲染新文章 → 复位上一篇的复制状态（按钮变身 + 后台入口），避免显示陈旧的「✓已复制」。
     if (window._resetCopyFeedback) window._resetCopyFeedback();
-    _articleHtml = normalizeWechatRichHtml(articleContent);
+    _articleHtml = normalizeRich(articleContent);
     _articleCopy = _articleHtml;
-    _footerHtml = normalizeWechatRichHtml(footerContent);
+    _footerHtml = normalizeRich(footerContent);
     _footerCopy = _footerHtml;
     _failedSrcs = [];
     _copyRequiresWechatImageTransfer = false;
@@ -736,7 +746,7 @@ export function initApp(initialTemplate) {
 
     window._updateFooter = function(newHtml) {
       if (typeof newHtml === 'string' && newHtml !== '') {
-        _footerHtml = normalizeWechatRichHtml(newHtml);
+        _footerHtml = normalizeRich(newHtml);
         _footerCopy = _footerHtml;
       }
       const enabled = document.getElementById('footerEnabled').checked;
@@ -914,7 +924,7 @@ export function initApp(initialTemplate) {
     const config = (window._activeConfig && window._activeConfig.config) || {};
     const themeCSS = await _themeCSSReady;
     html = processForCopy(html, themeCSS, config);
-    html = normalizeWechatRichHtml(html);
+    html = normalizeRich(html);
 
     // 公众号 ProseMirror 在粘贴 HTML 末尾若是 <img>/<section> 而无段落节点，
     // 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次

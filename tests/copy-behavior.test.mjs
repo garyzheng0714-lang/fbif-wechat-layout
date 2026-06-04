@@ -26,6 +26,23 @@ test('copy keeps legacy DOCX skip-upload behavior', async () => {
   assert.match(engine, /return ok;/);
 });
 
+test('网站渠道跳过公众号导向的图片归一化（内联 logo 不被强制居中）', async () => {
+  // 红线#19/#20：normalizeWechatRichHtml 给所有 <img> 强制 display:block + margin:0 auto，
+  // 会把网站页脚的内联 FoodTalks logo 误居中（预览与复制都中招）。网站渲染器输出已是干净
+  // inline-style（正文图自带居中、logo 故意左对齐），须经渠道感知的 normalizeRich 跳过。
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  assert.match(engine, /function normalizeRich\(html\)/, '必须有渠道感知的 normalizeRich 包装器');
+  assert.match(
+    engine,
+    /_activeTemplate\.id === 'foodtalks-site'\s*\)\s*return html/,
+    'normalizeRich 必须对 foodtalks-site 渠道跳过归一化'
+  );
+  // 预览/页脚更新/复制三条内容路径都须走 normalizeRich，而非裸 normalizeWechatRichHtml。
+  assert.match(engine, /_articleHtml = normalizeRich\(articleContent\)/);
+  assert.match(engine, /_footerHtml = normalizeRich\(footerContent\)/);
+  assert.match(engine, /html = normalizeRich\(html\)/, '复制路径必须走 normalizeRich');
+});
+
 test('copy click does not wait on background image or more-articles preparation', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));

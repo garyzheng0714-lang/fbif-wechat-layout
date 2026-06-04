@@ -165,6 +165,47 @@ func TestCaptionCenterThresholdCanBeConfigured(t *testing.T) {
 	}
 }
 
+// 说明性长图注（>80 字，中英混排 + 多个产品名/括号注释）带小字/灰色强信号时，
+// 必须识别为图注，而不是被 80 字基础上限一刀切成正文。复刻真实样例：
+// mp.weixin.qq.com/s/8xVXVFar3fbJEEQKHSwy7w 那段「左前方为…后排三款为…」(~123 字)。
+func TestLongStyledCaptionStaysCaption(t *testing.T) {
+	longCaption := "左前方为Classic Collection系列的Paris（巴黎红茶），后排三款为HT系列：" +
+		"Vanilla Comoro（香草科摩罗）、Green Tea with Coconut（椰子绿茶）和Peppermint Herbal（薄荷草本茶）"
+	if n := len([]rune(longCaption)); n <= defaultImageCaptionMaxChars {
+		t.Fatalf("样例图注应超过基础上限以验证回归，实际 %d 字", n)
+	}
+	// WeChat 把图注的字号/颜色放在内层 <span> 上（灰色强信号）。
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
+			`<p style="text-align: center;"><span style="font-size: 14px; color: #888888;">` +
+			longCaption + `</span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	cap := findBlockByText(blocks, "Peppermint Herbal")
+	if cap == nil || cap.K != "cap" {
+		t.Fatalf("带灰色强信号的长图注必须识别为 cap，got %v; kinds=%v", cap, findKinds(blocks))
+	}
+}
+
+// 防过度放宽：图片后的长【普通正文】段（非小字、非灰色）即使超过基础上限，
+// 也必须保持正文——强信号高上限只对小字/灰色图注生效。
+func TestLongPlainParagraphAfterImageStaysBody(t *testing.T) {
+	longBody := "这是一段紧跟在图片后面的普通正文，它既不是小字号也不是灰色，只是正常黑色正文，" +
+		"长度同样超过了八十个字符的基础上限，按规则必须保持为正文，绝不能被误判成居中灰色小字图注。"
+	if n := len([]rune(longBody)); n <= defaultImageCaptionMaxChars {
+		t.Fatalf("样例正文应超过基础上限以验证防回归，实际 %d 字", n)
+	}
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
+			`<p style="font-size: 16px;">` + longBody + `</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	b := findBlockByText(blocks, "普通正文")
+	if b == nil || b.K != "txt" {
+		t.Fatalf("图后长普通正文必须保持 txt，got %v; kinds=%v", b, findKinds(blocks))
+	}
+}
+
 func TestArticleBlockOptionsReadActiveAccountBehavior(t *testing.T) {
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 	preset := rulePreset{

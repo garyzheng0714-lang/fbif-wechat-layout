@@ -55,17 +55,24 @@ type computedStyle struct {
 const (
 	defaultImageCaptionMaxChars       = 80
 	defaultImageCaptionCenterMaxChars = 40
+	// 带强信号（小字号/灰色）的图注放宽到的更高字数上限。说明性长图注（中英混排、
+	// 多个产品名 + 括号注释，如「左前方为…（巴黎红茶），后排三款为…」）常突破 80 字，
+	// 但小字/灰色是公众号图注的明确标记（正文从不用小字/灰色），故对带此强信号的图后
+	// 段落放宽长度闸到 200，避免被一刀切降级成正文。
+	defaultImageCaptionStrongMaxChars = 200
 )
 
 type articleBlockOptions struct {
 	CaptionMaxChars       int
 	CaptionCenterMaxChars int
+	CaptionStrongMaxChars int
 }
 
 func defaultArticleBlockOptions() articleBlockOptions {
 	return articleBlockOptions{
 		CaptionMaxChars:       defaultImageCaptionMaxChars,
 		CaptionCenterMaxChars: defaultImageCaptionCenterMaxChars,
+		CaptionStrongMaxChars: defaultImageCaptionStrongMaxChars,
 	}
 }
 
@@ -76,6 +83,13 @@ func normalizeArticleBlockOptions(opts articleBlockOptions) articleBlockOptions 
 	}
 	if opts.CaptionCenterMaxChars <= 0 || opts.CaptionCenterMaxChars > opts.CaptionMaxChars {
 		opts.CaptionCenterMaxChars = defaults.CaptionCenterMaxChars
+	}
+	if opts.CaptionStrongMaxChars <= 0 || opts.CaptionStrongMaxChars > 1000 {
+		opts.CaptionStrongMaxChars = defaults.CaptionStrongMaxChars
+	}
+	// 强信号上限是放宽用的，不应比基础上限还严。
+	if opts.CaptionStrongMaxChars < opts.CaptionMaxChars {
+		opts.CaptionStrongMaxChars = opts.CaptionMaxChars
 	}
 	return opts
 }
@@ -474,7 +488,16 @@ func shouldAttachToCaptionGroup(cx *blockCtx, text string, textLen int, captionL
 }
 
 func isCaption(cx *blockCtx, textLen int, opts articleBlockOptions) bool {
-	if textLen == 0 || textLen > opts.CaptionMaxChars {
+	if textLen == 0 {
+		return false
+	}
+	// 小字/灰色是公众号图注的明确标记（正文从不用小字/灰色），带此强信号的图后段落
+	// 即便较长也是图注，放宽到 CaptionStrongMaxChars。仅居中/class 等弱信号仍守
+	// CaptionMaxChars，避免吞掉较长的居中正文段。
+	if hasStrongCaptionStyle(cx) {
+		return textLen <= opts.CaptionStrongMaxChars
+	}
+	if textLen > opts.CaptionMaxChars {
 		return false
 	}
 	for _, c := range cx.classes {
@@ -498,17 +521,30 @@ func isCaption(cx *blockCtx, textLen int, opts articleBlockOptions) bool {
 }
 
 func isCaptionContinuation(cx *blockCtx, text string, textLen int, opts articleBlockOptions) bool {
-	if textLen == 0 || textLen > opts.CaptionMaxChars {
+	if textLen == 0 {
 		return false
 	}
 	if isImageSourceLine(text) {
 		return true
+	}
+	// 与首行一致：带小字/灰色强信号的续行图注放宽到 CaptionStrongMaxChars。
+	if hasStrongCaptionStyle(cx) {
+		return textLen <= opts.CaptionStrongMaxChars
+	}
+	if textLen > opts.CaptionMaxChars {
+		return false
 	}
 	for _, c := range cx.classes {
 		if classSignalsCaption(c) {
 			return true
 		}
 	}
+	return false
+}
+
+// hasStrongCaptionStyle 报告块级或文本节点样式是否带明确图注标记（小字号或灰色）。
+// 居中被刻意排除——正文也可能居中，居中只是弱信号。
+func hasStrongCaptionStyle(cx *blockCtx) bool {
 	if strongStyleSignalsCaption(cx.style) {
 		return true
 	}
