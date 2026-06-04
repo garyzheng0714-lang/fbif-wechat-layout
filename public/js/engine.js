@@ -326,10 +326,28 @@ export function initApp(initialTemplate) {
     if (para || image) {
       return [
         para ? para[1] + ' 段' : '',
-        image ? image[1] + ' 图' : '',
+        image ? image[1] + ' 张图片' : '',
       ].filter(Boolean).join(' · ');
     }
     return text || '已完成提取';
+  }
+
+  function formatSidebarStatus(status) {
+    const text = String(status || '').trim();
+    return /^段落\s*(?:[:：]|\d)/.test(text) ? '' : text;
+  }
+
+  function hasDocumentSummaryCard() {
+    return !!document.getElementById('docZone');
+  }
+
+  function settledSidebarStatus(stats) {
+    return hasDocumentSummaryCard() ? formatSidebarStatus(stats) : (stats || '');
+  }
+
+  function uploadStatus(stats, suffix) {
+    if (hasDocumentSummaryCard()) return suffix;
+    return [stats || '', suffix || ''].filter(Boolean).join(' | ');
   }
 
   function showImportSummary(title, stats) {
@@ -748,7 +766,7 @@ export function initApp(initialTemplate) {
     if (window._activeConfig) applyThemeVars(contentArea, window._activeConfig.config);
     contentArea.innerHTML = _articleHtml + '\n' + _footerHtml;
     hookPreviewImages(contentArea);
-    document.getElementById('statsBar').textContent = stats;
+    document.getElementById('statsBar').textContent = settledSidebarStatus(stats);
 
     const retryBtn = document.getElementById('retryBtn');
     if (retryBtn) retryBtn.style.display = 'none';
@@ -805,7 +823,7 @@ export function initApp(initialTemplate) {
     _uploadDone = false;
     _uploadPromise = null;
     const statsBar = document.getElementById('statsBar');
-    const originalStats = stats;
+    const stableStats = settledSidebarStatus(stats);
 
     const skipUploadForThisFile = !!window._skipUpload && _sourceIsDocx;
     if (skipUploadForThisFile) {
@@ -820,10 +838,10 @@ export function initApp(initialTemplate) {
         _failedSrcs = result.failedSrcs || [];
         _uploadDone = true;
         if (result.failed > 0) {
-          statsBar.textContent = originalStats + ' | ' + result.failed + '张图片准备失败';
+          statsBar.textContent = uploadStatus(stableStats, result.failed + '张图片准备失败');
           markFailedImages(_failedSrcs);
         } else {
-          statsBar.textContent = originalStats;
+          statsBar.textContent = stableStats;
         }
       });
       logConv('info', 'DOCX 跳过上传：仅准备本地图片，不上传');
@@ -856,11 +874,11 @@ export function initApp(initialTemplate) {
       _failedSrcs = result.failedSrcs || [];
       _uploadDone = true;
       if (result.failed > 0) {
-        statsBar.textContent = originalStats + ' | ' + result.failed + '张图片上传失败';
+        statsBar.textContent = uploadStatus(stableStats, result.failed + '张图片上传失败');
         markFailedImages(_failedSrcs);
         if (retryBtn) retryBtn.style.display = 'inline-block';
       } else {
-        statsBar.textContent = originalStats + ' | 全部图片已就绪';
+        statsBar.textContent = hasDocumentSummaryCard() ? '' : uploadStatus(stableStats, '全部图片已就绪');
       }
     });
     prepareMoreArticlesForCopy('preview');
@@ -886,7 +904,7 @@ export function initApp(initialTemplate) {
       statsBar.textContent = result.failed + '张图片仍然失败';
       markFailedImages(_failedSrcs);
     } else {
-      statsBar.textContent = '全部图片已就绪';
+      statsBar.textContent = hasDocumentSummaryCard() ? '' : '全部图片已就绪';
       markFailedImages([]);
       if (retryBtn) retryBtn.style.display = 'none';
     }
@@ -1120,6 +1138,8 @@ export function initApp(initialTemplate) {
         dom.doc_name || dom.title_input_value || dom.article_title_text || '',
         dom.doc_stat || dom.stats_text || ''
       );
+      const statsBarEl = document.getElementById('statsBar');
+      if (statsBarEl) statsBarEl.textContent = formatSidebarStatus(dom.stats_text || '');
     } else {
       resetImportEntry();
     }

@@ -145,7 +145,20 @@ export function bindUrlImportShortcuts({
   documentRef = globalThis.document,
   fetchArticle,
   ignoreClassNames = [],
+  focusTargetSelector = '',
 } = {}) {
+  const urlInput = documentRef.getElementById('urlInput');
+
+  if (focusTargetSelector && urlInput && typeof documentRef.querySelectorAll === 'function') {
+    documentRef.querySelectorAll(focusTargetSelector).forEach(target => {
+      target.addEventListener('click', event => {
+        if (event.target === urlInput) return;
+        urlInput.focus();
+        if (urlInput.value && typeof urlInput.select === 'function') urlInput.select();
+      });
+    });
+  }
+
   documentRef.addEventListener('keydown', event => {
     const preview = documentRef.getElementById('previewContent');
     const hasPreview = preview && preview.style.display !== 'none';
@@ -155,7 +168,7 @@ export function bindUrlImportShortcuts({
     }
   });
   documentRef.addEventListener('paste', event => {
-    const urlInput = documentRef.getElementById('urlInput');
+    if (!urlInput) return;
     const ae = documentRef.activeElement;
     if (ae === urlInput) return;
     if (ae && ae.classList && ignoreClassNames.some(name => ae.classList.contains(name))) return;
@@ -168,7 +181,6 @@ export function bindUrlImportShortcuts({
       fetchArticle();
     }
   });
-  const urlInput = documentRef.getElementById('urlInput');
   if (!urlInput) return;
   urlInput.addEventListener('paste', () => {
     setTimeout(() => {

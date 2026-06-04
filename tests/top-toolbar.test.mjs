@@ -27,7 +27,7 @@ function assertToolbarInGlobalHeader(html, label) {
   assert.doesNotMatch(previewPanelTop, /id="previewToolbar"/, `${label} toolbar must not sit inside the article preview panel`);
 }
 
-test('app global header restores the account menu and keeps copy/settings on the right', async () => {
+test('app global header keeps settings inside the account menu and copy on the right', async () => {
   const html = await readShell('app.html');
 
   const headerStart = html.indexOf('<header class="global-channel-bar">');
@@ -41,9 +41,9 @@ test('app global header restores the account menu and keeps copy/settings on the
   assert.match(header, /id="acctMenu"/, 'app.html account menu should live in the top-left bar');
   assert.match(header, /id="previewToolbar"/, 'app.html copy toolbar should live in the global top bar');
   assert.match(header, /id="copyBtn"/, 'app.html copy button should be a global top-right action');
-  assert.match(header, /id="adminLockBtn"[\s\S]*id="copyBtn"/, 'app.html settings button should sit immediately before copy');
-  assert.match(header, /class="topbar-settings-btn admin-lock-btn"/, 'app.html settings entry should be an icon button');
-  assert.match(header, /class="topbar-settings-tooltip"[^>]*>设置</, 'app.html settings button should reveal a concise tooltip');
+  assert.match(header, /id="acctMenu"[\s\S]*class="topbar-spacer"[\s\S]*id="previewToolbar"[\s\S]*id="copyBtn"/, 'app.html copy should stay on the right');
+  assert.doesNotMatch(header, /id="adminLockBtn"|topbar-settings-btn/, 'app.html settings should not be a persistent top-bar icon');
+  assert.match(html, /settingsAction:\s*\{[\s\S]*id:\s*'adminLockBtn'[\s\S]*label:\s*'规则设置'/, 'app.html settings should be registered as an account-menu footer action');
   assert.doesNotMatch(header, /app-brand|app-brand-logo|FBIF文章排版工具/, 'app.html should not show product branding in the top bar');
   assert.doesNotMatch(header, /id="articleRefreshBtn"/, 'app.html should not show a refresh button in the top bar');
   assert.doesNotMatch(previewPanelTop, /id="previewToolbar"|id="copyBtn"|id="articleRefreshBtn"|preview-toolbar-strip/, 'app.html preview panel should not own the top actions');
@@ -71,12 +71,15 @@ test('site toolbar lives in the global top-right bar, not the article preview pa
 
 test('app rail divider stays visually slim and the handle behaves like a clickable control', async () => {
   const css = await readPublic('css/app-shell.css');
+  const channelCss = await readPublic('css/channel-bar.css');
   assert.match(css, /\.rail-divider\s*\{[\s\S]*?width:\s*4px;/, 'rail divider should stay slim');
   assert.match(css, /\.rail-divider-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*50px;[\s\S]*?cursor:\s*pointer;/, 'rail handle should be smaller and use pointer feedback');
   assert.match(css, /\.rail-divider-toggle:hover\s*\{[\s\S]*?--rail-toggle-scale:\s*1\.06;/, 'rail handle should animate on hover');
   assert.match(css, /\.global-channel-bar > \.acct-menu\s*\{[\s\S]*?flex:\s*0 1 auto;/, 'account switcher should be anchored in the top-left bar');
   assert.doesNotMatch(css, /preview-toolbar-strip|app-brand|tb-icon-action|article-refresh-spin/, 'old preview action strip and refresh styles should not be restored');
   assert.doesNotMatch(css, /article-tabs|article-tab/, 'article tab styles should not be restored');
-  assert.match(css, /\.topbar-settings-btn\s*\{[\s\S]*?width:\s*32px;[\s\S]*?color:\s*var\(--fs-brand\);/, 'settings button should be styled as a top-bar icon');
+  assert.doesNotMatch(css, /topbar-settings-btn|topbar-settings-tooltip/, 'app shell should not keep dead top-bar settings styles');
+  assert.match(channelCss, /\.acct-menu-divider\s*\{[\s\S]*?background:\s*var\(--fs-divider/, 'account menu settings should be separated from account choices');
+  assert.match(channelCss, /\.acct-settings-item\s*\{[\s\S]*?color:\s*var\(--fs-text-2/, 'account menu settings should be a muted menu action');
   assert.doesNotMatch(css, /\.sidebar-footer\s+\.active-rule-card/, 'left-bottom rule card styles should not be restored');
 });

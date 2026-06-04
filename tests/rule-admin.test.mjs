@@ -25,6 +25,7 @@ test('rule admin exposes JSON editing and new-rule controls', async () => {
   assert.match(adminPanel, /应用到当前公众号/);
   assert.match(adminPanel, /复制为新规则/);
   assert.match(adminPanel, /保存修改/);
+  assert.match(adminPanel, /closest\('#adminLockBtn'\)/, '规则后台入口应使用事件委托，账号菜单重绘后仍可打开');
   assert.doesNotMatch(adminPanel, />设为当前规则</);
   assert.doesNotMatch(adminPanel, />另存为规则</);
   assert.match(adminPanel, /createMoreArticlesRuleEditor/);

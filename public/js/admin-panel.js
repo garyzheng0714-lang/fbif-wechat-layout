@@ -895,5 +895,5 @@ export function initAdminPanel(options = {}) {
     else renderMain();
   }
 
-  button.addEventListener('click', open);
+  document.addEventListener('click', e => { const t = e.target && e.target.closest ? e.target : e.target && e.target.parentElement; if (t && t.closest('#adminLockBtn')) { e.preventDefault(); open(); } });
 }

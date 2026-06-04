@@ -24,8 +24,9 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(header, /id="acctMenu"/, '公众号菜单应回到全局顶栏左上角');
   assert.doesNotMatch(app, /captureArticleTab|_articleTabs|mountArticleTabs/, '账号切换不应再绑定文章标签页状态');
   assert.doesNotMatch(header, /FBIF文章排版工具|class="app-brand-logo"|class="app-brand"/, '全局顶栏不应展示产品身份文案');
-  assert.match(header, /id="adminLockBtn"/, '设置入口应在全局顶栏右侧');
-  assert.match(header, /id="adminLockBtn"[\s\S]*id="copyBtn"/, '设置入口应紧挨复制全文左侧');
+  assert.match(header, /id="acctMenu"[\s\S]*class="topbar-spacer"[\s\S]*id="previewToolbar"[\s\S]*id="copyBtn"/, '复制全文应留在右侧操作区');
+  assert.doesNotMatch(header, /id="adminLockBtn"/, '设置入口不应常驻顶栏');
+  assert.match(app, /settingsAction:\s*\{[\s\S]*id:\s*'adminLockBtn'[\s\S]*label:\s*'规则设置'/, '设置入口应收进账号菜单底部');
   assert.doesNotMatch(header, /id="articleRefreshBtn"/, '刷新按钮不应出现在顶栏');
   assert.doesNotMatch(railHead, /class="rail-account-bar"|id="acctMenu"/, '公众号菜单不应留在左侧工具区顶部');
   // 旧的两层切换器残骸必须清掉
@@ -36,6 +37,8 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(menuJs, /CHANNEL_LABEL/);
   assert.match(menuJs, /is-active/);
   assert.match(menuJs, /setActive/);
+  assert.match(menuJs, /acct-menu-divider/);
+  assert.match(menuJs, /data-acct-settings-action/);
   assert.match(app, /switchAccount/);
   assert.match(app, /loadActiveRulePreset\(activeRulePack\.id\)/);
   assert.match(app, /hydrateActiveRulePreset\(activeRulePack\.id\)/);
@@ -59,6 +62,7 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(allCss, /\.acct-trigger/);
   assert.match(allCss, /\.acct-panel/);
   assert.match(allCss, /\.acct-item\.is-active/);
+  assert.match(allCss, /\.acct-settings-item/);
   assert.doesNotMatch(css, /\.sidebar-footer\s+\.active-rule-card/);
   assert.doesNotMatch(css, /\.rail-icon-btn/);
   assert.match(css, /\.active-rule-card\.editing/);

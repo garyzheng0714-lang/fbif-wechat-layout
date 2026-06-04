@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import {
+  bindUrlImportShortcuts,
   createUrlImportHandler,
   foodTalksFetchErrorMessage,
   resolveInitialRulePackID,
@@ -58,6 +59,27 @@ test('editor shells load JSZip from the same-origin vendor asset', async () => {
     assert.match(source, /<script src="\/vendor\/jszip\.min\.js"><\/script>/);
     assert.doesNotMatch(source, /cdn\.jsdelivr\.net\/npm\/jszip/);
   }
+});
+
+test('公众号上传摘要收进文件卡片，网站页保留旧统计行', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const site = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+
+  const docZoneStart = app.indexOf('id="docZone"');
+  const statsBarStart = app.indexOf('id="statsBar"');
+  const docZoneEnd = app.indexOf('<div class="error" id="error">');
+  assert.ok(docZoneStart > 0, '公众号页应有上传后文件卡片');
+  assert.ok(
+    statsBarStart > docZoneStart && statsBarStart < docZoneEnd,
+    '旧统计/上传状态行应归属文件卡片，避免在左栏形成割裂的第二块信息'
+  );
+  assert.doesNotMatch(site, /id="docZone"/, '网站页仍走旧上传区，不能被公众号文件卡片样式隐式接管');
+  assert.match(
+    engine,
+    /return hasDocumentSummaryCard\(\) \? formatSidebarStatus\(stats\) : \(stats \|\| ''\);/,
+    '共享引擎应只在新文件卡片页隐藏成功态统计行，网站页继续显示旧统计'
+  );
 });
 
 test('editor shells do not block startup on external font stylesheets', async () => {
@@ -145,6 +167,89 @@ test('createUrlImportHandler passes source URL with structured blocks', async ()
   assert.equal(elements.get('progress').style.display, 'block');
   assert.equal(elements.get('progressFill').style.width, '30%');
   assert.equal(elements.get('progressText').textContent, '正在提取...');
+});
+
+test('bindUrlImportShortcuts lets the import row focus the URL input', () => {
+  const targetHandlers = {};
+  let focused = false;
+  let selected = false;
+
+  const urlInput = {
+    value: '',
+    tagName: 'INPUT',
+    classList: { contains: () => false },
+    addEventListener() {},
+    focus() { focused = true; },
+    select() { selected = true; },
+  };
+  const focusTarget = {
+    addEventListener(type, handler) { targetHandlers[type] = handler; },
+  };
+  const documentRef = {
+    activeElement: null,
+    getElementById(id) {
+      if (id === 'urlInput') return urlInput;
+      if (id === 'previewContent') return { style: { display: 'none' } };
+      return null;
+    },
+    addEventListener() {},
+    querySelectorAll() { return [focusTarget]; },
+  };
+
+  bindUrlImportShortcuts({
+    documentRef,
+    fetchArticle: () => {},
+    focusTargetSelector: '[data-url-focus-target]',
+  });
+
+  targetHandlers.click({ target: focusTarget });
+  assert.equal(focused, true);
+  assert.equal(selected, false);
+
+  urlInput.value = 'https://mp.weixin.qq.com/s/abc';
+  targetHandlers.click({ target: focusTarget });
+  assert.equal(selected, true);
+});
+
+test('bindUrlImportShortcuts leaves other text inputs alone on paste', () => {
+  const documentHandlers = {};
+  let fetched = 0;
+  let prevented = false;
+  const urlInput = {
+    value: '',
+    tagName: 'INPUT',
+    classList: { contains: () => false },
+    addEventListener() {},
+  };
+  const otherInput = {
+    tagName: 'INPUT',
+    classList: { contains: () => false },
+  };
+  const documentRef = {
+    activeElement: otherInput,
+    getElementById(id) {
+      if (id === 'urlInput') return urlInput;
+      if (id === 'previewContent') return { style: { display: 'none' } };
+      return null;
+    },
+    addEventListener(type, handler) { documentHandlers[type] = handler; },
+    querySelectorAll() { return []; },
+  };
+
+  bindUrlImportShortcuts({
+    documentRef,
+    fetchArticle: () => { fetched += 1; },
+    focusTargetSelector: '[data-url-focus-target]',
+  });
+
+  documentHandlers.paste({
+    clipboardData: { getData: () => 'https://mp.weixin.qq.com/s/abc' },
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, false);
+  assert.equal(urlInput.value, '');
+  assert.equal(fetched, 0);
 });
 
 test('foodTalksFetchErrorMessage keeps internal details out of the UI', () => {

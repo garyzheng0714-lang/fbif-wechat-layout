@@ -51,8 +51,8 @@
         <div class="upload-hint" id="fileHint">支持 .docx、.md、.txt</div>
         <input type="file" id="fileInput">
       </div>
-      <div class="url-row-inline">
-        <input type="url" id="urlInput" class="url-input-inline" placeholder="文章链接">
+      <div class="url-row-inline" data-url-focus-target>
+        <input type="url" id="urlInput" class="url-input-inline" placeholder="点击这里，粘贴文章链接">
         <button id="urlFetchBtn" class="url-btn-inline" onclick="fetchArticle()">提取</button>
       </div>
 
@@ -842,7 +842,7 @@ window.fetchArticle = createUrlImportHandler({
 bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
-  ignoreClassNames: ['ma-url'],
+  ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 
 (() => {

@@ -55,8 +55,24 @@ export function buildAccountGroups(packs, activeId) {
     .filter(g => g.items.length);
 }
 
+function settingsActionHtml(action) {
+  if (!action) return '';
+  const id = action.id ? ` id="${esc(action.id)}"` : '';
+  const label = action.label || '规则设置';
+  return (
+    `<div class="acct-menu-divider" aria-hidden="true"></div>` +
+    `<button type="button" class="acct-settings-item"${id} role="menuitem" data-acct-settings-action aria-label="${esc(label)}">` +
+      `<svg class="acct-settings-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">` +
+        `<path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z" fill="none" stroke="currentColor" stroke-width="1.8"/>` +
+        `<path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 0 1-2.83 2.83l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.05a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 0 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 0 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.05A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 0 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 0 1 0 4h-.05A1.7 1.7 0 0 0 19.4 15Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>` +
+      `</svg>` +
+      `<span>${esc(label)}</span>` +
+    `</button>`
+  );
+}
+
 // 渲染并挂载账号菜单。返回 { setActive(id) } 供页面在原地切换后更新高亮/触发器。
-export function mountAccountMenu({ container, activeId, onSwitch }) {
+export function mountAccountMenu({ container, activeId, onSwitch, settingsAction = null }) {
   if (!container) return { setActive() {} };
   const packs = listRulePacks();
   let isOpen = false;
@@ -88,6 +104,7 @@ export function mountAccountMenu({ container, activeId, onSwitch }) {
             `</button>`
           ).join('')
         ).join('') +
+        settingsActionHtml(settingsAction) +
       `</div>`;
     bind();
   }
@@ -102,6 +119,8 @@ export function mountAccountMenu({ container, activeId, onSwitch }) {
         if (id !== activeId) onSwitch(id);
       });
     });
+    const settingsButton = container.querySelector('[data-acct-settings-action]');
+    if (settingsButton) settingsButton.addEventListener('click', () => close());
   }
 
   function close() { if (isOpen) { isOpen = false; render(); } }

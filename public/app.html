@@ -24,12 +24,6 @@
   <div class="topbar-spacer"></div>
   <div class="tb-actions preview-toolbar" id="previewToolbar">
     <button class="tb-retry" id="retryBtn" type="button" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
-    <button class="topbar-settings-btn admin-lock-btn" id="adminLockBtn" type="button" title="设置" aria-label="设置">
-      <svg viewBox="0 0 1024 1024" width="22" height="22" aria-hidden="true">
-        <path d="M933.868272 511.691752a140.807706 140.807706 0 0 1 90.131728-131.067068 525.562914 525.562914 0 0 0-57.334136-138.64997 139.882962 139.882962 0 0 1-184.948826-184.948826A525.562914 525.562914 0 0 0 643.067068 0a140.376159 140.376159 0 0 1-262.134136 0A525.562914 525.562914 0 0 0 242.282962 57.334136a139.882962 139.882962 0 0 1-184.948826 184.948826A506.698134 506.698134 0 0 0 0 380.932932a140.376159 140.376159 0 0 1 0 262.134136 525.562914 525.562914 0 0 0 57.334136 138.64997 139.882962 139.882962 0 0 1 184.948826 184.948826 525.562914 525.562914 0 0 0 138.64997 57.334136 140.376159 140.376159 0 0 1 262.134136 0 525.562914 525.562914 0 0 0 138.64997-57.334136 139.882962 139.882962 0 0 1 184.948826-184.948826 506.698134 506.698134 0 0 0 57.334136-138.64997A140.807706 140.807706 0 0 1 933.868272 511.691752zM511.691752 652.437809A140.437809 140.437809 0 1 1 652.437809 511.691752 140.499458 140.499458 0 0 1 511.691752 652.437809z" fill="currentColor"></path>
-      </svg>
-      <span class="topbar-settings-tooltip" role="tooltip">设置</span>
-    </button>
     <button class="btn btn-primary tb-primary" id="copyBtn" type="button" onclick="copyContent()">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       <span>复制全文</span>
@@ -77,10 +71,10 @@
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h4"/><path d="M6 22v-4H2"/></svg>
           </button>
         </div>
+        <div class="sidebar-stats" id="statsBar"></div>
       </div>
 
       <div class="error" id="error"></div>
-      <div class="sidebar-stats" id="statsBar"></div>
       <div class="batch-list" id="batchList" style="display:none;"></div>
       <div class="rail-sep"></div>
       <div class="ma-section" id="moreArticlesSection" style="display:none;">
@@ -634,6 +628,10 @@ const accountMenu = mountAccountMenu({
   container: document.getElementById('acctMenu'),
   activeId: activeRulePack.id,
   onSwitch: (id) => switchAccount(id),
+  settingsAction: {
+    id: 'adminLockBtn',
+    label: '规则设置',
+  },
 });
 
 // #moreArticlesEmbed 的稳定引用：缓存一次，之后即使被 block-panel 的 innerHTML='' 摘下 DOM，
