@@ -41,6 +41,7 @@ test('app copy toolbar stays in the global top-right bar while rule admin moves 
   assert.doesNotMatch(header, /id="adminLockBtn"/, 'app.html rule admin button should not stay in the top bar');
   assert.match(footer, /id="adminLockBtn"/, 'app.html rule admin icon should live in the sidebar footer');
   assert.match(footer, /id="activeRuleCard"/, 'app.html active rule status should live in the fixed sidebar footer');
+  assert.match(footer, /当前排版规则/, 'app.html active rule status should name the applied typography rule clearly');
   assert.match(footer, /class="rail-icon-btn admin-lock-btn"/, 'app.html sidebar rule admin entry should be icon-only');
   assert.match(footer, /class="rail-icon-tooltip"[^>]*>规则后台</, 'app.html sidebar rule admin entry should reveal a text tooltip');
   assert.doesNotMatch(footer, /微信公众号后台/, 'app.html should remove the WeChat backend footer link');
@@ -67,4 +68,5 @@ test('app rail divider stays visually slim and the handle behaves like a clickab
   assert.match(css, /\.rail-divider-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*50px;[\s\S]*?cursor:\s*pointer;/, 'rail handle should be smaller and use pointer feedback');
   assert.match(css, /\.rail-divider-toggle:hover\s*\{[\s\S]*?--rail-toggle-scale:\s*1\.06;/, 'rail handle should animate on hover');
   assert.match(css, /\.sidebar-footer\s+\.active-rule-card/, 'active rule status should be styled as part of the fixed sidebar footer');
+  assert.match(css, /\.sidebar-footer\s+\.active-rule-readmeta\s*\{[\s\S]*?background:\s*var\(--fs-bg-nested\);[\s\S]*?box-shadow:\s*inset 0 0 0 1px var\(--fs-divider\);/, 'active rule status should read as a designed compact capsule');
 });
