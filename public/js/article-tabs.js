@@ -42,6 +42,11 @@ function currentAccountID(windowRef) {
   return (windowRef._activeRulePack && windowRef._activeRulePack.id) || 'fbif';
 }
 
+function workspacePath(windowRef) {
+  const path = windowRef.location ? windowRef.location.pathname : 'app';
+  return String(path || 'app').replace(/^\/(mp|ft)\/[^/]+/, '/$1');
+}
+
 function makeEmptySnapshot(documentRef, windowRef) {
   const date = documentRef.getElementById('wxDate');
   return {
@@ -91,6 +96,7 @@ function makeEmptySnapshot(documentRef, windowRef) {
 export function mountArticleTabs({
   container,
   refreshButton,
+  switchAccount,
   windowRef = window,
   documentRef = document,
   maxTabs = MAX_TABS,
@@ -99,9 +105,15 @@ export function mountArticleTabs({
 
   let tabs = [];
   let activeID = '';
+  let restoreSerial = 0;
 
   function storageKey() {
-    const path = windowRef.location ? windowRef.location.pathname : 'app';
+    const path = workspacePath(windowRef);
+    return STORAGE_PREFIX + path + '::workspace';
+  }
+
+  function legacyStorageKey() {
+    const path = workspacePath(windowRef);
     return STORAGE_PREFIX + path + '::' + currentAccountID(windowRef);
   }
 
@@ -113,6 +125,25 @@ export function mountArticleTabs({
   function restoreSnapshot(snapshot) {
     if (typeof windowRef._restoreSessionSnapshot !== 'function') return false;
     return windowRef._restoreSessionSnapshot(snapshot || makeEmptySnapshot(documentRef, windowRef));
+  }
+
+  function snapshotAccountID(snapshot) {
+    return snapshot && snapshot.article_state && snapshot.article_state.account_id;
+  }
+
+  async function restoreTab(tab, serial) {
+    const snapshot = tab && tab.snapshot;
+    const accountID = snapshotAccountID(snapshot);
+    if (accountID && accountID !== currentAccountID(windowRef) && typeof switchAccount === 'function') {
+      await switchAccount(accountID, {
+        captureArticleTab: false,
+        rerender: false,
+        source: 'article-tab',
+      });
+    }
+    if (serial !== restoreSerial) return false;
+    restoreSnapshot(snapshot);
+    return true;
   }
 
   function activeTab() {
@@ -148,7 +179,7 @@ export function mountArticleTabs({
 
   function load() {
     try {
-      const raw = windowRef.sessionStorage.getItem(storageKey());
+      const raw = windowRef.sessionStorage.getItem(storageKey()) || windowRef.sessionStorage.getItem(legacyStorageKey());
       if (!raw) return false;
       const payload = JSON.parse(raw);
       if (!payload || payload.schema_version !== SCHEMA_VERSION || !Array.isArray(payload.tabs)) return false;
@@ -281,27 +312,33 @@ export function mountArticleTabs({
     focusTab(next);
   }
 
-  function switchTo(id) {
+  async function switchTo(id) {
     if (!id || id === activeID) return;
+    const serial = ++restoreSerial;
     captureActive();
     activeID = id;
     const tab = activeTab();
-    restoreSnapshot(tab && tab.snapshot);
+    render();
+    await restoreTab(tab, serial);
+    if (serial !== restoreSerial) return;
     render();
     save();
   }
 
-  function newBlankTab() {
+  async function newBlankTab() {
+    const serial = ++restoreSerial;
     captureActive();
     const tab = addTab('新文章', makeEmptySnapshot(documentRef, windowRef));
-    restoreSnapshot(tab.snapshot);
+    await restoreTab(tab, serial);
+    if (serial !== restoreSerial) return;
     render();
     save();
   }
 
-  function closeTab(id) {
+  async function closeTab(id) {
     const index = tabs.findIndex(tab => tab.id === id);
     if (index < 0) return;
+    const serial = ++restoreSerial;
     const closingActive = tabs[index].id === activeID;
     if (!closingActive) {
       tabs.splice(index, 1);
@@ -312,12 +349,13 @@ export function mountArticleTabs({
     tabs.splice(index, 1);
     if (!tabs.length) {
       const blank = addTab('新文章', makeEmptySnapshot(documentRef, windowRef));
-      restoreSnapshot(blank.snapshot);
+      await restoreTab(blank, serial);
     } else {
       const next = tabs[Math.min(index, tabs.length - 1)];
       activeID = next.id;
-      restoreSnapshot(next.snapshot);
+      await restoreTab(next, serial);
     }
+    if (serial !== restoreSerial) return;
     render();
     save();
   }
@@ -372,7 +410,12 @@ export function mountArticleTabs({
 
   load();
   ensureInitialTab();
-  if (tabs.length && activeTab() && activeTab().snapshot) restoreSnapshot(activeTab().snapshot);
+  if (tabs.length && activeTab() && activeTab().snapshot) {
+    const serial = ++restoreSerial;
+    restoreTab(activeTab(), serial).then(() => {
+      if (serial === restoreSerial) render();
+    });
+  }
   render();
 
   return {

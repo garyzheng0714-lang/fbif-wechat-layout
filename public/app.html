@@ -19,37 +19,28 @@
 </head>
 <body>
 
-<!-- ======================= Top bar（方案A 检视台） ======================= -->
 <header class="global-channel-bar">
-  <!-- 单层账号菜单：mountAccountMenu 挂载点（红线 #2） -->
-  <div class="acct-menu" id="acctMenu" aria-label="切换账号"></div>
-
-  <div class="topbar-spacer"></div>
-
-  <!-- Preview actions -->
-  <div class="tb-actions preview-toolbar" id="previewToolbar">
-    <button class="tb-icon-action" id="articleRefreshBtn" type="button" title="重新排版当前文章" aria-label="重新排版当前文章" disabled>
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h4"/><path d="M6 22v-4H2"/></svg>
-    </button>
-    <button class="tb-retry" id="retryBtn" type="button" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
-    <button class="btn btn-primary tb-primary" id="copyBtn" type="button" onclick="copyContent()">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-      <span>复制全文</span>
-    </button>
+  <div class="app-brand" aria-label="FBIF文章排版工具">
+    <img class="app-brand-logo" src="/fbif-logo.png" alt="">
+    <span class="app-brand-title">FBIF文章排版工具</span>
   </div>
+  <div class="topbar-spacer"></div>
+  <button class="topbar-settings-btn admin-lock-btn" id="adminLockBtn" type="button" title="设置" aria-label="设置">
+    <svg viewBox="0 0 1024 1024" width="22" height="22" aria-hidden="true">
+      <path d="M933.868272 511.691752a140.807706 140.807706 0 0 1 90.131728-131.067068 525.562914 525.562914 0 0 0-57.334136-138.64997 139.882962 139.882962 0 0 1-184.948826-184.948826A525.562914 525.562914 0 0 0 643.067068 0a140.376159 140.376159 0 0 1-262.134136 0A525.562914 525.562914 0 0 0 242.282962 57.334136a139.882962 139.882962 0 0 1-184.948826 184.948826A506.698134 506.698134 0 0 0 0 380.932932a140.376159 140.376159 0 0 1 0 262.134136 525.562914 525.562914 0 0 0 57.334136 138.64997 139.882962 139.882962 0 0 1 184.948826 184.948826 525.562914 525.562914 0 0 0 138.64997 57.334136 140.376159 140.376159 0 0 1 262.134136 0 525.562914 525.562914 0 0 0 138.64997-57.334136 139.882962 139.882962 0 0 1 184.948826-184.948826 506.698134 506.698134 0 0 0 57.334136-138.64997A140.807706 140.807706 0 0 1 933.868272 511.691752zM511.691752 652.437809A140.437809 140.437809 0 1 1 652.437809 511.691752 140.499458 140.499458 0 0 1 511.691752 652.437809z" fill="currentColor"></path>
+    </svg>
+    <span class="topbar-settings-tooltip" role="tooltip">设置</span>
+  </button>
 </header>
 
-<!-- ======================= Workspace ======================= -->
 <div class="app-layout">
-
-  <!-- Left rail -->
   <aside class="rail sidebar" id="rail" data-screen-label="左栏">
+    <div class="rail-account-bar">
+      <div class="acct-menu" id="acctMenu" aria-label="切换公众号"></div>
+    </div>
     <div class="rail-body sidebar-body scroll-y">
-      <!-- Hidden compat for engine.js -->
       <span id="pageTitle" style="display:none;"></span>
       <span id="pageSubtitle" style="display:none;"></span>
-
-      <!-- Import zone -->
       <div class="import-zone" id="importZone">
         <div class="import-card">
           <div class="dropzone upload-zone" id="dropZone" tabindex="0" role="button" aria-label="上传文件">
@@ -60,11 +51,11 @@
             <div class="dropzone-hint upload-hint" id="fileHint">支持 Word、Markdown、TXT 格式</div>
             <input type="file" id="fileInput">
           </div>
-          <div class="url-row url-row-inline">
+          <div class="url-row url-row-inline" data-url-focus-target>
             <span class="url-link-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.1.2l2.1-2.1a5 5 0 0 0-7.1-7.1l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.1-.2L4.8 12.9a5 5 0 0 0 7.1 7.1l1.2-1.2"/></svg>
             </span>
-            <input type="url" class="field url-input-inline" id="urlInput" placeholder="粘贴公众号文章链接">
+            <input type="url" class="field url-input-inline" id="urlInput" placeholder="点击这里，粘贴公众号文章链接">
           </div>
           <div class="progress import-progress" id="progress">
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
@@ -72,7 +63,6 @@
           </div>
         </div>
       </div>
-
       <div class="doc-zone" id="docZone" hidden>
         <div class="doc-card">
           <div class="doc-ico">
@@ -91,11 +81,7 @@
       <div class="error" id="error"></div>
       <div class="sidebar-stats" id="statsBar"></div>
       <div class="batch-list" id="batchList" style="display:none;"></div>
-
       <div class="rail-sep"></div>
-
-      <!-- 更多文章卡片编辑器（B6）：隐藏 home；由 mountBlockPanel 的 getBlockExtra
-           搬进底部区块「更多文章」块展开区。不作为独立侧栏分区显示。 -->
       <div class="ma-section" id="moreArticlesSection" style="display:none;">
         <div id="moreArticlesEmbed">
           <div class="ma-embed-head" style="display:flex;justify-content:flex-end;margin-bottom:6px;">
@@ -107,33 +93,12 @@
           <div class="ma-hint" id="maHint">粘贴公众号链接自动抓取头图和标题。拖动卡片可重排顺序。</div>
         </div>
       </div>
-      <!-- 退役系列页脚选择器（红线 #22：始终隐藏，不再 import / 渲染） -->
       <div class="ma-section" id="ftSeriesFooterSection" style="display:none;"></div>
-
-      <!-- 底部区块（统一模型）单篇面板：mountBlockPanel 挂载 -->
       <div class="ma-section" id="blockPanelSection" style="display:none;">
         <div class="block-panel-mount" id="blockPanel"></div>
       </div>
-
     </div>
 
-    <div class="sidebar-footer">
-      <!-- 本篇规则 mini-card：renderActiveRuleCard 重建内部 -->
-      <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
-        <div class="active-rule-readline">
-          <span class="active-rule-readmeta">
-            <span class="active-rule-label">当前排版规则</span>
-            <span class="active-rule-readvalue">加载中...</span>
-          </span>
-        </div>
-      </div>
-      <button class="rail-icon-btn admin-lock-btn" id="adminLockBtn" type="button" title="规则后台" aria-label="规则后台">
-        <svg viewBox="0 0 1024 1024" width="24" height="24" aria-hidden="true">
-          <path d="M933.868272 511.691752a140.807706 140.807706 0 0 1 90.131728-131.067068 525.562914 525.562914 0 0 0-57.334136-138.64997 139.882962 139.882962 0 0 1-184.948826-184.948826A525.562914 525.562914 0 0 0 643.067068 0a140.376159 140.376159 0 0 1-262.134136 0A525.562914 525.562914 0 0 0 242.282962 57.334136a139.882962 139.882962 0 0 1-184.948826 184.948826A506.698134 506.698134 0 0 0 0 380.932932a140.376159 140.376159 0 0 1 0 262.134136 525.562914 525.562914 0 0 0 57.334136 138.64997 139.882962 139.882962 0 0 1 184.948826 184.948826 525.562914 525.562914 0 0 0 138.64997 57.334136 140.376159 140.376159 0 0 1 262.134136 0 525.562914 525.562914 0 0 0 138.64997-57.334136 139.882962 139.882962 0 0 1 184.948826-184.948826 506.698134 506.698134 0 0 0 57.334136-138.64997A140.807706 140.807706 0 0 1 933.868272 511.691752zM511.691752 652.437809A140.437809 140.437809 0 1 1 652.437809 511.691752 140.499458 140.499458 0 0 1 511.691752 652.437809z" fill="#1D85ED"></path>
-        </svg>
-        <span class="rail-icon-tooltip" role="tooltip">规则后台</span>
-      </button>
-    </div>
   </aside>
 
   <div class="rail-divider" id="railDivider" role="separator" aria-orientation="vertical" aria-label="调整左栏宽度">
@@ -142,14 +107,22 @@
     </button>
   </div>
 
-  <!-- Center stage -->
   <main class="preview-panel" data-screen-label="预览区">
     <div class="article-tabs-strip" aria-label="文章标签栏">
       <div class="article-tabs-host" id="articleTabsHost" aria-label="文章标签"></div>
+      <div class="tb-actions preview-toolbar" id="previewToolbar">
+        <button class="tb-icon-action" id="articleRefreshBtn" type="button" title="重新排版当前文章" aria-label="重新排版当前文章" disabled>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h4"/><path d="M6 22v-4H2"/></svg>
+        </button>
+        <button class="tb-retry" id="retryBtn" type="button" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
+        <button class="btn btn-primary tb-primary" id="copyBtn" type="button" onclick="copyContent()">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>复制全文</span>
+        </button>
+      </div>
     </div>
     <div class="preview-scroll scroll-y" id="previewScroll">
 
-      <!-- Empty state -->
       <div class="empty empty-state" id="emptyState">
         <div class="empty-ico">
           <svg viewBox="0 0 24 24" width="88" height="88" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
@@ -160,8 +133,6 @@
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
         选择文件</button>
       </div>
-
-      <!-- Preview content（正文契约：.wx-* / #contentArea 冻结，勿改样式） -->
       <div class="preview-content" id="previewContent" style="display:none;">
         <div class="wx-header">
           <h2 class="wx-title" id="articleTitle"></h2>
@@ -176,8 +147,6 @@
         </div>
         <div class="copy-success" id="copySuccess">已复制到剪贴板</div>
       </div>
-
-      <!-- WeChat footer（冻结复刻） -->
       <div class="wx-footer" id="wxFooter" style="display:none;">
         <div class="wx-footer-inner">
           <div class="wx-footer-left">
@@ -197,10 +166,7 @@
   </main>
 </div>
 
-<!-- ======================= Toasts ======================= -->
 <div class="toast-wrap" id="toastWrap"></div>
-
-<!-- Hidden compat elements for engine.js -->
 <input type="hidden" id="titleInput" value="">
 <span id="previewTitleDisplay" style="display:none;"></span>
 <input type="checkbox" id="footerEnabled" checked style="display:none;">
@@ -743,8 +709,9 @@ function persistAccountSelection(id) {
   history.replaceState(null, '', next);
 }
 
-async function switchAccount(accountID) {
-  if (window._articleTabs && typeof window._articleTabs.captureActive === 'function') window._articleTabs.captureActive();
+async function switchAccount(accountID, options = {}) {
+  const shouldCaptureTab = options.captureArticleTab !== false;
+  if (shouldCaptureTab && window._articleTabs && typeof window._articleTabs.captureActive === 'function') window._articleTabs.captureActive();
   const nextPack = rulePackModule.getRulePack(accountID);
   if (nextPack.id === activeRulePack.id) return;
   if (nextPack.channel !== activeRulePack.channel) {
@@ -782,7 +749,8 @@ async function switchAccount(accountID) {
   activeRuleSelectorDraftID = loaded.preset.id || 'default';
   activeRuleSelectorStatus = '';
   await applyAccountCapabilityUI(activeRulePack);
-  refreshRuleConsumers({ rerender: true });
+  refreshRuleConsumers({ rerender: options.rerender !== false });
+  if (shouldCaptureTab && window._articleTabs && typeof window._articleTabs.captureActive === 'function') window._articleTabs.captureActive();
 }
 
 function loadConfig() {
@@ -844,6 +812,7 @@ const { mountArticleTabs } = await import('/js/article-tabs.js?v=' + assetVersio
 window._articleTabs = mountArticleTabs({
   container: document.getElementById('articleTabsHost'),
   refreshButton: document.getElementById('articleRefreshBtn'),
+  switchAccount,
 });
 
 syncWorkflowControls();
@@ -907,7 +876,7 @@ window.fetchArticle = createUrlImportHandler({
 bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
-  ignoreClassNames: ['ma-url'],
+  ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 </script>
 <script type="module" src="/js/app-shell-ui.js"></script>

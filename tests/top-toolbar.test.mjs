@@ -27,24 +27,32 @@ function assertToolbarInGlobalHeader(html, label) {
   assert.doesNotMatch(previewPanelTop, /id="previewToolbar"/, `${label} toolbar must not sit inside the article preview panel`);
 }
 
-test('app copy toolbar stays in the global top-right bar while rule admin moves to the sidebar footer', async () => {
+test('app global header shows product identity while article actions stay in the preview toolbar', async () => {
   const html = await readShell('app.html');
-  assertToolbarInGlobalHeader(html, 'app.html');
 
   const headerStart = html.indexOf('<header class="global-channel-bar">');
   const headerEnd = html.indexOf('</header>', headerStart);
-  const footerStart = html.indexOf('<div class="sidebar-footer">');
-  const footerEnd = html.indexOf('</aside>', footerStart);
+  const previewPanelStart = html.indexOf('<main class="preview-panel');
+  const previewScrollStart = html.indexOf('<div class="preview-scroll"', previewPanelStart);
   const header = html.slice(headerStart, headerEnd);
-  const footer = html.slice(footerStart, footerEnd);
+  const previewPanelTop = html.slice(previewPanelStart, previewScrollStart);
+  const visibleShell = html.slice(0, html.indexOf('<script type="module">'));
 
-  assert.doesNotMatch(header, /id="adminLockBtn"/, 'app.html rule admin button should not stay in the top bar');
-  assert.match(footer, /id="adminLockBtn"/, 'app.html rule admin icon should live in the sidebar footer');
-  assert.match(footer, /id="activeRuleCard"/, 'app.html active rule status should live in the fixed sidebar footer');
-  assert.match(footer, /当前排版规则/, 'app.html active rule status should name the applied typography rule clearly');
-  assert.match(footer, /class="rail-icon-btn admin-lock-btn"/, 'app.html sidebar rule admin entry should be icon-only');
-  assert.match(footer, /class="rail-icon-tooltip"[^>]*>规则后台</, 'app.html sidebar rule admin entry should reveal a text tooltip');
-  assert.doesNotMatch(footer, /微信公众号后台/, 'app.html should remove the WeChat backend footer link');
+  assert.match(header, /class="app-brand-logo"/, 'app.html global top bar should show the FBIF logo');
+  assert.match(header, /FBIF文章排版工具/, 'app.html global top bar should name the product');
+  assert.match(header, /id="adminLockBtn"/, 'app.html settings button should live in the global top-right bar');
+  assert.match(header, /class="topbar-settings-btn admin-lock-btn"/, 'app.html settings entry should be an icon button');
+  assert.match(header, /class="topbar-settings-tooltip"[^>]*>设置</, 'app.html settings button should reveal a concise tooltip');
+  assert.doesNotMatch(header, /id="previewToolbar"/, 'app.html copy toolbar should not stay in the global top bar');
+  assert.doesNotMatch(header, /id="copyBtn"/, 'app.html copy button should not be a global action');
+  assert.doesNotMatch(header, /id="acctMenu"/, 'app.html account menu should not stay in the global top bar');
+  assert.match(previewPanelTop, /id="previewToolbar"/, 'app.html toolbar should live above the current article render area');
+  assert.match(previewPanelTop, /id="copyBtn"/, 'app.html copy button should copy the current article tab');
+  assert.match(previewPanelTop, /id="articleRefreshBtn"/, 'app.html refresh button should rerender the current article tab');
+  assert.doesNotMatch(visibleShell, /class="sidebar-footer"/, 'app.html should not show a fixed left-bottom footer');
+  assert.doesNotMatch(visibleShell, /id="activeRuleCard"/, 'app.html should not show the current-rule card at the left bottom');
+  assert.doesNotMatch(visibleShell, /当前排版规则/, 'app.html should not show bottom current-rule text');
+  assert.doesNotMatch(visibleShell, /微信公众号后台/, 'app.html should remove the WeChat backend footer link');
   assert.doesNotMatch(html, /已锁定/, 'app.html should not show a locked badge in the fixed rule status');
   assert.doesNotMatch(html, /data-action="edit-active-rule"/, 'app.html should not expose front-end rule editing in the fixed footer');
   assert.match(html, /class="rail-divider"/, 'app.html should render the WeChat-style rail divider');
@@ -67,6 +75,7 @@ test('app rail divider stays visually slim and the handle behaves like a clickab
   assert.match(css, /\.rail-divider\s*\{[\s\S]*?width:\s*4px;/, 'rail divider should stay slim');
   assert.match(css, /\.rail-divider-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*50px;[\s\S]*?cursor:\s*pointer;/, 'rail handle should be smaller and use pointer feedback');
   assert.match(css, /\.rail-divider-toggle:hover\s*\{[\s\S]*?--rail-toggle-scale:\s*1\.06;/, 'rail handle should animate on hover');
-  assert.match(css, /\.sidebar-footer\s+\.active-rule-card/, 'active rule status should be styled as part of the fixed sidebar footer');
-  assert.match(css, /\.sidebar-footer\s+\.active-rule-readmeta\s*\{[\s\S]*?background:\s*var\(--fs-bg-nested\);[\s\S]*?box-shadow:\s*inset 0 0 0 1px var\(--fs-divider\);/, 'active rule status should read as a designed compact capsule');
+  assert.match(css, /\.rail-account-bar\s*\{[\s\S]*?flex-shrink:\s*0;[\s\S]*?border-bottom:\s*1px solid var\(--fs-divider\);/, 'account switcher should be fixed above the scrolling left tools');
+  assert.match(css, /\.topbar-settings-btn\s*\{[\s\S]*?width:\s*32px;[\s\S]*?color:\s*var\(--fs-brand\);/, 'settings button should be styled as a top-bar icon');
+  assert.doesNotMatch(css, /\.sidebar-footer\s+\.active-rule-card/, 'left-bottom rule card styles should not be restored');
 });

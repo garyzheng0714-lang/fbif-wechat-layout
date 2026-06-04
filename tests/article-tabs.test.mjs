@@ -46,3 +46,17 @@ test('new imports create article tabs and completed previews update tab snapshot
   assert.match(tabs, /aria-selected/, '活动标签必须暴露 aria-selected');
   assert.match(tabs, /event\.key === 'Delete'/, '标签必须支持键盘删除当前文章');
 });
+
+test('article tabs restore the account context owned by each tab', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const tabs = await readFile(new URL('../public/js/article-tabs.js', import.meta.url), 'utf8');
+
+  assert.match(app, /switchAccount,\s*\}/, '标签控制器必须拿到账号切换能力');
+  assert.match(app, /options\.captureArticleTab !== false/, '账号切换应允许标签恢复时跳过反向捕获');
+  assert.match(app, /options\.rerender !== false/, '标签恢复账号时不能强制先重排当前文章');
+  assert.match(tabs, /snapshotAccountID/, '标签恢复前必须读取快照里的账号');
+  assert.match(tabs, /switchAccount\(accountID,[\s\S]*?captureArticleTab:\s*false[\s\S]*?rerender:\s*false/, '切换标签必须先恢复该标签所属公众号');
+  assert.match(tabs, /function workspacePath/, '标签存储 key 必须先归一工作区路径');
+  assert.match(tabs, /replace\(\s*\/\^\\\/\(mp\|ft\)/, '标签存储 key 不能被当前公众号路径拆散');
+  assert.match(tabs, /STORAGE_PREFIX \+ path \+ '::workspace'/, '标签列表不能再按当前公众号拆 session，否则多账号标签会丢失');
+});

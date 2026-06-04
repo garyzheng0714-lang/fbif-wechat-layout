@@ -2,18 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('app shell renders a unified top-bar account menu (single layer)', async () => {
+test('app shell renders a unified rail account menu (single layer)', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/app.css', import.meta.url), 'utf8');
   const channelBarCss = await readFile(new URL('../public/css/channel-bar.css', import.meta.url), 'utf8');
   const menuJs = await readFile(new URL('../public/js/account-menu.js', import.meta.url), 'utf8');
   const allCss = css + '\n' + channelBarCss;
 
-  // 单层账号菜单（2026-06-02 用户裁定「不要两层」）：顶栏头像菜单取代旧的
+  // 单层账号菜单：左侧工具区顶部的头像菜单取代旧的
   // 侧栏方角分段 + 顶部圆形渠道胶囊。渲染逻辑在 account-menu.js，挂载点 #acctMenu。
   assert.match(app, /id="acctMenu"/);
   assert.match(app, /mountAccountMenu/);
   assert.match(app, /account-menu\.js/);
+  const headerStart = app.indexOf('<header class="global-channel-bar">');
+  const headerEnd = app.indexOf('</header>', headerStart);
+  const railStart = app.indexOf('<aside class="rail sidebar"');
+  const railBodyStart = app.indexOf('<div class="rail-body sidebar-body scroll-y">', railStart);
+  const header = app.slice(headerStart, headerEnd);
+  const railHead = app.slice(railStart, railBodyStart);
+  const visibleShell = app.slice(0, app.indexOf('<script type="module">'));
+  assert.doesNotMatch(header, /id="acctMenu"/, '公众号菜单不应再占据全局顶栏');
+  assert.match(header, /FBIF文章排版工具/, '全局顶栏必须展示产品身份');
+  assert.match(header, /class="app-brand-logo"/, '全局顶栏必须展示 FBIF logo');
+  assert.match(header, /id="adminLockBtn"/, '设置入口应在全局顶栏右侧');
+  assert.match(railHead, /class="rail-account-bar"/, '公众号菜单应固定在左侧工具区顶部');
+  assert.match(railHead, /id="acctMenu"/, '左侧工具区顶部必须提供公众号菜单挂载点');
   // 旧的两层切换器残骸必须清掉
   assert.doesNotMatch(app, /id="accountSwitcher"/, '旧侧栏方角分段已移除');
   assert.doesNotMatch(app, /class="channel-switcher"/, '旧顶部圆形渠道胶囊已移除');
@@ -26,10 +39,12 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(app, /loadActiveRulePreset\(activeRulePack\.id\)/);
   assert.match(app, /hydrateActiveRulePreset\(activeRulePack\.id\)/);
   assert.match(app, /cacheServerRuleFallback\(loaded\.preset\.config\)/);
-  assert.match(app, /id="activeRuleCard"/);
+  assert.doesNotMatch(visibleShell, /class="sidebar-footer"/, '左侧底部不再显示当前规则区');
+  assert.doesNotMatch(visibleShell, /id="activeRuleCard"/, '当前规则卡片不应再出现在左侧底部');
+  assert.doesNotMatch(visibleShell, /当前排版规则/, '左侧底部不再展示当前规则文案');
   assert.match(app, /renderActiveRuleCard/);
   assert.match(app, /id="activeRuleSelect"/);
-  assert.doesNotMatch(app, /data-action="edit-active-rule"/, 'app fixed footer rule card is read-only; editing lives behind the rule admin entry');
+  assert.doesNotMatch(app, /data-action="edit-active-rule"/, '规则切换编辑不应回到左侧底部入口');
   assert.match(app, /data-action="save-active-rule"/);
   assert.match(app, /data-action="cancel-active-rule"/);
   assert.match(app, /cancelActiveRuleEdit/);
@@ -38,19 +53,13 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.doesNotMatch(app, /<select id="activeRuleSelect"/);
   assert.match(app, /listPublicRulePresets/);
   assert.match(app, /setActiveRulePreset\(password,\s*nextID,\s*activeRulePack\.id\)/);
-  assert.match(app, /当前规则/);
-  assert.ok(
-    app.indexOf('id="activeRuleCard"') > app.indexOf('id="moreArticlesSection"') &&
-      app.indexOf('id="activeRuleCard"') > app.indexOf('class="sidebar-footer"') &&
-      app.indexOf('id="activeRuleCard"') < app.indexOf('id="adminLockBtn"'),
-    'current rule selector should sit below the more-articles section and before the admin button',
-  );
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
   assert.match(allCss, /\.acct-trigger/);
   assert.match(allCss, /\.acct-panel/);
   assert.match(allCss, /\.acct-item\.is-active/);
-  assert.match(css, /\.active-rule-card/);
+  assert.doesNotMatch(css, /\.sidebar-footer\s+\.active-rule-card/);
+  assert.doesNotMatch(css, /\.rail-icon-btn/);
   assert.match(css, /\.active-rule-card\.editing/);
   assert.match(css, /\.active-rule-readline/);
   assert.match(css, /\.active-rule-readvalue/);
