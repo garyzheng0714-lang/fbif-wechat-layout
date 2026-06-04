@@ -133,6 +133,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
   let filterScope = 'all';
   let filterUsage = 'all';
   let filterText = '';
+  const expanded = new Set(); // 默认折叠：素材列表为可扫的紧凑行，点开某素材才展开 8 字段编辑表单
 
   function referencesFor(asset) {
     const refs = buildAssetReferenceIndex(referencePresets, state.assets);
@@ -163,8 +164,19 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     const ok = isSafeURL(asset.url);
     const refs = referencesFor(asset);
     const refTitle = refs.map(ref => `${ref.presetName} / ${ref.path}`).join('\n');
-    return `<div class="asset-lib-card" data-asset-idx="${index}">
+    const open = expanded.has(asset.id);
+    // 折叠行（始终可见）：小缩略图 + 名称 + 用途·范围·ID + 引用数 + 展开箭头；点行切换展开。
+    const row = `<div class="asset-lib-row" data-action="toggle" data-asset-id="${esc(asset.id)}">
       <div class="asset-lib-thumb">${ok ? `<img src="${esc(asset.url)}" alt="">` : '<span>无图</span>'}</div>
+      <div class="asset-lib-rowmeta">
+        <div class="asset-lib-rowname">${esc(asset.label)}</div>
+        <div class="asset-lib-rowsub">${esc(asset.usage)} · ${esc(asset.scope)} · ${esc(asset.id)}</div>
+      </div>
+      <span class="asset-lib-ref ${refs.length ? 'used' : ''}" title="${esc(refTitle)}">被 ${refs.length} 处引用</span>
+      <span class="asset-lib-caret ${open ? 'open' : ''}" aria-hidden="true">▸</span>
+    </div>`;
+    // 展开详情：8 字段编辑表单 + 上传替换/删除（仅展开时渲染，去掉默认的表单墙）。
+    const detail = open ? `<div class="asset-lib-detail">
       <div class="asset-lib-fields">
         <label><span>名称</span><input data-field="label" value="${esc(asset.label)}"></label>
         <label><span>ID</span><input value="${esc(asset.id)}" readonly title="素材 ID 创建后不可改，避免已引用区块失效"></label>
@@ -176,11 +188,11 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
         <label class="asset-lib-wide"><span>标签</span><input data-field="tags" value="${esc(tagsText(asset))}" placeholder="用逗号分隔"></label>
       </div>
       <div class="asset-lib-actions">
-        <span class="asset-lib-ref ${refs.length ? 'used' : ''}" title="${esc(refTitle)}">被 ${refs.length} 处引用</span>
         <button type="button" class="admin-secondary" data-action="upload-replace" data-asset-idx="${index}">上传替换</button>
         <button type="button" class="admin-secondary danger" data-action="remove" data-asset-idx="${index}" ${refs.length ? 'disabled' : ''}>删除</button>
       </div>
-    </div>`;
+    </div>` : '';
+    return `<div class="asset-lib-card${open ? ' open' : ''}" data-asset-idx="${index}">${row}${detail}</div>`;
   }
 
   function render() {
@@ -244,6 +256,12 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const action = btn.dataset.action;
+    if (action === 'toggle') {
+      const id = btn.dataset.assetId;
+      if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+      render();
+      return;
+    }
     if (action === 'undo') { emit(snapshot); return; }
     if (action === 'add-url') {
       const next = clone(state);
@@ -287,7 +305,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     stylesInjected = true;
     const style = document.createElement('style');
     style.id = 'asset-lib-styles';
-    style.textContent = `.asset-lib-editor{display:grid;gap:12px}.asset-lib-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.asset-lib-toolbar select,.asset-lib-search{height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-search{min-width:190px}.asset-lib-status{font-size:12px;font-weight:700}.asset-lib-status.synced{color:var(--fs-success,#00A870)}.asset-lib-status.dirty{color:var(--fs-warning,#FF8800)}.asset-lib-error{padding:8px 10px;border-radius:var(--fs-r-s,6px);background:rgba(255,136,0,.08);color:var(--fs-warning,#FF8800);font-size:12px}.asset-lib-list{display:grid;gap:10px}.asset-lib-empty{padding:18px;text-align:center;color:var(--fs-text-3,#8F959E);background:var(--fs-bg-nested,#F7F8FA);border-radius:var(--fs-r-m,8px);font-size:13px}.asset-lib-card{display:grid;grid-template-columns:92px minmax(0,1fr) 128px;gap:12px;align-items:start;padding:12px;border-radius:var(--fs-r-m,8px);background:var(--fs-bg-nested,#F7F8FA)}.asset-lib-thumb{width:92px;aspect-ratio:1;border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--fs-text-3,#8F959E);font-size:12px}.asset-lib-thumb img{max-width:100%;max-height:100%;object-fit:contain}.asset-lib-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.asset-lib-fields label{display:grid;gap:4px}.asset-lib-fields span{font-size:12px;color:var(--fs-text-2,#646A73)}.asset-lib-fields input,.asset-lib-fields select{min-width:0;height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-fields input[readonly]{background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E)}.asset-lib-fields input:focus,.asset-lib-fields select:focus,.asset-lib-toolbar select:focus,.asset-lib-search:focus{outline:none;border-color:var(--fs-brand,#1456F0);box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}.asset-lib-wide{grid-column:span 2}.asset-lib-actions{display:grid;gap:8px}.asset-lib-ref{display:inline-flex;align-items:center;justify-content:center;min-height:24px;border-radius:var(--fs-r-full,9999px);background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E);font-size:12px;font-weight:700}.asset-lib-ref.used{background:var(--fs-brand-soft,#EBF1FF);color:var(--fs-brand,#1456F0)}@media(max-width:900px){.asset-lib-card{grid-template-columns:1fr}.asset-lib-thumb{width:100%}.asset-lib-fields{grid-template-columns:1fr}.asset-lib-wide{grid-column:auto}.asset-lib-actions{display:flex;flex-wrap:wrap}}`;
+    style.textContent = `.asset-lib-editor{display:grid;gap:12px}.asset-lib-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.asset-lib-toolbar select,.asset-lib-search{height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-search{min-width:190px}.asset-lib-status{font-size:12px;font-weight:700}.asset-lib-status.synced{color:var(--fs-success,#00A870)}.asset-lib-status.dirty{color:var(--fs-warning,#FF8800)}.asset-lib-error{padding:8px 10px;border-radius:var(--fs-r-s,6px);background:rgba(255,136,0,.08);color:var(--fs-warning,#FF8800);font-size:12px}.asset-lib-list{display:grid;gap:10px}.asset-lib-empty{padding:18px;text-align:center;color:var(--fs-text-3,#8F959E);background:var(--fs-bg-nested,#F7F8FA);border-radius:var(--fs-r-m,8px);font-size:13px}.asset-lib-card{border-radius:var(--fs-r-m,8px);background:var(--fs-bg-nested,#F7F8FA);overflow:hidden}.asset-lib-card.open{box-shadow:inset 0 0 0 1px var(--fs-border-control,#D9DCE0)}.asset-lib-row{display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;transition:background .12s}.asset-lib-row:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045))}.asset-lib-rowmeta{flex:1;min-width:0}.asset-lib-rowname{font-size:13px;font-weight:600;color:var(--fs-text-1,#1F2329);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.asset-lib-rowsub{font-size:11px;color:var(--fs-text-3,#8F959E);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}.asset-lib-caret{flex:none;color:var(--fs-text-3,#8F959E);font-size:12px;transition:transform .15s}.asset-lib-caret.open{transform:rotate(90deg)}.asset-lib-detail{padding:6px 12px 14px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));display:grid;gap:10px}.asset-lib-thumb{width:44px;height:44px;flex:none;border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--fs-text-3,#8F959E);font-size:11px}.asset-lib-thumb img{max-width:100%;max-height:100%;object-fit:contain}.asset-lib-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.asset-lib-fields label{display:grid;gap:4px}.asset-lib-fields span{font-size:12px;color:var(--fs-text-2,#646A73)}.asset-lib-fields input,.asset-lib-fields select{min-width:0;height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-fields input[readonly]{background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E)}.asset-lib-fields input:focus,.asset-lib-fields select:focus,.asset-lib-toolbar select:focus,.asset-lib-search:focus{outline:none;border-color:var(--fs-brand,#1456F0);box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}.asset-lib-wide{grid-column:span 2}.asset-lib-actions{display:flex;gap:8px}.asset-lib-ref{flex:none;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:0 8px;border-radius:var(--fs-r-full,9999px);background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E);font-size:11px;font-weight:600}.asset-lib-ref.used{background:var(--fs-brand-soft,#EBF1FF);color:var(--fs-brand,#1456F0)}@media(max-width:900px){.asset-lib-fields{grid-template-columns:1fr}.asset-lib-wide{grid-column:auto}.asset-lib-detail{padding:6px 10px 12px}}`;
     document.head.appendChild(style);
   }
 
