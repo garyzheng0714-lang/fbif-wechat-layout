@@ -90,7 +90,7 @@
   border-radius: var(--fs-r-l);
   background: var(--fs-bg-card);
   border: 1px solid var(--fs-border-card);
-  box-shadow: var(--fs-sh-s2);
+  box-shadow: var(--fs-sh-s1);
   overflow: hidden;
 }
 .import-card .url-row {
@@ -100,9 +100,9 @@
 /* Dropzone */
 .dropzone {
   position: relative; border-radius: 0;
-  min-height: 178px;
+  min-height: 128px;
   background: var(--fs-bg-nested);
-  padding: 30px 18px 28px; text-align: center; cursor: pointer;
+  padding: 20px 14px 18px; text-align: center; cursor: pointer;
   border: none;
   display: flex;
   flex-direction: column;
@@ -113,7 +113,7 @@
 .dropzone:hover { background: var(--fs-bg-sunken); }
 .dropzone.dragover { background: var(--fs-brand-soft); box-shadow: inset 0 0 0 1.5px var(--fs-brand); }
 .dropzone-icon {
-  width: 56px; height: 56px; margin: 0 auto 13px;
+  width: 40px; height: 40px; margin: 0 auto 9px;
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--fs-r-full); background: var(--fs-brand-soft);
   color: var(--fs-brand); box-shadow: none;
@@ -121,24 +121,24 @@
 }
 .dropzone:hover .dropzone-icon { color: var(--fs-brand); transform: translateY(-2px); }
 .dropzone.dragover .dropzone-icon { color: var(--fs-brand); transform: translateY(-3px) scale(1.04); }
-.dropzone-icon svg { width: 28px; height: 28px; color: currentColor; }
-.dropzone-title { font-size: 15px; font-weight: 600; color: var(--fs-text-1); }
-.dropzone-hint { font-size: 12px; color: var(--fs-text-2); margin-top: 5px; }
+.dropzone-icon svg { width: 22px; height: 22px; color: currentColor; }
+.dropzone-title { font-size: 13px; font-weight: 600; color: var(--fs-text-1); }
+.dropzone-hint { font-size: 12px; color: var(--fs-text-2); margin-top: 3px; }
 .dropzone input[type=file] { display: none; }
 
 /* URL row */
 .url-row { display: flex; gap: 10px; }
 .import-card .url-row {
-  min-height: 64px;
-  padding: 12px 12px;
+  min-height: 44px;
+  padding: 6px 10px;
   align-items: center;
   border-top: 1px solid var(--fs-divider);
   background: var(--fs-bg-card);
 }
 .url-link-icon {
   flex: 0 0 auto;
-  width: 28px;
-  height: 34px;
+  width: 24px;
+  height: 32px;
   color: var(--fs-text-3);
   display: inline-flex;
   align-items: center;
@@ -152,9 +152,9 @@
   transition: box-shadow var(--fs-t-fast) var(--fs-ease-out);
 }
 .import-card .field {
-  height: 40px;
+  height: 32px;
   padding: 0;
-  font-size: 14px;
+  font-size: 13px;
   box-shadow: none;
 }
 .field::placeholder { color: var(--fs-text-3); }
@@ -183,7 +183,7 @@
 .btn-sm:disabled { opacity: .45; cursor: not-allowed; }
 
 .import-progress {
-  padding: 0 12px 12px 50px;
+  padding: 0 10px 10px 44px;
   background: var(--fs-bg-card);
 }
 .progress-bar {
