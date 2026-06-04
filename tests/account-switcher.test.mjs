@@ -29,7 +29,7 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(app, /id="activeRuleCard"/);
   assert.match(app, /renderActiveRuleCard/);
   assert.match(app, /id="activeRuleSelect"/);
-  assert.match(app, /data-action="edit-active-rule"/);
+  assert.doesNotMatch(app, /data-action="edit-active-rule"/, 'app fixed footer rule card is read-only; editing lives behind the rule admin entry');
   assert.match(app, /data-action="save-active-rule"/);
   assert.match(app, /data-action="cancel-active-rule"/);
   assert.match(app, /cancelActiveRuleEdit/);
@@ -41,8 +41,9 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(app, /当前规则/);
   assert.ok(
     app.indexOf('id="activeRuleCard"') > app.indexOf('id="moreArticlesSection"') &&
-      app.indexOf('id="activeRuleCard"') < app.indexOf('class="sidebar-footer"'),
-    'current rule selector should sit below the more-articles section as secondary metadata',
+      app.indexOf('id="activeRuleCard"') > app.indexOf('class="sidebar-footer"') &&
+      app.indexOf('id="activeRuleCard"') < app.indexOf('id="adminLockBtn"'),
+    'current rule selector should sit below the more-articles section and before the admin button',
   );
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
