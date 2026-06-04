@@ -62,12 +62,30 @@ export function createUrlImportHandler({
     const urlInput = documentRef.getElementById('urlInput');
     const btn = documentRef.getElementById('urlFetchBtn');
     const errorEl = documentRef.getElementById('error');
+    const importZone = documentRef.getElementById('importZone');
+    const docZone = documentRef.getElementById('docZone');
+    const progress = documentRef.getElementById('progress');
+    const progressFill = documentRef.getElementById('progressFill');
+    const progressText = documentRef.getElementById('progressText');
     const url = (urlInput && urlInput.value || '').trim();
     if (!url) return;
+    let handedOffToRenderer = false;
+    function showFetchProgress() {
+      if (importZone) importZone.hidden = false;
+      if (docZone) docZone.hidden = true;
+      if (progress) progress.style.display = 'block';
+      if (progressFill) progressFill.style.width = '30%';
+      if (progressText) progressText.textContent = '正在提取...';
+    }
+    function hideFetchProgress() {
+      if (progress) progress.style.display = 'none';
+      if (progressFill) progressFill.style.width = '0%';
+    }
     if (errorEl) {
       errorEl.textContent = '';
       errorEl.style.display = 'none';
     }
+    showFetchProgress();
     if (btn) {
       btn.disabled = true;
       btn.textContent = '提取中...';
@@ -88,17 +106,20 @@ export function createUrlImportHandler({
       if (Array.isArray(blocks) && blocks.length > 0) {
         const handleBlocks = getHandleBlocks();
         if (!handleBlocks) throw new Error('blocks 路径未就绪');
+        handedOffToRenderer = true;
         handleBlocks({ title, blocks, source: url }, { isRepost: true });
       } else if (content) {
         const file = new FileCtor([content], (title || 'article') + '.md', { type: 'text/markdown' });
         const handleFile = getHandleFile();
         if (handleFile) {
+          handedOffToRenderer = true;
           handleFile(file, { isRepost: true });
         } else {
           const fi = documentRef.getElementById('fileInput');
           const dt = new DataTransferCtor();
           dt.items.add(file);
           fi.files = dt.files;
+          handedOffToRenderer = true;
           fi.dispatchEvent(new Event('change'));
         }
       } else {
@@ -109,11 +130,13 @@ export function createUrlImportHandler({
         errorEl.textContent = errorMessage(err);
         errorEl.style.display = 'block';
       }
+      hideFetchProgress();
     } finally {
       if (btn) {
         btn.disabled = false;
         btn.textContent = '提取';
       }
+      if (!handedOffToRenderer) hideFetchProgress();
     }
   };
 }

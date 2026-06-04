@@ -95,10 +95,15 @@ test('createUrlImportHandler passes source URL with structured blocks', async ()
   const calls = [];
   const requests = [];
   const elements = new Map();
-  const makeElement = value => ({ value, textContent: '', disabled: false, style: { display: '' } });
+  const makeElement = value => ({ value, textContent: '', disabled: false, hidden: false, style: { display: '' } });
   elements.set('urlInput', makeElement('https://mp.weixin.qq.com/s/abc'));
   elements.set('urlFetchBtn', makeElement(''));
   elements.set('error', makeElement(''));
+  elements.set('importZone', makeElement(''));
+  elements.set('docZone', makeElement(''));
+  elements.set('progress', makeElement(''));
+  elements.set('progressFill', { style: { width: '' } });
+  elements.set('progressText', makeElement(''));
 
   const documentRef = {
     getElementById(id) {
@@ -135,6 +140,11 @@ test('createUrlImportHandler passes source URL with structured blocks', async ()
     source: 'https://mp.weixin.qq.com/s/abc',
   });
   assert.deepEqual(calls[1].options, { isRepost: true });
+  assert.equal(elements.get('importZone').hidden, false);
+  assert.equal(elements.get('docZone').hidden, true);
+  assert.equal(elements.get('progress').style.display, 'block');
+  assert.equal(elements.get('progressFill').style.width, '30%');
+  assert.equal(elements.get('progressText').textContent, '正在提取...');
 });
 
 test('foodTalksFetchErrorMessage keeps internal details out of the UI', () => {

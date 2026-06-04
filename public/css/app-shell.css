@@ -77,6 +77,24 @@
 .rail-link svg { width: 14px; height: 14px; }
 .rail-sep { height: 1px; background: var(--fs-divider); margin: 2px 0; }
 
+/* Import area */
+.import-zone[hidden],
+.doc-zone[hidden] {
+  display: none;
+}
+.import-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--fs-r-l);
+  background: var(--fs-bg-card);
+  box-shadow: var(--fs-sh-s1);
+}
+.import-card .url-row {
+  margin-top: 0;
+}
+
 /* Dropzone */
 .dropzone {
   position: relative; border-radius: var(--fs-r-m);
@@ -121,6 +139,92 @@
 .btn-sm:hover { background: var(--fs-bg-hover); box-shadow: inset 0 0 0 1px var(--fs-text-3); }
 .btn-sm:active { background: var(--fs-bg-press); }
 .btn-sm:disabled { opacity: .45; cursor: not-allowed; }
+
+.import-progress {
+  padding: 0 2px 2px;
+}
+.progress-bar {
+  height: 3px;
+  border-radius: var(--fs-r-full);
+  background: var(--fs-bg-sunken);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: var(--fs-r-full);
+  background: var(--fs-brand);
+  transition: width var(--fs-t-slow) var(--fs-ease-out);
+}
+.progress-text {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--fs-text-2);
+}
+.doc-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--fs-r-m);
+  background: var(--fs-bg-nested);
+}
+.doc-ico {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: var(--fs-r-s);
+  background: var(--fs-brand-soft);
+  color: var(--fs-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.doc-meta {
+  min-width: 0;
+  flex: 1;
+}
+.doc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fs-text-1);
+}
+.doc-stat {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fs-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.doc-swap {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--fs-r-s);
+  color: var(--fs-text-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--fs-t-fast) var(--fs-ease-out),
+              color var(--fs-t-fast) var(--fs-ease-out),
+              transform var(--fs-t-fast) var(--fs-ease-out);
+}
+.doc-swap:hover {
+  background: var(--fs-bg-press);
+  color: var(--fs-text-1);
+}
+.doc-swap:active {
+  transform: scale(0.95);
+}
+.doc-swap:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
+}
 
 /* ============================================================
    Center stage

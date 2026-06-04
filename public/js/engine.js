@@ -288,8 +288,50 @@ export function initApp(initialTemplate) {
   const progressText = document.getElementById('progressText');
   const errorEl = document.getElementById('error');
   const batchList = document.getElementById('batchList');
+  const importZone = document.getElementById('importZone');
+  const docZone = document.getElementById('docZone');
+  const docName = document.getElementById('docName');
+  const docStat = document.getElementById('docStat');
+  const docSwap = document.getElementById('docSwap');
 
   function showError(msg) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+
+  function showImportEntry() {
+    if (importZone) importZone.hidden = false;
+    if (docZone) docZone.hidden = true;
+  }
+
+  function resetImportEntry() {
+    showImportEntry();
+    dropZone.classList.remove('processing');
+    progress.style.display = 'none';
+    progressFill.style.width = '0%';
+    progressText.textContent = '正在排版...';
+    fileInput.value = '';
+  }
+
+  function formatImportStat(stats) {
+    const text = String(stats || '');
+    const para = text.match(/段落:\s*(\d+)/);
+    const image = text.match(/图片:\s*(\d+)/);
+    if (para || image) {
+      return [
+        para ? para[1] + ' 段' : '',
+        image ? image[1] + ' 图' : '',
+      ].filter(Boolean).join(' · ');
+    }
+    return text || '已完成提取';
+  }
+
+  function showImportSummary(title, stats) {
+    if (!docZone) return;
+    if (docName) docName.textContent = title || '未命名文档';
+    if (docStat) docStat.textContent = formatImportStat(stats);
+    if (importZone) importZone.hidden = true;
+    docZone.hidden = false;
+    dropZone.classList.remove('processing');
+    progress.style.display = 'none';
+  }
 
   function isValidFile(f) {
     return template.formats.some(fmt => f.name.toLowerCase().endsWith(fmt));
@@ -336,6 +378,7 @@ export function initApp(initialTemplate) {
   async function handleFiles(files, opts) {
     const valid = Array.from(files).filter(isValidFile);
     if (valid.length === 0) {
+      showImportEntry();
       showError('请上传 ' + template.formats.join(' 或 ') + ' 文件');
       return;
     }
@@ -396,6 +439,11 @@ export function initApp(initialTemplate) {
   }
 
   dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    fileInput.click();
+  });
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone.addEventListener('drop', e => {
@@ -403,6 +451,12 @@ export function initApp(initialTemplate) {
     handleFiles(e.dataTransfer.files, { isRepost: false });
   });
   fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles(fileInput.files, { isRepost: false }); });
+  if (docSwap) {
+    docSwap.addEventListener('click', () => {
+      resetImportEntry();
+      fileInput.click();
+    });
+  }
 
   // Exposed so app.html fetchArticle() can feed the synthetic File produced
   // from a URL fetch through the same pipeline as a local upload, but with
@@ -418,6 +472,7 @@ export function initApp(initialTemplate) {
     _convLog.length = 0;
     logConv('info', '开始转化', { source: 'blocks', blocks: (data.blocks || []).length });
     errorEl.style.display = 'none';
+    showImportEntry();
     dropZone.classList.add('processing');
     progress.style.display = 'block';
     progressFill.style.width = '70%';
@@ -518,6 +573,7 @@ export function initApp(initialTemplate) {
     _convLog.length = 0;
     logConv('info', '开始转化', { file: file.name, size: (file.size / 1024).toFixed(1) + 'KB' });
     errorEl.style.display = 'none';
+    showImportEntry();
     dropZone.classList.add('processing');
     progress.style.display = 'block';
     progressFill.style.width = '50%';
@@ -667,6 +723,7 @@ export function initApp(initialTemplate) {
 
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
+    showImportSummary(title, stats);
 
     // Apply theme CSS variables to contentArea for preview
     const contentArea = document.getElementById('contentArea');
@@ -913,8 +970,7 @@ export function initApp(initialTemplate) {
     document.body.classList.remove('has-preview');
 
     dropZone.classList.remove('processing');
-    progress.style.display = 'none';
-    progressFill.style.width = '0%';
+    resetImportEntry();
     fileInput.value = '';
     const copyBtn = document.getElementById('copyBtn');
     if (copyBtn) { copyBtn.textContent = '复制全文'; copyBtn.classList.remove('copied'); }
@@ -984,6 +1040,11 @@ export function initApp(initialTemplate) {
         batch_visible: batchListEl ? batchListEl.style.display !== 'none' : false,
         batch_html: batchListEl ? batchListEl.innerHTML : '',
         has_preview_class: document.body.classList.contains('has-preview'),
+        import_visible: importZone ? !importZone.hidden : true,
+        doc_visible: docZone ? !docZone.hidden : false,
+        doc_name: docName ? docName.textContent : '',
+        doc_stat: docStat ? docStat.textContent : '',
+        stats_text: (document.getElementById('statsBar') || {}).textContent || '',
       },
     };
   };
@@ -1026,6 +1087,14 @@ export function initApp(initialTemplate) {
     if (emptyState) emptyState.style.display = dom.empty_visible ? '' : 'none';
     const wxFooter = document.getElementById('wxFooter');
     if (wxFooter) wxFooter.style.display = dom.footer_visible ? '' : 'none';
+    if (dom.doc_visible || (dom.preview_visible && !dom.import_visible)) {
+      showImportSummary(
+        dom.doc_name || dom.title_input_value || dom.article_title_text || '',
+        dom.doc_stat || dom.stats_text || ''
+      );
+    } else {
+      resetImportEntry();
+    }
     const batchListEl = document.getElementById('batchList');
     if (batchListEl) {
       batchListEl.innerHTML = dom.batch_html || '';
