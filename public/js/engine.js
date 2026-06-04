@@ -273,8 +273,7 @@ export function initApp(initialTemplate) {
   function applyTemplateShell(nextTemplate) {
     document.getElementById('pageTitle').textContent = nextTemplate.name;
     document.getElementById('pageSubtitle').textContent = nextTemplate.description;
-    document.getElementById('fileHint').textContent =
-      '支持 ' + nextTemplate.formats.join('、') + ' 格式';
+    document.getElementById('fileHint').textContent = '支持 Word、Markdown、TXT 格式';
     fileInputEl.accept = nextTemplate.formats.join(',');
   }
   const fileInputEl = document.getElementById('fileInput');
