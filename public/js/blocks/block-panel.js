@@ -30,6 +30,13 @@ function saveOverride(accountId, ov) {
 const ICON_CHEVRON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 const ICON_GRIP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>';
 const ICON_RESET = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 3v5h5"/></svg>';
+// 手风琴头的层叠图标（方案A 参考稿 I('layers')）。
+const ICON_LAYERS = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>';
+
+// reduced-motion 探测（无 window 时安全返回 false，与 anim.js 一致语义但不引入 import）。
+function prefersReduced() {
+  return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 const STYLE_ID = 'bp-style';
 function ensureStyle(doc) {
@@ -38,10 +45,20 @@ function ensureStyle(doc) {
   st.id = STYLE_ID;
   st.textContent = `
 .bp-wrap{font-size:13px;color:var(--fs-text-1,#1f2329);}
-.bp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
-.bp-head-title{font-weight:600;}
-.bp-master{display:flex;align-items:center;gap:6px;cursor:pointer;}
-.bp-resetall{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;font-size:12px;text-decoration:underline;padding:0;}
+.bp-acc{border-radius:var(--fs-r-m,8px);}
+.bp-acc-head{display:flex;align-items:center;gap:10px;width:100%;height:40px;padding:0 8px;border:none;background:none;border-radius:var(--fs-r-s,6px);text-align:left;cursor:pointer;font-family:inherit;transition:background .12s var(--fs-ease-out,ease);}
+.bp-acc-head:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045));}
+.bp-ico{width:18px;height:18px;color:var(--fs-text-2,#646a73);flex-shrink:0;display:flex;}
+.bp-acc-title{flex:1;font-size:13px;font-weight:600;color:var(--fs-text-1,#1f2329);}
+.bp-count{min-width:18px;height:18px;padding:0 5px;border-radius:9999px;background:var(--fs-bg-sunken,#f2f3f5);color:var(--fs-text-2,#646a73);font-size:11px;font-weight:500;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,color .15s;}
+.bp-acc.is-open .bp-count{background:var(--fs-brand-soft,#ebf1ff);color:var(--fs-brand,#1456f0);}
+.bp-chevron{color:var(--fs-text-3,#8f959e);flex-shrink:0;display:inline-flex;transition:transform .2s var(--fs-ease-out,ease);}
+.bp-acc.is-open .bp-chevron{transform:rotate(90deg);}
+.bp-acc-body{overflow:hidden;}
+.bp-acc-inner{padding-top:4px;}
+.bp-list{display:flex;flex-direction:column;gap:2px;}
+.bp-hint{color:var(--fs-text-3,#8f959e);font-size:11px;line-height:1.6;margin-top:8px;padding:0 8px;}
+.bp-resetall{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;font-size:12px;text-decoration:underline;padding:4px 8px 0;}
 .bp-resetall:hover{color:var(--fs-brand,#1456f0);}
 .bp-card{border:none;border-radius:var(--fs-r-s,6px);margin-bottom:2px;background:transparent;}
 .bp-card:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045));}
@@ -136,6 +153,11 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
   let override = loadOverride(accountId);
   const expanded = new Set();
   let sortable = null;
+  let panelOpen = true;      // 手风琴整段默认展开，chevron 折叠
+  let justExpanded = null;   // 刚点开字段的区块 id，render 后做一次淡入
+  // 迁移：旧版「主开关」可写 override.enabled=false（整段隐藏）。新版去掉主开关、改用每块开关+计数，
+  // 清掉遗留 enabled，避免老文章卡在「整段关闭且无 UI 可恢复」。order/overrides 保留。
+  if (override && 'enabled' in override) { delete override.enabled; saveOverride(accountId, override); }
 
   function emit() { saveOverride(accountId, override); if (onChange) onChange(override); }
   function ensureBlock(id) {
@@ -153,10 +175,6 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     if (override.overrides && !Object.keys(override.overrides).length) delete override.overrides;
   }
 
-  function setMaster(val, def) {
-    if (val === def) delete override.enabled; else override.enabled = val;
-    emit(); render();
-  }
   function setEnabled(id, val, def) {
     const b = ensureBlock(id);
     if (val === def) delete b.enabled; else b.enabled = val;
@@ -306,28 +324,48 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     const wrap = doc.createElement('div');
     wrap.className = 'bp-wrap';
 
-    const head = doc.createElement('div');
-    head.className = 'bp-head';
-    const master = doc.createElement('label');
-    master.className = 'bp-master';
-    const mcb = doc.createElement('input'); mcb.type = 'checkbox'; mcb.className = 'bp-switch'; mcb.checked = resolved.enabled;
-    const moduleDefault = mod.enabled !== false;
-    mcb.onchange = () => setMaster(mcb.checked, moduleDefault);
-    master.appendChild(mcb);
-    const mlabel = doc.createElement('span'); mlabel.className = 'bp-head-title'; mlabel.textContent = '底部区块';
-    master.appendChild(mlabel);
-    head.appendChild(master);
-    if (hasAnyOverride(override)) {
-      const ra = doc.createElement('button'); ra.type = 'button'; ra.className = 'bp-resetall'; ra.textContent = '全部恢复默认';
-      ra.onclick = resetAll; head.appendChild(ra);
-    }
-    wrap.appendChild(head);
+    // 手风琴头：层叠图标 +「底部区块」+ 启用/总数计数 + 折叠 chevron（整段可折叠，无主开关；
+    // 全关=0/N 即等价隐藏整段，参考稿口径）。
+    const acc = doc.createElement('div');
+    acc.className = 'bp-acc' + (panelOpen ? ' is-open' : '');
+    const accHead = doc.createElement('button');
+    accHead.type = 'button'; accHead.className = 'bp-acc-head';
+    const enabledCount = resolved.blocks.filter(b => b.enabled).length;
+    accHead.innerHTML =
+      `<span class="bp-ico">${ICON_LAYERS}</span>` +
+      `<span class="bp-acc-title">底部区块</span>` +
+      `<span class="bp-count">${enabledCount}/${resolved.blocks.length}</span>` +
+      `<span class="bp-chevron">${ICON_CHEVRON}</span>`;
+    acc.appendChild(accHead);
+
+    const body = doc.createElement('div'); body.className = 'bp-acc-body';
+    body.style.height = panelOpen ? 'auto' : '0';
+    const inner = doc.createElement('div'); inner.className = 'bp-acc-inner';
+    body.appendChild(inner);
+    acc.appendChild(body);
+    wrap.appendChild(acc);
+
+    // chevron 折叠：只动 body 高度 + 旋转，不整树重渲（保留内容/输入态）。
+    accHead.onclick = () => {
+      panelOpen = !panelOpen;
+      acc.classList.toggle('is-open', panelOpen);
+      if (prefersReduced() || !window.gsap) { body.style.height = panelOpen ? 'auto' : '0'; return; }
+      if (panelOpen) {
+        window.gsap.set(body, { height: 'auto' });
+        if (window.gFrom) window.gFrom(body, { height: 0, duration: 0.3, ease: 'power3.out' });
+        if (window.gFrom) window.gFrom(inner.querySelectorAll('.bp-card, .bp-hint, .bp-resetall'),
+          { y: 8, opacity: 0, duration: 0.26, stagger: 0.035, delay: 0.04, ease: 'power2.out' });
+      } else if (window.gTo) {
+        window.gTo(body, { height: 0, duration: 0.24, ease: 'power2.inOut' });
+      }
+    };
 
     if (!resolved.blocks.length) {
       const e = doc.createElement('div'); e.className = 'bp-empty'; e.textContent = '该规则暂无可配置的底部区块。';
-      wrap.appendChild(e); mount.appendChild(wrap); return;
+      inner.appendChild(e); mount.appendChild(wrap); return;
     }
 
+    const list = doc.createElement('div'); list.className = 'bp-list';
     for (const block of resolved.blocks) {
       const type = getBlockType(block.type) || { label: block.type, fields: [] };
       const card = doc.createElement('div');
@@ -346,7 +384,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       caret.className = 'bp-caret' + (isOpen ? ' bp-open' : ''); caret.innerHTML = ICON_CHEVRON;
       const toggle = () => {
         if (isOpenNow(block)) { expanded.delete(block.id); expanded.add('__c__' + block.id); }
-        else { expanded.add(block.id); expanded.delete('__c__' + block.id); }
+        else { expanded.add(block.id); expanded.delete('__c__' + block.id); justExpanded = block.id; }
         render();
       };
       name.onclick = toggle; caret.onclick = toggle;
@@ -368,24 +406,41 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
         if (extra) fields.appendChild(extra);
         if (fields.childNodes.length) card.appendChild(fields);
       }
-      wrap.appendChild(card);
+      list.appendChild(card);
+    }
+    inner.appendChild(list);
+
+    const hint = doc.createElement('div'); hint.className = 'bp-hint';
+    hint.textContent = '勾选显示/隐藏，拖拽排序，展开可改本篇字段；改动只影响当前文章。';
+    inner.appendChild(hint);
+    if (hasAnyOverride(override)) {
+      const ra = doc.createElement('button'); ra.type = 'button'; ra.className = 'bp-resetall'; ra.textContent = '全部恢复默认';
+      ra.onclick = resetAll; inner.appendChild(ra);
     }
     mount.appendChild(wrap);
 
-    // 拖拽排序交给 SortableJS（grip 为唯一把手；只对 .bp-card 排序，head 不动）。
+    // 拖拽排序交给 SortableJS（grip 为唯一把手；只对 .bp-list 内 .bp-card 排序，仅展开时启用）。
     // 拖完一次性按 DOM 顺序回写 override.order 并重建——拖拽会话已结束，render() 销毁旧实例安全。
-    if (window.Sortable && resolved.blocks.length > 1) {
-      sortable = window.Sortable.create(wrap, {
+    if (window.Sortable && resolved.blocks.length > 1 && panelOpen) {
+      sortable = window.Sortable.create(list, {
         handle: '.bp-grip',
         draggable: '.bp-card',
         animation: 150,
         forceFallback: true,
         onEnd: () => applyOrder(
-          Array.from(wrap.querySelectorAll('.bp-card')).map(c => c.dataset.id),
+          Array.from(list.querySelectorAll('.bp-card')).map(c => c.dataset.id),
           baseOrder
         ),
       });
     }
+
+    // 刚点开字段的区块：fields 高度+透明淡入一次（每块展开的微动效）。
+    if (justExpanded && window.gFrom && window.gsap && !prefersReduced()) {
+      const card = Array.from(list.querySelectorAll('.bp-card')).find(c => c.dataset.id === justExpanded);
+      const f = card && card.querySelector('.bp-fields');
+      if (f) window.gFrom(f, { height: 0, opacity: 0, duration: 0.28, ease: 'power3.out', clearProps: 'height' });
+    }
+    justExpanded = null;
   }
 
   // 默认开合规则：全部默认折叠，避免底部面板一打开就过长；用户手动开合后以 expanded 记录为准。
