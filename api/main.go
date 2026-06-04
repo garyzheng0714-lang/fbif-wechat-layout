@@ -124,12 +124,10 @@ func main() {
 
 	// Serve static files from ../public
 	fs := http.FileServer(http.Dir(publicDir))
-	// Force browsers to revalidate HTML + all JS/CSS on every load so a deploy
-	// picks up the latest code immediately. Top-level modules are pinned with
-	// ?v=<commit>, but nested imports (e.g. parser.js → punctuation.js) are
-	// bare paths — without a server-side no-cache, an updated inner module
-	// keeps serving from the browser's heuristic cache for hours.
-	mux.Handle("/", noCacheStatic(fs))
+	// HTML/version stay fresh on every deploy; version-pinned top-level assets
+	// can be reused without revalidation. Bare nested JS/CSS remains no-cache
+	// because those imports do not carry ?v=<commit>.
+	mux.Handle("/", cacheStatic(fs))
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
@@ -138,22 +136,51 @@ func main() {
 	}
 }
 
-// noCacheStatic forces revalidation of HTML / JS / CSS on every load.
-// Top-level HTML and hashed modules are re-fetched so a deploy takes effect
-// immediately; bare-path nested imports (e.g. parser.js → punctuation.js)
-// also stay fresh without relying on query-string pins the author may forget
-// to add. "no-cache" still allows 304s via If-Modified-Since, so repeat loads
-// are cheap when nothing changed.
-func noCacheStatic(next http.Handler) http.Handler {
+const (
+	appShellCacheControl        = "no-cache"
+	versionedAssetCacheControl  = "public, max-age=31536000, immutable"
+	shortLivedAssetCacheControl = "public, max-age=86400"
+)
+
+// cacheStatic keeps the app shell deployment-sensitive while avoiding repeat
+// revalidation for assets whose URL already carries the deploy version.
+func cacheStatic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/" || strings.HasSuffix(p, ".html") ||
-			strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".mjs") ||
-			strings.HasSuffix(p, ".css") {
-			w.Header().Set("Cache-Control", "no-cache")
+		switch {
+		case p == "/" || p == "/version.json" || strings.HasSuffix(p, ".html"):
+			w.Header().Set("Cache-Control", appShellCacheControl)
+		case isVersionedStaticAsset(r):
+			w.Header().Set("Cache-Control", versionedAssetCacheControl)
+		case strings.HasPrefix(p, "/vendor/"):
+			w.Header().Set("Cache-Control", versionedAssetCacheControl)
+		case isImageAssetPath(p):
+			w.Header().Set("Cache-Control", shortLivedAssetCacheControl)
+		case isScriptOrStylePath(p):
+			w.Header().Set("Cache-Control", appShellCacheControl)
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isVersionedStaticAsset(r *http.Request) bool {
+	if strings.TrimSpace(r.URL.Query().Get("v")) == "" {
+		return false
+	}
+	return isScriptOrStylePath(r.URL.Path)
+}
+
+func isScriptOrStylePath(p string) bool {
+	return strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".mjs") || strings.HasSuffix(p, ".css")
+}
+
+func isImageAssetPath(p string) bool {
+	for _, suffix := range []string{".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico"} {
+		if strings.HasSuffix(p, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func withCORS(next http.Handler) http.Handler {

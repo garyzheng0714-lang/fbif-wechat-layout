@@ -3,7 +3,7 @@
 // - Empty state shows a red-bordered prompt.
 // - Each card can be reordered via drag, and deleted via × button.
 // - A "+ 添加更多文章" button below the list appends a blank card.
-// Called by: public/app.html inline <script type="module"> on startup.
+// Called by: public/app.html inline <script type="module"> after an article exists.
 
 import {
   loadCards,

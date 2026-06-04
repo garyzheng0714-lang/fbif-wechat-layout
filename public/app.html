@@ -638,6 +638,7 @@ const accountMenu = mountAccountMenu({
 
 // #moreArticlesEmbed 的稳定引用：缓存一次，之后即使被 block-panel 的 innerHTML='' 摘下 DOM，
 // 元素对象仍存活，可再 append 复位（不能用 getElementById——detached 时找不到）。
+let articleEditorActivated = document.body.classList.contains('has-preview');
 function moreArticlesEmbedEl() {
   if (!window._maEmbedRef) window._maEmbedRef = document.getElementById('moreArticlesEmbed');
   return window._maEmbedRef || null;
@@ -653,6 +654,10 @@ async function applyAccountCapabilityUI(pack) {
   const bbMount = document.getElementById('blockPanel');
   const bbMod = window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks;
   if (bbSec && bbMount) {
+    if (!articleEditorActivated && !document.body.classList.contains('has-preview')) {
+      bbSec.style.display = 'none';
+      return;
+    }
     if (bbMod) {
       // 幂等挂载：同账号已挂载则只 refresh，避免初始时序竞态下被调用两次而挂出双实例
       // （双实例各持一份内存 override，互相打架 → “改了又被打回”）。换账号则销毁旧实例再挂新。
@@ -666,7 +671,7 @@ async function applyAccountCapabilityUI(pack) {
           getModule: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks) || {},
           getAssetLibrary: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.asset_library) || null,
           // more_articles 块把卡片编辑器（#moreArticlesEmbed）搬进内容编辑区；其余块由面板按 frontend_editable 决定换图入口。
-          getBlockExtra: (block) => (block && block.type === 'more_articles') ? moreArticlesEmbedEl() : null,
+          getBlockExtra: (block) => (articleEditorActivated && block && block.type === 'more_articles') ? moreArticlesEmbedEl() : null,
           onChange: (ov) => { window._bottomBlocksOverride = ov; if (window._engineApi && typeof window._engineApi.rerender === 'function') window._engineApi.rerender(); },
         });
         window._blockPanelAcct = pack.id;
@@ -765,9 +770,40 @@ function syncWorkflowControls() {
 
 // ---- Load engine + template ----
 const { initApp } = await import('/js/engine.js?v=' + assetVersion);
-const { initMoreArticlesEditor } = await import('/js/more-articles-ui.js?v=' + assetVersion);
-const { openCropEditor } = await import('/js/crop-editor.js?v=' + assetVersion);
-initMoreArticlesEditor({ openCropEditor });
+
+let moreArticlesEditorReady = null;
+async function ensureMoreArticlesEditor() {
+  if (!moreArticlesEditorReady) {
+    moreArticlesEditorReady = (async () => {
+      const [{ initMoreArticlesEditor }, { openCropEditor }] = await Promise.all([
+        import('/js/more-articles-ui.js?v=' + assetVersion),
+        import('/js/crop-editor.js?v=' + assetVersion),
+      ]);
+      initMoreArticlesEditor({ openCropEditor });
+      return true;
+    })();
+  }
+  return moreArticlesEditorReady;
+}
+
+async function activateArticleSidebar() {
+  articleEditorActivated = true;
+  try {
+    await ensureMoreArticlesEditor();
+    await applyAccountCapabilityUI(activeRulePack);
+  } catch (err) {
+    console.warn('[more-articles] lazy init failed', err);
+  }
+}
+
+window.addEventListener('fbif:article-previewed', activateArticleSidebar);
+window.addEventListener('fbif:article-restored', activateArticleSidebar);
+window.addEventListener('fbif:article-cleared', () => {
+  articleEditorActivated = false;
+  const bbSec = document.getElementById('blockPanelSection');
+  if (bbSec) bbSec.style.display = 'none';
+});
+
 hydrateActiveRulePreset(activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
 refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));
 

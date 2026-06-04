@@ -173,6 +173,20 @@ jobs:
               "  @fbifAppShell path / /index.html /app.html /version.json\n"
               "  header @fbifAppShell Cache-Control \"no-cache\"\n"
           )
+          asset_cache_headers = (
+              "\n"
+              "  @fbifVersionedAssets {\n"
+              "    path /js/* /css/*\n"
+              "    query v=*\n"
+              "  }\n"
+              "  header @fbifVersionedAssets Cache-Control \"public, max-age=31536000, immutable\"\n"
+              "\n"
+              "  @fbifVendorAssets path /vendor/*\n"
+              "  header @fbifVendorAssets Cache-Control \"public, max-age=31536000, immutable\"\n"
+              "\n"
+              "  @fbifImageAssets path *.png *.jpg *.jpeg *.webp *.gif *.svg *.ico\n"
+              "  header @fbifImageAssets Cache-Control \"public, max-age=86400\"\n"
+          )
 
           # Remove any prior @fbifRulesApi route, regardless of upstream form
           # (127.0.0.1, localhost, or other host:port) and regardless of
@@ -219,6 +233,23 @@ jobs:
               if new_text == text:
                   break
               text = new_text
+          asset_header_re = re.compile(
+              r"\n[ \t]*@fbifVersionedAssets[ \t]*\{[ \t]*\n"
+              r"(?:[^\n]*\n)*?"
+              r"[ \t]*\}[ \t]*\n"
+              r"[ \t]*header[ \t]+@fbifVersionedAssets[ \t]+Cache-Control[^\n]*\n"
+              r"\n?"
+              r"[ \t]*@fbifVendorAssets[^\n]*\n"
+              r"[ \t]*header[ \t]+@fbifVendorAssets[ \t]+Cache-Control[^\n]*\n"
+              r"\n?"
+              r"[ \t]*@fbifImageAssets[^\n]*\n"
+              r"[ \t]*header[ \t]+@fbifImageAssets[ \t]+Cache-Control[^\n]*\n"
+          )
+          while True:
+              new_text = asset_header_re.sub("\n", text)
+              if new_text == text:
+                  break
+              text = new_text
 
           insert_points = []
           scan_from = 0
@@ -238,7 +269,7 @@ jobs:
           backup = target.with_suffix(target.suffix + ".bak-rules")
           backup.write_text(original)
           for open_after in sorted(set(insert_points), reverse=True):
-              text = text[:open_after] + app_shell_header + route + channels_route + text[open_after:]
+              text = text[:open_after] + app_shell_header + asset_cache_headers + route + channels_route + text[open_after:]
           target.write_text(text)
           print("Ensured Caddy rule API + channel handles in " + str(target) + " -> " + upstream)
           PY

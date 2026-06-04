@@ -89,6 +89,52 @@ func TestChannelRoute_SetsNoCacheHeader(t *testing.T) {
 	}
 }
 
+func TestStaticCache_VersionedJSIsImmutable(t *testing.T) {
+	publicDir := mustWriteStaticAsset(t, "js/engine.js", []byte("export {};"))
+	handler := cacheStatic(http.FileServer(http.Dir(publicDir)))
+	req := httptest.NewRequest(http.MethodGet, "/js/engine.js?v=commit123", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Cache-Control"); got != versionedAssetCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, versionedAssetCacheControl)
+	}
+}
+
+func TestStaticCache_BareNestedJSStaysNoCache(t *testing.T) {
+	publicDir := mustWriteStaticAsset(t, "js/parser.js", []byte("export {};"))
+	handler := cacheStatic(http.FileServer(http.Dir(publicDir)))
+	req := httptest.NewRequest(http.MethodGet, "/js/parser.js", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Cache-Control"); got != appShellCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, appShellCacheControl)
+	}
+}
+
+func TestStaticCache_VersionFileStaysNoCache(t *testing.T) {
+	publicDir := mustWriteStaticAsset(t, "version.json", []byte(`{"build":"test"}`))
+	handler := cacheStatic(http.FileServer(http.Dir(publicDir)))
+	req := httptest.NewRequest(http.MethodGet, "/version.json", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Cache-Control"); got != appShellCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, appShellCacheControl)
+	}
+}
+
+func mustWriteStaticAsset(t *testing.T, name string, content []byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	full := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		t.Fatalf("mkdir asset dir: %v", err)
+	}
+	if err := os.WriteFile(full, content, 0644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	return dir
+}
+
 // mustWriteBothHTML 写一份 app.html（带 APP marker）和 site.html（带 SITE marker），
 // 用于验证 /mp 系列 serve app.html、/ft 系列 serve site.html。
 func mustWriteBothHTML(t *testing.T) string {
