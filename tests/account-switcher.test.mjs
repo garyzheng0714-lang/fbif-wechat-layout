@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('app shell renders a unified rail account menu (single layer)', async () => {
+test('app shell renders a unified top-bar account menu (single layer)', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/app.css', import.meta.url), 'utf8');
   const channelBarCss = await readFile(new URL('../public/css/channel-bar.css', import.meta.url), 'utf8');
   const menuJs = await readFile(new URL('../public/js/account-menu.js', import.meta.url), 'utf8');
   const allCss = css + '\n' + channelBarCss;
 
-  // 单层账号菜单：左侧工具区顶部的头像菜单取代旧的
+  // 单层账号菜单：顶栏左上角头像菜单取代旧的
   // 侧栏方角分段 + 顶部圆形渠道胶囊。渲染逻辑在 account-menu.js，挂载点 #acctMenu。
   assert.match(app, /id="acctMenu"/);
   assert.match(app, /mountAccountMenu/);
@@ -21,13 +21,13 @@ test('app shell renders a unified rail account menu (single layer)', async () =>
   const header = app.slice(headerStart, headerEnd);
   const railHead = app.slice(railStart, railBodyStart);
   const visibleShell = app.slice(0, app.indexOf('<script type="module">'));
-  assert.doesNotMatch(header, /id="acctMenu"/, '公众号菜单不应再占据全局顶栏');
+  assert.match(header, /id="acctMenu"/, '公众号菜单应回到全局顶栏左上角');
   assert.doesNotMatch(app, /captureArticleTab|_articleTabs|mountArticleTabs/, '账号切换不应再绑定文章标签页状态');
-  assert.match(header, /FBIF文章排版工具/, '全局顶栏必须展示产品身份');
-  assert.match(header, /class="app-brand-logo"/, '全局顶栏必须展示 FBIF logo');
+  assert.doesNotMatch(header, /FBIF文章排版工具|class="app-brand-logo"|class="app-brand"/, '全局顶栏不应展示产品身份文案');
   assert.match(header, /id="adminLockBtn"/, '设置入口应在全局顶栏右侧');
-  assert.match(railHead, /class="rail-account-bar"/, '公众号菜单应固定在左侧工具区顶部');
-  assert.match(railHead, /id="acctMenu"/, '左侧工具区顶部必须提供公众号菜单挂载点');
+  assert.match(header, /id="adminLockBtn"[\s\S]*id="copyBtn"/, '设置入口应紧挨复制全文左侧');
+  assert.doesNotMatch(header, /id="articleRefreshBtn"/, '刷新按钮不应出现在顶栏');
+  assert.doesNotMatch(railHead, /class="rail-account-bar"|id="acctMenu"/, '公众号菜单不应留在左侧工具区顶部');
   // 旧的两层切换器残骸必须清掉
   assert.doesNotMatch(app, /id="accountSwitcher"/, '旧侧栏方角分段已移除');
   assert.doesNotMatch(app, /class="channel-switcher"/, '旧顶部圆形渠道胶囊已移除');

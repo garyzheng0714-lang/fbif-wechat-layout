@@ -26,26 +26,9 @@
   position: relative;
   z-index: 60;
 }
-.app-brand {
+.global-channel-bar > .acct-menu {
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--fs-text-1);
-  font-size: 15px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.app-brand-logo {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--fs-r-s);
-  object-fit: contain;
-  flex: 0 0 26px;
-}
-.app-brand-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 1 auto;
 }
 .topbar-settings-btn {
   width: 32px;
@@ -107,47 +90,6 @@
 /* 账号菜单展开：CSS-only 入场（不动 account-menu.js，红线#2 单层菜单不变） */
 .acct-panel:not([hidden]) { transform-origin: top left; animation: acct-pop 160ms var(--fs-ease-out, ease); }
 @keyframes acct-pop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-.preview-toolbar-strip {
-  height: 40px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 16px 0 14px;
-  background: var(--fs-bg-nested);
-  border-bottom: 1px solid var(--fs-divider);
-  position: relative;
-  z-index: 55;
-}
-.tb-icon-action:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
-}
-.tb-icon-action {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  border: none;
-  border-radius: var(--fs-r-s);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--fs-text-3);
-  font: inherit;
-  cursor: pointer;
-  transition: background var(--fs-t-fast) var(--fs-ease-out), color var(--fs-t-fast) var(--fs-ease-out), transform var(--fs-t-fast) var(--fs-ease-out);
-}
-.tb-icon-action:hover { background: var(--fs-bg-hover); color: var(--fs-text-1); }
-.tb-icon-action:active { transform: scale(0.95); }
-.tb-icon-action:disabled {
-  opacity: 0.45;
-  cursor: default;
-  transform: none;
-}
-.tb-icon-action:disabled:hover { background: transparent; color: var(--fs-text-3); }
-.tb-icon-action.is-refreshing svg { animation: article-refresh-spin 700ms linear infinite; }
-@keyframes article-refresh-spin { to { transform: rotate(360deg); } }
 .topbar-spacer { flex: 1; }
 .tb-actions { display: flex; align-items: center; gap: 8px; }
 
@@ -614,11 +556,9 @@ body.is-resizing-rail .rail { transition: none; }
 }
 @media (max-width: 520px) {
   .global-channel-bar { padding: 0 10px; gap: 8px; }
-  .app-brand-title { max-width: 180px; }
-  .preview-toolbar-strip { padding: 0 10px; }
-  .preview-toolbar-strip .btn-primary { padding: 0 12px; }
+  .global-channel-bar .btn-primary { padding: 0 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .global-channel-bar *, .preview-toolbar-strip *, .rail *, .preview-panel *, .modal-scrim *, .toast { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
+  .global-channel-bar *, .rail *, .preview-panel *, .modal-scrim *, .toast { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
 }
