@@ -64,6 +64,7 @@ test('editor shells load JSZip from the same-origin vendor asset', async () => {
 test('公众号上传摘要收进文件卡片，网站页保留旧统计行', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const site = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../public/css/app-shell.css', import.meta.url), 'utf8');
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
 
   const docZoneStart = app.indexOf('id="docZone"');
@@ -74,6 +75,9 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
     statsBarStart > docZoneStart && statsBarStart < docZoneEnd,
     '旧统计/上传状态行应归属文件卡片，避免在左栏形成割裂的第二块信息'
   );
+  assert.match(app, /id="docSwap"[^>]*aria-label="重新上传"[^>]*>重新上传<\/button>/, '文件卡片右侧动作应是明确的重新上传按钮，不应使用刷新图标');
+  assert.doesNotMatch(app, /id="docSwap"[\s\S]{0,200}<svg/, '重新上传入口不能再退回成语义不清的循环箭头图标');
+  assert.doesNotMatch(css, /\.doc-stat::before/, '上传摘要统计前不应出现突兀的成功绿点');
   assert.doesNotMatch(site, /id="docZone"/, '网站页仍走旧上传区，不能被公众号文件卡片样式隐式接管');
   assert.match(
     engine,
