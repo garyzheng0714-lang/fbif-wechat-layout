@@ -15,7 +15,7 @@ test('rule pack registry keeps FBIF as the default account pack', () => {
   assert.equal(DEFAULT_RULE_PACK_ID, 'fbif');
   assert.equal(pack.id, 'fbif');
   assert.equal(pack.templateId, 'fbif');
-  assert.equal(pack.accountName, 'FBIF公众号');
+  assert.equal(pack.accountName, 'FBIF食品饮料创新');
   assert.equal(pack.previewAccountName, 'FBIF食品饮料创新');
   assert.equal(pack.behaviorAccountName, 'FBIF');
   assert.equal(pack.footerUrl, '/footer.html');

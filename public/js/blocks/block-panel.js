@@ -62,7 +62,6 @@ function ensureStyle(doc) {
 .bp-field{margin-top:10px;}
 .bp-flabel{display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--fs-text-2,#646a73);font-size:12px;}
 .bp-badge{font-size:11px;padding:1px 6px;border-radius:9999px;}
-.bp-badge.inherit{background:var(--fs-bg-sunken,#f2f3f5);color:var(--fs-text-3,#8f959e);}
 .bp-badge.over{background:var(--fs-brand-soft,#ebf1ff);color:var(--fs-brand,#1456f0);}
 .bp-reset{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;display:inline-flex;align-items:center;padding:2px;margin-left:auto;}
 .bp-reset:hover{color:var(--fs-brand,#1456f0);}
@@ -70,7 +69,6 @@ function ensureStyle(doc) {
 .bp-textarea{min-height:60px;resize:vertical;}
 .bp-color{display:flex;align-items:center;gap:8px;}
 .bp-color input[type=color]{width:34px;height:26px;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:0;background:none;cursor:pointer;}
-.bp-tip{color:var(--fs-text-3,#8f959e);font-size:11px;margin-top:3px;}
 .bp-empty{color:var(--fs-text-3,#8f959e);font-size:12px;padding:6px 2px;}
 .bp-image{display:flex;align-items:center;gap:10px;}
 .bp-image-preview{width:64px;height:48px;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--fs-bg-sunken,#f7f8fa);flex:none;}
@@ -164,10 +162,14 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     if (val === def) delete b.enabled; else b.enabled = val;
     prune(id); emit(); render();
   }
-  function setField(id, key, val, def) {
+  // 第 4 参 same = 新值是否等于默认（各调用处已算好，与下方 setFieldSoft 同约定）：
+  // 相同则不落盘（恢复继承默认），否则记为本篇覆盖。
+  // 旧实现误写 `val === def`——对布尔型 switch 会把「关掉默认开的开关」(val=false, same=false)
+  // 判成 false===false 而删除覆盖，导致默认开的开关关不掉、回弹。改用 same 与 setEnabled/setFieldSoft 对齐。
+  function setField(id, key, val, same) {
     const b = ensureBlock(id);
     if (!isObj(b.fields)) b.fields = {};
-    if (val === def) delete b.fields[key]; else b.fields[key] = val;
+    if (same) delete b.fields[key]; else b.fields[key] = val;
     prune(id); emit(); render();
   }
   function resetField(id, key) {
@@ -207,8 +209,9 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
     wrap.className = 'bp-field';
     const label = doc.createElement('div');
     label.className = 'bp-flabel';
+    // 徽标只在本篇已覆盖后台默认时出现；未覆盖（绝大多数字段）保持干净，无常驻「继承默认」药丸。
     label.innerHTML = `<span>${esc(field.label || key)}</span>` +
-      `<span class="bp-badge ${overridden ? 'over' : 'inherit'}">${overridden ? '本篇已覆盖' : '继承默认'}</span>`;
+      (overridden ? `<span class="bp-badge over">本篇已覆盖</span>` : '');
     if (overridden) {
       const rb = doc.createElement('button');
       rb.type = 'button'; rb.className = 'bp-reset'; rb.textContent = '⟲ 恢复默认';
@@ -249,7 +252,9 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       ctrl.value = val == null ? '' : val;
       ctrl.onchange = () => setField(id, key, ctrl.value, ctrl.value === def);
     } else if (field.type === 'switch') {
-      ctrl = doc.createElement('input'); ctrl.type = 'checkbox'; ctrl.checked = !!val;
+      // 拨动开关（与主开关/显隐开关同款 .bp-switch），label 同行右对齐，不再是裸 checkbox。
+      ctrl = doc.createElement('input'); ctrl.type = 'checkbox'; ctrl.className = 'bp-switch'; ctrl.checked = !!val;
+      ctrl.style.marginLeft = 'auto';
       ctrl.onchange = () => setField(id, key, ctrl.checked, ctrl.checked === !!def);
     } else if (field.type === 'image') {
       // 素材库选图（不再让用户手填 URL / {{asset}} 语法）：缩略图 + 「从素材库选择」按钮。
@@ -273,8 +278,15 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
       ctrl.value = String(val == null ? '' : val);
       ctrl.oninput = () => setField(id, key, ctrl.value, ctrl.value === def);
     }
-    wrap.appendChild(ctrl);
-    if (field.tooltip) { const t = doc.createElement('div'); t.className = 'bp-tip'; t.textContent = field.tooltip; wrap.appendChild(t); }
+    // switch 的开关并入 label 行右侧；其余控件另起一行。tooltip 不再常驻一行（多为 label 回显的噪音），
+    // 改挂 hover title——需要时悬停可见，平时「不显性化」，面板更干净。
+    if (field.type === 'switch') {
+      if (field.tooltip) ctrl.title = field.tooltip;
+      label.appendChild(ctrl);
+    } else {
+      wrap.appendChild(ctrl);
+      if (field.tooltip) wrap.title = field.tooltip;
+    }
     return wrap;
   }
   // setField 的薄封装：html_lines 的“等于默认”判断在调用处算好后传入 same

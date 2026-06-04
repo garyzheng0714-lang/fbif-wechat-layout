@@ -404,7 +404,7 @@ export function initAdminPanel(options = {}) {
   }
 
   function visibleRulePacks() {
-    return rulePacks.length ? rulePacks : [{ id: 'fbif', accountName: 'FBIF公众号' }];
+    return rulePacks.length ? rulePacks : [{ id: 'fbif', accountName: 'FBIF食品饮料创新' }];
   }
 
   function accountBindings() {

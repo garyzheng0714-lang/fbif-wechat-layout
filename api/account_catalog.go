@@ -45,7 +45,7 @@ func accountCatalog() []accountMeta {
 			ID:                  defaultRuleAccountID, // "fbif"
 			Channel:             "mp",
 			TemplateID:          "fbif",
-			AccountName:         "FBIF公众号",
+			AccountName:         "FBIF食品饮料创新",
 			PreviewAccountName:  "FBIF食品饮料创新",
 			BehaviorAccountName: "FBIF",
 			AvatarURL:           "/fbif-avatar.webp",

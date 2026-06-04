@@ -72,7 +72,7 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 		t.Fatalf("accounts = %d, want 4: %#v", len(doc.Accounts), doc.Accounts)
 	}
 	wantOrder := []struct{ id, name string }{
-		{"fbif", "FBIF公众号"},
+		{"fbif", "FBIF食品饮料创新"},
 		{"foodtalks-series", "FoodTalks什么是系列"},
 		{"wowfood", "WowFood爆品超市"},
 		{"ft-default", "网站默认"},

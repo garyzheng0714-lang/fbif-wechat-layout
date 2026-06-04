@@ -10,7 +10,7 @@ export const RULE_PACKS = Object.freeze({
   fbif: Object.freeze({
     id: 'fbif',
     templateId: 'fbif',
-    accountName: 'FBIF公众号',
+    accountName: 'FBIF食品饮料创新',
     previewAccountName: 'FBIF食品饮料创新',
     behaviorAccountName: 'FBIF',
     avatarUrl: '/fbif-avatar.webp',
