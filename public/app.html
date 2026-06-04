@@ -108,8 +108,7 @@
   </div>
 
   <main class="preview-panel" data-screen-label="预览区">
-    <div class="article-tabs-strip" aria-label="文章标签栏">
-      <div class="article-tabs-host" id="articleTabsHost" aria-label="文章标签"></div>
+    <div class="preview-toolbar-strip" aria-label="文章操作">
       <div class="tb-actions preview-toolbar" id="previewToolbar">
         <button class="tb-icon-action" id="articleRefreshBtn" type="button" title="重新排版当前文章" aria-label="重新排版当前文章" disabled>
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h4"/><path d="M6 22v-4H2"/></svg>
@@ -710,8 +709,6 @@ function persistAccountSelection(id) {
 }
 
 async function switchAccount(accountID, options = {}) {
-  const shouldCaptureTab = options.captureArticleTab !== false;
-  if (shouldCaptureTab && window._articleTabs && typeof window._articleTabs.captureActive === 'function') window._articleTabs.captureActive();
   const nextPack = rulePackModule.getRulePack(accountID);
   if (nextPack.id === activeRulePack.id) return;
   if (nextPack.channel !== activeRulePack.channel) {
@@ -750,7 +747,6 @@ async function switchAccount(accountID, options = {}) {
   activeRuleSelectorStatus = '';
   await applyAccountCapabilityUI(activeRulePack);
   refreshRuleConsumers({ rerender: options.rerender !== false });
-  if (shouldCaptureTab && window._articleTabs && typeof window._articleTabs.captureActive === 'function') window._articleTabs.captureActive();
 }
 
 function loadConfig() {
@@ -806,14 +802,32 @@ await loadTemplate(currentTemplateId);
 // Cross-channel state restore — must come after initApp so engine.js has
 // wired up window._captureSessionSnapshot / _restoreSessionSnapshot.
 const { restoreCurrentChannel, bindChannelSwitcher } = await import('/js/session-restore.js?v=' + assetVersion);
+const articleRefreshButton = document.getElementById('articleRefreshBtn');
+function setArticleRefreshEnabled(enabled) {
+  if (!articleRefreshButton) return;
+  articleRefreshButton.disabled = !enabled;
+  articleRefreshButton.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+}
+if (articleRefreshButton) {
+  articleRefreshButton.addEventListener('click', async () => {
+    if (articleRefreshButton.disabled || !window._engineApi || typeof window._engineApi.rerender !== 'function') return;
+    articleRefreshButton.classList.add('is-refreshing');
+    try {
+      await window._engineApi.rerender();
+    } finally {
+      articleRefreshButton.classList.remove('is-refreshing');
+    }
+  });
+}
+window.addEventListener('fbif:article-previewed', () => setArticleRefreshEnabled(true));
+window.addEventListener('fbif:article-restored', (event) => {
+  const snap = event.detail && event.detail.snapshot;
+  setArticleRefreshEnabled(!!(snap && snap.closure_state && snap.closure_state.last_render_input));
+});
+window.addEventListener('fbif:article-cleared', () => setArticleRefreshEnabled(false));
 restoreCurrentChannel();
 bindChannelSwitcher();
-const { mountArticleTabs } = await import('/js/article-tabs.js?v=' + assetVersion);
-window._articleTabs = mountArticleTabs({
-  container: document.getElementById('articleTabsHost'),
-  refreshButton: document.getElementById('articleRefreshBtn'),
-  switchAccount,
-});
+setArticleRefreshEnabled(document.body.classList.contains('has-preview'));
 
 syncWorkflowControls();
 renderActiveRuleCard();

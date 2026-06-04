@@ -1,62 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 
-test('article tabs sit above the article preview, not above the left rail', async () => {
+test('app shell stays single-article and does not render article tabs', async () => {
   const html = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
-  const headerStart = html.indexOf('<header class="global-channel-bar">');
-  const headerEnd = html.indexOf('</header>', headerStart);
+  const css = await readFile(new URL('../public/css/app-shell.css', import.meta.url), 'utf8');
   const appLayoutStart = html.indexOf('<div class="app-layout">');
   const railStart = html.indexOf('<aside class="rail sidebar"', appLayoutStart);
   const previewPanelStart = html.indexOf('<main class="preview-panel"', appLayoutStart);
-  const stripStart = html.indexOf('<div class="article-tabs-strip"', previewPanelStart);
+  const toolbarStart = html.indexOf('<div class="preview-toolbar-strip"', previewPanelStart);
   const previewScrollStart = html.indexOf('<div class="preview-scroll', previewPanelStart);
-  const header = html.slice(headerStart, headerEnd);
   const previewHead = html.slice(previewPanelStart, previewScrollStart);
 
-  assert.doesNotMatch(html, /class="has-article-tabs"/, '标签栏在正文区内部，不应再扣减整个工作区高度');
-  assert.ok(stripStart > previewPanelStart, '文章标签栏必须位于正文预览区内部');
-  assert.ok(stripStart < previewScrollStart, '文章标签栏必须贴在正文滚动区上方');
-  assert.ok(stripStart > railStart, '文章标签栏不能出现在左侧栏上方');
-  assert.doesNotMatch(header, /id="articleTabsHost"/, '全局顶栏不应再承载文章标签');
-  assert.match(previewHead, /id="articleTabsHost"/, '正文预览区顶部必须提供文章标签挂载点');
-  assert.match(html, /id="articleRefreshBtn"/, '顶栏必须提供当前文章重新排版按钮');
-  assert.match(html, /\/js\/article-tabs\.js/, '标签逻辑必须拆到独立模块，避免继续撑大 app.html');
-  assert.match(html, /mountArticleTabs\(\{/, '启动时必须挂载文章标签控制器');
+  assert.ok(toolbarStart > previewPanelStart, '文章操作条应位于正文预览区内部');
+  assert.ok(toolbarStart < previewScrollStart, '文章操作条应贴在正文滚动区上方');
+  assert.ok(toolbarStart > railStart, '文章操作条不能出现在左侧栏上方');
+  assert.match(previewHead, /id="previewToolbar"/, '正文区顶部仍保留复制和刷新操作');
+  assert.match(previewHead, /id="copyBtn"/, '复制按钮仍位于正文渲染区右上角');
+  assert.match(previewHead, /id="articleRefreshBtn"/, '刷新按钮仍位于正文渲染区右上角');
+  assert.doesNotMatch(html, /articleTabsHost|article-tabs-strip|article-tab-|mountArticleTabs|\/js\/article-tabs\.js/, 'app.html 不应再挂载文章标签页');
+  assert.doesNotMatch(css, /article-tabs|article-tab/, '外壳样式不应保留文章标签页选择器');
+  assert.match(css, /\.preview-toolbar-strip\s*\{/, '外壳样式应使用普通预览操作条');
 });
 
-test('engine snapshots include rerender input and per-article sidebar state', async () => {
-  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
-
-  assert.match(engine, /last_render_input:\s*clonePlain\(_lastRenderInput\)/, '快照必须保存重新排版所需的原始解析输入');
-  assert.match(engine, /article_state:\s*readArticleLocalState\(\)/, '快照必须包含本篇文章的侧栏局部状态');
-  assert.match(engine, /more_articles_cards/, '更多文章卡片必须随文章切换隔离');
-  assert.match(engine, /bottom_blocks_override/, '底部区块本篇覆盖必须随文章切换隔离');
-  assert.match(engine, /applyArticleLocalState\(snap\.article_state\)/, '恢复标签时必须同步本篇侧栏状态');
+test('article-tab state module is removed instead of hidden', async () => {
+  await assert.rejects(
+    access(new URL('../public/js/article-tabs.js', import.meta.url)),
+    /ENOENT/,
+    '标签页模块应被删除，避免后续误恢复多文章状态',
+  );
 });
 
-test('new imports create article tabs and completed previews update tab snapshots', async () => {
-  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
-  const tabs = await readFile(new URL('../public/js/article-tabs.js', import.meta.url), 'utf8');
-
-  assert.match(engine, /prepareArticleTabForNewUpload/, '新上传或 URL 导入前必须通知标签控制器');
-  assert.match(engine, /fbif:article-previewed/, '预览完成后必须发事件让标签保存真实快照');
-  assert.match(tabs, /prepareForNewArticle/, '标签模块必须提供新文章入口');
-  assert.match(tabs, /role', 'tablist'/, '标签列表必须使用 ARIA tablist 语义');
-  assert.match(tabs, /aria-selected/, '活动标签必须暴露 aria-selected');
-  assert.match(tabs, /event\.key === 'Delete'/, '标签必须支持键盘删除当前文章');
-});
-
-test('article tabs restore the account context owned by each tab', async () => {
+test('engine remains single-article while keeping rerender snapshots', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
-  const tabs = await readFile(new URL('../public/js/article-tabs.js', import.meta.url), 'utf8');
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
 
-  assert.match(app, /switchAccount,\s*\}/, '标签控制器必须拿到账号切换能力');
-  assert.match(app, /options\.captureArticleTab !== false/, '账号切换应允许标签恢复时跳过反向捕获');
-  assert.match(app, /options\.rerender !== false/, '标签恢复账号时不能强制先重排当前文章');
-  assert.match(tabs, /snapshotAccountID/, '标签恢复前必须读取快照里的账号');
-  assert.match(tabs, /switchAccount\(accountID,[\s\S]*?captureArticleTab:\s*false[\s\S]*?rerender:\s*false/, '切换标签必须先恢复该标签所属公众号');
-  assert.match(tabs, /function workspacePath/, '标签存储 key 必须先归一工作区路径');
-  assert.match(tabs, /replace\(\s*\/\^\\\/\(mp\|ft\)/, '标签存储 key 不能被当前公众号路径拆散');
-  assert.match(tabs, /STORAGE_PREFIX \+ path \+ '::workspace'/, '标签列表不能再按当前公众号拆 session，否则多账号标签会丢失');
+  assert.match(engine, /last_render_input:\s*clonePlain\(_lastRenderInput\)/, '单篇模式仍需保存重排输入，供刷新和切规则重排使用');
+  assert.doesNotMatch(engine, /prepareArticleTabForNewUpload|_articleTabs|article_state|readArticleLocalState|applyArticleLocalState/, '引擎不应再保存或恢复多标签文章状态');
+  assert.doesNotMatch(app, /captureArticleTab|_articleTabs/, '账号切换不应再反向捕获标签页状态');
+  assert.match(app, /articleRefreshButton\.addEventListener\('click'/, '刷新按钮应直接触发当前单篇重排');
+  assert.match(app, /fbif:article-previewed/, '上传完成后应启用当前单篇刷新按钮');
+  assert.match(app, /fbif:article-cleared/, '清空内容后应禁用当前单篇刷新按钮');
 });

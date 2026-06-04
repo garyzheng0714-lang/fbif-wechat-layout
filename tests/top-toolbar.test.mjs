@@ -47,8 +47,10 @@ test('app global header shows product identity while article actions stay in the
   assert.doesNotMatch(header, /id="copyBtn"/, 'app.html copy button should not be a global action');
   assert.doesNotMatch(header, /id="acctMenu"/, 'app.html account menu should not stay in the global top bar');
   assert.match(previewPanelTop, /id="previewToolbar"/, 'app.html toolbar should live above the current article render area');
-  assert.match(previewPanelTop, /id="copyBtn"/, 'app.html copy button should copy the current article tab');
-  assert.match(previewPanelTop, /id="articleRefreshBtn"/, 'app.html refresh button should rerender the current article tab');
+  assert.match(previewPanelTop, /class="preview-toolbar-strip"/, 'app.html should use a plain preview action strip, not article tabs');
+  assert.match(previewPanelTop, /id="copyBtn"/, 'app.html copy button should copy the current article');
+  assert.match(previewPanelTop, /id="articleRefreshBtn"/, 'app.html refresh button should rerender the current article');
+  assert.doesNotMatch(previewPanelTop, /articleTabsHost|article-tabs-strip|article-tab-/, 'app.html preview toolbar should not render article tabs');
   assert.doesNotMatch(visibleShell, /class="sidebar-footer"/, 'app.html should not show a fixed left-bottom footer');
   assert.doesNotMatch(visibleShell, /id="activeRuleCard"/, 'app.html should not show the current-rule card at the left bottom');
   assert.doesNotMatch(visibleShell, /当前排版规则/, 'app.html should not show bottom current-rule text');
@@ -76,6 +78,8 @@ test('app rail divider stays visually slim and the handle behaves like a clickab
   assert.match(css, /\.rail-divider-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*50px;[\s\S]*?cursor:\s*pointer;/, 'rail handle should be smaller and use pointer feedback');
   assert.match(css, /\.rail-divider-toggle:hover\s*\{[\s\S]*?--rail-toggle-scale:\s*1\.06;/, 'rail handle should animate on hover');
   assert.match(css, /\.rail-account-bar\s*\{[\s\S]*?flex-shrink:\s*0;[\s\S]*?border-bottom:\s*1px solid var\(--fs-divider\);/, 'account switcher should be fixed above the scrolling left tools');
+  assert.match(css, /\.preview-toolbar-strip\s*\{[\s\S]*?justify-content:\s*flex-end;/, 'preview actions should align to the render area right edge without tabs');
+  assert.doesNotMatch(css, /article-tabs|article-tab/, 'article tab styles should not be restored');
   assert.match(css, /\.topbar-settings-btn\s*\{[\s\S]*?width:\s*32px;[\s\S]*?color:\s*var\(--fs-brand\);/, 'settings button should be styled as a top-bar icon');
   assert.doesNotMatch(css, /\.sidebar-footer\s+\.active-rule-card/, 'left-bottom rule card styles should not be restored');
 });

@@ -22,6 +22,7 @@ test('app shell renders a unified rail account menu (single layer)', async () =>
   const railHead = app.slice(railStart, railBodyStart);
   const visibleShell = app.slice(0, app.indexOf('<script type="module">'));
   assert.doesNotMatch(header, /id="acctMenu"/, '公众号菜单不应再占据全局顶栏');
+  assert.doesNotMatch(app, /captureArticleTab|_articleTabs|mountArticleTabs/, '账号切换不应再绑定文章标签页状态');
   assert.match(header, /FBIF文章排版工具/, '全局顶栏必须展示产品身份');
   assert.match(header, /class="app-brand-logo"/, '全局顶栏必须展示 FBIF logo');
   assert.match(header, /id="adminLockBtn"/, '设置入口应在全局顶栏右侧');

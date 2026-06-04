@@ -342,62 +342,13 @@ export function initApp(initialTemplate) {
     progress.style.display = 'none';
   }
 
-  function activeArticleAccountID() {
-    return (window._activeRulePack && window._activeRulePack.id) || 'fbif';
-  }
-
-  function blockOverrideKey(accountID) {
-    return 'bb.override::' + accountID;
-  }
-
   function clonePlain(value) {
     if (value == null) return value;
     try { return JSON.parse(JSON.stringify(value)); } catch { return null; }
   }
 
-  function readArticleLocalState() {
-    const accountID = activeArticleAccountID();
-    let bottomBlocks = null;
-    try {
-      bottomBlocks = JSON.parse(localStorage.getItem(blockOverrideKey(accountID)) || 'null') || null;
-    } catch {}
-    return {
-      account_id: accountID,
-      more_articles_cards: clonePlain(loadMoreArticlesCards()) || [],
-      bottom_blocks_override: clonePlain(bottomBlocks),
-    };
-  }
-
-  function applyArticleLocalState(state) {
-    if (!state || state.account_id !== activeArticleAccountID()) return;
-    if (Array.isArray(state.more_articles_cards)) {
-      saveMoreArticlesCards(state.more_articles_cards);
-    }
-    const override = state.bottom_blocks_override && typeof state.bottom_blocks_override === 'object'
-      ? state.bottom_blocks_override
-      : null;
-    try {
-      if (override && Object.keys(override).length) {
-        localStorage.setItem(blockOverrideKey(state.account_id), JSON.stringify(override));
-      } else {
-        localStorage.removeItem(blockOverrideKey(state.account_id));
-      }
-    } catch {}
-    window._bottomBlocksOverride = override && Object.keys(override).length ? override : undefined;
-    if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-    if (window._blockPanelInst && typeof window._blockPanelInst.refresh === 'function') {
-      window._blockPanelInst.refresh();
-    }
-  }
-
   function dispatchArticleEvent(name, detail = {}) {
     window.dispatchEvent(new CustomEvent(name, { detail }));
-  }
-
-  function prepareArticleTabForNewUpload(title) {
-    if (window._articleTabs && typeof window._articleTabs.prepareForNewArticle === 'function') {
-      window._articleTabs.prepareForNewArticle({ title });
-    }
   }
 
   function isValidFile(f) {
@@ -535,7 +486,6 @@ export function initApp(initialTemplate) {
   // visual signals). Falls back to _handleFile with a synthetic .md File
   // when the server returns {title, content} (x-reader fallback).
   window._handleBlocks = async (data, opts) => {
-    prepareArticleTabForNewUpload((data && data.title) || '转载文章');
     _isRepost = !!(opts && opts.isRepost);
     _convLog.length = 0;
     logConv('info', '开始转化', { source: 'blocks', blocks: (data.blocks || []).length });
@@ -636,7 +586,6 @@ export function initApp(initialTemplate) {
   };
 
   async function handleFile(file, opts) {
-    prepareArticleTabForNewUpload(file && file.name ? file.name.replace(/\.\w+$/i, '') : '新文章');
     // Set repost flag per-call so it never leaks across articles.
     _isRepost = !!(opts && opts.isRepost);
     _convLog.length = 0;
@@ -1046,6 +995,7 @@ export function initApp(initialTemplate) {
     const copyBtn = document.getElementById('copyBtn');
     if (copyBtn) { copyBtn.textContent = '复制全文'; copyBtn.classList.remove('copied'); }
     document.getElementById('statsBar').textContent = '';
+    dispatchArticleEvent('fbif:article-cleared');
   };
 
   window.zoom = function(dir) {
@@ -1119,7 +1069,6 @@ export function initApp(initialTemplate) {
         stats_text: (document.getElementById('statsBar') || {}).textContent || '',
         preview_scroll_top: (document.getElementById('previewScroll') || {}).scrollTop || 0,
       },
-      article_state: readArticleLocalState(),
     };
   };
 
@@ -1143,7 +1092,6 @@ export function initApp(initialTemplate) {
       _batchFiles = [];
       _batchResults = snap.batch_state.results || [];
     }
-    applyArticleLocalState(snap.article_state);
     const dom = snap.dom || {};
     const ca = document.getElementById('contentArea');
     if (ca) {
