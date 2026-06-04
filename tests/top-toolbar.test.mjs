@@ -19,15 +19,36 @@ function assertToolbarInGlobalHeader(html, label) {
   assert.ok(headerEnd > headerStart, `${label} should close the global channel bar before the app layout`);
   assert.ok(headerEnd < appLayoutStart, `${label} header should sit above the app layout`);
   assert.match(header, /id="previewToolbar"/, `${label} toolbar should live in the global top bar`);
-  assert.match(header, /id="adminLockBtn"/, `${label} rule admin button should live in the top bar`);
   assert.match(header, /id="copyBtn"/, `${label} copy button should live in the top bar`);
   assert.doesNotMatch(previewPanelTop, /id="previewToolbar"/, `${label} toolbar must not sit inside the article preview panel`);
 }
 
-test('app toolbar lives in the global top-right bar, not the article preview panel', async () => {
-  assertToolbarInGlobalHeader(await readShell('app.html'), 'app.html');
+test('app copy toolbar stays in the global top-right bar while rule admin moves to the sidebar footer', async () => {
+  const html = await readShell('app.html');
+  assertToolbarInGlobalHeader(html, 'app.html');
+
+  const headerStart = html.indexOf('<header class="global-channel-bar">');
+  const headerEnd = html.indexOf('</header>', headerStart);
+  const footerStart = html.indexOf('<div class="sidebar-footer">');
+  const footerEnd = html.indexOf('</aside>', footerStart);
+  const header = html.slice(headerStart, headerEnd);
+  const footer = html.slice(footerStart, footerEnd);
+
+  assert.doesNotMatch(header, /id="adminLockBtn"/, 'app.html rule admin button should not stay in the top bar');
+  assert.match(footer, /id="adminLockBtn"/, 'app.html rule admin icon should live in the sidebar footer');
+  assert.match(footer, /class="rail-icon-btn admin-lock-btn"/, 'app.html sidebar rule admin entry should be icon-only');
+  assert.doesNotMatch(footer, /微信公众号后台/, 'app.html should remove the WeChat backend footer link');
+  assert.match(html, /class="rail-divider"/, 'app.html should render the WeChat-style rail divider');
+  assert.match(html, /id="railToggleBtn"/, 'app.html rail divider should expose a real collapse control');
+  assert.match(html, /function bindRailDivider\(\)/, 'app.html should bind finite drag and collapse behavior');
+  assert.match(html, /startedOnButton = button\.contains\(event\.target\)/, 'app.html rail handle should support click and drag without conflicting');
 });
 
 test('site toolbar lives in the global top-right bar, not the article preview panel', async () => {
-  assertToolbarInGlobalHeader(await readShell('site.html'), 'site.html');
+  const html = await readShell('site.html');
+  assertToolbarInGlobalHeader(html, 'site.html');
+  const headerStart = html.indexOf('<header class="global-channel-bar">');
+  const headerEnd = html.indexOf('</header>', headerStart);
+  const header = html.slice(headerStart, headerEnd);
+  assert.match(header, /id="adminLockBtn"/, 'site.html rule admin button should remain in the top bar');
 });

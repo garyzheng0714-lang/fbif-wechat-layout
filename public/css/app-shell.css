@@ -56,17 +56,31 @@
    Layout
    ============================================================ */
 .app-layout { display: flex; height: calc(100dvh - var(--topbar-h)); position: relative; }
+body.is-resizing-rail {
+  cursor: col-resize;
+  user-select: none;
+}
 
 /* Left rail（覆盖 app.css .sidebar 宽度/样式） */
 .rail {
-  width: var(--rail-w); flex-shrink: 0;
+  width: var(--rail-current-w, var(--rail-w)); flex-shrink: 0;
   background: var(--fs-bg-card);
-  border-right: 1px solid var(--fs-divider);
+  border-right: none;
   display: flex; flex-direction: column;
+  overflow: hidden;
   z-index: 20;
+  transition: width var(--fs-t-mid) var(--fs-ease-out);
 }
+body.is-resizing-rail .rail { transition: none; }
+.app-layout.rail-collapsed .rail { width: 0; }
 .rail-body { flex: 1; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.sidebar-footer { flex-shrink: 0; padding: 10px 14px; border-top: 1px solid var(--fs-divider); }
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--fs-divider);
+  display: flex;
+  align-items: center;
+}
 .rail-link {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 13px; color: var(--fs-text-2); text-decoration: none;
@@ -75,7 +89,83 @@
 }
 .rail-link:hover { background: var(--fs-bg-sunken); color: var(--fs-text-1); }
 .rail-link svg { width: 14px; height: 14px; }
+.rail-icon-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: var(--fs-r-s);
+  background: transparent;
+  color: var(--fs-brand);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  transition: background var(--fs-t-fast) var(--fs-ease-out), transform var(--fs-t-fast) var(--fs-ease-out);
+}
+.rail-icon-btn:hover { background: var(--fs-bg-sunken); }
+.rail-icon-btn:active { transform: scale(0.95); }
+.rail-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
+}
+.rail-icon-btn svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
 .rail-sep { height: 1px; background: var(--fs-divider); margin: 2px 0; }
+.rail-divider {
+  width: 8px;
+  flex: 0 0 8px;
+  position: relative;
+  background: var(--fs-bg-sunken);
+  box-shadow: inset 1px 0 0 var(--fs-divider), inset -1px 0 0 var(--fs-divider);
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 30;
+}
+.rail-divider-toggle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--fs-border-card);
+  border-radius: var(--fs-r-full);
+  background: var(--fs-bg-card);
+  color: var(--fs-text-2);
+  box-shadow: var(--fs-sh-s1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  cursor: col-resize;
+  font-family: inherit;
+  transition: background var(--fs-t-fast) var(--fs-ease-out),
+              color var(--fs-t-fast) var(--fs-ease-out),
+              box-shadow var(--fs-t-fast) var(--fs-ease-out);
+}
+.rail-divider-toggle:hover {
+  background: var(--fs-bg-card);
+  color: var(--fs-brand);
+  box-shadow: var(--fs-sh-s2);
+}
+.rail-divider-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
+}
+.rail-divider-toggle svg {
+  width: 18px;
+  height: 18px;
+  transition: transform var(--fs-t-mid) var(--fs-ease-out);
+}
+.app-layout.rail-collapsed .rail-divider-toggle {
+  left: calc(100% + 10px);
+}
+.app-layout.rail-collapsed .rail-divider-toggle svg { transform: rotate(180deg); }
 
 /* Import area */
 .import-zone[hidden],
@@ -379,6 +469,8 @@
   /* 无汉堡抽屉：左栏直接竖向堆在预览上方 */
   .app-layout { flex-direction: column; height: auto; min-height: calc(100dvh - var(--topbar-h)); }
   .rail { width: auto; border-right: none; border-bottom: 1px solid var(--fs-divider); }
+  .app-layout.rail-collapsed .rail { width: auto; }
+  .rail-divider { display: none; }
   .preview-panel { min-height: 60vh; }
 }
 @media (max-width: 520px) {
