@@ -179,13 +179,13 @@ jobs:
               "    path /js/* /css/*\n"
               "    query v=*\n"
               "  }\n"
-              "  header @fbifVersionedAssets Cache-Control \"public, max-age=31536000, immutable\"\n"
+              "  header @fbifVersionedAssets >Cache-Control \"public, max-age=31536000, immutable\"\n"
               "\n"
               "  @fbifVendorAssets path /vendor/*\n"
-              "  header @fbifVendorAssets Cache-Control \"public, max-age=31536000, immutable\"\n"
+              "  header @fbifVendorAssets >Cache-Control \"public, max-age=31536000, immutable\"\n"
               "\n"
               "  @fbifImageAssets path *.png *.jpg *.jpeg *.webp *.gif *.svg *.ico\n"
-              "  header @fbifImageAssets Cache-Control \"public, max-age=86400\"\n"
+              "  header @fbifImageAssets >Cache-Control \"public, max-age=86400\"\n"
           )
 
           # Remove any prior @fbifRulesApi route, regardless of upstream form
@@ -237,13 +237,13 @@ jobs:
               r"\n[ \t]*@fbifVersionedAssets[ \t]*\{[ \t]*\n"
               r"(?:[^\n]*\n)*?"
               r"[ \t]*\}[ \t]*\n"
-              r"[ \t]*header[ \t]+@fbifVersionedAssets[ \t]+Cache-Control[^\n]*\n"
+              r"[ \t]*header[ \t]+@fbifVersionedAssets[ \t]+>?Cache-Control[^\n]*\n"
               r"\n?"
               r"[ \t]*@fbifVendorAssets[^\n]*\n"
-              r"[ \t]*header[ \t]+@fbifVendorAssets[ \t]+Cache-Control[^\n]*\n"
+              r"[ \t]*header[ \t]+@fbifVendorAssets[ \t]+>?Cache-Control[^\n]*\n"
               r"\n?"
               r"[ \t]*@fbifImageAssets[^\n]*\n"
-              r"[ \t]*header[ \t]+@fbifImageAssets[ \t]+Cache-Control[^\n]*\n"
+              r"[ \t]*header[ \t]+@fbifImageAssets[ \t]+>?Cache-Control[^\n]*\n"
           )
           while True:
               new_text = asset_header_re.sub("\n", text)

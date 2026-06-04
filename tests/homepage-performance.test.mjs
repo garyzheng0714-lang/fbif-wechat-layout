@@ -15,3 +15,11 @@ test('homepage defers the more-articles editor until an article exists', async (
     '空首页不应启动更多文章编辑器，否则默认卡片图片会拖慢首屏',
   );
 });
+
+test('deploy overrides existing Caddy no-cache headers for cacheable assets', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+
+  assert.ok(workflow.includes('header @fbifVersionedAssets >Cache-Control \\"public, max-age=31536000, immutable\\"'));
+  assert.ok(workflow.includes('header @fbifVendorAssets >Cache-Control \\"public, max-age=31536000, immutable\\"'));
+  assert.ok(workflow.includes('header @fbifImageAssets >Cache-Control \\"public, max-age=86400\\"'));
+});
