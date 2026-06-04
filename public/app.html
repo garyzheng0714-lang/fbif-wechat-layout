@@ -112,6 +112,9 @@
         <div class="block-panel-mount" id="blockPanel"></div>
       </div>
 
+    </div>
+
+    <div class="sidebar-footer">
       <!-- 本篇规则 mini-card：renderActiveRuleCard 重建内部 -->
       <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
         <div class="active-rule-readline">
@@ -121,13 +124,11 @@
           </span>
         </div>
       </div>
-    </div>
-
-    <div class="sidebar-footer">
       <button class="rail-icon-btn admin-lock-btn" id="adminLockBtn" type="button" title="规则后台" aria-label="规则后台">
         <svg viewBox="0 0 1024 1024" width="24" height="24" aria-hidden="true">
           <path d="M933.868272 511.691752a140.807706 140.807706 0 0 1 90.131728-131.067068 525.562914 525.562914 0 0 0-57.334136-138.64997 139.882962 139.882962 0 0 1-184.948826-184.948826A525.562914 525.562914 0 0 0 643.067068 0a140.376159 140.376159 0 0 1-262.134136 0A525.562914 525.562914 0 0 0 242.282962 57.334136a139.882962 139.882962 0 0 1-184.948826 184.948826A506.698134 506.698134 0 0 0 0 380.932932a140.376159 140.376159 0 0 1 0 262.134136 525.562914 525.562914 0 0 0 57.334136 138.64997 139.882962 139.882962 0 0 1 184.948826 184.948826 525.562914 525.562914 0 0 0 138.64997 57.334136 140.376159 140.376159 0 0 1 262.134136 0 525.562914 525.562914 0 0 0 138.64997-57.334136 139.882962 139.882962 0 0 1 184.948826-184.948826 506.698134 506.698134 0 0 0 57.334136-138.64997A140.807706 140.807706 0 0 1 933.868272 511.691752zM511.691752 652.437809A140.437809 140.437809 0 1 1 652.437809 511.691752 140.499458 140.499458 0 0 1 511.691752 652.437809z" fill="#1D85ED"></path>
         </svg>
+        <span class="rail-icon-tooltip" role="tooltip">规则后台</span>
       </button>
     </div>
   </aside>
@@ -428,11 +429,7 @@ function renderActiveRuleCard() {
       <span class="active-rule-readmeta">
         <span class="active-rule-label">规则</span>
         <span class="active-rule-readvalue">${ruleName}</span>
-        <span class="active-rule-badge">已锁定</span>
       </span>
-      <button type="button" class="active-rule-icon" data-action="edit-active-rule" aria-label="修改当前规则" title="修改当前规则">
-        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </button>
     </div>
     ${statusHTML}
   `;
@@ -457,8 +454,6 @@ function renderActiveRuleCard() {
     button.addEventListener('click', () => chooseActiveRuleOption(button.getAttribute('data-rule-option')));
     button.addEventListener('keydown', event => handleActiveRuleOptionKeydown(event, button));
   });
-  const editButton = card.querySelector('[data-action="edit-active-rule"]');
-  if (editButton) editButton.addEventListener('click', () => beginActiveRuleEdit());
   const saveButton = card.querySelector('[data-action="save-active-rule"]');
   if (saveButton) saveButton.addEventListener('click', () => saveActiveRuleSelection());
   const cancelButton = card.querySelector('[data-action="cancel-active-rule"]');

@@ -6,6 +6,10 @@ async function readShell(fileName) {
   return readFile(new URL(`../public/${fileName}`, import.meta.url), 'utf8');
 }
 
+async function readPublic(fileName) {
+  return readFile(new URL(`../public/${fileName}`, import.meta.url), 'utf8');
+}
+
 function assertToolbarInGlobalHeader(html, label) {
   const headerStart = html.indexOf('<header class="global-channel-bar">');
   const headerEnd = html.indexOf('</header>', headerStart);
@@ -36,8 +40,12 @@ test('app copy toolbar stays in the global top-right bar while rule admin moves 
 
   assert.doesNotMatch(header, /id="adminLockBtn"/, 'app.html rule admin button should not stay in the top bar');
   assert.match(footer, /id="adminLockBtn"/, 'app.html rule admin icon should live in the sidebar footer');
+  assert.match(footer, /id="activeRuleCard"/, 'app.html active rule status should live in the fixed sidebar footer');
   assert.match(footer, /class="rail-icon-btn admin-lock-btn"/, 'app.html sidebar rule admin entry should be icon-only');
+  assert.match(footer, /class="rail-icon-tooltip"[^>]*>规则后台</, 'app.html sidebar rule admin entry should reveal a text tooltip');
   assert.doesNotMatch(footer, /微信公众号后台/, 'app.html should remove the WeChat backend footer link');
+  assert.doesNotMatch(html, /已锁定/, 'app.html should not show a locked badge in the fixed rule status');
+  assert.doesNotMatch(html, /data-action="edit-active-rule"/, 'app.html should not expose front-end rule editing in the fixed footer');
   assert.match(html, /class="rail-divider"/, 'app.html should render the WeChat-style rail divider');
   assert.match(html, /id="railToggleBtn"/, 'app.html rail divider should expose a real collapse control');
   assert.match(html, /function bindRailDivider\(\)/, 'app.html should bind finite drag and collapse behavior');
@@ -51,4 +59,12 @@ test('site toolbar lives in the global top-right bar, not the article preview pa
   const headerEnd = html.indexOf('</header>', headerStart);
   const header = html.slice(headerStart, headerEnd);
   assert.match(header, /id="adminLockBtn"/, 'site.html rule admin button should remain in the top bar');
+});
+
+test('app rail divider stays visually slim and the handle behaves like a clickable control', async () => {
+  const css = await readPublic('css/app-shell.css');
+  assert.match(css, /\.rail-divider\s*\{[\s\S]*?width:\s*4px;/, 'rail divider should stay slim');
+  assert.match(css, /\.rail-divider-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*50px;[\s\S]*?cursor:\s*pointer;/, 'rail handle should be smaller and use pointer feedback');
+  assert.match(css, /\.rail-divider-toggle:hover\s*\{[\s\S]*?--rail-toggle-scale:\s*1\.06;/, 'rail handle should animate on hover');
+  assert.match(css, /\.sidebar-footer\s+\.active-rule-card/, 'active rule status should be styled as part of the fixed sidebar footer');
 });
