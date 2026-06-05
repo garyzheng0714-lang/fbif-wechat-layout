@@ -66,14 +66,15 @@ function resolveOneBlock(id, base, ov) {
     // 块级「允许前端编辑」：缺省 false=前端只读（结构/样式归后台预配）。前端据此决定是否长出换图入口。
     // 服务端默认（rule_defaults.go 按账号写）+ rule_bottom_blocks.go 白名单校验；前端零硬编码哪块可改。
     frontendEditable: base.frontend_editable === true,
+    displayName: String(base.display_name || '').trim(),
     fields,
   };
 }
 
 // resolveBlocks 合并后台默认模块与前台单篇覆盖，返回按解析顺序排列的区块列表。
-//   defaultModule: config.modules.bottom_blocks = { enabled, order:[id], blocks:{ id:{type,enabled,fields} }, presets }
+//   defaultModule: config.modules.bottom_blocks = { enabled, gap, order:[id], blocks:{ id:{type,enabled,fields} }, presets }
 //   override:      { enabled?, order?, overrides:{ id:{enabled?, fields?} } }
-// 返回：{ enabled, enabledOverridden, orderOverridden, blocks:[ resolvedBlock ] }
+// 返回：{ enabled, gap, enabledOverridden, orderOverridden, blocks:[ resolvedBlock ] }
 export function resolveBlocks(defaultModule, override) {
   const mod = isObj(defaultModule) ? defaultModule : {};
   const ov = isObj(override) ? override : {};
@@ -98,10 +99,12 @@ export function resolveBlocks(defaultModule, override) {
   const moduleEnabled = mod.enabled !== false;
   const enabledOv = typeof ov.enabled === 'boolean' ? ov.enabled : null;
   const enabled = enabledOv == null ? moduleEnabled : enabledOv;
+  const gap = typeof mod.gap === 'string' ? mod.gap : 'none';
 
   const blocks = order.map(id => resolveOneBlock(id, baseBlocks[id], ovBlocks[id]));
   return {
     enabled,
+    gap,
     enabledOverridden: enabledOv != null && enabledOv !== moduleEnabled,
     orderOverridden,
     blocks,

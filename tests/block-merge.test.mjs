@@ -9,10 +9,11 @@ import { resolveBlocks, flattenFields, hasAnyOverride, stripReadonlyOverride } f
 function baseModule() {
   return {
     enabled: true,
+    gap: 'blank_line',
     order: ['intro', 'card', 'more'],
     blocks: {
       intro: { type: 'rich_html', enabled: true, fields: { html_lines: ['<p>hi</p>'] } },
-      card: { type: 'name_card', enabled: false, fields: { intro_text: '找小明' } },
+      card: { type: 'name_card', display_name: '商务名片', enabled: false, fields: { intro_text: '找小明' } },
       more: { type: 'more_articles', enabled: true, fields: {} },
     },
   };
@@ -21,18 +22,21 @@ function baseModule() {
 test('无覆盖时直通后台默认：顺序、开关、字段默认值均跟随', () => {
   const r = resolveBlocks(baseModule(), null);
   assert.equal(r.enabled, true);
+  assert.equal(r.gap, 'blank_line');          // 模块间空行由后台默认控制
   assert.equal(r.enabledOverridden, false);
   assert.equal(r.orderOverridden, false);
   assert.deepEqual(r.blocks.map(b => b.id), ['intro', 'card', 'more']);
 
   const card = r.blocks.find(b => b.id === 'card');
   assert.equal(card.enabled, false);          // 后台默认关
+  assert.equal(card.displayName, '商务名片'); // 实例显示名只服务编辑器标题，不进入 fields
   // base.fields 覆盖 schema 默认；未在 base 设置的字段回落 schema 默认。
   assert.equal(card.fields.intro_text.value, '找小明');
   assert.equal(card.fields.intro_text.overridden, false);
   assert.equal(card.fields.intro_size.value, 14);       // schema 默认
   assert.equal(card.fields.intro_color.value, '#888888');
   assert.equal(card.fields.image.value, '');
+  assert.equal(flattenFields(card).display_name, undefined);
 });
 
 test('字段覆盖：被改字段标 overridden 并取覆盖值，其余字段仍跟随默认', () => {

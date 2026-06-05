@@ -5,6 +5,12 @@
 
 import { resolveBlocks, flattenFields } from './block-merge.js';
 
+function blockSeparatorHtml(renderers, ctx) {
+  if (ctx && typeof ctx.blockSeparatorHtml === 'string') return ctx.blockSeparatorHtml;
+  if (renderers && typeof renderers.__separator === 'function') return renderers.__separator(ctx);
+  return '<section style="height:1em;line-height:1em;font-size:0;">&nbsp;</section>';
+}
+
 // renderBottomBlocksHtml 合并后台默认与单篇覆盖，按解析顺序对每个启用区块调用其类型渲染器，
 // 返回拼好的 HTML（模块禁用或全部为空时返回 ''）。
 //   module:   config.modules.bottom_blocks（后台默认）
@@ -20,7 +26,10 @@ export function renderBottomBlocksHtml(module, override, renderers, ctx = {}) {
     const render = renderers && renderers[block.type];
     if (typeof render !== 'function') continue; // 该渠道未实现此区块类型 → 跳过（不报错，保持鲁棒）
     const html = render(flattenFields(block), { ...ctx, block });
-    if (html) parts.push(html);
+    if (html) {
+      if (parts.length && resolved.gap === 'blank_line') parts.push(blockSeparatorHtml(renderers, ctx));
+      parts.push(html);
+    }
   }
   return parts.join('\n');
 }

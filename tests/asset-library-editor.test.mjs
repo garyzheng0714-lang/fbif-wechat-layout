@@ -21,6 +21,9 @@ test('素材库编辑器有 scope 和 usage 控件，并做安全 URL 校验', (
   assert.match(editorSrc, /listRulePacks/);
   assert.match(editorSrc, /scopeOptions/);
   assert.match(editorSrc, /USAGES/);
+  assert.match(editorSrc, /tagOptions/);
+  assert.match(editorSrc, /asset-lib-group-title/);
+  assert.match(editorSrc, /data-action="filter-tag"/);
   assert.match(editorSrc, /isSafeURL/);
   assert.match(editorSrc, /https:/);
   assert.match(editorSrc, /startsWith\('\/'\)/);
@@ -31,6 +34,8 @@ test('规则后台有素材库页签，并保存 workingAssets 到 asset_library
   assert.match(adminSrc, /createAssetLibraryEditor/);
   assert.match(adminSrc, /\['bottom', '底部'\]/);
   assert.match(adminSrc, /data-role="asset-library-editor"/);
+  assert.match(adminSrc, /admin-bottom-layout/);
+  assert.match(adminSrc, /compact:\s*true/);
   assert.match(adminSrc, /data-role="block-editor"/);
   assert.match(adminSrc, /workingAssets/);
   assert.match(adminSrc, /configDoc\.modules\.asset_library/);
@@ -47,8 +52,14 @@ test('素材库编辑器按引用索引阻断删除，并把素材 ID 设为只�
   assert.doesNotMatch(editorSrc, /if \(field === 'id'\) asset\.id/);
 });
 
-test('底部区块编辑器显示标题、说明或素材标签，但 name_card 空说明保留「名片」', () => {
+test('底部区块编辑器支持实例显示名，并在缺省时显示标题、说明或素材标签', () => {
   assert.match(blockEditorSrc, /function blockDisplayLabel/);
+  assert.match(blockEditorSrc, /display_name/);
+  assert.match(blockEditorSrc, /模块名称/);
+  assert.match(blockEditorSrc, /KIND_LABELS/);
+  assert.match(blockEditorSrc, /模块间默认空行/);
+  assert.match(blockEditorSrc, /setBlockDisplayName/);
+  assert.match(blockPanelSrc, /displayName/);
   assert.match(blockEditorSrc, /assetIDFromRef/);
   assert.match(blockEditorSrc, /block\.type === 'name_card'/);
   assert.match(blockEditorSrc, /getAssetLibrary \? getAssetLibrary\(\)/);

@@ -19,6 +19,10 @@ function uid(type, existing) {
   while (existing[id]) { id = type + '_' + (++i); }
   return id;
 }
+const KIND_LABELS = { text: '文字', image: '图片', recommendations: '推荐文章' };
+function typeGroupLabel(type) {
+  return KIND_LABELS[type && type.kind] || '图片';
+}
 function assetsOf(lib) {
   if (Array.isArray(lib)) return lib;
   if (isObj(lib) && Array.isArray(lib.assets)) return lib.assets;
@@ -29,6 +33,8 @@ function assetIDFromRef(value) {
   return m ? m[1] : '';
 }
 function blockDisplayLabel(block, type, assetLibrary, scope) {
+  const custom = String(block && block.display_name || '').trim();
+  if (custom) return custom;
   const f = isObj(block && block.fields) ? block.fields : {};
   const title = typeof f.title === 'string' ? f.title.replace(/^[\s/]+|[\s/]+$/g, '').trim() : '';
   if (title) return title;
@@ -50,13 +56,13 @@ function ensureStyle(doc) {
   st.id = STYLE_ID;
   st.textContent = `
 .be-wrap{font-size:13px;color:var(--fs-text-1,#1f2329);}
-.be-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;}
+.be-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap;}
 .be-master{display:flex;align-items:center;gap:6px;}
 .be-add{display:flex;gap:6px;align-items:center;}
 .be-add select{border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:4px 6px;font-size:12px;}
 .be-add button{background:var(--fs-brand,#1456f0);color:#fff;border:none;border-radius:var(--fs-r-s,6px);padding:5px 10px;font-size:12px;cursor:pointer;}
 .be-card{border:1px solid var(--fs-border-card,#e5e6eb);border-radius:var(--fs-r-s,6px);margin-bottom:8px;background:var(--fs-bg-card,#fff);}
-.be-fe{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:var(--fs-text-2,#646a73);cursor:pointer;}
+.be-fe{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin-bottom:0;font-size:12px;color:var(--fs-text-2,#646a73);cursor:pointer;}
 .be-fe input[disabled]{cursor:default;}
 .be-row{display:flex;align-items:center;gap:8px;padding:8px 10px;}
 .be-grip{cursor:grab;color:var(--fs-text-disabled,#bbbfc4);display:inline-flex;align-items:center;}
@@ -65,8 +71,9 @@ function ensureStyle(doc) {
 .be-del{background:none;border:none;color:var(--fs-text-3,#8f959e);cursor:pointer;font-size:13px;}
 .be-del:hover{color:var(--fs-danger,#f54a45);}
 .be-caret{color:var(--fs-text-3,#8f959e);cursor:pointer;font-size:11px;}
-.be-fields{padding:2px 12px 12px 30px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));}
-.be-field{margin-top:10px;}
+.be-fields{padding:10px 12px 12px 30px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px;row-gap:10px;}
+.be-field{margin-top:0;}
+.be-field.wide{grid-column:1/-1;}
 .be-flabel{display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--fs-text-2,#646a73);font-size:12px;}
 .be-flabel .be-defmark{font-size:11px;color:var(--fs-text-3,#8f959e);}
 .be-input,.be-textarea,.be-select{width:100%;box-sizing:border-box;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:5px 8px;font-size:13px;font-family:inherit;}
@@ -78,6 +85,7 @@ function ensureStyle(doc) {
 .be-adv{margin-top:10px;}
 .be-adv summary{cursor:pointer;color:var(--fs-text-3,#8f959e);font-size:12px;}
 .be-adv textarea{width:100%;box-sizing:border-box;min-height:120px;margin-top:6px;font-family:ui-monospace,monospace;font-size:12px;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:8px;}
+@media(max-width:980px){.be-fields{grid-template-columns:1fr}.be-field.wide{grid-column:auto}}
 `;
   (doc.head || doc.documentElement).appendChild(st);
 }
@@ -100,7 +108,9 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
   function emit() { if (onChange) onChange(clone(mod)); }
 
   function setMaster(v) { mod.enabled = v; emit(); render(); }
+  function setGap(v) { mod.gap = v ? 'blank_line' : 'none'; emit(); render(); }
   function setBlockEnabled(id, v) { if (mod.blocks[id]) { mod.blocks[id].enabled = v; emit(); render(); } }
+  function setBlockDisplayName(id, v) { if (mod.blocks[id]) { const s = String(v || '').trim(); if (s) mod.blocks[id].display_name = s; else delete mod.blocks[id].display_name; emit(); render(); } }
   // 块实例级「允许前端编辑此块」：勾选写 frontend_editable=true（前端出现换图入口），不勾删除（缺省 false=前端只读）。
   function setBlockFrontendEditable(id, v) { if (mod.blocks[id]) { if (v) mod.blocks[id].frontend_editable = true; else delete mod.blocks[id].frontend_editable; emit(); render(); } }
   function setField(id, key, v) {
@@ -113,7 +123,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
     const t = getBlockType(type);
     if (!t) return;
     const id = uid(type, mod.blocks);
-    mod.blocks[id] = { type, enabled: true, fields: defaultFieldsForType(type) };
+    mod.blocks[id] = { type, display_name: (t && t.label) || type, enabled: true, fields: defaultFieldsForType(type) };
     mod.order.push(id);
     expanded.add(id);
     emit(); render();
@@ -132,6 +142,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
 
   function fieldControl(id, field, value) {
     const wrap = doc.createElement('div'); wrap.className = 'be-field';
+    if (field.type === 'longText' || field.type === 'html_lines') wrap.classList.add('wide');
     const label = doc.createElement('div'); label.className = 'be-flabel';
     label.innerHTML = `<span>${esc(field.label || field.key)}</span><span class="be-defmark">默认值</span>`;
     wrap.appendChild(label);
@@ -204,9 +215,22 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
     const ml = doc.createElement('span'); ml.textContent = '默认启用底部区块'; master.appendChild(ml);
     head.appendChild(master);
 
+    const gap = doc.createElement('label'); gap.className = 'be-master';
+    const gcb = doc.createElement('input'); gcb.type = 'checkbox'; gcb.checked = mod.gap !== 'none';
+    gcb.onchange = () => setGap(gcb.checked);
+    gap.appendChild(gcb);
+    const gl = doc.createElement('span'); gl.textContent = '模块间默认空行'; gap.appendChild(gl);
+    head.appendChild(gap);
+
     const add = doc.createElement('div'); add.className = 'be-add';
     const sel = doc.createElement('select');
-    blockTypesForChannel(channel).forEach(t => { const op = doc.createElement('option'); op.value = t.type; op.textContent = '＋ ' + t.label; sel.appendChild(op); });
+    for (const group of ['文字', '图片', '推荐文章']) {
+      const types = blockTypesForChannel(channel).filter(t => typeGroupLabel(t) === group);
+      if (!types.length) continue;
+      const og = doc.createElement('optgroup'); og.label = group;
+      types.forEach(t => { const op = doc.createElement('option'); op.value = t.type; op.textContent = t.label; og.appendChild(op); });
+      sel.appendChild(og);
+    }
     const addBtn = doc.createElement('button'); addBtn.type = 'button'; addBtn.textContent = '新增区块';
     addBtn.onclick = () => sel.value && addBlock(sel.value);
     add.appendChild(sel); add.appendChild(addBtn);
@@ -232,7 +256,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
       const en = doc.createElement('input'); en.type = 'checkbox'; en.checked = block.enabled !== false; en.title = '默认是否启用';
       en.onchange = () => setBlockEnabled(id, en.checked);
       const name = doc.createElement('span'); name.className = 'be-name';
-      name.innerHTML = esc(blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, getScope ? getScope() : '')) + `<span class="be-type">${esc(block.type)} · ${esc(id)}</span>`;
+      name.innerHTML = esc(blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, getScope ? getScope() : '')) + `<span class="be-type">${esc(typeGroupLabel(type))} · ${esc(block.type)} · ${esc(id)}</span>`;
       const open = expanded.has(id);
       const caret = doc.createElement('span'); caret.className = 'be-caret'; caret.textContent = open ? '▾' : '▸';
       const toggle = () => { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); render(); };
@@ -258,6 +282,12 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
           : '允许前端编辑此块（前端出现「更换图片」入口；不勾＝前端只读）';
         feRow.appendChild(fe); feRow.appendChild(feTxt);
         fields.appendChild(feRow);
+        const labelField = doc.createElement('div'); labelField.className = 'be-field wide';
+        const labelTitle = doc.createElement('div'); labelTitle.className = 'be-flabel'; labelTitle.innerHTML = '<span>模块名称</span><span class="be-defmark">显示名</span>';
+        const labelInput = doc.createElement('input'); labelInput.className = 'be-input'; labelInput.type = 'text'; labelInput.value = block.display_name || '';
+        labelInput.placeholder = blockDisplayLabel({ ...block, display_name: '' }, type, getAssetLibrary ? getAssetLibrary() : null, getScope ? getScope() : '');
+        labelInput.oninput = () => setBlockDisplayName(id, labelInput.value);
+        labelField.appendChild(labelTitle); labelField.appendChild(labelInput); fields.appendChild(labelField);
         const fdefs = type.fields || [];
         const fv = isObj(block.fields) ? block.fields : {};
         if (!fdefs.length) { const e = doc.createElement('div'); e.className = 'be-empty'; e.textContent = '该类型无可编辑字段（如「更多文章」委托卡片编辑器）。'; fields.appendChild(e); }

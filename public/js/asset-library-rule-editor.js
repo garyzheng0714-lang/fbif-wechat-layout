@@ -125,7 +125,7 @@ export function buildAssetReferenceIndex(presets = [], assets = []) {
   return index;
 }
 
-export function createAssetLibraryEditor({ container, assetLibrary, onChange, referencePresets = [], currentScope = 'global' }) {
+export function createAssetLibraryEditor({ container, assetLibrary, onChange, referencePresets = [], currentScope = 'global', compact = false }) {
   if (!container) throw new Error('createAssetLibraryEditor: container is required');
   const snapshot = normalizeLibrary(assetLibrary);
   let state = normalizeLibrary(assetLibrary);
@@ -151,6 +151,20 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
         return [asset.id, asset.label, asset.usage, asset.scope, ...(asset.tags || [])]
           .some(v => String(v || '').toLowerCase().includes(text));
       });
+  }
+
+  function tagOptions() {
+    const counts = new Map();
+    for (const asset of state.assets || []) {
+      for (const tag of asset.tags || []) {
+        const key = String(tag || '').trim();
+        if (key) counts.set(key, (counts.get(key) || 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-Hans-CN'))
+      .slice(0, 12)
+      .map(([tag]) => tag);
   }
 
   function emit(next) {
@@ -195,10 +209,26 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     return `<div class="asset-lib-card${open ? ' open' : ''}" data-asset-idx="${index}">${row}${detail}</div>`;
   }
 
+  function renderAssetList(visible) {
+    if (!visible.length) return '<div class="asset-lib-empty">没有符合筛选条件的素材。</div>';
+    const grouped = new Map();
+    for (const item of visible) {
+      const usage = item.asset.usage || 'custom';
+      if (!grouped.has(usage)) grouped.set(usage, []);
+      grouped.get(usage).push(item);
+    }
+    return USAGES.filter(usage => grouped.has(usage)).map(usage => `
+      <section class="asset-lib-group">
+        <div class="asset-lib-group-title">${esc(usage)}</div>
+        ${grouped.get(usage).map(({ asset, index }) => renderAsset(asset, index)).join('')}
+      </section>`).join('');
+  }
+
   function render() {
     const dirty = JSON.stringify(state) !== JSON.stringify(snapshot);
     const visible = visibleAssets();
-    container.innerHTML = `<div class="asset-lib-editor">
+    const tags = tagOptions();
+    container.innerHTML = `<div class="asset-lib-editor ${compact ? 'compact' : ''}">
       <div class="asset-lib-toolbar">
         <span class="asset-lib-status ${dirty ? 'dirty' : 'synced'}">${dirty ? '有未保存改动' : '已同步 ✓'}</span>
         <input class="asset-lib-search" data-filter="text" value="${esc(filterText)}" placeholder="搜索名称、ID、标签">
@@ -209,8 +239,9 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
         <button type="button" class="admin-secondary" data-action="undo" ${dirty ? '' : 'disabled'}>撤销所有修改</button>
         <input type="file" accept="image/*" hidden data-role="asset-file">
       </div>
+      ${tags.length ? `<div class="asset-lib-tags"><span>标签</span>${tags.map(tag => `<button type="button" data-action="filter-tag" data-tag="${esc(tag)}" class="${filterText.trim() === tag ? 'active' : ''}">${esc(tag)}</button>`).join('')}</div>` : ''}
       ${status ? `<div class="asset-lib-error">${esc(status)}</div>` : ''}
-      <div class="asset-lib-list">${visible.length ? visible.map(({ asset, index }) => renderAsset(asset, index)).join('') : '<div class="asset-lib-empty">没有符合筛选条件的素材。</div>'}</div>
+      <div class="asset-lib-list">${renderAssetList(visible)}</div>
     </div>`;
     injectStyles();
   }
@@ -262,6 +293,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
       render();
       return;
     }
+    if (action === 'filter-tag') { filterText = btn.dataset.tag || ''; render(); return; }
     if (action === 'undo') { emit(snapshot); return; }
     if (action === 'add-url') {
       const next = clone(state);
@@ -305,7 +337,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     stylesInjected = true;
     const style = document.createElement('style');
     style.id = 'asset-lib-styles';
-    style.textContent = `.asset-lib-editor{display:grid;gap:12px}.asset-lib-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.asset-lib-toolbar select,.asset-lib-search{height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-search{min-width:190px}.asset-lib-status{font-size:12px;font-weight:700}.asset-lib-status.synced{color:var(--fs-success,#00A870)}.asset-lib-status.dirty{color:var(--fs-warning,#FF8800)}.asset-lib-error{padding:8px 10px;border-radius:var(--fs-r-s,6px);background:rgba(255,136,0,.08);color:var(--fs-warning,#FF8800);font-size:12px}.asset-lib-list{display:grid;gap:10px}.asset-lib-empty{padding:18px;text-align:center;color:var(--fs-text-3,#8F959E);background:var(--fs-bg-nested,#F7F8FA);border-radius:var(--fs-r-m,8px);font-size:13px}.asset-lib-card{border-radius:var(--fs-r-m,8px);background:var(--fs-bg-nested,#F7F8FA);overflow:hidden}.asset-lib-card.open{box-shadow:inset 0 0 0 1px var(--fs-border-control,#D9DCE0)}.asset-lib-row{display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;transition:background .12s}.asset-lib-row:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045))}.asset-lib-rowmeta{flex:1;min-width:0}.asset-lib-rowname{font-size:13px;font-weight:600;color:var(--fs-text-1,#1F2329);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.asset-lib-rowsub{font-size:11px;color:var(--fs-text-3,#8F959E);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}.asset-lib-caret{flex:none;color:var(--fs-text-3,#8F959E);font-size:12px;transition:transform .15s}.asset-lib-caret.open{transform:rotate(90deg)}.asset-lib-detail{padding:6px 12px 14px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));display:grid;gap:10px}.asset-lib-thumb{width:44px;height:44px;flex:none;border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--fs-text-3,#8F959E);font-size:11px}.asset-lib-thumb img{max-width:100%;max-height:100%;object-fit:contain}.asset-lib-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.asset-lib-fields label{display:grid;gap:4px}.asset-lib-fields span{font-size:12px;color:var(--fs-text-2,#646A73)}.asset-lib-fields input,.asset-lib-fields select{min-width:0;height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-fields input[readonly]{background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E)}.asset-lib-fields input:focus,.asset-lib-fields select:focus,.asset-lib-toolbar select:focus,.asset-lib-search:focus{outline:none;border-color:var(--fs-brand,#1456F0);box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}.asset-lib-wide{grid-column:span 2}.asset-lib-actions{display:flex;gap:8px}.asset-lib-ref{flex:none;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:0 8px;border-radius:var(--fs-r-full,9999px);background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E);font-size:11px;font-weight:600}.asset-lib-ref.used{background:var(--fs-brand-soft,#EBF1FF);color:var(--fs-brand,#1456F0)}@media(max-width:900px){.asset-lib-fields{grid-template-columns:1fr}.asset-lib-wide{grid-column:auto}.asset-lib-detail{padding:6px 10px 12px}}`;
+    style.textContent = `.asset-lib-editor{display:grid;gap:12px}.asset-lib-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.asset-lib-toolbar select,.asset-lib-search{height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-search{min-width:190px}.asset-lib-status{font-size:12px;font-weight:700}.asset-lib-status.synced{color:var(--fs-success,#00A870)}.asset-lib-status.dirty{color:var(--fs-warning,#FF8800)}.asset-lib-tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.asset-lib-tags span{font-size:11px;color:var(--fs-text-3,#8F959E);font-weight:700}.asset-lib-tags button{border:0;border-radius:var(--fs-r-full,9999px);padding:3px 8px;background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-2,#646A73);font-size:11px;font-family:inherit;cursor:pointer}.asset-lib-tags button:hover,.asset-lib-tags button.active{background:var(--fs-brand-soft,#EBF1FF);color:var(--fs-brand,#1456F0)}.asset-lib-error{padding:8px 10px;border-radius:var(--fs-r-s,6px);background:rgba(255,136,0,.08);color:var(--fs-warning,#FF8800);font-size:12px}.asset-lib-list{display:grid;gap:10px}.asset-lib-group{display:grid;gap:6px}.asset-lib-group-title{font-size:11px;color:var(--fs-text-3,#8F959E);font-weight:700;text-transform:uppercase}.asset-lib-empty{padding:18px;text-align:center;color:var(--fs-text-3,#8F959E);background:var(--fs-bg-nested,#F7F8FA);border-radius:var(--fs-r-m,8px);font-size:13px}.asset-lib-card{border-radius:var(--fs-r-m,8px);background:var(--fs-bg-nested,#F7F8FA);overflow:hidden}.asset-lib-card.open{box-shadow:inset 0 0 0 1px var(--fs-border-control,#D9DCE0)}.asset-lib-row{display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;transition:background .12s}.asset-lib-row:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045))}.asset-lib-rowmeta{flex:1;min-width:0}.asset-lib-rowname{font-size:13px;font-weight:600;color:var(--fs-text-1,#1F2329);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.asset-lib-rowsub{font-size:11px;color:var(--fs-text-3,#8F959E);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}.asset-lib-caret{flex:none;color:var(--fs-text-3,#8F959E);font-size:12px;transition:transform .15s}.asset-lib-caret.open{transform:rotate(90deg)}.asset-lib-detail{padding:6px 12px 14px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));display:grid;gap:10px}.asset-lib-thumb{width:44px;height:44px;flex:none;border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--fs-text-3,#8F959E);font-size:11px}.asset-lib-thumb img{max-width:100%;max-height:100%;object-fit:contain}.asset-lib-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.asset-lib-fields label{display:grid;gap:4px}.asset-lib-fields span{font-size:12px;color:var(--fs-text-2,#646A73)}.asset-lib-fields input,.asset-lib-fields select{min-width:0;height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-fields input[readonly]{background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E)}.asset-lib-fields input:focus,.asset-lib-fields select:focus,.asset-lib-toolbar select:focus,.asset-lib-search:focus{outline:none;border-color:var(--fs-brand,#1456F0);box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}.asset-lib-wide{grid-column:span 2}.asset-lib-actions{display:flex;gap:8px}.asset-lib-ref{flex:none;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:0 8px;border-radius:var(--fs-r-full,9999px);background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E);font-size:11px;font-weight:600}.asset-lib-ref.used{background:var(--fs-brand-soft,#EBF1FF);color:var(--fs-brand,#1456F0)}.asset-lib-editor.compact .asset-lib-toolbar{display:grid;grid-template-columns:1fr;align-items:stretch}.asset-lib-editor.compact .asset-lib-search{min-width:0;width:100%;box-sizing:border-box}.asset-lib-editor.compact .asset-lib-toolbar select,.asset-lib-editor.compact .asset-lib-toolbar button{width:100%;box-sizing:border-box}.asset-lib-editor.compact .asset-lib-row{padding:7px 8px}.asset-lib-editor.compact .asset-lib-thumb{width:38px;height:38px}.asset-lib-editor.compact .asset-lib-ref{display:none}.asset-lib-editor.compact .asset-lib-fields{grid-template-columns:1fr}.asset-lib-editor.compact .asset-lib-wide{grid-column:auto}@media(max-width:900px){.asset-lib-fields{grid-template-columns:1fr}.asset-lib-wide{grid-column:auto}.asset-lib-detail{padding:6px 10px 12px}}`;
     document.head.appendChild(style);
   }
 

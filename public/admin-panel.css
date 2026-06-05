@@ -272,6 +272,25 @@
   display: grid;
   gap: 14px;
 }
+.admin-bottom-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.admin-bottom-assets,
+.admin-bottom-blocks {
+  min-width: 0;
+}
+.admin-bottom-assets {
+  position: sticky;
+  top: 0;
+  max-height: calc(100dvh - 210px);
+  overflow: auto;
+  padding: 12px;
+  border-radius: var(--fs-r-m, 8px);
+  background: var(--fs-bg-nested, #F7F8FA);
+}
 .admin-bottom-stack h3:not(:first-child) {
   margin-top: 10px;
 }
@@ -491,7 +510,12 @@
   .admin-rule-bar,
   .admin-meta-grid,
   .admin-editor-split,
+  .admin-bottom-layout,
   .admin-field-grid { grid-template-columns: 1fr; }
+  .admin-bottom-assets {
+    position: static;
+    max-height: none;
+  }
   .admin-icon-danger { opacity: 1; }
   .admin-rule-tabs {
     display: flex;

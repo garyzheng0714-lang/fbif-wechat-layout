@@ -18,6 +18,9 @@ func TestBlockTypeCatalogIntegrity(t *testing.T) {
 		if len(bt.Channels) == 0 {
 			t.Errorf("%s: must declare at least one channel", bt.Type)
 		}
+		if bt.Kind != "text" && bt.Kind != "image" && bt.Kind != "recommendations" {
+			t.Errorf("%s: invalid kind %q (only text|image|recommendations)", bt.Type, bt.Kind)
+		}
 		for _, ch := range bt.Channels {
 			if ch != "mp" && ch != "ft" {
 				t.Errorf("%s: invalid channel %q (only mp|ft)", bt.Type, ch)
@@ -32,6 +35,35 @@ func TestBlockTypeCatalogIntegrity(t *testing.T) {
 				t.Errorf("%s: duplicate field key %s", bt.Type, f.Key)
 			}
 			fkeys[f.Key] = true
+		}
+	}
+}
+
+// WHY：底部产品模型收敛为「文字 / 图片 / 推荐文章」三类；文字模块必须是跨公众号/网站共用的基础能力。
+func TestTextBlockSupportsBasicFormatting(t *testing.T) {
+	bt, ok := blockTypeByName("text")
+	if !ok {
+		t.Fatal("text block type missing")
+	}
+	if bt.Kind != "text" {
+		t.Fatalf("text kind = %q, want text", bt.Kind)
+	}
+	want := map[string]string{
+		"content":          "longText",
+		"font_size":        "number",
+		"text_color":       "color",
+		"background_color": "color",
+		"italic":           "switch",
+		"underline":        "switch",
+		"align":            "select",
+	}
+	got := map[string]string{}
+	for _, f := range bt.Fields {
+		got[f.Key] = f.Type
+	}
+	for k, typ := range want {
+		if got[k] != typ {
+			t.Errorf("text.%s: want field type %s, got %q", k, typ, got[k])
 		}
 	}
 }

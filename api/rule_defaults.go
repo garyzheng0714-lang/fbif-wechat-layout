@@ -119,7 +119,10 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v3→v4（2026-06-03）：「什么是」系列文末区块对齐成品——文末署名/图源说明 12px #7f7f7f 斜体
 // （footer_note_color/footer_note_font_size + footer_note_regex），「提示：/* 声明」块（tip_*_regex），
 // 联系小节公司信息居中（contact_section_regex/contact_field_regex）。
-const currentBuiltinRuleVersion = 4
+// v4→v5（2026-06-05）：bottom_blocks 区块实例新增 display_name，修正系列尾部区块在后台/前台
+// 退到“什么是系列Eileen名片”这类素材文件名的问题。
+// v5→v6（2026-06-05）：bottom_blocks 模块新增 gap=blank_line，区块类型增加 kind/text 文字模块。
+const currentBuiltinRuleVersion = 6
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{

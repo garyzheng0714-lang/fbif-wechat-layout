@@ -73,18 +73,27 @@ func TestDefaultBottomBlocksModuleValid(t *testing.T) {
 	if err := validateBottomBlocksModule(defaultBottomBlocksModule()); err != nil {
 		t.Fatalf("default bottom_blocks module should validate: %v", err)
 	}
+	if err := validateBottomBlocksModule(defaultMpBottomBlocksModule()); err != nil {
+		t.Fatalf("mp bottom_blocks module should validate: %v", err)
+	}
+	if err := validateBottomBlocksModule(defaultSeriesBottomBlocksModule()); err != nil {
+		t.Fatalf("series bottom_blocks module should validate: %v", err)
+	}
 }
 
 func TestValidateBottomBlocksRejectsBad(t *testing.T) {
 	cases := map[string]map[string]any{
-		"unknown type":          {"blocks": map[string]any{"x": map[string]any{"type": "no_such_type"}}},
-		"bad block id":          {"blocks": map[string]any{"Bad ID!": map[string]any{"type": "rich_html"}}},
-		"order ghost ref":       {"order": []any{"ghost"}},
-		"number above max":      {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"intro_size": float64(999)}}}},
-		"insecure image url":    {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"image": "http://insecure.example/x.png"}}}},
-		"undeclared field":      {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"nope": "x"}}}},
-		"enabled wrong type":    {"enabled": "yes"},
-		"unknown module field":  {"weird": true},
+		"unknown type":         {"blocks": map[string]any{"x": map[string]any{"type": "no_such_type"}}},
+		"bad block id":         {"blocks": map[string]any{"Bad ID!": map[string]any{"type": "rich_html"}}},
+		"order ghost ref":      {"order": []any{"ghost"}},
+		"number above max":     {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"intro_size": float64(999)}}}},
+		"insecure image url":   {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"image": "http://insecure.example/x.png"}}}},
+		"undeclared field":     {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"nope": "x"}}}},
+		"enabled wrong type":   {"enabled": "yes"},
+		"bad gap":              {"gap": "huge"},
+		"display non-string":   {"blocks": map[string]any{"c": map[string]any{"type": "image", "display_name": 123}}},
+		"display too long":     {"blocks": map[string]any{"c": map[string]any{"type": "image", "display_name": string(make([]rune, 81))}}},
+		"unknown module field": {"weird": true},
 		// 审计修复回归：重复 order、预设悬空引用、html_lines 非字符串元素均须拒绝。
 		"duplicate order":       {"blocks": map[string]any{"a": map[string]any{"type": "rich_html"}, "b": map[string]any{"type": "rich_html"}}, "order": []any{"a", "a"}},
 		"preset ghost key":      {"blocks": map[string]any{"a": map[string]any{"type": "rich_html"}}, "presets": []any{map[string]any{"id": "p1", "name": "x", "enabled": map[string]any{"ghost": true}}}},
@@ -99,14 +108,23 @@ func TestValidateBottomBlocksRejectsBad(t *testing.T) {
 
 // name_card 图片字段接受素材库占位符（{{asset#id}}）与站内路径，合法 number 通过。
 func TestValidateBottomBlocksAcceptsValid(t *testing.T) {
-	ok := map[string]any{"blocks": map[string]any{
-		"c": map[string]any{"type": "name_card", "fields": map[string]any{
+	ok := map[string]any{"gap": "blank_line", "blocks": map[string]any{
+		"c": map[string]any{"type": "name_card", "display_name": "商务名片", "fields": map[string]any{
 			"image":      "{{asset#ft_footer_logo}}",
 			"intro_size": float64(16),
 			"intro_text": "联系 Eileen",
 		}},
+		"t": map[string]any{"type": "text", "display_name": "提示文字", "fields": map[string]any{
+			"content":          "欢迎入群",
+			"font_size":        float64(18),
+			"text_color":       "#396FBC",
+			"background_color": "",
+			"italic":           true,
+			"underline":        true,
+			"align":            "center",
+		}},
 	}}
 	if err := validateBottomBlocksModule(ok); err != nil {
-		t.Fatalf("valid name_card should pass: %v", err)
+		t.Fatalf("valid bottom blocks should pass: %v", err)
 	}
 }

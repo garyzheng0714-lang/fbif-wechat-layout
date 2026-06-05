@@ -72,6 +72,8 @@ function assetLabelFor(block, assetLibrary, accountId) {
 
 // blockDisplayLabel：该可编辑块的只读小标题。优先标题字段，再上方说明，name_card 用类型名，图片块退到素材名。
 function blockDisplayLabel(block, type, assetLibrary, accountId) {
+  const custom = String(block && block.displayName || block && block.display_name || '').trim();
+  if (custom) return custom;
   const t = block && block.fields && block.fields.title && block.fields.title.value;
   if (typeof t === 'string') {
     const cleaned = t.replace(/^[\s/]+|[\s/]+$/g, '').trim();

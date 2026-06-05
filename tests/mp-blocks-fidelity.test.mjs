@@ -88,3 +88,23 @@ test('更多文章块输出 mergeIntoFooter 的两个锚点（委托复制链路
   assert.ok(out.includes('<section data-role="paragraph">\n'), '需含无 style 的 paragraph 锚点');
   assert.ok(out.includes(OUTER_OPEN), '需含卡片容器锚点');
 });
+
+test('文字模块支持基础样式，并在模块之间插入默认空行', () => {
+  // WHY：底部重构后运营只面对「文字 / 图片 / 推荐文章」三类模块；文字模块必须能承担常见提示文案。
+  const mod = {
+    enabled: true,
+    gap: 'blank_line',
+    order: ['notice', 'logo'],
+    blocks: {
+      notice: { type: 'text', enabled: true, fields: { content: '欢迎加入\n扫码联系', font_size: 18, text_color: '#396FBC', background_color: '#FFFFFF', italic: true, underline: true, align: 'center' } },
+      logo: { type: 'image', enabled: true, fields: { image: '{{asset#fbif_bobo_card}}' } },
+    },
+  };
+  const out = renderBottomBlocksHtml(mod, undefined, mpBlockRenderers(assetLibrary, 'fbif'));
+  assert.match(out, /欢迎加入/);
+  assert.match(out, /font-size:18px/);
+  assert.match(out, /color:rgb\(57, 111, 188\)/);
+  assert.match(out, /font-style:italic/);
+  assert.match(out, /text-decoration:underline/);
+  assert.match(out, /<br>/, '两个非空模块之间应有默认空行');
+});

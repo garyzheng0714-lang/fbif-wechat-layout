@@ -238,6 +238,7 @@ test('rule admin bottom section combines assets, bottom blocks, and dirty status
 
   assert.match(adminPanel, /\['bottom', '底部'\]/);
   assert.match(adminPanel, /admin-bottom-stack/);
+  assert.match(adminPanel, /admin-bottom-layout/);
   assert.match(adminPanel, /data-role="asset-library-editor"/);
   assert.match(adminPanel, /data-role="block-editor"/);
   assert.doesNotMatch(adminPanel, /\['assets', '素材库'\]/);
@@ -245,5 +246,7 @@ test('rule admin bottom section combines assets, bottom blocks, and dirty status
   assert.match(adminPanel, /data-role="dirty-chip"/);
   assert.match(adminPanel, /adminDirtyCount/);
   assert.match(css, /\.admin-bottom-stack/);
+  assert.match(css, /\.admin-bottom-layout/);
+  assert.match(css, /\.admin-bottom-assets/);
   assert.match(css, /\.admin-dirty-chip/);
 });

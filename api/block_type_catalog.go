@@ -50,6 +50,7 @@ type blockField struct {
 
 type blockType struct {
 	Type     string
+	Kind     string // text | image | recommendations，面向运营的三类模块维度
 	Label    string
 	Channels []string // mp | ft
 	Fields   []blockField
@@ -65,7 +66,28 @@ func intp(n int) *int { return &n }
 func blockTypeCatalog() []blockType {
 	return []blockType{
 		{
+			Type:     "text",
+			Kind:     "text",
+			Label:    "文字",
+			Channels: []string{"mp", "ft"},
+			Note:     "文字模块：一段可编辑文字，支持字号、斜体、下划线、字色、背景色和对齐。作为底部通用文字块，公众号/网站共用。",
+			Fields: []blockField{
+				{Key: "content", Label: "文字内容", Type: "longText", Default: "", Tooltip: "支持换行；每行会作为一行文字输出。"},
+				{Key: "font_size", Label: "字号", Type: "number", Default: 15, Min: intp(10), Max: intp(48), Tooltip: "文字字号（纯数字，无需单位）。"},
+				{Key: "text_color", Label: "字色", Type: "color", Default: "#544545", Tooltip: "文字颜色。"},
+				{Key: "background_color", Label: "背景色", Type: "color", Default: "", Tooltip: "可留空；填写后给文字行加背景色。"},
+				{Key: "italic", Label: "斜体", Type: "switch", Default: false, Tooltip: "是否使用斜体。"},
+				{Key: "underline", Label: "下划线", Type: "switch", Default: false, Tooltip: "是否显示下划线。"},
+				{Key: "align", Label: "对齐", Type: "select", Default: "left", Tooltip: "文字对齐方式。", Options: []blockFieldOption{
+					{Value: "left", Label: "左对齐"},
+					{Value: "center", Label: "居中"},
+					{Value: "right", Label: "右对齐"},
+				}},
+			},
+		},
+		{
 			Type:     "rich_html",
+			Kind:     "text",
 			Label:    "自定义内容",
 			Channels: []string{"mp", "ft"},
 			Note:     "原始 HTML 段（html_lines）。承接历史页脚段的无损迁移，也是高级用户兜底类型。",
@@ -75,6 +97,7 @@ func blockTypeCatalog() []blockType {
 		},
 		{
 			Type:     "declaration",
+			Kind:     "text",
 			Label:    "声明/提示",
 			Channels: []string{"mp", "ft"},
 			Note:     "声明区块：一行标题（如「提示：」）+ 若干条目行（html_lines，可含转载替换锚点）。FBIF 提示段即此型。",
@@ -85,6 +108,7 @@ func blockTypeCatalog() []blockType {
 		},
 		{
 			Type:     "name_card",
+			Kind:     "image",
 			Label:    "名片",
 			Channels: []string{"mp", "ft"},
 			Note:     "字段化名片：上方一行说明文字（可留空，可改文案/字号/颜色）+ 名片图（素材库）。覆盖 FBIF 波波名片、系列作者/BD 名片。",
@@ -97,6 +121,7 @@ func blockTypeCatalog() []blockType {
 		},
 		{
 			Type:     "qr_card",
+			Kind:     "image",
 			Label:    "二维码卡",
 			Channels: []string{"mp", "ft"},
 			Note:     "二维码/图片卡：一行说明文字（可留空）+ 二维码图（素材库）。覆盖系列群二维码、关注公众号。",
@@ -109,6 +134,7 @@ func blockTypeCatalog() []blockType {
 		},
 		{
 			Type:     "titled_media",
+			Kind:     "image",
 			Label:    "标题+图片",
 			Channels: []string{"mp", "ft"},
 			Note:     "栏目标题（如「/ 1000个食品创新案例 /」，可改文字/字号/颜色/居中）+ 一张引流图（素材库）。",
@@ -122,6 +148,7 @@ func blockTypeCatalog() []blockType {
 		},
 		{
 			Type:     "more_articles",
+			Kind:     "recommendations",
 			Label:    "更多文章",
 			Channels: []string{"mp"},
 			Note:     "栏目标题（如「/ 更多文章 /」，可改文字/字号/颜色/居中）+ 委托现有 more-articles.js 渲染推荐卡片；卡片在「更多文章」编辑器/侧栏管理。",
@@ -134,6 +161,7 @@ func blockTypeCatalog() []blockType {
 		},
 		{
 			Type:     "image",
+			Kind:     "image",
 			Label:    "图片",
 			Channels: []string{"mp", "ft"},
 			Note:     "单张图片（素材库），可设宽度/居中。覆盖 FoodTalks logo 等纯图区块。",
@@ -209,6 +237,7 @@ func renderBlockRegistryJS() string {
 		}
 		b.WriteString("  " + jsKey(t.Type) + ": Object.freeze({\n")
 		b.WriteString("    type: " + jsStr(t.Type) + ",\n")
+		b.WriteString("    kind: " + jsStr(t.Kind) + ",\n")
 		b.WriteString("    label: " + jsStr(t.Label) + ",\n")
 		b.WriteString("    channels: Object.freeze([" + joinJsStr(t.Channels) + "]),\n")
 		b.WriteString("    fields: Object.freeze([\n")

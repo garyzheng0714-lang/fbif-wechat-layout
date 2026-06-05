@@ -127,11 +127,13 @@ func defaultBottomBlocksModule() map[string]any {
 func defaultMpBottomBlocksModule() map[string]any {
 	return map[string]any{
 		"enabled": true,
+		"gap":     "blank_line",
 		"order":   []any{"tip", "byline", "more_articles", "promo"},
 		"blocks": map[string]any{
 			"tip": map[string]any{
-				"type":    "declaration",
-				"enabled": true,
+				"type":         "declaration",
+				"display_name": "提示声明",
+				"enabled":      true,
 				"fields": map[string]any{
 					"title": "提示：",
 					"lines": []any{
@@ -145,23 +147,26 @@ func defaultMpBottomBlocksModule() map[string]any {
 				},
 			},
 			"byline": map[string]any{
-				"type":    "name_card",
-				"enabled": true,
+				"type":         "name_card",
+				"display_name": "Bobo 名片",
+				"enabled":      true,
 				"fields": map[string]any{
 					"intro_text": "",
 					"image":      "{{asset#fbif_bobo_card}}",
 				},
 			},
 			"more_articles": map[string]any{
-				"type":    "more_articles",
-				"enabled": true,
+				"type":         "more_articles",
+				"display_name": "更多文章",
+				"enabled":      true,
 				"fields": map[string]any{
 					"title": "/ 更多文章 /",
 				},
 			},
 			"promo": map[string]any{
-				"type":    "titled_media",
-				"enabled": true,
+				"type":         "titled_media",
+				"display_name": "1000 个食品创新案例",
+				"enabled":      true,
 				"fields": map[string]any{
 					"title": "/ 1000个食品创新案例 /",
 					"image": "{{asset#fbif_promo_1000}}",
@@ -182,28 +187,33 @@ func defaultMpBottomBlocksModule() map[string]any {
 func defaultSeriesBottomBlocksModule() map[string]any {
 	return map[string]any{
 		"enabled": true,
+		"gap":     "blank_line",
 		"order":   []any{"author_card", "bd_card", "group_qr", "more_articles"},
 		"blocks": map[string]any{
 			"author_card": map[string]any{
 				"type":              "image",
+				"display_name":      "作者名片",
 				"enabled":           true,
-				"frontend_editable": true,                  // 系列作者名片随篇不同，前端放开换图（运营单篇从素材库点选）
+				"frontend_editable": true,                        // 系列作者名片随篇不同，前端放开换图（运营单篇从素材库点选）
 				"fields":            map[string]any{"image": ""}, // 默认空：运营单篇从素材库点选作者名片
 			},
 			"bd_card": map[string]any{
-				"type":    "image",
-				"enabled": true,
-				"fields":  map[string]any{"image": "{{asset#ft_series_card_eileen}}"},
+				"type":         "image",
+				"display_name": "BD 名片",
+				"enabled":      true,
+				"fields":       map[string]any{"image": "{{asset#ft_series_card_eileen}}"},
 			},
 			"group_qr": map[string]any{
-				"type":    "image",
-				"enabled": true,
-				"fields":  map[string]any{"image": "{{asset#ft_series_group_packaging}}"},
+				"type":         "image",
+				"display_name": "包装群二维码",
+				"enabled":      true,
+				"fields":       map[string]any{"image": "{{asset#ft_series_group_packaging}}"},
 			},
 			"more_articles": map[string]any{
-				"type":    "more_articles",
-				"enabled": false, // 系列默认不出更多文章；结构里保留，运营可显隐（用户诉求：结构统一）
-				"fields":  map[string]any{"title": "/ 更多文章 /"},
+				"type":         "more_articles",
+				"display_name": "推荐文章",
+				"enabled":      false, // 系列默认不出更多文章；结构里保留，运营可显隐（用户诉求：结构统一）
+				"fields":       map[string]any{"title": "/ 更多文章 /"},
 			},
 		},
 		"presets": []any{},
@@ -294,7 +304,7 @@ func validateBottomBlocksBlock(id string, raw any) error {
 	if !ok {
 		return fmt.Errorf("bottom_blocks block %q must be an object", id)
 	}
-	allowed := map[string]bool{"type": true, "enabled": true, "fields": true, "frontend_editable": true}
+	allowed := map[string]bool{"type": true, "display_name": true, "enabled": true, "fields": true, "frontend_editable": true}
 	for k := range block {
 		if !allowed[k] {
 			return fmt.Errorf("bottom_blocks block %q has unknown field: %s", id, k)
@@ -304,6 +314,15 @@ func validateBottomBlocksBlock(id string, raw any) error {
 	bt, ok := blockTypeByName(typ)
 	if !ok {
 		return fmt.Errorf("bottom_blocks block %q has unknown type: %s", id, typ)
+	}
+	if v, ok := block["display_name"]; ok {
+		name, ok := v.(string)
+		if !ok {
+			return fmt.Errorf("bottom_blocks block %q display_name must be string", id)
+		}
+		if len([]rune(name)) > 80 {
+			return fmt.Errorf("bottom_blocks block %q display_name too long", id)
+		}
 	}
 	if v, ok := block["enabled"]; ok {
 		if _, ok := v.(bool); !ok {
@@ -337,7 +356,7 @@ func validateBottomBlocksModule(raw any) error {
 	if !ok {
 		return fmt.Errorf("bottom_blocks module must be an object")
 	}
-	allowed := map[string]bool{"enabled": true, "order": true, "blocks": true, "presets": true, "schema_version": true}
+	allowed := map[string]bool{"enabled": true, "gap": true, "order": true, "blocks": true, "presets": true, "schema_version": true}
 	for k := range m {
 		if !allowed[k] {
 			return fmt.Errorf("unknown bottom_blocks field: %s", k)
@@ -346,6 +365,12 @@ func validateBottomBlocksModule(raw any) error {
 	if v, ok := m["enabled"]; ok {
 		if _, ok := v.(bool); !ok {
 			return fmt.Errorf("bottom_blocks enabled must be boolean")
+		}
+	}
+	if v, ok := m["gap"]; ok {
+		gap := strings.TrimSpace(fmt.Sprint(v))
+		if gap != "none" && gap != "blank_line" {
+			return fmt.Errorf("bottom_blocks gap must be none or blank_line")
 		}
 	}
 

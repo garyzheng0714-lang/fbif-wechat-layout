@@ -66,3 +66,27 @@ test('name_card 字段化区块：上方文字 + 名片图按字段渲染', () =
   assert.match(out, /#396FBC/);
   assert.match(out, /static\.foodtalks\.cn\/x\.png/);
 });
+
+test('网站文字模块与图片区块共用底部语义，并支持模块间空行', () => {
+  // WHY：网站没有推荐文章系统，但文字/图片模块应与公众号共用同一 bottom_blocks 模型。
+  const mod = {
+    enabled: true,
+    gap: 'blank_line',
+    order: ['tip', 'logo'],
+    blocks: {
+      tip: { type: 'text', enabled: true, fields: { content: '商务合作', font_size: 16, text_color: '#396FBC', italic: true, underline: true, align: 'center' } },
+      logo: { type: 'image', enabled: true, fields: { image: 'https://static.foodtalks.cn/logo.png' } },
+    },
+  };
+  const out = renderBottomBlocksHtml(
+    mod,
+    { enabled: true, overrides: {} },
+    siteBlockRenderers(ASSET_LIBRARY_DEFAULT, 'ft-default')
+  );
+  assert.match(out, /商务合作/);
+  assert.match(out, /font-size: 16px/);
+  assert.match(out, /font-style: italic/);
+  assert.match(out, /text-decoration: underline/);
+  assert.match(out, /<p><br \/><\/p>/);
+  assert.match(out, /static\.foodtalks\.cn\/logo\.png/);
+});

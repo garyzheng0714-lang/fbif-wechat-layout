@@ -473,7 +473,7 @@ export function initAdminPanel(options = {}) {
 
   function renderRuleTabContent() {
     if (activeRuleTab === 'bottom') {
-      return `<section class="admin-rule-group admin-bottom-stack"><h3>素材库</h3><div data-role="asset-library-editor"></div><h3>底部区块默认</h3><div data-role="block-editor"></div>${isFtDefaultPack() ? '<h3>网站页脚库</h3><div data-role="footer-library-editor"></div>' : ''}</section>`;
+      return `<section class="admin-rule-group admin-bottom-stack"><div class="admin-bottom-layout"><aside class="admin-bottom-assets"><h3>素材库</h3><div data-role="asset-library-editor"></div></aside><div class="admin-bottom-blocks"><h3>底部区块默认</h3><div data-role="block-editor"></div>${isFtDefaultPack() ? '<h3>网站页脚库</h3><div data-role="footer-library-editor"></div>' : ''}</div></div></section>`;
     }
     if (activeRuleTab === 'behavior') {
       return `<section class="admin-rule-group admin-json-panel"><div data-role="behavior-editor"></div>
@@ -621,7 +621,7 @@ export function initAdminPanel(options = {}) {
     const mount = overlay && overlay.querySelector('[data-role="asset-library-editor"]');
     if (!mount) return;
     if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
-    assetEditorInstance = createAssetLibraryEditor({ container: mount, assetLibrary: workingAssets || defaultAssetLibraryData(), referencePresets: (doc && doc.presets) || [], currentScope: currentAccountID(), onChange(next) { workingAssets = next; updateStatusInline('有未保存改动，点击「保存修改」后生效'); } });
+    assetEditorInstance = createAssetLibraryEditor({ container: mount, assetLibrary: workingAssets || defaultAssetLibraryData(), referencePresets: (doc && doc.presets) || [], currentScope: currentAccountID(), compact: true, onChange(next) { workingAssets = next; updateStatusInline('有未保存改动，点击「保存修改」后生效'); } });
   }
 
   function bindMain() {

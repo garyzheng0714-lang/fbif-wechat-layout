@@ -99,6 +99,10 @@ function centerCss(center) {
   return center === false ? '' : 'text-align:center;';
 }
 
+function alignOr(v, fallback = 'left') {
+  return ['left', 'center', 'right'].includes(v) ? v : fallback;
+}
+
 function moreArticlesTitle(f, sp) {
   const title = String(f.title == null ? '' : f.title).trim();
   if (!title) return '';
@@ -120,6 +124,20 @@ function seriesBlockRenderers(sp, assetLibrary, scope) {
     return url;
   };
   return {
+    __separator: () => '<p style="margin:0 8px;padding:0;line-height:1.75;font-size:15px;"><br></p>',
+    text: (f) => {
+      const lines = String(f.content == null ? '' : f.content).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      if (!lines.length) return '';
+      const bg = String(f.background_color == null ? '' : f.background_color).trim();
+      const size = cfgNum(f, 'font_size', sp.bodySize);
+      const color = /^#[0-9a-fA-F]{6}$/.test(String(f.text_color || '')) ? f.text_color : sp.text;
+      const style =
+        `color:${color};font-size:${size}px;font-family:${sp.font};line-height:${sp.lh};` +
+        `font-style:${f.italic ? 'italic' : 'normal'};font-weight:normal;text-decoration:${f.underline ? 'underline' : 'none'};` +
+        (bg ? `background-color:${bg};` : '');
+      const align = alignOr(f.align);
+      return lines.map(line => `<p style="margin:0 8px;padding:0;text-align:${align};"><span style="${style}">${esc(line)}</span></p>`).join('\n');
+    },
     image: (f) => {
       const url = toUrl(f.image);
       if (!url) return '';

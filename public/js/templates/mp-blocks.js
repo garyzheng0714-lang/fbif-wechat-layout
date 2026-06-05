@@ -45,9 +45,18 @@ function intOr(v, fallback) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
 }
 
+function alignOr(v, fallback = 'left') {
+  return ['left', 'center', 'right'].includes(v) ? v : fallback;
+}
+
 // 栏目标题 span 样式（声明标题 / 更多文章 / 1000案例 共用，color/size 可配）。
 function titleSpanStyle(color, size) {
   return `color:${colorToRgb(color)};font-size:${size}px;font-family:${FONT_FAMILY};line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;`;
+}
+
+function textBlockSpanStyle(f) {
+  const bg = String(f.background_color == null ? '' : f.background_color).trim();
+  return `color:${colorToRgb(f.text_color || '#544545')};font-size:${intOr(f.font_size, 15)}px;font-family:${FONT_FAMILY};line-height:1.75;letter-spacing:0.034em;font-style:${f.italic ? 'italic' : 'normal'};font-weight:normal;text-decoration:${f.underline ? 'underline' : 'none'};${bg ? `background-color:${colorToRgb(bg)};` : ''}`;
 }
 
 // 名片/二维码上方说明文字 span 样式（可空，color/size 可配）。
@@ -71,6 +80,17 @@ function centerCss(center) {
 export function mpBlockRenderers(assetLibrary, scope = 'global') {
   const resolve = (lines) => resolveAssetRefs(lines, assetLibrary, scope).join('\n');
   return {
+    __separator: () => '<p style="margin:0 8px;padding:0;line-height:1.75;font-size:15px;"><br></p>',
+
+    // 文字模块：基础样式字段 → 确定性 inline HTML，避免引入富文本库污染微信复制。
+    text: (f) => {
+      const lines = String(f.content == null ? '' : f.content).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      if (!lines.length) return '';
+      const align = alignOr(f.align);
+      const style = textBlockSpanStyle(f);
+      return lines.map(line => `<p style="margin:0 8px;padding:0;text-align:${align};"><span style="${style}">${esc(line)}</span></p>`).join('\n');
+    },
+
     // 自定义内容：html_lines 原样输出（历史段无损迁移 / 高级兜底）。
     rich_html: (f) => resolve(asLines(f.html_lines)),
 

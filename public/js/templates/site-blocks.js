@@ -28,6 +28,9 @@ function intOr(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
 }
+function alignOr(v, fallback = 'left') {
+  return ['left', 'center', 'right'].includes(v) ? v : fallback;
+}
 
 // 网站口径满宽图段。
 function siteImage(url, extra = '') {
@@ -44,6 +47,24 @@ function siteText(text, size, color) {
 export function siteBlockRenderers(assetLibrary, scope = 'ft-default') {
   const resolve = (lines) => resolveAssetRefs(lines, assetLibrary, scope).join('\n');
   return {
+    __separator: () => '<p><br /></p>',
+
+    // 文字模块：网站与公众号共用语义字段，但输出网站口径 HTML。
+    text: (f) => {
+      const lines = String(f.content == null ? '' : f.content).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      if (!lines.length) return '';
+      const bg = String(f.background_color == null ? '' : f.background_color).trim();
+      const style = [
+        `text-align: ${alignOr(f.align)}`,
+        `font-size: ${intOr(f.font_size, 15)}px`,
+        `color: ${esc(f.text_color || '#544545')}`,
+        f.italic ? 'font-style: italic' : '',
+        f.underline ? 'text-decoration: underline' : '',
+        bg ? `background-color: ${esc(bg)}` : '',
+      ].filter(Boolean).join('; ');
+      return lines.map(line => `<p style="${style};">${esc(line)}</p>`).join('\n');
+    },
+
     // 自定义内容：原样输出（网站默认页脚段即此型，字节一致）。
     rich_html: (f) => resolve(asLines(f.html_lines)),
 
