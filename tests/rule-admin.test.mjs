@@ -191,6 +191,7 @@ test('rule admin card editor has dedicated layout styles', async () => {
 
 test('rule admin has footer-library tab and workingFooter save injection', async () => {
   const adminPanel = await readProjectFile('public/js/admin-panel.js');
+  const blockData = await readProjectFile('public/js/admin-block-data.js');
 
   // import
   assert.match(adminPanel, /import\s*\{[^}]*createFooterLibraryEditor[^}]*\}\s*from\s*['"]\.\/footer-library-rule-editor\.js['"]/);
@@ -201,7 +202,7 @@ test('rule admin has footer-library tab and workingFooter save injection', async
 
   // 网站页脚库收敛到统一「底部」分区里，仅对 ft-default 系展示
   assert.match(adminPanel, /\['bottom', '底部'\]/);
-  assert.match(adminPanel, /isFtDefaultPack\(\) \? '<h3>网站页脚库<\/h3><div data-role="footer-library-editor"><\/div>'/);
+  assert.match(blockData, /isFt \? '<h3>网站页脚库<\/h3><div data-role="footer-library-editor"><\/div>'/); // 渲染移到 admin-block-data helper
 
   // workingFooter 变量声明
   assert.match(adminPanel, /let workingFooter\s*=/);
@@ -213,8 +214,8 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   const footerFromPresetCount = (adminPanel.match(/footerFromPreset/g) || []).length;
   assert.ok(footerFromPresetCount >= 2, `footerFromPreset 应至少出现 2 次，实际 ${footerFromPresetCount}`);
 
-  // Footer Tab 挂载点
-  assert.match(adminPanel, /data-role="footer-library-editor"/);
+  // Footer Tab 挂载点（在 admin-block-data helper）
+  assert.match(blockData, /data-role="footer-library-editor"/);
 
   // bindFooterLibraryEditor 调用 createFooterLibraryEditor
   assert.match(adminPanel, /createFooterLibraryEditor\(\{[\s\S]*?container[\s\S]*?footerData[\s\S]*?onChange[\s\S]*?\}\)/);
@@ -232,21 +233,17 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   assert.ok(adminPanel.split('\n').length <= 900, `admin-panel.js 超过 900 行`);
 });
 
-test('rule admin bottom section combines assets, bottom blocks, and dirty status', async () => {
+test('rule admin：素材库独立 tab + 底部区块 tab（用户裁定 2026-06-05，推翻旧「嵌底部」）', async () => {
   const adminPanel = await readProjectFile('public/js/admin-panel.js');
+  const blockData = await readProjectFile('public/js/admin-block-data.js');
   const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
 
   assert.match(adminPanel, /\['bottom', '底部'\]/);
-  assert.match(adminPanel, /admin-bottom-stack/);
-  assert.match(adminPanel, /admin-bottom-layout/);
-  assert.match(adminPanel, /data-role="asset-library-editor"/);
-  assert.match(adminPanel, /data-role="block-editor"/);
-  assert.doesNotMatch(adminPanel, /\['assets', '素材库'\]/);
+  assert.match(adminPanel, /\['assets', '素材库'\]/);          // 素材库独立成 tab
+  assert.match(blockData, /data-role="asset-library-editor"/); // 渲染抽到 admin-block-data helper
+  assert.match(blockData, /data-role="block-editor"/);
   assert.doesNotMatch(adminPanel, /\['blocks', '底部区块'\]/);
   assert.match(adminPanel, /data-role="dirty-chip"/);
   assert.match(adminPanel, /adminDirtyCount/);
-  assert.match(css, /\.admin-bottom-stack/);
-  assert.match(css, /\.admin-bottom-layout/);
-  assert.match(css, /\.admin-bottom-assets/);
   assert.match(css, /\.admin-dirty-chip/);
 });

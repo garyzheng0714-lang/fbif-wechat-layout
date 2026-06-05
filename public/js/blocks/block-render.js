@@ -16,9 +16,9 @@ function blockSeparatorHtml(renderers, ctx) {
 //   module:   config.modules.bottom_blocks（后台默认）
 //   override: 单篇覆盖 { enabled?, order?, overrides:{ id:{enabled?,fields?} } }
 //   renderers: { <type>: (fields, ctx) => htmlStringOrEmpty }；缺该 type 的渲染器则跳过该块（该渠道不支持）。
-//   ctx: 透传给渲染器（含 block 元信息）。
+//   ctx: 透传给渲染器（含 block 元信息）；ctx.presetId 在 v2 双预设下选 active 预设（v1 忽略）。
 export function renderBottomBlocksHtml(module, override, renderers, ctx = {}) {
-  const resolved = resolveBlocks(module, override);
+  const resolved = resolveBlocks(module, override, { presetId: ctx && ctx.presetId });
   if (!resolved.enabled) return '';
   const parts = [];
   for (const block of resolved.blocks) {

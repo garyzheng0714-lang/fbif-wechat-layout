@@ -9,5 +9,12 @@
     "gen:blocks": "cd api && go run . -emit-blocks > ../public/js/blocks/block-registry.gen.js"
   },
   "license": "UNLICENSED",
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "linkedom": "^0.18.12"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "^0.9.10",
+    "jszip": "^3.10.1"
+  }
 }

@@ -25,7 +25,7 @@ import (
 // blockFieldType 是字段控件类型的白名单。新增类型需同步前端控件映射与 validateBottomBlocksField。
 func isAllowedBlockFieldType(t string) bool {
 	switch t {
-	case "text", "longText", "number", "color", "image", "select", "switch", "html_lines":
+	case "text", "longText", "number", "color", "image", "select", "switch", "html_lines", "rich_text":
 		return true
 	default:
 		return false
@@ -73,11 +73,13 @@ func blockTypeCatalog() []blockType {
 			Note:     "文字模块：一段可编辑文字，支持字号、斜体、下划线、字色、背景色和对齐。作为底部通用文字块，公众号/网站共用。",
 			Fields: []blockField{
 				{Key: "content", Label: "文字内容", Type: "longText", Default: "", Tooltip: "支持换行；每行会作为一行文字输出。"},
+				{Key: "html", Label: "富文本", Type: "rich_text", Default: "", Tooltip: "富文本内容（选中片段设样式）；留空则用上面的纯文本字段（迁移期并存，P2）。"},
 				{Key: "font_size", Label: "字号", Type: "number", Default: 15, Min: intp(10), Max: intp(48), Tooltip: "文字字号（纯数字，无需单位）。"},
 				{Key: "text_color", Label: "字色", Type: "color", Default: "#544545", Tooltip: "文字颜色。"},
 				{Key: "background_color", Label: "背景色", Type: "color", Default: "", Tooltip: "可留空；填写后给文字行加背景色。"},
 				{Key: "italic", Label: "斜体", Type: "switch", Default: false, Tooltip: "是否使用斜体。"},
 				{Key: "underline", Label: "下划线", Type: "switch", Default: false, Tooltip: "是否显示下划线。"},
+				{Key: "bold", Label: "加粗", Type: "switch", Default: false, Tooltip: "整段是否加粗。"},
 				{Key: "align", Label: "对齐", Type: "select", Default: "left", Tooltip: "文字对齐方式。", Options: []blockFieldOption{
 					{Value: "left", Label: "左对齐"},
 					{Value: "center", Label: "居中"},
@@ -169,6 +171,16 @@ func blockTypeCatalog() []blockType {
 				{Key: "image", Label: "图片", Type: "image", Default: "", Tooltip: "从素材库选择图片。"},
 				{Key: "width", Label: "宽度", Type: "number", Default: 0, Min: intp(0), Max: intp(1080), Tooltip: "图片宽度（px，0=自适应满宽）。"},
 				{Key: "center", Label: "居中", Type: "switch", Default: true, Tooltip: "是否居中。"},
+			},
+		},
+		{
+			Type:     "spacer",
+			Kind:     "spacer",
+			Label:    "间距",
+			Channels: []string{"mp", "ft"},
+			Note:     "间距模块：一段可调高度的留白，精确控制区块之间的间隔（取代自动空行）。公众号/网站共用。",
+			Fields: []blockField{
+				{Key: "height", Label: "高度", Type: "number", Default: 16, Min: intp(0), Max: intp(200), Tooltip: "留白高度（px，纯数字，无需单位）。"},
 			},
 		},
 	}

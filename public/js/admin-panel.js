@@ -26,7 +26,7 @@ import { createFooterLibraryEditor } from './footer-library-rule-editor.js';
 import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
 import { createAssetLibraryEditor } from './asset-library-rule-editor.js';
 import { assetLibraryFromPreset, defaultAssetLibraryData } from './admin-asset-data.js';
-import { bottomBlocksFromPreset, createBlockEditorBinder } from './admin-block-data.js';
+import { bottomBlocksFromPreset, createBlockEditorBinder, renderRuleBottomTabHtml } from './admin-block-data.js';
 import { createBehaviorFormBinder } from './admin-behavior-data.js';
 import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
@@ -150,7 +150,7 @@ export function initAdminPanel(options = {}) {
   let workingBehavior = normalizeRuleBehavior(getBehavior());
   let workingFooter = null;
   let workingAssets = null;
-  let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; updateStatusInline('有未保存改动，点击「保存修改」后生效'); }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp'), getScope: () => currentAccountID(), getAssetLibrary: () => workingAssets || defaultAssetLibraryData() });
+  let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; updateStatusInline('有未保存改动，点击「保存修改」后生效'); }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp'), getScope: () => currentAccountID(), getAssetLibrary: () => workingAssets || defaultAssetLibraryData(), addAsset: (asset) => { const lib = workingAssets || defaultAssetLibraryData(); workingAssets = { ...lib, assets: [asset, ...(Array.isArray(lib.assets) ? lib.assets : [])] }; updateStatusInline('已上传并入库，点击「保存修改」生效'); } });
   const behaviorBinder = createBehaviorFormBinder({ getBehavior: () => workingBehavior, setBehavior: (b) => { workingBehavior = b; syncBehaviorText(); const ta = overlay && overlay.querySelector('[data-role="behavior-json"]'); if (ta) ta.value = behaviorText; updateStatusInline('有未保存改动，点击「保存修改」后生效'); } });
   let footerEditorInstance = null, assetEditorInstance = null;
   let workingName = '未命名规则';
@@ -302,7 +302,7 @@ export function initAdminPanel(options = {}) {
   }
 
   function renderRuleTabs() {
-    const tabs = [['params', '参数'], ['bottom', '底部'], ['behavior', '代码化规则'], ['validation', '校验预览']];
+    const tabs = [['params', '参数'], ['bottom', '底部'], ['assets', '素材库'], ['behavior', '代码化规则'], ['validation', '校验预览']];
     return `
       <div class="admin-rule-tabs" role="tablist" aria-label="规则编辑分区">
         ${tabs.map(([id, label]) => `
@@ -472,8 +472,8 @@ export function initAdminPanel(options = {}) {
   }
 
   function renderRuleTabContent() {
-    if (activeRuleTab === 'bottom') {
-      return `<section class="admin-rule-group admin-bottom-stack"><div class="admin-bottom-layout"><aside class="admin-bottom-assets"><h3>素材库</h3><div data-role="asset-library-editor"></div></aside><div class="admin-bottom-blocks"><h3>底部区块默认</h3><div data-role="block-editor"></div>${isFtDefaultPack() ? '<h3>网站页脚库</h3><div data-role="footer-library-editor"></div>' : ''}</div></div></section>`;
+    if (activeRuleTab === 'bottom' || activeRuleTab === 'assets') {
+      return renderRuleBottomTabHtml(activeRuleTab, isFtDefaultPack());
     }
     if (activeRuleTab === 'behavior') {
       return `<section class="admin-rule-group admin-json-panel"><div data-role="behavior-editor"></div>

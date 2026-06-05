@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -69,6 +70,71 @@ func TestBottomBlocksMigrationPresets(t *testing.T) {
 	}
 }
 
+// FBIF v2 原子双预设样板必须通过 v2 校验（结构合法）。视觉 1:1 由 JS 渲染 golden + 公众号真机确认。
+func TestDefaultMpBottomBlocksModuleV2Valid(t *testing.T) {
+	if err := validateBottomBlocksModule(defaultMpBottomBlocksModuleV2()); err != nil {
+		t.Fatalf("FBIF v2 bottom_blocks module should validate: %v", err)
+	}
+}
+
+// Go 侧防漂移：锁住 v2 样板的顺序/三条文案/图宽（codex review #1/#2/#3/#5）。
+// 与 tests/mp-blocks-fidelity.test.mjs 的 JS 渲染断言双侧守，避免 Go 默认与 JS 测试漂移。
+func TestDefaultMpBottomBlocksModuleV2Shape(t *testing.T) {
+	mod := defaultMpBottomBlocksModuleV2()
+	presets := mod["presets"].([]any)
+	if len(presets) != 2 {
+		t.Fatalf("v2 应有 2 个预设(原创/转载), got %d", len(presets))
+	}
+	original := presets[0].(map[string]any)
+	if original["id"] != "original" {
+		t.Fatalf("首个预设应为 original, got %v", original["id"])
+	}
+	// 顺序对齐 footer.html：提示 → 名片 → 更多文章 → 1000标题 → 1000图
+	wantOrder := []any{"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles", "sp_ma", "promo_title", "sp4", "promo_img"}
+	if !reflect.DeepEqual(original["order"], wantOrder) {
+		t.Errorf("original order 漂移:\n got=%v\nwant=%v", original["order"], wantOrder)
+	}
+	blocks := original["blocks"].(map[string]any)
+	tipBody := blocks["tip_body"].(map[string]any)["fields"].(map[string]any)["content"].(string)
+	for _, frag := range []string{"本文为FBIF原创", "转载请在后台回复", "FBIF投稿与商务合作"} {
+		if !strings.Contains(tipBody, frag) {
+			t.Errorf("original tip_body 缺文案 %q（codex #2）", frag)
+		}
+	}
+	byline := blocks["byline"].(map[string]any)["fields"].(map[string]any)
+	if byline["width"] != 661 {
+		t.Errorf("byline 图宽应 661（codex #3）, got %v", byline["width"])
+	}
+	// 转载预设两条、不含原创
+	repostBody := presets[1].(map[string]any)["blocks"].(map[string]any)["tip_body"].(map[string]any)["fields"].(map[string]any)["content"].(string)
+	if strings.Contains(repostBody, "本文为FBIF原创") {
+		t.Error("repost tip_body 不应含原创文案")
+	}
+	if !strings.Contains(repostBody, "本文为转载") {
+		t.Error("repost tip_body 应含转载文案")
+	}
+}
+
+// 系列 v2 样板：结构合法 + 作者名片 frontend_editable + 更多文章默认隐藏。视觉待公众号确认。
+func TestDefaultSeriesBottomBlocksModuleV2(t *testing.T) {
+	mod := defaultSeriesBottomBlocksModuleV2()
+	if err := validateBottomBlocksModule(mod); err != nil {
+		t.Fatalf("系列 v2 应通过校验: %v", err)
+	}
+	presets := mod["presets"].([]any)
+	blocks := presets[0].(map[string]any)["blocks"].(map[string]any)
+	author := blocks["author_card"].(map[string]any)
+	if author["frontend_editable"] != true {
+		t.Error("作者名片应 frontend_editable=true（红线#14 例外）")
+	}
+	if author["fields"].(map[string]any)["image"] != "" {
+		t.Error("作者名片默认空（运营单篇换）")
+	}
+	if blocks["more_articles"].(map[string]any)["enabled"] != false {
+		t.Error("系列更多文章默认隐藏")
+	}
+}
+
 func TestDefaultBottomBlocksModuleValid(t *testing.T) {
 	if err := validateBottomBlocksModule(defaultBottomBlocksModule()); err != nil {
 		t.Fatalf("default bottom_blocks module should validate: %v", err)
@@ -126,5 +192,79 @@ func TestValidateBottomBlocksAcceptsValid(t *testing.T) {
 	}}
 	if err := validateBottomBlocksModule(ok); err != nil {
 		t.Fatalf("valid bottom blocks should pass: %v", err)
+	}
+}
+
+// v2 双预设：schema_version=2 时 presets[] 各带完整 order/blocks（原创/转载各一套）。
+func TestValidateBottomBlocksAcceptsV2(t *testing.T) {
+	mod := map[string]any{
+		"schema_version":   float64(2),
+		"enabled":          true,
+		"active_preset_id": "original",
+		"presets": []any{
+			map[string]any{
+				"id": "original", "name": "原创",
+				"order": []any{"note", "card"},
+				"blocks": map[string]any{
+					"note": map[string]any{"type": "text", "fields": map[string]any{"content": "原创声明"}},
+					"card": map[string]any{"type": "image", "display_name": "名片", "fields": map[string]any{"image": "{{asset#y}}"}},
+				},
+			},
+			map[string]any{
+				"id": "repost", "name": "转载",
+				"order": []any{"note"},
+				"blocks": map[string]any{
+					"note": map[string]any{"type": "text", "fields": map[string]any{"content": "转载声明"}},
+				},
+			},
+		},
+	}
+	if err := validateBottomBlocksModule(mod); err != nil {
+		t.Fatalf("v2 bottom_blocks module should validate: %v", err)
+	}
+}
+
+// v2 拒绝：未知预设字段 / 预设内坏块类型 / 预设内 order 悬空 / 非法 schema_version。
+func TestValidateBottomBlocksV2RejectsBad(t *testing.T) {
+	cases := map[string]map[string]any{
+		"v2 preset unknown field": {
+			"schema_version": float64(2),
+			"presets":        []any{map[string]any{"id": "p1", "weird": true}},
+		},
+		"v2 preset bad block type": {
+			"schema_version": float64(2),
+			"presets":        []any{map[string]any{"id": "p1", "blocks": map[string]any{"a": map[string]any{"type": "no_such"}}}},
+		},
+		"v2 preset order ghost": {
+			"schema_version": float64(2),
+			"presets":        []any{map[string]any{"id": "p1", "blocks": map[string]any{"a": map[string]any{"type": "text"}}, "order": []any{"ghost"}}},
+		},
+		"bad schema_version":      {"schema_version": float64(3)},
+		"v2 empty presets":        {"schema_version": float64(2), "presets": []any{}},
+		"v2 missing presets":      {"schema_version": float64(2)},
+		"v2 preset empty blocks":  {"schema_version": float64(2), "presets": []any{map[string]any{"id": "p1", "order": []any{"a"}, "blocks": map[string]any{}}}},
+		"v2 preset empty order":   {"schema_version": float64(2), "presets": []any{map[string]any{"id": "p1", "order": []any{}, "blocks": map[string]any{"a": map[string]any{"type": "text"}}}}},
+		"v2 top-level blocks":     {"schema_version": float64(2), "blocks": map[string]any{}, "presets": []any{map[string]any{"id": "p1", "order": []any{"a"}, "blocks": map[string]any{"a": map[string]any{"type": "text"}}}}},
+		"v2 top-level gap":        {"schema_version": float64(2), "gap": "blank_line", "presets": []any{map[string]any{"id": "p1", "order": []any{"a"}, "blocks": map[string]any{"a": map[string]any{"type": "text"}}}}},
+		"v2 bad active_preset_id": {"schema_version": float64(2), "active_preset_id": "ghost", "presets": []any{map[string]any{"id": "p1", "order": []any{"a"}, "blocks": map[string]any{"a": map[string]any{"type": "text"}}}}},
+	}
+	for name, c := range cases {
+		if err := validateBottomBlocksModule(c); err == nil {
+			t.Errorf("v2 case %q should be rejected", name)
+		}
+	}
+}
+
+// v2 容错：schema_version 为字符串 "2" 也应被识别并接受（前后端一致）。
+func TestValidateBottomBlocksV2AcceptsStringSchemaVersion(t *testing.T) {
+	mod := map[string]any{
+		"schema_version":   "2",
+		"active_preset_id": "original",
+		"presets": []any{
+			map[string]any{"id": "original", "order": []any{"a"}, "blocks": map[string]any{"a": map[string]any{"type": "text"}}},
+		},
+	}
+	if err := validateBottomBlocksModule(mod); err != nil {
+		t.Fatalf("string schema_version '2' should validate: %v", err)
 	}
 }

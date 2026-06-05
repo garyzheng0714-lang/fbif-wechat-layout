@@ -11,11 +11,13 @@ export const BLOCK_TYPES = Object.freeze({
     channels: Object.freeze(['mp', 'ft']),
     fields: Object.freeze([
       Object.freeze({ key: 'content', label: '文字内容', type: 'longText', default: '', tooltip: '支持换行；每行会作为一行文字输出。' }),
+      Object.freeze({ key: 'html', label: '富文本', type: 'rich_text', default: '', tooltip: '富文本内容（选中片段设样式）；留空则用上面的纯文本字段（迁移期并存，P2）。' }),
       Object.freeze({ key: 'font_size', label: '字号', type: 'number', default: 15, tooltip: '文字字号（纯数字，无需单位）。', min: 10, max: 48 }),
       Object.freeze({ key: 'text_color', label: '字色', type: 'color', default: '#544545', tooltip: '文字颜色。' }),
       Object.freeze({ key: 'background_color', label: '背景色', type: 'color', default: '', tooltip: '可留空；填写后给文字行加背景色。' }),
       Object.freeze({ key: 'italic', label: '斜体', type: 'switch', default: false, tooltip: '是否使用斜体。' }),
       Object.freeze({ key: 'underline', label: '下划线', type: 'switch', default: false, tooltip: '是否显示下划线。' }),
+      Object.freeze({ key: 'bold', label: '加粗', type: 'switch', default: false, tooltip: '整段是否加粗。' }),
       Object.freeze({ key: 'align', label: '对齐', type: 'select', default: 'left', tooltip: '文字对齐方式。', options: Object.freeze([{ value: 'left', label: '左对齐' }, { value: 'center', label: '居中' }, { value: 'right', label: '右对齐' }]) }),
     ]),
   }),
@@ -103,6 +105,16 @@ export const BLOCK_TYPES = Object.freeze({
       Object.freeze({ key: 'image', label: '图片', type: 'image', default: '', tooltip: '从素材库选择图片。' }),
       Object.freeze({ key: 'width', label: '宽度', type: 'number', default: 0, tooltip: '图片宽度（px，0=自适应满宽）。', min: 0, max: 1080 }),
       Object.freeze({ key: 'center', label: '居中', type: 'switch', default: true, tooltip: '是否居中。' }),
+    ]),
+  }),
+  // 间距模块：一段可调高度的留白，精确控制区块之间的间隔（取代自动空行）。公众号/网站共用。
+  spacer: Object.freeze({
+    type: 'spacer',
+    kind: 'spacer',
+    label: '间距',
+    channels: Object.freeze(['mp', 'ft']),
+    fields: Object.freeze([
+      Object.freeze({ key: 'height', label: '高度', type: 'number', default: 16, tooltip: '留白高度（px，纯数字，无需单位）。', min: 0, max: 200 }),
     ]),
   }),
 });

@@ -10,6 +10,7 @@
 //     more-articles.js 复制链路委托填充（红线 #9/#14，不在此重复造卡）。
 
 import { resolveAssetRefs } from '../asset-library.js';
+import { richTextToInline } from '../blocks/rich-text-render.js';
 
 // footer.html 标题/正文统一字体栈（mp-quote 优先 + 微信端字体回退）。&quot; 是 footer 原始转义形态，保留。
 const FONT_FAMILY = 'mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif';
@@ -56,7 +57,7 @@ function titleSpanStyle(color, size) {
 
 function textBlockSpanStyle(f) {
   const bg = String(f.background_color == null ? '' : f.background_color).trim();
-  return `color:${colorToRgb(f.text_color || '#544545')};font-size:${intOr(f.font_size, 15)}px;font-family:${FONT_FAMILY};line-height:1.75;letter-spacing:0.034em;font-style:${f.italic ? 'italic' : 'normal'};font-weight:normal;text-decoration:${f.underline ? 'underline' : 'none'};${bg ? `background-color:${colorToRgb(bg)};` : ''}`;
+  return `color:${colorToRgb(f.text_color || '#544545')};font-size:${intOr(f.font_size, 15)}px;font-family:${FONT_FAMILY};line-height:1.75;letter-spacing:0.034em;font-style:${f.italic ? 'italic' : 'normal'};font-weight:${f.bold ? 'bold' : 'normal'};text-decoration:${f.underline ? 'underline' : 'none'};${bg ? `background-color:${colorToRgb(bg)};` : ''}`;
 }
 
 // 名片/二维码上方说明文字 span 样式（可空，color/size 可配）。
@@ -77,13 +78,57 @@ function centerCss(center) {
 // mpBlockRenderers 返回公众号渠道的「type → 渲染函数」表。
 //   assetLibrary: config.modules.asset_library（解析 {{asset#id}}）
 //   scope: 资产作用域，公众号用账号 id（如 'fbif'）；缺省 'global'
-export function mpBlockRenderers(assetLibrary, scope = 'global') {
+export function mpBlockRenderers(assetLibrary, scope = 'global', opts = {}) {
   const resolve = (lines) => resolveAssetRefs(lines, assetLibrary, scope).join('\n');
+  // P2 富文本：parseDoc 注入（生产=浏览器 DOMParser；测试=linkedom）；mpCh 提供 mp 口径样式。
+  const parseDoc = opts.parseDoc || ((html) => {
+    if (typeof DOMParser === 'undefined') return null;
+    const d = new DOMParser().parseFromString(html, 'text/html');
+    return d.body || d; // 内容容器（childNodes 语义对齐测试侧 linkedom document）
+  });
+  const fsOk = (v) => {
+    const m = /^(\d+(?:\.\d+)?)(px|em|rem|%|pt)$/.exec(String(v || ''));
+    if (!m) return false;
+    if (m[2] === 'px') { const n = Number(m[1]); return n >= 6 && n <= 100; } // px 范围防滥用（codex P2 review #3）
+    return true;
+  };
+  const mpSpan = (s) => {
+    const parts = [
+      `color:${colorToRgb(s.color || '#544545')}`,
+      `font-size:${fsOk(s['font-size']) ? s['font-size'] : '15px'}`,
+      `font-family:${FONT_FAMILY}`,
+      'line-height:1.75', 'letter-spacing:0.034em',
+      `font-style:${s['font-style'] === 'italic' ? 'italic' : 'normal'}`,
+      `font-weight:${s['font-weight'] === 'bold' ? 'bold' : 'normal'}`,
+      `text-decoration:${s['text-decoration'] === 'underline' ? 'underline' : 'none'}`,
+    ];
+    if (s['background-color']) parts.push(`background-color:${colorToRgb(s['background-color'])}`);
+    return parts.join(';') + ';';
+  };
+  const mpCh = {
+    span: (s, inner) => `<span style="${mpSpan(s)}">${inner}</span>`,
+    link: (href, s, inner) => `<a href="${esc(href)}" style="${mpSpan(s)}">${inner}</a>`,
+    pWrap: (align, inner) => `<p style="margin:0 8px;text-align:${align};padding:0;">${inner}</p>`,
+  };
   return {
     __separator: () => '<p style="margin:0 8px;padding:0;line-height:1.75;font-size:15px;"><br></p>',
 
-    // 文字模块：基础样式字段 → 确定性 inline HTML，避免引入富文本库污染微信复制。
+    // 间距模块（v2 原子）：定高留白段，精确控制块间距（取代 v1 的自动空行）。
+    // height<=0 不输出（=运营删掉该间距）。line-height:0;font-size:0 让段高精确等于 height。
+    spacer: (f) => {
+      let h = Math.round(Number(f.height));
+      if (!Number.isFinite(h) || h <= 0) return '';
+      if (h > 200) h = 200; // 与 catalog schema(0..200) 一致，防脏本地数据渲出超大留白（codex review）
+      return `<section style="height:${h}px;line-height:0;font-size:0;">&nbsp;</section>`;
+    },
+
+    // 文字模块：富文本 html 非空 → 渲染期转 mp inline-style（P2）；否则散字段回落（迁移期并存）。
     text: (f) => {
+      const richHtml = String(f.html == null ? '' : f.html).trim();
+      if (richHtml && parseDoc) {
+        const out = richTextToInline(richHtml, parseDoc, mpCh);
+        if (out) return out;
+      }
       const lines = String(f.content == null ? '' : f.content).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
       if (!lines.length) return '';
       const align = alignOr(f.align);

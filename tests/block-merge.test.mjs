@@ -134,6 +134,91 @@ test('stripReadonlyOverride：剥离结构性(enabled/order)与只读块的存�
   assert.deepEqual(stripReadonlyOverride(stale, new Set()), {});          // 全只读 → 空（不落盘）
 });
 
+// ── schema_version:2 双预设兼容契约（codex 评审 P1 第一步：锁住 v1/v2 并存） ──
+
+function v2Module() {
+  return {
+    schema_version: 2,
+    enabled: true,
+    active_preset_id: 'original',
+    presets: [
+      {
+        id: 'original', name: '原创',
+        order: ['note', 'sp', 'card'],
+        blocks: {
+          note: { type: 'text', enabled: true, fields: { content: '原创声明' } },
+          sp: { type: 'spacer', enabled: true, fields: { height: 16 } },
+          card: { type: 'image', display_name: '名片', enabled: true, fields: { image: '{{asset#x}}' } },
+        },
+      },
+      {
+        id: 'repost', name: '转载',
+        order: ['note', 'card'],
+        blocks: {
+          note: { type: 'text', enabled: true, fields: { content: '转载声明' } },
+          card: { type: 'image', display_name: '名片', enabled: true, fields: { image: '{{asset#x}}' } },
+        },
+      },
+    ],
+    // 顶层 order/blocks 在 v2 应被忽略（故意放干扰数据，验证不泄漏）
+    order: ['ignored'],
+    blocks: { ignored: { type: 'text', enabled: true, fields: {} } },
+  };
+}
+
+test('v2：按 presetId 选 active 预设的 order/blocks（original），gap 废弃为 none', () => {
+  const r = resolveBlocks(v2Module(), null, { presetId: 'original' });
+  assert.deepEqual(r.blocks.map(b => b.id), ['note', 'sp', 'card']);
+  assert.equal(r.blocks.find(b => b.id === 'note').fields.content.value, '原创声明');
+  assert.equal(r.gap, 'none'); // v2 间距走 spacer，gap 不再用
+});
+
+test('v2：presetId=repost 读转载预设（不同 order/内容）', () => {
+  const r = resolveBlocks(v2Module(), null, { presetId: 'repost' });
+  assert.deepEqual(r.blocks.map(b => b.id), ['note', 'card']);
+  assert.equal(r.blocks.find(b => b.id === 'note').fields.content.value, '转载声明');
+});
+
+test('v2：缺省 presetId 用 active_preset_id', () => {
+  const r = resolveBlocks(v2Module(), null);
+  assert.deepEqual(r.blocks.map(b => b.id), ['note', 'sp', 'card']); // active=original
+});
+
+test('v2：未知 presetId 回落第一个预设，不抛错', () => {
+  const r = resolveBlocks(v2Module(), null, { presetId: 'nope' });
+  assert.deepEqual(r.blocks.map(b => b.id), ['note', 'sp', 'card']);
+});
+
+test('v2：顶层 order/blocks 被忽略（只认 presets[]）', () => {
+  const r = resolveBlocks(v2Module(), null, { presetId: 'original' });
+  assert.ok(!r.blocks.find(b => b.id === 'ignored'));
+});
+
+test('v2：单篇 fields 覆盖仍作用于 active 预设的块', () => {
+  const r = resolveBlocks(v2Module(), { overrides: { note: { fields: { content: '改了' } } } }, { presetId: 'original' });
+  assert.equal(r.blocks.find(b => b.id === 'note').fields.content.value, '改了');
+  assert.equal(r.blocks.find(b => b.id === 'note').fields.content.overridden, true);
+});
+
+test('v2：schema_version 为字符串 "2" 也识别（容错，前后端一致）', () => {
+  const mod = { ...v2Module(), schema_version: '2' };
+  const r = resolveBlocks(mod, null, { presetId: 'repost' });
+  assert.deepEqual(r.blocks.map(b => b.id), ['note', 'card']);
+});
+
+test('v2：缺 active_preset_id 且无 opts 时安全回落首个预设（渲染鲁棒不崩）', () => {
+  const mod = { ...v2Module() };
+  delete mod.active_preset_id;
+  const r = resolveBlocks(mod, null);
+  assert.deepEqual(r.blocks.map(b => b.id), ['note', 'sp', 'card']); // 回落首个=original
+});
+
+test('v1 不受影响：无 schema_version 仍读顶层 order/blocks/gap（向后兼容）', () => {
+  const r = resolveBlocks(baseModule(), null);
+  assert.deepEqual(r.blocks.map(b => b.id), ['intro', 'card', 'more']);
+  assert.equal(r.gap, 'blank_line');
+});
+
 test('hasAnyOverride 正确判定是否存在单篇改动', () => {
   assert.equal(hasAnyOverride(null), false);
   assert.equal(hasAnyOverride({}), false);

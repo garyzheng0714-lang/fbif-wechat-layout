@@ -18,8 +18,8 @@ func TestBlockTypeCatalogIntegrity(t *testing.T) {
 		if len(bt.Channels) == 0 {
 			t.Errorf("%s: must declare at least one channel", bt.Type)
 		}
-		if bt.Kind != "text" && bt.Kind != "image" && bt.Kind != "recommendations" {
-			t.Errorf("%s: invalid kind %q (only text|image|recommendations)", bt.Type, bt.Kind)
+		if bt.Kind != "text" && bt.Kind != "image" && bt.Kind != "recommendations" && bt.Kind != "spacer" {
+			t.Errorf("%s: invalid kind %q (only text|image|recommendations|spacer)", bt.Type, bt.Kind)
 		}
 		for _, ch := range bt.Channels {
 			if ch != "mp" && ch != "ft" {

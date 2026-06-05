@@ -459,7 +459,7 @@ export default {
   // 整段底部由统一区块模型渲染（替代旧 buildSeriesFooterElems 的 body-concat）。
   // engine.loadBaseFooterHtml 接管时调用；bottom_blocks 缺失/禁用返回 null → fallback footerUrl
   // （系列 footerUrl='' → 空）。红线#19：seriesBlockRenderers 只在系列侧定义，engine 经此回调拿结果。
-  renderBottomFooter() {
+  renderBottomFooter(opts) {
     const ac = (typeof window !== 'undefined' && window._activeConfig) || {};
     let cfg = (ac.preset && (ac.preset.raw_config || ac.preset.config)) || ac.config || {};
     if (cfg && cfg.config && cfg.config.modules) cfg = cfg.config;
@@ -469,6 +469,9 @@ export default {
     const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'foodtalks-series';
     const ov = (typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined;
     const sp = styleProps((ac.config && typeof ac.config === 'object') ? ac.config : {});
-    return renderBottomBlocksHtml(bb, ov, seriesBlockRenderers(sp, mods.asset_library, scope));
+    // v2 双预设：来源决定原创/转载（v1 模块忽略 presetId，行为不变）。
+    const presetId = (opts && opts.isRepost) ? 'repost' : 'original';
+    const html = renderBottomBlocksHtml(bb, ov, seriesBlockRenderers(sp, mods.asset_library, scope), { presetId });
+    return { html, isV2: Number(bb.schema_version) >= 2 }; // isV2：engine 据此对 v2 跳过 applyRepostTransform（codex #4）
   },
 };

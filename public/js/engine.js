@@ -169,16 +169,24 @@ function normalizeRich(html) {
   return normalizeWechatRichHtml(html);
 }
 
-async function loadBaseFooterHtml() {
+// loadBaseFooterHtml 返回 { html, isV2 }：isV2=true 表示 v2 双预设底部（已按 presetId 分原创/转载）。
+// 调用方把 isV2 作为局部值传给 buildFooterWithMoreArticles，避免模块级单例在 await 间被并发重入覆盖
+// （codex review #4 竞态修复——多条 load→build 链交错时单例会互相覆盖 isV2）。
+async function loadBaseFooterHtml(opts = {}) {
   const custom = localStorage.getItem('custom_footer');
-  if (custom) return custom;
+  if (custom) return { html: custom, isV2: false };
   // 公众号 bottom_blocks 启用时，整段底部由区块渲染（替代 footer.html）。
-  // 返回 null/'' → 模块未接管，fallback 到 footerUrl(footer.html)。
+  // html 为 null/'' → 模块未接管，fallback 到 footerUrl(footer.html)。
+  // isRepost 显式传入（重渲染用 cached.isRepost，避免读全局 _isRepost 漂移；codex review #5）。
+  const isRepost = opts.isRepost != null ? opts.isRepost : _isRepost;
   if (_activeTemplate && typeof _activeTemplate.renderBottomFooter === 'function') {
-    const html = _activeTemplate.renderBottomFooter();
-    if (html != null && html !== '') return html;
+    const res = _activeTemplate.renderBottomFooter({ isRepost });
+    const html = res && typeof res === 'object' ? res.html : res; // 模板返回 {html,isV2} 或（自定义）字符串
+    if (html != null && html !== '') {
+      return { html, isV2: !!(res && typeof res === 'object' && res.isV2) };
+    }
   }
-  return await stockFooterReady();
+  return { html: await stockFooterReady(), isV2: false };
 }
 
 // Module-level flag: true when the current article was fetched from a URL
@@ -229,7 +237,7 @@ function footerBehaviorParam(key, fallback) {
 // in footer.html. If the user customized the footer and removed the sentinels
 // or the bullet text, transform no-ops (logged) — custom footers are the
 // user's responsibility.
-function applyRepostTransform(html) {
+function applyRepostTransform(html, isRepost = _isRepost) {
   if (typeof html !== 'string' || !html) return html;
   let out = html;
   let changed = false;
@@ -240,12 +248,12 @@ function applyRepostTransform(html) {
   // footer.html 内嵌存量原创声明（红线下放 behavior.params.footer_stock_original_text，
   // 默认即 footer.html 中的 FBIF 文案；按此字面量在静态页脚里定位替换）。
   const stockOriginal = footerBehaviorParam('footer_stock_original_text', '* 本文为FBIF原创，欢迎转发朋友圈；');
-  const nextNotice = _isRepost ? after : before;
+  const nextNotice = isRepost ? after : before;
   if (out.includes(stockOriginal)) {
     out = out.replace(stockOriginal, esc(nextNotice));
     changed = true;
   }
-  if (!_isRepost) return out;
+  if (!isRepost) return out;
   if (out.includes(before)) {
     out = out.replace(before, esc(after));
     changed = true;
@@ -267,8 +275,11 @@ function applyRepostTransform(html) {
 // Build a footer HTML that has the "更多文章" section replaced with the user's
 // current card config. Each customized card is composited to a data URL for
 // instant preview (no upload). Copy-time will re-run with uploaded OSS URLs.
-async function buildFooterWithMoreArticles(baseFooterHtml) {
-  const transformed = normalizeWechatRichHtml(applyRepostTransform(baseFooterHtml));
+async function buildFooterWithMoreArticles(baseFooterHtml, opts = {}) {
+  const isRepost = opts.isRepost != null ? opts.isRepost : _isRepost;
+  // v2 双预设已按 presetId 分原创/转载，跳过旧锚点替换（codex review #4，互斥）。isV2 由调用方局部传入。
+  const base = opts.isV2 ? baseFooterHtml : applyRepostTransform(baseFooterHtml, isRepost);
+  const transformed = normalizeWechatRichHtml(base);
   const cards = loadMoreArticlesCards();
   const cardsForPreview = await Promise.all(
     cards.map(async c => ({ ...c, final_url: await compositePreviewDataUrl(c) }))
@@ -466,8 +477,8 @@ export function initApp(initialTemplate) {
     // slots — cards are a per-article curation, filled in manually each time.
     saveMoreArticlesCards(makeFreshUploadCards());
     if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-    const baseFooterHtml = await loadBaseFooterHtml();
-    const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
+    const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml();
+    const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isV2 });
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
     const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
       ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -529,8 +540,8 @@ export function initApp(initialTemplate) {
       const articleHtml = result.lines.join('\n');
       saveMoreArticlesCards(makeFreshUploadCards());
       if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-      const baseFooterHtml = await loadBaseFooterHtml();
-      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
+      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml();
+      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isV2 });
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -573,8 +584,8 @@ export function initApp(initialTemplate) {
         return;
       }
       const articleHtml = result.lines.join('\n');
-      const baseFooterHtml = await loadBaseFooterHtml();
-      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
+      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({ isRepost });
+      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -648,8 +659,8 @@ export function initApp(initialTemplate) {
       // sidebar shows empty inputs and footer renders gray placeholders.
       saveMoreArticlesCards(makeFreshUploadCards());
       if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-      const baseFooterHtml = await loadBaseFooterHtml();
-      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml);
+      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml();
+      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isV2 });
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -724,7 +735,9 @@ export function initApp(initialTemplate) {
     _moreArticlesCopyJob = ensureCompositeReady(cards).then(async uploaded => {
       if (seq !== _moreArticlesCopySeq) return false;
       saveMoreArticlesCards(uploaded);
-      const baseFooter = normalizeWechatRichHtml(applyRepostTransform(await loadBaseFooterHtml()));
+      const rp = _lastRenderInput && _lastRenderInput.isRepost != null ? _lastRenderInput.isRepost : _isRepost;
+      const { html: base0, isV2 } = await loadBaseFooterHtml({ isRepost: rp });
+      const baseFooter = normalizeWechatRichHtml(isV2 ? base0 : applyRepostTransform(base0, rp));
       if (seq !== _moreArticlesCopySeq) return false;
       _footerCopy = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, uploaded));
       logConv('info', '更多文章图片已后台准备完成', { reason });
@@ -806,8 +819,9 @@ export function initApp(initialTemplate) {
       if (cardsOverride) saveMoreArticlesCards(cardsOverride);
       _moreArticlesCopySeq++;
       _moreArticlesCopyJob = null;
-      const base = await loadBaseFooterHtml();
-      const merged = await buildFooterWithMoreArticles(base);
+      const rp = _lastRenderInput && _lastRenderInput.isRepost != null ? _lastRenderInput.isRepost : _isRepost;
+      const { html: base, isV2 } = await loadBaseFooterHtml({ isRepost: rp });
+      const merged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2 });
       _footerHtml = merged;
       _footerCopy = merged;
       const enabled = document.getElementById('footerEnabled').checked;

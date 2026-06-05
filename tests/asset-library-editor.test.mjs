@@ -7,6 +7,7 @@ const adminSrc = await readFile(new URL('../public/js/admin-panel.js', import.me
 const blockEditorSrc = await readFile(new URL('../public/js/admin/block-editor.js', import.meta.url), 'utf8');
 const blockPanelSrc = await readFile(new URL('../public/js/blocks/block-panel.js', import.meta.url), 'utf8');
 const footerEditorSrc = await readFile(new URL('../public/js/footer-library-rule-editor.js', import.meta.url), 'utf8');
+const blockDataSrc = await readFile(new URL('../public/js/admin-block-data.js', import.meta.url), 'utf8');
 const uploaderSrc = await readFile(new URL('../public/js/uploader.js', import.meta.url), 'utf8');
 
 test('素材库编辑器导出并复用上传入口', () => {
@@ -33,10 +34,10 @@ test('素材库编辑器有 scope 和 usage 控件，并做安全 URL 校验', (
 test('规则后台有素材库页签，并保存 workingAssets 到 asset_library', () => {
   assert.match(adminSrc, /createAssetLibraryEditor/);
   assert.match(adminSrc, /\['bottom', '底部'\]/);
-  assert.match(adminSrc, /data-role="asset-library-editor"/);
-  assert.match(adminSrc, /admin-bottom-layout/);
+  assert.match(adminSrc, /\['assets', '素材库'\]/);              // 素材库独立成 tab（用户裁定 2026-06-05，spec §9）
+  assert.match(blockDataSrc, /data-role="asset-library-editor"/); // 渲染抽到 admin-block-data helper（腾 900 行）
   assert.match(adminSrc, /compact:\s*true/);
-  assert.match(adminSrc, /data-role="block-editor"/);
+  assert.match(blockDataSrc, /data-role="block-editor"/);
   assert.match(adminSrc, /workingAssets/);
   assert.match(adminSrc, /configDoc\.modules\.asset_library/);
   assert.match(adminSrc, /assetLibraryFromPreset\(selected\)/);

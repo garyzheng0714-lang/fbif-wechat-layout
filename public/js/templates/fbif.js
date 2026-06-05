@@ -572,12 +572,15 @@ export default {
   // 整段底部由统一区块模型渲染（替代 footer.html）。engine.loadBaseFooterHtml 接管时调用：
   // 模块缺失/禁用返回 null → engine fallback 到 footerUrl(footer.html)。
   // 红线 #19：mpBlockRenderers 只在公众号侧 import；engine 通过此回调拿结果、不直接依赖渲染器。
-  renderBottomFooter() {
+  renderBottomFooter(opts) {
     const mods = rawActiveModules();
     const bb = mods.bottom_blocks;
     if (!bb || typeof bb !== 'object' || bb.enabled === false) return null;
     const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'fbif';
     const ov = (typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined;
-    return renderBottomBlocksHtml(bb, ov, mpBlockRenderers(mods.asset_library, scope));
+    // v2 双预设：来源决定原创/转载（v1 模块忽略 presetId，行为不变）。
+    const presetId = (opts && opts.isRepost) ? 'repost' : 'original';
+    const html = renderBottomBlocksHtml(bb, ov, mpBlockRenderers(mods.asset_library, scope), { presetId });
+    return { html, isV2: Number(bb.schema_version) >= 2 }; // isV2：engine 据此对 v2 跳过 applyRepostTransform（codex #4）
   },
 };

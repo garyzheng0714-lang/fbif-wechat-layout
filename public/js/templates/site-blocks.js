@@ -9,6 +9,7 @@
 // 供网站后续按语义化布局使用；图字段经选图器写 {{asset#id}}，由 resolveAssetRefs 解析。
 
 import { resolveAssetRefs } from '../asset-library.js';
+import { richTextToInline } from '../blocks/rich-text-render.js';
 
 function asLines(v) {
   if (Array.isArray(v)) return v;
@@ -44,13 +45,52 @@ function siteText(text, size, color) {
 // siteBlockRenderers 返回网站渠道的「type → 渲染函数」表。
 //   assetLibrary: config.modules.asset_library（用于解析 {{asset#id}} 占位符，兼容旧 {{asset:usage}}）
 //   scope: 资产作用域，网站默认 'ft-default'
-export function siteBlockRenderers(assetLibrary, scope = 'ft-default') {
+export function siteBlockRenderers(assetLibrary, scope = 'ft-default', opts = {}) {
   const resolve = (lines) => resolveAssetRefs(lines, assetLibrary, scope).join('\n');
+  // P2 富文本：parseDoc 注入；siteCh 网站口径（hex 直出、无 mp-quote 字体栈）。
+  const parseDoc = opts.parseDoc || ((html) => {
+    if (typeof DOMParser === 'undefined') return null;
+    const d = new DOMParser().parseFromString(html, 'text/html');
+    return d.body || d; // 内容容器（childNodes 语义对齐测试侧 linkedom document）
+  });
+  const fsOk = (v) => {
+    const m = /^(\d+(?:\.\d+)?)(px|em|rem|%|pt)$/.exec(String(v || ''));
+    if (!m) return false;
+    if (m[2] === 'px') { const n = Number(m[1]); return n >= 6 && n <= 100; } // px 范围防滥用（codex P2 review #3）
+    return true;
+  };
+  const siteSpan = (s) => {
+    const parts = [`color: ${esc(s.color || '#544545')}`];
+    if (fsOk(s['font-size'])) parts.push(`font-size: ${s['font-size']}`);
+    if (s['font-style'] === 'italic') parts.push('font-style: italic');
+    if (s['font-weight'] === 'bold') parts.push('font-weight: bold');
+    if (s['text-decoration'] === 'underline') parts.push('text-decoration: underline');
+    if (s['background-color']) parts.push(`background-color: ${esc(s['background-color'])}`);
+    return parts.join('; ');
+  };
+  const siteCh = {
+    span: (s, inner) => `<span style="${siteSpan(s)};">${inner}</span>`,
+    link: (href, s, inner) => `<a href="${esc(href)}" style="${siteSpan(s)};">${inner}</a>`,
+    pWrap: (align, inner) => `<p style="text-align: ${align};">${inner}</p>`,
+  };
   return {
     __separator: () => '<p><br /></p>',
 
-    // 文字模块：网站与公众号共用语义字段，但输出网站口径 HTML。
+    // 间距模块（v2 原子）：定高留白段。height<=0 不输出（=运营删掉该间距）。
+    spacer: (f) => {
+      let h = Math.round(Number(f.height));
+      if (!Number.isFinite(h) || h <= 0) return '';
+      if (h > 200) h = 200; // 与 catalog schema(0..200) 一致，防脏本地数据渲出超大留白（codex review）
+      return `<section style="height:${h}px;line-height:0;font-size:0;">&nbsp;</section>`;
+    },
+
+    // 文字模块：富文本 html 非空 → 渲染期转网站口径 inline-style（P2）；否则散字段回落。
     text: (f) => {
+      const richHtml = String(f.html == null ? '' : f.html).trim();
+      if (richHtml && parseDoc) {
+        const out = richTextToInline(richHtml, parseDoc, siteCh);
+        if (out) return out;
+      }
       const lines = String(f.content == null ? '' : f.content).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
       if (!lines.length) return '';
       const bg = String(f.background_color == null ? '' : f.background_color).trim();
@@ -59,6 +99,7 @@ export function siteBlockRenderers(assetLibrary, scope = 'ft-default') {
         `font-size: ${intOr(f.font_size, 15)}px`,
         `color: ${esc(f.text_color || '#544545')}`,
         f.italic ? 'font-style: italic' : '',
+        f.bold ? 'font-weight: bold' : '',
         f.underline ? 'text-decoration: underline' : '',
         bg ? `background-color: ${esc(bg)}` : '',
       ].filter(Boolean).join('; ');

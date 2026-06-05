@@ -51,9 +51,10 @@ func defaultRuleConfig() map[string]any {
 		"banner_title_max_lines":   "2",
 		"modules": map[string]any{
 			"asset_library": defaultAssetLibraryModule(),
-			// 公众号(FBIF)底部区块：由 footer.html 4 块逆向、enabled=true，经 template.renderBottomFooter
-			// 接管底部渲染（见 defaultMpBottomBlocksModule）。复用此基线的账号若不要 FBIF 底部需显式覆盖。
-			"bottom_blocks": defaultMpBottomBlocksModule(),
+			// 公众号(FBIF)底部区块：4 原子 V2 双预设（原创/转载），enabled=true，经 template.renderBottomFooter
+			// 接管底部渲染。本地浏览器验证 V2 视觉 1:1 == footer.html（v6→v7 切生产）。复用此基线的账号若不要
+			// FBIF 底部需显式覆盖。
+			"bottom_blocks": defaultMpBottomBlocksModuleV2(),
 		},
 	}
 }
@@ -122,7 +123,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v4→v5（2026-06-05）：bottom_blocks 区块实例新增 display_name，修正系列尾部区块在后台/前台
 // 退到“什么是系列Eileen名片”这类素材文件名的问题。
 // v5→v6（2026-06-05）：bottom_blocks 模块新增 gap=blank_line，区块类型增加 kind/text 文字模块。
-const currentBuiltinRuleVersion = 6
+// v6→v7（2026-06-06）：公众号(FBIF)/系列底部默认切 4 原子 V2 双预设（原创/转载），替换旧语义类型
+// declaration/name_card/titled_media。本地浏览器验证 V2 视觉 1:1 == footer.html；微信复制最终由公众号后台确认。
+const currentBuiltinRuleVersion = 7
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -373,7 +376,7 @@ func defaultFoodTalksSeriesRuleConfig() map[string]any {
 			"ft_series_materials": defaultFtSeriesMaterialsModule(),
 			// 显式覆盖：系列与 FBIF 共用 bottom_blocks 结构但默认不同（名片/群二维码满宽图 + 可显隐更多文章）。
 			// 不覆盖则经 mergeRuleDefaults 继承 FBIF 基线 → renderBottomFooter 会错渲 FBIF 提示/波波/1000。
-			"bottom_blocks": defaultSeriesBottomBlocksModule(),
+			"bottom_blocks": defaultSeriesBottomBlocksModuleV2(),
 		},
 	}
 }

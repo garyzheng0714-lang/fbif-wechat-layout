@@ -177,6 +177,95 @@ func defaultMpBottomBlocksModule() map[string]any {
 	}
 }
 
+// defaultMpBottomBlocksModuleV2 是 FBIF 公众号底部的 v2 原子双预设版本（原创/转载各一套）：
+// 把 v1 的 declaration/name_card/titled_media 重写成「文字(text)+图片(image)+间距(spacer)+推荐(more_articles)」
+// 四原子，视觉复刻 footer.html。原创/转载差异仅在提示正文(tip_body)文案，由 isRepost→presetId 自动选。
+// 间距复刻 footer.html：提示标题↓8、提示正文↓16(名片图上)、名片图↓20(1000标题上)、1000标题↓20(图上)；
+// more_articles 标题间距内化进其渲染器，故 1000图与 more_articles 之间不放独立 spacer（spec §5）。
+// 注意：此为 v2 样板，切换生产（BuiltinVersion）前须在公众号后台复制确认视觉 1:1（CLAUDE.md UI 协议）。
+func defaultMpBottomBlocksModuleV2() map[string]any {
+	textBlock := func(name, content string, bold bool, size int, color, align string) map[string]any {
+		return map[string]any{
+			"type": "text", "display_name": name, "enabled": true,
+			"fields": map[string]any{"content": content, "bold": bold, "font_size": size, "text_color": color, "align": align},
+		}
+	}
+	spacer := func(h int) map[string]any {
+		return map[string]any{"type": "spacer", "display_name": "间距", "enabled": true, "fields": map[string]any{"height": h}}
+	}
+	imageBlock := func(name, asset string, width int) map[string]any {
+		return map[string]any{"type": "image", "display_name": name, "enabled": true, "fields": map[string]any{"image": asset, "width": width}}
+	}
+	// 原创/转载共用块（除 tip_body 文案外完全一致）。图宽 661 对齐 footer.html 的满宽图（codex review #3）。
+	sharedBlocks := func(tipBody map[string]any) map[string]any {
+		return map[string]any{
+			"tip_title":     textBlock("提示标题", "提示：", true, 17, "#544545", "left"),
+			"sp1":           spacer(8),
+			"tip_body":      tipBody,
+			"sp2":           spacer(16),
+			"byline":        imageBlock("Bobo 名片", "{{asset#fbif_bobo_card}}", 661),
+			"more_articles": map[string]any{"type": "more_articles", "display_name": "更多文章", "enabled": true, "fields": map[string]any{"title": "/ 更多文章 /"}},
+			"sp_ma":         spacer(20),
+			"promo_title":   textBlock("1000 案例标题", "/ 1000个食品创新案例 /", true, 17, "#544545", "center"),
+			"sp4":           spacer(20),
+			"promo_img":     imageBlock("1000 案例图", "{{asset#fbif_promo_1000}}", 661),
+		}
+	}
+	// 顺序对齐 footer.html：提示 → 名片 → 更多文章 → 1000标题 → 1000图（codex review #1；
+	// more_articles 标题间距内化，byline 后不放 spacer）。
+	order := []any{"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles", "sp_ma", "promo_title", "sp4", "promo_img"}
+	// 原创三条（含「转载请在后台回复」，codex review #2），转载两条。
+	originalBody := textBlock("提示正文", "* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）", false, 15, "#888888", "left")
+	repostBody := textBlock("提示正文", "* 本文为转载，不代表FBIF立场。\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）", false, 15, "#888888", "left")
+	return map[string]any{
+		"schema_version":   2,
+		"enabled":          true,
+		"active_preset_id": "original",
+		"presets": []any{
+			map[string]any{"id": "original", "name": "原创", "order": order, "blocks": sharedBlocks(originalBody)},
+			map[string]any{"id": "repost", "name": "转载", "order": order, "blocks": sharedBlocks(repostBody)},
+		},
+	}
+}
+
+// defaultSeriesBottomBlocksModuleV2 是 FoodTalks「什么是」系列底部的 v2 原子版本：系列底部全是满宽
+// 图片块（作者名片/BD名片/群二维码）+ 可显隐的更多文章，无原创/转载声明差异，故双预设同内容（保持
+// 4 原子模型一致、presetId 映射直接命中）。作者名片 frontend_editable（红线#14 例外：系列作者随篇不同，
+// 运营单篇换图）。间距 spacer 高度为占位值，切生产前须公众号后台复制确认（CLAUDE.md UI 协议）。
+func defaultSeriesBottomBlocksModuleV2() map[string]any {
+	spacer := func(h int) map[string]any {
+		return map[string]any{"type": "spacer", "display_name": "间距", "enabled": true, "fields": map[string]any{"height": h}}
+	}
+	imageBlock := func(name, asset string, frontendEditable bool) map[string]any {
+		b := map[string]any{"type": "image", "display_name": name, "enabled": true, "fields": map[string]any{"image": asset}}
+		if frontendEditable {
+			b["frontend_editable"] = true
+		}
+		return b
+	}
+	blocks := func() map[string]any {
+		return map[string]any{
+			"author_card":   imageBlock("作者名片", "", true), // 作者默认空，运营单篇从素材库点选（frontend_editable）
+			"sp1":           spacer(16),
+			"bd_card":       imageBlock("BD 名片", "{{asset#ft_series_card_eileen}}", false),
+			"sp2":           spacer(16),
+			"group_qr":      imageBlock("包装群二维码", "{{asset#ft_series_group_packaging}}", false),
+			"sp3":           spacer(16),
+			"more_articles": map[string]any{"type": "more_articles", "display_name": "推荐文章", "enabled": false, "fields": map[string]any{"title": "/ 更多文章 /"}},
+		}
+	}
+	order := []any{"author_card", "sp1", "bd_card", "sp2", "group_qr", "sp3", "more_articles"}
+	return map[string]any{
+		"schema_version":   2,
+		"enabled":          true,
+		"active_preset_id": "original",
+		"presets": []any{
+			map[string]any{"id": "original", "name": "原创", "order": order, "blocks": blocks()},
+			map[string]any{"id": "repost", "name": "转载", "order": order, "blocks": blocks()},
+		},
+	}
+}
+
 // defaultSeriesBottomBlocksModule 是 FoodTalks「什么是」系列底部默认布局：把原 buildSeriesFooterElems
 // 的「作者名片 → BD 名片 → 群二维码」3 张满宽 banner 表达成 image 区块（引用素材库 {{asset#id}}），
 // 外加一个默认隐藏、可显隐的「更多文章」区块——让系列与 FBIF 共用同一 bottom_blocks 结构，
@@ -275,6 +364,13 @@ func validateBottomBlocksField(blockID string, bt blockType, key string, value a
 		if len([]rune(fmt.Sprint(value))) > 5000 {
 			return fmt.Errorf("bottom_blocks block %q field %q too long", blockID, key)
 		}
+	case "rich_text":
+		if len([]rune(fmt.Sprint(value))) > 20000 {
+			return fmt.Errorf("bottom_blocks block %q field %q too long", blockID, key)
+		}
+		if err := validateRichTextHTML(fmt.Sprint(value)); err != nil {
+			return fmt.Errorf("bottom_blocks block %q field %q: %w", blockID, key, err)
+		}
 	case "html_lines":
 		lines, ok := value.([]any)
 		if !ok {
@@ -350,16 +446,79 @@ func validateBottomBlocksBlock(id string, raw any) error {
 	return nil
 }
 
+// validateBlocksAndOrderMaps 校验一组 blocks(map) + order(array)——顶层(v1)与 preset 内(v2)共用。
+// 块级校验复用 validateBottomBlocksBlock；order 引用必须指向 blocks 内存在且不重复的 id。
+func validateBlocksAndOrderMaps(blocksRaw, orderRaw any) error {
+	blocks := map[string]any{}
+	if blocksRaw != nil {
+		b, ok := blocksRaw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("bottom_blocks blocks must be an object")
+		}
+		blocks = b
+		if len(blocks) > 100 {
+			return fmt.Errorf("bottom_blocks has too many blocks")
+		}
+		for id, bl := range blocks {
+			if err := validateBottomBlocksBlock(id, bl); err != nil {
+				return err
+			}
+		}
+	}
+	if orderRaw != nil {
+		order, ok := orderRaw.([]any)
+		if !ok {
+			return fmt.Errorf("bottom_blocks order must be an array")
+		}
+		if len(order) > 100 {
+			return fmt.Errorf("bottom_blocks order has too many entries")
+		}
+		seen := map[string]bool{}
+		for _, raw := range order {
+			id := strings.TrimSpace(fmt.Sprint(raw))
+			if _, ok := blocks[id]; !ok {
+				return fmt.Errorf("bottom_blocks order references unknown block: %s", id)
+			}
+			if seen[id] {
+				return fmt.Errorf("bottom_blocks order has duplicate block: %s", id)
+			}
+			seen[id] = true
+		}
+	}
+	return nil
+}
+
 // validateBottomBlocksModule 校验区块模块结构（config.modules.bottom_blocks）。
 func validateBottomBlocksModule(raw any) error {
 	m, ok := raw.(map[string]any)
 	if !ok {
 		return fmt.Errorf("bottom_blocks module must be an object")
 	}
-	allowed := map[string]bool{"enabled": true, "gap": true, "order": true, "blocks": true, "presets": true, "schema_version": true}
+	allowed := map[string]bool{"enabled": true, "gap": true, "order": true, "blocks": true, "presets": true, "schema_version": true, "active_preset_id": true}
 	for k := range m {
 		if !allowed[k] {
 			return fmt.Errorf("unknown bottom_blocks field: %s", k)
+		}
+	}
+	// schema_version：缺省 1（顶层 order/blocks，gap 控空行）；2=双预设（presets[] 各带 order/blocks，间距走 spacer）。
+	schemaVersion := 1
+	if v, ok := m["schema_version"]; ok {
+		n := ruleBehaviorNumber(v)
+		if n != 1 && n != 2 {
+			return fmt.Errorf("bottom_blocks schema_version must be 1 or 2")
+		}
+		schemaVersion = int(n)
+	}
+	if schemaVersion >= 2 {
+		// v2：顶层 blocks/order/gap 无意义（数据全在 presets[] 内），存在即拒——强制干净，迁移负责清理顶层。
+		for _, k := range []string{"blocks", "order", "gap"} {
+			if _, ok := m[k]; ok {
+				return fmt.Errorf("bottom_blocks schema_version 2 must not carry top-level %q (use presets[])", k)
+			}
+		}
+		// presets 必须非空（否则前端 activeLayer 落空、底部静默消失）。
+		if ps, _ := m["presets"].([]any); len(ps) == 0 {
+			return fmt.Errorf("bottom_blocks schema_version 2 requires non-empty presets")
 		}
 	}
 	if v, ok := m["enabled"]; ok {
@@ -419,29 +578,61 @@ func validateBottomBlocksModule(raw any) error {
 		if len(presets) > 50 {
 			return fmt.Errorf("bottom_blocks has too many presets")
 		}
+		presetIDs := map[string]bool{}
 		for i, rp := range presets {
 			p, ok := rp.(map[string]any)
 			if !ok {
 				return fmt.Errorf("bottom_blocks presets[%d] must be an object", i)
 			}
-			for k := range p {
-				if k != "id" && k != "name" && k != "enabled" {
-					return fmt.Errorf("bottom_blocks presets[%d] has unknown field: %s", i, k)
-				}
-			}
-			if id := strings.TrimSpace(fmt.Sprint(p["id"])); id != "" && !assetLibraryID.MatchString(id) {
+			pid := strings.TrimSpace(fmt.Sprint(p["id"]))
+			if pid != "" && !assetLibraryID.MatchString(pid) {
 				return fmt.Errorf("bottom_blocks presets[%d].id is invalid", i)
 			}
-			if en, ok := p["enabled"]; ok && en != nil {
-				enMap, ok := en.(map[string]any)
-				if !ok {
-					return fmt.Errorf("bottom_blocks presets[%d].enabled must be an object", i)
-				}
-				// preset 里引用的区块必须真实存在（与 order 校验对齐，防悬空引用）。
-				for blockID := range enMap {
-					if _, ok := blocks[blockID]; !ok {
-						return fmt.Errorf("bottom_blocks presets[%d].enabled references unknown block: %s", i, blockID)
+			presetIDs[pid] = true
+			if schemaVersion >= 2 {
+				// v2：每个预设是一套完整 blocks+order（原创/转载各一套，间距走 spacer）。
+				for k := range p {
+					if k != "id" && k != "name" && k != "order" && k != "blocks" {
+						return fmt.Errorf("bottom_blocks presets[%d] has unknown field: %s", i, k)
 					}
+				}
+				// blocks/order 必须非空，否则该预设渲染出空底部（codex review）。
+				if bm, _ := p["blocks"].(map[string]any); len(bm) == 0 {
+					return fmt.Errorf("bottom_blocks presets[%d] requires non-empty blocks", i)
+				}
+				if om, _ := p["order"].([]any); len(om) == 0 {
+					return fmt.Errorf("bottom_blocks presets[%d] requires non-empty order", i)
+				}
+				if err := validateBlocksAndOrderMaps(p["blocks"], p["order"]); err != nil {
+					return fmt.Errorf("bottom_blocks presets[%d]: %w", i, err)
+				}
+			} else {
+				// v1：enabled map 预设（页脚库迁移而来，开关引用顶层 blocks）。
+				for k := range p {
+					if k != "id" && k != "name" && k != "enabled" {
+						return fmt.Errorf("bottom_blocks presets[%d] has unknown field: %s", i, k)
+					}
+				}
+				if en, ok := p["enabled"]; ok && en != nil {
+					enMap, ok := en.(map[string]any)
+					if !ok {
+						return fmt.Errorf("bottom_blocks presets[%d].enabled must be an object", i)
+					}
+					// preset 里引用的区块必须真实存在（与 order 校验对齐，防悬空引用）。
+					for blockID := range enMap {
+						if _, ok := blocks[blockID]; !ok {
+							return fmt.Errorf("bottom_blocks presets[%d].enabled references unknown block: %s", i, blockID)
+						}
+					}
+				}
+			}
+		}
+		// v2：active_preset_id 必须引用存在的预设，否则 fallback 首个会把转载渲成原创（codex review）。
+		if schemaVersion >= 2 {
+			if apid, ok := m["active_preset_id"]; ok {
+				s := strings.TrimSpace(fmt.Sprint(apid))
+				if s != "" && !presetIDs[s] {
+					return fmt.Errorf("bottom_blocks active_preset_id references unknown preset: %s", s)
 				}
 			}
 		}

@@ -8,6 +8,7 @@
 
 import { getBlockType, blockTypesForChannel, defaultFieldsForType } from '../blocks/block-registry.gen.js';
 import { openAssetPicker, resolveAssetThumb } from '../blocks/asset-picker.js';
+import { normalizeRichHtml } from '../blocks/rich-text-render.js';
 
 function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
 function esc(s) {
@@ -19,7 +20,7 @@ function uid(type, existing) {
   while (existing[id]) { id = type + '_' + (++i); }
   return id;
 }
-const KIND_LABELS = { text: '文字', image: '图片', recommendations: '推荐文章' };
+const KIND_LABELS = { text: '文字', image: '图片', recommendations: '推荐文章', spacer: '间距' };
 function typeGroupLabel(type) {
   return KIND_LABELS[type && type.kind] || '图片';
 }
@@ -96,7 +97,30 @@ function ensureStyle(doc) {
 //   channel: 'mp' | 'ft'（决定「新增区块」可选类型）
 //   onChange: (module) => void
 //   doc: 文档（测试可注入）
-export function createBlockEditor({ container, module, channel = 'mp', getAssetLibrary, getScope, onChange, doc = document }) {
+// mountWangEditor 在 rich_text 字段挂载 wangEditor 富文本编辑器（vendor 全局 window.wangEditor）。
+// 工具条对齐 catalog 富文本能力（加粗/斜体/下划线 + 字色/背景/字号 + 对齐 + 列表 + 链接）。
+// 产出 html 经后端 validateRichTextHTML 白名单兜底；wangEditor 不可用/出错时回退 textarea。
+function mountWangEditor(doc, container, textarea, initialHtml, onChange) {
+  let tb = null, ed = null, editor = null;
+  try {
+    textarea.style.display = 'none';
+    tb = doc.createElement('div'); tb.style.cssText = 'border:1px solid #e8e8e8;';
+    ed = doc.createElement('div'); ed.style.cssText = 'border:1px solid #e8e8e8;border-top:none;height:160px;overflow-y:auto;';
+    container.appendChild(tb); container.appendChild(ed);
+    const W = window.wangEditor;
+    const parseDoc = (h) => { try { return new window.DOMParser().parseFromString(h, 'text/html').body; } catch (e2) { return null; } };
+    editor = W.createEditor({ selector: ed, html: initialHtml || '<p><br></p>', config: { onChange: (e) => onChange(normalizeRichHtml(e.getHtml(), parseDoc)) } });
+    W.createToolbar({ editor, selector: tb, config: { toolbarKeys: ['bold', 'italic', 'underline', '|', 'color', 'bgColor', 'fontSize', '|', 'justifyLeft', 'justifyCenter', 'justifyRight', '|', 'bulletedList', 'numberedList', 'insertLink'] } });
+  } catch (e) {
+    // 失败回退 textarea：清理半初始化 DOM + 销毁 editor，避免页面残留半初始化编辑器（codex review Block 4）。
+    try { if (editor && editor.destroy) editor.destroy(); } catch (e2) {}
+    if (ed && ed.remove) ed.remove();
+    if (tb && tb.remove) tb.remove();
+    textarea.style.display = '';
+  }
+}
+
+export function createBlockEditor({ container, module, channel = 'mp', getAssetLibrary, getScope, onChange, onUploadAsset, doc = document }) {
   if (!container) return null;
   ensureStyle(doc);
   let mod = isObj(module) ? clone(module) : { enabled: false, order: [], blocks: {}, presets: [] };
@@ -191,8 +215,21 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
         assetLibrary: getAssetLibrary ? getAssetLibrary() : null, scope, doc,
         onPick: (assetId) => setField(id, field.key, '{{asset#' + assetId + '}}'),
         onClear: () => setField(id, field.key, ''),
+        // 上传新图（默认入库）：宿主提供 onUploadAsset(file, scope)→Promise<assetId>；缺省不显示上传按钮。
+        onUpload: onUploadAsset ? (file) => onUploadAsset(file, scope) : undefined,
       });
       ctrl.appendChild(preview); ctrl.appendChild(btn);
+    } else if (field.type === 'rich_text') {
+      // 富文本：优先 wangEditor（vendor 全局），否则 textarea 填 HTML（后端 sanitizer 白名单兜底）。
+      ctrl = doc.createElement('div');
+      const ta = doc.createElement('textarea');
+      ta.className = 'be-input'; ta.rows = 4; ta.style.cssText = 'width:100%;font-family:monospace;font-size:12px;box-sizing:border-box;';
+      ta.value = String(value == null ? '' : value);
+      ta.oninput = () => setField(id, field.key, ta.value);
+      ctrl.appendChild(ta);
+      if (typeof window !== 'undefined' && window.wangEditor) {
+        mountWangEditor(doc, ctrl, ta, ta.value, (html) => { ta.value = html; setField(id, field.key, html); });
+      }
     } else {
       ctrl = doc.createElement('input'); ctrl.className = 'be-input'; ctrl.type = 'text';
       ctrl.value = String(value == null ? '' : value);
@@ -224,7 +261,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
 
     const add = doc.createElement('div'); add.className = 'be-add';
     const sel = doc.createElement('select');
-    for (const group of ['文字', '图片', '推荐文章']) {
+    for (const group of ['文字', '图片', '推荐文章', '间距']) {
       const types = blockTypesForChannel(channel).filter(t => typeGroupLabel(t) === group);
       if (!types.length) continue;
       const og = doc.createElement('optgroup'); og.label = group;

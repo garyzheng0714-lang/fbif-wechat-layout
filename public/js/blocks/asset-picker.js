@@ -42,8 +42,9 @@ function ensureStyle(doc) {
   (doc.head || doc.documentElement).appendChild(st);
 }
 
-// openAssetPicker 弹出选图层。onPick(assetId) 选中某图；onClear() 清空（不显示该图）。
-export function openAssetPicker({ assetLibrary, scope = 'global', doc = document, onPick, onClear }) {
+// openAssetPicker 弹出选图层。onPick(assetId) 选中某图；onClear() 清空（不显示该图）；
+// onUpload(file)→Promise<assetId> 就地上传新图并入库（默认入库，用户裁定），选中返回的 id。
+export function openAssetPicker({ assetLibrary, scope = 'global', doc = document, onPick, onClear, onUpload }) {
   ensureStyle(doc);
   const all = assetsOf(assetLibrary).filter(a => isObj(a) && a.url && inScope(a, scope));
   const mask = doc.createElement('div'); mask.className = 'ap-mask';
@@ -73,11 +74,37 @@ export function openAssetPicker({ assetLibrary, scope = 'global', doc = document
   }
   modal.appendChild(body);
 
-  if (onClear) {
+  if (onUpload || onClear) {
     const foot = doc.createElement('div'); foot.className = 'ap-foot';
-    const clr = doc.createElement('button'); clr.className = 'ap-clear'; clr.textContent = '清除图片（该区块不显示图）';
-    clr.onclick = () => { onClear(); mask.remove(); };
-    foot.appendChild(clr); modal.appendChild(foot);
+    if (onUpload) {
+      // 上传新图（默认入库）：弹层就地补充素材，无需先去后台素材库（codex 条11 + 用户裁定默认入库）。
+      const up = doc.createElement('button');
+      up.textContent = '上传新图';
+      up.style.cssText = 'border:1px solid #1456f0;background:#fff;color:#1456f0;border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;float:left;';
+      up.onclick = () => {
+        const input = doc.createElement('input'); input.type = 'file'; input.accept = 'image/*';
+        input.onchange = async () => {
+          const file = input.files && input.files[0];
+          if (!file) return;
+          up.textContent = '上传中…'; up.disabled = true;
+          try {
+            const id = await onUpload(file); // 调用方负责上传入库，返回新 asset id
+            if (id && onPick) onPick(id);
+            mask.remove();
+          } catch (err) {
+            up.textContent = '上传失败，重试'; up.disabled = false;
+          }
+        };
+        input.click();
+      };
+      foot.appendChild(up);
+    }
+    if (onClear) {
+      const clr = doc.createElement('button'); clr.className = 'ap-clear'; clr.textContent = '清除图片（该区块不显示图）';
+      clr.onclick = () => { onClear(); mask.remove(); };
+      foot.appendChild(clr);
+    }
+    modal.appendChild(foot);
   }
 
   mask.appendChild(modal);

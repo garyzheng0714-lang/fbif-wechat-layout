@@ -464,6 +464,11 @@ function render(elems, config = {}) {
   // 无 bottom_blocks 的网站旧规则会被塞进公众号版。网站页脚段是 rich_html，故仅当存在
   // rich_html 区块时才认其为「网站底部」走区块渲染；否则回退 fbif_footer（保住页脚）。
   const bbBlocks = bottomBlocks && typeof bottomBlocks.blocks === 'object' ? bottomBlocks.blocks : null;
+  // 仅 rich_html 页脚段认作「网站底部」——它是网站特有的页脚类型，公众号基线没有，故能区分
+  // 「网站自己的底部」与「mergeRuleDefaults 泄漏进来的公众号 bottom_blocks」。
+  // 不用 schema_version>=2 判定：公众号一旦切 v2，其泄漏的 bottom_blocks 也是 schema_version>=2，
+  // 会被误判为网站底部、用 siteBlockRenderers 渲染公众号块（codex review Block 2）。网站 v2 底部的
+  // 识别留到网站 v2 重搭时用网站专属标记（templateId/source），而非数据特征 schema_version。
   const bbIsSiteFooter = bbBlocks && Object.keys(bbBlocks).some(k => bbBlocks[k] && bbBlocks[k].type === 'rich_html');
   if (bottomBlocks && typeof bottomBlocks === 'object' && bbIsSiteFooter) {
     // 单篇覆盖由 site.html syncEngineConfig 从 localStorage 映射进来（开关/排序/字段）。

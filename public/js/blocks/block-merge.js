@@ -71,19 +71,46 @@ function resolveOneBlock(id, base, ov) {
   };
 }
 
+// activeLayer 取模块的「生效层」blocks/order/gap，桥接 v1↔v2 两种 schema：
+//   v1（无 schema_version 或 <2）：顶层 blocks/order/gap（原行为，字节不变）。
+//   v2（schema_version>=2）：按 presetId（缺省 active_preset_id，再缺省第一个）选 presets[] 中的
+//     order/blocks；gap 在 v2 废弃为 'none'（间距由 spacer 块承载，见 spec §4.2/§5）。
+//   顶层 order/blocks 在 v2 被忽略（只认 presets[]）。
+function activeLayer(mod, opts) {
+  if (Number(mod.schema_version) >= 2) {
+    const presets = Array.isArray(mod.presets) ? mod.presets : [];
+    const wantId = (opts && opts.presetId) || mod.active_preset_id || (presets[0] && presets[0].id) || '';
+    const preset = presets.find(p => isObj(p) && p.id === wantId) || presets[0] || {};
+    return {
+      blocks: isObj(preset.blocks) ? preset.blocks : {},
+      order: Array.isArray(preset.order) ? preset.order : null,
+      gap: 'none',
+    };
+  }
+  return {
+    blocks: isObj(mod.blocks) ? mod.blocks : {},
+    order: Array.isArray(mod.order) ? mod.order : null,
+    gap: typeof mod.gap === 'string' ? mod.gap : 'none',
+  };
+}
+
 // resolveBlocks 合并后台默认模块与前台单篇覆盖，返回按解析顺序排列的区块列表。
-//   defaultModule: config.modules.bottom_blocks = { enabled, gap, order:[id], blocks:{ id:{type,enabled,fields} }, presets }
+//   defaultModule: config.modules.bottom_blocks
+//     v1: { enabled, gap, order:[id], blocks:{ id:{type,enabled,fields} }, presets }
+//     v2: { schema_version:2, enabled, active_preset_id, presets:[{id,name,order,blocks}] }
 //   override:      { enabled?, order?, overrides:{ id:{enabled?, fields?} } }
+//   opts:          { presetId? } —— v2 下显式选预设（由 engine/模板边界按 isRepost 映射传入，中性层不读全局）。
 // 返回：{ enabled, gap, enabledOverridden, orderOverridden, blocks:[ resolvedBlock ] }
-export function resolveBlocks(defaultModule, override) {
+export function resolveBlocks(defaultModule, override, opts = {}) {
   const mod = isObj(defaultModule) ? defaultModule : {};
   const ov = isObj(override) ? override : {};
-  const baseBlocks = isObj(mod.blocks) ? mod.blocks : {};
+  const layer = activeLayer(mod, opts);
+  const baseBlocks = layer.blocks;
   const ovBlocks = isObj(ov.overrides) ? ov.overrides : {};
 
-  // 解析顺序：后台 order 过滤掉不存在的块 + 保序去重；缺省用 blocks 的键序。
+  // 解析顺序：生效层 order 过滤掉不存在的块 + 保序去重；缺省用 blocks 的键序。
   const baseOrder = dedupe(
-    Array.isArray(mod.order) ? mod.order.filter(id => baseBlocks[id]) : Object.keys(baseBlocks)
+    Array.isArray(layer.order) ? layer.order.filter(id => baseBlocks[id]) : Object.keys(baseBlocks)
   );
 
   let order = baseOrder;
@@ -99,7 +126,7 @@ export function resolveBlocks(defaultModule, override) {
   const moduleEnabled = mod.enabled !== false;
   const enabledOv = typeof ov.enabled === 'boolean' ? ov.enabled : null;
   const enabled = enabledOv == null ? moduleEnabled : enabledOv;
-  const gap = typeof mod.gap === 'string' ? mod.gap : 'none';
+  const gap = layer.gap;
 
   const blocks = order.map(id => resolveOneBlock(id, baseBlocks[id], ovBlocks[id]));
   return {

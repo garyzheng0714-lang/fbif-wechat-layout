@@ -53,7 +53,7 @@ const FULL_IMG_STYLE = 'width: 100%; max-width: 100%; height: auto; display: blo
 
 test('renderBottomFooter: 系列默认 = Eileen 名片 + 包装群二维码 两张满宽 banner（author 空跳过、更多文章默认隐藏）', () => {
   setActive(seriesBottomBlocks(), undefined);
-  const html = template.renderBottomFooter();
+  const html = template.renderBottomFooter().html;
   assert.equal(typeof html, 'string', 'renderBottomFooter 返回字符串');
   assert.equal((html.match(/<section /g) || []).length, 2, '恰好 2 张图（author 空 + more_articles 禁用各跳过）');
   assert.match(html, /src="\/assets\/foodtalks-series\/cards\/eileen\.jpg"/, 'BD 名片=Eileen');
@@ -64,7 +64,7 @@ test('renderBottomFooter: 系列默认 = Eileen 名片 + 包装群二维码 两�
 
 test('renderBottomFooter: 不泄漏 FBIF 页脚口径（661px / mp-quote / 波波 / 1000）', () => {
   setActive(seriesBottomBlocks(), undefined);
-  const html = template.renderBottomFooter();
+  const html = template.renderBottomFooter().html;
   assert.ok(!html.includes('661px'), '非 FBIF 661px 满宽');
   assert.ok(!html.includes('mp-quote'), '非 FBIF mp-quote 字体栈');
   assert.ok(!/波波|1000个食品创新/.test(html), '无 FBIF 名片/案例引流内容');
@@ -73,7 +73,7 @@ test('renderBottomFooter: 不泄漏 FBIF 页脚口径（661px / mp-quote / 波�
 
 test('renderBottomFooter: 单篇 override 显隐生效（隐藏 bd_card → 只剩群二维码）', () => {
   setActive(seriesBottomBlocks(), { overrides: { bd_card: { enabled: false } } });
-  const html = template.renderBottomFooter();
+  const html = template.renderBottomFooter().html;
   assert.equal((html.match(/<section /g) || []).length, 1, '隐藏 BD 名片后只剩 1 张');
   assert.ok(!html.includes('eileen.jpg'), 'BD 名片已隐藏');
   assert.match(html, /packaging\.png/, '群二维码仍在');
@@ -81,7 +81,7 @@ test('renderBottomFooter: 单篇 override 显隐生效（隐藏 bd_card → 只�
 
 test('renderBottomFooter: 系列启用 more_articles 时输出复制链路识别的锚点', () => {
   setActive(seriesBottomBlocks(), { overrides: { more_articles: { enabled: true } } });
-  const html = template.renderBottomFooter();
+  const html = template.renderBottomFooter().html;
   assert.match(html, /<section data-role="paragraph">/, '保留 paragraph 包裹锚点');
   assert.match(html, /\/ 更多文章 \//, '渲染更多文章标题');
   assert.match(html, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;"><\/section>/, '保留 more-articles.js 合成卡片的外层锚点');
