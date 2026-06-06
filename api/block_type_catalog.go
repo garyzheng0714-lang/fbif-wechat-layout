@@ -91,7 +91,7 @@ func blockTypeCatalog() []blockType {
 			Type:     "rich_html",
 			Kind:     "text",
 			Label:    "自定义内容",
-			Channels: []string{"mp", "ft"},
+			Channels: []string{"ft"},
 			Note:     "原始 HTML 段（html_lines）。承接历史页脚段的无损迁移，也是高级用户兜底类型。",
 			Fields: []blockField{
 				{Key: "html_lines", Label: "HTML 内容", Type: "html_lines", Default: []any{}, Tooltip: "每行一个 HTML 段；属高级编辑，运营一般无需改动。"},
@@ -101,7 +101,7 @@ func blockTypeCatalog() []blockType {
 			Type:     "declaration",
 			Kind:     "text",
 			Label:    "声明/提示",
-			Channels: []string{"mp", "ft"},
+			Channels: []string{"ft"},
 			Note:     "声明区块：一行标题（如「提示：」）+ 若干条目行（html_lines，可含转载替换锚点）。FBIF 提示段即此型。",
 			Fields: []blockField{
 				{Key: "title", Label: "标题", Type: "text", Default: "提示：", Tooltip: "声明标题，可留空。"},
@@ -112,7 +112,7 @@ func blockTypeCatalog() []blockType {
 			Type:     "name_card",
 			Kind:     "image",
 			Label:    "名片",
-			Channels: []string{"mp", "ft"},
+			Channels: []string{"ft"},
 			Note:     "字段化名片：上方一行说明文字（可留空，可改文案/字号/颜色）+ 名片图（素材库）。覆盖 FBIF 波波名片、系列作者/BD 名片。",
 			Fields: []blockField{
 				{Key: "intro_text", Label: "上方文字", Type: "text", Default: "", Tooltip: "名片上方一行说明文字，可留空。"},
@@ -125,7 +125,7 @@ func blockTypeCatalog() []blockType {
 			Type:     "qr_card",
 			Kind:     "image",
 			Label:    "二维码卡",
-			Channels: []string{"mp", "ft"},
+			Channels: []string{"ft"},
 			Note:     "二维码/图片卡：一行说明文字（可留空）+ 二维码图（素材库）。覆盖系列群二维码、关注公众号。",
 			Fields: []blockField{
 				{Key: "caption", Label: "说明文字", Type: "text", Default: "", Tooltip: "二维码上方说明，可留空。"},
@@ -138,7 +138,7 @@ func blockTypeCatalog() []blockType {
 			Type:     "titled_media",
 			Kind:     "image",
 			Label:    "标题+图片",
-			Channels: []string{"mp", "ft"},
+			Channels: []string{"ft"},
 			Note:     "栏目标题（如「/ 1000个食品创新案例 /」，可改文字/字号/颜色/居中）+ 一张引流图（素材库）。",
 			Fields: []blockField{
 				{Key: "title", Label: "标题文字", Type: "text", Default: "", Tooltip: "栏目标题，如 / 更多文章 /；可留空。"},

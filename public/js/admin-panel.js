@@ -16,9 +16,7 @@ import {
 } from './rule-presets.js';
 import {
   DEFAULT_BEHAVIOR,
-  normalizeAuthorName,
   normalizeRuleBehavior,
-  renderBehaviorTemplate,
   validateRuleBehavior,
 } from './rule-behavior.js';
 import { createMoreArticlesRuleEditor } from './more-articles-rule-editor.js';
@@ -271,38 +269,8 @@ export function initAdminPanel(options = {}) {
     if (el) el.innerHTML = renderWarningsHTML();
   }
 
-  function validateBehaviorDraft() {
-    if (!behaviorDirty) return validateRuleBehavior(workingBehavior);
-    try {
-      return validateRuleBehavior(JSON.parse(behaviorText));
-    } catch {
-      return { ok: false, errors: ['代码化规则 JSON 格式不正确'], behavior: workingBehavior };
-    }
-  }
-
-  function renderBehaviorWarningsHTML() {
-    const result = validateBehaviorDraft();
-    if (result.ok) {
-      return '<div class="admin-rule-ok">代码化规则校验通过。</div>';
-    }
-    return '<ul class="admin-warnings">' + result.errors.map(w => '<li>' + esc(w) + '</li>').join('') + '</ul>';
-  }
-
-  function sampleBehaviorContext() {
-    return { article: { author: 'Mote莫特', source: 'FoodTalks', author_normalized: normalizeAuthorName('Mote莫特') }, account: { name: 'FBIF' } };
-  }
-
-  function renderBehaviorPreviewHTML() {
-    const context = sampleBehaviorContext();
-    const validation = validateBehaviorDraft();
-    const behavior = normalizeRuleBehavior(validation.ok ? validation.behavior : workingBehavior);
-    const rows = [['作者行', behavior.templates.author_line], ['来源行', behavior.templates.source_line], ['原创提示', behavior.templates.footer_original_notice], ['转载提示', behavior.templates.footer_repost_notice]];
-    const insertImage = behavior.actions.some(action => action.type === 'insert_image_before' && action.when === 'is_mote_author');
-    return `<div class="admin-preview-grid">${rows.map(([label, tpl]) => `<div class="admin-preview-row"><span>${esc(label)}</span><code>${esc(renderBehaviorTemplate(tpl, context))}</code></div>`).join('')}<div class="admin-preview-row"><span>Mote 署名图</span><code>${insertImage ? '会在参考来源前插入' : '不会插入'}</code></div></div>`;
-  }
-
   function renderRuleTabs() {
-    const tabs = [['params', '参数'], ['bottom', '底部'], ['assets', '素材库'], ['behavior', '代码化规则'], ['validation', '校验预览']];
+    const tabs = [['params', '参数'], ['bottom', '底部']];
     return `
       <div class="admin-rule-tabs" role="tablist" aria-label="规则编辑分区">
         ${tabs.map(([id, label]) => `
@@ -438,8 +406,9 @@ export function initAdminPanel(options = {}) {
   function renderSideNav() {
     return `
       <nav class="admin-side-nav" aria-label="规则后台导航">
-        <button type="button" data-view="assignments" class="${activeView === 'assignments' ? 'active' : ''}">规则配置</button>
+        <button type="button" data-view="assignments" class="${activeView === 'assignments' ? 'active' : ''}">账号</button>
         <button type="button" data-view="rules" class="${activeView === 'rules' ? 'active' : ''}">规则</button>
+        <button type="button" data-view="assets" class="${activeView === 'assets' ? 'active' : ''}">素材库</button>
       </nav>`;
   }
 
@@ -458,7 +427,7 @@ export function initAdminPanel(options = {}) {
   function renderAssignments() {
     return `
       <section class="admin-assignment-panel">
-        <h3>规则配置</h3>
+        <h3>账号</h3>
         <p class="admin-panel-note">选择每个公众号当前应用的规则。</p>
         ${accountBindings().map(account => `
           <label class="admin-account-row">
@@ -471,44 +440,24 @@ export function initAdminPanel(options = {}) {
       </section>`;
   }
 
+  function renderAssetsLibraryView() {
+    return `
+      <section class="admin-rule-group admin-assets-view">
+        <h3>素材库</h3>
+        <p class="admin-panel-note">被底部区块引用的图片资产池：仅新增 / 删除 / 查看，不引用别处。</p>
+        <div data-role="asset-library-editor"></div>
+      </section>`;
+  }
+
   function renderRuleTabContent() {
-    if (activeRuleTab === 'bottom' || activeRuleTab === 'assets') {
-      return renderRuleBottomTabHtml(activeRuleTab, isFtDefaultPack());
-    }
-    if (activeRuleTab === 'behavior') {
-      return `<section class="admin-rule-group admin-json-panel"><div data-role="behavior-editor"></div>
-        <details class="admin-adv"><summary>高级 · 原始 JSON（条件/动作在此编辑）</summary>
-          <div class="admin-json-actions"><button type="button" class="admin-secondary" data-action="validate-behavior">校验代码</button><button type="button" class="admin-secondary" data-action="apply-behavior">应用到预览</button></div>
-          <textarea data-role="behavior-json" spellcheck="false">${esc(behaviorText)}</textarea></details></section>`;
-    }
-    if (activeRuleTab === 'validation') {
-      return `
-        <section class="admin-rule-group admin-validation-panel">
-          <h3>参数校验</h3>
-          <div data-role="rule-warnings">${renderWarningsHTML()}</div>
-          <h3>代码化规则校验</h3>
-          <div data-role="behavior-warnings">${renderBehaviorWarningsHTML()}</div>
-          <h3>输出预览</h3>
-          ${renderBehaviorPreviewHTML()}
-        </section>`;
+    if (activeRuleTab === 'bottom') {
+      return renderRuleBottomTabHtml(isFtDefaultPack());
     }
     return `
-      <div class="admin-editor-split">
-        <section class="admin-code-zone admin-rule-group admin-json-panel">
-          <div class="admin-json-head">
-            <h3>JSON 规则</h3>
-            <div class="admin-json-actions">
-              <button type="button" class="admin-secondary" data-action="validate-json">校验</button>
-              <button type="button" class="admin-secondary" data-action="apply-json">同步</button>
-            </div>
-          </div>
-          <textarea data-role="rule-json" spellcheck="false">${esc(jsonText)}</textarea>
-        </section>
-        <section class="admin-visual-zone" aria-label="前端修改区">
-          <div class="admin-form-col"><div data-role="rule-warnings">${renderWarningsHTML()}</div>${renderGroups(workingConfig)}</div>
-          ${livePreviewHTML()}
-        </section>
-      </div>`;
+      <section class="admin-visual-zone" aria-label="前端修改区">
+        <div class="admin-form-col"><div data-role="rule-warnings">${renderWarningsHTML()}</div>${renderGroups(workingConfig)}</div>
+        ${livePreviewHTML()}
+      </section>`;
   }
 
   function renderRulesEditor(optionsHTML) {
@@ -556,6 +505,8 @@ export function initAdminPanel(options = {}) {
     }).join('');
     const contentHTML = activeView === 'assignments'
       ? renderAssignments()
+      : activeView === 'assets'
+      ? renderAssetsLibraryView()
       : renderRulesEditor(optionsHTML);
     overlay.innerHTML = `
       <div class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
@@ -661,6 +612,7 @@ export function initAdminPanel(options = {}) {
         }, '已更新规则配置');
       });
     });
+    if (activeView === 'assets') { bindAssetLibraryEditor(); return; }
     if (activeView !== 'rules') return;
     bindMoreArticlesRuleEditor();
     bindFooterLibraryEditor();

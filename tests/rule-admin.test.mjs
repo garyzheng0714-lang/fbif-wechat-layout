@@ -8,29 +8,22 @@ async function readProjectFile(path) {
   return readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
-test('rule admin exposes JSON editing and new-rule controls', async () => {
+test('规则后台：参数为可视化表单(无 JSON 代码框)，规则控件齐全', async () => {
   const adminPanel = await readProjectFile('public/js/admin-panel.js');
 
-  assert.match(adminPanel, /parseRuleConfigDocument/);
-  assert.match(adminPanel, /buildRuleConfigDocument/);
-  assert.match(adminPanel, /data-role="rule-json"/);
-  assert.match(adminPanel, /data-action="validate-json"/);
-  assert.match(adminPanel, /data-action="apply-json"/);
-  assert.match(adminPanel, /admin-editor-split/);
-  assert.match(adminPanel, /syncRuleVisualEditor/);
-  assert.match(adminPanel, /JSON 已同步到表单/);
+  // 用户裁定 2026-06-06：参数 tab = 可视化表单 + 实时预览，JSON 分栏代码框已删（后台要直观）
+  assert.match(adminPanel, /admin-visual-zone/);
+  assert.doesNotMatch(adminPanel, /admin-editor-split/);
+  assert.doesNotMatch(adminPanel, /<textarea data-role="rule-json"/);
+  // 规则控件保留
   assert.match(adminPanel, /data-action="new"/);
-  assert.match(adminPanel, /syncDirtyJSONBeforePersist/);
-  assert.match(adminPanel, /syncDirtyJSONBeforePersist\(\);[\s\S]*savePresetWithFooter|syncDirtyJSONBeforePersist\(\);[\s\S]*saveRulePreset/);
   assert.match(adminPanel, /应用到当前公众号/);
   assert.match(adminPanel, /复制为新规则/);
   assert.match(adminPanel, /保存修改/);
   assert.match(adminPanel, /closest\('#adminLockBtn'\)/, '规则后台入口应使用事件委托，账号菜单重绘后仍可打开');
   assert.doesNotMatch(adminPanel, />设为当前规则</);
-  assert.doesNotMatch(adminPanel, />另存为规则</);
   assert.match(adminPanel, /createMoreArticlesRuleEditor/);
   assert.match(adminPanel, /data-role="more-articles-rule-editor"/);
-  assert.match(adminPanel, /syncJSONEditorFromInputs/);
 });
 
 test('rule admin save-as generates a unique id instead of overwriting same-name rules', async () => {
@@ -149,26 +142,18 @@ test('rule admin deletes from the rule row with explicit confirmation', async ()
   assert.match(css, /\.admin-icon-danger/);
 });
 
-test('rule admin exposes behavior-code editing and validation preview', async () => {
+test('规则后台：删掉「代码化规则」「校验预览」tab，但 behavior 数据链路保留', async () => {
   const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
 
-  assert.match(adminPanel, /validateRuleBehavior/);
-  assert.match(adminPanel, /validateBehaviorDraft/);
-  assert.match(adminPanel, /behaviorDirty/);
-  assert.match(adminPanel, /renderBehaviorTemplate/);
-  assert.match(adminPanel, /\['behavior', '代码化规则'\]/);
-  assert.match(adminPanel, /data-rule-tab="\$\{id\}"/);
-  assert.match(adminPanel, /代码化规则/);
-  assert.match(adminPanel, /data-role="behavior-json"/);
-  assert.match(adminPanel, /data-action="validate-behavior"/);
-  assert.match(adminPanel, /data-action="apply-behavior"/);
-  assert.match(adminPanel, /\['validation', '校验预览'\]/);
-  assert.match(adminPanel, /校验预览/);
-  assert.match(adminPanel, /syncDirtyBehaviorBeforePersist\(\);[\s\S]*savePresetWithFooter|syncDirtyBehaviorBeforePersist\(\);[\s\S]*saveRulePreset/);
+  // 用户裁定 2026-06-06：删掉复杂的代码化规则/校验预览 tab，胶囊只剩参数 + 底部
+  assert.doesNotMatch(adminPanel, /\['behavior', '代码化规则'\]/);
+  assert.doesNotMatch(adminPanel, /\['validation', '校验预览'\]/);
+  assert.match(adminPanel, /const tabs = \[\['params', '参数'\], \['bottom', '底部'\]\]/);
+  // behavior 数据链路保留：原作者行 / Mote 署名 / 原创转载声明等服务端规则仍生效（只删编辑 UI，数据照常加载/保存）
+  assert.match(adminPanel, /normalizeRuleBehavior/);
   assert.match(adminPanel, /behavior:\s*workingBehavior/);
   assert.match(css, /\.admin-rule-tabs/);
-  assert.match(css, /\.admin-preview-grid/);
 });
 
 test('rule admin card editor has dedicated layout styles', async () => {
@@ -233,16 +218,21 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   assert.ok(adminPanel.split('\n').length <= 900, `admin-panel.js 超过 900 行`);
 });
 
-test('rule admin：素材库独立 tab + 底部区块 tab（用户裁定 2026-06-05，推翻旧「嵌底部」）', async () => {
+test('rule admin：素材库提升为左侧独立 view（用户裁定 2026-06-06，推翻旧「嵌胶囊 tab」）', async () => {
   const adminPanel = await readProjectFile('public/js/admin-panel.js');
   const blockData = await readProjectFile('public/js/admin-block-data.js');
   const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
 
+  // 左侧三视图：账号 / 规则 / 素材库（素材库从胶囊 tab 提升为独立 view）
+  assert.match(adminPanel, /data-view="assignments"[^>]*>账号/);
+  assert.match(adminPanel, /data-view="rules"/);
+  assert.match(adminPanel, /data-view="assets"/);
+  assert.match(adminPanel, /renderAssetsLibraryView/);
+  assert.match(adminPanel, /data-role="asset-library-editor"/);  // 素材库 view 挂载点
+  assert.doesNotMatch(adminPanel, /\['assets', '素材库'\]/);        // 不再是胶囊 tab
+  // 底部 tab 仍是区块编辑器
   assert.match(adminPanel, /\['bottom', '底部'\]/);
-  assert.match(adminPanel, /\['assets', '素材库'\]/);          // 素材库独立成 tab
-  assert.match(blockData, /data-role="asset-library-editor"/); // 渲染抽到 admin-block-data helper
   assert.match(blockData, /data-role="block-editor"/);
-  assert.doesNotMatch(adminPanel, /\['blocks', '底部区块'\]/);
   assert.match(adminPanel, /data-role="dirty-chip"/);
   assert.match(adminPanel, /adminDirtyCount/);
   assert.match(css, /\.admin-dirty-chip/);

@@ -34,8 +34,8 @@ test('素材库编辑器有 scope 和 usage 控件，并做安全 URL 校验', (
 test('规则后台有素材库页签，并保存 workingAssets 到 asset_library', () => {
   assert.match(adminSrc, /createAssetLibraryEditor/);
   assert.match(adminSrc, /\['bottom', '底部'\]/);
-  assert.match(adminSrc, /\['assets', '素材库'\]/);              // 素材库独立成 tab（用户裁定 2026-06-05，spec §9）
-  assert.match(blockDataSrc, /data-role="asset-library-editor"/); // 渲染抽到 admin-block-data helper（腾 900 行）
+  assert.match(adminSrc, /data-view="assets"/);                   // 素材库提升为左侧独立 view（用户裁定 2026-06-06）
+  assert.match(adminSrc, /data-role="asset-library-editor"/);     // 素材库 view 挂载点(admin-panel renderAssetsLibraryView)
   assert.match(adminSrc, /compact:\s*true/);
   assert.match(blockDataSrc, /data-role="block-editor"/);
   assert.match(adminSrc, /workingAssets/);

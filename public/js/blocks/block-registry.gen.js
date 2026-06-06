@@ -26,7 +26,7 @@ export const BLOCK_TYPES = Object.freeze({
     type: 'rich_html',
     kind: 'text',
     label: '自定义内容',
-    channels: Object.freeze(['mp', 'ft']),
+    channels: Object.freeze(['ft']),
     fields: Object.freeze([
       Object.freeze({ key: 'html_lines', label: 'HTML 内容', type: 'html_lines', default: [], tooltip: '每行一个 HTML 段；属高级编辑，运营一般无需改动。' }),
     ]),
@@ -36,7 +36,7 @@ export const BLOCK_TYPES = Object.freeze({
     type: 'declaration',
     kind: 'text',
     label: '声明/提示',
-    channels: Object.freeze(['mp', 'ft']),
+    channels: Object.freeze(['ft']),
     fields: Object.freeze([
       Object.freeze({ key: 'title', label: '标题', type: 'text', default: '提示：', tooltip: '声明标题，可留空。' }),
       Object.freeze({ key: 'lines', label: '条目', type: 'html_lines', default: [], tooltip: '每行一条声明 HTML；可含 <!--REPOST_*--> 转载替换锚点。' }),
@@ -47,7 +47,7 @@ export const BLOCK_TYPES = Object.freeze({
     type: 'name_card',
     kind: 'image',
     label: '名片',
-    channels: Object.freeze(['mp', 'ft']),
+    channels: Object.freeze(['ft']),
     fields: Object.freeze([
       Object.freeze({ key: 'intro_text', label: '上方文字', type: 'text', default: '', tooltip: '名片上方一行说明文字，可留空。' }),
       Object.freeze({ key: 'intro_size', label: '文字字号', type: 'number', default: 14, tooltip: '上方文字字号（纯数字，无需单位）。', min: 12, max: 28 }),
@@ -60,7 +60,7 @@ export const BLOCK_TYPES = Object.freeze({
     type: 'qr_card',
     kind: 'image',
     label: '二维码卡',
-    channels: Object.freeze(['mp', 'ft']),
+    channels: Object.freeze(['ft']),
     fields: Object.freeze([
       Object.freeze({ key: 'caption', label: '说明文字', type: 'text', default: '', tooltip: '二维码上方说明，可留空。' }),
       Object.freeze({ key: 'caption_size', label: '说明字号', type: 'number', default: 14, tooltip: '说明文字字号。', min: 12, max: 28 }),
@@ -73,7 +73,7 @@ export const BLOCK_TYPES = Object.freeze({
     type: 'titled_media',
     kind: 'image',
     label: '标题+图片',
-    channels: Object.freeze(['mp', 'ft']),
+    channels: Object.freeze(['ft']),
     fields: Object.freeze([
       Object.freeze({ key: 'title', label: '标题文字', type: 'text', default: '', tooltip: '栏目标题，如 / 更多文章 /；可留空。' }),
       Object.freeze({ key: 'title_size', label: '标题字号', type: 'number', default: 17, tooltip: '标题字号。', min: 12, max: 28 }),

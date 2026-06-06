@@ -65,3 +65,10 @@ test('v1 单套（系列）路径不变：直接渲染顶层块、无预设 tab�
   assert.deepEqual(ids, ['a', 'b'], 'v1 渲染顶层块');
   assert.match(c.textContent, /模块间默认空行/, 'v1 显示空行开关');
 });
+
+test('公众号底部新增下拉只剩 4 原子（旧语义块 2026-06-06 归网站渠道）', async () => {
+  const { blockTypesForChannel } = await import('../public/js/blocks/block-registry.gen.js');
+  const mp = blockTypesForChannel('mp').map(t => t.type).sort();
+  assert.deepEqual(mp, ['image', 'more_articles', 'spacer', 'text'], '公众号下拉只 4 原子');
+  assert.ok(!mp.some(t => ['rich_html', 'declaration', 'name_card', 'qr_card', 'titled_media'].includes(t)), '公众号下拉不含旧语义块');
+});
