@@ -86,6 +86,9 @@ function ensureStyle(doc) {
 .be-adv{margin-top:10px;}
 .be-adv summary{cursor:pointer;color:var(--fs-text-3,#8f959e);font-size:12px;}
 .be-adv textarea{width:100%;box-sizing:border-box;min-height:120px;margin-top:6px;font-family:ui-monospace,monospace;font-size:12px;border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:8px;}
+.be-presets{display:flex;gap:4px;margin:0 0 10px;border-bottom:1px solid var(--fs-divider,rgba(31,35,39,.08));}
+.be-preset{background:none;border:none;border-bottom:2px solid transparent;padding:6px 14px;font-size:13px;cursor:pointer;color:var(--fs-text-2,#646a73);margin-bottom:-1px;}
+.be-preset.active{color:var(--fs-brand,#1456f0);border-bottom-color:var(--fs-brand,#1456f0);font-weight:500;}
 @media(max-width:980px){.be-fields{grid-template-columns:1fr}.be-field.wide{grid-column:auto}}
 `;
   (doc.head || doc.documentElement).appendChild(st);
@@ -128,39 +131,57 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
   if (!Array.isArray(mod.order)) mod.order = Object.keys(mod.blocks);
   const expanded = new Set();
   let dragId = '';
+  let activeIdx = 0; // 双预设（FBIF 原创/转载）：当前正在编辑哪一套
+
+  // 双套结构（schema_version>=2，原创/转载分两套放进 presets[]，顶层 blocks/order 为空）vs 单套（顶层 blocks/order）。
+  // layer() 返回「当前编辑层」的 {blocks, order} 引用——所有增删改读写都走它，于是同一套逻辑既能编单套（系列），
+  // 也能编双套里选中的那一套（FBIF 原创/转载切换）。
+  function isV2() { return Number(mod.schema_version) >= 2 && Array.isArray(mod.presets); }
+  function activePreset() { const ps = mod.presets || []; return ps[activeIdx] || ps[0] || null; }
+  function layer() {
+    if (isV2()) {
+      const p = activePreset();
+      if (p) { if (!isObj(p.blocks)) p.blocks = {}; if (!Array.isArray(p.order)) p.order = Object.keys(p.blocks); return p; }
+    }
+    return mod;
+  }
 
   function emit() { if (onChange) onChange(clone(mod)); }
 
   function setMaster(v) { mod.enabled = v; emit(); render(); }
   function setGap(v) { mod.gap = v ? 'blank_line' : 'none'; emit(); render(); }
-  function setBlockEnabled(id, v) { if (mod.blocks[id]) { mod.blocks[id].enabled = v; emit(); render(); } }
-  function setBlockDisplayName(id, v) { if (mod.blocks[id]) { const s = String(v || '').trim(); if (s) mod.blocks[id].display_name = s; else delete mod.blocks[id].display_name; emit(); render(); } }
+  function setBlockEnabled(id, v) { const L = layer(); if (L.blocks[id]) { L.blocks[id].enabled = v; emit(); render(); } }
+  function setBlockDisplayName(id, v) { const L = layer(); if (L.blocks[id]) { const s = String(v || '').trim(); if (s) L.blocks[id].display_name = s; else delete L.blocks[id].display_name; emit(); render(); } }
   // 块实例级「允许前端编辑此块」：勾选写 frontend_editable=true（前端出现换图入口），不勾删除（缺省 false=前端只读）。
-  function setBlockFrontendEditable(id, v) { if (mod.blocks[id]) { if (v) mod.blocks[id].frontend_editable = true; else delete mod.blocks[id].frontend_editable; emit(); render(); } }
+  function setBlockFrontendEditable(id, v) { const L = layer(); if (L.blocks[id]) { if (v) L.blocks[id].frontend_editable = true; else delete L.blocks[id].frontend_editable; emit(); render(); } }
   function setField(id, key, v) {
-    if (!mod.blocks[id]) return;
-    if (!isObj(mod.blocks[id].fields)) mod.blocks[id].fields = {};
-    mod.blocks[id].fields[key] = v;
+    const L = layer();
+    if (!L.blocks[id]) return;
+    if (!isObj(L.blocks[id].fields)) L.blocks[id].fields = {};
+    L.blocks[id].fields[key] = v;
     emit(); render();
   }
   function addBlock(type) {
     const t = getBlockType(type);
     if (!t) return;
-    const id = uid(type, mod.blocks);
-    mod.blocks[id] = { type, display_name: (t && t.label) || type, enabled: true, fields: defaultFieldsForType(type) };
-    mod.order.push(id);
+    const L = layer();
+    const id = uid(type, L.blocks);
+    L.blocks[id] = { type, display_name: (t && t.label) || type, enabled: true, fields: defaultFieldsForType(type) };
+    L.order.push(id);
     expanded.add(id);
     emit(); render();
   }
   function removeBlock(id) {
-    delete mod.blocks[id];
-    mod.order = mod.order.filter(x => x !== id);
+    const L = layer();
+    delete L.blocks[id];
+    L.order = L.order.filter(x => x !== id);
     emit(); render();
   }
   function reorder(fromId, toId) {
-    const fi = mod.order.indexOf(fromId), ti = mod.order.indexOf(toId);
+    const L = layer();
+    const fi = L.order.indexOf(fromId), ti = L.order.indexOf(toId);
     if (fi < 0 || ti < 0 || fi === ti) return;
-    mod.order.splice(ti, 0, mod.order.splice(fi, 1)[0]);
+    L.order.splice(ti, 0, L.order.splice(fi, 1)[0]);
     emit(); render();
   }
 
@@ -252,12 +273,15 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
     const ml = doc.createElement('span'); ml.textContent = '默认启用底部区块'; master.appendChild(ml);
     head.appendChild(master);
 
-    const gap = doc.createElement('label'); gap.className = 'be-master';
-    const gcb = doc.createElement('input'); gcb.type = 'checkbox'; gcb.checked = mod.gap !== 'none';
-    gcb.onchange = () => setGap(gcb.checked);
-    gap.appendChild(gcb);
-    const gl = doc.createElement('span'); gl.textContent = '模块间默认空行'; gap.appendChild(gl);
-    head.appendChild(gap);
+    // gap（模块间空行）仅单套结构有意义；双套（原创/转载）间距由「间距」块承载，不显示此开关。
+    if (!isV2()) {
+      const gap = doc.createElement('label'); gap.className = 'be-master';
+      const gcb = doc.createElement('input'); gcb.type = 'checkbox'; gcb.checked = mod.gap !== 'none';
+      gcb.onchange = () => setGap(gcb.checked);
+      gap.appendChild(gcb);
+      const gl = doc.createElement('span'); gl.textContent = '模块间默认空行'; gap.appendChild(gl);
+      head.appendChild(gap);
+    }
 
     const add = doc.createElement('div'); add.className = 'be-add';
     const sel = doc.createElement('select');
@@ -274,13 +298,28 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
     head.appendChild(add);
     wrap.appendChild(head);
 
-    const order = mod.order.filter(id => mod.blocks[id]);
+    // 双预设（FBIF）：原创/转载切换 tab。切换只改正在编辑哪一套；名片/更多文章等结构通常两套一致，
+    // 仅「提示正文」声明文案不同。改完任一套，保存时整套（含两个预设）一起写回。
+    if (isV2()) {
+      const tabs = doc.createElement('div'); tabs.className = 'be-presets';
+      (mod.presets || []).forEach((p, i) => {
+        const b = doc.createElement('button'); b.type = 'button';
+        b.className = 'be-preset' + (i === activeIdx ? ' active' : '');
+        b.textContent = p.name || p.id || ('预设' + (i + 1));
+        b.onclick = () => { activeIdx = i; expanded.clear(); render(); };
+        tabs.appendChild(b);
+      });
+      wrap.appendChild(tabs);
+    }
+
+    const L = layer();
+    const order = L.order.filter(id => L.blocks[id]);
     if (!order.length) {
       const e = doc.createElement('div'); e.className = 'be-empty'; e.textContent = '暂无区块。用右上「新增区块」添加（如名片）。';
       wrap.appendChild(e);
     }
     for (const id of order) {
-      const block = mod.blocks[id];
+      const block = L.blocks[id];
       const type = getBlockType(block.type) || { label: block.type, fields: [] };
       const card = doc.createElement('div'); card.className = 'be-card';
       card.setAttribute('draggable', 'true'); card.dataset.id = id;
@@ -338,7 +377,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
     const adv = doc.createElement('details'); adv.className = 'be-adv';
     const sum = doc.createElement('summary'); sum.textContent = '高级 · 原始 JSON（一般无需改）'; adv.appendChild(sum);
     const ta = doc.createElement('textarea'); ta.value = JSON.stringify(mod, null, 2);
-    ta.onchange = () => { try { const parsed = JSON.parse(ta.value); if (isObj(parsed)) { mod = parsed; if (!isObj(mod.blocks)) mod.blocks = {}; if (!Array.isArray(mod.order)) mod.order = Object.keys(mod.blocks); emit(); render(); } } catch (e) { ta.style.borderColor = 'var(--fs-danger,#f54a45)'; } };
+    ta.onchange = () => { try { const parsed = JSON.parse(ta.value); if (isObj(parsed)) { mod = parsed; if (!isObj(mod.blocks)) mod.blocks = {}; if (!Array.isArray(mod.order)) mod.order = Object.keys(mod.blocks); activeIdx = 0; emit(); render(); } } catch (e) { ta.style.borderColor = 'var(--fs-danger,#f54a45)'; } };
     adv.appendChild(ta);
     wrap.appendChild(adv);
 
