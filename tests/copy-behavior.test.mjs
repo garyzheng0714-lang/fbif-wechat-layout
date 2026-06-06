@@ -52,6 +52,33 @@ test('copy click does not wait on background image or more-articles preparation'
   assert.match(copyFn, /prepareMoreArticlesForCopy\('copy-click'\)/);
 });
 
+test('新文章导入原子作废上一篇的更多文章预热 job（防跨文章卡片污染）', async () => {
+  // 红线#9：更多文章卡片是单篇 curation。清卡片(makeFreshUploadCards)与作废预热 job 必须原子同处，
+  // 否则两步之间的窗口（loadBaseFooterHtml/buildFooterWithMoreArticles 两个 await + 200ms setTimeout）
+  // 里，上一篇在途 job 会 resolve 并把旧卡片写回存储，下一篇 loadMoreArticlesCards 读到旧卡片
+  // （codex re-review #2/#3）。
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  // 原子复位 helper：三要素同处。
+  const helper = engine.slice(engine.indexOf('function resetMoreArticlesForNewArticle'));
+  const helperBody = helper.slice(0, helper.indexOf('\n  function '));
+  assert.match(helperBody, /saveMoreArticlesCards\(makeFreshUploadCards\(\)\)/, 'helper 须重置卡片');
+  assert.match(helperBody, /_moreArticlesCopySeq\+\+/, 'helper 须 seq++ 作废在途 job');
+  assert.match(helperBody, /_moreArticlesCopyJob = null/, 'helper 须 job=null 让本篇重建');
+  // 三处新稿路径都走 helper，不得再裸调 saveMoreArticlesCards+refreshSidebar（漏作废 → 暴露窗口）。
+  assert.doesNotMatch(
+    engine,
+    /saveMoreArticlesCards\(makeFreshUploadCards\(\)\);\n\s*if \(window\._refreshMoreArticlesSidebar\)/,
+    '新稿点不得裸调 saveMoreArticlesCards+refreshSidebar，须走原子 helper'
+  );
+  assert.ok((engine.match(/resetMoreArticlesForNewArticle\(\)/g) || []).length >= 4, '三处新稿调用 + 定义 ≥4');
+  // 双保险：在途 job resolve 的两个 await 边界都校验 seq，过期则自我丢弃，不写回 _footerCopy。
+  assert.ok((engine.match(/if \(seq !== _moreArticlesCopySeq\) return false/g) || []).length >= 2, '≥2 处 seq 校验（742/747）');
+  // showPreview 仍保留作废，供 rerender（同篇换配置）丢弃旧预热并重建。
+  const showPreview = engine.slice(engine.indexOf('function showPreview('));
+  const resetZone = showPreview.slice(0, showPreview.indexOf('// Split layout'));
+  assert.match(resetZone, /_moreArticlesCopyJob = null/, 'showPreview 保留作废供 rerender');
+});
+
 test('website copy blocks when WeChat image CDN URLs still remain', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));

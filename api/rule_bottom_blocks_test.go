@@ -115,26 +115,6 @@ func TestDefaultMpBottomBlocksModuleV2Shape(t *testing.T) {
 	}
 }
 
-// 系列 v2 样板：结构合法 + 作者名片 frontend_editable + 更多文章默认隐藏。视觉待公众号确认。
-func TestDefaultSeriesBottomBlocksModuleV2(t *testing.T) {
-	mod := defaultSeriesBottomBlocksModuleV2()
-	if err := validateBottomBlocksModule(mod); err != nil {
-		t.Fatalf("系列 v2 应通过校验: %v", err)
-	}
-	presets := mod["presets"].([]any)
-	blocks := presets[0].(map[string]any)["blocks"].(map[string]any)
-	author := blocks["author_card"].(map[string]any)
-	if author["frontend_editable"] != true {
-		t.Error("作者名片应 frontend_editable=true（红线#14 例外）")
-	}
-	if author["fields"].(map[string]any)["image"] != "" {
-		t.Error("作者名片默认空（运营单篇换）")
-	}
-	if blocks["more_articles"].(map[string]any)["enabled"] != false {
-		t.Error("系列更多文章默认隐藏")
-	}
-}
-
 func TestDefaultBottomBlocksModuleValid(t *testing.T) {
 	if err := validateBottomBlocksModule(defaultBottomBlocksModule()); err != nil {
 		t.Fatalf("default bottom_blocks module should validate: %v", err)
@@ -144,6 +124,27 @@ func TestDefaultBottomBlocksModuleValid(t *testing.T) {
 	}
 	if err := validateBottomBlocksModule(defaultSeriesBottomBlocksModule()); err != nil {
 		t.Fatalf("series bottom_blocks module should validate: %v", err)
+	}
+}
+
+// 系列底部默认只能用 foodtalks-series.js 的 seriesBlockRenderers 真正实现的块类型
+// （image / more_articles / text）。守护「校验通过但渲染器没实现 → block-render 静默跳过」这类
+// 回归：曾经系列 V2 默认放了 spacer 块，但系列渲染器无 spacer renderer，导致图间距整段静默丢失。
+// 取顶层 mod["blocks"] 还顺带锁死系列保持 v1（若误切 V2，blocks 进 presets，顶层缺失 → Fatal）。
+// 新增系列块类型前，必须先在 seriesBlockRenderers 实现对应 renderer 并更新此白名单。
+func TestSeriesBottomBlocksOnlyRenderableTypes(t *testing.T) {
+	renderable := map[string]bool{"image": true, "more_articles": true, "text": true}
+	mod := defaultSeriesBottomBlocksModule()
+	blocks, ok := mod["blocks"].(map[string]any)
+	if !ok {
+		t.Fatal("系列默认应为 v1 顶层 blocks 结构（非 V2 presets）：系列无 spacer renderer，不得切 V2")
+	}
+	for id, raw := range blocks {
+		b, _ := raw.(map[string]any)
+		typ, _ := b["type"].(string)
+		if !renderable[typ] {
+			t.Errorf("系列底部块 %q 类型 %q 无 seriesBlockRenderers 实现，会被 block-render 静默跳过", id, typ)
+		}
 	}
 }
 

@@ -123,8 +123,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v4→v5（2026-06-05）：bottom_blocks 区块实例新增 display_name，修正系列尾部区块在后台/前台
 // 退到“什么是系列Eileen名片”这类素材文件名的问题。
 // v5→v6（2026-06-05）：bottom_blocks 模块新增 gap=blank_line，区块类型增加 kind/text 文字模块。
-// v6→v7（2026-06-06）：公众号(FBIF)/系列底部默认切 4 原子 V2 双预设（原创/转载），替换旧语义类型
-// declaration/name_card/titled_media。本地浏览器验证 V2 视觉 1:1 == footer.html；微信复制最终由公众号后台确认。
+// v6→v7（2026-06-06）：FBIF 公众号底部默认切 4 原子 V2 双预设（原创/转载），替换旧语义类型
+// declaration/name_card/titled_media；本地浏览器验证 FBIF V2 视觉 1:1 == footer.html，微信复制最终由公众号后台确认。
+// 系列【保持 v1，不切 V2】：spacer 间距需 FoodTalks 后台确认且系列无 spacer renderer，切 V2 零收益（理由见 series bottom_blocks 覆盖处注释）。
 const currentBuiltinRuleVersion = 7
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
@@ -376,7 +377,11 @@ func defaultFoodTalksSeriesRuleConfig() map[string]any {
 			"ft_series_materials": defaultFtSeriesMaterialsModule(),
 			// 显式覆盖：系列与 FBIF 共用 bottom_blocks 结构但默认不同（名片/群二维码满宽图 + 可显隐更多文章）。
 			// 不覆盖则经 mergeRuleDefaults 继承 FBIF 基线 → renderBottomFooter 会错渲 FBIF 提示/波波/1000。
-			"bottom_blocks": defaultSeriesBottomBlocksModuleV2(),
+			// 系列保持 v1（不切 V2）：系列 V2 的 spacer 间距是占位值、需 FoodTalks 后台视觉确认（无权限做），
+			// 且 foodtalks-series.js 无 spacer renderer（spacer 会被 block-render 静默跳过，间距由 v1 的
+			// gap=blank_line separator 承载，已 series-blocks-fidelity 验证）；系列原创/转载同内容、双预设零收益。
+			// v1 已是统一 image/more_articles 原子区块、走 mountBlockPanel，满足红线#22（统一结构≠强制 schema_version 2）。
+			"bottom_blocks": defaultSeriesBottomBlocksModule(),
 		},
 	}
 }

@@ -453,8 +453,10 @@ export function initApp(initialTemplate) {
   }
 
   async function processFile(file, opts) {
-    // Set repost flag per-call so it never leaks across articles.
-    _isRepost = !!(opts && opts.isRepost);
+    // Repost flag 局部捕获：footer 选预设全程用此局部，绝不在 await 之后回读模块级 _isRepost
+    // （并发导入交错会污染全局；codex re-review）。全局仍同步设置，供快照/renderBottomFooter 兜底。
+    const isRepost = !!(opts && opts.isRepost);
+    _isRepost = isRepost;
     const t0 = performance.now();
     file = await normalizeToDocx(file);
     let result;
@@ -463,22 +465,21 @@ export function initApp(initialTemplate) {
     const fallbackTitle = file.name.replace(/\.\w+$/i, '');
     if (isDocx) {
       const docxData = await parseDocx(file);
-      result = template.processDocx({ ...docxData, isRepost: _isRepost, config: _activeConfig });
-      _lastRenderInput = { kind: 'docx', payload: docxData, isRepost: _isRepost, title: result.title || fallbackTitle };
+      result = template.processDocx({ ...docxData, isRepost, config: _activeConfig });
+      _lastRenderInput = { kind: 'docx', payload: docxData, isRepost, title: result.title || fallbackTitle };
     } else if (typeof template.processMd === 'function') {
       const text = await file.text();
-      result = await template.processMd(text, { isRepost: _isRepost, config: _activeConfig });
-      _lastRenderInput = { kind: 'md', payload: text, isRepost: _isRepost, title: result.title || fallbackTitle };
+      result = await template.processMd(text, { isRepost, config: _activeConfig });
+      _lastRenderInput = { kind: 'md', payload: text, isRepost, title: result.title || fallbackTitle };
     } else {
       throw new Error('此模板不支持该文件格式');
     }
     const articleHtml = result.lines.join('\n');
     // New article upload resets the "更多文章" section to blank placeholder
     // slots — cards are a per-article curation, filled in manually each time.
-    saveMoreArticlesCards(makeFreshUploadCards());
-    if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-    const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml();
-    const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isV2 });
+    resetMoreArticlesForNewArticle();
+    const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({ isRepost });
+    const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
     const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
       ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -515,7 +516,9 @@ export function initApp(initialTemplate) {
   // visual signals). Falls back to _handleFile with a synthetic .md File
   // when the server returns {title, content} (x-reader fallback).
   window._handleBlocks = async (data, opts) => {
-    _isRepost = !!(opts && opts.isRepost);
+    // Repost flag 局部捕获（同 processFile/handleFile）：footer 链路用局部，不回读全局。
+    const isRepost = !!(opts && opts.isRepost);
+    _isRepost = isRepost;
     _convLog.length = 0;
     logConv('info', '开始转化', { source: 'blocks', blocks: (data.blocks || []).length });
     errorEl.style.display = 'none';
@@ -533,15 +536,14 @@ export function initApp(initialTemplate) {
       // await: processBlocks is synchronous today but we're inside an
       // async context anyway, and future work (e.g. image pre-fetch)
       // might make it async. The await has zero cost on plain returns.
-      const result = await template.processBlocks(data, { isRepost: _isRepost, config: _activeConfig });
-      _lastRenderInput = { kind: 'blocks', payload: data, isRepost: _isRepost, title: data.title };
+      const result = await template.processBlocks(data, { isRepost, config: _activeConfig });
+      _lastRenderInput = { kind: 'blocks', payload: data, isRepost, title: data.title };
       logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
 
       const articleHtml = result.lines.join('\n');
-      saveMoreArticlesCards(makeFreshUploadCards());
-      if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml();
-      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isV2 });
+      resetMoreArticlesForNewArticle();
+      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({ isRepost });
+      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -615,8 +617,10 @@ export function initApp(initialTemplate) {
   };
 
   async function handleFile(file, opts) {
-    // Set repost flag per-call so it never leaks across articles.
-    _isRepost = !!(opts && opts.isRepost);
+    // Repost flag 局部捕获：footer 选预设全程用此局部，绝不在 await 之后回读模块级 _isRepost
+    // （并发导入交错会污染全局；codex re-review）。全局仍同步设置，供快照/renderBottomFooter 兜底。
+    const isRepost = !!(opts && opts.isRepost);
+    _isRepost = isRepost;
     _convLog.length = 0;
     logConv('info', '开始转化', { file: file.name, size: (file.size / 1024).toFixed(1) + 'KB' });
     errorEl.style.display = 'none';
@@ -641,13 +645,13 @@ export function initApp(initialTemplate) {
       const fallbackTitle = file.name.replace(/\.\w+$/i, '');
       if (isDocx) {
         const docxData = await parseDocx(file);
-        result = template.processDocx({ ...docxData, isRepost: _isRepost, config: _activeConfig });
-        _lastRenderInput = { kind: 'docx', payload: docxData, isRepost: _isRepost, title: result.title || fallbackTitle };
+        result = template.processDocx({ ...docxData, isRepost, config: _activeConfig });
+        _lastRenderInput = { kind: 'docx', payload: docxData, isRepost, title: result.title || fallbackTitle };
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else if (typeof template.processMd === 'function') {
         const text = await file.text();
-        result = await template.processMd(text, { isRepost: _isRepost, config: _activeConfig });
-        _lastRenderInput = { kind: 'md', payload: text, isRepost: _isRepost, title: result.title || fallbackTitle };
+        result = await template.processMd(text, { isRepost, config: _activeConfig });
+        _lastRenderInput = { kind: 'md', payload: text, isRepost, title: result.title || fallbackTitle };
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else {
         throw new Error('此模板不支持该文件格式');
@@ -657,10 +661,9 @@ export function initApp(initialTemplate) {
       // Single-file upload path — same reset behavior as batch path: wipe
       // any prior article's "更多文章" cards to blank placeholder slots, so
       // sidebar shows empty inputs and footer renders gray placeholders.
-      saveMoreArticlesCards(makeFreshUploadCards());
-      if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml();
-      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isV2 });
+      resetMoreArticlesForNewArticle();
+      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({ isRepost });
+      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
         ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
@@ -727,6 +730,17 @@ export function initApp(initialTemplate) {
     return cards.some(c => (c.title && c.title.trim()) || c.cover_data_url);
   }
 
+  // 新文章导入：把「更多文章」卡片重置为空白占位 + 作废上一篇在途的预热 job——两步必须原子。
+  // 只清卡片不作废 job，旧 job 会在卡片重置之后、showPreview 之前的窗口（两个 await + setTimeout）
+  // 里 resolve，此时 seq 未变 → 通过 742 校验 → saveMoreArticlesCards 把上一篇卡片写回存储，
+  // 下一篇 loadMoreArticlesCards 读到旧卡片（跨文章污染；codex re-review #3）。
+  function resetMoreArticlesForNewArticle() {
+    saveMoreArticlesCards(makeFreshUploadCards());
+    _moreArticlesCopySeq++;
+    _moreArticlesCopyJob = null;
+    if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+  }
+
   function prepareMoreArticlesForCopy(reason) {
     if (_moreArticlesCopyJob) return _moreArticlesCopyJob;
     const cards = loadMoreArticlesCards();
@@ -760,6 +774,11 @@ export function initApp(initialTemplate) {
     _footerCopy = _footerHtml;
     _failedSrcs = [];
     _copyRequiresWechatImageTransfer = false;
+    // 作废旧配置遗留的「更多文章」预热 job（主要供 rerender：同篇换配置时丢弃旧预热并重建）。
+    // 新文章导入路径已在更早的 resetMoreArticlesForNewArticle() 原子作废（codex re-review #3）；
+    // 此处再作废对新稿无害、对 rerender 必要。seq++ 让在途 job 在 742/747 校验失败自我丢弃。
+    _moreArticlesCopySeq++;
+    _moreArticlesCopyJob = null;
 
     // Split layout: show preview content, hide empty state
     const emptyState = document.getElementById('emptyState');

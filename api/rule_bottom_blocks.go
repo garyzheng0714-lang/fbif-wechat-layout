@@ -228,44 +228,6 @@ func defaultMpBottomBlocksModuleV2() map[string]any {
 	}
 }
 
-// defaultSeriesBottomBlocksModuleV2 是 FoodTalks「什么是」系列底部的 v2 原子版本：系列底部全是满宽
-// 图片块（作者名片/BD名片/群二维码）+ 可显隐的更多文章，无原创/转载声明差异，故双预设同内容（保持
-// 4 原子模型一致、presetId 映射直接命中）。作者名片 frontend_editable（红线#14 例外：系列作者随篇不同，
-// 运营单篇换图）。间距 spacer 高度为占位值，切生产前须公众号后台复制确认（CLAUDE.md UI 协议）。
-func defaultSeriesBottomBlocksModuleV2() map[string]any {
-	spacer := func(h int) map[string]any {
-		return map[string]any{"type": "spacer", "display_name": "间距", "enabled": true, "fields": map[string]any{"height": h}}
-	}
-	imageBlock := func(name, asset string, frontendEditable bool) map[string]any {
-		b := map[string]any{"type": "image", "display_name": name, "enabled": true, "fields": map[string]any{"image": asset}}
-		if frontendEditable {
-			b["frontend_editable"] = true
-		}
-		return b
-	}
-	blocks := func() map[string]any {
-		return map[string]any{
-			"author_card":   imageBlock("作者名片", "", true), // 作者默认空，运营单篇从素材库点选（frontend_editable）
-			"sp1":           spacer(16),
-			"bd_card":       imageBlock("BD 名片", "{{asset#ft_series_card_eileen}}", false),
-			"sp2":           spacer(16),
-			"group_qr":      imageBlock("包装群二维码", "{{asset#ft_series_group_packaging}}", false),
-			"sp3":           spacer(16),
-			"more_articles": map[string]any{"type": "more_articles", "display_name": "推荐文章", "enabled": false, "fields": map[string]any{"title": "/ 更多文章 /"}},
-		}
-	}
-	order := []any{"author_card", "sp1", "bd_card", "sp2", "group_qr", "sp3", "more_articles"}
-	return map[string]any{
-		"schema_version":   2,
-		"enabled":          true,
-		"active_preset_id": "original",
-		"presets": []any{
-			map[string]any{"id": "original", "name": "原创", "order": order, "blocks": blocks()},
-			map[string]any{"id": "repost", "name": "转载", "order": order, "blocks": blocks()},
-		},
-	}
-}
-
 // defaultSeriesBottomBlocksModule 是 FoodTalks「什么是」系列底部默认布局：把原 buildSeriesFooterElems
 // 的「作者名片 → BD 名片 → 群二维码」3 张满宽 banner 表达成 image 区块（引用素材库 {{asset#id}}），
 // 外加一个默认隐藏、可显隐的「更多文章」区块——让系列与 FBIF 共用同一 bottom_blocks 结构，
