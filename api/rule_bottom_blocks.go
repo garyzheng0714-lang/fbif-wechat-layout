@@ -13,27 +13,13 @@ import (
 //
 // 边界：渲染（type→HTML）由各渠道渲染器在 P3 实现；本文件只产出/校验数据，不拼 HTML。
 
-// truthyRuleValue 把任意值判定为布尔（兼容 true / 1 / "1" / "true"）。
-func truthyRuleValue(v any) bool {
-	switch x := v.(type) {
-	case bool:
-		return x
-	case float64:
-		return x != 0
-	case int:
-		return x != 0
-	case string:
-		s := strings.TrimSpace(strings.ToLower(x))
-		return s == "1" || s == "true" || s == "yes" || s == "on"
-	default:
-		return false
-	}
-}
-
-// bottomBlocksFromFooterModule 把历史页脚库模块(fbif_footer)无损迁移成区块模块：
+// bottomBlocksFromFooterModule 把历史页脚库模块(fbif_footer)迁移成 v2 单预设区块模块：
 //   - 每个页脚段 → 一个 rich_html 区块（html_lines 原样保留）；
-//   - segment_order → order（排除 tip——tip 在网站走正文流 buildSiteFooterTipElem，不属 buildFooterHtml 渲染范围）；
-//   - presets 的 segment 开关 → 区块 enabled 开关（同样排除 tip）。
+//   - segment_order → 单预设 default 的 order（排除 tip——tip 在网站走正文流
+//     buildSiteFooterTipElem，不属 buildFooterHtml 渲染范围）；
+//   - 页脚「4 套快捷预设」(fbif-original/repost-simple/tip-only/none) 是前端面板概念
+//     （site.html FALLBACK_PRESETS / footerLib.presets，走 ft.footer.segments 勾选），
+//     不进 bottom_blocks presets[]；段显隐由前端 override.overrides[id].enabled 控制。
 //
 // 同时作为运行时 fallback：旧规则只有 fbif_footer、缺 bottom_blocks 时现场迁移（spec §10）。
 func bottomBlocksFromFooterModule(footer map[string]any) map[string]any {
@@ -80,36 +66,22 @@ func bottomBlocksFromFooterModule(footer map[string]any) map[string]any {
 		order = append(order, id)
 	}
 
-	presets := []any{}
-	if rawPresets, ok := footer["presets"].([]any); ok {
-		for _, rp := range rawPresets {
-			p, ok := rp.(map[string]any)
-			if !ok {
-				continue
-			}
-			segs, _ := p["segments"].(map[string]any)
-			enabled := map[string]any{}
-			for _, raw := range order {
-				id := fmt.Sprint(raw)
-				enabled[id] = truthyRuleValue(segs[id])
-			}
-			presets = append(presets, map[string]any{
-				"id":      p["id"],
-				"name":    p["name"],
-				"enabled": enabled,
-			})
-		}
-	}
-
 	enabled := true
 	if v, ok := footer["enabled"].(bool); ok {
 		enabled = v
 	}
 	return map[string]any{
-		"enabled": enabled,
-		"order":   order,
-		"blocks":  blocks,
-		"presets": presets,
+		"schema_version":   2,
+		"enabled":          enabled,
+		"active_preset_id": "default",
+		"presets": []any{
+			map[string]any{
+				"id":     "default",
+				"name":   "页脚",
+				"order":  order,
+				"blocks": blocks,
+			},
+		},
 	}
 }
 

@@ -463,13 +463,21 @@ function render(elems, config = {}) {
   // 防泄漏：mergeRuleDefaults 以公众号基线(含 mp 的 name_card bottom_blocks)为合并底，
   // 无 bottom_blocks 的网站旧规则会被塞进公众号版。网站页脚段是 rich_html，故仅当存在
   // rich_html 区块时才认其为「网站底部」走区块渲染；否则回退 fbif_footer（保住页脚）。
-  const bbBlocks = bottomBlocks && typeof bottomBlocks.blocks === 'object' ? bottomBlocks.blocks : null;
-  // 仅 rich_html 页脚段认作「网站底部」——它是网站特有的页脚类型，公众号基线没有，故能区分
-  // 「网站自己的底部」与「mergeRuleDefaults 泄漏进来的公众号 bottom_blocks」。
-  // 不用 schema_version>=2 判定：公众号一旦切 v2，其泄漏的 bottom_blocks 也是 schema_version>=2，
-  // 会被误判为网站底部、用 siteBlockRenderers 渲染公众号块（codex review Block 2）。网站 v2 底部的
-  // 识别留到网站 v2 重搭时用网站专属标记（templateId/source），而非数据特征 schema_version。
-  const bbIsSiteFooter = bbBlocks && Object.keys(bbBlocks).some(k => bbBlocks[k] && bbBlocks[k].type === 'rich_html');
+  // 网站 v2 底部识别（统一打包）：取 active preset 的 blocks（保留顶层兜底兼容旧 v1）。
+  // 仅含 rich_html 区块才认作「网站底部」——rich_html 是网站特有的页脚段类型，公众号 v2
+  // presets 是 text/image/spacer 原子、不含 rich_html，故据此区分「网站自己的底部」与
+  // 「mergeRuleDefaults 泄漏进来的公众号 bottom_blocks」（rich_html 特征解决了旧 schema_version
+  // 无法区分公众号 v2 泄漏的问题——前任推迟的 templateId 标记不再必需）。
+  const bbActiveBlocks = (() => {
+    if (!bottomBlocks || typeof bottomBlocks !== 'object') return null;
+    const ps = Array.isArray(bottomBlocks.presets) ? bottomBlocks.presets : null;
+    if (ps && ps.length) {
+      const p = ps.find(x => x && x.id === bottomBlocks.active_preset_id) || ps[0] || {};
+      return p && typeof p.blocks === 'object' ? p.blocks : null;
+    }
+    return typeof bottomBlocks.blocks === 'object' ? bottomBlocks.blocks : null;
+  })();
+  const bbIsSiteFooter = bbActiveBlocks && Object.keys(bbActiveBlocks).some(k => bbActiveBlocks[k] && bbActiveBlocks[k].type === 'rich_html');
   if (bottomBlocks && typeof bottomBlocks === 'object' && bbIsSiteFooter) {
     // 单篇覆盖由 site.html syncEngineConfig 从 localStorage 映射进来（开关/排序/字段）。
     const override = config._bottomBlocksOverride || {};

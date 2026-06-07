@@ -643,7 +643,10 @@ function syncEngineConfig(triggerRerender) {
   // 逐块 enabled = !!active_segments[id]（缺失视为关），与旧 buildFooterHtml 的 `if(!seg[key])continue` 一致。
   let bottomBlocksOverride;
   if (serverBottomBlocks && typeof serverBottomBlocks === 'object') {
-    const bbOrder = Array.isArray(serverBottomBlocks.order) ? serverBottomBlocks.order : [];
+    // v2：order 在 active preset 内（顶层无 order）；保留 serverBottomBlocks 兜底兼容旧 v1 顶层。
+    const bbPresets = Array.isArray(serverBottomBlocks.presets) ? serverBottomBlocks.presets : [];
+    const bbActive = bbPresets.find(p => p && p.id === serverBottomBlocks.active_preset_id) || bbPresets[0] || serverBottomBlocks;
+    const bbOrder = Array.isArray(bbActive.order) ? bbActive.order : [];
     const overrides = {};
     for (const id of bbOrder) {
       if (id === 'tip') continue;

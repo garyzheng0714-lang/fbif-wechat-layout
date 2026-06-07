@@ -8,12 +8,23 @@ import (
 
 func bbBlock(t *testing.T, mod map[string]any, id string) map[string]any {
 	t.Helper()
-	blocks, _ := mod["blocks"].(map[string]any)
-	b, ok := blocks[id].(map[string]any)
+	b, ok := bbActiveBlocks(t, mod)[id].(map[string]any)
 	if !ok {
 		t.Fatalf("block %q missing in bottom_blocks", id)
 	}
 	return b
+}
+
+// bbActiveBlocks 取 v2 单预设的 blocks（网站/系列默认已转 v2 presets[]）。
+func bbActiveBlocks(t *testing.T, mod map[string]any) map[string]any {
+	t.Helper()
+	presets, _ := mod["presets"].([]any)
+	if len(presets) == 0 {
+		t.Fatal("bottom_blocks 应为 v2 presets 结构")
+	}
+	p, _ := presets[0].(map[string]any)
+	blocks, _ := p["blocks"].(map[string]any)
+	return blocks
 }
 
 // 迁移必须逐段无损：每个页脚段变成 rich_html 区块，html_lines 字节级保留。
@@ -22,9 +33,14 @@ func TestBottomBlocksMigrationLossless(t *testing.T) {
 	footer := defaultFBIFFooterModule()
 	mod := bottomBlocksFromFooterModule(footer)
 
+	presets, _ := mod["presets"].([]any)
+	if len(presets) == 0 {
+		t.Fatal("迁移后应为 v2 presets 结构")
+	}
+	preset := presets[0].(map[string]any)
 	wantOrder := []any{"biz_coop", "join_group", "follow_account", "logo", "more_info"}
-	if !reflect.DeepEqual(mod["order"], wantOrder) {
-		t.Fatalf("order = %v, want %v", mod["order"], wantOrder)
+	if !reflect.DeepEqual(preset["order"], wantOrder) {
+		t.Fatalf("order = %v, want %v", preset["order"], wantOrder)
 	}
 	segments := footer["segments"].(map[string]any)
 	for _, raw := range wantOrder {
@@ -43,30 +59,36 @@ func TestBottomBlocksMigrationLossless(t *testing.T) {
 		}
 	}
 	// tip 不进区块模型（网站走正文流 buildSiteFooterTipElem），即使 presets 里引用了它。
-	if _, ok := mod["blocks"].(map[string]any)["tip"]; ok {
+	if _, ok := bbActiveBlocks(t, mod)["tip"]; ok {
 		t.Error("tip must NOT migrate into bottom_blocks")
 	}
 }
 
+// 网站页脚迁移后是 v2 单预设（default）：4 套快捷预设（fbif-original/repost-simple/
+// tip-only/none）是前端面板概念（site.html FALLBACK_PRESETS，走 ft.footer.segments 勾选），
+// 不进 bottom_blocks presets[]；段显隐由前端 override.overrides[id].enabled 控制。
 func TestBottomBlocksMigrationPresets(t *testing.T) {
 	mod := bottomBlocksFromFooterModule(defaultFBIFFooterModule())
-	byID := map[string]map[string]any{}
-	for _, rp := range mod["presets"].([]any) {
-		p := rp.(map[string]any)
-		byID[p["id"].(string)] = p["enabled"].(map[string]any)
+	if mod["schema_version"] != 2 {
+		t.Fatalf("schema_version = %v, want 2", mod["schema_version"])
 	}
-	orig := byID["fbif-original"]
-	for _, id := range []string{"biz_coop", "join_group", "follow_account", "logo", "more_info"} {
-		if orig[id] != true {
-			t.Errorf("fbif-original preset %q = %v, want true", id, orig[id])
-		}
+	if mod["active_preset_id"] != "default" {
+		t.Errorf("active_preset_id = %v, want default", mod["active_preset_id"])
 	}
-	if _, ok := orig["tip"]; ok {
-		t.Error("preset enabled map must exclude tip")
+	presets, _ := mod["presets"].([]any)
+	if len(presets) != 1 {
+		t.Fatalf("网站 v2 应为单预设，got %d 个", len(presets))
 	}
-	repost := byID["repost-simple"]
-	if repost["biz_coop"] != true || repost["join_group"] != false || repost["logo"] != false {
-		t.Errorf("repost-simple mapping wrong: %v", repost)
+	p := presets[0].(map[string]any)
+	if p["id"] != "default" {
+		t.Errorf("单预设 id = %v, want default", p["id"])
+	}
+	// 顶层不得残留 v1 的 blocks/order（v2 数据全在 presets[] 内）。
+	if _, ok := mod["blocks"]; ok {
+		t.Error("v2 不应有顶层 blocks")
+	}
+	if _, ok := mod["order"]; ok {
+		t.Error("v2 不应有顶层 order")
 	}
 }
 
