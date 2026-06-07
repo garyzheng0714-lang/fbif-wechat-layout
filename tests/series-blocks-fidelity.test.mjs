@@ -14,18 +14,23 @@ globalThis.fetch = async () => ({ ok: false, text: async () => '' });
 
 const template = (await import('../public/js/templates/foodtalks-series.js?test=' + Date.now())).default;
 
-// 系列底部默认（与 api/rule_bottom_blocks.go defaultSeriesBottomBlocksModule 对齐）。
+// 系列底部默认（v2 单预设，与 api/rule_bottom_blocks.go defaultSeriesBottomBlocksModule 对齐）。
 function seriesBottomBlocks() {
   return {
+    schema_version: 2,
     enabled: true,
-    order: ['author_card', 'bd_card', 'group_qr', 'more_articles'],
-    blocks: {
-      author_card: { type: 'image', enabled: true, fields: { image: '' } },
-      bd_card: { type: 'image', enabled: true, fields: { image: '{{asset#ft_series_card_eileen}}' } },
-      group_qr: { type: 'image', enabled: true, fields: { image: '{{asset#ft_series_group_packaging}}' } },
-      more_articles: { type: 'more_articles', enabled: false, fields: { title: '/ 更多文章 /' } },
-    },
-    presets: [],
+    active_preset_id: 'default',
+    presets: [{
+      id: 'default',
+      name: '系列页脚',
+      order: ['author_card', 'bd_card', 'group_qr', 'more_articles'],
+      blocks: {
+        author_card: { type: 'image', enabled: true, fields: { image: '' } },
+        bd_card: { type: 'image', enabled: true, fields: { image: '{{asset#ft_series_card_eileen}}' } },
+        group_qr: { type: 'image', enabled: true, fields: { image: '{{asset#ft_series_group_packaging}}' } },
+        more_articles: { type: 'more_articles', enabled: false, fields: { title: '/ 更多文章 /' } },
+      },
+    }],
   };
 }
 const ASSET_LIB = {

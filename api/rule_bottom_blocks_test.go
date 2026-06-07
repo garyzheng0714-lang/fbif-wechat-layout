@@ -128,16 +128,21 @@ func TestDefaultBottomBlocksModuleValid(t *testing.T) {
 }
 
 // 系列底部默认只能用 foodtalks-series.js 的 seriesBlockRenderers 真正实现的块类型
-// （image / more_articles / text）。守护「校验通过但渲染器没实现 → block-render 静默跳过」这类
-// 回归：曾经系列 V2 默认放了 spacer 块，但系列渲染器无 spacer renderer，导致图间距整段静默丢失。
-// 取顶层 mod["blocks"] 还顺带锁死系列保持 v1（若误切 V2，blocks 进 presets，顶层缺失 → Fatal）。
+// （image / more_articles / text / spacer）。守护「校验通过但渲染器没实现 → block-render 静默跳过」
+// 这类回归：曾经系列默认放了 spacer 块但渲染器无 spacer renderer，导致图间距整段静默丢失
+// （已于 b0bf5ee 补 spacer renderer）。系列已转 v2 单预设：从 presets[0].blocks 取块类型校验。
 // 新增系列块类型前，必须先在 seriesBlockRenderers 实现对应 renderer 并更新此白名单。
 func TestSeriesBottomBlocksOnlyRenderableTypes(t *testing.T) {
-	renderable := map[string]bool{"image": true, "more_articles": true, "text": true}
+	renderable := map[string]bool{"image": true, "more_articles": true, "text": true, "spacer": true}
 	mod := defaultSeriesBottomBlocksModule()
-	blocks, ok := mod["blocks"].(map[string]any)
+	presets, ok := mod["presets"].([]any)
+	if !ok || len(presets) == 0 {
+		t.Fatal("系列默认应为 v2 presets 结构（schema_version=2，单预设 default）")
+	}
+	preset, _ := presets[0].(map[string]any)
+	blocks, ok := preset["blocks"].(map[string]any)
 	if !ok {
-		t.Fatal("系列默认应为 v1 顶层 blocks 结构（非 V2 presets）：系列无 spacer renderer，不得切 V2")
+		t.Fatal("系列 v2 预设应含 blocks")
 	}
 	for id, raw := range blocks {
 		b, _ := raw.(map[string]any)
@@ -153,9 +158,9 @@ func TestValidateBottomBlocksRejectsBad(t *testing.T) {
 		"unknown type":         {"blocks": map[string]any{"x": map[string]any{"type": "no_such_type"}}},
 		"bad block id":         {"blocks": map[string]any{"Bad ID!": map[string]any{"type": "rich_html"}}},
 		"order ghost ref":      {"order": []any{"ghost"}},
-		"number above max":     {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"intro_size": float64(999)}}}},
-		"insecure image url":   {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"image": "http://insecure.example/x.png"}}}},
-		"undeclared field":     {"blocks": map[string]any{"c": map[string]any{"type": "name_card", "fields": map[string]any{"nope": "x"}}}},
+		"number above max":     {"blocks": map[string]any{"c": map[string]any{"type": "image", "fields": map[string]any{"width": float64(9999)}}}},
+		"insecure image url":   {"blocks": map[string]any{"c": map[string]any{"type": "image", "fields": map[string]any{"image": "http://insecure.example/x.png"}}}},
+		"undeclared field":     {"blocks": map[string]any{"c": map[string]any{"type": "image", "fields": map[string]any{"nope": "x"}}}},
 		"enabled wrong type":   {"enabled": "yes"},
 		"bad gap":              {"gap": "huge"},
 		"display non-string":   {"blocks": map[string]any{"c": map[string]any{"type": "image", "display_name": 123}}},

@@ -170,46 +170,54 @@ func defaultMpBottomBlocksModuleV2() map[string]any {
 	}
 }
 
-// defaultSeriesBottomBlocksModule 是 FoodTalks「什么是」系列底部默认布局：把原 buildSeriesFooterElems
-// 的「作者名片 → BD 名片 → 群二维码」3 张满宽 banner 表达成 image 区块（引用素材库 {{asset#id}}），
-// 外加一个默认隐藏、可显隐的「更多文章」区块——让系列与 FBIF 共用同一 bottom_blocks 结构，
-// 差异只在默认值（红线#2：规则是可复用资产）。默认选择对齐 defaultFtSeriesMaterialsModule 的
-// footer_default：author 留空（运营单篇点选）、bd=Eileen、group=包装。系列必须显式覆盖此模块，
-// 否则经 mergeRuleDefaults 继承 FBIF 基线的 defaultMpBottomBlocksModule → 错渲 FBIF 页脚。
-// 渲染走系列专属 renderBottomFooter（foodtalks-series.js），字节口径区别于 FBIF（满宽 100% 而非 661px）。
+// defaultSeriesBottomBlocksModule 是 FoodTalks「什么是」系列底部默认布局（v2 单预设）：把
+// 作者名片 → BD 名片 → 群二维码 3 张满宽 banner 表达成 image 区块（引用素材库 {{asset#id}}），
+// 外加默认隐藏、可显隐的「更多文章」。系列与 FBIF 共用同一 bottom_blocks 结构，差异只在默认值
+// （红线#2：规则是可复用资产）。系列无原创/转载之分，单预设 id=default；renderBottomFooter 传
+// presetId=original 在 activeLayer 找不到时 fallback 到首个预设（default）。块间距走 image 块自带
+// margin（SERIES_LAYOUT.gap，golden 20px）——v2 无 blank_line 自动空段，对齐 series-blocks-fidelity
+// golden 的设计口径。系列必须显式覆盖此模块，否则经 mergeRuleDefaults 继承 FBIF 基线
+// defaultMpBottomBlocksModuleV2 → 错渲 FBIF 页脚。渲染走系列专属 renderBottomFooter
+// （foodtalks-series.js），满宽 100% 区别于 FBIF 661px。
 func defaultSeriesBottomBlocksModule() map[string]any {
 	return map[string]any{
-		"enabled": true,
-		"gap":     "blank_line",
-		"order":   []any{"author_card", "bd_card", "group_qr", "more_articles"},
-		"blocks": map[string]any{
-			"author_card": map[string]any{
-				"type":              "image",
-				"display_name":      "作者名片",
-				"enabled":           true,
-				"frontend_editable": true,                        // 系列作者名片随篇不同，前端放开换图（运营单篇从素材库点选）
-				"fields":            map[string]any{"image": ""}, // 默认空：运营单篇从素材库点选作者名片
-			},
-			"bd_card": map[string]any{
-				"type":         "image",
-				"display_name": "BD 名片",
-				"enabled":      true,
-				"fields":       map[string]any{"image": "{{asset#ft_series_card_eileen}}"},
-			},
-			"group_qr": map[string]any{
-				"type":         "image",
-				"display_name": "包装群二维码",
-				"enabled":      true,
-				"fields":       map[string]any{"image": "{{asset#ft_series_group_packaging}}"},
-			},
-			"more_articles": map[string]any{
-				"type":         "more_articles",
-				"display_name": "推荐文章",
-				"enabled":      false, // 系列默认不出更多文章；结构里保留，运营可显隐（用户诉求：结构统一）
-				"fields":       map[string]any{"title": "/ 更多文章 /"},
+		"schema_version":   2,
+		"enabled":          true,
+		"active_preset_id": "default",
+		"presets": []any{
+			map[string]any{
+				"id":    "default",
+				"name":  "系列页脚",
+				"order": []any{"author_card", "bd_card", "group_qr", "more_articles"},
+				"blocks": map[string]any{
+					"author_card": map[string]any{
+						"type":              "image",
+						"display_name":      "作者名片",
+						"enabled":           true,
+						"frontend_editable": true,
+						"fields":            map[string]any{"image": ""},
+					},
+					"bd_card": map[string]any{
+						"type":         "image",
+						"display_name": "BD 名片",
+						"enabled":      true,
+						"fields":       map[string]any{"image": "{{asset#ft_series_card_eileen}}"},
+					},
+					"group_qr": map[string]any{
+						"type":         "image",
+						"display_name": "包装群二维码",
+						"enabled":      true,
+						"fields":       map[string]any{"image": "{{asset#ft_series_group_packaging}}"},
+					},
+					"more_articles": map[string]any{
+						"type":         "more_articles",
+						"display_name": "推荐文章",
+						"enabled":      false,
+						"fields":       map[string]any{"title": "/ 更多文章 /"},
+					},
+				},
 			},
 		},
-		"presets": []any{},
 	}
 }
 
