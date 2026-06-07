@@ -119,64 +119,6 @@ func defaultBottomBlocksModule() map[string]any {
 	return bottomBlocksFromFooterModule(defaultFBIFFooterModule())
 }
 
-// defaultMpBottomBlocksModule 是公众号(FBIF)底部区块默认布局：由 footer.html 的 4 块逆向而来
-// （提示声明 declaration / 波波名片 name_card / 更多文章 more_articles / 1000案例 titled_media）。
-// 图字段引用素材库 {{asset#id}}。模块 enabled 暂为 false：待 engine footer 链路改由 bottom_blocks
-// engine footer 链路已通过 template.renderBottomFooter 接管（替代 footer.html）；
-// 渲染保真由 tests/mp-blocks-fidelity.test.mjs golden 守。
-func defaultMpBottomBlocksModule() map[string]any {
-	return map[string]any{
-		"enabled": true,
-		"gap":     "blank_line",
-		"order":   []any{"tip", "byline", "more_articles", "promo"},
-		"blocks": map[string]any{
-			"tip": map[string]any{
-				"type":         "declaration",
-				"display_name": "提示声明",
-				"enabled":      true,
-				"fields": map[string]any{
-					"title": "提示：",
-					"lines": []any{
-						`<!--REPOST_BULLET1_START-->`,
-						`<p style="margin:0 8px;padding:0;"><span style="color:rgb(136, 136, 136);font-size:15px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;">* 本文为FBIF原创，欢迎转发朋友圈；</span></p>`,
-						`<!--REPOST_BULLET1_END--><!--REPOST_BULLET2_START-->`,
-						`<p style="margin:0 8px;padding:0;"><span style="color:rgb(136, 136, 136);font-size:15px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;">* 转载请在后台回复“转载”了解规则；</span></p>`,
-						`<!--REPOST_BULLET2_END-->`,
-						`<p style="margin:0 8px;padding:0;"><span style="color:rgb(136, 136, 136);font-size:15px;font-family:mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif;line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;">* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）</span></p>`,
-					},
-				},
-			},
-			"byline": map[string]any{
-				"type":         "name_card",
-				"display_name": "Bobo 名片",
-				"enabled":      true,
-				"fields": map[string]any{
-					"intro_text": "",
-					"image":      "{{asset#fbif_bobo_card}}",
-				},
-			},
-			"more_articles": map[string]any{
-				"type":         "more_articles",
-				"display_name": "更多文章",
-				"enabled":      true,
-				"fields": map[string]any{
-					"title": "/ 更多文章 /",
-				},
-			},
-			"promo": map[string]any{
-				"type":         "titled_media",
-				"display_name": "1000 个食品创新案例",
-				"enabled":      true,
-				"fields": map[string]any{
-					"title": "/ 1000个食品创新案例 /",
-					"image": "{{asset#fbif_promo_1000}}",
-				},
-			},
-		},
-		"presets": []any{},
-	}
-}
-
 // defaultMpBottomBlocksModuleV2 是 FBIF 公众号底部的 v2 原子双预设版本（原创/转载各一套）：
 // 把 v1 的 declaration/name_card/titled_media 重写成「文字(text)+图片(image)+间距(spacer)+推荐(more_articles)」
 // 四原子，视觉复刻 footer.html。原创/转载差异仅在提示正文(tip_body)文案，由 isRepost→presetId 自动选。

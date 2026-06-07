@@ -54,19 +54,6 @@ test('模块禁用（enabled=false）：区块渲染输出空串', () => {
   assert.equal(out, '');
 });
 
-test('name_card 字段化区块：上方文字 + 名片图按字段渲染', () => {
-  const mod = { enabled: true, order: ['card'], blocks: { card: { type: 'name_card', enabled: true, fields: {} } } };
-  const out = renderBottomBlocksHtml(
-    mod,
-    { overrides: { card: { fields: { intro_text: '联系 Eileen', intro_size: 16, intro_color: '#396FBC', image: 'https://static.foodtalks.cn/x.png' } } } },
-    siteBlockRenderers(ASSET_LIBRARY_DEFAULT, 'ft-default')
-  );
-  assert.match(out, /联系 Eileen/);
-  assert.match(out, /font-size: 16px/);
-  assert.match(out, /#396FBC/);
-  assert.match(out, /static\.foodtalks\.cn\/x\.png/);
-});
-
 test('网站文字模块与图片区块共用底部语义，并支持模块间空行', () => {
   // WHY：网站没有推荐文章系统，但文字/图片模块应与公众号共用同一 bottom_blocks 模型。
   const mod = {

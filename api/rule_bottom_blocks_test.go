@@ -119,8 +119,8 @@ func TestDefaultBottomBlocksModuleValid(t *testing.T) {
 	if err := validateBottomBlocksModule(defaultBottomBlocksModule()); err != nil {
 		t.Fatalf("default bottom_blocks module should validate: %v", err)
 	}
-	if err := validateBottomBlocksModule(defaultMpBottomBlocksModule()); err != nil {
-		t.Fatalf("mp bottom_blocks module should validate: %v", err)
+	if err := validateBottomBlocksModule(defaultMpBottomBlocksModuleV2()); err != nil {
+		t.Fatalf("mp v2 bottom_blocks module should validate: %v", err)
 	}
 	if err := validateBottomBlocksModule(defaultSeriesBottomBlocksModule()); err != nil {
 		t.Fatalf("series bottom_blocks module should validate: %v", err)
@@ -173,13 +173,13 @@ func TestValidateBottomBlocksRejectsBad(t *testing.T) {
 	}
 }
 
-// name_card 图片字段接受素材库占位符（{{asset#id}}）与站内路径，合法 number 通过。
+// 图片块的图片字段接受素材库占位符（{{asset#id}}）与站内路径，合法 number 通过。
 func TestValidateBottomBlocksAcceptsValid(t *testing.T) {
 	ok := map[string]any{"gap": "blank_line", "blocks": map[string]any{
-		"c": map[string]any{"type": "name_card", "display_name": "商务名片", "fields": map[string]any{
-			"image":      "{{asset#ft_footer_logo}}",
-			"intro_size": float64(16),
-			"intro_text": "联系 Eileen",
+		"c": map[string]any{"type": "image", "display_name": "商务图", "fields": map[string]any{
+			"image":  "{{asset#ft_footer_logo}}",
+			"width":  float64(160),
+			"center": true,
 		}},
 		"t": map[string]any{"type": "text", "display_name": "提示文字", "fields": map[string]any{
 			"content":          "欢迎入群",

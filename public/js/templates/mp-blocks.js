@@ -14,8 +14,6 @@ import { richTextToInline } from '../blocks/rich-text-render.js';
 
 // footer.html 标题/正文统一字体栈（mp-quote 优先 + 微信端字体回退）。&quot; 是 footer 原始转义形态，保留。
 const FONT_FAMILY = 'mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif';
-// 满宽图样式（661px = 微信正文宽），复刻 footer.html 的名片/引流图 <img>。
-const IMG_FULL = 'display:block;width:661px !important;max-width:100% !important;height:auto !important;margin:0 auto;vertical-align:top;box-sizing:border-box;visibility:visible !important;';
 // 更多文章卡片外层容器开标签——必须与 more-articles.js 的 OUTER_WRAPPER_OPEN 字节一致（委托锚点）。
 const CARDS_WRAPPER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
 
@@ -58,16 +56,6 @@ function titleSpanStyle(color, size) {
 function textBlockSpanStyle(f) {
   const bg = String(f.background_color == null ? '' : f.background_color).trim();
   return `color:${colorToRgb(f.text_color || '#544545')};font-size:${intOr(f.font_size, 15)}px;font-family:${FONT_FAMILY};line-height:1.75;letter-spacing:0.034em;font-style:${f.italic ? 'italic' : 'normal'};font-weight:${f.bold ? 'bold' : 'normal'};text-decoration:${f.underline ? 'underline' : 'none'};${bg ? `background-color:${colorToRgb(bg)};` : ''}`;
-}
-
-// 名片/二维码上方说明文字 span 样式（可空，color/size 可配）。
-function captionSpanStyle(color, size) {
-  return `color:${colorToRgb(color)};font-size:${size}px;font-family:${FONT_FAMILY};line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;`;
-}
-
-// 满宽图 section（margin 由各块给定，复刻 footer.html 精确块间距）。
-function fullImageSection(margin, url) {
-  return `<section style="margin:${margin};padding:0;text-align:center;line-height:0;font-size:0;"><img alt="图片" class="rich_pages wxw-img" style="${IMG_FULL}" src="${url}"></section>`;
 }
 
 // 居中开关 → text-align 片段（footer.html 标题均居中；center=false 时去掉）。
@@ -138,56 +126,6 @@ export function mpBlockRenderers(assetLibrary, scope = 'global', opts = {}) {
 
     // 自定义内容：html_lines 原样输出（历史段无损迁移 / 高级兜底）。
     rich_html: (f) => resolve(asLines(f.html_lines)),
-
-    // 声明/提示：paragraph 外层 + 标题（固定 17px 深褐、左对齐）+ 条目行（原样，含转载锚点）。
-    declaration: (f) => {
-      const parts = ['<section data-role="paragraph" style="margin:0;padding:0;">'];
-      const title = String(f.title == null ? '' : f.title).trim();
-      if (title) {
-        parts.push(`<section style="margin:0 8px 8px;padding:0;"><span style="${titleSpanStyle('#544545', 17)}"><strong>${esc(title)}</strong></span></section>`);
-      }
-      for (const ln of asLines(f.lines)) parts.push(String(ln == null ? '' : ln));
-      parts.push('</section>');
-      return resolve(parts);
-    },
-
-    // 名片：上方文字（可空）+ 满宽名片图。复刻 FBIF 波波名片（无文字，图 margin:16px 8px 0）。
-    name_card: (f) => {
-      const lines = [];
-      const text = String(f.intro_text == null ? '' : f.intro_text).trim();
-      if (text) {
-        lines.push(`<section style="margin:0 8px 12px;padding:0;text-align:center;"><span style="${captionSpanStyle(f.intro_color || '#888888', intOr(f.intro_size, 14))}">${esc(text)}</span></section>`);
-      }
-      const img = String(f.image == null ? '' : f.image).trim();
-      if (img) lines.push(fullImageSection('16px 8px 0', img));
-      return resolve(lines);
-    },
-
-    // 二维码卡：说明（可空）+ 满宽二维码图。
-    qr_card: (f) => {
-      const lines = [];
-      const cap = String(f.caption == null ? '' : f.caption).trim();
-      if (cap) {
-        lines.push(`<section style="margin:0 8px 12px;padding:0;text-align:center;"><span style="${captionSpanStyle(f.caption_color || '#888888', intOr(f.caption_size, 14))}">${esc(cap)}</span></section>`);
-      }
-      const img = String(f.image == null ? '' : f.image).trim();
-      if (img) lines.push(fullImageSection('16px 8px 0', img));
-      return resolve(lines);
-    },
-
-    // 标题+图片：栏目标题（文字/字号/颜色/居中可配）+ 满宽图。复刻 1000案例（标题 margin:20px、图 margin:0 8px 0）。
-    titled_media: (f) => {
-      const parts = [];
-      const title = String(f.title == null ? '' : f.title).trim();
-      if (title) {
-        parts.push('<section data-role="paragraph" style="margin:0;padding:0;">');
-        parts.push(`<section style="margin:20px 8px 20px;padding:0;${centerCss(f.center)}"><span style="${titleSpanStyle(f.title_color || '#544545', intOr(f.title_size, 17))}"><strong>${esc(title)}</strong></span></section>`);
-        parts.push('</section>');
-      }
-      const img = String(f.image == null ? '' : f.image).trim();
-      if (img) parts.push(fullImageSection('0 8px 0', img));
-      return resolve(parts);
-    },
 
     // 更多文章：标题 + 空卡片容器（带 mergeIntoFooter 锚点）。卡片由现有 more-articles 复制链路委托填充。
     // paragraph 外层【无 style】——必须与 more-articles.js 的 PARAGRAPH_WRAPPER_OPEN 字节一致。

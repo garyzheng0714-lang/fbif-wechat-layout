@@ -37,11 +37,6 @@ function alignOr(v, fallback = 'left') {
 function siteImage(url, extra = '') {
   return `<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto; max-width: 100%;${extra}" src="${url}" alt="" /></p>`;
 }
-// 网站口径居中文字段。
-function siteText(text, size, color) {
-  return `<p style="text-align: center; font-size: ${size}px; color: ${esc(color)};">${esc(text)}</p>`;
-}
-
 // siteBlockRenderers 返回网站渠道的「type → 渲染函数」表。
 //   assetLibrary: config.modules.asset_library（用于解析 {{asset#id}} 占位符，兼容旧 {{asset:usage}}）
 //   scope: 资产作用域，网站默认 'ft-default'
@@ -108,48 +103,6 @@ export function siteBlockRenderers(assetLibrary, scope = 'ft-default', opts = {}
 
     // 自定义内容：原样输出（网站默认页脚段即此型，字节一致）。
     rich_html: (f) => resolve(asLines(f.html_lines)),
-
-    // 声明/提示：粗体标题 + 条目行（原样）。
-    declaration: (f) => {
-      const lines = [];
-      const title = String(f.title == null ? '' : f.title).trim();
-      if (title) lines.push(`<p style="font-weight: bold;">${esc(title)}</p>`);
-      for (const ln of asLines(f.lines)) lines.push(String(ln == null ? '' : ln));
-      return resolve(lines);
-    },
-
-    // 名片：上方文字（可空）+ 名片图（网站口径 #888888 14px）。
-    name_card: (f) => {
-      const lines = [];
-      const text = String(f.intro_text == null ? '' : f.intro_text).trim();
-      if (text) lines.push(siteText(text, intOr(f.intro_size, 14), f.intro_color || '#888888'));
-      const img = String(f.image == null ? '' : f.image).trim();
-      if (img) lines.push(siteImage(img));
-      return resolve(lines);
-    },
-
-    // 二维码卡：说明（可空）+ 二维码图。
-    qr_card: (f) => {
-      const lines = [];
-      const cap = String(f.caption == null ? '' : f.caption).trim();
-      if (cap) lines.push(siteText(cap, intOr(f.caption_size, 14), f.caption_color || '#888888'));
-      const img = String(f.image == null ? '' : f.image).trim();
-      if (img) lines.push(siteImage(img));
-      return resolve(lines);
-    },
-
-    // 标题+图片：栏目标题（可配文字/字号/颜色/居中）+ 图。
-    titled_media: (f) => {
-      const parts = [];
-      const title = String(f.title == null ? '' : f.title).trim();
-      if (title) {
-        const ta = f.center === false ? 'left' : 'center';
-        parts.push(`<p style="text-align: ${ta}; font-size: ${intOr(f.title_size, 17)}px; color: ${esc(f.title_color || '#544545')}; font-weight: bold;">${esc(title)}</p>`);
-      }
-      const img = String(f.image == null ? '' : f.image).trim();
-      if (img) parts.push(siteImage(img));
-      return resolve(parts);
-    },
 
     // 更多文章：网站渠道无公众号「更多文章」卡片系统，按栏目标题渲染（仅标题，无委托卡片）。
     more_articles: (f) => {

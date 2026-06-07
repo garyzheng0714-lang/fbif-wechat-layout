@@ -81,8 +81,6 @@ function blockDisplayLabel(block, type, assetLibrary, accountId) {
   }
   const intro = block && block.fields && block.fields.intro_text && block.fields.intro_text.value;
   if (typeof intro === 'string' && intro.trim()) return intro.trim();
-  // name_card 空说明保留类型名「名片」（比素材文件名更像一个可编辑块）。
-  if (block && block.type === 'name_card') return (type && type.label) || block.type;
   const label = assetLabelFor(block, assetLibrary, accountId);
   if (label) return label;
   return (type && type.label) || (block && block.type) || '';

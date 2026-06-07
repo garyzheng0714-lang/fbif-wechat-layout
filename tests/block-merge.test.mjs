@@ -13,7 +13,7 @@ function baseModule() {
     order: ['intro', 'card', 'more'],
     blocks: {
       intro: { type: 'rich_html', enabled: true, fields: { html_lines: ['<p>hi</p>'] } },
-      card: { type: 'name_card', display_name: '商务名片', enabled: false, fields: { intro_text: '找小明' } },
+      card: { type: 'text', display_name: '商务名片', enabled: false, fields: { content: '找小明' } },
       more: { type: 'more_articles', enabled: true, fields: {} },
     },
   };
@@ -31,23 +31,23 @@ test('无覆盖时直通后台默认：顺序、开关、字段默认值均跟�
   assert.equal(card.enabled, false);          // 后台默认关
   assert.equal(card.displayName, '商务名片'); // 实例显示名只服务编辑器标题，不进入 fields
   // base.fields 覆盖 schema 默认；未在 base 设置的字段回落 schema 默认。
-  assert.equal(card.fields.intro_text.value, '找小明');
-  assert.equal(card.fields.intro_text.overridden, false);
-  assert.equal(card.fields.intro_size.value, 14);       // schema 默认
-  assert.equal(card.fields.intro_color.value, '#888888');
-  assert.equal(card.fields.image.value, '');
+  assert.equal(card.fields.content.value, '找小明');
+  assert.equal(card.fields.content.overridden, false);
+  assert.equal(card.fields.font_size.value, 15);       // schema 默认
+  assert.equal(card.fields.text_color.value, '#544545');
+  assert.equal(card.fields.align.value, 'left');
   assert.equal(flattenFields(card).display_name, undefined);
 });
 
 test('字段覆盖：被改字段标 overridden 并取覆盖值，其余字段仍跟随默认', () => {
-  const override = { overrides: { card: { fields: { intro_text: '找小红' } } } };
+  const override = { overrides: { card: { fields: { content: '找小红' } } } };
   const r = resolveBlocks(baseModule(), override);
   const card = r.blocks.find(b => b.id === 'card');
-  assert.equal(card.fields.intro_text.value, '找小红');
-  assert.equal(card.fields.intro_text.overridden, true);
-  assert.equal(card.fields.intro_text.default, '找小明');   // 仍记得后台默认，供恢复
-  assert.equal(card.fields.intro_size.value, 14);
-  assert.equal(card.fields.intro_size.overridden, false);
+  assert.equal(card.fields.content.value, '找小红');
+  assert.equal(card.fields.content.overridden, true);
+  assert.equal(card.fields.content.default, '找小明');   // 仍记得后台默认，供恢复
+  assert.equal(card.fields.font_size.value, 15);
+  assert.equal(card.fields.font_size.overridden, false);
 });
 
 test('开关覆盖：单篇可临时开启后台默认关闭的区块', () => {
@@ -71,20 +71,25 @@ test('顺序覆盖缺新块：后台后加的块自动补到末尾，不丢失',
 });
 
 test('flattenFields 取最终值映射，供渠道渲染器消费', () => {
-  const r = resolveBlocks(baseModule(), { overrides: { card: { fields: { intro_size: 20 } } } });
+  const r = resolveBlocks(baseModule(), { overrides: { card: { fields: { font_size: 20 } } } });
   const card = r.blocks.find(b => b.id === 'card');
   assert.deepEqual(flattenFields(card), {
-    intro_text: '找小明',
-    intro_size: 20,
-    intro_color: '#888888',
-    image: '',
+    content: '找小明',
+    html: '',
+    font_size: 20,
+    text_color: '#544545',
+    background_color: '',
+    italic: false,
+    underline: false,
+    bold: false,
+    align: 'left',
   });
 });
 
 test('恢复默认：清空覆盖即回到后台默认（card 文字回 找小明）', () => {
   const card = resolveBlocks(baseModule(), {}).blocks.find(b => b.id === 'card');
-  assert.equal(card.fields.intro_text.value, '找小明');
-  assert.equal(card.fields.intro_text.overridden, false);
+  assert.equal(card.fields.content.value, '找小明');
+  assert.equal(card.fields.content.overridden, false);
 });
 
 test('审计修复：order 重复 id 去重，区块不被渲染两次', () => {
@@ -226,5 +231,5 @@ test('hasAnyOverride 正确判定是否存在单篇改动', () => {
   assert.equal(hasAnyOverride({ enabled: false }), true);
   assert.equal(hasAnyOverride({ order: ['card'] }), true);
   assert.equal(hasAnyOverride({ overrides: { card: { enabled: true } } }), true);
-  assert.equal(hasAnyOverride({ overrides: { card: { fields: { intro_text: 'x' } } } }), true);
+  assert.equal(hasAnyOverride({ overrides: { card: { fields: { content: 'x' } } } }), true);
 });

@@ -68,24 +68,24 @@ func TestTextBlockSupportsBasicFormatting(t *testing.T) {
 	}
 }
 
-// 用户旗舰示例：名片必须是「字段化」的——上方文字 + 字号(带范围) + 颜色 + 名片图。
-// WHY：核心诉求是「可编辑/可自定义」，名片是其示范。若有人把名片退回成裸 HTML，本测试应失败。
-func TestNameCardIsFieldBased(t *testing.T) {
-	bt, ok := blockTypeByName("name_card")
+// 用户旗舰示例：通用块必须是「字段化」的——图片块 = 图片 + 宽度(带范围) + 居中开关。
+// WHY：核心诉求是「可编辑/可自定义」。若有人把块退回成裸 HTML（无字段、不可配），本测试应失败。
+func TestImageBlockIsFieldBased(t *testing.T) {
+	bt, ok := blockTypeByName("image")
 	if !ok {
-		t.Fatal("name_card block type missing")
+		t.Fatal("image block type missing")
 	}
-	want := map[string]string{"intro_text": "text", "intro_size": "number", "intro_color": "color", "image": "image"}
+	want := map[string]string{"image": "image", "width": "number", "center": "switch"}
 	got := map[string]string{}
 	for _, f := range bt.Fields {
 		got[f.Key] = f.Type
-		if f.Key == "intro_size" && (f.Min == nil || f.Max == nil) {
-			t.Error("name_card.intro_size must carry min/max to keep font size in a safe range")
+		if f.Key == "width" && (f.Min == nil || f.Max == nil) {
+			t.Error("image.width must carry min/max to keep width in a safe range")
 		}
 	}
 	for k, typ := range want {
 		if got[k] != typ {
-			t.Errorf("name_card.%s: want field type %s, got %q", k, typ, got[k])
+			t.Errorf("image.%s: want field type %s, got %q", k, typ, got[k])
 		}
 	}
 }

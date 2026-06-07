@@ -62,10 +62,8 @@ test('底部区块编辑器支持实例显示名，并在缺省时显示标题�
   assert.match(blockEditorSrc, /setBlockDisplayName/);
   assert.match(blockPanelSrc, /displayName/);
   assert.match(blockEditorSrc, /assetIDFromRef/);
-  assert.match(blockEditorSrc, /block\.type === 'name_card'/);
   assert.match(blockEditorSrc, /getAssetLibrary \? getAssetLibrary\(\)/);
   assert.match(blockEditorSrc, /blockDisplayLabel\(block, type/);
-  assert.match(blockPanelSrc, /block\.type === 'name_card'/);
 });
 
 test('素材库引用索引能扫描规则模块里的 #id 与旧 usage token', async () => {

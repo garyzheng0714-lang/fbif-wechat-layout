@@ -41,7 +41,6 @@ function blockDisplayLabel(block, type, assetLibrary, scope) {
   if (title) return title;
   const intro = String(f.intro_text || f.caption || '').trim();
   if (intro) return intro;
-  if (block && block.type === 'name_card') return (type && type.label) || block.type || '';
   const id = assetIDFromRef(f.image);
   for (const asset of assetsOf(assetLibrary)) {
     const assetScope = asset && (asset.scope || 'global');

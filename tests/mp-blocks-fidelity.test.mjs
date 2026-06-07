@@ -9,17 +9,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { renderBottomBlocksHtml } from '../public/js/blocks/block-render.js';
 import { mpBlockRenderers } from '../public/js/templates/mp-blocks.js';
 import { parseHTML } from 'linkedom';
 
 const mpParseDoc = (html) => parseHTML(html).document;
-
-const dir = path.dirname(fileURLToPath(import.meta.url));
-const footerHtml = fs.readFileSync(path.join(dir, '../public/footer.html'), 'utf8');
 
 const assetLibrary = {
   schema_version: 1,
@@ -29,68 +23,7 @@ const assetLibrary = {
   ],
 };
 
-// 从 footer.html 反向提取 FBIF 默认 bottom_blocks（base64 先占位，避免污染行切分）。
-function fbifModule() {
-  const segs = footerHtml.split(/(data:image\/[a-zA-Z.+-]+;base64,[A-Za-z0-9+/=]+)/);
-  let sk = '';
-  let n = 0;
-  for (const p of segs) sk += p.startsWith('data:image') ? `__IMG${n++}__` : p;
-  const L = sk.split('\n');
-  return {
-    enabled: true,
-    order: ['tip', 'byline', 'more_articles', 'promo'],
-    blocks: {
-      tip: { type: 'declaration', enabled: true, fields: { title: '提示：', lines: [L[2], L[3], L[4], L[5], L[6], L[7]] } },
-      byline: { type: 'name_card', enabled: true, fields: { intro_text: '', image: '{{asset#fbif_bobo_card}}' } },
-      more_articles: { type: 'more_articles', enabled: true, fields: { title: '/ 更多文章 /' } },
-      promo: { type: 'titled_media', enabled: true, fields: { title: '/ 1000个食品创新案例 /', image: '{{asset#fbif_promo_1000}}' } },
-    },
-  };
-}
-
 const OUTER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
-
-// 把更多文章卡片外层容器（OUTER_OPEN 到其深度匹配的 </section>）整体替换为 [[CARDS]]。
-function blankCards(html) {
-  const i = html.indexOf(OUTER_OPEN);
-  if (i < 0) return html;
-  let depth = 0;
-  let j = i;
-  while (j < html.length) {
-    const ni = html.indexOf('<section', j);
-    const nc = html.indexOf('</section>', j);
-    if (nc < 0) break;
-    if (ni >= 0 && ni < nc) { depth++; j = ni + '<section'.length; }
-    else {
-      depth--;
-      if (depth === 0) return html.slice(0, i) + '[[CARDS]]' + html.slice(nc + '</section>'.length);
-      j = nc + '</section>'.length;
-    }
-  }
-  return html;
-}
-
-function normalize(html) {
-  return blankCards(html.replace(/src="[^"]*"/g, 'src="[SRC]"')).trim();
-}
-
-test('mp 底部区块渲染字节级复刻 footer.html（图 src 与更多文章卡片区归一）', () => {
-  const out = renderBottomBlocksHtml(fbifModule(), undefined, mpBlockRenderers(assetLibrary, 'fbif'));
-  assert.equal(normalize(out), normalize(footerHtml));
-});
-
-test('波波名片图正确解析为素材库 URL（不是 base64、不补 width/height）', () => {
-  const out = renderBottomBlocksHtml(fbifModule(), undefined, mpBlockRenderers(assetLibrary, 'fbif'));
-  assert.ok(out.includes('src="/assets/fbif/bobo-card.webp"'), '波波名片应引用素材库 URL');
-  assert.ok(out.includes('src="/assets/fbif/promo-1000.webp"'), '1000案例图应引用素材库 URL');
-  assert.ok(!/bobo-card\.webp"[^>]*\swidth=/.test(out), '名片图不应被补 width 属性（保真）');
-});
-
-test('更多文章块输出 mergeIntoFooter 的两个锚点（委托复制链路可定位）', () => {
-  const out = renderBottomBlocksHtml(fbifModule(), undefined, mpBlockRenderers(assetLibrary, 'fbif'));
-  assert.ok(out.includes('<section data-role="paragraph">\n'), '需含无 style 的 paragraph 锚点');
-  assert.ok(out.includes(OUTER_OPEN), '需含卡片容器锚点');
-});
 
 // v2 双预设 FBIF 默认（对应 api/rule_bottom_blocks.go: defaultMpBottomBlocksModuleV2）渲染断言。
 // 视觉关键属性 golden；像素级 1:1 由公众号后台复制最终确认（CLAUDE.md UI 协议）。
