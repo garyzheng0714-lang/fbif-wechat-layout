@@ -378,147 +378,79 @@ func validateBottomBlocksModule(raw any) error {
 	if !ok {
 		return fmt.Errorf("bottom_blocks module must be an object")
 	}
-	allowed := map[string]bool{"enabled": true, "gap": true, "order": true, "blocks": true, "presets": true, "schema_version": true, "active_preset_id": true}
+	allowed := map[string]bool{"enabled": true, "presets": true, "schema_version": true, "active_preset_id": true}
 	for k := range m {
 		if !allowed[k] {
+			// 顶层 blocks/order/gap 是已退役的 v1 单布局格式（数据全在 presets[] 内）。
+			if k == "blocks" || k == "order" || k == "gap" {
+				return fmt.Errorf("bottom_blocks 顶层 %q 已退役（v1 单布局），数据须放 presets[]", k)
+			}
 			return fmt.Errorf("unknown bottom_blocks field: %s", k)
 		}
 	}
-	// schema_version：缺省 1（顶层 order/blocks，gap 控空行）；2=双预设（presets[] 各带 order/blocks，间距走 spacer）。
-	schemaVersion := 1
-	if v, ok := m["schema_version"]; ok {
-		n := ruleBehaviorNumber(v)
-		if n != 1 && n != 2 {
-			return fmt.Errorf("bottom_blocks schema_version must be 1 or 2")
-		}
-		schemaVersion = int(n)
+	// 统一 v2 打包：schema_version 必须为 2（v1 顶层 order/blocks 单布局已退役删除）。
+	if v, ok := m["schema_version"]; !ok || ruleBehaviorNumber(v) != 2 {
+		return fmt.Errorf("bottom_blocks requires schema_version 2")
 	}
-	if schemaVersion >= 2 {
-		// v2：顶层 blocks/order/gap 无意义（数据全在 presets[] 内），存在即拒——强制干净，迁移负责清理顶层。
-		for _, k := range []string{"blocks", "order", "gap"} {
-			if _, ok := m[k]; ok {
-				return fmt.Errorf("bottom_blocks schema_version 2 must not carry top-level %q (use presets[])", k)
-			}
-		}
-		// presets 必须非空（否则前端 activeLayer 落空、底部静默消失）。
-		if ps, _ := m["presets"].([]any); len(ps) == 0 {
-			return fmt.Errorf("bottom_blocks schema_version 2 requires non-empty presets")
-		}
-	}
+	moduleEnabled := true
 	if v, ok := m["enabled"]; ok {
-		if _, ok := v.(bool); !ok {
+		b, isBool := v.(bool)
+		if !isBool {
 			return fmt.Errorf("bottom_blocks enabled must be boolean")
 		}
+		moduleEnabled = b
 	}
-	if v, ok := m["gap"]; ok {
-		gap := strings.TrimSpace(fmt.Sprint(v))
-		if gap != "none" && gap != "blank_line" {
-			return fmt.Errorf("bottom_blocks gap must be none or blank_line")
+	rawPresets, hasPresets := m["presets"]
+	if !hasPresets || rawPresets == nil {
+		if moduleEnabled {
+			return fmt.Errorf("bottom_blocks schema_version 2 requires non-empty presets")
 		}
+		return nil // 关闭的空模块合法（如 WowFood 显式关页脚）
 	}
-
-	blocks := map[string]any{}
-	if rawBlocks, ok := m["blocks"]; ok && rawBlocks != nil {
-		blocks, ok = rawBlocks.(map[string]any)
+	presets, ok := rawPresets.([]any)
+	if !ok {
+		return fmt.Errorf("bottom_blocks presets must be an array")
+	}
+	if moduleEnabled && len(presets) == 0 {
+		return fmt.Errorf("bottom_blocks schema_version 2 requires non-empty presets")
+	}
+	if len(presets) > 50 {
+		return fmt.Errorf("bottom_blocks has too many presets")
+	}
+	presetIDs := map[string]bool{}
+	for i, rp := range presets {
+		p, ok := rp.(map[string]any)
 		if !ok {
-			return fmt.Errorf("bottom_blocks blocks must be an object")
+			return fmt.Errorf("bottom_blocks presets[%d] must be an object", i)
 		}
-		if len(blocks) > 100 {
-			return fmt.Errorf("bottom_blocks has too many blocks")
+		pid := strings.TrimSpace(fmt.Sprint(p["id"]))
+		if pid != "" && !assetLibraryID.MatchString(pid) {
+			return fmt.Errorf("bottom_blocks presets[%d].id is invalid", i)
 		}
-		for id, b := range blocks {
-			if err := validateBottomBlocksBlock(id, b); err != nil {
-				return err
+		presetIDs[pid] = true
+		for k := range p {
+			if k != "id" && k != "name" && k != "order" && k != "blocks" {
+				return fmt.Errorf("bottom_blocks presets[%d] has unknown field: %s", i, k)
 			}
+		}
+		// enabled 模块的预设必须有非空 blocks/order（否则渲染空底部，codex review）；
+		// 关闭模块（moduleEnabled=false）豁免——反正不渲染。
+		if moduleEnabled {
+			if bm, _ := p["blocks"].(map[string]any); len(bm) == 0 {
+				return fmt.Errorf("bottom_blocks presets[%d] requires non-empty blocks", i)
+			}
+			if om, _ := p["order"].([]any); len(om) == 0 {
+				return fmt.Errorf("bottom_blocks presets[%d] requires non-empty order", i)
+			}
+		}
+		if err := validateBlocksAndOrderMaps(p["blocks"], p["order"]); err != nil {
+			return fmt.Errorf("bottom_blocks presets[%d]: %w", i, err)
 		}
 	}
-
-	if rawOrder, ok := m["order"]; ok && rawOrder != nil {
-		order, ok := rawOrder.([]any)
-		if !ok {
-			return fmt.Errorf("bottom_blocks order must be an array")
-		}
-		if len(order) > 100 {
-			return fmt.Errorf("bottom_blocks order has too many entries")
-		}
-		seenOrder := map[string]bool{}
-		for _, raw := range order {
-			id := strings.TrimSpace(fmt.Sprint(raw))
-			if _, ok := blocks[id]; !ok {
-				return fmt.Errorf("bottom_blocks order references unknown block: %s", id)
-			}
-			if seenOrder[id] {
-				return fmt.Errorf("bottom_blocks order has duplicate block: %s", id)
-			}
-			seenOrder[id] = true
-		}
-	}
-
-	if rawPresets, ok := m["presets"]; ok && rawPresets != nil {
-		presets, ok := rawPresets.([]any)
-		if !ok {
-			return fmt.Errorf("bottom_blocks presets must be an array")
-		}
-		if len(presets) > 50 {
-			return fmt.Errorf("bottom_blocks has too many presets")
-		}
-		presetIDs := map[string]bool{}
-		for i, rp := range presets {
-			p, ok := rp.(map[string]any)
-			if !ok {
-				return fmt.Errorf("bottom_blocks presets[%d] must be an object", i)
-			}
-			pid := strings.TrimSpace(fmt.Sprint(p["id"]))
-			if pid != "" && !assetLibraryID.MatchString(pid) {
-				return fmt.Errorf("bottom_blocks presets[%d].id is invalid", i)
-			}
-			presetIDs[pid] = true
-			if schemaVersion >= 2 {
-				// v2：每个预设是一套完整 blocks+order（原创/转载各一套，间距走 spacer）。
-				for k := range p {
-					if k != "id" && k != "name" && k != "order" && k != "blocks" {
-						return fmt.Errorf("bottom_blocks presets[%d] has unknown field: %s", i, k)
-					}
-				}
-				// blocks/order 必须非空，否则该预设渲染出空底部（codex review）。
-				if bm, _ := p["blocks"].(map[string]any); len(bm) == 0 {
-					return fmt.Errorf("bottom_blocks presets[%d] requires non-empty blocks", i)
-				}
-				if om, _ := p["order"].([]any); len(om) == 0 {
-					return fmt.Errorf("bottom_blocks presets[%d] requires non-empty order", i)
-				}
-				if err := validateBlocksAndOrderMaps(p["blocks"], p["order"]); err != nil {
-					return fmt.Errorf("bottom_blocks presets[%d]: %w", i, err)
-				}
-			} else {
-				// v1：enabled map 预设（页脚库迁移而来，开关引用顶层 blocks）。
-				for k := range p {
-					if k != "id" && k != "name" && k != "enabled" {
-						return fmt.Errorf("bottom_blocks presets[%d] has unknown field: %s", i, k)
-					}
-				}
-				if en, ok := p["enabled"]; ok && en != nil {
-					enMap, ok := en.(map[string]any)
-					if !ok {
-						return fmt.Errorf("bottom_blocks presets[%d].enabled must be an object", i)
-					}
-					// preset 里引用的区块必须真实存在（与 order 校验对齐，防悬空引用）。
-					for blockID := range enMap {
-						if _, ok := blocks[blockID]; !ok {
-							return fmt.Errorf("bottom_blocks presets[%d].enabled references unknown block: %s", i, blockID)
-						}
-					}
-				}
-			}
-		}
-		// v2：active_preset_id 必须引用存在的预设，否则 fallback 首个会把转载渲成原创（codex review）。
-		if schemaVersion >= 2 {
-			if apid, ok := m["active_preset_id"]; ok {
-				s := strings.TrimSpace(fmt.Sprint(apid))
-				if s != "" && !presetIDs[s] {
-					return fmt.Errorf("bottom_blocks active_preset_id references unknown preset: %s", s)
-				}
-			}
+	if apid, ok := m["active_preset_id"]; ok {
+		s := strings.TrimSpace(fmt.Sprint(apid))
+		if s != "" && !presetIDs[s] {
+			return fmt.Errorf("bottom_blocks active_preset_id references unknown preset: %s", s)
 		}
 	}
 	return nil

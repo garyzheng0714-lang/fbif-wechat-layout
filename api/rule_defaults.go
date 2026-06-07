@@ -202,7 +202,7 @@ func defaultWowFoodRuleConfig() map[string]any {
 	// 会读 bottom_blocks；不清空则 WowFood 文末会错渲 FBIF 的提示/名片/更多文章/1000案例，且
 	// fbif-scope 素材在 wowfood-scope 解析为破图。清空 = 与 footerUrl='' 一致的「底部无内容」。
 	if mods, ok := cfg["modules"].(map[string]any); ok {
-		mods["bottom_blocks"] = map[string]any{"enabled": false, "order": []any{}, "blocks": map[string]any{}, "presets": []any{}}
+		mods["bottom_blocks"] = map[string]any{"schema_version": 2, "enabled": false, "presets": []any{}}
 	}
 	return cfg
 }

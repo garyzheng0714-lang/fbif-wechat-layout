@@ -8,21 +8,25 @@ import { resolveBlocks, flattenFields, hasAnyOverride, stripReadonlyOverride } f
 
 function baseModule() {
   return {
+    schema_version: 2,
     enabled: true,
-    gap: 'blank_line',
-    order: ['intro', 'card', 'more'],
-    blocks: {
-      intro: { type: 'rich_html', enabled: true, fields: { html_lines: ['<p>hi</p>'] } },
-      card: { type: 'text', display_name: '商务名片', enabled: false, fields: { content: '找小明' } },
-      more: { type: 'more_articles', enabled: true, fields: {} },
-    },
+    active_preset_id: 'default',
+    presets: [{
+      id: 'default', name: '默认',
+      order: ['intro', 'card', 'more'],
+      blocks: {
+        intro: { type: 'rich_html', enabled: true, fields: { html_lines: ['<p>hi</p>'] } },
+        card: { type: 'text', display_name: '商务名片', enabled: false, fields: { content: '找小明' } },
+        more: { type: 'more_articles', enabled: true, fields: {} },
+      },
+    }],
   };
 }
 
 test('无覆盖时直通后台默认：顺序、开关、字段默认值均跟随', () => {
   const r = resolveBlocks(baseModule(), null);
   assert.equal(r.enabled, true);
-  assert.equal(r.gap, 'blank_line');          // 模块间空行由后台默认控制
+  assert.equal(r.gap, 'none');                // v2 间距走 spacer 块，gap 恒 none
   assert.equal(r.enabledOverridden, false);
   assert.equal(r.orderOverridden, false);
   assert.deepEqual(r.blocks.map(b => b.id), ['intro', 'card', 'more']);
@@ -111,11 +115,11 @@ test('审计修复：override 独有字段不被丢弃（出现在结果与 flat
 test('frontendEditable 透传：块级 frontend_editable 反映到解析结果（缺省 false=前端只读）', () => {
   // WHY：前端简化后据此判定哪块出换图入口；缺省只读，避免脏数据误开放结构编辑。
   const mod = {
-    order: ['a', 'b'],
-    blocks: {
+    schema_version: 2, active_preset_id: 'default',
+    presets: [{ id: 'default', order: ['a', 'b'], blocks: {
       a: { type: 'image', enabled: true, frontend_editable: true, fields: { image: '' } },
       b: { type: 'image', enabled: true, fields: { image: '' } },
-    },
+    } }],
   };
   const r = resolveBlocks(mod, {});
   assert.equal(r.blocks.find(x => x.id === 'a').frontendEditable, true);
@@ -216,12 +220,6 @@ test('v2：缺 active_preset_id 且无 opts 时安全回落首个预设（渲染
   delete mod.active_preset_id;
   const r = resolveBlocks(mod, null);
   assert.deepEqual(r.blocks.map(b => b.id), ['note', 'sp', 'card']); // 回落首个=original
-});
-
-test('v1 不受影响：无 schema_version 仍读顶层 order/blocks/gap（向后兼容）', () => {
-  const r = resolveBlocks(baseModule(), null);
-  assert.deepEqual(r.blocks.map(b => b.id), ['intro', 'card', 'more']);
-  assert.equal(r.gap, 'blank_line');
 });
 
 test('hasAnyOverride 正确判定是否存在单篇改动', () => {

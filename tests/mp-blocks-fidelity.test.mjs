@@ -96,12 +96,11 @@ test('防漂移：Go defaultMpBottomBlocksModuleV2 关键结构与 JS fbifV2Modu
 
 test('P2 富文本：text.html 渲染期转 mp inline-style（hex→rgb、补字体栈、粗体/居中、回落散字段）', () => {
   const mod = {
-    enabled: true,
-    order: ['rich', 'plain'],
-    blocks: {
+    schema_version: 2, active_preset_id: 'default',
+    presets: [{ id: 'default', order: ['rich', 'plain'], blocks: {
       rich: { type: 'text', enabled: true, fields: { html: '<p style="text-align:center"><span style="color:#544545;font-size:17px;font-weight:bold">提示：</span></p>' } },
       plain: { type: 'text', enabled: true, fields: { content: '纯文本回落', font_size: 15, text_color: '#888888' } },
-    },
+    } }],
   };
   const out = renderBottomBlocksHtml(mod, undefined, mpBlockRenderers(assetLibrary, 'fbif', { parseDoc: mpParseDoc }));
   // 富文本块：hex→rgb、补 mp-quote 字体栈、粗体、居中
@@ -116,16 +115,15 @@ test('P2 富文本：text.html 渲染期转 mp inline-style（hex→rgb、补字
   assert.match(out, /color:rgb\(136, 136, 136\)/);
 });
 
-test('文字模块支持基础样式，并在模块之间插入默认空行', () => {
+test('文字模块支持基础样式（v2 单预设）', () => {
   // WHY：底部重构后运营只面对「文字 / 图片 / 推荐文章」三类模块；文字模块必须能承担常见提示文案。
+  // v2 无 blank_line 自动空段——块间距由 spacer 块承载（此处不测间距，只测文字样式）。
   const mod = {
-    enabled: true,
-    gap: 'blank_line',
-    order: ['notice', 'logo'],
-    blocks: {
+    schema_version: 2, active_preset_id: 'default',
+    presets: [{ id: 'default', order: ['notice', 'logo'], blocks: {
       notice: { type: 'text', enabled: true, fields: { content: '欢迎加入\n扫码联系', font_size: 18, text_color: '#396FBC', background_color: '#FFFFFF', italic: true, underline: true, align: 'center' } },
       logo: { type: 'image', enabled: true, fields: { image: '{{asset#fbif_bobo_card}}' } },
-    },
+    } }],
   };
   const out = renderBottomBlocksHtml(mod, undefined, mpBlockRenderers(assetLibrary, 'fbif'));
   assert.match(out, /欢迎加入/);
@@ -133,5 +131,4 @@ test('文字模块支持基础样式，并在模块之间插入默认空行', ()
   assert.match(out, /color:rgb\(57, 111, 188\)/);
   assert.match(out, /font-style:italic/);
   assert.match(out, /text-decoration:underline/);
-  assert.match(out, /<br>/, '两个非空模块之间应有默认空行');
 });

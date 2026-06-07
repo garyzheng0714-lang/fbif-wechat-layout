@@ -15,7 +15,7 @@ function bottomBlocksFromDefaults() {
   for (const id of FOOTER_SEGMENT_ORDER_DEFAULT) {
     blocks[id] = { type: 'rich_html', enabled: true, fields: { html_lines: FOOTER_SEGMENTS_DEFAULT[id].html_lines } };
   }
-  return { enabled: true, order: FOOTER_SEGMENT_ORDER_DEFAULT.slice(), blocks };
+  return { schema_version: 2, enabled: true, active_preset_id: 'default', presets: [{ id: 'default', order: FOOTER_SEGMENT_ORDER_DEFAULT.slice(), blocks }] };
 }
 
 const LIB = { segments: FOOTER_SEGMENTS_DEFAULT, segment_order: FOOTER_SEGMENT_ORDER_DEFAULT };
@@ -54,16 +54,15 @@ test('模块禁用（enabled=false）：区块渲染输出空串', () => {
   assert.equal(out, '');
 });
 
-test('网站文字模块与图片区块共用底部语义，并支持模块间空行', () => {
+test('网站文字模块与图片区块共用底部语义（v2 单预设）', () => {
   // WHY：网站没有推荐文章系统，但文字/图片模块应与公众号共用同一 bottom_blocks 模型。
+  // v2 无 blank_line 自动空段——块间距由 spacer 块承载（此处不测间距，只测块样式渲染）。
   const mod = {
-    enabled: true,
-    gap: 'blank_line',
-    order: ['tip', 'logo'],
-    blocks: {
+    schema_version: 2, active_preset_id: 'default',
+    presets: [{ id: 'default', order: ['tip', 'logo'], blocks: {
       tip: { type: 'text', enabled: true, fields: { content: '商务合作', font_size: 16, text_color: '#396FBC', italic: true, underline: true, align: 'center' } },
       logo: { type: 'image', enabled: true, fields: { image: 'https://static.foodtalks.cn/logo.png' } },
-    },
+    } }],
   };
   const out = renderBottomBlocksHtml(
     mod,
@@ -74,6 +73,5 @@ test('网站文字模块与图片区块共用底部语义，并支持模块间�
   assert.match(out, /font-size: 16px/);
   assert.match(out, /font-style: italic/);
   assert.match(out, /text-decoration: underline/);
-  assert.match(out, /<p><br \/><\/p>/);
   assert.match(out, /static\.foodtalks\.cn\/logo\.png/);
 });

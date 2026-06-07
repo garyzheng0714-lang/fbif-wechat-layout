@@ -71,33 +71,25 @@ function resolveOneBlock(id, base, ov) {
   };
 }
 
-// activeLayer 取模块的「生效层」blocks/order/gap，桥接 v1↔v2 两种 schema：
-//   v1（无 schema_version 或 <2）：顶层 blocks/order/gap（原行为，字节不变）。
-//   v2（schema_version>=2）：按 presetId（缺省 active_preset_id，再缺省第一个）选 presets[] 中的
-//     order/blocks；gap 在 v2 废弃为 'none'（间距由 spacer 块承载，见 spec §4.2/§5）。
-//   顶层 order/blocks 在 v2 被忽略（只认 presets[]）。
+// activeLayer 取模块的「生效层」blocks/order（统一 v2 单格式）：从 presets[] 按 presetId
+//   （缺省 active_preset_id，再缺省第一个）选 order/blocks。v1 顶层 order/blocks 单布局已退役删除
+//   （2026-06-07 用户裁定彻底统一打包格式），不再支持。gap 恒为 'none'——块间距由 spacer 块承载
+//   （见 spec §4.2/§5），不再有 blank_line 自动空段。
 function activeLayer(mod, opts) {
-  if (Number(mod.schema_version) >= 2) {
-    const presets = Array.isArray(mod.presets) ? mod.presets : [];
-    const wantId = (opts && opts.presetId) || mod.active_preset_id || (presets[0] && presets[0].id) || '';
-    const preset = presets.find(p => isObj(p) && p.id === wantId) || presets[0] || {};
-    return {
-      blocks: isObj(preset.blocks) ? preset.blocks : {},
-      order: Array.isArray(preset.order) ? preset.order : null,
-      gap: 'none',
-    };
-  }
+  const presets = Array.isArray(mod.presets) ? mod.presets : [];
+  const wantId = (opts && opts.presetId) || mod.active_preset_id || (presets[0] && presets[0].id) || '';
+  const preset = presets.find(p => isObj(p) && p.id === wantId) || presets[0] || {};
   return {
-    blocks: isObj(mod.blocks) ? mod.blocks : {},
-    order: Array.isArray(mod.order) ? mod.order : null,
-    gap: typeof mod.gap === 'string' ? mod.gap : 'none',
+    blocks: isObj(preset.blocks) ? preset.blocks : {},
+    order: Array.isArray(preset.order) ? preset.order : null,
+    gap: 'none',
   };
 }
 
 // resolveBlocks 合并后台默认模块与前台单篇覆盖，返回按解析顺序排列的区块列表。
-//   defaultModule: config.modules.bottom_blocks
-//     v1: { enabled, gap, order:[id], blocks:{ id:{type,enabled,fields} }, presets }
-//     v2: { schema_version:2, enabled, active_preset_id, presets:[{id,name,order,blocks}] }
+//   defaultModule: config.modules.bottom_blocks（统一 v2 单格式）
+//     { schema_version:2, enabled, active_preset_id, presets:[{id,name,order,blocks}] }
+//     （v1 顶层 order/blocks 单布局已退役删除，2026-06-07 用户裁定彻底统一）
 //   override:      { enabled?, order?, overrides:{ id:{enabled?, fields?} } }
 //   opts:          { presetId? } —— v2 下显式选预设（由 engine/模板边界按 isRepost 映射传入，中性层不读全局）。
 // 返回：{ enabled, gap, enabledOverridden, orderOverridden, blocks:[ resolvedBlock ] }
