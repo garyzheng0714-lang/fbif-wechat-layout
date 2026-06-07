@@ -1112,10 +1112,11 @@ func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
-			writeError(w, 413, fmt.Sprintf("file too large (max %d MB)", maxDocUploadBytes>>20))
+			writeError(w, 413, fmt.Sprintf("文件过大（最大 %d MB），请压缩后重试", maxDocUploadBytes>>20))
 			return
 		}
-		writeError(w, 400, "failed to parse multipart: "+err.Error())
+		log.Printf("doc-to-docx: parse multipart failed: %v", err)
+		writeError(w, 400, "上传内容解析失败，请重试")
 		return
 	}
 	upload, header, err := r.FormFile("file")
@@ -1129,14 +1130,15 @@ func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
-			writeError(w, 413, fmt.Sprintf("file too large (max %d MB)", maxDocUploadBytes>>20))
+			writeError(w, 413, fmt.Sprintf("文件过大（最大 %d MB），请压缩后重试", maxDocUploadBytes>>20))
 			return
 		}
-		writeError(w, 400, "read file: "+err.Error())
+		log.Printf("doc-to-docx: read upload failed: %v", err)
+		writeError(w, 400, "文件读取失败，请重试")
 		return
 	}
 	if len(data) < 8 || !bytes.Equal(data[:8], ole2Magic) {
-		writeError(w, 400, "not an OLE2 .doc file (missing magic bytes)")
+		writeError(w, 400, "文件不是有效的 Word .doc 格式，请用 Word 另存为 .docx 后重试")
 		return
 	}
 
@@ -1160,13 +1162,14 @@ func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
 	if docx == nil {
 		apiKey := os.Getenv("CLOUDCONVERT_API_KEY")
 		if apiKey == "" {
-			writeError(w, 500, "no converter available: LIBREOFFICE_URL/TOKEN and CLOUDCONVERT_API_KEY both unset")
+			log.Printf("doc-to-docx: no converter available (LIBREOFFICE_URL/TOKEN and CLOUDCONVERT_API_KEY all unset)")
+			writeError(w, 500, "文件转换服务暂不可用，请将文件另存为 .docx 后重新上传")
 			return
 		}
 		docx, err = cloudConvertDocToDocx(ctx, apiKey, data, header.Filename)
 		if err != nil {
 			log.Printf("cloudconvert error: %v", err)
-			writeError(w, 502, "conversion failed: "+err.Error())
+			writeError(w, 502, "文件转换失败，请将文件另存为 .docx 后重新上传")
 			return
 		}
 		usedPath = "cloudconvert"

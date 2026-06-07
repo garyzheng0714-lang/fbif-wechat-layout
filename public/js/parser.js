@@ -436,10 +436,10 @@ export async function parseDocx(file) {
   const relsEntry = zipFile('word/_rels/document.xml.rels');
   const docEntry = zipFile('word/document.xml');
   if (!relsEntry) {
-    const keys = Object.keys(zip.files).slice(0, 20).join(', ');
-    throw new Error('无效的 DOCX 文件：缺少 document.xml.rels（zip keys: ' + keys + '）');
+    console.warn('[docx] 缺少 word/_rels/document.xml.rels，zip keys:', Object.keys(zip.files).slice(0, 20).join(', '));
+    throw new Error('文件格式不兼容，请用 Word 打开后另存为 .docx 重试');
   }
-  if (!docEntry) throw new Error('无效的 DOCX 文件：缺少 document.xml');
+  if (!docEntry) throw new Error('文件格式不兼容，请用 Word 打开后另存为 .docx 重试');
 
   const relsXml = await relsEntry.async('string');
   const relsDom = new DOMParser().parseFromString(relsXml, 'text/xml');

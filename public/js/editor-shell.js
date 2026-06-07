@@ -1,6 +1,7 @@
 // editor-shell.js — shared shell helpers for channel editor pages.
 // Keeps page scripts focused on channel-specific wiring while common URL import,
 // rule-pack path resolution, and copy feedback live behind one interface.
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 export const DEFAULT_ACCOUNT_STORAGE_KEY = 'active_rule_pack';
 
@@ -92,11 +93,11 @@ export function createUrlImportHandler({
     }
     try {
       onArticleUrl(url);
-      const resp = await fetchImpl('/api/fetch-article', {
+      const resp = await fetchWithTimeout('/api/fetch-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, account: getAccountID() || undefined }),
-      });
+      }, { fetchImpl, timeoutMs: 30000, timeoutMessage: '抓取超时，请检查网络后重试' });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status }));
         throw new Error(err.error || '抓取失败');

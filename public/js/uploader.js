@@ -1,5 +1,6 @@
 // Image upload — base64 images (from DOCX) are uploaded to OSS.
 // Website-channel WeChat image CDN URLs are optionally re-hosted to our CDN.
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 const WECHAT_IMAGE_HOSTS = new Set([
   'mmbiz.qpic.cn',
@@ -30,7 +31,7 @@ function arrayBufferToBase64(buffer) {
 // Fetch a blob: or server cache URL and encode it as a base64 data URL so the
 // skip-upload copy path can paste usable image bytes instead of page-local URLs.
 async function imageRefToDataUrl(src) {
-  const resp = await fetch(src);
+  const resp = await fetchWithTimeout(src, {}, { timeoutMs: 20000, timeoutMessage: '图片下载超时' });
   if (!resp.ok) throw new Error('fetch ' + src + ' -> ' + resp.status);
   const blob = await resp.blob();
   const mime = blob.type || 'image/png';
@@ -42,14 +43,18 @@ async function imageRefToDataUrl(src) {
 // Upload a single base64 image to OSS. Returns OSS URL or null on failure.
 async function uploadOne(task) {
   const body = JSON.stringify({ base64_images: { [task.key]: task.src } });
-  const resp = await fetch('/api/oss-upload', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  });
-  if (!resp.ok) return null;
-  const { results } = await resp.json();
-  return results[task.key] || Object.values(results)[0] || null;
+  try {
+    const resp = await fetchWithTimeout('/api/oss-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    }, { timeoutMs: 20000 });
+    if (!resp.ok) return null;
+    const { results } = await resp.json();
+    return results[task.key] || Object.values(results)[0] || null;
+  } catch {
+    return null; // 超时/网络错误与上传失败同等处理，交给上层重试机制
+  }
 }
 
 export async function uploadAssetFile(file) {
@@ -128,11 +133,11 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
       // →上传」快一个量级——后端服务器并发取 mmbiz 不触发微信反爬限流（浏览器并发才
       // 会），且服务器到 OSS 走内网。实测 19 张 ~1.3s（前端逐张串行 ~20s）。
       try {
-        const resp = await fetch('/api/oss-upload', {
+        const resp = await fetchWithTimeout('/api/oss-upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ urls: urlList }),
-        });
+        }, { timeoutMs: 60000, timeoutMessage: '图床转存超时' });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const { results } = await resp.json();
         let done = 0;

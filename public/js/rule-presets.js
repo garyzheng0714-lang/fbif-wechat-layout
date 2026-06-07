@@ -3,6 +3,7 @@
 // same rule object to the Go server as named presets. Editable field facts live
 // in rule-document.js.
 import { DEFAULT_BEHAVIOR, normalizeRuleBehavior } from './rule-behavior.js';
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 import {
   normalizeMoreArticleDefaultCards,
@@ -409,7 +410,7 @@ export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) 
     behavior: normalizeRuleBehavior(DEFAULT_BEHAVIOR),
   };
   try {
-    const resp = await fetch('/api/rules/active?account=' + encodeURIComponent(account), { cache: 'no-store' });
+    const resp = await fetchWithTimeout('/api/rules/active?account=' + encodeURIComponent(account), { cache: 'no-store' }, { timeoutMs: 10000, timeoutMessage: '规则加载超时' });
     const data = await parseJSONResponse(resp);
     const preset = data.preset || fallback;
     return {
@@ -428,16 +429,16 @@ export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) 
 }
 
 export async function listPublicRulePresets() {
-  const resp = await fetch('/api/rules/presets', { cache: 'no-store' });
+  const resp = await fetchWithTimeout('/api/rules/presets', { cache: 'no-store' }, { timeoutMs: 10000 });
   return parseJSONResponse(resp);
 }
 
 export async function adminLogin(password) {
-  const resp = await fetch('/api/rules/admin/login', {
+  const resp = await fetchWithTimeout('/api/rules/admin/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password: String(password || '').trim() }),
-  });
+  }, { timeoutMs: 10000 });
   return parseJSONResponse(resp);
 }
 
@@ -449,15 +450,15 @@ function adminHeaders(password) {
 }
 
 export async function listRulePresets(password) {
-  const resp = await fetch('/api/rules/admin/presets', {
+  const resp = await fetchWithTimeout('/api/rules/admin/presets', {
     headers: adminHeaders(password),
     cache: 'no-store',
-  });
+  }, { timeoutMs: 10000 });
   return parseJSONResponse(resp);
 }
 
 export async function saveRulePreset(password, preset) {
-  const resp = await fetch('/api/rules/admin/presets', {
+  const resp = await fetchWithTimeout('/api/rules/admin/presets', {
     method: 'POST',
     headers: adminHeaders(password),
     body: JSON.stringify({
@@ -465,27 +466,27 @@ export async function saveRulePreset(password, preset) {
       config: normalizeRuleConfig(preset.config),
       behavior: normalizeRuleBehavior(preset.behavior),
     }),
-  });
+  }, { timeoutMs: 10000 });
   return parseJSONResponse(resp);
 }
 
 export async function setActiveRulePreset(password, id, accountID = DEFAULT_RULE_ACCOUNT_ID) {
-  const resp = await fetch('/api/rules/admin/active', {
+  const resp = await fetchWithTimeout('/api/rules/admin/active', {
     method: 'PUT',
     headers: adminHeaders(password),
     body: JSON.stringify({
       id,
       account_id: normalizeAccountID(accountID),
     }),
-  });
+  }, { timeoutMs: 10000 });
   return parseJSONResponse(resp);
 }
 
 export async function deleteRulePreset(password, id) {
-  const resp = await fetch('/api/rules/admin/presets/' + encodeURIComponent(id), {
+  const resp = await fetchWithTimeout('/api/rules/admin/presets/' + encodeURIComponent(id), {
     method: 'DELETE',
     headers: adminHeaders(password),
-  });
+  }, { timeoutMs: 10000 });
   return parseJSONResponse(resp);
 }
 

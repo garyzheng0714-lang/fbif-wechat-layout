@@ -57,6 +57,21 @@ function renderBlocks(blocks, opts = {}) {
   }, { isRepost: opts.isRepost !== false }).lines.join('\n');
 }
 
+test('docx whole-paragraph bold lines and CJK-numbered lines promote to section headings', () => {
+  // 高频痛点：作者用「整段加粗」或「三、xx」中文编号写章节标题，而非 Word 标题样式。
+  // 升级后应渲染成 wx-th 标题；普通正文（含句号陈述句）不受影响。
+  const boldP = (text) => p(text, { runs: [{ type: 'txt', text, bold: true }] });
+  const html = renderDocx([
+    p('作者：张三'),
+    boldP('主要趋势'),
+    p('这是一段普通正文，以句号结尾不应升级为标题。'),
+    p('三、总结'),
+  ]);
+  assert.match(html, /class="wx-th">主要趋势</);
+  assert.match(html, /class="wx-th">三、总结</);
+  assert.doesNotMatch(html, /class="wx-th">这是一段普通正文/);
+});
+
 test('docx lead author starts the article and hides front matter', () => {
   const html = renderDocx([
     p('不应显示的标题'),

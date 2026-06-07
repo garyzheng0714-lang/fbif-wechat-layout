@@ -50,6 +50,16 @@ const { renderBehaviorTemplate } = behaviorModule;
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
 
+// 把疑似内部技术细节的错误消息兜底成中文白话（守「绝不向用户暴露内部错误」契约）。
+// 后端 doc-to-docx 等已尽量中文化，此处是最后一道防线：兜住后端漏网、解析器抛出的
+// zip/Go/栈技术串。命中技术特征 → 通用中文兜底；否则原样透传。
+const INTERNAL_ERR_RE = /LIBREOFFICE|CLOUDCONVERT|converter|multipart|EOF|zip keys|document\.xml|\bexec\b|\bPATH\b|undefined|\.go:|panic|\bnull\b|\bstack\b|\$\{|0x[0-9a-f]{2,}/i;
+function sanitizeErrMsg(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '处理失败，请重试';
+  return INTERNAL_ERR_RE.test(s) ? '处理失败，请重试或更换文件' : s;
+}
+
 // ---- Legacy .doc (OLE2) → .docx bridge ----
 // Sniff first 8 bytes for the OLE2 Compound Document magic. Detect by bytes,
 // not filename: some files have `.doc` extension, others ship legacy binary
@@ -93,7 +103,7 @@ function convertDocToDocxFile(file, onProgress) {
       } else {
         let msg = '';
         try { msg = JSON.parse(xhr.responseText || '').error || ''; } catch {}
-        reject(new Error('DOC 转换失败: ' + (msg || xhr.status)));
+        reject(new Error('DOC 转换失败: ' + (msg ? sanitizeErrMsg(msg) : ('错误码 ' + xhr.status))));
       }
     };
     xhr.onerror = () => reject(new Error('DOC 转换失败: 网络错误'));
@@ -556,7 +566,7 @@ export function initApp(initialTemplate) {
       logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
       progress.style.display = 'none';
-      showError('排版失败: ' + err.message);
+      showError('排版失败: ' + sanitizeErrMsg(err.message));
     }
   };
 
@@ -679,7 +689,7 @@ export function initApp(initialTemplate) {
       logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
       progress.style.display = 'none';
-      showError('排版失败: ' + err.message);
+      showError('排版失败: ' + sanitizeErrMsg(err.message));
     }
   }
 

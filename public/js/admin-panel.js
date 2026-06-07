@@ -188,6 +188,12 @@ export function initAdminPanel(options = {}) {
 
   function close() {
     if (!overlay) return;
+    // 防丢稿：有未保存改动时关闭（×/ESC/点遮罩）需二次确认。规则后台「保存修改」会即时应用
+    // 到生产公众号，未保存改动一旦关闭不落库，故拦一道。dirtyCount 在登录态可能尚无 doc，
+    // 包 try 兜底为 0（不拦），不影响正常关闭。
+    let dc = 0;
+    try { dc = dirtyCount(); } catch { dc = 0; }
+    if (dc > 0 && !window.confirm('有 ' + dc + ' 项未保存改动，关闭后不会应用到公众号。确定关闭吗？')) return;
     window.clearTimeout(jsonSyncTimer);
     overlay.remove();
     overlay = null;
@@ -779,7 +785,7 @@ export function initAdminPanel(options = {}) {
         doc = await listRulePresets(password);
         draftPreset = null;
         applyConfig(workingConfig, presetWithBehavior(presetByID(doc, selected.id)), { source: 'server' });
-      }, '已保存到服务器');
+      }, '已保存并应用到当前公众号（已对读者生效）');
     });
     overlay.querySelector('[data-action="save-as"]').addEventListener('click', () => {
       run(async () => {

@@ -11,6 +11,9 @@ const { applyBehaviorToElems, normalizeAuthorName, renderBehaviorTemplate } = be
 // / classifyReferences 均为 true），输出与抽取前逐字节一致（golden tea-pyramid 守卫）。
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
+// 标题启发式纯函数（网站渲染器也用，红线#19 中性共享模块，不跨渲染器 import）。
+const headingDetectModule = await import('../heading-detect.js' + assetQuery);
+const { detectHeadingLevel, isBoldHeading } = headingDetectModule;
 const tableModule = await import('./shared/table-renderer.js' + assetQuery);
 const { renderTable: renderSharedTable } = tableModule;
 // 底部追加式区块（统一模型）：中性编排器 + 公众号渲染器（红线 #19：不 import 网站渲染器）。
@@ -213,12 +216,30 @@ const RE_DOCX_AUTHOR_LINE = /^作者[：:]\s*(.+)$/;
 // classifyReferences=true（分类 refH/ref）。正则仍由本模板从全局 behavior 解析后注入
 // （规则源无关边界）；ref_heading_prefix_regex 是把旧 line 224 写死正则下放为可配项，
 // 缺省 fallback 与旧值逐字一致——故公众号输出逐字节不变（golden tea-pyramid 守卫）。
+// DOCX 整段加粗标题启发式升级：classifyDocxArticle 只认 Word 大纲级别/标题样式，但大量作者
+// 用「整段加粗」或「一、xx」中文编号写章节标题。复用 heading-detect 纯函数（isBoldHeading 看
+// runs 的 bold 标志、detectHeadingLevel 看纯文本）把这类正文段（k:'txt'）升级为标题（k:'h'），
+// 与 MD 路径整段加粗标题识别对齐。只动顶层正文段：参考段内行已是 k:'ref'、图注 k:'cap'，不受影响。
+// 保留原 elem 的段距 meta（blankBefore 等），与既有 docx heading 同款（docx-article-model.js:203）。
+function promoteDocxBoldHeadings(elems) {
+  return (elems || []).map(e => {
+    if (!e || e.k !== 'txt') return e;
+    const plain = (e.runs || []).filter(r => r && r.type === 'txt').map(r => r.text).join('');
+    if (detectHeadingLevel(plain) === 0 && !isBoldHeading(e.runs)) return e;
+    const text = plain.trim().replace(/[：:]$/, '').replace(/^0?\d+\s+/, '');
+    if (!text) return e;
+    const { k, runs, ...meta } = e;
+    return { k: 'h', text, ...meta };
+  });
+}
+
 function classifyDocx(paragraphs, imgCache) {
-  return classifyDocxArticle(paragraphs, imgCache, {
+  const result = classifyDocxArticle(paragraphs, imgCache, {
     authorLineRegex: behaviorRegexParam('docx_author_line_regex', RE_DOCX_AUTHOR_LINE),
     refSectionRegex: behaviorRegexParam('ref_section_regex', RE_REF_SECTION),
     refHeadingPrefixRegex: behaviorRegexParam('ref_heading_prefix_regex', /^(参考(来源|文献|资料|链接)|信息来源)/),
   });
+  return { ...result, elems: promoteDocxBoldHeadings(result.elems) };
 }
 
 // ---- Attribution Patterns ----

@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from './fetch-timeout.js';
+
 export function isValidMoreArticleUrl(value) {
   const url = String(value || '').trim();
   try {
@@ -23,11 +25,11 @@ export async function fetchMoreArticleMetaCached(url) {
   const normalized = String(url || '').trim();
   if (metaCache.has(normalized)) return metaCache.get(normalized);
   const job = (async () => {
-    const resp = await fetch('/api/fetch-article-meta', {
+    const resp = await fetchWithTimeout('/api/fetch-article-meta', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: normalized }),
-    });
+    }, { timeoutMs: 15000, timeoutMessage: '获取文章信息超时，请重试' });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.error || ('HTTP ' + resp.status));
