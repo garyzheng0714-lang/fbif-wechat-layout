@@ -504,10 +504,6 @@ func (s *rulePresetStore) writeStoreLocked(doc ruleStoreDocumentV2) error {
 	return os.Rename(tmpName, s.path)
 }
 
-func (s *rulePresetStore) writeLocked(doc rulePresetDocument) error {
-	return s.writeStoreLocked(legacyDocumentToStore(doc))
-}
-
 func (s *rulePresetStore) list() (rulePresetDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

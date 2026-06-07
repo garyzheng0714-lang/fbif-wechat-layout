@@ -522,6 +522,7 @@ input[type="file"] { display: none; }
   font-size: 14px; font-weight: 500;
   border: 1px solid rgba(0,0,0,0.1);
 }
+.copy-success.copy-success--warn { background: var(--fs-danger-soft); color: var(--fs-danger); border-color: var(--fs-danger); } /* 有图未上传成功→红色警告（A线P0）*/
 
 /* 复制后「去后台粘贴」入口（概念A：复制键右侧内联，非弹窗，持续到下次动作）。 */
 .copy-paste-hint {

@@ -6,8 +6,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifySeries,
-  buildSeriesFooterElems,
-  getSeriesFooterSelection,
   sectionImageUrl,
 } from '../public/js/rule-behavior-foodtalks-series.js';
 
@@ -150,40 +148,6 @@ test('classifySeries: 参考来源条目清除超链接（规范§六 非本号�
   assert.ok(ref, '应识别为参考条目');
   assert.ok(ref.runs.every(r => r.type !== 'link'), '参考条目外链必须降级为纯文本');
   assert.match(ref.runs.map(r => r.text).join(''), /报告链接/, '链接文字保留为纯文本');
-});
-
-test('buildSeriesFooterElems: 默认 BD 名片=Eileen（取自 cards 库）+ 包装群，无作者名片', () => {
-  const sel = getSeriesFooterSelection({});
-  assert.equal(sel.group, '包装');
-  assert.equal(sel.bd_card, 'Eileen');
-  const footer = buildSeriesFooterElems({});
-  const srcs = footer.map(e => e.src);
-  assert.ok(srcs.some(s => s.includes('cards/eileen')), '应含 Eileen BD 名片（从 cards 库取）');
-  assert.ok(srcs.some(s => s.includes('packaging')), '应含包装群二维码');
-  assert.ok(!srcs.some(s => s.includes('cards/aimee')), '默认不预选作者名片');
-});
-
-test('buildSeriesFooterElems: 默认 BD 名片走规则后台 footer_default.bd_card 可改', () => {
-  // 红线：规则不硬编码——默认 BD 名片对象由 config.modules.ft_series_materials.footer_default 决定。
-  const cfg = { modules: { ft_series_materials: { footer_default: { group: '包装', bd_card: 'Isaac' } } } };
-  const sel = getSeriesFooterSelection(cfg);
-  assert.equal(sel.bd_card, 'Isaac');
-  const srcs = buildSeriesFooterElems(cfg).map(e => e.src);
-  assert.ok(srcs.some(s => s.includes('cards/isaac')), 'BD 名片改 Isaac → 取 cards/isaac.jpg');
-  assert.ok(!srcs.some(s => s.includes('cards/eileen')), '不再带默认 Eileen');
-});
-
-test('buildSeriesFooterElems: BD 名片可置空（不带）', () => {
-  const cfg = { modules: { ft_series_materials: { footer_default: { group: '', bd_card: '' } } } };
-  assert.equal(buildSeriesFooterElems(cfg).length, 0, 'BD/群/作者全空 → 尾部无图');
-});
-
-test('buildSeriesFooterElems: 新增群品类（渠道/代工/酒类/食品资讯/方便速食）可选', () => {
-  for (const [cat, slug] of [['渠道','channel'],['代工','oem'],['酒类','alcohol'],['食品资讯','news'],['方便速食','convenience']]) {
-    const cfg = { modules: { ft_series_materials: { footer_default: { group: cat, bd_card: '' } } } };
-    const srcs = buildSeriesFooterElems(cfg).map(e => e.src);
-    assert.ok(srcs.some(s => s.includes('groups/' + slug)), `${cat} → groups/${slug}.png`);
-  }
 });
 
 test('sectionImageUrl: 按序数返回序号图，缺号返回空串', () => {

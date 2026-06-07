@@ -88,7 +88,6 @@
           <div class="ma-hint" id="maHint">粘贴公众号链接自动抓取头图和标题。拖动卡片可重排顺序。</div>
         </div>
       </div>
-      <div class="ma-section" id="ftSeriesFooterSection" style="display:none;"></div>
       <div class="ma-section" id="blockPanelSection" style="display:none;">
         <div class="block-panel-mount" id="blockPanel"></div>
       </div>
@@ -643,10 +642,6 @@ function moreArticlesEmbedEl() {
 }
 
 async function applyAccountCapabilityUI(pack) {
-  const ftSec = document.getElementById('ftSeriesFooterSection');
-  // 更多文章卡片编辑器已并入底部区块「更多文章」块（B6）；#moreArticlesSection 仅作隐藏 home
-  // （inline display:none），不在此取消隐藏。旧系列页脚选择器（作者/BD/群下拉）已被统一面板取代（B4）：始终隐藏。
-  if (ftSec) ftSec.style.display = 'none';
   // 底部区块单篇面板：所有公众号账号（含 FoodTalks 系列）统一走 mountBlockPanel，差异只在服务端默认。
   const bbSec = document.getElementById('blockPanelSection');
   const bbMount = document.getElementById('blockPanel');

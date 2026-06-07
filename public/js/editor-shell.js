@@ -263,6 +263,13 @@ export function wrapCopyFeedback({
     // 底部 pill 维持原有 10s 自动消失；按钮变身 + 后台入口则保持到下次动作。
     const success = documentRef.getElementById(successID);
     if (success) {
+      // 有图片未上传成功时，底部提示走警告文案，别给「成功」假象（A 线 P0：消灭复制假成功）。
+      const warnCount = windowRef._copyImageWarning || 0;
+      if (!success.dataset.okText) success.dataset.okText = success.textContent || '已复制到剪贴板';
+      success.textContent = warnCount
+        ? `已复制，但 ${warnCount} 张图未上传成功，粘贴后可能缺失，请点「重试上传」`
+        : success.dataset.okText;
+      success.classList.toggle('copy-success--warn', !!warnCount);
       success.style.display = 'block';
       setTimeout(() => { if (success) success.style.display = 'none'; }, timeoutMs);
     }

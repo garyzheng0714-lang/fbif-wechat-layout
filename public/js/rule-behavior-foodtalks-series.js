@@ -17,7 +17,6 @@ import {
   SERIES_REGEX,
   SERIES_CAPTION_KEYWORDS,
   SERIES_MATERIALS_DEFAULT,
-  SERIES_FOOTER_DEFAULT,
   SERIES_TEMPLATES,
 } from './foodtalks-series-defaults.js';
 
@@ -289,37 +288,9 @@ export function getSeriesMaterials(config = {}) {
   return (m && typeof m === 'object') ? { ...SERIES_MATERIALS_DEFAULT, ...m } : SERIES_MATERIALS_DEFAULT;
 }
 
-// 当前文章尾部选择：侧栏 window._ftSeriesFooter 覆盖 > 规则 footer_default。
-export function getSeriesFooterSelection(config = {}) {
-  const def = getSeriesMaterials(config).footer_default || SERIES_FOOTER_DEFAULT;
-  const live = (typeof window !== 'undefined' && window._ftSeriesFooter) || null;
-  return {
-    author_card: (live && live.author_card != null) ? live.author_card : def.author_card,
-    group: (live && live.group != null) ? live.group : def.group,
-    bd_card: (live && live.bd_card != null) ? live.bd_card : def.bd_card,
-  };
-}
-
 // 取一级标题第 N 个的序号图 URL（缺该序号则返回空串，渲染器降级为纯文字标题）。
 export function sectionImageUrl(config, n) {
   const sections = getSeriesMaterials(config).sections || {};
   const url = sections[n] || sections[String(n)];
   return (typeof url === 'string' && url) ? url : '';
-}
-
-// 合成尾部图片 elem 序列：作者名片 →（空行）→ BD 名片 → 群二维码。
-// BD 名片复用 cards 名片库（默认 Eileen，规则后台 footer_default.bd_card 可改）。
-// 缺图项自动跳过；返回 [{k:'footer-img', src}] 序列（render 各自渲成自适应图）。
-export function buildSeriesFooterElems(config = {}) {
-  const mats = getSeriesMaterials(config);
-  const sel = getSeriesFooterSelection(config);
-  const out = [];
-  // getSeriesMaterials 始终返回含 cards/groups 的完整对象，故无需再 `|| {}` 兜底。
-  const authorUrl = sel.author_card && mats.cards[sel.author_card];
-  if (authorUrl) out.push({ k: 'footer-img', src: authorUrl, gap: true });
-  const bdUrl = sel.bd_card && mats.cards[sel.bd_card];
-  if (bdUrl) out.push({ k: 'footer-img', src: bdUrl, gap: true });
-  const groupUrl = sel.group && mats.groups[sel.group];
-  if (groupUrl) out.push({ k: 'footer-img', src: groupUrl, gap: true });
-  return out;
 }

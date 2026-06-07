@@ -173,8 +173,6 @@ function normalizeRich(html) {
 // 调用方把 isV2 作为局部值传给 buildFooterWithMoreArticles，避免模块级单例在 await 间被并发重入覆盖
 // （codex review #4 竞态修复——多条 load→build 链交错时单例会互相覆盖 isV2）。
 async function loadBaseFooterHtml(opts = {}) {
-  const custom = localStorage.getItem('custom_footer');
-  if (custom) return { html: custom, isV2: false };
   // 公众号 bottom_blocks 启用时，整段底部由区块渲染（替代 footer.html）。
   // html 为 null/'' → 模块未接管，fallback 到 footerUrl(footer.html)。
   // isRepost 显式传入（重渲染用 cached.isRepost，避免读全局 _isRepost 漂移；codex review #5）。
@@ -1013,14 +1011,23 @@ export function initApp(initialTemplate) {
 
     _lastCopiedHtml = html;
     const imgCount = (html.match(/<img[\s>]/gi) || []).length;
-    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', {
-      method,
-      htmlSize: (html.length / 1024).toFixed(1) + 'KB',
-      imgCount,
-    });
+    // 复制已写入剪贴板，但若仍有图片上传失败（_failedSrcs 非空），粘进后台这些图会缺失。
+    // 必须显式告警、不能静默显示「✓已复制」让用户白发一篇（A 线 P0：消灭复制假成功）。
+    const failedImgCount = ok && _failedSrcs ? _failedSrcs.length : 0;
+    window._copyImageWarning = failedImgCount;
+    logConv(ok ? (failedImgCount ? 'warn' : 'info') : 'error',
+      ok ? (failedImgCount ? '复制完成，但有图片未上传成功' : '复制完成') : '复制失败', {
+        method,
+        htmlSize: (html.length / 1024).toFixed(1) + 'KB',
+        imgCount,
+        failedImgs: failedImgCount || undefined,
+      });
 
     btn.textContent = ok ? '\u2713 已复制' : '复制失败';
+    if (ok && failedImgCount) btn.textContent = '已复制·' + failedImgCount + '张图缺失';
     btn.classList.add('copied');
+    // 按钮底色：有图缺失→橙色警告；正常/失败态清空 inline，回归默认（.copied 绿 / .tb-primary 蓝）。
+    btn.style.background = failedImgCount ? 'var(--fs-warning)' : '';
     return ok;
   };
 
