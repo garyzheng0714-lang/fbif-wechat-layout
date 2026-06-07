@@ -8,7 +8,7 @@
 
   --fs-text-1: #1F2329;
   --fs-text-2: #646A73;
-  --fs-text-3: #8F959E;
+  --fs-text-3: #6F757D; /* 弱文字（占位/caption/状态）：对白底 4.66:1 达 WCAG AA；旧 #8F959E=3.0:1 不达标 */
   --fs-text-disabled: #BBBFC4;
 
   --fs-bg-card: #FFFFFF;

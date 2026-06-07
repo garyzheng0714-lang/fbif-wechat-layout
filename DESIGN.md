@@ -19,7 +19,7 @@
 | 主蓝浅底（badge/icon 软底） | `--fs-brand-soft` | `#EBF1FF` |
 | 主文字 | `--fs-text-1` | `#1F2329` |
 | 次文字（描述/标签） | `--fs-text-2` | `#646A73` |
-| 弱文字（占位/caption/状态） | `--fs-text-3` | `#8F959E` |
+| 弱文字（占位/caption/状态） | `--fs-text-3` | `#6F757D`（对白底 4.66:1，达 WCAG AA；旧 `#8F959E`=3.0:1 不达标，2026-06-07 调深） |
 | 卡片 / 页面底 | `--fs-bg-card` | `#FFFFFF` |
 | 嵌套分区底 | `--fs-bg-nested` | `#F7F8FA` |
 | 凹槽 / sunken | `--fs-bg-sunken` | `#F2F3F5` |

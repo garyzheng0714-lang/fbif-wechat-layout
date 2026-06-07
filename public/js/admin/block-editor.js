@@ -226,7 +226,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
       ctrl.style.cssText = 'display:flex;align-items:center;gap:8px;';
       const thumb = resolveAssetThumb(value, getAssetLibrary ? getAssetLibrary() : null, scope);
       const preview = doc.createElement('div');
-      preview.style.cssText = 'width:64px;height:48px;border:1px solid #d9dce0;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f7f8fa;flex:none;font-size:11px;color:#8f959e;';
+      preview.style.cssText = 'width:64px;height:48px;border:1px solid #d9dce0;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f7f8fa;flex:none;font-size:11px;color:#6f757d;';
       if (thumb) { const im = doc.createElement('img'); im.src = thumb; im.alt = ''; im.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;'; preview.appendChild(im); }
       else { preview.textContent = '未选择'; }
       const btn = doc.createElement('button'); btn.type = 'button';

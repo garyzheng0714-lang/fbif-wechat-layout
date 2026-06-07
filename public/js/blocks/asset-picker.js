@@ -34,9 +34,9 @@ function ensureStyle(doc) {
 .ap-item:hover{border-color:#1456f0;}
 .ap-item img{width:100%;height:72px;object-fit:contain;background:#f7f8fa;border-radius:4px;}
 .ap-item .ap-label{font-size:11px;color:#646a73;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.ap-empty{color:#8f959e;font-size:13px;padding:20px 8px;text-align:center;line-height:1.6;}
+.ap-empty{color:#6f757d;font-size:13px;padding:20px 8px;text-align:center;line-height:1.6;}
 .ap-foot{padding:8px 16px 14px;border-top:1px solid #f2f3f5;text-align:right;}
-.ap-clear{background:none;border:none;color:#8f959e;cursor:pointer;text-decoration:underline;font-size:12px;}
+.ap-clear{background:none;border:none;color:#6f757d;cursor:pointer;text-decoration:underline;font-size:12px;}
 .ap-clear:hover{color:#f54a45;}
 `;
   (doc.head || doc.documentElement).appendChild(st);

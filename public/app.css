@@ -716,8 +716,16 @@ input[type="file"] { display: none; }
   from { opacity: 0; transform: translateY(8px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
+/* 全局动效降级兜底：app.html 加载本表，故 * 选择器覆盖整页（外壳 + 规则后台 + 弹窗 +
+   底部区块），把 transition/animation 归零、停掉无限循环动画。比旧版只关 crop/gallery
+   四个弹窗更彻底；正文 .wx-* 仅有图片淡入，归零后图片即时显示，不影响内容契约的静态值。 */
 @media (prefers-reduced-motion: reduce) {
-  .crop-modal, .crop-box, .ma-gallery-overlay, .ma-gallery-dialog { animation: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 .ma-gallery-dialog {
   background: var(--fs-bg-card); border-radius: var(--fs-r-l);
