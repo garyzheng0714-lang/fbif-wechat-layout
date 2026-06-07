@@ -59,6 +59,8 @@ const { renderTable: renderSharedTable } = tableModule;
 // 底部区块（统一模型）：中性编排器 + 网站渲染器（红线 #19：不 import 公众号渲染器）。
 const blockRenderModule = await import('../blocks/block-render.js' + assetQuery);
 const { renderBottomBlocksHtml } = blockRenderModule;
+const blockMergeModule = await import('../blocks/block-merge.js' + assetQuery);
+const { pickActivePreset } = blockMergeModule;
 const siteBlocksModule = await import('./site-blocks.js' + assetQuery);
 const { siteBlockRenderers } = siteBlocksModule;
 
@@ -463,20 +465,13 @@ function render(elems, config = {}) {
   // 防泄漏：mergeRuleDefaults 以公众号基线(含 mp 的 name_card bottom_blocks)为合并底，
   // 无 bottom_blocks 的网站旧规则会被塞进公众号版。网站页脚段是 rich_html，故仅当存在
   // rich_html 区块时才认其为「网站底部」走区块渲染；否则回退 fbif_footer（保住页脚）。
-  // 网站 v2 底部识别（统一打包）：取 active preset 的 blocks（保留顶层兜底兼容旧 v1）。
+  // 网站 v2 底部识别（统一打包）：取 active preset 的 blocks（复用 block-merge 的 pickActivePreset）。
   // 仅含 rich_html 区块才认作「网站底部」——rich_html 是网站特有的页脚段类型，公众号 v2
   // presets 是 text/image/spacer 原子、不含 rich_html，故据此区分「网站自己的底部」与
   // 「mergeRuleDefaults 泄漏进来的公众号 bottom_blocks」（rich_html 特征解决了旧 schema_version
   // 无法区分公众号 v2 泄漏的问题——前任推迟的 templateId 标记不再必需）。
-  const bbActiveBlocks = (() => {
-    if (!bottomBlocks || typeof bottomBlocks !== 'object') return null;
-    const ps = Array.isArray(bottomBlocks.presets) ? bottomBlocks.presets : null;
-    if (ps && ps.length) {
-      const p = ps.find(x => x && x.id === bottomBlocks.active_preset_id) || ps[0] || {};
-      return p && typeof p.blocks === 'object' ? p.blocks : null;
-    }
-    return typeof bottomBlocks.blocks === 'object' ? bottomBlocks.blocks : null;
-  })();
+  const _ap = (bottomBlocks && typeof bottomBlocks === 'object') ? pickActivePreset(bottomBlocks) : {};
+  const bbActiveBlocks = (_ap && typeof _ap.blocks === 'object') ? _ap.blocks : null;
   const bbIsSiteFooter = bbActiveBlocks && Object.keys(bbActiveBlocks).some(k => bbActiveBlocks[k] && bbActiveBlocks[k].type === 'rich_html');
   if (bottomBlocks && typeof bottomBlocks === 'object' && bbIsSiteFooter) {
     // 单篇覆盖由 site.html syncEngineConfig 从 localStorage 映射进来（开关/排序/字段）。

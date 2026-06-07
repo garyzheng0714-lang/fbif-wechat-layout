@@ -71,18 +71,24 @@ function resolveOneBlock(id, base, ov) {
   };
 }
 
-// activeLayer 取模块的「生效层」blocks/order（统一 v2 单格式）：从 presets[] 按 presetId
-//   （缺省 active_preset_id，再缺省第一个）选 order/blocks。v1 顶层 order/blocks 单布局已退役删除
-//   （2026-06-07 用户裁定彻底统一打包格式），不再支持。gap 恒为 'none'——块间距由 spacer 块承载
-//   （见 spec §4.2/§5），不再有 blank_line 自动空段。
+// pickActivePreset 选 v2 模块的生效预设：按 presetId → active_preset_id → 首个预设。
+// 渲染（activeLayer）、网站底部识别（foodtalks-site.js）、前端 footer override 映射（site.html）
+// 共用此选择，避免各处重写「找 active 预设」逻辑。空/非法模块或无预设时返回 {}。
+export function pickActivePreset(mod, presetId) {
+  const m = isObj(mod) ? mod : {};
+  const presets = Array.isArray(m.presets) ? m.presets : [];
+  const wantId = presetId || m.active_preset_id || (presets[0] && presets[0].id) || '';
+  return presets.find(p => isObj(p) && p.id === wantId) || presets[0] || {};
+}
+
+// activeLayer 取模块的「生效层」blocks/order（统一 v2 单格式）：从 presets[] 选生效预设的
+//   order/blocks。v1 顶层 order/blocks 单布局已退役删除（2026-06-07 用户裁定彻底统一），不再支持。
+//   块间距由 spacer 块承载（见 spec §4.2/§5），不再有 blank_line 自动空段，故无 gap 概念。
 function activeLayer(mod, opts) {
-  const presets = Array.isArray(mod.presets) ? mod.presets : [];
-  const wantId = (opts && opts.presetId) || mod.active_preset_id || (presets[0] && presets[0].id) || '';
-  const preset = presets.find(p => isObj(p) && p.id === wantId) || presets[0] || {};
+  const preset = pickActivePreset(mod, opts && opts.presetId);
   return {
     blocks: isObj(preset.blocks) ? preset.blocks : {},
     order: Array.isArray(preset.order) ? preset.order : null,
-    gap: 'none',
   };
 }
 
@@ -92,7 +98,7 @@ function activeLayer(mod, opts) {
 //     （v1 顶层 order/blocks 单布局已退役删除，2026-06-07 用户裁定彻底统一）
 //   override:      { enabled?, order?, overrides:{ id:{enabled?, fields?} } }
 //   opts:          { presetId? } —— v2 下显式选预设（由 engine/模板边界按 isRepost 映射传入，中性层不读全局）。
-// 返回：{ enabled, gap, enabledOverridden, orderOverridden, blocks:[ resolvedBlock ] }
+// 返回：{ enabled, enabledOverridden, orderOverridden, blocks:[ resolvedBlock ] }
 export function resolveBlocks(defaultModule, override, opts = {}) {
   const mod = isObj(defaultModule) ? defaultModule : {};
   const ov = isObj(override) ? override : {};
@@ -118,12 +124,10 @@ export function resolveBlocks(defaultModule, override, opts = {}) {
   const moduleEnabled = mod.enabled !== false;
   const enabledOv = typeof ov.enabled === 'boolean' ? ov.enabled : null;
   const enabled = enabledOv == null ? moduleEnabled : enabledOv;
-  const gap = layer.gap;
 
   const blocks = order.map(id => resolveOneBlock(id, baseBlocks[id], ovBlocks[id]));
   return {
     enabled,
-    gap,
     enabledOverridden: enabledOv != null && enabledOv !== moduleEnabled,
     orderOverridden,
     blocks,

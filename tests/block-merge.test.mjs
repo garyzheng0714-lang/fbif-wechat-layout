@@ -26,7 +26,6 @@ function baseModule() {
 test('无覆盖时直通后台默认：顺序、开关、字段默认值均跟随', () => {
   const r = resolveBlocks(baseModule(), null);
   assert.equal(r.enabled, true);
-  assert.equal(r.gap, 'none');                // v2 间距走 spacer 块，gap 恒 none
   assert.equal(r.enabledOverridden, false);
   assert.equal(r.orderOverridden, false);
   assert.deepEqual(r.blocks.map(b => b.id), ['intro', 'card', 'more']);
@@ -175,11 +174,10 @@ function v2Module() {
   };
 }
 
-test('v2：按 presetId 选 active 预设的 order/blocks（original），gap 废弃为 none', () => {
+test('v2：按 presetId 选 active 预设的 order/blocks（original）', () => {
   const r = resolveBlocks(v2Module(), null, { presetId: 'original' });
   assert.deepEqual(r.blocks.map(b => b.id), ['note', 'sp', 'card']);
   assert.equal(r.blocks.find(b => b.id === 'note').fields.content.value, '原创声明');
-  assert.equal(r.gap, 'none'); // v2 间距走 spacer，gap 不再用
 });
 
 test('v2：presetId=repost 读转载预设（不同 order/内容）', () => {

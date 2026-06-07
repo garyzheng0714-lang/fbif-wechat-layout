@@ -124,7 +124,6 @@ function seriesBlockRenderers(sp, assetLibrary, scope) {
     return url;
   };
   return {
-    __separator: () => '<p style="margin:0 8px;padding:0;line-height:1.75;font-size:15px;"><br></p>',
     // 间距模块（v2 原子）：定高留白段，精确控制块间距（与 mp-blocks / site-blocks 同口径，渠道无关）。
     // height<=0 不输出；上限 200 与 catalog schema 一致。此前系列缺此渲染器，间距块会被 block-render 静默跳过。
     spacer: (f) => {

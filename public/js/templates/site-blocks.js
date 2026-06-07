@@ -69,7 +69,6 @@ export function siteBlockRenderers(assetLibrary, scope = 'ft-default', opts = {}
     pWrap: (align, inner) => `<p style="text-align: ${align};">${inner}</p>`,
   };
   return {
-    __separator: () => '<p><br /></p>',
 
     // 间距模块（v2 原子）：定高留白段。height<=0 不输出（=运营删掉该间距）。
     spacer: (f) => {

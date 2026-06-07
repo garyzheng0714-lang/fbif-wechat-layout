@@ -212,6 +212,7 @@
 <span id="zoomLabel" style="display:none;">200%</span>
 
 <script type="module">
+import { pickActivePreset } from '/js/blocks/block-merge.js';
 // ---- Version ----
 async function loadVersionInfo() {
   try { const r = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' }); if (r.ok) return await r.json(); } catch {}
@@ -643,9 +644,8 @@ function syncEngineConfig(triggerRerender) {
   // 逐块 enabled = !!active_segments[id]（缺失视为关），与旧 buildFooterHtml 的 `if(!seg[key])continue` 一致。
   let bottomBlocksOverride;
   if (serverBottomBlocks && typeof serverBottomBlocks === 'object') {
-    // v2：order 在 active preset 内（顶层无 order）；保留 serverBottomBlocks 兜底兼容旧 v1 顶层。
-    const bbPresets = Array.isArray(serverBottomBlocks.presets) ? serverBottomBlocks.presets : [];
-    const bbActive = bbPresets.find(p => p && p.id === serverBottomBlocks.active_preset_id) || bbPresets[0] || serverBottomBlocks;
+    // v2：order 在 active preset 内（复用 block-merge 的 pickActivePreset 选预设）。
+    const bbActive = pickActivePreset(serverBottomBlocks);
     const bbOrder = Array.isArray(bbActive.order) ? bbActive.order : [];
     const overrides = {};
     for (const id of bbOrder) {

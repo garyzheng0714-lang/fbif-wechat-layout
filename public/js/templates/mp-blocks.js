@@ -99,7 +99,6 @@ export function mpBlockRenderers(assetLibrary, scope = 'global', opts = {}) {
     pWrap: (align, inner) => `<p style="margin:0 8px;text-align:${align};padding:0;">${inner}</p>`,
   };
   return {
-    __separator: () => '<p style="margin:0 8px;padding:0;line-height:1.75;font-size:15px;"><br></p>',
 
     // 间距模块（v2 原子）：定高留白段，精确控制块间距（取代 v1 的自动空行）。
     // height<=0 不输出（=运营删掉该间距）。line-height:0;font-size:0 让段高精确等于 height。
