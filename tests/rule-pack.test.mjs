@@ -145,7 +145,7 @@ test('WowFood 爆品超市 是公众号渠道账号，复用 fbif 渲染器', ()
 test('getRulePacksByChannel ft returns only website packs', () => {
   const packs = getRulePacksByChannel('ft');
   const ids = packs.map(p => p.id).sort();
-  assert.deepEqual(ids, ['ft-default']);
+  assert.deepEqual(ids, ['ft-default', 'ft-series']);
   assert.ok(packs.every(p => p.channel === 'ft'));
 });
 

@@ -13,6 +13,10 @@ const (
 	ftFooterGroupQR   = "https://static.foodtalks.cn/image/news/6e309987660da9af009b89be08c4aa74ed78.png"
 	ftFooterAccountQR = "https://static.foodtalks.cn/image/post/b5b448f324a538209eb53379bef8dea9a7bf.jpg"
 	ftFooterLogo      = "https://static.foodtalks.cn/uploads/images/202007/e155b7852c10a72f7b73157fdf9c4bf0.png"
+	// 「什么是」系列商务合作版块素材（static.foodtalks.cn，网站渠道直接引用、不转存）。
+	ftSeriesCoopCard  = "https://static.foodtalks.cn/image/post/78cbc7b7c8bd705db8f43f057c548506d823.png"
+	ftSeriesGroupQR   = "https://static.foodtalks.cn/image/news/4ae6499ea33bf7bf68435dad193e9c01002c.png"
+	ftSeriesAccountQR = "https://static.foodtalks.cn/image/post/c6ce3f375f1399792325ccd09105b8c52986.png"
 )
 
 var assetLibraryID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -52,9 +56,25 @@ func defaultAssetLibraryModule() map[string]any {
 		assetLibraryImage("fbif_promo_1000", "decor", "FBIF 1000个食品创新案例引流图", "/assets/fbif/promo-1000.webp", "fbif", 0, 0, "FBIF", "引流图"),
 	}
 	assets = append(assets, defaultSeriesAssetLibraryAssets()...)
+	assets = append(assets, defaultFtSeriesSiteCoopAssets()...)
 	return map[string]any{
 		"schema_version": 1,
 		"assets":         assets,
+	}
+}
+
+// defaultFtSeriesSiteCoopAssets 网站「什么是」系列商务合作版块素材。创意名片图/群二维码/公众号
+// 二维码走 static.foodtalks.cn（网站渠道直接引用）；BD 名片是落地站内的本地图。scope=global：
+// 底部页脚渲染 scope 写死 'ft-default'，用 global 保证 ft-series 也能解析（不改 render，红线#19）。
+func defaultFtSeriesSiteCoopAssets() []any {
+	// 前缀 ftss_（ft-series-site）区别于公众号系列素材的 ft_series_（红线#19：网站系列 ≠ 公众号系列）。
+	return []any{
+		assetLibraryImage("ftss_coop_card", "decor", "什么是系列创意名片图", ftSeriesCoopCard, "global", 600, 0, "商务合作"),
+		assetLibraryImage("ftss_group_qr", "qr_group", "功能性食品群二维码", ftSeriesGroupQR, "global", 600, 0, "商务合作", "二维码"),
+		assetLibraryImage("ftss_account_qr", "qr_account", "什么是系列公众号二维码", ftSeriesAccountQR, "global", 600, 0, "商务合作", "二维码"),
+		assetLibraryImage("ftss_bd_eileen", "avatar", "BD名片 Eileen", "/assets/ft-series/bd/eileen.png", "global", 600, 0, "BD名片"),
+		assetLibraryImage("ftss_bd_soso", "avatar", "BD名片 Soso", "/assets/ft-series/bd/soso.jpg", "global", 600, 0, "BD名片"),
+		assetLibraryImage("ftss_bd_tiki", "avatar", "BD名片 Tiki", "/assets/ft-series/bd/tiki.png", "global", 600, 0, "BD名片"),
 	}
 }
 

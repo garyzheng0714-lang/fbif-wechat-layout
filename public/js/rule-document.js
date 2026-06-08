@@ -23,6 +23,7 @@ export const RULE_SCHEMA = Object.freeze([
       { key: 'text_color', label: '正文颜色', type: 'color', default: '#544545' },
       { key: 'link_color', label: '链接颜色', type: 'color', default: '#0070C0' },
       { key: 'muted_color', label: '辅助文字颜色', type: 'color', default: '#888888' },
+      { key: 'justify_paragraphs', label: '段落两端对齐', type: 'boolean', default: true },
     ]),
   },
   {

@@ -55,6 +55,18 @@ export const RULE_PACKS = Object.freeze({
     location: '',
     channel: 'ft',
   }),
+  // 网站渠道「什么是系列」：复用 foodtalks-site 渲染器，颜色#333333/#7f7f7f/#01396a + 商务合作版块差异走 config。放 ft-default 之后保证 ft 渠道默认仍是 ft-default（红线#21）。
+  'ft-series': Object.freeze({
+    id: 'ft-series',
+    templateId: 'foodtalks-site',
+    accountName: '网站·什么是系列',
+    previewAccountName: 'FoodTalks什么是系列',
+    behaviorAccountName: 'FoodTalks',
+    avatarUrl: '/foodtalks-logo.svg',
+    footerUrl: '',
+    location: '',
+    channel: 'ft',
+  }),
 });
 
 export function listRulePacks() {

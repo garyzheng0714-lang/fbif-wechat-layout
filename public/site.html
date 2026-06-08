@@ -626,15 +626,27 @@ function syncEngineConfig(triggerRerender) {
   const prev = (window._engineApi.getActiveConfig && window._engineApi.getActiveConfig()) || {};
   const prevModules = prev.modules || {};
   const serverBehavior = (window._activeConfig && window._activeConfig.behavior) || {};
-  const footerEnabled = localStorage.getItem('ft.footer.enabled') === '1';
-  let footerActiveSegments = {};
-  try { footerActiveSegments = JSON.parse(localStorage.getItem('ft.footer.segments') || '{}'); } catch (e) {}
-  let footerOrder = [];
-  try { footerOrder = JSON.parse(localStorage.getItem('ft.footer.order') || '[]'); } catch (e) {}
   // 页脚库【内容】（segments html_lines / presets / segment_order）以服务端 /api/rules
   // 为准——直接从 raw _activeConfig.config 取，绕过 normalizeRuleConfig（它只认已知
   // module、会丢弃结构化的 fbif_footer）。服务端无内容时由 buildFooterHtml 降级默认。
   const serverFooter = serverFooterLibrary();
+  // 页脚开关/勾选首次（无 localStorage）从服务端 fbif_footer 默认初始化：enabled 取服务端值
+  // （ft-series 商务合作 enabled=true → 默认输出；ft-default enabled=false → 默认不输出，行为不变），
+  // active_segments 取 active_preset 的 segments。之后用户侧栏勾选写 localStorage 覆盖。
+  const footerEnabledLS = localStorage.getItem('ft.footer.enabled');
+  const footerEnabled = footerEnabledLS === null
+    ? !!(serverFooter && serverFooter.enabled)
+    : footerEnabledLS === '1';
+  let footerActiveSegments = {};
+  const footerSegLS = localStorage.getItem('ft.footer.segments');
+  if (footerSegLS) {
+    try { footerActiveSegments = JSON.parse(footerSegLS); } catch (e) {}
+  } else if (serverFooter && Array.isArray(serverFooter.presets)) {
+    const ap = serverFooter.presets.find(p => p.id === serverFooter.active_preset_id) || serverFooter.presets[0];
+    if (ap && ap.segments) footerActiveSegments = { ...ap.segments };
+  }
+  let footerOrder = [];
+  try { footerOrder = JSON.parse(localStorage.getItem('ft.footer.order') || '[]'); } catch (e) {}
   const serverAssets = serverAssetLibrary();
   const serverBottomBlocks = serverRuleModules().bottom_blocks;
   const footerForRender = Array.isArray(footerOrder) && footerOrder.length

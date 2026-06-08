@@ -93,6 +93,19 @@ func accountCatalog() []accountMeta {
 			DefaultPresetID:     foodTalksSiteDefaultRulePresetID, // "ft-default-v1"
 			Note:                "网站渲染器，与公众号物理隔离（红线 #19）；previewAccountName 是基石 62285 的 FBIF 署名而非 FoodTalks。",
 		},
+		{
+			ID:                  foodTalksSeriesSiteRuleAccountID, // "ft-series"
+			Channel:             "ft",
+			TemplateID:          "foodtalks-site", // 复用网站渲染器；系列差异(颜色/字号/商务合作版块/视频)全走 config（红线#19：网站内部共用，不碰公众号）
+			AccountName:         "网站·什么是系列",
+			PreviewAccountName:  "FoodTalks什么是系列",
+			BehaviorAccountName: "FoodTalks",
+			AvatarURL:           "/foodtalks-logo.svg",
+			FooterURL:           "",
+			Location:            "",
+			DefaultPresetID:     foodTalksSeriesSiteDefaultRulePresetID, // "ft-series-v1"
+			Note:                "网站渠道「什么是系列」：复用 foodtalks-site 渲染器，颜色#333333/#7f7f7f/#01396a + 商务合作版块差异走 config。放 ft-default 之后保证 ft 渠道默认仍是 ft-default（红线#21）。",
+		},
 	}
 }
 

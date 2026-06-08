@@ -66,6 +66,7 @@ var ruleBooleanFields = map[string]bool{
 	"skip_upload":           true,
 	"more_articles_enabled": true,
 	"table_header_bold":     true, // 表头加粗（统一表格样式，红线下放）
+	"justify_paragraphs":    true, // 段落/标题两端对齐：ft-default=true(FBIF搬运文口径)；网站系列=false(成品裸标签)
 }
 
 var ruleTextFields = map[string]bool{

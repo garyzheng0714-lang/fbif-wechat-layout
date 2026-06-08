@@ -22,6 +22,7 @@ type Block struct {
 	DataRatio string        `json:"dataRatio,omitempty"`
 	Ordered   bool          `json:"ordered,omitempty"`
 	Rows      [][]TableCell `json:"rows,omitempty"` // K=="table": 二维行/列，保住表格结构
+	Poster    string        `json:"poster,omitempty"` // K=="video": 视频封面 poster
 }
 
 // TableCell is one cell of a K=="table" block. Header marks heading-row /
@@ -210,6 +211,33 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.textStyles = nil
 			}
 			w.blocks = append(w.blocks, Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
+			w.captionContext = true
+			w.captionLines = 0
+			w.inRefSection = false
+			return
+		case "video":
+			// FoodTalks 网站文章视频 = <video src=mp4 poster=jpg>（成品口径）。src 优先取标签
+			// 自身，缺省找子 <source src>。视频后紧跟的说明=来源，同图注走 captionContext。
+			vsrc := getAttr(n, "src")
+			if vsrc == "" {
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					if c.Type == html.ElementNode && strings.ToLower(c.Data) == "source" {
+						if s := getAttr(c, "src"); s != "" {
+							vsrc = s
+							break
+						}
+					}
+				}
+			}
+			if vsrc == "" {
+				return
+			}
+			if cur != nil && hasContent(cur.runs) {
+				w.emit(cur)
+				cur.runs = nil
+				cur.textStyles = nil
+			}
+			w.blocks = append(w.blocks, Block{K: "video", Src: vsrc, Poster: getAttr(n, "poster")})
 			w.captionContext = true
 			w.captionLines = 0
 			w.inRefSection = false

@@ -245,6 +245,20 @@ function renderImage(src, alt, naturalWidth, naturalHeight, config = {}) {
   );
 }
 
+// 视频块（成品口径，安姆科那篇实测）：<video src=mp4 poster=jpg width:100% max-height:480px
+// border-radius:8px controls>。视频后紧跟的来源说明走 cap 分支（12px muted 居中，同图注）。
+function renderVideo(src, poster) {
+  const safeSrc = escAttr(src || '');
+  if (!safeSrc) return BLANK_LINE;
+  const posterAttr = poster ? ` poster="${escAttr(poster)}"` : '';
+  const rpol = String(src || '').startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
+  return (
+    `<p><video src="${safeSrc}"${posterAttr}${rpol} ` +
+    `style="width: 100%; max-height: 480px; border-radius: 8px; outline: none;" ` +
+    `controls="controls" x5-video-player-type="h5-page"></video></p>`
+  );
+}
+
 function renderImageCaption(text, config = {}) {
   const color = (config && config.muted_color) || '#888888';
   const fs = cfgNum(config, 'caption_font_size', 12);
@@ -409,6 +423,16 @@ function render(elems, config = {}) {
       prevWasStandaloneLink = false;
       continue;
     }
+    if (e.k === 'video') {
+      lines.push(renderVideo(e.src, e.poster));
+      // 视频后若不是来源说明（cap），补空行（同图片口径）
+      if (!elems[i + 1] || elems[i + 1].k !== 'cap') {
+        lines.push(BLANK_LINE);
+      }
+      prevWasHeading = false;
+      prevWasStandaloneLink = false;
+      continue;
+    }
     if (e.k === 'cap') {
       lines.push(renderImageCaption(runsToPlain(e.runs), config));
       // 连续图注（图注 + 图片来源）之间不插空行；最后一个图注后用 center 对齐空行
@@ -494,6 +518,15 @@ function render(elems, config = {}) {
       }
     }
   }
+  // 系列口径（config.justify_paragraphs===false）：FoodTalks「什么是」系列成品正文/标题/署名/参考
+  // 是裸标签（样式靠后台 CSS，8 篇成品 justify=0），去掉 ft-default 的 text-align: justify。
+  // ft-default 默认 justify=true → 不走此清理，输出字节不变（红线#19：网站内部共用渲染器，config 区分）。
+  if (config && config.justify_paragraphs === false) {
+    return lines.map(l => l
+      .replace(/<p style="text-align: justify;">/g, '<p>')
+      .replace(/(<h[1-6][^>]*?) style="text-align: justify;"/g, '$1')
+      .replace(/ ?text-align: justify;/g, ''));
+  }
   return lines;
 }
 
@@ -525,7 +558,7 @@ function buildDocxOpts(config) {
   let authorLineRegex = /^[\s　]*(?:作者|Author)\s*[:：]\s*(.*)$/i;
   const src = behParamStr(config, 'docx_preamble_author_regex', '');
   if (src) { try { authorLineRegex = compileSiteRegex(src); } catch (e) { /* 非法降级 */ } }
-  return { authorLineRegex, consumeAuthorLine: false, classifyReferences: false };
+  return { authorLineRegex, consumeAuthorLine: false, classifyReferences: false, extractVideo: true };
 }
 
 // 中性元素 → 网站本地 elem。网站渲染结构与公众号物理隔离（红线#19）：图片走像素 width
@@ -535,6 +568,7 @@ function buildDocxOpts(config) {
 function adaptNeutralToSite(e) {
   // 缓存未命中（src 空）→ 丢弃该图，绝不输出 <img src="">（坏 HTML 会污染网站后台）。
   if (e.k === 'img') return e.src ? { k: 'img', src: e.src, alt: '', width: 0, height: 0 } : null;
+  if (e.k === 'video') return e.src ? { k: 'video', src: e.src, poster: e.poster || '' } : null;
   if (e.k === 'h') {
     const level = /heading\s*[3-6]/.test(String(e.styleName || '').toLowerCase()) ? 3 : 2;
     return { k: 'h', level, runs: [{ type: 'txt', text: e.text }] };
@@ -614,6 +648,10 @@ function classifyBlocks(data) {
         height: h,
       });
       imgN += 1;
+      continue;
+    }
+    if (b.k === 'video') {
+      elems.push({ k: 'video', src: b.src || '', poster: b.poster || '' });
       continue;
     }
     if (b.k === 'h') {

@@ -126,7 +126,11 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v6→v7（2026-06-06）：FBIF 公众号底部默认切 4 原子 V2 双预设（原创/转载），替换旧语义类型
 // declaration/name_card/titled_media；本地浏览器验证 FBIF V2 视觉 1:1 == footer.html，微信复制最终由公众号后台确认。
 // 系列【保持 v1，不切 V2】：spacer 间距需 FoodTalks 后台确认且系列无 spacer renderer，切 V2 零收益（理由见 series bottom_blocks 覆盖处注释）。
-const currentBuiltinRuleVersion = 7
+// v7→v8（2026-06-08）：新增网站渠道「什么是系列」包 ft-series（ft-series-v1）——复用 foodtalks-site
+// 渲染器，覆盖系列原生口径(正文#333333/灰#7f7f7f/框线#7f7f7f/表头#01396a/参考16px)，依据 8 篇真实成品。
+// v8→v9（2026-06-08）：ft-series 补 justify_paragraphs=false + 视频块 + 商务合作版块（fbif_footer 覆盖
+// + 清空继承的 bottom_blocks）；覆盖已持久化的 v8 旧版 ft-series-v1（无商务合作）。
+const currentBuiltinRuleVersion = 9
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -162,6 +166,18 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 				Version:   1,
 				Config:    defaultFoodTalksSiteRuleConfig(),
 				Behavior:  defaultFoodTalksSiteRuleBehavior(),
+				CreatedAt: now,
+			}},
+			UpdatedAt: now,
+		},
+		foodTalksSeriesSiteDefaultRulePresetID: {
+			ID:          foodTalksSeriesSiteDefaultRulePresetID,
+			Name:        "网站·什么是系列默认规则",
+			Description: "FoodTalks 网站「什么是系列」排版默认（正文#333333/灰#7f7f7f/表头#01396a/框线#7f7f7f/参考16px + 商务合作版块）",
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultFoodTalksSeriesSiteRuleConfig(),
+				Behavior:  defaultFoodTalksSeriesSiteRuleBehavior(),
 				CreatedAt: now,
 			}},
 			UpdatedAt: now,
@@ -339,6 +355,39 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 			},
 		},
 	}
+}
+
+// defaultFoodTalksSeriesSiteRuleConfig 网站渠道「什么是系列」默认参数。
+// 复用网站基线(defaultFoodTalksSiteRuleConfig)，仅覆盖系列原生口径——颜色/字号经 8 篇真实
+// static.foodtalks.cn「什么是」成品逐元素核对(2026-06-08，依据《Foodtalks【什么是系列】排版要求》)：
+// 正文 #333333、灰字(图注/参考/署名) #7f7f7f、表格框线 #7f7f7f、表头 #01396a、参考来源 16px。
+// muted #7f7f7f 是系列原生色，区别于 ft-default 的 #888888(红线#19 针对搬运文)；物理隔离=不动 ft-default。
+// 商务合作底部版块走 modules.fbif_footer/bottom_blocks（后续块覆盖），此处仅定样式真值。
+func defaultFoodTalksSeriesSiteRuleConfig() map[string]any {
+	cfg := defaultFoodTalksSiteRuleConfig()
+	cfg["text_color"] = "#333333"
+	cfg["muted_color"] = "#7f7f7f"
+	cfg["caption_font_size"] = "12"
+	cfg["table_header_bg"] = "#01396a"
+	cfg["table_header_text_color"] = "#ffffff"
+	cfg["table_border_color"] = "#7f7f7f"
+	cfg["table_font_size"] = "15"
+	cfg["justify_paragraphs"] = false // 系列正文/标题/参考裸标签（8 篇成品 justify=0，样式靠后台 CSS）
+	// 底部页脚库覆盖为「什么是系列商务合作」版块（默认开启）：标题/创意策划文案/创意名片图/
+	// BD名片(默认Eileen)/群二维码/公众号二维码/logo/更多。素材见 defaultFtSeriesSiteCoopAssets。
+	if mods, ok := cfg["modules"].(map[string]any); ok {
+		mods["fbif_footer"] = defaultFtSeriesBizCoopFooterModule()
+		// 清空继承自网站基线的 bottom_blocks（rich_html site footer）：foodtalks-site.js render 底部
+		// 优先走 bottom_blocks 分支、会忽略 fbif_footer。清空 → 回退到 fbif_footer 商务合作版块
+		// （与 WowFood 同手法）。
+		mods["bottom_blocks"] = map[string]any{"schema_version": 2, "enabled": false, "presets": []any{}}
+	}
+	return cfg
+}
+
+// defaultFoodTalksSeriesSiteRuleBehavior 暂复用网站基线行为；系列专属 tip/商务合作文案在后续块按成品调。
+func defaultFoodTalksSeriesSiteRuleBehavior() map[string]any {
+	return defaultFoodTalksSiteRuleBehavior()
 }
 
 // defaultFoodTalksSeriesRuleConfig 返回 FoodTalks「什么是」系列的默认参数配置。

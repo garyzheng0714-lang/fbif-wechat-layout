@@ -20,6 +20,8 @@ const foodTalksRuleAccountID = "foodtalks-series"
 const foodTalksDefaultRulePresetID = "foodtalks-series-default"
 const foodTalksSiteRuleAccountID = "ft-default"
 const foodTalksSiteDefaultRulePresetID = "ft-default-v1"
+const foodTalksSeriesSiteRuleAccountID = "ft-series"          // 网站渠道「什么是系列」= registry pack.id
+const foodTalksSeriesSiteDefaultRulePresetID = "ft-series-v1" // 网站系列独立 preset
 const wowFoodRuleAccountID = "wowfood"               // = registry pack.id
 const wowFoodDefaultRulePresetID = "wowfood-default" // WowFood爆品超市 独立 preset
 const maxRulePresetVersions = 20

@@ -63,6 +63,8 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
   const frontMatterScanLimit = opts.frontMatterScanLimit || DEFAULT_FRONT_MATTER_SCAN_LIMIT;
   const consumeAuthorLine = opts.consumeAuthorLine !== false; // 默认 true（公众号语义）
   const classifyReferences = opts.classifyReferences !== false; // 默认 true（公众号语义）
+  // 默认 false：仅网站口径把「（插入视频）」超链接段转 video elem；公众号保持跳过（字节不变，红线#19）。
+  const extractVideo = opts.extractVideo === true;
   // 正文起点信号：'authorLine'（默认，公众号——首个「作者：」行之前=前置材料）；
   // 'firstImage'（FoodTalks「什么是」系列——文章无作者行、固定以头图为正文锚点，头图之前的
   // 标题段 + 单格副标题表格都是编辑前置物料，须剥离。见红线#12 的系列变体）。
@@ -147,7 +149,22 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
   for (let i = contentStart; i < pds.length; i++) {
     const pd = pds[i];
     if (pd.isEmpty) { if (elems.length) blankBefore = true; continue; }
-    if (pd.hasHL && pd.text.includes('插入视频')) continue;
+    if (pd.hasHL && pd.text.includes('插入视频')) {
+      // 网站口径：docx 用「（插入视频）」+超链接标记视频位置。转 video elem——src 取超链接
+      // href（编辑填的视频 URL；真实 mp4 多由 FoodTalks 后台上传补全），poster 取紧邻上一个图
+      // （视频封面，并入 video 不再单独渲染）。无 href 且无封面则跳过，避免空 video。
+      if (extractVideo) {
+        let vhref = '';
+        for (const r of (pd.runs || [])) { if (r && r.type === 'link' && r.href) { vhref = r.href; break; } }
+        let poster = '';
+        if (elems.length && elems[elems.length - 1].k === 'img') {
+          poster = elems[elems.length - 1].src || '';
+          elems.pop();
+        }
+        if (vhref || poster) elems.push({ k: 'video', src: vhref, poster, ...takeDocxMeta(pd) });
+      }
+      continue;
+    }
 
     // 表格块：parser.buildTableBlock 产出的二维 rows 透传成中性 k:'table' 元素，
     // 两侧渲染器各自渲成 <table>（红线#19：渲染各写各的，只共享此结构层）。
