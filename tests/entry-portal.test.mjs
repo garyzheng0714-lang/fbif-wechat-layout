@@ -40,9 +40,27 @@ test('site.html removes public-account specific DOM', async () => {
 test('site.html keeps upload + URL + preview + copy button', async () => {
   const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
   assert.match(html, /id=['"]dropZone['"]/);
+  assert.match(html, /class=['"][^'"]*\bimport-card\b[^'"]*['"]/);
+  assert.match(html, /class=['"][^'"]*\bdropzone\b[^'"]*['"][^>]*id=['"]dropZone['"]/);
+  assert.match(html, /class=['"][^'"]*\burl-row\b[^'"]*['"][^>]*data-url-focus-target/);
+  assert.match(html, /id=['"]urlFetchBtn['"][^>]*class=['"][^'"]*\bbtn-sm\b/, 'website URL import action should use the shared shell button size');
   assert.match(html, /id=['"]urlInput['"]/);
   assert.match(html, /id=['"]previewContent['"]/);
   assert.match(html, /id=['"]copyBtn['"]/);
+});
+
+test('site.html uses the shared shell empty state without WeChat-only actions', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const emptyStart = html.indexOf('id="emptyState"');
+  const emptyEnd = html.indexOf('<!-- Preview content -->', emptyStart);
+  const empty = html.slice(emptyStart, emptyEnd);
+
+  assert.ok(emptyStart > 0, 'website shell should render an empty state');
+  assert.match(empty, /class=['"]empty-ico['"]/);
+  assert.match(empty, /class=['"]empty-title['"]>还没有内容<\/div>/);
+  assert.match(empty, /class=['"]empty-sub['"][\s\S]*FoodTalks 文章链接/);
+  assert.doesNotMatch(empty, /<p>上传文件开始预览<\/p>/, 'website shell should not keep the old one-line empty state');
+  assert.doesNotMatch(empty, /class=['"]empty-cta['"]/, 'website shell should not inherit the public-account file CTA by accident');
 });
 
 test('site.html renders the FoodTalks article preview shell', async () => {

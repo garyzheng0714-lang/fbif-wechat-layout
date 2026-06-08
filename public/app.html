@@ -178,94 +178,6 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) reloadIfUpdated();
 // 只有 build 真变了才 reload；reload 前 session-restore 的 beforeunload 会兜底保存当前文章快照。
 setInterval(reloadIfUpdated, 5 * 60 * 1000);
 
-function bindRailDivider() {
-  const layout = document.querySelector('.app-layout');
-  const rail = document.getElementById('rail');
-  const divider = document.getElementById('railDivider');
-  const button = document.getElementById('railToggleBtn');
-  if (!layout || !rail || !divider || !button) return;
-
-  const minWidth = 220;
-  const maxWidth = 420;
-  const collapseThreshold = 180;
-  let railWidth = rail.getBoundingClientRect().width || 300;
-  let suppressClick = false;
-
-  function clampWidth(width) {
-    return Math.max(minWidth, Math.min(maxWidth, width));
-  }
-
-  function setCollapsed(collapsed) {
-    layout.classList.toggle('rail-collapsed', collapsed);
-    button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-    button.setAttribute('aria-label', collapsed ? '展开左栏' : '收起左栏');
-    button.title = collapsed ? '展开左栏' : '收起左栏';
-  }
-
-  function setRailWidth(width) {
-    railWidth = clampWidth(width);
-    layout.style.setProperty('--rail-current-w', railWidth + 'px');
-    setCollapsed(false);
-  }
-
-  button.addEventListener('click', () => {
-    if (suppressClick) {
-      suppressClick = false;
-      return;
-    }
-    setCollapsed(!layout.classList.contains('rail-collapsed'));
-  });
-
-  divider.addEventListener('pointerdown', event => {
-    if (window.matchMedia('(max-width: 820px)').matches) return;
-    event.preventDefault();
-    const startedOnButton = button.contains(event.target);
-    const pointerID = event.pointerId;
-    const startX = event.clientX;
-    const startWidth = layout.classList.contains('rail-collapsed')
-      ? 0
-      : rail.getBoundingClientRect().width;
-    let moved = false;
-
-    divider.setPointerCapture(pointerID);
-    document.body.classList.add('is-resizing-rail');
-
-    function moveRail(moveEvent) {
-      const delta = moveEvent.clientX - startX;
-      const nextWidth = startWidth + delta;
-      if (Math.abs(delta) > 3) moved = true;
-      if (nextWidth < collapseThreshold) {
-        setCollapsed(true);
-      } else {
-        setRailWidth(nextWidth);
-      }
-    }
-
-    function stopDrag() {
-      divider.releasePointerCapture(pointerID);
-      document.body.classList.remove('is-resizing-rail');
-      divider.removeEventListener('pointermove', moveRail);
-      divider.removeEventListener('pointerup', stopDrag);
-      divider.removeEventListener('pointercancel', stopDrag);
-      if (!moved && startedOnButton) {
-        setCollapsed(!layout.classList.contains('rail-collapsed'));
-        suppressClick = true;
-        window.setTimeout(() => { suppressClick = false; }, 120);
-        return;
-      }
-      if (moved) {
-        suppressClick = true;
-        window.setTimeout(() => { suppressClick = false; }, 120);
-      }
-    }
-
-    divider.addEventListener('pointermove', moveRail);
-    divider.addEventListener('pointerup', stopDrag);
-    divider.addEventListener('pointercancel', stopDrag);
-  });
-}
-bindRailDivider();
-
 // ---- Log ----
 window._pushLog = function(level, msg, detail) {
   console.log('[FBIF]', level === 'error' ? '!' : '+', msg, detail || '');
@@ -278,6 +190,7 @@ const { mountAccountMenu } = await import('/js/account-menu.js?v=' + assetVersio
 const editorShell = await import('/js/editor-shell.js?v=' + assetVersion);
 const { mountBlockPanel } = await import('/js/blocks/block-panel.js?v=' + assetVersion);
 const {
+  bindRailDivider,
   bindUrlImportShortcuts,
   createUrlImportHandler,
   pasteTargetsForChannel,
@@ -285,6 +198,7 @@ const {
   wrapBackFeedback,
   wrapCopyFeedback,
 } = editorShell;
+bindRailDivider();
 const ACCOUNT_STORAGE_KEY = 'active_rule_pack';
 
 function initialRulePackID() {

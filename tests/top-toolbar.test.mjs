@@ -56,8 +56,9 @@ test('app global header keeps settings inside the account menu and copy on the r
   assert.doesNotMatch(html, /data-action="edit-active-rule"/, 'app.html should not expose front-end rule editing in the fixed footer');
   assert.match(html, /class="rail-divider"/, 'app.html should render the WeChat-style rail divider');
   assert.match(html, /id="railToggleBtn"/, 'app.html rail divider should expose a real collapse control');
-  assert.match(html, /function bindRailDivider\(\)/, 'app.html should bind finite drag and collapse behavior');
-  assert.match(html, /startedOnButton = button\.contains\(event\.target\)/, 'app.html rail handle should support click and drag without conflicting');
+  assert.match(html, /const \{[\s\S]*bindRailDivider[\s\S]*\} = editorShell;/, 'app.html should import the shared rail divider behavior');
+  assert.match(html, /bindRailDivider\(\);/, 'app.html should bind finite drag and collapse behavior');
+  assert.doesNotMatch(html, /function bindRailDivider\(\)/, 'app.html should not carry a private rail divider implementation');
 });
 
 test('site toolbar lives in the global top-right bar, not the article preview panel', async () => {
@@ -67,14 +68,20 @@ test('site toolbar lives in the global top-right bar, not the article preview pa
   const headerEnd = html.indexOf('</header>', headerStart);
   const header = html.slice(headerStart, headerEnd);
   assert.match(header, /id="adminLockBtn"/, 'site.html rule admin button should remain in the top bar');
+  assert.match(html, /class="rail-divider"/, 'site.html should render the shared rail divider');
+  assert.match(html, /id="railToggleBtn"/, 'site.html rail divider should expose a real collapse control');
+  assert.match(html, /const \{[\s\S]*bindRailDivider[\s\S]*\} = editorShell;/, 'site.html should import the shared rail divider behavior');
+  assert.match(html, /bindRailDivider\(\);/, 'site.html should bind finite drag and collapse behavior');
 });
 
 test('app rail divider stays visually slim and the handle behaves like a clickable control', async () => {
   const css = await readPublic('css/app-shell.css');
   const channelCss = await readPublic('css/channel-bar.css');
+  const shellJs = await readPublic('js/editor-shell.js');
   assert.match(css, /\.rail-divider\s*\{[\s\S]*?width:\s*4px;/, 'rail divider should stay slim');
   assert.match(css, /\.rail-divider-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*50px;[\s\S]*?cursor:\s*pointer;/, 'rail handle should be smaller and use pointer feedback');
   assert.match(css, /\.rail-divider-toggle:hover\s*\{[\s\S]*?--rail-toggle-scale:\s*1\.06;/, 'rail handle should animate on hover');
+  assert.match(shellJs, /export function bindRailDivider\(/, 'rail divider behavior should live in the shared shell helper');
   assert.match(css, /\.global-channel-bar > \.acct-menu\s*\{[\s\S]*?flex:\s*0 1 auto;/, 'account switcher should be anchored in the top-left bar');
   assert.doesNotMatch(css, /preview-toolbar-strip|app-brand|tb-icon-action|article-refresh-spin/, 'old preview action strip and refresh styles should not be restored');
   assert.doesNotMatch(css, /article-tabs|article-tab/, 'article tab styles should not be restored');

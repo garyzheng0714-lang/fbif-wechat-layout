@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import {
+  bindRailDivider,
   bindUrlImportShortcuts,
   createUrlImportHandler,
   foodTalksFetchErrorMessage,
@@ -10,6 +11,89 @@ import {
 } from '../public/js/editor-shell.js';
 import * as rulePackModule from '../public/js/rule-packs/registry.js';
 import * as rulePackUrlModule from '../public/js/rule-packs/url.js';
+
+function makeClassList() {
+  const names = new Set();
+  return {
+    add(name) { names.add(name); },
+    remove(name) { names.delete(name); },
+    contains(name) { return names.has(name); },
+    toggle(name, force) {
+      const shouldAdd = force === undefined ? !names.has(name) : !!force;
+      if (shouldAdd) names.add(name);
+      else names.delete(name);
+      return shouldAdd;
+    },
+  };
+}
+
+function makeRailElement({ width = 300 } = {}) {
+  const listeners = new Map();
+  const attrs = new Map();
+  const styleValues = new Map();
+  const element = {
+    attrs,
+    listeners,
+    classList: makeClassList(),
+    capturedPointers: [],
+    releasedPointers: [],
+    style: {
+      setProperty(name, value) { styleValues.set(name, value); },
+      getPropertyValue(name) { return styleValues.get(name) || ''; },
+    },
+    title: '',
+    addEventListener(type, handler) {
+      const handlers = listeners.get(type) || [];
+      handlers.push(handler);
+      listeners.set(type, handlers);
+    },
+    removeEventListener(type, handler) {
+      listeners.set(type, (listeners.get(type) || []).filter(item => item !== handler));
+    },
+    dispatch(type, event = {}) {
+      for (const handler of [...(listeners.get(type) || [])]) handler(event);
+    },
+    setAttribute(name, value) { attrs.set(name, value); },
+    getAttribute(name) { return attrs.get(name); },
+    contains(target) { return target === element; },
+    getBoundingClientRect() { return { width }; },
+    setPointerCapture(pointerID) { element.capturedPointers.push(pointerID); },
+    releasePointerCapture(pointerID) { element.releasedPointers.push(pointerID); },
+  };
+  return element;
+}
+
+function makeRailFixture({ mobile = false, includeNodes = true } = {}) {
+  const layout = makeRailElement();
+  const rail = makeRailElement({ width: 300 });
+  const divider = makeRailElement();
+  const button = makeRailElement();
+  const body = { classList: makeClassList() };
+  const elements = includeNodes
+    ? new Map([['rail', rail], ['railDivider', divider], ['railToggleBtn', button]])
+    : new Map();
+
+  return {
+    layout,
+    rail,
+    divider,
+    button,
+    body,
+    documentRef: {
+      body,
+      querySelector(selector) {
+        return selector === '.app-layout' && includeNodes ? layout : null;
+      },
+      getElementById(id) {
+        return elements.get(id) || null;
+      },
+    },
+    windowRef: {
+      matchMedia() { return { matches: mobile }; },
+      setTimeout(fn) { fn(); },
+    },
+  };
+}
 
 test('editor shells both import the shared editor-shell helpers', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
@@ -21,6 +105,73 @@ test('editor shells both import the shared editor-shell helpers', async () => {
   assert.match(site, /createUrlImportHandler/);
   assert.match(app, /bindUrlImportShortcuts/);
   assert.match(site, /bindUrlImportShortcuts/);
+  assert.match(app, /bindRailDivider/);
+  assert.match(site, /bindRailDivider/);
+  assert.equal(typeof bindRailDivider, 'function');
+});
+
+test('bindRailDivider no-ops safely when shell nodes are missing', () => {
+  const fixture = makeRailFixture({ includeNodes: false });
+
+  assert.doesNotThrow(() => bindRailDivider(fixture));
+});
+
+test('bindRailDivider toggles collapsed state from the handle button', () => {
+  const fixture = makeRailFixture();
+  bindRailDivider(fixture);
+
+  fixture.button.dispatch('click');
+  assert.equal(fixture.layout.classList.contains('rail-collapsed'), true);
+  assert.equal(fixture.button.getAttribute('aria-expanded'), 'false');
+  assert.equal(fixture.button.getAttribute('aria-label'), '展开左栏');
+
+  fixture.button.dispatch('click');
+  assert.equal(fixture.layout.classList.contains('rail-collapsed'), false);
+  assert.equal(fixture.button.getAttribute('aria-expanded'), 'true');
+  assert.equal(fixture.button.getAttribute('aria-label'), '收起左栏');
+});
+
+test('bindRailDivider ignores drag gestures on mobile viewports', () => {
+  const fixture = makeRailFixture({ mobile: true });
+  bindRailDivider(fixture);
+  let prevented = false;
+
+  fixture.divider.dispatch('pointerdown', {
+    pointerId: 1,
+    clientX: 100,
+    target: fixture.divider,
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, false);
+  assert.deepEqual(fixture.divider.capturedPointers, []);
+  assert.equal(fixture.body.classList.contains('is-resizing-rail'), false);
+  assert.equal(fixture.divider.listeners.get('pointermove'), undefined);
+});
+
+test('bindRailDivider resizes on desktop drag and cleans listeners on release', () => {
+  const fixture = makeRailFixture();
+  bindRailDivider(fixture);
+
+  fixture.divider.dispatch('pointerdown', {
+    pointerId: 7,
+    clientX: 100,
+    target: fixture.divider,
+    preventDefault() {},
+  });
+  assert.deepEqual(fixture.divider.capturedPointers, [7]);
+  assert.equal(fixture.body.classList.contains('is-resizing-rail'), true);
+
+  fixture.divider.dispatch('pointermove', { clientX: 160 });
+  assert.equal(fixture.layout.style.getPropertyValue('--rail-current-w'), '360px');
+  assert.equal(fixture.layout.classList.contains('rail-collapsed'), false);
+
+  fixture.divider.dispatch('pointerup');
+  assert.deepEqual(fixture.divider.releasedPointers, [7]);
+  assert.equal(fixture.body.classList.contains('is-resizing-rail'), false);
+  assert.equal(fixture.divider.listeners.get('pointermove').length, 0);
+  assert.equal(fixture.divider.listeners.get('pointerup').length, 0);
+  assert.equal(fixture.divider.listeners.get('pointercancel').length, 0);
 });
 
 test('editor shells bind upload before remote rule hydration settles', async () => {

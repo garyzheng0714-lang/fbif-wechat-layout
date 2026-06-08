@@ -48,6 +48,100 @@ export function foodTalksFetchErrorMessage(err) {
     : '文章抓取失败，请稍后重试';
 }
 
+export function bindRailDivider({
+  documentRef = globalThis.document,
+  windowRef = globalThis.window,
+  layoutSelector = '.app-layout',
+  railID = 'rail',
+  dividerID = 'railDivider',
+  buttonID = 'railToggleBtn',
+  minWidth = 220,
+  maxWidth = 420,
+  collapseThreshold = 180,
+} = {}) {
+  const layout = documentRef.querySelector(layoutSelector);
+  const rail = documentRef.getElementById(railID);
+  const divider = documentRef.getElementById(dividerID);
+  const button = documentRef.getElementById(buttonID);
+  if (!layout || !rail || !divider || !button || !windowRef) return;
+
+  let railWidth = rail.getBoundingClientRect().width || 300;
+  let suppressClick = false;
+
+  function clampWidth(width) {
+    return Math.max(minWidth, Math.min(maxWidth, width));
+  }
+
+  function setCollapsed(collapsed) {
+    layout.classList.toggle('rail-collapsed', collapsed);
+    button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    button.setAttribute('aria-label', collapsed ? '展开左栏' : '收起左栏');
+    button.title = collapsed ? '展开左栏' : '收起左栏';
+  }
+
+  function setRailWidth(width) {
+    railWidth = clampWidth(width);
+    layout.style.setProperty('--rail-current-w', railWidth + 'px');
+    setCollapsed(false);
+  }
+
+  button.addEventListener('click', () => {
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
+    setCollapsed(!layout.classList.contains('rail-collapsed'));
+  });
+
+  divider.addEventListener('pointerdown', event => {
+    if (windowRef.matchMedia('(max-width: 820px)').matches) return;
+    event.preventDefault();
+    const startedOnButton = button.contains(event.target);
+    const pointerID = event.pointerId;
+    const startX = event.clientX;
+    const startWidth = layout.classList.contains('rail-collapsed')
+      ? 0
+      : rail.getBoundingClientRect().width;
+    let moved = false;
+
+    divider.setPointerCapture(pointerID);
+    documentRef.body.classList.add('is-resizing-rail');
+
+    function moveRail(moveEvent) {
+      const delta = moveEvent.clientX - startX;
+      const nextWidth = startWidth + delta;
+      if (Math.abs(delta) > 3) moved = true;
+      if (nextWidth < collapseThreshold) {
+        setCollapsed(true);
+      } else {
+        setRailWidth(nextWidth);
+      }
+    }
+
+    function stopDrag() {
+      divider.releasePointerCapture(pointerID);
+      documentRef.body.classList.remove('is-resizing-rail');
+      divider.removeEventListener('pointermove', moveRail);
+      divider.removeEventListener('pointerup', stopDrag);
+      divider.removeEventListener('pointercancel', stopDrag);
+      if (!moved && startedOnButton) {
+        setCollapsed(!layout.classList.contains('rail-collapsed'));
+        suppressClick = true;
+        windowRef.setTimeout(() => { suppressClick = false; }, 120);
+        return;
+      }
+      if (moved) {
+        suppressClick = true;
+        windowRef.setTimeout(() => { suppressClick = false; }, 120);
+      }
+    }
+
+    divider.addEventListener('pointermove', moveRail);
+    divider.addEventListener('pointerup', stopDrag);
+    divider.addEventListener('pointercancel', stopDrag);
+  });
+}
+
 export function createUrlImportHandler({
   documentRef = globalThis.document,
   fetchImpl = globalThis.fetch,
