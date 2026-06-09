@@ -183,6 +183,132 @@ const BLANK_LINE = '<p style="text-align: justify;"><br></p>';
 // 图注后的空行与图注同为 center 对齐（基石规律：图注块后空行是 text-align:center）
 const CENTER_BLANK_LINE = '<p style="text-align: center;"><br></p>';
 
+function isSeriesSiteConfig(config = {}) {
+  return config && config.justify_paragraphs === false;
+}
+
+function chineseSectionNumber(n) {
+  return ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][n - 1] || String(n);
+}
+
+function stripSectionNumber(text) {
+  return String(text || '').replace(/^\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[、.．]\s*/, '').trim();
+}
+
+function sectionNumberPrefix(text) {
+  const m = String(text || '').trim().match(/^((?:[一二三四五六七八九十]+|[0-9]+))\s*[、.．]\s*/);
+  return m ? m[1] + '、' : '';
+}
+
+function hasSectionNumber(text) {
+  return stripSectionNumber(text) !== String(text || '').trim();
+}
+
+function normalizeSectionTitleKey(text) {
+  return stripSectionNumber(stripHtml(text || '')).replace(/\s+/g, '').trim();
+}
+
+function collectSeriesTocSections(elems) {
+  const sections = new Map();
+  let inToc = false;
+  for (const e of elems || []) {
+    if (!e) continue;
+    const text = e.runs ? runsToPlain(e.runs) : (e.text || '');
+    const key = normalizeSectionTitleKey(text);
+    if (!inToc && e.k === 'h' && key === '目录') {
+      inToc = true;
+      continue;
+    }
+    if (!inToc) continue;
+    if (e.k !== 'h' && e.k !== 'p') {
+      if (sections.size) break;
+      continue;
+    }
+    const prefix = sectionNumberPrefix(text);
+    if (!prefix) {
+      if (sections.size) break;
+      continue;
+    }
+    sections.set(key, prefix);
+  }
+  return sections;
+}
+
+function prefixHeadingRuns(runs, prefix) {
+  const out = (runs || []).map(r => ({ ...r }));
+  const idx = out.findIndex(r => r && r.type === 'txt' && String(r.text || '').trim());
+  if (idx < 0) return [{ type: 'txt', text: prefix }];
+  out[idx] = { ...out[idx], text: prefix + String(out[idx].text || '').replace(/^\s+/, '') };
+  return out;
+}
+
+function isWideSectionDivider(e) {
+  if (!e || e.k !== 'img') return false;
+  const w = Number(e.width || 0);
+  const h = Number(e.height || 0);
+  if (!w || !h) return false;
+  return w >= 900 && h / w > 0 && h / w <= 0.22;
+}
+
+function isImageTitleCaption(text) {
+  const plain = stripHtml(text || '').trim();
+  if (!plain || plain.length > 42) return false;
+  if (hasSectionNumber(plain)) return false;
+  if (/^[（(]?\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）、.．]/.test(plain)) return false;
+  return true;
+}
+
+// FoodTalks 网站「什么是系列」的公众号源稿会用窄长图片表示 01/02/03... 分节号，
+// 并把部分图片说明抓成 h。网站成品口径是文字编号 h2 + 图注，不保留这些装饰编号图。
+function normalizeWhatIsSeriesElems(elems, config = {}) {
+  if (!isSeriesSiteConfig(config)) return elems;
+  const tocSections = collectSeriesTocSections(elems);
+  const hasTocSections = tocSections.size > 0;
+  const out = [];
+  let sectionNo = 0;
+  let inToc = false;
+  let tocItemCount = 0;
+  for (let i = 0; i < elems.length; i++) {
+    const e = elems[i];
+    const next = elems[i + 1];
+    const text = e && e.runs ? runsToPlain(e.runs) : (e && e.text) || '';
+    const key = normalizeSectionTitleKey(text);
+    if (!inToc && e && e.k === 'h' && key === '目录') {
+      inToc = true;
+      tocItemCount = 0;
+      out.push(e);
+      continue;
+    }
+    if (inToc) {
+      const prefix = sectionNumberPrefix(text);
+      if ((e.k === 'h' || e.k === 'p') && prefix) {
+        tocItemCount += 1;
+        out.push(e.k === 'p' ? { k: 'h', level: 2, runs: e.runs } : e);
+        continue;
+      }
+      if (tocItemCount > 0) inToc = false;
+    }
+    const nextText = next && next.k === 'h' ? runsToPlain(next.runs) : '';
+    const tocPrefix = nextText ? tocSections.get(normalizeSectionTitleKey(nextText)) : '';
+    const isSectionDivider = hasTocSections ? !!tocPrefix : isWideSectionDivider(e);
+    if (isSectionDivider && next && next.k === 'h') {
+      sectionNo += 1;
+      const prefix = hasSectionNumber(nextText) ? '' : (tocPrefix || chineseSectionNumber(sectionNo) + '、');
+      out.push({ ...next, runs: prefix ? prefixHeadingRuns(next.runs, prefix) : next.runs });
+      i += 1;
+      continue;
+    }
+    if (e && e.k === 'img' && next && next.k === 'h' && isImageTitleCaption(runsToPlain(next.runs))) {
+      out.push(e);
+      out.push({ k: 'cap', runs: next.runs });
+      i += 1;
+      continue;
+    }
+    out.push(e);
+  }
+  return out;
+}
+
 function renderRuns(runs) {
   return (runs || []).filter(r => r.type !== 'img').map(r => {
     if (r.type === 'txt') {
@@ -372,11 +498,25 @@ function render(elems, config = {}) {
       prevWasStandaloneLink = false;
       continue;
     }
+    if (e.k === 'footer-note') {
+      const noteColor = cfgColor(config, 'footer_note_color', (config && config.muted_color) || '#7f7f7f');
+      const noteFs = cfgNum(config, 'footer_note_font_size', 14);
+      const parts = (Array.isArray(e.lines) ? e.lines : [e.text]).filter(Boolean).map(t =>
+        `<em><span style="font-size: ${noteFs}px; color: ${noteColor};">${esc(t)}</span></em>`
+      );
+      if (parts.length) {
+        lines.push(`<p>${parts.join('<br>')}</p>`);
+        lines.push(BLANK_LINE);
+      }
+      prevWasHeading = false;
+      prevWasStandaloneLink = false;
+      continue;
+    }
     if (e.k === 'tip') {
       // 提示声明受页脚库勾选 active_segments.tip 控制：仅当用户显式取消勾选（=0）时不输出。
       // 默认（未设 / 未配页脚）仍输出，保证转载版权声明默认在（基石所有文章都有）。
       const ftSeg = config.modules && config.modules.fbif_footer && config.modules.fbif_footer.active_segments;
-      if (ftSeg && ftSeg.tip === 0) {
+      if (ftSeg && Object.prototype.hasOwnProperty.call(ftSeg, 'tip') && !ftSeg.tip) {
         prevWasHeading = false;
         prevWasStandaloneLink = false;
         continue;
@@ -504,7 +644,9 @@ function render(elems, config = {}) {
     if (footerHtml) {
       // 正文以 tip 提示声明收尾时，它与底部首块（商务合作）同属一组声明，应连续无空行
       // （红线#20）。仅当正文不是以 tip 收尾时才插正文→页脚分隔空行。
-      if (!endedWithTip) lines.push(BLANK_LINE);
+      if (!endedWithTip && lines[lines.length - 1] !== BLANK_LINE && lines[lines.length - 1] !== CENTER_BLANK_LINE) {
+        lines.push(BLANK_LINE);
+      }
       lines.push(footerHtml);
     }
   } else {
@@ -513,7 +655,9 @@ function render(elems, config = {}) {
     if (footerCfg.enabled) {
       const footerHtml = buildFooterHtml(footerCfg.active_segments, footerCfg, mods.asset_library, 'ft-default');
       if (footerHtml) {
-        if (!endedWithTip) lines.push(BLANK_LINE);
+        if (!endedWithTip && lines[lines.length - 1] !== BLANK_LINE && lines[lines.length - 1] !== CENTER_BLANK_LINE) {
+          lines.push(BLANK_LINE);
+        }
         lines.push(footerHtml);
       }
     }
@@ -693,7 +837,8 @@ export default {
 
   processDocx({ paragraphs, imgCache, config = {}, isRepost = false }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache, config);
-    const behaved = applyFoodTalksBehavior(elems, config, { isRepost });
+    const normalized = normalizeWhatIsSeriesElems(elems, config);
+    const behaved = applyFoodTalksBehavior(normalized, config, { isRepost });
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
@@ -707,7 +852,8 @@ export default {
   async processMd(text, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
-    const behaved = applyFoodTalksBehavior(elems, config, { isRepost: !!(opts && opts.isRepost), title });
+    const normalized = normalizeWhatIsSeriesElems(elems, config);
+    const behaved = applyFoodTalksBehavior(normalized, config, { isRepost: !!(opts && opts.isRepost), title });
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     return {
       lines: render(promoted, config),
@@ -721,7 +867,8 @@ export default {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
     // data.source 是后端抓取的原文 URL（公众号链接），用于提示声明的标题超链接。
-    const behaved = applyFoodTalksBehavior(elems, config, {
+    const normalized = normalizeWhatIsSeriesElems(elems, config);
+    const behaved = applyFoodTalksBehavior(normalized, config, {
       isRepost: !!(opts && opts.isRepost),
       title,
       sourceUrl: (data && data.source) || '',

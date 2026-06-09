@@ -14,7 +14,7 @@ const DEFAULT_CONFIG = {
   behavior: {
     author_regex: '^\\s*作者[：:]\\s*',
     tip_regex: '^\\s*提示[：:]',
-    ref_header_regex: '^\\s*参考(?:来源|资料)[：:]\\s*$',
+    ref_header_regex: '^\\s*参考(?:来源|资料)[：:]?\\s*$',
     ref_item_regex: '^\\s*\\[\\d+\\]',
   },
   modules: {
@@ -108,6 +108,23 @@ test('参考来源识别：header 段 + 后续 [n] 条目', () => {
   assert.equal(out[2].k, 'ref-item');
   assert.equal(out[3].k, 'ref-item');
   assert.equal(out[4].k, 'p', '非 [n] 开头的段不再被识别为 ref-item');
+});
+
+test('参考来源识别：网站系列标题「七、参考来源」保留为 h，后续 [n] 条目仍进 ref-item', () => {
+  // WHY：微信源稿用窄长分节图 + h「参考来源」，网站成品是文字标题「七、参考来源」。
+  // 标题本身要保留为网站 h2，但后续条目不能退化成黑色正文或被空行拆散。
+  const elems = [
+    p('正文。'),
+    h(2, '七、参考来源'),
+    p('[1] 来源 A'),
+    p('[2] 来源 B'),
+    p('本文未标注来源图片/数据均来自橙宝 本文作者：Ian, FoodTalks'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG);
+  assert.equal(out[1].k, 'h', '参考来源标题应保持 h2，而不是 ref-header');
+  assert.equal(out[2].k, 'ref-item');
+  assert.equal(out[3].k, 'ref-item');
+  assert.equal(out[4].k, 'footer-note');
 });
 
 test('参考来源：[n] 条目下的「—说明」延续行也归 ref-item（基石 62285 结构）', () => {
@@ -285,6 +302,20 @@ test('buildAuthorLineFromSource：纯函数直测', () => {
     '本文为食品内参原创，作者：内参君，转载请联系出处。'
   );
   assert.equal(buildAuthorLineFromSource([p('正文无来源作者')]), '');
+});
+
+test('文末图源/作者：合并成一段时拆为 footer-note 两行', () => {
+  // WHY：橙宝微信源稿把「本文未标注来源图片/数据均来自橙宝」和
+  // 「本文作者：Ian, FoodTalks」抓成同一个 txt，网站成品要求它们是 14px 灰色斜体小字。
+  const out = applyFoodTalksBehavior([
+    p('正文结尾。'),
+    p('本文未标注来源图片/数据均来自橙宝 本文作者：Ian, FoodTalks'),
+  ], DEFAULT_CONFIG);
+  assert.equal(out[1].k, 'footer-note');
+  assert.deepEqual(out[1].lines, [
+    '本文未标注来源图片/数据均来自橙宝',
+    '本文作者：Ian, FoodTalks',
+  ]);
 });
 
 test('尾部清理：公众号"提示："页脚起全切，并补网站口径页脚（isRepost）', () => {

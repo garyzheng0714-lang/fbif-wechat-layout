@@ -9,6 +9,7 @@
 //   - k:'tip'         提示行（任意 p 行首命中）
 //   - k:'ref-header'  参考来源段头
 //   - k:'ref-item'    参考来源条目（[1] [2] 等，遇非 [n] 段则停止）
+//   - k:'footer-note' 文末图源/作者小字（网站「什么是系列」口径）
 //
 // 规则来源：docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md §4
 
@@ -126,6 +127,37 @@ function elemText(e) {
   if (!e) return '';
   if (Array.isArray(e.runs)) return runsToText(e.runs);
   return typeof e.text === 'string' ? e.text : '';
+}
+
+function stripSectionPrefix(text) {
+  return String(text || '').replace(/^\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[、.．]\s*/, '').trim();
+}
+
+function matchesRefHeader(text, refHeaderRe) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  const stripped = stripSectionPrefix(raw);
+  const candidates = [raw];
+  if (stripped !== raw) candidates.push(stripped);
+  // 兼容已持久化的旧规则：旧 regex 要求「参考来源：」必须带冒号；
+  // 网站「什么是系列」成品标题是「七、参考来源」，无冒号。
+  candidates.push(stripped + '：', stripped + ':');
+  for (const candidate of candidates) {
+    refHeaderRe.lastIndex = 0;
+    if (refHeaderRe.test(candidate)) return true;
+  }
+  return false;
+}
+
+function splitFooterNoteLines(text) {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return [];
+  const markers = ['本文作者：', '本文作者:', '本文图片来源：', '本文图片来源:'];
+  for (const marker of markers) {
+    const idx = raw.indexOf(marker);
+    if (idx > 0) return [raw.slice(0, idx).trim(), raw.slice(idx).trim()].filter(Boolean);
+  }
+  return [raw];
 }
 
 function isNearTail(elems, i) {
@@ -270,8 +302,9 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   const behavior = (config && config.behavior) || {};
   const authorRe    = new RegExp(behavior.author_regex     || '^\\s*作者[：:]\\s*');
   const tipRe       = new RegExp(behavior.tip_regex        || '^\\s*提示[：:]');
-  const refHeaderRe = new RegExp(behavior.ref_header_regex || '^\\s*参考(?:来源|资料)[：:]\\s*$');
+  const refHeaderRe = new RegExp(behavior.ref_header_regex || '^\\s*参考(?:来源|资料)[：:]?\\s*$');
   const refItemRe   = new RegExp(behavior.ref_item_regex   || '^\\s*\\[\\d+\\]');
+  const footerNoteRe = behaviorRegex(behavior, 'footer_note_regex', '^(?:本文(?:未标注来源图片/数据均来自|作者\\s*[：:]|图片来源)|图片均来自)');
   // 公众号导流尾段标记 / 提示页脚特征句（红线下放：behavior.lists，缺省降级 const）。
   const trailerMarkers = compileMarkerList(behavior, 'wechat_trailer_markers', WECHAT_TRAILER_MARKERS);
   const tipSignatures  = compileMarkerList(behavior, 'wechat_tip_signatures', WECHAT_TIP_SIGNATURES);
@@ -332,10 +365,17 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     }
   }
 
-  // 阶段 3：参考来源段头 + 后续 ref-item（遇非 [n] 开头段即中断）
+  // 阶段 3：参考来源段头 + 后续 ref-item（遇非 [n] 开头段即中断）。
+  // 网站「什么是系列」URL 源稿的参考标题常是 h2「七、参考来源」，标题本身应保留，
+  // 但其后的 [n] 条目仍要进入 ref-item 分支，才能连续无空行并套灰色。
   let refMode = false;
   for (let i = 0; i < out.length; i++) {
     const e = out[i];
+    if (e.k === 'h') {
+      const text = runsToText(e.runs).trim();
+      refMode = matchesRefHeader(text, refHeaderRe);
+      continue;
+    }
     if (e.k !== 'p') {
       // 任何不是 p 的元素（包括前面阶段提升出来的 author/tip，以及 h/img）
       // 都中断 refMode —— 否则参考段中间夹一个提示行会让其后的 [n] 仍然被
@@ -345,7 +385,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     }
     const text = runsToText(e.runs).trim();
     if (!refMode) {
-      if (refHeaderRe.test(text)) {
+      if (matchesRefHeader(text, refHeaderRe)) {
         out[i] = { k: 'ref-header' };
         refMode = true;
       }
@@ -361,7 +401,17 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     }
   }
 
-  // 阶段 4：补网站口径提示页脚。仅当上一步切掉了公众号转载声明页脚时才补，
+  // 阶段 4：文末图源/作者小字。真实网站口径是 14px #7f7f7f 斜体，且可能被抓成一段。
+  for (let i = 0; i < out.length; i++) {
+    const e = out[i];
+    if (!e || e.k !== 'p') continue;
+    const text = runsToText(e.runs).trim();
+    if (!text || !footerNoteRe.test(text)) continue;
+    const lines = splitFooterNoteLines(text);
+    if (lines.length) out[i] = { k: 'footer-note', lines };
+  }
+
+  // 阶段 5：补网站口径提示页脚。仅当上一步切掉了公众号转载声明页脚时才补，
   // 避免给非原创 / 已是 FoodTalks 原生口径的文章凭空加声明。
   if (trimmed.cutWechatTip) {
     // 来源从【原始 elems】提取（切尾前），因为「来源：XX」行常紧邻被切的导流段。

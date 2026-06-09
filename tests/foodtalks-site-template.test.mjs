@@ -118,7 +118,7 @@ test('正文以 tip 提示声明收尾时，底部页脚前不插分隔空行（
   assert.match(templateSource, /endedWithTip\s*=\s*true/, 'tip 渲染分支必须标记 endedWithTip');
   assert.match(
     templateSource,
-    /if\s*\(\s*!endedWithTip\s*\)\s*lines\.push\(BLANK_LINE\)/,
+    /if\s*\(\s*!endedWithTip[\s\S]{0,160}lines\.push\(BLANK_LINE\)/,
     '正文→页脚分隔空行必须以 !endedWithTip 守门，tip 收尾时不插'
   );
 });
@@ -298,5 +298,15 @@ test('页脚库: render 末尾优先走统一区块模型(bottom_blocks)，缺�
 test('页脚库: 提示声明受 segments.tip 控制（=0 不输出，默认保留版权）', () => {
   const tipBranch = templateSource.match(/e\.k === 'tip'[\s\S]{0,500}/);
   assert.ok(tipBranch, '找到 tip 分支');
-  assert.match(tipBranch[0], /segments[\s\S]{0,60}tip\s*===\s*0/, '提示声明受 segments.tip===0 控制（取消勾选生效）');
+  assert.match(tipBranch[0], /hasOwnProperty[\s\S]{0,80}tip/, '提示声明只有在用户显式配置 segments.tip 时才读开关');
+  assert.match(tipBranch[0], /!\s*ftSeg\.tip/, 'segments.tip=false/0 都应能关闭提示声明');
+});
+
+test('网站什么是系列: URL 导入前先做分节图/图注/文末小字归一化', () => {
+  // WHY：公众号源稿的 01/02/07 窄长分节图片不是网站内容；图片后的短 h 是图注；
+  // 这层结构归一化缺失时，橙宝文章会出现多余分节图、参考来源丢样式、图注变大标题。
+  assert.match(templateSource, /normalizeWhatIsSeriesElems/, '必须有系列网站结构归一化入口');
+  assert.match(templateSource, /isWideSectionDivider/, '必须识别窄长分节装饰图');
+  assert.match(templateSource, /prefixHeadingRuns/, '分节标题必须转为文字编号标题');
+  assert.match(templateSource, /footer-note/, '文末图源/作者小字必须有独立渲染分支');
 });

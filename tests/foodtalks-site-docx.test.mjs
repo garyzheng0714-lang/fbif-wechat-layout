@@ -117,6 +117,55 @@ test('网站 DOCX：参考来源仍由网站行为层按 [n] 口径识别（口�
   assert.match(html, /#888888/, '参考区块走 muted 灰色口径');
 });
 
+test('网站什么是系列 URL 导入：分节图转文字标题，图片标题转图注，参考/署名保持网站口径', () => {
+  // WHY：橙宝样例的微信源稿结构是「窄长分节图 + h」和「普通图片 + h 图注」。
+  // 网站成品不展示分节装饰图；参考来源标题没有冒号但后续 [n] 仍必须连续灰色；文末图源/作者是 14px 灰色斜体。
+  const imgBlock = (src, dataW, dataRatio) => ({ k: 'img', src, dataW, dataRatio });
+  const hBlock = (text) => ({ k: 'h', text });
+  const txtBlock = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });
+  const result = template.processBlocks({
+    title: '橙宝样例',
+    blocks: [
+      hBlock('目录'),
+      hBlock('一、穿越周期：橙宝的40年进化史'),
+      txtBlock('七、参考来源'),
+      imgBlock('https://mmbiz.qpic.cn/section-01.png'),
+      hBlock('穿越周期：橙宝的40年进化史'),
+      imgBlock('https://mmbiz.qpic.cn/content-image.png', 900, 0.62),
+      hBlock('橙宝的40年进化史'),
+      imgBlock('https://mmbiz.qpic.cn/wide-logo.png', 1080, 0.15),
+      hBlock('橙宝logo'),
+      imgBlock('https://mmbiz.qpic.cn/section-02.png'),
+      hBlock('参考来源'),
+      txtBlock('[1] 中国消费者网（2025），《HPP果汁成果汁界新晋顶流》'),
+      txtBlock('本文未标注来源图片/数据均来自橙宝 本文作者：Ian, FoodTalks'),
+    ],
+  }, {
+    config: {
+      justify_paragraphs: false,
+      muted_color: '#7f7f7f',
+      caption_font_size: '12',
+      footer_note_color: '#7f7f7f',
+      footer_note_font_size: '14',
+      modules: { fbif_footer: { enabled: false } },
+    },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.doesNotMatch(html, /section-01\.png|section-02\.png/, '分节装饰图不得输出到网站正文');
+  assert.match(html, /<h2[^>]*>一、穿越周期：橙宝的40年进化史<\/h2>/, '分节标题应转成文字编号 h2');
+  assert.doesNotMatch(html, /<h2[^>]*>穿越周期：橙宝的40年进化史<\/h2>/, '正文分节标题不得留下未编号副本');
+  assert.doesNotMatch(html, /<h2[^>]*>橙宝的40年进化史<\/h2>/, '图片后的短 h 不得继续作为大标题');
+  assert.match(html, /font-size: 12px; color: #7f7f7f;">橙宝的40年进化史/, '图片后的短 h 应转为灰色图注');
+  assert.match(html, /wide-logo\.png/, '目录存在时，非目录章节标题后的宽图不得被误删');
+  assert.doesNotMatch(html, /<h2[^>]*>橙宝logo<\/h2>/, '宽图后的短 h 应转图注，不得误当分节标题');
+  assert.match(html, /<h2[^>]*>七、参考来源<\/h2>/, '无冒号参考来源标题应按目录编号保留为 h2');
+  assert.doesNotMatch(html, /<h2[^>]*>参考来源<\/h2>/, '参考来源正文标题不得留下未编号副本');
+  assert.match(html, /<span style="color: #7f7f7f;">\[1\]/, '参考条目必须进入灰色 ref-item 分支');
+  assert.match(html, /font-size: 14px; color: #7f7f7f;">本文未标注来源图片\/数据均来自橙宝/, '文末图源说明应是 14px 灰色小字');
+  assert.match(html, /<br><em><span style="font-size: 14px; color: #7f7f7f;">本文作者：Ian, FoodTalks/, '文末作者应拆到下一行');
+});
+
 // ---- 统一表格样式（网站渲染：本就 inline-style，与公众号物理隔离各写各的 renderTable） ----
 // WHY：网站渠道也要支持表格，默认样式与公众号同一套（蓝底白字表头 + 浅灰网格线 = 统一），
 // 但渲染函数物理隔离；样式读扁平 config 键，缺省降级与服务端 defaultRuleConfig 逐字一致。
