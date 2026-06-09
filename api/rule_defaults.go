@@ -130,7 +130,8 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 渲染器，覆盖系列原生口径(正文#333333/灰#7f7f7f/框线#7f7f7f/表头#01396a/参考16px)，依据 8 篇真实成品。
 // v8→v9（2026-06-08）：ft-series 补 justify_paragraphs=false + 视频块 + 商务合作版块（fbif_footer 覆盖
 // + 清空继承的 bottom_blocks）；覆盖已持久化的 v8 旧版 ft-series-v1（无商务合作）。
-const currentBuiltinRuleVersion = 9
+// v9→v10（2026-06-09）：FoodTalks「什么是」系列公众号底部 BD 名片 / 群二维码开放前台单篇换图入口。
+const currentBuiltinRuleVersion = 10
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -471,6 +472,9 @@ func defaultFtSeriesMaterialsModule() map[string]any {
 		"sections": sections,
 		"groups":   groups,
 		"cards":    cards,
+		"author_card_aliases": map[string]any{
+			"Ian": "Lan",
+		},
 		"footer_default": map[string]any{
 			"author_card": "",
 			"group":       "包装",

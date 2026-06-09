@@ -46,6 +46,8 @@ const rulePresetModule = await import('./rule-presets.js' + assetQuery);
 const { getActiveRuleBehavior } = rulePresetModule;
 const behaviorModule = await import('./rule-behavior.js' + assetQuery);
 const { renderBehaviorTemplate } = behaviorModule;
+const authorCardAutofillModule = await import('./blocks/author-card-autofill.js' + assetQuery);
+const { applySeriesAuthorCardAutofill } = authorCardAutofillModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -188,7 +190,11 @@ async function loadBaseFooterHtml(opts = {}) {
   // isRepost 显式传入（重渲染用 cached.isRepost，避免读全局 _isRepost 漂移；codex review #5）。
   const isRepost = opts.isRepost != null ? opts.isRepost : _isRepost;
   if (_activeTemplate && typeof _activeTemplate.renderBottomFooter === 'function') {
-    const res = _activeTemplate.renderBottomFooter({ isRepost });
+    const renderOpts = { isRepost };
+    if (Object.prototype.hasOwnProperty.call(opts, 'bottomBlocksOverride')) {
+      renderOpts.bottomBlocksOverride = opts.bottomBlocksOverride;
+    }
+    const res = _activeTemplate.renderBottomFooter(renderOpts);
     const html = res && typeof res === 'object' ? res.html : res; // 模板返回 {html,isV2} 或（自定义）字符串
     if (html != null && html !== '') {
       return { html, isV2: !!(res && typeof res === 'object' && res.isV2) };
@@ -237,6 +243,68 @@ function footerBehaviorParam(key, fallback) {
     if (typeof v === 'string' && v) return v;
   } catch (e) { /* 降级 */ }
   return fallback;
+}
+
+function bottomOverrideKey(accountId) {
+  return 'bb.override::' + accountId;
+}
+
+function readBottomBlocksOverride(accountId) {
+  try { return JSON.parse(localStorage.getItem(bottomOverrideKey(accountId)) || 'null') || {}; } catch { return {}; }
+}
+
+function hasBottomBlocksOverride(override) {
+  return !!(override && typeof override === 'object' && !Array.isArray(override) && Object.keys(override).length);
+}
+
+function writeBottomBlocksOverride(accountId, override) {
+  const next = hasBottomBlocksOverride(override) ? override : {};
+  try {
+    if (hasBottomBlocksOverride(next)) localStorage.setItem(bottomOverrideKey(accountId), JSON.stringify(next));
+    else localStorage.removeItem(bottomOverrideKey(accountId));
+  } catch {}
+  window._bottomBlocksOverride = hasBottomBlocksOverride(next) ? next : undefined;
+  const inst = window._blockPanelInst;
+  if (inst && window._blockPanelAcct === accountId && typeof inst.setOverride === 'function') {
+    inst.setOverride(next);
+  }
+}
+
+async function waitForActiveRuleConfigReady(reason) {
+  const p = typeof window !== 'undefined' && window._activeRuleReadyPromise;
+  if (!p || typeof p.then !== 'function' || window._activeRuleReady === true) return;
+  try {
+    await Promise.race([
+      p.catch(() => null),
+      new Promise(resolve => setTimeout(resolve, 3000)),
+    ]);
+  } catch (err) {
+    logConv('warn', '当前规则加载较慢，先使用已有规则继续排版', { reason, error: err && err.message });
+  }
+}
+
+function resolveAuthorCardOverrideForArticle(result) {
+  const pack = typeof window !== 'undefined' ? window._activeRulePack : null;
+  const accountId = pack && pack.id;
+  if (!accountId) return { accountId: '', override: undefined, changed: false };
+  const config = (window._activeConfig && window._activeConfig.config) || _activeConfig || {};
+  const current = readBottomBlocksOverride(accountId);
+  const applied = applySeriesAuthorCardAutofill({ result, config, accountId, override: current });
+  return { accountId, override: applied.override, changed: applied.changed };
+}
+
+function readCurrentBottomBlocksOverrideForArticle() {
+  const pack = typeof window !== 'undefined' ? window._activeRulePack : null;
+  const accountId = pack && pack.id;
+  return { accountId: accountId || '', override: accountId ? readBottomBlocksOverride(accountId) : undefined };
+}
+
+function syncAuthorCardForNewArticle(result) {
+  const applied = resolveAuthorCardOverrideForArticle(result);
+  const accountId = applied.accountId;
+  if (!accountId) return undefined;
+  if (applied.changed) writeBottomBlocksOverride(accountId, applied.override);
+  return applied.override;
 }
 
 // Rewrites the stock footer notice from the active behavior rule. URL imports
@@ -392,10 +460,28 @@ export function initApp(initialTemplate) {
     return template.formats.some(fmt => f.name.toLowerCase().endsWith(fmt));
   }
 
+  function currentRuntimeConfig() {
+    const cfg = (window._activeConfig && window._activeConfig.config) || _activeConfig || {};
+    return cfg && cfg.config && cfg.config.modules ? cfg.config : cfg;
+  }
+
+  function hasManagedBottomBlocksFooter() {
+    const cfg = currentRuntimeConfig();
+    const bb = cfg && cfg.modules && cfg.modules.bottom_blocks;
+    return !!(bb && typeof bb === 'object' && bb.enabled !== false);
+  }
+
+  function isFooterEnabledForCurrentArticle() {
+    const footerEl = document.getElementById('footerEnabled');
+    return hasManagedBottomBlocksFooter() || !!(footerEl && footerEl.checked);
+  }
+
   // Cache the latest parsed inputs so rerender() can re-run template.process*
   // with the new config without re-parsing the source file.
   let _lastRenderInput = null;
   // shape: { kind: 'docx'|'md'|'blocks', payload: <data>, isRepost, title? }
+  let _articleSession = null;
+  // shape: { input, title, articleHtml, footerHtml, stats, bottomBlocksOverride, bottomBlocksAccountId, sourceIsDocx }
 
   // Batch file queue
   let _batchFiles = [];
@@ -417,8 +503,7 @@ export function initApp(initialTemplate) {
         '<span class="batch-status" id="batch-status-' + i + '">等待中</span>';
       item.addEventListener('click', () => {
         if (_batchResults[i]) {
-          const r = _batchResults[i];
-          showPreview(r.title || f.name.replace(/\.\w+$/i, ''), r.articleHtml, r.footerHtml, r.stats);
+          activateArticleSession(_batchResults[i]);
         }
       });
       batchList.appendChild(item);
@@ -428,6 +513,87 @@ export function initApp(initialTemplate) {
   function updateBatchStatus(idx, status, cls) {
     const el = document.getElementById('batch-status-' + idx);
     if (el) { el.textContent = status; el.className = 'batch-status ' + (cls || ''); }
+  }
+
+  async function parseFileToArticleInput(file, isRepost) {
+    const sourceIsDocx = file.name.toLowerCase().endsWith('.docx');
+    const fallbackTitle = file.name.replace(/\.\w+$/i, '');
+    if (sourceIsDocx) {
+      const docxData = await parseDocx(file);
+      return { kind: 'docx', payload: docxData, isRepost, title: fallbackTitle, sourceIsDocx };
+    }
+    if (typeof template.processMd === 'function') {
+      const text = await file.text();
+      return { kind: 'md', payload: text, isRepost, title: fallbackTitle, sourceIsDocx: false };
+    }
+    throw new Error('此模板不支持该文件格式');
+  }
+
+  async function renderArticleInput(input) {
+    if (!input) throw new Error('没有可渲染的文章输入');
+    const isRepost = !!input.isRepost;
+    if (input.kind === 'docx') {
+      return template.processDocx({ ...input.payload, isRepost, config: _activeConfig });
+    }
+    if (input.kind === 'md') {
+      if (typeof template.processMd !== 'function') throw new Error('此模板不支持该文件格式');
+      return await template.processMd(input.payload, { isRepost, config: _activeConfig });
+    }
+    if (input.kind === 'blocks') {
+      if (typeof template.processBlocks !== 'function') throw new Error('当前模板不支持 blocks 路径');
+      return await template.processBlocks(input.payload, { isRepost, config: _activeConfig });
+    }
+    throw new Error('未知文章输入类型');
+  }
+
+  function formatRenderStats(result, elapsed) {
+    const parts = [
+      '段落: ' + result.lines.length,
+      '图片: ' + result.imgN,
+      '标题: ' + result.headingN,
+    ];
+    if (elapsed) parts.push('耗时: ' + elapsed + 's');
+    return parts.join(' | ');
+  }
+
+  async function buildArticleSession(input, result, options = {}) {
+    if (options.resetArticleArtifacts) resetMoreArticlesForNewArticle();
+    const articleHtml = result.lines.join('\n');
+    const bottomBlocksState = options.autofillAuthorCard
+      ? resolveAuthorCardOverrideForArticle(result)
+      : readCurrentBottomBlocksOverrideForArticle();
+    const isRepost = !!input.isRepost;
+    const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({
+      isRepost,
+      bottomBlocksOverride: bottomBlocksState.override,
+    });
+    const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
+    const elapsed = options.startedAt ? ((performance.now() - options.startedAt) / 1000).toFixed(1) : options.elapsed;
+    const title = result.title || input.title || '';
+    return {
+      input: { ...input, title },
+      result,
+      title,
+      articleHtml,
+      footerHtml,
+      stats: options.stats || formatRenderStats(result, elapsed),
+      bottomBlocksOverride: bottomBlocksState.override,
+      bottomBlocksAccountId: bottomBlocksState.accountId,
+      sourceIsDocx: !!input.sourceIsDocx,
+    };
+  }
+
+  function activateArticleSession(session) {
+    if (!session) return;
+    _articleSession = session;
+    _lastRenderInput = session.input || null;
+    _isRepost = !!(_lastRenderInput && _lastRenderInput.isRepost);
+    _sourceIsDocx = !!session.sourceIsDocx;
+    const accountId = session.bottomBlocksAccountId || (window._activeRulePack && window._activeRulePack.id);
+    if (accountId && session.bottomBlocksOverride !== undefined) {
+      writeBottomBlocksOverride(accountId, session.bottomBlocksOverride || {});
+    }
+    showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats);
   }
 
   async function handleFiles(files, opts) {
@@ -455,8 +621,7 @@ export function initApp(initialTemplate) {
       }
     }
     if (_batchResults[0]) {
-      const r = _batchResults[0];
-      showPreview(r.title || valid[0].name.replace(/\.\w+$/i, ''), r.articleHtml, r.footerHtml, r.stats);
+      activateArticleSession(_batchResults[0]);
     }
   }
 
@@ -467,31 +632,16 @@ export function initApp(initialTemplate) {
     _isRepost = isRepost;
     const t0 = performance.now();
     file = await normalizeToDocx(file);
-    let result;
-    const isDocx = file.name.toLowerCase().endsWith('.docx');
-    _sourceIsDocx = isDocx;
-    const fallbackTitle = file.name.replace(/\.\w+$/i, '');
-    if (isDocx) {
-      const docxData = await parseDocx(file);
-      result = template.processDocx({ ...docxData, isRepost, config: _activeConfig });
-      _lastRenderInput = { kind: 'docx', payload: docxData, isRepost, title: result.title || fallbackTitle };
-    } else if (typeof template.processMd === 'function') {
-      const text = await file.text();
-      result = await template.processMd(text, { isRepost, config: _activeConfig });
-      _lastRenderInput = { kind: 'md', payload: text, isRepost, title: result.title || fallbackTitle };
-    } else {
-      throw new Error('此模板不支持该文件格式');
-    }
-    const articleHtml = result.lines.join('\n');
+    await waitForActiveRuleConfigReady('batch-upload');
+    const input = await parseFileToArticleInput(file, isRepost);
+    const result = await renderArticleInput(input);
     // New article upload resets the "更多文章" section to blank placeholder
     // slots — cards are a per-article curation, filled in manually each time.
-    resetMoreArticlesForNewArticle();
-    const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({ isRepost });
-    const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
-    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-    const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
-      ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
-    return { articleHtml, footerHtml, stats, title: result.title };
+    return await buildArticleSession(input, result, {
+      resetArticleArtifacts: true,
+      startedAt: t0,
+      autofillAuthorCard: true,
+    });
   }
 
   dropZone.addEventListener('click', () => fileInput.click());
@@ -540,28 +690,27 @@ export function initApp(initialTemplate) {
       if (typeof template.processBlocks !== 'function') {
         throw new Error('当前模板不支持 blocks 路径');
       }
-      _sourceIsDocx = false;
       // await: processBlocks is synchronous today but we're inside an
       // async context anyway, and future work (e.g. image pre-fetch)
       // might make it async. The await has zero cost on plain returns.
-      const result = await template.processBlocks(data, { isRepost, config: _activeConfig });
-      _lastRenderInput = { kind: 'blocks', payload: data, isRepost, title: data.title };
+      await waitForActiveRuleConfigReady('blocks-upload');
+      const input = { kind: 'blocks', payload: data, isRepost, title: data.title, sourceIsDocx: false };
+      const result = await renderArticleInput(input);
       logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
 
-      const articleHtml = result.lines.join('\n');
-      resetMoreArticlesForNewArticle();
-      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({ isRepost });
-      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
+      const session = await buildArticleSession(input, result, {
+        resetArticleArtifacts: true,
+        startedAt: t0,
+        autofillAuthorCard: true,
+      });
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
-        ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
+      session.stats = formatRenderStats(result, elapsed);
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
 
       progressFill.style.width = '100%';
       progressText.textContent = '排版完成!';
-      const displayTitle = result.title || data.title || '转载文章';
       dropZone.classList.remove('processing');
-      setTimeout(() => showPreview(displayTitle, articleHtml, footerHtml, stats), 200);
+      setTimeout(() => activateArticleSession(session), 200);
     } catch (err) {
       logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
@@ -570,37 +719,21 @@ export function initApp(initialTemplate) {
     }
   };
 
-  // Re-render the current article with the latest _activeConfig without
-  // re-parsing the source file. Safe to call before any file is loaded
-  // (returns silently when _lastRenderInput is null).
-  async function _engineRerender() {
-    if (!_lastRenderInput) return;
-    const cached = _lastRenderInput;
+  // Re-render the current article session with the latest _activeConfig without
+  // re-parsing the source file. Safe to call before any file is loaded.
+  async function _engineRerender(options = {}) {
+    const cached = (_articleSession && _articleSession.input) || _lastRenderInput;
+    if (!cached) return;
     // Use a local repost flag so we don't pollute the module-level _isRepost,
     // which handleFile / _handleBlocks set per upload and other code paths read.
-    const isRepost = cached.isRepost;
     try {
       const t0 = performance.now();
-      let result;
-      if (cached.kind === 'docx') {
-        result = template.processDocx({ ...cached.payload, isRepost, config: _activeConfig });
-      } else if (cached.kind === 'md') {
-        if (typeof template.processMd !== 'function') return;
-        result = await template.processMd(cached.payload, { isRepost, config: _activeConfig });
-      } else if (cached.kind === 'blocks') {
-        if (typeof template.processBlocks !== 'function') return;
-        result = await template.processBlocks(cached.payload, { isRepost, config: _activeConfig });
-      } else {
-        return;
-      }
-      const articleHtml = result.lines.join('\n');
-      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({ isRepost });
-      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
-        ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
-      const displayTitle = result.title || cached.title || '';
-      showPreview(displayTitle, articleHtml, footerHtml, stats);
+      const result = await renderArticleInput(cached);
+      const session = await buildArticleSession(cached, result, {
+        startedAt: t0,
+        autofillAuthorCard: !!options.autofillAuthorCard,
+      });
+      activateArticleSession(session);
     } catch (err) {
       console.error('[engine] rerender failed:', err);
     }
@@ -608,6 +741,11 @@ export function initApp(initialTemplate) {
 
   // Make rerender callable from inline scripts (site.html / app.html sidebar)
   window._engineRerender = _engineRerender;
+  window.addEventListener('fbif:rules-ready', () => {
+    if ((_articleSession && _articleSession.input) || _lastRenderInput) {
+      _engineRerender({ autofillAuthorCard: true });
+    }
+  });
   window._engineSwitchTemplate = async function(nextTemplate, options = {}) {
     if (!nextTemplate) return false;
     template = nextTemplate;
@@ -620,7 +758,7 @@ export function initApp(initialTemplate) {
     ...window._engineApi,
     setActiveConfig,
     getActiveConfig,
-    rerender: () => _engineRerender(),
+    rerender: (options) => _engineRerender(options),
     switchTemplate: window._engineSwitchTemplate,
   };
 
@@ -644,47 +782,37 @@ export function initApp(initialTemplate) {
         progressText.textContent = msg;
         progressFill.style.width = pct + '%';
       });
+      await waitForActiveRuleConfigReady('single-upload');
       progressFill.style.width = '97%';
       progressText.textContent = '正在解析...';
 
-      let result;
-      const isDocx = file.name.toLowerCase().endsWith('.docx');
-      _sourceIsDocx = isDocx;
-      const fallbackTitle = file.name.replace(/\.\w+$/i, '');
-      if (isDocx) {
-        const docxData = await parseDocx(file);
-        result = template.processDocx({ ...docxData, isRepost, config: _activeConfig });
-        _lastRenderInput = { kind: 'docx', payload: docxData, isRepost, title: result.title || fallbackTitle };
+      const input = await parseFileToArticleInput(file, isRepost);
+      const result = await renderArticleInput(input);
+      if (input.kind === 'docx') {
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
-      } else if (typeof template.processMd === 'function') {
-        const text = await file.text();
-        result = await template.processMd(text, { isRepost, config: _activeConfig });
-        _lastRenderInput = { kind: 'md', payload: text, isRepost, title: result.title || fallbackTitle };
+      } else if (input.kind === 'md') {
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
-      } else {
-        throw new Error('此模板不支持该文件格式');
       }
 
-      const articleHtml = result.lines.join('\n');
       // Single-file upload path — same reset behavior as batch path: wipe
       // any prior article's "更多文章" cards to blank placeholder slots, so
       // sidebar shows empty inputs and footer renders gray placeholders.
-      resetMoreArticlesForNewArticle();
-      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({ isRepost });
-      const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
+      const session = await buildArticleSession(input, result, {
+        resetArticleArtifacts: true,
+        startedAt: t0,
+        autofillAuthorCard: true,
+      });
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      const stats = '段落: ' + result.lines.length + ' | 图片: ' + result.imgN +
-        ' | 标题: ' + result.headingN + ' | 耗时: ' + elapsed + 's';
+      session.stats = formatRenderStats(result, elapsed);
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
 
       progressFill.style.width = '100%';
       progressText.textContent = '排版完成!';
-      const displayTitle = result.title || file.name.replace(/\.\w+$/i, '');
       // Drop the processing state so the upload zone is clickable again for
       // the next file. (Previously only the error branch cleared it, so a
       // successful upload left pointer-events:none on the drop zone.)
       dropZone.classList.remove('processing');
-      setTimeout(() => showPreview(displayTitle, articleHtml, footerHtml, stats), 200);
+      setTimeout(() => activateArticleSession(session), 200);
     } catch (err) {
       logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
@@ -815,8 +943,9 @@ export function initApp(initialTemplate) {
       if (typeof newHtml === 'string' && newHtml !== '') {
         _footerHtml = normalizeRich(newHtml);
         _footerCopy = _footerHtml;
+        if (_articleSession) _articleSession.footerHtml = _footerHtml;
       }
-      const enabled = document.getElementById('footerEnabled').checked;
+      const enabled = isFooterEnabledForCurrentArticle();
       contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
       hookPreviewImages(contentArea);
       markFailedImages(_failedSrcs);
@@ -851,7 +980,8 @@ export function initApp(initialTemplate) {
       const merged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2 });
       _footerHtml = merged;
       _footerCopy = merged;
-      const enabled = document.getElementById('footerEnabled').checked;
+      if (_articleSession) _articleSession.footerHtml = merged;
+      const enabled = isFooterEnabledForCurrentArticle();
       contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
       hookPreviewImages(contentArea);
       markFailedImages(_failedSrcs);
@@ -973,7 +1103,7 @@ export function initApp(initialTemplate) {
 
     prepareMoreArticlesForCopy('copy-click');
 
-    const enabled = document.getElementById('footerEnabled').checked;
+    const enabled = isFooterEnabledForCurrentArticle();
     let html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
     const pendingWechatSrcs = _copyRequiresWechatImageTransfer ? findWechatImageSrcs(html) : [];
     if (pendingWechatSrcs.length > 0) {
@@ -1057,6 +1187,8 @@ export function initApp(initialTemplate) {
     if (wxFooter) wxFooter.style.display = 'none';
     document.body.classList.remove('has-preview');
 
+    _articleSession = null;
+    _lastRenderInput = null;
     dropZone.classList.remove('processing');
     resetImportEntry();
     fileInput.value = '';
@@ -1109,6 +1241,7 @@ export function initApp(initialTemplate) {
         failed_srcs: _failedSrcs ? _failedSrcs.slice() : [],
         upload_done: _uploadDone,
         last_render_input: clonePlain(_lastRenderInput),
+        article_session: clonePlain(_articleSession),
       },
       batch_state: {
         // File objects can't be serialized; persist only result metadata so a
@@ -1143,6 +1276,7 @@ export function initApp(initialTemplate) {
   window._restoreSessionSnapshot = function(snap) {
     if (!snap || snap.schema_version !== 1) return false;
     const cs = snap.closure_state || {};
+    const dom = snap.dom || {};
     _articleHtml = cs.article_html || '';
     _articleCopy = cs.article_copy || '';
     _footerHtml = cs.footer_html || '';
@@ -1156,11 +1290,21 @@ export function initApp(initialTemplate) {
     _moreArticlesCopySeq++;
     _moreArticlesCopyJob = null;
     _lastRenderInput = cs.last_render_input || null;
+    _articleSession = cs.article_session || null;
+    if (!_articleSession && _lastRenderInput) {
+      _articleSession = {
+        input: _lastRenderInput,
+        title: dom.title_input_value || dom.article_title_text || '',
+        articleHtml: _articleHtml,
+        footerHtml: _footerHtml,
+        stats: dom.stats_text || '',
+        sourceIsDocx: _sourceIsDocx,
+      };
+    }
     if (snap.batch_state) {
       _batchFiles = [];
       _batchResults = snap.batch_state.results || [];
     }
-    const dom = snap.dom || {};
     const ca = document.getElementById('contentArea');
     if (ca) {
       ca.innerHTML = dom.content_area_html || '';
@@ -1214,9 +1358,9 @@ if (typeof window !== 'undefined') {
     ...window._engineApi,
     setActiveConfig,
     getActiveConfig,
-    rerender: () => {
+    rerender: (options) => {
       if (typeof window._engineRerender === 'function') {
-        return window._engineRerender();
+        return window._engineRerender(options);
       }
     },
   };

@@ -64,13 +64,20 @@ test('新文章导入原子作废上一篇的更多文章预热 job（防跨文�
   assert.match(helperBody, /saveMoreArticlesCards\(makeFreshUploadCards\(\)\)/, 'helper 须重置卡片');
   assert.match(helperBody, /_moreArticlesCopySeq\+\+/, 'helper 须 seq++ 作废在途 job');
   assert.match(helperBody, /_moreArticlesCopyJob = null/, 'helper 须 job=null 让本篇重建');
-  // 三处新稿路径都走 helper，不得再裸调 saveMoreArticlesCards+refreshSidebar（漏作废 → 暴露窗口）。
+  // 三处新稿路径都通过 session 构建传 reset 标记，不得再裸调 saveMoreArticlesCards+refreshSidebar
+  // （漏作废 → 暴露窗口）。
   assert.doesNotMatch(
     engine,
     /saveMoreArticlesCards\(makeFreshUploadCards\(\)\);\n\s*if \(window\._refreshMoreArticlesSidebar\)/,
     '新稿点不得裸调 saveMoreArticlesCards+refreshSidebar，须走原子 helper'
   );
-  assert.ok((engine.match(/resetMoreArticlesForNewArticle\(\)/g) || []).length >= 4, '三处新稿调用 + 定义 ≥4');
+  const buildSession = engine.slice(engine.indexOf('async function buildArticleSession'), engine.indexOf('function activateArticleSession'));
+  assert.match(
+    buildSession,
+    /if \(options\.resetArticleArtifacts\) resetMoreArticlesForNewArticle\(\)/,
+    'session 构建应负责原子 reset'
+  );
+  assert.ok((engine.match(/resetArticleArtifacts: true/g) || []).length >= 3, '单篇/批量/blocks 三处新稿入口都要传 reset 标记');
   // 双保险：在途 job resolve 的两个 await 边界都校验 seq，过期则自我丢弃，不写回 _footerCopy。
   assert.ok((engine.match(/if \(seq !== _moreArticlesCopySeq\) return false/g) || []).length >= 2, '≥2 处 seq 校验（742/747）');
   // showPreview 仍保留作废，供 rerender（同篇换配置）丢弃旧预热并重建。

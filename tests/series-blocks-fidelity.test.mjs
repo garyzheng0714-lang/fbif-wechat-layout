@@ -25,9 +25,9 @@ function seriesBottomBlocks() {
       name: '系列页脚',
       order: ['author_card', 'bd_card', 'group_qr', 'more_articles'],
       blocks: {
-        author_card: { type: 'image', enabled: true, fields: { image: '' } },
-        bd_card: { type: 'image', enabled: true, fields: { image: '{{asset#ft_series_card_eileen}}' } },
-        group_qr: { type: 'image', enabled: true, fields: { image: '{{asset#ft_series_group_packaging}}' } },
+        author_card: { type: 'image', enabled: true, frontend_editable: true, fields: { image: '' } },
+        bd_card: { type: 'image', enabled: true, frontend_editable: true, fields: { image: '{{asset#ft_series_card_eileen}}' } },
+        group_qr: { type: 'image', enabled: true, frontend_editable: true, fields: { image: '{{asset#ft_series_group_packaging}}' } },
         more_articles: { type: 'more_articles', enabled: false, fields: { title: '/ 更多文章 /' } },
       },
     }],

@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifySeries,
+  extractSeriesAuthorName,
   sectionImageUrl,
 } from '../public/js/rule-behavior-foodtalks-series.js';
 
@@ -168,6 +169,19 @@ test('classifySeries: 文末署名/图源说明 → footer-note（成品 12px #7
   assert.equal(out.filter(e => e.k === 'p').length, 1, '只有引子是正文');
 });
 
+test('extractSeriesAuthorName: 从「本文作者：Ian, FoodTalks」提取作者名用于作者名片匹配', () => {
+  // WHY：作者名片自动补充依赖该字段；Word 会把视觉上一行拆成多个 run，分类后必须按整段文本识别。
+  const out = classifySeries([
+    P('正文引子。'),
+    { k: 'txt', runs: [
+      { type: 'txt', text: '本文作者：' },
+      { type: 'txt', text: 'Ian, ' },
+      { type: 'txt', text: 'FoodTalks' },
+    ], text: '本文作者：Ian, FoodTalks' },
+  ], {});
+  assert.equal(extractSeriesAuthorName(out), 'Ian');
+});
+
 test('classifySeries: 文末「提示：」→ tip-title，「* …」声明 → tip-item', () => {
   const out = classifySeries([P('提示：'), P('* 本文为FoodTalks原创首发，欢迎无条件转发朋友圈。')], {});
   assert.ok(out.find(e => e.k === 'tip-title'), '「提示：」标签');
@@ -181,14 +195,19 @@ test('classifySeries: 无序号「参考来源：」段兜底进入参考模式 
   assert.equal(out.filter(e => e.k === 'ref-item').length, 2);
 });
 
-test('classifySeries: 联系小节（倒数第二个一级标题含「联系」）公司信息居中、描述左对齐', () => {
-  // WHY：成品「联系XXX」下方公司信息（办公室名/地址/官网/电话）居中，描述性正文左对齐。
+test('classifySeries: 联系小节（倒数第二个一级标题含「联系」）公司信息块整体居中、描述左对齐', () => {
+  // WHY：成品「联系XXX」下方公司信息是一个整体；进入信息块后，姓名/职位/备注不能漏成左对齐。
   const out = classifySeries([
     P('五、联系安姆科'),
     P('安姆科总部位于上海，热诚欢迎各位前来参观交流。'),                              // 描述 → 左
     { k: 'txt', runs: [{ type: 'txt', text: '上海总部办公室', bold: true }], text: '上海总部办公室' }, // 加粗 → 居中
     P('地址：上海市闵行区申长路988弄'),                                            // 字段 → 居中
     P('官网：https://www.amcor.com/'),
+    P('商务合作对接'),
+    P('郝佳丽'),
+    P('总经理助理'),
+    P('联系电话：17310962656'),
+    P('（添加请备注：公司 姓名 职位）'),
     P('六、参考来源'),
     P('[1] 报告A'),
   ], {});
@@ -197,10 +216,20 @@ test('classifySeries: 联系小节（倒数第二个一级标题含「联系」�
   const office = out.find(e => txt(e) === '上海总部办公室');
   const addr = out.find(e => txt(e).startsWith('地址'));
   const web = out.find(e => txt(e).startsWith('官网'));
+  const biz = out.find(e => txt(e) === '商务合作对接');
+  const name = out.find(e => txt(e) === '郝佳丽');
+  const title = out.find(e => txt(e) === '总经理助理');
+  const phone = out.find(e => txt(e).startsWith('联系电话'));
+  const note = out.find(e => txt(e).startsWith('（添加请备注'));
   assert.ok(!desc.center, '描述性正文不居中');
   assert.equal(office.center, true, '办公室名（加粗 h3）居中');
   assert.equal(addr.center, true, '地址行居中');
   assert.equal(web.center, true, '官网行居中');
+  assert.equal(biz.center, true, '商务合作标题延续行居中');
+  assert.equal(name.center, true, '姓名延续行居中');
+  assert.equal(title.center, true, '职位延续行居中');
+  assert.equal(phone.center, true, '联系电话字段行居中');
+  assert.equal(note.center, true, '添加备注延续行居中');
 });
 
 test('classifySeries: 联系为最后一个一级标题（无参考来源在后）时不触发居中', () => {
@@ -218,11 +247,12 @@ test('classifySeries: 联系字段正则走规则后台可配（红线：不硬�
   const txt = e => e.text || (e.runs || []).map(r => r.text).join('');
   const cfg = { behavior: { params: { contact_field_regex: { default: '^邮编' } } } };
   const out = classifySeries([
-    P('五、联系我们'), P('邮编：200000'), P('地址：上海'),
+    P('五、联系我们'), P('地址：上海'), P('邮编：200000'), P('备注：公司 姓名 职位'),
     P('六、参考来源'), P('[1] A'),
   ], cfg);
+  assert.ok(!out.find(e => txt(e).startsWith('地址')).center, '自定义字段命中前的地址不居中');
   assert.equal(out.find(e => txt(e).startsWith('邮编')).center, true, '自定义字段命中→居中');
-  assert.ok(!out.find(e => txt(e).startsWith('地址')).center, '默认地址正则被覆盖→不再命中');
+  assert.equal(out.find(e => txt(e).startsWith('备注')).center, true, '命中后延续行跟随居中');
 });
 
 test('classifySeries: config.behavior 正则可覆盖默认（红线：规则后台可配）', () => {

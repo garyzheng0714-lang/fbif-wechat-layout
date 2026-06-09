@@ -243,6 +243,30 @@ let activeRuleSelectorDraftID = initialRule.preset.id || 'default';
 let activeRuleSelectorStatus = '';
 let activeRuleAdminPassword = '';
 let activeRuleOutsideHandler = null;
+let activeRuleHydrationSeq = 0;
+
+function trackActiveRuleHydration(promise, accountID = activeRulePack.id) {
+  const seq = ++activeRuleHydrationSeq;
+  window._activeRuleReady = false;
+  const tracked = Promise.resolve(promise).then(
+    value => {
+      if (seq === activeRuleHydrationSeq && accountID === activeRulePack.id) {
+        window._activeRuleReady = true;
+        window.dispatchEvent(new CustomEvent('fbif:rules-ready', { detail: { accountId: accountID } }));
+      }
+      return value;
+    },
+    err => {
+      if (seq === activeRuleHydrationSeq && accountID === activeRulePack.id) {
+        window._activeRuleReady = true;
+        window.dispatchEvent(new CustomEvent('fbif:rules-ready', { detail: { accountId: accountID, failed: true } }));
+      }
+      throw err;
+    }
+  );
+  window._activeRuleReadyPromise = tracked.catch(() => null);
+  return tracked;
+}
 
 function escText(value) {
   return String(value == null ? '' : value)
@@ -711,7 +735,7 @@ window.addEventListener('fbif:article-cleared', () => {
   if (bbSec) bbSec.style.display = 'none';
 });
 
-hydrateActiveRulePreset(activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
+trackActiveRuleHydration(hydrateActiveRulePreset(activeRulePack.id), activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
 refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));
 
 async function loadTemplate(templateId, options = {}) {

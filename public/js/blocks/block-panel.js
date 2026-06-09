@@ -212,6 +212,7 @@ export function mountBlockPanel({ mount, accountId, getModule, getAssetLibrary, 
   render();
   return {
     getOverride: () => override,
+    setOverride: (next) => { override = isObj(next) ? next : {}; saveOverride(accountId, override); render(); },
     refresh: render,
     hasEditableContent: () => editableCount > 0,
     destroy: () => { mount.innerHTML = ''; },

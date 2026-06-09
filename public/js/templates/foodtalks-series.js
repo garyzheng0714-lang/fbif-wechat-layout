@@ -11,7 +11,7 @@ const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter, convertRuns, looksLikeGifSource } = engineModule;
 const behaviorModule = await import('../rule-behavior-foodtalks-series.js' + assetQuery);
 const {
-  classifySeries, sectionImageUrl,
+  classifySeries, extractSeriesAuthorName, sectionImageUrl,
 } = behaviorModule;
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
@@ -410,6 +410,7 @@ function processDocxInternal(paragraphs, imgCache, config) {
     elems,
     imgN: elems.filter(e => e.k === 'img').length,
     headingN: elems.filter(e => e.k === 'h1' || e.k === 'h2' || e.k === 'h3').length,
+    authorName: extractSeriesAuthorName(elems),
   };
 }
 
@@ -420,8 +421,8 @@ export default {
   formats: ['.docx', '.doc', '.md', '.txt'],
 
   processDocx({ paragraphs, imgCache, config = {} }) {
-    const { elems, imgN, headingN } = processDocxInternal(paragraphs, imgCache, config);
-    return { lines: render(elems, config), imgN, headingN };
+    const { elems, imgN, headingN, authorName } = processDocxInternal(paragraphs, imgCache, config);
+    return { lines: render(elems, config), imgN, headingN, authorName };
   },
 
   async processMd(text, opts = {}) {
@@ -436,6 +437,7 @@ export default {
       lines: render(elems, config),
       imgN: elems.filter(e => e.k === 'img').length,
       headingN: elems.filter(e => e.k === 'h1' || e.k === 'h2' || e.k === 'h3').length,
+      authorName: extractSeriesAuthorName(elems),
       title: (fm && fm.title) || '',
     };
   },
@@ -459,6 +461,7 @@ export default {
       lines: render(elems, config),
       imgN: elems.filter(e => e.k === 'img').length,
       headingN: elems.filter(e => e.k === 'h1' || e.k === 'h2' || e.k === 'h3').length,
+      authorName: extractSeriesAuthorName(elems),
       title: (data && data.title) || '',
     };
   },
@@ -474,7 +477,9 @@ export default {
     const bb = mods.bottom_blocks;
     if (!bb || typeof bb !== 'object' || bb.enabled === false) return null;
     const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'foodtalks-series';
-    const ov = (typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined;
+    const ov = opts && Object.prototype.hasOwnProperty.call(opts, 'bottomBlocksOverride')
+      ? opts.bottomBlocksOverride
+      : ((typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined);
     const sp = styleProps((ac.config && typeof ac.config === 'object') ? ac.config : {});
     // v2 双预设：来源决定原创/转载（v1 模块忽略 presetId，行为不变）。
     const presetId = (opts && opts.isRepost) ? 'repost' : 'original';

@@ -625,7 +625,7 @@ func validateFBIFFooterModule(raw any) error {
 
 // validateFtSeriesMaterialsModule 校验「什么是」系列素材库（config.modules.ft_series_materials）：
 //
-//	{ sections?{n:url}, groups?{name:url}, cards?{name:url}, footer_default?{author_card,group,bd_card} }
+//	{ sections?{n:url}, groups?{name:url}, cards?{name:url}, author_card_aliases?{alias:name}, footer_default?{author_card,group,bd_card} }
 //
 // 所有 URL 允许站内相对路径（/assets/...）或 HTTPS；走 isSafeRuleBehaviorURL 防注入。
 func validateFtSeriesMaterialsModule(raw any) error {
@@ -633,7 +633,7 @@ func validateFtSeriesMaterialsModule(raw any) error {
 	if !ok {
 		return fmt.Errorf("ft_series_materials module must be an object")
 	}
-	allowed := map[string]bool{"sections": true, "groups": true, "cards": true, "footer_default": true}
+	allowed := map[string]bool{"sections": true, "groups": true, "cards": true, "author_card_aliases": true, "footer_default": true}
 	for k := range m {
 		if !allowed[k] {
 			return fmt.Errorf("unknown ft_series_materials field: %s", k)
@@ -662,6 +662,21 @@ func validateFtSeriesMaterialsModule(raw any) error {
 	for _, key := range []string{"sections", "groups", "cards"} {
 		if err := checkURLMap(key); err != nil {
 			return err
+		}
+	}
+	if v, ok := m["author_card_aliases"]; ok {
+		aliases, ok := v.(map[string]any)
+		if !ok {
+			return fmt.Errorf("ft_series_materials author_card_aliases must be an object")
+		}
+		for k, iv := range aliases {
+			s, ok := iv.(string)
+			if !ok {
+				return fmt.Errorf("ft_series_materials author_card_aliases.%s must be a string", k)
+			}
+			if len(k) > 80 || len(s) > 80 {
+				return fmt.Errorf("ft_series_materials author_card_aliases.%s too long", k)
+			}
 		}
 	}
 	if v, ok := m["footer_default"]; ok {

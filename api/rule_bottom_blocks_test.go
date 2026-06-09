@@ -149,6 +149,21 @@ func TestDefaultBottomBlocksModuleValid(t *testing.T) {
 	}
 }
 
+func TestSeriesBottomBlocksExposeFrontPanelImageSlots(t *testing.T) {
+	// WHY：FoodTalks 系列文章每篇都可能需要替换作者名片、BD 名片和入群二维码；
+	// 若默认块未标 frontend_editable，左侧内容面板不会出现换图入口，运营无法完成单篇替换。
+	blocks := bbActiveBlocks(t, defaultSeriesBottomBlocksModule())
+	for _, id := range []string{"author_card", "bd_card", "group_qr"} {
+		block, ok := blocks[id].(map[string]any)
+		if !ok {
+			t.Fatalf("series block %q missing", id)
+		}
+		if block["frontend_editable"] != true {
+			t.Fatalf("series block %q frontend_editable = %v, want true", id, block["frontend_editable"])
+		}
+	}
+}
+
 // 系列底部默认只能用 foodtalks-series.js 的 seriesBlockRenderers 真正实现的块类型
 // （image / more_articles / text / spacer）。守护「校验通过但渲染器没实现 → block-render 静默跳过」
 // 这类回归：曾经系列默认放了 spacer 块但渲染器无 spacer renderer，导致图间距整段静默丢失

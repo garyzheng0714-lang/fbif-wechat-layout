@@ -193,7 +193,7 @@ test('editor shells bind upload before remote rule hydration settles', async () 
     );
     assert.match(
       beforeInit,
-      /hydrateActiveRulePreset\(activeRulePack\.id\)\.catch/,
+      /(?:trackActiveRuleHydration\(\s*)?hydrateActiveRulePreset\(activeRulePack\.id\)(?:,\s*activeRulePack\.id\))?\.catch/,
       `${name} should hydrate the active rule in the background`
     );
     assert.match(

@@ -258,10 +258,30 @@ export function classifySeries(neutralElems, config = {}) {
   return out;
 }
 
+function cleanSeriesAuthorName(raw) {
+  let s = String(raw || '').replace(/^本文作者\s*[：:]\s*/i, '').trim();
+  const parts = s.split(/[,，、/／|｜]/).map(p => p.trim()).filter(Boolean);
+  const author = parts.find(p => !/^foodtalks$/i.test(p.replace(/\s+/g, '')));
+  if (author) return author;
+  s = s.replace(/\bFoodTalks\b/ig, '').replace(/^[,，、/／|｜\s]+|[,，、/／|｜\s]+$/g, '').trim();
+  return s;
+}
+
+// 从系列分类结果中提取“本文作者”。用于上传后自动补作者名片；不参与正文排版。
+export function extractSeriesAuthorName(elems) {
+  for (const e of Array.isArray(elems) ? elems : []) {
+    if (!e || e.k !== 'footer-note') continue;
+    const text = elemText(e).trim();
+    const m = text.match(/^本文作者\s*[：:]\s*(.+)$/i);
+    if (m) return cleanSeriesAuthorName(m[1]);
+  }
+  return '';
+}
+
 // 「联系XXX」公司信息居中：当倒数第二个一级标题含「联系」二字时，其与最后一个一级标题
-// （参考来源）之间的【公司信息块】居中——办公室名（加粗 → h3）、地址/官网/电话（命中
-// contact_field_regex 的正文）、图注本就居中；而「联系XXX」下方偶尔的【描述性正文】不命中
-// 字段正则 → 保持左对齐（成品实测：描述段左、公司信息居中）。规则后台可配两条正则。
+// （参考来源）之间的【公司信息块】居中。公司信息块从办公室名（加粗 → h3）或地址/官网/电话
+// 等字段行（contact_field_regex）开始；一旦进入信息块，后续姓名、职位、备注等短行也同属
+// 联系信息，必须跟随居中。联系小节开头偶尔出现的描述性正文仍保持左对齐。
 function applyContactCentering(out, config) {
   const h1Pos = [];
   for (let i = 0; i < out.length; i++) if (out[i].k === 'h1') h1Pos.push(i);
@@ -272,10 +292,24 @@ function applyContactCentering(out, config) {
   if (!sectionRe.test(title)) return;
   const endIdx = h1Pos[h1Pos.length - 1]; // 最后一个一级标题（参考来源）= 区间右界
   const fieldRe = seriesRegex(config, 'contact_field_regex', SERIES_REGEX.contact_field_regex);
+  let inInfoBlock = false;
   for (let i = secIdx + 1; i < endIdx; i++) {
     const e = out[i];
-    if (e.k === 'h3') e.center = true;                      // 加粗公司信息行（办公室名/微信公众号/商务合作）
-    else if (e.k === 'p' && fieldRe.test(elemText(e).trim())) e.center = true; // 地址/官网/电话 …
+    if (e.k === 'h3') {
+      e.center = true; // 加粗公司信息行（办公室名/微信公众号/商务合作）
+      inInfoBlock = true;
+      continue;
+    }
+    if (e.k !== 'p') continue;
+    const text = elemText(e).trim();
+    if (fieldRe.test(text)) {
+      e.center = true; // 地址/官网/电话 …
+      inInfoBlock = true;
+      continue;
+    }
+    if (inInfoBlock && text && text.length <= 80) {
+      e.center = true; // 姓名/职位/备注等联系信息延续行
+    }
   }
 }
 

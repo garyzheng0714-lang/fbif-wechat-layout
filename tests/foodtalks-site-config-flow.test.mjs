@@ -15,13 +15,13 @@ test('engine.js: setActiveConfig exists and writes to _activeConfig', async () =
   assert.match(src, /_activeConfig/, 'engine.js 必须有 _activeConfig 字段');
 });
 
-test('engine.js: all 5 process call sites pass config', async () => {
+test('engine.js: all process call sites pass config through the unified renderer', async () => {
   const src = await readFile(
     new URL('../public/js/engine.js', import.meta.url),
     'utf8'
   );
   const processDocxCalls = [...src.matchAll(/template\.processDocx\s*\([^)]*\)/g)];
-  assert.ok(processDocxCalls.length >= 2, `processDocx 调用点至少 2 处，实际 ${processDocxCalls.length}`);
+  assert.ok(processDocxCalls.length >= 1, `processDocx 调用点至少 1 处，实际 ${processDocxCalls.length}`);
   for (const m of processDocxCalls) {
     assert.match(m[0], /config/, `processDocx 调用 "${m[0]}" 必须含 config`);
   }
@@ -33,6 +33,91 @@ test('engine.js: all 5 process call sites pass config', async () => {
   for (const m of processBlocksCalls) {
     assert.match(m[0], /config/, `processBlocks 调用 "${m[0]}" 必须含 config`);
   }
+});
+
+test('engine.js: 当前文章由统一 session 激活，批量和重排不直接 showPreview', async () => {
+  // WHY：底部名片、正文页脚、复制层不能各自维护状态。当前文章必须由一个 session 统一激活，
+  // 否则批量处理或规则晚到时会出现左侧有名片、正文底部没有名片的分裂状态。
+  const src = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /let _articleSession = null/, 'engine 应维护当前文章 session');
+  assert.match(src, /async function buildArticleSession/, 'engine 应集中构建文章 session');
+  assert.match(src, /function activateArticleSession/, 'engine 应集中激活当前文章');
+  const rerender = src.slice(src.indexOf('async function _engineRerender'));
+  assert.match(rerender, /buildArticleSession\(cached, result/, '重排应重建 session');
+  assert.match(rerender, /activateArticleSession\(session\)/, '重排应通过 session 激活预览');
+  const batchClick = src.slice(src.indexOf('function showBatchList'), src.indexOf('function updateBatchStatus'));
+  assert.match(batchClick, /activateArticleSession\(_batchResults\[i\]\)/, '批量点击应激活对应 session');
+  assert.doesNotMatch(batchClick, /showPreview\(/, '批量点击不得绕过 session 直接 showPreview');
+});
+
+test('engine.js: 上传前等待当前规则加载，避免 FoodTalks 底部区块漏渲', async () => {
+  // WHY：用户打开页面后立刻上传时，/api/rules/active 可能还没回来；若不等待，正文会按
+  // 无 bottom_blocks 的临时配置生成，左侧有名片但正文底部没有名片。
+  const src = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /function\s+waitForActiveRuleConfigReady/, 'engine 必须有规则 ready 等待');
+  assert.ok((src.match(/await waitForActiveRuleConfigReady\(/g) || []).length >= 3, '单篇/批量/blocks 三条上传路径都要等待规则 ready');
+  assert.match(src, /addEventListener\('fbif:rules-ready'/, '规则晚到时必须触发补渲染');
+  const rerender = src.slice(src.indexOf('async function _engineRerender'));
+  assert.match(rerender, /autofillAuthorCard: !!options\.autofillAuthorCard/, '普通重排不得默认覆盖用户手动替换的作者名片');
+  assert.match(src, /_engineRerender\(\{ autofillAuthorCard: true \}\)/, '规则晚到补渲才允许重新自动补作者名片');
+});
+
+test('engine.js/templates: 底部区块渲染读取 session override，而不是碰运气读全局', async () => {
+  // WHY：作者名片 override 只有进入当前文章 session 后才持久化；页脚构建必须显式使用该 session
+  // 的 override，否则新稿第一次渲染会仍按旧全局值输出，正文底部漏名片。
+  const engine = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(engine, /bottomBlocksOverride: bottomBlocksState\.override/, 'session 应保存本篇底部 override');
+  assert.match(
+    engine,
+    /loadBaseFooterHtml\(\{\s*isRepost,\s*bottomBlocksOverride: bottomBlocksState\.override,/,
+    '构建页脚时应传入本篇 override'
+  );
+
+  const series = await readFile(
+    new URL('../public/js/templates/foodtalks-series.js', import.meta.url),
+    'utf8'
+  );
+  const fbif = await readFile(
+    new URL('../public/js/templates/fbif.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(series, /hasOwnProperty\.call\(opts, 'bottomBlocksOverride'\)/, 'FoodTalks 系列页脚应支持显式 override');
+  assert.match(fbif, /hasOwnProperty\.call\(opts, 'bottomBlocksOverride'\)/, '公众号页脚应支持显式 override');
+});
+
+test('engine.js: bottom_blocks 启用时不再被旧 footer_enabled 隐藏', async () => {
+  // WHY：FoodTalks 系列的名片/BD/群二维码属于 modules.bottom_blocks，
+  // 旧的隐藏 footer_enabled=false 只应用于静态 footer.html，不能把新版底部区块整段关掉。
+  const engine = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(engine, /function\s+hasManagedBottomBlocksFooter/, 'engine 应识别托管底部区块');
+  assert.match(
+    engine,
+    /return hasManagedBottomBlocksFooter\(\) \|\| !!\(footerEl && footerEl\.checked\)/,
+    'bottom_blocks 启用时应强制显示页脚区块'
+  );
+  assert.ok((engine.match(/isFooterEnabledForCurrentArticle\(\)/g) || []).length >= 3, '预览更新/更多文章/复制路径都要用统一 footer 开关');
+});
+
+test('app.html: 暴露当前规则 ready promise 给上传流程等待', async () => {
+  const src = await readFile(
+    new URL('../public/app.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /function\s+trackActiveRuleHydration/, 'app 应跟踪 active rule hydration');
+  assert.match(src, /window\._activeRuleReadyPromise/, 'app 应暴露 ready promise 给 engine');
+  assert.match(src, /fbif:rules-ready/, '规则加载完成后应发 rules-ready 事件');
 });
 
 test('fbif.js: 3 process entries accept config param', async () => {

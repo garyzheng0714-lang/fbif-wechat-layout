@@ -129,6 +129,11 @@ export const SERIES_CARDS = Object.freeze({
   Yisa:    '/assets/foodtalks-series/cards/yisa.jpg',
 });
 
+// 作者署名别名：文章里写 Ian，素材库沿用既有 Lan 名片。
+export const SERIES_AUTHOR_CARD_ALIASES = Object.freeze({
+  Ian: 'Lan',
+});
+
 // 尾部默认组合（规则后台 footer_default 可改；侧栏每篇可临时覆盖）。
 export const SERIES_FOOTER_DEFAULT = Object.freeze({
   author_card: '',     // 默认不预选作者名片（侧栏每篇手选）
@@ -141,5 +146,6 @@ export const SERIES_MATERIALS_DEFAULT = Object.freeze({
   sections: SERIES_SECTIONS,
   groups: SERIES_GROUPS,
   cards: SERIES_CARDS,
+  author_card_aliases: SERIES_AUTHOR_CARD_ALIASES,
   footer_default: SERIES_FOOTER_DEFAULT,
 });

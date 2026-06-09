@@ -104,6 +104,20 @@ test('render: 文末署名/图源说明 = 12px #7f7f7f 斜体小字（成品实�
   }
 });
 
+test('processDocx: 暴露 authorName 给上传流程自动补作者名片', () => {
+  // WHY：作者名片自动补充发生在 engine 生成底部区块前；模板必须把分类层识别到的作者显式返回。
+  const result = template.processDocx({
+    paragraphs: [
+      imgP('h.png', '96%', 1.6),
+      p('正文引子。'),
+      p('本文作者：Ian, FoodTalks'),
+    ],
+    imgCache: { 'h.png': 'blob:h' },
+    config: {},
+  });
+  assert.equal(result.authorName, 'Ian');
+});
+
 test('render: 文末「提示：」深蓝粗体、「* 声明」#888888 斜体（成品口径）', () => {
   const html = render([
     imgP('h.png', '96%', 1.6),
@@ -119,8 +133,8 @@ test('render: 文末「提示：」深蓝粗体、「* 声明」#888888 斜体�
   assert.match(item, /font-style: italic/, '声明条目斜体');
 });
 
-test('render: 联系小节公司信息居中、描述性正文左对齐（成品口径）', () => {
-  // WHY：成品「联系XXX」下方公司信息（办公室名/地址/官网）居中，描述性正文左对齐。
+test('render: 联系小节公司信息块整体居中、描述性正文左对齐（成品口径）', () => {
+  // WHY：成品「联系XXX」下方公司信息是一个整体；姓名、职位、备注不能漏成左对齐。
   const html = render([
     imgP('h.png', '96%', 1.6),
     p('正文引子。'),
@@ -129,6 +143,11 @@ test('render: 联系小节公司信息居中、描述性正文左对齐（成品
     p('上海总部办公室', { runs: [{ type: 'txt', text: '上海总部办公室', bold: true }] }),
     p('地址：上海市闵行区申长路988弄'),
     p('官网：https://www.amcor.com/'),
+    p('商务合作对接'),
+    p('郝佳丽'),
+    p('总经理助理'),
+    p('联系电话：17310962656'),
+    p('（添加请备注：公司 姓名 职位）'),
     p('六、参考来源'),
     p('[1] 报告A'),
   ], { 'h.png': 'blob:h' });
@@ -136,4 +155,9 @@ test('render: 联系小节公司信息居中、描述性正文左对齐（成品
   assert.equal(sectionAlignOf(html, '上海总部办公室'), 'center', '办公室名居中');
   assert.equal(sectionAlignOf(html, '地址：上海市闵行区申长路988弄'), 'center', '地址行居中');
   assert.equal(sectionAlignOf(html, '官网：https://www\\.amcor\\.com/'), 'center', '官网行居中');
+  assert.equal(sectionAlignOf(html, '商务合作对接'), 'center', '商务合作标题居中');
+  assert.equal(sectionAlignOf(html, '郝佳丽'), 'center', '姓名居中');
+  assert.equal(sectionAlignOf(html, '总经理助理'), 'center', '职位居中');
+  assert.equal(sectionAlignOf(html, '联系电话：17310962656'), 'center', '联系电话居中');
+  assert.equal(sectionAlignOf(html, '（添加请备注：公司 姓名 职位）'), 'center', '添加备注居中');
 });

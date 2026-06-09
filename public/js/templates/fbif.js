@@ -598,7 +598,9 @@ export default {
     const bb = mods.bottom_blocks;
     if (!bb || typeof bb !== 'object' || bb.enabled === false) return null;
     const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'fbif';
-    const ov = (typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined;
+    const ov = opts && Object.prototype.hasOwnProperty.call(opts, 'bottomBlocksOverride')
+      ? opts.bottomBlocksOverride
+      : ((typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined);
     // v2 双预设：来源决定原创/转载（v1 模块忽略 presetId，行为不变）。
     const presetId = (opts && opts.isRepost) ? 'repost' : 'original';
     const html = renderBottomBlocksHtml(bb, ov, mpBlockRenderers(mods.asset_library, scope), { presetId });
