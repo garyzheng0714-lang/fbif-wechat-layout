@@ -175,3 +175,16 @@ test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并�
   assert.match(src, /dragstart/, '应支持拖拽排序');
   assert.doesNotMatch(src, /<button type="button" class="ft-footer-preset" data-preset="fbif-original">FBIF原创<\/button>/, '不应在 HTML 静态写死预设按钮');
 });
+
+test('site.html: 服务端页脚结构变化时清理旧本地状态，避免 tip=true 或漏 BD 名片', async () => {
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /FT_FOOTER_STORAGE[\s\S]*signature/, '本地页脚状态必须带服务端结构签名');
+  assert.match(src, /function\s+footerSignature/, '应按服务端预设、顺序、片段 key 计算签名');
+  assert.match(src, /storedSignature\s*!==\s*signature/, '签名变化时应重置到服务端默认');
+  assert.match(src, /bd_card:\s*'BD 名片'/, '左侧必须能显示 BD 名片分块');
+  assert.match(src, /coop_table:\s*'相关合作表'/, '左侧必须能显示相关合作表分块');
+  assert.doesNotMatch(src, /资讯投稿 & 商务合作/, '网站什么是系列不能继续显示旧商务合作标签');
+});

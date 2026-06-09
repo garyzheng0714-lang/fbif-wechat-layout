@@ -24,10 +24,15 @@ test('返回 destroy() 清理句柄', () => {
   assert.match(src, /destroy\s*\(\s*\)/, '返回对象需包含 destroy()');
 });
 
-// ── 5 个固定片段 key ──
+// ── 页脚片段 key ──
 
 test('包含片段 biz_coop', () => {
   assert.match(src, /biz_coop/, '应含 biz_coop 片段');
+});
+
+test('包含什么是系列 BD 名片和相关合作表片段', () => {
+  assert.match(src, /bd_card/, '应含 bd_card 片段');
+  assert.match(src, /coop_table/, '应含 coop_table 片段');
 });
 
 test('包含片段 join_group', () => {
@@ -48,10 +53,18 @@ test('包含片段 more_info', () => {
 
 test('中文片段名全部覆盖', () => {
   assert.match(src, /商务合作/, '应含商务合作');
+  assert.match(src, /BD 名片/, '应含 BD 名片');
+  assert.match(src, /相关合作表/, '应含相关合作表');
   assert.match(src, /加入微信群/, '应含加入微信群');
   assert.match(src, /关注公众号/, '应含关注公众号');
   assert.match(src, /FoodTalks logo/, '应含 FoodTalks logo');
   assert.match(src, /点击获取更多/, '应含点击获取更多');
+});
+
+test('后台编辑器按服务端片段动态渲染，不能写死旧 5 项列表', () => {
+  assert.match(src, /function\s+allSegKeys/, '应从 segment_order / segments 动态收集片段');
+  assert.match(src, /function\s+orderedSegKeys/, '应以服务端顺序为主并补齐新增片段');
+  assert.doesNotMatch(src, /ALL_SEG_KEYS\s*=\s*\[/, '不能再用 ALL_SEG_KEYS 写死旧片段');
 });
 
 // ── 预设矩阵 ──

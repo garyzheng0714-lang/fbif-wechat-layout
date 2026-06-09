@@ -3,8 +3,16 @@
 import { FOOTER_SEGMENTS_DEFAULT, FOOTER_SEGMENT_ORDER_DEFAULT, FOOTER_PRESETS_DEFAULT } from './footer-segments-defaults.js';
 import { buildFooterHtml } from './rule-behavior-foodtalks.js';
 
-const SEGMENT_LABELS = { biz_coop: '商务合作', join_group: '加入微信群', follow_account: '关注公众号', logo: 'FoodTalks logo', more_info: '点击获取更多' };
-const ALL_SEG_KEYS = ['biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
+const SEGMENT_LABELS = {
+  biz_coop: '商务合作',
+  bd_card: 'BD 名片',
+  coop_table: '相关合作表',
+  join_group: '加入微信群',
+  follow_account: '关注公众号',
+  logo: 'FoodTalks logo',
+  more_info: '点击获取更多',
+};
+const BASE_SEG_KEYS = ['biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
 const XSS_RE = /<script|on\w+\s*=|javascript:/i;
 
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -29,8 +37,8 @@ function validateHtmlLines(lines) {
   return XSS_RE.test(lines.join('\n')) ? '内容含不安全代码（<script> / on*= / javascript:），请删除后再保存' : '';
 }
 
-function isSegChanged(key, lines) {
-  const def = FOOTER_SEGMENTS_DEFAULT[key];
+function isSegChanged(key, lines, fallbackDefault) {
+  const def = FOOTER_SEGMENTS_DEFAULT[key] || fallbackDefault;
   return def ? JSON.stringify(lines) !== JSON.stringify(def.html_lines) : false;
 }
 
@@ -43,14 +51,41 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
   const openCards = {};
   let draggingKey = '';
 
+  function allSegKeys() {
+    const keys = new Set([
+      ...(Array.isArray(state.segment_order) ? state.segment_order : []),
+      ...BASE_SEG_KEYS,
+      ...Object.keys(state.segments || {}),
+    ]);
+    return [...keys].filter(k => k && k !== 'tip');
+  }
+
+  function orderedSegKeys() {
+    const order = Array.isArray(state.segment_order) && state.segment_order.length
+      ? state.segment_order.slice()
+      : FOOTER_SEGMENT_ORDER_DEFAULT.slice();
+    for (const key of allSegKeys()) {
+      if (!order.includes(key)) order.push(key);
+    }
+    return order.filter(k => k !== 'tip');
+  }
+
+  function segmentToggleDefaults() {
+    return Object.fromEntries(['tip', ...orderedSegKeys()].map(k => [k, false]));
+  }
+
+  function segmentDefault(key) {
+    return FOOTER_SEGMENTS_DEFAULT[key] || ((snapshot.segments || {})[key]);
+  }
+
   // 补全 state
   if (!state.segments) state.segments = {};
   if (!Array.isArray(state.segment_order)) state.segment_order = [...FOOTER_SEGMENT_ORDER_DEFAULT];
   if (!Array.isArray(state.presets)) state.presets = clone(FOOTER_PRESETS_DEFAULT);
   if (state.enabled == null) state.enabled = false;
   if (!state.active_preset_id) state.active_preset_id = 'fbif-original';
-  for (const k of ALL_SEG_KEYS) {
-    if (!state.segments[k]) state.segments[k] = clone(FOOTER_SEGMENTS_DEFAULT[k] || { html_lines: [] });
+  for (const k of allSegKeys()) {
+    if (!state.segments[k]) state.segments[k] = clone(segmentDefault(k) || { html_lines: [] });
     if (!Array.isArray(state.segments[k].html_lines)) state.segments[k].html_lines = [];
   }
 
@@ -86,7 +121,7 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     const xssErr = validateHtmlLines(lines);
     return `<div class="footer-lib-card${open?' open':''}" data-seg-key="${esc(key)}" draggable="true">
       <button type="button" class="footer-lib-card-head" data-action="toggle-card" data-seg-key="${esc(key)}">
-        <span class="footer-lib-card-label"><span class="footer-lib-drag-handle" title="拖拽排序">⠿</span>${esc(label)}${isSegChanged(key,lines)?'<span class="footer-lib-changed-dot" title="与默认值不同">● 已改</span>':''}</span>
+        <span class="footer-lib-card-label"><span class="footer-lib-drag-handle" title="拖拽排序">⠿</span>${esc(label)}${isSegChanged(key,lines,segmentDefault(key))?'<span class="footer-lib-changed-dot" title="与默认值不同">● 已改</span>':''}</span>
         <span class="footer-lib-card-arrow">${open?'▲':'▼'}</span>
       </button>
       ${open?`<div class="footer-lib-card-body">
@@ -119,8 +154,8 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
 
   function renderPresetTable() {
     const presets = Array.isArray(state.presets) ? state.presets : [];
-    const cols = ['tip', ...ALL_SEG_KEYS];
-    const labels = { tip:'提示', biz_coop:'商务', join_group:'加群', follow_account:'关注', logo:'Logo', more_info:'更多' };
+    const cols = ['tip', ...orderedSegKeys()];
+    const labels = { tip: '提示', ...SEGMENT_LABELS };
     return `<div class="footer-lib-preset-section">
       <h3 class="footer-lib-section-title">预设管理</h3>
       <div class="footer-lib-table-wrap"><table class="footer-lib-preset-table">
@@ -154,7 +189,7 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
   }
 
   function render() {
-    const order = Array.isArray(state.segment_order) ? state.segment_order : FOOTER_SEGMENT_ORDER_DEFAULT;
+    const order = orderedSegKeys();
     container.innerHTML = `<div class="footer-lib-editor">
       ${renderStatusBar()}
       <div class="footer-lib-main">
@@ -182,7 +217,7 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     if (action === 'reset-seg') {
       e.preventDefault();
       const key = btn.dataset.segKey;
-      const def = FOOTER_SEGMENTS_DEFAULT[key];
+      const def = segmentDefault(key);
       if (!def || !confirm(`确认将「${SEGMENT_LABELS[key]||key}」重置为默认内容？`)) return;
       const next = clone(state); next.segments[key] = clone(def); emit(next); return;
     }
@@ -199,7 +234,7 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     if (action === 'add-preset') {
       const next = clone(state);
       if (!Array.isArray(next.presets)) next.presets = [];
-      next.presets.push({ id: genId(), name: '新预设', segments: { tip:false, biz_coop:false, join_group:false, follow_account:false, logo:false, more_info:false } });
+      next.presets.push({ id: genId(), name: '新预设', segments: segmentToggleDefaults() });
       emit(next); return;
     }
     if (action === 'validate-json') {
@@ -273,7 +308,7 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
 
   function moveSegment(fromKey, toKey) {
     if (!fromKey || !toKey || fromKey === toKey) return;
-    const order = Array.isArray(state.segment_order) ? state.segment_order.slice() : FOOTER_SEGMENT_ORDER_DEFAULT.slice();
+    const order = orderedSegKeys();
     const from = order.indexOf(fromKey);
     const to = order.indexOf(toKey);
     if (from < 0 || to < 0) return;
