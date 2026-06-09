@@ -48,6 +48,8 @@ function behList(config, key, fallback) {
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
 const { promoteHeuristicHeadings } = headingModule;
+const { applySeriesContactLayout } = await import('../site-contact-layout.js' + assetQuery);
+const { activeFooterSegments } = await import('../site-footer-active.js' + assetQuery);
 const imageWidthModule = await import('../image-width.js' + assetQuery);
 const { adaptiveImageWidth } = imageWidthModule;
 // DOCX 内容结构分类与公众号共用一套（红线#19：两渲染器不互相 import，都只 import
@@ -340,9 +342,17 @@ function renderHeading(level, text, config = {}) {
   return `<${tag}${idAttr} style="text-align: justify;">${esc(text)}</${tag}>`;
 }
 
-function renderParagraph(runs) {
+function renderParagraph(runs, elem = {}, config = {}) {
   const inner = renderRuns(runs);
   if (!inner) return BLANK_LINE;
+  if (elem.center) {
+    if (elem.contactNote) {
+      const noteColor = cfgColor(config, 'footer_note_color', (config && config.muted_color) || '#7f7f7f');
+      const noteFs = cfgNum(config, 'footer_note_font_size', 14);
+      return `<p style="text-align: center;"><span style="font-size: ${noteFs}px; color: ${noteColor};">${inner}</span></p>`;
+    }
+    return `<p style="text-align: center;">${inner}</p>`;
+  }
   return `<p style="text-align: justify;">${inner}</p>`;
 }
 
@@ -440,6 +450,11 @@ function promoteImageCaptions(elems, capOpts) {
     for (let j = i + 1; j < out.length && scanned < 3 && promoted < 2; j++) {
       const e = out[j];
       if (e.k === 'img' || e.k === 'h' || e.k === 'ref-header' || e.k === 'ref-item') break;
+      if (e.k === 'cap') {
+        promoted += 1;
+        scanned += 1;
+        continue;
+      }
       if (e.k !== 'p') continue;
       scanned += 1;
       const plain = (e.runs || []).filter(r => r.type === 'txt').map(r => r.text).join('').trim();
@@ -515,7 +530,7 @@ function render(elems, config = {}) {
     if (e.k === 'tip') {
       // 提示声明受页脚库勾选 active_segments.tip 控制：仅当用户显式取消勾选（=0）时不输出。
       // 默认（未设 / 未配页脚）仍输出，保证转载版权声明默认在（基石所有文章都有）。
-      const ftSeg = config.modules && config.modules.fbif_footer && config.modules.fbif_footer.active_segments;
+      const ftSeg = activeFooterSegments(config.modules && config.modules.fbif_footer);
       if (ftSeg && Object.prototype.hasOwnProperty.call(ftSeg, 'tip') && !ftSeg.tip) {
         prevWasHeading = false;
         prevWasStandaloneLink = false;
@@ -614,9 +629,11 @@ function render(elems, config = {}) {
     }
     // p
     const standalone = isStandaloneLinkParagraph(e.runs);
-    lines.push(renderParagraph(e.runs || []));
-    // 如果当前是独立链接 + 上一段也是独立链接，不插空行
-    if (!(standalone && prevWasStandaloneLink)) {
+    lines.push(renderParagraph(e.runs || [], e, config));
+    const next = elems[i + 1];
+    const compactContactPair = e.contactInfo && next && next.contactInfo && !next.blankBefore;
+    // 如果当前是独立链接 + 上一段也是独立链接，不插空行；联系信息块内部同理保持紧凑。
+    if (!(standalone && prevWasStandaloneLink) && !compactContactPair) {
       lines.push(BLANK_LINE);
     }
     prevWasStandaloneLink = standalone;
@@ -653,7 +670,7 @@ function render(elems, config = {}) {
     // 回退：历史页脚库渲染（与旧行为字节一致；bottom_blocks 缺省时仍可用）。
     const footerCfg = mods.fbif_footer || {};
     if (footerCfg.enabled) {
-      const footerHtml = buildFooterHtml(footerCfg.active_segments, footerCfg, mods.asset_library, 'ft-default');
+      const footerHtml = buildFooterHtml(activeFooterSegments(footerCfg), footerCfg, mods.asset_library, 'ft-default');
       if (footerHtml) {
         if (!endedWithTip && lines[lines.length - 1] !== BLANK_LINE && lines[lines.length - 1] !== CENTER_BLANK_LINE) {
           lines.push(BLANK_LINE);
@@ -705,21 +722,17 @@ function buildDocxOpts(config) {
   return { authorLineRegex, consumeAuthorLine: false, classifyReferences: false, extractVideo: true };
 }
 
-// 中性元素 → 网站本地 elem。网站渲染结构与公众号物理隔离（红线#19）：图片走像素 width
-// 属性（renderImage 的 adaptiveImageWidth；DOCX 无像素尺寸 → width/height=0 → 默认 600，
-// 与改动前一致），标题层级沿用旧版按 styleName 区分 h2/h3，图注/正文包成 runs。参考来源
-// 因 classifyReferences=false 不出现在中性序列里，落为 p 交行为层识别。
+// 中性元素 → 网站本地 elem。网站渲染结构与公众号物理隔离（红线#19）。
 function adaptNeutralToSite(e) {
-  // 缓存未命中（src 空）→ 丢弃该图，绝不输出 <img src="">（坏 HTML 会污染网站后台）。
-  if (e.k === 'img') return e.src ? { k: 'img', src: e.src, alt: '', width: 0, height: 0 } : null;
-  if (e.k === 'video') return e.src ? { k: 'video', src: e.src, poster: e.poster || '' } : null;
+  if (e.k === 'img') return e.src ? { k: 'img', src: e.src, alt: '', width: 0, height: 0, blankBefore: e.blankBefore } : null;
+  if (e.k === 'video') return e.src ? { k: 'video', src: e.src, poster: e.poster || '', blankBefore: e.blankBefore } : null;
   if (e.k === 'h') {
     const level = /heading\s*[3-6]/.test(String(e.styleName || '').toLowerCase()) ? 3 : 2;
-    return { k: 'h', level, runs: [{ type: 'txt', text: e.text }] };
+    return { k: 'h', level, runs: [{ type: 'txt', text: e.text }], blankBefore: e.blankBefore };
   }
-  if (e.k === 'cap') return { k: 'cap', runs: [{ type: 'txt', text: e.text }] };
-  if (e.k === 'table') return { k: 'table', rows: e.rows || [] };
-  return { k: 'p', runs: e.runs || [] };
+  if (e.k === 'cap') return { k: 'cap', runs: [{ type: 'txt', text: e.text }], blankBefore: e.blankBefore };
+  if (e.k === 'table') return { k: 'table', rows: e.rows || [], blankBefore: e.blankBefore };
+  return { k: 'p', runs: e.runs || [], blankBefore: e.blankBefore };
 }
 
 function classifyDocx(paragraphs, imgCache, config = {}) {
@@ -775,6 +788,7 @@ async function classifyMd(text) {
 function classifyBlocks(data) {
   const elems = [];
   let imgN = 0;
+  const meta = b => (b && b.blankBefore ? { blankBefore: true } : {});
   for (const b of (data && data.blocks) || []) {
     if (!b || !b.k) continue;
     if (b.k === 'img') {
@@ -790,20 +804,21 @@ function classifyBlocks(data) {
         alt: '',
         width: w,
         height: h,
+        ...meta(b),
       });
       imgN += 1;
       continue;
     }
     if (b.k === 'video') {
-      elems.push({ k: 'video', src: b.src || '', poster: b.poster || '' });
+      elems.push({ k: 'video', src: b.src || '', poster: b.poster || '', ...meta(b) });
       continue;
     }
     if (b.k === 'h') {
-      elems.push({ k: 'h', level: 2, runs: [{ type: 'txt', text: b.text || '' }] });
+      elems.push({ k: 'h', level: 2, runs: [{ type: 'txt', text: b.text || '' }], ...meta(b) });
       continue;
     }
     if (b.k === 'cap') {
-      elems.push({ k: 'cap', runs: [{ type: 'txt', text: b.text || '' }] });
+      elems.push({ k: 'cap', runs: [{ type: 'txt', text: b.text || '' }], ...meta(b) });
       continue;
     }
     if (b.k === 'table') {
@@ -813,6 +828,7 @@ function classifyBlocks(data) {
           runs: Array.isArray(c.runs) ? c.runs : [],
           header: !!c.header,
         }))),
+        ...meta(b),
       });
       continue;
     }
@@ -820,7 +836,7 @@ function classifyBlocks(data) {
     const runs = Array.isArray(b.runs) && b.runs.length
       ? b.runs
       : [{ type: 'txt', text: b.text || '' }];
-    elems.push({ k: 'p', runs });
+    elems.push({ k: 'p', runs, ...meta(b) });
   }
   return { elems, imgN, title: (data && data.title) || '' };
 }
@@ -837,7 +853,7 @@ export default {
 
   processDocx({ paragraphs, imgCache, config = {}, isRepost = false }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache, config);
-    const normalized = normalizeWhatIsSeriesElems(elems, config);
+    const normalized = applySeriesContactLayout(normalizeWhatIsSeriesElems(elems, config), config);
     const behaved = applyFoodTalksBehavior(normalized, config, { isRepost });
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
@@ -852,7 +868,7 @@ export default {
   async processMd(text, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
-    const normalized = normalizeWhatIsSeriesElems(elems, config);
+    const normalized = applySeriesContactLayout(normalizeWhatIsSeriesElems(elems, config), config);
     const behaved = applyFoodTalksBehavior(normalized, config, { isRepost: !!(opts && opts.isRepost), title });
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     return {
@@ -867,7 +883,7 @@ export default {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
     // data.source 是后端抓取的原文 URL（公众号链接），用于提示声明的标题超链接。
-    const normalized = normalizeWhatIsSeriesElems(elems, config);
+    const normalized = applySeriesContactLayout(normalizeWhatIsSeriesElems(elems, config), config);
     const behaved = applyFoodTalksBehavior(normalized, config, {
       isRepost: !!(opts && opts.isRepost),
       title,

@@ -68,6 +68,7 @@ export function isBoldHeading(runs, opts) {
 export function promoteHeuristicHeadings(elems, opts) {
   return (elems || []).map(e => {
     if (!e || e.k !== 'p') return e;
+    if (e.skipHeadingPromote) return e;
     const plain = (e.runs || []).filter(r => r.type === 'txt').map(r => r.text).join('');
     const level = detectHeadingLevel(plain, opts);
     if (level !== 0) return { k: 'h', level, runs: e.runs };

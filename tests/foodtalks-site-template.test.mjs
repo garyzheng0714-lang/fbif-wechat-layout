@@ -291,7 +291,7 @@ test('页脚库: render 末尾优先走统一区块模型(bottom_blocks)，缺�
   // P3：底部统一为 bottom_blocks 区块模型；rich_html 区块复刻原页脚段（字节一致见 site-blocks-fidelity 测试）。
   assert.match(templateSource, /renderBottomBlocksHtml\s*\(\s*bottomBlocks\s*,\s*override\s*,\s*siteBlockRenderers/, 'render 优先用 renderBottomBlocksHtml(bottom_blocks, 单篇override, 网站渲染器)');
   // 回退路径保留：旧规则无 bottom_blocks 时仍走 buildFooterHtml（兼容不炸）。
-  assert.match(templateSource, /buildFooterHtml\s*\(\s*footerCfg\.active_segments\s*,\s*footerCfg\s*,\s*mods\.asset_library/, '回退：无 bottom_blocks 时用 buildFooterHtml(勾选, 页脚库内容, 素材库)');
+  assert.match(templateSource, /buildFooterHtml\s*\(\s*activeFooterSegments\(footerCfg\)\s*,\s*footerCfg\s*,\s*mods\.asset_library/, '回退：无 bottom_blocks 时用 buildFooterHtml(当前 preset 勾选, 页脚库内容, 素材库)');
   assert.match(templateSource, /footerCfg\.enabled/, '回退页脚营销段受 enabled 总开关控制');
 });
 

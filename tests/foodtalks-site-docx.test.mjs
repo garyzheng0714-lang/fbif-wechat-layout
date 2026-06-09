@@ -166,6 +166,88 @@ test('网站什么是系列 URL 导入：分节图转文字标题，图片标题
   assert.match(html, /<br><em><span style="font-size: 14px; color: #7f7f7f;">本文作者：Ian, FoodTalks/, '文末作者应拆到下一行');
 });
 
+test('网站什么是系列 URL 导入：联系区信息块居中，组内紧凑，仅显式空段拉开', () => {
+  // WHY：橙宝样例的「联系橙宝」不是普通正文段列表；公司信息与 BD 信息应成组居中。
+  // 此前网站渲染器给每个 p 后都塞 <p><br></p>，导致姓名/职位/电话之间出现异常空行。
+  const imgBlock = (src, dataW, dataRatio) => ({ k: 'img', src, dataW, dataRatio });
+  const hBlock = (text) => ({ k: 'h', text });
+  const txtBlock = (text, extra = {}) => ({ k: 'txt', runs: [{ type: 'txt', text }], ...extra });
+  const boldBlock = (text, extra = {}) => ({ k: 'txt', runs: [{ type: 'txt', text, bold: true }], ...extra });
+  const result = template.processBlocks({
+    title: '橙宝样例',
+    blocks: [
+      hBlock('六、联系橙宝'),
+      imgBlock('https://mmbiz.qpic.cn/logo.jpg', 607, 0.66),
+      hBlock('橙宝logo'),
+      boldBlock('天津橙宝鲜橙汁有限公司', { blankBefore: true }),
+      txtBlock('总部地址：天津市静海经济开发区聚海道16号'),
+      txtBlock('联系电话：+86 022-28011188'),
+      boldBlock('商务合作对接', { blankBefore: true }),
+      txtBlock('郝佳丽'),
+      txtBlock('总经理助理'),
+      txtBlock('联系电话：17310962656'),
+      txtBlock('（添加请备注：公司 姓名 职位）'),
+      hBlock('七、参考来源'),
+      txtBlock('[1] 中国消费者网（2025），《HPP果汁成果汁界新晋顶流》'),
+    ],
+  }, {
+    config: {
+      justify_paragraphs: false,
+      muted_color: '#7f7f7f',
+      footer_note_color: '#7f7f7f',
+      footer_note_font_size: '14',
+      modules: { fbif_footer: { enabled: false } },
+    },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(
+    html,
+    /<p style="text-align: center;"><strong>天津橙宝鲜橙汁有限公司<\/strong><\/p>\n<p style="text-align: center;">总部地址：天津市静海经济开发区聚海道16号<\/p>\n<p style="text-align: center;">联系电话：\+86 022-28011188<\/p>/,
+    '公司信息三行应居中且组内不插空行，不能被 logo 图注误吞'
+  );
+  assert.doesNotMatch(html, /font-size: 12px; color: #7f7f7f;">天津橙宝鲜橙汁有限公司/, '公司名不能被误判为图注小灰字');
+  assert.match(
+    html,
+    /联系电话：\+86 022-28011188<\/p>\n<p><br><\/p>\n<p style="text-align: center;"><strong>商务合作对接<\/strong><\/p>/,
+    '原文显式空段应只在公司信息与 BD 信息之间保留'
+  );
+  assert.match(
+    html,
+    /<strong>商务合作对接<\/strong><\/p>\n<p style="text-align: center;">郝佳丽<\/p>\n<p style="text-align: center;">总经理助理<\/p>\n<p style="text-align: center;">联系电话：17310962656<\/p>/,
+    'BD 姓名/职位/电话应紧凑居中'
+  );
+  assert.match(
+    html,
+    /<p style="text-align: center;"><span style="font-size: 14px; color: #7f7f7f;">（添加请备注：公司 姓名 职位）<\/span><\/p>/,
+    '备注行应按成品小灰字居中'
+  );
+});
+
+test('网站页脚库：无 active_segments 时使用 active preset 的 segments 渲染 BD 名片', () => {
+  // WHY：ft-series 默认页脚库已经是 presets 结构；渲染器若只读旧 active_segments，
+  // 网站底部 BD 名片/商务合作会整体不出现。
+  const result = template.processBlocks({
+    title: '页脚样例',
+    blocks: [{ k: 'txt', runs: [{ type: 'txt', text: '正文。' }] }],
+  }, {
+    config: {
+      modules: {
+        fbif_footer: {
+          enabled: true,
+          active_preset_id: 'p1',
+          segment_order: ['bd_card'],
+          segments: { bd_card: { html_lines: ['<p>BD名片出现</p>'] } },
+          presets: [{ id: 'p1', name: '默认', segments: { tip: false, bd_card: true } }],
+        },
+      },
+    },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /BD名片出现/, 'active preset 勾选的 bd_card 必须渲染');
+});
+
 // ---- 统一表格样式（网站渲染：本就 inline-style，与公众号物理隔离各写各的 renderTable） ----
 // WHY：网站渠道也要支持表格，默认样式与公众号同一套（蓝底白字表头 + 浅灰网格线 = 统一），
 // 但渲染函数物理隔离；样式读扁平 config 键，缺省降级与服务端 defaultRuleConfig 逐字一致。

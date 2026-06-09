@@ -141,3 +141,12 @@ test('promoteHeuristicHeadings 不动已分类的 author/tip/cap/img 块', () =>
   assert.equal(out[2].k, 'cap', 'cap 不被误升级');
   assert.equal(out[3].k, 'img');
 });
+
+test('promoteHeuristicHeadings 不升级已标记的联系信息块', () => {
+  const elems = [
+    { k: 'p', skipHeadingPromote: true, contactInfo: true, runs: [{ type: 'txt', text: '商务合作对接', bold: true }] },
+  ];
+  const out = promoteHeuristicHeadings(elems);
+  assert.equal(out[0].k, 'p', '联系信息块里的加粗短句不是正文标题');
+  assert.equal(out[0].contactInfo, true);
+});
