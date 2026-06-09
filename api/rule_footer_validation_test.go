@@ -1,6 +1,20 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func anyStringSlice(raw any) []string {
+	arr, _ := raw.([]any)
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 // 红线 M1：网站规则带 fbif_footer 页脚库 + 识别正则，应能通过保存校验（往返）。
 func TestValidateFooterLibraryAndRegex(t *testing.T) {
@@ -11,6 +25,38 @@ func TestValidateFooterLibraryAndRegex(t *testing.T) {
 	beh := defaultFoodTalksSiteRuleBehavior() // 含 4 个正则
 	if err := validateRuleBehaviorPayload(beh); err != nil {
 		t.Fatalf("默认网站 behavior（含识别正则）应通过校验，却报错: %v", err)
+	}
+}
+
+func TestValidateFtSeriesSiteFooterDefaults(t *testing.T) {
+	cfg := defaultFoodTalksSeriesSiteRuleConfig()
+	if err := validateRuleConfig(cfg); err != nil {
+		t.Fatalf("网站什么是系列默认规则 config 应通过校验，却报错: %v", err)
+	}
+	beh := defaultFoodTalksSeriesSiteRuleBehavior()
+	if err := validateRuleBehaviorPayload(beh); err != nil {
+		t.Fatalf("网站什么是系列默认 behavior 应通过校验，却报错: %v", err)
+	}
+
+	modules := cfg["modules"].(map[string]any)
+	footer := modules["fbif_footer"].(map[string]any)
+	segments := footer["segments"].(map[string]any)
+	biz := strings.Join(anyStringSlice(segments["biz_coop"].(map[string]any)["html_lines"]), "\n")
+	bd := strings.Join(anyStringSlice(segments["bd_card"].(map[string]any)["html_lines"]), "\n")
+	group := strings.Join(anyStringSlice(segments["join_group"].(map[string]any)["html_lines"]), "\n")
+	follow := strings.Join(anyStringSlice(segments["follow_account"].(map[string]any)["html_lines"]), "\n")
+
+	if !strings.Contains(biz, "相关合作") || !strings.Contains(biz, "食品雷达") {
+		t.Fatalf("商务合作段应包含相关合作表，实际: %s", biz)
+	}
+	if !strings.Contains(bd, assetRefID("ftss_bd_soso")) {
+		t.Fatalf("默认 BD 名片应使用 Soso 素材引用，实际: %s", bd)
+	}
+	if !strings.Contains(group, "加入FBIF饮料群") || !strings.Contains(group, `width="150" height="150"`) {
+		t.Fatalf("加群段应是饮料群标题 + 150x150 二维码，实际: %s", group)
+	}
+	if !strings.Contains(follow, "关注FoodTalks什么是系列公众号") || !strings.Contains(follow, `height="180"`) {
+		t.Fatalf("关注公众号段应使用正确标题和 600x180 二维码，实际: %s", follow)
 	}
 }
 

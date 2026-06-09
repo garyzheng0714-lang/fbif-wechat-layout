@@ -17,6 +17,7 @@ const (
 	ftSeriesCoopCard  = "https://static.foodtalks.cn/image/post/78cbc7b7c8bd705db8f43f057c548506d823.png"
 	ftSeriesGroupQR   = "https://static.foodtalks.cn/image/news/4ae6499ea33bf7bf68435dad193e9c01002c.png"
 	ftSeriesAccountQR = "https://static.foodtalks.cn/image/post/c6ce3f375f1399792325ccd09105b8c52986.png"
+	ftSeriesBDSoso    = "https://static.foodtalks.cn/image/post/2d8a590984ffacfb87b448bb7f31441add1c.png"
 )
 
 var assetLibraryID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -70,10 +71,10 @@ func defaultFtSeriesSiteCoopAssets() []any {
 	// 前缀 ftss_（ft-series-site）区别于公众号系列素材的 ft_series_（红线#19：网站系列 ≠ 公众号系列）。
 	return []any{
 		assetLibraryImage("ftss_coop_card", "decor", "什么是系列创意名片图", ftSeriesCoopCard, "global", 600, 0, "商务合作"),
-		assetLibraryImage("ftss_group_qr", "qr_group", "功能性食品群二维码", ftSeriesGroupQR, "global", 600, 0, "商务合作", "二维码"),
-		assetLibraryImage("ftss_account_qr", "qr_account", "什么是系列公众号二维码", ftSeriesAccountQR, "global", 600, 0, "商务合作", "二维码"),
+		assetLibraryImage("ftss_group_qr", "qr_group", "饮料群二维码", ftSeriesGroupQR, "global", 150, 150, "商务合作", "二维码"),
+		assetLibraryImage("ftss_account_qr", "qr_account", "什么是系列公众号二维码", ftSeriesAccountQR, "global", 600, 180, "商务合作", "二维码"),
 		assetLibraryImage("ftss_bd_eileen", "avatar", "BD名片 Eileen", "/assets/ft-series/bd/eileen.png", "global", 600, 0, "BD名片"),
-		assetLibraryImage("ftss_bd_soso", "avatar", "BD名片 Soso", "/assets/ft-series/bd/soso.jpg", "global", 600, 0, "BD名片"),
+		assetLibraryImage("ftss_bd_soso", "avatar", "BD名片 Soso", ftSeriesBDSoso, "global", 600, 175, "BD名片"),
 		assetLibraryImage("ftss_bd_tiki", "avatar", "BD名片 Tiki", "/assets/ft-series/bd/tiki.png", "global", 600, 0, "BD名片"),
 	}
 }

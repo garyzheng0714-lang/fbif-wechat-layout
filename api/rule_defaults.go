@@ -131,7 +131,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v8→v9（2026-06-08）：ft-series 补 justify_paragraphs=false + 视频块 + 商务合作版块（fbif_footer 覆盖
 // + 清空继承的 bottom_blocks）；覆盖已持久化的 v8 旧版 ft-series-v1（无商务合作）。
 // v9→v10（2026-06-09）：FoodTalks「什么是」系列公众号底部 BD 名片 / 群二维码开放前台单篇换图入口。
-const currentBuiltinRuleVersion = 10
+// v10→v11（2026-06-09）：ft-series 网站「什么是系列」URL 导入结构归一化 + 参考来源/文末署名
+// + 商务合作表格/二维码尺寸修复，覆盖已持久化的 v10 旧版 ft-series-v1。
+const currentBuiltinRuleVersion = 11
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -303,12 +305,12 @@ func defaultFBIFFooterModule() map[string]any {
 }
 
 // defaultFoodTalksSiteRuleBehavior 返回 FoodTalks 网站行为模板的默认配置。
-// 三条识别正则：作者署名、提示行、参考来源段。
+// 识别正则：作者署名、提示行、参考来源段、文末图源/作者说明。
 func defaultFoodTalksSiteRuleBehavior() map[string]any {
 	return map[string]any{
 		"author_regex":     `^\s*作者[：:]\s*`,
 		"tip_regex":        `^\s*提示[：:]`,
-		"ref_header_regex": `^\s*参考(?:来源|资料)[：:]\s*$`,
+		"ref_header_regex": `^\s*参考(?:来源|资料)[：:]?\s*$`,
 		"ref_item_regex":   `^\s*\[\d+\]`,
 		// 网站句式模板（红线下放：规则后台可配；客户端读 templates.<key>，缺省降级同值 const）。
 		"templates": map[string]any{
@@ -325,6 +327,7 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 			"image_caption_prefix_regex": map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\s*[：:\s\d]`},
 			"docx_preamble_author_regex": map[string]any{"type": "string", "default": `(?i)^[\s　]*(作者|Author)\s*[:：]`},
 			"caption_lead_regex":         map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|Source|Photo|Image|Credit)\s*[：:]`},
+			"footer_note_regex":          map[string]any{"type": "string", "default": `^(?:本文(?:未标注来源图片/数据均来自|作者\s*[：:]|图片来源)|图片均来自)`},
 			"repost_source_regex":        map[string]any{"type": "string", "default": `^来源[：:]\s*(.+)$`},
 		},
 		// 网站识别词表/标记列表（红线下放；客户端读 lists.<key>，缺省降级同值 const）。
@@ -368,14 +371,16 @@ func defaultFoodTalksSeriesSiteRuleConfig() map[string]any {
 	cfg := defaultFoodTalksSiteRuleConfig()
 	cfg["text_color"] = "#333333"
 	cfg["muted_color"] = "#7f7f7f"
+	cfg["footer_note_color"] = "#7f7f7f"
 	cfg["caption_font_size"] = "12"
+	cfg["footer_note_font_size"] = "14"
 	cfg["table_header_bg"] = "#01396a"
 	cfg["table_header_text_color"] = "#ffffff"
 	cfg["table_border_color"] = "#7f7f7f"
 	cfg["table_font_size"] = "15"
 	cfg["justify_paragraphs"] = false // 系列正文/标题/参考裸标签（8 篇成品 justify=0，样式靠后台 CSS）
-	// 底部页脚库覆盖为「什么是系列商务合作」版块（默认开启）：标题/创意策划文案/创意名片图/
-	// BD名片(默认Eileen)/群二维码/公众号二维码/logo/更多。素材见 defaultFtSeriesSiteCoopAssets。
+	// 底部页脚库覆盖为「什么是系列商务合作」版块（默认开启）：公司内容策划文案/
+	// 相关合作表、BD名片(默认Soso)、群二维码、公众号二维码、logo/更多。素材见 defaultFtSeriesSiteCoopAssets。
 	if mods, ok := cfg["modules"].(map[string]any); ok {
 		mods["fbif_footer"] = defaultFtSeriesBizCoopFooterModule()
 		// 清空继承自网站基线的 bottom_blocks（rich_html site footer）：foodtalks-site.js render 底部
