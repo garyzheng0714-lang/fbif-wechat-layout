@@ -70,6 +70,22 @@ func TestBoldPullquoteNoFontSizeIsTxt(t *testing.T) {
 	}
 }
 
+func TestBlankParagraphMarksNextBlockBlankBefore(t *testing.T) {
+	// WHY：网站「什么是系列」联系区依赖公众号源稿里的显式空段来恢复分组间距。
+	// 空段不应输出成一个无意义 txt 块，但必须挂到下一块，否则联系信息会被错误压成一团。
+	html := jsContentWrap(`<p>第一段</p><p><br /></p><p>第二段</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	if len(blocks) != 2 {
+		t.Fatalf("空段不应生成独立 block，got %d kinds=%v", len(blocks), findKinds(blocks))
+	}
+	if blocks[0].BlankBefore {
+		t.Fatal("第一段前不应标 blankBefore")
+	}
+	if !blocks[1].BlankBefore {
+		t.Fatalf("第二段应继承前置空段 blankBefore，got %+v", blocks[1])
+	}
+}
+
 // ---- Bug B: image caption must classify as cap ----
 
 func TestImageCaptionByGreyColor(t *testing.T) {

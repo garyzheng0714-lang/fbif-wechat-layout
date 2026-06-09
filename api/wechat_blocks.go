@@ -13,16 +13,17 @@ import (
 // Shape matches the `elems` array produced by classifyMd in fbif.js so the
 // renderer can consume them without translation.
 type Block struct {
-	K         string        `json:"k"`
-	Text      string        `json:"text,omitempty"`
-	Runs      []Run         `json:"runs,omitempty"`
-	Src       string        `json:"src,omitempty"`
-	DataW     string        `json:"dataW,omitempty"`
-	DataH     string        `json:"dataH,omitempty"`
-	DataRatio string        `json:"dataRatio,omitempty"`
-	Ordered   bool          `json:"ordered,omitempty"`
-	Rows      [][]TableCell `json:"rows,omitempty"` // K=="table": 二维行/列，保住表格结构
-	Poster    string        `json:"poster,omitempty"` // K=="video": 视频封面 poster
+	K           string        `json:"k"`
+	Text        string        `json:"text,omitempty"`
+	Runs        []Run         `json:"runs,omitempty"`
+	Src         string        `json:"src,omitempty"`
+	DataW       string        `json:"dataW,omitempty"`
+	DataH       string        `json:"dataH,omitempty"`
+	DataRatio   string        `json:"dataRatio,omitempty"`
+	Ordered     bool          `json:"ordered,omitempty"`
+	Rows        [][]TableCell `json:"rows,omitempty"`        // K=="table": 二维行/列，保住表格结构
+	Poster      string        `json:"poster,omitempty"`      // K=="video": 视频封面 poster
+	BlankBefore bool          `json:"blankBefore,omitempty"` // 原文在该块前有显式空段（<p><br></p> 等）
 }
 
 // TableCell is one cell of a K=="table" block. Header marks heading-row /
@@ -131,10 +132,11 @@ func extractArticleBlocksWithOptions(rawHTML string, opts articleBlockOptions) (
 // ---- Walker ----
 
 type blockWalker struct {
-	opts           articleBlockOptions
-	blocks         []Block
-	captionContext bool
-	captionLines   int
+	opts               articleBlockOptions
+	blocks             []Block
+	pendingBlankBefore bool
+	captionContext     bool
+	captionLines       int
 	// inRefSection: 进入「参考来源：」区后置真。该区内的 [n] 条目与「—说明」延续行
 	// 字号小、颜色灰，会被 caption 启发式误吞成 cap（拆散参考来源块）。置真后强制
 	// 这些行走 txt，交前端 refMode 统一识别为连续的 ref-item（无空行）。
@@ -146,6 +148,7 @@ type blockCtx struct {
 	classes    []string
 	style      computedStyle
 	runs       []Run
+	hadBreak   bool
 	boldDepth  int
 	hrefStack  []string
 	textStyles []computedStyle // computed style at each text node — needed
@@ -190,6 +193,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			return
 		case "br":
 			if cur != nil {
+				cur.hadBreak = true
 				cur.runs = append(cur.runs, Run{Type: "txt", Text: " "})
 			}
 			return
@@ -210,7 +214,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.blocks = append(w.blocks, Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
+			w.appendBlock(Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
 			w.captionContext = true
 			w.captionLines = 0
 			w.inRefSection = false
@@ -237,7 +241,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.blocks = append(w.blocks, Block{K: "video", Src: vsrc, Poster: getAttr(n, "poster")})
+			w.appendBlock(Block{K: "video", Src: vsrc, Poster: getAttr(n, "poster")})
 			w.captionContext = true
 			w.captionLines = 0
 			w.inRefSection = false
@@ -348,7 +352,7 @@ func (w *blockWalker) walkTable(n *html.Node, inherited computedStyle) {
 	}
 	walkRows(n, false)
 	if len(rows) > 0 {
-		w.blocks = append(w.blocks, Block{K: "table", Rows: rows})
+		w.appendBlock(Block{K: "table", Rows: rows})
 	}
 }
 
@@ -437,6 +441,11 @@ func (w *blockWalker) makeTextRun(cur *blockCtx, text string) Run {
 func (w *blockWalker) emit(cx *blockCtx) {
 	runs := normalizeRuns(cx.runs)
 	if !hasContent(runs) {
+		if cx.hadBreak && len(w.blocks) > 0 {
+			w.pendingBlankBefore = true
+			w.closeCaptionContext()
+			w.inRefSection = false
+		}
 		return
 	}
 
@@ -445,7 +454,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	allBold := allRunsBold(runs)
 
 	if isHeadingTag(cx.tag) {
-		w.blocks = append(w.blocks, Block{K: "h", Text: text})
+		w.appendBlock(Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
 	}
@@ -453,7 +462,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	for _, c := range cx.classes {
 		lc := strings.ToLower(c)
 		if lc == "rich_media_title" || lc == "js_article_title" {
-			w.blocks = append(w.blocks, Block{K: "h", Text: text})
+			w.appendBlock(Block{K: "h", Text: text})
 			w.closeCaptionContext()
 			return
 		}
@@ -462,7 +471,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	// Visual-signal heading: font-size ≥ 18px AND all text runs bold AND ≤ 80 chars.
 	// Pullquotes stay at body font-size → fail this gate → remain txt with bold inline.
 	if cx.style.FontSizeSet && cx.style.FontSize >= 18 && allBold && textLen > 0 && textLen <= 80 {
-		w.blocks = append(w.blocks, Block{K: "h", Text: text})
+		w.appendBlock(Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
 	}
@@ -473,13 +482,13 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	if refSectionHeadRe.MatchString(trimmed) {
 		w.inRefSection = true
 		w.closeCaptionContext()
-		w.blocks = append(w.blocks, Block{K: "txt", Runs: runs})
+		w.appendBlock(Block{K: "txt", Runs: runs})
 		return
 	}
 	if w.inRefSection {
 		if refItemRe.MatchString(trimmed) || refContinuationRe.MatchString(trimmed) {
 			w.closeCaptionContext()
-			w.blocks = append(w.blocks, Block{K: "txt", Runs: runs})
+			w.appendBlock(Block{K: "txt", Runs: runs})
 			return
 		}
 		// 既非条目也非说明行 → 参考来源区结束
@@ -487,20 +496,28 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	}
 
 	if w.captionContext && shouldAttachToCaptionGroup(cx, text, textLen, w.captionLines, w.opts) {
-		w.blocks = append(w.blocks, Block{K: "cap", Text: text})
+		w.appendBlock(Block{K: "cap", Text: text})
 		w.captionLines++
 		return
 	}
 
 	switch cx.tag {
 	case "blockquote":
-		w.blocks = append(w.blocks, Block{K: "bq", Runs: runs})
+		w.appendBlock(Block{K: "bq", Runs: runs})
 	case "li":
-		w.blocks = append(w.blocks, Block{K: "li", Runs: runs})
+		w.appendBlock(Block{K: "li", Runs: runs})
 	default:
-		w.blocks = append(w.blocks, Block{K: "txt", Runs: runs})
+		w.appendBlock(Block{K: "txt", Runs: runs})
 	}
 	w.closeCaptionContext()
+}
+
+func (w *blockWalker) appendBlock(b Block) {
+	if w.pendingBlankBefore && len(w.blocks) > 0 {
+		b.BlankBefore = true
+	}
+	w.pendingBlankBefore = false
+	w.blocks = append(w.blocks, b)
 }
 
 func (w *blockWalker) closeCaptionContext() {
