@@ -30,6 +30,12 @@ function runsToText(runs) {
     .join('');
 }
 
+function elemText(e) {
+  if (!e) return '';
+  if (Array.isArray(e.runs)) return runsToText(e.runs);
+  return typeof e.text === 'string' ? e.text : '';
+}
+
 function allVisibleRunsBold(runs) {
   const visible = (runs || []).filter(r => r && (r.type === 'txt' || r.type === 'link') && String(r.text || '').trim());
   return visible.length > 0 && visible.every(r => r.bold);
@@ -42,39 +48,62 @@ function cloneElem(e) {
   };
 }
 
+function isContactBoundaryText(text) {
+  return /^(参考(来源|文献|资料|链接)|信息来源)\s*[：:]?$/.test(text) ||
+    /^本文(作者|图片来源)\s*[：:]/.test(text) ||
+    /^图片均来自/.test(text) ||
+    /^提示\s*[：:]/.test(text);
+}
+
+function markContactInfo(e, text) {
+  e.center = true;
+  e.contactInfo = true;
+  e.skipHeadingPromote = true;
+  e.contactNote = /^[（(]?\s*添加请备注/.test(text);
+}
+
 export function applySeriesContactLayout(elems, config = {}) {
   if (!isSeriesSiteConfig(config)) return elems;
   const out = (elems || []).map(cloneElem);
   const hPos = [];
   for (let i = 0; i < out.length; i++) if (out[i] && out[i].k === 'h') hPos.push(i);
-  if (hPos.length < 2) return elems;
+  if (!hPos.length) return elems;
 
-  const secIdx = hPos[hPos.length - 2];
-  const endIdx = hPos[hPos.length - 1];
   const sectionRe = behaviorRegex(config, 'contact_section_regex', '联系');
-  const sectionText = runsToText(out[secIdx].runs).trim();
-  sectionRe.lastIndex = 0;
-  if (!sectionRe.test(sectionText)) return elems;
-
   const fieldRe = behaviorRegex(
     config,
     'contact_field_regex',
     '^(地址|地點|地点|总部地址|官网|官網|网址|網址|网站|網站|电话|電話|联系电话|联系方式|邮箱|郵箱|邮件|手机|手機|微信|公众号|公眾號|传真|傳真|Tel|Phone|Email|E-?mail|Add|Address|Web|Website)\\s*[：:]'
   );
-  let inInfoBlock = false;
-  for (let i = secIdx + 1; i < endIdx; i++) {
-    const e = out[i];
-    if (!e || e.k !== 'p') continue;
-    const text = runsToText(e.runs).trim();
-    if (!text) continue;
-    fieldRe.lastIndex = 0;
-    const startsInfo = fieldRe.test(text) || (text.length <= 80 && allVisibleRunsBold(e.runs));
-    if (startsInfo) inInfoBlock = true;
-    if (!inInfoBlock || text.length > 80) continue;
-    e.center = true;
-    e.contactInfo = true;
-    e.skipHeadingPromote = true;
-    e.contactNote = /^[（(]?\s*添加请备注/.test(text);
+
+  for (let h = 0; h < hPos.length; h++) {
+    const secIdx = hPos[h];
+    const endIdx = hPos[h + 1] || out.length;
+    const sectionText = elemText(out[secIdx]).trim();
+    sectionRe.lastIndex = 0;
+    if (!sectionRe.test(sectionText)) continue;
+
+    let inInfoBlock = false;
+    for (let i = secIdx + 1; i < endIdx; i++) {
+      const e = out[i];
+      if (!e || e.k !== 'p') continue;
+      const text = elemText(e).trim();
+      if (!text) continue;
+      if (isContactBoundaryText(text)) break;
+      fieldRe.lastIndex = 0;
+      const startsInfo = fieldRe.test(text) || (text.length <= 80 && allVisibleRunsBold(e.runs));
+      if (startsInfo) {
+        inInfoBlock = true;
+        markContactInfo(e, text);
+        continue;
+      }
+      if (!inInfoBlock) continue;
+      if (text.length > 80) {
+        inInfoBlock = false;
+        continue;
+      }
+      markContactInfo(e, text);
+    }
   }
   return out;
 }

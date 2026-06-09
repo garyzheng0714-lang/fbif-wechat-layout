@@ -224,6 +224,38 @@ test('网站什么是系列 URL 导入：联系区信息块居中，组内紧凑
   );
 });
 
+test('网站什么是系列 URL 导入：联系区即使是最后一节也按信息块处理', () => {
+  // WHY：不是所有文章都保证「联系」后面还有「参考来源」标题；联系区不能只靠倒数第二节识别。
+  const hBlock = (text) => ({ k: 'h', text });
+  const txtBlock = (text, extra = {}) => ({ k: 'txt', runs: [{ type: 'txt', text }], ...extra });
+  const boldBlock = (text, extra = {}) => ({ k: 'txt', runs: [{ type: 'txt', text, bold: true }], ...extra });
+  const result = template.processBlocks({
+    title: '联系最后一节样例',
+    blocks: [
+      hBlock('六、联系品牌方'),
+      boldBlock('某某食品有限公司'),
+      txtBlock('总部地址：上海市浦东新区一条很长很长但仍属于联系字段的地址信息'),
+      boldBlock('商务合作对接', { blankBefore: true }),
+      txtBlock('张三'),
+      txtBlock('品牌经理'),
+      txtBlock('联系电话：13800000000'),
+      txtBlock('本文作者：Ian, FoodTalks'),
+    ],
+  }, {
+    config: {
+      justify_paragraphs: false,
+      muted_color: '#7f7f7f',
+      modules: { fbif_footer: { enabled: false } },
+    },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<p style="text-align: center;"><strong>某某食品有限公司<\/strong><\/p>/, '最后一节里的公司名也应居中');
+  assert.match(html, /<p style="text-align: center;">总部地址：上海市浦东新区一条很长很长但仍属于联系字段的地址信息<\/p>/, '长地址字段也应作为联系信息居中');
+  assert.match(html, /<p style="text-align: center;">张三<\/p>\n<p style="text-align: center;">品牌经理<\/p>\n<p style="text-align: center;">联系电话：13800000000<\/p>/, '最后一节里的 BD 信息仍应紧凑居中');
+  assert.doesNotMatch(html, /text-align: center;">本文作者/, '文末作者边界不能被误并入联系信息块');
+});
+
 test('网站页脚库：无 active_segments 时使用 active preset 的 segments 渲染 BD 名片', () => {
   // WHY：ft-series 默认页脚库已经是 presets 结构；渲染器若只读旧 active_segments，
   // 网站底部 BD 名片/商务合作会整体不出现。
@@ -246,6 +278,31 @@ test('网站页脚库：无 active_segments 时使用 active preset 的 segments
   });
   const html = result.lines.join('\n');
   assert.match(html, /BD名片出现/, 'active preset 勾选的 bd_card 必须渲染');
+});
+
+test('网站页脚库：active_segments 残留时仍以 active preset 为准', () => {
+  // WHY：规则从旧结构迁移到 presets 后，浏览器本地或旧规则可能残留 active_segments；
+  // 新旧字段共存时若优先旧字段，BD 名片会在别的文章上再次漏渲。
+  const result = template.processBlocks({
+    title: '页脚迁移样例',
+    blocks: [{ k: 'txt', runs: [{ type: 'txt', text: '正文。' }] }],
+  }, {
+    config: {
+      modules: {
+        fbif_footer: {
+          enabled: true,
+          active_segments: { tip: false, bd_card: false },
+          active_preset_id: 'p1',
+          segment_order: ['bd_card'],
+          segments: { bd_card: { html_lines: ['<p>BD名片按 preset 出现</p>'] } },
+          presets: [{ id: 'p1', name: '默认', segments: { tip: false, bd_card: true } }],
+        },
+      },
+    },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /BD名片按 preset 出现/, '新 preset 必须压过旧 active_segments 残留值');
 });
 
 // ---- 统一表格样式（网站渲染：本就 inline-style，与公众号物理隔离各写各的 renderTable） ----
