@@ -133,7 +133,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v9→v10（2026-06-09）：FoodTalks「什么是」系列公众号底部 BD 名片 / 群二维码开放前台单篇换图入口。
 // v10→v11（2026-06-09）：ft-series 网站「什么是系列」URL 导入结构归一化 + 参考来源/文末署名
 // + 商务合作表格/二维码尺寸修复，覆盖已持久化的 v10 旧版 ft-series-v1。
-const currentBuiltinRuleVersion = 11
+// v11→v12（2026-06-09）：ft-series 网站页脚按成品顺序拆为「商务合作文案 → BD名片 → 相关合作表」，
+// 并触发前端清理旧 ft.footer.* 本地覆盖，避免 tip=true / 缺 bd_card 的旧状态继续污染新文章。
+const currentBuiltinRuleVersion = 12
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{

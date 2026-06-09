@@ -40,17 +40,26 @@ func TestValidateFtSeriesSiteFooterDefaults(t *testing.T) {
 
 	modules := cfg["modules"].(map[string]any)
 	footer := modules["fbif_footer"].(map[string]any)
+	order := anyStringSlice(footer["segment_order"])
 	segments := footer["segments"].(map[string]any)
 	biz := strings.Join(anyStringSlice(segments["biz_coop"].(map[string]any)["html_lines"]), "\n")
 	bd := strings.Join(anyStringSlice(segments["bd_card"].(map[string]any)["html_lines"]), "\n")
+	coopTable := strings.Join(anyStringSlice(segments["coop_table"].(map[string]any)["html_lines"]), "\n")
 	group := strings.Join(anyStringSlice(segments["join_group"].(map[string]any)["html_lines"]), "\n")
 	follow := strings.Join(anyStringSlice(segments["follow_account"].(map[string]any)["html_lines"]), "\n")
 
-	if !strings.Contains(biz, "相关合作") || !strings.Contains(biz, "食品雷达") {
-		t.Fatalf("商务合作段应包含相关合作表，实际: %s", biz)
+	wantOrder := []string{"biz_coop", "bd_card", "coop_table", "join_group", "follow_account", "logo", "more_info"}
+	if strings.Join(order, ",") != strings.Join(wantOrder, ",") {
+		t.Fatalf("什么是系列网站页脚顺序应是商务合作文案→BD名片→相关合作表→后续二维码，实际: %#v", order)
+	}
+	if strings.Contains(biz, "相关合作") || !strings.Contains(biz, "线上名片") {
+		t.Fatalf("商务合作段只应包含标题和两段文案，不能吞掉相关合作表，实际: %s", biz)
 	}
 	if !strings.Contains(bd, assetRefID("ftss_bd_soso")) {
 		t.Fatalf("默认 BD 名片应使用 Soso 素材引用，实际: %s", bd)
+	}
+	if !strings.Contains(coopTable, "相关合作") || !strings.Contains(coopTable, "食品雷达") || !strings.Contains(coopTable, "更多合作，请点击") {
+		t.Fatalf("相关合作表应独立成段并包含成品表格内容，实际: %s", coopTable)
 	}
 	if !strings.Contains(group, "加入FBIF饮料群") || !strings.Contains(group, `width="150" height="150"`) {
 		t.Fatalf("加群段应是饮料群标题 + 150x150 二维码，实际: %s", group)
