@@ -272,7 +272,7 @@ export function extractSeriesAuthorName(elems) {
   for (const e of Array.isArray(elems) ? elems : []) {
     if (!e || e.k !== 'footer-note') continue;
     const text = elemText(e).trim();
-    const m = text.match(/^本文作者\s*[：:]\s*(.+)$/i);
+    const m = text.match(/本文作者\s*[：:]\s*(.+)$/i);
     if (m) return cleanSeriesAuthorName(m[1]);
   }
   return '';

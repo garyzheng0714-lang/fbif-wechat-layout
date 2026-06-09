@@ -135,7 +135,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // + 商务合作表格/二维码尺寸修复，覆盖已持久化的 v10 旧版 ft-series-v1。
 // v11→v12（2026-06-09）：ft-series 网站页脚按成品顺序拆为「商务合作文案 → BD名片 → 相关合作表」，
 // 并触发前端清理旧 ft.footer.* 本地覆盖，避免 tip=true / 缺 bd_card 的旧状态继续污染新文章。
-const currentBuiltinRuleVersion = 12
+// v12→v13（2026-06-09）：FoodTalks「什么是」系列公众号 URL 导入把「图片/数据来源 + 本文作者」
+// 合并成同一文本块时，仍识别为文末尾注并自动匹配作者名片（Ian→Lan）。
+const currentBuiltinRuleVersion = 13
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -511,7 +513,7 @@ func defaultFoodTalksSeriesRuleBehavior() map[string]any {
 			// 文末区块识别（成品实测口径）：「提示：」标签 / 「* …」声明条目 / 文末署名·图源说明
 			"tip_label_regex":   map[string]any{"type": "string", "default": `^提示\s*[：:]\s*$`},
 			"tip_item_regex":    map[string]any{"type": "string", "default": `^\s*[*＊·]`},
-			"footer_note_regex": map[string]any{"type": "string", "default": `^本文作者\s*[：:]|图片均来自|^本文图片来源`},
+			"footer_note_regex": map[string]any{"type": "string", "default": `^本文(?:未标注来源图片/数据均来自|作者\s*[：:]|图片来源)|图片均来自`},
 			// 前置物料剥离：系列文章无「作者：」行，正文以头图为锚点。'firstImage' = 头图之前的
 			// 标题段 + 单格副标题表格都是编辑前置物料（进微信后台标题/摘要），不进正文。
 			"content_start_signal":    map[string]any{"type": "string", "default": "firstImage"},

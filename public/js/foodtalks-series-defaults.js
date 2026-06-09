@@ -59,7 +59,7 @@ export const SERIES_REGEX = Object.freeze({
   // 文末「* …」原创/转载声明条目（成品：15px #888888 斜体）
   tip_item_regex: '^\\s*[*＊·]',
   // 文末署名 / 图源说明（成品：12px #7f7f7f 斜体小字）
-  footer_note_regex: '^本文作者\\s*[：:]|图片均来自|^本文图片来源',
+  footer_note_regex: '^本文(?:未标注来源图片/数据均来自|作者\\s*[：:]|图片来源)|图片均来自',
 });
 
 // ── 前置物料剥离默认（红线下放：behavior.params.content_start_signal / front_matter_scan_limit）──

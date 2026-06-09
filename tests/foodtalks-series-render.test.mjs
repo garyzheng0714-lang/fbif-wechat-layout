@@ -118,6 +118,20 @@ test('processDocx: 暴露 authorName 给上传流程自动补作者名片', () =
   assert.equal(result.authorName, 'Ian');
 });
 
+test('processBlocks: 合并尾注里也要暴露 authorName 给作者名片自动补充', () => {
+  // WHY：真实公众号 URL 导入会把「图片/数据来源」和「本文作者」合并成一个文本块；
+  // 只测 DOCX 独立作者行会漏掉 Ian 名片自动补充。
+  const result = template.processBlocks({
+    title: '橙宝',
+    blocks: [
+      { k: 'img', src: 'https://example.com/head.png' },
+      { k: 'txt', runs: [{ type: 'txt', text: '正文引子。' }] },
+      { k: 'txt', runs: [{ type: 'txt', text: '本文未标注来源图片/数据均来自橙宝 本文作者：Ian, FoodTalks' }] },
+    ],
+  }, { config: {} });
+  assert.equal(result.authorName, 'Ian');
+});
+
 test('render: 文末「提示：」深蓝粗体、「* 声明」#888888 斜体（成品口径）', () => {
   const html = render([
     imgP('h.png', '96%', 1.6),
