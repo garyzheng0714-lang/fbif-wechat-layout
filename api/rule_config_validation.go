@@ -91,6 +91,7 @@ var ruleModuleFields = map[string]map[string]bool{
 		"text_color":         true,
 		"link_color":         true,
 		"muted_color":        true,
+		"justify_paragraphs": true,
 		"tip_title_color":    true,
 		"tip_body_color":     true,
 	},

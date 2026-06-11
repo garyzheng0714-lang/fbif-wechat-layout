@@ -774,6 +774,34 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestRulePresetAdminAcceptsThemeJustifyParagraphs(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "secret")
+	mux := http.NewServeMux()
+	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
+
+	body, _ := json.Marshal(rulePreset{
+		ID:   "theme-justify",
+		Name: "Theme Justify",
+		Config: map[string]any{
+			"schema_version": float64(2),
+			"modules": map[string]any{
+				"theme": map[string]any{
+					"font_size":          "15",
+					"justify_paragraphs": true,
+				},
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Admin-Password", "secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRulePresetAcceptsMoreArticlesDefaultCards(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", "secret")
 	path := filepath.Join(t.TempDir(), "rules.json")
