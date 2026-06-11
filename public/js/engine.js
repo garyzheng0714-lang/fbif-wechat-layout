@@ -320,7 +320,7 @@ function applyRepostTransform(html, isRepost = _isRepost) {
   // 机构名走 account.name（红线下放：fallback 不再写死 FBIF；模板缺省时按账号名动态构造）。
   const acctName = footerBehaviorContext().account.name || 'FBIF';
   const before = footerBehaviorText('footer_original_notice', '* 本文为' + acctName + '原创，欢迎转发朋友圈；');
-  const after = footerBehaviorText('footer_repost_notice', '* 本文为转载，不代表' + acctName + '立场。');
+  const after = footerBehaviorText('footer_repost_notice', '* 本文为转载文章。');
   // footer.html 内嵌存量原创声明（红线下放 behavior.params.footer_stock_original_text，
   // 默认即 footer.html 中的 FBIF 文案；按此字面量在静态页脚里定位替换）。
   const stockOriginal = footerBehaviorParam('footer_stock_original_text', '* 本文为FBIF原创，欢迎转发朋友圈；');

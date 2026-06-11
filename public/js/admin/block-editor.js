@@ -125,27 +125,54 @@ function mountWangEditor(doc, container, textarea, initialHtml, onChange) {
 export function createBlockEditor({ container, module, channel = 'mp', getAssetLibrary, getScope, onChange, onUploadAsset, doc = document }) {
   if (!container) return null;
   ensureStyle(doc);
-  let mod = isObj(module) ? clone(module) : { enabled: false, order: [], blocks: {}, presets: [] };
-  if (!isObj(mod.blocks)) mod.blocks = {};
-  if (!Array.isArray(mod.order)) mod.order = Object.keys(mod.blocks);
+  let mod = isObj(module) ? clone(module) : { schema_version: 2, enabled: false, presets: [] };
   const expanded = new Set();
   let dragId = '';
   let activeIdx = 0; // 双预设（FBIF 原创/转载）：当前正在编辑哪一套
 
+  function normalizePreset(p, idx) {
+    if (!isObj(p.blocks)) p.blocks = {};
+    if (!Array.isArray(p.order)) p.order = Object.keys(p.blocks);
+    if (!String(p.id || '').trim()) p.id = 'preset_' + (idx + 1);
+  }
+  function isV2Module(m) { return Number(m && m.schema_version) >= 2 && Array.isArray(m && m.presets); }
+  function normalizeModuleShape() {
+    if (isV2Module(mod)) {
+      mod.schema_version = 2;
+      delete mod.blocks;
+      delete mod.order;
+      delete mod.gap;
+      mod.presets.forEach((p, i) => {
+        if (!isObj(p)) {
+          mod.presets[i] = { id: 'preset_' + (i + 1), name: '预设' + (i + 1), order: [], blocks: {} };
+          return;
+        }
+        normalizePreset(p, i);
+      });
+      if (activeIdx >= mod.presets.length) activeIdx = 0;
+      return;
+    }
+    if (!isObj(mod.blocks)) mod.blocks = {};
+    if (!Array.isArray(mod.order)) mod.order = Object.keys(mod.blocks);
+  }
+  normalizeModuleShape();
+
   // 双套结构（schema_version>=2，原创/转载分两套放进 presets[]，顶层 blocks/order 为空）vs 单套（顶层 blocks/order）。
   // layer() 返回「当前编辑层」的 {blocks, order} 引用——所有增删改读写都走它，于是同一套逻辑既能编单套（系列），
   // 也能编双套里选中的那一套（FBIF 原创/转载切换）。
-  function isV2() { return Number(mod.schema_version) >= 2 && Array.isArray(mod.presets); }
+  function isV2() { return isV2Module(mod); }
   function activePreset() { const ps = mod.presets || []; return ps[activeIdx] || ps[0] || null; }
   function layer() {
+    normalizeModuleShape();
     if (isV2()) {
       const p = activePreset();
-      if (p) { if (!isObj(p.blocks)) p.blocks = {}; if (!Array.isArray(p.order)) p.order = Object.keys(p.blocks); return p; }
+      if (p) { normalizePreset(p, activeIdx); return p; }
+      return { blocks: {}, order: [] };
     }
     return mod;
   }
 
-  function emit() { if (onChange) onChange(clone(mod)); }
+  function emit() { normalizeModuleShape(); if (onChange) onChange(clone(mod)); }
 
   function setMaster(v) { mod.enabled = v; emit(); render(); }
   function setGap(v) { mod.gap = v ? 'blank_line' : 'none'; emit(); render(); }
@@ -376,7 +403,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
     const adv = doc.createElement('details'); adv.className = 'be-adv';
     const sum = doc.createElement('summary'); sum.textContent = '高级 · 原始 JSON（一般无需改）'; adv.appendChild(sum);
     const ta = doc.createElement('textarea'); ta.value = JSON.stringify(mod, null, 2);
-    ta.onchange = () => { try { const parsed = JSON.parse(ta.value); if (isObj(parsed)) { mod = parsed; if (!isObj(mod.blocks)) mod.blocks = {}; if (!Array.isArray(mod.order)) mod.order = Object.keys(mod.blocks); activeIdx = 0; emit(); render(); } } catch (e) { ta.style.borderColor = 'var(--fs-danger,#f54a45)'; } };
+    ta.onchange = () => { try { const parsed = JSON.parse(ta.value); if (isObj(parsed)) { mod = parsed; activeIdx = 0; normalizeModuleShape(); emit(); render(); } } catch (e) { ta.style.borderColor = 'var(--fs-danger,#f54a45)'; } };
     adv.appendChild(ta);
     wrap.appendChild(adv);
 
@@ -385,7 +412,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
 
   render();
   return {
-    getModule: () => clone(mod),
+    getModule: () => { normalizeModuleShape(); return clone(mod); },
     destroy: () => { container.innerHTML = ''; },
   };
 }

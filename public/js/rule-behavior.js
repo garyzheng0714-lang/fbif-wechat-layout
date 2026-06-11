@@ -30,7 +30,7 @@ export const DEFAULT_BEHAVIOR = Object.freeze({
     author_line: '作者：{{ article.author }}',
     source_line: '来源：{{ article.source }}',
     footer_original_notice: '* 本文为{{ account.name }}原创，欢迎转发朋友圈；',
-    footer_repost_notice: '* 本文为转载，不代表{{ account.name }}立场。',
+    footer_repost_notice: '* 本文为转载文章。',
   }),
   output_contracts: Object.freeze({
     author_line: Object.freeze({ max_length: 80, allow_html: false }),

@@ -9,7 +9,7 @@ import { uploadAssetFile } from './uploader.js';
 export function bottomBlocksFromPreset(preset) {
   const raw = preset && preset.config && preset.config.modules && preset.config.modules.bottom_blocks;
   if (raw && typeof raw === 'object') return JSON.parse(JSON.stringify(raw));
-  return { enabled: false, order: [], blocks: {}, presets: [] };
+  return { schema_version: 2, enabled: false, presets: [] };
 }
 
 // createBlockEditorBinder 管理后台区块编辑器实例的挂载/销毁。

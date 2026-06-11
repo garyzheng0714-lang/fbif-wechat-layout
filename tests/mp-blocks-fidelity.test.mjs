@@ -46,7 +46,7 @@ function fbifV2Module() {
     schema_version: 2, enabled: true, active_preset_id: 'original',
     presets: [
       { id: 'original', name: '原创', order, blocks: shared(textB('* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）', false, 15, '#888888', 'left')) },
-      { id: 'repost', name: '转载', order, blocks: shared(textB('* 本文为转载，不代表FBIF立场。\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）', false, 15, '#888888', 'left')) },
+      { id: 'repost', name: '转载', order, blocks: shared(textB('* 本文为转载文章。\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）', false, 15, '#888888', 'left')) },
     ],
   };
 }
@@ -73,7 +73,7 @@ test('v2 FBIF 原创预设：顺序/三条文案/图宽661/粗体/间距复刻 f
 
 test('v2 FBIF 转载预设：提示正文切转载文案（两条），其余块一致', () => {
   const out = renderBottomBlocksHtml(fbifV2Module(), undefined, mpBlockRenderers(assetLibrary, 'fbif'), { presetId: 'repost' });
-  assert.match(out, /本文为转载，不代表FBIF立场/);
+  assert.match(out, /本文为转载文章。/);
   assert.ok(!out.includes('本文为FBIF原创'), '转载预设不应出现原创文案');
   assert.ok(!out.includes('转载请在后台回复'), '转载预设不含原创第二条');
   assert.ok(out.includes('src="/assets/fbif/bobo-card.webp"'), '名片图两套预设一致');

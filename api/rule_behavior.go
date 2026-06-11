@@ -56,7 +56,7 @@ func defaultRuleBehavior() map[string]any {
 			"author_line":            "作者：{{ article.author }}",
 			"source_line":            "来源：{{ article.source }}",
 			"footer_original_notice": "* 本文为{{ account.name }}原创，欢迎转发朋友圈；",
-			"footer_repost_notice":   "* 本文为转载，不代表{{ account.name }}立场。",
+			"footer_repost_notice":   "* 本文为转载文章。",
 		},
 		"output_contracts": map[string]any{
 			"author_line": map[string]any{"max_length": float64(80), "allow_html": false},

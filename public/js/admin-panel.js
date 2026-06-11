@@ -754,7 +754,7 @@ export function initAdminPanel(options = {}) {
       const oc = (presetByID(doc, preset.id) || {}).config || {};
       const ocModules = oc.modules || {};
       configDoc.modules.asset_library = JSON.parse(JSON.stringify(workingAssets || ocModules.asset_library || defaultAssetLibraryData()));
-      configDoc.modules.bottom_blocks = JSON.parse(JSON.stringify(workingBottomBlocks || ocModules.bottom_blocks || { enabled: false, order: [], blocks: {}, presets: [] }));
+      configDoc.modules.bottom_blocks = JSON.parse(JSON.stringify(workingBottomBlocks || ocModules.bottom_blocks || { schema_version: 2, enabled: false, presets: [] }));
       if (isFtDefaultPack()) {
         // 保留 buildRuleConfigDocument 丢弃的网站结构化字段（顶层 image、mctoc、fbif_footer）
         if (oc.image) configDoc.image = oc.image;

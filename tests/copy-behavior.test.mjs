@@ -109,6 +109,7 @@ test('footer original and repost notices come from behavior rules', async () => 
   assert.match(engine, /footer_repost_notice/);
   assert.match(engine, /renderBehaviorTemplate/);
   assert.doesNotMatch(engine, /const after = '\* 本文为转载，不代表FBIF立场。'/);
+  assert.match(engine, /\* 本文为转载文章。/);
 });
 
 test('deploy writes rule admin password to production env', async () => {

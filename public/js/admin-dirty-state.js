@@ -4,7 +4,7 @@ import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
 import { assetLibraryFromPreset, defaultAssetLibraryData } from './admin-asset-data.js';
 import { bottomBlocksFromPreset } from './admin-block-data.js';
 
-const EMPTY_BOTTOM_BLOCKS = { enabled: false, order: [], blocks: {}, presets: [] };
+const EMPTY_BOTTOM_BLOCKS = { schema_version: 2, enabled: false, presets: [] };
 const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 export function adminDirtyCount(state) {

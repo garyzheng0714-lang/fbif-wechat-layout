@@ -56,6 +56,29 @@ test('切换到转载 tab → active 切换 + 渲染转载预设；编辑写回�
   assert.deepEqual(orig.order, ['tip', 'img'], '原创预设不受影响（不串台）');
 });
 
+test('V2 保存输出不携带已退役的顶层 blocks/order/gap', () => {
+  const doc = mkDoc();
+  const c = mount(doc);
+  const polluted = JSON.parse(JSON.stringify(V2));
+  polluted.blocks = { ghost: { type: 'text', fields: { content: '旧字段' } } };
+  polluted.order = ['ghost'];
+  polluted.gap = 'blank_line';
+  let captured = null;
+  const editor = createBlockEditor({ container: c, module: polluted, channel: 'mp', onChange: (m) => { captured = m; }, doc });
+  const initial = editor.getModule();
+  assert.equal('blocks' in initial, false, 'getModule 不应输出顶层 blocks');
+  assert.equal('order' in initial, false, 'getModule 不应输出顶层 order');
+  assert.equal('gap' in initial, false, 'getModule 不应输出顶层 gap');
+
+  c.querySelector('.be-del').click();
+  assert.ok(captured, '编辑后应触发 onChange');
+  assert.equal('blocks' in captured, false, 'onChange 不应输出顶层 blocks');
+  assert.equal('order' in captured, false, 'onChange 不应输出顶层 order');
+  assert.equal('gap' in captured, false, 'onChange 不应输出顶层 gap');
+  assert.equal(captured.schema_version, 2);
+  assert.ok(Array.isArray(captured.presets), 'V2 数据必须留在 presets[] 内');
+});
+
 test('v1 单套（系列）路径不变：直接渲染顶层块、无预设 tab、有空行开关', () => {
   const doc = mkDoc();
   const c = mount(doc);
