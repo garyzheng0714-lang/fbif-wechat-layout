@@ -60,6 +60,8 @@ export const SERIES_REGEX = Object.freeze({
   tip_item_regex: '^\\s*[*＊·]',
   // 文末署名 / 图源说明（成品：12px #7f7f7f 斜体小字）
   footer_note_regex: '^本文(?:未标注来源图片/数据均来自|作者\\s*[：:]|图片来源)|图片均来自',
+  // 商务合作导联行（2026-06-11 飞书反馈：检测到该句式整行替换为 biz_coop_replacement 文案）
+  biz_coop_replace_regex: '^\\s*商务合作对接请点击',
 });
 
 // ── 前置物料剥离默认（红线下放：behavior.params.content_start_signal / front_matter_scan_limit）──
@@ -74,6 +76,8 @@ export const SERIES_FRONTMATTER = Object.freeze({
 // 推荐阅读块下方补充说明（规范《二·七·推荐阅读》：14px 灰斜体）。须与 api/rule_defaults.go 一致。
 export const SERIES_TEMPLATES = Object.freeze({
   recommended_reading_note: '查看更多推荐阅读，请拉至文末点击“阅读原文”访问FoodTalks网站',
+  // 商务合作导联行替换文案；{contact_section} 自动取文中「联系XX」标题（2026-06-11 飞书反馈）。
+  biz_coop_replacement: '如有合作意向，请移至“{contact_section}”获取联系方式',
 });
 
 // 图注关键词（紧跟图片、或含来源前缀的短段 → 12px 灰居中图注）。

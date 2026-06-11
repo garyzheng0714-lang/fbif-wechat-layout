@@ -137,7 +137,10 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 并触发前端清理旧 ft.footer.* 本地覆盖，避免 tip=true / 缺 bd_card 的旧状态继续污染新文章。
 // v12→v13（2026-06-09）：FoodTalks「什么是」系列公众号 URL 导入把「图片/数据来源 + 本文作者」
 // 合并成同一文本块时，仍识别为文末尾注并自动匹配作者名片（Ian→Lan）。
-const currentBuiltinRuleVersion = 13
+// v13→v14（2026-06-11）：网站渠道按飞书反馈批次修订——图宽规则改纵图(含1:1)长边375/二维码150
+// （image.portrait_px=375 + qr_px/qr_max_natural_px），footer_note_regex 增收「本文未标注来源的
+// 图片均来自」「*注：」变体，新增 biz_coop_line_regex（商务合作导联行 14px 斜体灰）。
+const currentBuiltinRuleVersion = 14
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -248,9 +251,11 @@ func defaultFoodTalksSiteRuleConfig() map[string]any {
 		"author_font_size": "14",
 		"tip_font_size":    "14",
 		"image": map[string]any{
-			"width":        600,
-			"portrait_px":  400, // 竖图宽度（高>宽）
-			"landscape_px": 600, // 横图宽度
+			"width":             600,
+			"portrait_px":       375, // 纵图（高≥宽，含1:1）长边（高）目标值；宽按比例（2026-06-11 反馈问题十一）
+			"landscape_px":      600, // 横图宽度
+			"qr_px":             150, // 二维码（近正方形小图）输出宽（2026-06-11 反馈问题十五）
+			"qr_max_natural_px": 500, // 近正方形图原始宽 ≤ 此值才按二维码处理
 		},
 		"modules": map[string]any{
 			"mctoc":         map[string]any{"enabled": true},
@@ -331,8 +336,10 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 			"image_caption_prefix_regex": map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\s*[：:\s\d]`},
 			"docx_preamble_author_regex": map[string]any{"type": "string", "default": `(?i)^[\s　]*(作者|Author)\s*[:：]`},
 			"caption_lead_regex":         map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|Source|Photo|Image|Credit)\s*[：:]`},
-			"footer_note_regex":          map[string]any{"type": "string", "default": `^(?:本文(?:未标注来源图片/数据均来自|作者\s*[：:]|图片来源)|图片均来自)`},
+			"footer_note_regex":          map[string]any{"type": "string", "default": `^(?:本文(?:未标注来源|作者\s*[：:]|图片来源)|图片均来自|[*＊]\s*注[：:])`},
 			"repost_source_regex":        map[string]any{"type": "string", "default": `^来源[：:]\s*(.+)$`},
+			// 商务合作导联行（62139/62303 成品：14px 斜体、文本 #7f7f7f、链接保留）——2026-06-11 反馈问题九。
+			"biz_coop_line_regex":        map[string]any{"type": "string", "default": `^\s*(?:商务合作对接请点击|如有合作意向)`},
 		},
 		// 网站识别词表/标记列表（红线下放；客户端读 lists.<key>，缺省降级同值 const）。
 		"lists": map[string]any{
@@ -499,6 +506,8 @@ func defaultFoodTalksSeriesRuleBehavior() map[string]any {
 		"templates": map[string]any{
 			"recommended_reading_note": "查看更多推荐阅读，请拉至文末点击“阅读原文”访问FoodTalks网站",
 			"ref_header_label":         "参考来源：",
+			// 商务合作导联行替换文案；{contact_section} 自动取文中「联系XX」标题（2026-06-11 飞书反馈）。
+			"biz_coop_replacement": "如有合作意向，请移至“{contact_section}”获取联系方式",
 		},
 		"params": map[string]any{
 			"level1_regex":              map[string]any{"type": "string", "default": `^[一二三四五六七八九十百零]+\s*[、.．]\s*`},
@@ -514,6 +523,8 @@ func defaultFoodTalksSeriesRuleBehavior() map[string]any {
 			"tip_label_regex":   map[string]any{"type": "string", "default": `^提示\s*[：:]\s*$`},
 			"tip_item_regex":    map[string]any{"type": "string", "default": `^\s*[*＊·]`},
 			"footer_note_regex": map[string]any{"type": "string", "default": `^本文(?:未标注来源图片/数据均来自|作者\s*[：:]|图片来源)|图片均来自`},
+			// 商务合作导联行（检测到该句式整行替换为 biz_coop_replacement 文案，2026-06-11 飞书反馈）
+			"biz_coop_replace_regex": map[string]any{"type": "string", "default": `^\s*商务合作对接请点击`},
 			// 前置物料剥离：系列文章无「作者：」行，正文以头图为锚点。'firstImage' = 头图之前的
 			// 标题段 + 单格副标题表格都是编辑前置物料（进微信后台标题/摘要），不进正文。
 			"content_start_signal":    map[string]any{"type": "string", "default": "firstImage"},

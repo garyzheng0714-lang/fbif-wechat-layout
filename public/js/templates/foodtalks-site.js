@@ -236,6 +236,24 @@ function collectSeriesTocSections(elems) {
   return sections;
 }
 
+// 目录章节查询（精确 key + 前缀宽松匹配）。公众号源稿目录条目与正文标题常有微小措辞
+// 差异（上海艾录文实测：目录「二、什么是上海艾录微发泡片材？」vs 正文标题「什么是上海
+// 艾录微发泡片材方案？」），精确匹配失败会导致分节图不删、标题编号缺失、甚至标题被
+// img+h 分支误转图注（2026-06-11 飞书反馈批次定位）。宽松规则：去尾部标点后一方是
+// 另一方前缀且 ≥6 字（startsWith 单向包含，避免短词误撞）。
+function lookupTocPrefix(sections, key) {
+  if (!key || !sections || !sections.size) return '';
+  if (sections.has(key)) return sections.get(key);
+  const norm = k => String(k || '').replace(/[？?！!。.：:]+$/, '');
+  const nk = norm(key);
+  if (nk.length < 6) return '';
+  for (const [k, v] of sections) {
+    const a = norm(k);
+    if (a.length >= 6 && (a.startsWith(nk) || nk.startsWith(a))) return v;
+  }
+  return '';
+}
+
 function prefixHeadingRuns(runs, prefix) {
   const out = (runs || []).map(r => ({ ...r }));
   const idx = out.findIndex(r => r && r.type === 'txt' && String(r.text || '').trim());
@@ -285,13 +303,16 @@ function normalizeWhatIsSeriesElems(elems, config = {}) {
       const prefix = sectionNumberPrefix(text);
       if ((e.k === 'h' || e.k === 'p') && prefix) {
         tocItemCount += 1;
-        out.push(e.k === 'p' ? { k: 'h', level: 2, runs: e.runs } : e);
+        // 目录条目保持普通段落（62303 成品：目录区仅「目录」二字是标题，条目是 16px
+        // 正文文本）。标记交给 markTocEntries 统一打（飞书反馈问题十，2026-06-11 推翻
+        // 旧「目录条目升级 h2」行为）。
+        out.push(e);
         continue;
       }
       if (tocItemCount > 0) inToc = false;
     }
     const nextText = next && next.k === 'h' ? runsToPlain(next.runs) : '';
-    const tocPrefix = nextText ? tocSections.get(normalizeSectionTitleKey(nextText)) : '';
+    const tocPrefix = nextText ? lookupTocPrefix(tocSections, normalizeSectionTitleKey(nextText)) : '';
     const isSectionDivider = hasTocSections ? !!tocPrefix : isWideSectionDivider(e);
     if (isSectionDivider && next && next.k === 'h') {
       sectionNo += 1;
@@ -307,6 +328,33 @@ function normalizeWhatIsSeriesElems(elems, config = {}) {
       continue;
     }
     out.push(e);
+  }
+  return out;
+}
+
+// 目录区标记：「目录」标题后的连续编号条目（「一、…」「六、参考来源」）是导航文本，
+// 不是标题也不是参考来源段头（62303 成品：目录条目为 16px 普通文本、条目间无空行）。
+// 打标记后：promoteHeuristicHeadings 跳过（skipHeadingPromote）、behavior 阶段 3 跳过
+// （tocEntry，避免「六、参考来源」被剥编号后误判 ref-header）、render 紧凑排列。
+// 飞书反馈问题十/十六（2026-06-11）。
+function markTocEntries(elems) {
+  const out = (elems || []).slice();
+  let tocIdx = -1;
+  for (let i = 0; i < out.length; i++) {
+    const e = out[i];
+    if (!e || (e.k !== 'h' && e.k !== 'p')) continue;
+    const text = e.runs ? runsToPlain(e.runs) : (e.text || '');
+    if (text.trim() === '目录') { tocIdx = i; break; }
+  }
+  if (tocIdx < 0) return out;
+  for (let i = tocIdx + 1; i < out.length; i++) {
+    const e = out[i];
+    // 仅普通段落可为目录条目；遇 h（如 series 归一化已升级的正文编号标题）/img 即正文开始
+    if (!e || e.k !== 'p') break;
+    const text = (e.runs ? runsToPlain(e.runs) : (e.text || '')).trim();
+    if (!text) continue; // 目录条目之间的空段不结束目录区
+    if (!sectionNumberPrefix(text)) break;
+    out[i] = { ...e, tocEntry: true, skipHeadingPromote: true };
   }
   return out;
 }
@@ -332,6 +380,12 @@ function genMctocId() {
   return 'mctoc_' + Math.random().toString(36).slice(2, 14);
 }
 
+// 次级标题编号括号半角化：「（一）包装减量…」→「(一)包装减量…」（62303 成品 h3 实测
+// 全部为英文括号且括号后无空格；飞书反馈问题十-2）。仅处理行首编号括号，正文括号不动。
+function normalizeSubheadingParens(text) {
+  return String(text || '').replace(/^[（(]\s*([一二三四五六七八九十]+|[0-9]+)\s*[)）]\s*/, '($1)');
+}
+
 function renderHeading(level, text, config = {}) {
   // 基石 news/62285 的标题是 <h2 style="text-align: justify;">…</h2>；id="mctoc_xxx" 是
   // FoodTalks 后台生成目录时自动注入的锚点，默认不输出（用户 2026-05-30 确认），仅在
@@ -339,7 +393,8 @@ function renderHeading(level, text, config = {}) {
   const mctocEnabled = !!(config.modules && config.modules.mctoc && config.modules.mctoc.enabled);
   const idAttr = mctocEnabled ? ` id="${genMctocId()}"` : '';
   const tag = level === 3 ? 'h3' : 'h2';
-  return `<${tag}${idAttr} style="text-align: justify;">${esc(text)}</${tag}>`;
+  const t = level === 3 ? normalizeSubheadingParens(text) : text;
+  return `<${tag}${idAttr} style="text-align: justify;">${esc(t)}</${tag}>`;
 }
 
 function renderParagraph(runs, elem = {}, config = {}) {
@@ -361,11 +416,14 @@ function renderParagraph(runs, elem = {}, config = {}) {
 function renderImage(src, alt, naturalWidth, naturalHeight, config = {}) {
   const safeSrc = escAttr(src || '');
   const safeAlt = escAttr(alt || '');
-  // 图宽规则（红线下放：config.image.portrait_px/landscape_px，缺省降级 400/600）。
+  // 图宽规则（红线下放：config.image.portrait_px/landscape_px/qr_px/qr_max_natural_px，
+  // 缺省降级 375/600/150/500——2026-06-11 飞书反馈问题十一/十五口径）。
   const imgCfg = (config && config.image) || {};
   const width = adaptiveImageWidth(naturalWidth, naturalHeight, {
-    portrait: Number(imgCfg.portrait_px) || 400,
+    portrait: Number(imgCfg.portrait_px) || 375,
     landscape: Number(imgCfg.landscape_px) || 600,
+    qr: Number(imgCfg.qr_px) || 150,
+    qrMaxNatural: Number(imgCfg.qr_max_natural_px) || 500,
   });
   // mmbiz 等公众号图带防盗链：浏览器若发 Referer 头会被换成"未经允许不可引用"
   // 占位图。referrerpolicy="no-referrer" 让加载图片时不发 Referer，绕过防盗链。
@@ -489,12 +547,35 @@ function render(elems, config = {}) {
     const e = elems[i];
     endedWithTip = false;
     if (e.k === 'h') {
-      // 标题前 1 个空行。p 分支已在每段后留空行，这里避免再叠加成双空行。
-      if (!prevWasHeading && lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
+      // 二级标题前 1 个空行；三级标题（(一)…）紧贴上文（62303 后台源码：h3 前无空行
+      // div，间距由后台 CSS margin 提供——飞书反馈问题十/十二核对）。p 分支已在每段后
+      // 留空行，这里避免再叠加成双空行。
+      const lv = e.level === 3 ? 3 : 2;
+      if (lv === 3) {
+        // h3 紧贴：吃掉 p 分支刚补的尾空行，对齐 62303「正文段→h3 直接相连」结构
+        if (lines.length > 0 && lines[lines.length - 1] === BLANK_LINE) lines.pop();
+      } else if (!prevWasHeading && lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
         lines.push(BLANK_LINE);
       }
-      lines.push(renderHeading(e.level === 3 ? 3 : 2, runsToPlain(e.runs), config));
+      lines.push(renderHeading(lv, runsToPlain(e.runs), config));
       prevWasHeading = true;
+      prevWasStandaloneLink = false;
+      continue;
+    }
+    if (e.k === 'coop-line') {
+      // 商务合作导联行（62139/62303 成品逐元素核对）：
+      // <em><span 14px><span #7f7f7f>文本</span><a …>链接</a></span></em>
+      const coopFs = cfgNum(config, 'footer_note_font_size', 14);
+      const coopColor = cfgColor(config, 'footer_note_color', (config && config.muted_color) || '#7f7f7f');
+      const inner = (e.runs || []).filter(r => r.type !== 'img').map(r => {
+        if (r.type === 'link' && /^https?:\/\//i.test(r.href || '')) {
+          return '<a href="' + escAttr(r.href) + '" target="_blank" rel="noopener">' + esc(r.text) + '</a>';
+        }
+        return `<span style="color: ${coopColor};">${esc(normalizeChinesePunctuation(r.text || ''))}</span>`;
+      }).join('');
+      lines.push(`<p><em><span style="font-size: ${coopFs}px;">${inner}</span></em></p>`);
+      lines.push(BLANK_LINE);
+      prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
     }
@@ -520,6 +601,14 @@ function render(elems, config = {}) {
         `<em><span style="font-size: ${noteFs}px; color: ${noteColor};">${esc(t)}</span></em>`
       );
       if (parts.length) {
+        // 62303 成品口径：组前 1 空行（[4] 末条 → 空行 → 本文未标注…），组内连续行
+        // 之间无空行（本文未标注/本文作者两行紧贴），组尾 1 空行。
+        const prevIsNote = i > 0 && elems[i - 1] && elems[i - 1].k === 'footer-note';
+        const last = lines[lines.length - 1];
+        if (prevIsNote && last === BLANK_LINE) lines.pop();
+        else if (!prevIsNote && lines.length > 0 && last !== BLANK_LINE && last !== CENTER_BLANK_LINE) {
+          lines.push(BLANK_LINE);
+        }
         lines.push(`<p>${parts.join('<br>')}</p>`);
         lines.push(BLANK_LINE);
       }
@@ -632,8 +721,10 @@ function render(elems, config = {}) {
     lines.push(renderParagraph(e.runs || [], e, config));
     const next = elems[i + 1];
     const compactContactPair = e.contactInfo && next && next.contactInfo && !next.blankBefore;
+    // 目录条目之间不插空行（62303 成品：目录区条目紧密相连，仅区尾 1 空行）。
+    const compactTocPair = e.tocEntry && next && next.tocEntry;
     // 如果当前是独立链接 + 上一段也是独立链接，不插空行；联系信息块内部同理保持紧凑。
-    if (!(standalone && prevWasStandaloneLink) && !compactContactPair) {
+    if (!(standalone && prevWasStandaloneLink) && !compactContactPair && !compactTocPair) {
       lines.push(BLANK_LINE);
     }
     prevWasStandaloneLink = standalone;
@@ -814,7 +905,10 @@ function classifyBlocks(data) {
       continue;
     }
     if (b.k === 'h') {
-      elems.push({ k: 'h', level: 2, runs: [{ type: 'txt', text: b.text || '' }], ...meta(b) });
+      // 「（一）…」编号标题是次级标题 → h3（62303 成品：(一)/(二) 全部 heading-3）。
+      const hText = b.text || '';
+      const hLevel = /^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]/.test(hText.trim()) ? 3 : 2;
+      elems.push({ k: 'h', level: hLevel, runs: [{ type: 'txt', text: hText }], ...meta(b) });
       continue;
     }
     if (b.k === 'cap') {
@@ -853,7 +947,7 @@ export default {
 
   processDocx({ paragraphs, imgCache, config = {}, isRepost = false }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache, config);
-    const normalized = applySeriesContactLayout(normalizeWhatIsSeriesElems(elems, config), config);
+    const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
     const behaved = applyFoodTalksBehavior(normalized, config, { isRepost });
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
@@ -868,7 +962,7 @@ export default {
   async processMd(text, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
-    const normalized = applySeriesContactLayout(normalizeWhatIsSeriesElems(elems, config), config);
+    const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
     const behaved = applyFoodTalksBehavior(normalized, config, { isRepost: !!(opts && opts.isRepost), title });
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     return {
@@ -883,7 +977,7 @@ export default {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
     // data.source 是后端抓取的原文 URL（公众号链接），用于提示声明的标题超链接。
-    const normalized = applySeriesContactLayout(normalizeWhatIsSeriesElems(elems, config), config);
+    const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
     const behaved = applyFoodTalksBehavior(normalized, config, {
       isRepost: !!(opts && opts.isRepost),
       title,

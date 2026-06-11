@@ -267,6 +267,7 @@ const {
   bindRailDivider,
   bindUrlImportShortcuts,
   createUrlImportHandler,
+  extractSiteSummary,
   foodTalksFetchErrorMessage,
   pasteTargetsForChannel,
   resolveInitialRulePackID,
@@ -948,6 +949,13 @@ window.fetchArticle = createUrlImportHandler({
   getAccountID: () => activeRulePack.id,
   errorMessage: foodTalksFetchErrorMessage,
   onArticleUrl(url) { window._currentArticleUrl = url; },
+  // 摘要自动填充（飞书反馈问题七）：原文开头短导语 → 预览【摘要】框，并从正文流移除
+  // （62139 成品：摘要句不在正文重复）。提取不到合适导语时保持占位，由编辑自填。
+  onBlocks(blocks) {
+    const summary = extractSiteSummary(blocks, { consume: true });
+    const summaryEl = document.getElementById('ftSummary');
+    if (summaryEl) summaryEl.textContent = summary || FOODTALKS_PREVIEW_META.summary;
+  },
 });
 
 // ---- Keyboard shortcuts ----

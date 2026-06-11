@@ -417,3 +417,41 @@ test('foodTalksFetchErrorMessage keeps internal details out of the UI', () => {
     '文章内容为空',
   );
 });
+
+// ── 摘要自动提取（2026-06-11 飞书反馈问题七，成品 news/62139 实测）──
+test('extractSiteSummary：开头短导语 → 摘要（62139 橙宝文实测）', async () => {
+  const { extractSiteSummary } = await import('../public/js/editor-shell.js');
+  const blocks = [
+    { k: 'img', src: 'https://mmbiz.qpic.cn/head.png' },
+    { k: 'cap', text: '橙宝果汁' },
+    { k: 'txt', runs: [{ type: 'txt', text: '1500多家星级酒店的选择，高端酒店果汁品类市占率近60%' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '后续正文段。' }] },
+  ];
+  assert.equal(extractSiteSummary(blocks), '1500多家星级酒店的选择，高端酒店果汁品类市占率近60%');
+});
+
+test('extractSiteSummary：首段过长（62303 上海艾录文，摘要为编辑手写）→ 空串不自动填', async () => {
+  const { extractSiteSummary } = await import('../public/js/editor-shell.js');
+  const blocks = [
+    { k: 'img', src: 'https://mmbiz.qpic.cn/head.png' },
+    { k: 'txt', runs: [{ type: 'txt', text: '中东冲突波及全球石化产业链，自2026年2月以来，国内塑料原料价格普遍上涨20%-50%，并迅速传导至下游塑料包装。在这一背景下，塑料包装如何少用一点材料，不仅关乎可持续性，更影响供应链稳定性。' }] },
+  ];
+  assert.equal(extractSiteSummary(blocks), '');
+});
+
+test('extractSiteSummary：开头直接是标题 → 空串', async () => {
+  const { extractSiteSummary } = await import('../public/js/editor-shell.js');
+  assert.equal(extractSiteSummary([{ k: 'h', text: '一、第一章' }, { k: 'txt', runs: [{ type: 'txt', text: '短句' }] }]), '');
+});
+
+test('extractSiteSummary consume：命中段从 blocks 原地移除（62139：摘要句不进正文）', async () => {
+  const { extractSiteSummary } = await import('../public/js/editor-shell.js');
+  const blocks = [
+    { k: 'img', src: 'https://mmbiz.qpic.cn/head.png' },
+    { k: 'txt', runs: [{ type: 'txt', text: '短导语摘要句' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '后续正文段。' }] },
+  ];
+  assert.equal(extractSiteSummary(blocks, { consume: true }), '短导语摘要句');
+  assert.equal(blocks.length, 2);
+  assert.ok(!blocks.some(b => (b.runs || []).some(r => r.text === '短导语摘要句')));
+});

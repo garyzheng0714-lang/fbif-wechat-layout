@@ -86,7 +86,7 @@ test('foodtalks-site imports heading detection from heading-detect.js', () => {
 // h2/h3 输出契约（金标准 news/62285）：<h2 style="text-align: justify;">…</h2>，
 // 默认不带 id（id 仅在 mctoc 模块开启时注入）。
 test('foodtalks-site renderHeading outputs text-align: justify and conditional mctoc id', () => {
-  assert.match(templateSource, /style="text-align: justify;">\$\{esc\(text\)\}/);
+  assert.match(templateSource, /style="text-align: justify;">\$\{esc\(t\)\}/);
   assert.match(templateSource, /mctocEnabled\s*\?\s*` id="\$\{genMctocId\(\)\}"`/);
 });
 

@@ -450,3 +450,73 @@ test('elems 数组不被原地修改（pure function）', () => {
   applyFoodTalksBehavior(elems, DEFAULT_CONFIG);
   assert.equal(JSON.stringify(elems), snapshot, 'applyFoodTalksBehavior 不能原地修改输入');
 });
+
+// ── 2026-06-11 飞书反馈批次（依据成品 news/62303 / 62139 逐元素核对）──
+
+// 反馈问题十六根因：正文「联系XX」板块里的「（扫码关注上海艾录）」图注撞上导流标记
+// `扫码.{0,4}关注`，导致其后的参考来源/文末署名整块被切。守卫：切点后仍有参考来源
+// 段头 → 跳过该切点，真正的导流尾（参考来源之后）照常切。
+test('切尾守卫：正文联系区「扫码关注XX」后仍有参考来源 → 不在此切（62303 上海艾录文）', () => {
+  const elems = [
+    p('正文段'),
+    h(2, '联系上海艾录'),
+    p('微信公众号'),
+    img('https://mmbiz.qpic.cn/wechat-qr.png'),
+    cap('（扫码关注上海艾录）'),
+    p('商务合作对接人联系方式'),
+    p('彭辉'),
+    h(2, '参考来源'),
+    p('[1] 来源 A'),
+    p('本文未标注来源的图片均来自上海艾录'),
+    p('本文作者：Isaac, FoodTalks'),
+    p('提示：'),
+    p('* 本文为FoodTalks原创首发，欢迎转发朋友圈。'),
+    p('关注公众号'),
+    p('加入微信群'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, REPOST);
+  const texts = out.map(e => (e.runs || []).map(r => r.text).join('') || e.text || e.k);
+  assert.ok(out.some(e => e.k === 'cap' && (e.runs || []).map(r => r.text).join('').includes('扫码关注上海艾录')),
+    '联系区扫码图注应保留');
+  assert.ok(texts.some(t => String(t).includes('彭辉')), '商务对接人名片应保留');
+  assert.ok(out.some(e => e.k === 'ref-item'), '参考来源条目应保留');
+  assert.ok(out.some(e => e.k === 'footer-note'), '文末署名应保留');
+  // 真正的导流尾（参考来源之后的提示页脚/关注公众号/加入微信群）仍要切掉
+  assert.ok(!texts.some(t => String(t).includes('加入微信群')), '参考来源后的导流尾仍应切除');
+  assert.ok(!texts.some(t => String(t) === '关注公众号'), '关注公众号导流仍应切除');
+});
+
+// 反馈问题十/十六：目录条目（tocEntry 标记）不得被剥编号后误判为参考来源段头。
+test('目录条目「六、参考来源」带 tocEntry 标记时不被识别为 ref-header', () => {
+  const elems = [
+    h(2, '目录'),
+    { k: 'p', runs: [{ type: 'txt', text: '一、第一章' }], tocEntry: true, skipHeadingPromote: true },
+    { k: 'p', runs: [{ type: 'txt', text: '六、参考来源' }], tocEntry: true, skipHeadingPromote: true },
+    p('正文'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, {});
+  assert.ok(!out.some(e => e.k === 'ref-header'), '目录条目不应变成 ref-header');
+  assert.equal(out[2].k, 'p');
+});
+
+// 反馈问题九：商务合作导联行 → coop-line（62139/62303 成品 14px 斜体灰）。
+test('商务合作导联行识别为 coop-line（两种句式）', () => {
+  for (const text of [
+    '商务合作对接请点击：上海艾录商务合作联系方式',
+    '如有合作意向，请移至“联系上海艾录”获取联系方式',
+  ]) {
+    const out = applyFoodTalksBehavior([p('正文'), p(text)], DEFAULT_CONFIG, {});
+    assert.equal(out[1].k, 'coop-line', text);
+  }
+});
+
+// 反馈问题十四/十六：「*注：…」「本文未标注来源的图片均来自XX」按文末小字（footer-note）渲染。
+test('footer_note 默认正则覆盖 *注 与 本文未标注来源的图片均来自 变体', () => {
+  const out = applyFoodTalksBehavior([
+    p('正文'),
+    p('*注：CO₂排放减量数据来源于Promix网站提供的计算工具'),
+    p('本文未标注来源的图片均来自上海艾录'),
+  ], DEFAULT_CONFIG, {});
+  assert.equal(out[1].k, 'footer-note');
+  assert.equal(out[2].k, 'footer-note');
+});

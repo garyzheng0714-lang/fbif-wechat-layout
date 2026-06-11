@@ -48,6 +48,31 @@ export function foodTalksFetchErrorMessage(err) {
     : '文章抓取失败，请稍后重试';
 }
 
+// 从 /api/fetch-article 的 blocks 提取网站【摘要】候选（飞书反馈问题七，2026-06-11）。
+// 成品规律（news/62139 实测）：FoodTalks 摘要 = 原文开头的短导语段（橙宝文首段
+// 「1500多家星级酒店的选择…」原文即摘要，且摘要句不在正文重复出现）。规则：跳过
+// 头图/图注，取第一个非空文本段；短（≤ maxLen 字）才用作摘要，长段（如上海艾录文
+// 90 字导语，62303 摘要为编辑手写）返回空串 → 摘要框保持占位由编辑自填。
+// opts.consume=true 时命中段从 blocks 原地移除（对齐 62139：摘要句不进正文流）。
+export function extractSiteSummary(blocks, opts = {}) {
+  const maxLen = Number(opts.maxLen) > 0 ? Number(opts.maxLen) : 50;
+  for (let i = 0; i < (blocks || []).length; i++) {
+    const b = blocks[i];
+    if (!b || !b.k) continue;
+    if (b.k === 'img' || b.k === 'cap' || b.k === 'video') continue;
+    if (b.k === 'h') return ''; // 已进入正文章节仍无导语 → 不自动填
+    if (b.k !== 'txt') continue;
+    const text = (Array.isArray(b.runs)
+      ? b.runs.filter(r => r && (r.type === 'txt' || r.type === 'link')).map(r => r.text || '').join('')
+      : (b.text || '')).trim();
+    if (!text) continue;
+    if (text.length > maxLen) return '';
+    if (opts.consume) blocks.splice(i, 1);
+    return text;
+  }
+  return '';
+}
+
 export function bindRailDivider({
   documentRef = globalThis.document,
   windowRef = globalThis.window,
@@ -151,6 +176,7 @@ export function createUrlImportHandler({
   getHandleFile = () => globalThis.window && globalThis.window._handleFile,
   getAccountID = () => '',
   onArticleUrl = () => {},
+  onBlocks = () => {},
   errorMessage = defaultFetchErrorMessage,
 } = {}) {
   return async function fetchArticleFromUrl() {
@@ -202,6 +228,7 @@ export function createUrlImportHandler({
         const handleBlocks = getHandleBlocks();
         if (!handleBlocks) throw new Error('blocks 路径未就绪');
         handedOffToRenderer = true;
+        try { onBlocks(blocks, { title, url }); } catch { /* 摘要等附加填充失败不阻断导入 */ }
         handleBlocks({ title, blocks, source: url }, { isRepost: true });
       } else if (content) {
         const file = new FileCtor([content], (title || 'article') + '.md', { type: 'text/markdown' });

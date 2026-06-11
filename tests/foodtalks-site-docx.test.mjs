@@ -471,3 +471,87 @@ test('网站 DOCX：真实文章 fixture 不出现空 src，图片全部带 src'
     assert.match(tag, /src="[^"]+"/, `图片标签必须带非空 src：${tag}`);
   }
 });
+
+// ── 2026-06-11 飞书反馈批次（成品 news/62303 逐元素核对）──
+
+test('网站 URL 导入：目录条目渲染为普通段落且条目间无空行（反馈问题十）', () => {
+  // WHY：62303 成品目录区仅「目录」二字是 h2，条目是 16px 普通文本、紧密相连；
+  // 旧行为把「一、…」条目升级成 h2 蓝粗大字，且「六、参考来源」被误判 ref-header。
+  const hBlock = (text) => ({ k: 'h', text });
+  const txtBlock = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });
+  const result = template.processBlocks({
+    title: '上海艾录样例',
+    blocks: [
+      hBlock('目录'),
+      txtBlock('一、食品包装为什么需要“轻量化”方案？'),
+      txtBlock('五、联系上海艾录'),
+      txtBlock('六、参考来源'),
+      hBlock('食品包装为什么需要“轻量化”方案？'),
+      txtBlock('正文内容段。'),
+    ],
+  }, { config: { modules: { fbif_footer: { enabled: false } } }, isRepost: false });
+  const html = result.lines.join('\n');
+  assert.match(html, /<h2[^>]*>目录<\/h2>/, '「目录」二字保持 h2');
+  assert.doesNotMatch(html, /<h2[^>]*>一、食品包装为什么需要“轻量化”方案？<\/h2>/, '目录条目不得升级 h2');
+  assert.match(html, /<p[^>]*>一、食品包装为什么需要“轻量化”方案？<\/p>/, '目录条目应为普通段落');
+  assert.doesNotMatch(html, /参考来源：/, '「六、参考来源」目录条目不得被误判为参考来源段头');
+  // 条目间紧凑：两个相邻条目之间不得有空行 <p ...><br></p>
+  assert.match(html, /一、食品包装为什么需要“轻量化”方案？<\/p>\n<p[^>]*>五、联系上海艾录<\/p>/, '目录条目间不插空行');
+});
+
+test('网站 URL 导入：（一）编号标题升 h3 且括号半角化（反馈问题十-2）', () => {
+  const hBlock = (text) => ({ k: 'h', text });
+  const txtBlock = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });
+  const result = template.processBlocks({
+    title: '样例',
+    blocks: [
+      hBlock('一、食品包装为什么需要“轻量化”方案？'),
+      hBlock('（一）包装减量正在从“理念”变成“经营问题”'),
+      txtBlock('正文段。'),
+      hBlock('（二）在“少用料”和“够好用”之间找到平衡点'),
+      txtBlock('又一段。'),
+    ],
+  }, { config: { modules: { fbif_footer: { enabled: false } } }, isRepost: false });
+  const html = result.lines.join('\n');
+  assert.match(html, /<h3[^>]*>\(一\)包装减量正在从“理念”变成“经营问题”<\/h3>/, '（一）应为 h3 且括号半角');
+  assert.match(html, /<h3[^>]*>\(二\)在“少用料”和“够好用”之间找到平衡点<\/h3>/);
+  // 62303 后台源码：h3 紧贴上文（无空行 div），间距由后台 CSS 提供
+  assert.match(html, /正文段。<\/p>\n<h3/, 'h3 前不插空行');
+});
+
+test('网站 URL 导入：二维码 150、纵图长边 375（反馈问题十一/十五）', () => {
+  const result = template.processBlocks({
+    title: '样例',
+    blocks: [
+      { k: 'txt', runs: [{ type: 'txt', text: '正文段。' }] },
+      { k: 'img', src: 'https://mmbiz.qpic.cn/qr.png', dataW: '161', dataRatio: '1.0124' },
+      { k: 'img', src: 'https://mmbiz.qpic.cn/portrait.png', dataW: '840', dataRatio: '1.019047' },
+      { k: 'img', src: 'https://mmbiz.qpic.cn/square.png', dataW: '1080', dataRatio: '1' },
+      { k: 'img', src: 'https://mmbiz.qpic.cn/landscape.png', dataW: '1080', dataRatio: '0.75' },
+    ],
+  }, { config: { modules: { fbif_footer: { enabled: false } } }, isRepost: false });
+  const html = result.lines.join('\n');
+  assert.match(html, /qr\.png[^>]*width="150"/, '近正方形小图按二维码 150');
+  assert.match(html, /portrait\.png[^>]*width="368"/, '840×856 纵图宽 368（高 375）');
+  assert.match(html, /square\.png[^>]*width="375"/, '1:1 大图 375');
+  assert.match(html, /landscape\.png[^>]*width="600"/, '横图维持 600');
+});
+
+test('网站 URL 导入：商务合作导联行渲染 14px 斜体灰、链接保留（反馈问题九）', () => {
+  const result = template.processBlocks({
+    title: '样例',
+    blocks: [
+      { k: 'txt', runs: [{ type: 'txt', text: '一文了解！' }] },
+      { k: 'txt', runs: [
+        { type: 'txt', text: '商务合作对接请点击：' },
+        { type: 'link', text: '上海艾录商务合作联系方式', href: 'https://www.foodtalks.cn/company/ailu/contact' },
+      ] },
+    ],
+  }, { config: { modules: { fbif_footer: { enabled: false } } }, isRepost: false });
+  const html = result.lines.join('\n');
+  assert.match(
+    html,
+    /<p><em><span style="font-size: 14px;"><span style="color: #7f7f7f;">商务合作对接请点击：<\/span><a href="https:\/\/www\.foodtalks\.cn\/company\/ailu\/contact"[^>]*>上海艾录商务合作联系方式<\/a><\/span><\/em><\/p>/,
+    '62139/62303 成品口径：整行 14px 斜体、文本灰、链接保留'
+  );
+});

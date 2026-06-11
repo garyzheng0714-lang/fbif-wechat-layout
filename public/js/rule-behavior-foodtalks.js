@@ -175,9 +175,23 @@ function isExternalMediaTrailer(elems, i, text, markers) {
   return true;
 }
 
+// 切点守卫：候选切点之后若仍存在「参考来源」段头，说明正文主体未结束（正文联系
+// 板块里的「扫码关注XX」「微信公众号」等字样会撞上导流标记——上海艾录文实测：
+// 联系区图注「（扫码关注上海艾录）」后面还有完整的参考来源/文末署名，绝不能切）。
+// 真正的公众号导流尾固定在参考来源之后，所以「后方还有参考来源 → 跳过该候选切点」。
+function hasRefSectionAfter(elems, i, refHeaderRe) {
+  if (!refHeaderRe) return false;
+  for (let j = i + 1; j < elems.length; j++) {
+    const e = elems[j];
+    if (!e || (e.k !== 'p' && e.k !== 'h')) continue;
+    if (matchesRefHeader(elemText(e).trim(), refHeaderRe)) return true;
+  }
+  return false;
+}
+
 // 从尾部裁掉公众号导流段。返回 { elems, cutWechatTip } ——cutWechatTip 表示是否
 // 切掉了公众号口径的"提示："页脚（决定后续是否要补一段网站口径页脚）。
-function stripWechatTrailer(elems, markers, signatures, externalMarkers) {
+function stripWechatTrailer(elems, markers, signatures, externalMarkers, refHeaderRe) {
   const trailerMarkers = markers || WECHAT_TRAILER_MARKERS;
   const tipSignatures = signatures || WECHAT_TIP_SIGNATURES;
   const mediaMarkers = externalMarkers || EXTERNAL_MEDIA_TRAILER_MARKERS;
@@ -189,13 +203,16 @@ function stripWechatTrailer(elems, markers, signatures, externalMarkers) {
     // 公众号"提示："页脚：从这一段起切除，并标记需补网站页脚
     if (e.k === 'p' && /^\s*提示[：:]/.test(text) &&
         tipSignatures.some(re => re.test(collectFollowingText(elems, i)))) {
+      if (hasRefSectionAfter(elems, i, refHeaderRe)) continue;
       return { elems: elems.slice(0, i), cutWechatTip: true };
     }
     // 其余导流标记：命中即从此切除（不补页脚——这类切点不代表原文有转载声明）
     if (text && trailerMarkers.some(re => re.test(text))) {
+      if (hasRefSectionAfter(elems, i, refHeaderRe)) continue;
       return { elems: elems.slice(0, i), cutWechatTip: false };
     }
     if (isExternalMediaTrailer(elems, i, text, mediaMarkers)) {
+      if (hasRefSectionAfter(elems, i, refHeaderRe)) continue;
       return { elems: elems.slice(0, i), cutWechatTip: false };
     }
   }
@@ -304,7 +321,10 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   const tipRe       = new RegExp(behavior.tip_regex        || '^\\s*提示[：:]');
   const refHeaderRe = new RegExp(behavior.ref_header_regex || '^\\s*参考(?:来源|资料)[：:]?\\s*$');
   const refItemRe   = new RegExp(behavior.ref_item_regex   || '^\\s*\\[\\d+\\]');
-  const footerNoteRe = behaviorRegex(behavior, 'footer_note_regex', '^(?:本文(?:未标注来源图片/数据均来自|作者\\s*[：:]|图片来源)|图片均来自)');
+  // 文末小字（14px 灰斜体）：图源/作者说明 + 正文「*注：…」补充注释（62303 实测同口径）。
+  const footerNoteRe = behaviorRegex(behavior, 'footer_note_regex', '^(?:本文(?:未标注来源|作者\\s*[：:]|图片来源)|图片均来自|[*＊]\\s*注[：:])');
+  // 商务合作导联行（62139/62303 实测：14px 斜体、文本 #7f7f7f、链接保留）。
+  const coopLineRe = behaviorRegex(behavior, 'biz_coop_line_regex', '^\\s*(?:商务合作对接请点击|如有合作意向)');
   // 公众号导流尾段标记 / 提示页脚特征句（红线下放：behavior.lists，缺省降级 const）。
   const trailerMarkers = compileMarkerList(behavior, 'wechat_trailer_markers', WECHAT_TRAILER_MARKERS);
   const tipSignatures  = compileMarkerList(behavior, 'wechat_tip_signatures', WECHAT_TIP_SIGNATURES);
@@ -313,7 +333,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   // 阶段 0：切掉公众号原文尾部导流段（更多文章 / 案例库 / 加群 / 公众号"提示："
   // 页脚 / 二维码）。网站发布版不保留这些；若切掉的是公众号转载声明页脚，则在
   // 正文末尾补一段网站口径页脚。仅对从公众号 URL 导入的文章生效（isRepost）。
-  const trimmed = opts.isRepost ? stripWechatTrailer(elems, trailerMarkers, tipSignatures, externalMarkers) : { elems, cutWechatTip: false };
+  const trimmed = opts.isRepost ? stripWechatTrailer(elems, trailerMarkers, tipSignatures, externalMarkers, refHeaderRe) : { elems, cutWechatTip: false };
 
   // 浅拷贝每个元素（runs 数组本身也新建），保证不原地修改输入
   const out = trimmed.elems.map(e => ({
@@ -365,6 +385,17 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     }
   }
 
+  // 阶段 2.5：商务合作导联行（「商务合作对接请点击：…」/「如有合作意向，请移至…」）。
+  // 62139/62303 成品口径：整行 14px 斜体，纯文本灰色，链接保留默认色。
+  for (let i = 0; i < out.length; i++) {
+    const e = out[i];
+    if (e.k !== 'p' || e.tocEntry) continue;
+    const text = runsToText(e.runs).trim();
+    if (text && coopLineRe.test(text)) {
+      out[i] = { k: 'coop-line', runs: e.runs };
+    }
+  }
+
   // 阶段 3：参考来源段头 + 后续 ref-item（遇非 [n] 开头段即中断）。
   // 网站「什么是系列」URL 源稿的参考标题常是 h2「七、参考来源」，标题本身应保留，
   // 但其后的 [n] 条目仍要进入 ref-item 分支，才能连续无空行并套灰色。
@@ -383,6 +414,9 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
       if (refMode) refMode = false;
       continue;
     }
+    // 目录条目（如「六、参考来源」）是导航文本，不是参考来源段头——
+    // matchesRefHeader 会剥掉「六、」前缀导致误命中，这里显式跳过（飞书反馈问题十/十六）。
+    if (e.tocEntry) continue;
     const text = runsToText(e.runs).trim();
     if (!refMode) {
       if (matchesRefHeader(text, refHeaderRe)) {

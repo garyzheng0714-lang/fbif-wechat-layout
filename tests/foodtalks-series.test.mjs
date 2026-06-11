@@ -266,3 +266,31 @@ test('classifySeries: config.behavior 正则可覆盖默认（红线：规则后
   assert.equal(out.filter(e => e.k === 'h1').length, 1);
   assert.equal(out.find(e => e.k === 'h1').text, '开篇');
 });
+
+// ── 商务合作导联行替换（2026-06-11 飞书反馈：公众号排版检测整句转换）──
+test('classifySeries：「商务合作对接请点击」整行替换为联系小节指引文案', async () => {
+  const { classifySeries } = await import('../public/js/rule-behavior-foodtalks-series.js');
+  const elems = [
+    { k: 'txt', runs: [{ type: 'txt', text: '一文了解！' }] },
+    { k: 'txt', runs: [
+      { type: 'txt', text: '商务合作对接请点击：' },
+      { type: 'link', text: '上海艾录商务合作联系方式', href: 'https://example.com/contact' },
+    ] },
+    { k: 'h', text: '五、联系上海艾录' },
+  ];
+  const out = classifySeries(elems, {});
+  const texts = out.map(e => (e.runs || []).map(r => r.text).join('') || e.text || '');
+  assert.ok(texts.includes('如有合作意向，请移至“联系上海艾录”获取联系方式'), '应替换为指引文案');
+  assert.ok(!texts.some(t => t.includes('商务合作对接请点击')), '原句不应保留');
+});
+
+test('classifySeries：文中无「联系XX」小节时不替换（不造假引用）', async () => {
+  const { classifySeries } = await import('../public/js/rule-behavior-foodtalks-series.js');
+  const elems = [
+    { k: 'txt', runs: [{ type: 'txt', text: '商务合作对接请点击：某公司联系方式' }] },
+    { k: 'h', text: '一、正文标题' },
+  ];
+  const out = classifySeries(elems, {});
+  const texts = out.map(e => (e.runs || []).map(r => r.text).join('') || e.text || '');
+  assert.ok(texts.some(t => t.includes('商务合作对接请点击')), '无联系小节时保留原句');
+});

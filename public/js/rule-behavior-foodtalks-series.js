@@ -120,6 +120,18 @@ export function classifySeries(neutralElems, config = {}) {
 
   const isHeadingLike = (e) => e && (e.k === 'h' || e.k === 'txt');
 
+  // 商务合作导联行替换（2026-06-11 飞书反馈）：检测「商务合作对接请点击：…」整行 →
+  // 「如有合作意向，请移至“联系XX”获取联系方式」；{contact_section} 取文中「联系XX」
+  // 标题文本（目录条目与正文标题同文）。找不到联系小节则不替换（不造假引用）。
+  const coopReplaceRe = seriesRegex(config, 'biz_coop_replace_regex', SERIES_REGEX.biz_coop_replace_regex);
+  const coopTpl = behTemplate(config, 'biz_coop_replacement', SERIES_TEMPLATES.biz_coop_replacement);
+  let coopContactSection = '';
+  for (const e2 of elems) {
+    if (!e2 || (e2.k !== 'h' && e2.k !== 'txt')) continue;
+    const m = elemText(e2).trim().match(/^(?:[一二三四五六七八九十百零]+\s*[、.．]\s*)?(联系\S{1,24})\s*$/);
+    if (m) { coopContactSection = m[1]; break; }
+  }
+
   const out = [];
   let sectionIndex = 0; // 第 N 个一级标题 → 序号图 N
   let refMode = false;
@@ -225,6 +237,13 @@ export function classifySeries(neutralElems, config = {}) {
         continue;
       }
       refMode = false; // 遇非 [n] / 非延续行，退出参考模式
+    }
+
+    // 商务合作导联行（2026-06-11 飞书反馈）：整行替换为指引文案，落回普通正文段
+    if (coopContactSection && coopReplaceRe.test(plain)) {
+      const replaced = coopTpl.replace('{contact_section}', coopContactSection);
+      out.push({ k: 'p', runs: [{ type: 'txt', text: replaced }], ...carryDocxMeta(e) });
+      continue;
     }
 
     // 文末署名 / 图源说明（规范《十》，成品实测：12px #7f7f7f 斜体小字）
