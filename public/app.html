@@ -160,14 +160,20 @@ async function loadVersionInfo() {
   return { build: 'runtime-' + Date.now() };
 }
 const versionInfo = await loadVersionInfo();
-const buildId = String(versionInfo.build || versionInfo.commit || Date.now());
+const rawBuildId = String(versionInfo.build || versionInfo.commit || Date.now());
+const isDevBuild = rawBuildId === 'dev';
+const buildId = isDevBuild ? 'dev-' + Date.now() : rawBuildId;
 const assetVersion = encodeURIComponent(buildId);
-window.__APP_BUILD_INFO = versionInfo;
+window.__APP_BUILD_INFO = { ...versionInfo, asset_version: buildId };
 if (!new URLSearchParams(location.search).get('v')) {
   const next = new URL(location.href); next.searchParams.set('v', buildId); history.replaceState(null, '', next);
 }
 async function reloadIfUpdated() {
-  try { const latest = await loadVersionInfo(); if (String(latest.build || latest.commit || '') !== buildId) location.reload(); } catch {}
+  try {
+    const latest = await loadVersionInfo();
+    const latestBuildId = String(latest.build || latest.commit || '');
+    if (!isDevBuild && latestBuildId !== rawBuildId) location.reload();
+  } catch {}
 }
 window.addEventListener('focus', reloadIfUpdated);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadIfUpdated(); });

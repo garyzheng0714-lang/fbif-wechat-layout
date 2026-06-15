@@ -79,10 +79,27 @@ test('site.html renders the FoodTalks article preview shell', async () => {
   assert.match(css, /\.preview-site \.ft-share-popover/);
 });
 
+test('site.html updates DOCX summary without wiping URL summaries, and resets MD summaries', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  assert.match(html, /fbif:article-session-activated/, '网站页应监听渲染 session 激活事件');
+  assert.match(html, /session\.input\.kind !== 'docx' && session\.input\.kind !== 'md'/, 'blocks 路径摘要由 URL onBlocks 管，不应被事件重置');
+  assert.match(html, /session\.input\.kind === 'docx'[\s\S]{0,120}session\.result\.summary/, 'DOCX 摘要应来自渲染结果');
+  assert.match(html, /summaryEl\.textContent = summary \|\| FOODTALKS_PREVIEW_META\.summary/, 'MD 等本地文件应重置为默认摘要，避免残留上一篇 DOCX 摘要');
+});
+
 test('site.html uses absolute /js/ paths for dynamic imports', async () => {
   const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
   const relMatches = html.match(/import\(['"]\.\//g);
   assert.equal(relMatches, null, 'site.html should not contain relative "./..." dynamic imports');
   assert.match(html, /import\(['"]\/js\/engine\.js/);
   assert.match(html, /import\(['"]\/js\/rule-packs\/url\.js/);
+});
+
+test('local dev build IDs do not reuse stale versioned JS cache', async () => {
+  for (const name of ['app.html', 'site.html']) {
+    const html = await readFile(new URL('../public/' + name, import.meta.url), 'utf8');
+    assert.match(html, /rawBuildId === 'dev'/, name + ' should detect local dev builds');
+    assert.match(html, /'dev-' \+ Date\.now\(\)/, name + ' should create a fresh local asset version');
+    assert.match(html, /!isDevBuild && latestBuildId !== rawBuildId/, name + ' should not reload-loop on dev builds');
+  }
 });

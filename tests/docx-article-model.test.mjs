@@ -22,6 +22,11 @@ function para(overrides = {}) {
 }
 const txt = (text, extra = {}) => para({ runs: [{ type: 'txt', text }], text, ...extra });
 const img = (file, w = '100%') => para({ runs: [{ type: 'img', file, w }], hasImg: true });
+const imgWithText = (file, text, w = '100%', aspect = 0) => para({
+  runs: [{ type: 'img', file, w, aspect }, { type: 'txt', text }],
+  text,
+  hasImg: true,
+});
 
 test('图片按 file 字段从 imgCache 取 src（根治 file/id 错配）', () => {
   const { elems, imgN } = classifyDocxArticle(
@@ -138,6 +143,31 @@ test('图注 look-ahead：图片后紧随的 center 段提升为 cap，且 cap �
   assert.ok(cap, '产出 cap');
   assert.equal(cap.text, '图片来源：FBIF');
   assert.ok(!('fromDocx' in cap), 'cap 不携带 docxMeta（图注紧贴图片，不参与间距协商）');
+});
+
+test('同段图片文字默认不提升为图注（共享层默认保持旧口径）', () => {
+  // WHY：共享 DOCX 模型同时服务公众号和网站；同段图片文字兼容需由调用方显式打开，
+  // 否则会悄悄改变 FBIF/ft-default 等既有规则。
+  const { elems } = classifyDocxArticle(
+    [txt('作者：张三'), imgWithText('p.png', '图片来源：FBIF')],
+    { 'p.png': 'blob:x' },
+    {}
+  );
+  assert.equal(elems.filter(e => e.k === 'img').length, 1);
+  assert.equal(elems.filter(e => e.k === 'cap').length, 0, '默认不开启同段图注兼容');
+});
+
+test('sameParagraphImageTextAsCaption=true：同段图片文字紧跟图片输出为 cap', () => {
+  // WHY：FoodTalks 网站「什么是系列」真实 DOCX 常把图片和图注放在同一 Word 段落。
+  // 解析器已拿到文字，分类层不能在显式开关打开时静默吞掉。
+  const { elems } = classifyDocxArticle(
+    [txt('作者：张三'), imgWithText('p.png', 'ESG标识')],
+    { 'p.png': 'blob:x' },
+    { sameParagraphImageTextAsCaption: true }
+  );
+  assert.equal(elems[0].k, 'img');
+  assert.equal(elems[1].k, 'cap');
+  assert.equal(elems[1].text, 'ESG标识');
 });
 
 test('空段语义：空段只把 blankBefore 标到紧随其后的第一个 elem', () => {

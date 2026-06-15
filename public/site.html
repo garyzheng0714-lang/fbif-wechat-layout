@@ -236,14 +236,20 @@ async function loadVersionInfo() {
   return { build: 'runtime-' + Date.now() };
 }
 const versionInfo = await loadVersionInfo();
-const buildId = String(versionInfo.build || versionInfo.commit || Date.now());
+const rawBuildId = String(versionInfo.build || versionInfo.commit || Date.now());
+const isDevBuild = rawBuildId === 'dev';
+const buildId = isDevBuild ? 'dev-' + Date.now() : rawBuildId;
 const assetVersion = encodeURIComponent(buildId);
-window.__APP_BUILD_INFO = versionInfo;
+window.__APP_BUILD_INFO = { ...versionInfo, asset_version: buildId };
 if (!new URLSearchParams(location.search).get('v')) {
   const next = new URL(location.href); next.searchParams.set('v', buildId); history.replaceState(null, '', next);
 }
 async function reloadIfUpdated() {
-  try { const latest = await loadVersionInfo(); if (String(latest.build || latest.commit || '') !== buildId) location.reload(); } catch {}
+  try {
+    const latest = await loadVersionInfo();
+    const latestBuildId = String(latest.build || latest.commit || '');
+    if (!isDevBuild && latestBuildId !== rawBuildId) location.reload();
+  } catch {}
 }
 window.addEventListener('focus', reloadIfUpdated);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadIfUpdated(); });
@@ -653,12 +659,32 @@ const FT_FOOTER_LABELS = Object.freeze({
   logo: 'FoodTalks logo',
   more_info: '点击获取更多',
 });
+const FT_FOOTER_BD_CARD_RE = /^ftss_bd_[a-z0-9_-]+$/i;
 const FT_FOOTER_FALLBACK_PRESETS = Object.freeze([
   Object.freeze({ id: 'fbif-original', name: 'FBIF原创', segments: Object.freeze({ tip: 1, biz_coop: 1, join_group: 1, follow_account: 1, logo: 1, more_info: 1 }) }),
   Object.freeze({ id: 'repost-simple', name: '转载简版', segments: Object.freeze({ tip: 1, biz_coop: 1, join_group: 0, follow_account: 0, logo: 0, more_info: 0 }) }),
   Object.freeze({ id: 'tip-only', name: '仅提示', segments: Object.freeze({ tip: 1, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 }) }),
   Object.freeze({ id: 'none', name: '无', segments: Object.freeze({ tip: 0, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 }) }),
 ]);
+let footerBdCardAssetID = '';
+let footerLastArticlePayload = null;
+let refreshFooterControls = () => {};
+
+function footerAssets(assetLibrary = serverAssetLibrary()) {
+  return assetLibrary && Array.isArray(assetLibrary.assets) ? assetLibrary.assets : [];
+}
+
+function isFooterBdCardAsset(asset) {
+  if (!asset || !asset.url) return false;
+  const id = String(asset.id || '').trim();
+  const tags = Array.isArray(asset.tags) ? asset.tags.map(tag => String(tag || '').trim()) : [];
+  return FT_FOOTER_BD_CARD_RE.test(id) || tags.some(tag => /^BD\s*名片$/i.test(tag));
+}
+
+function footerBdCardAssets() {
+  if (!activeRulePack || activeRulePack.id !== 'ft-series') return [];
+  return footerAssets().filter(isFooterBdCardAsset);
+}
 
 function footerPresetList(footerLib = serverFooterLibrary()) {
   return Array.isArray(footerLib.presets) && footerLib.presets.length ? footerLib.presets : FT_FOOTER_FALLBACK_PRESETS;
@@ -673,6 +699,46 @@ function footerServerOrder(footerLib = serverFooterLibrary()) {
 function activeFooterPreset(footerLib = serverFooterLibrary()) {
   const presets = footerPresetList(footerLib);
   return presets.find(p => p.id === footerLib.active_preset_id) || presets[0] || { segments: {} };
+}
+
+function replaceBdCardAssetRef(lines, assetID) {
+  if (!assetID) return lines;
+  const nextRef = '{{asset#' + assetID + '}}';
+  return (lines || []).map(line => String(line || '').replace(/\{\{asset#[a-z0-9_-]+\}\}/i, nextRef));
+}
+
+function applyFooterArticleOverrides(footerLib) {
+  if (!footerBdCardAssetID || !footerLib || typeof footerLib !== 'object') return footerLib;
+  const segments = footerLib.segments && typeof footerLib.segments === 'object' ? footerLib.segments : null;
+  const entry = segments && segments.bd_card;
+  const htmlLines = Array.isArray(entry) ? entry : (entry && Array.isArray(entry.html_lines) ? entry.html_lines : null);
+  if (!htmlLines) return footerLib;
+  return {
+    ...footerLib,
+    segments: {
+      ...segments,
+      bd_card: Array.isArray(entry)
+        ? replaceBdCardAssetRef(entry, footerBdCardAssetID)
+        : { ...entry, html_lines: replaceBdCardAssetRef(htmlLines, footerBdCardAssetID) },
+    },
+  };
+}
+
+function clearFooterArticleOverrides(rerender = false, resetPayload = true) {
+  if (resetPayload) footerLastArticlePayload = null;
+  if (!footerBdCardAssetID) return false;
+  footerBdCardAssetID = '';
+  refreshFooterControls();
+  if (rerender) syncEngineConfig(true);
+  return true;
+}
+
+function resetFooterArticleOverridesFor(session) {
+  const input = session && session.input;
+  const payload = input && (input.payload || input.title || null);
+  if (!payload || payload === footerLastArticlePayload) return false;
+  footerLastArticlePayload = payload;
+  return clearFooterArticleOverrides(true, false);
 }
 
 function footerSignature(footerLib = serverFooterLibrary()) {
@@ -745,9 +811,10 @@ function syncEngineConfig(triggerRerender) {
   const footerOrder = footerState.order;
   const serverAssets = serverAssetLibrary();
   const serverBottomBlocks = serverRuleModules().bottom_blocks;
-  const footerForRender = Array.isArray(footerOrder) && footerOrder.length
+  const baseFooterForRender = Array.isArray(footerOrder) && footerOrder.length
     ? { ...serverFooter, segment_order: footerOrder.filter(k => k !== 'tip') }
     : serverFooter;
+  const footerForRender = applyFooterArticleOverrides(baseFooterForRender);
   // 统一区块模型：把现有 ft.footer.* 单篇信号映射成 bottom_blocks 覆盖（开关/排序/逐块启用）。
   // 逐块 enabled = !!active_segments[id]（缺失视为关），与旧 buildFooterHtml 的 `if(!seg[key])continue` 一致。
   let bottomBlocksOverride;
@@ -902,6 +969,24 @@ function renderFoodTalksPreviewMeta(meta) {
 }
 renderFoodTalksPreviewMeta(FOODTALKS_PREVIEW_META);
 
+window.addEventListener('fbif:article-input-started', () => {
+  clearFooterArticleOverrides(false);
+});
+
+window.addEventListener('fbif:article-session-activated', event => {
+  const session = event && event.detail && event.detail.session;
+  if (!session || !session.input) return;
+  resetFooterArticleOverridesFor(session);
+  if (session.input.kind !== 'docx' && session.input.kind !== 'md') return;
+  const summaryEl = document.getElementById('ftSummary');
+  if (summaryEl) {
+    const summary = session.input.kind === 'docx' && session.result && typeof session.result.summary === 'string'
+      ? session.result.summary.trim()
+      : '';
+    summaryEl.textContent = summary || FOODTALKS_PREVIEW_META.summary;
+  }
+});
+
 {
   const shareButton = document.getElementById('ftShareButton');
   const sharePopover = document.getElementById('ftSharePopover');
@@ -975,16 +1060,48 @@ bindUrlImportShortcuts({
   let enabled = state.enabled;
   let segments = state.segments;
 
+  function bdCardSelectHtml(key) {
+    if (key !== 'bd_card') return '';
+    const assets = footerBdCardAssets();
+    if (footerBdCardAssetID && !assets.some(asset => asset.id === footerBdCardAssetID)) footerBdCardAssetID = '';
+    if (!assets.length) return '';
+    return `<select class="ft-footer-bd-select" data-bd-card-select aria-label="选择 BD 名片">
+      <option value="" ${footerBdCardAssetID ? '' : 'selected'}>按规则默认</option>
+      ${assets.map(asset => `<option value="${escText(asset.id)}" ${asset.id === footerBdCardAssetID ? 'selected' : ''}>${escText(asset.label || asset.id)}</option>`).join('')}
+    </select>`;
+  }
+
+  function segmentRowHtml(key) {
+    return `<label class="ft-footer-seg-row" data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}">
+      <input type="checkbox" data-seg="${escText(key)}">
+      <span class="ft-footer-seg-title">${escText(FT_FOOTER_LABELS[key] || key)}</span>
+      ${bdCardSelectHtml(key)}
+    </label>`;
+  }
+
   function renderControls() {
     presetsEl.innerHTML = presetList.map(p => `<button type="button" class="ft-footer-preset" data-preset="${escText(p.id)}">${escText(p.name || p.id)}</button>`).join('');
-    segsEl.innerHTML = order.map(key => `<label data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}"><input type="checkbox" data-seg="${escText(key)}"><span>${escText(FT_FOOTER_LABELS[key] || key)}</span></label>`).join('');
+    segsEl.innerHTML = order.map(segmentRowHtml).join('');
   }
   renderControls();
+  refreshFooterControls = () => { renderControls(); paint(); };
 
   const checkboxes = () => Array.from(segsEl.querySelectorAll('input[type="checkbox"]'));
   const segmentKeys = () => order.slice();
   function matchPreset() { for (const [id, segs] of Object.entries(PRESETS)) if (segmentKeys().every(k => !!segments[k] === !!segs[k])) return id; return null; }
-  function paint() { toggle.checked = enabled; segsEl.classList.toggle('ft-footer-disabled', !enabled); presetsEl.classList.toggle('ft-footer-disabled', !enabled); const active = matchPreset(); presetsEl.querySelectorAll('.ft-footer-preset').forEach(b => b.classList.toggle('active', b.dataset.preset === active)); checkboxes().forEach(cb => { cb.checked = !!segments[cb.dataset.seg]; }); }
+  function paint() {
+    toggle.checked = enabled;
+    segsEl.classList.toggle('ft-footer-disabled', !enabled);
+    presetsEl.classList.toggle('ft-footer-disabled', !enabled);
+    const active = matchPreset();
+    presetsEl.querySelectorAll('.ft-footer-preset').forEach(b => b.classList.toggle('active', b.dataset.preset === active));
+    checkboxes().forEach(cb => { cb.checked = !!segments[cb.dataset.seg]; });
+    const bdSelect = segsEl.querySelector('[data-bd-card-select]');
+    if (bdSelect) {
+      bdSelect.value = footerBdCardAssetID;
+      bdSelect.disabled = !enabled || !segments.bd_card;
+    }
+  }
   function persist(rerender) { localStorage.setItem(FT_FOOTER_STORAGE.enabled, enabled ? '1' : '0'); localStorage.setItem(FT_FOOTER_STORAGE.segments, JSON.stringify(segments)); localStorage.setItem(FT_FOOTER_STORAGE.order, JSON.stringify(order)); syncEngineConfig(rerender); }
 
   paint();
@@ -1003,6 +1120,16 @@ bindUrlImportShortcuts({
     paint(); persist(true);
   });
   segsEl.addEventListener('change', (e) => {
+    const bdSelect = e.target.closest('[data-bd-card-select]');
+    if (bdSelect) {
+      footerBdCardAssetID = bdSelect.value || '';
+      if (footerBdCardAssetID) {
+        enabled = true;
+        segments.bd_card = 1;
+      }
+      paint(); persist(true);
+      return;
+    }
     const cb = e.target.closest('input[type="checkbox"]');
     if (!cb) return;
     segments[cb.dataset.seg] = cb.checked ? 1 : 0;

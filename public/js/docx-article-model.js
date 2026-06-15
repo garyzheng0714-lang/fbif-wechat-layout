@@ -65,6 +65,7 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
   const classifyReferences = opts.classifyReferences !== false; // 默认 true（公众号语义）
   // 默认 false：仅网站口径把「（插入视频）」超链接段转 video elem；公众号保持跳过（字节不变，红线#19）。
   const extractVideo = opts.extractVideo === true;
+  const sameParagraphImageTextAsCaption = opts.sameParagraphImageTextAsCaption === true;
   // 正文起点信号：'authorLine'（默认，公众号——首个「作者：」行之前=前置材料）；
   // 'firstImage'（FoodTalks「什么是」系列——文章无作者行、固定以头图为正文锚点，头图之前的
   // 标题段 + 单格副标题表格都是编辑前置物料，须剥离。见红线#12 的系列变体）。
@@ -233,6 +234,15 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
           imgN++;
           elems.push({ k: 'img', src, w: r.w, aspect: r.aspect, gif: looksLikeGifSource(src) || /\.gif$/i.test(r.file), ...meta });
         }
+      }
+      if (sameParagraphImageTextAsCaption) {
+        const ct = (pd.runs || [])
+          .filter(r => r && r.type !== 'img' && r.type !== 'br')
+          .map(r => r.text || '')
+          .join('')
+          .trim()
+          .replace(/^[（(]插入视频[）)]\s*/, '');
+        if (ct) elems.push({ k: 'cap', text: ct });
       }
       while (i + 1 < pds.length) {
         const nx = pds[i + 1];

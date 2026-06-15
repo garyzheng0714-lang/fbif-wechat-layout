@@ -40,6 +40,22 @@ function behParamStr(config, key, fallback) {
   const s = p && p[key] && p[key].default;
   return (typeof s === 'string' && s) ? s : fallback;
 }
+function behParamNum(config, key, fallback) {
+  const p = behOf(config).params;
+  const raw = p && p[key] && p[key].default;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+function behParamBool(config, key, fallback) {
+  const p = behOf(config).params;
+  const raw = p && p[key] && p[key].default;
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw === 'string') {
+    if (/^(true|1|yes)$/i.test(raw.trim())) return true;
+    if (/^(false|0|no)$/i.test(raw.trim())) return false;
+  }
+  return fallback;
+}
 function behList(config, key, fallback) {
   const v = behOf(config).lists && behOf(config).lists[key];
   return (Array.isArray(v) && v.length) ? v : fallback;
@@ -186,7 +202,8 @@ const BLANK_LINE = '<p style="text-align: justify;"><br></p>';
 const CENTER_BLANK_LINE = '<p style="text-align: center;"><br></p>';
 
 function isSeriesSiteConfig(config = {}) {
-  return config && config.justify_paragraphs === false;
+  return behParamStr(config, 'site_variant', '') === 'ft-series' ||
+    (config && config.justify_paragraphs === false);
 }
 
 function chineseSectionNumber(n) {
@@ -222,6 +239,7 @@ function collectSeriesTocSections(elems) {
       continue;
     }
     if (!inToc) continue;
+    if (e.blankBefore && sections.size) break;
     if (e.k !== 'h' && e.k !== 'p') {
       if (sections.size) break;
       continue;
@@ -300,16 +318,20 @@ function normalizeWhatIsSeriesElems(elems, config = {}) {
       continue;
     }
     if (inToc) {
-      const prefix = sectionNumberPrefix(text);
-      if ((e.k === 'h' || e.k === 'p') && prefix) {
-        tocItemCount += 1;
-        // 目录条目保持普通段落（62303 成品：目录区仅「目录」二字是标题，条目是 16px
-        // 正文文本）。标记交给 markTocEntries 统一打（飞书反馈问题十，2026-06-11 推翻
-        // 旧「目录条目升级 h2」行为）。
-        out.push(e);
-        continue;
+      if (e && e.blankBefore && tocItemCount > 0) {
+        inToc = false;
+      } else {
+        const prefix = sectionNumberPrefix(text);
+        if ((e.k === 'h' || e.k === 'p') && prefix) {
+          tocItemCount += 1;
+          // 目录条目保持普通段落（62303 成品：目录区仅「目录」二字是标题，条目是 16px
+          // 正文文本）。标记交给 markTocEntries 统一打（飞书反馈问题十，2026-06-11 推翻
+          // 旧「目录条目升级 h2」行为）。
+          out.push(e);
+          continue;
+        }
+        if (tocItemCount > 0) inToc = false;
       }
-      if (tocItemCount > 0) inToc = false;
     }
     const nextText = next && next.k === 'h' ? runsToPlain(next.runs) : '';
     const tocPrefix = nextText ? lookupTocPrefix(tocSections, normalizeSectionTitleKey(nextText)) : '';
@@ -351,6 +373,7 @@ function markTocEntries(elems) {
     const e = out[i];
     // 仅普通段落可为目录条目；遇 h（如 series 归一化已升级的正文编号标题）/img 即正文开始
     if (!e || e.k !== 'p') break;
+    if (e.blankBefore) break;
     const text = (e.runs ? runsToPlain(e.runs) : (e.text || '')).trim();
     if (!text) continue; // 目录条目之间的空段不结束目录区
     if (!sectionNumberPrefix(text)) break;
@@ -413,18 +436,50 @@ function renderParagraph(runs, elem = {}, config = {}) {
 
 // adaptiveImageWidth（竖图400/横图600）已抽到 image-width.js（顶部 import），可独立单测。
 
-function renderImage(src, alt, naturalWidth, naturalHeight, config = {}) {
-  const safeSrc = escAttr(src || '');
-  const safeAlt = escAttr(alt || '');
-  // 图宽规则（红线下放：config.image.portrait_px/landscape_px/qr_px/qr_max_natural_px，
-  // 缺省降级 375/600/150/500——2026-06-11 飞书反馈问题十一/十五口径）。
+function imageWidthOptions(config = {}) {
   const imgCfg = (config && config.image) || {};
-  const width = adaptiveImageWidth(naturalWidth, naturalHeight, {
+  return {
     portrait: Number(imgCfg.portrait_px) || 375,
     landscape: Number(imgCfg.landscape_px) || 600,
     qr: Number(imgCfg.qr_px) || 150,
     qrMaxNatural: Number(imgCfg.qr_max_natural_px) || 500,
-  });
+  };
+}
+
+function parsePercent(value) {
+  const m = String(value || '').trim().match(/^(\d+(?:\.\d+)?)%$/);
+  return m ? Number(m[1]) : 0;
+}
+
+function renderedImageWidth(naturalWidth, naturalHeight, config = {}, elem = {}) {
+  // 图宽规则（红线下放：config.image.portrait_px/landscape_px/qr_px/qr_max_natural_px，
+  // 缺省降级 375/600/150/500——2026-06-11 飞书反馈问题十一/十五口径）。
+  const opts = imageWidthOptions(config);
+  const w = Number(naturalWidth || 0);
+  const h = Number(naturalHeight || 0);
+  if (w && h) return adaptiveImageWidth(w, h, opts);
+
+  // DOCX 本地上传没有原图尺寸，但 parser 已有显示宽高比 aspect。该路径只在系列行为
+  // 显式开启时使用，避免改变 ft-default/公众号既有输出。
+  if (isSeriesSiteConfig(config) && behParamBool(config, 'docx_use_image_aspect_width', false)) {
+    const aspect = Number(elem && elem.aspect);
+    if (aspect > 0) {
+      const displayPct = parsePercent(elem.w);
+      const qrMaxDisplayPct = behParamNum(config, 'docx_qr_max_display_percent', 35);
+      if (displayPct > 0 && displayPct <= qrMaxDisplayPct && aspect >= 0.85 && aspect <= 1.18) {
+        return opts.qr;
+      }
+      if (aspect <= 1) return Math.round(opts.portrait * aspect);
+      return opts.landscape;
+    }
+  }
+  return adaptiveImageWidth(w, h, opts);
+}
+
+function renderImage(src, alt, naturalWidth, naturalHeight, config = {}, elem = {}) {
+  const safeSrc = escAttr(src || '');
+  const safeAlt = escAttr(alt || '');
+  const width = renderedImageWidth(naturalWidth, naturalHeight, config, elem);
   // mmbiz 等公众号图带防盗链：浏览器若发 Referer 头会被换成"未经允许不可引用"
   // 占位图。referrerpolicy="no-referrer" 让加载图片时不发 Referer，绕过防盗链。
   // 与公众号渲染（fbif.js）保持一致。
@@ -658,7 +713,7 @@ function render(elems, config = {}) {
       continue;
     }
     if (e.k === 'img') {
-      lines.push(renderImage(e.src, e.alt, e.width, e.height, config));
+      lines.push(renderImage(e.src, e.alt, e.width, e.height, config, e));
       // 图片后若不是图注，补空行（基石：图→正文间有空行；图→图注紧贴无空行）
       if (!elems[i + 1] || elems[i + 1].k !== 'cap') {
         lines.push(BLANK_LINE);
@@ -810,12 +865,19 @@ function buildDocxOpts(config) {
   let authorLineRegex = /^[\s　]*(?:作者|Author)\s*[:：]\s*(.*)$/i;
   const src = behParamStr(config, 'docx_preamble_author_regex', '');
   if (src) { try { authorLineRegex = compileSiteRegex(src); } catch (e) { /* 非法降级 */ } }
-  return { authorLineRegex, consumeAuthorLine: false, classifyReferences: false, extractVideo: true };
+  return {
+    authorLineRegex,
+    consumeAuthorLine: false,
+    classifyReferences: false,
+    extractVideo: true,
+    sameParagraphImageTextAsCaption: isSeriesSiteConfig(config) &&
+      behParamBool(config, 'docx_same_paragraph_image_caption', false),
+  };
 }
 
 // 中性元素 → 网站本地 elem。网站渲染结构与公众号物理隔离（红线#19）。
 function adaptNeutralToSite(e) {
-  if (e.k === 'img') return e.src ? { k: 'img', src: e.src, alt: '', width: 0, height: 0, blankBefore: e.blankBefore } : null;
+  if (e.k === 'img') return e.src ? { k: 'img', src: e.src, alt: '', width: 0, height: 0, w: e.w, aspect: e.aspect, blankBefore: e.blankBefore } : null;
   if (e.k === 'video') return e.src ? { k: 'video', src: e.src, poster: e.poster || '', blankBefore: e.blankBefore } : null;
   if (e.k === 'h') {
     const level = /heading\s*[3-6]/.test(String(e.styleName || '').toLowerCase()) ? 3 : 2;
@@ -839,6 +901,30 @@ function classifyDocx(paragraphs, imgCache, config = {}) {
       rn + (row || []).reduce((cn, cell) =>
         cn + (cell.runs || []).filter(r => r.type === 'img' && r.src).length, 0), 0), 0);
   return { elems: siteElems, imgN: siteElems.filter(e => e.k === 'img').length + tableImgN };
+}
+
+function extractDocxSummary(elems, config = {}) {
+  const maxLen = behParamNum(config, 'docx_summary_max_chars', 0);
+  if (!isSeriesSiteConfig(config) || maxLen <= 0) return { elems, summary: '' };
+  for (let i = 0; i < (elems || []).length; i++) {
+    const e = elems[i];
+    if (!e) continue;
+    if (e.k === 'img' || e.k === 'video' || e.k === 'h' || e.k === 'table') break;
+    if (e.k !== 'p') continue;
+    const text = runsToPlain(e.runs).trim();
+    if (!text) continue;
+    if (text === '目录' || sectionNumberPrefix(text)) return { elems, summary: '' };
+    if (/^(?:作者|来源|参考(?:来源|资料))[：:]/.test(text)) return { elems, summary: '' };
+    if (text.length > maxLen) return { elems, summary: '' };
+    const hasMediaAfter = elems.slice(i + 1).some(x => x && (x.k === 'img' || x.k === 'video'));
+    if (!hasMediaAfter) return { elems, summary: '' };
+    const consume = behParamBool(config, 'docx_summary_consume', true);
+    return {
+      elems: consume ? elems.filter((_, idx) => idx !== i) : elems,
+      summary: text,
+    };
+  }
+  return { elems, summary: '' };
 }
 
 // ---- Markdown 分类（最小版） ----
@@ -947,7 +1033,8 @@ export default {
 
   processDocx({ paragraphs, imgCache, config = {}, isRepost = false }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache, config);
-    const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
+    const docxSummary = extractDocxSummary(elems, config);
+    const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(docxSummary.elems, config)), config);
     const behaved = applyFoodTalksBehavior(normalized, config, { isRepost });
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
@@ -956,6 +1043,7 @@ export default {
       lines: render(promoted, config),
       imgN,
       headingN: promoted.filter(e => e.k === 'h').length,
+      summary: docxSummary.summary,
     };
   },
 

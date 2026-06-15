@@ -45,12 +45,39 @@ function para(overrides = {}) {
   };
 }
 
-function imgPara(file, w = '100%') {
-  return para({ runs: [{ type: 'img', file, w }], hasImg: true });
+function imgPara(file, w = '100%', aspect = 0, afterRuns = []) {
+  const runs = [{ type: 'img', file, w, aspect }, ...afterRuns];
+  return para({
+    runs,
+    text: afterRuns.filter(r => r.type !== 'img').map(r => r.text || '').join(''),
+    hasImg: true,
+  });
 }
 
 function txtPara(text, extra = {}) {
   return para({ runs: [{ type: 'txt', text }], text, ...extra });
+}
+
+function seriesDocxConfig(extra = {}) {
+  return {
+    justify_paragraphs: false,
+    muted_color: '#7f7f7f',
+    caption_font_size: '12',
+    footer_note_color: '#7f7f7f',
+    footer_note_font_size: '14',
+    behavior: {
+      params: {
+        site_variant: { type: 'string', default: 'ft-series' },
+        docx_summary_max_chars: { type: 'number', default: 80 },
+        docx_summary_consume: { type: 'boolean', default: true },
+        docx_same_paragraph_image_caption: { type: 'boolean', default: true },
+        docx_use_image_aspect_width: { type: 'boolean', default: true },
+        docx_qr_max_display_percent: { type: 'number', default: 35 },
+      },
+    },
+    modules: { fbif_footer: { enabled: false }, bottom_blocks: { enabled: false, presets: [] } },
+    ...extra,
+  };
 }
 
 test('网站 DOCX：图片经 imgCache 按 file 字段取到 src（杜绝 src 为空）', () => {
@@ -78,6 +105,118 @@ test('网站 DOCX：imgCache 未命中也绝不输出 src=""', () => {
   });
   const html = result.lines.join('\n');
   assert.doesNotMatch(html, /src="\s*"/, '缓存未命中时不得输出空 src');
+});
+
+test('网站什么是系列 DOCX：短摘要进入摘要字段并从正文移除', () => {
+  // WHY：URL 导入已有摘要消费逻辑，DOCX 上传也应把开头短导语放进网站摘要框，
+  // 否则 62303 这类文章会把摘要留在正文第一段。
+  const summary = '少用即环保，以年消耗1000吨塑料测算，可减少约692.0吨碳排放';
+  const result = template.processDocx({
+    paragraphs: [
+      txtPara(summary),
+      imgPara('head.jpeg', '96%', 1.333, [{ type: 'txt', text: '盛放食品的塑料托盒' }]),
+      txtPara('正文第一段。'),
+    ],
+    imgCache: { 'head.jpeg': 'blob:head' },
+    config: seriesDocxConfig(),
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.equal(result.summary, summary, '短导语应返回给网站摘要框');
+  assert.doesNotMatch(html, new RegExp(summary), '摘要被消费后不应在正文重复出现');
+  assert.match(html, /盛放食品的塑料托盒/, '头图同段说明不能因摘要消费被吞掉');
+});
+
+test('网站默认 DOCX：未配置系列摘要参数时不自动消费首段', () => {
+  // WHY：红线是不同网站账号规则分开；ft-default 不应因为 ft-series 的 DOCX 摘要规则改变输出。
+  const summary = '少用即环保，以年消耗1000吨塑料测算，可减少约692.0吨碳排放';
+  const result = template.processDocx({
+    paragraphs: [txtPara(summary), imgPara('head.jpeg', '96%', 1.333)],
+    imgCache: { 'head.jpeg': 'blob:head' },
+    config: { modules: { fbif_footer: { enabled: false } } },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.equal(result.summary || '', '', 'ft-default 不返回 DOCX 摘要');
+  assert.match(html, new RegExp(summary), 'ft-default 仍保留首段正文');
+});
+
+test('网站什么是系列 DOCX：目录空段后的一、标题不再被当成目录条目', () => {
+  // WHY：真实 DOCX 的目录和正文之间有空段；目录后的正文一级标题也是“一、...”，
+  // 若空段边界不生效，正文标题会被 skipHeadingPromote 错过。
+  const heading = '一、食品包装为什么需要“轻量化”方案？';
+  const result = template.processDocx({
+    paragraphs: [
+      txtPara('目录', { runs: [{ type: 'txt', text: '目录', bold: true }], allBold: true }),
+      txtPara(heading),
+      txtPara('二、什么是上海艾录微发泡片材？'),
+      para({ isEmpty: true }),
+      txtPara(heading, { runs: [{ type: 'txt', text: heading, bold: true }], allBold: true }),
+      txtPara('正文第一段。'),
+    ],
+    imgCache: {},
+    config: seriesDocxConfig(),
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<p>一、食品包装为什么需要“轻量化”方案？<\/p>\n<p>二、什么是上海艾录微发泡片材？<\/p>/, '目录条目仍是紧凑普通段落');
+  const h2s = html.match(/<h2>一、食品包装为什么需要“轻量化”方案？<\/h2>/g) || [];
+  assert.equal(h2s.length, 1, '空段后的正文一级标题应升级为 h2，且只出现一次');
+});
+
+test('网站什么是系列 DOCX：摘要提取不得把目录当摘要吃掉', () => {
+  // WHY：摘要提取发生在目录标记前；“目录”是普通加粗段且后文常有图片，不能被短文本规则误吞。
+  const result = template.processDocx({
+    paragraphs: [
+      txtPara('目录', { runs: [{ type: 'txt', text: '目录', bold: true }], allBold: true }),
+      txtPara('一、食品包装为什么需要“轻量化”方案？'),
+      para({ isEmpty: true }),
+      txtPara('一、食品包装为什么需要“轻量化”方案？', { runs: [{ type: 'txt', text: '一、食品包装为什么需要“轻量化”方案？', bold: true }], allBold: true }),
+      imgPara('p.jpeg', '96%', 1.333, [{ type: 'txt', text: '配图说明' }]),
+    ],
+    imgCache: { 'p.jpeg': 'blob:p' },
+    config: seriesDocxConfig(),
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.equal(result.summary || '', '', '目录不应成为摘要');
+  assert.match(html, /<h2>目录<\/h2>/, '目录标题必须保留');
+  assert.match(html, /<h2>一、食品包装为什么需要“轻量化”方案？<\/h2>/, '正文标题仍应升级');
+});
+
+test('网站什么是系列 DOCX：同段图片说明保留为图注，下一段来源继续并入图注组', () => {
+  // WHY：真实 DOCX 会把“ESG标识”和图片放同段，图片来源放下一段；二者都属于图片说明组。
+  const result = template.processDocx({
+    paragraphs: [
+      imgPara('esg.jpeg', '52%', 1, [{ type: 'txt', text: 'ESG标识' }]),
+      txtPara('图片来源：小红书@ESG绿色主义'),
+      txtPara('正文第一段。'),
+    ],
+    imgCache: { 'esg.jpeg': 'blob:esg' },
+    config: seriesDocxConfig(),
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /font-size: 12px; color: #7f7f7f;">ESG标识/, '同段图片文字应渲染为图注');
+  assert.match(html, /font-size: 12px; color: #7f7f7f;">图片来源：小红书@ESG绿色主义/, '下一段来源应继续并入图注组');
+});
+
+test('网站什么是系列 DOCX：按图片显示比例输出方图/竖图/二维码宽度', () => {
+  // WHY：parser 已解析 DOCX 显示宽高比；网站适配层不能丢掉 aspect 后全部回退 600。
+  const result = template.processDocx({
+    paragraphs: [
+      imgPara('square.jpeg', '52%', 1),
+      imgPara('portrait.png', '64%', 0.981),
+      imgPara('qr.png', '26%', 1),
+    ],
+    imgCache: { 'square.jpeg': 'blob:square', 'portrait.png': 'blob:portrait', 'qr.png': 'blob:qr' },
+    config: seriesDocxConfig(),
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /src="blob:square"[^>]*width="375"/, '1:1 正文图按高 375 输出宽 375');
+  assert.match(html, /src="blob:portrait"[^>]*width="368"/, '近竖图按 375 * 宽高比 输出宽度');
+  assert.match(html, /src="blob:qr"[^>]*width="150"/, '显示宽度很小的近方图按二维码宽度 150');
 });
 
 test('网站 DOCX：剥离首个「作者：」行之前的前置材料（与公众号共用前置剥离）', () => {
@@ -303,6 +442,41 @@ test('网站页脚库：active_segments 残留时仍以 active preset 为准', (
   });
   const html = result.lines.join('\n');
   assert.match(html, /BD名片按 preset 出现/, '新 preset 必须压过旧 active_segments 残留值');
+});
+
+test('网站页脚库：BD 名片片段使用传入的素材引用渲染，支持当前文章选择覆盖', () => {
+  // WHY：用户需要自己选择本篇 BD 名片。选择器只应替换 ft-series 网站页脚库里的 bd_card
+  // asset 引用，渲染器仍走素材库解析，不硬编码图片 URL。
+  const result = template.processBlocks({
+    title: 'BD 名片选择样例',
+    blocks: [{ k: 'txt', runs: [{ type: 'txt', text: '正文。' }] }],
+  }, {
+    config: {
+      modules: {
+        asset_library: {
+          assets: [
+            { id: 'ftss_bd_soso', label: 'BD名片 Soso', url: '/assets/ft-series/bd/soso.png', scope: 'global' },
+            { id: 'ftss_bd_tiki', label: 'BD名片 Tiki', url: '/assets/ft-series/bd/tiki.png', scope: 'global' },
+          ],
+        },
+        fbif_footer: {
+          enabled: true,
+          active_preset_id: 'p1',
+          segment_order: ['bd_card'],
+          segments: {
+            bd_card: {
+              html_lines: ['<p><img class="mc-img" src="{{asset#ftss_bd_tiki}}" alt="BD名片" width="600" /></p>'],
+            },
+          },
+          presets: [{ id: 'p1', name: '默认', segments: { tip: false, bd_card: true } }],
+        },
+      },
+    },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /\/assets\/ft-series\/bd\/tiki\.png/, '应渲染当前文章选择的 Tiki 名片');
+  assert.doesNotMatch(html, /\/assets\/ft-series\/bd\/soso\.png/, '不应回退到默认 Soso 名片');
 });
 
 // ---- 统一表格样式（网站渲染：本就 inline-style，与公众号物理隔离各写各的 renderTable） ----

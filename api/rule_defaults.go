@@ -140,7 +140,17 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v13→v14（2026-06-11）：网站渠道按飞书反馈批次修订——图宽规则改纵图(含1:1)长边375/二维码150
 // （image.portrait_px=375 + qr_px/qr_max_natural_px），footer_note_regex 增收「本文未标注来源的
 // 图片均来自」「*注：」变体，新增 biz_coop_line_regex（商务合作导联行 14px 斜体灰）。
-const currentBuiltinRuleVersion = 14
+// v14→v15（2026-06-14）：ft-series 网站 DOCX 启用摘要提取、同段图片图注、DOCX aspect 图宽；
+// 仅补网站「什么是系列」行为参数，ft-default/公众号规则不继承。
+const currentBuiltinRuleVersion = 15
+const defaultBuiltinRuleVersion = 14
+
+func builtinVersionForDefaultRule(id string) int {
+	if id == foodTalksSeriesSiteDefaultRulePresetID {
+		return currentBuiltinRuleVersion
+	}
+	return defaultBuiltinRuleVersion
+}
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
@@ -206,7 +216,7 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 		},
 	}
 	for id, d := range defs {
-		d.BuiltinVersion = currentBuiltinRuleVersion
+		d.BuiltinVersion = builtinVersionForDefaultRule(id)
 		defs[id] = d
 	}
 	return defs
@@ -339,7 +349,7 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 			"footer_note_regex":          map[string]any{"type": "string", "default": `^(?:本文(?:未标注来源|作者\s*[：:]|图片来源)|图片均来自|[*＊]\s*注[：:])`},
 			"repost_source_regex":        map[string]any{"type": "string", "default": `^来源[：:]\s*(.+)$`},
 			// 商务合作导联行（62139/62303 成品：14px 斜体、文本 #7f7f7f、链接保留）——2026-06-11 反馈问题九。
-			"biz_coop_line_regex":        map[string]any{"type": "string", "default": `^\s*(?:商务合作对接请点击|如有合作意向)`},
+			"biz_coop_line_regex": map[string]any{"type": "string", "default": `^\s*(?:商务合作对接请点击|如有合作意向)`},
 		},
 		// 网站识别词表/标记列表（红线下放；客户端读 lists.<key>，缺省降级同值 const）。
 		"lists": map[string]any{
@@ -402,9 +412,21 @@ func defaultFoodTalksSeriesSiteRuleConfig() map[string]any {
 	return cfg
 }
 
-// defaultFoodTalksSeriesSiteRuleBehavior 暂复用网站基线行为；系列专属 tip/商务合作文案在后续块按成品调。
+// defaultFoodTalksSeriesSiteRuleBehavior 网站「什么是系列」行为：在网站基线上只打开系列 DOCX 兼容项。
 func defaultFoodTalksSeriesSiteRuleBehavior() map[string]any {
-	return defaultFoodTalksSiteRuleBehavior()
+	beh := defaultFoodTalksSiteRuleBehavior()
+	params, _ := beh["params"].(map[string]any)
+	if params == nil {
+		params = map[string]any{}
+	}
+	params["site_variant"] = map[string]any{"type": "string", "default": "ft-series"}
+	params["docx_summary_max_chars"] = map[string]any{"type": "number", "default": 80}
+	params["docx_summary_consume"] = map[string]any{"type": "boolean", "default": true}
+	params["docx_same_paragraph_image_caption"] = map[string]any{"type": "boolean", "default": true}
+	params["docx_use_image_aspect_width"] = map[string]any{"type": "boolean", "default": true}
+	params["docx_qr_max_display_percent"] = map[string]any{"type": "number", "default": 35}
+	beh["params"] = params
+	return beh
 }
 
 // defaultFoodTalksSeriesRuleConfig 返回 FoodTalks「什么是」系列的默认参数配置。

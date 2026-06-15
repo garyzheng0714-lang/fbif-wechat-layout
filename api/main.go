@@ -164,7 +164,8 @@ func cacheStatic(next http.Handler) http.Handler {
 }
 
 func isVersionedStaticAsset(r *http.Request) bool {
-	if strings.TrimSpace(r.URL.Query().Get("v")) == "" {
+	version := strings.TrimSpace(r.URL.Query().Get("v"))
+	if version == "" || strings.EqualFold(version, "dev") || strings.HasPrefix(strings.ToLower(version), "dev-") {
 		return false
 	}
 	return isScriptOrStylePath(r.URL.Path)

@@ -188,3 +188,31 @@ test('site.html: 服务端页脚结构变化时清理旧本地状态，避免 ti
   assert.match(src, /coop_table:\s*'相关合作表'/, '左侧必须能显示相关合作表分块');
   assert.doesNotMatch(src, /资讯投稿 & 商务合作/, '网站什么是系列不能继续显示旧商务合作标签');
 });
+
+test('site.html: 网站什么是系列 BD 名片可按当前文章选择，且新文章重置为规则默认', async () => {
+  // WHY：BD 名片是运营手动选择项，不应由 DOCX 解析自动决定；同时不能把本篇选择串到下一篇。
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /let\s+footerBdCardAssetID\s*=\s*''/, 'BD 名片选择应是当前页面内存态，不落入全局默认规则');
+  assert.match(src, /FT_FOOTER_BD_CARD_RE/, '候选应限制为网站 ft-series BD 名片素材');
+  assert.match(src, /activeRulePack\.id\s*!==\s*'ft-series'/, '选择器必须只在网站 ft-series 生效');
+  assert.match(src, /data-bd-card-select/, '页脚侧栏应提供 BD 名片选择控件');
+  assert.match(src, /applyFooterArticleOverrides/, '渲染前应把当前文章选择合入 footer library');
+  assert.match(src, /replaceBdCardAssetRef/, '选择器只应替换 bd_card 的 asset 引用');
+  assert.match(src, /payload\s*===\s*footerLastArticlePayload/, '同一篇文章重排时不应清空手动选择');
+  assert.match(src, /footerLastArticlePayload\s*=\s*payload/, '新文章激活时必须记录新的文章 payload');
+  assert.match(src, /footerBdCardAssetID\s*=\s*''[\s\S]{0,160}syncEngineConfig\(true\)/, '新文章应清空本篇名片覆盖并回到规则默认');
+  assert.match(src, /fbif:article-input-started[\s\S]{0,160}clearFooterArticleOverrides\(false\)/, '新输入开始时应先清空本篇名片覆盖');
+});
+
+test('engine.js: 新文件和 URL blocks 导入都会通知站点清理当前文章覆盖', async () => {
+  // WHY：BD 名片选择是本篇文章覆盖；新文件/URL 文章开始处理时必须清空，避免串稿。
+  const src = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /dispatchArticleEvent\('fbif:article-input-started',\s*\{\s*source:\s*'file'/, '文件上传路径应通知新输入开始');
+  assert.match(src, /dispatchArticleEvent\('fbif:article-input-started',\s*\{\s*source:\s*'blocks'/, 'URL blocks 路径应通知新输入开始');
+});

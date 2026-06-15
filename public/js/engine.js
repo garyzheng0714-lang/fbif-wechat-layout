@@ -594,6 +594,9 @@ export function initApp(initialTemplate) {
       writeBottomBlocksOverride(accountId, session.bottomBlocksOverride || {});
     }
     showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats);
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('fbif:article-session-activated', { detail: { session } }));
+    }
   }
 
   async function handleFiles(files, opts) {
@@ -678,6 +681,7 @@ export function initApp(initialTemplate) {
     const isRepost = !!(opts && opts.isRepost);
     _isRepost = isRepost;
     _convLog.length = 0;
+    dispatchArticleEvent('fbif:article-input-started', { source: 'blocks', title: data && data.title || '' });
     logConv('info', '开始转化', { source: 'blocks', blocks: (data.blocks || []).length });
     errorEl.style.display = 'none';
     showImportEntry();
@@ -768,6 +772,7 @@ export function initApp(initialTemplate) {
     const isRepost = !!(opts && opts.isRepost);
     _isRepost = isRepost;
     _convLog.length = 0;
+    dispatchArticleEvent('fbif:article-input-started', { source: 'file', file: file && file.name || '' });
     logConv('info', '开始转化', { file: file.name, size: (file.size / 1024).toFixed(1) + 'KB' });
     errorEl.style.display = 'none';
     showImportEntry();

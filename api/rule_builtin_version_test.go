@@ -31,8 +31,9 @@ func TestNormalizeOverridesStaleBuiltinPreset(t *testing.T) {
 	}
 	doc := normalizeRuleStoreDocument(builtinVersionStoreDoc(stale))
 	got := doc.Rules[foodTalksDefaultRulePresetID]
-	if got.BuiltinVersion != currentBuiltinRuleVersion {
-		t.Fatalf("BuiltinVersion 应提升到 %d，实际 %d", currentBuiltinRuleVersion, got.BuiltinVersion)
+	wantVersion := builtinVersionForDefaultRule(foodTalksDefaultRulePresetID)
+	if got.BuiltinVersion != wantVersion {
+		t.Fatalf("BuiltinVersion 应提升到 %d，实际 %d", wantVersion, got.BuiltinVersion)
 	}
 	cfg := latestRuleVersion(got).Config
 	if cfg["table_border_color"] != "#888888" {
@@ -49,7 +50,7 @@ func TestNormalizeKeepsCurrentBuiltinPreset(t *testing.T) {
 	custom := ruleDefinition{
 		ID:             foodTalksDefaultRulePresetID,
 		Name:           "用户自定义",
-		BuiltinVersion: currentBuiltinRuleVersion,
+		BuiltinVersion: builtinVersionForDefaultRule(foodTalksDefaultRulePresetID),
 		Versions: []rulePresetVersion{{
 			Version: 1,
 			Config:  map[string]any{"table_border_color": "#123456"},
@@ -59,6 +60,55 @@ func TestNormalizeKeepsCurrentBuiltinPreset(t *testing.T) {
 	cfg := latestRuleVersion(doc.Rules[foodTalksDefaultRulePresetID]).Config
 	if cfg["table_border_color"] != "#123456" {
 		t.Fatalf("当前版本内置 preset 不应被覆盖：table_border_color=%v，期望保留 #123456", cfg["table_border_color"])
+	}
+}
+
+func TestNormalizeOnlyOverridesStaleTargetBuiltinPreset(t *testing.T) {
+	// 本次 v15 只更新网站 ft-series-v1。其他内置默认即便低于 currentBuiltinRuleVersion，
+	// 只要已达各自目标版本，就不能被覆盖，避免跨账号规则被重置。
+	now := "2026-06-14T00:00:00Z"
+	doc := ruleStoreDocumentV2{
+		SchemaVersion: 2,
+		Rules: map[string]ruleDefinition{
+			defaultRulePresetID: {
+				ID:             defaultRulePresetID,
+				Name:           "FBIF 用户改过的默认",
+				BuiltinVersion: builtinVersionForDefaultRule(defaultRulePresetID),
+				Versions: []rulePresetVersion{{
+					Version:   1,
+					Config:    map[string]any{"text_color": "#abcdef"},
+					Behavior:  defaultRuleBehavior(),
+					CreatedAt: now,
+				}},
+				UpdatedAt: now,
+			},
+			foodTalksSeriesSiteDefaultRulePresetID: {
+				ID:             foodTalksSeriesSiteDefaultRulePresetID,
+				Name:           "旧 ft-series 网站默认",
+				BuiltinVersion: defaultBuiltinRuleVersion,
+				Versions: []rulePresetVersion{{
+					Version:   1,
+					Config:    defaultFoodTalksSeriesSiteRuleConfig(),
+					Behavior:  defaultFoodTalksSiteRuleBehavior(), // 缺 v15 DOCX 参数
+					CreatedAt: now,
+				}},
+				UpdatedAt: now,
+			},
+		},
+		Accounts: map[string]ruleAccount{},
+	}
+	got := normalizeRuleStoreDocument(doc)
+	fbifCfg := latestRuleVersion(got.Rules[defaultRulePresetID]).Config
+	if fbifCfg["text_color"] != "#abcdef" {
+		t.Fatalf("非目标内置默认不应被 v15 覆盖：text_color=%v", fbifCfg["text_color"])
+	}
+	ftSeries := got.Rules[foodTalksSeriesSiteDefaultRulePresetID]
+	if ftSeries.BuiltinVersion != currentBuiltinRuleVersion {
+		t.Fatalf("ft-series-v1 应升级到 v15，实际 %d", ftSeries.BuiltinVersion)
+	}
+	params, _ := latestRuleVersion(ftSeries).Behavior["params"].(map[string]any)
+	if _, ok := params["docx_same_paragraph_image_caption"]; !ok {
+		t.Fatalf("ft-series-v1 升级后应含 DOCX 同段图注参数")
 	}
 }
 

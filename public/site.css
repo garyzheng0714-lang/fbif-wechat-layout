@@ -547,6 +547,35 @@ body.channel-portal-body {
   color: var(--fs-text-1);
   cursor: pointer;
 }
+.ft-footer-segments .ft-footer-seg-row {
+  flex-wrap: wrap;
+}
+.ft-footer-seg-title {
+  flex: 1;
+  min-width: 0;
+}
+.ft-footer-bd-select {
+  flex: 0 0 calc(100% - 22px);
+  margin-left: 22px;
+  height: 30px;
+  min-width: 0;
+  border: 1px solid var(--fs-border-control);
+  border-radius: var(--fs-r-xs);
+  background: var(--fs-bg-card);
+  color: var(--fs-text-1);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 0 8px;
+}
+.ft-footer-bd-select:focus {
+  outline: none;
+  border-color: var(--fs-brand);
+  box-shadow: 0 0 0 2px var(--fs-brand-soft);
+}
+.ft-footer-bd-select:disabled {
+  color: var(--fs-text-3);
+  background: var(--fs-bg-sunken);
+}
 .ft-footer-segments input[type="checkbox"] {
   width: 14px;
   height: 14px;

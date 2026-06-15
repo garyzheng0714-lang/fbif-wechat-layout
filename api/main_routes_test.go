@@ -100,6 +100,17 @@ func TestStaticCache_VersionedJSIsImmutable(t *testing.T) {
 	}
 }
 
+func TestStaticCache_DevVersionedJSStaysNoCache(t *testing.T) {
+	publicDir := mustWriteStaticAsset(t, "js/engine.js", []byte("export {};"))
+	handler := cacheStatic(http.FileServer(http.Dir(publicDir)))
+	req := httptest.NewRequest(http.MethodGet, "/js/engine.js?v=dev", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Cache-Control"); got != appShellCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, appShellCacheControl)
+	}
+}
+
 func TestStaticCache_BareNestedJSStaysNoCache(t *testing.T) {
 	publicDir := mustWriteStaticAsset(t, "js/parser.js", []byte("export {};"))
 	handler := cacheStatic(http.FileServer(http.Dir(publicDir)))
