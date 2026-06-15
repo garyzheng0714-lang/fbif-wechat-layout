@@ -87,7 +87,7 @@
         </div>
       </div>
 
-      <details class="ft-advanced-options" id="footerLib">
+      <details class="ft-advanced-options" id="footerLib" open>
         <summary class="ft-adv-summary">页脚</summary>
         <div class="ft-adv-body">
           <label class="ft-adv-toggle">
@@ -686,6 +686,11 @@ function footerBdCardAssets() {
   return footerAssets().filter(isFooterBdCardAsset);
 }
 
+function footerAssetByID(id) {
+  if (!id) return null;
+  return footerAssets().find(asset => String(asset && asset.id || '') === String(id)) || null;
+}
+
 function footerPresetList(footerLib = serverFooterLibrary()) {
   return Array.isArray(footerLib.presets) && footerLib.presets.length ? footerLib.presets : FT_FOOTER_FALLBACK_PRESETS;
 }
@@ -705,6 +710,19 @@ function replaceBdCardAssetRef(lines, assetID) {
   if (!assetID) return lines;
   const nextRef = '{{asset#' + assetID + '}}';
   return (lines || []).map(line => String(line || '').replace(/\{\{asset#[a-z0-9_-]+\}\}/i, nextRef));
+}
+
+function footerDefaultBdCardAssetID(footerLib = serverFooterLibrary()) {
+  const segments = footerLib && footerLib.segments && typeof footerLib.segments === 'object' ? footerLib.segments : null;
+  const entry = segments && segments.bd_card;
+  const htmlLines = Array.isArray(entry) ? entry : (entry && Array.isArray(entry.html_lines) ? entry.html_lines : []);
+  const line = htmlLines.map(v => String(v || '')).find(v => /\{\{asset#[a-z0-9_-]+\}\}/i.test(v)) || '';
+  const match = line.match(/\{\{asset#([a-z0-9_-]+)\}\}/i);
+  return match ? match[1] : '';
+}
+
+function footerSelectedBdCardAsset() {
+  return footerAssetByID(footerBdCardAssetID) || footerAssetByID(footerDefaultBdCardAssetID());
 }
 
 function applyFooterArticleOverrides(footerLib) {
@@ -1065,18 +1083,23 @@ bindUrlImportShortcuts({
     const assets = footerBdCardAssets();
     if (footerBdCardAssetID && !assets.some(asset => asset.id === footerBdCardAssetID)) footerBdCardAssetID = '';
     if (!assets.length) return '';
-    return `<select class="ft-footer-bd-select" data-bd-card-select aria-label="选择 BD 名片">
-      <option value="" ${footerBdCardAssetID ? '' : 'selected'}>按规则默认</option>
-      ${assets.map(asset => `<option value="${escText(asset.id)}" ${asset.id === footerBdCardAssetID ? 'selected' : ''}>${escText(asset.label || asset.id)}</option>`).join('')}
-    </select>`;
+    return `<div class="ft-footer-bd-control">
+      <select class="ft-footer-bd-select" data-bd-card-select aria-label="选择 BD 名片">
+        <option value="" ${footerBdCardAssetID ? '' : 'selected'}>按规则默认</option>
+        ${assets.map(asset => `<option value="${escText(asset.id)}" ${asset.id === footerBdCardAssetID ? 'selected' : ''}>${escText(asset.label || asset.id)}</option>`).join('')}
+      </select>
+      <div class="ft-footer-bd-preview" data-bd-card-preview hidden></div>
+    </div>`;
   }
 
   function segmentRowHtml(key) {
-    return `<label class="ft-footer-seg-row" data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}">
-      <input type="checkbox" data-seg="${escText(key)}">
-      <span class="ft-footer-seg-title">${escText(FT_FOOTER_LABELS[key] || key)}</span>
+    return `<div class="ft-footer-seg-row" data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}">
+      <label class="ft-footer-seg-label">
+        <input type="checkbox" data-seg="${escText(key)}">
+        <span class="ft-footer-seg-title">${escText(FT_FOOTER_LABELS[key] || key)}</span>
+      </label>
       ${bdCardSelectHtml(key)}
-    </label>`;
+    </div>`;
   }
 
   function renderControls() {
@@ -1088,11 +1111,17 @@ bindUrlImportShortcuts({
 
   const checkboxes = () => Array.from(segsEl.querySelectorAll('input[type="checkbox"]'));
   const segmentKeys = () => order.slice();
-  function matchPreset() { for (const [id, segs] of Object.entries(PRESETS)) if (segmentKeys().every(k => !!segments[k] === !!segs[k])) return id; return null; }
+  function isEmptyFooterPreset(segs) {
+    return segmentKeys().every(k => !segs || !segs[k]);
+  }
+  function matchPreset() {
+    if (!enabled && PRESETS.none && isEmptyFooterPreset(PRESETS.none)) return 'none';
+    for (const [id, segs] of Object.entries(PRESETS)) if (segmentKeys().every(k => !!segments[k] === !!segs[k])) return id;
+    return null;
+  }
   function paint() {
     toggle.checked = enabled;
     segsEl.classList.toggle('ft-footer-disabled', !enabled);
-    presetsEl.classList.toggle('ft-footer-disabled', !enabled);
     const active = matchPreset();
     presetsEl.querySelectorAll('.ft-footer-preset').forEach(b => b.classList.toggle('active', b.dataset.preset === active));
     checkboxes().forEach(cb => { cb.checked = !!segments[cb.dataset.seg]; });
@@ -1100,6 +1129,18 @@ bindUrlImportShortcuts({
     if (bdSelect) {
       bdSelect.value = footerBdCardAssetID;
       bdSelect.disabled = !enabled || !segments.bd_card;
+    }
+    const bdPreview = segsEl.querySelector('[data-bd-card-preview]');
+    const bdAsset = footerSelectedBdCardAsset();
+    if (bdPreview) {
+      if (bdAsset && bdAsset.url) {
+        bdPreview.innerHTML = `<img src="${escText(bdAsset.url)}" alt="${escText(bdAsset.label || 'BD名片预览')}" loading="lazy">`;
+        bdPreview.hidden = false;
+        bdPreview.classList.toggle('disabled', !enabled || !segments.bd_card);
+      } else {
+        bdPreview.innerHTML = '';
+        bdPreview.hidden = true;
+      }
     }
   }
   function persist(rerender) { localStorage.setItem(FT_FOOTER_STORAGE.enabled, enabled ? '1' : '0'); localStorage.setItem(FT_FOOTER_STORAGE.segments, JSON.stringify(segments)); localStorage.setItem(FT_FOOTER_STORAGE.order, JSON.stringify(order)); syncEngineConfig(rerender); }
@@ -1115,8 +1156,9 @@ bindUrlImportShortcuts({
   presetsEl.addEventListener('click', e => {
     const btn = e.target.closest('.ft-footer-preset');
     if (!btn) return;
-    if (!enabled) enabled = true;
-    segments = { ...(PRESETS[btn.dataset.preset] || {}) };
+    const nextSegments = { ...(PRESETS[btn.dataset.preset] || {}) };
+    enabled = !isEmptyFooterPreset(nextSegments);
+    segments = nextSegments;
     paint(); persist(true);
   });
   segsEl.addEventListener('change', (e) => {

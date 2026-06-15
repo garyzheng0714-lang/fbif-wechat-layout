@@ -167,12 +167,15 @@ test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并�
     new URL('../public/site.html', import.meta.url),
     'utf8'
   );
+  assert.match(src, /<details class="ft-advanced-options" id="footerLib" open>/, '页脚控制区默认应展开，避免运营每篇都多点一次');
   assert.match(src, /serverFooterLibrary\(\)/, '页脚侧栏应读取服务端页脚库');
   assert.match(src, /footerLib\.presets/, '预设按钮应由服务端 presets 渲染');
   assert.match(src, /footerLib\.segment_order/, '片段顺序应由服务端 segment_order 渲染');
   assert.match(src, /ft\.footer\.order/, '当前文章排序应本地保存为临时选择');
   assert.match(src, /data-seg-row/, '片段行应有拖拽目标');
   assert.match(src, /dragstart/, '应支持拖拽排序');
+  assert.match(src, /function\s+isEmptyFooterPreset/, '无页脚 preset 应被识别为空页脚状态');
+  assert.match(src, /enabled\s*=\s*!\s*isEmptyFooterPreset\(nextSegments\)/, '点击无页脚应同步关闭总开关，点击完整预设应重新打开');
   assert.doesNotMatch(src, /<button type="button" class="ft-footer-preset" data-preset="fbif-original">FBIF原创<\/button>/, '不应在 HTML 静态写死预设按钮');
 });
 
@@ -199,6 +202,8 @@ test('site.html: 网站什么是系列 BD 名片可按当前文章选择，且�
   assert.match(src, /FT_FOOTER_BD_CARD_RE/, '候选应限制为网站 ft-series BD 名片素材');
   assert.match(src, /activeRulePack\.id\s*!==\s*'ft-series'/, '选择器必须只在网站 ft-series 生效');
   assert.match(src, /data-bd-card-select/, '页脚侧栏应提供 BD 名片选择控件');
+  assert.match(src, /data-bd-card-preview/, 'BD 名片选择应显示当前图片预览');
+  assert.match(src, /footerSelectedBdCardAsset/, '预览图应来自当前选择或规则默认素材');
   assert.match(src, /applyFooterArticleOverrides/, '渲染前应把当前文章选择合入 footer library');
   assert.match(src, /replaceBdCardAssetRef/, '选择器只应替换 bd_card 的 asset 引用');
   assert.match(src, /payload\s*===\s*footerLastArticlePayload/, '同一篇文章重排时不应清空手动选择');

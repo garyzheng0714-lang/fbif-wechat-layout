@@ -539,7 +539,7 @@ body.channel-portal-body {
   flex-direction: column;
   gap: 9px;
 }
-.ft-footer-segments label {
+.ft-footer-seg-label {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -548,16 +548,24 @@ body.channel-portal-body {
   cursor: pointer;
 }
 .ft-footer-segments .ft-footer-seg-row {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 .ft-footer-seg-title {
   flex: 1;
   min-width: 0;
 }
-.ft-footer-bd-select {
+.ft-footer-bd-control {
   flex: 0 0 calc(100% - 22px);
   margin-left: 22px;
+  display: grid;
+  gap: 8px;
+}
+.ft-footer-bd-select {
   height: 30px;
+  width: 100%;
   min-width: 0;
   border: 1px solid var(--fs-border-control);
   border-radius: var(--fs-r-xs);
@@ -575,6 +583,23 @@ body.channel-portal-body {
 .ft-footer-bd-select:disabled {
   color: var(--fs-text-3);
   background: var(--fs-bg-sunken);
+}
+.ft-footer-bd-preview {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--fs-border-card);
+  border-radius: var(--fs-r-xs);
+  background: var(--fs-bg-nested);
+}
+.ft-footer-bd-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 120px;
+  object-fit: contain;
+}
+.ft-footer-bd-preview.disabled {
+  opacity: 0.5;
 }
 .ft-footer-segments input[type="checkbox"] {
   width: 14px;
