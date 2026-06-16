@@ -133,6 +133,20 @@ function stripSectionPrefix(text) {
   return String(text || '').replace(/^\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[、.．]\s*/, '').trim();
 }
 
+function hasSectionPrefix(text) {
+  const raw = String(text || '').trim();
+  return raw && stripSectionPrefix(raw) !== raw;
+}
+
+function isSeriesSiteConfig(config = {}) {
+  const behavior = (config && config.behavior) || {};
+  return behaviorParamStr(behavior, 'site_variant', '') === 'ft-series';
+}
+
+function hasLinkRun(runs) {
+  return (runs || []).some(r => r && r.type === 'link' && r.href);
+}
+
 function matchesRefHeader(text, refHeaderRe) {
   const raw = String(text || '').trim();
   if (!raw) return false;
@@ -325,6 +339,10 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   const footerNoteRe = behaviorRegex(behavior, 'footer_note_regex', '^(?:本文(?:未标注来源|作者\\s*[：:]|图片来源)|图片均来自|[*＊]\\s*注[：:])');
   // 商务合作导联行（62139/62303 实测：14px 斜体、文本 #7f7f7f、链接保留）。
   const coopLineRe = behaviorRegex(behavior, 'biz_coop_line_regex', '^\\s*(?:商务合作对接请点击|如有合作意向)');
+  const isSeriesSite = isSeriesSiteConfig(config);
+  const relatedReadingRe = isSeriesSite
+    ? behaviorRegex(behavior, 'recommended_reading_regex', '^\\s*(?:相关阅读|推荐阅读)\\s*[：:]?\\s*$')
+    : null;
   // 公众号导流尾段标记 / 提示页脚特征句（红线下放：behavior.lists，缺省降级 const）。
   const trailerMarkers = compileMarkerList(behavior, 'wechat_trailer_markers', WECHAT_TRAILER_MARKERS);
   const tipSignatures  = compileMarkerList(behavior, 'wechat_tip_signatures', WECHAT_TIP_SIGNATURES);
@@ -396,6 +414,36 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     }
   }
 
+  // 阶段 2.6：系列网站「相关阅读/推荐阅读」组。该组是关于区里的普通链接列表，
+  // 不应被当作正文逐段拉开空行，也不应被通用标题启发式升级。
+  if (relatedReadingRe) {
+    let relatedMode = false;
+    for (let i = 0; i < out.length; i++) {
+      const e = out[i];
+      if (!e || e.k !== 'p') {
+        if (relatedMode && e && e.blankBefore) relatedMode = false;
+        continue;
+      }
+      const text = runsToText(e.runs).trim();
+      relatedReadingRe.lastIndex = 0;
+      if (text && relatedReadingRe.test(text)) {
+        out[i] = { ...e, relatedReading: true, skipHeadingPromote: true };
+        relatedMode = true;
+        continue;
+      }
+      if (!relatedMode) continue;
+      if (e.blankBefore || !text || matchesRefHeader(text, refHeaderRe) || hasSectionPrefix(text)) {
+        relatedMode = false;
+        continue;
+      }
+      if (hasLinkRun(e.runs) || !/[。.]$/.test(text)) {
+        out[i] = { ...e, relatedReading: true, skipHeadingPromote: true };
+      } else {
+        relatedMode = false;
+      }
+    }
+  }
+
   // 阶段 3：参考来源段头 + 后续 ref-item（遇非 [n] 开头段即中断）。
   // 网站「什么是系列」URL 源稿的参考标题常是 h2「七、参考来源」，标题本身应保留，
   // 但其后的 [n] 条目仍要进入 ref-item 分支，才能连续无空行并套灰色。
@@ -420,7 +468,9 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     const text = runsToText(e.runs).trim();
     if (!refMode) {
       if (matchesRefHeader(text, refHeaderRe)) {
-        out[i] = { k: 'ref-header' };
+        out[i] = isSeriesSite && hasSectionPrefix(text)
+          ? { k: 'h', level: 2, runs: e.runs }
+          : { k: 'ref-header' };
         refMode = true;
       }
       continue;

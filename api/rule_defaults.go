@@ -142,7 +142,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 图片均来自」「*注：」变体，新增 biz_coop_line_regex（商务合作导联行 14px 斜体灰）。
 // v14→v15（2026-06-14）：ft-series 网站 DOCX 启用摘要提取、同段图片图注、DOCX aspect 图宽；
 // 仅补网站「什么是系列」行为参数，ft-default/公众号规则不继承。
-const currentBuiltinRuleVersion = 15
+// v15→v16（2026-06-16）：ft-series 网站 6/15 DOCX 反馈回归——参考来源编号标题、
+// 相关阅读紧凑、联系区边界、关于区 logo 300、文末图源错字窄容错；仅覆盖 ft-series-v1。
+const currentBuiltinRuleVersion = 16
 const defaultBuiltinRuleVersion = 14
 
 func builtinVersionForDefaultRule(id string) int {
@@ -425,6 +427,12 @@ func defaultFoodTalksSeriesSiteRuleBehavior() map[string]any {
 	params["docx_same_paragraph_image_caption"] = map[string]any{"type": "boolean", "default": true}
 	params["docx_use_image_aspect_width"] = map[string]any{"type": "boolean", "default": true}
 	params["docx_qr_max_display_percent"] = map[string]any{"type": "number", "default": 35}
+	params["recommended_reading_regex"] = map[string]any{"type": "string", "default": `^\s*(?:相关阅读|推荐阅读)\s*[：:]?\s*$`}
+	params["contact_section_regex"] = map[string]any{"type": "string", "default": `联系`}
+	params["about_section_regex"] = map[string]any{"type": "string", "default": `^关于`}
+	params["about_logo_caption_regex"] = map[string]any{"type": "string", "default": `(?i)logo|标志|商标`}
+	params["about_logo_width_px"] = map[string]any{"type": "number", "default": 300}
+	params["footer_note_regex"] = map[string]any{"type": "string", "default": `^本文(?:(?:未|为)标注来源(?:的)?图片(?:/数据)?均来自|作者\s*[：:]|图片来源)|^图片均来自|^[*＊]\s*注[：:]`}
 	beh["params"] = params
 	return beh
 }

@@ -202,8 +202,7 @@ const BLANK_LINE = '<p style="text-align: justify;"><br></p>';
 const CENTER_BLANK_LINE = '<p style="text-align: center;"><br></p>';
 
 function isSeriesSiteConfig(config = {}) {
-  return behParamStr(config, 'site_variant', '') === 'ft-series' ||
-    (config && config.justify_paragraphs === false);
+  return behParamStr(config, 'site_variant', '') === 'ft-series';
 }
 
 function chineseSectionNumber(n) {
@@ -455,6 +454,10 @@ function renderedImageWidth(naturalWidth, naturalHeight, config = {}, elem = {})
   // 图宽规则（红线下放：config.image.portrait_px/landscape_px/qr_px/qr_max_natural_px，
   // 缺省降级 375/600/150/500——2026-06-11 飞书反馈问题十一/十五口径）。
   const opts = imageWidthOptions(config);
+  if (isSeriesSiteConfig(config)) {
+    const forced = Number(elem && (elem.renderWidth || elem.widthOverride));
+    if (Number.isFinite(forced) && forced > 0) return Math.round(forced);
+  }
   const w = Number(naturalWidth || 0);
   const h = Number(naturalHeight || 0);
   if (w && h) return adaptiveImageWidth(w, h, opts);
@@ -589,6 +592,48 @@ function promoteImageCaptions(elems, capOpts) {
   return out;
 }
 
+function cloneElem(e) {
+  if (!e) return e;
+  return {
+    ...e,
+    runs: Array.isArray(e.runs) ? e.runs.map(r => ({ ...r })) : e.runs,
+  };
+}
+
+function markSeriesAboutLogoImages(elems, config = {}) {
+  if (!isSeriesSiteConfig(config)) return elems;
+  const width = behParamNum(config, 'about_logo_width_px', 0);
+  if (!(width > 0)) return elems;
+
+  let aboutRe = /^关于/;
+  let logoRe = /logo|标志|商标/i;
+  const aboutSrc = behParamStr(config, 'about_section_regex', '');
+  const logoSrc = behParamStr(config, 'about_logo_caption_regex', '');
+  if (aboutSrc) { try { aboutRe = compileSiteRegex(aboutSrc); } catch (e) { /* 非法降级 */ } }
+  if (logoSrc) { try { logoRe = compileSiteRegex(logoSrc); } catch (e) { /* 非法降级 */ } }
+
+  const out = (elems || []).map(cloneElem);
+  let inAbout = false;
+  for (let i = 0; i < out.length; i++) {
+    const e = out[i];
+    if (!e) continue;
+    if (e.k === 'h') {
+      const title = stripSectionNumber(runsToPlain(e.runs)).trim();
+      aboutRe.lastIndex = 0;
+      inAbout = aboutRe.test(title);
+      continue;
+    }
+    if (!inAbout || e.k !== 'img') continue;
+    const next = out[i + 1];
+    const captionText = next && (next.k === 'cap' || next.k === 'p' || next.k === 'h')
+      ? runsToPlain(next.runs || [])
+      : '';
+    logoRe.lastIndex = 0;
+    if (logoRe.test(captionText)) out[i] = { ...e, renderWidth: width };
+  }
+  return out;
+}
+
 // ---- 渲染主入口：把分类后的 elems 拼装成 HTML 行数组 ----
 
 function render(elems, config = {}) {
@@ -606,7 +651,12 @@ function render(elems, config = {}) {
       // div，间距由后台 CSS margin 提供——飞书反馈问题十/十二核对）。p 分支已在每段后
       // 留空行，这里避免再叠加成双空行。
       const lv = e.level === 3 ? 3 : 2;
-      if (lv === 3) {
+      const prev = elems[i - 1];
+      const last = lines[lines.length - 1];
+      if (isSeriesSiteConfig(config) && prev && (prev.k === 'img' || prev.k === 'video' || prev.k === 'cap') &&
+          (last === BLANK_LINE || last === CENTER_BLANK_LINE)) {
+        lines.pop();
+      } else if (lv === 3) {
         // h3 紧贴：吃掉 p 分支刚补的尾空行，对齐 62303「正文段→h3 直接相连」结构
         if (lines.length > 0 && lines[lines.length - 1] === BLANK_LINE) lines.pop();
       } else if (!prevWasHeading && lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
@@ -778,8 +828,9 @@ function render(elems, config = {}) {
     const compactContactPair = e.contactInfo && next && next.contactInfo && !next.blankBefore;
     // 目录条目之间不插空行（62303 成品：目录区条目紧密相连，仅区尾 1 空行）。
     const compactTocPair = e.tocEntry && next && next.tocEntry;
+    const compactRelatedPair = e.relatedReading && next && next.relatedReading && !next.blankBefore;
     // 如果当前是独立链接 + 上一段也是独立链接，不插空行；联系信息块内部同理保持紧凑。
-    if (!(standalone && prevWasStandaloneLink) && !compactContactPair && !compactTocPair) {
+    if (!(standalone && prevWasStandaloneLink) && !compactContactPair && !compactTocPair && !compactRelatedPair) {
       lines.push(BLANK_LINE);
     }
     prevWasStandaloneLink = standalone;
@@ -1039,10 +1090,11 @@ export default {
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
+    const finalElems = markSeriesAboutLogoImages(promoted, config);
     return {
-      lines: render(promoted, config),
+      lines: render(finalElems, config),
       imgN,
-      headingN: promoted.filter(e => e.k === 'h').length,
+      headingN: finalElems.filter(e => e.k === 'h').length,
       summary: docxSummary.summary,
     };
   },
@@ -1053,10 +1105,11 @@ export default {
     const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
     const behaved = applyFoodTalksBehavior(normalized, config, { isRepost: !!(opts && opts.isRepost), title });
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
+    const finalElems = markSeriesAboutLogoImages(promoted, config);
     return {
-      lines: render(promoted, config),
+      lines: render(finalElems, config),
       imgN,
-      headingN: promoted.filter(e => e.k === 'h').length,
+      headingN: finalElems.filter(e => e.k === 'h').length,
       title,
     };
   },
@@ -1072,10 +1125,11 @@ export default {
       sourceUrl: (data && data.source) || '',
     });
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
+    const finalElems = markSeriesAboutLogoImages(promoted, config);
     return {
-      lines: render(promoted, config),
+      lines: render(finalElems, config),
       imgN,
-      headingN: promoted.filter(e => e.k === 'h').length,
+      headingN: finalElems.filter(e => e.k === 'h').length,
       title,
     };
   },

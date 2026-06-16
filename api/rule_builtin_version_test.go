@@ -64,7 +64,7 @@ func TestNormalizeKeepsCurrentBuiltinPreset(t *testing.T) {
 }
 
 func TestNormalizeOnlyOverridesStaleTargetBuiltinPreset(t *testing.T) {
-	// 本次 v15 只更新网站 ft-series-v1。其他内置默认即便低于 currentBuiltinRuleVersion，
+	// 本次 v16 只更新网站 ft-series-v1。其他内置默认即便低于 currentBuiltinRuleVersion，
 	// 只要已达各自目标版本，就不能被覆盖，避免跨账号规则被重置。
 	now := "2026-06-14T00:00:00Z"
 	doc := ruleStoreDocumentV2{
@@ -89,7 +89,7 @@ func TestNormalizeOnlyOverridesStaleTargetBuiltinPreset(t *testing.T) {
 				Versions: []rulePresetVersion{{
 					Version:   1,
 					Config:    defaultFoodTalksSeriesSiteRuleConfig(),
-					Behavior:  defaultFoodTalksSiteRuleBehavior(), // 缺 v15 DOCX 参数
+					Behavior:  defaultFoodTalksSiteRuleBehavior(), // 缺 v16 ft-series DOCX/6-15 参数
 					CreatedAt: now,
 				}},
 				UpdatedAt: now,
@@ -104,11 +104,14 @@ func TestNormalizeOnlyOverridesStaleTargetBuiltinPreset(t *testing.T) {
 	}
 	ftSeries := got.Rules[foodTalksSeriesSiteDefaultRulePresetID]
 	if ftSeries.BuiltinVersion != currentBuiltinRuleVersion {
-		t.Fatalf("ft-series-v1 应升级到 v15，实际 %d", ftSeries.BuiltinVersion)
+		t.Fatalf("ft-series-v1 应升级到 v16，实际 %d", ftSeries.BuiltinVersion)
 	}
 	params, _ := latestRuleVersion(ftSeries).Behavior["params"].(map[string]any)
 	if _, ok := params["docx_same_paragraph_image_caption"]; !ok {
 		t.Fatalf("ft-series-v1 升级后应含 DOCX 同段图注参数")
+	}
+	if _, ok := params["about_logo_width_px"]; !ok {
+		t.Fatalf("ft-series-v1 升级后应含关于区 logo 宽度参数")
 	}
 }
 

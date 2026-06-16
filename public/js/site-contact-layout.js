@@ -1,5 +1,5 @@
 // FoodTalks 网站「什么是系列」联系区归一化。
-// 只处理 config.justify_paragraphs=false 的系列网站包：联系信息块居中，组内紧凑。
+// 只处理 behavior.params.site_variant=ft-series 的系列网站包：联系信息块居中，组内紧凑。
 
 function behParamStr(config, key, fallback) {
   const p = config && config.behavior && config.behavior.params;
@@ -20,7 +20,7 @@ function behaviorRegex(config, key, fallback) {
 }
 
 function isSeriesSiteConfig(config = {}) {
-  return config && config.justify_paragraphs === false;
+  return behParamStr(config, 'site_variant', '') === 'ft-series';
 }
 
 function runsToText(runs) {
@@ -41,6 +41,15 @@ function allVisibleRunsBold(runs) {
   return visible.length > 0 && visible.every(r => r.bold);
 }
 
+function stripSectionPrefix(text) {
+  return String(text || '').replace(/^\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[、.．]\s*/, '').trim();
+}
+
+function hasSectionPrefix(text) {
+  const raw = String(text || '').trim();
+  return raw && stripSectionPrefix(raw) !== raw;
+}
+
 function cloneElem(e) {
   return {
     ...e,
@@ -49,10 +58,18 @@ function cloneElem(e) {
 }
 
 function isContactBoundaryText(text) {
-  return /^(参考(来源|文献|资料|链接)|信息来源)\s*[：:]?$/.test(text) ||
-    /^本文(作者|图片来源)\s*[：:]/.test(text) ||
-    /^图片均来自/.test(text) ||
-    /^提示\s*[：:]/.test(text);
+  const t = stripSectionPrefix(text);
+  return /^(参考(来源|文献|资料|链接)|信息来源)\s*[：:]?$/.test(t) ||
+    /^本文(?:(?:未|为)标注来源(?:的)?图片(?:\/数据)?均来自|作者|图片来源)\s*[：:]?/.test(t) ||
+    /^图片均来自/.test(t) ||
+    /^提示\s*[：:]/.test(t);
+}
+
+function isSectionBoundary(e) {
+  if (!e) return false;
+  if (e.k === 'h') return true;
+  if (e.k !== 'p') return false;
+  return hasSectionPrefix(elemText(e));
 }
 
 function markContactInfo(e, text) {
@@ -66,7 +83,7 @@ export function applySeriesContactLayout(elems, config = {}) {
   if (!isSeriesSiteConfig(config)) return elems;
   const out = (elems || []).map(cloneElem);
   const hPos = [];
-  for (let i = 0; i < out.length; i++) if (out[i] && out[i].k === 'h') hPos.push(i);
+  for (let i = 0; i < out.length; i++) if (isSectionBoundary(out[i])) hPos.push(i);
   if (!hPos.length) return elems;
 
   const sectionRe = behaviorRegex(config, 'contact_section_regex', '联系');

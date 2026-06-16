@@ -22,6 +22,18 @@ const DEFAULT_CONFIG = {
   },
 };
 
+const SERIES_CONFIG = {
+  ...DEFAULT_CONFIG,
+  behavior: {
+    ...DEFAULT_CONFIG.behavior,
+    params: {
+      site_variant: { type: 'string', default: 'ft-series' },
+      recommended_reading_regex: { type: 'string', default: '^\\s*(?:相关阅读|推荐阅读)\\s*[：:]?\\s*$' },
+      footer_note_regex: { type: 'string', default: '^本文(?:(?:未|为)标注来源(?:的)?图片(?:/数据)?均来自|作者\\s*[：:]|图片来源)|^图片均来自|^[*＊]\\s*注[：:]' },
+    },
+  },
+};
+
 function p(text) {
   return { k: 'p', runs: [{ type: 'txt', text }] };
 }
@@ -519,4 +531,52 @@ test('footer_note 默认正则覆盖 *注 与 本文未标注来源的图片均�
   ], DEFAULT_CONFIG, {});
   assert.equal(out[1].k, 'footer-note');
   assert.equal(out[2].k, 'footer-note');
+});
+
+test('ft-series：编号参考来源普通段保留为 h2，后续 [n] 仍进 ref-item', () => {
+  // WHY：6/15 上海艾录 DOCX 的「六、参考来源」是全粗普通段。系列网站应把它当标题，
+  // 但后续参考条目仍要走灰色 ref-item；不能提前降级成 ref-header。
+  const out = applyFoodTalksBehavior([
+    p('正文'),
+    p('六、参考来源'),
+    p('[1] 来源 A'),
+    p('[2] 来源 B'),
+  ], SERIES_CONFIG, {});
+  assert.equal(out[1].k, 'h');
+  assert.equal(out[1].level, 2);
+  assert.equal(out[2].k, 'ref-item');
+  assert.equal(out[3].k, 'ref-item');
+});
+
+test('ft-series：兼容 DOCX 错字「本文为标注来源的图片均来自」为文末小字', () => {
+  // WHY：用户上传 DOCX 原文少了「未」，标准稿是「未标注」。工具不改正文内容，
+  // 但在 ft-series 中窄容错，避免样式降级成普通正文。
+  const out = applyFoodTalksBehavior([
+    p('正文'),
+    p('本文为标注来源的图片均来自上海艾录'),
+    p('本文作者：Isaac, FoodTalks'),
+  ], SERIES_CONFIG, {});
+  assert.equal(out[1].k, 'footer-note');
+  assert.deepEqual(out[1].lines, ['本文为标注来源的图片均来自上海艾录']);
+  assert.equal(out[2].k, 'footer-note');
+});
+
+test('ft-series：相关阅读组打标为紧凑段，非系列默认不触发', () => {
+  const series = applyFoodTalksBehavior([
+    p('相关阅读：'),
+    p('第一篇相关文章'),
+    p('第二篇相关文章'),
+    { ...p('正文继续。'), blankBefore: true },
+  ], SERIES_CONFIG, {});
+  assert.equal(series[0].relatedReading, true);
+  assert.equal(series[1].relatedReading, true);
+  assert.equal(series[2].relatedReading, true);
+  assert.equal(series[3].relatedReading, undefined);
+
+  const normal = applyFoodTalksBehavior([
+    p('相关阅读：'),
+    p('第一篇相关文章'),
+  ], DEFAULT_CONFIG, {});
+  assert.equal(normal[0].relatedReading, undefined);
+  assert.equal(normal[1].relatedReading, undefined);
 });

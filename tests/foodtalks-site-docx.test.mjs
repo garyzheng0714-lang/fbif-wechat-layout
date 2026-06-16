@@ -58,8 +58,16 @@ function txtPara(text, extra = {}) {
   return para({ runs: [{ type: 'txt', text }], text, ...extra });
 }
 
+function boldPara(text, extra = {}) {
+  return txtPara(text, {
+    runs: [{ type: 'txt', text, bold: true }],
+    allBold: true,
+    ...extra,
+  });
+}
+
 function seriesDocxConfig(extra = {}) {
-  return {
+  const base = {
     justify_paragraphs: false,
     muted_color: '#7f7f7f',
     caption_font_size: '12',
@@ -73,10 +81,31 @@ function seriesDocxConfig(extra = {}) {
         docx_same_paragraph_image_caption: { type: 'boolean', default: true },
         docx_use_image_aspect_width: { type: 'boolean', default: true },
         docx_qr_max_display_percent: { type: 'number', default: 35 },
+        recommended_reading_regex: { type: 'string', default: '^\\s*(?:相关阅读|推荐阅读)\\s*[：:]?\\s*$' },
+        contact_section_regex: { type: 'string', default: '联系' },
+        about_section_regex: { type: 'string', default: '^关于' },
+        about_logo_caption_regex: { type: 'string', default: '(?i)logo|标志|商标' },
+        about_logo_width_px: { type: 'number', default: 300 },
+        footer_note_regex: { type: 'string', default: '^本文(?:(?:未|为)标注来源(?:的)?图片(?:/数据)?均来自|作者\\s*[：:]|图片来源)|^图片均来自|^[*＊]\\s*注[：:]' },
       },
     },
     modules: { fbif_footer: { enabled: false }, bottom_blocks: { enabled: false, presets: [] } },
+  };
+  return {
+    ...base,
     ...extra,
+    behavior: {
+      ...base.behavior,
+      ...(extra.behavior || {}),
+      params: {
+        ...base.behavior.params,
+        ...((extra.behavior && extra.behavior.params) || {}),
+      },
+    },
+    modules: {
+      ...base.modules,
+      ...(extra.modules || {}),
+    },
   };
 }
 
@@ -280,14 +309,7 @@ test('网站什么是系列 URL 导入：分节图转文字标题，图片标题
       txtBlock('本文未标注来源图片/数据均来自橙宝 本文作者：Ian, FoodTalks'),
     ],
   }, {
-    config: {
-      justify_paragraphs: false,
-      muted_color: '#7f7f7f',
-      caption_font_size: '12',
-      footer_note_color: '#7f7f7f',
-      footer_note_font_size: '14',
-      modules: { fbif_footer: { enabled: false } },
-    },
+    config: seriesDocxConfig(),
     isRepost: false,
   });
   const html = result.lines.join('\n');
@@ -330,13 +352,7 @@ test('网站什么是系列 URL 导入：联系区信息块居中，组内紧凑
       txtBlock('[1] 中国消费者网（2025），《HPP果汁成果汁界新晋顶流》'),
     ],
   }, {
-    config: {
-      justify_paragraphs: false,
-      muted_color: '#7f7f7f',
-      footer_note_color: '#7f7f7f',
-      footer_note_font_size: '14',
-      modules: { fbif_footer: { enabled: false } },
-    },
+    config: seriesDocxConfig(),
     isRepost: false,
   });
   const html = result.lines.join('\n');
@@ -381,11 +397,7 @@ test('网站什么是系列 URL 导入：联系区即使是最后一节也按信
       txtBlock('本文作者：Ian, FoodTalks'),
     ],
   }, {
-    config: {
-      justify_paragraphs: false,
-      muted_color: '#7f7f7f',
-      modules: { fbif_footer: { enabled: false } },
-    },
+    config: seriesDocxConfig(),
     isRepost: false,
   });
   const html = result.lines.join('\n');
@@ -728,4 +740,130 @@ test('网站 URL 导入：商务合作导联行渲染 14px 斜体灰、链接保
     /<p><em><span style="font-size: 14px;"><span style="color: #7f7f7f;">商务合作对接请点击：<\/span><a href="https:\/\/www\.foodtalks\.cn\/company\/ailu\/contact"[^>]*>上海艾录商务合作联系方式<\/a><\/span><\/em><\/p>/,
     '62139/62303 成品口径：整行 14px 斜体、文本灰、链接保留'
   );
+});
+
+test('网站什么是系列 DOCX：上海艾录 6/15 反馈回归', () => {
+  // WHY：6/15 飞书反馈集中在同一篇 DOCX 的结构错配：图注后标题空行、关于区 logo
+  // 宽度、相关阅读/联系区空行、联系区误升标题、参考来源标题、文末图源/作者样式。
+  // 这些只能在 ft-series 网站规则下生效，不能靠全局图片/标题规则兜底。
+  const bold = boldPara;
+  const center = (text) => txtPara(text, { align: 'center' });
+  const link = (text, href) => para({
+    runs: [{ type: 'link', text, href }],
+    text,
+  });
+  const blank = () => para({ isEmpty: true });
+
+  const result = template.processDocx({
+    paragraphs: [
+      bold('三、为什么选择上海艾录微发泡片材？'),
+      bold('（一）工艺优化，确保食品安全及包装表现'),
+      txtPara('通过工艺调试，上海艾录成功掌控了材料中气孔尺寸的一致性。'),
+      blank(),
+      imgPara('foam.jpeg', '96%', 2.69, [{ type: 'txt', text: '发泡后，原本透明或半透明的PP片材会呈现乳白色效果' }]),
+      bold('（二）减少材料用量，降低采购成本'),
+      txtPara('相较传统实体塑料片材方案，上海艾录的微发泡片材单位面积的塑料用量可减少10%~30%。'),
+      blank(),
+
+      bold('四、关于上海艾录'),
+      imgPara('logo.png', '52%', 1.5075, [{ type: 'txt', text: '上海艾录Logo' }]),
+      txtPara('上海艾录包装股份有限公司成立于2006年。'),
+      blank(),
+      txtPara('相关阅读：'),
+      link('深耕纸包装20年，储备上万种不同纸样材料的上海艾录是谁？', 'https://www.foodtalks.cn/news/53261'),
+      link('对看不见的微型塑料说不，什么是上海艾录无塑膜纸基包装？', 'https://www.foodtalks.cn/news/50502'),
+      link('纸包装不加塑料，也能防氧防潮？什么是上海艾录ESpeed™ Aishield？', 'https://www.foodtalks.cn/news/61922'),
+      blank(),
+
+      bold('五、联系上海艾录'),
+      bold('上海艾录包装股份有限公司'),
+      txtPara('地址1：总部生产基地'),
+      txtPara('上海市金山区漕廊公路3588号'),
+      blank(),
+      txtPara('电话：+86 021-57293030'),
+      txtPara('官网：http://www.ailugroup.com/'),
+      blank(),
+      bold('微信公众号'),
+      imgPara('wechat.png', '26%', 1),
+      center('（扫码关注上海艾录）'),
+      blank(),
+      bold('商务合作对接人联系方式'),
+      bold('彭辉'),
+      bold('上海艾录快消包装销售负责人'),
+      txtPara('邮箱：jessicapeng@ailugroup.com'),
+      txtPara('手机号：+86 186-2111-4182'),
+      imgPara('bdqr.png', '26%', 1),
+      center('（添加请备注：姓名 公司 职位）'),
+
+      bold('六、参考来源'),
+      txtPara('[1] 中国包装联合会塑料包装分会（2026），《关于塑料包装制品企业成本合理传导的倡议书》'),
+      txtPara('[2] 中国蒙牛乳业有限公司（2024），《环境目标进展》'),
+      txtPara('[3] 中塑在线：中国塑料城指数'),
+      txtPara('[4] Guang-hong Hu, Wang Yue (2012), Microcellular Foam Injection Molding Process'),
+      blank(),
+      txtPara('本文为标注来源的图片均来自上海艾录'),
+      txtPara('本文作者：Isaac, FoodTalks'),
+    ],
+    imgCache: {
+      'foam.jpeg': 'blob:foam',
+      'logo.png': 'blob:logo',
+      'wechat.png': 'blob:wechat',
+      'bdqr.png': 'blob:bdqr',
+    },
+    config: seriesDocxConfig(),
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+
+  assert.match(
+    html,
+    /乳白色效果<\/span><\/p>\n<h3>\(二\)减少材料用量，降低采购成本<\/h3>/,
+    '图片图注后接 h3 时不得插空行'
+  );
+  assert.match(html, /src="blob:logo"[^>]*width="300"/, '关于区 logo 图固定宽 300');
+  assert.match(
+    html,
+    /相关阅读：<\/p>\n<p><a href="https:\/\/www\.foodtalks\.cn\/news\/53261"[^>]*>深耕纸包装20年[\s\S]*?<\/p>\n<p><a href="https:\/\/www\.foodtalks\.cn\/news\/50502"/,
+    '相关阅读标题与条目、条目之间应紧凑无空行'
+  );
+  assert.doesNotMatch(html, /<h2>上海艾录包装股份有限公司<\/h2>/, '联系区公司名不得误升 h2');
+  assert.doesNotMatch(html, /<h2>商务合作对接人联系方式<\/h2>/, '联系区 BD 标题不得误升 h2');
+  assert.match(
+    html,
+    /<p style="text-align: center;"><strong>上海艾录包装股份有限公司<\/strong><\/p>\n<p style="text-align: center;">地址1：总部生产基地<\/p>\n<p style="text-align: center;">上海市金山区漕廊公路3588号<\/p>/,
+    '联系区公司信息应居中且组内紧凑'
+  );
+  assert.match(html, /<h2>六、参考来源<\/h2>/, '编号参考来源应保留为标题');
+  assert.doesNotMatch(html, /参考来源：/, '编号参考来源不应退化为 ref-header 标签文案');
+  assert.match(
+    html,
+    /\[4\][\s\S]*?<\/span><\/p>\n<p><br><\/p>\n<p><em><span style="font-size: 14px; color: #7f7f7f;">本文为标注来源的图片均来自上海艾录/,
+    '文末图源说明与上方参考条目之间应有空行，并按 14px 灰斜体渲染'
+  );
+  assert.match(
+    html,
+    /本文为标注来源的图片均来自上海艾录<\/span><\/em><\/p>\n<p><em><span style="font-size: 14px; color: #7f7f7f;">本文作者：Isaac, FoodTalks/,
+    '图源说明与作者行应组内紧邻换行'
+  );
+});
+
+test('网站默认包：justify_paragraphs=false 不等于 ft-series 身份', () => {
+  // WHY：隔离红线。ft-default 如果仅关闭两端对齐，也不能触发 ft-series 的摘要消费、
+  // 联系区归一化、关于区 logo 300 等系列业务规则。
+  const result = template.processDocx({
+    paragraphs: [
+      txtPara('少用即环保，以年消耗1000吨塑料测算，可减少约692.0吨碳排放'),
+      imgPara('head.jpeg', '96%', 1.333, [{ type: 'txt', text: '盛放食品的塑料托盒' }]),
+      boldPara('五、联系上海艾录'),
+      boldPara('上海艾录包装股份有限公司'),
+      txtPara('地址1：总部生产基地'),
+    ],
+    imgCache: { 'head.jpeg': 'blob:head' },
+    config: { justify_paragraphs: false, modules: { fbif_footer: { enabled: false } } },
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.equal(result.summary || '', '', '未显式 site_variant=ft-series 时不得消费摘要');
+  assert.match(html, /少用即环保/, 'ft-default 即使 justify=false 也应保留首段正文');
+  assert.match(html, /<h2>上海艾录包装股份有限公司<\/h2>/, 'ft-default 不应套用 ft-series 联系区归一化');
 });
