@@ -221,7 +221,8 @@ func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 	// Proxy to upload endpoint if configured
 	legacyURL := os.Getenv("WECHAT_UPLOAD_ENDPOINT")
 	if legacyURL != "" {
-		proxyReq, err := http.NewRequestWithContext(r.Context(), "POST", legacyURL, bytes.NewReader(body))
+		proxyURL := uploadProxyURL(legacyURL, r.URL.Path)
+		proxyReq, err := http.NewRequestWithContext(r.Context(), "POST", proxyURL, bytes.NewReader(body))
 		if err != nil {
 			writeError(w, 500, "proxy error: "+err.Error())
 			return
@@ -254,6 +255,34 @@ func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 		results[key] = val
 	}
 	writeJSON(w, 200, map[string]interface{}{"results": results})
+}
+
+func uploadProxyURL(configured, requestPath string) string {
+	u, err := url.Parse(configured)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return configured
+	}
+
+	switch {
+	case strings.HasSuffix(requestPath, "/api/oss-upload"):
+		u.Path = uploadProxyEndpointPath(u.Path, "/api/oss-upload")
+	case strings.HasSuffix(requestPath, "/api/wechat-upload"):
+		u.Path = uploadProxyEndpointPath(u.Path, "/api/wechat-upload")
+	}
+	return u.String()
+}
+
+func uploadProxyEndpointPath(current, endpoint string) string {
+	trimmed := strings.TrimRight(current, "/")
+	for _, legacyEndpoint := range []string{"/api/oss-upload", "/api/wechat-upload"} {
+		if strings.HasSuffix(trimmed, legacyEndpoint) {
+			return strings.TrimSuffix(trimmed, legacyEndpoint) + endpoint
+		}
+	}
+	if trimmed == "" {
+		return endpoint
+	}
+	return current
 }
 
 func setUploadProxySourceHeaders(proxyReq *http.Request, original *http.Request) {
