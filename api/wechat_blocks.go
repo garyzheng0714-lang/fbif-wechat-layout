@@ -47,11 +47,12 @@ type Run struct {
 // inherit down the DOM tree. Every block is classified against a resolved
 // snapshot of its ancestor chain's styles plus its own overrides.
 type computedStyle struct {
-	FontSize    float64
-	FontSizeSet bool
-	Color       string
-	ColorSet    bool
-	Align       string
+	FontSize       float64
+	FontSizeSet    bool
+	Color          string
+	ColorSet       bool
+	Align          string
+	FontWeightBold bool
 }
 
 const (
@@ -149,7 +150,6 @@ type blockCtx struct {
 	style      computedStyle
 	runs       []Run
 	hadBreak   bool
-	boldDepth  int
 	hrefStack  []string
 	textStyles []computedStyle // computed style at each text node — needed
 	// because WeChat emits captions as <p><img><span style="...">text</span></p>:
@@ -182,7 +182,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 		if cur.runs == nil && strings.TrimSpace(n.Data) == "" {
 			return
 		}
-		cur.runs = append(cur.runs, w.makeTextRun(cur, n.Data))
+		cur.runs = append(cur.runs, w.makeTextRun(cur, n.Data, inherited))
 		cur.textStyles = append(cur.textStyles, inherited)
 		return
 
@@ -268,19 +268,14 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			w.walkChildren(n, cur, inherited)
 			return
 		case "strong", "b":
-			if cur != nil {
-				cur.boldDepth++
-			}
-			w.walkChildren(n, cur, inherited)
-			if cur != nil {
-				cur.boldDepth--
-			}
+			boldStyle := inherited
+			boldStyle.FontWeightBold = true
+			w.walkChildren(n, cur, boldStyle)
 			return
 		}
 
 		nodeStyle := parseInlineStyle(getAttr(n, "style"))
 		merged := mergeStyle(inherited, nodeStyle)
-		spanBold := nodeStyle.fontWeightBold
 
 		if isBlockTag(tag) {
 			if cur != nil && hasContent(cur.runs) {
@@ -295,23 +290,13 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			}
 			if cur != nil {
 				child.hrefStack = append([]string(nil), cur.hrefStack...)
-				child.boldDepth = cur.boldDepth
-			}
-			if spanBold {
-				child.boldDepth++
 			}
 			w.walkChildren(n, child, merged)
 			w.emit(child)
 			return
 		}
 
-		if cur != nil && spanBold {
-			cur.boldDepth++
-		}
 		w.walkChildren(n, cur, merged)
-		if cur != nil && spanBold {
-			cur.boldDepth--
-		}
 		return
 	}
 
@@ -383,7 +368,7 @@ func (w *blockWalker) collectCellRuns(n *html.Node, cur *blockCtx, inherited com
 		if cur.runs == nil && strings.TrimSpace(n.Data) == "" {
 			return
 		}
-		cur.runs = append(cur.runs, w.makeTextRun(cur, n.Data))
+		cur.runs = append(cur.runs, w.makeTextRun(cur, n.Data, inherited))
 		return
 	case html.ElementNode:
 		switch strings.ToLower(n.Data) {
@@ -403,23 +388,17 @@ func (w *blockWalker) collectCellRuns(n *html.Node, cur *blockCtx, inherited com
 				return
 			}
 		case "strong", "b":
-			cur.boldDepth++
+			boldStyle := inherited
+			boldStyle.FontWeightBold = true
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				w.collectCellRuns(c, cur, inherited)
+				w.collectCellRuns(c, cur, boldStyle)
 			}
-			cur.boldDepth--
 			return
 		}
 		nodeStyle := parseInlineStyle(getAttr(n, "style"))
 		merged := mergeStyle(inherited, nodeStyle)
-		if nodeStyle.fontWeightBold {
-			cur.boldDepth++
-		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			w.collectCellRuns(c, cur, merged)
-		}
-		if nodeStyle.fontWeightBold {
-			cur.boldDepth--
 		}
 		return
 	}
@@ -428,8 +407,8 @@ func (w *blockWalker) collectCellRuns(n *html.Node, cur *blockCtx, inherited com
 	}
 }
 
-func (w *blockWalker) makeTextRun(cur *blockCtx, text string) Run {
-	bold := cur.boldDepth > 0
+func (w *blockWalker) makeTextRun(cur *blockCtx, text string, style computedStyle) Run {
+	bold := style.FontWeightBold
 	if len(cur.hrefStack) > 0 {
 		return Run{Type: "link", Text: text, Href: cur.hrefStack[len(cur.hrefStack)-1], Bold: bold}
 	}
@@ -646,6 +625,7 @@ func strongStyleSignalsCaption(s computedStyle) bool {
 
 type parsedStyle struct {
 	computedStyle
+	fontWeightSet  bool
 	fontWeightBold bool
 }
 
@@ -659,7 +639,8 @@ var refItemRe = regexp.MustCompile(`^\[\d+\]`)
 var refContinuationRe = regexp.MustCompile(`^[—–─-]`)
 
 var reFontSizeValue = regexp.MustCompile(`^\s*([0-9]*\.?[0-9]+)\s*(px|pt|em|rem|%)?`)
-var reFontWeightValue = regexp.MustCompile(`^(bold|bolder|[6-9]\d\d)\b`)
+var reFontWeightBoldValue = regexp.MustCompile(`^(bold|bolder|[6-9]\d\d)\b`)
+var reFontWeightNormalValue = regexp.MustCompile(`^(normal|lighter|[1-5]\d\d)\b`)
 
 func parseInlineStyle(style string) parsedStyle {
 	out := parsedStyle{}
@@ -703,8 +684,13 @@ func parseInlineStyle(style string) parsedStyle {
 		case "text-align":
 			out.Align = strings.ToLower(strings.Fields(val)[0])
 		case "font-weight":
-			if reFontWeightValue.MatchString(strings.ToLower(val)) {
+			lower := strings.ToLower(val)
+			if reFontWeightBoldValue.MatchString(lower) {
+				out.fontWeightSet = true
 				out.fontWeightBold = true
+			} else if reFontWeightNormalValue.MatchString(lower) {
+				out.fontWeightSet = true
+				out.fontWeightBold = false
 			}
 		}
 	}
@@ -723,6 +709,9 @@ func mergeStyle(parent computedStyle, child parsedStyle) computedStyle {
 	}
 	if child.Align != "" {
 		out.Align = child.Align
+	}
+	if child.fontWeightSet {
+		out.FontWeightBold = child.fontWeightBold
 	}
 	return out
 }

@@ -70,6 +70,54 @@ func TestBoldPullquoteNoFontSizeIsTxt(t *testing.T) {
 	}
 }
 
+func TestFontWeightNormalOverridesBoldAncestor(t *testing.T) {
+	// WHY：这篇微信原文大量出现外层 span font-weight:bold、内层 textstyle
+	// font-weight:normal 的结构。浏览器最终显示正常字重；抽取器也必须遵守内层覆盖，
+	// 否则整篇正文都会被标成粗体。
+	html := jsContentWrap(
+		`<p style="font-size: 16px;">` +
+			`<span style="font-weight: bold; font-size: 15px;">` +
+			`<span textstyle="" style="font-weight: normal;">如果要选出2026年餐饮业的潘通口味。</span>` +
+			`</span>` +
+			`</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	b := findBlockByText(blocks, "潘通口味")
+	if b == nil {
+		t.Fatalf("missing paragraph block: kinds=%v", findKinds(blocks))
+	}
+	if b.K != "txt" {
+		t.Fatalf("normal body paragraph should stay txt, got %s", b.K)
+	}
+	if len(b.Runs) == 0 {
+		t.Fatalf("missing runs: %+v", b)
+	}
+	if b.Runs[0].Bold {
+		t.Fatalf("inner font-weight:normal must override bold ancestor, got %+v", b.Runs)
+	}
+}
+
+func TestStrongInsideFontWeightNormalStillBold(t *testing.T) {
+	// WHY：支持 normal 覆盖不能把真正的局部强调洗掉；内层 strong 仍应生效。
+	html := jsContentWrap(
+		`<p><span style="font-weight: normal;">普通<strong>重点</strong></span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	b := findBlockByText(blocks, "普通")
+	if b == nil {
+		t.Fatalf("missing paragraph block: kinds=%v", findKinds(blocks))
+	}
+	if got := len(b.Runs); got != 2 {
+		t.Fatalf("runs len = %d, want 2: %+v", got, b.Runs)
+	}
+	if b.Runs[0].Bold {
+		t.Fatalf("normal text should not be bold: %+v", b.Runs)
+	}
+	if !b.Runs[1].Bold {
+		t.Fatalf("strong text should remain bold: %+v", b.Runs)
+	}
+}
+
 func TestBlankParagraphMarksNextBlockBlankBefore(t *testing.T) {
 	// WHY：网站「什么是系列」联系区依赖公众号源稿里的显式空段来恢复分组间距。
 	// 空段不应输出成一个无意义 txt 块，但必须挂到下一块，否则联系信息会被错误压成一团。
