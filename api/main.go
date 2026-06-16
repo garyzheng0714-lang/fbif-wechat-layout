@@ -227,6 +227,7 @@ func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+		setUploadProxySourceHeaders(proxyReq, r)
 		resp, err := http.DefaultClient.Do(proxyReq)
 		if err != nil {
 			writeError(w, 502, "upstream error: "+err.Error())
@@ -253,6 +254,54 @@ func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 		results[key] = val
 	}
 	writeJSON(w, 200, map[string]interface{}{"results": results})
+}
+
+func setUploadProxySourceHeaders(proxyReq *http.Request, original *http.Request) {
+	origin := strings.TrimSpace(original.Header.Get("Origin"))
+	if origin == "" {
+		origin = uploadProxyOrigin(original)
+	}
+	if origin != "" {
+		proxyReq.Header.Set("Origin", origin)
+	}
+
+	referer := strings.TrimSpace(original.Header.Get("Referer"))
+	if referer == "" && origin != "" {
+		referer = strings.TrimRight(origin, "/") + "/"
+	}
+	if referer != "" {
+		proxyReq.Header.Set("Referer", referer)
+	}
+}
+
+func uploadProxyOrigin(r *http.Request) string {
+	if configured := strings.TrimSpace(os.Getenv("WECHAT_UPLOAD_ORIGIN")); configured != "" {
+		return strings.TrimRight(configured, "/")
+	}
+
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+	if host == "" {
+		return ""
+	}
+	if comma := strings.IndexByte(host, ','); comma >= 0 {
+		host = strings.TrimSpace(host[:comma])
+	}
+
+	proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	if comma := strings.IndexByte(proto, ','); comma >= 0 {
+		proto = strings.TrimSpace(proto[:comma])
+	}
+	if proto != "http" && proto != "https" {
+		if r.TLS != nil {
+			proto = "https"
+		} else {
+			proto = "http"
+		}
+	}
+	return proto + "://" + host
 }
 
 // ---- Article Fetch (URL repost via x-reader) ----

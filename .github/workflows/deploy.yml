@@ -167,6 +167,13 @@ jobs:
               "    reverse_proxy " + upstream + "\n"
               "  }\n"
           )
+          upload_route = (
+              "\n"
+              "  @fbifUploadApi path /api/oss-upload /api/wechat-upload\n"
+              "  handle @fbifUploadApi {\n"
+              "    reverse_proxy " + upstream + "\n"
+              "  }\n"
+          )
 
           app_shell_header = (
               "\n"
@@ -212,6 +219,12 @@ jobs:
               r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
               r"[ \t]*\}[ \t]*\n)?"
           )
+          upload_route_re = re.compile(
+              r"\n[ \t]*@fbifUploadApi[ \t]+path[^\n]*\n"
+              r"(?:[ \t]*handle[ \t]+@fbifUploadApi[ \t]*\{[ \t]*\n"
+              r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
+              r"[ \t]*\}[ \t]*\n)?"
+          )
           text = original
           while True:
               new_text = rules_route_re.sub("\n", text)
@@ -220,6 +233,11 @@ jobs:
               text = new_text
           while True:
               new_text = channels_route_re.sub("\n", text)
+              if new_text == text:
+                  break
+              text = new_text
+          while True:
+              new_text = upload_route_re.sub("\n", text)
               if new_text == text:
                   break
               text = new_text
@@ -269,13 +287,10 @@ jobs:
           backup = target.with_suffix(target.suffix + ".bak-rules")
           backup.write_text(original)
           for open_after in sorted(set(insert_points), reverse=True):
-              text = text[:open_after] + app_shell_header + asset_cache_headers + route + channels_route + text[open_after:]
+              text = text[:open_after] + app_shell_header + asset_cache_headers + route + channels_route + upload_route + text[open_after:]
           target.write_text(text)
-          print("Ensured Caddy rule API + channel handles in " + str(target) + " -> " + upstream)
+          print("Ensured Caddy rule API + channel + upload handles in " + str(target) + " -> " + upstream)
           PY
-
-          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
-            "sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy"
 
           # Write env file for the fbif-api systemd service (loaded via EnvironmentFile=)
           # Tempfile + atomic rename so the service never sees a half-written file.
@@ -286,7 +301,7 @@ jobs:
             echo "ADMIN_PASSWORD GitHub secret is required for the rule admin backend" >&2
             exit 1
           fi
-          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nPUBLIC_DIR=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "${DEPLOY_PATH}" | base64)
+          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" | base64)
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
             "echo '$ENV_CONTENT' | base64 -d > /var/www/api/.env.tmp && chmod 600 /var/www/api/.env.tmp && mv /var/www/api/.env.tmp /var/www/api/.env"
 
@@ -303,3 +318,6 @@ jobs:
           # instead, and prove the service is active before the deploy declares
           # success.
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "sudo systemctl restart fbif-api && sudo systemctl is-active --quiet fbif-api && sudo systemctl status fbif-api --no-pager --lines=5"
+
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
+            "sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy"
