@@ -11,9 +11,9 @@ export const FOOTER_SEGMENT_ORDER_DEFAULT = ['biz_coop', 'join_group', 'follow_a
 export const FOOTER_SEGMENTS_DEFAULT = {
   biz_coop: { html_lines: [
     '<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*资讯投稿与商务合作，请查看&ldquo;<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/news/30752" target="_blank" rel="noopener">FoodTalks商务合作方案</a>&rdquo;，并联系Bobo。</span></em></p>',
+    '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;" src="{{asset#ft_footer_bobo_card}}" alt="Bobo二维码" width="600" /></p>',
   ] },
   join_group: { html_lines: [
-    '<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="{{asset#ft_footer_banner}}" alt="" width="600" /></p>',
     '<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>',
     '<p><br /></p>',
     '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="{{asset#ft_footer_group_qr}}" alt="00" width="600" height="267" /></p>',

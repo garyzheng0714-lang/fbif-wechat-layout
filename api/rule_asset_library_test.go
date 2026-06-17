@@ -23,10 +23,20 @@ func TestDefaultAssetLibraryIncludesSeriesMaterials(t *testing.T) {
 	lib := defaultAssetLibraryModule()
 	assets, _ := lib["assets"].([]any)
 	var sections, groups, cards int
+	foundSiteBobo := false
 	for _, raw := range assets {
 		asset, _ := raw.(map[string]any)
 		id := strings.TrimSpace(asset["id"].(string))
 		scope := strings.TrimSpace(asset["scope"].(string))
+		if id == "ft_footer_bobo_card" {
+			foundSiteBobo = true
+			if scope != foodTalksSiteRuleAccountID {
+				t.Fatalf("网站默认 Bobo 素材 scope=%q，期望 %s", scope, foodTalksSiteRuleAccountID)
+			}
+			if !strings.Contains(strings.TrimSpace(asset["url"].(string)), "/assets/fbif/bobo-card.webp") {
+				t.Fatalf("网站默认 Bobo 素材应复用已落地名片图，实际: %v", asset["url"])
+			}
+		}
 		if !strings.HasPrefix(id, "ft_series_") {
 			continue
 		}
@@ -44,6 +54,9 @@ func TestDefaultAssetLibraryIncludesSeriesMaterials(t *testing.T) {
 	}
 	if sections != 12 || groups != 18 || cards != 15 {
 		t.Fatalf("系列素材数量不完整：sections=%d groups=%d cards=%d", sections, groups, cards)
+	}
+	if !foundSiteBobo {
+		t.Fatal("默认素材库应包含网站默认商务合作用的 ft_footer_bobo_card")
 	}
 }
 
@@ -92,8 +105,20 @@ func TestAssetLibraryRejectsUnsafeOrAmbiguousAssets(t *testing.T) {
 func TestDefaultFooterUsesAssetReferences(t *testing.T) {
 	footer := defaultFBIFFooterModule()
 	segments := footer["segments"].(map[string]any)
+	bizCoop := segments["biz_coop"].(map[string]any)
 	joinGroup := segments["join_group"].(map[string]any)
+	bizLines := bizCoop["html_lines"].([]any)
 	lines := joinGroup["html_lines"].([]any)
+	foundBobo := false
+	for _, line := range bizLines {
+		s := line.(string)
+		if strings.Contains(s, assetRefID("ft_footer_bobo_card")) {
+			foundBobo = true
+		}
+	}
+	if !foundBobo {
+		t.Fatal("默认商务合作页脚应通过 {{asset#ft_footer_bobo_card}} 引用 Bobo 二维码")
+	}
 	foundQR := false
 	for _, line := range lines {
 		s := line.(string)
@@ -102,6 +127,12 @@ func TestDefaultFooterUsesAssetReferences(t *testing.T) {
 		}
 		if strings.Contains(s, ftFooterGroupQR) {
 			t.Fatal("默认页脚不应再把二维码 URL 内联在 html_lines")
+		}
+		if strings.Contains(s, "ft_footer_bobo_card") {
+			t.Fatal("加群段不应引用 Bobo 二维码")
+		}
+		if strings.Contains(s, "ft_footer_banner") {
+			t.Fatal("加群段不应引用 Bobo banner 图")
 		}
 	}
 	if !foundQR {

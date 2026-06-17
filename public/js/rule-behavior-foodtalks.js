@@ -523,7 +523,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
 //            缺省时降级到 FOOTER_SEGMENTS_DEFAULT。
 //   assetLibrary: 服务端 config.modules.asset_library，缺省时降级到 ASSET_LIBRARY_DEFAULT。
 // 勾选全 false / 缺省时返回空串。
-export function buildFooterHtml(enabledSegments, library, assetLibrary, scope = 'global') {
+export function buildFooterHtml(enabledSegments, library, assetLibrary, scope = 'ft-default') {
   const seg = enabledSegments || {};
   const lib = library || {};
   const segments = (lib.segments && typeof lib.segments === 'object') ? lib.segments : FOOTER_SEGMENTS_DEFAULT;

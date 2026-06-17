@@ -190,6 +190,7 @@ test('页脚库：buildFooterHtml 全开 = 完整页脚（含关注公众号/log
   const full = buildFooterHtml({ biz_coop: true, join_group: true, follow_account: true, logo: true, more_info: true });
   assert.match(full, /商务合作/, '含商务合作');
   assert.match(full, /news\/30752/, '商务合作带真实链接');
+  assert.match(full, /\/assets\/fbif\/bobo-card\.webp/, '商务合作含 Bobo 二维码');
   assert.match(full, /加入微信群/, '含加入微信群');
   assert.match(full, /Lemon/, '含 Lemon 微信号');
   assert.match(full, /image\/news\/6e309987/, '含真实加群二维码（非占位符）');
@@ -204,16 +205,27 @@ test('页脚库：buildFooterHtml 全开 = 完整页脚（含关注公众号/log
 test('页脚库：segments 关闭则不输出对应片段，全关返回空串', () => {
   const simple = buildFooterHtml({ biz_coop: true });
   assert.match(simple, /商务合作/);
+  assert.match(simple, /bobo-card\.webp/, '只开商务合作时应输出 Bobo 二维码');
   assert.doesNotMatch(simple, /加入微信群/, 'join_group 关则无加群');
+  assert.doesNotMatch(simple, /6e309987660da9af/, 'join_group 关则无加群二维码');
   assert.doesNotMatch(simple, /关注公众号/, 'follow_account 关则无关注公众号');
   assert.equal(buildFooterHtml({}), '', '全关返回空串');
   assert.equal(buildFooterHtml(), '', 'segments 缺省返回空串');
 });
 
+test('页脚库：商务合作和加群二维码归属不串片段', () => {
+  const biz = buildFooterHtml({ biz_coop: true });
+  const group = buildFooterHtml({ join_group: true });
+  assert.match(biz, /bobo-card\.webp/, '商务合作片段放 Bobo 二维码');
+  assert.doesNotMatch(biz, /6e309987660da9af/, '商务合作片段不放加群二维码');
+  assert.match(group, /6e309987660da9af/, '加群片段放群二维码');
+  assert.doesNotMatch(group, /bobo-card\.webp/, '加群片段不放 Bobo 二维码');
+  assert.doesNotMatch(group, /07079a66940e1ff57e71b140e7e36357/, '加群片段不放 Bobo banner 图');
+});
+
 test('页脚库：默认占位符迁移后输出 HTML 与旧固定 URL 字节一致', () => {
   const html = buildFooterHtml({ join_group: true, follow_account: true, logo: true });
   const expected = [
-    '<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="https://static.foodtalks.cn/image/post/07079a66940e1ff57e71b140e7e36357.webp" alt="" width="600" /></p>',
     '<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>',
     '<p><br /></p>',
     '<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="https://static.foodtalks.cn/image/news/6e309987660da9af009b89be08c4aa74ed78.png" alt="00" width="600" height="267" /></p>',

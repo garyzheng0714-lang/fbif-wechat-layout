@@ -99,6 +99,15 @@ export const ASSET_LIBRARY_DEFAULT = {
       ['logo', '页脚'],
       { width: 130, height: 27 }
     ),
+    asset(
+      'ft_footer_bobo_card',
+      'avatar',
+      'FoodTalks Bobo 名片',
+      '/assets/fbif/bobo-card.webp',
+      'ft-default',
+      ['FoodTalks', '名片', '商务合作'],
+      { width: 600 }
+    ),
     // FBIF 公众号底部素材（footer.html 内联 base64 提取为站内静态文件；复制时自动上传微信 CDN）。
     // 不设 width/height：保留原 <img> 仅 style 控宽，避免补属性破坏字节级保真。
     asset('fbif_bobo_card', 'avatar', 'FBIF 波波名片', '/assets/fbif/bobo-card.webp', 'fbif', ['FBIF', '名片']),

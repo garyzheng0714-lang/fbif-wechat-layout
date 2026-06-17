@@ -144,14 +144,21 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 仅补网站「什么是系列」行为参数，ft-default/公众号规则不继承。
 // v15→v16（2026-06-16）：ft-series 网站 6/15 DOCX 反馈回归——参考来源编号标题、
 // 相关阅读紧凑、联系区边界、关于区 logo 300、文末图源错字窄容错；仅覆盖 ft-series-v1。
-const currentBuiltinRuleVersion = 16
+// v16→v17（2026-06-17）：ft-default 网站默认页脚纠偏——商务合作段补 Bobo 名片，
+// 加群段保持只输出群二维码；仅覆盖 ft-default-v1。
+const currentBuiltinRuleVersion = 17
 const defaultBuiltinRuleVersion = 14
+const ftSeriesSiteBuiltinRuleVersion = 16
 
 func builtinVersionForDefaultRule(id string) int {
-	if id == foodTalksSeriesSiteDefaultRulePresetID {
+	switch id {
+	case foodTalksSiteDefaultRulePresetID:
 		return currentBuiltinRuleVersion
+	case foodTalksSeriesSiteDefaultRulePresetID:
+		return ftSeriesSiteBuiltinRuleVersion
+	default:
+		return defaultBuiltinRuleVersion
 	}
-	return defaultBuiltinRuleVersion
 }
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
@@ -296,9 +303,9 @@ func defaultFBIFFooterModule() map[string]any {
 		"segments": map[string]any{
 			"biz_coop": seg(
 				`<p style="text-align: left;"><em><span style="color: #7f7f7f; font-size: 14px;">*资讯投稿与商务合作，请查看&ldquo;<a style="text-decoration: underline; color: #105b89;" href="https://www.foodtalks.cn/news/30752" target="_blank" rel="noopener">FoodTalks商务合作方案</a>&rdquo;，并联系Bobo。</span></em></p>`,
+				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;" src="`+assetRefID("ft_footer_bobo_card")+`" alt="Bobo二维码" width="600" /></p>`,
 			),
 			"join_group": seg(
-				`<p style="text-align: center;"><img style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefID("ft_footer_banner")+`" alt="" width="600" /></p>`,
 				`<p style="color: #01396a; font-size: 20px;"><strong>加入微信群</strong></p>`,
 				`<p><br /></p>`,
 				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto;" src="`+assetRefID("ft_footer_group_qr")+`" alt="00" width="600" height="267" /></p>`,

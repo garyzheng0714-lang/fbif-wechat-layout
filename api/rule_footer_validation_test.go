@@ -26,6 +26,18 @@ func TestValidateFooterLibraryAndRegex(t *testing.T) {
 	if err := validateRuleBehaviorPayload(beh); err != nil {
 		t.Fatalf("默认网站 behavior（含识别正则）应通过校验，却报错: %v", err)
 	}
+
+	modules := cfg["modules"].(map[string]any)
+	footer := modules["fbif_footer"].(map[string]any)
+	segments := footer["segments"].(map[string]any)
+	biz := strings.Join(anyStringSlice(segments["biz_coop"].(map[string]any)["html_lines"]), "\n")
+	group := strings.Join(anyStringSlice(segments["join_group"].(map[string]any)["html_lines"]), "\n")
+	if !strings.Contains(biz, assetRefID("ft_footer_bobo_card")) {
+		t.Fatalf("网站默认商务合作段勾选后应输出 Bobo 二维码，实际: %s", biz)
+	}
+	if strings.Contains(group, "bobo-card") || strings.Contains(group, assetRefID("ft_footer_bobo_card")) || strings.Contains(group, assetRefID("ft_footer_banner")) {
+		t.Fatalf("网站默认加群段只应包含群二维码，不应混入 Bobo 二维码，实际: %s", group)
+	}
 }
 
 func TestValidateFtSeriesSiteFooterDefaults(t *testing.T) {
@@ -63,6 +75,9 @@ func TestValidateFtSeriesSiteFooterDefaults(t *testing.T) {
 	}
 	if !strings.Contains(group, "加入FBIF饮料群") || !strings.Contains(group, `width="150" height="150"`) {
 		t.Fatalf("加群段应是饮料群标题 + 150x150 二维码，实际: %s", group)
+	}
+	if strings.Contains(group, assetRefID("ftss_bd_soso")) || strings.Contains(group, assetRefID("ft_footer_bobo_card")) || strings.Contains(group, "bobo-card") {
+		t.Fatalf("什么是系列加群段只应包含饮料群二维码，不能混入 BD/Bobo 名片，实际: %s", group)
 	}
 	if !strings.Contains(follow, "关注FoodTalks什么是系列公众号") || !strings.Contains(follow, `height="180"`) {
 		t.Fatalf("关注公众号段应使用正确标题和 600x180 二维码，实际: %s", follow)

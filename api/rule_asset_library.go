@@ -51,6 +51,7 @@ func defaultAssetLibraryModule() map[string]any {
 		assetLibraryImage("ft_footer_group_qr", "qr_group", "FoodTalks 加群二维码", ftFooterGroupQR, "global", 600, 267, "二维码", "页脚"),
 		assetLibraryImage("ft_footer_account_qr", "qr_account", "FoodTalks 公众号二维码", ftFooterAccountQR, "global", 600, 221, "二维码", "页脚"),
 		assetLibraryImage("ft_footer_logo", "logo", "FoodTalks logo", ftFooterLogo, "global", 130, 27, "logo", "页脚"),
+		assetLibraryImage("ft_footer_bobo_card", "avatar", "FoodTalks Bobo 名片", "/assets/fbif/bobo-card.webp", foodTalksSiteRuleAccountID, 600, 0, "FoodTalks", "名片", "商务合作"),
 		// FBIF 公众号底部素材（footer.html 内联 base64 提取为站内静态文件；复制时自动上传微信 CDN）。
 		// 不设 width/height：原 footer.html <img> 仅用 style 控宽，补 width/height 属性会破坏字节级保真。
 		assetLibraryImage("fbif_bobo_card", "avatar", "FBIF 波波名片", "/assets/fbif/bobo-card.webp", "fbif", 0, 0, "FBIF", "名片"),
