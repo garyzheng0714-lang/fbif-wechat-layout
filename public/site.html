@@ -649,16 +649,27 @@ const FT_FOOTER_STORAGE = Object.freeze({
   order: 'ft.footer.order',
   signature: 'ft.footer.signature',
 });
-const FT_FOOTER_LABELS = Object.freeze({
+const FT_FOOTER_LABELS_DEFAULT = Object.freeze({
   tip: '提示声明',
-  biz_coop: '什么是系列商务合作',
-  bd_card: 'BD 名片',
-  coop_table: '相关合作表',
-  join_group: '加入FBIF饮料群（二维码）',
+  biz_coop: '商务合作',
+  join_group: '加入微信群（二维码）',
   follow_account: '关注公众号（二维码）',
   logo: 'FoodTalks logo',
   more_info: '点击获取更多',
 });
+const FT_FOOTER_LABELS_SERIES = Object.freeze({
+  ...FT_FOOTER_LABELS_DEFAULT,
+  biz_coop: '什么是系列商务合作',
+  bd_card: 'BD 名片',
+  coop_table: '相关合作表',
+  join_group: '加入FBIF饮料群（二维码）',
+});
+function footerSegmentLabel(key) {
+  const labels = activeRulePack && activeRulePack.id === 'ft-series'
+    ? FT_FOOTER_LABELS_SERIES
+    : FT_FOOTER_LABELS_DEFAULT;
+  return labels[key] || key;
+}
 const FT_FOOTER_BD_CARD_RE = /^ftss_bd_[a-z0-9_-]+$/i;
 const FT_FOOTER_FALLBACK_PRESETS = Object.freeze([
   Object.freeze({ id: 'fbif-original', name: 'FBIF原创', segments: Object.freeze({ tip: 1, biz_coop: 1, join_group: 1, follow_account: 1, logo: 1, more_info: 1 }) }),
@@ -1096,7 +1107,7 @@ bindUrlImportShortcuts({
     return `<div class="ft-footer-seg-row" data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}">
       <label class="ft-footer-seg-label">
         <input type="checkbox" data-seg="${escText(key)}">
-        <span class="ft-footer-seg-title">${escText(FT_FOOTER_LABELS[key] || key)}</span>
+        <span class="ft-footer-seg-title">${escText(footerSegmentLabel(key))}</span>
       </label>
       ${bdCardSelectHtml(key)}
     </div>`;
