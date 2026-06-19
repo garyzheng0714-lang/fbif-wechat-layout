@@ -41,6 +41,7 @@ export const DEFAULT_BEHAVIOR = Object.freeze({
 const ALLOWED_ACTION_TYPES = new Set(['insert_image_before']);
 const ALLOWED_TARGETS = new Set(['first_ref_heading']);
 const ALLOWED_OPS = new Set(['eq', 'neq', 'exists', 'includes']);
+const ALLOWED_INSERT_CLASSES = new Set(['wx-mote-author']);
 const ALLOWED_TOP_LEVEL_KEYS = new Set([
   'schema_version',
   'params',
@@ -250,6 +251,11 @@ function findInsertIndex(elems, target) {
   return -1;
 }
 
+function safeInsertClass(action) {
+  const className = String(action && action.class || '').trim();
+  return ALLOWED_INSERT_CLASSES.has(className) ? className : '';
+}
+
 export function applyBehaviorToElems(elems, context, rawBehavior) {
   const behavior = normalizeRuleBehavior(rawBehavior);
   const conditionState = new Map(
@@ -262,7 +268,16 @@ export function applyBehaviorToElems(elems, context, rawBehavior) {
     const idx = findInsertIndex(out, action.target);
     const src = getBehaviorParam(behavior, action.src_param);
     if (idx < 0 || !src) continue;
-    out = out.slice(0, idx).concat([{ k: 'img', src, w: '100%', maxPx: 0 }], out.slice(idx));
+    const target = out[idx] || {};
+    const className = safeInsertClass(action);
+    const inserted = { k: 'img', src, w: '100%', maxPx: 0 };
+    if (className) {
+      inserted.className = className;
+      inserted.role = className === 'wx-mote-author' ? 'mote-author-card' : '';
+    }
+    if (target.blankBefore) inserted.blankBefore = target.blankBefore;
+    const nextTarget = target.blankBefore ? { ...target, blankBefore: false } : target;
+    out = out.slice(0, idx).concat([inserted, nextTarget], out.slice(idx + 1));
   }
   return out;
 }

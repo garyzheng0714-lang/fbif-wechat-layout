@@ -45,7 +45,7 @@ function convertSingleParagraph(text) {
   let out = masked;
   out = convertEllipsisAndDash(out);
   out = convertQuotes(out);
-  out = convertBasicPunct(out);
+  out = convertBasicPunct(out, englishFragmentProtectedIndexes(out));
   return unmask(out, slots);
 }
 
@@ -186,12 +186,13 @@ const BASIC_MAP = {
   ')': '）',
 };
 
-function convertBasicPunct(text) {
+function convertBasicPunct(text, protectedIndexes = new Set()) {
   let out = '';
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     const full = BASIC_MAP[ch];
     if (full) {
+      if (protectedIndexes.has(i)) { out += ch; continue; }
       if (bothSidesAscii(text, i)) { out += ch; continue; }
       // Abbreviation / sentence-end guard: `.` after ASCII letter and followed
       // immediately by whitespace (or end-of-text) is an English period — keep.
@@ -206,6 +207,87 @@ function convertBasicPunct(text) {
     }
   }
   return out;
+}
+
+const PROTECTED_INNER_PUNCT = new Set(['.', ',', ';', ':', '!', '?']);
+
+function englishFragmentProtectedIndexes(text) {
+  const protectedIndexes = new Set();
+  for (const pair of englishLikePairs(text)) {
+    for (let i = pair.start + 1; i < pair.end; i++) {
+      if (PROTECTED_INNER_PUNCT.has(text[i])) protectedIndexes.add(i);
+    }
+    if (pair.keepAsciiDelimiters) {
+      protectedIndexes.add(pair.start);
+      protectedIndexes.add(pair.end);
+    }
+  }
+  return protectedIndexes;
+}
+
+function englishLikePairs(text) {
+  const pairs = [];
+  const stack = [];
+  const openToClose = new Map([
+    ['(', ')'],
+    ['（', '）'],
+    ['“', '”'],
+    ['‘', '’'],
+  ]);
+  const closeToOpen = new Map(Array.from(openToClose, ([open, close]) => [close, open]));
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (openToClose.has(ch)) {
+      stack.push({ ch, i });
+      continue;
+    }
+    const open = closeToOpen.get(ch);
+    if (!open) continue;
+    for (let j = stack.length - 1; j >= 0; j--) {
+      if (stack[j].ch !== open) continue;
+      const start = stack[j].i;
+      stack.splice(j, 1);
+      const content = text.slice(start + 1, i);
+      if (!isEnglishFragment(content)) break;
+      pairs.push({
+        start,
+        end: i,
+        keepAsciiDelimiters: open === '(' && ch === ')' && shouldKeepAsciiParenPair(text, start, i),
+      });
+      break;
+    }
+  }
+  return pairs;
+}
+
+function isEnglishFragment(text) {
+  if (!text || hasHan(text)) return false;
+  let latin = 0;
+  for (const ch of text) {
+    if (/[A-Za-z]/.test(ch)) latin++;
+  }
+  return latin > 0;
+}
+
+function hasHan(text) {
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (
+      (code >= 0x4E00 && code <= 0x9FFF) ||
+      (code >= 0x3400 && code <= 0x4DBF) ||
+      (code >= 0x20000 && code <= 0x2A6DF)
+    ) return true;
+  }
+  return false;
+}
+
+function shouldKeepAsciiParenPair(text, start, end) {
+  return isAsciiWord(neighbor(text, start, -1)) || isAsciiWord(neighbor(text, end, +1));
+}
+
+function isAsciiWord(ch) {
+  return /[A-Za-z0-9_]/.test(ch || '');
 }
 
 function bothSidesAscii(text, i) {

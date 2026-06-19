@@ -183,6 +183,17 @@ test('空段语义：空段只把 blankBefore 标到紧随其后的第一个 ele
   assert.equal(body[2].blankBefore, false, 'blankBefore 即取即清，不蔓延');
 });
 
+test('空段语义：参考来源段头也保留 blankBefore，供行为插入块迁移', () => {
+  const { elems } = classifyDocxArticle(
+    [txt('作者：张三'), txt('正文。'), para({ isEmpty: true }), txt('参考来源'), txt('[1] source')],
+    {},
+    {}
+  );
+  const refH = elems.find(e => e.k === 'refH');
+  assert.ok(refH, '产出参考来源段头');
+  assert.equal(refH.blankBefore, true, '参考来源前的原文空段不能丢');
+});
+
 test('parseAuthorLineWith：捕获组 1 为作者名，无匹配返回空串', () => {
   assert.equal(parseAuthorLineWith('作者：王五', /^作者[：:]\s*(.+)$/), '王五');
   assert.equal(parseAuthorLineWith('正文不是作者行', /^作者[：:]\s*(.+)$/), '');

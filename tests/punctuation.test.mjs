@@ -34,6 +34,31 @@ test('convert: parentheses in Chinese context', () => {
   assert.equal(convertText('他(小王)来了'), '他（小王）来了');
 });
 
+test('convert: keeps English sentence punctuation inside fullwidth parentheses', () => {
+  const input = '当时的英国国王点单（Bring me the finest tea in all of the land.）然后Fortnum开始找茶。';
+  assert.equal(convertText(input), input);
+});
+
+test('convert: keeps English comma and period inside an English parenthetical fragment', () => {
+  const input = '产品页写着（Royal Blend, their most popular tea.）这句话。';
+  assert.equal(convertText(input), input);
+});
+
+test('convert: keeps English sentence period before a Chinese closing quote', () => {
+  const input = '他说：“Bring me the finest tea.”然后继续。';
+  assert.equal(convertText(input), input);
+});
+
+test('convert: keeps ASCII parentheses when the parenthetical belongs to an English phrase', () => {
+  const input = '这家公司 FoodTech (NYSE: FDN) 完成融资,增长很快。';
+  const expected = '这家公司 FoodTech (NYSE: FDN) 完成融资，增长很快。';
+  assert.equal(convertText(input), expected);
+});
+
+test('convert: still localizes parenthesis around an English brand alias in Chinese copy', () => {
+  assert.equal(convertText('我再写玛黑兄弟(Mariage Freres)这个品牌。'), '我再写玛黑兄弟（Mariage Freres）这个品牌。');
+});
+
 test('convert: colon and semicolon', () => {
   assert.equal(convertText('做小:加味;做完'), '做小：加味；做完');
 });
@@ -258,6 +283,17 @@ test('runs: cross-run quote pairing', () => {
   const out = convertRuns(runs);
   assert.equal(out[0].text, '他叫“豆碟');
   assert.equal(out[1].text, '豆腐”，真好吃。');
+  assert.equal(out[1].bold, true);
+});
+
+test('runs: protects English sentence punctuation across DOCX text runs', () => {
+  const runs = [
+    { type: 'txt', text: '引用英文（Bring me the finest ', bold: false },
+    { type: 'txt', text: 'tea in all of the land.）继续', bold: true },
+  ];
+  const out = convertRuns(runs);
+  assert.equal(out[0].text, '引用英文（Bring me the finest ');
+  assert.equal(out[1].text, 'tea in all of the land.）继续');
   assert.equal(out[1].bold, true);
 });
 

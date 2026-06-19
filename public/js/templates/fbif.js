@@ -193,12 +193,22 @@ function isCompactDocxPair(a, b) {
     (!Number.isFinite(before) || before <= 160);
 }
 
+function isMoteAuthorCard(e) {
+  return !!e && (e.role === 'mote-author-card' || e.className === 'wx-mote-author');
+}
+
+function elemExtraClass(e) {
+  return isMoteAuthorCard(e) ? ' wx-mote-author' : '';
+}
+
 function shouldSpaceAfter(e, next) {
   // No `next` means this is the article body's tail. The FBIF footer is
   // concatenated afterwards with `margin:0;padding:0;` on its outer section,
   // so without `wx-gap` here the last paragraph (often a [n] reference) sits
   // flush against the 「提示：」 line. Emit the standard 20px gap.
   if (!next) return true;
+  if (next.blankBefore && !(e.k === 'ref' && next.k === 'ref')) return true;
+  if (isMoteAuthorCard(next)) return true;
   if (next.k === 'cap') return false;
   if (e.k === 'ref' && next.k === 'ref') return false;
   if (e.k === 'attr' && next.k === 'attr') return false;
@@ -424,7 +434,7 @@ function render(elems, author, source, opts) {
         const sizeStyle = e.maxPx
           ? 'max-width: ' + e.maxPx + 'px; width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;'
           : 'width: ' + e.w + '; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;';
-        lines.push('<section class="wx-pi' + (spaceAfter ? ' wx-gap' : '') + '">' +
+        lines.push('<section class="wx-pi' + elemExtraClass(e) + (spaceAfter ? ' wx-gap' : '') + '">' +
           '<img src="' + escAttr(src) + '"' + gifAttr + rpol + ' style="' + sizeStyle + '" /></section>');
         break;
       }

@@ -59,11 +59,52 @@ function parseRules(css) {
   return rules;
 }
 
+function parseDeclarations(style) {
+  const entries = [];
+  for (const part of String(style || '').split(';')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const idx = trimmed.indexOf(':');
+    if (idx === -1) continue;
+    const name = trimmed.slice(0, idx).trim().toLowerCase();
+    const value = trimmed.slice(idx + 1).trim();
+    if (!name) continue;
+    entries.push([name, value]);
+  }
+  return entries;
+}
+
+function mergeStyles(styles) {
+  const order = [];
+  const values = new Map();
+  for (const style of styles) {
+    for (const [name, value] of parseDeclarations(style)) {
+      if (!values.has(name)) order.push(name);
+      values.set(name, value);
+    }
+  }
+  return order.map(name => name + ': ' + values.get(name) + ';').join(' ');
+}
+
 export function inlineCSS(html, resolvedCSS) {
   const rules = parseRules(resolvedCSS);
-  return html.replace(/\bclass="([^"]+)"/g, (_, classes) => {
-    const styles = classes.split(/\s+/).map(c => rules[c]).filter(Boolean).join(' ');
-    return styles ? 'style="' + styles + '"' : '';
+  return html.replace(/<([A-Za-z][\w:-]*)([^<>]*?)>/g, (tag) => {
+    const classRe = /\sclass=(["'])([^"']*)\1/i;
+    const classMatch = tag.match(classRe);
+    if (!classMatch) return tag;
+
+    const classSet = new Set(classMatch[2].split(/\s+/).filter(Boolean));
+    const classStyles = Object.entries(rules)
+      .filter(([className]) => classSet.has(className))
+      .map(([, style]) => style);
+    let next = tag.replace(classRe, '');
+    if (!classStyles.length) return next;
+
+    const styleRe = /\sstyle=(["'])([\s\S]*?)\1/i;
+    const styleMatch = next.match(styleRe);
+    const merged = mergeStyles(styleMatch ? classStyles.concat(styleMatch[2]) : classStyles);
+    if (styleMatch) return next.replace(styleRe, ' style="' + merged + '"');
+    return next.replace(/\s*\/?>$/, (end) => ' style="' + merged + '"' + end);
   });
 }
 

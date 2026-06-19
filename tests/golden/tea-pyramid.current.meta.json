@@ -1,7 +1,5 @@
 {
   "source": "tests/fixtures/tea-pyramid.docx",
-  "source_original": "/Users/simba/Downloads/把茶包做成金字塔，进入35个国家的高端酒店，年收1540万美元.docx",
-  "generated_from_commit": "6291ec0 checkpoint: save current correct layout version",
   "paragraphs": 251,
   "image_files": [
     "image1.png",
@@ -17,5 +15,5 @@
   "lines": 138,
   "imgN": 9,
   "headingN": 7,
-  "html_bytes": 34864
+  "html_bytes": 34879
 }

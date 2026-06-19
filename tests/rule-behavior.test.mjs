@@ -111,5 +111,37 @@ test('behavior action inserts the Mote author image before reference heading', (
   assert.equal(out.length, 3);
   assert.equal(out[1].k, 'img');
   assert.equal(out[1].src, DEFAULT_BEHAVIOR.params.mote_ref_image_url.default);
+  assert.equal(out[1].className, 'wx-mote-author');
+  assert.equal(out[1].role, 'mote-author-card');
+  assert.equal(out[2].k, 'refH');
+});
+
+test('behavior action moves target blankBefore onto the inserted image without mutating input', () => {
+  const ref = { k: 'refH', text: '参考来源', blankBefore: true };
+  const elems = [
+    { k: 'txt', runs: [{ type: 'txt', text: '正文' }] },
+    ref,
+  ];
+  const out = applyBehaviorToElems(elems, {
+    article: { author_normalized: normalizeAuthorName('Mote莫特') },
+  }, DEFAULT_BEHAVIOR);
+
+  assert.equal(out[1].k, 'img');
+  assert.equal(out[1].blankBefore, true);
+  assert.equal(out[2].k, 'refH');
+  assert.equal(out[2].blankBefore, false);
+  assert.equal(ref.blankBefore, true, '原始 elem 不应被行为层原地修改');
+});
+
+test('behavior action does not invent blankBefore when the target did not have it', () => {
+  const out = applyBehaviorToElems([
+    { k: 'txt', runs: [{ type: 'txt', text: '正文' }] },
+    { k: 'refH', text: '参考来源' },
+  ], {
+    article: { author_normalized: normalizeAuthorName('Mote莫特') },
+  }, DEFAULT_BEHAVIOR);
+
+  assert.equal(out[1].k, 'img');
+  assert.equal(Object.prototype.hasOwnProperty.call(out[1], 'blankBefore'), false);
   assert.equal(out[2].k, 'refH');
 });

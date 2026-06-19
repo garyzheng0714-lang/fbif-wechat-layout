@@ -16,6 +16,8 @@ globalThis.localStorage = storage;
 globalThis.fetch = async () => ({ ok: false, text: async () => '' });
 
 const template = (await import('../public/js/templates/fbif.js?test=' + Date.now())).default;
+const { processForCopy } = await import('../public/js/css-inline.js?test=' + Date.now());
+const { DEFAULT_RULE_CONFIG } = await import('../public/js/rule-presets.js?test-copy=' + Date.now());
 const moteImageUrl = 'https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/fbif-attachment-to-url/2026/05/tblMQeXvSGd7Hebf_-CkOuPdpNzb-_3u9Rxc5KA_1778028720411/img_v3_0211e_8b79127d-72a5-4011-9f01-fe3b30c7548g_1778028720565.png';
 
 function p(text, extra = {}) {
@@ -36,6 +38,16 @@ function docxBody(text, extra = {}) {
     spacing: { before: '120', after: '120', line: '288' },
     ...extra,
   });
+}
+
+function imgPara(file, extra = {}) {
+  return {
+    text: '',
+    runs: [{ type: 'img', file, w: '100%' }],
+    isEmpty: false,
+    hasImg: true,
+    ...extra,
+  };
 }
 
 function renderDocx(paragraphs, opts = {}) {
@@ -106,6 +118,84 @@ test('docx Mote author accepts the spaced name form', () => {
 
   assert.match(html, /作者：Mote 莫特/);
   assert.match(html, new RegExp(moteImageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('docx Mote card inherits the blank line before references and keeps references tight', () => {
+  const html = renderDocx([
+    p('作者：Mote莫特'),
+    p('正文内容'),
+    p(''),
+    h('参考来源'),
+    p('[1] source'),
+  ]);
+
+  const bodyIdx = html.indexOf('正文内容');
+  const imageIdx = html.indexOf(moteImageUrl);
+  const refIdx = html.indexOf('参考来源：');
+  const firstRefIdx = html.indexOf('[1] source');
+  assert.ok(bodyIdx < imageIdx, '正文在 Mote 名片前');
+  assert.ok(imageIdx < refIdx, 'Mote 名片在参考来源前');
+  assert.ok(refIdx < firstRefIdx, '参考来源标题在条目前');
+
+  const bodySection = html.slice(html.lastIndexOf('<section', bodyIdx), html.indexOf('</section>', bodyIdx));
+  const imageSection = html.slice(html.lastIndexOf('<section', imageIdx), html.indexOf('</section>', imageIdx));
+  const refSection = html.slice(html.lastIndexOf('<section', refIdx), html.indexOf('</section>', refIdx));
+  assert.match(bodySection, /class="wx-p wx-gap"/, '正文到 Mote 名片前保留空行');
+  assert.match(imageSection, /class="wx-pi wx-mote-author wx-gap"/, 'Mote 名片到参考来源前保留空行');
+  assert.match(refSection, /class="wx-p"/, '参考来源标题到 [1] 仍保持紧凑');
+  assert.doesNotMatch(refSection, /wx-gap/);
+});
+
+test('docx Mote card keeps a gap even when the body tail is an image', () => {
+  const html = renderDocx([
+    p('作者：Mote莫特'),
+    imgPara('body.png'),
+    p(''),
+    h('参考来源'),
+    p('[1] source'),
+  ], { imgCache: { 'body.png': 'https://example.com/body.png' } });
+
+  const bodyImageIdx = html.indexOf('https://example.com/body.png');
+  const bodyImageSection = html.slice(html.lastIndexOf('<section', bodyImageIdx), html.indexOf('</section>', bodyImageIdx));
+  const moteImageIdx = html.indexOf(moteImageUrl);
+  const moteImageSection = html.slice(html.lastIndexOf('<section', moteImageIdx), html.indexOf('</section>', moteImageIdx));
+  assert.match(bodyImageSection, /class="wx-pi wx-gap"/, '正文尾图到 Mote 名片前保留空行');
+  assert.match(moteImageSection, /class="wx-pi wx-mote-author wx-gap"/, 'Mote 名片到参考来源前保留空行');
+});
+
+test('docx ordinary consecutive images still stay tight', () => {
+  const html = renderDocx([
+    p('作者：张三'),
+    imgPara('a.png'),
+    imgPara('b.png'),
+  ], { imgCache: { 'a.png': 'https://example.com/a.png', 'b.png': 'https://example.com/b.png' } });
+
+  const firstIdx = html.indexOf('https://example.com/a.png');
+  const secondIdx = html.indexOf('https://example.com/b.png');
+  const firstSection = html.slice(html.lastIndexOf('<section', firstIdx), html.indexOf('</section>', firstIdx));
+  const secondSection = html.slice(html.lastIndexOf('<section', secondIdx), html.indexOf('</section>', secondIdx));
+  assert.match(firstSection, /class="wx-pi"/);
+  assert.doesNotMatch(firstSection, /wx-gap/, '普通连续图片之间不加空行');
+  assert.match(secondSection, /class="wx-pi wx-gap"/, '文末图片仍给页脚留间距');
+});
+
+test('copy HTML preserves Mote card spacing after CSS inlining', async () => {
+  const html = renderDocx([
+    p('作者：Mote莫特'),
+    p('正文内容'),
+    p(''),
+    h('参考来源'),
+    p('[1] source'),
+  ]);
+  const themeCSS = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
+  const copyHtml = processForCopy(html, themeCSS, DEFAULT_RULE_CONFIG);
+  const imageIdx = copyHtml.indexOf(moteImageUrl);
+  const imageSection = copyHtml.slice(copyHtml.lastIndexOf('<section', imageIdx), copyHtml.indexOf('</section>', imageIdx));
+
+  assert.match(imageSection, /line-height:\s*0/);
+  assert.match(imageSection, /font-size:\s*0/);
+  assert.match(imageSection, /margin-bottom:\s*20px/);
+  assert.doesNotMatch(copyHtml, /class="wx-mote-author"/);
 });
 
 test('behavior rules control author label and Mote image insertion', () => {
