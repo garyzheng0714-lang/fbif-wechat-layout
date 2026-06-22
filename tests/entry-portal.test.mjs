@@ -39,8 +39,9 @@ test('site.html removes public-account specific DOM', async () => {
 
 test('site.html keeps upload + URL + preview + copy button', async () => {
   const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
-  assert.match(html, /class=['"][^'"]*\bimport-card-head\b[^'"]*['"]/, 'website import area should have a unified source panel header');
-  assert.match(html, /class=['"][^'"]*\bimport-mode-badge\b[^'"]*['"][^>]*>自动识别</);
+  assert.match(html, /class=['"][^'"]*\bimport-card-head\b[^'"]*['"]/, 'website import area should have a quiet source panel header');
+  assert.match(html, /class=['"][^'"]*\bimport-title\b[^'"]*['"][^>]*>导入内容</);
+  assert.doesNotMatch(html, /import-mode-badge/, 'import panel should not add decorative badges that compete with the editor input');
   assert.match(html, /class=['"][^'"]*\bimport-actions\b[^'"]*['"]/, 'website import area should group file fallback and primary action together');
   assert.match(html, /id=['"]dropZone['"]/);
   assert.match(html, /class=['"][^'"]*\bimport-card\b[^'"]*['"]/);
@@ -57,7 +58,8 @@ test('site.html keeps upload + URL + preview + copy button', async () => {
 test('app.html uses the unified source import panel', async () => {
   const html = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   assert.match(html, /class=['"][^'"]*\bimport-card-head\b[^'"]*['"]/);
-  assert.match(html, /class=['"][^'"]*\bimport-mode-badge\b[^'"]*['"][^>]*>自动识别</);
+  assert.match(html, /class=['"][^'"]*\bimport-title\b[^'"]*['"][^>]*>导入内容</);
+  assert.doesNotMatch(html, /import-mode-badge/);
   assert.match(html, /class=['"][^'"]*\bimport-actions\b[^'"]*['"]/);
   assert.match(html, /class=['"][^'"]*\bdropzone\b[^'"]*['"][^>]*id=['"]dropZone['"]/);
   assert.match(html, /class=['"][^'"]*\burl-row\b[^'"]*['"][^>]*data-url-focus-target/);
