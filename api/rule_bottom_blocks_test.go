@@ -111,8 +111,8 @@ func TestDefaultMpBottomBlocksModuleV2Shape(t *testing.T) {
 	if original["id"] != "original" {
 		t.Fatalf("首个预设应为 original, got %v", original["id"])
 	}
-	// 顺序对齐 footer.html：提示 → 名片 → 更多文章 → 1000标题 → 1000图
-	wantOrder := []any{"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles", "sp_ma", "promo_title", "sp4", "promo_img"}
+	// 顺序对齐当前 FBIF 底部契约：提示 → 名片 → 更多文章。
+	wantOrder := []any{"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles"}
 	if !reflect.DeepEqual(original["order"], wantOrder) {
 		t.Errorf("original order 漂移:\n got=%v\nwant=%v", original["order"], wantOrder)
 	}
@@ -126,6 +126,11 @@ func TestDefaultMpBottomBlocksModuleV2Shape(t *testing.T) {
 	byline := blocks["byline"].(map[string]any)["fields"].(map[string]any)
 	if byline["width"] != 661 {
 		t.Errorf("byline 图宽应 661（codex #3）, got %v", byline["width"])
+	}
+	for _, oldID := range []string{"promo_title", "promo_img"} {
+		if _, ok := blocks[oldID]; ok {
+			t.Errorf("FBIF 默认底部不应再包含旧 1000 案例推广块 %q", oldID)
+		}
 	}
 	// 转载预设两条、不含原创
 	repostBody := presets[1].(map[string]any)["blocks"].(map[string]any)["tip_body"].(map[string]any)["fields"].(map[string]any)["content"].(string)

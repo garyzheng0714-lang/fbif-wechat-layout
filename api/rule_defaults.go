@@ -146,8 +146,10 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 相关阅读紧凑、联系区边界、关于区 logo 300、文末图源错字窄容错；仅覆盖 ft-series-v1。
 // v16→v17（2026-06-17）：ft-default 网站默认页脚纠偏——商务合作段补 Bobo 名片，
 // 加群段保持只输出群二维码；仅覆盖 ft-default-v1。
+// default v14→v15（2026-06-22）：FBIF 公众号默认底部移除「1000个食品创新案例」推广块，
+// 覆盖已持久化的旧内置 default / wowfood-default / foodtalks-series-default。
 const currentBuiltinRuleVersion = 17
-const defaultBuiltinRuleVersion = 14
+const defaultBuiltinRuleVersion = 15
 const ftSeriesSiteBuiltinRuleVersion = 16
 
 func builtinVersionForDefaultRule(id string) int {

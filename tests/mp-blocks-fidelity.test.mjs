@@ -19,7 +19,6 @@ const assetLibrary = {
   schema_version: 1,
   assets: [
     { id: 'fbif_bobo_card', type: 'image', usage: 'avatar', url: '/assets/fbif/bobo-card.webp', scope: 'fbif' },
-    { id: 'fbif_promo_1000', type: 'image', usage: 'decor', url: '/assets/fbif/promo-1000.webp', scope: 'fbif' },
   ],
 };
 
@@ -36,12 +35,9 @@ function fbifV2Module() {
     sp1: sp(8), tip_body: tipBody, sp2: sp(16),
     byline: img('{{asset#fbif_bobo_card}}', 661),
     more_articles: { type: 'more_articles', enabled: true, fields: { title: '/ 更多文章 /' } },
-    sp_ma: sp(20),
-    promo_title: textB('/ 1000个食品创新案例 /', true, 17, '#544545', 'center'),
-    sp4: sp(20), promo_img: img('{{asset#fbif_promo_1000}}', 661),
   });
-  // 顺序对齐 footer.html：提示 → 名片 → 更多文章 → 1000标题 → 1000图。
-  const order = ['tip_title', 'sp1', 'tip_body', 'sp2', 'byline', 'more_articles', 'sp_ma', 'promo_title', 'sp4', 'promo_img'];
+  // 顺序对齐当前 FBIF 底部契约：提示 → 名片 → 更多文章。
+  const order = ['tip_title', 'sp1', 'tip_body', 'sp2', 'byline', 'more_articles'];
   return {
     schema_version: 2, enabled: true, active_preset_id: 'original',
     presets: [
@@ -51,7 +47,7 @@ function fbifV2Module() {
   };
 }
 
-test('v2 FBIF 原创预设：顺序/三条文案/图宽661/粗体/间距复刻 footer.html（防漂移断言，codex review）', () => {
+test('v2 FBIF 原创预设：顺序/三条文案/图宽661/粗体/间距复刻当前底部契约（防漂移断言）', () => {
   const out = renderBottomBlocksHtml(fbifV2Module(), undefined, mpBlockRenderers(assetLibrary, 'fbif'), { presetId: 'original' });
   // 粗体标题 17 深褐
   assert.match(out, /提示：/); assert.match(out, /font-size:17px/); assert.match(out, /font-weight:bold/); assert.match(out, /color:rgb\(84, 69, 69\)/);
@@ -59,15 +55,15 @@ test('v2 FBIF 原创预设：顺序/三条文案/图宽661/粗体/间距复刻 f
   assert.match(out, /本文为FBIF原创/); assert.match(out, /转载请在后台回复/); assert.match(out, /FBIF投稿与商务合作/);
   assert.match(out, /color:rgb\(136, 136, 136\)/); assert.match(out, /font-size:15px/);
   // 间距 + 图宽 661（非 100%）
-  assert.match(out, /height:8px/); assert.match(out, /height:16px/); assert.match(out, /height:20px/);
+  assert.match(out, /height:8px/); assert.match(out, /height:16px/);
   assert.match(out, /width:661px/);
-  assert.ok(out.includes('src="/assets/fbif/bobo-card.webp"')); assert.ok(out.includes('src="/assets/fbif/promo-1000.webp"'));
-  // 顺序：名片 → 更多文章 → 1000标题 → 1000图（防漂移）
+  assert.ok(out.includes('src="/assets/fbif/bobo-card.webp"'));
+  assert.ok(!out.includes('1000个食品创新案例'), 'FBIF 默认底部不应出现旧 1000 案例标题');
+  assert.ok(!out.includes('promo-1000.webp'), 'FBIF 默认底部不应出现旧 1000 案例图片');
+  // 顺序：名片 → 更多文章（防漂移）
   const iByline = out.indexOf('bobo-card.webp');
   const iMore = out.indexOf(OUTER_OPEN);
-  const iPromoTitle = out.indexOf('1000个食品创新案例');
-  const iPromoImg = out.indexOf('promo-1000.webp');
-  assert.ok(iByline < iMore && iMore < iPromoTitle && iPromoTitle < iPromoImg, '顺序应为 名片→更多文章→1000标题→1000图');
+  assert.ok(iByline < iMore, '顺序应为 名片→更多文章');
   assert.match(out, /text-align:center/);
 });
 
@@ -82,16 +78,15 @@ test('v2 FBIF 转载预设：提示正文切转载文案（两条），其余块
 test('防漂移：Go defaultMpBottomBlocksModuleV2 关键结构与 JS fbifV2Module 同步（切生产前哨兵）', async () => {
   const { readFile } = await import('node:fs/promises');
   const goSrc = await readFile(new URL('../api/rule_bottom_blocks.go', import.meta.url), 'utf8');
-  const orig = fbifV2Module().presets[0].blocks;
   // order 完整同步——任一侧改顺序而另一侧没跟 → 失败。
-  assert.ok(goSrc.includes('"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles", "sp_ma", "promo_title", "sp4", "promo_img"'), 'order 同步');
+  assert.ok(goSrc.includes('"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles"'), 'order 同步');
   // 关键文案同步（含 codex review #2 要求的原创第二条）。
   assert.ok(goSrc.includes('本文为FBIF原创'), '原创文案同步');
   assert.ok(goSrc.includes('转载请在后台回复'), '原创第二条同步');
-  assert.ok(goSrc.includes(orig.promo_title.fields.content), 'promo_title 文案同步');
   // 图宽 661 精确（绑定 asset 引用，避免误匹配其它 661）。
   assert.ok(goSrc.includes('"{{asset#fbif_bobo_card}}", 661'), 'byline 图宽 661 同步');
-  assert.ok(goSrc.includes('"{{asset#fbif_promo_1000}}", 661'), 'promo_img 图宽 661 同步');
+  assert.ok(!goSrc.includes('promo_title'), 'Go 默认不应再声明 promo_title');
+  assert.ok(!goSrc.includes('fbif_promo_1000'), 'Go 默认不应再引用 1000 案例图片');
 });
 
 test('P2 富文本：text.html 渲染期转 mp inline-style（hex→rgb、补字体栈、粗体/居中、回落散字段）', () => {

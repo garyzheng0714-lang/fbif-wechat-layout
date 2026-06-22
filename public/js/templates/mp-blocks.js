@@ -48,7 +48,7 @@ function alignOr(v, fallback = 'left') {
   return ['left', 'center', 'right'].includes(v) ? v : fallback;
 }
 
-// 栏目标题 span 样式（声明标题 / 更多文章 / 1000案例 共用，color/size 可配）。
+// 栏目标题 span 样式（声明标题 / 更多文章共用，color/size 可配）。
 function titleSpanStyle(color, size) {
   return `color:${colorToRgb(color)};font-size:${size}px;font-family:${FONT_FAMILY};line-height:1.75;letter-spacing:0.034em;font-style:normal;font-weight:normal;`;
 }

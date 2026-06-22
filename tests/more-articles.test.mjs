@@ -62,9 +62,39 @@ test('footer section titles keep symmetric image rhythm with block images', asyn
   ]);
 
   assert.match(html, /margin:20px 8px 20px;padding:0;text-align:center;"><span[^>]*><strong>\/ 更多文章 \/<\/strong>/);
-  assert.match(html, /margin:20px 8px 20px;padding:0;text-align:center;"><span[^>]*><strong>\/ 1000个食品创新案例 \/<\/strong>/);
-  assert.match(html, /\/ 1000个食品创新案例 \/<\/strong>[\s\S]*<section style="margin:0 8px 0;padding:0;text-align:center;line-height:0;font-size:0;"><img/);
+  assert.doesNotMatch(html, /1000个食品创新案例/, '旧 1000 案例标题不应进入最终页脚');
+  assert.doesNotMatch(html, /promo-1000|免费领/, '旧 1000 案例图不应进入最终页脚');
   assert.doesNotMatch(html, /(?:<span\b[^>]*>\s*)?<br\s*\/?>\s*(?:<\/span>\s*)?<\/section>\s*$/i);
+});
+
+test('stock footer does not keep the removed 1000-case promo image slot', async () => {
+  const footer = await readFile(new URL('../public/footer.html', import.meta.url), 'utf8');
+
+  assert.equal((footer.match(/<img\b/g) || []).length, 4);
+  assert.doesNotMatch(
+    footer,
+    /<section data-role="paragraph"[^>]*>\s*<\/section>\s*<section style="margin:0 8px 0;padding:0;text-align:center;line-height:0;font-size:0;"><img/i,
+    '旧推广标题删除后，不应留下空段落后紧跟的孤立二维码图'
+  );
+});
+
+test('legacy footer promo block is stripped during merge', () => {
+  const legacyFooter = [
+    '<section data-role="paragraph">',
+    '<section style="margin:20px 8px 20px;padding:0;text-align:center;"><strong>/ 更多文章 /</strong></section>',
+    '<section style="text-align: center;margin-left: 8px;margin-right: 8px;"></section>',
+    '</section>',
+    '<section style="margin:20px 8px 20px;padding:0;text-align:center;"><strong>/ 1000个食品创新案例 /</strong></section>',
+    '<section style="margin:0 8px 0;padding:0;text-align:center;line-height:0;font-size:0;"><img src="/assets/fbif/promo-1000.webp"></section>',
+  ].join('\n');
+
+  const html = mergeIntoFooter(legacyFooter, [
+    { href: 'https://mp.weixin.qq.com/s/a', final_url: 'https://example.com/a.png' },
+  ]);
+
+  assert.match(html, /\/ 更多文章 \//);
+  assert.doesNotMatch(html, /1000个食品创新案例/);
+  assert.doesNotMatch(html, /promo-1000/);
 });
 
 test('fresh more-articles cards seed from the active rule default cards', () => {

@@ -94,8 +94,8 @@ func defaultBottomBlocksModule() map[string]any {
 // defaultMpBottomBlocksModuleV2 是 FBIF 公众号底部的 v2 原子双预设版本（原创/转载各一套）：
 // 把 v1 的 declaration/name_card/titled_media 重写成「文字(text)+图片(image)+间距(spacer)+推荐(more_articles)」
 // 四原子，视觉复刻 footer.html。原创/转载差异仅在提示正文(tip_body)文案，由 isRepost→presetId 自动选。
-// 间距复刻 footer.html：提示标题↓8、提示正文↓16(名片图上)、名片图↓20(1000标题上)、1000标题↓20(图上)；
-// more_articles 标题间距内化进其渲染器，故 1000图与 more_articles 之间不放独立 spacer（spec §5）。
+// 间距复刻 footer.html：提示标题↓8、提示正文↓16(名片图上)；
+// more_articles 标题间距内化进其渲染器，名片图后不放独立 spacer。
 // 注意：此为 v2 样板，切换生产（BuiltinVersion）前须在公众号后台复制确认视觉 1:1（CLAUDE.md UI 协议）。
 func defaultMpBottomBlocksModuleV2() map[string]any {
 	textBlock := func(name, content string, bold bool, size int, color, align string) map[string]any {
@@ -119,15 +119,11 @@ func defaultMpBottomBlocksModuleV2() map[string]any {
 			"sp2":           spacer(16),
 			"byline":        imageBlock("Bobo 名片", "{{asset#fbif_bobo_card}}", 661),
 			"more_articles": map[string]any{"type": "more_articles", "display_name": "更多文章", "enabled": true, "fields": map[string]any{"title": "/ 更多文章 /"}},
-			"sp_ma":         spacer(20),
-			"promo_title":   textBlock("1000 案例标题", "/ 1000个食品创新案例 /", true, 17, "#544545", "center"),
-			"sp4":           spacer(20),
-			"promo_img":     imageBlock("1000 案例图", "{{asset#fbif_promo_1000}}", 661),
 		}
 	}
-	// 顺序对齐 footer.html：提示 → 名片 → 更多文章 → 1000标题 → 1000图（codex review #1；
-	// more_articles 标题间距内化，byline 后不放 spacer）。
-	order := []any{"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles", "sp_ma", "promo_title", "sp4", "promo_img"}
+	// 顺序对齐当前 FBIF 底部契约：提示 → 名片 → 更多文章。
+	// 旧 1000 案例推广块已下线，不再作为默认排版输出。
+	order := []any{"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles"}
 	// 原创三条（含「转载请在后台回复」，codex review #2），转载两条。
 	originalBody := textBlock("提示正文", "* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）", false, 15, "#888888", "left")
 	repostBody := textBlock("提示正文", "* 本文为转载文章。\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）", false, 15, "#888888", "left")

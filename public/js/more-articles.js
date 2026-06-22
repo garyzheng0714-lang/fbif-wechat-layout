@@ -532,6 +532,33 @@ function findMatchingClose(html, openIdx) {
   return -1;
 }
 
+function stripDeprecatedPromo1000(footerHtml) {
+  const marker = '1000个食品创新案例';
+  let out = String(footerHtml || '');
+  for (;;) {
+    const markerIdx = out.indexOf(marker);
+    if (markerIdx === -1) return out;
+    const titleStart = out.lastIndexOf('<section', markerIdx);
+    if (titleStart === -1) return out.replace(marker, '');
+    const titleEnd = findMatchingClose(out, titleStart);
+    if (titleEnd === -1) return out.replace(marker, '');
+
+    const titleCloseEnd = titleEnd + '</section>'.length;
+    let removeEnd = titleCloseEnd;
+    const afterTitle = out.slice(titleCloseEnd);
+    const ws = afterTitle.match(/^\s*/);
+    const nextStart = titleCloseEnd + (ws ? ws[0].length : 0);
+    if (out.startsWith('<section', nextStart)) {
+      const nextEnd = findMatchingClose(out, nextStart);
+      const nextHtml = nextEnd === -1 ? '' : out.slice(nextStart, nextEnd + '</section>'.length);
+      if (/<img\b/i.test(nextHtml)) {
+        removeEnd = nextEnd + '</section>'.length;
+      }
+    }
+    out = out.slice(0, titleStart) + out.slice(removeEnd);
+  }
+}
+
 // Paragraph section that wraps BOTH the "/ 更多文章 /" title AND the outer
 // cards wrapper. Found by scanning backwards from the cards wrapper.
 const PARAGRAPH_WRAPPER_OPEN = '<section data-role="paragraph">';
@@ -548,6 +575,7 @@ function findMoreArticlesSectionBounds(footerHtml) {
 
 export function mergeIntoFooter(footerHtml, cards) {
   if (!footerHtml) return footerHtml;
+  footerHtml = stripDeprecatedPromo1000(footerHtml);
   const list = Array.isArray(cards) ? cards : [];
 
   // Empty list → remove the entire "更多文章" section (title + cards wrapper).
