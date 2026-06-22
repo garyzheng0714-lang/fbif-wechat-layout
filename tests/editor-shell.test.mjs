@@ -235,6 +235,31 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
     /return hasDocumentSummaryCard\(\) \? formatSidebarStatus\(stats\) : \(stats \|\| ''\);/,
     '共享引擎应只在新文件卡片页隐藏成功态统计行，网站页继续显示旧统计'
   );
+  assert.match(
+    engine,
+    /Object\.prototype\.hasOwnProperty\.call\(opts, 'title'\)/,
+    '共享引擎应允许剪贴板正文覆盖文件名兜底标题'
+  );
+  assert.match(
+    engine,
+    /handleFile\(file, \{ \.\.\.opts, isRepost: false, title: '', displayName: '剪贴板正文' \}\);/,
+    '剪贴板正文不应把内部 clipboard.md 文件名渲染成文章标题'
+  );
+  assert.match(
+    engine,
+    /showPreview\(session\.title \|\| '', session\.articleHtml, session\.footerHtml, session\.stats, session\.displayName \|\| session\.title \|\| ''\);/,
+    '剪贴板正文的左侧状态名应独立于文章标题'
+  );
+  assert.match(
+    app,
+    /const importClipboardText = \(text\) => \{\s*window\._currentArticleUrl = '';\s*if \(window\._handleText\)/,
+    '公众号页粘贴正文时应清空上一条 URL 导入状态'
+  );
+  assert.match(
+    site,
+    /const importClipboardText = \(text\) => \{\s*window\._currentArticleUrl = '';\s*if \(window\._handleText\)/,
+    '网站页粘贴正文时应清空上一条 URL 导入状态，避免分享复制沿用旧链接'
+  );
 });
 
 test('editor shells do not block startup on external font stylesheets', async () => {
@@ -324,6 +349,34 @@ test('createUrlImportHandler passes source URL with structured blocks', async ()
   assert.equal(elements.get('progressText').textContent, '正在提取...');
 });
 
+test('createUrlImportHandler treats non-URL input as pasted text', async () => {
+  const elements = new Map();
+  const makeElement = value => ({ value, textContent: '', disabled: false, hidden: false, style: { display: '' } });
+  elements.set('urlInput', makeElement('第一段正文,需要排版。'));
+  const documentRef = {
+    getElementById(id) {
+      return elements.get(id);
+    },
+  };
+  let imported = '';
+  let fetched = false;
+  const handler = createUrlImportHandler({
+    documentRef,
+    fetchImpl: async () => {
+      fetched = true;
+      throw new Error('should not fetch plain text');
+    },
+    importText(text) {
+      imported = text;
+    },
+  });
+
+  await handler();
+
+  assert.equal(imported, '第一段正文,需要排版。');
+  assert.equal(fetched, false);
+});
+
 test('bindUrlImportShortcuts lets the import row focus the URL input', () => {
   const targetHandlers = {};
   let focused = false;
@@ -404,6 +457,45 @@ test('bindUrlImportShortcuts leaves other text inputs alone on paste', () => {
 
   assert.equal(prevented, false);
   assert.equal(urlInput.value, '');
+  assert.equal(fetched, 0);
+});
+
+test('bindUrlImportShortcuts imports non-URL clipboard text from the page', () => {
+  const documentHandlers = {};
+  let imported = '';
+  let fetched = 0;
+  let prevented = false;
+  const urlInput = {
+    value: '',
+    tagName: 'TEXTAREA',
+    classList: { contains: () => false },
+    addEventListener() {},
+  };
+  const documentRef = {
+    activeElement: null,
+    getElementById(id) {
+      if (id === 'urlInput') return urlInput;
+      if (id === 'previewContent') return { style: { display: 'none' } };
+      return null;
+    },
+    addEventListener(type, handler) { documentHandlers[type] = handler; },
+    querySelectorAll() { return []; },
+  };
+
+  bindUrlImportShortcuts({
+    documentRef,
+    fetchArticle: () => { fetched += 1; },
+    importText: text => { imported = text; },
+    focusTargetSelector: '[data-url-focus-target]',
+  });
+
+  documentHandlers.paste({
+    clipboardData: { getData: () => '这是一段正文,需要直接排版。' },
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(imported, '这是一段正文,需要直接排版。');
   assert.equal(fetched, 0);
 });
 

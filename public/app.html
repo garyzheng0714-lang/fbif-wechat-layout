@@ -40,19 +40,34 @@
       <span id="pageSubtitle" style="display:none;"></span>
       <div class="import-zone" id="importZone">
         <div class="import-card">
-          <div class="dropzone upload-zone" id="dropZone" tabindex="0" role="button" aria-label="上传文件">
-            <div class="dropzone-icon upload-icon">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+          <div class="import-card-head">
+            <div>
+              <div class="import-eyebrow">排版入口</div>
+              <div class="import-title">粘贴内容或导入文件</div>
             </div>
-            <div class="dropzone-title upload-text">点击或拖拽文件到此处</div>
-            <div class="dropzone-hint upload-hint" id="fileHint">支持 Word、Markdown、TXT 格式</div>
-            <input type="file" id="fileInput">
+            <span class="import-mode-badge">自动识别</span>
           </div>
-          <div class="url-row url-row-inline" data-url-focus-target>
+          <div class="url-row url-row-inline import-composer" data-url-focus-target>
             <span class="url-link-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.1.2l2.1-2.1a5 5 0 0 0-7.1-7.1l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.1-.2L4.8 12.9a5 5 0 0 0 7.1 7.1l1.2-1.2"/></svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/></svg>
             </span>
-            <input type="url" class="field url-input-inline" id="urlInput" placeholder="点击这里，粘贴公众号文章链接">
+            <div class="import-input-stack">
+              <label class="import-input-label" for="urlInput">素材内容</label>
+              <textarea class="field url-input-inline import-textarea" id="urlInput" rows="5" spellcheck="false" placeholder="粘贴公众号链接，或直接粘贴正文 / Markdown"></textarea>
+            </div>
+          </div>
+          <div class="import-actions">
+            <div class="dropzone upload-zone" id="dropZone" tabindex="0" role="button" aria-label="上传文件">
+              <div class="dropzone-icon upload-icon">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+              </div>
+              <div class="dropzone-copy">
+                <div class="dropzone-title upload-text">选择或拖入文件</div>
+                <div class="dropzone-hint upload-hint" id="fileHint">Word / MD / TXT</div>
+              </div>
+              <input type="file" id="fileInput">
+            </div>
+            <button id="urlFetchBtn" class="btn-sm url-btn-inline" type="button" onclick="fetchArticle()">排版</button>
           </div>
           <div class="progress import-progress" id="progress">
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
@@ -109,7 +124,7 @@
           <svg viewBox="0 0 24 24" width="88" height="88" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
         </div>
         <div class="empty-title">还没有内容</div>
-        <div class="empty-sub">上传 Word / Markdown 文件，或粘贴公众号链接，预览会在这里实时呈现。</div>
+        <div class="empty-sub">上传 Word / Markdown 文件，或粘贴公众号链接 / 正文，预览会在这里实时呈现。</div>
         <button class="empty-cta" type="button" onclick="document.getElementById('fileInput').click()">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
         选择文件</button>
@@ -817,10 +832,15 @@ function wrapEngineFunctions() {
 }
 
 // ---- URL repost ----
+const importClipboardText = (text) => {
+  window._currentArticleUrl = '';
+  if (window._handleText) window._handleText(text, { source: 'clipboard' });
+};
 window.fetchArticle = createUrlImportHandler({
   documentRef: document,
   fetchImpl: fetch,
   getAccountID: () => activeRulePack.id,
+  importText: importClipboardText,
   onArticleUrl(url) { window._currentArticleUrl = url; },
 });
 
@@ -828,6 +848,7 @@ window.fetchArticle = createUrlImportHandler({
 bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
+  importText: importClipboardText,
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 </script>

@@ -48,6 +48,10 @@ export function foodTalksFetchErrorMessage(err) {
     : '文章抓取失败，请稍后重试';
 }
 
+function isSingleHttpUrl(text) {
+  return /^https?:\/\/\S+$/i.test(String(text || '').trim());
+}
+
 // 从 /api/fetch-article 的 blocks 提取网站【摘要】候选（飞书反馈问题七，2026-06-11）。
 // 成品规律（news/62139 实测）：FoodTalks 摘要 = 原文开头的短导语段（橙宝文首段
 // 「1500多家星级酒店的选择…」原文即摘要，且摘要句不在正文重复出现）。规则：跳过
@@ -177,6 +181,7 @@ export function createUrlImportHandler({
   getAccountID = () => '',
   onArticleUrl = () => {},
   onBlocks = () => {},
+  importText = null,
   errorMessage = defaultFetchErrorMessage,
 } = {}) {
   return async function fetchArticleFromUrl() {
@@ -188,9 +193,17 @@ export function createUrlImportHandler({
     const progress = documentRef.getElementById('progress');
     const progressFill = documentRef.getElementById('progressFill');
     const progressText = documentRef.getElementById('progressText');
-    const url = (urlInput && urlInput.value || '').trim();
-    if (!url) return;
+    const rawValue = (urlInput && urlInput.value || '').trim();
+    if (!rawValue) return;
+    if (!isSingleHttpUrl(rawValue)) {
+      if (typeof importText === 'function') {
+        importText(rawValue);
+      }
+      return;
+    }
+    const url = rawValue;
     let handedOffToRenderer = false;
+    const btnLabel = btn ? (btn.textContent || '导入') : '';
     function showFetchProgress() {
       if (importZone) importZone.hidden = false;
       if (docZone) docZone.hidden = true;
@@ -209,7 +222,7 @@ export function createUrlImportHandler({
     showFetchProgress();
     if (btn) {
       btn.disabled = true;
-      btn.textContent = '提取中...';
+      btn.textContent = '排版中...';
     }
     try {
       onArticleUrl(url);
@@ -256,7 +269,7 @@ export function createUrlImportHandler({
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = '提取';
+        btn.textContent = btnLabel || '导入';
       }
       if (!handedOffToRenderer) hideFetchProgress();
     }
@@ -266,10 +279,26 @@ export function createUrlImportHandler({
 export function bindUrlImportShortcuts({
   documentRef = globalThis.document,
   fetchArticle,
+  importText = null,
   ignoreClassNames = [],
   focusTargetSelector = '',
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
+
+  function submitImportValue(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (isSingleHttpUrl(text)) {
+      if (urlInput) urlInput.value = text;
+      fetchArticle();
+      return true;
+    }
+    if (typeof importText === 'function') {
+      importText(text);
+      return true;
+    }
+    return false;
+  }
 
   if (focusTargetSelector && urlInput && typeof documentRef.querySelectorAll === 'function') {
     documentRef.querySelectorAll(focusTargetSelector).forEach(target => {
@@ -297,23 +326,22 @@ export function bindUrlImportShortcuts({
     const tag = ae && ae.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     const text = (event.clipboardData || globalThis.window.clipboardData).getData('text').trim();
-    if (text && /^https?:\/\//i.test(text)) {
+    if (text && submitImportValue(text)) {
       event.preventDefault();
-      urlInput.value = text;
-      fetchArticle();
     }
   });
   if (!urlInput) return;
   urlInput.addEventListener('paste', () => {
     setTimeout(() => {
       const value = (urlInput.value || '').trim();
-      if (/^https?:\/\//i.test(value)) fetchArticle();
+      submitImportValue(value);
     }, 0);
   });
   urlInput.addEventListener('keydown', event => {
-    if (event.key === 'Enter') {
+    const isMultiline = urlInput.tagName === 'TEXTAREA';
+    if (event.key === 'Enter' && (!isMultiline || event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      fetchArticle();
+      submitImportValue(urlInput.value);
     }
   });
 }

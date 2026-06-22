@@ -370,7 +370,7 @@ export function initApp(initialTemplate) {
   function applyTemplateShell(nextTemplate) {
     document.getElementById('pageTitle').textContent = nextTemplate.name;
     document.getElementById('pageSubtitle').textContent = nextTemplate.description;
-    document.getElementById('fileHint').textContent = '支持 Word、Markdown、TXT 格式';
+    document.getElementById('fileHint').textContent = 'Word / MD / TXT';
     fileInputEl.accept = nextTemplate.formats.join(',');
   }
   const fileInputEl = document.getElementById('fileInput');
@@ -515,16 +515,19 @@ export function initApp(initialTemplate) {
     if (el) { el.textContent = status; el.className = 'batch-status ' + (cls || ''); }
   }
 
-  async function parseFileToArticleInput(file, isRepost) {
+  async function parseFileToArticleInput(file, isRepost, opts = {}) {
     const sourceIsDocx = file.name.toLowerCase().endsWith('.docx');
-    const fallbackTitle = file.name.replace(/\.\w+$/i, '');
+    const fallbackTitle = Object.prototype.hasOwnProperty.call(opts, 'title')
+      ? String(opts.title || '')
+      : file.name.replace(/\.\w+$/i, '');
+    const displayName = opts.displayName ? String(opts.displayName) : '';
     if (sourceIsDocx) {
       const docxData = await parseDocx(file);
-      return { kind: 'docx', payload: docxData, isRepost, title: fallbackTitle, sourceIsDocx };
+      return { kind: 'docx', payload: docxData, isRepost, title: fallbackTitle, displayName, sourceIsDocx };
     }
     if (typeof template.processMd === 'function') {
       const text = await file.text();
-      return { kind: 'md', payload: text, isRepost, title: fallbackTitle, sourceIsDocx: false };
+      return { kind: 'md', payload: text, isRepost, title: fallbackTitle, displayName, sourceIsDocx: false };
     }
     throw new Error('此模板不支持该文件格式');
   }
@@ -574,6 +577,7 @@ export function initApp(initialTemplate) {
       input: { ...input, title },
       result,
       title,
+      displayName: input.displayName || title,
       articleHtml,
       footerHtml,
       stats: options.stats || formatRenderStats(result, elapsed),
@@ -593,7 +597,7 @@ export function initApp(initialTemplate) {
     if (accountId && session.bottomBlocksOverride !== undefined) {
       writeBottomBlocksOverride(accountId, session.bottomBlocksOverride || {});
     }
-    showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats);
+    showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats, session.displayName || session.title || '');
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('fbif:article-session-activated', { detail: { session } }));
     }
@@ -636,7 +640,7 @@ export function initApp(initialTemplate) {
     const t0 = performance.now();
     file = await normalizeToDocx(file);
     await waitForActiveRuleConfigReady('batch-upload');
-    const input = await parseFileToArticleInput(file, isRepost);
+    const input = await parseFileToArticleInput(file, isRepost, opts);
     const result = await renderArticleInput(input);
     // New article upload resets the "更多文章" section to blank placeholder
     // slots — cards are a per-article curation, filled in manually each time.
@@ -671,6 +675,12 @@ export function initApp(initialTemplate) {
   // from a URL fetch through the same pipeline as a local upload, but with
   // isRepost=true so the footer swaps to the 转载 variant.
   window._handleFile = (file, opts) => handleFile(file, opts);
+  window._handleText = (text, opts = {}) => {
+    const body = String(text || '').trim();
+    if (!body) return;
+    const file = new File([body], 'clipboard.md', { type: 'text/markdown' });
+    handleFile(file, { ...opts, isRepost: false, title: '', displayName: '剪贴板正文' });
+  };
 
   // URL-import structured-blocks entry point. Used when the server responds
   // to /api/fetch-article with {title, blocks} (preferred path — preserves
@@ -791,7 +801,7 @@ export function initApp(initialTemplate) {
       progressFill.style.width = '97%';
       progressText.textContent = '正在解析...';
 
-      const input = await parseFileToArticleInput(file, isRepost);
+      const input = await parseFileToArticleInput(file, isRepost, opts);
       const result = await renderArticleInput(input);
       if (input.kind === 'docx') {
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
@@ -906,7 +916,7 @@ export function initApp(initialTemplate) {
     return _moreArticlesCopyJob;
   }
 
-  function showPreview(title, articleContent, footerContent, stats) {
+  function showPreview(title, articleContent, footerContent, stats, importTitle = title) {
     // 渲染新文章 → 复位上一篇的复制状态（按钮变身 + 后台入口），避免显示陈旧的「✓已复制」。
     if (window._resetCopyFeedback) window._resetCopyFeedback();
     _articleHtml = normalizeRich(articleContent);
@@ -932,7 +942,7 @@ export function initApp(initialTemplate) {
 
     document.getElementById('titleInput').value = title;
     document.getElementById('previewTitleDisplay').textContent = title;
-    showImportSummary(title, stats);
+    showImportSummary(importTitle, stats);
 
     // Apply theme CSS variables to contentArea for preview
     const contentArea = document.getElementById('contentArea');
