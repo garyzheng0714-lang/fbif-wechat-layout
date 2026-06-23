@@ -10,11 +10,11 @@ const assetQuery = new URL(import.meta.url).search;
 // re-exports below, so one dynamic import here fixes the whole chain.
 const parserModule = await import('./parser.js' + assetQuery);
 const {
-  esc, escAttr, parseMdRuns, parseMdFrontmatter, parseDocx, extractParagraph,
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 } = parserModule;
 export {
-  esc, escAttr, parseMdRuns, parseMdFrontmatter, parseDocx, extractParagraph,
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 };
 
@@ -767,7 +767,7 @@ export function initApp(initialTemplate) {
     handleFile(file, opts);
   };
   window._handleText = (text, opts = {}) => {
-    const body = String(text || '').trim();
+    const body = normalizeClipboardTextForMarkdown(text);
     if (!body) return;
     clearUploadVisual();
     const file = new File([body], 'clipboard.md', { type: 'text/markdown' });

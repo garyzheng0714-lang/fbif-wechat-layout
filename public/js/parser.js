@@ -622,6 +622,13 @@ export function parseMdRuns(text) {
   return convertRuns(runs);
 }
 
+export function normalizeClipboardTextForMarkdown(text) {
+  const body = String(text || '').replace(/\r\n?/g, '\n').trim();
+  if (!body) return '';
+  const lines = body.split('\n').map(line => line.trim()).filter(Boolean);
+  return lines.join('\n\n');
+}
+
 export function parseMdFrontmatter(text) {
   let author = '', title = '', content = text;
   const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);

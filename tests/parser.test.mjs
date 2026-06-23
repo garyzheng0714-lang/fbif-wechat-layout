@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DOMParser } from '@xmldom/xmldom';
 import {
   esc, escAttr, extractParagraph, parseDocxStyles, parseMdRuns, parseMdFrontmatter,
-  buildTableBlock
+  normalizeClipboardTextForMarkdown, buildTableBlock
 } from '../public/js/parser.js';
 
 const WNS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -73,6 +73,27 @@ test('parseMdRuns all bold', () => {
   assert.equal(runs.length, 1);
   assert.equal(runs[0].bold, true);
   assert.equal(runs[0].text, 'everything bold');
+});
+
+test('normalizeClipboardTextForMarkdown treats single-line article breaks as paragraphs', () => {
+  const input = '第一段，原文这里换行。\n第二段，应该是新的段落。\n第三段也一样。';
+
+  assert.equal(
+    normalizeClipboardTextForMarkdown(input),
+    '第一段，原文这里换行。\n\n第二段，应该是新的段落。\n\n第三段也一样。'
+  );
+});
+
+test('normalizeClipboardTextForMarkdown keeps existing blank-line paragraphs stable', () => {
+  const input = '第一段。\n\n第二段。';
+
+  assert.equal(normalizeClipboardTextForMarkdown(input), input);
+});
+
+test('normalizeClipboardTextForMarkdown handles mixed blank and single line breaks', () => {
+  const input = '第一段。\n第二段。\n\n第三段。';
+
+  assert.equal(normalizeClipboardTextForMarkdown(input), '第一段。\n\n第二段。\n\n第三段。');
 });
 
 // ---- parseMdFrontmatter ----

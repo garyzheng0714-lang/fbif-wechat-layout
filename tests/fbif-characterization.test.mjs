@@ -28,7 +28,8 @@ globalThis.localStorage = storage;
 globalThis.fetch = async () => ({ ok: false, text: async () => '' });
 globalThis.URL.createObjectURL = (blob) => 'blob:test/' + (blob && blob.size || 0);
 
-const { parseDocx } = await import('../public/js/parser.js?characterization=' + Date.now());
+const parserModule = await import('../public/js/parser.js?characterization=' + Date.now());
+const { parseDocx, normalizeClipboardTextForMarkdown } = parserModule;
 const template = (await import('../public/js/templates/fbif.js?characterization=' + Date.now())).default;
 const { processForCopy } = await import('../public/js/css-inline.js?characterization=' + Date.now());
 const { DEFAULT_RULE_CONFIG } = await import('../public/js/rule-presets.js?characterization=' + Date.now());
@@ -81,4 +82,14 @@ test('FBIF DOCX real article copy HTML matches the saved correct-version golden'
   const copyHtml = processForCopy(actual.html, themeCSS, DEFAULT_RULE_CONFIG);
 
   assert.equal(copyHtml + '\n', expected);
+});
+
+test('FBIF pasted plain text keeps line-separated paragraphs', async () => {
+  const text = normalizeClipboardTextForMarkdown('第一段。\n第二段。\n第三段。');
+  const result = await template.processMd(text, { isRepost: false });
+
+  assert.equal(result.lines.length, 3);
+  assert.match(result.lines[0], /第一段。/);
+  assert.match(result.lines[1], /第二段。/);
+  assert.match(result.lines[2], /第三段。/);
 });
