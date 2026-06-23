@@ -131,6 +131,13 @@ export function clearChannel(channel) {
   try { sessionStorage.removeItem(keyFor(channel)); } catch {}
 }
 
+export function clearCurrentChannel() {
+  const ch = currentChannel();
+  if (!ch) return false;
+  clearChannel(ch);
+  return true;
+}
+
 // Wire up the top channel pill so clicks flush state before navigating.
 // 跨渠道编辑器快照兜底：账号切换走统一顶栏菜单（account-menu.js），跨模板时用
 // location.href 整页导航——这里在 beforeunload 时 captureChannel 保存当前渠道快照。
@@ -156,6 +163,7 @@ if (typeof window !== 'undefined') {
     capture: captureChannel,
     restore: restoreChannel,
     clear: clearChannel,
+    clearCurrent: clearCurrentChannel,
     bindSwitcher: bindChannelSwitcher,
     restoreCurrent: restoreCurrentChannel,
     currentChannel,

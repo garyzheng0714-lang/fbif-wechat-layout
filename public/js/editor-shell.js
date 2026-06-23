@@ -282,14 +282,15 @@ export function bindUrlImportShortcuts({
   importText = null,
   ignoreClassNames = [],
   focusTargetSelector = '',
+  onInputCleared = null,
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
 
   function submitImportValue(value) {
     const text = String(value || '').trim();
     if (!text) return false;
+    if (urlInput) urlInput.value = text;
     if (isSingleHttpUrl(text)) {
-      if (urlInput) urlInput.value = text;
       fetchArticle();
       return true;
     }
@@ -331,6 +332,10 @@ export function bindUrlImportShortcuts({
     }
   });
   if (!urlInput) return;
+  urlInput.addEventListener('input', () => {
+    if ((urlInput.value || '').trim()) return;
+    if (typeof onInputCleared === 'function') onInputCleared();
+  });
   urlInput.addEventListener('paste', () => {
     setTimeout(() => {
       const value = (urlInput.value || '').trim();

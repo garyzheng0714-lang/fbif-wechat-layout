@@ -1080,6 +1080,12 @@ const importClipboardText = (text) => {
   window._currentArticleUrl = '';
   if (window._handleText) window._handleText(text, { source: 'clipboard' });
 };
+const clearRenderedImport = () => {
+  if (window._sessionRestore && typeof window._sessionRestore.clearCurrent === 'function') {
+    window._sessionRestore.clearCurrent();
+  }
+  if (window.goBack) window.goBack();
+};
 window.fetchArticle = createUrlImportHandler({
   documentRef: document,
   fetchImpl: fetch,
@@ -1101,6 +1107,7 @@ bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
   importText: importClipboardText,
+  onInputCleared: clearRenderedImport,
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 

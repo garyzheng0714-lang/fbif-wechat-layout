@@ -105,6 +105,8 @@ test('editor shells both import the shared editor-shell helpers', async () => {
   assert.match(site, /createUrlImportHandler/);
   assert.match(app, /bindUrlImportShortcuts/);
   assert.match(site, /bindUrlImportShortcuts/);
+  assert.match(app, /onInputCleared:\s*clearRenderedImport/);
+  assert.match(site, /onInputCleared:\s*clearRenderedImport/);
   assert.match(app, /bindRailDivider/);
   assert.match(site, /bindRailDivider/);
   assert.equal(typeof bindRailDivider, 'function');
@@ -521,7 +523,44 @@ test('bindUrlImportShortcuts imports non-URL clipboard text from the page', () =
 
   assert.equal(prevented, true);
   assert.equal(imported, '这是一段正文,需要直接排版。');
+  assert.equal(urlInput.value, '这是一段正文,需要直接排版。');
   assert.equal(fetched, 0);
+});
+
+test('bindUrlImportShortcuts clears the rendered article when the import box is emptied', () => {
+  const inputHandlers = {};
+  let cleared = 0;
+  const urlInput = {
+    value: '已经排版的正文',
+    tagName: 'TEXTAREA',
+    classList: { contains: () => false },
+    addEventListener(type, handler) { inputHandlers[type] = handler; },
+  };
+  const documentRef = {
+    activeElement: urlInput,
+    getElementById(id) {
+      if (id === 'urlInput') return urlInput;
+      if (id === 'previewContent') return { style: { display: '' } };
+      return null;
+    },
+    addEventListener() {},
+    querySelectorAll() { return []; },
+  };
+
+  bindUrlImportShortcuts({
+    documentRef,
+    fetchArticle: () => {},
+    importText: () => {},
+    onInputCleared: () => { cleared += 1; },
+  });
+
+  urlInput.value = '还没清空';
+  inputHandlers.input();
+  assert.equal(cleared, 0);
+
+  urlInput.value = '';
+  inputHandlers.input();
+  assert.equal(cleared, 1);
 });
 
 test('foodTalksFetchErrorMessage keeps internal details out of the UI', () => {

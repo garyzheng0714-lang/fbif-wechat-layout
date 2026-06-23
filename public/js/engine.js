@@ -1328,6 +1328,7 @@ export function initApp(initialTemplate) {
   // editor (preview shows but copy is empty, or vice versa).
   window._captureSessionSnapshot = function() {
     const ca = document.getElementById('contentArea');
+    const importInput = document.getElementById('urlInput');
     const titleDisplay = document.getElementById('previewTitleDisplay');
     const titleInput = document.getElementById('titleInput');
     const date = document.getElementById('wxDate');
@@ -1377,9 +1378,28 @@ export function initApp(initialTemplate) {
         doc_stat: docStat ? docStat.textContent : '',
         stats_text: (document.getElementById('statsBar') || {}).textContent || '',
         preview_scroll_top: (document.getElementById('previewScroll') || {}).scrollTop || 0,
+        import_input_value: importInput ? importInput.value : '',
       },
     };
   };
+
+  function restoredImportInputValue(dom, closureState) {
+    if (Object.prototype.hasOwnProperty.call(dom, 'import_input_value')) {
+      return dom.import_input_value || '';
+    }
+    const input = (closureState && (closureState.last_render_input || (closureState.article_session || {}).input)) || null;
+    if (
+      input &&
+      input.kind === 'md' &&
+      !input.isRepost &&
+      !input.sourceIsDocx &&
+      !input.title &&
+      typeof input.payload === 'string'
+    ) {
+      return input.payload;
+    }
+    return '';
+  }
 
   window._restoreSessionSnapshot = function(snap) {
     if (!snap || snap.schema_version !== 1) return false;
@@ -1453,6 +1473,8 @@ export function initApp(initialTemplate) {
     document.body.classList.toggle('has-preview', !!dom.has_preview_class);
     const previewScroll = document.getElementById('previewScroll');
     if (previewScroll) previewScroll.scrollTop = dom.preview_scroll_top || 0;
+    const importInput = document.getElementById('urlInput');
+    if (importInput) importInput.value = restoredImportInputValue(dom, cs);
     dispatchArticleEvent('fbif:article-restored', { snapshot: snap });
     return true;
   };

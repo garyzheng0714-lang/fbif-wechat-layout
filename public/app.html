@@ -783,7 +783,7 @@ await loadTemplate(currentTemplateId);
 
 // Cross-channel state restore — must come after initApp so engine.js has
 // wired up window._captureSessionSnapshot / _restoreSessionSnapshot.
-const { restoreCurrentChannel, bindChannelSwitcher } = await import('/js/session-restore.js?v=' + assetVersion);
+const { restoreCurrentChannel, bindChannelSwitcher, clearCurrentChannel } = await import('/js/session-restore.js?v=' + assetVersion);
 restoreCurrentChannel();
 bindChannelSwitcher();
 
@@ -841,6 +841,10 @@ const importClipboardText = (text) => {
   window._currentArticleUrl = '';
   if (window._handleText) window._handleText(text, { source: 'clipboard' });
 };
+const clearRenderedImport = () => {
+  clearCurrentChannel();
+  if (window.goBack) window.goBack();
+};
 window.fetchArticle = createUrlImportHandler({
   documentRef: document,
   fetchImpl: fetch,
@@ -854,6 +858,7 @@ bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
   importText: importClipboardText,
+  onInputCleared: clearRenderedImport,
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 </script>
