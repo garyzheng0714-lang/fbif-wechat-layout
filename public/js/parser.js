@@ -648,7 +648,15 @@ export function hasImageLikeLink(text) {
 export function formatPlainTextForCopy(text) {
   const body = normalizeClipboardTextForMarkdown(text);
   if (!body) return '';
-  return convertText(body, { locale: 'zh' });
+  return tidyPlainTextChineseSpacing(convertText(body, { locale: 'zh' }));
+}
+
+function tidyPlainTextChineseSpacing(text) {
+  return String(text || '')
+    .replace(/[ \t]+([，。；：？！、）】」』》〉])/g, '$1')
+    .replace(/[ \t]+([（【「『《〈])/g, '$1')
+    .replace(/([（【「『《〈])[ \t]+/g, '$1')
+    .replace(/([，。；：？！、])[ \t]+/g, '$1');
 }
 
 export function parseMdFrontmatter(text) {

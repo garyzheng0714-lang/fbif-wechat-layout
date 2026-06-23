@@ -102,6 +102,12 @@ test('formatPlainTextForCopy converts punctuation and preserves paragraph breaks
   assert.equal(formatPlainTextForCopy(input), '第一段，测试。\n\n第二段？');
 });
 
+test('formatPlainTextForCopy removes stray spaces around Chinese punctuation', () => {
+  const input = '第一段: 文字 (中文), 继续。';
+
+  assert.equal(formatPlainTextForCopy(input), '第一段：文字（中文），继续。');
+});
+
 test('hasImageLikeLink detects image-bearing text', () => {
   assert.equal(hasImageLikeLink('![图](https://example.com/a.jpg)'), true);
   assert.equal(hasImageLikeLink('<img src="https://example.com/a.png">'), true);

@@ -757,6 +757,15 @@ window.addEventListener('fbif:article-previewed', activateArticleSidebar);
 window.addEventListener('fbif:article-restored', activateArticleSidebar);
 window.addEventListener('fbif:article-cleared', () => {
   articleEditorActivated = false;
+  const maSec = document.getElementById('moreArticlesSection');
+  if (maSec) maSec.style.display = 'none';
+  const bbSec = document.getElementById('blockPanelSection');
+  if (bbSec) bbSec.style.display = 'none';
+});
+window.addEventListener('fbif:plain-text-ready', () => {
+  articleEditorActivated = false;
+  const maSec = document.getElementById('moreArticlesSection');
+  if (maSec) maSec.style.display = 'none';
   const bbSec = document.getElementById('blockPanelSection');
   if (bbSec) bbSec.style.display = 'none';
 });

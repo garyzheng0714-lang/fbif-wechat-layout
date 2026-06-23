@@ -769,97 +769,104 @@ export function initApp(initialTemplate) {
     handleFile(file, opts);
   };
 
-  let plainTextDialog = null;
-  function ensurePlainTextDialog() {
-    if (plainTextDialog) return plainTextDialog;
-
-    const scrim = document.createElement('div');
-    scrim.className = 'modal-scrim plain-text-scrim';
-    scrim.hidden = true;
-    scrim.setAttribute('data-plain-text-dialog', '');
-    scrim.innerHTML = `
-      <div class="modal plain-text-modal" role="dialog" aria-modal="true" aria-labelledby="plainTextTitle">
-        <div class="modal-head">
-          <div class="modal-title" id="plainTextTitle">文字已处理</div>
-          <button class="modal-close" type="button" data-plain-close aria-label="关闭">×</button>
-        </div>
-        <div class="modal-body">
-          <textarea class="plain-text-output" data-plain-output readonly spellcheck="false"></textarea>
-          <div class="plain-text-meta" data-plain-meta></div>
-        </div>
-        <div class="modal-foot">
-          <button class="btn btn-secondary" type="button" data-plain-close>关闭</button>
-          <button class="btn btn-primary" type="button" data-plain-copy>复制文字</button>
-        </div>
-      </div>`;
-    document.body.appendChild(scrim);
-
-    const output = scrim.querySelector('[data-plain-output]');
-    const meta = scrim.querySelector('[data-plain-meta]');
-    const copyBtn = scrim.querySelector('[data-plain-copy]');
-    const closeButtons = Array.from(scrim.querySelectorAll('[data-plain-close]'));
-
-    const close = () => {
-      scrim.hidden = true;
-      copyBtn.textContent = '复制文字';
-      copyBtn.classList.remove('copied');
-    };
-    closeButtons.forEach(btn => btn.addEventListener('click', close));
-    scrim.addEventListener('click', e => {
-      if (e.target === scrim) close();
-    });
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && !scrim.hidden) close();
-    });
-
-    copyBtn.addEventListener('click', async () => {
-      const text = output.value || '';
-      let ok = false;
+  function copyPlainTextToClipboard(text) {
+    return (async () => {
       try {
         if (navigator.clipboard) {
           await navigator.clipboard.writeText(text);
-          ok = true;
+          return true;
         }
       } catch {}
-      if (!ok) {
-        output.focus();
-        output.select();
-        try { ok = document.execCommand('copy'); } catch {}
-      }
-      copyBtn.textContent = ok ? '已复制' : '复制失败';
-      copyBtn.classList.toggle('copied', ok);
-      setTimeout(() => {
-        if (!scrim.hidden) {
-          copyBtn.textContent = '复制文字';
-          copyBtn.classList.remove('copied');
-        }
-      }, 1600);
-    });
 
-    plainTextDialog = {
-      open(text) {
-        output.value = text;
-        meta.textContent = `已保留段落，${text.length} 字符`;
-        copyBtn.textContent = '复制文字';
-        copyBtn.classList.remove('copied');
-        scrim.hidden = false;
-        requestAnimationFrame(() => {
-          output.focus();
-          output.select();
-        });
-      },
-      close,
-    };
-    return plainTextDialog;
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch {}
+      ta.remove();
+      return ok;
+    })();
+  }
+
+  function getPlainTextCopyValue() {
+    const output = document.querySelector('.plain-text-page-output');
+    if (output && typeof output.value === 'string') return output.value;
+    if (output) return normalizePlainTextOutputValue(output.innerText || output.textContent || '');
+    return _plainTextCopy || '';
+  }
+
+  function normalizePlainTextOutputValue(text) {
+    return String(text || '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/\u00A0/g, ' ')
+      .replace(/\n{3,}/g, '\n\n');
   }
 
   function showPlainTextResult(text) {
     const converted = formatPlainTextForCopy(text);
     if (!converted) return false;
-    if (typeof window.goBack === 'function') window.goBack();
+    if (window._resetCopyFeedback) window._resetCopyFeedback();
+    _plainTextCopy = converted;
+    _lastCopiedHtml = '';
+    _articleSession = null;
+    _lastRenderInput = null;
+    _sourceIsDocx = false;
+    _isRepost = false;
+    _articleHtml = '';
+    _articleCopy = '';
+    _footerHtml = '';
+    _footerCopy = '';
+    _failedSrcs = [];
+    _copyRequiresWechatImageTransfer = false;
+    _uploadDone = true;
+    _uploadPromise = null;
+    _moreArticlesCopySeq++;
+    _moreArticlesCopyJob = null;
     clearUploadVisual();
-    ensurePlainTextDialog().open(converted);
-    dispatchArticleEvent('fbif:plain-text-ready', { text: converted });
+    showImportEntry();
+    progress.style.display = 'none';
+    progressFill.style.width = '0%';
+    dropZone.classList.remove('processing');
+
+    const emptyState = document.getElementById('emptyState');
+    const previewContent = document.getElementById('previewContent');
+    const wxFooter = document.getElementById('wxFooter');
+    if (emptyState) emptyState.style.display = 'none';
+    if (previewContent) previewContent.style.display = '';
+    if (wxFooter) wxFooter.style.display = 'none';
+    document.body.classList.add('has-preview', 'plain-text-preview');
+
+    const titleInput = document.getElementById('titleInput');
+    const titleDisplay = document.getElementById('previewTitleDisplay');
+    const articleTitle = document.getElementById('articleTitle');
+    if (titleInput) titleInput.value = '';
+    if (titleDisplay) titleDisplay.textContent = '';
+    if (articleTitle) articleTitle.textContent = '';
+
+    const contentArea = document.getElementById('contentArea');
+    if (contentArea) {
+      contentArea.removeAttribute('style');
+      contentArea.innerHTML =
+        '<section class="plain-text-page" data-rule-label="' + escAttr(PLAIN_TEXT_RULE_LABEL) + '">' +
+        '<div class="plain-text-page-output" contenteditable="plaintext-only" role="textbox" aria-multiline="true" spellcheck="false" tabindex="0" aria-label="处理后的文字">' +
+        esc(converted) +
+        '</div>' +
+        '</section>';
+    }
+    const statsBar = document.getElementById('statsBar');
+    if (statsBar) statsBar.textContent = '';
+    const retryBtn = document.getElementById('retryBtn');
+    if (retryBtn) retryBtn.style.display = 'none';
+    const previewScroll = document.getElementById('previewScroll');
+    if (previewScroll) previewScroll.scrollTop = 0;
+    window._getArticleImageSrcs = function() { return []; };
+    window._updateMoreArticles = async function() { return false; };
+    dispatchArticleEvent('fbif:plain-text-ready', { text: converted, rule: PLAIN_TEXT_RULE_LABEL });
     return true;
   }
 
@@ -1044,6 +1051,9 @@ export function initApp(initialTemplate) {
   let _copyRequiresWechatImageTransfer = false;
   let _moreArticlesCopySeq = 0;
   let _moreArticlesCopyJob = null;
+  const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
+  let _plainTextCopy = null;
+  let _lastCopiedHtml = '';
 
   function findWechatImageSrcs(html) {
     const urls = [];
@@ -1113,6 +1123,8 @@ export function initApp(initialTemplate) {
   function showPreview(title, articleContent, footerContent, stats, importTitle = title) {
     // 渲染新文章 → 复位上一篇的复制状态（按钮变身 + 后台入口），避免显示陈旧的「✓已复制」。
     if (window._resetCopyFeedback) window._resetCopyFeedback();
+    _plainTextCopy = null;
+    document.body.classList.remove('plain-text-preview');
     _articleHtml = normalizeRich(articleContent);
     _articleCopy = _articleHtml;
     _footerHtml = normalizeRich(footerContent);
@@ -1304,11 +1316,24 @@ export function initApp(initialTemplate) {
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
 
   // ---- Copy (with CSS inlining) ----
-  let _lastCopiedHtml = '';
-
   window.copyContent = async function() {
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
+
+    if (_plainTextCopy !== null) {
+      const text = getPlainTextCopyValue();
+      const ok = await copyPlainTextToClipboard(text);
+      _plainTextCopy = text;
+      _lastCopiedHtml = '';
+      logConv(ok ? 'info' : 'error', ok ? '纯文字复制完成' : '纯文字复制失败', {
+        rule: PLAIN_TEXT_RULE_LABEL,
+        chars: text.length,
+      });
+      btn.textContent = ok ? '\u2713 已复制' : '复制失败';
+      btn.classList.toggle('copied', ok);
+      btn.style.background = '';
+      return ok;
+    }
 
     prepareMoreArticlesForCopy('copy-click');
 
@@ -1394,8 +1419,9 @@ export function initApp(initialTemplate) {
     if (emptyState) emptyState.style.display = '';
     if (previewContent) previewContent.style.display = 'none';
     if (wxFooter) wxFooter.style.display = 'none';
-    document.body.classList.remove('has-preview');
+    document.body.classList.remove('has-preview', 'plain-text-preview');
 
+    _plainTextCopy = null;
     _articleSession = null;
     _lastRenderInput = null;
     dropZone.classList.remove('processing');
@@ -1403,6 +1429,8 @@ export function initApp(initialTemplate) {
     fileInput.value = '';
     const copyBtn = document.getElementById('copyBtn');
     if (copyBtn) { copyBtn.textContent = '复制全文'; copyBtn.classList.remove('copied'); }
+    const contentArea = document.getElementById('contentArea');
+    if (contentArea) contentArea.innerHTML = '';
     document.getElementById('statsBar').textContent = '';
     dispatchArticleEvent('fbif:article-cleared');
   };
@@ -1445,6 +1473,7 @@ export function initApp(initialTemplate) {
         article_copy: _articleCopy,
         footer_html: _footerHtml,
         footer_copy: _footerCopy,
+        plain_text_copy: getPlainTextCopyValue(),
         is_repost: _isRepost,
         source_is_docx: _sourceIsDocx,
         copy_requires_wechat_image_transfer: _copyRequiresWechatImageTransfer,
@@ -1473,6 +1502,7 @@ export function initApp(initialTemplate) {
         batch_visible: batchListEl ? batchListEl.style.display !== 'none' : false,
         batch_html: batchListEl ? batchListEl.innerHTML : '',
         has_preview_class: document.body.classList.contains('has-preview'),
+        plain_text_preview: document.body.classList.contains('plain-text-preview'),
         import_visible: importZone ? !importZone.hidden : true,
         doc_visible: docZone ? !docZone.hidden : false,
         doc_name: docName ? docName.textContent : '',
@@ -1510,6 +1540,7 @@ export function initApp(initialTemplate) {
     _articleCopy = cs.article_copy || '';
     _footerHtml = cs.footer_html || '';
     _footerCopy = cs.footer_copy || '';
+    _plainTextCopy = cs.plain_text_copy != null ? cs.plain_text_copy : null;
     _isRepost = !!cs.is_repost;
     _sourceIsDocx = !!cs.source_is_docx;
     _copyRequiresWechatImageTransfer = !!cs.copy_requires_wechat_image_transfer;
@@ -1539,6 +1570,11 @@ export function initApp(initialTemplate) {
       ca.innerHTML = dom.content_area_html || '';
       if (dom.content_area_style) ca.setAttribute('style', dom.content_area_style);
       else ca.removeAttribute('style');
+      if (dom.plain_text_preview) {
+        const output = ca.querySelector('.plain-text-page-output');
+        if (output && typeof output.value === 'string') output.value = _plainTextCopy || '';
+        else if (output) output.textContent = _plainTextCopy || '';
+      }
     }
     const titleDisplay = document.getElementById('previewTitleDisplay');
     if (titleDisplay) titleDisplay.textContent = dom.title_display || '';
@@ -1572,11 +1608,16 @@ export function initApp(initialTemplate) {
       batchListEl.style.display = dom.batch_visible ? '' : 'none';
     }
     document.body.classList.toggle('has-preview', !!dom.has_preview_class);
+    document.body.classList.toggle('plain-text-preview', !!dom.plain_text_preview);
     const previewScroll = document.getElementById('previewScroll');
     if (previewScroll) previewScroll.scrollTop = dom.preview_scroll_top || 0;
     const importInput = document.getElementById('urlInput');
     if (importInput) importInput.value = restoredImportInputValue(dom, cs);
-    dispatchArticleEvent('fbif:article-restored', { snapshot: snap });
+    if (dom.plain_text_preview) {
+      dispatchArticleEvent('fbif:plain-text-ready', { text: _plainTextCopy || '', rule: PLAIN_TEXT_RULE_LABEL });
+    } else {
+      dispatchArticleEvent('fbif:article-restored', { snapshot: snap });
+    }
     return true;
   };
 }

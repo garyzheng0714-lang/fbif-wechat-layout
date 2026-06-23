@@ -250,12 +250,37 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   assert.match(
     engine,
     /if \(!hasImageLikeLink\(body\)\) \{[\s\S]{0,120}showPlainTextResult\(body\);[\s\S]{0,40}return;/,
-    '纯文字剪贴板内容应走轻量弹窗，不应渲染成公众号文章'
+    '纯文字剪贴板内容应走轻量结果页，不应渲染成公众号文章'
   );
   assert.match(
     engine,
-    /navigator\.clipboard\.writeText\(text\)/,
-    '纯文字弹窗应复制纯文本，而不是复用公众号 HTML 复制链路'
+    /document\.body\.classList\.add\('has-preview', 'plain-text-preview'\)/,
+    '纯文字结果应占用右侧预览区，而不是弹出小窗口'
+  );
+  assert.match(
+    engine,
+    /if \(_plainTextCopy !== null\) \{[\s\S]{0,260}const text = getPlainTextCopyValue\(\);[\s\S]{0,80}copyPlainTextToClipboard\(text\)/,
+    '顶部复制全文在纯文字模式应复制结果文本区当前内容，而不是复用公众号 HTML 复制链路'
+  );
+  assert.doesNotMatch(
+    engine,
+    /data-plain-text-dialog|ensurePlainTextDialog|plain-text-modal/,
+    '纯文字结果不应退回弹窗实现'
+  );
+  assert.match(
+    css,
+    /\.empty-cta svg \{[^}]*opacity: 1;[^}]*color: #fff;/,
+    '选择文件按钮里的上传图标不能继承空状态弱化透明度'
+  );
+  assert.match(
+    css,
+    /\.plain-text-page-output \{[\s\S]{0,260}-webkit-text-fill-color: #1F2329;/,
+    '纯文字结果页应使用明确正文色，不能像禁用提示一样发灰'
+  );
+  assert.match(
+    app,
+    /window\.addEventListener\('fbif:plain-text-ready'[\s\S]{0,180}articleEditorActivated = false/,
+    '纯文字结果页不应打开更多文章或底部模块侧栏'
   );
   assert.match(
     engine,

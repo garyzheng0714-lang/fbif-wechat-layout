@@ -52,6 +52,22 @@ test('copy click does not wait on background image or more-articles preparation'
   assert.match(copyFn, /prepareMoreArticlesForCopy\('copy-click'\)/);
 });
 
+test('pure text copy bypasses article HTML and footer pipeline', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));
+  const plainIndex = copyFn.indexOf('copyPlainTextToClipboard(text)');
+  const articleIndex = copyFn.indexOf("prepareMoreArticlesForCopy('copy-click')");
+
+  assert.match(copyFn, /if \(_plainTextCopy !== null\)/);
+  assert.match(copyFn, /const text = getPlainTextCopyValue\(\)/);
+  assert.ok(plainIndex > -1, '纯文字复制应写入纯文本');
+  assert.ok(articleIndex > -1, '公众号文章复制仍应保留更多文章预热入口');
+  assert.ok(
+    plainIndex < articleIndex,
+    '纯文字复制必须先返回，避免触发公众号 HTML、页脚和更多文章复制链路'
+  );
+});
+
 test('新文章导入原子作废上一篇的更多文章预热 job（防跨文章卡片污染）', async () => {
   // 红线#9：更多文章卡片是单篇 curation。清卡片(makeFreshUploadCards)与作废预热 job 必须原子同处，
   // 否则两步之间的窗口（loadBaseFooterHtml/buildFooterWithMoreArticles 两个 await + 200ms setTimeout）
