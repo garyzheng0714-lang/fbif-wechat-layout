@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DOMParser } from '@xmldom/xmldom';
 import {
   esc, escAttr, extractParagraph, parseDocxStyles, parseMdRuns, parseMdFrontmatter,
-  normalizeClipboardTextForMarkdown, buildTableBlock
+  normalizeClipboardTextForMarkdown, hasImageLikeLink, formatPlainTextForCopy, buildTableBlock
 } from '../public/js/parser.js';
 
 const WNS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -94,6 +94,24 @@ test('normalizeClipboardTextForMarkdown handles mixed blank and single line brea
   const input = '第一段。\n第二段。\n\n第三段。';
 
   assert.equal(normalizeClipboardTextForMarkdown(input), '第一段。\n\n第二段。\n\n第三段。');
+});
+
+test('formatPlainTextForCopy converts punctuation and preserves paragraph breaks', () => {
+  const input = '第一段,测试.\n第二段?';
+
+  assert.equal(formatPlainTextForCopy(input), '第一段，测试。\n\n第二段？');
+});
+
+test('hasImageLikeLink detects image-bearing text', () => {
+  assert.equal(hasImageLikeLink('![图](https://example.com/a.jpg)'), true);
+  assert.equal(hasImageLikeLink('<img src="https://example.com/a.png">'), true);
+  assert.equal(hasImageLikeLink('图片 https://mmbiz.qpic.cn/sz_mmbiz_jpg/abc/0'), true);
+  assert.equal(hasImageLikeLink('图片 https://img.example.com/render?id=1&format=webp'), true);
+});
+
+test('hasImageLikeLink ignores ordinary article links', () => {
+  assert.equal(hasImageLikeLink('https://mp.weixin.qq.com/s/abc'), false);
+  assert.equal(hasImageLikeLink('https://www.foodtalks.cn/news/123'), false);
 });
 
 // ---- parseMdFrontmatter ----

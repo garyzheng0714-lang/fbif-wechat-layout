@@ -1,7 +1,7 @@
 // DOCX/Markdown parsing — pure functions, no browser dependencies
 // (except DOMParser which is available in Node 20+ via jsdom if needed)
 
-import { convertRuns } from './punctuation.js';
+import { convertRuns, convertText } from './punctuation.js';
 
 const EXT_TO_MIME = {
   gif: 'image/gif',
@@ -14,6 +14,12 @@ const EXT_TO_MIME = {
   tiff: 'image/tiff',
   tif: 'image/tiff',
 };
+
+const IMAGE_URL_RE = /\bhttps?:\/\/[^\s"'<>)]*\.(?:png|jpe?g|gif|webp|svg|bmp|tiff?)(?:[?#][^\s"'<>)]*)?/i;
+const IMAGE_FORMAT_PARAM_RE = /\bhttps?:\/\/[^\s"'<>)]*[?&](?:wx_fmt|format|fm|type)=(?:png|jpe?g|gif|webp|svg|bmp|tiff?)(?:[&#][^\s"'<>)]*)?/i;
+const WECHAT_IMAGE_CDN_RE = /\bhttps?:\/\/[^\s"'<>)]*(?:mmbiz\.qpic\.cn|mmbiz\.qlogo\.cn|mmecoa\.qpic\.cn)[^\s"'<>)]*/i;
+const MARKDOWN_IMAGE_RE = /!\[[^\]]*]\(\s*<?https?:\/\/[^)\s>]+/i;
+const HTML_IMAGE_RE = /<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\//i;
 
 // ---- XML Namespaces ----
 export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -627,6 +633,22 @@ export function normalizeClipboardTextForMarkdown(text) {
   if (!body) return '';
   const lines = body.split('\n').map(line => line.trim()).filter(Boolean);
   return lines.join('\n\n');
+}
+
+export function hasImageLikeLink(text) {
+  const body = String(text || '');
+  if (!body) return false;
+  return MARKDOWN_IMAGE_RE.test(body) ||
+    HTML_IMAGE_RE.test(body) ||
+    IMAGE_URL_RE.test(body) ||
+    IMAGE_FORMAT_PARAM_RE.test(body) ||
+    WECHAT_IMAGE_CDN_RE.test(body);
+}
+
+export function formatPlainTextForCopy(text) {
+  const body = normalizeClipboardTextForMarkdown(text);
+  if (!body) return '';
+  return convertText(body, { locale: 'zh' });
 }
 
 export function parseMdFrontmatter(text) {

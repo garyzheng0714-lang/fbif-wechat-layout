@@ -10,11 +10,13 @@ const assetQuery = new URL(import.meta.url).search;
 // re-exports below, so one dynamic import here fixes the whole chain.
 const parserModule = await import('./parser.js' + assetQuery);
 const {
-  esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown, parseDocx, extractParagraph,
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown,
+  hasImageLikeLink, formatPlainTextForCopy, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 } = parserModule;
 export {
-  esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown, parseDocx, extractParagraph,
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown,
+  hasImageLikeLink, formatPlainTextForCopy, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 };
 
@@ -766,10 +768,109 @@ export function initApp(initialTemplate) {
     if (opts && opts.isRepost) clearUploadVisual();
     handleFile(file, opts);
   };
+
+  let plainTextDialog = null;
+  function ensurePlainTextDialog() {
+    if (plainTextDialog) return plainTextDialog;
+
+    const scrim = document.createElement('div');
+    scrim.className = 'modal-scrim plain-text-scrim';
+    scrim.hidden = true;
+    scrim.setAttribute('data-plain-text-dialog', '');
+    scrim.innerHTML = `
+      <div class="modal plain-text-modal" role="dialog" aria-modal="true" aria-labelledby="plainTextTitle">
+        <div class="modal-head">
+          <div class="modal-title" id="plainTextTitle">文字已处理</div>
+          <button class="modal-close" type="button" data-plain-close aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <textarea class="plain-text-output" data-plain-output readonly spellcheck="false"></textarea>
+          <div class="plain-text-meta" data-plain-meta></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" type="button" data-plain-close>关闭</button>
+          <button class="btn btn-primary" type="button" data-plain-copy>复制文字</button>
+        </div>
+      </div>`;
+    document.body.appendChild(scrim);
+
+    const output = scrim.querySelector('[data-plain-output]');
+    const meta = scrim.querySelector('[data-plain-meta]');
+    const copyBtn = scrim.querySelector('[data-plain-copy]');
+    const closeButtons = Array.from(scrim.querySelectorAll('[data-plain-close]'));
+
+    const close = () => {
+      scrim.hidden = true;
+      copyBtn.textContent = '复制文字';
+      copyBtn.classList.remove('copied');
+    };
+    closeButtons.forEach(btn => btn.addEventListener('click', close));
+    scrim.addEventListener('click', e => {
+      if (e.target === scrim) close();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !scrim.hidden) close();
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const text = output.value || '';
+      let ok = false;
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(text);
+          ok = true;
+        }
+      } catch {}
+      if (!ok) {
+        output.focus();
+        output.select();
+        try { ok = document.execCommand('copy'); } catch {}
+      }
+      copyBtn.textContent = ok ? '已复制' : '复制失败';
+      copyBtn.classList.toggle('copied', ok);
+      setTimeout(() => {
+        if (!scrim.hidden) {
+          copyBtn.textContent = '复制文字';
+          copyBtn.classList.remove('copied');
+        }
+      }, 1600);
+    });
+
+    plainTextDialog = {
+      open(text) {
+        output.value = text;
+        meta.textContent = `已保留段落，${text.length} 字符`;
+        copyBtn.textContent = '复制文字';
+        copyBtn.classList.remove('copied');
+        scrim.hidden = false;
+        requestAnimationFrame(() => {
+          output.focus();
+          output.select();
+        });
+      },
+      close,
+    };
+    return plainTextDialog;
+  }
+
+  function showPlainTextResult(text) {
+    const converted = formatPlainTextForCopy(text);
+    if (!converted) return false;
+    if (typeof window.goBack === 'function') window.goBack();
+    clearUploadVisual();
+    ensurePlainTextDialog().open(converted);
+    dispatchArticleEvent('fbif:plain-text-ready', { text: converted });
+    return true;
+  }
+
   window._handleText = (text, opts = {}) => {
     const body = normalizeClipboardTextForMarkdown(text);
     if (!body) return;
     clearUploadVisual();
+    if (!hasImageLikeLink(body)) {
+      showPlainTextResult(body);
+      return;
+    }
     const file = new File([body], 'clipboard.md', { type: 'text/markdown' });
     handleFile(file, { ...opts, isRepost: false, title: '', displayName: '剪贴板正文' });
   };

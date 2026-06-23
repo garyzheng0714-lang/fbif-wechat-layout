@@ -245,7 +245,17 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   assert.match(
     engine,
     /handleFile\(file, \{ \.\.\.opts, isRepost: false, title: '', displayName: '剪贴板正文' \}\);/,
-    '剪贴板正文不应把内部 clipboard.md 文件名渲染成文章标题'
+    '包含图片链接的剪贴板正文仍不应把内部 clipboard.md 文件名渲染成文章标题'
+  );
+  assert.match(
+    engine,
+    /if \(!hasImageLikeLink\(body\)\) \{[\s\S]{0,120}showPlainTextResult\(body\);[\s\S]{0,40}return;/,
+    '纯文字剪贴板内容应走轻量弹窗，不应渲染成公众号文章'
+  );
+  assert.match(
+    engine,
+    /navigator\.clipboard\.writeText\(text\)/,
+    '纯文字弹窗应复制纯文本，而不是复用公众号 HTML 复制链路'
   );
   assert.match(
     engine,

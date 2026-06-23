@@ -689,6 +689,25 @@ body.is-resizing-rail .rail { transition: none; }
 .modal-foot { flex-shrink: 0; padding: 12px 18px; border-top: 1px solid var(--fs-divider); display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 .modal-foot .spacer { flex: 1; }
 
+.plain-text-modal { width: min(640px, 100%); }
+.plain-text-modal .modal-body { background: var(--fs-bg-nested); }
+.plain-text-output {
+  width: 100%; min-height: 300px; max-height: min(54dvh, 520px); resize: vertical;
+  border: 1px solid var(--fs-border-control); border-radius: var(--fs-r-m);
+  background: var(--fs-bg-card); color: var(--fs-text-1);
+  font-family: var(--fs-font); font-size: 14px; line-height: 1.75;
+  padding: 12px 14px; outline: none; white-space: pre-wrap;
+  transition: border-color var(--fs-t-fast), box-shadow var(--fs-t-fast);
+}
+.plain-text-output:focus {
+  border-color: var(--fs-brand);
+  box-shadow: 0 0 0 2px var(--fs-brand-soft);
+}
+.plain-text-meta {
+  margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--fs-text-3);
+}
+.plain-text-modal .btn-primary.copied { background: var(--fs-success); }
+
 .gal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .gal-tile {
   position: relative; aspect-ratio: 10/7; border-radius: var(--fs-r-s); overflow: hidden;
