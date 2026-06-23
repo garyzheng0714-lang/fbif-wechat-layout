@@ -42,13 +42,15 @@ test('site.html keeps upload + URL + preview + copy button', async () => {
   assert.match(html, /class=['"][^'"]*\bimport-card-head\b[^'"]*['"]/, 'website import area should have a quiet source panel header');
   assert.match(html, /class=['"][^'"]*\bimport-title\b[^'"]*['"][^>]*>导入内容</);
   assert.doesNotMatch(html, /import-mode-badge/, 'import panel should not add decorative badges that compete with the editor input');
-  assert.match(html, /class=['"][^'"]*\bimport-actions\b[^'"]*['"]/, 'website import area should group file fallback and primary action together');
+  assert.match(html, /class=['"][^'"]*\bimport-actions\b[^'"]*['"]/, 'website import area should keep the file entry as a first-class zone');
   assert.match(html, /id=['"]dropZone['"]/);
+  assert.match(html, /data-upload-label[^>]*>粘贴或拖拽至这里上传</, 'upload zone should explain paste and drag inside the box');
+  assert.match(html, /data-add-file-text[^>]*>添加本地文件</, 'file picker should be expressed inside the upload zone');
+  assert.match(html, /data-uploaded-file hidden/, 'upload zone should have a centered uploaded-file state');
   assert.match(html, /class=['"][^'"]*\bimport-card\b[^'"]*['"]/);
   assert.match(html, /class=['"][^'"]*\bdropzone\b[^'"]*['"][^>]*id=['"]dropZone['"]/);
   assert.match(html, /class=['"][^'"]*\burl-row\b[^'"]*['"][^>]*data-url-focus-target/);
-  assert.match(html, /id=['"]urlFetchBtn['"][^>]*class=['"][^'"]*\bbtn-sm\b/, 'website URL import action should use the shared shell button size');
-  assert.match(html, /id=['"]urlFetchBtn['"][\s\S]*?>排版<\/button>/, 'website primary import action should be phrased as formatting');
+  assert.doesNotMatch(html, /id=['"]urlFetchBtn['"]/, 'import panel should not keep a hidden third action; paste and keyboard shortcuts route URL/text formatting');
   assert.match(html, /id=['"]urlInput['"]/);
   assert.match(html, /<textarea[^>]*id=['"]urlInput['"]/, 'shared import box should accept multi-line pasted text');
   assert.match(html, /id=['"]previewContent['"]/);
@@ -62,10 +64,12 @@ test('app.html uses the unified source import panel', async () => {
   assert.doesNotMatch(html, /import-mode-badge/);
   assert.match(html, /class=['"][^'"]*\bimport-actions\b[^'"]*['"]/);
   assert.match(html, /class=['"][^'"]*\bdropzone\b[^'"]*['"][^>]*id=['"]dropZone['"]/);
+  assert.match(html, /data-upload-label[^>]*>粘贴或拖拽至这里上传</);
+  assert.match(html, /data-add-file-text[^>]*>添加本地文件</);
+  assert.match(html, /data-uploaded-file hidden/);
   assert.match(html, /class=['"][^'"]*\burl-row\b[^'"]*['"][^>]*data-url-focus-target/);
   assert.match(html, /<textarea[^>]*id=['"]urlInput['"]/);
-  assert.match(html, /id=['"]urlFetchBtn['"][^>]*class=['"][^'"]*\bbtn-sm\b/);
-  assert.match(html, /id=['"]urlFetchBtn['"][\s\S]*?>排版<\/button>/);
+  assert.doesNotMatch(html, /id=['"]urlFetchBtn['"]/);
   assert.match(html, /id=['"]docZone['"][^>]*hidden/, 'public-account page should keep the imported-source summary card');
 });
 

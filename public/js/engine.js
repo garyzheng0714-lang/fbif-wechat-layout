@@ -370,15 +370,23 @@ export function initApp(initialTemplate) {
   function applyTemplateShell(nextTemplate) {
     document.getElementById('pageTitle').textContent = nextTemplate.name;
     document.getElementById('pageSubtitle').textContent = nextTemplate.description;
-    document.getElementById('fileHint').textContent = 'Word / MD / TXT';
+    const fileHint = document.getElementById('fileHint');
+    if (fileHint) fileHint.textContent = 'Word / MD / TXT';
     fileInputEl.accept = nextTemplate.formats.join(',');
   }
   const fileInputEl = document.getElementById('fileInput');
   applyTemplateShell(template);
-  fileInputEl.multiple = true;
+  fileInputEl.multiple = false;
 
   const dropZone = document.getElementById('dropZone');
   const fileInput = fileInputEl;
+  const uploadLabel = dropZone ? dropZone.querySelector('[data-upload-label]') : null;
+  const addFileText = dropZone ? dropZone.querySelector('[data-add-file-text]') : null;
+  const uploadedFile = dropZone ? dropZone.querySelector('[data-uploaded-file]') : null;
+  const uploadedName = dropZone ? dropZone.querySelector('[data-uploaded-name]') : null;
+  const uploadExt = dropZone ? dropZone.querySelector('[data-file-ext]') : null;
+  const removeUpload = dropZone ? dropZone.querySelector('[data-remove-upload]') : null;
+  const defaultUploadLabel = uploadLabel ? uploadLabel.textContent : '粘贴或拖拽至这里上传';
   const progress = document.getElementById('progress');
   const progressFill = document.getElementById('progressFill');
   const progressText = document.getElementById('progressText');
@@ -392,6 +400,44 @@ export function initApp(initialTemplate) {
 
   function showError(msg) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
 
+  function displayFileExt(file) {
+    const ext = String((file && file.name || '').split('.').pop() || '').toUpperCase();
+    if (ext === 'DOCX') return 'DOC';
+    if (ext === 'MARKDOWN') return 'MD';
+    if (ext === 'TXT') return 'T';
+    return ext ? ext.slice(0, 3) : 'T';
+  }
+
+  function setDropActive(active) {
+    if (!dropZone) return;
+    dropZone.classList.toggle('dragover', !!active);
+    if (uploadLabel && !dropZone.classList.contains('has-file')) {
+      uploadLabel.textContent = active ? '粘贴或拖拽上传' : defaultUploadLabel;
+    }
+  }
+
+  function clearUploadVisual() {
+    if (!dropZone) return;
+    setDropActive(false);
+    dropZone.classList.remove('has-file');
+    if (uploadLabel) uploadLabel.textContent = defaultUploadLabel;
+    if (addFileText) addFileText.textContent = '添加本地文件';
+    if (uploadedName) uploadedName.textContent = '';
+    if (uploadExt) uploadExt.textContent = 'T';
+    if (uploadedFile) uploadedFile.hidden = true;
+    if (fileInput) fileInput.value = '';
+  }
+
+  function showUploadFile(file) {
+    if (!dropZone || !file) return;
+    setDropActive(false);
+    dropZone.classList.add('has-file');
+    if (addFileText) addFileText.textContent = '重新选择文件';
+    if (uploadedName) uploadedName.textContent = file.name || '未命名文件';
+    if (uploadExt) uploadExt.textContent = displayFileExt(file);
+    if (uploadedFile) uploadedFile.hidden = false;
+  }
+
   function showImportEntry() {
     if (importZone) importZone.hidden = false;
     if (docZone) docZone.hidden = true;
@@ -400,6 +446,7 @@ export function initApp(initialTemplate) {
   function resetImportEntry() {
     showImportEntry();
     dropZone.classList.remove('processing');
+    clearUploadVisual();
     progress.style.display = 'none';
     progressFill.style.width = '0%';
     progressText.textContent = '正在排版...';
@@ -438,11 +485,12 @@ export function initApp(initialTemplate) {
   }
 
   function showImportSummary(title, stats) {
-    if (!docZone) return;
-    if (docName) docName.textContent = title || '未命名文档';
-    if (docStat) docStat.textContent = formatImportStat(stats);
-    if (importZone) importZone.hidden = true;
-    docZone.hidden = false;
+    if (docZone) {
+      if (docName) docName.textContent = title || '未命名文档';
+      if (docStat) docStat.textContent = formatImportStat(stats);
+      docZone.hidden = true;
+    }
+    if (importZone) importZone.hidden = false;
     dropZone.classList.remove('processing');
     progress.style.display = 'none';
   }
@@ -632,6 +680,20 @@ export function initApp(initialTemplate) {
     }
   }
 
+  function handleUploadFiles(files, opts) {
+    const list = Array.from(files || []);
+    if (list.length === 0) return;
+    const valid = list.filter(isValidFile);
+    if (valid.length === 0) {
+      showImportEntry();
+      showError('请上传 ' + template.formats.join(' 或 ') + ' 文件');
+      return;
+    }
+    const selected = valid[0];
+    showUploadFile(selected);
+    handleFiles([selected], opts);
+  }
+
   async function processFile(file, opts) {
     // Repost flag 局部捕获：footer 选预设全程用此局部，绝不在 await 之后回读模块级 _isRepost
     // （并发导入交错会污染全局；codex re-review）。全局仍同步设置，供快照/renderBottomFooter 兜底。
@@ -651,19 +713,45 @@ export function initApp(initialTemplate) {
     });
   }
 
-  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('click', () => {
+    fileInput.value = '';
+    fileInput.click();
+  });
   dropZone.addEventListener('keydown', e => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     fileInput.click();
   });
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-  dropZone.addEventListener('drop', e => {
-    e.preventDefault(); dropZone.classList.remove('dragover');
-    handleFiles(e.dataTransfer.files, { isRepost: false });
+  dropZone.addEventListener('dragenter', e => { e.preventDefault(); setDropActive(true); });
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); setDropActive(true); });
+  dropZone.addEventListener('dragleave', e => {
+    if (!e.relatedTarget || !dropZone.contains(e.relatedTarget)) setDropActive(false);
   });
-  fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles(fileInput.files, { isRepost: false }); });
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    setDropActive(false);
+    handleUploadFiles(e.dataTransfer.files, { isRepost: false });
+  });
+  fileInput.addEventListener('change', () => {
+    if (!fileInput.files.length) return;
+    handleUploadFiles(fileInput.files, { isRepost: false });
+    fileInput.value = '';
+  });
+  if (removeUpload) {
+    removeUpload.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearUploadVisual();
+      fileInput.value = '';
+    });
+  }
+  document.addEventListener('paste', e => {
+    const files = e.clipboardData && e.clipboardData.files;
+    if (!files || !files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    handleUploadFiles(files, { isRepost: false });
+  }, true);
   if (docSwap) {
     docSwap.addEventListener('click', () => {
       resetImportEntry();
@@ -674,10 +762,14 @@ export function initApp(initialTemplate) {
   // Exposed so app.html fetchArticle() can feed the synthetic File produced
   // from a URL fetch through the same pipeline as a local upload, but with
   // isRepost=true so the footer swaps to the 转载 variant.
-  window._handleFile = (file, opts) => handleFile(file, opts);
+  window._handleFile = (file, opts) => {
+    if (opts && opts.isRepost) clearUploadVisual();
+    handleFile(file, opts);
+  };
   window._handleText = (text, opts = {}) => {
     const body = String(text || '').trim();
     if (!body) return;
+    clearUploadVisual();
     const file = new File([body], 'clipboard.md', { type: 'text/markdown' });
     handleFile(file, { ...opts, isRepost: false, title: '', displayName: '剪贴板正文' });
   };
@@ -691,6 +783,7 @@ export function initApp(initialTemplate) {
     const isRepost = !!(opts && opts.isRepost);
     _isRepost = isRepost;
     _convLog.length = 0;
+    clearUploadVisual();
     dispatchArticleEvent('fbif:article-input-started', { source: 'blocks', title: data && data.title || '' });
     logConv('info', '开始转化', { source: 'blocks', blocks: (data.blocks || []).length });
     errorEl.style.display = 'none';

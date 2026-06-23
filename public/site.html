@@ -52,27 +52,36 @@
           <div class="import-card-head">
             <div>
               <div class="import-title">导入内容</div>
-              <div class="import-eyebrow">正文、Markdown、链接、Word / MD / TXT</div>
+            </div>
+          </div>
+          <div class="import-actions">
+            <div class="dropzone upload-zone" id="dropZone" tabindex="0" role="button" aria-label="粘贴或拖拽文件到这里上传，点击添加本地文件">
+              <div class="dropzone-inner">
+                <div class="dropzone-empty" data-upload-empty>
+                  <svg class="dropzone-cloud" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M22 46H17.5C10.6 46 6 41.4 6 35.5C6 30.1 10 25.8 15.3 25.1C17.5 15.3 25.2 9 34.3 9C44.5 9 52.5 17 52.8 27.1C58 28.7 61 32.7 61 37.7C61 43.2 56.5 46 50.6 46H44"/>
+                    <path d="M33 55V32"/>
+                    <path d="M23.5 41.5L33 32L42.5 41.5"/>
+                  </svg>
+                  <div class="dropzone-title upload-text" data-upload-label>粘贴或拖拽至这里上传</div>
+                </div>
+                <div class="dropzone-file" data-uploaded-file hidden>
+                  <div class="dropzone-file-icon" data-file-ext>T</div>
+                  <div class="dropzone-file-overlay">
+                    <span class="dropzone-file-name" data-uploaded-name></span>
+                    <button class="dropzone-file-remove" type="button" data-remove-upload aria-label="移除已选择文件">×</button>
+                  </div>
+                </div>
+              </div>
+              <div class="dropzone-add-row"><span aria-hidden="true">＋</span><span data-add-file-text>添加本地文件</span></div>
+              <input type="file" id="fileInput">
             </div>
           </div>
           <div class="url-row url-row-inline import-composer" data-url-focus-target>
             <div class="import-input-stack">
               <label class="import-input-label" for="urlInput">正文 / 链接</label>
-              <textarea id="urlInput" class="field url-input-inline import-textarea" rows="5" spellcheck="false" placeholder="粘贴 FoodTalks 链接，或直接粘贴正文 / Markdown"></textarea>
+              <textarea id="urlInput" class="field url-input-inline import-textarea" rows="5" spellcheck="false" placeholder="粘贴 FoodTalks 链接、正文或 Markdown。系统会自动识别输入类型，并按当前账号规则排版。"></textarea>
             </div>
-          </div>
-          <div class="import-actions">
-            <div class="dropzone upload-zone" id="dropZone" tabindex="0" role="button" aria-label="上传文件">
-              <div class="dropzone-icon upload-icon">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
-              </div>
-              <div class="dropzone-copy">
-                <div class="dropzone-title upload-text">选择文件</div>
-                <div class="dropzone-hint upload-hint" id="fileHint">Word / MD / TXT</div>
-              </div>
-              <input type="file" id="fileInput">
-            </div>
-            <button id="urlFetchBtn" class="btn-sm url-btn-inline" type="button" onclick="fetchArticle()">排版</button>
           </div>
           <div class="progress import-progress" id="progress">
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>

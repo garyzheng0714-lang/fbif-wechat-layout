@@ -251,6 +251,31 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
     '剪贴板正文的左侧状态名应独立于文章标题'
   );
   assert.match(
+    engine,
+    /fileInputEl\.multiple = false;/,
+    '当前上传区只承诺单文件，不能在代码层继续暴露多文件选择'
+  );
+  assert.match(
+    engine,
+    /const selected = valid\[0\];[\s\S]{0,120}showUploadFile\(selected\);/,
+    '拖拽、选择和粘贴文件应共用单文件上传状态'
+  );
+  assert.match(
+    engine,
+    /document\.addEventListener\('paste'[\s\S]{0,160}e\.clipboardData && e\.clipboardData\.files/,
+    '上传区应支持从剪贴板粘贴文件'
+  );
+  assert.match(
+    css,
+    /\.dropzone\.dragover \.dropzone-cloud[\s\S]{0,100}animation: upload-float/,
+    '文件拖入时应有明确的上传动效反馈'
+  );
+  assert.match(
+    css,
+    /\.dropzone\.has-file \.dropzone-empty/,
+    '上传完成后应切换到居中的文件状态，而不是继续显示空态'
+  );
+  assert.match(
     app,
     /const importClipboardText = \(text\) => \{\s*window\._currentArticleUrl = '';\s*if \(window\._handleText\)/,
     '公众号页粘贴正文时应清空上一条 URL 导入状态'

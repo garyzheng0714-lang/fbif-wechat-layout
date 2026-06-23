@@ -50,7 +50,7 @@
   --fs-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* 方案A 外壳布局 + FBIF 品牌色（方案A 检视台引入） */
-  --rail-w: 300px;
+  --rail-w: 420px;
   --topbar-h: 56px;
   --fbif-logo-blue: #1F5995;
   --fbif-logo-yellow: #FFC60B;
