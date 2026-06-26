@@ -666,12 +666,11 @@ export function buildClipboardArticleBlocks(text) {
   const firstContentIndex = rawLines.findIndex(line => String(line || '').trim());
   if (firstContentIndex < 0) return { title: '', blocks: [], source: 'clipboard-text', bodyOnly: true };
 
-  const title = normalizePlainTextLine(rawLines[firstContentIndex].replace(/^#+\s*/, ''));
   const blocks = [];
   let sawContent = false;
   let blankBefore = false;
 
-  for (let i = firstContentIndex + 1; i < rawLines.length; i++) {
+  for (let i = firstContentIndex; i < rawLines.length; i++) {
     const raw = String(rawLines[i] || '').trim();
     if (!raw) {
       if (sawContent) blankBefore = true;
@@ -689,7 +688,7 @@ export function buildClipboardArticleBlocks(text) {
     blankBefore = false;
   }
 
-  return { title: '', displayName: title || '剪贴板正文', blocks, source: 'clipboard-text', bodyOnly: true };
+  return { title: '', displayName: '剪贴板正文', blocks, source: 'clipboard-text', bodyOnly: true };
 }
 
 export function hasImageLikeLink(text) {

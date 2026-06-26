@@ -340,6 +340,7 @@ test('clipboard article blocks keep author as body text and pasted paragraphs co
     title: '',
     source: 'clipboard-text',
     blocks: [
+      { k: 'txt', runs: [{ type: 'txt', text: '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？' }], compact: true },
       { k: 'txt', runs: [{ type: 'txt', text: '作者：Mote莫特' }], compact: true },
       { k: 'txt', runs: [{ type: 'txt', text: '为什么它家的佛手柑不冲？' }], compact: true },
       { k: 'txt', runs: [{ type: 'txt', text: '这是我第一回迷上欧美的茶叶。' }], compact: true },
@@ -349,8 +350,8 @@ test('clipboard article blocks keep author as body text and pasted paragraphs co
   const html = result.lines.join('\n');
 
   assert.equal(result.title, '');
-  assert.doesNotMatch(html, /年营收21\.8亿！福南梅森凭什么成了英国茶叶天花板？/);
   assert.doesNotMatch(html, /wx-th/);
+  assert.match(sectionForText(html, '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？'), /class="wx-p/);
   assert.equal((html.match(/作者：Mote莫特/g) || []).length, 1);
   assert.doesNotMatch(html, /wx-ta[^"]*">作者：Mote莫特/);
   assert.match(sectionForText(html, '作者：Mote莫特'), /class="wx-p/);

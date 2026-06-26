@@ -121,7 +121,7 @@ test('looksLikeArticleClipboardText detects title-author article drafts', () => 
   assert.equal(looksLikeArticleClipboardText('第一段,测试.\n第二段?'), false);
 });
 
-test('buildClipboardArticleBlocks extracts title and preserves real blank lines', () => {
+test('buildClipboardArticleBlocks treats all pasted article lines as body text', () => {
   const input = [
     '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？',
     '作者：Mote莫特',
@@ -135,12 +135,13 @@ test('buildClipboardArticleBlocks extracts title and preserves real blank lines'
   assert.equal(article.source, 'clipboard-text');
   assert.equal(article.bodyOnly, true);
   assert.equal(article.title, '');
-  assert.equal(article.displayName, '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？');
+  assert.equal(article.displayName, '剪贴板正文');
   assert.equal(article.blocks.some(block => block.k === 'h'), false);
-  assert.equal(article.blocks[0].runs[0].text, '作者：Mote莫特');
-  assert.equal(article.blocks[1].runs[0].text, '为什么它家的佛手柑不冲？我查了一圈发现，味道很柔和。');
-  assert.equal(article.blocks[1].blankBefore, false);
-  assert.equal(article.blocks[2].blankBefore, true);
+  assert.equal(article.blocks[0].runs[0].text, '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？');
+  assert.equal(article.blocks[1].runs[0].text, '作者：Mote莫特');
+  assert.equal(article.blocks[2].runs[0].text, '为什么它家的佛手柑不冲？我查了一圈发现，味道很柔和。');
+  assert.equal(article.blocks[2].blankBefore, false);
+  assert.equal(article.blocks[3].blankBefore, true);
   assert.equal(article.blocks.every(block => block.compact === true), true);
 });
 
