@@ -667,8 +667,8 @@ export function buildClipboardArticleBlocks(text) {
   if (firstContentIndex < 0) return { title: '', blocks: [], source: 'clipboard-text', bodyOnly: true };
 
   const title = normalizePlainTextLine(rawLines[firstContentIndex].replace(/^#+\s*/, ''));
-  const blocks = title ? [{ k: 'h', text: title, compact: false }] : [];
-  let sawContent = !!title;
+  const blocks = [];
+  let sawContent = false;
   let blankBefore = false;
 
   for (let i = firstContentIndex + 1; i < rawLines.length; i++) {
