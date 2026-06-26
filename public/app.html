@@ -769,6 +769,13 @@ window.addEventListener('fbif:plain-text-ready', () => {
   const bbSec = document.getElementById('blockPanelSection');
   if (bbSec) bbSec.style.display = 'none';
 });
+window.addEventListener('fbif:article-text-ready', () => {
+  articleEditorActivated = false;
+  const maSec = document.getElementById('moreArticlesSection');
+  if (maSec) maSec.style.display = 'none';
+  const bbSec = document.getElementById('blockPanelSection');
+  if (bbSec) bbSec.style.display = 'none';
+});
 
 trackActiveRuleHydration(hydrateActiveRulePreset(activeRulePack.id), activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
 refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));

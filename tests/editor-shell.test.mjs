@@ -249,8 +249,13 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   );
   assert.match(
     engine,
+    /looksLikeArticleClipboardText\(raw\)[\s\S]{0,180}_handleBlocks\(buildClipboardArticleBlocks\(raw\), \{ \.\.\.opts, isRepost: false, bodyOnly: true \}\)/,
+    '带标题和作者的剪贴板文章草稿应进入公众号正文排版，但不应生成完整公众号头尾'
+  );
+  assert.match(
+    engine,
     /if \(!hasImageLikeLink\(body\)\) \{[\s\S]{0,120}showPlainTextResult\(body\);[\s\S]{0,40}return;/,
-    '纯文字剪贴板内容应走轻量结果页，不应渲染成公众号文章'
+    '短纯文字剪贴板内容仍可走轻量结果页'
   );
   assert.match(
     engine,
@@ -284,7 +289,7 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   );
   assert.match(
     engine,
-    /showPreview\(session\.title \|\| '', session\.articleHtml, session\.footerHtml, session\.stats, session\.displayName \|\| session\.title \|\| ''\);/,
+    /showPreview\(session\.title \|\| '', session\.articleHtml, session\.footerHtml, session\.stats, session\.displayName \|\| session\.title \|\| '', \{[\s\S]{0,80}bodyOnly: _articleBodyOnly/,
     '剪贴板正文的左侧状态名应独立于文章标题'
   );
   assert.match(

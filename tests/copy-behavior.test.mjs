@@ -39,7 +39,7 @@ test('网站渠道跳过公众号导向的图片归一化（内联 logo 不被�
   );
   // 预览/页脚更新/复制三条内容路径都须走 normalizeRich，而非裸 normalizeWechatRichHtml。
   assert.match(engine, /_articleHtml = normalizeRich\(articleContent\)/);
-  assert.match(engine, /_footerHtml = normalizeRich\(footerContent\)/);
+  assert.match(engine, /_footerHtml = bodyOnly \? '' : normalizeRich\(footerContent\)/);
   assert.match(engine, /html = normalizeRich\(html\)/, '复制路径必须走 normalizeRich');
 });
 

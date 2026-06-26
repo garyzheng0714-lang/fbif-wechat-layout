@@ -208,6 +208,7 @@ function shouldSpaceAfter(e, next) {
   // flush against the 「提示：」 line. Emit the standard 20px gap.
   if (!next) return true;
   if (next.blankBefore && !(e.k === 'ref' && next.k === 'ref')) return true;
+  if (e.compact && next.compact && !next.blankBefore) return false;
   if (isMoteAuthorCard(next)) return true;
   if (next.k === 'cap') return false;
   if (e.k === 'ref' && next.k === 'ref') return false;
@@ -480,9 +481,12 @@ function render(elems, author, source, opts) {
 // paragraphs to 'attr' blocks, and track 参考文献/信息来源 sections. No
 // visual-heuristic role-guessing — that was the whole point of moving to
 // structured blocks. See api/wechat_blocks.go for the upstream contract.
-function classifyBlocks({ title, blocks }) {
+function classifyBlocks(data) {
+  const { title, blocks } = data || {};
   const elems = [];
   const attrs = [];
+  const isClipboardText = data && data.source === 'clipboard-text';
+  let author = '', source = '';
   let imgN = 0, inRef = false;
   const inputBlocks = blocks || [];
 
@@ -539,7 +543,7 @@ function classifyBlocks({ title, blocks }) {
       .join('')
       .trim();
 
-    if (attrs.length && isFooterPromptText(text) && isStandardFooterPrompt(inputBlocks, blockIndex)) {
+    if (!isClipboardText && attrs.length && isFooterPromptText(text) && isStandardFooterPrompt(inputBlocks, blockIndex)) {
       break;
     }
 
@@ -551,7 +555,7 @@ function classifyBlocks({ title, blocks }) {
 
     // URL imports use the standard FBIF footer, so article-level attribution
     // is collected and emitted once at the article tail before that footer.
-    const attr = parseAttribution(text);
+    const attr = isClipboardText ? null : parseAttribution(text);
     if (attr) {
       pushUniqueAttribution(attrs, attr);
       inRef = false;
@@ -566,16 +570,16 @@ function classifyBlocks({ title, blocks }) {
     }
 
     if (inRef) {
-      elems.push({ k: 'ref', runs });
+      elems.push({ k: 'ref', runs, blankBefore: !!b.blankBefore, compact: !!b.compact });
       continue;
     }
 
     // li and txt render the same (FBIF template has no dedicated list style);
     // collapsing them here keeps the renderer's switch simple.
-    elems.push({ k: 'txt', runs });
+    elems.push({ k: 'txt', runs, blankBefore: !!b.blankBefore, compact: !!b.compact });
   }
 
-  return { elems: elems.concat(attrs), author: '', source: '', title: title || '', imgN };
+  return { elems: elems.concat(attrs), author, source, title: title || '', imgN };
 }
 
 export default {

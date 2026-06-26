@@ -635,6 +635,63 @@ export function normalizeClipboardTextForMarkdown(text) {
   return lines.join('\n\n');
 }
 
+function normalizePlainTextLine(text) {
+  return tidyPlainTextChineseSpacing(convertText(String(text || '').trim(), { locale: 'zh' }));
+}
+
+function nonEmptyClipboardLines(text) {
+  return String(text || '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+function isLikelyArticleTitle(line) {
+  const text = String(line || '').trim().replace(/^#+\s*/, '');
+  if (text.length < 6 || text.length > 80) return false;
+  if (/^(作者|撰文|撰稿|来源|出品|编辑|责编)[：:/|｜]/.test(text)) return false;
+  return /[？?！!]$/.test(text) || /^(为什么|怎么|如何|谁|什么|哪|年营收|独家|深度)/.test(text);
+}
+
+export function looksLikeArticleClipboardText(text) {
+  const lines = nonEmptyClipboardLines(text);
+  if (lines.length < 4) return false;
+  if (!isLikelyArticleTitle(lines[0])) return false;
+  return lines.slice(1, 5).some(line => /^(作者|撰文|撰稿|文)[：:/|｜]\s*\S+/.test(line));
+}
+
+export function buildClipboardArticleBlocks(text) {
+  const rawLines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+  const firstContentIndex = rawLines.findIndex(line => String(line || '').trim());
+  if (firstContentIndex < 0) return { title: '', blocks: [], source: 'clipboard-text', bodyOnly: true };
+
+  const title = normalizePlainTextLine(rawLines[firstContentIndex].replace(/^#+\s*/, ''));
+  const blocks = title ? [{ k: 'h', text: title, compact: false }] : [];
+  let sawContent = !!title;
+  let blankBefore = false;
+
+  for (let i = firstContentIndex + 1; i < rawLines.length; i++) {
+    const raw = String(rawLines[i] || '').trim();
+    if (!raw) {
+      if (sawContent) blankBefore = true;
+      continue;
+    }
+    const line = normalizePlainTextLine(raw);
+    if (!line) continue;
+    blocks.push({
+      k: 'txt',
+      runs: [{ type: 'txt', text: line }],
+      blankBefore,
+      compact: true,
+    });
+    sawContent = true;
+    blankBefore = false;
+  }
+
+  return { title: '', displayName: title || '剪贴板正文', blocks, source: 'clipboard-text', bodyOnly: true };
+}
+
 export function hasImageLikeLink(text) {
   const body = String(text || '');
   if (!body) return false;

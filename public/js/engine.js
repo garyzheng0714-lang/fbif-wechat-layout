@@ -11,12 +11,14 @@ const assetQuery = new URL(import.meta.url).search;
 const parserModule = await import('./parser.js' + assetQuery);
 const {
   esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown,
-  hasImageLikeLink, formatPlainTextForCopy, parseDocx, extractParagraph,
+  hasImageLikeLink, formatPlainTextForCopy, looksLikeArticleClipboardText,
+  buildClipboardArticleBlocks, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 } = parserModule;
 export {
   esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown,
-  hasImageLikeLink, formatPlainTextForCopy, parseDocx, extractParagraph,
+  hasImageLikeLink, formatPlainTextForCopy, looksLikeArticleClipboardText,
+  buildClipboardArticleBlocks, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 };
 
@@ -522,6 +524,7 @@ export function initApp(initialTemplate) {
   }
 
   function isFooterEnabledForCurrentArticle() {
+    if (_articleBodyOnly) return false;
     const footerEl = document.getElementById('footerEnabled');
     return hasManagedBottomBlocksFooter() || !!(footerEl && footerEl.checked);
   }
@@ -531,7 +534,7 @@ export function initApp(initialTemplate) {
   let _lastRenderInput = null;
   // shape: { kind: 'docx'|'md'|'blocks', payload: <data>, isRepost, title? }
   let _articleSession = null;
-  // shape: { input, title, articleHtml, footerHtml, stats, bottomBlocksOverride, bottomBlocksAccountId, sourceIsDocx }
+  // shape: { input, title, articleHtml, footerHtml, stats, bottomBlocksOverride, bottomBlocksAccountId, sourceIsDocx, bodyOnly }
 
   // Batch file queue
   let _batchFiles = [];
@@ -611,16 +614,22 @@ export function initApp(initialTemplate) {
 
   async function buildArticleSession(input, result, options = {}) {
     if (options.resetArticleArtifacts) resetMoreArticlesForNewArticle();
+    const bodyOnly = !!input.bodyOnly;
     const articleHtml = result.lines.join('\n');
-    const bottomBlocksState = options.autofillAuthorCard
+    const bottomBlocksState = bodyOnly
+      ? { override: undefined, accountId: null }
+      : options.autofillAuthorCard
       ? resolveAuthorCardOverrideForArticle(result)
       : readCurrentBottomBlocksOverrideForArticle();
     const isRepost = !!input.isRepost;
-    const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({
-      isRepost,
-      bottomBlocksOverride: bottomBlocksState.override,
-    });
-    const footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
+    let footerHtml = '';
+    if (!bodyOnly) {
+      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({
+        isRepost,
+        bottomBlocksOverride: bottomBlocksState.override,
+      });
+      footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
+    }
     const elapsed = options.startedAt ? ((performance.now() - options.startedAt) / 1000).toFixed(1) : options.elapsed;
     const title = result.title || input.title || '';
     return {
@@ -634,6 +643,7 @@ export function initApp(initialTemplate) {
       bottomBlocksOverride: bottomBlocksState.override,
       bottomBlocksAccountId: bottomBlocksState.accountId,
       sourceIsDocx: !!input.sourceIsDocx,
+      bodyOnly,
     };
   }
 
@@ -643,11 +653,14 @@ export function initApp(initialTemplate) {
     _lastRenderInput = session.input || null;
     _isRepost = !!(_lastRenderInput && _lastRenderInput.isRepost);
     _sourceIsDocx = !!session.sourceIsDocx;
+    _articleBodyOnly = !!session.bodyOnly;
     const accountId = session.bottomBlocksAccountId || (window._activeRulePack && window._activeRulePack.id);
     if (accountId && session.bottomBlocksOverride !== undefined) {
       writeBottomBlocksOverride(accountId, session.bottomBlocksOverride || {});
     }
-    showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats, session.displayName || session.title || '');
+    showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats, session.displayName || session.title || '', {
+      bodyOnly: _articleBodyOnly,
+    });
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('fbif:article-session-activated', { detail: { session } }));
     }
@@ -816,6 +829,7 @@ export function initApp(initialTemplate) {
     _articleSession = null;
     _lastRenderInput = null;
     _sourceIsDocx = false;
+    _articleBodyOnly = false;
     _isRepost = false;
     _articleHtml = '';
     _articleCopy = '';
@@ -839,6 +853,7 @@ export function initApp(initialTemplate) {
     if (emptyState) emptyState.style.display = 'none';
     if (previewContent) previewContent.style.display = '';
     if (wxFooter) wxFooter.style.display = 'none';
+    document.body.classList.remove('article-text-preview');
     document.body.classList.add('has-preview', 'plain-text-preview');
 
     const titleInput = document.getElementById('titleInput');
@@ -871,9 +886,14 @@ export function initApp(initialTemplate) {
   }
 
   window._handleText = (text, opts = {}) => {
-    const body = normalizeClipboardTextForMarkdown(text);
+    const raw = String(text || '');
+    const body = normalizeClipboardTextForMarkdown(raw);
     if (!body) return;
     clearUploadVisual();
+    if (!hasImageLikeLink(body) && looksLikeArticleClipboardText(raw)) {
+      window._handleBlocks(buildClipboardArticleBlocks(raw), { ...opts, isRepost: false, bodyOnly: true });
+      return;
+    }
     if (!hasImageLikeLink(body)) {
       showPlainTextResult(body);
       return;
@@ -909,7 +929,15 @@ export function initApp(initialTemplate) {
       // async context anyway, and future work (e.g. image pre-fetch)
       // might make it async. The await has zero cost on plain returns.
       await waitForActiveRuleConfigReady('blocks-upload');
-      const input = { kind: 'blocks', payload: data, isRepost, title: data.title, sourceIsDocx: false };
+      const input = {
+        kind: 'blocks',
+        payload: data,
+        isRepost,
+        title: data.title,
+        displayName: data.displayName || '',
+        sourceIsDocx: false,
+        bodyOnly: !!((opts && opts.bodyOnly) || (data && data.bodyOnly)),
+      };
       const result = await renderArticleInput(input);
       logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
 
@@ -1048,6 +1076,7 @@ export function initApp(initialTemplate) {
   let _uploadDone = false;
   let _failedSrcs = [];
   let _sourceIsDocx = false;
+  let _articleBodyOnly = false;
   let _copyRequiresWechatImageTransfer = false;
   let _moreArticlesCopySeq = 0;
   let _moreArticlesCopyJob = null;
@@ -1120,14 +1149,16 @@ export function initApp(initialTemplate) {
     return _moreArticlesCopyJob;
   }
 
-  function showPreview(title, articleContent, footerContent, stats, importTitle = title) {
+  function showPreview(title, articleContent, footerContent, stats, importTitle = title, opts = {}) {
+    const bodyOnly = !!(opts && opts.bodyOnly);
     // 渲染新文章 → 复位上一篇的复制状态（按钮变身 + 后台入口），避免显示陈旧的「✓已复制」。
     if (window._resetCopyFeedback) window._resetCopyFeedback();
     _plainTextCopy = null;
     document.body.classList.remove('plain-text-preview');
+    document.body.classList.toggle('article-text-preview', bodyOnly);
     _articleHtml = normalizeRich(articleContent);
     _articleCopy = _articleHtml;
-    _footerHtml = normalizeRich(footerContent);
+    _footerHtml = bodyOnly ? '' : normalizeRich(footerContent);
     _footerCopy = _footerHtml;
     _failedSrcs = [];
     _copyRequiresWechatImageTransfer = false;
@@ -1143,17 +1174,17 @@ export function initApp(initialTemplate) {
     const wxFooter = document.getElementById('wxFooter');
     if (emptyState) emptyState.style.display = 'none';
     if (previewContent) previewContent.style.display = '';
-    if (wxFooter) wxFooter.style.display = '';
+    if (wxFooter) wxFooter.style.display = bodyOnly ? 'none' : '';
     document.body.classList.add('has-preview');
 
-    document.getElementById('titleInput').value = title;
-    document.getElementById('previewTitleDisplay').textContent = title;
+    document.getElementById('titleInput').value = bodyOnly ? '' : title;
+    document.getElementById('previewTitleDisplay').textContent = bodyOnly ? '' : title;
     showImportSummary(importTitle, stats);
 
     // Apply theme CSS variables to contentArea for preview
     const contentArea = document.getElementById('contentArea');
     if (window._activeConfig) applyThemeVars(contentArea, window._activeConfig.config);
-    contentArea.innerHTML = _articleHtml + '\n' + _footerHtml;
+    contentArea.innerHTML = _articleHtml + '\n' + (bodyOnly ? '' : _footerHtml);
     hookPreviewImages(contentArea);
     document.getElementById('statsBar').textContent = settledSidebarStatus(stats);
 
@@ -1161,6 +1192,11 @@ export function initApp(initialTemplate) {
     if (retryBtn) retryBtn.style.display = 'none';
 
     window._updateFooter = function(newHtml) {
+      if (bodyOnly) {
+        contentArea.innerHTML = _articleHtml;
+        hookPreviewImages(contentArea);
+        return;
+      }
       if (typeof newHtml === 'string' && newHtml !== '') {
         _footerHtml = normalizeRich(newHtml);
         _footerCopy = _footerHtml;
@@ -1193,6 +1229,7 @@ export function initApp(initialTemplate) {
     // Re-render the "更多文章" section after the user edits card config.
     // Uses fast preview data URLs; real OSS URLs are swapped in at copy time.
     window._updateMoreArticles = async function(cardsOverride) {
+      if (bodyOnly) return false;
       if (cardsOverride) saveMoreArticlesCards(cardsOverride);
       _moreArticlesCopySeq++;
       _moreArticlesCopyJob = null;
@@ -1209,7 +1246,7 @@ export function initApp(initialTemplate) {
       prepareMoreArticlesForCopy('edit');
     };
 
-    dispatchArticleEvent('fbif:article-previewed', { title, stats });
+    dispatchArticleEvent(bodyOnly ? 'fbif:article-text-ready' : 'fbif:article-previewed', { title, stats });
 
     // Background: upload non-mmbiz images to WeChat CDN for the copy layer
     _uploadDone = false;
@@ -1218,6 +1255,11 @@ export function initApp(initialTemplate) {
     const stableStats = settledSidebarStatus(stats);
 
     const skipUploadForThisFile = !!window._skipUpload && _sourceIsDocx;
+    if (bodyOnly) {
+      _uploadDone = true;
+      statsBar.textContent = settledSidebarStatus(stats);
+      return;
+    }
     if (skipUploadForThisFile) {
       _uploadPromise = materializeLazyImages(_articleCopy, _footerCopy, {
         onProgress(done, total) {
@@ -1335,7 +1377,7 @@ export function initApp(initialTemplate) {
       return ok;
     }
 
-    prepareMoreArticlesForCopy('copy-click');
+    if (!_articleBodyOnly) prepareMoreArticlesForCopy('copy-click');
 
     const enabled = isFooterEnabledForCurrentArticle();
     let html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
@@ -1419,9 +1461,10 @@ export function initApp(initialTemplate) {
     if (emptyState) emptyState.style.display = '';
     if (previewContent) previewContent.style.display = 'none';
     if (wxFooter) wxFooter.style.display = 'none';
-    document.body.classList.remove('has-preview', 'plain-text-preview');
+    document.body.classList.remove('has-preview', 'plain-text-preview', 'article-text-preview');
 
     _plainTextCopy = null;
+    _articleBodyOnly = false;
     _articleSession = null;
     _lastRenderInput = null;
     dropZone.classList.remove('processing');
@@ -1476,6 +1519,7 @@ export function initApp(initialTemplate) {
         plain_text_copy: getPlainTextCopyValue(),
         is_repost: _isRepost,
         source_is_docx: _sourceIsDocx,
+        article_body_only: _articleBodyOnly,
         copy_requires_wechat_image_transfer: _copyRequiresWechatImageTransfer,
         failed_srcs: _failedSrcs ? _failedSrcs.slice() : [],
         upload_done: _uploadDone,
@@ -1503,6 +1547,7 @@ export function initApp(initialTemplate) {
         batch_html: batchListEl ? batchListEl.innerHTML : '',
         has_preview_class: document.body.classList.contains('has-preview'),
         plain_text_preview: document.body.classList.contains('plain-text-preview'),
+        article_text_preview: document.body.classList.contains('article-text-preview'),
         import_visible: importZone ? !importZone.hidden : true,
         doc_visible: docZone ? !docZone.hidden : false,
         doc_name: docName ? docName.textContent : '',
@@ -1543,6 +1588,7 @@ export function initApp(initialTemplate) {
     _plainTextCopy = cs.plain_text_copy != null ? cs.plain_text_copy : null;
     _isRepost = !!cs.is_repost;
     _sourceIsDocx = !!cs.source_is_docx;
+    _articleBodyOnly = !!cs.article_body_only || !!dom.article_text_preview;
     _copyRequiresWechatImageTransfer = !!cs.copy_requires_wechat_image_transfer;
     _failedSrcs = cs.failed_srcs || [];
     _uploadDone = !!cs.upload_done;
@@ -1559,6 +1605,7 @@ export function initApp(initialTemplate) {
         footerHtml: _footerHtml,
         stats: dom.stats_text || '',
         sourceIsDocx: _sourceIsDocx,
+        bodyOnly: _articleBodyOnly,
       };
     }
     if (snap.batch_state) {
@@ -1609,12 +1656,15 @@ export function initApp(initialTemplate) {
     }
     document.body.classList.toggle('has-preview', !!dom.has_preview_class);
     document.body.classList.toggle('plain-text-preview', !!dom.plain_text_preview);
+    document.body.classList.toggle('article-text-preview', !!dom.article_text_preview);
     const previewScroll = document.getElementById('previewScroll');
     if (previewScroll) previewScroll.scrollTop = dom.preview_scroll_top || 0;
     const importInput = document.getElementById('urlInput');
     if (importInput) importInput.value = restoredImportInputValue(dom, cs);
     if (dom.plain_text_preview) {
       dispatchArticleEvent('fbif:plain-text-ready', { text: _plainTextCopy || '', rule: PLAIN_TEXT_RULE_LABEL });
+    } else if (dom.article_text_preview) {
+      dispatchArticleEvent('fbif:article-text-ready', { snapshot: snap });
     } else {
       dispatchArticleEvent('fbif:article-restored', { snapshot: snap });
     }

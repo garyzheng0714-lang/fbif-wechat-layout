@@ -65,8 +65,18 @@ function txtBlock(text) {
 function renderBlocks(blocks, opts = {}) {
   return template.processBlocks({
     title: opts.title || '测试文章',
+    source: opts.source,
     blocks,
   }, { isRepost: opts.isRepost !== false }).lines.join('\n');
+}
+
+function sectionForText(html, text) {
+  const idx = html.indexOf(text);
+  assert.ok(idx >= 0, `expected section text: ${text}`);
+  const start = html.lastIndexOf('<section', idx);
+  const end = html.indexOf('</section>', idx);
+  assert.ok(start >= 0 && end >= idx, `expected section wrapper for: ${text}`);
+  return html.slice(start, end + '</section>'.length);
 }
 
 test('docx whole-paragraph bold lines and CJK-numbered lines promote to section headings', () => {
@@ -323,6 +333,30 @@ test('url-import attribution is emitted once at article tail before the standard
   assert.doesNotMatch(html, /提示：/);
   assert.ok(html.indexOf('正文第一段') < html.indexOf('来源：剁椒Spicy'));
   assert.ok(html.indexOf('来源：剁椒Spicy') < html.indexOf('作者：亚娜'));
+});
+
+test('clipboard article blocks keep author as body text and pasted paragraphs compact', () => {
+  const result = template.processBlocks({
+    title: '',
+    source: 'clipboard-text',
+    blocks: [
+      { k: 'h', text: '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？' },
+      { k: 'txt', runs: [{ type: 'txt', text: '作者：Mote莫特' }], compact: true },
+      { k: 'txt', runs: [{ type: 'txt', text: '为什么它家的佛手柑不冲？' }], compact: true },
+      { k: 'txt', runs: [{ type: 'txt', text: '这是我第一回迷上欧美的茶叶。' }], compact: true },
+      { k: 'txt', runs: [{ type: 'txt', text: '更让我意外的是：它不是一家茶叶公司。' }], compact: true, blankBefore: true },
+    ],
+  }, { isRepost: false });
+  const html = result.lines.join('\n');
+
+  assert.equal(result.title, '');
+  assert.match(html, /class="wx-th">年营收21\.8亿！福南梅森凭什么成了英国茶叶天花板？/);
+  assert.equal((html.match(/作者：Mote莫特/g) || []).length, 1);
+  assert.doesNotMatch(html, /wx-ta[^"]*">作者：Mote莫特/);
+  assert.match(sectionForText(html, '作者：Mote莫特'), /class="wx-p/);
+  assert.doesNotMatch(sectionForText(html, '为什么它家的佛手柑不冲？'), /wx-gap/);
+  assert.match(sectionForText(html, '这是我第一回迷上欧美的茶叶。'), /wx-gap/);
+  assert.match(sectionForText(html, '更让我意外的是：它不是一家茶叶公司。'), /wx-gap/);
 });
 
 test('url-import keeps body prompt sections that are not the standard footer', () => {

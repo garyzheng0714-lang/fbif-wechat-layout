@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { DOMParser } from '@xmldom/xmldom';
 import {
   esc, escAttr, extractParagraph, parseDocxStyles, parseMdRuns, parseMdFrontmatter,
-  normalizeClipboardTextForMarkdown, hasImageLikeLink, formatPlainTextForCopy, buildTableBlock
+  normalizeClipboardTextForMarkdown, hasImageLikeLink, formatPlainTextForCopy,
+  looksLikeArticleClipboardText, buildClipboardArticleBlocks, buildTableBlock
 } from '../public/js/parser.js';
 
 const WNS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -106,6 +107,45 @@ test('formatPlainTextForCopy removes stray spaces around Chinese punctuation', (
   const input = '第一段: 文字 (中文), 继续。';
 
   assert.equal(formatPlainTextForCopy(input), '第一段：文字（中文），继续。');
+});
+
+test('looksLikeArticleClipboardText detects title-author article drafts', () => {
+  const input = [
+    '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？',
+    '作者：Mote莫特',
+    '我以前一直不喜欢伯爵茶。',
+    '味道冲，香气重，喝起来像一杯加了香水的红茶。',
+  ].join('\n');
+
+  assert.equal(looksLikeArticleClipboardText(input), true);
+  assert.equal(looksLikeArticleClipboardText('第一段,测试.\n第二段?'), false);
+});
+
+test('buildClipboardArticleBlocks extracts title and preserves real blank lines', () => {
+  const input = [
+    '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？',
+    '作者：Mote莫特',
+    '为什么它家的佛手柑不冲? 我查了一圈发现, 味道很柔和。',
+    '',
+    '这是我第一回迷上欧美的茶叶。',
+  ].join('\n');
+
+  const article = buildClipboardArticleBlocks(input);
+
+  assert.equal(article.source, 'clipboard-text');
+  assert.equal(article.bodyOnly, true);
+  assert.equal(article.title, '');
+  assert.equal(article.displayName, '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？');
+  assert.deepEqual(article.blocks[0], {
+    k: 'h',
+    text: '年营收21.8亿！福南梅森凭什么成了英国茶叶天花板？',
+    compact: false,
+  });
+  assert.equal(article.blocks[1].runs[0].text, '作者：Mote莫特');
+  assert.equal(article.blocks[2].runs[0].text, '为什么它家的佛手柑不冲？我查了一圈发现，味道很柔和。');
+  assert.equal(article.blocks[2].blankBefore, false);
+  assert.equal(article.blocks[3].blankBefore, true);
+  assert.equal(article.blocks.slice(1).every(block => block.compact === true), true);
 });
 
 test('hasImageLikeLink detects image-bearing text', () => {

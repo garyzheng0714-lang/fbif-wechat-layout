@@ -693,11 +693,20 @@ body.plain-text-preview .preview-content {
   max-width: min(920px, calc(100% - 48px));
   padding-top: 44px;
 }
+body.article-text-preview .preview-content {
+  max-width: min(680px, calc(100% - 48px));
+  padding-top: 44px;
+}
 body.plain-text-preview .wx-header,
+body.article-text-preview .wx-header,
+body.article-text-preview #wxFooter,
 body.plain-text-preview #wxFooter {
   display: none !important;
 }
 body.plain-text-preview .phone-frame {
+  overflow: visible;
+}
+body.article-text-preview .phone-frame {
   overflow: visible;
 }
 .plain-text-page {
@@ -731,6 +740,10 @@ body.plain-text-preview .phone-frame {
 
 @media (max-width: 720px) {
   body.plain-text-preview .preview-content {
+    max-width: calc(100% - 32px);
+    padding-top: 28px;
+  }
+  body.article-text-preview .preview-content {
     max-width: calc(100% - 32px);
     padding-top: 28px;
   }
