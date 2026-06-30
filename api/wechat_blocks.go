@@ -449,7 +449,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 
 	// Visual-signal heading: font-size ≥ 18px AND all text runs bold AND ≤ 80 chars.
 	// Pullquotes stay at body font-size → fail this gate → remain txt with bold inline.
-	if cx.style.FontSizeSet && cx.style.FontSize >= 18 && allBold && textLen > 0 && textLen <= 80 {
+	if hasHeadingFontSize(cx) && allBold && textLen > 0 && textLen <= 80 {
 		w.appendBlock(Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
@@ -489,6 +489,27 @@ func (w *blockWalker) emit(cx *blockCtx) {
 		w.appendBlock(Block{K: "txt", Runs: runs})
 	}
 	w.closeCaptionContext()
+}
+
+func hasHeadingFontSize(cx *blockCtx) bool {
+	if cx.style.FontSizeSet && cx.style.FontSize >= 18 {
+		return true
+	}
+	if len(cx.runs) == 0 || len(cx.runs) != len(cx.textStyles) {
+		return false
+	}
+	sawText := false
+	for i, r := range cx.runs {
+		if strings.TrimSpace(r.Text) == "" {
+			continue
+		}
+		s := cx.textStyles[i]
+		if !s.FontSizeSet || s.FontSize < 18 {
+			return false
+		}
+		sawText = true
+	}
+	return sawText
 }
 
 func (w *blockWalker) appendBlock(b Block) {

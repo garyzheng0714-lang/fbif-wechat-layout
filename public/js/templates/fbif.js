@@ -215,6 +215,10 @@ function elemExtraClass(e) {
   return isMoteAuthorCard(e) ? ' wx-mote-author' : '';
 }
 
+function isNumericHeadingMarker(e) {
+  return !!e && e.k === 'h' && /^0?\d{1,2}$/.test((e.text || '').trim());
+}
+
 function shouldSpaceAfter(e, next) {
   // No `next` means this is the article body's tail. The FBIF footer is
   // concatenated afterwards with `margin:0;padding:0;` on its outer section,
@@ -222,6 +226,7 @@ function shouldSpaceAfter(e, next) {
   // flush against the 「提示：」 line. Emit the standard 20px gap.
   if (!next) return true;
   if (next.blankBefore && !(e.k === 'ref' && next.k === 'ref')) return true;
+  if (isNumericHeadingMarker(e) && next.k === 'h') return false;
   if (e.compact && next.compact && !next.blankBefore) return false;
   if (isMoteAuthorCard(next)) return true;
   if (next.k === 'cap') return false;
