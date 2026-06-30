@@ -50,6 +50,31 @@ test('materializeLazyImages replaces DOCX blob/cache refs with data URLs', async
   assert.match(result.footerCopy, /src="data:image\/png;base64,BAUG"/);
 });
 
+test('materializeLazyImages replaces local asset and image proxy refs with data URLs', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(new Blob([new Uint8Array([10, 11, 12])], { type: 'image/webp' }));
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const result = await materializeLazyImages(
+    '<p><img src="/assets/fbif/bobo-card.webp"></p>',
+    '<p><img src="/api/image-proxy?url=https%3A%2F%2Fmmbiz.qpic.cn%2Fa.jpg"></p>'
+  );
+
+  assert.equal(result.failed, 0);
+  assert.deepEqual(calls, [
+    '/assets/fbif/bobo-card.webp',
+    '/api/image-proxy?url=https%3A%2F%2Fmmbiz.qpic.cn%2Fa.jpg',
+  ]);
+  assert.doesNotMatch(result.articleCopy, /\/assets\/fbif/);
+  assert.doesNotMatch(result.footerCopy, /\/api\/image-proxy/);
+  assert.match(result.articleCopy, /src="data:image\/webp;base64,CgsM"/);
+  assert.match(result.footerCopy, /src="data:image\/webp;base64,CgsM"/);
+});
+
 test('uploadNonCdnImages uses refreshed HTML after lazy image materialization', async (t) => {
   const originalFetch = globalThis.fetch;
   const uploads = [];
@@ -76,6 +101,33 @@ test('uploadNonCdnImages uses refreshed HTML after lazy image materialization', 
   assert.equal(uploads.length, 1);
   assert.doesNotMatch(result.articleCopy, /blob:/);
   assert.match(result.articleCopy, /https:\/\/oss\.example\/img_0\.png/);
+});
+
+test('uploadNonCdnImages uploads local asset refs before copy', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const uploads = [];
+  globalThis.fetch = async (url, opts = {}) => {
+    if (String(url) === '/api/oss-upload') {
+      uploads.push(JSON.parse(opts.body));
+      return new Response(JSON.stringify({ results: { img_0: 'https://oss.example/bobo-card.webp' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(new Blob([new Uint8Array([13, 14, 15])], { type: 'image/webp' }));
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const result = await uploadNonCdnImages(
+    '',
+    '<section><img src="/assets/fbif/bobo-card.webp"></section>'
+  );
+
+  assert.equal(result.failed, 0);
+  assert.equal(uploads.length, 1);
+  assert.doesNotMatch(result.footerCopy, /\/assets\/fbif/);
+  assert.doesNotMatch(result.footerCopy, /data:image/);
+  assert.match(result.footerCopy, /https:\/\/oss\.example\/bobo-card\.webp/);
 });
 
 test('uploadNonCdnImages: WeChat channel (transferMmbiz=false) leaves mmbiz URLs untouched', async (t) => {

@@ -38,6 +38,7 @@ import {
   compositePreviewDataUrl,
   ensureCompositeReady,
   makeFreshUploadCards,
+  copySafeMoreArticleCard,
 } from './more-articles.js';
 
 const imageUtilsModule = await import('./image-utils.mjs' + assetQuery);
@@ -456,10 +457,10 @@ async function buildFooterWithMoreArticles(baseFooterHtml, opts = {}) {
   const base = opts.isV2 ? baseFooterHtml : applyRepostTransform(baseFooterHtml, isRepost);
   const transformed = normalizeWechatRichHtml(base);
   const cards = loadMoreArticlesCards();
-  const cardsForPreview = await Promise.all(
-    cards.map(async c => ({ ...c, final_url: await compositePreviewDataUrl(c) }))
-  );
-  return normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(transformed, cardsForPreview));
+  const cardsForFooter = opts.copySafe
+    ? cards.map(copySafeMoreArticleCard)
+    : await Promise.all(cards.map(async c => ({ ...c, final_url: await compositePreviewDataUrl(c) })));
+  return normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(transformed, cardsForFooter));
 }
 
 // ---- App Initialization ----
@@ -761,6 +762,7 @@ export function initApp(initialTemplate) {
       : readCurrentBottomBlocksOverrideForArticle();
     const isRepost = !!input.isRepost;
     let footerHtml = '';
+    let footerCopy = '';
     let articleFooterProfile = null;
     if (!bodyOnly) {
       const { html: baseFooterHtml, isV2, articleFooterProfile: profile } = await loadBaseFooterHtml({
@@ -771,6 +773,7 @@ export function initApp(initialTemplate) {
       });
       articleFooterProfile = profile || null;
       footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
+      footerCopy = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2, copySafe: true });
     }
     const elapsed = options.startedAt ? ((performance.now() - options.startedAt) / 1000).toFixed(1) : options.elapsed;
     const title = result.title || input.title || '';
@@ -786,6 +789,7 @@ export function initApp(initialTemplate) {
       displayName: input.displayName || title,
       articleHtml,
       footerHtml,
+      footerCopy,
       stats: options.stats || formatRenderStats(result, elapsed),
       articleMeta,
       articleFooterProfile,
@@ -815,6 +819,7 @@ export function initApp(initialTemplate) {
     }
     showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats, session.displayName || session.title || '', {
       bodyOnly: _articleBodyOnly,
+      footerCopy: session.footerCopy,
     });
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('fbif:article-session-activated', { detail: { session } }));
@@ -1278,6 +1283,29 @@ export function initApp(initialTemplate) {
     return urls;
   }
 
+  function isUnsafeCopyImageRef(value) {
+    const src = String(value || '').trim();
+    if (!src) return false;
+    if (/^(?:data:|blob:)/i.test(src)) return true;
+    if (/^\/(?:assets\/|api\/doc-cache\/|api\/image-proxy(?:\?|$))/i.test(src)) return true;
+    if (/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(src)) return true;
+    return false;
+  }
+
+  function findUnsafeCopyImageRefs(html) {
+    const refs = [];
+    const seen = new Set();
+    const re = /\b(?:src|imgurl)=(["'])([^"']+)\1/gi;
+    let m;
+    while ((m = re.exec(String(html || ''))) !== null) {
+      const ref = m[2];
+      if (!isUnsafeCopyImageRef(ref) || seen.has(ref)) continue;
+      seen.add(ref);
+      refs.push(ref);
+    }
+    return refs;
+  }
+
   function markFailedImages(failedSrcs) {
     if (!failedSrcs.length) return;
     const imgs = document.getElementById('contentArea').querySelectorAll('img');
@@ -1326,7 +1354,16 @@ export function initApp(initialTemplate) {
       });
       const baseFooter = normalizeWechatRichHtml(isV2 ? base0 : applyRepostTransform(base0, rp));
       if (seq !== _moreArticlesCopySeq) return false;
-      _footerCopy = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, uploaded));
+      const mergedFooter = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, uploaded));
+      const footerUpload = await uploadNonCdnImages('', mergedFooter, {
+        transferMmbiz: false,
+        onLog: logConv,
+      });
+      if (seq !== _moreArticlesCopySeq) return false;
+      _footerCopy = footerUpload.footerCopy;
+      if (footerUpload.failedSrcs && footerUpload.failedSrcs.length) {
+        _failedSrcs = Array.from(new Set((_failedSrcs || []).concat(footerUpload.failedSrcs)));
+      }
       logConv('info', '更多文章图片已后台准备完成', { reason });
       return true;
     }).catch(err => {
@@ -1348,7 +1385,7 @@ export function initApp(initialTemplate) {
     _articleHtml = normalizeRich(articleContent);
     _articleCopy = _articleHtml;
     _footerHtml = bodyOnly ? '' : normalizeRich(footerContent);
-    _footerCopy = _footerHtml;
+    _footerCopy = bodyOnly ? '' : normalizeRich((opts && opts.footerCopy) || footerContent);
     _failedSrcs = [];
     _copyRequiresWechatImageTransfer = false;
     // 作废旧配置遗留的「更多文章」预热 job（主要供 rerender：同篇换配置时丢弃旧预热并重建）。
@@ -1430,9 +1467,13 @@ export function initApp(initialTemplate) {
         footerVisibilityOverride: _articleSession && _articleSession.footerVisibilityOverride,
       });
       const merged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2 });
+      const copySafeMerged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2, copySafe: true });
       _footerHtml = merged;
-      _footerCopy = merged;
-      if (_articleSession) _articleSession.footerHtml = merged;
+      _footerCopy = copySafeMerged;
+      if (_articleSession) {
+        _articleSession.footerHtml = merged;
+        _articleSession.footerCopy = copySafeMerged;
+      }
       const enabled = isFooterEnabledForCurrentArticle();
       contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
       hookPreviewImages(contentArea);
@@ -1595,6 +1636,7 @@ export function initApp(initialTemplate) {
     const themeCSS = await _themeCSSReady;
     html = processForCopy(html, themeCSS, config);
     html = normalizeRich(html);
+    const unsafeCopyRefs = findUnsafeCopyImageRefs(html);
 
     // 公众号 ProseMirror 在粘贴 HTML 末尾若是 <img>/<section> 而无段落节点，
     // 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次
@@ -1623,7 +1665,9 @@ export function initApp(initialTemplate) {
     const imgCount = (html.match(/<img[\s>]/gi) || []).length;
     // 复制已写入剪贴板，但若仍有图片上传失败（_failedSrcs 非空），粘进后台这些图会缺失。
     // 必须显式告警、不能静默显示「✓已复制」让用户白发一篇（A 线 P0：消灭复制假成功）。
-    const failedImgCount = ok && _failedSrcs ? _failedSrcs.length : 0;
+    const failedImgCount = ok
+      ? Array.from(new Set([ ...(_failedSrcs || []), ...unsafeCopyRefs ])).length
+      : 0;
     window._copyImageWarning = failedImgCount;
     logConv(ok ? (failedImgCount ? 'warn' : 'info') : 'error',
       ok ? (failedImgCount ? '复制完成，但有图片未上传成功' : '复制完成') : '复制失败', {

@@ -39,6 +39,36 @@ async function imageRefToDataUrl(src) {
   return 'data:' + mime + ';base64,' + base64;
 }
 
+function currentOrigin() {
+  try {
+    return globalThis.location && globalThis.location.origin ? globalThis.location.origin : '';
+  } catch {
+    return '';
+  }
+}
+
+function isMaterializableImageRef(src) {
+  const value = String(src || '').trim();
+  if (!value) return false;
+  if (value.startsWith('blob:')) return true;
+  if (/^\/(?:api\/doc-cache\/|api\/image-proxy\?|assets\/)/.test(value)) return true;
+
+  const origin = currentOrigin();
+  if (!origin) return false;
+  try {
+    const u = new URL(value);
+    if (u.origin !== origin) return false;
+    return u.pathname.startsWith('/api/doc-cache/')
+      || u.pathname === '/api/image-proxy'
+      || u.pathname.startsWith('/assets/');
+  } catch {
+    return false;
+  }
+}
+
+function isRemoteUploadUrl(url) {
+  return /^https?:\/\//i.test(String(url || '').trim());
+}
 
 // Upload a single base64 image to OSS. Returns OSS URL or null on failure.
 async function uploadOne(task) {
@@ -51,7 +81,8 @@ async function uploadOne(task) {
     }, { timeoutMs: 20000 });
     if (!resp.ok) return null;
     const { results } = await resp.json();
-    return results[task.key] || Object.values(results)[0] || null;
+    const url = results[task.key] || Object.values(results)[0] || null;
+    return isRemoteUploadUrl(url) ? url : null;
   } catch {
     return null; // 超时/网络错误与上传失败同等处理，交给上层重试机制
   }
@@ -76,9 +107,11 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
   //    conversions (preserves original bytes, parallel download, fast text render)
   // In both cases a one-time fetch + FileReader roundtrip yields the data URL
   // that the OSS upload path can consume.
-  const lazyRe = /src=(["'])(blob:[^"']+|\/api\/doc-cache\/[^"']+)\1/g;
+  const lazyRe = /src=(["'])([^"']+)\1/g;
   const lazyUrls = new Set();
-  while ((m = lazyRe.exec(allHtml)) !== null) lazyUrls.add(m[2]);
+  while ((m = lazyRe.exec(allHtml)) !== null) {
+    if (isMaterializableImageRef(m[2])) lazyUrls.add(m[2]);
+  }
   onProgress && onProgress(0, lazyUrls.size);
 
   let done = 0;

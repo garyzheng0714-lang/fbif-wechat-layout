@@ -52,6 +52,38 @@ test('copy click does not wait on background image or more-articles preparation'
   assert.match(copyFn, /prepareMoreArticlesForCopy\('copy-click'\)/);
 });
 
+test('more articles prepared footer copy is uploaded before replacing the copy layer', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const prepareFn = engine.slice(
+    engine.indexOf('function prepareMoreArticlesForCopy'),
+    engine.indexOf('function showPreview')
+  );
+
+  assert.match(prepareFn, /const mergedFooter = normalizeWechatRichHtml\(mergeMoreArticlesIntoFooter\(baseFooter, uploaded\)\)/);
+  assert.match(prepareFn, /await uploadNonCdnImages\('', mergedFooter,/);
+  assert.match(prepareFn, /_footerCopy = footerUpload\.footerCopy/);
+});
+
+test('preview footer and copy footer are separate so preview data images do not leak into copy', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+
+  assert.match(engine, /footerCopy = await buildFooterWithMoreArticles\(baseFooterHtml, \{ isRepost, isV2, copySafe: true \}\)/);
+  assert.match(engine, /footerCopy: session\.footerCopy/);
+  assert.match(engine, /_footerCopy = bodyOnly \? '' : normalizeRich\(\(opts && opts\.footerCopy\) \|\| footerContent\)/);
+  assert.match(engine, /const copySafeMerged = await buildFooterWithMoreArticles\(base, \{ isRepost: rp, isV2, copySafe: true \}\)/);
+  assert.match(engine, /_articleSession\.footerCopy = copySafeMerged/);
+});
+
+test('copy warning is derived from final HTML unsafe image src and imgurl refs', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));
+
+  assert.match(engine, /function findUnsafeCopyImageRefs\(html\)/);
+  assert.match(engine, /src\|imgurl/);
+  assert.match(copyFn, /const unsafeCopyRefs = findUnsafeCopyImageRefs\(html\)/);
+  assert.match(copyFn, /new Set\(\[ \.\.\.\(_failedSrcs \|\| \[\]\), \.\.\.unsafeCopyRefs \]\)/);
+});
+
 test('pure text copy bypasses article HTML and footer pipeline', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));

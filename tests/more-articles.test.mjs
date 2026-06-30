@@ -1,7 +1,7 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { computeBannerTitleLayout, makeFreshUploadCards, mergeIntoFooter, wrapBannerTitleLines } from '../public/js/more-articles.js';
+import { computeBannerTitleLayout, copySafeMoreArticleCard, makeFreshUploadCards, mergeIntoFooter, uploadDataUrl, wrapBannerTitleLines } from '../public/js/more-articles.js';
 
 afterEach(() => {
   delete globalThis.window;
@@ -185,4 +185,49 @@ test('fresh more-articles cards pad explicit count after active rule defaults', 
   assert.equal(cards[0].href, 'https://mp.weixin.qq.com/s/one');
   assert.equal(cards[1].href, '');
   assert.equal(cards[2].href, '');
+});
+
+test('more articles upload rejects echoed data URLs because WeChat save strips linked data images', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const dataUrl = 'data:image/png;base64,AAAA';
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    results: { more_article_test: dataUrl },
+  }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  await assert.rejects(
+    () => uploadDataUrl(dataUrl, 'more_article_test'),
+    /remote image URL/
+  );
+});
+
+test('more articles copy-safe fallback never uses preview data URLs for linked cards', () => {
+  assert.deepEqual(
+    copySafeMoreArticleCard({
+      href: 'https://mp.weixin.qq.com/s/a',
+      imgurl: 'https://mmbiz.qpic.cn/a.jpg',
+      composite_url: 'data:image/png;base64,preview',
+      title: '带标题的预览合成图',
+    }).final_url,
+    'https://mmbiz.qpic.cn/a.jpg'
+  );
+
+  assert.equal(
+    copySafeMoreArticleCard({
+      imgurl: 'https://mmbiz.qpic.cn/a.jpg',
+      composite_url: 'https://oss.example/more-article.png',
+    }).final_url,
+    'https://oss.example/more-article.png'
+  );
+
+  const unsafe = copySafeMoreArticleCard({
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: 'data:image/png;base64,preview',
+    composite_url: '',
+  });
+  assert.equal(unsafe.imgurl, '');
+  assert.equal(unsafe.final_url, '');
 });
