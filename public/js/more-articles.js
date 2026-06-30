@@ -530,7 +530,8 @@ function buildCardsInnerHTML(cards) {
 }
 
 // ---- Merge into footer.html (replaces the outer wrapper's inner content) ----
-const OUTER_WRAPPER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
+const OUTER_WRAPPER_OPEN = '<section style="text-align: center;">';
+const LEGACY_OUTER_WRAPPER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
 
 function findMatchingClose(html, openIdx) {
   const OPEN = '<section';
@@ -585,9 +586,18 @@ function stripDeprecatedPromo1000(footerHtml) {
 // cards wrapper. Found by scanning backwards from the cards wrapper.
 const PARAGRAPH_WRAPPER_OPEN = '<section data-role="paragraph">';
 
+function findOuterWrapper(html) {
+  const wrappers = [OUTER_WRAPPER_OPEN, LEGACY_OUTER_WRAPPER_OPEN]
+    .map(open => ({ open, start: html.indexOf(open) }))
+    .filter(item => item.start !== -1)
+    .sort((a, b) => a.start - b.start);
+  return wrappers[0] || null;
+}
+
 function findMoreArticlesSectionBounds(footerHtml) {
-  const outerStart = footerHtml.indexOf(OUTER_WRAPPER_OPEN);
-  if (outerStart === -1) return null;
+  const wrapper = findOuterWrapper(footerHtml);
+  if (!wrapper) return null;
+  const outerStart = wrapper.start;
   const paraStart = footerHtml.lastIndexOf(PARAGRAPH_WRAPPER_OPEN, outerStart);
   if (paraStart === -1) return null;
   const paraEnd = findMatchingClose(footerHtml, paraStart);
@@ -610,12 +620,13 @@ export function mergeIntoFooter(footerHtml, cards) {
 
   // Non-empty → replace the inner content of the outer cards wrapper with
   // the user's N cards.
-  const start = footerHtml.indexOf(OUTER_WRAPPER_OPEN);
-  if (start === -1) return footerHtml;
+  const wrapper = findOuterWrapper(footerHtml);
+  if (!wrapper) return footerHtml;
+  const start = wrapper.start;
   const end = findMatchingClose(footerHtml, start);
   if (end === -1) return footerHtml;
-  const wrapperInnerStart = start + OUTER_WRAPPER_OPEN.length;
-  const before = footerHtml.slice(0, wrapperInnerStart);
+  const wrapperInnerStart = start + wrapper.open.length;
+  const before = footerHtml.slice(0, start) + OUTER_WRAPPER_OPEN;
   const after = footerHtml.slice(end);
   return before + buildCardsInnerHTML(list) + after;
 }
