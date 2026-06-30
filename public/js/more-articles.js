@@ -14,6 +14,7 @@ import {
   normalizeMoreArticleDefaultCard,
 } from './more-articles-config.js';
 import { getRulePackByPath, DEFAULT_RULE_PACK_ID } from './rule-packs/registry.js';
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 const LS_KEY = 'more_articles_v1';
 
@@ -387,18 +388,37 @@ export async function computeCardHash(card) {
 
 // ---- Upload to OSS (reuses existing /api/oss-upload endpoint) ----
 export async function uploadDataUrl(dataUrl, key) {
-  const resp = await fetch('/api/oss-upload', {
+  const resp = await fetchWithTimeout('/api/oss-upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ base64_images: { [key]: dataUrl } }),
-  });
+  }, { timeoutMs: 20000 });
   if (!resp.ok) {
     const err = await resp.text().catch(() => '');
     throw new Error('oss-upload HTTP ' + resp.status + ' ' + err);
   }
   const json = await resp.json();
   const url = json && json.results && json.results[key];
-  return url || dataUrl;
+  if (!/^https?:\/\//i.test(String(url || '').trim())) {
+    throw new Error('oss-upload did not return a remote image URL');
+  }
+  return url;
+}
+
+function isRemoteImageUrl(url) {
+  return /^https?:\/\//i.test(String(url || '').trim());
+}
+
+export function copySafeMoreArticleCard(card) {
+  const c = { ...(card || {}), crop: { ...((card && card.crop) || {}) } };
+  const remoteComposite = isRemoteImageUrl(c.composite_url) ? c.composite_url : '';
+  const remoteOriginal = isRemoteImageUrl(c.imgurl) ? c.imgurl : '';
+  return {
+    ...c,
+    imgurl: remoteOriginal,
+    composite_url: remoteComposite || null,
+    final_url: remoteComposite || remoteOriginal || '',
+  };
 }
 
 // ---- Ensure each card has a usable final image URL ----
@@ -416,7 +436,7 @@ export async function ensureCompositeReady(cards, { onProgress } = {}) {
       continue;
     }
     const hash = await computeCardHash(c);
-    if (c.composite_url && c.composite_hash === hash && !c.force_recompose) {
+    if (/^https?:\/\//i.test(String(c.composite_url || '').trim()) && c.composite_hash === hash && !c.force_recompose) {
       c.final_url = c.composite_url;
       continue;
     }
@@ -430,6 +450,8 @@ export async function ensureCompositeReady(cards, { onProgress } = {}) {
       c.force_recompose = false;
     } catch (err) {
       console.warn('[more-articles] composite/upload failed for card', i, err);
+      c.composite_url = null;
+      c.composite_hash = null;
       c.final_url = c.imgurl || '';
     }
   }
