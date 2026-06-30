@@ -345,6 +345,42 @@ func TestLargeBoldFontIsHeading(t *testing.T) {
 	}
 }
 
+func TestInnerSpanLargeBoldFontIsHeading(t *testing.T) {
+	html := jsContentWrap(
+		`<p><span textstyle="" style="font-size: 20px; font-weight: bold;">最听劝的生鲜电商平台</span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "最听劝的生鲜电商平台")
+	if b == nil || b.K != "h" {
+		t.Errorf("inner span 20px + bold → heading, got %v", b)
+	}
+}
+
+func TestWechatNumberTitleHeadingsStaySeparateAndLongBoldBodyStaysTxt(t *testing.T) {
+	longBody := strings.Repeat("这是一段很长的加粗正文，", 12)
+	if n := len([]rune(longBody)); n <= 80 {
+		t.Fatalf("样例正文应超过标题上限以验证防回归，实际 %d 字", n)
+	}
+	html := jsContentWrap(
+		`<p><span textstyle="" style="font-size: 20px; font-weight: bold;">01</span></p>` +
+			`<p><span textstyle="" style="font-size: 20px; font-weight: bold;">最听劝的生鲜电商平台</span></p>` +
+			`<p><span textstyle="" style="font-size: 20px; font-weight: bold;">` + longBody + `</span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	hTexts := []string{}
+	for _, b := range blocks {
+		if b.K == "h" {
+			hTexts = append(hTexts, b.Text)
+		}
+	}
+	if len(hTexts) != 2 || hTexts[0] != "01" || hTexts[1] != "最听劝的生鲜电商平台" {
+		t.Fatalf("number and title should stay as two heading blocks, got %q; kinds=%v", hTexts, findKinds(blocks))
+	}
+	body := findBlockByText(blocks, "加粗正文")
+	if body == nil || body.K != "txt" {
+		t.Fatalf("long bold body must stay txt, got %v; kinds=%v", body, findKinds(blocks))
+	}
+}
+
 func TestLargeNonBoldFontIsNotHeading(t *testing.T) {
 	// Font-size alone doesn't promote — avoids treating every decorative
 	// oversized callout as a heading.

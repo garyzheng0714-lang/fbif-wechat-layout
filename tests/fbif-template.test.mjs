@@ -423,6 +423,25 @@ test('url-import image source captions render with muted caption styling', () =>
   assert.doesNotMatch(html, /class="wx-t">图片来源：Facebook@Emily Velasco/);
 });
 
+test('url-import keeps numeric heading groups tight without merging headings', () => {
+  const result = template.processBlocks({
+    title: '测试文章',
+    blocks: [
+      { k: 'h', text: '01' },
+      { k: 'h', text: '最听劝的生鲜电商平台' },
+      txtBlock('这是标题之后的正文。'),
+    ],
+  }, { isRepost: true });
+  const html = result.lines.join('\n');
+
+  assert.equal(result.headingN, 2);
+  assert.equal((html.match(/class="wx-th"/g) || []).length, 2);
+  assert.doesNotMatch(sectionForText(html, '01'), /wx-gap/, '数字标题到标题正文之间不加标准段距');
+  assert.match(sectionForText(html, '最听劝的生鲜电商平台'), /class="wx-p wx-gap"/, '标题组之后到正文保留标准段距');
+  assert.match(sectionForText(html, '这是标题之后的正文。'), /class="wx-p/);
+  assert.doesNotMatch(sectionForText(html, '这是标题之后的正文。'), /wx-th/);
+});
+
 test('url-import attribution is emitted once at article tail before the standard footer', () => {
   const html = renderBlocks([
     txtBlock('正文第一段'),
