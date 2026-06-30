@@ -10,6 +10,7 @@ import {
   loadLocalRuleConfig,
   normalizeRuleConfig,
   parseRuleConfigDocument,
+  saveRulePreset,
   saveLocalRuleConfig,
   setActiveRulePreset,
   validateRuleConfigDocument,
@@ -72,6 +73,28 @@ test('rule config JSON document round-trips through modules', () => {
   assert.equal(parsed.description, '用于 JSON 编辑框');
   assert.equal(parsed.config.font_size, '16');
   assert.equal(parsed.config.footer_enabled, false);
+});
+
+test('rule config document parse preserves structured modules', () => {
+  const parsed = parseRuleConfigDocument(JSON.stringify({
+    schema_version: 2,
+    modules: {
+      article_footer_defaults: {
+        schema_version: 1,
+        enabled: false,
+        author_aliases: {},
+        profiles: [],
+      },
+      bottom_blocks: {
+        schema_version: 2,
+        enabled: false,
+        presets: [],
+      },
+    },
+  }));
+
+  assert.equal(parsed.config.modules.article_footer_defaults.enabled, false);
+  assert.equal(parsed.config.modules.bottom_blocks.enabled, false);
 });
 
 test('rule config accepts readable more_articles enabled and default_cards fields', () => {
@@ -305,6 +328,51 @@ test('local fallback preserves custom more articles default cards', () => {
   }
 });
 
+test('local fallback preserves structured footer modules', () => {
+  const store = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem(key) { return store.has(key) ? store.get(key) : null; },
+      setItem(key, value) { store.set(key, String(value)); },
+    },
+  };
+  const structured = {
+    ...DEFAULT_RULE_CONFIG,
+    modules: {
+      bottom_blocks: {
+        schema_version: 2,
+        enabled: true,
+        presets: [{ id: 'default', order: [], blocks: {} }],
+      },
+      article_footer_defaults: {
+        schema_version: 1,
+        enabled: true,
+        author_aliases: { mote: ['Mote莫特'] },
+        profiles: [{
+          id: 'mote_author',
+          match: { author_alias_group: 'mote' },
+          block_visibility: { byline: false },
+          artifact_visibility: { mote_ref_author_card: false },
+        }],
+      },
+    },
+  };
+  try {
+    const saved = saveLocalRuleConfig(structured, 'fbif');
+    assert.equal(saved.modules.article_footer_defaults.enabled, true);
+
+    const stored = JSON.parse(store.get('config_fbif'));
+    assert.equal(stored.modules.bottom_blocks.enabled, true);
+    assert.equal(stored.modules.article_footer_defaults.profiles[0].block_visibility.byline, false);
+
+    const loaded = loadLocalRuleConfig('fbif');
+    assert.equal(loaded.modules.bottom_blocks.schema_version, 2);
+    assert.equal(loaded.modules.article_footer_defaults.profiles[0].artifact_visibility.mote_ref_author_card, false);
+  } finally {
+    delete globalThis.window;
+  }
+});
+
 test('local fallback restores skip-upload after bad migration', () => {
   const store = new Map([
     ['config_fbif', JSON.stringify({ skip_upload: false })],
@@ -460,6 +528,42 @@ test('admin active rule writes include the selected account id', async () => {
       id: 'foodtalks-rule',
       account_id: 'foodtalks-series',
     });
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test('admin preset save preserves structured modules', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return {
+      ok: true,
+      async json() {
+        return { ok: true };
+      },
+    };
+  };
+
+  try {
+    await saveRulePreset('secret', {
+      id: 'structured-save',
+      name: '结构化保存',
+      config: {
+        ...DEFAULT_RULE_CONFIG,
+        modules: {
+          article_footer_defaults: {
+            schema_version: 1,
+            enabled: false,
+            author_aliases: {},
+            profiles: [],
+          },
+        },
+      },
+      behavior: DEFAULT_BEHAVIOR,
+    });
+    const body = JSON.parse(calls[0].options.body);
+    assert.equal(body.config.modules.article_footer_defaults.enabled, false);
   } finally {
     delete globalThis.fetch;
   }

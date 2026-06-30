@@ -34,5 +34,5 @@ export function createBlockEditorBinder(deps) {
 // renderRuleBottomTabHtml 渲染「底部」与「素材库」两个规则 tab（素材库独立成 tab，用户裁定 spec §9）。
 // 素材库是「被引用」的资产池，独立 tab；底部区块 + 网站页脚库在「底部」tab。
 export function renderRuleBottomTabHtml(isFt) {
-  return `<section class="admin-rule-group"><h3>底部区块默认</h3><div data-role="block-editor"></div>${isFt ? '<h3>网站页脚库</h3><div data-role="footer-library-editor"></div>' : ''}</section>`;
+  return `<section class="admin-rule-group">${isFt ? '' : '<h3>文章默认方案</h3><div data-role="article-footer-defaults-editor"></div>'}<h3>底部区块默认</h3><div data-role="block-editor"></div>${isFt ? '<h3>网站页脚库</h3><div data-role="footer-library-editor"></div>' : ''}</section>`;
 }

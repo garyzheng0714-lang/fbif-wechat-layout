@@ -70,6 +70,40 @@ function renderBlocks(blocks, opts = {}) {
   }, { isRepost: opts.isRepost !== false }).lines.join('\n');
 }
 
+test('processDocx returns articleMeta for footer article-type defaults', () => {
+  const result = template.processDocx({
+    paragraphs: [
+      p('作者：Mote 莫特'),
+      p('正文内容'),
+    ],
+    imgCache: {},
+    isRepost: false,
+  });
+
+  assert.deepEqual(result.articleMeta, {
+    author: 'Mote 莫特',
+    source: '',
+    author_normalized: 'mote莫特',
+  });
+});
+
+test('processBlocks returns articleMeta from structured attribution blocks', () => {
+  const result = template.processBlocks({
+    title: '测试文章',
+    blocks: [
+      txtBlock('作者：Mote莫特'),
+      txtBlock('来源：测试来源'),
+      txtBlock('正文内容'),
+    ],
+  }, { isRepost: true });
+
+  assert.deepEqual(result.articleMeta, {
+    author: 'Mote莫特',
+    source: '测试来源',
+    author_normalized: 'mote莫特',
+  });
+});
+
 function sectionForText(html, text) {
   const idx = html.indexOf(text);
   assert.ok(idx >= 0, `expected section text: ${text}`);
@@ -128,6 +162,76 @@ test('docx Mote author accepts the spaced name form', () => {
 
   assert.match(html, /作者：Mote 莫特/);
   assert.match(html, new RegExp(moteImageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('docx Mote author card can be hidden per article without changing original author line', () => {
+  const result = template.processDocx({
+    paragraphs: [
+      p('作者：Mote莫特'),
+      p('正文内容'),
+      h('参考来源'),
+      p('[1] source'),
+    ],
+    imgCache: {},
+    isRepost: false,
+    articleArtifactOverride: { mote_ref_author_card: false },
+  });
+  const html = result.lines.join('\n');
+
+  assert.doesNotMatch(html, new RegExp(moteImageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(html, /class="wx-ta wx-ta-author">作者：Mote莫特/);
+  assert.equal((html.match(/作者：Mote莫特/g) || []).length, 1);
+  assert.match(html, /参考来源：/);
+});
+
+test('docx Mote author card follows article footer artifact defaults and can be reopened per article', () => {
+  const previousActiveConfig = globalThis.window._activeConfig;
+  globalThis.window._activeConfig = {
+    config: {
+      modules: {
+        article_footer_defaults: {
+          schema_version: 1,
+          enabled: true,
+          author_aliases: { mote: ['Mote莫特', 'Mote 莫特'] },
+          profiles: [{
+            id: 'mote_author',
+            name: 'Mote 作者默认',
+            match: { author_alias_group: 'mote' },
+            block_visibility: {},
+            artifact_visibility: { mote_ref_author_card: false },
+          }],
+        },
+      },
+    },
+  };
+  try {
+    const hidden = template.processDocx({
+      paragraphs: [
+        p('作者：Mote莫特'),
+        p('正文内容'),
+        h('参考来源'),
+        p('[1] source'),
+      ],
+      imgCache: {},
+      isRepost: false,
+    }).lines.join('\n');
+    assert.doesNotMatch(hidden, new RegExp(moteImageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+    const shown = template.processDocx({
+      paragraphs: [
+        p('作者：Mote莫特'),
+        p('正文内容'),
+        h('参考来源'),
+        p('[1] source'),
+      ],
+      imgCache: {},
+      isRepost: false,
+      articleArtifactOverride: { mote_ref_author_card: 'show' },
+    }).lines.join('\n');
+    assert.match(shown, new RegExp(moteImageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    globalThis.window._activeConfig = previousActiveConfig;
+  }
 });
 
 test('docx Mote card inherits the blank line before references and keeps references tight', () => {

@@ -52,6 +52,8 @@ const behaviorModule = await import('./rule-behavior.js' + assetQuery);
 const { renderBehaviorTemplate } = behaviorModule;
 const authorCardAutofillModule = await import('./blocks/author-card-autofill.js' + assetQuery);
 const { applySeriesAuthorCardAutofill } = authorCardAutofillModule;
+const blockMergeModule = await import('./blocks/block-merge.js' + assetQuery);
+const { stripReadonlyOverride } = blockMergeModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -190,7 +192,8 @@ function normalizeRich(html) {
 // （codex review #4 竞态修复——多条 load→build 链交错时单例会互相覆盖 isV2）。
 async function loadBaseFooterHtml(opts = {}) {
   // 公众号 bottom_blocks 启用时，整段底部由区块渲染（替代 footer.html）。
-  // html 为 null/'' → 模块未接管，fallback 到 footerUrl(footer.html)。
+  // 模板返回 null/undefined → 模块未接管，fallback 到 footerUrl(footer.html)。
+  // 模板返回对象时即表示已接管；对象里的空 html 是“明确输出空底部”，不能再 fallback。
   // isRepost 显式传入（重渲染用 cached.isRepost，避免读全局 _isRepost 漂移；codex review #5）。
   const isRepost = opts.isRepost != null ? opts.isRepost : _isRepost;
   if (_activeTemplate && typeof _activeTemplate.renderBottomFooter === 'function') {
@@ -198,13 +201,26 @@ async function loadBaseFooterHtml(opts = {}) {
     if (Object.prototype.hasOwnProperty.call(opts, 'bottomBlocksOverride')) {
       renderOpts.bottomBlocksOverride = opts.bottomBlocksOverride;
     }
+    if (Object.prototype.hasOwnProperty.call(opts, 'articleMeta')) {
+      renderOpts.articleMeta = opts.articleMeta;
+    }
+    if (Object.prototype.hasOwnProperty.call(opts, 'footerVisibilityOverride')) {
+      renderOpts.footerVisibilityOverride = opts.footerVisibilityOverride;
+    }
     const res = _activeTemplate.renderBottomFooter(renderOpts);
-    const html = res && typeof res === 'object' ? res.html : res; // 模板返回 {html,isV2} 或（自定义）字符串
+    if (res && typeof res === 'object') {
+      return {
+        html: res.html == null ? '' : String(res.html),
+        isV2: !!res.isV2,
+        articleFooterProfile: res.articleFooterProfile || null,
+      };
+    }
+    const html = res; // 自定义模板可返回字符串；空字符串仍按“未接管”兼容旧行为。
     if (html != null && html !== '') {
-      return { html, isV2: !!(res && typeof res === 'object' && res.isV2) };
+      return { html, isV2: false, articleFooterProfile: null };
     }
   }
-  return { html: await stockFooterReady(), isV2: false };
+  return { html: await stockFooterReady(), isV2: false, articleFooterProfile: null };
 }
 
 // Module-level flag: true when the current article was fetched from a URL
@@ -254,11 +270,55 @@ function bottomOverrideKey(accountId) {
 }
 
 function readBottomBlocksOverride(accountId) {
-  try { return JSON.parse(localStorage.getItem(bottomOverrideKey(accountId)) || 'null') || {}; } catch { return {}; }
+  let raw = {};
+  try { raw = JSON.parse(localStorage.getItem(bottomOverrideKey(accountId)) || 'null') || {}; } catch { raw = {}; }
+  return migrateStoredBottomBlocksOverride(accountId, raw);
 }
 
 function hasBottomBlocksOverride(override) {
   return !!(override && typeof override === 'object' && !Array.isArray(override) && Object.keys(override).length);
+}
+
+function normalizeFooterVisibilityOverride(override) {
+  if (!override || typeof override !== 'object' || Array.isArray(override)) return undefined;
+  const out = {};
+  if (override.enabled === true || override.enabled === false || override.enabled === 'show' || override.enabled === 'hide') {
+    out.enabled = override.enabled;
+  }
+  if (override.blocks && typeof override.blocks === 'object' && !Array.isArray(override.blocks)) {
+    const blocks = {};
+    for (const id of Object.keys(override.blocks)) {
+      const value = override.blocks[id];
+      if (value === true || value === false || value === 'show' || value === 'hide') blocks[id] = value;
+    }
+    if (Object.keys(blocks).length) out.blocks = blocks;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function visibilityOverrideHides(value) {
+  return value === false || value === 'hide';
+}
+
+function visibilityOverrideShows(value) {
+  return value === true || value === 'show';
+}
+
+function normalizeArticleArtifactOverride(override) {
+  if (!override || typeof override !== 'object' || Array.isArray(override)) return undefined;
+  const out = {};
+  for (const id of Object.keys(override)) {
+    const value = override[id];
+    if (value === true || value === false || value === 'show' || value === 'hide' || value === 'hidden') {
+      out[id] = value;
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const next = {};
+      if (value.hidden === true || value.hidden === false) next.hidden = value.hidden;
+      if (value.enabled === true || value.enabled === false) next.enabled = value.enabled;
+      if (Object.keys(next).length) out[id] = next;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function writeBottomBlocksOverride(accountId, override) {
@@ -272,6 +332,41 @@ function writeBottomBlocksOverride(accountId, override) {
   if (inst && window._blockPanelAcct === accountId && typeof inst.setOverride === 'function') {
     inst.setOverride(next);
   }
+}
+
+function bottomBlocksModuleForCurrentRule() {
+  const cfg = (window._activeConfig && window._activeConfig.config) || _activeConfig || {};
+  return cfg && cfg.modules && cfg.modules.bottom_blocks;
+}
+
+function frontendEditableBlockIDs(module) {
+  const ids = new Set();
+  function collect(blocks) {
+    if (!blocks || typeof blocks !== 'object' || Array.isArray(blocks)) return;
+    for (const id of Object.keys(blocks)) {
+      const block = blocks[id];
+      if (block && typeof block === 'object' && block.frontend_editable === true) ids.add(id);
+    }
+  }
+  if (module && Array.isArray(module.presets)) {
+    for (const preset of module.presets) collect(preset && preset.blocks);
+  } else {
+    collect(module && module.blocks);
+  }
+  return ids;
+}
+
+function migrateStoredBottomBlocksOverride(accountId, override) {
+  const module = bottomBlocksModuleForCurrentRule();
+  if (!module || typeof module !== 'object') return override;
+  const next = stripReadonlyOverride(override, frontendEditableBlockIDs(module));
+  try {
+    if (JSON.stringify(next) !== JSON.stringify(override)) {
+      if (hasBottomBlocksOverride(next)) localStorage.setItem(bottomOverrideKey(accountId), JSON.stringify(next));
+      else localStorage.removeItem(bottomOverrideKey(accountId));
+    }
+  } catch {}
+  return next;
 }
 
 async function waitForActiveRuleConfigReady(reason) {
@@ -525,8 +620,29 @@ export function initApp(initialTemplate) {
 
   function isFooterEnabledForCurrentArticle() {
     if (_articleBodyOnly) return false;
+    const footerVisibilityOverride = normalizeFooterVisibilityOverride(
+      _articleSession && Object.prototype.hasOwnProperty.call(_articleSession, 'footerVisibilityOverride')
+        ? _articleSession.footerVisibilityOverride
+        : window._footerVisibilityOverride
+    );
+    if (footerVisibilityOverride && visibilityOverrideHides(footerVisibilityOverride.enabled)) return false;
+    if (footerVisibilityOverride && visibilityOverrideShows(footerVisibilityOverride.enabled)) return true;
     const footerEl = document.getElementById('footerEnabled');
     return hasManagedBottomBlocksFooter() || !!(footerEl && footerEl.checked);
+  }
+
+  function refreshFooterPreviewFromVisibility() {
+    if (typeof window._updateFooter === 'function') {
+      window._updateFooter('');
+      return true;
+    }
+    const contentArea = document.getElementById('contentArea');
+    if (!contentArea || !_articleHtml) return false;
+    const enabled = isFooterEnabledForCurrentArticle();
+    contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+    hookPreviewImages(contentArea);
+    markFailedImages(_failedSrcs);
+    return true;
   }
 
   // Cache the latest parsed inputs so rerender() can re-run template.process*
@@ -534,7 +650,7 @@ export function initApp(initialTemplate) {
   let _lastRenderInput = null;
   // shape: { kind: 'docx'|'md'|'blocks', payload: <data>, isRepost, title? }
   let _articleSession = null;
-  // shape: { input, title, articleHtml, footerHtml, stats, bottomBlocksOverride, bottomBlocksAccountId, sourceIsDocx, bodyOnly }
+  // shape: { input, title, articleHtml, footerHtml, stats, articleMeta, articleFooterProfile, bottomBlocksOverride, bottomBlocksAccountId, sourceIsDocx, bodyOnly }
 
   // Batch file queue
   let _batchFiles = [];
@@ -574,13 +690,14 @@ export function initApp(initialTemplate) {
       ? String(opts.title || '')
       : file.name.replace(/\.\w+$/i, '');
     const displayName = opts.displayName ? String(opts.displayName) : '';
+    const articleArtifactOverride = normalizeArticleArtifactOverride(opts.articleArtifactOverride);
     if (sourceIsDocx) {
       const docxData = await parseDocx(file);
-      return { kind: 'docx', payload: docxData, isRepost, title: fallbackTitle, displayName, sourceIsDocx };
+      return { kind: 'docx', payload: docxData, isRepost, title: fallbackTitle, displayName, sourceIsDocx, articleArtifactOverride };
     }
     if (typeof template.processMd === 'function') {
       const text = await file.text();
-      return { kind: 'md', payload: text, isRepost, title: fallbackTitle, displayName, sourceIsDocx: false };
+      return { kind: 'md', payload: text, isRepost, title: fallbackTitle, displayName, sourceIsDocx: false, articleArtifactOverride };
     }
     throw new Error('此模板不支持该文件格式');
   }
@@ -589,15 +706,28 @@ export function initApp(initialTemplate) {
     if (!input) throw new Error('没有可渲染的文章输入');
     const isRepost = !!input.isRepost;
     if (input.kind === 'docx') {
-      return template.processDocx({ ...input.payload, isRepost, config: _activeConfig });
+      return template.processDocx({
+        ...input.payload,
+        isRepost,
+        config: _activeConfig,
+        articleArtifactOverride: input.articleArtifactOverride,
+      });
     }
     if (input.kind === 'md') {
       if (typeof template.processMd !== 'function') throw new Error('此模板不支持该文件格式');
-      return await template.processMd(input.payload, { isRepost, config: _activeConfig });
+      return await template.processMd(input.payload, {
+        isRepost,
+        config: _activeConfig,
+        articleArtifactOverride: input.articleArtifactOverride,
+      });
     }
     if (input.kind === 'blocks') {
       if (typeof template.processBlocks !== 'function') throw new Error('当前模板不支持 blocks 路径');
-      return await template.processBlocks(input.payload, { isRepost, config: _activeConfig });
+      return await template.processBlocks(input.payload, {
+        isRepost,
+        config: _activeConfig,
+        articleArtifactOverride: input.articleArtifactOverride,
+      });
     }
     throw new Error('未知文章输入类型');
   }
@@ -616,6 +746,14 @@ export function initApp(initialTemplate) {
     if (options.resetArticleArtifacts) resetMoreArticlesForNewArticle();
     const bodyOnly = !!input.bodyOnly;
     const articleHtml = result.lines.join('\n');
+    const articleMeta = result.articleMeta || {};
+    const footerVisibilityOverride = bodyOnly
+      ? undefined
+      : normalizeFooterVisibilityOverride(
+        Object.prototype.hasOwnProperty.call(options, 'footerVisibilityOverride')
+          ? options.footerVisibilityOverride
+          : input.footerVisibilityOverride
+      );
     const bottomBlocksState = bodyOnly
       ? { override: undefined, accountId: null }
       : options.autofillAuthorCard
@@ -623,23 +761,36 @@ export function initApp(initialTemplate) {
       : readCurrentBottomBlocksOverrideForArticle();
     const isRepost = !!input.isRepost;
     let footerHtml = '';
+    let articleFooterProfile = null;
     if (!bodyOnly) {
-      const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({
+      const { html: baseFooterHtml, isV2, articleFooterProfile: profile } = await loadBaseFooterHtml({
         isRepost,
         bottomBlocksOverride: bottomBlocksState.override,
+        articleMeta,
+        footerVisibilityOverride,
       });
+      articleFooterProfile = profile || null;
       footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
     }
     const elapsed = options.startedAt ? ((performance.now() - options.startedAt) / 1000).toFixed(1) : options.elapsed;
     const title = result.title || input.title || '';
+    const articleArtifactOverride = normalizeArticleArtifactOverride(
+      Object.prototype.hasOwnProperty.call(options, 'articleArtifactOverride')
+        ? options.articleArtifactOverride
+        : input.articleArtifactOverride
+    );
     return {
-      input: { ...input, title },
+      input: { ...input, title, footerVisibilityOverride, articleArtifactOverride },
       result,
       title,
       displayName: input.displayName || title,
       articleHtml,
       footerHtml,
       stats: options.stats || formatRenderStats(result, elapsed),
+      articleMeta,
+      articleFooterProfile,
+      footerVisibilityOverride,
+      articleArtifactOverride,
       bottomBlocksOverride: bottomBlocksState.override,
       bottomBlocksAccountId: bottomBlocksState.accountId,
       sourceIsDocx: !!input.sourceIsDocx,
@@ -654,6 +805,10 @@ export function initApp(initialTemplate) {
     _isRepost = !!(_lastRenderInput && _lastRenderInput.isRepost);
     _sourceIsDocx = !!session.sourceIsDocx;
     _articleBodyOnly = !!session.bodyOnly;
+    window._articleMeta = session.articleMeta || {};
+    window._articleFooterProfile = session.articleFooterProfile || null;
+    window._footerVisibilityOverride = normalizeFooterVisibilityOverride(session.footerVisibilityOverride);
+    window._articleArtifactOverride = normalizeArticleArtifactOverride(session.articleArtifactOverride);
     const accountId = session.bottomBlocksAccountId || (window._activeRulePack && window._activeRulePack.id);
     if (accountId && session.bottomBlocksOverride !== undefined) {
       writeBottomBlocksOverride(accountId, session.bottomBlocksOverride || {});
@@ -890,12 +1045,8 @@ export function initApp(initialTemplate) {
     const body = normalizeClipboardTextForMarkdown(raw);
     if (!body) return;
     clearUploadVisual();
-    if (!hasImageLikeLink(body) && looksLikeArticleClipboardText(raw)) {
-      window._handleBlocks(buildClipboardArticleBlocks(raw), { ...opts, isRepost: false, bodyOnly: true });
-      return;
-    }
     if (!hasImageLikeLink(body)) {
-      showPlainTextResult(body);
+      window._handleBlocks(buildClipboardArticleBlocks(raw), { ...opts, isRepost: false, bodyOnly: true });
       return;
     }
     const file = new File([body], 'clipboard.md', { type: 'text/markdown' });
@@ -937,6 +1088,7 @@ export function initApp(initialTemplate) {
         displayName: data.displayName || '',
         sourceIsDocx: false,
         bodyOnly: !!((opts && opts.bodyOnly) || (data && data.bodyOnly)),
+        articleArtifactOverride: normalizeArticleArtifactOverride(opts && opts.articleArtifactOverride),
       };
       const result = await renderArticleInput(input);
       logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
@@ -967,14 +1119,24 @@ export function initApp(initialTemplate) {
   async function _engineRerender(options = {}) {
     const cached = (_articleSession && _articleSession.input) || _lastRenderInput;
     if (!cached) return;
+    const articleArtifactOverride = Object.prototype.hasOwnProperty.call(options, 'articleArtifactOverride')
+      ? normalizeArticleArtifactOverride(options.articleArtifactOverride)
+      : cached.articleArtifactOverride;
+    const renderInput = Object.prototype.hasOwnProperty.call(options, 'articleArtifactOverride')
+      ? { ...cached, articleArtifactOverride }
+      : cached;
     // Use a local repost flag so we don't pollute the module-level _isRepost,
     // which handleFile / _handleBlocks set per upload and other code paths read.
     try {
       const t0 = performance.now();
-      const result = await renderArticleInput(cached);
+      const result = await renderArticleInput(renderInput);
       const session = await buildArticleSession(cached, result, {
         startedAt: t0,
         autofillAuthorCard: !!options.autofillAuthorCard,
+        footerVisibilityOverride: Object.prototype.hasOwnProperty.call(options, 'footerVisibilityOverride')
+          ? options.footerVisibilityOverride
+          : renderInput.footerVisibilityOverride,
+        articleArtifactOverride,
       });
       activateArticleSession(session);
     } catch (err) {
@@ -997,12 +1159,34 @@ export function initApp(initialTemplate) {
     if (options.rerender !== false) await _engineRerender();
     return true;
   };
+  async function setFooterVisibilityOverride(next) {
+    const normalized = normalizeFooterVisibilityOverride(next);
+    window._footerVisibilityOverride = normalized;
+    if (!_articleSession) return refreshFooterPreviewFromVisibility();
+    _articleSession.footerVisibilityOverride = normalized;
+    _articleSession.input = { ...(_articleSession.input || {}), footerVisibilityOverride: normalized };
+    _lastRenderInput = _articleSession.input;
+    await _engineRerender({ footerVisibilityOverride: normalized });
+    return true;
+  }
+  async function setArticleArtifactOverride(next) {
+    const normalized = normalizeArticleArtifactOverride(next);
+    window._articleArtifactOverride = normalized;
+    if (!_articleSession) return false;
+    _articleSession.articleArtifactOverride = normalized;
+    _articleSession.input = { ...(_articleSession.input || {}), articleArtifactOverride: normalized };
+    _lastRenderInput = _articleSession.input;
+    await _engineRerender({ articleArtifactOverride: normalized });
+    return true;
+  }
   window._engineApi = {
     ...window._engineApi,
     setActiveConfig,
     getActiveConfig,
     rerender: (options) => _engineRerender(options),
     switchTemplate: window._engineSwitchTemplate,
+    setFooterVisibilityOverride,
+    setArticleArtifactOverride,
   };
 
   async function handleFile(file, opts) {
@@ -1134,7 +1318,12 @@ export function initApp(initialTemplate) {
       if (seq !== _moreArticlesCopySeq) return false;
       saveMoreArticlesCards(uploaded);
       const rp = _lastRenderInput && _lastRenderInput.isRepost != null ? _lastRenderInput.isRepost : _isRepost;
-      const { html: base0, isV2 } = await loadBaseFooterHtml({ isRepost: rp });
+      const { html: base0, isV2 } = await loadBaseFooterHtml({
+        isRepost: rp,
+        articleMeta: _articleSession && _articleSession.articleMeta,
+        bottomBlocksOverride: _articleSession && _articleSession.bottomBlocksOverride,
+        footerVisibilityOverride: _articleSession && _articleSession.footerVisibilityOverride,
+      });
       const baseFooter = normalizeWechatRichHtml(isV2 ? base0 : applyRepostTransform(base0, rp));
       if (seq !== _moreArticlesCopySeq) return false;
       _footerCopy = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, uploaded));
@@ -1234,7 +1423,12 @@ export function initApp(initialTemplate) {
       _moreArticlesCopySeq++;
       _moreArticlesCopyJob = null;
       const rp = _lastRenderInput && _lastRenderInput.isRepost != null ? _lastRenderInput.isRepost : _isRepost;
-      const { html: base, isV2 } = await loadBaseFooterHtml({ isRepost: rp });
+      const { html: base, isV2 } = await loadBaseFooterHtml({
+        isRepost: rp,
+        articleMeta: _articleSession && _articleSession.articleMeta,
+        bottomBlocksOverride: _articleSession && _articleSession.bottomBlocksOverride,
+        footerVisibilityOverride: _articleSession && _articleSession.footerVisibilityOverride,
+      });
       const merged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2 });
       _footerHtml = merged;
       _footerCopy = merged;
@@ -1466,6 +1660,10 @@ export function initApp(initialTemplate) {
     _plainTextCopy = null;
     _articleBodyOnly = false;
     _articleSession = null;
+    window._articleMeta = {};
+    window._articleFooterProfile = null;
+    window._footerVisibilityOverride = undefined;
+    window._articleArtifactOverride = undefined;
     _lastRenderInput = null;
     dropZone.classList.remove('processing');
     resetImportEntry();
@@ -1597,6 +1795,10 @@ export function initApp(initialTemplate) {
     _moreArticlesCopyJob = null;
     _lastRenderInput = cs.last_render_input || null;
     _articleSession = cs.article_session || null;
+    window._articleMeta = (_articleSession && _articleSession.articleMeta) || {};
+    window._articleFooterProfile = (_articleSession && _articleSession.articleFooterProfile) || null;
+    window._footerVisibilityOverride = normalizeFooterVisibilityOverride(_articleSession && _articleSession.footerVisibilityOverride);
+    window._articleArtifactOverride = normalizeArticleArtifactOverride(_articleSession && _articleSession.articleArtifactOverride);
     if (!_articleSession && _lastRenderInput) {
       _articleSession = {
         input: _lastRenderInput,

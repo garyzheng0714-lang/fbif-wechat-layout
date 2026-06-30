@@ -22,8 +22,8 @@ const foodTalksSiteRuleAccountID = "ft-default"
 const foodTalksSiteDefaultRulePresetID = "ft-default-v1"
 const foodTalksSeriesSiteRuleAccountID = "ft-series"          // 网站渠道「什么是系列」= registry pack.id
 const foodTalksSeriesSiteDefaultRulePresetID = "ft-series-v1" // 网站系列独立 preset
-const wowFoodRuleAccountID = "wowfood"               // = registry pack.id
-const wowFoodDefaultRulePresetID = "wowfood-default" // WowFood爆品超市 独立 preset
+const wowFoodRuleAccountID = "wowfood"                        // = registry pack.id
+const wowFoodDefaultRulePresetID = "wowfood-default"          // WowFood爆品超市 独立 preset
 const maxRulePresetVersions = 20
 
 type rulePreset struct {
@@ -129,6 +129,11 @@ func mergeRuleDefaults(config map[string]any) map[string]any {
 		if len(mergedMods) > 0 {
 			merged["modules"] = mergedMods
 		}
+	}
+	mods, _ := merged["modules"].(map[string]any)
+	srcMods, _ := config["modules"].(map[string]any)
+	if mods != nil && (srcMods == nil || srcMods["article_footer_defaults"] == nil) {
+		mods["article_footer_defaults"] = disabledArticleFooterDefaultsModule()
 	}
 	return merged
 }
@@ -574,9 +579,13 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	rule.ID = p.ID
 	rule.Name = p.Name
 	rule.Description = p.Description
-	// 用户保存即视为接受当前代码基线：标记 BuiltinVersion=当前，避免下次加载被内置默认覆盖
-	// （内置 id preset 的后台编辑得以保留，直到开发者再次 bump 代码版本）。
-	rule.BuiltinVersion = currentBuiltinRuleVersion
+	// 用户保存内置默认 preset 即视为接受该 preset 的当前代码基线，避免下次加载被
+	// 内置默认覆盖；各内置账号有独立目标版本，不能再写全局 currentBuiltinRuleVersion。
+	if isProtectedDefaultPreset(p.ID) {
+		rule.BuiltinVersion = builtinVersionForDefaultRule(p.ID)
+	} else {
+		rule.BuiltinVersion = 0
+	}
 	rule.Versions = append(rule.Versions, rulePresetVersion{
 		Version:   nextVersion,
 		Config:    p.Config,

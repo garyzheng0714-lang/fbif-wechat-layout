@@ -31,6 +31,14 @@ const LEGACY_FOOTER_KEY = 'footer_enabled';
 const LEGACY_SKIP_UPLOAD_KEY = 'skip_upload';
 const BAD_SKIP_UPLOAD_MIGRATION_KEY = 'skip_upload_migrated_v2';
 const RESTORED_SKIP_UPLOAD_KEY = 'skip_upload_restored_v3';
+const STRUCTURED_RULE_MODULES = new Set([
+  'mctoc',
+  'fbif_footer',
+  'ft_series_materials',
+  'asset_library',
+  'bottom_blocks',
+  'article_footer_defaults',
+]);
 
 function hasWindowStorage() {
   return typeof window !== 'undefined' && window.localStorage;
@@ -48,6 +56,23 @@ function localConfigKey(accountID) {
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function clonePlain(value) {
+  if (!isPlainObject(value) && !Array.isArray(value)) return value;
+  try { return JSON.parse(JSON.stringify(value)); } catch { return value; }
+}
+
+function withStructuredRuleConfig(config, normalized = normalizeRuleConfig(config)) {
+  const source = isPlainObject(config && config.raw_config)
+    ? config.raw_config
+    : (isPlainObject(config && config.config) && (config.config.schema_version === 2 || isPlainObject(config.config.modules))
+      ? config.config
+      : config);
+  const out = { ...normalized };
+  if (isPlainObject(source) && isPlainObject(source.modules)) out.modules = clonePlain(source.modules);
+  if (isPlainObject(source) && isPlainObject(source.image)) out.image = clonePlain(source.image);
+  return out;
 }
 
 function readableMoreArticlesKey(key) {
@@ -274,6 +299,7 @@ function validateRuleConfigSource(source) {
     for (const [moduleName, moduleConfig] of Object.entries(modules)) {
       const allowedFields = RULE_MODULE_FIELDS.get(moduleName);
       if (!allowedFields) {
+        if (STRUCTURED_RULE_MODULES.has(moduleName)) continue;
         errors.push('未知规则模块：' + moduleName);
         continue;
       }
@@ -305,7 +331,7 @@ export function validateRuleConfigDocument(input) {
   return {
     name: String(raw.name || '').trim(),
     description: String(raw.description || '').trim(),
-    config: normalizeRuleConfig(source),
+    config: withStructuredRuleConfig(source),
     document: raw,
   };
 }
@@ -362,22 +388,23 @@ export function loadLocalRuleConfig(accountID = DEFAULT_RULE_ACCOUNT_ID) {
       }
     }
   }
-  return normalizeRuleConfig(raw);
+  return withStructuredRuleConfig(raw);
 }
 
 export function saveLocalRuleConfig(config, accountID = DEFAULT_RULE_ACCOUNT_ID) {
   const normalized = normalizeRuleConfig(config);
+  const stored = withStructuredRuleConfig(config, normalized);
   const account = normalizeAccountID(accountID);
   if (hasWindowStorage()) {
     try {
-      window.localStorage.setItem(localConfigKey(account), JSON.stringify(normalized));
+      window.localStorage.setItem(localConfigKey(account), JSON.stringify(stored));
       if (account === DEFAULT_RULE_ACCOUNT_ID) {
         window.localStorage.setItem(LEGACY_FOOTER_KEY, String(normalized.footer_enabled));
         window.localStorage.setItem(LEGACY_SKIP_UPLOAD_KEY, String(normalized.skip_upload));
       }
     } catch {}
   }
-  return normalized;
+  return stored;
 }
 
 export function applyActiveRuleConfig(config, preset) {
@@ -463,7 +490,7 @@ export async function saveRulePreset(password, preset) {
     headers: adminHeaders(password),
     body: JSON.stringify({
       ...preset,
-      config: normalizeRuleConfig(preset.config),
+      config: withStructuredRuleConfig(preset.config),
       behavior: normalizeRuleBehavior(preset.behavior),
     }),
   }, { timeoutMs: 10000 });

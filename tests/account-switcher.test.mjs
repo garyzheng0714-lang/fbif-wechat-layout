@@ -42,7 +42,7 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(app, /switchAccount/);
   assert.match(app, /loadActiveRulePreset\(activeRulePack\.id\)/);
   assert.match(app, /hydrateActiveRulePreset\(activeRulePack\.id\)/);
-  assert.match(app, /cacheServerRuleFallback\(loaded\.preset\.config\)/);
+  assert.match(app, /cacheServerRuleFallback\(loaded\.preset\.config,\s*loaded\.preset\)/);
   assert.doesNotMatch(visibleShell, /class="sidebar-footer"/, '左侧底部不再显示当前规则区');
   assert.doesNotMatch(visibleShell, /id="activeRuleCard"/, '当前规则卡片不应再出现在左侧底部');
   assert.doesNotMatch(visibleShell, /当前排版规则/, '左侧底部不再展示当前规则文案');

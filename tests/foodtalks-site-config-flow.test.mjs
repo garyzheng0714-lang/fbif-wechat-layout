@@ -94,6 +94,52 @@ test('engine.js/templates: 底部区块渲染读取 session override，而不是
   assert.match(fbif, /hasOwnProperty\.call\(opts, 'bottomBlocksOverride'\)/, '公众号页脚应支持显式 override');
 });
 
+test('engine.js: 本篇隐藏底部区域时不得 fallback 到旧 footer.html', async () => {
+  // WHY：用户关闭“底部区域”时，空 HTML 是明确的“不要输出底部”，不是“模板没接管”。
+  // 否则 engine 会把旧 footer.html 塞回来，预览和复制都违背所见即所得。
+  const engine = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  const loadBaseFooter = engine.slice(
+    engine.indexOf('async function loadBaseFooterHtml'),
+    engine.indexOf('// Module-level flag')
+  );
+  assert.match(loadBaseFooter, /res && typeof res === 'object'/, '模板返回对象时应视为已接管 footer');
+  assert.match(loadBaseFooter, /html:\s*res\.html == null \? '' : String\(res\.html\)/, '对象返回的空 html 应被保留为空字符串');
+  assert.doesNotMatch(loadBaseFooter, /const html = res && typeof res === 'object' \? res\.html : res/, '不得把对象 html 抽出后再用非空判断决定 fallback');
+  assert.ok(
+    loadBaseFooter.indexOf('if (res && typeof res ===') < loadBaseFooter.indexOf('const html = res;'),
+    '对象接管分支必须早于字符串兼容分支'
+  );
+});
+
+test('engine.js: 更多文章刷新必须沿用当前文章的底部可见性状态', async () => {
+  // WHY：编辑更多文章只是更新卡片，不能偷偷恢复用户已经隐藏的底部区域。
+  const engine = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  const updateMore = engine.slice(
+    engine.indexOf('window._updateMoreArticles = async function(cardsOverride)'),
+    engine.indexOf('dispatchArticleEvent(bodyOnly')
+  );
+  assert.match(updateMore, /articleMeta:\s*_articleSession && _articleSession\.articleMeta/, '刷新更多文章应带本篇 articleMeta');
+  assert.match(updateMore, /bottomBlocksOverride:\s*_articleSession && _articleSession\.bottomBlocksOverride/, '刷新更多文章应带本篇 bottomBlocksOverride');
+  assert.match(updateMore, /footerVisibilityOverride:\s*_articleSession && _articleSession\.footerVisibilityOverride/, '刷新更多文章应带本篇 footerVisibilityOverride');
+});
+
+test('engine.js: 读取本地底部覆盖时必须迁移旧结构覆盖', async () => {
+  // WHY：旧 bb.override 里的 enabled/order/块级 enabled 不能抢在作者默认前生效。
+  const engine = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(engine, /stripReadonlyOverride/, 'engine 应复用底部覆盖迁移逻辑');
+  assert.match(engine, /return migrateStoredBottomBlocksOverride\(accountId, raw\)/, '读取本地 bottom override 必须先迁移');
+  assert.match(engine, /function\s+frontendEditableBlockIDs/, '迁移必须基于当前 bottom_blocks 的 frontend_editable 块集合');
+});
+
 test('engine.js: bottom_blocks 启用时不再被旧 footer_enabled 隐藏', async () => {
   // WHY：FoodTalks 系列的名片/BD/群二维码属于 modules.bottom_blocks，
   // 旧的隐藏 footer_enabled=false 只应用于静态 footer.html，不能把新版底部区块整段关掉。
@@ -102,12 +148,29 @@ test('engine.js: bottom_blocks 启用时不再被旧 footer_enabled 隐藏', asy
     'utf8'
   );
   assert.match(engine, /function\s+hasManagedBottomBlocksFooter/, 'engine 应识别托管底部区块');
+  assert.match(engine, /normalizeFooterVisibilityOverride\([\s\S]{0,220}_articleSession\.footerVisibilityOverride/, '统一 footer 开关必须读取当前文章的显隐覆盖');
+  assert.match(engine, /visibilityOverrideHides\(footerVisibilityOverride\.enabled\)[\s\S]{0,80}return false/, '本文隐藏底部区域时必须优先于 bottom_blocks 默认显示');
   assert.match(
     engine,
     /return hasManagedBottomBlocksFooter\(\) \|\| !!\(footerEl && footerEl\.checked\)/,
     'bottom_blocks 启用时应强制显示页脚区块'
   );
   assert.ok((engine.match(/isFooterEnabledForCurrentArticle\(\)/g) || []).length >= 3, '预览更新/更多文章/复制路径都要用统一 footer 开关');
+});
+
+test('engine.js: 恢复会话缺少 articleSession 时，底部开关仍刷新预览', async () => {
+  // WHY：旧本地会话可能只恢复预览 HTML 缓存，没有完整 articleSession。
+  // 此时左侧父级开关不能只更新内存状态，否则右侧预览会继续显示底部。
+  const engine = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  const setFooterVisibility = engine.slice(
+    engine.indexOf('async function setFooterVisibilityOverride(next)'),
+    engine.indexOf('async function setArticleArtifactOverride(next)')
+  );
+  assert.match(engine, /function\s+refreshFooterPreviewFromVisibility/, 'engine 应有无 session 时的预览刷新兜底');
+  assert.match(setFooterVisibility, /if \(!_articleSession\) return refreshFooterPreviewFromVisibility\(\)/, '无 articleSession 时也必须立刻刷新右侧预览');
 });
 
 test('app.html: 暴露当前规则 ready promise 给上传流程等待', async () => {

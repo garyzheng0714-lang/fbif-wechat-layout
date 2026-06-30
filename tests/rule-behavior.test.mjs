@@ -116,6 +116,42 @@ test('behavior action inserts the Mote author image before reference heading', (
   assert.equal(out[2].k, 'refH');
 });
 
+test('behavior action can hide the Mote author image with article artifact override', () => {
+  const elems = [
+    { k: 'txt', runs: [{ type: 'txt', text: '正文' }] },
+    { k: 'refH', text: '参考来源' },
+  ];
+  const out = applyBehaviorToElems(elems, {
+    article: { author_normalized: normalizeAuthorName('Mote莫特') },
+  }, DEFAULT_BEHAVIOR, {
+    articleArtifactOverride: { mote_ref_author_card: false },
+  });
+
+  assert.equal(out.length, 2);
+  assert.equal(out[0].k, 'txt');
+  assert.equal(out[1].k, 'refH');
+});
+
+test('legacy Mote behavior action without id still honors the article artifact override', () => {
+  const legacyBehavior = {
+    ...DEFAULT_BEHAVIOR,
+    actions: DEFAULT_BEHAVIOR.actions.map(({ id: _id, ...action }) => action),
+  };
+  const elems = [
+    { k: 'txt', runs: [{ type: 'txt', text: '正文' }] },
+    { k: 'refH', text: '参考来源' },
+  ];
+  const out = applyBehaviorToElems(elems, {
+    article: { author_normalized: normalizeAuthorName('Mote莫特') },
+  }, legacyBehavior, {
+    articleArtifactOverride: { mote_ref_author_card: 'hide' },
+  });
+
+  assert.equal(out.length, 2);
+  assert.equal(out[0].k, 'txt');
+  assert.equal(out[1].k, 'refH');
+});
+
 test('behavior action moves target blankBefore onto the inserted image without mutating input', () => {
   const ref = { k: 'refH', text: '参考来源', blankBefore: true };
   const elems = [

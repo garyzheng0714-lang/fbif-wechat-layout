@@ -21,6 +21,12 @@ const blockRenderModule = await import('../blocks/block-render.js' + assetQuery)
 const { renderBottomBlocksHtml } = blockRenderModule;
 const mpBlocksModule = await import('./mp-blocks.js' + assetQuery);
 const { mpBlockRenderers } = mpBlocksModule;
+const articleFooterModule = await import('../article-footer-defaults.js' + assetQuery);
+const {
+  mergeArticleArtifactOverrides,
+  prepareBottomBlocksForArticle,
+  resolveArticleArtifactDefaultsForArticle,
+} = articleFooterModule;
 
 // ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
 function leafWrap(inner) {
@@ -76,6 +82,14 @@ function behaviorContext(author, source) {
       author_normalized: normalizeAuthorName(author),
     },
     account: activeBehaviorAccount(),
+  };
+}
+
+function articleMeta(author, source) {
+  return {
+    author: author || '',
+    source: source || '',
+    author_normalized: normalizeAuthorName(author),
   };
 }
 
@@ -404,17 +418,29 @@ async function classifyMd(text) {
 // 给作者行加 wx-ta-author，覆盖为 #396FBC（FBIF 视觉规范）。
 function render(elems, author, source, opts) {
   const isRepost = !!(opts && opts.isRepost);
+  const showTopAttribution = !(opts && opts.suppressTopAttribution);
   const behavior = getActiveRuleBehavior();
   const context = behaviorContext(author, source);
-  elems = applyBehaviorToElems(elems, context, behavior);
+  const mods = rawActiveModules();
+  const artifactDefaults = resolveArticleArtifactDefaultsForArticle({
+    articleMeta: context.article,
+    footerDefaults: mods.article_footer_defaults,
+  });
+  const articleArtifactOverride = mergeArticleArtifactOverrides(
+    artifactDefaults,
+    opts && opts.articleArtifactOverride,
+  );
+  elems = applyBehaviorToElems(elems, context, behavior, {
+    articleArtifactOverride,
+  });
   const lines = [];
 
   // Author and source lines at the top
-  if (author) {
+  if (showTopAttribution && author) {
     const authorCls = isRepost ? 'wx-ta' : 'wx-ta wx-ta-author';
     lines.push(sec(leafWrapAuthor('<span textstyle="" class="' + authorCls + '">' + esc(attributionText('作者', author, context, behavior)) + '</span>'), !source));
   }
-  if (source) {
+  if (showTopAttribution && source) {
     lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' + esc(attributionText('来源', source, context, behavior)) + '</span>'), true));
   }
 
@@ -557,6 +583,8 @@ function classifyBlocks(data) {
     // is collected and emitted once at the article tail before that footer.
     const attr = isClipboardText ? null : parseAttribution(text);
     if (attr) {
+      if (attr.role === '作者' && !author) author = attr.name;
+      if (attr.role === '来源') source = attr.name;
       pushUniqueAttribution(attrs, attr);
       inRef = false;
       continue;
@@ -588,20 +616,37 @@ export default {
   description: '按 FBIF 排版规范格式化，支持标题/引言/图片说明/参考来源',
   formats: ['.docx', '.doc', '.md', '.txt'],
 
-  processDocx({ paragraphs, imgCache, isRepost, config: _config }) {
+  processDocx({ paragraphs, imgCache, isRepost, config: _config, articleArtifactOverride }) {
     // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, imgN } = classifyDocx(paragraphs, imgCache);
-    return { lines: render(elems, author, '', { isRepost }), imgN, headingN: elems.filter(e => e.k === 'h').length };
+    return {
+      lines: render(elems, author, '', { isRepost, articleArtifactOverride }),
+      imgN,
+      headingN: elems.filter(e => e.k === 'h').length,
+      articleMeta: articleMeta(author, ''),
+    };
   },
   async processMd(text, { config: _config, ...opts } = {}) {
     // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, source, title, imgN } = await classifyMd(text);
-    return { lines: render(elems, author, source, opts), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return {
+      lines: render(elems, author, source, opts),
+      imgN,
+      headingN: elems.filter(e => e.k === 'h').length,
+      title,
+      articleMeta: articleMeta(author, source),
+    };
   },
   processBlocks(data, { config: _config, ...opts } = {}) {
     // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, source, title, imgN } = classifyBlocks(data);
-    return { lines: render(elems, author, source, opts), imgN, headingN: elems.filter(e => e.k === 'h').length, title };
+    return {
+      lines: render(elems, author, source, { ...opts, suppressTopAttribution: true }),
+      imgN,
+      headingN: elems.filter(e => e.k === 'h').length,
+      title,
+      articleMeta: articleMeta(author, source),
+    };
   },
 
   // 整段底部由统一区块模型渲染（替代 footer.html）。engine.loadBaseFooterHtml 接管时调用：
@@ -617,7 +662,23 @@ export default {
       : ((typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined);
     // v2 双预设：来源决定原创/转载（v1 模块忽略 presetId，行为不变）。
     const presetId = (opts && opts.isRepost) ? 'repost' : 'original';
-    const html = renderBottomBlocksHtml(bb, ov, mpBlockRenderers(mods.asset_library, scope), { presetId });
-    return { html, isV2: Number(bb.schema_version) >= 2 }; // isV2：engine 据此对 v2 跳过 applyRepostTransform（codex #4）
+    const prepared = prepareBottomBlocksForArticle({
+      module: bb,
+      articleMeta: opts && opts.articleMeta,
+      footerDefaults: mods.article_footer_defaults,
+      contentOverride: ov,
+      visibilityOverride: opts && opts.footerVisibilityOverride,
+    });
+    const html = renderBottomBlocksHtml(
+      prepared.module,
+      prepared.override,
+      mpBlockRenderers(mods.asset_library, scope),
+      { presetId }
+    );
+    return {
+      html,
+      isV2: Number(bb.schema_version) >= 2,
+      articleFooterProfile: prepared.articleFooterProfile,
+    }; // isV2：engine 据此对 v2 跳过 applyRepostTransform（codex #4）
   },
 };

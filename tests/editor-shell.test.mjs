@@ -249,13 +249,13 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   );
   assert.match(
     engine,
-    /looksLikeArticleClipboardText\(raw\)[\s\S]{0,180}_handleBlocks\(buildClipboardArticleBlocks\(raw\), \{ \.\.\.opts, isRepost: false, bodyOnly: true \}\)/,
-    '带标题和作者的剪贴板文章草稿应进入公众号正文排版，但不应生成完整公众号头尾'
+    /if \(!hasImageLikeLink\(body\)\) \{[\s\S]{0,140}_handleBlocks\(buildClipboardArticleBlocks\(raw\), \{ \.\.\.opts, isRepost: false, bodyOnly: true \}\);[\s\S]{0,40}return;/,
+    '无图片的剪贴板正文应进入公众号正文排版，但不应生成完整公众号头尾'
   );
-  assert.match(
+  assert.doesNotMatch(
     engine,
     /if \(!hasImageLikeLink\(body\)\) \{[\s\S]{0,120}showPlainTextResult\(body\);[\s\S]{0,40}return;/,
-    '短纯文字剪贴板内容仍可走轻量结果页'
+    '正文粘贴不能再掉进纯文字结果页，否则字体和公众号正文不一致'
   );
   assert.match(
     engine,

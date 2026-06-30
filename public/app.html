@@ -528,7 +528,7 @@ async function hydrateActiveRulePreset(accountID = activeRulePack.id) {
   if (accountID !== activeRulePack.id) return loaded;
   activeRuleSource = loaded.source;
   applyActiveRuleConfig(loaded.preset.config, loaded.preset);
-  if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config);
+  if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config, loaded.preset);
   activeRuleSelectorDraftID = loaded.preset.id || 'default';
   activeRuleSelectorStatus = '';
   await applyAccountCapabilityUI(activeRulePack);
@@ -557,7 +557,7 @@ async function saveActiveRuleSelection() {
     ]);
     activeRuleSource = loaded.source;
     applyActiveRuleConfig(loaded.preset.config, loaded.preset);
-    if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config);
+    if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config, loaded.preset);
     activeRuleCatalog = catalog;
     activeRuleSelectorEditing = false;
     activeRuleSelectorOpen = false;
@@ -627,6 +627,29 @@ async function applyAccountCapabilityUI(pack) {
           accountId: pack.id,
           getModule: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.bottom_blocks) || {},
           getAssetLibrary: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.asset_library) || null,
+          getArticleMeta: () => window._articleMeta || {},
+          getFooterDefaults: () => (window._activeConfig && window._activeConfig.config && window._activeConfig.config.modules && window._activeConfig.config.modules.article_footer_defaults) || null,
+          getFooterVisibilityOverride: () => window._footerVisibilityOverride || {},
+          onFooterVisibilityChange: (ov) => {
+            window._footerVisibilityOverride = ov;
+            if (window._engineApi && typeof window._engineApi.setFooterVisibilityOverride === 'function') {
+              const result = window._engineApi.setFooterVisibilityOverride(ov);
+              if (result && typeof result.catch === 'function') {
+                result.catch(err => console.warn('[footer] visibility update failed', err));
+              }
+            }
+            if (window._updateFooter) {
+              window._updateFooter(null);
+            }
+          },
+          getArticleArtifactOverride: () => window._articleArtifactOverride || {},
+          onArticleArtifactChange: (ov) => {
+            if (window._engineApi && typeof window._engineApi.setArticleArtifactOverride === 'function') {
+              window._engineApi.setArticleArtifactOverride(ov);
+            } else {
+              window._articleArtifactOverride = ov;
+            }
+          },
           // more_articles 块把卡片编辑器（#moreArticlesEmbed）搬进内容编辑区；其余块由面板按 frontend_editable 决定换图入口。
           getBlockExtra: (block) => (articleEditorActivated && block && block.type === 'more_articles') ? moreArticlesEmbedEl() : null,
           onChange: (ov) => { window._bottomBlocksOverride = ov; if (window._engineApi && typeof window._engineApi.rerender === 'function') window._engineApi.rerender(); },
@@ -689,7 +712,7 @@ async function switchAccount(accountID, options = {}) {
   activeRuleSource = loaded.source;
   applyActiveRuleConfig(loaded.preset.config, loaded.preset);
   if (activeRuleSource === 'server') {
-    saveLocalRuleConfig(loaded.preset.config, activeRulePack.id);
+    cacheServerRuleFallback(loaded.preset.config, loaded.preset);
   }
   activeRuleCatalog = catalog;
   activeRuleSelectorEditing = false;
@@ -704,16 +727,20 @@ function loadConfig() {
   return normalizeRuleConfig((window._activeConfig && window._activeConfig.config) || loadLocalRuleConfig(activeRulePack.id));
 }
 
-function cacheServerRuleFallback(config) {
-  saveLocalRuleConfig(config, activeRulePack.id);
+function structuredFallbackConfig(config, preset) {
+  return (preset && (preset.raw_config || preset.config)) || config;
+}
+
+function cacheServerRuleFallback(config, preset) {
+  saveLocalRuleConfig(structuredFallbackConfig(config, preset), activeRulePack.id);
 }
 
 function saveConfig(config, preset, options = {}) {
   const normalized = normalizeRuleConfig(config);
   if (options.persistLocal || activeRuleSource !== 'server') {
-    saveLocalRuleConfig(normalized, activeRulePack.id);
+    saveLocalRuleConfig(config, activeRulePack.id);
   }
-  applyActiveRuleConfig(normalized, preset || (window._activeConfig && window._activeConfig.preset));
+  applyActiveRuleConfig(config, preset || (window._activeConfig && window._activeConfig.preset));
   refreshRuleConsumers();
   return normalized;
 }
@@ -817,7 +844,7 @@ initAdminPanel({
   applyConfig(config, preset, meta = {}) {
     if (meta.source === 'server') {
       activeRuleSource = 'server';
-      cacheServerRuleFallback(config);
+      cacheServerRuleFallback(config, preset);
     }
     const c = saveConfig(config, preset, { persistLocal: meta.persistLocal === true });
     syncEngineConfig(true);

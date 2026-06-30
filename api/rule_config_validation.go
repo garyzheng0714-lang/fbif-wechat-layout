@@ -480,6 +480,12 @@ func validateRuleConfigKeys(config map[string]any) error {
 				}
 				continue
 			}
+			if moduleName == "article_footer_defaults" {
+				if err := validateArticleFooterDefaultsModule(rawModule); err != nil {
+					return err
+				}
+				continue
+			}
 			allowedFields, ok := ruleModuleFields[moduleName]
 			if !ok {
 				return fmt.Errorf("unknown rule module: %s", moduleName)
@@ -689,6 +695,171 @@ func validateFtSeriesMaterialsModule(raw any) error {
 		for k := range fd {
 			if !fdAllowed[k] {
 				return fmt.Errorf("unknown ft_series_materials footer_default field: %s", k)
+			}
+		}
+	}
+	return nil
+}
+
+// validateArticleFooterDefaultsModule 校验文章元信息驱动的底部默认：
+//
+//	{
+//	  schema_version:1, enabled?:bool,
+//	  author_aliases:{ group_id:[]string },
+//	  profiles:[{
+//	    id,name, match:{author_alias_group},
+//	    block_visibility:{block_id:bool},
+//	    artifact_visibility?:{artifact_id:bool}
+//	  }]
+//	}
+//
+// 这里只允许“作者等于别名组”这一类条件。复杂条件继续留在 behavior 的受限动作系统之外，
+// 避免 footer 默认变成难审计的规则引擎。
+func validateArticleFooterDefaultsModule(raw any) error {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("article_footer_defaults module must be an object")
+	}
+	allowed := map[string]bool{"schema_version": true, "enabled": true, "author_aliases": true, "profiles": true}
+	for k := range m {
+		if !allowed[k] {
+			return fmt.Errorf("unknown article_footer_defaults field: %s", k)
+		}
+	}
+	if v, ok := m["schema_version"]; ok {
+		n, err := ruleValueAsFloat(v)
+		if err != nil || n != 1 {
+			return fmt.Errorf("article_footer_defaults requires schema_version 1")
+		}
+	}
+	if v, ok := m["enabled"]; ok {
+		if _, ok := v.(bool); !ok {
+			return fmt.Errorf("article_footer_defaults enabled must be boolean")
+		}
+	}
+	aliasIDs := map[string]bool{}
+	if rawAliases, ok := m["author_aliases"]; ok {
+		aliases, ok := rawAliases.(map[string]any)
+		if !ok {
+			return fmt.Errorf("article_footer_defaults author_aliases must be an object")
+		}
+		if len(aliases) > 500 {
+			return fmt.Errorf("article_footer_defaults has too many author alias groups")
+		}
+		for groupID, rawList := range aliases {
+			if !assetLibraryID.MatchString(groupID) {
+				return fmt.Errorf("article_footer_defaults author alias group %q is invalid", groupID)
+			}
+			aliasIDs[groupID] = true
+			list, ok := rawList.([]any)
+			if !ok {
+				return fmt.Errorf("article_footer_defaults author_aliases.%s must be an array", groupID)
+			}
+			if len(list) > 40 {
+				return fmt.Errorf("article_footer_defaults author_aliases.%s has too many entries", groupID)
+			}
+			for i, item := range list {
+				s, ok := item.(string)
+				if !ok {
+					return fmt.Errorf("article_footer_defaults author_aliases.%s[%d] must be a string", groupID, i)
+				}
+				if strings.TrimSpace(s) == "" || len([]rune(s)) > 80 {
+					return fmt.Errorf("article_footer_defaults author_aliases.%s[%d] is invalid", groupID, i)
+				}
+				if behaviorUnsafeTemplate.MatchString(s) {
+					return fmt.Errorf("article_footer_defaults author_aliases.%s[%d] contains unsafe text", groupID, i)
+				}
+			}
+		}
+	}
+	rawProfiles, ok := m["profiles"]
+	if !ok {
+		return nil
+	}
+	profiles, ok := rawProfiles.([]any)
+	if !ok {
+		return fmt.Errorf("article_footer_defaults profiles must be an array")
+	}
+	if len(profiles) > 500 {
+		return fmt.Errorf("article_footer_defaults has too many profiles")
+	}
+	seenProfiles := map[string]bool{}
+	for i, rawProfile := range profiles {
+		profile, ok := rawProfile.(map[string]any)
+		if !ok {
+			return fmt.Errorf("article_footer_defaults profiles[%d] must be an object", i)
+		}
+		allowedProfile := map[string]bool{"id": true, "name": true, "match": true, "block_visibility": true, "artifact_visibility": true}
+		for k := range profile {
+			if !allowedProfile[k] {
+				return fmt.Errorf("article_footer_defaults profiles[%d] has unknown field: %s", i, k)
+			}
+		}
+		id, _ := profile["id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" || !assetLibraryID.MatchString(id) {
+			return fmt.Errorf("article_footer_defaults profiles[%d].id is invalid", i)
+		}
+		if seenProfiles[id] {
+			return fmt.Errorf("article_footer_defaults has duplicate profile id: %s", id)
+		}
+		seenProfiles[id] = true
+		if rawName, ok := profile["name"]; ok {
+			name, ok := rawName.(string)
+			if !ok {
+				return fmt.Errorf("article_footer_defaults profiles[%d].name must be string", i)
+			}
+			if len([]rune(name)) > 80 {
+				return fmt.Errorf("article_footer_defaults profiles[%d].name too long", i)
+			}
+		}
+		match, ok := profile["match"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("article_footer_defaults profiles[%d].match must be an object", i)
+		}
+		for k := range match {
+			if k != "author_alias_group" {
+				return fmt.Errorf("article_footer_defaults profiles[%d].match has unknown field: %s", i, k)
+			}
+		}
+		groupID, ok := match["author_alias_group"].(string)
+		groupID = strings.TrimSpace(groupID)
+		if !ok || groupID == "" || !assetLibraryID.MatchString(groupID) {
+			return fmt.Errorf("article_footer_defaults profiles[%d].match.author_alias_group is invalid", i)
+		}
+		if !aliasIDs[groupID] {
+			return fmt.Errorf("article_footer_defaults profile %q references unknown author alias group: %s", id, groupID)
+		}
+		visibility, ok := profile["block_visibility"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("article_footer_defaults profiles[%d].block_visibility must be an object", i)
+		}
+		if len(visibility) > 100 {
+			return fmt.Errorf("article_footer_defaults profiles[%d].block_visibility has too many entries", i)
+		}
+		for blockID, rawEnabled := range visibility {
+			if !assetLibraryID.MatchString(blockID) {
+				return fmt.Errorf("article_footer_defaults profiles[%d].block_visibility block id %q is invalid", i, blockID)
+			}
+			if _, ok := rawEnabled.(bool); !ok {
+				return fmt.Errorf("article_footer_defaults profiles[%d].block_visibility.%s must be boolean", i, blockID)
+			}
+		}
+		if rawArtifactVisibility, ok := profile["artifact_visibility"]; ok {
+			artifactVisibility, ok := rawArtifactVisibility.(map[string]any)
+			if !ok {
+				return fmt.Errorf("article_footer_defaults profiles[%d].artifact_visibility must be an object", i)
+			}
+			if len(artifactVisibility) > 100 {
+				return fmt.Errorf("article_footer_defaults profiles[%d].artifact_visibility has too many entries", i)
+			}
+			for artifactID, rawEnabled := range artifactVisibility {
+				if !assetLibraryID.MatchString(artifactID) {
+					return fmt.Errorf("article_footer_defaults profiles[%d].artifact_visibility artifact id %q is invalid", i, artifactID)
+				}
+				if _, ok := rawEnabled.(bool); !ok {
+					return fmt.Errorf("article_footer_defaults profiles[%d].artifact_visibility.%s must be boolean", i, artifactID)
+				}
 			}
 		}
 	}

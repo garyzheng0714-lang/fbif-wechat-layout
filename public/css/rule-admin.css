@@ -136,8 +136,112 @@
   flex-wrap: wrap;
 }
 
+.admin-afd {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--fs-border-subtle, #EFF0F1);
+  border-radius: var(--fs-r-sm, 6px);
+  background: var(--fs-bg-card, #ffffff);
+  margin-bottom: 16px;
+}
+
+.admin-afd-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--fs-text-1, #1F2329);
+}
+
+.admin-afd-toggle input,
+.admin-afd-blocks input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--fs-brand, #1456F0);
+}
+
+.admin-afd-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.admin-afd-field {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--fs-text-2, #4E5969);
+}
+
+.admin-afd-field input,
+.admin-afd-field select {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--fs-border-control, #D9DCE0);
+  border-radius: var(--fs-r-xs, 4px);
+  background: var(--fs-bg-card, #ffffff);
+  color: var(--fs-text-1, #1F2329);
+  font: inherit;
+}
+
+.admin-afd-field input:focus,
+.admin-afd-field select:focus {
+  outline: none;
+  border-color: var(--fs-brand, #1456F0);
+  box-shadow: 0 0 0 2px var(--fs-brand-soft, #EBF1FF);
+}
+
+.admin-afd-mini {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--fs-border-control, #D9DCE0);
+  border-radius: var(--fs-r-xs, 4px);
+  background: var(--fs-bg-card, #ffffff);
+  color: var(--fs-text-1, #1F2329);
+  font: inherit;
+  cursor: pointer;
+}
+
+.admin-afd-mini:hover {
+  background: var(--fs-bg-hover, rgba(31,35,39,.045));
+}
+
+.admin-afd-hint {
+  margin: 0;
+  color: var(--fs-text-3, #6F757D);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-afd-blocks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 12px;
+}
+
+.admin-afd-blocks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--fs-text-1, #1F2329);
+}
+
 @media (max-width: 768px) {
   .ma-rule-field {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-afd-field {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-afd-row {
     grid-template-columns: 1fr;
   }
 

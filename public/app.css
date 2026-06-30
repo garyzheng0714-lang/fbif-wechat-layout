@@ -569,35 +569,31 @@ input[type="file"] { display: none; }
 .ma-card-head {
   display: flex; align-items: center; gap: 6px; font-size: 12px;
 }
+.ma-icon { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.ma-icon svg { display: block; width: 16px; height: 16px; }
 .ma-drag-handle {
-  cursor: grab; color: var(--fs-text-3); font-size: 14px;
-  line-height: 1; user-select: none;
-  padding: 2px 4px;
+  width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+  cursor: grab; color: var(--fs-text-3); user-select: none; border-radius: var(--fs-r-xs);
+  transition: background var(--fs-t-fast) var(--fs-ease-out), color var(--fs-t-fast) var(--fs-ease-out);
 }
+.ma-drag-handle:hover { background: var(--fs-bg-hover); color: var(--fs-text-2); }
 .ma-drag-handle:active { cursor: grabbing; }
-.ma-card-num {
-  font-weight: 600; color: var(--fs-text-2); font-size: 12px;
-}
+.ma-card-num { font-weight: 600; color: var(--fs-text-2); font-size: 12px; }
 .ma-card-head .ma-card-status { flex: 1; text-align: right; }
 .ma-remove-btn {
-  flex-shrink: 0;
-  width: 22px; height: 22px; border-radius: 50%;
-  border: none; background: transparent;
-  color: var(--fs-text-3);
-  font-size: 16px; line-height: 1; cursor: pointer;
-  font-family: inherit; padding: 0;
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: var(--fs-r-full);
+  border: none; background: transparent; color: var(--fs-text-3); cursor: pointer;
+  font-family: inherit; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   transition: all var(--fs-t-fast) var(--fs-ease-out);
 }
 .ma-remove-btn:hover {
   background: var(--fs-danger-soft); color: var(--fs-danger);
 }
 
-/* Add button — 保留虚线（添加区语义信号） */
 .ma-add-btn {
-  padding: 10px; border: none;
-  border-radius: var(--fs-r-s); background: transparent;
-  color: var(--fs-text-3); font-size: 13px; font-weight: 500;
-  font-family: inherit; cursor: pointer;
+  padding: 10px; border: none; border-radius: var(--fs-r-s); background: transparent;
+  color: var(--fs-text-3); font-size: 13px; font-weight: 500; font-family: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   transition: background var(--fs-t-fast) var(--fs-ease-out), color var(--fs-t-fast) var(--fs-ease-out);
 }
 .ma-add-btn:hover {
@@ -747,11 +743,9 @@ input[type="file"] { display: none; }
   font-size: 14px; font-weight: 600; color: rgba(0,0,0,0.95);
 }
 .ma-gallery-close {
-  width: 26px; height: 26px; border-radius: 50%;
-  border: none; background: var(--fs-bg-hover);
-  color: var(--fs-text-2);
-  font-size: 18px; line-height: 1; cursor: pointer;
-  font-family: inherit; padding: 0;
+  width: 28px; height: 28px; border-radius: var(--fs-r-full);
+  border: none; background: var(--fs-bg-hover); color: var(--fs-text-2); cursor: pointer;
+  font-family: inherit; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   transition: all var(--fs-t-fast) var(--fs-ease-out);
 }
 .ma-gallery-close:hover { background: var(--fs-bg-press); color: var(--fs-text-1); }

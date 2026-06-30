@@ -54,7 +54,36 @@ func defaultRuleConfig() map[string]any {
 			// 公众号(FBIF)底部区块：4 原子 V2 双预设（原创/转载），enabled=true，经 template.renderBottomFooter
 			// 接管底部渲染。本地浏览器验证 V2 视觉 1:1 == footer.html（v6→v7 切生产）。复用此基线的账号若不要
 			// FBIF 底部需显式覆盖。
-			"bottom_blocks": defaultMpBottomBlocksModuleV2(),
+			"bottom_blocks":           defaultMpBottomBlocksModuleV2(),
+			"article_footer_defaults": defaultArticleFooterDefaultsModule(),
+		},
+	}
+}
+
+func disabledArticleFooterDefaultsModule() map[string]any {
+	return map[string]any{"schema_version": 1, "enabled": false, "author_aliases": map[string]any{}, "profiles": []any{}}
+}
+
+func defaultArticleFooterDefaultsModule() map[string]any {
+	return map[string]any{
+		"schema_version": 1,
+		"enabled":        true,
+		"author_aliases": map[string]any{
+			"mote": []any{"Mote莫特", "Mote 莫特"},
+		},
+		"profiles": []any{
+			map[string]any{
+				"id":    "mote_author",
+				"name":  "Mote 作者默认",
+				"match": map[string]any{"author_alias_group": "mote"},
+				"block_visibility": map[string]any{
+					"byline":        false,
+					"more_articles": true,
+				},
+				"artifact_visibility": map[string]any{
+					"mote_ref_author_card": false,
+				},
+			},
 		},
 	}
 }
@@ -148,12 +177,18 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 加群段保持只输出群二维码；仅覆盖 ft-default-v1。
 // default v14→v15（2026-06-22）：FBIF 公众号默认底部移除「1000个食品创新案例」推广块，
 // 覆盖已持久化的旧内置 default / wowfood-default / foodtalks-series-default。
+// default v15→v16（2026-06-30）：FBIF 公众号新增 article_footer_defaults；Mote 作者默认隐藏 byline，
+// 保留更多文章。其他公众号/网站内置规则显式关闭该模块，避免继承 FBIF 默认。
+// fbif v16→v17（2026-06-30）：Mote 作者默认隐藏参考文献前署名图，仍允许前台按单篇开启。
 const currentBuiltinRuleVersion = 17
-const defaultBuiltinRuleVersion = 15
+const defaultBuiltinRuleVersion = 16
+const fbifBuiltinRuleVersion = 17
 const ftSeriesSiteBuiltinRuleVersion = 16
 
 func builtinVersionForDefaultRule(id string) int {
 	switch id {
+	case defaultRulePresetID:
+		return fbifBuiltinRuleVersion
 	case foodTalksSiteDefaultRulePresetID:
 		return currentBuiltinRuleVersion
 	case foodTalksSeriesSiteDefaultRulePresetID:
@@ -250,6 +285,7 @@ func defaultWowFoodRuleConfig() map[string]any {
 	// fbif-scope 素材在 wowfood-scope 解析为破图。清空 = 与 footerUrl='' 一致的「底部无内容」。
 	if mods, ok := cfg["modules"].(map[string]any); ok {
 		mods["bottom_blocks"] = map[string]any{"schema_version": 2, "enabled": false, "presets": []any{}}
+		mods["article_footer_defaults"] = disabledArticleFooterDefaultsModule()
 	}
 	return cfg
 }
@@ -283,7 +319,8 @@ func defaultFoodTalksSiteRuleConfig() map[string]any {
 			"fbif_footer":   defaultFBIFFooterModule(),
 			"asset_library": defaultAssetLibraryModule(),
 			// 区块模块：由页脚库无损迁移而来（统一底部模型）。P3 渲染器接入前仅为数据，不改输出。
-			"bottom_blocks": defaultBottomBlocksModule(),
+			"bottom_blocks":           defaultBottomBlocksModule(),
+			"article_footer_defaults": disabledArticleFooterDefaultsModule(),
 		},
 	}
 }
@@ -419,6 +456,7 @@ func defaultFoodTalksSeriesSiteRuleConfig() map[string]any {
 		// 优先走 bottom_blocks 分支、会忽略 fbif_footer。清空 → 回退到 fbif_footer 商务合作版块
 		// （与 WowFood 同手法）。
 		mods["bottom_blocks"] = map[string]any{"schema_version": 2, "enabled": false, "presets": []any{}}
+		mods["article_footer_defaults"] = disabledArticleFooterDefaultsModule()
 	}
 	return cfg
 }
@@ -486,7 +524,8 @@ func defaultFoodTalksSeriesRuleConfig() map[string]any {
 			// 且 foodtalks-series.js 无 spacer renderer（spacer 会被 block-render 静默跳过，间距由 v1 的
 			// gap=blank_line separator 承载，已 series-blocks-fidelity 验证）；系列原创/转载同内容、双预设零收益。
 			// v1 已是统一 image/more_articles 原子区块、走 mountBlockPanel，满足红线#22（统一结构≠强制 schema_version 2）。
-			"bottom_blocks": defaultSeriesBottomBlocksModule(),
+			"bottom_blocks":           defaultSeriesBottomBlocksModule(),
+			"article_footer_defaults": disabledArticleFooterDefaultsModule(),
 		},
 	}
 }

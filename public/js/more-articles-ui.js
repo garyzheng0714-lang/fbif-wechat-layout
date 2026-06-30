@@ -1,7 +1,7 @@
 // Sidebar UI for the "更多文章" section.
 // - Cards are dynamic length (0..N).
 // - Empty state shows a red-bordered prompt.
-// - Each card can be reordered via drag, and deleted via × button.
+// - Each card can be reordered via drag and deleted.
 // - A "+ 添加更多文章" button below the list appends a blank card.
 // Called by: public/app.html inline <script type="module"> after an article exists.
 
@@ -18,6 +18,7 @@ import {
   isValidMoreArticleUrl,
   shouldAutoFetchMoreArticleUrl,
 } from './more-articles-meta.js';
+import { createIcon } from './ui-icons.js';
 
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -126,7 +127,7 @@ function openCoverPicker(card = {}) {
     <div class="ma-gallery-dialog" role="dialog" aria-modal="true">
       <div class="ma-gallery-head">
         <div class="ma-gallery-title">选择封面图</div>
-        <button type="button" class="ma-gallery-close" aria-label="关闭">×</button>
+        <button type="button" class="ma-gallery-close" aria-label="关闭"></button>
       </div>
       <div class="ma-gallery-body">
         ${srcs.length === 0
@@ -140,6 +141,8 @@ function openCoverPicker(card = {}) {
     </div>
   `;
   document.body.appendChild(overlay);
+  const closeBtn = overlay.querySelector('.ma-gallery-close');
+  if (closeBtn) closeBtn.appendChild(createIcon('x', document, { className: 'ma-icon' }));
 
   return new Promise(resolve => {
     let done = false;
@@ -252,7 +255,10 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     const el = document.createElement('button');
     el.className = 'ma-add-btn';
     el.type = 'button';
-    el.textContent = '+ 添加更多文章';
+    el.appendChild(createIcon('plus', document, { className: 'ma-icon' }));
+    const text = document.createElement('span');
+    text.textContent = '添加更多文章';
+    el.appendChild(text);
     el.addEventListener('click', addCard);
     return el;
   }
@@ -264,10 +270,10 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     root.dataset.idx = String(index);
     root.innerHTML = `
       <div class="ma-card-head">
-        <span class="ma-drag-handle" title="拖动排序">⠿</span>
+        <span class="ma-drag-handle" title="拖动排序"></span>
         <span class="ma-card-num">#${index + 1}</span>
         <span class="ma-card-status" data-role="status"></span>
-        <button type="button" class="ma-remove-btn" data-role="remove" title="删除这张卡片" draggable="false">×</button>
+        <button type="button" class="ma-remove-btn" data-role="remove" title="删除这张卡片" draggable="false"></button>
       </div>
       <div class="ma-row">
         <input type="url" class="ma-url" data-role="url" placeholder="粘贴公众号链接自动抓取" spellcheck="false" draggable="false">
@@ -281,6 +287,8 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     `;
 
     const $ = sel => root.querySelector(`[data-role="${sel}"]`);
+    root.querySelector('.ma-drag-handle').appendChild(createIcon('gripVertical', document, { className: 'ma-icon' }));
+    $('remove').appendChild(createIcon('trash2', document, { className: 'ma-icon' }));
     $('url').value = state.href || '';
 
     const setStatus = (text, kind) => {

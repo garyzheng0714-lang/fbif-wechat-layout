@@ -100,6 +100,13 @@ test('more article URL input auto-fetches when mobile paste only fires input', a
   assert.match(inputHandler, /scheduleAutoFetch\(\)/);
 });
 
+test('more articles editor uses shared SVG icons instead of character glyph controls', async () => {
+  const source = await readFile(new URL('../public/js/more-articles-ui.js', import.meta.url), 'utf8');
+  assert.match(source, /createIcon/);
+  assert.doesNotMatch(source, />⠿</);
+  assert.doesNotMatch(source, />×</);
+});
+
 test('more article URL helper accepts only WeChat article hosts', () => {
   assert.equal(isValidMoreArticleUrl('https://mp.weixin.qq.com/s/example'), true);
   assert.equal(isValidMoreArticleUrl('https://mp.weixin.qq.com/s?__biz=example'), true);

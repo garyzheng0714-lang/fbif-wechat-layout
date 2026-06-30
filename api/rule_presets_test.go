@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,35 @@ func validMoreArticlesDefaultCards() []any {
 			"title":  "自定义 A",
 			"imgurl": "https://mmbiz.qpic.cn/custom-a.jpg",
 		},
+	}
+}
+
+func articleFooterDefaultsWithProfiles(n int) map[string]any {
+	aliases := map[string]any{}
+	profiles := []any{}
+	for i := 0; i < n; i++ {
+		groupID := fmt.Sprintf("author_%03d", i)
+		aliases[groupID] = []any{fmt.Sprintf("作者%d", i)}
+		profiles = append(profiles, map[string]any{
+			"id":   groupID,
+			"name": fmt.Sprintf("作者%d 默认", i),
+			"match": map[string]any{
+				"author_alias_group": groupID,
+			},
+			"block_visibility": map[string]any{
+				"byline":        false,
+				"more_articles": true,
+			},
+			"artifact_visibility": map[string]any{
+				"mote_ref_author_card": false,
+			},
+		})
+	}
+	return map[string]any{
+		"schema_version": float64(1),
+		"enabled":        true,
+		"author_aliases": aliases,
+		"profiles":       profiles,
 	}
 }
 
@@ -55,6 +85,158 @@ func TestRulePresetStorePersistsActivePreset(t *testing.T) {
 	}
 	if active.Config["heading_size"] == "" {
 		t.Fatalf("expected default fields to be merged")
+	}
+}
+
+func TestArticleFooterDefaultsAllowsManyAuthorProfiles(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+	cfg := defaultRuleConfig()
+	mods, ok := cfg["modules"].(map[string]any)
+	if !ok {
+		t.Fatal("default config modules missing")
+	}
+	mods["article_footer_defaults"] = articleFooterDefaultsWithProfiles(500)
+
+	if _, err := store.upsert(rulePreset{ID: "many-authors", Name: "Many Authors", Config: cfg}); err != nil {
+		t.Fatalf("upsert many article footer profiles: %v", err)
+	}
+}
+
+func TestArticleFooterDefaultsAllowsArtifactVisibility(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+	cfg := defaultRuleConfig()
+	mods, ok := cfg["modules"].(map[string]any)
+	if !ok {
+		t.Fatal("default config modules missing")
+	}
+	mods["article_footer_defaults"] = map[string]any{
+		"schema_version": float64(1),
+		"enabled":        true,
+		"author_aliases": map[string]any{"mote": []any{"Mote莫特"}},
+		"profiles": []any{
+			map[string]any{
+				"id":    "mote_author",
+				"name":  "Mote 作者默认",
+				"match": map[string]any{"author_alias_group": "mote"},
+				"block_visibility": map[string]any{
+					"byline": false,
+				},
+				"artifact_visibility": map[string]any{
+					"mote_ref_author_card": false,
+				},
+			},
+		},
+	}
+
+	if _, err := store.upsert(rulePreset{ID: "mote-artifact-default", Name: "Mote", Config: cfg}); err != nil {
+		t.Fatalf("upsert article footer artifact defaults: %v", err)
+	}
+}
+
+func TestArticleFooterDefaultsRejectsInvalidProfiles(t *testing.T) {
+	tests := []struct {
+		name   string
+		module map[string]any
+	}{
+		{
+			name:   "too many profiles",
+			module: articleFooterDefaultsWithProfiles(501),
+		},
+		{
+			name: "profile references missing alias group",
+			module: map[string]any{
+				"schema_version": float64(1),
+				"enabled":        true,
+				"author_aliases": map[string]any{},
+				"profiles": []any{
+					map[string]any{
+						"id":    "missing_group_profile",
+						"name":  "缺失作者组",
+						"match": map[string]any{"author_alias_group": "missing_group"},
+						"block_visibility": map[string]any{
+							"byline": false,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "profile name must be string",
+			module: map[string]any{
+				"schema_version": float64(1),
+				"enabled":        true,
+				"author_aliases": map[string]any{"author_a": []any{"作者A"}},
+				"profiles": []any{
+					map[string]any{
+						"id":    "author_a",
+						"name":  []any{"作者A 默认"},
+						"match": map[string]any{"author_alias_group": "author_a"},
+						"block_visibility": map[string]any{
+							"byline": false,
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+			cfg := defaultRuleConfig()
+			mods, ok := cfg["modules"].(map[string]any)
+			if !ok {
+				t.Fatal("default config modules missing")
+			}
+			mods["article_footer_defaults"] = tt.module
+			if _, err := store.upsert(rulePreset{ID: "bad-author-default", Name: "Bad", Config: cfg}); err == nil {
+				t.Fatal("expected invalid article_footer_defaults profile to be rejected")
+			}
+		})
+	}
+}
+
+func TestUpsertBuiltinVersionUsesPresetSpecificTarget(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+
+	if _, err := store.upsert(rulePreset{
+		ID:       defaultRulePresetID,
+		Name:     "FBIF默认规则",
+		Config:   defaultRuleConfig(),
+		Behavior: defaultRuleBehavior(),
+	}); err != nil {
+		t.Fatalf("upsert fbif default: %v", err)
+	}
+	if _, err := store.upsert(rulePreset{
+		ID:       wowFoodDefaultRulePresetID,
+		Name:     "WowFood默认规则",
+		Config:   defaultWowFoodRuleConfig(),
+		Behavior: defaultWowFoodRuleBehavior(),
+	}); err != nil {
+		t.Fatalf("upsert wowfood default: %v", err)
+	}
+	if _, err := store.upsert(rulePreset{
+		ID:       "my-custom-rule",
+		Name:     "自建规则",
+		Config:   defaultRuleConfig(),
+		Behavior: defaultRuleBehavior(),
+	}); err != nil {
+		t.Fatalf("upsert custom rule: %v", err)
+	}
+
+	store.mu.Lock()
+	doc, err := store.readStoreLocked()
+	store.mu.Unlock()
+	if err != nil {
+		t.Fatalf("read store: %v", err)
+	}
+	if got := doc.Rules[defaultRulePresetID].BuiltinVersion; got != fbifBuiltinRuleVersion {
+		t.Fatalf("FBIF builtin version = %d, want %d", got, fbifBuiltinRuleVersion)
+	}
+	if got := doc.Rules[wowFoodDefaultRulePresetID].BuiltinVersion; got != defaultBuiltinRuleVersion {
+		t.Fatalf("WowFood builtin version = %d, want %d", got, defaultBuiltinRuleVersion)
+	}
+	if got := doc.Rules["my-custom-rule"].BuiltinVersion; got != 0 {
+		t.Fatalf("custom rule builtin version = %d, want 0", got)
 	}
 }
 
@@ -144,9 +326,65 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 	if wowBB["enabled"] != false {
 		t.Fatalf("wowfood-default bottom_blocks.enabled = %#v, want false（否则错渲 FBIF 底部+破图）", wowBB["enabled"])
 	}
+	if aft, ok := wowMods["article_footer_defaults"].(map[string]any); ok && aft["enabled"] == true {
+		t.Fatalf("wowfood-default article_footer_defaults.enabled = %#v, want absent/disabled", aft["enabled"])
+	}
 	// 对照：FBIF 基线仍带 3 张默认卡，证明 WowFood 的空是显式覆盖、非全局退化。
 	if cards, ok := presetByID("default").Config["more_articles_default_cards"].([]any); !ok || len(cards) == 0 {
 		t.Fatalf("fbif default more_articles_default_cards 应保留默认卡（差异即意图），got %#v", presetByID("default").Config["more_articles_default_cards"])
+	}
+	fbifMods, ok := presetByID("default").Config["modules"].(map[string]any)
+	if !ok {
+		t.Fatalf("fbif default modules missing")
+	}
+	aft, ok := fbifMods["article_footer_defaults"].(map[string]any)
+	if !ok || aft["enabled"] != true {
+		t.Fatalf("fbif default article_footer_defaults = %#v, want enabled module", fbifMods["article_footer_defaults"])
+	}
+	aliases, _ := aft["author_aliases"].(map[string]any)
+	if _, ok := aliases["mote"]; !ok {
+		t.Fatalf("fbif default article_footer_defaults.author_aliases.mote missing: %#v", aft)
+	}
+	profiles, _ := aft["profiles"].([]any)
+	if len(profiles) == 0 {
+		t.Fatalf("fbif default article_footer_defaults.profiles missing: %#v", aft)
+	}
+	moteProfile, _ := profiles[0].(map[string]any)
+	artifactVisibility, _ := moteProfile["artifact_visibility"].(map[string]any)
+	if artifactVisibility["mote_ref_author_card"] != false {
+		t.Fatalf("mote artifact default = %#v, want mote_ref_author_card false", artifactVisibility)
+	}
+	for _, id := range []string{"ft-default-v1", "ft-series-v1", "foodtalks-series-default"} {
+		cfg := presetByID(id).Config
+		mods, _ := cfg["modules"].(map[string]any)
+		if mod, ok := mods["article_footer_defaults"].(map[string]any); ok && mod["enabled"] == true {
+			t.Fatalf("%s article_footer_defaults.enabled = %#v, want absent/disabled", id, mod["enabled"])
+		}
+	}
+}
+
+func TestMergeRuleDefaultsDoesNotInjectArticleFooterDefaults(t *testing.T) {
+	cfg := mergeRuleDefaults(map[string]any{
+		"font_size": "16",
+		"modules": map[string]any{
+			"bottom_blocks": map[string]any{"schema_version": 2, "enabled": false, "presets": []any{}},
+		},
+	})
+	mods, _ := cfg["modules"].(map[string]any)
+	aft, _ := mods["article_footer_defaults"].(map[string]any)
+	if aft["enabled"] == true {
+		t.Fatalf("article_footer_defaults.enabled = %#v, want disabled when source did not declare it", aft["enabled"])
+	}
+
+	explicit := mergeRuleDefaults(map[string]any{
+		"modules": map[string]any{
+			"article_footer_defaults": defaultArticleFooterDefaultsModule(),
+		},
+	})
+	explicitMods, _ := explicit["modules"].(map[string]any)
+	explicitAFT, _ := explicitMods["article_footer_defaults"].(map[string]any)
+	if explicitAFT["enabled"] != true {
+		t.Fatalf("explicit article_footer_defaults.enabled = %#v, want true preserved", explicitAFT["enabled"])
 	}
 }
 

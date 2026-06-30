@@ -25,6 +25,7 @@ import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
 import { createAssetLibraryEditor } from './asset-library-rule-editor.js';
 import { assetLibraryFromPreset, defaultAssetLibraryData } from './admin-asset-data.js';
 import { bottomBlocksFromPreset, createBlockEditorBinder, renderRuleBottomTabHtml } from './admin-block-data.js';
+import { articleFooterDefaultsSeedForAccount, articleFooterDefaultsFromPreset, bindArticleFooterDefaultsEditor } from './admin-article-footer-defaults.js';
 import { createBehaviorFormBinder } from './admin-behavior-data.js';
 import { serverRuleConfigDocument } from './admin-rule-payload.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
@@ -148,7 +149,9 @@ export function initAdminPanel(options = {}) {
   let workingBehavior = normalizeRuleBehavior(getBehavior());
   let workingFooter = null;
   let workingAssets = null;
-  let workingBottomBlocks = null; const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; updateStatusInline('有未保存改动，点击「保存修改」后生效'); }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp'), getScope: () => currentAccountID(), getAssetLibrary: () => workingAssets || defaultAssetLibraryData(), addAsset: (asset) => { const lib = workingAssets || defaultAssetLibraryData(); workingAssets = { ...lib, assets: [asset, ...(Array.isArray(lib.assets) ? lib.assets : [])] }; updateStatusInline('已上传并入库，点击「保存修改」生效'); } });
+  let workingBottomBlocks = null;
+  let workingArticleFooterDefaults = null;
+  const blockBinder = createBlockEditorBinder({ getModule: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()), setModule: (m) => { workingBottomBlocks = m; updateStatusInline('有未保存改动，点击「保存修改」后生效'); }, getChannel: () => (isFtDefaultPack() ? 'ft' : 'mp'), getScope: () => currentAccountID(), getAssetLibrary: () => workingAssets || defaultAssetLibraryData(), addAsset: (asset) => { const lib = workingAssets || defaultAssetLibraryData(); workingAssets = { ...lib, assets: [asset, ...(Array.isArray(lib.assets) ? lib.assets : [])] }; updateStatusInline('已上传并入库，点击「保存修改」生效'); } });
   const behaviorBinder = createBehaviorFormBinder({ getBehavior: () => workingBehavior, setBehavior: (b) => { workingBehavior = b; syncBehaviorText(); const ta = overlay && overlay.querySelector('[data-role="behavior-json"]'); if (ta) ta.value = behaviorText; updateStatusInline('有未保存改动，点击「保存修改」后生效'); } });
   let footerEditorInstance = null, assetEditorInstance = null;
   let workingName = '未命名规则';
@@ -181,6 +184,7 @@ export function initAdminPanel(options = {}) {
     workingFooter = footerFromPreset(selected);
     workingAssets = assetLibraryFromPreset(selected);
     workingBottomBlocks = bottomBlocksFromPreset(selected);
+    workingArticleFooterDefaults = articleFooterDefaultsFromPreset(selected);
     syncJSONText();
     syncBehaviorText();
     applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' });
@@ -292,7 +296,7 @@ export function initAdminPanel(options = {}) {
       getPreset();
   }
 
-  function dirtyCount() { return adminDirtyCount({ draftPreset, selectedID, selected: selectedPreset(), workingName, workingDescription, workingConfig, workingBehavior, workingAssets, workingBottomBlocks, workingFooter, isFtDefault: isFtDefaultPack() }); }
+  function dirtyCount() { return adminDirtyCount({ draftPreset, selectedID, selected: selectedPreset(), workingName, workingDescription, workingConfig, workingBehavior, workingAssets, workingBottomBlocks, workingArticleFooterDefaults, workingFooter, isFtDefault: isFtDefaultPack() }); }
   function refreshDirtyChip() { updateDirtyChip(overlay, dirtyCount()); }
 
   function presetWithBehavior(preset) {
@@ -429,6 +433,8 @@ export function initAdminPanel(options = {}) {
   function currentAccountID() {
     return (window._activeRulePack && window._activeRulePack.id) || 'fbif';
   }
+
+  function defaultArticleFooterDefaultsForCurrentAccount() { return articleFooterDefaultsSeedForAccount(currentAccountID()); }
 
   function renderAssignments() {
     return `
@@ -581,6 +587,18 @@ export function initAdminPanel(options = {}) {
     assetEditorInstance = createAssetLibraryEditor({ container: mount, assetLibrary: workingAssets || defaultAssetLibraryData(), referencePresets: (doc && doc.presets) || [], currentScope: currentAccountID(), compact: true, onChange(next) { workingAssets = next; updateStatusInline('有未保存改动，点击「保存修改」后生效'); } });
   }
 
+  function bindArticleFooterDefaultsEditorPanel() {
+    bindArticleFooterDefaultsEditor({
+      overlay,
+      getModule: () => workingArticleFooterDefaults || articleFooterDefaultsFromPreset(selectedPreset()),
+      setModule(next) {
+        workingArticleFooterDefaults = next;
+        updateStatusInline('有未保存改动，点击「保存修改」后生效');
+      },
+      getBottomBlocks: () => workingBottomBlocks || bottomBlocksFromPreset(selectedPreset()),
+    });
+  }
+
   function bindMain() {
     overlay.querySelector('.admin-close').addEventListener('click', close);
     overlay.querySelectorAll('[data-view]').forEach(btn => {
@@ -611,6 +629,7 @@ export function initAdminPanel(options = {}) {
             workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : workingBehavior);
             workingAssets = assetLibraryFromPreset(selected);
             workingBottomBlocks = bottomBlocksFromPreset(selected);
+            workingArticleFooterDefaults = articleFooterDefaultsFromPreset(selected);
             selectedID = ruleID;
             syncBehaviorText();
             applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' });
@@ -624,6 +643,7 @@ export function initAdminPanel(options = {}) {
     bindFooterLibraryEditor();
     bindAssetLibraryEditor();
     blockBinder.bind(overlay);
+    bindArticleFooterDefaultsEditorPanel();
     behaviorBinder.bind(overlay);
     overlay.querySelector('[data-role="preset-select"]').addEventListener('change', e => {
       selectedID = e.target.value;
@@ -632,6 +652,8 @@ export function initAdminPanel(options = {}) {
       workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : getBehavior());
       workingFooter = footerFromPreset(selected);
       workingAssets = assetLibraryFromPreset(selected);
+      workingBottomBlocks = bottomBlocksFromPreset(selected);
+      workingArticleFooterDefaults = articleFooterDefaultsFromPreset(selected);
       workingName = selected && selected.name ? selected.name : '未命名规则';
       workingDescription = selected && selected.description ? selected.description : '';
       syncJSONText();
@@ -723,6 +745,7 @@ export function initAdminPanel(options = {}) {
       workingDescription = draftPreset.description;
       workingAssets = defaultAssetLibraryData();
       workingBottomBlocks = bottomBlocksFromPreset(draftPreset);
+      workingArticleFooterDefaults = defaultArticleFooterDefaultsForCurrentAccount();
       syncJSONText();
       syncBehaviorText();
       applyConfig(workingConfig, draftPreset);
@@ -751,10 +774,17 @@ export function initAdminPanel(options = {}) {
     applyLivePreview(overlay, workingConfig);
     async function savePresetWithFooter(preset) {
       const configDoc = buildRuleConfigDocument(preset.config, { name: preset.name, description: preset.description });
-      const oc = (presetByID(doc, preset.id) || {}).config || {};
+      const sourcePreset = presetByID(doc, preset.id) || presetByID(doc, selectedID) || {};
+      const oc = sourcePreset.config || {};
       const ocModules = oc.modules || {};
       configDoc.modules.asset_library = JSON.parse(JSON.stringify(workingAssets || ocModules.asset_library || defaultAssetLibraryData()));
       configDoc.modules.bottom_blocks = JSON.parse(JSON.stringify(workingBottomBlocks || ocModules.bottom_blocks || { schema_version: 2, enabled: false, presets: [] }));
+      const articleFooterDefaults = workingArticleFooterDefaults ||
+        ocModules.article_footer_defaults ||
+        defaultArticleFooterDefaultsForCurrentAccount();
+      if (articleFooterDefaults) {
+        configDoc.modules.article_footer_defaults = JSON.parse(JSON.stringify(articleFooterDefaults));
+      }
       if (isFtDefaultPack()) {
         // 保留 buildRuleConfigDocument 丢弃的网站结构化字段（顶层 image、mctoc、fbif_footer）
         if (oc.image) configDoc.image = oc.image;
@@ -825,6 +855,10 @@ export function initAdminPanel(options = {}) {
         const selected = activePresetFromDoc(doc);
         workingConfig = normalizeRuleConfig(selected ? selected.config : getConfig());
         workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : getBehavior());
+        workingFooter = footerFromPreset(selected);
+        workingAssets = assetLibraryFromPreset(selected);
+        workingBottomBlocks = bottomBlocksFromPreset(selected);
+        workingArticleFooterDefaults = articleFooterDefaultsFromPreset(selected);
         workingName = selected && selected.name ? selected.name : '未命名规则';
         workingDescription = selected && selected.description ? selected.description : '';
         syncJSONText();
@@ -838,6 +872,10 @@ export function initAdminPanel(options = {}) {
       const selected = activePresetFromDoc(doc);
       workingConfig = normalizeRuleConfig(selected ? selected.config : getConfig());
       workingBehavior = normalizeRuleBehavior(selected ? selected.behavior : getBehavior());
+      workingFooter = footerFromPreset(selected);
+      workingAssets = assetLibraryFromPreset(selected);
+      workingBottomBlocks = bottomBlocksFromPreset(selected);
+      workingArticleFooterDefaults = articleFooterDefaultsFromPreset(selected);
       workingName = selected && selected.name ? selected.name : '未命名规则';
       workingDescription = selected && selected.description ? selected.description : '';
       syncJSONText();

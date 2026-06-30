@@ -19,6 +19,7 @@ export const DEFAULT_BEHAVIOR = Object.freeze({
   ]),
   actions: Object.freeze([
     Object.freeze({
+      id: 'mote_ref_author_card',
       when: 'is_mote_author',
       type: 'insert_image_before',
       target: 'first_ref_heading',
@@ -42,6 +43,7 @@ const ALLOWED_ACTION_TYPES = new Set(['insert_image_before']);
 const ALLOWED_TARGETS = new Set(['first_ref_heading']);
 const ALLOWED_OPS = new Set(['eq', 'neq', 'exists', 'includes']);
 const ALLOWED_INSERT_CLASSES = new Set(['wx-mote-author']);
+const SAFE_ACTION_ID = /^[a-zA-Z0-9_-]{1,80}$/;
 const ALLOWED_TOP_LEVEL_KEYS = new Set([
   'schema_version',
   'params',
@@ -152,6 +154,9 @@ function validateAction(action, conditionIDs, params, errors) {
     errors.push('动作必须是对象');
     return;
   }
+  if (action.id != null && !SAFE_ACTION_ID.test(String(action.id))) {
+    errors.push('动作 id 无效：' + String(action.id || ''));
+  }
   if (!conditionIDs.has(action.when)) errors.push('动作引用了不存在的条件：' + String(action.when || ''));
   if (!ALLOWED_ACTION_TYPES.has(action.type)) errors.push('未知动作类型：' + String(action.type || ''));
   if (!ALLOWED_TARGETS.has(action.target)) errors.push('未知动作目标：' + String(action.target || ''));
@@ -256,13 +261,39 @@ function safeInsertClass(action) {
   return ALLOWED_INSERT_CLASSES.has(className) ? className : '';
 }
 
-export function applyBehaviorToElems(elems, context, rawBehavior) {
+function isArtifactHidden(override, id) {
+  if (!id || !isPlainObject(override)) return false;
+  const value = override[id];
+  if (value === false || value === 'hide' || value === 'hidden') return true;
+  return isPlainObject(value) && (value.hidden === true || value.enabled === false);
+}
+
+function behaviorActionArtifactId(action) {
+  const explicit = String(action && action.id || '').trim();
+  if (explicit) return explicit;
+  if (
+    action &&
+    action.when === 'is_mote_author' &&
+    action.type === 'insert_image_before' &&
+    action.target === 'first_ref_heading' &&
+    action.src_param === 'mote_ref_image_url'
+  ) {
+    return 'mote_ref_author_card';
+  }
+  return '';
+}
+
+export function applyBehaviorToElems(elems, context, rawBehavior, opts = {}) {
   const behavior = normalizeRuleBehavior(rawBehavior);
+  const articleArtifactOverride = opts && isPlainObject(opts.articleArtifactOverride)
+    ? opts.articleArtifactOverride
+    : undefined;
   const conditionState = new Map(
     behavior.conditions.map(condition => [condition.id, evaluateCondition(condition, context)])
   );
   let out = Array.isArray(elems) ? elems.slice() : [];
   for (const action of behavior.actions) {
+    if (isArtifactHidden(articleArtifactOverride, behaviorActionArtifactId(action))) continue;
     if (!conditionState.get(action.when)) continue;
     if (action.type !== 'insert_image_before') continue;
     const idx = findInsertIndex(out, action.target);

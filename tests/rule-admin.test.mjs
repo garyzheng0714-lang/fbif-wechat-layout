@@ -129,6 +129,24 @@ test('rule admin has configuration and rule-management views', async () => {
   assert.match(css, /\.admin-applied-badges/);
 });
 
+test('rule admin seeds article footer defaults from the current account', async () => {
+  const adminPanel = await readProjectFile('public/js/admin-panel.js');
+
+  assert.match(adminPanel, /articleFooterDefaultsSeedForAccount/);
+  assert.match(adminPanel, /workingArticleFooterDefaults = defaultArticleFooterDefaultsForCurrentAccount\(\);/);
+  assert.doesNotMatch(adminPanel, /workingArticleFooterDefaults = defaultArticleFooterDefaultsData\(\);/);
+});
+
+test('app caches structured server presets for local fallback', async () => {
+  const app = await readProjectFile('public/app.html');
+
+  assert.match(app, /function\s+structuredFallbackConfig\(config,\s*preset\)/);
+  assert.match(app, /preset && \(preset\.raw_config \|\| preset\.config\)/);
+  assert.match(app, /cacheServerRuleFallback\(loaded\.preset\.config,\s*loaded\.preset\)/);
+  assert.match(app, /cacheServerRuleFallback\(config,\s*preset\)/);
+  assert.doesNotMatch(app, /cacheServerRuleFallback\(config\);/);
+});
+
 test('rule admin deletes from the rule row with explicit confirmation', async () => {
   const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
@@ -188,6 +206,8 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   // 网站页脚库收敛到统一「底部」分区里，仅对 ft-default 系展示
   assert.match(adminPanel, /\['bottom', '底部'\]/);
   assert.match(blockData, /isFt \? '<h3>网站页脚库<\/h3><div data-role="footer-library-editor"><\/div>'/); // 渲染移到 admin-block-data helper
+  assert.match(blockData, /<h3>文章默认方案<\/h3><div data-role="article-footer-defaults-editor"><\/div>/, '公众号后台不应把作者默认写成某个作者专属模块');
+  assert.doesNotMatch(blockData, /<h3>作者默认<\/h3>/);
 
   // workingFooter 变量声明
   assert.match(adminPanel, /let workingFooter\s*=/);
