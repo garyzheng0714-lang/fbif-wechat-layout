@@ -48,11 +48,30 @@ test('more articles cards use block image layout and explicit card spacing', asy
     { href: 'https://mp.weixin.qq.com/s/b', final_url: 'https://example.com/b.png' },
   ]);
 
+  assert.match(html, /<section style="text-align: center;">/);
+  assert.doesNotMatch(html, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;">/);
   assert.match(html, /display:block;line-height:0;font-size:0;width:100%;/);
   assert.match(html, /display:block;width: 661px !important; max-width: 100% !important; height: auto !important; margin: 0 auto; vertical-align: top;/);
   assert.match(html, /margin-top:12px/);
   assert.doesNotMatch(html, /vertical-align:\s*baseline/i);
   assert.doesNotMatch(html, /line-height:\s*1\.6/i);
+});
+
+test('more articles merge still recognizes legacy 8px wrapper but outputs single-indent wrapper', () => {
+  const legacyFooter = [
+    '<section data-role="paragraph">',
+    '<section style="margin:20px 8px 20px;padding:0;text-align:center;"><strong>/ 更多文章 /</strong></section>',
+    '<section style="text-align: center;margin-left: 8px;margin-right: 8px;"></section>',
+    '</section>',
+  ].join('\n');
+
+  const html = mergeIntoFooter(legacyFooter, [
+    { href: 'https://mp.weixin.qq.com/s/a', final_url: 'https://example.com/a.png' },
+  ]);
+
+  assert.match(html, /<section style="text-align: center;">/);
+  assert.doesNotMatch(html, /margin-left: 8px;margin-right: 8px/);
+  assert.match(html, /https:\/\/example\.com\/a\.png/);
 });
 
 test('footer section titles keep symmetric image rhythm with block images', async () => {

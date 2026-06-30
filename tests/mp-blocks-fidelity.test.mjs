@@ -22,7 +22,7 @@ const assetLibrary = {
   ],
 };
 
-const OUTER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
+const OUTER_OPEN = '<section style="text-align: center;">';
 
 // v2 双预设 FBIF 默认（对应 api/rule_bottom_blocks.go: defaultMpBottomBlocksModuleV2）渲染断言。
 // 视觉关键属性 golden；像素级 1:1 由公众号后台复制最终确认（CLAUDE.md UI 协议）。

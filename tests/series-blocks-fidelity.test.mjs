@@ -89,7 +89,8 @@ test('renderBottomFooter: 系列启用 more_articles 时输出复制链路识别
   const html = template.renderBottomFooter().html;
   assert.match(html, /<section data-role="paragraph">/, '保留 paragraph 包裹锚点');
   assert.match(html, /\/ 更多文章 \//, '渲染更多文章标题');
-  assert.match(html, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;"><\/section>/, '保留 more-articles.js 合成卡片的外层锚点');
+  assert.match(html, /<section style="text-align: center;"><\/section>/, '保留 more-articles.js 合成卡片的外层锚点');
+  assert.doesNotMatch(html, /margin-left: 8px;margin-right: 8px/, '更多文章卡片锚点不应叠加第二层左右缩进');
 });
 
 test('renderBottomFooter: 模块禁用 → 返回 null（engine fallback footerUrl）', () => {

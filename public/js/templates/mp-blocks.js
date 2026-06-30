@@ -15,7 +15,7 @@ import { richTextToInline } from '../blocks/rich-text-render.js';
 // footer.html 标题/正文统一字体栈（mp-quote 优先 + 微信端字体回退）。&quot; 是 footer 原始转义形态，保留。
 const FONT_FAMILY = 'mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif';
 // 更多文章卡片外层容器开标签——必须与 more-articles.js 的 OUTER_WRAPPER_OPEN 字节一致（委托锚点）。
-const CARDS_WRAPPER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
+const CARDS_WRAPPER_OPEN = '<section style="text-align: center;">';
 
 function asLines(v) {
   if (Array.isArray(v)) return v;
