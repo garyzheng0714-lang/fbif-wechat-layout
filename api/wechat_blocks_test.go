@@ -396,18 +396,17 @@ func TestLargeNonBoldFontIsNotHeading(t *testing.T) {
 }
 
 // 真实微信小标题：夹在两张图之间、20px（>正文17px）、居中，外层 <b> 被 leaf<span> 的
-// font-weight:normal 覆盖 → allBold=false。此前 heading 强求 allBold 会漏判，标题落入
-// captionContext 后被图注启发式的「居中+短」分支误吞成 cap。字号 + 居中即标题的充分信号。
+// font-weight:normal 覆盖 → 视觉非粗、allBold=false。靠 BoldTag（<b>/<strong> 标签
+// 痕迹，不被内联 normal 抹掉）判为标题，而非靠泛化的「居中」（居中会误伤图注/导语/来源）。
 // 病样：https://mp.weixin.qq.com/s/swJQCw5THd0gJVF2GOoMIQ
 func TestCenteredLargeNonBoldTitleBetweenImagesIsHeading(t *testing.T) {
-	// 复刻真实 DOM：block 级 <p> 无 text-align，居中信号落在行内 <span>，走 textStyles 兜底。
 	html := jsContentWrap(
 		`<p><img data-src="https://x/a.png" data-w="1080"></p>` +
-			`<p style="margin-left:8px;margin-right:8px;">` +
-			`<span style="text-align:center;color:rgba(0,0,0,0.9);font-weight:normal;">` +
+			`<p style="text-align:center;">` +
+			`<b><font face="汉仪劲楷简">` +
 			`<span leaf="" style="color:rgba(0,0,0,0.9);font-size:17px;font-weight:normal;">` +
 			`<span textstyle="" style="font-size:20px;">产品美好：当地的、应季的、有良知的</span>` +
-			`</span></span></p>` +
+			`</span></font></b></p>` +
 			`<p><img data-src="https://x/b.png" data-w="1080"></p>`)
 	_, blocks, _ := extractArticleBlocks(html)
 	b := findBlockByText(blocks, "产品美好")
@@ -415,7 +414,99 @@ func TestCenteredLargeNonBoldTitleBetweenImagesIsHeading(t *testing.T) {
 		t.Fatalf("missing title block; kinds=%v", findKinds(blocks))
 	}
 	if b.K != "h" {
-		t.Errorf("居中 20px 非粗小标题应为 heading，got %s; kinds=%v", b.K, findKinds(blocks))
+		t.Errorf("<b> 包裹的 20px 居中标题应为 heading，got %s; kinds=%v", b.K, findKinds(blocks))
+	}
+}
+
+// 同篇真实文章的第一个章节标题没有 <b> 包裹，但仍是居中 20px 的「冒号标题」。
+func TestCenteredLargeTitleLikeWithoutBoldTagIsHeading(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://x/a.png" data-w="1080"></p>` +
+			`<p style="text-align:center;">` +
+			`<span leaf="" style="color:rgba(0,0,0,0.9);font-size:17px;font-weight:normal;">` +
+			`<span textstyle="" style="font-size:20px;">文化美好：求真，行善，分享美</span>` +
+			`</span></p>` +
+			`<p><img data-src="https://x/b.png" data-w="1080"></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "文化美好")
+	if b == nil {
+		t.Fatalf("missing title block; kinds=%v", findKinds(blocks))
+	}
+	if b.K != "h" {
+		t.Errorf("无 <b> 但标题式的 20px 居中章节应为 heading，got %s; kinds=%v", b.K, findKinds(blocks))
+	}
+}
+
+// ---- v2 负向守护：无明确标题信号的居中大字号不能被误判为标题（图注/导语/来源保真）----
+
+// 无 <b> 且不呈现标题式冒号结构的居中大字不升级为 heading；
+// 且在图后 captionContext 下也不能被图注启发式吞成 cap（≥18px 不是图注）——落 txt。
+func TestCenteredLargeWithoutBoldTagIsNotHeadingNorCaption(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://x/a.png" data-w="1080"></p>` +
+			`<p style="text-align:center;"><span style="font-size:20px;">居中放大但没有加粗标签的一行</span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "居中放大")
+	if b == nil {
+		t.Fatalf("missing block; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Errorf("无 <b> 的居中大字不应判 heading，got h; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "cap" {
+		t.Errorf("≥18px 块不应判图注，got cap; kinds=%v", findKinds(blocks))
+	}
+}
+
+// 居中大字号的「图片来源：」行不能被抢成标题，也不能掉成正文。
+func TestLargeCenteredImageSourceNotHeading(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://x/a.png" data-w="1080"></p>` +
+			`<p style="text-align:center;"><span style="font-size:20px;">图片来源：Facebook</span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "图片来源")
+	if b == nil {
+		t.Fatalf("missing block; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Errorf("图片来源行不应判 heading，got h; kinds=%v", findKinds(blocks))
+	}
+	if b.K != "cap" {
+		t.Errorf("图片来源行应保留为 cap，got %s; kinds=%v", b.K, findKinds(blocks))
+	}
+}
+
+// 居中大字号的「参考来源：」头不能被抢成标题——否则 inRefSection 不开启，后续条目错乱。
+func TestLargeCenteredRefHeadNotStolenAsHeading(t *testing.T) {
+	html := jsContentWrap(
+		`<p style="text-align:center;"><span style="font-size:20px;">参考来源：</span></p>` +
+			`<p>[1] 某条目</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	head := findBlockByText(blocks, "参考来源")
+	item := findBlockByText(blocks, "某条目")
+	if head == nil || item == nil {
+		t.Fatalf("missing blocks; kinds=%v", findKinds(blocks))
+	}
+	if head.K == "h" {
+		t.Errorf("参考来源头不应判 heading，got h; kinds=%v", findKinds(blocks))
+	}
+	if item.K != "txt" {
+		t.Errorf("参考条目应在 refSection 内走 txt，got %s; kinds=%v", item.K, findKinds(blocks))
+	}
+}
+
+// 左对齐正文里内嵌一个居中的空白 <span>(&nbsp;) 不应污染判定把正文升级为标题。
+func TestBlankCenterSpanDoesNotPromoteToHeading(t *testing.T) {
+	html := jsContentWrap(
+		`<p style="font-size:18px;text-align:left;">纯左对齐正文没有任何居中意图` +
+			`<span style="text-align:center;">&nbsp;</span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "纯左对齐正文")
+	if b == nil {
+		t.Fatalf("missing block; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Errorf("含居中空白 span 的左对齐正文不应判 heading，got h; kinds=%v", findKinds(blocks))
 	}
 }
 

@@ -53,6 +53,7 @@ type computedStyle struct {
 	ColorSet       bool
 	Align          string
 	FontWeightBold bool
+	BoldTag        bool
 }
 
 const (
@@ -270,6 +271,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 		case "strong", "b":
 			boldStyle := inherited
 			boldStyle.FontWeightBold = true
+			boldStyle.BoldTag = true
 			w.walkChildren(n, cur, boldStyle)
 			return
 		}
@@ -390,6 +392,7 @@ func (w *blockWalker) collectCellRuns(n *html.Node, cur *blockCtx, inherited com
 		case "strong", "b":
 			boldStyle := inherited
 			boldStyle.FontWeightBold = true
+			boldStyle.BoldTag = true
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
 				w.collectCellRuns(c, cur, boldStyle)
 			}
@@ -447,14 +450,13 @@ func (w *blockWalker) emit(cx *blockCtx) {
 		}
 	}
 
-	// Visual-signal heading: font-size ≥ 18px（明显大于微信正文 15–17px）且 ≤ 80 字。
-	// 加粗曾是必要条件，但微信小标题的 leaf<span> 常内联 font-weight:normal，覆盖掉外层
-	// <b> / 自定义字体（mergeStyle 里 normal 压过祖先 bold），使 allBold=false，把「大字号
-	// + 居中」的小标题整批漏判成 caption（居中+短分支误吞）。字号相对正文的方向才是标题
-	// 与图注/正文最可靠的区分维度（图注 ≤14px、正文 15–17px、仅小标题上探到 18px+），故
-	// 居中与加粗并列作为标题信号。非居中的大字（左对齐 callout）不含 center → 仍留 txt；
-	// pullquote 保持正文字号 <18 → 进不了本闸。
-	if hasHeadingFontSize(cx) && textLen > 0 && textLen <= 80 && (allBold || isCenteredHeading(cx)) {
+	// Visual-signal heading: font-size >= 18px 且 <= 80 字，并且整块有明确标题信号。
+	// 微信小标题常被外层 <b>/<strong> 包住，但 leaf<span> 又内联 font-weight:normal；
+	// computed bold 会被 normal 覆盖为 false，所以同时保留 BoldTag 痕迹来识别这种标题。
+	// 少数真实章节标题没有 <b>，但仍是「居中 + 大字号 + 冒号标题」；该兜底必须排除
+	// 图片来源、参考来源和强图注样式，避免回到“所有居中大字都是标题”的宽判定。
+	if hasHeadingFontSize(cx) && textLen > 0 && textLen <= 80 &&
+		(allBold || allRunsUnderBoldTag(cx) || isCenteredTitleLikeHeading(cx, text, textLen)) {
 		w.appendBlock(Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
@@ -496,21 +498,43 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	w.closeCaptionContext()
 }
 
-// isCenteredHeading 报告块整体是否居中。居中信号可能在块级样式（<p style=text-align>），
-// 也可能只在文本节点继承的行内样式上——微信常把 text-align:center 塞进内层 <span>，块级
-// <p> 反而无信号，故与 isCaption 一样扫描 textStyles 兜底。
-func isCenteredHeading(cx *blockCtx) bool {
+func isCenteredTitleLikeHeading(cx *blockCtx, text string, textLen int) bool {
+	trimmed := strings.TrimSpace(text)
+	if textLen == 0 || textLen > 40 {
+		return false
+	}
+	if !strings.ContainsAny(trimmed, "：:") {
+		return false
+	}
+	if isImageSourceLine(trimmed) || refSectionHeadRe.MatchString(trimmed) || hasStrongCaptionStyle(cx) {
+		return false
+	}
+	return isTextCentered(cx)
+}
+
+func isTextCentered(cx *blockCtx) bool {
 	if cx.style.Align == "center" {
 		return true
 	}
-	for _, s := range cx.textStyles {
-		if s.Align == "center" {
-			return true
-		}
+	if len(cx.runs) == 0 || len(cx.runs) != len(cx.textStyles) {
+		return false
 	}
-	return false
+	sawText := false
+	for i, r := range cx.runs {
+		if strings.TrimSpace(r.Text) == "" {
+			continue
+		}
+		if cx.textStyles[i].Align != "center" {
+			return false
+		}
+		sawText = true
+	}
+	return sawText
 }
 
+// hasHeadingFontSize reports whether every non-empty text run is visually larger
+// than normal WeChat body text. WeChat often puts font-size on inner spans, so
+// the block-level style alone is not enough.
 func hasHeadingFontSize(cx *blockCtx) bool {
 	if cx.style.FontSizeSet && cx.style.FontSize >= 18 {
 		return true
@@ -547,20 +571,27 @@ func (w *blockWalker) closeCaptionContext() {
 
 func shouldAttachToCaptionGroup(cx *blockCtx, text string, textLen int, captionLines int, opts articleBlockOptions) bool {
 	if captionLines == 0 {
-		return isCaption(cx, textLen, opts)
+		return isCaption(cx, text, textLen, opts)
 	}
 	return isCaptionContinuation(cx, text, textLen, opts)
 }
 
-func isCaption(cx *blockCtx, textLen int, opts articleBlockOptions) bool {
+func isCaption(cx *blockCtx, text string, textLen int, opts articleBlockOptions) bool {
 	if textLen == 0 {
 		return false
+	}
+	if isImageSourceLine(text) {
+		return true
 	}
 	// 小字/灰色是公众号图注的明确标记（正文从不用小字/灰色），带此强信号的图后段落
 	// 即便较长也是图注，放宽到 CaptionStrongMaxChars。仅居中/class 等弱信号仍守
 	// CaptionMaxChars，避免吞掉较长的居中正文段。
 	if hasStrongCaptionStyle(cx) {
 		return textLen <= opts.CaptionStrongMaxChars
+	}
+	// 大字号是标题/正文强调信号，不应仅因“居中+短”被弱图注启发式吞掉。
+	if hasHeadingFontSize(cx) {
+		return false
 	}
 	if textLen > opts.CaptionMaxChars {
 		return false
@@ -842,6 +873,28 @@ func textFromRuns(runs []Run) string {
 		sb.WriteString(r.Text)
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+// allRunsUnderBoldTag 报告块内所有非空文本 run 是否都处在 <b>/<strong> 祖先下（BoldTag，
+// 不被内联 font-weight:normal 覆盖）。用于区分「整块加粗的小标题」（即便视觉加粗被 leaf
+// <span> 的 normal 抹掉、allBold=false）与「只夹了个加粗词的居中短正文」——后者并非全部
+// run 在 <b> 下，不应升级为标题。runs 与 textStyles 长度不齐（含 <br> 等）时保守返回
+// false，交由 allBold 主路径判断。
+func allRunsUnderBoldTag(cx *blockCtx) bool {
+	if len(cx.runs) == 0 || len(cx.runs) != len(cx.textStyles) {
+		return false
+	}
+	saw := false
+	for i, r := range cx.runs {
+		if strings.TrimSpace(r.Text) == "" {
+			continue
+		}
+		if !cx.textStyles[i].BoldTag {
+			return false
+		}
+		saw = true
+	}
+	return saw
 }
 
 func allRunsBold(runs []Run) bool {
