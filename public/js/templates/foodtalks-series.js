@@ -93,7 +93,7 @@ function imageSection(src, gap, sp, { alt = '', width = '100%' } = {}) {
   );
 }
 
-const MORE_CARDS_WRAPPER_OPEN = '<section style="text-align: center;">';
+const MORE_CARDS_WRAPPER_OPEN = '<section style="text-align: center;" data-card-inset="0">';
 
 function centerCss(center) {
   return center === false ? '' : 'text-align:center;';

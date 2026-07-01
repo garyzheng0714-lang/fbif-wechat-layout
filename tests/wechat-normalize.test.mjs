@@ -26,7 +26,7 @@ test('footer source is already a normalized component, not pasted editor html', 
   assert.doesNotMatch(footer, /vertical-align:\s*baseline/i);
   assert.doesNotMatch(footer, /line-height:\s*1\.6/i);
   assert.match(footer, /<!--REPOST_BULLET1_START-->/);
-  assert.match(footer, /<section style="text-align: center;">/);
+  assert.match(footer, /<section style="text-align: center;" data-card-inset="8">/);
   assert.doesNotMatch(footer, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;">/);
 
   for (const text of ['* 本文为', '* 转载请', '* FBIF投稿']) {
