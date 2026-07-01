@@ -395,6 +395,30 @@ func TestLargeNonBoldFontIsNotHeading(t *testing.T) {
 	}
 }
 
+// 真实微信小标题：夹在两张图之间、20px（>正文17px）、居中，外层 <b> 被 leaf<span> 的
+// font-weight:normal 覆盖 → allBold=false。此前 heading 强求 allBold 会漏判，标题落入
+// captionContext 后被图注启发式的「居中+短」分支误吞成 cap。字号 + 居中即标题的充分信号。
+// 病样：https://mp.weixin.qq.com/s/swJQCw5THd0gJVF2GOoMIQ
+func TestCenteredLargeNonBoldTitleBetweenImagesIsHeading(t *testing.T) {
+	// 复刻真实 DOM：block 级 <p> 无 text-align，居中信号落在行内 <span>，走 textStyles 兜底。
+	html := jsContentWrap(
+		`<p><img data-src="https://x/a.png" data-w="1080"></p>` +
+			`<p style="margin-left:8px;margin-right:8px;">` +
+			`<span style="text-align:center;color:rgba(0,0,0,0.9);font-weight:normal;">` +
+			`<span leaf="" style="color:rgba(0,0,0,0.9);font-size:17px;font-weight:normal;">` +
+			`<span textstyle="" style="font-size:20px;">产品美好：当地的、应季的、有良知的</span>` +
+			`</span></span></p>` +
+			`<p><img data-src="https://x/b.png" data-w="1080"></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "产品美好")
+	if b == nil {
+		t.Fatalf("missing title block; kinds=%v", findKinds(blocks))
+	}
+	if b.K != "h" {
+		t.Errorf("居中 20px 非粗小标题应为 heading，got %s; kinds=%v", b.K, findKinds(blocks))
+	}
+}
+
 func TestLongBoldLineIsNotHeading(t *testing.T) {
 	long := strings.Repeat("很长的一段加粗的话，", 10)
 	html := jsContentWrap(`<p style="font-size: 20px;"><strong>` + long + `</strong></p>`)

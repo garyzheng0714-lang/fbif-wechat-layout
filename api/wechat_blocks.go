@@ -447,9 +447,14 @@ func (w *blockWalker) emit(cx *blockCtx) {
 		}
 	}
 
-	// Visual-signal heading: font-size ≥ 18px AND all text runs bold AND ≤ 80 chars.
-	// Pullquotes stay at body font-size → fail this gate → remain txt with bold inline.
-	if hasHeadingFontSize(cx) && allBold && textLen > 0 && textLen <= 80 {
+	// Visual-signal heading: font-size ≥ 18px（明显大于微信正文 15–17px）且 ≤ 80 字。
+	// 加粗曾是必要条件，但微信小标题的 leaf<span> 常内联 font-weight:normal，覆盖掉外层
+	// <b> / 自定义字体（mergeStyle 里 normal 压过祖先 bold），使 allBold=false，把「大字号
+	// + 居中」的小标题整批漏判成 caption（居中+短分支误吞）。字号相对正文的方向才是标题
+	// 与图注/正文最可靠的区分维度（图注 ≤14px、正文 15–17px、仅小标题上探到 18px+），故
+	// 居中与加粗并列作为标题信号。非居中的大字（左对齐 callout）不含 center → 仍留 txt；
+	// pullquote 保持正文字号 <18 → 进不了本闸。
+	if hasHeadingFontSize(cx) && textLen > 0 && textLen <= 80 && (allBold || isCenteredHeading(cx)) {
 		w.appendBlock(Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
@@ -489,6 +494,21 @@ func (w *blockWalker) emit(cx *blockCtx) {
 		w.appendBlock(Block{K: "txt", Runs: runs})
 	}
 	w.closeCaptionContext()
+}
+
+// isCenteredHeading 报告块整体是否居中。居中信号可能在块级样式（<p style=text-align>），
+// 也可能只在文本节点继承的行内样式上——微信常把 text-align:center 塞进内层 <span>，块级
+// <p> 反而无信号，故与 isCaption 一样扫描 textStyles 兜底。
+func isCenteredHeading(cx *blockCtx) bool {
+	if cx.style.Align == "center" {
+		return true
+	}
+	for _, s := range cx.textStyles {
+		if s.Align == "center" {
+			return true
+		}
+	}
+	return false
 }
 
 func hasHeadingFontSize(cx *blockCtx) bool {
