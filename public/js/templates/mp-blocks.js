@@ -14,8 +14,9 @@ import { richTextToInline } from '../blocks/rich-text-render.js';
 
 // footer.html 标题/正文统一字体栈（mp-quote 优先 + 微信端字体回退）。&quot; 是 footer 原始转义形态，保留。
 const FONT_FAMILY = 'mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif';
-// 更多文章卡片外层容器开标签——必须与 more-articles.js 的 OUTER_WRAPPER_OPEN 字节一致（委托锚点）。
-const CARDS_WRAPPER_OPEN = '<section style="text-align: center;">';
+// 更多文章卡片外层容器开标签。data-card-inset 声明唯一横向缩进所有者，
+// more-articles.js 合成卡片时把它落到卡片 section，避免外层/内层双缩进。
+const CARDS_WRAPPER_OPEN = '<section style="text-align: center;" data-card-inset="8">';
 
 function asLines(v) {
   if (Array.isArray(v)) return v;

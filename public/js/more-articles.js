@@ -493,22 +493,36 @@ function escAttr(s) {
 const PLACEHOLDER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300"><rect x="0" y="0" width="1000" height="300" rx="6" ry="6" fill="#e8e6e4"/><text x="500" y="150" fill="#a39e98" font-size="23" text-anchor="middle" dominant-baseline="middle" font-family="PingFang SC, Microsoft YaHei, sans-serif">待补充文章链接</text></svg>';
 const PLACEHOLDER_DATA_URL = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(PLACEHOLDER_SVG);
 
-const CARD_SECTION_STYLE = 'margin:0;padding:0;text-align:center;line-height:0;font-size:0;';
+const DEFAULT_CARD_INSET_PX = 8;
+const CARD_SECTION_BASE_STYLE = 'margin:0;';
 const CARD_P_STYLE = 'margin:0;padding:0;line-height:0;font-size:0;';
 const SPAN_STYLE = 'display:block;line-height:0;font-size:0;width:100%;';
 const IMG_STYLE = 'display:block;width: 661px !important; max-width: 100% !important; height: auto !important; margin: 0 auto; vertical-align: top; box-sizing: border-box; visibility: visible !important;';
 
-function cardHTML(card, index) {
+function nonNegativePx(value, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.round(n);
+}
+
+function cardSectionStyle(insetPx) {
+  const inset = nonNegativePx(insetPx, DEFAULT_CARD_INSET_PX);
+  const marginX = inset > 0 ? `margin-left:${inset}px;margin-right:${inset}px;` : '';
+  return `${CARD_SECTION_BASE_STYLE}${marginX}padding:0;text-align:center;line-height:0;font-size:0;`;
+}
+
+function cardHTML(card, index, insetPx) {
   const rawImgurl = card.final_url || card.composite_url || card.imgurl || '';
   const href = escAttr(card.href || '');
   const marginTop = index === 0 ? 'margin-top:0px;' : 'margin-top:12px;';
+  const sectionStyle = cardSectionStyle(insetPx);
 
   // Empty card (no URL pasted yet): render the same block image shape as a real
   // card, with a neutral-gray SVG as the src. The <img> stays in place for
   // direct replacement in WeChat's editor.
   if (!rawImgurl) {
     return (
-      `<section style="${CARD_SECTION_STYLE}${marginTop}"><p style="${CARD_P_STYLE}">` +
+      `<section style="${sectionStyle}${marginTop}"><p style="${CARD_P_STYLE}">` +
       `<span style="${SPAN_STYLE}">` +
       `<img alt="图片" class="rich_pages wxw-img" style="${IMG_STYLE}" src="${PLACEHOLDER_DATA_URL}">` +
       `</span></p></section>`
@@ -517,7 +531,7 @@ function cardHTML(card, index) {
 
   const imgurl = escAttr(rawImgurl);
   return (
-    `<section style="${CARD_SECTION_STYLE}${marginTop}"><p style="${CARD_P_STYLE}"><strong>` +
+    `<section style="${sectionStyle}${marginTop}"><p style="${CARD_P_STYLE}"><strong>` +
     `<a href="${href}" imgurl="${imgurl}" linktype="image" tab="innerlink" data-itemshowtype="0" target="_blank" data-linktype="1">` +
     `<span style="${SPAN_STYLE}" class="js_jump_icon h5_image_link">` +
     `<img alt="图片" class="rich_pages wxw-img" style="${IMG_STYLE}" src="${imgurl}">` +
@@ -525,13 +539,17 @@ function cardHTML(card, index) {
   );
 }
 
-function buildCardsInnerHTML(cards) {
-  return cards.map((c, i) => cardHTML(c, i)).join('');
+function buildCardsInnerHTML(cards, insetPx) {
+  return cards.map((c, i) => cardHTML(c, i, insetPx)).join('');
 }
 
 // ---- Merge into footer.html (replaces the outer wrapper's inner content) ----
-const OUTER_WRAPPER_OPEN = '<section style="text-align: center;">';
+const OUTER_WRAPPER_STYLE = 'text-align: center;';
 const LEGACY_OUTER_WRAPPER_OPEN = '<section style="text-align: center;margin-left: 8px;margin-right: 8px;">';
+
+function outerWrapperOpen(insetPx) {
+  return `<section style="${OUTER_WRAPPER_STYLE}" data-card-inset="${nonNegativePx(insetPx, DEFAULT_CARD_INSET_PX)}">`;
+}
 
 function findMatchingClose(html, openIdx) {
   const OPEN = '<section';
@@ -587,11 +605,53 @@ function stripDeprecatedPromo1000(footerHtml) {
 const PARAGRAPH_WRAPPER_OPEN = '<section data-role="paragraph">';
 
 function findOuterWrapper(html) {
-  const wrappers = [OUTER_WRAPPER_OPEN, LEGACY_OUTER_WRAPPER_OPEN]
-    .map(open => ({ open, start: html.indexOf(open) }))
-    .filter(item => item.start !== -1)
-    .sort((a, b) => a.start - b.start);
+  const wrappers = [];
+  const re = /<section\b[^>]*>/gi;
+  let match;
+  while ((match = re.exec(html)) !== null) {
+    const open = match[0];
+    const style = attrValue(open, 'style') || '';
+    if (!isCardsWrapperStyle(style) && open !== LEGACY_OUTER_WRAPPER_OPEN) continue;
+    if (!isInsideMoreArticlesParagraph(html, match.index)) continue;
+    wrappers.push({
+      open,
+      start: match.index,
+      insetPx: cardsWrapperInset(open, style),
+    });
+  }
+  wrappers.sort((a, b) => a.start - b.start);
   return wrappers[0] || null;
+}
+
+function isInsideMoreArticlesParagraph(html, start) {
+  const paraStart = html.lastIndexOf(PARAGRAPH_WRAPPER_OPEN, start);
+  if (paraStart === -1) return false;
+  const paraEnd = findMatchingClose(html, paraStart);
+  return paraEnd !== -1 && paraEnd > start;
+}
+
+function attrValue(tag, name) {
+  const re = new RegExp(`\\s${name}=(["'])([^"']*)\\1`, 'i');
+  const match = tag.match(re);
+  return match ? match[2] : '';
+}
+
+function isCardsWrapperStyle(style) {
+  const normalized = String(style || '').trim().replace(/\s+/g, ' ');
+  return normalized === OUTER_WRAPPER_STYLE
+    || normalized === 'text-align:center;'
+    || hasHorizontalInset(style);
+}
+
+function hasHorizontalInset(style) {
+  return /margin-left\s*:\s*8px/i.test(style) && /margin-right\s*:\s*8px/i.test(style);
+}
+
+function cardsWrapperInset(open, style) {
+  const explicit = attrValue(open, 'data-card-inset');
+  if (explicit !== '') return nonNegativePx(explicit, DEFAULT_CARD_INSET_PX);
+  if (hasHorizontalInset(style)) return 8;
+  return DEFAULT_CARD_INSET_PX;
 }
 
 function findMoreArticlesSectionBounds(footerHtml) {
@@ -625,8 +685,7 @@ export function mergeIntoFooter(footerHtml, cards) {
   const start = wrapper.start;
   const end = findMatchingClose(footerHtml, start);
   if (end === -1) return footerHtml;
-  const wrapperInnerStart = start + wrapper.open.length;
-  const before = footerHtml.slice(0, start) + OUTER_WRAPPER_OPEN;
+  const before = footerHtml.slice(0, start) + outerWrapperOpen(wrapper.insetPx);
   const after = footerHtml.slice(end);
-  return before + buildCardsInnerHTML(list) + after;
+  return before + buildCardsInnerHTML(list, wrapper.insetPx) + after;
 }

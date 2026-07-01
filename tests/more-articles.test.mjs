@@ -13,6 +13,18 @@ const monoCtx = {
   },
 };
 
+function moreArticlesSlice(html) {
+  const idx = html.indexOf('/ 更多文章 /');
+  assert.ok(idx >= 0, 'should contain the more-articles section');
+  return html.slice(idx);
+}
+
+function cardSectionStyles(html) {
+  return Array.from(moreArticlesSlice(html).matchAll(
+    /<section style="([^"]*)"><p style="margin:0;padding:0;line-height:0;font-size:0;">/g
+  )).map(match => match[1]);
+}
+
 test('more articles title keeps punctuation off the second line start', () => {
   assert.deepEqual(
     wrapBannerTitleLines(monoCtx, 'ABCDE，FG', 5),
@@ -47,17 +59,25 @@ test('more articles cards use block image layout and explicit card spacing', asy
     { href: 'https://mp.weixin.qq.com/s/a', final_url: 'https://example.com/a.png' },
     { href: 'https://mp.weixin.qq.com/s/b', final_url: 'https://example.com/b.png' },
   ]);
+  const styles = cardSectionStyles(html);
 
-  assert.match(html, /<section style="text-align: center;">/);
+  assert.match(html, /<section style="text-align: center;" data-card-inset="8">/);
   assert.doesNotMatch(html, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;">/);
+  assert.equal(styles.length, 2);
+  for (const style of styles) {
+    assert.match(style, /margin:0;/);
+    assert.match(style, /margin-left:8px;/);
+    assert.match(style, /margin-right:8px;/);
+  }
   assert.match(html, /display:block;line-height:0;font-size:0;width:100%;/);
   assert.match(html, /display:block;width: 661px !important; max-width: 100% !important; height: auto !important; margin: 0 auto; vertical-align: top;/);
-  assert.match(html, /margin-top:12px/);
+  assert.match(styles[0], /margin-top:0px/);
+  assert.match(styles[1], /margin-top:12px/);
   assert.doesNotMatch(html, /vertical-align:\s*baseline/i);
   assert.doesNotMatch(html, /line-height:\s*1\.6/i);
 });
 
-test('more articles merge still recognizes legacy 8px wrapper but outputs single-indent wrapper', () => {
+test('more articles merge still recognizes legacy 8px wrapper but outputs one 8px indent on cards', () => {
   const legacyFooter = [
     '<section data-role="paragraph">',
     '<section style="margin:20px 8px 20px;padding:0;text-align:center;"><strong>/ 更多文章 /</strong></section>',
@@ -68,10 +88,30 @@ test('more articles merge still recognizes legacy 8px wrapper but outputs single
   const html = mergeIntoFooter(legacyFooter, [
     { href: 'https://mp.weixin.qq.com/s/a', final_url: 'https://example.com/a.png' },
   ]);
+  const styles = cardSectionStyles(html);
 
-  assert.match(html, /<section style="text-align: center;">/);
-  assert.doesNotMatch(html, /margin-left: 8px;margin-right: 8px/);
+  assert.match(html, /<section style="text-align: center;" data-card-inset="8">/);
+  assert.doesNotMatch(html, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;">/);
+  assert.deepEqual(styles, ['margin:0;margin-left:8px;margin-right:8px;padding:0;text-align:center;line-height:0;font-size:0;margin-top:0px;']);
   assert.match(html, /https:\/\/example\.com\/a\.png/);
+});
+
+test('more articles merge ignores unrelated centered sections before the anchor', () => {
+  const footer = [
+    '<section style="text-align: center;">不是更多文章</section>',
+    '<section data-role="paragraph">',
+    '<section style="margin:20px 8px 20px;padding:0;text-align:center;"><strong>/ 更多文章 /</strong></section>',
+    '<section style="text-align: center;" data-card-inset="8"></section>',
+    '</section>',
+  ].join('\n');
+
+  const html = mergeIntoFooter(footer, [
+    { href: 'https://mp.weixin.qq.com/s/a', final_url: 'https://example.com/a.png' },
+  ]);
+
+  assert.match(html, /不是更多文章/);
+  assert.ok(html.indexOf('https://example.com/a.png') > html.indexOf('/ 更多文章 /'));
+  assert.deepEqual(cardSectionStyles(html), ['margin:0;margin-left:8px;margin-right:8px;padding:0;text-align:center;line-height:0;font-size:0;margin-top:0px;']);
 });
 
 test('footer section titles keep symmetric image rhythm with block images', async () => {

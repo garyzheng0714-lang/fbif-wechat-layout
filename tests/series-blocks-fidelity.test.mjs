@@ -13,6 +13,7 @@ globalThis.localStorage = storage;
 globalThis.fetch = async () => ({ ok: false, text: async () => '' });
 
 const template = (await import('../public/js/templates/foodtalks-series.js?test=' + Date.now())).default;
+const { mergeIntoFooter } = await import('../public/js/more-articles.js?test=' + Date.now());
 
 // 系列底部默认（v2 单预设，与 api/rule_bottom_blocks.go defaultSeriesBottomBlocksModule 对齐）。
 function seriesBottomBlocks() {
@@ -89,8 +90,22 @@ test('renderBottomFooter: 系列启用 more_articles 时输出复制链路识别
   const html = template.renderBottomFooter().html;
   assert.match(html, /<section data-role="paragraph">/, '保留 paragraph 包裹锚点');
   assert.match(html, /\/ 更多文章 \//, '渲染更多文章标题');
-  assert.match(html, /<section style="text-align: center;"><\/section>/, '保留 more-articles.js 合成卡片的外层锚点');
+  assert.match(html, /<section style="text-align: center;" data-card-inset="0"><\/section>/, '保留 more-articles.js 合成卡片的外层锚点，并声明系列不加 FBIF 横向缩进');
   assert.doesNotMatch(html, /margin-left: 8px;margin-right: 8px/, '更多文章卡片锚点不应叠加第二层左右缩进');
+});
+
+test('renderBottomFooter: 系列 more_articles 合并后卡片不继承 FBIF 8px 缩进', () => {
+  setActive(seriesBottomBlocks(), { overrides: { more_articles: { enabled: true } } });
+  const footer = template.renderBottomFooter().html;
+  const html = mergeIntoFooter(footer, [
+    { href: 'https://mp.weixin.qq.com/s/a', final_url: 'https://example.com/a.png' },
+  ]);
+  const card = html.match(/<section style="([^"]*)"><p style="margin:0;padding:0;line-height:0;font-size:0;">/);
+  assert.ok(card, '应合成更多文章卡片 section');
+  assert.match(html, /<section style="text-align: center;" data-card-inset="0">/);
+  assert.match(card[1], /margin:0;/);
+  assert.doesNotMatch(card[1], /margin-left:8px/);
+  assert.doesNotMatch(card[1], /margin-right:8px/);
 });
 
 test('renderBottomFooter: 模块禁用 → 返回 null（engine fallback footerUrl）', () => {
