@@ -1269,6 +1269,10 @@ export function initApp(initialTemplate) {
   let _copyRequiresWechatImageTransfer = false;
   let _moreArticlesCopySeq = 0;
   let _moreArticlesCopyJob = null;
+  // _footerCopy 的代数号：每次权威重建（新文章、更多文章预热完成、面板改动、
+  // 会话恢复）+1。慢速完成的旧上传任务只有在代数未变时才允许回写 _footerCopy，
+  // 防止「文章图上传比更多文章预热晚完成 → 用启动时捕获的过期底部覆盖成品」。
+  let _footerCopyGen = 0;
   const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
   let _plainTextCopy = null;
   let _lastCopiedHtml = '';
@@ -1283,26 +1287,33 @@ export function initApp(initialTemplate) {
     return urls;
   }
 
-  function isUnsafeCopyImageRef(value, attrName = 'src') {
+  function isUnsafeCopyImageRef(value, attr, requiresWechatTransfer) {
     const src = String(value || '').trim();
     if (!src) return false;
-    if (String(attrName || '').toLowerCase() === 'src' && /^data:image\//i.test(src)) return false;
-    if (/^data:/i.test(src)) return true;
+    if (/^data:/i.test(src)) {
+      // 公众号渠道 <img src> 里的 base64 位图是安全形态：微信编辑器粘贴时会
+      // 立即本地转存（DOCX 正文图长期依赖的契约）。svg 微信不转存；imgurl
+      // 是图片链接卡片的服务端校验属性、粘贴时不会被改写——这两类留在剪贴
+      // 板都会在保存草稿时丢内容，必须继续判为不安全。
+      if (attr === 'src' && !requiresWechatTransfer
+        && /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i.test(src)) return false;
+      return true;
+    }
     if (/^blob:/i.test(src)) return true;
     if (/^\/(?:assets\/|api\/doc-cache\/|api\/image-proxy(?:\?|$))/i.test(src)) return true;
     if (/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(src)) return true;
     return false;
   }
 
-  function findUnsafeCopyImageRefs(html) {
+  function findUnsafeCopyImageRefs(html, requiresWechatTransfer) {
     const refs = [];
     const seen = new Set();
     const re = /\b(src|imgurl)=(["'])([^"']+)\2/gi;
     let m;
     while ((m = re.exec(String(html || ''))) !== null) {
-      const attrName = m[1];
+      const attr = m[1].toLowerCase();
       const ref = m[3];
-      if (!isUnsafeCopyImageRef(ref, attrName) || seen.has(ref)) continue;
+      if (!isUnsafeCopyImageRef(ref, attr, requiresWechatTransfer) || seen.has(ref)) continue;
       seen.add(ref);
       refs.push(ref);
     }
@@ -1364,6 +1375,7 @@ export function initApp(initialTemplate) {
       });
       if (seq !== _moreArticlesCopySeq) return false;
       _footerCopy = footerUpload.footerCopy;
+      _footerCopyGen++;
       if (footerUpload.failedSrcs && footerUpload.failedSrcs.length) {
         _failedSrcs = Array.from(new Set((_failedSrcs || []).concat(footerUpload.failedSrcs)));
       }
@@ -1389,6 +1401,7 @@ export function initApp(initialTemplate) {
     _articleCopy = _articleHtml;
     _footerHtml = bodyOnly ? '' : normalizeRich(footerContent);
     _footerCopy = bodyOnly ? '' : normalizeRich((opts && opts.footerCopy) || footerContent);
+    _footerCopyGen++;
     _failedSrcs = [];
     _copyRequiresWechatImageTransfer = false;
     // 作废旧配置遗留的「更多文章」预热 job（主要供 rerender：同篇换配置时丢弃旧预热并重建）。
@@ -1429,7 +1442,13 @@ export function initApp(initialTemplate) {
       if (typeof newHtml === 'string' && newHtml !== '') {
         _footerHtml = normalizeRich(newHtml);
         _footerCopy = _footerHtml;
+        _footerCopyGen++;
         if (_articleSession) _articleSession.footerHtml = _footerHtml;
+        // 预览层可能含 data: 合成图 / 本地素材引用；立即重建复制安全层，
+        // 不让预览形态直接留在剪贴板层（保存草稿消失回归的旁路之一）。
+        _moreArticlesCopySeq++;
+        _moreArticlesCopyJob = null;
+        prepareMoreArticlesForCopy('footer-edit');
       }
       const enabled = isFooterEnabledForCurrentArticle();
       contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
@@ -1473,6 +1492,7 @@ export function initApp(initialTemplate) {
       const copySafeMerged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2, copySafe: true });
       _footerHtml = merged;
       _footerCopy = copySafeMerged;
+      _footerCopyGen++;
       if (_articleSession) {
         _articleSession.footerHtml = merged;
         _articleSession.footerCopy = copySafeMerged;
@@ -1499,6 +1519,7 @@ export function initApp(initialTemplate) {
       return;
     }
     if (skipUploadForThisFile) {
+      const footerGenAtStart = _footerCopyGen;
       _uploadPromise = materializeLazyImages(_articleCopy, _footerCopy, {
         onProgress(done, total) {
           if (total > 0) statsBar.textContent = '准备图片 (' + done + '/' + total + ')...';
@@ -1506,7 +1527,7 @@ export function initApp(initialTemplate) {
         onLog: logConv,
       }).then(result => {
         _articleCopy = result.articleCopy;
-        _footerCopy = result.footerCopy;
+        if (_footerCopyGen === footerGenAtStart) _footerCopy = result.footerCopy;
         _failedSrcs = result.failedSrcs || [];
         _uploadDone = true;
         if (result.failed > 0) {
@@ -1529,6 +1550,7 @@ export function initApp(initialTemplate) {
       ? !!template.transferMmbiz
       : template.id === 'foodtalks-site';
     _copyRequiresWechatImageTransfer = transferMmbiz;
+    const footerGenAtStart = _footerCopyGen;
     _uploadPromise = uploadNonCdnImages(_articleCopy, _footerCopy, {
       transferMmbiz,
       onProgress(done, total) {
@@ -1537,12 +1559,12 @@ export function initApp(initialTemplate) {
       onLog: logConv,
       onMaterialized(result) {
         _articleCopy = result.articleCopy;
-        _footerCopy = result.footerCopy;
+        if (_footerCopyGen === footerGenAtStart) _footerCopy = result.footerCopy;
         _failedSrcs = result.failedSrcs || [];
       },
     }).then(result => {
       _articleCopy = result.articleCopy;
-      _footerCopy = result.footerCopy;
+      if (_footerCopyGen === footerGenAtStart) _footerCopy = result.footerCopy;
       _failedSrcs = result.failedSrcs || [];
       _uploadDone = true;
       if (result.failed > 0) {
@@ -1562,6 +1584,7 @@ export function initApp(initialTemplate) {
     const statsBar = document.getElementById('statsBar');
     if (retryBtn) { retryBtn.textContent = '重试中...'; retryBtn.disabled = true; }
 
+    const footerGenAtStart = _footerCopyGen;
     const result = await retryFailedImages(_articleCopy, _footerCopy, _failedSrcs, {
       onProgress(done, total) {
         statsBar.textContent = '重试上传 (' + done + '/' + total + ')...';
@@ -1569,7 +1592,7 @@ export function initApp(initialTemplate) {
       onLog: logConv,
     });
     _articleCopy = result.articleCopy;
-    _footerCopy = result.footerCopy;
+    if (_footerCopyGen === footerGenAtStart) _footerCopy = result.footerCopy;
     _failedSrcs = result.failedSrcs;
 
     if (result.failed > 0) {
@@ -1639,7 +1662,7 @@ export function initApp(initialTemplate) {
     const themeCSS = await _themeCSSReady;
     html = processForCopy(html, themeCSS, config);
     html = normalizeRich(html);
-    const unsafeCopyRefs = findUnsafeCopyImageRefs(html);
+    const unsafeCopyRefs = findUnsafeCopyImageRefs(html, _copyRequiresWechatImageTransfer);
 
     // 公众号 ProseMirror 在粘贴 HTML 末尾若是 <img>/<section> 而无段落节点，
     // 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次
@@ -1830,6 +1853,7 @@ export function initApp(initialTemplate) {
     _articleCopy = cs.article_copy || '';
     _footerHtml = cs.footer_html || '';
     _footerCopy = cs.footer_copy || '';
+    _footerCopyGen++;
     _plainTextCopy = cs.plain_text_copy != null ? cs.plain_text_copy : null;
     _isRepost = !!cs.is_repost;
     _sourceIsDocx = !!cs.source_is_docx;

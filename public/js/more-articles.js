@@ -15,6 +15,8 @@ import {
 } from './more-articles-config.js';
 import { getRulePackByPath, DEFAULT_RULE_PACK_ID } from './rule-packs/registry.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { isMmbizUrl } from './uploader.js';
+import { PLACEHOLDER_DATA_URL } from './more-articles-placeholder.js';
 
 const LS_KEY = 'more_articles_v1';
 
@@ -441,9 +443,10 @@ export async function ensureCompositeReady(cards, { onProgress } = {}) {
       continue;
     }
     if (onProgress) onProgress(i, out.length);
+    let compositeDataUrl = '';
     try {
-      const dataUrl = await compositeCard(c);
-      const uploaded = await uploadDataUrl(dataUrl, `more_article_${i}_${hash.slice(0, 10)}`);
+      compositeDataUrl = await compositeCard(c);
+      const uploaded = await uploadDataUrl(compositeDataUrl, `more_article_${i}_${hash.slice(0, 10)}`);
       c.composite_url = uploaded;
       c.composite_hash = hash;
       c.final_url = uploaded;
@@ -452,7 +455,9 @@ export async function ensureCompositeReady(cards, { onProgress } = {}) {
       console.warn('[more-articles] composite/upload failed for card', i, err);
       c.composite_url = null;
       c.composite_hash = null;
-      c.final_url = c.imgurl || '';
+      // 上传失败但合成成功：用 data: 合成图兜底。微信编辑器对粘贴的 base64
+      // 位图会立即本地转存（与 DOCX 正文图同契约），比丢掉标题叠字更安全。
+      c.final_url = compositeDataUrl || c.imgurl || '';
     }
   }
   return out;
@@ -487,11 +492,10 @@ function escAttr(s) {
     .replace(/>/g, '&gt;');
 }
 
-// Inline SVG placeholder for empty card slots. Rendered as the <img src> so
+// PNG placeholder for empty card slots (imported constant; see the module
+// comment for why it must be a bitmap, not SVG). Rendered as the <img src> so
 // the empty card has the same DOM shape as a real card — copy the HTML to
 // WeChat, then swap each placeholder image via WeChat's "替换图片" UI.
-const PLACEHOLDER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300"><rect x="0" y="0" width="1000" height="300" rx="6" ry="6" fill="#e8e6e4"/><text x="500" y="150" fill="#a39e98" font-size="23" text-anchor="middle" dominant-baseline="middle" font-family="PingFang SC, Microsoft YaHei, sans-serif">待补充文章链接</text></svg>';
-const PLACEHOLDER_DATA_URL = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(PLACEHOLDER_SVG);
 
 const DEFAULT_CARD_INSET_PX = 8;
 const CARD_SECTION_BASE_STYLE = 'margin:0;';
@@ -509,6 +513,18 @@ function cardSectionStyle(insetPx) {
   const inset = nonNegativePx(insetPx, DEFAULT_CARD_INSET_PX);
   const marginX = inset > 0 ? `margin-left:${inset}px;margin-right:${inset}px;` : '';
   return `${CARD_SECTION_BASE_STYLE}${marginX}padding:0;text-align:center;line-height:0;font-size:0;`;
+}
+
+// <a linktype="image"> 的 imgurl 是微信服务端校验属性：粘贴时编辑器只转存
+// <img src>、从不改写 imgurl；保存草稿时 imgurl 非微信图床的图片链接卡片会被
+// 整卡清除（2026-07-02「保存草稿后更多文章消失」根因）。因此 imgurl 恒用
+// 原始微信图床封面，合成图只放 <img src>。
+function wechatSafeCardImgurl(card, fallback) {
+  const original = String((card && card.imgurl) || '').trim();
+  if (isMmbizUrl(original)) return original;
+  // 非微信封面（外站文章卡）：远程原图仍优于合成图外链/data:。
+  if (/^https?:\/\//i.test(original)) return original;
+  return fallback;
 }
 
 function cardHTML(card, index, insetPx) {
@@ -530,9 +546,10 @@ function cardHTML(card, index, insetPx) {
   }
 
   const imgurl = escAttr(rawImgurl);
+  const cardImgurl = escAttr(wechatSafeCardImgurl(card, rawImgurl));
   return (
     `<section style="${sectionStyle}${marginTop}"><p style="${CARD_P_STYLE}"><strong>` +
-    `<a href="${href}" imgurl="${imgurl}" linktype="image" tab="innerlink" data-itemshowtype="0" target="_blank" data-linktype="1">` +
+    `<a href="${href}" imgurl="${cardImgurl}" linktype="image" tab="innerlink" data-itemshowtype="0" target="_blank" data-linktype="1">` +
     `<span style="${SPAN_STYLE}" class="js_jump_icon h5_image_link">` +
     `<img alt="图片" class="rich_pages wxw-img" style="${IMG_STYLE}" src="${imgurl}">` +
     `</span></a></strong></p></section>`

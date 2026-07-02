@@ -91,9 +91,9 @@ test('copy warning is derived from final HTML unsafe image src and imgurl refs',
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));
 
-  assert.match(engine, /function findUnsafeCopyImageRefs\(html\)/);
+  assert.match(engine, /function findUnsafeCopyImageRefs\(html, requiresWechatTransfer\)/);
   assert.match(engine, /src\|imgurl/);
-  assert.match(copyFn, /const unsafeCopyRefs = findUnsafeCopyImageRefs\(html\)/);
+  assert.match(copyFn, /const unsafeCopyRefs = findUnsafeCopyImageRefs\(html, _copyRequiresWechatImageTransfer\)/);
   assert.match(copyFn, /new Set\(\[ \.\.\.\(_failedSrcs \|\| \[\]\), \.\.\.unsafeCopyRefs \]\)/);
 });
 
