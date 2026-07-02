@@ -1283,10 +1283,12 @@ export function initApp(initialTemplate) {
     return urls;
   }
 
-  function isUnsafeCopyImageRef(value) {
+  function isUnsafeCopyImageRef(value, attrName = 'src') {
     const src = String(value || '').trim();
     if (!src) return false;
-    if (/^(?:data:|blob:)/i.test(src)) return true;
+    if (String(attrName || '').toLowerCase() === 'src' && /^data:image\//i.test(src)) return false;
+    if (/^data:/i.test(src)) return true;
+    if (/^blob:/i.test(src)) return true;
     if (/^\/(?:assets\/|api\/doc-cache\/|api\/image-proxy(?:\?|$))/i.test(src)) return true;
     if (/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(src)) return true;
     return false;
@@ -1295,11 +1297,12 @@ export function initApp(initialTemplate) {
   function findUnsafeCopyImageRefs(html) {
     const refs = [];
     const seen = new Set();
-    const re = /\b(?:src|imgurl)=(["'])([^"']+)\1/gi;
+    const re = /\b(src|imgurl)=(["'])([^"']+)\2/gi;
     let m;
     while ((m = re.exec(String(html || ''))) !== null) {
-      const ref = m[2];
-      if (!isUnsafeCopyImageRef(ref) || seen.has(ref)) continue;
+      const attrName = m[1];
+      const ref = m[3];
+      if (!isUnsafeCopyImageRef(ref, attrName) || seen.has(ref)) continue;
       seen.add(ref);
       refs.push(ref);
     }
