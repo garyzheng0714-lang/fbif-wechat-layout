@@ -498,8 +498,8 @@ test('url-import keeps body prompt sections that are not the standard footer', (
 // ---- 统一表格样式（公众号渲染：全 inline-style，css-inline 不碰裸 table） ----
 // WHY：旧路径表格被拍平丢结构；这里锁住公众号侧渲成真正的 <table>，样式默认复刻既有
 // 公众号表格（蓝底白字表头 + 浅灰网格线），且全部 inline（复制到微信不丢样式）。
-function tablePara(rows) {
-  return { text: '', runs: [], isEmpty: false, type: 'table', rows };
+function tablePara(rows, colWidths = []) {
+  return { text: '', runs: [], isEmpty: false, type: 'table', rows, colWidths };
 }
 const tcell = (text, header = false) => ({ runs: [{ type: 'txt', text }], header });
 
@@ -519,6 +519,19 @@ test('公众号 DOCX 表格渲成 inline-style <table>（蓝底白字表头 + �
   assert.match(html, /¥11\.9/);
   // 单元格文本不走 wx-t（那会被 css-inline 套正文色，与表格自有色冲突）
   assert.ok(!/<td[^>]*>[^<]*<span[^>]*class="wx-t"/.test(html), '单元格不用 wx-t class');
+});
+
+test('公众号 DOCX 表格保留 Word colWidths（共享底层能力）', () => {
+  const html = renderDocx([
+    tablePara([
+      [tcell('图片', true), tcell('渠道', true), tcell('名称', true), tcell('供货商', true)],
+      [tcell(''), tcell('几多全'), tcell('咸蛋黄香脆鱼皮110g'), tcell('安徽灵猫食品有限公司')],
+    ], [1305, 1485, 2205, 3285]),
+  ]);
+
+  assert.match(html, /<colgroup>/, 'DOCX gridCol 应进入共享表格渲染结果');
+  assert.match(html, /<col width="16%" style="width: 15\.76%;"/, '第一列按原始图片列比例渲染');
+  assert.doesNotMatch(html, /<col width="25%"/, '四列表格不得被渠道模板等宽化');
 });
 
 test('公众号 URL 导入表格块（processBlocks）也渲成 <table>', () => {

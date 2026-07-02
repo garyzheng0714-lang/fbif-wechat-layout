@@ -233,7 +233,6 @@ function renderTable(elem, config) {
     headerBold: !(config && config.table_header_bold === false),
     marginAuto: true,
     verticalAlignMiddle: true,
-    useColgroup: true,
     bannerHeader: true,
     renderers: tableRunRenderers(),
   });

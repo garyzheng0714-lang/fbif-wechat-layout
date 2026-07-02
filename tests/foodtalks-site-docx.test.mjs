@@ -494,8 +494,8 @@ test('网站页脚库：BD 名片片段使用传入的素材引用渲染，支�
 // ---- 统一表格样式（网站渲染：本就 inline-style，与公众号物理隔离各写各的 renderTable） ----
 // WHY：网站渠道也要支持表格，默认样式与公众号同一套（蓝底白字表头 + 浅灰网格线 = 统一），
 // 但渲染函数物理隔离；样式读扁平 config 键，缺省降级与服务端 defaultRuleConfig 逐字一致。
-function tablePara(rows) {
-  return para({ type: 'table', rows, isEmpty: false });
+function tablePara(rows, colWidths = []) {
+  return para({ type: 'table', rows, colWidths, isEmpty: false });
 }
 const stcell = (text, header = false) => ({ runs: [{ type: 'txt', text }], header });
 
@@ -518,6 +518,27 @@ test('网站 DOCX 表格渲成 inline-style <table>（默认与公众号同一�
   assert.match(html, /border: 1px solid #e5e7eb/, '浅灰网格线');
   assert.match(html, /产品名称/);
   assert.match(html, /¥11\.9/);
+});
+
+test('网站默认 DOCX 表格保留 Word colWidths（共享底层能力）', () => {
+  const imgCell = (file) => ({ runs: [{ type: 'img', file, w: '12%', aspect: 1 }], header: false });
+  const result = template.processDocx({
+    paragraphs: [
+      tablePara([
+        [stcell('图片', true), stcell('渠道', true), stcell('名称', true), stcell('供货商', true)],
+        [imgCell('p1.png'), stcell('几多全'), stcell('咸蛋黄香脆鱼皮110g'), stcell('安徽灵猫食品有限公司')],
+      ], [1305, 1485, 2205, 3285]),
+    ],
+    imgCache: { 'p1.png': 'blob:p1' },
+    config: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+
+  assert.match(html, /<colgroup>/, '网站默认也必须消费中性表格模型里的 DOCX 列宽');
+  assert.match(html, /<col width="16%" style="width: 15\.76%;"/, '图片列按 Word gridCol 保持窄列');
+  assert.doesNotMatch(html, /<col width="25%"/, '四列表格不得退化成等宽 25%');
+  assert.match(html, /<img[^>]*src="blob:p1"/, '列宽修复不能破坏单元格图片 src 注入');
 });
 
 test('网站表格样式可被规则后台 config 覆盖（红线：不可写死）', () => {

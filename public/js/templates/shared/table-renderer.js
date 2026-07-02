@@ -16,8 +16,8 @@ export function renderTableCellRuns(runs, renderers = {}) {
 }
 
 function colgroupHTML(elem, colCount) {
-  const cw = (Array.isArray(elem.colWidths) ? elem.colWidths : []).filter(n => n > 0);
-  if (cw.length !== colCount || colCount <= 1) return '';
+  const cw = (Array.isArray(elem.colWidths) ? elem.colWidths : []).map(n => Number(n));
+  if (cw.length !== colCount || colCount <= 1 || !cw.every(n => Number.isFinite(n) && n > 0)) return '';
   const total = cw.reduce((a, b) => a + b, 0);
   const pcts = cw.map(w => w / total * 100);
   const ints = pcts.map(p => Math.round(p));
@@ -54,5 +54,6 @@ export function renderTable(elem, opts = {}) {
     }).join('') + '</tr>';
   }).join('');
   const tableStyle = 'border-collapse: collapse; width: 100%; table-layout: fixed;' + (opts.marginAuto ? ' margin: 0 auto;' : '');
-  return `<table style="${tableStyle}">${opts.useColgroup ? colgroupHTML(elem, colCount) : ''}<tbody>${body}</tbody></table>`;
+  const colgroup = opts.useColgroup === false ? '' : colgroupHTML(elem, colCount);
+  return `<table style="${tableStyle}">${colgroup}<tbody>${body}</tbody></table>`;
 }
