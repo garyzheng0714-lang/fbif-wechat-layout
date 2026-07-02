@@ -255,6 +255,7 @@
 <script type="module">
 import { pickActivePreset } from '/js/blocks/block-merge.js';
 import { openAssetPicker, resolveAssetThumb } from '/js/blocks/asset-picker.js';
+import { createIcon } from '/js/ui-icons.js';
 import {
   activeFooterPreset,
   readFooterPanelState,
@@ -1237,20 +1238,30 @@ bindUrlImportShortcuts({
   function segmentRowHtml(key) {
     return `<div class="ft-footer-seg-row" data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}">
       <div class="ft-footer-seg-main">
+        <span class="ft-footer-drag-slot" data-footer-drag-slot>${key === 'tip' ? '' : `<span class="ft-footer-drag-handle" data-footer-drag-handle aria-label="拖拽排序${escText(footerSegmentLabel(key))}" title="拖拽排序"></span>`}</span>
+        <span class="ft-footer-seg-title">${escText(footerSegmentLabel(key))}</span>
         <button type="button" class="ft-switch" data-footer-seg="${escText(key)}" role="switch" aria-checked="false" aria-label="显示${escText(footerSegmentLabel(key))}">
           <span class="ft-switch-knob"></span>
         </button>
-        <span class="ft-footer-seg-title">${escText(footerSegmentLabel(key))}</span>
-        <span class="ft-footer-seg-state" data-footer-seg-state="${escText(key)}">隐藏</span>
       </div>
       ${bdCardSelectHtml(key)}
       ${footerSegmentAssetControlHtml(key)}
     </div>`;
   }
 
+  function hydrateFooterDragHandles() {
+    segsEl.querySelectorAll('[data-footer-drag-handle]').forEach(handle => {
+      if (handle.firstChild) return;
+      const icon = createIcon('gripVertical');
+      icon.className = 'ft-footer-drag-icon';
+      handle.appendChild(icon);
+    });
+  }
+
   function renderControls() {
     presetsEl.innerHTML = presetList.map(p => `<button type="button" class="ft-footer-preset" data-preset="${escText(p.id)}">${escText(p.name || p.id)}</button>`).join('');
     segsEl.innerHTML = order.map(segmentRowHtml).join('');
+    hydrateFooterDragHandles();
   }
   renderControls();
   refreshFooterControls = () => { renderControls(); paint(); };
@@ -1277,8 +1288,6 @@ bindUrlImportShortcuts({
       btn.setAttribute('aria-checked', checked ? 'true' : 'false');
       btn.disabled = !enabled;
       btn.setAttribute('aria-disabled', enabled ? 'false' : 'true');
-      const state = segsEl.querySelector('[data-footer-seg-state="' + key + '"]');
-      if (state) state.textContent = checked ? '显示' : '隐藏';
     });
     const bdSelect = segsEl.querySelector('[data-bd-card-select]');
     if (bdSelect) {

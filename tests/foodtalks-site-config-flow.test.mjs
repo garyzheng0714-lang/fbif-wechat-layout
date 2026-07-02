@@ -240,6 +240,8 @@ test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并�
   assert.match(stateSrc, /footerLib\.segment_order/, '片段顺序应由服务端 segment_order 渲染');
   assert.match(src, /saveFooterPanelState\(/, '当前文章排序应保存到单个 bottom_blocks 形状状态');
   assert.match(src, /data-seg-row/, '片段行应有拖拽目标');
+  assert.match(src, /data-footer-drag-handle/, '片段行应有专用拖拽 handle');
+  assert.match(src, /function\s+hydrateFooterDragHandles\(\)/, '拖拽 handle 图标应由 createIcon 注入');
   assert.match(src, /dragstart/, '应支持拖拽排序');
   assert.match(src, /function\s+isEmptyFooterPreset/, '无页脚 preset 应被识别为空页脚状态');
   assert.match(src, /enabled\s*=\s*!\s*isEmptyFooterPreset\(nextSegments\)/, '点击无页脚应同步关闭总开关，点击完整预设应重新打开');

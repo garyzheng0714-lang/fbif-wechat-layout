@@ -593,15 +593,6 @@ body.channel-portal-body {
   flex-direction: column;
   gap: 9px;
 }
-.ft-footer-seg-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--fs-text-1);
-  min-width: 0;
-  flex: 1 1 100%;
-}
 .ft-footer-segments .ft-footer-seg-row {
   display: flex;
   flex-wrap: wrap;
@@ -613,18 +604,59 @@ body.channel-portal-body {
 .ft-footer-segments .ft-footer-seg-row:first-child {
   border-top: none;
 }
+.ft-footer-seg-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fs-text-1);
+  min-width: 0;
+  flex: 1 1 100%;
+}
+.ft-footer-drag-slot {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.ft-footer-drag-handle {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--fs-text-3);
+  user-select: none;
+  border-radius: var(--fs-r-xs);
+  transition: background var(--fs-t-fast) var(--fs-ease-out),
+              color var(--fs-t-fast) var(--fs-ease-out);
+}
+.ft-footer-drag-handle:hover {
+  background: var(--fs-bg-hover);
+  color: var(--fs-text-2);
+}
+.ft-footer-drag-handle:active {
+  cursor: grabbing;
+}
+.ft-footer-drag-icon,
+.ft-footer-drag-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
 .ft-footer-seg-title {
   flex: 1;
   min-width: 0;
-}
-.ft-footer-seg-state {
-  color: var(--fs-text-3);
-  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .ft-footer-bd-control {
-  flex: 0 0 calc(100% - 44px);
-  margin-left: 44px;
+  flex: 0 0 calc(100% - 30px);
+  margin-left: 30px;
   display: grid;
   gap: 8px;
 }
@@ -667,8 +699,8 @@ body.channel-portal-body {
   opacity: 0.5;
 }
 .ft-footer-asset-control {
-  flex: 0 0 calc(100% - 44px);
-  margin-left: 44px;
+  flex: 0 0 calc(100% - 30px);
+  margin-left: 30px;
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
   align-items: center;
@@ -710,12 +742,12 @@ body.channel-portal-body {
   cursor: pointer;
 }
 .ft-footer-asset-btn {
-  color: var(--fs-brand);
+  color: var(--fs-text-1);
   background: var(--fs-bg-card);
   border: 1px solid var(--fs-border-control);
 }
 .ft-footer-asset-btn:hover {
-  background: var(--fs-brand-soft);
+  background: var(--fs-bg-hover);
 }
 .ft-footer-asset-reset {
   color: var(--fs-text-2);
