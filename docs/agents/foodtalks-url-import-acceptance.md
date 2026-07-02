@@ -5,7 +5,7 @@
 
 ## 1. 用户要的是什么（任务本质）
 
-在 FoodTalks 网站渠道（线上 `https://fbifmp-layout.foodtalks.cn/ft/default`）里：
+在 FoodTalks 网站渠道（线上 `https://fbifmp-layout.foodtalks.cn/ft/ft-default`）里：
 
 1. 用户粘贴一个微信公众号文章链接（URL 导入）。
 2. 工具抓取正文 + 图片，按 FoodTalks 网站规则渲染出预览页。
@@ -51,7 +51,7 @@
 > 这条是用户反复强调的硬约束，违反等于没看本文件。
 
 - **不准只在本地测**。图片抓取/转存依赖我们的服务器（绕过微信防盗链），本地拿不到真实结果。
-- **必须部署到服务器后**，用 Claude-in-Chrome 连上线上 `https://fbifmp-layout.foodtalks.cn/ft/default` 做真实测试。
+- **必须部署到服务器后**，用 Claude-in-Chrome 连上线上 `https://fbifmp-layout.foodtalks.cn/ft/ft-default` 做真实测试。
 - 测试动作：在线上工具里粘贴公众号链接 → 等渲染 → 整页截图扫描 → 点复制 → 把复制出的 HTML 与基准后台源码逐项 diff（按第 3、4 节口径）。
 - **"CSS 下发成功"≠ 完成；"build 通过"≠ 完成；"tsc 通过"≠ 完成**。只有真实浏览器上眼睛看过、复制出的 HTML 与基准对齐才算完成。
 - 不做"亡羊补牢"式单篇打补丁；发现的问题要从渲染/解析规则层面修，保证通配。
@@ -64,7 +64,7 @@
 
 ## 7. 完成定义（Definition of Done）
 
-- [x] 线上 `/ft/default` 粘贴基准链接，预览页正文主体与 https://www.foodtalks.cn/news/62285 后台源码逐项对齐（第 3、4 节口径）。
+- [x] 线上 `/ft/ft-default` 粘贴基准链接，预览页正文主体与 https://www.foodtalks.cn/news/62285 后台源码逐项对齐（第 3、4 节口径）。
 - [x] 所有图片成功绕过微信防盗链显示（不是裂图）。
 - [x] 正文主体颜色归一到 `#888888`（网站口径），无公众号 Mote `#396FBC` 泄漏；页脚库可保留固定片段自带颜色。
 - [x] 按页脚库配置输出 FoodTalks 固定页脚片段，不输出空 `js_content` div。
@@ -74,7 +74,7 @@
 
 ## 8. 修复记录（2026-05-30，build ffc2c66）
 
-诊断（真实环境 `/ft/default` + 后端 `/api/fetch-article`）发现三类根因，全部修复并真机验证：
+诊断（真实环境 `/ft/ft-default` + 后端 `/api/fetch-article`）发现三类根因，全部修复并真机验证：
 
 1. **图片仍是 mmbiz 原图床（致命裂图）** —— `uploader.js` 原逻辑刻意跳过 mmbiz
    （公众号场景对：mp.weixin.qq.com 内同源可用、保 GIF 动画）。网站渠道粘进
@@ -159,7 +159,7 @@ footerUrl='' 契约）共多项；`npm test` 264 全过、`go test ./...` 全过
 
 **解法**：新建**杭州同地域**桶 `fbif-gary-img-hz`（cn-hangzhou，公共读），上传走
 **内网** endpoint，实测 **2825KB/s（提速 ~23x）**，单张 400KB 上传从 ~3000ms 降到
-**145ms**。真机验证：`/ft/default` 导入 MATCH，14 张图全走
+**145ms**。真机验证：`/ft/ft-default` 导入 MATCH，14 张图全走
 `fbif-gary-img-hz.oss-cn-hangzhou`、公网 HTTP 200 可访问、排版正确性全保持。
 
 ### 运维细节（改的是服务器，不在本仓库；重装/接手必看）
@@ -203,7 +203,7 @@ footerUrl='' 契约）共多项；`npm test` 264 全过、`go test ./...` 全过
 （抄微信渠道 `_handle_upload` 现成模式），服务器内部并发「download_image（空 Referer
 绕防盗链）+ 杭州内网传 OSS」，返回 `{mmbiz_url: oss_url}` 映射，前端按映射替换 src。
 
-真机验证：`/ft/default` 导入 MATCH **端到端就绪 5.6s**（改前 ~40s，~7x），后端转存
+真机验证：`/ft/ft-default` 导入 MATCH **端到端就绪 5.6s**（改前 ~40s，~7x），后端转存
 占 1.3s；14 张图全走新桶、0 mmbiz/0 base64 残留、排版正确性全保持。
 （`uploader.js` + 服务器 `server.py`；删除前端 `mmbizUrlToDataUrl` 死代码；
 测试更新到 urls 契约 + 失败保留原链接/多图不串号用例。）

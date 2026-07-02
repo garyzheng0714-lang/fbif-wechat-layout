@@ -5,7 +5,7 @@
 ![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a)
 ![README](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-brightgreen)
 
-FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转换成可复制到微信公众号编辑器的 FBIF 风格 HTML。
+FBIF 微信公众号排版工具，用于把 DOCX、Markdown、剪贴板正文或文章链接转换成可复制到微信公众号编辑器的 FBIF 风格 HTML。
 
 ## 仓库定位
 
@@ -13,15 +13,15 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - **服务对象**：FBIF 公众号编辑、内容运营和需要快速统一文章样式的协作人员。
 - **服务宿主**：输出内容面向微信公众号编辑器；本仓库不是浏览器插件，也不是飞书多维表格插件。
 
-## 渠道隔离（2026-05-26）
+## 渠道与账号入口
 
 排版工具进入方式：
 
-- 打开 `/` 显示**渠道选择门户**（两个大框：公众号 / 网站），点哪个进哪个，**不**自动跳转。
-- 点"公众号"进入 `/mp/fbif`（FBIF 公众号工具，胶囊、更多文章、底部公众号链接都在）。
-- 点"网站"进入 `/ft/default`（FoodTalks 网站工具，独立页面，无胶囊、无"更多文章"、输出 inline-style HTML 给 FoodTalks 网站后台粘贴）。
-
-老 URL（`/app.html?account=fbif`）仍可用，作为公众号工具的过渡 alias。
+- 打开 `/` 会**无条件重定向到 `/mp/fbif`**（FBIF 公众号编辑器），不再有渠道选择门户。
+- 公众号渠道走 `/mp/<packId>`（由 `public/app.html` 服务）：FBIF、WowFood爆品超市、FoodTalks什么是系列。
+- 网站渠道走 `/ft/<packId>`（由 `public/site.html` 服务）：FoodTalks 网站默认包 `ft-default`，进入路径 `/ft/ft-default`，独立页面、无胶囊、无"更多文章"、输出 inline-style HTML 给 FoodTalks 网站后台粘贴。
+- 账号切换统一走**单层顶栏头像菜单**（`public/js/account-menu.js` 的 `mountAccountMenu`，挂载点 `#acctMenu`），渠道降为菜单内分组标签；同模板账号原地切换，跨模板 / 跨渠道账号整页 reload。
+- 老 URL（`/app.html`、`/mp`）仍可用，作为公众号工具的过渡 alias。
 
 **网站工具的排版规则**（参考 [VanilMsou/FoodtalksArticleLayout](https://github.com/VanilMsou/FoodtalksArticleLayout) 已移植）：
 
@@ -35,17 +35,20 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - 连续独立链接段之间不插空行
 - DOCX 首个"作者："行之前的前置材料默认剥离
 
-## 最新状态（2026-05-24）
+## 最新状态（2026-06-04）
 
-- 规则配置已扩展为多公众号模块化规则库：前端以 `public/js/rule-presets.js` 作为 schema 和本地兜底，服务端以 `api/rule_presets.go` 兼容旧版 preset 文档和 v2 rule store。
-- 密码保护的规则后台支持 `规则配置` 和 `规则` 两个视图：`规则配置` 绑定公众号当前应用的规则，`规则` 内含 `参数`、`代码化规则`、`校验预览` 三个分区，可编辑参数 JSON 和受限行为 JSON。
-- `public/js/rule-packs/registry.js` 已收拢账号 chrome、页脚和模板入口，当前注册 `FBIF公众号` 与 `FoodTalks什么是系列`；新增公众号必须先扩展该注册表。
-- “更多文章”URL 输入框已支持移动端粘贴只触发 `input` 事件的场景：合法微信文章链接会自动抓取元信息，同一链接不会重复触发抓取。
-- DOCX golden 输出、规则后台、规则 schema、CSS 内联和规则包注册都有 Node / Go 测试保护。
+- **统一顶栏账号菜单（单层）**：多账号在单层顶栏头像菜单切换（`public/js/account-menu.js` 的 `mountAccountMenu`），渠道（公众号 / 网站）降为菜单内分组标签；旧的「渠道胶囊 + 规则包分段」两层切换器已删除。账号 chrome、页脚和模板入口集中在 `public/js/rule-packs/registry.js`，服务端默认在 `api/rule_defaults.go` 成对登记，新增账号必须从这两处入手。
+- **底部区域 = 数据驱动的统一区块模型**：FBIF / WowFood / FoodTalks系列共用同一 `bottom_blocks` 结构（提示声明、名片、二维码、更多文章等通用可配置区块），差异只在 `api/rule_defaults.go` 的服务端默认。前端只暴露真正需要改的内容位（更多文章换链接 / 封面、`frontend_editable` 块换图），区块的显隐 / 排序 / 字号 / 颜色等结构样式归规则后台预配。
+- **总素材库 + 选图器**：图片统一从规则后台素材库按 ID 引用（`{{asset#id}}`，见 `docs/adr/2026-06-03-asset-reference-id.md`）；前台和后台选图都走素材库，不再手填图片 URL。
+- **网站页脚库**：FoodTalks 网站文章底部页脚由本工具完整输出，拆为 6 个可独立勾选片段（提示声明 / 商务合作 / 加入微信群 / 关注公众号 / FoodTalks logo / 点击获取更多），由 `config.modules.fbif_footer.segments.*` 控制。
+- **规则全部服务端可配**：页脚、识别正则、文案、颜色、底部区块默认等规则数据不写死在代码里，统一由密码保护的规则后台（`/api/rules/*`）配置；前端以 `public/js/rule-presets.js` 作为 schema 和本地兜底，localStorage 仅作离线降级。
+- **网站与公众号物理隔离**：网站（FoodTalks）渲染器、行为模板、署名颜色与公众号全套分离，互不 import；公众号 Mote `#396FBC` 蓝斜体不复用到网站。
+- DOCX golden 输出、规则后台、规则 schema、CSS 内联、底部区块保真和规则包注册都有 Node / Go 测试保护。
 
 ## 功能
 
 - 解析 DOCX / Markdown，保留标题、正文、图片、超链接、列表、引用和参考来源等结构。
+- 粘贴正文会作为临时 TXT / Markdown 文档进入同一套解析、标点和渲染链路。
 - 粘贴微信公众号文章或网页链接后，由 Go API 抓取并转换为结构化内容；失败时回退到备用读取路径。
 - URL 导入会保留微信文章的图片说明组：`图片 -> 图注 -> 图片来源` 必须连续渲染为浅灰图注，不得把 `图片来源：` 当成正文或文章来源。
 - 使用 `public/js/templates/fbif.js` 和 `public/css/wx-theme.css` 生成 FBIF 公众号样式。
@@ -55,7 +58,7 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 - “更多文章”URL 粘贴支持移动端 input-only 行为；输入合法微信文章链接后会自动抓取，重复输入同一链接不闪烁状态。
 - 支持旧版 `.doc` 经 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
 - 支持多文件队列处理、品牌页脚开关和“更多文章”组合页脚。
-- 支持多公众号规则绑定：`FBIF公众号` 与 `FoodTalks什么是系列` 可分别选择当前应用的规则；规则库 v2 文档可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数配置，并为每条规则保存 `behavior` 行为配置，本地设置保留为离线降级和兼容兜底。
+- 支持多账号规则绑定，当前 4 个账号：`FBIF食品饮料创新`、`WowFood爆品超市`（公众号，复用 fbif 模板）、`FoodTalks什么是系列`（公众号，独立 foodtalks-series 模板）、`网站默认 ft-default`（网站渠道，foodtalks-site 模板），各有独立服务端默认规则绑定；规则库 v2 文档可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数配置，并为每条规则保存 `behavior` 行为配置，本地设置保留为离线降级和兼容兜底。
 - 原创 DOCX 以首个 `作者：` 行作为正文起点；该行之前的编辑前置材料不进入编辑器预览。
 - DOCX 连续正文段落会保留紧凑排版；只有原文空段分隔的位置才恢复标准段后间距。
 - URL 导入的文章级 `来源：`、`作者：`、`编辑：` 会收集到正文末尾，并在标准 FBIF `提示：` 页脚前只渲染一次。
@@ -74,7 +77,7 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 ```text
 .
 ├── public/
-│   ├── index.html                  # 渠道选择门户（公众号 / 网站）
+│   ├── index.html                  # 根重定向页（无条件跳转到 /mp/fbif）
 │   ├── app.html                    # 公众号排版工具页（路径 /mp/*）
 │   ├── site.html                   # 网站排版工具页（路径 /ft/*）
 │   ├── site.css                    # 门户 + 网站工具页特有样式
@@ -83,23 +86,34 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown 或文章链接转�
 │   ├── css/wx-theme.css            # 微信内容样式
 │   ├── js/
 │   │   ├── engine.js               # UI 协调、批处理、页脚、复制流程
+│   │   ├── editor-shell.js         # 编辑器外壳、初始账号解析、快捷键
+│   │   ├── account-menu.js         # 单层顶栏头像账号菜单（mountAccountMenu）
+│   │   ├── session-restore.js      # 跨渠道编辑器快照保存与恢复
 │   │   ├── parser.js               # DOCX / Markdown 解析
 │   │   ├── uploader.js             # 图片上传与重试
 │   │   ├── clipboard.js            # 剪贴板复制
 │   │   ├── css-inline.js           # 复制前 CSS 内联
 │   │   ├── crop-editor.js          # 图片裁剪编辑
 │   │   ├── more-articles*.js       # “更多文章”配置与合成
+│   │   ├── asset-library.js        # 总素材库 {{asset#id}} 引用解析
+│   │   ├── blocks/                 # 底部区块统一模型（block-render/-merge/-panel；block-registry.gen.js 由 npm run gen:blocks 生成）
 │   │   ├── rule-presets.js         # 规则参数 schema、行为加载和 API 封装
-│   │   ├── rule-behavior.js        # 受限行为规则 schema、校验和执行
-│   │   ├── rule-packs/registry.js  # 账号包、页脚和模板注册表
-│   │   ├── admin-panel.js          # 密码保护的规则后台 UI
-│   │   └── templates/fbif.js       # FBIF 模板
+│   │   ├── rule-behavior.js        # 公众号受限行为规则 schema、校验和执行
+│   │   ├── rule-behavior-foodtalks*.js  # 网站 / 系列受限行为规则（与公众号物理隔离，红线#19）
+│   │   ├── rule-packs/registry.js  # 账号包注册表（go run . -emit-registry 生成，勿手改）
+│   │   ├── admin-panel.js          # 密码保护的规则后台 UI（admin-* 系列子模块）
+│   │   └── templates/              # 渲染器：fbif（公众号）/ foodtalks-site（网站）/ foodtalks-series（系列）+ mp-blocks / site-blocks 底部，三套互不 import
 │   ├── fonts/                      # Noto Sans Hans 字体文件和许可证
 │   └── version.json                # 部署版本信息
 ├── api/
-│   ├── main.go                     # API + 静态文件服务
+│   ├── main.go                     # API + 静态文件服务 + 渠道路由
 │   ├── html2md.go                  # HTML 转 Markdown 辅助
-│   ├── rule_presets.go             # 规则预设存储、后台 API 和 v1/v2 兼容
+│   ├── account_catalog.go          # 账号目录（accountCatalog()，registry.js 的 -emit-registry 源）
+│   ├── rule_defaults.go            # 各账号 / preset 服务端默认成对登记（红线#2/#22）
+│   ├── rule_presets.go             # 规则预设存储与后台 API
+│   ├── rule_bottom_blocks.go       # 统一 bottom_blocks 默认与校验（强制 schema_version=2）
+│   ├── block_type_catalog.go       # 底部区块类型目录（-emit-blocks 源）
+│   ├── rule_asset_library.go       # 素材库服务端存储
 │   ├── rule_behavior.go            # 默认行为规则和服务端合并逻辑
 │   ├── rule_config_validation.go   # 规则字段、模块、行为和取值校验
 │   └── wechat_blocks.go            # 微信文章块提取
@@ -143,7 +157,7 @@ curl http://127.0.0.1:9000/api/health
 
 ## 使用流程
 
-1. 上传 DOCX / Markdown，或粘贴文章链接。
+1. 上传 DOCX / Markdown，或粘贴文章链接 / 正文。
 2. 检查预览层中的正文、图片、引用和“更多文章”卡片。
 3. 原创 DOCX 默认读取首个 `作者：` 行作为作者信息；作者行会显示为蓝色、非斜体，不要在正文中重复保留。
 4. URL 导入文章时，图片来源应显示为浅灰小字号图注；文章级来源、作者、编辑应在提示页脚前只出现一次。
@@ -163,7 +177,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
-| `GET` | `/api/rules/active?account=foodtalks-series` | 读取指定公众号当前规则；未传 `account` 时默认读取 FBIF |
+| `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default`）当前规则；未传 `account` 时默认读取 FBIF |
 | `POST` | `/api/rules/admin/login` | 校验规则后台密码；成功返回 `{ "ok": true }` |
 | `GET` | `/api/rules/admin/presets` | 列出规则预设，需 `X-Admin-Password` |
 | `POST` | `/api/rules/admin/presets` | 保存规则预设，需 `X-Admin-Password` |
@@ -230,10 +244,10 @@ go test ./...
 ## 维护说明
 
 - `DESIGN.md` 记录界面和公众号预览页的设计约束。
-- 当前主模板为 `fbif`；功能描述应以 `public/app.html`、`public/js/engine.js` 和 `public/js/templates/fbif.js` 为准。
-- 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；受限行为规则集中在 `public/js/rule-behavior.js`。服务端持久化、v1/v2 兼容、公众号绑定和写入校验集中在 `api/rule_presets.go`、`api/rule_behavior.go`、`api/rule_config_validation.go`。
+- 渲染器按渠道分三套且物理隔离（红线#19）：公众号默认走 `fbif`，网站走 `foodtalks-site`，FoodTalks系列走 `foodtalks-series`，底部分别由 `mp-blocks`（661px）/ `site-blocks`（满宽）渲染。各渠道功能应以对应渲染器为准，不要用 `fbif.js` 描述网站 / 系列行为。
+- 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；受限行为规则集中在 `public/js/rule-behavior.js`。服务端规则持久化、账号绑定和写入校验集中在 `api/rule_presets.go`、`api/rule_behavior.go`、`api/rule_config_validation.go`；各账号 / preset 的默认成对登记在 `api/rule_defaults.go` 与 `api/account_catalog.go`，底部区块默认与校验在 `api/rule_bottom_blocks.go`（统一 `schema_version=2`）。
 - `behavior` 不是任意 JavaScript。第一阶段只允许 schema 校验过的参数、条件、动作和模板槽位，用于作者/来源行、Mote 署名图、原创/转载页脚提示等轻量业务规则；解析、上传、复制、重试和图片处理仍必须留在代码里并由测试保护。
-- 账号包入口集中在 `public/js/rule-packs/registry.js`；新增账号包时应同时确认页脚、头像、账号名、模板 ID 和测试覆盖。`FoodTalks什么是系列` 第一阶段复用现有 FBIF 模板和页脚资产，但拥有独立默认规则绑定，避免编辑 FoodTalks 规则时影响 FBIF。
+- 账号包入口集中在 `public/js/rule-packs/registry.js`（由 `go run . -emit-registry` 从 `api/account_catalog.go` 生成，勿手改）；新增账号必须先进入 `account_catalog.go` 并在 `api/rule_defaults.go` 成对登记账号 / preset（id 字节一致，红线#2）。`FoodTalks什么是系列` 走独立 `foodtalks-series` 渲染器与独立 `bottom_blocks` 默认（满宽，作者 / BD / 群二维码为 image 块），**不复用 FBIF 模板或页脚**；`api/rule_defaults.go` 必须显式覆盖其 `modules.bottom_blocks`，否则继承 FBIF 基线会错渲 FBIF 页脚（红线#22）。
 - 复制到微信前的兼容处理集中在 `engine.js`、`clipboard.js`、`css-inline.js`、`uploader.js` 和 `more-articles.js`。`copyContent()` 不应等待图片上传或“更多文章”合成；后台准备完成后刷新复制层，下一次复制自然使用新结果。
 - 默认“更多文章”列表由规则配置驱动：`public/js/rule-presets.js` 负责 JSON 读写，`public/js/more-articles-config.js` 负责卡片归一化，`public/js/more-articles-rule-editor.js` 负责规则后台卡片编辑器，`public/js/more-articles.js` 在新文章导入时按当前规则生成默认卡片。
 - “更多文章”选图链路由 `api/main.go` 的 `/api/fetch-article-meta` 返回 `image_urls`，`public/js/more-articles.js` 持久化到卡片状态，`public/js/more-articles-ui.js` 合并为选图候选并处理 URL 输入自动抓取。候选顺序为自定义封面、抓取头图、当前卡片正文媒体图、主文章图片兜底；旧卡片缺少 `image_urls` 时，点击替换会按卡片链接补抓一次。

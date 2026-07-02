@@ -1,6 +1,11 @@
 # 工作文档 · 网站渠道「什么是系列」排版包（ft-series）
 
-> 开始：2026-06-08 ｜ 状态：进行中（第 1 块）
+> 开始：2026-06-08 ｜ 状态：**已提交并部署到生产**（commit `1713214`，部署 run 27119761494 全步骤 ✓）
+>
+> 已落地：注册 / 样式 / 商务合作底部 / BD 素材（本地浏览器验证 + go test + npm 537 全绿）。
+> 搁置：**视频 UI 实测**（代码已随包上线，`extractVideo` 默认 false 对公众号/ft-default 零影响，golden 守，待真实带视频文章验证）。
+> 遗留：商务合作「相关合作」3 行表、BD 切换器（默认 Eileen，换 soso/tiki 侧栏选择器待接）。
+> 生产终验缺口：生产域名是 deploy secret，未做生产侧 `curl /api/rules/active?account=ft-series` 与浏览器 /ft 终验，待用户提供域名/页面。
 
 ## 目标
 在 **FoodTalks 网站渠道（channel `ft`）** 新增一个「什么是系列」排版规则包 `ft-series`，

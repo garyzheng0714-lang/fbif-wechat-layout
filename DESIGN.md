@@ -23,8 +23,8 @@
 | 卡片 / 页面底 | `--fs-bg-card` | `#FFFFFF` |
 | 嵌套分区底 | `--fs-bg-nested` | `#F7F8FA` |
 | 凹槽 / sunken | `--fs-bg-sunken` | `#F2F3F5` |
-| hover / press 叠加 | `--fs-bg-hover` / `--fs-bg-press` | `rgba(31,35,39,0.04)` / `.08` |
-| 浮层遮罩 | `--fs-bg-overlay` | `rgba(0,0,0,0.45)` |
+| hover / press 叠加 | `--fs-bg-hover` / `--fs-bg-press` | `rgba(31,35,39,0.045)` / `.08` |
+| 浮层遮罩 | `--fs-bg-overlay` | `rgba(17,20,24,0.42)` |
 | 控件描边 | `--fs-border-control` | `#D9DCE0` |
 | 卡片描边 | `--fs-border-card` | `#E5E6EB` |
 | 分隔线 | `--fs-divider` | `rgba(31,35,39,0.08)` |

@@ -31,7 +31,7 @@ in the active thread, the newer instruction wins. Do not promote old product
 requests into this list unless the user explicitly reconfirms them as current.
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
-2. **多公众号规则绑定，单模板起步** — 默认公众号为 `FBIF公众号`，上传区胶囊可切到 `FoodTalks什么是系列`；公众号是规则应用对象，规则是可复用资产，新增公众号必须先进入 `public/js/rule-packs/registry.js`
+2. **多账号绑定，统一顶栏账号菜单（单层）** — 公众号是规则应用对象，规则是可复用资产；新增账号必须先进入 `public/js/rule-packs/registry.js`（唯一入口），并在 `api/rule_defaults.go` 成对登记账号/preset。账号切换走单层顶栏头像菜单（`public/js/account-menu.js` 的 `mountAccountMenu`，挂载点 `#acctMenu`），渠道（公众号 / 网站）降为菜单内分组标签。同模板账号原地切换，跨模板账号整页 reload。**2026-06-02 用户裁定「不要两层」，旧的「圆角渠道胶囊 + 方角规则包分段」两层切换器已删除，不要恢复。**
 3. **规则服务端保存 + 本地降级** — 参数预设和 `behavior` 行为配置以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
 4. **所有按钮在顶部工具栏** — 底部不放按钮
 5. **不要 TOC/目录** — 已删除
@@ -48,6 +48,10 @@ requests into this list unless the user explicitly reconfirms them as current.
 16. **URL 导入图片说明组不可拆散** — `图片 -> 图注 -> 图片来源` 必须连续归为图注；`图片来源：` / `图源：` 不能被当成正文或文章级来源
 17. **URL 导入作者来源固定在提示前** — 文章级 `来源：` / `作者：` / `编辑：` 只渲染一次，位置固定在标准 `提示：` 页脚前
 18. **DOCX 连续段落尊重空段语义** — 连续非空正文段落在 Word 段距较小时保持紧凑；只有原文中间有空段时，下一段前才恢复标准 `wx-gap`
+19. **FoodTalks 网站规则与公众号物理隔离** — 网站渲染器（`public/js/templates/foodtalks-site.js`）、行为模板（`public/js/rule-behavior-foodtalks.js`）、页脚、署名颜色全套与公众号分离，两侧渲染器互不 import。公众号 Mote `#396FBC` 蓝色斜体不复用到网站；网站署名走 `#888888` 14px 斜体。改任一侧规则不得波及另一侧（`public/js/templates/fbif.js` 在网站任务中字节级不动）。
+20. **页脚库（footer library）** — FoodTalks 网站文章底部页脚由本工具**完整输出**，拆为 6 个可独立勾选片段（`tip` / `biz_coop` / `join_group` / `follow_account` / `logo` / `more_info`），固定资源 URL 定义在 `rule-behavior-foodtalks.js` 的 `FOOTER_SEGMENTS`，由 `buildFooterHtml(segments)` 按开关拼接，受 `config.modules.fbif_footer.segments.<key>` 控制。
+21. **网站渠道默认走 ft-default 规则包** — site.html 用 `getRulePackByPath(location.pathname)` 做渠道感知 fallback：`/ft/<任意 id>` 都落到该渠道默认包 `ft-default`。**禁止**裸用 `parsed.packId`——`/ft/default` 里的 `default` 在 registry 不存在，裸用会误 fallback 到公众号 `fbif`。
+22. **所有公众号账号共用同一 `bottom_blocks` 底部结构，差异只在服务端默认** — FBIF / WowFood / FoodTalks系列都走统一 `mountBlockPanel`，每账号在 `api/rule_defaults.go` 显式覆盖 `modules.bottom_blocks`（不覆盖则经 `mergeRuleDefaults` 继承 FBIF 基线→错渲）。拖拽排序统一用 vendor 的 SortableJS（`public/vendor/Sortable.min.js`）。
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
