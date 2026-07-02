@@ -230,7 +230,7 @@ test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并�
     new URL('../public/site.html', import.meta.url),
     'utf8'
   );
-  assert.match(src, /<details class="ft-advanced-options" id="footerLib" open>/, '页脚控制区默认应展开，避免运营每篇都多点一次');
+  assert.match(src, /<details class="ft-advanced-options ft-footer-area" id="footerLib" open>/, '底部区域控制区默认应展开，避免运营每篇都多点一次');
   assert.match(src, /serverFooterLibrary\(\)/, '页脚侧栏应读取服务端页脚库');
   assert.match(src, /footerLib\.presets/, '预设按钮应由服务端 presets 渲染');
   assert.match(src, /footerLib\.segment_order/, '片段顺序应由服务端 segment_order 渲染');
@@ -240,6 +240,48 @@ test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并�
   assert.match(src, /function\s+isEmptyFooterPreset/, '无页脚 preset 应被识别为空页脚状态');
   assert.match(src, /enabled\s*=\s*!\s*isEmptyFooterPreset\(nextSegments\)/, '点击无页脚应同步关闭总开关，点击完整预设应重新打开');
   assert.doesNotMatch(src, /<button type="button" class="ft-footer-preset" data-preset="fbif-original">FBIF原创<\/button>/, '不应在 HTML 静态写死预设按钮');
+});
+
+test('site.html: 本篇底部区域开关必须同步到正文流 tip', async () => {
+  // WHY：网站 tip 在 foodtalks-site.js 里走正文流，不在底部 HTML 拼接里。
+  // 如果前台只关 footer.enabled，tip 会继续显示，违背所见即所得。
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /const\s+effectiveFooterSegments\s*=\s*footerEnabled\s*\?\s*footerActiveSegments\s*:\s*disabledFooterSegments\(footerActiveSegments,\s*footerOrder\)/, '关闭底部区域时必须生成全 false 的本篇片段状态');
+  assert.ok(
+    src.indexOf('const footerOrder = footerState.order') < src.indexOf('const effectiveFooterSegments ='),
+    'effectiveFooterSegments 不能在 footerOrder 声明前读取 footerOrder'
+  );
+  assert.match(src, /active_preset_id:\s*'__article_override__'/, '传给渲染器的页脚库应使用本篇覆盖 preset');
+  assert.match(src, /presets:\s*\[\{\s*id:\s*'__article_override__'[\s\S]{0,120}segments:\s*effectiveFooterSegments/, '本篇覆盖 preset 必须压过服务端 preset，确保 tip 开关即时生效');
+  assert.match(src, /active_segments:\s*effectiveFooterSegments/, '旧 active_segments 兼容字段也应同步本篇状态');
+});
+
+test('site.html: 关闭底部区域时即使 preset 缺 tip 也要关闭正文流 tip', async () => {
+  // WHY：FoodTalks tip 是正文流元素；active segments 缺 tip 时模板默认会继续输出。
+  // 父级关闭必须显式补 tip:0，不能只把已有 segment 置 0。
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /function\s+disabledFooterSegments\(segments,\s*order\s*=\s*\[\]\)/, 'disabledFooterSegments 应接收 footer order');
+  assert.match(src, /\['tip',\s*\.\.\.order,\s*\.\.\.Object\.keys\(segments \|\| \{\}\)\]/, '关闭态必须强制包含 tip 和当前顺序里的所有片段');
+  assert.match(src, /disabledFooterSegments\(footerActiveSegments,\s*footerOrder\)/, '关闭底部区域时必须按当前页脚顺序生成全 false 状态');
+});
+
+test('site.html: bottom_blocks 自有块不被旧 fbif_footer 片段缺省误关', async () => {
+  // WHY：bottom_blocks 是新主合同；fbif_footer 只是兼容回退。
+  // 后台新增的 bottom_blocks-only 区块不应因为旧 preset 没同名 segment 而被映射成 false。
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /function\s+footerSegmentEnabledForBlock\(id,\s*block,\s*effectiveSegments,\s*footerEnabled\)/, 'bottom_blocks 显隐应通过专门桥接函数判定');
+  assert.match(src, /Object\.prototype\.hasOwnProperty\.call\(effectiveSegments,\s*id\)/, '只有 legacy segments 显式声明同名 id 时才覆盖 bottom block');
+  assert.match(src, /return\s+!\(block && block\.enabled === false\)/, 'legacy segments 缺省时应回到 bottom block 自身默认 enabled');
+  assert.match(src, /overrides\[id\]\s*=\s*\{\s*enabled:\s*footerSegmentEnabledForBlock\(id,\s*bbBlocks\[id\],\s*effectiveFooterSegments,\s*footerEnabled\)\s*\}/, 'bottom_blocks override 应从 block 默认和显式本篇开关合成');
 });
 
 test('site.html: 服务端页脚结构变化时清理旧本地状态，避免 tip=true 或漏 BD 名片', async () => {

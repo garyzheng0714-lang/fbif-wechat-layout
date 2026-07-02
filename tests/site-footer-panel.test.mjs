@@ -17,3 +17,15 @@ test('页脚面板：默认排版和什么是系列使用各自的片段标签',
   assert.match(siteHtml, /footerSegmentLabel\(key\)/);
   assert.doesNotMatch(siteHtml, /FT_FOOTER_LABELS\[key\]/);
 });
+
+test('页脚面板：网站侧使用底部区域胶囊开关，不再暴露 checkbox', () => {
+  // WHY：网站侧和公众号侧应共用“底部区域 → 子模块”的低摩擦心智；
+  // 普通编辑不应该在前台看到复选框式页脚库。
+  assert.match(siteHtml, /<summary class="ft-adv-summary ft-footer-summary">/);
+  assert.match(siteHtml, /<span class="ft-footer-summary-title">底部区域<\/span>/);
+  assert.match(siteHtml, /id="footerEnableToggle"[\s\S]{0,160}role="switch"/);
+  assert.match(siteHtml, /data-footer-area-switch="enabled"/);
+  assert.match(siteHtml, /data-footer-seg="\$\{escText\(key\)\}"[\s\S]{0,160}role="switch"/);
+  assert.doesNotMatch(siteHtml, /<input type="checkbox" id="footerEnableToggle"/);
+  assert.doesNotMatch(siteHtml, /<input type="checkbox" data-seg=/);
+});

@@ -106,15 +106,20 @@
         </div>
       </div>
 
-      <details class="ft-advanced-options" id="footerLib" open>
-        <summary class="ft-adv-summary">页脚</summary>
+      <details class="ft-advanced-options ft-footer-area" id="footerLib" open>
+        <summary class="ft-adv-summary ft-footer-summary">
+          <span class="ft-footer-summary-title">底部区域</span>
+          <span class="ft-footer-parent-switch">
+            <span>本文显示</span>
+            <button type="button" class="ft-switch" id="footerEnableToggle" role="switch" aria-checked="false" aria-label="显示底部区域" data-footer-area-switch="enabled">
+              <span class="ft-switch-knob"></span>
+            </button>
+          </span>
+        </summary>
         <div class="ft-adv-body">
-          <label class="ft-adv-toggle">
-            <input type="checkbox" id="footerEnableToggle">
-            <span>输出 FoodTalks 页脚</span>
-          </label>
           <!-- 页脚预设和片段由服务端规则模块动态渲染 -->
           <div class="ft-footer-presets" id="footerPresets"></div>
+          <div class="ft-footer-off-note" id="footerOffNote" hidden>本文不输出底部区域，预览和复制都不会包含这些模块。</div>
           <div class="ft-footer-segments" id="footerSegments"></div>
         </div>
       </details>
@@ -840,6 +845,22 @@ function readFooterState() {
   return { footerLib, enabled, segments, order, presets: footerPresetList(footerLib) };
 }
 
+function disabledFooterSegments(segments, order = []) {
+  const next = {};
+  for (const key of ['tip', ...order, ...Object.keys(segments || {})]) {
+    if (key) next[key] = 0;
+  }
+  return next;
+}
+
+function footerSegmentEnabledForBlock(id, block, effectiveSegments, footerEnabled) {
+  if (!footerEnabled) return false;
+  if (effectiveSegments && Object.prototype.hasOwnProperty.call(effectiveSegments, id)) {
+    return !!effectiveSegments[id];
+  }
+  return !(block && block.enabled === false);
+}
+
 // 把当前规则（扁平参数 + 行为 + 模块开关）注入排版引擎的渲染配置。
 // 命门：扁平参数（muted_color 等）必须并进去，否则网站模板读不到，
 // 后台改颜色不生效（见 specs/2026-05-28-unified-rule-engine-design.md §3）。
@@ -857,6 +878,7 @@ function syncEngineConfig(triggerRerender) {
   const footerEnabled = footerState.enabled;
   const footerActiveSegments = footerState.segments;
   const footerOrder = footerState.order;
+  const effectiveFooterSegments = footerEnabled ? footerActiveSegments : disabledFooterSegments(footerActiveSegments, footerOrder);
   const serverAssets = serverAssetLibrary();
   const serverBottomBlocks = serverRuleModules().bottom_blocks;
   const baseFooterForRender = Array.isArray(footerOrder) && footerOrder.length
@@ -870,10 +892,11 @@ function syncEngineConfig(triggerRerender) {
     // v2：order 在 active preset 内（复用 block-merge 的 pickActivePreset 选预设）。
     const bbActive = pickActivePreset(serverBottomBlocks);
     const bbOrder = Array.isArray(bbActive.order) ? bbActive.order : [];
+    const bbBlocks = bbActive && typeof bbActive.blocks === 'object' ? bbActive.blocks : {};
     const overrides = {};
     for (const id of bbOrder) {
       if (id === 'tip') continue;
-      overrides[id] = { enabled: !!footerActiveSegments[id] };
+      overrides[id] = { enabled: footerSegmentEnabledForBlock(id, bbBlocks[id], effectiveFooterSegments, footerEnabled) };
     }
     bottomBlocksOverride = { enabled: footerEnabled, overrides };
     if (Array.isArray(footerOrder) && footerOrder.length) {
@@ -886,7 +909,13 @@ function syncEngineConfig(triggerRerender) {
     _bottomBlocksOverride: bottomBlocksOverride,
     modules: {
       ...prevModules,
-      fbif_footer: { ...footerForRender, enabled: footerEnabled, active_segments: footerActiveSegments },
+      fbif_footer: {
+        ...footerForRender,
+        enabled: footerEnabled,
+        active_preset_id: '__article_override__',
+        presets: [{ id: '__article_override__', name: '本篇', segments: effectiveFooterSegments }],
+        active_segments: effectiveFooterSegments,
+      },
       asset_library: serverAssets,
       ...(serverBottomBlocks && typeof serverBottomBlocks === 'object' ? { bottom_blocks: serverBottomBlocks } : {}),
       // 网站渠道 h2 默认不输出 mctoc 锚点 id —— FoodTalks 后台生成目录时会自己加
@@ -1112,7 +1141,7 @@ bindUrlImportShortcuts({
 });
 
 (() => {
-  const toggle = document.getElementById('footerEnableToggle'), presetsEl = document.getElementById('footerPresets'), segsEl = document.getElementById('footerSegments');
+  const toggle = document.getElementById('footerEnableToggle'), presetsEl = document.getElementById('footerPresets'), segsEl = document.getElementById('footerSegments'), offNote = document.getElementById('footerOffNote');
   if (!toggle || !presetsEl || !segsEl) return;
   const state = readFooterState();
   const presetList = state.presets;
@@ -1137,10 +1166,13 @@ bindUrlImportShortcuts({
 
   function segmentRowHtml(key) {
     return `<div class="ft-footer-seg-row" data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}">
-      <label class="ft-footer-seg-label">
-        <input type="checkbox" data-seg="${escText(key)}">
+      <div class="ft-footer-seg-main">
+        <button type="button" class="ft-switch" data-footer-seg="${escText(key)}" role="switch" aria-checked="false" aria-label="显示${escText(footerSegmentLabel(key))}">
+          <span class="ft-switch-knob"></span>
+        </button>
         <span class="ft-footer-seg-title">${escText(footerSegmentLabel(key))}</span>
-      </label>
+        <span class="ft-footer-seg-state" data-footer-seg-state="${escText(key)}">隐藏</span>
+      </div>
       ${bdCardSelectHtml(key)}
     </div>`;
   }
@@ -1152,7 +1184,7 @@ bindUrlImportShortcuts({
   renderControls();
   refreshFooterControls = () => { renderControls(); paint(); };
 
-  const checkboxes = () => Array.from(segsEl.querySelectorAll('input[type="checkbox"]'));
+  const segmentSwitches = () => Array.from(segsEl.querySelectorAll('[data-footer-seg][role="switch"]'));
   const segmentKeys = () => order.slice();
   function isEmptyFooterPreset(segs) {
     return segmentKeys().every(k => !segs || !segs[k]);
@@ -1163,11 +1195,20 @@ bindUrlImportShortcuts({
     return null;
   }
   function paint() {
-    toggle.checked = enabled;
+    toggle.setAttribute('aria-checked', enabled ? 'true' : 'false');
     segsEl.classList.toggle('ft-footer-disabled', !enabled);
+    if (offNote) offNote.hidden = enabled;
     const active = matchPreset();
     presetsEl.querySelectorAll('.ft-footer-preset').forEach(b => b.classList.toggle('active', b.dataset.preset === active));
-    checkboxes().forEach(cb => { cb.checked = !!segments[cb.dataset.seg]; });
+    segmentSwitches().forEach(btn => {
+      const key = btn.dataset.footerSeg;
+      const checked = !!segments[key];
+      btn.setAttribute('aria-checked', checked ? 'true' : 'false');
+      btn.disabled = !enabled;
+      btn.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+      const state = segsEl.querySelector('[data-footer-seg-state="' + key + '"]');
+      if (state) state.textContent = checked ? '显示' : '隐藏';
+    });
     const bdSelect = segsEl.querySelector('[data-bd-card-select]');
     if (bdSelect) {
       bdSelect.value = footerBdCardAssetID;
@@ -1191,8 +1232,10 @@ bindUrlImportShortcuts({
   paint();
   syncEngineConfig(false);
 
-  toggle.addEventListener('change', () => {
-    enabled = toggle.checked;
+  toggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    enabled = toggle.getAttribute('aria-checked') !== 'true';
     if (enabled && !segmentKeys().some(k => segments[k])) segments = { ...((activeFooterPreset(serverFooterLibrary()) || {}).segments || {}) };
     paint(); persist(true);
   });
@@ -1202,6 +1245,13 @@ bindUrlImportShortcuts({
     const nextSegments = { ...(PRESETS[btn.dataset.preset] || {}) };
     enabled = !isEmptyFooterPreset(nextSegments);
     segments = nextSegments;
+    paint(); persist(true);
+  });
+  segsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-footer-seg][role="switch"]');
+    if (!btn || btn.disabled) return;
+    const key = btn.dataset.footerSeg;
+    segments[key] = btn.getAttribute('aria-checked') === 'true' ? 0 : 1;
     paint(); persist(true);
   });
   segsEl.addEventListener('change', (e) => {
@@ -1215,10 +1265,6 @@ bindUrlImportShortcuts({
       paint(); persist(true);
       return;
     }
-    const cb = e.target.closest('input[type="checkbox"]');
-    if (!cb) return;
-    segments[cb.dataset.seg] = cb.checked ? 1 : 0;
-    paint(); persist(true);
   });
   let dragging = '';
   segsEl.addEventListener('dragstart', e => { const row = e.target.closest('[data-seg-row]'); dragging = row && row.dataset.segRow || ''; });
