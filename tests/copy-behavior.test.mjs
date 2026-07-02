@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
+function extractFunction(source, name) {
+  const start = source.indexOf(`function ${name}`);
+  assert.notEqual(start, -1, `${name} should exist`);
+  const bodyStart = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    if (source[i] === '}') depth--;
+    if (depth === 0) return source.slice(start, i + 1);
+  }
+  assert.fail(`${name} function body should be complete`);
+}
+
 test('copy button does not auto-open WeChat backend', async () => {
   const html = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const rulePresets = await readFile(new URL('../public/js/rule-presets.js', import.meta.url), 'utf8');
@@ -82,6 +95,29 @@ test('copy warning is derived from final HTML unsafe image src and imgurl refs',
   assert.match(engine, /src\|imgurl/);
   assert.match(copyFn, /const unsafeCopyRefs = findUnsafeCopyImageRefs\(html\)/);
   assert.match(copyFn, /new Set\(\[ \.\.\.\(_failedSrcs \|\| \[\]\), \.\.\.unsafeCopyRefs \]\)/);
+});
+
+test('materialized DOCX image srcs are copy-safe but metadata image refs still warn', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const findUnsafeCopyImageRefs = new Function(`
+    ${extractFunction(engine, 'isUnsafeCopyImageRef')}
+    ${extractFunction(engine, 'findUnsafeCopyImageRefs')}
+    return findUnsafeCopyImageRefs;
+  `)();
+
+  const refs = findUnsafeCopyImageRefs(`
+    <p><img src="data:image/png;base64,docx-image"></p>
+    <p><img src="blob:docx-local-image"></p>
+    <section imgurl="data:image/jpeg;base64,preview-leak"></section>
+    <p><img src="/api/doc-cache/article/image1.png"></p>
+    <p><img src="https://cdn.example.com/article/image2.png"></p>
+  `);
+
+  assert.deepEqual(refs, [
+    'blob:docx-local-image',
+    'data:image/jpeg;base64,preview-leak',
+    '/api/doc-cache/article/image1.png',
+  ]);
 });
 
 test('pure text copy bypasses article HTML and footer pipeline', async () => {
