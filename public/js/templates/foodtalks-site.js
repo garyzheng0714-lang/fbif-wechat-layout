@@ -521,7 +521,7 @@ function renderImageCaption(text, config = {}) {
   );
 }
 
-// ---- 表格渲染（统一表格样式，与公众号物理隔离：各写各的 renderTable，仅共享中性 rows 结构）----
+// ---- 表格渲染（统一表格样式，与公众号物理隔离：各写各的 renderTable，共享中性表格结构）----
 // 网站渲染器本就全 inline-style（粘进 FoodTalks 后台编辑器），表格同样把 border/底色/字号/
 // 内距内联到每个 td。颜色/字号/边框/内距读扁平 config 键（cfgColor/cfgNum，红线下放规则后台
 // 可配），缺省降级到与服务端 defaultRuleConfig 逐字一致的 const（与公众号同一套默认值=统一）。
@@ -935,7 +935,7 @@ function adaptNeutralToSite(e) {
     return { k: 'h', level, runs: [{ type: 'txt', text: e.text }], blankBefore: e.blankBefore };
   }
   if (e.k === 'cap') return { k: 'cap', runs: [{ type: 'txt', text: e.text }], blankBefore: e.blankBefore };
-  if (e.k === 'table') return { k: 'table', rows: e.rows || [], blankBefore: e.blankBefore };
+  if (e.k === 'table') return { k: 'table', rows: e.rows || [], colWidths: e.colWidths || [], blankBefore: e.blankBefore };
   return { k: 'p', runs: e.runs || [], blankBefore: e.blankBefore };
 }
 
