@@ -254,6 +254,11 @@
 
 <script type="module">
 import { pickActivePreset } from '/js/blocks/block-merge.js';
+import {
+  activeFooterPreset,
+  readFooterPanelState,
+  saveFooterPanelState,
+} from '/js/site-footer-state.js';
 // ---- Version ----
 async function loadVersionInfo() {
   try { const r = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' }); if (r.ok) return await r.json(); } catch {}
@@ -667,12 +672,6 @@ function serverAssetLibrary() {
   return (mods.asset_library && typeof mods.asset_library === 'object') ? mods.asset_library : {};
 }
 
-const FT_FOOTER_STORAGE = Object.freeze({
-  enabled: 'ft.footer.enabled',
-  segments: 'ft.footer.segments',
-  order: 'ft.footer.order',
-  signature: 'ft.footer.signature',
-});
 const FT_FOOTER_LABELS_DEFAULT = Object.freeze({
   tip: '提示声明',
   biz_coop: '商务合作',
@@ -695,12 +694,6 @@ function footerSegmentLabel(key) {
   return labels[key] || key;
 }
 const FT_FOOTER_BD_CARD_RE = /^ftss_bd_[a-z0-9_-]+$/i;
-const FT_FOOTER_FALLBACK_PRESETS = Object.freeze([
-  Object.freeze({ id: 'fbif-original', name: 'FBIF原创', segments: Object.freeze({ tip: 1, biz_coop: 1, join_group: 1, follow_account: 1, logo: 1, more_info: 1 }) }),
-  Object.freeze({ id: 'repost-simple', name: '转载简版', segments: Object.freeze({ tip: 1, biz_coop: 1, join_group: 0, follow_account: 0, logo: 0, more_info: 0 }) }),
-  Object.freeze({ id: 'tip-only', name: '仅提示', segments: Object.freeze({ tip: 1, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 }) }),
-  Object.freeze({ id: 'none', name: '无', segments: Object.freeze({ tip: 0, biz_coop: 0, join_group: 0, follow_account: 0, logo: 0, more_info: 0 }) }),
-]);
 let footerBdCardAssetID = '';
 let footerLastArticlePayload = null;
 let refreshFooterControls = () => {};
@@ -724,21 +717,6 @@ function footerBdCardAssets() {
 function footerAssetByID(id) {
   if (!id) return null;
   return footerAssets().find(asset => String(asset && asset.id || '') === String(id)) || null;
-}
-
-function footerPresetList(footerLib = serverFooterLibrary()) {
-  return Array.isArray(footerLib.presets) && footerLib.presets.length ? footerLib.presets : FT_FOOTER_FALLBACK_PRESETS;
-}
-
-function footerServerOrder(footerLib = serverFooterLibrary()) {
-  return Array.isArray(footerLib.segment_order) && footerLib.segment_order.length
-    ? footerLib.segment_order.filter(k => k !== 'tip')
-    : ['biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
-}
-
-function activeFooterPreset(footerLib = serverFooterLibrary()) {
-  const presets = footerPresetList(footerLib);
-  return presets.find(p => p.id === footerLib.active_preset_id) || presets[0] || { segments: {} };
 }
 
 function replaceBdCardAssetRef(lines, assetID) {
@@ -794,55 +772,12 @@ function resetFooterArticleOverridesFor(session) {
   return clearFooterArticleOverrides(true, false);
 }
 
-function footerSignature(footerLib = serverFooterLibrary()) {
-  const active = activeFooterPreset(footerLib);
-  const segmentKeys = Object.keys((footerLib && footerLib.segments) || {}).sort();
-  return JSON.stringify({
-    preset: (footerLib && footerLib.active_preset_id) || active.id || '',
-    order: footerServerOrder(footerLib),
-    segments: active.segments || {},
-    keys: segmentKeys,
-  });
-}
-
 function readFooterState() {
-  const footerLib = serverFooterLibrary();
-  const signature = footerSignature(footerLib);
-  const active = activeFooterPreset(footerLib);
-  const defaultOrder = ['tip', ...footerServerOrder(footerLib)];
-  const defaultSegments = { ...((active && active.segments) || {}) };
-  const defaultEnabled = !!(footerLib && footerLib.enabled);
-  const storedSignature = localStorage.getItem(FT_FOOTER_STORAGE.signature);
-  const resetToServer = storedSignature !== signature;
-
-  let order = [];
-  let segments = {};
-  let enabled = defaultEnabled;
-  if (!resetToServer) {
-    try { order = JSON.parse(localStorage.getItem(FT_FOOTER_STORAGE.order) || '[]'); } catch (e) {}
-    try { segments = JSON.parse(localStorage.getItem(FT_FOOTER_STORAGE.segments) || 'null') || {}; } catch (e) {}
-    const enabledLS = localStorage.getItem(FT_FOOTER_STORAGE.enabled);
-    enabled = enabledLS === null ? defaultEnabled : enabledLS === '1';
-  }
-
-  const known = new Set(defaultOrder);
-  order = Array.isArray(order) && order.length ? order.filter(k => known.has(k)) : [];
-  for (const key of defaultOrder) {
-    if (!order.includes(key)) order.push(key);
-    if (!Object.prototype.hasOwnProperty.call(segments, key) && Object.prototype.hasOwnProperty.call(defaultSegments, key)) {
-      segments[key] = defaultSegments[key];
-    }
-  }
-  if (resetToServer || !Object.keys(segments).length) {
-    segments = { ...defaultSegments };
-    order = defaultOrder.slice();
-  }
-
-  localStorage.setItem(FT_FOOTER_STORAGE.signature, signature);
-  localStorage.setItem(FT_FOOTER_STORAGE.enabled, enabled ? '1' : '0');
-  localStorage.setItem(FT_FOOTER_STORAGE.segments, JSON.stringify(segments));
-  localStorage.setItem(FT_FOOTER_STORAGE.order, JSON.stringify(order));
-  return { footerLib, enabled, segments, order, presets: footerPresetList(footerLib) };
+  return readFooterPanelState({
+    storage: localStorage,
+    accountId: activeRulePack.id,
+    footerLib: serverFooterLibrary(),
+  });
 }
 
 function disabledFooterSegments(segments, order = []) {
@@ -885,7 +820,7 @@ function syncEngineConfig(triggerRerender) {
     ? { ...serverFooter, segment_order: footerOrder.filter(k => k !== 'tip') }
     : serverFooter;
   const footerForRender = applyFooterArticleOverrides(baseFooterForRender);
-  // 统一区块模型：把现有 ft.footer.* 单篇信号映射成 bottom_blocks 覆盖（开关/排序/逐块启用）。
+  // 统一区块模型：面板内部状态已收敛为 bottom_blocks override（开关/排序/逐块启用）。
   // 逐块 enabled = !!active_segments[id]（缺失视为关），与旧 buildFooterHtml 的 `if(!seg[key])continue` 一致。
   let bottomBlocksOverride;
   if (serverBottomBlocks && typeof serverBottomBlocks === 'object') {
@@ -1227,7 +1162,17 @@ bindUrlImportShortcuts({
       }
     }
   }
-  function persist(rerender) { localStorage.setItem(FT_FOOTER_STORAGE.enabled, enabled ? '1' : '0'); localStorage.setItem(FT_FOOTER_STORAGE.segments, JSON.stringify(segments)); localStorage.setItem(FT_FOOTER_STORAGE.order, JSON.stringify(order)); syncEngineConfig(rerender); }
+  function persist(rerender) {
+    saveFooterPanelState({
+      storage: localStorage,
+      accountId: activeRulePack.id,
+      footerLib: serverFooterLibrary(),
+      enabled,
+      segments,
+      order,
+    });
+    syncEngineConfig(rerender);
+  }
 
   paint();
   syncEngineConfig(false);

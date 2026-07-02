@@ -37,6 +37,10 @@
 - 串行派单：T1 golden 双路径守卫（安全网先行）→ T2 单合同收敛收尾 → T3 图片替换/素材库对齐 → 收官（红线改写+终验+部署）。三个任务都碰 site.html 面，禁止并行。
 - T2 前置审计结论（2026-07-02）：fbif_footer 前台直接依赖面仅 11 处（site.html 4 / foodtalks-site.js 5 / rule-behavior-foodtalks.js 2 / 规则后台编辑器 0）。**CTO 范围裁定：T2 v1 只收敛前台消费面**（site.html 读写走 bottom_blocks 语义，fbif_footer 在 loadRules 做一次性映射），服务端规则数据形态不动——不迁移生产数据，风险可控；服务端数据层退役另立后续任务。
 - T1 关键预期风险：双路径可能**实际不一致**——已要求 Codex 不许"顺手修"，输出差异报告由 CTO 裁定。
+- T1 审核结果：通过（破坏性验证：注入 1 字节漂移 → 7 测试全红；还原全绿）。双路径实测逐字节一致，commit `b1a59ce`。
+- T2 审核记录（两次打回，教训沉淀）：
+  1. **规则数据分叉**：新模块复制了一份 FOOTER_PRESETS（且已漂移：1/0 vs 布尔、名称不同）。追查发现复制源是 site.html 存量 `FT_FOOTER_FALLBACK_PRESETS`——存量病，趁收敛消灭；返工后 import 单一来源 `footer-segments-defaults.js`。
+  2. **空库窗口烧掉一次性迁移**（真实浏览器时序验收发现，单测测不到）：`hydrateActiveRulePreset` fire-and-forget，`loadTemplate → syncEngineConfig → readFooterState` 先跑，空 footerLib 算出"空库签名"→ 判旧键失配 → 删旧键写默认，用户自定义必丢。修复裁定：footerLib 空对象 = 未就绪 → 读取零副作用（不迁移/不删键/不落盘）。**教训：涉及"一次性迁移"的代码必须做真实加载时序验收，删除旧数据前先确认判定输入已就绪。**
 
 ## 后续步骤（待归属确认后执行）
 

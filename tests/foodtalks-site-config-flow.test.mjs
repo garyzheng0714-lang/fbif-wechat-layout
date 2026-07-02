@@ -230,11 +230,15 @@ test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并�
     new URL('../public/site.html', import.meta.url),
     'utf8'
   );
+  const stateSrc = await readFile(
+    new URL('../public/js/site-footer-state.js', import.meta.url),
+    'utf8'
+  );
   assert.match(src, /<details class="ft-advanced-options ft-footer-area" id="footerLib" open>/, '底部区域控制区默认应展开，避免运营每篇都多点一次');
   assert.match(src, /serverFooterLibrary\(\)/, '页脚侧栏应读取服务端页脚库');
-  assert.match(src, /footerLib\.presets/, '预设按钮应由服务端 presets 渲染');
-  assert.match(src, /footerLib\.segment_order/, '片段顺序应由服务端 segment_order 渲染');
-  assert.match(src, /ft\.footer\.order/, '当前文章排序应本地保存为临时选择');
+  assert.match(stateSrc, /footerLib\.presets/, '预设按钮应由服务端 presets 渲染');
+  assert.match(stateSrc, /footerLib\.segment_order/, '片段顺序应由服务端 segment_order 渲染');
+  assert.match(src, /saveFooterPanelState\(/, '当前文章排序应保存到单个 bottom_blocks 形状状态');
   assert.match(src, /data-seg-row/, '片段行应有拖拽目标');
   assert.match(src, /dragstart/, '应支持拖拽排序');
   assert.match(src, /function\s+isEmptyFooterPreset/, '无页脚 preset 应被识别为空页脚状态');
@@ -289,9 +293,14 @@ test('site.html: 服务端页脚结构变化时清理旧本地状态，避免 ti
     new URL('../public/site.html', import.meta.url),
     'utf8'
   );
-  assert.match(src, /FT_FOOTER_STORAGE[\s\S]*signature/, '本地页脚状态必须带服务端结构签名');
-  assert.match(src, /function\s+footerSignature/, '应按服务端预设、顺序、片段 key 计算签名');
-  assert.match(src, /storedSignature\s*!==\s*signature/, '签名变化时应重置到服务端默认');
+  const stateSrc = await readFile(
+    new URL('../public/js/site-footer-state.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /readFooterPanelState\(/, '本地页脚状态应通过统一 bottom_blocks 状态读取');
+  assert.match(stateSrc, /signature:\s*footerPanelSignature/, '本地页脚状态必须带服务端结构签名');
+  assert.match(stateSrc, /function\s+normalizeStoredState/, '应集中校验本地状态签名');
+  assert.match(stateSrc, /raw\.signature\s*!==\s*defaults\.signature/, '签名变化时应重置到服务端默认');
   assert.match(src, /bd_card:\s*'BD 名片'/, '左侧必须能显示 BD 名片分块');
   assert.match(src, /coop_table:\s*'相关合作表'/, '左侧必须能显示相关合作表分块');
   assert.doesNotMatch(src, /资讯投稿 & 商务合作/, '网站什么是系列不能继续显示旧商务合作标签');
