@@ -49,9 +49,9 @@ requests into this list unless the user explicitly reconfirms them as current.
 17. **URL 导入作者来源固定在提示前** — 文章级 `来源：` / `作者：` / `编辑：` 只渲染一次，位置固定在标准 `提示：` 页脚前
 18. **DOCX 连续段落尊重空段语义** — 连续非空正文段落在 Word 段距较小时保持紧凑；只有原文中间有空段时，下一段前才恢复标准 `wx-gap`
 19. **FoodTalks 网站规则与公众号物理隔离** — 网站渲染器（`public/js/templates/foodtalks-site.js`）、行为模板（`public/js/rule-behavior-foodtalks.js`）、页脚、署名颜色全套与公众号分离，两侧渲染器互不 import。公众号 Mote `#396FBC` 蓝色斜体不复用到网站；网站署名走 `#888888` 14px 斜体。改任一侧规则不得波及另一侧（`public/js/templates/fbif.js` 在网站任务中字节级不动）。
-20. **页脚库（footer library）** — FoodTalks 网站文章底部页脚由本工具**完整输出**，拆为 6 个可独立勾选片段（`tip` / `biz_coop` / `join_group` / `follow_account` / `logo` / `more_info`），固定资源 URL 定义在 `rule-behavior-foodtalks.js` 的 `FOOTER_SEGMENTS`，由 `buildFooterHtml(segments)` 按开关拼接，受 `config.modules.fbif_footer.segments.<key>` 控制。
+20. **页脚库（footer library）— 完整输出 + 区块面板交互**（2026-07-02 用户裁定交互统一，推翻旧"6 片段复选框"形态）— FoodTalks 网站文章底部页脚由本工具**完整输出**，6 片段（`tip` / `biz_coop` / `join_group` / `follow_account` / `logo` / `more_info`）。渲染主路径是 `modules.bottom_blocks`（rich_html 区块），`fbif_footer`+`buildFooterHtml` 只是兼容回退，双路径字节一致由 `tests/site-footer-parity.test.mjs` golden 守。面板单篇状态走 `public/js/site-footer-state.js`（bottom_blocks override 单合同；旧 `ft.footer.*` 键一次性迁移；服务端规则未就绪时读取零副作用）。图片片段支持单篇"替换图片/素材库选图"（`overrides[seg].fields`，保留 `{{asset#id}}` 引用形态）。
 21. **网站渠道默认走 ft-default 规则包** — site.html 用 `getRulePackByPath(location.pathname)` 做渠道感知 fallback：`/ft/<任意 id>` 都落到该渠道默认包 `ft-default`。**禁止**裸用 `parsed.packId`——`/ft/default` 里的 `default` 在 registry 不存在，裸用会误 fallback 到公众号 `fbif`。
-22. **所有公众号账号共用同一 `bottom_blocks` 底部结构，差异只在服务端默认** — FBIF / WowFood / FoodTalks系列都走统一 `mountBlockPanel`，每账号在 `api/rule_defaults.go` 显式覆盖 `modules.bottom_blocks`（不覆盖则经 `mergeRuleDefaults` 继承 FBIF 基线→错渲）。拖拽排序统一用 vendor 的 SortableJS（`public/vendor/Sortable.min.js`）。
+22. **所有账号（含网站渠道）共用同一 `bottom_blocks` 底部结构与交互语言，差异只在服务端默认与各渠道渲染器**（2026-07-02 扩展到网站渠道：结构与交互全渠道统一、视觉口径按渠道隔离，红线 #19 的物理隔离保留在渲染层）— FBIF / WowFood / FoodTalks系列走统一 `mountBlockPanel`，每账号在 `api/rule_defaults.go` 显式覆盖 `modules.bottom_blocks`（不覆盖则经 `mergeRuleDefaults` 继承 FBIF 基线→错渲）。拖拽排序统一用 vendor 的 SortableJS（`public/vendor/Sortable.min.js`）。
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
