@@ -326,6 +326,26 @@ test('site.html: 网站什么是系列 BD 名片可按当前文章选择，且�
   assert.match(src, /fbif:article-input-started[\s\S]{0,160}clearFooterArticleOverrides\(false\)/, '新输入开始时应先清空本篇名片覆盖');
 });
 
+test('site.html: /ft 底部图片替换通过中性 asset-picker 写入 bottom block fields', async () => {
+  // WHY: 网站渠道不能 import 公众号渲染器，也不能硬编码某几个 footer 图片块。
+  // 选图入口应动态检测 rich_html 里的 asset token，并把本篇替换写入 _bottomBlocksOverride.fields。
+  const src = await readFile(
+    new URL('../public/site.html', import.meta.url),
+    'utf8'
+  );
+  assert.match(src, /openAssetPicker[\s\S]{0,120}resolveAssetThumb/, 'site.html 应 import 中性 asset-picker 的打开弹层和缩略图解析');
+  assert.match(src, /openAssetPicker\(\{[\s\S]{0,220}scope:\s*'ft-default'/, '网站页脚选图 scope 必须固定 ft-default');
+  assert.match(src, /function\s+footerSegmentAssetToken/, '页脚图片块应从 html_lines 动态检测 asset token');
+  assert.match(src, /\{\{asset(?:#|:)[^}]+\}\}/, '动态检测应覆盖 asset#id 和 asset:usage 两类 token');
+  assert.match(src, /footerSegmentFields/, '前台应维护本篇 footer field overrides');
+  assert.match(src, /fields:\s*footerSegmentFields\[id\]/, 'syncEngineConfig 合成 _bottomBlocksOverride 时必须把 fields 合入 block override');
+  assert.match(src, /saveFooterPanelState\(\{[\s\S]{0,220}fields:\s*footerSegmentFields/, '持久化应保存本篇 fields');
+  assert.match(src, /sameFooterHtmlLines/, '选回规则默认素材时应识别为同默认，避免落无意义 field diff');
+  assert.match(src, /delete\s+footerSegmentFields\[key\][\s\S]{0,160}else[\s\S]{0,120}footerSegmentFields\[key\]/, '选回默认应删除 field，只有非默认替换才写入 fields');
+  assert.match(src, /footerSegmentFields\s*=\s*\{\}[\s\S]{0,120}saveFooterArticleOverrideState\(\)/, '新文章开始时应清空并保存 footer fields，避免上一稿替换串稿');
+  assert.match(src, /saveFooterArticleOverrideState\s*=\s*\(\)\s*=>\s*\{[\s\S]{0,220}saveFooterPanelState/, '清空本篇 fields 的保存回调应写回统一 footer state');
+});
+
 test('engine.js: 新文件和 URL blocks 导入都会通知站点清理当前文章覆盖', async () => {
   // WHY：BD 名片选择是本篇文章覆盖；新文件/URL 文章开始处理时必须清空，避免串稿。
   const src = await readFile(

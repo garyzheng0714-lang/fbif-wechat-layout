@@ -75,3 +75,67 @@ test('网站文字模块与图片区块共用底部语义（v2 单预设）', ()
   assert.match(out, /text-decoration: underline/);
   assert.match(out, /static\.foodtalks\.cn\/logo\.png/);
 });
+
+test('网站 rich_html 页脚支持 fields.html_lines 替换素材且默认输出不漂', () => {
+  const assetLibrary = {
+    ...ASSET_LIBRARY_DEFAULT,
+    assets: [
+      ...ASSET_LIBRARY_DEFAULT.assets,
+      {
+        id: 'ft_footer_replacement_logo',
+        type: 'image',
+        usage: 'custom',
+        label: '替换图',
+        url: 'https://static.foodtalks.cn/replacement-logo.png',
+        scope: 'ft-default',
+      },
+    ],
+  };
+  const mod = {
+    schema_version: 2,
+    enabled: true,
+    active_preset_id: 'default',
+    presets: [{ id: 'default', order: ['logo'], blocks: {
+      logo: {
+        type: 'rich_html',
+        enabled: true,
+        fields: {
+          html_lines: ['<p><img src="{{asset#ft_footer_logo}}" alt="old" /></p>'],
+        },
+      },
+    } }],
+  };
+
+  const defaultOut = renderBottomBlocksHtml(
+    mod,
+    { enabled: true, overrides: {} },
+    siteBlockRenderers(assetLibrary, 'ft-default')
+  );
+  const restoredOut = renderBottomBlocksHtml(
+    mod,
+    { enabled: true, overrides: { logo: { enabled: true } } },
+    siteBlockRenderers(assetLibrary, 'ft-default')
+  );
+  const replacedOut = renderBottomBlocksHtml(
+    mod,
+    {
+      enabled: true,
+      overrides: {
+        logo: {
+          enabled: true,
+          fields: {
+            html_lines: ['<p><img src="{{asset#ft_footer_replacement_logo}}" alt="new" /></p>'],
+          },
+        },
+      },
+    },
+    siteBlockRenderers(assetLibrary, 'ft-default')
+  );
+
+  // WHY: /ft 侧栏只写本篇 rich_html field diff。没有 diff 或恢复默认时必须回到
+  // 后台默认 HTML；有 diff 时渲染应解析新素材，不保留旧素材 URL。
+  assert.equal(restoredOut, defaultOut, 'no fields override should keep the existing default/golden path stable');
+  assert.match(defaultOut, /e155b7852c10a72f7b73157fdf9c4bf0\.png/);
+  assert.match(replacedOut, /replacement-logo\.png/);
+  assert.doesNotMatch(replacedOut, /e155b7852c10a72f7b73157fdf9c4bf0\.png/);
+});

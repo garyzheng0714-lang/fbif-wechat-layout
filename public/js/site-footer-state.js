@@ -95,11 +95,32 @@ function segmentsFromOverride(override, defaultSegments, defaultOrder) {
   return out;
 }
 
-function overrideFromParts({ enabled, segments, order }) {
+function cleanFields(fields) {
+  if (!isObj(fields)) return null;
+  const out = {};
+  for (const key of Object.keys(fields)) {
+    if (fields[key] !== undefined) out[key] = fields[key];
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function normalizeOverrideBlock(block) {
+  if (!isObj(block)) return {};
+  const out = {};
+  if (typeof block.enabled === 'boolean') out.enabled = block.enabled;
+  const fields = cleanFields(block.fields);
+  if (fields) out.fields = fields;
+  return out;
+}
+
+function overrideFromParts({ enabled, segments, order, fields }) {
   const overrides = {};
   for (const key of [...(Array.isArray(order) ? order : []), ...Object.keys(segments || {})]) {
     if (!key || Object.prototype.hasOwnProperty.call(overrides, key)) continue;
-    overrides[key] = { enabled: !!(segments && segments[key]) };
+    const block = { enabled: !!(segments && segments[key]) };
+    const blockFields = cleanFields(isObj(fields) ? fields[key] : null);
+    if (blockFields) block.fields = blockFields;
+    overrides[key] = block;
   }
   return {
     enabled: !!enabled,
@@ -177,7 +198,9 @@ function normalizeStoredState(raw, defaults) {
     override: {
       enabled: typeof override.enabled === 'boolean' ? override.enabled : defaults.enabled,
       order: normalizeOrder(override.order, defaults.order),
-      overrides: isObj(override.overrides) ? { ...override.overrides } : {},
+      overrides: isObj(override.overrides)
+        ? Object.fromEntries(Object.entries(override.overrides).map(([key, block]) => [key, normalizeOverrideBlock(block)]))
+        : {},
     },
   };
 }
@@ -252,6 +275,7 @@ export function saveFooterPanelState({
   enabled,
   segments,
   order,
+  fields,
   fallbackPresets = FOOTER_PRESETS_DEFAULT,
   fallbackOrder = FOOTER_SEGMENT_ORDER_DEFAULT,
 } = {}) {
@@ -262,6 +286,7 @@ export function saveFooterPanelState({
     enabled,
     segments: isObj(segments) ? { ...segments } : defaults.segments,
     order: cleanOrder,
+    fields: isObj(fields) ? { ...fields } : {},
   });
   writeState(storage, accountId, state);
   removeLegacyKeys(storage);

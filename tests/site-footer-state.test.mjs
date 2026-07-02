@@ -6,6 +6,7 @@ import {
   footerPanelSignature,
   footerStateStorageKey,
   readFooterPanelState,
+  saveFooterPanelState,
 } from '../public/js/site-footer-state.js';
 import {
   FOOTER_PRESETS_DEFAULT,
@@ -214,4 +215,84 @@ test('site footer legacy migration preserves server defaults for missing segment
     FOOTER_PRESETS_DEFAULT[0].segments.follow_account,
     'missing old segment should keep server preset default'
   );
+});
+
+test('site footer state preserves per-segment fields and keeps reloads idempotent', () => {
+  const accountId = 'ft-default';
+  const storage = createStorage();
+  const order = ['tip', 'logo', 'biz_coop', 'join_group', 'follow_account', 'more_info'];
+  const segments = { tip: true, logo: true, biz_coop: false, join_group: true, follow_account: true, more_info: true };
+  const fields = {
+    logo: {
+      html_lines: ['<p><img src="{{asset#ft_footer_group_qr}}" alt="new logo" /></p>'],
+    },
+    more_info: {},
+  };
+
+  // WHY: 网站 /ft 底部图片替换是单篇 field override，不是规则默认。
+  // 保存后必须只在对应 block 写 fields，空 fields 不应制造无意义 diff。
+  const saved = saveFooterPanelState({ storage, accountId, footerLib: FOOTER_LIB, enabled: true, segments, order, fields });
+
+  assert.deepEqual(saved.overrides.logo, {
+    enabled: true,
+    fields: {
+      html_lines: ['<p><img src="{{asset#ft_footer_group_qr}}" alt="new logo" /></p>'],
+    },
+  });
+  assert.deepEqual(saved.overrides.more_info, { enabled: true }, 'empty fields should be removed before writing');
+
+  const raw = JSON.parse(storage.getItem(footerStateStorageKey(accountId)));
+  assert.deepEqual(raw.override.overrides.logo.fields, fields.logo);
+  assert.equal(raw.override.overrides.biz_coop.fields, undefined, 'segments without replacements should not get fields');
+
+  const beforeReload = storage.snapshot();
+  storage.clearOperations();
+  const reloaded = readFooterPanelState({ storage, accountId, footerLib: FOOTER_LIB });
+
+  assert.deepEqual(reloaded.override.overrides.logo.fields, fields.logo);
+  assert.deepEqual(reloaded.segments, segments);
+  assert.deepEqual(storage.snapshot(), beforeReload, 'reading an already-normalized fields override should not rewrite storage');
+  assert.deepEqual(
+    storage.operations().filter(op => op.type !== 'get'),
+    [],
+    'idempotent fields reload should not write or remove keys'
+  );
+});
+
+test('site footer state deletes restored-default fields without dropping enabled/order', () => {
+  const accountId = 'ft-default';
+  const storage = createStorage();
+  const order = ['tip', 'logo', 'biz_coop', 'join_group', 'follow_account', 'more_info'];
+  const segments = { tip: true, logo: true, biz_coop: true, join_group: true, follow_account: true, more_info: true };
+
+  saveFooterPanelState({
+    storage,
+    accountId,
+    footerLib: FOOTER_LIB,
+    enabled: true,
+    segments,
+    order,
+    fields: { logo: { html_lines: ['<p><img src="{{asset#ft_footer_group_qr}}" /></p>'] } },
+  });
+
+  // WHY: “恢复默认”应删除本篇 field diff，让渲染重新跟随后台默认素材；
+  // 但不能顺手改掉本文的开关和排序状态。
+  const restored = saveFooterPanelState({
+    storage,
+    accountId,
+    footerLib: FOOTER_LIB,
+    enabled: true,
+    segments,
+    order,
+    fields: { logo: {} },
+  });
+
+  assert.equal(restored.overrides.logo.fields, undefined);
+  assert.equal(restored.overrides.logo.enabled, true);
+  assert.deepEqual(restored.order, order);
+
+  const reloaded = readFooterPanelState({ storage, accountId, footerLib: FOOTER_LIB });
+  assert.equal(reloaded.override.overrides.logo.fields, undefined);
+  assert.equal(reloaded.override.overrides.logo.enabled, true);
+  assert.deepEqual(reloaded.order, order);
 });

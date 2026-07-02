@@ -254,6 +254,7 @@
 
 <script type="module">
 import { pickActivePreset } from '/js/blocks/block-merge.js';
+import { openAssetPicker, resolveAssetThumb } from '/js/blocks/asset-picker.js';
 import {
   activeFooterPreset,
   readFooterPanelState,
@@ -672,6 +673,13 @@ function serverAssetLibrary() {
   return (mods.asset_library && typeof mods.asset_library === 'object') ? mods.asset_library : {};
 }
 
+function activeBottomBlocks() {
+  const mod = serverRuleModules().bottom_blocks;
+  if (!mod || typeof mod !== 'object') return {};
+  const active = pickActivePreset(mod);
+  return active && typeof active.blocks === 'object' ? active.blocks : {};
+}
+
 const FT_FOOTER_LABELS_DEFAULT = Object.freeze({
   tip: '提示声明',
   biz_coop: '商务合作',
@@ -694,9 +702,12 @@ function footerSegmentLabel(key) {
   return labels[key] || key;
 }
 const FT_FOOTER_BD_CARD_RE = /^ftss_bd_[a-z0-9_-]+$/i;
+const FOOTER_ASSET_TOKEN_RE = /\{\{asset(?:#|:)[a-z0-9_-]+\}\}/i;
 let footerBdCardAssetID = '';
 let footerLastArticlePayload = null;
+let footerSegmentFields = {};
 let refreshFooterControls = () => {};
+let saveFooterArticleOverrideState = () => {};
 
 function footerAssets(assetLibrary = serverAssetLibrary()) {
   return assetLibrary && Array.isArray(assetLibrary.assets) ? assetLibrary.assets : [];
@@ -719,6 +730,100 @@ function footerAssetByID(id) {
   return footerAssets().find(asset => String(asset && asset.id || '') === String(id)) || null;
 }
 
+function footerAssetInScope(asset, scope = 'ft-default') {
+  const assetScope = String(asset && asset.scope || 'global').trim() || 'global';
+  return assetScope === 'global' || assetScope === scope;
+}
+
+function footerAssetForToken(token, scope = 'ft-default') {
+  const match = String(token || '').match(/^\{\{asset(?::([a-z0-9_-]+)|#([a-z0-9_-]+))\}\}$/i);
+  if (!match) return null;
+  const usage = match[1] || '';
+  const id = match[2] || '';
+  return footerAssets().find(asset => {
+    if (!footerAssetInScope(asset, scope)) return false;
+    if (id) return String(asset && asset.id || '') === id;
+    return String(asset && asset.usage || '') === usage;
+  }) || null;
+}
+
+function footerFieldsFromOverride(override) {
+  const out = {};
+  const overrides = override && override.overrides && typeof override.overrides === 'object' ? override.overrides : {};
+  for (const id of Object.keys(overrides)) {
+    const fields = overrides[id] && overrides[id].fields;
+    if (fields && typeof fields === 'object' && !Array.isArray(fields) && Object.keys(fields).length) {
+      out[id] = { ...fields };
+    }
+  }
+  return out;
+}
+
+function footerSegmentDefaultHtmlLines(key) {
+  const block = activeBottomBlocks()[key];
+  if (block && block.type === 'rich_html' && block.fields && Array.isArray(block.fields.html_lines)) {
+    return block.fields.html_lines.slice();
+  }
+  const segments = serverFooterLibrary().segments;
+  const entry = segments && typeof segments === 'object' ? segments[key] : null;
+  if (Array.isArray(entry)) return entry.slice();
+  if (entry && Array.isArray(entry.html_lines)) return entry.html_lines.slice();
+  return [];
+}
+
+function footerSegmentCurrentHtmlLines(key) {
+  const fields = footerSegmentFields[key];
+  if (fields && Array.isArray(fields.html_lines)) return fields.html_lines.slice();
+  return footerSegmentDefaultHtmlLines(key);
+}
+
+function footerSegmentAssetToken(key) {
+  const line = footerSegmentDefaultHtmlLines(key).map(v => String(v || '')).find(v => FOOTER_ASSET_TOKEN_RE.test(v)) || '';
+  const match = line.match(FOOTER_ASSET_TOKEN_RE);
+  return match ? match[0] : '';
+}
+
+function footerSegmentDefaultAssetID(key) {
+  const asset = footerAssetForToken(footerSegmentAssetToken(key), 'ft-default');
+  return asset && asset.id ? String(asset.id) : '';
+}
+
+function replaceFooterSegmentAssetRef(lines, assetID) {
+  const nextRef = '{{asset#' + assetID + '}}';
+  let replaced = false;
+  return (lines || []).map(line => String(line || '').replace(FOOTER_ASSET_TOKEN_RE, token => {
+    if (replaced) return token;
+    replaced = true;
+    return nextRef;
+  }));
+}
+
+function sameFooterHtmlLines(a, b) {
+  const aa = Array.isArray(a) ? a : [];
+  const bb = Array.isArray(b) ? b : [];
+  if (aa.length !== bb.length) return false;
+  for (let i = 0; i < aa.length; i += 1) {
+    if (String(aa[i] || '') !== String(bb[i] || '')) return false;
+  }
+  return true;
+}
+
+function footerSegmentAssetControlHtml(key) {
+  if (key === 'bd_card' || !footerSegmentAssetToken(key)) return '';
+  const currentToken = (footerSegmentCurrentHtmlLines(key).join('\n').match(FOOTER_ASSET_TOKEN_RE) || [footerSegmentAssetToken(key)])[0];
+  const thumb = resolveAssetThumb(currentToken, serverAssetLibrary(), 'ft-default');
+  const hasOverride = !!(footerSegmentFields[key] && footerSegmentFields[key].html_lines);
+  return `<div class="ft-footer-asset-control" data-footer-asset-control="${escText(key)}">
+    <div class="ft-footer-asset-preview ${thumb ? '' : 'is-empty'}">
+      ${thumb ? `<img src="${escText(thumb)}" alt="${escText(footerSegmentLabel(key))}" loading="lazy">` : '<span>暂无预览</span>'}
+    </div>
+    <div class="ft-footer-asset-actions">
+      <button type="button" class="ft-footer-asset-btn" data-footer-asset-pick="${escText(key)}">替换图片</button>
+      <button type="button" class="ft-footer-asset-reset" data-footer-asset-reset="${escText(key)}" ${hasOverride ? '' : 'hidden'}>恢复默认</button>
+    </div>
+  </div>`;
+}
+
 function replaceBdCardAssetRef(lines, assetID) {
   if (!assetID) return lines;
   const nextRef = '{{asset#' + assetID + '}}';
@@ -739,26 +844,51 @@ function footerSelectedBdCardAsset() {
 }
 
 function applyFooterArticleOverrides(footerLib) {
-  if (!footerBdCardAssetID || !footerLib || typeof footerLib !== 'object') return footerLib;
+  const hasFieldOverrides = footerSegmentFields && Object.keys(footerSegmentFields).length > 0;
+  if ((!footerBdCardAssetID && !hasFieldOverrides) || !footerLib || typeof footerLib !== 'object') return footerLib;
   const segments = footerLib.segments && typeof footerLib.segments === 'object' ? footerLib.segments : null;
+  let nextSegments = segments;
+  function ensureNextSegments() {
+    if (nextSegments === segments) nextSegments = { ...(segments || {}) };
+    return nextSegments;
+  }
+
   const entry = segments && segments.bd_card;
   const htmlLines = Array.isArray(entry) ? entry : (entry && Array.isArray(entry.html_lines) ? entry.html_lines : null);
-  if (!htmlLines) return footerLib;
+  if (footerBdCardAssetID && htmlLines) {
+    const target = ensureNextSegments();
+    target.bd_card = Array.isArray(entry)
+      ? replaceBdCardAssetRef(entry, footerBdCardAssetID)
+      : { ...entry, html_lines: replaceBdCardAssetRef(htmlLines, footerBdCardAssetID) };
+  }
+
+  for (const key of Object.keys(footerSegmentFields || {})) {
+    const fields = footerSegmentFields[key];
+    if (!fields || !Array.isArray(fields.html_lines)) continue;
+    const entry = segments && segments[key];
+    const target = ensureNextSegments();
+    target[key] = Array.isArray(entry)
+      ? fields.html_lines.slice()
+      : { ...(entry || {}), html_lines: fields.html_lines.slice() };
+  }
+
+  if (nextSegments === segments) return footerLib;
   return {
     ...footerLib,
-    segments: {
-      ...segments,
-      bd_card: Array.isArray(entry)
-        ? replaceBdCardAssetRef(entry, footerBdCardAssetID)
-        : { ...entry, html_lines: replaceBdCardAssetRef(htmlLines, footerBdCardAssetID) },
-    },
+    segments: nextSegments,
   };
 }
 
 function clearFooterArticleOverrides(rerender = false, resetPayload = true) {
   if (resetPayload) footerLastArticlePayload = null;
-  if (!footerBdCardAssetID) return false;
+  const hadBdCard = !!footerBdCardAssetID;
+  const hadSegmentFields = !!(footerSegmentFields && Object.keys(footerSegmentFields).length);
+  if (!hadBdCard && !hadSegmentFields) return false;
   footerBdCardAssetID = '';
+  if (hadSegmentFields) {
+    footerSegmentFields = {};
+    saveFooterArticleOverrideState();
+  }
   refreshFooterControls();
   if (rerender) syncEngineConfig(true);
   return true;
@@ -773,11 +903,13 @@ function resetFooterArticleOverridesFor(session) {
 }
 
 function readFooterState() {
-  return readFooterPanelState({
+  const state = readFooterPanelState({
     storage: localStorage,
     accountId: activeRulePack.id,
     footerLib: serverFooterLibrary(),
   });
+  footerSegmentFields = footerFieldsFromOverride(state.override);
+  return state;
 }
 
 function disabledFooterSegments(segments, order = []) {
@@ -832,6 +964,9 @@ function syncEngineConfig(triggerRerender) {
     for (const id of bbOrder) {
       if (id === 'tip') continue;
       overrides[id] = { enabled: footerSegmentEnabledForBlock(id, bbBlocks[id], effectiveFooterSegments, footerEnabled) };
+      if (footerSegmentFields[id] && Object.keys(footerSegmentFields[id]).length) {
+        overrides[id] = { ...overrides[id], fields: footerSegmentFields[id] };
+      }
     }
     bottomBlocksOverride = { enabled: footerEnabled, overrides };
     if (Array.isArray(footerOrder) && footerOrder.length) {
@@ -1109,6 +1244,7 @@ bindUrlImportShortcuts({
         <span class="ft-footer-seg-state" data-footer-seg-state="${escText(key)}">隐藏</span>
       </div>
       ${bdCardSelectHtml(key)}
+      ${footerSegmentAssetControlHtml(key)}
     </div>`;
   }
 
@@ -1161,6 +1297,14 @@ bindUrlImportShortcuts({
         bdPreview.hidden = true;
       }
     }
+    segsEl.querySelectorAll('[data-footer-asset-pick], [data-footer-asset-reset]').forEach(btn => {
+      const key = btn.dataset.footerAssetPick || btn.dataset.footerAssetReset;
+      btn.disabled = !enabled || !segments[key];
+    });
+    segsEl.querySelectorAll('[data-footer-asset-control]').forEach(control => {
+      const key = control.dataset.footerAssetControl;
+      control.classList.toggle('disabled', !enabled || !segments[key]);
+    });
   }
   function persist(rerender) {
     saveFooterPanelState({
@@ -1170,9 +1314,21 @@ bindUrlImportShortcuts({
       enabled,
       segments,
       order,
+      fields: footerSegmentFields,
     });
     syncEngineConfig(rerender);
   }
+  saveFooterArticleOverrideState = () => {
+    saveFooterPanelState({
+      storage: localStorage,
+      accountId: activeRulePack.id,
+      footerLib: serverFooterLibrary(),
+      enabled,
+      segments,
+      order,
+      fields: footerSegmentFields,
+    });
+  };
 
   paint();
   syncEngineConfig(false);
@@ -1193,6 +1349,41 @@ bindUrlImportShortcuts({
     paint(); persist(true);
   });
   segsEl.addEventListener('click', (e) => {
+    const pickBtn = e.target.closest('[data-footer-asset-pick]');
+    if (pickBtn && !pickBtn.disabled) {
+      const key = pickBtn.dataset.footerAssetPick;
+      openAssetPicker({
+        assetLibrary: serverAssetLibrary(),
+        scope: 'ft-default',
+        doc: document,
+        onPick(assetID) {
+          const defaultLines = footerSegmentDefaultHtmlLines(key);
+          if (!defaultLines.length) return;
+          const nextLines = replaceFooterSegmentAssetRef(defaultLines, assetID);
+          if (String(assetID || '') === footerSegmentDefaultAssetID(key) || sameFooterHtmlLines(nextLines, defaultLines)) {
+            delete footerSegmentFields[key];
+          } else {
+            footerSegmentFields[key] = {
+              ...(footerSegmentFields[key] || {}),
+              html_lines: nextLines,
+            };
+          }
+          enabled = true;
+          segments[key] = 1;
+          renderControls(); paint(); persist(true);
+        },
+      });
+      return;
+    }
+
+    const resetBtn = e.target.closest('[data-footer-asset-reset]');
+    if (resetBtn && !resetBtn.disabled) {
+      const key = resetBtn.dataset.footerAssetReset;
+      delete footerSegmentFields[key];
+      renderControls(); paint(); persist(true);
+      return;
+    }
+
     const btn = e.target.closest('[data-footer-seg][role="switch"]');
     if (!btn || btn.disabled) return;
     const key = btn.dataset.footerSeg;
