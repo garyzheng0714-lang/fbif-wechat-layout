@@ -32,6 +32,12 @@
 3. 字节保真 golden：现有 `buildFooterHtml(segments)` 输出 vs bottom_blocks 渲染输出需逐字节一致的守卫测试（对照 `tests/series-blocks-fidelity.test.mjs` 的做法）。
 4. 落地后改写红线 #20（交互形态条款），红线 #22 补"网站渠道已收编"。
 
+## 收官阶段执行模式（2026-07-02 用户指令：Codex 写码、本会话任 CTO 审核）
+
+- 串行派单：T1 golden 双路径守卫（安全网先行）→ T2 单合同收敛收尾 → T3 图片替换/素材库对齐 → 收官（红线改写+终验+部署）。三个任务都碰 site.html 面，禁止并行。
+- T2 前置审计结论（2026-07-02）：fbif_footer 前台直接依赖面仅 11 处（site.html 4 / foodtalks-site.js 5 / rule-behavior-foodtalks.js 2 / 规则后台编辑器 0）。**CTO 范围裁定：T2 v1 只收敛前台消费面**（site.html 读写走 bottom_blocks 语义，fbif_footer 在 loadRules 做一次性映射），服务端规则数据形态不动——不迁移生产数据，风险可控；服务端数据层退役另立后续任务。
+- T1 关键预期风险：双路径可能**实际不一致**——已要求 Codex 不许"顺手修"，输出差异报告由 CTO 裁定。
+
 ## 后续步骤（待归属确认后执行）
 
 - [ ] 确认 site.html 未提交代码归属 → 收尾提交（含 698 测试）
