@@ -350,9 +350,14 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 		t.Fatalf("fbif default article_footer_defaults.profiles missing: %#v", aft)
 	}
 	moteProfile, _ := profiles[0].(map[string]any)
+	// 用户裁定（2026-07-05）：Mote 作者默认【显示】参考文献前署名图与 Bobo 名片。
 	artifactVisibility, _ := moteProfile["artifact_visibility"].(map[string]any)
-	if artifactVisibility["mote_ref_author_card"] != false {
-		t.Fatalf("mote artifact default = %#v, want mote_ref_author_card false", artifactVisibility)
+	if artifactVisibility["mote_ref_author_card"] != true {
+		t.Fatalf("mote artifact default = %#v, want mote_ref_author_card true", artifactVisibility)
+	}
+	blockVisibility, _ := moteProfile["block_visibility"].(map[string]any)
+	if blockVisibility["byline"] != true {
+		t.Fatalf("mote block default = %#v, want byline true", blockVisibility)
 	}
 	for _, id := range []string{"ft-default-v1", "ft-series-v1", "foodtalks-series-default"} {
 		cfg := presetByID(id).Config

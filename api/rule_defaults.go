@@ -77,11 +77,11 @@ func defaultArticleFooterDefaultsModule() map[string]any {
 				"name":  "Mote 作者默认",
 				"match": map[string]any{"author_alias_group": "mote"},
 				"block_visibility": map[string]any{
-					"byline":        false,
+					"byline":        true,
 					"more_articles": true,
 				},
 				"artifact_visibility": map[string]any{
-					"mote_ref_author_card": false,
+					"mote_ref_author_card": true,
 				},
 			},
 		},
@@ -180,9 +180,11 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // default v15→v16（2026-06-30）：FBIF 公众号新增 article_footer_defaults；Mote 作者默认隐藏 byline，
 // 保留更多文章。其他公众号/网站内置规则显式关闭该模块，避免继承 FBIF 默认。
 // fbif v16→v17（2026-06-30）：Mote 作者默认隐藏参考文献前署名图，仍允许前台按单篇开启。
+// fbif v17→v18（2026-07-05）：用户裁定 Mote 作者默认【显示】Bobo 名片（byline）与参考文献前
+// 署名图（mote_ref_author_card），推翻 v16/v17 的默认隐藏；单篇仍可按需关闭。
 const currentBuiltinRuleVersion = 17
 const defaultBuiltinRuleVersion = 16
-const fbifBuiltinRuleVersion = 17
+const fbifBuiltinRuleVersion = 18
 const ftSeriesSiteBuiltinRuleVersion = 16
 
 func builtinVersionForDefaultRule(id string) int {
