@@ -63,6 +63,15 @@ export function isBoldHeading(runs, opts) {
   return true;
 }
 
+// hasExplicitDocxHeadings: 正文元素里是否存在来自 Word 标题样式/大纲级别的真标题。
+// DOCX 分类产物里 k:'h' 只可能来自 hasHeadingStyle || hasOutlineLevel（docx-article-model.js）。
+// 信号优先级原则（根治「正文加粗被误判标题」，见 WORKLOG-docx-heading-signal-priority.md）：
+// 作者用了真标题样式 ⇒ 结构信号显式存在 ⇒ 整段加粗只是强调，加粗/编号启发式必须整体停用，
+// 保真基准是 Word 里实际显示的样子；只有全文零样式标题（微信作者常态）才轮到启发式补位。
+export function hasExplicitDocxHeadings(elems) {
+  return (elems || []).some(e => e && e.k === 'h');
+}
+
 // promoteHeuristicHeadings: 把被启发式识别为标题的普通段（k:'p'）转换成 'h' 元素。
 // 先认显式编号/关键词标题，再认整段加粗标题。已是 author/tip/cap/ref 等非 'p' 块不动。
 export function promoteHeuristicHeadings(elems, opts) {

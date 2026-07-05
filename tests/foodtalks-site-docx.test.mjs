@@ -109,6 +109,41 @@ function seriesDocxConfig(extra = {}) {
   };
 }
 
+test('网站 DOCX：真 Word 标题样式在场时，整段加粗强调句不升级为 h2（信号优先级）', () => {
+  // WHY：与公众号同一根治（WORKLOG-docx-heading-signal-priority.md）——作者用了真标题
+  // 样式，整段加粗只是强调；skipHeadingPromote 只在 DOCX 分类口打标，URL 导入不受影响。
+  const result = template.processDocx({
+    paragraphs: [
+      txtPara('正文第一段，铺垫内容，以句号结尾。'),
+      txtPara('太阳王的密使', { hasHeadingStyle: true }),
+      txtPara('小节内容若干，以句号结尾。'),
+      boldPara('更残酷的事实是什么呢？'),
+    ],
+    imgCache: {},
+    config: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<h2[^>]*>太阳王的密使<\/h2>/, '真·样式标题仍渲染为 h2');
+  assert.doesNotMatch(html, /<h2[^>]*>更残酷的事实是什么呢？<\/h2>/, '加粗强调句不得升级为 h2');
+  assert.match(html, /更残酷的事实是什么呢？/, '强调句本身不能丢');
+});
+
+test('网站 DOCX：零标题样式文档的加粗短句启发式照旧升级（不回归）', () => {
+  const result = template.processDocx({
+    paragraphs: [
+      txtPara('正文第一段，铺垫内容，以句号结尾。'),
+      boldPara('2个外行，教美国人喝茶'),
+      txtPara('小节内容若干，以句号结尾。'),
+    ],
+    imgCache: {},
+    config: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<h2[^>]*>2个外行，教美国人喝茶<\/h2>/, '零样式标题文档仍靠启发式识别章节');
+});
+
 test('网站 DOCX：图片经 imgCache 按 file 字段取到 src（杜绝 src 为空）', () => {
   // WHY：parser.js 产出的图片 run 是 {type:'img', file, w}，没有 id 字段。
   // 网站必须用 imgCache[run.file] 取图，否则整篇 DOCX 图片全空白。

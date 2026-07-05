@@ -4,6 +4,7 @@ import {
   detectHeadingLevel,
   isBoldHeading,
   promoteHeuristicHeadings,
+  hasExplicitDocxHeadings,
 } from '../public/js/heading-detect.js';
 
 // 测试数据取自金标准 docs/agents/baselines/62285-foodtalks-backend.html（Teavana）
@@ -140,6 +141,32 @@ test('promoteHeuristicHeadings 不动已分类的 author/tip/cap/img 块', () =>
   assert.equal(out[1].k, 'tip', 'tip（整段加粗、短、不收尾）不被误升级');
   assert.equal(out[2].k, 'cap', 'cap 不被误升级');
   assert.equal(out[3].k, 'img');
+});
+
+// ---- hasExplicitDocxHeadings: 信号优先级门控（显式 Word 标题样式在场 ⇒ 启发式停用） ----
+// WHY：启发式存在的唯一理由是填补"作者没用标题样式"的空缺；一旦文档里有真·样式标题，
+// 整段加粗只是强调，再跑启发式就会把强调句误升 h2（玛黑兄弟样本，见
+// WORKLOG-docx-heading-signal-priority.md）。此函数是两侧模板共用的门控依据。
+
+test('hasExplicitDocxHeadings：存在样式标题元素时为 true', () => {
+  assert.equal(hasExplicitDocxHeadings([
+    { k: 'txt', runs: [] },
+    { k: 'h', text: '太阳王的密使' },
+  ]), true);
+});
+
+test('hasExplicitDocxHeadings：全文无样式标题时为 false（启发式才补位）', () => {
+  assert.equal(hasExplicitDocxHeadings([
+    { k: 'txt', runs: [] },
+    { k: 'refH', text: '参考来源' },
+    { k: 'img', src: 'x' },
+  ]), false);
+});
+
+test('hasExplicitDocxHeadings：空/无效输入为 false', () => {
+  assert.equal(hasExplicitDocxHeadings([]), false);
+  assert.equal(hasExplicitDocxHeadings(null), false);
+  assert.equal(hasExplicitDocxHeadings([null, undefined]), false);
 });
 
 test('promoteHeuristicHeadings 不升级已标记的联系信息块', () => {

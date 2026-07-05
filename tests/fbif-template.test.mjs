@@ -70,6 +70,52 @@ function renderBlocks(blocks, opts = {}) {
   }, { isRepost: opts.isRepost !== false }).lines.join('\n');
 }
 
+function boldP(text, extra = {}) {
+  return p(text, { runs: [{ type: 'txt', text, bold: true }], ...extra });
+}
+
+// ---- DOCX 标题信号优先级（WORKLOG-docx-heading-signal-priority.md） ----
+// WHY：启发式「整段加粗≈标题」只为填补作者不用 Word 标题样式的空缺。作者用了真样式
+// （玛黑兄弟：正文小节全是「标题2」）时，整段加粗是强调句，再跑启发式必然误升 h2——
+// 且靠加排除判据堵不完。业务规则：显式结构信号在场 ⇒ 猜测停用，保真于 Word 实际显示。
+
+test('DOCX 有真标题样式时：整段加粗强调句保持正文，不升级为标题', () => {
+  const result = template.processDocx({
+    paragraphs: [
+      p('作者：Mote莫特'),
+      docxBody('正文第一段，铺垫内容，以句号结尾。'),
+      h('太阳王的密使'),
+      docxBody('小节内容若干，以句号结尾。'),
+      boldP('更残酷的事实是什么呢？'),
+      docxBody('一、这不是编号标题，是正文里的列举句，同样不得升级。'),
+    ],
+    imgCache: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.equal(result.headingN, 1, '只有样式标题算标题');
+  assert.match(html, /wx-th">太阳王的密使/, '真·样式标题仍渲染为标题');
+  assert.doesNotMatch(html, /wx-th">更残酷/, '加粗强调句不得渲染为标题');
+  assert.match(html, /更残酷的事实是什么呢？/, '强调句本身不能丢');
+  assert.doesNotMatch(html, /wx-th">一、/, '样式标题在场时编号启发式同样停用');
+});
+
+test('DOCX 无任何标题样式时：加粗短句启发式照旧升级（微信作者常态不回归）', () => {
+  const result = template.processDocx({
+    paragraphs: [
+      p('作者：Mote莫特'),
+      docxBody('正文第一段，铺垫内容，以句号结尾。'),
+      boldP('2个外行，教美国人喝茶'),
+      docxBody('小节内容若干，以句号结尾。'),
+    ],
+    imgCache: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.equal(result.headingN, 1, '零样式标题的文档仍靠启发式识别章节');
+  assert.match(html, /wx-th">2个外行，教美国人喝茶/, '加粗短句升级为标题');
+});
+
 test('processDocx returns articleMeta for footer article-type defaults', () => {
   const result = template.processDocx({
     paragraphs: [

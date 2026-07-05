@@ -63,7 +63,7 @@ function behList(config, key, fallback) {
 // 标题识别（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）抽到无依赖
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
-const { promoteHeuristicHeadings } = headingModule;
+const { promoteHeuristicHeadings, hasExplicitDocxHeadings } = headingModule;
 const { applySeriesContactLayout } = await import('../site-contact-layout.js' + assetQuery);
 const { activeFooterSegments } = await import('../site-footer-active.js' + assetQuery);
 const imageWidthModule = await import('../image-width.js' + assetQuery);
@@ -943,7 +943,13 @@ function classifyDocx(paragraphs, imgCache, config = {}) {
   const { elems } = classifyDocxArticle(paragraphs || [], imgCache || {}, buildDocxOpts(config));
   // imgN 按【实际渲染】的图计数：共享层无条件计每个 img run，但空 src 图在 adapter 被
   // filter 丢弃不渲染，故缓存未命中时重算，避免状态栏「图片：N」高估（与旧版口径一致）。
-  const siteElems = elems.map(adaptNeutralToSite).filter(Boolean);
+  let siteElems = elems.map(adaptNeutralToSite).filter(Boolean);
+  // 信号优先级（与公众号 fbif.js classifyDocx 同一原则，见 WORKLOG-docx-heading-signal-priority.md）：
+  // DOCX 里已有真·Word 标题样式的标题 ⇒ 整段加粗只是强调，给所有正文段打 skipHeadingPromote，
+  // 渲染期 promoteHeuristicHeadings 对其免疫。只在 DOCX 分类口打标——URL 导入/MD 路径不受影响。
+  if (hasExplicitDocxHeadings(siteElems)) {
+    siteElems = siteElems.map(e => (e.k === 'p' ? { ...e, skipHeadingPromote: true } : e));
+  }
   // 表格内图片藏在 k:'table' 的 rows.runs 里（不在顶层 k:'img'），单独累加有 src 的，
   // 与公众号口径一致（否则『顶层无图、表格有图』的文章状态栏会显示图片:0）。
   const tableImgN = siteElems

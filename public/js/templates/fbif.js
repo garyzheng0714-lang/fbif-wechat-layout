@@ -13,7 +13,7 @@ const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
 // 标题启发式纯函数（网站渲染器也用，红线#19 中性共享模块，不跨渲染器 import）。
 const headingDetectModule = await import('../heading-detect.js' + assetQuery);
-const { detectHeadingLevel, isBoldHeading } = headingDetectModule;
+const { detectHeadingLevel, isBoldHeading, hasExplicitDocxHeadings } = headingDetectModule;
 const tableModule = await import('./shared/table-renderer.js' + assetQuery);
 const { renderTable: renderSharedTable } = tableModule;
 // 底部追加式区块（统一模型）：中性编排器 + 公众号渲染器（红线 #19：不 import 网站渲染器）。
@@ -269,6 +269,10 @@ function classifyDocx(paragraphs, imgCache) {
     refSectionRegex: behaviorRegexParam('ref_section_regex', RE_REF_SECTION),
     refHeadingPrefixRegex: behaviorRegexParam('ref_heading_prefix_regex', /^(参考(来源|文献|资料|链接)|信息来源)/),
   });
+  // 信号优先级：正文里已有真·Word 标题样式的标题（k:'h'）时，作者显然会用标题样式，
+  // 整段加粗只是强调 ⇒ 启发式停用（否则加粗强调句会被误升 h2，判据加多少条都堵不完）。
+  // 零样式标题的文档（微信作者常态）才走启发式补位。见 WORKLOG-docx-heading-signal-priority.md。
+  if (hasExplicitDocxHeadings(result.elems)) return result;
   return { ...result, elems: promoteDocxBoldHeadings(result.elems) };
 }
 
