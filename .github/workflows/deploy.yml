@@ -41,6 +41,7 @@ jobs:
           LIBREOFFICE_TOKEN: ${{ secrets.LIBREOFFICE_TOKEN }}
           CLOUDCONVERT_API_KEY: ${{ secrets.CLOUDCONVERT_API_KEY }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          RENDER_TOKEN: ${{ secrets.RENDER_TOKEN }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/deploy_key
@@ -58,6 +59,12 @@ jobs:
             -e "ssh -i ~/.ssh/deploy_key" \
             api/fbif-api \
             "${USER}@${HOST}:${DEPLOY_PATH}/../api/"
+
+          # Deploy render service (Node headless renderer, systemd: fbif-render)
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            render-service/ \
+            "${USER}@${HOST}:/var/www/render-service/"
 
           # Ensure the rule preset API is routed to the Go service. The server's
           # Caddy config proxies only selected /api paths, so new API namespaces
@@ -174,6 +181,13 @@ jobs:
               "    reverse_proxy " + upstream + "\n"
               "  }\n"
           )
+          render_route = (
+              "\n"
+              "  @fbifRenderApi path /api/render /api/html-to-blocks\n"
+              "  handle @fbifRenderApi {\n"
+              "    reverse_proxy " + upstream + "\n"
+              "  }\n"
+          )
 
           app_shell_header = (
               "\n"
@@ -225,6 +239,12 @@ jobs:
               r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
               r"[ \t]*\}[ \t]*\n)?"
           )
+          render_route_re = re.compile(
+              r"\n[ \t]*@fbifRenderApi[ \t]+path[^\n]*\n"
+              r"(?:[ \t]*handle[ \t]+@fbifRenderApi[ \t]*\{[ \t]*\n"
+              r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
+              r"[ \t]*\}[ \t]*\n)?"
+          )
           text = original
           while True:
               new_text = rules_route_re.sub("\n", text)
@@ -238,6 +258,11 @@ jobs:
               text = new_text
           while True:
               new_text = upload_route_re.sub("\n", text)
+              if new_text == text:
+                  break
+              text = new_text
+          while True:
+              new_text = render_route_re.sub("\n", text)
               if new_text == text:
                   break
               text = new_text
@@ -287,7 +312,7 @@ jobs:
           backup = target.with_suffix(target.suffix + ".bak-rules")
           backup.write_text(original)
           for open_after in sorted(set(insert_points), reverse=True):
-              text = text[:open_after] + app_shell_header + asset_cache_headers + route + channels_route + upload_route + text[open_after:]
+              text = text[:open_after] + app_shell_header + asset_cache_headers + route + channels_route + upload_route + render_route + text[open_after:]
           target.write_text(text)
           print("Ensured Caddy rule API + channel + upload handles in " + str(target) + " -> " + upstream)
           PY
@@ -301,7 +326,11 @@ jobs:
             echo "ADMIN_PASSWORD GitHub secret is required for the rule admin backend" >&2
             exit 1
           fi
-          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" | base64)
+          if [ -z "$RENDER_TOKEN" ]; then
+            echo "RENDER_TOKEN GitHub secret is required for the render API (/api/render)" >&2
+            exit 1
+          fi
+          ENV_CONTENT=$(printf 'LIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nRENDER_TOKEN=%s\nRENDER_SERVICE_URL=%s\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "$RENDER_TOKEN" "http://127.0.0.1:19096" | base64)
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
             "echo '$ENV_CONTENT' | base64 -d > /var/www/api/.env.tmp && chmod 600 /var/www/api/.env.tmp && mv /var/www/api/.env.tmp /var/www/api/.env"
 
@@ -318,6 +347,9 @@ jobs:
           # instead, and prove the service is active before the deploy declares
           # success.
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "sudo systemctl restart fbif-api && sudo systemctl is-active --quiet fbif-api && sudo systemctl status fbif-api --no-pager --lines=5"
+
+          # Restart render service (same fail-loud contract as fbif-api above).
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "sudo systemctl restart fbif-render && sudo systemctl is-active --quiet fbif-render"
 
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
             "sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy"

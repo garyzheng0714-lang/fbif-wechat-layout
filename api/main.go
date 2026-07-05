@@ -106,6 +106,9 @@ func main() {
 
 	registerRulePresetHandlers(mux, ruleStore)
 
+	// 程序化排版 API（/api/render 代理 + /api/html-to-blocks，Bearer RENDER_TOKEN）
+	registerRenderRoutes(mux)
+
 	// Kick off the in-memory image cache GC loop
 	startDocImageCacheGC()
 
