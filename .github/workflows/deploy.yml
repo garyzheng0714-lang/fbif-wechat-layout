@@ -61,10 +61,14 @@ jobs:
             "${USER}@${HOST}:${DEPLOY_PATH}/../api/"
 
           # Deploy render service (Node headless renderer, systemd: fbif-render)
-          rsync -avz --delete \
+          rsync -avz --delete --exclude=node_modules \
             -e "ssh -i ~/.ssh/deploy_key" \
             render-service/ \
             "${USER}@${HOST}:/var/www/render-service/"
+
+          # Render service deps (linkedom for footer DOM shim)
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
+            "cd /var/www/render-service && npm install --omit=dev --no-audit --no-fund"
 
           # Ensure the rule preset API is routed to the Go service. The server's
           # Caddy config proxies only selected /api paths, so new API namespaces

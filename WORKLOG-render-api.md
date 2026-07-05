@@ -39,8 +39,29 @@
 
 - [x] render.mjs / server.mjs
 - [x] Go 端点 + 路由注册
-- [x] 冒烟测试进 npm test
-- [ ] 部署（systemd + workflow + 线上 curl 验证）
+- [x] 冒烟测试进 npm test（727 全绿）
+- [x] 部署完成（2026-07-05）：systemd `fbif-render`（127.0.0.1:19096，MemoryMax=512M）已 enable；
+  deploy.yml 接管 rsync/env/Caddy `@fbifRenderApi` 路由/重启；GitHub secret `RENDER_TOKEN` 已设；
+  线上验证：无 token 401 ✓、带 token /api/render 出内联 HTML ✓、/api/html-to-blocks 分块 ✓
+
+## 2026-07-05 补：bottom_blocks 页脚渲染（用户验收反馈）
+
+用户看过第一版草稿后裁决：格式必须与人工排版完整一致，**包括底部拖尾区**——
+第一版只渲染正文是刻意的 MVP 裁剪，现补齐：
+
+- `/render` 默认带页脚（`withFooter=false` 可关）：`template.renderBottomFooter({articleMeta,
+  isRepost, footerVisibilityOverride})`，转载自动走生产规则 `bottom_blocks` 的 **repost 预设**
+  （提示声明「本文为转载文章」+ Bobo 名片）——与网页版同一数据源、同一渲染器。
+- 页脚数据源：拉 `/api/rules/active` 后 `applyActiveRuleConfig` 灌进 `window._activeConfig`，
+  fbif.js 的 `rawActiveModules()` 才能读到 bottom_blocks/asset_library。
+- DOM shim：`globalThis.DOMParser = linkedom.DOMParser`（mp-blocks 富文本块 parseDoc 缺省路径）。
+  render-service 因此有了自己的 `package.json`（唯一依赖 linkedom），部署时
+  `npm install --omit=dev`，rsync 加 `--exclude=node_modules`。
+- 素材相对路径（`/assets/...`）绝对化到 `ASSET_ORIGIN`（默认线上域名），
+  后续由发布方逐图转存微信图床。
+- **「更多文章」块本期隐藏**（`footerVisibilityOverride: {blocks:{more_articles:false}}`，
+  注意块级显隐要嵌在 `.blocks` 下）：卡片依赖编辑挑选往期文章 + canvas 合成封面
+  （headless 无 canvas），自动选卡列为下一期。
 
 ## 环境变量
 

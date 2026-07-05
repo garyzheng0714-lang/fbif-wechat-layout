@@ -52,6 +52,18 @@ test('renderArticle：空 blocks 显式报错（不静默出空文）', async ()
   await assert.rejects(() => renderArticle({ title: 't', blocks: [] }), /blocks 不能为空/);
 });
 
+test('renderArticle：withFooter=false 时不带页脚（fetch 桩下页脚数据缺失也不报错）', async () => {
+  const { html } = await renderArticle({ title: 't', blocks: sampleBlocks, withFooter: false });
+  assert.doesNotMatch(html, /提示：/, '关闭页脚时不应出现提示声明');
+});
+
+test('absolutizeAssetURLs：站内相对素材补全为线上域名，绝对 URL 不动', async () => {
+  const { absolutizeAssetURLs } = await import('../render-service/render.mjs');
+  const out = absolutizeAssetURLs('<img src="/assets/fbif/bobo-card.webp"><img src="https://mmbiz.qpic.cn/a.jpg">', 'https://example.host');
+  assert.match(out, /src="https:\/\/example\.host\/assets\/fbif\/bobo-card\.webp"/);
+  assert.match(out, /src="https:\/\/mmbiz\.qpic\.cn\/a\.jpg"/);
+});
+
 test('stripExternalAnchors：只动 <a>，不碰其他标签', () => {
   const html = '<section class="wx-p"><a class="wx-a" href="https://x.com/a">A</a><img src="https://mmbiz.qpic.cn/i.jpg"></section>';
   const out = stripExternalAnchors(html);
