@@ -188,6 +188,15 @@ window.__APP_BUILD_INFO = { ...versionInfo, asset_version: buildId };
 if (!new URLSearchParams(location.search).get('v')) {
   const next = new URL(location.href); next.searchParams.set('v', buildId); history.replaceState(null, '', next);
 }
+// <head> 里的 <link rel=stylesheet> 是裸 URL（无 ?v=），JS import 却都带 ?v=assetVersion。
+// 于是部署后 JS 走新 URL 必然刷新，CSS 因 URL 不变、被浏览器/代理按旧缓存直接复用而变陈旧
+// ——「导入区显示错乱」正是旧 CSS 卡住的表现。这里给同源 CSS 链接补上同一构建号：每次部署
+// CSS 都是全新 URL（命中服务端 versioned 长缓存），旧缓存无法遮挡，与 JS 治理口径一致。
+for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+  const href = link.getAttribute('href') || '';
+  if (!href || /^https?:\/\//i.test(href) || href.includes('?')) continue;
+  link.setAttribute('href', href + '?v=' + assetVersion);
+}
 async function reloadIfUpdated() {
   try {
     const latest = await loadVersionInfo();

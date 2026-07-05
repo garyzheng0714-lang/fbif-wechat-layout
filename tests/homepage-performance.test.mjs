@@ -23,3 +23,28 @@ test('deploy overrides existing Caddy no-cache headers for cacheable assets', as
   assert.ok(workflow.includes('header @fbifVendorAssets >Cache-Control \\"public, max-age=31536000, immutable\\"'));
   assert.ok(workflow.includes('header @fbifImageAssets >Cache-Control \\"public, max-age=86400\\"'));
 });
+
+// WHY：编辑器 HTML 用 ?v=assetVersion 给每个 JS import 打版本，部署后 JS 必然刷新；但 <head>
+// 里的 <link rel=stylesheet> 若是裸 URL（无 ?v=），CSS 会被浏览器/代理按旧缓存直接复用而卡在
+// 旧版本——曾导致「导入区显示错乱」（旧 app-shell.css 被缓存）。Caddy 的 @fbifVersionedAssets
+// 匹配 `path /js/* /css/*` + `query v=*`，本就为「带版本的 CSS」准备了不可变长缓存，只是 <link>
+// 从未带上 ?v=。这条测试锁死：凡是给 JS 打版本的编辑器 HTML，必须同样给 CSS <link> 打版本，
+// 否则 CSS 会重蹈陈旧缓存的覆辙。
+for (const page of ['app.html', 'site.html']) {
+  test(`${page} cache-busts its stylesheet <link> tags with the build version`, async () => {
+    const html = await readFile(new URL(`../public/${page}`, import.meta.url), 'utf8');
+    // 前提：该页确实用 assetVersion 给 JS import 打了版本（否则本约束不适用）。
+    assert.match(html, /import\([^)]*\?v=['"]?\s*\+\s*assetVersion/, `${page} 应以 assetVersion 给 JS 打版本`);
+    // 必须存在「给同源 stylesheet <link> 追加 ?v=assetVersion」的逻辑。
+    assert.match(
+      html,
+      /querySelectorAll\(['"]link\[rel="stylesheet"\]['"]\)/,
+      `${page} 必须遍历 stylesheet <link> 以打版本`,
+    );
+    assert.match(
+      html,
+      /setAttribute\(['"]href['"],\s*href \+ ['"]\?v=['"] \+ assetVersion\)/,
+      `${page} 必须给 stylesheet <link> 追加 ?v=assetVersion（否则 CSS 会卡旧缓存）`,
+    );
+  });
+}
