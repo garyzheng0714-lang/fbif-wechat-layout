@@ -53,7 +53,11 @@ export function renderTable(elem, opts = {}) {
       return `<td style="${style}">${cellHtml(cell) || '<br>'}</td>`;
     }).join('') + '</tr>';
   }).join('');
-  const tableStyle = 'border-collapse: collapse; width: 100%; table-layout: fixed;' + (opts.marginAuto ? ' margin: 0 auto;' : '');
+  // outerBorder(网站渠道):CMS 富文本编辑器把无 border 属性的表格判为"无边框表格"并加虚线
+  // 辅助线,FoodTalks 发布链路会把虚线带上线。border="1" + 同色内联外框让编辑器不再误判;
+  // border-collapse: collapse 下外框与 td 边框合并,视觉零变化。公众号不传此开关,输出字节不变。
+  const tableStyle = 'border-collapse: collapse; width: 100%; table-layout: fixed;' +
+    (opts.outerBorder ? ` border: 1px solid ${borderColor};` : '') + (opts.marginAuto ? ' margin: 0 auto;' : '');
   const colgroup = opts.useColgroup === false ? '' : colgroupHTML(elem, colCount);
-  return `<table style="${tableStyle}">${colgroup}<tbody>${body}</tbody></table>`;
+  return `<table${opts.outerBorder ? ' border="1"' : ''} style="${tableStyle}">${colgroup}<tbody>${body}</tbody></table>`;
 }

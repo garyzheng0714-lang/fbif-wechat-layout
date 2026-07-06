@@ -551,6 +551,7 @@ function renderTable(elem, config = {}) {
     fontSize: fs,
     padding: pad,
     headerBold: !(config && config.table_header_bold === false),
+    outerBorder: true,
     renderers: tableRunRenderers(),
   });
 }

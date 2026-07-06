@@ -234,6 +234,7 @@ function renderTable(elem, config) {
     marginAuto: true,
     verticalAlignMiddle: true,
     bannerHeader: true,
+    outerBorder: true,
     renderers: tableRunRenderers(),
   });
 }
