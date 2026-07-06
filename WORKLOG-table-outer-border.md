@@ -47,3 +47,5 @@ shared renderer 加 `opts.outerBorder` 开关(默认关):
 
 - 公众号 fbif.js 未改动;shared renderer 不传 outerBorder 时输出与改动前字节一致(测试锁定)
 - FoodTalks 后台无账号,生产侧最终确认需用户发布链路粘贴一次看虚线消失
+- 已部署生产:commit 07b35ce,deploy run 28767085200 success,
+  生产 `js/templates/shared/table-renderer.js` 已确认含 outerBorder(2026-07-06)
