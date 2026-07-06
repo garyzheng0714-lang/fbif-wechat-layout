@@ -54,6 +54,12 @@
 - parser 表头判定契约:Word 表格需 `tblLook firstRow="1"`(Word"标题行"复选框,默认开)才渲染蓝底表头
 - 已知未修(显式暴露):① fbif 公众号表格图片同样丢 wpx(微信侧未报问题,不动红线);② 系列模板表格无 image renderer(系列现无表格图片场景);③ 若真实后台实测仍丢字号,再上内容层 span 方案(td font-size 属性无 HTML 等价物)
 
+## 部署
+
+- commit 9ef8065,deploy run 28771321945 success(2026-07-06);
+  生产 table-renderer.js 含 cmsSurvival、parser.js 含 wpx 已确认
+
 ## 待用户
 
 - 真实 FoodTalks 后台粘贴一次验收(无账号无法代验);若仍丢字号/底色,启用内容层 span 方案
+- 注意:表头蓝底需要 Word 表格开着"标题行"复选框(tblLook firstRow,Word 默认开)
