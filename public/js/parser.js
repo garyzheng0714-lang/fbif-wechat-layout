@@ -257,13 +257,15 @@ function visitRun(r, ctx, runs, ridToFile) {
     const ext = findDeep(drw, WP, 'extent');
     let w = '100%';
     let aspect = 0; // 显示宽高比 cx/cy（>1 横图 / <1 纵图 / ≈1 方形=二维码）；0=未知
+    let wpx = 0; // Word 所见显示宽度（EMU→CSS px）；表格内图片按此渲染才能与 Word 一致
     if (ext) {
       const cx = parseInt(ext.getAttribute('cx') || '0');
       const cy = parseInt(ext.getAttribute('cy') || '0');
       if (cx > 0) w = Math.min(100, Math.round(cx / 5486400 * 100)) + '%';
+      if (cx > 0) wpx = Math.round(cx / 9525);
       if (cx > 0 && cy > 0) aspect = cx / cy;
     }
-    runs.push({ type: 'img', file: ridToFile[embed] || '', w, aspect });
+    runs.push({ type: 'img', file: ridToFile[embed] || '', w, aspect, wpx });
     return;
   }
 

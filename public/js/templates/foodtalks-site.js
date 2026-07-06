@@ -533,6 +533,13 @@ function tableRunRenderers() {
     if (r.type === 'img') {
       if (!r.src) return '';
       const rpol = r.src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
+      // 表格内图片按 Word 所见显示宽度(wpx)渲染:原图像素不一时 Word 里统一设置的大小
+      // 才是编辑意图;width 属性 + style 双写(真值审计:CMS 剥 td 样式但保留 img 属性与 style)。
+      const wpx = Math.round(Number(r.wpx));
+      if (Number.isFinite(wpx) && wpx > 0) {
+        return `<img width="${wpx}" style="display: block; margin: 0 auto; width: ${wpx}px; max-width: 100%; height: auto;" src="` +
+          escAttr(r.src) + '"' + rpol + '>';
+      }
       return '<img style="display: block; margin: 0 auto; max-width: 100%; height: auto;" src="' +
         escAttr(r.src) + '"' + rpol + '>';
     }
@@ -552,6 +559,7 @@ function renderTable(elem, config = {}) {
     padding: pad,
     headerBold: !(config && config.table_header_bold === false),
     outerBorder: true,
+    cmsSurvival: true,
     renderers: tableRunRenderers(),
   });
 }

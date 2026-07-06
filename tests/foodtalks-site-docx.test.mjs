@@ -576,6 +576,40 @@ test('网站默认 DOCX 表格保留 Word colWidths（共享底层能力）', ()
   assert.match(html, /<img[^>]*src="blob:p1"/, '列宽修复不能破坏单元格图片 src 注入');
 });
 
+test('网站表格图片按 Word 显示宽度渲染（width 属性+style 双写，防 CMS 剥样式后大小不一）', () => {
+  // WHY：编辑在 Word 里把产品图统一设置显示大小（drawing extent cx），渲染层丢掉它就会按
+  // 原图像素各显各的 →"图片大小不一样"。wpx 是 parser 从 cx 换算的 CSS px；width 属性与
+  // style 双写是因为真值审计（news/62475）证实 CMS 保留 img 属性与 style、但会剥 td 样式。
+  const imgCell = (file, wpx) => ({ runs: [{ type: 'img', file, w: '12%', aspect: 1, wpx }], header: false });
+  const result = template.processDocx({
+    paragraphs: [tablePara([
+      [imgCell('p1.png', 96), stcell('几多全')],
+      [imgCell('p2.png', 0), stcell('金粒门')], // wpx 缺失/为 0 → 维持原输出形态
+    ])],
+    imgCache: { 'p1.png': 'blob:p1', 'p2.png': 'blob:p2' },
+    config: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<img width="96" style="display: block; margin: 0 auto; width: 96px; max-width: 100%; height: auto;" src="blob:p1"/,
+    '有 wpx:width 属性 + style 宽度双写,预览与 Word 所见一致');
+  assert.match(html, /<img style="display: block; margin: 0 auto; max-width: 100%; height: auto;" src="blob:p2"/,
+    '无 wpx:输出与旧版字节一致,不猜宽度');
+});
+
+test('网站表格 td 带 align 等存活属性（CMS 剥 td 样式后居中不丢）', () => {
+  const result = template.processDocx({
+    paragraphs: [tablePara([[stcell('h', true)], [stcell('x')]])],
+    imgCache: {},
+    config: {},
+    isRepost: false,
+  });
+  const html = result.lines.join('\n');
+  assert.match(html, /<table border="1" cellpadding="8" /, '网站表格外壳带 border+cellpadding 属性');
+  assert.match(html, /<td align="center" bgcolor="#01396a" style="[^"]*"><strong>h<\/strong><\/td>/, '表头三层防御');
+  assert.match(html, /<td align="center" style="[^"]*">x<\/td>/, '正文格 align 属性');
+});
+
 test('网站表格样式可被规则后台 config 覆盖（红线：不可写死）', () => {
   const result = template.processDocx({
     paragraphs: [tablePara([[stcell('h', true)], [stcell('x')]])],
