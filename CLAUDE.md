@@ -58,6 +58,8 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 23. **微信复制安全契约（保存草稿存活）** — 粘进公众号编辑器的 HTML 必须能活过「粘贴转存 + 保存草稿清洗」两道微信侧处理（2026-07-02 根治「保存草稿后更多文章消失」，根因与规则依据见 `WORKLOG-draft-save-regression.md`）：① `<a linktype="image">` 的 `imgurl` 是微信服务端校验属性，粘贴时编辑器只转存 `<img src>`、从不改写 `imgurl`，`imgurl` 非微信图床（mmbiz/qpic/qlogo）时保存草稿会**整卡清除**——更多文章卡片 `imgurl` 恒用原始 mmbiz 封面（`more-articles.js wechatSafeCardImgurl`），合成图只放 `<img src>`；② 公众号渠道 `<img src>` 的 base64 **位图**（png/jpg/gif/webp）是安全形态（编辑器粘贴时本地转存，DOCX 正文图长期依赖），**SVG data: 不被转存、保存必丢**——空卡占位图必须是 PNG data:（`more-articles-placeholder.js`），勿改回 SVG；③ 更多文章 wrapper 锚点必须在 `more-articles.js`/`mp-blocks.js`/`foodtalks-series.js` 三处字节一致；④ 复制层 `_footerCopy` 只允许权威重建路径回写（`_footerCopyGen` 代数守卫），慢速完成的旧上传任务不得覆盖成品。以上全部由 `tests/wechat-draft-survival.test.mjs` 的微信草稿保存模拟器守护——改动复制层/卡片 HTML 前先跑它。
 
+24. **网站渠道表格 CMS 存活契约**（2026-07-06 真值审计 foodtalks.cn/news/62475 + TinyMCE 沙盒真实粘贴实测）— FoodTalks CMS 粘贴会剥光 table/td 的内联样式，只保留 HTML 属性（border/cellpadding/align/bgcolor/width）与内容层（strong、img 的属性和 style）。因此 site/series 表格必须走 `shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival` 开关（td 的 align/valign/bgcolor/width 属性、table cellpadding、表头文字包 strong——与 inline style 双写，预览视觉零变化）；表格内图片按 parser 的 `wpx`（Word 显示宽度 EMU/9525）输出 `width` 属性+style 双写，保证"Word 里设多大、发布后就多大"。公众号 fbif 不传这些开关，输出字节不变（红线 #19）。守护：`tests/table-renderer-shared.test.mjs`、`tests/foodtalks-site-docx.test.mjs`；改表格输出前先读 `WORKLOG-table-cms-survival.md`。
+
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
