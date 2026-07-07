@@ -437,24 +437,27 @@ func TestCenteredLargeTitleLikeWithoutBoldTagIsHeading(t *testing.T) {
 	}
 }
 
-// ---- v2 负向守护：无明确标题信号的居中大字号不能被误判为标题（图注/导语/来源保真）----
+// ---- 居中大字号章节标题：不依赖 <b> / 冒号这两个不可靠的巧合信号 ----
 
-// 无 <b> 且不呈现标题式冒号结构的居中大字不升级为 heading；
-// 且在图后 captionContext 下也不能被图注启发式吞成 cap（≥18px 不是图注）——落 txt。
-func TestCenteredLargeWithoutBoldTagIsNotHeadingNorCaption(t *testing.T) {
+// 真实回归样例：https://mp.weixin.qq.com/s/nGe2BIRRWeItV1p3O6wxOQ 的「02」章节标题。
+// 与「01」标题视觉完全一致（居中、20px>正文17px、深色 rgba(0,0,0,.9)、短），
+// 唯一区别是作者漏写了外层 <b>，也没有冒号。旧判据要求「run 全在 <b> 下」或「含冒号」，
+// 两条都是别篇样例的巧合属性，导致这个真标题被降级成正文。字号相对正文放大 + 居中 +
+// 非图注/来源/参考头，才是微信章节标题的第一性信号。
+func TestCenteredLargeTitleWithoutBoldNorColonIsHeading(t *testing.T) {
 	html := jsContentWrap(
 		`<p><img data-src="https://x/a.png" data-w="1080"></p>` +
-			`<p style="text-align:center;"><span style="font-size:20px;">居中放大但没有加粗标签的一行</span></p>`)
+			`<p style="text-align: center;">` +
+			`<span leaf="" style="color: rgba(0, 0, 0, 0.9);font-size: 17px;font-weight: normal;">` +
+			`<span textstyle="" style="font-size: 20px;">四大品牌差异化竞争策略拆解</span>` +
+			`</span></p>`)
 	_, blocks, _ := extractArticleBlocks(html)
-	b := findBlockByText(blocks, "居中放大")
+	b := findBlockByText(blocks, "四大品牌差异化竞争策略拆解")
 	if b == nil {
-		t.Fatalf("missing block; kinds=%v", findKinds(blocks))
+		t.Fatalf("missing title block; kinds=%v", findKinds(blocks))
 	}
-	if b.K == "h" {
-		t.Errorf("无 <b> 的居中大字不应判 heading，got h; kinds=%v", findKinds(blocks))
-	}
-	if b.K == "cap" {
-		t.Errorf("≥18px 块不应判图注，got cap; kinds=%v", findKinds(blocks))
+	if b.K != "h" {
+		t.Errorf("居中 20px 无 <b> 无冒号的真章节标题应为 heading，got %s; kinds=%v", b.K, findKinds(blocks))
 	}
 }
 
@@ -520,6 +523,58 @@ func TestLongBoldLineIsNotHeading(t *testing.T) {
 	}
 	if b.K == "h" {
 		t.Errorf("long bold paragraph must not be heading")
+	}
+}
+
+// pt 精度回归守护（Codex 对抗测试挖出）：13.5pt 精确等于 18px，换算不能用截断的
+// 1.333（会得 17.9955，漏在 ≥18 标题阈值外）。居中 13.5pt 章节标题必须判 h。
+func TestPtFontSizeHeadingPrecision(t *testing.T) {
+	html := jsContentWrap(
+		`<p style="text-align:center;font-size:13.5pt;">` +
+			`<span leaf="" style="color:rgba(0,0,0,0.9);font-weight:normal;">` +
+			`新鲜零食四强品牌共性特征</span></p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "新鲜零食四强")
+	if b == nil {
+		t.Fatalf("missing title block; kinds=%v", findKinds(blocks))
+	}
+	if b.K != "h" {
+		t.Errorf("13.5pt(=18px) 居中标题应为 h，got %s; kinds=%v", b.K, findKinds(blocks))
+	}
+}
+
+// 句号结尾否决回归守护（Codex 对抗测试挖出）：居中大字若是「完整句子」（句号/逗号收尾），
+// 是金句/导语/强调整句，不是章节标题，不升级为 h；同一形态但短语式收尾（无句末标点）的
+// 真标题仍判 h。放行 ？！——疑问/感叹式标题真实存在。
+func TestCenteredLargeSentenceEndingIsNotHeadingButLabelIs(t *testing.T) {
+	// 金句：句号 + 闭引号收尾 → 不是标题
+	quoteHTML := jsContentWrap(
+		`<p style="text-align:center;">` +
+			`<span leaf="" style="color:rgba(0,0,0,0.9);font-size:20px;font-weight:normal;">` +
+			`“好吃不是结果，而是一套持续被验证的能力。”</span></p>`)
+	_, qb, _ := extractArticleBlocks(quoteHTML)
+	if b := findBlockByText(qb, "好吃不是结果"); b == nil || b.K == "h" {
+		t.Errorf("句号收尾的居中金句不应判 h，got %v; kinds=%v", b, findKinds(qb))
+	}
+
+	// 短语式真标题：无句末标点 → 仍是标题
+	labelHTML := jsContentWrap(
+		`<p style="text-align:center;">` +
+			`<span leaf="" style="color:rgba(0,0,0,0.9);font-size:20px;font-weight:normal;">` +
+			`四大品牌差异化竞争策略拆解</span></p>`)
+	_, lb, _ := extractArticleBlocks(labelHTML)
+	if b := findBlockByText(lb, "四大品牌"); b == nil || b.K != "h" {
+		t.Errorf("无句末标点的短语式居中标题应为 h，got %v; kinds=%v", b, findKinds(lb))
+	}
+
+	// 疑问式标题：？收尾放行 → 仍是标题（不因像句子而被否决）
+	qTitleHTML := jsContentWrap(
+		`<p style="text-align:center;">` +
+			`<span leaf="" style="color:rgba(0,0,0,0.9);font-size:20px;font-weight:normal;">` +
+			`新鲜零食还能火多久？</span></p>`)
+	_, qtb, _ := extractArticleBlocks(qTitleHTML)
+	if b := findBlockByText(qtb, "还能火多久"); b == nil || b.K != "h" {
+		t.Errorf("问号收尾的疑问式标题应为 h，got %v; kinds=%v", b, findKinds(qtb))
 	}
 }
 
@@ -660,7 +715,7 @@ func TestParseInlineStyleFontSize(t *testing.T) {
 		wantSet bool
 	}{
 		{"font-size: 18px", 18, true},
-		{"font-size:14pt", 14 * 1.333, true},
+		{"font-size:14pt", 14 * 96.0 / 72.0, true}, // pt→px 按 96dpi 精确换算
 		{"font-size: 1em", 16, true},
 		{"color: red", 0, false},
 		{"", 0, false},

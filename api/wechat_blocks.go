@@ -456,7 +456,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	// 少数真实章节标题没有 <b>，但仍是「居中 + 大字号 + 冒号标题」；该兜底必须排除
 	// 图片来源、参考来源和强图注样式，避免回到“所有居中大字都是标题”的宽判定。
 	if hasHeadingFontSize(cx) && textLen > 0 && textLen <= 80 &&
-		(allBold || allRunsUnderBoldTag(cx) || isCenteredTitleLikeHeading(cx, text, textLen)) {
+		(allBold || allRunsUnderBoldTag(cx) || isCenteredLargeHeading(cx, text, textLen)) {
 		w.appendBlock(Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
@@ -498,12 +498,25 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	w.closeCaptionContext()
 }
 
-func isCenteredTitleLikeHeading(cx *blockCtx, text string, textLen int) bool {
+// isCenteredLargeHeading: 兜底识别「没有任何加粗痕迹」的章节小标题。
+// 判据用微信排版的第一性信号，不猜作者是否加了 <b>、是否带冒号：
+//
+//	居中 + 字号 ≥18px（外层 hasHeadingFontSize 已保证，严格大于正文 15–17px）+ 短
+//	（≤40 字）+ 不是图片来源行 / 参考来源头 / 强图注样式（小字或灰色）。
+//
+// 历史教训：早期版本额外要求「文本含冒号」或「run 全在 <b> 下」，这两条都是某一篇
+// 样例文章的巧合属性（作者恰好那样写），换一篇没冒号、没加粗的真标题就漏判——
+// 「四大品牌差异化竞争策略拆解」正是被那条冒号闸门挡在门外。根因与防再犯协议见
+// openspec/changes/robust-wechat-heading-detection/design.md。
+func isCenteredLargeHeading(cx *blockCtx, text string, textLen int) bool {
 	trimmed := strings.TrimSpace(text)
 	if textLen == 0 || textLen > 40 {
 		return false
 	}
-	if !strings.ContainsAny(trimmed, "：:") {
+	// 章节标题是「短语标签」，不是完整句子：以句号/逗号/分号收尾的是居中金句/导语/强调整句，
+	// 不升级为标题（与 DOCX 侧 isBoldHeading 判据一致）。问号/感叹号放行——疑问/感叹式章节
+	// 标题真实存在（如「毕业20年的老粉凭什么"回坑"？」）。
+	if sentenceEndsLikeBody(trimmed) {
 		return false
 	}
 	if isImageSourceLine(trimmed) || refSectionHeadRe.MatchString(trimmed) || hasStrongCaptionStyle(cx) {
@@ -511,6 +524,14 @@ func isCenteredTitleLikeHeading(cx *blockCtx, text string, textLen int) bool {
 	}
 	return isTextCentered(cx)
 }
+
+// sentenceEndsLikeBody 报告文本是否以「正文句子」的收尾标点结束（句号/逗号/顿号/分号）。
+// 标题不这样收尾；居中金句、导语、强调整句会。放行 ？！——疑问/感叹标题真实存在。
+func sentenceEndsLikeBody(trimmed string) bool {
+	return sentenceEndRe.MatchString(trimmed)
+}
+
+var sentenceEndRe = regexp.MustCompile(`[。.．，,、；;]["'”’）)】]*$`)
 
 func isTextCentered(cx *blockCtx) bool {
 	if cx.style.Align == "center" {
@@ -737,7 +758,9 @@ func parseInlineStyle(style string) parsedStyle {
 					case "", "px":
 						out.FontSize = v
 					case "pt":
-						out.FontSize = v * 1.333
+						// 点→像素按 96dpi 精确换算（96/72），不要用截断的 1.333：
+						// 13.5pt 精确等于 18px，但 13.5*1.333=17.9955 会漏在 ≥18 标题阈值之外。
+						out.FontSize = v * 96.0 / 72.0
 					case "em", "rem":
 						out.FontSize = v * 16
 					case "%":
