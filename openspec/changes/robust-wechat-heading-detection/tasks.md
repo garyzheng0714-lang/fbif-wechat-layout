@@ -36,8 +36,8 @@
       `swJQCw5THd0gJVF2GOoMIQ` 及 WORKLOG 提到的 5 篇原生文章真实 HTML 为共享 fixture，
       让每次判据改动一次性跑通全部历史病样
 
-## 6. 上线（待用户确认）
+## 6. 上线（已完成）
 
-- [ ] 6.1 补一份 WORKLOG 记录本次根因与修复（文档先行原则）
-- [ ] 6.2 提交并 push main 触发部署（用户可直接 commit main）
-- [ ] 6.3 部署后线上再导入一次病样 URL 复核 02 为小标题
+- [x] 6.1 补 WORKLOG `WORKLOG-wechat-heading-firstprinciples-2026-07-07.md`
+- [x] 6.2 提交 `e9da55d` push main，部署 run `28851022646` 成功
+- [x] 6.3 生产复核：`version.json`=e9da55d；线上 `/api/fetch-article` 02 返回 `h`；真实浏览器确认 02 渲染为小标题

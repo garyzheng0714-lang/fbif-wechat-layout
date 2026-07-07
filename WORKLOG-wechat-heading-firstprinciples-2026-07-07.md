@@ -49,4 +49,7 @@
 
 ## 部署记录
 
-- 提交 push main 触发 `.github/workflows/deploy.yml`。（下方待部署完成后回填 commit 与线上复核结果。）
+- commit `e9da55d`，push main 触发 `.github/workflows/deploy.yml`，run `28851022646` 成功。
+- 生产 `version.json` build = `e9da55d`，确认新代码已上线。
+- 生产端到端 `POST https://fbifmp-layout.foodtalks.cn/api/fetch-article` 抓取病样：02 块返回 `k="h"`。
+- 生产真实浏览器导入病样 URL：02「四大品牌差异化竞争策略拆解」渲染为加粗小标题（放大截图确认字重）。
