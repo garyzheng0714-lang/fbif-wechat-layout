@@ -183,8 +183,12 @@ let _activeTemplate = null;
 // normalizeWechatRichHtml 会给所有 <img> 强制套 margin:0 auto，把网站页脚的内联 logo
 // 误居中（预览与复制路径都中招）。网站渠道整体跳过归一化（红线#19/#20：与公众号物理
 // 隔离、页脚字节保真），其余渠道照常归一化。
+function isWebsiteTemplate() {
+  return !!(_activeTemplate && (_activeTemplate.transferMmbiz || _activeTemplate.id === 'foodtalks-site'));
+}
+
 function normalizeRich(html) {
-  if (_activeTemplate && _activeTemplate.id === 'foodtalks-site') return html;
+  if (isWebsiteTemplate()) return html;
   return normalizeWechatRichHtml(html);
 }
 
@@ -1068,7 +1072,7 @@ export function initApp(initialTemplate) {
     _isRepost = isRepost;
     _convLog.length = 0;
     clearUploadVisual();
-    dispatchArticleEvent('fbif:article-input-started', { source: 'blocks', title: data && data.title || '' });
+    dispatchArticleEvent('fbif:article-input-started', { source: 'blocks', title: data && data.title || '', isRepost });
     logConv('info', '开始转化', { source: 'blocks', blocks: (data.blocks || []).length });
     errorEl.style.display = 'none';
     showImportEntry();
@@ -1184,6 +1188,20 @@ export function initApp(initialTemplate) {
     await _engineRerender({ articleArtifactOverride: normalized });
     return true;
   }
+  async function setArticleStrategy(isRepost) {
+    const nextIsRepost = !!isRepost;
+    _isRepost = nextIsRepost;
+    if (!_articleSession && !_lastRenderInput) return false;
+    if (_articleSession) {
+      _articleSession.input = { ...(_articleSession.input || {}), isRepost: nextIsRepost };
+      _lastRenderInput = _articleSession.input;
+    } else if (_lastRenderInput) {
+      _lastRenderInput = { ..._lastRenderInput, isRepost: nextIsRepost };
+    }
+    await _engineRerender();
+    return true;
+  }
+  const setArticleRepost = setArticleStrategy;
   window._engineApi = {
     ...window._engineApi,
     setActiveConfig,
@@ -1192,6 +1210,8 @@ export function initApp(initialTemplate) {
     switchTemplate: window._engineSwitchTemplate,
     setFooterVisibilityOverride,
     setArticleArtifactOverride,
+    setArticleStrategy,
+    setArticleRepost,
   };
 
   async function handleFile(file, opts) {
@@ -1200,7 +1220,7 @@ export function initApp(initialTemplate) {
     const isRepost = !!(opts && opts.isRepost);
     _isRepost = isRepost;
     _convLog.length = 0;
-    dispatchArticleEvent('fbif:article-input-started', { source: 'file', file: file && file.name || '' });
+    dispatchArticleEvent('fbif:article-input-started', { source: 'file', file: file && file.name || '', isRepost });
     logConv('info', '开始转化', { file: file.name, size: (file.size / 1024).toFixed(1) + 'KB' });
     errorEl.style.display = 'none';
     showImportEntry();
@@ -1340,6 +1360,14 @@ export function initApp(initialTemplate) {
     return cards.some(c => (c.title && c.title.trim()) || c.cover_data_url);
   }
 
+  function copySafeFooterAfterImagePreparation(footerCopy) {
+    if (isWebsiteTemplate()) return footerCopy;
+    const cards = loadMoreArticlesCards();
+    if (!cards || cards.length === 0) return footerCopy;
+    const copySafeCards = cards.map(copySafeMoreArticleCard);
+    return normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(footerCopy, copySafeCards));
+  }
+
   // 新文章导入：把「更多文章」卡片重置为空白占位 + 作废上一篇在途的预热 job——两步必须原子。
   // 只清卡片不作废 job，旧 job 会在卡片重置之后、showPreview 之前的窗口（两个 await + setTimeout）
   // 里 resolve，此时 seq 未变 → 通过 742 校验 → saveMoreArticlesCards 把上一篇卡片写回存储，
@@ -1352,6 +1380,7 @@ export function initApp(initialTemplate) {
   }
 
   function prepareMoreArticlesForCopy(reason) {
+    if (isWebsiteTemplate()) return Promise.resolve(false);
     if (_moreArticlesCopyJob) return _moreArticlesCopyJob;
     const cards = loadMoreArticlesCards();
     if (!cardsNeedComposite(cards)) return Promise.resolve(false);
@@ -1368,17 +1397,11 @@ export function initApp(initialTemplate) {
       });
       const baseFooter = normalizeWechatRichHtml(isV2 ? base0 : applyRepostTransform(base0, rp));
       if (seq !== _moreArticlesCopySeq) return false;
-      const mergedFooter = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, uploaded));
-      const footerUpload = await uploadNonCdnImages('', mergedFooter, {
-        transferMmbiz: false,
-        onLog: logConv,
-      });
+      const copySafeCards = uploaded.map(copySafeMoreArticleCard);
+      const mergedFooter = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, copySafeCards));
       if (seq !== _moreArticlesCopySeq) return false;
-      _footerCopy = footerUpload.footerCopy;
+      _footerCopy = mergedFooter;
       _footerCopyGen++;
-      if (footerUpload.failedSrcs && footerUpload.failedSrcs.length) {
-        _failedSrcs = Array.from(new Set((_failedSrcs || []).concat(footerUpload.failedSrcs)));
-      }
       logConv('info', '更多文章图片已后台准备完成', { reason });
       return true;
     }).catch(err => {
@@ -1527,7 +1550,7 @@ export function initApp(initialTemplate) {
         onLog: logConv,
       }).then(result => {
         _articleCopy = result.articleCopy;
-        if (_footerCopyGen === footerGenAtStart) _footerCopy = result.footerCopy;
+        if (_footerCopyGen === footerGenAtStart) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
         _failedSrcs = result.failedSrcs || [];
         _uploadDone = true;
         if (result.failed > 0) {
@@ -1559,12 +1582,12 @@ export function initApp(initialTemplate) {
       onLog: logConv,
       onMaterialized(result) {
         _articleCopy = result.articleCopy;
-        if (_footerCopyGen === footerGenAtStart) _footerCopy = result.footerCopy;
+        if (_footerCopyGen === footerGenAtStart) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
         _failedSrcs = result.failedSrcs || [];
       },
     }).then(result => {
       _articleCopy = result.articleCopy;
-      if (_footerCopyGen === footerGenAtStart) _footerCopy = result.footerCopy;
+      if (_footerCopyGen === footerGenAtStart) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
       _failedSrcs = result.failedSrcs || [];
       _uploadDone = true;
       if (result.failed > 0) {
@@ -1592,7 +1615,7 @@ export function initApp(initialTemplate) {
       onLog: logConv,
     });
     _articleCopy = result.articleCopy;
-    if (_footerCopyGen === footerGenAtStart) _footerCopy = result.footerCopy;
+    if (_footerCopyGen === footerGenAtStart) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
     _failedSrcs = result.failedSrcs;
 
     if (result.failed > 0) {
@@ -1852,7 +1875,7 @@ export function initApp(initialTemplate) {
     _articleHtml = cs.article_html || '';
     _articleCopy = cs.article_copy || '';
     _footerHtml = cs.footer_html || '';
-    _footerCopy = cs.footer_copy || '';
+    _footerCopy = copySafeFooterAfterImagePreparation(cs.footer_copy || '');
     _footerCopyGen++;
     _plainTextCopy = cs.plain_text_copy != null ? cs.plain_text_copy : null;
     _isRepost = !!cs.is_repost;

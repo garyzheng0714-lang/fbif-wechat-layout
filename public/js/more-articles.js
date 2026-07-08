@@ -411,15 +411,30 @@ function isRemoteImageUrl(url) {
   return /^https?:\/\//i.test(String(url || '').trim());
 }
 
+function isBitmapDataImageUrl(url) {
+  return /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i.test(String(url || '').trim());
+}
+
+function isImmediateSafeCardSrc(url) {
+  return isMmbizUrl(url) || isBitmapDataImageUrl(url);
+}
+
 export function copySafeMoreArticleCard(card) {
   const c = { ...(card || {}), crop: { ...((card && card.crop) || {}) } };
-  const remoteComposite = isRemoteImageUrl(c.composite_url) ? c.composite_url : '';
-  const remoteOriginal = isRemoteImageUrl(c.imgurl) ? c.imgurl : '';
+  const wechatOriginal = isMmbizUrl(c.imgurl) ? String(c.imgurl).trim() : '';
+  const finalUrl = String(c.final_url || '').trim();
+  const compositeUrl = String(c.composite_url || '').trim();
+  const safeComposite = isBitmapDataImageUrl(finalUrl)
+    ? finalUrl
+    : isBitmapDataImageUrl(compositeUrl)
+      ? compositeUrl
+      : '';
   return {
     ...c,
-    imgurl: remoteOriginal,
-    composite_url: remoteComposite || null,
-    final_url: remoteComposite || remoteOriginal || '',
+    _copySafeMp: true,
+    imgurl: wechatOriginal,
+    composite_url: safeComposite || null,
+    final_url: wechatOriginal ? (safeComposite || wechatOriginal) : '',
   };
 }
 
@@ -522,6 +537,7 @@ function cardSectionStyle(insetPx) {
 function wechatSafeCardImgurl(card, fallback) {
   const original = String((card && card.imgurl) || '').trim();
   if (isMmbizUrl(original)) return original;
+  if (card && card._copySafeMp) return '';
   // 非微信封面（外站文章卡）：远程原图仍优于合成图外链/data:。
   if (/^https?:\/\//i.test(original)) return original;
   return fallback;
@@ -546,7 +562,16 @@ function cardHTML(card, index, insetPx) {
   }
 
   const imgurl = escAttr(rawImgurl);
-  const cardImgurl = escAttr(wechatSafeCardImgurl(card, rawImgurl));
+  const rawCardImgurl = wechatSafeCardImgurl(card, rawImgurl);
+  if (card && card._copySafeMp && (!rawCardImgurl || !isImmediateSafeCardSrc(rawImgurl))) {
+    return (
+      `<section style="${sectionStyle}${marginTop}"><p style="${CARD_P_STYLE}">` +
+      `<span style="${SPAN_STYLE}">` +
+      `<img alt="图片" class="rich_pages wxw-img" style="${IMG_STYLE}" src="${PLACEHOLDER_DATA_URL}">` +
+      `</span></p></section>`
+    );
+  }
+  const cardImgurl = escAttr(rawCardImgurl);
   return (
     `<section style="${sectionStyle}${marginTop}"><p style="${CARD_P_STYLE}"><strong>` +
     `<a href="${href}" imgurl="${cardImgurl}" linktype="image" tab="innerlink" data-itemshowtype="0" target="_blank" data-linktype="1">` +

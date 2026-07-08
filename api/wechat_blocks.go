@@ -107,6 +107,16 @@ func extractArticleBlocks(rawHTML string) (title string, blocks []Block, author 
 }
 
 func extractArticleBlocksWithOptions(rawHTML string, opts articleBlockOptions) (title string, blocks []Block, author string) {
+	title, decisions, author := extractArticleRoleDecisionsWithOptions(rawHTML, opts)
+	return title, blocksFromRoleDecisions(decisions), author
+}
+
+func extractArticleRoleDecisionsForTest(rawHTML string) []RoleDecision {
+	_, decisions, _ := extractArticleRoleDecisionsWithOptions(rawHTML, defaultArticleBlockOptions())
+	return decisions
+}
+
+func extractArticleRoleDecisionsWithOptions(rawHTML string, opts articleBlockOptions) (title string, decisions []RoleDecision, author string) {
 	opts = normalizeArticleBlockOptions(opts)
 	title = extractMeta(rawHTML, "og:title")
 	if title == "" {
@@ -128,7 +138,9 @@ func extractArticleBlocksWithOptions(rawHTML string, opts articleBlockOptions) (
 
 	w := &blockWalker{opts: opts}
 	w.walk(doc, nil, computedStyle{FontSize: 16})
-	return title, w.blocks, ""
+	profile := buildArticleProfile(w.observed)
+	decisions = resolveRoleDecisions(w.observed, profile, opts)
+	return title, decisions, ""
 }
 
 // ---- Walker ----
@@ -136,6 +148,7 @@ func extractArticleBlocksWithOptions(rawHTML string, opts articleBlockOptions) (
 type blockWalker struct {
 	opts               articleBlockOptions
 	blocks             []Block
+	observed           []ObservedBlock
 	pendingBlankBefore bool
 	captionContext     bool
 	captionLines       int
@@ -215,9 +228,11 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.appendBlock(Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
-			w.captionContext = true
-			w.captionLines = 0
+			w.appendImageBlock(Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
+			// Final image/text relationships are resolved after observation.
+			// A single global caption flag cannot distinguish content images
+			// from decorative section markers.
+			w.closeCaptionContext()
 			w.inRefSection = false
 			return
 		case "video":
@@ -242,9 +257,8 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.appendBlock(Block{K: "video", Src: vsrc, Poster: getAttr(n, "poster")})
-			w.captionContext = true
-			w.captionLines = 0
+			w.appendImageBlock(Block{K: "video", Src: vsrc, Poster: getAttr(n, "poster")})
+			w.closeCaptionContext()
 			w.inRefSection = false
 			return
 		case "table":
@@ -436,7 +450,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	allBold := allRunsBold(runs)
 
 	if isHeadingTag(cx.tag) {
-		w.appendBlock(Block{K: "h", Text: text})
+		w.appendTextBlock(cx, Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
 	}
@@ -444,7 +458,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	for _, c := range cx.classes {
 		lc := strings.ToLower(c)
 		if lc == "rich_media_title" || lc == "js_article_title" {
-			w.appendBlock(Block{K: "h", Text: text})
+			w.appendTextBlock(cx, Block{K: "h", Text: text})
 			w.closeCaptionContext()
 			return
 		}
@@ -457,7 +471,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	// 图片来源、参考来源和强图注样式，避免回到“所有居中大字都是标题”的宽判定。
 	if hasHeadingFontSize(cx) && textLen > 0 && textLen <= 80 &&
 		(allBold || allRunsUnderBoldTag(cx) || isCenteredLargeHeading(cx, text, textLen)) {
-		w.appendBlock(Block{K: "h", Text: text})
+		w.appendTextBlock(cx, Block{K: "h", Text: text})
 		w.closeCaptionContext()
 		return
 	}
@@ -468,13 +482,13 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	if refSectionHeadRe.MatchString(trimmed) {
 		w.inRefSection = true
 		w.closeCaptionContext()
-		w.appendBlock(Block{K: "txt", Runs: runs})
+		w.appendTextBlock(cx, Block{K: "txt", Runs: runs})
 		return
 	}
 	if w.inRefSection {
 		if refItemRe.MatchString(trimmed) || refContinuationRe.MatchString(trimmed) {
 			w.closeCaptionContext()
-			w.appendBlock(Block{K: "txt", Runs: runs})
+			w.appendTextBlock(cx, Block{K: "txt", Runs: runs})
 			return
 		}
 		// 既非条目也非说明行 → 参考来源区结束
@@ -482,18 +496,18 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	}
 
 	if w.captionContext && shouldAttachToCaptionGroup(cx, text, textLen, w.captionLines, w.opts) {
-		w.appendBlock(Block{K: "cap", Text: text})
+		w.appendTextBlock(cx, Block{K: "cap", Text: text})
 		w.captionLines++
 		return
 	}
 
 	switch cx.tag {
 	case "blockquote":
-		w.appendBlock(Block{K: "bq", Runs: runs})
+		w.appendTextBlock(cx, Block{K: "bq", Runs: runs})
 	case "li":
-		w.appendBlock(Block{K: "li", Runs: runs})
+		w.appendTextBlock(cx, Block{K: "li", Runs: runs})
 	default:
-		w.appendBlock(Block{K: "txt", Runs: runs})
+		w.appendTextBlock(cx, Block{K: "txt", Runs: runs})
 	}
 	w.closeCaptionContext()
 }
@@ -577,17 +591,519 @@ func hasHeadingFontSize(cx *blockCtx) bool {
 	return sawText
 }
 
+// ObservedBlock is the internal fact layer for URL imports. It records what
+// the DOM said in order, but it is not the final public h/txt/cap decision.
+type ObservedBlock struct {
+	Index              int
+	LegacyBlock        Block
+	RawKind            string
+	Tag                string
+	Classes            []string
+	Style              computedStyle
+	TextStyles         []computedStyle
+	Text               string
+	TextLen            int
+	Centered           bool
+	HeadingFontSize    bool
+	StrongCaptionStyle bool
+	ImageSourceLine    bool
+	ReferenceHead      bool
+	ReferenceItem      bool
+	ReferenceContinue  bool
+	BodyLikeEnding     bool
+	ImageRatio         float64
+}
+
+type articleProfile struct {
+	bodyFlow      map[int]bool
+	refFlow       map[int]bool
+	captionLike   map[int]bool
+	headingSignal map[int]bool
+}
+
+type RoleDecision struct {
+	Index  int
+	Role   string
+	Group  string
+	Reason string
+	Block  Block
+}
+
 func (w *blockWalker) appendBlock(b Block) {
+	w.appendObservedBlock(b, ObservedBlock{})
+}
+
+func (w *blockWalker) appendTextBlock(cx *blockCtx, b Block) {
+	text := b.Text
+	if text == "" {
+		text = textFromRuns(b.Runs)
+	}
+	trimmed := strings.TrimSpace(text)
+	obs := ObservedBlock{
+		RawKind:            "text",
+		Tag:                cx.tag,
+		Classes:            append([]string(nil), cx.classes...),
+		Style:              cx.style,
+		TextStyles:         append([]computedStyle(nil), cx.textStyles...),
+		Text:               trimmed,
+		TextLen:            utf8.RuneCountInString(trimmed),
+		Centered:           isTextCentered(cx),
+		HeadingFontSize:    hasHeadingFontSize(cx),
+		StrongCaptionStyle: hasStrongCaptionStyle(cx),
+		ImageSourceLine:    isImageSourceLine(trimmed),
+		ReferenceHead:      refSectionHeadRe.MatchString(trimmed),
+		ReferenceItem:      refItemRe.MatchString(trimmed),
+		ReferenceContinue:  refContinuationRe.MatchString(trimmed),
+		BodyLikeEnding:     sentenceEndsLikeBody(trimmed),
+	}
+	w.appendObservedBlock(b, obs)
+}
+
+func (w *blockWalker) appendImageBlock(b Block) {
+	w.appendObservedBlock(b, ObservedBlock{
+		RawKind:    "media",
+		ImageRatio: imageRatioFromBlock(b),
+	})
+}
+
+func (w *blockWalker) appendObservedBlock(b Block, obs ObservedBlock) {
 	if w.pendingBlankBefore && len(w.blocks) > 0 {
 		b.BlankBefore = true
 	}
 	w.pendingBlankBefore = false
 	w.blocks = append(w.blocks, b)
+	obs.Index = len(w.observed)
+	obs.LegacyBlock = b
+	if obs.RawKind == "" {
+		switch b.K {
+		case "img", "video":
+			obs.RawKind = "media"
+			obs.ImageRatio = imageRatioFromBlock(b)
+		case "table":
+			obs.RawKind = "table"
+		default:
+			obs.RawKind = "text"
+			if obs.Text == "" {
+				obs.Text = b.Text
+				if obs.Text == "" {
+					obs.Text = textFromRuns(b.Runs)
+				}
+				obs.Text = strings.TrimSpace(obs.Text)
+				obs.TextLen = utf8.RuneCountInString(obs.Text)
+			}
+		}
+	}
+	w.observed = append(w.observed, obs)
 }
 
 func (w *blockWalker) closeCaptionContext() {
 	w.captionContext = false
 	w.captionLines = 0
+}
+
+func imageRatioFromBlock(b Block) float64 {
+	if r := parsePositiveFloat(b.DataRatio); r > 0 {
+		return r
+	}
+	w := parsePositiveFloat(b.DataW)
+	h := parsePositiveFloat(b.DataH)
+	if w > 0 && h > 0 {
+		return h / w
+	}
+	return 0
+}
+
+func parsePositiveFloat(s string) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || v <= 0 {
+		return 0
+	}
+	return v
+}
+
+func buildArticleProfile(observed []ObservedBlock) articleProfile {
+	profile := articleProfile{
+		bodyFlow:      map[int]bool{},
+		refFlow:       map[int]bool{},
+		captionLike:   map[int]bool{},
+		headingSignal: map[int]bool{},
+	}
+	inRefSection := false
+	for _, obs := range observed {
+		if obs.RawKind != "text" {
+			continue
+		}
+		if obs.ImageSourceLine || obs.StrongCaptionStyle || classListSignalsCaption(obs.Classes) {
+			profile.captionLike[obs.Index] = true
+		}
+		if hasSectionHeaderSignal(obs) {
+			profile.headingSignal[obs.Index] = true
+		}
+		if obs.ReferenceHead {
+			inRefSection = true
+			profile.refFlow[obs.Index] = true
+			continue
+		}
+		if inRefSection {
+			if obs.ReferenceItem || obs.ReferenceContinue {
+				profile.refFlow[obs.Index] = true
+				continue
+			}
+			inRefSection = false
+		}
+		if isBodyFlowObservation(obs) {
+			profile.bodyFlow[obs.Index] = true
+		}
+	}
+	return profile
+}
+
+func resolveRoleDecisions(observed []ObservedBlock, profile articleProfile, opts articleBlockOptions) []RoleDecision {
+	sectionTitles := map[int]bool{}
+	for i, obs := range observed {
+		if obs.RawKind != "media" || !isDecorativeMarkerCandidate(obs) {
+			continue
+		}
+		for _, idx := range collectSectionHeaderGroup(observed, profile, i) {
+			sectionTitles[idx] = true
+		}
+	}
+
+	decisions := make([]RoleDecision, 0, len(observed))
+	captionGroupActive := false
+	firstBody := firstBodyFlowIndex(profile)
+	for i, obs := range observed {
+		if obs.RawKind != "text" {
+			decisions = append(decisions, RoleDecision{
+				Index:  obs.Index,
+				Role:   obs.LegacyBlock.K,
+				Group:  "Media",
+				Reason: obs.RawKind,
+				Block:  obs.LegacyBlock,
+			})
+			captionGroupActive = false
+			continue
+		}
+
+		role := obs.LegacyBlock.K
+		reason := "legacy-fallback"
+		group := defaultRoleDecisionGroup(obs, role)
+		if profile.refFlow[obs.Index] {
+			role = "txt"
+			group = "RefGroup"
+			reason = "ref-section"
+			captionGroupActive = false
+		} else if sectionTitles[obs.Index] {
+			role = "h"
+			group = "SectionHeaderGroup"
+			reason = "marker-title-body"
+			captionGroupActive = false
+		} else if isHeadingTag(obs.Tag) && isPrefaceMetadataLine(obs.Text) && (firstBody == -1 || obs.Index < firstBody) {
+			role = "txt"
+			group = "MetadataPreface"
+			reason = "preface-metadata"
+			captionGroupActive = false
+		} else if previous := previousMeaningfulIndex(observed, i); previous >= 0 &&
+			observed[previous].RawKind == "media" &&
+			!isConfirmedSectionMarkerMedia(observed, profile, previous) &&
+			isMediaCaptionFirstLine(observed[previous], obs, opts) {
+			role = "cap"
+			group = "MediaGroup"
+			reason = "source-prefix-after-content-image"
+			if !obs.ImageSourceLine {
+				reason = "media-caption"
+			}
+			captionGroupActive = true
+		} else if captionGroupActive && isCaptionContinuationObservation(obs, opts) {
+			role = "cap"
+			group = "MediaGroup"
+			reason = "media-caption-continuation"
+		} else if isPrefaceMetadataLine(obs.Text) && (firstBody == -1 || obs.Index < firstBody) {
+			role = "txt"
+			group = "MetadataPreface"
+			reason = "preface-metadata"
+			captionGroupActive = false
+		} else if profile.bodyFlow[obs.Index] {
+			role = "txt"
+			group = "BodyFlow"
+			reason = "body-flow"
+			captionGroupActive = false
+		} else {
+			captionGroupActive = false
+			if role == "cap" {
+				role = "txt"
+				group = "Unknown"
+				reason = "unknown-fallback"
+			}
+		}
+
+		decisions = append(decisions, RoleDecision{
+			Index:  obs.Index,
+			Role:   role,
+			Group:  group,
+			Reason: reason,
+			Block:  blockFromRoleDecision(obs, role),
+		})
+	}
+	return decisions
+}
+
+func defaultRoleDecisionGroup(obs ObservedBlock, role string) string {
+	switch role {
+	case "h":
+		return "StandaloneHeading"
+	case "txt", "bq", "li":
+		if obs.RawKind == "text" {
+			return "Unknown"
+		}
+	case "cap":
+		return "Unknown"
+	}
+	if obs.RawKind != "" {
+		return obs.RawKind
+	}
+	return "Unknown"
+}
+
+func blocksFromRoleDecisions(decisions []RoleDecision) []Block {
+	out := make([]Block, 0, len(decisions))
+	for _, d := range decisions {
+		out = append(out, d.Block)
+	}
+	return out
+}
+
+func firstBodyFlowIndex(profile articleProfile) int {
+	first := -1
+	for idx := range profile.bodyFlow {
+		if first == -1 || idx < first {
+			first = idx
+		}
+	}
+	return first
+}
+
+func isBodyFlowObservation(obs ObservedBlock) bool {
+	if obs.RawKind != "text" || obs.TextLen == 0 || obs.ImageSourceLine || obs.ReferenceHead {
+		return false
+	}
+	if obs.LegacyBlock.K == "bq" || obs.LegacyBlock.K == "li" || obs.LegacyBlock.K == "h" || obs.LegacyBlock.K == "cap" {
+		return false
+	}
+	if obs.TextLen > 40 || obs.BodyLikeEnding {
+		return true
+	}
+	return obs.LegacyBlock.K == "txt" && !obs.Centered && !obs.StrongCaptionStyle && obs.TextLen >= 18
+}
+
+func collectSectionHeaderGroup(observed []ObservedBlock, profile articleProfile, markerIdx int) []int {
+	var titles []int
+	next := nextMeaningfulIndex(observed, markerIdx)
+	for next >= 0 && len(titles) < 2 {
+		obs := observed[next]
+		if obs.RawKind != "text" {
+			return nil
+		}
+		if profile.bodyFlow[obs.Index] {
+			if len(titles) > 0 {
+				if sectionHeaderGroupHasEvidence(observed[markerIdx], observed, titles) {
+					return titles
+				}
+			}
+			return nil
+		}
+		if !isSectionHeaderCandidate(obs) {
+			return nil
+		}
+		titles = append(titles, obs.Index)
+		following := nextMeaningfulIndex(observed, next)
+		if following < 0 {
+			return nil
+		}
+		if observed[following].RawKind == "text" && profile.bodyFlow[observed[following].Index] {
+			if sectionHeaderGroupHasEvidence(observed[markerIdx], observed, titles) {
+				return titles
+			}
+			return nil
+		}
+		next = following
+	}
+	return nil
+}
+
+func isSectionHeaderCandidate(obs ObservedBlock) bool {
+	if obs.RawKind != "text" || obs.TextLen == 0 || obs.TextLen > 40 {
+		return false
+	}
+	if obs.ImageSourceLine || obs.ReferenceHead || obs.ReferenceItem || obs.ReferenceContinue {
+		return false
+	}
+	if obs.BodyLikeEnding {
+		return false
+	}
+	return true
+}
+
+func sectionHeaderGroupHasEvidence(marker ObservedBlock, observed []ObservedBlock, titles []int) bool {
+	if isFlatSectionMarkerCandidate(marker) && len(titles) > 0 &&
+		titles[0] >= 0 && titles[0] < len(observed) &&
+		!observed[titles[0]].StrongCaptionStyle {
+		return true
+	}
+	for _, idx := range titles {
+		if idx >= 0 && idx < len(observed) && hasSectionHeaderSignal(observed[idx]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDecorativeMarkerMedia(obs ObservedBlock) bool {
+	return isDecorativeMarkerCandidate(obs)
+}
+
+func isDecorativeMarkerCandidate(obs ObservedBlock) bool {
+	if obs.RawKind != "media" {
+		return false
+	}
+	return obs.ImageRatio == 0 || obs.ImageRatio <= 0.33
+}
+
+func isFlatSectionMarkerCandidate(obs ObservedBlock) bool {
+	return obs.ImageRatio > 0 && isDecorativeMarkerCandidate(obs) && obs.ImageRatio <= 0.13
+}
+
+func isConfirmedSectionMarkerMedia(observed []ObservedBlock, profile articleProfile, markerIdx int) bool {
+	return isDecorativeMarkerMedia(observed[markerIdx]) && len(collectSectionHeaderGroup(observed, profile, markerIdx)) > 0
+}
+
+func hasSectionHeaderSignal(obs ObservedBlock) bool {
+	if obs.HeadingFontSize {
+		return true
+	}
+	for _, s := range obs.TextStyles {
+		if s.ColorSet && !isGreyHex(s.Color) {
+			return true
+		}
+		if s.FontWeightBold || s.BoldTag {
+			return true
+		}
+	}
+	if obs.Style.ColorSet && !isGreyHex(obs.Style.Color) {
+		return true
+	}
+	return obs.Style.FontWeightBold || obs.Style.BoldTag
+}
+
+func isCaptionFirstLineObservation(obs ObservedBlock, opts articleBlockOptions) bool {
+	if obs.TextLen == 0 {
+		return false
+	}
+	if obs.ImageSourceLine {
+		return true
+	}
+	if obs.BodyLikeEnding {
+		return false
+	}
+	if obs.StrongCaptionStyle {
+		return obs.TextLen <= opts.CaptionStrongMaxChars
+	}
+	if obs.HeadingFontSize || obs.TextLen > opts.CaptionMaxChars {
+		return false
+	}
+	if classListSignalsCaption(obs.Classes) {
+		return true
+	}
+	return obs.Centered && obs.TextLen <= opts.CaptionCenterMaxChars
+}
+
+func isMediaCaptionFirstLine(media ObservedBlock, obs ObservedBlock, opts articleBlockOptions) bool {
+	if !isCaptionFirstLineObservation(obs, opts) {
+		return false
+	}
+	if obs.ImageSourceLine || obs.StrongCaptionStyle || classListSignalsCaption(obs.Classes) {
+		return true
+	}
+	return media.ImageRatio > 0
+}
+
+func isCaptionContinuationObservation(obs ObservedBlock, opts articleBlockOptions) bool {
+	if obs.TextLen == 0 {
+		return false
+	}
+	if obs.ImageSourceLine {
+		return true
+	}
+	if obs.StrongCaptionStyle {
+		return obs.TextLen <= opts.CaptionStrongMaxChars
+	}
+	if obs.TextLen > opts.CaptionMaxChars {
+		return false
+	}
+	return classListSignalsCaption(obs.Classes)
+}
+
+func classListSignalsCaption(classes []string) bool {
+	for _, c := range classes {
+		if classSignalsCaption(c) {
+			return true
+		}
+	}
+	return false
+}
+
+func previousMeaningfulIndex(observed []ObservedBlock, i int) int {
+	for j := i - 1; j >= 0; j-- {
+		if observed[j].RawKind != "" {
+			return j
+		}
+	}
+	return -1
+}
+
+func nextMeaningfulIndex(observed []ObservedBlock, i int) int {
+	for j := i + 1; j < len(observed); j++ {
+		if observed[j].RawKind != "" {
+			return j
+		}
+	}
+	return -1
+}
+
+func isPrefaceMetadataLine(text string) bool {
+	t := strings.TrimSpace(text)
+	t = strings.TrimLeft(t, "（([【 ")
+	if t == "" {
+		return false
+	}
+	prefixes := []string{"作者", "撰文", "文", "来源", "编辑", "出品"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(t, p+"：") || strings.HasPrefix(t, p+":") || strings.HasPrefix(t, p+" |") || strings.HasPrefix(t, p+"｜") {
+			return true
+		}
+	}
+	return false
+}
+
+func blockFromRoleDecision(obs ObservedBlock, role string) Block {
+	b := obs.LegacyBlock
+	switch role {
+	case "h":
+		b.K = "h"
+		b.Text = obs.Text
+		b.Runs = nil
+	case "cap":
+		b.K = "cap"
+		b.Text = obs.Text
+		b.Runs = nil
+	case "txt":
+		b.K = "txt"
+		b.Text = ""
+		if len(b.Runs) == 0 && obs.Text != "" {
+			b.Runs = []Run{{Type: "txt", Text: obs.Text}}
+		}
+	}
+	return b
 }
 
 func shouldAttachToCaptionGroup(cx *blockCtx, text string, textLen int, captionLines int, opts articleBlockOptions) bool {
@@ -685,6 +1201,7 @@ func isImageSourceLine(text string) bool {
 	t = strings.TrimLeft(t, "（([【 ")
 	return strings.HasPrefix(t, "图片来源") ||
 		strings.HasPrefix(t, "图源") ||
+		strings.HasPrefix(t, "图为") ||
 		strings.HasPrefix(t, "图片源") ||
 		strings.HasPrefix(t, "image source") ||
 		strings.HasPrefix(t, "photo source") ||

@@ -54,6 +54,10 @@
               <div class="import-title">导入内容</div>
             </div>
           </div>
+          <div class="site-import-summary" id="siteImportSummary" role="button" tabindex="0" aria-label="展开导入内容" hidden>
+            <span class="site-import-summary-label" id="siteImportSummaryLabel">已导入</span>
+            <span class="site-import-summary-text" id="siteImportSummaryText">等待内容</span>
+          </div>
           <div class="import-actions">
             <div class="dropzone upload-zone" id="dropZone" tabindex="0" role="button" aria-label="粘贴或拖拽文件到这里上传，点击添加本地文件">
               <div class="dropzone-inner">
@@ -93,34 +97,65 @@
       <div class="sidebar-stats" id="statsBar"></div>
       <div class="batch-list" id="batchList" style="display:none;"></div>
 
-      <div class="active-rule-card" id="activeRuleCard" aria-live="polite">
-        <div class="active-rule-readline">
-          <span class="active-rule-readmeta">
-            <span class="active-rule-label">规则</span>
-            <span class="active-rule-readvalue">加载中...</span>
-            <span class="active-rule-badge">已锁定</span>
-          </span>
-          <button type="button" class="active-rule-icon" aria-label="修改当前规则" title="修改当前规则">
-            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-          </button>
+      <details class="site-editor-section site-section-card site-top-info-section" data-site-section="top-info" open>
+        <summary class="site-section-summary">
+          <span class="site-section-title">文章顶部信息</span>
+          <span class="site-section-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="site-section-body site-meta-form">
+          <label class="site-field-row" for="siteArticleTitleInput">
+            <span class="site-field-label">标题 <span aria-hidden="true">*</span></span>
+            <input class="site-field-control" id="siteArticleTitleInput" type="text" autocomplete="off">
+          </label>
+          <label class="site-field-row" for="siteArticleAuthorInput">
+            <span class="site-field-label">作者 <span aria-hidden="true">*</span></span>
+            <span class="site-input-wrap">
+              <input class="site-field-control" id="siteArticleAuthorInput" type="text" maxlength="20" autocomplete="off">
+              <span class="site-field-count" data-site-count-for="siteArticleAuthorInput">0/20</span>
+            </span>
+          </label>
+          <label class="site-field-row" for="siteArticleSummaryInput">
+            <span class="site-field-label">摘要 <span aria-hidden="true">*</span></span>
+            <span class="site-input-wrap">
+              <textarea class="site-field-control site-field-textarea" id="siteArticleSummaryInput" rows="4" maxlength="200"></textarea>
+              <span class="site-field-count" data-site-count-for="siteArticleSummaryInput">0/200</span>
+            </span>
+          </label>
+          <div class="site-field-row">
+            <span class="site-field-label">标签</span>
+            <div class="site-tag-editor" id="siteArticleTagsEditor" aria-label="文章标签"></div>
+          </div>
         </div>
-      </div>
+      </details>
 
-      <details class="ft-advanced-options ft-footer-area" id="footerLib" open>
-        <summary class="ft-adv-summary ft-footer-summary">
-          <span class="ft-footer-summary-title">底部区域</span>
-          <span class="ft-footer-parent-switch">
-            <span>本文显示</span>
-            <button type="button" class="ft-switch" id="footerEnableToggle" role="switch" aria-checked="false" aria-label="显示底部区域" data-footer-area-switch="enabled">
+      <details class="site-editor-section site-section-card ft-advanced-options ft-footer-area" data-site-section="footer-trailer" id="footerLib" open>
+        <summary class="site-section-summary ft-footer-summary">
+          <span class="site-section-title">文章底部拖尾</span>
+          <span class="site-section-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="site-section-body ft-adv-body">
+          <div class="site-footer-strategy-inline" aria-label="排版策略">
+            <div class="site-strategy-grid" role="group" aria-label="排版策略">
+              <button type="button" class="site-strategy-card is-active" data-site-strategy="original" aria-pressed="true">
+                <span class="site-strategy-name">原创</span>
+                <span class="site-strategy-desc">上传、正文默认</span>
+              </button>
+              <button type="button" class="site-strategy-card" data-site-strategy="repost" aria-pressed="false">
+                <span class="site-strategy-name">转载</span>
+                <span class="site-strategy-desc">URL 导入默认</span>
+              </button>
+            </div>
+          </div>
+          <div class="ft-footer-technical-controls" hidden aria-hidden="true">
+            <button type="button" class="ft-switch" id="footerEnableToggle" hidden role="switch" aria-checked="true" aria-label="显示底部区域" data-footer-area-switch="enabled">
               <span class="ft-switch-knob"></span>
             </button>
-          </span>
-        </summary>
-        <div class="ft-adv-body">
-          <!-- 页脚预设和片段由服务端规则模块动态渲染 -->
-          <div class="ft-footer-presets" id="footerPresets"></div>
-          <div class="ft-footer-off-note" id="footerOffNote" hidden>本文不输出底部区域，预览和复制都不会包含这些模块。</div>
-          <div class="ft-footer-segments" id="footerSegments"></div>
+            <div class="ft-footer-presets" id="footerPresets" hidden></div>
+            <div class="ft-footer-off-note" id="footerOffNote" hidden>本文不输出底部区域，预览和复制都不会包含这些模块。</div>
+          </div>
+          <div class="ft-footer-table">
+            <div class="ft-footer-segments" id="footerSegments" role="list" aria-label="文章底部拖尾模块"></div>
+          </div>
         </div>
       </details>
     </div>
@@ -793,6 +828,29 @@ function footerSegmentAssetToken(key) {
   return match ? match[0] : '';
 }
 
+function stripFooterPreviewText(lines) {
+  return String((lines || []).join(' '))
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&ldquo;|&rdquo;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function footerSegmentPreviewHtml(key) {
+  const lines = footerSegmentCurrentHtmlLines(key);
+  const token = (lines.join('\n').match(FOOTER_ASSET_TOKEN_RE) || [footerSegmentAssetToken(key)])[0];
+  const thumb = token ? resolveAssetThumb(token, serverAssetLibrary(), 'ft-default') : '';
+  const text = stripFooterPreviewText(lines);
+  if (thumb) {
+    return `<span class="ft-footer-preview-thumb"><img src="${escText(thumb)}" alt="${escText(footerSegmentLabel(key))}" loading="lazy"></span><span class="ft-footer-preview-text">${escText(text || footerSegmentLabel(key))}</span>`;
+  }
+  return `<span class="ft-footer-preview-text">${escText(text || '按规则默认')}</span>`;
+}
+
 function footerSegmentDefaultAssetID(key) {
   const asset = footerAssetForToken(footerSegmentAssetToken(key), 'ft-default');
   return asset && asset.id ? String(asset.id) : '';
@@ -820,13 +878,8 @@ function sameFooterHtmlLines(a, b) {
 
 function footerSegmentAssetControlHtml(key) {
   if (key === 'bd_card' || !footerSegmentAssetToken(key)) return '';
-  const currentToken = (footerSegmentCurrentHtmlLines(key).join('\n').match(FOOTER_ASSET_TOKEN_RE) || [footerSegmentAssetToken(key)])[0];
-  const thumb = resolveAssetThumb(currentToken, serverAssetLibrary(), 'ft-default');
   const hasOverride = !!(footerSegmentFields[key] && footerSegmentFields[key].html_lines);
   return `<div class="ft-footer-asset-control" data-footer-asset-control="${escText(key)}">
-    <div class="ft-footer-asset-preview ${thumb ? '' : 'is-empty'}">
-      ${thumb ? `<img src="${escText(thumb)}" alt="${escText(footerSegmentLabel(key))}" loading="lazy">` : '<span>暂无预览</span>'}
-    </div>
     <div class="ft-footer-asset-actions">
       <button type="button" class="ft-footer-asset-btn" data-footer-asset-pick="${escText(key)}">替换图片</button>
       <button type="button" class="ft-footer-asset-reset" data-footer-asset-reset="${escText(key)}" ${hasOverride ? '' : 'hidden'}>恢复默认</button>
@@ -1049,7 +1102,6 @@ await loadTemplate(currentTemplateId);
 // Cross-channel state restore — must come after initApp so engine.js has
 // wired up window._captureSessionSnapshot / _restoreSessionSnapshot.
 const { restoreCurrentChannel, bindChannelSwitcher } = await import('/js/session-restore.js?v=' + assetVersion);
-restoreCurrentChannel();
 bindChannelSwitcher();
 
 syncWorkflowControls();
@@ -1079,11 +1131,45 @@ initAdminPanel({
 // ---- Title display ----
 const titleInput = document.getElementById('titleInput');
 const articleTitle = document.getElementById('articleTitle');
+const siteArticleTitleInput = document.getElementById('siteArticleTitleInput');
+const siteArticleAuthorInput = document.getElementById('siteArticleAuthorInput');
+const siteAuthorPreviewSelector = '.ft-meta-author .wx-meta-account';
+const siteArticleSummaryInput = document.getElementById('siteArticleSummaryInput');
+const siteSummaryPreviewID = 'ftSummary';
+const siteArticleTagsEditor = document.getElementById('siteArticleTagsEditor');
+const siteTagsPreviewID = 'ftPreviewTags';
+const siteImportZone = document.getElementById('importZone');
+const siteImportSummary = document.getElementById('siteImportSummary');
+const siteImportSummaryLabel = document.getElementById('siteImportSummaryLabel');
+const siteImportSummaryText = document.getElementById('siteImportSummaryText');
 const _od = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+let siteArticleStrategy = 'original';
+let siteArticleMetaPayload = null;
+const siteArticleMetaDirty = { title: false, author: false, summary: false, tags: false };
+const siteArticleMeta = {
+  title: '',
+  author: (activeRulePack && (activeRulePack.previewAccountName || activeRulePack.accountName)) || 'FBIF食品饮料创新',
+  summary: '',
+  tags: [],
+};
+
 Object.defineProperty(titleInput, 'value', {
   get() { return _od.get.call(this); },
-  set(v) { _od.set.call(this, v); articleTitle.textContent = v; },
+  set(v) {
+    const incoming = String(v == null ? '' : v);
+    if (siteArticleMetaDirty.title) {
+      _od.set.call(this, siteArticleMeta.title);
+      if (articleTitle) articleTitle.textContent = siteArticleMeta.title;
+      return;
+    }
+    _od.set.call(this, incoming);
+    siteArticleMeta.title = incoming;
+    if (articleTitle) articleTitle.textContent = incoming;
+    if (siteArticleTitleInput && siteArticleTitleInput.value !== incoming) siteArticleTitleInput.value = incoming;
+  },
 });
+siteArticleMeta.title = (titleInput && titleInput.value) || (articleTitle && articleTitle.textContent) || '';
+if (siteArticleTitleInput) siteArticleTitleInput.value = siteArticleMeta.title;
 
 // ---- FoodTalks article preview shell ----
 const FOODTALKS_PREVIEW_META = Object.freeze({
@@ -1100,49 +1186,356 @@ const FOODTALKS_PREVIEW_META = Object.freeze({
 });
 window._foodTalksPreviewMeta = FOODTALKS_PREVIEW_META;
 
-function renderFoodTalksPreviewMeta(meta) {
-  const dateEl = document.getElementById('wxDate');
-  const readEl = document.getElementById('ftReadCount');
-  const summaryEl = document.getElementById('ftSummary');
-  const tagsEl = document.getElementById('ftPreviewTags');
-  const qrCaptionEl = document.getElementById('ftShareQrCaption');
-  const copyTextEl = document.getElementById('ftShareCopyText');
-  if (dateEl) dateEl.textContent = meta.articleDate;
-  if (readEl) readEl.textContent = meta.readCount;
-  if (summaryEl) summaryEl.textContent = meta.summary;
-  if (qrCaptionEl) qrCaptionEl.textContent = meta.shareQrCaption;
-  if (copyTextEl) copyTextEl.textContent = meta.shareCopyText;
+function setSiteImportCompact(label, text) {
+  if (!siteImportZone || !siteImportSummary) return;
+  const nextLabel = String(label || '已导入').trim() || '已导入';
+  const nextText = String(text || '已导入内容').trim() || '已导入内容';
+  siteImportZone.classList.add('is-compact');
+  siteImportSummary.hidden = false;
+  if (siteImportSummaryLabel) siteImportSummaryLabel.textContent = nextLabel;
+  if (siteImportSummaryText) siteImportSummaryText.textContent = nextText;
+}
+
+function clearSiteImportCompact() {
+  if (siteImportZone) siteImportZone.classList.remove('is-compact');
+  if (siteImportSummary) siteImportSummary.hidden = true;
+  if (siteImportSummaryLabel) siteImportSummaryLabel.textContent = '已导入';
+  if (siteImportSummaryText) siteImportSummaryText.textContent = '等待内容';
+}
+
+function expandSiteImportPanel() {
+  if (siteImportZone) siteImportZone.classList.remove('is-compact');
+}
+
+if (siteImportSummary) {
+  siteImportSummary.addEventListener('click', expandSiteImportPanel);
+  siteImportSummary.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    expandSiteImportPanel();
+  });
+}
+
+function siteDefaultTags() {
+  return FOODTALKS_PREVIEW_META.tags.map(tag => tag.label);
+}
+
+function parseSiteTags(value) {
+  return String(value == null ? '' : value)
+    .split(/[，,、\n]+/)
+    .map(tag => tag.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function normalizeSiteTagList(tags) {
+  const list = Array.isArray(tags) ? tags : parseSiteTags(tags);
+  return list
+    .map(tag => String(tag || '').trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function renderSiteTagEditor() {
+  if (!siteArticleTagsEditor) return;
+  siteArticleTagsEditor.replaceChildren();
+  const tags = siteArticleMeta.tags.length ? siteArticleMeta.tags : siteDefaultTags();
+  tags.forEach((label, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'site-tag-chip';
+    button.dataset.siteTagIndex = String(index);
+    button.textContent = label;
+    button.addEventListener('click', () => editSiteTagAt(index));
+    siteArticleTagsEditor.appendChild(button);
+  });
+  const addButton = document.createElement('button');
+  addButton.type = 'button';
+  addButton.className = 'site-tag-add';
+  addButton.setAttribute('aria-label', '新增标签');
+  addButton.textContent = '+';
+  addButton.addEventListener('click', addSiteTag);
+  siteArticleTagsEditor.appendChild(addButton);
+}
+
+function editSiteTagAt(index) {
+  const tags = normalizeSiteTagList(siteArticleMeta.tags.length ? siteArticleMeta.tags : siteDefaultTags());
+  const current = tags[index] || '';
+  const chip = siteArticleTagsEditor && siteArticleTagsEditor.querySelector(`[data-site-tag-index="${index}"]`);
+  if (!chip) return;
+  const input = document.createElement('input');
+  input.className = 'site-tag-input';
+  input.type = 'text';
+  input.maxLength = 24;
+  input.value = current;
+  input.setAttribute('aria-label', '编辑标签');
+  let done = false;
+  const finish = commit => {
+    if (done) return;
+    done = true;
+    if (!commit) {
+      renderSiteTagEditor();
+      return;
+    }
+    const clean = input.value.trim();
+    siteArticleMetaDirty.tags = true;
+    if (clean) tags[index] = clean;
+    else tags.splice(index, 1);
+    setSiteArticleMeta({ tags }, { writeInputs: false });
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') finish(true);
+    if (event.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  chip.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+function addSiteTag() {
+  const tags = normalizeSiteTagList(siteArticleMeta.tags.length ? siteArticleMeta.tags : siteDefaultTags());
+  if (tags.length >= 12) return;
+  if (!siteArticleTagsEditor) return;
+  const addButton = siteArticleTagsEditor.querySelector('.site-tag-add');
+  const input = document.createElement('input');
+  input.className = 'site-tag-input';
+  input.type = 'text';
+  input.maxLength = 24;
+  input.setAttribute('aria-label', '新增标签');
+  let done = false;
+  const finish = commit => {
+    if (done) return;
+    done = true;
+    const clean = input.value.trim();
+    if (!commit || !clean) {
+      renderSiteTagEditor();
+      return;
+    }
+    siteArticleMetaDirty.tags = true;
+    tags.push(clean);
+    setSiteArticleMeta({ tags }, { writeInputs: false });
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') finish(true);
+    if (event.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  siteArticleTagsEditor.insertBefore(input, addButton || null);
+  input.focus();
+}
+
+function syncSiteFieldCount(input) {
+  if (!input) return;
+  const counter = document.querySelector(`[data-site-count-for="${input.id}"]`);
+  if (!counter) return;
+  const max = Number(input.getAttribute('maxlength') || 0);
+  counter.textContent = max ? `${input.value.length}/${max}` : String(input.value.length);
+}
+
+function writeSiteArticleMetaInputs() {
+  if (siteArticleTitleInput && siteArticleTitleInput.value !== siteArticleMeta.title) siteArticleTitleInput.value = siteArticleMeta.title;
+  if (siteArticleAuthorInput && siteArticleAuthorInput.value !== siteArticleMeta.author) siteArticleAuthorInput.value = siteArticleMeta.author;
+  if (siteArticleSummaryInput && siteArticleSummaryInput.value !== siteArticleMeta.summary) siteArticleSummaryInput.value = siteArticleMeta.summary;
+  renderSiteTagEditor();
+  [siteArticleAuthorInput, siteArticleSummaryInput].forEach(syncSiteFieldCount);
+}
+
+function setSiteArticleMeta(patch = {}, options = {}) {
+  if (Object.prototype.hasOwnProperty.call(patch, 'title')) siteArticleMeta.title = String(patch.title || '');
+  if (Object.prototype.hasOwnProperty.call(patch, 'author')) siteArticleMeta.author = String(patch.author || '');
+  if (Object.prototype.hasOwnProperty.call(patch, 'summary')) siteArticleMeta.summary = String(patch.summary || '');
+  if (Object.prototype.hasOwnProperty.call(patch, 'tags')) siteArticleMeta.tags = normalizeSiteTagList(patch.tags);
+  if (options.writeInputs !== false) writeSiteArticleMetaInputs();
+  else renderSiteTagEditor();
+  syncSiteArticleMetaPreview();
+}
+
+function syncSiteArticleMetaPreview() {
+  if (titleInput && titleInput.value !== siteArticleMeta.title) titleInput.value = siteArticleMeta.title;
+  if (articleTitle) articleTitle.textContent = siteArticleMeta.title;
+  document.querySelectorAll(siteAuthorPreviewSelector).forEach(el => { el.textContent = siteArticleMeta.author || ((activeRulePack && (activeRulePack.previewAccountName || activeRulePack.accountName)) || 'FBIF食品饮料创新'); });
+  const summaryEl = document.getElementById(siteSummaryPreviewID);
+  if (summaryEl) summaryEl.textContent = siteArticleMeta.summary || FOODTALKS_PREVIEW_META.summary;
+  const tagsEl = document.getElementById(siteTagsPreviewID);
   if (tagsEl) {
     tagsEl.replaceChildren();
-    meta.tags.forEach(tag => {
+    const tags = siteArticleMeta.tags.length ? siteArticleMeta.tags : siteDefaultTags();
+    tags.forEach((label, index) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'ft-preview-tag';
-      button.dataset.previewTagKey = tag.key;
-      button.textContent = tag.label;
+      button.dataset.previewTagKey = 'site_tag_' + index;
+      button.textContent = label;
       tagsEl.appendChild(button);
     });
   }
 }
+
+function bindSiteArticleMetaInputs() {
+  if (siteArticleTitleInput) siteArticleTitleInput.addEventListener('input', () => {
+    siteArticleMetaDirty.title = true;
+    siteArticleMeta.title = siteArticleTitleInput.value;
+    if (titleInput) titleInput.value = siteArticleTitleInput.value;
+    syncSiteArticleMetaPreview();
+  });
+  if (siteArticleAuthorInput) siteArticleAuthorInput.addEventListener('input', () => {
+    siteArticleMetaDirty.author = true;
+    siteArticleMeta.author = siteArticleAuthorInput.value;
+    syncSiteFieldCount(siteArticleAuthorInput);
+    syncSiteArticleMetaPreview();
+  });
+  if (siteArticleSummaryInput) siteArticleSummaryInput.addEventListener('input', () => {
+    siteArticleMetaDirty.summary = true;
+    siteArticleMeta.summary = siteArticleSummaryInput.value;
+    syncSiteFieldCount(siteArticleSummaryInput);
+    syncSiteArticleMetaPreview();
+  });
+}
+
+function plainTextFromRuns(runs) {
+  return (runs || []).map(run => String((run && (run.text || run.value)) || '')).join('');
+}
+
+function extractAuthorFromText(text) {
+  const compact = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  const match = compact.match(/(?:本文作者|作者|Author)\s*[：:]\s*([^,，。；;\n]+)/i);
+  return match ? match[1].trim() : '';
+}
+
+function collectInputTextSamples(input) {
+  const payload = input && input.payload;
+  if (!payload) return [];
+  if (typeof payload === 'string') return payload.split(/\r?\n/).slice(0, 30);
+  if (Array.isArray(payload.paragraphs)) {
+    return payload.paragraphs.map(p => {
+      if (!p) return '';
+      if (typeof p.text === 'string') return p.text;
+      return plainTextFromRuns(p.runs || []);
+    });
+  }
+  if (Array.isArray(payload.blocks)) {
+    return payload.blocks.map(block => {
+      if (!block) return '';
+      if (typeof block.text === 'string') return block.text;
+      return plainTextFromRuns(block.runs || []);
+    });
+  }
+  return [];
+}
+
+function extractSiteAuthorFromInput(input) {
+  for (const text of collectInputTextSamples(input)) {
+    const author = extractAuthorFromText(text);
+    if (author) return author;
+  }
+  return '';
+}
+
+function siteMetaFromSession(session) {
+  const articleMeta = session && session.articleMeta || {};
+  const result = session && session.result || {};
+  return {
+    title: String((session && (session.title || (session.input && session.input.title))) || result.title || '').trim(),
+    author: String(articleMeta.author || (result.articleMeta && result.articleMeta.author) || result.authorName || (session ? extractSiteAuthorFromInput(session.input) : '') || '').trim(),
+  };
+}
+
+function resetSiteArticleMetaForNewInput(strategy) {
+  siteArticleMetaPayload = null;
+  for (const key of Object.keys(siteArticleMetaDirty)) siteArticleMetaDirty[key] = false;
+  setSiteArticleMeta({
+    title: '',
+    author: (activeRulePack && (activeRulePack.previewAccountName || activeRulePack.accountName)) || 'FBIF食品饮料创新',
+    summary: FOODTALKS_PREVIEW_META.summary,
+    tags: siteDefaultTags(),
+  });
+  if (strategy) setSiteStrategy(strategy, { rerender: false });
+}
+
+function setSiteStrategy(strategy, options = {}) {
+  const next = strategy === 'repost' ? 'repost' : 'original';
+  siteArticleStrategy = next;
+  document.querySelectorAll('[data-site-strategy]').forEach(btn => {
+    const active = btn.dataset.siteStrategy === next;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  if (options.rerender !== false && window._engineApi && typeof window._engineApi.setArticleStrategy === 'function') {
+    window._engineApi.setArticleStrategy(next === 'repost');
+  }
+}
+
+function setSiteStrategyFromInput(input, fallbackIsRepost = false) {
+  const isRepost = input && input.isRepost != null ? !!input.isRepost : !!fallbackIsRepost;
+  setSiteStrategy(isRepost ? 'repost' : 'original', { rerender: false });
+}
+
+document.querySelectorAll('[data-site-strategy]').forEach(btn => {
+  btn.addEventListener('click', () => setSiteStrategy(btn.dataset.siteStrategy));
+});
+bindSiteArticleMetaInputs();
+
+function renderFoodTalksPreviewMeta(meta) {
+  const dateEl = document.getElementById('wxDate');
+  const readEl = document.getElementById('ftReadCount');
+  const qrCaptionEl = document.getElementById('ftShareQrCaption');
+  const copyTextEl = document.getElementById('ftShareCopyText');
+  if (dateEl) dateEl.textContent = meta.articleDate;
+  if (readEl) readEl.textContent = meta.readCount;
+  if (qrCaptionEl) qrCaptionEl.textContent = meta.shareQrCaption;
+  if (copyTextEl) copyTextEl.textContent = meta.shareCopyText;
+  setSiteArticleMeta({ summary: meta.summary, tags: meta.tags.map(tag => tag.label) });
+}
 renderFoodTalksPreviewMeta(FOODTALKS_PREVIEW_META);
 
-window.addEventListener('fbif:article-input-started', () => {
+let pendingUrlSummary = '';
+
+window.addEventListener('fbif:article-input-started', event => {
   clearFooterArticleOverrides(false);
+  const detail = event && event.detail || {};
+  resetSiteArticleMetaForNewInput(detail.isRepost ? 'repost' : 'original');
+  const importName = detail.file || detail.title || (detail.isRepost ? window._currentArticleUrl : '') || '已导入正文';
+  setSiteImportCompact(detail.isRepost ? 'FoodTalks 链接' : (detail.source === 'file' ? '本地文件' : '正文内容'), importName);
+  if (detail.isRepost && pendingUrlSummary && !siteArticleMetaDirty.summary) {
+    setSiteArticleMeta({ summary: pendingUrlSummary });
+    pendingUrlSummary = '';
+  }
 });
 
 window.addEventListener('fbif:article-session-activated', event => {
   const session = event && event.detail && event.detail.session;
   if (!session || !session.input) return;
+  setSiteStrategyFromInput(session.input);
   resetFooterArticleOverridesFor(session);
+  const payload = session.input.payload || session.input.title || null;
+  const isNewPayload = payload && payload !== siteArticleMetaPayload;
+  if (isNewPayload) siteArticleMetaPayload = payload;
+  const sourceText = session.input.displayName || session.input.title || window._currentArticleUrl || '已导入内容';
+  setSiteImportCompact(session.input.isRepost ? 'FoodTalks 链接' : (session.input.kind === 'docx' ? '本地文件' : '正文内容'), sourceText);
+  const meta = siteMetaFromSession(session);
+  if (!siteArticleMetaDirty.title && meta.title) setSiteArticleMeta({ title: meta.title });
+  if (!siteArticleMetaDirty.author && meta.author) setSiteArticleMeta({ author: meta.author });
   if (session.input.kind !== 'docx' && session.input.kind !== 'md') return;
-  const summaryEl = document.getElementById('ftSummary');
-  if (summaryEl) {
+  if (!siteArticleMetaDirty.summary && isNewPayload) {
     const summary = session.input.kind === 'docx' && session.result && typeof session.result.summary === 'string'
       ? session.result.summary.trim()
       : '';
-    summaryEl.textContent = summary || FOODTALKS_PREVIEW_META.summary;
+    setSiteArticleMeta({ summary: summary || FOODTALKS_PREVIEW_META.summary });
+    const summaryEl = document.getElementById(siteSummaryPreviewID);
+    if (summaryEl) summaryEl.textContent = summary || FOODTALKS_PREVIEW_META.summary;
   }
 });
+
+window.addEventListener('fbif:article-restored', event => {
+  const snap = event && event.detail && event.detail.snapshot || {};
+  const cs = snap.closure_state || {};
+  const restoredInput = (cs.article_session && cs.article_session.input) || cs.last_render_input || null;
+  setSiteStrategyFromInput(restoredInput, cs.is_repost);
+});
+
+restoreCurrentChannel();
 
 {
   const shareButton = document.getElementById('ftShareButton');
@@ -1187,9 +1580,13 @@ function wrapEngineFunctions() {
 // ---- URL repost ----
 const importClipboardText = (text) => {
   window._currentArticleUrl = '';
-  if (window._handleText) window._handleText(text, { source: 'clipboard' });
+  if (window._handleText) {
+    resetSiteArticleMetaForNewInput('original');
+    window._handleText(text, { source: 'clipboard' });
+  }
 };
 const clearRenderedImport = () => {
+  clearSiteImportCompact();
   if (window._sessionRestore && typeof window._sessionRestore.clearCurrent === 'function') {
     window._sessionRestore.clearCurrent();
   }
@@ -1201,13 +1598,16 @@ window.fetchArticle = createUrlImportHandler({
   getAccountID: () => activeRulePack.id,
   errorMessage: foodTalksFetchErrorMessage,
   importText: importClipboardText,
-  onArticleUrl(url) { window._currentArticleUrl = url; },
+  onArticleUrl(url) {
+    window._currentArticleUrl = url;
+    setSiteImportCompact('FoodTalks 链接', url);
+    setSiteStrategy('repost', { rerender: false });
+  },
   // 摘要自动填充（飞书反馈问题七）：原文开头短导语 → 预览【摘要】框，并从正文流移除
   // （62139 成品：摘要句不在正文重复）。提取不到合适导语时保持占位，由编辑自填。
   onBlocks(blocks) {
     const summary = extractSiteSummary(blocks, { consume: true });
-    const summaryEl = document.getElementById('ftSummary');
-    if (summaryEl) summaryEl.textContent = summary || FOODTALKS_PREVIEW_META.summary;
+    pendingUrlSummary = summary || FOODTALKS_PREVIEW_META.summary;
   },
 });
 
@@ -1220,6 +1620,12 @@ bindUrlImportShortcuts({
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 
+document.addEventListener('click', event => {
+  if (event.target && event.target.closest && event.target.closest('[data-remove-upload]')) {
+    clearSiteImportCompact();
+  }
+}, true);
+
 (() => {
   const toggle = document.getElementById('footerEnableToggle'), presetsEl = document.getElementById('footerPresets'), segsEl = document.getElementById('footerSegments'), offNote = document.getElementById('footerOffNote');
   if (!toggle || !presetsEl || !segsEl) return;
@@ -1227,7 +1633,7 @@ bindUrlImportShortcuts({
   const presetList = state.presets;
   const PRESETS = Object.fromEntries(presetList.map(p => [p.id, p.segments || {}]));
   let order = state.order;
-  let enabled = state.enabled;
+  let enabled = true;
   let segments = state.segments;
 
   function bdCardSelectHtml(key) {
@@ -1244,17 +1650,25 @@ bindUrlImportShortcuts({
     </div>`;
   }
 
+  function footerSegmentNeedsDetail(key) {
+    return key === 'bd_card' || !!footerSegmentAssetToken(key);
+  }
+
   function segmentRowHtml(key) {
-    return `<div class="ft-footer-seg-row" data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}">
-      <div class="ft-footer-seg-main">
+    const assetControl = footerSegmentAssetControlHtml(key);
+    const bdControl = bdCardSelectHtml(key);
+    return `<div class="ft-footer-seg-row ${footerSegmentNeedsDetail(key) ? '' : 'ft-footer-seg-row--compact'}" role="listitem" data-seg-row="${escText(key)}" draggable="${key === 'tip' ? 'false' : 'true'}">
+      <div class="ft-footer-cell ft-footer-cell-module">
         <span class="ft-footer-drag-slot" data-footer-drag-slot>${key === 'tip' ? '' : `<span class="ft-footer-drag-handle" data-footer-drag-handle aria-label="拖拽排序${escText(footerSegmentLabel(key))}" title="拖拽排序"></span>`}</span>
         <span class="ft-footer-seg-title">${escText(footerSegmentLabel(key))}</span>
+      </div>
+      <div class="ft-footer-cell ft-footer-cell-preview">${footerSegmentPreviewHtml(key)}</div>
+      <div class="ft-footer-cell ft-footer-cell-status">
         <button type="button" class="ft-switch" data-footer-seg="${escText(key)}" role="switch" aria-checked="false" aria-label="显示${escText(footerSegmentLabel(key))}">
           <span class="ft-switch-knob"></span>
         </button>
       </div>
-      ${bdCardSelectHtml(key)}
-      ${footerSegmentAssetControlHtml(key)}
+      <div class="ft-footer-cell ft-footer-cell-actions">${assetControl || bdControl || ''}</div>
     </div>`;
   }
 

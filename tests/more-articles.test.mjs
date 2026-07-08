@@ -263,7 +263,7 @@ test('more articles upload rejects echoed data URLs because WeChat save strips l
   );
 });
 
-test('more articles copy-safe fallback never uses preview data URLs for linked cards', () => {
+test('more articles copy-safe fallback only uses T0-safe card images for linked cards', () => {
   assert.deepEqual(
     copySafeMoreArticleCard({
       href: 'https://mp.weixin.qq.com/s/a',
@@ -271,7 +271,7 @@ test('more articles copy-safe fallback never uses preview data URLs for linked c
       composite_url: 'data:image/png;base64,preview',
       title: '带标题的预览合成图',
     }).final_url,
-    'https://mmbiz.qpic.cn/a.jpg'
+    'data:image/png;base64,preview'
   );
 
   assert.equal(
@@ -279,7 +279,7 @@ test('more articles copy-safe fallback never uses preview data URLs for linked c
       imgurl: 'https://mmbiz.qpic.cn/a.jpg',
       composite_url: 'https://oss.example/more-article.png',
     }).final_url,
-    'https://oss.example/more-article.png'
+    'https://mmbiz.qpic.cn/a.jpg'
   );
 
   const unsafe = copySafeMoreArticleCard({

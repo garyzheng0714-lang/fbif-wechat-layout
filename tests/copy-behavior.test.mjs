@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { copySafeMoreArticleCard, mergeIntoFooter } from '../public/js/more-articles.js';
+import { normalizeWechatRichHtml } from '../public/js/wechat-normalize.js';
 
 function extractFunction(source, name) {
   const start = source.indexOf(`function ${name}`);
@@ -13,6 +15,36 @@ function extractFunction(source, name) {
     if (depth === 0) return source.slice(start, i + 1);
   }
   assert.fail(`${name} function body should be complete`);
+}
+
+function extractAssignedFunctionExpression(source, assignment) {
+  const start = source.indexOf(assignment);
+  assert.notEqual(start, -1, `${assignment} should exist`);
+  const functionStart = source.indexOf('async function', start);
+  assert.notEqual(functionStart, -1, `${assignment} should assign an async function`);
+  const bodyStart = source.indexOf('{', functionStart);
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    if (source[i] === '}') depth--;
+    if (depth === 0) return source.slice(functionStart, i + 1);
+  }
+  assert.fail(`${assignment} function body should be complete`);
+}
+
+function extractAssignedSyncFunctionExpression(source, assignment) {
+  const start = source.indexOf(assignment);
+  assert.notEqual(start, -1, `${assignment} should exist`);
+  const functionStart = source.indexOf('function', start);
+  assert.notEqual(functionStart, -1, `${assignment} should assign a function`);
+  const bodyStart = source.indexOf('{', functionStart);
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    if (source[i] === '}') depth--;
+    if (depth === 0) return source.slice(functionStart, i + 1);
+  }
+  assert.fail(`${assignment} function body should be complete`);
 }
 
 test('copy button does not auto-open WeChat backend', async () => {
@@ -45,9 +77,10 @@ test('网站渠道跳过公众号导向的图片归一化（内联 logo 不被�
   // inline-style（正文图自带居中、logo 故意左对齐），须经渠道感知的 normalizeRich 跳过。
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   assert.match(engine, /function normalizeRich\(html\)/, '必须有渠道感知的 normalizeRich 包装器');
+  assert.match(engine, /function isWebsiteTemplate\(\)/, '必须有网站模板能力判断');
   assert.match(
     engine,
-    /_activeTemplate\.id === 'foodtalks-site'\s*\)\s*return html/,
+    /if \(isWebsiteTemplate\(\)\) return html/,
     'normalizeRich 必须对 foodtalks-site 渠道跳过归一化'
   );
   // 预览/页脚更新/复制三条内容路径都须走 normalizeRich，而非裸 normalizeWechatRichHtml。
@@ -65,16 +98,234 @@ test('copy click does not wait on background image or more-articles preparation'
   assert.match(copyFn, /prepareMoreArticlesForCopy\('copy-click'\)/);
 });
 
-test('more articles prepared footer copy is uploaded before replacing the copy layer', async () => {
+test('copyContent writes clipboard before pending more-articles preparation resolves', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
+
+  let prepareResolve;
+  let prepareResolved = false;
+  const pendingPreparation = new Promise(resolve => {
+    prepareResolve = () => {
+      prepareResolved = true;
+      resolve(true);
+    };
+  });
+  const events = [];
+  const deps = {
+    window: {},
+    document: {
+      getElementById(id) {
+        if (id === 'contentArea') return { textContent: 'plain fallback' };
+        if (id === 'copyBtn') {
+          return {
+            textContent: '复制全文',
+            classList: { add() {}, toggle() {} },
+            style: {},
+          };
+        }
+        return null;
+      },
+    },
+    _plainTextCopy: null,
+    getPlainTextCopyValue: () => '',
+    copyPlainTextToClipboard: async () => false,
+    PLAIN_TEXT_RULE_LABEL: 'plain',
+    _lastCopiedHtml: '',
+    logConv() {},
+    _articleBodyOnly: false,
+    prepareMoreArticlesForCopy(reason) {
+      events.push(`prepare:${reason}`);
+      return pendingPreparation;
+    },
+    isFooterEnabledForCurrentArticle: () => true,
+    _articleCopy: '<section class="wx-p">正文</section>',
+    _footerCopy: '<section>更多文章安全副本</section>',
+    _copyRequiresWechatImageTransfer: false,
+    findWechatImageSrcs: () => [],
+    _uploadPromise: null,
+    _uploadDone: false,
+    _themeCSSReady: Promise.resolve(''),
+    processForCopy(html) { return html; },
+    normalizeRich(html) { return html; },
+    findUnsafeCopyImageRefs: () => [],
+    async copyByClipboardApi(html) {
+      events.push(`clipboard:${prepareResolved ? 'after' : 'before'}`);
+      deps.copiedHtml = html;
+      return true;
+    },
+    async copyByClipboardEvent() {
+      events.push('fallback');
+      return false;
+    },
+    _failedSrcs: [],
+    Array,
+    Set,
+  };
+  deps.window._copyImageWarning = 0;
+
+  const copyContent = new Function('deps', `with (deps) { return (${copyExpr}); }`)(deps);
+  const result = await copyContent();
+
+  assert.equal(result, true);
+  assert.equal(prepareResolved, false, 'copyContent must finish before more-articles preparation resolves');
+  assert.deepEqual(events, ['prepare:copy-click', 'clipboard:before']);
+  assert.match(deps.copiedHtml, /更多文章安全副本/);
+
+  prepareResolve();
+  await pendingPreparation;
+});
+
+test('more articles prepared footer copy is projected through copy-safe cards before replacing the copy layer', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const prepareFn = engine.slice(
     engine.indexOf('function prepareMoreArticlesForCopy'),
     engine.indexOf('function showPreview')
   );
 
-  assert.match(prepareFn, /const mergedFooter = normalizeWechatRichHtml\(mergeMoreArticlesIntoFooter\(baseFooter, uploaded\)\)/);
-  assert.match(prepareFn, /await uploadNonCdnImages\('', mergedFooter,/);
-  assert.match(prepareFn, /_footerCopy = footerUpload\.footerCopy/);
+  assert.match(prepareFn, /const copySafeCards = uploaded\.map\(copySafeMoreArticleCard\)/);
+  assert.match(prepareFn, /const mergedFooter = normalizeWechatRichHtml\(mergeMoreArticlesIntoFooter\(baseFooter, copySafeCards\)\)/);
+  assert.doesNotMatch(prepareFn, /await uploadNonCdnImages\('', mergedFooter,/);
+  assert.match(prepareFn, /_footerCopy = mergedFooter/);
+});
+
+test('background image preparation re-projects MP footer copy through copy-safe more-article cards before writeback', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  assert.match(engine, /function isWebsiteTemplate\(\)/);
+  assert.match(engine, /function copySafeFooterAfterImagePreparation\(footerCopy\)/);
+  const websiteHelper = extractFunction(engine, 'isWebsiteTemplate');
+  assert.match(websiteHelper, /_activeTemplate\.transferMmbiz/);
+  assert.match(websiteHelper, /_activeTemplate\.id === 'foodtalks-site'/);
+  assert.doesNotMatch(websiteHelper, /_activeTemplate\.channel === 'site'/);
+  const helper = extractFunction(engine, 'copySafeFooterAfterImagePreparation');
+  assert.match(helper, /if \(isWebsiteTemplate\(\)\) return footerCopy/);
+  assert.match(helper, /const cards = loadMoreArticlesCards\(\)/);
+  assert.match(helper, /cards\.map\(copySafeMoreArticleCard\)/);
+  assert.match(helper, /mergeMoreArticlesIntoFooter\(footerCopy, copySafeCards\)/);
+  assert.match(engine, /_footerCopy = copySafeFooterAfterImagePreparation\(result\.footerCopy\)/);
+});
+
+test('retry upload also re-projects footer copy through copy-safe cards', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const retryFn = extractAssignedFunctionExpression(engine, 'window.retryUpload =');
+
+  assert.match(retryFn, /_footerCopy = copySafeFooterAfterImagePreparation\(result\.footerCopy\)/);
+  assert.doesNotMatch(retryFn, /_footerCopy = result\.footerCopy/);
+});
+
+test('restored session footer copy is re-projected before entering the copy layer', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const restoreStart = engine.indexOf('window._restoreSessionSnapshot = function');
+  assert.notEqual(restoreStart, -1, 'restore snapshot hook should exist');
+  const restoreFn = engine.slice(restoreStart, engine.indexOf('function restoredImportInputValue', restoreStart + 1) > -1
+    ? engine.indexOf('function restoredImportInputValue', restoreStart + 1)
+    : engine.indexOf('window._debugState', restoreStart));
+
+  assert.match(restoreFn, /_footerCopy = copySafeFooterAfterImagePreparation\(cs\.footer_copy \|\| ''\)/);
+  assert.doesNotMatch(restoreFn, /_footerCopy = cs\.footer_copy \|\| ''/);
+});
+
+test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a copy-safe footer', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const restoreExpr = extractAssignedSyncFunctionExpression(engine, 'window._restoreSessionSnapshot =');
+  const copySafeFooterHelper = extractFunction(engine, 'copySafeFooterAfterImagePreparation');
+  const mmbizCover = 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/restore-safe-cover/0?wx_fmt=jpeg';
+  const ossComposite = 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/restore-unsafe.png';
+  const anchorFooter = [
+    '<section data-role="paragraph">',
+    '<section style="margin:20px 8px 20px;padding:0;text-align:center;"><strong>/ 更多文章 /</strong></section>',
+    '<section style="text-align: center;"></section>',
+    '</section>',
+  ].join('\n');
+  const legacyUnsafeFooterCopy = mergeIntoFooter(anchorFooter, [
+    { href: 'https://mp.weixin.qq.com/s/restore', imgurl: mmbizCover, final_url: ossComposite, title: '旧快照卡片' },
+  ]);
+  assert.match(legacyUnsafeFooterCopy, /oss-cn-hangzhou/, 'legacy snapshot fixture must contain an unsafe external card image');
+
+  const actualProjector = new Function('deps', `
+    with (deps) {
+      ${copySafeFooterHelper}
+      return copySafeFooterAfterImagePreparation;
+    }
+  `)({
+    isWebsiteTemplate: () => false,
+    loadMoreArticlesCards: () => [{
+      href: 'https://mp.weixin.qq.com/s/restore',
+      imgurl: mmbizCover,
+      final_url: ossComposite,
+      title: '旧快照卡片',
+    }],
+    copySafeMoreArticleCard,
+    mergeMoreArticlesIntoFooter: mergeIntoFooter,
+    normalizeWechatRichHtml,
+  });
+
+  const element = (extra = {}) => ({
+    textContent: '',
+    value: '',
+    innerHTML: '',
+    style: {},
+    classList: { add() {}, toggle() {} },
+    setAttribute() {},
+    removeAttribute() {},
+    querySelector() { return null; },
+    ...extra,
+  });
+  const projectedInputs = [];
+  const deps = {
+    window: {},
+    document: {
+      body: { classList: { toggle() {} } },
+      getElementById(id) {
+        if (id === 'previewScroll') return element({ scrollTop: 0 });
+        return element();
+      },
+    },
+    copySafeFooterAfterImagePreparation(html) {
+      projectedInputs.push(html);
+      return actualProjector(html);
+    },
+    restoredImportInputValue: () => '',
+    normalizeFooterVisibilityOverride: value => value || null,
+    normalizeArticleArtifactOverride: value => value || null,
+    showImportSummary() {},
+    formatSidebarStatus: text => text,
+    resetImportEntry() {},
+    dispatchArticleEvent(type) { deps.dispatchedType = type; },
+    PLAIN_TEXT_RULE_LABEL: 'plain',
+    _articleHtml: '',
+    _articleCopy: '',
+    _footerHtml: '',
+    _footerCopy: '',
+    _footerCopyGen: 0,
+    _plainTextCopy: null,
+    _isRepost: false,
+    _sourceIsDocx: false,
+    _articleBodyOnly: false,
+    _copyRequiresWechatImageTransfer: false,
+    _failedSrcs: [],
+    _uploadDone: false,
+    _uploadPromise: null,
+    _moreArticlesCopySeq: 0,
+    _moreArticlesCopyJob: null,
+    _lastRenderInput: null,
+    _articleSession: null,
+    _batchFiles: [],
+    _batchResults: [],
+  };
+
+  const restoreSessionSnapshot = new Function('deps', `with (deps) { return (${restoreExpr}); }`)(deps);
+  const ok = restoreSessionSnapshot({
+    schema_version: 1,
+    closure_state: { footer_copy: legacyUnsafeFooterCopy },
+    dom: {},
+  });
+
+  assert.equal(ok, true);
+  assert.deepEqual(projectedInputs, [legacyUnsafeFooterCopy]);
+  assert.doesNotMatch(deps._footerCopy, /oss-cn-hangzhou/, 'restored copy layer must not keep unsafe external card images');
+  assert.ok(deps._footerCopy.includes(mmbizCover), 'restored copy layer should use the original mmbiz cover');
+  assert.equal(deps._footerCopyGen, 1);
+  assert.equal(deps.dispatchedType, 'fbif:article-restored');
 });
 
 test('preview footer and copy footer are separate so preview data images do not leak into copy', async () => {
