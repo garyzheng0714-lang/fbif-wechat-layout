@@ -173,6 +173,20 @@ test('engine.js: 恢复会话缺少 articleSession 时，底部开关仍刷新�
   assert.match(setFooterVisibility, /if \(!_articleSession\) return refreshFooterPreviewFromVisibility\(\)/, '无 articleSession 时也必须立刻刷新右侧预览');
 });
 
+test('engine.js: 网站策略切换可更新当前文章原创/转载状态并重排', async () => {
+  // WHY：左侧“原创/转载”是排版策略，不是纯视觉选中态；切换后必须复用现有 isRepost 链路。
+  const engine = await readFile(
+    new URL('../public/js/engine.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(engine, /async function setArticleStrategy\(isRepost\)/, 'engine 应暴露文章策略切换入口');
+  assert.match(engine, /_articleSession\.input\s*=\s*\{\s*\.\.\.\(_articleSession\.input \|\| \{\}\),\s*isRepost:\s*nextIsRepost\s*\}/, '策略切换应更新当前 session input');
+  assert.match(engine, /_lastRenderInput\s*=\s*\{\s*\.\.\._lastRenderInput,\s*isRepost:\s*nextIsRepost\s*\}/, '无完整 session 时也应更新 lastRenderInput');
+  assert.match(engine, /_isRepost\s*=\s*nextIsRepost/, '策略切换应同步模块级 repost 标记');
+  assert.match(engine, /await _engineRerender\(\)/, '策略切换后应重排当前文章');
+  assert.match(engine, /setArticleStrategy,/, 'engine API 应导出 setArticleStrategy');
+});
+
 test('app.html: 暴露当前规则 ready promise 给上传流程等待', async () => {
   const src = await readFile(
     new URL('../public/app.html', import.meta.url),
@@ -234,7 +248,11 @@ test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并�
     new URL('../public/js/site-footer-state.js', import.meta.url),
     'utf8'
   );
-  assert.match(src, /<details class="ft-advanced-options ft-footer-area" id="footerLib" open>/, '底部区域控制区默认应展开，避免运营每篇都多点一次');
+  assert.match(
+    src,
+    /data-site-section="footer-trailer"[\s\S]{0,140}id="footerLib"[\s\S]{0,20}open/,
+    '底部区域控制区应作为固定“文章底部拖尾”分区默认展开'
+  );
   assert.match(src, /serverFooterLibrary\(\)/, '页脚侧栏应读取服务端页脚库');
   assert.match(stateSrc, /footerLib\.presets/, '预设按钮应由服务端 presets 渲染');
   assert.match(stateSrc, /footerLib\.segment_order/, '片段顺序应由服务端 segment_order 渲染');

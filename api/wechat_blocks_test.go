@@ -21,6 +21,19 @@ func findKinds(blocks []Block) []string {
 	return out
 }
 
+func requireKinds(t *testing.T, blocks []Block, want []string) {
+	t.Helper()
+	got := findKinds(blocks)
+	if len(got) != len(want) {
+		t.Fatalf("kinds len = %d, want %d: got=%v want=%v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("kinds mismatch at %d: got=%v want=%v", i, got, want)
+		}
+	}
+}
+
 func findBlockByText(blocks []Block, needle string) *Block {
 	for i := range blocks {
 		if blocks[i].Text != "" && strings.Contains(blocks[i].Text, needle) {
@@ -29,6 +42,21 @@ func findBlockByText(blocks []Block, needle string) *Block {
 		for _, r := range blocks[i].Runs {
 			if strings.Contains(r.Text, needle) {
 				return &blocks[i]
+			}
+		}
+	}
+	return nil
+}
+
+func findDecisionByText(decisions []RoleDecision, needle string) *RoleDecision {
+	for i := range decisions {
+		b := decisions[i].Block
+		if b.Text != "" && strings.Contains(b.Text, needle) {
+			return &decisions[i]
+		}
+		for _, r := range b.Runs {
+			if strings.Contains(r.Text, needle) {
+				return &decisions[i]
 			}
 		}
 	}
@@ -163,7 +191,7 @@ func TestImageCaptionBySmallFont(t *testing.T) {
 
 func TestImageCaptionByCenterShort(t *testing.T) {
 	html := jsContentWrap(
-		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667" /></p>` +
 			`<p style="text-align: center;">来源：财新网</p>`)
 	_, blocks, _ := extractArticleBlocks(html)
 	b := findBlockByText(blocks, "来源：财新网")
@@ -196,7 +224,7 @@ func TestImageCaptionGroupKeepsImageSourceAsCaption(t *testing.T) {
 
 func TestCaptionContinuationRequiresCaptionStyle(t *testing.T) {
 	html := jsContentWrap(
-		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667" /></p>` +
 			`<p style="text-align: center;">图注</p>` +
 			`<p style="text-align: center;">短正文</p>`)
 	_, blocks, _ := extractArticleBlocks(html)
@@ -213,7 +241,7 @@ func TestCaptionContinuationRequiresCaptionStyle(t *testing.T) {
 
 func TestCaptionCenterThresholdCanBeConfigured(t *testing.T) {
 	html := jsContentWrap(
-		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667" /></p>` +
 			`<p style="text-align: center;">abcdef</p>`)
 	_, defaultBlocks, _ := extractArticleBlocks(html)
 	if b := findBlockByText(defaultBlocks, "abcdef"); b == nil || b.K != "cap" {
@@ -575,6 +603,380 @@ func TestCenteredLargeSentenceEndingIsNotHeadingButLabelIs(t *testing.T) {
 	_, qtb, _ := extractArticleBlocks(qTitleHTML)
 	if b := findBlockByText(qtb, "还能火多久"); b == nil || b.K != "h" {
 		t.Errorf("问号收尾的疑问式标题应为 h，got %v; kinds=%v", b, findKinds(qtb))
+	}
+}
+
+// ---- Reported WeChat URL structures: classify by role relationship, not local style only ----
+
+func reportedGtyfMarkerFixture(titleText string) string {
+	return jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/content-photo.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+			`<p style="font-size:12px;color:#888888;text-align:center;">聚慧食品服务的部分餐饮客户</p>` +
+			`<p>比起火锅底料供应商，他们更熟悉海底捞、老乡鸡、蒙自源这类连锁品牌。</p>` +
+			`<p style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/marker-01.png" data-w="312" data-h="84" data-ratio="0.269"></p>` +
+			`<p style="text-align:center;"><span style="font-size:16px;color:#8fa5c6;">` + titleText + `</span></p>` +
+			`<p><strong>但却是餐饮界最熟悉的“陌生人”</strong></p>` +
+			`<p>事实上，聚慧食品既不是“小透明”，也不是行业无人问津的供应商。</p>`)
+}
+
+func reportedKatP22Fixture(titleText string) string {
+	return jsContentWrap(
+		`<p>不是做奶茶，做的还是奶茶里面属于小众品类的泰式奶茶。</p>` +
+			`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/thaitea-store.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+			`<p style="font-size:12px;color:#888888;text-align:center;">图源大众点评</p>` +
+			`<p>在一条连锁加盟九死一生已经是共识的赛道上，泰柯茶园能不能持续证明这不是赶上了某个窗口期的幸运？</p>` +
+			`<section style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/thaitea-divider.png" data-w="420" data-h="100" data-ratio="0.238"></section>` +
+			`<section><p style="color:#3a9799;text-align:center;font-size:16px;">` + titleText + `</p></section>` +
+			`<p>其实，泰式奶茶已经火过两次了。</p>`)
+}
+
+func TestReportedGtyfNumberMarkerTitleIsHeading(t *testing.T) {
+	_, blocks, _ := extractArticleBlocks(reportedGtyfMarkerFixture("年收入超过11亿元"))
+	requireKinds(t, blocks, []string{"img", "cap", "txt", "img", "h", "h", "txt"})
+
+	title := findBlockByText(blocks, "年收入超过11亿元")
+	if title == nil {
+		t.Fatalf("missing reported marker title; kinds=%v", findKinds(blocks))
+	}
+	if title.K != "h" {
+		t.Fatalf("number marker title must be h, got %s; kinds=%v", title.K, findKinds(blocks))
+	}
+	continuation := findBlockByText(blocks, "但却是餐饮界最熟悉")
+	if continuation == nil || continuation.K != "h" {
+		t.Fatalf("marker title continuation must remain part of heading group, got %v; kinds=%v", continuation, findKinds(blocks))
+	}
+
+	body := findBlockByText(blocks, "聚慧食品既不是")
+	if body == nil || body.K != "txt" {
+		t.Fatalf("body paragraph after marker title must remain txt, got %v; kinds=%v", body, findKinds(blocks))
+	}
+}
+
+func TestReportedKatP22CaptionAndLaterSectionTitleCoexist(t *testing.T) {
+	_, blocks, _ := extractArticleBlocks(reportedKatP22Fixture("重生之泰奶又又又火了"))
+	requireKinds(t, blocks, []string{"txt", "img", "cap", "txt", "img", "h", "txt"})
+
+	caption := findBlockByText(blocks, "图源大众点评")
+	if caption == nil || caption.K != "cap" {
+		t.Fatalf("content-image source must stay cap, got %v; kinds=%v", caption, findKinds(blocks))
+	}
+	title := findBlockByText(blocks, "重生之泰奶又又又火了")
+	if title == nil {
+		t.Fatalf("missing reported section title; kinds=%v", findKinds(blocks))
+	}
+	if title.K != "h" {
+		t.Fatalf("decorative marker section title must be h, got %s; kinds=%v", title.K, findKinds(blocks))
+	}
+	body := findBlockByText(blocks, "泰式奶茶已经火过")
+	if body == nil || body.K != "txt" {
+		t.Fatalf("body after marker title must remain txt, got %v; kinds=%v", body, findKinds(blocks))
+	}
+}
+
+func TestRoleDecisionReasonsExposeStructureForReportedFixtures(t *testing.T) {
+	katDecisions := extractArticleRoleDecisionsForTest(reportedKatP22Fixture("重生之泰奶又又又火了"))
+	caption := findDecisionByText(katDecisions, "图源大众点评")
+	if caption == nil || caption.Role != "cap" || caption.Group != "MediaGroup" || caption.Reason != "source-prefix-after-content-image" {
+		t.Fatalf("content image source decision = %+v", caption)
+	}
+	title := findDecisionByText(katDecisions, "重生之泰奶又又又火了")
+	if title == nil || title.Role != "h" || title.Group != "SectionHeaderGroup" || title.Reason != "marker-title-body" {
+		t.Fatalf("decorative marker title decision = %+v", title)
+	}
+	body := findDecisionByText(katDecisions, "泰式奶茶已经火过")
+	if body == nil || body.Role != "txt" || body.Group != "BodyFlow" {
+		t.Fatalf("body flow decision = %+v", body)
+	}
+
+	prefaceDecisions := extractArticleRoleDecisionsForTest(jsContentWrap(
+		`<h1 style="font-size:18px;">来源：FoodTalks</h1>` +
+			`<p>开篇导语说明文章背景。</p>`))
+	preface := findDecisionByText(prefaceDecisions, "来源：FoodTalks")
+	if preface == nil || preface.Role != "txt" || preface.Group != "MetadataPreface" || preface.Reason != "preface-metadata" {
+		t.Fatalf("preface source decision = %+v", preface)
+	}
+}
+
+func TestPrefaceH1AuthorLineIsNotBlindBodyHeading(t *testing.T) {
+	cases := []string{
+		"作者 | 曾有为",
+		"来源：FoodTalks",
+	}
+	for _, prefaceText := range cases {
+		t.Run(prefaceText, func(t *testing.T) {
+			html := jsContentWrap(
+				`<h1 style="font-size:18px;">` + prefaceText + `</h1>` +
+					`<p>开篇导语说明文章背景。</p>` +
+					`<h2>真正的小节标题</h2>` +
+					`<p>正文开始。</p>`)
+			_, blocks, _ := extractArticleBlocks(html)
+
+			preface := findBlockByText(blocks, prefaceText)
+			if preface == nil {
+				t.Fatalf("missing h1 preface; kinds=%v", findKinds(blocks))
+			}
+			if preface.K == "h" {
+				t.Fatalf("author/source preface must not be emitted as body heading solely because it uses h1; kinds=%v", findKinds(blocks))
+			}
+			realHeading := findBlockByText(blocks, "真正的小节标题")
+			if realHeading == nil || realHeading.K != "h" {
+				t.Fatalf("real body heading should still be h, got %v; kinds=%v", realHeading, findKinds(blocks))
+			}
+		})
+	}
+}
+
+func TestMarkerHeadingMetamorphicTextWrapperAndUnits(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/content.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+			`<p>前一段正文提供正文流基准。</p>` +
+			`<section><section style="text-align:center;">` +
+			`<img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/marker.png" data-w="300" data-h="72" data-ratio="0.24">` +
+			`</section></section>` +
+			`<section><p style="text-align:center;"><span style="color:#3a9799; font-size:12pt;">咖啡店仍在下沉</span></p></section>` +
+			`<p>随后出现一段正常正文，证明前文短句开启了新小节。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	title := findBlockByText(blocks, "咖啡店仍在下沉")
+	if title == nil {
+		t.Fatalf("missing metamorphic marker title; kinds=%v", findKinds(blocks))
+	}
+	if title.K != "h" {
+		t.Fatalf("marker title must survive text/style/wrapper changes, got %s; kinds=%v", title.K, findKinds(blocks))
+	}
+}
+
+func TestShortCenteredTextWithoutMarkerIsNotHeadingByItself(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文建立正文流。</p>` +
+			`<p style="text-align:center;"><span style="color:#3a9799;font-size:12pt;">咖啡店仍在下沉</span></p>` +
+			`<p>随后出现一段正常正文。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	b := findBlockByText(blocks, "咖啡店仍在下沉")
+	if b == nil {
+		t.Fatalf("missing short centered text; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Fatalf("short centered text without section marker/body-flow relationship must not be h; kinds=%v", findKinds(blocks))
+	}
+}
+
+func TestMarkerAndContentImageNegativeRoleBoundaries(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/content.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+			`<p style="text-align:center;">品牌门店实拍</p>` +
+			`<p>正文继续描述门店状态。</p>` +
+			`<p style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/marker.png" data-w="300" data-h="72" data-ratio="0.24"></p>` +
+			`<p style="text-align:center;"><span style="color:#3a9799;">品牌门店实拍</span></p>` +
+			`<p>这个短语在这里是新小节标题，不是上一张图的说明。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	var matches []Block
+	for _, b := range blocks {
+		if strings.Contains(b.Text, "品牌门店实拍") || strings.Contains(textFromRuns(b.Runs), "品牌门店实拍") {
+			matches = append(matches, b)
+		}
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected two matching short texts, got %d; kinds=%v", len(matches), findKinds(blocks))
+	}
+	if matches[0].K != "cap" {
+		t.Fatalf("same short text after content image should be cap, got %s", matches[0].K)
+	}
+	if matches[1].K != "h" {
+		t.Fatalf("same short text after decorative marker should be h, got %s; kinds=%v", matches[1].K, findKinds(blocks))
+	}
+}
+
+func TestWideContentImageWithShortCaptionIsNotMarkerHeading(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/wide-chart.jpg" data-w="1080" data-h="320" data-ratio="0.296"></p>` +
+			`<p style="text-align:center;">门店实拍</p>` +
+			`<p>下一段正文继续解释这张宽幅图片。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "门店实拍")
+	if b == nil {
+		t.Fatalf("missing short caption after wide content image; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Fatalf("wide content image must not be treated as decorative marker solely by ratio; kinds=%v", findKinds(blocks))
+	}
+	if b.K != "cap" {
+		t.Fatalf("short centered text after wide content image should remain cap, got %s; kinds=%v", b.K, findKinds(blocks))
+	}
+}
+
+func TestSmallWideContentImageWithShortCaptionIsNotMarkerHeading(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/wide-small-chart.jpg" data-w="640" data-h="190" data-ratio="0.297"></p>` +
+			`<p style="text-align:center;">门店实拍</p>` +
+			`<p>下一段正文继续解释这张宽幅图片。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "门店实拍")
+	if b == nil {
+		t.Fatalf("missing short caption after small wide content image; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Fatalf("small wide content image must not become marker solely by width+ratio; kinds=%v", findKinds(blocks))
+	}
+	if b.K != "cap" {
+		t.Fatalf("short centered text after small wide content image should remain cap, got %s; kinds=%v", b.K, findKinds(blocks))
+	}
+}
+
+func TestFlatContentImageWithShortCaptionIsNotMarkerHeading(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/wide-banner-content.jpg" data-w="1080" data-h="160" data-ratio="0.148"></p>` +
+			`<p style="text-align:center;">门店实拍</p>` +
+			`<p>下一段正文继续解释这张横幅图片。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "门店实拍")
+	if b == nil {
+		t.Fatalf("missing short caption after flat content image; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Fatalf("flat content image must not become marker solely by extreme ratio; kinds=%v", findKinds(blocks))
+	}
+	if b.K != "cap" {
+		t.Fatalf("short caption after flat content image should remain cap, got %s; kinds=%v", b.K, findKinds(blocks))
+	}
+}
+
+func TestDimensionlessUnknownMediaDoesNotSwallowPlainShortTextAsCaption(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/unknown-content.jpg"></p>` +
+			`<p style="text-align:center;">门店实拍</p>` +
+			`<p>下一段正文继续解释这张图片。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "门店实拍")
+	if b == nil {
+		t.Fatalf("missing plain short text after dimensionless media; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "cap" {
+		t.Fatalf("dimensionless unknown media must not swallow plain short text as caption; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Fatalf("dimensionless unknown media without title signal must not promote plain short text to heading; kinds=%v", findKinds(blocks))
+	}
+}
+
+func TestHighResolutionDecorativeMarkerStillCreatesHeadingGroup(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/marker-hd.png" data-w="1080" data-h="290" data-ratio="0.269"></p>` +
+			`<p style="text-align:center;"><span style="color:#3a9799;font-size:16px;">新茶饮继续下沉</span></p>` +
+			`<p>下一段正文开启小节。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "新茶饮继续下沉")
+	if b == nil || b.K != "h" {
+		t.Fatalf("high-resolution decorative marker should still produce heading, got %v; kinds=%v", b, findKinds(blocks))
+	}
+}
+
+func TestDimensionlessDecorativeMarkerWithHeadingSignalCreatesHeadingGroup(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/dimensionless-marker.png"></p>` +
+			`<p style="text-align:center;"><span style="color:#3a9799;font-size:16px;">新茶饮继续下沉</span></p>` +
+			`<p>下一段正文开启小节。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "新茶饮继续下沉")
+	if b == nil || b.K != "h" {
+		t.Fatalf("dimensionless decorative marker with heading signal should produce heading, got %v; kinds=%v", b, findKinds(blocks))
+	}
+}
+
+func TestFlatDividerWithPlainTitleCreatesHeadingGroup(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/content.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+			`<p style="font-size:12px;color:#888888;text-align:center;">图源大众点评</p>` +
+			`<p>上一节正文收束。</p>` +
+			`<p style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/flat-divider.png" data-w="1080" data-h="133" data-ratio="0.123"></p>` +
+			`<p style="text-align:center;">重生之泰奶又又又火了</p>` +
+			`<p>其实，泰式奶茶已经火过两次了。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	caption := findBlockByText(blocks, "图源大众点评")
+	if caption == nil || caption.K != "cap" {
+		t.Fatalf("content image caption should remain cap, got %v; kinds=%v", caption, findKinds(blocks))
+	}
+	title := findBlockByText(blocks, "重生之泰奶又又又火了")
+	if title == nil || title.K != "h" {
+		t.Fatalf("flat divider plain title should produce heading, got %v; kinds=%v", title, findKinds(blocks))
+	}
+}
+
+func TestWeakKickerBeforeStrongMarkerTitleCreatesHeadingGroup(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/marker-hd.png" data-w="1080" data-h="290" data-ratio="0.269"></p>` +
+			`<p style="font-size:13px;color:#9a9a9a;text-align:center;">年收入超过11亿元</p>` +
+			`<p><strong>但却是餐饮界最熟悉的“陌生人”</strong></p>` +
+			`<p>事实上，聚慧食品既不是“小透明”，也不是行业无人问津的供应商。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	kicker := findBlockByText(blocks, "年收入超过11亿元")
+	if kicker == nil || kicker.K != "h" {
+		t.Fatalf("weak marker kicker should remain in heading group, got %v; kinds=%v", kicker, findKinds(blocks))
+	}
+	title := findBlockByText(blocks, "但却是餐饮界最熟悉")
+	if title == nil || title.K != "h" {
+		t.Fatalf("strong continuation should remain in heading group, got %v; kinds=%v", title, findKinds(blocks))
+	}
+}
+
+func TestHeaderImageThenH1AuthorPrefaceIsNotCaption(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/header.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+			`<h1 style="font-size:18px;text-align:center;color:#888888;">作者 | 曾有为</h1>` +
+			`<p>开篇导语说明文章背景。</p>` +
+			`<h2>真正的小节标题</h2>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	preface := findBlockByText(blocks, "作者 | 曾有为")
+	if preface == nil {
+		t.Fatalf("missing h1 preface after header image; kinds=%v", findKinds(blocks))
+	}
+	if preface.K != "txt" {
+		t.Fatalf("h1 author preface after header image should be txt, got %s; kinds=%v", preface.K, findKinds(blocks))
+	}
+}
+
+func TestImageSourceLeadVariantsStayCaptionAfterContentImage(t *testing.T) {
+	for _, sourceText := range []string{"图源大众点评", "图为门店实拍", "图片来源：品牌官方"} {
+		t.Run(sourceText, func(t *testing.T) {
+			html := jsContentWrap(
+				`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/content.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+					`<p style="text-align:left;">` + sourceText + `</p>` +
+					`<p>后续正文。</p>`)
+			_, blocks, _ := extractArticleBlocks(html)
+			b := findBlockByText(blocks, sourceText)
+			if b == nil || b.K != "cap" {
+				t.Fatalf("%q after content image should stay cap, got %v; kinds=%v", sourceText, b, findKinds(blocks))
+			}
+		})
+	}
+}
+
+func TestFullSentenceAfterMarkerIsNotHeadingByItself(t *testing.T) {
+	html := jsContentWrap(
+		`<p>前一段正文。</p>` +
+			`<p style="text-align:center;"><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_png/marker.png" data-w="300" data-h="72" data-ratio="0.24"></p>` +
+			`<p style="text-align:center;">这是一句完整的正文判断，它只是跟在装饰图后面。</p>` +
+			`<p>下一段正文。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "完整的正文判断")
+	if b == nil {
+		t.Fatalf("missing body-like sentence; kinds=%v", findKinds(blocks))
+	}
+	if b.K == "h" {
+		t.Fatalf("body-like sentence after marker must not be h solely because of marker context; kinds=%v", findKinds(blocks))
+	}
+	if b.K != "txt" {
+		t.Fatalf("body-like sentence after marker should stay txt, got %s; kinds=%v", b.K, findKinds(blocks))
 	}
 }
 

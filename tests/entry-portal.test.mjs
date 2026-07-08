@@ -103,6 +103,67 @@ test('site.html renders the FoodTalks article preview shell', async () => {
   assert.match(css, /\.preview-site \.ft-share-popover/);
 });
 
+test('site.html 左栏使用网站 beta 固定分区和原创/转载策略', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /class=['"][^'"]*\bsite-strategy-panel\b[^'"]*['"]/);
+  assert.doesNotMatch(html, /id=['"]siteStrategyTitle['"]/);
+  assert.doesNotMatch(html, /data-site-section=['"]body-readonly['"]/);
+  assert.doesNotMatch(html, /正文内容（暂不需要）/);
+  assert.doesNotMatch(html, /标准网站稿/);
+  assert.doesNotMatch(html, /转载清洗/);
+  assert.doesNotMatch(html, /轻量发布/);
+  assert.match(html, /data-site-section=['"]top-info['"][\s\S]*文章顶部信息/);
+  assert.match(html, /data-site-section=['"]footer-trailer['"][\s\S]*文章底部拖尾/);
+  assert.match(html, /data-site-section=['"]footer-trailer['"][\s\S]*data-site-strategy=['"]original['"][\s\S]{0,220}>[\s\S]*原创/);
+  assert.match(html, /data-site-section=['"]footer-trailer['"][\s\S]*data-site-strategy=['"]repost['"][\s\S]{0,220}>[\s\S]*转载/);
+});
+
+test('site.html 恢复转载会话时同步左栏策略按钮', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const listenerIndex = html.indexOf("window.addEventListener('fbif:article-restored'");
+  const restoreIndex = html.indexOf('restoreCurrentChannel();');
+  assert.notEqual(listenerIndex, -1, '网站页应监听文章恢复事件');
+  assert.notEqual(restoreIndex, -1, '网站页应恢复当前渠道快照');
+  assert.ok(listenerIndex < restoreIndex, '恢复快照必须发生在站点策略 listener 注册之后');
+  assert.match(html, /const\s+restoredInput\s*=\s*\(cs\.article_session\s*&&\s*cs\.article_session\.input\)\s*\|\|\s*cs\.last_render_input\s*\|\|\s*null/);
+  assert.match(html, /setSiteStrategyFromInput\(restoredInput,\s*cs\.is_repost\)/);
+});
+
+test('site.html 顶部信息字段可编辑并同步右侧只读预览', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  assert.match(html, /id=['"]siteArticleTitleInput['"]/);
+  assert.match(html, /id=['"]siteArticleAuthorInput['"]/);
+  assert.match(html, /id=['"]siteArticleSummaryInput['"]/);
+  assert.match(html, /id=['"]siteArticleTagsEditor['"]/);
+  assert.doesNotMatch(html, /id=['"]siteArticleTagsInput['"]/);
+  assert.match(html, /function\s+renderSiteTagEditor\(/);
+  assert.match(html, /function\s+editSiteTagAt\(/);
+  assert.match(html, /dataset\.siteTagIndex/);
+  assert.match(html, /className\s*=\s*'site-tag-chip'/);
+  assert.match(html, /function\s+syncSiteArticleMetaPreview\(/);
+  assert.match(html, /siteArticleTitleInput[\s\S]{0,220}titleInput\.value/);
+  assert.match(html, /siteArticleAuthorInput[\s\S]{0,260}ft-meta-author[\s\S]{0,180}wx-meta-account/);
+  assert.match(html, /siteArticleSummaryInput[\s\S]{0,260}ftSummary/);
+  assert.match(html, /siteArticleTagsEditor[\s\S]{0,300}ftPreviewTags/);
+  assert.match(html, /function\s+siteMetaFromSession\(/, '导入会话应抽取标题和作者填充顶部信息');
+  assert.match(html, /articleMeta[\s\S]{0,120}\.author/, '作者应优先读取结构化 articleMeta.author');
+  assert.match(html, /result[\s\S]{0,120}\.authorName/, '作者应兜底读取渲染结果 authorName');
+  assert.match(html, /extractSiteAuthorFromInput\(session\.input\)/, '作者应从导入正文 payload 兜底识别');
+  assert.match(html, /if \(!siteArticleMetaDirty\.title[\s\S]{0,160}meta\.title/, '标题仅在未手动编辑时自动填充');
+  assert.match(html, /if \(!siteArticleMetaDirty\.author[\s\S]{0,160}meta\.author/, '作者仅在未手动编辑时自动填充');
+});
+
+test('site.html 导入后左栏保持可滚动且导入区半折叠', async () => {
+  const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../public/site.css', import.meta.url), 'utf8');
+  assert.match(css, /\.sidebar-site \.rail-body > \*[\s\S]{0,120}flex:\s*0 0 auto/, '左栏子区块不能被 flex 压缩裁切');
+  assert.match(html, /id=['"]siteImportSummary['"]/, '导入区应有已导入内容摘要条');
+  assert.match(html, /function\s+setSiteImportCompact\(/, '导入后应进入半折叠状态');
+  assert.match(html, /function\s+clearSiteImportCompact\(/, '清空导入时应恢复完整导入区');
+  assert.match(css, /\.import-zone\.is-compact[\s\S]{0,260}\.import-actions/, '半折叠状态应隐藏大上传区');
+  assert.match(css, /\.import-zone\.is-compact[\s\S]{0,320}\.url-row/, '半折叠状态应隐藏大文本框');
+});
+
 test('site.html updates DOCX summary without wiping URL summaries, and resets MD summaries', async () => {
   const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
   assert.match(html, /fbif:article-session-activated/, '网站页应监听渲染 session 激活事件');

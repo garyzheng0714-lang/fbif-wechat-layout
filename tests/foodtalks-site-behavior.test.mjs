@@ -22,6 +22,26 @@ const DEFAULT_CONFIG = {
   },
 };
 
+const TIP_ENABLED_CONFIG = {
+  ...DEFAULT_CONFIG,
+  modules: {
+    fbif_footer: {
+      enabled: true,
+      active_segments: { tip: true },
+    },
+  },
+};
+
+const TIP_DISABLED_CONFIG = {
+  ...DEFAULT_CONFIG,
+  modules: {
+    fbif_footer: {
+      enabled: true,
+      active_segments: { tip: false },
+    },
+  },
+};
+
 const SERIES_CONFIG = {
   ...DEFAULT_CONFIG,
   behavior: {
@@ -105,6 +125,21 @@ test('提示行：非行首的"提示："不提升', () => {
   const elems = [p('在此提示：xxx')];
   const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG);
   assert.equal(out[0].k, 'p', '非行首"提示："保持 p');
+});
+
+test('提示声明模块：左侧开启时即使原文没有提示段也生成网站声明', () => {
+  const elems = [p('正文第一段。')];
+  const out = applyFoodTalksBehavior(elems, TIP_ENABLED_CONFIG, { title: '测试标题' });
+  const tip = out.find(e => e.k === 'tip');
+  assert.ok(tip, '提示声明模块开启时应补网站声明');
+  assert.equal(tip.title, '提示：');
+  assert.match(tip.rest_runs.map(r => r.text).join(''), /测试标题/);
+});
+
+test('提示声明模块：左侧关闭时不主动生成网站声明', () => {
+  const elems = [p('正文第一段。')];
+  const out = applyFoodTalksBehavior(elems, TIP_DISABLED_CONFIG, { title: '测试标题' });
+  assert.ok(!out.some(e => e.k === 'tip'), '提示声明模块关闭时不应补网站声明');
 });
 
 test('参考来源识别：header 段 + 后续 [n] 条目', () => {

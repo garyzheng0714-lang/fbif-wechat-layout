@@ -13,7 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { mergeIntoFooter } from '../public/js/more-articles.js';
+import { copySafeMoreArticleCard, mergeIntoFooter } from '../public/js/more-articles.js';
 import { PLACEHOLDER_DATA_URL } from '../public/js/more-articles-placeholder.js';
 
 // ---- 微信草稿保存模拟器（粘贴 + 保存两阶段） ----
@@ -24,16 +24,17 @@ function isWechatHostedImage(url) {
   return WECHAT_IMG_HOST_RE.test(String(url || '').trim());
 }
 
-export function simulateWechatDraftSave(html) {
+export function simulateWechatDraftSave(html, opts = {}) {
   let out = String(html || '');
   let transferSeq = 0;
+  const mode = opts.mode === 'delayed' ? 'delayed' : 'immediate';
 
-  // 粘贴阶段：base64 位图与外链 http 图的 <img src> 被编辑器转存为 mmbiz。
+  // 粘贴阶段：base64 位图立即转存；外链 http 图只有 delayed 模式才视为已完成转存。
   // SVG data: 不转存；imgurl 属性保持原样（编辑器从不改写它）。
   out = out.replace(/(<img\b[^>]*\bsrc=)(["'])([^"']+)\2/gi, (m, prefix, q, src) => {
     const isBitmapDataUri = /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i.test(src);
     const isExternalHttp = /^https?:\/\//i.test(src) && !isWechatHostedImage(src);
-    if (isBitmapDataUri || isExternalHttp) {
+    if (isBitmapDataUri || (mode === 'delayed' && isExternalHttp)) {
       return prefix + q + 'https://mmbiz.qpic.cn/simulated/' + (transferSeq++) + q;
     }
     return m;
@@ -42,11 +43,14 @@ export function simulateWechatDraftSave(html) {
   // 保存阶段①：src 仍是 data:/blob:/相对路径/localhost 的 <img> 被删。
   out = out.replace(/<img\b[^>]*\bsrc=(["'])(?:data:|blob:|\/|https?:\/\/(?:localhost|127\.0\.0\.1))[^"']*\1[^>]*>/gi, '');
 
-  // 保存阶段②：<a linktype="image"> 的 imgurl 非微信图床 → 整卡（含子内容）清除。
+  // 保存阶段②：图片链接卡片的 src 若仍依赖外部 HTTP，立即保存时会整卡清除。
   out = out.replace(/<a\b[^>]*\blinktype=(["'])image\1[^>]*>[\s\S]*?<\/a>/gi, (m) => {
     const im = m.match(/\bimgurl=(["'])([^"']*)\1/i);
     const imgurl = im ? im[2] : '';
-    return isWechatHostedImage(imgurl) ? m : '';
+    const sm = m.match(/<img\b[^>]*\bsrc=(["'])([^"']*)\1/i);
+    const src = sm ? sm[2] : '';
+    const srcSafe = isWechatHostedImage(src) || /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i.test(src);
+    return isWechatHostedImage(imgurl) && srcSafe ? m : '';
   });
 
   return out;
@@ -78,17 +82,72 @@ const V2_ANCHOR_FOOTER = [
 
 // ---- 核心存活契约 ----
 
-test('更多文章卡片（OSS 合成图 + mmbiz imgurl）经微信粘贴+保存草稿后存活', async () => {
+test('delayed 保存可模拟 OSS 合成图完成转存后存活', async () => {
   const merged = mergeIntoFooter(await fbifFooter(), [
     { href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, final_url: OSS_COMPOSITE_A, title: '标题A' },
     { href: 'https://mp.weixin.qq.com/s/b', imgurl: MMBIZ_COVER_B, final_url: OSS_COMPOSITE_B, title: '标题B' },
   ]);
   assert.equal(cardCountIn(merged), 2);
 
-  const saved = simulateWechatDraftSave(merged);
+  const saved = simulateWechatDraftSave(merged, { mode: 'delayed' });
   assert.equal(cardCountIn(saved), 2, '保存草稿后卡片必须全部存活');
   assert.match(saved, /href="https:\/\/mp\.weixin\.qq\.com\/s\/a"/);
   assert.match(saved, /href="https:\/\/mp\.weixin\.qq\.com\/s\/b"/);
+});
+
+test('immediate 保存不会假设 OSS/external HTTP 卡片图已经被微信转存', async () => {
+  const standaloneExternalImg = `<img alt="图片" src="${OSS_COMPOSITE_A}">`;
+  assert.doesNotMatch(
+    simulateWechatDraftSave(standaloneExternalImg, { mode: 'immediate' }),
+    /mmbiz\.qpic\.cn\/simulated\//,
+    'immediate mode must not transfer standalone external HTTP img src'
+  );
+  assert.match(
+    simulateWechatDraftSave(standaloneExternalImg, { mode: 'delayed' }),
+    /mmbiz\.qpic\.cn\/simulated\//,
+    'delayed mode may model external HTTP img transfer'
+  );
+
+  const merged = mergeIntoFooter(await fbifFooter(), [
+    { href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, final_url: OSS_COMPOSITE_A, title: '标题A' },
+  ]);
+  assert.equal(cardCountIn(merged), 1);
+
+  const immediate = simulateWechatDraftSave(merged, { mode: 'immediate' });
+  assert.equal(cardCountIn(immediate), 0, 'immediate save 下依赖外链 src 的卡片必须失败，不能被模拟器提前转存');
+
+  const delayed = simulateWechatDraftSave(merged, { mode: 'delayed' });
+  assert.equal(cardCountIn(delayed), 1, 'delayed save 可以模拟外链 src 已完成转存，但这不是 T0 安全');
+});
+
+test('公众号 copy-safe 卡片 src 在 T0 只能是 mmbiz 或位图 data，不能是 OSS 外链', async () => {
+  const safeCard = copySafeMoreArticleCard({
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: MMBIZ_COVER_A,
+    composite_url: OSS_COMPOSITE_A,
+    title: '标题A',
+  });
+  assert.equal(safeCard.final_url, MMBIZ_COVER_A, 'OSS 合成图不能作为公众号 copy-safe 的唯一 T0 src');
+
+  const merged = mergeIntoFooter(await fbifFooter(), [safeCard]);
+  const imgurl = merged.match(/\bimgurl="([^"]+)"/)?.[1] || '';
+  assert.ok(isWechatHostedImage(imgurl), `copy-safe card imgurl must be WeChat-hosted, got ${imgurl}`);
+  const src = merged.match(/linktype="image"[\s\S]*?<img[^>]*\bsrc="([^"]+)"/)?.[1] || '';
+  assert.ok(
+    isWechatHostedImage(src) || /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i.test(src),
+    `copy-safe card src must be immediately survivable, got ${src}`
+  );
+});
+
+test('没有微信图床封面的外站卡片不能伪装成 linktype=image 安全卡', async () => {
+  const unsafeCard = copySafeMoreArticleCard({
+    href: 'https://example.com/article',
+    imgurl: 'https://images.example.com/cover.jpg',
+    composite_url: OSS_COMPOSITE_B,
+    title: '外站文章',
+  });
+  const merged = mergeIntoFooter(await fbifFooter(), [unsafeCard]);
+  assert.equal(cardCountIn(merged), 0, '没有 mmbiz imgurl 时不得输出伪安全 linktype=image 卡片');
 });
 
 test('合成图上传失败降级为 data: PNG 时，卡片保存草稿后依然存活', async () => {
@@ -101,23 +160,23 @@ test('合成图上传失败降级为 data: PNG 时，卡片保存草稿后依然
 
 test('v2 blocks 渠道（mp-blocks/series 锚点）的卡片同样存活', () => {
   const merged = mergeIntoFooter(V2_ANCHOR_FOOTER, [
-    { href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, final_url: OSS_COMPOSITE_A, title: '标题A' },
-    { href: 'https://mp.weixin.qq.com/s/b', imgurl: MMBIZ_COVER_B, final_url: DATA_PNG_COMPOSITE, title: '标题B' },
+    copySafeMoreArticleCard({ href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, final_url: OSS_COMPOSITE_A, title: '标题A' }),
+    copySafeMoreArticleCard({ href: 'https://mp.weixin.qq.com/s/b', imgurl: MMBIZ_COVER_B, final_url: DATA_PNG_COMPOSITE, title: '标题B' }),
   ]);
   assert.equal(cardCountIn(merged), 2);
   const saved = simulateWechatDraftSave(merged);
   assert.equal(cardCountIn(saved), 2);
 });
 
-test('卡片 imgurl 恒为微信图床封面，不跟随合成图外链', async () => {
+test('copy-safe 卡片 imgurl 和 src 都不跟随 OSS 合成图外链', async () => {
   const merged = mergeIntoFooter(await fbifFooter(), [
-    { href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, final_url: OSS_COMPOSITE_A, title: '标题A' },
+    copySafeMoreArticleCard({ href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, final_url: OSS_COMPOSITE_A, title: '标题A' }),
   ]);
   const im = merged.match(/\bimgurl="([^"]+)"/);
   assert.ok(im, '卡片必须有 imgurl');
   assert.equal(im[1], MMBIZ_COVER_A, 'imgurl 必须是原始 mmbiz 封面（微信保存草稿的服务端校验属性）');
   const src = merged.match(/linktype="image"[\s\S]*?<img[^>]*\bsrc="([^"]+)"/);
-  assert.equal(src[1], OSS_COMPOSITE_A, '<img src> 仍用合成图');
+  assert.equal(src[1], MMBIZ_COVER_A, '<img src> 也必须是 T0 可存活的微信图床图');
 });
 
 // ---- 模拟器必须有牙齿：旧回归形态必须被杀 ----

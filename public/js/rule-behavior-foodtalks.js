@@ -68,6 +68,24 @@ function behaviorRegex(behavior, key, fallback) {
   try { return compileSiteRegex(src); } catch (e) { return compileSiteRegex(fallback); }
 }
 
+function activeFooterSegmentsFromConfig(config) {
+  const footerCfg = config && config.modules && config.modules.fbif_footer;
+  if (!footerCfg || typeof footerCfg !== 'object' || footerCfg.enabled === false) return null;
+  const presets = Array.isArray(footerCfg.presets) ? footerCfg.presets : [];
+  if (presets.length) {
+    const activeId = String(footerCfg.active_preset_id || '');
+    const active = presets.find(p => p && p.id === activeId) || presets[0];
+    if (active && active.segments && typeof active.segments === 'object') return active.segments;
+  }
+  if (footerCfg.active_segments && typeof footerCfg.active_segments === 'object') return footerCfg.active_segments;
+  return null;
+}
+
+function shouldGenerateSiteTip(config) {
+  const segments = activeFooterSegmentsFromConfig(config);
+  return !!(segments && segments.tip);
+}
+
 // 公众号原文尾部专属标记 —— 网站发布版会把这一整段删除（更多文章导流、案例库
 // 导流、加群/关注公众号引导、二维码、公众号口径的"提示："页脚）。只要正文里
 // 出现下列任一标记，就把它及其后的所有元素全部切掉，正文主体到此为止。
@@ -495,9 +513,9 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     if (lines.length) out[i] = { k: 'footer-note', lines };
   }
 
-  // 阶段 5：补网站口径提示页脚。仅当上一步切掉了公众号转载声明页脚时才补，
-  // 避免给非原创 / 已是 FoodTalks 原生口径的文章凭空加声明。
-  if (trimmed.cutWechatTip) {
+  // 阶段 5：补网站口径提示页脚。
+  // 公众号转载文切掉原提示页脚时需要补；网站 beta 左栏开启「提示声明」时也应生成。
+  if ((trimmed.cutWechatTip || shouldGenerateSiteTip(config)) && !out.some(e => e && e.k === 'tip')) {
     // 来源从【原始 elems】提取（切尾前），因为「来源：XX」行常紧邻被切的导流段。
     out.push(buildSiteFooterTipElem(opts.title, {
       source: opts.isRepost ? extractRepostSource(elems, behavior) : '',
