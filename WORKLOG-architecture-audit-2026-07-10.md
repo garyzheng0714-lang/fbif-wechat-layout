@@ -51,7 +51,18 @@ FoodTalks 冒烟测试（已批准）排在本任务之后。
 3. 共用/隔离判断标准 ADR + CLAUDE.md「新功能先过边界」规则
 4. CLAUDE.md 红线 #2 过时事实修正（registry.js 是生成文件、真相源是 account_catalog.go）
 
-### 待批准的大手术（按投入产出排序，每项独立立项）
+### 大手术（2026-07-10 用户批准 S1–S6 全部：「每项先补契约测试再动刀」；执行顺序按风险 S6→S3→S4→S5→S1→S2，每项完成即 commit+全量测试）
+
+**执行进度（实时）**：
+- [x] S6（commit 8e9f345）：rule-behavior-utils.js 收敛 4 份助手拷贝（13 契约测试先行）；author-card-autofill 迁出中立层；KNOWN_CHANNELS Go 测试守护。772 测试全绿。
+- [x] S3（commit 027d35d）：merge 基线按 preset 查表选择（rule_merge_baseline_test.go 4 契约先行）；连带修复校验器 FBIF 形状假设（conditions/actions 缺失视为空）。
+- [x] S4（commit fc320f6，生产已验证）：生产 Caddyfile 拆分完成（备份 bak-s4-split-20260710-064916，拆分前后 7 路径+缓存头零漂移）；deploy.yml 注入脚本 250 行 → 声明式 rsync+validate+自动回滚（376→151 行）；部署实战通过。已知遗留显式标注：/api/wechat-draft、/api/oss-presign 指向 9000 旧服务，@fbifUploadApi 下方两个 9000 handle 是死配置。
+- [x] S5（commit 9fb3e16）：e2e 一键可跑（webServer 自动起 Go 服务）+ 24 张像素基线自动对比（toHaveScreenshot，禁动画+mask 日期）；两个抓取场景 route 桩确定性化；修 spec 三处已改版 UI 死 selector。基线不入库（23M 绑定 macOS 渲染，本地防线）；首建 `npm run test:e2e:baseline`。
+- [x] S1（commit 61f3e7e）：规则选择器族（17 函数 + escText，~500 行×2 已分叉）收敛为 active-rule-selector.js 工厂模块，渠道差异 options 注入（readonlyEditEntry/fallbackTransform/afterHydrate）；app switchAccount 手工展开段收编为 adoptAccount()。7 项 linkedom 行为契约先行（此前零行为覆盖）。app 内联 740→479 行。剩余小函数（版本热更新等 ~60 行）收益递减列后续；syncEngineConfig/loadTemplate 属真渠道差异保留各页。视觉基线 24/24 零像素回归（两页手术各验一轮）。
+- [x] S2（commit e0576d2）：两个裸计数器守卫收敛为 copy-session.js 版本门（capture/stale 自解释）；文章级重置唯一入口 resetForNewArticle()。两 gate 语义独立（footer 写权 vs 合成任务）刻意不合并。5 项契约含防回退断言；wechat-draft-survival 模拟器全绿；视觉基线 24/24。
+  疑点存档（未顺手改）：copyPlainTextToClipboard 的重置段只作废合成任务、不作废 footer 写权——旧上传完成后仍可回写已清空的 _footerCopy；因纯文字分支不读 _footerCopy 未构成可见 bug，留待 copyContent 行为测试补齐后再定。
+
+### S1-S6 全部完成（2026-07-10）。累计新增契约测试 41 项（13 utils + 4 merge 基线 + 2 挂链/渠道 + 7 选择器 + 5 copy-session + 视觉基线 24 张 + 迁移改写若干），npm test 759→784。
 - **S1 外壳收敛**（中投入，直接消灭「改一处忘另一处」）：把 app.html/site.html 的 28 个复制粘贴同名函数抽成共享 shell 模块（两页 import 同一份），从此外壳 bug 只修一次。前置：先给现有行为补契约测试。
 - **S2 复制链路状态机化**（高投入，根治复制类 bug）：把 engine.js 里 11 个复制状态变量 + 两套守卫收敛为单一 CopySession 对象（一次导入=一个不可变会话，天然免疫旧任务回写），并给 initApp 编排层建行为测试。
 - **S3 规则合并显式化**（中投入，根治串台）：mergeRuleDefaults 从「默认继承 FBIF」改为「新账号必须显式声明每个模块的继承或覆盖」，缺声明启动报错。
