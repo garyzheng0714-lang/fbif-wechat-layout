@@ -16,12 +16,15 @@ test('homepage defers the more-articles editor until an article exists', async (
   );
 });
 
-test('deploy overrides existing Caddy no-cache headers for cacheable assets', async () => {
-  const workflow = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+// WHY：带版本 JS/CSS、vendor、图片必须有长缓存覆盖头（>Cache-Control 强制覆盖站点级
+// no-cache），否则首屏每次全量回源。S4(2026-07-10) 起 Caddy 路由的唯一真相源是仓库的
+// deploy/caddy/fbifmp-layout.caddy（不再是 deploy.yml 注入脚本），断言随真相源迁移。
+test('Caddy vhost overrides no-cache headers for cacheable assets', async () => {
+  const vhost = await readFile(new URL('../deploy/caddy/fbifmp-layout.caddy', import.meta.url), 'utf8');
 
-  assert.ok(workflow.includes('header @fbifVersionedAssets >Cache-Control \\"public, max-age=31536000, immutable\\"'));
-  assert.ok(workflow.includes('header @fbifVendorAssets >Cache-Control \\"public, max-age=31536000, immutable\\"'));
-  assert.ok(workflow.includes('header @fbifImageAssets >Cache-Control \\"public, max-age=86400\\"'));
+  assert.ok(vhost.includes('header @fbifVersionedAssets >Cache-Control "public, max-age=31536000, immutable"'));
+  assert.ok(vhost.includes('header @fbifVendorAssets >Cache-Control "public, max-age=31536000, immutable"'));
+  assert.ok(vhost.includes('header @fbifImageAssets >Cache-Control "public, max-age=86400"'));
 });
 
 // WHY：编辑器 HTML 用 ?v=assetVersion 给每个 JS import 打版本，部署后 JS 必然刷新；但 <head>

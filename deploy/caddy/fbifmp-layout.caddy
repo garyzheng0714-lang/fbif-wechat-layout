@@ -1,0 +1,97 @@
+# fbifmp-layout.foodtalks.cn — 排版工具站点 Caddy vhost（声明式，架构体检 S4）
+#
+# 本文件是该站点路由的唯一真相源：仓库改这里 → 部署 rsync 到
+# /etc/caddy/sites/fbifmp-layout.caddy → caddy validate 通过才 reload。
+# 服务器主 Caddyfile（15 个站点共用）只保留一行 `import sites/fbifmp-layout.caddy`，
+# 本项目部署不再对主文件做注入式 patch（旧脚本曾因此连修 6 次路由）。
+#
+# 内容为 2026-07-10 拆分时对生产现状的保真迁移；已知遗留（勿顺手清理，需单独验证）：
+#   - /api/wechat-draft、/api/oss-presign 仍指向 localhost:9000 的旧服务；
+#   - /api/oss-upload、/api/wechat-upload 在 @fbifUploadApi（9001）已匹配，
+#     下方 9000 的同名 handle 是永不命中的死配置，保留只为与拆分前逐字节语义一致。
+
+fbifmp-layout.foodtalks.cn {
+	@fbifAppShell path / /index.html /app.html /version.json
+	header @fbifAppShell Cache-Control "no-cache"
+
+	@fbifVersionedAssets {
+		path /js/* /css/*
+		query v=*
+	}
+	header @fbifVersionedAssets >Cache-Control "public, max-age=31536000, immutable"
+
+	@fbifVendorAssets path /vendor/*
+	header @fbifVendorAssets >Cache-Control "public, max-age=31536000, immutable"
+
+	@fbifImageAssets path *.png *.jpg *.jpeg *.webp *.gif *.svg *.ico
+	header @fbifImageAssets >Cache-Control "public, max-age=86400"
+
+	@fbifRulesApi path /api/rules /api/rules/*
+	handle @fbifRulesApi {
+		reverse_proxy localhost:9001
+	}
+
+	@fbifChannels path /mp /mp/* /ft /ft/*
+	handle @fbifChannels {
+		reverse_proxy localhost:9001
+	}
+
+	@fbifUploadApi path /api/oss-upload /api/wechat-upload
+	handle @fbifUploadApi {
+		reverse_proxy localhost:9001
+	}
+
+	@fbifRenderApi path /api/render /api/html-to-blocks
+	handle @fbifRenderApi {
+		reverse_proxy localhost:9001
+	}
+
+	encode gzip zstd
+
+	handle /api/wechat-draft {
+		reverse_proxy localhost:9000
+	}
+	handle /api/oss-presign {
+		reverse_proxy localhost:9000
+	}
+	handle /api/oss-upload {
+		reverse_proxy localhost:9000
+	}
+	handle /api/wechat-upload {
+		reverse_proxy localhost:9000
+	}
+	handle /api/fetch-article {
+		reverse_proxy localhost:9001
+	}
+	handle /api/fetch-article-meta {
+		reverse_proxy localhost:9001
+	}
+	handle /api/image-proxy {
+		reverse_proxy localhost:9001
+	}
+	handle /api/config/* {
+		reverse_proxy localhost:9001
+	}
+	handle /api/health {
+		reverse_proxy localhost:9001
+	}
+	handle /api/doc-to-docx {
+		reverse_proxy localhost:9001 {
+			transport http {
+				read_timeout 180s
+				write_timeout 180s
+			}
+		}
+	}
+	handle /api/doc-cache/* {
+		reverse_proxy localhost:9001
+	}
+
+	handle {
+		root * /var/www/wechat-layout
+		try_files {path} /index.html
+		@static path *.css *.js
+		header @static Cache-Control "no-cache"
+		file_server
+	}
+}

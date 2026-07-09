@@ -87,256 +87,27 @@ jobs:
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
             "cd /var/www/render-service && npm install --omit=dev --no-audit --no-fund"
 
-          # Ensure the rule preset API is routed to the Go service. The server's
-          # Caddy config proxies only selected /api paths, so new API namespaces
-          # must be added explicitly or they fall through to the static app.
-          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "sudo python3 -" <<'PY'
-          from pathlib import Path
-          import re
-          import sys
-          import urllib.request
-
-          site = "fbifmp-layout.foodtalks.cn"
-          marker = "@fbifRulesApi"
-
-          root = Path("/etc/caddy")
-          if not root.exists():
-              print("/etc/caddy does not exist", file=sys.stderr)
-              sys.exit(1)
-
-          files = []
-          primary = root / "Caddyfile"
-          if primary.exists():
-              files.append(primary)
-          files.extend(
-              p for p in root.rglob("*")
-              if p.is_file()
-              and p != primary
-              and ".bak" not in p.name
-              and not p.name.endswith("~")
-          )
-
-          target = None
-          for path in files:
-              try:
-                  text = path.read_text()
-              except UnicodeDecodeError:
-                  continue
-              if site in text:
-                  target = path
-                  break
-
-          if target is None:
-              print("Could not find Caddy site config for " + site, file=sys.stderr)
-              sys.exit(1)
-
-          original = target.read_text()
-          def extract_upstreams(config):
-              found = []
-              for token in ("/api/fetch-article-meta", "/api/fetch-article", "/api/health"):
-                  at = config.find(token)
-                  if at == -1:
-                      continue
-                  window = config[max(0, at - 500):at + 1800]
-                  for line in window.splitlines():
-                      stripped = line.strip()
-                      if not stripped.startswith("reverse_proxy"):
-                          continue
-                      for part in stripped.split()[1:]:
-                          if part.startswith("@") or part.startswith("/") or part == "{":
-                              continue
-                          if part not in found:
-                              found.append(part)
-              return found
-
-          def health_url(upstream):
-              if upstream.startswith("http://") or upstream.startswith("https://"):
-                  base = upstream.rstrip("/")
-              else:
-                  base = "http://" + upstream.rstrip("/")
-              return base + "/api/health"
-
-          def is_go_api(upstream):
-              try:
-                  with urllib.request.urlopen(health_url(upstream), timeout=2) as resp:
-                      body = resp.read(200).decode("utf-8", "replace")
-                      return resp.status == 200 and '"status":"ok"' in body.replace(" ", "")
-              except Exception:
-                  return False
-
-          candidates = extract_upstreams(original)
-          for fallback in (
-              "127.0.0.1:19090",
-              "127.0.0.1:9000",
-              "127.0.0.1:8080",
-              "127.0.0.1:9090",
-              "127.0.0.1:3000",
-          ):
-              if fallback not in candidates:
-                  candidates.append(fallback)
-
-          upstream = next((candidate for candidate in candidates if is_go_api(candidate)), "")
-          if not upstream:
-              print("Could not find a local Go API upstream with /api/health", file=sys.stderr)
-              sys.exit(1)
-
-          route = (
-              "\n"
-              "  @fbifRulesApi path /api/rules /api/rules/*\n"
-              "  handle @fbifRulesApi {\n"
-              "    reverse_proxy " + upstream + "\n"
-              "  }\n"
-          )
-
-          channels_route = (
-              "\n"
-              "  @fbifChannels path /mp /mp/* /ft /ft/*\n"
-              "  handle @fbifChannels {\n"
-              "    reverse_proxy " + upstream + "\n"
-              "  }\n"
-          )
-          upload_route = (
-              "\n"
-              "  @fbifUploadApi path /api/oss-upload /api/wechat-upload\n"
-              "  handle @fbifUploadApi {\n"
-              "    reverse_proxy " + upstream + "\n"
-              "  }\n"
-          )
-          render_route = (
-              "\n"
-              "  @fbifRenderApi path /api/render /api/html-to-blocks\n"
-              "  handle @fbifRenderApi {\n"
-              "    reverse_proxy " + upstream + "\n"
-              "  }\n"
-          )
-
-          app_shell_header = (
-              "\n"
-              "  @fbifAppShell path / /index.html /app.html /version.json\n"
-              "  header @fbifAppShell Cache-Control \"no-cache\"\n"
-          )
-          asset_cache_headers = (
-              "\n"
-              "  @fbifVersionedAssets {\n"
-              "    path /js/* /css/*\n"
-              "    query v=*\n"
-              "  }\n"
-              "  header @fbifVersionedAssets >Cache-Control \"public, max-age=31536000, immutable\"\n"
-              "\n"
-              "  @fbifVendorAssets path /vendor/*\n"
-              "  header @fbifVendorAssets >Cache-Control \"public, max-age=31536000, immutable\"\n"
-              "\n"
-              "  @fbifImageAssets path *.png *.jpg *.jpeg *.webp *.gif *.svg *.ico\n"
-              "  header @fbifImageAssets >Cache-Control \"public, max-age=86400\"\n"
-          )
-
-          # Remove any prior @fbifRulesApi route, regardless of upstream form
-          # (127.0.0.1, localhost, or other host:port) and regardless of
-          # rendering style (one-line `reverse_proxy @matcher upstream` or
-          # `handle @matcher { reverse_proxy upstream }`). Earlier deploys
-          # used patterns that hardcoded `127\.0\.0\.1`, so when the resolved
-          # upstream switched to `localhost:9001` the cleanup stopped matching
-          # and every run appended another duplicate matcher block until
-          # `caddy validate` rejected the file with "matcher is defined more
-          # than once: @fbifRulesApi". The block below tolerates both
-          # historical forms in a single sweep, in a loop so multiple
-          # accumulated copies all get removed.
-          rules_route_re = re.compile(
-              r"\n[ \t]*@fbifRulesApi[ \t]+path[ \t]+/api/rules[ \t]+/api/rules/\*[ \t]*\n"
-              r"(?:[ \t]*reverse_proxy[ \t]+@fbifRulesApi[ \t]+\S+[ \t]*\n)?"
-              r"(?:[ \t]*handle[ \t]+@fbifRulesApi[ \t]*\{[ \t]*\n"
-              r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
-              r"[ \t]*\}[ \t]*\n)?"
-          )
-          channels_route_re = re.compile(
-              r"\n[ \t]*@fbifChannels[ \t]+path[^\n]*\n"
-              r"(?:[ \t]*handle[ \t]+@fbifChannels[ \t]*\{[ \t]*\n"
-              r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
-              r"[ \t]*\}[ \t]*\n)?"
-          )
-          upload_route_re = re.compile(
-              r"\n[ \t]*@fbifUploadApi[ \t]+path[^\n]*\n"
-              r"(?:[ \t]*handle[ \t]+@fbifUploadApi[ \t]*\{[ \t]*\n"
-              r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
-              r"[ \t]*\}[ \t]*\n)?"
-          )
-          render_route_re = re.compile(
-              r"\n[ \t]*@fbifRenderApi[ \t]+path[^\n]*\n"
-              r"(?:[ \t]*handle[ \t]+@fbifRenderApi[ \t]*\{[ \t]*\n"
-              r"[ \t]*reverse_proxy[ \t]+\S+[ \t]*\n"
-              r"[ \t]*\}[ \t]*\n)?"
-          )
-          text = original
-          while True:
-              new_text = rules_route_re.sub("\n", text)
-              if new_text == text:
-                  break
-              text = new_text
-          while True:
-              new_text = channels_route_re.sub("\n", text)
-              if new_text == text:
-                  break
-              text = new_text
-          while True:
-              new_text = upload_route_re.sub("\n", text)
-              if new_text == text:
-                  break
-              text = new_text
-          while True:
-              new_text = render_route_re.sub("\n", text)
-              if new_text == text:
-                  break
-              text = new_text
-
-          app_shell_header_re = re.compile(
-              r"\n[ \t]*@fbifAppShell[ \t]+path[^\n]*\n"
-              r"[ \t]*header[ \t]+@fbifAppShell[ \t]+Cache-Control[ \t]+\"?[^\n\"]+\"?[ \t]*\n"
-          )
-          while True:
-              new_text = app_shell_header_re.sub("\n", text)
-              if new_text == text:
-                  break
-              text = new_text
-          asset_header_re = re.compile(
-              r"\n[ \t]*@fbifVersionedAssets[ \t]*\{[ \t]*\n"
-              r"(?:[^\n]*\n)*?"
-              r"[ \t]*\}[ \t]*\n"
-              r"[ \t]*header[ \t]+@fbifVersionedAssets[ \t]+>?Cache-Control[^\n]*\n"
-              r"\n?"
-              r"[ \t]*@fbifVendorAssets[^\n]*\n"
-              r"[ \t]*header[ \t]+@fbifVendorAssets[ \t]+>?Cache-Control[^\n]*\n"
-              r"\n?"
-              r"[ \t]*@fbifImageAssets[^\n]*\n"
-              r"[ \t]*header[ \t]+@fbifImageAssets[ \t]+>?Cache-Control[^\n]*\n"
-          )
-          while True:
-              new_text = asset_header_re.sub("\n", text)
-              if new_text == text:
-                  break
-              text = new_text
-
-          insert_points = []
-          scan_from = 0
-          while True:
-              site_at = text.find(site, scan_from)
-              if site_at == -1:
-                  break
-              open_at = text.find("{", site_at)
-              if open_at != -1:
-                  insert_points.append(open_at + 1)
-              scan_from = site_at + len(site)
-
-          if not insert_points:
-              print("Could not find site block opening brace in " + str(target), file=sys.stderr)
-              sys.exit(1)
-
-          backup = target.with_suffix(target.suffix + ".bak-rules")
-          backup.write_text(original)
-          for open_after in sorted(set(insert_points), reverse=True):
-              text = text[:open_after] + app_shell_header + asset_cache_headers + route + channels_route + upload_route + render_route + text[open_after:]
-          target.write_text(text)
-          print("Ensured Caddy rule API + channel + upload handles in " + str(target) + " -> " + upstream)
-          PY
+          # S4(2026-07-10)：Caddy 路由声明式管理。本站 vhost 的唯一真相源是仓库的
+          # deploy/caddy/fbifmp-layout.caddy，同步到 /etc/caddy/sites/ 后 validate；
+          # 服务器主 Caddyfile（15 站共用）只保留一行 import，本项目不再注入式 patch
+          # （旧 ~250 行注入脚本曾因同一路由问题连修 6 次）。validate 失败自动恢复
+          # 上一版 vhost，坏配置永远到不了运行中的 Caddy。
+          rsync -avz \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            deploy/caddy/fbifmp-layout.caddy \
+            "${USER}@${HOST}:/tmp/fbifmp-layout.caddy.new"
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "sudo bash -s" <<'CADDYSYNC'
+          set -euo pipefail
+          target=/etc/caddy/sites/fbifmp-layout.caddy
+          mkdir -p /etc/caddy/sites
+          if [ -f "$target" ]; then cp "$target" "$target.prev"; fi
+          mv /tmp/fbifmp-layout.caddy.new "$target"
+          if ! caddy validate --config /etc/caddy/Caddyfile; then
+            echo "caddy validate failed — restoring previous vhost" >&2
+            if [ -f "$target.prev" ]; then mv "$target.prev" "$target"; fi
+            exit 1
+          fi
+          CADDYSYNC
 
           # Write env file for the fbif-api systemd service (loaded via EnvironmentFile=)
           # Tempfile + atomic rename so the service never sees a half-written file.
