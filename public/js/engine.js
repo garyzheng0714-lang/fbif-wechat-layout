@@ -37,6 +37,7 @@ import {
   mergeIntoFooter as mergeMoreArticlesIntoFooter,
   compositePreviewDataUrl,
   ensureCompositeReady,
+  ensureCopyCompositeDataUrl,
   makeFreshUploadCards,
   copySafeMoreArticleCard,
 } from './more-articles.js';
@@ -452,9 +453,18 @@ function applyRepostTransform(html, isRepost = _isRepost) {
   return out;
 }
 
+function moreArticleCardNeedsCopyComposite(card) {
+  return !!(card && ((card.title && String(card.title).trim()) || card.cover_data_url));
+}
+
+async function copySafeMoreArticleCardForFooter(card) {
+  if (moreArticleCardNeedsCopyComposite(card)) await ensureCopyCompositeDataUrl(card);
+  return copySafeMoreArticleCard(card);
+}
+
 // Build a footer HTML that has the "更多文章" section replaced with the user's
-// current card config. Each customized card is composited to a data URL for
-// instant preview (no upload). Copy-time will re-run with uploaded OSS URLs.
+// current card config. Preview can use OSS/proxy URLs; the WeChat copy layer
+// must carry a local bitmap composite so title overlays survive T0 draft save.
 async function buildFooterWithMoreArticles(baseFooterHtml, opts = {}) {
   const isRepost = opts.isRepost != null ? opts.isRepost : _isRepost;
   // v2 双预设已按 presetId 分原创/转载，跳过旧锚点替换（codex review #4，互斥）。isV2 由调用方局部传入。
@@ -462,8 +472,9 @@ async function buildFooterWithMoreArticles(baseFooterHtml, opts = {}) {
   const transformed = normalizeWechatRichHtml(base);
   const cards = loadMoreArticlesCards();
   const cardsForFooter = opts.copySafe
-    ? cards.map(copySafeMoreArticleCard)
+    ? await Promise.all(cards.map(copySafeMoreArticleCardForFooter))
     : await Promise.all(cards.map(async c => ({ ...c, final_url: await compositePreviewDataUrl(c) })));
+  if (opts.copySafe) saveMoreArticlesCards(cards);
   return normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(transformed, cardsForFooter));
 }
 

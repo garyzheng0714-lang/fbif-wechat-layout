@@ -76,6 +76,7 @@ const LINE_START_FORBIDDEN_PUNCTUATION = new Set(Array.from(
 const LINE_END_FORBIDDEN_PUNCTUATION = new Set(Array.from(
   '“‘「『'
 ));
+const copyCompositeDataCache = new Map();
 
 export function getBannerStyleSpec(config = getActiveRuleConfig()) {
   const overlayAlpha = Math.max(0, Math.min(1, getRuleNumber(config, 'banner_overlay_alpha')));
@@ -101,6 +102,8 @@ export function emptyCard() {
   return {
     ...emptyMoreArticleCard(),
     composite_url: null,
+    copy_data_url: null,
+    copy_data_key: null,
     composite_hash: null,
   };
 }
@@ -134,12 +137,12 @@ function normalizeCard(c) {
   const imageUrls = Array.isArray(c.image_urls)
     ? Array.from(new Set(c.image_urls.map(v => String(v || '').trim()).filter(Boolean)))
     : [];
-  return {
+  return hydrateCopyCompositeData({
     ...base,
     ...c,
     image_urls: imageUrls,
     crop: { ...base.crop, ...(c.crop || {}) },
-  };
+  });
 }
 
 export function loadCards() {
@@ -165,9 +168,17 @@ export function loadCards() {
   }
 }
 
+function cardForStorage(card) {
+  const c = { ...(card || {}) };
+  delete c.copy_data_url;
+  delete c.copy_data_key;
+  return c;
+}
+
 export function saveCards(cards) {
   try {
-    localStorage.setItem(lsKey(), JSON.stringify(cards));
+    const serializable = Array.isArray(cards) ? cards.map(cardForStorage) : cards;
+    localStorage.setItem(lsKey(), JSON.stringify(serializable));
   } catch (err) {
     console.warn('[more-articles] saveCards failed', err);
   }
@@ -362,7 +373,7 @@ export async function compositeCard(card) {
   return canvas.toDataURL(COMPOSITE_OUTPUT_TYPE);
 }
 
-// ---- Fingerprint for skip-upload ----
+// ---- Fingerprint for skip-upload / copy bitmap cache ----
 async function sha1Hex(str) {
   const buf = new TextEncoder().encode(str);
   const digest = await crypto.subtle.digest('SHA-1', buf);
@@ -371,20 +382,95 @@ async function sha1Hex(str) {
     .join('');
 }
 
-export async function computeCardHash(card) {
+function fingerprintCrop(card) {
+  const crop = (card && card.crop) || {};
+  const num = (value, fallback) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  return {
+    x: num(crop.x, 0.5),
+    y: num(crop.y, 0.5),
+    scale: num(crop.scale, 1),
+  };
+}
+
+function compositeFingerprintInput(card) {
   const styleSpec = getBannerStyleSpec();
-  const input = JSON.stringify({
-    title: card.title || '',
-    imgurl: card.imgurl || '',
-    cover_data_url_len: card.cover_data_url ? card.cover_data_url.length : 0,
-    cover_data_url_head: card.cover_data_url ? card.cover_data_url.slice(0, 120) : '',
-    crop: card.crop || null,
+  const source = card || {};
+  return JSON.stringify({
+    title: source.title || '',
+    imgurl: source.imgurl || '',
+    cover_data_url: source.cover_data_url || '',
+    crop: fingerprintCrop(source),
     style: {
       version: COMPOSITE_STYLE_VERSION,
       overlayAlpha: styleSpec.overlayAlpha,
       title: styleSpec.title,
     },
   });
+}
+
+export function copyCompositeCacheKey(card) {
+  return compositeFingerprintInput(card);
+}
+
+function cardNeedsComposite(card) {
+  return !!(card && ((card.title && String(card.title).trim()) || card.cover_data_url));
+}
+
+function validCopyCompositeDataUrl(card) {
+  if (!cardNeedsComposite(card)) return '';
+  const key = copyCompositeCacheKey(card);
+  const url = String((card && card.copy_data_url) || '').trim();
+  if (card && card.copy_data_key === key && isBitmapDataImageUrl(url)) return url;
+  const cached = copyCompositeDataCache.get(key);
+  return isBitmapDataImageUrl(cached) ? cached : '';
+}
+
+function rememberCopyCompositeDataUrl(card, dataUrl) {
+  if (!isBitmapDataImageUrl(dataUrl)) return '';
+  const key = copyCompositeCacheKey(card);
+  copyCompositeDataCache.set(key, dataUrl);
+  card.copy_data_url = dataUrl;
+  card.copy_data_key = key;
+  return dataUrl;
+}
+
+function hydrateCopyCompositeData(card) {
+  if (!card || typeof card !== 'object') return card;
+  const dataUrl = validCopyCompositeDataUrl(card);
+  if (dataUrl) {
+    card.copy_data_url = dataUrl;
+    card.copy_data_key = copyCompositeCacheKey(card);
+  } else {
+    delete card.copy_data_url;
+    delete card.copy_data_key;
+  }
+  return card;
+}
+
+export async function ensureCopyCompositeDataUrl(card) {
+  if (!cardNeedsComposite(card)) {
+    delete card.copy_data_url;
+    delete card.copy_data_key;
+    return '';
+  }
+  const ready = validCopyCompositeDataUrl(card);
+  if (ready) {
+    card.copy_data_url = ready;
+    card.copy_data_key = copyCompositeCacheKey(card);
+    return ready;
+  }
+  const dataUrl = await compositeCard(card);
+  if (!isBitmapDataImageUrl(dataUrl)) {
+    throw new Error('more-article copy composite did not produce a bitmap data URL');
+  }
+  return rememberCopyCompositeDataUrl(card, dataUrl);
+}
+
+export async function computeCardHash(card) {
+  const input = compositeFingerprintInput(card);
   return sha1Hex(input);
 }
 
@@ -411,7 +497,7 @@ function isRemoteImageUrl(url) {
   return /^https?:\/\//i.test(String(url || '').trim());
 }
 
-function isBitmapDataImageUrl(url) {
+export function isBitmapDataImageUrl(url) {
   return /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i.test(String(url || '').trim());
 }
 
@@ -420,21 +506,27 @@ function isImmediateSafeCardSrc(url) {
 }
 
 export function copySafeMoreArticleCard(card) {
-  const c = { ...(card || {}), crop: { ...((card && card.crop) || {}) } };
+  const c = hydrateCopyCompositeData({ ...(card || {}), crop: { ...((card && card.crop) || {}) } });
+  const needsComposite = cardNeedsComposite(c);
   const wechatOriginal = isMmbizUrl(c.imgurl) ? String(c.imgurl).trim() : '';
   const finalUrl = String(c.final_url || '').trim();
   const compositeUrl = String(c.composite_url || '').trim();
-  const safeComposite = isBitmapDataImageUrl(finalUrl)
-    ? finalUrl
-    : isBitmapDataImageUrl(compositeUrl)
-      ? compositeUrl
-      : '';
+  const copyDataUrl = validCopyCompositeDataUrl(c);
+  const safeComposite = needsComposite
+    ? copyDataUrl
+    : isBitmapDataImageUrl(finalUrl)
+      ? finalUrl
+      : isBitmapDataImageUrl(compositeUrl)
+        ? compositeUrl
+        : '';
   return {
     ...c,
     _copySafeMp: true,
     imgurl: wechatOriginal,
+    copy_data_url: safeComposite || null,
+    copy_data_key: safeComposite && needsComposite ? copyCompositeCacheKey(c) : null,
     composite_url: safeComposite || null,
-    final_url: wechatOriginal ? (safeComposite || wechatOriginal) : '',
+    final_url: wechatOriginal ? (safeComposite || (needsComposite ? '' : wechatOriginal)) : '',
   };
 }
 
@@ -450,10 +542,13 @@ export async function ensureCompositeReady(cards, { onProgress } = {}) {
     const needsComposite = hasTitle || hasCustomCover;
     if (!needsComposite) {
       c.final_url = c.imgurl;
+      delete c.copy_data_url;
+      delete c.copy_data_key;
       continue;
     }
     const hash = await computeCardHash(c);
     if (/^https?:\/\//i.test(String(c.composite_url || '').trim()) && c.composite_hash === hash && !c.force_recompose) {
+      await ensureCopyCompositeDataUrl(c);
       c.final_url = c.composite_url;
       continue;
     }
@@ -461,6 +556,7 @@ export async function ensureCompositeReady(cards, { onProgress } = {}) {
     let compositeDataUrl = '';
     try {
       compositeDataUrl = await compositeCard(c);
+      rememberCopyCompositeDataUrl(c, compositeDataUrl);
       const uploaded = await uploadDataUrl(compositeDataUrl, `more_article_${i}_${hash.slice(0, 10)}`);
       c.composite_url = uploaded;
       c.composite_hash = hash;
@@ -472,7 +568,9 @@ export async function ensureCompositeReady(cards, { onProgress } = {}) {
       c.composite_hash = null;
       // 上传失败但合成成功：用 data: 合成图兜底。微信编辑器对粘贴的 base64
       // 位图会立即本地转存（与 DOCX 正文图同契约），比丢掉标题叠字更安全。
-      c.final_url = compositeDataUrl || c.imgurl || '';
+      if (!compositeDataUrl) throw err;
+      rememberCopyCompositeDataUrl(c, compositeDataUrl);
+      c.final_url = compositeDataUrl;
     }
   }
   return out;
@@ -544,7 +642,9 @@ function wechatSafeCardImgurl(card, fallback) {
 }
 
 function cardHTML(card, index, insetPx) {
-  const rawImgurl = card.final_url || card.composite_url || card.imgurl || '';
+  const rawImgurl = card && card._copySafeMp
+    ? (card.final_url || card.composite_url || '')
+    : (card.final_url || card.composite_url || card.imgurl || '');
   const href = escAttr(card.href || '');
   const marginTop = index === 0 ? 'margin-top:0px;' : 'margin-top:12px;';
   const sectionStyle = cardSectionStyle(insetPx);

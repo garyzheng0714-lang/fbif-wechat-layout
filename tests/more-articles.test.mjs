@@ -1,10 +1,12 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { computeBannerTitleLayout, copySafeMoreArticleCard, makeFreshUploadCards, mergeIntoFooter, uploadDataUrl, wrapBannerTitleLines } from '../public/js/more-articles.js';
+import { computeBannerTitleLayout, computeCardHash, copyCompositeCacheKey, copySafeMoreArticleCard, ensureCompositeReady, ensureCopyCompositeDataUrl, loadCards, makeFreshUploadCards, mergeIntoFooter, saveCards, uploadDataUrl, wrapBannerTitleLines } from '../public/js/more-articles.js';
 
 afterEach(() => {
   delete globalThis.window;
+  delete globalThis.localStorage;
+  delete globalThis.location;
 });
 
 const monoCtx = {
@@ -264,14 +266,40 @@ test('more articles upload rejects echoed data URLs because WeChat save strips l
 });
 
 test('more articles copy-safe fallback only uses T0-safe card images for linked cards', () => {
+  const readyCard = {
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: 'https://mmbiz.qpic.cn/a.jpg',
+    composite_url: 'https://oss.example/more-article.png',
+    copy_data_url: 'data:image/png;base64,copy-composite',
+    title: '带标题的合成图',
+  };
+  readyCard.copy_data_key = copyCompositeCacheKey(readyCard);
   assert.deepEqual(
+    copySafeMoreArticleCard(readyCard).final_url,
+    'data:image/png;base64,copy-composite',
+    '带标题卡片必须优先使用本地合成位图，不能回退成无文字的原始封面'
+  );
+
+  assert.equal(
     copySafeMoreArticleCard({
       href: 'https://mp.weixin.qq.com/s/a',
       imgurl: 'https://mmbiz.qpic.cn/a.jpg',
       composite_url: 'data:image/png;base64,preview',
       title: '带标题的预览合成图',
     }).final_url,
-    'data:image/png;base64,preview'
+    '',
+    '带标题卡片不能信任没有内容指纹的旧 data URL'
+  );
+
+  assert.equal(
+    copySafeMoreArticleCard({
+      href: 'https://mp.weixin.qq.com/s/a',
+      imgurl: 'https://mmbiz.qpic.cn/a.jpg',
+      composite_url: 'https://oss.example/more-article.png',
+      title: '缺少本地合成图',
+    }).final_url,
+    '',
+    '带标题卡片缺少本地合成位图时必须 fail closed，不能退回原始封面'
   );
 
   assert.equal(
@@ -289,4 +317,398 @@ test('more articles copy-safe fallback only uses T0-safe card images for linked 
   });
   assert.equal(unsafe.imgurl, '');
   assert.equal(unsafe.final_url, '');
+});
+
+test('more articles upload keeps a bitmap composite for the WeChat copy layer', async (t) => {
+  const originalImage = globalThis.Image;
+  const originalDocument = globalThis.document;
+  const originalFetch = globalThis.fetch;
+  const dataUrl = 'data:image/png;base64,copy-layer-composite';
+  const uploadedUrl = 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/uploaded-composite.png';
+  const filledText = [];
+  const canvasSizes = [];
+
+  class FakeImage {
+    constructor() {
+      this.naturalWidth = 1000;
+      this.naturalHeight = 300;
+      this.width = 1000;
+      this.height = 300;
+    }
+    set src(value) {
+      this._src = value;
+      queueMicrotask(() => this.onload && this.onload());
+    }
+    get src() { return this._src; }
+  }
+
+  globalThis.Image = FakeImage;
+  globalThis.document = {
+    createElement(tag) {
+      assert.equal(tag, 'canvas');
+      return {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            fillStyle: '',
+            font: '',
+            textBaseline: '',
+            fillRect() {},
+            drawImage() {},
+            measureText(text) {
+              return { width: Array.from(String(text)).length * 24 };
+            },
+            fillText(text) {
+              filledText.push(text);
+            },
+          };
+        },
+        toDataURL() {
+          canvasSizes.push([this.width, this.height]);
+          return dataUrl;
+        },
+      };
+    },
+  };
+  globalThis.fetch = async (_url, options = {}) => {
+    const payload = JSON.parse(String(options.body || '{}'));
+    const key = Object.keys(payload.base64_images || {})[0];
+    return new Response(JSON.stringify({
+      results: { [key]: uploadedUrl },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  t.after(() => {
+    globalThis.Image = originalImage;
+    globalThis.document = originalDocument;
+    globalThis.fetch = originalFetch;
+  });
+
+  const [prepared] = await ensureCompositeReady([{
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: 'https://mmbiz.qpic.cn/a.jpg',
+    title: '必须显示的标题',
+  }]);
+
+  assert.equal(prepared.composite_url, uploadedUrl);
+  assert.equal(prepared.final_url, uploadedUrl);
+  assert.equal(prepared.copy_data_url, dataUrl, '上传成功后仍必须保留本地合成位图给公众号复制层');
+  assert.deepEqual(canvasSizes, [[1000, 300]], '更多文章合成图必须保持 1000x300 横幅比例');
+  assert.deepEqual(filledText, ['必须显示的标题']);
+  assert.equal(copySafeMoreArticleCard(prepared).final_url, dataUrl);
+});
+
+test('cached more-article OSS composite still rebuilds a bitmap for the copy layer', async (t) => {
+  const originalImage = globalThis.Image;
+  const originalDocument = globalThis.document;
+  const originalFetch = globalThis.fetch;
+  const dataUrl = 'data:image/png;base64,cached-copy-layer-composite';
+  const filledText = [];
+  let uploadCalled = false;
+
+  class FakeImage {
+    constructor() {
+      this.naturalWidth = 1000;
+      this.naturalHeight = 300;
+      this.width = 1000;
+      this.height = 300;
+    }
+    set src(value) {
+      this._src = value;
+      queueMicrotask(() => this.onload && this.onload());
+    }
+    get src() { return this._src; }
+  }
+
+  globalThis.Image = FakeImage;
+  globalThis.document = {
+    createElement(tag) {
+      assert.equal(tag, 'canvas');
+      return {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            fillStyle: '',
+            font: '',
+            textBaseline: '',
+            fillRect() {},
+            drawImage() {},
+            measureText(text) {
+              return { width: Array.from(String(text)).length * 24 };
+            },
+            fillText(text) {
+              filledText.push(text);
+            },
+          };
+        },
+        toDataURL() {
+          return dataUrl;
+        },
+      };
+    },
+  };
+  globalThis.fetch = async () => {
+    uploadCalled = true;
+    throw new Error('cached composite must not upload again');
+  };
+  t.after(() => {
+    globalThis.Image = originalImage;
+    globalThis.document = originalDocument;
+    globalThis.fetch = originalFetch;
+  });
+
+  const card = {
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: 'https://mmbiz.qpic.cn/a.jpg',
+    title: '缓存也必须显示标题',
+    crop: { x: 0.5, y: 0.5, scale: 1 },
+    composite_url: 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/cached-composite.png',
+  };
+  const hash = await computeCardHash(card);
+
+  const [prepared] = await ensureCompositeReady([{ ...card, composite_hash: hash }]);
+
+  assert.equal(prepared.composite_url, card.composite_url);
+  assert.equal(prepared.final_url, card.composite_url);
+  assert.equal(prepared.copy_data_url, dataUrl, '命中 OSS 缓存时也必须补齐复制层本地位图');
+  assert.equal(uploadCalled, false, '已有 OSS 缓存时不应重复上传');
+  assert.deepEqual(filledText, ['缓存也必须显示标题']);
+  assert.equal(copySafeMoreArticleCard(prepared).final_url, dataUrl);
+});
+
+test('more articles copy bitmap is invalidated when card content changes', async (t) => {
+  const originalImage = globalThis.Image;
+  const originalDocument = globalThis.document;
+  const dataUrls = [
+    'data:image/png;base64,old-copy-layer-composite',
+    'data:image/png;base64,new-copy-layer-composite',
+  ];
+  const filledText = [];
+
+  class FakeImage {
+    constructor() {
+      this.naturalWidth = 1000;
+      this.naturalHeight = 300;
+      this.width = 1000;
+      this.height = 300;
+    }
+    set src(value) {
+      this._src = value;
+      queueMicrotask(() => this.onload && this.onload());
+    }
+    get src() { return this._src; }
+  }
+
+  globalThis.Image = FakeImage;
+  globalThis.document = {
+    createElement(tag) {
+      assert.equal(tag, 'canvas');
+      return {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            fillStyle: '',
+            font: '',
+            textBaseline: '',
+            fillRect() {},
+            drawImage() {},
+            measureText(text) {
+              return { width: Array.from(String(text)).length * 24 };
+            },
+            fillText(text) {
+              filledText.push(text);
+            },
+          };
+        },
+        toDataURL() {
+          return dataUrls.shift();
+        },
+      };
+    },
+  };
+  t.after(() => {
+    globalThis.Image = originalImage;
+    globalThis.document = originalDocument;
+  });
+
+  const original = {
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: 'https://mmbiz.qpic.cn/a.jpg',
+    title: '旧标题',
+  };
+  await ensureCopyCompositeDataUrl(original);
+  assert.equal(copySafeMoreArticleCard(original).final_url, 'data:image/png;base64,old-copy-layer-composite');
+
+  const changed = { ...original, title: '新标题' };
+  assert.equal(
+    copySafeMoreArticleCard(changed).final_url,
+    '',
+    '标题变更后旧 copy_data_url/key 不能继续被信任'
+  );
+  await ensureCopyCompositeDataUrl(changed);
+  assert.equal(copySafeMoreArticleCard(changed).final_url, 'data:image/png;base64,new-copy-layer-composite');
+  assert.deepEqual(filledText, ['旧标题', '新标题']);
+});
+
+test('more articles copy bitmap is invalidated when custom cover data changes after the shared prefix', async (t) => {
+  const originalImage = globalThis.Image;
+  const originalDocument = globalThis.document;
+  const dataUrls = [
+    'data:image/png;base64,cover-a-composite',
+    'data:image/png;base64,cover-b-composite',
+  ];
+
+  class FakeImage {
+    constructor() {
+      this.naturalWidth = 1000;
+      this.naturalHeight = 300;
+      this.width = 1000;
+      this.height = 300;
+    }
+    set src(value) {
+      this._src = value;
+      queueMicrotask(() => this.onload && this.onload());
+    }
+    get src() { return this._src; }
+  }
+
+  globalThis.Image = FakeImage;
+  globalThis.document = {
+    createElement(tag) {
+      assert.equal(tag, 'canvas');
+      return {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            fillStyle: '',
+            font: '',
+            textBaseline: '',
+            fillRect() {},
+            drawImage() {},
+            measureText(text) {
+              return { width: Array.from(String(text)).length * 24 };
+            },
+            fillText() {},
+          };
+        },
+        toDataURL() {
+          return dataUrls.shift();
+        },
+      };
+    },
+  };
+  t.after(() => {
+    globalThis.Image = originalImage;
+    globalThis.document = originalDocument;
+  });
+
+  const sharedPrefix = 'data:image/png;base64,' + 'A'.repeat(180);
+  const coverA = sharedPrefix + '1111';
+  const coverB = sharedPrefix + '2222';
+  assert.equal(coverA.length, coverB.length);
+  assert.equal(coverA.slice(0, 120), coverB.slice(0, 120));
+
+  const first = {
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: 'https://mmbiz.qpic.cn/a.jpg',
+    title: '同标题',
+    cover_data_url: coverA,
+  };
+  await ensureCopyCompositeDataUrl(first);
+  assert.equal(copySafeMoreArticleCard(first).final_url, 'data:image/png;base64,cover-a-composite');
+
+  const second = { ...first, cover_data_url: coverB };
+  assert.notEqual(copyCompositeCacheKey(first), copyCompositeCacheKey(second));
+  assert.equal(
+    copySafeMoreArticleCard(second).final_url,
+    '',
+    '自定义封面 data URL 只有尾部变化时，也不能复用旧 copy PNG'
+  );
+  await ensureCopyCompositeDataUrl(second);
+  assert.equal(copySafeMoreArticleCard(second).final_url, 'data:image/png;base64,cover-b-composite');
+});
+
+test('more articles copy bitmap survives localStorage write failure via session cache', async (t) => {
+  const originalImage = globalThis.Image;
+  const originalDocument = globalThis.document;
+  const originalLocalStorage = globalThis.localStorage;
+  const dataUrl = 'data:image/png;base64,session-cache-copy-layer';
+  const storedCard = {
+    href: 'https://mp.weixin.qq.com/s/session-cache',
+    imgurl: 'https://mmbiz.qpic.cn/session-cache.jpg',
+    title: '写不进 localStorage 也要显示标题',
+  };
+  const storedJson = JSON.stringify([storedCard]);
+
+  class FakeImage {
+    constructor() {
+      this.naturalWidth = 1000;
+      this.naturalHeight = 300;
+      this.width = 1000;
+      this.height = 300;
+    }
+    set src(value) {
+      this._src = value;
+      queueMicrotask(() => this.onload && this.onload());
+    }
+    get src() { return this._src; }
+  }
+
+  globalThis.Image = FakeImage;
+  globalThis.document = {
+    createElement(tag) {
+      assert.equal(tag, 'canvas');
+      return {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            fillStyle: '',
+            font: '',
+            textBaseline: '',
+            fillRect() {},
+            drawImage() {},
+            measureText(text) {
+              return { width: Array.from(String(text)).length * 24 };
+            },
+            fillText() {},
+          };
+        },
+        toDataURL() {
+          return dataUrl;
+        },
+      };
+    },
+  };
+  globalThis.localStorage = {
+    getItem(key) {
+      return String(key).startsWith('more_articles_v1::') ? storedJson : null;
+    },
+    setItem() {
+      throw new Error('QuotaExceededError');
+    },
+    removeItem() {},
+  };
+  t.after(() => {
+    globalThis.Image = originalImage;
+    globalThis.document = originalDocument;
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  const [card] = loadCards();
+  await ensureCopyCompositeDataUrl(card);
+  saveCards([card]);
+
+  const [loadedAgain] = loadCards();
+  assert.equal(
+    copySafeMoreArticleCard(loadedAgain).final_url,
+    dataUrl,
+    'localStorage 写失败后，当前会话仍必须用内存缓存保留带标题合成图'
+  );
 });
