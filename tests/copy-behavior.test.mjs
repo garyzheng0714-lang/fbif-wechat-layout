@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { copySafeMoreArticleCard, mergeIntoFooter } from '../public/js/more-articles.js';
+import { copyCompositeCacheKey, copySafeMoreArticleCard, mergeIntoFooter } from '../public/js/more-articles.js';
 import { normalizeWechatRichHtml } from '../public/js/wechat-normalize.js';
 
 function extractFunction(source, name) {
@@ -323,7 +323,8 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
   assert.equal(ok, true);
   assert.deepEqual(projectedInputs, [legacyUnsafeFooterCopy]);
   assert.doesNotMatch(deps._footerCopy, /oss-cn-hangzhou/, 'restored copy layer must not keep unsafe external card images');
-  assert.ok(deps._footerCopy.includes(mmbizCover), 'restored copy layer should use the original mmbiz cover');
+  assert.doesNotMatch(deps._footerCopy, /linktype="image"/, 'restored unsafe legacy card must fail closed instead of reverting to the original cover');
+  assert.doesNotMatch(deps._footerCopy, new RegExp(mmbizCover.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'restored copy layer must not silently use the no-title original cover');
   assert.equal(deps._footerCopyGen, 1);
   assert.equal(deps.dispatchedType, 'fbif:article-restored');
 });
@@ -331,11 +332,73 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
 test('preview footer and copy footer are separate so preview data images do not leak into copy', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
 
+  assert.match(engine, /ensureCopyCompositeDataUrl/, 'copy-safe 层必须走严格合成，不得复用会吞错的 preview helper');
+  assert.match(engine, /async function copySafeMoreArticleCardForFooter/, '初始复制层必须有复制专用卡片生成器');
+  assert.match(
+    engine,
+    /await Promise\.all\(cards\.map\(copySafeMoreArticleCardForFooter\)\)/,
+    '初始 copy-safe footer 必须先生成本地合成位图，不能直接退回原始封面'
+  );
+  const helper = extractFunction(engine, 'copySafeMoreArticleCardForFooter');
+  assert.doesNotMatch(helper, /compositePreviewDataUrl/, 'copy-safe 生成器不得调用会失败后退回 imgurl 的 preview helper');
   assert.match(engine, /footerCopy = await buildFooterWithMoreArticles\(baseFooterHtml, \{ isRepost, isV2, copySafe: true \}\)/);
   assert.match(engine, /footerCopy: session\.footerCopy/);
   assert.match(engine, /_footerCopy = bodyOnly \? '' : normalizeRich\(\(opts && opts\.footerCopy\) \|\| footerContent\)/);
   assert.match(engine, /const copySafeMerged = await buildFooterWithMoreArticles\(base, \{ isRepost: rp, isV2, copySafe: true \}\)/);
   assert.match(engine, /_articleSession\.footerCopy = copySafeMerged/);
+});
+
+test('initial copy-safe more-article helper emits data bitmap and fails closed on composite errors', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copySafeHelper = new Function('deps', `
+    with (deps) {
+      ${extractFunction(engine, 'moreArticleCardNeedsCopyComposite')}
+      async ${extractFunction(engine, 'copySafeMoreArticleCardForFooter')}
+      return copySafeMoreArticleCardForFooter;
+    }
+  `)({
+    ensureCopyCompositeDataUrl: async (card) => {
+      card.copy_data_url = 'data:image/png;base64,initial-copy-composite';
+      card.copy_data_key = copyCompositeCacheKey(card);
+      return card.copy_data_url;
+    },
+    copySafeMoreArticleCard,
+  });
+
+  const card = {
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/cover-a/0?wx_fmt=jpeg',
+    title: '初始复制层必须有标题',
+  };
+  const copyCard = await copySafeHelper(card);
+  const merged = mergeIntoFooter([
+    '<section data-role="paragraph">',
+    '<section style="margin:20px 8px 20px;padding:0;text-align:center;"><strong>/ 更多文章 /</strong></section>',
+    '<section style="text-align: center;" data-card-inset="8"></section>',
+    '</section>',
+  ].join('\n'), [copyCard]);
+
+  assert.match(merged, /linktype="image"/);
+  assert.match(merged, /imgurl="https:\/\/mmbiz\.qpic\.cn\/sz_mmbiz_jpg\/cover-a\/0\?wx_fmt=jpeg"/);
+  assert.match(merged, /src="data:image\/png;base64,initial-copy-composite"/);
+
+  const failingHelper = new Function('deps', `
+    with (deps) {
+      ${extractFunction(engine, 'moreArticleCardNeedsCopyComposite')}
+      async ${extractFunction(engine, 'copySafeMoreArticleCardForFooter')}
+      return copySafeMoreArticleCardForFooter;
+    }
+  `)({
+    ensureCopyCompositeDataUrl: async () => {
+      throw new Error('copy composite failed');
+    },
+    copySafeMoreArticleCard,
+  });
+  await assert.rejects(
+    () => failingHelper({ ...card, title: '失败不能复制原封面' }),
+    /copy composite failed/,
+    '初始 copy-safe 合成失败必须阻断，不能继续生成无标题原封面'
+  );
 });
 
 test('copy warning is derived from final HTML unsafe image src and imgurl refs', async () => {

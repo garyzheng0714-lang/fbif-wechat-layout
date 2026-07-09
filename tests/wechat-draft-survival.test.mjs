@@ -13,7 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { copySafeMoreArticleCard, mergeIntoFooter } from '../public/js/more-articles.js';
+import { copyCompositeCacheKey, copySafeMoreArticleCard, mergeIntoFooter } from '../public/js/more-articles.js';
 import { PLACEHOLDER_DATA_URL } from '../public/js/more-articles-placeholder.js';
 
 // ---- 微信草稿保存模拟器（粘贴 + 保存两阶段） ----
@@ -63,6 +63,12 @@ const MMBIZ_COVER_B = 'https://mmbiz.qpic.cn/sz_mmbiz_jpg/cover-b/0?wx_fmt=jpeg'
 const OSS_COMPOSITE_A = 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/composite-a.png';
 const OSS_COMPOSITE_B = 'https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/composite-b.png';
 const DATA_PNG_COMPOSITE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+function withCopyBitmap(card, dataUrl = DATA_PNG_COMPOSITE) {
+  const ready = { ...card, copy_data_url: dataUrl };
+  ready.copy_data_key = copyCompositeCacheKey(ready);
+  return ready;
+}
 
 function cardCountIn(html) {
   return (html.match(/linktype="image"/g) || []).length;
@@ -121,22 +127,37 @@ test('immediate 保存不会假设 OSS/external HTTP 卡片图已经被微信转
 });
 
 test('公众号 copy-safe 卡片 src 在 T0 只能是 mmbiz 或位图 data，不能是 OSS 外链', async () => {
-  const safeCard = copySafeMoreArticleCard({
+  const unsafeCompositeOnly = copySafeMoreArticleCard({
+    href: 'https://mp.weixin.qq.com/s/a',
+    imgurl: MMBIZ_COVER_A,
+    composite_url: OSS_COMPOSITE_A,
+    title: '缺少本地合成位图标题',
+  });
+  assert.equal(unsafeCompositeOnly.final_url, '', '带标题卡片没有本地合成位图时，不能退回无标题原封面');
+
+  const merged = mergeIntoFooter(await fbifFooter(), [unsafeCompositeOnly]);
+  assert.equal(cardCountIn(merged), 0, '缺本地合成位图时不得输出错误的 linktype=image 卡片');
+  assert.doesNotMatch(merged, /oss-cn-hangzhou/, 'OSS 外链不能进入 copy-safe 卡片 src');
+});
+
+test('公众号 copy-safe 使用本地合成位图保留标题文字并立即保存存活', async () => {
+  const ready = withCopyBitmap({
     href: 'https://mp.weixin.qq.com/s/a',
     imgurl: MMBIZ_COVER_A,
     composite_url: OSS_COMPOSITE_A,
     title: '标题A',
   });
-  assert.equal(safeCard.final_url, MMBIZ_COVER_A, 'OSS 合成图不能作为公众号 copy-safe 的唯一 T0 src');
+  const safeCard = copySafeMoreArticleCard(ready);
+  assert.equal(safeCard.final_url, DATA_PNG_COMPOSITE, '有本地合成位图时必须复制带标题图，不能退回原始封面');
 
   const merged = mergeIntoFooter(await fbifFooter(), [safeCard]);
   const imgurl = merged.match(/\bimgurl="([^"]+)"/)?.[1] || '';
-  assert.ok(isWechatHostedImage(imgurl), `copy-safe card imgurl must be WeChat-hosted, got ${imgurl}`);
   const src = merged.match(/linktype="image"[\s\S]*?<img[^>]*\bsrc="([^"]+)"/)?.[1] || '';
-  assert.ok(
-    isWechatHostedImage(src) || /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i.test(src),
-    `copy-safe card src must be immediately survivable, got ${src}`
-  );
+  assert.equal(imgurl, MMBIZ_COVER_A, 'imgurl 仍必须是原始 mmbiz 封面，供微信服务端校验');
+  assert.equal(src, DATA_PNG_COMPOSITE, '<img src> 必须是带标题的本地合成位图');
+
+  const saved = simulateWechatDraftSave(merged);
+  assert.equal(cardCountIn(saved), 1, '带标题 data: 位图必须在立即保存草稿时存活');
 });
 
 test('没有微信图床封面的外站卡片不能伪装成 linktype=image 安全卡', async () => {
@@ -160,8 +181,8 @@ test('合成图上传失败降级为 data: PNG 时，卡片保存草稿后依然
 
 test('v2 blocks 渠道（mp-blocks/series 锚点）的卡片同样存活', () => {
   const merged = mergeIntoFooter(V2_ANCHOR_FOOTER, [
-    copySafeMoreArticleCard({ href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, final_url: OSS_COMPOSITE_A, title: '标题A' }),
-    copySafeMoreArticleCard({ href: 'https://mp.weixin.qq.com/s/b', imgurl: MMBIZ_COVER_B, final_url: DATA_PNG_COMPOSITE, title: '标题B' }),
+    copySafeMoreArticleCard(withCopyBitmap({ href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, composite_url: OSS_COMPOSITE_A, title: '标题A' })),
+    copySafeMoreArticleCard(withCopyBitmap({ href: 'https://mp.weixin.qq.com/s/b', imgurl: MMBIZ_COVER_B, composite_url: OSS_COMPOSITE_B, title: '标题B' })),
   ]);
   assert.equal(cardCountIn(merged), 2);
   const saved = simulateWechatDraftSave(merged);
@@ -170,13 +191,14 @@ test('v2 blocks 渠道（mp-blocks/series 锚点）的卡片同样存活', () =>
 
 test('copy-safe 卡片 imgurl 和 src 都不跟随 OSS 合成图外链', async () => {
   const merged = mergeIntoFooter(await fbifFooter(), [
-    copySafeMoreArticleCard({ href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, final_url: OSS_COMPOSITE_A, title: '标题A' }),
+    copySafeMoreArticleCard(withCopyBitmap({ href: 'https://mp.weixin.qq.com/s/a', imgurl: MMBIZ_COVER_A, composite_url: OSS_COMPOSITE_A, title: '标题A' })),
   ]);
   const im = merged.match(/\bimgurl="([^"]+)"/);
   assert.ok(im, '卡片必须有 imgurl');
   assert.equal(im[1], MMBIZ_COVER_A, 'imgurl 必须是原始 mmbiz 封面（微信保存草稿的服务端校验属性）');
   const src = merged.match(/linktype="image"[\s\S]*?<img[^>]*\bsrc="([^"]+)"/);
-  assert.equal(src[1], MMBIZ_COVER_A, '<img src> 也必须是 T0 可存活的微信图床图');
+  assert.equal(src[1], DATA_PNG_COMPOSITE, '<img src> 必须是 T0 可存活的本地合成位图');
+  assert.doesNotMatch(merged, /oss-cn-hangzhou/, 'OSS 合成图外链不能进入 copy-safe 卡片');
 });
 
 // ---- 模拟器必须有牙齿：旧回归形态必须被杀 ----
