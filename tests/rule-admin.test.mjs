@@ -140,11 +140,13 @@ test('rule admin seeds article footer defaults from the current account', async 
 test('app caches structured server presets for local fallback', async () => {
   const app = await readProjectFile('public/app.html');
 
+  // S1(2026-07-10)：cacheServerRuleFallback 本体收编进 active-rule-selector.js，
+  // 「server 预设经渠道变换落本地缓存」的行为契约由
+  // tests/active-rule-selector.test.mjs 的 fallbackTransform 测试守护；
+  // app.html 只需证明它把 structuredFallbackConfig 作为公众号口径的变换注入工厂。
   assert.match(app, /function\s+structuredFallbackConfig\(config,\s*preset\)/);
   assert.match(app, /preset && \(preset\.raw_config \|\| preset\.config\)/);
-  assert.match(app, /cacheServerRuleFallback\(loaded\.preset\.config,\s*loaded\.preset\)/);
-  assert.match(app, /cacheServerRuleFallback\(config,\s*preset\)/);
-  assert.doesNotMatch(app, /cacheServerRuleFallback\(config\);/);
+  assert.match(app, /fallbackTransform:\s*\(config, preset\) => structuredFallbackConfig\(config, preset\)/);
 });
 
 test('rule admin deletes from the rule row with explicit confirmation', async () => {

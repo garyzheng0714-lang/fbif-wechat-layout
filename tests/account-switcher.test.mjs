@@ -40,23 +40,29 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(menuJs, /acct-menu-divider/);
   assert.match(menuJs, /data-acct-settings-action/);
   assert.match(app, /switchAccount/);
-  assert.match(app, /loadActiveRulePreset\(activeRulePack\.id\)/);
+  // S1(2026-07-10)：账号切换的「水合+拉目录+复位选择器」收编进共享模块
+  // active-rule-selector.js（行为契约见 tests/active-rule-selector.test.mjs 的
+  // adoptAccount 测试）；app.html 只需证明它把切换委托给了共享模块。
+  assert.match(app, /ruleSelector\.adoptAccount\(/);
   assert.match(app, /hydrateActiveRulePreset\(activeRulePack\.id\)/);
-  assert.match(app, /cacheServerRuleFallback\(loaded\.preset\.config,\s*loaded\.preset\)/);
   assert.doesNotMatch(visibleShell, /class="sidebar-footer"/, '左侧底部不再显示当前规则区');
   assert.doesNotMatch(visibleShell, /id="activeRuleCard"/, '当前规则卡片不应再出现在左侧底部');
   assert.doesNotMatch(visibleShell, /当前排版规则/, '左侧底部不再展示当前规则文案');
+  // S1(2026-07-10)：规则选择器 UI 本体收编进共享模块 active-rule-selector.js
+  // （交互契约由 tests/active-rule-selector.test.mjs 行为测试守护）。这里守两件事：
+  // ① app.html 确实委托共享模块且用公众号口径（只读态无编辑入口）；
+  // ② 共享模块保持自定义触发器（非原生 select）与保存/取消动作结构。
+  assert.match(app, /active-rule-selector\.js/);
   assert.match(app, /renderActiveRuleCard/);
-  assert.match(app, /id="activeRuleSelect"/);
-  assert.doesNotMatch(app, /data-action="edit-active-rule"/, '规则切换编辑不应回到左侧底部入口');
-  assert.match(app, /data-action="save-active-rule"/);
-  assert.match(app, /data-action="cancel-active-rule"/);
-  assert.match(app, /cancelActiveRuleEdit/);
-  assert.match(app, /activeRuleSelectorOpen/);
-  assert.match(app, /data-rule-option/);
-  assert.doesNotMatch(app, /<select id="activeRuleSelect"/);
-  assert.match(app, /listPublicRulePresets/);
-  assert.match(app, /setActiveRulePreset\(password,\s*nextID,\s*activeRulePack\.id\)/);
+  assert.match(app, /readonlyEditEntry:\s*false/, '公众号只读态不应有编辑入口（规则编辑走后台）');
+  const selectorJs = await readFile(new URL('../public/js/active-rule-selector.js', import.meta.url), 'utf8');
+  assert.match(selectorJs, /id="activeRuleSelect"/);
+  assert.doesNotMatch(selectorJs, /<select id="activeRuleSelect"/);
+  assert.match(selectorJs, /data-action="save-active-rule"/);
+  assert.match(selectorJs, /data-action="cancel-active-rule"/);
+  assert.match(selectorJs, /data-rule-option/);
+  assert.match(selectorJs, /listPublicRulePresets/);
+  assert.match(selectorJs, /setActiveRulePreset\(password,\s*nextID,\s*getPack\(\)\.id\)/);
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
   assert.match(allCss, /\.acct-trigger/);
