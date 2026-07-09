@@ -296,7 +296,9 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
     _articleCopy: '',
     _footerHtml: '',
     _footerCopy: '',
-    _footerCopyGen: 0,
+    // S2：裸计数器已收敛为 copy-session 版本门；恢复路径必须调用文章级重置作废在途回写。
+    copySessionResetCalls: 0,
+    copySession: { resetForNewArticle() { deps.copySessionResetCalls++; } },
     _plainTextCopy: null,
     _isRepost: false,
     _sourceIsDocx: false,
@@ -305,7 +307,6 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
     _failedSrcs: [],
     _uploadDone: false,
     _uploadPromise: null,
-    _moreArticlesCopySeq: 0,
     _moreArticlesCopyJob: null,
     _lastRenderInput: null,
     _articleSession: null,
@@ -325,7 +326,7 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
   assert.doesNotMatch(deps._footerCopy, /oss-cn-hangzhou/, 'restored copy layer must not keep unsafe external card images');
   assert.doesNotMatch(deps._footerCopy, /linktype="image"/, 'restored unsafe legacy card must fail closed instead of reverting to the original cover');
   assert.doesNotMatch(deps._footerCopy, new RegExp(mmbizCover.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'restored copy layer must not silently use the no-title original cover');
-  assert.equal(deps._footerCopyGen, 1);
+  assert.equal(deps.copySessionResetCalls, 1, '恢复快照必须做一次文章级重置（作废在途异步回写）');
   assert.equal(deps.dispatchedType, 'fbif:article-restored');
 });
 
@@ -460,7 +461,8 @@ test('新文章导入原子作废上一篇的更多文章预热 job（防跨文�
   const helper = engine.slice(engine.indexOf('function resetMoreArticlesForNewArticle'));
   const helperBody = helper.slice(0, helper.indexOf('\n  function '));
   assert.match(helperBody, /saveMoreArticlesCards\(makeFreshUploadCards\(\)\)/, 'helper 须重置卡片');
-  assert.match(helperBody, /_moreArticlesCopySeq\+\+/, 'helper 须 seq++ 作废在途 job');
+  // S2：seq++ 裸计数器收敛为版本门，作废语义等价（moreArticlesGate.invalidate）。
+  assert.match(helperBody, /moreArticlesGate\.invalidate\(\)/, 'helper 须作废在途 job（版本门）');
   assert.match(helperBody, /_moreArticlesCopyJob = null/, 'helper 须 job=null 让本篇重建');
   // 三处新稿路径都通过 session 构建传 reset 标记，不得再裸调 saveMoreArticlesCards+refreshSidebar
   // （漏作废 → 暴露窗口）。
@@ -476,8 +478,8 @@ test('新文章导入原子作废上一篇的更多文章预热 job（防跨文�
     'session 构建应负责原子 reset'
   );
   assert.ok((engine.match(/resetArticleArtifacts: true/g) || []).length >= 3, '单篇/批量/blocks 三处新稿入口都要传 reset 标记');
-  // 双保险：在途 job resolve 的两个 await 边界都校验 seq，过期则自我丢弃，不写回 _footerCopy。
-  assert.ok((engine.match(/if \(seq !== _moreArticlesCopySeq\) return false/g) || []).length >= 2, '≥2 处 seq 校验（742/747）');
+  // 双保险：在途 job resolve 的两个 await 边界都校验版本门，过期则自我丢弃，不写回 _footerCopy。
+  assert.ok((engine.match(/if \(gate\.stale\(\)\) return false/g) || []).length >= 2, '≥2 处版本门校验（原 742/747 seq 校验）');
   // showPreview 仍保留作废，供 rerender（同篇换配置）丢弃旧预热并重建。
   const showPreview = engine.slice(engine.indexOf('function showPreview('));
   const resetZone = showPreview.slice(0, showPreview.indexOf('// Split layout'));

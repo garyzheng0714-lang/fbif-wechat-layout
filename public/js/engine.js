@@ -29,6 +29,7 @@ const punctuationModule = await import('./punctuation.js' + assetQuery);
 export const { convertRuns } = punctuationModule;
 
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
+import { createCopySession } from './copy-session.js';
 import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
 import { normalizeWechatRichHtml } from './wechat-normalize.js';
 import {
@@ -1014,7 +1015,7 @@ export function initApp(initialTemplate) {
     _copyRequiresWechatImageTransfer = false;
     _uploadDone = true;
     _uploadPromise = null;
-    _moreArticlesCopySeq++;
+    moreArticlesGate.invalidate();
     _moreArticlesCopyJob = null;
     clearUploadVisual();
     showImportEntry();
@@ -1298,12 +1299,13 @@ export function initApp(initialTemplate) {
   let _sourceIsDocx = false;
   let _articleBodyOnly = false;
   let _copyRequiresWechatImageTransfer = false;
-  let _moreArticlesCopySeq = 0;
   let _moreArticlesCopyJob = null;
-  // _footerCopy 的代数号：每次权威重建（新文章、更多文章预热完成、面板改动、
-  // 会话恢复）+1。慢速完成的旧上传任务只有在代数未变时才允许回写 _footerCopy，
-  // 防止「文章图上传比更多文章预热晚完成 → 用启动时捕获的过期底部覆盖成品」。
-  let _footerCopyGen = 0;
+  // 复制层竞态守卫（架构体检 S2：旧 _footerCopyGen/_moreArticlesCopySeq 两个裸计数器
+  // 收敛为版本门，语义不变——footerCopyGate = _footerCopy 写权版本（慢速旧上传只有在
+  // 版本未变时才允许回写）；moreArticlesGate = 更多文章合成任务版本。契约与「文章级
+  // 重置必须全部作废」由 copy-session.js + tests/copy-session.test.mjs 守护）。
+  const copySession = createCopySession();
+  const { footerCopyGate, moreArticlesGate } = copySession;
   const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
   let _plainTextCopy = null;
   let _lastCopiedHtml = '';
@@ -1385,7 +1387,7 @@ export function initApp(initialTemplate) {
   // 下一篇 loadMoreArticlesCards 读到旧卡片（跨文章污染；codex re-review #3）。
   function resetMoreArticlesForNewArticle() {
     saveMoreArticlesCards(makeFreshUploadCards());
-    _moreArticlesCopySeq++;
+    moreArticlesGate.invalidate();
     _moreArticlesCopyJob = null;
     if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
   }
@@ -1395,9 +1397,10 @@ export function initApp(initialTemplate) {
     if (_moreArticlesCopyJob) return _moreArticlesCopyJob;
     const cards = loadMoreArticlesCards();
     if (!cardsNeedComposite(cards)) return Promise.resolve(false);
-    const seq = ++_moreArticlesCopySeq;
+    moreArticlesGate.invalidate();
+    const gate = moreArticlesGate.capture();
     _moreArticlesCopyJob = ensureCompositeReady(cards).then(async uploaded => {
-      if (seq !== _moreArticlesCopySeq) return false;
+      if (gate.stale()) return false;
       saveMoreArticlesCards(uploaded);
       const rp = _lastRenderInput && _lastRenderInput.isRepost != null ? _lastRenderInput.isRepost : _isRepost;
       const { html: base0, isV2 } = await loadBaseFooterHtml({
@@ -1407,19 +1410,19 @@ export function initApp(initialTemplate) {
         footerVisibilityOverride: _articleSession && _articleSession.footerVisibilityOverride,
       });
       const baseFooter = normalizeWechatRichHtml(isV2 ? base0 : applyRepostTransform(base0, rp));
-      if (seq !== _moreArticlesCopySeq) return false;
+      if (gate.stale()) return false;
       const copySafeCards = uploaded.map(copySafeMoreArticleCard);
       const mergedFooter = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, copySafeCards));
-      if (seq !== _moreArticlesCopySeq) return false;
+      if (gate.stale()) return false;
       _footerCopy = mergedFooter;
-      _footerCopyGen++;
+      footerCopyGate.invalidate();
       logConv('info', '更多文章图片已后台准备完成', { reason });
       return true;
     }).catch(err => {
       logConv('warn', '更多文章后台准备失败，继续使用当前预览版', { error: err.message, reason });
       return false;
     }).finally(() => {
-      if (seq === _moreArticlesCopySeq) _moreArticlesCopyJob = null;
+      if (!gate.stale()) _moreArticlesCopyJob = null;
     });
     return _moreArticlesCopyJob;
   }
@@ -1435,13 +1438,12 @@ export function initApp(initialTemplate) {
     _articleCopy = _articleHtml;
     _footerHtml = bodyOnly ? '' : normalizeRich(footerContent);
     _footerCopy = bodyOnly ? '' : normalizeRich((opts && opts.footerCopy) || footerContent);
-    _footerCopyGen++;
     _failedSrcs = [];
     _copyRequiresWechatImageTransfer = false;
-    // 作废旧配置遗留的「更多文章」预热 job（主要供 rerender：同篇换配置时丢弃旧预热并重建）。
+    // 文章级重置：作废全部在途异步回写（footer 写权 + 更多文章预热 job）。
     // 新文章导入路径已在更早的 resetMoreArticlesForNewArticle() 原子作废（codex re-review #3）；
-    // 此处再作废对新稿无害、对 rerender 必要。seq++ 让在途 job 在 742/747 校验失败自我丢弃。
-    _moreArticlesCopySeq++;
+    // 此处再作废对新稿无害、对 rerender 必要（同篇换配置时丢弃旧预热并重建）。
+    copySession.resetForNewArticle();
     _moreArticlesCopyJob = null;
 
     // Split layout: show preview content, hide empty state
@@ -1476,11 +1478,11 @@ export function initApp(initialTemplate) {
       if (typeof newHtml === 'string' && newHtml !== '') {
         _footerHtml = normalizeRich(newHtml);
         _footerCopy = _footerHtml;
-        _footerCopyGen++;
+        footerCopyGate.invalidate();
         if (_articleSession) _articleSession.footerHtml = _footerHtml;
         // 预览层可能含 data: 合成图 / 本地素材引用；立即重建复制安全层，
         // 不让预览形态直接留在剪贴板层（保存草稿消失回归的旁路之一）。
-        _moreArticlesCopySeq++;
+        moreArticlesGate.invalidate();
         _moreArticlesCopyJob = null;
         prepareMoreArticlesForCopy('footer-edit');
       }
@@ -1513,7 +1515,7 @@ export function initApp(initialTemplate) {
     window._updateMoreArticles = async function(cardsOverride) {
       if (bodyOnly) return false;
       if (cardsOverride) saveMoreArticlesCards(cardsOverride);
-      _moreArticlesCopySeq++;
+      moreArticlesGate.invalidate();
       _moreArticlesCopyJob = null;
       const rp = _lastRenderInput && _lastRenderInput.isRepost != null ? _lastRenderInput.isRepost : _isRepost;
       const { html: base, isV2 } = await loadBaseFooterHtml({
@@ -1526,7 +1528,7 @@ export function initApp(initialTemplate) {
       const copySafeMerged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2, copySafe: true });
       _footerHtml = merged;
       _footerCopy = copySafeMerged;
-      _footerCopyGen++;
+      footerCopyGate.invalidate();
       if (_articleSession) {
         _articleSession.footerHtml = merged;
         _articleSession.footerCopy = copySafeMerged;
@@ -1553,7 +1555,7 @@ export function initApp(initialTemplate) {
       return;
     }
     if (skipUploadForThisFile) {
-      const footerGenAtStart = _footerCopyGen;
+      const footerWriteGate = footerCopyGate.capture();
       _uploadPromise = materializeLazyImages(_articleCopy, _footerCopy, {
         onProgress(done, total) {
           if (total > 0) statsBar.textContent = '准备图片 (' + done + '/' + total + ')...';
@@ -1561,7 +1563,7 @@ export function initApp(initialTemplate) {
         onLog: logConv,
       }).then(result => {
         _articleCopy = result.articleCopy;
-        if (_footerCopyGen === footerGenAtStart) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
+        if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
         _failedSrcs = result.failedSrcs || [];
         _uploadDone = true;
         if (result.failed > 0) {
@@ -1584,7 +1586,7 @@ export function initApp(initialTemplate) {
       ? !!template.transferMmbiz
       : template.id === 'foodtalks-site';
     _copyRequiresWechatImageTransfer = transferMmbiz;
-    const footerGenAtStart = _footerCopyGen;
+    const footerWriteGate = footerCopyGate.capture();
     _uploadPromise = uploadNonCdnImages(_articleCopy, _footerCopy, {
       transferMmbiz,
       onProgress(done, total) {
@@ -1593,12 +1595,12 @@ export function initApp(initialTemplate) {
       onLog: logConv,
       onMaterialized(result) {
         _articleCopy = result.articleCopy;
-        if (_footerCopyGen === footerGenAtStart) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
+        if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
         _failedSrcs = result.failedSrcs || [];
       },
     }).then(result => {
       _articleCopy = result.articleCopy;
-      if (_footerCopyGen === footerGenAtStart) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
+      if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
       _failedSrcs = result.failedSrcs || [];
       _uploadDone = true;
       if (result.failed > 0) {
@@ -1618,7 +1620,7 @@ export function initApp(initialTemplate) {
     const statsBar = document.getElementById('statsBar');
     if (retryBtn) { retryBtn.textContent = '重试中...'; retryBtn.disabled = true; }
 
-    const footerGenAtStart = _footerCopyGen;
+    const footerWriteGate = footerCopyGate.capture();
     const result = await retryFailedImages(_articleCopy, _footerCopy, _failedSrcs, {
       onProgress(done, total) {
         statsBar.textContent = '重试上传 (' + done + '/' + total + ')...';
@@ -1626,7 +1628,7 @@ export function initApp(initialTemplate) {
       onLog: logConv,
     });
     _articleCopy = result.articleCopy;
-    if (_footerCopyGen === footerGenAtStart) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
+    if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
     _failedSrcs = result.failedSrcs;
 
     if (result.failed > 0) {
@@ -1887,7 +1889,7 @@ export function initApp(initialTemplate) {
     _articleCopy = cs.article_copy || '';
     _footerHtml = cs.footer_html || '';
     _footerCopy = copySafeFooterAfterImagePreparation(cs.footer_copy || '');
-    _footerCopyGen++;
+    copySession.resetForNewArticle();
     _plainTextCopy = cs.plain_text_copy != null ? cs.plain_text_copy : null;
     _isRepost = !!cs.is_repost;
     _sourceIsDocx = !!cs.source_is_docx;
@@ -1896,7 +1898,6 @@ export function initApp(initialTemplate) {
     _failedSrcs = cs.failed_srcs || [];
     _uploadDone = !!cs.upload_done;
     _uploadPromise = null;
-    _moreArticlesCopySeq++;
     _moreArticlesCopyJob = null;
     _lastRenderInput = cs.last_render_input || null;
     _articleSession = cs.article_session || null;
