@@ -283,3 +283,16 @@ func validateRegistryConsistency(publicDir string) error {
 	}
 	return nil
 }
+
+// 启动期账号↔preset 挂链校验：每个账号的 DefaultPresetID 必须真实存在于
+// defaultRuleDefinitions。两者只靠字符串常量对齐、无编译期链接，写错则该账号的
+// 默认规则悬空（2026-07-10 架构体检认定的「只靠人肉」薄弱边界，补为机器强制）。
+func validateAccountPresetLinkage() error {
+	defs := defaultRuleDefinitions("")
+	for _, m := range accountCatalog() {
+		if _, ok := defs[m.DefaultPresetID]; !ok {
+			return fmt.Errorf("账号 %q 的 DefaultPresetID=%q 在 defaultRuleDefinitions 中不存在（新增账号需在 rule_defaults.go 成对登记 preset）", m.ID, m.DefaultPresetID)
+		}
+	}
+	return nil
+}

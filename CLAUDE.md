@@ -25,11 +25,16 @@ All font choices, colors, spacing, and aesthetic direction are defined there.
 Do not deviate without explicit user approval.
 In QA mode, flag any code that doesn't match DESIGN.md.
 
+## 共用/隔离边界（新功能先过这个）
+任何新功能动手前，先按 `docs/adr/2026-07-10-share-vs-isolate-boundary.md` 的四层模型落层：
+**能力代码全渠道共用（差异只能以参数进入），视觉输出按渠道物理隔离，规则数据按账号显式配置（禁止靠默认继承兜底），操作交互全渠道统一。**
+反模式（出现即打回）：中立层写账号字面量；渲染器 import 渲染器；新账号不显式覆盖 `bottom_blocks` 等模块靠继承兜底；助手函数复制第 N 份；往 app.html/site.html 内联脚本里加新逻辑（外壳逻辑必须进独立 js 模块）。
+
 ## Critical Design Rules (DO NOT VIOLATE)
 These have been explicitly confirmed by the user. Breaking any of these is unacceptable:
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
-2. **多账号绑定，统一顶栏账号菜单（单层）** — 公众号是规则应用对象，规则是可复用资产，新增账号必须先进入 `public/js/rule-packs/registry.js`（唯一入口），并在 `api/rule_defaults.go` 成对登记账号/preset（id 字节一致）。账号切换走**单层顶栏头像菜单**（`public/js/account-menu.js` 的 `mountAccountMenu`，挂载点 `#acctMenu`）：列出全部账号，渠道（公众号 / 网站）降为菜单内的**分组标签**，不再是独立控件。点击同模板账号（如 `FBIF公众号`↔`WowFood爆品超市`，templateId 都是 `fbif`）原地切换；跨模板账号（`FoodTalks什么是系列` / `网站默认`）整页 reload 到其 URL（红线 #19 隔离）。跨渠道编辑器快照由 `session-restore.js` 的 `beforeunload` 兜底保存（无条件注册，不依赖旧 `.channel-switcher`）。**2026-06-02 用户裁定「不要两层」，推翻旧"圆角渠道胶囊 + 方角规则包分段 两层分离（方角 vs 圆角）"契约**——旧的两层切换器（顶部 `.channel-switcher` 圆胶囊、侧栏 `.account-switcher` 方角分段）已删除，不要恢复
+2. **多账号绑定，统一顶栏账号菜单（单层）** — 公众号是规则应用对象，规则是可复用资产，新增账号的单一真相源是 `api/account_catalog.go`（改完跑 `npm run gen:registry` 重新生成 `public/js/rule-packs/registry.js`——它是生成文件勿手改，Go 启动期逐字节校验漂移即 fatal），并在 `api/rule_defaults.go` 成对登记 preset（`DefaultPresetID` 挂链有启动校验，2026-07-10 起）。账号切换走**单层顶栏头像菜单**（`public/js/account-menu.js` 的 `mountAccountMenu`，挂载点 `#acctMenu`）：列出全部账号，渠道（公众号 / 网站）降为菜单内的**分组标签**，不再是独立控件。点击同模板账号（如 `FBIF公众号`↔`WowFood爆品超市`，templateId 都是 `fbif`）原地切换；跨模板账号（`FoodTalks什么是系列` / `网站默认`）整页 reload 到其 URL（红线 #19 隔离）。跨渠道编辑器快照由 `session-restore.js` 的 `beforeunload` 兜底保存（无条件注册，不依赖旧 `.channel-switcher`）。**2026-06-02 用户裁定「不要两层」，推翻旧"圆角渠道胶囊 + 方角规则包分段 两层分离（方角 vs 圆角）"契约**——旧的两层切换器（顶部 `.channel-switcher` 圆胶囊、侧栏 `.account-switcher` 方角分段）已删除，不要恢复
 3. **规则服务端保存 + 本地降级** — 参数预设和 `behavior` 行为配置以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
 4. **所有按钮在顶部工具栏** — 底部不放按钮
 5. **不要 TOC/目录** — 已删除

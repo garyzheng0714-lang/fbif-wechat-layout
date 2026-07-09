@@ -73,6 +73,11 @@ func main() {
 		}
 	}
 
+	// 启动期账号↔preset 挂链校验：DefaultPresetID 悬空则 fail loud（无文件依赖，纯内存比对）。
+	if err := validateAccountPresetLinkage(); err != nil {
+		log.Fatalf("账号 preset 挂链校验失败：%v", err)
+	}
+
 	// 启动期区块注册表一致性校验：block-registry.gen.js 与 blockTypeCatalog 漂移则 fail loud。
 	// 文件缺失（部署路径差异）只告警，不 brick 生产。
 	if err := validateBlockRegistryConsistency(publicDir); err != nil {

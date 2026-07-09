@@ -135,3 +135,12 @@ func head(s string, n int) string {
 	}
 	return s
 }
+
+// 意图：账号 DefaultPresetID 与 defaultRuleDefinitions 只靠字符串常量对齐、无编译期链接。
+// 新增账号忘在 rule_defaults.go 成对登记 preset 时，服务必须在启动期失败而不是让该账号
+// 的默认规则静默悬空——本测试保证校验函数对当前 catalog 全量通过，漏登记会在这里先红。
+func TestAccountPresetLinkage(t *testing.T) {
+	if err := validateAccountPresetLinkage(); err != nil {
+		t.Fatalf("账号 preset 挂链校验失败：%v", err)
+	}
+}

@@ -16,6 +16,23 @@ jobs:
         with:
           go-version: '1.26'
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 测试门禁：任何测试失败都不允许部署（2026-07-10 架构体检修复：
+      # 此前 CI 只编译不测试，1.3 万行测试形同虚设，测试挂了照样上生产）
+      - name: Run JS tests (gate)
+        run: |
+          npm ci
+          npm test
+
+      - name: Run Go tests (gate)
+        run: |
+          cd api
+          go test ./...
+
       - name: Build API server
         run: |
           cd api
