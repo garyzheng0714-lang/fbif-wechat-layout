@@ -28,3 +28,5 @@ conversation-*.txt
 news62285_source.html
 stage*.png
 tests/e2e-screenshots/
+tests/e2e-baselines/
+test-results/

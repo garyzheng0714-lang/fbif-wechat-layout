@@ -1,0 +1,474 @@
+/**
+ * Playwright E2E Regression Test — 8 scenarios x 3 breakpoints
+ *
+ * Run: npx playwright test tests/e2e-regression.spec.mjs --reporter=list
+ *
+ * Screenshots saved to: tests/e2e-screenshots/
+ */
+
+import { test, expect } from '@playwright/test';
+import path from 'path';
+import fs from 'fs';
+
+const BASE = 'http://localhost:19090';
+const DOCX_PATH = path.resolve('tests/fixtures/tea-pyramid.docx');
+const SCREENSHOT_DIR = path.resolve('tests/e2e-screenshots');
+
+// Ensure screenshot directory
+fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+
+const BREAKPOINTS = [
+  { name: 'desktop-1440', width: 1440, height: 900 },
+  { name: 'tablet-768', width: 768, height: 1024 },
+  { name: 'mobile-390', width: 390, height: 844 },
+];
+
+const RESULTS = [];
+
+// ============ Helpers ============
+
+function screenshotName(scenario, bp) {
+  return `${scenario}__${bp.name}.png`;
+}
+
+async function waitForAppReady(page) {
+  // Wait for the app to fully load (script modules executed)
+  await page.waitForSelector('.app-layout', { timeout: 15000 });
+  // Wait a bit for dynamic JS to settle
+  await page.waitForTimeout(2000);
+}
+
+async function captureAndCheck(page, scenario, bp, extraChecks = null) {
+  const name = screenshotName(scenario, bp);
+  const filePath = path.join(SCREENSHOT_DIR, name);
+  await page.screenshot({ path: filePath, fullPage: true });
+
+  // S5 视觉基线（架构体检 2026-07-10）：与入库基线做像素 diff——此前截图只存盘
+  // 不对比，视觉层没有任何会自动失败的守护。基线缺失时自动生成（updateSnapshots
+  // 默认 missing）；改版式后用 npm run test:e2e -- --update-snapshots 重建。
+  // 日期输入随当天变化，遮罩后再比。
+  await expect(page).toHaveScreenshot(name, {
+    fullPage: true,
+    mask: [page.locator('input[type="date"]')],
+  });
+
+  const result = {
+    scenario,
+    breakpoint: bp.name,
+    screenshot: name,
+    issues: [],
+  };
+
+  // Check for horizontal overflow
+  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  if (scrollWidth > clientWidth + 5) {
+    result.issues.push(`水平溢出: scrollWidth=${scrollWidth} > clientWidth=${clientWidth}`);
+  }
+
+  // Check for JS console errors
+  const consoleErrors = [];
+  page.on('console', msg => {
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  });
+
+  if (extraChecks) {
+    await extraChecks(result);
+  }
+
+  RESULTS.push(result);
+  return result;
+}
+
+// ============ Test Suite ============
+
+test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
+  // ---- Scenario 1: 初始空状态 ----
+  for (const bp of BREAKPOINTS) {
+    test(`1-初始空状态 [${bp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      const consoleErrors = [];
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      // Verify empty state is visible
+      const emptyState = page.locator('#emptyState');
+      await expect(emptyState).toBeVisible();
+
+      // Verify preview content is hidden
+      const previewContent = page.locator('#previewContent');
+      await expect(previewContent).toBeHidden();
+
+      // Verify copy button exists
+      await expect(page.locator('#copyBtn')).toBeVisible();
+
+      // Verify sidebar upload zone exists
+      await expect(page.locator('#dropZone')).toBeVisible();
+
+      const result = await captureAndCheck(page, '1-empty-state', bp);
+
+      if (consoleErrors.length > 0) {
+        result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);
+      }
+
+      console.log(`[${bp.name}] Scenario 1 完成: ${result.issues.length} 个问题`);
+      await context.close();
+    });
+  }
+
+  // ---- Scenario 2: 上传 DOCX 全流程 ----
+  for (const bp of BREAKPOINTS) {
+    test(`2-上传DOCX全流程 [${bp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      const consoleErrors = [];
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      // Upload DOCX
+      const fileInput = page.locator('#fileInput');
+      await fileInput.setInputFiles(DOCX_PATH);
+
+      // Wait for parsing to complete (empty state should disappear)
+      await page.waitForFunction(() => {
+        const el = document.getElementById('previewContent');
+        return el && el.style.display !== 'none';
+      }, { timeout: 30000 });
+
+      // Wait a bit for rendering
+      await page.waitForTimeout(2000);
+
+      // Verify content is showing
+      const previewContent = page.locator('#previewContent');
+      await expect(previewContent).toBeVisible();
+
+      // Verify empty state is hidden
+      const emptyState = page.locator('#emptyState');
+      await expect(emptyState).toBeHidden();
+
+      // Verify article title is populated (or at least the content area has content)
+      const contentArea = page.locator('#contentArea');
+      const hasContent = await contentArea.evaluate(el => el.innerHTML.length > 0);
+      expect(hasContent).toBeTruthy();
+
+      const result = await captureAndCheck(page, '2-docx-upload', bp);
+
+      if (consoleErrors.length > 0) {
+        result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);
+      }
+
+      console.log(`[${bp.name}] Scenario 2 完成: ${result.issues.length} 个问题`);
+      await context.close();
+    });
+  }
+
+  // ---- Scenario 3: URL 导入全流程 ----
+  for (const bp of BREAKPOINTS) {
+    test(`3-URL导入全流程 [${bp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      const consoleErrors = [];
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+
+      // S5：拦截后端抓取接口返回确定性错误桩——本场景测的是「导入失败的前端
+      // 流程与错误 UI」，真实外网请求时长不可控（曾把 toHaveScreenshot 拖到
+      // 120s 超时），且外网状态会让视觉基线不稳定。
+      await page.route('**/api/fetch-article*', route => route.fulfill({
+        status: 422,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ error: '无法抓取该链接（E2E 测试桩）' }),
+      }));
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      // Type URL and fetch。当前 UI 没有独立抓取按钮（旧 #urlFetchBtn 已随导入改版
+      // 删除）：粘贴到 #urlInput 自动触发导入，等价入口是页面暴露的 window.fetchArticle()。
+      const urlInput = page.locator('#urlInput');
+      await urlInput.fill('https://mp.weixin.qq.com/s/test-article');
+      await page.evaluate(() => window.fetchArticle());
+
+      // Wait for the deterministic error state to render
+      await page.locator('#error').waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+
+      // Check for error display (expected since URL is fake)
+      const errorEl = page.locator('#error');
+      const errorText = await errorEl.textContent();
+      const isErrorVisible = await errorEl.isVisible();
+
+      const result = await captureAndCheck(page, '3-url-import', bp);
+      result.fetchResult = isErrorVisible ? 'error' : 'success';
+      result.fetchMessage = errorText;
+
+      if (consoleErrors.length > 0) {
+        result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);
+      }
+
+      console.log(`[${bp.name}] Scenario 3 完成: ${result.fetchResult}, ${result.issues.length} 个问题`);
+      await context.close();
+    });
+  }
+
+  // ---- Scenario 4: 排版完成状态 ----
+  for (const bp of BREAKPOINTS) {
+    test(`4-排版完成状态 [${bp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      const consoleErrors = [];
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      // Upload DOCX to get to "done" state
+      const fileInput = page.locator('#fileInput');
+      await fileInput.setInputFiles(DOCX_PATH);
+
+      // Wait for content to appear
+      await page.waitForFunction(() => {
+        const el = document.getElementById('previewContent');
+        return el && el.style.display !== 'none';
+      }, { timeout: 30000 });
+
+      await page.waitForTimeout(3000);
+
+      const result = await captureAndCheck(page, '4-layout-done', bp);
+
+      // Verify footer is visible
+      const wxFooter = page.locator('#wxFooter');
+      const footerVisible = await wxFooter.isVisible();
+      result.footerVisible = footerVisible;
+
+      // Check bottom bar styling (white background, centered divider)
+      if (footerVisible) {
+        const footerBg = await wxFooter.evaluate(el => getComputedStyle(el).backgroundColor);
+        result.footerBg = footerBg;
+        // Should be white-ish (rgb(255, 255, 255) or similar)
+        if (!footerBg.includes('255, 255, 255') && !footerBg.includes('transparent')) {
+          result.issues.push(`底部栏背景不是白色: ${footerBg}`);
+        }
+      }
+
+      if (consoleErrors.length > 0) {
+        result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);
+      }
+
+      console.log(`[${bp.name}] Scenario 4 完成: footer=${footerVisible}, ${result.issues.length} 个问题`);
+      await context.close();
+    });
+  }
+
+  // ---- Scenario 5: 复制成功状态 ----
+  for (const bp of BREAKPOINTS) {
+    test(`5-复制成功状态 [${bp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+        permissions: ['clipboard-read', 'clipboard-write'],
+      });
+      const page = await context.newPage();
+      const consoleErrors = [];
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      // Upload DOCX first
+      const fileInput = page.locator('#fileInput');
+      await fileInput.setInputFiles(DOCX_PATH);
+
+      await page.waitForFunction(() => {
+        const el = document.getElementById('previewContent');
+        return el && el.style.display !== 'none';
+      }, { timeout: 30000 });
+
+      await page.waitForTimeout(3000);
+
+      // Click copy button
+      const copyBtn = page.locator('#copyBtn');
+      await copyBtn.click();
+
+      // Wait for copy success indicator
+      await page.waitForTimeout(2000);
+
+      const result = await captureAndCheck(page, '5-copy-success', bp);
+
+      // Check if copy success message appeared
+      const copySuccess = page.locator('#copySuccess');
+      const successVisible = await copySuccess.isVisible();
+      result.copySuccessVisible = successVisible;
+
+      // Check button feedback
+      const btnText = await copyBtn.textContent();
+      result.copyBtnText = btnText;
+
+      if (consoleErrors.length > 0) {
+        result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);
+      }
+
+      console.log(`[${bp.name}] Scenario 5 完成: success=${successVisible}, btn="${btnText}", ${result.issues.length} 个问题`);
+      await context.close();
+    });
+  }
+
+  // ---- Scenario 6: 抓取失败状态 ----
+  for (const bp of BREAKPOINTS) {
+    test(`6-抓取失败状态 [${bp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      const consoleErrors = [];
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+
+      // S5：拦截后端抓取接口返回确定性 500——本场景测「抓取失败的错误 UI」，
+      // 真实打无效域名的时长与文案都不可控（同场景 3 的教训）。
+      await page.route('**/api/fetch-article*', route => route.fulfill({
+        status: 500,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ error: '抓取服务暂时不可用（E2E 测试桩）' }),
+      }));
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      // Type a WeChat-shaped URL（非公众号域名会被自动识别成正文文字而非链接）and fetch.
+      // 旧 #urlFetchBtn 已删：等价入口是 window.fetchArticle()。
+      const urlInput = page.locator('#urlInput');
+      await urlInput.fill('https://mp.weixin.qq.com/s/e2e-fetch-error');
+      await page.evaluate(() => window.fetchArticle());
+
+      // Wait for the deterministic error state to render
+      await page.locator('#error').waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+
+      const result = await captureAndCheck(page, '6-fetch-error', bp);
+
+      // Verify error message is displayed
+      const errorEl = page.locator('#error');
+      const errorVisible = await errorEl.isVisible();
+      const errorText = await errorEl.textContent();
+      result.errorVisible = errorVisible;
+      result.errorText = errorText;
+
+      if (!errorVisible) {
+        result.issues.push('抓取失败后未显示错误信息');
+      }
+
+      if (consoleErrors.length > 0) {
+        result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);
+      }
+
+      console.log(`[${bp.name}] Scenario 6 完成: error="${errorText}", ${result.issues.length} 个问题`);
+      await context.close();
+    });
+  }
+
+  // ---- Scenario 7: 规则后台视图 ----
+  for (const bp of BREAKPOINTS) {
+    test(`7-规则后台视图 [${bp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      const consoleErrors = [];
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      // Click the rule settings entry inside the account menu.
+      await page.locator('.acct-trigger').click();
+      const adminBtn = page.locator('#adminLockBtn');
+      if (await adminBtn.isVisible()) {
+        await adminBtn.click();
+        await page.waitForTimeout(2000);
+      }
+
+      const result = await captureAndCheck(page, '7-rule-admin', bp);
+
+      // Check if admin panel is open
+      const adminPanel = page.locator('#adminPanel, .admin-panel, [class*="admin"]');
+      const adminVisible = await adminPanel.first().isVisible().catch(() => false);
+      result.adminVisible = adminVisible;
+
+      if (consoleErrors.length > 0) {
+        result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);
+      }
+
+      console.log(`[${bp.name}] Scenario 7 完成: admin=${adminVisible}, ${result.issues.length} 个问题`);
+      await context.close();
+    });
+  }
+
+  // ---- Scenario 8: 网站渠道视图 ----
+  for (const bp of BREAKPOINTS) {
+    test(`8-网站渠道视图 [${bp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      const consoleErrors = [];
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+
+      // Navigate to FoodTalks site channel
+      await page.goto(BASE + '/ft/default', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      const result = await captureAndCheck(page, '8-site-channel', bp);
+
+      // Verify FoodTalks channel is active：旧 [data-channel] 渠道 tab 已随两层切换器
+      // 删除（红线 #2），现在验证顶栏账号菜单显示的是网站渠道账号。
+      const acctName = await page.locator('.acct-trigger-name').textContent().catch(() => '');
+      result.ftChannelActive = /网站/.test(acctName || '');
+
+      // Verify sidebar has site-specific class
+      const sidebar = page.locator('.sidebar');
+      const sidebarClass = await sidebar.getAttribute('class');
+      result.sidebarClass = sidebarClass;
+
+      if (consoleErrors.length > 0) {
+        result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);
+      }
+
+      console.log(`[${bp.name}] Scenario 8 完成: ft=${result.ftChannelActive}, ${result.issues.length} 个问题`);
+      await context.close();
+    });
+  }
+});
+
+// ---- Generate report after all tests ----
+test.afterAll(async () => {
+  const reportPath = path.join(SCREENSHOT_DIR, 'regression-report.json');
+  fs.writeFileSync(reportPath, JSON.stringify(RESULTS, null, 2), 'utf-8');
+  console.log(`\n=== 测试报告已保存: ${reportPath} ===`);
+});

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:baseline": "playwright test --update-snapshots",
     "gen:registry": "cd api && go run . -emit-registry > ../public/js/rule-packs/registry.js",
     "gen:blocks": "cd api && go run . -emit-blocks > ../public/js/blocks/block-registry.gen.js"
   },
