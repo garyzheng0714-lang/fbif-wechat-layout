@@ -97,8 +97,10 @@ func newRulePresetStore(path string) *rulePresetStore {
 	return &rulePresetStore{path: path}
 }
 
-func mergeRuleDefaults(config map[string]any) map[string]any {
-	merged := defaultRuleConfig()
+// presetID 决定合并基线（见 baselineRuleConfigForPreset）：内置 preset 缺键补自己
+// 账号族的默认，自建 preset 保持 FBIF 基线的历史行为。契约：rule_merge_baseline_test.go。
+func mergeRuleDefaults(presetID string, config map[string]any) map[string]any {
+	merged := baselineRuleConfigForPreset(presetID)
 	for k, v := range flattenRuleConfig(config) {
 		merged[k] = v
 	}
@@ -194,8 +196,8 @@ func normalizeRuleDocument(doc rulePresetDocument) rulePresetDocument {
 		if p.Name == "" {
 			p.Name = "未命名规则"
 		}
-		p.Config = mergeRuleDefaults(p.Config)
-		p.Behavior = mergeRuleBehavior(p.Behavior)
+		p.Config = mergeRuleDefaults(p.ID, p.Config)
+		p.Behavior = mergeRuleBehavior(p.ID, p.Behavior)
 		if p.UpdatedAt == "" {
 			p.UpdatedAt = now
 		}
@@ -259,8 +261,8 @@ func legacyDocumentToStore(doc rulePresetDocument) ruleStoreDocumentV2 {
 			Description: p.Description,
 			Versions: []rulePresetVersion{{
 				Version:   1,
-				Config:    mergeRuleDefaults(p.Config),
-				Behavior:  mergeRuleBehavior(p.Behavior),
+				Config:    mergeRuleDefaults(p.ID, p.Config),
+				Behavior:  mergeRuleBehavior(p.ID, p.Behavior),
 				CreatedAt: updatedAt,
 			}},
 			UpdatedAt: updatedAt,
@@ -305,8 +307,8 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 			if version.CreatedAt == "" {
 				version.CreatedAt = now
 			}
-			version.Config = mergeRuleDefaults(version.Config)
-			version.Behavior = mergeRuleBehavior(version.Behavior)
+			version.Config = mergeRuleDefaults(rule.ID, version.Config)
+			version.Behavior = mergeRuleBehavior(rule.ID, version.Behavior)
 			versions = append(versions, version)
 		}
 		sort.SliceStable(versions, func(i, j int) bool {
@@ -421,8 +423,8 @@ func legacyDocumentFromStore(doc ruleStoreDocumentV2) rulePresetDocument {
 			ID:          rule.ID,
 			Name:        rule.Name,
 			Description: rule.Description,
-			Config:      mergeRuleDefaults(version.Config),
-			Behavior:    mergeRuleBehavior(version.Behavior),
+			Config:      mergeRuleDefaults(rule.ID, version.Config),
+			Behavior:    mergeRuleBehavior(rule.ID, version.Behavior),
 			UpdatedAt:   rule.UpdatedAt,
 		})
 	}
@@ -542,8 +544,8 @@ func (s *rulePresetStore) activeForAccount(accountID string) (rulePreset, error)
 		ID:          rule.ID,
 		Name:        rule.Name,
 		Description: rule.Description,
-		Config:      mergeRuleDefaults(version.Config),
-		Behavior:    mergeRuleBehavior(version.Behavior),
+		Config:      mergeRuleDefaults(rule.ID, version.Config),
+		Behavior:    mergeRuleBehavior(rule.ID, version.Behavior),
 		UpdatedAt:   rule.UpdatedAt,
 	}, nil
 }
@@ -568,8 +570,8 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	if err := validateRulePresetPayload(p); err != nil {
 		return legacyDocumentFromStore(doc), err
 	}
-	p.Config = mergeRuleDefaults(p.Config)
-	p.Behavior = mergeRuleBehavior(p.Behavior)
+	p.Config = mergeRuleDefaults(p.ID, p.Config)
+	p.Behavior = mergeRuleBehavior(p.ID, p.Behavior)
 	p.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	rule := doc.Rules[p.ID]
 	nextVersion := 1

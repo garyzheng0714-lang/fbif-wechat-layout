@@ -200,6 +200,25 @@ func builtinVersionForDefaultRule(id string) int {
 	}
 }
 
+// merge 基线按 preset 归属选择（架构体检 S3，2026-07-10）：内置 preset 用自己账号族
+// 的代码内默认（缺键补自己的值，根治「缺键继承 FBIF 串台」——此前 WowFood/系列/网站
+// 全靠显式覆盖打补丁堵）；非内置（用户自建）preset 无账号归属字段，沿用历史 FBIF
+// 基线行为（自建 preset 从完整 config 复制创建，不依赖兜底）。查表走
+// defaultRuleDefinitions，新增账号自动覆盖、无 switch 漏 case。
+func baselineRuleConfigForPreset(presetID string) map[string]any {
+	if def, ok := defaultRuleDefinitions("")[presetID]; ok && len(def.Versions) > 0 && def.Versions[0].Config != nil {
+		return def.Versions[0].Config
+	}
+	return defaultRuleConfig()
+}
+
+func baselineRuleBehaviorForPreset(presetID string) map[string]any {
+	if def, ok := defaultRuleDefinitions("")[presetID]; ok && len(def.Versions) > 0 && def.Versions[0].Behavior != nil {
+		return def.Versions[0].Behavior
+	}
+	return defaultRuleBehavior()
+}
+
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 	defs := map[string]ruleDefinition{
 		defaultRulePresetID: {

@@ -88,8 +88,10 @@ func cloneRuleMap(input map[string]any) map[string]any {
 	return out
 }
 
-func mergeRuleBehavior(behavior map[string]any) map[string]any {
-	merged := cloneRuleMap(defaultRuleBehavior())
+// presetID 决定合并基线（见 baselineRuleBehaviorForPreset）：内置 preset 缺省补自己
+// 账号族的 behavior（网站/系列不再混入 FBIF Mote 条件），自建 preset 保持 FBIF 基线。
+func mergeRuleBehavior(presetID string, behavior map[string]any) map[string]any {
+	merged := cloneRuleMap(baselineRuleBehaviorForPreset(presetID))
 	if behavior == nil {
 		return merged
 	}

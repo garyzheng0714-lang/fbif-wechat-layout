@@ -369,7 +369,7 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 }
 
 func TestMergeRuleDefaultsDoesNotInjectArticleFooterDefaults(t *testing.T) {
-	cfg := mergeRuleDefaults(map[string]any{
+	cfg := mergeRuleDefaults("rule-user-custom", map[string]any{
 		"font_size": "16",
 		"modules": map[string]any{
 			"bottom_blocks": map[string]any{"schema_version": 2, "enabled": false, "presets": []any{}},
@@ -381,7 +381,7 @@ func TestMergeRuleDefaultsDoesNotInjectArticleFooterDefaults(t *testing.T) {
 		t.Fatalf("article_footer_defaults.enabled = %#v, want disabled when source did not declare it", aft["enabled"])
 	}
 
-	explicit := mergeRuleDefaults(map[string]any{
+	explicit := mergeRuleDefaults("rule-user-custom", map[string]any{
 		"modules": map[string]any{
 			"article_footer_defaults": defaultArticleFooterDefaultsModule(),
 		},

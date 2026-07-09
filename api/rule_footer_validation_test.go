@@ -23,7 +23,7 @@ func TestValidateFooterLibraryAndRegex(t *testing.T) {
 		t.Fatalf("默认网站规则 config（含页脚库）应通过校验，却报错: %v", err)
 	}
 	beh := defaultFoodTalksSiteRuleBehavior() // 含 4 个正则
-	if err := validateRuleBehaviorPayload(beh); err != nil {
+	if err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, beh); err != nil {
 		t.Fatalf("默认网站 behavior（含识别正则）应通过校验，却报错: %v", err)
 	}
 
@@ -46,7 +46,7 @@ func TestValidateFtSeriesSiteFooterDefaults(t *testing.T) {
 		t.Fatalf("网站什么是系列默认规则 config 应通过校验，却报错: %v", err)
 	}
 	beh := defaultFoodTalksSeriesSiteRuleBehavior()
-	if err := validateRuleBehaviorPayload(beh); err != nil {
+	if err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, beh); err != nil {
 		t.Fatalf("网站什么是系列默认 behavior 应通过校验，却报错: %v", err)
 	}
 
@@ -116,7 +116,7 @@ func TestFooterModuleAcceptsEditedContent(t *testing.T) {
 
 func TestBehaviorRejectsBadRegex(t *testing.T) {
 	beh := map[string]any{"author_regex": "([unclosed"}
-	if err := validateRuleBehaviorPayload(beh); err == nil {
+	if err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, beh); err == nil {
 		t.Fatal("非法正则应被拒绝")
 	}
 }
@@ -124,7 +124,7 @@ func TestBehaviorRejectsBadRegex(t *testing.T) {
 // 红线下放：公众号识别正则进 behavior.params（{type:string,default}），默认值应通过保存校验。
 func TestValidatePublicAccountRegexParams(t *testing.T) {
 	beh := defaultRuleBehavior() // 含 author_line_regex / source_line_regex / footer_prompt_* 等
-	if err := validateRuleBehaviorPayload(beh); err != nil {
+	if err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, beh); err != nil {
 		t.Fatalf("公众号默认 behavior（含识别正则 params）应通过校验，却报错: %v", err)
 	}
 }
@@ -137,7 +137,7 @@ func TestBehaviorListsRoundTrip(t *testing.T) {
 			"image_caption_keywords": []any{"图片来源", "Source"},
 		},
 	}
-	if err := validateRuleBehaviorPayload(beh); err != nil {
+	if err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, beh); err != nil {
 		t.Fatalf("编辑后的 behavior.lists 应通过校验，却报错: %v", err)
 	}
 }
@@ -145,7 +145,7 @@ func TestBehaviorListsRoundTrip(t *testing.T) {
 // behavior.lists 中标记/正则项若非法正则，应被拒绝（防后台误配导致整篇渲染崩）。
 func TestBehaviorListsRejectsBadRegex(t *testing.T) {
 	beh := map[string]any{"lists": map[string]any{"wechat_trailer_markers": []any{"([unclosed"}}}
-	if err := validateRuleBehaviorPayload(beh); err == nil {
+	if err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, beh); err == nil {
 		t.Fatal("behavior.lists 中非法正则应被拒绝")
 	}
 }
@@ -154,7 +154,7 @@ func TestBehaviorListsRejectsBadRegex(t *testing.T) {
 // 否则服务端配置传不到客户端，规则"后台可配"名存实亡。
 func TestMergeRuleBehaviorPreservesSiteFields(t *testing.T) {
 	stored := defaultFoodTalksSiteRuleBehavior()
-	merged := mergeRuleBehavior(stored)
+	merged := mergeRuleBehavior(foodTalksSiteDefaultRulePresetID, stored)
 	lists, ok := merged["lists"].(map[string]any)
 	if !ok || lists["wechat_trailer_markers"] == nil {
 		t.Fatalf("下发后应保留 behavior.lists.wechat_trailer_markers，实际 lists=%v", merged["lists"])
@@ -164,7 +164,7 @@ func TestMergeRuleBehaviorPreservesSiteFields(t *testing.T) {
 	}
 	// 客户端编辑 lists 后下发也应保留覆盖值。
 	edited := map[string]any{"lists": map[string]any{"title_keywords": []any{"自定义标题词"}}}
-	m2 := mergeRuleBehavior(edited)
+	m2 := mergeRuleBehavior(foodTalksSiteDefaultRulePresetID, edited)
 	got, _ := m2["lists"].(map[string]any)
 	arr, _ := got["title_keywords"].([]any)
 	if len(arr) != 1 || arr[0] != "自定义标题词" {
@@ -175,7 +175,7 @@ func TestMergeRuleBehaviorPreservesSiteFields(t *testing.T) {
 // behavior.lists 中含不安全 HTML 的词条应被拒绝（XSS 防护）。
 func TestBehaviorListsRejectsUnsafeHTML(t *testing.T) {
 	beh := map[string]any{"lists": map[string]any{"image_caption_keywords": []any{`<script>x</script>`}}}
-	if err := validateRuleBehaviorPayload(beh); err == nil {
+	if err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, beh); err == nil {
 		t.Fatal("behavior.lists 中含 <script> 的词条应被拒绝")
 	}
 }

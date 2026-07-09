@@ -196,10 +196,10 @@ func validateRulePresetPayload(p rulePreset) error {
 	if err := validateRuleConfig(p.Config); err != nil {
 		return err
 	}
-	return validateRuleBehaviorPayload(p.Behavior)
+	return validateRuleBehaviorPayload(p.ID, p.Behavior)
 }
 
-func validateRuleBehaviorPayload(raw map[string]any) error {
+func validateRuleBehaviorPayload(presetID string, raw map[string]any) error {
 	regexFields := map[string]bool{"author_regex": true, "tip_regex": true, "ref_header_regex": true, "ref_item_regex": true}
 	for key := range raw {
 		switch key {
@@ -248,7 +248,7 @@ func validateRuleBehaviorPayload(raw map[string]any) error {
 	if version, ok := raw["schema_version"]; ok && int(ruleBehaviorNumber(version)) != 1 {
 		return fmt.Errorf("unsupported behavior schema_version")
 	}
-	behavior := mergeRuleBehavior(raw)
+	behavior := mergeRuleBehavior(presetID, raw)
 	params, ok := behavior["params"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("behavior params must be an object")
@@ -346,6 +346,11 @@ func isSafeRuleBehaviorURL(value string) bool {
 }
 
 func validateRuleBehaviorConditions(raw any) (map[string]bool, error) {
+	// conditions/actions 是 FBIF 声明式行为引擎的字段；FoodTalks 系 behavior（命令式）
+	// 天然没有——缺失视为空，不能报错（S3 前靠「merge 基线永远是 FBIF」掩盖了这条路径）。
+	if raw == nil {
+		return map[string]bool{}, nil
+	}
 	items, ok := raw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("behavior conditions must be an array")
@@ -397,6 +402,9 @@ func validateRuleBehaviorConditions(raw any) (map[string]bool, error) {
 }
 
 func validateRuleBehaviorActions(raw any, conditionIDs map[string]bool, params map[string]any) error {
+	if raw == nil { // 同 conditions：命令式 behavior 无 actions，缺失视为空。
+		return nil
+	}
 	items, ok := raw.([]any)
 	if !ok {
 		return fmt.Errorf("behavior actions must be an array")
