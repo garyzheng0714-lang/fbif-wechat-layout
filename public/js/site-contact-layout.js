@@ -1,53 +1,18 @@
 // FoodTalks 网站「什么是系列」联系区归一化。
 // 只处理 behavior.params.site_variant=ft-series 的系列网站包：联系信息块居中，组内紧凑。
 
-function behParamStr(config, key, fallback) {
-  const p = config && config.behavior && config.behavior.params;
-  const s = p && p[key] && p[key].default;
-  return (typeof s === 'string' && s) ? s : fallback;
-}
-
-function compileRegex(src) {
-  let s = String(src), flags = '';
-  const m = s.match(/^\(\?([a-z]+)\)/);
-  if (m) { flags = m[1].replace(/[^gimsuy]/g, ''); s = s.slice(m[0].length); }
-  return new RegExp(s, flags);
-}
-
-function behaviorRegex(config, key, fallback) {
-  const src = behParamStr(config, key, fallback);
-  try { return compileRegex(src); } catch (e) { return compileRegex(fallback); }
-}
+// 规则读取/正则/文本助手共享实现收敛到 rule-behavior-utils.js（架构体检 S6，勿再本地复制）。
+import {
+  behParamStr, behaviorRegex, elemText, stripSectionPrefix, hasSectionPrefix,
+} from './rule-behavior-utils.js';
 
 function isSeriesSiteConfig(config = {}) {
   return behParamStr(config, 'site_variant', '') === 'ft-series';
 }
 
-function runsToText(runs) {
-  return (runs || [])
-    .filter(r => r && (r.type === 'txt' || r.type === 'link'))
-    .map(r => r.text || '')
-    .join('');
-}
-
-function elemText(e) {
-  if (!e) return '';
-  if (Array.isArray(e.runs)) return runsToText(e.runs);
-  return typeof e.text === 'string' ? e.text : '';
-}
-
 function allVisibleRunsBold(runs) {
   const visible = (runs || []).filter(r => r && (r.type === 'txt' || r.type === 'link') && String(r.text || '').trim());
   return visible.length > 0 && visible.every(r => r.bold);
-}
-
-function stripSectionPrefix(text) {
-  return String(text || '').replace(/^\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[、.．]\s*/, '').trim();
-}
-
-function hasSectionPrefix(text) {
-  const raw = String(text || '').trim();
-  return raw && stripSectionPrefix(raw) !== raw;
 }
 
 function cloneElem(e) {

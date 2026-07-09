@@ -20,7 +20,9 @@ const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery
 const { applyFoodTalksBehavior, buildFooterHtml, compileSiteRegex } = behaviorModule;
 
 // ── 规则读取助手（红线下放：优先服务端 config / config.behavior，缺省/非法降级 const）──
-function behOf(config) { return (config && config.behavior) || {}; }
+// behOf/behTemplate/behParamStr/behList 共享实现收敛到 rule-behavior-utils.js（架构体检 S6）。
+const behaviorUtilsModule = await import('../rule-behavior-utils.js' + assetQuery);
+const { behOf, behTemplate, behParamStr, behList } = behaviorUtilsModule;
 function cfgNum(config, key, fallback) {
   const n = Number(config && config[key]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -29,16 +31,6 @@ function cfgColor(config, key, fallback) {
   // 颜色进 style，做 hex 白名单防 XSS；非法/缺省降级 const。
   const v = config && config[key];
   return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(String(v).trim())) ? String(v).trim() : fallback;
-}
-function behTemplate(config, key, fallback) {
-  const t = behOf(config).templates;
-  const v = t && t[key];
-  return (typeof v === 'string' && v) ? v : fallback;
-}
-function behParamStr(config, key, fallback) {
-  const p = behOf(config).params;
-  const s = p && p[key] && p[key].default;
-  return (typeof s === 'string' && s) ? s : fallback;
 }
 function behParamNum(config, key, fallback) {
   const p = behOf(config).params;
@@ -55,10 +47,6 @@ function behParamBool(config, key, fallback) {
     if (/^(false|0|no)$/i.test(raw.trim())) return false;
   }
   return fallback;
-}
-function behList(config, key, fallback) {
-  const v = behOf(config).lists && behOf(config).lists[key];
-  return (Array.isArray(v) && v.length) ? v : fallback;
 }
 // 标题识别（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）抽到无依赖
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。

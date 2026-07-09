@@ -20,50 +20,15 @@ import {
   SERIES_TEMPLATES,
 } from './foodtalks-series-defaults.js';
 
-// ── 规则读取助手（优先 config.behavior，缺省/非法降级 const）──
-function behOf(config) { return (config && config.behavior) || {}; }
-function behParamStr(config, key, fallback) {
-  const p = behOf(config).params;
-  const s = p && p[key] && p[key].default;
-  return (typeof s === 'string' && s) ? s : fallback;
-}
-function behList(config, key, fallback) {
-  const v = behOf(config).lists && behOf(config).lists[key];
-  return (Array.isArray(v) && v.length) ? v : fallback;
-}
-// 行为文案：优先 config.behavior.templates.<key>，缺省/非法降级 fallback（仿网站 behaviorTemplate）。
-function behTemplate(config, key, fallback) {
-  const t = behOf(config).templates;
-  const v = t && t[key];
-  return (typeof v === 'string' && v) ? v : fallback;
-}
+// ── 规则读取助手：共享实现收敛到 rule-behavior-utils.js（架构体检 S6，勿再本地复制）──
+import {
+  behList, behTemplate, compileBehaviorRegex, behaviorRegex, elemText,
+} from './rule-behavior-utils.js';
 
-// 正则字符串 → RegExp。识别开头 (?i) 内联 flag（服务端 RE2 用 (?i) 表达大小写不敏感，
-// JS new RegExp 不支持内联 flag 组，这里转为构造函数 flag）。
-export function compileSeriesRegex(src) {
-  if (src instanceof RegExp) return src;
-  let s = String(src), flags = '';
-  const m = s.match(/^\(\?([a-z]+)\)/);
-  if (m) { flags = m[1].replace(/[^gimsuy]/g, ''); s = s.slice(m[0].length); }
-  return new RegExp(s, flags);
-}
+// 兼容导出：foodtalks-series-defaults.js 等外部消费方仍以 compileSeriesRegex 命名引用。
+export const compileSeriesRegex = compileBehaviorRegex;
 // 从 config 取单条正则（behavior.params.<key>.default），非法/缺省降级 fallback 字符串。
-function seriesRegex(config, key, fallbackStr) {
-  const src = behParamStr(config, key, fallbackStr);
-  try { return compileSeriesRegex(src); } catch (e) { return compileSeriesRegex(fallbackStr); }
-}
-
-function runsToText(runs) {
-  return (runs || [])
-    .filter(r => r && (r.type === 'txt' || r.type === 'link'))
-    .map(r => r.text || '')
-    .join('');
-}
-function elemText(e) {
-  if (!e) return '';
-  if (Array.isArray(e.runs)) return runsToText(e.runs);
-  return typeof e.text === 'string' ? e.text : '';
-}
+const seriesRegex = behaviorRegex;
 
 // 半角括号转中文括号（规范《二·五·二级标题》：需注意调整为中文括号）。
 function normalizeParens(text) {

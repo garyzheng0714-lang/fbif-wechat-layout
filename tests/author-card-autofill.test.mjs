@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   applySeriesAuthorCardAutofill,
   resolveSeriesAuthorCardRef,
-} from '../public/js/blocks/author-card-autofill.js';
+} from '../public/js/author-card-autofill.js';
 
 test('resolveSeriesAuthorCardRef: Ian 通过别名命中 Lan 名片', () => {
   assert.equal(resolveSeriesAuthorCardRef('Ian', {}), '{{asset#ft_series_card_lan}}');

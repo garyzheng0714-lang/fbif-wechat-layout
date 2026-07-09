@@ -1,9 +1,11 @@
-// author-card-autofill.js — FoodTalks 系列文章作者名片自动匹配。
+// author-card-autofill.js — FoodTalks 系列文章作者名片自动匹配（foodtalks-series 渠道专属）。
 //
 // 只做确定性匹配：正文作者名 -> ft_series_materials.cards/author_card_aliases。
 // 匹配不到就清空作者名片，避免沿用上一篇文章的手动选择。
+// 2026-07-10 架构体检 S6：从 blocks/（L1 中立层）迁出——本模块含账号特判与系列默认值
+// import，属渠道专属辅助，不满足中立层「无账号字面量」判据（docs/adr/2026-07-10）。
 
-import { SERIES_MATERIALS_DEFAULT } from '../foodtalks-series-defaults.js';
+import { SERIES_MATERIALS_DEFAULT } from './foodtalks-series-defaults.js';
 
 function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
 

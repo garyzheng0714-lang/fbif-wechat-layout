@@ -21,37 +21,15 @@ import {
 } from './footer-segments-defaults.js';
 import { resolveAssetRefs } from './asset-library.js';
 
-function runsToText(runs) {
-  return (runs || [])
-    .filter(r => r.type === 'txt' || r.type === 'link')
-    .map(r => r.text || '')
-    .join('');
-}
-
-// ── 规则读取助手（红线下放：优先服务端 config.behavior，缺省/非法降级到代码内 const）──
+// ── 规则读取助手：共享实现收敛到 rule-behavior-utils.js（架构体检 S6，勿再本地复制）──
 // behavior = config.behavior（服务端 raw 下发：{templates, params, lists, *_regex}）。
-function behaviorTemplate(behavior, key, fallback) {
-  const v = behavior && behavior.templates && behavior.templates[key];
-  return (typeof v === 'string' && v) ? v : fallback;
-}
-function behaviorParamStr(behavior, key, fallback) {
-  const p = behavior && behavior.params && behavior.params[key];
-  const v = p && p.default;
-  return (typeof v === 'string' && v) ? v : fallback;
-}
-function behaviorListRaw(behavior, key) {
-  const v = behavior && behavior.lists && behavior.lists[key];
-  return (Array.isArray(v) && v.length) ? v : null;
-}
-// 正则字符串 → RegExp。识别开头 (?i) 等内联 flag（JS new RegExp 不支持内联 flag 组，
-// 服务端用 RE2 (?i) 表达大小写不敏感，这里转成构造函数 flag）。
-export function compileSiteRegex(src) {
-  if (src instanceof RegExp) return src;
-  let s = String(src), flags = '';
-  const m = s.match(/^\(\?([a-z]+)\)/);
-  if (m) { flags = m[1].replace(/[^gimsuy]/g, ''); s = s.slice(m[0].length); }
-  return new RegExp(s, flags);
-}
+import {
+  behaviorTemplate, behaviorParamStr, behaviorListRaw,
+  compileBehaviorRegex, runsToText, elemText, stripSectionPrefix, hasSectionPrefix,
+} from './rule-behavior-utils.js';
+
+// 兼容导出：templates/foodtalks-site.js 等外部消费方仍以 compileSiteRegex 命名引用。
+export const compileSiteRegex = compileBehaviorRegex;
 // 编译 behavior.lists 里的正则字符串列表；缺省/全部非法时降级到 fallback RegExp 数组。
 function compileMarkerList(behavior, key, fallback) {
   const strs = behaviorListRaw(behavior, key);
@@ -141,20 +119,7 @@ function collectFollowingText(elems, i) {
   return s;
 }
 
-function elemText(e) {
-  if (!e) return '';
-  if (Array.isArray(e.runs)) return runsToText(e.runs);
-  return typeof e.text === 'string' ? e.text : '';
-}
-
-function stripSectionPrefix(text) {
-  return String(text || '').replace(/^\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[、.．]\s*/, '').trim();
-}
-
-function hasSectionPrefix(text) {
-  const raw = String(text || '').trim();
-  return raw && stripSectionPrefix(raw) !== raw;
-}
+// elemText / stripSectionPrefix / hasSectionPrefix 已收敛到 rule-behavior-utils.js（见顶部 import）。
 
 function isSeriesSiteConfig(config = {}) {
   const behavior = (config && config.behavior) || {};

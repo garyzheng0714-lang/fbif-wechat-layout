@@ -144,3 +144,33 @@ func TestAccountPresetLinkage(t *testing.T) {
 		t.Fatalf("账号 preset 挂链校验失败：%v", err)
 	}
 }
+
+// 意图：rule-packs/url.js 的 KNOWN_CHANNELS 是渠道白名单，但 url.js 被 registry.js
+// import（生成链反向依赖），无法直接消费生成数据——新渠道上线若忘改它，该渠道所有
+// URL 会被 parsePath 判为非法、整套模板失效。本测试把「catalog 里的每个渠道都必须
+// 出现在 KNOWN_CHANNELS 字面量里」变成机器契约（架构体检 S6）。
+func TestURLKnownChannelsCoverCatalog(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "public", "js", "rule-packs", "url.js"))
+	if err != nil {
+		t.Fatalf("读取 url.js 失败：%v", err)
+	}
+	src := string(raw)
+	start := strings.Index(src, "KNOWN_CHANNELS")
+	if start < 0 {
+		t.Fatal("url.js 中找不到 KNOWN_CHANNELS 定义")
+	}
+	line := src[start:]
+	if i := strings.Index(line, "\n"); i > 0 {
+		line = line[:i]
+	}
+	seen := map[string]bool{}
+	for _, m := range accountCatalog() {
+		if seen[m.Channel] {
+			continue
+		}
+		seen[m.Channel] = true
+		if !strings.Contains(line, "'"+m.Channel+"'") {
+			t.Fatalf("渠道 %q 不在 url.js KNOWN_CHANNELS 白名单里（新增渠道需同步该文件）：%s", m.Channel, line)
+		}
+	}
+}
