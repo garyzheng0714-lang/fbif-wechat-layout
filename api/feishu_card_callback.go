@@ -97,7 +97,10 @@ func feishuCallbackTokenOK(got string) bool {
 }
 
 // feishuReviewerAllowed 是 Webhook / WebSocket 共用的审核 RBAC。白名单以逗号、分号或
-// 空白分隔；未配置、空 operator、非白名单全部拒绝，ADMIN_PASSWORD HTTP 审核不走这里。
+// 空白分隔。**2026-07-11 用户裁定「白名单不需要」**：未配置 = 开放——卡片只发进
+// 指定审核群（FEISHU_REVIEW_CHAT_ID），能点到按钮的本来就是群成员，群成员即审核人
+// （来源真实性仍由 verification token / 长连接 SDK 鉴权守着）；配置了 env 则收紧为
+// 白名单模式（原 fail-closed 设计保留为可选硬化）。空 operator 仍一律拒绝。
 func feishuReviewerAllowed(operatorOpenID string) bool {
 	operatorOpenID = strings.TrimSpace(operatorOpenID)
 	if !feishuOpenIDSafe(operatorOpenID) {
@@ -106,6 +109,9 @@ func feishuReviewerAllowed(operatorOpenID string) bool {
 	items := strings.FieldsFunc(os.Getenv("FEISHU_REVIEWER_OPEN_IDS"), func(r rune) bool {
 		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
 	})
+	if len(items) == 0 {
+		return true // 未配置 = 开放（2026-07-11 用户裁定「白名单不需要」）；operator 形态校验已在上方兜住
+	}
 	for _, item := range items {
 		candidate := strings.TrimSpace(item)
 		if len(candidate) == len(operatorOpenID) && subtle.ConstantTimeCompare([]byte(candidate), []byte(operatorOpenID)) == 1 {
@@ -133,6 +139,9 @@ func feishuReviewerAllowlistConfigured() bool {
 	items := strings.FieldsFunc(os.Getenv("FEISHU_REVIEWER_OPEN_IDS"), func(r rune) bool {
 		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
 	})
+	if len(items) == 0 {
+		return true // 未配置 = 开放（2026-07-11 用户裁定「白名单不需要」）；operator 形态校验已在上方兜住
+	}
 	for _, item := range items {
 		if feishuOpenIDSafe(strings.TrimSpace(item)) {
 			return true

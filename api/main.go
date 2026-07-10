@@ -124,7 +124,7 @@ func main() {
 	publishStore := newPublishJobStore(publishJobsPath(*rulesPath))
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
 	if !feishuReviewerAllowlistConfigured() {
-		log.Printf("publish: WARN FEISHU_REVIEWER_OPEN_IDS 未配置，Webhook/长连接卡片审核全部 fail-closed；仅 ADMIN_PASSWORD 管理端审核可用")
+		log.Printf("publish: FEISHU_REVIEWER_OPEN_IDS 未配置——卡片审核对审核群成员开放（2026-07-11 用户裁定；配置该 env 可收紧为白名单）")
 	}
 	// 候选部署先以 DEPLOYMENT_WRITES_PAUSED=1 启动，只开放只读/健康验收；验收通过并
 	// 接受该 release 后再解除暂停。这样 rollback 窗口内不会自动恢复任务、发通知或
