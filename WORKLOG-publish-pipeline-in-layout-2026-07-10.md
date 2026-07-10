@@ -76,6 +76,37 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - [ ] 正式环境接入（等 IP 白名单：**121.40.214.5**，用户下午通知后端；token 已有 ai_news 50 年）
 - [ ] 资讯订阅仓参考实现退役清理（design.md D1 已反转回写 89295c6）
 
+## M4 提前：飞书卡片审核交互（2026-07-10 用户提出「点按钮回调接收事件」）
+
+### 设计（钉死）
+- **审核卡（pending）**：schema 2.0、`config.update_multi:true`、**禁 emoji**（cardkit skill 红线）；header 蓝 + text_tag「待审核」黄；body=grey-100 信息色块（标题/来源公众号/任务号/目标环境/进站时间）+ 按钮行：「通过并发布」primary_filled + confirm 二次确认（文案明说「发布后公开可见且发布动作不可逆」）｜「驳回」danger + confirm｜「查看原文」default open_url。behaviors callback value=`{"action":"approve|reject","job_id":N}`。
+- **终态卡**：approve→绿 header「已发布」+ `<person>` 操作留痕 + 时间 + 「查看文章」open_url(article_url)；reject→红 header「已驳回」+ 留痕。回调响应直接带新卡（3 秒内 `{toast, card}`），群内所有人可见（update_multi）。
+- **回调端点** `POST /api/feishu/card-callback`：URL 验证 challenge 原样回；verification token 校验（env `FEISHU_VERIFICATION_TOKEN`，未配置时 WARN 放行——首次配置后必须回填）；`card.action.trigger` → operator.open_id + action.value → 复用 review 核心逻辑（从 HTTP handler 抽公共函数，**审核语义与权限红线不变**：仅 awaiting_review 可操作、approve 是唯一公开路径）；非待审态回 toast「已被处理」+ 当前终态卡防重复点击。
+- **发送**：staging 成功发 interactive 卡片，构建/发送失败降级回文本通知（现有能力保留）。
+- **审核人身份**：operator.open_id 落 job（新字段 reviewed_by/reviewed_at），留痕进终态卡。
+- **外部配置**（代码上线后）：开放平台应用后台「事件与回调」配回调地址 `https://fbifmp-layout.foodtalks.cn/api/feishu/card-callback` + 订阅 card.action.trigger + 取 Verification Token 回填 publish.env。Caddy /api/* 已通配转 9001，无需改配置。
+
+## M5：AI 预填发布参数（2026-07-10 用户新增）
+
+用户原话要点：模型审核任务多加一个——选合适封面图、摘要、标签、文章作者等参数信息**预填好**；模型还要输出一段**非常清晰直白简短的优化说明**（格式哪里不规范、怎么调整的）。
+
+### 设计（钉死）
+- 新阶段 `enriching`：mirroring 之后 staging 之前（此时图已 OSS 化，模型看的封面候选=最终 URL）。
+- 模型：豆包 Doubao-Seed-2.1-pro（ARK responses API，多模态）。输入：文章标题+纯文本正文（截断）+正文图 URL 列表（多模态看图）。输出 JSON：`{cover_url(从候选选一), summary(80-120字), tags([3-5个]), author(从正文抽取，如 Mote莫特), notes(优化说明：2-4 句人话，说明参数怎么选的+发现的格式问题)}`。
+- **边界**：预填只产元数据，绝不碰正文 content（无篡改面）；M3 排版修补另做（届时上三道铁闸）。
+- 降级：模型失败/超时/解析失败 → 元数据用规则兜底（封面=正文第一图、摘要=正文前 100 字、author=source_name、tags 空、notes="AI 预填未执行"），WARN 不 fail job——AI 是加速器不是闸门。
+- env：`ARK_API_KEY`（publish.env）、`ARK_MODEL_ID`（默认 ep-20260623134011-qljpn）；调用系统 prompt 须含「请用简体中文回复」。
+- 落库：job 加 cover_candidates/summary/tags/author/ai_notes 字段；buildSiteNews 消费（Summary/Author/NewsTags/CoverImg）。
+- 卡片与前端展示 ai_notes + 预填参数；审核人可在前端改（改动优先于 AI 值）。
+
+## M6：前端交互设计（2026-07-10 用户命题「排版工具前端怎么展示 + feed 里点发布到网站的交互」）
+
+按 DESIGN.md（真实动作出发/最少新概念/按钮在顶栏红线 #4/右滑抽屉既有交互语言）：
+- **排版工具·编辑视角**：网站渠道（/ft/*）顶栏在「复制全文」旁加同级主按钮「发布到网站」——发布是与复制同本质的输出动作，不新增页面。点击 → 右滑「发布面板」（复用规则工作台抽屉模式）：文章预览确认 + AI 预填表单（封面九宫格从正文图选/摘要/标签/作者，全可改，显示 AI 优化说明）→「提交审核」。提交后面板显示任务状态流。已在编辑器排好的内容直接走 html-to-blocks→流水线（不再重新抓 URL）。
+- **排版工具·任务状态**：顶栏「发布任务」入口 → 右滑任务列表抽屉（状态徽标/失败原因人话/重试按钮）；审核动作主入口仍是飞书卡片（列表只看和重试，不做第二审核入口——最少新概念）。
+- **feed.foodtalks.cn 视角**：文章卡片/详情的既有操作区加同级动作「发布到网站」→ feed 后端仅调排版工具 `POST /api/publish/site-sync`（触发器角色，符合架构裁定）→ 界面显示「已提交，任务 #N，审核在飞书群」+ 状态徽标轮询排版工具 jobs API。注意临时链接过期实测坑：发现即触发可行，过期失败给人话提示。
+- 交互设计稿：Artifact「发布交互设计」（三场景线框）。
+
 ## 踩坑 / 实施偏离记录（2026-07-10）
 
 1. **fetching 无需再抽函数**：`handleFetchArticleWithStore` 的核心 `fetchDirectBlocksWithOptions`（含限流重试）本来就是独立内部函数、handler 已是薄壳。唯一改动：给它加第 4 个返回值 `author`（`extractArticleBlocks` 一直在产出公众号名，此前被丢弃），流水线用作 `source_name`；handler 调用处只是丢弃该值，HTTP 输出逐字节不变（既有 main_upload_test / main_routes_test 全绿佐证）。
