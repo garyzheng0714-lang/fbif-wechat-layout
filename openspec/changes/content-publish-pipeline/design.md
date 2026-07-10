@@ -91,7 +91,8 @@ type Client interface {
 | `title` | 公众号文章标题（LLM 可微调，人可改） | |
 | `coverImg` | 公众号封面图转存网站存储后的 URL | 冒烟测试确认允许的域名/尺寸 |
 | `content` | `/api/render packId=ft-default` 输出的 HTML，图片已重写为网站存储 URL | |
-| `publishStatus` / `isPublic` | **隐藏组合待冒烟测试确认**（假设 `isPublic=0` 或 `publishStatus=0` 为不可见态） | 审核通过后 PUT 翻转 |
+| `publishStatus` | **已实测（2026-07-10 冒烟，详见 `docs/foodtalks-api-contract.md`）**：0=草稿（进站态，外界不可见）；1=已发布；2=下线（也不可见，可再翻回 1）。⚠️ 单向门：发布过就回不到 0，驳回回炉用 2 | 进站 POST 用 0，审核通过 PUT 翻 1 |
+| `isPublic` | 🚨 实测**不是可见性开关**（=0 时未登录直链完整可见），真实语义待网站后端确认；同步链路先恒传 1 | 「有料」标签来自 categoryIds，与此无关 |
 | `sourceType`/`sourceId`/`sourceName`/`author` | 转载/原创口径映射，枚举待冒烟确认 | 原创=FBIF，转载带原来源 |
 | `summary` | 公众号摘要（digest），LLM 兜底生成 | |
 | `primaryCategoryId`/`categoryIds` | 走可配置规则（管理后台/env），**不硬编码 58/52** | 全局规则：规则数据可配 |
@@ -102,6 +103,13 @@ type Client interface {
 **幂等**：`publish_jobs` 加 `source_key`（`wechat_mp:{url_hash}`，能拿到 biz/mid/idx 时用之）唯一索引 + `foodtalks_news_id` 回填锚点。创建前查锚点：已有 id → 走 UPDATE 不再 CREATE。这与 push_log 的 `bitable_record_id` 回填模式同构。
 
 **鉴权（最大外部风险，Phase 0 解决）**：现文档的 Bearer 是个人登录 token。上线前必须从网站后端团队拿到：正式环境 Base URL、服务级长效 token（或专用机器账号 + 登录续期方案）、响应体结构与错误码。token 过期的降级行为：job 进 `failed`（错误信息人话提示「FoodTalks 凭证过期」），不静默重试打爆接口。
+
+**FoodTalks API 实测契约（2026-07-10 冒烟，Phase 1 完成）**：完整版见 `docs/foodtalks-api-contract.md`（唯一真相源），客户端实现要点：
+1. 请求必须带 `Origin`+`Referer`+浏览器形 UA，否则 nginx 层 403（HTML 错误页非 JSON）。
+2. 响应统一 `{"code":0,"msg":"success","data":<newsId>}`；**业务失败也是 HTTP 200**（`code!=0` + 中文 `msg`），客户端必须判 `code` 不能信 HTTP 状态码。
+3. API 不校验 `publishStatus` 枚举范围（乱值也 success），客户端只准用 0/1/2。
+4. PUT 是全量覆盖语义，需带完整字段集；编辑就地生效不产生新文章。
+5. 隐藏进站→审核→公开走法已在测试环境全流程走通（文章 7241）：POST(0 草稿) → PUT(1 发布) → PUT(2 下线)。
 
 ### D4. 图片策略：mmbiz 全量转存网站可用存储，禁止外链裸奔
 
@@ -173,7 +181,7 @@ created → fetching（fetch-article 拉 blocks）
 
 ## Risks / Trade-offs
 
-- [FoodTalks「隐藏态」语义与假设不符（比如 isPublic=0 仍出现在列表/搜索）] → Phase 1 冒烟第一项就是创建后用无痕浏览器验证前台各入口不可见；不满足则要求网站侧加草稿态，或降级为「测试分类 + 上线前人工目检」。
+- [FoodTalks「隐藏态」语义与假设不符（比如 isPublic=0 仍出现在列表/搜索）] → **已应验并已解决（2026-07-10 冒烟）**：isPublic=0 确实不隐藏（未登录直链完整可见）；正确的隐藏进站态是 `publishStatus=0`（草稿），全流程已走通，见 `docs/foodtalks-api-contract.md`。
 - [FoodTalks 图片上传接口拿不到] → 硬阻塞，Phase 0 通过抓包 CMS 编辑器或直接询问网站后端解决；过渡方案（自有 OSS+CDN）需先确认 CMS 不清洗外域 img src。
 - [抓包 token 过期导致线上任务集体失败] → 客户端对 401/403 专项识别，job 错误信息直接写「凭证过期，联系 ×× 换发」；Phase 0 争取长效服务凭证是正解。
 - [freepublish/batchget 拉不到「群发」文章] → 自动发现降级半自动（群里贴链接），流水线本体不受影响（D5 已设计为触发可插拔）。
@@ -198,7 +206,7 @@ created → fetching（fetch-article 拉 blocks）
 
 - FoodTalks 正式环境 Base URL、服务级鉴权方案？（Phase 0，问网站后端）
 - 图片上传到 FoodTalks 存储的接口？（Phase 0，抓包或索要——当前最大阻塞）
-- `publishStatus`/`isPublic`/`sourceType` 的完整枚举与「前台完全不可见」的正确组合？（Phase 1 冒烟）
+- ~~`publishStatus` 的「前台完全不可见」正确组合？~~ **已实测**：0=草稿/2=下线均不可见，1=发布可见，单向门 1↛0（`docs/foodtalks-api-contract.md`）。仍待后端确认：`isPublic` 真实语义、`sourceType`/`isLatest`/`commentEnable` 枚举、publishStatus 2 vs 3 官方口径、「有料」categoryId 表。
 - FBIF 订阅号运营日常动作是「群发」还是「发布」？决定 Phase 5 自动发现的可行性。（Phase 0，问运营）
 - 网站文章的 `categoryIds` 由谁定：固定默认？LLM 按内容选？人在审核卡片上改？（MVP 先可配置默认值，卡片改分类留到 Phase 4+）
 - 资讯订阅生产环境出口 IP 是否已在公众号 IP 白名单？（agent-publish-pipeline 用的是测试号 Ecooo，正式号白名单需另配）

@@ -1,0 +1,62 @@
+# WORKLOG：内容发布流水线 Phase 1（FoodTalks API 冒烟）+ Phase 2（render 支持网站模板）
+
+- 日期：2026-07-10
+- 依据：`openspec/changes/content-publish-pipeline/tasks.md` Phase 1 / Phase 2
+- 用户授权：2026-07-10 用户回复「开跑」——批准 Phase 1 对 FoodTalks **测试环境** 的真实写入冒烟 + Phase 2 本仓库代码工作
+- 安全边界（不可越）：只碰测试环境 `api-we-test.foodtalks.cn`；文章标题必须带 `[SYNC-TEST]`；全程保持隐藏态验证，测完下线/删除；不发飞书消息；不碰公众号写接口；token 不进 git/日志
+
+## 目标
+
+- Phase 1：实测 FoodTalks 发布 API 契约（创建隐藏→验证不可见→PUT 编辑→可见性双向翻转→清理），回填 design.md D3
+- Phase 2：`/api/render` 支持 `packId=ft-default` 输出网站模板 HTML，fbif 输出逐字节不变
+
+## 时间线
+
+- [完成] lark-cli 读接口文档（wiki PM9EwLPrAiD6mQkuDYWcAOPUnWb → docx）：POST/PUT `api-we-test.foodtalks.cn/news/admin/news`，抓包 Bearer token，响应体/枚举文档空白
+- [完成] 2.1 创建隐藏文章：初次 403（nginx 层拦无 Origin/Referer 的请求），补 `Origin`+`Referer`+浏览器 UA 后 200
+- [完成] Phase 2 已派后台代理（render-service 支持 ft-default），与 Phase 1 并行
+- [完成] 2.2 可见性验证——**发现 isPublic 语义与假设不符**（见下）
+- [完成] 2.3 PUT 编辑：7240 就地更新（同 id、无新文章、全量覆盖语义、<3s 生效）
+- [完成] 2.4 可见性翻转：1→3(404)→1(恢复)→2(下线)双向可用；**单向门：发布过回不到草稿 0**（code=1 中文报错）
+- [完成] 补测「创建即隐藏」：7241 以 publishStatus=0 草稿进站（外界 404）→ PUT 翻 1 发布（可见）→ PUT 翻 2 下线——**流水线「隐藏进站→审核→公开」全流程走通**
+- [完成] 2.5/2.6 契约入库 `docs/foodtalks-api-contract.md`（.gitignore 单独放行）+ design.md 三处回填 + tasks.md 勾选
+- [完成] 清理复核：列表页无 [SYNC-TEST] 残留，7240/7241 均停在 publishStatus=2 下线态
+
+## 实测记录（Phase 1）
+
+### 网关行为（写进未来客户端）
+- 不带 `Origin`/`Referer` → nginx 直接 403（HTML 错误页，非 JSON）；带上后才到应用层
+- 应用层无 token → 401
+
+### 创建（POST /news/admin/news）
+- 请求：`id:""`, `publishStatus:1`, `isPublic:0`, title 带 [SYNC-TEST]
+- 响应：`{"code":0,"msg":"success","data":7240}` —— **data 直接是资讯 ID（number）**
+
+### 🚨 isPublic 不是可见性开关
+- publishStatus=1 + isPublic=0 的文章，**未登录浏览器直链完整可见**：`https://test.foodtalks.cn/news/7240`（截图留档）
+- 页面标题下出现「**有料**」标签 → isPublic 疑似控制「公开 vs 有料（付费/会员）」栏目属性
+- 隐藏必须靠 publishStatus 非 1（待实测哪个枚举值）
+- 前台路由：列表 `test.foodtalks.cn/news`，详情 `test.foodtalks.cn/news/<id>`；`we-test.foodtalks.cn` 会 302 到 `test.foodtalks.cn/wefood/...` 但 `/wefood` 前缀路由实际被弹回首页（`/wefood` 疑似历史路径）
+- 列表页顶部未出现 7240（isPublic=0 时不进列表？还是列表缓存？待翻转后复核）
+
+### 完整契约（唯一真相源）
+后续全部实测结论（publishStatus 枚举与单向门、错误响应形态、PUT 全量覆盖语义、前台 URL、未决问题清单）已沉淀到 **`docs/foodtalks-api-contract.md`**，本 WORKLOG 不再重复维护。
+
+## Phase 2 进度
+
+（待填）
+
+## 踩坑 / 决策
+
+（待填）
+
+## 待办
+
+- [x] 读飞书接口文档，提取：endpoint 全集、字段、token
+- [x] 2.1 创建 [SYNC-TEST] 隐藏文章
+- [x] 2.2 验证隐藏态外部不可见（浏览器截图留档）
+- [x] 2.3 PUT 编辑验证
+- [x] 2.4 可见性双向翻转 + 清理
+- [x] 2.5 实测契约回填 design.md
+- [x] 2.6 冒烟脚本与记录入库 docs/（`docs/foodtalks-api-contract.md`）
+- [ ] Phase 2：3.1–3.5 后台代理进行中；3.6–3.8（真实文章 diff、部署、线上冒烟）待代理交付后主线接手

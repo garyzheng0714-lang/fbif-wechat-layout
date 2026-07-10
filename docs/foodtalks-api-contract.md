@@ -1,0 +1,75 @@
+# FoodTalks 发布 API 实测契约（2026-07-10 冒烟）
+
+> 来源：openspec change `content-publish-pipeline` Phase 1 冒烟测试实测结论。
+> 环境：测试环境 `api-we-test.foodtalks.cn`（前台 `test.foodtalks.cn`）。
+> 测试文章：7240、7241（标题带 [SYNC-TEST]，测毕均已置 `publishStatus=2` 下线，前台 404）。
+> 鉴权 token 为抓包个人 token，**不入库**（视为已泄露级别，正式上线换服务级凭证，见 tasks Phase 0）。
+
+## 1. 网关（写进未来客户端，缺一层就白忙）
+
+| 层 | 行为 |
+|---|---|
+| nginx/WAF | 请求**必须带 `Origin` + `Referer` 头**（值随意有效域即可），否则直接 403 返回 **HTML 错误页**（不是 JSON） |
+| 应用层 | 无/错 token → 401 |
+
+客户端固定头：`Origin`、`Referer`、浏览器形 `User-Agent`、`Authorization: Bearer <token>`、`Content-Type: application/json;charset=UTF-8`。
+
+## 2. 响应契约
+
+```json
+{"code":0,"msg":"success","data":7240}
+```
+
+- `data` = 资讯 ID（number）。POST 返回新 id；PUT 返回同 id。
+- **业务失败也是 HTTP 200**，靠 body 判断：`code != 0`，`msg` 为中文人话（例：`不允许将已发布的资讯改为草稿状态！`），`data: null`。
+- **客户端必须判 `code` 字段，不能信 HTTP 状态码。**
+
+## 3. publishStatus 枚举（实测）
+
+| 值 | 语义 | 前台表现 | 转移限制 |
+|---|---|---|---|
+| 0 | 草稿 | 直链 404「你查看的内容不存在」，列表无 | **已发布(1) → 0 被拒**（code=1，单向门）；0 → 1 允许 |
+| 1 | 已发布 | 直链完整可见，未登录可看 | 1 → 2/3 允许，2/3 → 1 允许（双向） |
+| 2 | 下线（推测语义） | 直链 404，列表无 | — |
+| 3 | 未知（推测待发布/审核） | 直链 404，列表无 | — |
+
+- ⚠️ **API 不校验枚举范围**：传 2、3 等值一律 `code=0` 成功。客户端必须自律只用已确认语义的值（0/1/2），别的值行为未定义。
+- 「删除」接口未提供；清理测试数据用 `publishStatus=2` 下线即可达到前台不可见。
+
+## 4. 🚨 isPublic 不是可见性开关
+
+- `publishStatus=1 + isPublic=0` 的文章**未登录直链完整可见**——「isPublic=0 即隐藏」的假设不成立。
+- `isPublic` 0/1 之间前台可感知差异未观察到；页面上的「有料」标签在两种取值下都出现，**「有料」来自 `categoryIds`（本次用了示例值 52/58）**，与 `isPublic` 无关。
+- `isPublic` 真实语义待网站后端确认（Phase 0 问题清单）。
+
+## 5. 流水线状态走法（已验证可行）
+
+```
+POST publishStatus=0（草稿进站，外界不可见）
+  → 人工审核
+  → PUT publishStatus=1（公开）
+  → 需要时 PUT publishStatus=2（下线，可再翻回 1）
+```
+
+- 「隐藏进站→审核→翻公开」全流程在测试环境走通（7241 全程验证）。
+- 注意单向门：**一旦发布过（1），永远回不到草稿(0)**，下线只能用 2。job 状态机里「驳回后回炉」要用 2 不能用 0。
+
+## 6. 前台 URL（测试环境）
+
+- 列表：`https://test.foodtalks.cn/news`（客户端渲染 SPA；SSR 壳不含正文，可见性校验要跑真浏览器或调详情数据接口）
+- 详情：`https://test.foodtalks.cn/news/<id>`
+- ❌ `we-test.foodtalks.cn` 会 302 到 `test.foodtalks.cn/wefood/...`，而 `/wefood` 前缀路由一律被弹回首页——**不要用**。
+
+## 7. 编辑（PUT）行为
+
+- 传已有 `id` + 全量字段：就地更新，不产生新文章；标题/正文改动即时生效（实测 <3s 可见）。
+- PUT 是**全量覆盖**语义（请求体和 POST 相同的完整字段集），不是增量 patch——客户端必须保存/回读完整字段再改。
+
+## 8. 未决问题（转给网站后端 / Phase 0）
+
+1. `isPublic`、`sourceType`、`isLatest`、`commentEnable` 的完整枚举与语义
+2. `publishStatus=2` vs `3` 的官方语义区分
+3. **图片上传接口**（正文与封面转存，硬阻塞）
+4. 正式环境 Base URL + 服务级长效 token
+5. 「有料」标签对应的 categoryId 表；线上分类 ID 全集（本次沿用文档示例 52/58）
+6. 列表页排序规则（2026 年文章混在 2023 年之后，疑有置顶/权重逻辑，同步后运营可见性预期要对齐）
