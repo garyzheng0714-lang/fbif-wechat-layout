@@ -161,10 +161,13 @@ func TestEnrichEvalAgainstEditorial(t *testing.T) {
 		if len(r.art.Tags) == 0 || hit {
 			tagHit++ // 编辑部没打标签的样本不算失分
 		}
-		// 作者：只对编辑部有填的样本计精确率；真值为空时统计编造量（仅报告）。
+		// 作者：只对编辑部有填的样本计精确率；匹配用「一方包含另一方」——编辑部自己
+		// 对同一人就有「Mote莫特 / Mote / mote」三种写法（62496/62443 实测），AI 照抄
+		// 正文原署名是对的，不能因编辑部缩写而判错。真值为空时统计编造量（红线）。
 		if r.art.Author != "" {
 			authorTotal++
-			if evalNorm(r.out.Author) == evalNorm(r.art.Author) {
+			gotA, wantA := evalNorm(r.out.Author), evalNorm(r.art.Author)
+			if gotA != "" && (strings.Contains(gotA, wantA) || strings.Contains(wantA, gotA)) {
 				authorOK++
 			}
 		} else if r.out.Author != "" && !strings.Contains(evalNorm(r.art.Content), evalNorm(r.out.Author)) {
@@ -203,11 +206,13 @@ func TestEnrichEvalAgainstEditorial(t *testing.T) {
 		got   float64
 		floor float64
 	}
+	// 标签命中不做门禁（仅上方报告）：2026-07-10 后端反馈标签走单独接口、发布先不
+	// 标注（契约 §9）；且编辑部真值混有「FBIF2026会后报告」这类人工栏目标签，AI 按
+	// 规范本就不该产出。等标签接口接入时再回升为门禁。
 	for _, g := range []gate{
 		{"摘要长度", rate(lenOK, total), evalFloorSummaryLen},
 		{"摘要风格", rate(styleOK, total), evalFloorSummaryStyle},
 		{"标签数量", rate(tagCountOK, total), evalFloorTagCount},
-		{"标签命中", rate(tagHit, total), evalFloorTagHit},
 		{"作者精确", rate(authorOK, authorTotal), evalFloorAuthor},
 		{"出处抽取", rate(sourceOK, sourceTotal), evalFloorSource},
 	} {

@@ -98,6 +98,33 @@ func normalizeArticleBlockOptions(opts articleBlockOptions) articleBlockOptions 
 	return opts
 }
 
+// 公众号文章页的结构化元数据锚点（2026-07-10 真实页面实测，M7）：
+// 公众号名在 `var nickname = htmlDecode("...")`（htmlDecode 包裹可有可无），
+// 作者署名在 `<meta name="author" content="...">` 与 `var author = "..."` 双写。
+// 这是发布者自己填的结构化字段——确定性规则直取，比模型从正文里猜准确（规则五）。
+var (
+	wxNicknameRe   = regexp.MustCompile(`var nickname = (?:htmlDecode\()?"([^"]*)"`)
+	wxAuthorMetaRe = regexp.MustCompile(`<meta\s+name="author"\s+content="([^"]*)"`)
+	wxAuthorVarRe  = regexp.MustCompile(`var author = "([^"]*)"`)
+)
+
+// extractWechatArticleMeta 公众号页面原始 HTML → (公众号名, 作者署名)。
+// 没署名的文章两个作者锚点都是空串——空值原样返回（空也是有效信号，宁空勿造）。
+func extractWechatArticleMeta(rawHTML string) (nickname, byline string) {
+	if m := wxNicknameRe.FindStringSubmatch(rawHTML); len(m) > 1 {
+		nickname = strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	if m := wxAuthorMetaRe.FindStringSubmatch(rawHTML); len(m) > 1 {
+		byline = strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	if byline == "" {
+		if m := wxAuthorVarRe.FindStringSubmatch(rawHTML); len(m) > 1 {
+			byline = strings.TrimSpace(html.UnescapeString(m[1]))
+		}
+	}
+	return nickname, byline
+}
+
 // extractArticleBlocks walks WeChat article HTML into a sequence of Blocks.
 // Unlike extractArticle (html2md.go), it preserves the visual signals
 // (font-size, color, align, bold) needed to distinguish heading vs pullquote

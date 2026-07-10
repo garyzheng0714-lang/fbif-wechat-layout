@@ -127,9 +127,9 @@ func newPublishTestEnv(t *testing.T) *publishTestEnv {
 	}
 	env.pipeline = &publishPipeline{
 		store: env.store,
-		fetch: func(ctx context.Context, articleURL string) (string, string, string, error) {
+		fetch: func(ctx context.Context, articleURL string) (string, string, string, string, error) {
 			env.fetchCalls++
-			return "测试标题", "测试公众号", testPublishBlocksJSON, nil
+			return "测试标题", "测试公众号", "", testPublishBlocksJSON, nil
 		},
 		render: func(ctx context.Context, title, source, blocksJSON string) (string, error) {
 			return testPublishRenderedHTML, nil

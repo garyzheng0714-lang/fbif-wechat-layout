@@ -182,5 +182,21 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - [x] B. 规范文档 `docs/editorial-norms-foodtalks.md`
 - [x] C. 代码：norms_prompt.md（go:embed）+ editorial_norms.go 组装 prompt（{{VOCAB}} 注入前 300 高频标签）；enrich 输出加 source_name；job 加 ai_source；siteSourceFor 确定性判定（SITE_OWN_ACCOUNTS env）；buildSiteNews 补 SourceName/SourceType、author 不再回落 source_name；fallback 摘要 100→40 字、author 空；预览页加「来源」行；全部 api 测试绿
 - [x] D. newsTags 实验完成——**结构破解：[{tagId,tagName}] 对象数组且 tagId 必须真实存在（POST ✅）；但后端 PUT 带标签必 500 且污染文章成「任何 PUT 都 500」**（翻公开会卡死）→ 修复前恒空不变，完整矩阵进契约 §9，转后端修（实验文章 7246/7247/7248 停留草稿态无法 API 下线，请后端清理）
-- [ ] E. 准确率评测：评测器已建（api/publish_enrich_eval_test.go，6 项指标+达标线+作者幻觉红线）；本地到 ARK 网络超时 → 服务器（121）装 Go 跑全量 40 篇，冒烟 1 篇质量极好（摘要 26 字钩子体、标签与编辑部完全一致、出处「新零售」抽对）——**跑分中**
-- [ ] F. 契约文档更新（§9 矩阵已写）+ 部署验证
+- [ ] E. 准确率评测（服务器 121 装 Go1.22.5 跑，本地到 ARK 必超时勿在 Mac 跑）：
+  - 第 1 轮（24 样本/16 超时）：摘要长度/风格/标签数量 100%、出处抽取 11/11=100%、作者 3/6、标签命中 14/24=58%、编造 0
+  - 修正：①ARK 客户端超时 120s→300s（16 篇超时全是 context deadline，长文思考超 120s；生产同样受益——超时走兜底=浪费 AI）②作者匹配改「一方包含另一方」（编辑部对同一人有 Mote莫特/Mote/mote 三种写法，AI 照抄正文不算错）③标签命中降级为仅报告（**后端反馈标签走单独接口、先不标注**——用户 2026-07-10 转达；且真值混栏目标签 AI 按规范不产出）
+  - 第 2 轮（40 样本/0 超时——300s 修复生效）：摘要长度/风格/标签数量 100%、出处抽取 13/14=93%、编造 0、作者 6/10=60%（4 miss：2 个是编辑部把自家商务稿记机构名的记账偏好、2 个真漏抽——中文尾部署名+英文 Author 形态）
+  - 修正④：prompt 作者规则补「文首文末都找、认 文｜X / Author: X / By X、编辑排版审核不算作者」——第 3 轮跑分中；生产主路径已是页面结构化直取（见下节），AI 评测口径=兜底路径质量
+- [ ] F. 契约文档更新（§9 矩阵+后端「标签单独接口」裁定已写）+ 飞书 API 文档已同步 bug 报告 + 部署验证
+
+### 作者改结构化直取（2026-07-10 用户裁定「从公众号里直接提取，准确度更高」）
+
+排查中抓到暗伤：施工图偏离记录 1 说「extractArticleBlocks 一直在产出公众号名」**与代码不符**——那条链路两处 return 都是空串，生产 job #1/#2 的 source_name 一直是空的（siteSourceFor 会把 FBIF 自家文章误判成转载）。修正：
+
+- 真实页面实测锚点：公众号名 `var nickname = htmlDecode("...")`；作者署名 `<meta name="author">` 与 `var author = "..."` 双写（未署名文章两处都是空串——空也是有效信号）。
+- 新增 `extractWechatArticleMeta`（wechat_blocks.go，确定性正则直取）；`fetchDirectBlocksWithOptions` 第 4/5 返回值改为 (sourceName, byline)；stageFetch 落 j.SourceName + j.Author=byline。
+- **优先级合同：结构化署名 > AI 正文识别**——stageEnrich 只在 j.Author 为空时才用 AI 值（TestEnrichKeepsStructuredByline 守）；AI 作者评测退化为「兜底路径质量」口径（评测集是 CMS 文章无公众号 meta，正好只测兜底路径）。
+- 单测：TestExtractWechatArticleMeta（htmlDecode 包裹/var 兜底/未署名空值三形态）。
+
+### newsTags 谜底闭环（2026-07-10 下午）
+字符串数组 500 → 库表启发对象数组 → POST [{tagId,tagName}] 成功但 PUT 必 500 且污染文章 → **后端裁定：标签是单独接口，news payload 本就不带标签**。恒空是正确终态（不是权宜）；AI 标签只做审核展示。实验文章 7246/7247/7248 留测试环境草稿态待后端清理。

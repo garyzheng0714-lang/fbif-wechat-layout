@@ -9,6 +9,7 @@ package main
 //   3. buildSiteNews 消费 AI 字段（Summary/Author/NewsTags/CoverImg）。
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -296,5 +297,29 @@ func TestHTMLToPlainText(t *testing.T) {
 	}
 	if got := truncateRunes("一二三四五", 3); got != "一二三" {
 		t.Fatalf("truncateRunes 按字符截断错误：%q", got)
+	}
+}
+
+// TestEnrichKeepsStructuredByline 结构化署名优先（M7 用户裁定「作者从公众号页面
+// 直接提取更准」）：fetching 从页面 meta/var author 直取的署名落在 job.Author，
+// enriching 的 AI 识别值**不得覆盖**它；只有页面未署名（byline 空）时 AI 才兜底。
+func TestEnrichKeepsStructuredByline(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, error) {
+		return "测试标题", "FBIF食品饮料创新", "Mote莫特", testPublishBlocksJSON, nil
+	}
+	env.pipeline.enrich = func(ctx context.Context, job publishJob) (publishEnrichment, error) {
+		return publishEnrichment{Summary: "钩子摘要。", Author: "正文里猜的名字"}, nil
+	}
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Author != "Mote莫特" {
+		t.Fatalf("结构化署名被 AI 覆盖：%q", got.Author)
+	}
+	if got.Summary != "钩子摘要。" {
+		t.Fatalf("摘要应正常注入：%q", got.Summary)
 	}
 }

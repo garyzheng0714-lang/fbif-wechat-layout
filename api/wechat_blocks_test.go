@@ -1277,3 +1277,28 @@ func TestTableThCellsAreHeader(t *testing.T) {
 		t.Errorf("<th> 单元格应标 Header=true")
 	}
 }
+
+// TestExtractWechatArticleMeta 公众号页面结构化元数据直取（M7）：公众号名走
+// var nickname（htmlDecode 包裹可有可无），作者署名 meta author 优先、var author
+// 兜底；没署名的文章返回空串——这是发布者填的字段，宁空勿造（规范 §5）。
+func TestExtractWechatArticleMeta(t *testing.T) {
+	page := `<html><head><meta name="author" content="Mote&amp;莫特" /></head>
+<script>var nickname = htmlDecode("FBIF食品饮料创新");var author = "备用名";</script></html>`
+	nickname, byline := extractWechatArticleMeta(page)
+	if nickname != "FBIF食品饮料创新" {
+		t.Fatalf("公众号名解析失败：%q", nickname)
+	}
+	if byline != "Mote&莫特" {
+		t.Fatalf("meta author 应优先且解码实体：%q", byline)
+	}
+	// meta 缺失 → var author 兜底；nickname 无 htmlDecode 包裹也要认。
+	nickname, byline = extractWechatArticleMeta(`<script>var nickname = "小食代";var author = "何丹琳";</script>`)
+	if nickname != "小食代" || byline != "何丹琳" {
+		t.Fatalf("var 形态解析失败：%q %q", nickname, byline)
+	}
+	// 未署名文章（2026-07-10 真实页面形态）：两个锚点都空。
+	nickname, byline = extractWechatArticleMeta(`<meta name="author" content="" /><script>var nickname = htmlDecode("FBIF食品饮料创新");var author = "";</script>`)
+	if nickname != "FBIF食品饮料创新" || byline != "" {
+		t.Fatalf("未署名文章应返回空 byline：%q %q", nickname, byline)
+	}
+}

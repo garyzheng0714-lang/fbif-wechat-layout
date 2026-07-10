@@ -70,8 +70,10 @@ type publishPipeline struct {
 	store *publishJobStore
 	rules *rulePresetStore
 
-	// fetch 公众号 URL → 标题 + 公众号名 + 中立 Block[] JSON（默认复用 fetchDirectBlocksWithOptions）
-	fetch func(ctx context.Context, articleURL string) (title, sourceName, blocksJSON string, err error)
+	// fetch 公众号 URL → 标题 + 公众号名 + 结构化作者署名 + 中立 Block[] JSON
+	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
+	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7）
+	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, blocksJSON string, err error)
 	// render Block[] → ft-default 规则包内联 HTML（默认走 render_proxy 转发内核）
 	render func(ctx context.Context, title, source, blocksJSON string) (string, error)
 	// ossUpload 整批图片 URL → OSS 转存（默认走 /api/oss-upload 的上游代理内核，urls 模式）
@@ -102,7 +104,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		spawn:     func(f func()) { go f() },
 		now:       time.Now,
 	}
-	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, error) {
+	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, error) {
 		return fetchSiteArticle(rules, articleURL)
 	}
 	if n := newFeishuNotifierFromEnv(); n != nil {
@@ -156,19 +158,19 @@ func normalizeSiteSourceKey(rawURL string) (string, error) {
 // fetchSiteArticle 进程内复用 main.go 的抓取主路径 fetchDirectBlocksWithOptions
 // （含限流重试）；x-reader Markdown 回退喂不进渲染器，此处按失败处理（fail loud）。
 // caption 参数取网站渠道账号（ft-default）的规则配置，与人工导入同口径。
-func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string, string, error) {
-	title, blocks, author, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, foodTalksSiteRuleAccountID))
+func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string, string, string, error) {
+	title, blocks, sourceName, byline, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, foodTalksSiteRuleAccountID))
 	if err != nil {
-		return "", "", "", fmt.Errorf("文章抓取失败: %w", err)
+		return "", "", "", "", fmt.Errorf("文章抓取失败: %w", err)
 	}
 	if len(blocks) == 0 {
-		return "", "", "", errors.New("未能从文章解析出内容块（链接可能已过期或被限流，请稍后重试）")
+		return "", "", "", "", errors.New("未能从文章解析出内容块（链接可能已过期或被限流，请稍后重试）")
 	}
 	raw, err := json.Marshal(blocks)
 	if err != nil {
-		return "", "", "", fmt.Errorf("序列化内容块失败: %w", err)
+		return "", "", "", "", fmt.Errorf("序列化内容块失败: %w", err)
 	}
-	return title, author, string(raw), nil
+	return title, sourceName, byline, string(raw), nil
 }
 
 // renderSiteHTML 进程内复用 render_proxy.go 的转发内核，packId=ft-default。
@@ -313,10 +315,10 @@ func (p *publishPipeline) runJob(jobID int64) {
 	}
 }
 
-// stageFetch 抓公众号文章 → 标题 + 公众号名 + Block[] 落库。blocks 必须先落库再推进：
-// 公众号临时链接（含 chksm）会过期，后续阶段失败重试不再回源。
+// stageFetch 抓公众号文章 → 标题 + 公众号名 + 结构化作者署名 + Block[] 落库。
+// blocks 必须先落库再推进：公众号临时链接（含 chksm）会过期，后续阶段失败重试不再回源。
 func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error {
-	title, sourceName, blocksJSON, err := p.fetch(ctx, job.SourceURL)
+	title, sourceName, byline, blocksJSON, err := p.fetch(ctx, job.SourceURL)
 	if err != nil {
 		return err
 	}
@@ -329,6 +331,7 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 	_, err = p.store.update(job.ID, func(j *publishJob) {
 		j.Title = title
 		j.SourceName = sourceName
+		j.Author = byline // 页面结构化署名（可为空）；enriching 只在它为空时用 AI 兜底
 		j.BlocksJSON = blocksJSON
 		j.Stage = publishStageRendering
 		j.FailedStage = ""
@@ -455,7 +458,11 @@ func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error
 		}
 		j.Summary = result.Summary
 		j.Tags = result.Tags
-		j.Author = result.Author
+		if strings.TrimSpace(j.Author) == "" {
+			// 结构化署名（fetching 从页面 meta/var author 直取）优先；AI 从正文
+			// 识别只做兜底——发布者自己填的字段永远比模型猜的准（M7 用户裁定）。
+			j.Author = result.Author
+		}
 		j.AISource = result.SourceName
 		j.AINotes = result.Notes
 		j.Stage = publishStageStaging
@@ -681,11 +688,10 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 		IsPublic:      1, // ⚠️ 实测非可见性开关（契约 §4），恒 1；隐藏靠 publishStatus=0
 		Author:        strings.TrimSpace(job.Author),
 		Summary:       job.Summary, // M5 AI 摘要（兜底=正文前 100 字）
-		// newsTags 恒空：结构已破解（对象数组 [{tagId,tagName}]，tagId 必须真实存在），
-		// 但后端 UPDATE 路径有 bug——PUT 带非空标签必 500，且失败后文章进「带标签」脏态、
-		// 此后任何 PUT 都 500（翻公开也会卡死）。完整实测矩阵见契约 §9。修复前恒空是
-		// 唯一安全解；AI 标签（job.Tags）只在审核卡片与预览页展示，词表（含 tagId）已
-		// 备好在 api/editorial/tag_vocab.json，后端修好即可解锁直发。
+		// newsTags 恒空（后端裁定 2026-07-10）：标签走**单独接口**，news payload 本就
+		// 不该带标签（带了必 500 且污染文章，实测矩阵见契约 §9）；发布先不标注。
+		// AI 标签（job.Tags）只在审核卡片与预览页展示，词表（含 tagId）备在
+		// api/editorial/tag_vocab.json，待标签接口文档到手再接。
 		NewsTags:          []string{},
 		Content:           job.ContentHTML, // mirroring 后成品（图片已全部 OSS 化；enriching 绝不改它）
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),

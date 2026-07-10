@@ -116,8 +116,10 @@ func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, e
 	return parseEnrichmentJSON(text, images)
 }
 
-// arkHTTPClient 多模态推理慢（要看图），超时给足；测试桩即回不受影响。
-var arkHTTPClient = &http.Client{Timeout: 120 * time.Second}
+// arkHTTPClient 多模态推理慢（要看图、要思考长文）：2026-07-10 评测实测 120s 会让
+// 40% 的长文超时（走兜底浪费 AI），放宽到 300s——enriching 是异步阶段，慢无妨；
+// 测试桩即回不受影响。
+var arkHTTPClient = &http.Client{Timeout: 300 * time.Second}
 
 // arkExtractOutputText responses API 响应 → 模型输出文本：遍历 output[].content[] 拼接
 // output_text（跳过 reasoning 等非 message 项），HTTP/业务错误显式报错。
