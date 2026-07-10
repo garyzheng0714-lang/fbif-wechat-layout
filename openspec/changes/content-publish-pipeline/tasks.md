@@ -29,8 +29,8 @@
 - [x] 3.4 确认 CMS 存活开关（table `outerBorder`+`cmsSurvival`、图片 width 双写）在 API 渲染路径生效（2026-07-10：headless 输出实测 table border/cellpadding + td align/bgcolor + strong 齐全）
 - [x] 3.5 新增 `tests/render-service-site.test.mjs`：样例 blocks → 断言网站模板特征、表格 CMS 存活（模拟清洗器复演真值审计口径）、页脚存在、fbif 输出逐字节不变（2026-07-10：golden 由重构前代码生成 `tests/golden/render-service-fbif.html`；npm test 792 全绿）
 - [x] 3.6 用一篇真实公众号文章（fetch-article → render ft-default）与人工 `/ft/` 排版结果做结构 diff，验证同源（2026-07-10：真值文章 62285/星巴克茶品牌，188 blocks；正文中段 498 标签与浏览器人工链路逐组指纹 100% 一致；头（Mote作者行）尾（版权声明段）两处差异以已发布成品 ft-groundtruth/62285.gt.html 为真值裁决——成品两段皆有、API 输出两段皆有且逐标签同构，浏览器本地缺失系本地种子规则页脚关闭+作者行提取进 CMS 表单所致，非渲染不同源）
-- [ ] 3.7 `npm test` + `cd api && go test ./...` 全绿；部署（deploy.yml 无需新 env）；线上 curl 冒烟 ft-default
-- [ ] 3.8 验收：线上 `/api/render packId=ft-default` 对样例文章出网站 HTML；红线 #19/#23 回归测试全绿
+- [x] 3.7 `npm test` + `cd api && go test ./...` 全绿；部署（deploy.yml 无需新 env）；线上 curl 冒烟 ft-default（2026-07-10：CI 测试门禁全绿，run 29062786816 部署成功，生产 version=7fad2fc；render 服务生产端口 19096）
+- [x] 3.8 验收：线上 `/api/render packId=ft-default` 对样例文章出网站 HTML；红线 #19/#23 回归测试全绿（2026-07-10：真实文章 62285 blocks 生产重放，输出 30078 字节与本地逐字节同长、imgN17/headingN10 一致、Mote 署名 #888888 同构成品；未知 packId 400；fbif 输出正常；红线测试随 npm test 792 全绿。备查：手造非契约形态 blocks 时 ft 模板静默出空而 fbif 宽容输出——两渲染器既有差异，真实链路 blocks 均出自 fetch-article/html-to-blocks 不受影响）
 
 ## 4. Phase 3 — 资讯订阅 MVP 闭环：手动 URL → 隐藏发布 → 文本通知（仓库 FBIF资讯订阅）
 

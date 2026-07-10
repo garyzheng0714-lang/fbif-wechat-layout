@@ -64,4 +64,11 @@
 - [x] 2.4 可见性双向翻转 + 清理
 - [x] 2.5 实测契约回填 design.md
 - [x] 2.6 冒烟脚本与记录入库 docs/（`docs/foodtalks-api-contract.md`）
-- [ ] Phase 2：3.1–3.5 后台代理进行中；3.6–3.8（真实文章 diff、部署、线上冒烟）待代理交付后主线接手
+- [x] Phase 2：3.1–3.5 代理交付+主线验收（792 全绿，提交 2f201ac）；3.6 同源验证通过；3.7 部署成功（version=7fad2fc）；3.8 生产重放真实文章 30078 字节与本地同长——**Phase 1 + Phase 2 全部完成**
+
+## 交接要点（下一阶段 Phase 3 用）
+
+- 生产 render 服务端口 **19096**（非 19091——19091 被 docker 占用；unit 里 Environment=RENDER_PORT=19096），RULES_API_ORIGIN=127.0.0.1:9001
+- ft-default 模板对非契约形态 blocks 静默输出空 HTML（fbif 则宽容输出）；调用方必须用 fetch-article / html-to-blocks 的原生输出
+- 生产 ft-default 激活规则当前对真实文章的输出与本地默认种子等效（30078 字节一致）；页脚显隐跟随服务端运营态，上线流水线前复核 bottom_blocks.enabled
+- 图片转存（mmbiz → 网站存储）不在 render API 职责内，是资讯订阅仓库 Phase 3 任务 4.3；浏览器人工链路的「未转存阻止复制」守卫在 API 路径不存在
