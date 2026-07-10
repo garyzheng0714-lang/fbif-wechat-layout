@@ -760,6 +760,8 @@ export function initApp(initialTemplate) {
   }
 
   async function buildArticleSession(input, result, options = {}) {
+    const commitGate = options.commitGate || null;
+    if (commitGate && commitGate.stale()) return null;
     if (options.resetArticleArtifacts) resetMoreArticlesForNewArticle();
     const bodyOnly = !!input.bodyOnly;
     const articleHtml = result.lines.join('\n');
@@ -787,9 +789,17 @@ export function initApp(initialTemplate) {
         articleMeta,
         footerVisibilityOverride,
       });
+      if (commitGate && commitGate.stale()) return null;
       articleFooterProfile = profile || null;
       footerHtml = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2 });
-      footerCopy = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2, copySafe: true });
+      if (commitGate && commitGate.stale()) return null;
+      footerCopy = await buildFooterWithMoreArticles(baseFooterHtml, {
+        isRepost,
+        isV2,
+        copySafe: true,
+        canCommitCards: () => !commitGate || !commitGate.stale(),
+      });
+      if (commitGate && commitGate.stale()) return null;
     }
     const elapsed = options.startedAt ? ((performance.now() - options.startedAt) / 1000).toFixed(1) : options.elapsed;
     const title = result.title || input.title || '';
@@ -820,6 +830,7 @@ export function initApp(initialTemplate) {
 
   function activateArticleSession(session) {
     if (!session) return;
+    _articleInputPending = false;
     _articleSession = session;
     _lastRenderInput = session.input || null;
     _isRepost = !!(_lastRenderInput && _lastRenderInput.isRepost);
@@ -840,6 +851,7 @@ export function initApp(initialTemplate) {
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('fbif:article-session-activated', { detail: { session } }));
     }
+    flushRerenderAfterInput();
   }
 
   async function handleFiles(files, opts) {
@@ -1016,6 +1028,8 @@ export function initApp(initialTemplate) {
     _uploadDone = true;
     _uploadPromise = null;
     copySession.resetForNewArticle();
+    _articleInputPending = false;
+    clearQueuedInputRerender();
     _moreArticlesCopyJob = null;
     resetRetryUploadUI();
     clearUploadVisual();
@@ -1080,12 +1094,23 @@ export function initApp(initialTemplate) {
   // visual signals). Falls back to _handleFile with a synthetic .md File
   // when the server returns {title, content} (x-reader fallback).
   window._handleBlocks = async (data, opts) => {
+    // 新输入是文章级意图边界：解析、旧文章上传、更多文章、复制、重试等
+    // 所有在途回写都必须同时失效，不能只挡解析结果。
+    copySession.resetForNewArticle();
+    clearQueuedInputRerender();
+    const inputCommit = articleInputGate.capture();
+    _articleInputPending = true;
     // Repost flag 局部捕获（同 processFile/handleFile）：footer 链路用局部，不回读全局。
     const isRepost = !!(opts && opts.isRepost);
     _isRepost = isRepost;
     _convLog.length = 0;
     clearUploadVisual();
-    dispatchArticleEvent('fbif:article-input-started', { source: 'blocks', title: data && data.title || '', isRepost });
+    dispatchArticleEvent('fbif:article-input-started', {
+      source: 'blocks',
+      origin: opts && opts.source || '',
+      title: data && data.title || '',
+      isRepost,
+    });
     logConv('info', '开始转化', { source: 'blocks', blocks: (data.blocks || []).length });
     errorEl.style.display = 'none';
     showImportEntry();
@@ -1102,6 +1127,7 @@ export function initApp(initialTemplate) {
       // async context anyway, and future work (e.g. image pre-fetch)
       // might make it async. The await has zero cost on plain returns.
       await waitForActiveRuleConfigReady('blocks-upload');
+      if (inputCommit.stale()) return false;
       const input = {
         kind: 'blocks',
         payload: data,
@@ -1113,13 +1139,16 @@ export function initApp(initialTemplate) {
         articleArtifactOverride: normalizeArticleArtifactOverride(opts && opts.articleArtifactOverride),
       };
       const result = await renderArticleInput(input);
+      if (inputCommit.stale()) return false;
       logConv('info', '结构化解析完成', { paragraphs: result.lines.length, images: result.imgN });
 
       const session = await buildArticleSession(input, result, {
         resetArticleArtifacts: true,
         startedAt: t0,
         autofillAuthorCard: true,
+        commitGate: inputCommit,
       });
+      if (!session || inputCommit.stale()) return false;
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       session.stats = formatRenderStats(result, elapsed);
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
@@ -1127,20 +1156,60 @@ export function initApp(initialTemplate) {
       progressFill.style.width = '100%';
       progressText.textContent = '排版完成!';
       dropZone.classList.remove('processing');
-      setTimeout(() => activateArticleSession(session), 200);
+      setTimeout(() => {
+        if (inputCommit.stale()) return;
+        _articleInputPending = false;
+        activateArticleSession(session);
+      }, 200);
+      return true;
     } catch (err) {
+      if (inputCommit.stale()) return false;
+      _articleInputPending = false;
       logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
       progress.style.display = 'none';
       showError('排版失败: ' + sanitizeErrMsg(err.message));
+      flushRerenderAfterInput();
+      return false;
     }
   };
+
+  // 规则在文件 / blocks 解析期间变更时，不能直接丢掉重排。
+  // 先合并为一个待处理任务；当前输入激活（或失败）后立即消费。
+  function queueRerenderAfterInput(options = {}) {
+    _rerenderAfterInput = true;
+    _rerenderAfterInputOptions = { ...(_rerenderAfterInputOptions || {}), ...options };
+  }
+
+  function clearQueuedInputRerender() {
+    _rerenderAfterInput = false;
+    _rerenderAfterInputOptions = null;
+  }
+
+  function flushRerenderAfterInput() {
+    if (!_rerenderAfterInput || _articleInputPending) return false;
+    const options = _rerenderAfterInputOptions || {};
+    clearQueuedInputRerender();
+    Promise.resolve(_engineRerender(options)).catch(err => console.error('[engine] queued rerender failed:', err));
+    return true;
+  }
 
   // Re-render the current article session with the latest _activeConfig without
   // re-parsing the source file. Safe to call before any file is loaded.
   async function _engineRerender(options = {}) {
+    const detailedOutcome = options && options.__detailedOutcome === true;
+    const outcome = (status, legacyValue, err) => detailedOutcome
+      ? { status, ...(err ? { error: String(err && err.message || err) } : {}) }
+      : legacyValue;
+    if (_articleInputPending) {
+      queueRerenderAfterInput(options);
+      return outcome('deferred', false);
+    }
+    clearQueuedInputRerender();
+    renderCommitGate.invalidate();
+    const renderCommit = renderCommitGate.capture();
     const cached = (_articleSession && _articleSession.input) || _lastRenderInput;
-    if (!cached) return;
+    if (!cached) return outcome('noop', undefined);
     const articleArtifactOverride = Object.prototype.hasOwnProperty.call(options, 'articleArtifactOverride')
       ? normalizeArticleArtifactOverride(options.articleArtifactOverride)
       : cached.articleArtifactOverride;
@@ -1152,29 +1221,47 @@ export function initApp(initialTemplate) {
     try {
       const t0 = performance.now();
       const result = await renderArticleInput(renderInput);
-      const session = await buildArticleSession(cached, result, {
+      if (renderCommit.stale()) return outcome('superseded', false);
+      const session = await buildArticleSession(renderInput, result, {
         startedAt: t0,
         autofillAuthorCard: !!options.autofillAuthorCard,
         footerVisibilityOverride: Object.prototype.hasOwnProperty.call(options, 'footerVisibilityOverride')
           ? options.footerVisibilityOverride
           : renderInput.footerVisibilityOverride,
         articleArtifactOverride,
+        commitGate: renderCommit,
       });
+      if (!session || renderCommit.stale()) return outcome('superseded', false);
       activateArticleSession(session);
+      return outcome('committed', true);
     } catch (err) {
+      if (renderCommit.stale()) return outcome('superseded', false);
       console.error('[engine] rerender failed:', err);
+      return outcome('failed', false, err);
     }
   }
 
   // Make rerender callable from inline scripts (site.html / app.html sidebar)
   window._engineRerender = _engineRerender;
-  window.addEventListener('fbif:rules-ready', () => {
-    if ((_articleSession && _articleSession.input) || _lastRenderInput) {
+  window.addEventListener('fbif:rules-ready', event => {
+    if (event && event.detail && event.detail.failed) return;
+    if (_articleInputPending || (_articleSession && _articleSession.input) || _lastRenderInput) {
       _engineRerender({ autofillAuthorCard: true });
     }
   });
+  function invalidatePendingArticleWork() {
+    copySession.resetForNewArticle();
+    _articleInputPending = false;
+    clearQueuedInputRerender();
+    _moreArticlesCopyJob = null;
+    dropZone.classList.remove('processing');
+    progress.style.display = 'none';
+    progressFill.style.width = '0%';
+    resetRetryUploadUI();
+  }
   window._engineSwitchTemplate = async function(nextTemplate, options = {}) {
     if (!nextTemplate) return false;
+    invalidatePendingArticleWork();
     template = nextTemplate;
     _activeTemplate = nextTemplate;
     applyTemplateShell(template);
@@ -1220,20 +1307,31 @@ export function initApp(initialTemplate) {
     setActiveConfig,
     getActiveConfig,
     rerender: (options) => _engineRerender(options),
+    rerenderWithStatus: (options = {}) => _engineRerender({ ...options, __detailedOutcome: true }),
     switchTemplate: window._engineSwitchTemplate,
     setFooterVisibilityOverride,
     setArticleArtifactOverride,
     setArticleStrategy,
     setArticleRepost,
+    invalidatePendingWork: invalidatePendingArticleWork,
   };
 
   async function handleFile(file, opts) {
+    copySession.resetForNewArticle();
+    clearQueuedInputRerender();
+    const inputCommit = articleInputGate.capture();
+    _articleInputPending = true;
     // Repost flag 局部捕获：footer 选预设全程用此局部，绝不在 await 之后回读模块级 _isRepost
     // （并发导入交错会污染全局；codex re-review）。全局仍同步设置，供快照/renderBottomFooter 兜底。
     const isRepost = !!(opts && opts.isRepost);
     _isRepost = isRepost;
     _convLog.length = 0;
-    dispatchArticleEvent('fbif:article-input-started', { source: 'file', file: file && file.name || '', isRepost });
+    dispatchArticleEvent('fbif:article-input-started', {
+      source: 'file',
+      origin: opts && opts.source || '',
+      file: file && file.name || '',
+      isRepost,
+    });
     logConv('info', '开始转化', { file: file.name, size: (file.size / 1024).toFixed(1) + 'KB' });
     errorEl.style.display = 'none';
     showImportEntry();
@@ -1245,15 +1343,20 @@ export function initApp(initialTemplate) {
       const t0 = performance.now();
 
       file = await normalizeToDocx(file, (pct, msg) => {
+        if (inputCommit.stale()) return;
         progressText.textContent = msg;
         progressFill.style.width = pct + '%';
       });
+      if (inputCommit.stale()) return false;
       await waitForActiveRuleConfigReady('single-upload');
+      if (inputCommit.stale()) return false;
       progressFill.style.width = '97%';
       progressText.textContent = '正在解析...';
 
       const input = await parseFileToArticleInput(file, isRepost, opts);
+      if (inputCommit.stale()) return false;
       const result = await renderArticleInput(input);
+      if (inputCommit.stale()) return false;
       if (input.kind === 'docx') {
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
       } else if (input.kind === 'md') {
@@ -1266,7 +1369,9 @@ export function initApp(initialTemplate) {
         resetArticleArtifacts: true,
         startedAt: t0,
         autofillAuthorCard: true,
+        commitGate: inputCommit,
       });
+      if (!session || inputCommit.stale()) return false;
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       session.stats = formatRenderStats(result, elapsed);
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
@@ -1277,12 +1382,21 @@ export function initApp(initialTemplate) {
       // the next file. (Previously only the error branch cleared it, so a
       // successful upload left pointer-events:none on the drop zone.)
       dropZone.classList.remove('processing');
-      setTimeout(() => activateArticleSession(session), 200);
+      setTimeout(() => {
+        if (inputCommit.stale()) return;
+        _articleInputPending = false;
+        activateArticleSession(session);
+      }, 200);
+      return true;
     } catch (err) {
+      if (inputCommit.stale()) return false;
+      _articleInputPending = false;
       logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
       progress.style.display = 'none';
       showError('排版失败: ' + sanitizeErrMsg(err.message));
+      flushRerenderAfterInput();
+      return false;
     }
   }
 
@@ -1305,7 +1419,19 @@ export function initApp(initialTemplate) {
   // 版本未变时才允许回写）；moreArticlesGate = 更多文章合成任务版本。契约与「文章级
   // 重置必须全部作废」由 copy-session.js + tests/copy-session.test.mjs 守护）。
   const copySession = createCopySession();
-  const { articleResultGate, footerCopyGate, moreArticlesGate, moreArticlesPreviewGate } = copySession;
+  const {
+    articleInputGate,
+    renderCommitGate,
+    articleResultGate,
+    footerCopyGate,
+    moreArticlesGate,
+    moreArticlesPreviewGate,
+    copyActionGate,
+    retryGate,
+  } = copySession;
+  let _articleInputPending = false;
+  let _rerenderAfterInput = false;
+  let _rerenderAfterInputOptions = null;
   const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
   let _plainTextCopy = null;
   let _lastCopiedHtml = '';
@@ -1427,7 +1553,7 @@ export function initApp(initialTemplate) {
       logConv('info', '更多文章图片已后台准备完成', { reason });
       return true;
     }).catch(err => {
-      logConv('warn', '更多文章后台准备失败，继续使用当前预览版', { error: err.message, reason });
+      if (!gate.stale()) logConv('warn', '更多文章后台准备失败，继续使用当前预览版', { error: err.message, reason });
       return false;
     }).finally(() => {
       if (!gate.stale()) _moreArticlesCopyJob = null;
@@ -1646,36 +1772,49 @@ export function initApp(initialTemplate) {
 
   window.retryUpload = async function() {
     if (!_failedSrcs.length) return;
+    retryGate.invalidate();
+    const retryCommit = retryGate.capture();
     const retryBtn = document.getElementById('retryBtn');
     const statsBar = document.getElementById('statsBar');
     if (retryBtn) { retryBtn.textContent = '重试中...'; retryBtn.disabled = true; }
 
     const articleResult = articleResultGate.capture();
     const footerWriteGate = footerCopyGate.capture();
-    const result = await retryFailedImages(_articleCopy, _footerCopy, _failedSrcs, {
-      onProgress(done, total) {
-        if (articleResult.stale()) return;
-        statsBar.textContent = '重试上传 (' + done + '/' + total + ')...';
-      },
-      onLog(...args) {
-        if (!articleResult.stale()) logConv(...args);
-      },
-    });
-    if (articleResult.stale()) return false;
-    _articleCopy = result.articleCopy;
-    if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
-    _failedSrcs = result.failedSrcs;
+    try {
+      const result = await retryFailedImages(_articleCopy, _footerCopy, _failedSrcs, {
+        onProgress(done, total) {
+          if (articleResult.stale() || retryCommit.stale()) return;
+          statsBar.textContent = '重试上传 (' + done + '/' + total + ')...';
+        },
+        onLog(...args) {
+          if (!articleResult.stale() && !retryCommit.stale()) logConv(...args);
+        },
+      });
+      if (articleResult.stale() || retryCommit.stale()) return false;
+      _articleCopy = result.articleCopy;
+      if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
+      _failedSrcs = result.failedSrcs;
 
-    if (result.failed > 0) {
-      statsBar.textContent = result.failed + '张图片仍然失败';
-      markFailedImages(_failedSrcs);
-    } else {
-      statsBar.textContent = hasDocumentSummaryCard() ? '' : '全部图片已就绪';
-      markFailedImages([]);
-      if (retryBtn) retryBtn.style.display = 'none';
+      if (result.failed > 0) {
+        statsBar.textContent = result.failed + '张图片仍然失败';
+        markFailedImages(_failedSrcs);
+      } else {
+        statsBar.textContent = hasDocumentSummaryCard() ? '' : '全部图片已就绪';
+        markFailedImages([]);
+        if (retryBtn) retryBtn.style.display = 'none';
+      }
+      return true;
+    } catch (err) {
+      if (articleResult.stale() || retryCommit.stale()) return false;
+      statsBar.textContent = '重试上传失败';
+      logConv('error', '重试上传失败', { error: err.message });
+      return false;
+    } finally {
+      if (!articleResult.stale() && !retryCommit.stale() && retryBtn) {
+        retryBtn.textContent = '重试上传';
+        retryBtn.disabled = false;
+      }
     }
-    if (retryBtn) { retryBtn.textContent = '重试上传'; retryBtn.disabled = false; }
-    return true;
   };
 
   // ---- Conversion Log ----
@@ -1692,12 +1831,15 @@ export function initApp(initialTemplate) {
 
   // ---- Copy (with CSS inlining) ----
   window.copyContent = async function() {
+    copyActionGate.invalidate();
+    const copyAction = copyActionGate.capture();
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
 
     if (_plainTextCopy !== null) {
       const text = getPlainTextCopyValue();
       const ok = await copyPlainTextToClipboard(text);
+      if (copyAction.stale()) return false;
       _plainTextCopy = text;
       _lastCopiedHtml = '';
       logConv(ok ? 'info' : 'error', ok ? '纯文字复制完成' : '纯文字复制失败', {
@@ -1725,13 +1867,14 @@ export function initApp(initialTemplate) {
       });
       const originalText = btn.textContent || '复制全文';
       btn.textContent = waiting ? '图片准备中' : '图片需重试';
-      setTimeout(() => { btn.textContent = originalText; }, 1600);
+      setTimeout(() => { if (!copyAction.stale()) btn.textContent = originalText; }, 1600);
       return false;
     }
 
     // Inline CSS classes → style attributes for WeChat compatibility
     const config = (window._activeConfig && window._activeConfig.config) || {};
     const themeCSS = await _themeCSSReady;
+    if (copyAction.stale()) return false;
     html = processForCopy(html, themeCSS, config);
     html = normalizeRich(html);
     const unsafeCopyRefs = findUnsafeCopyImageRefs(html, _copyRequiresWechatImageTransfer);
@@ -1749,16 +1892,20 @@ export function initApp(initialTemplate) {
 
     try {
       ok = await copyByClipboardApi(html, plainText);
+      if (copyAction.stale()) return false;
       if (ok) method = 'ClipboardAPI';
     } catch {}
+    if (copyAction.stale()) return false;
 
     if (!ok) {
       try {
         ok = await copyByClipboardEvent(html, plainText);
+        if (copyAction.stale()) return false;
         if (ok) method = 'ClipboardEvent';
       } catch {}
     }
 
+    if (copyAction.stale()) return false;
     _lastCopiedHtml = html;
     const imgCount = (html.match(/<img[\s>]/gi) || []).length;
     // 复制已写入剪贴板，但若仍有图片上传失败（_failedSrcs 非空），粘进后台这些图会缺失。
@@ -1791,6 +1938,8 @@ export function initApp(initialTemplate) {
 
   window.goBack = function() {
     copySession.resetForNewArticle();
+    _articleInputPending = false;
+    clearQueuedInputRerender();
     _moreArticlesCopyJob = null;
     resetRetryUploadUI();
     // Split layout: hide preview, show empty state
@@ -1929,6 +2078,8 @@ export function initApp(initialTemplate) {
     _footerHtml = cs.footer_html || '';
     _footerCopy = copySafeFooterAfterImagePreparation(cs.footer_copy || '');
     copySession.resetForNewArticle();
+    _articleInputPending = false;
+    clearQueuedInputRerender();
     _plainTextCopy = cs.plain_text_copy != null ? cs.plain_text_copy : null;
     _isRepost = !!cs.is_repost;
     _sourceIsDocx = !!cs.source_is_docx;

@@ -32,28 +32,31 @@
 - [x] 3.7 `npm test` + `cd api && go test ./...` 全绿；部署（deploy.yml 无需新 env）；线上 curl 冒烟 ft-default（2026-07-10：CI 测试门禁全绿，run 29062786816 部署成功，生产 version=7fad2fc；render 服务生产端口 19096）
 - [x] 3.8 验收：线上 `/api/render packId=ft-default` 对样例文章出网站 HTML；红线 #19/#23 回归测试全绿（2026-07-10：真实文章 62285 blocks 生产重放，输出 30078 字节与本地逐字节同长、imgN17/headingN10 一致、Mote 署名 #888888 同构成品；未知 packId 400；fbif 输出正常；红线测试随 npm test 792 全绿。备查：手造非契约形态 blocks 时 ft 模板静默出空而 fbif 宽容输出——两渲染器既有差异，真实链路 blocks 均出自 fetch-article/html-to-blocks 不受影响）
 
-## 4. Phase 3 — 资讯订阅 MVP 闭环：手动 URL → 隐藏发布 → 文本通知（仓库 FBIF资讯订阅）
+## 4. Phase 3 — 排版工具本体 MVP：手动 URL → 隐藏发布 → 文本/卡片通知（本仓库）
+
+> 2026-07-10 架构裁定：排版工具是发布编排中枢，资讯订阅只作为未来输入源。
+> 4.1/4.2 的资讯订阅实现仅保留为参考；4.3 起的权威实现均在本仓库 `api/`。
 
 - [x] 4.1 新包 `internal/foodtalks`：Client（CreateNews/UpdateNews）、News 结构体按 Phase 1 实测契约定义、401/403 凭证过期专项错误、env 配置（BASE_URL/TOKEN 缺失 fail loud）（2026-07-10 资讯订阅仓 04d39ac：27 字段契约对齐、id 二态 RawMessage、publishStatus 客户端自律 0/1/2、网关/凭证/业务错误三分类）
 - [x] 4.2 `internal/foodtalks` 单测：请求体序列化、幂等锚点判断、错误映射（httptest 桩）（2026-07-10 同提交：9 项全绿，含「HTTP 200 业务失败」真实样例与枚举拒发零请求断言）
-- [ ] 4.3 图片转存：调排版工具 `POST /api/oss-upload` urls 模式一次批量（服务端已内网并发，无需 imagecache 逐图下载），响应缺失的 URL 重试一次仍缺则 job failed；original→new 映射落 job；封面 coverImg 同通道（2026-07-10 方案已实测定型，见 design D4 与契约 §8）
-- [ ] 4.4 `publish_jobs` 迁移：新增 `source_key`（唯一索引）、`source_url`、`foodtalks_news_id`、`review_card_msg_id`、`risk_notes` 列；版本化迁移脚本
-- [ ] 4.5 `internal/publishing` 新增 site 链路 stage 序列（fetching→rendering→mirroring→staging→awaiting_review→publicizing）；推进器按 target 分发，wechat_mp 路径零改动（diff 审查确认）
-- [ ] 4.6 LayoutClient 扩展：Render 支持 packId 参数（ft-default）
-- [ ] 4.7 风险提示节点：复用 OptimizeClient 骨架新建红线检查 prompt（功效表达/转载授权/竞品评价/数据来源），输出 pass/warning/block + 条目证据，解析失败降级 warning
-- [ ] 4.8 API：`POST /api/publish/site-sync`（URL 校验 + 去重 + 建 job）、`GET /api/publish/jobs/{id}`（复用）、`POST /api/publish/jobs/{id}/review`（通过/驳回，RBAC 白名单）
-- [ ] 4.9 飞书文本通知（降级路径）：awaiting_review 时向审核群发文本（标题/类型/风险/预览与原文链接）；publicizing 终态发结果通知；群维度发送能力补进 `internal/feishu`
-- [ ] 4.10 单测：状态机推进/续跑幂等/同 source_key 二次触发不建新文/block 不可通过
+- [x] 4.3 图片转存：`stageMirror` 整批调用既有 OSS 通道，缺失项重试一次；映射与封面落 job，失败显式停单
+- [x] 4.4 任务持久化：按本仓既有范式使用原子 JSON store，落 `source_key` / URL / blocks / image map / FoodTalks id / CreateNews intent / 风险与审核字段；启动损坏 fail loud
+- [x] 4.5 发布状态机：created→fetching→rendering→mirroring→enriching→assessing→staging→awaiting_review→publicizing；failed/retry、reconciliation 与重启恢复均有 CAS 护栏
+- [x] 4.6 渲染服务支持 `packId=ft-default`，未知 packId 400，网站与公众号 behavior 物理隔离
+- [x] 4.7 风险提示节点：覆盖功效表达/转载授权/竞品评价/数据来源，输出 pass/warning/block + 证据；解析/调用失败降级 warning；block 在卡片和核心状态机双重禁止通过
+- [x] 4.8 API：`POST /api/publish/site-sync`、任务列表/详情、review/retry/reconcile；HTTP 走 ADMIN_PASSWORD，飞书回调走 verification token + reviewer open_id 白名单
+- [x] 4.9 飞书通知：待审优先交互卡片，失败降级文本；发布/驳回终态通知保留；风险、预览、原文与后台入口齐全
+- [x] 4.10 对抗单测：状态机推进、source_key 永久去重、CreateNews 不确定态、CAS review/retry、重启恢复、缺风险 fail-closed、block 不可通过
 - [ ] 4.11 🔴 测试环境全链路真机验收：贴真实公众号 URL → 隐藏文章生成 → 群收到通知 → 前端/接口点通过 → 文章公开 → 群收到结果；再触发同 URL 验证幂等
-- [ ] 4.12 🔴 生产部署：手动 psql 跑迁移 → 部署 → env 配齐（FOODTALKS_*、RENDER 相关已有）→ 用一篇真实文章走通全链路（停在隐藏态，人工确认后公开）
+- [ ] 4.12 🔴 生产部署：备份并校验 JSON store → 事务化部署与健康验收 → env 配齐（FOODTALKS_*、FEISHU_*、ARK_*、RENDER）→ 用一篇真实文章走通全链路（停在隐藏态，人工确认后公开）
 - [ ] 4.13 验收：MVP 链路生产可用；误发不可能（公开只能经审核动作）；WORKLOG 实时回写
 
-## 5. Phase 4 — 飞书交互卡片审核（仓库 FBIF资讯订阅）
+## 5. Phase 4 — 飞书交互卡片审核（本仓库）
 
 - [ ] 5.1 按 feishu-cardkit 规范搭审核卡片 JSON（标题/来源/类型/风险列表/预览与原文按钮/「通过并公开」「驳回」）；🔴 真机预览卡片渲染
-- [ ] 5.2 配置飞书事件订阅（`card.action.trigger`）：评估回调 URL vs 长连接模式，按部署环境落地
-- [ ] 5.3 回调处理端点:校验操作人白名单 → 执行通过/驳回 → 更新原卡片为终态（操作人+链接）→ 防重复操作
-- [ ] 5.4 替换 Phase 3 文本降级路径为卡片（文本能力保留作故障降级）
+- [x] 5.2 `card.action.trigger` 同时实现 Webhook 备用通道与飞书 SDK 长连接主通道；两者共用业务核心
+- [x] 5.3 回调处理：verification token fail-closed、审核人 open_id 白名单、CAS 通过/驳回、终态卡与重复点击收敛
+- [x] 5.4 待审通知优先卡片，文本能力保留为故障降级
 - [ ] 5.5 🔴 真机验收：卡片按钮走完通过/驳回/无权限三条路径，卡片状态更新正确
 - [ ] 5.6 验收:审核动作全程不离开飞书；无权限点击不改状态
 

@@ -66,7 +66,7 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   // active-rule-selector.js（行为契约见 tests/active-rule-selector.test.mjs 的
   // adoptAccount 测试）；app.html 只需证明它把切换委托给了共享模块。
   assert.match(app, /ruleSelector\.adoptAccount\(/);
-  assert.match(app, /hydrateActiveRulePreset\(activeRulePack\.id\)/);
+  assert.match(app, /hydrateActiveRulePreset\(initialHydrationAccountID\)/);
   assert.doesNotMatch(visibleShell, /class="sidebar-footer"/, '左侧底部不再显示当前规则区');
   assert.doesNotMatch(visibleShell, /id="activeRuleCard"/, '当前规则卡片不应再出现在左侧底部');
   assert.doesNotMatch(visibleShell, /当前排版规则/, '左侧底部不再展示当前规则文案');
@@ -84,7 +84,8 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(selectorJs, /data-action="cancel-active-rule"/);
   assert.match(selectorJs, /data-rule-option/);
   assert.match(selectorJs, /listPublicRulePresets/);
-  assert.match(selectorJs, /setActiveRulePreset\(password,\s*nextID,\s*getPack\(\)\.id\)/);
+  assert.match(selectorJs, /const accountID = getPack\(\)\.id[\s\S]{0,900}setActiveRulePreset\(password,\s*nextID,\s*accountID\)/,
+    '保存必须固定启动时账号，不得在 await 后重读 getPack');
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
   assert.match(allCss, /\.acct-trigger/);
@@ -142,7 +143,7 @@ test('mp accounts hot-swap templates instead of reloading the page', async () =>
   // 新页面只能恢复失效的 blob 字符串，预览里的图片会全部消失。
   assert.match(
     app,
-    /nextPack\.channel !== activeRulePack\.channel[\s\S]{0,500}location\.href = next\.toString\(\)/,
+    /nextPack\.channel !== rollbackState\.pack\.channel[\s\S]{0,500}location\.href = next\.toString\(\)/,
     '只有跨渠道账号切换才允许整页导航',
   );
   assert.match(
@@ -206,6 +207,10 @@ test('跨模板 A→B 快速切换时，后返的 A 模板不得覆盖 B', async
       return promise;
     },
   };
+  deps.committedAccountState = {
+    pack: packs.fbif, templateId: 'fbif', activeConfig: deps.window._activeConfig,
+    skipUpload: deps.window._skipUpload, bottomBlocksOverride: deps.window._bottomBlocksOverride, ruleSource: 'server',
+  };
   const actualLoadTemplate = new Function('deps', `with (deps) { ${loadTemplateSource}; return loadTemplate; }`)(deps);
   deps.loadTemplate = actualLoadTemplate;
   const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
@@ -226,6 +231,499 @@ test('跨模板 A→B 快速切换时，后返的 A 模板不得覆盖 B', async
   assert.deepEqual(switchedTemplates, [], '过期 series 模板不得进入引擎');
   assert.deepEqual(adopted, ['wowfood'], '过期 series 不得继续规则水合');
   assert.deepEqual(tracked, ['series', 'wowfood']);
+});
+
+test('账号切换是事务：模板加载失败后回滚原账号并可重试', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const loadTemplateSource = extractFunction(app, 'loadTemplate');
+  const switchAccountSource = extractFunction(app, 'switchAccount');
+  const packs = {
+    fbif: { id: 'fbif', channel: 'mp', templateId: 'fbif' },
+    series: { id: 'series', channel: 'mp', templateId: 'foodtalks-series' },
+  };
+  let attempts = 0;
+  const menu = [];
+  const deps = {
+    activeRulePack: packs.fbif,
+    currentTemplateId: 'fbif',
+    accountSwitchGeneration: 0,
+    rulePackModule: { getRulePack: id => packs[id] },
+    rulePackUrlModule: { parsePath: () => null, buildPath: () => '/' },
+    location: { pathname: '/mp/fbif', href: 'https://example.test/mp/fbif' },
+    window: {
+      _activeRulePack: packs.fbif,
+      _activeConfig: { preset: { id: 'fbif-rule' }, config: { owner: 'fbif' } },
+      _skipUpload: false,
+      _bottomBlocksOverride: undefined,
+      fetchArticle: { invalidate() {} },
+      _engineApi: { async switchTemplate() {} },
+    },
+    URL,
+    persistAccountSelection() {},
+    applyRulePackChrome() {},
+    applyAccountCapabilityUI: async () => {},
+    accountMenu: { setActive(id) { menu.push(id); } },
+    syncEngineConfig() {},
+    initApp() {}, wrapEngineFunctions() {},
+    async importTemplateModule(templateID) {
+      attempts++;
+      if (attempts === 1) throw new Error('template unavailable');
+      return { default: { id: templateID } };
+    },
+    ruleSelector: {
+      getSource: () => 'server', setSource() {},
+      async adoptAccount() { return { accountID: deps.activeRulePack.id, stale: false }; },
+    },
+    trackActiveRuleHydration(promise) { return promise; },
+  };
+  deps.committedAccountState = {
+    pack: packs.fbif, templateId: 'fbif', activeConfig: deps.window._activeConfig,
+    skipUpload: deps.window._skipUpload, bottomBlocksOverride: deps.window._bottomBlocksOverride, ruleSource: 'server',
+  };
+  deps.loadTemplate = new Function('deps', `with (deps) { ${loadTemplateSource}; return loadTemplate; }`)(deps);
+  const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
+
+  await assert.rejects(switchAccount('series'), /template unavailable/);
+  assert.equal(deps.activeRulePack.id, 'fbif');
+  assert.equal(deps.window._activeRulePack.id, 'fbif');
+  assert.equal(deps.currentTemplateId, 'fbif');
+  assert.notEqual(menu.at(-1), 'series', '失败目标不得留在菜单高亮');
+
+  const retried = await switchAccount('series');
+  assert.equal(retried.stale, false);
+  assert.equal(deps.activeRulePack.id, 'series');
+  assert.equal(deps.currentTemplateId, 'foodtalks-series');
+  assert.equal(menu.at(-1), 'series');
+});
+
+test('账号规则已水合但预览未提交时，不得提前提交 URL/菜单并必须回滚', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const switchAccountSource = extractFunction(app, 'switchAccount');
+  const packs = {
+    a: { id: 'a', channel: 'mp', templateId: 'fbif' },
+    b: { id: 'b', channel: 'mp', templateId: 'fbif' },
+  };
+  const initialConfig = { preset: { id: 'rule-a' }, config: { owner: 'A' } };
+  const persisted = [];
+  const menu = [];
+  const deps = {
+    activeRulePack: packs.a,
+    currentTemplateId: 'fbif',
+    accountSwitchGeneration: 0,
+    committedAccountState: {
+      pack: packs.a,
+      templateId: 'fbif',
+      activeConfig: initialConfig,
+      skipUpload: false,
+      bottomBlocksOverride: { owner: 'A' },
+      ruleSource: 'server',
+    },
+    rulePackModule: { getRulePack: id => packs[id] },
+    rulePackUrlModule: { parsePath: () => null, buildPath: () => '/' },
+    location: { pathname: '/mp/a', href: 'https://example.test/mp/a' },
+    URL,
+    window: {
+      _activeRulePack: packs.a,
+      _activeConfig: initialConfig,
+      _skipUpload: false,
+      _bottomBlocksOverride: { owner: 'A' },
+      fetchArticle: { invalidate() {} },
+      _engineApi: { invalidatePendingWork() {} },
+    },
+    persistAccountSelection(id) { persisted.push(id); },
+    applyRulePackChrome() {},
+    applyAccountCapabilityUI: async () => {},
+    accountMenu: { setActive(id) { menu.push(id); } },
+    syncEngineConfig() {},
+    async loadTemplate() { return true; },
+    rulePreviewCommitted: result => ['committed', 'noop', 'not-requested'].includes(result && result.status),
+    ruleSelector: {
+      getSource: () => 'server',
+      setSource() {},
+      async adoptAccount() {
+        deps.window._activeConfig = { preset: { id: 'rule-b' }, config: { owner: 'B' } };
+        deps.window._skipUpload = true;
+        deps.window._bottomBlocksOverride = { owner: 'B' };
+        return { accountID: 'b', stale: false, previewSync: { status: 'failed' } };
+      },
+    },
+    trackActiveRuleHydration(promise) { return promise; },
+  };
+  const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
+
+  await assert.rejects(switchAccount('b'), /预览未能提交/);
+  assert.equal(deps.activeRulePack.id, 'a');
+  assert.equal(deps.window._activeRulePack.id, 'a');
+  assert.equal(deps.window._activeConfig.config.owner, 'A');
+  assert.deepEqual(deps.window._bottomBlocksOverride, { owner: 'A' });
+  assert.deepEqual(persisted, [], '预览失败前不得持久化目标账号');
+  assert.equal(menu.at(-1), 'a', '菜单最终必须回到已提交账号');
+});
+
+test('目标预览已提交后 afterHydrate 失败，回滚必须重投原规则并刷新全部消费者', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const switchAccountSource = extractFunction(app, 'switchAccount');
+  const packs = {
+    a: { id: 'a', channel: 'mp', templateId: 'fbif' },
+    b: { id: 'b', channel: 'mp', templateId: 'fbif' },
+  };
+  const initialConfig = { preset: { id: 'rule-a' }, config: { owner: 'A' } };
+  const previewCommits = [];
+  const consumerRefreshes = [];
+  const menu = [];
+  let rollbackStatus = 'committed';
+  const deps = {
+    activeRulePack: packs.a,
+    currentTemplateId: 'fbif',
+    accountSwitchGeneration: 0,
+    committedAccountState: { pack: packs.a, templateId: 'fbif', activeConfig: initialConfig, ruleSource: 'server' },
+    rulePackModule: { getRulePack: id => packs[id] },
+    rulePackUrlModule: { parsePath: () => null, buildPath: () => '/' },
+    location: { pathname: '/mp/a', href: 'https://example.test/mp/a' },
+    URL,
+    window: {
+      _activeRulePack: packs.a,
+      _activeConfig: initialConfig,
+      fetchArticle: { invalidate() {} },
+      _engineApi: { invalidatePendingWork() {} },
+    },
+    persistAccountSelection() {},
+    applyRulePackChrome() {},
+    applyAccountCapabilityUI: async () => {},
+    accountMenu: { setActive(id) { menu.push(id); } },
+    async loadTemplate() { return true; },
+    syncEngineConfig() {},
+    refreshRuleConsumers(options) {
+      consumerRefreshes.push({ owner: deps.window._activeConfig.config.owner, rerender: options.rerender });
+      return { status: rollbackStatus };
+    },
+    rulePreviewCommitted: result => ['committed', 'noop', 'not-requested'].includes(result && result.status),
+    ruleSelector: {
+      getSource: () => 'server',
+      setSource() {},
+      async adoptAccount() {
+        deps.window._activeConfig = { preset: { id: 'rule-b' }, config: { owner: 'B' } };
+        previewCommits.push('B');
+        throw new Error('afterHydrate failed');
+      },
+    },
+    trackActiveRuleHydration(promise) { return promise; },
+  };
+  const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
+
+  await assert.rejects(switchAccount('b'), /afterHydrate failed/);
+  assert.deepEqual(previewCommits, ['B'], '目标正文曾经已提交');
+  assert.deepEqual(consumerRefreshes, [{ owner: 'A', rerender: true }], '回滚必须用 A 快照重投正文并刷新 sidecars');
+  assert.equal(deps.window._activeConfig.config.owner, 'A');
+  assert.equal(menu.at(-1), 'a');
+
+  rollbackStatus = 'failed';
+  await assert.rejects(switchAccount('b'), /原账号已回滚，但当前预览恢复失败/);
+});
+
+test('模板已进入引擎后才报错，账号事务仍必须回滚原模板', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const loadTemplateSource = extractFunction(app, 'loadTemplate');
+  const switchAccountSource = extractFunction(app, 'switchAccount');
+  const packs = {
+    fbif: { id: 'fbif', channel: 'mp', templateId: 'fbif' },
+    series: { id: 'series', channel: 'mp', templateId: 'foodtalks-series' },
+  };
+  const switched = [];
+  let failTarget = true;
+  const deps = {
+    activeRulePack: packs.fbif,
+    currentTemplateId: 'fbif',
+    accountSwitchGeneration: 0,
+    rulePackModule: { getRulePack: id => packs[id] },
+    rulePackUrlModule: { parsePath: () => null, buildPath: () => '/' },
+    location: { pathname: '/mp/fbif', href: 'https://example.test/mp/fbif' },
+    window: {
+      _activeRulePack: packs.fbif,
+      _activeConfig: { preset: { id: 'fbif-rule' }, config: { owner: 'fbif' } },
+      _engineTemplate: 'fbif',
+      _engineApi: {
+        async switchTemplate(template) {
+          switched.push(template.id);
+          deps.window._engineTemplate = template.id;
+          if (template.id === 'foodtalks-series' && failTarget) {
+            failTarget = false;
+            throw new Error('template shell failed');
+          }
+        },
+      },
+    },
+    URL,
+    persistAccountSelection() {}, applyRulePackChrome() {},
+    applyAccountCapabilityUI: async () => {}, accountMenu: { setActive() {} },
+    syncEngineConfig() {}, initApp() {}, wrapEngineFunctions() {},
+    async importTemplateModule(templateID) { return { default: { id: templateID } }; },
+    ruleSelector: {
+      getSource: () => 'server', setSource() {},
+      async adoptAccount() { return { accountID: deps.activeRulePack.id, stale: false }; },
+    },
+    trackActiveRuleHydration(promise) { return promise; },
+  };
+  deps.committedAccountState = {
+    pack: packs.fbif, templateId: 'fbif', activeConfig: deps.window._activeConfig,
+    skipUpload: deps.window._skipUpload, bottomBlocksOverride: deps.window._bottomBlocksOverride, ruleSource: 'server',
+  };
+  deps.loadTemplate = new Function('deps', `with (deps) { ${loadTemplateSource}; return loadTemplate; }`)(deps);
+  const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
+
+  await assert.rejects(switchAccount('series'), /template shell failed/);
+  assert.equal(deps.activeRulePack.id, 'fbif');
+  assert.equal(deps.currentTemplateId, 'fbif');
+  assert.equal(deps.window._engineTemplate, 'fbif', '引擎不得留在失败目标模板');
+  assert.deepEqual(switched, ['foodtalks-series', 'fbif']);
+});
+
+test('原模板回滚失败时必须 fail-closed，不得伪装已恢复菜单和预览', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const switchAccountSource = extractFunction(app, 'switchAccount');
+  const packs = {
+    a: { id: 'a', channel: 'mp', templateId: 'template-a' },
+    b: { id: 'b', channel: 'mp', templateId: 'template-b' },
+  };
+  const chrome = [];
+  const menu = [];
+  const navigations = [];
+  let refreshes = 0;
+  const locationState = {
+    pathname: '/mp/a',
+    _href: 'https://example.test/mp/a',
+    get href() { return this._href; },
+    set href(value) { this._href = value; navigations.push(value); },
+  };
+  const initialConfig = { config: { owner: 'A' } };
+  const deps = {
+    activeRulePack: packs.a,
+    currentTemplateId: 'template-a',
+    accountSwitchGeneration: 0,
+    committedAccountState: {
+      pack: packs.a,
+      templateId: 'template-a',
+      activeConfig: initialConfig,
+      ruleSource: 'server',
+    },
+    rulePackModule: { getRulePack: id => packs[id] },
+    rulePackUrlModule: {
+      parsePath: () => ({ channel: 'mp', id: 'a' }),
+      buildPath: (channel, id) => `/${channel}/${id}`,
+    },
+    location: locationState,
+    URL,
+    window: {
+      _activeRulePack: packs.a,
+      _activeConfig: initialConfig,
+      _engineTemplate: 'template-a',
+      fetchArticle: { invalidate() {} },
+      _engineApi: { invalidatePendingWork() {} },
+    },
+    persistAccountSelection() {},
+    applyRulePackChrome(pack) { chrome.push(pack.id); },
+    accountMenu: { setActive(id) { menu.push(id); } },
+    applyAccountCapabilityUI: async () => {},
+    syncEngineConfig() {},
+    refreshRuleConsumers() { refreshes++; return { status: 'committed' }; },
+    rulePreviewCommitted: result => result?.status === 'committed',
+    async loadTemplate(templateID) {
+      if (templateID === 'template-b') {
+        deps.currentTemplateId = templateID;
+        deps.window._engineTemplate = templateID;
+        return true;
+      }
+      throw new Error('rollback template unavailable');
+    },
+    ruleSelector: {
+      getSource: () => 'server',
+      setSource() {},
+      async adoptAccount() { throw new Error('target hydrate failed'); },
+    },
+    trackActiveRuleHydration(promise) { return promise; },
+  };
+  const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
+
+  await assert.rejects(
+    switchAccount('b'),
+    /原账号模板回滚失败.*当前页面不可继续编辑/,
+  );
+  assert.equal(refreshes, 0, '模板未恢复时不得重投 A 规则到 B 模板');
+  assert.deepEqual(chrome, [], '不得将 chrome 伪装成已恢复 A');
+  assert.deepEqual(menu, [], '不得将菜单伪装成已恢复 A');
+  assert.equal(deps.currentTemplateId, 'template-b');
+  assert.equal(deps.window._engineTemplate, 'template-b');
+  assert.equal(navigations.at(-1), 'https://example.test/mp/a', '必须强制回到已提交 A 的 canonical URL');
+});
+
+test('A→B pending→C 失败：C 必须回滚已提交 A，B 后返不得制造混合态', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const loadTemplateSource = extractFunction(app, 'loadTemplate');
+  const switchAccountSource = extractFunction(app, 'switchAccount');
+  const packs = {
+    fbif: { id: 'fbif', channel: 'mp', templateId: 'fbif' },
+    series: { id: 'series', channel: 'mp', templateId: 'foodtalks-series' },
+    wowfood: { id: 'wowfood', channel: 'mp', templateId: 'fbif' },
+  };
+  const delayedB = deferred();
+  const persisted = [];
+  const menu = [];
+  const adopted = [];
+  const initialConfig = { preset: { id: 'rule-a' }, config: { owner: 'A' } };
+  const deps = {
+    activeRulePack: packs.fbif,
+    currentTemplateId: 'fbif',
+    accountSwitchGeneration: 0,
+    rulePackModule: { getRulePack: id => packs[id] },
+    rulePackUrlModule: { parsePath: () => null, buildPath: () => '/' },
+    location: { pathname: '/mp/fbif', href: 'https://example.test/mp/fbif' },
+    window: {
+      _activeRulePack: packs.fbif,
+      _activeConfig: initialConfig,
+      _skipUpload: false,
+      _bottomBlocksOverride: { owner: 'A' },
+      _engineTemplate: 'fbif',
+      fetchArticle: { invalidate() {} },
+      _engineApi: {
+        invalidatePendingWork() {},
+        async switchTemplate(template) { deps.window._engineTemplate = template.id; },
+      },
+    },
+    URL,
+    persistAccountSelection(id) { persisted.push(id); },
+    applyRulePackChrome() {}, applyAccountCapabilityUI: async () => {},
+    accountMenu: { setActive(id) { menu.push(id); } },
+    syncEngineConfig() {}, initApp() {}, wrapEngineFunctions() {},
+    importTemplateModule(templateID) {
+      if (templateID === 'foodtalks-series') return delayedB.promise;
+      return Promise.resolve({ default: { id: templateID } });
+    },
+    ruleSelector: {
+      getSource: () => 'server', setSource() {},
+      async adoptAccount() {
+        const id = deps.activeRulePack.id;
+        adopted.push(id);
+        if (id === 'wowfood') {
+          deps.window._activeConfig = { preset: { id: 'rule-c' }, config: { owner: 'C' } };
+          deps.window._skipUpload = true;
+          deps.window._bottomBlocksOverride = { owner: 'C' };
+          throw new Error('C hydrate failed');
+        }
+        return { accountID: id, stale: false };
+      },
+    },
+    trackActiveRuleHydration(promise) { return promise; },
+  };
+  deps.committedAccountState = {
+    pack: packs.fbif, templateId: 'fbif', activeConfig: initialConfig,
+    skipUpload: false, bottomBlocksOverride: { owner: 'A' }, ruleSource: 'server',
+  };
+  deps.loadTemplate = new Function('deps', `with (deps) { ${loadTemplateSource}; return loadTemplate; }`)(deps);
+  const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
+
+  const switchB = switchAccount('series');
+  await assert.rejects(switchAccount('wowfood'), /C hydrate failed/);
+  assert.equal(deps.activeRulePack.id, 'fbif');
+  assert.equal(deps.window._activeRulePack.id, 'fbif');
+  assert.equal(deps.currentTemplateId, 'fbif');
+  assert.equal(deps.window._engineTemplate, 'fbif');
+  assert.equal(deps.window._activeConfig.config.owner, 'A');
+  assert.equal(deps.window._skipUpload, false);
+  assert.deepEqual(deps.window._bottomBlocksOverride, { owner: 'A' });
+
+  delayedB.resolve({ default: { id: 'foodtalks-series' } });
+  const staleB = await switchB;
+  assert.equal(staleB.stale, true);
+  assert.equal(deps.activeRulePack.id, 'fbif');
+  assert.equal(deps.window._engineTemplate, 'fbif');
+  assert.deepEqual(adopted, ['wowfood'], 'B 过期后不得继续水合');
+  assert.deepEqual(persisted, [], '失败/过期目标都不得持久化');
+  assert.equal(menu.at(-1), 'fbif');
+});
+
+test('已提交账号保存新规则后，回滚快照同步更新；暂存账号不得更新', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const refreshSource = extractFunction(app, 'refreshRuleConsumers');
+  const packs = { a: { id: 'a' }, b: { id: 'b' } };
+  const deps = {
+    activeRulePack: packs.a,
+    currentTemplateId: 'template-a',
+    committedAccountState: { pack: packs.a, activeConfig: { config: { version: 1 } } },
+    window: { _activeConfig: { config: { version: 2 } }, _skipUpload: false, _bottomBlocksOverride: { a: 1 } },
+    ruleSelector: { getSource: () => 'server' },
+    syncWorkflowControls() {}, syncEngineConfig() {}, renderActiveRuleCard() {}, loadConfig: () => ({}),
+  };
+  const refresh = new Function('deps', `with (deps) { ${refreshSource}; return refreshRuleConsumers; }`)(deps);
+  refresh();
+  assert.equal(deps.committedAccountState.activeConfig.config.version, 2);
+
+  const committedA = deps.committedAccountState;
+  deps.activeRulePack = packs.b;
+  deps.window._activeConfig = { config: { version: 99 } };
+  refresh();
+  assert.equal(deps.committedAccountState, committedA);
+  assert.equal(deps.committedAccountState.pack.id, 'a');
+});
+
+test('失败回滚模板后返时已有更新切换，旧回滚不得覆盖新账号', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const loadTemplateSource = extractFunction(app, 'loadTemplate');
+  const switchAccountSource = extractFunction(app, 'switchAccount');
+  const packs = {
+    fbif: { id: 'fbif', channel: 'mp', templateId: 'fbif' },
+    series: { id: 'series', channel: 'mp', templateId: 'foodtalks-series' },
+    wowfood: { id: 'wowfood', channel: 'mp', templateId: 'fbif' },
+  };
+  const fbifLoads = [];
+  const switched = [];
+  const deps = {
+    activeRulePack: packs.fbif, currentTemplateId: 'fbif', accountSwitchGeneration: 0,
+    rulePackModule: { getRulePack: id => packs[id] },
+    rulePackUrlModule: { parsePath: () => null, buildPath: () => '/' },
+    location: { pathname: '/mp/fbif', href: 'https://example.test/mp/fbif' }, URL,
+    window: {
+      _activeRulePack: packs.fbif, _activeConfig: { config: { owner: 'A' } },
+      _engineApi: { async switchTemplate(template) { switched.push(template.id); } },
+    },
+    persistAccountSelection() {}, applyRulePackChrome() {}, applyAccountCapabilityUI: async () => {},
+    accountMenu: { setActive() {} }, syncEngineConfig() {}, initApp() {}, wrapEngineFunctions() {},
+    importTemplateModule(templateID) {
+      if (templateID !== 'fbif') return Promise.resolve({ default: { id: templateID } });
+      const task = deferred();
+      fbifLoads.push(task);
+      return task.promise;
+    },
+    ruleSelector: {
+      getSource: () => 'server', setSource() {},
+      async adoptAccount() {
+        if (deps.activeRulePack.id === 'series') throw new Error('series hydrate failed');
+        return { accountID: deps.activeRulePack.id, stale: false };
+      },
+    },
+    trackActiveRuleHydration(promise) { return promise; },
+  };
+  deps.committedAccountState = {
+    pack: packs.fbif, templateId: 'fbif', activeConfig: deps.window._activeConfig,
+    skipUpload: false, bottomBlocksOverride: undefined, ruleSource: 'server',
+  };
+  deps.loadTemplate = new Function('deps', `with (deps) { ${loadTemplateSource}; return loadTemplate; }`)(deps);
+  const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
+
+  const failing = switchAccount('series');
+  for (let i = 0; i < 6 && fbifLoads.length < 1; i++) await Promise.resolve();
+  assert.equal(fbifLoads.length, 1, '失败切换已进入 A 模板回滚');
+  const newest = switchAccount('wowfood');
+  for (let i = 0; i < 6 && fbifLoads.length < 2; i++) await Promise.resolve();
+  assert.equal(fbifLoads.length, 2);
+  fbifLoads[1].resolve({ default: { id: 'fbif' } });
+  await newest;
+  fbifLoads[0].resolve({ default: { id: 'fbif' } });
+  await assert.rejects(failing, /series hydrate failed/);
+
+  assert.equal(deps.activeRulePack.id, 'wowfood');
+  assert.equal(deps.currentTemplateId, 'fbif');
+  assert.equal(deps.committedAccountState.pack.id, 'wowfood');
+  assert.deepEqual(switched, ['foodtalks-series', 'fbif'], '旧回滚过期后不得再进引擎');
 });
 
 test('engine supports template hot-swap and reads footer from the current account', async () => {

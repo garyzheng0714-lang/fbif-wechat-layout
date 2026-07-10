@@ -9,6 +9,8 @@
 //   - afterHydrate：预设水合后的渠道钩子（公众号刷新账号能力 UI）
 // 契约测试：tests/active-rule-selector.test.mjs（linkedom 行为测试——这一族此前零行为覆盖）。
 
+import { rulePreviewSavedMessage } from './rule-preview-sync.js';
+
 export function escText(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -33,7 +35,9 @@ export function createActiveRuleSelector({
   const {
     loadActiveRulePreset,
     loadLocalRuleConfig,
+    loadLocalRulePreset,
     saveLocalRuleConfig,
+    saveLocalRulePreset,
     applyActiveRuleConfig,
     adminLogin,
     listPublicRulePresets,
@@ -49,19 +53,44 @@ export function createActiveRuleSelector({
   let activeRuleAdminPassword = '';
   let activeRuleOutsideHandler = null;
   let accountHydrationGeneration = 0;
+  let selectorUIGeneration = 0;
+  let catalogGeneration = 0;
+  let activeRuleSavePromise = null;
+  let activeRuleSaveToken = null;
+  let activeRuleSaving = false;
+
+  function invalidateSelectorInteractions() {
+    selectorUIGeneration++;
+    catalogGeneration++;
+    activeRuleSavePromise = null;
+    activeRuleSaveToken = null;
+    activeRuleSaving = false;
+    activeRuleSelectorEditing = false;
+    activeRuleSelectorOpen = false;
+  }
 
   function currentPresetFromConfig() {
     return (windowRef._activeConfig && windowRef._activeConfig.preset) || {};
   }
 
   function cacheServerRuleFallback(config, preset, accountID = getPack().id) {
-    saveLocalRuleConfig(fallbackTransform(config, preset), accountID);
+    const fallbackConfig = fallbackTransform(config, preset);
+    if (typeof saveLocalRulePreset === 'function') {
+      saveLocalRulePreset({ ...(preset || {}), config: fallbackConfig }, accountID);
+    } else {
+      saveLocalRuleConfig(fallbackConfig, accountID);
+    }
   }
 
   function localActiveRulePreset(accountID) {
+    if (typeof loadLocalRulePreset === 'function') {
+      const preset = loadLocalRulePreset(accountID);
+      if (preset) return preset;
+    }
     return {
       id: 'local',
       name: '本机设置',
+      rule_account_id: accountID,
       config: loadLocalRuleConfig(accountID),
     };
   }
@@ -88,8 +117,11 @@ export function createActiveRuleSelector({
   function ruleSelectorOptions(currentPreset) {
     const seen = new Set();
     const rules = [];
+    const ruleFamily = getPack().templateId;
     for (const rule of activeRuleCatalog.presets || []) {
       if (!rule || !rule.id || seen.has(rule.id)) continue;
+      if (rule.migration_required) continue;
+      if (ruleFamily && rule.rule_family !== ruleFamily) continue;
       seen.add(rule.id);
       rules.push({ id: rule.id, name: rule.name || rule.id });
     }
@@ -117,14 +149,14 @@ export function createActiveRuleSelector({
   }
 
   function toggleActiveRuleMenu() {
-    if (!activeRuleSelectorEditing) return;
+    if (!activeRuleSelectorEditing || activeRuleSaving) return;
     activeRuleSelectorOpen = !activeRuleSelectorOpen;
     activeRuleSelectorStatus = '';
     renderActiveRuleCard();
   }
 
   function chooseActiveRuleOption(ruleID) {
-    if (!ruleID) return;
+    if (!ruleID || activeRuleSaving) return;
     activeRuleSelectorDraftID = ruleID;
     activeRuleSelectorOpen = false;
     activeRuleSelectorStatus = '';
@@ -154,62 +186,105 @@ export function createActiveRuleSelector({
   }
 
   async function beginActiveRuleEdit() {
+    if (activeRuleSaving) return false;
+    const accountID = getPack().id;
+    const generation = ++selectorUIGeneration;
+    const catalogAtStart = ++catalogGeneration;
     const preset = currentPresetFromConfig();
     activeRuleSelectorDraftID = preset.id || 'default';
     activeRuleSelectorStatus = '';
-    activeRuleCatalog = await loadRuleCatalog();
+    const catalog = await loadRuleCatalog();
+    if (generation !== selectorUIGeneration || catalogAtStart !== catalogGeneration || accountID !== getPack().id) return false;
+    activeRuleCatalog = catalog;
     activeRuleSelectorEditing = true;
     activeRuleSelectorOpen = false;
     renderActiveRuleCard();
     const trigger = documentRef.getElementById('activeRuleSelect');
     if (trigger) trigger.focus();
+    return true;
   }
 
   function cancelActiveRuleEdit() {
+    if (activeRuleSaving) return false;
+    invalidateSelectorInteractions();
     const preset = currentPresetFromConfig();
     activeRuleSelectorDraftID = preset.id || 'default';
     activeRuleSelectorStatus = '';
     activeRuleSelectorEditing = false;
     activeRuleSelectorOpen = false;
     renderActiveRuleCard();
+    return true;
   }
 
   async function saveActiveRuleSelection() {
+    if (activeRuleSavePromise) return activeRuleSavePromise;
     const preset = currentPresetFromConfig();
     const nextID = activeRuleSelectorDraftID || preset.id || 'default';
     if (nextID === preset.id) {
       activeRuleSelectorEditing = false;
       activeRuleSelectorOpen = false;
       renderActiveRuleCard();
-      return;
+      return true;
     }
+    const accountID = getPack().id;
+    const generation = ++selectorUIGeneration;
+    const catalogAtStart = ++catalogGeneration;
+    const saveToken = {};
+    activeRuleSaveToken = saveToken;
+    activeRuleSaving = true;
+    const stale = () => generation !== selectorUIGeneration ||
+      accountID !== getPack().id ||
+      activeRuleSaveToken !== saveToken;
     activeRuleSelectorStatus = '保存中...';
     activeRuleSelectorOpen = false;
     renderActiveRuleCard();
+    const task = (async () => {
+      try {
+        const password = await ensureRuleAdminPassword();
+        if (stale()) return false;
+        await setActiveRulePreset(password, nextID, accountID);
+        if (stale()) return false;
+        const [loaded, catalog] = await Promise.all([
+          loadActiveRulePreset(accountID),
+          loadRuleCatalog(),
+        ]);
+        if (stale()) return false;
+        activeRuleSource = loaded.source;
+        applyActiveRuleConfig(loaded.preset.config, loaded.preset);
+        if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config, loaded.preset, accountID);
+        if (catalogAtStart === catalogGeneration) activeRuleCatalog = catalog;
+        const previewSync = await Promise.resolve(refreshRuleConsumers({ rerender: true }));
+        if (stale()) return false;
+        activeRuleSelectorEditing = false;
+        activeRuleSelectorOpen = false;
+        activeRuleSelectorDraftID = loaded.preset.id || nextID;
+        activeRuleSelectorStatus = rulePreviewSavedMessage(previewSync);
+        activeRuleSaving = false;
+        renderActiveRuleCard();
+        return true;
+      } catch (err) {
+        if (/password|密码|401|unauthorized/i.test(String(err && err.message))) activeRuleAdminPassword = '';
+        if (stale()) return false;
+        activeRuleSelectorStatus = err.message || '保存失败';
+        activeRuleSaving = false;
+        renderActiveRuleCard();
+        return false;
+      }
+    })();
+    activeRuleSavePromise = task;
     try {
-      const password = await ensureRuleAdminPassword();
-      await setActiveRulePreset(password, nextID, getPack().id);
-      const [loaded, catalog] = await Promise.all([
-        loadActiveRulePreset(getPack().id),
-        loadRuleCatalog(),
-      ]);
-      activeRuleSource = loaded.source;
-      applyActiveRuleConfig(loaded.preset.config, loaded.preset);
-      if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config, loaded.preset);
-      activeRuleCatalog = catalog;
-      activeRuleSelectorEditing = false;
-      activeRuleSelectorOpen = false;
-      activeRuleSelectorDraftID = loaded.preset.id || nextID;
-      activeRuleSelectorStatus = '已保存';
-      refreshRuleConsumers({ rerender: true });
-    } catch (err) {
-      if (/password|密码|401|unauthorized/i.test(String(err && err.message))) activeRuleAdminPassword = '';
-      activeRuleSelectorStatus = err.message || '保存失败';
-      renderActiveRuleCard();
+      return await task;
+    } finally {
+      if (activeRuleSaveToken === saveToken) {
+        activeRuleSavePromise = null;
+        activeRuleSaveToken = null;
+        activeRuleSaving = false;
+      }
     }
   }
 
   async function hydrateActiveRulePreset(accountID = getPack().id) {
+    invalidateSelectorInteractions();
     const generation = ++accountHydrationGeneration;
     const loaded = await loadActiveRulePreset(accountID);
     if (generation !== accountHydrationGeneration || accountID !== getPack().id) return loaded;
@@ -220,15 +295,18 @@ export function createActiveRuleSelector({
     activeRuleSelectorStatus = '';
     if (afterHydrate) await afterHydrate(getPack());
     if (generation !== accountHydrationGeneration || accountID !== getPack().id) return loaded;
-    refreshRuleConsumers({ rerender: true });
-    return loaded;
+    const previewSync = await Promise.resolve(refreshRuleConsumers({ rerender: true }));
+    if (generation !== accountHydrationGeneration || accountID !== getPack().id) return loaded;
+    return { ...loaded, previewSync };
   }
 
   // 账号切换用：hydrate + 拉目录 + 复位选择器（app.html switchAccount 此前手工展开这段）。
   async function adoptAccount({ rerender = true } = {}) {
+    invalidateSelectorInteractions();
     const accountID = getPack().id;
     const pack = getPack();
     const generation = ++accountHydrationGeneration;
+    const catalogAtStart = catalogGeneration;
     const [loaded, catalog] = await Promise.all([
       loadActiveRulePreset(accountID),
       loadRuleCatalog(),
@@ -240,7 +318,7 @@ export function createActiveRuleSelector({
     if (activeRuleSource === 'server') {
       cacheServerRuleFallback(loaded.preset.config, loaded.preset, accountID);
     }
-    activeRuleCatalog = catalog;
+    if (catalogAtStart === catalogGeneration) activeRuleCatalog = catalog;
     activeRuleSelectorEditing = false;
     activeRuleSelectorOpen = false;
     activeRuleSelectorDraftID = loaded.preset.id || 'default';
@@ -249,13 +327,17 @@ export function createActiveRuleSelector({
     if (generation !== accountHydrationGeneration || accountID !== getPack().id) {
       return { ...loaded, accountID, stale: true };
     }
-    refreshRuleConsumers({ rerender });
-    return { ...loaded, accountID, stale: false };
+    const previewSync = await Promise.resolve(refreshRuleConsumers({ rerender }));
+    if (generation !== accountHydrationGeneration || accountID !== getPack().id) {
+      return { ...loaded, accountID, stale: true, previewSync };
+    }
+    return { ...loaded, accountID, stale: false, previewSync };
   }
 
   async function refreshActiveRuleCatalog(accountID = getPack().id) {
+    const generation = ++catalogGeneration;
     const catalog = await loadRuleCatalog();
-    if (accountID !== getPack().id) return catalog;
+    if (generation !== catalogGeneration || accountID !== getPack().id) return catalog;
     activeRuleCatalog = catalog;
     renderActiveRuleCard();
     return catalog;
@@ -269,7 +351,7 @@ export function createActiveRuleSelector({
     const selectedID = activeRuleSelectorEditing ? (activeRuleSelectorDraftID || currentID) : currentID;
     const options = ruleSelectorOptions(preset);
     const selectedRule = options.find(rule => rule.id === selectedID) || options[0];
-    const canSave = activeRuleSelectorEditing && selectedID && selectedID !== currentID;
+    const canSave = activeRuleSelectorEditing && !activeRuleSaving && selectedID && selectedID !== currentID;
     const statusHTML = activeRuleSelectorStatus ? `<div class="active-rule-status">${escText(activeRuleSelectorStatus)}</div>` : '';
     const ruleName = escText(selectedRule.name || selectedRule.id);
     const menuHTML = activeRuleSelectorEditing && activeRuleSelectorOpen ? `
@@ -312,14 +394,14 @@ export function createActiveRuleSelector({
     </div>
     <div class="active-rule-line">
       <span class="active-rule-select-wrap">
-        <button type="button" id="activeRuleSelect" class="active-rule-trigger" data-value="${escText(selectedRule.id)}" aria-haspopup="listbox" aria-expanded="${activeRuleSelectorOpen ? 'true' : 'false'}" ${activeRuleSelectorEditing ? '' : 'disabled'}>
+        <button type="button" id="activeRuleSelect" class="active-rule-trigger" data-value="${escText(selectedRule.id)}" aria-haspopup="listbox" aria-expanded="${activeRuleSelectorOpen ? 'true' : 'false'}" ${activeRuleSelectorEditing && !activeRuleSaving ? '' : 'disabled'}>
           <span class="active-rule-value">${ruleName}</span>
         </button>
         <svg class="active-rule-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${menuHTML}
       </span>
       <button type="button" class="active-rule-save" data-action="save-active-rule" ${canSave ? '' : 'disabled'}>保存</button>
-      <button type="button" class="active-rule-cancel" data-action="cancel-active-rule">取消</button>
+      <button type="button" class="active-rule-cancel" data-action="cancel-active-rule" ${activeRuleSaving ? 'disabled' : ''}>取消</button>
     </div>
     ${statusHTML}
   ` : readonlyHTML;

@@ -354,10 +354,32 @@ func (p *publishPipeline) runJob(jobID int64) {
 			stageErr = fmt.Errorf("未知任务阶段 %q", job.Stage)
 		}
 		if stageErr != nil {
-			log.Printf("publish: job %d stage %s failed: %v", jobID, job.Stage, stageErr)
 			if errors.Is(stageErr, errStagingOutcomeUncertain) || errors.Is(stageErr, errPublicizeOutcomeUncertain) {
 				// 已经进入持久 intent 窗口；Create 盲重放会建重文，
 				// publicize 盲重放则会掩盖不可逆动作的真实结果。
+				log.Printf("publish: job %d stage %s outcome uncertain: %v", jobID, job.Stage, stageErr)
+				return
+			}
+			log.Printf("publish: job %d stage %s failed: %v", jobID, job.Stage, stageErr)
+			if job.Stage == publishStagePublicizing {
+				failed, swapped, persistErr := p.store.updateIf(jobID, func(current publishJob) bool {
+					return current.Stage == publishStagePublicizing && current.PublicizeIntentKey == ""
+				}, func(j *publishJob) {
+					j.Stage = publishStageFailed
+					j.FailedStage = publishStagePublicizing
+					j.Error = stageErr.Error()
+					enqueuePublishNotification(j, publishNotificationPublicizeFailed)
+				})
+				if persistErr != nil {
+					log.Printf("publish: record job %d publicize failure failed: %v", jobID, persistErr)
+					return
+				}
+				if !swapped {
+					// 另一 worker 已经认领 PUT intent；它负责最终结果，
+					// 本 worker 不得覆写其 publicizing_updating/reconciliation 状态。
+					return
+				}
+				p.schedulePublishNotification(failed.ID)
 				return
 			}
 			if _, err := p.store.setFailed(jobID, job.Stage, stageErr.Error()); err != nil {
@@ -700,6 +722,10 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		return fmt.Errorf("%w：公开意图持久化结果不确定: %v", errPublicizeOutcomeUncertain, err)
 	}
 	if !swapped {
+		if claimed.Stage == publishStagePublicizing && claimed.PublicizeIntentKey == "" &&
+			!validPersistedPublishApproval(claimed) {
+			return errors.New("公开授权在外调前失效，未发出 UpdateNews")
+		}
 		return fmt.Errorf("%w：任务当前阶段 %s，公开意图 %q 已被其他 worker 认领或授权已失效",
 			errPublicizeOutcomeUncertain, claimed.Stage, claimed.PublicizeIntentKey)
 	}
@@ -778,6 +804,10 @@ func (p *publishPipeline) review(ctx context.Context, jobID int64, action, revie
 // “先读版本、后审核”的 TOCTOU。expectedRiskVersion 为空表示 ADMIN_PASSWORD
 // 管理端明确审批 CAS 当刻的最新风险快照；两条路径都会持久化该版本。
 func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, action, reviewedBy, expectedRiskVersion string) (publishJob, error) {
+	if publishWorkersPaused() {
+		job, _ := p.store.byID(jobID)
+		return job, errPublishWorkersPaused
+	}
 	if action != publishReviewApprove && action != publishReviewReject {
 		job, err := p.store.byID(jobID)
 		if err != nil {
@@ -857,6 +887,10 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 // PublicizeIntentKey（确定未外调）且审批风险版本仍匹配时可重试；已进入
 // publicizing_updating / reconciliation 的任务不经本入口。
 func (p *publishPipeline) retry(jobID int64) (publishJob, error) {
+	if publishWorkersPaused() {
+		job, _ := p.store.byID(jobID)
+		return job, errPublishWorkersPaused
+	}
 	var target string
 	job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
 		if current.Stage != publishStageFailed {
@@ -896,6 +930,10 @@ func (p *publishPipeline) retry(jobID int64) (publishJob, error) {
 // approve + reviewed_at + 匹配的风险版本且尚未落 PUT intent 才能恢复。
 // publicizing_updating 表示崩溃可能发生在外调窗口，必须转人工对账。
 func (p *publishPipeline) recoverJobs() {
+	if publishWorkersPaused() {
+		log.Printf("publish: workers paused，跳过启动恢复扫描")
+		return
+	}
 	jobs, err := p.store.all()
 	if err != nil {
 		log.Printf("publish: 启动恢复扫描失败: %v", err)
@@ -990,6 +1028,10 @@ func (p *publishPipeline) markStagingReconciliation(jobID int64, reason string) 
 //
 // 两种选择都走存储 CAS，重复/并发处理只有一个胜出。
 func (p *publishPipeline) reconcileStaging(jobID, newsID int64, confirmNotCreated bool) (publishJob, error) {
+	if publishWorkersPaused() {
+		job, _ := p.store.byID(jobID)
+		return job, errPublishWorkersPaused
+	}
 	if (newsID > 0) == confirmNotCreated {
 		return publishJob{}, errors.New("必须且只能选择 foodtalks_news_id 或 confirm_not_created")
 	}
@@ -1039,6 +1081,10 @@ func (p *publishPipeline) reconcileStaging(jobID, newsID int64, confirmNotCreate
 // FoodTalks 前台/后台核对，然后明确二选一——已公开则只补本地终态，
 // 未公开才允许清掉旧 intent 并发起一次新 PUT。
 func (p *publishPipeline) reconcilePublicize(jobID int64, confirmPublished, confirmNotPublished bool) (publishJob, error) {
+	if publishWorkersPaused() {
+		job, _ := p.store.byID(jobID)
+		return job, errPublishWorkersPaused
+	}
 	if confirmPublished == confirmNotPublished {
 		return publishJob{}, errors.New("必须且只能选择 confirm_published 或 confirm_not_published")
 	}
@@ -1078,6 +1124,9 @@ func (p *publishPipeline) reconcilePublicize(jobID int64, confirmPublished, conf
 
 // submit source_key 永久幂等建单：任意阶段（含终态）同源任务都返回原单，绝不再建文。
 func (p *publishPipeline) submit(sourceURL string) (publishJob, bool, error) {
+	if publishWorkersPaused() {
+		return publishJob{}, false, errPublishWorkersPaused
+	}
 	sourceKey, err := normalizeSiteSourceKey(sourceURL)
 	if err != nil {
 		return publishJob{}, false, err

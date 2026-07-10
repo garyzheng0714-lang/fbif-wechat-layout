@@ -9,17 +9,33 @@ import { parseHTML } from 'linkedom';
 
 const { createActiveRuleSelector, escText } = await import('../public/js/active-rule-selector.js');
 
-function makeEnv({ readonlyEditEntry = false, readonlyLabel = '当前排版规则', source = 'server', fallbackTransform } = {}) {
+function makeEnv({
+  readonlyEditEntry = false,
+  readonlyLabel = '当前排版规则',
+  source = 'server',
+  fallbackTransform,
+  pack = { id: 'fbif', channel: 'mp', templateId: 'fbif' },
+  currentPreset,
+  refreshRuleConsumers: refreshRuleConsumersOverride,
+} = {}) {
   const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
-  window._activeConfig = { preset: { id: 'default', name: 'FBIF默认规则', config: { a: 1 } }, config: { a: 1 } };
-  const calls = { saveLocal: [], setActive: [], adminLogin: [], applied: [] };
+  const initialPreset = currentPreset || { id: 'default', name: 'FBIF默认规则', channel: 'mp', config: { a: 1 } };
+  window._activeConfig = { preset: initialPreset, config: initialPreset.config };
+  const calls = { saveLocal: [], saveLocalPreset: [], setActive: [], adminLogin: [], applied: [] };
   const ruleModule = {
     loadActiveRulePreset: async () => ({ source: 'server', preset: { id: 'rule-x', name: '新规则', config: { b: 2 } } }),
     loadLocalRuleConfig: () => ({ local: true }),
+    loadLocalRulePreset: () => null,
     saveLocalRuleConfig: (config, acct) => calls.saveLocal.push({ config, acct }),
+    saveLocalRulePreset: (preset, acct) => calls.saveLocalPreset.push({ preset, acct }),
     applyActiveRuleConfig: (config, preset) => calls.applied.push({ config, preset }),
     adminLogin: async (pw) => { calls.adminLogin.push(pw); if (pw === 'bad') { const e = new Error('401 unauthorized'); throw e; } },
-    listPublicRulePresets: async () => ({ presets: [{ id: 'default', name: 'FBIF默认规则' }, { id: 'rule-x', name: '新规则' }] }),
+    listPublicRulePresets: async () => ({ presets: [
+      { id: 'default', name: 'FBIF默认规则', channel: 'mp', rule_family: 'fbif' },
+      { id: 'rule-x', name: '新规则', channel: 'mp', rule_family: 'fbif' },
+      { id: 'legacy-ambiguous', name: '待迁移规则', channel: 'mp', rule_family: 'fbif', migration_required: true },
+      { id: 'site-rule', name: '网站规则', channel: 'ft', rule_family: 'foodtalks-site' },
+    ] }),
     setActiveRulePreset: async (pw, id, acct) => calls.setActive.push({ pw, id, acct }),
   };
   // 页面真实实现里 refreshRuleConsumers 会重渲选择器卡片（saveActiveRuleSelection
@@ -28,9 +44,12 @@ function makeEnv({ readonlyEditEntry = false, readonlyLabel = '当前排版规�
   const selector = createActiveRuleSelector({
     documentRef: document,
     windowRef: window,
-    getPack: () => ({ id: 'fbif' }),
+    getPack: () => pack,
     ruleModule,
-    refreshRuleConsumers: () => { if (selectorRef) selectorRef.renderActiveRuleCard(); },
+    refreshRuleConsumers: options => {
+      if (selectorRef) selectorRef.renderActiveRuleCard();
+      return refreshRuleConsumersOverride ? refreshRuleConsumersOverride(options) : undefined;
+    },
     fallbackTransform,
     readonlyLabel,
     readonlyEditEntry,
@@ -64,6 +83,27 @@ test('网站口径只读视图：「已锁定」徽章 + 铅笔编辑入口，�
   assert.ok(card.querySelector('[data-action="cancel-active-rule"]'));
 });
 
+test('规则菜单按当前渠道过滤，网站账号看不到公众号 preset', async () => {
+  const { document, selector } = makeEnv({
+    readonlyEditEntry: true,
+    pack: { id: 'ft-default', channel: 'ft', templateId: 'foodtalks-site' },
+    currentPreset: { id: 'site-rule', name: '网站规则', channel: 'ft', config: {} },
+  });
+  await selector.beginActiveRuleEdit();
+  document.querySelector('#activeRuleSelect').click();
+  assert.ok(document.querySelector('[data-rule-option="site-rule"]'));
+  assert.equal(document.querySelector('[data-rule-option="default"]'), null);
+  assert.equal(document.querySelector('[data-rule-option="rule-x"]'), null);
+});
+
+test('待确认基线的历史规则不进入前台绑定菜单', async () => {
+  const { document, selector } = makeEnv({ readonlyEditEntry: true });
+  await selector.beginActiveRuleEdit();
+  document.querySelector('#activeRuleSelect').click();
+  assert.equal(document.querySelector('[data-rule-option="legacy-ambiguous"]'), null);
+  assert.ok(document.querySelector('[data-rule-option="rule-x"]'));
+});
+
 test('保存流程：选新规则 → 输密码 → setActiveRulePreset → 回只读并显示已保存', async () => {
   const { document, window, selector, calls } = makeEnv({ readonlyEditEntry: true });
   window.prompt = () => 'good-pass';
@@ -81,6 +121,46 @@ test('保存流程：选新规则 → 输密码 → setActiveRulePreset → 回�
   await new Promise(r => setTimeout(r, 20));
   assert.deepEqual(calls.setActive[0], { pw: 'good-pass', id: 'rule-x', acct: 'fbif' });
   assert.match(document.getElementById('activeRuleCard').innerHTML, /已保存/);
+});
+
+test('规则保存必须等预览提交后才离开保存中', async () => {
+  let releasePreview;
+  const preview = new Promise(resolve => { releasePreview = resolve; });
+  const { document, window, selector, calls } = makeEnv({
+    readonlyEditEntry: true,
+    refreshRuleConsumers: () => preview,
+  });
+  window.prompt = () => 'good-pass';
+  await selector.beginActiveRuleEdit();
+  document.querySelector('#activeRuleSelect').click();
+  document.querySelector('[data-rule-option="rule-x"]').click();
+  document.querySelector('[data-action="save-active-rule"]').click();
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+
+  assert.equal(calls.setActive.length, 1, '服务端绑定已完成');
+  assert.match(document.getElementById('activeRuleCard').textContent, /保存中/);
+  assert.doesNotMatch(document.getElementById('activeRuleCard').textContent, /已保存/);
+
+  releasePreview({ status: 'committed' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.match(document.getElementById('activeRuleCard').textContent, /已保存/);
+  assert.doesNotMatch(document.getElementById('activeRuleCard').textContent, /保存中/);
+});
+
+test('服务端规则已保存但预览失败时，不得伪装整体回滚或笼统显示已保存', async () => {
+  const { document, window, selector, calls } = makeEnv({
+    readonlyEditEntry: true,
+    refreshRuleConsumers: async () => ({ status: 'failed', error: 'render failed' }),
+  });
+  window.prompt = () => 'good-pass';
+  await selector.beginActiveRuleEdit();
+  document.querySelector('#activeRuleSelect').click();
+  document.querySelector('[data-rule-option="rule-x"]').click();
+  document.querySelector('[data-action="save-active-rule"]').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(calls.setActive.length, 1, '预览失败不得否认服务端已保存的事实');
+  assert.match(document.getElementById('activeRuleCard').textContent, /规则已保存，但当前预览刷新失败/);
 });
 
 test('密码错误：401 类失败清空缓存密码并显示错误状态', async () => {
@@ -108,8 +188,18 @@ test('server 预设落本地缓存经过渠道 fallbackTransform（公众号 str
   const transform = (config, preset) => (preset && preset.config) || config;
   const { selector, calls } = makeEnv({ fallbackTransform: transform });
   await selector.hydrateActiveRulePreset('fbif');
-  assert.equal(calls.saveLocal.length, 1);
-  assert.deepEqual(calls.saveLocal[0], { config: { b: 2 }, acct: 'fbif' });
+  assert.equal(calls.saveLocalPreset.length, 1);
+  assert.deepEqual(calls.saveLocalPreset[0], {
+    preset: { id: 'rule-x', name: '新规则', config: { b: 2 } },
+    acct: 'fbif',
+  });
+});
+
+test('网站首屏本地规则携带账号身份，离线时也不走公众号 behavior', () => {
+  const { selector } = makeEnv();
+  const local = selector.localActiveRulePreset('ft-default');
+  assert.equal(local.rule_account_id, 'ft-default');
+  assert.equal(local.id, 'local');
 });
 
 test('adoptAccount：并行水合+目录并复位选择器状态（账号切换契约）', async () => {
@@ -227,6 +317,210 @@ test('hydrate guard：A→B→A 后，最早的 A 响应不得覆盖新 A', asyn
 
   assert.deepEqual(applied, ['new-a']);
   assert.equal(window._activeConfig.preset.id, 'new-a');
+});
+
+test('保存 guard：A 保存后切 B，旧 A 后返不得 apply 或缓存到 B', async () => {
+  const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
+  let accountID = 'account-a';
+  window._activeConfig = { preset: { id: 'default', name: 'Default', config: {} }, config: {} };
+  window.prompt = () => 'good-pass';
+  const defer = () => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+  };
+  const setTask = defer();
+  const loads = [];
+  const calls = { applied: [], saved: [], setActive: [] };
+  let selector;
+  selector = createActiveRuleSelector({
+    documentRef: document,
+    windowRef: window,
+    getPack: () => ({ id: accountID }),
+    ruleModule: {
+      loadActiveRulePreset(id) {
+        const task = defer();
+        loads.push({ id, ...task });
+        return task.promise;
+      },
+      loadLocalRuleConfig: () => ({}),
+      saveLocalRuleConfig: (config, id) => calls.saved.push({ owner: config.owner, id }),
+      applyActiveRuleConfig(config, preset) {
+        calls.applied.push({ rule: preset.id, account: accountID });
+        window._activeConfig = { config, preset };
+      },
+      adminLogin: async () => {},
+      listPublicRulePresets: async () => ({ presets: [{ id: 'default' }, { id: 'rule-x' }] }),
+      setActiveRulePreset: async (...args) => { calls.setActive.push(args); return setTask.promise; },
+    },
+    refreshRuleConsumers: () => selector.renderActiveRuleCard(),
+  });
+  selector.renderActiveRuleCard();
+  await selector.beginActiveRuleEdit();
+  document.querySelector('#activeRuleSelect').click();
+  document.querySelector('[data-rule-option="rule-x"]').click();
+  document.querySelector('[data-action="save-active-rule"]').click();
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  setTask.resolve({});
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  assert.equal(loads[0].id, 'account-a');
+
+  accountID = 'account-b';
+  const adoptB = selector.adoptAccount({ rerender: false });
+  loads.find(load => load.id === 'account-b').resolve({
+    source: 'server', preset: { id: 'rule-b', config: { owner: 'B' } },
+  });
+  await adoptB;
+  loads.find(load => load.id === 'account-a').resolve({
+    source: 'server', preset: { id: 'rule-a', config: { owner: 'A' } },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.deepEqual(calls.applied, [{ rule: 'rule-b', account: 'account-b' }]);
+  assert.deepEqual(calls.saved, [{ owner: 'B', id: 'account-b' }]);
+  assert.equal(window._activeConfig.preset.id, 'rule-b');
+  assert.deepEqual(calls.setActive[0].slice(1), ['rule-x', 'account-a'], '保存请求必须固定启动时账号');
+});
+
+test('保存 single-flight：保存中再点击不得发第二个 PUT', async () => {
+  const { document, window, selector, calls } = makeEnv({ readonlyEditEntry: true });
+  window.prompt = () => 'good-pass';
+  selector.setAdminPassword('good-pass');
+  await selector.beginActiveRuleEdit();
+  document.querySelector('#activeRuleSelect').click();
+  document.querySelector('[data-rule-option="rule-x"]').click();
+  const first = document.querySelector('[data-action="save-active-rule"]');
+  first.click();
+  const second = document.querySelector('[data-action="save-active-rule"]');
+  if (second) second.click();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(calls.setActive.length, 1);
+});
+
+test('保存中取消必须禁用，PUT 成功后仍水合并应用新规则', async () => {
+  const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
+  window._activeConfig = { preset: { id: 'default', name: '默认', channel: 'mp', config: {} }, config: {} };
+  window.prompt = () => 'secret';
+  let release;
+  const pendingPut = new Promise(resolve => { release = resolve; });
+  const applied = [];
+  let selector;
+  selector = createActiveRuleSelector({
+    documentRef: document,
+    windowRef: window,
+    getPack: () => ({ id: 'fbif', channel: 'mp', templateId: 'fbif' }),
+    ruleModule: {
+      loadActiveRulePreset: async () => ({ source: 'server', preset: { id: 'rule-x', name: 'X', channel: 'mp', config: {} } }),
+      loadLocalRuleConfig: () => ({}), saveLocalRuleConfig: () => {},
+      applyActiveRuleConfig(config, preset) { applied.push(preset.id); window._activeConfig = { config, preset }; },
+      adminLogin: async () => {},
+      listPublicRulePresets: async () => ({ presets: [{ id: 'default', rule_family: 'fbif' }, { id: 'rule-x', rule_family: 'fbif' }] }),
+      setActiveRulePreset: () => pendingPut,
+    },
+    refreshRuleConsumers: () => selector.renderActiveRuleCard(),
+    readonlyEditEntry: true,
+  });
+  selector.renderActiveRuleCard();
+  await selector.beginActiveRuleEdit();
+  document.querySelector('#activeRuleSelect').click();
+  document.querySelector('[data-rule-option="rule-x"]').click();
+  document.querySelector('[data-action="save-active-rule"]').click();
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  assert.ok(document.querySelector('[data-action="cancel-active-rule"]').hasAttribute('disabled'));
+  assert.equal(selector.cancelActiveRuleEdit(), false);
+  release({});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(applied, ['rule-x']);
+  assert.equal(window._activeConfig.preset.id, 'rule-x');
+});
+
+test('保存 PUT 成功后并发刷新目录，不得把保存事务误判 stale 卡在保存中', async () => {
+  const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
+  window._activeConfig = { preset: { id: 'default', name: '默认', channel: 'mp', config: {} }, config: {} };
+  window.prompt = () => 'secret';
+  const defer = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+  const activeLoad = defer();
+  const saveCatalog = defer();
+  const refreshCatalog = defer();
+  let catalogCalls = 0;
+  const applied = [];
+  let selector;
+  selector = createActiveRuleSelector({
+    documentRef: document,
+    windowRef: window,
+    getPack: () => ({ id: 'fbif', channel: 'mp', templateId: 'fbif' }),
+    ruleModule: {
+      loadActiveRulePreset: () => activeLoad.promise,
+      loadLocalRuleConfig: () => ({}),
+      saveLocalRuleConfig: () => {},
+      applyActiveRuleConfig(config, preset) { applied.push(preset.id); window._activeConfig = { config, preset }; },
+      adminLogin: async () => {},
+      setActiveRulePreset: async () => {},
+      listPublicRulePresets() {
+        catalogCalls++;
+        if (catalogCalls === 1) return Promise.resolve({ presets: [{ id: 'default', rule_family: 'fbif' }, { id: 'rule-x', rule_family: 'fbif' }] });
+        return catalogCalls === 2 ? saveCatalog.promise : refreshCatalog.promise;
+      },
+    },
+    refreshRuleConsumers: () => selector.renderActiveRuleCard(),
+    readonlyEditEntry: true,
+  });
+  selector.renderActiveRuleCard();
+  await selector.beginActiveRuleEdit();
+  document.querySelector('#activeRuleSelect').click();
+  document.querySelector('[data-rule-option="rule-x"]').click();
+  document.querySelector('[data-action="save-active-rule"]').click();
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  const refresh = selector.refreshActiveRuleCatalog('fbif');
+  refreshCatalog.resolve({ presets: [{ id: 'rule-newer', rule_family: 'fbif' }] });
+  await refresh;
+  saveCatalog.resolve({ presets: [{ id: 'rule-x', rule_family: 'fbif' }] });
+  activeLoad.resolve({ source: 'server', preset: { id: 'rule-x', name: 'X', channel: 'mp', config: {} } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(applied, ['rule-x']);
+  assert.match(document.getElementById('activeRuleCard').textContent, /已保存/);
+  assert.doesNotMatch(document.getElementById('activeRuleCard').textContent, /保存中/);
+});
+
+test('begin edit 后切账号：旧目录后返不得让新账号重新进入编辑态', async () => {
+  const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
+  let accountID = 'account-a';
+  window._activeConfig = { preset: { id: 'default', name: 'Default', config: {} }, config: {} };
+  const catalogLoads = [];
+  const defer = () => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+  };
+  const selector = createActiveRuleSelector({
+    documentRef: document,
+    windowRef: window,
+    getPack: () => ({ id: accountID }),
+    ruleModule: {
+      loadActiveRulePreset: async id => ({ source: 'server', preset: { id: 'rule-' + id, config: {} } }),
+      loadLocalRuleConfig: () => ({}), saveLocalRuleConfig: () => {},
+      applyActiveRuleConfig(config, preset) { window._activeConfig = { config, preset }; },
+      adminLogin: async () => {},
+      listPublicRulePresets() {
+        const task = defer();
+        catalogLoads.push(task);
+        return task.promise;
+      },
+      setActiveRulePreset: async () => {},
+    },
+    refreshRuleConsumers() {},
+    readonlyEditEntry: true,
+  });
+  selector.renderActiveRuleCard();
+  const oldBegin = selector.beginActiveRuleEdit();
+  accountID = 'account-b';
+  const adoptB = selector.adoptAccount({ rerender: false });
+  catalogLoads[1].resolve({ presets: [{ id: 'rule-account-b' }] });
+  await adoptB;
+  catalogLoads[0].resolve({ presets: [{ id: 'old-a' }] });
+  await oldBegin;
+  selector.renderActiveRuleCard();
+  assert.doesNotMatch(document.getElementById('activeRuleCard').innerHTML, /编辑中/);
 });
 
 test('escText 转义 HTML 敏感字符', () => {

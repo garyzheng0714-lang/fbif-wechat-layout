@@ -28,6 +28,7 @@ test('规则后台：参数为可视化表单(无 JSON 代码框)，规则控件
 
 test('rule admin save-as generates a unique id instead of overwriting same-name rules', async () => {
   const adminPanel = await readFile(new URL('../public/js/admin-panel.js', import.meta.url), 'utf8');
+  const adminRuleState = await readFile(new URL('../public/js/admin-rule-state.js', import.meta.url), 'utf8');
   const { uniqueClientRuleID } = await import('../public/js/admin-panel.js?unique=' + Date.now());
 
   assert.equal(uniqueClientRuleID('foodtalks series default', {
@@ -36,9 +37,9 @@ test('rule admin save-as generates a unique id instead of overwriting same-name 
   assert.equal(uniqueClientRuleID('foodtalks series default', {
     rules: { 'foodtalks-series-default': { id: 'foodtalks-series-default' } },
   }), 'foodtalks-series-default-2');
-  assert.match(adminPanel, /function ruleListFromDoc\(doc\)/);
-  assert.match(adminPanel, /Array\.isArray\(doc\.presets\)/);
-  assert.match(adminPanel, /while \(used\.has\(base \+ '-' \+ suffix\)\) suffix\+\+;/);
+  assert.match(adminRuleState, /function ruleListFromDoc\(doc\)/);
+  assert.match(adminRuleState, /Array\.isArray\(doc\.presets\)/);
+  assert.match(adminRuleState, /while \(used\.has\(base \+ '-' \+ suffix\)\) suffix\+\+;/);
   assert.match(adminPanel, /const id = uniqueClientRuleID\(name, doc\);/);
   assert.doesNotMatch(adminPanel, /data-action="save-as"[\s\S]*const id = clientRuleID\(name\);/);
 });
@@ -122,18 +123,21 @@ test('rule admin has configuration and rule-management views', async () => {
   assert.match(adminPanel, /已应用到：/);
   assert.match(adminPanel, /未应用/);
   assert.match(adminPanel, /renderApplicationBadges/);
-  assert.match(adminPanel, /setActiveRulePreset\(password, ruleID, accountID\)/);
+  assert.match(adminPanel, /setActiveRulePreset\(operation\.password, ruleID, accountID\)/);
   assert.match(adminPanel, /仅在预览中查看，未改变公众号应用规则/);
   assert.match(css, /\.admin-layout/);
   assert.match(css, /\.admin-side-nav/);
   assert.match(css, /\.admin-applied-badges/);
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*?\.admin-layout\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\)/,
+    '窄屏单列 Grid 必须让导航按内容高度、正文占剩余空间，避免 768px 导航撑高');
 });
 
 test('rule admin seeds article footer defaults from the current account', async () => {
   const adminPanel = await readProjectFile('public/js/admin-panel.js');
 
   assert.match(adminPanel, /articleFooterDefaultsSeedForAccount/);
-  assert.match(adminPanel, /workingArticleFooterDefaults = defaultArticleFooterDefaultsForCurrentAccount\(\);/);
+  assert.match(adminPanel, /const baseline = seed \|\| draftPreset;/);
+  assert.match(adminPanel, /workingArticleFooterDefaults = articleFooterDefaultsFromPreset\(baseline\)/);
   assert.doesNotMatch(adminPanel, /workingArticleFooterDefaults = defaultArticleFooterDefaultsData\(\);/);
 });
 
@@ -171,7 +175,13 @@ test('规则后台：删掉「代码化规则」「校验预览」tab，但 beha
   assert.doesNotMatch(adminPanel, /\['validation', '校验预览'\]/);
   assert.match(adminPanel, /const tabs = \[\['params', '参数'\], \['bottom', '底部'\]\]/);
   // behavior 数据链路保留：原作者行 / Mote 署名 / 原创转载声明等服务端规则仍生效（只删编辑 UI，数据照常加载/保存）
-  assert.match(adminPanel, /normalizeRuleBehavior/);
+  assert.match(adminPanel, /normalizeRuleBehaviorForRule/);
+  assert.doesNotMatch(adminPanel, /\bnormalizeRuleBehavior\(/,
+    '规则后台不得绕过渠道边界直接调公众号 normalizer');
+  assert.ok((adminPanel.match(/normalizedBehavior\(/g) || []).length >= 8,
+    '初始加载、规则切换、新建、删除回落等全部 behavior 入口应走渠道感知帮手');
+  assert.match(adminPanel, /isFtDefaultPack\(\)[\s\S]{0,220}return normalizedBehavior\(raw, selectedPreset\(\)\)/,
+    '网站 JSON behavior 应保留原始 schema，不进公众号 validateRuleBehavior');
   assert.match(adminPanel, /behavior:\s*workingBehavior/);
   assert.match(css, /\.admin-rule-tabs/);
 });
@@ -231,12 +241,22 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   assert.match(adminPanel, /savePresetWithFooter/);
   assert.match(adminPanel, /configDoc\.modules\.fbif_footer/);
   assert.match(adminPanel, /serverRuleConfigDocument\(configDoc\)/);
+  assert.match(adminPanel, /preserveUneditableRuleConfig\(configDoc, oc\)/,
+    '保存/另存不得丢弃账号专属顶层字段与结构化模块');
 	assert.match(adminPanel, /baseline_id:\s*preset\.baseline_id\s*\|\|\s*sourcePreset\.baseline_id/,
 	  '保存已有规则和另存新规则都必须携带显式基线');
 
   // 两处保存都调用 savePresetWithFooter 而非裸 saveRulePreset
   const saveCount = (adminPanel.match(/await savePresetWithFooter/g) || []).length;
   assert.ok(saveCount >= 2, `应有至少 2 处 savePresetWithFooter 调用，实际 ${saveCount}`);
+  assert.match(adminPanel, /const body = \{[^\n]*baseline_id:[^\n]*behavior:\s*preset\.behavior/,
+    '保存 API 应原样发送 channel-aware working behavior');
+  assert.ok((adminPanel.match(/savePresetWithFooter\(\{[^}]*behavior:\s*savedBehavior/g) || []).length >= 2,
+    '保存与另存都必须传送当前网站 behavior，不得重新公众号化');
+  assert.match(adminPanel, /workingBehavior\s*=\s*normalizedBehavior\(selected\s*\?\s*selected\.behavior\s*:\s*getBehavior\(\),\s*selected\)/,
+    '规则下拉切换必须走 channel-aware behavior 边界');
+  assert.match(adminPanel, /normalizedBehavior\(selected\s*\?\s*selected\.behavior\s*:\s*workingBehavior,\s*selected,\s*accountID\)/,
+    '账号绑定切换必须显式传 accountID，避免网站 behavior 被当成公众号');
 
   // 行数守护
   assert.ok(adminPanel.split('\n').length <= 900, `admin-panel.js 超过 900 行`);

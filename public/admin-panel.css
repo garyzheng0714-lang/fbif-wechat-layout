@@ -496,6 +496,7 @@
 @media (max-width: 768px) {
   .admin-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
   .admin-side-nav {
     flex-direction: row;

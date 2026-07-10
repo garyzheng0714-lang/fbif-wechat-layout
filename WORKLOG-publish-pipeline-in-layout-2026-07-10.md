@@ -15,13 +15,14 @@
 ### S1. 存储：JSON 文件（贴仓库范式，零新依赖）
 - `data/publish-jobs.json`（路径随 RULES_STORE_PATH 同目录规则；env `PUBLISH_JOBS_PATH` 可覆盖）
 - 结构：`{"next_id": N, "jobs": [{...}]}`；进程内 sync.Mutex + 临时文件原子替换写（同 rulePresetStore 模式）
-- Job 字段：id/source_key/source_url/stage/failed_stage/error/title/source_name/blocks_json/content_html/cover_url/image_map/foodtalks_news_id/article_url/created_at/updated_at
-- source_key 归一化与幂等语义照抄资讯订阅仓 `internal/publishing/site.go` 的 `NormalizeSiteSourceKey`（支持 /s/ 短链 + biz/mid/idx/sn 长链；拒绝无定位参数形态）
+- Job 除正文/站点锨点外，还持久 `source_aliases` / `approved_risk_version` / CreateNews 与 Publicize 两类 intent / 通知 outbox。
+- source_key：长链唯一身份是 `__biz+mid+idx`，`sn/chksm/scene` 不参与去重；短链先用 slug，抓取后把页面 `og:url`/最终 URL 解出的长链身份原子加入 `source_aliases`。旧版含 `sn` 的已存 key 在比较时动态归一，避免升级反而重文。
 
 ### S2. 状态机（阶段进程内化——这是迁移的最大红利）
 ```
-created → fetching → rendering → mirroring → staging → awaiting_review
-        → [review approve] → publicizing → published
+created → fetching → rendering → mirroring → enriching → assessing → staging → awaiting_review
+        → [review approve] → publicizing → publicizing_updating → published
+                                             └→ publicize_reconciliation_required
         → [review reject]  → rejected（终态；FoodTalks 侧留草稿不动）
 任一步失败 → failed（failed_stage 续跑，retry 端点）
 ```
@@ -29,8 +30,8 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - rendering：走 `render_proxy.go` 既有转发内核（RENDER_SERVICE_URL + RENDER_TOKEN env 已有）传 packId=ft-default → content_html
 - mirroring：**进程内**调 `handleImageUpload` 的上游代理逻辑（WECHAT_UPLOAD_ENDPOINT，urls 模式批量）→ 重写 content_html 的 img src + cover；任一图失败 fail loud 列 URL；封面无值用正文第一图兜底
 - staging：foodtalks 客户端 CreateNews（publishStatus=0 草稿）；foodtalks_news_id 幂等锚点（非 0 走 UpdateNews）
-- publicizing：UpdateNews 全量覆盖翻 publishStatus=1（**唯一不可逆动作，只能由 review approve 触发**）；article_url = FOODTALKS_FRONT_URL + /news/<id>
-- 通知：awaiting_review 与终态各发一条群文本；发送失败只 WARN 不 fail job
+- publicizing：approve CAS 同时绑定当前风险版本；sink 再复核 approve/reviewed_at/版本/pass|warning。外调前确定失败落 `failed(publicizing)` 并发结果通知，修复后可安全 retry。
+- publicizing_updating：先持久 PUT intent 再外调。传输错、进程崩溃或成功后本地落盘不确定，一律进 `publicize_reconciliation_required` 并通知人工核对，不盲目重放 PUT。
 
 ### S3. FoodTalks 客户端：从资讯订阅仓 `internal/foodtalks/client.go` 搬入 `api/foodtalks.go`
 - 改 package main；逻辑逐行保真（27 字段 News/id 二态 RawMessage/错误三分类/publishStatus 客户端自律 0/1/2/网关三头）
@@ -81,7 +82,7 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 ### 设计（钉死）
 - **审核卡（pending）**：schema 2.0、`config.update_multi:true`、**禁 emoji**（cardkit skill 红线）；header 蓝 + text_tag「待审核」黄；body=grey-100 信息色块（标题/来源公众号/任务号/目标环境/进站时间）+ 按钮行：「通过并发布」primary_filled + confirm 二次确认（文案明说「发布后公开可见且发布动作不可逆」）｜「驳回」danger + confirm｜「查看原文」default open_url。behaviors callback value=`{"action":"approve|reject","job_id":N}`。
 - **终态卡**：approve→绿 header「已发布」+ `<person>` 操作留痕 + 时间 + 「查看文章」open_url(article_url)；reject→红 header「已驳回」+ 留痕。回调响应直接带新卡（3 秒内 `{toast, card}`），群内所有人可见（update_multi）。
-- **回调端点** `POST /api/feishu/card-callback`：URL 验证 challenge 原样回；verification token 校验（env `FEISHU_VERIFICATION_TOKEN`，未配置时 WARN 放行——首次配置后必须回填）；`card.action.trigger` → operator.open_id + action.value → 复用 review 核心逻辑（从 HTTP handler 抽公共函数，**审核语义与权限红线不变**：仅 awaiting_review 可操作、approve 是唯一公开路径）；非待审态回 toast「已被处理」+ 当前终态卡防重复点击。
+- **回调端点** `POST /api/feishu/card-callback`：URL 验证 challenge 原样回；verification token 校验（env `FEISHU_VERIFICATION_TOKEN`，缺失或不匹配均 fail-closed）；`card.action.trigger` → operator.open_id + action.value，并要求审核人命中 `FEISHU_REVIEWER_OPEN_IDS` 白名单，再复用 review 核心逻辑（从 HTTP handler 抽公共函数，**审核语义与权限红线不变**：仅 awaiting_review 可操作、approve 是唯一公开路径）；非待审态回 toast「已被处理」+ 当前终态卡防重复点击。
 - **发送**：staging 成功发 interactive 卡片，构建/发送失败降级回文本通知（现有能力保留）。
 - **审核人身份**：operator.open_id 落 job（新字段 reviewed_by/reviewed_at），留痕进终态卡。
 - **外部配置**（代码上线后）：开放平台应用后台「事件与回调」配回调地址 `https://fbifmp-layout.foodtalks.cn/api/feishu/card-callback` + 订阅 card.action.trigger + 取 Verification Token 回填 publish.env。Caddy /api/* 已通配转 9001，无需改配置。
@@ -90,7 +91,7 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - **文件**：新增 `api/feishu_review_card.go`（pending 蓝卡 + done 绿/红终态卡构建）、`api/feishu_card_callback.go`（`POST /api/feishu/card-callback`：challenge 握手 / verification token 校验 / card.action.trigger → review 核心）、`api/feishu_card_callback_test.go`（7 个新测试）；改 `api/publish_jobs.go`（+reviewed_by/reviewed_at）、`api/publish_pipeline.go`（review 核心加 reviewedBy 参数落留痕；+notifyCard 依赖；staging 通知位点升级 notifyReviewPending：卡片优先、失败降级文本）、`api/feishu_notify.go`（抽 sendMessage 内核 + sendCard interactive）、`api/publish_http.go`（review 调用传 reviewedBy=""）、`api/main.go`（注册回调路由）。
 - **review 核心归一**：HTTP 端点与卡片回调共用 `publishPipeline.review(ctx, id, action, reviewedBy)` 一个函数——仅 awaiting_review 可操作、approve 仍是翻公开唯一路径；红线测试（ftStub forbidPublish 守卫 + TestPublishNoPublicizeWithoutApprove）继续全绿。
 - **卡片契约**（cardkit 红线，TestReviewPendingCardContract 字符串断言锁死）：schema 2.0 + update_multi；无 emoji；「通过并发布」primary_filled+done_outlined+confirm（文案明说不可逆）、「驳回」danger+confirm（照规范 03 §9 权威示例不带 icon）、「查看原文」default+preview_outlined open_url；横排按钮 column_set（schema 2.0 禁 action/note）；终态卡 person capsule 留痕（HTTP 审核无 open_id 时退化「经管理后台」纯文本）。
-- **回调安全模型**：无 ADMIN_PASSWORD 门（飞书服务器调用）；FEISHU_VERIFICATION_TOKEN 比对（url_verification 顶层 token / 事件 header.token 双形态），不匹配 401；未配置 WARN 放行（仅首次配置窗口，配好必须回填 publish.env）；业务性失败（任务不存在/已被处理）回 200+toast 防飞书重试轰炸；防重复点击：终态回「已被处理」+当前终态卡（update_multi 群内旧卡一并刷新）；非终态非待审（failed/publicizing 半途）只回 toast 指路管理后台、不动卡片。
+- **回调安全模型**：无 ADMIN_PASSWORD 门（飞书服务器调用）；FEISHU_VERIFICATION_TOKEN 比对（url_verification 顶层 token / 事件 header.token 双形态），缺失或不匹配均 401；`FEISHU_REVIEWER_OPEN_IDS` 缺失或未命中均拒绝审核；业务性失败（任务不存在/已被处理）回 200+toast 防飞书重试轰炸；防重复点击：终态回「已被处理」+当前终态卡（update_multi 群内旧卡一并刷新）；非终态非待审（failed/publicizing 半途）只回 toast 指路管理后台、不动卡片。
 - **实施决策**：① 卡片发送成功不再发文本（同一事件不双通知），失败才降级——测试锁定；② published/rejected 既有文本通知位点保留（HTTP 审核路径的既有能力，卡片回调场景终态卡已原地刷新）；③ job_id 回传兼容数字/字符串两种 JSON 形态（coerceFeishuJobID）。
 - **与下方「预览链接」裁定的衔接（✅ 2026-07-10 已随 M5 实施）**：卡片第三键已换成「预览效果」（open_url=预览签名链接），原文链接移入卡片信息色块一行——单点改了 `buildReviewPendingCard`，回调与安全模型未动。详见「M5 + 预览页实施」节。
 - [ ] 开放平台外部配置（用户照做，见上方「外部配置」行；⚠️ 2026-07-10 用户已在后台把「订阅方式」选为**长连接**——见下方 M4b，Webhook 的回调地址/verification token 配置只在切回 Webhook 模式时才需要）
@@ -109,8 +110,8 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 
 ### M4c：审核异步化 + 持久通知 outbox（2026-07-10 对抗审查收口）
 
-- **3 秒响应合同**：Webhook / 长连接的 approve 只用存储 CAS 把 `awaiting_review` 原子改为 `publicizing`、落 `review_action=approve` 与审核人/时间，然后立即回「已受理，正在发布」无按钮进度卡，并明示「最终结果以随后终态卡为准」；不在回调请求内等待 FoodTalks。不可逆 `UpdateNews(publishStatus=1)` 由后台 `runJob` 执行，进程在 CAS 后崩溃时由启动扫描凭已持久化 approve intent 恢复。
-- **通知 outbox**：job 持久化 `notification_kind/state/seq/attempts/error/sent_at`。进入待审、发布成功、驳回时，业务状态与通知事件同一次 JSON 原子写；发送前 CAS `pending→sending`，成功按 `seq` ack 清空，失败回 `pending` 并指数退避重试。启动时把崩溃遗留 `sending` 重置并重发。published / rejected 优先发无审核按钮的绿/红终态卡，发卡失败再降级文本。语义为 **at-least-once**：极端「飞书已收、本地 ack 失败」可能重复，但不会因「状态已落盘、发卡前崩溃」漏通知。
+- **3 秒响应合同**：Webhook / 长连接的 approve 只用存储 CAS 把 `awaiting_review` 原子改为 `publicizing`、落 `review_action=approve` / 审核人/时间 / `approved_risk_version`，然后立即回「已受理，正在发布」无按钮进度卡，并明示「最终结果以随后终态卡为准」；不在回调请求内等待 FoodTalks。后台 worker 必须先 CAS 落 `publicizing_updating` + PUT intent 才调 FoodTalks；只有尚未落 PUT intent 的 `publicizing` 能安全恢复。
+- **通知 outbox**：job 持久化 `notification_kind/state/seq/attempts/error/sent_at`。进入待审、发布成功、驳回、公开前确定失败、公开结果不确定时，业务状态与通知事件同一次 JSON 原子写；发送前 CAS `pending→sending`，成功按 `seq` ack 清空，失败回 `pending` 并指数退避重试。启动时把崩溃遗留 `sending` 重置并重发。published / rejected 优先发无审核按钮的绿/红终态卡，发卡失败再降级文本。语义为 **at-least-once**：极端「飞书已收、本地 ack 失败」可能重复，但不会漏掉「发布中」之后的最终结果。
 - **审核安全**：Webhook token 未配置也 fail-closed；卡片审核人必须命中 `FEISHU_REVIEWER_OPEN_IDS`，空白名单全部拒绝（ADMIN_PASSWORD 管理审核不受影响）。卡片 value 带 `review_version`，版本绑定当前风险级别、证据条目与说明；历史补检或重评变更结论后旧卡自动失效。
 - **风险闸门**：风险检查是持久 `assessing` 阶段，失败降级 warning；只有 pass/warning 可人工 approve，block/空值/未知值均 fail-closed。block 卡不渲染通过按钮，正文在风险检查前后逐字节不变。
 
@@ -158,10 +159,10 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 4. **Summary 暂空**：施工图 S1 字段清单无 digest（参考实现的 job.Digest 来自 feed 数据，本仓无此来源），buildSiteNews 的 Summary 先留空，待接摘要来源再补。
 5. **鉴权门覆盖所有端点**：施工图只在 site-sync/review 明写 admin 门，实施时 GET jobs / retry 一并上门（管理面不裸奔；测试断言 5 端点无密码全 401）。
 6. **failed 不算终态**：terminal=published/rejected；同 source_key 重复提交幂等返回 failed 单（用户走 retry），终态后重提才建新单。
-7. **进程重启不自动续跑**：文件持久化保证 failed/awaiting_review 不丢，但重启后不自动 spawn（谨慎优先——尤其 publicizing 半途的单，由人经 retry/review 显式推进）。
+7. **进程重启按副作用边界分类恢复**：尚未发生不可逆外调的计算阶段、草稿更新阶段，以及未持久 PUT intent 的 `publicizing` 可自动续跑；`staging_creating` 与已持久 intent 的 `publicizing_updating` 一律转人工 reconciliation，不猜测外部结果、不盲重放请求。
 8. **列表端点是摘要视图**：GET /api/publish/jobs 清空 blocks_json/content_html/image_map 大字段，全量走详情端点。
 9. **gofmt 基线冲突**：仓库既有文件（account_catalog.go 等）在当前 gofmt 下本就不干净（中文注释 `//（` 风格）；新增文件全部 gofmt 干净，render_proxy.go 仅保留基线原有两行注释原样（不顺手重排既有代码）。
-10. **飞书通知位点**：待审核（staging 成功）/ 已发布（publicize 成功）/ 已驳回（reject）三处；failed 不通知（施工图口径「awaiting_review 与终态各一条」）。测试注入 notify fake，另有 httptest 桩直测 token 缓存与消息形态。
+10. **飞书通知位点**：待审核（staging 成功）/ 已发布（publicize 成功）/ 已驳回（reject）之外，公开请求发出前的确定失败发 `publicize_failed`，请求结果不确定发 `publicize_uncertain` 并要求人工 reconciliation。普通上游 failed 仍不打群；一旦已发「发布中」，后续一定有明确结果通知。测试注入 notify fake，另有 httptest 桩直测 token 缓存与消息形态。
 11. **（M5）未落 cover_candidates 字段**：施工图 M5 落库行列了 cover_candidates，实施时不存——候选=正文图列表，随时可从 content_html 用 extractImgSrcs 推导（enrichCandidateImages），存第二份就是冗余漂移面；前端 M6 九宫格选图从详情端点的 content_html 提取即可。
 12. **（M5）偏离记录 4「Summary 暂空」作废**：buildSiteNews 的 Summary/NewsTags/Author 现由 enriching 阶段的 AI 预填（或规则兜底）供给。
 13. **（预览页）域名取法**：Go 侧此前没有站点域名常量；预览链接 base 复用既有 env `WECHAT_UPLOAD_ORIGIN`（deploy.yml 已写死为 https://fbifmp-layout.foodtalks.cn）→ 缺失时默认常量兜底，不新增平行 env（最少新概念）。
@@ -227,3 +228,28 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - **并行工作流协同（第二回合）**：风险评估流水线（assessing/assessing_review 阶段+启动风险补检）上线后，重启把历史 awaiting_review 任务迁去补检、几分钟自愈回 awaiting_review（risk=warning）——期间预览 404 属过渡态非 bug。其前端规则面板 WIP 未提交（npm 红），本次提交用 stash 隔离出 api 子集验证后推送（注意 account_catalog.go+registry.js 是逐字节校验对，必须同车）。
 - **待用户动作**：①开放平台给应用 cli_aac5d107d9381bdf 开 im:resource:upload 权限（封面进卡片用，日志有直达链接）②群里随便点一次卡片按钮（会被白名单拒绝，正常）→ 从日志收割你在本应用下的 open_id → 配 FEISHU_REVIEWER_OPEN_IDS 重启，卡片审核解锁。
 - **评测第 5 轮（双模型判决模式）结果：全部门禁 PASS**（2086s）——摘要长度/风格/标签数量 100%、作者 8/9=89%、出处 93%、编造 0，与第 4 轮单模型基线持平（门禁指标已在天花板）；标签命中 50%/词表率 74% 较单模型微降（judge 偶尔采纳偏离词表的一案，仅报告项）。结论：双模型的价值不在均值提升，在**每篇都有第二意见+判决透明度**（verdict 上卡片）与单点模型故障韧性；代价=每篇 3 次调用、耗时 +50%。生产已启用。
+
+## 2026-07-10 对抗审查最终收口
+
+### 不可逆发布 sink
+
+- `approve` 只持久化人工决策、审核时间和当时的风险版本；FoodTalks `PUT publishStatus=1` 仍由后台 worker 执行。
+- sink 在外调前重新检查：人工 approve 存在、`reviewed_at` 存在、风险版本未变化、风险结论严格为 `pass|warning`。`block`、空值与未知枚举全部 fail-closed。
+- CreateNews / Publicize 都先持久化 intent；网络结果不确定时转 reconciliation，禁止自动重试。`source_key` 与抓取后发现的 URL aliases 永久幂等。
+- 审核通知采用持久 outbox；发布前确定失败发送 `publicize_failed`，结果不确定发送 `publicize_uncertain`，避免群里只留下“发布中”。
+
+### 官方预览与双模型
+
+- 本地 HMAC 预览会优先现铸 FoodTalks 官方预览 URL；只接受配置目标域名上的 `https` URL，路径/查询按组件编码，响应 `no-store` 且页面不发送 referrer。官方 token 获取失败时才回落本地白底预览。
+- AI 预填支持主模型 A、备选模型 B 与独立 judge。judge 只能在 A/B 两个已有方案中选字段，不得凭空生成第三套正文或元数据；自由文本仅限审核说明。readiness 要求生产部署使用 `dual` 模式。
+
+### 部署暂停与 readiness
+
+- 候选 API 必须以 `DEPLOYMENT_WRITES_PAUSED=1` 启动：发布/rules 写路由、业务写方法、恢复任务、通知 outbox worker 与飞书长连接全部暂停，避免新旧版本同时写 JSON store。
+- 管理员鉴权的 `GET /api/publish/readiness` 只返回布尔值和模式，不泄露凭证；校验 publish store 可读、FoodTalks API/前台/后台/期望目标一致、分类非空、render 可用、飞书通知配置、审核白名单状态与 enrich 模式。
+- 部署在 pause 状态完成公网 SHA、健康、鉴权和 readiness 验收后才接受 release；接受后禁止自动回滚，再解 pause 重启并复验。解 pause 后若失败只允许向前修复，避免旧版重复消费已经恢复的外部副作用。
+
+### 当前外部配置边界
+
+- 生产服务器的 FoodTalks 配置已显式声明 `FOODTALKS_EXPECTED_TARGET=test`，并补齐测试后台入口与分类；这是对现状的安全固化，不代表获准切到正式 FoodTalks。
+- `FEISHU_REVIEWER_OPEN_IDS` 仍未配置。飞书卡片审核因此按设计拒绝；`ADMIN_PASSWORD` 保护的管理审核可用。白名单只能由用户提供授权审核人的真实 open_id，代码不得猜测或放宽。

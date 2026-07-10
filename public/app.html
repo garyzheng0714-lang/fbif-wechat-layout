@@ -223,6 +223,7 @@ const rulePackModule = await import('/js/rule-packs/registry.js?v=' + assetVersi
 const rulePackUrlModule = await import('/js/rule-packs/url.js?v=' + assetVersion);
 const { mountAccountMenu } = await import('/js/account-menu.js?v=' + assetVersion);
 const editorShell = await import('/js/editor-shell.js?v=' + assetVersion);
+const { requestRulePreviewSync, rulePreviewCommitted } = await import('/js/rule-preview-sync.js?v=' + assetVersion);
 const { mountBlockPanel } = await import('/js/blocks/block-panel.js?v=' + assetVersion);
 const {
   bindRailDivider,
@@ -288,6 +289,14 @@ const initialRule = { source: 'local', preset: localActiveRulePreset(activeRuleP
 applyActiveRuleConfig(initialRule.preset.config, initialRule.preset);
 let activeRuleHydrationSeq = 0;
 let accountSwitchGeneration = 0;
+let committedAccountState = {
+  pack: activeRulePack,
+  templateId: currentTemplateId,
+  activeConfig: window._activeConfig,
+  skipUpload: window._skipUpload,
+  bottomBlocksOverride: window._bottomBlocksOverride,
+  ruleSource: ruleSelector.getSource(),
+};
 
 function trackActiveRuleHydration(promise, accountID = activeRulePack.id) {
   const seq = ++activeRuleHydrationSeq;
@@ -313,7 +322,7 @@ function trackActiveRuleHydration(promise, accountID = activeRulePack.id) {
 }
 
 function syncEngineConfig(triggerRerender) {
-  if (!window._engineApi || !window._engineApi.setActiveConfig) return;
+  if (!window._engineApi || !window._engineApi.setActiveConfig) return { status: 'unavailable' };
   // 本篇底部区块覆盖（公众号 fbif.js 读 window._bottomBlocksOverride；面板写 bb.override::<acct>）。
   try { window._bottomBlocksOverride = JSON.parse(localStorage.getItem('bb.override::' + activeRulePack.id) || 'null') || undefined; } catch { window._bottomBlocksOverride = undefined; }
   const flat = loadConfig();
@@ -322,19 +331,35 @@ function syncEngineConfig(triggerRerender) {
     ...flat,
     behavior: serverBehavior,
   });
-  if (triggerRerender && typeof window._engineApi.rerender === 'function') {
-    window._engineApi.rerender();
-  }
+  return requestRulePreviewSync(window._engineApi, triggerRerender);
 }
 
 function refreshRuleConsumers(options = {}) {
   syncWorkflowControls();
-  syncEngineConfig(options.rerender === true);
-  renderActiveRuleCard();
-  if (window.updateThemePreview) window.updateThemePreview(loadConfig());
-  if (window._updateFooter) window._updateFooter(null);
-  if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-  if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
+  const previewSync = syncEngineConfig(options.rerender === true);
+  const finalize = result => {
+    renderActiveRuleCard();
+    if (window.updateThemePreview) window.updateThemePreview(loadConfig());
+    if (window._updateFooter) window._updateFooter(null);
+    if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+    if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
+    // 当前账号已是最后提交态时，规则保存/水合也要同步回滚快照。
+    // 切换中的目标账号与 committed pack 不同，不会误把暂存态提交。
+    if (committedAccountState && committedAccountState.pack.id === activeRulePack.id) {
+      committedAccountState = {
+        pack: activeRulePack,
+        templateId: currentTemplateId,
+        activeConfig: window._activeConfig,
+        skipUpload: window._skipUpload,
+        bottomBlocksOverride: window._bottomBlocksOverride,
+        ruleSource: typeof ruleSelector.getSource === 'function' ? ruleSelector.getSource() : null,
+      };
+    }
+    return result;
+  };
+  return previewSync && typeof previewSync.then === 'function'
+    ? previewSync.then(finalize)
+    : finalize(previewSync);
 }
 
 function applyRulePackChrome(pack) {
@@ -356,7 +381,7 @@ renderActiveRuleCard();
 const accountMenu = mountAccountMenu({
   container: document.getElementById('acctMenu'),
   activeId: activeRulePack.id,
-  onSwitch: (id) => switchAccount(id),
+  onSwitch: (id) => { switchAccount(id).catch(err => console.warn('[account] switch failed', err)); },
   settingsAction: {
     id: 'adminLockBtn',
     label: '规则设置',
@@ -449,11 +474,19 @@ function persistAccountSelection(id) {
 }
 
 async function switchAccount(accountID, options = {}) {
+  if (window._accountSwitchFatal) {
+    throw new Error('账号状态恢复失败，当前页面不可继续编辑，请刷新后重试');
+  }
   const nextPack = rulePackModule.getRulePack(accountID);
   if (nextPack.id === activeRulePack.id) return;
   const generation = ++accountSwitchGeneration;
-  const stale = () => generation !== accountSwitchGeneration || activeRulePack.id !== nextPack.id;
-  if (nextPack.channel !== activeRulePack.channel) {
+  if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
+  if (window._engineApi && typeof window._engineApi.invalidatePendingWork === 'function') window._engineApi.invalidatePendingWork();
+  const rollbackState = committedAccountState;
+  if (nextPack.channel !== rollbackState.pack.channel) {
+    // 先暴露导航目标，让上一个同页切换的 selector 水合立即因账号不匹配失效。
+    activeRulePack = nextPack;
+    window._activeRulePack = nextPack;
     const next = new URL(location.href);
     if (rulePackUrlModule.parsePath(location.pathname) !== null) {
       next.pathname = rulePackUrlModule.buildPath(nextPack.channel, nextPack.id);
@@ -461,14 +494,20 @@ async function switchAccount(accountID, options = {}) {
     } else {
       next.searchParams.set('account', nextPack.id);
     }
-    location.href = next.toString();
+    try {
+      location.href = next.toString();
+    } catch (err) {
+      activeRulePack = rollbackState.pack;
+      window._activeRulePack = rollbackState.pack;
+      throw err;
+    }
     return;
   }
+  const stale = () => generation !== accountSwitchGeneration || activeRulePack.id !== nextPack.id;
+  // 水合期先让共享模块读到目标账号，但 URL / chrome / 菜单只在全链路
+  // 成功后提交；任一步失败都回滚，同一账号可直接重试。
   activeRulePack = nextPack;
   window._activeRulePack = activeRulePack;
-  persistAccountSelection(activeRulePack.id);
-  applyRulePackChrome(activeRulePack);
-  accountMenu.setActive(activeRulePack.id);
   // 整个跨模板+规则水合过程共用现有 rules-ready 门；不能只包住
   // adoptAccount，否则模板 import 期间上传文章会读到旧账号规则。
   const switching = (async () => {
@@ -480,9 +519,83 @@ async function switchAccount(accountID, options = {}) {
     // 水合+拉目录+复位选择器（含 afterHydrate 的账号能力 UI 刷新）收编进共享模块。
     const adopted = await ruleSelector.adoptAccount({ rerender: options.rerender !== false });
     if (stale() || (adopted && adopted.stale)) return { accountID: nextPack.id, stale: true };
+    if (adopted && adopted.previewSync && !rulePreviewCommitted(adopted.previewSync)) {
+      throw new Error('目标账号规则已加载，但当前文章预览未能提交；账号切换已回滚，请重试');
+    }
+    persistAccountSelection(nextPack.id);
+    applyRulePackChrome(nextPack);
+    accountMenu.setActive(nextPack.id);
+    committedAccountState = {
+      pack: nextPack,
+      templateId: currentTemplateId,
+      activeConfig: window._activeConfig,
+      skipUpload: window._skipUpload,
+      bottomBlocksOverride: window._bottomBlocksOverride,
+      ruleSource: typeof ruleSelector.getSource === 'function' ? ruleSelector.getSource() : null,
+    };
     return adopted;
   })();
-  return trackActiveRuleHydration(switching, nextPack.id);
+  try {
+    return await trackActiveRuleHydration(switching, nextPack.id);
+  } catch (err) {
+    if (generation === accountSwitchGeneration) {
+      activeRulePack = rollbackState.pack;
+      window._activeRulePack = rollbackState.pack;
+      window._activeConfig = rollbackState.activeConfig;
+      window._skipUpload = rollbackState.skipUpload;
+      window._bottomBlocksOverride = rollbackState.bottomBlocksOverride;
+      if (window._engineApi && typeof window._engineApi.invalidatePendingWork === 'function') window._engineApi.invalidatePendingWork();
+      if (rollbackState.ruleSource != null && typeof ruleSelector.setSource === 'function') ruleSelector.setSource(rollbackState.ruleSource);
+      // 无条件重投已提交模板：上一个过期切换可能已改了引擎，
+      // 却还没来得及更新 currentTemplateId。
+      const rollbackStale = () => generation !== accountSwitchGeneration || activeRulePack.id !== rollbackState.pack.id;
+      let rollbackTemplateError = null;
+      try {
+        const restored = await loadTemplate(rollbackState.templateId, { rerender: false, stale: rollbackStale });
+        if (!restored && !rollbackStale()) rollbackTemplateError = new Error('原模板未能恢复');
+      } catch (rollbackErr) {
+        rollbackTemplateError = rollbackErr;
+      }
+      if (rollbackStale()) throw err;
+      if (rollbackTemplateError) {
+        // 引擎实际模板已无法被可靠判定，此时继续刷新 A 规则/chrome/菜单只会
+        // 制造“规则 A + 模板 B”混合态。立即锁页并回到已提交账号的 canonical URL。
+        window._accountSwitchFatal = true;
+        if (typeof document !== 'undefined' && document.body) document.body.inert = true;
+        const canonical = new URL(location.href);
+        if (rulePackUrlModule.parsePath(location.pathname) !== null) {
+          canonical.pathname = rulePackUrlModule.buildPath(rollbackState.pack.channel, rollbackState.pack.id);
+          canonical.searchParams.delete('account');
+        } else {
+          canonical.searchParams.set('account', rollbackState.pack.id);
+        }
+        try { location.href = canonical.toString(); } catch {}
+        throw new Error(
+          (err && err.message || '账号切换失败') +
+          '；原账号模板回滚失败，已强制重新加载，当前页面不可继续编辑'
+        );
+      }
+      let rollbackPreview = { status: 'not-requested' };
+      let rollbackRestored = true;
+      if (typeof refreshRuleConsumers === 'function') {
+        try {
+          rollbackPreview = await Promise.resolve(refreshRuleConsumers({ rerender: true }));
+        } catch (rollbackErr) {
+          rollbackPreview = { status: 'failed', error: String(rollbackErr && rollbackErr.message || rollbackErr) };
+        }
+        rollbackRestored = rulePreviewCommitted(rollbackPreview);
+      } else {
+        syncEngineConfig(false);
+      }
+      applyRulePackChrome(rollbackState.pack);
+      accountMenu.setActive(rollbackState.pack.id);
+      try { await applyAccountCapabilityUI(rollbackState.pack); } catch {}
+      if (!rollbackRestored) {
+        throw new Error((err && err.message || '账号切换失败') + '；原账号已回滚，但当前预览恢复失败，请重新导入文章');
+      }
+    }
+    throw err;
+  }
 }
 
 function loadConfig() {
@@ -499,7 +612,7 @@ function saveConfig(config, preset, options = {}) {
     saveLocalRuleConfig(config, activeRulePack.id);
   }
   applyActiveRuleConfig(config, preset || (window._activeConfig && window._activeConfig.preset));
-  refreshRuleConsumers();
+  if (options.refresh !== false) refreshRuleConsumers();
   return normalized;
 }
 
@@ -562,7 +675,19 @@ window.addEventListener('fbif:article-text-ready', () => {
   if (bbSec) bbSec.style.display = 'none';
 });
 
-trackActiveRuleHydration(hydrateActiveRulePreset(activeRulePack.id), activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
+const initialHydrationAccountID = activeRulePack.id;
+const initialHydrationGeneration = accountSwitchGeneration;
+trackActiveRuleHydration(hydrateActiveRulePreset(initialHydrationAccountID), initialHydrationAccountID).then(() => {
+  if (initialHydrationGeneration !== accountSwitchGeneration || activeRulePack.id !== initialHydrationAccountID) return;
+  committedAccountState = {
+    pack: activeRulePack,
+    templateId: currentTemplateId,
+    activeConfig: window._activeConfig,
+    skipUpload: window._skipUpload,
+    bottomBlocksOverride: window._bottomBlocksOverride,
+    ruleSource: typeof ruleSelector.getSource === 'function' ? ruleSelector.getSource() : null,
+  };
+}).catch(err => console.warn('[rules] active hydrate failed', err));
 refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));
 
 function importTemplateModule(templateId) {
@@ -572,14 +697,19 @@ function importTemplateModule(templateId) {
 async function loadTemplate(templateId, options = {}) {
   const mod = await importTemplateModule(templateId);
   if (options.stale && options.stale()) return false;
-  currentTemplateId = templateId;
   syncEngineConfig(false);
   if (window._engineApi && typeof window._engineApi.switchTemplate === 'function') {
-    await window._engineApi.switchTemplate(mod.default, { rerender: options.rerender === true });
+    const switching = window._engineApi.switchTemplate(mod.default, { rerender: options.rerender === true });
+    // switchTemplate 在首个 await 前已把模板写入引擎；同步记录实际态，
+    // 让后续切换能看见过期任务已经做过的模板变更。
+    currentTemplateId = templateId;
+    await switching;
   } else {
     initApp(mod.default);
     wrapEngineFunctions();
+    currentTemplateId = templateId;
   }
+  if (options.stale && options.stale()) return false;
   return true;
 }
 
@@ -598,6 +728,7 @@ syncWorkflowControls();
 renderActiveRuleCard();
 
 const { initAdminPanel } = await import('/js/admin-panel.js?v=' + assetVersion);
+let adminApplyGeneration = 0;
 initAdminPanel({
   rulePacks: rulePackModule.listRulePacks(),
   getConfig: loadConfig,
@@ -606,17 +737,24 @@ initAdminPanel({
     ruleSelector.setAdminPassword(password);
   },
   applyConfig(config, preset, meta = {}) {
+    const generation = ++adminApplyGeneration;
     if (meta.source === 'server') {
       ruleSelector.setSource('server');
       cacheServerRuleFallback(config, preset);
     }
-    const c = saveConfig(config, preset, { persistLocal: meta.persistLocal === true });
-    syncEngineConfig(true);
-    if (window.updateThemePreview) window.updateThemePreview(c);
-    if (window._updateFooter) window._updateFooter(null);
-    if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
-    if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
-    return c;
+    const c = saveConfig(config, preset, { persistLocal: meta.persistLocal === true, refresh: false });
+    const previewSync = syncEngineConfig(true);
+    const finalize = result => {
+      if (generation !== adminApplyGeneration) return { config: c, previewSync: { status: 'superseded' } };
+      if (window.updateThemePreview) window.updateThemePreview(c);
+      if (window._updateFooter) window._updateFooter(null);
+      if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
+      if (window._updateMoreArticles) window._updateMoreArticles().catch(() => {});
+      return { config: c, previewSync: result };
+    };
+    return previewSync && typeof previewSync.then === 'function'
+      ? previewSync.then(finalize)
+      : finalize(previewSync);
   },
 });
 
@@ -649,6 +787,7 @@ const importClipboardText = (text) => {
   if (window._handleText) window._handleText(text, { source: 'clipboard' });
 };
 const clearRenderedImport = () => {
+  if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
   clearCurrentChannel();
   if (window.goBack) window.goBack();
 };
@@ -657,7 +796,16 @@ window.fetchArticle = createUrlImportHandler({
   fetchImpl: fetch,
   getAccountID: () => activeRulePack.id,
   importText: importClipboardText,
-  onArticleUrl(url) { window._currentArticleUrl = url; },
+  onArticleIntent() {
+    if (window._engineApi && typeof window._engineApi.invalidatePendingWork === 'function') window._engineApi.invalidatePendingWork();
+  },
+  onArticleUrl(url) {
+    window._currentArticleUrl = url;
+  },
+});
+window.addEventListener('fbif:article-input-started', event => {
+  if (event && event.detail && event.detail.origin === 'url-import') return;
+  if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
 });
 
 // ---- Keyboard shortcuts ----

@@ -103,6 +103,14 @@ test('editor shells both import the shared editor-shell helpers', async () => {
   assert.match(site, /import\(['"]\/js\/editor-shell\.js/);
   assert.match(app, /createUrlImportHandler/);
   assert.match(site, /createUrlImportHandler/);
+  assert.match(app, /switchAccount[\s\S]{0,500}fetchArticle\.invalidate\(\)/, '公众号切账号必须作废旧 URL 请求');
+  assert.match(app, /clearRenderedImport[\s\S]{0,220}fetchArticle\.invalidate\(\)/, '公众号清空必须作废旧 URL 请求');
+  assert.match(site, /onSwitch:\s*\(id\)[\s\S]{0,220}fetchArticle\.invalidate\(\)/, '网站切账号必须作废旧 URL 请求');
+  assert.match(site, /clearRenderedImport[\s\S]{0,220}fetchArticle\.invalidate\(\)/, '网站清空必须作废旧 URL 请求');
+  assert.match(app, /onArticleIntent\(\)[\s\S]{0,220}invalidatePendingWork/, 'URL 意图必须作废旧文件解析');
+  assert.match(site, /onArticleIntent\(\)[\s\S]{0,220}invalidatePendingWork/, '网站 URL 意图必须作废旧文件解析');
+  assert.match(app, /fbif:article-input-started[\s\S]{0,260}url-import[\s\S]{0,160}fetchArticle\.invalidate\(\)/,
+    '新本地输入必须作废在途 URL 请求');
   assert.match(app, /bindUrlImportShortcuts/);
   assert.match(site, /bindUrlImportShortcuts/);
   assert.match(app, /onInputCleared:\s*clearRenderedImport/);
@@ -195,7 +203,7 @@ test('editor shells bind upload before remote rule hydration settles', async () 
     );
     assert.match(
       beforeInit,
-      /(?:trackActiveRuleHydration\(\s*)?hydrateActiveRulePreset\(activeRulePack\.id\)(?:,\s*activeRulePack\.id\))?\.catch/,
+      /(?:trackActiveRuleHydration\(\s*)?hydrateActiveRulePreset\((?:activeRulePack\.id|initialHydrationAccountID)\)/,
       `${name} should hydrate the active rule in the background`
     );
     assert.match(
@@ -363,6 +371,7 @@ test('resolveInitialRulePackID falls back by channel for website shell', () => {
 test('createUrlImportHandler passes source URL with structured blocks', async () => {
   const calls = [];
   const requests = [];
+  let blockMeta = null;
   const elements = new Map();
   const makeElement = value => ({ value, textContent: '', disabled: false, hidden: false, style: { display: '' } });
   elements.set('urlInput', makeElement('https://mp.weixin.qq.com/s/abc'));
@@ -394,26 +403,146 @@ test('createUrlImportHandler passes source URL with structured blocks', async ()
     onArticleUrl(url) {
       calls.push({ currentUrl: url });
     },
+    onBlocks(_blocks, meta) {
+      blockMeta = meta;
+    },
   });
 
   await handler();
 
-  assert.equal(calls[0].currentUrl, 'https://mp.weixin.qq.com/s/abc');
+  assert.equal(calls[1].currentUrl, 'https://mp.weixin.qq.com/s/abc');
   assert.deepEqual(requests[0], {
     url: '/api/fetch-article',
     body: { url: 'https://mp.weixin.qq.com/s/abc', account: 'ft-default' },
   });
-  assert.deepEqual(calls[1].payload, {
+  assert.deepEqual(calls[0].payload, {
     title: '标题',
     blocks: [{ type: 'p', text: '正文' }],
     source: 'https://mp.weixin.qq.com/s/abc',
   });
-  assert.deepEqual(calls[1].options, { isRepost: true });
+  assert.deepEqual(calls[0].options, { isRepost: true, source: 'url-import' });
+  assert.deepEqual(blockMeta, { title: '标题', url: 'https://mp.weixin.qq.com/s/abc' }, '摘要链路仍必须拿到来源 URL');
   assert.equal(elements.get('importZone').hidden, false);
   assert.equal(elements.get('docZone').hidden, true);
   assert.equal(elements.get('progress').style.display, 'block');
   assert.equal(elements.get('progressFill').style.width, '30%');
   assert.equal(elements.get('progressText').textContent, '正在提取...');
+});
+
+test('URL 只在成功交给渲染器后提交：抓取或 handoff 失败保留旧稿来源', async () => {
+  const elements = new Map();
+  const makeElement = value => ({ value, textContent: '', disabled: false, hidden: false, style: { display: '' } });
+  elements.set('urlInput', makeElement('https://example.test/fetch-fails'));
+  elements.set('urlFetchBtn', makeElement('导入'));
+  elements.set('error', makeElement(''));
+  elements.set('importZone', makeElement(''));
+  elements.set('docZone', makeElement(''));
+  elements.set('progress', makeElement(''));
+  elements.set('progressFill', { style: { width: '' } });
+  elements.set('progressText', makeElement(''));
+  const documentRef = { getElementById: id => elements.get(id) };
+  const intents = [];
+  let committedUrl = 'https://example.test/old-preview';
+  let mode = 'fetch-fails';
+  const handler = createUrlImportHandler({
+    documentRef,
+    getAccountID: () => 'fbif',
+    fetchImpl: async () => mode === 'fetch-fails'
+      ? { ok: false, status: 502, json: async () => ({ error: '抓取失败' }) }
+      : { ok: true, json: async () => ({ title: '新稿', blocks: [{ type: 'p', text: '正文' }] }) },
+    getHandleBlocks: () => () => { throw new Error('渲染器未就绪'); },
+    onArticleIntent: url => intents.push(url),
+    onArticleUrl: url => { committedUrl = url; },
+  });
+
+  assert.equal(await handler(), false);
+  assert.equal(committedUrl, 'https://example.test/old-preview');
+
+  mode = 'handoff-fails';
+  elements.get('urlInput').value = 'https://example.test/handoff-fails';
+  assert.equal(await handler(), false);
+  assert.equal(committedUrl, 'https://example.test/old-preview');
+  assert.deepEqual(intents, [
+    'https://example.test/fetch-fails',
+    'https://example.test/handoff-fails',
+  ], '新 URL 意图仍应立即作废旧异步工作，只是不提前改来源 URL');
+});
+
+test('createUrlImportHandler latest-wins：A→B 且 A 后返时只交给渲染器 B', async () => {
+  const elements = new Map();
+  const makeElement = value => ({ value, textContent: '', disabled: false, hidden: false, style: { display: '' } });
+  elements.set('urlInput', makeElement(''));
+  elements.set('urlFetchBtn', makeElement('导入'));
+  elements.set('error', makeElement(''));
+  elements.set('importZone', makeElement(''));
+  elements.set('docZone', makeElement(''));
+  elements.set('progress', makeElement(''));
+  elements.set('progressFill', { style: { width: '' } });
+  elements.set('progressText', makeElement(''));
+  const documentRef = { getElementById: id => elements.get(id) };
+  const pending = [];
+  const handedOff = [];
+  const fetchImpl = (url, init) => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    pending.push({ requested: JSON.parse(init.body).url, resolve });
+    return promise;
+  };
+  const handler = createUrlImportHandler({
+    documentRef,
+    fetchImpl,
+    getAccountID: () => 'fbif',
+    getHandleBlocks: () => payload => handedOff.push(payload.title),
+  });
+
+  elements.get('urlInput').value = 'https://example.test/a';
+  const requestA = handler();
+  elements.get('urlInput').value = 'https://example.test/b';
+  const requestB = handler();
+  const response = title => ({ ok: true, json: async () => ({ title, blocks: [{ type: 'p', text: title }] }) });
+  pending[1].resolve(response('B'));
+  await requestB;
+  pending[0].resolve(response('A'));
+  await requestA;
+
+  assert.deepEqual(handedOff, ['B'], '旧 A 响应不得在 B 之后重新导入');
+  assert.equal(elements.get('error').style.display, 'none');
+});
+
+test('createUrlImportHandler invalidate / 账号变更会作废在途响应及旧错误 UI', async () => {
+  const elements = new Map();
+  const makeElement = value => ({ value, textContent: '', disabled: false, hidden: false, style: { display: '' } });
+  elements.set('urlInput', makeElement('https://example.test/a'));
+  elements.set('urlFetchBtn', makeElement('导入'));
+  elements.set('error', makeElement(''));
+  elements.set('importZone', makeElement(''));
+  elements.set('docZone', makeElement(''));
+  elements.set('progress', makeElement(''));
+  elements.set('progressFill', { style: { width: '' } });
+  elements.set('progressText', makeElement(''));
+  const documentRef = { getElementById: id => elements.get(id) };
+  let accountID = 'fbif';
+  let rejectFetch;
+  let handedOff = 0;
+  const handler = createUrlImportHandler({
+    documentRef,
+    fetchImpl: () => new Promise((resolve, reject) => { rejectFetch = reject; }),
+    getAccountID: () => accountID,
+    getHandleBlocks: () => () => { handedOff++; },
+  });
+
+  const request = handler();
+  accountID = 'wowfood';
+  handler.invalidate();
+  rejectFetch(new Error('old request failed'));
+  await request;
+
+  assert.equal(handedOff, 0);
+  assert.equal(elements.get('error').textContent, '', '作废请求的错误不得污染新账号 UI');
+  assert.equal(elements.get('urlFetchBtn').textContent, '导入', '作废动作必须立即恢复按钮');
+  assert.equal(elements.get('urlFetchBtn').disabled, false);
+  assert.equal(elements.get('progress').style.display, 'none', '作废动作必须收起旧请求进度');
+  assert.equal(elements.get('progressFill').style.width, '0%');
 });
 
 test('createUrlImportHandler treats non-URL input as pasted text', async () => {

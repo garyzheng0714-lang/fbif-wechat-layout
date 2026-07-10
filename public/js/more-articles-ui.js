@@ -173,6 +173,16 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
   if (!container) return;
 
   let cards = loadCards();
+  // 版本门按卡片对象跟踪，不按数组下标：拖拽后同一卡片仍能正常收口，
+  // 删除后即使新卡复用了原下标，旧响应也无法落到新卡上。
+  const metaRequestVersions = new WeakMap();
+  const invalidateCardMetaRequest = (card) => {
+    const version = (metaRequestVersions.get(card) || 0) + 1;
+    metaRequestVersions.set(card, version);
+    return version;
+  };
+  const isCurrentCardMetaRequest = (card, version) =>
+    cards.includes(card) && metaRequestVersions.get(card) === version;
   // 拖拽排序交给 SortableJS（见 renderAll 末尾 + commitDragOrder）；maSortable 持当前实例，重渲前销毁。
   let maSortable = null;
 
@@ -335,10 +345,10 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       refreshThumb();
     }, SAVE_DEBOUNCE_MS);
 
-    // Track the URL we last auto-fetched so repeated paste/input events for
-    // the same string don't re-fire (cache still short-circuits them, but
-    // avoiding the duplicate status flicker matters).
-    let lastFetchedUrl = '';
+    // inFlight 与 committed 分开：用户改输入会作废旧 await，但同 URL 的缓存 Promise
+    // 仍可被新版本重新订阅，避免 A pending → 清空 → A 时永久卡在“抓取中”。
+    let inFlightUrl = '';
+    let lastCommittedUrl = '';
 
     const triggerFetch = async () => {
       const url = $('url').value.trim();
@@ -346,12 +356,16 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
         setStatus('需要公众号链接', 'err');
         return;
       }
-      if (url === lastFetchedUrl) return;
-      lastFetchedUrl = url;
+      if (url === inFlightUrl || url === lastCommittedUrl) return;
+      inFlightUrl = url;
+      const requestVersion = invalidateCardMetaRequest(state);
       setStatus('抓取中…', 'info');
       try {
         const meta = await fetchMoreArticleMetaCached(url);
+        if (!isCurrentCardMetaRequest(state, requestVersion)) return;
         state.href = meta.source_url || url;
+        inFlightUrl = '';
+        lastCommittedUrl = state.href;
         if (meta.title) state.title = meta.title;
         if (meta.cover_url) state.imgurl = meta.cover_url;
         state.image_urls = Array.isArray(meta.image_urls) ? meta.image_urls : [];
@@ -368,19 +382,23 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
         pushLivePreview();
         await refreshThumb();
       } catch (err) {
-        lastFetchedUrl = '';
+        if (!isCurrentCardMetaRequest(state, requestVersion)) return;
+        inFlightUrl = '';
         console.warn('[more-articles] fetch meta failed', err);
         setStatus('抓取失败: ' + err.message, 'err');
       }
     };
 
     const scheduleAutoFetch = debounce(() => {
-      if (shouldAutoFetchMoreArticleUrl($('url').value, lastFetchedUrl)) {
+      if (shouldAutoFetchMoreArticleUrl($('url').value, inFlightUrl || lastCommittedUrl)) {
         triggerFetch();
       }
     }, SAVE_DEBOUNCE_MS);
 
     $('url').addEventListener('input', () => {
+      // 用户一旦表达新 URL 意图就废止旧请求，不等 400ms 防抖后的新请求才废止。
+      invalidateCardMetaRequest(state);
+      inFlightUrl = '';
       state.href = $('url').value.trim();
       debouncedSave();
       scheduleAutoFetch();
@@ -411,12 +429,14 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
     };
 
     const ensureImageLibrary = async () => {
-      if (Array.isArray(state.image_urls) && state.image_urls.length > 0) return;
+      if (Array.isArray(state.image_urls) && state.image_urls.length > 0) return true;
       const url = (state.href || $('url').value || '').trim();
-      if (!isValidMoreArticleUrl(url)) return;
+      if (!isValidMoreArticleUrl(url)) return true;
+      const requestVersion = invalidateCardMetaRequest(state);
       setStatus('加载图片库中…', 'info');
       try {
         const meta = await fetchMoreArticleMetaCached(url);
+        if (!isCurrentCardMetaRequest(state, requestVersion)) return false;
         state.href = meta.source_url || url;
         if (meta.title && !state.title) state.title = meta.title;
         if (meta.cover_url && !state.imgurl) state.imgurl = meta.cover_url;
@@ -425,14 +445,17 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
         saveCards(cards);
         await refreshThumb();
         setStatus(state.image_urls.length > 0 ? `✓ 已加载${state.image_urls.length}张图片` : '', state.image_urls.length > 0 ? 'ok' : '');
+        return true;
       } catch (err) {
+        if (!isCurrentCardMetaRequest(state, requestVersion)) return false;
         setStatus('', '');
         console.warn('[more-articles] fetch image library failed', err);
+        return true;
       }
     };
 
     $('replace').addEventListener('click', async () => {
-      await ensureImageLibrary();
+      if (!await ensureImageLibrary()) return;
       const pick = await openCoverPicker(state);
       if (!pick) return;
       if (pick.type === 'file') { $('file').click(); return; }

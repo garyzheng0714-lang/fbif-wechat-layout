@@ -110,7 +110,7 @@ func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, e
 	}
 
 	modelB := strings.TrimSpace(os.Getenv(arkModelIDBEnv))
-	if modelB == "" {
+	if modelB == "" || modelB == arkModelID() {
 		return callOne(arkModelID()) // 单模型路径（旧行为）
 	}
 
@@ -209,11 +209,50 @@ func arkJudgeEnrichments(ctx context.Context, apiKey, articleText string, images
 	if err != nil {
 		return publishEnrichment{}, err
 	}
+	judged, invalidFields := enforceJudgeFieldChoices(judged, a, b)
+	if len(invalidFields) > 0 {
+		judged.Notes = strings.TrimSpace(judged.Notes + " 判决节点返回了不属于任一候选方案的" + strings.Join(invalidFields, "、") + "，已回退方案一对应值。")
+	}
 	judged = enforceEnrichmentEvidence(judged, evidence)
 	if verdict := parseJudgeVerdict(text); verdict != "" {
 		judged.Notes = strings.TrimSpace(judged.Notes + "\n【双模型判决】" + verdict)
 	}
 	return judged, nil
+}
+
+// enforceJudgeFieldChoices 把“判决节点只能逐字段二选一”从 prompt 提升为运行时约束。
+// 模型若自创摘要、混拼标签或改写封面等，相关字段回退方案一并留痕；notes 是判决节点
+// 唯一允许重写的字段，不在此约束。
+func enforceJudgeFieldChoices(judged, a, b publishEnrichment) (publishEnrichment, []string) {
+	invalid := make([]string, 0, 5)
+	chooseString := func(label string, got *string, left, right string) {
+		if *got == left || *got == right {
+			return
+		}
+		*got = left
+		invalid = append(invalid, label)
+	}
+	chooseString("封面", &judged.CoverURL, a.CoverURL, b.CoverURL)
+	chooseString("摘要", &judged.Summary, a.Summary, b.Summary)
+	if !equalStringSlices(judged.Tags, a.Tags) && !equalStringSlices(judged.Tags, b.Tags) {
+		judged.Tags = append([]string(nil), a.Tags...)
+		invalid = append(invalid, "标签")
+	}
+	chooseString("作者", &judged.Author, a.Author, b.Author)
+	chooseString("出处", &judged.SourceName, a.SourceName, b.SourceName)
+	return judged, invalid
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // parseJudgeVerdict 从判决输出里提取 verdict 字段（解析失败返回空串——判决说明是

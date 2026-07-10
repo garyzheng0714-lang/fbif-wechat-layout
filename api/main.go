@@ -126,16 +126,23 @@ func main() {
 	if !feishuReviewerAllowlistConfigured() {
 		log.Printf("publish: WARN FEISHU_REVIEWER_OPEN_IDS 未配置，Webhook/长连接卡片审核全部 fail-closed；仅 ADMIN_PASSWORD 管理端审核可用")
 	}
-	// 安全恢复仅重放可幂等阶段；CreateNews 不确定态转人工对账，publicizing 必须带
-	// 已持久化 approve 凭据。先扫描再开放 HTTP，避免启动瞬间与人工 retry 争抢。
-	publishPipe.recoverJobs()
+	// 候选部署先以 DEPLOYMENT_WRITES_PAUSED=1 启动，只开放只读/健康验收；验收通过并
+	// 接受该 release 后再解除暂停。这样 rollback 窗口内不会自动恢复任务、发通知或
+	// 续跑不可逆外调。正常启动仍先扫描再开放 HTTP，避免与人工 retry 争抢。
+	if publishWorkersPaused() {
+		log.Printf("publish: 候选部署暂停态，跳过任务恢复、通知 outbox 与飞书长连接")
+	} else {
+		publishPipe.recoverJobs()
+	}
 	registerPublishRoutes(mux, publishPipe)
 	// 飞书卡片审核回调（M4）：飞书服务器调用，无 ADMIN_PASSWORD 门，安全靠
 	// FEISHU_VERIFICATION_TOKEN 校验 + review 核心的业务态校验（见 feishu_card_callback.go）。
 	registerFeishuCardCallbackRoute(mux, publishPipe)
 	// 飞书卡片回调·长连接模式（2026-07-10 升级）：与上方 Webhook 端点并存，生效哪个
 	// 由飞书后台「订阅方式」单选决定；业务段两模式共用（见 feishu_ws.go）。
-	maybeStartFeishuWS(publishPipe)
+	if !publishWorkersPaused() {
+		maybeStartFeishuWS(publishPipe)
+	}
 	// 未上架预览页（M4「预览链接」裁定）：免登录但 HMAC 签名门（key=ADMIN_PASSWORD），
 	// 签名错/不存在/阶段太早一律 404（见 publish_preview.go 安全模型）。
 	registerPublishPreviewRoute(mux, publishStore)

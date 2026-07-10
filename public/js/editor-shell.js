@@ -179,12 +179,32 @@ export function createUrlImportHandler({
   getHandleBlocks = () => globalThis.window && globalThis.window._handleBlocks,
   getHandleFile = () => globalThis.window && globalThis.window._handleFile,
   getAccountID = () => '',
+  onArticleIntent = () => {},
   onArticleUrl = () => {},
   onBlocks = () => {},
   importText = null,
   errorMessage = defaultFetchErrorMessage,
 } = {}) {
-  return async function fetchArticleFromUrl() {
+  let requestGeneration = 0;
+  let idleButtonLabel = '';
+
+  function invalidate() {
+    requestGeneration++;
+    const btn = documentRef.getElementById('urlFetchBtn');
+    const progress = documentRef.getElementById('progress');
+    const progressFill = documentRef.getElementById('progressFill');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = idleButtonLabel || '导入';
+    }
+    if (progress) progress.style.display = 'none';
+    if (progressFill) progressFill.style.width = '0%';
+  }
+
+  async function fetchArticleFromUrl() {
+    const generation = ++requestGeneration;
+    const accountID = String(getAccountID() || '');
+    const stale = () => generation !== requestGeneration || String(getAccountID() || '') !== accountID;
     const urlInput = documentRef.getElementById('urlInput');
     const btn = documentRef.getElementById('urlFetchBtn');
     const errorEl = documentRef.getElementById('error');
@@ -203,7 +223,8 @@ export function createUrlImportHandler({
     }
     const url = rawValue;
     let handedOffToRenderer = false;
-    const btnLabel = btn ? (btn.textContent || '导入') : '';
+    const btnLabel = btn ? (idleButtonLabel || btn.textContent || '导入') : '';
+    if (!idleButtonLabel) idleButtonLabel = btnLabel || '导入';
     function showFetchProgress() {
       if (importZone) importZone.hidden = false;
       if (docZone) docZone.hidden = true;
@@ -225,55 +246,74 @@ export function createUrlImportHandler({
       btn.textContent = '排版中...';
     }
     try {
-      onArticleUrl(url);
+      onArticleIntent(url);
       const resp = await fetchWithTimeout('/api/fetch-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, account: getAccountID() || undefined }),
+        body: JSON.stringify({ url, account: accountID || undefined }),
       }, { fetchImpl, timeoutMs: 30000, timeoutMessage: '抓取超时，请检查网络后重试' });
+      if (stale()) return false;
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status }));
+        if (stale()) return false;
         throw new Error(err.error || '抓取失败');
       }
       const payload = await resp.json();
+      if (stale()) return false;
       const { title, blocks, content } = payload;
       if (Array.isArray(blocks) && blocks.length > 0) {
         const handleBlocks = getHandleBlocks();
         if (!handleBlocks) throw new Error('blocks 路径未就绪');
-        handedOffToRenderer = true;
         try { onBlocks(blocks, { title, url }); } catch { /* 摘要等附加填充失败不阻断导入 */ }
-        handleBlocks({ title, blocks, source: url }, { isRepost: true });
+        if (stale()) return false;
+        handleBlocks({ title, blocks, source: url }, { isRepost: true, source: 'url-import' });
+        if (stale()) return false;
+        handedOffToRenderer = true;
+        onArticleUrl(url);
       } else if (content) {
         const file = new FileCtor([content], (title || 'article') + '.md', { type: 'text/markdown' });
         const handleFile = getHandleFile();
         if (handleFile) {
+          if (stale()) return false;
+          handleFile(file, { isRepost: true, source: 'url-import' });
+          if (stale()) return false;
           handedOffToRenderer = true;
-          handleFile(file, { isRepost: true });
+          onArticleUrl(url);
         } else {
           const fi = documentRef.getElementById('fileInput');
           const dt = new DataTransferCtor();
           dt.items.add(file);
           fi.files = dt.files;
-          handedOffToRenderer = true;
+          if (stale()) return false;
           fi.dispatchEvent(new Event('change'));
+          if (stale()) return false;
+          handedOffToRenderer = true;
+          onArticleUrl(url);
         }
       } else {
         throw new Error('文章内容为空');
       }
+      return true;
     } catch (err) {
+      if (stale()) return false;
       if (errorEl) {
         errorEl.textContent = errorMessage(err);
         errorEl.style.display = 'block';
       }
       hideFetchProgress();
+      return false;
     } finally {
+      if (stale()) return;
       if (btn) {
         btn.disabled = false;
         btn.textContent = btnLabel || '导入';
       }
       if (!handedOffToRenderer) hideFetchProgress();
     }
-  };
+  }
+
+  fetchArticleFromUrl.invalidate = invalidate;
+  return fetchArticleFromUrl;
 }
 
 export function bindUrlImportShortcuts({

@@ -15,6 +15,7 @@ test('rule pack registry keeps FBIF as the default account pack', () => {
   assert.equal(DEFAULT_RULE_PACK_ID, 'fbif');
   assert.equal(pack.id, 'fbif');
   assert.equal(pack.templateId, 'fbif');
+  assert.equal(pack.defaultPresetId, 'default');
   assert.equal(pack.accountName, 'FBIF食品饮料创新');
   assert.equal(pack.previewAccountName, 'FBIF食品饮料创新');
   assert.equal(pack.behaviorAccountName, 'FBIF');
@@ -32,6 +33,7 @@ test('rule pack registry exposes FoodTalks what-is series as a selectable accoun
   assert.equal(pack.id, 'foodtalks-series');
   // 「什么是」系列有独立隔离渲染器（序号图标题/深蓝/目录/尾部名片），不再复用 fbif 模板。
   assert.equal(pack.templateId, 'foodtalks-series');
+  assert.equal(pack.defaultPresetId, 'foodtalks-series-default');
   assert.equal(pack.accountName, 'FoodTalks什么是系列');
   assert.equal(pack.previewAccountName, 'FoodTalks什么是系列');
   assert.equal(pack.behaviorAccountName, 'FoodTalks什么是系列');
@@ -103,6 +105,7 @@ test('rule pack registry assigns ft-default to the website channel', () => {
   assert.equal(pack.id, 'ft-default');
   assert.equal(pack.channel, 'ft');
   assert.equal(pack.templateId, 'foodtalks-site');
+  assert.equal(pack.defaultPresetId, 'ft-default-v1');
 });
 
 test('ft-default 显式空 footerUrl —— 网站渠道不带公众号页脚', () => {

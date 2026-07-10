@@ -152,8 +152,11 @@ func TestPublishPreviewRedirectsToOfficial(t *testing.T) {
 	}
 	ft := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/preview/token") {
+			if got := r.Header.Get("Authorization"); got != "Bearer svc-token" {
+				t.Errorf("官方预览 token 请求鉴权头=%q", got)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"id":7249,"token":"tok-fresh-123"}}`)
+			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"id":7249,"token":"tok+fresh&123"}}`)
 			return
 		}
 		t.Errorf("FoodTalks 桩收到意外请求 %s %s", r.Method, r.URL.Path)
@@ -168,13 +171,50 @@ func TestPublishPreviewRedirectsToOfficial(t *testing.T) {
 		t.Fatalf("应 302 到官方预览，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
 	got, _ := env.store.byID(job.ID)
-	wantLoc := "https://test.foodtalks.cn/preview/news/" + itoa64(got.FoodTalksNewsID) + "?token=tok-fresh-123"
+	wantLoc := "https://test.foodtalks.cn/preview/news/" + itoa64(got.FoodTalksNewsID) + "?token=tok%2Bfresh%26123"
 	if loc := rec.Header().Get("Location"); loc != wantLoc {
 		t.Fatalf("Location=%q，应为 %q", loc, wantLoc)
+	}
+	for header, want := range map[string]string{
+		"Referrer-Policy": "no-referrer",
+		"Cache-Control":   "no-store",
+		"X-Robots-Tag":    "noindex, nofollow",
+	} {
+		if got := rec.Header().Get(header); got != want {
+			t.Fatalf("官方预览重定向 %s=%q，应为 %q", header, got, want)
+		}
 	}
 	// ?local=1 强制本地预览页（仍走签名门）。
 	rec = getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID)+"&local=1")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "AI 预填参数") {
 		t.Fatalf("local=1 应渲染本地页，实际 %d", rec.Code)
+	}
+}
+
+func TestPublishPreviewOfficialTokenFailureFallsBackLocally(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPreviewMux(t, env)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	ft := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "temporarily unavailable", http.StatusBadGateway)
+	}))
+	t.Cleanup(ft.Close)
+	t.Setenv("FOODTALKS_BASE_URL", ft.URL)
+	t.Setenv("FOODTALKS_TOKEN", "svc-token")
+
+	rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "AI 预填参数") {
+		t.Fatalf("官方 token 失败应回落本地页，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOfficialPublishPreviewURLRejectsUnsafeBase(t *testing.T) {
+	for _, base := range []string{"javascript:alert(1)", "https://user@example.com", "//example.com"} {
+		if _, err := officialPublishPreviewURL(base, 7249, "token"); err == nil {
+			t.Fatalf("不安全前台 URL 应拒绝：%q", base)
+		}
 	}
 }

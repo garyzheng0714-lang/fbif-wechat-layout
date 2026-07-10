@@ -32,7 +32,7 @@ FoodTalks 冒烟测试（已批准）排在本任务之后。
 - [x] 共用/隔离判断标准成文 → `docs/adr/2026-07-10-share-vs-isolate-boundary.md` + CLAUDE.md 摘要
 - [x] 优化清单分级（见下）
 - [x] 第一批安全收敛已执行并验证（CI 测试门禁 + DefaultPresetID 挂链启动校验 + CLAUDE.md 红线 #2 事实修正；npm test 759 绿、go test 全绿）
-- [ ] 大手术清单待用户批准后立项执行
+- [x] S1–S6 大手术与二次对抗审查全部完成；真实浏览器、Node、Go、race、E2E 与部署事务测试均纳入收口门禁
 
 ## 根因综合（为什么「总出莫名其妙的 bug」）
 
@@ -55,14 +55,14 @@ FoodTalks 冒烟测试（已批准）排在本任务之后。
 
 **执行进度（实时）**：
 - [x] S6（commit 8e9f345）：rule-behavior-utils.js 收敛 4 份助手拷贝（13 契约测试先行）；author-card-autofill 迁出中立层；KNOWN_CHANNELS Go 测试守护。772 测试全绿。
-- [x] S3（commit 027d35d）：merge 基线按 preset 查表选择（rule_merge_baseline_test.go 4 契约先行）；连带修复校验器 FBIF 形状假设（conditions/actions 缺失视为空）。
+- [x] S3（commit 027d35d 起步，2026-07-10 二次对抗审查补齐）：规则库 schema v3 为内置/自建规则持久化受限 `baseline_id`；新建缺基线在保存期报错，v3 存储缺基线在启动期拒绝，v1/v2 存量自建规则显式迁移为历史 `default` 基线。同时补齐 headless 与 site.html 交互路径的 channel-aware behavior 边界，FoodTalks 网站顶层正则/lists 不再被公众号 normalizer 裁掉或注入 Mote actions。
 - [x] S4（commit fc320f6，生产已验证）：生产 Caddyfile 拆分完成（备份 bak-s4-split-20260710-064916，拆分前后 7 路径+缓存头零漂移）；deploy.yml 注入脚本 250 行 → 声明式 rsync+validate+自动回滚（376→151 行）；部署实战通过。已知遗留显式标注：/api/wechat-draft、/api/oss-presign 指向 9000 旧服务，@fbifUploadApi 下方两个 9000 handle 是死配置。
 - [x] S5（commit 9fb3e16）：e2e 一键可跑（webServer 自动起 Go 服务）+ 24 张像素基线自动对比（toHaveScreenshot，禁动画+mask 日期）；两个抓取场景 route 桩确定性化；修 spec 三处已改版 UI 死 selector。基线不入库（23M 绑定 macOS 渲染，本地防线）；首建 `npm run test:e2e:baseline`。
 - [x] S1（commit 61f3e7e）：规则选择器族（17 函数 + escText，~500 行×2 已分叉）收敛为 active-rule-selector.js 工厂模块，渠道差异 options 注入（readonlyEditEntry/fallbackTransform/afterHydrate）；app switchAccount 手工展开段收编为 adoptAccount()。7 项 linkedom 行为契约先行（此前零行为覆盖）。app 内联 740→479 行。剩余小函数（版本热更新等 ~60 行）收益递减列后续；syncEngineConfig/loadTemplate 属真渠道差异保留各页。视觉基线 24/24 零像素回归（两页手术各验一轮）。
 - [x] S2（commit e0576d2）：两个裸计数器守卫收敛为 copy-session.js 版本门（capture/stale 自解释）；文章级重置唯一入口 resetForNewArticle()。两 gate 语义独立（footer 写权 vs 合成任务）刻意不合并。5 项契约含防回退断言；wechat-draft-survival 模拟器全绿；视觉基线 24/24。
   疑点存档（未顺手改）：copyPlainTextToClipboard 的重置段只作废合成任务、不作废 footer 写权——旧上传完成后仍可回写已清空的 _footerCopy；因纯文字分支不读 _footerCopy 未构成可见 bug，留待 copyContent 行为测试补齐后再定。
 
-### S1-S6 全部完成（2026-07-10）。累计新增契约测试 41 项（13 utils + 4 merge 基线 + 2 挂链/渠道 + 7 选择器 + 5 copy-session + 视觉基线 24 张 + 迁移改写若干），npm test 759→784。
+### S1-S6 全部完成（2026-07-10）。首轮累计新增契约测试 41 项（13 utils + 4 merge 基线 + 2 挂链/渠道 + 7 选择器 + 5 copy-session + 视觉基线 24 张 + 迁移改写若干），随后又做了一轮逐 await、逐外部副作用的对抗审查。
 - **S1 外壳收敛**（中投入，直接消灭「改一处忘另一处」）：把 app.html/site.html 的 28 个复制粘贴同名函数抽成共享 shell 模块（两页 import 同一份），从此外壳 bug 只修一次。前置：先给现有行为补契约测试。
 - **S2 复制链路状态机化**（高投入，根治复制类 bug）：把 engine.js 里 11 个复制状态变量 + 两套守卫收敛为单一 CopySession 对象（一次导入=一个不可变会话，天然免疫旧任务回写），并给 initApp 编排层建行为测试。
 - **S3 规则合并显式化**（中投入，根治串台）：mergeRuleDefaults 从「默认继承 FBIF」改为「新账号必须显式声明每个模块的继承或覆盖」，缺声明启动报错。
@@ -70,9 +70,22 @@ FoodTalks 冒烟测试（已批准）排在本任务之后。
 - **S5 视觉基线**（低投入）：e2e-regression 纳入可跑路径（npm run test:e2e），截图与基线做像素 diff；至少覆盖 fbif/site 两渠道首屏与文章页。
 - **S6 小额清理**：助手函数家族去重（compileRegex 等 4 份→1 份）；author-card-autofill 硬编码迁出中立层；KNOWN_CHANNELS 并入生成链。
 
+### 二次对抗审查收口（2026-07-10～11）
+
+| 项目 | 对抗性反例 | 最终约束 |
+| --- | --- | --- |
+| S1 账号与规则切换 | 慢请求晚到、模板加载失败、回滚模板也失败 | 账号/规则/模板/菜单一次事务提交；旧意图 latest-wins 作废；回滚失败时页面 fail-closed 并回到规范 URL，不伪装成功 |
+| S2 编辑与复制链路 | URL、文件、区块、重渲染、更多文章、复制准备、重试交叉完成 | 所有异步入口统一在意图开始取版本门，每个 `await` 后与写 DOM/全局/持久化前复核；更多文章按卡片对象而非数组下标判定归属 |
+| S3 历史规则迁移 | v2 自建规则被默认基线展开后无法判断真实覆盖 | 未确认迁移只暴露原始 overrides；用户二次确认 `baseline_id` 后由服务端基于存储原值重建，忽略客户端伪造 payload；基线按渠道族过滤 |
+| S4 部署事务 | 新旧 API 同时写 JSON、健康通过但发布配置不可用、切换后回滚导致外部副作用重复 | 候选实例以 `DEPLOYMENT_WRITES_PAUSED=1` 启动，发布/rules 写入口和 worker 全暂停；管理员鉴权 readiness 同时验 store、目标、分类、渲染、飞书与双模型；验收后才解暂停，解暂停后只向前修复、不自动回滚 |
+| S5 浏览器回归 | 固定 19090 复用别的 worktree、缺基线时自动生成导致假绿 | CI 使用隔离 `E2E_PORT`、禁止复用既有服务、25 个功能场景必跑；视觉基线只允许显式命令更新，缺失即失败 |
+| S6 共用/隔离边界 | 去重后把网站差异错误下沉为“共用” | 中立能力只接受参数注入，平台渲染器仍物理隔离；本轮未发现需要继续抽象的 S6 缺陷 |
+
+最终验证口径：`npm test` 861 项、Go 全量测试与 vet、`go test -race ./...`、Playwright 25 场景、规则后台 320/768/1024 三档真实页面、严格 OpenSpec、生成物一致性及部署事务回归。视觉审计见 `docs/ui-audits/2026-07-10-rule-migration-and-preview-sync.md`。
+
 ## 结论
 
-「没有安全感」的来源不是代码烂，而是**防线和边界都存在但没接电**：测试写了 CI 不跑，隔离原则有但靠人记，契约多数靠注释。第一批收敛把「接电」成本最低的三处（CI 门禁、挂链校验、边界标准成文）做掉了；剩余安全感缺口集中在 S1/S2（外壳与复制链路），需要用户批准立项。
+「没有安全感」的来源不是单个坏函数，而是原先**防线和边界存在但没有覆盖真实时序与部署切换**。本轮已把 S1/S2 从“靠记住顺序”改为版本门与事务，把 S3/S4 从“默认可用”改为显式迁移和 readiness，把 S5 从“能截图”改为 CI 中必跑且不可假绿。仍保留的限制只有已知外部配置与架构边界：发布任务 JSON store 只能单进程写；飞书卡片审核白名单未配置时必须拒绝，不能猜测放行。
 
 ## 发现（实时回写）
 
@@ -102,7 +115,7 @@ FoodTalks 冒烟测试（已批准）排在本任务之后。
 ### Agent A：巨石解剖（已完成）——「莫名其妙 bug」的机理
 
 1. **`initApp()` 单函数约 1500 行**（engine.js 482–1996，占全文件 75%），十几种职责共享同一闭包变量池：格式转换/UI 状态/解析管线/footer 组装/图片上传/session 快照/复制链路。`_isRepost` 被 5 处读写，注释里反复自我告诫「绝不在 await 后回读全局 _isRepost」——坑已踩过的直接证据。
-2. **复制链路双真相源**：显示层（DOM）与复制层（闭包 `_articleCopy`/`_footerCopy`）分离，复制层被两路异步任务（图片上传、更多文章合成）在渲染后持续改写，靠 `_footerCopyGen` 数字守卫 + `_moreArticlesCopySeq` 两套补丁式守卫防错位。一次复制横跨 11 个闭包变量 + 4 个 window 全局 + 2 套守卫。
+2. **复制链路双真相源（历史发现）**：显示层（DOM）与复制层曾靠 `_footerCopyGen` / `_moreArticlesCopySeq` 两个裸计数器防错位；现已收敛为 `copy-session.js` 的具名版本门与文章级 reset，并给后台回写和旧 session 恢复补了 T0 安全投影测试。
 3. **20+ 个 `window._xxx` 隐式全局当跨文件状态总线**：`_activeConfig` 被 7 个文件读写且与 export 的 `getActiveConfig` 双通道并存；`_skipUpload` 三处写一处读；`_engineApi` 被组装两次并自我 spread（1216/1986）。模块用 ESM 加载，但状态传递全靠 window——「模块边界是 ESM 的，数据流是隐式全局的」。
 4. **app.html 与 site.html 有 28 个同名函数是复制粘贴**（规则选择器/版本热更新/配置读写整套外壳双份维护），部分逐字一致（escText），部分已分叉（syncEngineConfig 一个 15 行一个 68 行；renderActiveRuleCard 文案/按钮漂移）。改一处必须记得改另一处——「打补丁精疲力尽」的直接来源。
 5. engine.js 还是 parser/punctuation 的**唯一 re-export 转发枢纽**（隐藏中心依赖点），下游都从 engine 拿符号。

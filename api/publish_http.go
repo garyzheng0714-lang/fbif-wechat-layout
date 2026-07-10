@@ -11,9 +11,19 @@ import (
 )
 
 func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
+	mux.HandleFunc("GET /api/publish/readiness", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdminPassword(w, r) {
+			return
+		}
+		writeJSON(w, http.StatusOK, currentPublishReadiness(p))
+	})
+
 	// 提交同步任务：source_key 幂等（已有未终态 job 返回它）→ 建 job → goroutine 异步推进。
 	mux.HandleFunc("POST /api/publish/site-sync", func(w http.ResponseWriter, r *http.Request) {
 		if !requireAdminPassword(w, r) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
 			return
 		}
 		var req struct {
@@ -75,6 +85,9 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		if !requireAdminPassword(w, r) {
 			return
 		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
 		id, ok := publishJobIDFromPath(w, r)
 		if !ok {
 			return
@@ -100,6 +113,9 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		if !requireAdminPassword(w, r) {
 			return
 		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
 		id, ok := publishJobIDFromPath(w, r)
 		if !ok {
 			return
@@ -116,6 +132,9 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 	// 回填已存在 news id；或明确确认未创建，才重新进入 staging 发起新 POST。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/reconcile", func(w http.ResponseWriter, r *http.Request) {
 		if !requireAdminPassword(w, r) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
 			return
 		}
 		id, ok := publishJobIDFromPath(w, r)

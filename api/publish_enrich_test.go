@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -444,6 +445,35 @@ func TestDualModelJudgeArbitrates(t *testing.T) {
 	for _, banned := range []string{"ep-A", "ep-B", "豆包", "DeepSeek", "Doubao"} {
 		if strings.Contains(judgeText, banned) {
 			t.Fatalf("判决输入泄漏模型身份 %q（必须匿名保证公平）", banned)
+		}
+	}
+}
+
+func TestDualModelJudgeCannotInventOrMixFields(t *testing.T) {
+	newARKModelRouterStub(t, map[string]string{
+		"ep-A": `{"cover_url":"","summary":"A摘要。","tags":["食品","饮料"],"author":"","source_name":"","notes":"A案"}`,
+		"ep-B": `{"cover_url":"","summary":"B摘要。","tags":["零食"],"author":"","source_name":"","notes":"B案"}`,
+		"ep-J": `{"cover_url":"","summary":"判决节点自创摘要。","tags":["食品","零食"],"author":"虚构作者","source_name":"虚构来源","notes":"判决说明","verdict":"自行综合"}`,
+	}, nil)
+	t.Setenv("ARK_MODEL_ID", "ep-A")
+	t.Setenv("ARK_MODEL_ID_B", "ep-B")
+	t.Setenv("ARK_JUDGE_MODEL_ID", "ep-J")
+
+	got, err := arkEnrichArticle(context.Background(), publishJob{
+		Title: "测试标题", ContentHTML: "<p>正文提到了食品、饮料与零食，但没有作者和出处。</p>",
+	})
+	if err != nil {
+		t.Fatalf("arkEnrichArticle: %v", err)
+	}
+	if got.Summary != "A摘要。" || !reflect.DeepEqual(got.Tags, []string{"食品", "饮料"}) {
+		t.Fatalf("自创/混拼字段必须回退方案一：%+v", got)
+	}
+	if got.Author != "" || got.SourceName != "" {
+		t.Fatalf("作者/出处不得脱离两案与正文证据：%+v", got)
+	}
+	for _, field := range []string{"摘要", "标签", "作者", "出处"} {
+		if !strings.Contains(got.Notes, field) {
+			t.Fatalf("notes 应留痕无效字段 %q：%q", field, got.Notes)
 		}
 	}
 }
