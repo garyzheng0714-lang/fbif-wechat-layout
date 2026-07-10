@@ -71,9 +71,10 @@ created → fetching → rendering → mirroring → staging → awaiting_review
   - S4 `api/feishu_notify.go`（tenant_access_token 缓存 + 群文本；env 缺失静默禁用）
   - S5 `api/publish_http.go`（/api/publish/site-sync、jobs、jobs/{id}、review、retry；全端点 ADMIN_PASSWORD 门）
   - S6 `api/publish_pipeline_test.go` + `api/publish_http_test.go` + `api/feishu_notify_test.go`（16 个新测试，外部调用全 httptest 桩；红线「无 approve 则 UpdateNews 永不被调」由 FoodTalks 桩 forbidPublish 守卫 + 专门测试双保险锁死）
-- [ ] 测试环境全链路真机（等实施完，用户当审核人走 approve）
-- [ ] 正式环境接入（等 IP 白名单：**121.40.214.5**，用户下午通知后端）
-- [ ] 资讯订阅仓参考实现退役清理 + openspec design.md D1 反转回写
+- [x] 测试环境全链路真机（2026-07-10 部署 5ecb1b4 后生产服务实跑）：job #1（星巴克短链）fetching→rendering→mirroring→staging 全通 → FoodTalks 测试环境草稿 **news 7243** → 停在 awaiting_review（前台 404 复核 ✓）→ 群通知已发（无 WARN 日志）→ **等用户当审核人裁决 approve/reject**
+- [x] 部署踩坑根治：deploy.yml 每次部署整文件重写 /var/www/api/.env，手工键必被抹——流水线配置改放独立 `/var/www/api/publish.env` + systemd drop-in（fbif-api.service.d/publish-env.conf 加 EnvironmentFile），部署不再破坏。切正式环境只改 publish.env 四行（BASE_URL/TOKEN/ORIGIN/FRONT_URL）+ restart
+- [ ] 正式环境接入（等 IP 白名单：**121.40.214.5**，用户下午通知后端；token 已有 ai_news 50 年）
+- [ ] 资讯订阅仓参考实现退役清理（design.md D1 已反转回写 89295c6）
 
 ## 踩坑 / 实施偏离记录（2026-07-10）
 
