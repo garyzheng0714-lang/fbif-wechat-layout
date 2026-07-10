@@ -66,6 +66,19 @@
 - [x] 2.6 冒烟脚本与记录入库 docs/（`docs/foodtalks-api-contract.md`）
 - [x] Phase 2：3.1–3.5 代理交付+主线验收（792 全绿，提交 2f201ac）；3.6 同源验证通过；3.7 部署成功（version=7fad2fc）；3.8 生产重放真实文章 30078 字节与本地同长——**Phase 1 + Phase 2 全部完成**
 
+## Phase 0 前置项落定（2026-07-10 用户答复）
+
+- 飞书 App Secret：**用户裁定不重置、直接用**（仍 env-only）
+- 图片转存：用户指路排版工具 OSS 接口 → 实测定型（下条）
+- 运营发文动作：**群发/发布混用不固定** → Phase 5 自动发现按「freepublish 拉到多少算多少 + 手动兜底」设计
+
+## 图片链路实测（硬阻塞解除）
+
+- 链路：`/api/oss-upload`（Go 代理）→ `WECHAT_UPLOAD_ENDPOINT=localhost:9000/api/wechat-upload`（python 服务）→ OSS 桶 `fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com`
+- 生产实测：真实 mmbiz 图转存成功且公网可访问；文件名 hash 与已发布成品 static.foodtalks.cn 同图印证「CMS 粘贴才二次转存」
+- 测试环境实测（文章 7240，测毕已收回下线态并浏览器复核 404）：API 提交带我方 OSS 图的 content，前台**原样引用并正常渲染**——FoodTalks API 不校验图片域名，不需要索要其上传接口
+- 权衡记录：图片资产落我方 OSS，桶停用则文章图全挂（长期与网站后端商定归一，不阻塞 MVP）
+
 ## 交接要点（下一阶段 Phase 3 用）
 
 - 生产 render 服务端口 **19096**（非 19091——19091 被 docker 占用；unit 里 Environment=RENDER_PORT=19096），RULES_API_ORIGIN=127.0.0.1:9001

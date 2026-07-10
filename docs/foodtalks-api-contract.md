@@ -65,11 +65,18 @@ POST publishStatus=0（草稿进站，外界不可见）
 - 传已有 `id` + 全量字段：就地更新，不产生新文章；标题/正文改动即时生效（实测 <3s 可见）。
 - PUT 是**全量覆盖**语义（请求体和 POST 相同的完整字段集），不是增量 patch——客户端必须保存/回读完整字段再改。
 
-## 8. 未决问题（转给网站后端 / Phase 0）
+## 8. 图片链路实测（2026-07-10 补测，硬阻塞已解除）
+
+- **API 提交不转存图片、不校验图片域名**：PUT content 带外域 `<img src>`（排版工具 OSS `fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com`），前台原样引用并正常渲染（文章 7240 实测）。
+- 已发布成品里的 `static.foodtalks.cn/image/post/*` 是 **CMS 编辑器粘贴时**的二次转存行为（TinyMCE 侧），API 路径不触发——同一张图内容 hash 前缀可互相印证（`388d9023bb0d`）。
+- **流水线图片方案（定型）**：mmbiz → 排版工具既有 `POST /api/oss-upload`（`urls` 模式：服务器内网并发「取图+传 OSS」，实测 19 张 ~1.3s；上游 `WECHAT_UPLOAD_ENDPOINT=localhost:9000/api/wechat-upload`，python 服务）→ content 直接用 OSS URL 提交。零新开发。
+- ⚠️ 记录在案的权衡：文章图片资产落在我方 OSS 而非 FoodTalks 存储——桶（fbif-gary-img-hz）若停用/欠费，已发布文章图片全挂。长期可与网站后端商定归一到 static.foodtalks.cn，不阻塞 MVP。
+
+## 9. 未决问题（转给网站后端 / Phase 0）
 
 1. `isPublic`、`sourceType`、`isLatest`、`commentEnable` 的完整枚举与语义
 2. `publishStatus=2` vs `3` 的官方语义区分
-3. **图片上传接口**（正文与封面转存，硬阻塞）
+3. ~~图片上传接口~~ **已解除**（见 §8：API 不校验图片域名，走排版工具 OSS）
 4. 正式环境 Base URL + 服务级长效 token
 5. 「有料」标签对应的 categoryId 表；线上分类 ID 全集（本次沿用文档示例 52/58）
 6. 列表页排序规则（2026 年文章混在 2023 年之后，疑有置顶/权重逻辑，同步后运营可见性预期要对齐）

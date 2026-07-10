@@ -113,20 +113,21 @@ type Client interface {
 
 ### D4. 图片策略：mmbiz 全量转存网站可用存储，禁止外链裸奔
 
-正文 `<img>` 与封面的 mmbiz.qpic.cn URL 有防盗链且不受我们控制，网站端必须转存：
+正文 `<img>` 与封面的 mmbiz.qpic.cn URL 有防盗链且不受我们控制，网站端必须转存。
+**2026-07-10 实测定型（用户裁定走排版工具 OSS，硬阻塞解除）**：FoodTalks API 不校验图片域名、前台原样引用外域图（实测见 `docs/foodtalks-api-contract.md` §8），排版工具既有 `POST /api/oss-upload`（urls 模式）就是转存通道——服务器内网并发「取 mmbiz + 传 OSS」，实测 19 张 ~1.3s，零新开发：
 
 ```
 render 输出 HTML → 枚举 img src（mmbiz/外站）
-  → imagecache.FetchAndStore 下载（已有 qpic 防盗链 UA/referer 处理）
-  → 上传 FoodTalks 存储（接口待 Phase 0 抓包/索要——硬阻塞项）
-  → 重写 src → content 落库
+  → 调排版工具 POST /api/oss-upload {urls:[...]}（一次批量，返回 {原url: oss_url}）
+  → 重写 src → content 落库（封面 coverImg 同通道）
 ```
 
-- 逐图串行 + 失败重试一次（沿用 agent-publish-pipeline 的微信频控经验）。
+- 整批一次调用（上游本就并发），失败 URL 在响应缺失即视为失败，重试一次。
 - 任何一张正文图转存失败 → job `failed` 并列出失败 URL（显式失败），不允许「个别图裸奔外链」的半成品进站。
 - `original_url → new_url` 映射存 job 记录，便于追溯与重跑跳过已传图。
 
-**被否掉的方案**：*直接引用 mmbiz 外链*（防盗链裂图）；*先上自己 OSS 再说*（FoodTalks CMS 前台是否允许任意 OSS 域名未知，且多一跳存储；若网站上传接口短期拿不到，OSS+CDN 才作为过渡方案启用，并在 Open Questions 中单列）。
+**被否掉的方案**：*直接引用 mmbiz 外链*（防盗链裂图）；*索要 FoodTalks 上传接口*（实测证明不需要——API 不校验域名；已发布成品里的 static.foodtalks.cn 是 CMS 编辑器粘贴时的二次转存，API 路径不触发）。
+**记录在案的权衡**：图片资产落我方 OSS（fbif-gary-img-hz）而非 FoodTalks 存储，桶停用则文章图全挂；长期可与网站后端商定归一，不阻塞 MVP。
 
 ### D5. 触发：轮询 `freepublish/batchget` 为主，**不启用微信「服务器配置」事件推送**；手动贴 URL 是 MVP 主路径与永久兜底
 

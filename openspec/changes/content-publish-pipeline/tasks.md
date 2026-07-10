@@ -4,10 +4,10 @@
 
 ## 1. Phase 0 — 安全与外部前提（人工 + 确认类，先做）
 
-- [ ] 1.1 🔴 在飞书开放平台重置应用 `cli_aac5d107d9381bdf` 的 App Secret（对话中已明文暴露），新值只进服务器 env
-- [ ] 1.2 向 FoodTalks 网站后端确认：正式环境 Base URL、服务级长效鉴权（替换抓包个人 token）、响应体结构与错误码、`publishStatus`/`isPublic`/`sourceType` 完整枚举
-- [ ] 1.3 向 FoodTalks 网站后端索要（或抓包 CMS 编辑器补齐）图片上传接口——正文与封面转存的硬阻塞项；拿不到则评估自有 OSS+CDN 过渡方案（需先验证 CMS 不清洗外域 img src）
-- [ ] 1.4 与运营确认 FBIF 订阅号日常发文动作是「群发」还是「发布」（决定 Phase 5 轮询可行性）；确认不在公众号后台启用「服务器配置」的红线共识
+- [x] 1.1 ~~重置飞书 App Secret~~（2026-07-10 **用户裁定不重置、直接使用**；new值仍遵守 env-only 纪律，不进 git/日志）
+- [ ] 1.2 向 FoodTalks 网站后端确认：正式环境 Base URL、服务级长效鉴权（替换抓包个人 token）、响应体结构与错误码、`publishStatus`/`isPublic`/`sourceType` 完整枚举（部分已由 Phase 1 实测覆盖，见 docs/foodtalks-api-contract.md §9 余项）
+- [x] 1.3 图片转存通道（2026-07-10 实测解除硬阻塞，用户指路）：FoodTalks API 不校验图片域名、前台原样引用外域图；走排版工具既有 `POST /api/oss-upload`（urls 模式，服务器内网并发，19 张 ~1.3s，上游 localhost:9000 python 服务）；权衡与实测记录见契约 §8
+- [x] 1.4 运营发文动作（2026-07-10 用户答复：**群发/发布都有、不固定**）→ Phase 5 自动发现不能假设 freepublish/batchget 全覆盖，按「拉到多少算多少 + 手动贴 URL 永久兜底」设计；6.1 实测覆盖度仍必做。「不启用服务器配置」红线共识维持
 - [ ] 1.5 确认资讯订阅生产服务器出口 IP，加入 FBIF 订阅号 IP 白名单（微信公众平台后台）
 - [ ] 1.6 建飞书审核群，把应用机器人拉进群；🔴 调 `GET /open-apis/im/v1/chats` 获取群 chat_id 存入配置
 - [ ] 1.7 建议项：把飞书文档里明文的微信 AppSecret 挪到密钥管理（提醒用户，不代做）
@@ -36,7 +36,7 @@
 
 - [ ] 4.1 新包 `internal/foodtalks`：Client（CreateNews/UpdateNews）、News 结构体按 Phase 1 实测契约定义、401/403 凭证过期专项错误、env 配置（BASE_URL/TOKEN 缺失 fail loud）
 - [ ] 4.2 `internal/foodtalks` 单测：请求体序列化、幂等锚点判断、错误映射（httptest 桩）
-- [ ] 4.3 图片转存：复用 `imagecache.FetchAndStore` 下载 + 新增网站存储上传（按 Phase 0 拿到的接口），逐图串行重试一次，original→new 映射落 job
+- [ ] 4.3 图片转存：调排版工具 `POST /api/oss-upload` urls 模式一次批量（服务端已内网并发，无需 imagecache 逐图下载），响应缺失的 URL 重试一次仍缺则 job failed；original→new 映射落 job；封面 coverImg 同通道（2026-07-10 方案已实测定型，见 design D4 与契约 §8）
 - [ ] 4.4 `publish_jobs` 迁移：新增 `source_key`（唯一索引）、`source_url`、`foodtalks_news_id`、`review_card_msg_id`、`risk_notes` 列；版本化迁移脚本
 - [ ] 4.5 `internal/publishing` 新增 site 链路 stage 序列（fetching→rendering→mirroring→staging→awaiting_review→publicizing）；推进器按 target 分发，wechat_mp 路径零改动（diff 审查确认）
 - [ ] 4.6 LayoutClient 扩展：Render 支持 packId 参数（ft-default）
