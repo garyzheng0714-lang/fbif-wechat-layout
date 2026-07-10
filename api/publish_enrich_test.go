@@ -145,8 +145,8 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 }
 
 // TestPublishEnrichFallbackOnARKFailure ARK 挂了（HTTP 500）：走规则兜底
-// （摘要=正文前 100 字、author=source_name、tags 空、notes 说明未执行原因），
-// job 绝不 fail，照常推进到 awaiting_review、CreateNews 恰一次。
+// （摘要=正文前 40 字、author 空【编辑部宁空勿造，规范 §5】、tags 空、notes 说明
+// 未执行原因），job 绝不 fail，照常推进到 awaiting_review、CreateNews 恰一次。
 func TestPublishEnrichFallbackOnARKFailure(t *testing.T) {
 	env := newPublishTestEnv(t)
 	newARKStub(t, func() (int, string) { return http.StatusInternalServerError, "" })
@@ -161,10 +161,10 @@ func TestPublishEnrichFallbackOnARKFailure(t *testing.T) {
 		t.Fatalf("AI 失败不得 fail job，实际 stage=%q error=%q", got.Stage, got.Error)
 	}
 	if got.Summary != "正文" {
-		t.Fatalf("兜底摘要应为正文纯文本前 100 字，实际 %q", got.Summary)
+		t.Fatalf("兜底摘要应为正文纯文本前 40 字，实际 %q", got.Summary)
 	}
-	if got.Author != "测试公众号" {
-		t.Fatalf("兜底 author 应为 source_name，实际 %q", got.Author)
+	if got.Author != "" {
+		t.Fatalf("兜底 author 应为空（宁空勿造，不塞 source_name），实际 %q", got.Author)
 	}
 	if len(got.Tags) != 0 {
 		t.Fatalf("兜底 tags 应为空，实际 %v", got.Tags)
@@ -231,9 +231,10 @@ func TestParseEnrichmentJSONTolerance(t *testing.T) {
 	}
 }
 
-// TestBuildSiteNewsConsumesAIFields buildSiteNews 消费 M5 字段：Summary/NewsTags 直取、
-// Author 优先 AI 识别名、CoverImg 用（可能被 AI 覆盖过的）cover_url；Author 为空时
-// 回落 source_name（与 M5 之前行为一致，老任务不受影响）。
+// TestBuildSiteNewsConsumesAIFields buildSiteNews 消费 M5/M7 字段：Summary 直取、
+// Author=AI 识别署名（为空就是空——编辑部宁空勿造，不回落 source_name，规范 §5）、
+// CoverImg 用（可能被 AI 覆盖过的）cover_url；来源判定走 siteSourceFor 确定性规则
+// （自家号=原创 0，外部号/正文声明出处=转载 1，来源名必填——编辑部 163/163 有来源名）。
 func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
 	p := &publishPipeline{now: time.Now}
@@ -254,18 +255,34 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 	if news.Summary != "AI 摘要" || news.Author != "Mote莫特" || news.CoverImg != "https://oss.example.com/b.jpg" {
 		t.Fatalf("AI 字段未被消费：summary=%q author=%q cover=%q", news.Summary, news.Author, news.CoverImg)
 	}
-	// newsTags 恒空：2026-07-10 真机实测传字符串数组必 500（后端元素结构未知，契约 §9）。
-	// AI 标签只进卡片/预览展示，不写给 FoodTalks——这条断言守住「不再回退成透传」。
+	// newsTags 恒空：结构已破解（[{tagId,tagName}]），但后端 PUT 带标签必 500 且会把
+	// 文章污染成「任何 PUT 都 500」（翻公开卡死），契约 §9 矩阵。修复前这条断言守住恒空。
 	if len(news.NewsTags) != 0 {
 		t.Fatalf("NewsTags 必须恒空（后端结构未知，字符串数组会 500）：%v", news.NewsTags)
+	}
+	// 外部公众号 → 转载（source_type=1），来源名=公众号名，author 不填就是空。
+	if news.SourceType != 1 || news.SourceName != "测试公众号" {
+		t.Fatalf("外部号应判转载且带来源名：type=%d name=%q", news.SourceType, news.SourceName)
 	}
 	job.Author = ""
 	news, err = p.buildSiteNews(job, foodTalksPublishStatusDraft)
 	if err != nil {
 		t.Fatalf("buildSiteNews: %v", err)
 	}
-	if news.Author != "测试公众号" {
-		t.Fatalf("Author 为空应回落 source_name，实际 %q", news.Author)
+	if news.Author != "" {
+		t.Fatalf("Author 为空不得回落 source_name（编辑部 132/163 作者为空），实际 %q", news.Author)
+	}
+	// 自家号 → 原创（source_type=0）。
+	job.SourceName = "FBIF食品饮料创新"
+	news, _ = p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	if news.SourceType != 0 || news.SourceName != "FBIF食品饮料创新" {
+		t.Fatalf("自家号应判原创：type=%d name=%q", news.SourceType, news.SourceName)
+	}
+	// 自家号转发他人文章：AI 从正文声明抽到出处 → 按转载算，来源名=声明出处。
+	job.AISource = "小食代"
+	news, _ = p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	if news.SourceType != 1 || news.SourceName != "小食代" {
+		t.Fatalf("声明出处应判转载：type=%d name=%q", news.SourceType, news.SourceName)
 	}
 }
 

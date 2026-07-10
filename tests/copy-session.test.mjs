@@ -40,9 +40,11 @@ test('resetForNewArticle 一次作废全部 gate（新文章导入后旧任务�
   const s = createCopySession();
   const footer = s.footerCopyGate.capture();
   const ma = s.moreArticlesGate.capture();
+  const preview = s.moreArticlesPreviewGate.capture();
   s.resetForNewArticle();
   assert.equal(footer.stale(), true);
   assert.equal(ma.stale(), true);
+  assert.equal(preview.stale(), true);
 });
 
 // 机制防回退：engine.js 不得再出现裸计数器守卫（有人绕过 gate 加回 _footerCopyGen

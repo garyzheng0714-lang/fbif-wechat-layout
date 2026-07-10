@@ -51,9 +51,11 @@ type publishJob struct {
 	FoodTalksNewsID int64  `json:"foodtalks_news_id,omitempty"`
 	ArticleURL      string `json:"article_url,omitempty"`
 	// M5 AI 预填发布参数（enriching 阶段落库；AI 失败时是规则兜底值，任务照常推进）。
-	Summary    string   `json:"summary,omitempty"`     // 摘要（AI 80-120 字；兜底=正文纯文本前 100 字）
-	Tags       []string `json:"tags,omitempty"`        // 标签（AI 3-5 个；兜底为空）
-	Author     string   `json:"author,omitempty"`      // 正文识别的作者名（兜底=source_name；空则 buildSiteNews 回落 source_name）
+	// 口径见 docs/editorial-norms-foodtalks.md（M7 从编辑部历史文章倒推）。
+	Summary    string   `json:"summary,omitempty"`     // 摘要（一句话钩子 10~40 字；兜底=正文纯文本前 40 字）
+	Tags       []string `json:"tags,omitempty"`        // 标签（1~3 个，词表优先；兜底为空）
+	Author     string   `json:"author,omitempty"`      // 正文识别的作者署名（宁空勿造；不回落 source_name）
+	AISource   string   `json:"ai_source,omitempty"`   // 正文声明的原始出处（自家号转发他人文章时命中；决定 sourceType/sourceName）
 	AINotes    string   `json:"ai_notes,omitempty"`    // AI 优化说明（人话 2-4 句；兜底="AI 预填未执行（原因）"）
 	ReviewedBy string   `json:"reviewed_by,omitempty"` // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
 	ReviewedAt string   `json:"reviewed_at,omitempty"` // 审核时刻（RFC3339 UTC）

@@ -47,19 +47,21 @@ const (
 	arkEnrichMaxImages    = 8
 )
 
-// arkEnrichSystemPrompt 语言强制约束（全局规则）：调用模型必须显式要求简体中文。
-const arkEnrichSystemPrompt = `你是 FoodTalks 食品行业网站的编辑助手，为一篇即将发布的转载文章预填发布参数。请用简体中文回复，思考过程也用简体中文。
-只输出一个 JSON 对象（不要 markdown 代码围栏，不要任何多余文字），字段如下：
-{"cover_url":"从给定候选图中选最适合做封面的一张，必须原样照抄候选列表里的 URL","summary":"80-120字的文章摘要","tags":["3-5个标签"],"author":"从正文识别出的作者名，识别不到就给空字符串","notes":"2-4句非常直白的人话优化说明：封面为什么这么选、发现了哪些格式问题、摘要是怎么取的"}`
+// system prompt 见 editorial_norms.go（M7：从编辑部历史文章倒推的规范 + 词表组装，
+// 语言强制约束「请用简体中文回复」已写在 norms_prompt.md 里）。
 
 // publishEnrichment enriching 阶段的产出（AI 或规则兜底）。
 type publishEnrichment struct {
-	CoverURL string
-	Summary  string
-	Tags     []string
-	Author   string
-	Notes    string
+	CoverURL   string
+	Summary    string
+	Tags       []string
+	Author     string
+	SourceName string // 正文声明的原始出处（「本文来自微信公众号：XX」），没有则空
+	Notes      string
 }
+
+// enrichMaxTags 编辑部口径每篇 1~3 个标签（规范文档 §4），模型超发时硬截断。
+const enrichMaxTags = 3
 
 // arkEnrichArticle 生产默认实现：多模态调 ARK responses API（标题 + 纯文本正文 +
 // 正文图 input_image），要求严格 JSON 输出并容错解析。任何失败都返回 error，
@@ -85,7 +87,7 @@ func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, e
 	payload, err := json.Marshal(map[string]any{
 		"model": arkModelID(),
 		"input": []any{
-			map[string]any{"role": "system", "content": []map[string]any{{"type": "input_text", "text": arkEnrichSystemPrompt}}},
+			map[string]any{"role": "system", "content": []map[string]any{{"type": "input_text", "text": editorialEnrichSystemPrompt()}}},
 			map[string]any{"role": "user", "content": userContent},
 		},
 	})
@@ -168,11 +170,12 @@ func parseEnrichmentJSON(text string, candidates []string) (publishEnrichment, e
 		cleaned = cleaned[start : end+1]
 	}
 	var parsed struct {
-		CoverURL string   `json:"cover_url"`
-		Summary  string   `json:"summary"`
-		Tags     []string `json:"tags"`
-		Author   string   `json:"author"`
-		Notes    string   `json:"notes"`
+		CoverURL   string   `json:"cover_url"`
+		Summary    string   `json:"summary"`
+		Tags       []string `json:"tags"`
+		Author     string   `json:"author"`
+		SourceName string   `json:"source_name"`
+		Notes      string   `json:"notes"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
 		return publishEnrichment{}, fmt.Errorf("模型输出不是合法 JSON: %w", err)
@@ -190,24 +193,35 @@ func parseEnrichmentJSON(text string, candidates []string) (publishEnrichment, e
 			cover = "" // 幻觉/改写的 URL 一律弃用
 		}
 	}
-	tags := make([]string, 0, len(parsed.Tags))
+	// 标签：去空白、去重、按编辑部口径硬截断到 1~3 个（规范文档 §4）。
+	tags := make([]string, 0, enrichMaxTags)
+	seen := map[string]bool{}
 	for _, tag := range parsed.Tags {
-		if tag = strings.TrimSpace(tag); tag != "" {
-			tags = append(tags, tag)
+		tag = strings.TrimSpace(tag)
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+		if len(tags) >= enrichMaxTags {
+			break
 		}
 	}
 	return publishEnrichment{
-		CoverURL: cover,
-		Summary:  strings.TrimSpace(parsed.Summary),
-		Tags:     tags,
-		Author:   strings.TrimSpace(parsed.Author),
-		Notes:    strings.TrimSpace(parsed.Notes),
+		CoverURL:   cover,
+		Summary:    strings.TrimSpace(parsed.Summary),
+		Tags:       tags,
+		Author:     strings.TrimSpace(parsed.Author),
+		SourceName: strings.TrimSpace(parsed.SourceName),
+		Notes:      strings.TrimSpace(parsed.Notes),
 	}, nil
 }
 
 // fallbackEnrichment 规则兜底（施工图钉死）：封面不动（mirroring 已用正文第一图兜底
-// 且 OSS 化）、摘要=正文纯文本前 100 字、author=source_name、tags 空、notes 写明
-// 未执行原因（一句话，截断防错误串刷屏卡片）。
+// 且 OSS 化）、摘要=正文纯文本前 40 字（编辑部摘要 84% ≤40 字，规范文档 §3——规则
+// 兜底写不出钩子，至少长度不越线）、author 空（编辑部 132/163 篇作者为空且宁空勿造，
+// 规范 §5；来源信息由 source_name 承载不塞 author）、tags 空、notes 写明未执行原因
+// （一句话，截断防错误串刷屏卡片）。
 func fallbackEnrichment(job publishJob, cause error) publishEnrichment {
 	reason := "未知原因"
 	if cause != nil {
@@ -215,8 +229,7 @@ func fallbackEnrichment(job publishJob, cause error) publishEnrichment {
 	}
 	return publishEnrichment{
 		CoverURL: "", // 空 = 维持 job.CoverURL 现值
-		Summary:  truncateRunes(htmlToPlainText(job.ContentHTML), 100),
-		Author:   job.SourceName,
+		Summary:  truncateRunes(htmlToPlainText(job.ContentHTML), 40),
 		Notes:    "AI 预填未执行（" + reason + "）",
 	}
 }

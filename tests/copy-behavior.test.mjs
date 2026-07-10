@@ -345,7 +345,7 @@ test('preview footer and copy footer are separate so preview data images do not 
   assert.match(engine, /footerCopy = await buildFooterWithMoreArticles\(baseFooterHtml, \{ isRepost, isV2, copySafe: true \}\)/);
   assert.match(engine, /footerCopy: session\.footerCopy/);
   assert.match(engine, /_footerCopy = bodyOnly \? '' : normalizeRich\(\(opts && opts\.footerCopy\) \|\| footerContent\)/);
-  assert.match(engine, /const copySafeMerged = await buildFooterWithMoreArticles\(base, \{ isRepost: rp, isV2, copySafe: true \}\)/);
+  assert.match(engine, /const copySafeMerged = await buildFooterWithMoreArticles\(base, \{[\s\S]*?copySafe: true,[\s\S]*?\}\)/);
   assert.match(engine, /_articleSession\.footerCopy = copySafeMerged/);
 });
 
@@ -484,6 +484,29 @@ test('新文章导入原子作废上一篇的更多文章预热 job（防跨文�
   const showPreview = engine.slice(engine.indexOf('function showPreview('));
   const resetZone = showPreview.slice(0, showPreview.indexOf('// Split layout'));
   assert.match(resetZone, /_moreArticlesCopyJob = null/, 'showPreview 保留作废供 rerender');
+});
+
+test('更多文章预览只允许最新一次链接编辑回写', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const previewScope = engine.slice(engine.indexOf('function showPreview('));
+  const updateFn = extractAssignedFunctionExpression(previewScope, 'window._updateMoreArticles =');
+  const previewBuild = updateFn.indexOf('const merged = await buildFooterWithMoreArticles');
+  const copyBuild = updateFn.indexOf('const copySafeMerged = await buildFooterWithMoreArticles');
+  const footerWrite = updateFn.indexOf('_footerHtml = merged');
+  const staleChecks = Array.from(updateFn.matchAll(/if \(previewGate\.stale\(\)\) return false/g))
+    .map(match => match.index);
+
+  assert.match(updateFn, /moreArticlesPreviewGate\.invalidate\(\)/);
+  assert.match(updateFn, /const previewGate = moreArticlesPreviewGate\.capture\(\)/);
+  assert.ok(staleChecks.some(index => index > previewBuild && index < copyBuild), '预览合成后必须拒绝旧任务继续');
+  assert.ok(staleChecks.some(index => index > copyBuild && index < footerWrite), '复制层合成后必须拒绝旧任务回写 DOM');
+  assert.match(updateFn, /canCommitCards: \(\) => !previewGate\.stale\(\)/, '旧任务不得把旧卡片重新存回本地状态');
+
+  const builder = engine.slice(
+    engine.indexOf('async function buildFooterWithMoreArticles'),
+    engine.indexOf('// ---- App Initialization ----')
+  );
+  assert.match(builder, /!opts\.canCommitCards \|\| opts\.canCommitCards\(\)/);
 });
 
 test('website copy blocks when WeChat image CDN URLs still remain', async () => {

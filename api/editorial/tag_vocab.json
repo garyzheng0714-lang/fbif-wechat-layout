@@ -1,0 +1,2502 @@
+[
+{
+"cnt": 101,
+"tag_id": 113842,
+"tag_name": "FBIF2026会后报告"
+},
+{
+"cnt": 90,
+"tag_id": 6609,
+"tag_name": "FBIF"
+},
+{
+"cnt": 78,
+"tag_id": 39031,
+"tag_name": "FBIF Wow食品创新奖"
+},
+{
+"cnt": 73,
+"tag_id": 10449,
+"tag_name": "山姆"
+},
+{
+"cnt": 73,
+"tag_id": 13335,
+"tag_name": "盒马"
+},
+{
+"cnt": 64,
+"tag_id": 15560,
+"tag_name": "胖东来"
+},
+{
+"cnt": 64,
+"tag_id": 103890,
+"tag_name": "FBIF2026"
+},
+{
+"cnt": 61,
+"tag_id": 99913,
+"tag_name": "Mote莫特"
+},
+{
+"cnt": 60,
+"tag_id": 107004,
+"tag_name": "FBIF2026参展企业"
+},
+{
+"cnt": 59,
+"tag_id": 7253,
+"tag_name": "Wow Food Awards"
+},
+{
+"cnt": 51,
+"tag_id": 7320,
+"tag_name": "蜜雪冰城"
+},
+{
+"cnt": 49,
+"tag_id": 10752,
+"tag_name": "沃尔玛"
+},
+{
+"cnt": 49,
+"tag_id": 113338,
+"tag_name": "FBIF 2026"
+},
+{
+"cnt": 45,
+"tag_id": 7311,
+"tag_name": "星巴克"
+},
+{
+"cnt": 40,
+"tag_id": 7319,
+"tag_name": "喜茶"
+},
+{
+"cnt": 37,
+"tag_id": 14913,
+"tag_name": "永辉超市"
+},
+{
+"cnt": 36,
+"tag_id": 7223,
+"tag_name": "雀巢"
+},
+{
+"cnt": 35,
+"tag_id": 5070,
+"tag_name": "新零售"
+},
+{
+"cnt": 34,
+"tag_id": 100018,
+"tag_name": "Hema"
+},
+{
+"cnt": 33,
+"tag_id": 7287,
+"tag_name": "可口可乐"
+},
+{
+"cnt": 32,
+"tag_id": 7382,
+"tag_name": "瑞幸咖啡"
+},
+{
+"cnt": 30,
+"tag_id": 5075,
+"tag_name": "饮料"
+},
+{
+"cnt": 30,
+"tag_id": 7225,
+"tag_name": "农夫山泉"
+},
+{
+"cnt": 30,
+"tag_id": 11795,
+"tag_name": "产品策划"
+},
+{
+"cnt": 29,
+"tag_id": 7455,
+"tag_name": "零售"
+},
+{
+"cnt": 29,
+"tag_id": 21596,
+"tag_name": "山姆会员店"
+},
+{
+"cnt": 28,
+"tag_id": 7210,
+"tag_name": "伊利"
+},
+{
+"cnt": 28,
+"tag_id": 7322,
+"tag_name": "麦当劳"
+},
+{
+"cnt": 28,
+"tag_id": 100017,
+"tag_name": "Sam"
+},
+{
+"cnt": 27,
+"tag_id": 7347,
+"tag_name": "娃哈哈"
+},
+{
+"cnt": 26,
+"tag_id": 100139,
+"tag_name": "Starbucks"
+},
+{
+"cnt": 26,
+"tag_id": 101893,
+"tag_name": "retail"
+},
+{
+"cnt": 25,
+"tag_id": 18079,
+"tag_name": "奥乐齐"
+},
+{
+"cnt": 24,
+"tag_id": 11874,
+"tag_name": "美团"
+},
+{
+"cnt": 23,
+"tag_id": 7344,
+"tag_name": "元气森林"
+},
+{
+"cnt": 22,
+"tag_id": 10918,
+"tag_name": "海底捞"
+},
+{
+"cnt": 22,
+"tag_id": 12850,
+"tag_name": "叮咚买菜"
+},
+{
+"cnt": 22,
+"tag_id": 13034,
+"tag_name": "京东"
+},
+{
+"cnt": 20,
+"tag_id": 7227,
+"tag_name": "蒙牛"
+},
+{
+"cnt": 20,
+"tag_id": 7593,
+"tag_name": "西贝"
+},
+{
+"cnt": 20,
+"tag_id": 58528,
+"tag_name": "小象超市"
+},
+{
+"cnt": 20,
+"tag_id": 97341,
+"tag_name": "鸣鸣很忙"
+},
+{
+"cnt": 20,
+"tag_id": 101611,
+"tag_name": "supermarket"
+},
+{
+"cnt": 20,
+"tag_id": 114000,
+"tag_name": "茶叶系列"
+},
+{
+"cnt": 19,
+"tag_id": 7592,
+"tag_name": "古茗"
+},
+{
+"cnt": 19,
+"tag_id": 9346,
+"tag_name": "便利店"
+},
+{
+"cnt": 19,
+"tag_id": 104574,
+"tag_name": "beverage"
+},
+{
+"cnt": 19,
+"tag_id": 104871,
+"tag_name": "快乐猴"
+},
+{
+"cnt": 18,
+"tag_id": 5084,
+"tag_name": "咖啡"
+},
+{
+"cnt": 18,
+"tag_id": 7163,
+"tag_name": "超市"
+},
+{
+"cnt": 18,
+"tag_id": 9322,
+"tag_name": "东鹏饮料"
+},
+{
+"cnt": 17,
+"tag_id": 6372,
+"tag_name": "冰淇淋"
+},
+{
+"cnt": 17,
+"tag_id": 25796,
+"tag_name": "公司策划"
+},
+{
+"cnt": 17,
+"tag_id": 99948,
+"tag_name": "Walmart"
+},
+{
+"cnt": 16,
+"tag_id": 7107,
+"tag_name": "三只松鼠"
+},
+{
+"cnt": 16,
+"tag_id": 7247,
+"tag_name": "康师傅"
+},
+{
+"cnt": 16,
+"tag_id": 10992,
+"tag_name": "霸王茶姬"
+},
+{
+"cnt": 16,
+"tag_id": 26132,
+"tag_name": "FBIF食品创新展"
+},
+{
+"cnt": 16,
+"tag_id": 100343,
+"tag_name": "Pang Donglai"
+},
+{
+"cnt": 15,
+"tag_id": 5121,
+"tag_name": "啤酒"
+},
+{
+"cnt": 15,
+"tag_id": 7306,
+"tag_name": "联合利华"
+},
+{
+"cnt": 15,
+"tag_id": 7355,
+"tag_name": "肯德基"
+},
+{
+"cnt": 15,
+"tag_id": 8461,
+"tag_name": "配料"
+},
+{
+"cnt": 15,
+"tag_id": 97704,
+"tag_name": "食品渠道"
+},
+{
+"cnt": 15,
+"tag_id": 99549,
+"tag_name": "Luckin Coffee"
+},
+{
+"cnt": 15,
+"tag_id": 99961,
+"tag_name": "coffee"
+},
+{
+"cnt": 15,
+"tag_id": 100085,
+"tag_name": "Wahaha"
+},
+{
+"cnt": 15,
+"tag_id": 101372,
+"tag_name": "Mixue Bingcheng"
+},
+{
+"cnt": 15,
+"tag_id": 106606,
+"tag_name": "超盒算NB"
+},
+{
+"cnt": 14,
+"tag_id": 13334,
+"tag_name": "大润发"
+},
+{
+"cnt": 14,
+"tag_id": 15393,
+"tag_name": "京东七鲜"
+},
+{
+"cnt": 14,
+"tag_id": 99977,
+"tag_name": "Nestlé"
+},
+{
+"cnt": 14,
+"tag_id": 100452,
+"tag_name": "Sam's"
+},
+{
+"cnt": 13,
+"tag_id": 100133,
+"tag_name": "Coca-Cola"
+},
+{
+"cnt": 13,
+"tag_id": 104709,
+"tag_name": "FBIF2026 EN"
+},
+{
+"cnt": 13,
+"tag_id": 104796,
+"tag_name": "野人先生"
+},
+{
+"cnt": 13,
+"tag_id": 105663,
+"tag_name": "JD.com"
+},
+{
+"cnt": 12,
+"tag_id": 5355,
+"tag_name": "零食"
+},
+{
+"cnt": 12,
+"tag_id": 7230,
+"tag_name": "百事"
+},
+{
+"cnt": 12,
+"tag_id": 7231,
+"tag_name": "百事可乐"
+},
+{
+"cnt": 12,
+"tag_id": 7394,
+"tag_name": "三得利"
+},
+{
+"cnt": 12,
+"tag_id": 7400,
+"tag_name": "茶颜悦色"
+},
+{
+"cnt": 12,
+"tag_id": 7479,
+"tag_name": "豆腐"
+},
+{
+"cnt": 12,
+"tag_id": 7522,
+"tag_name": "卡夫亨氏"
+},
+{
+"cnt": 12,
+"tag_id": 7609,
+"tag_name": "预制菜"
+},
+{
+"cnt": 12,
+"tag_id": 60803,
+"tag_name": "ALDI奥乐齐"
+},
+{
+"cnt": 12,
+"tag_id": 100358,
+"tag_name": "beer"
+},
+{
+"cnt": 12,
+"tag_id": 103614,
+"tag_name": "Meituan"
+},
+{
+"cnt": 12,
+"tag_id": 103821,
+"tag_name": "朴朴超市"
+},
+{
+"cnt": 11,
+"tag_id": 7328,
+"tag_name": "奈雪的茶"
+},
+{
+"cnt": 11,
+"tag_id": 12278,
+"tag_name": "创意策划"
+},
+{
+"cnt": 11,
+"tag_id": 13308,
+"tag_name": "永辉"
+},
+{
+"cnt": 11,
+"tag_id": 99561,
+"tag_name": "Nongfu Spring"
+},
+{
+"cnt": 11,
+"tag_id": 103781,
+"tag_name": "JD"
+},
+{
+"cnt": 11,
+"tag_id": 105729,
+"tag_name": "京东折扣超市"
+},
+{
+"cnt": 10,
+"tag_id": 5432,
+"tag_name": "渠道"
+},
+{
+"cnt": 10,
+"tag_id": 5978,
+"tag_name": "抹茶"
+},
+{
+"cnt": 10,
+"tag_id": 7238,
+"tag_name": "君乐宝"
+},
+{
+"cnt": 10,
+"tag_id": 11120,
+"tag_name": "瑞幸"
+},
+{
+"cnt": 10,
+"tag_id": 13343,
+"tag_name": "梦龙"
+},
+{
+"cnt": 10,
+"tag_id": 14075,
+"tag_name": "罗森"
+},
+{
+"cnt": 10,
+"tag_id": 24709,
+"tag_name": "东方甄选"
+},
+{
+"cnt": 10,
+"tag_id": 53357,
+"tag_name": "万辰集团"
+},
+{
+"cnt": 10,
+"tag_id": 100357,
+"tag_name": "PepsiCo"
+},
+{
+"cnt": 10,
+"tag_id": 102957,
+"tag_name": "Yonghui"
+},
+{
+"cnt": 10,
+"tag_id": 104458,
+"tag_name": "Xibei"
+},
+{
+"cnt": 10,
+"tag_id": 104632,
+"tag_name": "ice cream"
+},
+{
+"cnt": 10,
+"tag_id": 114011,
+"tag_name": "豆腐系列"
+},
+{
+"cnt": 9,
+"tag_id": 5004,
+"tag_name": "代工"
+},
+{
+"cnt": 9,
+"tag_id": 5006,
+"tag_name": "食品"
+},
+{
+"cnt": 9,
+"tag_id": 5106,
+"tag_name": "巧克力"
+},
+{
+"cnt": 9,
+"tag_id": 5502,
+"tag_name": "药食同源"
+},
+{
+"cnt": 9,
+"tag_id": 7332,
+"tag_name": "钟薛高"
+},
+{
+"cnt": 9,
+"tag_id": 8695,
+"tag_name": "妙可蓝多"
+},
+{
+"cnt": 9,
+"tag_id": 10034,
+"tag_name": "7-Eleven"
+},
+{
+"cnt": 9,
+"tag_id": 11709,
+"tag_name": "人事变动"
+},
+{
+"cnt": 9,
+"tag_id": 12036,
+"tag_name": "必胜客"
+},
+{
+"cnt": 9,
+"tag_id": 12111,
+"tag_name": "财报"
+},
+{
+"cnt": 9,
+"tag_id": 100174,
+"tag_name": "snack"
+},
+{
+"cnt": 9,
+"tag_id": 112010,
+"tag_name": "FBIF Wow Food Awards 2026"
+},
+{
+"cnt": 8,
+"tag_id": 5115,
+"tag_name": "茶叶"
+},
+{
+"cnt": 8,
+"tag_id": 5268,
+"tag_name": "餐饮"
+},
+{
+"cnt": 8,
+"tag_id": 5609,
+"tag_name": "奶茶"
+},
+{
+"cnt": 8,
+"tag_id": 7301,
+"tag_name": "达能"
+},
+{
+"cnt": 8,
+"tag_id": 7451,
+"tag_name": "收购"
+},
+{
+"cnt": 8,
+"tag_id": 8265,
+"tag_name": "创新周报"
+},
+{
+"cnt": 8,
+"tag_id": 8887,
+"tag_name": "无糖茶"
+},
+{
+"cnt": 8,
+"tag_id": 8899,
+"tag_name": "百胜中国"
+},
+{
+"cnt": 8,
+"tag_id": 9687,
+"tag_name": "好望水"
+},
+{
+"cnt": 8,
+"tag_id": 9845,
+"tag_name": "遇见小面"
+},
+{
+"cnt": 8,
+"tag_id": 12651,
+"tag_name": "幸运咖"
+},
+{
+"cnt": 8,
+"tag_id": 100128,
+"tag_name": "Yili"
+},
+{
+"cnt": 8,
+"tag_id": 101667,
+"tag_name": "Pangdonglai"
+},
+{
+"cnt": 8,
+"tag_id": 102750,
+"tag_name": "Unilever"
+},
+{
+"cnt": 8,
+"tag_id": 105026,
+"tag_name": "Zong Fuli"
+},
+{
+"cnt": 8,
+"tag_id": 106632,
+"tag_name": "淘宝闪购"
+},
+{
+"cnt": 7,
+"tag_id": 5067,
+"tag_name": "功能食品"
+},
+{
+"cnt": 7,
+"tag_id": 5118,
+"tag_name": "酸奶"
+},
+{
+"cnt": 7,
+"tag_id": 5122,
+"tag_name": "果汁"
+},
+{
+"cnt": 7,
+"tag_id": 6014,
+"tag_name": "天然色素"
+},
+{
+"cnt": 7,
+"tag_id": 6154,
+"tag_name": "恒天然"
+},
+{
+"cnt": 7,
+"tag_id": 7106,
+"tag_name": "商超"
+},
+{
+"cnt": 7,
+"tag_id": 7217,
+"tag_name": "良品铺子"
+},
+{
+"cnt": 7,
+"tag_id": 7385,
+"tag_name": "香飘飘"
+},
+{
+"cnt": 7,
+"tag_id": 7481,
+"tag_name": "汉堡王"
+},
+{
+"cnt": 7,
+"tag_id": 8742,
+"tag_name": "盒马鲜生"
+},
+{
+"cnt": 7,
+"tag_id": 11623,
+"tag_name": "茶百道"
+},
+{
+"cnt": 7,
+"tag_id": 11684,
+"tag_name": "贵州茅台"
+},
+{
+"cnt": 7,
+"tag_id": 13432,
+"tag_name": "亨氏"
+},
+{
+"cnt": 7,
+"tag_id": 14673,
+"tag_name": "华润万家"
+},
+{
+"cnt": 7,
+"tag_id": 22676,
+"tag_name": "HEYTEA喜茶"
+},
+{
+"cnt": 7,
+"tag_id": 52613,
+"tag_name": "好想来"
+},
+{
+"cnt": 7,
+"tag_id": 64755,
+"tag_name": "Wow Food"
+},
+{
+"cnt": 7,
+"tag_id": 99626,
+"tag_name": "ALDI"
+},
+{
+"cnt": 7,
+"tag_id": 100491,
+"tag_name": "Dongpeng Beverage"
+},
+{
+"cnt": 7,
+"tag_id": 102567,
+"tag_name": "Heytea"
+},
+{
+"cnt": 7,
+"tag_id": 104588,
+"tag_name": "baking"
+},
+{
+"cnt": 7,
+"tag_id": 104705,
+"tag_name": "water"
+},
+{
+"cnt": 7,
+"tag_id": 107177,
+"tag_name": "Aldi"
+},
+{
+"cnt": 7,
+"tag_id": 111919,
+"tag_name": "沃集鲜"
+},
+{
+"cnt": 7,
+"tag_id": 114152,
+"tag_name": "FBIF2026会后报告"
+},
+{
+"cnt": 6,
+"tag_id": 5221,
+"tag_name": "品牌营销"
+},
+{
+"cnt": 6,
+"tag_id": 5296,
+"tag_name": "原料"
+},
+{
+"cnt": 6,
+"tag_id": 5444,
+"tag_name": "食品安全"
+},
+{
+"cnt": 6,
+"tag_id": 5729,
+"tag_name": "调味品"
+},
+{
+"cnt": 6,
+"tag_id": 7235,
+"tag_name": "光明乳业"
+},
+{
+"cnt": 6,
+"tag_id": 7490,
+"tag_name": "卫龙"
+},
+{
+"cnt": 6,
+"tag_id": 7549,
+"tag_name": "萨莉亚"
+},
+{
+"cnt": 6,
+"tag_id": 8335,
+"tag_name": "外卖"
+},
+{
+"cnt": 6,
+"tag_id": 8365,
+"tag_name": "新茶饮"
+},
+{
+"cnt": 6,
+"tag_id": 9866,
+"tag_name": "西贝莜面村"
+},
+{
+"cnt": 6,
+"tag_id": 10031,
+"tag_name": "蓝瓶咖啡"
+},
+{
+"cnt": 6,
+"tag_id": 11293,
+"tag_name": "好特卖"
+},
+{
+"cnt": 6,
+"tag_id": 11641,
+"tag_name": "面包"
+},
+{
+"cnt": 6,
+"tag_id": 11699,
+"tag_name": "宗馥莉"
+},
+{
+"cnt": 6,
+"tag_id": 15526,
+"tag_name": "福鹿家"
+},
+{
+"cnt": 6,
+"tag_id": 15844,
+"tag_name": "柠檬共和国"
+},
+{
+"cnt": 6,
+"tag_id": 16266,
+"tag_name": "皮爷咖啡"
+},
+{
+"cnt": 6,
+"tag_id": 21671,
+"tag_name": "茉莉奶白"
+},
+{
+"cnt": 6,
+"tag_id": 23285,
+"tag_name": "果子熟了"
+},
+{
+"cnt": 6,
+"tag_id": 23477,
+"tag_name": "luckincoffee瑞幸咖啡"
+},
+{
+"cnt": 6,
+"tag_id": 23978,
+"tag_name": "步步高"
+},
+{
+"cnt": 6,
+"tag_id": 31586,
+"tag_name": "寿司郎"
+},
+{
+"cnt": 6,
+"tag_id": 32695,
+"tag_name": "开市客"
+},
+{
+"cnt": 6,
+"tag_id": 99534,
+"tag_name": "Chi Forest"
+},
+{
+"cnt": 6,
+"tag_id": 99715,
+"tag_name": "dairy products"
+},
+{
+"cnt": 6,
+"tag_id": 100032,
+"tag_name": "Suntory"
+},
+{
+"cnt": 6,
+"tag_id": 101468,
+"tag_name": "Mengniu"
+},
+{
+"cnt": 6,
+"tag_id": 104191,
+"tag_name": "北京同仁堂"
+},
+{
+"cnt": 6,
+"tag_id": 104690,
+"tag_name": "Xiaoxiang Supermarket"
+},
+{
+"cnt": 6,
+"tag_id": 105008,
+"tag_name": "pre-prepared meals"
+},
+{
+"cnt": 6,
+"tag_id": 109521,
+"tag_name": "淘小胖"
+},
+{
+"cnt": 5,
+"tag_id": 5095,
+"tag_name": "奶粉"
+},
+{
+"cnt": 5,
+"tag_id": 5267,
+"tag_name": "包装"
+},
+{
+"cnt": 5,
+"tag_id": 5418,
+"tag_name": "保健品"
+},
+{
+"cnt": 5,
+"tag_id": 6963,
+"tag_name": "清洁标签"
+},
+{
+"cnt": 5,
+"tag_id": 7036,
+"tag_name": "京东超市"
+},
+{
+"cnt": 5,
+"tag_id": 7321,
+"tag_name": "自有品牌"
+},
+{
+"cnt": 5,
+"tag_id": 7343,
+"tag_name": "江小白"
+},
+{
+"cnt": 5,
+"tag_id": 7379,
+"tag_name": "哈根达斯"
+},
+{
+"cnt": 5,
+"tag_id": 7387,
+"tag_name": "统一"
+},
+{
+"cnt": 5,
+"tag_id": 7388,
+"tag_name": "百威英博"
+},
+{
+"cnt": 5,
+"tag_id": 7510,
+"tag_name": "OATLY"
+},
+{
+"cnt": 5,
+"tag_id": 7518,
+"tag_name": "麦德龙"
+},
+{
+"cnt": 5,
+"tag_id": 7536,
+"tag_name": "金龙鱼"
+},
+{
+"cnt": 5,
+"tag_id": 7621,
+"tag_name": "费列罗"
+},
+{
+"cnt": 5,
+"tag_id": 11607,
+"tag_name": "新品"
+},
+{
+"cnt": 5,
+"tag_id": 11637,
+"tag_name": "王老吉"
+},
+{
+"cnt": 5,
+"tag_id": 11832,
+"tag_name": "盼盼"
+},
+{
+"cnt": 5,
+"tag_id": 12044,
+"tag_name": "玛氏公司"
+},
+{
+"cnt": 5,
+"tag_id": 12227,
+"tag_name": "东鹏特饮"
+},
+{
+"cnt": 5,
+"tag_id": 13061,
+"tag_name": "亿滋国际"
+},
+{
+"cnt": 5,
+"tag_id": 13752,
+"tag_name": "袁记云饺"
+},
+{
+"cnt": 5,
+"tag_id": 14173,
+"tag_name": "挪瓦咖啡"
+},
+{
+"cnt": 5,
+"tag_id": 15353,
+"tag_name": "好丽友"
+},
+{
+"cnt": 5,
+"tag_id": 15391,
+"tag_name": "赛百味"
+},
+{
+"cnt": 5,
+"tag_id": 16926,
+"tag_name": "卡乐比"
+},
+{
+"cnt": 5,
+"tag_id": 23570,
+"tag_name": "佳宝"
+},
+{
+"cnt": 5,
+"tag_id": 25507,
+"tag_name": "海河乳品"
+},
+{
+"cnt": 5,
+"tag_id": 29302,
+"tag_name": "库迪咖啡"
+},
+{
+"cnt": 5,
+"tag_id": 32522,
+"tag_name": "金星啤酒"
+},
+{
+"cnt": 5,
+"tag_id": 35260,
+"tag_name": "百科策划"
+},
+{
+"cnt": 5,
+"tag_id": 35275,
+"tag_name": "爷爷不泡茶"
+},
+{
+"cnt": 5,
+"tag_id": 100171,
+"tag_name": "CHAGEE"
+},
+{
+"cnt": 5,
+"tag_id": 100272,
+"tag_name": "Haidilao"
+},
+{
+"cnt": 5,
+"tag_id": 102641,
+"tag_name": "Master Kong"
+},
+{
+"cnt": 5,
+"tag_id": 104772,
+"tag_name": "Taobao"
+},
+{
+"cnt": 5,
+"tag_id": 105223,
+"tag_name": "七鲜小厨"
+},
+{
+"cnt": 5,
+"tag_id": 105761,
+"tag_name": "7-ELEVEn"
+},
+{
+"cnt": 5,
+"tag_id": 106256,
+"tag_name": "线下品鉴会"
+},
+{
+"cnt": 5,
+"tag_id": 107570,
+"tag_name": "绿捷公司"
+},
+{
+"cnt": 5,
+"tag_id": 108280,
+"tag_name": "七鲜咖啡"
+},
+{
+"cnt": 5,
+"tag_id": 108989,
+"tag_name": "宏胜集团"
+},
+{
+"cnt": 5,
+"tag_id": 112873,
+"tag_name": "蒲妈妈"
+},
+{
+"cnt": 5,
+"tag_id": 114234,
+"tag_name": "FBIF2027"
+},
+{
+"cnt": 4,
+"tag_id": 5117,
+"tag_name": "乳制品"
+},
+{
+"cnt": 4,
+"tag_id": 5119,
+"tag_name": "牛奶"
+},
+{
+"cnt": 4,
+"tag_id": 5277,
+"tag_name": "饼干"
+},
+{
+"cnt": 4,
+"tag_id": 5304,
+"tag_name": "烘焙"
+},
+{
+"cnt": 4,
+"tag_id": 5570,
+"tag_name": "食品饮料"
+},
+{
+"cnt": 4,
+"tag_id": 5745,
+"tag_name": "冷冻食品"
+},
+{
+"cnt": 4,
+"tag_id": 6227,
+"tag_name": "酒"
+},
+{
+"cnt": 4,
+"tag_id": 6240,
+"tag_name": "NFC果汁"
+},
+{
+"cnt": 4,
+"tag_id": 6466,
+"tag_name": "AI"
+},
+{
+"cnt": 4,
+"tag_id": 6528,
+"tag_name": "生鲜"
+},
+{
+"cnt": 4,
+"tag_id": 6636,
+"tag_name": "HPP"
+},
+{
+"cnt": 4,
+"tag_id": 7203,
+"tag_name": "瓶装水"
+},
+{
+"cnt": 4,
+"tag_id": 7242,
+"tag_name": "旺旺"
+},
+{
+"cnt": 4,
+"tag_id": 7309,
+"tag_name": "玛氏"
+},
+{
+"cnt": 4,
+"tag_id": 7327,
+"tag_name": "双汇"
+},
+{
+"cnt": 4,
+"tag_id": 7333,
+"tag_name": "周黑鸭"
+},
+{
+"cnt": 4,
+"tag_id": 7369,
+"tag_name": "消费趋势"
+},
+{
+"cnt": 4,
+"tag_id": 7398,
+"tag_name": "海天"
+},
+{
+"cnt": 4,
+"tag_id": 7445,
+"tag_name": "青岛啤酒"
+},
+{
+"cnt": 4,
+"tag_id": 7584,
+"tag_name": "老乡鸡"
+},
+{
+"cnt": 4,
+"tag_id": 8787,
+"tag_name": "五粮液"
+},
+{
+"cnt": 4,
+"tag_id": 8987,
+"tag_name": "优酸乳"
+},
+{
+"cnt": 4,
+"tag_id": 9098,
+"tag_name": "矿泉水"
+},
+{
+"cnt": 4,
+"tag_id": 9637,
+"tag_name": "奥利奥"
+},
+{
+"cnt": 4,
+"tag_id": 9706,
+"tag_name": "沪上阿姨"
+},
+{
+"cnt": 4,
+"tag_id": 9731,
+"tag_name": "小红书"
+},
+{
+"cnt": 4,
+"tag_id": 10756,
+"tag_name": "ffit8"
+},
+{
+"cnt": 4,
+"tag_id": 11314,
+"tag_name": "专访"
+},
+{
+"cnt": 4,
+"tag_id": 11681,
+"tag_name": "NOWWA 挪瓦咖啡"
+},
+{
+"cnt": 4,
+"tag_id": 11688,
+"tag_name": "海天味业"
+},
+{
+"cnt": 4,
+"tag_id": 11715,
+"tag_name": "嘉士伯"
+},
+{
+"cnt": 4,
+"tag_id": 11798,
+"tag_name": "茅台"
+},
+{
+"cnt": 4,
+"tag_id": 12110,
+"tag_name": "季度营收"
+},
+{
+"cnt": 4,
+"tag_id": 12620,
+"tag_name": "阿麦斯"
+},
+{
+"cnt": 4,
+"tag_id": 12625,
+"tag_name": "轻食"
+},
+{
+"cnt": 4,
+"tag_id": 13005,
+"tag_name": "喜力"
+},
+{
+"cnt": 4,
+"tag_id": 13250,
+"tag_name": "饿了么"
+},
+{
+"cnt": 4,
+"tag_id": 13454,
+"tag_name": "性价比"
+},
+{
+"cnt": 4,
+"tag_id": 14116,
+"tag_name": "八马茶业"
+},
+{
+"cnt": 4,
+"tag_id": 17674,
+"tag_name": "包子"
+},
+{
+"cnt": 4,
+"tag_id": 18289,
+"tag_name": "每日鲜语"
+},
+{
+"cnt": 4,
+"tag_id": 18462,
+"tag_name": "雀巢奶粉"
+},
+{
+"cnt": 4,
+"tag_id": 19092,
+"tag_name": "物美"
+},
+{
+"cnt": 4,
+"tag_id": 19129,
+"tag_name": "代言人"
+},
+{
+"cnt": 4,
+"tag_id": 20418,
+"tag_name": "卡旺卡"
+},
+{
+"cnt": 4,
+"tag_id": 21901,
+"tag_name": "九阳豆浆"
+},
+{
+"cnt": 4,
+"tag_id": 25229,
+"tag_name": "DQ冰淇淋"
+},
+{
+"cnt": 4,
+"tag_id": 25612,
+"tag_name": "诺黛然"
+},
+{
+"cnt": 4,
+"tag_id": 28715,
+"tag_name": "大窑汽水"
+},
+{
+"cnt": 4,
+"tag_id": 30672,
+"tag_name": "7-11"
+},
+{
+"cnt": 4,
+"tag_id": 50897,
+"tag_name": "百威集团"
+},
+{
+"cnt": 4,
+"tag_id": 52951,
+"tag_name": "全家便利店"
+},
+{
+"cnt": 4,
+"tag_id": 56313,
+"tag_name": "山姆会员商店"
+},
+{
+"cnt": 4,
+"tag_id": 56476,
+"tag_name": "南方乳业"
+},
+{
+"cnt": 4,
+"tag_id": 98238,
+"tag_name": "盒马NB"
+},
+{
+"cnt": 4,
+"tag_id": 98701,
+"tag_name": "冰杯"
+},
+{
+"cnt": 4,
+"tag_id": 99506,
+"tag_name": "Three Squirrels"
+},
+{
+"cnt": 4,
+"tag_id": 99976,
+"tag_name": "milk tea"
+},
+{
+"cnt": 4,
+"tag_id": 100142,
+"tag_name": "Lucky Coffee"
+},
+{
+"cnt": 4,
+"tag_id": 100184,
+"tag_name": "Uni-President"
+},
+{
+"cnt": 4,
+"tag_id": 100192,
+"tag_name": "比优特"
+},
+{
+"cnt": 4,
+"tag_id": 100289,
+"tag_name": "Mars"
+},
+{
+"cnt": 4,
+"tag_id": 100551,
+"tag_name": "Danone"
+},
+{
+"cnt": 4,
+"tag_id": 100850,
+"tag_name": "华润饮料"
+},
+{
+"cnt": 4,
+"tag_id": 102987,
+"tag_name": "Dali Food"
+},
+{
+"cnt": 4,
+"tag_id": 103995,
+"tag_name": "Douyin"
+},
+{
+"cnt": 4,
+"tag_id": 104578,
+"tag_name": "齐云山"
+},
+{
+"cnt": 4,
+"tag_id": 104980,
+"tag_name": "Happy Monkey Supermarket"
+},
+{
+"cnt": 4,
+"tag_id": 105396,
+"tag_name": "Yum China"
+},
+{
+"cnt": 4,
+"tag_id": 105516,
+"tag_name": "润田"
+},
+{
+"cnt": 4,
+"tag_id": 106099,
+"tag_name": "Wanchen Group"
+},
+{
+"cnt": 4,
+"tag_id": 107241,
+"tag_name": "Happy Monkey"
+},
+{
+"cnt": 4,
+"tag_id": 107598,
+"tag_name": "Yonghui Supermarket"
+},
+{
+"cnt": 4,
+"tag_id": 107656,
+"tag_name": "Juewei Foods"
+},
+{
+"cnt": 4,
+"tag_id": 108291,
+"tag_name": "娃小宗"
+},
+{
+"cnt": 4,
+"tag_id": 108922,
+"tag_name": "Moutai"
+},
+{
+"cnt": 4,
+"tag_id": 114012,
+"tag_name": "包子系列"
+},
+{
+"cnt": 3,
+"tag_id": 5101,
+"tag_name": "休闲食品"
+},
+{
+"cnt": 3,
+"tag_id": 5104,
+"tag_name": "方便速食"
+},
+{
+"cnt": 3,
+"tag_id": 5144,
+"tag_name": "食品添加剂"
+},
+{
+"cnt": 3,
+"tag_id": 5148,
+"tag_name": "甜味剂"
+},
+{
+"cnt": 3,
+"tag_id": 5354,
+"tag_name": "薯片"
+},
+{
+"cnt": 3,
+"tag_id": 5507,
+"tag_name": "抖音"
+},
+{
+"cnt": 3,
+"tag_id": 5591,
+"tag_name": "广告"
+},
+{
+"cnt": 3,
+"tag_id": 5608,
+"tag_name": "饮品"
+},
+{
+"cnt": 3,
+"tag_id": 5617,
+"tag_name": "软糖"
+},
+{
+"cnt": 3,
+"tag_id": 5631,
+"tag_name": "营销"
+},
+{
+"cnt": 3,
+"tag_id": 5690,
+"tag_name": "白酒"
+},
+{
+"cnt": 3,
+"tag_id": 6748,
+"tag_name": "茶饮"
+},
+{
+"cnt": 3,
+"tag_id": 6766,
+"tag_name": "月饼"
+},
+{
+"cnt": 3,
+"tag_id": 7167,
+"tag_name": "雪糕"
+},
+{
+"cnt": 3,
+"tag_id": 7205,
+"tag_name": "方便面"
+},
+{
+"cnt": 3,
+"tag_id": 7215,
+"tag_name": "IPO"
+},
+{
+"cnt": 3,
+"tag_id": 7226,
+"tag_name": "尖叫"
+},
+{
+"cnt": 3,
+"tag_id": 7269,
+"tag_name": "东方树叶"
+},
+{
+"cnt": 3,
+"tag_id": 7295,
+"tag_name": "亿滋"
+},
+{
+"cnt": 3,
+"tag_id": 7358,
+"tag_name": "东阿阿胶"
+},
+{
+"cnt": 3,
+"tag_id": 7375,
+"tag_name": "乐事"
+},
+{
+"cnt": 3,
+"tag_id": 7405,
+"tag_name": "优诺"
+},
+{
+"cnt": 3,
+"tag_id": 7433,
+"tag_name": "日清"
+},
+{
+"cnt": 3,
+"tag_id": 7484,
+"tag_name": "百果园"
+},
+{
+"cnt": 3,
+"tag_id": 7500,
+"tag_name": "太古可口可乐"
+},
+{
+"cnt": 3,
+"tag_id": 7547,
+"tag_name": "三全食品"
+},
+{
+"cnt": 3,
+"tag_id": 7559,
+"tag_name": "隅田川"
+},
+{
+"cnt": 3,
+"tag_id": 7562,
+"tag_name": "辣条"
+},
+{
+"cnt": 3,
+"tag_id": 7598,
+"tag_name": "钱大妈"
+},
+{
+"cnt": 3,
+"tag_id": 7610,
+"tag_name": "午餐肉"
+},
+{
+"cnt": 3,
+"tag_id": 8424,
+"tag_name": "脉动"
+},
+{
+"cnt": 3,
+"tag_id": 8635,
+"tag_name": "高鑫零售集团"
+},
+{
+"cnt": 3,
+"tag_id": 8696,
+"tag_name": "蒙牛乳业"
+},
+{
+"cnt": 3,
+"tag_id": 8740,
+"tag_name": "红牛"
+},
+{
+"cnt": 3,
+"tag_id": 8785,
+"tag_name": "茅台酒"
+},
+{
+"cnt": 3,
+"tag_id": 8852,
+"tag_name": "黄天鹅"
+},
+{
+"cnt": 3,
+"tag_id": 8866,
+"tag_name": "乐乐茶"
+},
+{
+"cnt": 3,
+"tag_id": 9150,
+"tag_name": "百强榜"
+},
+{
+"cnt": 3,
+"tag_id": 9202,
+"tag_name": "食验室"
+},
+{
+"cnt": 3,
+"tag_id": 9257,
+"tag_name": "冰淇凌"
+},
+{
+"cnt": 3,
+"tag_id": 9693,
+"tag_name": "鸡蛋"
+},
+{
+"cnt": 3,
+"tag_id": 9983,
+"tag_name": "好利来"
+},
+{
+"cnt": 3,
+"tag_id": 10032,
+"tag_name": "%Arabica"
+},
+{
+"cnt": 3,
+"tag_id": 10066,
+"tag_name": "雀巢中国"
+},
+{
+"cnt": 3,
+"tag_id": 10157,
+"tag_name": "电解质水"
+},
+{
+"cnt": 3,
+"tag_id": 10199,
+"tag_name": "乳品"
+},
+{
+"cnt": 3,
+"tag_id": 10347,
+"tag_name": "溜溜梅"
+},
+{
+"cnt": 3,
+"tag_id": 10720,
+"tag_name": "拼多多"
+},
+{
+"cnt": 3,
+"tag_id": 11049,
+"tag_name": "百乐嘉利宝"
+},
+{
+"cnt": 3,
+"tag_id": 11085,
+"tag_name": "吾岛"
+},
+{
+"cnt": 3,
+"tag_id": 11400,
+"tag_name": "趋势"
+},
+{
+"cnt": 3,
+"tag_id": 11411,
+"tag_name": "快餐"
+},
+{
+"cnt": 3,
+"tag_id": 11413,
+"tag_name": "DQ"
+},
+{
+"cnt": 3,
+"tag_id": 11640,
+"tag_name": "味好美"
+},
+{
+"cnt": 3,
+"tag_id": 11691,
+"tag_name": "饭团"
+},
+{
+"cnt": 3,
+"tag_id": 11713,
+"tag_name": "锅圈食汇"
+},
+{
+"cnt": 3,
+"tag_id": 11750,
+"tag_name": "百事公司"
+},
+{
+"cnt": 3,
+"tag_id": 11822,
+"tag_name": "泸溪河"
+},
+{
+"cnt": 3,
+"tag_id": 11823,
+"tag_name": "上市"
+},
+{
+"cnt": 3,
+"tag_id": 11827,
+"tag_name": "柠檬"
+},
+{
+"cnt": 3,
+"tag_id": 11829,
+"tag_name": "嘉吉"
+},
+{
+"cnt": 3,
+"tag_id": 11970,
+"tag_name": "三元"
+},
+{
+"cnt": 3,
+"tag_id": 12083,
+"tag_name": "帝亚吉欧"
+},
+{
+"cnt": 3,
+"tag_id": 12309,
+"tag_name": "酒鬼酒"
+},
+{
+"cnt": 3,
+"tag_id": 12525,
+"tag_name": "绝味食品"
+},
+{
+"cnt": 3,
+"tag_id": 12610,
+"tag_name": "泡泡玛特"
+},
+{
+"cnt": 3,
+"tag_id": 12697,
+"tag_name": "桃李面包"
+},
+{
+"cnt": 3,
+"tag_id": 12796,
+"tag_name": "煌上煌"
+},
+{
+"cnt": 3,
+"tag_id": 12919,
+"tag_name": "紫光园"
+},
+{
+"cnt": 3,
+"tag_id": 13070,
+"tag_name": "水井坊"
+},
+{
+"cnt": 3,
+"tag_id": 13123,
+"tag_name": "711便利店"
+},
+{
+"cnt": 3,
+"tag_id": 13258,
+"tag_name": "报告"
+},
+{
+"cnt": 3,
+"tag_id": 13475,
+"tag_name": "鲍师傅"
+},
+{
+"cnt": 3,
+"tag_id": 13526,
+"tag_name": "贝因美"
+},
+{
+"cnt": 3,
+"tag_id": 13868,
+"tag_name": "白象食品"
+},
+{
+"cnt": 3,
+"tag_id": 13889,
+"tag_name": "达利园"
+},
+{
+"cnt": 3,
+"tag_id": 13977,
+"tag_name": "华润啤酒"
+},
+{
+"cnt": 3,
+"tag_id": 14072,
+"tag_name": "罗森便利店"
+},
+{
+"cnt": 3,
+"tag_id": 14282,
+"tag_name": "白象"
+},
+{
+"cnt": 3,
+"tag_id": 14434,
+"tag_name": "朴朴"
+},
+{
+"cnt": 3,
+"tag_id": 14440,
+"tag_name": "寿司"
+},
+{
+"cnt": 3,
+"tag_id": 14558,
+"tag_name": "菲仕兰"
+},
+{
+"cnt": 3,
+"tag_id": 14690,
+"tag_name": "涪陵榨菜"
+},
+{
+"cnt": 3,
+"tag_id": 14781,
+"tag_name": "仙乐健康"
+},
+{
+"cnt": 3,
+"tag_id": 14791,
+"tag_name": "安井食品"
+},
+{
+"cnt": 3,
+"tag_id": 14875,
+"tag_name": "家乐氏"
+},
+{
+"cnt": 3,
+"tag_id": 15253,
+"tag_name": "阿嬷手作"
+},
+{
+"cnt": 3,
+"tag_id": 15602,
+"tag_name": "茅台集团"
+},
+{
+"cnt": 3,
+"tag_id": 15696,
+"tag_name": "港交所"
+},
+{
+"cnt": 3,
+"tag_id": 15788,
+"tag_name": "有友食品"
+},
+{
+"cnt": 3,
+"tag_id": 15888,
+"tag_name": "麻辣王子"
+},
+{
+"cnt": 3,
+"tag_id": 16273,
+"tag_name": "美宜佳"
+},
+{
+"cnt": 3,
+"tag_id": 18523,
+"tag_name": "大窑"
+},
+{
+"cnt": 3,
+"tag_id": 18940,
+"tag_name": "淘宝"
+},
+{
+"cnt": 3,
+"tag_id": 19240,
+"tag_name": "新国标"
+},
+{
+"cnt": 3,
+"tag_id": 19269,
+"tag_name": "宏胜饮料"
+},
+{
+"cnt": 3,
+"tag_id": 19530,
+"tag_name": "咖喱"
+},
+{
+"cnt": 3,
+"tag_id": 19660,
+"tag_name": "恰巴塔"
+},
+{
+"cnt": 3,
+"tag_id": 23242,
+"tag_name": "特斯拉餐厅"
+},
+{
+"cnt": 3,
+"tag_id": 24483,
+"tag_name": "CCFA"
+},
+{
+"cnt": 3,
+"tag_id": 25056,
+"tag_name": "海特真露"
+},
+{
+"cnt": 3,
+"tag_id": 25561,
+"tag_name": "九多肉多"
+},
+{
+"cnt": 3,
+"tag_id": 27489,
+"tag_name": "艾地盟"
+},
+{
+"cnt": 3,
+"tag_id": 27978,
+"tag_name": "中大恒源"
+},
+{
+"cnt": 3,
+"tag_id": 28870,
+"tag_name": "出海"
+},
+{
+"cnt": 3,
+"tag_id": 31408,
+"tag_name": "米村拌饭"
+},
+{
+"cnt": 3,
+"tag_id": 31530,
+"tag_name": "馒头"
+},
+{
+"cnt": 3,
+"tag_id": 33167,
+"tag_name": "KitKat"
+},
+{
+"cnt": 3,
+"tag_id": 35112,
+"tag_name": "永旺"
+},
+{
+"cnt": 3,
+"tag_id": 35158,
+"tag_name": "波比艾斯"
+},
+{
+"cnt": 3,
+"tag_id": 35316,
+"tag_name": "鱼子酱"
+},
+{
+"cnt": 3,
+"tag_id": 35347,
+"tag_name": "帝斯曼-芬美意"
+},
+{
+"cnt": 3,
+"tag_id": 36285,
+"tag_name": "Tims天好中国"
+},
+{
+"cnt": 3,
+"tag_id": 36917,
+"tag_name": "量贩零食"
+},
+{
+"cnt": 3,
+"tag_id": 39113,
+"tag_name": "库迪"
+},
+{
+"cnt": 3,
+"tag_id": 39466,
+"tag_name": "甘乐"
+},
+{
+"cnt": 3,
+"tag_id": 50796,
+"tag_name": "汉堡王中国"
+},
+{
+"cnt": 3,
+"tag_id": 51517,
+"tag_name": "COTTI COFFEE库迪咖啡"
+},
+{
+"cnt": 3,
+"tag_id": 53633,
+"tag_name": "柠檬向右"
+},
+{
+"cnt": 3,
+"tag_id": 64013,
+"tag_name": "上海艾录"
+},
+{
+"cnt": 3,
+"tag_id": 99503,
+"tag_name": "Pizza Hut"
+},
+{
+"cnt": 3,
+"tag_id": 100233,
+"tag_name": "Fonterra"
+},
+{
+"cnt": 3,
+"tag_id": 100300,
+"tag_name": "Subway"
+},
+{
+"cnt": 3,
+"tag_id": 100382,
+"tag_name": "McDonald's"
+},
+{
+"cnt": 3,
+"tag_id": 100450,
+"tag_name": "KFC"
+},
+{
+"cnt": 3,
+"tag_id": 101182,
+"tag_name": "Heineken"
+},
+{
+"cnt": 3,
+"tag_id": 101183,
+"tag_name": "Ferrero"
+},
+{
+"cnt": 3,
+"tag_id": 101253,
+"tag_name": "渠道对接会"
+},
+{
+"cnt": 3,
+"tag_id": 101364,
+"tag_name": "Coconut Water"
+},
+{
+"cnt": 3,
+"tag_id": 101526,
+"tag_name": "McDonald"
+},
+{
+"cnt": 3,
+"tag_id": 101532,
+"tag_name": "Saizeriya"
+},
+{
+"cnt": 3,
+"tag_id": 101608,
+"tag_name": "Mondelez"
+},
+{
+"cnt": 3,
+"tag_id": 101768,
+"tag_name": "RT-Mart"
+},
+{
+"cnt": 3,
+"tag_id": 101930,
+"tag_name": "京东外卖"
+},
+{
+"cnt": 3,
+"tag_id": 102249,
+"tag_name": "Dayao"
+},
+{
+"cnt": 3,
+"tag_id": 102582,
+"tag_name": "food"
+},
+{
+"cnt": 3,
+"tag_id": 103046,
+"tag_name": "Wumart"
+},
+{
+"cnt": 3,
+"tag_id": 103116,
+"tag_name": "Taoli Bread"
+},
+{
+"cnt": 3,
+"tag_id": 103133,
+"tag_name": "Iceland"
+},
+{
+"cnt": 3,
+"tag_id": 103765,
+"tag_name": "学生餐"
+},
+{
+"cnt": 3,
+"tag_id": 104294,
+"tag_name": "Xiang Piaopiao"
+},
+{
+"cnt": 3,
+"tag_id": 104310,
+"tag_name": "matcha"
+},
+{
+"cnt": 3,
+"tag_id": 104405,
+"tag_name": "Kraft Heinz"
+},
+{
+"cnt": 3,
+"tag_id": 104730,
+"tag_name": "Heinz"
+},
+{
+"cnt": 3,
+"tag_id": 104964,
+"tag_name": "Anjing Foods"
+},
+{
+"cnt": 3,
+"tag_id": 104978,
+"tag_name": "Dingdong Maicai"
+},
+{
+"cnt": 3,
+"tag_id": 105022,
+"tag_name": "中国饮料地图"
+},
+{
+"cnt": 3,
+"tag_id": 105633,
+"tag_name": "百利食品"
+},
+{
+"cnt": 3,
+"tag_id": 106209,
+"tag_name": "Oriental Selection"
+},
+{
+"cnt": 3,
+"tag_id": 107175,
+"tag_name": "The Magnum Ice Cream Company"
+},
+{
+"cnt": 3,
+"tag_id": 107640,
+"tag_name": "绿捷"
+},
+{
+"cnt": 3,
+"tag_id": 107677,
+"tag_name": "信誉楼超市"
+},
+{
+"cnt": 3,
+"tag_id": 107946,
+"tag_name": "catering"
+},
+{
+"cnt": 3,
+"tag_id": 108348,
+"tag_name": "Bama Tea"
+},
+{
+"cnt": 3,
+"tag_id": 108400,
+"tag_name": "Yu Jian Xiaomian"
+},
+{
+"cnt": 3,
+"tag_id": 109109,
+"tag_name": "好侍"
+},
+{
+"cnt": 3,
+"tag_id": 109323,
+"tag_name": "Hongsheng Group"
+},
+{
+"cnt": 3,
+"tag_id": 109494,
+"tag_name": "美特好"
+},
+{
+"cnt": 3,
+"tag_id": 110336,
+"tag_name": "麦记牛奶"
+},
+{
+"cnt": 3,
+"tag_id": 110682,
+"tag_name": "物美超市"
+},
+{
+"cnt": 3,
+"tag_id": 111023,
+"tag_name": "闻达配料"
+},
+{
+"cnt": 3,
+"tag_id": 111180,
+"tag_name": "沃尔玛中国"
+},
+{
+"cnt": 3,
+"tag_id": 111581,
+"tag_name": "百川名品"
+},
+{
+"cnt": 3,
+"tag_id": 111830,
+"tag_name": "爷爷的农场"
+},
+{
+"cnt": 3,
+"tag_id": 112007,
+"tag_name": "几多全"
+},
+{
+"cnt": 3,
+"tag_id": 112110,
+"tag_name": "比格"
+},
+{
+"cnt": 3,
+"tag_id": 113414,
+"tag_name": "f展"
+},
+{
+"cnt": 3,
+"tag_id": 114091,
+"tag_name": "日本伴手礼系列"
+},
+{
+"cnt": 2,
+"tag_id": 5110,
+"tag_name": "烘焙食品"
+},
+{
+"cnt": 2,
+"tag_id": 5132,
+"tag_name": "农产品"
+},
+{
+"cnt": 2,
+"tag_id": 5224,
+"tag_name": "设计"
+},
+{
+"cnt": 2,
+"tag_id": 5257,
+"tag_name": "电商"
+},
+{
+"cnt": 2,
+"tag_id": 5286,
+"tag_name": "包装设计"
+},
+{
+"cnt": 2,
+"tag_id": 5288,
+"tag_name": "logo"
+},
+{
+"cnt": 2,
+"tag_id": 5413,
+"tag_name": "姜黄"
+},
+{
+"cnt": 2,
+"tag_id": 5422,
+"tag_name": "功能性食品"
+},
+{
+"cnt": 2,
+"tag_id": 5540,
+"tag_name": "糖果"
+},
+{
+"cnt": 2,
+"tag_id": 5569,
+"tag_name": "能量饮料"
+},
+{
+"cnt": 2,
+"tag_id": 5572,
+"tag_name": "植物基"
+},
+{
+"cnt": 2,
+"tag_id": 5632,
+"tag_name": "品牌"
+},
+{
+"cnt": 2,
+"tag_id": 5800,
+"tag_name": "鲜奶"
+},
+{
+"cnt": 2,
+"tag_id": 5855,
+"tag_name": "快消品"
+},
+{
+"cnt": 2,
+"tag_id": 5874,
+"tag_name": "供应商"
+},
+{
+"cnt": 2,
+"tag_id": 5923,
+"tag_name": "伴手礼"
+},
+{
+"cnt": 2,
+"tag_id": 6052,
+"tag_name": "HPP果汁"
+},
+{
+"cnt": 2,
+"tag_id": 6054,
+"tag_name": "粮油"
+},
+{
+"cnt": 2,
+"tag_id": 6055,
+"tag_name": "方便食品"
+},
+{
+"cnt": 2,
+"tag_id": 6285,
+"tag_name": "健康零食"
+}
+]

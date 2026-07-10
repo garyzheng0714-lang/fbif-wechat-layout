@@ -107,6 +107,21 @@ test('more articles editor uses shared SVG icons instead of character glyph cont
   assert.doesNotMatch(source, />×</);
 });
 
+test('empty more article thumbnail does not reuse the global empty-state class', async () => {
+  const [source, appCss, shellCss] = await Promise.all([
+    readFile(new URL('../public/js/more-articles-ui.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.css', import.meta.url), 'utf8'),
+    readFile(new URL('../public/css/app-shell.css', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(shellCss, /\.empty\s*\{[\s\S]*?position:\s*absolute/);
+  assert.match(source, /classList\.add\('is-empty'\)/);
+  assert.match(source, /classList\.remove\('is-empty'\)/);
+  assert.match(appCss, /\.ma-thumb\.is-empty\s*\{/);
+  assert.doesNotMatch(source, /classList\.(?:add|remove)\('empty'\)/);
+  assert.doesNotMatch(appCss, /\.ma-thumb\.empty\s*\{/);
+});
+
 test('more article URL helper accepts only WeChat article hosts', () => {
   assert.equal(isValidMoreArticleUrl('https://mp.weixin.qq.com/s/example'), true);
   assert.equal(isValidMoreArticleUrl('https://mp.weixin.qq.com/s?__biz=example'), true);
