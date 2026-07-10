@@ -1,0 +1,281 @@
+package main
+
+// publish_enrich_test.go — M5「AI 预填发布参数」测试（ARK 走 httptest 桩，绝不触真实
+// API）。锁死三条契约：
+//   1. enriching 只产元数据：AI 成功注入 summary/tags/author/ai_notes、可换封面，
+//      但 content_html 必须逐字节不变（AI 没有正文篡改面）；
+//   2. AI 是加速器不是闸门：ARK 失败走规则兜底，job 照常推进到 awaiting_review，
+//      绝不 fail；
+//   3. buildSiteNews 消费 AI 字段（Summary/Author/NewsTags/CoverImg）。
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+// mirroredPublishHTML 是 mirroring 完成后的成品正文（testPublishRenderedHTML 的
+// mmbiz 图已全部重写为 OSS URL）——enriching 前后它必须逐字节相等。
+func mirroredPublishHTML() string {
+	s := testPublishRenderedHTML
+	for _, src := range []string{"https://mmbiz.qpic.cn/a.jpg", "https://mmbiz.qpic.cn/b.jpg"} {
+		s = strings.ReplaceAll(s, src, ossURLFor(src))
+	}
+	return s
+}
+
+// arkStubRequest ARK 桩收到的请求体（断言请求形态用）。
+type arkStubRequest struct {
+	Model string `json:"model"`
+	Input []struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			ImageURL string `json:"image_url"`
+		} `json:"content"`
+	} `json:"input"`
+}
+
+// newARKStub 起 ARK responses API 桩并把 env 指向它（arkEnrichArticle 走真实客户端代码）。
+// respond 返回 (HTTP 状态码, 模型输出文本)；文本为空时回 error 响应体。
+func newARKStub(t *testing.T, respond func() (int, string)) *arkStubRequest {
+	t.Helper()
+	got := &arkStubRequest{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != arkResponsesPath {
+			t.Errorf("ARK 桩收到意外路径 %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-ark-key" {
+			t.Errorf("ARK 桩收到错误鉴权头 %q", r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(got); err != nil {
+			t.Errorf("ARK 桩解析请求体失败: %v", err)
+		}
+		status, text := respond()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if text == "" {
+			fmt.Fprint(w, `{"error":{"message":"模型服务不可用"}}`)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"output": []any{
+				map[string]any{"type": "reasoning"}, // 非 message 项必须被跳过
+				map[string]any{"type": "message", "content": []any{
+					map[string]any{"type": "output_text", "text": text},
+				}},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("ARK_API_KEY", "test-ark-key")
+	t.Setenv("ARK_BASE_URL", srv.URL)
+	return got
+}
+
+// TestPublishEnrichingInjectsMetadata AI 成功：summary/tags/author/ai_notes 注入落库、
+// AI 从候选里选中的封面覆盖默认第一图、content_html 逐字节不变、任务照常停在
+// awaiting_review。响应带 markdown 围栏，顺带锁死解析容错。
+func TestPublishEnrichingInjectsMetadata(t *testing.T) {
+	env := newPublishTestEnv(t)
+	aiCover := ossURLFor("https://mmbiz.qpic.cn/b.jpg")
+	gotReq := newARKStub(t, func() (int, string) {
+		return http.StatusOK, "```json\n" + fmt.Sprintf(
+			`{"cover_url":%q,"summary":"这是一段模型生成的文章摘要。","tags":["食品","饮料","新品"],"author":"Mote莫特","notes":"封面选第二张图，构图更完整。正文格式规范。摘要取自导语。"}`,
+			aiCover) + "\n```"
+	})
+	t.Setenv("ARK_MODEL_ID", "ep-test-model")
+	env.pipeline.enrich = arkEnrichArticle
+
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageAwaitingReview {
+		t.Fatalf("stage = %q（error=%q），应停在 awaiting_review", got.Stage, got.Error)
+	}
+	// 🚨 边界红线：enriching 只产元数据，content_html 必须与 mirroring 成品逐字节相等。
+	if got.ContentHTML != mirroredPublishHTML() {
+		t.Fatalf("enriching 改动了 content_html（禁止）：%q", got.ContentHTML)
+	}
+	if got.Summary != "这是一段模型生成的文章摘要。" || got.Author != "Mote莫特" {
+		t.Fatalf("AI 元数据未落库：summary=%q author=%q", got.Summary, got.Author)
+	}
+	if len(got.Tags) != 3 || got.Tags[0] != "食品" {
+		t.Fatalf("AI 标签未落库：%v", got.Tags)
+	}
+	if !strings.Contains(got.AINotes, "封面选第二张图") {
+		t.Fatalf("AI 优化说明未落库：%q", got.AINotes)
+	}
+	if got.CoverURL != aiCover {
+		t.Fatalf("AI 选中封面应覆盖默认第一图：%q", got.CoverURL)
+	}
+	// 请求形态：model 取 env、system 提示强制简体中文、图片多模态入参齐全。
+	if gotReq.Model != "ep-test-model" {
+		t.Fatalf("model = %q，应取 ARK_MODEL_ID", gotReq.Model)
+	}
+	if len(gotReq.Input) != 2 || gotReq.Input[0].Role != "system" {
+		t.Fatalf("input 形态不符：%+v", gotReq.Input)
+	}
+	if !strings.Contains(gotReq.Input[0].Content[0].Text, "请用简体中文回复") {
+		t.Fatalf("system 提示必须含「请用简体中文回复」：%q", gotReq.Input[0].Content[0].Text)
+	}
+	var imageURLs []string
+	userText := ""
+	for _, c := range gotReq.Input[1].Content {
+		switch c.Type {
+		case "input_image":
+			imageURLs = append(imageURLs, c.ImageURL)
+		case "input_text":
+			userText = c.Text
+		}
+	}
+	if len(imageURLs) != 2 || imageURLs[0] != ossURLFor("https://mmbiz.qpic.cn/a.jpg") {
+		t.Fatalf("input_image 候选应为 OSS 化正文图：%v", imageURLs)
+	}
+	if !strings.Contains(userText, "测试标题") || !strings.Contains(userText, "正文") {
+		t.Fatalf("user 文本应含标题与纯文本正文：%q", userText)
+	}
+}
+
+// TestPublishEnrichFallbackOnARKFailure ARK 挂了（HTTP 500）：走规则兜底
+// （摘要=正文前 100 字、author=source_name、tags 空、notes 说明未执行原因），
+// job 绝不 fail，照常推进到 awaiting_review、CreateNews 恰一次。
+func TestPublishEnrichFallbackOnARKFailure(t *testing.T) {
+	env := newPublishTestEnv(t)
+	newARKStub(t, func() (int, string) { return http.StatusInternalServerError, "" })
+	env.pipeline.enrich = arkEnrichArticle
+
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageAwaitingReview {
+		t.Fatalf("AI 失败不得 fail job，实际 stage=%q error=%q", got.Stage, got.Error)
+	}
+	if got.Summary != "正文" {
+		t.Fatalf("兜底摘要应为正文纯文本前 100 字，实际 %q", got.Summary)
+	}
+	if got.Author != "测试公众号" {
+		t.Fatalf("兜底 author 应为 source_name，实际 %q", got.Author)
+	}
+	if len(got.Tags) != 0 {
+		t.Fatalf("兜底 tags 应为空，实际 %v", got.Tags)
+	}
+	if !strings.HasPrefix(got.AINotes, "AI 预填未执行（") {
+		t.Fatalf("兜底 notes 应说明未执行原因，实际 %q", got.AINotes)
+	}
+	if got.CoverURL != ossURLFor("https://mmbiz.qpic.cn/a.jpg") {
+		t.Fatalf("兜底封面应维持 mirroring 已定的正文第一图，实际 %q", got.CoverURL)
+	}
+	if got.ContentHTML != mirroredPublishHTML() {
+		t.Fatalf("兜底路径也不得改 content_html：%q", got.ContentHTML)
+	}
+	if createN, _ := env.ft.counts(); createN != 1 {
+		t.Fatalf("阶段应照常推进（CreateNews 恰一次），实际 %d", createN)
+	}
+}
+
+// TestPublishEnrichKeyMissingFallback ARK_API_KEY 未配置：不发任何请求直接走兜底
+// （newPublishTestEnv 未注入 enrich 时同样兜底——两种缺配置形态都不阻断流水线）。
+func TestPublishEnrichKeyMissingFallback(t *testing.T) {
+	env := newPublishTestEnv(t)
+	t.Setenv("ARK_API_KEY", "")
+	env.pipeline.enrich = arkEnrichArticle
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageAwaitingReview {
+		t.Fatalf("缺 ARK_API_KEY 不得 fail job，实际 stage=%q", got.Stage)
+	}
+	if !strings.Contains(got.AINotes, "ARK_API_KEY 未配置") {
+		t.Fatalf("notes 应写明原因，实际 %q", got.AINotes)
+	}
+}
+
+// TestParseEnrichmentJSONTolerance 解析容错：裸 JSON / 围栏 / 前后杂话都能解析；
+// cover_url 不在候选列表（模型幻觉/改写 URL）必须弃用；非 JSON 输出报错。
+func TestParseEnrichmentJSONTolerance(t *testing.T) {
+	candidates := []string{"https://oss.example.com/a.jpg"}
+	for _, text := range []string{
+		`{"cover_url":"https://oss.example.com/a.jpg","summary":"s","tags":["t"],"author":"a","notes":"n"}`,
+		"```json\n{\"cover_url\":\"https://oss.example.com/a.jpg\",\"summary\":\"s\",\"tags\":[\"t\"],\"author\":\"a\",\"notes\":\"n\"}\n```",
+		"好的，以下是结果：\n{\"cover_url\":\"https://oss.example.com/a.jpg\",\"summary\":\"s\",\"tags\":[\"t\"],\"author\":\"a\",\"notes\":\"n\"}",
+	} {
+		got, err := parseEnrichmentJSON(text, candidates)
+		if err != nil {
+			t.Fatalf("应能解析 %q: %v", text, err)
+		}
+		if got.CoverURL != candidates[0] || got.Summary != "s" || got.Author != "a" {
+			t.Fatalf("解析结果不符：%+v", got)
+		}
+	}
+	got, err := parseEnrichmentJSON(`{"cover_url":"https://evil.example.com/x.jpg","summary":"s"}`, candidates)
+	if err != nil {
+		t.Fatalf("解析: %v", err)
+	}
+	if got.CoverURL != "" {
+		t.Fatalf("候选之外的 cover_url 必须弃用，实际 %q", got.CoverURL)
+	}
+	if _, err := parseEnrichmentJSON("模型拒绝回答", candidates); err == nil {
+		t.Fatalf("非 JSON 输出应报错（走兜底）")
+	}
+}
+
+// TestBuildSiteNewsConsumesAIFields buildSiteNews 消费 M5 字段：Summary/NewsTags 直取、
+// Author 优先 AI 识别名、CoverImg 用（可能被 AI 覆盖过的）cover_url；Author 为空时
+// 回落 source_name（与 M5 之前行为一致，老任务不受影响）。
+func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
+	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
+	p := &publishPipeline{now: time.Now}
+	job := publishJob{
+		Title:       "标题",
+		SourceName:  "测试公众号",
+		ContentHTML: "<p>正文</p>",
+		CoverURL:    "https://oss.example.com/b.jpg",
+		Summary:     "AI 摘要",
+		Tags:        []string{"食品", "饮料"},
+		Author:      "Mote莫特",
+		CreatedAt:   "2026-07-10T00:00:00Z",
+	}
+	news, err := p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatalf("buildSiteNews: %v", err)
+	}
+	if news.Summary != "AI 摘要" || news.Author != "Mote莫特" || news.CoverImg != "https://oss.example.com/b.jpg" {
+		t.Fatalf("AI 字段未被消费：summary=%q author=%q cover=%q", news.Summary, news.Author, news.CoverImg)
+	}
+	if len(news.NewsTags) != 2 || news.NewsTags[0] != "食品" {
+		t.Fatalf("NewsTags 未被消费：%v", news.NewsTags)
+	}
+	job.Author = ""
+	news, err = p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatalf("buildSiteNews: %v", err)
+	}
+	if news.Author != "测试公众号" {
+		t.Fatalf("Author 为空应回落 source_name，实际 %q", news.Author)
+	}
+}
+
+// TestHTMLToPlainText 剥标签内核：块级标签转换行、实体解码、行首尾空白清理——
+// 它决定摘要兜底与模型输入的质量。
+func TestHTMLToPlainText(t *testing.T) {
+	in := `<p>第一段&amp;文字</p><div> 第二段 </div><img src="x"><h2>小标题</h2>`
+	want := "第一段&文字\n第二段\n小标题"
+	if got := htmlToPlainText(in); got != want {
+		t.Fatalf("htmlToPlainText = %q，应为 %q", got, want)
+	}
+	if got := truncateRunes("一二三四五", 3); got != "一二三" {
+		t.Fatalf("truncateRunes 按字符截断错误：%q", got)
+	}
+}

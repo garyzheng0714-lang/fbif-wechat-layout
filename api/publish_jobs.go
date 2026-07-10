@@ -14,9 +14,9 @@ import (
 	"time"
 )
 
-// 状态机阶段全集（施工图 S2）：
+// 状态机阶段全集（施工图 S2 + M5 的 enriching）：
 //
-//	created → fetching → rendering → mirroring → staging → awaiting_review
+//	created → fetching → rendering → mirroring → enriching → staging → awaiting_review
 //	        → [review approve] → publicizing → published
 //	        → [review reject]  → rejected（终态；FoodTalks 侧留草稿不动）
 //	任一步失败 → failed（failed_stage 记录续跑起点，retry 端点续跑）
@@ -25,6 +25,7 @@ const (
 	publishStageFetching       = "fetching"
 	publishStageRendering      = "rendering"
 	publishStageMirroring      = "mirroring"
+	publishStageEnriching      = "enriching" // M5：AI 预填发布参数（只产元数据，绝不改 content_html）
 	publishStageStaging        = "staging"
 	publishStageAwaitingReview = "awaiting_review"
 	publishStagePublicizing    = "publicizing"
@@ -49,10 +50,15 @@ type publishJob struct {
 	ImageMap        string `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
 	FoodTalksNewsID int64  `json:"foodtalks_news_id,omitempty"`
 	ArticleURL      string `json:"article_url,omitempty"`
-	ReviewedBy      string `json:"reviewed_by,omitempty"` // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
-	ReviewedAt      string `json:"reviewed_at,omitempty"` // 审核时刻（RFC3339 UTC）
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	// M5 AI 预填发布参数（enriching 阶段落库；AI 失败时是规则兜底值，任务照常推进）。
+	Summary    string   `json:"summary,omitempty"`     // 摘要（AI 80-120 字；兜底=正文纯文本前 100 字）
+	Tags       []string `json:"tags,omitempty"`        // 标签（AI 3-5 个；兜底为空）
+	Author     string   `json:"author,omitempty"`      // 正文识别的作者名（兜底=source_name；空则 buildSiteNews 回落 source_name）
+	AINotes    string   `json:"ai_notes,omitempty"`    // AI 优化说明（人话 2-4 句；兜底="AI 预填未执行（原因）"）
+	ReviewedBy string   `json:"reviewed_by,omitempty"` // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
+	ReviewedAt string   `json:"reviewed_at,omitempty"` // 审核时刻（RFC3339 UTC）
+	CreatedAt  string   `json:"created_at"`
+	UpdatedAt  string   `json:"updated_at"`
 }
 
 // terminal 终态判定：published / rejected 之后任务盖棺；failed 不算终态（可 retry 续跑），

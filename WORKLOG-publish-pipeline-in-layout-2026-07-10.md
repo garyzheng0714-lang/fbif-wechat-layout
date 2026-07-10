@@ -92,7 +92,7 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - **卡片契约**（cardkit 红线，TestReviewPendingCardContract 字符串断言锁死）：schema 2.0 + update_multi；无 emoji；「通过并发布」primary_filled+done_outlined+confirm（文案明说不可逆）、「驳回」danger+confirm（照规范 03 §9 权威示例不带 icon）、「查看原文」default+preview_outlined open_url；横排按钮 column_set（schema 2.0 禁 action/note）；终态卡 person capsule 留痕（HTTP 审核无 open_id 时退化「经管理后台」纯文本）。
 - **回调安全模型**：无 ADMIN_PASSWORD 门（飞书服务器调用）；FEISHU_VERIFICATION_TOKEN 比对（url_verification 顶层 token / 事件 header.token 双形态），不匹配 401；未配置 WARN 放行（仅首次配置窗口，配好必须回填 publish.env）；业务性失败（任务不存在/已被处理）回 200+toast 防飞书重试轰炸；防重复点击：终态回「已被处理」+当前终态卡（update_multi 群内旧卡一并刷新）；非终态非待审（failed/publicizing 半途）只回 toast 指路管理后台、不动卡片。
 - **实施决策**：① 卡片发送成功不再发文本（同一事件不双通知），失败才降级——测试锁定；② published/rejected 既有文本通知位点保留（HTTP 审核路径的既有能力，卡片回调场景终态卡已原地刷新）；③ job_id 回传兼容数字/字符串两种 JSON 形态（coerceFeishuJobID）。
-- **⚠️ 与下方「预览链接」裁定的衔接（后到的裁定，尚未实施）**：当前卡片第三键是「查看原文」（本次开工时 M4 钉死稿）；预览页（`/preview/publish/{id}?t=HMAC`）落地时需把该键换成「预览效果」并把原文链接移入卡片正文行——单点改 `buildReviewPendingCard`，回调与安全模型不受影响。
+- **与下方「预览链接」裁定的衔接（✅ 2026-07-10 已随 M5 实施）**：卡片第三键已换成「预览效果」（open_url=预览签名链接），原文链接移入卡片信息色块一行——单点改了 `buildReviewPendingCard`，回调与安全模型未动。详见「M5 + 预览页实施」节。
 - [ ] 开放平台外部配置（用户照做，见上方「外部配置」行）
 
 ### 预览链接（2026-07-10 用户裁定：审核必须给未上架的预览链接，不能盲审）
@@ -114,6 +114,15 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - 落库：job 加 cover_candidates/summary/tags/author/ai_notes 字段；buildSiteNews 消费（Summary/Author/NewsTags/CoverImg）。
 - 卡片与前端展示 ai_notes + 预填参数；审核人可在前端改（改动优先于 AI 值）。
 
+### M5 + 预览页实施（2026-07-10 完成；`cd api && go test ./...` 全绿 + 根 `npm test` 792 全绿 + 新改文件 gofmt 干净 + public/ 零字节改动 + 单文件 ≤900 行）
+- [x] enriching 阶段：新增 `api/publish_enrich.go`（ARK responses API 客户端 + 解析容错 + 规则兜底）；`publish_pipeline.go` 在 mirroring→staging 之间插 `stageEnrich`（pipeline 加 `enrich` 注入字段，默认 `arkEnrichArticle`）。**stageEnrich 永不因 AI fail job**：未装配(nil)/Key 缺失/调用失败/解析失败全走 `fallbackEnrichment`（封面维持 mirroring 已定第一图、摘要=正文纯文本前 100 字、author=source_name、tags 空、notes="AI 预填未执行（原因一句话）"）+ WARN 照常推进。
+- [x] ARK 调用：`POST {ARK_BASE_URL:-https://ark.cn-beijing.volces.com}/api/v3/responses`，Bearer `ARK_API_KEY`，model `ARK_MODEL_ID`（默认 ep-20260623134011-qljpn）；system 提示含「请用简体中文回复」；输入=标题+剥标签正文（6000 字截断）+正文图 input_image（≤8 张，OSS URL）；输出严格 JSON，解析剥 markdown 围栏 + 截取首尾大括号；**cover_url 必须原样命中候选列表否则弃用**（防幻觉 URL 混进发布参数）。
+- [x] job 字段 summary/tags/author/ai_notes（`publish_jobs.go`）+ buildSiteNews 消费（Summary/NewsTags 直取；Author 优先 AI 识别名、空则回落 source_name——与 M5 前行为一致；CoverImg 用可能被 AI 覆盖的 cover_url）。列表端点保留这些小字段（大字段照旧清空）。
+- [x] 预览页：新增 `api/publish_preview.go`，`GET /preview/publish/{id}?t=hex(HMAC-SHA256(ADMIN_PASSWORD,"publish-preview:"+id))`；签名错/任务不存在/阶段太早**同一个 404**（hmac.Equal 常时比对，不给探测面）；无 ADMIN_PASSWORD → 503；仅 awaiting_review/publicizing/published/rejected 可预览（failed 半成品不给看）。页面纯服务端拼：白底、680px 居中、通栏警示黄横幅、h1 标题（转义）、content_html 原样、页尾 AI 参数（封面缩略/摘要/标签/作者/优化说明，文本全转义）+ noindex 头。已用 Playwright 截图目检版式。
+- [x] 卡片（`feishu_review_card.go`）：第三键「查看原文」→「预览效果」（open_url=预览签名链接）；原文降为信息色块一行（markdown 链接「打开公众号原文」）；信息区加作者/标签/摘要行；新增 AI 优化说明 grey-100 色块段（notes 空时不渲染，老任务兼容）。回调与安全模型未动。
+- [x] 测试：新增 `api/publish_enrich_test.go`（6 个：AI 注入且 content_html 逐字节不变/ARK 500 兜底不 fail/Key 缺失兜底/解析容错+幻觉封面弃用/buildSiteNews 消费/剥标签内核）+ `api/publish_preview_test.go`（3 个：签名门/页面契约与标题转义/阶段门+503）+ 更新 TestReviewPendingCardContract（预览效果+签名链接+AI 说明段+「查看原文」不得再现）。红线测试（forbidPublish 守卫、TestPublishNoPublicizeWithoutApprove、5 端点 401）全绿未动。
+- [ ] 生产配置：publish.env 加 `ARK_API_KEY`（`ARK_MODEL_ID` 可省用默认）+ restart——未配置时流水线照跑、参数走规则兜底
+
 ## M6：前端交互设计（2026-07-10 用户命题「排版工具前端怎么展示 + feed 里点发布到网站的交互」）
 
 按 DESIGN.md（真实动作出发/最少新概念/按钮在顶栏红线 #4/右滑抽屉既有交互语言）：
@@ -134,3 +143,8 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 8. **列表端点是摘要视图**：GET /api/publish/jobs 清空 blocks_json/content_html/image_map 大字段，全量走详情端点。
 9. **gofmt 基线冲突**：仓库既有文件（account_catalog.go 等）在当前 gofmt 下本就不干净（中文注释 `//（` 风格）；新增文件全部 gofmt 干净，render_proxy.go 仅保留基线原有两行注释原样（不顺手重排既有代码）。
 10. **飞书通知位点**：待审核（staging 成功）/ 已发布（publicize 成功）/ 已驳回（reject）三处；failed 不通知（施工图口径「awaiting_review 与终态各一条」）。测试注入 notify fake，另有 httptest 桩直测 token 缓存与消息形态。
+11. **（M5）未落 cover_candidates 字段**：施工图 M5 落库行列了 cover_candidates，实施时不存——候选=正文图列表，随时可从 content_html 用 extractImgSrcs 推导（enrichCandidateImages），存第二份就是冗余漂移面；前端 M6 九宫格选图从详情端点的 content_html 提取即可。
+12. **（M5）偏离记录 4「Summary 暂空」作废**：buildSiteNews 的 Summary/NewsTags/Author 现由 enriching 阶段的 AI 预填（或规则兜底）供给。
+13. **（预览页）域名取法**：Go 侧此前没有站点域名常量；预览链接 base 复用既有 env `WECHAT_UPLOAD_ORIGIN`（deploy.yml 已写死为 https://fbifmp-layout.foodtalks.cn）→ 缺失时默认常量兜底，不新增平行 env（最少新概念）。
+14. **（预览页）failed 不可预览**：施工图「awaiting_review 及之后」按字面实施为 {awaiting_review, publicizing, published, rejected} 白名单；failed 的 failed_stage 可能停在 fetching/rendering（content_html 未定型半成品），不给看。
+15. **（M5）ARK Base URL 可 env 覆盖**（`ARK_BASE_URL`，默认火山北京域名）：与 FOODTALKS_BASE_URL 同模式，测试 httptest 桩靠它注入，生产不用配。

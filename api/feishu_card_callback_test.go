@@ -243,11 +243,18 @@ func TestFeishuCallbackRepeatedClickNoOp(t *testing.T) {
 // TestReviewPendingCardContract 待审核卡 JSON 契约（cardkit 红线，字符串断言）：
 // 无 emoji、「通过并发布」「驳回」都带 confirm 二次确认、schema 2.0 不含 action/note
 // 容器、callback value 带 action+job_id、update_multi 开启（群内同步刷新的前提）。
+// 2026-07-10「预览链接」+ M5 扩展：第三键是「预览效果」（open_url 指 HMAC 签名预览链接，
+// 不再是「查看原文」按钮）、原文降为信息色块一行、信息区带 AI 作者/标签/摘要行、
+// 卡片含 AI 优化说明段。
 func TestReviewPendingCardContract(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("WECHAT_UPLOAD_ORIGIN", "https://preview.test")
 	job := publishJob{
 		ID: 7, Title: "示例标题", SourceName: "示例公众号",
 		SourceURL: "https://mp.weixin.qq.com/s/AbC", Stage: publishStageAwaitingReview,
 		FoodTalksNewsID: 7240, UpdatedAt: "2026-07-10T07:00:00Z",
+		Summary: "AI 摘要一段。", Tags: []string{"食品", "饮料"}, Author: "Mote莫特",
+		AINotes: "封面选第一张图。正文格式规范。摘要取自导语。",
 	}
 	raw, err := json.Marshal(buildReviewPendingCard(job))
 	if err != nil {
@@ -262,15 +269,25 @@ func TestReviewPendingCardContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"schema":"2.0"`, `"update_multi":true`,
-		"通过并发布", "驳回", "查看原文", "待审核",
+		"通过并发布", "驳回", "预览效果", "待审核",
 		"不可逆", // confirm 文案必须明说发布不可逆
 		`"action":"approve"`, `"action":"reject"`, `"job_id":7`,
 		`"primary_filled"`, `"danger"`, "done_outlined",
 		"示例标题", "示例公众号", "#7",
+		// 预览键 open_url 指向带 HMAC 签名的预览链接（域名走 WECHAT_UPLOAD_ORIGIN）。
+		"https://preview.test/preview/publish/7?t=" + publishPreviewSig(7),
+		// 原文从按钮降为信息色块一行（链接必须仍在卡片里，审核人要能回看原文）。
+		"打开公众号原文", job.SourceURL,
+		// M5 AI 预填参数行 + 优化说明段。
+		"Mote莫特", "食品、饮料", "AI 摘要一段。",
+		"AI 优化说明", "封面选第一张图。",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("审核卡缺少 %q：%s", want, s)
 		}
+	}
+	if strings.Contains(s, "查看原文") {
+		t.Fatalf("「查看原文」按钮应已被「预览效果」取代：%s", s)
 	}
 	for _, banned := range []string{`"tag":"action"`, `"tag":"note"`} {
 		if strings.Contains(s, banned) {

@@ -5,7 +5,8 @@ package main
 // internal/publishing/site.go，阶段执行进程内化——这是架构反转的最大红利）：
 //
 //	created → fetching（进程内抓文章存 blocks）→ rendering（render ft-default）
-//	        → mirroring（图片批量转存 OSS + 重写）→ staging（CreateNews 草稿进站）
+//	        → mirroring（图片批量转存 OSS + 重写）→ enriching（AI 预填发布参数，M5）
+//	        → staging（CreateNews 草稿进站）
 //	        → awaiting_review（人审闸门，自动推进到此为止）
 //	        → [人 approve] → publicizing（UpdateNews 翻 publishStatus=1）→ published
 //	        → [人 reject]  → rejected（终态；文章留在 FoodTalks 草稿态，本就不可见）
@@ -72,6 +73,9 @@ type publishPipeline struct {
 	render func(ctx context.Context, title, source, blocksJSON string) (string, error)
 	// ossUpload 整批图片 URL → OSS 转存（默认走 /api/oss-upload 的上游代理内核，urls 模式）
 	ossUpload func(ctx context.Context, urls []string) (map[string]string, error)
+	// enrich AI 预填发布参数（M5，默认 arkEnrichArticle）；nil / 失败都走规则兜底，
+	// WARN 不 fail job——AI 是加速器不是闸门
+	enrich func(ctx context.Context, job publishJob) (publishEnrichment, error)
 	// foodTalks 每次任务执行现构造（凭证 env-only 运行期可变；缺配置的错误落到具体任务上）
 	foodTalks func() (foodTalksAPI, error)
 	// notify 人审群通知；nil 或返回错误都不阻断流水线——人可以查任务列表，通知只是加速器
@@ -90,6 +94,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		rules:     rules,
 		render:    renderSiteHTML,
 		ossUpload: ossUploadByURLs,
+		enrich:    arkEnrichArticle,
 		foodTalks: func() (foodTalksAPI, error) { return newFoodTalksClientFromEnv() },
 		spawn:     func(f func()) { go f() },
 		now:       time.Now,
@@ -286,6 +291,8 @@ func (p *publishPipeline) runJob(jobID int64) {
 			stageErr = p.stageRender(ctx, job)
 		case publishStageMirroring:
 			stageErr = p.stageMirror(ctx, job)
+		case publishStageEnriching:
+			stageErr = p.stageEnrich(ctx, job)
 		case publishStageStaging:
 			stageErr = p.stageStage(ctx, job)
 		case publishStagePublicizing:
@@ -416,11 +423,42 @@ func (p *publishPipeline) stageMirror(ctx context.Context, job publishJob) error
 	_, err := p.store.update(job.ID, func(j *publishJob) {
 		j.ContentHTML = finalHTML
 		j.CoverURL = ossCover
-		j.Stage = publishStageStaging
+		j.Stage = publishStageEnriching
 		j.FailedStage = ""
 		j.Error = ""
 	})
 	return err
+}
+
+// stageEnrich AI 预填发布参数（M5）：只产元数据（summary/tags/author/ai_notes +
+// 可能覆盖 cover_url），**绝不碰 ContentHTML**。AI 未装配 / 调用失败 / 解析失败 →
+// fallbackEnrichment 规则兜底 + WARN，阶段照常推进——AI 是加速器不是闸门，
+// 本函数只会因存储写失败而让任务落 failed。
+func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error {
+	var result publishEnrichment
+	var err error
+	if p.enrich == nil {
+		err = errors.New("AI 预填未装配")
+	} else {
+		result, err = p.enrich(ctx, job)
+	}
+	if err != nil {
+		log.Printf("publish: WARN job %d AI 预填失败，走规则兜底: %v", job.ID, err)
+		result = fallbackEnrichment(job, err)
+	}
+	_, uerr := p.store.update(job.ID, func(j *publishJob) {
+		if result.CoverURL != "" {
+			j.CoverURL = result.CoverURL // AI 从候选里选中的封面覆盖默认第一图
+		}
+		j.Summary = result.Summary
+		j.Tags = result.Tags
+		j.Author = result.Author
+		j.AINotes = result.Notes
+		j.Stage = publishStageStaging
+		j.FailedStage = ""
+		j.Error = ""
+	})
+	return uerr
 }
 
 // stageStage 草稿进站：CreateNews publishStatus=0，外界不可见；成功即回填
@@ -625,16 +663,24 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 	if err != nil {
 		return foodTalksNews{}, err
 	}
+	// M5：作者优先用 enriching 从正文识别的名字；识别不到（或老任务没跑过 enriching）
+	// 回落公众号名——与 M5 之前的行为一致。
+	author := strings.TrimSpace(job.Author)
+	if author == "" {
+		author = job.SourceName
+	}
 	return foodTalksNews{
 		Title:    job.Title,
-		CoverImg: job.CoverURL, // mirroring 后已是转存 OSS URL
+		CoverImg: job.CoverURL, // mirroring 后已是转存 OSS URL；enriching 可能换成 AI 选中图
 		// sourceType 枚举语义未确认，先按 0 提交。
 		// TODO(契约 §9)：待网站后端确认枚举后改为显式「转载」取值。
 		SourceType:        0,
 		PublishStatus:     publishStatus,
 		IsPublic:          1, // ⚠️ 实测非可见性开关（契约 §4），恒 1；隐藏靠 publishStatus=0
-		Author:            job.SourceName,
-		Content:           job.ContentHTML, // mirroring 后成品（图片已全部 OSS 化）
+		Author:            author,
+		Summary:           job.Summary,     // M5 AI 摘要（兜底=正文前 100 字）
+		NewsTags:          job.Tags,        // M5 AI 标签（兜底空，客户端归一为 []）
+		Content:           job.ContentHTML, // mirroring 后成品（图片已全部 OSS 化；enriching 绝不改它）
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),
 		PrimaryCategoryID: primary,
 		CategoryIDs:       categories,

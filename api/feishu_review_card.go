@@ -17,6 +17,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -30,7 +31,9 @@ const (
 const reviewCardHeaderTitle = "网站同步 · 发布审核"
 
 // buildReviewPendingCard 待审核卡：蓝 header + 「待审核」黄 tag + grey-100 信息色块
-// （标题/来源公众号/任务号/目标环境/进站时间）+ 按钮行（通过并发布｜驳回｜查看原文）。
+// （标题/来源公众号/作者/标签/摘要/原文/任务号/目标环境/进站时间）+ AI 优化说明段
+// + 按钮行（通过并发布｜驳回｜预览效果）。第三键 2026-07-10「预览链接」裁定后从
+// 「查看原文」换成「预览效果」（审核不能盲审），原文链接降为信息色块一行。
 func buildReviewPendingCard(job publishJob) map[string]any {
 	approveValue := map[string]any{"action": feishuCardActionApprove, "job_id": job.ID}
 	rejectValue := map[string]any{"action": feishuCardActionReject, "job_id": job.ID}
@@ -62,17 +65,22 @@ func buildReviewPendingCard(job publishJob) map[string]any {
 		},
 		map[string]any{
 			"tag":   "button",
-			"text":  feishuPlainText("查看原文"),
+			"text":  feishuPlainText("预览效果"),
 			"type":  "default",
 			"size":  "medium",
 			"width": "fill",
 			"icon":  map[string]any{"tag": "standard_icon", "token": "preview_outlined"},
 			"behaviors": []any{map[string]any{
-				"type": "open_url", "default_url": job.SourceURL,
+				"type": "open_url", "default_url": publishPreviewURL(job.ID),
 				"pc_url": "", "ios_url": "", "android_url": "",
 			}},
 		},
 	)
+	elements := []any{reviewCardInfoBlock(job)}
+	if notes := reviewCardAINotesBlock(job); notes != nil {
+		elements = append(elements, notes)
+	}
+	elements = append(elements, buttons)
 	return map[string]any{
 		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},
@@ -91,10 +99,7 @@ func buildReviewPendingCard(job publishJob) map[string]any {
 			"vertical_spacing": "8px",
 			"horizontal_align": "left",
 			"vertical_align":   "top",
-			"elements": []any{
-				reviewCardInfoBlock(job),
-				buttons,
-			},
+			"elements":         elements,
 		},
 	}
 }
@@ -159,15 +164,21 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 	}
 }
 
-// reviewCardInfoBlock grey-100 信息色块：标题/来源公众号/任务号/目标环境/进站时间。
+// reviewCardInfoBlock grey-100 信息色块：标题/来源公众号/作者/标签/摘要/原文链接/
+// 任务号/目标环境/进站时间。作者/标签/摘要是 M5 AI 预填参数（或规则兜底值）；
+// 原文链接自 2026-07-10「预览链接」裁定起从按钮降为此处一行。
 func reviewCardInfoBlock(job publishJob) map[string]any {
 	sourceName := job.SourceName
 	if sourceName == "" {
 		sourceName = "未知"
 	}
 	content := fmt.Sprintf(
-		"**%s**\n<font color='grey'>来源公众号</font> %s\n<font color='grey'>任务号</font> #%d\n<font color='grey'>目标环境</font> %s\n<font color='grey'>进站时间</font> %s",
-		job.Title, sourceName, job.ID, siteFrontURL(), formatReviewCardTime(job.UpdatedAt))
+		"**%s**\n<font color='grey'>来源公众号</font> %s\n<font color='grey'>作者</font> %s\n<font color='grey'>标签</font> %s\n<font color='grey'>摘要</font> %s\n<font color='grey'>原文</font> [打开公众号原文](%s)\n<font color='grey'>任务号</font> #%d\n<font color='grey'>目标环境</font> %s\n<font color='grey'>进站时间</font> %s",
+		job.Title, sourceName,
+		reviewCardValueOrDash(job.Author),
+		reviewCardValueOrDash(strings.Join(job.Tags, "、")),
+		reviewCardValueOrDash(job.Summary),
+		job.SourceURL, job.ID, siteFrontURL(), formatReviewCardTime(job.UpdatedAt))
 	return map[string]any{
 		"tag":              "column_set",
 		"flex_mode":        "stretch",
@@ -185,6 +196,40 @@ func reviewCardInfoBlock(job publishJob) map[string]any {
 			}},
 		}},
 	}
+}
+
+// reviewCardAINotesBlock AI 优化说明段（M5）：grey-100 色块 + 小灰字标题，无 emoji。
+// notes 为空（老任务没跑过 enriching）时不渲染该段，返回 nil。
+func reviewCardAINotesBlock(job publishJob) map[string]any {
+	notes := strings.TrimSpace(job.AINotes)
+	if notes == "" {
+		return nil
+	}
+	return map[string]any{
+		"tag":              "column_set",
+		"flex_mode":        "stretch",
+		"background_style": "grey-100",
+		"columns": []any{map[string]any{
+			"tag":              "column",
+			"width":            "weighted",
+			"weight":           1,
+			"direction":        "vertical",
+			"padding":          "12px 12px 12px 12px",
+			"vertical_spacing": "4px",
+			"elements": []any{map[string]any{
+				"tag":     "markdown",
+				"content": fmt.Sprintf("<font color='grey'>AI 优化说明</font>\n%s", notes),
+			}},
+		}},
+	}
+}
+
+// reviewCardValueOrDash 空值统一展示为「-」（卡片信息行不留空尾巴）。
+func reviewCardValueOrDash(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "-"
+	}
+	return v
 }
 
 // reviewCardAuditTrail 底部操作留痕：卡片回调有 operator.open_id 时用 person capsule
