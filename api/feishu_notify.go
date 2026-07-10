@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -153,4 +154,73 @@ func (n *feishuNotifier) tenantAccessToken(ctx context.Context) (string, error) 
 	n.token = env.TenantAccessToken
 	n.tokenExpire = time.Now().Add(time.Duration(env.Expire) * time.Second)
 	return n.token, nil
+}
+
+// uploadImageByURL 把一张图（OSS/外链）转存为飞书图片素材，返回 img_key（卡片 img
+// 元素只认 img_key，不认外链 URL——2026-07-10 用户要求封面直接在卡片里呈现）。
+// 下载与上传都设上限与超时；任何失败由调用方降级为「卡片不带图」，绝不阻塞流水线。
+func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (string, error) {
+	token, err := n.tenantAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, imgURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("feishu: 构造封面下载请求: %w", err)
+	}
+	dlResp, err := n.httpClient.Do(dlReq)
+	if err != nil {
+		return "", fmt.Errorf("封面图下载失败: %w", err)
+	}
+	defer dlResp.Body.Close()
+	if dlResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("封面图下载失败（HTTP %d）", dlResp.StatusCode)
+	}
+	imgBytes, err := io.ReadAll(io.LimitReader(dlResp.Body, 10<<20))
+	if err != nil {
+		return "", fmt.Errorf("读封面图失败: %w", err)
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("image_type", "message"); err != nil {
+		return "", fmt.Errorf("feishu: 构造上传表单: %w", err)
+	}
+	fw, err := mw.CreateFormFile("image", "cover.jpg")
+	if err != nil {
+		return "", fmt.Errorf("feishu: 构造上传表单: %w", err)
+	}
+	if _, err := fw.Write(imgBytes); err != nil {
+		return "", fmt.Errorf("feishu: 写上传表单: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("feishu: 收口上传表单: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		n.baseURL+"/open-apis/im/v1/images", &buf)
+	if err != nil {
+		return "", fmt.Errorf("feishu: 构造图片上传请求: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("飞书图片接口不可达: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ImageKey string `json:"image_key"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return "", fmt.Errorf("飞书图片上传响应异常（HTTP %d）: %w", resp.StatusCode, err)
+	}
+	if env.Code != 0 || env.Data.ImageKey == "" {
+		return "", fmt.Errorf("飞书图片上传失败 code=%d msg=%s", env.Code, env.Msg)
+	}
+	return env.Data.ImageKey, nil
 }

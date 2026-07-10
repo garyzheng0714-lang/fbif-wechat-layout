@@ -287,6 +287,7 @@ const {
 const initialRule = { source: 'local', preset: localActiveRulePreset(activeRulePack.id) };
 applyActiveRuleConfig(initialRule.preset.config, initialRule.preset);
 let activeRuleHydrationSeq = 0;
+let accountSwitchGeneration = 0;
 
 function trackActiveRuleHydration(promise, accountID = activeRulePack.id) {
   const seq = ++activeRuleHydrationSeq;
@@ -450,6 +451,8 @@ function persistAccountSelection(id) {
 async function switchAccount(accountID, options = {}) {
   const nextPack = rulePackModule.getRulePack(accountID);
   if (nextPack.id === activeRulePack.id) return;
+  const generation = ++accountSwitchGeneration;
+  const stale = () => generation !== accountSwitchGeneration || activeRulePack.id !== nextPack.id;
   if (nextPack.channel !== activeRulePack.channel) {
     const next = new URL(location.href);
     if (rulePackUrlModule.parsePath(location.pathname) !== null) {
@@ -466,12 +469,20 @@ async function switchAccount(accountID, options = {}) {
   persistAccountSelection(activeRulePack.id);
   applyRulePackChrome(activeRulePack);
   accountMenu.setActive(activeRulePack.id);
-  if (activeRulePack.templateId !== currentTemplateId) {
-    await loadTemplate(activeRulePack.templateId, { rerender: false });
-  }
-
-  // 水合+拉目录+复位选择器（含 afterHydrate 的账号能力 UI 刷新）收编进共享模块。
-  await ruleSelector.adoptAccount({ rerender: options.rerender !== false });
+  // 整个跨模板+规则水合过程共用现有 rules-ready 门；不能只包住
+  // adoptAccount，否则模板 import 期间上传文章会读到旧账号规则。
+  const switching = (async () => {
+    if (nextPack.templateId !== currentTemplateId) {
+      const applied = await loadTemplate(nextPack.templateId, { rerender: false, stale });
+      if (!applied || stale()) return { accountID: nextPack.id, stale: true };
+    }
+    if (stale()) return { accountID: nextPack.id, stale: true };
+    // 水合+拉目录+复位选择器（含 afterHydrate 的账号能力 UI 刷新）收编进共享模块。
+    const adopted = await ruleSelector.adoptAccount({ rerender: options.rerender !== false });
+    if (stale() || (adopted && adopted.stale)) return { accountID: nextPack.id, stale: true };
+    return adopted;
+  })();
+  return trackActiveRuleHydration(switching, nextPack.id);
 }
 
 function loadConfig() {
@@ -554,8 +565,13 @@ window.addEventListener('fbif:article-text-ready', () => {
 trackActiveRuleHydration(hydrateActiveRulePreset(activeRulePack.id), activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
 refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));
 
+function importTemplateModule(templateId) {
+  return import('/js/templates/' + templateId + '.js?v=' + assetVersion);
+}
+
 async function loadTemplate(templateId, options = {}) {
-  const mod = await import('/js/templates/' + templateId + '.js?v=' + assetVersion);
+  const mod = await importTemplateModule(templateId);
+  if (options.stale && options.stale()) return false;
   currentTemplateId = templateId;
   syncEngineConfig(false);
   if (window._engineApi && typeof window._engineApi.switchTemplate === 'function') {
@@ -564,6 +580,7 @@ async function loadTemplate(templateId, options = {}) {
     initApp(mod.default);
     wrapEngineFunctions();
   }
+  return true;
 }
 
 await loadTemplate(currentTemplateId);

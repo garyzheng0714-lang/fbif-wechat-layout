@@ -48,13 +48,14 @@ export function createActiveRuleSelector({
   let activeRuleSelectorStatus = '';
   let activeRuleAdminPassword = '';
   let activeRuleOutsideHandler = null;
+  let accountHydrationGeneration = 0;
 
   function currentPresetFromConfig() {
     return (windowRef._activeConfig && windowRef._activeConfig.preset) || {};
   }
 
-  function cacheServerRuleFallback(config, preset) {
-    saveLocalRuleConfig(fallbackTransform(config, preset), getPack().id);
+  function cacheServerRuleFallback(config, preset, accountID = getPack().id) {
+    saveLocalRuleConfig(fallbackTransform(config, preset), accountID);
   }
 
   function localActiveRulePreset(accountID) {
@@ -209,37 +210,47 @@ export function createActiveRuleSelector({
   }
 
   async function hydrateActiveRulePreset(accountID = getPack().id) {
+    const generation = ++accountHydrationGeneration;
     const loaded = await loadActiveRulePreset(accountID);
-    if (accountID !== getPack().id) return loaded;
+    if (generation !== accountHydrationGeneration || accountID !== getPack().id) return loaded;
     activeRuleSource = loaded.source;
     applyActiveRuleConfig(loaded.preset.config, loaded.preset);
-    if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config, loaded.preset);
+    if (activeRuleSource === 'server') cacheServerRuleFallback(loaded.preset.config, loaded.preset, accountID);
     activeRuleSelectorDraftID = loaded.preset.id || 'default';
     activeRuleSelectorStatus = '';
     if (afterHydrate) await afterHydrate(getPack());
+    if (generation !== accountHydrationGeneration || accountID !== getPack().id) return loaded;
     refreshRuleConsumers({ rerender: true });
     return loaded;
   }
 
   // 账号切换用：hydrate + 拉目录 + 复位选择器（app.html switchAccount 此前手工展开这段）。
   async function adoptAccount({ rerender = true } = {}) {
+    const accountID = getPack().id;
+    const pack = getPack();
+    const generation = ++accountHydrationGeneration;
     const [loaded, catalog] = await Promise.all([
-      loadActiveRulePreset(getPack().id),
+      loadActiveRulePreset(accountID),
       loadRuleCatalog(),
     ]);
+    const stale = generation !== accountHydrationGeneration || accountID !== getPack().id;
+    if (stale) return { ...loaded, accountID, stale: true };
     activeRuleSource = loaded.source;
     applyActiveRuleConfig(loaded.preset.config, loaded.preset);
     if (activeRuleSource === 'server') {
-      cacheServerRuleFallback(loaded.preset.config, loaded.preset);
+      cacheServerRuleFallback(loaded.preset.config, loaded.preset, accountID);
     }
     activeRuleCatalog = catalog;
     activeRuleSelectorEditing = false;
     activeRuleSelectorOpen = false;
     activeRuleSelectorDraftID = loaded.preset.id || 'default';
     activeRuleSelectorStatus = '';
-    if (afterHydrate) await afterHydrate(getPack());
+    if (afterHydrate) await afterHydrate(pack);
+    if (generation !== accountHydrationGeneration || accountID !== getPack().id) {
+      return { ...loaded, accountID, stale: true };
+    }
     refreshRuleConsumers({ rerender });
-    return loaded;
+    return { ...loaded, accountID, stale: false };
   }
 
   async function refreshActiveRuleCatalog(accountID = getPack().id) {

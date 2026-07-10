@@ -46,6 +46,7 @@ func TestPublishEndpointsRequireAdminPassword(t *testing.T) {
 		{http.MethodGet, "/api/publish/jobs/1", ""},
 		{http.MethodPost, "/api/publish/jobs/1/review", `{"action":"approve"}`},
 		{http.MethodPost, "/api/publish/jobs/1/retry", ""},
+		{http.MethodPost, "/api/publish/jobs/1/reconcile", `{"foodtalks_news_id":7240}`},
 	}
 	for _, c := range cases {
 		if rec := doPublishReq(mux, c.method, c.target, c.body, false); rec.Code != http.StatusUnauthorized {

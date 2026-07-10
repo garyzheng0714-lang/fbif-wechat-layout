@@ -193,13 +193,23 @@ func validateRulePresetPayload(p rulePreset) error {
 	if len([]rune(p.Description)) > 500 {
 		return fmt.Errorf("description is too long")
 	}
+	baselineID := sanitizeRulePresetID(p.BaselineID)
+	if isProtectedDefaultPreset(sanitizeRulePresetID(p.ID)) && baselineID == "" {
+		baselineID = sanitizeRulePresetID(p.ID)
+	}
+	if err := validateRuleBaselineID(baselineID); err != nil {
+		return err
+	}
+	if isProtectedDefaultPreset(sanitizeRulePresetID(p.ID)) && baselineID != sanitizeRulePresetID(p.ID) {
+		return fmt.Errorf("内置规则 %s 的 baseline_id 必须指向自身", p.ID)
+	}
 	if err := validateRuleConfig(p.Config); err != nil {
 		return err
 	}
-	return validateRuleBehaviorPayload(p.ID, p.Behavior)
+	return validateRuleBehaviorPayload(baselineID, p.Behavior)
 }
 
-func validateRuleBehaviorPayload(presetID string, raw map[string]any) error {
+func validateRuleBehaviorPayload(baselineID string, raw map[string]any) error {
 	regexFields := map[string]bool{"author_regex": true, "tip_regex": true, "ref_header_regex": true, "ref_item_regex": true}
 	for key := range raw {
 		switch key {
@@ -248,7 +258,7 @@ func validateRuleBehaviorPayload(presetID string, raw map[string]any) error {
 	if version, ok := raw["schema_version"]; ok && int(ruleBehaviorNumber(version)) != 1 {
 		return fmt.Errorf("unsupported behavior schema_version")
 	}
-	behavior := mergeRuleBehavior(presetID, raw)
+	behavior := mergeRuleBehavior(baselineID, raw)
 	params, ok := behavior["params"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("behavior params must be an object")

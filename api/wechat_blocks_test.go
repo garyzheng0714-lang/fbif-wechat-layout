@@ -301,9 +301,10 @@ func TestLongPlainParagraphAfterImageStaysBody(t *testing.T) {
 func TestArticleBlockOptionsReadActiveAccountBehavior(t *testing.T) {
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 	preset := rulePreset{
-		ID:     "site-tight-caption",
-		Name:   "网站短图注阈值",
-		Config: defaultFoodTalksSiteRuleConfig(),
+		ID:         "site-tight-caption",
+		Name:       "网站短图注阈值",
+		BaselineID: foodTalksSiteDefaultRulePresetID,
+		Config:     defaultFoodTalksSiteRuleConfig(),
 		Behavior: map[string]any{
 			"params": map[string]any{
 				"image_caption_max_chars":        map[string]any{"type": "number", "default": 20},

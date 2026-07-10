@@ -258,7 +258,7 @@ func TestPublishApprovePublicizes(t *testing.T) {
 }
 
 // TestPublishRejectIsTerminal reject 置终态：FoodTalks 侧留草稿不动（不发任何请求）、
-// 之后不可再 approve（终态校验挡住），同文可重新提交建新单（终态不再占用幂等键）。
+// 之后不可再 approve；source_key 终身占用，同文重提必须返回原任务，不能新建第二篇网站文章。
 func TestPublishRejectIsTerminal(t *testing.T) {
 	env := newPublishTestEnv(t)
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
@@ -278,9 +278,9 @@ func TestPublishRejectIsTerminal(t *testing.T) {
 	if _, updateN := env.ft.counts(); updateN != 0 {
 		t.Fatalf("reject 全程不应触发 UpdateNews（文章留在草稿态即可），实际 %d 次", updateN)
 	}
-	// 终态释放幂等键：同文重新提交应建新单（编辑部改完稿可以重走流程）。
-	if newJob, created, err := env.pipeline.submit(testPublishSourceURL); err != nil || !created || newJob.ID == job.ID {
-		t.Fatalf("终态后重新提交应建新单（err=%v created=%v id=%d）", err, created, newJob.ID)
+	// 终态也不释放幂等键：网站文章没有安全删除/去重 API，重提不能再 CreateNews。
+	if existing, created, err := env.pipeline.submit(testPublishSourceURL); err != nil || created || existing.ID != job.ID {
+		t.Fatalf("终态后重新提交应返回原任务（err=%v created=%v id=%d）", err, created, existing.ID)
 	}
 }
 

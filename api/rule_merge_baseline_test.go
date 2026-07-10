@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+)
 
 // 契约（架构体检 S3，2026-07-10）：mergeRuleDefaults / mergeRuleBehavior 的合并基线
 // 必须按 preset 归属选择——内置 preset 用【自己账号族】的代码内默认，而不是一律
@@ -40,12 +43,41 @@ func TestMergeBehaviorBaselineSiteNotFBIF(t *testing.T) {
 	}
 }
 
-// 用户自建 preset（非内置 id）没有账号归属字段，保持历史行为：FBIF 基线兜底。
-// 这是显式锁定的兼容语义（改它之前必须先给自建 preset 建立账号归属）。
-func TestMergeBaselineCustomPresetKeepsFBIF(t *testing.T) {
-	merged := mergeRuleDefaults("user-custom-123", map[string]any{})
-	if got := merged["footer_enabled"]; got != true {
-		t.Fatalf("自建 preset 应保持 FBIF 基线 footer_enabled=true 的历史行为，实际 %v", got)
+// 自建 preset 必须明确携带 baseline_id，不再根据「非内置 id」猜成 FBIF。
+// 缺失/未知基线要在保存边界给人话错误，不能带着不完整配置进存储。
+func TestCustomRuleRequiresExplicitKnownBaseline(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		baselineID string
+	}{
+		{name: "missing"},
+		{name: "unknown", baselineID: "mystery-channel"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateRulePresetPayload(rulePreset{
+				ID:         "user-custom-123",
+				Name:       "自建规则",
+				BaselineID: tc.baselineID,
+				Config:     map[string]any{"font_size": "16"},
+			})
+			if err == nil {
+				t.Fatal("缺失/未知 baseline_id 必须拒绝保存")
+			}
+			if !regexp.MustCompile(`(?i)baseline_id|规则基线`).MatchString(err.Error()) {
+				t.Fatalf("错误应指明规则基线，实际：%v", err)
+			}
+		})
+	}
+}
+
+func TestCustomRuleCanExplicitlyInheritWebsiteBaseline(t *testing.T) {
+	merged := mergeRuleDefaults(foodTalksSiteDefaultRulePresetID, map[string]any{"author_font_size": "16"})
+	if got := merged["author_font_size"]; got != "16" {
+		t.Fatalf("显式覆盖应保留，实际 %v", got)
+	}
+	behavior := mergeRuleBehavior(foodTalksSiteDefaultRulePresetID, nil)
+	if _, hasActions := behavior["actions"]; hasActions {
+		t.Fatalf("自建网站规则继承网站基线时不得混入公众号 actions：%v", behavior["actions"])
 	}
 }
 

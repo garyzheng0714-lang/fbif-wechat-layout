@@ -89,6 +89,11 @@ func main() {
 	}
 
 	ruleStore := newRulePresetStore(*rulesPath)
+	// schema v3 起每条规则必须显式声明 baseline_id。v1/v2 存量库会按历史
+	// 语义迁移；已是 v3 却缺失/指向未知基线则拒绝启动，避免运行期串台。
+	if err := ruleStore.validate(); err != nil {
+		log.Fatalf("规则库校验失败：%v", err)
+	}
 
 	// Image upload to OSS (base64 from DOCX)
 	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
@@ -118,6 +123,9 @@ func main() {
 	// 权限复用规则后台 ADMIN_PASSWORD 门；翻公开只能由 review approve 触发（用户红线）。
 	publishStore := newPublishJobStore(publishJobsPath(*rulesPath))
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
+	// 安全恢复仅重放可幂等阶段；CreateNews 不确定态转人工对账，publicizing 必须带
+	// 已持久化 approve 凭据。先扫描再开放 HTTP，避免启动瞬间与人工 retry 争抢。
+	publishPipe.recoverJobs()
 	registerPublishRoutes(mux, publishPipe)
 	// 飞书卡片审核回调（M4）：飞书服务器调用，无 ADMIN_PASSWORD 门，安全靠
 	// FEISHU_VERIFICATION_TOKEN 校验 + review 核心的业务态校验（见 feishu_card_callback.go）。

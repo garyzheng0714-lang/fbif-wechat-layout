@@ -63,6 +63,7 @@ const CHANNELS = {
     footerViaTemplate: true,
     stripExternalAnchors: true,
     normalizeWechat: true,
+    ruleProfile: 'fbif',
   },
   'ft-default': {
     templatePath: 'templates/foodtalks-site.js',
@@ -71,6 +72,7 @@ const CHANNELS = {
     footerViaTemplate: false,
     stripExternalAnchors: false,
     normalizeWechat: false,
+    ruleProfile: 'foodtalks-site',
   },
 };
 
@@ -85,6 +87,59 @@ const { normalizeWechatRichHtml } = await mod('wechat-normalize.js');
 const { DEFAULT_RULE_CONFIG, normalizeRuleConfig, applyActiveRuleConfig } = await mod('rule-presets.js');
 const { normalizeRuleBehavior } = await mod('rule-behavior.js');
 
+function cloneRuleValue(value) {
+  if (!value || typeof value !== 'object') return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+// 规则数据是 L3 账号边界：公众号与网站只共用「拉取/缓存」能力，
+// schema 必须按渠道选择。网站 behavior 含顶层 *_regex 和 lists，若经
+// normalizeRuleBehavior（公众号 schema）会被裁掉并注入 Mote actions。
+const RULE_PROFILES = Object.freeze({
+  fbif: Object.freeze({
+    normalizeBehavior: value => normalizeRuleBehavior(value),
+    fallback: () => ({
+      config: normalizeRuleConfig(DEFAULT_RULE_CONFIG),
+      behavior: normalizeRuleBehavior(undefined),
+    }),
+  }),
+  'foodtalks-site': Object.freeze({
+    normalizeBehavior: value => cloneRuleValue(value && typeof value === 'object' ? value : {}),
+    // API 不可用时显式落网站口径，不携入 FBIF bottom_blocks /
+    // article_footer_defaults。行为细节继续由 foodtalks-site 模板内的网站
+    // fallback 常量托底，不 import 公众号渲染器（红线 #19）。
+    fallback: () => ({
+      config: {
+        ...normalizeRuleConfig(DEFAULT_RULE_CONFIG),
+        tip_title_color: '#01396a',
+        tip_body_color: '#7f7f7f',
+        author_font_size: '14',
+        tip_font_size: '14',
+        image: {
+          width: 600,
+          portrait_px: 375,
+          landscape_px: 600,
+          qr_px: 150,
+          qr_max_natural_px: 500,
+        },
+        modules: {
+          mctoc: { enabled: false },
+          bottom_blocks: { schema_version: 2, enabled: false, presets: [] },
+          article_footer_defaults: { schema_version: 1, enabled: false, author_aliases: {}, profiles: [] },
+        },
+      },
+      behavior: {},
+    }),
+  }),
+});
+
+export function fallbackRuleForPack(packId) {
+  const channel = CHANNELS[packId];
+  if (!channel) throw new Error('未知渲染渠道：' + packId);
+  const fallback = RULE_PROFILES[channel.ruleProfile].fallback();
+  return cloneRuleValue(fallback);
+}
+
 // 两渠道复制层用同一份主题 CSS：site.html 与 app.html 都引 /css/wx-theme.css，
 // engine.js copyContent 对网站输出同样跑 processForCopy（网站 HTML 本就全内联，近似 no-op）。
 const themeCSS = await readFile(path.join(PUBLIC_DIR, 'css', 'wx-theme.css'), 'utf8');
@@ -94,10 +149,13 @@ const themeCSS = await readFile(path.join(PUBLIC_DIR, 'css', 'wx-theme.css'), 'u
 // 注意：这里只取数不碰全局；window._activeConfig 的写入收敛在 applyChannelRuleConfig，
 // 且必须在渲染前的同步段执行（避免并发请求间 await 交错互踩全局）。
 const _ruleCache = new Map(); // rulesAccount -> { at, preset|null, config }
-async function activeRulePreset(account) {
+async function activeRulePreset(packId, channel) {
+  const account = channel.rulesAccount;
   const hit = _ruleCache.get(account);
   if (hit && Date.now() - hit.at < 60_000) return hit;
-  const entry = { at: Date.now(), preset: null, config: normalizeRuleConfig(DEFAULT_RULE_CONFIG) };
+  const profile = RULE_PROFILES[channel.ruleProfile];
+  const fallback = fallbackRuleForPack(packId);
+  const entry = { at: Date.now(), preset: null, config: fallback.config, behavior: fallback.behavior };
   try {
     const resp = await realFetch(RULES_API_ORIGIN + '/api/rules/active?account=' + encodeURIComponent(account), { signal: AbortSignal.timeout(5000) });
     if (resp.ok) {
@@ -107,12 +165,13 @@ async function activeRulePreset(account) {
           ...data.preset,
           raw_config: data.preset.config,
           config: normalizeRuleConfig(data.preset.config),
-          behavior: normalizeRuleBehavior(data.preset.behavior),
+          behavior: profile.normalizeBehavior(data.preset.behavior),
         };
+        entry.behavior = entry.preset.behavior;
       }
     }
   } catch (err) {
-    console.warn('[render] 规则预设拉取失败（account=' + account + '），使用默认配置（页脚将缺失）：', err.message || err);
+    console.warn('[render] 规则预设拉取失败（account=' + account + '），使用该渠道默认配置：', err.message || err);
   }
   _ruleCache.set(account, entry);
   return entry;
@@ -143,7 +202,7 @@ function siteEngineConfig(entry, { withFooter }) {
     delete modules.bottom_blocks;
     delete modules.fbif_footer;
   }
-  return { ...flat, behavior: (entry.preset && entry.preset.behavior) || {}, modules };
+  return { ...flat, behavior: entry.behavior || {}, modules };
 }
 
 // 微信草稿只保留 mp.weixin.qq.com 链接，其余 <a> 会被过滤破坏版式——渲染期即降级：
@@ -176,7 +235,7 @@ export async function renderArticle({ packId = 'fbif', title, source, blocks, is
   if (!Array.isArray(blocks) || blocks.length === 0) {
     throw Object.assign(new Error('blocks 不能为空'), { status: 400 });
   }
-  const entry = await activeRulePreset(channel.rulesAccount);
+  const entry = await activeRulePreset(packId, channel);
   // —— 以下到函数尾全部同步：window._activeConfig 是进程级全局，写入与消费之间不得有 await ——
   const template = templates[packId];
   const config = channel.configViaOpts

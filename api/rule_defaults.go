@@ -116,6 +116,7 @@ func defaultRuleDocument() rulePresetDocument {
 			ID:          defaultRulePresetID,
 			Name:        "FBIF默认规则",
 			Description: "当前 FBIF 公众号排版默认参数",
+			BaselineID:  defaultRulePresetID,
 			Config:      defaultRuleConfig(),
 			Behavior:    defaultRuleBehavior(),
 			UpdatedAt:   now,
@@ -200,23 +201,21 @@ func builtinVersionForDefaultRule(id string) int {
 	}
 }
 
-// merge 基线按 preset 归属选择（架构体检 S3，2026-07-10）：内置 preset 用自己账号族
-// 的代码内默认（缺键补自己的值，根治「缺键继承 FBIF 串台」——此前 WowFood/系列/网站
-// 全靠显式覆盖打补丁堵）；非内置（用户自建）preset 无账号归属字段，沿用历史 FBIF
-// 基线行为（自建 preset 从完整 config 复制创建，不依赖兜底）。查表走
-// defaultRuleDefinitions，新增账号自动覆盖、无 switch 漏 case。
-func baselineRuleConfigForPreset(presetID string) map[string]any {
-	if def, ok := defaultRuleDefinitions("")[presetID]; ok && len(def.Versions) > 0 && def.Versions[0].Config != nil {
+// merge 基线由规则文档的 baseline_id 显式指定（架构体检 S3）。
+// 保存与启动边界会先校验 baseline_id；此处仍 fail loud 作为程序员错误
+// 的最后一道防线，绝不再将未知 id 静默当成 FBIF。
+func baselineRuleConfigForPreset(baselineID string) map[string]any {
+	if def, ok := defaultRuleDefinitions("")[baselineID]; ok && len(def.Versions) > 0 && def.Versions[0].Config != nil {
 		return def.Versions[0].Config
 	}
-	return defaultRuleConfig()
+	panic(fmt.Sprintf("未知规则基线 baseline_id=%q", baselineID))
 }
 
-func baselineRuleBehaviorForPreset(presetID string) map[string]any {
-	if def, ok := defaultRuleDefinitions("")[presetID]; ok && len(def.Versions) > 0 && def.Versions[0].Behavior != nil {
+func baselineRuleBehaviorForPreset(baselineID string) map[string]any {
+	if def, ok := defaultRuleDefinitions("")[baselineID]; ok && len(def.Versions) > 0 && def.Versions[0].Behavior != nil {
 		return def.Versions[0].Behavior
 	}
-	return defaultRuleBehavior()
+	panic(fmt.Sprintf("未知规则基线 baseline_id=%q", baselineID))
 }
 
 func defaultRuleDefinitions(now string) map[string]ruleDefinition {
@@ -283,6 +282,7 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 		},
 	}
 	for id, d := range defs {
+		d.BaselineID = id
 		d.BuiltinVersion = builtinVersionForDefaultRule(id)
 		defs[id] = d
 	}
@@ -641,7 +641,7 @@ func defaultFoodTalksSeriesRuleBehavior() map[string]any {
 func defaultRuleStoreDocumentV2() ruleStoreDocumentV2 {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return ruleStoreDocumentV2{
-		SchemaVersion: 2,
+		SchemaVersion: currentRuleStoreSchemaVersion,
 		Accounts:      defaultRuleAccounts(now),
 		Rules:         defaultRuleDefinitions(now),
 		UpdatedAt:     now,

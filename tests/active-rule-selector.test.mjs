@@ -121,6 +121,114 @@ test('adoptAccount：并行水合+目录并复位选择器状态（账号切换�
   assert.ok(!/编辑中/.test(document.getElementById('activeRuleCard').innerHTML), '切账号后选择器必须退出编辑态');
 });
 
+test('adoptAccount：A→B 快速切换且 A 后返时，旧 A 不 apply 也不缓存到 B', async () => {
+  const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
+  let accountID = 'account-a';
+  const pendingLoads = new Map();
+  const calls = { applied: [], saved: [], hydrated: [], refreshed: [] };
+  const defer = () => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+  };
+  const ruleModule = {
+    loadActiveRulePreset(id) {
+      const task = defer();
+      pendingLoads.set(id, task);
+      return task.promise;
+    },
+    loadLocalRuleConfig: () => ({}),
+    saveLocalRuleConfig: (config, id) => calls.saved.push({ config, id }),
+    applyActiveRuleConfig: (config, preset) => {
+      calls.applied.push(preset.id);
+      window._activeConfig = { config, preset };
+    },
+    adminLogin: async () => {},
+    listPublicRulePresets: async () => ({ presets: [] }),
+    setActiveRulePreset: async () => {},
+  };
+  const selector = createActiveRuleSelector({
+    documentRef: document,
+    windowRef: window,
+    getPack: () => ({ id: accountID }),
+    ruleModule,
+    refreshRuleConsumers: options => calls.refreshed.push(options),
+    afterHydrate: pack => calls.hydrated.push(pack.id),
+  });
+
+  const adoptA = selector.adoptAccount({ rerender: false });
+  accountID = 'account-b';
+  const adoptB = selector.adoptAccount({ rerender: true });
+
+  pendingLoads.get('account-b').resolve({
+    source: 'server',
+    preset: { id: 'rule-b', name: 'Rule B', config: { owner: 'B' } },
+  });
+  const resultB = await adoptB;
+  pendingLoads.get('account-a').resolve({
+    source: 'server',
+    preset: { id: 'rule-a', name: 'Rule A', config: { owner: 'A' } },
+  });
+  const resultA = await adoptA;
+
+  assert.equal(resultB.stale, false);
+  assert.equal(resultB.accountID, 'account-b');
+  assert.equal(resultA.stale, true, '后返的 A 必须显式标记为 stale');
+  assert.equal(resultA.accountID, 'account-a', '返回值保留任务启动时的账号');
+  assert.deepEqual(calls.applied, ['rule-b']);
+  assert.deepEqual(calls.saved, [{ config: { owner: 'B' }, id: 'account-b' }]);
+  assert.deepEqual(calls.hydrated, ['account-b']);
+  assert.deepEqual(calls.refreshed, [{ rerender: true }]);
+});
+
+test('hydrate guard：A→B→A 后，最早的 A 响应不得覆盖新 A', async () => {
+  const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
+  let accountID = 'account-a';
+  const loads = [];
+  const applied = [];
+  const defer = () => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+  };
+  const selector = createActiveRuleSelector({
+    documentRef: document,
+    windowRef: window,
+    getPack: () => ({ id: accountID }),
+    ruleModule: {
+      loadActiveRulePreset(id) {
+        const task = defer();
+        loads.push({ id, ...task });
+        return task.promise;
+      },
+      loadLocalRuleConfig: () => ({}),
+      saveLocalRuleConfig: () => {},
+      applyActiveRuleConfig(config, preset) {
+        applied.push(preset.id);
+        window._activeConfig = { config, preset };
+      },
+      adminLogin: async () => {},
+      listPublicRulePresets: async () => ({ presets: [] }),
+      setActiveRulePreset: async () => {},
+    },
+    refreshRuleConsumers() {},
+  });
+
+  const initialA = selector.hydrateActiveRulePreset('account-a');
+  accountID = 'account-b';
+  selector.adoptAccount({ rerender: false });
+  accountID = 'account-a';
+  const latestA = selector.adoptAccount({ rerender: false });
+
+  loads[2].resolve({ source: 'server', preset: { id: 'new-a', config: { version: 2 } } });
+  await latestA;
+  loads[0].resolve({ source: 'server', preset: { id: 'old-a', config: { version: 1 } } });
+  await initialA;
+
+  assert.deepEqual(applied, ['new-a']);
+  assert.equal(window._activeConfig.preset.id, 'new-a');
+});
+
 test('escText 转义 HTML 敏感字符', () => {
   assert.equal(escText('<a b="c">&'), '&lt;a b=&quot;c&quot;&gt;&amp;');
   assert.equal(escText(null), '');

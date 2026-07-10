@@ -2,6 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
+function extractFunction(source, name) {
+  const functionStart = source.indexOf(`function ${name}`);
+  assert.notEqual(functionStart, -1, `${name} should exist`);
+  const start = source.slice(functionStart - 6, functionStart) === 'async ' ? functionStart - 6 : functionStart;
+  const signatureEnd = source.indexOf(') {', start);
+  assert.notEqual(signatureEnd, -1, `${name} signature should be complete`);
+  const bodyStart = signatureEnd + 2;
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    if (source[i] === '}') depth--;
+    if (depth === 0) return source.slice(start, i + 1);
+  }
+  assert.fail(`${name} function body should be complete`);
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  return { promise, resolve };
+}
+
 test('app shell renders a unified top-bar account menu (single layer)', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/app.css', import.meta.url), 'utf8');
@@ -125,7 +147,7 @@ test('mp accounts hot-swap templates instead of reloading the page', async () =>
   );
   assert.match(
     app,
-    /activeRulePack\.templateId !== currentTemplateId[\s\S]{0,160}await loadTemplate\(activeRulePack\.templateId,\s*\{\s*rerender:\s*false\s*\}\)/,
+    /nextPack\.templateId !== currentTemplateId[\s\S]{0,220}await loadTemplate\(nextPack\.templateId,\s*\{\s*rerender:\s*false,\s*stale\s*\}\)/,
     '同渠道跨模板账号切换应热加载模板，保留当前页面里的 DOCX 图片 blob',
   );
   assert.doesNotMatch(
@@ -133,6 +155,77 @@ test('mp accounts hot-swap templates instead of reloading the page', async () =>
     /templateId !== currentTemplateId[\s\S]{0,240}location\.href/,
     '不能再用模板差异触发整页 reload',
   );
+});
+
+test('跨模板 A→B 快速切换时，后返的 A 模板不得覆盖 B', async () => {
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const loadTemplateSource = extractFunction(app, 'loadTemplate');
+  const switchAccountSource = extractFunction(app, 'switchAccount');
+  const templateLoads = new Map();
+  const adopted = [];
+  const tracked = [];
+  const switchedTemplates = [];
+  const packs = {
+    fbif: { id: 'fbif', channel: 'mp', templateId: 'fbif' },
+    series: { id: 'series', channel: 'mp', templateId: 'foodtalks-series' },
+    wowfood: { id: 'wowfood', channel: 'mp', templateId: 'fbif' },
+  };
+  const deps = {
+    activeRulePack: packs.fbif,
+    currentTemplateId: 'fbif',
+    accountSwitchGeneration: 0,
+    rulePackModule: { getRulePack: id => packs[id] },
+    rulePackUrlModule: { parsePath: () => null, buildPath: () => '/' },
+    location: { pathname: '/mp/fbif', href: 'https://example.test/mp/fbif' },
+    window: {
+      _activeRulePack: packs.fbif,
+      _engineApi: {
+        async switchTemplate(template) { switchedTemplates.push(template.id); },
+      },
+    },
+    URL,
+    persistAccountSelection() {},
+    applyRulePackChrome() {},
+    accountMenu: { setActive() {} },
+    syncEngineConfig() {},
+    initApp() {},
+    wrapEngineFunctions() {},
+    importTemplateModule(templateID) {
+      const task = deferred();
+      templateLoads.set(templateID, task);
+      return task.promise;
+    },
+    ruleSelector: {
+      async adoptAccount() {
+        adopted.push(deps.activeRulePack.id);
+        return { accountID: deps.activeRulePack.id, stale: false };
+      },
+    },
+    trackActiveRuleHydration(promise, accountID) {
+      tracked.push(accountID);
+      return promise;
+    },
+  };
+  const actualLoadTemplate = new Function('deps', `with (deps) { ${loadTemplateSource}; return loadTemplate; }`)(deps);
+  deps.loadTemplate = actualLoadTemplate;
+  const switchAccount = new Function('deps', `with (deps) { ${switchAccountSource}; return switchAccount; }`)(deps);
+
+  const switchToA = switchAccount('series');
+  assert.deepEqual(tracked, ['series'], '跨模板 import 一开始就必须进入 rules-ready 门');
+  const switchToB = switchAccount('wowfood');
+  const resultB = await switchToB;
+  templateLoads.get('foodtalks-series').resolve({ default: { id: 'foodtalks-series' } });
+  const resultA = await switchToA;
+
+  assert.equal(resultB.stale, false);
+  assert.equal(resultB.accountID, 'wowfood');
+  assert.equal(resultA.stale, true);
+  assert.equal(resultA.accountID, 'series');
+  assert.equal(deps.activeRulePack.id, 'wowfood');
+  assert.equal(deps.currentTemplateId, 'fbif');
+  assert.deepEqual(switchedTemplates, [], '过期 series 模板不得进入引擎');
+  assert.deepEqual(adopted, ['wowfood'], '过期 series 不得继续规则水合');
+  assert.deepEqual(tracked, ['series', 'wowfood']);
 });
 
 test('engine supports template hot-swap and reads footer from the current account', async () => {

@@ -231,6 +231,8 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   assert.match(adminPanel, /savePresetWithFooter/);
   assert.match(adminPanel, /configDoc\.modules\.fbif_footer/);
   assert.match(adminPanel, /serverRuleConfigDocument\(configDoc\)/);
+	assert.match(adminPanel, /baseline_id:\s*preset\.baseline_id\s*\|\|\s*sourcePreset\.baseline_id/,
+	  '保存已有规则和另存新规则都必须携带显式基线');
 
   // 两处保存都调用 savePresetWithFooter 而非裸 saveRulePreset
   const saveCount = (adminPanel.match(/await savePresetWithFooter/g) || []).length;

@@ -38,17 +38,18 @@ async function waitForAppReady(page) {
   await page.waitForTimeout(2000);
 }
 
-async function captureAndCheck(page, scenario, bp, extraChecks = null) {
+async function captureAndCheck(page, scenario, bp, extraChecks = null, screenshotOptions = {}) {
   const name = screenshotName(scenario, bp);
   const filePath = path.join(SCREENSHOT_DIR, name);
-  await page.screenshot({ path: filePath, fullPage: true });
+  const fullPage = screenshotOptions.fullPage ?? true;
+  await page.screenshot({ path: filePath, fullPage });
 
   // S5 视觉基线（架构体检 2026-07-10）：与入库基线做像素 diff——此前截图只存盘
   // 不对比，视觉层没有任何会自动失败的守护。基线缺失时自动生成（updateSnapshots
   // 默认 missing）；改版式后用 npm run test:e2e -- --update-snapshots 重建。
   // 日期输入随当天变化，遮罩后再比。
   await expect(page).toHaveScreenshot(name, {
-    fullPage: true,
+    fullPage,
     mask: [page.locator('input[type="date"]')],
   });
 
@@ -412,7 +413,22 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
         await page.waitForTimeout(2000);
       }
 
-      const result = await captureAndCheck(page, '7-rule-admin', bp);
+      // 768px 正好是 admin-panel.css 的响应式边界。页面启动时会把裸 CSS URL 换成
+      // 带构建号的 URL；换链期间旧缓存可能仍把 overlay 当成 app-layout 内的绝对定位，
+      // 即使 padding/max-width 已经相同，截图仍会随机上下偏移一个顶栏高度。这里等待
+      // 最终样式合同全部落稳：overlay 固定铺满视口，tablet 抽屉保留 12px 安全边距。
+      if (bp.width === 768) {
+        await expect(page.locator('.admin-overlay')).toHaveCSS('padding', '12px');
+        await expect(page.locator('.admin-overlay')).toHaveCSS('position', 'fixed');
+        await expect(page.locator('.admin-overlay')).toHaveCSS('top', '0px');
+        await expect(page.locator('.admin-dialog')).toHaveCSS('max-width', '744px');
+        await expect.poll(async () => (await page.locator('.admin-dialog').boundingBox())?.y)
+          .toBe(12);
+      }
+
+      // 固定定位的浮层不能用 fullPage 拼接截图：页面比 viewport 高时，Chromium 会把
+      // fixed 元素随机放在首屏或下一拼接片，造成 60px 假差异。规则后台只验可见视口。
+      const result = await captureAndCheck(page, '7-rule-admin', bp, null, { fullPage: false });
 
       // Check if admin panel is open
       const adminPanel = page.locator('#adminPanel, .admin-panel, [class*="admin"]');

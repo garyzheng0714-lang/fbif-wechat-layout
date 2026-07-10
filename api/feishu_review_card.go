@@ -34,7 +34,9 @@ const reviewCardHeaderTitle = "网站同步 · 发布审核"
 // （标题/来源公众号/作者/标签/摘要/原文/任务号/目标环境/进站时间）+ AI 优化说明段
 // + 按钮行（通过并发布｜驳回｜预览效果）。第三键 2026-07-10「预览链接」裁定后从
 // 「查看原文」换成「预览效果」（审核不能盲审），原文链接降为信息色块一行。
-func buildReviewPendingCard(job publishJob) map[string]any {
+// coverImgKey 是封面图经飞书图片素材接口转存后的 img_key（卡片 img 元素只认
+// img_key）；上传失败或无封面时传空串 → 卡片不带图，其余不变（卡片永不阻塞流水线）。
+func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 	approveValue := map[string]any{"action": feishuCardActionApprove, "job_id": job.ID}
 	rejectValue := map[string]any{"action": feishuCardActionReject, "job_id": job.ID}
 	buttons := feishuButtonRow(
@@ -76,7 +78,16 @@ func buildReviewPendingCard(job publishJob) map[string]any {
 			}},
 		},
 	)
-	elements := []any{reviewCardInfoBlock(job)}
+	elements := []any{}
+	if coverImgKey != "" {
+		elements = append(elements, map[string]any{
+			"tag":           "img",
+			"img_key":       coverImgKey,
+			"alt":           feishuPlainText("封面图（AI 预选，可在管理后台更换）"),
+			"corner_radius": "8px",
+		})
+	}
+	elements = append(elements, reviewCardInfoBlock(job))
 	if notes := reviewCardAINotesBlock(job); notes != nil {
 		elements = append(elements, notes)
 	}
@@ -173,12 +184,12 @@ func reviewCardInfoBlock(job publishJob) map[string]any {
 		sourceName = "未知"
 	}
 	content := fmt.Sprintf(
-		"**%s**\n<font color='grey'>来源公众号</font> %s\n<font color='grey'>作者</font> %s\n<font color='grey'>标签</font> %s\n<font color='grey'>摘要</font> %s\n<font color='grey'>原文</font> [打开公众号原文](%s)\n<font color='grey'>任务号</font> #%d\n<font color='grey'>目标环境</font> %s\n<font color='grey'>进站时间</font> %s",
+		"**%s**\n<font color='grey'>来源公众号</font> %s\n<font color='grey'>作者</font> %s\n<font color='grey'>标签</font> %s\n<font color='grey'>摘要</font> %s\n<font color='grey'>原文</font> [打开公众号原文](%s)\n<font color='grey'>管理后台</font> [去后台编辑这篇文章](%s)\n<font color='grey'>任务号</font> #%d\n<font color='grey'>目标环境</font> %s\n<font color='grey'>进站时间</font> %s",
 		job.Title, sourceName,
 		reviewCardValueOrDash(job.Author),
 		reviewCardValueOrDash(strings.Join(job.Tags, "、")),
 		reviewCardValueOrDash(job.Summary),
-		job.SourceURL, job.ID, siteFrontURL(), formatReviewCardTime(job.UpdatedAt))
+		job.SourceURL, siteAdminArticleURL(job.FoodTalksNewsID), job.ID, siteFrontURL(), formatReviewCardTime(job.UpdatedAt))
 	return map[string]any{
 		"tag":              "column_set",
 		"flex_mode":        "stretch",

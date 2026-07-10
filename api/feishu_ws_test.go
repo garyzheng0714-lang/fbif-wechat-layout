@@ -94,6 +94,7 @@ func TestFeishuWSEventParamsEmpty(t *testing.T) {
 func TestFeishuWSCardActionApprove(t *testing.T) {
 	env := newPublishTestEnv(t)
 	t.Setenv("FOODTALKS_FRONT_URL", "")
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_ws_reviewer")
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
 	if err != nil {
 		t.Fatalf("submit: %v", err)

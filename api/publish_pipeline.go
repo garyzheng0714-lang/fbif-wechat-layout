@@ -46,8 +46,13 @@ const (
 	siteCategoryIDsEnv     = "FOODTALKS_CATEGORY_IDS"
 	siteFrontURLEnv        = "FOODTALKS_FRONT_URL"
 	siteOwnAccountsEnv     = "SITE_OWN_ACCOUNTS"
-	defaultSiteCategoryIDs = "52,58"                     // 与 2026-07-10 冒烟一致（契约 §9：线上分类表待后端给全集）
-	defaultSiteFrontURL    = "https://test.foodtalks.cn" // 默认测试环境前台；生产切换只改 env
+	siteAdminURLEnv        = "FOODTALKS_ADMIN_ARTICLE_URL" // 管理后台文章编辑页模板，{id} 占位
+	defaultSiteCategoryIDs = "52,58"                       // 与 2026-07-10 冒烟一致（契约 §9：线上分类表待后端给全集）
+	defaultSiteFrontURL    = "https://test.foodtalks.cn"   // 默认测试环境前台；生产切换只改 env
+	// 管理后台默认先落在首页（hash 路由 SPA）：编辑页路由从后台 JS 包挖到是
+	// cms/:siteCode/news/edit/:id，但 siteCode 是运行时值、不猜（红线：不编造 URL）——
+	// 拿到真实编辑页 URL 后配 env（含 {id} 占位）即得深链，无需改代码。
+	defaultSiteAdminURL = "https://admin-we-test.foodtalks.cn/#/"
 	// 自家账号清单（原创判定，规范文档 §1）：近一月库内 source_type=0 的全部来源名。
 	defaultSiteOwnAccounts = "FBIF食品饮料创新,FBIF食品饮料创新论坛,FoodTalks,FBIF食品创新展"
 )
@@ -57,6 +62,11 @@ const (
 	publishReviewApprove = "approve"
 	publishReviewReject  = "reject"
 )
+
+// errStagingOutcomeUncertain 表示 CreateNews 可能已被服务端执行，调用方绝不能把任务
+// 降成普通 failed 后自动重试 POST。stageStage 会尽力落 reconciliation_required；若连
+// 本地写也失败，则保留此前已持久化的 staging_creating intent，交给启动扫描转人工。
+var errStagingOutcomeUncertain = errors.New("FoodTalks CreateNews 结果不确定")
 
 // foodTalksAPI FoodTalks 发布客户端能力面（*foodTalksClient 满足；测试可注入 fake）。
 type foodTalksAPI interface {
@@ -87,6 +97,9 @@ type publishPipeline struct {
 	notify func(ctx context.Context, text string) error
 	// notifyCard 审核交互卡片发送（M4）；nil 或失败降级回 notify 文本，同样不阻断流水线
 	notifyCard func(ctx context.Context, card map[string]any) error
+	// coverImgKey 封面 URL → 飞书图片素材 img_key（卡片内呈现封面用）；nil 或失败
+	// 降级为卡片不带图，同样不阻断流水线
+	coverImgKey func(ctx context.Context, imgURL string) (string, error)
 	// spawn 异步推进入口（生产 go routine；测试注入同步执行保证确定性）
 	spawn func(func())
 	now   func() time.Time
@@ -110,6 +123,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 	if n := newFeishuNotifierFromEnv(); n != nil {
 		p.notify = n.send
 		p.notifyCard = n.sendCard
+		p.coverImgKey = n.uploadImageByURL
 	} else {
 		log.Printf("publish: 飞书通知未配置（需 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_REVIEW_CHAT_ID），审核群通知禁用")
 	}
@@ -283,7 +297,8 @@ func (p *publishPipeline) runJob(jobID int64) {
 			log.Printf("publish: load job %d failed: %v", jobID, err)
 			return
 		}
-		if job.terminal() || job.Stage == publishStageAwaitingReview || job.Stage == publishStageFailed {
+		if job.terminal() || job.Stage == publishStageAwaitingReview || job.Stage == publishStageFailed ||
+			job.Stage == publishStageStagingCreating || job.Stage == publishStageReconciliationRequired {
 			return
 		}
 		var stageErr error
@@ -307,6 +322,10 @@ func (p *publishPipeline) runJob(jobID int64) {
 		}
 		if stageErr != nil {
 			log.Printf("publish: job %d stage %s failed: %v", jobID, job.Stage, stageErr)
+			if errors.Is(stageErr, errStagingOutcomeUncertain) {
+				// 已经存在持久化 intent；普通 failed/retry 会制造第二篇网站文章。
+				return
+			}
 			if _, err := p.store.setFailed(jobID, job.Stage, stageErr.Error()); err != nil {
 				log.Printf("publish: record job %d failure failed: %v", jobID, err)
 			}
@@ -472,8 +491,9 @@ func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error
 	return uerr
 }
 
-// stageStage 草稿进站：CreateNews publishStatus=0，外界不可见；成功即回填
-// foodtalks_news_id 幂等锚点并停在 awaiting_review，发人审通知。
+// stageStage 草稿进站：已有 news id 走幂等 PUT；无 id 时必须先持久化
+// staging_creating intent 再 POST。FoodTalks 没有服务端幂等键，因此 POST 返回错误、
+// 或成功后本地 id 落盘失败，都属于结果不确定态，只能人工核对，绝不自动 POST 第二次。
 func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error {
 	ft, err := p.foodTalks()
 	if err != nil {
@@ -491,20 +511,63 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		if err := ft.UpdateNews(ctx, news); err != nil {
 			return err
 		}
-	} else {
-		newsID, err = ft.CreateNews(ctx, news)
+		updated, err := p.store.update(job.ID, func(j *publishJob) {
+			j.Stage = publishStageAwaitingReview
+			j.FailedStage = ""
+			j.Error = ""
+		})
 		if err != nil {
 			return err
 		}
+		p.notifyReviewPending(ctx, updated)
+		return nil
 	}
-	updated, err := p.store.update(job.ID, func(j *publishJob) {
+
+	intentKey := fmt.Sprintf("foodtalks-create:job-%d", job.ID)
+	intentAt := p.now().UTC().Format(time.RFC3339)
+	intentJob, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == publishStageStaging && current.FoodTalksNewsID == 0 && current.StagingIntentKey == ""
+	}, func(j *publishJob) {
+		j.Stage = publishStageStagingCreating
+		j.StagingIntentKey = intentKey
+		j.StagingIntentAt = intentAt
+		j.FailedStage = ""
+		j.Error = ""
+	})
+	if err != nil {
+		return err
+	}
+	if !swapped {
+		return fmt.Errorf("%w：任务当前阶段 %s，已存在 intent %q", errStagingOutcomeUncertain, intentJob.Stage, intentJob.StagingIntentKey)
+	}
+
+	newsID, err = ft.CreateNews(ctx, news)
+	if err != nil {
+		msg := fmt.Sprintf("CreateNews 请求结果不确定，禁止自动重试；请在 FoodTalks 后台按标题核对后人工对账（intent=%s）：%v", intentKey, err)
+		_, _, markErr := p.store.updateIf(job.ID, func(current publishJob) bool {
+			return current.Stage == publishStageStagingCreating && current.StagingIntentKey == intentKey
+		}, func(j *publishJob) {
+			j.Stage = publishStageReconciliationRequired
+			j.Error = msg
+		})
+		if markErr != nil {
+			log.Printf("publish: job %d 无法落 reconciliation 状态，保留 staging_creating intent: %v", job.ID, markErr)
+		}
+		return fmt.Errorf("%w：%s", errStagingOutcomeUncertain, msg)
+	}
+	updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == publishStageStagingCreating && current.StagingIntentKey == intentKey && current.FoodTalksNewsID == 0
+	}, func(j *publishJob) {
 		j.FoodTalksNewsID = newsID
 		j.Stage = publishStageAwaitingReview
 		j.FailedStage = ""
 		j.Error = ""
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("%w：FoodTalks 已返回资讯 id=%d，但本地锚点落盘失败（intent=%s）：%v", errStagingOutcomeUncertain, newsID, intentKey, err)
+	}
+	if !swapped {
+		return fmt.Errorf("%w：FoodTalks 已返回资讯 id=%d，但任务状态已变为 %s（intent=%s）", errStagingOutcomeUncertain, newsID, updated.Stage, intentKey)
 	}
 	p.notifyReviewPending(ctx, updated)
 	return nil
@@ -514,7 +577,18 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 // 卡片未装配或发送失败降级回原有文本通知（M4 铁律：降级保底，通知永不阻断流水线）。
 func (p *publishPipeline) notifyReviewPending(ctx context.Context, job publishJob) {
 	if p.notifyCard != nil {
-		err := p.notifyCard(ctx, buildReviewPendingCard(job))
+		// 封面转存飞书图片素材拿 img_key（2026-07-10 用户要求封面直接在卡片呈现）；
+		// 失败只降级为「卡片不带图」并 WARN，绝不因此丢整张卡。
+		coverImgKey := ""
+		if p.coverImgKey != nil && strings.TrimSpace(job.CoverURL) != "" {
+			key, err := p.coverImgKey(ctx, job.CoverURL)
+			if err != nil {
+				log.Printf("publish: WARN 封面转存飞书失败（卡片将不带图）: %v", err)
+			} else {
+				coverImgKey = key
+			}
+		}
+		err := p.notifyCard(ctx, buildReviewPendingCard(job, coverImgKey))
 		if err == nil {
 			return
 		}
@@ -565,29 +639,41 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 // reject 置终态 rejected——文章留在 FoodTalks 草稿态本就不可见，不额外动它，
 // 且终态校验保证 reject 后不可再 approve。
 func (p *publishPipeline) review(ctx context.Context, jobID int64, action, reviewedBy string) (publishJob, error) {
-	job, err := p.store.byID(jobID)
-	if err != nil {
-		return publishJob{}, err
+	if action != publishReviewApprove && action != publishReviewReject {
+		job, err := p.store.byID(jobID)
+		if err != nil {
+			return publishJob{}, err
+		}
+		return job, fmt.Errorf("未知审核动作 %q（支持 approve / reject）", action)
 	}
 	reviewedAt := p.now().UTC().Format(time.RFC3339)
 	switch action {
 	case publishReviewApprove:
-		if job.Stage != publishStageAwaitingReview || job.FoodTalksNewsID == 0 {
-			return job, fmt.Errorf("任务当前阶段（%s）无法通过：仅待审核且草稿已进站的任务可发布", job.Stage)
-		}
-		if _, err := p.store.update(jobID, func(j *publishJob) {
+		job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
+			return current.Stage == publishStageAwaitingReview && current.FoodTalksNewsID > 0
+		}, func(j *publishJob) {
 			j.Stage = publishStagePublicizing
 			j.FailedStage = ""
 			j.Error = ""
 			j.ReviewedBy = reviewedBy
 			j.ReviewedAt = reviewedAt
-		}); err != nil {
-			return job, err
+			j.ReviewAction = publishReviewApprove
+		})
+		if err != nil {
+			return publishJob{}, err
 		}
-		job.Stage = publishStagePublicizing
+		if !swapped {
+			return job, fmt.Errorf("任务当前阶段（%s）无法通过：仅待审核且草稿已进站的任务可发布", job.Stage)
+		}
 		if err := p.stagePublicize(ctx, job); err != nil {
 			// 公开动作失败：显式落败（failed_stage=publicizing），retry 续跑补完（方向已裁定）。
-			if _, ferr := p.store.setFailed(jobID, publishStagePublicizing, err.Error()); ferr != nil {
+			if _, _, ferr := p.store.updateIf(jobID, func(current publishJob) bool {
+				return current.Stage == publishStagePublicizing && current.ReviewAction == publishReviewApprove && current.ReviewedAt != ""
+			}, func(j *publishJob) {
+				j.Stage = publishStageFailed
+				j.FailedStage = publishStagePublicizing
+				j.Error = err.Error()
+			}); ferr != nil {
 				log.Printf("publish: record publicize failure failed: job=%d err=%v", jobID, ferr)
 			}
 			latest, lerr := p.store.byID(jobID)
@@ -597,21 +683,23 @@ func (p *publishPipeline) review(ctx context.Context, jobID int64, action, revie
 			return latest, err
 		}
 	case publishReviewReject:
-		if job.Stage != publishStageAwaitingReview {
-			return job, fmt.Errorf("任务当前阶段（%s）无法驳回：仅待审核任务可驳回", job.Stage)
-		}
-		if _, err := p.store.update(jobID, func(j *publishJob) {
+		job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
+			return current.Stage == publishStageAwaitingReview
+		}, func(j *publishJob) {
 			j.Stage = publishStageRejected
 			j.FailedStage = ""
 			j.Error = ""
 			j.ReviewedBy = reviewedBy
 			j.ReviewedAt = reviewedAt
-		}); err != nil {
-			return job, err
+			j.ReviewAction = publishReviewReject
+		})
+		if err != nil {
+			return publishJob{}, err
+		}
+		if !swapped {
+			return job, fmt.Errorf("任务当前阶段（%s）无法驳回：仅待审核任务可驳回", job.Stage)
 		}
 		p.notifyReview(ctx, fmt.Sprintf("【网站同步】已驳回\n标题：%s\n文章留在 FoodTalks 草稿态，不对外可见", job.Title))
-	default:
-		return job, fmt.Errorf("未知审核动作 %q（支持 approve / reject）", action)
 	}
 	return p.store.byID(jobID)
 }
@@ -619,26 +707,129 @@ func (p *publishPipeline) review(ctx context.Context, jobID int64, action, revie
 // retry failed 任务从 failed_stage 续跑（异步推进）。publicizing 的续跑不越权：
 // failed_stage=publicizing 只可能在 approve 之后被记录（方向已由人裁定）。
 func (p *publishPipeline) retry(jobID int64) (publishJob, error) {
-	job, err := p.store.byID(jobID)
+	var target string
+	job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
+		if current.Stage != publishStageFailed {
+			return false
+		}
+		target = current.FailedStage
+		if target == "" || target == publishStageCreated {
+			target = publishStageFetching
+		}
+		// publicizing 重试也是公开动作，必须存在已持久化 approve 授权凭据。
+		if target == publishStagePublicizing && (current.ReviewAction != publishReviewApprove || current.ReviewedAt == "") {
+			return false
+		}
+		// 旧数据若在 staging failed 上已有 intent，也必须人工对账，不可重发 POST。
+		if target == publishStageStaging && current.StagingIntentKey != "" && current.FoodTalksNewsID == 0 {
+			return false
+		}
+		return true
+	}, func(j *publishJob) {
+		j.Stage = target
+		j.FailedStage = ""
+		j.Error = ""
+	})
 	if err != nil {
 		return publishJob{}, err
 	}
-	if job.Stage != publishStageFailed {
-		return job, fmt.Errorf("任务当前阶段（%s）无法重试：仅 failed 任务可重试", job.Stage)
-	}
-	target := job.FailedStage
-	if target == "" || target == publishStageCreated {
-		target = publishStageFetching
-	}
-	job, err = p.store.setStage(jobID, target)
-	if err != nil {
-		return job, err
+	if !swapped {
+		return job, fmt.Errorf("任务当前阶段（%s）或授权状态无法重试：仅可安全续跑的 failed 任务可重试", job.Stage)
 	}
 	p.spawn(func() { p.runJob(jobID) })
 	return job, nil
 }
 
-// submit source_key 幂等建单：已有未终态同源任务直接返回它，否则建新单并异步推进。
+// recoverJobs 扫描进程重启时遗留的活跃阶段。纯计算/幂等 PUT 阶段可续跑；
+// staging_creating 可能已在网站建文，必须转人工核对；publicizing 只有持久化了
+// approve + reviewed_at 才能恢复，绝不能仅凭 stage 字符串触发公开。
+func (p *publishPipeline) recoverJobs() {
+	jobs, err := p.store.all()
+	if err != nil {
+		log.Printf("publish: 启动恢复扫描失败: %v", err)
+		return
+	}
+	for _, job := range jobs {
+		switch job.Stage {
+		case publishStageCreated, publishStageFetching, publishStageRendering,
+			publishStageMirroring, publishStageEnriching:
+			p.spawn(func() { p.runJob(job.ID) })
+		case publishStageStaging:
+			if job.StagingIntentKey == "" || job.FoodTalksNewsID > 0 {
+				p.spawn(func() { p.runJob(job.ID) })
+				continue
+			}
+			p.markStagingReconciliation(job.ID, "任务在 staging 留有 CreateNews intent，无法确认外部结果，启动时禁止自动重发")
+		case publishStageStagingCreating:
+			p.markStagingReconciliation(job.ID, "进程在 CreateNews 调用窗口中断，外部结果不确定，启动时禁止自动重发")
+		case publishStagePublicizing:
+			if job.ReviewAction == publishReviewApprove && job.ReviewedAt != "" {
+				p.spawn(func() { p.runJob(job.ID) })
+				continue
+			}
+			_, _, updateErr := p.store.updateIf(job.ID, func(current publishJob) bool {
+				return current.Stage == publishStagePublicizing && (current.ReviewAction != publishReviewApprove || current.ReviewedAt == "")
+			}, func(j *publishJob) {
+				j.Error = "publicizing 缺少已持久化的 approve/reviewed_at 授权凭据，启动时拒绝自动公开，请人工核对"
+			})
+			if updateErr != nil {
+				log.Printf("publish: job %d 记录不安全 publicizing 状态失败: %v", job.ID, updateErr)
+			}
+		}
+	}
+}
+
+func (p *publishPipeline) markStagingReconciliation(jobID int64, reason string) {
+	_, _, err := p.store.updateIf(jobID, func(current publishJob) bool {
+		return (current.Stage == publishStageStagingCreating || current.Stage == publishStageStaging) &&
+			current.StagingIntentKey != "" && current.FoodTalksNewsID == 0
+	}, func(j *publishJob) {
+		j.Stage = publishStageReconciliationRequired
+		j.Error = reason + fmt.Sprintf("（intent=%s）", j.StagingIntentKey)
+	})
+	if err != nil {
+		log.Printf("publish: job %d 转人工 reconciliation 失败: %v", jobID, err)
+	}
+}
+
+// reconcileStaging 是不确定 CreateNews 的人工收口：
+//   - newsID>0：运营已在 FoodTalks 后台找到实际草稿，绑定锚点后进入待审；
+//   - confirmNotCreated=true：运营确认后台没有该文，才允许清 intent 并重新 POST。
+//
+// 两种选择都走存储 CAS，重复/并发处理只有一个胜出。
+func (p *publishPipeline) reconcileStaging(jobID, newsID int64, confirmNotCreated bool) (publishJob, error) {
+	if (newsID > 0) == confirmNotCreated {
+		return publishJob{}, errors.New("必须且只能选择 foodtalks_news_id 或 confirm_not_created")
+	}
+	job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
+		return current.Stage == publishStageStagingCreating || current.Stage == publishStageReconciliationRequired
+	}, func(j *publishJob) {
+		j.Error = ""
+		j.FailedStage = ""
+		if newsID > 0 {
+			j.FoodTalksNewsID = newsID
+			j.Stage = publishStageAwaitingReview
+			return
+		}
+		j.StagingIntentKey = ""
+		j.StagingIntentAt = ""
+		j.Stage = publishStageStaging
+	})
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !swapped {
+		return job, fmt.Errorf("任务当前阶段（%s）不需要 CreateNews 对账", job.Stage)
+	}
+	if newsID > 0 {
+		p.notifyReviewPending(context.Background(), job)
+	} else {
+		p.spawn(func() { p.runJob(jobID) })
+	}
+	return job, nil
+}
+
+// submit source_key 永久幂等建单：任意阶段（含终态）同源任务都返回原单，绝不再建文。
 func (p *publishPipeline) submit(sourceURL string) (publishJob, bool, error) {
 	sourceKey, err := normalizeSiteSourceKey(sourceURL)
 	if err != nil {
@@ -727,6 +918,19 @@ func siteSourceFor(job publishJob) (int, string) {
 		return 0, name
 	}
 	return 1, name
+}
+
+// siteAdminArticleURL 管理后台文章编辑页链接（审核卡片「去后台编辑」用，2026-07-10
+// 用户要求）：env 模板含 {id} 时替换为 FoodTalks newsId；未配置回落后台首页。
+func siteAdminArticleURL(newsID int64) string {
+	tpl := strings.TrimSpace(os.Getenv(siteAdminURLEnv))
+	if tpl == "" {
+		return defaultSiteAdminURL
+	}
+	if newsID > 0 {
+		return strings.ReplaceAll(tpl, "{id}", strconv.FormatInt(newsID, 10))
+	}
+	return tpl
 }
 
 // siteFrontURL 前台地址（article_url 回填用），默认测试环境；生产切换只改 env。

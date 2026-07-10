@@ -10,10 +10,11 @@ package main
 // 安全模型（与其他 /api/publish/* 端点不同，本端点由飞书开放平台服务器调用，
 // **不能**上 ADMIN_PASSWORD 门）：
 //  1. verification token 校验：env FEISHU_VERIFICATION_TOKEN 与请求携带的 token 比对，
-//     不匹配一律 401。未配置时 WARN 放行——仅为首次配置窗口（开放平台后台要先配回调
-//     地址并通过 challenge 验证才发得下 token）；⚠️ 首次配置后必须把 token 回填
-//     publish.env，长期空置等于回调裸奔。（长连接模式无此项：SDK 建连时内置鉴权。）
-//  2. 业务态校验：审核动作走与 HTTP review 端点同一个 review 核心（publishPipeline.review），
+//     不匹配或未配置一律 401；challenge 同样 fail-closed，须先配置 token 再验证 URL。
+//     （长连接模式无此项：SDK 建连时内置鉴权。）
+//  2. 审核人权限：operator.open_id 必须命中 FEISHU_REVIEWER_OPEN_IDS；空白名单默认拒绝，
+//     Webhook 与 WebSocket 共用同一检查。
+//  3. 业务态校验：审核动作走与 HTTP review 端点同一个 review 核心（publishPipeline.review），
 //     仅 awaiting_review 可操作、approve 仍是翻公开的唯一路径——按钮不是新的权限入口。
 //
 // 协议（cardkit 规范 04）：
@@ -25,9 +26,9 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -83,15 +84,34 @@ func registerFeishuCardCallbackRoute(mux *http.ServeMux, p *publishPipeline) {
 	})
 }
 
-// feishuCallbackTokenOK verification token 校验；env 未配置 WARN 放行（首次配置窗口，
-// 之后必须回填——见文件头安全模型）。
+// feishuCallbackTokenOK verification token 校验。配置缺失同样拒绝（fail-closed）；
+// challenge 首次配置也必须先把 token 写入环境，不能用「配置窗口」换裸奔审核入口。
 func feishuCallbackTokenOK(got string) bool {
 	want := strings.TrimSpace(os.Getenv("FEISHU_VERIFICATION_TOKEN"))
-	if want == "" {
-		log.Printf("publish: WARN FEISHU_VERIFICATION_TOKEN 未配置，卡片回调未做来源校验（首次配置后必须回填 publish.env）")
-		return true
+	got = strings.TrimSpace(got)
+	if want == "" || got == "" || len(want) != len(got) {
+		return false
 	}
-	return got == want
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// feishuReviewerAllowed 是 Webhook / WebSocket 共用的审核 RBAC。白名单以逗号、分号或
+// 空白分隔；未配置、空 operator、非白名单全部拒绝，ADMIN_PASSWORD HTTP 审核不走这里。
+func feishuReviewerAllowed(operatorOpenID string) bool {
+	operatorOpenID = strings.TrimSpace(operatorOpenID)
+	if operatorOpenID == "" {
+		return false
+	}
+	items := strings.FieldsFunc(os.Getenv("FEISHU_REVIEWER_OPEN_IDS"), func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	for _, item := range items {
+		candidate := strings.TrimSpace(item)
+		if len(candidate) == len(operatorOpenID) && subtle.ConstantTimeCompare([]byte(candidate), []byte(operatorOpenID)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // handleReviewCardAction Webhook 模式薄壳：事件字段 → 共用业务段 → 3 秒响应体 {toast, card}。
@@ -124,6 +144,9 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 	jobID := coerceFeishuJobID(value.JobID)
 	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionReject) {
 		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位发布任务"}
+	}
+	if !feishuReviewerAllowed(operatorOpenID) {
+		return reviewCardOutcome{toastType: "error", toastContent: "你没有网站发布审核权限，请联系管理员配置审核人白名单"}
 	}
 	job, err := p.store.byID(jobID)
 	if err != nil {

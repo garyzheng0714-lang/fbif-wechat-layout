@@ -79,7 +79,7 @@ func TestDeleteFallsBackToCatalogDefaultPreset(t *testing.T) {
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 
 	// 给 wowfood 新建并激活一个临时 preset，再删掉它。
-	if _, err := store.upsert(rulePreset{ID: "wowfood-temp", Name: "临时", Config: defaultRuleConfig()}); err != nil {
+	if _, err := store.upsert(rulePreset{ID: "wowfood-temp", Name: "临时", BaselineID: wowFoodDefaultRulePresetID, Config: defaultRuleConfig()}); err != nil {
 		t.Fatalf("upsert temp preset: %v", err)
 	}
 	if _, err := store.setActiveForAccount(wowFoodRuleAccountID, "wowfood-temp"); err != nil {

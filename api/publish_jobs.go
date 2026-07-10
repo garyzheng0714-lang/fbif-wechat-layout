@@ -21,17 +21,21 @@ import (
 //	        → [review reject]  → rejected（终态；FoodTalks 侧留草稿不动）
 //	任一步失败 → failed（failed_stage 记录续跑起点，retry 端点续跑）
 const (
-	publishStageCreated        = "created"
-	publishStageFetching       = "fetching"
-	publishStageRendering      = "rendering"
-	publishStageMirroring      = "mirroring"
-	publishStageEnriching      = "enriching" // M5：AI 预填发布参数（只产元数据，绝不改 content_html）
-	publishStageStaging        = "staging"
-	publishStageAwaitingReview = "awaiting_review"
-	publishStagePublicizing    = "publicizing"
-	publishStagePublished      = "published"
-	publishStageRejected       = "rejected"
-	publishStageFailed         = "failed"
+	publishStageCreated   = "created"
+	publishStageFetching  = "fetching"
+	publishStageRendering = "rendering"
+	publishStageMirroring = "mirroring"
+	publishStageEnriching = "enriching" // M5：AI 预填发布参数（只产元数据，绝不改 content_html）
+	publishStageStaging   = "staging"
+	// staging_creating 表示 CreateNews 调用意图已持久化、但 foodtalks_news_id 尚未可靠落盘。
+	// 该阶段绝不能自动重放 POST；重启后转 reconciliation_required 等人工核对。
+	publishStageStagingCreating        = "staging_creating"
+	publishStageReconciliationRequired = "reconciliation_required"
+	publishStageAwaitingReview         = "awaiting_review"
+	publishStagePublicizing            = "publicizing"
+	publishStagePublished              = "published"
+	publishStageRejected               = "rejected"
+	publishStageFailed                 = "failed"
 )
 
 // publishJob 一条「公众号 → FoodTalks 网站」发布任务（字段清单来自施工图 S1）。
@@ -50,17 +54,22 @@ type publishJob struct {
 	ImageMap        string `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
 	FoodTalksNewsID int64  `json:"foodtalks_news_id,omitempty"`
 	ArticleURL      string `json:"article_url,omitempty"`
+	// FoodTalks CreateNews 没有服务端幂等键：外调前先持久化本地 intent。
+	// 调用结果不确定时凭此转人工核对，禁止自动 POST 第二次。
+	StagingIntentKey string `json:"staging_intent_key,omitempty"`
+	StagingIntentAt  string `json:"staging_intent_at,omitempty"`
 	// M5 AI 预填发布参数（enriching 阶段落库；AI 失败时是规则兜底值，任务照常推进）。
 	// 口径见 docs/editorial-norms-foodtalks.md（M7 从编辑部历史文章倒推）。
-	Summary    string   `json:"summary,omitempty"`     // 摘要（一句话钩子 10~40 字；兜底=正文纯文本前 40 字）
-	Tags       []string `json:"tags,omitempty"`        // 标签（1~3 个，词表优先；兜底为空）
-	Author     string   `json:"author,omitempty"`      // 正文识别的作者署名（宁空勿造；不回落 source_name）
-	AISource   string   `json:"ai_source,omitempty"`   // 正文声明的原始出处（自家号转发他人文章时命中；决定 sourceType/sourceName）
-	AINotes    string   `json:"ai_notes,omitempty"`    // AI 优化说明（人话 2-4 句；兜底="AI 预填未执行（原因）"）
-	ReviewedBy string   `json:"reviewed_by,omitempty"` // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
-	ReviewedAt string   `json:"reviewed_at,omitempty"` // 审核时刻（RFC3339 UTC）
-	CreatedAt  string   `json:"created_at"`
-	UpdatedAt  string   `json:"updated_at"`
+	Summary      string   `json:"summary,omitempty"`       // 摘要（一句话钩子 10~40 字；兜底=正文纯文本前 40 字）
+	Tags         []string `json:"tags,omitempty"`          // 标签（1~3 个，词表优先；兜底为空）
+	Author       string   `json:"author,omitempty"`        // 正文识别的作者署名（宁空勿造；不回落 source_name）
+	AISource     string   `json:"ai_source,omitempty"`     // 正文声明的原始出处（自家号转发他人文章时命中；决定 sourceType/sourceName）
+	AINotes      string   `json:"ai_notes,omitempty"`      // AI 优化说明（人话 2-4 句；兜底="AI 预填未执行（原因）"）
+	ReviewedBy   string   `json:"reviewed_by,omitempty"`   // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
+	ReviewedAt   string   `json:"reviewed_at,omitempty"`   // 审核时刻（RFC3339 UTC）
+	ReviewAction string   `json:"review_action,omitempty"` // approve / reject；publicizing 恢复的授权凭据
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
 }
 
 // terminal 终态判定：published / rejected 之后任务盖棺；failed 不算终态（可 retry 续跑），
@@ -139,15 +148,30 @@ func (s *publishJobStore) writeLocked(doc publishJobDocument) error {
 		os.Remove(tmpName)
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
-	return os.Rename(tmpName, s.path)
+	if err := os.Rename(tmpName, s.path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	// rename 原子但不等于掉电持久；同步目录，确保「先落 intent、再外调」的顺序成立。
+	dir, err := os.Open(filepath.Dir(s.path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
-// create 建单 + source_key 幂等收敛：同 key 已有未终态任务时返回它（created=false），
-// 判重与建单在同一把锁内完成，并发提交同一篇文章也不会建出重复单。
+// create 建单 + source_key 永久幂等收敛：同 key 只允许存在一条任务，包含 published /
+// rejected 等终态。网站没有安全删除与服务端幂等 API，终态释放 key 会重复建文。
 func (s *publishJobStore) create(sourceKey, sourceURL string) (publishJob, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -156,7 +180,7 @@ func (s *publishJobStore) create(sourceKey, sourceURL string) (publishJob, bool,
 		return publishJob{}, false, err
 	}
 	for _, j := range doc.Jobs {
-		if j.SourceKey == sourceKey && !j.terminal() {
+		if j.SourceKey == sourceKey {
 			return j, false, nil
 		}
 	}
@@ -175,6 +199,19 @@ func (s *publishJobStore) create(sourceKey, sourceURL string) (publishJob, bool,
 		return publishJob{}, false, err
 	}
 	return job, true, nil
+}
+
+// all 返回存储中的完整任务快照，供进程启动恢复扫描。调用方不得修改返回值中的切片。
+func (s *publishJobStore) all() ([]publishJob, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.readLocked()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]publishJob, len(doc.Jobs))
+	copy(out, doc.Jobs)
+	return out, nil
 }
 
 func (s *publishJobStore) byID(id int64) (publishJob, error) {
@@ -218,24 +255,34 @@ func (s *publishJobStore) list(limit int) ([]publishJob, error) {
 // update 锁内 read-modify-write：所有阶段推进都经这一个入口，mutate 只改业务字段，
 // UpdatedAt 由存储统一盖章。
 func (s *publishJobStore) update(id int64, mutate func(*publishJob)) (publishJob, error) {
+	job, _, err := s.updateIf(id, func(publishJob) bool { return true }, mutate)
+	return job, err
+}
+
+// updateIf 是存储层原子 compare-and-swap：predicate 与 mutate 在同一把锁、同一份
+// 文档快照内执行。swapped=false 时返回当前任务且不写盘，供 review/retry 报冲突。
+func (s *publishJobStore) updateIf(id int64, predicate func(publishJob) bool, mutate func(*publishJob)) (job publishJob, swapped bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := s.readLocked()
 	if err != nil {
-		return publishJob{}, err
+		return publishJob{}, false, err
 	}
 	for i := range doc.Jobs {
 		if doc.Jobs[i].ID != id {
 			continue
 		}
+		if !predicate(doc.Jobs[i]) {
+			return doc.Jobs[i], false, nil
+		}
 		mutate(&doc.Jobs[i])
 		doc.Jobs[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if err := s.writeLocked(doc); err != nil {
-			return publishJob{}, err
+			return publishJob{}, false, err
 		}
-		return doc.Jobs[i], nil
+		return doc.Jobs[i], true, nil
 	}
-	return publishJob{}, fmt.Errorf("发布任务 #%d 不存在", id)
+	return publishJob{}, false, fmt.Errorf("发布任务 #%d 不存在", id)
 }
 
 // setStage 推进阶段（清空上次失败痕迹，避免旧 error 粘在推进后的任务上误导排障）。

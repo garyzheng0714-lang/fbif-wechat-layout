@@ -735,6 +735,7 @@ export function initAdminPanel(options = {}) {
         id: uniqueClientRuleID('新规则', doc),
         name: '新规则',
         description: '',
+        baseline_id: selectedPreset()?.baseline_id,
         config: normalizeRuleConfig(DEFAULT_RULE_CONFIG),
         behavior: normalizeRuleBehavior(DEFAULT_BEHAVIOR),
       };
@@ -791,7 +792,7 @@ export function initAdminPanel(options = {}) {
         if (ocModules.mctoc) configDoc.modules.mctoc = ocModules.mctoc;
         configDoc.modules.fbif_footer = JSON.parse(JSON.stringify(workingFooter || defaultFooterData()));
       }
-      const body = { id: preset.id, name: preset.name, description: preset.description, config: serverRuleConfigDocument(configDoc), behavior: preset.behavior };
+      const body = { id: preset.id, name: preset.name, description: preset.description, baseline_id: preset.baseline_id || sourcePreset.baseline_id, config: serverRuleConfigDocument(configDoc), behavior: preset.behavior };
       const resp = await fetch('/api/rules/admin/presets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': String(password || '').trim() }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
@@ -801,13 +802,14 @@ export function initAdminPanel(options = {}) {
       run(async () => {
         syncDirtyJSONBeforePersist();
         syncDirtyBehaviorBeforePersist();
-        const selected = presetByID(doc, selectedID) || { id: selectedID };
+		const selected = selectedPreset() || { id: selectedID };
         const name = workingName.trim() || selected.name || '未命名规则';
         const description = workingDescription.trim();
         doc = await savePresetWithFooter({
           id: selected.id,
           name,
           description,
+          baseline_id: selected.baseline_id,
           config: workingConfig,
           behavior: workingBehavior,
         });
@@ -824,7 +826,7 @@ export function initAdminPanel(options = {}) {
         const name = workingName.trim() || '新规则';
         const id = uniqueClientRuleID(name, doc);
         const description = workingDescription.trim();
-        doc = await savePresetWithFooter({ id, name, description, config: workingConfig, behavior: workingBehavior });
+        doc = await savePresetWithFooter({ id, name, description, baseline_id: selectedPreset()?.baseline_id, config: workingConfig, behavior: workingBehavior });
         await setActiveRulePreset(password, id, currentAccountID());
         doc = await listRulePresets(password);
         draftPreset = null;

@@ -27,9 +27,56 @@ const testFeishuVerificationToken = "vt-secret"
 func newCardCallbackMux(t *testing.T, env *publishTestEnv) *http.ServeMux {
 	t.Helper()
 	t.Setenv("FEISHU_VERIFICATION_TOKEN", testFeishuVerificationToken)
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
 	mux := http.NewServeMux()
 	registerFeishuCardCallbackRoute(mux, env.pipeline)
 	return mux
+}
+
+// TestFeishuCallbackMissingTokenFailClosed 回调来源凭证未配置时必须默认拒绝；
+// challenge 也不能为了首次配置窗口而裸奔，否则同一路由上的审核动作会一起失守。
+func TestFeishuCallbackMissingTokenFailClosed(t *testing.T) {
+	env := newPublishTestEnv(t)
+	t.Setenv("FEISHU_VERIFICATION_TOKEN", "")
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	mux := http.NewServeMux()
+	registerFeishuCardCallbackRoute(mux, env.pipeline)
+	rec := postCardCallback(mux, `{"type":"url_verification","challenge":"ch-unsafe","token":""}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("token 未配置时 challenge 必须 fail-closed，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestFeishuReviewerAllowlistFailClosed Webhook 与长连接共用 reviewCardAction，
+// 因此审核人白名单也必须在这个共享入口 fail-closed：空白名单和非白名单成员都不能审核。
+func TestFeishuReviewerAllowlistFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name, allowlist, operator string
+	}{
+		{name: "空白名单", allowlist: "", operator: "ou_reviewer_1"},
+		{name: "非白名单成员", allowlist: "ou_allowed", operator: "ou_intruder"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newPublishTestEnv(t)
+			t.Setenv("FEISHU_REVIEWER_OPEN_IDS", tc.allowlist)
+			job, _, err := env.pipeline.submit(testPublishSourceURL)
+			if err != nil {
+				t.Fatalf("submit: %v", err)
+			}
+			raw := json.RawMessage(fmt.Sprintf(`{"action":"approve","job_id":%d}`, job.ID))
+			out := env.pipeline.reviewCardAction(context.Background(), tc.operator, raw)
+			if out.toastType != "error" || !strings.Contains(out.toastContent, "权限") {
+				t.Fatalf("未授权审核应回 error 权限提示，实际 %+v", out)
+			}
+			got, _ := env.store.byID(job.ID)
+			if got.Stage != publishStageAwaitingReview {
+				t.Fatalf("未授权审核不得改状态，实际 %q", got.Stage)
+			}
+			if _, updateN := env.ft.counts(); updateN != 0 {
+				t.Fatalf("未授权审核触发了公开请求：%d", updateN)
+			}
+		})
+	}
 }
 
 func postCardCallback(mux *http.ServeMux, body string) *httptest.ResponseRecorder {
@@ -256,7 +303,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 		Summary: "AI 摘要一段。", Tags: []string{"食品", "饮料"}, Author: "Mote莫特",
 		AINotes: "封面选第一张图。正文格式规范。摘要取自导语。",
 	}
-	raw, err := json.Marshal(buildReviewPendingCard(job))
+	raw, err := json.Marshal(buildReviewPendingCard(job, "img_v3_test_cover_key"))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -281,10 +328,19 @@ func TestReviewPendingCardContract(t *testing.T) {
 		// M5 AI 预填参数行 + 优化说明段。
 		"Mote莫特", "食品、饮料", "AI 摘要一段。",
 		"AI 优化说明", "封面选第一张图。",
+		// 2026-07-10 用户追加：封面图直接在卡片呈现（img 元素只认 img_key）+
+		// 管理后台编辑链接（默认后台首页，配 FOODTALKS_ADMIN_ARTICLE_URL 深链）。
+		`"tag":"img"`, `"img_key":"img_v3_test_cover_key"`,
+		"去后台编辑这篇文章", defaultSiteAdminURL,
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("审核卡缺少 %q：%s", want, s)
 		}
+	}
+	// 无封面 img_key 时卡片不得残留空 img 元素。
+	rawNoCover, _ := json.Marshal(buildReviewPendingCard(job, ""))
+	if strings.Contains(string(rawNoCover), `"tag":"img"`) {
+		t.Fatalf("无 img_key 不得渲染 img 元素：%s", rawNoCover)
 	}
 	if strings.Contains(s, "查看原文") {
 		t.Fatalf("「查看原文」按钮应已被「预览效果」取代：%s", s)

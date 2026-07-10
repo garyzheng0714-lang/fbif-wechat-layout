@@ -111,6 +111,32 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"job": job})
 	})
+
+	// CreateNews 结果不确定态的人工对账。运营在 FoodTalks 后台核对后，只能二选一：
+	// 回填已存在 news id；或明确确认未创建，才重新进入 staging 发起新 POST。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/reconcile", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdminPassword(w, r) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			FoodTalksNewsID   int64 `json:"foodtalks_news_id"`
+			ConfirmNotCreated bool  `json:"confirm_not_created"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		job, err := p.reconcileStaging(id, req.FoodTalksNewsID, req.ConfirmNotCreated)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": job})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": job})
+	})
 }
 
 func publishJobIDFromPath(w http.ResponseWriter, r *http.Request) (int64, bool) {

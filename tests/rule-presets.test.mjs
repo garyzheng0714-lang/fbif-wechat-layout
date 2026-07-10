@@ -549,6 +549,7 @@ test('admin preset save preserves structured modules', async () => {
     await saveRulePreset('secret', {
       id: 'structured-save',
       name: '结构化保存',
+	  baseline_id: 'ft-default-v1',
       config: {
         ...DEFAULT_RULE_CONFIG,
         modules: {
@@ -563,6 +564,7 @@ test('admin preset save preserves structured modules', async () => {
       behavior: DEFAULT_BEHAVIOR,
     });
     const body = JSON.parse(calls[0].options.body);
+	assert.equal(body.baseline_id, 'ft-default-v1', '显式规则基线必须透传到保存 API');
     assert.equal(body.config.modules.article_footer_defaults.enabled, false);
   } finally {
     delete globalThis.fetch;

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,8 +56,9 @@ func TestRulePresetStorePersistsActivePreset(t *testing.T) {
 	store := newRulePresetStore(path)
 
 	doc, err := store.upsert(rulePreset{
-		ID:   "campaign",
-		Name: "Campaign Rule",
+		ID:         "campaign",
+		Name:       "Campaign Rule",
+		BaselineID: defaultRulePresetID,
 		Config: map[string]any{
 			"font_size": "16",
 		},
@@ -88,6 +90,68 @@ func TestRulePresetStorePersistsActivePreset(t *testing.T) {
 	}
 }
 
+func TestRuleStoreV2MigratesCustomRuleToExplicitHistoricalBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rule-presets.json")
+	raw := `{
+		"schema_version": 2,
+		"accounts": {},
+		"rules": {
+			"legacy-custom": {
+				"id": "legacy-custom",
+				"name": "历史自建规则",
+				"versions": [{"version": 1, "config": {"font_size": "16"}, "behavior": {}}]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := newRulePresetStore(path)
+	doc, err := store.readStoreLocked()
+	if err != nil {
+		t.Fatalf("v2 存量规则库应兼容迁移：%v", err)
+	}
+	legacy := doc.Rules["legacy-custom"]
+	if legacy.BaselineID != defaultRulePresetID {
+		t.Fatalf("历史自建规则应显式迁移为 default 基线，实际 %q", legacy.BaselineID)
+	}
+	if err := store.writeStoreLocked(doc); err != nil {
+		t.Fatalf("回写迁移后规则库：%v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"schema_version": 3`)) || !bytes.Contains(b, []byte(`"baseline_id": "default"`)) {
+		t.Fatalf("回写后必须是带显式 baseline_id 的 schema v3：%s", b)
+	}
+}
+
+func TestRuleStoreV3MissingBaselineFailsValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rule-presets.json")
+	raw := `{
+		"schema_version": 3,
+		"accounts": {},
+		"rules": {
+			"broken-custom": {
+				"id": "broken-custom",
+				"name": "缺基线规则",
+				"versions": [{"version": 1, "config": {"font_size": "16"}, "behavior": {}}]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := newRulePresetStore(path).validate()
+	if err == nil {
+		t.Fatal("schema v3 缺 baseline_id 必须在启动校验期失败")
+	}
+	if !strings.Contains(err.Error(), "broken-custom") || !strings.Contains(err.Error(), "baseline_id") {
+		t.Fatalf("启动错误应指明规则和 baseline_id，实际：%v", err)
+	}
+}
+
 func TestArticleFooterDefaultsAllowsManyAuthorProfiles(t *testing.T) {
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 	cfg := defaultRuleConfig()
@@ -97,7 +161,7 @@ func TestArticleFooterDefaultsAllowsManyAuthorProfiles(t *testing.T) {
 	}
 	mods["article_footer_defaults"] = articleFooterDefaultsWithProfiles(500)
 
-	if _, err := store.upsert(rulePreset{ID: "many-authors", Name: "Many Authors", Config: cfg}); err != nil {
+	if _, err := store.upsert(rulePreset{ID: "many-authors", Name: "Many Authors", BaselineID: defaultRulePresetID, Config: cfg}); err != nil {
 		t.Fatalf("upsert many article footer profiles: %v", err)
 	}
 }
@@ -128,7 +192,7 @@ func TestArticleFooterDefaultsAllowsArtifactVisibility(t *testing.T) {
 		},
 	}
 
-	if _, err := store.upsert(rulePreset{ID: "mote-artifact-default", Name: "Mote", Config: cfg}); err != nil {
+	if _, err := store.upsert(rulePreset{ID: "mote-artifact-default", Name: "Mote", BaselineID: defaultRulePresetID, Config: cfg}); err != nil {
 		t.Fatalf("upsert article footer artifact defaults: %v", err)
 	}
 }
@@ -188,7 +252,7 @@ func TestArticleFooterDefaultsRejectsInvalidProfiles(t *testing.T) {
 				t.Fatal("default config modules missing")
 			}
 			mods["article_footer_defaults"] = tt.module
-			if _, err := store.upsert(rulePreset{ID: "bad-author-default", Name: "Bad", Config: cfg}); err == nil {
+			if _, err := store.upsert(rulePreset{ID: "bad-author-default", Name: "Bad", BaselineID: defaultRulePresetID, Config: cfg}); err == nil {
 				t.Fatal("expected invalid article_footer_defaults profile to be rejected")
 			}
 		})
@@ -215,10 +279,11 @@ func TestUpsertBuiltinVersionUsesPresetSpecificTarget(t *testing.T) {
 		t.Fatalf("upsert wowfood default: %v", err)
 	}
 	if _, err := store.upsert(rulePreset{
-		ID:       "my-custom-rule",
-		Name:     "自建规则",
-		Config:   defaultRuleConfig(),
-		Behavior: defaultRuleBehavior(),
+		ID:         "my-custom-rule",
+		Name:       "自建规则",
+		BaselineID: defaultRulePresetID,
+		Config:     defaultRuleConfig(),
+		Behavior:   defaultRuleBehavior(),
 	}); err != nil {
 		t.Fatalf("upsert custom rule: %v", err)
 	}
@@ -369,7 +434,7 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 }
 
 func TestMergeRuleDefaultsDoesNotInjectArticleFooterDefaults(t *testing.T) {
-	cfg := mergeRuleDefaults("rule-user-custom", map[string]any{
+	cfg := mergeRuleDefaults(defaultRulePresetID, map[string]any{
 		"font_size": "16",
 		"modules": map[string]any{
 			"bottom_blocks": map[string]any{"schema_version": 2, "enabled": false, "presets": []any{}},
@@ -381,7 +446,7 @@ func TestMergeRuleDefaultsDoesNotInjectArticleFooterDefaults(t *testing.T) {
 		t.Fatalf("article_footer_defaults.enabled = %#v, want disabled when source did not declare it", aft["enabled"])
 	}
 
-	explicit := mergeRuleDefaults("rule-user-custom", map[string]any{
+	explicit := mergeRuleDefaults(defaultRulePresetID, map[string]any{
 		"modules": map[string]any{
 			"article_footer_defaults": defaultArticleFooterDefaultsModule(),
 		},
@@ -418,9 +483,10 @@ func TestRulePresetRejectsInvalidBehavior(t *testing.T) {
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 
 	_, err := store.upsert(rulePreset{
-		ID:     "bad-behavior",
-		Name:   "Bad behavior",
-		Config: defaultRuleConfig(),
+		ID:         "bad-behavior",
+		Name:       "Bad behavior",
+		BaselineID: defaultRulePresetID,
+		Config:     defaultRuleConfig(),
 		Behavior: map[string]any{
 			"schema_version": float64(1),
 			"params": map[string]any{
@@ -436,9 +502,10 @@ func TestRulePresetRejectsInvalidBehavior(t *testing.T) {
 	}
 
 	_, err = store.upsert(rulePreset{
-		ID:     "bad-behavior-url",
-		Name:   "Bad behavior URL",
-		Config: defaultRuleConfig(),
+		ID:         "bad-behavior-url",
+		Name:       "Bad behavior URL",
+		BaselineID: defaultRulePresetID,
+		Config:     defaultRuleConfig(),
 		Behavior: map[string]any{
 			"params": map[string]any{
 				"mote_ref_image_url": map[string]any{"type": "url", "required": true, "default": `https://example.com/a.png" onerror="alert(1)`},
@@ -450,9 +517,10 @@ func TestRulePresetRejectsInvalidBehavior(t *testing.T) {
 	}
 
 	_, err = store.upsert(rulePreset{
-		ID:     "bad-behavior-action",
-		Name:   "Bad behavior action",
-		Config: defaultRuleConfig(),
+		ID:         "bad-behavior-action",
+		Name:       "Bad behavior action",
+		BaselineID: defaultRulePresetID,
+		Config:     defaultRuleConfig(),
 		Behavior: map[string]any{
 			"actions": []any{
 				map[string]any{
@@ -469,9 +537,10 @@ func TestRulePresetRejectsInvalidBehavior(t *testing.T) {
 	}
 
 	_, err = store.upsert(rulePreset{
-		ID:     "bad-behavior-shape",
-		Name:   "Bad behavior shape",
-		Config: defaultRuleConfig(),
+		ID:         "bad-behavior-shape",
+		Name:       "Bad behavior shape",
+		BaselineID: defaultRulePresetID,
+		Config:     defaultRuleConfig(),
 		Behavior: map[string]any{
 			"params": []any{"not-object"},
 		},
@@ -487,7 +556,7 @@ func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, store)
 
-	custom := rulePreset{ID: "foodtalks-custom", Name: "FoodTalks Custom", Config: defaultRuleConfig()}
+	custom := rulePreset{ID: "foodtalks-custom", Name: "FoodTalks Custom", BaselineID: foodTalksDefaultRulePresetID, Config: defaultRuleConfig()}
 	body, _ := json.Marshal(custom)
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("X-Admin-Password", "secret")
@@ -577,7 +646,7 @@ func TestRulePresetAdminHandlersRequirePassword(t *testing.T) {
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
-	body, _ := json.Marshal(rulePreset{ID: "test", Name: "Test", Config: defaultRuleConfig()})
+	body, _ := json.Marshal(rulePreset{ID: "test", Name: "Test", BaselineID: defaultRulePresetID, Config: defaultRuleConfig()})
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -663,9 +732,10 @@ func TestRulePresetStoreMigratesLegacyV1FileToV2OnWriteKeepingLegacyFacade(t *te
 	}
 
 	if _, err := store.upsert(rulePreset{
-		ID:     "campaign",
-		Name:   "Campaign Rule",
-		Config: map[string]any{"font_size": "17"},
+		ID:         "campaign",
+		Name:       "Campaign Rule",
+		BaselineID: defaultRulePresetID,
+		Config:     map[string]any{"font_size": "17"},
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -678,8 +748,8 @@ func TestRulePresetStoreMigratesLegacyV1FileToV2OnWriteKeepingLegacyFacade(t *te
 	if err := json.Unmarshal(b, &raw); err != nil {
 		t.Fatalf("unmarshal migrated file: %v", err)
 	}
-	if raw["schema_version"] != float64(2) {
-		t.Fatalf("schema_version = %v, want 2", raw["schema_version"])
+	if raw["schema_version"] != float64(currentRuleStoreSchemaVersion) {
+		t.Fatalf("schema_version = %v, want %d", raw["schema_version"], currentRuleStoreSchemaVersion)
 	}
 	if _, ok := raw["accounts"]; !ok {
 		t.Fatalf("migrated file missing accounts")
@@ -712,9 +782,10 @@ func TestRulePresetStoreWritesRollbackReadableLegacyShadowFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rule-presets.json")
 	store := newRulePresetStore(path)
 	if _, err := store.upsert(rulePreset{
-		ID:     "campaign",
-		Name:   "Campaign Rule",
-		Config: map[string]any{"font_size": "17"},
+		ID:         "campaign",
+		Name:       "Campaign Rule",
+		BaselineID: defaultRulePresetID,
+		Config:     map[string]any{"font_size": "17"},
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -753,9 +824,10 @@ func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rules.json")
 	store := newRulePresetStore(path)
 	if _, err := store.upsert(rulePreset{
-		ID:     "campaign",
-		Name:   "Campaign Rule",
-		Config: map[string]any{"font_size": "16"},
+		ID:         "campaign",
+		Name:       "Campaign Rule",
+		BaselineID: defaultRulePresetID,
+		Config:     map[string]any{"font_size": "16"},
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -1001,9 +1073,10 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			body, _ := json.Marshal(rulePreset{
-				ID:     "bad-config",
-				Name:   "Bad Config",
-				Config: tc.config,
+				ID:         "bad-config",
+				Name:       "Bad Config",
+				BaselineID: defaultRulePresetID,
+				Config:     tc.config,
 			})
 			req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
@@ -1023,8 +1096,9 @@ func TestRulePresetAdminAcceptsThemeJustifyParagraphs(t *testing.T) {
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
 	body, _ := json.Marshal(rulePreset{
-		ID:   "theme-justify",
-		Name: "Theme Justify",
+		ID:         "theme-justify",
+		Name:       "Theme Justify",
+		BaselineID: defaultRulePresetID,
 		Config: map[string]any{
 			"schema_version": float64(2),
 			"modules": map[string]any{
@@ -1053,8 +1127,9 @@ func TestRulePresetAcceptsMoreArticlesDefaultCards(t *testing.T) {
 	registerRulePresetHandlers(mux, store)
 
 	body, _ := json.Marshal(rulePreset{
-		ID:   "custom-more-articles",
-		Name: "Custom More Articles",
+		ID:         "custom-more-articles",
+		Name:       "Custom More Articles",
+		BaselineID: defaultRulePresetID,
 		Config: map[string]any{
 			"schema_version": float64(2),
 			"modules": map[string]any{
@@ -1130,9 +1205,10 @@ func TestRulePresetStoreCapsSavedVersionsPerRule(t *testing.T) {
 	store := newRulePresetStore(path)
 	for i := 0; i < maxRulePresetVersions+5; i++ {
 		if _, err := store.upsert(rulePreset{
-			ID:     "campaign",
-			Name:   "Campaign Rule",
-			Config: map[string]any{"font_size": "16"},
+			ID:         "campaign",
+			Name:       "Campaign Rule",
+			BaselineID: defaultRulePresetID,
+			Config:     map[string]any{"font_size": "16"},
 		}); err != nil {
 			t.Fatalf("upsert %d: %v", i, err)
 		}
@@ -1209,8 +1285,9 @@ func TestRulePresetAdminAcceptsModularConfigAndProjectsFlatLegacyPreset(t *testi
 	registerRulePresetHandlers(mux, store)
 
 	body, _ := json.Marshal(rulePreset{
-		ID:   "modular",
-		Name: "Modular",
+		ID:         "modular",
+		Name:       "Modular",
+		BaselineID: defaultRulePresetID,
 		Config: map[string]any{
 			"schema_version": float64(2),
 			"font_size":      "15",
@@ -1264,9 +1341,10 @@ func TestRulePresetStoreDeleteFallsBackToAccountDefault(t *testing.T) {
 			store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 			customID := c.account + "-custom"
 			if _, err := store.upsert(rulePreset{
-				ID:     customID,
-				Name:   "临时自定义",
-				Config: map[string]any{"font_size": "16"},
+				ID:         customID,
+				Name:       "临时自定义",
+				BaselineID: c.wantDefault,
+				Config:     map[string]any{"font_size": "16"},
 			}); err != nil {
 				t.Fatalf("upsert: %v", err)
 			}

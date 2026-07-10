@@ -25,14 +25,18 @@ const foodTalksSeriesSiteDefaultRulePresetID = "ft-series-v1" // 网站系列独
 const wowFoodRuleAccountID = "wowfood"                        // = registry pack.id
 const wowFoodDefaultRulePresetID = "wowfood-default"          // WowFood爆品超市 独立 preset
 const maxRulePresetVersions = 20
+const currentRuleStoreSchemaVersion = 3
 
 type rulePreset struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Config      map[string]any `json:"config"`
-	Behavior    map[string]any `json:"behavior,omitempty"`
-	UpdatedAt   string         `json:"updated_at"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// BaselineID 显式指向一个内置账号基线 preset。自建规则不再从
+	// ID/当前账号猜继承关系；只允许 defaultRuleDefinitions 中的受控 id。
+	BaselineID string         `json:"baseline_id"`
+	Config     map[string]any `json:"config"`
+	Behavior   map[string]any `json:"behavior,omitempty"`
+	UpdatedAt  string         `json:"updated_at"`
 }
 
 type rulePresetDocument struct {
@@ -60,6 +64,7 @@ type ruleDefinition struct {
 	ID          string              `json:"id"`
 	Name        string              `json:"name"`
 	Description string              `json:"description,omitempty"`
+	BaselineID  string              `json:"baseline_id"`
 	Versions    []rulePresetVersion `json:"versions"`
 	UpdatedAt   string              `json:"updated_at"`
 	// BuiltinVersion 标记该内置默认 preset 对应的代码版本。store 加载时若持久化值
@@ -97,10 +102,10 @@ func newRulePresetStore(path string) *rulePresetStore {
 	return &rulePresetStore{path: path}
 }
 
-// presetID 决定合并基线（见 baselineRuleConfigForPreset）：内置 preset 缺键补自己
-// 账号族的默认，自建 preset 保持 FBIF 基线的历史行为。契约：rule_merge_baseline_test.go。
-func mergeRuleDefaults(presetID string, config map[string]any) map[string]any {
-	merged := baselineRuleConfigForPreset(presetID)
+// baselineID 是已经在保存/启动边界校验过的显式继承目标。
+// 未知基线在 baselineRuleConfigForPreset 内 fail loud，绝不默认落 FBIF。
+func mergeRuleDefaults(baselineID string, config map[string]any) map[string]any {
+	merged := baselineRuleConfigForPreset(baselineID)
 	for k, v := range flattenRuleConfig(config) {
 		merged[k] = v
 	}
@@ -158,8 +163,17 @@ func (s *rulePresetStore) readStoreLocked() (ruleStoreDocumentV2, error) {
 	if err := json.Unmarshal(b, &probe); err != nil {
 		return defaultRuleStoreDocumentV2(), err
 	}
-	if probe.SchemaVersion == 2 || len(probe.Accounts) > 0 || len(probe.Rules) > 0 {
+	if probe.SchemaVersion >= 2 || len(probe.Accounts) > 0 || len(probe.Rules) > 0 {
 		if err := json.Unmarshal(b, &doc); err != nil {
+			return defaultRuleStoreDocumentV2(), err
+		}
+		if probe.SchemaVersion > currentRuleStoreSchemaVersion {
+			return defaultRuleStoreDocumentV2(), fmt.Errorf("规则库 schema_version=%d 高于当前支持版本 %d", probe.SchemaVersion, currentRuleStoreSchemaVersion)
+		}
+		if probe.SchemaVersion < currentRuleStoreSchemaVersion {
+			migrateLegacyRuleBaselines(&doc)
+		}
+		if err := validateRuleStoreBaselines(doc); err != nil {
 			return defaultRuleStoreDocumentV2(), err
 		}
 		return normalizeRuleStoreDocument(doc), nil
@@ -196,8 +210,9 @@ func normalizeRuleDocument(doc rulePresetDocument) rulePresetDocument {
 		if p.Name == "" {
 			p.Name = "未命名规则"
 		}
-		p.Config = mergeRuleDefaults(p.ID, p.Config)
-		p.Behavior = mergeRuleBehavior(p.ID, p.Behavior)
+		p.BaselineID = legacyCompatibleBaselineID(p.ID, p.BaselineID)
+		p.Config = mergeRuleDefaults(p.BaselineID, p.Config)
+		p.Behavior = mergeRuleBehavior(p.BaselineID, p.Behavior)
 		if p.UpdatedAt == "" {
 			p.UpdatedAt = now
 		}
@@ -259,10 +274,11 @@ func legacyDocumentToStore(doc rulePresetDocument) ruleStoreDocumentV2 {
 			ID:          p.ID,
 			Name:        p.Name,
 			Description: p.Description,
+			BaselineID:  p.BaselineID,
 			Versions: []rulePresetVersion{{
 				Version:   1,
-				Config:    mergeRuleDefaults(p.ID, p.Config),
-				Behavior:  mergeRuleBehavior(p.ID, p.Behavior),
+				Config:    mergeRuleDefaults(p.BaselineID, p.Config),
+				Behavior:  mergeRuleBehavior(p.BaselineID, p.Behavior),
 				CreatedAt: updatedAt,
 			}},
 			UpdatedAt: updatedAt,
@@ -273,6 +289,9 @@ func legacyDocumentToStore(doc rulePresetDocument) ruleStoreDocumentV2 {
 
 func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 	now := time.Now().UTC().Format(time.RFC3339)
+	if doc.SchemaVersion < currentRuleStoreSchemaVersion {
+		migrateLegacyRuleBaselines(&doc)
+	}
 	if doc.Rules == nil {
 		doc.Rules = map[string]ruleDefinition{}
 	}
@@ -285,6 +304,7 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 		if rule.Name == "" {
 			rule.Name = "未命名规则"
 		}
+		rule.BaselineID = sanitizeRulePresetID(rule.BaselineID)
 		if len(rule.Versions) == 0 {
 			rule.Versions = []rulePresetVersion{{
 				Version:   1,
@@ -307,8 +327,8 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 			if version.CreatedAt == "" {
 				version.CreatedAt = now
 			}
-			version.Config = mergeRuleDefaults(rule.ID, version.Config)
-			version.Behavior = mergeRuleBehavior(rule.ID, version.Behavior)
+			version.Config = mergeRuleDefaults(rule.BaselineID, version.Config)
+			version.Behavior = mergeRuleBehavior(rule.BaselineID, version.Behavior)
 			versions = append(versions, version)
 		}
 		sort.SliceStable(versions, func(i, j int) bool {
@@ -337,7 +357,7 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 			normalizedRules[id] = def
 		}
 	}
-	doc.SchemaVersion = 2
+	doc.SchemaVersion = currentRuleStoreSchemaVersion
 	doc.Rules = normalizedRules
 	if doc.Accounts == nil {
 		doc.Accounts = map[string]ruleAccount{}
@@ -423,8 +443,9 @@ func legacyDocumentFromStore(doc ruleStoreDocumentV2) rulePresetDocument {
 			ID:          rule.ID,
 			Name:        rule.Name,
 			Description: rule.Description,
-			Config:      mergeRuleDefaults(rule.ID, version.Config),
-			Behavior:    mergeRuleBehavior(rule.ID, version.Behavior),
+			BaselineID:  rule.BaselineID,
+			Config:      mergeRuleDefaults(rule.BaselineID, version.Config),
+			Behavior:    mergeRuleBehavior(rule.BaselineID, version.Behavior),
 			UpdatedAt:   rule.UpdatedAt,
 		})
 	}
@@ -519,6 +540,13 @@ func (s *rulePresetStore) list() (rulePresetDocument, error) {
 	return s.readLocked()
 }
 
+func (s *rulePresetStore) validate() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.readStoreLocked()
+	return err
+}
+
 func (s *rulePresetStore) active() (rulePreset, error) {
 	return s.activeForAccount(defaultRuleAccountID)
 }
@@ -544,8 +572,9 @@ func (s *rulePresetStore) activeForAccount(accountID string) (rulePreset, error)
 		ID:          rule.ID,
 		Name:        rule.Name,
 		Description: rule.Description,
-		Config:      mergeRuleDefaults(rule.ID, version.Config),
-		Behavior:    mergeRuleBehavior(rule.ID, version.Behavior),
+		BaselineID:  rule.BaselineID,
+		Config:      mergeRuleDefaults(rule.BaselineID, version.Config),
+		Behavior:    mergeRuleBehavior(rule.BaselineID, version.Behavior),
 		UpdatedAt:   rule.UpdatedAt,
 	}, nil
 }
@@ -567,11 +596,19 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	if strings.TrimSpace(p.Name) == "" {
 		p.Name = "未命名规则"
 	}
+	if isProtectedDefaultPreset(p.ID) {
+		if strings.TrimSpace(p.BaselineID) != "" && sanitizeRulePresetID(p.BaselineID) != p.ID {
+			return legacyDocumentFromStore(doc), fmt.Errorf("内置规则 %s 的 baseline_id 必须是 %s", p.ID, p.ID)
+		}
+		p.BaselineID = p.ID
+	} else {
+		p.BaselineID = sanitizeRulePresetID(p.BaselineID)
+	}
 	if err := validateRulePresetPayload(p); err != nil {
 		return legacyDocumentFromStore(doc), err
 	}
-	p.Config = mergeRuleDefaults(p.ID, p.Config)
-	p.Behavior = mergeRuleBehavior(p.ID, p.Behavior)
+	p.Config = mergeRuleDefaults(p.BaselineID, p.Config)
+	p.Behavior = mergeRuleBehavior(p.BaselineID, p.Behavior)
 	p.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	rule := doc.Rules[p.ID]
 	nextVersion := 1
@@ -581,6 +618,7 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	rule.ID = p.ID
 	rule.Name = p.Name
 	rule.Description = p.Description
+	rule.BaselineID = p.BaselineID
 	// 用户保存内置默认 preset 即视为接受该 preset 的当前代码基线，避免下次加载被
 	// 内置默认覆盖；各内置账号有独立目标版本，不能再写全局 currentBuiltinRuleVersion。
 	if isProtectedDefaultPreset(p.ID) {
@@ -700,6 +738,57 @@ func sanitizeRuleAccountID(id string) string {
 		return defaultRuleAccountID
 	}
 	return id
+}
+
+// legacyCompatibleBaselineID 只用于 schema v1/v2 迁移：内置规则的基线是自身，
+// 历史自建规则明确标记为 default（它们过去已经按 FBIF 合并）。
+// 这是一次性数据迁移，不是新规则的猜测路径。
+func legacyCompatibleBaselineID(ruleID, baselineID string) string {
+	baselineID = sanitizeRulePresetID(baselineID)
+	if baselineID != "" {
+		return baselineID
+	}
+	ruleID = sanitizeRulePresetID(ruleID)
+	if isProtectedDefaultPreset(ruleID) {
+		return ruleID
+	}
+	return defaultRulePresetID
+}
+
+func migrateLegacyRuleBaselines(doc *ruleStoreDocumentV2) {
+	if doc == nil {
+		return
+	}
+	for id, rule := range doc.Rules {
+		ruleID := sanitizeRulePresetID(firstNonEmpty(rule.ID, id))
+		rule.BaselineID = legacyCompatibleBaselineID(ruleID, rule.BaselineID)
+		doc.Rules[id] = rule
+	}
+	doc.SchemaVersion = currentRuleStoreSchemaVersion
+}
+
+func validateRuleBaselineID(baselineID string) error {
+	baselineID = sanitizeRulePresetID(baselineID)
+	if baselineID == "" {
+		return fmt.Errorf("请选择规则基线（baseline_id）")
+	}
+	if _, ok := defaultRuleDefinitions("")[baselineID]; !ok {
+		return fmt.Errorf("未知规则基线 baseline_id=%q；只能继承已登记的账号默认规则", baselineID)
+	}
+	return nil
+}
+
+func validateRuleStoreBaselines(doc ruleStoreDocumentV2) error {
+	for key, rule := range doc.Rules {
+		ruleID := sanitizeRulePresetID(firstNonEmpty(rule.ID, key))
+		if err := validateRuleBaselineID(rule.BaselineID); err != nil {
+			return fmt.Errorf("规则 %q 的基线无效：%w", ruleID, err)
+		}
+		if isProtectedDefaultPreset(ruleID) && sanitizeRulePresetID(rule.BaselineID) != ruleID {
+			return fmt.Errorf("内置规则 %q 的 baseline_id 必须指向自身", ruleID)
+		}
+	}
+	return nil
 }
 
 func adminPassword() string {

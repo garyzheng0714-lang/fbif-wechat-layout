@@ -21,6 +21,10 @@ const ftRules = JSON.parse(await readFile(new URL('./fixtures/render-service-rul
 // 「页脚开启时 bottom_blocks 主路径正确渲染」，故桩里显式开启，模拟运营态。
 ftRules.preset.config.modules.bottom_blocks.enabled = true;
 ftRules.preset.config.modules.fbif_footer.enabled = true; // tip 片段开关挂在页脚库上
+// 守网站 behavior 原始结构：这些字段不在公众号 normalizeRuleBehavior schema 里。
+// 若 headless 路径误走公众号 normalizer，author_regex/lists 会被删除。
+ftRules.preset.behavior.author_regex = '^\\s*(?:作者|署名)[：:]\\s*';
+ftRules.preset.behavior.lists.wechat_trailer_markers = ['自定义网站尾标'];
 
 // 规则拉取桩：必须在 import render.mjs 之前设置（render.mjs 顶层捕获 realFetch）。
 // 按 account 分流并计数——顺带守「缓存按账号分 key」（两账号各拉一次，互不污染）。
@@ -34,7 +38,7 @@ globalThis.fetch = async (url) => {
   return { ok: false, json: async () => ({}) };
 };
 
-const { renderArticle, SUPPORTED_PACK_IDS } = await import('../render-service/render.mjs');
+const { renderArticle, SUPPORTED_PACK_IDS, fallbackRuleForPack } = await import('../render-service/render.mjs');
 const { SAMPLE_ARTICLE } = await import('./fixtures/render-service-sample-blocks.mjs');
 
 const golden = await readFile(new URL('./golden/render-service-fbif.html', import.meta.url), 'utf8');
@@ -52,6 +56,39 @@ test('ft-default：输出网站口径特征（署名 #888888、h2 无 mctoc 锚�
   assert.doesNotMatch(siteHtml, /id="mctoc_/, 'FoodTalks 后台自己生成目录锚点，本工具不输出');
   assert.equal(siteResult.imgN, 1);
   assert.ok(siteResult.headingN >= 1);
+});
+
+test('ft-default：headless 保留网站 behavior 的顶层正则与 lists，不走公众号 normalizer', async () => {
+  const custom = await renderArticle({
+    title: '网站原始 behavior',
+    source: 'https://mp.weixin.qq.com/s/source',
+    packId: 'ft-default',
+    isRepost: true,
+    blocks: [
+      { k: 'txt', runs: [{ type: 'txt', text: '署名：李四' }] },
+      { k: 'txt', runs: [{ type: 'txt', text: '正文保留' }] },
+      { k: 'txt', runs: [{ type: 'txt', text: '自定义网站尾标' }] },
+      { k: 'txt', runs: [{ type: 'txt', text: '这段必须被规则切掉' }] },
+    ],
+  });
+  assert.match(custom.html, /<em><span style="font-size: 14px; color: #888888;">署名：李四<\/span><\/em>/,
+    'author_regex 顶层字段必须保留');
+  assert.match(custom.html, /正文保留/);
+  assert.doesNotMatch(custom.html, /自定义网站尾标|这段必须被规则切掉/,
+    'lists.wechat_trailer_markers 必须保留并生效');
+  assert.doesNotMatch(custom.html, /wx-mote-author|#396FBC/i, '公众号 Mote 动作不得注入网站');
+});
+
+test('ft-default：规则 API 失败的离线基线也是网站口径', () => {
+  const fallback = fallbackRuleForPack('ft-default');
+  assert.equal(fallback.config.tip_title_color, '#01396a');
+  assert.equal(fallback.config.image.width, 600);
+  assert.equal(fallback.config.modules.mctoc.enabled, false);
+  assert.equal(fallback.config.modules.bottom_blocks.enabled, false);
+  assert.equal(fallback.config.modules.article_footer_defaults.enabled, false);
+  assert.deepEqual(fallback.behavior, {}, '离线网站 behavior 不得注入公众号 actions');
+  const fbifFallback = fallbackRuleForPack('fbif');
+  assert.ok(Array.isArray(fbifFallback.behavior.actions), '公众号仍走原 normalizer');
 });
 
 test('ft-default：外链保留、不做微信归一化（粘贴目标是 CMS 不是微信编辑器）', () => {

@@ -1015,8 +1015,9 @@ export function initApp(initialTemplate) {
     _copyRequiresWechatImageTransfer = false;
     _uploadDone = true;
     _uploadPromise = null;
-    moreArticlesGate.invalidate();
+    copySession.resetForNewArticle();
     _moreArticlesCopyJob = null;
+    resetRetryUploadUI();
     clearUploadVisual();
     showImportEntry();
     progress.style.display = 'none';
@@ -1304,7 +1305,7 @@ export function initApp(initialTemplate) {
   // 版本未变时才允许回写）；moreArticlesGate = 更多文章合成任务版本。契约与「文章级
   // 重置必须全部作废」由 copy-session.js + tests/copy-session.test.mjs 守护）。
   const copySession = createCopySession();
-  const { footerCopyGate, moreArticlesGate, moreArticlesPreviewGate } = copySession;
+  const { articleResultGate, footerCopyGate, moreArticlesGate, moreArticlesPreviewGate } = copySession;
   const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
   let _plainTextCopy = null;
   let _lastCopiedHtml = '';
@@ -1366,6 +1367,14 @@ export function initApp(initialTemplate) {
         img.title = '';
       }
     });
+  }
+
+  function resetRetryUploadUI() {
+    const retryBtn = document.getElementById('retryBtn');
+    if (!retryBtn) return;
+    retryBtn.textContent = '重试上传';
+    retryBtn.disabled = false;
+    retryBtn.style.display = 'none';
   }
 
   function cardsNeedComposite(cards) {
@@ -1466,7 +1475,7 @@ export function initApp(initialTemplate) {
     document.getElementById('statsBar').textContent = settledSidebarStatus(stats);
 
     const retryBtn = document.getElementById('retryBtn');
-    if (retryBtn) retryBtn.style.display = 'none';
+    resetRetryUploadUI();
 
     window._updateFooter = function(newHtml) {
       if (bodyOnly) {
@@ -1556,6 +1565,7 @@ export function initApp(initialTemplate) {
     _uploadPromise = null;
     const statsBar = document.getElementById('statsBar');
     const stableStats = settledSidebarStatus(stats);
+    const articleResult = articleResultGate.capture();
 
     const skipUploadForThisFile = !!window._skipUpload && _sourceIsDocx;
     if (bodyOnly) {
@@ -1567,10 +1577,14 @@ export function initApp(initialTemplate) {
       const footerWriteGate = footerCopyGate.capture();
       _uploadPromise = materializeLazyImages(_articleCopy, _footerCopy, {
         onProgress(done, total) {
+          if (articleResult.stale()) return;
           if (total > 0) statsBar.textContent = '准备图片 (' + done + '/' + total + ')...';
         },
-        onLog: logConv,
+        onLog(...args) {
+          if (!articleResult.stale()) logConv(...args);
+        },
       }).then(result => {
+        if (articleResult.stale()) return false;
         _articleCopy = result.articleCopy;
         if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
         _failedSrcs = result.failedSrcs || [];
@@ -1581,6 +1595,7 @@ export function initApp(initialTemplate) {
         } else {
           statsBar.textContent = stableStats;
         }
+        return true;
       });
       logConv('info', 'DOCX 跳过上传：仅准备本地图片，不上传');
       prepareMoreArticlesForCopy('preview');
@@ -1599,15 +1614,20 @@ export function initApp(initialTemplate) {
     _uploadPromise = uploadNonCdnImages(_articleCopy, _footerCopy, {
       transferMmbiz,
       onProgress(done, total) {
+        if (articleResult.stale()) return;
         statsBar.textContent = (transferMmbiz ? '转存图片 (' : '上传图片 (') + done + '/' + total + ')...';
       },
-      onLog: logConv,
+      onLog(...args) {
+        if (!articleResult.stale()) logConv(...args);
+      },
       onMaterialized(result) {
+        if (articleResult.stale()) return;
         _articleCopy = result.articleCopy;
         if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
         _failedSrcs = result.failedSrcs || [];
       },
     }).then(result => {
+      if (articleResult.stale()) return false;
       _articleCopy = result.articleCopy;
       if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
       _failedSrcs = result.failedSrcs || [];
@@ -1619,6 +1639,7 @@ export function initApp(initialTemplate) {
       } else {
         statsBar.textContent = hasDocumentSummaryCard() ? '' : uploadStatus(stableStats, '全部图片已就绪');
       }
+      return true;
     });
     prepareMoreArticlesForCopy('preview');
   }
@@ -1629,13 +1650,18 @@ export function initApp(initialTemplate) {
     const statsBar = document.getElementById('statsBar');
     if (retryBtn) { retryBtn.textContent = '重试中...'; retryBtn.disabled = true; }
 
+    const articleResult = articleResultGate.capture();
     const footerWriteGate = footerCopyGate.capture();
     const result = await retryFailedImages(_articleCopy, _footerCopy, _failedSrcs, {
       onProgress(done, total) {
+        if (articleResult.stale()) return;
         statsBar.textContent = '重试上传 (' + done + '/' + total + ')...';
       },
-      onLog: logConv,
+      onLog(...args) {
+        if (!articleResult.stale()) logConv(...args);
+      },
     });
+    if (articleResult.stale()) return false;
     _articleCopy = result.articleCopy;
     if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
     _failedSrcs = result.failedSrcs;
@@ -1649,6 +1675,7 @@ export function initApp(initialTemplate) {
       if (retryBtn) retryBtn.style.display = 'none';
     }
     if (retryBtn) { retryBtn.textContent = '重试上传'; retryBtn.disabled = false; }
+    return true;
   };
 
   // ---- Conversion Log ----
@@ -1763,6 +1790,9 @@ export function initApp(initialTemplate) {
   let zoomIdx = ZOOM_STEPS.length - 1;
 
   window.goBack = function() {
+    copySession.resetForNewArticle();
+    _moreArticlesCopyJob = null;
+    resetRetryUploadUI();
     // Split layout: hide preview, show empty state
     const emptyState = document.getElementById('emptyState');
     const previewContent = document.getElementById('previewContent');
