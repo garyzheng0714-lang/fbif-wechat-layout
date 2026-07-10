@@ -86,6 +86,12 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - **审核人身份**：operator.open_id 落 job（新字段 reviewed_by/reviewed_at），留痕进终态卡。
 - **外部配置**（代码上线后）：开放平台应用后台「事件与回调」配回调地址 `https://fbifmp-layout.foodtalks.cn/api/feishu/card-callback` + 订阅 card.action.trigger + 取 Verification Token 回填 publish.env。Caddy /api/* 已通配转 9001，无需改配置。
 
+### 预览链接（2026-07-10 用户裁定：审核必须给未上架的预览链接，不能盲审）
+- 排版工具自己出预览页：`GET /preview/publish/{id}?t=<HMAC 签名>`——渲染 job 的 content_html（就是将要发布的字节）+ 标题 + AI 预填参数（封面/摘要/标签/作者）侧栏 + 顶部醒目横幅「预览 · 未发布」。白底、680px 内容宽度近似 FoodTalks 前台阅读版式。
+- 签名：`t = hex(HMAC-SHA256(ADMIN_PASSWORD, "publish-preview:" + id))`——免登录可分享给审核人，但不可遍历、不可伪造；未发布内容不裸奔。
+- 卡片按钮改为：「通过并发布」「驳回」「预览效果」（open_url 指预览链接，取代「查看原文」的主位；原文链接移入卡片正文一行）。发布面板与 feed 徽标详情同样引用该预览链接。
+- 不采用 FoodTalks CMS 后台预览：依赖对方功能与账号体系，跳出飞书体验差且不可控。
+
 ## M5：AI 预填发布参数（2026-07-10 用户新增）
 
 用户原话要点：模型审核任务多加一个——选合适封面图、摘要、标签、文章作者等参数信息**预填好**；模型还要输出一段**非常清晰直白简短的优化说明**（格式哪里不规范、怎么调整的）。
