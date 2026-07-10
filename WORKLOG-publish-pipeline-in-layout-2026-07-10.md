@@ -93,7 +93,19 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - **回调安全模型**：无 ADMIN_PASSWORD 门（飞书服务器调用）；FEISHU_VERIFICATION_TOKEN 比对（url_verification 顶层 token / 事件 header.token 双形态），不匹配 401；未配置 WARN 放行（仅首次配置窗口，配好必须回填 publish.env）；业务性失败（任务不存在/已被处理）回 200+toast 防飞书重试轰炸；防重复点击：终态回「已被处理」+当前终态卡（update_multi 群内旧卡一并刷新）；非终态非待审（failed/publicizing 半途）只回 toast 指路管理后台、不动卡片。
 - **实施决策**：① 卡片发送成功不再发文本（同一事件不双通知），失败才降级——测试锁定；② published/rejected 既有文本通知位点保留（HTTP 审核路径的既有能力，卡片回调场景终态卡已原地刷新）；③ job_id 回传兼容数字/字符串两种 JSON 形态（coerceFeishuJobID）。
 - **与下方「预览链接」裁定的衔接（✅ 2026-07-10 已随 M5 实施）**：卡片第三键已换成「预览效果」（open_url=预览签名链接），原文链接移入卡片信息色块一行——单点改了 `buildReviewPendingCard`，回调与安全模型未动。详见「M5 + 预览页实施」节。
-- [ ] 开放平台外部配置（用户照做，见上方「外部配置」行）
+- [ ] 开放平台外部配置（用户照做，见上方「外部配置」行；⚠️ 2026-07-10 用户已在后台把「订阅方式」选为**长连接**——见下方 M4b，Webhook 的回调地址/verification token 配置只在切回 Webhook 模式时才需要）
+
+### M4b：卡片回调升级长连接（WebSocket）模式（2026-07-10 完成）
+
+用户在飞书开放平台已选「使用长连接接收回调」，Webhook 模式升级为长连接，用官方 Go SDK。
+
+- **SDK**：`github.com/larksuite/oapi-sdk-go/v3` **v3.9.9**（go.mod 直接依赖；连带 indirect：gorilla/websocket v1.5.0、gogo/protobuf v1.3.2）。类型签名全部经 go doc 查证：`larkws.NewClient(appID, appSecret, WithEventHandler, WithAutoReconnect(true), WithOnReady/OnReconnecting/OnReconnected/OnError)` + 阻塞式 `Start(ctx)`；handler=`dispatcher.NewEventDispatcher("","").OnP2CardActionTrigger(...)`；事件 `callback.CardActionTriggerEvent`（`Event.Operator.OpenID` string / `Event.Action.Value` map[string]interface{}）；响应 `callback.CardActionTriggerResponse{Toast, Card{Type:"raw", Data: 卡片 map}}`。
+- **两模式并存**：Webhook 端点（`/api/feishu/card-callback`）保留作备用通道，**生效哪条由飞书后台「事件与回调 → 订阅方式」单选决定**（选长连接时飞书不再调 Webhook）。长连接由 SDK 建连时用 app_id/app_secret 内置鉴权，无需 FEISHU_VERIFICATION_TOKEN（那是 Webhook 验来源用的，保留）。
+- **业务段归一**：Webhook 原 `handleReviewCardAction` 的「事件解析后业务段」抽成两模式共用的 `publishPipeline.reviewCardAction(ctx, operatorOpenID, rawValue)`（feishu_card_callback.go，返回中立 `reviewCardOutcome{toastType, toastContent, card}`），Webhook/长连接各自薄壳包装成协议响应——审核语义与权限红线仍只在 `publishPipeline.review` 定义一次，**review 核心与卡片构建零改动（只消费）**。
+- **文件**：新增 `api/feishu_ws.go`（`maybeStartFeishuWS(publishPipe)`：FEISHU_APP_ID/SECRET 齐了 goroutine 启动、缺失 log 一行跳过；连接建立/断开/重连/事件处理结果全打人话日志）+ `api/feishu_ws_test.go`（3 个测试：事件体→业务参数解析含 job_id 数字/字符串两形态、空/残缺事件不 panic、长连接 approve 事件走同一 review 核心落 published+留痕+绿终态卡，全程桩不连真实飞书）；改 `api/feishu_card_callback.go`（抽 reviewCardAction）、`api/main.go`（启动处调 maybeStartFeishuWS）、`api/go.mod`/`go.sum`。
+- **验证**：`cd api && go test ./...` 全绿 + go vet 干净 + 根 `npm test` 792 全绿 + 新改文件 gofmt 干净 + public/ 零字节改动 + 单文件 ≤900 行；既有红线测试（forbidPublish 守卫、TestPublishNoPublicizeWithoutApprove、Webhook 7 测试）全绿未动。
+- **实施偏离**：施工图写 `maybeStartFeishuWS()` 无参，实施为 `maybeStartFeishuWS(p *publishPipeline)`——业务段需要 pipeline，从 main.go 启动处传入（不设包级全局变量）。
+- **遗留**：生产 publish.env 已有 FEISHU_APP_ID/SECRET（M4 通知在用），部署重启后长连接自动生效；断线期间飞书侧事件是否补推由飞书平台语义决定，Webhook 备用通道兜底需人工在后台切回。
 
 ### 预览链接（2026-07-10 用户裁定：审核必须给未上架的预览链接，不能盲审）
 - 排版工具自己出预览页：`GET /preview/publish/{id}?t=<HMAC 签名>`——渲染 job 的 content_html（就是将要发布的字节）+ 标题 + AI 预填参数（封面/摘要/标签/作者）侧栏 + 顶部醒目横幅「预览 · 未发布」。白底、680px 内容宽度近似 FoodTalks 前台阅读版式。

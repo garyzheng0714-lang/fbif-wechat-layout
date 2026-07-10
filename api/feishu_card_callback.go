@@ -2,12 +2,17 @@ package main
 
 // feishu_card_callback.go — 飞书卡片回调端点（施工图 M4）：POST /api/feishu/card-callback。
 //
+// ⚠️ 两模式并存（2026-07-10 升级长连接后）：卡片回调有 Webhook（本文件端点）与
+// 长连接 WebSocket（feishu_ws.go）两条通道，**生效哪条由飞书开放平台后台
+// 「事件与回调 → 订阅方式」单选决定**——选「使用长连接接收回调」时飞书不再调本端点。
+// 本端点保留作备用通道，事件解析后的业务段抽在 reviewCardAction，两模式共用一份。
+//
 // 安全模型（与其他 /api/publish/* 端点不同，本端点由飞书开放平台服务器调用，
 // **不能**上 ADMIN_PASSWORD 门）：
 //  1. verification token 校验：env FEISHU_VERIFICATION_TOKEN 与请求携带的 token 比对，
 //     不匹配一律 401。未配置时 WARN 放行——仅为首次配置窗口（开放平台后台要先配回调
 //     地址并通过 challenge 验证才发得下 token）；⚠️ 首次配置后必须把 token 回填
-//     publish.env，长期空置等于回调裸奔。
+//     publish.env，长期空置等于回调裸奔。（长连接模式无此项：SDK 建连时内置鉴权。）
 //  2. 业务态校验：审核动作走与 HTTP review 端点同一个 review 核心（publishPipeline.review），
 //     仅 awaiting_review 可操作、approve 仍是翻公开的唯一路径——按钮不是新的权限入口。
 //
@@ -19,6 +24,7 @@ package main
 //     轰炸端点；只有鉴权失败才 401。
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -88,44 +94,60 @@ func feishuCallbackTokenOK(got string) bool {
 	return got == want
 }
 
-// handleReviewCardAction 卡片按钮动作 → review 核心。返回 3 秒响应体 {toast, card}。
+// handleReviewCardAction Webhook 模式薄壳：事件字段 → 共用业务段 → 3 秒响应体 {toast, card}。
 func (p *publishPipeline) handleReviewCardAction(r *http.Request, payload feishuCardCallbackPayload) map[string]any {
+	out := p.reviewCardAction(r.Context(), payload.Event.Operator.OpenID, payload.Event.Action.Value)
+	return feishuCardToast(out.toastType, out.toastContent, out.card)
+}
+
+// reviewCardOutcome 卡片按钮业务处理结果——Webhook 与长连接两模式共用的中立形态，
+// 由各自的薄壳包装成协议响应（Webhook: {toast,card} JSON；长连接: SDK CardActionTriggerResponse）。
+type reviewCardOutcome struct {
+	toastType    string // success / info / error
+	toastContent string
+	card         map[string]any // 非 nil 时以 raw 形态刷新卡片（终态卡，update_multi 群内同步）
+}
+
+// reviewCardAction 卡片按钮动作的业务核心（两模式共用唯一入口）：解析 value
+// （action + job_id，兼容数字/字符串）→ 业务态校验 → review 核心 → 终态卡。
+// 审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
+func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID string, rawValue json.RawMessage) reviewCardOutcome {
 	var value struct {
 		Action string `json:"action"`
 		JobID  any    `json:"job_id"`
 	}
-	if len(payload.Event.Action.Value) > 0 {
-		if err := json.Unmarshal(payload.Event.Action.Value, &value); err != nil {
-			return feishuCardToast("error", "按钮数据无法解析", nil)
+	if len(rawValue) > 0 {
+		if err := json.Unmarshal(rawValue, &value); err != nil {
+			return reviewCardOutcome{toastType: "error", toastContent: "按钮数据无法解析"}
 		}
 	}
 	jobID := coerceFeishuJobID(value.JobID)
 	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionReject) {
-		return feishuCardToast("error", "按钮数据不完整，无法定位发布任务", nil)
+		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位发布任务"}
 	}
 	job, err := p.store.byID(jobID)
 	if err != nil {
-		return feishuCardToast("error", err.Error(), nil)
+		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
 	// 防重复点击：任务已进终态 → 提示已被处理，并把卡片刷成当前终态（update_multi
 	// 让群里其他人手里的旧「待审核」卡也一起变终态）。
 	if job.terminal() {
-		return feishuCardToast("info", "该任务已被处理", buildReviewDoneCard(job))
+		return reviewCardOutcome{toastType: "info", toastContent: "该任务已被处理", card: buildReviewDoneCard(job)}
 	}
 	if job.Stage != publishStageAwaitingReview {
 		// 非终态也非待审（failed / publicizing 半途）：不动卡片，指路管理后台。
-		return feishuCardToast("info", fmt.Sprintf("任务当前阶段（%s）无法在卡片上操作，请到管理后台处理", job.Stage), nil)
+		return reviewCardOutcome{toastType: "info", toastContent: fmt.Sprintf("任务当前阶段（%s）无法在卡片上操作，请到管理后台处理", job.Stage)}
 	}
 	// 审核人身份唯一可信来源是 operator.open_id（cardkit 规范 04），不信 value 自带字段。
-	reviewed, err := p.review(r.Context(), jobID, value.Action, payload.Event.Operator.OpenID)
+	reviewed, err := p.review(ctx, jobID, value.Action, operatorOpenID)
 	if err != nil {
-		return feishuCardToast("error", err.Error(), nil)
+		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
 	toast := "已发布"
 	if value.Action == feishuCardActionReject {
 		toast = "已驳回"
 	}
-	return feishuCardToast("success", toast, buildReviewDoneCard(reviewed))
+	return reviewCardOutcome{toastType: "success", toastContent: toast, card: buildReviewDoneCard(reviewed)}
 }
 
 // coerceFeishuJobID 回调 value 里的 job_id 兼容数字与字符串两种 JSON 形态。

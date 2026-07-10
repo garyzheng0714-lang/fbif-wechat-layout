@@ -122,6 +122,9 @@ func main() {
 	// 飞书卡片审核回调（M4）：飞书服务器调用，无 ADMIN_PASSWORD 门，安全靠
 	// FEISHU_VERIFICATION_TOKEN 校验 + review 核心的业务态校验（见 feishu_card_callback.go）。
 	registerFeishuCardCallbackRoute(mux, publishPipe)
+	// 飞书卡片回调·长连接模式（2026-07-10 升级）：与上方 Webhook 端点并存，生效哪个
+	// 由飞书后台「订阅方式」单选决定；业务段两模式共用（见 feishu_ws.go）。
+	maybeStartFeishuWS(publishPipe)
 	// 未上架预览页（M4「预览链接」裁定）：免登录但 HMAC 签名门（key=ADMIN_PASSWORD），
 	// 签名错/不存在/阶段太早一律 404（见 publish_preview.go 安全模型）。
 	registerPublishPreviewRoute(mux, publishStore)
