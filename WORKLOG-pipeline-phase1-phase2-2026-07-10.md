@@ -1,5 +1,12 @@
 # WORKLOG：内容发布流水线 Phase 1（FoodTalks API 冒烟）+ Phase 2（render 支持网站模板）
 
+## 2026-07-10 第二批用户构思（原话要点 + 裁定，Phase 3 开工同轮）
+
+1. **架构人话讲解**：已交付 Artifact「内容发布流水线 · 全景图」（含模块地图/文章八站旅程/AI 质检铁闸/登录矩阵/M1-M6 路线）。
+2. **排版工具加登录**：飞书登录（走 ~/.claude/skills/feishu-login-guide v4 单应用模式，生产锚点 feed.foodtalks.cn）+ 外部兼职账号密码（skill 的 account-password 场景；首个账号 mrfood，密码见用户会话原话，**只进服务端加密存储，不进 git/文档**）。权限分层：兼职只能排版，规则后台不可见。→ 排队为 M2，与 M1 并行。
+3. **LLM 排版质检**（用户原构思「排版工具抽象为智能体」，经讨论收窄为「机器出口加 AI 质检岗」）：豆包 Doubao-Seed-2.1-pro（ARK responses API，多模态），**ARK_API_KEY env-only 不进 git**。铁律：模型只改排版不改内容，由代码三道铁闸强制（纯文本逐字符一致/图片清单一致/链接一致，违者弃用模型输出并告警）；质检失败不阻塞流水线（原样放行+审核消息标注）。一期读 HTML 结构审（M3），二期截图视觉审（M5，复用本仓库 Playwright 基建）。
+4. Phase 3 已开工：internal/foodtalks 客户端（资讯订阅仓库）后台代理进行中。
+
 - 日期：2026-07-10
 - 依据：`openspec/changes/content-publish-pipeline/tasks.md` Phase 1 / Phase 2
 - 用户授权：2026-07-10 用户回复「开跑」——批准 Phase 1 对 FoodTalks **测试环境** 的真实写入冒烟 + Phase 2 本仓库代码工作
