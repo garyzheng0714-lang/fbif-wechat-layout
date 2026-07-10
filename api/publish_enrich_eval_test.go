@@ -161,10 +161,12 @@ func TestEnrichEvalAgainstEditorial(t *testing.T) {
 		if len(r.art.Tags) == 0 || hit {
 			tagHit++ // 编辑部没打标签的样本不算失分
 		}
-		// 作者：只对编辑部有填的样本计精确率；匹配用「一方包含另一方」——编辑部自己
-		// 对同一人就有「Mote莫特 / Mote / mote」三种写法（62496/62443 实测），AI 照抄
-		// 正文原署名是对的，不能因编辑部缩写而判错。真值为空时统计编造量（红线）。
-		if r.art.Author != "" {
+		// 作者：只对「编辑部有填 **且** 真值确实出现在正文里」的样本计精确率——不在
+		// 正文里的无从抽取（62411 实测：编辑从原文页面外部获知），与出处抽取同口径。
+		// 匹配用「一方包含另一方」——编辑部自己对同一人就有「Mote莫特 / Mote / mote」
+		// 三种写法（62496/62443 实测），AI 照抄正文原署名是对的，不能因编辑部缩写而
+		// 判错。真值为空时统计编造量（红线）。
+		if r.art.Author != "" && strings.Contains(evalNorm(r.art.Content), evalNorm(r.art.Author)) {
 			authorTotal++
 			gotA, wantA := evalNorm(r.out.Author), evalNorm(r.art.Author)
 			if gotA != "" && (strings.Contains(gotA, wantA) || strings.Contains(wantA, gotA)) {

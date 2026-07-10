@@ -46,6 +46,15 @@ fbifmp-layout.foodtalks.cn {
 		reverse_proxy localhost:9001
 	}
 
+	# 发布流水线（M4-M7）：审核预览页 + 任务管理 API + 飞书卡片回调（Webhook 备用线）。
+	# 2026-07-10 踩坑：本 vhost 是路径白名单，漏登记的路径会落到静态兜底 try_files
+	# 返回 index.html 空壳——用户点卡片「预览效果」看到空页即此因。新增 9001 端点必须
+	# 同步登记到这里。
+	@fbifPublish path /preview/* /api/publish/* /api/feishu/*
+	handle @fbifPublish {
+		reverse_proxy localhost:9001
+	}
+
 	encode gzip zstd
 
 	handle /api/wechat-draft {
