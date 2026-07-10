@@ -50,7 +50,7 @@ const (
 )
 
 // errFoodTalksNotConfigured 凭证未配置——调用方应显式落败并提示，不得静默跳过。
-var errFoodTalksNotConfigured = errors.New("FoodTalks 发布未配置（需 env FOODTALKS_BASE_URL / FOODTALKS_TOKEN / FOODTALKS_ORIGIN）")
+var errFoodTalksNotConfigured = errors.New("FoodTalks 发布未配置（需 env FOODTALKS_BASE_URL / FOODTALKS_TOKEN；FOODTALKS_ORIGIN 仅测试环境需要）")
 
 // errFoodTalksUnauthorized 应用层鉴权失败（HTTP 401，或带 JSON 体的 403）。
 // 降级行为：job 落 failed 并给人话「FoodTalks 凭证过期」，不静默重试打爆接口。
@@ -162,8 +162,11 @@ type foodTalksClient struct {
 func newFoodTalksClientFromEnv() (*foodTalksClient, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv(foodTalksBaseURLEnv)), "/")
 	token := strings.TrimSpace(os.Getenv(foodTalksTokenEnv))
+	// FOODTALKS_ORIGIN 是「浏览器头模式」开关（2026-07-10 用户裁定 + 双环境实测）：
+	//   - 配置了 → 带 Origin/Referer/UA 三头（测试环境网关要求，否则 403）
+	//   - 不配置 → 纯 token 直连（正式环境走 IP 白名单，后端要求不伪装浏览器）
 	origin := strings.TrimRight(strings.TrimSpace(os.Getenv(foodTalksOriginEnv)), "/")
-	if baseURL == "" || token == "" || origin == "" {
+	if baseURL == "" || token == "" {
 		return nil, errFoodTalksNotConfigured
 	}
 	return &foodTalksClient{
@@ -218,13 +221,19 @@ func (c *foodTalksClient) send(ctx context.Context, method string, body foodTalk
 	if err != nil {
 		return nil, fmt.Errorf("foodtalks: 构造请求: %w", err)
 	}
-	// 固定头全集（契约 §1）：缺 Origin/Referer/浏览器 UA 任一层就到不了应用层。
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Origin", c.origin)
-	req.Header.Set("Referer", c.origin+"/")
-	req.Header.Set("User-Agent", foodTalksBrowserUA)
+	// 浏览器头模式（origin 已配置）：测试环境网关要求 Origin/Referer/UA，缺任一 403（契约 §1）。
+	// 白名单模式（origin 未配置）：正式环境按 IP 放行，不伪装浏览器（2026-07-10 用户裁定，
+	// 实测纯 token 直达应用层）；显式置空 UA 压掉 Go 默认的 Go-http-client。
+	if c.origin != "" {
+		req.Header.Set("Origin", c.origin)
+		req.Header.Set("Referer", c.origin+"/")
+		req.Header.Set("User-Agent", foodTalksBrowserUA)
+	} else {
+		req.Header.Set("User-Agent", "")
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
