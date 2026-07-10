@@ -61,7 +61,7 @@ func accountCatalog() []accountMeta {
 			PreviewAccountName:  "FoodTalks什么是系列",
 			BehaviorAccountName: "FoodTalks什么是系列",
 			AvatarURL:           "/fbif-avatar.webp",
-			FooterURL:           "", // 空串 = 不追加 FBIF 公众号页脚；「什么是」系列尾部（名片/Eileen/群二维码）由模板自身在正文末渲染
+			FooterURL:           "",          // 空串 = 不追加 FBIF 公众号页脚；「什么是」系列尾部（名片/Eileen/群二维码）由模板自身在正文末渲染
 			FooterPicker:        "ft-series", // 声明侧栏用系列尾部选择器；app.html 据此显隐，取代硬编码 id 比较
 			Location:            "上海",
 			DefaultPresetID:     foodTalksDefaultRulePresetID, // "foodtalks-series-default"
@@ -75,7 +75,7 @@ func accountCatalog() []accountMeta {
 			PreviewAccountName:  "WowFood爆品超市",
 			BehaviorAccountName: "WowFood爆品超市",
 			AvatarURL:           "/fbif-avatar.webp", // TODO: 待 WowFood 头像资源就位后替换
-			FooterURL:           "", // 空串 = 不追加 FBIF 公众号页脚；WowFood 自己的尾部规则走它独立 preset
+			FooterURL:           "",                  // 空串 = 不追加 FBIF 公众号页脚；WowFood 自己的尾部规则走它独立 preset
 			Location:            "上海",
 			DefaultPresetID:     wowFoodDefaultRulePresetID, // "wowfood-default"
 			Note:                "复用公众号渲染器（templateId=fbif）；footerUrl 空串不追加 FBIF 页脚；avatar 待替换。",
@@ -193,6 +193,7 @@ func renderRegistryJS() string {
 		b.WriteString("  " + jsKey(m.ID) + ": Object.freeze({\n")
 		b.WriteString("    id: " + jsStr(m.ID) + ",\n")
 		b.WriteString("    templateId: " + jsStr(m.TemplateID) + ",\n")
+		b.WriteString("    defaultPresetId: " + jsStr(m.DefaultPresetID) + ",\n")
 		b.WriteString("    accountName: " + jsStr(m.AccountName) + ",\n")
 		b.WriteString("    previewAccountName: " + jsStr(m.PreviewAccountName) + ",\n")
 		b.WriteString("    behaviorAccountName: " + jsStr(m.BehaviorAccountName) + ",\n")

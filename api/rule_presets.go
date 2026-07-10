@@ -31,12 +31,18 @@ type rulePreset struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	Channel     string `json:"channel,omitempty"`
+	RuleFamily  string `json:"rule_family,omitempty"`
 	// BaselineID 显式指向一个内置账号基线 preset。自建规则不再从
 	// ID/当前账号猜继承关系；只允许 defaultRuleDefinitions 中的受控 id。
-	BaselineID string         `json:"baseline_id"`
-	Config     map[string]any `json:"config"`
-	Behavior   map[string]any `json:"behavior,omitempty"`
-	UpdatedAt  string         `json:"updated_at"`
+	BaselineID string `json:"baseline_id"`
+	// MigrationRequired 只来自 schema v1/v2 迁移：旧数据无法唯一推断
+	// baseline 时显式标记，禁止新绑定，直到管理员选择基线并重新保存。
+	MigrationRequired bool           `json:"migration_required,omitempty"`
+	MigrationNote     string         `json:"migration_note,omitempty"`
+	Config            map[string]any `json:"config"`
+	Behavior          map[string]any `json:"behavior,omitempty"`
+	UpdatedAt         string         `json:"updated_at"`
 }
 
 type rulePresetDocument struct {
@@ -61,12 +67,14 @@ type rulePresetVersion struct {
 }
 
 type ruleDefinition struct {
-	ID          string              `json:"id"`
-	Name        string              `json:"name"`
-	Description string              `json:"description,omitempty"`
-	BaselineID  string              `json:"baseline_id"`
-	Versions    []rulePresetVersion `json:"versions"`
-	UpdatedAt   string              `json:"updated_at"`
+	ID                string              `json:"id"`
+	Name              string              `json:"name"`
+	Description       string              `json:"description,omitempty"`
+	BaselineID        string              `json:"baseline_id"`
+	MigrationRequired bool                `json:"migration_required,omitempty"`
+	MigrationNote     string              `json:"migration_note,omitempty"`
+	Versions          []rulePresetVersion `json:"versions"`
+	UpdatedAt         string              `json:"updated_at"`
 	// BuiltinVersion 标记该内置默认 preset 对应的代码版本。store 加载时若持久化值
 	// 落后于代码 currentBuiltinRuleVersion，则用代码默认覆盖（修复历史持久化旧数据 +
 	// 防代码更新被旧持久化挡住）。仅作用于 defaultRuleDefinitions 里的固定 id；
@@ -327,8 +335,12 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 			if version.CreatedAt == "" {
 				version.CreatedAt = now
 			}
-			version.Config = mergeRuleDefaults(rule.BaselineID, version.Config)
-			version.Behavior = mergeRuleBehavior(rule.BaselineID, version.Behavior)
+			// 旧规则基线存在歧义时不能先用占位 baseline 展开并写回内存，
+			// 否则其他账号再按自己的基线合并时仍会残留错误默认值。
+			if !rule.MigrationRequired {
+				version.Config = mergeRuleDefaults(rule.BaselineID, version.Config)
+				version.Behavior = mergeRuleBehavior(rule.BaselineID, version.Behavior)
+			}
 			versions = append(versions, version)
 		}
 		sort.SliceStable(versions, func(i, j int) bool {
@@ -440,13 +452,17 @@ func legacyDocumentFromStore(doc ruleStoreDocumentV2) rulePresetDocument {
 			version = ruleVersionOrLatest(rule, account.ActiveRuleVersion)
 		}
 		presets = append(presets, rulePreset{
-			ID:          rule.ID,
-			Name:        rule.Name,
-			Description: rule.Description,
-			BaselineID:  rule.BaselineID,
-			Config:      mergeRuleDefaults(rule.BaselineID, version.Config),
-			Behavior:    mergeRuleBehavior(rule.BaselineID, version.Behavior),
-			UpdatedAt:   rule.UpdatedAt,
+			ID:                rule.ID,
+			Name:              rule.Name,
+			Description:       rule.Description,
+			Channel:           ruleChannelForBaseline(rule.BaselineID),
+			RuleFamily:        ruleFamilyForBaseline(rule.BaselineID),
+			BaselineID:        rule.BaselineID,
+			MigrationRequired: rule.MigrationRequired,
+			MigrationNote:     rule.MigrationNote,
+			Config:            mergeRuleDefaults(rule.BaselineID, version.Config),
+			Behavior:          mergeRuleBehavior(rule.BaselineID, version.Behavior),
+			UpdatedAt:         rule.UpdatedAt,
 		})
 	}
 	return rulePresetDocument{
@@ -508,6 +524,9 @@ func seenRulePreset(presets []rulePreset, id string) bool {
 
 func (s *rulePresetStore) writeStoreLocked(doc ruleStoreDocumentV2) error {
 	doc = normalizeRuleStoreDocument(doc)
+	if err := validateRuleStoreBaselines(doc); err != nil {
+		return err
+	}
 	doc.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	shadow := legacyDocumentFromStore(doc)
 	doc.ActiveID = shadow.ActiveID
@@ -558,24 +577,40 @@ func (s *rulePresetStore) activeForAccount(accountID string) (rulePreset, error)
 	if err != nil {
 		return rulePreset{}, err
 	}
-	account := doc.Accounts[sanitizeRuleAccountID(accountID)]
+	accountID = sanitizeRuleAccountID(accountID)
+	meta, ok := accountMetaByID(accountID)
+	if !ok {
+		return rulePreset{}, fmt.Errorf("未知规则账号 account_id=%q", accountID)
+	}
+	account := doc.Accounts[accountID]
 	if account.ActiveRuleID == "" {
-		account = doc.Accounts[defaultRuleAccountID]
+		account.ActiveRuleID = meta.DefaultPresetID
+		account.ActiveRuleVersion = latestRuleVersion(doc.Rules[meta.DefaultPresetID]).Version
 	}
 	rule := doc.Rules[account.ActiveRuleID]
 	if rule.ID == "" {
-		rule = doc.Rules[defaultRulePresetID]
+		rule = doc.Rules[meta.DefaultPresetID]
 		account.ActiveRuleVersion = latestRuleVersion(rule).Version
 	}
 	version := ruleVersionOrLatest(rule, account.ActiveRuleVersion)
+	baselineID := rule.BaselineID
+	if rule.MigrationRequired {
+		// 历史规则可能已绑定多个规则族。迁移确认前，每个现有绑定
+		// 按该账号自己的受控默认基线合并，不把占位 baseline 串到其他渠道。
+		baselineID = meta.DefaultPresetID
+	}
 	return rulePreset{
-		ID:          rule.ID,
-		Name:        rule.Name,
-		Description: rule.Description,
-		BaselineID:  rule.BaselineID,
-		Config:      mergeRuleDefaults(rule.BaselineID, version.Config),
-		Behavior:    mergeRuleBehavior(rule.BaselineID, version.Behavior),
-		UpdatedAt:   rule.UpdatedAt,
+		ID:                rule.ID,
+		Name:              rule.Name,
+		Description:       rule.Description,
+		Channel:           ruleChannelForBaseline(baselineID),
+		RuleFamily:        ruleFamilyForBaseline(baselineID),
+		BaselineID:        baselineID,
+		MigrationRequired: rule.MigrationRequired,
+		MigrationNote:     rule.MigrationNote,
+		Config:            mergeRuleDefaults(baselineID, version.Config),
+		Behavior:          mergeRuleBehavior(baselineID, version.Behavior),
+		UpdatedAt:         rule.UpdatedAt,
 	}, nil
 }
 
@@ -619,6 +654,10 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	rule.Name = p.Name
 	rule.Description = p.Description
 	rule.BaselineID = p.BaselineID
+	// 能通过 payload 校验走到这里，说明管理员已显式选择 baseline；
+	// 新版本从此不再属于待迁移规则。
+	rule.MigrationRequired = false
+	rule.MigrationNote = ""
 	// 用户保存内置默认 preset 即视为接受该 preset 的当前代码基线，避免下次加载被
 	// 内置默认覆盖；各内置账号有独立目标版本，不能再写全局 currentBuiltinRuleVersion。
 	if isProtectedDefaultPreset(p.ID) {
@@ -664,6 +703,15 @@ func (s *rulePresetStore) setActiveForAccount(accountID, id string) (rulePresetD
 		return legacyDocumentFromStore(doc), fmt.Errorf("rule preset not found")
 	}
 	accountID = sanitizeRuleAccountID(accountID)
+	if _, ok := accountMetaByID(accountID); !ok {
+		return legacyDocumentFromStore(doc), fmt.Errorf("未知规则账号 account_id=%q", accountID)
+	}
+	if rule.MigrationRequired {
+		return legacyDocumentFromStore(doc), fmt.Errorf("规则 %q 需先确认历史基线后才能绑定：%s", rule.ID, rule.MigrationNote)
+	}
+	if err := validateRuleBindingFamily(accountID, rule); err != nil {
+		return legacyDocumentFromStore(doc), err
+	}
 	account := doc.Accounts[accountID]
 	if account.Name == "" {
 		account.Name = accountID
@@ -755,13 +803,94 @@ func legacyCompatibleBaselineID(ruleID, baselineID string) string {
 	return defaultRulePresetID
 }
 
+func ruleChannelForBaseline(baselineID string) string {
+	baselineID = sanitizeRulePresetID(baselineID)
+	channel := ""
+	for _, meta := range accountCatalog() {
+		if sanitizeRulePresetID(meta.DefaultPresetID) != baselineID {
+			continue
+		}
+		if channel != "" && channel != meta.Channel {
+			return ""
+		}
+		channel = meta.Channel
+	}
+	return channel
+}
+
+func ruleFamilyForBaseline(baselineID string) string {
+	baselineID = sanitizeRulePresetID(baselineID)
+	family := ""
+	for _, meta := range accountCatalog() {
+		if sanitizeRulePresetID(meta.DefaultPresetID) != baselineID {
+			continue
+		}
+		if family != "" && family != meta.TemplateID {
+			return ""
+		}
+		family = meta.TemplateID
+	}
+	return family
+}
+
+func validateRuleBindingFamily(accountID string, rule ruleDefinition) error {
+	meta, ok := accountMetaByID(sanitizeRuleAccountID(accountID))
+	if !ok {
+		return fmt.Errorf("未知规则账号 account_id=%q", accountID)
+	}
+	ruleFamily := ruleFamilyForBaseline(rule.BaselineID)
+	if ruleFamily == "" {
+		return fmt.Errorf("规则 %q 的 baseline_id=%q 没有已登记规则族", rule.ID, rule.BaselineID)
+	}
+	if ruleFamily != meta.TemplateID {
+		return fmt.Errorf("规则 %q 属于 %s 规则族，不能绑定到 %s 规则族账号 %q", rule.ID, ruleFamily, meta.TemplateID, meta.ID)
+	}
+	return nil
+}
+
+func legacyBaselineFromAccountBindings(doc ruleStoreDocumentV2, ruleID string) (string, bool, string) {
+	candidates := make([]string, 0, 2)
+	seen := map[string]bool{}
+	// 按 accountCatalog 声明顺序推导，不依赖 Go map 的随机迭代顺序。
+	for _, meta := range accountCatalog() {
+		account, ok := doc.Accounts[meta.ID]
+		if !ok || sanitizeRulePresetID(account.ActiveRuleID) != ruleID {
+			continue
+		}
+		baselineID := sanitizeRulePresetID(meta.DefaultPresetID)
+		if !seen[baselineID] {
+			seen[baselineID] = true
+			candidates = append(candidates, baselineID)
+		}
+	}
+	if len(candidates) == 1 {
+		return candidates[0], false, ""
+	}
+	if len(candidates) == 0 {
+		return defaultRulePresetID, true, "历史规则未绑定账号，无法推断 baseline_id；请在规则后台选择基线并保存"
+	}
+	return candidates[0], true, fmt.Sprintf("历史规则同时来自多个账号基线（%s），无法推断唯一 baseline_id；请拆分绑定或确认基线并保存", strings.Join(candidates, "、"))
+}
+
 func migrateLegacyRuleBaselines(doc *ruleStoreDocumentV2) {
 	if doc == nil {
 		return
 	}
 	for id, rule := range doc.Rules {
 		ruleID := sanitizeRulePresetID(firstNonEmpty(rule.ID, id))
-		rule.BaselineID = legacyCompatibleBaselineID(ruleID, rule.BaselineID)
+		baselineID := sanitizeRulePresetID(rule.BaselineID)
+		if baselineID == "" {
+			if isProtectedDefaultPreset(ruleID) {
+				baselineID = ruleID
+			} else {
+				var migrationRequired bool
+				var migrationNote string
+				baselineID, migrationRequired, migrationNote = legacyBaselineFromAccountBindings(*doc, ruleID)
+				rule.MigrationRequired = migrationRequired
+				rule.MigrationNote = migrationNote
+			}
+		}
+		rule.BaselineID = baselineID
 		doc.Rules[id] = rule
 	}
 	doc.SchemaVersion = currentRuleStoreSchemaVersion
@@ -786,6 +915,27 @@ func validateRuleStoreBaselines(doc ruleStoreDocumentV2) error {
 		}
 		if isProtectedDefaultPreset(ruleID) && sanitizeRulePresetID(rule.BaselineID) != ruleID {
 			return fmt.Errorf("内置规则 %q 的 baseline_id 必须指向自身", ruleID)
+		}
+	}
+	for accountID, account := range doc.Accounts {
+		if _, ok := accountMetaByID(accountID); !ok {
+			return fmt.Errorf("未知规则账号 account_id=%q", accountID)
+		}
+		ruleID := sanitizeRulePresetID(account.ActiveRuleID)
+		if ruleID == "" {
+			continue
+		}
+		rule, ok := doc.Rules[ruleID]
+		if !ok || rule.ID == "" {
+			continue
+		}
+		if rule.MigrationRequired {
+			// 旧库的现有绑定允许继续读取，activeForAccount 会按各账号
+			// 自己的受控基线合并；新绑定由 setActiveForAccount 明确拒绝。
+			continue
+		}
+		if err := validateRuleBindingFamily(accountID, rule); err != nil {
+			return err
 		}
 	}
 	return nil

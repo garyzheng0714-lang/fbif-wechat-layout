@@ -108,7 +108,17 @@ func assessPublishRiskWithFallback(ctx context.Context, job publishJob, assess f
 	if err != nil {
 		return fallbackPublishRisk(result.Raw, err)
 	}
-	return result
+	// 即使替换了 assessor，也必须经过同一结构校验；未知 level 绝不能以「非 block」
+	// 身份流入审核门。生产 arkAssess 已解析一次，这里是便宜的纵深防御。
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return fallbackPublishRisk(result.Raw, err)
+	}
+	normalized, err := parsePublishRiskAssessment(string(raw))
+	if err != nil {
+		return fallbackPublishRisk(result.Raw, err)
+	}
+	return normalized
 }
 
 func parsePublishRiskAssessment(text string) (publishRiskAssessment, error) {
@@ -184,4 +194,77 @@ func fallbackPublishRisk(raw string, cause error) publishRiskAssessment {
 		Notes: "风险检查未完成，必须由审核人手工核对后再决定。原因：" + reason,
 		Raw:   truncateRunes(strings.TrimSpace(raw), 2000),
 	}
+}
+
+func publishRiskLevelLabel(level string) string {
+	switch level {
+	case publishRiskPass:
+		return "通过"
+	case publishRiskBlock:
+		return "阻断"
+	case publishRiskWarning:
+		return "需人工核对"
+	default:
+		return "未检查"
+	}
+}
+
+// publishRiskAllowsManualApprove 采用 allowlist 而不是「非 block」判断：空值、拼写错误、
+// 未来新增级别都 fail-closed，只有已经完成检查的 pass/warning 可由人审核通过。
+func publishRiskAllowsManualApprove(level string) bool {
+	return level == publishRiskPass || level == publishRiskWarning
+}
+
+func publishRiskLevelKnown(level string) bool {
+	return publishRiskAllowsManualApprove(level) || level == publishRiskBlock
+}
+
+func publishRiskCategoryLabel(category string) string {
+	switch category {
+	case publishRiskCategoryEfficacy:
+		return "功效表达"
+	case publishRiskCategoryRepublication:
+		return "转载授权"
+	case publishRiskCategoryCompetitor:
+		return "竞品评价"
+	case publishRiskCategoryDataSource:
+		return "数据来源"
+	case publishRiskCategorySystem:
+		return "风险检查异常"
+	default:
+		return "其他风险"
+	}
+}
+
+// formatPublishRiskText 是飞书卡片降级为纯文本时的风险摘要；限制条目与长度，避免
+// 通知过长被平台拒收。完整证据仍持久化在 job 详情和预览页。
+func formatPublishRiskText(job publishJob) string {
+	var b strings.Builder
+	b.WriteString("风险审核：")
+	b.WriteString(publishRiskLevelLabel(job.RiskLevel))
+	limit := len(job.RiskItems)
+	if limit > 4 {
+		limit = 4
+	}
+	for i := 0; i < limit; i++ {
+		item := job.RiskItems[i]
+		b.WriteString("\n- ")
+		b.WriteString(publishRiskCategoryLabel(item.Category))
+		b.WriteString("：")
+		b.WriteString(truncateRunes(strings.Join(strings.Fields(item.Evidence), " "), 100))
+		b.WriteString("（")
+		b.WriteString(truncateRunes(strings.Join(strings.Fields(item.Reason), " "), 100))
+		b.WriteString("）")
+	}
+	if len(job.RiskItems) > limit {
+		b.WriteString(fmt.Sprintf("\n- 另有 %d 条，请在预览中查看", len(job.RiskItems)-limit))
+	}
+	if strings.TrimSpace(job.RiskNotes) != "" {
+		b.WriteString("\n说明：")
+		b.WriteString(truncateRunes(strings.Join(strings.Fields(job.RiskNotes), " "), 160))
+	}
+	if job.RiskLevel == publishRiskBlock {
+		b.WriteString("\n当前为阻断级，禁止一键通过发布。")
+	}
+	return b.String()
 }

@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -41,7 +42,7 @@ func TestPublishPreviewSignatureGate(t *testing.T) {
 	}
 	base := "/preview/publish/" + itoa64(job.ID)
 
-	if rec := getPreview(mux, base+"?t="+publishPreviewSig(job.ID)); rec.Code != http.StatusOK {
+	if rec := getPreview(mux, base+"?t="+publishPreviewSig(job.ID)+"&local=1"); rec.Code != http.StatusOK {
 		t.Fatalf("正确签名应 200，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
 	for name, target := range map[string]string{
@@ -61,19 +62,28 @@ func TestPublishPreviewSignatureGate(t *testing.T) {
 func TestPublishPreviewRendersArticle(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPreviewMux(t, env)
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, error) {
-		return `恶意<script>标题 & "引号"`, "测试公众号", "", testPublishBlocksJSON, nil
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+		return `恶意<script>标题 & "引号"`, "测试公众号", "", articleURL, testPublishBlocksJSON, nil
 	}
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID))
+	rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID)+"&local=1")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("应 200，实际 %d", rec.Code)
 	}
 	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Fatalf("Content-Type = %q", ct)
+	}
+	for header, want := range map[string]string{
+		"Content-Security-Policy": "default-src 'none'",
+		"X-Content-Type-Options":  "nosniff",
+		"Referrer-Policy":         "no-referrer",
+	} {
+		if got := rec.Header().Get(header); !strings.Contains(got, want) {
+			t.Fatalf("%s 缺安全策略 %q，实际 %q", header, want, got)
+		}
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "预览 · 未发布——本页仅供审核，实际上线以 FoodTalks 为准") {
@@ -120,12 +130,51 @@ func TestPublishPreviewStageGate(t *testing.T) {
 	if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewReject, ""); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
-	if rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID)); rec.Code != http.StatusOK {
+	if rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID)+"&local=1"); rec.Code != http.StatusOK {
 		t.Fatalf("rejected 终态应仍可预览，实际 %d", rec.Code)
 	}
 	// 无 ADMIN_PASSWORD → 503。
 	t.Setenv("ADMIN_PASSWORD", "")
 	if rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t=whatever"); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("无 ADMIN_PASSWORD 应 503，实际 %d", rec.Code)
+	}
+}
+
+// TestPublishPreviewRedirectsToOfficial 官方预览优先（2026-07-10 用户裁定）：草稿已
+// 进站（有 FoodTalksNewsID）且能现铸预览 token 时，302 到 FoodTalks 官方预览页
+// {front}/preview/news/{id}?token=...；?local=1 强制本地页（AI 参数兜底视图）。
+func TestPublishPreviewRedirectsToOfficial(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPreviewMux(t, env)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	ft := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/preview/token") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"id":7249,"token":"tok-fresh-123"}}`)
+			return
+		}
+		t.Errorf("FoodTalks 桩收到意外请求 %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(ft.Close)
+	t.Setenv("FOODTALKS_BASE_URL", ft.URL)
+	t.Setenv("FOODTALKS_TOKEN", "svc-token")
+	t.Setenv("FOODTALKS_FRONT_URL", "https://test.foodtalks.cn")
+
+	rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("应 302 到官方预览，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	got, _ := env.store.byID(job.ID)
+	wantLoc := "https://test.foodtalks.cn/preview/news/" + itoa64(got.FoodTalksNewsID) + "?token=tok-fresh-123"
+	if loc := rec.Header().Get("Location"); loc != wantLoc {
+		t.Fatalf("Location=%q，应为 %q", loc, wantLoc)
+	}
+	// ?local=1 强制本地预览页（仍走签名门）。
+	rec = getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID)+"&local=1")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "AI 预填参数") {
+		t.Fatalf("local=1 应渲染本地页，实际 %d", rec.Code)
 	}
 }

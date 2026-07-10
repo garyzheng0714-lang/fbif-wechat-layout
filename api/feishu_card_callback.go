@@ -26,6 +26,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -99,7 +100,7 @@ func feishuCallbackTokenOK(got string) bool {
 // 空白分隔；未配置、空 operator、非白名单全部拒绝，ADMIN_PASSWORD HTTP 审核不走这里。
 func feishuReviewerAllowed(operatorOpenID string) bool {
 	operatorOpenID = strings.TrimSpace(operatorOpenID)
-	if operatorOpenID == "" {
+	if !feishuOpenIDSafe(operatorOpenID) {
 		return false
 	}
 	items := strings.FieldsFunc(os.Getenv("FEISHU_REVIEWER_OPEN_IDS"), func(r rune) bool {
@@ -108,6 +109,32 @@ func feishuReviewerAllowed(operatorOpenID string) bool {
 	for _, item := range items {
 		candidate := strings.TrimSpace(item)
 		if len(candidate) == len(operatorOpenID) && subtle.ConstantTimeCompare([]byte(candidate), []byte(operatorOpenID)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func feishuOpenIDSafe(openID string) bool {
+	if openID == "" || len(openID) > 128 {
+		return false
+	}
+	for _, r := range openID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func feishuReviewerAllowlistConfigured() bool {
+	items := strings.FieldsFunc(os.Getenv("FEISHU_REVIEWER_OPEN_IDS"), func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	for _, item := range items {
+		if feishuOpenIDSafe(strings.TrimSpace(item)) {
 			return true
 		}
 	}
@@ -133,8 +160,9 @@ type reviewCardOutcome struct {
 // 审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
 func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID string, rawValue json.RawMessage) reviewCardOutcome {
 	var value struct {
-		Action string `json:"action"`
-		JobID  any    `json:"job_id"`
+		Action        string `json:"action"`
+		JobID         any    `json:"job_id"`
+		ReviewVersion string `json:"review_version"`
 	}
 	if len(rawValue) > 0 {
 		if err := json.Unmarshal(rawValue, &value); err != nil {
@@ -157,20 +185,40 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 	if job.terminal() {
 		return reviewCardOutcome{toastType: "info", toastContent: "该任务已被处理", card: buildReviewDoneCard(job)}
 	}
+	wantVersion := publishReviewCardVersion(job)
+	if wantVersion != "" && (len(value.ReviewVersion) != len(wantVersion) ||
+		subtle.ConstantTimeCompare([]byte(value.ReviewVersion), []byte(wantVersion)) != 1) {
+		return reviewCardOutcome{toastType: "error", toastContent: "审核卡已过期，请使用最新一张包含风险结论的卡片"}
+	}
 	if job.Stage != publishStageAwaitingReview {
 		// 非终态也非待审（failed / publicizing 半途）：不动卡片，指路管理后台。
 		return reviewCardOutcome{toastType: "info", toastContent: fmt.Sprintf("任务当前阶段（%s）无法在卡片上操作，请到管理后台处理", job.Stage)}
 	}
 	// 审核人身份唯一可信来源是 operator.open_id（cardkit 规范 04），不信 value 自带字段。
-	reviewed, err := p.review(ctx, jobID, value.Action, operatorOpenID)
+	reviewed, err := p.reviewWithRiskVersion(ctx, jobID, value.Action, operatorOpenID, value.ReviewVersion)
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	toast := "已发布"
-	if value.Action == feishuCardActionReject {
-		toast = "已驳回"
+	if value.Action == feishuCardActionApprove {
+		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在发布", card: buildReviewPublishingCard(reviewed)}
 	}
-	return reviewCardOutcome{toastType: "success", toastContent: toast, card: buildReviewDoneCard(reviewed)}
+	return reviewCardOutcome{toastType: "success", toastContent: "已驳回", card: buildReviewDoneCard(reviewed)}
+}
+
+// publishReviewCardVersion 将风险结论和证据绑定到卡片按钮：补检或重评后
+// 任一级别/条目/说明变化都会使旧卡失效，避免审核人按照已过期的风险语义操作。
+// HTTP admin 审核不使用卡片版本。
+func publishReviewCardVersion(job publishJob) string {
+	if !publishRiskLevelKnown(job.RiskLevel) {
+		return ""
+	}
+	payload, _ := json.Marshal(struct {
+		Level string            `json:"level"`
+		Items []publishRiskItem `json:"items"`
+		Notes string            `json:"notes"`
+	}{Level: job.RiskLevel, Items: job.RiskItems, Notes: job.RiskNotes})
+	digest := sha256.Sum256(payload)
+	return fmt.Sprintf("risk-v2:%d:%x", job.ID, digest[:8])
 }
 
 // coerceFeishuJobID 回调 value 里的 job_id 兼容数字与字符串两种 JSON 形态。

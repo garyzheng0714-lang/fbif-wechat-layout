@@ -127,9 +127,9 @@ func newPublishTestEnv(t *testing.T) *publishTestEnv {
 	}
 	env.pipeline = &publishPipeline{
 		store: env.store,
-		fetch: func(ctx context.Context, articleURL string) (string, string, string, string, error) {
+		fetch: func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
 			env.fetchCalls++
-			return "测试标题", "测试公众号", "", testPublishBlocksJSON, nil
+			return "测试标题", "测试公众号", "", articleURL, testPublishBlocksJSON, nil
 		},
 		render: func(ctx context.Context, title, source, blocksJSON string) (string, error) {
 			return testPublishRenderedHTML, nil
@@ -152,8 +152,9 @@ func newPublishTestEnv(t *testing.T) *publishTestEnv {
 			env.notified = append(env.notified, text)
 			return env.notifyErr
 		},
-		spawn: func(f func()) { f() }, // 同步推进：测试断言无竞态
-		now:   time.Now,
+		spawn:             func(f func()) { f() }, // 同步推进：测试断言无竞态
+		retryNotification: func(time.Duration, func()) {},
+		now:               time.Now,
 	}
 	return env
 }
@@ -239,12 +240,16 @@ func TestPublishApprovePublicizes(t *testing.T) {
 	env.ft.mu.Lock()
 	env.ft.forbidPublish = false // 本场景 approve 合法，解除守卫
 	env.ft.mu.Unlock()
-	got, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "")
+	accepted, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "")
 	if err != nil {
 		t.Fatalf("approve: %v", err)
 	}
+	if accepted.Stage != publishStagePublicizing {
+		t.Fatalf("review 返回应是已持久化的 publicizing 接受态，实际 %q", accepted.Stage)
+	}
+	got, _ := env.store.byID(job.ID) // 测试 spawn 同步，后台 worker 此时已跑完。
 	if got.Stage != publishStagePublished {
-		t.Fatalf("stage = %q，应为 published", got.Stage)
+		t.Fatalf("worker 后 stage = %q，应为 published", got.Stage)
 	}
 	if got.ArticleURL != "https://test.foodtalks.cn/news/7240" {
 		t.Fatalf("article_url = %q", got.ArticleURL)
@@ -343,6 +348,9 @@ func TestPublishNotifyFailureDoesNotFailJob(t *testing.T) {
 	if got.Stage != publishStageAwaitingReview {
 		t.Fatalf("通知失败不应影响任务，实际 stage=%q error=%q", got.Stage, got.Error)
 	}
+	if got.NotificationKind != publishNotificationReviewPending || got.NotificationState != publishNotificationStatePending || got.NotificationError == "" {
+		t.Fatalf("通知失败必须持久留在 outbox 重试，实际 kind=%q state=%q error=%q", got.NotificationKind, got.NotificationState, got.NotificationError)
+	}
 }
 
 // TestPublishRetryRejectsNonFailed retry 只服务 failed 任务：awaiting_review 等阶段
@@ -373,6 +381,15 @@ func TestNormalizeSiteSourceKey(t *testing.T) {
 	if long1 != long2 {
 		t.Fatalf("同文不同形态应归一同 key：%q vs %q", long1, long2)
 	}
+	for _, variant := range []string{
+		"https://mp.weixin.qq.com/s?__biz=MzA1&mid=2&idx=1",
+		"https://mp.weixin.qq.com/s?__biz=MzA1&mid=2&idx=1&sn=different-signature",
+	} {
+		got, err := normalizeSiteSourceKey(variant)
+		if err != nil || got != long1 {
+			t.Fatalf("同 biz/mid/idx 不应因 sn 缺失/变化重复建单：input=%q got=%q err=%v", variant, got, err)
+		}
+	}
 	if !strings.HasPrefix(long1, "site:https://mp.weixin.qq.com/s?") {
 		t.Fatalf("key 形态异常: %q", long1)
 	}
@@ -384,14 +401,77 @@ func TestNormalizeSiteSourceKey(t *testing.T) {
 	if short1 != "site:https://mp.weixin.qq.com/s/AbCdEf123" {
 		t.Fatalf("短链 key = %q", short1)
 	}
+	for _, variant := range []string{
+		"https://mp.weixin.qq.com/s/AbCdEf123",
+		"https://mp.weixin.qq.com/s/AbCdEf123/",
+		"https://mp.weixin.qq.com/s/AbCdEf123?__biz=other&mid=9&idx=2&sn=volatile#rd",
+	} {
+		got, err := normalizeSiteSourceKey(variant)
+		if err != nil || got != short1 {
+			t.Fatalf("短链 query/fragment/尾斜杠应归一且保留 slug 大小写：input=%q got=%q err=%v", variant, got, err)
+		}
+	}
 	// 拒绝集：非公众号域名 / 裸 /s 无定位参数 / 非 http(s)。
 	for _, bad := range []string{
 		"https://example.com/s?__biz=x&mid=1&idx=1&sn=a",
 		"https://mp.weixin.qq.com/s?chksm=onlyvolatile",
+		"https://mp.weixin.qq.com/s?__biz=x&mid=1&sn=missing-idx",
+		"https://mp.weixin.qq.com/",
+		"https://mp.weixin.qq.com/not-article?__biz=x&mid=1&idx=1&sn=a",
+		"https://mp.weixin.qq.com/s/a/b",
+		"https://evil@mp.weixin.qq.com/s/abc",
+		"https://mp.weixin.qq.com:444/s/abc",
 		"ftp://mp.weixin.qq.com/s/abc",
 	} {
 		if _, err := normalizeSiteSourceKey(bad); err == nil {
 			t.Fatalf("应拒绝非法链接 %q", bad)
 		}
+	}
+}
+
+func TestPublishCanonicalAliasDedupesShortAndLongLinks(t *testing.T) {
+	env := newPublishTestEnv(t)
+	canonical := "https://mp.weixin.qq.com/s?__biz=MzA1&mid=2&idx=1&sn=canonical-signature"
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+		env.fetchCalls++
+		return "同一篇文章", "测试公众号", "", canonical, testPublishBlocksJSON, nil
+	}
+	first, created, err := env.pipeline.submit("https://mp.weixin.qq.com/s/ShortAliasA")
+	if err != nil || !created {
+		t.Fatalf("短链首次提交失败：job=%+v created=%v err=%v", first, created, err)
+	}
+	second, created, err := env.pipeline.submit("https://mp.weixin.qq.com/s?idx=1&mid=2&__biz=MzA1&sn=another")
+	if err != nil || created || second.ID != first.ID {
+		t.Fatalf("长链应命中短链抓取后的 canonical alias：first=%d second=%d created=%v err=%v", first.ID, second.ID, created, err)
+	}
+	if createN, _ := env.ft.counts(); createN != 1 {
+		t.Fatalf("短链↔长链同文只能 CreateNews 一次，实际 %d", createN)
+	}
+
+	third, created, err := env.pipeline.submit("https://mp.weixin.qq.com/s/AnotherShortAlias")
+	if err != nil || !created {
+		t.Fatalf("新短链在抓取前无法本地解析身份，应先建临时任务：created=%v err=%v", created, err)
+	}
+	thirdStored, _ := env.store.byID(third.ID)
+	if thirdStored.Stage != publishStageFailed || thirdStored.FailedStage != publishStageFetching ||
+		!strings.Contains(thirdStored.Error, fmt.Sprintf("#%d", first.ID)) {
+		t.Fatalf("第二个短链解出同 canonical 后必须在 CreateNews 前停单：%+v", thirdStored)
+	}
+	if createN, _ := env.ft.counts(); createN != 1 {
+		t.Fatalf("不同短链同文也只能 CreateNews 一次，实际 %d", createN)
+	}
+}
+
+func TestPublishSourceKeyMigrationKeepsLegacySNKeyDeduped(t *testing.T) {
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "publish-jobs.json"))
+	legacyKey := "site:https://mp.weixin.qq.com/s?__biz=MzA1&idx=1&mid=2&sn=old-signature"
+	legacy, created, err := store.create(legacyKey, "https://mp.weixin.qq.com/s?__biz=MzA1&mid=2&idx=1&sn=old-signature")
+	if err != nil || !created {
+		t.Fatalf("准备旧 key 失败：job=%+v created=%v err=%v", legacy, created, err)
+	}
+	got, created, err := store.create("site:https://mp.weixin.qq.com/s?__biz=MzA1&idx=1&mid=2",
+		"https://mp.weixin.qq.com/s?__biz=MzA1&mid=2&idx=1&sn=new-signature")
+	if err != nil || created || got.ID != legacy.ID {
+		t.Fatalf("旧 sn key 必须与新 biz/mid/idx key 视为同文：got=%+v created=%v err=%v", got, created, err)
 	}
 }

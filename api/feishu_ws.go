@@ -38,11 +38,6 @@ func maybeStartFeishuWS(p *publishPipeline) {
 		log.Printf("publish: FEISHU_APP_ID/FEISHU_APP_SECRET 未配置，跳过飞书长连接（Webhook 回调端点仍可用）")
 		return
 	}
-	if len(strings.FieldsFunc(os.Getenv("FEISHU_REVIEWER_OPEN_IDS"), func(r rune) bool {
-		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
-	})) == 0 {
-		log.Printf("publish: WARN FEISHU_REVIEWER_OPEN_IDS 未配置，长连接仍接收事件但所有审核动作将 fail-closed")
-	}
 	// 长连接模式无需 verification token / encrypt key（SDK 建连鉴权），两参传空。
 	handler := dispatcher.NewEventDispatcher("", "").
 		OnP2CardActionTrigger(feishuWSCardActionHandler(p))

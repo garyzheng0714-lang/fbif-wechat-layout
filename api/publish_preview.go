@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"html"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -89,9 +90,26 @@ func registerPublishPreviewRoute(mux *http.ServeMux, store *publishJobStore) {
 			http.NotFound(w, r)
 			return
 		}
+		// 官方预览优先（2026-07-10 用户裁定「发布预览会有专门的预览链接」）：现铸
+		// 短期 token（每次点击新铸，永不过期失效）302 到 FoodTalks 官方预览页——网站
+		// 真实渲染，视觉保真度最高。铸造失败 / 草稿未进站 / ?local=1 → 本地预览页兜底
+		//（本地页仍展示 AI 参数全量，且不依赖 FoodTalks 可用性）。
+		if job.FoodTalksNewsID > 0 && r.URL.Query().Get("local") != "1" {
+			if ft, ferr := newFoodTalksClientFromEnv(); ferr == nil {
+				if tok, terr := ft.PreviewToken(r.Context(), job.FoodTalksNewsID); terr == nil {
+					http.Redirect(w, r, siteFrontURL()+"/preview/news/"+strconv.FormatInt(job.FoodTalksNewsID, 10)+"?token="+tok, http.StatusFound)
+					return
+				} else {
+					log.Printf("publish: WARN 官方预览 token 铸造失败，回落本地预览页: %v", terr)
+				}
+			}
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Write([]byte(renderPublishPreviewHTML(job)))
 	})
 }
@@ -150,6 +168,11 @@ body { margin: 0; background: #ffffff; color: #333; font-family: -apple-system, 
 	}
 	writePreviewMetaLine(&b, "来源", sourceLabel+" · "+sourceName)
 	writePreviewMetaLine(&b, "优化说明", job.AINotes)
+	writePreviewMetaLine(&b, "风险审核", publishRiskLevelLabel(job.RiskLevel))
+	for i, item := range job.RiskItems {
+		writePreviewMetaLine(&b, "风险 "+strconv.Itoa(i+1)+" · "+publishRiskCategoryLabel(item.Category), item.Evidence+"；原因："+item.Reason)
+	}
+	writePreviewMetaLine(&b, "风险说明", job.RiskNotes)
 	b.WriteString(`</footer>
 </main>
 </body>

@@ -123,6 +123,9 @@ func main() {
 	// 权限复用规则后台 ADMIN_PASSWORD 门；翻公开只能由 review approve 触发（用户红线）。
 	publishStore := newPublishJobStore(publishJobsPath(*rulesPath))
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
+	if !feishuReviewerAllowlistConfigured() {
+		log.Printf("publish: WARN FEISHU_REVIEWER_OPEN_IDS 未配置，Webhook/长连接卡片审核全部 fail-closed；仅 ADMIN_PASSWORD 管理端审核可用")
+	}
 	// 安全恢复仅重放可幂等阶段；CreateNews 不确定态转人工对账，publicizing 必须带
 	// 已持久化 approve 凭据。先扫描再开放 HTTP，避免启动瞬间与人工 retry 争抢。
 	publishPipe.recoverJobs()
@@ -404,7 +407,7 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		// classification is deterministic, not inferred from a lossy MD
 		// intermediate. See wechat_blocks.go.
 		accountID := firstNonEmpty(req.AccountID, req.Account)
-		title, blocks, _, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
+		title, blocks, _, _, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
 		if derr == nil && len(blocks) > 0 {
 			writeJSON(w, 200, map[string]interface{}{
 				"title":  title,
@@ -454,7 +457,7 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 // valid (non-error) outcome — a page genuinely without article content.
 // The caller at handleFetchArticle gates on `len(blocks) > 0`.
 func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
-	title, blocks, _, _, err = fetchDirectBlocksWithOptions(url, defaultArticleBlockOptions())
+	title, blocks, _, _, _, err = fetchDirectBlocksWithOptions(url, defaultArticleBlockOptions())
 	return title, blocks, err
 }
 
@@ -463,7 +466,7 @@ func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
 // 生产 job #1/#2 的 source_name 为空即此暗伤）：sourceName=公众号名（var nickname），
 // byline=发布者填的结构化作者署名（meta author / var author，没署名就是空）。
 // 发布流水线 fetching 阶段消费；handler 行为不变。
-func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title string, blocks []Block, sourceName, byline string, err error) {
+func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title string, blocks []Block, sourceName, byline, canonicalURL string, err error) {
 	opts = normalizeArticleBlockOptions(opts)
 	// 3 attempts, exponential-ish backoff. WeChat 限流通常几百毫秒内恢复。
 	backoffs := []time.Duration{0, 600 * time.Millisecond, 1500 * time.Millisecond}
@@ -472,7 +475,7 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 		if wait > 0 {
 			time.Sleep(wait)
 		}
-		bodyBytes, ferr := fetchRawHTML(url)
+		bodyBytes, finalURL, ferr := fetchRawHTML(url)
 		if ferr != nil {
 			transportErr = ferr
 			log.Printf("fetchDirectBlocks attempt %d/%d transport error: %v", i+1, len(backoffs), ferr)
@@ -481,7 +484,7 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 		t, bs, _ := extractArticleBlocksWithOptions(string(bodyBytes), opts)
 		if len(bs) > 0 {
 			nickname, by := extractWechatArticleMeta(string(bodyBytes))
-			return t, bs, nickname, by, nil
+			return t, bs, nickname, by, articleSourceURL(url, finalURL, string(bodyBytes)), nil
 		}
 		// 传输成功但无内容：可能是反爬中间页，重试一次可能拿到真正文。
 		transportErr = nil
@@ -489,7 +492,7 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 	}
 	// 全部尝试都没拿到内容：最后一次是传输失败则返回该 err；否则（拿到页面但空）
 	// 返回空 blocks 无 err，让调用方决定是否走 x-reader。
-	return "", nil, "", "", transportErr
+	return "", nil, "", "", "", transportErr
 }
 
 func articleBlockOptionsForAccount(store *rulePresetStore, accountID string) articleBlockOptions {
@@ -531,23 +534,24 @@ func behaviorParamInt(params map[string]any, key string, fallback int) int {
 	return fallback
 }
 
-func fetchRawHTML(url string) ([]byte, error) {
+func fetchRawHTML(url string) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+		return nil, "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, resp.Request.URL.String(), fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	return body, resp.Request.URL.String(), err
 }
 
 func fetchWithXReader(url string) (content, title string, err error) {

@@ -10,6 +10,7 @@ export const RULE_PACKS = Object.freeze({
   fbif: Object.freeze({
     id: 'fbif',
     templateId: 'fbif',
+    defaultPresetId: 'default',
     accountName: 'FBIF食品饮料创新',
     previewAccountName: 'FBIF食品饮料创新',
     behaviorAccountName: 'FBIF',
@@ -22,6 +23,7 @@ export const RULE_PACKS = Object.freeze({
   'foodtalks-series': Object.freeze({
     id: 'foodtalks-series',
     templateId: 'foodtalks-series',
+    defaultPresetId: 'foodtalks-series-default',
     accountName: 'FoodTalks什么是系列',
     previewAccountName: 'FoodTalks什么是系列',
     behaviorAccountName: 'FoodTalks什么是系列',
@@ -35,6 +37,7 @@ export const RULE_PACKS = Object.freeze({
   wowfood: Object.freeze({
     id: 'wowfood',
     templateId: 'fbif',
+    defaultPresetId: 'wowfood-default',
     accountName: 'WowFood爆品超市',
     previewAccountName: 'WowFood爆品超市',
     behaviorAccountName: 'WowFood爆品超市',
@@ -47,6 +50,7 @@ export const RULE_PACKS = Object.freeze({
   'ft-default': Object.freeze({
     id: 'ft-default',
     templateId: 'foodtalks-site',
+    defaultPresetId: 'ft-default-v1',
     accountName: '网站默认',
     previewAccountName: 'FBIF食品饮料创新',
     behaviorAccountName: 'FoodTalks',
@@ -59,6 +63,7 @@ export const RULE_PACKS = Object.freeze({
   'ft-series': Object.freeze({
     id: 'ft-series',
     templateId: 'foodtalks-site',
+    defaultPresetId: 'ft-series-v1',
     accountName: '网站·什么是系列',
     previewAccountName: 'FoodTalks什么是系列',
     behaviorAccountName: 'FoodTalks',

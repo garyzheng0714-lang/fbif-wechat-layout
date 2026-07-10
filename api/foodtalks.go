@@ -221,19 +221,7 @@ func (c *foodTalksClient) send(ctx context.Context, method string, body foodTalk
 	if err != nil {
 		return nil, fmt.Errorf("foodtalks: 构造请求: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json;charset=UTF-8")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	// 浏览器头模式（origin 已配置）：测试环境网关要求 Origin/Referer/UA，缺任一 403（契约 §1）。
-	// 白名单模式（origin 未配置）：正式环境按 IP 放行，不伪装浏览器（2026-07-10 用户裁定，
-	// 实测纯 token 直达应用层）；显式置空 UA 压掉 Go 默认的 Go-http-client。
-	if c.origin != "" {
-		req.Header.Set("Origin", c.origin)
-		req.Header.Set("Referer", c.origin+"/")
-		req.Header.Set("User-Agent", foodTalksBrowserUA)
-	} else {
-		req.Header.Set("User-Agent", "")
-	}
+	c.applyHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -272,6 +260,68 @@ func (c *foodTalksClient) send(ctx context.Context, method string, body foodTalk
 		return nil, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
 	}
 	return env.Data, nil
+}
+
+// applyHeaders 统一请求头（send 与 PreviewToken 共用）：
+// 浏览器头模式（origin 已配置）：测试环境网关要求 Origin/Referer/UA，缺任一 403（契约 §1）。
+// 白名单模式（origin 未配置）：正式环境按 IP 放行，不伪装浏览器（2026-07-10 用户裁定，
+// 实测纯 token 直达应用层）；显式置空 UA 压掉 Go 默认的 Go-http-client。
+func (c *foodTalksClient) applyHeaders(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json;charset=UTF-8")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	if c.origin != "" {
+		req.Header.Set("Origin", c.origin)
+		req.Header.Set("Referer", c.origin+"/")
+		req.Header.Set("User-Agent", foodTalksBrowserUA)
+	} else {
+		req.Header.Set("User-Agent", "")
+	}
+}
+
+// PreviewToken 为未上架文章现铸官方预览 token（2026-07-10 从管理后台前端代码挖到并
+// 实测：POST /news/admin/news/{id}/preview/token → {code:0, data:{id, token}}）。
+// token 短期有效（前台横幅「将在短期内失效」）——**每次要用时现铸，不落库**。
+// 前台预览页 = {FOODTALKS_FRONT_URL}/preview/news/{id}?token={token}。
+func (c *foodTalksClient) PreviewToken(ctx context.Context, newsID int64) (string, error) {
+	if newsID <= 0 {
+		return "", fmt.Errorf("PreviewToken 需要已有资讯 id（>0），当前 id=%d", newsID)
+	}
+	path := "/news/admin/news/" + strconv.FormatInt(newsID, 10) + "/preview/token"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader("{}"))
+	if err != nil {
+		return "", fmt.Errorf("foodtalks: 构造预览 token 请求: %w", err)
+	}
+	c.applyHeaders(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("FoodTalks 接口不可达（POST %s）: %w", path, err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("foodtalks: 读预览 token 响应: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("FoodTalks 预览 token 接口异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data *struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return "", fmt.Errorf("FoodTalks 预览 token 响应不是预期 JSON（响应片段：%s): %w", foodTalksSnippet(respBody), err)
+	}
+	if env.Code != 0 {
+		return "", &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
+	}
+	if env.Data == nil || strings.TrimSpace(env.Data.Token) == "" {
+		return "", errors.New("FoodTalks 预览 token 响应缺 data.token")
+	}
+	return env.Data.Token, nil
 }
 
 // foodTalksSnippet 截取响应前 200 字节进错误信息（够定位 nginx 错误页/意外形态，不刷屏日志）。

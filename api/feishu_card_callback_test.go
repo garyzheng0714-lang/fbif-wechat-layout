@@ -55,6 +55,7 @@ func TestFeishuReviewerAllowlistFailClosed(t *testing.T) {
 	}{
 		{name: "空白名单", allowlist: "", operator: "ou_reviewer_1"},
 		{name: "非白名单成员", allowlist: "ou_allowed", operator: "ou_intruder"},
+		{name: "非法 open_id 不能注入卡片", allowlist: `"><at id=all>`, operator: `"><at id=all>`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := newPublishTestEnv(t)
@@ -88,17 +89,21 @@ func postCardCallback(mux *http.ServeMux, body string) *httptest.ResponseRecorde
 
 // cardActionBody card.action.trigger 事件体（形态照 cardkit 规范 04 §4.1：
 // verification token 在 header.token，审核人在 event.operator.open_id）。
-func cardActionBody(token, action string, jobID int64) string {
+func cardActionBody(token, action string, jobID int64, reviewVersions ...string) string {
+	reviewVersion := "obsolete-test-version"
+	if len(reviewVersions) > 0 {
+		reviewVersion = reviewVersions[0]
+	}
 	return fmt.Sprintf(`{
 		"schema": "2.0",
 		"header": {"event_type": "card.action.trigger", "token": %q},
 		"event": {
 			"operator": {"open_id": "ou_reviewer_1"},
 			"token": "c-cardtoken",
-			"action": {"tag": "button", "value": {"action": %q, "job_id": %d}},
+			"action": {"tag": "button", "value": {"action": %q, "job_id": %d, "review_version": %q}},
 			"context": {"open_chat_id": "oc_review_chat"}
 		}
-	}`, token, action, jobID)
+	}`, token, action, jobID, reviewVersion)
 }
 
 // containsEmoji 粗粒度 emoji 扫描：卡片文案只允许中文/ASCII/常规标点（cardkit 红线）。
@@ -156,9 +161,8 @@ func TestFeishuCallbackTokenMismatch401(t *testing.T) {
 }
 
 // TestFeishuCallbackApprovePublishes 卡片「通过并发布」走与 HTTP 端点同一个 review
-// 核心：job 经 publicizing 落 published、UpdateNews 收 publishStatus=1、审核人
-// operator.open_id 落 reviewed_by/reviewed_at，3 秒响应带 success toast + 绿终态卡
-// （含 person 留痕，群内 update_multi 同步刷新）。
+// 核心：3 秒响应只做 CAS 接受并回「发布中」卡，不等待 FoodTalks；后台 worker
+// 随后落 published，UpdateNews 收 publishStatus=1，审核人留痕保持。
 func TestFeishuCallbackApprovePublishes(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newCardCallbackMux(t, env)
@@ -170,20 +174,23 @@ func TestFeishuCallbackApprovePublishes(t *testing.T) {
 	env.ft.mu.Lock()
 	env.ft.forbidPublish = false // 本场景 approve 合法，解除红线守卫
 	env.ft.mu.Unlock()
+	var queued []func()
+	env.pipeline.spawn = func(f func()) { queued = append(queued, f) }
+	ready, _ := env.store.byID(job.ID)
 
-	rec := postCardCallback(mux, cardActionBody(testFeishuVerificationToken, feishuCardActionApprove, job.ID))
+	rec := postCardCallback(mux, cardActionBody(testFeishuVerificationToken, feishuCardActionApprove, job.ID, publishReviewCardVersion(ready)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("approve 回调应 200，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
 	got, _ := env.store.byID(job.ID)
-	if got.Stage != publishStagePublished {
-		t.Fatalf("stage = %q（error=%q），应为 published", got.Stage, got.Error)
+	if got.Stage != publishStagePublicizing || len(queued) != 1 {
+		t.Fatalf("回调返回时应 publicizing + 1 个后台 worker，实际 stage=%q queued=%d", got.Stage, len(queued))
 	}
 	if got.ReviewedBy != "ou_reviewer_1" || got.ReviewedAt == "" {
 		t.Fatalf("审核留痕未落库：reviewed_by=%q reviewed_at=%q", got.ReviewedBy, got.ReviewedAt)
 	}
-	if _, updateN := env.ft.counts(); updateN != 1 || env.ft.updateStatuses[0] != foodTalksPublishStatusPublished {
-		t.Fatalf("UpdateNews 应恰一次 publishStatus=1，实际 statuses=%v", env.ft.updateStatuses)
+	if _, updateN := env.ft.counts(); updateN != 0 {
+		t.Fatalf("回调返回前不得等待/调用 FoodTalks，实际 UpdateNews=%d", updateN)
 	}
 	body := rec.Body.String()
 	var resp struct {
@@ -199,23 +206,31 @@ func TestFeishuCallbackApprovePublishes(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode 回调响应: %v", err)
 	}
-	if resp.Toast.Type != "success" || resp.Toast.Content != "已发布" {
+	if resp.Toast.Type != "success" || resp.Toast.Content != "已受理，正在发布" {
 		t.Fatalf("toast 不符：%+v", resp.Toast)
 	}
 	if resp.Card.Type != "raw" || resp.Card.Data["schema"] != "2.0" {
-		t.Fatalf("响应应带 raw 终态卡：%+v", resp.Card)
+		t.Fatalf("响应应带 raw 进度卡：%+v", resp.Card)
 	}
 	header, _ := resp.Card.Data["header"].(map[string]any)
-	if header["template"] != "green" {
-		t.Fatalf("approve 终态卡 header 应为 green，实际 %v", header["template"])
+	if header["template"] != "blue" {
+		t.Fatalf("approve 进度卡 header 应为 blue，实际 %v", header["template"])
 	}
-	for _, want := range []string{"已发布", "ou_reviewer_1", "capsule", "查看文章", got.ArticleURL} {
+	for _, want := range []string{"发布中", "ou_reviewer_1", "capsule", "后台正在发布", "最终结果以随后终态卡为准"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("终态卡应包含 %q，实际响应：%s", want, body)
 		}
 	}
 	if containsEmoji(body) {
-		t.Fatalf("终态卡含 emoji（cardkit 红线）：%s", body)
+		t.Fatalf("进度卡含 emoji（cardkit 红线）：%s", body)
+	}
+	queued[0]()
+	got, _ = env.store.byID(job.ID)
+	if got.Stage != publishStagePublished {
+		t.Fatalf("后台 worker 后应 published，实际 stage=%q error=%q", got.Stage, got.Error)
+	}
+	if _, updateN := env.ft.counts(); updateN != 1 || env.ft.updateStatuses[0] != foodTalksPublishStatusPublished {
+		t.Fatalf("后台 UpdateNews 应恰一次 publishStatus=1，实际 statuses=%v", env.ft.updateStatuses)
 	}
 }
 
@@ -228,7 +243,8 @@ func TestFeishuCallbackRejectTerminates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	rec := postCardCallback(mux, cardActionBody(testFeishuVerificationToken, feishuCardActionReject, job.ID))
+	ready, _ := env.store.byID(job.ID)
+	rec := postCardCallback(mux, cardActionBody(testFeishuVerificationToken, feishuCardActionReject, job.ID, publishReviewCardVersion(ready)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reject 回调应 200，实际 %d", rec.Code)
 	}
@@ -260,7 +276,8 @@ func TestFeishuCallbackRepeatedClickNoOp(t *testing.T) {
 	env.ft.mu.Lock()
 	env.ft.forbidPublish = false
 	env.ft.mu.Unlock()
-	if rec := postCardCallback(mux, cardActionBody(testFeishuVerificationToken, feishuCardActionApprove, job.ID)); rec.Code != http.StatusOK {
+	ready, _ := env.store.byID(job.ID)
+	if rec := postCardCallback(mux, cardActionBody(testFeishuVerificationToken, feishuCardActionApprove, job.ID, publishReviewCardVersion(ready))); rec.Code != http.StatusOK {
 		t.Fatalf("首次 approve 应 200，实际 %d", rec.Code)
 	}
 	// 二次点击（approve 与 reject 各试一次）：状态不变、UpdateNews 不再发。
@@ -287,6 +304,48 @@ func TestFeishuCallbackRepeatedClickNoOp(t *testing.T) {
 	}
 }
 
+func TestReviewCardRiskChangeExpiresOldVersion(t *testing.T) {
+	env := newPublishTestEnv(t)
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	job, _, err := env.store.create("site:risk-version", testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	oldJob, err := env.store.update(job.ID, func(j *publishJob) {
+		j.Stage = publishStageAwaitingReview
+		j.RiskLevel = publishRiskWarning
+		j.RiskItems = []publishRiskItem{{
+			Category: publishRiskCategoryDataSource, Level: publishRiskWarning,
+			Evidence: "旧证据", Reason: "旧说明",
+		}}
+		j.RiskNotes = "旧风险结论"
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	oldVersion := publishReviewCardVersion(oldJob)
+	if _, err := env.store.update(job.ID, func(j *publishJob) {
+		j.RiskLevel = publishRiskBlock
+		j.RiskItems = []publishRiskItem{{
+			Category: publishRiskCategoryRepublication, Level: publishRiskBlock,
+			Evidence: "新证据", Reason: "授权硬缺口",
+		}}
+		j.RiskNotes = "新风险结论"
+	}); err != nil {
+		t.Fatalf("update risk: %v", err)
+	}
+	raw := json.RawMessage(fmt.Sprintf(
+		`{"action":"approve","job_id":%d,"review_version":%q}`, job.ID, oldVersion))
+	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", raw)
+	if out.toastType != "error" || !strings.Contains(out.toastContent, "过期") {
+		t.Fatalf("风险变化后旧卡必须失效，实际 %+v", out)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageAwaitingReview || got.ReviewAction != "" {
+		t.Fatalf("过期卡不得改变任务：stage=%q action=%q", got.Stage, got.ReviewAction)
+	}
+}
+
 // TestReviewPendingCardContract 待审核卡 JSON 契约（cardkit 红线，字符串断言）：
 // 无 emoji、「通过并发布」「驳回」都带 confirm 二次确认、schema 2.0 不含 action/note
 // 容器、callback value 带 action+job_id、update_multi 开启（群内同步刷新的前提）。
@@ -301,7 +360,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 		SourceURL: "https://mp.weixin.qq.com/s/AbC", Stage: publishStageAwaitingReview,
 		FoodTalksNewsID: 7240, UpdatedAt: "2026-07-10T07:00:00Z",
 		Summary: "AI 摘要一段。", Tags: []string{"食品", "饮料"}, Author: "Mote莫特",
-		AINotes: "封面选第一张图。正文格式规范。摘要取自导语。",
+		AINotes: "封面选第一张图。正文格式规范。摘要取自导语。", RiskLevel: publishRiskPass,
 	}
 	raw, err := json.Marshal(buildReviewPendingCard(job, "img_v3_test_cover_key"))
 	if err != nil {
@@ -349,6 +408,55 @@ func TestReviewPendingCardContract(t *testing.T) {
 		if strings.Contains(s, banned) {
 			t.Fatalf("schema 2.0 禁用容器 %s（会报 200861）：%s", banned, s)
 		}
+	}
+}
+
+func TestReviewCardEscapesExternalMarkdownFields(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	malicious := `<at id=all></at> [恶链](https://evil.example) **粗体** # 标题`
+	job := publishJob{
+		ID: 9, Stage: publishStageAwaitingReview, FoodTalksNewsID: 7240,
+		SourceURL: "https://mp.weixin.qq.com/s/SafeSlug", RiskLevel: publishRiskWarning,
+		Title: malicious, SourceName: malicious, Author: malicious, Summary: malicious,
+		Tags: []string{malicious}, AINotes: malicious, RiskNotes: malicious,
+		RiskItems: []publishRiskItem{{
+			Category: publishRiskCategoryDataSource, Level: publishRiskWarning,
+			Evidence: malicious, Reason: malicious,
+		}},
+	}
+	card := fmt.Sprint(buildReviewPendingCard(job, ""))
+	for _, banned := range []string{"<at id=all>", "https://evil.example", "[恶链]", "**粗体**", "# 标题"} {
+		if strings.Contains(card, banned) {
+			t.Fatalf("外部文本不得注入 Feishu markdown %q：%s", banned, card)
+		}
+	}
+	for _, fixed := range []string{"打开公众号原文", job.SourceURL, "去后台编辑这篇文章", "通过并发布"} {
+		if !strings.Contains(card, fixed) {
+			t.Fatalf("安全转义不得破坏代码生成的固定内容 %q：%s", fixed, card)
+		}
+	}
+}
+
+func TestReviewCardEscapesSourceURLMarkdownTarget(t *testing.T) {
+	rawURL := "https://mp.weixin.qq.com/s/SafeSlug)[恶链](mailto:attacker@example.com)"
+	safeURL := reviewCardSafeURL(rawURL)
+	if safeURL == "" {
+		t.Fatalf("合法 HTTP URL 应可安全编码")
+	}
+	if strings.Contains(safeURL, ")[") || strings.Contains(safeURL, "](mailto:") ||
+		!strings.Contains(safeURL, "%29%5B") {
+		t.Fatalf("markdown 链接目标未阻止闭链注入：raw=%q safe=%q", rawURL, safeURL)
+	}
+	job := publishJob{
+		ID: 10, Stage: publishStageAwaitingReview, FoodTalksNewsID: 7240,
+		SourceURL: rawURL, RiskLevel: publishRiskPass, Title: "URL 注入测试",
+	}
+	card := fmt.Sprint(buildReviewPendingCard(job, ""))
+	if strings.Contains(card, ")[恶链](mailto:") || strings.Contains(card, rawURL) {
+		t.Fatalf("原始 SourceURL 不得直接拼入 Feishu markdown：%s", card)
+	}
+	if !strings.Contains(card, safeURL) {
+		t.Fatalf("卡片应使用安全编码后的 SourceURL：%s", card)
 	}
 }
 

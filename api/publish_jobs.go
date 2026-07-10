@@ -16,8 +16,9 @@ import (
 
 // 状态机阶段全集（施工图 S2 + M5 的 enriching）：
 //
-//	created → fetching → rendering → mirroring → enriching → staging → awaiting_review
-//	        → [review approve] → publicizing → published
+//	created → fetching → rendering → mirroring → enriching → assessing → staging → awaiting_review
+//	        → [review approve] → publicizing → publicizing_updating → published
+//	                                      └→ publicize_reconciliation_required
 //	        → [review reject]  → rejected（终态；FoodTalks 侧留草稿不动）
 //	任一步失败 → failed（failed_stage 记录续跑起点，retry 端点续跑）
 const (
@@ -26,50 +27,74 @@ const (
 	publishStageRendering = "rendering"
 	publishStageMirroring = "mirroring"
 	publishStageEnriching = "enriching" // M5：AI 预填发布参数（只产元数据，绝不改 content_html）
-	publishStageStaging   = "staging"
+	publishStageAssessing = "assessing" // 发布红线风险检查（只产结构化提示，绝不改正文）
+	// assessing_review 只用于历史 awaiting_review / 人工绑定已有草稿的补检；
+	// 完成后直接回 awaiting_review，不再 PUT 草稿，避免丢审核态。
+	publishStageAssessingReview = "assessing_review"
+	publishStageStaging         = "staging"
 	// staging_creating 表示 CreateNews 调用意图已持久化、但 foodtalks_news_id 尚未可靠落盘。
 	// 该阶段绝不能自动重放 POST；重启后转 reconciliation_required 等人工核对。
-	publishStageStagingCreating        = "staging_creating"
-	publishStageReconciliationRequired = "reconciliation_required"
-	publishStageAwaitingReview         = "awaiting_review"
-	publishStagePublicizing            = "publicizing"
-	publishStagePublished              = "published"
-	publishStageRejected               = "rejected"
-	publishStageFailed                 = "failed"
+	publishStageStagingCreating                 = "staging_creating"
+	publishStageReconciliationRequired          = "reconciliation_required"
+	publishStageAwaitingReview                  = "awaiting_review"
+	publishStagePublicizing                     = "publicizing" // approve 已持久化，尚未发出外部 PUT
+	publishStagePublicizingUpdating             = "publicizing_updating"
+	publishStagePublicizeReconciliationRequired = "publicize_reconciliation_required"
+	publishStagePublished                       = "published"
+	publishStageRejected                        = "rejected"
+	publishStageFailed                          = "failed"
 )
 
 // publishJob 一条「公众号 → FoodTalks 网站」发布任务（字段清单来自施工图 S1）。
 type publishJob struct {
-	ID              int64  `json:"id"`
-	SourceKey       string `json:"source_key"` // 归一化幂等键（normalizeSiteSourceKey）
-	SourceURL       string `json:"source_url"` // 用户提交的原始公众号文章链接
-	Stage           string `json:"stage"`
-	FailedStage     string `json:"failed_stage,omitempty"` // stage=failed 时的续跑起点
-	Error           string `json:"error,omitempty"`
-	Title           string `json:"title,omitempty"`
-	SourceName      string `json:"source_name,omitempty"` // 公众号名（fetching 阶段解析）
-	BlocksJSON      string `json:"blocks_json,omitempty"` // 中立 Block[] 序列化（先落库再推进，链接过期不回源）
-	ContentHTML     string `json:"content_html,omitempty"`
-	CoverURL        string `json:"cover_url,omitempty"`
-	ImageMap        string `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
-	FoodTalksNewsID int64  `json:"foodtalks_news_id,omitempty"`
-	ArticleURL      string `json:"article_url,omitempty"`
+	ID              int64    `json:"id"`
+	SourceKey       string   `json:"source_key"`               // 归一化幂等键（normalizeSiteSourceKey）
+	SourceAliases   []string `json:"source_aliases,omitempty"` // 抓取后解出的同文规范身份（短链↔长链去重）
+	SourceURL       string   `json:"source_url"`               // 用户提交的原始公众号文章链接
+	Stage           string   `json:"stage"`
+	FailedStage     string   `json:"failed_stage,omitempty"` // stage=failed 时的续跑起点
+	Error           string   `json:"error,omitempty"`
+	Title           string   `json:"title,omitempty"`
+	SourceName      string   `json:"source_name,omitempty"` // 公众号名（fetching 阶段解析）
+	BlocksJSON      string   `json:"blocks_json,omitempty"` // 中立 Block[] 序列化（先落库再推进，链接过期不回源）
+	ContentHTML     string   `json:"content_html,omitempty"`
+	CoverURL        string   `json:"cover_url,omitempty"`
+	ImageMap        string   `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
+	FoodTalksNewsID int64    `json:"foodtalks_news_id,omitempty"`
+	ArticleURL      string   `json:"article_url,omitempty"`
 	// FoodTalks CreateNews 没有服务端幂等键：外调前先持久化本地 intent。
 	// 调用结果不确定时凭此转人工核对，禁止自动 POST 第二次。
 	StagingIntentKey string `json:"staging_intent_key,omitempty"`
 	StagingIntentAt  string `json:"staging_intent_at,omitempty"`
+	// 公开 PUT 同样先落意图：publicizing_updating 表示已可能向 FoodTalks
+	// 发出不可逆请求，崩溃/断线后只能人工核对，不得盲目重放。
+	PublicizeIntentKey string `json:"publicize_intent_key,omitempty"`
+	PublicizeIntentAt  string `json:"publicize_intent_at,omitempty"`
 	// M5 AI 预填发布参数（enriching 阶段落库；AI 失败时是规则兜底值，任务照常推进）。
 	// 口径见 docs/editorial-norms-foodtalks.md（M7 从编辑部历史文章倒推）。
-	Summary      string   `json:"summary,omitempty"`       // 摘要（一句话钩子 10~40 字；兜底=正文纯文本前 40 字）
-	Tags         []string `json:"tags,omitempty"`          // 标签（1~3 个，词表优先；兜底为空）
-	Author       string   `json:"author,omitempty"`        // 正文识别的作者署名（宁空勿造；不回落 source_name）
-	AISource     string   `json:"ai_source,omitempty"`     // 正文声明的原始出处（自家号转发他人文章时命中；决定 sourceType/sourceName）
-	AINotes      string   `json:"ai_notes,omitempty"`      // AI 优化说明（人话 2-4 句；兜底="AI 预填未执行（原因）"）
-	ReviewedBy   string   `json:"reviewed_by,omitempty"`   // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
-	ReviewedAt   string   `json:"reviewed_at,omitempty"`   // 审核时刻（RFC3339 UTC）
-	ReviewAction string   `json:"review_action,omitempty"` // approve / reject；publicizing 恢复的授权凭据
-	CreatedAt    string   `json:"created_at"`
-	UpdatedAt    string   `json:"updated_at"`
+	Summary   string            `json:"summary,omitempty"`    // 摘要（一句话钩子 10~40 字；兜底=正文纯文本前 40 字）
+	Tags      []string          `json:"tags,omitempty"`       // 标签（1~3 个，词表优先；兜底为空）
+	Author    string            `json:"author,omitempty"`     // 正文识别的作者署名（宁空勿造；不回落 source_name）
+	AISource  string            `json:"ai_source,omitempty"`  // 正文声明的原始出处（自家号转发他人文章时命中；决定 sourceType/sourceName）
+	AINotes   string            `json:"ai_notes,omitempty"`   // AI 优化说明（人话 2-4 句；兜底="AI 预填未执行（原因）"）
+	RiskLevel string            `json:"risk_level,omitempty"` // pass / warning / block；block 禁止 approve
+	RiskItems []publishRiskItem `json:"risk_items,omitempty"` // 四类红线的证据与原因
+	RiskNotes string            `json:"risk_notes,omitempty"`
+	RiskRaw   string            `json:"risk_raw,omitempty"` // 模型解析失败时留痕，最多 2000 字
+	// 持久 notification outbox：状态迁移与待发送事件同一次 JSON 原子写；sending
+	// 在进程启动时视为上次崩溃遗留并重置 pending。seq 防旧发送结果清掉新事件。
+	NotificationKind     string `json:"notification_kind,omitempty"`
+	NotificationState    string `json:"notification_state,omitempty"`
+	NotificationSeq      int64  `json:"notification_seq,omitempty"`
+	NotificationAttempts int    `json:"notification_attempts,omitempty"`
+	NotificationError    string `json:"notification_error,omitempty"`
+	NotificationSentAt   string `json:"notification_sent_at,omitempty"`
+	ReviewedBy           string `json:"reviewed_by,omitempty"`           // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
+	ReviewedAt           string `json:"reviewed_at,omitempty"`           // 审核时刻（RFC3339 UTC）
+	ReviewAction         string `json:"review_action,omitempty"`         // approve / reject；publicizing 恢复的授权凭据
+	ApprovedRiskVersion  string `json:"approved_risk_version,omitempty"` // approve 当刻与风险快照绑定的摘要
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
 }
 
 // terminal 终态判定：published / rejected 之后任务盖棺；failed 不算终态（可 retry 续跑），
@@ -180,7 +205,7 @@ func (s *publishJobStore) create(sourceKey, sourceURL string) (publishJob, bool,
 		return publishJob{}, false, err
 	}
 	for _, j := range doc.Jobs {
-		if j.SourceKey == sourceKey {
+		if publishJobHasSourceKey(j, sourceKey) {
 			return j, false, nil
 		}
 	}
@@ -199,6 +224,70 @@ func (s *publishJobStore) create(sourceKey, sourceURL string) (publishJob, bool,
 		return publishJob{}, false, err
 	}
 	return job, true, nil
+}
+
+func publishJobHasSourceKey(job publishJob, sourceKey string) bool {
+	if publishSourceKeysEqual(job.SourceKey, sourceKey) {
+		return true
+	}
+	for _, alias := range job.SourceAliases {
+		if publishSourceKeysEqual(alias, sourceKey) {
+			return true
+		}
+	}
+	return false
+}
+
+// publishSourceKeysEqual 让旧存储中曾把 sn 写进 key 的长链与新版
+// biz/mid/idx 身份无缝兼容，避免上线后因 key 算法升级反而重复建文。
+func publishSourceKeysEqual(a, b string) bool {
+	if a == b {
+		return true
+	}
+	canonical := func(key string) string {
+		if !strings.HasPrefix(key, "site:") {
+			return key
+		}
+		if normalized, err := normalizeSiteSourceKey(strings.TrimPrefix(key, "site:")); err == nil {
+			return normalized
+		}
+		return key
+	}
+	return canonical(a) == canonical(b)
+}
+
+// claimSourceAlias 在抓取到公众号页面的 og:url / 最终 URL 后，原子声明
+// 规范文章身份。两个不同短链或短/长链同时抓取时，只有一个 job 能抢到
+// alias；输家在 CreateNews 之前显式停单，不会制造第二篇网站文章。
+func (s *publishJobStore) claimSourceAlias(id int64, sourceKey string) (job publishJob, conflictingID int64, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.readLocked()
+	if err != nil {
+		return publishJob{}, 0, err
+	}
+	idx := -1
+	for i := range doc.Jobs {
+		if doc.Jobs[i].ID == id {
+			idx = i
+			continue
+		}
+		if publishJobHasSourceKey(doc.Jobs[i], sourceKey) {
+			return doc.Jobs[i], doc.Jobs[i].ID, nil
+		}
+	}
+	if idx < 0 {
+		return publishJob{}, 0, fmt.Errorf("发布任务 #%d 不存在", id)
+	}
+	if publishJobHasSourceKey(doc.Jobs[idx], sourceKey) {
+		return doc.Jobs[idx], 0, nil
+	}
+	doc.Jobs[idx].SourceAliases = append(doc.Jobs[idx].SourceAliases, sourceKey)
+	doc.Jobs[idx].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := s.writeLocked(doc); err != nil {
+		return publishJob{}, 0, err
+	}
+	return doc.Jobs[idx], 0, nil
 }
 
 // all 返回存储中的完整任务快照，供进程启动恢复扫描。调用方不得修改返回值中的切片。
@@ -247,6 +336,7 @@ func (s *publishJobStore) list(limit int) ([]publishJob, error) {
 		j.BlocksJSON = ""
 		j.ContentHTML = ""
 		j.ImageMap = ""
+		j.RiskRaw = ""
 		out = append(out, j)
 	}
 	return out, nil

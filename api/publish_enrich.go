@@ -4,7 +4,7 @@ package main
 // 2026-07-10.md M5 节）。enriching 阶段（mirroring 后 staging 前，此时正文图已 OSS 化，
 // 模型看到的封面候选就是最终 URL）调豆包 ARK responses API，产出：
 //
-//	cover_url（从正文图候选里选一张）/ summary（80-120 字摘要）/ tags（3-5 个标签）
+//	cover_url（从正文图候选里选一张）/ summary（10-40 字一句话钩子）/ tags（1-3 个标签）
 //	/ author（从正文识别的作者名）/ notes（2-4 句人话优化说明）
 //
 // 🚨 边界（施工图钉死）：本文件只产**元数据**，绝不碰 job.ContentHTML——AI 没有正文
@@ -12,7 +12,7 @@ package main
 //
 // 降级哲学：AI 是加速器不是闸门。ARK_API_KEY 未配置 / 调用失败 / 解析失败 →
 // fallbackEnrichment 规则兜底（封面维持 mirroring 已定的正文第一图、摘要=正文纯文本
-// 前 100 字、author=source_name、tags 空、notes 写明未执行原因），WARN 不 fail job，
+// 前 40 字、author/source_name 留空、tags 空、notes 写明未执行原因），WARN 不 fail job，
 // 阶段照常推进。
 
 import (
@@ -27,18 +27,26 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 )
 
 // ARK 可配项：API Key 必配（缺失走兜底）；模型与 Base URL 有默认值，env 可覆盖
 // （Base URL 覆盖同时服务测试 httptest 桩，与 FOODTALKS_BASE_URL 同模式）。
 const (
-	arkAPIKeyEnv      = "ARK_API_KEY"
-	arkModelIDEnv     = "ARK_MODEL_ID"
-	arkBaseURLEnv     = "ARK_BASE_URL"
-	defaultARKModelID = "ep-20260623134011-qljpn" // Doubao-Seed-2.1-pro endpoint
-	defaultARKBaseURL = "https://ark.cn-beijing.volces.com"
-	arkResponsesPath  = "/api/v3/responses"
+	arkAPIKeyEnv  = "ARK_API_KEY"
+	arkModelIDEnv = "ARK_MODEL_ID"
+	// 双模型对比 + 判决节点（2026-07-10 用户裁定「两个一起跑，讨论对比，最终由单独的
+	// 判决节点公平对比给出判决，判决节点用 DeepSeek」）：ARK_MODEL_ID_B 配置即启用
+	// 双模型（并行跑 A/B → 判决节点逐字段裁决）；判决模型取 ARK_JUDGE_MODEL_ID，
+	// 缺省回落 B（DeepSeek）。B 未配置 → 单模型路径，与旧行为完全一致。
+	arkModelIDBEnv     = "ARK_MODEL_ID_B"
+	arkJudgeModelIDEnv = "ARK_JUDGE_MODEL_ID"
+	arkBaseURLEnv      = "ARK_BASE_URL"
+	defaultARKModelID  = "ep-20260623134011-qljpn" // Doubao-Seed-2.1-pro endpoint
+	defaultARKBaseURL  = "https://ark.cn-beijing.volces.com"
+	arkResponsesPath   = "/api/v3/responses"
 )
 
 // 输入裁剪（控 token 成本，够模型判断即可）：正文纯文本最多 6000 字、候选图最多前 8 张。
@@ -66,6 +74,9 @@ const enrichMaxTags = 3
 // arkEnrichArticle 生产默认实现：多模态调 ARK responses API（标题 + 纯文本正文 +
 // 正文图 input_image），要求严格 JSON 输出并容错解析。任何失败都返回 error，
 // 由 stageEnrich 统一降级兜底——本函数自身不兜底，职责单一。
+// ARK_MODEL_ID_B 配置时升级为双模型对比：A/B 并行各出一份方案 → 判决节点（DeepSeek）
+// 逐字段公平裁决，判决说明并入 notes 给审核人看；任一侧失败自动降级单侧，判决节点
+// 失败降级主模型方案——多模型永远是增强器不是新故障点。
 func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, error) {
 	apiKey := strings.TrimSpace(os.Getenv(arkAPIKeyEnv))
 	if apiKey == "" {
@@ -73,6 +84,7 @@ func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, e
 	}
 	images := enrichCandidateImages(job.ContentHTML)
 	bodyText := truncateRunes(htmlToPlainText(job.ContentHTML), arkEnrichMaxBodyRunes)
+	evidence := job.Title + "\n" + bodyText
 
 	userText := "文章标题：" + job.Title + "\n\n正文（纯文本）：\n" + bodyText
 	if len(images) > 0 {
@@ -84,36 +96,140 @@ func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, e
 	for _, u := range images {
 		userContent = append(userContent, map[string]any{"type": "input_image", "image_url": u})
 	}
+
+	callOne := func(model string) (publishEnrichment, error) {
+		text, err := arkResponsesCall(ctx, apiKey, model, editorialEnrichSystemPrompt(), userContent)
+		if err != nil {
+			return publishEnrichment{}, err
+		}
+		result, err := parseEnrichmentJSON(text, images)
+		if err != nil {
+			return publishEnrichment{}, err
+		}
+		return enforceEnrichmentEvidence(result, evidence), nil
+	}
+
+	modelB := strings.TrimSpace(os.Getenv(arkModelIDBEnv))
+	if modelB == "" {
+		return callOne(arkModelID()) // 单模型路径（旧行为）
+	}
+
+	// 双模型并行出方案。
+	var (
+		wg         sync.WaitGroup
+		resA, resB publishEnrichment
+		errA, errB error
+	)
+	wg.Add(2)
+	go func() { defer wg.Done(); resA, errA = callOne(arkModelID()) }()
+	go func() { defer wg.Done(); resB, errB = callOne(modelB) }()
+	wg.Wait()
+	switch {
+	case errA != nil && errB != nil:
+		return publishEnrichment{}, fmt.Errorf("双模型全部失败：主模型 %v；对比模型 %v", errA, errB)
+	case errA != nil:
+		resB.Notes = "【双模型】主模型失败（" + truncateRunes(errA.Error(), 80) + "），采用对比模型方案。\n" + resB.Notes
+		return resB, nil
+	case errB != nil:
+		resA.Notes = "【双模型】对比模型失败（" + truncateRunes(errB.Error(), 80) + "），采用主模型方案。\n" + resA.Notes
+		return resA, nil
+	}
+	judged, err := arkJudgeEnrichments(ctx, apiKey, userText, images, evidence, resA, resB)
+	if err != nil {
+		resA.Notes = "【双模型】判决节点失败（" + truncateRunes(err.Error(), 80) + "），采用主模型方案。\n" + resA.Notes
+		return resA, nil
+	}
+	return judged, nil
+}
+
+// arkResponsesCall responses API 调用内核（A/B 模型与判决节点共用）：payload 组装、
+// HTTP、输出文本提取。userContent 允许含 input_image（多模态）；判决节点只传文本。
+func arkResponsesCall(ctx context.Context, apiKey, model, systemPrompt string, userContent []map[string]any) (string, error) {
 	payload, err := json.Marshal(map[string]any{
-		"model": arkModelID(),
+		"model": model,
 		"input": []any{
-			map[string]any{"role": "system", "content": []map[string]any{{"type": "input_text", "text": editorialEnrichSystemPrompt()}}},
+			map[string]any{"role": "system", "content": []map[string]any{{"type": "input_text", "text": systemPrompt}}},
 			map[string]any{"role": "user", "content": userContent},
 		},
 	})
 	if err != nil {
-		return publishEnrichment{}, fmt.Errorf("序列化 ARK 请求失败: %w", err)
+		return "", fmt.Errorf("序列化 ARK 请求失败: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, arkBaseURL()+arkResponsesPath, bytes.NewReader(payload))
 	if err != nil {
-		return publishEnrichment{}, fmt.Errorf("构造 ARK 请求失败: %w", err)
+		return "", fmt.Errorf("构造 ARK 请求失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	resp, err := arkHTTPClient.Do(req)
 	if err != nil {
-		return publishEnrichment{}, fmt.Errorf("ARK 接口不可达: %w", err)
+		return "", fmt.Errorf("ARK 接口不可达: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return publishEnrichment{}, fmt.Errorf("读 ARK 响应失败: %w", err)
+		return "", fmt.Errorf("读 ARK 响应失败: %w", err)
 	}
-	text, err := arkExtractOutputText(respBody, resp.StatusCode)
+	return arkExtractOutputText(respBody, resp.StatusCode)
+}
+
+// arkJudgeEnrichments 判决节点：把 A/B 两案匿名为方案一/方案二（判决模型不知道来源，
+// 不预设偏好），连同文章与编辑部规范交给判决模型逐字段裁决。产出最终参数 + verdict
+// 判决说明（并入 notes，审核人在卡片上能看到两案对比结论）。
+func arkJudgeEnrichments(ctx context.Context, apiKey, articleText string, images []string, evidence string, a, b publishEnrichment) (publishEnrichment, error) {
+	judgeModel := strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv))
+	if judgeModel == "" {
+		judgeModel = strings.TrimSpace(os.Getenv(arkModelIDBEnv)) // 用户裁定判决节点用 DeepSeek（即 B）
+	}
+	marshal := func(e publishEnrichment) string {
+		raw, _ := json.Marshal(map[string]any{
+			"cover_url": e.CoverURL, "summary": e.Summary, "tags": e.Tags,
+			"author": e.Author, "source_name": e.SourceName, "notes": e.Notes,
+		})
+		return string(raw)
+	}
+	systemPrompt := `你是发布参数的终审判决节点。同一篇文章有两份预填方案（方案一、方案二），来自两个不同的模型，已匿名——你不知道也不要猜测来源，必须逐字段公平比较。请用简体中文回复，思考过程也用简体中文。
+
+判决标准是下面这份编辑部规范（哪个方案更贴近规范就采用哪个）：
+=== 编辑部规范开始 ===
+` + editorialEnrichSystemPrompt() + `
+=== 编辑部规范结束 ===
+
+裁决规则：
+- cover_url / summary / tags / author / source_name 五个字段逐一比较，每个字段只能整体采用其中一案的取值（不得自创新值、不得混拼半截）；两案相同就照抄。
+- notes 你来重写：给审核编辑的 2~4 句直白优化说明（可综合两案的信息）。
+- 只输出一个 JSON 对象（不要 markdown 代码围栏）：
+{"cover_url":"...","summary":"...","tags":["..."],"author":"...","source_name":"...","notes":"...","verdict":"2~4 句判决说明：每个有分歧的字段采用了哪个方案、为什么，直白人话"}`
+	userText := articleText + "\n\n=== 方案一 ===\n" + marshal(a) + "\n\n=== 方案二 ===\n" + marshal(b)
+	text, err := arkResponsesCall(ctx, apiKey, judgeModel, systemPrompt, []map[string]any{{"type": "input_text", "text": userText}})
 	if err != nil {
 		return publishEnrichment{}, err
 	}
-	return parseEnrichmentJSON(text, images)
+	judged, err := parseEnrichmentJSON(text, images)
+	if err != nil {
+		return publishEnrichment{}, err
+	}
+	judged = enforceEnrichmentEvidence(judged, evidence)
+	if verdict := parseJudgeVerdict(text); verdict != "" {
+		judged.Notes = strings.TrimSpace(judged.Notes + "\n【双模型判决】" + verdict)
+	}
+	return judged, nil
+}
+
+// parseJudgeVerdict 从判决输出里提取 verdict 字段（解析失败返回空串——判决说明是
+// 增强信息，不因它失败而丢整个判决结果）。
+func parseJudgeVerdict(text string) string {
+	cleaned := stripMarkdownFence(text)
+	if start, end := strings.Index(cleaned, "{"), strings.LastIndex(cleaned, "}"); start >= 0 && end > start {
+		cleaned = cleaned[start : end+1]
+	}
+	var v struct {
+		Verdict string `json:"verdict"`
+	}
+	if err := json.Unmarshal([]byte(cleaned), &v); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(v.Verdict)
 }
 
 // arkHTTPClient 多模态推理慢（要看图、要思考长文）：2026-07-10 评测实测 120s 会让
@@ -217,6 +333,42 @@ func parseEnrichmentJSON(text string, candidates []string) (publishEnrichment, e
 		SourceName: strings.TrimSpace(parsed.SourceName),
 		Notes:      strings.TrimSpace(parsed.Notes),
 	}, nil
+}
+
+// enforceEnrichmentEvidence 把「作者/出处绝不编造」从 prompt 与离线评测提升为
+// 运行时硬约束。模型只能抽取本次标题/正文里实际出现的值；找不到证据就留空，
+// 同时在 notes 留痕让审核人知道发生过自动清理。空格差异（Mote 莫特/Mote莫特）
+// 不应造成误删，故比较前只折叠大小写并移除 Unicode 空白。
+func enforceEnrichmentEvidence(result publishEnrichment, sourceText string) publishEnrichment {
+	haystack := normalizeEnrichmentEvidence(sourceText)
+	dropped := make([]string, 0, 2)
+	if result.Author != "" && !strings.Contains(haystack, normalizeEnrichmentEvidence(result.Author)) {
+		result.Author = ""
+		dropped = append(dropped, "作者")
+	}
+	if result.SourceName != "" && !strings.Contains(haystack, normalizeEnrichmentEvidence(result.SourceName)) {
+		result.SourceName = ""
+		dropped = append(dropped, "出处")
+	}
+	if len(dropped) > 0 {
+		note := "未在标题或正文找到" + strings.Join(dropped, "、") + "证据，已自动留空。"
+		if strings.TrimSpace(result.Notes) == "" {
+			result.Notes = note
+		} else {
+			result.Notes = strings.TrimSpace(result.Notes) + " " + note
+		}
+	}
+	result.Notes = truncateRunes(strings.TrimSpace(result.Notes), 600)
+	return result
+}
+
+func normalizeEnrichmentEvidence(value string) string {
+	return strings.ToLower(strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(value)))
 }
 
 // fallbackEnrichment 规则兜底（施工图钉死）：封面不动（mirroring 已用正文第一图兜底

@@ -90,7 +90,58 @@ func TestRulePresetStorePersistsActivePreset(t *testing.T) {
 	}
 }
 
-func TestRuleStoreV2MigratesCustomRuleToExplicitHistoricalBaseline(t *testing.T) {
+func TestRulePresetStoreRejectsUnknownAccountInsteadOfFallingBackToFBIF(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+	if _, err := store.activeForAccount("ft-defaut"); err == nil || !strings.Contains(err.Error(), "未知规则账号") {
+		t.Fatalf("未知账号读取必须 fail loud，实际 err=%v", err)
+	}
+	if _, err := store.setActiveForAccount("ft-defaut", defaultRulePresetID); err == nil || !strings.Contains(err.Error(), "未知规则账号") {
+		t.Fatalf("未知账号绑定必须 fail loud，实际 err=%v", err)
+	}
+}
+
+func TestRulePresetStoreRejectsCrossFamilyRuleBinding(t *testing.T) {
+	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
+	if _, err := store.setActiveForAccount(foodTalksSiteRuleAccountID, defaultRulePresetID); err == nil || !strings.Contains(err.Error(), "规则族") {
+		t.Fatalf("网站账号不得绑定公众号 baseline，实际 err=%v", err)
+	}
+	if _, err := store.setActiveForAccount(foodTalksRuleAccountID, defaultRulePresetID); err == nil || !strings.Contains(err.Error(), "规则族") {
+		t.Fatalf("FBIF 规则不得绑定独立 FoodTalks 系列渲染器，实际 err=%v", err)
+	}
+	if _, err := store.setActiveForAccount(defaultRuleAccountID, foodTalksDefaultRulePresetID); err == nil || !strings.Contains(err.Error(), "规则族") {
+		t.Fatalf("FoodTalks 系列规则不得反向绑定 FBIF，实际 err=%v", err)
+	}
+	if _, err := store.setActiveForAccount(wowFoodRuleAccountID, defaultRulePresetID); err != nil {
+		t.Fatalf("同为公众号渠道的规则应允许复用：%v", err)
+	}
+	if _, err := store.setActiveForAccount(foodTalksSeriesSiteRuleAccountID, foodTalksSiteDefaultRulePresetID); err != nil {
+		t.Fatalf("同为 foodtalks-site 规则族应允许复用：%v", err)
+	}
+}
+
+func TestRulePresetUpsertCannotChangeBaselineAcrossBoundRuleFamily(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rules.json")
+	store := newRulePresetStore(path)
+	if _, err := store.upsert(rulePreset{ID: "bound-custom", Name: "绑定规则", BaselineID: defaultRulePresetID, Config: map[string]any{"font_size": "16"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.setActiveForAccount(defaultRuleAccountID, "bound-custom"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.upsert(rulePreset{ID: "bound-custom", Name: "错误改族", BaselineID: foodTalksDefaultRulePresetID, Config: map[string]any{"font_size": "17"}}); err == nil || !strings.Contains(err.Error(), "规则族") {
+		t.Fatalf("已绑定规则跨族改 baseline 必须在落盘前拒绝，实际 err=%v", err)
+	}
+	reloaded := newRulePresetStore(path)
+	active, err := reloaded.activeForAccount(defaultRuleAccountID)
+	if err != nil {
+		t.Fatalf("拒绝写入后旧库仍应可读：%v", err)
+	}
+	if active.ID != "bound-custom" || active.BaselineID != defaultRulePresetID || active.Config["font_size"] != "16" {
+		t.Fatalf("拒绝写入后旧版本必须原样保留：%#v", active)
+	}
+}
+
+func TestRuleStoreV2MarksUnboundCustomRuleAsMigrationRequired(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rule-presets.json")
 	raw := `{
 		"schema_version": 2,
@@ -113,7 +164,10 @@ func TestRuleStoreV2MigratesCustomRuleToExplicitHistoricalBaseline(t *testing.T)
 	}
 	legacy := doc.Rules["legacy-custom"]
 	if legacy.BaselineID != defaultRulePresetID {
-		t.Fatalf("历史自建规则应显式迁移为 default 基线，实际 %q", legacy.BaselineID)
+		t.Fatalf("无绑定历史规则应使用确定性占位基线，实际 %q", legacy.BaselineID)
+	}
+	if !legacy.MigrationRequired || !strings.Contains(legacy.MigrationNote, "无法推断") {
+		t.Fatalf("零绑定不得静默当作 FBIF 规则：%#v", legacy)
 	}
 	if err := store.writeStoreLocked(doc); err != nil {
 		t.Fatalf("回写迁移后规则库：%v", err)
@@ -122,8 +176,139 @@ func TestRuleStoreV2MigratesCustomRuleToExplicitHistoricalBaseline(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(b, []byte(`"schema_version": 3`)) || !bytes.Contains(b, []byte(`"baseline_id": "default"`)) {
-		t.Fatalf("回写后必须是带显式 baseline_id 的 schema v3：%s", b)
+	if !bytes.Contains(b, []byte(`"schema_version": 3`)) || !bytes.Contains(b, []byte(`"migration_required": true`)) {
+		t.Fatalf("回写后必须持久化待确认标记：%s", b)
+	}
+}
+
+func TestRuleStoreV2InfersCustomRuleBaselineFromUniqueAccountBinding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rule-presets.json")
+	raw := `{
+		"schema_version": 2,
+		"accounts": {
+			"ft-default": {"name":"网站默认","active_rule_id":"website-custom","active_rule_version":1}
+		},
+		"rules": {
+			"website-custom": {
+				"id":"website-custom","name":"历史网站规则",
+				"versions":[{"version":1,"config":{"author_font_size":"16"},"behavior":{"author_regex":"^署名[：:]"}}]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := newRulePresetStore(path).readStoreLocked()
+	if err != nil {
+		t.Fatalf("v2 网站规则迁移失败：%v", err)
+	}
+	got := doc.Rules["website-custom"]
+	if got.BaselineID != foodTalksSiteDefaultRulePresetID {
+		t.Fatalf("唯一绑定 ft-default 的历史规则应迁移到网站基线，实际 %q", got.BaselineID)
+	}
+	if got.MigrationRequired {
+		t.Fatalf("唯一账号绑定可确定推断，不应要求人工迁移：%#v", got)
+	}
+	behavior := latestRuleVersion(got).Behavior
+	if _, leaked := behavior["actions"]; leaked {
+		t.Fatalf("网站历史规则迁移后不得注入公众号 actions：%#v", behavior["actions"])
+	}
+}
+
+func TestRuleStoreV2AmbiguousBindingsAreMarkedInsteadOfSilentlyDefaulted(t *testing.T) {
+	doc := ruleStoreDocumentV2{
+		SchemaVersion: 2,
+		Accounts: map[string]ruleAccount{
+			"fbif":       {ActiveRuleID: "shared-custom"},
+			"ft-default": {ActiveRuleID: "shared-custom"},
+		},
+		Rules: map[string]ruleDefinition{
+			"shared-custom": {ID: "shared-custom"},
+		},
+	}
+	migrateLegacyRuleBaselines(&doc)
+	if got := doc.Rules["shared-custom"].BaselineID; got != defaultRulePresetID {
+		t.Fatalf("歧义规则占位基线应按 catalog 顺序确定，实际 %q", got)
+	}
+	if !doc.Rules["shared-custom"].MigrationRequired {
+		t.Fatal("多基线绑定必须显式标记待迁移")
+	}
+}
+
+func TestRuleStoreV2AmbiguousCrossFamilyBindingsStayReadableButCannotRebind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rule-presets.json")
+	raw := `{
+		"schema_version": 2,
+		"accounts": {
+			"fbif": {"active_rule_id":"shared-custom","active_rule_version":1},
+			"ft-default": {"active_rule_id":"shared-custom","active_rule_version":1}
+		},
+		"rules": {
+			"shared-custom": {
+				"id":"shared-custom","name":"历史跨族共享规则",
+				"versions":[{"version":1,"config":{"font_size":"16"}}]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := newRulePresetStore(path)
+	if _, err := store.readStoreLocked(); err != nil {
+		t.Fatalf("历史歧义不得直接阻断生产升级：%v", err)
+	}
+	fbif, err := store.activeForAccount(defaultRuleAccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	website, err := store.activeForAccount(foodTalksSiteRuleAccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fbif.MigrationRequired || !website.MigrationRequired {
+		t.Fatalf("两个现有绑定都必须暴露迁移状态：fbif=%#v website=%#v", fbif, website)
+	}
+	if fbif.RuleFamily != "fbif" || website.RuleFamily != "foodtalks-site" {
+		t.Fatalf("待迁移规则应按各账号自己基线读取：fbif=%q website=%q", fbif.RuleFamily, website.RuleFamily)
+	}
+	if _, err := store.setActiveForAccount(wowFoodRuleAccountID, "shared-custom"); err == nil || !strings.Contains(err.Error(), "先确认历史基线") {
+		t.Fatalf("待迁移规则禁止新绑定，实际 err=%v", err)
+	}
+}
+
+func TestRuleStoreV2UnboundRuleCanBindOnlyAfterExplicitBaselineSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rule-presets.json")
+	raw := `{
+		"schema_version":2,
+		"accounts":{},
+		"rules":{"legacy-custom":{"id":"legacy-custom","name":"旧规则","versions":[{"version":1,"config":{"text_color":"#123456"}}]}}
+	}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := newRulePresetStore(path)
+	if _, err := store.setActiveForAccount(foodTalksSiteRuleAccountID, "legacy-custom"); err == nil || !strings.Contains(err.Error(), "先确认历史基线") {
+		t.Fatalf("未确认基线前不得绑定，实际 err=%v", err)
+	}
+	doc, err := store.upsert(rulePreset{
+		ID: "legacy-custom", Name: "旧规则", BaselineID: foodTalksSiteDefaultRulePresetID,
+		Config: map[string]any{"text_color": "#123456"},
+	})
+	if err != nil {
+		t.Fatalf("显式选择网站 baseline 应能完成迁移：%v", err)
+	}
+	var migrated rulePreset
+	for _, preset := range doc.Presets {
+		if preset.ID == "legacy-custom" {
+			migrated = preset
+			break
+		}
+	}
+	if migrated.MigrationRequired || migrated.BaselineID != foodTalksSiteDefaultRulePresetID {
+		t.Fatalf("显式保存后应解除迁移标记：%#v", migrated)
+	}
+	if _, err := store.setActiveForAccount(foodTalksSiteRuleAccountID, "legacy-custom"); err != nil {
+		t.Fatalf("完成迁移后应允许绑定：%v", err)
 	}
 }
 
@@ -628,6 +813,14 @@ func TestRulePresetPublicCatalogOmitsRuleBodies(t *testing.T) {
 	}
 	if payload.Presets[0]["id"] == "" || payload.Presets[0]["name"] == "" {
 		t.Fatalf("catalog should expose rule id and name: %#v", payload.Presets[0])
+	}
+	for _, preset := range payload.Presets {
+		if preset["channel"] != "mp" && preset["channel"] != "ft" {
+			t.Fatalf("catalog preset 必须携带可过滤的 channel：%#v", preset)
+		}
+		if preset["rule_family"] == "" {
+			t.Fatalf("catalog preset 必须携带可过滤的 rule_family：%#v", preset)
+		}
 	}
 	if _, ok := payload.Presets[0]["config"]; ok {
 		t.Fatalf("catalog must not expose editable config body: %#v", payload.Presets[0])

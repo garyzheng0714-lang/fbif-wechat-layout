@@ -69,8 +69,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		writeJSON(w, http.StatusOK, map[string]any{"job": job})
 	})
 
-	// 人审：approve 触发唯一不可逆的翻公开动作（用户红线：除此之外任何路径不得触发）；
-	// reject 置终态。仅 awaiting_review 可操作，非法阶段返回 400 人话。
+	// 人审：approve 只原子落 publicizing/授权凭据并立即返回，后台 worker 执行唯一
+	// 不可逆的翻公开动作；reject 置终态。仅 awaiting_review 可操作。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/review", func(w http.ResponseWriter, r *http.Request) {
 		if !requireAdminPassword(w, r) {
 			return
@@ -123,14 +123,22 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			return
 		}
 		var req struct {
-			FoodTalksNewsID   int64 `json:"foodtalks_news_id"`
-			ConfirmNotCreated bool  `json:"confirm_not_created"`
+			FoodTalksNewsID     int64 `json:"foodtalks_news_id"`
+			ConfirmNotCreated   bool  `json:"confirm_not_created"`
+			ConfirmPublished    bool  `json:"confirm_published"`
+			ConfirmNotPublished bool  `json:"confirm_not_published"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		job, err := p.reconcileStaging(id, req.FoodTalksNewsID, req.ConfirmNotCreated)
+		var job publishJob
+		var err error
+		if req.ConfirmPublished || req.ConfirmNotPublished {
+			job, err = p.reconcilePublicize(id, req.ConfirmPublished, req.ConfirmNotPublished)
+		} else {
+			job, err = p.reconcileStaging(id, req.FoodTalksNewsID, req.ConfirmNotCreated)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": job})
 			return

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -80,6 +81,38 @@ func TestPublishReviewCASConcurrentApprovals(t *testing.T) {
 	}
 }
 
+func TestPublishApproveQueuesPublicizeBeforeExternalCall(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	env.ft.mu.Lock()
+	env.ft.forbidPublish = false
+	env.ft.mu.Unlock()
+	queued := make([]func(), 0, 2)
+	env.pipeline.spawn = func(f func()) { queued = append(queued, f) }
+
+	accepted, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "admin")
+	if err != nil {
+		t.Fatalf("approve claim: %v", err)
+	}
+	if accepted.Stage != publishStagePublicizing || len(queued) != 1 {
+		t.Fatalf("approve 应只落 publicizing 并排队一次，实际 stage=%q queued=%d", accepted.Stage, len(queued))
+	}
+	if _, updateN := env.ft.counts(); updateN != 0 {
+		t.Fatalf("审核请求返回前不得同步调用 FoodTalks，实际 PUT=%d", updateN)
+	}
+	queued[0]()
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStagePublished {
+		t.Fatalf("后台 worker 应完成 published，实际 stage=%q error=%q", got.Stage, got.Error)
+	}
+	if _, updateN := env.ft.counts(); updateN != 1 {
+		t.Fatalf("后台公开应恰一次，实际 PUT=%d", updateN)
+	}
+}
+
 // TestPublishRetryCASConcurrent 双 retry 必须只让一个调用者认领 failed 任务。
 func TestPublishRetryCASConcurrent(t *testing.T) {
 	env := newPublishTestEnv(t)
@@ -147,6 +180,21 @@ func TestPublishCreateResponseLossNeedsReconciliation(t *testing.T) {
 	}
 }
 
+func TestPublishCreateInvalidIDNeedsReconciliation(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.foodTalks = func() (foodTalksAPI, error) {
+		return directFoodTalksStub{create: func() (int64, error) { return 0, nil }}, nil
+	}
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageReconciliationRequired || got.StagingIntentKey == "" {
+		t.Fatalf("CreateNews 非正 id 结果不可信，必须人工对账：stage=%q id=%d intent=%q", got.Stage, got.FoodTalksNewsID, got.StagingIntentKey)
+	}
+}
+
 // TestPublishCreateSucceededButAnchorWriteFailed 模拟网站已返回 news id，随后本地锚点
 // 落盘失败。磁盘上必须已先有 staging intent；恢复后转人工核对，绝不能再次 CreateNews。
 func TestPublishCreateSucceededButAnchorWriteFailed(t *testing.T) {
@@ -187,6 +235,31 @@ func TestPublishCreateSucceededButAnchorWriteFailed(t *testing.T) {
 	}
 }
 
+func TestPublishStartupConvertsFailedStagingIntentToReconciliation(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.store.create("site:failed-staging-intent", testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, err = env.store.update(job.ID, func(j *publishJob) {
+		j.Stage = publishStageFailed
+		j.FailedStage = publishStageStaging
+		j.StagingIntentKey = "foodtalks-create:job-1"
+		j.Error = "directory sync failed after intent rename"
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	env.pipeline.recoverJobs()
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageReconciliationRequired {
+		t.Fatalf("failed(staging)+intent 必须转人工对账，实际 %q", got.Stage)
+	}
+	if createN, updateN := env.ft.counts(); createN != 0 || updateN != 0 {
+		t.Fatalf("不确定 intent 恢复不得调用 FoodTalks，实际 %d/%d", createN, updateN)
+	}
+}
+
 // TestPublishStartupRecoverySafeStages 启动只恢复可安全重放的自动阶段；每个阶段都应
 // 继续到 awaiting_review，且仍只 CreateNews 一次、绝不自动公开。
 func TestPublishStartupRecoverySafeStages(t *testing.T) {
@@ -196,6 +269,7 @@ func TestPublishStartupRecoverySafeStages(t *testing.T) {
 		publishStageRendering,
 		publishStageMirroring,
 		publishStageEnriching,
+		publishStageAssessing,
 		publishStageStaging,
 	} {
 		t.Run(stage, func(t *testing.T) {
@@ -211,7 +285,7 @@ func TestPublishStartupRecoverySafeStages(t *testing.T) {
 				j.BlocksJSON = testPublishBlocksJSON
 				j.ContentHTML = testPublishRenderedHTML
 				j.CoverURL = "https://mmbiz.qpic.cn/a.jpg"
-				if stage == publishStageEnriching || stage == publishStageStaging {
+				if stage == publishStageEnriching || stage == publishStageAssessing || stage == publishStageStaging {
 					j.ContentHTML = `<p>正文</p><img src="https://oss.example.com/a.jpg">`
 					j.CoverURL = "https://oss.example.com/a.jpg"
 				}
@@ -252,6 +326,8 @@ func TestPublishStartupRecoveryPublicizingRequiresApprovalIntent(t *testing.T) {
 			j.FoodTalksNewsID = 7240
 			j.ReviewAction = publishReviewApprove
 			j.ReviewedAt = "2026-07-10T00:00:00Z"
+			j.RiskLevel = publishRiskPass
+			j.ApprovedRiskVersion = publishReviewCardVersion(*j)
 		})
 		if err != nil {
 			t.Fatalf("seed: %v", err)
@@ -334,8 +410,8 @@ func TestPublishReconcileStaging(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reconcile: %v", err)
 		}
-		if got.Stage != publishStageStaging {
-			t.Fatalf("返回快照应是已认领的 staging，实际 %q", got.Stage)
+		if got.Stage != publishStageAwaitingReview {
+			t.Fatalf("同步测试中人工确认后应已续跑到 awaiting_review，实际 %q", got.Stage)
 		}
 		latest, _ := env.store.byID(job.ID)
 		if latest.Stage != publishStageAwaitingReview || latest.FoodTalksNewsID == 0 {
@@ -345,4 +421,194 @@ func TestPublishReconcileStaging(t *testing.T) {
 			t.Fatalf("人工确认后应恰一次 CreateNews，实际 %d", createN)
 		}
 	})
+}
+
+func TestPublishSinkRejectsMissingOrStaleApproval(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*publishJob)
+	}{
+		{name: "无 approve", mutate: func(j *publishJob) { j.RiskLevel = publishRiskPass }},
+		{name: "block 风险", mutate: func(j *publishJob) {
+			j.RiskLevel = publishRiskBlock
+			j.ReviewAction = publishReviewApprove
+			j.ReviewedAt = "2026-07-10T00:00:00Z"
+			j.ApprovedRiskVersion = publishReviewCardVersion(*j)
+		}},
+		{name: "风险版本已变", mutate: func(j *publishJob) {
+			j.RiskLevel = publishRiskPass
+			j.ReviewAction = publishReviewApprove
+			j.ReviewedAt = "2026-07-10T00:00:00Z"
+			j.ApprovedRiskVersion = publishReviewCardVersion(*j)
+			j.RiskNotes = "approve 后的新风险说明"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newPublishTestEnv(t)
+			job, _, err := env.store.create("site:sink:"+tc.name, testPublishSourceURL)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			job, err = env.store.update(job.ID, func(j *publishJob) {
+				j.Stage = publishStagePublicizing
+				j.FoodTalksNewsID = 7240
+				j.Title = "sink 守卫"
+				j.ContentHTML = "<p>正文</p>"
+				j.CoverURL = "https://oss.example.com/a.jpg"
+				tc.mutate(j)
+			})
+			if err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			if err := env.pipeline.stagePublicize(context.Background(), job); err == nil {
+				t.Fatalf("不安全公开态必须被 sink 拒绝")
+			}
+			if _, updateN := env.ft.counts(); updateN != 0 {
+				t.Fatalf("授权无效时不得外调 UpdateNews，实际 %d", updateN)
+			}
+		})
+	}
+}
+
+func TestPublishApprovalBindsRiskVersionAndInvalidatesOnChange(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	ready, _ := env.store.byID(job.ID)
+	wantVersion := publishReviewCardVersion(ready)
+	var queued []func()
+	env.pipeline.spawn = func(f func()) { queued = append(queued, f) }
+	accepted, err := env.pipeline.reviewWithRiskVersion(context.Background(), job.ID, publishReviewApprove, "ou_reviewer", wantVersion)
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if accepted.ApprovedRiskVersion != wantVersion || len(queued) != 1 {
+		t.Fatalf("审核必须持久绑定风险版本：job=%+v queued=%d", accepted, len(queued))
+	}
+	if _, err := env.store.update(job.ID, func(j *publishJob) {
+		j.RiskNotes = "approve 后风险证据发生变化"
+	}); err != nil {
+		t.Fatalf("mutate risk: %v", err)
+	}
+	queued[0]()
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageFailed || got.FailedStage != publishStagePublicizing {
+		t.Fatalf("旧 approve 必须在 sink 失效，实际 stage=%q failed_stage=%q", got.Stage, got.FailedStage)
+	}
+	if _, updateN := env.ft.counts(); updateN != 0 {
+		t.Fatalf("风险版本变更后不得公开，实际 UpdateNews=%d", updateN)
+	}
+}
+
+func TestPublishPublicizeUncertainRequiresManualReconciliation(t *testing.T) {
+	t.Run("人工确认已公开", func(t *testing.T) {
+		env := newPublishTestEnv(t)
+		job, _, err := env.pipeline.submit(testPublishSourceURL)
+		if err != nil {
+			t.Fatalf("submit: %v", err)
+		}
+		var updates atomic.Int32
+		env.pipeline.foodTalks = func() (foodTalksAPI, error) {
+			return directFoodTalksStub{
+				create: func() (int64, error) { return 0, errors.New("unexpected create") },
+				update: func() error {
+					updates.Add(1)
+					return errors.New("response lost after server accepted PUT")
+				},
+			}, nil
+		}
+		if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "admin"); err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+		got, _ := env.store.byID(job.ID)
+		if got.Stage != publishStagePublicizeReconciliationRequired || got.PublicizeIntentKey == "" {
+			t.Fatalf("公开响应丢失必须进人工对账，实际 stage=%q intent=%q error=%q", got.Stage, got.PublicizeIntentKey, got.Error)
+		}
+		if len(env.notified) < 2 || !strings.Contains(env.notified[len(env.notified)-1], "公开结果待核对") {
+			t.Fatalf("发布中断必须给审核群明确结果通知：%v", env.notified)
+		}
+		if _, err := env.pipeline.retry(job.ID); err == nil {
+			t.Fatalf("不确定公开结果不得走普通 retry")
+		}
+		env.pipeline.recoverJobs()
+		if updates.Load() != 1 {
+			t.Fatalf("重启恢复不得盲重放 PUT，实际 %d", updates.Load())
+		}
+		got, err = env.pipeline.reconcilePublicize(job.ID, true, false)
+		if err != nil || got.Stage != publishStagePublished {
+			t.Fatalf("人工确认已公开应只补终态：job=%+v err=%v", got, err)
+		}
+		if updates.Load() != 1 {
+			t.Fatalf("确认已公开不得再 PUT，实际 %d", updates.Load())
+		}
+	})
+
+	t.Run("人工确认未公开才重试", func(t *testing.T) {
+		env := newPublishTestEnv(t)
+		job, _, err := env.pipeline.submit(testPublishSourceURL)
+		if err != nil {
+			t.Fatalf("submit: %v", err)
+		}
+		var updates atomic.Int32
+		var fail atomic.Bool
+		fail.Store(true)
+		env.pipeline.foodTalks = func() (foodTalksAPI, error) {
+			return directFoodTalksStub{
+				create: func() (int64, error) { return 0, errors.New("unexpected create") },
+				update: func() error {
+					updates.Add(1)
+					if fail.Load() {
+						return errors.New("timeout")
+					}
+					return nil
+				},
+			}, nil
+		}
+		if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "admin"); err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+		fail.Store(false)
+		got, err := env.pipeline.reconcilePublicize(job.ID, false, true)
+		if err != nil || got.Stage != publishStagePublished {
+			t.Fatalf("确认未公开后应重试到 published：job=%+v err=%v", got, err)
+		}
+		if updates.Load() != 2 {
+			t.Fatalf("只应在人工确认后发第二次 PUT，实际 %d", updates.Load())
+		}
+	})
+}
+
+func TestPublishStartupConvertsInFlightPublicizeToReconciliation(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.store.create("site:publicize-in-flight", testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	job, err = env.store.update(job.ID, func(j *publishJob) {
+		j.Stage = publishStagePublicizingUpdating
+		j.FoodTalksNewsID = 7240
+		j.RiskLevel = publishRiskPass
+		j.ReviewAction = publishReviewApprove
+		j.ReviewedAt = "2026-07-10T00:00:00Z"
+		j.ApprovedRiskVersion = publishReviewCardVersion(*j)
+		j.PublicizeIntentKey = "foodtalks-publicize:job-1:test"
+		j.PublicizeIntentAt = "2026-07-10T00:00:01Z"
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	var updates atomic.Int32
+	env.pipeline.foodTalks = func() (foodTalksAPI, error) {
+		return directFoodTalksStub{create: func() (int64, error) { return 0, nil }, update: func() error {
+			updates.Add(1)
+			return nil
+		}}, nil
+	}
+	env.pipeline.recoverJobs()
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStagePublicizeReconciliationRequired || updates.Load() != 0 {
+		t.Fatalf("崩溃遗留公开意图必须人工对账且零重放：stage=%q updates=%d", got.Stage, updates.Load())
+	}
 }
