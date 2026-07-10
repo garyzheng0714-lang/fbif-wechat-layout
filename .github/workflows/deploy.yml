@@ -14,17 +14,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26'
+          cache-dependency-path: api/go.sum
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
+          package-manager-cache: false
 
       # 测试门禁：任何测试失败都不允许部署（2026-07-10 架构体检修复：
       # 此前 CI 只编译不测试，1.3 万行测试形同虚设，测试挂了照样上生产）

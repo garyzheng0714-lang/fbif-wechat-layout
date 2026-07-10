@@ -67,6 +67,14 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   assert.match(workflow, /playwright install --with-deps chromium/);
   assert.match(workflow, /npm run test:e2e:ci/,
     '无截图交互 E2E 必须进入部署门禁，不能只留在本机手跑');
+  assert.match(workflow, /uses: actions\/checkout@v5/,
+    '官方 checkout Node 24 运行时版本必须固定，避免旧 action 弃用告警');
+  assert.match(workflow, /uses: actions\/setup-go@v6/);
+  assert.match(workflow, /cache-dependency-path: api\/go\.sum/,
+    'Go 模块位于 api/，缓存不得再去仓库根目录找 go.sum');
+  assert.match(workflow, /uses: actions\/setup-node@v6/);
+  assert.match(workflow, /package-manager-cache: false/,
+    'setup-node v6 不应依赖 packageManager 自动探测改变缓存行为');
   assert.match(workflow, /remote_transaction rollback/);
   assert.match(workflow, /concurrency:\s*\n\s*group: fbifmp-layout-production\s*\n\s*cancel-in-progress: false/,
     '生产部署必须串行排队，不能让两个 run 同时 swap/rollback');
