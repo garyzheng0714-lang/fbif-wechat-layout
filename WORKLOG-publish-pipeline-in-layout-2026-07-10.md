@@ -160,3 +160,27 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 13. **（预览页）域名取法**：Go 侧此前没有站点域名常量；预览链接 base 复用既有 env `WECHAT_UPLOAD_ORIGIN`（deploy.yml 已写死为 https://fbifmp-layout.foodtalks.cn）→ 缺失时默认常量兜底，不新增平行 env（最少新概念）。
 14. **（预览页）failed 不可预览**：施工图「awaiting_review 及之后」按字面实施为 {awaiting_review, publicizing, published, rejected} 白名单；failed 的 failed_stage 可能停在 fetching/rendering（content_html 未定型半成品），不给看。
 15. **（M5）ARK Base URL 可 env 覆盖**（`ARK_BASE_URL`，默认火山北京域名）：与 FOODTALKS_BASE_URL 同模式，测试 httptest 桩靠它注入，生产不用配。
+
+## M7：编辑部规范倒推 AI 预填提示词（2026-07-10 用户命题「摘要太长；连库看近一月历史文章，倒推转载/原创/摘要/标签规范成底层提示词；要测试准确率；换模型影响要小」）
+
+数据源：阿里云 RDS `mc-fb` 库（只读账号 rss_readonly，凭证在服务器 `/root/.mcfb.cnf`，chmod 600，不进 git）。
+核心表：`news_news`（文章主表）/ `news_news_tag`（关联 {news_id, tag_id, tag_name}）/ `basic_tag`（标签库，新闻标签 tag_type_id=6）。
+
+### 数据结论（2026-06-10 ~ 07-10，publish_status=1 共 163 篇）
+
+- **source_type 语义实锤**：0=原创/自有（FBIF食品饮料创新 63、FoodTalks、FBIF食品创新展），1=转载（零售圈/联商网/小食代/咖门…）。93:70。→ 判定是确定性规则（自家号清单），不该让模型猜（规则五）。
+- **摘要**：avg 29 字；70% ≤30 字、84% ≤40 字、94% ≤60 字。形态=一句话钩子（提问 26/163、金句、数据点睛、原文引语），句号结尾为主。**绝不是内容概括**——当前 prompt 写死「80-120 字」正是用户嫌太长的根因。
+- **标签**：每篇 1-3 个为主（1 个 64 篇/2 个 48 篇/3 个 18 篇；4 个仅 5 篇）。粒度=品牌名/品类/公司/栏目名（喜茶、饮料、FBIF2026会后报告），**无抽象概念标签**（「热点营销」「品牌破圈」这类不出现）。全部关联 basic_tag 词表（近一年实际用过 2063 个，≥5 次的 235 个）→ 打标签应做成**封闭词表选择题**（准确率+换模型鲁棒性双赢）。
+- **作者**：132/163 为空——有明确个人署名才填（Mote/何丹琳/李达），机构名偶用。62523 正文有「作者：陈新生」但编辑部没填 → 预填仍抽取（给审核人看），但评测只对「编辑部有填」的样本计精确率。
+- **封面**：162/163 是 static.foodtalks.cn（CMS 转存）；我们 API 路径发的 OSS 图是库里唯一外域。风险已记录（契约 §8）。
+- **newsTags 500 之谜疑似解**：库里标签是 {tag_id, tag_name} 对象——API 大概率要对象数组不是字符串数组。→ 测试环境草稿实验验证（D 项）。
+- **buildSiteNews 漏填 SourceName**：foodTalksNews 有该字段但没赋值，编辑部 163/163 篇都有来源名 → 补。
+
+### 施工项
+
+- [x] A. 数据导出：`api/editorial/tag_vocab.json`（500 条含 tag_id）；`tools/enrich-eval/eval_set.json`（40 篇=30 最新+10 有署名，25 原创/15 转载）
+- [x] B. 规范文档 `docs/editorial-norms-foodtalks.md`
+- [x] C. 代码：norms_prompt.md（go:embed）+ editorial_norms.go 组装 prompt（{{VOCAB}} 注入前 300 高频标签）；enrich 输出加 source_name；job 加 ai_source；siteSourceFor 确定性判定（SITE_OWN_ACCOUNTS env）；buildSiteNews 补 SourceName/SourceType、author 不再回落 source_name；fallback 摘要 100→40 字、author 空；预览页加「来源」行；全部 api 测试绿
+- [x] D. newsTags 实验完成——**结构破解：[{tagId,tagName}] 对象数组且 tagId 必须真实存在（POST ✅）；但后端 PUT 带标签必 500 且污染文章成「任何 PUT 都 500」**（翻公开会卡死）→ 修复前恒空不变，完整矩阵进契约 §9，转后端修（实验文章 7246/7247/7248 停留草稿态无法 API 下线，请后端清理）
+- [ ] E. 准确率评测：评测器已建（api/publish_enrich_eval_test.go，6 项指标+达标线+作者幻觉红线）；本地到 ARK 网络超时 → 服务器（121）装 Go 跑全量 40 篇，冒烟 1 篇质量极好（摘要 26 字钩子体、标签与编辑部完全一致、出处「新零售」抽对）——**跑分中**
+- [ ] F. 契约文档更新（§9 矩阵已写）+ 部署验证

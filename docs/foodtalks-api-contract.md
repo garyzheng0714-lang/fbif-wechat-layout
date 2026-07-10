@@ -72,11 +72,30 @@ POST publishStatus=0（草稿进站，外界不可见）
 - **流水线图片方案（定型）**：mmbiz → 排版工具既有 `POST /api/oss-upload`（`urls` 模式：服务器内网并发「取图+传 OSS」，实测 19 张 ~1.3s；上游 `WECHAT_UPLOAD_ENDPOINT=localhost:9000/api/wechat-upload`，python 服务）→ content 直接用 OSS URL 提交。零新开发。
 - ⚠️ 记录在案的权衡：文章图片资产落在我方 OSS 而非 FoodTalks 存储——桶（fbif-gary-img-hz）若停用/欠费，已发布文章图片全挂。长期可与网站后端商定归一到 static.foodtalks.cn，不阻塞 MVP。
 
-## 9. 未决问题（转给网站后端 / Phase 0）
+## 9. newsTags 完整实测矩阵（2026-07-10 下午，测试环境 7246/7247/7248 实验）
 
-1. `isPublic`、`sourceType`、`isLatest`、`commentEnable` 的完整枚举与语义
+**结构已破解**：库表 `news_news_tag` 每行 `{news_id, tag_id, tag_name}` → API 要的是**对象数组** `[{"tagId": <int>, "tagName": <string>}]`，且 **tagId 必须真实存在**于标签库（`basic_tag`，新闻标签 `tag_type_id=6`）。字符串数组 500 的谜底就是结构不对。
+
+| 操作 | newsTags 形态 | 结果 |
+|---|---|---|
+| POST | `[]` 空数组 | ✅ code=0 |
+| POST | `[{"tagId":6609,"tagName":"FBIF"}]`（真实 ID） | ✅ code=0（7246/7247） |
+| POST | `["字符串"]` | ❌ 500「服务器内部异常」 |
+| PUT（任意文章） | 含非空 newsTags（真实 ID 也一样） | ❌ 500 |
+| PUT | `[{"tagName":"饮料"}]` 缺 tagId | ❌「标签id不能为null」 |
+| PUT | 伪 tagId 999999999 | ❌ 500（后端校验/联表失败） |
+| PUT（**带过标签的文章**） | 空数组 / 完全省略字段 | ❌ **一律 500** |
+| PUT（从未带标签的文章） | 空数组 / 省略 | ✅（7240/7241/7245 冒烟已证） |
+
+**🚨 后端 bug（阻塞标签直发）**：UPDATE 路径的 newsTags 处理疑似「先写后炸、非事务」——PUT 带标签必 500，且失败的 PUT 会把文章置into「带标签」脏态，此后该文章**任何 PUT 都 500**（连 publishStatus 都改不了）。对我们状态机的含义：POST 带标签建草稿 → 审核通过翻公开的 PUT 必挂 → **修复前 newsTags 必须恒空**（`buildSiteNews` 现状即唯一安全解），AI 标签只做卡片/预览展示。词表（含 tagId）已备好在 `api/editorial/tag_vocab.json`，后端修好 PUT 即可解锁直发。
+遗留：实验文章 7246/7247/7248 因该 bug 无法经 API 置 2 下线，停留草稿态（前台不可见），请后端顺手清理。
+
+## 10. 未决问题（转给网站后端 / Phase 0）
+
+1. `isPublic`、`sourceType`、`isLatest`、`commentEnable` 的完整枚举与语义（sourceType 0/1=原创/转载已由 mc-fb 库 163 篇分布反推实锤，见 docs/editorial-norms-foodtalks.md §1）
 2. `publishStatus=2` vs `3` 的官方语义区分
 3. ~~图片上传接口~~ **已解除**（见 §8：API 不校验图片域名，走排版工具 OSS）
 4. 正式环境 Base URL + 服务级长效 token
 5. 「有料」标签对应的 categoryId 表；线上分类 ID 全集（本次沿用文档示例 52/58）
 6. 列表页排序规则（2026 年文章混在 2023 年之后，疑有置顶/权重逻辑，同步后运营可见性预期要对齐）
+7. **修复 PUT newsTags 500**（§9 矩阵）——修好后我们即可开启标签直发

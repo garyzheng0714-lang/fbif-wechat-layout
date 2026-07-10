@@ -191,7 +191,7 @@ test('fresh more-articles cards seed from the active rule default cards', () => 
   assert.deepEqual(cards.map(card => card.composite_hash), [null, null]);
 });
 
-test('fresh more-articles cards use active rule slots when count is omitted', () => {
+test('fresh more-articles cards do not pad rule defaults with empty legacy slots', () => {
   globalThis.window = {
     _activeConfig: {
       config: {
@@ -206,11 +206,34 @@ test('fresh more-articles cards use active rule slots when count is omitted', ()
 
   const cards = makeFreshUploadCards();
 
-  assert.equal(cards.length, 4);
+  assert.equal(cards.length, 1);
   assert.equal(cards[0].href, 'https://mp.weixin.qq.com/s/one');
-  assert.equal(cards[1].href, '');
-  assert.equal(cards[2].href, '');
-  assert.equal(cards[3].href, '');
+});
+
+test('loading legacy more-article state drops empty cards padded after real recommendations', () => {
+  const storedCards = [
+    { href: 'https://mp.weixin.qq.com/s/a', title: '文章 A' },
+    { href: 'https://mp.weixin.qq.com/s/b', title: '文章 B' },
+    { href: '', title: '', imgurl: '', image_urls: [] },
+    { href: '', title: '', imgurl: '', image_urls: [] },
+  ];
+  globalThis.localStorage = {
+    getItem(key) {
+      return String(key).startsWith('more_articles_v1::')
+        ? JSON.stringify(storedCards)
+        : null;
+    },
+    setItem() {},
+    removeItem() {},
+  };
+
+  const cards = loadCards();
+
+  assert.equal(cards.length, 2);
+  assert.deepEqual(cards.map(card => card.href), [
+    'https://mp.weixin.qq.com/s/a',
+    'https://mp.weixin.qq.com/s/b',
+  ]);
 });
 
 test('fresh more-articles cards are empty when the active rule disables the section', () => {

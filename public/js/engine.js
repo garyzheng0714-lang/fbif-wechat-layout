@@ -475,7 +475,7 @@ async function buildFooterWithMoreArticles(baseFooterHtml, opts = {}) {
   const cardsForFooter = opts.copySafe
     ? await Promise.all(cards.map(copySafeMoreArticleCardForFooter))
     : await Promise.all(cards.map(async c => ({ ...c, final_url: await compositePreviewDataUrl(c) })));
-  if (opts.copySafe) saveMoreArticlesCards(cards);
+  if (opts.copySafe && (!opts.canCommitCards || opts.canCommitCards())) saveMoreArticlesCards(cards);
   return normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(transformed, cardsForFooter));
 }
 
@@ -895,8 +895,8 @@ export function initApp(initialTemplate) {
     await waitForActiveRuleConfigReady('batch-upload');
     const input = await parseFileToArticleInput(file, isRepost, opts);
     const result = await renderArticleInput(input);
-    // New article upload resets the "更多文章" section to blank placeholder
-    // slots — cards are a per-article curation, filled in manually each time.
+    // New article upload resets the "更多文章" section to this rule's saved
+    // recommendation list. Per-article edits must not leak into the next file.
     return await buildArticleSession(input, result, {
       resetArticleArtifacts: true,
       startedAt: t0,
@@ -1259,9 +1259,8 @@ export function initApp(initialTemplate) {
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       }
 
-      // Single-file upload path — same reset behavior as batch path: wipe
-      // any prior article's "更多文章" cards to blank placeholder slots, so
-      // sidebar shows empty inputs and footer renders gray placeholders.
+      // Single-file upload path — same reset behavior as batch path: discard
+      // the prior article's edits and restore this rule's recommendation list.
       const session = await buildArticleSession(input, result, {
         resetArticleArtifacts: true,
         startedAt: t0,
@@ -1305,7 +1304,7 @@ export function initApp(initialTemplate) {
   // 版本未变时才允许回写）；moreArticlesGate = 更多文章合成任务版本。契约与「文章级
   // 重置必须全部作废」由 copy-session.js + tests/copy-session.test.mjs 守护）。
   const copySession = createCopySession();
-  const { footerCopyGate, moreArticlesGate } = copySession;
+  const { footerCopyGate, moreArticlesGate, moreArticlesPreviewGate } = copySession;
   const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
   let _plainTextCopy = null;
   let _lastCopiedHtml = '';
@@ -1381,7 +1380,7 @@ export function initApp(initialTemplate) {
     return normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(footerCopy, copySafeCards));
   }
 
-  // 新文章导入：把「更多文章」卡片重置为空白占位 + 作废上一篇在途的预热 job——两步必须原子。
+  // 新文章导入：把「更多文章」卡片重置为规则默认列表 + 作废上一篇在途的预热 job——两步必须原子。
   // 只清卡片不作废 job，旧 job 会在卡片重置之后、showPreview 之前的窗口（两个 await + setTimeout）
   // 里 resolve，此时 seq 未变 → 通过 742 校验 → saveMoreArticlesCards 把上一篇卡片写回存储，
   // 下一篇 loadMoreArticlesCards 读到旧卡片（跨文章污染；codex re-review #3）。
@@ -1515,6 +1514,8 @@ export function initApp(initialTemplate) {
     window._updateMoreArticles = async function(cardsOverride) {
       if (bodyOnly) return false;
       if (cardsOverride) saveMoreArticlesCards(cardsOverride);
+      moreArticlesPreviewGate.invalidate();
+      const previewGate = moreArticlesPreviewGate.capture();
       moreArticlesGate.invalidate();
       _moreArticlesCopyJob = null;
       const rp = _lastRenderInput && _lastRenderInput.isRepost != null ? _lastRenderInput.isRepost : _isRepost;
@@ -1525,7 +1526,14 @@ export function initApp(initialTemplate) {
         footerVisibilityOverride: _articleSession && _articleSession.footerVisibilityOverride,
       });
       const merged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2 });
-      const copySafeMerged = await buildFooterWithMoreArticles(base, { isRepost: rp, isV2, copySafe: true });
+      if (previewGate.stale()) return false;
+      const copySafeMerged = await buildFooterWithMoreArticles(base, {
+        isRepost: rp,
+        isV2,
+        copySafe: true,
+        canCommitCards: () => !previewGate.stale(),
+      });
+      if (previewGate.stale()) return false;
       _footerHtml = merged;
       _footerCopy = copySafeMerged;
       footerCopyGate.invalidate();
@@ -1538,6 +1546,7 @@ export function initApp(initialTemplate) {
       hookPreviewImages(contentArea);
       markFailedImages(_failedSrcs);
       prepareMoreArticlesForCopy('edit');
+      return true;
     };
 
     dispatchArticleEvent(bodyOnly ? 'fbif:article-text-ready' : 'fbif:article-previewed', { title, stats });

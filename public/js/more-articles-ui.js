@@ -222,7 +222,7 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
   // ---- Rendering ----------------------------------------------------------
 
   function renderAll() {
-    // Default state uses the active rule preset's placeholder slot count.
+    // Default state uses the active rule preset's saved recommendation list.
     // Seed on demand so first-visit, 清空, and delete-to-zero all converge to
     // the same recommended-articles default. Saved cards that are all empty
     // (legacy state from before defaults existed) get reseeded too — empty
@@ -310,21 +310,21 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
       const thumb = $('thumb');
       const hasAny = !!(state.href || state.imgurl || state.cover_data_url || state.title);
       if (!hasAny) {
-        thumb.classList.add('empty');
+        thumb.classList.add('is-empty');
         thumb.textContent = '粘贴文章链接自动抓取';
         return;
       }
       try {
         const url = await compositePreviewDataUrl(state);
         if (url) {
-          thumb.classList.remove('empty');
+          thumb.classList.remove('is-empty');
           thumb.innerHTML = `<img alt="" src="${url.replace(/"/g, '&quot;')}">`;
         } else {
-          thumb.classList.add('empty');
+          thumb.classList.add('is-empty');
           thumb.textContent = '暂无头图';
         }
       } catch {
-        thumb.classList.add('empty');
+        thumb.classList.add('is-empty');
         thumb.textContent = '加载失败';
       }
     };
@@ -359,6 +359,9 @@ export function initMoreArticlesEditor({ openCropEditor } = {}) {
         state.crop = { x: 0.5, y: 0.5, scale: 1 };
         state.composite_url = null;
         state.composite_hash = null;
+        state.final_url = null;
+        delete state.copy_data_url;
+        delete state.copy_data_key;
         $('url').value = state.href;
         setStatus('✓ 已抓取', 'ok');
         saveCards(cards);

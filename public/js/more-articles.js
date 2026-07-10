@@ -10,6 +10,7 @@
 import { getActiveRuleConfig, getRuleNumber } from './rule-presets.js';
 import {
   emptyMoreArticleCard,
+  hasMoreArticleCardContent,
   moreArticleCardsForRule,
   normalizeMoreArticleDefaultCard,
 } from './more-articles-config.js';
@@ -122,7 +123,7 @@ export function makeFreshUploadCards(n = null) {
   const defaultCards = moreArticleCardsForRule(config);
   if (config.more_articles_enabled === false) return [];
   const count = n == null
-    ? Math.max(0, Math.round(getRuleNumber(config, 'more_articles_slots')))
+    ? defaultCards.length
     : Math.max(0, Math.round(Number(n) || 0));
   return Array.from({ length: count }, (_, i) => {
     const seed = defaultCards[i];
@@ -162,7 +163,7 @@ export function loadCards() {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeCard);
+    return parsed.map(normalizeCard).filter(hasMoreArticleCardContent);
   } catch {
     return [];
   }

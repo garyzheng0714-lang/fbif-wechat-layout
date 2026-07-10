@@ -142,6 +142,13 @@ body { margin: 0; background: #ffffff; color: #333; font-family: -apple-system, 
 	writePreviewMetaLine(&b, "摘要", job.Summary)
 	writePreviewMetaLine(&b, "标签", strings.Join(job.Tags, "、"))
 	writePreviewMetaLine(&b, "作者", job.Author)
+	// 来源判定（M7 确定性规则）：审核人要能看到将写进网站的转载/原创口径与来源名。
+	sourceType, sourceName := siteSourceFor(job)
+	sourceLabel := "原创"
+	if sourceType == 1 {
+		sourceLabel = "转载"
+	}
+	writePreviewMetaLine(&b, "来源", sourceLabel+" · "+sourceName)
 	writePreviewMetaLine(&b, "优化说明", job.AINotes)
 	b.WriteString(`</footer>
 </main>

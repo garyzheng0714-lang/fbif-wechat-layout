@@ -45,8 +45,11 @@ const sitePublishRulePackID = "ft-default"
 const (
 	siteCategoryIDsEnv     = "FOODTALKS_CATEGORY_IDS"
 	siteFrontURLEnv        = "FOODTALKS_FRONT_URL"
+	siteOwnAccountsEnv     = "SITE_OWN_ACCOUNTS"
 	defaultSiteCategoryIDs = "52,58"                     // 与 2026-07-10 冒烟一致（契约 §9：线上分类表待后端给全集）
 	defaultSiteFrontURL    = "https://test.foodtalks.cn" // 默认测试环境前台；生产切换只改 env
+	// 自家账号清单（原创判定，规范文档 §1）：近一月库内 source_type=0 的全部来源名。
+	defaultSiteOwnAccounts = "FBIF食品饮料创新,FBIF食品饮料创新论坛,FoodTalks,FBIF食品创新展"
 )
 
 // 人审动作。
@@ -453,6 +456,7 @@ func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error
 		j.Summary = result.Summary
 		j.Tags = result.Tags
 		j.Author = result.Author
+		j.AISource = result.SourceName
 		j.AINotes = result.Notes
 		j.Stage = publishStageStaging
 		j.FailedStage = ""
@@ -663,25 +667,25 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 	if err != nil {
 		return foodTalksNews{}, err
 	}
-	// M5：作者优先用 enriching 从正文识别的名字；识别不到（或老任务没跑过 enriching）
-	// 回落公众号名——与 M5 之前的行为一致。
-	author := strings.TrimSpace(job.Author)
-	if author == "" {
-		author = job.SourceName
-	}
+	// M7 来源判定（docs/editorial-norms-foodtalks.md §1/§2/§5，从库里 163 篇倒推）：
+	// sourceType 是确定性规则不交模型——自家号清单命中=0（原创），否则=1（转载）；
+	// 自家号转发他人文章时 AI 从正文声明抽出真实出处（job.AISource），此时按转载算。
+	// author 不再回落 source_name：编辑部 132/163 篇作者为空、来源归 sourceName 字段。
+	sourceType, sourceName := siteSourceFor(job)
 	return foodTalksNews{
-		Title:    job.Title,
-		CoverImg: job.CoverURL, // mirroring 后已是转存 OSS URL；enriching 可能换成 AI 选中图
-		// sourceType 枚举语义未确认，先按 0 提交。
-		// TODO(契约 §9)：待网站后端确认枚举后改为显式「转载」取值。
-		SourceType:        0,
-		PublishStatus:     publishStatus,
-		IsPublic:          1, // ⚠️ 实测非可见性开关（契约 §4），恒 1；隐藏靠 publishStatus=0
-		Author:            author,
-		Summary:           job.Summary,     // M5 AI 摘要（兜底=正文前 100 字）
-		// newsTags 恒空：2026-07-10 实测传字符串数组必 500「服务器内部异常」（空数组成功）——
-		// 后端期待的元素结构未知（契约 §9 待确认，疑似需 CMS 标签 ID）。AI 标签（job.Tags）
-		// 仍在审核卡片与预览页展示给人看，拿到后端结构前不写给 FoodTalks。
+		Title:         job.Title,
+		CoverImg:      job.CoverURL, // mirroring 后已是转存 OSS URL；enriching 可能换成 AI 选中图
+		SourceType:    sourceType,
+		SourceName:    sourceName,
+		PublishStatus: publishStatus,
+		IsPublic:      1, // ⚠️ 实测非可见性开关（契约 §4），恒 1；隐藏靠 publishStatus=0
+		Author:        strings.TrimSpace(job.Author),
+		Summary:       job.Summary, // M5 AI 摘要（兜底=正文前 100 字）
+		// newsTags 恒空：结构已破解（对象数组 [{tagId,tagName}]，tagId 必须真实存在），
+		// 但后端 UPDATE 路径有 bug——PUT 带非空标签必 500，且失败后文章进「带标签」脏态、
+		// 此后任何 PUT 都 500（翻公开也会卡死）。完整实测矩阵见契约 §9。修复前恒空是
+		// 唯一安全解；AI 标签（job.Tags）只在审核卡片与预览页展示，词表（含 tagId）已
+		// 备好在 api/editorial/tag_vocab.json，后端修好即可解锁直发。
 		NewsTags:          []string{},
 		Content:           job.ContentHTML, // mirroring 后成品（图片已全部 OSS 化；enriching 绝不改它）
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),
@@ -690,6 +694,33 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 		Language:          "ZH", // 中文站固定
 		SEOTitle:          job.Title + "-FoodTalks全球食品资讯",
 	}, nil
+}
+
+// siteSourceFor 转载/原创判定（确定性规则，规范文档 §1：能用代码就不用模型）：
+//  1. AI 从正文抽到出处声明且不是自家账号 → 转载，来源=声明出处（自家号转发他人文章）；
+//  2. 公众号名在自家清单 → 原创，来源=公众号名；
+//  3. 其余 → 转载，来源=公众号名（直接监控外部公众号的场景）。
+//
+// source_type 语义 0=原创/自有、1=转载，来自 mc-fb 库近一月 163 篇实测分布（规范 §1）。
+func siteSourceFor(job publishJob) (int, string) {
+	own := map[string]bool{}
+	raw := strings.TrimSpace(os.Getenv(siteOwnAccountsEnv))
+	if raw == "" {
+		raw = defaultSiteOwnAccounts
+	}
+	for _, name := range strings.Split(raw, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			own[name] = true
+		}
+	}
+	if src := strings.TrimSpace(job.AISource); src != "" && !own[src] {
+		return 1, src
+	}
+	name := strings.TrimSpace(job.SourceName)
+	if own[name] {
+		return 0, name
+	}
+	return 1, name
 }
 
 // siteFrontURL 前台地址（article_url 回填用），默认测试环境；生产切换只改 env。

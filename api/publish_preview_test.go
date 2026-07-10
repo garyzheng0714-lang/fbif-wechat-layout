@@ -90,8 +90,9 @@ func TestPublishPreviewRendersArticle(t *testing.T) {
 	if !strings.Contains(body, `src="`+ossURLFor("https://mmbiz.qpic.cn/a.jpg")+`"`) {
 		t.Fatalf("content_html 未原样嵌入：%s", body)
 	}
-	// AI 预填参数页尾（本测试 enrich 未装配 → 规则兜底值）。
-	for _, want := range []string{"AI 预填参数", "摘要：", "作者：测试公众号", "AI 预填未执行"} {
+	// AI 预填参数页尾（本测试 enrich 未装配 → 规则兜底值：author 宁空勿造显示「-」，
+	// 来源行是 M7 确定性判定——外部公众号=转载）。
+	for _, want := range []string{"AI 预填参数", "摘要：", "作者：-", "来源：转载 · 测试公众号", "AI 预填未执行"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("页尾缺 %q：%s", want, body)
 		}

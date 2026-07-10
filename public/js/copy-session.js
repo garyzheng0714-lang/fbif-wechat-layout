@@ -12,9 +12,10 @@
 //   - createCopySession：把「一次导入 = 一个会话」封装为唯一重置入口
 //     resetForNewArticle()——内部作废全部 gate，调用方不可能再漏。
 //
-// 两个 gate 语义不同（不能合并为一个计数器）：
+// 三个 gate 语义不同（不能合并为一个计数器）：
 //   footerCopyGate    = _footerCopy 的写权版本（文章重置 + 更多文章权威重建时作废）
 //   moreArticlesGate  = 更多文章合成任务的版本（文章重置 + 新一轮 prepare 时作废）
+//   moreArticlesPreviewGate = 更多文章预览更新版本（后一次编辑必须淘汰前一次异步渲染）
 // 契约测试：tests/copy-session.test.mjs。
 
 export function createVersionGate(name) {
@@ -33,14 +34,17 @@ export function createVersionGate(name) {
 export function createCopySession() {
   const footerCopyGate = createVersionGate('footerCopy');
   const moreArticlesGate = createVersionGate('moreArticles');
+  const moreArticlesPreviewGate = createVersionGate('moreArticlesPreview');
   return {
     footerCopyGate,
     moreArticlesGate,
+    moreArticlesPreviewGate,
     // 文章级重置（新文章导入 / goBack / 快照恢复 / 纯文字重置）唯一入口：
     // 所有在途异步回写全部作废。新增 gate 时在此登记，调用方零改动。
     resetForNewArticle() {
       footerCopyGate.invalidate();
       moreArticlesGate.invalidate();
+      moreArticlesPreviewGate.invalidate();
     },
   };
 }
