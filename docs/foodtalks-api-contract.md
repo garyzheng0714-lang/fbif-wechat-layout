@@ -5,14 +5,14 @@
 > 测试文章：7240、7241（标题带 [SYNC-TEST]，测毕均已置 `publishStatus=2` 下线，前台 404）。
 > 鉴权 token 为抓包个人 token，**不入库**（视为已泄露级别，正式上线换服务级凭证，见 tasks Phase 0）。
 
-## 1. 网关（写进未来客户端，缺一层就白忙）
+## 1. 网关（写进未来客户端，缺一层就白忙——**两环境规则相反**，2026-07-10 全天实测）
 
-| 层 | 行为 |
-|---|---|
-| nginx/WAF | 请求**必须带 `Origin` + `Referer` 头**（值随意有效域即可），否则直接 403 返回 **HTML 错误页**（不是 JSON） |
-| 应用层 | 无/错 token → 401 |
+| 环境 | 网关规则 | 客户端头策略 |
+|---|---|---|
+| **测试**（api-we-test） | 要求 `Origin`+`Referer`+浏览器形 UA，缺任一 → nginx 403（HTML 错误页非 JSON）；无 IP 白名单概念 | 带三头（浏览器头模式） |
+| **正式**（api-we） | IP 白名单 + **禁止伪装浏览器**：白名单 IP 发纯 token 请求 → 放行直达应用层；同一 IP 带浏览器伪装头 → WAF 429 持续拦截（curl 的 TLS 指纹 + 浏览器 UA = 伪装特征） | 纯 token，**不带** Origin/Referer/UA（显式空 UA 压掉语言默认值） |
 
-客户端固定头：`Origin`、`Referer`、浏览器形 `User-Agent`、`Authorization: Bearer <token>`、`Content-Type: application/json;charset=UTF-8`。
+两环境通用：应用层无/错 token → 401（data 回显所传 token）。客户端实现：`FOODTALKS_ORIGIN` env 配置与否即为两模式开关（api/foodtalks.go，契约测试防回退）。
 
 ## 2. 响应契约
 
