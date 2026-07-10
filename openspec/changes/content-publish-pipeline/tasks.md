@@ -34,8 +34,8 @@
 
 ## 4. Phase 3 — 资讯订阅 MVP 闭环：手动 URL → 隐藏发布 → 文本通知（仓库 FBIF资讯订阅）
 
-- [ ] 4.1 新包 `internal/foodtalks`：Client（CreateNews/UpdateNews）、News 结构体按 Phase 1 实测契约定义、401/403 凭证过期专项错误、env 配置（BASE_URL/TOKEN 缺失 fail loud）
-- [ ] 4.2 `internal/foodtalks` 单测：请求体序列化、幂等锚点判断、错误映射（httptest 桩）
+- [x] 4.1 新包 `internal/foodtalks`：Client（CreateNews/UpdateNews）、News 结构体按 Phase 1 实测契约定义、401/403 凭证过期专项错误、env 配置（BASE_URL/TOKEN 缺失 fail loud）（2026-07-10 资讯订阅仓 04d39ac：27 字段契约对齐、id 二态 RawMessage、publishStatus 客户端自律 0/1/2、网关/凭证/业务错误三分类）
+- [x] 4.2 `internal/foodtalks` 单测：请求体序列化、幂等锚点判断、错误映射（httptest 桩）（2026-07-10 同提交：9 项全绿，含「HTTP 200 业务失败」真实样例与枚举拒发零请求断言）
 - [ ] 4.3 图片转存：调排版工具 `POST /api/oss-upload` urls 模式一次批量（服务端已内网并发，无需 imagecache 逐图下载），响应缺失的 URL 重试一次仍缺则 job failed；original→new 映射落 job；封面 coverImg 同通道（2026-07-10 方案已实测定型，见 design D4 与契约 §8）
 - [ ] 4.4 `publish_jobs` 迁移：新增 `source_key`（唯一索引）、`source_url`、`foodtalks_news_id`、`review_card_msg_id`、`risk_notes` 列；版本化迁移脚本
 - [ ] 4.5 `internal/publishing` 新增 site 链路 stage 序列（fetching→rendering→mirroring→staging→awaiting_review→publicizing）；推进器按 target 分发，wechat_mp 路径零改动（diff 审查确认）
