@@ -2,7 +2,7 @@
 // 只监听 127.0.0.1（对外由 Go API 的 /api/render 代理），双层 Bearer 校验。
 // 端点：POST /render（渲染）、GET /healthz（存活，无鉴权）。
 import { createServer } from 'node:http';
-import { renderArticle } from './render.mjs';
+import { renderArticle, SUPPORTED_PACK_IDS } from './render.mjs';
 
 const PORT = Number(process.env.RENDER_PORT || 19091);
 const TOKEN = (process.env.RENDER_TOKEN || '').trim();
@@ -55,9 +55,10 @@ const server = createServer(async (req, res) => {
     } catch {
       return sendJSON(res, 400, { error: '请求体不是合法 JSON' });
     }
+    // packId 白名单与 render.mjs CHANNELS 表同源（单一真相）；未知 packId 显式 400，不静默降级。
     const packId = payload.packId || 'fbif';
-    if (packId !== 'fbif') {
-      return sendJSON(res, 400, { error: '暂只支持 packId=fbif，收到：' + packId });
+    if (!SUPPORTED_PACK_IDS.includes(packId)) {
+      return sendJSON(res, 400, { error: '暂只支持 packId=' + SUPPORTED_PACK_IDS.join(' / ') + '，收到：' + packId });
     }
     const out = await renderArticle(payload);
     return sendJSON(res, 200, out);

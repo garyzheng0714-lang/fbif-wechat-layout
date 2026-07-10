@@ -63,6 +63,43 @@
   注意块级显隐要嵌在 `.blocks` 下）：卡片依赖编辑挑选往期文章 + canvas 合成封面
   （headless 无 canvas），自动选卡列为下一期。
 
+## 2026-07-10 补：网站渠道 packId=ft-default（content-publish-pipeline 任务 3.1–3.5）
+
+发布流水线要把公众号文章同步排版到 FoodTalks 网站，渲染 API 补第二个渠道：
+
+- **渠道差异全部收敛为 CHANNELS 参数表**（render.mjs），零 `if(packId===...)` 散落分支
+  （依据 docs/adr/2026-07-10-share-vs-isolate-boundary.md：能力代码共用，差异只以参数进入）：
+
+  | 参数 | fbif（公众号） | ft-default（网站） | 为什么 |
+  |---|---|---|---|
+  | templatePath | templates/fbif.js | templates/foodtalks-site.js | L2 渲染器物理隔离（红线 #19） |
+  | rulesAccount | fbif | ft-default | L3 规则按账号 |
+  | configViaOpts | 否（fbif.js 读 window._activeConfig，模板契约） | 是（opts.config，engine.js renderArticleInput 同款） | 两模板既有读法不同 |
+  | footerViaTemplate | 是（renderBottomFooter 单独拼） | 否（render() 内嵌 bottom_blocks 主路径，红线 #20/#22） | 页脚出口不同 |
+  | stripExternalAnchors | 是 | **否**（网站文章保留外链是正常形态） | 微信草稿过滤外链，CMS 不会 |
+  | normalizeWechat | 是 | **否**（engine.js isWebsiteTemplate 同语义——归一化会误居中网站内联 logo） | 粘贴目标不同 |
+
+- **网站 config 装配 = site.html syncEngineConfig 的 headless 等价物**（siteEngineConfig）：
+  flat 参数 + behavior + 原始结构化 modules（normalizeRuleConfig 会丢 bottom_blocks 等，须走 raw）；
+  mctoc 锚点强制关（与 site.html 同口径，且 genMctocId 随机、开了输出不可复现）；
+  无 localStorage 单篇覆盖 → 服务端默认即最终态。
+- **规则缓存改按账号分 key**（Map，各 60s）；window._activeConfig 每请求在同步段重灌，
+  拉取失败显式清空（不留上一账号规则让 fbif.js 错读别家页脚）。交错渲染互不污染有测试守。
+- **表格 CMS 存活开关（红线 #24）确认沿 headless 路径生效**：outerBorder/cmsSurvival 写死在
+  foodtalks-site.js renderTable 调用处（渠道属性，非运行时开关），API 路径自然携带；
+  输出实测 table border/cellpadding + td align/bgcolor + 表头 strong 齐全。
+- **fbif 逐字节不变的证明**：重构前先用旧代码 + 规则 fixture 生成 golden
+  （tests/golden/render-service-fbif.html），重构后 renderArticle 同输入输出逐字节相等
+  （成功/降级两条路径都比对过）；public/ 目录零改动（git diff 为空）。
+- 测试：tests/render-service-site.test.mjs（8 项：网站特征/外链保留/不归一化/bottom_blocks
+  页脚/withFooter=false/CMS 清洗模拟/fbif golden/交错防污染/未知 packId 400）。
+  规则 fixture 由本仓库 Go API 默认种子 dump（tests/fixtures/render-service-rules-*.json）；
+  样例 blocks 单一真相在 tests/fixtures/render-service-sample-blocks.mjs。npm test 792 全绿。
+- server.mjs 白名单与 CHANNELS 表同源（SUPPORTED_PACK_IDS），未知 packId 400；
+  本地 curl 冒烟：healthz 200 / 无 token 401 / 未知 packId 400 / 两渠道 200。
+- 遗留：任务 3.6（真实文章与人工 /ft/ 结构 diff）、3.7–3.8（部署 + 线上冒烟）未做——
+  需要真实文章样本与部署动作，不在本次范围。
+
 ## 环境变量
 
 | 变量 | 谁用 | 含义 |

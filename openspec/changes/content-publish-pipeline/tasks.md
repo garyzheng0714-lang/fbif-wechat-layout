@@ -23,11 +23,11 @@
 
 ## 3. Phase 2 — 排版工具支持网站模板渲染（本仓库）
 
-- [ ] 3.1 `render-service/render.mjs`：按 fbif 同款 globals 桩方式接入 `foodtalks-site.js` 渲染器，梳理其额外 DOM/全局依赖并补桩
-- [ ] 3.2 `render-service/server.mjs`：packId 白名单加 `ft-default`，按模板路由；未知 packId 保持 400 显式失败
-- [ ] 3.3 接通网站规则：渲染前拉 `GET /api/rules/active?account=ft-default` 灌入 `_activeConfig`（复用 fbif 链路的缓存与降级），页脚走 bottom_blocks 主路径
-- [ ] 3.4 确认 CMS 存活开关（table `outerBorder`+`cmsSurvival`、图片 width 双写）在 API 渲染路径生效
-- [ ] 3.5 新增 `tests/render-service-site.test.mjs`：样例 blocks → 断言网站模板特征、表格 CMS 存活（复用模拟清洗器）、页脚存在、fbif 输出逐字节不变
+- [x] 3.1 `render-service/render.mjs`：按 fbif 同款 globals 桩方式接入 `foodtalks-site.js` 渲染器，梳理其额外 DOM/全局依赖并补桩（2026-07-10：既有桩已够——linkedom DOMParser + window/localStorage/fetch；渠道差异收敛为 CHANNELS 参数表，零 packId 字面量分支）
+- [x] 3.2 `render-service/server.mjs`：packId 白名单加 `ft-default`，按模板路由；未知 packId 保持 400 显式失败（2026-07-10：白名单与 CHANNELS 表同源 SUPPORTED_PACK_IDS；本地 curl 冒烟 401/400/200 三态验证）
+- [x] 3.3 接通网站规则：渲染前拉 `GET /api/rules/active?account=ft-default` 灌入 `_activeConfig`（复用 fbif 链路的缓存与降级），页脚走 bottom_blocks 主路径（2026-07-10：缓存改按账号分 key 的 Map，交错渲染互不污染有测试守）
+- [x] 3.4 确认 CMS 存活开关（table `outerBorder`+`cmsSurvival`、图片 width 双写）在 API 渲染路径生效（2026-07-10：headless 输出实测 table border/cellpadding + td align/bgcolor + strong 齐全）
+- [x] 3.5 新增 `tests/render-service-site.test.mjs`：样例 blocks → 断言网站模板特征、表格 CMS 存活（模拟清洗器复演真值审计口径）、页脚存在、fbif 输出逐字节不变（2026-07-10：golden 由重构前代码生成 `tests/golden/render-service-fbif.html`；npm test 792 全绿）
 - [ ] 3.6 用一篇真实公众号文章（fetch-article → render ft-default）与人工 `/ft/` 排版结果做结构 diff，验证同源（复刻类任务以成品为真值）
 - [ ] 3.7 `npm test` + `cd api && go test ./...` 全绿；部署（deploy.yml 无需新 env）；线上 curl 冒烟 ft-default
 - [ ] 3.8 验收：线上 `/api/render packId=ft-default` 对样例文章出网站 HTML；红线 #19/#23 回归测试全绿
