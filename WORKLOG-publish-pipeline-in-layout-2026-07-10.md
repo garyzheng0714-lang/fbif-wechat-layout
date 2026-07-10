@@ -107,6 +107,13 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - **实施偏离**：施工图写 `maybeStartFeishuWS()` 无参，实施为 `maybeStartFeishuWS(p *publishPipeline)`——业务段需要 pipeline，从 main.go 启动处传入（不设包级全局变量）。
 - **遗留**：生产 publish.env 已有 FEISHU_APP_ID/SECRET（M4 通知在用），部署重启后长连接自动生效；断线期间飞书侧事件是否补推由飞书平台语义决定，Webhook 备用通道兜底需人工在后台切回。
 
+### M4c：审核异步化 + 持久通知 outbox（2026-07-10 对抗审查收口）
+
+- **3 秒响应合同**：Webhook / 长连接的 approve 只用存储 CAS 把 `awaiting_review` 原子改为 `publicizing`、落 `review_action=approve` 与审核人/时间，然后立即回「已受理，正在发布」无按钮进度卡，并明示「最终结果以随后终态卡为准」；不在回调请求内等待 FoodTalks。不可逆 `UpdateNews(publishStatus=1)` 由后台 `runJob` 执行，进程在 CAS 后崩溃时由启动扫描凭已持久化 approve intent 恢复。
+- **通知 outbox**：job 持久化 `notification_kind/state/seq/attempts/error/sent_at`。进入待审、发布成功、驳回时，业务状态与通知事件同一次 JSON 原子写；发送前 CAS `pending→sending`，成功按 `seq` ack 清空，失败回 `pending` 并指数退避重试。启动时把崩溃遗留 `sending` 重置并重发。published / rejected 优先发无审核按钮的绿/红终态卡，发卡失败再降级文本。语义为 **at-least-once**：极端「飞书已收、本地 ack 失败」可能重复，但不会因「状态已落盘、发卡前崩溃」漏通知。
+- **审核安全**：Webhook token 未配置也 fail-closed；卡片审核人必须命中 `FEISHU_REVIEWER_OPEN_IDS`，空白名单全部拒绝（ADMIN_PASSWORD 管理审核不受影响）。卡片 value 带 `review_version`，版本绑定当前风险级别、证据条目与说明；历史补检或重评变更结论后旧卡自动失效。
+- **风险闸门**：风险检查是持久 `assessing` 阶段，失败降级 warning；只有 pass/warning 可人工 approve，block/空值/未知值均 fail-closed。block 卡不渲染通过按钮，正文在风险检查前后逐字节不变。
+
 ### 预览链接（2026-07-10 用户裁定：审核必须给未上架的预览链接，不能盲审）
 - 排版工具自己出预览页：`GET /preview/publish/{id}?t=<HMAC 签名>`——渲染 job 的 content_html（就是将要发布的字节）+ 标题 + AI 预填参数（封面/摘要/标签/作者）侧栏 + 顶部醒目横幅「预览 · 未发布」。白底、680px 内容宽度近似 FoodTalks 前台阅读版式。
 - 签名：`t = hex(HMAC-SHA256(ADMIN_PASSWORD, "publish-preview:" + id))`——免登录可分享给审核人，但不可遍历、不可伪造；未发布内容不裸奔。
@@ -211,3 +218,12 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 
 ### newsTags 谜底闭环（2026-07-10 下午）
 字符串数组 500 → 库表启发对象数组 → POST [{tagId,tagName}] 成功但 PUT 必 500 且污染文章 → **后端裁定：标签是单独接口，news payload 本就不带标签**。恒空是正确终态（不是权宜）；AI 标签只做审核展示。实验文章 7246/7247/7248 留测试环境草稿态待后端清理。
+
+## M8：官方预览链接 + DeepSeek 双模型判决（2026-07-10 晚，用户连发三题）
+
+- **官方预览（用户「发布预览会有专门的预览链接/二维码」）**：从后台 JS（懒加载块 src_views_radar_news_detail_vue）挖到铸 token 接口 `POST /news/admin/news/{id}/preview/token`（注意是 POST，GET 404；响应 data={id,token}）；前台路由 `/preview/news/:id?token=`，数据接口是 `GET /news/news/{id}?previewToken=`（页面把 query 的 token 改名 previewToken 转发——直接拿 token 调数据接口会「不存在该资讯」，踩坑记录）。实装：卡片「预览效果」的签名链接现在 302 到官方预览页（**每次点击现铸新 token，规避「短期失效」**）；铸造失败/?local=1 回落本地 AI 参数页。已验证：任务 2 → 302 test.foodtalks.cn/preview/news/7245?token=新token。
+- **双模型判决（用户提供 DeepSeekV4-pro ep-20260710175216-hb4qf，「两个一起跑，单独判决节点公平对比，判决节点用 DeepSeek」）**：ARK_MODEL_ID_B 配置即启用——豆包+DeepSeek 并行出案 → 判决节点（ARK_JUDGE_MODEL_ID，缺省=B）收到**匿名**方案一/二+编辑部规范，逐字段裁决（字段只能整体取自一案防混拼幻觉；cover 仍过候选白名单+证据校验）；verdict 并入 notes（卡片可见「双模型判决」结论）。降级链：一侧挂→用另一侧；判决挂→用主模型——多模型不是新故障点。测试锁死：判决输入必含匿名两案+规范、不得泄漏模型身份（ep-A/ep-B/豆包/DeepSeek 字样都不许出现）。
+- **生产配置**：publish.env += ARK_MODEL_ID_B / ARK_JUDGE_MODEL_ID（都是 DeepSeek 端点）。
+- **并行工作流协同（第二回合）**：风险评估流水线（assessing/assessing_review 阶段+启动风险补检）上线后，重启把历史 awaiting_review 任务迁去补检、几分钟自愈回 awaiting_review（risk=warning）——期间预览 404 属过渡态非 bug。其前端规则面板 WIP 未提交（npm 红），本次提交用 stash 隔离出 api 子集验证后推送（注意 account_catalog.go+registry.js 是逐字节校验对，必须同车）。
+- **待用户动作**：①开放平台给应用 cli_aac5d107d9381bdf 开 im:resource:upload 权限（封面进卡片用，日志有直达链接）②群里随便点一次卡片按钮（会被白名单拒绝，正常）→ 从日志收割你在本应用下的 open_id → 配 FEISHU_REVIEWER_OPEN_IDS 重启，卡片审核解锁。
+- **评测第 5 轮（双模型判决模式）结果：全部门禁 PASS**（2086s）——摘要长度/风格/标签数量 100%、作者 8/9=89%、出处 93%、编造 0，与第 4 轮单模型基线持平（门禁指标已在天花板）；标签命中 50%/词表率 74% 较单模型微降（judge 偶尔采纳偏离词表的一案，仅报告项）。结论：双模型的价值不在均值提升，在**每篇都有第二意见+判决透明度**（verdict 上卡片）与单点模型故障韧性；代价=每篇 3 次调用、耗时 +50%。生产已启用。
