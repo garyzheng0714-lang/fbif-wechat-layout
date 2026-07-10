@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -51,7 +52,25 @@ func registerRenderRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/html-to-blocks", requireRenderToken(handleHTMLToBlocks))
 }
 
-// handleRenderProxy 原样转发请求体到 Node 渲染服务。渲染服务未就绪时返回明确 502
+// newRenderServiceRequest 渲染服务转发内核：构造发往 Node 渲染服务 /render 的请求。
+// /api/render 薄代理与发布流水线 rendering 阶段共用这一份（ADR 四层模型 L1：能力代码
+// 只此一份，差异只以参数进入），杜绝第二套转发实现漂移。
+func newRenderServiceRequest(ctx context.Context, body []byte, authorization string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, renderServiceURL()+"/render", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authorization)
+	return req, nil
+}
+
+// renderServiceHTTPClient 渲染服务专用 HTTP 客户端（60s 超时，与历史行为一致）。
+func renderServiceHTTPClient() *http.Client {
+	return &http.Client{Timeout: 60 * time.Second}
+}
+
+// handleRenderProxy 原样转发请求体到本机 Node 渲染服务。渲染服务未就绪时返回明确 502
 //（调用方据此把发布任务置为 failed，提示「排版服务未就绪」，不得挂起）。
 func handleRenderProxy(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
@@ -59,15 +78,12 @@ func handleRenderProxy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "读取请求体失败: " + err.Error()})
 		return
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, renderServiceURL()+"/render", bytes.NewReader(body))
+	req, err := newRenderServiceRequest(r.Context(), body, r.Header.Get("Authorization"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", r.Header.Get("Authorization"))
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := renderServiceHTTPClient().Do(req)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "渲染服务未就绪（render-service 未启动或不可达）: " + err.Error()})
 		return

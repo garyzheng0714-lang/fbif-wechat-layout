@@ -64,7 +64,26 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 
 ## 进度
 - [x] 设计钉死（本文档）；飞书机器人「FBIF文章排版工具」在审核群发消息已实测成功
-- [ ] S1–S5 实施 + S6 测试
+- [x] S1–S5 实施 + S6 测试（2026-07-10 完成，`cd api && go test ./...` 全绿 + 根 `npm test` 792 全绿；public/ 零字节改动）
+  - S1 `api/publish_jobs.go`（JSON 存储，mutex + 临时文件原子替换，PUBLISH_JOBS_PATH 可覆盖、默认随 rules 存储同目录）
+  - S2 `api/publish_pipeline.go`（状态机 + normalizeSiteSourceKey + 各阶段默认实现进程内复用既有内核）
+  - S3 `api/foodtalks.go`（客户端逐行搬入，标识符加 foodTalks 前缀防单包冲突）
+  - S4 `api/feishu_notify.go`（tenant_access_token 缓存 + 群文本；env 缺失静默禁用）
+  - S5 `api/publish_http.go`（/api/publish/site-sync、jobs、jobs/{id}、review、retry；全端点 ADMIN_PASSWORD 门）
+  - S6 `api/publish_pipeline_test.go` + `api/publish_http_test.go` + `api/feishu_notify_test.go`（16 个新测试，外部调用全 httptest 桩；红线「无 approve 则 UpdateNews 永不被调」由 FoodTalks 桩 forbidPublish 守卫 + 专门测试双保险锁死）
 - [ ] 测试环境全链路真机（等实施完，用户当审核人走 approve）
 - [ ] 正式环境接入（等 IP 白名单：**121.40.214.5**，用户下午通知后端）
 - [ ] 资讯订阅仓参考实现退役清理 + openspec design.md D1 反转回写
+
+## 踩坑 / 实施偏离记录（2026-07-10）
+
+1. **fetching 无需再抽函数**：`handleFetchArticleWithStore` 的核心 `fetchDirectBlocksWithOptions`（含限流重试）本来就是独立内部函数、handler 已是薄壳。唯一改动：给它加第 4 个返回值 `author`（`extractArticleBlocks` 一直在产出公众号名，此前被丢弃），流水线用作 `source_name`；handler 调用处只是丢弃该值，HTTP 输出逐字节不变（既有 main_upload_test / main_routes_test 全绿佐证）。
+2. **mirroring 抽取形态**：`setUploadProxySourceHeaders`（副作用式设头）改造为 `uploadProxySourceHeaders`（纯计算）+ `newUploadProxyRequest`（请求构造内核，handler 与流水线共用）；Content-Type 无条件 Set、Origin/Referer 条件 Set 的历史语义逐条保持。流水线侧 Origin 取 `WECHAT_UPLOAD_ORIGIN` env（无浏览器请求可推导）。
+3. **rendering 抽取形态**：`render_proxy.go` 抽 `newRenderServiceRequest` + `renderServiceHTTPClient`，handler 的 500/502 错误映射分支保持原状；流水线传 `Bearer $RENDER_TOKEN`、packId=ft-default、isRepost=true（与资讯订阅仓 LayoutClient.RenderPack 同参数形态）。
+4. **Summary 暂空**：施工图 S1 字段清单无 digest（参考实现的 job.Digest 来自 feed 数据，本仓无此来源），buildSiteNews 的 Summary 先留空，待接摘要来源再补。
+5. **鉴权门覆盖所有端点**：施工图只在 site-sync/review 明写 admin 门，实施时 GET jobs / retry 一并上门（管理面不裸奔；测试断言 5 端点无密码全 401）。
+6. **failed 不算终态**：terminal=published/rejected；同 source_key 重复提交幂等返回 failed 单（用户走 retry），终态后重提才建新单。
+7. **进程重启不自动续跑**：文件持久化保证 failed/awaiting_review 不丢，但重启后不自动 spawn（谨慎优先——尤其 publicizing 半途的单，由人经 retry/review 显式推进）。
+8. **列表端点是摘要视图**：GET /api/publish/jobs 清空 blocks_json/content_html/image_map 大字段，全量走详情端点。
+9. **gofmt 基线冲突**：仓库既有文件（account_catalog.go 等）在当前 gofmt 下本就不干净（中文注释 `//（` 风格）；新增文件全部 gofmt 干净，render_proxy.go 仅保留基线原有两行注释原样（不顺手重排既有代码）。
+10. **飞书通知位点**：待审核（staging 成功）/ 已发布（publicize 成功）/ 已驳回（reject）三处；failed 不通知（施工图口径「awaiting_review 与终态各一条」）。测试注入 notify fake，另有 httptest 桩直测 token 缓存与消息形态。

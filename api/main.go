@@ -114,6 +114,11 @@ func main() {
 	// 程序化排版 API（/api/render 代理 + /api/html-to-blocks，Bearer RENDER_TOKEN）
 	registerRenderRoutes(mux)
 
+	// 发布流水线（公众号 → FoodTalks 网站）：JSON 任务存储 + 状态机 + 人审端点。
+	// 权限复用规则后台 ADMIN_PASSWORD 门；翻公开只能由 review approve 触发（用户红线）。
+	publishStore := newPublishJobStore(publishJobsPath(*rulesPath))
+	registerPublishRoutes(mux, newPublishPipeline(publishStore, ruleStore))
+
 	// Kick off the in-memory image cache GC loop
 	startDocImageCacheGC()
 
@@ -229,14 +234,12 @@ func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 	// Proxy to upload endpoint if configured
 	legacyURL := os.Getenv("WECHAT_UPLOAD_ENDPOINT")
 	if legacyURL != "" {
-		proxyURL := uploadProxyURL(legacyURL, r.URL.Path)
-		proxyReq, err := http.NewRequestWithContext(r.Context(), "POST", proxyURL, bytes.NewReader(body))
+		origin, referer := uploadProxySourceHeaders(r)
+		proxyReq, err := newUploadProxyRequest(r.Context(), legacyURL, r.URL.Path, r.Header.Get("Content-Type"), origin, referer, body)
 		if err != nil {
 			writeError(w, 500, "proxy error: "+err.Error())
 			return
 		}
-		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
-		setUploadProxySourceHeaders(proxyReq, r)
 		resp, err := http.DefaultClient.Do(proxyReq)
 		if err != nil {
 			writeError(w, 502, "upstream error: "+err.Error())
@@ -293,22 +296,35 @@ func uploadProxyEndpointPath(current, endpoint string) string {
 	return current
 }
 
-func setUploadProxySourceHeaders(proxyReq *http.Request, original *http.Request) {
-	origin := strings.TrimSpace(original.Header.Get("Origin"))
-	if origin == "" {
-		origin = uploadProxyOrigin(original)
+// newUploadProxyRequest 上游图片上传代理的请求构造内核：/api/oss-upload（及 wechat 别名）
+// handler 与发布流水线 mirroring 阶段共用这一份（ADR 四层模型 L1：能力代码只此一份），
+// 不许出现第二套上游请求实现。origin/referer 传空则不设该头（与历史条件语义一致）。
+func newUploadProxyRequest(ctx context.Context, endpoint, requestPath, contentType, origin, referer string, body []byte) (*http.Request, error) {
+	proxyReq, err := http.NewRequestWithContext(ctx, "POST", uploadProxyURL(endpoint, requestPath), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
 	}
+	proxyReq.Header.Set("Content-Type", contentType)
 	if origin != "" {
 		proxyReq.Header.Set("Origin", origin)
-	}
-
-	referer := strings.TrimSpace(original.Header.Get("Referer"))
-	if referer == "" && origin != "" {
-		referer = strings.TrimRight(origin, "/") + "/"
 	}
 	if referer != "" {
 		proxyReq.Header.Set("Referer", referer)
 	}
+	return proxyReq, nil
+}
+
+// uploadProxySourceHeaders 从原始浏览器请求推导转发用的 Origin/Referer 值。
+func uploadProxySourceHeaders(original *http.Request) (origin, referer string) {
+	origin = strings.TrimSpace(original.Header.Get("Origin"))
+	if origin == "" {
+		origin = uploadProxyOrigin(original)
+	}
+	referer = strings.TrimSpace(original.Header.Get("Referer"))
+	if referer == "" && origin != "" {
+		referer = strings.TrimRight(origin, "/") + "/"
+	}
+	return origin, referer
 }
 
 func uploadProxyOrigin(r *http.Request) string {
@@ -370,7 +386,7 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		// classification is deterministic, not inferred from a lossy MD
 		// intermediate. See wechat_blocks.go.
 		accountID := firstNonEmpty(req.AccountID, req.Account)
-		title, blocks, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
+		title, blocks, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
 		if derr == nil && len(blocks) > 0 {
 			writeJSON(w, 200, map[string]interface{}{
 				"title":  title,
@@ -420,10 +436,13 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 // valid (non-error) outcome — a page genuinely without article content.
 // The caller at handleFetchArticle gates on `len(blocks) > 0`.
 func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
-	return fetchDirectBlocksWithOptions(url, defaultArticleBlockOptions())
+	title, blocks, _, err = fetchDirectBlocksWithOptions(url, defaultArticleBlockOptions())
+	return title, blocks, err
 }
 
-func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title string, blocks []Block, err error) {
+// 第四个返回值 author 是文章页解析出的公众号名（extractArticleBlocks 一直在产出，
+// 此前被丢弃）；发布流水线 fetching 阶段用它作 source_name，handler 行为不变。
+func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title string, blocks []Block, author string, err error) {
 	opts = normalizeArticleBlockOptions(opts)
 	// 3 attempts, exponential-ish backoff. WeChat 限流通常几百毫秒内恢复。
 	backoffs := []time.Duration{0, 600 * time.Millisecond, 1500 * time.Millisecond}
@@ -438,9 +457,9 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 			log.Printf("fetchDirectBlocks attempt %d/%d transport error: %v", i+1, len(backoffs), ferr)
 			continue
 		}
-		t, bs, _ := extractArticleBlocksWithOptions(string(bodyBytes), opts)
+		t, bs, a := extractArticleBlocksWithOptions(string(bodyBytes), opts)
 		if len(bs) > 0 {
-			return t, bs, nil
+			return t, bs, a, nil
 		}
 		// 传输成功但无内容：可能是反爬中间页，重试一次可能拿到真正文。
 		transportErr = nil
@@ -448,7 +467,7 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 	}
 	// 全部尝试都没拿到内容：最后一次是传输失败则返回该 err；否则（拿到页面但空）
 	// 返回空 blocks 无 err，让调用方决定是否走 x-reader。
-	return "", nil, transportErr
+	return "", nil, "", transportErr
 }
 
 func articleBlockOptionsForAccount(store *rulePresetStore, accountID string) articleBlockOptions {
