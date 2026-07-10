@@ -254,8 +254,10 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 	if news.Summary != "AI 摘要" || news.Author != "Mote莫特" || news.CoverImg != "https://oss.example.com/b.jpg" {
 		t.Fatalf("AI 字段未被消费：summary=%q author=%q cover=%q", news.Summary, news.Author, news.CoverImg)
 	}
-	if len(news.NewsTags) != 2 || news.NewsTags[0] != "食品" {
-		t.Fatalf("NewsTags 未被消费：%v", news.NewsTags)
+	// newsTags 恒空：2026-07-10 真机实测传字符串数组必 500（后端元素结构未知，契约 §9）。
+	// AI 标签只进卡片/预览展示，不写给 FoodTalks——这条断言守住「不再回退成透传」。
+	if len(news.NewsTags) != 0 {
+		t.Fatalf("NewsTags 必须恒空（后端结构未知，字符串数组会 500）：%v", news.NewsTags)
 	}
 	job.Author = ""
 	news, err = p.buildSiteNews(job, foodTalksPublishStatusDraft)

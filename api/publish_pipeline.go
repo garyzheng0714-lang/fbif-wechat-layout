@@ -679,7 +679,10 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 		IsPublic:          1, // ⚠️ 实测非可见性开关（契约 §4），恒 1；隐藏靠 publishStatus=0
 		Author:            author,
 		Summary:           job.Summary,     // M5 AI 摘要（兜底=正文前 100 字）
-		NewsTags:          job.Tags,        // M5 AI 标签（兜底空，客户端归一为 []）
+		// newsTags 恒空：2026-07-10 实测传字符串数组必 500「服务器内部异常」（空数组成功）——
+		// 后端期待的元素结构未知（契约 §9 待确认，疑似需 CMS 标签 ID）。AI 标签（job.Tags）
+		// 仍在审核卡片与预览页展示给人看，拿到后端结构前不写给 FoodTalks。
+		NewsTags:          []string{},
 		Content:           job.ContentHTML, // mirroring 后成品（图片已全部 OSS 化；enriching 绝不改它）
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),
 		PrimaryCategoryID: primary,
