@@ -44,7 +44,12 @@
 
 ## Phase 2 进度
 
-（待填）
+- [完成] 3.1–3.5 后台代理交付，主线亲自验收：npm test 792/792 全绿、`git diff -- public/` 零字节、CHANNELS 参数表无 packId 散落分支——提交 2f201ac
+- [完成] 3.6 真实文章同源验证（文章 62285「星巴克茶品牌」，公众号原文 → fetch-article 188 blocks → render ft-default）：
+  - 方法：浏览器人工链路（本地 /ft/default 导入同 URL）取 `_captureSessionSnapshot` 复制层原料，页面内 dynamic import 同一份 processForCopy 复刻后处理；两侧比结构指纹（标签+属性名序列，规避安全过滤不外传内容）
+  - 结果：正文中段 498 标签逐组指纹 100% 一致；API 头部多 Mote 作者行（p>em>span #888888 斜体）、尾部多版权声明段——**与已发布成品 62285.gt.html 头尾逐标签同构**（成品为真值：API 是对的）
+  - 浏览器本地缺两段的归因：本地种子规则 ft-default 页脚关闭（tip 不出）+ 作者行被 UI 提取进 CMS 摘要/作者表单字段。属规则数据态与产品交互差异，非渲染代码不同源
+  - 附带发现：网站渠道复制按钮有「mmbiz 未转存则阻止复制」守卫（本地无上传端点复制被拦），API 路径无此关卡——图片转存是 Phase 3 任务 4.3 发布方职责，与 agent 遗留 #3 一致
 
 ## 踩坑 / 决策
 
