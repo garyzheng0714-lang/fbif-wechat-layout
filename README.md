@@ -1,17 +1,18 @@
 # fbif-wechat-layout
 
-![类型](https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E5%BE%AE%E4%BF%A1%E5%B7%A5%E5%85%B7-2563eb)
-![技术栈](https://img.shields.io/badge/%E6%8A%80%E6%9C%AF%E6%A0%88-Go%20%2B%20Vanilla%20JS-0f766e)
+![类型](https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E5%86%85%E5%AE%B9%E6%8E%92%E7%89%88%E4%B8%8E%E5%8F%91%E5%B8%83-2563eb)
+![Go](https://img.shields.io/badge/Go-1.26.1-00ADD8?logo=go&logoColor=white)
+![前端](https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-Vanilla%20JS-f7df1e?logo=javascript&logoColor=111827)
 ![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a)
 ![README](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-brightgreen)
 
-FBIF 微信公众号排版工具，用于把 DOCX、Markdown、剪贴板正文或文章链接转换成可复制到微信公众号编辑器的 FBIF 风格 HTML。
+FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文或文章链接转换成适配微信公众号或 FoodTalks CMS 的 HTML，并提供“公众号文章 → FoodTalks 隐藏草稿 → 飞书审核 → 人工公开”的受控发布流水线。
 
 ## 仓库定位
 
-- **分类**：微信工具 / FBIF 内容排版工具。
-- **服务对象**：FBIF 公众号编辑、内容运营和需要快速统一文章样式的协作人员。
-- **服务宿主**：输出内容面向微信公众号编辑器；本仓库不是浏览器插件，也不是飞书多维表格插件。
+- **分类**：内容工具 / 多渠道排版 / 受控发布流水线。
+- **服务对象**：FBIF 公众号编辑、FoodTalks 网站编辑和需要统一文章样式与审核流程的内容运营人员。
+- **服务宿主**：交互式输出面向微信公众号编辑器和 FoodTalks CMS；程序化接口供内部内容流水线调用。本仓库不是浏览器插件，也不是飞书多维表格插件。
 
 ## 渠道与账号入口
 
@@ -36,15 +37,17 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown、剪贴板正文�
 - DOCX 首个"作者："行之前的前置材料默认剥离
 - 表格：蓝底白字表头 + 浅灰网格线、全格居中、列宽按 Word gridCol 比例；关键视觉以 HTML 属性 + 内容层双写（`border`/`cellpadding`/`align`/`bgcolor`/`width` 属性、表头 `<strong>`），保证粘进 FoodTalks 后台被清洗内联样式后不丢样；表格内图片按 Word 里设置的显示宽度统一尺寸（2026-07-06）
 
-## 最新状态（2026-06-04）
+## 最新状态（2026-07-10）
 
-- **统一顶栏账号菜单（单层）**：多账号在单层顶栏头像菜单切换（`public/js/account-menu.js` 的 `mountAccountMenu`），渠道（公众号 / 网站）降为菜单内分组标签；旧的「渠道胶囊 + 规则包分段」两层切换器已删除。账号 chrome、页脚和模板入口集中在 `public/js/rule-packs/registry.js`，服务端默认在 `api/rule_defaults.go` 成对登记，新增账号必须从这两处入手。
-- **底部区域 = 数据驱动的统一区块模型**：FBIF / WowFood / FoodTalks系列共用同一 `bottom_blocks` 结构（提示声明、名片、二维码、更多文章等通用可配置区块），差异只在 `api/rule_defaults.go` 的服务端默认。前端只暴露真正需要改的内容位（更多文章换链接 / 封面、`frontend_editable` 块换图），区块的显隐 / 排序 / 字号 / 颜色等结构样式归规则后台预配。
-- **总素材库 + 选图器**：图片统一从规则后台素材库按 ID 引用（`{{asset#id}}`，见 `docs/adr/2026-06-03-asset-reference-id.md`）；前台和后台选图都走素材库，不再手填图片 URL。
-- **网站页脚库**：FoodTalks 网站文章底部页脚由本工具完整输出，拆为 6 个可独立勾选片段（提示声明 / 商务合作 / 加入微信群 / 关注公众号 / FoodTalks logo / 点击获取更多），由 `config.modules.fbif_footer.segments.*` 控制。
-- **规则全部服务端可配**：页脚、识别正则、文案、颜色、底部区块默认等规则数据不写死在代码里，统一由密码保护的规则后台（`/api/rules/*`）配置；前端以 `public/js/rule-presets.js` 作为 schema 和本地兜底，localStorage 仅作离线降级。
-- **网站与公众号物理隔离**：网站（FoodTalks）渲染器、行为模板、署名颜色与公众号全套分离，互不 import；公众号 Mote `#396FBC` 蓝斜体不复用到网站。
-- DOCX golden 输出、规则后台、规则 schema、CSS 内联、底部区块保真和规则包注册都有 Node / Go 测试保护。
+- **账号目录单一真相源**：账号先登记在 `api/account_catalog.go`，再运行 `npm run gen:registry` 生成 `public/js/rule-packs/registry.js`；生成文件不手改。账号与默认 preset 在启动时做成对校验。
+- **统一底部区块模型**：公众号与网站渠道共用 `modules.bottom_blocks` 数据结构和区块面板交互，但视觉输出仍由 `fbif`、`foodtalks-series`、`foodtalks-site` 三套渲染器物理隔离。旧 `fbif_footer` 只保留兼容回退，不再是网站页脚主路径。
+- **微信草稿存活保护**：公众号复制层对更多文章卡片、微信图床属性、位图占位和异步回写做 T0 安全约束，防止内容粘贴后在“保存草稿”阶段被微信清洗掉。
+- **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
+- **程序化渲染**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 复用交互式编辑器的同一套解析、规则与渲染实现，支持 `fbif` 和 `ft-default`。
+- **受控发布流水线**：手动提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、可选 AI 预填元数据、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。
+- **编辑部规范数据化**：摘要、标签、作者和原创 / 转载判定已按历史发布样本沉淀为声明式规范与封闭标签词表。AI 只负责预填和出处抽取；完整评测仍在进行，且 FoodTalks 的标签 PUT 缺陷修复前不会把标签写入正式请求。
+- **发布状态边界**：测试环境已经完成隐藏草稿、审核卡片与状态机全链路验证；正式环境接入仍等待外部白名单和服务级凭证，不能把测试闭环写成正式生产已上线。
+- **部署门禁**：`main` 部署前会执行完整 Node 和 Go 测试，生成版本文件，部署 API、静态资源和 Node render service，并通过声明式 Caddy vhost 校验后再 reload。
 
 ## 功能
 
@@ -65,6 +68,7 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown、剪贴板正文�
 - URL 导入的文章级 `来源：`、`作者：`、`编辑：` 会收集到正文末尾，并在标准 FBIF `提示：` 页脚前只渲染一次。
 - 正文最后一段（包括参考来源末行）与标准 FBIF `提示：` 页脚之间保留标准段落间距，避免正文尾部贴住页脚。
 - 默认行为规则下，作者为 `Mote莫特` 或 `Mote 莫特` 时，会在“参考来源”上方自动插入固定署名图片；后台 `代码化规则` 可调整作者/来源/页脚文案和这类受限插图动作。
+- 支持内部内容发布任务：同一来源 URL 幂等建单，任务失败可从失败阶段续跑；AI 只预填封面、摘要、标签、作者和优化说明，不允许修改正文 HTML。
 
 ## 技术栈
 
@@ -117,7 +121,12 @@ FBIF 微信公众号排版工具，用于把 DOCX、Markdown、剪贴板正文�
 │   ├── rule_asset_library.go       # 素材库服务端存储
 │   ├── rule_behavior.go            # 默认行为规则和服务端合并逻辑
 │   ├── rule_config_validation.go   # 规则字段、模块、行为和取值校验
-│   └── wechat_blocks.go            # 微信文章块提取
+│   ├── wechat_blocks.go            # 微信文章块提取
+│   ├── publish_*.go                # FoodTalks 发布任务、状态机、审核、预览与 AI 元数据
+│   ├── foodtalks.go                # FoodTalks API 客户端与环境差异合同
+│   └── feishu_*.go                 # 审核通知、卡片回调与长连接
+├── render-service/                 # Node headless 渲染服务
+├── deploy/caddy/                   # 声明式 Caddy vhost
 ├── tests/                          # 前端模块测试
 ├── DESIGN.md                       # 设计系统和交互约束
 ├── package.json
@@ -184,6 +193,15 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/rules/admin/presets` | 保存规则预设，需 `X-Admin-Password` |
 | `PUT` | `/api/rules/admin/active` | 绑定某个公众号当前应用的规则，支持 `{ "account_id": "...", "id": "..." }`，需 `X-Admin-Password` |
 | `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需 `X-Admin-Password` |
+| `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
+| `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
+| `POST` | `/api/publish/site-sync` | 提交公众号 URL 发布任务，需 `X-Admin-Password` |
+| `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员密码 |
+| `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员密码 |
+| `POST` | `/api/publish/jobs/{id}/review` | 审核通过或驳回；通过是翻公开的唯一 HTTP 入口 |
+| `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
+| `POST` | `/api/feishu/card-callback` | 飞书审核卡片 Webhook 备用通道 |
+| `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览页；仅允许可审核或终态阶段 |
 
 ## 配置
 
@@ -197,6 +215,15 @@ curl http://127.0.0.1:9000/api/health
 | `CLOUDCONVERT_API_KEY` | LibreOffice 不可用时的 CloudConvert fallback |
 | `ADMIN_PASSWORD` | 规则后台密码；未设置时登录返回 503，后台写操作不可用 |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
+| `RENDER_TOKEN` / `RENDER_SERVICE_URL` | 程序化排版 API 鉴权与 Node 渲染服务地址 |
+| `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
+| `FOODTALKS_BASE_URL` / `FOODTALKS_TOKEN` | FoodTalks API 与凭证；缺失时发布任务显式失败 |
+| `FOODTALKS_ORIGIN` | 测试环境浏览器头模式开关；正式白名单模式保持为空 |
+| `FOODTALKS_FRONT_URL` / `FOODTALKS_CATEGORY_IDS` | 前台链接与发布分类 |
+| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REVIEW_CHAT_ID` | 审核通知和长连接回调 |
+| `FEISHU_VERIFICATION_TOKEN` | Webhook 回调来源校验；长连接模式不使用 |
+| `ARK_API_KEY` / `ARK_MODEL_ID` / `ARK_BASE_URL` | 可选 AI 元数据预填；缺失或失败时走规则兜底，不阻断任务 |
+| `SITE_OWN_ACCOUNTS` | 自有账号清单，用于代码侧确定原创 / 转载；留空使用内置清单 |
 
 部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`ADMIN_PASSWORD` 等 GitHub Secrets。生产规则后台密码只存放在 GitHub Secret 和本地忽略提交的 `.env` 中；不要把微信、LibreOffice、CloudConvert、服务器密钥或后台密码提交到仓库。
 
@@ -227,13 +254,12 @@ go test ./...
 
 推送到 `main` 会触发 `.github/workflows/deploy.yml`：
 
-1. 使用 Go 1.26 构建 `api/fbif-api`。
-2. 写入 `public/version.json`，用于浏览器端检测新版并刷新缓存。
-3. 通过 rsync 同步 `public/` 到服务器静态目录。
-4. 同步 API 二进制到服务器 API 目录。
-5. 写入 API 服务使用的 `.env` 文件；`ADMIN_PASSWORD` 缺失时部署会失败，避免正式端出现“规则后台未配置密码”。
-6. 确保 Caddy 对 `/`、`/index.html`、`/app.html`、`/version.json` 返回 `Cache-Control: no-cache`，避免正式端停留在旧前端入口。
-7. 重启 `fbif-api` systemd 服务。
+1. 执行 `npm ci && npm test` 和 `cd api && go test ./...`，任何失败都会阻止部署。
+2. 使用 Go 1.26 构建 `api/fbif-api`，并写入 `public/version.json`。
+3. 通过 rsync 同步 `public/`、API 二进制、Node `render-service/` 和声明式 Caddy vhost。
+4. 校验 `ADMIN_PASSWORD` 与 `RENDER_TOKEN` 等必填 secret，原子写入 API 环境文件。
+5. 运行 `caddy validate`；验证失败时恢复旧 vhost，不 reload 坏配置。
+6. 重启并检查 `fbif-api`、`fbif-render` systemd 服务，再 reload Caddy。
 
 生产规则后台密码变更流程：
 
@@ -256,3 +282,4 @@ go test ./...
 - DOCX 段距规则也在 `public/js/templates/fbif.js`：连续非空正文段落在 Word 段距较小时保持紧凑；如果中间出现空段，则下一段前恢复标准 `wx-gap`。
 - URL 导入结构化块由 `api/wechat_blocks.go` 输出，`public/js/templates/fbif.js` 渲染。图片说明组必须保留为 `cap`；文章级来源、作者、编辑必须在正文尾部、标准页脚前只渲染一次；正文尾段即使没有后续正文块，也必须带 `wx-gap`，给标准 `提示：` 页脚留出段落间距。
 - 排版契约需要测试保护：`api/wechat_blocks_test.go` 覆盖连续图注和图片来源，`tests/fbif-template.test.mjs` 覆盖图注样式、作者来源去重、页脚位置和 DOCX 连续段落紧凑规则。
+- FoodTalks 编辑部元数据口径见 [`docs/editorial-norms-foodtalks.md`](docs/editorial-norms-foodtalks.md)；API 环境差异、可见性状态与未解限制见 [`docs/foodtalks-api-contract.md`](docs/foodtalks-api-contract.md)。
