@@ -1,5 +1,5 @@
 /**
- * Playwright E2E Regression Test — 8 scenarios x 3 breakpoints
+ * Playwright E2E Regression Test — 8 visual scenarios x 3 breakpoints + focused interaction regressions
  *
  * Run: npx playwright test tests/e2e-regression.spec.mjs --reporter=list
  *
@@ -10,7 +10,8 @@ import { test, expect } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
 
-const BASE = 'http://localhost:19090';
+const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
+const VISUAL_ENABLED = process.env.E2E_SKIP_VISUAL !== '1';
 const DOCX_PATH = path.resolve('tests/fixtures/tea-pyramid.docx');
 const SCREENSHOT_DIR = path.resolve('tests/e2e-screenshots');
 
@@ -42,16 +43,13 @@ async function captureAndCheck(page, scenario, bp, extraChecks = null, screensho
   const name = screenshotName(scenario, bp);
   const filePath = path.join(SCREENSHOT_DIR, name);
   const fullPage = screenshotOptions.fullPage ?? true;
-  await page.screenshot({ path: filePath, fullPage });
-
-  // S5 视觉基线（架构体检 2026-07-10）：与入库基线做像素 diff——此前截图只存盘
-  // 不对比，视觉层没有任何会自动失败的守护。基线缺失时自动生成（updateSnapshots
-  // 默认 missing）；改版式后用 npm run test:e2e -- --update-snapshots 重建。
-  // 日期输入随当天变化，遮罩后再比。
-  await expect(page).toHaveScreenshot(name, {
-    fullPage,
-    mask: [page.locator('input[type="date"]')],
-  });
+  if (VISUAL_ENABLED) {
+    await page.screenshot({ path: filePath, fullPage });
+    await expect(page).toHaveScreenshot(name, {
+      fullPage,
+      mask: [page.locator('input[type="date"]')],
+    });
+  }
 
   const result = {
     scenario,
@@ -480,6 +478,64 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       await context.close();
     });
   }
+
+  // ---- Scenario 9: 更多文章编辑必须实时反映到右侧预览 ----
+  test('9-更多文章链接抓取后实时更新预览', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    const nextURL = 'https://mp.weixin.qq.com/s/e2e-live-preview';
+    const nextCover = 'https://example.com/e2e-live-preview.png';
+    const tinyPNG = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Xw4AAAAASUVORK5CYII=',
+      'base64',
+    );
+
+    // 抓取元数据与远程封面均走确定性桩：本场景只验证「左侧成功后右侧立即换卡」，
+    // 不把微信限流或图片 CORS 混进交互合同。
+    await page.route('**/api/fetch-article-meta', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        source_url: nextURL,
+        title: '新增文章必须实时出现在右侧预览',
+        cover_url: nextCover,
+        image_urls: [nextCover],
+      }),
+    }));
+    await page.route('**/api/image-proxy?**', route => route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: tinyPNG,
+    }));
+
+    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+    await waitForAppReady(page);
+    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
+    await page.waitForFunction(() => {
+      const el = document.getElementById('previewContent');
+      return el && el.style.display !== 'none';
+    }, { timeout: 30000 });
+
+    const urlInputs = page.locator('#moreArticlesEditor .ma-url');
+    await expect(urlInputs).toHaveCount(3);
+    const oldThirdLink = page.locator('#contentArea a[href*="2652906407"]');
+    await expect(oldThirdLink).toHaveCount(1);
+    const oldPreviewSrc = await oldThirdLink.locator('img').getAttribute('src');
+
+    await urlInputs.nth(2).fill(nextURL);
+    const thirdCard = page.locator('#moreArticlesEditor .ma-card').nth(2);
+    await expect(thirdCard.locator('.ma-card-status')).toHaveText('✓ 已抓取', { timeout: 20000 });
+
+    const nextLink = page.locator(`#contentArea a[href="${nextURL}"]`);
+    await expect(nextLink).toHaveCount(1);
+    const nextPreviewSrc = await nextLink.locator('img').getAttribute('src');
+    expect(nextPreviewSrc).toMatch(/^data:image\/png;base64,/);
+    expect(nextPreviewSrc).not.toBe(oldPreviewSrc);
+    const savedCards = await page.evaluate(() => JSON.parse(localStorage.getItem('more_articles_v1::fbif') || '[]'));
+    expect(savedCards[2]?.title).toBe('新增文章必须实时出现在右侧预览');
+
+    await context.close();
+  });
 });
 
 // ---- Generate report after all tests ----

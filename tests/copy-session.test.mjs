@@ -42,6 +42,34 @@ function extractAssignedFunctionExpression(source, assignment) {
   assert.fail(`${assignment} function body should be complete`);
 }
 
+function extractExactAsyncFunction(source, signature) {
+  const start = source.indexOf(signature);
+  assert.notEqual(start, -1, `${signature} should exist`);
+  const signatureEnd = source.indexOf(') {', start);
+  const bodyStart = signatureEnd + 2;
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    if (source[i] === '}') depth--;
+    if (depth === 0) return source.slice(start, i + 1);
+  }
+  assert.fail(`${signature} should be complete`);
+}
+
+function extractAssignedAsyncArrow(source, assignment) {
+  const assignmentStart = source.indexOf(assignment);
+  assert.notEqual(assignmentStart, -1, `${assignment} should exist`);
+  const start = source.indexOf('async (', assignmentStart);
+  const bodyStart = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    if (source[i] === '}') depth--;
+    if (depth === 0) return source.slice(start, i + 1);
+  }
+  assert.fail(`${assignment} arrow should be complete`);
+}
+
 function deferred() {
   let resolve;
   const promise = new Promise(r => { resolve = r; });
@@ -148,15 +176,274 @@ test('两个 gate 相互独立：作废更多文章任务不影响 footer 写权
 
 test('resetForNewArticle 一次作废全部 gate（新文章导入后旧任务全体免疫）', () => {
   const s = createCopySession();
+  const input = s.articleInputGate.capture();
+  const render = s.renderCommitGate.capture();
   const article = s.articleResultGate.capture();
   const footer = s.footerCopyGate.capture();
   const ma = s.moreArticlesGate.capture();
   const preview = s.moreArticlesPreviewGate.capture();
+  const copy = s.copyActionGate.capture();
+  const retry = s.retryGate.capture();
   s.resetForNewArticle();
+  assert.equal(input.stale(), true);
+  assert.equal(render.stale(), true);
   assert.equal(article.stale(), true);
   assert.equal(footer.stale(), true);
   assert.equal(ma.stale(), true);
   assert.equal(preview.stale(), true);
+  assert.equal(copy.stale(), true);
+  assert.equal(retry.stale(), true);
+});
+
+test('file 输入 A→B 且 A 后完成时，只允许 B activateArticleSession', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const handleFileSource = extractExactAsyncFunction(engine, 'async function handleFile(');
+  const session = createCopySession();
+  const tasks = [];
+  const activated = [];
+  const deps = {
+    copySession: session,
+    articleInputGate: session.articleInputGate,
+    renderCommitGate: session.renderCommitGate,
+    _articleInputPending: false,
+    _rerenderAfterInput: true,
+    _rerenderAfterInputOptions: { articleArtifactOverride: { from: 'old-file' } },
+    clearQueuedInputRerender() {
+      deps._rerenderAfterInput = false;
+      deps._rerenderAfterInputOptions = null;
+    },
+    _isRepost: false,
+    _convLog: [],
+    dispatchArticleEvent() {}, logConv() {}, showImportEntry() {}, showError() {},
+    sanitizeErrMsg: value => value,
+    errorEl: { style: {} },
+    dropZone: { classList: { add() {}, remove() {} } },
+    progress: { style: {} }, progressFill: { style: {} }, progressText: {},
+    performance: { now: () => 0 },
+    normalizeToDocx: async file => file,
+    waitForActiveRuleConfigReady: async () => {},
+    parseFileToArticleInput: async file => ({ kind: 'md', id: file.name, title: file.name }),
+    renderArticleInput(input) {
+      const task = deferred();
+      tasks.push({ id: input.id, ...task });
+      return task.promise;
+    },
+    buildArticleSession: async (input, result) => ({ input, title: result.label }),
+    formatRenderStats: result => result.label,
+    activateArticleSession: article => activated.push(article.title),
+    setTimeout: fn => fn(),
+  };
+  const handleFile = new Function('deps', `with (deps) { ${handleFileSource}; return handleFile; }`)(deps);
+  const a = handleFile({ name: 'A', size: 1 }, {});
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  const b = handleFile({ name: 'B', size: 1 }, {});
+  assert.equal(deps._rerenderAfterInput, false, '新文件意图必须清掉旧文章的排队重排');
+  assert.equal(deps._rerenderAfterInputOptions, null);
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  const result = label => ({ label, lines: [], imgN: 0, headingN: 0 });
+  tasks.find(task => task.id === 'B').resolve(result('B'));
+  await b;
+  tasks.find(task => task.id === 'A').resolve(result('A'));
+  await a;
+  assert.deepEqual(activated, ['B']);
+});
+
+test('blocks 输入 A→B 且 A 后完成时，只允许 B activateArticleSession', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const handleBlocksSource = extractAssignedAsyncArrow(engine, 'window._handleBlocks =');
+  const session = createCopySession();
+  const tasks = [];
+  const activated = [];
+  const deps = {
+    copySession: session,
+    articleInputGate: session.articleInputGate,
+    renderCommitGate: session.renderCommitGate,
+    _articleInputPending: false,
+    _rerenderAfterInput: true,
+    _rerenderAfterInputOptions: { articleArtifactOverride: { from: 'old-blocks' } },
+    clearQueuedInputRerender() {
+      deps._rerenderAfterInput = false;
+      deps._rerenderAfterInputOptions = null;
+    },
+    _isRepost: false, _convLog: [],
+    dispatchArticleEvent() {}, logConv() {}, clearUploadVisual() {}, showImportEntry() {}, showError() {},
+    sanitizeErrMsg: value => value,
+    errorEl: { style: {} },
+    dropZone: { classList: { add() {}, remove() {} } },
+    progress: { style: {} }, progressFill: { style: {} }, progressText: {},
+    performance: { now: () => 0 }, template: { processBlocks() {} },
+    waitForActiveRuleConfigReady: async () => {},
+    normalizeArticleArtifactOverride: value => value,
+    renderArticleInput(input) {
+      const task = deferred();
+      tasks.push({ id: input.title, ...task });
+      return task.promise;
+    },
+    buildArticleSession: async (input, result) => ({ input, title: result.label }),
+    formatRenderStats: result => result.label,
+    activateArticleSession: article => activated.push(article.title),
+    setTimeout: fn => fn(),
+  };
+  const handleBlocks = new Function('deps', `with (deps) { return (${handleBlocksSource}); }`)(deps);
+  const a = handleBlocks({ title: 'A', blocks: [] }, {});
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  const b = handleBlocks({ title: 'B', blocks: [] }, {});
+  assert.equal(deps._rerenderAfterInput, false, '新区块意图必须清掉旧文章的排队重排');
+  assert.equal(deps._rerenderAfterInputOptions, null);
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  const result = label => ({ label, lines: [], imgN: 0, headingN: 0 });
+  tasks.find(task => task.id === 'B').resolve(result('B'));
+  await b;
+  tasks.find(task => task.id === 'A').resolve(result('A'));
+  await a;
+  assert.deepEqual(activated, ['B']);
+});
+
+test('_engineRerender latest-wins：旧规则重排后返不得覆盖新规则', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const rerenderSource = extractExactAsyncFunction(engine, 'async function _engineRerender(');
+  const session = createCopySession();
+  const tasks = [];
+  const activated = [];
+  const deps = {
+    renderCommitGate: session.renderCommitGate,
+    _articleInputPending: false,
+    _rerenderAfterInput: false,
+    _rerenderAfterInputOptions: null,
+    clearQueuedInputRerender() {
+      deps._rerenderAfterInput = false;
+      deps._rerenderAfterInputOptions = null;
+    },
+    _articleSession: { input: { id: 'article' } },
+    _lastRenderInput: null,
+    normalizeArticleArtifactOverride: value => value,
+    renderArticleInput() {
+      const task = deferred();
+      tasks.push(task);
+      return task.promise;
+    },
+    buildArticleSession: async (input, result) => ({ input, title: result }),
+    activateArticleSession: article => activated.push(article.title),
+    console,
+  };
+  const rerender = new Function('deps', `with (deps) { ${rerenderSource}; return _engineRerender; }`)(deps);
+  const a = rerender();
+  const b = rerender();
+  tasks[1].resolve('B');
+  await b;
+  tasks[0].resolve('A');
+  await a;
+  assert.deepEqual(activated, ['B']);
+});
+
+test('规则在输入解析期变更：重排不丢失，输入结束后自动消费最新选项', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const queueSource = extractFunction(engine, 'queueRerenderAfterInput');
+  const clearSource = extractFunction(engine, 'clearQueuedInputRerender');
+  const flushSource = extractFunction(engine, 'flushRerenderAfterInput');
+  const rerenderSource = extractExactAsyncFunction(engine, 'async function _engineRerender(');
+  const calls = [];
+  const deps = {
+    _articleInputPending: true,
+    _rerenderAfterInput: false,
+    _rerenderAfterInputOptions: null,
+    console,
+  };
+  deps.queueRerenderAfterInput = new Function('deps', `with (deps) { ${queueSource}; return queueRerenderAfterInput; }`)(deps);
+  deps.clearQueuedInputRerender = new Function('deps', `with (deps) { ${clearSource}; return clearQueuedInputRerender; }`)(deps);
+  const rerender = new Function('deps', `with (deps) { ${rerenderSource}; return _engineRerender; }`)(deps);
+
+  assert.equal(await rerender({ autofillAuthorCard: true }), false);
+  assert.equal(deps._rerenderAfterInput, true);
+  assert.deepEqual(deps._rerenderAfterInputOptions, { autofillAuthorCard: true });
+
+  deps._articleInputPending = false;
+  deps._engineRerender = async options => { calls.push(options); return true; };
+  const flush = new Function('deps', `with (deps) { ${flushSource}; return flushRerenderAfterInput; }`)(deps);
+  assert.equal(flush(), true);
+  await Promise.resolve();
+  assert.deepEqual(calls, [{ autofillAuthorCard: true }]);
+  assert.equal(deps._rerenderAfterInput, false);
+
+  const activate = extractFunction(engine, 'activateArticleSession');
+  assert.match(activate, /flushRerenderAfterInput\(\)/, '新输入激活后必须自动消费待处理重排');
+  const rulesReady = engine.slice(engine.indexOf("window.addEventListener('fbif:rules-ready'"), engine.indexOf('function invalidatePendingArticleWork'));
+  assert.match(rulesReady, /_articleInputPending\s*\|\|/, '首篇文章尚无 session 时，规则变更也必须进入待处理重排');
+});
+
+test('URL / 账号切换作废文件解析时，必须同步解锁上传区', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const invalidateSource = extractFunction(engine, 'invalidatePendingArticleWork');
+  const session = createCopySession();
+  const input = session.articleInputGate.capture();
+  const render = session.renderCommitGate.capture();
+  const article = session.articleResultGate.capture();
+  const footer = session.footerCopyGate.capture();
+  const more = session.moreArticlesGate.capture();
+  const preview = session.moreArticlesPreviewGate.capture();
+  const copy = session.copyActionGate.capture();
+  const retry = session.retryGate.capture();
+  const removed = [];
+  let retryReset = 0;
+  const deps = {
+    copySession: session,
+    articleInputGate: session.articleInputGate,
+    renderCommitGate: session.renderCommitGate,
+    _articleInputPending: true,
+    _rerenderAfterInput: true,
+    _rerenderAfterInputOptions: { articleArtifactOverride: { from: 'old' } },
+    _moreArticlesCopyJob: { old: true },
+    clearQueuedInputRerender() {
+      deps._rerenderAfterInput = false;
+      deps._rerenderAfterInputOptions = null;
+    },
+    dropZone: { classList: { remove: name => removed.push(name) } },
+    progress: { style: { display: 'block' } },
+    progressFill: { style: { width: '70%' } },
+    resetRetryUploadUI() { retryReset++; },
+  };
+  const invalidate = new Function('deps', `with (deps) { ${invalidateSource}; return invalidatePendingArticleWork; }`)(deps);
+  invalidate();
+  assert.equal(input.stale(), true);
+  assert.equal(render.stale(), true);
+  assert.equal(article.stale(), true);
+  assert.equal(footer.stale(), true);
+  assert.equal(more.stale(), true);
+  assert.equal(preview.stale(), true);
+  assert.equal(copy.stale(), true);
+  assert.equal(retry.stale(), true);
+  assert.equal(deps._articleInputPending, false);
+  assert.equal(deps._rerenderAfterInput, false);
+  assert.equal(deps._rerenderAfterInputOptions, null);
+  assert.equal(deps._moreArticlesCopyJob, null);
+  assert.equal(deps.progress.style.display, 'none');
+  assert.equal(deps.progressFill.style.width, '0%');
+  assert.equal(retryReset, 1);
+  assert.deepEqual(removed, ['processing']);
+});
+
+test('goBack / 快照恢复 / 纯文字都会终止 pending input，复制与重试有独立回写门', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const plain = extractFunction(engine, 'showPlainTextResult');
+  const back = engine.slice(engine.indexOf('window.goBack = function'), engine.indexOf('window.zoom = function'));
+  const restore = engine.slice(engine.indexOf('window._restoreSessionSnapshot = function'), engine.indexOf('window._restoreSessionSnapshot = function') + 900);
+  const copy = extractAssignedFunctionExpression(engine, 'window.copyContent =');
+  const retry = extractAssignedFunctionExpression(engine, 'window.retryUpload =');
+  assert.match(plain, /copySession\.resetForNewArticle\(\)[\s\S]{0,100}_articleInputPending\s*=\s*false/);
+  assert.match(back, /copySession\.resetForNewArticle\(\)[\s\S]{0,100}_articleInputPending\s*=\s*false/);
+  assert.match(restore, /copySession\.resetForNewArticle\(\)[\s\S]{0,100}_articleInputPending\s*=\s*false/);
+  assert.match(copy, /copyActionGate\.invalidate\(\)[\s\S]{0,100}copyActionGate\.capture\(\)/);
+  assert.match(copy, /await _themeCSSReady;[\s\S]{0,100}copyAction\.stale\(\)/);
+  assert.match(retry, /retryGate\.invalidate\(\)[\s\S]{0,100}retryGate\.capture\(\)/);
+  assert.match(retry, /finally\s*\{/);
+});
+
+test('过期的更多文章任务失败不得记入当前文章日志', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const prepare = extractFunction(engine, 'prepareMoreArticlesForCopy');
+  const catchIndex = prepare.indexOf('.catch(err =>');
+  assert.notEqual(catchIndex, -1);
+  assert.match(prepare.slice(catchIndex), /if \(!gate\.stale\(\)\)\s*logConv/);
 });
 
 test('文章 A 上传任务晚于 B 导入完成时，不得回写 B 的复制状态或 UI', async () => {
@@ -250,6 +537,7 @@ test('文章 A 重试上传期间导入 B，A 重试结果不得回写 B', async
     document,
     articleResultGate: copySession.articleResultGate,
     footerCopyGate: copySession.footerCopyGate,
+    retryGate: copySession.retryGate,
     retryFailedImages(articleCopy, footerCopy, failedSrcs, options) {
       retryOptions = options;
       return task.promise;

@@ -112,6 +112,7 @@ test('copyContent writes clipboard before pending more-articles preparation reso
   });
   const events = [];
   const deps = {
+    copyActionGate: { invalidate() {}, capture: () => ({ stale: () => false }) },
     window: {},
     document: {
       getElementById(id) {
@@ -299,6 +300,8 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
     // S2：裸计数器已收敛为 copy-session 版本门；恢复路径必须调用文章级重置作废在途回写。
     copySessionResetCalls: 0,
     copySession: { resetForNewArticle() { deps.copySessionResetCalls++; } },
+    clearQueuedInputRerender() {},
+    _articleInputPending: false,
     _plainTextCopy: null,
     _isRepost: false,
     _sourceIsDocx: false,
@@ -342,7 +345,7 @@ test('preview footer and copy footer are separate so preview data images do not 
   );
   const helper = extractFunction(engine, 'copySafeMoreArticleCardForFooter');
   assert.doesNotMatch(helper, /compositePreviewDataUrl/, 'copy-safe 生成器不得调用会失败后退回 imgurl 的 preview helper');
-  assert.match(engine, /footerCopy = await buildFooterWithMoreArticles\(baseFooterHtml, \{ isRepost, isV2, copySafe: true \}\)/);
+  assert.match(engine, /footerCopy = await buildFooterWithMoreArticles\(baseFooterHtml, \{[\s\S]{0,180}copySafe: true,[\s\S]{0,180}canCommitCards:/);
   assert.match(engine, /footerCopy: session\.footerCopy/);
   assert.match(engine, /_footerCopy = bodyOnly \? '' : normalizeRich\(\(opts && opts\.footerCopy\) \|\| footerContent\)/);
   assert.match(engine, /const copySafeMerged = await buildFooterWithMoreArticles\(base, \{[\s\S]*?copySafe: true,[\s\S]*?\}\)/);

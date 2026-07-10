@@ -1,6 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { loadLocalRulePreset, saveLocalRulePreset } from '../public/js/rule-presets.js';
+
+function extractObjectMethod(source, signature) {
+  const start = source.indexOf(signature);
+  assert.notEqual(start, -1, `${signature} should exist`);
+  const signatureEnd = source.indexOf(') {', start);
+  assert.notEqual(signatureEnd, -1, `${signature} signature should be complete`);
+  const bodyStart = signatureEnd + 2;
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    if (source[i] === '}') depth--;
+    if (depth === 0) return 'function ' + source.slice(start, i + 1);
+  }
+  assert.fail(`${signature} should be complete`);
+}
 
 test.before(async () => {
   // 集成测试同样走源码 grep —— jsdom 不是项目依赖
@@ -46,7 +62,7 @@ test('engine.js: 当前文章由统一 session 激活，批量和重排不直接
   assert.match(src, /async function buildArticleSession/, 'engine 应集中构建文章 session');
   assert.match(src, /function activateArticleSession/, 'engine 应集中激活当前文章');
   const rerender = src.slice(src.indexOf('async function _engineRerender'));
-  assert.match(rerender, /buildArticleSession\(cached, result/, '重排应重建 session');
+  assert.match(rerender, /buildArticleSession\(renderInput, result/, '重排应用本次固定输入重建 session');
   assert.match(rerender, /activateArticleSession\(session\)/, '重排应通过 session 激活预览');
   const batchClick = src.slice(src.indexOf('function showBatchList'), src.indexOf('function updateBatchStatus'));
   assert.match(batchClick, /activateArticleSession\(_batchResults\[i\]\)/, '批量点击应激活对应 session');
@@ -228,6 +244,10 @@ test('site.html: 注入 engine 的 config 并入扁平参数（loadConfig）', a
   const fn = src.match(/function\s+syncEngineConfig[\s\S]+?\n\}/);
   assert.ok(fn, '找不到 syncEngineConfig 函数体');
   assert.match(fn[0], /\.\.\.\s*flat\b|\.\.\.\s*loadConfig\(\)/, 'syncEngineConfig 必须 spread loadConfig() 的扁平字段');
+  assert.match(fn[0], /serverBehavior\s*=\s*\(window\._activeConfig\s*&&\s*window\._activeConfig\.behavior\)\s*\|\|\s*\{\}/,
+    'site.html 必须从 channel-aware applyActiveRuleConfig 取网站原始 behavior');
+  assert.match(fn[0], /behavior:\s*serverBehavior/,
+    'site.html 必须把 lists 与顶层正则原样传给 foodtalks-site 渲染器');
   assert.match(fn[0], /setActiveConfig/, 'syncEngineConfig 必须调 setActiveConfig');
 });
 
@@ -237,6 +257,50 @@ test('site.html: admin applyConfig 改规则后触发 engine 同步（验收线1
     'utf8'
   );
   assert.match(src, /applyConfig\s*\([\s\S]{0,500}syncEngineConfig/, 'applyConfig 内须调 syncEngineConfig（否则后台改规则不重排）');
+});
+
+test('site.html: 服务端网站 preset 落本地时带上 behavior，断网恢复不丢自定义规则', async () => {
+  const src = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const methodSource = extractObjectMethod(src, 'applyConfig(config, preset, meta = {})');
+  const storage = new Map();
+  const windowRef = {
+    localStorage: {
+      getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+      setItem(key, value) { storage.set(key, String(value)); },
+    },
+  };
+  globalThis.window = windowRef;
+  const deps = {
+    adminApplyGeneration: 0,
+    window: windowRef,
+    ruleSelector: { setSource() {} },
+    cacheServerRuleFallback(config, preset) {
+      saveLocalRulePreset({ ...(preset || {}), config }, 'ft-default');
+    },
+    saveConfig: config => config,
+    syncEngineConfig: () => ({ status: 'noop' }),
+  };
+  const applyConfig = new Function('deps', `with (deps) { ${methodSource}; return applyConfig; }`)(deps);
+  const behavior = {
+    author_regex: '^署名[：:]',
+    lists: { wechat_trailer_markers: ['网站自定义尾标'] },
+  };
+  const preset = {
+    id: 'website-custom',
+    name: '网站自定义',
+    baseline_id: 'ft-default-v1',
+    rule_family: 'foodtalks-site',
+    behavior,
+  };
+  try {
+    await Promise.resolve(applyConfig({ tip_title_color: '#123456' }, preset, { source: 'server' }));
+    const restored = loadLocalRulePreset('ft-default');
+    assert.equal(restored.id, 'website-custom');
+    assert.equal(restored.config.tip_title_color, '#123456');
+    assert.deepEqual(restored.behavior, behavior);
+  } finally {
+    delete globalThis.window;
+  }
 });
 
 test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并支持拖拽排序', async () => {

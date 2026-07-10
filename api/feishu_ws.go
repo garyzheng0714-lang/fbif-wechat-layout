@@ -32,6 +32,10 @@ import (
 // 客户端；缺任一则 log 一行跳过（Webhook 备用通道仍在，不影响其余功能）。
 // 长连接失败不 fatal——它是审核交互的加速器，不是发布流水线的闸门。
 func maybeStartFeishuWS(p *publishPipeline) {
+	if publishWorkersPaused() {
+		log.Printf("publish: workers paused，跳过飞书长连接")
+		return
+	}
 	appID := strings.TrimSpace(os.Getenv("FEISHU_APP_ID"))
 	appSecret := strings.TrimSpace(os.Getenv("FEISHU_APP_SECRET"))
 	if appID == "" || appSecret == "" {

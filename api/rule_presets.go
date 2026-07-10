@@ -38,11 +38,12 @@ type rulePreset struct {
 	BaselineID string `json:"baseline_id"`
 	// MigrationRequired 只来自 schema v1/v2 迁移：旧数据无法唯一推断
 	// baseline 时显式标记，禁止新绑定，直到管理员选择基线并重新保存。
-	MigrationRequired bool           `json:"migration_required,omitempty"`
-	MigrationNote     string         `json:"migration_note,omitempty"`
-	Config            map[string]any `json:"config"`
-	Behavior          map[string]any `json:"behavior,omitempty"`
-	UpdatedAt         string         `json:"updated_at"`
+	MigrationRequired  bool           `json:"migration_required,omitempty"`
+	MigrationNote      string         `json:"migration_note,omitempty"`
+	MigrationConfirmed bool           `json:"migration_confirmed,omitempty"`
+	Config             map[string]any `json:"config"`
+	Behavior           map[string]any `json:"behavior,omitempty"`
+	UpdatedAt          string         `json:"updated_at"`
 }
 
 type rulePresetDocument struct {
@@ -451,6 +452,14 @@ func legacyDocumentFromStore(doc ruleStoreDocumentV2) rulePresetDocument {
 		if id == account.ActiveRuleID {
 			version = ruleVersionOrLatest(rule, account.ActiveRuleVersion)
 		}
+		config := mergeRuleDefaults(rule.BaselineID, version.Config)
+		behavior := mergeRuleBehavior(rule.BaselineID, version.Behavior)
+		if rule.MigrationRequired {
+			// 后台确认基线前只能看到历史原始 overrides，不得把
+			// 占位 baseline 的默认值烘进下一版。
+			config = cloneRuleMap(version.Config)
+			behavior = cloneRuleMap(version.Behavior)
+		}
 		presets = append(presets, rulePreset{
 			ID:                rule.ID,
 			Name:              rule.Name,
@@ -460,8 +469,8 @@ func legacyDocumentFromStore(doc ruleStoreDocumentV2) rulePresetDocument {
 			BaselineID:        rule.BaselineID,
 			MigrationRequired: rule.MigrationRequired,
 			MigrationNote:     rule.MigrationNote,
-			Config:            mergeRuleDefaults(rule.BaselineID, version.Config),
-			Behavior:          mergeRuleBehavior(rule.BaselineID, version.Behavior),
+			Config:            config,
+			Behavior:          behavior,
 			UpdatedAt:         rule.UpdatedAt,
 		})
 	}
@@ -639,13 +648,23 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	} else {
 		p.BaselineID = sanitizeRulePresetID(p.BaselineID)
 	}
+	rule := doc.Rules[p.ID]
+	if rule.MigrationRequired {
+		if !p.MigrationConfirmed {
+			return legacyDocumentFromStore(doc), fmt.Errorf("规则 %q 尚未确认历史基线；请在规则后台显式选择 baseline_id", rule.ID)
+		}
+		// 首次确认只改基线：忽略客户端可能已被占位 baseline 展开的
+		// config/behavior，从 store 中的原始 overrides 重建新版本。
+		raw := latestRuleVersion(rule)
+		p.Config = cloneRuleMap(raw.Config)
+		p.Behavior = cloneRuleMap(raw.Behavior)
+	}
 	if err := validateRulePresetPayload(p); err != nil {
 		return legacyDocumentFromStore(doc), err
 	}
 	p.Config = mergeRuleDefaults(p.BaselineID, p.Config)
 	p.Behavior = mergeRuleBehavior(p.BaselineID, p.Behavior)
 	p.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	rule := doc.Rules[p.ID]
 	nextVersion := 1
 	if rule.ID != "" {
 		nextVersion = latestRuleVersion(rule).Version + 1
@@ -1035,6 +1054,9 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 		if !requireAdminPassword(w, r) {
 			return
 		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
 		var req rulePreset
 		r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1057,6 +1079,9 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 		if !requireAdminPassword(w, r) {
 			return
 		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
 		var req struct {
 			ID        string `json:"id"`
 			AccountID string `json:"account_id"`
@@ -1075,6 +1100,9 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 
 	mux.HandleFunc("DELETE /api/rules/admin/presets/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !requireAdminPassword(w, r) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
 			return
 		}
 		doc, err := store.delete(r.PathValue("id"))

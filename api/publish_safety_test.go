@@ -612,3 +612,42 @@ func TestPublishStartupConvertsInFlightPublicizeToReconciliation(t *testing.T) {
 		t.Fatalf("崩溃遗留公开意图必须人工对账且零重放：stage=%q updates=%d", got.Stage, updates.Load())
 	}
 }
+
+func TestPublishPublicizeDefiniteFailureNotifiesAndCanRetry(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	env.pipeline.foodTalks = func() (foodTalksAPI, error) {
+		return nil, errors.New("FoodTalks 凭证未配置")
+	}
+	if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "admin"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageFailed || got.FailedStage != publishStagePublicizing || got.PublicizeIntentKey != "" {
+		t.Fatalf("外调前确定失败应落 failed(publicizing) 且无 PUT intent：%+v", got)
+	}
+	if len(env.notified) < 2 || !strings.Contains(env.notified[len(env.notified)-1], "发布失败") {
+		t.Fatalf("卡片已进入发布中后，确定失败必须发结果通知：%v", env.notified)
+	}
+	var updates atomic.Int32
+	env.pipeline.foodTalks = func() (foodTalksAPI, error) {
+		return directFoodTalksStub{
+			create: func() (int64, error) { return 0, errors.New("unexpected create") },
+			update: func() error {
+				updates.Add(1)
+				return nil
+			},
+		}, nil
+	}
+	got, err = env.pipeline.retry(job.ID)
+	if err != nil {
+		t.Fatalf("修复确定失败后应可安全 retry: %v", err)
+	}
+	got, _ = env.store.byID(job.ID)
+	if got.Stage != publishStagePublished || updates.Load() != 1 {
+		t.Fatalf("安全 retry 应只 PUT 一次并发布成功：stage=%q updates=%d", got.Stage, updates.Load())
+	}
+}

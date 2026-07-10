@@ -17,6 +17,7 @@ const (
 	publishNotificationReviewPending      = "review_pending"
 	publishNotificationPublished          = "published"
 	publishNotificationRejected           = "rejected"
+	publishNotificationPublicizeFailed    = "publicize_failed"
 	publishNotificationPublicizeUncertain = "publicize_uncertain"
 
 	publishNotificationStatePending = "pending"
@@ -116,6 +117,13 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 	case publishNotificationRejected:
 		return p.sendTerminalPublishNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】已驳回\n标题：%s\n文章留在 FoodTalks 草稿态，不对外可见", job.Title))
+	case publishNotificationPublicizeFailed:
+		if p.notify == nil {
+			return errors.New("飞书发布失败通知未配置")
+		}
+		return p.notify(ctx, fmt.Sprintf(
+			"【网站同步】发布失败\n标题：%s\n任务 #%d 在发出公开请求前已确认失败，网站仍保持草稿态；修复配置后可安全重试。\n原因：%s",
+			job.Title, job.ID, job.Error))
 	case publishNotificationPublicizeUncertain:
 		if p.notify == nil {
 			return errors.New("飞书公开结果异常通知未配置")

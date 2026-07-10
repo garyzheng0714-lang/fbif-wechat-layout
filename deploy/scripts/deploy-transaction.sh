@@ -59,7 +59,7 @@ validate_release() {
   [[ -x "$RELEASE_DIR/api/fbif-api" ]] || die "staged API binary is not executable"
 
   local command_name
-  for command_name in caddy curl install mv cp rm systemctl; do
+  for command_name in caddy curl install mv cp rm sed systemctl; do
     command -v "$command_name" >/dev/null || die "missing remote command: $command_name"
   done
 
@@ -68,6 +68,8 @@ validate_release() {
   systemctl is-active --quiet caddy || die "caddy is not active before deploy"
   caddy validate --config /etc/caddy/Caddyfile >/dev/null
   caddy validate --adapter caddyfile --config "$RELEASE_DIR/caddy/fbifmp-layout.caddy" >/dev/null
+  grep -qx 'DEPLOYMENT_WRITES_PAUSED=1' "$RELEASE_DIR/api.env" ||
+    die "staged API env must start with DEPLOYMENT_WRITES_PAUSED=1"
   wait_http_ok http://127.0.0.1:9001/api/health 5
   wait_http_ok http://127.0.0.1:19096/healthz 5
 }
@@ -75,12 +77,25 @@ validate_release() {
 restore_path() {
   local name=$1
   local target=$2
+  local failed=0
+  rm -rf -- "$target.new.$DEPLOY_ID" || failed=1
   if [[ -e "$(marker "$name.activated")" ]]; then
-    rm -rf -- "$target"
+    rm -rf -- "$target" || failed=1
   fi
-  if [[ -e "$(marker "$name.had")" && -e "$BACKUP_ROOT/$name" ]]; then
-    mv -- "$BACKUP_ROOT/$name" "$target"
+  if [[ -e "$(marker "$name.had")" ]]; then
+    if [[ -e "$BACKUP_ROOT/$name" || -L "$BACKUP_ROOT/$name" ]]; then
+      # 保留 backup 到整个 rollback 验收成功后再统一删除。这样回滚被再次取消、
+      # marker 清理失败或 Actions 重试 rollback 时，仍可幂等地删除半成品并重拷。
+      cp -a -- "$BACKUP_ROOT/$name" "$target" || failed=1
+    else
+      echo "deploy transaction: missing backup for $name" >&2
+      failed=1
+    fi
   fi
+  if [[ $failed -eq 0 ]]; then
+    rm -f -- "$(marker "$name.activated")" "$(marker "$name.had")" || failed=1
+  fi
+  return "$failed"
 }
 
 rollback_impl() {
@@ -105,6 +120,7 @@ rollback_impl() {
     echo "deploy transaction: rollback incomplete; backup kept at $BACKUP_ROOT" >&2
     return 1
   fi
+  rm -rf -- "$BACKUP_ROOT"
   return 0
 }
 
@@ -123,9 +139,9 @@ install_file() {
   local target=$3
   local mode=$4
   backup_file "$name" "$target"
+  touch "$(marker "$name.activated")"
   install -D -m "$mode" -- "$staged" "$target.new.$DEPLOY_ID"
   mv -f -- "$target.new.$DEPLOY_ID" "$target"
-  touch "$(marker "$name.activated")"
 }
 
 swap_directory() {
@@ -133,11 +149,11 @@ swap_directory() {
   local staged=$2
   local target=$3
   if [[ -e "$target" || -L "$target" ]]; then
-    mv -- "$target" "$BACKUP_ROOT/$name"
     touch "$(marker "$name.had")"
+    mv -- "$target" "$BACKUP_ROOT/$name"
   fi
-  mv -- "$staged" "$target"
   touch "$(marker "$name.activated")"
+  mv -- "$staged" "$target"
 }
 
 activate_release() {
@@ -147,14 +163,17 @@ activate_release() {
 
   local activated=0
   on_activate_error() {
-    local rc=$?
-    trap - ERR
+    local rc=${1:-$?}
+    trap - ERR HUP INT TERM
     if [[ $activated -eq 1 ]]; then
       rollback_impl || true
     fi
     exit "$rc"
   }
-  trap on_activate_error ERR
+  trap 'on_activate_error $?' ERR
+  trap 'on_activate_error 129' HUP
+  trap 'on_activate_error 130' INT
+  trap 'on_activate_error 143' TERM
   activated=1
 
   # Caddy 候选先进入事务并做全局 validate，但在服务和静态资源全部就绪前不 reload。
@@ -173,7 +192,22 @@ activate_release() {
   wait_http_ok http://127.0.0.1:9001/api/health
   systemctl reload caddy
 
-  trap - ERR
+  trap - ERR HUP INT TERM
+}
+
+unpause_release() {
+  [[ -d "$BACKUP_ROOT" ]] || die "active transaction backup not found: $BACKUP_ROOT"
+  grep -qx 'DEPLOYMENT_WRITES_PAUSED=1' "$ENV_TARGET" ||
+    die "live API env is not in deployment pause mode"
+  local next_env="$ENV_TARGET.unpause.$DEPLOY_ID"
+  install -m 0600 -- "$ENV_TARGET" "$next_env"
+  sed -i 's/^DEPLOYMENT_WRITES_PAUSED=1$/DEPLOYMENT_WRITES_PAUSED=0/' "$next_env"
+  grep -qx 'DEPLOYMENT_WRITES_PAUSED=0' "$next_env" || die "failed to clear deployment pause"
+  mv -f -- "$next_env" "$ENV_TARGET"
+  # 从这里开始任务恢复和外部副作用可能发生；调用方必须先完成候选 release 验收，
+  # 且此后不得自动 rollback 到旧二进制/旧 env。
+  systemctl restart fbif-api
+  wait_http_ok http://127.0.0.1:9001/api/health
 }
 
 case "$ACTION" in
@@ -182,6 +216,9 @@ case "$ACTION" in
     ;;
   activate)
     activate_release
+    ;;
+  unpause)
+    unpause_release
     ;;
   rollback)
     if [[ -d "$BACKUP_ROOT" ]]; then
@@ -192,6 +229,6 @@ case "$ACTION" in
     rm -rf -- "$BACKUP_ROOT" "$RELEASE_DIR"
     ;;
   *)
-    die "usage: $0 {preflight|activate|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
+    die "usage: $0 {preflight|activate|unpause|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
     ;;
 esac

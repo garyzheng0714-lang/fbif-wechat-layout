@@ -44,10 +44,10 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **微信草稿存活保护**：公众号复制层对更多文章卡片、微信图床属性、位图占位和异步回写做 T0 安全约束，防止内容粘贴后在“保存草稿”阶段被微信清洗掉。
 - **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
 - **程序化渲染**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 复用交互式编辑器的同一套解析、规则与渲染实现，支持 `fbif` 和 `ft-default`。
-- **受控发布流水线**：手动提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、可选 AI 预填元数据、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。
+- **受控发布流水线**：手动提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
 - **编辑部规范数据化**：摘要、标签、作者和原创 / 转载判定已按历史发布样本沉淀为声明式规范与封闭标签词表。AI 只负责预填和出处抽取；完整评测仍在进行，且 FoodTalks 的标签 PUT 缺陷修复前不会把标签写入正式请求。
 - **发布状态边界**：测试环境已经完成隐藏草稿、审核卡片与状态机全链路验证；正式环境接入仍等待外部白名单和服务级凭证，不能把测试闭环写成正式生产已上线。
-- **部署门禁**：`main` 部署前会执行完整 Node 和 Go 测试，生成版本文件，部署 API、静态资源和 Node render service，并通过声明式 Caddy vhost 校验后再 reload。
+- **部署门禁**：`main` 部署串行排队；完整 Node/Go 测试通过后，API、静态资源、render service、env 与 Caddy 全部先进入隔离 staging，再事务切换。服务或公网 SHA/健康/鉴权验收失败会恢复上一版。
 
 ## 功能
 
@@ -62,7 +62,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - “更多文章”URL 粘贴支持移动端 input-only 行为；输入合法微信文章链接后会自动抓取，重复输入同一链接不闪烁状态。
 - 支持旧版 `.doc` 经 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
 - 支持多文件队列处理、品牌页脚开关和“更多文章”组合页脚。
-- 支持多账号规则绑定，当前 4 个账号：`FBIF食品饮料创新`、`WowFood爆品超市`（公众号，复用 fbif 模板）、`FoodTalks什么是系列`（公众号，独立 foodtalks-series 模板）、`网站默认 ft-default`（网站渠道，foodtalks-site 模板），各有独立服务端默认规则绑定；规则库 v2 文档可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数配置，并为每条规则保存 `behavior` 行为配置，本地设置保留为离线降级和兼容兜底。
+- 支持多账号规则绑定，当前 5 个账号：`FBIF食品饮料创新`、`WowFood爆品超市`（公众号，复用 fbif 模板）、`FoodTalks什么是系列`（公众号，独立 foodtalks-series 模板）、`网站默认 ft-default`与`网站·什么是系列 ft-series`（网站渠道，foodtalks-site 模板），各有独立服务端默认规则绑定；规则库 schema v3 为每条规则保存受限 `baseline_id`，自建规则必须显式选择继承基线，不再默认串到 FBIF；规则配置可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数，并保存渠道独立的 `behavior`，本地设置仅作离线降级。
 - 原创 DOCX 以首个 `作者：` 行作为正文起点；该行之前的编辑前置材料不进入编辑器预览。
 - DOCX 连续正文段落会保留紧凑排版；只有原文空段分隔的位置才恢复标准段后间距。
 - URL 导入的文章级 `来源：`、`作者：`、`编辑：` 会收集到正文末尾，并在标准 FBIF `提示：` 页脚前只渲染一次。
@@ -197,11 +197,13 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
 | `POST` | `/api/publish/site-sync` | 提交公众号 URL 发布任务，需 `X-Admin-Password` |
 | `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员密码 |
+| `GET` | `/api/publish/readiness` | 部署/运维只读验收：存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员密码且只返回布尔/模式信息 |
 | `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员密码 |
-| `POST` | `/api/publish/jobs/{id}/review` | 审核通过或驳回；通过是翻公开的唯一 HTTP 入口 |
+| `POST` | `/api/publish/jobs/{id}/review` | 审核通过或驳回；approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
+| `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员密码 |
 | `POST` | `/api/feishu/card-callback` | 飞书审核卡片 Webhook 备用通道 |
-| `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览页；仅允许可审核或终态阶段 |
+| `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 
 ## 配置
 
@@ -219,13 +221,19 @@ curl http://127.0.0.1:9000/api/health
 | `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
 | `FOODTALKS_BASE_URL` / `FOODTALKS_TOKEN` | FoodTalks API 与凭证；缺失时发布任务显式失败 |
 | `FOODTALKS_ORIGIN` | 测试环境浏览器头模式开关；正式白名单模式保持为空 |
-| `FOODTALKS_FRONT_URL` / `FOODTALKS_CATEGORY_IDS` | 前台链接与发布分类 |
+| `FOODTALKS_FRONT_URL` / `FOODTALKS_ADMIN_ARTICLE_URL` / `FOODTALKS_CATEGORY_IDS` | 前台、后台文章入口与发布分类；三类 URL 必须指向同一目标环境 |
+| `FOODTALKS_EXPECTED_TARGET` | 显式声明 `test` 或 `production`；readiness 会拒绝缺失、未知或与 FoodTalks URL 不一致的配置 |
+| `DEPLOYMENT_WRITES_PAUSED` | 部署候选实例专用；为 `1` 时暂停发布/rules 写入口、恢复任务、通知 worker 与飞书长连接，验收通过后由事务脚本清零 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REVIEW_CHAT_ID` | 审核通知和长连接回调 |
 | `FEISHU_VERIFICATION_TOKEN` | Webhook 回调来源校验；长连接模式不使用 |
-| `ARK_API_KEY` / `ARK_MODEL_ID` / `ARK_BASE_URL` | 可选 AI 元数据预填；缺失或失败时走规则兜底，不阻断任务 |
+| `FEISHU_REVIEWER_OPEN_IDS` | 可执行卡片审核的飞书 `open_id` 白名单，逗号分隔；空值时 Webhook/长连接卡片审核全部 fail-closed，`ADMIN_PASSWORD` 保护的 HTTP 管理审核不受影响 |
+| `ARK_API_KEY` / `ARK_MODEL_ID` / `ARK_BASE_URL` | AI 元数据预填与发布风险检查；缺失或失败时风险结论 fail-safe 降级为 `warning`，不阻断进入人工审核 |
+| `ARK_MODEL_ID_B` / `ARK_JUDGE_MODEL_ID` | 可选双模型预填与独立判决；未配置 B 时保持单模型，判决失败回落主模型方案 |
 | `SITE_OWN_ACCOUNTS` | 自有账号清单，用于代码侧确定原创 / 转载；留空使用内置清单 |
 
 部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`ADMIN_PASSWORD` 等 GitHub Secrets。生产规则后台密码只存放在 GitHub Secret 和本地忽略提交的 `.env` 中；不要把微信、LibreOffice、CloudConvert、服务器密钥或后台密码提交到仓库。
+
+发布任务当前采用 JSON 文件 + 进程内互斥锁，部署约束是同一 `PUBLISH_JOBS_PATH` 只能由一个 API 进程写入；如扩为多实例，必须先迁移到带唯一约束和事务的共享数据库，不能让多个进程直接共写该文件。
 
 ## 脚本与测试
 
@@ -254,12 +262,14 @@ go test ./...
 
 推送到 `main` 会触发 `.github/workflows/deploy.yml`：
 
-1. 执行 `npm ci && npm test` 和 `cd api && go test ./...`，任何失败都会阻止部署。
+1. 执行 `npm ci && npm test`、隔离端口 Playwright 25 个功能场景、`cd api && go test ./...`，任何失败都会阻止部署；视觉基线只能用显式本地命令更新。
 2. 使用 Go 1.26 构建 `api/fbif-api`，并写入 `public/version.json`。
-3. 通过 rsync 同步 `public/`、API 二进制、Node `render-service/` 和声明式 Caddy vhost。
-4. 校验 `ADMIN_PASSWORD` 与 `RENDER_TOKEN` 等必填 secret，原子写入 API 环境文件。
-5. 运行 `caddy validate`；验证失败时恢复旧 vhost，不 reload 坏配置。
-6. 重启并检查 `fbif-api`、`fbif-render` systemd 服务，再 reload Caddy。
+3. 把 `public/`、API、render service、Caddy 与 env 同步进隔离 release；候选 env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
+4. 原子切换当前 release，验证 systemd、Caddy、公网 commit SHA、健康与鉴权，并用管理员鉴权的 `/api/publish/readiness` 检查 JSON store、显式 FoodTalks 目标、分类、渲染、飞书与双模型配置。
+5. 任何候选验收失败都恢复上一 release；验收成功后确认 release、关闭自动回滚，再把 pause 清零并重启 API。
+6. 解暂停后再次检查健康与 readiness。此时外部副作用可能恢复，只允许向前修复，不自动切回旧版制造重复发布。
+
+当前生产配置显式锁定 `FOODTALKS_EXPECTED_TARGET=test`；切换正式 FoodTalks 是单独的外部环境变更，必须同时更新 API、前台、后台 URL 与凭证后再通过 readiness。`FEISHU_REVIEWER_OPEN_IDS` 为空时卡片审核保持 fail-closed，管理员 HTTP 审核仍可用。
 
 生产规则后台密码变更流程：
 

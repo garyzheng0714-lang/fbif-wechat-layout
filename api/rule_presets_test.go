@@ -169,6 +169,15 @@ func TestRuleStoreV2MarksUnboundCustomRuleAsMigrationRequired(t *testing.T) {
 	if !legacy.MigrationRequired || !strings.Contains(legacy.MigrationNote, "无法推断") {
 		t.Fatalf("零绑定不得静默当作 FBIF 规则：%#v", legacy)
 	}
+	listed := legacyDocumentFromStore(doc)
+	for _, preset := range listed.Presets {
+		if preset.ID != "legacy-custom" {
+			continue
+		}
+		if preset.Config["font_size"] != "16" || preset.Config["heading_size"] != nil {
+			t.Fatalf("待迁移 preset 只能暴露原始 overrides，不得展开占位基线：%#v", preset.Config)
+		}
+	}
 	if err := store.writeStoreLocked(doc); err != nil {
 		t.Fatalf("回写迁移后规则库：%v", err)
 	}
@@ -281,7 +290,7 @@ func TestRuleStoreV2UnboundRuleCanBindOnlyAfterExplicitBaselineSave(t *testing.T
 	raw := `{
 		"schema_version":2,
 		"accounts":{},
-		"rules":{"legacy-custom":{"id":"legacy-custom","name":"旧规则","versions":[{"version":1,"config":{"text_color":"#123456"}}]}}
+		"rules":{"legacy-custom":{"id":"legacy-custom","name":"旧规则","versions":[{"version":1,"config":{"text_color":"#123456"},"behavior":{"author_regex":"^署名[：:]"}}]}}
 	}`
 	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
 		t.Fatal(err)
@@ -290,9 +299,17 @@ func TestRuleStoreV2UnboundRuleCanBindOnlyAfterExplicitBaselineSave(t *testing.T
 	if _, err := store.setActiveForAccount(foodTalksSiteRuleAccountID, "legacy-custom"); err == nil || !strings.Contains(err.Error(), "先确认历史基线") {
 		t.Fatalf("未确认基线前不得绑定，实际 err=%v", err)
 	}
+	if _, err := store.upsert(rulePreset{
+		ID: "legacy-custom", Name: "旧规则", BaselineID: foodTalksSiteDefaultRulePresetID,
+		Config: map[string]any{"text_color": "#deadbe"},
+	}); err == nil || !strings.Contains(err.Error(), "尚未确认历史基线") {
+		t.Fatalf("仅传 baseline_id 不算人工确认，实际 err=%v", err)
+	}
 	doc, err := store.upsert(rulePreset{
 		ID: "legacy-custom", Name: "旧规则", BaselineID: foodTalksSiteDefaultRulePresetID,
-		Config: map[string]any{"text_color": "#123456"},
+		MigrationConfirmed: true,
+		Config:             map[string]any{"text_color": "#deadbe"},
+		Behavior:           map[string]any{"author_regex": "^CLIENT-WRONG$"},
 	})
 	if err != nil {
 		t.Fatalf("显式选择网站 baseline 应能完成迁移：%v", err)
@@ -306,6 +323,9 @@ func TestRuleStoreV2UnboundRuleCanBindOnlyAfterExplicitBaselineSave(t *testing.T
 	}
 	if migrated.MigrationRequired || migrated.BaselineID != foodTalksSiteDefaultRulePresetID {
 		t.Fatalf("显式保存后应解除迁移标记：%#v", migrated)
+	}
+	if migrated.Config["text_color"] != "#123456" || migrated.Behavior["author_regex"] != "^署名[：:]" {
+		t.Fatalf("首次确认必须用原始 overrides 重建，不得信任客户端已展开值：%#v", migrated)
 	}
 	if _, err := store.setActiveForAccount(foodTalksSiteRuleAccountID, "legacy-custom"); err != nil {
 		t.Fatalf("完成迁移后应允许绑定：%v", err)

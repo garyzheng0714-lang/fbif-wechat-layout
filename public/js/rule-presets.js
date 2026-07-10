@@ -9,6 +9,7 @@ import {
   normalizeMoreArticleDefaultCards,
 } from './more-articles-config.js';
 import { isValidMoreArticleUrl } from './more-articles-meta.js';
+import { RULE_PACKS } from './rule-packs/registry.js';
 export {
   DEFAULT_RULE_CONFIG,
   FIELD_BY_KEY,
@@ -26,6 +27,7 @@ import {
 } from './rule-document.js';
 
 const LOCAL_CONFIG_KEY = 'config_fbif';
+const LOCAL_PRESET_KEY_PREFIX = 'active_rule_fallback_v1::';
 const DEFAULT_RULE_ACCOUNT_ID = 'fbif';
 const LEGACY_FOOTER_KEY = 'footer_enabled';
 const LEGACY_SKIP_UPLOAD_KEY = 'skip_upload';
@@ -54,6 +56,10 @@ function localConfigKey(accountID) {
   return id === DEFAULT_RULE_ACCOUNT_ID ? LOCAL_CONFIG_KEY : 'config_' + id;
 }
 
+function localPresetKey(accountID) {
+  return LOCAL_PRESET_KEY_PREFIX + normalizeAccountID(accountID);
+}
+
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -61,6 +67,40 @@ function isPlainObject(value) {
 function clonePlain(value) {
   if (!isPlainObject(value) && !Array.isArray(value)) return value;
   try { return JSON.parse(JSON.stringify(value)); } catch { return value; }
+}
+
+function ruleFamilyForIdentity(identity = {}) {
+  const explicit = String(identity.rule_family || identity.ruleFamily || '').trim();
+  if (explicit) return explicit;
+  const rawAccountID = identity.rule_account_id || identity.account_id || identity.accountID;
+  if (rawAccountID) {
+    const accountID = normalizeAccountID(rawAccountID);
+    if (RULE_PACKS[accountID] && RULE_PACKS[accountID].templateId) return RULE_PACKS[accountID].templateId;
+  }
+  const baselineID = String(identity.baseline_id || identity.baselineId || '').trim();
+  if (baselineID) {
+    const pack = Object.values(RULE_PACKS).find(candidate => candidate.defaultPresetId === baselineID);
+    if (pack && pack.templateId) return pack.templateId;
+  }
+  return 'fbif';
+}
+
+function usesWebsiteRuleSchema(identity = {}) {
+  return ruleFamilyForIdentity(identity) === 'foodtalks-site';
+}
+
+function usesIndependentRuleSchema(identity = {}) {
+  return ruleFamilyForIdentity(identity) !== 'fbif';
+}
+
+// FoodTalks 网站 behavior 是独立 schema（顶层 *_regex + lists + params），
+// 绝不能经过公众号 normalizeRuleBehavior，否则会裁掉网站字段并
+// 注入 Mote actions。公众号路径仍保留原 normalizer 的补默认/校验语义。
+export function normalizeRuleBehaviorForRule(raw, identity = {}) {
+  if (usesIndependentRuleSchema(identity)) {
+    return isPlainObject(raw) ? clonePlain(raw) : {};
+  }
+  return normalizeRuleBehavior(raw);
 }
 
 function withStructuredRuleConfig(config, normalized = normalizeRuleConfig(config)) {
@@ -73,6 +113,46 @@ function withStructuredRuleConfig(config, normalized = normalizeRuleConfig(confi
   if (isPlainObject(source) && isPlainObject(source.modules)) out.modules = clonePlain(source.modules);
   if (isPlainObject(source) && isPlainObject(source.image)) out.image = clonePlain(source.image);
   return out;
+}
+
+// 网站规则还有未进公众号参数表的顶层字段（tip_*/author_*）。
+// 它们已由 Go 服务端白名单校验，前端必须保留；已知公共字段仍用
+// normalizeRuleConfig 做范围/颜色归一。rawSource 用于后台预览：原规则保留网站字段，
+// 当前可视化表单 config 覆盖已知公共字段。
+export function normalizeRuleConfigForRule(config, identity = {}, rawSource = config) {
+  const normalized = withStructuredRuleConfig(config);
+  if (!usesIndependentRuleSchema(identity)) return normalized;
+  const source = isPlainObject(rawSource && rawSource.raw_config)
+    ? rawSource.raw_config
+    : (isPlainObject(rawSource && rawSource.config) ? rawSource.config : rawSource);
+  const preserved = isPlainObject(source) ? clonePlain(source) : {};
+  const out = { ...preserved, ...normalized };
+  if (isPlainObject(preserved.modules)) out.modules = preserved.modules;
+  if (isPlainObject(preserved.image)) out.image = preserved.image;
+  return out;
+}
+
+function websiteRuleConfigFallback(accountID) {
+  const config = {
+    tip_title_color: '#01396a',
+    tip_body_color: '#7f7f7f',
+    author_font_size: '14',
+    tip_font_size: '14',
+    image: { width: 600, portrait_px: 375, landscape_px: 600, qr_px: 150, qr_max_natural_px: 500 },
+    modules: {
+      mctoc: { enabled: false },
+      bottom_blocks: { schema_version: 2, enabled: false, presets: [] },
+      article_footer_defaults: { schema_version: 1, enabled: false, author_aliases: {}, profiles: [] },
+    },
+  };
+  if (accountID === 'ft-series') Object.assign(config, { text_color: '#333333', muted_color: '#7f7f7f', footer_note_color: '#7f7f7f', table_border_color: '#7f7f7f' });
+  return config;
+}
+
+function websiteBehaviorFallback(accountID) {
+  return accountID === 'ft-series'
+    ? { params: { site_variant: { type: 'string', default: 'ft-series' } } }
+    : {};
 }
 
 function readableMoreArticlesKey(key) {
@@ -352,14 +432,14 @@ export function getRuleBoolean(config, key) {
 
 export function getActiveRuleConfig() {
   if (typeof window !== 'undefined' && window._activeConfig && window._activeConfig.config) {
-    return normalizeRuleConfig(window._activeConfig.config);
+    return normalizeRuleConfigForRule(window._activeConfig.config, window._activeConfig.preset || {});
   }
   return normalizeRuleConfig(DEFAULT_RULE_CONFIG);
 }
 
 export function getActiveRuleBehavior() {
   if (typeof window !== 'undefined' && window._activeConfig && window._activeConfig.behavior) {
-    return normalizeRuleBehavior(window._activeConfig.behavior);
+    return normalizeRuleBehaviorForRule(window._activeConfig.behavior, window._activeConfig.preset || {});
   }
   return normalizeRuleBehavior(DEFAULT_BEHAVIOR);
 }
@@ -388,13 +468,22 @@ export function loadLocalRuleConfig(accountID = DEFAULT_RULE_ACCOUNT_ID) {
       }
     }
   }
-  return withStructuredRuleConfig(raw);
+  if (usesWebsiteRuleSchema({ rule_account_id: account })) {
+    const fallback = websiteRuleConfigFallback(account);
+    raw = {
+      ...fallback,
+      ...raw,
+      image: { ...fallback.image, ...(isPlainObject(raw.image) ? raw.image : {}) },
+      modules: { ...fallback.modules, ...(isPlainObject(raw.modules) ? raw.modules : {}) },
+    };
+  }
+  return normalizeRuleConfigForRule(raw, { rule_account_id: account });
 }
 
 export function saveLocalRuleConfig(config, accountID = DEFAULT_RULE_ACCOUNT_ID) {
-  const normalized = normalizeRuleConfig(config);
-  const stored = withStructuredRuleConfig(config, normalized);
   const account = normalizeAccountID(accountID);
+  const normalized = normalizeRuleConfig(config);
+  const stored = normalizeRuleConfigForRule(config, { rule_account_id: account });
   if (hasWindowStorage()) {
     try {
       window.localStorage.setItem(localConfigKey(account), JSON.stringify(stored));
@@ -407,12 +496,61 @@ export function saveLocalRuleConfig(config, accountID = DEFAULT_RULE_ACCOUNT_ID)
   return stored;
 }
 
+export function loadLocalRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) {
+  const account = normalizeAccountID(accountID);
+  let cached = {};
+  if (hasWindowStorage()) {
+    try { cached = JSON.parse(window.localStorage.getItem(localPresetKey(account)) || '{}') || {}; } catch { cached = {}; }
+  }
+  const identity = {
+    id: String(cached.id || 'local'),
+    name: String(cached.name || '本机设置'),
+    baseline_id: String(cached.baseline_id || ''),
+    rule_account_id: account,
+  };
+  const fallbackBehavior = usesWebsiteRuleSchema(identity)
+    ? websiteBehaviorFallback(account)
+    : (usesIndependentRuleSchema(identity) ? {} : DEFAULT_BEHAVIOR);
+  return {
+    ...identity,
+    config: loadLocalRuleConfig(account),
+    behavior: normalizeRuleBehaviorForRule(isPlainObject(cached.behavior) ? cached.behavior : fallbackBehavior, identity),
+  };
+}
+
+export function saveLocalRulePreset(preset, accountID = DEFAULT_RULE_ACCOUNT_ID) {
+  const account = normalizeAccountID(accountID);
+  const identity = { ...(preset || {}), rule_account_id: account };
+  const stored = {
+    id: String(identity.id || 'local'),
+    name: String(identity.name || '本机设置'),
+    baseline_id: String(identity.baseline_id || ''),
+    rule_account_id: account,
+    config: saveLocalRuleConfig(identity.config || {}, account),
+    behavior: normalizeRuleBehaviorForRule(identity.behavior, identity),
+  };
+  if (hasWindowStorage()) {
+    try {
+      window.localStorage.setItem(localPresetKey(account), JSON.stringify({
+        id: stored.id,
+        name: stored.name,
+        baseline_id: stored.baseline_id,
+        behavior: stored.behavior,
+      }));
+    } catch {}
+  }
+  return stored;
+}
+
 export function applyActiveRuleConfig(config, preset) {
-  const normalized = normalizeRuleConfig(config);
-  const rawConfig = isPlainObject(preset && preset.raw_config) ? preset.raw_config : config;
+  const identity = preset || {};
+  const rawConfig = isPlainObject(identity.raw_config)
+    ? identity.raw_config
+    : (usesIndependentRuleSchema(identity) && isPlainObject(identity.config) ? identity.config : config);
+  const normalized = normalizeRuleConfigForRule(config, identity, rawConfig);
   if (isPlainObject(rawConfig) && isPlainObject(rawConfig.modules)) normalized.modules = rawConfig.modules;
   if (isPlainObject(rawConfig) && isPlainObject(rawConfig.image)) normalized.image = rawConfig.image;
-  const behavior = normalizeRuleBehavior(preset && preset.behavior);
+  const behavior = normalizeRuleBehaviorForRule(preset && preset.behavior, preset || {});
   if (typeof window !== 'undefined') {
     window._activeConfig = { preset: preset || null, config: normalized, behavior };
     window._skipUpload = normalized.skip_upload === true;
@@ -430,12 +568,7 @@ async function parseJSONResponse(resp) {
 
 export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) {
   const account = normalizeAccountID(accountID);
-  const fallback = {
-    id: 'local',
-    name: '本机设置',
-    config: loadLocalRuleConfig(account),
-    behavior: normalizeRuleBehavior(DEFAULT_BEHAVIOR),
-  };
+  const fallback = loadLocalRulePreset(account);
   try {
     const resp = await fetchWithTimeout('/api/rules/active?account=' + encodeURIComponent(account), { cache: 'no-store' }, { timeoutMs: 10000, timeoutMessage: '规则加载超时' });
     const data = await parseJSONResponse(resp);
@@ -444,9 +577,10 @@ export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) 
       source: 'server',
       preset: {
         ...preset,
+        rule_account_id: account,
         raw_config: preset.config,
-        config: normalizeRuleConfig(preset.config),
-        behavior: normalizeRuleBehavior(preset.behavior),
+        config: normalizeRuleConfigForRule(preset.config, { ...preset, rule_account_id: account }),
+        behavior: normalizeRuleBehaviorForRule(preset.behavior, { ...preset, rule_account_id: account }),
       },
     };
   } catch (err) {
@@ -490,8 +624,8 @@ export async function saveRulePreset(password, preset) {
     headers: adminHeaders(password),
     body: JSON.stringify({
       ...preset,
-      config: withStructuredRuleConfig(preset.config),
-      behavior: normalizeRuleBehavior(preset.behavior),
+      config: normalizeRuleConfigForRule(preset.config, preset),
+      behavior: normalizeRuleBehaviorForRule(preset.behavior, preset),
     }),
   }, { timeoutMs: 10000 });
   return parseJSONResponse(resp);

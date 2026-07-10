@@ -20,9 +20,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -91,14 +93,23 @@ func registerPublishPreviewRoute(mux *http.ServeMux, store *publishJobStore) {
 			return
 		}
 		// 官方预览优先（2026-07-10 用户裁定「发布预览会有专门的预览链接」）：现铸
-		// 短期 token（每次点击新铸，永不过期失效）302 到 FoodTalks 官方预览页——网站
+		// 短期 token（每次点击都新铸，避免复用已过期 token）302 到 FoodTalks 官方预览页——网站
 		// 真实渲染，视觉保真度最高。铸造失败 / 草稿未进站 / ?local=1 → 本地预览页兜底
 		//（本地页仍展示 AI 参数全量，且不依赖 FoodTalks 可用性）。
 		if job.FoodTalksNewsID > 0 && r.URL.Query().Get("local") != "1" {
 			if ft, ferr := newFoodTalksClientFromEnv(); ferr == nil {
 				if tok, terr := ft.PreviewToken(r.Context(), job.FoodTalksNewsID); terr == nil {
-					http.Redirect(w, r, siteFrontURL()+"/preview/news/"+strconv.FormatInt(job.FoodTalksNewsID, 10)+"?token="+tok, http.StatusFound)
-					return
+					if target, targetErr := officialPublishPreviewURL(siteFrontURL(), job.FoodTalksNewsID, tok); targetErr == nil {
+						// 302 也必须禁 Referer：否则浏览器会把当前带 HMAC 签名的本地预览 URL
+						// 泄漏到 FoodTalks 访问日志。重定向本身也禁止缓存/索引。
+						w.Header().Set("Referrer-Policy", "no-referrer")
+						w.Header().Set("Cache-Control", "no-store")
+						w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+						http.Redirect(w, r, target, http.StatusFound)
+						return
+					} else {
+						log.Printf("publish: WARN 官方预览目标 URL 无效，回落本地预览页: %v", targetErr)
+					}
 				} else {
 					log.Printf("publish: WARN 官方预览 token 铸造失败，回落本地预览页: %v", terr)
 				}
@@ -112,6 +123,23 @@ func registerPublishPreviewRoute(mux *http.ServeMux, store *publishJobStore) {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Write([]byte(renderPublishPreviewHTML(job)))
 	})
+}
+
+func officialPublishPreviewURL(front string, newsID int64, token string) (string, error) {
+	base, err := url.Parse(strings.TrimSpace(front))
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
+		return "", fmt.Errorf("FoodTalks 前台 URL 无效")
+	}
+	if newsID <= 0 || strings.TrimSpace(token) == "" {
+		return "", fmt.Errorf("FoodTalks 官方预览缺 news id 或 token")
+	}
+	base.Path = strings.TrimRight(base.Path, "/") + "/preview/news/" + strconv.FormatInt(newsID, 10)
+	base.RawPath = ""
+	query := base.Query()
+	query.Set("token", token)
+	base.RawQuery = query.Encode()
+	base.Fragment = ""
+	return base.String(), nil
 }
 
 // renderPublishPreviewHTML 纯服务端拼页面。content_html 是流水线自产可信字节原样嵌入；

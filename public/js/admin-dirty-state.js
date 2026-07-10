@@ -1,5 +1,4 @@
-import { normalizeRuleConfig } from './rule-presets.js';
-import { DEFAULT_BEHAVIOR, normalizeRuleBehavior } from './rule-behavior.js';
+import { normalizeRuleConfig, normalizeRuleBehaviorForRule } from './rule-presets.js';
 import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
 import { assetLibraryFromPreset, defaultAssetLibraryData } from './admin-asset-data.js';
 import { bottomBlocksFromPreset } from './admin-block-data.js';
@@ -15,10 +14,12 @@ export function adminDirtyCount(state) {
   if ((state.workingName || '') !== (selected.name || '未命名规则')) n++;
   if ((state.workingDescription || '') !== (selected.description || '')) n++;
   if (!sameJSON(state.workingConfig, normalizeRuleConfig(oc))) n++;
-  if (!sameJSON(state.workingBehavior, normalizeRuleBehavior(selected.behavior || DEFAULT_BEHAVIOR))) n++;
+  const behaviorIdentity = { ...selected, rule_account_id: state.accountID };
+  if (!sameJSON(state.workingBehavior, normalizeRuleBehaviorForRule(selected.behavior, behaviorIdentity))) n++;
   if (!sameJSON(state.workingAssets || defaultAssetLibraryData(), assetLibraryFromPreset(selected))) n++;
   if (!sameJSON(state.workingBottomBlocks || EMPTY_BOTTOM_BLOCKS, bottomBlocksFromPreset(selected))) n++;
-  if (!sameJSON(state.workingArticleFooterDefaults || articleFooterDefaultsFromPreset(selected), articleFooterDefaultsFromPreset(selected))) n++;
+  const originalArticleFooterDefaults = articleFooterDefaultsFromPreset(selected);
+  if (!sameJSON(state.workingArticleFooterDefaults ?? originalArticleFooterDefaults, originalArticleFooterDefaults)) n++;
   if (state.isFtDefault && !sameJSON(state.workingFooter || defaultFooterData(), footerFromPreset(selected))) n++;
   return n;
 }

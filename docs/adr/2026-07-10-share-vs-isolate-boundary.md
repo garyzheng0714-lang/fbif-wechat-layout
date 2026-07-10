@@ -14,7 +14,7 @@
 |---|---|---|---|
 | **L1 中立能力层** | parser、docx-article-model、heading-detect、punctuation、blocks/block-render、blocks/rich-text-render、blocks/block-merge、asset-library、templates/shared/table-renderer | **全渠道共用** | 纯算法，与「发布到哪」无关。渠道差异**只允许以参数注入**（scope、renderer 表、cmsSurvival 开关）；文件里出现任何账号/渠道字符串字面量即违规 |
 | **L2 渲染器层** | templates/fbif.js、foodtalks-site.js、foodtalks-series.js、mp-blocks.js、site-blocks.js | **按渠道物理隔离** | 视觉真值来自**各发布平台的已发布成品**（微信编辑器清洗规则 ≠ FoodTalks CMS 清洗规则 ≠ 系列满宽口径），真值源不同就永远不能共享实现。渲染器之间禁止互相 import；共性只能下沉到 L1 且必须参数化（table-renderer 是范本） |
-| **L3 规则数据层** | api/rule_defaults.go 各账号 config/behavior、/api/rules/* 服务端预设 | **按账号配置，显式继承** | 数据可以像（如 WowFood 继承 FBIF 行为），但**每一处继承必须是显式声明**；「不写就默认继承 FBIF 基线」是本项目串台 bug 的头号来源（mergeRuleDefaults 已为此打了 5 处定点补丁） |
+| **L3 规则数据层** | api/rule_defaults.go 各账号 config/behavior、/api/rules/* 服务端预设 | **按账号配置，显式继承** | 数据可以像（如 WowFood 继承 FBIF 行为），但**每一处继承必须是显式声明**；规则库 schema v3 用受限 `baseline_id` 指向已登记的内置基线，保存与启动期都会拒绝缺失/未知基线；「不写就默认继承 FBIF」已禁止 |
 | **L4 交互语言层** | block-panel（mountBlockPanel）、账号菜单、编辑器外壳、拖拽排序 | **全渠道统一** | 用户的操作心智模型必须一处学会到处适用（2026-07-02 用户裁定网站与公众号共用同一套区块交互语言）。差异只允许出现在「面板里列出哪些块」（数据），不允许出现在「面板怎么操作」（交互） |
 
 ## 新功能落层决策流程
@@ -36,7 +36,7 @@
 
 ## 边界靠什么强制（按强度排序，弱的要补强）
 
-1. 机器强制（最强）：registry.js/block-registry.gen.js 生成 + 启动期逐字节校验；DefaultPresetID 挂链启动校验（2026-07-10 新增）。
+1. 机器强制（最强）：registry.js/block-registry.gen.js 生成 + 启动期逐字节校验；DefaultPresetID 挂链校验；规则库 schema v3 `baseline_id` 的保存/启动校验（v1/v2 存量自建规则一次性标记为历史 `default` 基线）。
 2. 架构强制：L1 依赖注入（不 import 渲染器）；渲染器零互相 import。
 3. 测试强制：golden/fidelity/parity/draft-survival 套件 + CI 测试门禁（2026-07-10 起测试不过不部署）。
 4. 文档纪律（最弱，只作提醒）：CLAUDE.md 红线 + 文件头注释。新契约优先往 1–3 沉，不要停在 4。

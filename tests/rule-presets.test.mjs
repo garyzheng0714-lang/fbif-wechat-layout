@@ -8,10 +8,12 @@ import {
   listPublicRulePresets,
   loadActiveRulePreset,
   loadLocalRuleConfig,
+  loadLocalRulePreset,
   normalizeRuleConfig,
   parseRuleConfigDocument,
   saveRulePreset,
   saveLocalRuleConfig,
+  saveLocalRulePreset,
   setActiveRulePreset,
   validateRuleConfigDocument,
   validateRuleConfig,
@@ -373,6 +375,37 @@ test('local fallback preserves structured footer modules', () => {
   }
 });
 
+test('网站 server fallback 在离线时保留 preset 身份与自定义 behavior', () => {
+  const store = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem(key) { return store.has(key) ? store.get(key) : null; },
+      setItem(key, value) { store.set(key, String(value)); },
+    },
+  };
+  const behavior = {
+    author_regex: '^署名[：:]',
+    lists: { wechat_trailer_markers: ['网站自定义尾标'] },
+  };
+  try {
+    saveLocalRulePreset({
+      id: 'website-custom',
+      name: '网站自定义',
+      baseline_id: 'ft-default-v1',
+      config: { tip_title_color: '#123456' },
+      behavior,
+    }, 'ft-default');
+    const local = loadLocalRulePreset('ft-default');
+    assert.equal(local.id, 'website-custom');
+    assert.equal(local.baseline_id, 'ft-default-v1');
+    assert.equal(local.config.tip_title_color, '#123456');
+    assert.deepEqual(local.behavior, behavior);
+    assert.equal(local.behavior.actions, undefined);
+  } finally {
+    delete globalThis.window;
+  }
+});
+
 test('local fallback restores skip-upload after bad migration', () => {
   const store = new Map([
     ['config_fbif', JSON.stringify({ skip_upload: false })],
@@ -453,6 +486,69 @@ test('active rule fetch includes the selected account id', async () => {
   }
 });
 
+test('ft-default active rule preserves raw website behavior through load and apply', async () => {
+  const websiteBehavior = {
+    author_regex: '^\\s*署名[：:]\\s*',
+    tip_regex: '^\\s*网站提示[：:]',
+    lists: { wechat_trailer_markers: ['网站自定义尾标'] },
+    params: { site_variant: { type: 'string', default: 'ft-default' } },
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        preset: {
+          id: 'website-custom',
+          baseline_id: 'ft-default-v1',
+          config: { ...DEFAULT_RULE_CONFIG, tip_title_color: '#112233', author_font_size: '16' },
+          behavior: websiteBehavior,
+        },
+      };
+    },
+  });
+  globalThis.window = { localStorage: { getItem() { return null; }, setItem() {} } };
+
+  try {
+    const loaded = await loadActiveRulePreset('ft-default');
+    assert.deepEqual(loaded.preset.behavior, websiteBehavior, '网站 behavior 加载时必须原样保留');
+    assert.equal(loaded.preset.config.tip_title_color, '#112233', '网站专属顶层 config 不得被公众号 schema 裁掉');
+    assert.equal(loaded.preset.rule_account_id, 'ft-default');
+    applyActiveRuleConfig(loaded.preset.config, loaded.preset);
+    assert.deepEqual(window._activeConfig.behavior, websiteBehavior, '网站 behavior 应原样灌入 site.html');
+    assert.equal(window._activeConfig.config.author_font_size, '16');
+    assert.equal(window._activeConfig.behavior.actions, undefined, '不得注入公众号 Mote actions');
+  } finally {
+    delete globalThis.fetch;
+    delete globalThis.window;
+  }
+});
+
+test('FoodTalks 系列 load/apply 保留独立 behavior schema，不注入 FBIF Mote 动作', async () => {
+  const behavior = {
+    params: { level1_regex: { type: 'string', default: '^第[一二三]章' } },
+    templates: { recommended_reading_note: '系列自定义说明' },
+    lists: { image_caption_keywords: ['系列图源'] },
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    async json() {
+      return { preset: { id: 'series-custom', baseline_id: 'foodtalks-series-default', rule_family: 'foodtalks-series', config: { heading_color: '#02396b' }, behavior } };
+    },
+  });
+  globalThis.window = { localStorage: { getItem() { return null; }, setItem() {} } };
+  try {
+    const loaded = await loadActiveRulePreset('foodtalks-series');
+    assert.deepEqual(loaded.preset.behavior, behavior);
+    assert.equal(loaded.preset.config.heading_color, '#02396b');
+    applyActiveRuleConfig(loaded.preset.config, loaded.preset);
+    assert.deepEqual(window._activeConfig.behavior, behavior);
+    assert.equal(window._activeConfig.behavior.actions, undefined);
+  } finally {
+    delete globalThis.fetch;
+    delete globalThis.window;
+  }
+});
+
 test('active rule fallback includes default behavior', async () => {
   const originalWarn = console.warn;
   console.warn = () => {};
@@ -467,7 +563,7 @@ test('active rule fallback includes default behavior', async () => {
   };
 
   try {
-    const loaded = await loadActiveRulePreset('foodtalks-series');
+    const loaded = await loadActiveRulePreset('fbif');
     assert.equal(loaded.source, 'local');
     assert.equal(loaded.preset.behavior.templates.author_line, DEFAULT_BEHAVIOR.templates.author_line);
   } finally {
@@ -475,6 +571,49 @@ test('active rule fallback includes default behavior', async () => {
     delete globalThis.fetch;
     delete globalThis.window;
   }
+});
+
+test('ft-default offline fallback uses website behavior defaults, never FBIF actions', async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  globalThis.fetch = async () => { throw new Error('offline'); };
+  globalThis.window = { localStorage: { getItem() { return null; }, setItem() {} } };
+  try {
+    const loaded = await loadActiveRulePreset('ft-default');
+    assert.equal(loaded.source, 'local');
+    assert.deepEqual(loaded.preset.behavior, {}, '网站模板的自有常量才是离线 behavior 基线');
+    assert.equal(loaded.preset.behavior.actions, undefined, '离线网站不得注入公众号 Mote actions');
+  } finally {
+    console.warn = originalWarn;
+    delete globalThis.fetch;
+    delete globalThis.window;
+  }
+});
+
+test('FoodTalks 系列首次离线 fallback 不注入 FBIF behavior', async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  globalThis.fetch = async () => { throw new Error('offline'); };
+  globalThis.window = { localStorage: { getItem() { return null; }, setItem() {} } };
+  try {
+    const loaded = await loadActiveRulePreset('foodtalks-series');
+    assert.deepEqual(loaded.preset.behavior, {});
+    assert.equal(loaded.preset.behavior.actions, undefined);
+  } finally {
+    console.warn = originalWarn;
+    delete globalThis.fetch;
+    delete globalThis.window;
+  }
+});
+
+test('ft-default first-run local config is website default, not FBIF footer baseline', () => {
+  delete globalThis.window;
+  const config = loadLocalRuleConfig('ft-default');
+  assert.equal(config.tip_title_color, '#01396a');
+  assert.equal(config.image.width, 600);
+  assert.equal(config.modules.mctoc.enabled, false);
+  assert.equal(config.modules.bottom_blocks.enabled, false);
+  assert.equal(config.modules.article_footer_defaults.enabled, false);
 });
 
 test('applyActiveRuleConfig stores active behavior for renderers', () => {
@@ -549,7 +688,7 @@ test('admin preset save preserves structured modules', async () => {
     await saveRulePreset('secret', {
       id: 'structured-save',
       name: '结构化保存',
-	  baseline_id: 'ft-default-v1',
+      baseline_id: 'ft-default-v1',
       config: {
         ...DEFAULT_RULE_CONFIG,
         modules: {
@@ -561,11 +700,38 @@ test('admin preset save preserves structured modules', async () => {
           },
         },
       },
-      behavior: DEFAULT_BEHAVIOR,
+      behavior: {
+        author_regex: '^\\s*署名[：:]\\s*',
+        lists: { wechat_trailer_markers: ['网站自定义尾标'] },
+      },
     });
     const body = JSON.parse(calls[0].options.body);
-	assert.equal(body.baseline_id, 'ft-default-v1', '显式规则基线必须透传到保存 API');
+    assert.equal(body.baseline_id, 'ft-default-v1', '显式规则基线必须透传到保存 API');
+    assert.equal(body.behavior.author_regex, '^\\s*署名[：:]\\s*');
+    assert.deepEqual(body.behavior.lists.wechat_trailer_markers, ['网站自定义尾标']);
+    assert.equal(body.behavior.actions, undefined, '保存网站规则不得注入公众号 actions');
     assert.equal(body.config.modules.article_footer_defaults.enabled, false);
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test('保存 FoodTalks 系列 preset 原样发送独立 behavior，不注入 Mote', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+  const behavior = { params: { level1_regex: { type: 'string', default: '^章节' } }, lists: { image_caption_keywords: ['图源'] } };
+  try {
+    await saveRulePreset('secret', {
+      id: 'series-custom', name: '系列自定义', baseline_id: 'foodtalks-series-default',
+      config: { heading_color: '#02396b' }, behavior,
+    });
+    const body = JSON.parse(calls[0].options.body);
+    assert.deepEqual(body.behavior, behavior);
+    assert.equal(body.behavior.actions, undefined);
+    assert.equal(body.config.heading_color, '#02396b');
   } finally {
     delete globalThis.fetch;
   }

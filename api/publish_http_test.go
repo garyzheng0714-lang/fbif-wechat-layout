@@ -42,6 +42,7 @@ func TestPublishEndpointsRequireAdminPassword(t *testing.T) {
 	mux := newPublishTestMux(t, env)
 	cases := []struct{ method, target, body string }{
 		{http.MethodPost, "/api/publish/site-sync", `{"url":"https://mp.weixin.qq.com/s/x"}`},
+		{http.MethodGet, "/api/publish/readiness", ""},
 		{http.MethodGet, "/api/publish/jobs", ""},
 		{http.MethodGet, "/api/publish/jobs/1", ""},
 		{http.MethodPost, "/api/publish/jobs/1/review", `{"action":"approve"}`},
