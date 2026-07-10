@@ -76,6 +76,8 @@ type publishPipeline struct {
 	foodTalks func() (foodTalksAPI, error)
 	// notify 人审群通知；nil 或返回错误都不阻断流水线——人可以查任务列表，通知只是加速器
 	notify func(ctx context.Context, text string) error
+	// notifyCard 审核交互卡片发送（M4）；nil 或失败降级回 notify 文本，同样不阻断流水线
+	notifyCard func(ctx context.Context, card map[string]any) error
 	// spawn 异步推进入口（生产 go routine；测试注入同步执行保证确定性）
 	spawn func(func())
 	now   func() time.Time
@@ -97,6 +99,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 	}
 	if n := newFeishuNotifierFromEnv(); n != nil {
 		p.notify = n.send
+		p.notifyCard = n.sendCard
 	} else {
 		log.Printf("publish: 飞书通知未配置（需 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_REVIEW_CHAT_ID），审核群通知禁用")
 	}
@@ -445,18 +448,32 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 			return err
 		}
 	}
-	if _, err := p.store.update(job.ID, func(j *publishJob) {
+	updated, err := p.store.update(job.ID, func(j *publishJob) {
 		j.FoodTalksNewsID = newsID
 		j.Stage = publishStageAwaitingReview
 		j.FailedStage = ""
 		j.Error = ""
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	p.notifyReviewPending(ctx, updated)
+	return nil
+}
+
+// notifyReviewPending 待审核通知：优先发交互审核卡（点按钮即 approve/reject），
+// 卡片未装配或发送失败降级回原有文本通知（M4 铁律：降级保底，通知永不阻断流水线）。
+func (p *publishPipeline) notifyReviewPending(ctx context.Context, job publishJob) {
+	if p.notifyCard != nil {
+		err := p.notifyCard(ctx, buildReviewPendingCard(job))
+		if err == nil {
+			return
+		}
+		log.Printf("publish: 审核卡片发送失败，降级文本通知: %v", err)
 	}
 	p.notifyReview(ctx, fmt.Sprintf(
 		"【网站同步】待审核\n标题：%s\n原文：%s\n草稿已进站（外界不可见），FoodTalks 资讯 ID：%d\n请对发布任务 #%d 操作通过或驳回",
-		job.Title, job.SourceURL, newsID, job.ID))
-	return nil
+		job.Title, job.SourceURL, job.FoodTalksNewsID, job.ID))
 }
 
 // stagePublicize 翻公开：PUT 全量覆盖语义（契约 §7）——用与 staging 同一个 buildSiteNews
@@ -492,20 +509,30 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 	return nil
 }
 
-// review 人审动作。approve 触发唯一不可逆的公开动作（权限门禁在 API 层：ADMIN_PASSWORD）；
+// review 人审动作核心：HTTP 端点（ADMIN_PASSWORD 门）与飞书卡片回调（verification
+// token 门）共用这一个函数——审核语义与权限红线只在这里定义一次：仅 awaiting_review
+// 可操作，approve 是触发翻公开的唯一路径。reviewedBy 是审核人留痕（卡片回调传
+// operator.open_id，HTTP 端点传空），落 reviewed_by/reviewed_at 进终态卡与任务存储。
 // reject 置终态 rejected——文章留在 FoodTalks 草稿态本就不可见，不额外动它，
 // 且终态校验保证 reject 后不可再 approve。
-func (p *publishPipeline) review(ctx context.Context, jobID int64, action string) (publishJob, error) {
+func (p *publishPipeline) review(ctx context.Context, jobID int64, action, reviewedBy string) (publishJob, error) {
 	job, err := p.store.byID(jobID)
 	if err != nil {
 		return publishJob{}, err
 	}
+	reviewedAt := p.now().UTC().Format(time.RFC3339)
 	switch action {
 	case publishReviewApprove:
 		if job.Stage != publishStageAwaitingReview || job.FoodTalksNewsID == 0 {
 			return job, fmt.Errorf("任务当前阶段（%s）无法通过：仅待审核且草稿已进站的任务可发布", job.Stage)
 		}
-		if _, err := p.store.setStage(jobID, publishStagePublicizing); err != nil {
+		if _, err := p.store.update(jobID, func(j *publishJob) {
+			j.Stage = publishStagePublicizing
+			j.FailedStage = ""
+			j.Error = ""
+			j.ReviewedBy = reviewedBy
+			j.ReviewedAt = reviewedAt
+		}); err != nil {
 			return job, err
 		}
 		job.Stage = publishStagePublicizing
@@ -524,7 +551,13 @@ func (p *publishPipeline) review(ctx context.Context, jobID int64, action string
 		if job.Stage != publishStageAwaitingReview {
 			return job, fmt.Errorf("任务当前阶段（%s）无法驳回：仅待审核任务可驳回", job.Stage)
 		}
-		if _, err := p.store.setStage(jobID, publishStageRejected); err != nil {
+		if _, err := p.store.update(jobID, func(j *publishJob) {
+			j.Stage = publishStageRejected
+			j.FailedStage = ""
+			j.Error = ""
+			j.ReviewedBy = reviewedBy
+			j.ReviewedAt = reviewedAt
+		}); err != nil {
 			return job, err
 		}
 		p.notifyReview(ctx, fmt.Sprintf("【网站同步】已驳回\n标题：%s\n文章留在 FoodTalks 草稿态，不对外可见", job.Title))

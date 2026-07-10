@@ -49,6 +49,8 @@ type publishJob struct {
 	ImageMap        string `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
 	FoodTalksNewsID int64  `json:"foodtalks_news_id,omitempty"`
 	ArticleURL      string `json:"article_url,omitempty"`
+	ReviewedBy      string `json:"reviewed_by,omitempty"` // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
+	ReviewedAt      string `json:"reviewed_at,omitempty"` // 审核时刻（RFC3339 UTC）
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }

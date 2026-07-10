@@ -86,7 +86,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			writeError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		job, err := p.review(r.Context(), id, req.Action)
+		// reviewedBy 传空：ADMIN_PASSWORD 门后没有个人身份；飞书卡片回调侧传 operator.open_id。
+		job, err := p.review(r.Context(), id, req.Action, "")
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": job})
 			return

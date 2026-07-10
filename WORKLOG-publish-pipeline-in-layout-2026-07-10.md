@@ -86,6 +86,15 @@ created → fetching → rendering → mirroring → staging → awaiting_review
 - **审核人身份**：operator.open_id 落 job（新字段 reviewed_by/reviewed_at），留痕进终态卡。
 - **外部配置**（代码上线后）：开放平台应用后台「事件与回调」配回调地址 `https://fbifmp-layout.foodtalks.cn/api/feishu/card-callback` + 订阅 card.action.trigger + 取 Verification Token 回填 publish.env。Caddy /api/* 已通配转 9001，无需改配置。
 
+### M4 实施（2026-07-10 完成；`cd api && go test ./...` 全绿 + 根 `npm test` 792 全绿 + 新文件 gofmt 干净 + public/ 零字节改动）
+- **文件**：新增 `api/feishu_review_card.go`（pending 蓝卡 + done 绿/红终态卡构建）、`api/feishu_card_callback.go`（`POST /api/feishu/card-callback`：challenge 握手 / verification token 校验 / card.action.trigger → review 核心）、`api/feishu_card_callback_test.go`（7 个新测试）；改 `api/publish_jobs.go`（+reviewed_by/reviewed_at）、`api/publish_pipeline.go`（review 核心加 reviewedBy 参数落留痕；+notifyCard 依赖；staging 通知位点升级 notifyReviewPending：卡片优先、失败降级文本）、`api/feishu_notify.go`（抽 sendMessage 内核 + sendCard interactive）、`api/publish_http.go`（review 调用传 reviewedBy=""）、`api/main.go`（注册回调路由）。
+- **review 核心归一**：HTTP 端点与卡片回调共用 `publishPipeline.review(ctx, id, action, reviewedBy)` 一个函数——仅 awaiting_review 可操作、approve 仍是翻公开唯一路径；红线测试（ftStub forbidPublish 守卫 + TestPublishNoPublicizeWithoutApprove）继续全绿。
+- **卡片契约**（cardkit 红线，TestReviewPendingCardContract 字符串断言锁死）：schema 2.0 + update_multi；无 emoji；「通过并发布」primary_filled+done_outlined+confirm（文案明说不可逆）、「驳回」danger+confirm（照规范 03 §9 权威示例不带 icon）、「查看原文」default+preview_outlined open_url；横排按钮 column_set（schema 2.0 禁 action/note）；终态卡 person capsule 留痕（HTTP 审核无 open_id 时退化「经管理后台」纯文本）。
+- **回调安全模型**：无 ADMIN_PASSWORD 门（飞书服务器调用）；FEISHU_VERIFICATION_TOKEN 比对（url_verification 顶层 token / 事件 header.token 双形态），不匹配 401；未配置 WARN 放行（仅首次配置窗口，配好必须回填 publish.env）；业务性失败（任务不存在/已被处理）回 200+toast 防飞书重试轰炸；防重复点击：终态回「已被处理」+当前终态卡（update_multi 群内旧卡一并刷新）；非终态非待审（failed/publicizing 半途）只回 toast 指路管理后台、不动卡片。
+- **实施决策**：① 卡片发送成功不再发文本（同一事件不双通知），失败才降级——测试锁定；② published/rejected 既有文本通知位点保留（HTTP 审核路径的既有能力，卡片回调场景终态卡已原地刷新）；③ job_id 回传兼容数字/字符串两种 JSON 形态（coerceFeishuJobID）。
+- **⚠️ 与下方「预览链接」裁定的衔接（后到的裁定，尚未实施）**：当前卡片第三键是「查看原文」（本次开工时 M4 钉死稿）；预览页（`/preview/publish/{id}?t=HMAC`）落地时需把该键换成「预览效果」并把原文链接移入卡片正文行——单点改 `buildReviewPendingCard`，回调与安全模型不受影响。
+- [ ] 开放平台外部配置（用户照做，见上方「外部配置」行）
+
 ### 预览链接（2026-07-10 用户裁定：审核必须给未上架的预览链接，不能盲审）
 - 排版工具自己出预览页：`GET /preview/publish/{id}?t=<HMAC 签名>`——渲染 job 的 content_html（就是将要发布的字节）+ 标题 + AI 预填参数（封面/摘要/标签/作者）侧栏 + 顶部醒目横幅「预览 · 未发布」。白底、680px 内容宽度近似 FoodTalks 前台阅读版式。
 - 签名：`t = hex(HMAC-SHA256(ADMIN_PASSWORD, "publish-preview:" + id))`——免登录可分享给审核人，但不可遍历、不可伪造；未发布内容不裸奔。

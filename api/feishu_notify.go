@@ -55,18 +55,33 @@ func newFeishuNotifierFromEnv() *feishuNotifier {
 
 // send 发一条群文本。所有错误都由调用方降级为 WARN 日志（施工图钉死：通知失败不 fail job）。
 func (n *feishuNotifier) send(ctx context.Context, text string) error {
-	token, err := n.tenantAccessToken(ctx)
-	if err != nil {
-		return err
-	}
 	content, err := json.Marshal(map[string]string{"text": text})
 	if err != nil {
 		return fmt.Errorf("feishu: 序列化消息内容: %w", err)
 	}
+	return n.sendMessage(ctx, "text", string(content))
+}
+
+// sendCard 发一张 interactive 卡片（M4：审核卡）。content 是卡片 JSON 对象本体；
+// 构建/发送失败由调用方降级回文本通知，卡片永远不是发布流水线的闸门。
+func (n *feishuNotifier) sendCard(ctx context.Context, card map[string]any) error {
+	content, err := json.Marshal(card)
+	if err != nil {
+		return fmt.Errorf("feishu: 序列化卡片: %w", err)
+	}
+	return n.sendMessage(ctx, "interactive", string(content))
+}
+
+// sendMessage 发送内核：text 与 interactive 共用同一条 im/v1/messages 通道。
+func (n *feishuNotifier) sendMessage(ctx context.Context, msgType, content string) error {
+	token, err := n.tenantAccessToken(ctx)
+	if err != nil {
+		return err
+	}
 	body, err := json.Marshal(map[string]string{
 		"receive_id": n.chatID,
-		"msg_type":   "text",
-		"content":    string(content),
+		"msg_type":   msgType,
+		"content":    content,
 	})
 	if err != nil {
 		return fmt.Errorf("feishu: 序列化请求体: %w", err)

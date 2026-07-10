@@ -117,7 +117,11 @@ func main() {
 	// 发布流水线（公众号 → FoodTalks 网站）：JSON 任务存储 + 状态机 + 人审端点。
 	// 权限复用规则后台 ADMIN_PASSWORD 门；翻公开只能由 review approve 触发（用户红线）。
 	publishStore := newPublishJobStore(publishJobsPath(*rulesPath))
-	registerPublishRoutes(mux, newPublishPipeline(publishStore, ruleStore))
+	publishPipe := newPublishPipeline(publishStore, ruleStore)
+	registerPublishRoutes(mux, publishPipe)
+	// 飞书卡片审核回调（M4）：飞书服务器调用，无 ADMIN_PASSWORD 门，安全靠
+	// FEISHU_VERIFICATION_TOKEN 校验 + review 核心的业务态校验（见 feishu_card_callback.go）。
+	registerFeishuCardCallbackRoute(mux, publishPipe)
 
 	// Kick off the in-memory image cache GC loop
 	startDocImageCacheGC()

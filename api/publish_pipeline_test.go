@@ -239,7 +239,7 @@ func TestPublishApprovePublicizes(t *testing.T) {
 	env.ft.mu.Lock()
 	env.ft.forbidPublish = false // 本场景 approve 合法，解除守卫
 	env.ft.mu.Unlock()
-	got, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove)
+	got, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "")
 	if err != nil {
 		t.Fatalf("approve: %v", err)
 	}
@@ -265,14 +265,14 @@ func TestPublishRejectIsTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	got, err := env.pipeline.review(context.Background(), job.ID, publishReviewReject)
+	got, err := env.pipeline.review(context.Background(), job.ID, publishReviewReject, "")
 	if err != nil {
 		t.Fatalf("reject: %v", err)
 	}
 	if got.Stage != publishStageRejected {
 		t.Fatalf("stage = %q，应为 rejected", got.Stage)
 	}
-	if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove); err == nil {
+	if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, ""); err == nil {
 		t.Fatalf("reject 终态后 approve 应被拒绝")
 	}
 	if _, updateN := env.ft.counts(); updateN != 0 {
