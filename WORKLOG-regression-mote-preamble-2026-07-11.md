@@ -62,13 +62,41 @@
 标记正则 + 扫描上限均走 behavior.params 可配（红线：规则数据不硬编码），
 前端 fallback 常量 + 服务端默认成对登记。
 
-## 待办
+## 修复实现（已完成，commit d999c07）
 
-- [x] 根因定位（实证复现）
-- [ ] 修复 docx-article-model.js 扫描窗口 + params 下放
-- [ ] 防回归测试（docx-article-model.test.mjs + fbif 端到端）
-- [ ] 构造超长前置 docx，真实浏览器 UI 验证三症状修复（含面板开关）
-- [ ] 回归面盘点：MD/URL 导入路径是否有同型窗口问题；红线 #12/#13 测试覆盖补强
+- `public/js/docx-article-model.js`：扫描窗口改为「超限关窗、结构标记重开」——
+  整行「正文/标题/封面/推荐语/校对」命中即重置计数并重开窗口；无标记文档维持原上限
+  （第 25 段行为与旧版逐字一致，防误剥正文中段「作者：」）。「引言」不入默认集
+  （可出现在正文起点附近，有误重开风险，且对救活前置作者行无贡献）。
+- `public/js/templates/fbif.js`：注入 `docx_front_matter_marker_regex` /
+  `docx_front_matter_scan_limit`（新增 behaviorNumberParam 助手），fallback const 兜底。
+- `api/rule_behavior.go`：两个新参数成对登记进服务端默认 behavior（规则后台可配）。
+- 共享层修复对网站渠道 DOCX 同样生效（同一分类层）；系列 firstImage 信号不受影响。
+
+## 验证记录
+
+- [x] 根因定位（实证复现：作者行第 26 个非空段 → 三症状齐发；≤25 正常）
+- [x] 修复 + params 下放
+- [x] 防回归测试 3 条（超限+标记→识别剥离；超限无标记→不误剥；标记 opts 可配）
+- [x] `npm test` 864 全绿（tea-pyramid / 网站 / 系列 golden 逐字节不变）；`go test ./...` 全绿
+- [x] 真实浏览器验证（localhost:19090/mp/fbif，构造「作者行第 28 位」9MB docx 走
+      `_handleFile` 真实上传管线）：前置全剥离 ✓、作者行蓝色 ✓、参考来源上方 Mote
+      署名图 ✓（肉眼截图确认）、面板「参考文献前署名图」开关 + 「已套用: Mote 作者默认」✓
+- [x] 回归面盘点：MD 路径全篇识别作者无窗口限制、URL 导入走服务端 wechat_blocks 独立
+      体系（有自测）、系列 firstImage 有独立可配上限——同型问题仅 DOCX 前置扫描，已修
+- [x] 生产部署验证：deploy run 29138308510 success；生产 version.json=d999c07、
+      docx-article-model.js / fbif.js 哈希与本地一致；生产页面实际加载的 JS 已含
+      `DEFAULT_FRONT_MATTER_MARKER` / `scanWindowOpen` 修复代码；/api/health ok
+
+## 结论：这是不是「大修删了功能」？
+
+不是。三症状同根于一个**从最初实现就存在**的扫描上限（旧版 fbif.js 逐字相同的
+`nonEmptySeen >= 25` break）。大修各环节（共享层抽取/S1-S6/统一导入）在此链路上
+有 golden 逐字节守护、无功能丢失。「大修后频发」的真实机制：编辑部文档前置材料
+变长（第 22 篇新增「封面」区块+更多候选标题），把旧阈值缺陷从偶发擦线推成高频触发，
+时间上恰与大修窗口重叠。教训：阈值型静默降级（超限后不报错、直接当无作者处理）
+是「间歇性回归」错觉的温床——本次修复后超限文档仍可能存在（无任何标记的超长前置），
+后续若复发优先查 `docx_front_matter_scan_limit`。
 
 ## 时间线
 
