@@ -51,22 +51,77 @@ function profileMatches(profile, articleMeta, footerDefaults) {
   return false;
 }
 
-function firstMatchingProfile(articleMeta, footerDefaults) {
+function normalizeProfile(profile) {
+  return {
+    id: cleanId(profile.id),
+    name: cleanId(profile.name),
+    blockVisibility: isObj(profile.block_visibility) ? profile.block_visibility : {},
+    artifactVisibility: cleanArticleArtifactVisibility(profile.artifact_visibility),
+  };
+}
+
+function rawProfiles(footerDefaults) {
   const defaults = isObj(footerDefaults) ? footerDefaults : {};
-  if (defaults.enabled === false) return null;
-  const profiles = Array.isArray(defaults.profiles) ? defaults.profiles : [];
-  for (const profile of profiles) {
-    if (!isObj(profile)) continue;
-    if (profileMatches(profile, articleMeta, defaults)) {
+  if (defaults.enabled === false) return [];
+  return (Array.isArray(defaults.profiles) ? defaults.profiles : []).filter(isObj);
+}
+
+function firstMatchingProfile(articleMeta, footerDefaults) {
+  for (const profile of rawProfiles(footerDefaults)) {
+    if (profileMatches(profile, articleMeta, footerDefaults)) return normalizeProfile(profile);
+  }
+  return null;
+}
+
+// ---- 作者规则手动选择（2026-07-11 用户裁定：「已套用」标签升级为显式选择器）----
+// profileOverride 值语义：undefined/'' = 自动识别（现状）；'none' = 通用默认（强制不套任何
+// profile，作者相关特殊规则全关）；'<profile_id>' = 强制套用该 profile（无论作者是否匹配）。
+// 指向不存在的 id 时回退自动（规则后台改名/删 profile 后旧会话不炸）。
+
+export function normalizeArticleFooterProfileOverride(value) {
+  const v = cleanId(value);
+  return v ? v : undefined;
+}
+
+// 给选择器 UI 列出该账号已配置的 profiles（enabled=false 或无配置 → 空数组 → UI 不渲染选择器）。
+export function listArticleFooterProfiles(footerDefaults) {
+  return rawProfiles(footerDefaults).map(p => ({ id: cleanId(p.id), name: cleanId(p.name) }))
+    .filter(p => p.id);
+}
+
+// profile 的行为身份：别名组第一个别名的 normalize 形态（如 mote → 'mote莫特'）。
+// 手选 profile 时注入行为上下文，让「参考来源上方署名图」等按作者触发的规则一并生效。
+function profileAuthorNormalized(profile, footerDefaults) {
+  const match = isObj(profile && profile.match) ? profile.match : {};
+  const group = cleanId(match.author_alias_group);
+  if (!group) return undefined;
+  const aliases = isObj(footerDefaults && footerDefaults.author_aliases)
+    ? footerDefaults.author_aliases[group]
+    : null;
+  if (!Array.isArray(aliases) || !aliases.length) return undefined;
+  return normalizeAuthorName(aliases[0]) || undefined;
+}
+
+// 统一解析「生效的作者规则」：返回 { profile, autoProfile, authorNormalizedOverride }。
+// authorNormalizedOverride：undefined = 不覆盖行为身份（跟随识别结果）；'' = 中和（通用默认，
+// 即使识别到 Mote 也不触发作者特殊行为）；'<normalized>' = 注入该 profile 的作者身份。
+export function resolveArticleFooterSelection({ articleMeta, footerDefaults, profileOverride } = {}) {
+  const override = normalizeArticleFooterProfileOverride(profileOverride);
+  const autoProfile = firstMatchingProfile(articleMeta, footerDefaults);
+  if (override === 'none') {
+    return { profile: null, autoProfile, authorNormalizedOverride: '' };
+  }
+  if (override) {
+    const raw = rawProfiles(footerDefaults).find(p => cleanId(p.id) === override);
+    if (raw) {
       return {
-        id: cleanId(profile.id),
-        name: cleanId(profile.name),
-        blockVisibility: isObj(profile.block_visibility) ? profile.block_visibility : {},
-        artifactVisibility: cleanArticleArtifactVisibility(profile.artifact_visibility),
+        profile: normalizeProfile(raw),
+        autoProfile,
+        authorNormalizedOverride: profileAuthorNormalized(raw, footerDefaults),
       };
     }
   }
-  return null;
+  return { profile: autoProfile, autoProfile, authorNormalizedOverride: undefined };
 }
 
 export function cleanArticleArtifactVisibility(value) {
@@ -202,8 +257,9 @@ export function prepareBottomBlocksForArticle({
   footerDefaults,
   contentOverride,
   visibilityOverride,
+  profileOverride,
 } = {}) {
-  const profile = firstMatchingProfile(articleMeta, footerDefaults);
+  const { profile } = resolveArticleFooterSelection({ articleMeta, footerDefaults, profileOverride });
   const effectiveModule = profile
     ? materializeModuleWithVisibility(module, profile.blockVisibility)
     : (isObj(module) ? module : {});
@@ -233,6 +289,7 @@ export function resolveBottomBlocksForArticle({
   footerDefaults,
   contentOverride,
   visibilityOverride,
+  profileOverride,
 } = {}) {
   const prepared = prepareBottomBlocksForArticle({
     module,
@@ -240,6 +297,7 @@ export function resolveBottomBlocksForArticle({
     footerDefaults,
     contentOverride,
     visibilityOverride,
+    profileOverride,
   });
   const resolved = resolveBlocks(prepared.module, prepared.override, { presetId });
   return {

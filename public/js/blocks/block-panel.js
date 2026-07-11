@@ -12,7 +12,12 @@
 // 宿主（app.html）通过 onChange(override) 把 override 注入渲染并重渲；据 hasEditableContent() 决定整段显隐。
 
 import { resolveBlocks, hasAnyOverride, stripReadonlyOverride } from './block-merge.js';
-import { resolveBottomBlocksForArticle } from '../article-footer-defaults.js';
+import {
+  resolveBottomBlocksForArticle,
+  resolveArticleFooterSelection,
+  listArticleFooterProfiles,
+  normalizeArticleFooterProfileOverride,
+} from '../article-footer-defaults.js';
 import { getBlockType } from './block-registry.gen.js';
 import { openAssetPicker, resolveAssetThumb } from './asset-picker.js';
 import { createIcon } from '../ui-icons.js';
@@ -51,6 +56,9 @@ function ensureStyle(doc) {
 .bp-icon{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--fs-text-2,#646a73);flex:none;}
 .bp-icon svg{display:block;width:16px;height:16px;}
 .bp-profile-badge{font-size:11px;color:var(--fs-text-3,#6f757d);white-space:nowrap;}
+.bp-profile-select{font-size:12px;color:var(--fs-text-1,#1f2329);border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);background:#fff;padding:3px 6px;max-width:170px;cursor:pointer;}
+.bp-profile-select:hover{border-color:var(--fs-brand,#1456f0);}
+.bp-profile-select:focus{outline:none;border-color:var(--fs-brand,#1456f0);box-shadow:0 0 0 2px var(--fs-brand-a2,rgba(20,86,240,.15));}
 .bp-group{background:var(--fs-bg-nested,#f7f8fa);border-radius:var(--fs-r-m,8px);padding:10px;}
 .bp-group-head{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--fs-text-2,#646a73);margin-bottom:6px;}
 .bp-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:32px;padding:2px 0;}
@@ -350,6 +358,8 @@ export function mountBlockPanel({
   onFooterVisibilityChange,
   getArticleArtifactOverride,
   onArticleArtifactChange,
+  getArticleFooterProfileOverride,
+  onArticleFooterProfileChange,
   doc = document,
 }) {
   if (!mount) return null;
@@ -430,15 +440,23 @@ export function mountBlockPanel({
     return wrap;
   }
 
+  function articleFooterProfileOverrideValue() {
+    return normalizeArticleFooterProfileOverride(
+      getArticleFooterProfileOverride ? getArticleFooterProfileOverride() : undefined
+    );
+  }
+
   function footerState(mod) {
     const articleMeta = getArticleMeta ? getArticleMeta() : {};
     const footerDefaults = getFooterDefaults ? getFooterDefaults() : null;
     const visibilityOverride = cleanVisibilityOverride(getFooterVisibilityOverride ? getFooterVisibilityOverride() : {});
+    const profileOverride = articleFooterProfileOverrideValue();
     const base = resolveBottomBlocksForArticle({
       module: mod,
       articleMeta,
       footerDefaults,
       contentOverride: override,
+      profileOverride,
     });
     const resolved = resolveBottomBlocksForArticle({
       module: mod,
@@ -446,8 +464,9 @@ export function mountBlockPanel({
       footerDefaults,
       contentOverride: override,
       visibilityOverride,
+      profileOverride,
     });
-    return { base, resolved, visibilityOverride };
+    return { base, resolved, visibilityOverride, footerDefaults, articleMeta, profileOverride };
   }
 
   function setFooterEnabled(state, checked) {
@@ -561,15 +580,59 @@ export function mountBlockPanel({
     return item;
   }
 
+  // 作者规则选择器（2026-07-11 用户裁定：「已套用」灰字升级为显式下拉）。
+  // 选项 = 自动识别（显示当前匹配结果）/ 通用默认 / 各已配置 profile。手选覆盖自动识别，
+  // 自动识别失败（如作者行未识别）时仍可手动套用——这是对「静默失效」的兜底。
+  // 无 profiles 配置的账号（如网站渠道）不渲染选择器，UI 零变化。
+  function renderProfileSelect(state) {
+    const profiles = listArticleFooterProfiles(state.footerDefaults);
+    if (!profiles.length) return null;
+    const auto = resolveArticleFooterSelection({
+      articleMeta: state.articleMeta,
+      footerDefaults: state.footerDefaults,
+    });
+    const select = doc.createElement('select');
+    select.className = 'bp-profile-select';
+    select.setAttribute('aria-label', '本文作者规则');
+    const optAuto = doc.createElement('option');
+    optAuto.value = '';
+    optAuto.textContent = '自动 · ' + (auto.autoProfile ? (auto.autoProfile.name || auto.autoProfile.id) : '通用默认');
+    select.appendChild(optAuto);
+    const optNone = doc.createElement('option');
+    optNone.value = 'none';
+    optNone.textContent = '通用默认';
+    select.appendChild(optNone);
+    for (const p of profiles) {
+      const opt = doc.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name || p.id;
+      select.appendChild(opt);
+    }
+    // 面板每次 render 全量重建，用 option 的 selected 属性设初值（linkedom 无 select.value setter）。
+    // override 指向已删 profile 时无 option 命中 → 落回首项「自动」。
+    const current = state.profileOverride || '';
+    const options = Array.from(select.querySelectorAll('option'));
+    const selected = options.find(o => o.getAttribute('value') === current) || options[0];
+    selected.setAttribute('selected', '');
+    select.onchange = () => {
+      if (onArticleFooterProfileChange) {
+        onArticleFooterProfileChange(normalizeArticleFooterProfileOverride(select.value));
+      }
+      render();
+    };
+    return select;
+  }
+
   function renderFooterControls(wrap, mod) {
     const state = footerState(mod);
     const profile = state.resolved.articleFooterProfile;
     const hasFooter = moduleHasRenderableFooter(mod);
     const hasArtifacts = artifactControlIDs(profile).length > 0;
-    if (!hasFooter && !hasArtifacts) return;
+    const profileSelect = renderProfileSelect(state);
+    if (!hasFooter && !hasArtifacts && !profileSelect) return;
     const moduleWrap = doc.createElement('div');
     moduleWrap.className = 'bp-module';
-    if (profile) {
+    if (profile || profileSelect) {
       const head = doc.createElement('div');
       head.className = 'bp-module-head';
       const title = doc.createElement('div');
@@ -580,12 +643,16 @@ export function mountBlockPanel({
       title.appendChild(titleText);
       head.appendChild(title);
 
-      const badge = doc.createElement('span');
-      badge.className = 'bp-profile-badge';
-      badge.textContent = '已套用：' + (profile.name || '默认方案');
-      head.appendChild(badge);
+      if (profileSelect) {
+        head.appendChild(profileSelect);
+      } else {
+        const badge = doc.createElement('span');
+        badge.className = 'bp-profile-badge';
+        badge.textContent = '已套用：' + (profile.name || '默认方案');
+        head.appendChild(badge);
+      }
       moduleWrap.appendChild(head);
-      renderArtifactControls(moduleWrap, profile);
+      if (profile) renderArtifactControls(moduleWrap, profile);
     }
 
     if (hasFooter) {

@@ -57,6 +57,8 @@ const authorCardAutofillModule = await import('./author-card-autofill.js' + asse
 const { applySeriesAuthorCardAutofill } = authorCardAutofillModule;
 const blockMergeModule = await import('./blocks/block-merge.js' + assetQuery);
 const { stripReadonlyOverride } = blockMergeModule;
+const articleFooterDefaultsModule = await import('./article-footer-defaults.js' + assetQuery);
+const { normalizeArticleFooterProfileOverride } = articleFooterDefaultsModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -728,6 +730,7 @@ export function initApp(initialTemplate) {
         isRepost,
         config: _activeConfig,
         articleArtifactOverride: input.articleArtifactOverride,
+        articleFooterProfileOverride: input.articleFooterProfileOverride,
       });
     }
     if (input.kind === 'md') {
@@ -736,6 +739,7 @@ export function initApp(initialTemplate) {
         isRepost,
         config: _activeConfig,
         articleArtifactOverride: input.articleArtifactOverride,
+        articleFooterProfileOverride: input.articleFooterProfileOverride,
       });
     }
     if (input.kind === 'blocks') {
@@ -744,6 +748,7 @@ export function initApp(initialTemplate) {
         isRepost,
         config: _activeConfig,
         articleArtifactOverride: input.articleArtifactOverride,
+        articleFooterProfileOverride: input.articleFooterProfileOverride,
       });
     }
     throw new Error('未知文章输入类型');
@@ -808,8 +813,13 @@ export function initApp(initialTemplate) {
         ? options.articleArtifactOverride
         : input.articleArtifactOverride
     );
+    const articleFooterProfileOverride = normalizeArticleFooterProfileOverride(
+      Object.prototype.hasOwnProperty.call(options, 'articleFooterProfileOverride')
+        ? options.articleFooterProfileOverride
+        : input.articleFooterProfileOverride
+    );
     return {
-      input: { ...input, title, footerVisibilityOverride, articleArtifactOverride },
+      input: { ...input, title, footerVisibilityOverride, articleArtifactOverride, articleFooterProfileOverride },
       result,
       title,
       displayName: input.displayName || title,
@@ -821,6 +831,7 @@ export function initApp(initialTemplate) {
       articleFooterProfile,
       footerVisibilityOverride,
       articleArtifactOverride,
+      articleFooterProfileOverride,
       bottomBlocksOverride: bottomBlocksState.override,
       bottomBlocksAccountId: bottomBlocksState.accountId,
       sourceIsDocx: !!input.sourceIsDocx,
@@ -840,6 +851,7 @@ export function initApp(initialTemplate) {
     window._articleFooterProfile = session.articleFooterProfile || null;
     window._footerVisibilityOverride = normalizeFooterVisibilityOverride(session.footerVisibilityOverride);
     window._articleArtifactOverride = normalizeArticleArtifactOverride(session.articleArtifactOverride);
+    window._articleFooterProfileOverride = normalizeArticleFooterProfileOverride(session.articleFooterProfileOverride);
     const accountId = session.bottomBlocksAccountId || (window._activeRulePack && window._activeRulePack.id);
     if (accountId && session.bottomBlocksOverride !== undefined) {
       writeBottomBlocksOverride(accountId, session.bottomBlocksOverride || {});
@@ -1213,8 +1225,13 @@ export function initApp(initialTemplate) {
     const articleArtifactOverride = Object.prototype.hasOwnProperty.call(options, 'articleArtifactOverride')
       ? normalizeArticleArtifactOverride(options.articleArtifactOverride)
       : cached.articleArtifactOverride;
-    const renderInput = Object.prototype.hasOwnProperty.call(options, 'articleArtifactOverride')
-      ? { ...cached, articleArtifactOverride }
+    const articleFooterProfileOverride = Object.prototype.hasOwnProperty.call(options, 'articleFooterProfileOverride')
+      ? normalizeArticleFooterProfileOverride(options.articleFooterProfileOverride)
+      : cached.articleFooterProfileOverride;
+    const hasInputOverrides = Object.prototype.hasOwnProperty.call(options, 'articleArtifactOverride')
+      || Object.prototype.hasOwnProperty.call(options, 'articleFooterProfileOverride');
+    const renderInput = hasInputOverrides
+      ? { ...cached, articleArtifactOverride, articleFooterProfileOverride }
       : cached;
     // Use a local repost flag so we don't pollute the module-level _isRepost,
     // which handleFile / _handleBlocks set per upload and other code paths read.
@@ -1229,6 +1246,7 @@ export function initApp(initialTemplate) {
           ? options.footerVisibilityOverride
           : renderInput.footerVisibilityOverride,
         articleArtifactOverride,
+        articleFooterProfileOverride,
         commitGate: renderCommit,
       });
       if (!session || renderCommit.stale()) return outcome('superseded', false);
@@ -1288,6 +1306,18 @@ export function initApp(initialTemplate) {
     await _engineRerender({ articleArtifactOverride: normalized });
     return true;
   }
+  // 作者规则手选覆盖（undefined=自动 / 'none'=通用默认 / '<profile_id>'）。与
+  // setArticleArtifactOverride 同款：写会话与全局后走版本门重渲染（红线 #25）。
+  async function setArticleFooterProfileOverride(next) {
+    const normalized = normalizeArticleFooterProfileOverride(next);
+    window._articleFooterProfileOverride = normalized;
+    if (!_articleSession) return false;
+    _articleSession.articleFooterProfileOverride = normalized;
+    _articleSession.input = { ...(_articleSession.input || {}), articleFooterProfileOverride: normalized };
+    _lastRenderInput = _articleSession.input;
+    await _engineRerender({ articleFooterProfileOverride: normalized });
+    return true;
+  }
   async function setArticleStrategy(isRepost) {
     const nextIsRepost = !!isRepost;
     _isRepost = nextIsRepost;
@@ -1311,6 +1341,7 @@ export function initApp(initialTemplate) {
     switchTemplate: window._engineSwitchTemplate,
     setFooterVisibilityOverride,
     setArticleArtifactOverride,
+    setArticleFooterProfileOverride,
     setArticleStrategy,
     setArticleRepost,
     invalidatePendingWork: invalidatePendingArticleWork,

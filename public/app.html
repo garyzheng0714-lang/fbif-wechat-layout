@@ -441,6 +441,14 @@ async function applyAccountCapabilityUI(pack) {
               window._articleArtifactOverride = ov;
             }
           },
+          getArticleFooterProfileOverride: () => window._articleFooterProfileOverride,
+          onArticleFooterProfileChange: (v) => {
+            if (window._engineApi && typeof window._engineApi.setArticleFooterProfileOverride === 'function') {
+              window._engineApi.setArticleFooterProfileOverride(v);
+            } else {
+              window._articleFooterProfileOverride = v;
+            }
+          },
           // more_articles 块把卡片编辑器（#moreArticlesEmbed）搬进内容编辑区；其余块由面板按 frontend_editable 决定换图入口。
           getBlockExtra: (block) => (articleEditorActivated && block && block.type === 'more_articles') ? moreArticlesEmbedEl() : null,
           onChange: (ov) => { window._bottomBlocksOverride = ov; if (window._engineApi && typeof window._engineApi.rerender === 'function') window._engineApi.rerender(); },

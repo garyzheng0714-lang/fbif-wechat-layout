@@ -165,3 +165,77 @@ test('本篇例外可以隐藏整个底部区域', () => {
   assert.equal(resolved.articleFooterProfile.id, 'mote_author');
   assert.equal(resolved.enabled, false);
 });
+
+// ---- 作者规则手动选择（2026-07-11 用户裁定：选择器覆盖自动识别）----
+// WHY：自动识别失败（作者行未识别）时整套作者规则曾静默消失且无法补救；
+// 手选 override 必须能强制套用 profile（含行为身份注入），也必须能强制回通用默认。
+const { resolveArticleFooterSelection, listArticleFooterProfiles, normalizeArticleFooterProfileOverride } =
+  await import('../public/js/article-footer-defaults.js?selection=' + Date.now());
+
+test('选择器：无 override 时自动匹配（现状不变）', () => {
+  const s = resolveArticleFooterSelection({
+    articleMeta: { author: 'Mote莫特' },
+    footerDefaults,
+  });
+  assert.equal(s.profile && s.profile.id, 'mote_author');
+  assert.equal(s.autoProfile && s.autoProfile.id, 'mote_author');
+  assert.equal(s.authorNormalizedOverride, undefined, '自动路径不覆盖行为身份');
+});
+
+test('选择器：作者未识别时手选 profile 强制套用并注入行为身份', () => {
+  const s = resolveArticleFooterSelection({
+    articleMeta: { author: '' },
+    footerDefaults,
+    profileOverride: 'mote_author',
+  });
+  assert.equal(s.profile && s.profile.id, 'mote_author', '识别失败也能手动套用');
+  assert.equal(s.authorNormalizedOverride, 'mote莫特', '注入别名组身份以触发署名图等行为');
+});
+
+test('选择器：手选「通用默认」中和作者特殊规则（识别到 Mote 也不套）', () => {
+  const s = resolveArticleFooterSelection({
+    articleMeta: { author: 'Mote莫特' },
+    footerDefaults,
+    profileOverride: 'none',
+  });
+  assert.equal(s.profile, null);
+  assert.equal(s.authorNormalizedOverride, '', '身份中和，按作者触发的行为全关');
+});
+
+test('选择器：override 指向已删 profile 时回退自动（规则改名不炸旧会话）', () => {
+  const s = resolveArticleFooterSelection({
+    articleMeta: { author: 'Mote莫特' },
+    footerDefaults,
+    profileOverride: 'deleted_profile',
+  });
+  assert.equal(s.profile && s.profile.id, 'mote_author');
+});
+
+test('选择器：列表只含已配置 profiles；defaults 关闭时为空', () => {
+  assert.deepEqual(listArticleFooterProfiles(footerDefaults), [{ id: 'mote_author', name: 'Mote 作者默认' }]);
+  assert.deepEqual(listArticleFooterProfiles({ ...footerDefaults, enabled: false }), []);
+  assert.deepEqual(listArticleFooterProfiles(null), []);
+});
+
+test('选择器：resolveBottomBlocksForArticle 透传 profileOverride', () => {
+  const noAuthor = resolveBottomBlocksForArticle({
+    module: fbifBottomBlocks(),
+    articleMeta: { author: '' },
+    footerDefaults,
+    profileOverride: 'mote_author',
+  });
+  assert.equal(noAuthor.articleFooterProfile && noAuthor.articleFooterProfile.id, 'mote_author');
+  const neutralized = resolveBottomBlocksForArticle({
+    module: fbifBottomBlocks(),
+    articleMeta: { author: 'Mote莫特' },
+    footerDefaults,
+    profileOverride: 'none',
+  });
+  assert.equal(neutralized.articleFooterProfile, null);
+});
+
+test('选择器：normalize 空值→undefined（自动）', () => {
+  assert.equal(normalizeArticleFooterProfileOverride(''), undefined);
+  assert.equal(normalizeArticleFooterProfileOverride(null), undefined);
+  assert.equal(normalizeArticleFooterProfileOverride('  mote_author '), 'mote_author');
+});

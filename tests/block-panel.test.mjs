@@ -245,7 +245,12 @@ test('Mote 作者面板按递进层级组织底部区域和文中元素', () => 
   });
 
   assert.match(mount.textContent, /文章专属设置/);
-  assert.match(mount.textContent, /已套用：Mote 作者默认/);
+  // 2026-07-11 用户裁定：「已套用」灰字升级为作者规则选择器（自动/通用默认/各 profile）。
+  const profileSelect = mount.querySelector('.bp-profile-select');
+  assert.ok(profileSelect, '有 profiles 配置时必须渲染作者规则选择器');
+  const optionTexts = Array.from(profileSelect.querySelectorAll('option')).map(o => o.textContent.trim());
+  assert.deepEqual(optionTexts, ['自动 · Mote 作者默认', '通用默认', 'Mote 作者默认']);
+  assert.ok(profileSelect.querySelector('option[selected]').textContent.includes('自动'), '默认跟随自动识别');
   assert.doesNotMatch(mount.textContent, /Mote 作者模块/);
   assert.match(mount.textContent, /文中元素/);
   assert.match(mount.textContent, /参考文献前署名图/);
@@ -342,4 +347,60 @@ test('Mote 文中元素开关识别旧 artifact 隐藏形态', () => {
     assert.ok(artifactSwitch, 'Mote 文中署名图需要独立开关');
     assert.equal(artifactSwitch.getAttribute('aria-checked'), 'false');
   }
+});
+
+// ---- 作者规则选择器（2026-07-11 用户裁定）----
+// WHY：作者自动识别失败时整套作者规则曾静默消失且无 UI 可补救；选择器必须在
+// 「无匹配」时依然可见可选（兜底），且无 profiles 配置的账号（网站渠道）UI 零变化。
+test('作者未识别时选择器仍在，手选 profile 触发回调（静默失效的兜底）', () => {
+  storage.clear();
+  const mount = document.getElementById('mount');
+  mount.innerHTML = '';
+  let lastProfileChange = 'unset';
+  let profileOverride;
+  mountBlockPanel({
+    mount,
+    accountId: 'fbif',
+    getModule: fbifBottomBlocks,
+    getAssetLibrary: () => assetLibrary,
+    getArticleMeta: () => ({ author: '' }), // 识别失败场景
+    getFooterDefaults: () => moteFooterDefaults,
+    getArticleFooterProfileOverride: () => profileOverride,
+    onArticleFooterProfileChange: (v) => { lastProfileChange = v; profileOverride = v; },
+    getBlockExtra: () => null,
+    onChange: () => {},
+    doc: document,
+  });
+
+  const select = mount.querySelector('.bp-profile-select');
+  assert.ok(select, '无匹配时选择器仍必须渲染');
+  const optionTexts = Array.from(select.querySelectorAll('option')).map(o => o.textContent.trim());
+  assert.deepEqual(optionTexts, ['自动 · 通用默认', '通用默认', 'Mote 作者默认']);
+
+  // 手选 Mote → 回调收到 profile id，且面板重渲染出该 profile 的文中元素开关
+  Object.defineProperty(select, 'value', { configurable: true, get: () => 'mote_author' });
+  select.onchange();
+  assert.equal(lastProfileChange, 'mote_author');
+  const refreshed = mount.querySelector('.bp-profile-select');
+  assert.ok(refreshed.querySelector('option[selected]').textContent.includes('Mote 作者默认'), '重渲染后选中手选项');
+  assert.match(mount.textContent, /参考文献前署名图/, '手选后文中元素开关组出现');
+});
+
+test('无 profiles 配置的账号不渲染选择器（网站渠道 UI 零变化）', () => {
+  storage.clear();
+  const mount = document.getElementById('mount');
+  mount.innerHTML = '';
+  mountBlockPanel({
+    mount,
+    accountId: 'fbif',
+    getModule: fbifBottomBlocks,
+    getAssetLibrary: () => assetLibrary,
+    getArticleMeta: () => ({ author: 'Mote莫特' }),
+    getFooterDefaults: () => null,
+    getBlockExtra: () => null,
+    onChange: () => {},
+    doc: document,
+  });
+  assert.equal(mount.querySelector('.bp-profile-select'), null);
+  assert.doesNotMatch(mount.textContent, /文章专属设置/);
 });

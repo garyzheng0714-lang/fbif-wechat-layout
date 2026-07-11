@@ -25,7 +25,7 @@ const articleFooterModule = await import('../article-footer-defaults.js' + asset
 const {
   mergeArticleArtifactOverrides,
   prepareBottomBlocksForArticle,
-  resolveArticleArtifactDefaultsForArticle,
+  resolveArticleFooterSelection,
 } = articleFooterModule;
 
 // ---- Gold-standard WeChat ProseMirror wrapping (now class-based) ----
@@ -447,10 +447,19 @@ function render(elems, author, source, opts) {
   const behavior = getActiveRuleBehavior();
   const context = behaviorContext(author, source);
   const mods = rawActiveModules();
-  const artifactDefaults = resolveArticleArtifactDefaultsForArticle({
+  // 作者规则选择（手选覆盖自动识别）：手选 profile 注入其行为身份（署名图等按作者触发的
+  // 规则一并生效）；手选「通用默认」中和身份（识别到 Mote 也不触发）；不改 author 显示名。
+  const selection = resolveArticleFooterSelection({
     articleMeta: context.article,
     footerDefaults: mods.article_footer_defaults,
+    profileOverride: opts && opts.articleFooterProfileOverride,
   });
+  if (selection.authorNormalizedOverride !== undefined) {
+    context.article = { ...context.article, author_normalized: selection.authorNormalizedOverride };
+  }
+  const artifactDefaults = selection.profile && Object.keys(selection.profile.artifactVisibility).length
+    ? selection.profile.artifactVisibility
+    : undefined;
   const articleArtifactOverride = mergeArticleArtifactOverrides(
     artifactDefaults,
     opts && opts.articleArtifactOverride,
@@ -641,11 +650,11 @@ export default {
   description: '按 FBIF 排版规范格式化，支持标题/引言/图片说明/参考来源',
   formats: ['.docx', '.doc', '.md', '.txt'],
 
-  processDocx({ paragraphs, imgCache, isRepost, config: _config, articleArtifactOverride }) {
+  processDocx({ paragraphs, imgCache, isRepost, config: _config, articleArtifactOverride, articleFooterProfileOverride }) {
     // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, imgN } = classifyDocx(paragraphs, imgCache);
     return {
-      lines: render(elems, author, '', { isRepost, articleArtifactOverride }),
+      lines: render(elems, author, '', { isRepost, articleArtifactOverride, articleFooterProfileOverride }),
       imgN,
       headingN: elems.filter(e => e.k === 'h').length,
       articleMeta: articleMeta(author, ''),
@@ -653,6 +662,7 @@ export default {
   },
   async processMd(text, { config: _config, ...opts } = {}) {
     // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
+    // opts 已含 articleArtifactOverride / articleFooterProfileOverride，透传 render。
     const { elems, author, source, title, imgN } = await classifyMd(text);
     return {
       lines: render(elems, author, source, opts),
@@ -685,6 +695,9 @@ export default {
     const ov = opts && Object.prototype.hasOwnProperty.call(opts, 'bottomBlocksOverride')
       ? opts.bottomBlocksOverride
       : ((typeof window !== 'undefined' && window._bottomBlocksOverride) || undefined);
+    const profileOverride = opts && Object.prototype.hasOwnProperty.call(opts, 'articleFooterProfileOverride')
+      ? opts.articleFooterProfileOverride
+      : ((typeof window !== 'undefined' && window._articleFooterProfileOverride) || undefined);
     // v2 双预设：来源决定原创/转载（v1 模块忽略 presetId，行为不变）。
     const presetId = (opts && opts.isRepost) ? 'repost' : 'original';
     const prepared = prepareBottomBlocksForArticle({
@@ -693,6 +706,7 @@ export default {
       footerDefaults: mods.article_footer_defaults,
       contentOverride: ov,
       visibilityOverride: opts && opts.footerVisibilityOverride,
+      profileOverride,
     });
     const html = renderBottomBlocksHtml(
       prepared.module,
