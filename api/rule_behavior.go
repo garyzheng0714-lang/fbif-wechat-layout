@@ -22,7 +22,12 @@ func defaultRuleBehavior() map[string]any {
 			"footer_prompt_marker":          map[string]any{"type": "string", "default": `^提示[：:]$`},
 			"footer_prompt_detection_regex": map[string]any{"type": "string", "default": `(?i)本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1`},
 			"docx_author_line_regex":        map[string]any{"type": "string", "default": `^作者[：:]\s*(.+)$`},
-			"md_metadata_skip_regex":        map[string]any{"type": "string", "default": `(?i)^Author:\s|^Published:\s|^Source:\s`},
+			// DOCX 前置扫描：编辑部结构标记（整行「正文/封面/推荐语」等）命中即重置扫描窗口，
+			// 防止前置材料过长时作者行掉出上限 25（2026-07-11 生产事故：作者识别为空 →
+			// 前置不剥离 + Mote 署名图/名片开关连锁消失）。
+			"docx_front_matter_marker_regex": map[string]any{"type": "string", "default": `^(正文|标题|封面|推荐语|校对|引言)[：:]?$`},
+			"docx_front_matter_scan_limit":   map[string]any{"type": "number", "default": float64(25)},
+			"md_metadata_skip_regex":         map[string]any{"type": "string", "default": `(?i)^Author:\s|^Published:\s|^Source:\s`},
 			"image_caption_max_chars":       map[string]any{"type": "number", "default": defaultImageCaptionMaxChars},
 			"image_caption_center_max_chars": map[string]any{
 				"type":    "number",

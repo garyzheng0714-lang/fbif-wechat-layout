@@ -74,6 +74,17 @@ function behaviorRegexParam(key, fallbackRe) {
   return fallbackRe;
 }
 
+// 读 behavior.params.<key>.default 为正数（红线下放：扫描上限等数值规则后台可配；
+// 读不到/非法时降级到传入的 fallback）。
+function behaviorNumberParam(key, fallback) {
+  try {
+    const params = getActiveRuleBehavior().params || {};
+    const v = Number(params[key] && params[key].default);
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch (e) { /* 降级到 const */ }
+  return fallback;
+}
+
 function behaviorContext(author, source) {
   return {
     article: {
@@ -239,6 +250,9 @@ function shouldSpaceAfter(e, next) {
 
 // DOCX 前置「作者：」行识别正则默认值（红线下放 behavior.params.docx_author_line_regex）。
 const RE_DOCX_AUTHOR_LINE = /^作者[：:]\s*(.+)$/;
+// 编辑部结构标记默认值（红线下放 behavior.params.docx_front_matter_marker_regex）：
+// 命中即重置前置扫描窗口，防止前置材料过长时作者行掉出上限（2026-07-11 生产事故根因）。
+const RE_DOCX_FRONT_MATTER_MARKER = /^(正文|标题|封面|推荐语|校对)[：:]?$/;
 
 // ---- DOCX Classification ----
 // 内容结构分类下沉到共享模块 docx-article-model.js（与 FoodTalks 网站共用一套）。
@@ -268,6 +282,8 @@ function classifyDocx(paragraphs, imgCache) {
     authorLineRegex: behaviorRegexParam('docx_author_line_regex', RE_DOCX_AUTHOR_LINE),
     refSectionRegex: behaviorRegexParam('ref_section_regex', RE_REF_SECTION),
     refHeadingPrefixRegex: behaviorRegexParam('ref_heading_prefix_regex', /^(参考(来源|文献|资料|链接)|信息来源)/),
+    frontMatterMarkerRegex: behaviorRegexParam('docx_front_matter_marker_regex', RE_DOCX_FRONT_MATTER_MARKER),
+    frontMatterScanLimit: behaviorNumberParam('docx_front_matter_scan_limit', 25),
   });
   // 信号优先级：正文里已有真·Word 标题样式的标题（k:'h'）时，作者显然会用标题样式，
   // 整段加粗只是强调 ⇒ 启发式停用（否则加粗强调句会被误升 h2，判据加多少条都堵不完）。

@@ -29,6 +29,14 @@ const DEFAULT_AUTHOR_LINE = /^作者[：:]\s*(.+)$/;
 const DEFAULT_REF_SECTION = /^(参考(来源|文献|资料|链接)|信息来源)[：:]?$/;
 const DEFAULT_REF_HEADING_PREFIX = /^(参考(来源|文献|资料|链接)|信息来源)/;
 const DEFAULT_FRONT_MATTER_SCAN_LIMIT = 25;
+// 编辑部结构标记（整行「正文」「封面」「推荐语」等）：出现即证明仍在前置区。
+// 2026-07-11 生产事故根因——前置材料（候选标题+封面+推荐语）超过扫描上限 25 个非空段时，
+// 作者行掉出窗口 → 作者识别为空 → 前置不剥离（红线#12）+ Mote 署名图/名片开关连锁消失
+//（红线#13）。命中标记即重开扫描窗口并重置计数，前置再长作者行也追得到；无标记的文档
+// 维持原上限，防止把正文中段偶现的「作者：xxx」误当正文起点吞掉前文。
+// 「引言」不入默认集：它可出现在正文起点附近（本模块自身就有跳过「引言」的语义），
+// 入集会带来正文中段误重开窗口的风险，且对救活前置作者行无贡献。
+const DEFAULT_FRONT_MATTER_MARKER = /^(正文|标题|封面|推荐语|校对)[：:]?$/;
 
 // 平铺 docx 元数据：#18 空段语义 / 公众号成对紧凑间距(isCompactDocxPair) 的全部输入。
 // 共享模块原样透传，渲染器各自决定是否消费（公众号消费、网站当前不消费）。
@@ -54,13 +62,14 @@ export function parseAuthorLineWith(text, regex) {
 //   paragraphs：parser.buildParagraph 产出的段落对象数组
 //   imgCache：{ 文件名 -> 可用作 <img src> 的字符串 }
 //   opts：{ authorLineRegex, refSectionRegex, refHeadingPrefixRegex,
-//           frontMatterScanLimit, consumeAuthorLine, classifyReferences }
+//           frontMatterScanLimit, frontMatterMarkerRegex, consumeAuthorLine, classifyReferences }
 // 返回：{ elems, author, imgN }
 export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
   const authorLineRegex = opts.authorLineRegex || DEFAULT_AUTHOR_LINE;
   const refSectionRegex = opts.refSectionRegex || DEFAULT_REF_SECTION;
   const refHeadingPrefixRegex = opts.refHeadingPrefixRegex || DEFAULT_REF_HEADING_PREFIX;
   const frontMatterScanLimit = opts.frontMatterScanLimit || DEFAULT_FRONT_MATTER_SCAN_LIMIT;
+  const frontMatterMarkerRegex = opts.frontMatterMarkerRegex || DEFAULT_FRONT_MATTER_MARKER;
   const consumeAuthorLine = opts.consumeAuthorLine !== false; // 默认 true（公众号语义）
   const classifyReferences = opts.classifyReferences !== false; // 默认 true（公众号语义）
   // 默认 false：仅网站口径把「（插入视频）」超链接段转 video elem；公众号保持跳过（字节不变，红线#19）。
@@ -79,22 +88,32 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
 
   let author = '', contentStart = 0, resolved = false;
   let nonEmptySeen = 0;
+  let scanWindowOpen = true;
   // 首个「作者：」行之前的前置材料是编辑前置材料，不是文章正文。
+  // 扫描窗口：连续 frontMatterScanLimit 个非空段内没找到作者行即关窗（防误剥正文），
+  // 但编辑部结构标记（整行「正文」等）随时可重开窗口——标记本身证明仍在前置区。
   for (let i = 0; i < pds.length; i++) {
     if (pds[i].isEmpty) continue;
     if (pds[i].type === 'table') continue; // 表格块不是前置材料，不参与作者行/起点扫描
+    const lineText = String(pds[i].text || '').trim();
+    if (frontMatterMarkerRegex.test(lineText)) {
+      nonEmptySeen = 0;
+      scanWindowOpen = true;
+      continue;
+    }
     nonEmptySeen++;
+    if (nonEmptySeen > frontMatterScanLimit) scanWindowOpen = false;
+    if (!scanWindowOpen) continue; // 窗口已关：只可能被后续结构标记重开
     // 把「是否作者行（=正文起点/前置剥离触发）」与「捕获到的作者名」解耦：用 .test() 判定
     // 命中，作者名另取。这样「作者：」后无内容（网站正则 (.*) 允许空名）也能触发前置剥离，
     // 与旧 stripDocxPreambleBeforeAuthor「前缀即剥离，不要求有名」一致；公众号正则 (.+)
     // 要求非空名，.test() 对空名行不命中，逐字节维持旧行为。
-    if (authorLineRegex.test(String(pds[i].text || '').trim())) {
+    if (authorLineRegex.test(lineText)) {
       author = parseAuthorLineWith(pds[i].text, authorLineRegex);
       contentStart = consumeAuthorLine ? i + 1 : i;
       resolved = true;
       break;
     }
-    if (nonEmptySeen >= frontMatterScanLimit) break;
   }
 
   // 'firstImage' 信号：无作者行时，扫描前 frontMatterScanLimit 个非空块（含 table 块——

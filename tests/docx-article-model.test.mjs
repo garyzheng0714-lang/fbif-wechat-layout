@@ -352,3 +352,45 @@ test('表格单元格图片：浅拷贝，不污染传入的 parser 原始对象
   // 原始 run 不应被注入 src（共享层应浅拷贝后再注入）
   assert.equal('src' in original.rows[0][0].runs[0], false, 'parser 原始对象未被原地改');
 });
+
+// ---- 前置扫描窗口：编辑部结构标记重置计数 ----
+// WHY（2026-07-11 生产事故）：作者行扫描有上限（默认 25 个非空段，防止把正文中段偶现的
+// 「作者：xxx」误当正文起点吞掉前文）。编辑部文档前置材料（候选标题+封面+推荐语+校对）
+// 变长后作者行掉出窗口 → 作者识别为空 → 前置不剥离（红线#12）+ Mote 署名图与
+// 「参考文献前署名图」面板开关连锁消失（红线#13）。修复契约：整行「正文/封面/推荐语」等
+// 结构标记出现即证明仍在前置区，重置扫描计数；无标记文档维持原上限不误剥。
+function longPreamble(n) {
+  return Array.from({ length: n }, (_, i) => txt(`候选标题第${i + 1}版`));
+}
+
+test('前置超过扫描上限但含「正文」结构标记：作者仍被识别、前置全剥离', () => {
+  const { elems, author } = classifyDocxArticle(
+    [...longPreamble(30), txt('正文'), txt('作者：Mote莫特'), txt('正文第一段。')],
+    {},
+    {}
+  );
+  assert.equal(author, 'Mote莫特', '标记重置窗口后作者行必须命中');
+  const texts = elems.map(e => (e.runs || []).map(r => r.text).join(''));
+  assert.ok(!texts.some(t => t.includes('候选标题')), '超长前置材料被剥离');
+  assert.ok(texts.some(t => t.includes('正文第一段')), '正文保留');
+});
+
+test('前置超过扫描上限且无结构标记：维持原上限，不误剥正文', () => {
+  const { elems, author } = classifyDocxArticle(
+    [...longPreamble(30), txt('作者：Mote莫特'), txt('正文第一段。')],
+    {},
+    {}
+  );
+  assert.equal(author, '', '无标记时超限文档不识别（防正文中段作者行误触发剥离）');
+  const texts = elems.map(e => (e.runs || []).map(r => r.text).join(''));
+  assert.ok(texts.some(t => t.includes('候选标题第1版')), '内容不被吞');
+});
+
+test('结构标记正则可由 opts.frontMatterMarkerRegex 覆盖（规则可配契约）', () => {
+  const { author } = classifyDocxArticle(
+    [...longPreamble(30), txt('##BODY##'), txt('作者：Mote莫特'), txt('正文。')],
+    {},
+    { frontMatterMarkerRegex: /^##BODY##$/ }
+  );
+  assert.equal(author, 'Mote莫特', '自定义标记同样重置扫描窗口');
+});
