@@ -51,20 +51,15 @@ function ensureStyle(doc) {
 .bp-image-btn{border:1px solid var(--fs-border-control,#d9dce0);background:#fff;border-radius:var(--fs-r-xs,4px);padding:5px 10px;font-size:12px;cursor:pointer;color:var(--fs-text-1,#1f2329);}
 .bp-image-btn:hover{border-color:var(--fs-brand,#1456f0);color:var(--fs-brand,#1456f0);}
 .bp-module{display:flex;flex-direction:column;gap:10px;}
-.bp-module-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-.bp-module-title{display:flex;align-items:center;gap:8px;font-weight:650;color:var(--fs-text-1,#1f2329);}
 .bp-icon{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--fs-text-2,#646a73);flex:none;}
 .bp-icon svg{display:block;width:16px;height:16px;}
-.bp-profile-badge{font-size:11px;color:var(--fs-text-3,#6f757d);white-space:nowrap;}
-.bp-profile-wrap{display:inline-flex;align-items:center;gap:8px;min-width:0;}
-.bp-profile-note{font-size:11px;color:var(--fs-text-3,#8f959e);white-space:nowrap;flex:none;}
-.bp-profile-select{appearance:none;-webkit-appearance:none;font-size:12px;line-height:1.5;color:var(--fs-text-1,#1f2329);border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:4px 24px 4px 8px;max-width:190px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23646a73' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 6px center/14px 14px;transition:border-color var(--fs-t-fast,150ms) var(--fs-ease-out,ease-out);}
-.bp-profile-select:hover{border-color:var(--fs-brand,#1456f0);}
-.bp-profile-select:focus{outline:none;border-color:var(--fs-brand,#1456f0);box-shadow:0 0 0 2px var(--fs-brand-a2,rgba(20,86,240,.15));}
-.bp-group{background:var(--fs-bg-nested,#f7f8fa);border-radius:var(--fs-r-m,8px);padding:10px;}
-.bp-group-head{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--fs-text-2,#646a73);margin-bottom:6px;}
-.bp-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:32px;padding:2px 0;}
-.bp-toggle-label{display:flex;align-items:center;gap:8px;min-width:0;color:var(--fs-text-1,#1f2329);}
+.bp-rule-row{display:flex;align-items:center;gap:10px;padding:8px 10px 6px;}
+.bp-rule-label{font-size:12px;color:var(--fs-text-2,#646a73);flex:none;}
+.bp-rule-tabs{display:inline-flex;gap:2px;padding:2px;background:var(--fs-bg-sunken,#f2f3f5);border-radius:var(--fs-r-s,6px);flex:1;min-width:0;}
+.bp-rule-tab{flex:1;min-width:0;padding:5px 6px;font-size:12px;line-height:1.4;text-align:center;border:0;border-radius:var(--fs-r-xs,4px);background:transparent;color:var(--fs-text-2,#646a73);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background var(--fs-t-fast,150ms) var(--fs-ease-out,ease-out),color var(--fs-t-fast,150ms) var(--fs-ease-out,ease-out);}
+.bp-rule-tab:hover{color:var(--fs-text-1,#1f2329);}
+.bp-rule-tab[aria-selected="true"]{background:var(--fs-bg-card,#fff);color:var(--fs-text-1,#1f2329);font-weight:600;box-shadow:var(--fs-sh-s1,0 1px 2px rgba(31,35,39,.12));}
+.bp-rule-tab:focus-visible{outline:none;box-shadow:0 0 0 2px var(--fs-brand-soft,#ebf1ff);}
 .bp-switch{width:36px;height:20px;border:0;border-radius:var(--fs-r-full,9999px);background:var(--fs-bg-sunken,#f2f3f5);box-shadow:inset 0 0 0 1px var(--fs-border-control,#d9dce0);cursor:pointer;position:relative;flex:none;padding:0;transition:background var(--fs-t-fast,150ms) var(--fs-ease-out,ease-out),box-shadow var(--fs-t-fast,150ms) var(--fs-ease-out,ease-out);}
 .bp-switch[aria-checked="true"]{background:var(--fs-brand,#1456f0);box-shadow:inset 0 0 0 1px var(--fs-brand,#1456f0);}
 .bp-switch:hover{box-shadow:inset 0 0 0 1px var(--fs-brand,#1456f0);}
@@ -90,7 +85,6 @@ function ensureStyle(doc) {
 .bp-block-label{display:flex;align-items:center;gap:8px;min-width:0;color:var(--fs-text-1,#1f2329);}
 .bp-block-actions{display:flex;align-items:center;gap:8px;flex:none;}
 .bp-block-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.bp-artifact-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .bp-block-default{font-size:11px;color:var(--fs-text-3,#8f959e);white-space:nowrap;}
 .bp-block-nested{padding:6px 0 10px 23px;}
 .bp-block-nested:empty{display:none;}
@@ -499,41 +493,45 @@ export function mountBlockPanel({
     render({ focusSelector: '[data-artifact-id="' + cssAttrValue(id) + '"][role="switch"]' });
   }
 
-  function renderArtifactControls(moduleWrap, profile) {
-    const ids = artifactControlIDs(profile);
-    if (!ids.length) return;
+  // 参考文献前署名图开关——归入「底部区域」模块列表，视觉与 block 开关行完全一致
+  // （bp-block-item），不再是独立的「文中元素」分组。底层仍走 articleArtifactOverride
+  // （behavior action 把图注入正文参考文献前，渲染位置不变），默认值取当前 profile 的
+  // artifactVisibility：Mote 规则下默认开，通用规则下这行根本不出现（artifactControlIDs 返回空）。
+  function renderArtifactRow(profile, id) {
+    const control = ARTICLE_ARTIFACT_CONTROLS[id];
+    if (!control) return null;
     const defaults = cleanArticleArtifactOverride(profile && profile.artifactVisibility);
-    const group = doc.createElement('div');
-    group.className = 'bp-group';
-    const head = doc.createElement('div');
-    head.className = 'bp-group-head';
-    head.appendChild(createIcon('image', doc, { className: 'bp-icon' }));
-    const headText = doc.createElement('span');
-    headText.textContent = '文中元素';
-    head.appendChild(headText);
-    group.appendChild(head);
-
-    for (const id of ids) {
-      const control = ARTICLE_ARTIFACT_CONTROLS[id];
-      const defaultEnabled = artifactEnabled(defaults, id, true);
-      const row = doc.createElement('div');
-      row.className = 'bp-toggle-row';
-      const label = doc.createElement('span');
-      label.className = 'bp-toggle-label';
-      const name = doc.createElement('span');
-      name.className = 'bp-artifact-name';
-      name.textContent = control.label;
-      label.appendChild(name);
-      row.appendChild(label);
-      row.appendChild(createSwitchControl(doc, {
-        checked: artifactEnabled(getArticleArtifactOverride ? getArticleArtifactOverride() : {}, id, defaultEnabled),
-        label: control.label,
-        dataset: { artifactId: id },
-        onChange: (checked) => setArticleArtifact(id, checked, defaultEnabled),
-      }));
-      group.appendChild(row);
+    const defaultEnabled = artifactEnabled(defaults, id, true);
+    const current = getArticleArtifactOverride ? getArticleArtifactOverride() : {};
+    const item = doc.createElement('div');
+    item.className = 'bp-block-item';
+    const row = doc.createElement('div');
+    row.className = 'bp-block-check';
+    const rowLabel = doc.createElement('span');
+    rowLabel.className = 'bp-block-label';
+    const name = doc.createElement('span');
+    name.className = 'bp-block-name';
+    name.textContent = control.label;
+    rowLabel.appendChild(name);
+    row.appendChild(rowLabel);
+    const actions = doc.createElement('span');
+    actions.className = 'bp-block-actions';
+    // 本篇偏离 profile 默认时标注「本篇例外」，与 block 行同一交互语言。
+    if (cleanArticleArtifactOverride(current)[id] !== undefined) {
+      const note = doc.createElement('span');
+      note.className = 'bp-block-default';
+      note.textContent = '本篇例外';
+      actions.appendChild(note);
     }
-    moduleWrap.appendChild(group);
+    actions.appendChild(createSwitchControl(doc, {
+      checked: artifactEnabled(current, id, defaultEnabled),
+      label: control.label,
+      dataset: { artifactId: id },
+      onChange: (checked) => setArticleArtifact(id, checked, defaultEnabled),
+    }));
+    row.appendChild(actions);
+    item.appendChild(row);
+    return item;
   }
 
   function renderBlockToggle(state, block) {
@@ -582,107 +580,84 @@ export function mountBlockPanel({
     return item;
   }
 
-  // 作者规则选择器（2026-07-11 用户裁定：「已套用」灰字升级为显式下拉）。
-  // 选项 = 自动识别（显示当前匹配结果）/ 通用默认 / 各已配置 profile。手选覆盖自动识别，
-  // 自动识别失败（如作者行未识别）时仍可手动套用——这是对「静默失效」的兜底。
-  // 无 profiles 配置的账号（如网站渠道）不渲染选择器，UI 零变化。
-  function renderProfileSelect(state) {
+  // 作者规则分段切换（2026-07-11 用户裁定推翻旧下拉：规则是「好切换的动作」，不该藏在
+  // 下拉里；且规则决定的是「底部区域」各模块的默认开关，所以控件归入底部区域头部）。
+  // 三档：自动（智能默认，跟随文章作者识别）/ 默认（强制通用规则）/ 各 profile（强制套用）。
+  // 「自动」当前匹配到什么走 tab title 悬停。无 profiles 的账号（网站渠道）返回 null 不渲染。
+  function renderRuleTabs(state) {
     const profiles = listArticleFooterProfiles(state.footerDefaults);
     if (!profiles.length) return null;
     const auto = resolveArticleFooterSelection({
       articleMeta: state.articleMeta,
       footerDefaults: state.footerDefaults,
     });
-    const select = doc.createElement('select');
-    select.className = 'bp-profile-select';
-    select.setAttribute('aria-label', '本文作者规则');
-    const optAuto = doc.createElement('option');
-    optAuto.value = '';
-    optAuto.textContent = '自动 · ' + (auto.autoProfile ? (auto.autoProfile.name || auto.autoProfile.id) : '通用默认');
-    select.appendChild(optAuto);
-    const optNone = doc.createElement('option');
-    optNone.value = 'none';
-    optNone.textContent = '通用默认';
-    select.appendChild(optNone);
-    for (const p of profiles) {
-      const opt = doc.createElement('option');
-      opt.value = p.id;
-      opt.textContent = p.name || p.id;
-      select.appendChild(opt);
-    }
-    // 面板每次 render 全量重建，用 option 的 selected 属性设初值（linkedom 无 select.value setter）。
-    // override 指向已删 profile 时无 option 命中 → 落回首项「自动」。
     const current = state.profileOverride || '';
-    const options = Array.from(select.querySelectorAll('option'));
-    const selected = options.find(o => o.getAttribute('value') === current) || options[0];
-    selected.setAttribute('selected', '');
-    // 悬停自解释：说明用途 + 完整显示当前选中（长 profile 名被省略号截断时的兜底）。
-    select.setAttribute('title', '本文作者规则：' + selected.textContent);
-    select.onchange = () => {
-      if (onArticleFooterProfileChange) {
-        onArticleFooterProfileChange(normalizeArticleFooterProfileOverride(select.value));
-      }
-      render();
-    };
-    // 手动覆盖自动识别时标注「本篇例外」——与块开关偏离默认的既有标记同一交互语言。
-    const wrap = doc.createElement('span');
-    wrap.className = 'bp-profile-wrap';
-    if (current && selected !== options[0]) {
-      const note = doc.createElement('span');
-      note.className = 'bp-profile-note';
-      note.textContent = '本篇例外';
-      wrap.appendChild(note);
+    const defs = [
+      { value: '', label: '自动', hint: '当前识别：' + (auto.autoProfile ? (auto.autoProfile.name || auto.autoProfile.id) : '通用默认') },
+      { value: 'none', label: '默认', hint: '强制通用规则' },
+    ];
+    for (const p of profiles) defs.push({ value: p.id, label: p.name || p.id, hint: '强制套用' });
+
+    const row = doc.createElement('div');
+    row.className = 'bp-rule-row';
+    const label = doc.createElement('span');
+    label.className = 'bp-rule-label';
+    label.textContent = '规则';
+    row.appendChild(label);
+    const tabs = doc.createElement('div');
+    tabs.className = 'bp-rule-tabs';
+    tabs.setAttribute('role', 'tablist');
+    for (const d of defs) {
+      const btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.className = 'bp-rule-tab';
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', d.value === current ? 'true' : 'false');
+      btn.dataset.ruleValue = d.value;
+      btn.textContent = d.label;
+      btn.setAttribute('title', d.label + '（' + d.hint + '）');
+      btn.onclick = () => {
+        if (d.value === current) return;
+        if (onArticleFooterProfileChange) {
+          onArticleFooterProfileChange(normalizeArticleFooterProfileOverride(d.value));
+        }
+        render();
+      };
+      tabs.appendChild(btn);
     }
-    wrap.appendChild(select);
-    return wrap;
+    row.appendChild(tabs);
+    return row;
   }
 
+  // 「底部区域」= 唯一的统一容器（2026-07-11 架构修正：删掉旧的独立「文章专属设置」框
+  // 和「文中元素」分组）。层次：规则分段切换 → 参考文献前署名图 → 文末模块列表。
+  // 选规则决定这些模块的默认开关，这才是用户要的「一个动作切一整套底部默认」。
   function renderFooterControls(wrap, mod) {
     const state = footerState(mod);
     const profile = state.resolved.articleFooterProfile;
     const hasFooter = moduleHasRenderableFooter(mod);
-    const hasArtifacts = artifactControlIDs(profile).length > 0;
-    const profileSelect = renderProfileSelect(state);
-    if (!hasFooter && !hasArtifacts && !profileSelect) return;
+    const artifactIDs = artifactControlIDs(profile);
+    const ruleTabs = renderRuleTabs(state);
+    if (!hasFooter && !artifactIDs.length && !ruleTabs) return;
+
     const moduleWrap = doc.createElement('div');
     moduleWrap.className = 'bp-module';
-    if (profile || profileSelect) {
-      const head = doc.createElement('div');
-      head.className = 'bp-module-head';
-      const title = doc.createElement('div');
-      title.className = 'bp-module-title';
-      title.appendChild(createIcon('layers', doc, { className: 'bp-icon' }));
-      const titleText = doc.createElement('span');
-      titleText.textContent = '文章专属设置';
-      title.appendChild(titleText);
-      head.appendChild(title);
 
-      if (profileSelect) {
-        head.appendChild(profileSelect);
-      } else {
-        const badge = doc.createElement('span');
-        badge.className = 'bp-profile-badge';
-        badge.textContent = '已套用：' + (profile.name || '默认方案');
-        head.appendChild(badge);
-      }
-      moduleWrap.appendChild(head);
-      if (profile) renderArtifactControls(moduleWrap, profile);
-    }
+    const details = doc.createElement('details');
+    details.className = 'bp-footer-details';
+    details.open = true;
+    const summary = doc.createElement('summary');
+    const summaryLeft = doc.createElement('span');
+    summaryLeft.className = 'bp-summary-left';
+    summaryLeft.appendChild(createIcon('chevronRight', doc, { className: 'bp-icon bp-chevron' }));
+    summaryLeft.appendChild(createIcon('panelBottom', doc, { className: 'bp-icon' }));
+    const summaryTitle = doc.createElement('span');
+    summaryTitle.textContent = '底部区域';
+    summaryLeft.appendChild(summaryTitle);
+    summary.appendChild(summaryLeft);
 
+    // 「本文显示」总开关控制文末模块（提示/名片/更多文章）；仅在有 footer 时有意义。
     if (hasFooter) {
-      const details = doc.createElement('details');
-      details.className = 'bp-footer-details';
-      details.open = true;
-      const summary = doc.createElement('summary');
-      const summaryLeft = doc.createElement('span');
-      summaryLeft.className = 'bp-summary-left';
-      summaryLeft.appendChild(createIcon('chevronRight', doc, { className: 'bp-icon bp-chevron' }));
-      summaryLeft.appendChild(createIcon('panelBottom', doc, { className: 'bp-icon' }));
-      const summaryTitle = doc.createElement('span');
-      summaryTitle.textContent = '底部区域';
-      summaryLeft.appendChild(summaryTitle);
-      summary.appendChild(summaryLeft);
-
       const parentSwitch = doc.createElement('span');
       parentSwitch.className = 'bp-parent-switch';
       parentSwitch.onclick = (e) => e.stopPropagation();
@@ -696,24 +671,39 @@ export function mountBlockPanel({
         onChange: (checked) => setFooterEnabled(state, checked),
       }));
       summary.appendChild(parentSwitch);
-      details.appendChild(summary);
+    }
+    details.appendChild(summary);
 
-      if (state.resolved.enabled) {
-        const list = doc.createElement('div');
-        list.className = 'bp-block-list';
+    // 规则分段切换：决定整套底部默认（署名图 + 各 block）。始终显示，不受本文显示控制。
+    if (ruleTabs) details.appendChild(ruleTabs);
+
+    // 模块列表：参考文献前署名图（渲染在正文参考文献前，属底部区域，独立于「本文显示」——
+    // 后者只关文末模块）+ 文末模块（提示/名片/更多文章，受「本文显示」控制）。「本文显示」
+    // 开着时两者同一个列表、连续无缝，正是用户要的「一个统一列表」；关掉时署名图仍可控，
+    // 文末模块折叠为 off-note。署名图行仅当前 profile 有此 artifact（Mote 规则）时出现。
+    const showFooterList = hasFooter && state.resolved.enabled;
+    if (artifactIDs.length || showFooterList) {
+      const list = doc.createElement('div');
+      list.className = 'bp-block-list';
+      for (const id of artifactIDs) {
+        const r = renderArtifactRow(profile, id);
+        if (r) list.appendChild(r);
+      }
+      if (showFooterList) {
         for (const block of state.resolved.blocks || []) {
           const item = renderBlockToggle(state, block);
           if (item) list.appendChild(item);
         }
-        details.appendChild(list);
-      } else {
-        const note = doc.createElement('div');
-        note.className = 'bp-footer-off-note';
-        note.textContent = '本文不输出底部区域，预览和复制都不会包含这些模块。';
-        details.appendChild(note);
       }
-      moduleWrap.appendChild(details);
+      details.appendChild(list);
     }
+    if (hasFooter && !state.resolved.enabled) {
+      const note = doc.createElement('div');
+      note.className = 'bp-footer-off-note';
+      note.textContent = '本文不输出文末模块（提示、名片、更多文章），预览和复制都不会包含它们。';
+      details.appendChild(note);
+    }
+    moduleWrap.appendChild(details);
     wrap.appendChild(moduleWrap);
     editableCount++;
   }

@@ -178,7 +178,7 @@ test('底部区域关闭后不继续暴露底部图片区块编辑入口', () =>
   const parentSwitch = mount.querySelector('details.bp-footer-details .bp-parent-switch [role="switch"]');
   assert.ok(parentSwitch, '底部区域关闭态仍应保留父级开关');
   assert.equal(parentSwitch.getAttribute('aria-checked'), 'false');
-  assert.match(mount.textContent, /本文不输出底部区域/);
+  assert.match(mount.textContent, /本文不输出文末模块/);
   assert.equal(mount.querySelectorAll('.bp-block-item').length, 0, '关闭底部区域后不应显示子模块开关');
   assert.equal(mount.querySelectorAll('.bp-sec').length, 0, '关闭底部区域后不应显示底部图片编辑 section');
   assert.equal(mount.querySelectorAll('.bp-image-btn').length, 0, '关闭底部区域后不应继续显示换图入口');
@@ -204,7 +204,7 @@ test('底部模块禁用时不显示会误导的底部区域开关', () => {
   assert.equal(inst.hasEditableContent(), false);
 });
 
-test('Mote 作者面板按递进层级组织底部区域和文中元素', () => {
+test('Mote 作者：规则分段切换 + 署名图并入底部区域统一列表（架构修正）', () => {
   storage.clear();
   const mount = document.getElementById('mount');
   const originalParent = mount.parentNode;
@@ -244,23 +244,22 @@ test('Mote 作者面板按递进层级组织底部区域和文中元素', () => 
     doc: document,
   });
 
-  assert.match(mount.textContent, /文章专属设置/);
-  // 2026-07-11 用户裁定：「已套用」灰字升级为作者规则选择器（自动/通用默认/各 profile）。
-  const profileSelect = mount.querySelector('.bp-profile-select');
-  assert.ok(profileSelect, '有 profiles 配置时必须渲染作者规则选择器');
-  const optionTexts = Array.from(profileSelect.querySelectorAll('option')).map(o => o.textContent.trim());
-  assert.deepEqual(optionTexts, ['自动 · Mote 作者默认', '通用默认', 'Mote 作者默认']);
-  assert.ok(profileSelect.querySelector('option[selected]').textContent.includes('自动'), '默认跟随自动识别');
-  assert.doesNotMatch(mount.textContent, /Mote 作者模块/);
-  assert.match(mount.textContent, /文中元素/);
-  assert.match(mount.textContent, /参考文献前署名图/);
-
+  // 2026-07-11 架构修正：删掉独立「文章专属设置」框和「文中元素」分组，全部收进「底部区域」。
+  assert.doesNotMatch(mount.textContent, /文章专属设置/);
+  assert.doesNotMatch(mount.textContent, /文中元素/);
   const bottomDetails = mount.querySelector('details.bp-footer-details');
   assert.ok(bottomDetails, '底部区域应使用可展开层级');
   assert.equal(bottomDetails.open, true, '底部区域默认展开');
-
+  // 规则是分段切换（好切换的动作），归入底部区域头部
+  const ruleTabs = bottomDetails.querySelector('.bp-rule-tabs');
+  assert.ok(ruleTabs, '规则分段切换在底部区域内');
+  const tabLabels = Array.from(ruleTabs.querySelectorAll('.bp-rule-tab')).map(b => b.textContent);
+  assert.deepEqual(tabLabels, ['自动', '默认', 'Mote 作者默认']);
+  assert.equal(ruleTabs.querySelector('.bp-rule-tab[aria-selected="true"]').textContent, '自动', '默认选中自动档');
+  // 参考文献前署名图并入底部模块统一列表（署名图在前，渲染在正文更靠上位置）
+  assert.match(mount.textContent, /参考文献前署名图/);
   const blockNames = Array.from(mount.querySelectorAll('.bp-block-name')).map(el => el.textContent.trim());
-  assert.deepEqual(blockNames, ['提示声明', '作者署名', '更多文章']);
+  assert.deepEqual(blockNames, ['参考文献前署名图', '提示声明', '作者署名', '更多文章']);
   assert.equal(blockNames.includes('间距'), false, '间距不应作为勾选模块出现');
 
   const moreNode = mount.querySelector('[data-block-id="more_articles"]');
@@ -309,8 +308,9 @@ test('Mote 作者面板按递进层级组织底部区域和文中元素', () => 
   parentSwitchAfterRerender.dispatchEvent(keydown('Enter'));
 
   assert.deepEqual(lastFooterVisibilityChange, { enabled: 'hide' });
-  assert.match(mount.textContent, /本文不输出底部区域，预览和复制都不会包含这些模块。/);
-  assert.equal(mount.querySelectorAll('.bp-block-item').length, 0, '关闭底部区域后不应继续显示可误点的子模块');
+  assert.match(mount.textContent, /本文不输出文末模块（提示、名片、更多文章），预览和复制都不会包含它们。/);
+  assert.equal(mount.querySelectorAll('[data-block-id]').length, 0, '关闭后文末模块开关消失');
+  assert.ok(mount.querySelector('[data-artifact-id="mote_ref_author_card"]'), '署名图渲染在正文、独立于本文显示，仍保留');
   assert.equal(document.activeElement && document.activeElement.dataset.footerSwitch, 'enabled', '关闭底部区域后焦点应留在父级胶囊开关');
   assert.equal(scrollHost.scrollTop, 96, '关闭底部区域后左侧滚动位置不应重置');
 
@@ -319,7 +319,7 @@ test('Mote 作者面板按递进层级组织底部区域和文中元素', () => 
   assert.equal(scrollHost.scrollTop, 96, '宿主重刷面板后左侧滚动位置不应重置');
 });
 
-test('Mote 文中元素开关识别旧 artifact 隐藏形态', () => {
+test('Mote 署名图开关识别旧 artifact 隐藏形态', () => {
   storage.clear();
   const mount = document.getElementById('mount');
   const cases = [
@@ -349,10 +349,10 @@ test('Mote 文中元素开关识别旧 artifact 隐藏形态', () => {
   }
 });
 
-// ---- 作者规则选择器（2026-07-11 用户裁定）----
-// WHY：作者自动识别失败时整套作者规则曾静默消失且无 UI 可补救；选择器必须在
+// ---- 作者规则分段切换（2026-07-11 架构修正：规则归入底部区域头部）----
+// WHY：作者自动识别失败时整套作者规则曾静默消失且无 UI 可补救；规则切换必须在
 // 「无匹配」时依然可见可选（兜底），且无 profiles 配置的账号（网站渠道）UI 零变化。
-test('作者未识别时选择器仍在，手选 profile 触发回调（静默失效的兜底）', () => {
+test('作者未识别时规则分段切换仍在，手选 profile 救回署名图（静默失效兜底）', () => {
   storage.clear();
   const mount = document.getElementById('mount');
   mount.innerHTML = '';
@@ -372,27 +372,24 @@ test('作者未识别时选择器仍在，手选 profile 触发回调（静默�
     doc: document,
   });
 
-  const select = mount.querySelector('.bp-profile-select');
-  assert.ok(select, '无匹配时选择器仍必须渲染');
-  const optionTexts = Array.from(select.querySelectorAll('option')).map(o => o.textContent.trim());
-  assert.deepEqual(optionTexts, ['自动 · 通用默认', '通用默认', 'Mote 作者默认']);
+  const tabs = mount.querySelector('.bp-rule-tabs');
+  assert.ok(tabs, '无匹配时规则切换仍必须渲染');
+  const tabLabels = Array.from(tabs.querySelectorAll('.bp-rule-tab')).map(b => b.textContent);
+  assert.deepEqual(tabLabels, ['自动', '默认', 'Mote 作者默认']);
+  assert.equal(tabs.querySelector('.bp-rule-tab[aria-selected="true"]').textContent, '自动', '默认选中自动档');
+  // 作者未识别 → 自动档匹配不到 profile → 署名图行不出现
+  assert.equal(mount.querySelector('[data-artifact-id="mote_ref_author_card"]'), null, '自动+无作者：署名图行不出现');
 
-  assert.equal(mount.querySelector('.bp-profile-note'), null, '自动态不显示「本篇例外」');
-
-  // 手选 Mote → 回调收到 profile id，且面板重渲染出该 profile 的文中元素开关
-  Object.defineProperty(select, 'value', { configurable: true, get: () => 'mote_author' });
-  select.onchange();
+  // 手选 Mote → 回调 + 重渲染出署名图行（识别失败也能手动救回）
+  const moteTab = Array.from(tabs.querySelectorAll('.bp-rule-tab')).find(b => b.textContent === 'Mote 作者默认');
+  moteTab.onclick();
   assert.equal(lastProfileChange, 'mote_author');
-  const refreshed = mount.querySelector('.bp-profile-select');
-  assert.ok(refreshed.querySelector('option[selected]').textContent.includes('Mote 作者默认'), '重渲染后选中手选项');
-  assert.match(mount.textContent, /参考文献前署名图/, '手选后文中元素开关组出现');
-  // 手动覆盖必须有「本篇例外」标记——与块开关偏离默认的既有语言一致
-  const note = mount.querySelector('.bp-profile-note');
-  assert.ok(note && note.textContent === '本篇例外', '手选态显示「本篇例外」');
-  assert.match(refreshed.getAttribute('title') || '', /Mote 作者默认/, 'title 悬停显示完整当前值');
+  const refreshed = mount.querySelector('.bp-rule-tabs');
+  assert.equal(refreshed.querySelector('.bp-rule-tab[aria-selected="true"]').textContent, 'Mote 作者默认', '手选后高亮 Mote');
+  assert.ok(mount.querySelector('[data-artifact-id="mote_ref_author_card"]'), '手选 Mote 后署名图行出现');
 });
 
-test('无 profiles 配置的账号不渲染选择器（网站渠道 UI 零变化）', () => {
+test('无 profiles 配置的账号不渲染规则切换（网站渠道 UI 零变化）', () => {
   storage.clear();
   const mount = document.getElementById('mount');
   mount.innerHTML = '';
@@ -407,6 +404,6 @@ test('无 profiles 配置的账号不渲染选择器（网站渠道 UI 零变化
     onChange: () => {},
     doc: document,
   });
-  assert.equal(mount.querySelector('.bp-profile-select'), null);
+  assert.equal(mount.querySelector('.bp-rule-tabs'), null, '无 profiles 时不渲染规则切换');
   assert.doesNotMatch(mount.textContent, /文章专属设置/);
 });
