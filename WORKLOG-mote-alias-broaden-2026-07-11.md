@@ -41,14 +41,22 @@ Mote 识别有**两个**匹配点，且都太严：
 - 前端 evaluateCondition/compareCondition 已支持 any + includes（无需改）
 - 选择器 profileAuthorNormalized 取 aliases[0]="mote"→注入身份"mote"→condition includes mote 触发（一致）
 
-## 验收
+## 验收（全部完成）
 
-- [ ] Go 单测：mergeRuleBehavior 迁移 conditions、mergeRuleDefaults 迁移 aliases（旧默认→新；自定义不动）
-- [ ] 前端测试：aliasGroupMatches 覆盖 5 种写法；behavior condition any/includes 匹配
-- [ ] go test + npm test 全绿
-- [ ] 本地起服务：conditions 从持久化旧默认迁移为新值（curl /api/rules/active 验证）
-- [ ] 真实浏览器：作者写「Mote」「莫特」「MOTE莫特」等，署名图 + profile 都识别
-- [ ] 部署 + 生产 curl 确认 conditions/author_aliases 已迁移新值
+- [x] Go 单测（rule_mote_alias_migration_test.go 6 条）：conditions/aliases 旧默认→新；自定义保留；内置默认新值
+- [x] 前端测试：署名图 6 变体命中 + 非 Mote 不误伤；profile 匹配 6 变体 + 非 Mote 不误伤
+- [x] go test 全绿；npm test 877 全绿
+- [x] 本地起服务：store 持久化的旧 `eq mote莫特` 加载即迁移为 `any/includes`（curl 确认）
+- [x] 本地浏览器：导入「莫特」「MOTE莫特」「Mote」「mote 莫特」均注入署名图，张三对照不误伤
+- [x] 部署 success（run 29146551686）；生产 curl：conditions=any/includes、author_aliases=[mote,莫特]（迁移生效）
+- [x] 生产真机端到端：三种写法署名图 + 面板 Mote profile + 署名图行全部识别
+
+## 结论
+
+Mote 识别已放宽为「作者名规范化后含 mote 或 莫特」，覆盖用户所有写法。生产两处持久化的
+旧值经一次性迁移自动升级，无需 admin 密码。迁移只命中「等于旧内置默认」的值，后台自定义
+过的条件/别名不受影响。教训：改规则数据前先分清「代码默认 vs 持久化」——merge 会用持久化
+覆盖代码默认，光改默认对已持久化的账号不生效。
 
 ## 时间线
 
