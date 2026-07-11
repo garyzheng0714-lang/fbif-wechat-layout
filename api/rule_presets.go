@@ -151,7 +151,31 @@ func mergeRuleDefaults(baselineID string, config map[string]any) map[string]any 
 	if mods != nil && (srcMods == nil || srcMods["article_footer_defaults"] == nil) {
 		mods["article_footer_defaults"] = disabledArticleFooterDefaultsModule()
 	}
+	if mods != nil {
+		if afd, ok := mods["article_footer_defaults"].(map[string]any); ok {
+			migrateLegacyMoteAliases(afd)
+		}
+	}
 	return merged
+}
+
+// migrateLegacyMoteAliases 一次性迁移（2026-07-11）：把旧的 mote 别名
+// ["Mote莫特","Mote 莫特"]（规范化后只能整体匹配）就地放宽为 ["mote","莫特"]（包含匹配，
+// 覆盖 mote/莫特 单独出现）。只命中「等于旧内置默认」的持久化值，自定义别名不动。
+func migrateLegacyMoteAliases(afd map[string]any) {
+	aliases, ok := afd["author_aliases"].(map[string]any)
+	if !ok {
+		return
+	}
+	mote, ok := aliases["mote"].([]any)
+	if !ok || len(mote) != 2 {
+		return
+	}
+	a0, _ := mote[0].(string)
+	a1, _ := mote[1].(string)
+	if a0 == "Mote莫特" && a1 == "Mote 莫特" {
+		aliases["mote"] = []any{"mote", "莫特"}
+	}
 }
 
 func (s *rulePresetStore) readStoreLocked() (ruleStoreDocumentV2, error) {

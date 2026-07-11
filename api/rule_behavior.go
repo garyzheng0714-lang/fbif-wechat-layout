@@ -40,11 +40,14 @@ func defaultRuleBehavior() map[string]any {
 			// footer.html 内嵌的存量原创声明（engine.js 转载改写时按此字面量定位替换）。
 			"footer_stock_original_text": map[string]any{"type": "string", "default": "* 本文为FBIF原创，欢迎转发朋友圈；"},
 		},
+		// Mote 作者识别：作者名规范化（去空格转小写）后包含 mote 或 莫特 即命中，覆盖
+		// mote / 莫特 / mote 莫特 / Mote莫特 / MOTE莫特 各种写法（2026-07-11 用户裁定放宽）。
 		"conditions": []any{
 			map[string]any{
 				"id": "is_mote_author",
-				"all": []any{
-					map[string]any{"path": "article.author_normalized", "op": "eq", "value": "mote莫特"},
+				"any": []any{
+					map[string]any{"path": "article.author_normalized", "op": "includes", "value": "mote"},
+					map[string]any{"path": "article.author_normalized", "op": "includes", "value": "莫特"},
 				},
 			},
 		},
@@ -122,8 +125,36 @@ func mergeRuleBehavior(baselineID string, behavior map[string]any) map[string]an
 	for _, key := range []string{"schema_version", "conditions", "actions",
 		"author_regex", "tip_regex", "ref_header_regex", "ref_item_regex"} {
 		if value, ok := behavior[key]; ok {
+			// 一次性迁移（2026-07-11）：把旧的精确匹配 is_mote_author 条件放宽为
+			// mote/莫特 包含匹配。只跳过「等于旧内置默认」的持久化 conditions（用 baseline
+			// 新默认）；后台自定义过的条件保留不动。见 WORKLOG-mote-alias-broaden-2026-07-11.md。
+			if key == "conditions" && isLegacyMoteConditions(value) {
+				continue
+			}
 			merged[key] = value
 		}
 	}
 	return merged
+}
+
+// isLegacyMoteConditions 判断持久化 conditions 是否恰为旧内置默认（单条 is_mote_author，
+// all + eq "mote莫特"）。用于一次性迁移放宽 Mote 识别，只命中未被后台改动过的旧默认。
+func isLegacyMoteConditions(value any) bool {
+	arr, ok := value.([]any)
+	if !ok || len(arr) != 1 {
+		return false
+	}
+	c, ok := arr[0].(map[string]any)
+	if !ok || c["id"] != "is_mote_author" {
+		return false
+	}
+	all, ok := c["all"].([]any)
+	if !ok || len(all) != 1 {
+		return false
+	}
+	e, ok := all[0].(map[string]any)
+	if !ok {
+		return false
+	}
+	return e["path"] == "article.author_normalized" && e["op"] == "eq" && e["value"] == "mote莫特"
 }

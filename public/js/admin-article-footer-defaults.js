@@ -12,7 +12,7 @@ export function defaultArticleFooterDefaultsData() {
   return {
     schema_version: 1,
     enabled: true,
-    author_aliases: { mote: ['Mote莫特', 'Mote 莫特'] },
+    author_aliases: { mote: ['mote', '莫特'] },
     profiles: [{
       id: 'mote_author',
       name: 'Mote 作者默认',

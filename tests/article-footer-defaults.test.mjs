@@ -239,3 +239,28 @@ test('选择器：normalize 空值→undefined（自动）', () => {
   assert.equal(normalizeArticleFooterProfileOverride(null), undefined);
   assert.equal(normalizeArticleFooterProfileOverride('  mote_author '), 'mote_author');
 });
+
+// ---- Mote 识别放宽（2026-07-11）：profile 匹配覆盖 mote/莫特 变体 ----
+const broadenedFooterDefaults = {
+  enabled: true,
+  author_aliases: { mote: ['mote', '莫特'] },
+  profiles: [{
+    id: 'mote_author', name: 'Mote 作者默认',
+    match: { author_alias_group: 'mote' },
+    artifact_visibility: { mote_ref_author_card: true },
+  }],
+};
+
+test('放宽后 profile 匹配：mote/莫特/mote 莫特/Mote莫特/MOTE莫特 都识别为 Mote', () => {
+  for (const author of ['mote', '莫特', 'mote 莫特', 'Mote莫特', 'MOTE莫特', 'Mote 莫特']) {
+    const s = resolveArticleFooterSelection({ articleMeta: { author }, footerDefaults: broadenedFooterDefaults });
+    assert.equal(s.autoProfile && s.autoProfile.id, 'mote_author', `作者「${author}」应命中 Mote profile`);
+  }
+});
+
+test('放宽后 profile 匹配：非 Mote 作者不误命中', () => {
+  for (const author of ['张三', 'FBIF', 'Bobo']) {
+    const s = resolveArticleFooterSelection({ articleMeta: { author }, footerDefaults: broadenedFooterDefaults });
+    assert.equal(s.autoProfile, null, `作者「${author}」不应命中 Mote profile`);
+  }
+});

@@ -9,11 +9,14 @@ export const DEFAULT_BEHAVIOR = Object.freeze({
       default: MOTE_REF_HEAD_IMAGE_URL,
     }),
   }),
+  // Mote 作者识别：作者名规范化（去空格转小写）后包含 mote 或 莫特 即命中，覆盖
+  // mote / 莫特 / mote 莫特 / Mote莫特 / MOTE莫特 各种写法（2026-07-11 用户裁定放宽）。
   conditions: Object.freeze([
     Object.freeze({
       id: 'is_mote_author',
-      all: Object.freeze([
-        Object.freeze({ path: 'article.author_normalized', op: 'eq', value: 'mote莫特' }),
+      any: Object.freeze([
+        Object.freeze({ path: 'article.author_normalized', op: 'includes', value: 'mote' }),
+        Object.freeze({ path: 'article.author_normalized', op: 'includes', value: '莫特' }),
       ]),
     }),
   ]),

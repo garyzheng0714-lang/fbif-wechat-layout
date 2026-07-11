@@ -181,3 +181,27 @@ test('behavior action does not invent blankBefore when the target did not have i
   assert.equal(Object.prototype.hasOwnProperty.call(out[1], 'blankBefore'), false);
   assert.equal(out[2].k, 'refH');
 });
+
+// ---- Mote 识别放宽（2026-07-11 用户裁定：含 mote/莫特 各种写法）----
+test('放宽后 Mote 署名图匹配 mote/莫特/MOTE莫特 等变体', () => {
+  for (const author of ['mote', '莫特', 'mote 莫特', 'Mote莫特', 'MOTE莫特', 'Mote 莫特']) {
+    const out = applyBehaviorToElems(
+      [{ k: 'txt', runs: [{ type: 'txt', text: '正文' }] }, { k: 'refH', text: '参考来源' }],
+      { article: { author_normalized: normalizeAuthorName(author) } },
+      DEFAULT_BEHAVIOR
+    );
+    assert.equal(out.length, 3, `作者「${author}」应插入署名图`);
+    assert.equal(out[1].className, 'wx-mote-author', `作者「${author}」署名图 class`);
+  }
+});
+
+test('放宽后非 Mote 作者不误插署名图', () => {
+  for (const author of ['张三', 'FBIF', 'Bobo']) {
+    const out = applyBehaviorToElems(
+      [{ k: 'txt', runs: [{ type: 'txt', text: '正文' }] }, { k: 'refH', text: '参考来源' }],
+      { article: { author_normalized: normalizeAuthorName(author) } },
+      DEFAULT_BEHAVIOR
+    );
+    assert.equal(out.length, 2, `作者「${author}」不应插入署名图`);
+  }
+});

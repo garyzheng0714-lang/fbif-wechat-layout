@@ -68,8 +68,10 @@ func defaultArticleFooterDefaultsModule() map[string]any {
 	return map[string]any{
 		"schema_version": 1,
 		"enabled":        true,
+		// mote/莫特 别名（规范化后 includes 匹配）：覆盖 mote / 莫特 / mote 莫特 /
+		// Mote莫特 / MOTE莫特 各种写法（2026-07-11 用户裁定放宽）。
 		"author_aliases": map[string]any{
-			"mote": []any{"Mote莫特", "Mote 莫特"},
+			"mote": []any{"mote", "莫特"},
 		},
 		"profiles": []any{
 			map[string]any{
