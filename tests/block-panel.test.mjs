@@ -377,6 +377,8 @@ test('作者未识别时选择器仍在，手选 profile 触发回调（静默�
   const optionTexts = Array.from(select.querySelectorAll('option')).map(o => o.textContent.trim());
   assert.deepEqual(optionTexts, ['自动 · 通用默认', '通用默认', 'Mote 作者默认']);
 
+  assert.equal(mount.querySelector('.bp-profile-note'), null, '自动态不显示「本篇例外」');
+
   // 手选 Mote → 回调收到 profile id，且面板重渲染出该 profile 的文中元素开关
   Object.defineProperty(select, 'value', { configurable: true, get: () => 'mote_author' });
   select.onchange();
@@ -384,6 +386,10 @@ test('作者未识别时选择器仍在，手选 profile 触发回调（静默�
   const refreshed = mount.querySelector('.bp-profile-select');
   assert.ok(refreshed.querySelector('option[selected]').textContent.includes('Mote 作者默认'), '重渲染后选中手选项');
   assert.match(mount.textContent, /参考文献前署名图/, '手选后文中元素开关组出现');
+  // 手动覆盖必须有「本篇例外」标记——与块开关偏离默认的既有语言一致
+  const note = mount.querySelector('.bp-profile-note');
+  assert.ok(note && note.textContent === '本篇例外', '手选态显示「本篇例外」');
+  assert.match(refreshed.getAttribute('title') || '', /Mote 作者默认/, 'title 悬停显示完整当前值');
 });
 
 test('无 profiles 配置的账号不渲染选择器（网站渠道 UI 零变化）', () => {

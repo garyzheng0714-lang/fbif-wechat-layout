@@ -56,7 +56,9 @@ function ensureStyle(doc) {
 .bp-icon{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--fs-text-2,#646a73);flex:none;}
 .bp-icon svg{display:block;width:16px;height:16px;}
 .bp-profile-badge{font-size:11px;color:var(--fs-text-3,#6f757d);white-space:nowrap;}
-.bp-profile-select{font-size:12px;color:var(--fs-text-1,#1f2329);border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);background:#fff;padding:3px 6px;max-width:170px;cursor:pointer;}
+.bp-profile-wrap{display:inline-flex;align-items:center;gap:8px;min-width:0;}
+.bp-profile-note{font-size:11px;color:var(--fs-text-3,#8f959e);white-space:nowrap;flex:none;}
+.bp-profile-select{appearance:none;-webkit-appearance:none;font-size:12px;line-height:1.5;color:var(--fs-text-1,#1f2329);border:1px solid var(--fs-border-control,#d9dce0);border-radius:var(--fs-r-xs,4px);padding:4px 24px 4px 8px;max-width:190px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23646a73' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 6px center/14px 14px;transition:border-color var(--fs-t-fast,150ms) var(--fs-ease-out,ease-out);}
 .bp-profile-select:hover{border-color:var(--fs-brand,#1456f0);}
 .bp-profile-select:focus{outline:none;border-color:var(--fs-brand,#1456f0);box-shadow:0 0 0 2px var(--fs-brand-a2,rgba(20,86,240,.15));}
 .bp-group{background:var(--fs-bg-nested,#f7f8fa);border-radius:var(--fs-r-m,8px);padding:10px;}
@@ -614,13 +616,25 @@ export function mountBlockPanel({
     const options = Array.from(select.querySelectorAll('option'));
     const selected = options.find(o => o.getAttribute('value') === current) || options[0];
     selected.setAttribute('selected', '');
+    // 悬停自解释：说明用途 + 完整显示当前选中（长 profile 名被省略号截断时的兜底）。
+    select.setAttribute('title', '本文作者规则：' + selected.textContent);
     select.onchange = () => {
       if (onArticleFooterProfileChange) {
         onArticleFooterProfileChange(normalizeArticleFooterProfileOverride(select.value));
       }
       render();
     };
-    return select;
+    // 手动覆盖自动识别时标注「本篇例外」——与块开关偏离默认的既有标记同一交互语言。
+    const wrap = doc.createElement('span');
+    wrap.className = 'bp-profile-wrap';
+    if (current && selected !== options[0]) {
+      const note = doc.createElement('span');
+      note.className = 'bp-profile-note';
+      note.textContent = '本篇例外';
+      wrap.appendChild(note);
+    }
+    wrap.appendChild(select);
+    return wrap;
   }
 
   function renderFooterControls(wrap, mod) {
