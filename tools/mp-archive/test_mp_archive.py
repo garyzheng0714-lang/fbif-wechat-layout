@@ -61,6 +61,16 @@ class TestArchive(unittest.TestCase):
         self.assertEqual(rows[1][:3], ("A1", 1, "次条"))
         self.assertIn("正文HTML", rows[0][3])
 
+    def test_material_media_id_and_source(self):
+        """material 源用 media_id 作 id，source 列写 material，正文入库。"""
+        it = {"media_id": "M9", "update_time": 1600,
+              "content": {"news_item": [_news_item("素材篇", "mu")]}}
+        ins, skp = M.store_item(self.conn, it, 1, source="material")
+        self.assertEqual((ins, skp), (1, 0))
+        row = self.conn.execute(
+            "SELECT article_id, source, title FROM articles").fetchone()
+        self.assertEqual(row, ("M9", "material", "素材篇"))
+
     def test_dedup_on_reinsert(self):
         """同 (article_id, idx) 再插被 INSERT OR IGNORE 跳过。"""
         it = _item("A1", 1000, [_news_item("头条", "u0")])
@@ -84,8 +94,7 @@ class TestArchive(unittest.TestCase):
             2: [_item("C", 28, [_news_item("c", "uc")])],
         }
         fake = FakeWx(total_count=3, pages=pages)
-        M.fetch_page = fake.fetch_page          # monkeypatch
-        stat = M.backfill(self.conn, "tok", sleep_sec=0)
+        stat = M.backfill(self.conn, "tok", sleep_sec=0, fetch_fn=fake.fetch_page)
         self.assertEqual(stat["inserted"], 3)
         self.assertEqual(stat["next_offset"], 3)
         self.assertTrue(stat["done"])
@@ -100,11 +109,12 @@ class TestArchive(unittest.TestCase):
             2: [_item("C", 28, [_news_item("c", "uc")])],
         }
         fake = FakeWx(total_count=3, pages=pages)
-        M.fetch_page = fake.fetch_page
-        s1 = M.backfill(self.conn, "tok", max_articles=1, sleep_sec=0)
+        s1 = M.backfill(self.conn, "tok", max_articles=1, sleep_sec=0,
+                        fetch_fn=fake.fetch_page)
         self.assertFalse(s1["done"])            # 没抓完
         self.assertEqual(s1["next_offset"], 2)  # 第一页(2篇)后就到量停
-        s2 = M.backfill(self.conn, "tok", sleep_sec=0)   # 续
+        s2 = M.backfill(self.conn, "tok", sleep_sec=0,
+                        fetch_fn=fake.fetch_page)   # 续
         self.assertTrue(s2["done"])
         self.assertEqual(s2["inserted"], 1)     # 只新增 C，A/B 去重
         self.assertEqual(M.db_count(self.conn), 3)
@@ -113,11 +123,11 @@ class TestArchive(unittest.TestCase):
         """--reset 从头再抓，已入库的全去重，篇数不变。"""
         pages = {0: [_item("A", 30, [_news_item("a", "ua")])]}
         fake = FakeWx(total_count=1, pages=pages)
-        M.fetch_page = fake.fetch_page
-        M.backfill(self.conn, "tok", sleep_sec=0)
+        M.backfill(self.conn, "tok", sleep_sec=0, fetch_fn=fake.fetch_page)
         M.meta_set(self.conn, "next_offset", "0")   # 模拟 --reset
         M.meta_set(self.conn, "done", "0")
-        stat = M.backfill(self.conn, "tok", sleep_sec=0, resume=True)
+        stat = M.backfill(self.conn, "tok", sleep_sec=0, resume=True,
+                          fetch_fn=fake.fetch_page)
         self.assertEqual(stat["inserted"], 0)
         self.assertEqual(stat["skipped"], 1)
         self.assertEqual(M.db_count(self.conn), 1)

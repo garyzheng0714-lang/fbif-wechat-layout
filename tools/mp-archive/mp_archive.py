@@ -67,10 +67,25 @@ def fetch_token(appid, secret):
 
 def fetch_page(token, offset, count=PAGE_SIZE):
     """
-    拉一页已发布文章。返回原始 dict（含 total_count / item[]）。失败抛 WxError。
+    freepublish/batchget：只含「通过发布 API 发表」的记录——对 FBIF 这种大量后台
+    人工群发的号是**不完整子集**（实测仅 262，漏掉绝大部分）。保留仅作对照，默认不用。
     """
     url = f"{API_BASE}/freepublish/batchget?access_token={token}"
     body = {"offset": offset, "count": count, "no_content": 0}
+    d = _post_json(url, body)
+    if d.get("errcode"):
+        raise WxError(d.get("errcode"), d.get("errmsg", ""))
+    return d
+
+
+def fetch_material(token, offset, count=PAGE_SIZE):
+    """
+    material/batchget_material（图文素材库）：FBIF 全量文章的真实所在（实测 6483 组图文，
+    含完整正文、可追溯到更早年份）。返回同样是 {total_count, item[]}，但每条 item 用
+    `media_id` 作 id、含 news_item[] 完整正文。这是建库的**主源**。
+    """
+    url = f"{API_BASE}/material/batchget_material?access_token={token}"
+    body = {"type": "news", "offset": offset, "count": count}
     d = _post_json(url, body)
     if d.get("errcode"):
         raise WxError(d.get("errcode"), d.get("errmsg", ""))
@@ -89,8 +104,9 @@ class WxError(Exception):
 # ----------------------------------------------------------------------------
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (
-    article_id          TEXT NOT NULL,   -- freepublish 的发布 id
+    article_id          TEXT NOT NULL,   -- id：material 用 media_id / freepublish 用 article_id
     idx                 INTEGER NOT NULL,-- 多图文里的第几篇（0 起）
+    source              TEXT,            -- 来源接口：material / freepublish
     title               TEXT,
     author              TEXT,
     digest              TEXT,            -- 摘要（微信原生）
@@ -131,24 +147,25 @@ def meta_set(conn, key, value):
     )
 
 
-def store_item(conn, item, now_ts):
+def store_item(conn, item, now_ts, source="freepublish"):
     """
-    把一个 freepublish item（可能多图文）拆成多条 news_item 入库。
-    返回 (inserted, skipped)：新插入条数、已存在跳过条数。
+    把一个 item（可能多图文）拆成多条 news_item 入库。material 用 media_id、
+    freepublish 用 article_id 作 id。返回 (inserted, skipped)。
     """
-    article_id = str(item.get("article_id", ""))
-    publish_time = int(item.get("update_time", 0))
+    article_id = str(item.get("article_id") or item.get("media_id") or "")
+    publish_time = int(item.get("update_time", 0)
+                       or (item.get("content") or {}).get("update_time", 0))
     news = (item.get("content") or {}).get("news_item") or []
     inserted = skipped = 0
     for idx, n in enumerate(news):
         cur = conn.execute(
             """INSERT OR IGNORE INTO articles
-               (article_id, idx, title, author, digest, content_html,
+               (article_id, idx, source, title, author, digest, content_html,
                 thumb_url, content_source_url, url, publish_time,
                 is_deleted, raw_json, fetched_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                article_id, idx,
+                article_id, idx, source,
                 n.get("title"), n.get("author"), n.get("digest"),
                 n.get("content"), n.get("thumb_url"),
                 n.get("content_source_url"), n.get("url"),
@@ -172,18 +189,22 @@ def now_ts():
     return int(time.time())
 
 
-def backfill(conn, token, max_articles=None, sleep_sec=1.0, resume=True):
+def backfill(conn, token, max_articles=None, sleep_sec=1.0, resume=True,
+             source="material", fetch_fn=None):
     """
     从新到旧分页补抓。offset 游标存 meta.next_offset，可断点续传。
+    source: material（主源，全量）/ freepublish（对照子集）。
     max_articles: 本次最多处理多少「篇」(news_item)，达到即停（限速慢慢补）。None=不限。
     返回统计 dict。
     """
+    if fetch_fn is None:
+        fetch_fn = fetch_material if source == "material" else fetch_page
     offset = int(meta_get(conn, "next_offset", "0")) if resume else 0
     total_count = None
     ins = skp = pages = seen = 0
 
     while True:
-        page = fetch_page(token, offset, PAGE_SIZE)
+        page = fetch_fn(token, offset, PAGE_SIZE)
         total_count = int(page.get("total_count", 0))
         items = page.get("item") or []
         if not items:
@@ -191,7 +212,7 @@ def backfill(conn, token, max_articles=None, sleep_sec=1.0, resume=True):
             break
 
         for item in items:
-            i, s = store_item(conn, item, now_ts())
+            i, s = store_item(conn, item, now_ts(), source)
             ins += i
             skp += s
             seen += (i + s)
@@ -248,6 +269,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="FBIF 公众号历史文章库抓取器")
     ap.add_argument("--db", default=os.environ.get("MP_ARCHIVE_DB", DEFAULT_DB),
                     help="SQLite 库路径（默认脚本同目录 mp-archive.db）")
+    ap.add_argument("--source", choices=["material", "freepublish"],
+                    default="material",
+                    help="抓取源：material=图文素材库(全量,默认) / freepublish=发表记录(子集,对照用)")
     ap.add_argument("--max-articles", type=int, default=None,
                     help="本次最多抓多少篇（限速慢慢补；不填=一直抓到完）")
     ap.add_argument("--sleep", type=float, default=1.0,
@@ -286,7 +310,7 @@ def main(argv=None):
     before = db_count(conn)
     try:
         stat = backfill(conn, token, max_articles=args.max_articles,
-                        sleep_sec=args.sleep)
+                        sleep_sec=args.sleep, source=args.source)
     except WxError as e:
         whitelist_hint(e)
         print(f"❌ 抓取中断：{e}", file=sys.stderr)

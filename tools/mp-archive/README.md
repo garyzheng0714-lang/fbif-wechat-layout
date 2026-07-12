@@ -1,7 +1,20 @@
 # FBIF 公众号历史文章库抓取器
 
-用微信**官方**接口 `freepublish/batchget`（获取已发布文章列表）把一个公众号的全量历史
-文章落成一个可查询、可去重、可断点续抓的 SQLite 库。凭据只走环境变量，绝不写死。
+用微信**官方**接口把一个公众号的历史文章落成可查询、可去重、可断点续抓的 SQLite 库。
+凭据只走环境变量，绝不写死。
+
+## 两个源要一起抓（关键）
+
+微信没有单一"全量历史"接口，两个接口**互补、几乎不重叠**，必须都抓才最全：
+
+| 源(`--source`) | 接口 | 覆盖 | 说明 |
+|---|---|---|---|
+| `material`（默认） | 图文素材库 | **2015 → 2023-07，约 1.3 万篇** | 老档案主体，含完整正文 |
+| `freepublish` | 已发表记录 | 2023-09 → 至今，约 300 篇 | 近年新文章走这条路 |
+
+> ⚠️ **覆盖真相**：本库对 **2015-2021 接近全量**（1.3 万篇），对 **2022-2026 稀疏**（约 330 篇）——
+> FBIF 约 2022 起改了发布方式，那之后的文章**两个官方接口都收不全**（是微信侧盲区，非脚本问题）。
+> 要补 2022+ 需另想办法（mc-fb 已收录版 / 后台内容管理导出 / __biz 枚举）。
 
 ## 一次性前提：加 IP 白名单（只有你能做）
 
@@ -19,19 +32,21 @@ cd /root/mp-archive     # 脚本已放这里
 export WECHAT_MP_APPID=<公众号 AppID，见密钥文档>
 export WECHAT_MP_SECRET=<公众号 AppSecret，见密钥文档，别写进任何文件>
 
-# 1) 先看接口报的总数（不写库）
-python3 mp_archive.py --status         # 空库时游标为 0
+# 1) 抓老档案主体（素材库，2015→2023，约 1.3 万篇；默认 --source material）
+python3 mp_archive.py --sleep 0.5
+python3 mp_archive.py --reset --sleep 0.5      # 抓完补一次 reset 兜底补漏
 
-# 2) 小批验证一页（确认字段完整）
-python3 mp_archive.py --max-articles 20
+# 2) 并入近年新文章（freepublish，2023-09→今）到同一个库，自动去重不冲突
+python3 mp_archive.py --source freepublish --reset --sleep 0.5
 
-# 3) 没问题就放开补全量（从新到旧，翻到完为止）
-python3 mp_archive.py --sleep 1
+# 3) 随时看状态
+python3 mp_archive.py --status
 
 # 中断了随时再跑同一条命令，会从断点(next_offset)接着抓，已抓的自动去重。
 ```
 
-「慢慢补」：用 `--max-articles N` 每天只抓 N 篇，明天再跑接着抓，尊重每日配额。
+两个源共用一个库、用 `source` 列区分；`--reset` 只重置游标不清库。
+「慢慢补」：`--max-articles N` 每天只抓 N 篇，明天接着抓，尊重每日配额。
 
 ### ⚠️ 增量/补漏要从头扫（offset 竞态）
 
