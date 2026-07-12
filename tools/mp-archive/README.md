@@ -33,6 +33,15 @@ python3 mp_archive.py --sleep 1
 
 「慢慢补」：用 `--max-articles N` 每天只抓 N 篇，明天再跑接着抓，尊重每日配额。
 
+### ⚠️ 增量/补漏要从头扫（offset 竞态）
+
+接口按 offset 分页，但**列表在实时变**：抓取期间新发一篇，它会插到 offset 0，把后面
+整体挤下一位。若用 `next_offset` 断点续抓，最新那篇可能被跳过。所以：
+
+- **冷启动全量**：断点续抓没问题，抓完**再跑一次 `--reset`** 兜底补漏（去重会跳过已有）。
+- **日常增量/监控**：永远 `--reset` 从 offset 0 开始扫，靠去重跳过旧的、只捞新的——
+  这也正是未来「公众号发一篇 → 自动同步」监控器该有的姿势（轮询 offset 0 + article_id 差集）。
+
 ## 库长什么样
 
 SQLite 文件默认 `tools/mp-archive/mp-archive.db`（可用 `--db` 或 `MP_ARCHIVE_DB` 改）。
