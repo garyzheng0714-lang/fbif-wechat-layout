@@ -181,3 +181,30 @@ test('自包含 CSS 使用 footer-lib- 前缀', () => {
 test('复用 admin-secondary / admin-primary 按钮 class', () => {
   assert.match(src, /admin-secondary/, '应复用 admin-secondary 按钮样式');
 });
+
+test('页脚库外壳只使用 Feishu token，不回流旧色值或不可读弱灰', () => {
+  assert.doesNotMatch(
+    src,
+    /#(?:0075de|dd5b00|f0ebe5|a39e98|615d59|8f959e)\b/i,
+    '页脚库外壳不得继续使用旧 Notion 色值或旧 text-3 灰'
+  );
+  assert.match(src, /var\(--fs-brand/, '交互色应引用 --fs-brand');
+  assert.match(src, /var\(--fs-text-3/, '弱文字应引用已校正对比度的 --fs-text-3');
+});
+
+test('JSON 反馈使用语义状态而非 JS 内联颜色', () => {
+  assert.doesNotMatch(src, /\.style\.color\s*=/, '反馈颜色不得由 JS 写入内联样式');
+  assert.match(src, /dataset\.tone/, '反馈结果应通过 data-tone 暴露语义状态');
+});
+
+test('折叠、开关和动态反馈暴露可访问状态', () => {
+  assert.match(src, /aria-expanded=/, '片段折叠按钮应暴露 aria-expanded');
+  assert.match(src, /role="switch"/, '页脚启用按钮应使用 switch 语义');
+  assert.match(src, /aria-checked=/, '页脚启用按钮应暴露 aria-checked');
+  assert.match(src, /aria-live="polite"/, '动态校验反馈应通过 aria-live 宣告');
+});
+
+test('重置片段是按钮动作而不是伪链接', () => {
+  assert.match(src, /<button[^>]+footer-lib-reset-link/, '重置动作应使用 button');
+  assert.doesNotMatch(src, /<a href="#"[^>]+footer-lib-reset-link/, '不得用 href="#" 模拟按钮');
+});

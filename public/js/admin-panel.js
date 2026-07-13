@@ -1,7 +1,6 @@
 // admin-panel.js — password-gated rule preset editor.
 // Keeps UI orchestration separate from the rule schema and from the rendering
 // engine, so adding an editable field means updating rule-document.js first.
-
 import {
   DEFAULT_RULE_CONFIG,
   RULE_SCHEMA,
@@ -30,9 +29,9 @@ import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { adminDirtyCount, updateDirtyChip } from './admin-dirty-state.js';
 import { numberField, bindSteppers } from './admin-field-controls.js';
 import { livePreviewHTML, applyLivePreview, targetForKey } from './admin-live-preview.js';
+import { bindRovingTabs, createAdminDialogA11y } from './admin-dialog-a11y.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 export { uniqueClientRuleID } from './admin-rule-state.js';
-
 const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
 const SAVED_AFTER_CONTEXT_CHANGE = '规则已保存，但未应用：当前账号已变化；请重新打开后台确认', APPLIED_AFTER_CONTEXT_CHANGE = '规则已应用到原账号，但当前账号已变化；请重新打开后台确认', DELETED_AFTER_CONTEXT_CHANGE = '规则已在服务端删除，但当前账号已变化；请重新打开后台确认';
 function esc(s) {
@@ -46,7 +45,6 @@ function fieldValue(config, field) {
   const normalized = normalizeRuleConfig(config);
   return normalized[field.key];
 }
-
 function renderField(config, field) {
   const value = fieldValue(config, field);
   if (field.type === 'color') {
@@ -77,7 +75,6 @@ function renderField(config, field) {
   }
   return numberField(field, value, esc);
 }
-
 function renderGroups(config) {
   return RULE_SCHEMA.map(group => `
     <section class="admin-rule-group">
@@ -112,6 +109,7 @@ export function initAdminPanel(options = {}) {
   const rulePacks = Array.isArray(options.rulePacks) ? options.rulePacks : [];
 
   let overlay = null;
+  let dialogA11y = null;
   let password = '';
   let doc = null;
   let selectedID = '';
@@ -170,21 +168,19 @@ export function initAdminPanel(options = {}) {
     window.clearTimeout(jsonSyncTimer);
     overlay.remove();
     overlay = null;
-    document.removeEventListener('keydown', onKey);
-  }
-
-  function onKey(e) {
-    if (e.key === 'Escape') close();
+    dialogA11y?.release();
+    dialogA11y = null;
   }
 
   function open() {
     if (overlay) return;
     operationGate.invalidate();
     if (pendingOperationNotice) status = pendingOperationNotice;
+    const opener = document.activeElement;
     overlay = document.createElement('div');
     overlay.className = 'admin-overlay';
     document.body.appendChild(overlay);
-    document.addEventListener('keydown', onKey);
+    dialogA11y = createAdminDialogA11y({ document, overlay, opener, onEscape: close });
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
     render();
   }
@@ -210,6 +206,7 @@ export function initAdminPanel(options = {}) {
   }
 
   function renderLogin() {
+    const focusSelector = dialogA11y?.focusSelectorFor(document.activeElement) || '';
     overlay.innerHTML = `
       <div class="admin-dialog compact" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
         <div class="admin-head">
@@ -225,7 +222,7 @@ export function initAdminPanel(options = {}) {
             <input type="password" autocomplete="current-password" autofocus>
           </label>
           <button type="submit" class="admin-primary">进入后台</button>
-          <div class="admin-status">${esc(status)}</div>
+          <div class="admin-status" role="status" aria-live="polite">${esc(status)}</div>
         </form>
       </div>`;
     overlay.querySelector('.admin-close').addEventListener('click', close);
@@ -240,6 +237,7 @@ export function initAdminPanel(options = {}) {
         await refreshDoc(operation);
       }, '已进入后台');
     });
+    dialogA11y?.focusAfterRender(focusSelector, '.admin-login-form input');
   }
 
   function renderWarningsHTML() {
@@ -260,7 +258,7 @@ export function initAdminPanel(options = {}) {
     return `
       <div class="admin-rule-tabs" role="tablist" aria-label="规则编辑分区">
         ${tabs.map(([id, label]) => `
-          <button type="button" data-rule-tab="${id}" class="${activeRuleTab === id ? 'active' : ''}" aria-selected="${activeRuleTab === id ? 'true' : 'false'}">${label}</button>
+          <button type="button" id="admin-rule-tab-${id}" role="tab" data-rule-tab="${id}" class="${activeRuleTab === id ? 'active' : ''}" aria-controls="admin-rule-panel-${id}" aria-selected="${activeRuleTab === id ? 'true' : 'false'}" tabindex="${activeRuleTab === id ? '0' : '-1'}">${label}</button>
         `).join('')}
       </div>`;
   }
@@ -393,9 +391,9 @@ export function initAdminPanel(options = {}) {
   function renderSideNav() {
     return `
       <nav class="admin-side-nav" aria-label="规则后台导航">
-        <button type="button" data-view="assignments" class="${activeView === 'assignments' ? 'active' : ''}">账号</button>
-        <button type="button" data-view="rules" class="${activeView === 'rules' ? 'active' : ''}">规则</button>
-        <button type="button" data-view="assets" class="${activeView === 'assets' ? 'active' : ''}">素材库</button>
+        <button type="button" data-view="assignments" class="${activeView === 'assignments' ? 'active' : ''}"${activeView === 'assignments' ? ' aria-current="page"' : ''}>账号</button>
+        <button type="button" data-view="rules" class="${activeView === 'rules' ? 'active' : ''}"${activeView === 'rules' ? ' aria-current="page"' : ''}>规则</button>
+        <button type="button" data-view="assets" class="${activeView === 'assets' ? 'active' : ''}"${activeView === 'assets' ? ' aria-current="page"' : ''}>素材库</button>
       </nav>`;
   }
 
@@ -487,10 +485,13 @@ export function initAdminPanel(options = {}) {
         </label>
       </div>
       ${renderRuleTabs()}
-      ${renderRuleTabContent()}`}`;
+      <div id="admin-rule-panel-${activeRuleTab}" role="tabpanel" aria-labelledby="admin-rule-tab-${activeRuleTab}">
+        ${renderRuleTabContent()}
+      </div>`}`;
   }
 
   function renderMain() {
+    const focusSelector = dialogA11y?.focusSelectorFor(document.activeElement) || '';
     const presets = compatibleRulePresets((doc && doc.presets) || [], RULE_PACKS[currentAccountID()]?.templateId);
     if (!jsonDirty) syncJSONText();
     const listPresets = draftPreset && !presetByID(doc, draftPreset.id)
@@ -520,11 +521,12 @@ export function initAdminPanel(options = {}) {
           <div class="admin-body">${contentHTML}</div>
         </div>
         <div class="admin-foot">
-          <div class="admin-status">${esc(pendingOperationNotice || status)}</div>
+          <div class="admin-status" role="status" aria-live="polite">${esc(pendingOperationNotice || status)}</div>
           <span class="admin-dirty-chip ${dirtyCount() ? 'dirty' : ''}" data-role="dirty-chip">${dirtyCount() ? dirtyCount() + ' 项未保存' : '无未保存改动'}</span>
         </div>
       </div>`;
     bindMain();
+    dialogA11y?.focusAfterRender(focusSelector, `[data-view="${activeView}"]`);
   }
 
   function updateWorkingField(key, value) {
@@ -593,15 +595,13 @@ export function initAdminPanel(options = {}) {
         renderMain();
       });
     });
-    overlay.querySelectorAll('[data-rule-tab]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
-        if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
-        blockBinder.destroy();
-        behaviorBinder.destroy();
-        activeRuleTab = btn.dataset.ruleTab;
-        renderMain();
-      });
+    bindRovingTabs([...overlay.querySelectorAll('[data-rule-tab]')], btn => {
+      if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
+      if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
+      blockBinder.destroy();
+      behaviorBinder.destroy();
+      activeRuleTab = btn.dataset.ruleTab;
+      renderMain();
     });
     overlay.querySelectorAll('[data-account-rule]').forEach(select => {
       select.addEventListener('change', () => {

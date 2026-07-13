@@ -804,6 +804,14 @@ body.article-text-preview .phone-frame {
   .global-channel-bar { padding: 0 10px; gap: 8px; }
   .global-channel-bar .btn-primary { padding: 0 12px; }
 }
+@media (max-width: 820px), (pointer: coarse) {
+  .global-channel-bar .btn,
+  .global-channel-bar .acct-trigger,
+  .import-card .btn-sm,
+  .empty-action .btn-sm { height: 44px; }
+  .acct-item,
+  .acct-settings-item { min-height: 44px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .global-channel-bar *, .rail *, .preview-panel *, .modal-scrim *, .toast { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }

@@ -94,8 +94,8 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
   function renderStatusBar() {
     const dirty = JSON.stringify(state) !== JSON.stringify(snapshot);
     return `<div class="footer-lib-status-bar">
-      <span class="footer-lib-sync-label ${dirty?'dirty':'synced'}">${dirty?'有未保存改动':'已同步 ✓'}</span>
-      <button type="button" class="admin-secondary footer-lib-toggle-enabled ${state.enabled?'on':''}" data-action="toggle-enabled">${state.enabled?'默认输出页脚':'默认不输出页脚'}</button>
+      <span class="footer-lib-sync-label ${dirty?'dirty':'synced'}" role="status" aria-live="polite">${dirty?'有未保存改动':'已同步 ✓'}</span>
+      <button type="button" class="admin-secondary footer-lib-toggle-enabled ${state.enabled?'on':''}" data-action="toggle-enabled" role="switch" aria-checked="${state.enabled?'true':'false'}">${state.enabled?'默认输出页脚':'默认不输出页脚'}</button>
       <button type="button" class="admin-secondary footer-lib-undo-btn" data-action="undo-all" ${dirty?'':'disabled'}>撤销所有修改</button>
     </div>`;
   }
@@ -106,7 +106,7 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     const current = assetIDFromSrc(imgSrc);
     return `<div class="footer-lib-img-row">
       <label class="footer-lib-img-label">从素材库选图</label>
-      <select class="footer-lib-img-input" data-action="pick-asset" data-seg-key="${esc(key)}">
+      <select class="footer-lib-img-input" data-action="pick-asset" data-seg-key="${esc(key)}" aria-label="${esc(SEGMENT_LABELS[key] || key)}：从素材库选图">
         <option value="">保持当前链接</option>
         ${assets.map(asset => `<option value="${esc(asset.id)}" ${asset.id === current ? 'selected' : ''}>${esc(asset.label || asset.id)} · ${esc(asset.usage || 'custom')}</option>`).join('')}
       </select>
@@ -120,24 +120,24 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     const imgSrc = extractImgSrc(lines);
     const xssErr = validateHtmlLines(lines);
     return `<div class="footer-lib-card${open?' open':''}" data-seg-key="${esc(key)}" draggable="true">
-      <button type="button" class="footer-lib-card-head" data-action="toggle-card" data-seg-key="${esc(key)}">
-        <span class="footer-lib-card-label"><span class="footer-lib-drag-handle" title="拖拽排序">⠿</span>${esc(label)}${isSegChanged(key,lines,segmentDefault(key))?'<span class="footer-lib-changed-dot" title="与默认值不同">● 已改</span>':''}</span>
-        <span class="footer-lib-card-arrow">${open?'▲':'▼'}</span>
+      <button type="button" class="footer-lib-card-head" data-action="toggle-card" data-seg-key="${esc(key)}" aria-expanded="${open?'true':'false'}">
+        <span class="footer-lib-card-label"><span class="footer-lib-drag-handle" title="拖拽排序" aria-hidden="true">⠿</span>${esc(label)}${isSegChanged(key,lines,segmentDefault(key))?'<span class="footer-lib-changed-dot" title="与默认值不同">已改</span>':''}</span>
+        <span class="footer-lib-card-arrow" aria-hidden="true">${open?'▲':'▼'}</span>
       </button>
       ${open?`<div class="footer-lib-card-body">
         ${imgSrc!=null?`<div class="footer-lib-img-row">
           <label class="footer-lib-img-label">图片链接快速替换</label>
-          <input type="url" class="footer-lib-img-input" data-action="replace-img" data-seg-key="${esc(key)}" value="${esc(imgSrc)}" placeholder="https://..." />
-          <span class="footer-lib-err" data-role="img-err-${esc(key)}"></span>
+          <input type="url" class="footer-lib-img-input" data-action="replace-img" data-seg-key="${esc(key)}" value="${esc(imgSrc)}" placeholder="https://..." aria-label="${esc(label)}：图片链接快速替换" />
+          <span class="footer-lib-err" data-role="img-err-${esc(key)}" aria-live="polite"></span>
         </div>${renderAssetPicker(key,imgSrc)}`:''}
         <div class="footer-lib-textarea-row">
           <label class="footer-lib-textarea-label">HTML 内容（每行一段）</label>
-          <textarea class="footer-lib-html-area" data-action="edit-html" data-seg-key="${esc(key)}" spellcheck="false" rows="6">${esc(lines.join('\n'))}</textarea>
-          ${xssErr?`<span class="footer-lib-err">${esc(xssErr)}</span>`:''}
-          <span class="footer-lib-err" data-role="html-err-${esc(key)}"></span>
+          <textarea class="footer-lib-html-area" data-action="edit-html" data-seg-key="${esc(key)}" spellcheck="false" rows="6" aria-label="${esc(label)}：HTML 内容">${esc(lines.join('\n'))}</textarea>
+          ${xssErr?`<span class="footer-lib-err" role="alert">${esc(xssErr)}</span>`:''}
+          <span class="footer-lib-err" data-role="html-err-${esc(key)}" aria-live="polite"></span>
         </div>
         <div class="footer-lib-card-actions">
-          <a href="#" class="footer-lib-reset-link" data-action="reset-seg" data-seg-key="${esc(key)}">重置为默认</a>
+          <button type="button" class="footer-lib-reset-link" data-action="reset-seg" data-seg-key="${esc(key)}">重置为默认</button>
         </div>
       </div>`:''}
     </div>`;
@@ -148,7 +148,7 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     const html = state.enabled ? buildFooterHtml(preset.segments || {}, state, assetLibrary, 'ft-default') : '';
     return `<div class="footer-lib-preview">
       <h3 class="footer-lib-section-title">即时预览</h3>
-      <div class="footer-lib-preview-box">${html || '<p style="color:#8F959E;font-size:13px;">当前默认不输出页脚。</p>'}</div>
+      <div class="footer-lib-preview-box">${html || '<p class="footer-lib-preview-empty">当前默认不输出页脚。</p>'}</div>
     </div>`;
   }
 
@@ -158,15 +158,15 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     const labels = { tip: '提示', ...SEGMENT_LABELS };
     return `<div class="footer-lib-preset-section">
       <h3 class="footer-lib-section-title">预设管理</h3>
-      <div class="footer-lib-table-wrap"><table class="footer-lib-preset-table">
+      <div class="footer-lib-table-wrap"><table class="footer-lib-preset-table" aria-label="页脚预设管理">
         <thead><tr><th>预设名</th>${cols.map(k=>`<th>${esc(labels[k]||k)}</th>`).join('')}<th>默认</th><th></th></tr></thead>
         <tbody>${presets.map((p,i)=>{
           const isD = p.id === state.active_preset_id;
           return `<tr class="footer-lib-preset-row${isD?' footer-lib-preset-active':''}" data-preset-idx="${i}">
-            <td><input type="text" class="footer-lib-preset-name" data-action="rename-preset" data-preset-idx="${i}" value="${esc(p.name)}" /></td>
-            ${cols.map(k=>`<td class="footer-lib-preset-cell"><input type="checkbox" class="footer-lib-preset-chk" data-action="toggle-preset-seg" data-preset-idx="${i}" data-seg-key="${k}" ${(p.segments||{})[k]?'checked':''} /></td>`).join('')}
+            <td><input type="text" class="footer-lib-preset-name" data-action="rename-preset" data-preset-idx="${i}" value="${esc(p.name)}" aria-label="预设名称：${esc(p.name)}" /></td>
+            ${cols.map(k=>`<td class="footer-lib-preset-cell"><input type="checkbox" class="footer-lib-preset-chk" data-action="toggle-preset-seg" data-preset-idx="${i}" data-seg-key="${k}" aria-label="${esc(p.name)}：${esc(labels[k]||k)}" ${(p.segments||{})[k]?'checked':''} /></td>`).join('')}
             <td><button type="button" class="admin-secondary footer-lib-set-default-btn" data-action="set-default" data-preset-id="${esc(p.id)}" ${isD?'disabled':''}>${isD?'当前默认':'设为默认'}</button></td>
-            <td><button type="button" class="admin-secondary danger footer-lib-del-preset-btn" data-action="delete-preset" data-preset-idx="${i}" title="删除预设">✕</button></td>
+            <td><button type="button" class="admin-secondary danger footer-lib-del-preset-btn" data-action="delete-preset" data-preset-idx="${i}" title="删除预设" aria-label="删除预设：${esc(p.name)}">✕</button></td>
           </tr>`;
         }).join('')}</tbody>
       </table></div>
@@ -178,14 +178,19 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     return `<details class="footer-lib-json-details">
       <summary class="footer-lib-json-summary">高级 JSON（折叠）</summary>
       <div class="admin-json-panel footer-lib-json-body">
-        <textarea class="footer-lib-json-area" data-role="json-area" rows="14" spellcheck="false">${esc(JSON.stringify(state,null,2))}</textarea>
-        <div class="admin-json-actions" style="margin-top:8px;">
+        <textarea class="footer-lib-json-area" data-role="json-area" rows="14" spellcheck="false" aria-label="页脚库 JSON">${esc(JSON.stringify(state,null,2))}</textarea>
+        <div class="admin-json-actions footer-lib-json-actions">
           <button type="button" class="admin-secondary" data-action="validate-json">校验</button>
           <button type="button" class="admin-secondary" data-action="apply-json">应用 JSON</button>
-          <span class="footer-lib-err" data-role="json-err"></span>
+          <span class="footer-lib-err" data-role="json-err" aria-live="polite"></span>
         </div>
       </div>
     </details>`;
+  }
+
+  function setJsonFeedback(el, message, tone) {
+    el.textContent = message;
+    el.dataset.tone = tone;
   }
 
   function render() {
@@ -241,8 +246,8 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
       const ta = container.querySelector('[data-role="json-area"]');
       const errEl = container.querySelector('[data-role="json-err"]');
       if (!ta || !errEl) return;
-      try { JSON.parse(ta.value); errEl.textContent='✓ JSON 格式正确'; errEl.style.color='#1b7f36'; }
-      catch(ex) { errEl.textContent='JSON 解析失败：'+ex.message; errEl.style.color='#dd5b00'; }
+      try { JSON.parse(ta.value); setJsonFeedback(errEl, '✓ JSON 格式正确', 'success'); }
+      catch(ex) { setJsonFeedback(errEl, 'JSON 解析失败：'+ex.message, 'error'); }
       return;
     }
     if (action === 'apply-json') {
@@ -254,9 +259,12 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
         if (typeof p !== 'object' || p === null) throw new Error('顶层必须是对象');
         if (p.segments && typeof p.segments !== 'object') throw new Error('segments 必须是对象');
         if (p.presets !== undefined && !Array.isArray(p.presets)) throw new Error('presets 必须是数组');
-        errEl.textContent='✓ 应用成功'; errEl.style.color='#1b7f36';
         emit(p);
-      } catch(ex) { errEl.textContent='应用失败：'+ex.message; errEl.style.color='#dd5b00'; }
+        const nextDetails = container.querySelector('.footer-lib-json-details');
+        const nextErr = container.querySelector('[data-role="json-err"]');
+        if (nextDetails) nextDetails.open = true;
+        if (nextErr) setJsonFeedback(nextErr, '✓ 应用成功', 'success');
+      } catch(ex) { setJsonFeedback(errEl, '应用失败：'+ex.message, 'error'); }
       return;
     }
   }
@@ -341,7 +349,69 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
     if (stylesInjected || document.getElementById('footer-lib-styles')) return;
     stylesInjected = true;
     const s = document.createElement('style'); s.id = 'footer-lib-styles';
-    s.textContent = `.footer-lib-editor{display:grid;gap:16px}.footer-lib-status-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:6px;background:#f9f9f8;font-size:12px}.footer-lib-sync-label.synced{color:#1b7f36}.footer-lib-sync-label.dirty{color:#9a4600}.footer-lib-toggle-enabled.on{border-color:var(--fs-brand,#1456F0);color:var(--fs-brand,#1456F0);background:var(--fs-brand-soft,#EBF1FF)}.footer-lib-undo-btn{margin-left:auto}.footer-lib-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.42fr);gap:16px;align-items:start}.footer-lib-section-title{font-size:13px;font-weight:700;color:rgba(0,0,0,.9);margin:12px 0 8px}.footer-lib-card{border:1px solid rgba(0,0,0,.08);border-radius:6px;overflow:hidden;margin-bottom:6px}.footer-lib-card[draggable=true]{cursor:grab}.footer-lib-card-head{display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 12px;background:#f6f5f4;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;color:rgba(0,0,0,.85);text-align:left}.footer-lib-card-head:hover{background:#eeedec}.footer-lib-card.open .footer-lib-card-head{background:#eeeeee}.footer-lib-card-label{display:flex;align-items:center;gap:8px}.footer-lib-drag-handle{color:#8F959E;font-size:14px}.footer-lib-changed-dot{color:#9a4600;font-size:11px;font-weight:700}.footer-lib-card-arrow{font-size:11px;color:#a39e98}.footer-lib-card-body{padding:12px;background:#fff;border-top:1px solid rgba(0,0,0,.06);display:grid;gap:10px}.footer-lib-img-label,.footer-lib-textarea-label{font-size:12px;color:#615d59}.footer-lib-img-input{width:100%;padding:7px 9px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:inherit;font-size:13px}.footer-lib-img-input:focus,.footer-lib-html-area:focus{outline:none;border-color:#0075de;box-shadow:0 0 0 2px rgba(0,117,222,.15)}.footer-lib-html-area{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:'SF Mono',ui-monospace,monospace;font-size:12px;line-height:1.55;resize:vertical}.footer-lib-err{font-size:12px;color:#dd5b00}.footer-lib-card-actions{display:flex;gap:12px}.footer-lib-reset-link{font-size:12px;color:#0075de;text-decoration:underline;cursor:pointer}.footer-lib-preview{position:sticky;top:0}.footer-lib-preview-box{max-height:56vh;overflow:auto;padding:12px;border-radius:6px;background:#fff;box-shadow:var(--fs-sh-s1,0 1px 3px rgba(31,35,39,.04));font-size:13px}.footer-lib-preview-box img{max-width:100%;height:auto}.footer-lib-preset-section{display:grid;gap:10px}.footer-lib-table-wrap{overflow-x:auto}.footer-lib-preset-table{width:100%;border-collapse:collapse;font-size:12px}.footer-lib-preset-table th{padding:6px 8px;text-align:center;background:#f6f5f4;font-weight:700;color:rgba(0,0,0,.7);border-bottom:1px solid rgba(0,0,0,.1);white-space:nowrap}.footer-lib-preset-table th:first-child{text-align:left}.footer-lib-preset-table td{padding:6px 8px;vertical-align:middle;border-bottom:1px solid rgba(0,0,0,.05)}.footer-lib-preset-row.footer-lib-preset-active td{background:rgba(0,117,222,.04)}.footer-lib-preset-name{width:100%;min-width:120px;padding:5px 7px;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:12px}.footer-lib-preset-cell{text-align:center}.footer-lib-preset-chk{cursor:pointer}.footer-lib-set-default-btn,.footer-lib-del-preset-btn{font-size:11px;padding:4px 8px;white-space:nowrap}.footer-lib-add-preset-btn{font-size:12px}.footer-lib-json-details{margin-top:4px}.footer-lib-json-summary{cursor:pointer;font-size:12px;font-weight:600;color:#615d59;user-select:none;padding:4px 0}.footer-lib-json-summary:hover{color:rgba(0,0,0,.85)}.footer-lib-json-body{padding:10px 0;display:grid;gap:6px}.footer-lib-json-area{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;color:rgba(0,0,0,.9);font-family:'SF Mono',ui-monospace,monospace;font-size:12px;line-height:1.55;resize:vertical}.footer-lib-json-area:focus{outline:none;border-color:#0075de;box-shadow:0 0 0 2px rgba(0,117,222,.15)}@media(max-width:900px){.footer-lib-main{grid-template-columns:1fr}.footer-lib-preview{position:static}}`;
+    s.textContent = `
+.footer-lib-editor{display:grid;gap:16px}
+.footer-lib-status-bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:8px 10px;border:1px solid var(--fs-divider,rgba(31,35,39,.08));border-radius:var(--fs-r-s,6px);background:var(--fs-bg-nested,#F7F8FA);font-size:12px}
+.footer-lib-sync-label{display:inline-flex;align-items:center;gap:6px;color:var(--fs-text-2,#646A73);font-weight:600}
+.footer-lib-sync-label::before{content:"";width:7px;height:7px;border-radius:var(--fs-r-full,9999px);background:var(--fs-text-3,#6F757D)}
+.footer-lib-sync-label.synced::before{background:var(--fs-success,#00A870)}
+.footer-lib-sync-label.dirty::before{background:var(--fs-warning,#FF8800)}
+.footer-lib-toggle-enabled.on{border-color:var(--fs-brand,#1456F0);color:var(--fs-brand,#1456F0);background:var(--fs-brand-soft,#EBF1FF)}
+.footer-lib-undo-btn{margin-left:auto}
+.footer-lib-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.42fr);gap:16px;align-items:start}
+.footer-lib-section-title{margin:12px 0 8px;color:var(--fs-text-1,#1F2329);font-size:13px;font-weight:700}
+.footer-lib-card{overflow:hidden;margin-bottom:6px;border:1px solid var(--fs-border-card,#E5E6EB);border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff)}
+.footer-lib-card[draggable=true]{cursor:grab}
+.footer-lib-card-head{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:44px;padding:10px 12px;border:0;background:var(--fs-bg-nested,#F7F8FA);color:var(--fs-text-1,#1F2329);font-family:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer;transition:background var(--fs-t-fast,150ms) var(--fs-ease-out,ease)}
+.footer-lib-card-head:hover,.footer-lib-card.open .footer-lib-card-head{background:var(--fs-bg-sunken,#F2F3F5)}
+.footer-lib-card-label{display:flex;align-items:center;gap:8px;min-width:0}
+.footer-lib-drag-handle{flex:0 0 auto;color:var(--fs-text-3,#6F757D);font-size:14px}
+.footer-lib-changed-dot{display:inline-flex;align-items:center;gap:5px;padding:2px 6px;border-radius:var(--fs-r-full,9999px);background:var(--fs-warning-soft,#FFF3E5);color:var(--fs-text-1,#1F2329);font-size:11px;font-weight:600}
+.footer-lib-changed-dot::before{content:"";width:6px;height:6px;border-radius:var(--fs-r-full,9999px);background:var(--fs-warning,#FF8800)}
+.footer-lib-card-arrow{flex:0 0 auto;color:var(--fs-text-3,#6F757D);font-size:11px}
+.footer-lib-card-body{display:grid;gap:10px;padding:12px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));background:var(--fs-bg-card,#fff)}
+.footer-lib-img-row,.footer-lib-textarea-row{display:grid;gap:6px}
+.footer-lib-img-label,.footer-lib-textarea-label{color:var(--fs-text-2,#646A73);font-size:12px}
+.footer-lib-img-input,.footer-lib-preset-name,.footer-lib-html-area,.footer-lib-json-area{box-sizing:border-box;width:100%;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);background:var(--fs-bg-card,#fff);color:var(--fs-text-1,#1F2329)}
+.footer-lib-img-input{padding:7px 9px;font-family:inherit;font-size:13px}
+.footer-lib-html-area,.footer-lib-json-area{padding:10px 12px;font-family:var(--fs-mono,"JetBrains Mono",ui-monospace,monospace);font-size:12px;line-height:1.55;resize:vertical}
+.footer-lib-json-area{background:var(--fs-bg-sunken,#F2F3F5)}
+.footer-lib-img-input:focus,.footer-lib-preset-name:focus,.footer-lib-html-area:focus,.footer-lib-json-area:focus{outline:none;border-color:var(--fs-brand,#1456F0);box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}
+.footer-lib-err{color:var(--fs-danger,#F54A45);font-size:12px;line-height:1.5}
+.footer-lib-err:empty{display:none}
+.footer-lib-err[data-tone]{display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:var(--fs-r-xs,4px);color:var(--fs-text-1,#1F2329)}
+.footer-lib-err[data-tone]::before{content:"";width:7px;height:7px;border-radius:var(--fs-r-full,9999px)}
+.footer-lib-err[data-tone="success"]{background:var(--fs-success-soft,#E5F7F0)}
+.footer-lib-err[data-tone="success"]::before{background:var(--fs-success,#00A870)}
+.footer-lib-err[data-tone="error"]{background:var(--fs-danger-soft,#FEECEC)}
+.footer-lib-err[data-tone="error"]::before{background:var(--fs-danger,#F54A45)}
+.footer-lib-card-actions{display:flex;gap:12px}
+.footer-lib-reset-link{padding:2px 0;border:0;background:transparent;color:var(--fs-brand,#1456F0);font-family:inherit;font-size:12px;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.footer-lib-preview{position:sticky;top:0}
+.footer-lib-preview-box{max-height:56vh;overflow:auto;padding:12px;border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff);box-shadow:var(--fs-sh-s1,0 1px 3px rgba(31,35,39,.04));font-size:13px}
+.footer-lib-preview-box img{max-width:100%;height:auto}
+.footer-lib-preview-empty{margin:0;color:var(--fs-text-3,#6F757D);font-size:13px;line-height:1.6}
+.footer-lib-preset-section{display:grid;gap:10px}
+.footer-lib-table-wrap{overflow-x:auto}
+.footer-lib-preset-table{width:100%;border-collapse:collapse;color:var(--fs-text-1,#1F2329);font-size:12px}
+.footer-lib-preset-table th{padding:6px 8px;border-bottom:1px solid var(--fs-divider,rgba(31,35,39,.08));background:var(--fs-bg-nested,#F7F8FA);color:var(--fs-text-2,#646A73);font-weight:700;text-align:center;white-space:nowrap}
+.footer-lib-preset-table th:first-child{text-align:left}
+.footer-lib-preset-table td{padding:6px 8px;border-bottom:1px solid var(--fs-divider,rgba(31,35,39,.08));vertical-align:middle}
+.footer-lib-preset-row.footer-lib-preset-active td{background:var(--fs-brand-soft,#EBF1FF)}
+.footer-lib-preset-name{min-width:120px;padding:5px 7px;font-family:inherit;font-size:13px}
+.footer-lib-preset-cell{text-align:center}
+.footer-lib-preset-chk{width:16px;height:16px;accent-color:var(--fs-brand,#1456F0);cursor:pointer}
+.footer-lib-set-default-btn,.footer-lib-del-preset-btn{padding:4px 8px;font-size:12px;white-space:nowrap}
+.footer-lib-add-preset-btn{justify-self:start;font-size:12px}
+.footer-lib-json-details{margin-top:4px}
+.footer-lib-json-summary{display:flex;align-items:center;min-height:32px;padding:4px 0;color:var(--fs-text-2,#646A73);font-size:12px;font-weight:600;cursor:pointer;user-select:none;transition:color var(--fs-t-fast,150ms) var(--fs-ease-out,ease)}
+.footer-lib-json-summary:hover{color:var(--fs-text-1,#1F2329)}
+.footer-lib-json-body{display:grid;gap:6px;padding:10px 0}
+.footer-lib-json-actions{margin-top:8px}
+.footer-lib-card-head:focus-visible,.footer-lib-reset-link:focus-visible,.footer-lib-json-summary:focus-visible,.footer-lib-editor .admin-secondary:focus-visible{outline:none;box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF),0 0 0 3px var(--fs-brand,#1456F0)}
+@media(max-width:900px){.footer-lib-main{grid-template-columns:1fr}.footer-lib-preview{position:static}.footer-lib-img-input,.footer-lib-preset-name,.footer-lib-html-area,.footer-lib-json-area{font-size:14px}.footer-lib-preset-chk{width:20px;height:20px}.footer-lib-toggle-enabled,.footer-lib-undo-btn,.footer-lib-set-default-btn,.footer-lib-del-preset-btn,.footer-lib-add-preset-btn{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.footer-lib-editor *{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+`;
     document.head.appendChild(s);
   }
 

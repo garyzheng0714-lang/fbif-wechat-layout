@@ -95,3 +95,84 @@ test('公众号底部新增下拉只剩 4 原子（旧语义块 2026-06-06 归�
   assert.deepEqual(mp, ['image', 'more_articles', 'spacer', 'text'], '公众号下拉只 4 原子');
   assert.ok(!mp.some(t => ['rich_html', 'declaration', 'name_card', 'qr_card', 'titled_media'].includes(t)), '公众号下拉不含旧语义块');
 });
+
+test('底部区块编辑器提供上下移动、展开和上下文明确的控件名称', () => {
+  const doc = mkDoc();
+  const c = mount(doc);
+  createBlockEditor({ container: c, module: V2, channel: 'mp', onChange: () => {}, doc });
+
+  assert.equal(c.querySelector('.be-add select').getAttribute('aria-label'), '新增区块类型');
+  assert.equal(c.querySelector('.be-presets').getAttribute('role'), 'tablist');
+  assert.equal(c.querySelector('.be-preset.active').getAttribute('aria-selected'), 'true');
+
+  const cards = [...c.querySelectorAll('.be-card')];
+  assert.equal(cards.length, 2);
+  cards.forEach(card => {
+    const label = card.getAttribute('aria-label');
+    assert.ok(label && /区块$/.test(label), '卡片有可理解的分组名称');
+    assert.equal(card.querySelector('.be-toggle').tagName, 'BUTTON', '展开入口必须是按钮');
+    assert.match(card.querySelector('.be-enabled input').getAttribute('aria-label'), /默认启用/);
+    assert.match(card.querySelector('.be-del').getAttribute('aria-label'), /^删除/);
+    assert.ok(card.querySelector('[data-block-action="up"]'), '提供键盘可用的上移按钮');
+    assert.ok(card.querySelector('[data-block-action="down"]'), '提供键盘可用的下移按钮');
+  });
+  assert.ok(cards[0].querySelector('[data-block-action="up"]').disabled, '首项不可继续上移');
+  assert.ok(cards[1].querySelector('[data-block-action="down"]').disabled, '末项不可继续下移');
+});
+
+test('键盘移动区块后保持操作焦点，字段连续输入不会被重渲染打断', () => {
+  const doc = mkDoc();
+  let focused = doc.body;
+  Object.defineProperty(doc, 'activeElement', { configurable: true, get: () => focused });
+  doc.defaultView.HTMLElement.prototype.focus = function focus() { focused = this; };
+  const c = mount(doc);
+  let captured = null;
+  createBlockEditor({ container: c, module: V2, channel: 'mp', onChange: (m) => { captured = m; }, doc });
+
+  c.querySelector('.be-card[data-id="tip"] [data-block-action="down"]').click();
+  assert.deepEqual(captured.presets[0].order, ['img', 'tip']);
+  assert.equal(doc.activeElement?.dataset.blockAction, 'down', '移动后焦点留在同一区块操作上');
+
+  c.querySelector('.be-card[data-id="tip"] .be-toggle').click();
+  const field = c.querySelector('.be-card[data-id="tip"] .be-fields textarea, .be-card[data-id="tip"] .be-fields input[type="text"]');
+  assert.ok(field, '文字区块应有可编辑字段');
+  field.value = '第一段';
+  field.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
+  assert.ok(c.contains(field), '第一次输入后不得替换当前控件');
+  field.value = '第一段继续输入';
+  field.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
+  assert.ok(c.contains(field), '连续输入期间控件保持连接');
+});
+
+test('富文本工具栏异步挂载后仍为图标按钮提供可访问名称', async () => {
+  const doc = mkDoc();
+  const previousWindow = globalThis.window;
+  globalThis.window = doc.defaultView;
+  doc.defaultView.wangEditor = {
+    createEditor: () => ({ destroy() {} }),
+    createToolbar: ({ selector, config }) => {
+      queueMicrotask(() => {
+        config.toolbarKeys.filter(key => key !== '|').forEach(key => {
+          const button = doc.createElement('button');
+          if (key === 'fontSize') button.textContent = '默认字号';
+          selector.appendChild(button);
+        });
+      });
+    },
+  };
+
+  try {
+    const c = mount(doc);
+    createBlockEditor({ container: c, module: V2, channel: 'mp', onChange: () => {}, doc });
+    c.querySelector('.be-card[data-id="tip"] .be-toggle').click();
+    await Promise.resolve();
+
+    const toolbar = c.querySelector('[role="toolbar"]');
+    assert.equal(toolbar?.getAttribute('aria-label'), '富文本格式');
+    const labels = [...toolbar.querySelectorAll('button')].map(button => button.getAttribute('aria-label'));
+    assert.deepEqual(labels, ['加粗', '斜体', '下划线', '文字颜色', '背景颜色', '字号', '左对齐', '居中', '右对齐', '无序列表', '有序列表', '插入链接']);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});

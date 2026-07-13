@@ -5,7 +5,8 @@
 // 交互层（开合/onSwitch 同账号守卫）依赖 DOM，仓库无 DOM harness，留作残余缺口。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAccountGroups } from '../public/js/account-menu.js';
+import { parseHTML } from 'linkedom';
+import { buildAccountGroups, mountAccountMenu } from '../public/js/account-menu.js';
 
 const packs = [
   { id: 'fbif', accountName: 'FBIF公众号', channel: 'mp', avatarUrl: '/a.webp' },
@@ -40,4 +41,37 @@ test('buildAccountGroups 过滤空渠道组', () => {
 test('buildAccountGroups 头像缺失降级到 FALLBACK_AVATAR', () => {
   const wow = buildAccountGroups(packs, 'fbif')[0].items.find(i => i.id === 'wowfood');
   assert.equal(wow.avatarUrl, '/fbif-avatar.webp', '无 avatarUrl 用 fallback');
+});
+
+test('账号菜单打开后焦点进入当前项，方向键可移动，Escape 关闭并归还触发器', () => {
+  const { document, window } = parseHTML('<!doctype html><html><body><div id="acctMenu"></div></body></html>');
+  let focused = document.body;
+  Object.defineProperty(document, 'activeElement', { configurable: true, get: () => focused });
+  window.HTMLElement.prototype.focus = function focus() { focused = this; };
+  globalThis.document = document;
+  globalThis.window = window;
+  try {
+    const container = document.getElementById('acctMenu');
+    mountAccountMenu({ container, activeId: 'fbif', onSwitch() {} });
+
+    container.querySelector('.acct-trigger').click();
+    assert.equal(container.querySelector('.acct-trigger').getAttribute('aria-expanded'), 'true');
+    assert.equal(document.activeElement?.getAttribute('role'), 'menuitemradio', '打开后焦点进入菜单项');
+    assert.equal(document.activeElement?.getAttribute('aria-checked'), 'true', '优先聚焦当前账号');
+
+    const firstFocused = document.activeElement;
+    const down = new window.Event('keydown', { bubbles: true, cancelable: true });
+    down.key = 'ArrowDown';
+    firstFocused.dispatchEvent(down);
+    assert.notEqual(document.activeElement, firstFocused, '方向键移动到下一账号');
+
+    const escape = new window.Event('keydown', { bubbles: true, cancelable: true });
+    escape.key = 'Escape';
+    document.activeElement.dispatchEvent(escape);
+    assert.equal(container.querySelector('.acct-trigger').getAttribute('aria-expanded'), 'false');
+    assert.ok(document.activeElement?.classList.contains('acct-trigger'), '关闭后焦点回到触发器');
+  } finally {
+    delete globalThis.document;
+    delete globalThis.window;
+  }
 });

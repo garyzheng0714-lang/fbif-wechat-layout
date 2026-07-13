@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-13T14:38:34Z",
+  "title": "Design System: FBIF 内容排版与发布工具",
+  "extensions": {
+    "colorMeta": {
+      "brand": {
+        "role": "primary",
+        "displayName": "行动蓝",
+        "canonical": "#1456F0",
+        "tonalRamp": ["oklch(15% 0.23 264)", "oklch(27% 0.23 264)", "oklch(39% 0.23 264)", "oklch(51% 0.23 264)", "oklch(63% 0.23 264)", "oklch(75% 0.23 264)", "oklch(87% 0.23 264)", "oklch(95% 0.23 264)"]
+      },
+      "brand-hover": {
+        "role": "primary",
+        "displayName": "行动蓝 Hover",
+        "canonical": "#0F4DD1",
+        "tonalRamp": ["oklch(15% 0.21 264)", "oklch(27% 0.21 264)", "oklch(39% 0.21 264)", "oklch(51% 0.21 264)", "oklch(63% 0.21 264)", "oklch(75% 0.21 264)", "oklch(87% 0.21 264)", "oklch(95% 0.21 264)"]
+      },
+      "brand-active": {
+        "role": "primary",
+        "displayName": "行动蓝 Active",
+        "canonical": "#0B3FBA",
+        "tonalRamp": ["oklch(15% 0.19 264)", "oklch(27% 0.19 264)", "oklch(39% 0.19 264)", "oklch(51% 0.19 264)", "oklch(63% 0.19 264)", "oklch(75% 0.19 264)", "oklch(87% 0.19 264)", "oklch(95% 0.19 264)"]
+      },
+      "brand-soft": {
+        "role": "primary",
+        "displayName": "选择浅蓝",
+        "canonical": "#EBF1FF",
+        "tonalRamp": ["oklch(15% 0.026 264)", "oklch(27% 0.026 264)", "oklch(39% 0.026 264)", "oklch(51% 0.026 264)", "oklch(63% 0.026 264)", "oklch(75% 0.026 264)", "oklch(87% 0.026 264)", "oklch(95% 0.026 264)"]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "石墨主墨",
+        "canonical": "#1F2329",
+        "tonalRamp": ["oklch(15% 0.016 260)", "oklch(27% 0.016 260)", "oklch(39% 0.016 260)", "oklch(51% 0.016 260)", "oklch(63% 0.016 260)", "oklch(75% 0.016 260)", "oklch(87% 0.016 260)", "oklch(95% 0.016 260)"]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "说明灰",
+        "canonical": "#646A73",
+        "tonalRamp": ["oklch(15% 0.015 260)", "oklch(27% 0.015 260)", "oklch(39% 0.015 260)", "oklch(51% 0.015 260)", "oklch(63% 0.015 260)", "oklch(75% 0.015 260)", "oklch(87% 0.015 260)", "oklch(95% 0.015 260)"]
+      },
+      "text-tertiary": {
+        "role": "neutral",
+        "displayName": "可读弱灰",
+        "canonical": "#6F757D",
+        "tonalRamp": ["oklch(15% 0.014 260)", "oklch(27% 0.014 260)", "oklch(39% 0.014 260)", "oklch(51% 0.014 260)", "oklch(63% 0.014 260)", "oklch(75% 0.014 260)", "oklch(87% 0.014 260)", "oklch(95% 0.014 260)"]
+      },
+      "text-disabled": {
+        "role": "neutral",
+        "displayName": "禁用灰",
+        "canonical": "#BBBFC4",
+        "tonalRamp": ["oklch(15% 0.008 260)", "oklch(27% 0.008 260)", "oklch(39% 0.008 260)", "oklch(51% 0.008 260)", "oklch(63% 0.008 260)", "oklch(75% 0.008 260)", "oklch(87% 0.008 260)", "oklch(95% 0.008 260)"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "冷白工作面",
+        "canonical": "#FFFFFF",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(27% 0 0)", "oklch(39% 0 0)", "oklch(51% 0 0)", "oklch(63% 0 0)", "oklch(75% 0 0)", "oklch(87% 0 0)", "oklch(95% 0 0)"]
+      },
+      "surface-nested": {
+        "role": "neutral",
+        "displayName": "嵌套灰",
+        "canonical": "#F7F8FA",
+        "tonalRamp": ["oklch(15% 0.004 260)", "oklch(27% 0.004 260)", "oklch(39% 0.004 260)", "oklch(51% 0.004 260)", "oklch(63% 0.004 260)", "oklch(75% 0.004 260)", "oklch(87% 0.004 260)", "oklch(95% 0.004 260)"]
+      },
+      "surface-sunken": {
+        "role": "neutral",
+        "displayName": "凹槽灰",
+        "canonical": "#F2F3F5",
+        "tonalRamp": ["oklch(15% 0.005 260)", "oklch(27% 0.005 260)", "oklch(39% 0.005 260)", "oklch(51% 0.005 260)", "oklch(63% 0.005 260)", "oklch(75% 0.005 260)", "oklch(87% 0.005 260)", "oklch(95% 0.005 260)"]
+      },
+      "border-control": {
+        "role": "neutral",
+        "displayName": "控件线",
+        "canonical": "#D9DCE0",
+        "tonalRamp": ["oklch(15% 0.008 260)", "oklch(27% 0.008 260)", "oklch(39% 0.008 260)", "oklch(51% 0.008 260)", "oklch(63% 0.008 260)", "oklch(75% 0.008 260)", "oklch(87% 0.008 260)", "oklch(95% 0.008 260)"]
+      },
+      "border-card": {
+        "role": "neutral",
+        "displayName": "卡片线",
+        "canonical": "#E5E6EB",
+        "tonalRamp": ["oklch(15% 0.006 260)", "oklch(27% 0.006 260)", "oklch(39% 0.006 260)", "oklch(51% 0.006 260)", "oklch(63% 0.006 260)", "oklch(75% 0.006 260)", "oklch(87% 0.006 260)", "oklch(95% 0.006 260)"]
+      },
+      "success": {
+        "role": "tertiary",
+        "displayName": "成功绿",
+        "canonical": "#00A870",
+        "tonalRamp": ["oklch(15% 0.16 160)", "oklch(27% 0.16 160)", "oklch(39% 0.16 160)", "oklch(51% 0.16 160)", "oklch(63% 0.16 160)", "oklch(75% 0.16 160)", "oklch(87% 0.16 160)", "oklch(95% 0.16 160)"]
+      },
+      "warning": {
+        "role": "tertiary",
+        "displayName": "警告橙",
+        "canonical": "#FF8800",
+        "tonalRamp": ["oklch(15% 0.18 60)", "oklch(27% 0.18 60)", "oklch(39% 0.18 60)", "oklch(51% 0.18 60)", "oklch(63% 0.18 60)", "oklch(75% 0.18 60)", "oklch(87% 0.18 60)", "oklch(95% 0.18 60)"]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "危险红",
+        "canonical": "#F54A45",
+        "tonalRamp": ["oklch(15% 0.20 27)", "oklch(27% 0.20 27)", "oklch(39% 0.20 27)", "oklch(51% 0.20 27)", "oklch(63% 0.20 27)", "oklch(75% 0.20 27)", "oklch(87% 0.20 27)", "oklch(95% 0.20 27)"]
+      },
+      "wechat-body": {
+        "role": "secondary",
+        "displayName": "微信正文棕墨",
+        "canonical": "#544545",
+        "tonalRamp": ["oklch(15% 0.03 22)", "oklch(27% 0.03 22)", "oklch(39% 0.03 22)", "oklch(51% 0.03 22)", "oklch(63% 0.03 22)", "oklch(75% 0.03 22)", "oklch(87% 0.03 22)", "oklch(95% 0.03 22)"]
+      },
+      "wechat-author": {
+        "role": "secondary",
+        "displayName": "微信原创作者蓝",
+        "canonical": "#396FBC",
+        "tonalRamp": ["oklch(15% 0.13 258)", "oklch(27% 0.13 258)", "oklch(39% 0.13 258)", "oklch(51% 0.13 258)", "oklch(63% 0.13 258)", "oklch(75% 0.13 258)", "oklch(87% 0.13 258)", "oklch(95% 0.13 258)"]
+      },
+      "foodtalks-heading": {
+        "role": "secondary",
+        "displayName": "FoodTalks 标题蓝",
+        "canonical": "#01396A",
+        "tonalRamp": ["oklch(15% 0.10 250)", "oklch(27% 0.10 250)", "oklch(39% 0.10 250)", "oklch(51% 0.10 250)", "oklch(63% 0.10 250)", "oklch(75% 0.10 250)", "oklch(87% 0.10 250)", "oklch(95% 0.10 250)"]
+      }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "界面标题", "purpose": "卡片标题、主要按钮和账号名。" },
+      "body": { "displayName": "界面正文", "purpose": "输入内容、说明与常规操作文案。" },
+      "label": { "displayName": "界面标签", "purpose": "字段名、状态与 caption。" },
+      "mono": { "displayName": "技术值", "purpose": "管理员场景的 JSON、代码和值预览。" }
+    },
+    "shadows": [
+      { "name": "static-low", "value": "0 1px 3px rgba(31,35,39,0.04), 0 1px 2px rgba(31,35,39,0.03)", "purpose": "文件条、轻量卡片与开关旋钮。" },
+      { "name": "interactive-raised", "value": "0 2px 8px rgba(31,35,39,0.06), 0 1px 3px rgba(31,35,39,0.04)", "purpose": "hover、可选媒体与强调浮起。" },
+      { "name": "floating-layer", "value": "0 12px 32px rgba(31,35,39,0.12), 0 4px 12px rgba(31,35,39,0.06)", "purpose": "账号菜单、模态框与 toast。" }
+    ],
+    "motion": [
+      { "name": "ease-out", "value": "cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "常规状态反馈和菜单展开。" },
+      { "name": "ease-spring", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "短距离缩放与方向切换，不用于页面编排。" },
+      { "name": "duration-fast", "value": "150ms", "purpose": "hover、focus 与轻量状态变化。" },
+      { "name": "duration-mid", "value": "200ms", "purpose": "结构切换与控件状态。" },
+      { "name": "duration-slow", "value": "250ms", "purpose": "较长但仍不阻塞任务的反馈。" }
+    ],
+    "breakpoints": [
+      { "name": "compact-topbar", "value": "520px" },
+      { "name": "content-compact", "value": "720px" },
+      { "name": "stack-rail", "value": "820px" },
+      { "name": "narrow-rail", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "顶部工具栏的唯一主动作，适用于复制、保存等边界明确的任务。",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">复制全文</button>",
+      "css": ".ds-btn-primary{height:36px;padding:0 18px;border:0;border-radius:var(--fs-r-s,6px);background:var(--fs-brand,#1456F0);color:#fff;font-family:var(--fs-font,'PingFang SC',sans-serif);font-size:14px;font-weight:600;cursor:pointer;transition:background var(--fs-t-fast,150ms) var(--fs-ease-out,ease),transform var(--fs-t-fast,150ms) var(--fs-ease-out,ease)}.ds-btn-primary:hover{background:var(--fs-brand-hover,#0F4DD1)}.ds-btn-primary:focus-visible{outline:0;box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF),0 0 0 3px var(--fs-brand,#1456F0)}.ds-btn-primary:active{background:var(--fs-brand-active,#0B3FBA);transform:scale(.96)}@media(prefers-reduced-motion:reduce){.ds-btn-primary{transition:none}.ds-btn-primary:active{transform:none}}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "用于规则、取消和次要工具动作，保持冷白且不与主按钮竞争。",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">规则</button>",
+      "css": ".ds-btn-secondary{height:36px;padding:0 14px;border:0;border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff);color:var(--fs-text-1,#1F2329);box-shadow:inset 0 0 0 1px var(--fs-border-control,#D9DCE0);font-family:var(--fs-font,'PingFang SC',sans-serif);font-size:14px;font-weight:500;cursor:pointer;transition:background var(--fs-t-fast,150ms) var(--fs-ease-out,ease),box-shadow var(--fs-t-fast,150ms) var(--fs-ease-out,ease)}.ds-btn-secondary:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045));box-shadow:inset 0 0 0 1px var(--fs-text-3,#6F757D)}.ds-btn-secondary:focus-visible{outline:0;box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF),0 0 0 3px var(--fs-brand,#1456F0)}.ds-btn-secondary:active{background:var(--fs-bg-press,rgba(31,35,39,.08))}"
+    },
+    {
+      "name": "Input Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "紧凑的文本输入，弱文字仍满足白底可读性要求。",
+      "html": "<label class=\"ds-field-label\" for=\"ds-field\">正文 / 链接</label><input class=\"ds-field\" id=\"ds-field\" placeholder=\"粘贴公众号链接或正文\">",
+      "css": ".ds-field-label{display:block;margin-bottom:6px;color:var(--fs-text-2,#646A73);font-family:var(--fs-font,'PingFang SC',sans-serif);font-size:12px;font-weight:600}.ds-field{box-sizing:border-box;width:100%;height:34px;padding:0 10px;border:0;border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff);color:var(--fs-text-1,#1F2329);box-shadow:inset 0 0 0 1px var(--fs-border-control,#D9DCE0);font-family:var(--fs-font,'PingFang SC',sans-serif);font-size:13px;transition:box-shadow var(--fs-t-fast,150ms) var(--fs-ease-out,ease)}.ds-field::placeholder{color:var(--fs-text-3,#6F757D)}.ds-field:focus{outline:0;box-shadow:inset 0 0 0 1px var(--fs-brand,#1456F0),0 0 0 3px var(--fs-brand-soft,#EBF1FF)}"
+    },
+    {
+      "name": "Account Trigger",
+      "kind": "nav",
+      "refersTo": "account-trigger",
+      "description": "统一账号菜单的单层触发器，以账号而非渠道控件作为切换对象。",
+      "html": "<button class=\"ds-account-trigger\" type=\"button\" aria-expanded=\"false\"><span class=\"ds-account-avatar\">微</span><span>FBIF食品饮料创新</span><svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" aria-hidden=\"true\"><path d=\"M6 9l6 6 6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg></button>",
+      "css": ".ds-account-trigger{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 10px;border:0;border-radius:var(--fs-r-s,6px);background:transparent;color:var(--fs-text-1,#1F2329);font-family:var(--fs-font,'PingFang SC',sans-serif);font-size:14px;font-weight:500;cursor:pointer;transition:background var(--fs-t-fast,150ms) var(--fs-ease-out,ease)}.ds-account-trigger:hover,.ds-account-trigger[aria-expanded=true]{background:var(--fs-bg-sunken,#F2F3F5)}.ds-account-trigger:focus-visible{outline:0;box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}.ds-account-avatar{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:var(--fs-r-s,6px);background:#08A128;color:#fff;font-size:12px;font-weight:700}.ds-account-trigger svg{color:var(--fs-text-3,#6F757D)}"
+    },
+    {
+      "name": "Import Card",
+      "kind": "card",
+      "refersTo": "compact-card",
+      "description": "把文件拖放与正文输入组合成一个紧凑、可扫描的导入入口。",
+      "html": "<section class=\"ds-import-card\"><strong>导入内容</strong><button class=\"ds-dropzone\" type=\"button\">粘贴或拖拽至这里上传</button><textarea class=\"ds-import-text\" placeholder=\"粘贴公众号链接、正文或 Markdown\"></textarea></section>",
+      "css": ".ds-import-card{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--fs-border-card,#E5E6EB);border-radius:var(--fs-r-m,8px);background:var(--fs-bg-card,#fff);color:var(--fs-text-1,#1F2329);font-family:var(--fs-font,'PingFang SC',sans-serif);font-size:14px}.ds-dropzone{min-height:76px;border:1px dashed var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-s,6px);background:#FAFAFA;color:var(--fs-text-2,#646A73);font:inherit;cursor:pointer;transition:border-color var(--fs-t-mid,200ms) var(--fs-ease-out,ease),background var(--fs-t-mid,200ms) var(--fs-ease-out,ease)}.ds-dropzone:hover{border-color:var(--fs-brand,#1456F0);background:var(--fs-brand-soft,#EBF1FF)}.ds-dropzone:focus-visible{outline:0;box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}.ds-import-text{min-height:72px;padding:9px 10px;border:0;border-radius:var(--fs-r-s,6px);box-shadow:inset 0 0 0 1px var(--fs-border-control,#D9DCE0);color:var(--fs-text-1,#1F2329);font:13px/1.6 var(--fs-font,'PingFang SC',sans-serif);resize:vertical}.ds-import-text::placeholder{color:var(--fs-text-3,#6F757D)}.ds-import-text:focus{outline:0;box-shadow:inset 0 0 0 1px var(--fs-brand,#1456F0),0 0 0 2px var(--fs-brand-soft,#EBF1FF)}"
+    },
+    {
+      "name": "Toggle Switch",
+      "kind": "custom",
+      "refersTo": "toggle-switch",
+      "description": "用于明确的二元模块开关，状态同时由位置、颜色和 aria-checked 表达。",
+      "html": "<button class=\"ds-switch\" type=\"button\" role=\"switch\" aria-checked=\"true\" aria-label=\"显示底部区块\"><span></span></button>",
+      "css": ".ds-switch{position:relative;width:36px;height:20px;padding:0;border:0;border-radius:9999px;background:var(--fs-brand,#1456F0);box-shadow:inset 0 0 0 1px var(--fs-brand,#1456F0);cursor:pointer;transition:background var(--fs-t-fast,150ms) var(--fs-ease-out,ease)}.ds-switch span{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:var(--fs-sh-s1,0 1px 3px rgba(31,35,39,.04));transform:translateX(16px);transition:transform var(--fs-t-fast,150ms) var(--fs-ease-out,ease)}.ds-switch[aria-checked=false]{background:var(--fs-bg-sunken,#F2F3F5);box-shadow:inset 0 0 0 1px var(--fs-border-control,#D9DCE0)}.ds-switch[aria-checked=false] span{transform:none}.ds-switch:focus-visible{outline:0;box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF),inset 0 0 0 1px var(--fs-brand,#1456F0)}@media(prefers-reduced-motion:reduce){.ds-switch,.ds-switch span{transition:none}}"
+    },
+    {
+      "name": "Result Toast",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "只确认已完成结果，不承载需要用户决策的信息。",
+      "html": "<div class=\"ds-toast\" role=\"status\"><span aria-hidden=\"true\">✓</span>已复制到剪贴板</div>",
+      "css": ".ds-toast{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:var(--fs-r-m,8px);background:var(--fs-text-1,#1F2329);color:#fff;box-shadow:var(--fs-sh-s3,0 12px 32px rgba(31,35,39,.12));font-family:var(--fs-font,'PingFang SC',sans-serif);font-size:13px;font-weight:500}.ds-toast span{color:#41D693;font-size:16px}"
+    },
+    {
+      "name": "Modal",
+      "kind": "custom",
+      "refersTo": "modal",
+      "description": "仅用于必须中断当前上下文的选择或裁剪任务，内联能完成时不使用。",
+      "html": "<section class=\"ds-modal\" role=\"dialog\" aria-labelledby=\"ds-modal-title\"><header><strong id=\"ds-modal-title\">替换图片</strong><button type=\"button\" aria-label=\"关闭\">×</button></header><div class=\"ds-modal-body\">从当前卡片媒体库选择图片。</div><footer><button class=\"ds-modal-action\" type=\"button\">确认</button></footer></section>",
+      "css": ".ds-modal{width:min(520px,100%);overflow:hidden;border:0;border-radius:var(--fs-r-l,10px);background:var(--fs-bg-card,#fff);color:var(--fs-text-1,#1F2329);box-shadow:var(--fs-sh-s3,0 12px 32px rgba(31,35,39,.12));font-family:var(--fs-font,'PingFang SC',sans-serif)}.ds-modal header,.ds-modal footer{display:flex;align-items:center;padding:14px 18px}.ds-modal header{border-bottom:1px solid var(--fs-divider,rgba(31,35,39,.08))}.ds-modal header strong{flex:1;font-size:15px}.ds-modal header button{width:30px;height:30px;border:0;border-radius:var(--fs-r-s,6px);background:transparent;color:var(--fs-text-2,#646A73);font-size:20px;cursor:pointer}.ds-modal header button:hover{background:var(--fs-bg-sunken,#F2F3F5)}.ds-modal-body{padding:18px;color:var(--fs-text-2,#646A73);font-size:13px}.ds-modal footer{justify-content:flex-end;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08))}.ds-modal-action{height:34px;padding:0 14px;border:0;border-radius:var(--fs-r-s,6px);background:var(--fs-brand,#1456F0);color:#fff;font:600 13px var(--fs-font,'PingFang SC',sans-serif);cursor:pointer}.ds-modal-action:focus-visible,.ds-modal header button:focus-visible{outline:0;box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}"
+    },
+    {
+      "name": "WeChat Preview Surface",
+      "kind": "custom",
+      "refersTo": "wechat-preview",
+      "description": "直接在纯白页面流动的微信公众号内容契约，无 phone-frame 外观。",
+      "html": "<article class=\"ds-wx-preview\"><h1>文章标题左对齐</h1><p class=\"ds-wx-meta\">FBIF食品饮料创新　2026年7月13日</p><p>正文以真实发布后的可读节奏呈现，外壳样式不会进入这里。</p><p class=\"ds-wx-author\">作者：FBIF编辑部</p></article>",
+      "css": ".ds-wx-preview{box-sizing:border-box;width:min(680px,100%);padding:24px;background:#fff;color:#544545;font-family:'PingFang SC',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.ds-wx-preview h1{margin:0 0 12px;color:#222;font-size:27px;font-weight:700;line-height:1.35;text-align:left;text-wrap:balance}.ds-wx-preview p{margin:0 8px 16px;font-size:15px;line-height:1.75;text-wrap:pretty}.ds-wx-preview .ds-wx-meta{margin-left:0;color:#576B95;font-size:14px}.ds-wx-preview .ds-wx-author{color:#396FBC;font-style:normal}"
+    }
+  ],
+  "narrative": {
+    "northStar": "隐形检视台",
+    "overview": "这是给内容编辑在明亮办公环境中长时间使用的桌面工作台。冷白底、石墨文字与有限的飞书蓝让界面保持清醒；密度服务于连续处理稿件，不用大标题、品牌表演或页面级入场编排打断心流。\n\n“检视台”意味着每个状态都可看见、每个动作都有短而真实的反馈；“隐形”意味着工具外壳永远让位于文章。顶栏只保留账号与当前动作，左栏承载导入和单篇配置，中央纯白预览直接呈现最终渠道结果。\n\n系统明确拒绝旧 Notion 暖色、花哨 AI 模板、重边框、过度圆角和装饰性动效。熟悉的控件、明确的状态与目标后台的真实输出，比新奇外观更重要。",
+    "keyCharacteristics": [
+      "冷中性、单一行动蓝、纯白内容舞台",
+      "紧凑而不拥挤，主要外壳字号集中在 `12–15px`",
+      "色阶分区优先，阴影只表达真实 elevation",
+      "状态驱动的 `150–250ms` 动效，完整 reduced-motion 降级",
+      "编辑器外壳与微信 / FoodTalks 正文契约严格隔离"
+    ],
+    "rules": [
+      { "name": "The 双层契约 Rule", "body": "`--fs-*` 只服务编辑器外壳；`.wx-*`、`#contentArea` 与各渠道渲染器是发布内容契约，任何一侧都不得借用另一侧的视觉规则。", "section": "overview" },
+      { "name": "The One Voice Rule", "body": "行动蓝在单屏只表达动作与状态，不用于装饰；预览内容的品牌色只能由对应渠道渲染器输出。", "section": "colors" },
+      { "name": "The Fixed Scale Rule", "body": "外壳字号固定在稳定的小步进上；响应式只改变结构与可用空间，不缩放标题制造假层级。", "section": "typography" },
+      { "name": "The State-Only Motion Rule", "body": "动效只解释状态变化、空间关系或操作结果；不得延迟复制、发布决策或内容可见性。`prefers-reduced-motion` 下所有动效降为瞬时切换或极短淡入。", "section": "elevation" }
+    ],
+    "dos": [
+      "**Do** 让纯白预览成为页面焦点，并用冷中性色阶组织周围工具。",
+      "**Do** 复用 `public/css/feishu-tokens.css` 的 `--fs-*` token；新增外壳样式先映射到现有色彩、圆角、阴影与动效词汇。",
+      "**Do** 把所有主操作放在顶部工具栏，并让复制点击立即写入剪贴板和显示结果。",
+      "**Do** 为 hover、focus-visible、active、disabled、loading、error 和 success 补齐一致状态。",
+      "**Do** 让异步交互遵守 latest-wins，并在每个 `await` 后、提交 UI 前验证意图版本。",
+      "**Do** 为每段动效提供 `prefers-reduced-motion` 降级，且先保证内容默认可见。",
+      "**Do** 保持公众号、FoodTalks 网站与 FoodTalks 系列渲染器物理隔离。",
+      "**Do** 用真实微信公众号 / FoodTalks CMS 粘贴、保存结果验证正文视觉，而不是只检查本地截图。"
+    ],
+    "donts": [
+      "**Don't** 使用**旧 Notion 暖色体系残留**：`#DD5B00`、`#F0EBE5`、`#A39E98`、`#615D59`、`#0075DE`。`public/js/footer-library-rule-editor.js` 中仍存在的这些值是实现漂移，不是可复用先例。",
+      "**Don't** 制造**花哨 AI 模板感**：禁止渐变文字、玻璃拟态、装饰性动效、重复卡片阵列、全页 eyebrow 或编号脚手架。",
+      "**Don't** 使用**重边框 / 硬切块**：禁止大量常驻描边、浓黑阴影、彩色侧边条，以及描边与 `16px+` 宽软阴影同时出现。",
+      "**Don't** 形成**喧宾夺主的工具壳**：外壳不得用大字、饱和色块或复杂动效抢过正文预览。",
+      "**Don't** 引入**不透明的自动化**：禁止让复制等待后台准备、让旧异步结果覆盖新意图，或未经持久化人工批准自动公开。",
+      "**Don't** 给预览页添加 `#F7F7F7`、`#EDEDED` 或任何灰色画布；预览背景必须纯白。",
+      "**Don't** 恢复 phone-frame 边框、TOC、底部操作按钮或两层账号切换器。",
+      "**Don't** 把外壳 token 用进正文，或让公众号与网站渲染器互相 import。",
+      "**Don't** 使用 `12px+` 的体系外卡片圆角；卡片上限是 `10px`，pill 只用于标签、开关和明确的圆形控制。",
+      "**Don't** 自定义滚动条作为风格表达；现有 `.scroll-y` 规则属于待收敛实现，不应继续扩散。",
+      "**Don't** 用 modal 代替可以内联完成的选择、编辑或状态反馈。",
+      "**Don't** 通过颜色单独表达成功、警告、错误或选择状态。"
+    ]
+  }
+}

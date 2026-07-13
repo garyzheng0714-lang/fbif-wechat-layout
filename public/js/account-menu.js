@@ -61,7 +61,7 @@ function settingsActionHtml(action) {
   const label = action.label || '规则设置';
   return (
     `<div class="acct-menu-divider" aria-hidden="true"></div>` +
-    `<button type="button" class="acct-settings-item"${id} role="menuitem" data-acct-settings-action aria-label="${esc(label)}">` +
+    `<button type="button" class="acct-settings-item"${id} role="menuitem" tabindex="-1" data-acct-settings-action aria-label="${esc(label)}">` +
       `<svg class="acct-settings-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">` +
         `<path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z" fill="none" stroke="currentColor" stroke-width="1.8"/>` +
         `<path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 0 1-2.83 2.83l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.05a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 0 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 0 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.05A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 0 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 0 1 0 4h-.05A1.7 1.7 0 0 0 19.4 15Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>` +
@@ -76,24 +76,45 @@ export function mountAccountMenu({ container, activeId, onSwitch, settingsAction
   if (!container) return { setActive() {} };
   const packs = listRulePacks();
   let isOpen = false;
+  const panelID = (container.id || 'acct-menu') + '-panel';
 
   const activePack = () => packs.find(p => p.id === activeId) || packs[0];
 
-  function render() {
+  function menuItems() {
+    return [...container.querySelectorAll('[role="menuitemradio"], [role="menuitem"]')];
+  }
+
+  function focusAfterRender(target) {
+    if (!target) return;
+    if (target === 'trigger') {
+      container.querySelector('.acct-trigger')?.focus();
+      return;
+    }
+    const items = menuItems();
+    if (!items.length) return;
+    const item = target === 'last'
+      ? items[items.length - 1]
+      : target === 'active'
+      ? items.find(el => el.getAttribute('aria-checked') === 'true') || items[0]
+      : items[0];
+    item?.focus();
+  }
+
+  function render(focusTarget = '') {
     const cur = activePack();
     const groups = buildAccountGroups(packs, activeId);
     container.innerHTML =
-      `<button type="button" class="acct-trigger" aria-haspopup="menu" aria-expanded="${isOpen}">` +
+      `<button type="button" class="acct-trigger" aria-haspopup="menu" aria-controls="${esc(panelID)}" aria-expanded="${isOpen}">` +
         avatarHtml(cur.channel, cur.avatarUrl, 'acct-trigger-avatar') +
         `<span class="acct-trigger-name">${esc(cur.accountName)}</span>` +
         `<svg class="acct-trigger-caret" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">` +
           `<path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>` +
       `</button>` +
-      `<div class="acct-panel" role="menu"${isOpen ? '' : ' hidden'}>` +
+      `<div class="acct-panel" id="${esc(panelID)}" role="menu" aria-label="账号"${isOpen ? '' : ' hidden'}>` +
         groups.map(g =>
           `<div class="acct-group-label">${esc(g.label)}</div>` +
           g.items.map(it =>
-            `<button type="button" class="acct-item${it.active ? ' is-active' : ''}" role="menuitemradio"` +
+            `<button type="button" class="acct-item${it.active ? ' is-active' : ''}" role="menuitemradio" tabindex="-1"` +
               ` aria-checked="${it.active}" data-account-id="${esc(it.id)}">` +
               avatarHtml(g.channel, it.avatarUrl, 'acct-item-avatar') +
               `<span class="acct-item-name">${esc(it.name)}</span>` +
@@ -107,27 +128,65 @@ export function mountAccountMenu({ container, activeId, onSwitch, settingsAction
         settingsActionHtml(settingsAction) +
       `</div>`;
     bind();
+    focusAfterRender(focusTarget);
   }
 
   function bind() {
     const trigger = container.querySelector('.acct-trigger');
-    if (trigger) trigger.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+    if (trigger) {
+      trigger.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+      trigger.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        e.preventDefault();
+        isOpen = true;
+        render(e.key === 'ArrowUp' ? 'last' : 'first');
+      });
+    }
     container.querySelectorAll('[data-account-id]').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.accountId;
-        close();
+        close(id === activeId);
         if (id !== activeId) onSwitch(id);
       });
     });
     const settingsButton = container.querySelector('[data-acct-settings-action]');
     if (settingsButton) settingsButton.addEventListener('click', () => close());
+    menuItems().forEach(item => item.addEventListener('keydown', onMenuKey));
   }
 
-  function close() { if (isOpen) { isOpen = false; render(); } }
-  function toggle() { isOpen = !isOpen; render(); }
+  function onMenuKey(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      close(true);
+      return;
+    }
+    const items = menuItems();
+    const current = items.indexOf(e.currentTarget);
+    if (current < 0) return;
+    let next = current;
+    if (e.key === 'ArrowDown') next = (current + 1) % items.length;
+    else if (e.key === 'ArrowUp') next = (current - 1 + items.length) % items.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = items.length - 1;
+    else return;
+    e.preventDefault();
+    items[next]?.focus();
+  }
+
+  function close(restoreFocus = false) {
+    if (!isOpen) return;
+    isOpen = false;
+    render(restoreFocus ? 'trigger' : '');
+  }
+  function toggle() {
+    isOpen = !isOpen;
+    render(isOpen ? 'active' : 'trigger');
+  }
 
   document.addEventListener('click', (e) => { if (!container.contains(e.target)) close(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(true); });
+  document.addEventListener('focusin', (e) => { if (isOpen && !container.contains(e.target)) close(); });
 
   render();
   return {

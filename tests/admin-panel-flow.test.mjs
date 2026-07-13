@@ -37,6 +37,9 @@ async function waitFor(predicate, message) {
 
 test('规则后台完整状态机：按当前账号加载/保存系列私有模块，新建从系列 baseline 起步', async () => {
   const { document, window } = parseHTML('<!doctype html><html><body><button id="adminLockBtn">规则</button></body></html>');
+  let focused = document.body;
+  Object.defineProperty(document, 'activeElement', { configurable: true, get: () => focused });
+  window.HTMLElement.prototype.focus = function focus() { focused = this; };
   globalThis.document = document;
   globalThis.window = window;
   window.confirm = () => true;
@@ -94,13 +97,26 @@ test('规则后台完整状态机：按当前账号加载/保存系列私有模�
         return new Promise(resolve => { releasePreview = resolve; });
       },
     });
-    document.getElementById('adminLockBtn').click();
+    const opener = document.getElementById('adminLockBtn');
+    opener.focus();
+    opener.click();
     const overlay = document.body.lastElementChild;
     const form = overlay.querySelector('.admin-login-form');
+    assert.ok(document.body.classList.contains('admin-panel-open'), '打开后台时锁住页面滚动');
+    assert.ok(opener.hasAttribute('inert'), '后台打开时页面其余内容不可聚焦');
+    const submit = form.querySelector('button[type="submit"]');
+    submit.focus();
+    const tab = new window.Event('keydown', { bubbles: true, cancelable: true });
+    tab.key = 'Tab';
+    submit.dispatchEvent(tab);
+    assert.ok(document.activeElement?.classList.contains('admin-close'), 'Tab 在对话框末尾应回到首个控件');
     form.querySelector('input').value = 'secret';
     form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
     await waitFor(() => overlay.querySelector('[data-view="rules"]'), '后台登录未完成');
     overlay.querySelector('[data-view="rules"]').click();
+    assert.equal(overlay.querySelector('[data-view="rules"]').getAttribute('aria-current'), 'page', '侧栏标记当前分区');
+    const activeRuleTab = overlay.querySelector('.admin-rule-tabs [aria-selected="true"]');
+    assert.equal(activeRuleTab?.getAttribute('role'), 'tab', '规则分区使用完整 tab 语义');
     holdNextPreview = true;
     overlay.querySelector('[data-action="save"]').click();
     await waitFor(() => savedBodies.length === 1, '保存现有系列规则未发请求');
@@ -127,6 +143,10 @@ test('规则后台完整状态机：按当前账号加载/保存系列私有模�
         /\u5df2\u4fdd\u5b58\u5e76\u5e94\u7528/.test(overlay.querySelector('.admin-foot .admin-status')?.textContent || ''),
       '保存新规则后未完成回读与应用',
     );
+    overlay.querySelector('.admin-close').click();
+    assert.ok(!document.body.classList.contains('admin-panel-open'), '关闭后恢复页面滚动');
+    assert.ok(!opener.hasAttribute('inert'), '关闭后恢复页面交互');
+    assert.equal(document.activeElement, opener, '关闭后焦点回到打开按钮');
   } finally {
     delete globalThis.fetch;
     delete globalThis.document;

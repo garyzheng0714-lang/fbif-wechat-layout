@@ -8,9 +8,9 @@ export function numberField(field, value, esc) {
     <label class="admin-field">
       <span>${esc(field.label)}</span>
       <span class="admin-stepper">
-        <button type="button" class="admin-step" data-step-dir="-1" tabindex="-1" aria-hidden="true">−</button>
+        <button type="button" class="admin-step" data-step-dir="-1" tabindex="-1" aria-label="减少${esc(field.label)}">−</button>
         <input type="number" data-rule-key="${esc(field.key)}" value="${esc(value)}" min="${field.min}" max="${field.max}" step="${field.step}">
-        <button type="button" class="admin-step" data-step-dir="1" tabindex="-1" aria-hidden="true">+</button>
+        <button type="button" class="admin-step" data-step-dir="1" tabindex="-1" aria-label="增加${esc(field.label)}">+</button>
       </span>
     </label>`;
 }

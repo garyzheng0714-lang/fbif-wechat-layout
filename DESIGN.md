@@ -1,99 +1,275 @@
-# Design System — 飞书 Universe Design（编辑器外壳）+ 微信/FoodTalks 正文复刻
-
-> 编辑器**外壳**（顶栏、侧栏、卡片、按钮、弹窗）走飞书 Universe Design 冷中性灰体系，
-> 全部引用 `public/css/feishu-tokens.css` 的 `--fs-*` token。
-> **正文预览区**（`.wx-*` 微信复刻 / `#contentArea` FoodTalks 复刻）是内容契约红线，
-> **不属于本设计系统**，见下方「WeChat Preview Area」「Content Contract」——像素级冻结。
-
-## Visual Identity
-- **Style**: 飞书 Universe Design — 冷中性灰阶、减线条用背景分区、克制精确
-- **Font**: PingFang SC 打头（`--fs-font`）；正文区用各自的 mp-quote / FoodTalks 字体栈，不受影响
-- **Tone**: 冷静、干净、有层次 — 极轻阴影托起 elevation，而非靠硬边框切块
-
-## Color Palette（`--fs-*` token，定义在 `public/css/feishu-tokens.css`）
-
-| Role | Token | Value |
-|------|-------|-------|
-| 品牌主蓝 | `--fs-brand` | `#1456F0` |
-| 主蓝 hover / active | `--fs-brand-hover` / `--fs-brand-active` | `#0F4DD1` / `#0B3FBA` |
-| 主蓝浅底（badge/icon 软底） | `--fs-brand-soft` | `#EBF1FF` |
-| 主文字 | `--fs-text-1` | `#1F2329` |
-| 次文字（描述/标签） | `--fs-text-2` | `#646A73` |
-| 弱文字（占位/caption/状态） | `--fs-text-3` | `#6F757D`（对白底 4.66:1，达 WCAG AA；旧 `#8F959E`=3.0:1 不达标，2026-06-07 调深） |
-| 卡片 / 页面底 | `--fs-bg-card` | `#FFFFFF` |
-| 嵌套分区底 | `--fs-bg-nested` | `#F7F8FA` |
-| 凹槽 / sunken | `--fs-bg-sunken` | `#F2F3F5` |
-| hover / press 叠加 | `--fs-bg-hover` / `--fs-bg-press` | `rgba(31,35,39,0.045)` / `.08` |
-| 浮层遮罩 | `--fs-bg-overlay` | `rgba(17,20,24,0.42)` |
-| 控件描边 | `--fs-border-control` | `#D9DCE0` |
-| 卡片描边 | `--fs-border-card` | `#E5E6EB` |
-| 分隔线 | `--fs-divider` | `rgba(31,35,39,0.08)` |
-| 成功 / 警告 / 危险 | `--fs-success` / `--fs-warning` / `--fs-danger` | `#00A870` / `#FF8800` / `#F54A45` |
-
-## Radius / Shadow / Motion（token）
-
-- **圆角**: `--fs-r-xs/s/m/l` = `4 / 6 / 8 / 10px`，`--fs-r-full` = `9999px`。**只用这四级，不写体系外值（5/7/12px）**
-- **阴影（极轻、有方向）**: `--fs-sh-s1`（卡片静止）/ `--fs-sh-s2`（hover 升起）/ `--fs-sh-s3`（弹窗浮层）。**不手写浓黑投影**
-- **动效**: `--fs-ease-out` / `--fs-ease-spring`；时长 `--fs-t-fast/mid/slow` = `150/200/250ms`
-
-## Component Rules
-
-- **主按钮**: `--fs-brand` 底 + 白字，hover `--fs-brand-hover`，radius `--fs-r-s`，active `scale(0.95)`
-- **次按钮 / 控件**: `--fs-bg-card` 底 + `--fs-border-card`/`--fs-border-control` 描边，hover `--fs-bg-hover`
-- **卡片**: `--fs-bg-card` 底 + `--fs-sh-s1` 极轻阴影托起，hover 升 `--fs-sh-s2` + `translateY(-1px)`；**减线条——分区靠背景色差 + 阴影，不靠常驻边框**
-- **输入框**: `--fs-border-control` 描边，focus = `--fs-brand` 边 + `0 0 0 2px var(--fs-brand-soft)` 聚焦环
-- **弹窗浮层**: `--fs-bg-card` + `--fs-r-l` + `--fs-sh-s3`，遮罩 `--fs-bg-overlay`
-
-## Do / Don't
-- DO 用 `--fs-*` token，不硬编码颜色 / 圆角 / 阴影
-- DO 减线条：能用 `--fs-bg-nested/sunken` 背景分区就不画灰边框
-- DO 卡片配 `--fs-sh-s1~3` 极轻阴影拉 elevation
-- DON'T 残留旧 Notion 体系：旧蓝 `#0075de`、暖橙 `#dd5b00`、暖灰 `#f0ebe5 / #a39e98 / #615d59`
-- DON'T 手写浓黑投影 `rgba(0,0,0,0.28)`、体系外圆角 `5/7/12px`、`inset` 白高光 hack
-- DON'T 把外壳 token 用到正文预览区（正文是独立契约，见下）
-
+---
+name: "FBIF 内容排版与发布工具"
+description: "以隐形检视台承载多渠道排版、预览、复制与受控发布"
+colors:
+  brand: "#1456F0"
+  brand-hover: "#0F4DD1"
+  brand-active: "#0B3FBA"
+  brand-soft: "#EBF1FF"
+  text-primary: "#1F2329"
+  text-secondary: "#646A73"
+  text-tertiary: "#6F757D"
+  text-disabled: "#BBBFC4"
+  surface: "#FFFFFF"
+  surface-nested: "#F7F8FA"
+  surface-sunken: "#F2F3F5"
+  border-control: "#D9DCE0"
+  border-card: "#E5E6EB"
+  success: "#00A870"
+  warning: "#FF8800"
+  danger: "#F54A45"
+  wechat-body: "#544545"
+  wechat-author: "#396FBC"
+  foodtalks-heading: "#01396A"
+typography:
+  title:
+    fontFamily: "PingFang SC, -apple-system, BlinkMacSystemFont, Segoe UI, Microsoft YaHei, Noto Sans SC, sans-serif"
+    fontSize: "14px"
+    fontWeight: 600
+    lineHeight: 1.35
+    letterSpacing: "normal"
+  body:
+    fontFamily: "PingFang SC, -apple-system, BlinkMacSystemFont, Segoe UI, Microsoft YaHei, Noto Sans SC, sans-serif"
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.6
+    letterSpacing: "normal"
+  label:
+    fontFamily: "PingFang SC, -apple-system, BlinkMacSystemFont, Segoe UI, Microsoft YaHei, Noto Sans SC, sans-serif"
+    fontSize: "12px"
+    fontWeight: 500
+    lineHeight: 1.45
+    letterSpacing: "normal"
+  mono:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: 1.55
+    letterSpacing: "normal"
+rounded:
+  xs: "4px"
+  s: "6px"
+  m: "8px"
+  l: "10px"
+  full: "9999px"
+spacing:
+  xxs: "4px"
+  xs: "6px"
+  sm: "8px"
+  md: "12px"
+  lg: "16px"
+  xl: "24px"
+components:
+  button-primary:
+    backgroundColor: "{colors.brand}"
+    textColor: "{colors.surface}"
+    typography: "{typography.title}"
+    rounded: "{rounded.s}"
+    padding: "0 18px"
+    height: "36px"
+  button-primary-hover:
+    backgroundColor: "{colors.brand-hover}"
+    textColor: "{colors.surface}"
+    typography: "{typography.title}"
+    rounded: "{rounded.s}"
+    padding: "0 18px"
+    height: "36px"
+  button-primary-active:
+    backgroundColor: "{colors.brand-active}"
+    textColor: "{colors.surface}"
+    typography: "{typography.title}"
+    rounded: "{rounded.s}"
+    padding: "0 18px"
+    height: "36px"
+  button-secondary:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text-primary}"
+    typography: "{typography.title}"
+    rounded: "{rounded.s}"
+    padding: "0 14px"
+    height: "36px"
+  input-field:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text-primary}"
+    typography: "{typography.body}"
+    rounded: "{rounded.s}"
+    padding: "0 10px"
+    height: "34px"
+  account-trigger:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text-primary}"
+    typography: "{typography.title}"
+    rounded: "{rounded.s}"
+    padding: "0 10px"
+    height: "36px"
+  compact-card:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text-primary}"
+    rounded: "{rounded.m}"
+    padding: "12px"
 ---
 
-## WeChat Preview Area (unchanged)
-- **Background**: Pure white `#FFFFFF`
-- **Title**: 27px, weight 700, color #222, PingFang SC
-- **Meta**: "FBIF食品饮料创新" (#576b95) + date (#b2b2b2)
-- **Original Author Line**: `作者：` attribution uses `#396FBC`, normal style, not italic
-- **Footer**: sticky bottom, white bg, centered 0.5px divider (#E5E5E5)
-- **Content width**: max-width 680px centered
+# Design System: FBIF 内容排版与发布工具
 
-## WeChat Article Content Contract
+## Overview
 
-These values are product contracts, not incidental CSS. Any parser, renderer, copy, or deploy change must keep them covered by tests and browser verification.
+**Creative North Star: "隐形检视台"**
 
-| Role | Contract |
-|------|----------|
-| Body text | `15px`, color `#544545`, line-height `1.75`, paragraph side margin `8px` |
-| DOCX paragraph rhythm | Consecutive non-empty body paragraphs with compact Word spacing stay tight; a blank paragraph in the source restores the standard `wx-gap` before the next paragraph |
-| Image block | Centered, `line-height: 0`, `font-size: 0`, image `display: block` |
-| Image caption | `12px`, color `#888888`, line-height `1.75`, centered |
-| Image source | Treat `图片来源：` / `图源：` after an image as image caption metadata, not body text and not article-level source |
-| Article attribution | URL-imported `来源：` / `作者：` / `编辑：` renders once at the article tail before the standard `提示：` footer |
-| Attribution style | `15px`, color `#0070C0`, line-height `1.75`; original DOCX author additionally uses `#396FBC`, normal style |
+这是给内容编辑在明亮办公环境中长时间使用的桌面工作台。冷白底、石墨文字与有限的飞书蓝让界面保持清醒；密度服务于连续处理稿件，不用大标题、品牌表演或页面级入场编排打断心流。
 
-## Current Rules
-1. 预览页背景必须全白
-2. 多账号绑定，统一顶栏左侧账号菜单（单层）：账号切换走全局顶栏左上角头像菜单（`account-menu.js` 的 `mountAccountMenu`，挂载点 `#acctMenu`），列出全部账号，渠道（公众号 / 网站）降为菜单内的分组标签，不再是独立控件。当前编辑器保持单篇文章工作区，不再提供文章标签页。旧的"顶部圆角渠道胶囊 + 侧栏方角规则包分段"两层切换器已删除，勿恢复。
-3. 规则服务端保存 + 本地降级（服务器 `/api/rules/*` 为准，包含参数配置与受限 `behavior` 行为配置；localStorage 只做兼容与离线降级）
-4. 全局顶栏左侧显示账号下拉，不显示「FBIF文章排版工具」品牌文案；设置入口收进账号下拉菜单底部，右侧只保留复制全文。刷新按钮不显示。左侧底部不再显示当前规则卡片或设置入口
-5. 不要 TOC/目录
-6. 底部栏复刻微信（白底，分隔线不贯穿）
-7. 文章标题左对齐 27px 粗体
-8. 复制后不自动打开微信后台；只显示复制成功提示
-9. 复制按钮必须立即反馈；图片上传和“更多文章”合成只能提前或后台进行，不能把按钮文案切成上传/准备状态
-10. 表单只填数字
-11. 不要 phone-frame 边框
-12. 原创 DOCX 的首个 `作者：` 行是正文起点，它之前的编辑前置材料不显示在编辑器里
-13. `Mote莫特` / `Mote 莫特` 作者在参考来源上方插入固定署名图；原创作者行 `#396FBC` 且不斜体
-14. 更多文章是可选规则模块；`modules.more_articles.enabled=false` 时新文章不渲染底部更多文章，`modules.more_articles.default_cards` 保存新文章默认推荐列表，当前文章仍可在侧边栏临时替换、删除、排序和裁剪卡片
-15. 更多文章选图使用当前卡片媒体库；`/api/fetch-article-meta` 必须返回 `image_urls`，替换图片候选顺序为当前卡片自定义封面、抓取头图、当前卡片正文媒体图，主文章图片只做兜底；旧卡片缺少 `image_urls` 时点击替换要按卡片链接补抓
-16. URL 导入的图片说明组必须保留浅灰图注样式；`图片来源：` 不能掉成正文
-17. URL 导入的文章级来源、作者、编辑固定在标准 `提示：` 前，且只出现一次
-18. DOCX 连续非空正文段落保留紧凑节奏；原文空段分隔才恢复标准段后间距
+“检视台”意味着每个状态都可看见、每个动作都有短而真实的反馈；“隐形”意味着工具外壳永远让位于文章。顶栏只保留账号与当前动作，左栏承载导入和单篇配置，中央纯白预览直接呈现最终渠道结果。
 
-规则说明：这里记录当前设计约束。旧需求不能因为出现在历史记录里就被当成当前规则。
+系统明确拒绝旧 Notion 暖色、花哨 AI 模板、重边框、过度圆角和装饰性动效。熟悉的控件、明确的状态与目标后台的真实输出，比新奇外观更重要。
+
+**Key Characteristics:**
+
+- 冷中性、单一行动蓝、纯白内容舞台
+- 紧凑而不拥挤，主要外壳字号集中在 `12–15px`
+- 色阶分区优先，阴影只表达真实 elevation
+- 状态驱动的 `150–250ms` 动效，完整 reduced-motion 降级
+- 编辑器外壳与微信 / FoodTalks 正文契约严格隔离
+
+**The 双层契约 Rule.** `--fs-*` 只服务编辑器外壳；`.wx-*`、`#contentArea` 与各渠道渲染器是发布内容契约，任何一侧都不得借用另一侧的视觉规则。
+
+## Colors
+
+外壳采用 Restrained 策略：冷中性色承担绝大多数面积，飞书蓝只标记主动作、当前选择、焦点与进行中状态。
+
+### Primary
+
+- **行动蓝**（`brand`）：复制、保存、当前选择与键盘焦点；hover 和 active 只使用对应的 `brand-hover`、`brand-active`。
+- **选择浅蓝**（`brand-soft`）：焦点环、选中行与轻量 badge 的低强调背景，不能扩张成装饰色块。
+
+### Neutral
+
+- **石墨主墨**（`text-primary`）：标题、控件值与关键状态。
+- **说明灰**（`text-secondary`）：辅助说明和非主导标签。
+- **可读弱灰**（`text-tertiary`）：占位、caption 与次级状态；该值是白底文字的最低可读档，不得退回更浅的 `#8F959E`。
+- **冷白工作面**（`surface`）：页面、卡片与预览基底。
+- **嵌套灰 / 凹槽灰**（`surface-nested`、`surface-sunken`）：静态分区、hover 与不可编辑区域；它们替代无意义的常驻边框。
+- **控件线 / 卡片线**（`border-control`、`border-card`）：只在输入边界、分隔与可点击轮廓确有必要时出现。
+
+### Semantic
+
+- **成功绿**（`success`）：复制完成与同步完成。
+- **警告橙**（`warning`）：需要注意但仍可继续的状态。
+- **危险红**（`danger`）：失败、删除与阻断状态；颜色必须同时配合文字或图标。
+
+### Channel content contracts
+
+- 微信预览始终纯白；标题为 `27px / 700 / #222222`，正文使用 `wechat-body`、`15px`、`1.75` 行高，原创作者使用 `wechat-author` 且不斜体，图注为 `12px / #888888`。
+- FoodTalks 内容由独立渲染器决定，标题使用 `foodtalks-heading`；网站署名固定为 `14px / #888888 / italic`，不得复用公众号 Mote 蓝色署名。
+
+**The One Voice Rule.** 行动蓝在单屏只表达动作与状态，不用于装饰；预览内容的品牌色只能由对应渠道渲染器输出。
+
+## Typography
+
+**Display Font:** 无；工具界面不使用展示字体。
+
+**Body Font:** PingFang SC，回退到系统 UI sans-serif。
+
+**Label/Mono Font:** 普通标签沿用系统字体；规则 JSON、代码和值预览使用 JetBrains Mono 回退栈。
+
+**Character:** 单一、熟悉、清晰。产品界面用固定字号而非 `clamp()`；层级主要靠字重、位置和留白，不靠夸张尺寸。
+
+### Hierarchy
+
+- **Headline** (`600`, `15px`, `1.35`): 弹窗标题和一级面板标题。
+- **Title** (`600`, `14px`, `1.35`): 卡片标题、主要按钮和账号名。
+- **Body** (`400`, `13px`, `1.6`): 说明、输入内容和常规操作文案；长说明限制在 `65–75ch`。
+- **Label** (`500`, `12px`, `1.45`): 字段名、状态和 caption；不用全大写或宽字距制造 eyebrow。
+- **Mono** (`400`, `12px`, `1.55`): 结构化规则、JSON 与技术值，只在管理员场景出现。
+
+### Preview hierarchy
+
+公众号和网站正文排版不继承外壳层级。微信公众号正文保持 `15px / 1.75`，文章标题保持左对齐 `27px / 700`；FoodTalks 标题、正文、引用与表格样式由其渠道渲染器和 CMS 存活契约单独维护。
+
+**The Fixed Scale Rule.** 外壳字号固定在稳定的小步进上；响应式只改变结构与可用空间，不缩放标题制造假层级。
+
+## Elevation
+
+系统采用“色阶优先、阴影响应”的混合策略。静止分区先用 `surface`、`surface-nested`、`surface-sunken` 建立深度；阴影只在悬浮卡片、展开菜单、弹窗与明确 hover 升起时出现。
+
+### Shadow Vocabulary
+
+- **静止轻托** (`box-shadow: 0 1px 3px rgba(31,35,39,0.04), 0 1px 2px rgba(31,35,39,0.03)`): 文件条、轻量卡片与开关旋钮。
+- **交互升起** (`box-shadow: 0 2px 8px rgba(31,35,39,0.06), 0 1px 3px rgba(31,35,39,0.04)`): hover、可选媒体与强调浮起。
+- **浮层** (`box-shadow: 0 12px 32px rgba(31,35,39,0.12), 0 4px 12px rgba(31,35,39,0.06)`): 账号菜单、模态框与 toast；使用该阴影时不再叠加装饰性外边框。
+
+### Motion
+
+常规状态变化使用 `150ms`，结构切换使用 `200ms`，较长反馈上限 `250ms`；默认缓动为 `cubic-bezier(0.22, 1, 0.36, 1)`。账号菜单轻微下移展开，拖拽区通过边界和背景响应，文章渲染只做容器级渐入。动画永远建立在已经可见、已经提交的状态上。
+
+**The State-Only Motion Rule.** 动效只解释状态变化、空间关系或操作结果；不得延迟复制、发布决策或内容可见性。`prefers-reduced-motion` 下所有动效降为瞬时切换或极短淡入。
+
+## Components
+
+### Buttons
+
+- **Shape:** 紧凑矩形，圆角使用 `rounded.s`；常规高度 `36px`，小按钮 `34px`。
+- **Primary:** 行动蓝底、白字，只用于当前页面最重要且安全边界清楚的动作；复制按钮固定在顶部工具栏并立即反馈成功态。
+- **Secondary:** 冷白底、必要时用控件线或 inset 边界；hover 用中性背景，不与主按钮争夺注意力。
+- **States:** hover、focus-visible、active、disabled、loading、success 必须有明确差异；active 可使用 `scale(0.95–0.98)`，但 reduced-motion 下取消位移和缩放。
+
+### Account menu and navigation
+
+- 顶栏高 `56px`，左侧只有单层“头像 + 账号名 + 箭头”菜单，右侧只有当前页面动作。
+- 菜单按“公众号 / 网站”分组；同模板账号原地切换，跨模板或跨渠道整页切换。禁止恢复“渠道胶囊 + 规则包分段”的两层切换器。
+- 层级固定为：顶栏 `60`、账号菜单 `200`、toast `300`、模态框 `420`。浮层不得被滚动容器裁切。
+
+### Import and fields
+
+- 导入卡将文件拖放与“正文 / 链接”输入并列为两个清楚入口；文件选中后始终显示图标、完整可辨文件名和移除按钮。
+- 输入框使用 `border-control` 与 `rounded.s`，focus 用行动蓝边界加浅蓝焦点环。占位符使用 `text-tertiary`，不得用不可读浅灰。
+- 表单视觉值只展示数字；不要把 `px`、`em` 等单位塞进用户输入框，颜色使用 color picker。
+
+### Cards and containers
+
+- 卡片圆角只用 `4 / 6 / 8 / 10px`；默认无阴影或只用静止轻托。
+- 分区优先用中性背景和节奏，不用嵌套卡片、彩色侧边条或“描边 + 宽软阴影”的 ghost-card。
+- 底部区块面板跨账号共享结构与交互语言，排序使用明确拖拽把手；各渠道视觉输出仍由独立渲染器决定。
+
+### Modals and feedback
+
+- 模态框使用原生可理解的标题、内容、顶部关闭与底部动作；白色表面、`10px` 圆角、浮层阴影和半透明遮罩。
+- Toast 位于底部居中，只传达已经完成的结果，不承载需要用户决策的信息。
+- 错误状态必须给出可执行文案；不能只变红，也不能向普通编辑暴露内部堆栈或配置细节。
+
+### Preview surfaces
+
+- 公众号文章直接在纯白页面流动，内容宽度最大 `680px`；无 phone-frame 边框、无灰色画布、无目录。
+- FoodTalks 预览最大宽度 `865px`，只模拟目标网站；其正文样式、表格 CMS 存活属性和署名规则不进入公众号渲染器。
+- 所有文章级作者、来源与编辑信息由渲染契约控制位置和次数，外壳不得用 CSS 临时修饰或重复生成。
+
+### Responsive behavior
+
+- `1024px` 以下左栏收窄；`820px` 以下左栏堆叠到预览上方；`520px` 以下压缩顶栏水平留白，但保留账号与复制动作。
+- 响应式改变布局，不改变内容契约，也不通过流体大字制造层级。
+
+## Do's and Don'ts
+
+### Do:
+
+- **Do** 让纯白预览成为页面焦点，并用冷中性色阶组织周围工具。
+- **Do** 复用 `public/css/feishu-tokens.css` 的 `--fs-*` token；新增外壳样式先映射到现有色彩、圆角、阴影与动效词汇。
+- **Do** 把所有主操作放在顶部工具栏，并让复制点击立即写入剪贴板和显示结果。
+- **Do** 为 hover、focus-visible、active、disabled、loading、error 和 success 补齐一致状态。
+- **Do** 让异步交互遵守 latest-wins，并在每个 `await` 后、提交 UI 前验证意图版本。
+- **Do** 为每段动效提供 `prefers-reduced-motion` 降级，且先保证内容默认可见。
+- **Do** 保持公众号、FoodTalks 网站与 FoodTalks 系列渲染器物理隔离。
+- **Do** 用真实微信公众号 / FoodTalks CMS 粘贴、保存结果验证正文视觉，而不是只检查本地截图。
+
+### Don't:
+
+- **Don't** 使用**旧 Notion 暖色体系残留**：`#DD5B00`、`#F0EBE5`、`#A39E98`、`#615D59`、`#0075DE`。`public/js/footer-library-rule-editor.js` 中仍存在的这些值是实现漂移，不是可复用先例。
+- **Don't** 制造**花哨 AI 模板感**：禁止渐变文字、玻璃拟态、装饰性动效、重复卡片阵列、全页 eyebrow 或编号脚手架。
+- **Don't** 使用**重边框 / 硬切块**：禁止大量常驻描边、浓黑阴影、彩色侧边条，以及描边与 `16px+` 宽软阴影同时出现。
+- **Don't** 形成**喧宾夺主的工具壳**：外壳不得用大字、饱和色块或复杂动效抢过正文预览。
+- **Don't** 引入**不透明的自动化**：禁止让复制等待后台准备、让旧异步结果覆盖新意图，或未经持久化人工批准自动公开。
+- **Don't** 给预览页添加 `#F7F7F7`、`#EDEDED` 或任何灰色画布；预览背景必须纯白。
+- **Don't** 恢复 phone-frame 边框、TOC、底部操作按钮或两层账号切换器。
+- **Don't** 把外壳 token 用进正文，或让公众号与网站渲染器互相 import。
+- **Don't** 使用 `12px+` 的体系外卡片圆角；卡片上限是 `10px`，pill 只用于标签、开关和明确的圆形控制。
+- **Don't** 自定义滚动条作为风格表达；现有 `.scroll-y` 规则属于待收敛实现，不应继续扩散。
+- **Don't** 用 modal 代替可以内联完成的选择、编辑或状态反馈。
+- **Don't** 通过颜色单独表达成功、警告、错误或选择状态。

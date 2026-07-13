@@ -1,6 +1,7 @@
 /* ======== Rule admin panel — Feishu design tokens (stage 3) ======== */
 /* 规则工作台：右滑面板（方案A「检视台」）。原居中模态改为右侧 slide-over，
    把吓人的裸 JSON 弹窗变成顺手的工作台；内部布局/选择器保持不变（测试锁定）。 */
+body.admin-panel-open { overflow: hidden; }
 .admin-overlay {
   position: fixed; inset: 0;
   z-index: 140;
@@ -47,6 +48,11 @@
   font-family: inherit; padding: 0;
 }
 .admin-close:hover { background: var(--fs-bg-press, rgba(31,35,39,0.08)); color: var(--fs-text-1, #1F2329); }
+.admin-dialog button:focus-visible,
+.admin-dialog summary:focus-visible {
+  outline: 2px solid var(--fs-brand, #1456F0);
+  outline-offset: 2px;
+}
 .admin-body {
   flex: 1; overflow-y: auto;
   padding: 16px 20px 20px;
@@ -454,7 +460,7 @@
   border-radius: var(--fs-r-full, 9999px);
   padding: 4px 9px;
   background: var(--fs-bg-sunken, #F2F3F5);
-  color: var(--fs-text-3, #8F959E);
+  color: var(--fs-text-2, #646A73);
   font-size: 12px;
   font-weight: 700;
 }
@@ -529,6 +535,9 @@
   .admin-field { grid-template-columns: minmax(0, 1fr) 112px; }
   .admin-foot { flex-wrap: wrap; }
   .admin-status { flex-basis: 100%; }
+  .admin-dialog button,
+  .admin-dialog select,
+  .admin-dialog input:not([type="checkbox"]):not([type="color"]) { min-height: 44px; }
 }
 
 /* ===== 规则工作台：表单 + 右侧实时预览 + ± 步进器（方案A 检视台）===== */
