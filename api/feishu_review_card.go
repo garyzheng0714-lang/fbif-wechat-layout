@@ -32,9 +32,9 @@ const (
 const reviewCardHeaderTitle = "网站同步 · 发布审核"
 
 // buildReviewPendingCard 待审核卡：蓝 header + 「待审核」黄 tag + grey-100 信息色块
-// （标题/来源公众号/作者/标签/摘要/原文/任务号/目标环境/进站时间）+ AI 优化说明段
-// + 按钮行（通过并发布｜驳回｜预览效果）。第三键 2026-07-10「预览链接」裁定后从
-// 「查看原文」换成「预览效果」（审核不能盲审），原文链接降为信息色块一行。
+// （封面/标题/标签/摘要/预览）+ 基础信息 + AI 优化说明段 + 审核按钮行。
+// 预览键使用稳定的本站签名入口，每次点击现铸 FoodTalks 短期 token 后跳到官方预览页；
+// 原文链接降为基础信息一行。
 // coverImgKey 是封面图经飞书图片素材接口转存后的 img_key（卡片 img 元素只认
 // img_key）；上传失败或无封面时传空串 → 卡片不带图，其余不变（卡片永不阻塞流水线）。
 func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
@@ -77,23 +77,12 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 			"pc_url": "", "ios_url": "", "android_url": "",
 		}},
 	}
-	buttons := feishuButtonRow(approveButton, rejectButton, previewButton)
+	buttons := feishuButtonRow(approveButton, rejectButton)
 	if !publishRiskAllowsManualApprove(job.RiskLevel) {
 		// block/缺失/未知级别不能只靠回调端挡：卡片本身不呈现 approve，避免错误暗示。
-		buttons = feishuButtonRow(rejectButton, previewButton)
+		buttons = feishuButtonRow(rejectButton)
 	}
-	elements := []any{}
-	if coverImgKey != "" {
-		elements = append(elements, map[string]any{
-			"tag":           "img",
-			"img_key":       coverImgKey,
-			"alt":           feishuPlainText("封面图（AI 预选，可在管理后台更换）"),
-			"scale_type":    "crop_center",
-			"size":          "large",
-			"corner_radius": "8px",
-		})
-	}
-	elements = append(elements, reviewCardInfoBlock(job))
+	elements := []any{reviewCardHeroBlock(job, coverImgKey, previewButton), reviewCardInfoBlock(job)}
 	if notes := reviewCardAINotesBlock(job); notes != nil {
 		elements = append(elements, notes)
 	}
@@ -226,8 +215,71 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 	}
 }
 
-// reviewCardInfoBlock grey-100 信息色块：标题/来源公众号/作者/标签/摘要/原文链接/
-// 任务号/目标环境/进站时间。作者/标签/摘要是 M5 AI 预填参数（或规则兜底值）；
+// reviewCardHeroBlock 把封面、标题、标签、摘要和预览键收进同一个横向媒体容器：
+// 封面固定 120px，文案列占据剩余宽度；无封面时自动退化为单列，不留空白占位。
+func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[string]any) map[string]any {
+	columns := []any{}
+	copyPadding := "12px 12px 12px 12px"
+	if coverImgKey != "" {
+		columns = append(columns, map[string]any{
+			"tag":            "column",
+			"width":          "136px",
+			"direction":      "vertical",
+			"vertical_align": "center",
+			"padding":        "8px 8px 8px 8px",
+			"elements": []any{map[string]any{
+				"tag":           "img",
+				"img_key":       coverImgKey,
+				"alt":           feishuPlainText("封面图（AI 预选，可在管理后台更换）"),
+				"scale_type":    "crop_center",
+				"size":          "120px 120px",
+				"corner_radius": "8px",
+			}},
+		})
+		copyPadding = "12px 12px 12px 0px"
+	}
+	copyElements := []any{map[string]any{
+		"tag": "markdown", "content": fmt.Sprintf("**%s**", reviewCardSafeText(job.Title, 200)),
+	}}
+	if tags := reviewCardTagMarkup(job.Tags); tags != "" {
+		copyElements = append(copyElements, map[string]any{"tag": "markdown", "content": tags})
+	}
+	copyElements = append(copyElements,
+		map[string]any{"tag": "markdown", "content": reviewCardSafeOrDash(job.Summary, 500)},
+		previewButton,
+	)
+	columns = append(columns, map[string]any{
+		"tag":              "column",
+		"width":            "weighted",
+		"weight":           1,
+		"direction":        "vertical",
+		"vertical_align":   "center",
+		"padding":          copyPadding,
+		"vertical_spacing": "8px",
+		"elements":         copyElements,
+	})
+	return map[string]any{
+		"tag":                "column_set",
+		"flex_mode":          "none",
+		"horizontal_spacing": "0px",
+		"background_style":   "grey-100",
+		"columns":            columns,
+	}
+}
+
+// reviewCardTagMarkup 把 AI/规则生成的文章标签渲染成飞书原生 text_tag，而不是逗号文本。
+func reviewCardTagMarkup(tags []string) string {
+	items := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if safe := reviewCardSafeText(tag, 40); safe != "" {
+			items = append(items, fmt.Sprintf("<text_tag color='blue'>%s</text_tag>", safe))
+		}
+	}
+	return strings.Join(items, " ")
+}
+
+// reviewCardInfoBlock grey-100 信息色块：来源公众号/作者/原文链接/任务号/目标环境/
+// 进站时间。作者是 M5 AI 预填参数（或规则兜底值）；
 // 原文链接自 2026-07-10「预览链接」裁定起从按钮降为此处一行。
 func reviewCardInfoBlock(job publishJob) map[string]any {
 	sourceName := job.SourceName
@@ -239,12 +291,10 @@ func reviewCardInfoBlock(job publishJob) map[string]any {
 		sourceURL = "https://mp.weixin.qq.com/"
 	}
 	content := fmt.Sprintf(
-		"**%s**\n<font color='grey'>来源公众号</font> %s\n<font color='grey'>作者</font> %s\n<font color='grey'>标签</font> %s\n<font color='grey'>摘要</font> %s\n<font color='grey'>原文</font> [打开公众号原文](%s)\n<font color='grey'>管理后台</font> [去后台编辑这篇文章](%s)\n<font color='grey'>任务号</font> #%d\n<font color='grey'>目标环境</font> %s\n<font color='grey'>进站时间</font> %s",
-		reviewCardSafeText(job.Title, 200), reviewCardSafeText(sourceName, 100),
+		"<font color='grey'>来源公众号</font> %s\n<font color='grey'>作者</font> %s\n<font color='grey'>原文</font> [打开公众号原文](%s)\n<font color='grey'>任务号</font> #%d\n<font color='grey'>目标环境</font> %s\n<font color='grey'>进站时间</font> %s",
+		reviewCardSafeText(sourceName, 100),
 		reviewCardSafeOrDash(job.Author, 100),
-		reviewCardSafeOrDash(strings.Join(job.Tags, "、"), 200),
-		reviewCardSafeOrDash(job.Summary, 500),
-		sourceURL, siteAdminArticleURL(job.FoodTalksNewsID), job.ID, siteFrontURL(), formatReviewCardTime(job.UpdatedAt))
+		sourceURL, job.ID, siteFrontURL(), formatReviewCardTime(job.UpdatedAt))
 	return map[string]any{
 		"tag":              "column_set",
 		"flex_mode":        "stretch",

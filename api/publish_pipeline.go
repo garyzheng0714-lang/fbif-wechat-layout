@@ -50,13 +50,9 @@ const (
 	siteCategoryIDsEnv     = "FOODTALKS_CATEGORY_IDS"
 	siteFrontURLEnv        = "FOODTALKS_FRONT_URL"
 	siteOwnAccountsEnv     = "SITE_OWN_ACCOUNTS"
-	siteAdminURLEnv        = "FOODTALKS_ADMIN_ARTICLE_URL" // 管理后台文章编辑页模板，{id} 占位
+	siteAdminURLEnv        = "FOODTALKS_ADMIN_ARTICLE_URL" // readiness 用于校验 API/前台/后台目标环境一致
 	defaultSiteCategoryIDs = "52,58"                       // 与 2026-07-10 冒烟一致（契约 §9：线上分类表待后端给全集）
 	defaultSiteFrontURL    = "https://test.foodtalks.cn"   // 默认测试环境前台；生产切换只改 env
-	// 管理后台默认先落在首页（hash 路由 SPA）：编辑页路由从后台 JS 包挖到是
-	// cms/:siteCode/news/edit/:id，但 siteCode 是运行时值、不猜（红线：不编造 URL）——
-	// 拿到真实编辑页 URL 后配 env（含 {id} 占位）即得深链，无需改代码。
-	defaultSiteAdminURL = "https://admin-we-test.foodtalks.cn/#/"
 	// 自家账号清单（原创判定，规范文档 §1）：近一月库内 source_type=0 的全部来源名。
 	defaultSiteOwnAccounts = "FBIF食品饮料创新,FBIF食品饮料创新论坛,FoodTalks,FBIF食品创新展"
 )
@@ -1292,19 +1288,6 @@ func siteSourceFor(job publishJob) (int, string) {
 		return 0, name
 	}
 	return 1, name
-}
-
-// siteAdminArticleURL 管理后台文章编辑页链接（审核卡片「去后台编辑」用，2026-07-10
-// 用户要求）：env 模板含 {id} 时替换为 FoodTalks newsId；未配置回落后台首页。
-func siteAdminArticleURL(newsID int64) string {
-	tpl := strings.TrimSpace(os.Getenv(siteAdminURLEnv))
-	if tpl == "" {
-		return defaultSiteAdminURL
-	}
-	if newsID > 0 {
-		return strings.ReplaceAll(tpl, "{id}", strconv.FormatInt(newsID, 10))
-	}
-	return tpl
 }
 
 // siteFrontURL 前台地址（article_url 回填用），默认测试环境；生产切换只改 env。
