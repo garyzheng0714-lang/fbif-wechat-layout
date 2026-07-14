@@ -68,9 +68,9 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 	previewButton := map[string]any{
 		"tag":   "button",
 		"text":  feishuPlainText("预览效果"),
-		"type":  "default",
-		"size":  "medium",
-		"width": "fill",
+		"type":  "primary_text",
+		"size":  "small",
+		"width": "default",
 		"icon":  map[string]any{"tag": "standard_icon", "token": "preview_outlined"},
 		"behaviors": []any{map[string]any{
 			"type": "open_url", "default_url": publishPreviewURL(job.ID),
@@ -216,22 +216,22 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 }
 
 // reviewCardHeroBlock 把封面、标题、标签、摘要和预览键收进同一个横向媒体容器：
-// 封面按左栏宽度等比缩放、完整显示，文案列占据剩余宽度；无封面时自动退化为
-// 单列，不留空白占位。
+// 封面在紧凑左栏内等比缩放、完整显示，文案列占据剩余宽度；竖图不再主导整卡高度，
+// 无封面时自动退化为单列，不留空白占位。
 func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[string]any) map[string]any {
 	columns := []any{}
 	copyPadding := "12px 12px 12px 12px"
 	if coverImgKey != "" {
 		columns = append(columns, map[string]any{
 			"tag":            "column",
-			"width":          "136px",
+			"width":          "112px",
 			"direction":      "vertical",
 			"vertical_align": "center",
 			"padding":        "8px 8px 8px 8px",
 			"elements": []any{map[string]any{
 				"tag":           "img",
 				"img_key":       coverImgKey,
-				"alt":           feishuPlainText("封面图（AI 预选，可在管理后台更换）"),
+				"alt":           feishuPlainText("文章封面图"),
 				"scale_type":    "fit_horizontal",
 				"corner_radius": "8px",
 			}},
@@ -262,7 +262,7 @@ func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[s
 		"tag":                "column_set",
 		"flex_mode":          "none",
 		"horizontal_spacing": "0px",
-		"background_style":   "grey-100",
+		"background_style":   "grey-50",
 		"columns":            columns,
 	}
 }

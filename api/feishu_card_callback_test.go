@@ -406,7 +406,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 		t.Fatalf("审核卡 body.elements 结构错误：%#v", body["elements"])
 	}
 	hero, ok := elements[0].(map[string]any)
-	if !ok || hero["tag"] != "column_set" || hero["flex_mode"] != "none" || hero["background_style"] != "grey-100" {
+	if !ok || hero["tag"] != "column_set" || hero["flex_mode"] != "none" || hero["background_style"] != "grey-50" {
 		t.Fatalf("封面、标题、摘要必须位于同一个横向媒体容器：%#v", elements[0])
 	}
 	columns, ok := hero["columns"].([]any)
@@ -415,7 +415,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 	}
 	coverColumn, _ := columns[0].(map[string]any)
 	coverElements, _ := coverColumn["elements"].([]any)
-	if coverColumn["width"] != "136px" || len(coverElements) != 1 {
+	if coverColumn["width"] != "112px" || len(coverElements) != 1 {
 		t.Fatalf("封面列尺寸或结构错误：%#v", coverColumn)
 	}
 	cover, _ := coverElements[0].(map[string]any)
@@ -445,6 +445,9 @@ func TestReviewPendingCardContract(t *testing.T) {
 	previewBehavior, _ := previewBehaviors[0].(map[string]any)
 	if preview["tag"] != "button" || previewBehavior["type"] != "open_url" || previewBehavior["default_url"] != publishPreviewURL(job.ID) {
 		t.Fatalf("媒体容器必须带系统签名预览键：%#v", preview)
+	}
+	if preview["type"] != "primary_text" || preview["size"] != "small" || preview["width"] != "default" {
+		t.Fatalf("预览键必须保持紧凑的三级操作层级：%#v", preview)
 	}
 	infoRaw, _ := json.Marshal(elements[1])
 	for _, duplicate := range []string{"示例标题", "AI 摘要一段。", "沃集鲜", "沃尔玛", "药食同源"} {
