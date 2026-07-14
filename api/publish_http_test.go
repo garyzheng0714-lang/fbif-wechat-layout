@@ -115,6 +115,45 @@ func TestPublishOfficialSyncUsesOfficialContent(t *testing.T) {
 	}
 }
 
+func TestPublishOfficialSyncAcceptsOfficialPlainText(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	body, err := json.Marshal(map[string]string{
+		"url":          "https://mp.weixin.qq.com/s/official-plain-text",
+		"title":        "官方纯文本快讯",
+		"source_name":  "FBIF食品饮料创新",
+		"content_html": "第一段官方正文。\n\n第二段官方正文。\n\n参考来源：官方公告",
+		"cover_url":    "https://mmbiz.qpic.cn/a.jpg",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	rec := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", string(body), true)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("官方纯文本提交应 201，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Job publishJob `json:"job"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	job, err := env.store.byID(response.Job.ID)
+	if err != nil {
+		t.Fatalf("byID: %v", err)
+	}
+	if env.fetchCalls != 0 || job.Stage != publishStageAwaitingReview {
+		t.Fatalf("纯文本官方正文应跳过网页抓取并进入待审：fetch=%d stage=%q", env.fetchCalls, job.Stage)
+	}
+	var blocks []Block
+	if err := json.Unmarshal([]byte(job.BlocksJSON), &blocks); err != nil {
+		t.Fatalf("decode blocks: %v", err)
+	}
+	if len(blocks) != 3 || blocks[0].Text != "第一段官方正文。" || !blocks[1].BlankBefore {
+		t.Fatalf("纯文本段落转换不符：%+v", blocks)
+	}
+}
+
 // TestPublishSiteSyncIdempotentHTTP 同一篇文章的不同链接形态（chksm 等易变参数）
 // 幂等收敛到同一个任务：第二次提交返回既有单，不重复建单、不重复推进。
 func TestPublishSiteSyncIdempotentHTTP(t *testing.T) {

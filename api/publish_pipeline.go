@@ -1170,6 +1170,9 @@ func (p *publishPipeline) submitOfficial(input officialPublishInput) (publishJob
 	}
 	_, blocks, parsedAuthor := extractArticleBlocks(input.ContentHTML)
 	if len(blocks) == 0 {
+		blocks = officialPlainTextBlocks(input.ContentHTML)
+	}
+	if len(blocks) == 0 {
 		return publishJob{}, false, errors.New("官方 API 正文未解析出可排版内容块")
 	}
 	blocksJSON, err := json.Marshal(blocks)
@@ -1195,6 +1198,35 @@ func (p *publishPipeline) submitOfficial(input officialPublishInput) (publishJob
 		p.spawn(func() { p.runJob(job.ID) })
 	}
 	return job, created, nil
+}
+
+// officialPlainTextBlocks 兼容 freepublish 对快讯正文直接返回纯文本的真实形态。
+// 只在 HTML 解析零 blocks 且正文不含标签时启用；空行保留为下一段的 blankBefore，
+// 不做 Markdown 猜测，也不引入任何网页回源。
+func officialPlainTextBlocks(content string) []Block {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	if regexp.MustCompile(`(?i)<[a-z][^>]*>`).MatchString(content) {
+		return nil
+	}
+	blocks := make([]Block, 0)
+	pendingBlank := false
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if len(blocks) > 0 {
+				pendingBlank = true
+			}
+			continue
+		}
+		blocks = append(blocks, Block{
+			K:           "p",
+			Text:        line,
+			BlankBefore: pendingBlank,
+		})
+		pendingBlank = false
+	}
+	return blocks
 }
 
 // ---- News 组装与可配项 ----
