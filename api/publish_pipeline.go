@@ -1141,6 +1141,62 @@ func (p *publishPipeline) submit(sourceURL string) (publishJob, bool, error) {
 	return job, created, nil
 }
 
+type officialPublishInput struct {
+	URL         string
+	Title       string
+	SourceName  string
+	Author      string
+	ContentHTML string
+	CoverURL    string
+}
+
+// submitOfficial 让微信公众号官方 API 返回的正文直接进入既有排版状态机。
+// HTML 只在进程内转成中立 blocks；任务从 rendering 开始，永不回源抓公众号网页。
+func (p *publishPipeline) submitOfficial(input officialPublishInput) (publishJob, bool, error) {
+	if publishWorkersPaused() {
+		return publishJob{}, false, errPublishWorkersPaused
+	}
+	sourceKey, err := normalizeSiteSourceKey(input.URL)
+	if err != nil {
+		return publishJob{}, false, err
+	}
+	input.Title = strings.TrimSpace(input.Title)
+	input.ContentHTML = strings.TrimSpace(input.ContentHTML)
+	if input.Title == "" {
+		return publishJob{}, false, errors.New("title is required")
+	}
+	if input.ContentHTML == "" {
+		return publishJob{}, false, errors.New("content_html is required")
+	}
+	_, blocks, parsedAuthor := extractArticleBlocks(input.ContentHTML)
+	if len(blocks) == 0 {
+		return publishJob{}, false, errors.New("官方 API 正文未解析出可排版内容块")
+	}
+	blocksJSON, err := json.Marshal(blocks)
+	if err != nil {
+		return publishJob{}, false, fmt.Errorf("序列化官方 API 正文内容块失败: %w", err)
+	}
+	input.Author = strings.TrimSpace(input.Author)
+	if input.Author == "" {
+		input.Author = strings.TrimSpace(parsedAuthor)
+	}
+	job, created, err := p.store.createSeeded(sourceKey, input.URL, func(j *publishJob) {
+		j.Title = input.Title
+		j.SourceName = strings.TrimSpace(input.SourceName)
+		j.Author = input.Author
+		j.BlocksJSON = string(blocksJSON)
+		j.CoverURL = strings.TrimSpace(input.CoverURL)
+		j.Stage = publishStageRendering
+	})
+	if err != nil {
+		return publishJob{}, false, err
+	}
+	if created {
+		p.spawn(func() { p.runJob(job.ID) })
+	}
+	return job, created, nil
+}
+
 // ---- News 组装与可配项 ----
 
 // buildSiteNews News 组装唯一入口：staging（草稿）与 publicizing（公开）都从这一个函数

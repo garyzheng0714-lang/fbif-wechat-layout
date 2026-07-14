@@ -198,6 +198,13 @@ func (s *publishJobStore) writeLocked(doc publishJobDocument) error {
 // create 建单 + source_key 永久幂等收敛：同 key 只允许存在一条任务，包含 published /
 // rejected 等终态。网站没有安全删除与服务端幂等 API，终态释放 key 会重复建文。
 func (s *publishJobStore) create(sourceKey, sourceURL string) (publishJob, bool, error) {
+	return s.createSeeded(sourceKey, sourceURL, nil)
+}
+
+// createSeeded 与 create 共用永久幂等语义，并把调用方提供的初始内容与任务创建
+// 原子写入。官方 API 正文直入时不能先建空任务再补正文：进程若在两次写之间退出，
+// 恢复 worker 会误走网页 fetching，破坏“正文只来自官方 API”的契约。
+func (s *publishJobStore) createSeeded(sourceKey, sourceURL string, seed func(*publishJob)) (publishJob, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := s.readLocked()
@@ -217,6 +224,9 @@ func (s *publishJobStore) create(sourceKey, sourceURL string) (publishJob, bool,
 		Stage:     publishStageCreated,
 		CreatedAt: now,
 		UpdatedAt: now,
+	}
+	if seed != nil {
+		seed(&job)
 	}
 	doc.NextID++
 	doc.Jobs = append(doc.Jobs, job)

@@ -68,6 +68,11 @@ func TestPublishWorkersPausedBlocksHTTPRecoveryAndReview(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "暂停") {
 		t.Fatalf("暂停态提交应 503，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
+	rec = doPublishReq(mux, http.MethodPost, "/api/publish/official-sync",
+		`{"url":"https://mp.weixin.qq.com/s/paused","title":"暂停态","content_html":"<p>正文</p>"}`, true)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "暂停") {
+		t.Fatalf("暂停态官方正文提交应 503，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
 	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
 		t.Fatalf("暂停态不得建单：jobs=%d err=%v", len(jobs), err)
 	}

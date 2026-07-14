@@ -45,6 +45,42 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		writeJSON(w, status, map[string]any{"job": job, "existing": !created})
 	})
 
+	// 微信官方 API 正文直入：不抓公众号网页，直接把官方返回的 HTML 转 blocks 后
+	// 进入 ft-default 排版、图片转存、风险检查和待审核草稿流程。
+	mux.HandleFunc("POST /api/publish/official-sync", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdminPassword(w, r) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		var req struct {
+			URL         string `json:"url"`
+			Title       string `json:"title"`
+			SourceName  string `json:"source_name"`
+			Author      string `json:"author"`
+			ContentHTML string `json:"content_html"`
+			CoverURL    string `json:"cover_url"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		job, created, err := p.submitOfficial(officialPublishInput{
+			URL: req.URL, Title: req.Title, SourceName: req.SourceName,
+			Author: req.Author, ContentHTML: req.ContentHTML, CoverURL: req.CoverURL,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		status := http.StatusOK
+		if created {
+			status = http.StatusCreated
+		}
+		writeJSON(w, status, map[string]any{"job": job, "existing": !created})
+	})
+
 	mux.HandleFunc("GET /api/publish/jobs", func(w http.ResponseWriter, r *http.Request) {
 		if !requireAdminPassword(w, r) {
 			return

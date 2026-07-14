@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -42,6 +43,7 @@ func TestPublishEndpointsRequireAdminPassword(t *testing.T) {
 	mux := newPublishTestMux(t, env)
 	cases := []struct{ method, target, body string }{
 		{http.MethodPost, "/api/publish/site-sync", `{"url":"https://mp.weixin.qq.com/s/x"}`},
+		{http.MethodPost, "/api/publish/official-sync", `{"url":"https://mp.weixin.qq.com/s/x"}`},
 		{http.MethodGet, "/api/publish/readiness", ""},
 		{http.MethodGet, "/api/publish/jobs", ""},
 		{http.MethodGet, "/api/publish/jobs/1", ""},
@@ -57,6 +59,59 @@ func TestPublishEndpointsRequireAdminPassword(t *testing.T) {
 	// 红线连带断言：以上未过门的请求不得触发任何 FoodTalks 调用。
 	if createN, updateN := env.ft.counts(); createN != 0 || updateN != 0 {
 		t.Fatalf("未过鉴权门的请求触发了 FoodTalks 调用（create=%d update=%d）", createN, updateN)
+	}
+}
+
+// TestPublishOfficialSyncUsesOfficialContent 官方 API 正文直入必须跳过网页 fetch，
+// 同时复用原有排版、图片转存、草稿进站与永久幂等链路。
+func TestPublishOfficialSyncUsesOfficialContent(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	body, err := json.Marshal(map[string]string{
+		"url":          testPublishSourceURL,
+		"title":        "官方接口标题",
+		"source_name":  "FBIF食品饮料创新",
+		"author":       "官方作者",
+		"content_html": `<p>官方 API 正文</p><img src="https://mmbiz.qpic.cn/a.jpg"><img src="https://mmbiz.qpic.cn/b.jpg">`,
+		"cover_url":    "https://mmbiz.qpic.cn/a.jpg",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	first := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", string(body), true)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("首次官方正文提交应 201，实际 %d body=%s", first.Code, first.Body.String())
+	}
+	var response struct {
+		Job      publishJob `json:"job"`
+		Existing bool       `json:"existing"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.fetchCalls != 0 {
+		t.Fatalf("官方正文直入不得抓公众号网页，实际 fetch=%d", env.fetchCalls)
+	}
+	job, err := env.store.byID(response.Job.ID)
+	if err != nil {
+		t.Fatalf("byID: %v", err)
+	}
+	if job.Stage != publishStageAwaitingReview || job.Title != "官方接口标题" || job.SourceName != "FBIF食品饮料创新" || job.Author != "官方作者" {
+		t.Fatalf("官方正文任务字段/阶段不符: stage=%q title=%q source=%q author=%q", job.Stage, job.Title, job.SourceName, job.Author)
+	}
+	if strings.TrimSpace(job.BlocksJSON) == "" {
+		t.Fatalf("官方 HTML 应先持久化为 blocks")
+	}
+	if createN, updateN := env.ft.counts(); createN != 1 || updateN != 0 {
+		t.Fatalf("自动流程只能创建一份待审草稿，实际 create=%d update=%d", createN, updateN)
+	}
+
+	second := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", string(body), true)
+	if second.Code != http.StatusOK {
+		t.Fatalf("重复官方正文提交应 200，实际 %d body=%s", second.Code, second.Body.String())
+	}
+	if createN, _ := env.ft.counts(); createN != 1 {
+		t.Fatalf("同文重复提交不得重复建稿，实际 create=%d", createN)
 	}
 }
 
