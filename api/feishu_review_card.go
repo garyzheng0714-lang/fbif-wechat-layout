@@ -88,6 +88,8 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 			"tag":           "img",
 			"img_key":       coverImgKey,
 			"alt":           feishuPlainText("封面图（AI 预选，可在管理后台更换）"),
+			"scale_type":    "crop_center",
+			"size":          "large",
 			"corner_radius": "8px",
 		})
 	}

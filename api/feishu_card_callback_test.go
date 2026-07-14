@@ -388,8 +388,10 @@ func TestReviewPendingCardContract(t *testing.T) {
 		"Mote莫特", "食品、饮料", "AI 摘要一段。",
 		"AI 优化说明", "封面选第一张图。",
 		// 2026-07-10 用户追加：封面图直接在卡片呈现（img 元素只认 img_key）+
+		// 2026-07-14 收紧为 160px 居左缩略图，避免通栏封面挤走首屏审核信息；
 		// 管理后台编辑链接（默认后台首页，配 FOODTALKS_ADMIN_ARTICLE_URL 深链）。
 		`"tag":"img"`, `"img_key":"img_v3_test_cover_key"`,
+		`"scale_type":"crop_center"`, `"size":"large"`,
 		"去后台编辑这篇文章", defaultSiteAdminURL,
 	} {
 		if !strings.Contains(s, want) {
