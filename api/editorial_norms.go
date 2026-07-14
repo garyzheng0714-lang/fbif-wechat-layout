@@ -6,7 +6,7 @@ package main
 //	api/editorial/norms_prompt.md — 声明式规范 + 真实 few-shot（唯一真相源是
 //	  docs/editorial-norms-foodtalks.md，规范变更先改文档再同步这里）
 //	api/editorial/tag_vocab.json  — 近 12 个月编辑部实际用过的高频标签词表
-//	  （含 tag_id，未来 newsTags 结构确认后可直接解析成 ID 提交）
+//	  （含 tag_id，供标签查询接口核验 AI 标签是否命中真实标签库）
 //
 // 规范与模型解耦：prompt 只有声明式规则和范例，无模型特定语法；换模型只改
 // ARK_MODEL_ID 并重跑 publish_enrich_eval_test.go 评测（达标线见规范文档 §7）。
@@ -67,7 +67,7 @@ func editorialEnrichSystemPrompt() string {
 	return editorialPromptStr
 }
 
-// editorialTagVocab 完整词表（含 tag_id），供未来 newsTags 解析与测试断言用。
+// editorialTagVocab 完整词表（含 tag_id），供标签查询核验与测试断言用。
 func editorialTagVocab() []editorialTag {
 	editorialOnce.Do(editorialInit)
 	return editorialTags

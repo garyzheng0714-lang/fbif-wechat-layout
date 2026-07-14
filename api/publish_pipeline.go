@@ -1249,11 +1249,10 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 		IsPublic:      1, // ⚠️ 实测非可见性开关（契约 §4），恒 1；隐藏靠 publishStatus=0
 		Author:        strings.TrimSpace(job.Author),
 		Summary:       job.Summary, // M5 AI 摘要（兜底=正文前 100 字）
-		// newsTags 恒空（后端裁定 2026-07-10）：标签走**单独接口**，news payload 本就
-		// 不该带标签（带了必 500 且污染文章，实测矩阵见契约 §9）；发布先不标注。
-		// AI 标签（job.Tags）只在审核卡片与预览页展示，词表（含 tagId）备在
-		// api/editorial/tag_vocab.json，待标签接口文档到手再接。
-		NewsTags:          []string{},
+		// newsTags 结构已确认为 [{tagId,tagName}]，但后端 PUT 带标签仍会 500 并可能
+		// 污染文章，使之后任何 PUT 都失败（实测矩阵见契约 §9）；修复前主链路恒传空
+		// 对象数组。AI 标签只在审核卡与预览展示，真实 ID 由标签查询接口核验。
+		NewsTags:          []foodTalksNewsTag{},
 		Content:           job.ContentHTML, // mirroring 后成品（图片已全部 OSS 化；enriching 绝不改它）
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),
 		PrimaryCategoryID: primary,

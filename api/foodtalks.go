@@ -71,6 +71,14 @@ func (e *foodTalksAPIError) Error() string {
 	return fmt.Sprintf("FoodTalks 业务错误 code=%d msg=%s", e.Code, e.Msg)
 }
 
+// foodTalksNewsTag 是发布/编辑接口确认过的 newsTags 元素结构。tagId 必须来自
+// tag_type_id=6 的真实标签库；当前后端 PUT 路径仍有污染文章的缺陷，因此主链路只会
+// 发送空数组，但类型层必须先禁止退回会直接 500 的字符串数组。
+type foodTalksNewsTag struct {
+	TagID   int64  `json:"tagId"`
+	TagName string `json:"tagName"`
+}
+
 // foodTalksNews 资讯全量字段集。JSON tag 与抓包接口文档逐字对齐（wiki「【API】FoodTalks 后台
 // 资讯发布&编辑」）；PUT 是全量覆盖语义，调用方必须带完整字段，不能只带改动项。
 // ID 不直接序列化：POST 时 API 要求传空字符串 ""、PUT 时传数字（同一字段两种形态），
@@ -78,32 +86,32 @@ func (e *foodTalksAPIError) Error() string {
 type foodTalksNews struct {
 	ID int64 `json:"-"` // 资讯 id：CreateNews 必须为 0，UpdateNews 必须 >0（幂等锚点）
 
-	Title               string   `json:"title"`
-	CoverImg            string   `json:"coverImg"`
-	SourceType          int      `json:"sourceType"`
-	PublishStatus       int      `json:"publishStatus"` // 只准 0/1/2，见包常量
-	IsPublic            int      `json:"isPublic"`      // ⚠️ 实测不是可见性开关（契约 §4），隐藏靠 publishStatus
-	SourceID            int64    `json:"sourceId"`
-	SourceName          string   `json:"sourceName"`
-	Author              string   `json:"author"`
-	Summary             string   `json:"summary"`
-	NewsTags            []string `json:"newsTags"`
-	IsLatest            int      `json:"isLatest"`
-	ImgPreviewEnable    bool     `json:"imgPreviewEnable"` // 接口文档中唯一的布尔字段
-	CommentEnable       int      `json:"commentEnable"`
-	Content             string   `json:"content"`     // 正文 HTML；图片必须已转存（外链裸奔由流水线上游把关）
-	PublishTime         string   `json:"publishTime"` // 格式 YYYY-MM-DD HH:mm:ss
-	PrimaryCategoryID   int64    `json:"primaryCategoryId"`
-	SEOTitle            string   `json:"seoTitle"`
-	SEOKeywords         string   `json:"seoKeywords"`
-	SEODescription      string   `json:"seoDescription"`
-	NewsRelationIDs     []int64  `json:"newsRelationIds"`
-	CategoryIDs         []int64  `json:"categoryIds"`
-	TopicSectionIDList  []int64  `json:"topicSectionIdList"`
-	RelatedCompanyIDs   []int64  `json:"relatedCompanyIds"`
-	RelatedFoodpediaIDs []int64  `json:"relatedFoodpediaIds"`
-	Language            string   `json:"language"` // 中文站固定 "ZH"（由调用方传，本文件不设默认）
-	TOC                 string   `json:"toc"`
+	Title               string             `json:"title"`
+	CoverImg            string             `json:"coverImg"`
+	SourceType          int                `json:"sourceType"`
+	PublishStatus       int                `json:"publishStatus"` // 只准 0/1/2，见包常量
+	IsPublic            int                `json:"isPublic"`      // ⚠️ 实测不是可见性开关（契约 §4），隐藏靠 publishStatus
+	SourceID            int64              `json:"sourceId"`
+	SourceName          string             `json:"sourceName"`
+	Author              string             `json:"author"`
+	Summary             string             `json:"summary"`
+	NewsTags            []foodTalksNewsTag `json:"newsTags"`
+	IsLatest            int                `json:"isLatest"`
+	ImgPreviewEnable    bool               `json:"imgPreviewEnable"` // 接口文档中唯一的布尔字段
+	CommentEnable       int                `json:"commentEnable"`
+	Content             string             `json:"content"`     // 正文 HTML；图片必须已转存（外链裸奔由流水线上游把关）
+	PublishTime         string             `json:"publishTime"` // 格式 YYYY-MM-DD HH:mm:ss
+	PrimaryCategoryID   int64              `json:"primaryCategoryId"`
+	SEOTitle            string             `json:"seoTitle"`
+	SEOKeywords         string             `json:"seoKeywords"`
+	SEODescription      string             `json:"seoDescription"`
+	NewsRelationIDs     []int64            `json:"newsRelationIds"`
+	CategoryIDs         []int64            `json:"categoryIds"`
+	TopicSectionIDList  []int64            `json:"topicSectionIdList"`
+	RelatedCompanyIDs   []int64            `json:"relatedCompanyIds"`
+	RelatedFoodpediaIDs []int64            `json:"relatedFoodpediaIds"`
+	Language            string             `json:"language"` // 中文站固定 "ZH"（由调用方传，本文件不设默认）
+	TOC                 string             `json:"toc"`
 }
 
 // foodTalksNewsBody 请求体 = id + News 全字段。id 是本 API 的怪点：POST 传空字符串 ""、
@@ -118,7 +126,7 @@ type foodTalksNewsBody struct {
 // []，序列化成 null 属于契约外形态（后端行为未定义），不冒这个险。
 func buildFoodTalksNewsBody(idRaw json.RawMessage, n foodTalksNews) foodTalksNewsBody {
 	if n.NewsTags == nil {
-		n.NewsTags = []string{}
+		n.NewsTags = []foodTalksNewsTag{}
 	}
 	if n.NewsRelationIDs == nil {
 		n.NewsRelationIDs = []int64{}

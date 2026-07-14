@@ -391,7 +391,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 		// 2026-07-10 用户追加：封面图直接在卡片呈现（img 元素只认 img_key）+
 		// 2026-07-14 收进横向媒体容器，左侧封面、右侧标题/标签/摘要/预览键。
 		`"tag":"img"`, `"img_key":"img_v3_test_cover_key"`,
-		`"scale_type":"crop_center"`, `"size":"120px 120px"`,
+		`"scale_type":"fit_horizontal"`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("审核卡缺少 %q：%s", want, s)
@@ -419,8 +419,11 @@ func TestReviewPendingCardContract(t *testing.T) {
 		t.Fatalf("封面列尺寸或结构错误：%#v", coverColumn)
 	}
 	cover, _ := coverElements[0].(map[string]any)
-	if cover["tag"] != "img" || cover["size"] != "120px 120px" || cover["scale_type"] != "crop_center" {
-		t.Fatalf("封面必须是 120px 方形居中裁剪缩略图：%#v", cover)
+	if cover["tag"] != "img" || cover["scale_type"] != "fit_horizontal" {
+		t.Fatalf("封面必须按左栏宽度等比缩放并完整显示：%#v", cover)
+	}
+	if _, fixedSize := cover["size"]; fixedSize {
+		t.Fatalf("fit_horizontal 封面不得再带固定 size，否则客户端可能继续裁切：%#v", cover)
 	}
 	copyColumn, _ := columns[1].(map[string]any)
 	copyElements, _ := copyColumn["elements"].([]any)

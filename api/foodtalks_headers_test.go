@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -46,5 +47,25 @@ func TestFoodTalksBrowserHeaderModeKeepsAllThree(t *testing.T) {
 	h := foodTalksHeaderProbe(t, "https://admin-we-test.example")
 	if h.Get("Origin") == "" || h.Get("Referer") == "" || h.Get("User-Agent") == "" {
 		t.Fatalf("浏览器头模式三头必须齐全（测试环境网关 403 教训）：Origin=%q Referer=%q UA=%q", h.Get("Origin"), h.Get("Referer"), h.Get("User-Agent"))
+	}
+}
+
+func TestFoodTalksNewsTagsUseConfirmedObjectShape(t *testing.T) {
+	withTag, err := json.Marshal(buildFoodTalksNewsBody(json.RawMessage(`""`), foodTalksNews{
+		NewsTags: []foodTalksNewsTag{{TagID: 10752, TagName: "沃尔玛"}},
+	}))
+	if err != nil {
+		t.Fatalf("marshal newsTags: %v", err)
+	}
+	if !strings.Contains(string(withTag), `"newsTags":[{"tagId":10752,"tagName":"沃尔玛"}]`) {
+		t.Fatalf("newsTags 必须使用 API 确认的对象数组结构：%s", withTag)
+	}
+
+	empty, err := json.Marshal(buildFoodTalksNewsBody(json.RawMessage(`""`), foodTalksNews{}))
+	if err != nil {
+		t.Fatalf("marshal empty newsTags: %v", err)
+	}
+	if !strings.Contains(string(empty), `"newsTags":[]`) {
+		t.Fatalf("修复 PUT 标签缺陷前必须显式发送空数组，不能是 null：%s", empty)
 	}
 }

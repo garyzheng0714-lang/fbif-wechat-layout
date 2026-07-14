@@ -216,7 +216,8 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 }
 
 // reviewCardHeroBlock 把封面、标题、标签、摘要和预览键收进同一个横向媒体容器：
-// 封面固定 120px，文案列占据剩余宽度；无封面时自动退化为单列，不留空白占位。
+// 封面按左栏宽度等比缩放、完整显示，文案列占据剩余宽度；无封面时自动退化为
+// 单列，不留空白占位。
 func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[string]any) map[string]any {
 	columns := []any{}
 	copyPadding := "12px 12px 12px 12px"
@@ -231,8 +232,7 @@ func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[s
 				"tag":           "img",
 				"img_key":       coverImgKey,
 				"alt":           feishuPlainText("封面图（AI 预选，可在管理后台更换）"),
-				"scale_type":    "crop_center",
-				"size":          "120px 120px",
+				"scale_type":    "fit_horizontal",
 				"corner_radius": "8px",
 			}},
 		})

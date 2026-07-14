@@ -300,7 +300,7 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 	// newsTags 恒空：结构已破解（[{tagId,tagName}]），但后端 PUT 带标签必 500 且会把
 	// 文章污染成「任何 PUT 都 500」（翻公开卡死），契约 §9 矩阵。修复前这条断言守住恒空。
 	if len(news.NewsTags) != 0 {
-		t.Fatalf("NewsTags 必须恒空（后端结构未知，字符串数组会 500）：%v", news.NewsTags)
+		t.Fatalf("NewsTags 必须恒空（PUT 标签缺陷尚未修复）：%v", news.NewsTags)
 	}
 	// 外部公众号 → 转载（source_type=1），来源名=公众号名，author 不填就是空。
 	if news.SourceType != 1 || news.SourceName != "测试公众号" {
