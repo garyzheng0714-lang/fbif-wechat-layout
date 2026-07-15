@@ -216,8 +216,8 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 }
 
 // reviewCardHeroBlock 把封面、标题、标签、摘要和预览键收进同一个横向媒体容器：
-// 封面在紧凑左栏内等比缩放、完整显示，文案列占据剩余宽度；竖图不再主导整卡高度，
-// 无封面时自动退化为单列，不留空白占位。
+// 封面素材已在上传前生成方形画布，在紧凑左栏内等比显示；文案列占据剩余宽度，
+// 原图不被裁切且竖图不再主导整卡高度。无封面时自动退化为单列，不留空白占位。
 func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[string]any) map[string]any {
 	columns := []any{}
 	copyPadding := "12px 12px 12px 12px"

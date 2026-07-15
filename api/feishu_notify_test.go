@@ -5,15 +5,69 @@ package main
 // 缓存失效会让每条通知多打一次鉴权接口，env 缺失必须静默禁用而非报错刷屏。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+func testCoverPNG(t *testing.T, width, height int, fill color.Color) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, fill)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode test cover: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestSquareFeishuCoverPNG 封面上传前先生成 1:1 画布：原图完整居中，不通过
+// crop_center 截掉商品或图内文字；空余区域使用设计系统的嵌套灰。
+func TestSquareFeishuCoverPNG(t *testing.T) {
+	red := color.RGBA{R: 220, G: 40, B: 40, A: 255}
+	for _, tc := range []struct {
+		name          string
+		width, height int
+		paddingPoint  image.Point
+	}{
+		{name: "portrait", width: 2, height: 4, paddingPoint: image.Pt(0, feishuCoverSquareSize/2)},
+		{name: "landscape", width: 4, height: 2, paddingPoint: image.Pt(feishuCoverSquareSize/2, 0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := squareFeishuCoverPNG(testCoverPNG(t, tc.width, tc.height, red))
+			if err != nil {
+				t.Fatalf("square cover: %v", err)
+			}
+			img, format, err := image.Decode(bytes.NewReader(got))
+			if err != nil || format != "png" {
+				t.Fatalf("decode squared cover: format=%q err=%v", format, err)
+			}
+			if bounds := img.Bounds(); bounds.Dx() != feishuCoverSquareSize || bounds.Dy() != feishuCoverSquareSize {
+				t.Fatalf("封面必须为 %dx%d，实际 %v", feishuCoverSquareSize, feishuCoverSquareSize, bounds)
+			}
+			if got := color.RGBAModel.Convert(img.At(tc.paddingPoint.X, tc.paddingPoint.Y)).(color.RGBA); got != feishuCoverBackground {
+				t.Fatalf("补边颜色应为 %#v，实际 %#v", feishuCoverBackground, got)
+			}
+			center := color.RGBAModel.Convert(img.At(feishuCoverSquareSize/2, feishuCoverSquareSize/2)).(color.RGBA)
+			if center.R < 200 || center.G > 60 || center.B > 60 {
+				t.Fatalf("原图主体应完整居中保留，中心像素实际 %#v", center)
+			}
+		})
+	}
+}
 
 // TestFeishuNotifierSendAndTokenCache 发文本走 tenant_access_token 两步：token 只取一次
 // （缓存生效），消息体形态与 receive_id_type=chat_id 契约对齐。
@@ -72,6 +126,66 @@ func TestFeishuNotifierSendAndTokenCache(t *testing.T) {
 	}
 	if gotMsg.ReceiveID != "oc_test_chat" || gotMsg.MsgType != "text" || !strings.Contains(gotMsg.Content, "第二条") {
 		t.Fatalf("消息体不符：%+v", gotMsg)
+	}
+}
+
+// TestFeishuNotifierUploadCoverUsesSquarePNG 守住真实上传路径：飞书收到的必须已经是
+// 方形 PNG 素材，卡片端只负责按宽度展示，不再承担裁切。
+func TestFeishuNotifierUploadCoverUsesSquarePNG(t *testing.T) {
+	portrait := testCoverPNG(t, 2, 4, color.RGBA{R: 220, G: 40, B: 40, A: 255})
+	var uploadedBounds image.Rectangle
+	var uploadedFormat, uploadedName string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			fmt.Fprint(w, `{"code":0,"msg":"ok","tenant_access_token":"tok-cover","expire":7200}`)
+		case "/cover.png":
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(portrait)
+		case "/open-apis/im/v1/images":
+			if got := r.Header.Get("Authorization"); got != "Bearer tok-cover" {
+				t.Errorf("上传鉴权不符：%q", got)
+			}
+			if err := r.ParseMultipartForm(4 << 20); err != nil {
+				t.Errorf("parse upload form: %v", err)
+				http.Error(w, "bad form", http.StatusBadRequest)
+				return
+			}
+			if got := r.FormValue("image_type"); got != "message" {
+				t.Errorf("image_type=%q", got)
+			}
+			file, header, err := r.FormFile("image")
+			if err != nil {
+				t.Errorf("read uploaded image: %v", err)
+				http.Error(w, "bad image", http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			uploadedName = header.Filename
+			img, format, err := image.Decode(file)
+			if err != nil {
+				t.Errorf("decode uploaded image: %v", err)
+				http.Error(w, "bad image", http.StatusBadRequest)
+				return
+			}
+			uploadedBounds, uploadedFormat = img.Bounds(), format
+			fmt.Fprint(w, `{"code":0,"msg":"ok","data":{"image_key":"img_square"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	n := &feishuNotifier{
+		baseURL: srv.URL, appID: "a", appSecret: "b", chatID: "c", httpClient: srv.Client(),
+	}
+	key, err := n.uploadImageByURL(context.Background(), srv.URL+"/cover.png")
+	if err != nil || key != "img_square" {
+		t.Fatalf("upload cover: key=%q err=%v", key, err)
+	}
+	if uploadedName != "cover.png" || uploadedFormat != "png" || uploadedBounds.Dx() != feishuCoverSquareSize || uploadedBounds.Dy() != feishuCoverSquareSize {
+		t.Fatalf("飞书收到的封面必须是方形 PNG：name=%q format=%q bounds=%v", uploadedName, uploadedFormat, uploadedBounds)
 	}
 }
 
