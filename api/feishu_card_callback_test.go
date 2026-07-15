@@ -349,9 +349,9 @@ func TestReviewCardRiskChangeExpiresOldVersion(t *testing.T) {
 // TestReviewPendingCardContract 待审核卡 JSON 契约（cardkit 红线，字符串断言）：
 // 无 emoji、「通过并发布」「驳回」都带 confirm 二次确认、schema 2.0 不含 action/note
 // 容器、callback value 带 action+job_id、update_multi 开启（群内同步刷新的前提）。
-// 2026-07-10「预览链接」+ M5 扩展：「预览效果」使用 HMAC 签名链接，原文降为
-// 信息色块一行。2026-07-14 收紧首屏：封面/标题/原生标签/摘要/预览键归入同一个
-// 横向媒体容器，管理后台链接删除，卡片另含 AI 优化说明段。
+// 2026-07-10「预览链接」+ M5 扩展：「预览效果」使用 HMAC 签名链接。
+// 2026-07-15 收紧首屏：封面/标题/原生标签/摘要/预览链接归入同一个白底横向
+// 媒体容器；元信息压成两行，排版与风险说明默认折叠，不再叠灰色卡片。
 func TestReviewPendingCardContract(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
 	t.Setenv("WECHAT_UPLOAD_ORIGIN", "https://preview.test")
@@ -383,11 +383,11 @@ func TestReviewPendingCardContract(t *testing.T) {
 		"示例标题", "示例公众号", "#7",
 		// 预览键 open_url 指向带 HMAC 签名的预览链接（域名走 WECHAT_UPLOAD_ORIGIN）。
 		"https://preview.test/preview/publish/7?t=" + publishPreviewSig(7),
-		// 原文从按钮降为信息色块一行（链接必须仍在卡片里，审核人要能回看原文）。
-		"打开公众号原文", job.SourceURL,
+		// 原文与预览都降为主内容里的文字链接。
+		"公众号原文", job.SourceURL,
 		// M5 AI 预填参数 + 优化说明段。
 		"Mote莫特", "沃集鲜", "沃尔玛", "药食同源", "AI 摘要一段。",
-		"AI 优化说明", "封面选第一张图。",
+		"排版说明", "封面选第一张图。",
 		// 2026-07-10 用户追加：封面图直接在卡片呈现（img 元素只认 img_key）+
 		// 2026-07-14 收进横向媒体容器，左侧封面、右侧标题/标签/摘要/预览键。
 		`"tag":"img"`, `"img_key":"img_v3_test_cover_key"`,
@@ -406,8 +406,11 @@ func TestReviewPendingCardContract(t *testing.T) {
 		t.Fatalf("审核卡 body.elements 结构错误：%#v", body["elements"])
 	}
 	hero, ok := elements[0].(map[string]any)
-	if !ok || hero["tag"] != "column_set" || hero["flex_mode"] != "none" || hero["background_style"] != "grey-50" {
+	if !ok || hero["tag"] != "column_set" || hero["flex_mode"] != "none" {
 		t.Fatalf("封面、标题、摘要必须位于同一个横向媒体容器：%#v", elements[0])
+	}
+	if _, hasBackground := hero["background_style"]; hasBackground {
+		t.Fatalf("主内容应直接落在白底连续阅读流，不再叠灰色卡片：%#v", hero)
 	}
 	columns, ok := hero["columns"].([]any)
 	if !ok || len(columns) != 2 {
@@ -415,7 +418,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 	}
 	coverColumn, _ := columns[0].(map[string]any)
 	coverElements, _ := coverColumn["elements"].([]any)
-	if coverColumn["width"] != "112px" || len(coverElements) != 1 {
+	if coverColumn["width"] != "104px" || len(coverElements) != 1 {
 		t.Fatalf("封面列尺寸或结构错误：%#v", coverColumn)
 	}
 	cover, _ := coverElements[0].(map[string]any)
@@ -433,21 +436,14 @@ func TestReviewPendingCardContract(t *testing.T) {
 	title, _ := copyElements[0].(map[string]any)
 	tags, _ := copyElements[1].(map[string]any)
 	summary, _ := copyElements[2].(map[string]any)
-	preview, _ := copyElements[3].(map[string]any)
+	links, _ := copyElements[3].(map[string]any)
 	wantTags := "<text_tag color='blue'>沃集鲜</text_tag> <text_tag color='blue'>沃尔玛</text_tag> <text_tag color='blue'>药食同源</text_tag>"
-	if title["content"] != "**示例标题**" || tags["content"] != wantTags || summary["content"] != "AI 摘要一段。" {
+	summaryText, _ := summary["text"].(map[string]any)
+	if title["content"] != "**示例标题**" || tags["content"] != wantTags || summaryText["content"] != "AI 摘要一段。" || summaryText["lines"] != 3 {
 		t.Fatalf("媒体容器文案顺序应为标题→标签→摘要：title=%#v tags=%#v summary=%#v", title, tags, summary)
 	}
-	previewBehaviors, _ := preview["behaviors"].([]any)
-	if len(previewBehaviors) != 1 {
-		t.Fatalf("预览键必须只有一个 open_url 行为：%#v", preview)
-	}
-	previewBehavior, _ := previewBehaviors[0].(map[string]any)
-	if preview["tag"] != "button" || previewBehavior["type"] != "open_url" || previewBehavior["default_url"] != publishPreviewURL(job.ID) {
-		t.Fatalf("媒体容器必须带系统签名预览键：%#v", preview)
-	}
-	if preview["type"] != "primary_text" || preview["size"] != "small" || preview["width"] != "default" {
-		t.Fatalf("预览键必须保持紧凑的三级操作层级：%#v", preview)
+	if links["tag"] != "markdown" || links["text_size"] != "notation" || !strings.Contains(fmt.Sprint(links["content"]), publishPreviewURL(job.ID)) {
+		t.Fatalf("媒体容器必须带紧凑的系统签名预览链接：%#v", links)
 	}
 	infoRaw, _ := json.Marshal(elements[1])
 	for _, duplicate := range []string{"示例标题", "AI 摘要一段。", "沃集鲜", "沃尔玛", "药食同源"} {
@@ -460,6 +456,12 @@ func TestReviewPendingCardContract(t *testing.T) {
 	}
 	if n := strings.Count(s, "预览效果"); n != 1 {
 		t.Fatalf("预览键应只在媒体容器出现一次（实际 %d）：%s", n, s)
+	}
+	if strings.Contains(s, `"background_style":"grey-50"`) || strings.Contains(s, `"background_style":"grey-100"`) {
+		t.Fatalf("待审核卡不得再堆叠灰色背景卡片：%s", s)
+	}
+	if !strings.Contains(s, `"tag":"collapsible_panel"`) || !strings.Contains(s, `"expanded":false`) {
+		t.Fatalf("排版与风险说明应默认折叠：%s", s)
 	}
 	// 无封面 img_key 时卡片不得残留空 img 元素。
 	rawNoCover, _ := json.Marshal(buildReviewPendingCard(job, ""))
@@ -495,7 +497,7 @@ func TestReviewCardEscapesExternalMarkdownFields(t *testing.T) {
 			t.Fatalf("外部文本不得注入 Feishu markdown %q：%s", banned, card)
 		}
 	}
-	for _, fixed := range []string{"打开公众号原文", job.SourceURL, "预览效果", "通过并发布"} {
+	for _, fixed := range []string{"公众号原文", job.SourceURL, "预览效果", "通过并发布"} {
 		if !strings.Contains(card, fixed) {
 			t.Fatalf("安全转义不得破坏代码生成的固定内容 %q：%s", fixed, card)
 		}

@@ -1196,15 +1196,12 @@ func (p *publishPipeline) submitOfficial(input officialPublishInput) (publishJob
 	return job, created, nil
 }
 
-// officialPlainTextBlocks 兼容 freepublish 对快讯正文直接返回纯文本的真实形态。
-// 只在 HTML 解析零 blocks 且正文不含标签时启用；空行保留为下一段的 blankBefore，
+// officialPlainTextBlocks 兼容 freepublish 对快讯正文返回「根级纯文本 + 少量行内
+// 链接」的真实形态。空行保留为下一段的 blankBefore；链接继续保留为 runs，
 // 不做 Markdown 猜测，也不引入任何网页回源。
 func officialPlainTextBlocks(content string) []Block {
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "\n")
-	if regexp.MustCompile(`(?i)<[a-z][^>]*>`).MatchString(content) {
-		return nil
-	}
 	blocks := make([]Block, 0)
 	pendingBlank := false
 	for _, line := range strings.Split(content, "\n") {
@@ -1215,14 +1212,60 @@ func officialPlainTextBlocks(content string) []Block {
 			}
 			continue
 		}
-		blocks = append(blocks, Block{
-			K:           "p",
-			Text:        line,
-			BlankBefore: pendingBlank,
-		})
+		block := Block{K: "p", BlankBefore: pendingBlank}
+		if regexp.MustCompile(`(?i)</?[a-z][^>]*>`).MatchString(line) {
+			block.Runs = officialInlineRuns(line)
+			if !hasContent(block.Runs) {
+				continue
+			}
+		} else {
+			block.Text = line
+		}
+		blocks = append(blocks, block)
 		pendingBlank = false
 	}
 	return blocks
+}
+
+func officialInlineRuns(line string) []Run {
+	doc, err := html.Parse(strings.NewReader("<body>" + line + "</body>"))
+	if err != nil {
+		return nil
+	}
+	var runs []Run
+	var walk func(*html.Node, string, bool)
+	walk = func(node *html.Node, href string, bold bool) {
+		if node.Type == html.TextNode {
+			runType := "txt"
+			if href != "" {
+				runType = "link"
+			}
+			runs = append(runs, Run{Type: runType, Text: node.Data, Href: href, Bold: bold})
+			return
+		}
+		if node.Type == html.ElementNode {
+			tag := strings.ToLower(node.Data)
+			switch tag {
+			case "script", "style", "noscript", "iframe", "img":
+				return
+			case "br":
+				runs = append(runs, Run{Type: "txt", Text: " "})
+				return
+			case "a":
+				candidate := strings.TrimSpace(getAttr(node, "href"))
+				if candidate != "" && !strings.HasPrefix(strings.ToLower(candidate), "javascript:") {
+					href = candidate
+				}
+			case "strong", "b":
+				bold = true
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child, href, bold)
+		}
+	}
+	walk(doc, "", false)
+	return normalizeRuns(runs)
 }
 
 // ---- News 组装与可配项 ----

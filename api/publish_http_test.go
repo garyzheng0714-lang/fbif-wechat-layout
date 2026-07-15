@@ -154,6 +154,41 @@ func TestPublishOfficialSyncAcceptsOfficialPlainText(t *testing.T) {
 	}
 }
 
+func TestPublishOfficialSyncAcceptsPlainTextWithInlineLinks(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	body, err := json.Marshal(map[string]string{
+		"url":          "https://mp.weixin.qq.com/s/official-plain-text-links",
+		"title":        "官方纯文本带链接快讯",
+		"source_name":  "FBIF食品饮料创新",
+		"content_html": "第一段官方正文。\n\n更多阅读：\n<a href=\"https://mp.weixin.qq.com/s/related\">相关历史文章</a>",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	rec := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", string(body), true)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("带行内链接的官方纯文本提交应 201，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Job publishJob `json:"job"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	job, err := env.store.byID(response.Job.ID)
+	if err != nil {
+		t.Fatalf("byID: %v", err)
+	}
+	var blocks []Block
+	if err := json.Unmarshal([]byte(job.BlocksJSON), &blocks); err != nil {
+		t.Fatalf("decode blocks: %v", err)
+	}
+	if len(blocks) != 3 || blocks[2].Runs[0].Type != "link" || blocks[2].Runs[0].Text != "相关历史文章" {
+		t.Fatalf("带行内链接的纯文本段落转换不符：%+v", blocks)
+	}
+}
+
 // TestPublishSiteSyncIdempotentHTTP 同一篇文章的不同链接形态（chksm 等易变参数）
 // 幂等收敛到同一个任务：第二次提交返回既有单，不重复建单、不重复推进。
 func TestPublishSiteSyncIdempotentHTTP(t *testing.T) {

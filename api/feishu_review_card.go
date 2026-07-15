@@ -29,7 +29,7 @@ const (
 	feishuCardActionReject  = "reject"
 )
 
-const reviewCardHeaderTitle = "网站同步 · 发布审核"
+const reviewCardHeaderTitle = "网站发布审核"
 
 // buildReviewPendingCard 待审核卡：蓝 header + 「待审核」黄 tag + grey-100 信息色块
 // （封面/标题/标签/摘要/预览）+ 基础信息 + AI 优化说明段 + 审核按钮行。
@@ -65,62 +65,44 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 		},
 		"behaviors": []any{map[string]any{"type": "callback", "value": rejectValue}},
 	}
-	previewButton := map[string]any{
-		"tag":   "button",
-		"text":  feishuPlainText("预览效果"),
-		"type":  "primary_text",
-		"size":  "small",
-		"width": "default",
-		"icon":  map[string]any{"tag": "standard_icon", "token": "preview_outlined"},
-		"behaviors": []any{map[string]any{
-			"type": "open_url", "default_url": publishPreviewURL(job.ID),
-			"pc_url": "", "ios_url": "", "android_url": "",
-		}},
-	}
 	buttons := feishuButtonRow(approveButton, rejectButton)
 	if !publishRiskAllowsManualApprove(job.RiskLevel) {
 		// block/缺失/未知级别不能只靠回调端挡：卡片本身不呈现 approve，避免错误暗示。
 		buttons = feishuButtonRow(rejectButton)
 	}
-	elements := []any{reviewCardHeroBlock(job, coverImgKey, previewButton), reviewCardInfoBlock(job)}
-	if notes := reviewCardAINotesBlock(job); notes != nil {
-		elements = append(elements, notes)
-	}
-	if risk := reviewCardRiskBlock(job); risk != nil {
-		elements = append(elements, risk)
+	elements := []any{reviewCardHeroBlock(job, coverImgKey), reviewCardInfoBlock(job)}
+	if details := reviewCardDetailsPanel(job); details != nil {
+		elements = append(elements, details)
 	}
 	elements = append(elements, buttons)
 	headerTemplate := "blue"
-	headerSubtitle := "草稿已进站（外界不可见），等待人工裁决"
 	headerTagColor := "yellow"
 	headerTagText := "待审核"
 	if job.RiskLevel == publishRiskBlock {
 		headerTemplate = "red"
-		headerSubtitle = "发现阻断级风险，不可一键发布"
 		headerTagColor = "red"
 		headerTagText = "风险阻断"
 	} else if !publishRiskLevelKnown(job.RiskLevel) {
 		headerTemplate = "orange"
-		headerSubtitle = "风险检查尚未完成，不可一键发布"
 		headerTagColor = "orange"
 		headerTagText = "风险未完成"
 	}
 	return map[string]any{
 		"schema": "2.0",
-		"config": map[string]any{"update_multi": true},
+		"config": map[string]any{"update_multi": true, "width_mode": "default"},
 		"header": map[string]any{
 			"template": headerTemplate,
 			"icon":     map[string]any{"tag": "standard_icon", "token": "readinfo_outlined"},
 			"title":    feishuPlainText(reviewCardHeaderTitle),
-			"subtitle": feishuPlainText(headerSubtitle),
+			"subtitle": feishuPlainText(fmt.Sprintf("%s · 任务 #%d", reviewCardEnvironmentLabel(), job.ID)),
 			"text_tag_list": []any{map[string]any{
 				"tag": "text_tag", "text": feishuPlainText(headerTagText), "color": headerTagColor,
 			}},
 		},
 		"body": map[string]any{
 			"direction":        "vertical",
-			"padding":          "12px 12px 12px 12px",
-			"vertical_spacing": "8px",
+			"padding":          "12px 12px 16px 12px",
+			"vertical_spacing": "12px",
 			"horizontal_align": "left",
 			"vertical_align":   "top",
 			"elements":         elements,
@@ -218,16 +200,14 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 // reviewCardHeroBlock 把封面、标题、标签、摘要和预览键收进同一个横向媒体容器：
 // 封面素材已在上传前生成方形画布，在紧凑左栏内等比显示；文案列占据剩余宽度，
 // 原图不被裁切且竖图不再主导整卡高度。无封面时自动退化为单列，不留空白占位。
-func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[string]any) map[string]any {
+func reviewCardHeroBlock(job publishJob, coverImgKey string) map[string]any {
 	columns := []any{}
-	copyPadding := "12px 12px 12px 12px"
 	if coverImgKey != "" {
 		columns = append(columns, map[string]any{
 			"tag":            "column",
-			"width":          "112px",
+			"width":          "104px",
 			"direction":      "vertical",
-			"vertical_align": "center",
-			"padding":        "8px 8px 8px 8px",
+			"vertical_align": "top",
 			"elements": []any{map[string]any{
 				"tag":           "img",
 				"img_key":       coverImgKey,
@@ -236,7 +216,6 @@ func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[s
 				"corner_radius": "8px",
 			}},
 		})
-		copyPadding = "12px 12px 12px 0px"
 	}
 	copyElements := []any{map[string]any{
 		"tag": "markdown", "content": fmt.Sprintf("**%s**", reviewCardSafeText(job.Title, 200)),
@@ -244,27 +223,38 @@ func reviewCardHeroBlock(job publishJob, coverImgKey string, previewButton map[s
 	if tags := reviewCardTagMarkup(job.Tags); tags != "" {
 		copyElements = append(copyElements, map[string]any{"tag": "markdown", "content": tags})
 	}
-	copyElements = append(copyElements,
-		map[string]any{"tag": "markdown", "content": reviewCardSafeOrDash(job.Summary, 500)},
-		previewButton,
-	)
+	copyElements = append(copyElements, map[string]any{
+		"tag": "div",
+		"text": map[string]any{
+			"tag": "plain_text", "content": reviewCardSafeOrDash(job.Summary, 500), "lines": 3,
+		},
+	})
+	copyElements = append(copyElements, map[string]any{
+		"tag": "markdown", "content": reviewCardArticleLinks(job), "text_size": "notation",
+	})
 	columns = append(columns, map[string]any{
 		"tag":              "column",
 		"width":            "weighted",
 		"weight":           1,
 		"direction":        "vertical",
-		"vertical_align":   "center",
-		"padding":          copyPadding,
-		"vertical_spacing": "8px",
+		"vertical_align":   "top",
+		"vertical_spacing": "6px",
 		"elements":         copyElements,
 	})
 	return map[string]any{
 		"tag":                "column_set",
 		"flex_mode":          "none",
-		"horizontal_spacing": "0px",
-		"background_style":   "grey-50",
+		"horizontal_spacing": "12px",
 		"columns":            columns,
 	}
+}
+
+func reviewCardArticleLinks(job publishJob) string {
+	links := []string{fmt.Sprintf("[预览效果](%s)", reviewCardSafeURL(publishPreviewURL(job.ID)))}
+	if sourceURL := reviewCardSafeURL(job.SourceURL); sourceURL != "" {
+		links = append(links, fmt.Sprintf("[公众号原文](%s)", sourceURL))
+	}
+	return strings.Join(links, "　·　")
 }
 
 // reviewCardTagMarkup 把 AI/规则生成的文章标签渲染成飞书原生 text_tag，而不是逗号文本。
@@ -278,39 +268,48 @@ func reviewCardTagMarkup(tags []string) string {
 	return strings.Join(items, " ")
 }
 
-// reviewCardInfoBlock grey-100 信息色块：来源公众号/作者/原文链接/任务号/目标环境/
-// 进站时间。作者是 M5 AI 预填参数（或规则兜底值）；
-// 原文链接自 2026-07-10「预览链接」裁定起从按钮降为此处一行。
+// reviewCardInfoBlock 把来源、作者、进站时间、目标环境和风险结论压成两行轻量上下文，
+// 不再用第二层灰色卡片与主内容争夺视觉焦点。
 func reviewCardInfoBlock(job publishJob) map[string]any {
 	sourceName := job.SourceName
 	if sourceName == "" {
 		sourceName = "未知"
 	}
-	sourceURL := reviewCardSafeURL(job.SourceURL)
-	if sourceURL == "" {
-		sourceURL = "https://mp.weixin.qq.com/"
-	}
 	content := fmt.Sprintf(
-		"<font color='grey'>来源公众号</font> %s\n<font color='grey'>作者</font> %s\n<font color='grey'>原文</font> [打开公众号原文](%s)\n<font color='grey'>任务号</font> #%d\n<font color='grey'>目标环境</font> %s\n<font color='grey'>进站时间</font> %s",
+		"<font color='grey'>来源</font> %s　·　<font color='grey'>作者</font> %s　·　<font color='grey'>进站</font> %s\n<font color='grey'>%s　·　任务 #%d</font>　%s",
 		reviewCardSafeText(sourceName, 100),
 		reviewCardSafeOrDash(job.Author, 100),
-		sourceURL, job.ID, siteFrontURL(), formatReviewCardTime(job.UpdatedAt))
+		formatReviewCardTime(job.UpdatedAt), reviewCardEnvironmentLabel(), job.ID, reviewCardRiskTag(job.RiskLevel))
 	return map[string]any{
-		"tag":              "column_set",
-		"flex_mode":        "stretch",
-		"background_style": "grey-100",
-		"columns": []any{map[string]any{
-			"tag":              "column",
-			"width":            "weighted",
-			"weight":           1,
-			"direction":        "vertical",
-			"padding":          "12px 12px 12px 12px",
-			"vertical_spacing": "4px",
-			"elements": []any{map[string]any{
-				"tag":     "markdown",
-				"content": content,
-			}},
-		}},
+		"tag": "markdown", "content": content, "text_size": "notation",
+	}
+}
+
+func reviewCardEnvironmentLabel() string {
+	u, err := url.Parse(siteFrontURL())
+	if err != nil {
+		return "FoodTalks"
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "foodtalks.cn" || host == "www.foodtalks.cn" {
+		return "FoodTalks 正式环境"
+	}
+	if host == "localhost" || host == "127.0.0.1" || strings.Contains(host, "test") {
+		return "FoodTalks 测试环境"
+	}
+	return "FoodTalks"
+}
+
+func reviewCardRiskTag(level string) string {
+	switch level {
+	case publishRiskPass:
+		return "<text_tag color='neutral'>检查通过</text_tag>"
+	case publishRiskWarning:
+		return "<text_tag color='yellow'>风险提醒</text_tag>"
+	case publishRiskBlock:
+		return "<text_tag color='red'>风险阻断</text_tag>"
+	default:
+		return "<text_tag color='orange'>检查未完成</text_tag>"
 	}
 }
 
@@ -329,29 +328,40 @@ func reviewCardSafeURL(raw string) string {
 	).Replace(safe)
 }
 
-// reviewCardAINotesBlock AI 优化说明段（M5）：grey-100 色块 + 小灰字标题，无 emoji。
-// notes 为空（老任务没跑过 enriching）时不渲染该段，返回 nil。
+func reviewCardDetailsPanel(job publishJob) map[string]any {
+	elements := []any{}
+	if notes := reviewCardAINotesBlock(job); notes != nil {
+		elements = append(elements, notes)
+	}
+	if risk := reviewCardRiskBlock(job); risk != nil {
+		elements = append(elements, risk)
+	}
+	if len(elements) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"tag":      "collapsible_panel",
+		"expanded": job.RiskLevel != publishRiskPass,
+		"header": map[string]any{
+			"title":         feishuPlainText("查看排版与风险说明"),
+			"width":         "auto_when_fold",
+			"icon":          map[string]any{"tag": "standard_icon", "token": "info_outlined", "color": "grey"},
+			"icon_position": "left",
+		},
+		"vertical_spacing": "4px",
+		"elements":         elements,
+	}
+}
+
+// reviewCardAINotesBlock AI 优化说明段（M5）。notes 为空时不渲染。
 func reviewCardAINotesBlock(job publishJob) map[string]any {
 	notes := strings.TrimSpace(job.AINotes)
 	if notes == "" {
 		return nil
 	}
 	return map[string]any{
-		"tag":              "column_set",
-		"flex_mode":        "stretch",
-		"background_style": "grey-100",
-		"columns": []any{map[string]any{
-			"tag":              "column",
-			"width":            "weighted",
-			"weight":           1,
-			"direction":        "vertical",
-			"padding":          "12px 12px 12px 12px",
-			"vertical_spacing": "4px",
-			"elements": []any{map[string]any{
-				"tag":     "markdown",
-				"content": fmt.Sprintf("<font color='grey'>AI 优化说明</font>\n%s", reviewCardSafeText(notes, 600)),
-			}},
-		}},
+		"tag": "markdown", "text_size": "notation",
+		"content": fmt.Sprintf("<font color='grey'>排版说明</font>\n%s", reviewCardSafeText(notes, 400)),
 	}
 }
 
@@ -389,19 +399,7 @@ func reviewCardRiskBlock(job publishJob) map[string]any {
 		content.WriteString(reviewCardSafeText(job.RiskNotes, 180))
 	}
 	return map[string]any{
-		"tag":              "column_set",
-		"flex_mode":        "stretch",
-		"background_style": "grey-100",
-		"columns": []any{map[string]any{
-			"tag":       "column",
-			"width":     "weighted",
-			"weight":    1,
-			"direction": "vertical",
-			"padding":   "12px 12px 12px 12px",
-			"elements": []any{map[string]any{
-				"tag": "markdown", "content": content.String(),
-			}},
-		}},
+		"tag": "markdown", "content": content.String(), "text_size": "notation",
 	}
 }
 
@@ -454,7 +452,7 @@ func feishuButtonRow(buttons ...map[string]any) map[string]any {
 	}
 	return map[string]any{
 		"tag":                "column_set",
-		"flex_mode":          "stretch",
+		"flex_mode":          "none",
 		"horizontal_spacing": "8px",
 		"columns":            columns,
 	}
