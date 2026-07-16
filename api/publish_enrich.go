@@ -96,9 +96,10 @@ func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, e
 	for _, u := range images {
 		userContent = append(userContent, map[string]any{"type": "input_image", "image_url": u})
 	}
+	textOnlyContent := []map[string]any{{"type": "input_text", "text": userText}}
 
-	callOne := func(model string) (publishEnrichment, error) {
-		text, err := arkResponsesCall(ctx, apiKey, model, editorialEnrichSystemPrompt(), userContent)
+	callOne := func(model string, content []map[string]any) (publishEnrichment, error) {
+		text, err := arkResponsesCall(ctx, apiKey, model, editorialEnrichSystemPrompt(), content)
 		if err != nil {
 			return publishEnrichment{}, err
 		}
@@ -111,7 +112,7 @@ func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, e
 
 	modelB := strings.TrimSpace(os.Getenv(arkModelIDBEnv))
 	if modelB == "" || modelB == arkModelID() {
-		return callOne(arkModelID()) // 单模型路径（旧行为）
+		return callOne(arkModelID(), userContent) // 单模型路径（旧行为）
 	}
 
 	// 双模型并行出方案。
@@ -121,8 +122,10 @@ func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, e
 		errA, errB error
 	)
 	wg.Add(2)
-	go func() { defer wg.Done(); resA, errA = callOne(arkModelID()) }()
-	go func() { defer wg.Done(); resB, errB = callOne(modelB) }()
+	go func() { defer wg.Done(); resA, errA = callOne(arkModelID(), userContent) }()
+	// 当前对比模型是文本模型。候选图 URL 已写进 userText，不能再发送 input_image，
+	// 否则 ARK 会因 messages.content.image_url 不受支持而拒绝整个请求。
+	go func() { defer wg.Done(); resB, errB = callOne(modelB, textOnlyContent) }()
 	wg.Wait()
 	switch {
 	case errA != nil && errB != nil:

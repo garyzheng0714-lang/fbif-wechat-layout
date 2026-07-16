@@ -376,14 +376,19 @@ func newARKModelRouterStub(t *testing.T, scripts map[string]string, failModels m
 			t.Errorf("ARK 桩解析请求体失败: %v", err)
 		}
 		var userText string
+		var userContentTypes []string
 		for _, in := range req.Input {
 			for _, c := range in.Content {
 				if c.Type == "input_text" {
 					userText += in.Role + "::" + c.Text + "\n"
 				}
+				if in.Role == "user" {
+					userContentTypes = append(userContentTypes, c.Type)
+				}
 			}
 		}
 		seen.Store(req.Model, userText)
+		seen.Store(req.Model+"::content_types", userContentTypes)
 		w.Header().Set("Content-Type", "application/json")
 		if failModels[req.Model] {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -420,7 +425,7 @@ func TestDualModelJudgeArbitrates(t *testing.T) {
 	t.Setenv("ARK_MODEL_ID_B", "ep-B")
 	t.Setenv("ARK_JUDGE_MODEL_ID", "ep-J")
 	got, err := arkEnrichArticle(context.Background(), publishJob{
-		Title: "测试标题", ContentHTML: "<p>正文内容，提到了饮料与食品。</p>",
+		Title: "测试标题", ContentHTML: `<p>正文内容，提到了饮料与食品。</p><img src="https://cdn.example.com/cover.jpg">`,
 	})
 	if err != nil {
 		t.Fatalf("arkEnrichArticle: %v", err)
@@ -446,6 +451,24 @@ func TestDualModelJudgeArbitrates(t *testing.T) {
 		if strings.Contains(judgeText, banned) {
 			t.Fatalf("判决输入泄漏模型身份 %q（必须匿名保证公平）", banned)
 		}
+	}
+	hasType := func(model, want string) bool {
+		raw, ok := seen.Load(model + "::content_types")
+		if !ok {
+			t.Fatalf("模型 %s 未记录请求内容类型", model)
+		}
+		for _, gotType := range raw.([]string) {
+			if gotType == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasType("ep-A", "input_image") {
+		t.Fatal("主模型必须收到候选图片，才能执行视觉判断")
+	}
+	if hasType("ep-B", "input_image") || hasType("ep-J", "input_image") {
+		t.Fatal("文本对比模型与判决节点不得收到 input_image")
 	}
 }
 

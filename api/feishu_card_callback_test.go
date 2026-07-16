@@ -387,7 +387,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 		"公众号原文", job.SourceURL,
 		// M5 AI 预填参数 + 优化说明段。
 		"Mote莫特", "沃集鲜", "沃尔玛", "药食同源", "AI 摘要一段。",
-		"排版说明", "封面选第一张图。",
+		"排版说明", "1. **封面**：选第一张图。",
 		// 2026-07-10 用户追加：封面图直接在卡片呈现（img 元素只认 img_key）+
 		// 2026-07-14 收进横向媒体容器，左侧封面、右侧标题/标签/摘要/预览键。
 		`"tag":"img"`, `"img_key":"img_v3_test_cover_key"`,
@@ -500,6 +500,54 @@ func TestReviewCardEscapesExternalMarkdownFields(t *testing.T) {
 	for _, fixed := range []string{"公众号原文", job.SourceURL, "预览效果", "通过并发布"} {
 		if !strings.Contains(card, fixed) {
 			t.Fatalf("安全转义不得破坏代码生成的固定内容 %q：%s", fixed, card)
+		}
+	}
+}
+
+func TestReviewCardFormatsAINotesAsNumberedChecks(t *testing.T) {
+	job := publishJob{AINotes: "【双模型】对比模型失败（ARK 调用失败（HTTP 400）：The parameter messages.content.image_url），采用主模型方案。\n" +
+		"封面选首张 HBAF 上海门店实景图，有清晰品牌标识。摘要采用提问式悬念写法，紧扣文章核心设问。原文存在两处问题：HABF 应改为 HBAF，文末引语未完结。"}
+	block := reviewCardAINotesBlock(job)
+	content := fmt.Sprint(block["content"])
+	for _, want := range []string{
+		"双模型降级", "对比模型不支持图片输入", "已采用主模型结果",
+		"1. **封面**：", "2. **摘要**：", "3. **原文核对**：",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("编号排版缺少 %q：%s", want, content)
+		}
+	}
+	for _, internal := range []string{"HTTP 400", "messages.content.image_url", "ARK 调用失败"} {
+		if strings.Contains(content, internal) {
+			t.Fatalf("审核卡不得暴露内部模型错误 %q：%s", internal, content)
+		}
+	}
+}
+
+func TestReviewCardHumanizesSystemRisk(t *testing.T) {
+	job := publishJob{
+		RiskLevel: publishRiskWarning,
+		RiskItems: []publishRiskItem{{
+			Category: publishRiskCategorySystem,
+			Level:    publishRiskWarning,
+			Evidence: "风险模型未能产出可验证的结构化结果",
+			Reason:   `风险审核接口不可达: Post "https://ark.example/api/v3/responses": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`,
+		}},
+		RiskNotes: `风险检查未完成，必须人工核对。原因：https://ark.example Client.Timeout`,
+	}
+	block := reviewCardRiskBlock(job)
+	content := fmt.Sprint(block["content"])
+	for _, want := range []string{
+		"1. **风险检查异常**", "发现：风险模型未返回可验证的结构化结果。",
+		"处理建议：请人工核对功效表达、转载授权、竞品评价和数据来源后再决定。",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("风险说明缺少 %q：%s", want, content)
+		}
+	}
+	for _, internal := range []string{"https://ark.example", "Client.Timeout", "context deadline exceeded"} {
+		if strings.Contains(content, internal) {
+			t.Fatalf("审核卡不得暴露内部风险错误 %q：%s", internal, content)
 		}
 	}
 }

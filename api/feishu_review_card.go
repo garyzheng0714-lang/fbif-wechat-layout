@@ -359,10 +359,119 @@ func reviewCardAINotesBlock(job publishJob) map[string]any {
 	if notes == "" {
 		return nil
 	}
+	status, items := reviewCardAINoteParts(notes)
+	var content strings.Builder
+	content.WriteString("<font color='grey'>排版说明</font>")
+	if status != "" {
+		content.WriteString("\n")
+		content.WriteString(status)
+	}
+	for i, item := range items {
+		label, detail := reviewCardAINoteLabel(item)
+		content.WriteString(fmt.Sprintf("\n\n%d. ", i+1))
+		if label != "" {
+			content.WriteString("**")
+			content.WriteString(label)
+			content.WriteString("**：")
+		}
+		content.WriteString(reviewCardSafeText(detail, 180))
+	}
 	return map[string]any{
 		"tag": "markdown", "text_size": "notation",
-		"content": fmt.Sprintf("<font color='grey'>排版说明</font>\n%s", reviewCardSafeText(notes, 400)),
+		"content": content.String(),
 	}
+}
+
+// reviewCardAINoteParts 保留模型说明里的真实语义分组：模型状态单列，其余说明按
+// 显式换行和中文句末拆成最多 6 个检查项。拆分发生在安全转义之前，每一项最终仍由
+// reviewCardSafeText 收敛，旧任务无需迁移即可获得编号排版。
+func reviewCardAINoteParts(notes string) (string, []string) {
+	var status string
+	items := make([]string, 0, 6)
+	for _, line := range strings.Split(strings.ReplaceAll(notes, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "【双模型】") || strings.HasPrefix(line, "【双模型判决】") {
+			if rendered, ok := reviewCardModelStatus(line); ok {
+				status = rendered
+				continue
+			}
+		}
+		for _, sentence := range reviewCardSplitSentences(line) {
+			if len(items) == 6 {
+				break
+			}
+			items = append(items, sentence)
+		}
+	}
+	return status, items
+}
+
+func reviewCardSplitSentences(value string) []string {
+	var out []string
+	var sentence strings.Builder
+	flush := func() {
+		if item := strings.TrimSpace(sentence.String()); item != "" {
+			out = append(out, item)
+		}
+		sentence.Reset()
+	}
+	for _, r := range value {
+		sentence.WriteRune(r)
+		if r == '。' || r == '！' || r == '？' {
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+func reviewCardModelStatus(raw string) (string, bool) {
+	switch {
+	case strings.Contains(raw, "对比模型失败"):
+		if strings.Contains(raw, "image_url") {
+			return "<text_tag color='orange'>双模型降级</text_tag> 对比模型不支持图片输入，已采用主模型结果。", true
+		}
+		return "<text_tag color='orange'>双模型降级</text_tag> 对比模型本次未完成，已采用主模型结果。", true
+	case strings.Contains(raw, "主模型失败"):
+		return "<text_tag color='orange'>双模型降级</text_tag> 主模型本次未完成，已采用对比模型结果。", true
+	case strings.Contains(raw, "判决节点失败"):
+		return "<text_tag color='orange'>双模型降级</text_tag> 双模型判决本次未完成，已采用主模型结果。", true
+	case strings.HasPrefix(raw, "【双模型判决】"):
+		detail := strings.TrimSpace(strings.TrimPrefix(raw, "【双模型判决】"))
+		return "**双模型判决**：" + reviewCardSafeText(detail, 180), true
+	default:
+		return "", false
+	}
+}
+
+func reviewCardAINoteLabel(item string) (string, string) {
+	labels := []struct {
+		prefix string
+		label  string
+	}{
+		{"封面", "封面"},
+		{"摘要", "摘要"},
+		{"标签", "标签"},
+		{"作者", "作者"},
+		{"来源", "来源"},
+		{"原文", "原文核对"},
+		{"正文", "正文"},
+		{"排版", "排版"},
+	}
+	item = strings.TrimSpace(item)
+	for _, candidate := range labels {
+		if !strings.HasPrefix(item, candidate.prefix) {
+			continue
+		}
+		detail := strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(item, candidate.prefix), "：:，, "))
+		if detail != "" {
+			return candidate.label, detail
+		}
+	}
+	return "", item
 }
 
 // reviewCardRiskBlock 展示持久化的风险结论与证据。模型输出按纯文本收敛后再拼
@@ -384,23 +493,38 @@ func reviewCardRiskBlock(job publishJob) map[string]any {
 	}
 	for i := 0; i < limit; i++ {
 		item := job.RiskItems[i]
-		content.WriteString("\n")
-		content.WriteString(fmt.Sprintf("%d. %s：%s", i+1,
-			reviewCardSafeText(publishRiskCategoryLabel(item.Category), 40),
-			reviewCardSafeText(item.Evidence, 140)))
+		content.WriteString("\n\n")
+		content.WriteString(fmt.Sprintf("%d. **%s**", i+1,
+			reviewCardSafeText(publishRiskCategoryLabel(item.Category), 40)))
+		if item.Category == publishRiskCategorySystem {
+			content.WriteString("\n   发现：风险模型未返回可验证的结构化结果。")
+			content.WriteString("\n   处理建议：请人工核对功效表达、转载授权、竞品评价和数据来源后再决定。")
+			continue
+		}
+		content.WriteString("\n   发现：")
+		content.WriteString(reviewCardSafeText(item.Evidence, 140))
 		content.WriteString("\n   原因：")
 		content.WriteString(reviewCardSafeText(item.Reason, 140))
 	}
 	if len(job.RiskItems) > limit {
-		content.WriteString(fmt.Sprintf("\n另有 %d 条，请在任务详情中查看。", len(job.RiskItems)-limit))
+		content.WriteString(fmt.Sprintf("\n\n另有 %d 条，请在任务详情中查看。", len(job.RiskItems)-limit))
 	}
-	if strings.TrimSpace(job.RiskNotes) != "" {
-		content.WriteString("\n说明：")
+	if strings.TrimSpace(job.RiskNotes) != "" && !reviewCardHasSystemRisk(job.RiskItems) {
+		content.WriteString("\n\n**补充说明**：")
 		content.WriteString(reviewCardSafeText(job.RiskNotes, 180))
 	}
 	return map[string]any{
 		"tag": "markdown", "content": content.String(), "text_size": "notation",
 	}
+}
+
+func reviewCardHasSystemRisk(items []publishRiskItem) bool {
+	for _, item := range items {
+		if item.Category == publishRiskCategorySystem {
+			return true
+		}
+	}
+	return false
 }
 
 // reviewCardSafeText 把文章/模型等外部文本收敛成 Feishu markdown 内的纯文本。
