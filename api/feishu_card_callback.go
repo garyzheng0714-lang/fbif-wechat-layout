@@ -97,10 +97,7 @@ func feishuCallbackTokenOK(got string) bool {
 }
 
 // feishuReviewerAllowed 是 Webhook / WebSocket 共用的审核 RBAC。白名单以逗号、分号或
-// 空白分隔。**2026-07-11 用户裁定「白名单不需要」**：未配置 = 开放——卡片只发进
-// 指定审核群（FEISHU_REVIEW_CHAT_ID），能点到按钮的本来就是群成员，群成员即审核人
-// （来源真实性仍由 verification token / 长连接 SDK 鉴权守着）；配置了 env 则收紧为
-// 白名单模式（原 fail-closed 设计保留为可选硬化）。空 operator 仍一律拒绝。
+// 空白分隔；未配置、全部非法或 operator 不在清单内均 fail closed。
 func feishuReviewerAllowed(operatorOpenID string) bool {
 	operatorOpenID = strings.TrimSpace(operatorOpenID)
 	if !feishuOpenIDSafe(operatorOpenID) {
@@ -110,7 +107,7 @@ func feishuReviewerAllowed(operatorOpenID string) bool {
 		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
 	})
 	if len(items) == 0 {
-		return true // 未配置 = 开放（2026-07-11 用户裁定「白名单不需要」）；operator 形态校验已在上方兜住
+		return false
 	}
 	for _, item := range items {
 		candidate := strings.TrimSpace(item)
@@ -140,7 +137,7 @@ func feishuReviewerAllowlistConfigured() bool {
 		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
 	})
 	if len(items) == 0 {
-		return true // 未配置 = 开放（2026-07-11 用户裁定「白名单不需要」）；operator 形态校验已在上方兜住
+		return false
 	}
 	for _, item := range items {
 		if feishuOpenIDSafe(strings.TrimSpace(item)) {
@@ -214,20 +211,38 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 	return reviewCardOutcome{toastType: "success", toastContent: "已驳回", card: buildReviewDoneCard(reviewed)}
 }
 
-// publishReviewCardVersion 将风险结论和证据绑定到卡片按钮：补检或重评后
-// 任一级别/条目/说明变化都会使旧卡失效，避免审核人按照已过期的风险语义操作。
+// publishReviewCardVersion 将风险结论、内容哈希和冻结版本绑定到卡片按钮：补检、
+// 重评或高权威正文晚到都会使旧卡失效，避免审核人批准已过期内容。
 // HTTP admin 审核不使用卡片版本。
 func publishReviewCardVersion(job publishJob) string {
 	if !publishRiskLevelKnown(job.RiskLevel) {
 		return ""
 	}
+	// 上线前已经发出的待审卡仍携带 risk-v2。完全没有内容版本元数据的存量任务
+	// 保持旧摘要算法，避免部署后所有旧卡无替代卡可点；任何新任务或正文变更都走 v3。
+	if job.ContentVersion == 0 && job.ContentFrozenVersion == 0 && job.ContentHash == "" {
+		payload, _ := json.Marshal(struct {
+			Level string            `json:"level"`
+			Items []publishRiskItem `json:"items"`
+			Notes string            `json:"notes"`
+		}{Level: job.RiskLevel, Items: job.RiskItems, Notes: job.RiskNotes})
+		digest := sha256.Sum256(payload)
+		return fmt.Sprintf("risk-v2:%d:%x", job.ID, digest[:8])
+	}
 	payload, _ := json.Marshal(struct {
-		Level string            `json:"level"`
-		Items []publishRiskItem `json:"items"`
-		Notes string            `json:"notes"`
-	}{Level: job.RiskLevel, Items: job.RiskItems, Notes: job.RiskNotes})
+		Level         string            `json:"level"`
+		Items         []publishRiskItem `json:"items"`
+		Notes         string            `json:"notes"`
+		ContentHash   string            `json:"content_hash"`
+		Content       int64             `json:"content_version"`
+		FrozenContent int64             `json:"frozen_content_version"`
+	}{
+		Level: job.RiskLevel, Items: job.RiskItems, Notes: job.RiskNotes,
+		ContentHash: job.ContentHash, Content: job.ContentVersion,
+		FrozenContent: job.ContentFrozenVersion,
+	})
 	digest := sha256.Sum256(payload)
-	return fmt.Sprintf("risk-v2:%d:%x", job.ID, digest[:8])
+	return fmt.Sprintf("review-v3:%d:%x", job.ID, digest[:8])
 }
 
 // coerceFeishuJobID 回调 value 里的 job_id 兼容数字与字符串两种 JSON 形态。

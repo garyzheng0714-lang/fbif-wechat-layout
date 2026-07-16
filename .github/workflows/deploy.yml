@@ -209,6 +209,8 @@ jobs:
             .ready == true and
             .workers_paused == true and
             .store_valid == true and
+            .service_auth.configured == true and
+            .http_review_enabled == false and
             .foodtalks.configured == true and
             .foodtalks.target_matches_expected == true and
             .foodtalks.front_explicit == true and
@@ -218,12 +220,10 @@ jobs:
             .render.configured == true and
             .feishu.notify_configured == true and
             .feishu.ws_configured == true and
+            .feishu.reviewer_allowlist_configured == true and
             .enrich_mode == "dual" and
             .judge_configured == true
           ' >/dev/null
-          if ! echo "$readiness_json" | jq -e '.feishu.reviewer_allowlist_configured == true' >/dev/null; then
-            echo "WARNING: FEISHU_REVIEWER_OPEN_IDS is missing; card reviews remain fail-closed." >&2
-          fi
           echo "Publish target: $(echo "$readiness_json" | jq -r '.foodtalks.target')"
 
           # 到这里候选代码、静态资源、鉴权边界和运行配置已验收。先关闭自动 rollback，
@@ -238,7 +238,15 @@ jobs:
           unpaused_readiness=$(curl --silent --show-error --fail \
             --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
             "${SITE_ORIGIN}/api/publish/readiness")
-          echo "$unpaused_readiness" | jq -e '.ready == true and .workers_paused == false and .store_valid == true and .enrich_mode == "dual"' >/dev/null
+          echo "$unpaused_readiness" | jq -e '
+            .ready == true and
+            .workers_paused == false and
+            .store_valid == true and
+            .service_auth.configured == true and
+            .http_review_enabled == false and
+            .feishu.reviewer_allowlist_configured == true and
+            .enrich_mode == "dual"
+          ' >/dev/null
 
           remote_transaction finalize
           release_accepted=0

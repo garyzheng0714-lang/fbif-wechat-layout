@@ -72,6 +72,12 @@ var errStagingOutcomeUncertain = errors.New("FoodTalks CreateNews 结果不确�
 // 传输报错还是本地落盘报错，都不得用普通 failed/retry 盲重放。
 var errPublicizeOutcomeUncertain = errors.New("FoodTalks UpdateNews 公开结果不确定")
 
+// errPublishContentSuperseded 表示更高权威内容在当前阶段执行期间到达；旧 worker
+// 只能放弃快照并从持久化的新版本继续，不能把它记成普通失败。
+var errPublishContentSuperseded = errors.New("publish content version superseded")
+
+var errPublishDuplicateSuperseded = errors.New("publish job superseded by canonical duplicate")
+
 // foodTalksAPI FoodTalks 发布客户端能力面（*foodTalksClient 满足；测试可注入 fake）。
 type foodTalksAPI interface {
 	CreateNews(ctx context.Context, n foodTalksNews) (int64, error)
@@ -323,6 +329,16 @@ func (p *publishPipeline) runJob(jobID int64) {
 			log.Printf("publish: load job %d failed: %v", jobID, err)
 			return
 		}
+		if job.PendingContentHash != "" {
+			promoted, changed, promoteErr := p.promotePendingContent(jobID)
+			if promoteErr != nil {
+				log.Printf("publish: promote pending content for job %d failed: %v", jobID, promoteErr)
+				return
+			}
+			if changed {
+				job = promoted
+			}
+		}
 		if job.terminal() || job.Stage == publishStageAwaitingReview || job.Stage == publishStageFailed ||
 			job.Stage == publishStageStagingCreating || job.Stage == publishStageReconciliationRequired ||
 			job.Stage == publishStagePublicizingUpdating || job.Stage == publishStagePublicizeReconciliationRequired {
@@ -331,7 +347,17 @@ func (p *publishPipeline) runJob(jobID int64) {
 		var stageErr error
 		switch job.Stage {
 		case publishStageCreated:
-			_, stageErr = p.store.setStage(jobID, publishStageFetching)
+			_, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
+				return current.Stage == publishStageCreated && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
+			}, func(current *publishJob) {
+				current.Stage = publishStageFetching
+				current.FailedStage = ""
+				current.Error = ""
+			})
+			stageErr = err
+			if err == nil && !swapped {
+				stageErr = errPublishContentSuperseded
+			}
 		case publishStageFetching:
 			stageErr = p.stageFetch(ctx, job)
 		case publishStageRendering:
@@ -350,6 +376,15 @@ func (p *publishPipeline) runJob(jobID int64) {
 			stageErr = fmt.Errorf("未知任务阶段 %q", job.Stage)
 		}
 		if stageErr != nil {
+			if errors.Is(stageErr, errPublishContentSuperseded) {
+				continue
+			}
+			if errors.Is(stageErr, errPublishDuplicateSuperseded) {
+				return
+			}
+			if latest, loadErr := p.store.byID(jobID); loadErr == nil && latest.PendingContentHash != "" && publishContentPromotableStage(latest) {
+				continue
+			}
 			if errors.Is(stageErr, errStagingOutcomeUncertain) || errors.Is(stageErr, errPublicizeOutcomeUncertain) {
 				// 已经进入持久 intent 窗口；Create 盲重放会建重文，
 				// publicize 盲重放则会掩盖不可逆动作的真实结果。
@@ -375,11 +410,18 @@ func (p *publishPipeline) runJob(jobID int64) {
 					// 本 worker 不得覆写其 publicizing_updating/reconciliation 状态。
 					return
 				}
+				if failed.PendingContentHash != "" && publishContentPromotableStage(failed) {
+					continue
+				}
 				p.schedulePublishNotification(failed.ID)
 				return
 			}
-			if _, err := p.store.setFailed(jobID, job.Stage, stageErr.Error()); err != nil {
+			failed, err := p.store.setFailed(jobID, job.Stage, stageErr.Error())
+			if err != nil {
 				log.Printf("publish: record job %d failure failed: %v", jobID, err)
+			}
+			if err == nil && failed.PendingContentHash != "" && publishContentPromotableStage(failed) {
+				continue
 			}
 			return
 		}
@@ -404,22 +446,37 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 				return fmt.Errorf("持久化文章规范身份失败: %w", claimErr)
 			}
 			if conflictingID > 0 {
-				return fmt.Errorf("同一篇公众号文章已由发布任务 #%d 处理，当前任务为防止重复建文已停止", conflictingID)
+				_, swapped, markErr := p.store.updateIf(job.ID, func(current publishJob) bool {
+					return current.Stage == publishStageFetching && current.FoodTalksNewsID == 0
+				}, func(current *publishJob) {
+					current.Stage = publishStageSupersededDuplicate
+					current.SupersededByJobID = conflictingID
+					current.Error = fmt.Sprintf("同一篇公众号文章已由发布任务 #%d 处理", conflictingID)
+					current.FailedStage = ""
+				})
+				if markErr != nil {
+					return fmt.Errorf("标记重复任务失败: %w", markErr)
+				}
+				if !swapped {
+					return errPublishContentSuperseded
+				}
+				return fmt.Errorf("%w: winner job #%d", errPublishDuplicateSuperseded, conflictingID)
 			}
 		}
 	}
 	if strings.TrimSpace(title) == "" {
 		return errors.New("未能从文章解析出标题：请确认链接是公众号文章页，或稍后重试")
 	}
-	_, err = p.store.update(job.ID, func(j *publishJob) {
-		j.Title = title
-		j.SourceName = sourceName
-		j.Author = byline // 页面结构化署名（可为空）；enriching 只在它为空时用 AI 兜底
-		j.BlocksJSON = blocksJSON
-		j.Stage = publishStageRendering
-		j.FailedStage = ""
-		j.Error = ""
+	seed := newPublishContentSeed(publishContentWebFetch, title, sourceName, byline, blocksJSON, job.CoverURL)
+	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == publishStageFetching && current.ContentVersion == job.ContentVersion &&
+			current.PendingContentHash == "" && publishContentRank(current.ContentSource) <= publishContentRank(seed.Source)
+	}, func(current *publishJob) {
+		applyPublishContentSeed(current, seed)
 	})
+	if err == nil && !swapped {
+		return errPublishContentSuperseded
+	}
 	return err
 }
 
@@ -432,12 +489,17 @@ func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error
 	if err != nil {
 		return err
 	}
-	_, err = p.store.update(job.ID, func(j *publishJob) {
+	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == publishStageRendering && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
+	}, func(j *publishJob) {
 		j.ContentHTML = rendered
 		j.Stage = publishStageMirroring
 		j.FailedStage = ""
 		j.Error = ""
 	})
+	if err == nil && !swapped {
+		return errPublishContentSuperseded
+	}
 	return err
 }
 
@@ -495,8 +557,14 @@ func (p *publishPipeline) stageMirror(ctx context.Context, job publishJob) error
 		}
 		// 成功的先落库（幂等锚点：即使后续失败，重试也不重传这批）。
 		mapJSON, _ := json.Marshal(imageMap)
-		if _, err := p.store.update(job.ID, func(j *publishJob) { j.ImageMap = string(mapJSON) }); err != nil {
+		_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+			return current.Stage == publishStageMirroring && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
+		}, func(j *publishJob) { j.ImageMap = string(mapJSON) })
+		if err != nil {
 			return err
+		}
+		if !swapped {
+			return errPublishContentSuperseded
 		}
 		pending = missing
 	}
@@ -509,13 +577,18 @@ func (p *publishPipeline) stageMirror(ctx context.Context, job publishJob) error
 	if ossCover == "" {
 		return fmt.Errorf("封面图转存结果缺失（%s）", cover)
 	}
-	_, err := p.store.update(job.ID, func(j *publishJob) {
+	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == publishStageMirroring && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
+	}, func(j *publishJob) {
 		j.ContentHTML = finalHTML
 		j.CoverURL = ossCover
 		j.Stage = publishStageEnriching
 		j.FailedStage = ""
 		j.Error = ""
 	})
+	if err == nil && !swapped {
+		return errPublishContentSuperseded
+	}
 	return err
 }
 
@@ -535,7 +608,9 @@ func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error
 		log.Printf("publish: WARN job %d AI 预填失败，走规则兜底: %v", job.ID, err)
 		result = fallbackEnrichment(job, err)
 	}
-	_, uerr := p.store.update(job.ID, func(j *publishJob) {
+	_, swapped, uerr := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == publishStageEnriching && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
+	}, func(j *publishJob) {
 		if result.CoverURL != "" {
 			j.CoverURL = result.CoverURL // AI 从候选里选中的封面覆盖默认第一图
 		}
@@ -552,6 +627,9 @@ func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error
 		j.FailedStage = ""
 		j.Error = ""
 	})
+	if uerr == nil && !swapped {
+		return errPublishContentSuperseded
+	}
 	return uerr
 }
 
@@ -563,7 +641,9 @@ func (p *publishPipeline) stageAssessRisk(ctx context.Context, job publishJob) e
 	if job.Stage == publishStageAssessingReview {
 		nextStage = publishStageAwaitingReview
 	}
-	updated, err := p.store.update(job.ID, func(j *publishJob) {
+	updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == job.Stage && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
+	}, func(j *publishJob) {
 		j.RiskLevel = result.Level
 		j.RiskItems = append([]publishRiskItem(nil), result.Items...)
 		j.RiskNotes = result.Notes
@@ -575,6 +655,9 @@ func (p *publishPipeline) stageAssessRisk(ctx context.Context, job publishJob) e
 			enqueuePublishNotification(j, publishNotificationReviewPending)
 		}
 	})
+	if err == nil && !swapped {
+		return errPublishContentSuperseded
+	}
 	if err == nil && nextStage == publishStageAwaitingReview {
 		// 历史卡没有 risk 字段，也没有可更新的 message_id；补检后发一张新卡取代旧卡。
 		// 不再走 stageStage/PUT，避免已待审草稿因外部更新失败丢审核态。
@@ -591,6 +674,18 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 	if err != nil {
 		return err
 	}
+	frozen, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == publishStageStaging && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
+	}, func(current *publishJob) {
+		freezePublishContent(current, p.now())
+	})
+	if err != nil {
+		return err
+	}
+	if !swapped {
+		return errPublishContentSuperseded
+	}
+	job = frozen
 	news, err := p.buildSiteNews(job, foodTalksPublishStatusDraft)
 	if err != nil {
 		return err
@@ -603,14 +698,22 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		if err := ft.UpdateNews(ctx, news); err != nil {
 			return err
 		}
-		updated, err := p.store.update(job.ID, func(j *publishJob) {
+		updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+			return current.Stage == publishStageStaging && current.ContentVersion == job.ContentVersion &&
+				current.ContentFrozenVersion == job.ContentVersion
+		}, func(j *publishJob) {
 			j.Stage = publishStageAwaitingReview
 			j.FailedStage = ""
 			j.Error = ""
-			enqueuePublishNotification(j, publishNotificationReviewPending)
+			if j.PendingContentHash == "" {
+				enqueuePublishNotification(j, publishNotificationReviewPending)
+			}
 		})
 		if err != nil {
 			return err
+		}
+		if !swapped {
+			return errPublishContentSuperseded
 		}
 		p.schedulePublishNotification(updated.ID)
 		return nil
@@ -619,7 +722,8 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 	intentKey := fmt.Sprintf("foodtalks-create:job-%d", job.ID)
 	intentAt := p.now().UTC().Format(time.RFC3339)
 	intentJob, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
-		return current.Stage == publishStageStaging && current.FoodTalksNewsID == 0 && current.StagingIntentKey == ""
+		return current.Stage == publishStageStaging && current.FoodTalksNewsID == 0 && current.StagingIntentKey == "" &&
+			current.ContentVersion == job.ContentVersion && current.ContentFrozenVersion == job.ContentVersion && current.PendingContentHash == ""
 	}, func(j *publishJob) {
 		j.Stage = publishStageStagingCreating
 		j.StagingIntentKey = intentKey
@@ -631,6 +735,9 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		return err
 	}
 	if !swapped {
+		if intentJob.StagingIntentKey == "" {
+			return errPublishContentSuperseded
+		}
 		return fmt.Errorf("%w：任务当前阶段 %s，已存在 intent %q", errStagingOutcomeUncertain, intentJob.Stage, intentJob.StagingIntentKey)
 	}
 
@@ -668,7 +775,9 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		j.Stage = publishStageAwaitingReview
 		j.FailedStage = ""
 		j.Error = ""
-		enqueuePublishNotification(j, publishNotificationReviewPending)
+		if j.PendingContentHash == "" {
+			enqueuePublishNotification(j, publishNotificationReviewPending)
+		}
 	})
 	if err != nil {
 		return fmt.Errorf("%w：FoodTalks 已返回资讯 id=%d，但本地锚点落盘失败（intent=%s）：%v", errStagingOutcomeUncertain, newsID, intentKey, err)
@@ -761,7 +870,8 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 
 func validPersistedPublishApproval(job publishJob) bool {
 	if job.ReviewAction != publishReviewApprove || strings.TrimSpace(job.ReviewedAt) == "" ||
-		!publishRiskAllowsManualApprove(job.RiskLevel) || strings.TrimSpace(job.ApprovedRiskVersion) == "" {
+		!publishRiskAllowsManualApprove(job.RiskLevel) || strings.TrimSpace(job.ApprovedRiskVersion) == "" ||
+		!publishContentVersionReadyForReview(job) {
 		return false
 	}
 	current := publishReviewCardVersion(job)
@@ -823,7 +933,8 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 				return false
 			}
 			return current.Stage == publishStageAwaitingReview && current.FoodTalksNewsID > 0 &&
-				publishRiskAllowsManualApprove(current.RiskLevel) && currentVersion != ""
+				publishRiskAllowsManualApprove(current.RiskLevel) && currentVersion != "" &&
+				publishContentVersionReadyForReview(current)
 		}, func(j *publishJob) {
 			j.Stage = publishStagePublicizing
 			j.FailedStage = ""
@@ -848,6 +959,9 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 			}
 			if job.RiskLevel == publishRiskBlock {
 				return job, errors.New("任务风险级别为 block，禁止通过并发布；请驳回或人工处理风险后重新评估")
+			}
+			if !publishContentVersionReadyForReview(job) {
+				return job, errors.New("任务正文版本尚未冻结或有更高权威内容待处理，禁止按旧版本发布")
 			}
 			return job, fmt.Errorf("任务当前阶段（%s）无法通过：仅待审核且草稿已进站的任务可发布", job.Stage)
 		}
@@ -1120,12 +1234,48 @@ func (p *publishPipeline) reconcilePublicize(jobID int64, confirmPublished, conf
 
 // submit source_key 永久幂等建单：任意阶段（含终态）同源任务都返回原单，绝不再建文。
 func (p *publishPipeline) submit(sourceURL string) (publishJob, bool, error) {
+	return p.submitWithContext(context.Background(), sourceURL)
+}
+
+func (p *publishPipeline) submitWithContext(ctx context.Context, sourceURL string) (publishJob, bool, error) {
 	if publishWorkersPaused() {
 		return publishJob{}, false, errPublishWorkersPaused
 	}
 	sourceKey, err := normalizeSiteSourceKey(sourceURL)
 	if err != nil {
 		return publishJob{}, false, err
+	}
+	// /s/<slug> 只在单条分享链接内部稳定，两个不同 slug 仍可能指向同一篇文章。
+	// 因此短链必须先抓取页面并解析 __biz/mid/idx canonical identity，再原子建单；
+	// 绝不能先创建临时 job、事后把冲突输家打成 failed。
+	if publishSourceKeyIsShort(sourceKey) {
+		title, sourceName, byline, canonicalURL, blocksJSON, fetchErr := p.fetch(ctx, sourceURL)
+		if fetchErr != nil {
+			return publishJob{}, false, fetchErr
+		}
+		canonicalKey, keyErr := normalizeSiteSourceKey(canonicalURL)
+		if keyErr != nil || publishSourceKeyIsShort(canonicalKey) {
+			if keyErr != nil {
+				return publishJob{}, false, fmt.Errorf("短链未解析出可验证的文章规范身份: %w", keyErr)
+			}
+			return publishJob{}, false, errors.New("短链未解析出 __biz/mid/idx 文章规范身份，请使用公众号文章完整链接")
+		}
+		title = strings.TrimSpace(title)
+		if title == "" || strings.TrimSpace(blocksJSON) == "" {
+			return publishJob{}, false, errors.New("短链解析结果缺少标题或正文内容块，未创建发布任务")
+		}
+		seed := newPublishContentSeed(publishContentWebFetch, title, sourceName, byline, blocksJSON, "")
+		job, created, createErr := p.store.createSeeded(canonicalKey, sourceURL, func(j *publishJob) {
+			j.SourceAliases = []string{sourceKey}
+			applyPublishContentSeed(j, seed)
+		})
+		if createErr != nil {
+			return publishJob{}, false, createErr
+		}
+		if created {
+			p.spawn(func() { p.runJob(job.ID) })
+		}
+		return job, created, nil
 	}
 	job, created, err := p.store.create(sourceKey, sourceURL)
 	if err != nil {
@@ -1135,6 +1285,18 @@ func (p *publishPipeline) submit(sourceURL string) (publishJob, bool, error) {
 		p.spawn(func() { p.runJob(job.ID) })
 	}
 	return job, created, nil
+}
+
+func publishSourceKeyIsShort(sourceKey string) bool {
+	if !strings.HasPrefix(sourceKey, "site:") {
+		return false
+	}
+	u, err := url.Parse(strings.TrimPrefix(sourceKey, "site:"))
+	if err != nil {
+		return false
+	}
+	path := strings.TrimRight(u.Path, "/")
+	return strings.HasPrefix(path, "/s/") && len(path) > len("/s/")
 }
 
 type officialPublishInput struct {
@@ -1149,12 +1311,46 @@ type officialPublishInput struct {
 // submitOfficial 让微信公众号官方 API 返回的正文直接进入既有排版状态机。
 // HTML 只在进程内转成中立 blocks；任务从 rendering 开始，永不回源抓公众号网页。
 func (p *publishPipeline) submitOfficial(input officialPublishInput) (publishJob, bool, error) {
+	return p.submitOfficialWithContext(context.Background(), input)
+}
+
+func (p *publishPipeline) submitSupplier(input officialPublishInput) (publishJob, bool, error) {
+	return p.submitSupplierWithContext(context.Background(), input)
+}
+
+func (p *publishPipeline) submitOfficialWithContext(ctx context.Context, input officialPublishInput) (publishJob, bool, error) {
+	return p.submitStructuredContent(ctx, input, publishContentOfficial)
+}
+
+func (p *publishPipeline) submitSupplierWithContext(ctx context.Context, input officialPublishInput) (publishJob, bool, error) {
+	return p.submitStructuredContent(ctx, input, publishContentSupplier)
+}
+
+func (p *publishPipeline) submitStructuredContent(ctx context.Context, input officialPublishInput, contentSource string) (publishJob, bool, error) {
 	if publishWorkersPaused() {
 		return publishJob{}, false, errPublishWorkersPaused
 	}
 	sourceKey, err := normalizeSiteSourceKey(input.URL)
 	if err != nil {
 		return publishJob{}, false, err
+	}
+	originalSourceKey := sourceKey
+	if publishSourceKeyIsShort(sourceKey) {
+		if p.fetch == nil {
+			return publishJob{}, false, errors.New("短链缺少 canonical identity 解析器，未创建发布任务")
+		}
+		_, _, _, canonicalURL, _, fetchErr := p.fetch(ctx, input.URL)
+		if fetchErr != nil {
+			return publishJob{}, false, fmt.Errorf("短链规范身份解析失败，未创建发布任务: %w", fetchErr)
+		}
+		canonicalKey, keyErr := normalizeSiteSourceKey(canonicalURL)
+		if keyErr != nil || publishSourceKeyIsShort(canonicalKey) {
+			if keyErr != nil {
+				return publishJob{}, false, fmt.Errorf("短链未解析出可验证的文章规范身份: %w", keyErr)
+			}
+			return publishJob{}, false, errors.New("短链未解析出 __biz/mid/idx 文章规范身份，未创建发布任务")
+		}
+		sourceKey = canonicalKey
 	}
 	input.Title = strings.TrimSpace(input.Title)
 	input.ContentHTML = strings.TrimSpace(input.ContentHTML)
@@ -1179,18 +1375,33 @@ func (p *publishPipeline) submitOfficial(input officialPublishInput) (publishJob
 	if input.Author == "" {
 		input.Author = strings.TrimSpace(parsedAuthor)
 	}
+	seed := newPublishContentSeed(contentSource, input.Title, input.SourceName, input.Author, string(blocksJSON), input.CoverURL)
 	job, created, err := p.store.createSeeded(sourceKey, input.URL, func(j *publishJob) {
-		j.Title = input.Title
-		j.SourceName = strings.TrimSpace(input.SourceName)
-		j.Author = input.Author
-		j.BlocksJSON = string(blocksJSON)
-		j.CoverURL = strings.TrimSpace(input.CoverURL)
-		j.Stage = publishStageRendering
+		if originalSourceKey != sourceKey {
+			j.SourceAliases = []string{originalSourceKey}
+		}
+		applyPublishContentSeed(j, seed)
 	})
 	if err != nil {
 		return publishJob{}, false, err
 	}
-	if created {
+	if !created {
+		if originalSourceKey != sourceKey {
+			if _, conflictingID, aliasErr := p.store.claimSourceAlias(job.ID, originalSourceKey); aliasErr != nil {
+				return publishJob{}, false, aliasErr
+			} else if conflictingID > 0 && conflictingID != job.ID {
+				return publishJob{}, false, fmt.Errorf("短链身份已属于发布任务 #%d", conflictingID)
+			}
+		}
+		var restart bool
+		job, restart, err = p.mergeIncomingContent(job.ID, seed)
+		if err != nil {
+			return publishJob{}, false, err
+		}
+		if restart {
+			p.spawn(func() { p.runJob(job.ID) })
+		}
+	} else {
 		p.spawn(func() { p.runJob(job.ID) })
 	}
 	return job, created, nil

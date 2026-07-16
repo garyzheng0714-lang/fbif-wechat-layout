@@ -19,7 +19,11 @@ type publishReadinessStatus struct {
 	Ready         bool `json:"ready"`
 	WorkersPaused bool `json:"workers_paused"`
 	StoreValid    bool `json:"store_valid"`
-	FoodTalks     struct {
+	ServiceAuth   struct {
+		Configured bool `json:"configured"`
+	} `json:"service_auth"`
+	HTTPReviewEnabled bool `json:"http_review_enabled"`
+	FoodTalks         struct {
 		Configured            bool   `json:"configured"`
 		Target                string `json:"target"`
 		ExpectedTarget        string `json:"expected_target"`
@@ -73,7 +77,22 @@ func publishEnrichMode() string {
 
 func configuredHTTPBaseURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return u.Scheme == "https" || host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func foodTalksTestHost(host string) bool {
+	for _, label := range strings.Split(strings.ToLower(strings.TrimSpace(host)), ".") {
+		for _, token := range strings.Split(label, "-") {
+			if token == "test" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func foodTalksURLTarget(raw string) string {
@@ -82,7 +101,7 @@ func foodTalksURLTarget(raw string) string {
 	}
 	u, _ := url.Parse(strings.TrimSpace(raw))
 	host := strings.ToLower(u.Hostname())
-	if strings.Contains(host, "test") {
+	if foodTalksTestHost(host) {
 		return "test"
 	}
 	if host == "foodtalks.cn" || strings.HasSuffix(host, ".foodtalks.cn") {
@@ -135,9 +154,12 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.Feishu.NotifyConfigured = out.Feishu.WSConfigured && chatID != ""
 	out.Feishu.WebhookConfigured = strings.TrimSpace(os.Getenv("FEISHU_VERIFICATION_TOKEN")) != ""
 	out.Feishu.ReviewerAllowlistConfigured = feishuReviewerAllowlistConfigured()
+	out.ServiceAuth.Configured = publishSyncServiceTokenConfigured()
+	out.HTTPReviewEnabled = publishHTTPReviewEnabled()
 	out.EnrichMode = publishEnrichMode()
 	out.JudgeConfigured = strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv)) != ""
-	out.Ready = adminPasswordConfigured() && out.StoreValid && out.FoodTalks.Configured &&
+	out.Ready = adminPasswordConfigured() && out.ServiceAuth.Configured && !out.HTTPReviewEnabled &&
+		out.StoreValid && out.FoodTalks.Configured && out.Feishu.ReviewerAllowlistConfigured &&
 		out.FoodTalks.Categories && out.Render.Configured && out.Feishu.NotifyConfigured &&
 		out.Feishu.WSConfigured && out.EnrichMode == "dual" && out.JudgeConfigured
 	return out

@@ -195,11 +195,14 @@ curl http://127.0.0.1:9000/api/health
 | `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需 `X-Admin-Password` |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
-| `POST` | `/api/publish/site-sync` | 提交公众号 URL 发布任务，需 `X-Admin-Password` |
+| `POST` | `/api/publish/site-sync` | 供应商正文或公众号 URL 提交；机器调用需 `X-Publish-Sync-Token`、普通图文正向分类证据、有效 classifier version、至少 20 字可见正文且不得含活动 HTML，管理员仍可手工 URL 导入 |
+| `POST` | `/api/publish/official-sync` | 微信官方 API 正文提交；机器调用同样需要服务令牌、完整普通图文正文与 fail-closed 证据 |
+| `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文 |
+| `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权 |
 | `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员密码 |
 | `GET` | `/api/publish/readiness` | 部署/运维只读验收：存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员密码且只返回布尔/模式信息 |
 | `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员密码 |
-| `POST` | `/api/publish/jobs/{id}/review` | 审核通过或驳回；approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
+| `POST` | `/api/publish/jobs/{id}/review` | HTTP 审核默认关闭；仅显式开启、管理员鉴权且固定审核人位于飞书白名单时可用。approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
 | `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员密码 |
 | `POST` | `/api/feishu/card-callback` | 飞书审核卡片 Webhook 备用通道 |
@@ -219,6 +222,8 @@ curl http://127.0.0.1:9000/api/health
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
 | `RENDER_TOKEN` / `RENDER_SERVICE_URL` | 程序化排版 API 鉴权与 Node 渲染服务地址 |
 | `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
+| `PUBLISH_SYNC_SERVICE_TOKEN` | feed 与 112 调用发布提交、紧凑状态和监控端点的独立服务令牌；不能访问完整任务、审核、重试、对账或规则管理接口 |
+| `PUBLISH_HTTP_REVIEW_ENABLED` / `PUBLISH_HTTP_REVIEWER_OPEN_ID` | HTTP 审核应保持默认关闭；仅应急启用时，固定审核人仍必须命中 `FEISHU_REVIEWER_OPEN_IDS` |
 | `FOODTALKS_BASE_URL` / `FOODTALKS_TOKEN` | FoodTalks API 与凭证；缺失时发布任务显式失败 |
 | `FOODTALKS_ORIGIN` | 测试环境浏览器头模式开关；正式白名单模式保持为空 |
 | `FOODTALKS_FRONT_URL` / `FOODTALKS_ADMIN_ARTICLE_URL` / `FOODTALKS_CATEGORY_IDS` | 前台、后台文章入口与发布分类；三类 URL 必须指向同一目标环境 |
@@ -226,7 +231,7 @@ curl http://127.0.0.1:9000/api/health
 | `DEPLOYMENT_WRITES_PAUSED` | 部署候选实例专用；为 `1` 时暂停发布/rules 写入口、恢复任务、通知 worker 与飞书长连接，验收通过后由事务脚本清零 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REVIEW_CHAT_ID` | 审核通知和长连接回调 |
 | `FEISHU_VERIFICATION_TOKEN` | Webhook 回调来源校验；长连接模式不使用 |
-| `FEISHU_REVIEWER_OPEN_IDS` | 可执行卡片审核的飞书 `open_id` 白名单，逗号分隔；空值时 Webhook/长连接卡片审核全部 fail-closed，`ADMIN_PASSWORD` 保护的 HTTP 管理审核不受影响 |
+| `FEISHU_REVIEWER_OPEN_IDS` | 可执行审核的飞书 `open_id` 白名单，逗号分隔；空值时卡片审核和可选 HTTP 审核全部 fail-closed，readiness 失败 |
 | `ARK_API_KEY` / `ARK_MODEL_ID` / `ARK_BASE_URL` | AI 元数据预填与发布风险检查；缺失或失败时风险结论 fail-safe 降级为 `warning`，不阻断进入人工审核 |
 | `ARK_MODEL_ID_B` / `ARK_JUDGE_MODEL_ID` | 可选双模型预填与独立判决；未配置 B 时保持单模型，判决失败回落主模型方案 |
 | `SITE_OWN_ACCOUNTS` | 自有账号清单，用于代码侧确定原创 / 转载；留空使用内置清单 |
@@ -265,11 +270,11 @@ go test ./...
 1. 执行 `npm ci && npm test`、隔离端口 Playwright 25 个功能场景、`cd api && go test ./...`，任何失败都会阻止部署；视觉基线只能用显式本地命令更新。
 2. 使用 Go 1.26 构建 `api/fbif-api`，并写入 `public/version.json`。
 3. 把 `public/`、API、render service、Caddy 与 env 同步进隔离 release；候选 env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
-4. 原子切换当前 release，验证 systemd、Caddy、公网 commit SHA、健康与鉴权，并用管理员鉴权的 `/api/publish/readiness` 检查 JSON store、显式 FoodTalks 目标、分类、渲染、飞书与双模型配置。
+4. 原子切换当前 release，验证 systemd、Caddy、公网 commit SHA、健康与鉴权，并用管理员鉴权的 `/api/publish/readiness` 检查 JSON store、独立服务令牌、HTTP 审核关闭、审核人白名单、显式 FoodTalks 目标、分类、渲染、飞书与双模型配置。
 5. 任何候选验收失败都恢复上一 release；验收成功后确认 release、关闭自动回滚，再把 pause 清零并重启 API。
 6. 解暂停后再次检查健康与 readiness。此时外部副作用可能恢复，只允许向前修复，不自动切回旧版制造重复发布。
 
-当前生产配置显式锁定 `FOODTALKS_EXPECTED_TARGET=test`；切换正式 FoodTalks 是单独的外部环境变更，必须同时更新 API、前台、后台 URL 与凭证后再通过 readiness。`FEISHU_REVIEWER_OPEN_IDS` 为空时卡片审核保持 fail-closed，管理员 HTTP 审核仍可用。
+当前生产配置显式锁定 `FOODTALKS_EXPECTED_TARGET=test`；切换正式 FoodTalks 是单独的外部环境变更，必须同时更新 API、前台、后台 URL 与凭证后再通过 readiness。`PUBLISH_SYNC_SERVICE_TOKEN` 或 `FEISHU_REVIEWER_OPEN_IDS` 缺失、HTTP 审核意外开启时，readiness 均失败。发布任务 JSON store 带进程锁，只允许一个 API 实例持有；横向扩容前必须迁移到支持事务与锁的存储。
 
 生产规则后台密码变更流程：
 

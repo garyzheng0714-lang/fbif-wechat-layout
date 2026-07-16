@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,113 @@ import (
 	"time"
 )
 
-const testPublishSourceURL = "https://mp.weixin.qq.com/s/AbCdEf123"
+func TestLateCanonicalDuplicateBecomesSupersededWinnerReference(t *testing.T) {
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	winnerKey, _ := normalizeSiteSourceKey("https://mp.weixin.qq.com/s/winner")
+	winner, created, err := store.create(winnerKey, "https://mp.weixin.qq.com/s/winner")
+	if err != nil || !created {
+		t.Fatalf("create winner: job=%+v created=%v err=%v", winner, created, err)
+	}
+	canonicalURL := "https://mp.weixin.qq.com/s?__biz=MzWinner&mid=7&idx=1"
+	canonicalKey, _ := normalizeSiteSourceKey(canonicalURL)
+	if _, conflict, err := store.claimSourceAlias(winner.ID, canonicalKey); err != nil || conflict != 0 {
+		t.Fatalf("claim winner alias: conflict=%d err=%v", conflict, err)
+	}
+	loserKey, _ := normalizeSiteSourceKey("https://mp.weixin.qq.com/s/loser")
+	loser, created, err := store.create(loserKey, "https://mp.weixin.qq.com/s/loser")
+	if err != nil || !created {
+		t.Fatalf("create loser: job=%+v created=%v err=%v", loser, created, err)
+	}
+	loser, err = store.setStage(loser.ID, publishStageFetching)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline := &publishPipeline{
+		store: store,
+		fetch: func(context.Context, string) (string, string, string, string, string, error) {
+			return "重复文章", "FBIF", "", canonicalURL, testPublishBlocksJSON, nil
+		},
+	}
+	err = pipeline.stageFetch(context.Background(), loser)
+	if !errors.Is(err, errPublishDuplicateSuperseded) {
+		t.Fatalf("stageFetch error=%v", err)
+	}
+	got, err := store.byID(loser.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stage != publishStageSupersededDuplicate || got.SupersededByJobID != winner.ID {
+		t.Fatalf("loser did not reference winner: %+v", got)
+	}
+	summary := newPublishSyncJobSummary(got)
+	if summary.Retryable || len(summary.AvailableActions) != 1 || summary.AvailableActions[0] != "open_winner" {
+		t.Fatalf("superseded action contract = %+v", summary)
+	}
+}
+
+func TestStructuredSupplierShortAliasesResolveBeforeCreatingJob(t *testing.T) {
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	canonicalURL := "https://mp.weixin.qq.com/s?__biz=MzStructured&mid=9&idx=1"
+	pipeline := &publishPipeline{
+		store: store,
+		fetch: func(context.Context, string) (string, string, string, string, string, error) {
+			return "身份解析", "FBIF", "", canonicalURL, testPublishBlocksJSON, nil
+		},
+		spawn: func(func()) {},
+		now:   time.Now,
+	}
+	input := officialPublishInput{
+		Title: "供应商正文", SourceName: "FBIF", ContentHTML: "<p>供应商提供的完整正文内容。</p>",
+	}
+	input.URL = "https://mp.weixin.qq.com/s/short-a"
+	first, created, err := pipeline.submitSupplier(input)
+	if err != nil || !created {
+		t.Fatalf("first submit: job=%+v created=%v err=%v", first, created, err)
+	}
+	input.URL = "https://mp.weixin.qq.com/s/short-b"
+	second, created, err := pipeline.submitSupplier(input)
+	if err != nil || created || second.ID != first.ID {
+		t.Fatalf("second alias must reuse winner: first=%+v second=%+v created=%v err=%v", first, second, created, err)
+	}
+	jobs, err := store.all()
+	if err != nil || len(jobs) != 1 || jobs[0].ContentSource != publishContentSupplier {
+		t.Fatalf("structured canonical jobs=%+v err=%v", jobs, err)
+	}
+}
+
+func TestLateOfficialContentCanRestartFailedExistingDraft(t *testing.T) {
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	pipeline := &publishPipeline{store: store, spawn: func(func()) {}, now: time.Now}
+	input := officialPublishInput{
+		URL: testPublishSourceURL, Title: "供应商版本", SourceName: "FBIF",
+		ContentHTML: "<p>供应商提供的正文。</p>",
+	}
+	job, _, err := pipeline.submitSupplier(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStageFailed
+		current.FailedStage = publishStageStaging
+		current.FoodTalksNewsID = 88
+		current.StagingIntentKey = "foodtalks-create:job-1"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Title = "官方版本"
+	input.ContentHTML = "<p>官方接口提供的更高权威正文。</p>"
+	updated, created, err := pipeline.submitOfficial(input)
+	if err != nil || created {
+		t.Fatalf("official merge: job=%+v created=%v err=%v", updated, created, err)
+	}
+	if updated.Stage != publishStageRendering || updated.ContentSource != publishContentOfficial ||
+		updated.ContentVersion != job.ContentVersion+1 || updated.PendingContentHash != "" || updated.ContentConflict {
+		t.Fatalf("failed existing draft did not restart safely: %+v", updated)
+	}
+}
+
+const testPublishSourceURL = "https://mp.weixin.qq.com/s?__biz=MzTest&mid=123&idx=1&sn=test-signature"
 
 // 测试用中立 Block[]：一段正文 + 两张 mmbiz 图（第一张兼任封面兜底）。
 const testPublishBlocksJSON = `[{"k":"p","text":"正文"},{"k":"img","src":"https://mmbiz.qpic.cn/a.jpg"},{"k":"img","src":"https://mmbiz.qpic.cn/b.jpg"}]`
@@ -199,6 +306,79 @@ func TestPublishPipelineStopsAtAwaitingReview(t *testing.T) {
 	}
 	if job.Title != "测试标题" || job.SourceName != "测试公众号" {
 		t.Fatalf("title/source_name 落库不符: %q / %q", job.Title, job.SourceName)
+	}
+}
+
+func TestLateOfficialContentRebuildsExistingDraftWithoutCreatingDuplicate(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldReviewVersion := publishReviewCardVersion(before)
+	if before.ContentSource != publishContentWebFetch || before.ContentVersion != 1 || before.ContentFrozenVersion != 1 {
+		t.Fatalf("initial content provenance=%+v", before)
+	}
+
+	official, created, err := env.pipeline.submitOfficial(officialPublishInput{
+		URL: testPublishSourceURL, Title: "官方标题", SourceName: "官方公众号",
+		ContentHTML: `<p>官方更正正文</p><img src="https://mmbiz.qpic.cn/a.jpg">`,
+		CoverURL:    "https://mmbiz.qpic.cn/a.jpg",
+	})
+	if err != nil || created {
+		t.Fatalf("official merge created=%v err=%v", created, err)
+	}
+	official, err = env.store.byID(official.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if official.ID != before.ID || official.FoodTalksNewsID != before.FoodTalksNewsID || official.Stage != publishStageAwaitingReview {
+		t.Fatalf("official merge must reuse job/draft: before=%+v after=%+v", before, official)
+	}
+	if official.ContentSource != publishContentOfficial || official.ContentVersion != 2 ||
+		official.ContentFrozenVersion != 2 || official.ContentHash == before.ContentHash {
+		t.Fatalf("official provenance/version not advanced: before=%+v after=%+v", before, official)
+	}
+	if publishReviewCardVersion(official) == oldReviewVersion {
+		t.Fatal("late authoritative content must invalidate the old review card version")
+	}
+	if createN, updateN := env.ft.counts(); createN != 1 || updateN != 1 {
+		t.Fatalf("must update the existing draft, not create another: create=%d update=%d", createN, updateN)
+	}
+}
+
+func TestLateOfficialContentAfterPublishIsPersistedAsConflictWithoutOverwrite(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.ft.mu.Lock()
+	env.ft.forbidPublish = false
+	env.ft.mu.Unlock()
+	ready, _ := env.store.byID(job.ID)
+	if _, err := env.pipeline.reviewWithRiskVersion(context.Background(), job.ID, publishReviewApprove, "ou_reviewer", publishReviewCardVersion(ready)); err != nil {
+		t.Fatal(err)
+	}
+	published, _ := env.store.byID(job.ID)
+
+	merged, created, err := env.pipeline.submitOfficial(officialPublishInput{
+		URL: testPublishSourceURL, Title: "发布后到达的官方版本", SourceName: "官方公众号",
+		ContentHTML: `<p>不能静默覆盖的正文</p>`, CoverURL: "https://mmbiz.qpic.cn/a.jpg",
+	})
+	if err != nil || created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	if merged.Stage != publishStagePublished || merged.ContentVersion != published.ContentVersion ||
+		!merged.ContentConflict || merged.PendingContentSource != publishContentOfficial || merged.PendingContentHash == "" {
+		t.Fatalf("late published conflict was not preserved safely: %+v", merged)
+	}
+	if createN, updateN := env.ft.counts(); createN != 1 || updateN != 1 {
+		t.Fatalf("late conflict must not call FoodTalks: create=%d update=%d", createN, updateN)
 	}
 }
 
@@ -449,16 +629,61 @@ func TestPublishCanonicalAliasDedupesShortAndLongLinks(t *testing.T) {
 	}
 
 	third, created, err := env.pipeline.submit("https://mp.weixin.qq.com/s/AnotherShortAlias")
-	if err != nil || !created {
-		t.Fatalf("新短链在抓取前无法本地解析身份，应先建临时任务：created=%v err=%v", created, err)
+	if err != nil || created || third.ID != first.ID {
+		t.Fatalf("第二个短链必须在建单前解析 canonical 并命中主任务：first=%d third=%d created=%v err=%v", first.ID, third.ID, created, err)
 	}
-	thirdStored, _ := env.store.byID(third.ID)
-	if thirdStored.Stage != publishStageFailed || thirdStored.FailedStage != publishStageFetching ||
-		!strings.Contains(thirdStored.Error, fmt.Sprintf("#%d", first.ID)) {
-		t.Fatalf("第二个短链解出同 canonical 后必须在 CreateNews 前停单：%+v", thirdStored)
+	jobs, err := env.store.all()
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("不同短链同文不得留下临时失败任务：jobs=%d err=%v", len(jobs), err)
 	}
 	if createN, _ := env.ft.counts(); createN != 1 {
 		t.Fatalf("不同短链同文也只能 CreateNews 一次，实际 %d", createN)
+	}
+}
+
+func TestPublishCanonicalAliasConcurrentShortLinksCreateOneJob(t *testing.T) {
+	env := newPublishTestEnv(t)
+	canonical := "https://mp.weixin.qq.com/s?__biz=MzA1&mid=77&idx=1&sn=canonical"
+	var fetchMu sync.Mutex
+	fetchN := 0
+	bothFetched := make(chan struct{})
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+		fetchMu.Lock()
+		fetchN++
+		if fetchN == 2 {
+			close(bothFetched)
+		}
+		fetchMu.Unlock()
+		<-bothFetched
+		return "并发同文", "测试公众号", "", canonical, testPublishBlocksJSON, nil
+	}
+
+	type result struct {
+		job     publishJob
+		created bool
+		err     error
+	}
+	results := make(chan result, 2)
+	for _, sourceURL := range []string{
+		"https://mp.weixin.qq.com/s/ShortConcurrentA",
+		"https://mp.weixin.qq.com/s/ShortConcurrentB",
+	} {
+		go func(sourceURL string) {
+			job, created, err := env.pipeline.submit(sourceURL)
+			results <- result{job: job, created: created, err: err}
+		}(sourceURL)
+	}
+	first := <-results
+	second := <-results
+	if first.err != nil || second.err != nil || first.job.ID != second.job.ID || first.created == second.created {
+		t.Fatalf("并发短链应收敛为一个主任务：first=%+v second=%+v", first, second)
+	}
+	jobs, err := env.store.all()
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("并发短链不得产生临时/失败输家：jobs=%d err=%v", len(jobs), err)
+	}
+	if createN, _ := env.ft.counts(); createN != 1 {
+		t.Fatalf("并发短链只能 CreateNews 一次，实际 %d", createN)
 	}
 }
 

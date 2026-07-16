@@ -120,11 +120,20 @@ func main() {
 	registerRenderRoutes(mux)
 
 	// 发布流水线（公众号 → FoodTalks 网站）：JSON 任务存储 + 状态机 + 人审端点。
-	// 权限复用规则后台 ADMIN_PASSWORD 门；翻公开只能由 review approve 触发（用户红线）。
-	publishStore := newPublishJobStore(publishJobsPath(*rulesPath))
+	// 机器提交使用最小权限同步凭证；管理端保留 ADMIN_PASSWORD，生产 HTTP 审核默认关闭。
+	publishPath := publishJobsPath(*rulesPath)
+	publishLock, err := acquirePublishProcessLock(publishPath)
+	if err != nil {
+		log.Fatalf("发布任务库进程锁获取失败：%v", err)
+	}
+	defer publishLock.Close()
+	publishStore := newPublishJobStore(publishPath)
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
 	if !feishuReviewerAllowlistConfigured() {
-		log.Printf("publish: FEISHU_REVIEWER_OPEN_IDS 未配置——卡片审核对审核群成员开放（2026-07-11 用户裁定；配置该 env 可收紧为白名单）")
+		log.Printf("publish: FEISHU_REVIEWER_OPEN_IDS 未配置，所有卡片审核动作将 fail closed")
+	}
+	if !publishSyncServiceTokenConfigured() {
+		log.Printf("publish: PUBLISH_SYNC_SERVICE_TOKEN 未配置，机器提交与紧凑状态接口仅允许管理员调用，readiness=false")
 	}
 	// 候选部署先以 DEPLOYMENT_WRITES_PAUSED=1 启动，只开放只读/健康验收；验收通过并
 	// 接受该 release 后再解除暂停。这样 rollback 窗口内不会自动恢复任务、发通知或
