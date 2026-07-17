@@ -71,6 +71,12 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 27. **部署候选必须暂停写入并通过 readiness（2026-07-10 对抗式审计）** — 候选 API 以 `DEPLOYMENT_WRITES_PAUSED=1` 启动，发布/rules 写入口、恢复任务、通知 worker 与飞书长连接都暂停；公网 SHA、健康、鉴权及管理员 `/api/publish/readiness` 全通过后才接受 release。接受后先关闭自动回滚再解暂停；解暂停后外部副作用可能恢复，失败只能向前修复，不得自动切回旧版制造重复发布。FoodTalks 目标必须用 `FOODTALKS_EXPECTED_TARGET=test|production` 显式声明并与 API/前台/后台 URL 一致。
 
+28. **微信公众号历史已发布全量口径（2026-07-15，最高优先级）** — `freepublish/batchget` 的发布对象数和从中拆出的文章记录数都不是已核验历史全量。完成多官方接口、多表、稳定标识关联以及分页/时间/字段覆盖审计前，只能写“未完成/未核验”；飞书历史同步保持关闭。
+
+29. **已发布监控不得依赖草稿（2026-07-16）** — `freepublish` 最新页轮询必须独立执行，任何 draft 失败不得阻断；群发与 freepublish 是不同覆盖路径，禁止用单接口宣称覆盖群发。图集/小绿书继续 fail closed。
+
+30. **FBIF 公众号监控是 P0 上线红线（2026-07-17，最高优先级）** — 任意改动必须通过无 paths 过滤的 `.github/workflows/p0-monitoring-contract.yml`。生产独立 systemd 看门狗每两分钟检查 layout/feed/official，连续两次异常飞书告警、恢复通知、每天 09:20 存活心跳；告警 reporter 不可用本身即事故。门禁必须 fail closed 覆盖当天文章→同步单缺口、45 分钟未到审核态、通知错误/缺卡、重复 source_key、轮询/补漏陈旧及持久队列积压；禁止删测、skip、降级或忽略当前故障来“修绿”。
+
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量

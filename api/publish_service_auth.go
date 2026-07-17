@@ -37,6 +37,18 @@ func validPublishSyncServiceToken(input string) bool {
 	return want != "" && len(got) == len(want) && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
+func requirePublishServiceToken(w http.ResponseWriter, r *http.Request) bool {
+	if !publishSyncServiceTokenConfigured() {
+		writeError(w, http.StatusServiceUnavailable, publishSyncServiceTokenEnv+" is not configured")
+		return false
+	}
+	if !validPublishSyncServiceToken(r.Header.Get(publishSyncServiceHeader)) {
+		writeError(w, http.StatusUnauthorized, "publish sync service token required")
+		return false
+	}
+	return true
+}
+
 // requirePublishSubmitOrAdmin 给机器调用方最小的 submit/status 权限；管理密码仍可
 // 供人工后台使用，但机器凭证不能借此进入 review/retry/reconcile/rules 管理面。
 func requirePublishSubmitOrAdmin(w http.ResponseWriter, r *http.Request) bool {

@@ -9,6 +9,7 @@ import (
 const (
 	publishProcessingStaleAfter   = 15 * time.Minute
 	publishNotificationStaleAfter = 10 * time.Minute
+	publishRecentFailureWindow    = 24 * time.Hour
 )
 
 type publishMonitoringStatus struct {
@@ -20,7 +21,11 @@ type publishMonitoringStatus struct {
 	OldestProcessingAgeSeconds   int64    `json:"oldest_processing_age_seconds"`
 	NotificationPending          int      `json:"notification_pending"`
 	OldestNotificationAgeSeconds int64    `json:"oldest_notification_age_seconds"`
+	NotificationErrors           int      `json:"notification_errors"`
+	ReviewCardsMissing           int      `json:"review_cards_missing"`
+	DuplicateSourceKeys          int      `json:"duplicate_source_keys"`
 	Failed                       int      `json:"failed"`
+	FailedRecent                 int      `json:"failed_recent"`
 	ReconciliationRequired       int      `json:"reconciliation_required"`
 	ContentConflicts             int      `json:"content_conflicts"`
 	Issues                       []string `json:"issues,omitempty"`
@@ -42,7 +47,7 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 		status.Issues = []string{"publish_store_invalid"}
 		return status
 	}
-	for _, job := range jobs {
+	for index, job := range jobs {
 		age := publishMonitoringAge(now, job.UpdatedAt)
 		if publishMonitoringProcessingStage(job.Stage) {
 			status.Processing++
@@ -56,8 +61,17 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 				status.OldestNotificationAgeSeconds = age
 			}
 		}
+		if job.NotificationError != "" {
+			status.NotificationErrors++
+		}
+		if job.Stage == publishStageAwaitingReview && job.NotificationKind == "" && job.NotificationSentAt == "" {
+			status.ReviewCardsMissing++
+		}
 		if job.Stage == publishStageFailed {
 			status.Failed++
+			if publishMonitoringIsRecent(now, job.UpdatedAt) {
+				status.FailedRecent++
+			}
 		}
 		if job.Stage == publishStageReconciliationRequired ||
 			job.Stage == publishStagePublicizeReconciliationRequired ||
@@ -67,6 +81,14 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 		}
 		if job.ContentConflict {
 			status.ContentConflicts++
+		}
+		if job.Stage != publishStageSupersededDuplicate {
+			for previous := 0; previous < index; previous++ {
+				if jobs[previous].Stage != publishStageSupersededDuplicate && publishJobsShareSourceIdentity(job, jobs[previous]) {
+					status.DuplicateSourceKeys++
+					break
+				}
+			}
 		}
 	}
 	if status.WorkersPaused {
@@ -78,8 +100,17 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 	if status.OldestNotificationAgeSeconds > int64(publishNotificationStaleAfter/time.Second) {
 		status.Issues = append(status.Issues, fmt.Sprintf("notification_outbox_stale:%ds", status.OldestNotificationAgeSeconds))
 	}
-	if status.Failed > 0 {
-		status.Issues = append(status.Issues, fmt.Sprintf("failed_jobs:%d", status.Failed))
+	if status.NotificationErrors > 0 {
+		status.Issues = append(status.Issues, fmt.Sprintf("notification_errors:%d", status.NotificationErrors))
+	}
+	if status.ReviewCardsMissing > 0 {
+		status.Issues = append(status.Issues, fmt.Sprintf("review_cards_missing:%d", status.ReviewCardsMissing))
+	}
+	if status.DuplicateSourceKeys > 0 {
+		status.Issues = append(status.Issues, fmt.Sprintf("duplicate_source_keys:%d", status.DuplicateSourceKeys))
+	}
+	if status.FailedRecent > 0 {
+		status.Issues = append(status.Issues, fmt.Sprintf("failed_jobs_recent:%d", status.FailedRecent))
 	}
 	if status.ReconciliationRequired > 0 {
 		status.Issues = append(status.Issues, fmt.Sprintf("reconciliation_backlog:%d", status.ReconciliationRequired))
@@ -90,6 +121,27 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 	sort.Strings(status.Issues)
 	status.Ready = status.StoreValid && len(status.Issues) == 0
 	return status
+}
+
+func publishJobsShareSourceIdentity(left, right publishJob) bool {
+	leftKeys := append([]string{left.SourceKey}, left.SourceAliases...)
+	rightKeys := append([]string{right.SourceKey}, right.SourceAliases...)
+	for _, leftKey := range leftKeys {
+		for _, rightKey := range rightKeys {
+			if leftKey != "" && rightKey != "" && publishSourceKeysEqual(leftKey, rightKey) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func publishMonitoringIsRecent(now time.Time, value string) bool {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil || parsed.After(now) {
+		return true
+	}
+	return now.Sub(parsed) <= publishRecentFailureWindow
 }
 
 func publishMonitoringProcessingStage(stage string) bool {

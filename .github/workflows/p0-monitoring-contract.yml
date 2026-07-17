@@ -1,0 +1,65 @@
+name: P0 WeChat Monitoring Contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-monitoring-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-and-watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      # No path filter: every change must re-prove the idempotent intake,
+      # review-card outbox, monitoring invariants and alert relay.
+      - name: Run complete Go test suite
+        working-directory: api
+        run: go test ./...
+
+      - name: Race-test publishing contracts
+        working-directory: api
+        run: go test -race ./...
+
+      - name: Test independent watchdog and fault transitions
+        run: python3 -m unittest monitoring/test_watchdog.py
+
+  frontend-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm test
+
+  browser-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run browser interaction tests
+        run: E2E_PORT=19190 npm run test:e2e:ci
