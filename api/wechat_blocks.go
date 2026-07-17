@@ -59,10 +59,7 @@ type computedStyle struct {
 const (
 	defaultImageCaptionMaxChars       = 80
 	defaultImageCaptionCenterMaxChars = 40
-	// 带强信号（小字号/灰色）的图注放宽到的更高字数上限。说明性长图注（中英混排、
-	// 多个产品名 + 括号注释，如「左前方为…（巴黎红茶），后排三款为…」）常突破 80 字，
-	// 但小字/灰色是公众号图注的明确标记（正文从不用小字/灰色），故对带此强信号的图后
-	// 段落放宽长度闸到 200，避免被一刀切降级成正文。
+	// 小字号/灰色的图注允许使用更高的最终字数上限。
 	defaultImageCaptionStrongMaxChars = 200
 )
 
@@ -91,7 +88,7 @@ func normalizeArticleBlockOptions(opts articleBlockOptions) articleBlockOptions 
 	if opts.CaptionStrongMaxChars <= 0 || opts.CaptionStrongMaxChars > 1000 {
 		opts.CaptionStrongMaxChars = defaults.CaptionStrongMaxChars
 	}
-	// 强信号上限是放宽用的，不应比基础上限还严。
+	// 小字/灰色图注的放宽上限不应比基础上限还严。
 	if opts.CaptionStrongMaxChars < opts.CaptionMaxChars {
 		opts.CaptionStrongMaxChars = opts.CaptionMaxChars
 	}
@@ -143,6 +140,10 @@ func extractArticleRoleDecisionsForTest(rawHTML string) []RoleDecision {
 	return decisions
 }
 
+func extractObservedBlocksForTest(rawHTML string) []ObservedBlock {
+	return observeArticleHTML(rawHTML)
+}
+
 func extractArticleRoleDecisionsWithOptions(rawHTML string, opts articleBlockOptions) (title string, decisions []RoleDecision, author string) {
 	opts = normalizeArticleBlockOptions(opts)
 	title = extractMeta(rawHTML, "og:title")
@@ -152,6 +153,16 @@ func extractArticleRoleDecisionsWithOptions(rawHTML string, opts articleBlockOpt
 		}
 	}
 
+	observed := observeArticleHTML(rawHTML)
+	profile := buildArticleProfile(observed)
+	explicitBindings := proveCaptionBindings(projectCaptionStructure(observed))
+	bindings := inferCompatibleCaptionBindings(observed, profile, explicitBindings, opts)
+	bindings = applyCaptionLengthLimits(observed, bindings, opts)
+	decisions = resolveRoleDecisions(observed, profile, bindings)
+	return title, decisions, ""
+}
+
+func observeArticleHTML(rawHTML string) []ObservedBlock {
 	contentHTML := resolveContentHTML(rawHTML)
 
 	contentHTML = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`).ReplaceAllString(contentHTML, "")
@@ -160,42 +171,182 @@ func extractArticleRoleDecisionsWithOptions(rawHTML string, opts articleBlockOpt
 
 	doc, err := html.Parse(strings.NewReader(contentHTML))
 	if err != nil {
-		return title, nil, ""
+		return nil
 	}
 
-	w := &blockWalker{opts: opts}
+	w := newBlockWalker(doc)
 	w.walk(doc, nil, computedStyle{FontSize: 16})
-	profile := buildArticleProfile(w.observed)
-	decisions = resolveRoleDecisions(w.observed, profile, opts)
-	return title, decisions, ""
+	return w.observed
 }
 
 // ---- Walker ----
 
+type CaptionProof uint8
+
+const (
+	CaptionProofNone CaptionProof = iota
+	CaptionProofFigcaption
+	CaptionProofAriaDescribedBy
+	CaptionProofLegacyAssociation
+)
+
+type captionDOMIndex struct {
+	nodeIDs          map[*html.Node]int
+	mediaIDs         map[*html.Node]int
+	figureMediaIDs   map[*html.Node][]int
+	describedByMedia map[string][]int
+	elementIDCounts  map[string]int
+}
+
+func newBlockWalker(root *html.Node) *blockWalker {
+	return &blockWalker{captionIndex: buildCaptionDOMIndex(root)}
+}
+
+func buildCaptionDOMIndex(root *html.Node) *captionDOMIndex {
+	idx := &captionDOMIndex{
+		nodeIDs:          map[*html.Node]int{},
+		mediaIDs:         map[*html.Node]int{},
+		figureMediaIDs:   map[*html.Node][]int{},
+		describedByMedia: map[string][]int{},
+		elementIDCounts:  map[string]int{},
+	}
+	nextNodeID := 1
+	nextMediaID := 1
+	var indexNodes func(*html.Node, *html.Node)
+	indexNodes = func(n *html.Node, figure *html.Node) {
+		if n.Type == html.ElementNode {
+			idx.nodeIDs[n] = nextNodeID
+			nextNodeID++
+			if elementID := strings.TrimSpace(getAttr(n, "id")); elementID != "" {
+				idx.elementIDCounts[elementID]++
+			}
+			if strings.EqualFold(n.Data, "figure") {
+				figure = n
+			}
+			if _, src := mediaSourceForNode(n); src != "" {
+				idx.mediaIDs[n] = nextMediaID
+				if figure != nil {
+					idx.figureMediaIDs[figure] = append(idx.figureMediaIDs[figure], nextMediaID)
+				}
+				nextMediaID++
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			indexNodes(c, figure)
+		}
+	}
+	indexNodes(root, nil)
+
+	for node, mediaID := range idx.mediaIDs {
+		for _, targetID := range strings.Fields(getAttr(node, "aria-describedby")) {
+			idx.describedByMedia[targetID] = appendUniqueInt(idx.describedByMedia[targetID], mediaID)
+		}
+	}
+	return idx
+}
+
+func mediaSourceForNode(n *html.Node) (kind, src string) {
+	if n == nil || n.Type != html.ElementNode {
+		return "", ""
+	}
+	switch strings.ToLower(n.Data) {
+	case "img":
+		src = getAttr(n, "data-src")
+		if src == "" {
+			src = getAttr(n, "src")
+		}
+		if src == "" || strings.Contains(src, "data:image") {
+			return "", ""
+		}
+		return "img", src
+	case "video":
+		src = getAttr(n, "src")
+		if src == "" {
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if c.Type == html.ElementNode && strings.EqualFold(c.Data, "source") {
+					if candidate := getAttr(c, "src"); candidate != "" {
+						src = candidate
+						break
+					}
+				}
+			}
+		}
+		if src != "" {
+			return "video", src
+		}
+	}
+	return "", ""
+}
+
+func appendUniqueInt(values []int, value int) []int {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func nearestElement(n *html.Node, tag string) *html.Node {
+	for cur := n; cur != nil; cur = cur.Parent {
+		if cur.Type == html.ElementNode && strings.EqualFold(cur.Data, tag) {
+			return cur
+		}
+	}
+	return nil
+}
+
+func singleMediaID(ids []int) (int, bool) {
+	if len(ids) != 1 || ids[0] <= 0 {
+		return 0, false
+	}
+	return ids[0], true
+}
+
+func (idx *captionDOMIndex) captionEvidenceForNode(n *html.Node) (proof CaptionProof, scopeID, mediaID int) {
+	if idx == nil || n == nil {
+		return CaptionProofNone, 0, 0
+	}
+	if figcaption := nearestElement(n, "figcaption"); figcaption != nil {
+		if figure := nearestElement(figcaption.Parent, "figure"); figure != nil {
+			if boundMediaID, ok := singleMediaID(idx.figureMediaIDs[figure]); ok {
+				return CaptionProofFigcaption, idx.nodeIDs[figcaption], boundMediaID
+			}
+		}
+	}
+	for cur := n; cur != nil; cur = cur.Parent {
+		if cur.Type != html.ElementNode {
+			continue
+		}
+		targetID := strings.TrimSpace(getAttr(cur, "id"))
+		if targetID == "" || idx.elementIDCounts[targetID] != 1 {
+			continue
+		}
+		if boundMediaID, ok := singleMediaID(idx.describedByMedia[targetID]); ok {
+			return CaptionProofAriaDescribedBy, idx.nodeIDs[cur], boundMediaID
+		}
+	}
+	return CaptionProofNone, 0, 0
+}
+
 type blockWalker struct {
-	opts               articleBlockOptions
 	blocks             []Block
 	observed           []ObservedBlock
 	pendingBlankBefore bool
-	captionContext     bool
-	captionLines       int
-	// inRefSection: 进入「参考来源：」区后置真。该区内的 [n] 条目与「—说明」延续行
-	// 字号小、颜色灰，会被 caption 启发式误吞成 cap（拆散参考来源块）。置真后强制
-	// 这些行走 txt，交前端 refMode 统一识别为连续的 ref-item（无空行）。
-	inRefSection bool
+	captionIndex       *captionDOMIndex
 }
 
 type blockCtx struct {
-	tag        string
-	classes    []string
-	style      computedStyle
-	runs       []Run
-	hadBreak   bool
-	hrefStack  []string
-	textStyles []computedStyle // computed style at each text node — needed
-	// because WeChat emits captions as <p><img><span style="...">text</span></p>:
-	// the caption style sits on an inner span, not on the block. Classifying
-	// against only the block's own style would miss these.
+	node      *html.Node
+	tag       string
+	classes   []string
+	style     computedStyle
+	runs      []Run
+	hadBreak  bool
+	hrefStack []string
+	// computed style at each text node; WeChat commonly puts visual styling on
+	// an inner span rather than the enclosing block.
+	textStyles []computedStyle
 }
 
 func isBlockTag(tag string) bool {
@@ -239,43 +390,20 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			}
 			return
 		case "img":
-			src := getAttr(n, "data-src")
+			_, src := mediaSourceForNode(n)
 			if src == "" {
-				src = getAttr(n, "src")
-			}
-			if src == "" || strings.Contains(src, "data:image") {
 				return
 			}
-			// Ordering matters: emit() closes caption context, so we must
-			// append the image and open caption context AFTER the flush.
-			// Don't reorder without preserving this invariant, or the
-			// caption immediately after the image will be misclassified.
 			if cur != nil && hasContent(cur.runs) {
 				w.emit(cur)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.appendImageBlock(Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
-			// Final image/text relationships are resolved after observation.
-			// A single global caption flag cannot distinguish content images
-			// from decorative section markers.
-			w.closeCaptionContext()
-			w.inRefSection = false
+			w.appendImageBlock(n, Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
 			return
 		case "video":
-			// FoodTalks 网站文章视频 = <video src=mp4 poster=jpg>（成品口径）。src 优先取标签
-			// 自身，缺省找子 <source src>。视频后紧跟的说明=来源，同图注走 captionContext。
-			vsrc := getAttr(n, "src")
-			if vsrc == "" {
-				for c := n.FirstChild; c != nil; c = c.NextSibling {
-					if c.Type == html.ElementNode && strings.ToLower(c.Data) == "source" {
-						if s := getAttr(c, "src"); s != "" {
-							vsrc = s
-							break
-						}
-					}
-				}
-			}
+			// FoodTalks 网站文章视频 = <video src=mp4 poster=jpg>（成品口径）。
+			_, vsrc := mediaSourceForNode(n)
 			if vsrc == "" {
 				return
 			}
@@ -284,9 +412,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.appendImageBlock(Block{K: "video", Src: vsrc, Poster: getAttr(n, "poster")})
-			w.closeCaptionContext()
-			w.inRefSection = false
+			w.appendImageBlock(n, Block{K: "video", Src: vsrc, Poster: getAttr(n, "poster")})
 			return
 		case "table":
 			// 表格保结构：拦在通用 block 拍平之前。先冲掉未结块，再整表走 walkTable。
@@ -295,8 +421,6 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.closeCaptionContext()
-			w.inRefSection = false
 			w.walkTable(n, inherited)
 			return
 		case "a":
@@ -327,6 +451,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.textStyles = nil
 			}
 			child := &blockCtx{
+				node:    n,
 				tag:     tag,
 				classes: strings.Fields(getAttr(n, "class")),
 				style:   merged,
@@ -466,65 +591,7 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	if !hasContent(runs) {
 		if cx.hadBreak && len(w.blocks) > 0 {
 			w.pendingBlankBefore = true
-			w.closeCaptionContext()
-			w.inRefSection = false
 		}
-		return
-	}
-
-	text := textFromRuns(runs)
-	textLen := utf8.RuneCountInString(text)
-	allBold := allRunsBold(runs)
-
-	if isHeadingTag(cx.tag) {
-		w.appendTextBlock(cx, Block{K: "h", Text: text})
-		w.closeCaptionContext()
-		return
-	}
-
-	for _, c := range cx.classes {
-		lc := strings.ToLower(c)
-		if lc == "rich_media_title" || lc == "js_article_title" {
-			w.appendTextBlock(cx, Block{K: "h", Text: text})
-			w.closeCaptionContext()
-			return
-		}
-	}
-
-	// Visual-signal heading: font-size >= 18px 且 <= 80 字，并且整块有明确标题信号。
-	// 微信小标题常被外层 <b>/<strong> 包住，但 leaf<span> 又内联 font-weight:normal；
-	// computed bold 会被 normal 覆盖为 false，所以同时保留 BoldTag 痕迹来识别这种标题。
-	// 少数真实章节标题没有 <b>，但仍是「居中 + 大字号 + 冒号标题」；该兜底必须排除
-	// 图片来源、参考来源和强图注样式，避免回到“所有居中大字都是标题”的宽判定。
-	if hasHeadingFontSize(cx) && textLen > 0 && textLen <= 80 &&
-		(allBold || allRunsUnderBoldTag(cx) || isCenteredLargeHeading(cx, text, textLen)) {
-		w.appendTextBlock(cx, Block{K: "h", Text: text})
-		w.closeCaptionContext()
-		return
-	}
-
-	// 参考来源区：「参考来源：」/「参考资料：」头开启该区；区内 [n] 条目与
-	// 「—说明」延续行强制走 txt（不进 caption 分支），避免被图注启发式误吞拆散。
-	trimmed := strings.TrimSpace(text)
-	if refSectionHeadRe.MatchString(trimmed) {
-		w.inRefSection = true
-		w.closeCaptionContext()
-		w.appendTextBlock(cx, Block{K: "txt", Runs: runs})
-		return
-	}
-	if w.inRefSection {
-		if refItemRe.MatchString(trimmed) || refContinuationRe.MatchString(trimmed) {
-			w.closeCaptionContext()
-			w.appendTextBlock(cx, Block{K: "txt", Runs: runs})
-			return
-		}
-		// 既非条目也非说明行 → 参考来源区结束
-		w.inRefSection = false
-	}
-
-	if w.captionContext && shouldAttachToCaptionGroup(cx, text, textLen, w.captionLines, w.opts) {
-		w.appendTextBlock(cx, Block{K: "cap", Text: text})
-		w.captionLines++
 		return
 	}
 
@@ -536,34 +603,32 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	default:
 		w.appendTextBlock(cx, Block{K: "txt", Runs: runs})
 	}
-	w.closeCaptionContext()
 }
 
-// isCenteredLargeHeading: 兜底识别「没有任何加粗痕迹」的章节小标题。
+// isCenteredLargeHeadingObservation: 兜底识别「没有任何加粗痕迹」的章节小标题。
 // 判据用微信排版的第一性信号，不猜作者是否加了 <b>、是否带冒号：
 //
 //	居中 + 字号 ≥18px（外层 hasHeadingFontSize 已保证，严格大于正文 15–17px）+ 短
-//	（≤40 字）+ 不是图片来源行 / 参考来源头 / 强图注样式（小字或灰色）。
+//	（≤40 字）+ 不是图片来源行 / 参考来源头 / 小字灰色内容。
 //
 // 历史教训：早期版本额外要求「文本含冒号」或「run 全在 <b> 下」，这两条都是某一篇
 // 样例文章的巧合属性（作者恰好那样写），换一篇没冒号、没加粗的真标题就漏判——
 // 「四大品牌差异化竞争策略拆解」正是被那条冒号闸门挡在门外。根因与防再犯协议见
-// openspec/changes/robust-wechat-heading-detection/design.md。
-func isCenteredLargeHeading(cx *blockCtx, text string, textLen int) bool {
-	trimmed := strings.TrimSpace(text)
-	if textLen == 0 || textLen > 40 {
+// openspec/specs/wechat-heading-detection/spec.md。
+func isCenteredLargeHeadingObservation(obs ObservedBlock) bool {
+	if obs.TextLen == 0 || obs.TextLen > 40 {
 		return false
 	}
 	// 章节标题是「短语标签」，不是完整句子：以句号/逗号/分号收尾的是居中金句/导语/强调整句，
 	// 不升级为标题（与 DOCX 侧 isBoldHeading 判据一致）。问号/感叹号放行——疑问/感叹式章节
 	// 标题真实存在（如「毕业20年的老粉凭什么"回坑"？」）。
-	if sentenceEndsLikeBody(trimmed) {
+	if sentenceEndsLikeBody(obs.Text) {
 		return false
 	}
-	if isImageSourceLine(trimmed) || refSectionHeadRe.MatchString(trimmed) || hasStrongCaptionStyle(cx) {
+	if obs.ImageSourceLine || obs.ReferenceHead || obs.MutedOrSmallStyle {
 		return false
 	}
-	return isTextCentered(cx)
+	return obs.Centered
 }
 
 // sentenceEndsLikeBody 报告文本是否以「正文句子」的收尾标点结束（句号/逗号/顿号/分号）。
@@ -573,6 +638,15 @@ func sentenceEndsLikeBody(trimmed string) bool {
 }
 
 var sentenceEndRe = regexp.MustCompile(`[。.．，,、；;]["'”’）)】]*$`)
+
+// sentenceEndsLikeProse is deliberately broader than sentenceEndsLikeBody for
+// article-local body-flow profiling. Question/exclamation marks remain valid
+// section-title endings, so the heading-specific predicate stays narrower.
+func sentenceEndsLikeProse(trimmed string) bool {
+	return proseSentenceEndRe.MatchString(strings.TrimSpace(trimmed))
+}
+
+var proseSentenceEndRe = regexp.MustCompile(`[。.．，,、；;？！!?]["'”’）)】]*$`)
 
 func isTextCentered(cx *blockCtx) bool {
 	if cx.style.Align == "center" {
@@ -621,39 +695,74 @@ func hasHeadingFontSize(cx *blockCtx) bool {
 // ObservedBlock is the internal fact layer for URL imports. It records what
 // the DOM said in order, but it is not the final public h/txt/cap decision.
 type ObservedBlock struct {
-	Index              int
-	LegacyBlock        Block
-	RawKind            string
-	Tag                string
-	Classes            []string
-	Style              computedStyle
-	TextStyles         []computedStyle
-	Text               string
-	TextLen            int
-	Centered           bool
-	HeadingFontSize    bool
-	StrongCaptionStyle bool
-	ImageSourceLine    bool
-	ReferenceHead      bool
-	ReferenceItem      bool
-	ReferenceContinue  bool
-	BodyLikeEnding     bool
-	ImageRatio         float64
+	Index             int
+	BaseBlock         Block
+	RawKind           string
+	NodeID            int
+	MediaID           int
+	CaptionScopeID    int
+	CaptionProof      CaptionProof
+	Tag               string
+	Classes           []string
+	Style             computedStyle
+	TextStyles        []computedStyle
+	Text              string
+	TextLen           int
+	Centered          bool
+	HeadingFontSize   bool
+	AllBold           bool
+	AllUnderBoldTag   bool
+	MutedOrSmallStyle bool
+	ImageSourceLine   bool
+	ReferenceHead     bool
+	ReferenceItem     bool
+	ReferenceContinue bool
+	BodyLikeEnding    bool
+	ImageRatio        float64
 }
 
 type articleProfile struct {
 	bodyFlow      map[int]bool
 	refFlow       map[int]bool
-	captionLike   map[int]bool
 	headingSignal map[int]bool
+	bodyVisuals   map[textVisualSignature]bool
+}
+
+// textVisualSignature captures the article-local body typography that matters
+// to caption compatibility. Caption-looking values such as 14px or #555 are
+// not treated as special when the article uses the same values for its body.
+type textVisualSignature struct {
+	FontSize float64
+	Color    string
+	Align    string
+}
+
+type CaptionBinding struct {
+	TextIndex int
+	MediaID   int
+	ScopeID   int
+	Proof     CaptionProof
+	Reason    string
+}
+
+// captionStructureObservation is a deliberate type barrier: the proof stage
+// cannot access text, classes, color, font size, alignment or adjacency.
+type captionStructureObservation struct {
+	TextIndex int
+	MediaID   int
+	ScopeID   int
+	Proof     CaptionProof
 }
 
 type RoleDecision struct {
-	Index  int
-	Role   string
-	Group  string
-	Reason string
-	Block  Block
+	Index        int
+	Role         string
+	Group        string
+	Reason       string
+	MediaID      int
+	CaptionScope int
+	CaptionProof CaptionProof
+	Block        Block
 }
 
 func (w *blockWalker) appendBlock(b Block) {
@@ -666,29 +775,38 @@ func (w *blockWalker) appendTextBlock(cx *blockCtx, b Block) {
 		text = textFromRuns(b.Runs)
 	}
 	trimmed := strings.TrimSpace(text)
+	proof, scopeID, mediaID := w.captionIndex.captionEvidenceForNode(cx.node)
 	obs := ObservedBlock{
-		RawKind:            "text",
-		Tag:                cx.tag,
-		Classes:            append([]string(nil), cx.classes...),
-		Style:              cx.style,
-		TextStyles:         append([]computedStyle(nil), cx.textStyles...),
-		Text:               trimmed,
-		TextLen:            utf8.RuneCountInString(trimmed),
-		Centered:           isTextCentered(cx),
-		HeadingFontSize:    hasHeadingFontSize(cx),
-		StrongCaptionStyle: hasStrongCaptionStyle(cx),
-		ImageSourceLine:    isImageSourceLine(trimmed),
-		ReferenceHead:      refSectionHeadRe.MatchString(trimmed),
-		ReferenceItem:      refItemRe.MatchString(trimmed),
-		ReferenceContinue:  refContinuationRe.MatchString(trimmed),
-		BodyLikeEnding:     sentenceEndsLikeBody(trimmed),
+		RawKind:           "text",
+		NodeID:            w.captionIndex.nodeIDs[cx.node],
+		MediaID:           mediaID,
+		CaptionScopeID:    scopeID,
+		CaptionProof:      proof,
+		Tag:               cx.tag,
+		Classes:           append([]string(nil), cx.classes...),
+		Style:             cx.style,
+		TextStyles:        append([]computedStyle(nil), cx.textStyles...),
+		Text:              trimmed,
+		TextLen:           utf8.RuneCountInString(trimmed),
+		Centered:          isTextCentered(cx),
+		HeadingFontSize:   hasHeadingFontSize(cx),
+		AllBold:           allRunsBold(b.Runs),
+		AllUnderBoldTag:   allRunsUnderBoldTag(cx),
+		MutedOrSmallStyle: hasMutedOrSmallStyle(cx),
+		ImageSourceLine:   isImageSourceLine(trimmed),
+		ReferenceHead:     refSectionHeadRe.MatchString(trimmed),
+		ReferenceItem:     refItemRe.MatchString(trimmed),
+		ReferenceContinue: refContinuationRe.MatchString(trimmed),
+		BodyLikeEnding:    sentenceEndsLikeBody(trimmed),
 	}
 	w.appendObservedBlock(b, obs)
 }
 
-func (w *blockWalker) appendImageBlock(b Block) {
+func (w *blockWalker) appendImageBlock(node *html.Node, b Block) {
 	w.appendObservedBlock(b, ObservedBlock{
 		RawKind:    "media",
+		NodeID:     w.captionIndex.nodeIDs[node],
+		MediaID:    w.captionIndex.mediaIDs[node],
 		ImageRatio: imageRatioFromBlock(b),
 	})
 }
@@ -700,7 +818,7 @@ func (w *blockWalker) appendObservedBlock(b Block, obs ObservedBlock) {
 	w.pendingBlankBefore = false
 	w.blocks = append(w.blocks, b)
 	obs.Index = len(w.observed)
-	obs.LegacyBlock = b
+	obs.BaseBlock = b
 	if obs.RawKind == "" {
 		switch b.K {
 		case "img", "video":
@@ -723,11 +841,6 @@ func (w *blockWalker) appendObservedBlock(b Block, obs ObservedBlock) {
 	w.observed = append(w.observed, obs)
 }
 
-func (w *blockWalker) closeCaptionContext() {
-	w.captionContext = false
-	w.captionLines = 0
-}
-
 func imageRatioFromBlock(b Block) float64 {
 	if r := parsePositiveFloat(b.DataRatio); r > 0 {
 		return r
@@ -748,20 +861,41 @@ func parsePositiveFloat(s string) float64 {
 	return v
 }
 
+func standaloneHeadingReason(obs ObservedBlock) (string, bool) {
+	if isHeadingTag(obs.Tag) {
+		return "heading-tag", true
+	}
+	for _, className := range obs.Classes {
+		lc := strings.ToLower(className)
+		if lc == "rich_media_title" || lc == "js_article_title" {
+			return "heading-class", true
+		}
+	}
+	if !obs.HeadingFontSize || obs.TextLen == 0 || obs.TextLen > 80 {
+		return "", false
+	}
+	if obs.AllBold || obs.AllUnderBoldTag || isCenteredLargeHeadingObservation(obs) {
+		return "visual-heading", true
+	}
+	return "", false
+}
+
+func isStandaloneHeadingObservation(obs ObservedBlock) bool {
+	_, ok := standaloneHeadingReason(obs)
+	return ok
+}
+
 func buildArticleProfile(observed []ObservedBlock) articleProfile {
 	profile := articleProfile{
 		bodyFlow:      map[int]bool{},
 		refFlow:       map[int]bool{},
-		captionLike:   map[int]bool{},
 		headingSignal: map[int]bool{},
+		bodyVisuals:   map[textVisualSignature]bool{},
 	}
 	inRefSection := false
 	for _, obs := range observed {
 		if obs.RawKind != "text" {
 			continue
-		}
-		if obs.ImageSourceLine || obs.StrongCaptionStyle || classListSignalsCaption(obs.Classes) {
-			profile.captionLike[obs.Index] = true
 		}
 		if hasSectionHeaderSignal(obs) {
 			profile.headingSignal[obs.Index] = true
@@ -782,10 +916,280 @@ func buildArticleProfile(observed []ObservedBlock) articleProfile {
 			profile.bodyFlow[obs.Index] = true
 		}
 	}
+	for i, obs := range observed {
+		if !profile.bodyFlow[obs.Index] || obs.CaptionProof != CaptionProofNone ||
+			!sentenceEndsLikeProse(obs.Text) {
+			continue
+		}
+		// A long, styled caption can itself look like prose. Do not let the
+		// first text immediately following a media item define the body style;
+		// learn it from the surrounding article instead.
+		if previous := previousMeaningfulIndex(observed, i); previous >= 0 && observed[previous].RawKind == "media" {
+			continue
+		}
+		profile.bodyVisuals[visualSignatureForObservation(obs)] = true
+	}
 	return profile
 }
 
-func resolveRoleDecisions(observed []ObservedBlock, profile articleProfile, opts articleBlockOptions) []RoleDecision {
+func visualSignatureForObservation(obs ObservedBlock) textVisualSignature {
+	style := obs.Style
+	for _, textStyle := range obs.TextStyles {
+		if textStyle.FontSizeSet {
+			style.FontSize = textStyle.FontSize
+			style.FontSizeSet = true
+		}
+		if textStyle.ColorSet {
+			style.Color = textStyle.Color
+			style.ColorSet = true
+		}
+		if textStyle.Align != "" {
+			style.Align = textStyle.Align
+		}
+	}
+	align := strings.ToLower(strings.TrimSpace(style.Align))
+	if align == "" || align == "start" {
+		align = "left"
+	}
+	return textVisualSignature{
+		FontSize: style.FontSize,
+		Color:    strings.ToLower(strings.TrimSpace(style.Color)),
+		Align:    align,
+	}
+}
+
+func matchesArticleBodyVisual(obs ObservedBlock, profile articleProfile) bool {
+	return profile.bodyVisuals[visualSignatureForObservation(obs)]
+}
+
+func projectCaptionStructure(observed []ObservedBlock) []captionStructureObservation {
+	structure := make([]captionStructureObservation, 0, len(observed))
+	for _, obs := range observed {
+		if obs.RawKind != "text" {
+			continue
+		}
+		structure = append(structure, captionStructureObservation{
+			TextIndex: obs.Index,
+			MediaID:   obs.MediaID,
+			ScopeID:   obs.CaptionScopeID,
+			Proof:     obs.CaptionProof,
+		})
+	}
+	return structure
+}
+
+// proveCaptionBindings is intentionally restricted by its input type to DOM
+// relationships. Visual style, text content, adjacency and class names cannot
+// be consulted here and therefore cannot create cap.
+func proveCaptionBindings(structure []captionStructureObservation) map[int]CaptionBinding {
+	bindings := map[int]CaptionBinding{}
+	for _, obs := range structure {
+		if obs.Proof == CaptionProofNone || obs.ScopeID <= 0 || obs.MediaID <= 0 {
+			continue
+		}
+		bindings[obs.TextIndex] = CaptionBinding{
+			TextIndex: obs.TextIndex,
+			MediaID:   obs.MediaID,
+			ScopeID:   obs.ScopeID,
+			Proof:     obs.Proof,
+			Reason:    captionProofReason(obs.Proof),
+		}
+	}
+	return bindings
+}
+
+// inferCompatibleCaptionBindings preserves the caption forms supported before
+// explicit DOM bindings were introduced. Unlike the old global caption flag,
+// every inferred group is attached to one concrete media block, is stopped by
+// article-local body typography, and cannot cross another media boundary.
+func inferCompatibleCaptionBindings(
+	observed []ObservedBlock,
+	profile articleProfile,
+	explicit map[int]CaptionBinding,
+	opts articleBlockOptions,
+) map[int]CaptionBinding {
+	bindings := make(map[int]CaptionBinding, len(explicit))
+	explicitMedia := map[int]bool{}
+	for index, binding := range explicit {
+		bindings[index] = binding
+		explicitMedia[binding.MediaID] = true
+	}
+
+	for mediaIndex, media := range observed {
+		if media.RawKind != "media" || media.MediaID <= 0 || explicitMedia[media.MediaID] ||
+			isConfirmedSectionMarkerMedia(observed, profile, mediaIndex) {
+			continue
+		}
+		textIndex := nextMeaningfulIndex(observed, mediaIndex)
+		if textIndex < 0 {
+			continue
+		}
+		if _, alreadyBound := bindings[textIndex]; alreadyBound {
+			continue
+		}
+		if observed[textIndex].RawKind != "text" ||
+			!isCompatibleCaptionFirstLine(media, observed[textIndex], profile, opts) {
+			continue
+		}
+
+		scopeID := media.NodeID
+		if scopeID <= 0 {
+			scopeID = media.Index + 1
+		}
+		first := observed[textIndex]
+		bindings[textIndex] = CaptionBinding{
+			TextIndex: textIndex,
+			MediaID:   media.MediaID,
+			ScopeID:   scopeID,
+			Proof:     CaptionProofLegacyAssociation,
+			Reason:    compatibleCaptionReason(first, false),
+		}
+		// A source line is a natural terminal for a caption group. This keeps
+		// the following body from inheriting caption state.
+		if first.ImageSourceLine {
+			continue
+		}
+
+		for next := nextMeaningfulIndex(observed, textIndex); next >= 0; next = nextMeaningfulIndex(observed, next) {
+			if _, alreadyBound := bindings[next]; alreadyBound {
+				break
+			}
+			candidate := observed[next]
+			if candidate.RawKind != "text" || !isCompatibleCaptionContinuation(candidate, profile, opts) {
+				break
+			}
+			bindings[next] = CaptionBinding{
+				TextIndex: next,
+				MediaID:   media.MediaID,
+				ScopeID:   scopeID,
+				Proof:     CaptionProofLegacyAssociation,
+				Reason:    compatibleCaptionReason(candidate, true),
+			}
+			if candidate.ImageSourceLine {
+				break
+			}
+		}
+	}
+	return bindings
+}
+
+func isCompatibleCaptionFirstLine(media ObservedBlock, obs ObservedBlock, profile articleProfile, opts articleBlockOptions) bool {
+	if obs.RawKind != "text" || obs.TextLen == 0 || profile.refFlow[obs.Index] ||
+		blocksCaptionAssociationAsArticleCredit(obs.Text) || isStandaloneHeadingObservation(obs) {
+		return false
+	}
+	if obs.ImageSourceLine || classListSignalsCaption(obs.Classes) {
+		return true
+	}
+	if obs.BodyLikeEnding {
+		return false
+	}
+	if matchesArticleBodyVisual(obs, profile) {
+		return false
+	}
+	if obs.MutedOrSmallStyle {
+		return obs.TextLen <= opts.CaptionStrongMaxChars
+	}
+	if obs.HeadingFontSize || obs.TextLen > opts.CaptionMaxChars {
+		return false
+	}
+	return media.ImageRatio > 0 && obs.Centered && obs.TextLen <= opts.CaptionCenterMaxChars
+}
+
+func isCompatibleCaptionContinuation(obs ObservedBlock, profile articleProfile, opts articleBlockOptions) bool {
+	if obs.RawKind != "text" || obs.TextLen == 0 || profile.refFlow[obs.Index] ||
+		blocksCaptionAssociationAsArticleCredit(obs.Text) || isStandaloneHeadingObservation(obs) {
+		return false
+	}
+	if obs.ImageSourceLine || classListSignalsCaption(obs.Classes) {
+		return true
+	}
+	if matchesArticleBodyVisual(obs, profile) {
+		return false
+	}
+	return obs.MutedOrSmallStyle && obs.TextLen <= opts.CaptionStrongMaxChars
+}
+
+func compatibleCaptionReason(obs ObservedBlock, continuation bool) string {
+	if continuation {
+		return "media-caption-continuation"
+	}
+	if obs.ImageSourceLine {
+		return "source-prefix-after-content-image"
+	}
+	return "media-caption"
+}
+
+func blocksCaptionAssociationAsArticleCredit(text string) bool {
+	t := strings.TrimLeft(strings.TrimSpace(text), "（([【 ")
+	for _, prefix := range []string{"作者", "撰文", "文", "编辑", "出品", "声明"} {
+		if strings.HasPrefix(t, prefix+"：") || strings.HasPrefix(t, prefix+":") ||
+			strings.HasPrefix(t, prefix+" |") || strings.HasPrefix(t, prefix+"｜") {
+			return true
+		}
+	}
+	return false
+}
+
+type captionGroupKey struct {
+	MediaID int
+	ScopeID int
+}
+
+type captionLimitState struct {
+	Started bool
+	Closed  bool
+	Chars   int
+	Limit   int
+}
+
+// applyCaptionLengthLimits runs after a caption has been attached to one media
+// item. Once that scope exceeds either its per-block or cumulative limit, the
+// rest of the scope stays txt.
+func applyCaptionLengthLimits(observed []ObservedBlock, proven map[int]CaptionBinding, opts articleBlockOptions) map[int]CaptionBinding {
+	bounded := map[int]CaptionBinding{}
+	states := map[captionGroupKey]captionLimitState{}
+	for _, obs := range observed {
+		binding, ok := proven[obs.Index]
+		if !ok {
+			continue
+		}
+		key := captionGroupKey{MediaID: binding.MediaID, ScopeID: binding.ScopeID}
+		state := states[key]
+		if state.Closed {
+			continue
+		}
+		blockLimit := captionTextCharLimit(obs, opts)
+		if !state.Started {
+			state.Started = true
+			state.Limit = blockLimit
+		}
+		if obs.TextLen == 0 || obs.TextLen > blockLimit || state.Chars+obs.TextLen > state.Limit {
+			state.Closed = true
+			states[key] = state
+			continue
+		}
+		bounded[obs.Index] = binding
+		state.Chars += obs.TextLen
+		states[key] = state
+	}
+	return bounded
+}
+
+func captionProofReason(proof CaptionProof) string {
+	switch proof {
+	case CaptionProofFigcaption:
+		return "figcaption"
+	case CaptionProofAriaDescribedBy:
+		return "aria-describedby"
+	case CaptionProofLegacyAssociation:
+		return "media-caption"
+	default:
+		return ""
+	}
+}
+
+func resolveRoleDecisions(observed []ObservedBlock, profile articleProfile, captions map[int]CaptionBinding) []RoleDecision {
 	sectionTitles := map[int]bool{}
 	for i, obs := range observed {
 		if obs.RawKind != "media" || !isDecorativeMarkerCandidate(obs) {
@@ -797,79 +1201,61 @@ func resolveRoleDecisions(observed []ObservedBlock, profile articleProfile, opts
 	}
 
 	decisions := make([]RoleDecision, 0, len(observed))
-	captionGroupActive := false
 	firstBody := firstBodyFlowIndex(profile)
-	for i, obs := range observed {
+	for _, obs := range observed {
 		if obs.RawKind != "text" {
 			decisions = append(decisions, RoleDecision{
 				Index:  obs.Index,
-				Role:   obs.LegacyBlock.K,
+				Role:   obs.BaseBlock.K,
 				Group:  "Media",
 				Reason: obs.RawKind,
-				Block:  obs.LegacyBlock,
+				Block:  obs.BaseBlock,
 			})
-			captionGroupActive = false
 			continue
 		}
 
-		role := obs.LegacyBlock.K
-		reason := "legacy-fallback"
+		role := obs.BaseBlock.K
+		reason := "default-text"
 		group := defaultRoleDecisionGroup(obs, role)
-		if profile.refFlow[obs.Index] {
+		binding, isCaption := captions[obs.Index]
+		if isCaption {
+			role = "cap"
+			group = "MediaGroup"
+			reason = binding.Reason
+			if reason == "" {
+				reason = captionProofReason(binding.Proof)
+			}
+		} else if profile.refFlow[obs.Index] {
 			role = "txt"
 			group = "RefGroup"
 			reason = "ref-section"
-			captionGroupActive = false
 		} else if sectionTitles[obs.Index] {
 			role = "h"
 			group = "SectionHeaderGroup"
 			reason = "marker-title-body"
-			captionGroupActive = false
-		} else if isHeadingTag(obs.Tag) && isPrefaceMetadataLine(obs.Text) && (firstBody == -1 || obs.Index < firstBody) {
-			role = "txt"
-			group = "MetadataPreface"
-			reason = "preface-metadata"
-			captionGroupActive = false
-		} else if previous := previousMeaningfulIndex(observed, i); previous >= 0 &&
-			observed[previous].RawKind == "media" &&
-			!isConfirmedSectionMarkerMedia(observed, profile, previous) &&
-			isMediaCaptionFirstLine(observed[previous], obs, opts) {
-			role = "cap"
-			group = "MediaGroup"
-			reason = "source-prefix-after-content-image"
-			if !obs.ImageSourceLine {
-				reason = "media-caption"
-			}
-			captionGroupActive = true
-		} else if captionGroupActive && isCaptionContinuationObservation(obs, opts) {
-			role = "cap"
-			group = "MediaGroup"
-			reason = "media-caption-continuation"
 		} else if isPrefaceMetadataLine(obs.Text) && (firstBody == -1 || obs.Index < firstBody) {
 			role = "txt"
 			group = "MetadataPreface"
 			reason = "preface-metadata"
-			captionGroupActive = false
+		} else if headingReason, ok := standaloneHeadingReason(obs); ok {
+			role = "h"
+			group = "StandaloneHeading"
+			reason = headingReason
 		} else if profile.bodyFlow[obs.Index] {
 			role = "txt"
 			group = "BodyFlow"
 			reason = "body-flow"
-			captionGroupActive = false
-		} else {
-			captionGroupActive = false
-			if role == "cap" {
-				role = "txt"
-				group = "Unknown"
-				reason = "unknown-fallback"
-			}
 		}
 
 		decisions = append(decisions, RoleDecision{
-			Index:  obs.Index,
-			Role:   role,
-			Group:  group,
-			Reason: reason,
-			Block:  blockFromRoleDecision(obs, role),
+			Index:        obs.Index,
+			Role:         role,
+			Group:        group,
+			Reason:       reason,
+			MediaID:      binding.MediaID,
+			CaptionScope: binding.ScopeID,
+			CaptionProof: binding.Proof,
+			Block:        blockFromRoleDecision(obs, role),
 		})
 	}
 	return decisions
@@ -911,16 +1297,17 @@ func firstBodyFlowIndex(profile articleProfile) int {
 }
 
 func isBodyFlowObservation(obs ObservedBlock) bool {
-	if obs.RawKind != "text" || obs.TextLen == 0 || obs.ImageSourceLine || obs.ReferenceHead {
+	if obs.RawKind != "text" || obs.TextLen == 0 || obs.CaptionProof != CaptionProofNone ||
+		obs.ImageSourceLine || obs.ReferenceHead {
 		return false
 	}
-	if obs.LegacyBlock.K == "bq" || obs.LegacyBlock.K == "li" || obs.LegacyBlock.K == "h" || obs.LegacyBlock.K == "cap" {
+	if obs.BaseBlock.K == "bq" || obs.BaseBlock.K == "li" || isStandaloneHeadingObservation(obs) {
 		return false
 	}
-	if obs.TextLen > 40 || obs.BodyLikeEnding {
+	if obs.TextLen > 40 || sentenceEndsLikeProse(obs.Text) {
 		return true
 	}
-	return obs.LegacyBlock.K == "txt" && !obs.Centered && !obs.StrongCaptionStyle && obs.TextLen >= 18
+	return obs.BaseBlock.K == "txt" && !obs.Centered && !obs.MutedOrSmallStyle && obs.TextLen >= 18
 }
 
 func collectSectionHeaderGroup(observed []ObservedBlock, profile articleProfile, markerIdx int) []int {
@@ -974,7 +1361,7 @@ func isSectionHeaderCandidate(obs ObservedBlock) bool {
 func sectionHeaderGroupHasEvidence(marker ObservedBlock, observed []ObservedBlock, titles []int) bool {
 	if isFlatSectionMarkerCandidate(marker) && len(titles) > 0 &&
 		titles[0] >= 0 && titles[0] < len(observed) &&
-		!observed[titles[0]].StrongCaptionStyle {
+		!observed[titles[0]].MutedOrSmallStyle {
 		return true
 	}
 	for _, idx := range titles {
@@ -983,10 +1370,6 @@ func sectionHeaderGroupHasEvidence(marker ObservedBlock, observed []ObservedBloc
 		}
 	}
 	return false
-}
-
-func isDecorativeMarkerMedia(obs ObservedBlock) bool {
-	return isDecorativeMarkerCandidate(obs)
 }
 
 func isDecorativeMarkerCandidate(obs ObservedBlock) bool {
@@ -1001,7 +1384,9 @@ func isFlatSectionMarkerCandidate(obs ObservedBlock) bool {
 }
 
 func isConfirmedSectionMarkerMedia(observed []ObservedBlock, profile articleProfile, markerIdx int) bool {
-	return isDecorativeMarkerMedia(observed[markerIdx]) && len(collectSectionHeaderGroup(observed, profile, markerIdx)) > 0
+	return markerIdx >= 0 && markerIdx < len(observed) &&
+		isDecorativeMarkerCandidate(observed[markerIdx]) &&
+		len(collectSectionHeaderGroup(observed, profile, markerIdx)) > 0
 }
 
 func hasSectionHeaderSignal(obs ObservedBlock) bool {
@@ -1022,61 +1407,13 @@ func hasSectionHeaderSignal(obs ObservedBlock) bool {
 	return obs.Style.FontWeightBold || obs.Style.BoldTag
 }
 
-func isCaptionFirstLineObservation(obs ObservedBlock, opts articleBlockOptions) bool {
-	if obs.TextLen == 0 {
-		return false
+// captionTextCharLimit applies only after a caption has been attached to one
+// media item. Muted/small visual styling selects the documented relaxed ceiling.
+func captionTextCharLimit(obs ObservedBlock, opts articleBlockOptions) int {
+	if obs.MutedOrSmallStyle {
+		return opts.CaptionStrongMaxChars
 	}
-	if obs.ImageSourceLine {
-		return true
-	}
-	if obs.BodyLikeEnding {
-		return false
-	}
-	if obs.StrongCaptionStyle {
-		return obs.TextLen <= opts.CaptionStrongMaxChars
-	}
-	if obs.HeadingFontSize || obs.TextLen > opts.CaptionMaxChars {
-		return false
-	}
-	if classListSignalsCaption(obs.Classes) {
-		return true
-	}
-	return obs.Centered && obs.TextLen <= opts.CaptionCenterMaxChars
-}
-
-func isMediaCaptionFirstLine(media ObservedBlock, obs ObservedBlock, opts articleBlockOptions) bool {
-	if !isCaptionFirstLineObservation(obs, opts) {
-		return false
-	}
-	if obs.ImageSourceLine || obs.StrongCaptionStyle || classListSignalsCaption(obs.Classes) {
-		return true
-	}
-	return media.ImageRatio > 0
-}
-
-func isCaptionContinuationObservation(obs ObservedBlock, opts articleBlockOptions) bool {
-	if obs.TextLen == 0 {
-		return false
-	}
-	if obs.ImageSourceLine {
-		return true
-	}
-	if obs.StrongCaptionStyle {
-		return obs.TextLen <= opts.CaptionStrongMaxChars
-	}
-	if obs.TextLen > opts.CaptionMaxChars {
-		return false
-	}
-	return classListSignalsCaption(obs.Classes)
-}
-
-func classListSignalsCaption(classes []string) bool {
-	for _, c := range classes {
-		if classSignalsCaption(c) {
-			return true
-		}
-	}
-	return false
+	return opts.CaptionMaxChars
 }
 
 func previousMeaningfulIndex(observed []ObservedBlock, i int) int {
@@ -1113,7 +1450,7 @@ func isPrefaceMetadataLine(text string) bool {
 }
 
 func blockFromRoleDecision(obs ObservedBlock, role string) Block {
-	b := obs.LegacyBlock
+	b := obs.BaseBlock
 	switch role {
 	case "h":
 		b.K = "h"
@@ -1133,94 +1470,19 @@ func blockFromRoleDecision(obs ObservedBlock, role string) Block {
 	return b
 }
 
-func shouldAttachToCaptionGroup(cx *blockCtx, text string, textLen int, captionLines int, opts articleBlockOptions) bool {
-	if captionLines == 0 {
-		return isCaption(cx, text, textLen, opts)
-	}
-	return isCaptionContinuation(cx, text, textLen, opts)
-}
-
-func isCaption(cx *blockCtx, text string, textLen int, opts articleBlockOptions) bool {
-	if textLen == 0 {
-		return false
-	}
-	if isImageSourceLine(text) {
-		return true
-	}
-	// 小字/灰色是公众号图注的明确标记（正文从不用小字/灰色），带此强信号的图后段落
-	// 即便较长也是图注，放宽到 CaptionStrongMaxChars。仅居中/class 等弱信号仍守
-	// CaptionMaxChars，避免吞掉较长的居中正文段。
-	if hasStrongCaptionStyle(cx) {
-		return textLen <= opts.CaptionStrongMaxChars
-	}
-	// 大字号是标题/正文强调信号，不应仅因“居中+短”被弱图注启发式吞掉。
-	if hasHeadingFontSize(cx) {
-		return false
-	}
-	if textLen > opts.CaptionMaxChars {
-		return false
-	}
-	for _, c := range cx.classes {
-		if classSignalsCaption(c) {
-			return true
-		}
-	}
-	if styleSignalsCaption(cx.style, textLen, opts) {
-		return true
-	}
-	// Also scan the styles observed at each text node. WeChat puts the
-	// caption's font-size/color on an inner <span>, not on the enclosing
-	// <p>, so the block-level style often carries no signal even though
-	// the visible style clearly marks the text as a caption.
-	for _, s := range cx.textStyles {
-		if styleSignalsCaption(s, textLen, opts) {
-			return true
-		}
-	}
-	return false
-}
-
-func isCaptionContinuation(cx *blockCtx, text string, textLen int, opts articleBlockOptions) bool {
-	if textLen == 0 {
-		return false
-	}
-	if isImageSourceLine(text) {
-		return true
-	}
-	// 与首行一致：带小字/灰色强信号的续行图注放宽到 CaptionStrongMaxChars。
-	if hasStrongCaptionStyle(cx) {
-		return textLen <= opts.CaptionStrongMaxChars
-	}
-	if textLen > opts.CaptionMaxChars {
-		return false
-	}
-	for _, c := range cx.classes {
-		if classSignalsCaption(c) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasStrongCaptionStyle 报告块级或文本节点样式是否带明确图注标记（小字号或灰色）。
-// 居中被刻意排除——正文也可能居中，居中只是弱信号。
-func hasStrongCaptionStyle(cx *blockCtx) bool {
-	if strongStyleSignalsCaption(cx.style) {
+// hasMutedOrSmallStyle only records visual facts. It is used after a
+// structural caption proof to select a length ceiling and by heading guards;
+// it must never create cap.
+func hasMutedOrSmallStyle(cx *blockCtx) bool {
+	if mutedOrSmallStyle(cx.style) {
 		return true
 	}
 	for _, s := range cx.textStyles {
-		if strongStyleSignalsCaption(s) {
+		if mutedOrSmallStyle(s) {
 			return true
 		}
 	}
 	return false
-}
-
-func classSignalsCaption(className string) bool {
-	lc := strings.ToLower(className)
-	return strings.Contains(lc, "caption") ||
-		strings.Contains(lc, "img_des") ||
-		strings.Contains(lc, "imgdesc")
 }
 
 func isImageSourceLine(text string) bool {
@@ -1235,20 +1497,23 @@ func isImageSourceLine(text string) bool {
 		strings.HasPrefix(t, "source:")
 }
 
-func styleSignalsCaption(s computedStyle, textLen int, opts articleBlockOptions) bool {
-	if s.FontSizeSet && s.FontSize > 0 && s.FontSize <= 14 {
-		return true
-	}
-	if s.ColorSet && isGreyHex(s.Color) {
-		return true
-	}
-	if s.Align == "center" && textLen <= opts.CaptionCenterMaxChars {
-		return true
+func classListSignalsCaption(classes []string) bool {
+	for _, className := range classes {
+		if classSignalsCaption(className) {
+			return true
+		}
 	}
 	return false
 }
 
-func strongStyleSignalsCaption(s computedStyle) bool {
+func classSignalsCaption(className string) bool {
+	lower := strings.ToLower(className)
+	return strings.Contains(lower, "caption") ||
+		strings.Contains(lower, "img_des") ||
+		strings.Contains(lower, "imgdesc")
+}
+
+func mutedOrSmallStyle(s computedStyle) bool {
 	if s.FontSizeSet && s.FontSize > 0 && s.FontSize <= 14 {
 		return true
 	}

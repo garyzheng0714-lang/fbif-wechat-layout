@@ -162,7 +162,183 @@ func TestBlankParagraphMarksNextBlockBlankBefore(t *testing.T) {
 	}
 }
 
-// ---- Bug B: image caption must classify as cap ----
+// 兼容旧版已经正确工作的图注写法：公众号历史文章不一定带明确的图文关系标记，
+// 因此图片后的图注样式、来源文案和同段图片说明仍必须可用。
+func TestLegacyCaptionSignalsRemainCompatible(t *testing.T) {
+	const captionText = "这是图片的说明文字"
+	variants := []struct {
+		name string
+		html string
+	}{
+		{name: "small-grey-centered", html: `<p><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720"></p><p style="font-size:12px;color:#888888;text-align:center">` + captionText + `</p>`},
+		{name: "caption-class", html: `<p><img data-src="https://mmbiz.qpic.cn/a.jpg"></p><p class="caption">` + captionText + `</p>`},
+		{name: "source-prefix", html: `<p><img data-src="https://mmbiz.qpic.cn/a.jpg"></p><p>图源：` + captionText + `</p>`},
+		{name: "same-paragraph", html: `<p><img data-src="https://mmbiz.qpic.cn/a.jpg"><span style="font-size:12px;color:#888888">` + captionText + `</span></p>`},
+	}
+
+	for _, tc := range variants {
+		t.Run(tc.name, func(t *testing.T) {
+			_, blocks, _ := extractArticleBlocks(jsContentWrap(tc.html))
+			b := findBlockByText(blocks, captionText)
+			if b == nil || b.K != "cap" {
+				t.Fatalf("legacy caption signal must remain compatible, got %v; kinds=%v", b, findKinds(blocks))
+			}
+		})
+	}
+}
+
+func TestPlainTextDoesNotBecomeCaptionByImageAdjacencyAlone(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg"></p>` +
+			`<p>这是紧跟图片、但没有图注表现的普通正文。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "普通正文")
+	if b == nil || b.K != "txt" {
+		t.Fatalf("plain text after an image must stay txt, got %v; kinds=%v", b, findKinds(blocks))
+	}
+}
+
+func TestExplicitFigcaptionSurvivesStyleAndWrapperMutation(t *testing.T) {
+	variants := []string{
+		`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg"><figcaption>图源：Neuro</figcaption></figure>`,
+		`<figure><section><img data-src="https://mmbiz.qpic.cn/a.jpg"></section><figcaption><p style="font-size:20px;color:#111111;text-align:left">图源：Neuro</p></figcaption></figure>`,
+	}
+
+	for _, body := range variants {
+		decisions := extractArticleRoleDecisionsForTest(jsContentWrap(body))
+		d := findDecisionByText(decisions, "图源：Neuro")
+		if d == nil || d.Role != "cap" || d.CaptionProof != CaptionProofFigcaption ||
+			d.Reason != "figcaption" || d.MediaID <= 0 || d.CaptionScope <= 0 {
+			t.Fatalf("explicit figcaption must be structurally proven independent of visual style, got %+v", d)
+		}
+	}
+}
+
+func TestObservationLayerDoesNotEmitFinalHeadingOrCaptionRoles(t *testing.T) {
+	html := jsContentWrap(
+		`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg"><figcaption>结构图注</figcaption></figure>` +
+			`<h2>结构标题</h2><p>普通正文</p>`)
+	for _, obs := range extractObservedBlocksForTest(html) {
+		if obs.RawKind == "text" && (obs.BaseBlock.K == "h" || obs.BaseBlock.K == "cap") {
+			t.Fatalf("observation layer emitted final role %q for %q", obs.BaseBlock.K, obs.Text)
+		}
+	}
+
+	decisions := extractArticleRoleDecisionsForTest(html)
+	if d := findDecisionByText(decisions, "结构图注"); d == nil || d.Role != "cap" {
+		t.Fatalf("resolver must emit structurally proven caption, got %+v", d)
+	}
+	if d := findDecisionByText(decisions, "结构标题"); d == nil || d.Role != "h" {
+		t.Fatalf("resolver must emit heading after observation, got %+v", d)
+	}
+}
+
+func TestEveryCaptionDecisionCarriesBoundedMediaAssociation(t *testing.T) {
+	html := jsContentWrap(
+		`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg"><figcaption>Figure 说明</figcaption></figure>` +
+			`<img data-src="https://mmbiz.qpic.cn/b.jpg" aria-describedby="aria-cap">` +
+			`<p id="aria-cap">ARIA 说明</p>` +
+			`<img data-src="https://mmbiz.qpic.cn/c.jpg">` +
+			`<p class="caption" style="font-size:12px;color:#888888;text-align:center">未绑定说明</p>`)
+	captionCount := 0
+	for _, decision := range extractArticleRoleDecisionsForTest(html) {
+		if decision.Role != "cap" {
+			continue
+		}
+		captionCount++
+		if decision.CaptionProof == CaptionProofNone || decision.MediaID <= 0 || decision.CaptionScope <= 0 {
+			t.Fatalf("cap decision lacks bounded media association: %+v", decision)
+		}
+	}
+	if captionCount != 3 {
+		t.Fatalf("caption count = %d, want two explicit captions plus one compatible legacy caption", captionCount)
+	}
+}
+
+func TestAriaDescribedByCreatesExplicitCaptionBinding(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" aria-describedby="photo-caption"></p>` +
+			`<section id="photo-caption"><p style="font-size:20px;text-align:left">图片的结构化说明</p></section>` +
+			`<p style="font-size:12px;color:#888888;text-align:center">未绑定的后续正文</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	if b := findBlockByText(blocks, "结构化说明"); b == nil || b.K != "cap" {
+		t.Fatalf("aria-describedby target must be cap, got %v; kinds=%v", b, findKinds(blocks))
+	}
+	if b := findBlockByText(blocks, "未绑定的后续正文"); b == nil || b.K != "txt" {
+		t.Fatalf("caption binding must not escape the IDREF target, got %v; kinds=%v", b, findKinds(blocks))
+	}
+	d := findDecisionByText(extractArticleRoleDecisionsForTest(html), "结构化说明")
+	if d == nil || d.CaptionProof != CaptionProofAriaDescribedBy || d.Reason != "aria-describedby" {
+		t.Fatalf("aria-describedby caption must expose structural proof, got %+v", d)
+	}
+}
+
+func TestLegacyCompatibilityCannotOverwriteExplicitCaptionBinding(t *testing.T) {
+	html := jsContentWrap(
+		`<img data-src="https://mmbiz.qpic.cn/a.jpg" aria-describedby="caption-a">` +
+			`<img data-src="https://mmbiz.qpic.cn/b.jpg">` +
+			`<p id="caption-a" style="font-size:12px;color:#888888;text-align:center;">图片 A 的明确说明</p>`)
+	decision := findDecisionByText(extractArticleRoleDecisionsForTest(html), "明确说明")
+	if decision == nil || decision.Role != "cap" || decision.CaptionProof != CaptionProofAriaDescribedBy ||
+		decision.Reason != "aria-describedby" {
+		t.Fatalf("legacy compatibility must not overwrite an explicit binding, got %+v", decision)
+	}
+}
+
+func TestAmbiguousCaptionRelationshipFailsClosed(t *testing.T) {
+	cases := []struct {
+		name string
+		html string
+		text string
+	}{
+		{
+			name: "figure-with-multiple-media",
+			html: `<figure><img data-src="https://mmbiz.qpic.cn/a.jpg"><img data-src="https://mmbiz.qpic.cn/b.jpg">` +
+				`<figcaption>无法确定属于哪张图</figcaption></figure>`,
+			text: "无法确定属于哪张图",
+		},
+		{
+			name: "two-media-share-idref-target",
+			html: `<img data-src="https://mmbiz.qpic.cn/a.jpg" aria-describedby="shared">` +
+				`<img data-src="https://mmbiz.qpic.cn/b.jpg" aria-describedby="shared">` +
+				`<p id="shared">共享说明目标</p>`,
+			text: "共享说明目标",
+		},
+		{
+			name: "duplicate-idref-target",
+			html: `<img data-src="https://mmbiz.qpic.cn/a.jpg" aria-describedby="duplicate">` +
+				`<p id="duplicate">重复目标一</p><p id="duplicate">重复目标二</p>`,
+			text: "重复目标",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, blocks, _ := extractArticleBlocks(jsContentWrap(tc.html))
+			for _, b := range blocks {
+				if (strings.Contains(b.Text, tc.text) || strings.Contains(textFromRuns(b.Runs), tc.text)) && b.K == "cap" {
+					t.Fatalf("ambiguous relationship must fail closed to txt; block=%+v kinds=%v", b, findKinds(blocks))
+				}
+			}
+		})
+	}
+}
+
+func TestCaptionBindingCannotCrossScopeOrMediaBoundary(t *testing.T) {
+	html := jsContentWrap(
+		`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg"><figcaption><p>图片 A 的说明</p></figcaption></figure>` +
+			`<p><img data-src="https://mmbiz.qpic.cn/b.jpg"></p>` +
+			`<p>图片 B 后面的普通正文。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	if b := findBlockByText(blocks, "图片 A 的说明"); b == nil || b.K != "cap" {
+		t.Fatalf("explicit caption must stay bound to media A, got %v; kinds=%v", b, findKinds(blocks))
+	}
+	if b := findBlockByText(blocks, "图片 B 后面的普通正文"); b == nil || b.K != "txt" {
+		t.Fatalf("caption binding must not cross scope or media boundary, got %v; kinds=%v", b, findKinds(blocks))
+	}
+}
+
+// ---- Caption bindings: explicit proof + bounded legacy compatibility ----
 
 func TestImageCaptionByGreyColor(t *testing.T) {
 	html := jsContentWrap(
@@ -174,7 +350,7 @@ func TestImageCaptionByGreyColor(t *testing.T) {
 		t.Fatalf("caption text missing: kinds=%v", findKinds(blocks))
 	}
 	if b.K != "cap" {
-		t.Errorf("grey caption must be cap, got %s", b.K)
+		t.Errorf("grey caption must remain cap, got %s", b.K)
 	}
 }
 
@@ -185,7 +361,7 @@ func TestImageCaptionBySmallFont(t *testing.T) {
 	_, blocks, _ := extractArticleBlocks(html)
 	b := findBlockByText(blocks, "图片说明")
 	if b == nil || b.K != "cap" {
-		t.Errorf("small-font post-img → cap, got %v", b)
+		t.Errorf("small-font post-image caption must remain cap, got %v", b)
 	}
 }
 
@@ -196,7 +372,7 @@ func TestImageCaptionByCenterShort(t *testing.T) {
 	_, blocks, _ := extractArticleBlocks(html)
 	b := findBlockByText(blocks, "来源：财新网")
 	if b == nil || b.K != "cap" {
-		t.Errorf("center+short post-img → cap, got %v", b)
+		t.Errorf("center+short post-image caption must remain cap, got %v", b)
 	}
 }
 
@@ -222,6 +398,26 @@ func TestImageCaptionGroupKeepsImageSourceAsCaption(t *testing.T) {
 	}
 }
 
+func TestLegacyMultiBlockCaptionDoesNotDefineBodyTypography(t *testing.T) {
+	first := "新品包装组合展示"
+	second := strings.Repeat("说明", 50)
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667" /></p>` +
+			`<p style="font-size:12px;color:#888888;text-align:center;">` + first + `</p>` +
+			`<p style="font-size:12px;color:#888888;text-align:center;">` + second + `</p>` +
+			`<p style="font-size:16px;color:#333333;text-align:left;">正文继续介绍产品研发过程。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	for _, needle := range []string{first, second} {
+		if b := findBlockByText(blocks, needle); b == nil || b.K != "cap" {
+			t.Fatalf("legacy multi-block caption must remain cap, got %v; kinds=%v", b, findKinds(blocks))
+		}
+	}
+	if b := findBlockByText(blocks, "正文继续"); b == nil || b.K != "txt" {
+		t.Fatalf("body after legacy caption must remain txt, got %v; kinds=%v", b, findKinds(blocks))
+	}
+}
+
 func TestCaptionContinuationRequiresCaptionStyle(t *testing.T) {
 	html := jsContentWrap(
 		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667" /></p>` +
@@ -231,7 +427,7 @@ func TestCaptionContinuationRequiresCaptionStyle(t *testing.T) {
 
 	caption := findBlockByText(blocks, "图注")
 	if caption == nil || caption.K != "cap" {
-		t.Fatalf("first center-short post-image line must be cap, got %v", caption)
+		t.Fatalf("first center-short post-image line must remain cap, got %v", caption)
 	}
 	body := findBlockByText(blocks, "短正文")
 	if body == nil || body.K != "txt" {
@@ -239,13 +435,203 @@ func TestCaptionContinuationRequiresCaptionStyle(t *testing.T) {
 	}
 }
 
-func TestCaptionCenterThresholdCanBeConfigured(t *testing.T) {
+// 真实反馈文章 https://mp.weixin.qq.com/s/LmvhTcF2V7WVfY7xJTAhmQ 的页首结构：
+// 横幅图后先出现作者/版权信息，再进入小字号正文。这些文本没有媒体绑定，因此无论
+// 样式或邻接关系如何都必须保持 txt。
+func TestReportedLmvhHeaderMetadataAndBodyRemainText(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/brandark-banner.jpg" data-w="1080" data-h="360" data-ratio="0.333"></p>` +
+			`<p style="font-size:14px;color:#888888;text-align:left;">作者 | 十度</p>` +
+			`<p style="font-size:14px;color:#888888;text-align:left;">声明 | 此文章版权归品牌方舟所有，未经允许不得转载</p>` +
+			`<p style="font-size:14px;color:#555555;text-align:left;">如果把咖啡因加到一颗口香糖里，你会买吗？</p>` +
+			`<p style="font-size:14px;color:#555555;text-align:left;">放在十年前，这听起来更像一个异想天开的点子。毕竟，提神有咖啡，补充营养有保健品，口香糖的作用似乎只有清新口气。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	for _, needle := range []string{"作者 | 十度", "声明 | 此文章版权归", "如果把咖啡因", "放在十年前"} {
+		b := findBlockByText(blocks, needle)
+		if b == nil || b.K != "txt" {
+			t.Fatalf("%q must remain txt after the header image, got %v; kinds=%v", needle, b, findKinds(blocks))
+		}
+	}
+}
+
+// 同一真实页首在上游剥离作者/声明后，横幅图会直接邻接疑问式导语。左对齐完整问句
+// 仍是正文；不能因为它使用 14px 就把它当作图片说明。
+func TestReportedLmvhQuestionLeadImmediatelyAfterImageIsBody(t *testing.T) {
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/brandark-banner.jpg" data-w="1080" data-h="360" data-ratio="0.333"></p>` +
+			`<p style="font-size:14px;color:#555555;text-align:left;">如果把咖啡因加到一颗口香糖里，你会买吗？</p>` +
+			`<p style="font-size:14px;color:#555555;text-align:left;">放在十年前，这听起来更像一个异想天开的点子。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	for _, needle := range []string{"如果把咖啡因", "放在十年前"} {
+		b := findBlockByText(blocks, needle)
+		if b == nil || b.K != "txt" {
+			t.Fatalf("%q must remain txt immediately after the header image, got %v; kinds=%v", needle, b, findKinds(blocks))
+		}
+	}
+}
+
+func TestExplicitCaptionQuestionStaysCaption(t *testing.T) {
+	html := jsContentWrap(
+		`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667">` +
+			`<figcaption><p style="font-size:12px;color:#888888;text-align:center;">你知道这款包装来自哪里吗？</p></figcaption></figure>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "包装来自哪里")
+	if b == nil || b.K != "cap" {
+		t.Fatalf("centered styled question after image must stay cap, got %v; kinds=%v", b, findKinds(blocks))
+	}
+}
+
+// 同一真实文章的正文结构：旧版可识别的「图源：Neuro」仍必须是图注；正文沿用
+// 14px 深灰排版时，又不能被图注状态继续拖进去。
+// 第二个 case 改掉原文、包装层级、声明顺序和 px/pt 写法，守住结构关系而非样本文本。
+func TestReportedLmvhStyledBodyAfterCaptionReturnsToBodyFlow(t *testing.T) {
+	cases := []struct {
+		name     string
+		bodyHTML string
+		needles  []string
+	}{
+		{
+			name: "reported-text",
+			bodyHTML: `<p style="font-size:14px;color:#555555;text-align:left;">两人不由想到，如果把咖啡因放进一片口香糖里，会怎样？</p>` +
+				`<p style="font-size:14px;color:#555555;text-align:left;">Kent拥有神经科学背景，Ryan主修化学，两人开始一遍遍调试配方，将天然咖啡因与茶氨酸结合。</p>`,
+			needles: []string{"两人不由想到", "Kent拥有神经科学背景"},
+		},
+		{
+			name: "wrapper-style-and-text-variant",
+			bodyHTML: `<section style="color:rgb(85,85,85);font-size:10.5pt;">` +
+				`<p style="text-align:left;"><span>团队提出了另一个问题：把有效成分放进糖果里，会发生什么？</span></p>` +
+				`<p style="text-align:left;"><span>他们随后反复调整配方，并记录每一次测试结果。</span></p>` +
+				`</section>`,
+			needles: []string{"团队提出了另一个问题", "他们随后反复调整配方"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := jsContentWrap(
+				`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/neuro.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+					`<p style="font-size:12px;color:#888888;text-align:center;">图源：Neuro</p>` +
+					tc.bodyHTML)
+			_, blocks, _ := extractArticleBlocks(html)
+
+			caption := findBlockByText(blocks, "图源：Neuro")
+			if caption == nil || caption.K != "cap" {
+				t.Fatalf("real source caption must stay cap, got %v; kinds=%v", caption, findKinds(blocks))
+			}
+			for _, needle := range tc.needles {
+				b := findBlockByText(blocks, needle)
+				if b == nil || b.K != "txt" {
+					t.Fatalf("%q must return to body flow after caption, got %v; kinds=%v", needle, b, findKinds(blocks))
+				}
+			}
+		})
+	}
+}
+
+func TestCaptionBindingEndsAtExplicitScope(t *testing.T) {
+	html := jsContentWrap(
+		`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667" />` +
+			`<figcaption><p style="text-align: center;">图注</p></figcaption></figure>` +
+			`<p style="text-align: center;">短正文</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	caption := findBlockByText(blocks, "图注")
+	if caption == nil || caption.K != "cap" {
+		t.Fatalf("explicit figcaption must be cap, got %v", caption)
+	}
+	body := findBlockByText(blocks, "短正文")
+	if body == nil || body.K != "txt" {
+		t.Fatalf("text outside the explicit caption scope must be txt, got %v; kinds=%v", body, findKinds(blocks))
+	}
+}
+
+func TestCaptionSingleBlockCharacterLimit(t *testing.T) {
+	cases := []struct {
+		name  string
+		text  string
+		style string
+	}{
+		{
+			name: "source-prefix-cannot-bypass-base-limit",
+			text: "图片来源：" + strings.Repeat("源", defaultImageCaptionMaxChars),
+		},
+		{
+			name:  "strong-style-cannot-bypass-strong-limit",
+			text:  strings.Repeat("图", defaultImageCaptionStrongMaxChars+1),
+			style: ` style="font-size:12px;color:#888888;text-align:center;"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := jsContentWrap(
+				`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667">` +
+					`<figcaption><p` + tc.style + `>` + tc.text + `</p></figcaption></figure>`)
+			_, blocks, _ := extractArticleBlocks(html)
+			if b := findBlockByText(blocks, tc.text); b == nil || b.K != "txt" {
+				t.Fatalf("over-limit caption candidate must be txt, got %v; kinds=%v", b, findKinds(blocks))
+			}
+		})
+	}
+}
+
+func TestCaptionGroupCumulativeCharacterLimit(t *testing.T) {
+	t.Run("plain-caption-group-uses-base-limit", func(t *testing.T) {
+		first := strings.Repeat("图", 30)
+		second := strings.Repeat("注", 30)
+		overflow := strings.Repeat("文", 30)
+		afterOverflow := strings.Repeat("续", 10)
+		html := jsContentWrap(
+			`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667"><figcaption>` +
+				`<p style="text-align:center;">` + first + `</p>` +
+				`<p class="caption">` + second + `</p>` +
+				`<p class="caption">` + overflow + `</p>` +
+				`<p class="caption">` + afterOverflow + `</p></figcaption></figure>`)
+		_, blocks, _ := extractArticleBlocks(html)
+
+		for _, needle := range []string{first, second} {
+			if b := findBlockByText(blocks, needle); b == nil || b.K != "cap" {
+				t.Fatalf("caption text within %d-char group limit must stay cap, got %v; kinds=%v", defaultImageCaptionMaxChars, b, findKinds(blocks))
+			}
+		}
+		for _, needle := range []string{overflow, afterOverflow} {
+			if b := findBlockByText(blocks, needle); b == nil || b.K != "txt" {
+				t.Fatalf("text after cumulative %d-char group limit must be txt, got %v; kinds=%v", defaultImageCaptionMaxChars, b, findKinds(blocks))
+			}
+		}
+	})
+
+	t.Run("strong-caption-group-uses-strong-limit", func(t *testing.T) {
+		first := strings.Repeat("长", 120)
+		source := "图片来源：" + strings.Repeat("源", 20)
+		overflow := strings.Repeat("文", 70)
+		html := jsContentWrap(
+			`<figure><img data-src="https://mmbiz.qpic.cn/a.jpg"><figcaption>` +
+				`<p style="font-size:12px;color:#888888;text-align:center;">` + first + `</p>` +
+				`<p style="font-size:12px;color:#888888;text-align:center;">` + source + `</p>` +
+				`<p class="caption" style="font-size:12px;color:#888888;text-align:center;">` + overflow + `</p></figcaption></figure>`)
+		_, blocks, _ := extractArticleBlocks(html)
+
+		for _, needle := range []string{first, source} {
+			if b := findBlockByText(blocks, needle); b == nil || b.K != "cap" {
+				t.Fatalf("strong caption text within %d-char group limit must stay cap, got %v; kinds=%v", defaultImageCaptionStrongMaxChars, b, findKinds(blocks))
+			}
+		}
+		if b := findBlockByText(blocks, overflow); b == nil || b.K != "txt" {
+			t.Fatalf("text after cumulative %d-char strong group limit must be txt, got %v; kinds=%v", defaultImageCaptionStrongMaxChars, b, findKinds(blocks))
+		}
+	})
+}
+
+func TestCaptionCenterThresholdRemainsCompatible(t *testing.T) {
 	html := jsContentWrap(
 		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" data-w="1080" data-h="720" data-ratio="0.667" /></p>` +
 			`<p style="text-align: center;">abcdef</p>`)
 	_, defaultBlocks, _ := extractArticleBlocks(html)
 	if b := findBlockByText(defaultBlocks, "abcdef"); b == nil || b.K != "cap" {
-		t.Fatalf("default center-short threshold should classify caption, got %v; kinds=%v", b, findKinds(defaultBlocks))
+		t.Fatalf("default center-short threshold should keep legacy caption behavior, got %v; kinds=%v", b, findKinds(defaultBlocks))
 	}
 
 	_, strictBlocks, _ := extractArticleBlocksWithOptions(html, articleBlockOptions{
@@ -257,8 +643,8 @@ func TestCaptionCenterThresholdCanBeConfigured(t *testing.T) {
 	}
 }
 
-// 说明性长图注（>80 字，中英混排 + 多个产品名/括号注释）带小字/灰色强信号时，
-// 必须识别为图注，而不是被 80 字基础上限一刀切成正文。复刻真实样例：
+// 历史公众号中只靠图后小字/灰色排版表达的说明性长图注也必须兼容。
+// 复刻真实样例：
 // mp.weixin.qq.com/s/8xVXVFar3fbJEEQKHSwy7w 那段「左前方为…后排三款为…」(~123 字)。
 func TestLongStyledCaptionStaysCaption(t *testing.T) {
 	longCaption := "左前方为Classic Collection系列的Paris（巴黎红茶），后排三款为HT系列：" +
@@ -266,7 +652,7 @@ func TestLongStyledCaptionStaysCaption(t *testing.T) {
 	if n := len([]rune(longCaption)); n <= defaultImageCaptionMaxChars {
 		t.Fatalf("样例图注应超过基础上限以验证回归，实际 %d 字", n)
 	}
-	// WeChat 把图注的字号/颜色放在内层 <span> 上（灰色强信号）。
+	// WeChat 把图注的字号/颜色放在内层 <span> 上。
 	html := jsContentWrap(
 		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
 			`<p style="text-align: center;"><span style="font-size: 14px; color: #888888;">` +
@@ -275,12 +661,12 @@ func TestLongStyledCaptionStaysCaption(t *testing.T) {
 
 	cap := findBlockByText(blocks, "Peppermint Herbal")
 	if cap == nil || cap.K != "cap" {
-		t.Fatalf("带灰色强信号的长图注必须识别为 cap，got %v; kinds=%v", cap, findKinds(blocks))
+		t.Fatalf("旧版可识别的长图注必须继续是 cap，got %v; kinds=%v", cap, findKinds(blocks))
 	}
 }
 
-// 防过度放宽：图片后的长【普通正文】段（非小字、非灰色）即使超过基础上限，
-// 也必须保持正文——强信号高上限只对小字/灰色图注生效。
+// 防过度放宽：图片后的长【普通正文】段即使超过基础上限，也必须保持正文；
+// 视觉上限选择不能为未绑定文本创建图注资格。
 func TestLongPlainParagraphAfterImageStaysBody(t *testing.T) {
 	longBody := "这是一段紧跟在图片后面的普通正文，它既不是小字号也不是灰色，只是正常黑色正文，" +
 		"长度同样超过了八十个字符的基础上限，按规则必须保持为正文，绝不能被误判成居中灰色小字图注。"
@@ -325,9 +711,7 @@ func TestArticleBlockOptionsReadActiveAccountBehavior(t *testing.T) {
 	}
 }
 
-// Real WeChat pattern: <p> holds both the <img> and a trailing styled
-// <span> with the caption. The block's own style is empty; the caption
-// signal lives on the inner span. Must still classify as cap.
+// Real WeChat pattern: <p> holds both an image and trailing styled text.
 func TestCaptionInSameParagraphAsImage(t *testing.T) {
 	html := jsContentWrap(
 		`<p>` +
@@ -341,7 +725,7 @@ func TestCaptionInSameParagraphAsImage(t *testing.T) {
 		t.Fatalf("missing caption; kinds=%v", findKinds(blocks))
 	}
 	if b.K != "cap" {
-		t.Errorf("caption inside same <p> as <img> must be cap, got %s", b.K)
+		t.Errorf("caption inside same <p> as <img> must remain cap, got %s", b.K)
 	}
 }
 
@@ -677,7 +1061,9 @@ func TestReportedKatP22CaptionAndLaterSectionTitleCoexist(t *testing.T) {
 func TestRoleDecisionReasonsExposeStructureForReportedFixtures(t *testing.T) {
 	katDecisions := extractArticleRoleDecisionsForTest(reportedKatP22Fixture("重生之泰奶又又又火了"))
 	caption := findDecisionByText(katDecisions, "图源大众点评")
-	if caption == nil || caption.Role != "cap" || caption.Group != "MediaGroup" || caption.Reason != "source-prefix-after-content-image" {
+	if caption == nil || caption.Role != "cap" || caption.Group != "MediaGroup" ||
+		caption.Reason != "source-prefix-after-content-image" ||
+		caption.CaptionProof != CaptionProofLegacyAssociation || caption.MediaID <= 0 || caption.CaptionScope <= 0 {
 		t.Fatalf("content image source decision = %+v", caption)
 	}
 	title := findDecisionByText(katDecisions, "重生之泰奶又又又火了")
@@ -1184,9 +1570,9 @@ func TestInheritedFontSizePromotesBoldChild(t *testing.T) {
 	}
 }
 
-// ---- 参考来源块不被图注启发式误吞为 cap（基石 news/62285 结构）----
-// 真实文章里「参考来源：」前常有图（封面/配图），caption context 处于开启状态，
-// 参考来源行字号小、灰色、短，会被误标 cap 拆散。期望：整块走 txt。
+// ---- 参考来源块永远不会因图片邻接和样式被误吞为 cap（基石 news/62285 结构）----
+// 真实文章里「参考来源：」前常有图，且参考来源行字号小、灰色、短；没有明确
+// 媒体绑定时整块必须走 txt。
 func TestReferenceSectionNotCaptioned(t *testing.T) {
 	html := jsContentWrap(
 		`<p><img data-src="https://mmbiz.qpic.cn/x.png" data-w="1080" data-ratio="0.5"></p>` +

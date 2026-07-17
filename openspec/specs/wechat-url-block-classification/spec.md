@@ -1,90 +1,177 @@
 ## Purpose
 
-Define the URL import block-classification model used to convert WeChat article HTML into stable public blocks without overfitting to individual articles.
+Define a URL-import classifier that fixes body-as-caption failures without breaking caption forms that historical WeChat articles already rely on.
 
 ## Requirements
 
-### Requirement: URL classification uses observation, profile, and role decisions
-The URL block classifier SHALL separate raw observation, article-local profiling, and final role decisions before emitting public blocks.
+### Requirement: URL classification uses observation, article profile, and one role-decision stage
 
-#### Scenario: Observed blocks do not decide final role
-- **WHEN** WeChat HTML is parsed from URL import
-- **THEN** the classifier MUST first collect ordered observed blocks containing raw facts such as text, runs, tag, classes, style summary, image attributes, source markers, and neighboring structure
-- **THEN** observed blocks MUST NOT directly decide whether a text is `h`, `txt`, or `cap`
+The classifier SHALL separate DOM observation, article-local profiling, and final role decisions before emitting public blocks.
 
-#### Scenario: Article profile is local to the imported article
+#### Scenario: Observed text is role-neutral
+
+- **WHEN** WeChat HTML is parsed
+- **THEN** the walker MUST collect ordered facts such as text, style, DOM identity, media identity, and explicit relationships
+- **THEN** ordinary observed text MUST NOT be emitted as final `h` or `cap` by the walker
+
+#### Scenario: Article profile is request-local
+
 - **WHEN** observed blocks are available
-- **THEN** the classifier MUST derive article-local context such as body flow candidates, repeated body style, caption-like subordinate text, and reference-section candidates
-- **THEN** the classifier MUST NOT require a global fixed heading font-size threshold to decide all headings
+- **THEN** body flow, body typography, reference sections, and marker-heading candidates MUST be derived only from that article
+- **THEN** no classification state may leak across imports
 
-#### Scenario: Role decisions produce public blocks
-- **WHEN** role decisions have been resolved
-- **THEN** the classifier MUST convert those decisions into the existing public `Block` JSON shape
-- **THEN** frontend renderers MUST NOT need a new block contract for this change
+#### Scenario: Public block contract is unchanged
 
-### Requirement: Images are resolved as content media, section markers, or unknown media
-The classifier SHALL NOT treat every image as opening caption context immediately. It SHALL classify image role using surrounding block relationships.
+- **WHEN** roles are resolved
+- **THEN** they MUST be converted to the existing public `Block` JSON shape
+- **THEN** renderers MUST NOT require a new block contract
 
-#### Scenario: Content image with source text forms media group
-- **WHEN** an image is followed by source or explanatory text such as `图源大众点评`
-- **THEN** the image and source text MUST be resolved as a media group
-- **THEN** `图源大众点评` MUST be emitted as `cap`
+### Requirement: Every caption has a bounded association with one media item
 
-#### Scenario: Decorative marker with heading text forms section header group
-- **WHEN** a decorative or numbered marker image is followed by isolated heading text and then body flow
-- **THEN** the marker and heading text MUST be resolved as a section header group
+The classifier SHALL support both explicit relationships and historically supported WeChat caption forms. Every emitted `cap` MUST carry a media ID, a scope ID, and an association proof.
+
+The safety invariant is:
+
+```text
+role(text) == cap  =>  boundedMediaAssociation(text, media, scope, proof)
+```
+
+#### Scenario: Figure caption binds to exactly one media
+
+- **WHEN** text is inside a `<figcaption>` whose nearest `<figure>` contains exactly one supported media node
+- **THEN** it MUST be associated with that media
+- **THEN** the decision MUST expose `figcaption` proof
+
+#### Scenario: ARIA IDREF binds to one unique target
+
+- **WHEN** exactly one media points through `aria-describedby` to an element ID occurring exactly once
+- **THEN** text within that target MUST be associated with that media
+- **THEN** the decision MUST expose `aria-describedby` proof
+
+#### Scenario: Historical visual caption remains compatible
+
+- **WHEN** text immediately follows one concrete media item and uses a previously supported caption signal such as muted/small typography, short centered layout, caption metadata, image-source wording, or same-paragraph image description
+- **THEN** it MAY be associated with that media as a bounded legacy caption
+- **THEN** it MUST expose a legacy-association proof and MUST remain subject to body-style barriers and length limits
+
+#### Scenario: Existing correct caption fixtures remain unchanged
+
+- **WHEN** the historical grey, small-font, centered-short, image-source, same-paragraph, long-caption, wide-image, and marker-boundary fixtures are replayed
+- **THEN** every caption previously expected as `cap` MUST still be `cap`
+- **THEN** their later heading and body roles MUST remain unchanged
+
+#### Scenario: Ambiguous explicit declarations do not create an explicit proof
+
+- **WHEN** a figure contains multiple media nodes, multiple media share one IDREF target, or an ID is duplicated
+- **THEN** no explicit caption proof may be created from that declaration
+- **THEN** the text may only follow the separately bounded compatibility path if it independently satisfies that path
+
+### Requirement: Legacy compatibility is calibrated against the article's own body
+
+Absolute values such as 14px or `#555` SHALL NOT be treated as universally caption-like. The classifier SHALL learn the typography used by obvious prose elsewhere in the same article and use it as negative evidence.
+
+#### Scenario: Candidate matches article body typography
+
+- **WHEN** text after an image has the same effective font size, color, and alignment as established prose in that article
+- **THEN** visual caption signals MUST NOT classify it as `cap`
+- **THEN** it MUST continue through the normal body/heading decision process
+
+#### Scenario: Real caption differs from article body
+
+- **WHEN** a historical visual caption is associated with an image and its typography differs from the article's established body typography
+- **THEN** the compatibility path MUST continue to recognize it as `cap`
+
+#### Scenario: Long caption does not contaminate body profiling
+
+- **WHEN** a long styled caption immediately follows a media item
+- **THEN** that first post-media block MUST NOT define the article's body typography merely because it is long or sentence-like
+
+### Requirement: Caption association is media-local and cannot leak
+
+Caption state SHALL be keyed by media ID and scope. It SHALL NOT be represented by an unbound global boolean.
+
+#### Scenario: Explicit association ends at explicit scope
+
+- **WHEN** a proven caption is followed by text outside its `<figcaption>` or IDREF target
+- **THEN** later text MUST NOT inherit the caption role
+
+#### Scenario: Legacy association stops at body typography
+
+- **WHEN** a compatible legacy caption is followed by text matching the article's body typography
+- **THEN** the following text MUST remain `txt`
+- **THEN** later paragraphs MUST NOT inherit caption state
+
+#### Scenario: Image source terminates a legacy caption group
+
+- **WHEN** an image-source line is included in a legacy caption group
+- **THEN** that line MUST remain `cap`
+- **THEN** the following paragraph MUST begin normal classification rather than inheriting the group
+
+#### Scenario: Association cannot cross media
+
+- **WHEN** another media block is encountered
+- **THEN** any prior caption group MUST end
+- **THEN** the new media MUST receive an independent scope and length budget
+
+### Requirement: Caption character limits apply to explicit and compatible captions
+
+Configured limits SHALL be final safety valves after media association.
+
+#### Scenario: Single caption block exceeds its limit
+
+- **WHEN** an associated caption block exceeds its applicable base or muted/small-style limit
+- **THEN** it MUST be emitted as `txt`
+- **THEN** source wording, class metadata, or explicit markup MUST NOT bypass the limit
+
+#### Scenario: Caption scope exceeds its cumulative limit
+
+- **WHEN** associated blocks in one media/scope cumulatively exceed the selected limit
+- **THEN** the overflowing block and all later blocks in that scope MUST be emitted as `txt`
+- **THEN** other media scopes MUST remain independent
+
+### Requirement: Images may still form section-marker heading groups
+
+Caption fixes SHALL NOT change the existing article-local marker-heading relationship.
+
+#### Scenario: Decorative marker with heading text forms a section header
+
+- **WHEN** a decorative or numbered marker image is followed by isolated heading text and body flow
 - **THEN** the heading text MUST be emitted as `h`
+- **THEN** it MUST NOT be consumed by caption compatibility
 
-#### Scenario: Unknown media does not swallow following body by default
-- **WHEN** an image does not have enough evidence to be content media or section marker
-- **THEN** the classifier MUST NOT automatically classify the next short centered text as `cap`
-- **THEN** the next text MUST be resolved by the normal role decision process
+#### Scenario: Dimensionless unknown media does not swallow plain text
 
-### Requirement: Reported URL structures are classified by role relationship
-The reported WeChat URL fixtures SHALL be classified by structure, not by hard-coded article URL, title string, color, or absolute font size.
+- **WHEN** media has no dimensions and the following short text has no caption signal
+- **THEN** adjacency alone MUST NOT emit `cap`
 
-#### Scenario: Number marker title is heading
-- **WHEN** the minimal fixture derived from `https://mp.weixin.qq.com/s/gtyfKcOPo6SlcCjYvChhjw` is parsed
-- **THEN** `年收入超过11亿元` MUST be emitted as `h`
-- **THEN** the following normal paragraph MUST remain `txt`
+### Requirement: Reported URL and historical positives are dual regression gates
 
-#### Scenario: Real caption and later section title coexist
-- **WHEN** the minimal fixture derived from `https://mp.weixin.qq.com/s/katP22I4qo5CEFWQC5YeVw` is parsed
-- **THEN** `图源大众点评` MUST be emitted as `cap`
-- **THEN** `重生之泰奶又又又火了` MUST be emitted as `h`
+Fixes SHALL pass both the reported false-positive fixtures and all historical true-positive caption fixtures. Passing only one side is insufficient.
 
-#### Scenario: Explicit h tag in preface is not blindly promoted
-- **WHEN** a WeChat preface line such as author or source metadata uses an `h1` tag before body flow starts
-- **THEN** the classifier MUST NOT emit it as a body section heading solely because of the tag name
+#### Scenario: Reported header and body remain text
 
-### Requirement: Metamorphic tests prevent sample-specific fixes
-The classifier SHALL include tests that prove the implementation is not hard-coded to the reported strings, URLs, wrapper depth, or exact style spelling.
+- **WHEN** the minimal fixture derived from `https://mp.weixin.qq.com/s/LmvhTcF2V7WVfY7xJTAhmQ` is parsed
+- **THEN** author/copyright metadata and the following question/prose MUST remain `txt`
+- **THEN** removing the metadata so the question directly follows the banner MUST NOT change that prose into `cap`
 
-#### Scenario: Heading text can change
-- **WHEN** a section-marker fixture replaces `年收入超过11亿元` or `重生之泰奶又又又火了` with another short heading phrase while preserving the same role relationship
-- **THEN** the replacement heading MUST still be emitted as `h`
+#### Scenario: Reported source caption and later prose coexist
 
-#### Scenario: Wrapper and style spelling can change
-- **WHEN** semantically equivalent wrapper spans or sections are inserted, style declarations are reordered, or compatible px/pt units are used
-- **THEN** the classifier MUST preserve the same role decisions
+- **WHEN** the historical visual source caption `图源：Neuro` follows its image and later prose uses the article's 14px dark-grey body typography
+- **THEN** the source line MUST remain `cap`
+- **THEN** every later prose paragraph MUST remain `txt`
 
-#### Scenario: Removing the section marker changes the evidence
-- **WHEN** the same short centered text appears without a section marker or body-flow relationship
-- **THEN** the classifier MUST NOT promote it to `h` solely because the text is short or centered
+#### Scenario: Compatibility change cannot rewrite old positives
 
-### Requirement: Negative role boundaries are preserved
-The classifier SHALL preserve known negative boundaries so fixes do not convert captions, source lines, or body emphasis into headings.
+- **WHEN** any caption-classification implementation changes
+- **THEN** the original historical caption fixtures MUST be replayed without replacing them with explicit markup
+- **THEN** `go test ./...` and `npm test` MUST pass
 
-#### Scenario: Source lines remain captions after content image
-- **WHEN** text following content media begins with `图源`, `图为`, or `图片来源`
-- **THEN** it MUST be emitted as `cap`
-- **THEN** it MUST NOT be emitted as `h`
+### Requirement: Guarantee boundary is explicit
 
-#### Scenario: Body-like sentence after marker is not heading by itself
-- **WHEN** a section marker is followed by a full sentence or long body-like paragraph
-- **THEN** that text MUST NOT be promoted to `h` solely because it follows the marker
+The classifier SHALL guarantee bounded media association, body-style isolation, scope isolation, and regression compatibility. It SHALL NOT claim perfect recovery of author intent from arbitrary HTML.
 
-#### Scenario: Reference section is not captioned
-- **WHEN** a reference heading and reference entries appear after images
-- **THEN** the reference heading and entries MUST remain in reference/body flow handling
-- **THEN** they MUST NOT be swallowed as image captions
+#### Scenario: Source provides no distinguishing information
+
+- **WHEN** body and caption are indistinguishable in relationship, typography, wording, and surrounding flow
+- **THEN** deterministic classification may remain ambiguous
+- **THEN** the product MUST prefer readable output and MUST NOT allow an inferred caption group to propagate without a media-bound scope
