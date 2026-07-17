@@ -25,6 +25,9 @@ API_TARGET=$API_DIR/fbif-api
 ENV_TARGET=$API_DIR/.env
 RENDER_TARGET=/var/www/render-service
 CADDY_TARGET=/etc/caddy/sites/fbifmp-layout.caddy
+WATCHDOG_DIR=/opt/fbif-monitor-watchdog
+WATCHDOG_SERVICE_TARGET=/etc/systemd/system/fbif-monitor-watchdog.service
+WATCHDOG_TIMER_TARGET=/etc/systemd/system/fbif-monitor-watchdog.timer
 BACKUP_ROOT=/var/www/.fbif-layout-backups/$DEPLOY_ID
 
 marker() {
@@ -53,13 +56,16 @@ validate_release() {
     "$RELEASE_DIR/api.env" \
     "$RELEASE_DIR/render/server.mjs" \
     "$RELEASE_DIR/render/node_modules" \
-    "$RELEASE_DIR/caddy/fbifmp-layout.caddy"; do
+    "$RELEASE_DIR/caddy/fbifmp-layout.caddy" \
+    "$RELEASE_DIR/monitoring/watchdog.py" \
+    "$RELEASE_DIR/monitoring/fbif-monitor-watchdog.service" \
+    "$RELEASE_DIR/monitoring/fbif-monitor-watchdog.timer"; do
     [[ -e "$required" ]] || die "missing staged artifact: $required"
   done
   [[ -x "$RELEASE_DIR/api/fbif-api" ]] || die "staged API binary is not executable"
 
   local command_name
-  for command_name in caddy curl install mv cp rm sed systemctl; do
+  for command_name in caddy curl install mv cp rm sed systemctl python3; do
     command -v "$command_name" >/dev/null || die "missing remote command: $command_name"
   done
 
@@ -72,6 +78,26 @@ validate_release() {
     die "staged API env must start with DEPLOYMENT_WRITES_PAUSED=1"
   wait_http_ok http://127.0.0.1:9001/api/health 5
   wait_http_ok http://127.0.0.1:19096/healthz 5
+}
+
+install_monitoring() {
+  [[ -d "$BACKUP_ROOT" ]] || die "active transaction backup not found: $BACKUP_ROOT"
+  grep -qx 'DEPLOYMENT_WRITES_PAUSED=0' "$ENV_TARGET" ||
+    die "monitoring may only start after deployment writes are unpaused"
+  [[ -r /var/www/api/publish.env ]] || die "publish.env is required by monitoring watchdog"
+
+  install -d -m 0755 "$WATCHDOG_DIR"
+  install -m 0755 "$RELEASE_DIR/monitoring/watchdog.py" "$WATCHDOG_DIR/watchdog.py.new.$DEPLOY_ID"
+  mv -f -- "$WATCHDOG_DIR/watchdog.py.new.$DEPLOY_ID" "$WATCHDOG_DIR/watchdog.py"
+  install -m 0644 "$RELEASE_DIR/monitoring/fbif-monitor-watchdog.service" "$WATCHDOG_SERVICE_TARGET.new.$DEPLOY_ID"
+  install -m 0644 "$RELEASE_DIR/monitoring/fbif-monitor-watchdog.timer" "$WATCHDOG_TIMER_TARGET.new.$DEPLOY_ID"
+  mv -f -- "$WATCHDOG_SERVICE_TARGET.new.$DEPLOY_ID" "$WATCHDOG_SERVICE_TARGET"
+  mv -f -- "$WATCHDOG_TIMER_TARGET.new.$DEPLOY_ID" "$WATCHDOG_TIMER_TARGET"
+  systemctl daemon-reload
+  systemctl enable --now fbif-monitor-watchdog.timer
+  systemctl start fbif-monitor-watchdog.service
+  systemctl is-enabled --quiet fbif-monitor-watchdog.timer
+  systemctl is-active --quiet fbif-monitor-watchdog.timer
 }
 
 restore_path() {
@@ -220,6 +246,9 @@ case "$ACTION" in
   unpause)
     unpause_release
     ;;
+  install-monitoring)
+    install_monitoring
+    ;;
   rollback)
     if [[ -d "$BACKUP_ROOT" ]]; then
       rollback_impl
@@ -229,6 +258,6 @@ case "$ACTION" in
     rm -rf -- "$BACKUP_ROOT" "$RELEASE_DIR"
     ;;
   *)
-    die "usage: $0 {preflight|activate|unpause|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
+    die "usage: $0 {preflight|activate|unpause|install-monitoring|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
     ;;
 esac

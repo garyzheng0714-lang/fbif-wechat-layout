@@ -13,6 +13,31 @@ import (
 )
 
 func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
+	mux.HandleFunc("POST /api/publish/monitor-alert", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishServiceToken(w, r) {
+			return
+		}
+		var req publishMonitorAlertRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid monitoring alert")
+			return
+		}
+		message, err := formatPublishMonitorAlert(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if p.notify == nil {
+			writeError(w, http.StatusServiceUnavailable, "monitoring reporter is not configured")
+			return
+		}
+		if err := p.notify(r.Context(), message); err != nil {
+			writeError(w, http.StatusBadGateway, "monitoring alert delivery failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"delivered": true})
+	})
+
 	mux.HandleFunc("GET /api/publish/monitoring", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishSubmitOrAdmin(w, r) {
 			return
