@@ -31,6 +31,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	t.Setenv("FOODTALKS_ADMIN_ARTICLE_URL", "https://admin-we-test.foodtalks.cn/#/")
 	t.Setenv("FOODTALKS_CATEGORY_IDS", "52,58")
 	t.Setenv("FOODTALKS_EXPECTED_TARGET", "test")
+	t.Setenv("PUBLISH_HTTP_REVIEW_ENABLED", "")
 
 	mux := newPublishTestMux(t, env)
 	rec := doPublishReq(mux, http.MethodGet, "/api/publish/readiness", "", true)
@@ -48,13 +49,51 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Ready || !got.WorkersPaused || got.FoodTalks.Target != "test" ||
+	if !got.Ready || !got.WorkersPaused || !got.ServiceAuth.Configured || got.HTTPReviewEnabled || got.FoodTalks.Target != "test" ||
 		!got.FoodTalks.TargetMatchesExpected || got.EnrichMode != "dual" {
 		t.Fatalf("readiness 核心状态错误：%+v", got)
 	}
 	if !got.Feishu.NotifyConfigured || !got.Feishu.WSConfigured ||
 		!got.Feishu.WebhookConfigured || !got.Feishu.ReviewerAllowlistConfigured {
 		t.Fatalf("飞书 readiness 错误：%+v", got.Feishu)
+	}
+}
+
+func TestPublishReadinessFailsClosedWithoutReviewerAllowlistOrServiceToken(t *testing.T) {
+	env := newPublishTestEnv(t)
+	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("PUBLISH_SYNC_SERVICE_TOKEN", testPublishSyncServiceToken)
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "")
+	got := currentPublishReadiness(env.pipeline)
+	if got.Feishu.ReviewerAllowlistConfigured || got.Ready {
+		t.Fatalf("空审核白名单必须使 readiness=false：%+v", got)
+	}
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer")
+	t.Setenv("PUBLISH_SYNC_SERVICE_TOKEN", "")
+	got = currentPublishReadiness(env.pipeline)
+	if got.ServiceAuth.Configured || got.Ready {
+		t.Fatalf("缺同步服务凭证必须使 readiness=false：%+v", got)
+	}
+}
+
+func TestFoodTalksTargetClassificationIsTokenBasedAndHTTPSOnly(t *testing.T) {
+	for _, raw := range []string{
+		"https://api-we-test.foodtalks.cn",
+		"https://test.foodtalks.cn",
+		"https://admin-we-test.foodtalks.cn/#/",
+	} {
+		if got := foodTalksURLTarget(raw); got != "test" {
+			t.Fatalf("foodTalksURLTarget(%q)=%q want test", raw, got)
+		}
+	}
+	if got := foodTalksURLTarget("https://contest.foodtalks.cn"); got != "production" {
+		t.Fatalf("substring 'test' must not spoof test target: got %q", got)
+	}
+	if configuredHTTPBaseURL("http://api-we-test.foodtalks.cn") {
+		t.Fatal("non-loopback FoodTalks endpoints must use HTTPS")
+	}
+	if !configuredHTTPBaseURL("http://127.0.0.1:19090") {
+		t.Fatal("local test endpoint should remain available")
 	}
 }
 

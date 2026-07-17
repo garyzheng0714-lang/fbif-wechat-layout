@@ -17,10 +17,12 @@ import (
 )
 
 const testAdminPassword = "test-admin-pw"
+const testPublishSyncServiceToken = "test-publish-sync-service-token"
 
 func newPublishTestMux(t *testing.T, env *publishTestEnv) *http.ServeMux {
 	t.Helper()
 	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("PUBLISH_SYNC_SERVICE_TOKEN", testPublishSyncServiceToken)
 	mux := http.NewServeMux()
 	registerPublishRoutes(mux, env.pipeline)
 	return mux
@@ -31,6 +33,14 @@ func doPublishReq(mux *http.ServeMux, method, target, body string, withAuth bool
 	if withAuth {
 		req.Header.Set("X-Admin-Password", testAdminPassword)
 	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func doPublishServiceReq(mux *http.ServeMux, method, target, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, target, bytes.NewBufferString(body))
+	req.Header.Set("X-Publish-Sync-Token", testPublishSyncServiceToken)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec
@@ -47,7 +57,6 @@ func TestPublishEndpointsRequireAdminPassword(t *testing.T) {
 		{http.MethodGet, "/api/publish/readiness", ""},
 		{http.MethodGet, "/api/publish/jobs", ""},
 		{http.MethodGet, "/api/publish/jobs/1", ""},
-		{http.MethodPost, "/api/publish/jobs/1/review", `{"action":"approve"}`},
 		{http.MethodPost, "/api/publish/jobs/1/retry", ""},
 		{http.MethodPost, "/api/publish/jobs/1/reconcile", `{"foodtalks_news_id":7240}`},
 	}
@@ -59,6 +68,140 @@ func TestPublishEndpointsRequireAdminPassword(t *testing.T) {
 	// 红线连带断言：以上未过门的请求不得触发任何 FoodTalks 调用。
 	if createN, updateN := env.ft.counts(); createN != 0 || updateN != 0 {
 		t.Fatalf("未过鉴权门的请求触发了 FoodTalks 调用（create=%d update=%d）", createN, updateN)
+	}
+}
+
+func TestPublishSyncServiceTokenHasLeastPrivilege(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+
+	created := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q,"title":"普通文章","content_html":"<p>这是足够长的普通公众号文章正文，用于验证最小权限提交。</p>","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"test-v1"}`, testPublishSourceURL))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("同步服务凭证应能提交任务，实际 %d body=%s", created.Code, created.Body.String())
+	}
+	var response struct {
+		Job publishSyncJobSummary `json:"job"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &response); err != nil || response.Job.ID <= 0 {
+		t.Fatalf("提交响应应为紧凑任务摘要：err=%v body=%s", err, created.Body.String())
+	}
+	status := doPublishServiceReq(mux, http.MethodPost, "/api/publish/sync-status",
+		fmt.Sprintf(`{"job_ids":[%d]}`, response.Job.ID))
+	if status.Code != http.StatusOK || strings.Contains(status.Body.String(), "content_html") ||
+		strings.Contains(status.Body.String(), "blocks_json") || strings.Contains(status.Body.String(), "risk_raw") {
+		t.Fatalf("同步状态应可读且不含大字段/模型原文，实际 %d body=%s", status.Code, status.Body.String())
+	}
+	monitoring := doPublishServiceReq(mux, http.MethodGet, "/api/publish/monitoring", "")
+	if monitoring.Code != http.StatusOK || strings.Contains(monitoring.Body.String(), "content_html") ||
+		strings.Contains(monitoring.Body.String(), "blocks_json") || strings.Contains(monitoring.Body.String(), "risk_raw") {
+		t.Fatalf("同步服务凭证应能读取无正文的运行指标，实际 %d body=%s", monitoring.Code, monitoring.Body.String())
+	}
+
+	for _, tc := range []struct {
+		method, target, body string
+	}{
+		{http.MethodGet, "/api/publish/readiness", ""},
+		{http.MethodGet, "/api/publish/jobs", ""},
+		{http.MethodGet, fmt.Sprintf("/api/publish/jobs/%d", response.Job.ID), ""},
+		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/review", response.Job.ID), `{"action":"approve"}`},
+		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/retry", response.Job.ID), ""},
+		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/reconcile", response.Job.ID), `{"confirm_not_created":true}`},
+	} {
+		rec := doPublishServiceReq(mux, tc.method, tc.target, tc.body)
+		if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusNotFound {
+			t.Fatalf("同步服务凭证不得调用管理端点 %s %s，实际 %d body=%s", tc.method, tc.target, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestPublishMachineSiteSyncFailsClosedWithoutOrdinaryEvidence(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q}`, testPublishSourceURL))
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "ordinary") {
+		t.Fatalf("missing positive type evidence must be held: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
+		t.Fatalf("fail-closed request must not create a job: jobs=%d err=%v", len(jobs), err)
+	}
+}
+
+func TestPublishMachineSiteSyncFailsClosedWithEmptyBody(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	body := fmt.Sprintf(`{"url":%q,"content_html":"<p> </p>","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"test-v1"}`, testPublishSourceURL)
+	rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync", body)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "non-empty") {
+		t.Fatalf("empty machine body must be held: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
+		t.Fatalf("empty body request must not create a job: jobs=%d err=%v", len(jobs), err)
+	}
+}
+
+func TestPublishMachineOfficialSyncFailsClosedWithoutOrdinaryEvidence(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	body := fmt.Sprintf(`{"url":%q,"title":"官方标题","content_html":"<p>这是足够长的官方普通文章正文内容。</p>"}`, testPublishSourceURL)
+	rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/official-sync", body)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "ordinary") {
+		t.Fatalf("official machine request without type evidence must be held: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
+		t.Fatalf("fail-closed official request must not create a job: jobs=%d err=%v", len(jobs), err)
+	}
+}
+
+func TestPublishMachineSyncRejectsUnsafeActiveHTMLBeforeJobCreation(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	cases := []struct {
+		path string
+		html string
+	}{
+		{"/api/publish/site-sync", `<p>普通正文</p><iframe src="https://example.com/embed"></iframe>`},
+		{"/api/publish/official-sync", `<p onclick="publish()">普通正文</p>`},
+		{"/api/publish/official-sync", `<a href="javascript:alert(1)">普通正文链接</a>`},
+	}
+	for index, tc := range cases {
+		body, err := json.Marshal(map[string]string{
+			"url":                fmt.Sprintf("https://mp.weixin.qq.com/s?__biz=MzUnsafe&mid=%d&idx=1", index+1),
+			"title":              "不安全正文",
+			"content_html":       tc.html,
+			"content_kind":       "article",
+			"classification":     "ordinary_confirmed",
+			"classifier_version": "test-v1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := doPublishServiceReq(mux, http.MethodPost, tc.path, string(body))
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "unsafe") {
+			t.Fatalf("unsafe machine HTML should be rejected: path=%s status=%d body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+	}
+	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
+		t.Fatalf("unsafe machine HTML must not create jobs: jobs=%d err=%v", len(jobs), err)
+	}
+}
+
+func TestPublishHTTPReviewDisabledByDefault(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := fmt.Sprintf("/api/publish/jobs/%d/review", job.ID)
+	rec := doPublishReq(mux, http.MethodPost, target, `{"action":"approve"}`, true)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("HTTP 审核默认应关闭并返回 404，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageAwaitingReview || got.ReviewAction != "" {
+		t.Fatalf("关闭的 HTTP 审核不得改变任务：stage=%q action=%q", got.Stage, got.ReviewAction)
 	}
 }
 
@@ -119,7 +262,7 @@ func TestPublishOfficialSyncAcceptsOfficialPlainText(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
 	body, err := json.Marshal(map[string]string{
-		"url":          "https://mp.weixin.qq.com/s/official-plain-text",
+		"url":          "https://mp.weixin.qq.com/s?__biz=MzPlainText&mid=101&idx=1&sn=plain",
 		"title":        "官方纯文本快讯",
 		"source_name":  "FBIF食品饮料创新",
 		"content_html": "第一段官方正文。\n\n第二段官方正文。\n\n参考来源：官方公告",
@@ -158,7 +301,7 @@ func TestPublishOfficialSyncAcceptsPlainTextWithInlineLinks(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
 	body, err := json.Marshal(map[string]string{
-		"url":          "https://mp.weixin.qq.com/s/official-plain-text-links",
+		"url":          "https://mp.weixin.qq.com/s?__biz=MzPlainText&mid=102&idx=1&sn=links",
 		"title":        "官方纯文本带链接快讯",
 		"source_name":  "FBIF食品饮料创新",
 		"content_html": "第一段官方正文。\n\n更多阅读：\n<a href=\"https://mp.weixin.qq.com/s/related\">相关历史文章</a>",
@@ -239,6 +382,9 @@ func TestPublishSiteSyncIdempotentHTTP(t *testing.T) {
 // TestPublishReviewAndDetailHTTP 审核端点走通 approve 全链路，详情端点回读全量字段。
 func TestPublishReviewAndDetailHTTP(t *testing.T) {
 	env := newPublishTestEnv(t)
+	t.Setenv("PUBLISH_HTTP_REVIEW_ENABLED", "1")
+	t.Setenv("PUBLISH_HTTP_REVIEWER_OPEN_ID", "ou_breakglass_reviewer")
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_breakglass_reviewer")
 	mux := newPublishTestMux(t, env)
 	rec := doPublishReq(mux, http.MethodPost, "/api/publish/site-sync",
 		fmt.Sprintf(`{"url":%q}`, testPublishSourceURL), true)

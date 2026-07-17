@@ -42,26 +42,47 @@ const (
 	publishStagePublicizeReconciliationRequired = "publicize_reconciliation_required"
 	publishStagePublished                       = "published"
 	publishStageRejected                        = "rejected"
+	publishStageSupersededDuplicate             = "superseded_duplicate"
 	publishStageFailed                          = "failed"
 )
 
 // publishJob 一条「公众号 → FoodTalks 网站」发布任务（字段清单来自施工图 S1）。
 type publishJob struct {
-	ID              int64    `json:"id"`
-	SourceKey       string   `json:"source_key"`               // 归一化幂等键（normalizeSiteSourceKey）
-	SourceAliases   []string `json:"source_aliases,omitempty"` // 抓取后解出的同文规范身份（短链↔长链去重）
-	SourceURL       string   `json:"source_url"`               // 用户提交的原始公众号文章链接
-	Stage           string   `json:"stage"`
-	FailedStage     string   `json:"failed_stage,omitempty"` // stage=failed 时的续跑起点
-	Error           string   `json:"error,omitempty"`
-	Title           string   `json:"title,omitempty"`
-	SourceName      string   `json:"source_name,omitempty"` // 公众号名（fetching 阶段解析）
-	BlocksJSON      string   `json:"blocks_json,omitempty"` // 中立 Block[] 序列化（先落库再推进，链接过期不回源）
-	ContentHTML     string   `json:"content_html,omitempty"`
-	CoverURL        string   `json:"cover_url,omitempty"`
-	ImageMap        string   `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
-	FoodTalksNewsID int64    `json:"foodtalks_news_id,omitempty"`
-	ArticleURL      string   `json:"article_url,omitempty"`
+	ID                int64    `json:"id"`
+	SourceKey         string   `json:"source_key"`               // 归一化幂等键（normalizeSiteSourceKey）
+	SourceAliases     []string `json:"source_aliases,omitempty"` // 抓取后解出的同文规范身份（短链↔长链去重）
+	SourceURL         string   `json:"source_url"`               // 用户提交的原始公众号文章链接
+	Stage             string   `json:"stage"`
+	FailedStage       string   `json:"failed_stage,omitempty"` // stage=failed 时的续跑起点
+	Error             string   `json:"error,omitempty"`
+	Title             string   `json:"title,omitempty"`
+	SourceName        string   `json:"source_name,omitempty"` // 公众号名（fetching 阶段解析）
+	Classification    string   `json:"classification,omitempty"`
+	Classifier        string   `json:"classifier_version,omitempty"`
+	SupersededByJobID int64    `json:"superseded_by_job_id,omitempty"`
+	BlocksJSON        string   `json:"blocks_json,omitempty"` // 中立 Block[] 序列化（先落库再推进，链接过期不回源）
+	ContentHTML       string   `json:"content_html,omitempty"`
+	CoverURL          string   `json:"cover_url,omitempty"`
+	ImageMap          string   `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
+	// 内容版本契约：权威顺序 official_api > supplier > web_fetch。高权威
+	// 内容晚到时先持久化；可逆阶段重跑草稿，已进入不确定/公开窗口则只留冲突证据。
+	ContentSource        string `json:"content_source,omitempty"`
+	ContentHash          string `json:"content_hash,omitempty"`
+	ContentVersion       int64  `json:"content_version,omitempty"`
+	ContentFrozenVersion int64  `json:"content_frozen_version,omitempty"`
+	ContentFrozenAt      string `json:"content_frozen_at,omitempty"`
+	PendingContentSource string `json:"pending_content_source,omitempty"`
+	PendingContentHash   string `json:"pending_content_hash,omitempty"`
+	PendingTitle         string `json:"pending_title,omitempty"`
+	PendingSourceName    string `json:"pending_source_name,omitempty"`
+	PendingAuthor        string `json:"pending_author,omitempty"`
+	PendingBlocksJSON    string `json:"pending_blocks_json,omitempty"`
+	PendingCoverURL      string `json:"pending_cover_url,omitempty"`
+	PendingContentAt     string `json:"pending_content_at,omitempty"`
+	ContentConflict      bool   `json:"content_conflict,omitempty"`
+	ContentConflictNote  string `json:"content_conflict_note,omitempty"`
+	FoodTalksNewsID      int64  `json:"foodtalks_news_id,omitempty"`
+	ArticleURL           string `json:"article_url,omitempty"`
 	// FoodTalks CreateNews 没有服务端幂等键：外调前先持久化本地 intent。
 	// 调用结果不确定时凭此转人工核对，禁止自动 POST 第二次。
 	StagingIntentKey string `json:"staging_intent_key,omitempty"`
@@ -100,7 +121,7 @@ type publishJob struct {
 // terminal 终态判定：published / rejected 之后任务盖棺；failed 不算终态（可 retry 续跑），
 // 因此同 source_key 再提交会幂等返回 failed 任务而不是建新单。
 func (j publishJob) terminal() bool {
-	return j.Stage == publishStagePublished || j.Stage == publishStageRejected
+	return j.Stage == publishStagePublished || j.Stage == publishStageRejected || j.Stage == publishStageSupersededDuplicate
 }
 
 type publishJobDocument struct {

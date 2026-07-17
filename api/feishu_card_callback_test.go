@@ -48,13 +48,13 @@ func TestFeishuCallbackMissingTokenFailClosed(t *testing.T) {
 }
 
 // TestFeishuReviewerAllowlistFailClosed Webhook 与长连接共用 reviewCardAction：
-// **配置了**白名单时非白名单成员不能审核；未配置 = 对审核群成员开放（2026-07-11
-// 用户裁定「白名单不需要」，见 TestFeishuReviewerOpenWhenUnset）。
+// 非白名单、空白名单与非法 open_id 均默认拒绝。
 func TestFeishuReviewerAllowlistFailClosed(t *testing.T) {
 	for _, tc := range []struct {
 		name, allowlist, operator string
 	}{
 		{name: "非白名单成员", allowlist: "ou_allowed", operator: "ou_intruder"},
+		{name: "空白名单", allowlist: "", operator: "ou_group_member"},
 		{name: "非法 open_id 不能注入卡片", allowlist: `"><at id=all>`, operator: `"><at id=all>`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,6 +77,20 @@ func TestFeishuReviewerAllowlistFailClosed(t *testing.T) {
 				t.Fatalf("未授权审核触发了公开请求：%d", updateN)
 			}
 		})
+	}
+}
+
+func TestReviewVersionKeepsLegacyCardsCompatibleAndVersionsNewContent(t *testing.T) {
+	legacy := publishJob{ID: 7, RiskLevel: publishRiskPass}
+	if got := publishReviewCardVersion(legacy); !strings.HasPrefix(got, "risk-v2:7:") {
+		t.Fatalf("legacy review version=%q", got)
+	}
+	versioned := legacy
+	versioned.ContentHash = "abc"
+	versioned.ContentVersion = 1
+	versioned.ContentFrozenVersion = 1
+	if got := publishReviewCardVersion(versioned); !strings.HasPrefix(got, "review-v3:7:") {
+		t.Fatalf("versioned review version=%q", got)
 	}
 }
 
@@ -617,32 +631,26 @@ func TestNotifyPendingCardFallbackToText(t *testing.T) {
 	}
 }
 
-// TestFeishuReviewerOpenWhenUnset 2026-07-11 用户裁定「审核员的白名单不需要」：
-// FEISHU_REVIEWER_OPEN_IDS 未配置时审核群成员即审核人，卡片按钮直接可用（approve
-// 照常走翻公开唯一路径）；空/畸形 operator 仍拒绝（来源完整性底线不放）。
-func TestFeishuReviewerOpenWhenUnset(t *testing.T) {
+// TestFeishuReviewerClosedWhenUnset 锁死当前发布安全合同：空白名单不得把审核权
+// 扩散到整个群，任务必须保持 awaiting_review，且不能触发 FoodTalks。
+func TestFeishuReviewerClosedWhenUnset(t *testing.T) {
 	env := newPublishTestEnv(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "")
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	env.ft.mu.Lock()
-	env.ft.forbidPublish = false // 本场景 approve 合法
-	env.ft.mu.Unlock()
 	current, _ := env.store.byID(job.ID)
 	raw := json.RawMessage(fmt.Sprintf(`{"action":"approve","job_id":%d,"review_version":%q}`, job.ID, publishReviewCardVersion(current)))
 	out := env.pipeline.reviewCardAction(context.Background(), "ou_any_group_member", raw)
-	if out.toastType != "success" {
-		t.Fatalf("未配置白名单时群成员应可审核，实际 %+v", out)
+	if out.toastType != "error" || !strings.Contains(out.toastContent, "权限") {
+		t.Fatalf("未配置白名单时必须拒绝审核，实际 %+v", out)
 	}
 	got, _ := env.store.byID(job.ID)
-	if got.Stage != publishStagePublished || got.ReviewedBy != "ou_any_group_member" {
-		t.Fatalf("审核未生效或留痕缺失：stage=%q by=%q", got.Stage, got.ReviewedBy)
+	if got.Stage != publishStageAwaitingReview || got.ReviewedBy != "" {
+		t.Fatalf("空白名单不得改变任务：stage=%q by=%q", got.Stage, got.ReviewedBy)
 	}
-	// 空 operator 仍拒绝。
-	out = env.pipeline.reviewCardAction(context.Background(), "", raw)
-	if out.toastType != "error" {
-		t.Fatalf("空 operator 必须仍被拒绝：%+v", out)
+	if _, updateN := env.ft.counts(); updateN != 0 {
+		t.Fatalf("空白名单审核不得触发公开请求：%d", updateN)
 	}
 }
