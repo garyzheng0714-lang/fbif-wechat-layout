@@ -2,7 +2,7 @@
 """FBIF 公众号监控独立看门狗。
 
 该进程由 systemd timer 启动，不依赖排版 API 的 worker。它从外部网络检查
-排版、feed 和微信官方数据服务，并直接使用飞书应用凭证发告警。
+排版、feed 和微信官方数据服务，并直接使用飞书应用凭证向指定 user_id 私聊告警。
 """
 
 from __future__ import annotations
@@ -119,8 +119,8 @@ def _post_json(
     return result
 
 
-def send_feishu_app(app_id: str, app_secret: str, chat_id: str, message: str, timeout: float) -> None:
-    if not app_id or not app_secret or not chat_id:
+def send_feishu_app(app_id: str, app_secret: str, user_id: str, message: str, timeout: float) -> None:
+    if not app_id or not app_secret or not user_id:
         raise RuntimeError("feishu_reporter_not_configured")
     token_result = _post_json(
         FEISHU_TOKEN_URL,
@@ -133,9 +133,9 @@ def send_feishu_app(app_id: str, app_secret: str, chat_id: str, message: str, ti
     if int(token_result.get("code", 0)) != 0 or not token:
         raise RuntimeError(f"feishu_token:code_{token_result.get('code')}")
     result = _post_json(
-        FEISHU_MESSAGE_URL + "?receive_id_type=chat_id",
+        FEISHU_MESSAGE_URL + "?receive_id_type=user_id",
         {
-            "receive_id": chat_id,
+            "receive_id": user_id,
             "msg_type": "text",
             "content": json.dumps({"text": message[:15000]}, ensure_ascii=False),
         },
@@ -217,7 +217,7 @@ def run(args: argparse.Namespace) -> int:
     reporter = (
         os.getenv("FEISHU_APP_ID", "").strip(),
         os.getenv("FEISHU_APP_SECRET", "").strip(),
-        os.getenv("FEISHU_REVIEW_CHAT_ID", "").strip(),
+        os.getenv("PUBLISH_MONITOR_FEISHU_USER_ID", "").strip(),
     )
     issues: list[str] = []
     if not service_token:

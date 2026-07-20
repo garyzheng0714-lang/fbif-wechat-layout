@@ -230,6 +230,7 @@ curl http://127.0.0.1:9000/api/health
 | `FOODTALKS_EXPECTED_TARGET` | 显式声明 `test` 或 `production`；readiness 会拒绝缺失、未知或与 FoodTalks URL 不一致的配置 |
 | `DEPLOYMENT_WRITES_PAUSED` | 部署候选实例专用；为 `1` 时暂停发布/rules 写入口、恢复任务、通知 worker 与飞书长连接，验收通过后由事务脚本清零 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REVIEW_CHAT_ID` | 审核通知和长连接回调 |
+| `PUBLISH_MONITOR_FEISHU_USER_ID` | P0 异常、恢复和每日心跳的飞书私聊收件人 `user_id`；与审核群分开，缺失时 readiness 失败且不回退群聊 |
 | `FEISHU_VERIFICATION_TOKEN` | Webhook 回调来源校验；长连接模式不使用 |
 | `FEISHU_REVIEWER_OPEN_IDS` | 可执行审核的飞书 `open_id` 白名单，逗号分隔；空值时卡片审核和可选 HTTP 审核全部 fail-closed，readiness 失败 |
 | `ARK_API_KEY` / `ARK_MODEL_ID` / `ARK_BASE_URL` | AI 元数据预填与发布风险检查；缺失或失败时风险结论 fail-safe 降级为 `warning`，不阻断进入人工审核 |
@@ -274,7 +275,7 @@ go test ./...
 5. 任何候选验收失败都恢复上一 release；验收成功后确认 release、关闭自动回滚，再把 pause 清零并重启 API。
 6. 解暂停后再次检查健康与 readiness。此时外部副作用可能恢复，只允许向前修复，不自动切回旧版制造重复发布。
 
-当前生产配置显式锁定 `FOODTALKS_EXPECTED_TARGET=test`；切换正式 FoodTalks 是单独的外部环境变更，必须同时更新 API、前台、后台 URL 与凭证后再通过 readiness。`PUBLISH_SYNC_SERVICE_TOKEN` 或 `FEISHU_REVIEWER_OPEN_IDS` 缺失、HTTP 审核意外开启时，readiness 均失败。发布任务 JSON store 带进程锁，只允许一个 API 实例持有；横向扩容前必须迁移到支持事务与锁的存储。
+当前生产配置显式锁定 `FOODTALKS_EXPECTED_TARGET=test`；切换正式 FoodTalks 是单独的外部环境变更，必须同时更新 API、前台、后台 URL 与凭证后再通过 readiness。`PUBLISH_SYNC_SERVICE_TOKEN`、`PUBLISH_MONITOR_FEISHU_USER_ID` 或 `FEISHU_REVIEWER_OPEN_IDS` 缺失、HTTP 审核意外开启时，readiness 均失败。发布任务 JSON store 带进程锁，只允许一个 API 实例持有；横向扩容前必须迁移到支持事务与锁的存储。
 
 生产规则后台密码变更流程：
 

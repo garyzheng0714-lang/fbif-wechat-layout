@@ -27,11 +27,11 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if p.notify == nil {
-			writeError(w, http.StatusServiceUnavailable, "monitoring reporter is not configured")
+		if p.monitorNotify == nil {
+			writeError(w, http.StatusServiceUnavailable, "monitoring private reporter is not configured")
 			return
 		}
-		if err := p.notify(r.Context(), message); err != nil {
+		if err := p.monitorNotify(r.Context(), message); err != nil {
 			writeError(w, http.StatusBadGateway, "monitoring alert delivery failed")
 			return
 		}

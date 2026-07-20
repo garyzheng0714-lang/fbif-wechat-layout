@@ -1,12 +1,13 @@
 package main
 
-// feishu_notify.go — 飞书审核群文本通知（施工图 S4，极简实现不引 SDK）。
-// 应用「FBIF文章排版工具」（cli_aac5d107d9381bdf）向审核群发纯文本：
+// feishu_notify.go — 飞书通知（施工图 S4，极简实现不引 SDK）。
+// 应用「FBIF文章排版工具」（cli_aac5d107d9381bdf）按用途选择收件人：
+//   - 审核卡与发布结果：FEISHU_REVIEW_CHAT_ID 审核群；
+//   - P0 异常、恢复与心跳：PUBLISH_MONITOR_FEISHU_USER_ID 私聊。
 //   1) POST /open-apis/auth/v3/tenant_access_token/internal 换 tenant_access_token（缓存，
 //      过期前刷新，简单 mutex）
-//   2) POST /open-apis/im/v1/messages?receive_id_type=chat_id 发 text 消息
-// env：FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_REVIEW_CHAT_ID；任一缺失 → 通知静默禁用
-//（构造返回 nil，调用侧 WARN 一次），发送失败只 WARN 不 fail job——通知是加速器不是闸门。
+//   2) POST /open-apis/im/v1/messages，审核走 chat_id，监控走 user_id。
+// 任一路径缺少自己的收件人配置就单独禁用，监控不得回退到审核群。
 
 import (
 	"bytes"
@@ -25,16 +26,43 @@ import (
 
 const defaultFeishuBaseURL = "https://open.feishu.cn"
 
+const publishMonitorFeishuUserIDEnv = "PUBLISH_MONITOR_FEISHU_USER_ID"
+
+const (
+	feishuReceiveIDTypeChat = "chat_id"
+	feishuReceiveIDTypeUser = "user_id"
+)
+
 type feishuNotifier struct {
-	baseURL    string
-	appID      string
-	appSecret  string
-	chatID     string
-	httpClient *http.Client
+	baseURL     string
+	appID       string
+	appSecret   string
+	receiveID   string
+	receiveType string
+	httpClient  *http.Client
 
 	mu          sync.Mutex
 	token       string
 	tokenExpire time.Time
+}
+
+// newFeishuMonitorNotifierFromEnv 只构造 P0 监控私聊发送器。缺 user_id 时返回 nil；
+// 调用方必须显式失败，不能把监控消息回退到审核群。
+func newFeishuMonitorNotifierFromEnv() *feishuNotifier {
+	appID := strings.TrimSpace(os.Getenv("FEISHU_APP_ID"))
+	appSecret := strings.TrimSpace(os.Getenv("FEISHU_APP_SECRET"))
+	userID := strings.TrimSpace(os.Getenv(publishMonitorFeishuUserIDEnv))
+	if appID == "" || appSecret == "" || userID == "" {
+		return nil
+	}
+	return &feishuNotifier{
+		baseURL:     defaultFeishuBaseURL,
+		appID:       appID,
+		appSecret:   appSecret,
+		receiveID:   userID,
+		receiveType: feishuReceiveIDTypeUser,
+		httpClient:  &http.Client{Timeout: 15 * time.Second},
+	}
 }
 
 // newFeishuNotifierFromEnv 从 env 构造；任一配置缺失返回 nil（通知禁用，不影响流水线）。
@@ -46,15 +74,16 @@ func newFeishuNotifierFromEnv() *feishuNotifier {
 		return nil
 	}
 	return &feishuNotifier{
-		baseURL:    defaultFeishuBaseURL,
-		appID:      appID,
-		appSecret:  appSecret,
-		chatID:     chatID,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		baseURL:     defaultFeishuBaseURL,
+		appID:       appID,
+		appSecret:   appSecret,
+		receiveID:   chatID,
+		receiveType: feishuReceiveIDTypeChat,
+		httpClient:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
-// send 发一条群文本。所有错误都由调用方降级为 WARN 日志（施工图钉死：通知失败不 fail job）。
+// send 向构造时选定的群或私聊收件人发一条文本。
 func (n *feishuNotifier) send(ctx context.Context, text string) error {
 	content, err := json.Marshal(map[string]string{"text": text})
 	if err != nil {
@@ -75,12 +104,20 @@ func (n *feishuNotifier) sendCard(ctx context.Context, card map[string]any) erro
 
 // sendMessage 发送内核：text 与 interactive 共用同一条 im/v1/messages 通道。
 func (n *feishuNotifier) sendMessage(ctx context.Context, msgType, content string) error {
+	receiveIDType := strings.TrimSpace(n.receiveType)
+	receiveID := strings.TrimSpace(n.receiveID)
+	if receiveID == "" {
+		return errors.New("feishu: 缺少消息收件人")
+	}
+	if receiveIDType != feishuReceiveIDTypeChat && receiveIDType != feishuReceiveIDTypeUser {
+		return errors.New("feishu: 不支持的消息收件人类型")
+	}
 	token, err := n.tenantAccessToken(ctx)
 	if err != nil {
 		return err
 	}
 	body, err := json.Marshal(map[string]string{
-		"receive_id": n.chatID,
+		"receive_id": receiveID,
 		"msg_type":   msgType,
 		"content":    content,
 	})
@@ -88,7 +125,7 @@ func (n *feishuNotifier) sendMessage(ctx context.Context, msgType, content strin
 		return fmt.Errorf("feishu: 序列化请求体: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		n.baseURL+"/open-apis/im/v1/messages?receive_id_type=chat_id", bytes.NewReader(body))
+		n.baseURL+"/open-apis/im/v1/messages?receive_id_type="+receiveIDType, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("feishu: 构造请求: %w", err)
 	}

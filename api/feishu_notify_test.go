@@ -106,11 +106,12 @@ func TestFeishuNotifierSendAndTokenCache(t *testing.T) {
 	defer srv.Close()
 
 	n := &feishuNotifier{
-		baseURL:    srv.URL,
-		appID:      "cli_test",
-		appSecret:  "secret_test",
-		chatID:     "oc_test_chat",
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		baseURL:     srv.URL,
+		appID:       "cli_test",
+		appSecret:   "secret_test",
+		receiveID:   "oc_test_chat",
+		receiveType: feishuReceiveIDTypeChat,
+		httpClient:  &http.Client{Timeout: 5 * time.Second},
 	}
 	if err := n.send(context.Background(), "第一条"); err != nil {
 		t.Fatalf("send 1: %v", err)
@@ -126,6 +127,45 @@ func TestFeishuNotifierSendAndTokenCache(t *testing.T) {
 	}
 	if gotMsg.ReceiveID != "oc_test_chat" || gotMsg.MsgType != "text" || !strings.Contains(gotMsg.Content, "第二条") {
 		t.Fatalf("消息体不符：%+v", gotMsg)
+	}
+}
+
+func TestFeishuMonitorNotifierUsesPrivateUserID(t *testing.T) {
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "secret_test")
+	t.Setenv("FEISHU_REVIEW_CHAT_ID", "oc_review_group")
+	t.Setenv("PUBLISH_MONITOR_FEISHU_USER_ID", "test-monitor-user")
+	var gotQuery string
+	var gotMessage struct {
+		ReceiveID string `json:"receive_id"`
+		MsgType   string `json:"msg_type"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			fmt.Fprint(w, `{"code":0,"msg":"ok","tenant_access_token":"tok-private","expire":7200}`)
+		case "/open-apis/im/v1/messages":
+			gotQuery = r.URL.RawQuery
+			json.NewDecoder(r.Body).Decode(&gotMessage)
+			fmt.Fprint(w, `{"code":0,"msg":"ok"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	n := newFeishuMonitorNotifierFromEnv()
+	if n == nil {
+		t.Fatal("监控私聊配置完整时 notifier 不得为 nil")
+	}
+	n.baseURL = srv.URL
+	n.httpClient = srv.Client()
+	if err := n.send(context.Background(), "监控私聊"); err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "receive_id_type=user_id" || gotMessage.ReceiveID != "test-monitor-user" || gotMessage.MsgType != "text" {
+		t.Fatalf("监控通知必须只发 user_id 私聊：query=%q message=%+v", gotQuery, gotMessage)
 	}
 }
 
@@ -178,7 +218,7 @@ func TestFeishuNotifierUploadCoverUsesSquarePNG(t *testing.T) {
 	defer srv.Close()
 
 	n := &feishuNotifier{
-		baseURL: srv.URL, appID: "a", appSecret: "b", chatID: "c", httpClient: srv.Client(),
+		baseURL: srv.URL, appID: "a", appSecret: "b", httpClient: srv.Client(),
 	}
 	key, err := n.uploadImageByURL(context.Background(), srv.URL+"/cover.png")
 	if err != nil || key != "img_square" {
@@ -198,6 +238,11 @@ func TestFeishuNotifierDisabledWhenEnvMissing(t *testing.T) {
 	if n := newFeishuNotifierFromEnv(); n != nil {
 		t.Fatalf("缺 FEISHU_APP_SECRET 应禁用通知，实际返回了 notifier")
 	}
+	t.Setenv("FEISHU_APP_SECRET", "secret")
+	t.Setenv("PUBLISH_MONITOR_FEISHU_USER_ID", "")
+	if n := newFeishuMonitorNotifierFromEnv(); n != nil {
+		t.Fatalf("缺监控私聊 user_id 应禁用监控通知，实际返回了 notifier")
+	}
 	// 业务失败（code!=0）要转成 error 让调用方 WARN，不能静默吞掉。
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -208,7 +253,9 @@ func TestFeishuNotifierDisabledWhenEnvMissing(t *testing.T) {
 		fmt.Fprint(w, `{"code":230002,"msg":"bot not in chat"}`)
 	}))
 	defer srv.Close()
-	n := &feishuNotifier{baseURL: srv.URL, appID: "a", appSecret: "b", chatID: "c", httpClient: srv.Client()}
+	n := &feishuNotifier{
+		baseURL: srv.URL, appID: "a", appSecret: "b", receiveID: "c", receiveType: feishuReceiveIDTypeChat, httpClient: srv.Client(),
+	}
 	if err := n.send(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "230002") {
 		t.Fatalf("code!=0 应报错并携带 code，实际 %v", err)
 	}

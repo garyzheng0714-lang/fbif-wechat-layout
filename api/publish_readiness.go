@@ -38,6 +38,7 @@ type publishReadinessStatus struct {
 	} `json:"render"`
 	Feishu struct {
 		NotifyConfigured            bool `json:"notify_configured"`
+		MonitorNotifyConfigured     bool `json:"monitor_notify_configured"`
 		WSConfigured                bool `json:"ws_configured"`
 		WebhookConfigured           bool `json:"webhook_configured"`
 		ReviewerAllowlistConfigured bool `json:"reviewer_allowlist_configured"`
@@ -150,8 +151,10 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	appID := strings.TrimSpace(os.Getenv("FEISHU_APP_ID"))
 	appSecret := strings.TrimSpace(os.Getenv("FEISHU_APP_SECRET"))
 	chatID := strings.TrimSpace(os.Getenv("FEISHU_REVIEW_CHAT_ID"))
+	monitorUserID := strings.TrimSpace(os.Getenv(publishMonitorFeishuUserIDEnv))
 	out.Feishu.WSConfigured = appID != "" && appSecret != ""
 	out.Feishu.NotifyConfigured = out.Feishu.WSConfigured && chatID != ""
+	out.Feishu.MonitorNotifyConfigured = out.Feishu.WSConfigured && monitorUserID != ""
 	out.Feishu.WebhookConfigured = strings.TrimSpace(os.Getenv("FEISHU_VERIFICATION_TOKEN")) != ""
 	out.Feishu.ReviewerAllowlistConfigured = feishuReviewerAllowlistConfigured()
 	out.ServiceAuth.Configured = publishSyncServiceTokenConfigured()
@@ -161,6 +164,6 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.Ready = adminPasswordConfigured() && out.ServiceAuth.Configured && !out.HTTPReviewEnabled &&
 		out.StoreValid && out.FoodTalks.Configured && out.Feishu.ReviewerAllowlistConfigured &&
 		out.FoodTalks.Categories && out.Render.Configured && out.Feishu.NotifyConfigured &&
-		out.Feishu.WSConfigured && out.EnrichMode == "dual" && out.JudgeConfigured
+		out.Feishu.MonitorNotifyConfigured && out.Feishu.WSConfigured && out.EnrichMode == "dual" && out.JudgeConfigured
 	return out
 }
