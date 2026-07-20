@@ -31,6 +31,10 @@ jobs:
         working-directory: api
         run: go test ./...
 
+      - name: Prove in-flight layout or review-card work cannot report green
+        working-directory: api
+        run: go test . -run 'TestPublishMonitoring(ReportsOnlyOperationalMetrics|GuardsReviewNotificationAndDeduplication)'
+
       - name: Race-test publishing contracts
         working-directory: api
         run: go test -race ./...

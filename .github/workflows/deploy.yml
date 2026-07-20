@@ -44,6 +44,12 @@ jobs:
         run: |
           cd api
           go test ./...
+          go test -race ./...
+
+      - name: Run P0 business-closure tests (gate)
+        run: |
+          cd api
+          go test . -run 'TestPublishMonitoring(ReportsOnlyOperationalMetrics|GuardsReviewNotificationAndDeduplication)'
 
       - name: Run P0 watchdog tests (gate)
         run: python3 -m unittest monitoring/test_watchdog.py

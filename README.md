@@ -198,7 +198,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/site-sync` | 供应商正文或公众号 URL 提交；机器调用需 `X-Publish-Sync-Token`、普通图文正向分类证据、有效 classifier version、至少 20 字可见正文且不得含活动 HTML，管理员仍可手工 URL 导入 |
 | `POST` | `/api/publish/official-sync` | 微信官方 API 正文提交；机器调用同样需要服务令牌、完整普通图文正文与 fail-closed 证据 |
 | `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文 |
-| `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权 |
+| `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权。任一任务仍在 processing、审核通知仍 pending/sending、审核卡缺失或失败/对账积压时均 `ready=false`；进程存活不等于业务完成 |
 | `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员密码 |
 | `GET` | `/api/publish/readiness` | 部署/运维只读验收：存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员密码且只返回布尔/模式信息 |
 | `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员密码 |

@@ -185,13 +185,15 @@ def decide_notification(
         return (
             state,
             "recovery",
-            f"{prefix}[FBIF 公众号监控 P0] 已恢复\n检查时间：{checked_at}\n排版、feed、微信官方数据三条探针均恢复正常。",
+            f"{prefix}[FBIF 公众号监控 P0] 已恢复\n检查时间：{checked_at}\n"
+            "监控已确认的当日文章批次完整、普通文章全部进入审核、审核卡全部送达；三条探针无未完成项。",
         )
     if not issues and heartbeat_due(previous, now):
         return (
             state,
             "heartbeat",
-            f"{prefix}[FBIF 公众号监控 P0] 每日心跳\n检查时间：{checked_at}\n排版、feed、微信官方数据三条探针均正常。",
+            f"{prefix}[FBIF 公众号监控 P0] 每日心跳\n检查时间：{checked_at}\n"
+            "监控已确认的当日文章批次完整、普通文章全部进入审核、审核卡全部送达；三条探针无未完成项。",
         )
     return state, "", ""
 
@@ -203,6 +205,9 @@ def record_notification(state: dict[str, Any], kind: str, now: datetime) -> None
     elif kind == "recovery":
         state["incident_open"] = False
         state["notified_fingerprint"] = ""
+        # 恢复通知本身已经是当天的绿色业务确认；不得在下一次两分钟轮询中
+        # 紧接着再发一条“每日心跳”，覆盖用户刚看到的事故恢复语义。
+        state["last_heartbeat_date"] = now.astimezone(SHANGHAI).date().isoformat()
     elif kind == "heartbeat":
         state["last_heartbeat_date"] = now.astimezone(SHANGHAI).date().isoformat()
     state["last_notification_kind"] = kind

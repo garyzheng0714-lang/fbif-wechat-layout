@@ -37,3 +37,29 @@ rendering 完成后系统 SHALL 调用 LLM 产出结构化风险提示（红线�
 #### Scenario: block 不可发布
 - **WHEN** 风险等级为 block
 - **THEN** 审核界面/卡片不提供「通过」动作，只能驳回或人工线下处理后重跑
+
+### Requirement: 业务闭环健康不得假绿
+跨系统健康的绿色 MUST 表示：当日已发现批次完整且稳定、每篇普通文章已到 `awaiting_review` 或终态、排版任务无 processing、审核通知 outbox 已清空且审核卡无缺失。HTTP 进程存活、已经提交任务或尚未超过超时 SHALL NOT 单独构成绿色证据。
+
+#### Scenario: 排版仍在进行
+- **WHEN** 任一当日普通文章仍在 fetching/rendering/mirroring/enriching/assessing
+- **THEN** 跨系统监控返回非绿色，不发送恢复或每日心跳
+
+#### Scenario: 审核卡仍在发送
+- **WHEN** 文章已到 awaiting_review，但审核通知仍 pending/sending 或卡片缺失
+- **THEN** 跨系统监控返回非绿色，直到审核卡持久 outbox 清空
+
+### Requirement: 幂等任务持续自动补偿
+资讯订阅向排版工具的投递 MUST 使用永久 `source_key` 幂等，并在网络、限流、服务端或配置错误后持续退避重试，不得因固定重试次数耗尽而转为永久人工停摆。同步 worker MUST 提供独立心跳；单次 panic MUST 被隔离在迭代边界且下一轮继续执行；整个 worker 循环意外退出时 MUST 由进程内 supervisor 自动重启。
+
+#### Scenario: 下游长时间失败后恢复
+- **WHEN** 排版接口连续失败超过五次后恢复
+- **THEN** 持久任务无需人工操作继续投递，并最终只产生一个排版任务
+
+#### Scenario: worker 单轮 panic
+- **WHEN** 同步 worker 单轮发生 panic，HTTP API 进程仍存活
+- **THEN** panic 被记录，下一轮继续；worker 心跳缺失或过期期间监控保持非绿色
+
+#### Scenario: worker 整体循环 panic
+- **WHEN** worker 的调度循环在迭代边界之外 panic，HTTP API 进程仍存活
+- **THEN** supervisor 记录堆栈并在 1 秒后重启整个循环，不允许网页存活而 worker 永久退出
