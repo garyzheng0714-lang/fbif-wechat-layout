@@ -94,6 +94,14 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 	if status.WorkersPaused {
 		status.Issues = append(status.Issues, "deployment_writes_paused")
 	}
+	// 健康的含义是业务闭环已经完成，不是“进程还活着”。只要仍有任务在排版，
+	// 或审核卡仍在 outbox 中，就绝不能向外部看门狗返回绿色。
+	if status.Processing > 0 {
+		status.Issues = append(status.Issues, fmt.Sprintf("business_processing:%d", status.Processing))
+	}
+	if status.NotificationPending > 0 {
+		status.Issues = append(status.Issues, fmt.Sprintf("review_notification_pending:%d", status.NotificationPending))
+	}
 	if status.OldestProcessingAgeSeconds > int64(publishProcessingStaleAfter/time.Second) {
 		status.Issues = append(status.Issues, fmt.Sprintf("processing_stale:%ds", status.OldestProcessingAgeSeconds))
 	}

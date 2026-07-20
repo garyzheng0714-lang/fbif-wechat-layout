@@ -43,6 +43,11 @@ func TestPublishMonitoringReportsOnlyOperationalMetrics(t *testing.T) {
 	if status.Ready || status.Processing != 1 || status.NotificationPending != 1 {
 		t.Fatalf("monitoring status = %+v", status)
 	}
+	for _, prefix := range []string{"business_processing:", "review_notification_pending:"} {
+		if !publishMonitoringHasIssue(status, prefix) {
+			t.Fatalf("business work in progress must never be reported green; missing %q in %+v", prefix, status.Issues)
+		}
+	}
 
 	pipeline := &publishPipeline{store: store}
 	mux := http.NewServeMux()

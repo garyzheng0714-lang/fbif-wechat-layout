@@ -33,13 +33,11 @@ class WatchdogTest(unittest.TestCase):
         recovered, kind, message = watchdog.decide_notification(previous, [], now, False)
         self.assertEqual("recovery", kind)
         self.assertIn("已恢复", message)
+        self.assertIn("审核卡全部送达", message)
         watchdog.record_notification(recovered, kind, now)
-        heartbeat, kind, message = watchdog.decide_notification(recovered, [], now, False)
-        self.assertEqual("heartbeat", kind)
-        self.assertIn("每日心跳", message)
-        watchdog.record_notification(heartbeat, kind, now)
-        _, kind, _ = watchdog.decide_notification(heartbeat, [], now, False)
+        _, kind, _ = watchdog.decide_notification(recovered, [], now, False)
         self.assertEqual("", kind)
+        self.assertEqual("2026-07-17", recovered["last_heartbeat_date"])
 
     def test_before_0920_has_no_heartbeat(self):
         now = datetime(2026, 7, 17, 1, 19, tzinfo=timezone.utc)
