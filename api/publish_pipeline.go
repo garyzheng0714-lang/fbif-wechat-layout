@@ -108,6 +108,9 @@ type publishPipeline struct {
 	foodTalks func() (foodTalksAPI, error)
 	// notify 人审群通知；nil 或返回错误都不阻断流水线——人可以查任务列表，通知只是加速器
 	notify func(ctx context.Context, text string) error
+	// monitorNotify P0 监控私聊；与审核群物理分开，缺配置时监控 relay 必须失败，
+	// 绝不能回退到 notify 把异常、恢复或心跳发进审核群。
+	monitorNotify func(ctx context.Context, text string) error
 	// notifyCard 审核交互卡片发送（M4）；nil 或失败降级回 notify 文本，同样不阻断流水线
 	notifyCard func(ctx context.Context, card map[string]any) error
 	// coverImgKey 封面 URL → 飞书图片素材 img_key（卡片内呈现封面用）；nil 或失败
@@ -143,6 +146,11 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		p.coverImgKey = n.uploadImageByURL
 	} else {
 		log.Printf("publish: 飞书通知未配置（需 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_REVIEW_CHAT_ID），审核群通知禁用")
+	}
+	if n := newFeishuMonitorNotifierFromEnv(); n != nil {
+		p.monitorNotify = n.send
+	} else {
+		log.Printf("publish: 监控私聊未配置（需 FEISHU_APP_ID / FEISHU_APP_SECRET / %s），监控 relay 禁用", publishMonitorFeishuUserIDEnv)
 	}
 	return p
 }

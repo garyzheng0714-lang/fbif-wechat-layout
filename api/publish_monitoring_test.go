@@ -143,7 +143,7 @@ func TestPublishMonitorAlertRequiresMachineTokenAndDelivers(t *testing.T) {
 	var delivered string
 	pipeline := &publishPipeline{
 		store: newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json")),
-		notify: func(_ context.Context, message string) error {
+		monitorNotify: func(_ context.Context, message string) error {
 			delivered = message
 			return nil
 		},
@@ -173,5 +173,28 @@ func TestPublishMonitorAlertRequiresMachineTokenAndDelivers(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(delivered, "[FBIF 公众号监控 P0] 异常") ||
 		!strings.Contains(delivered, "failed_endpoints:2") || strings.Contains(delivered, "  ") {
 		t.Fatalf("relay status=%d body=%s delivered=%q", rec.Code, rec.Body.String(), delivered)
+	}
+}
+
+func TestPublishMonitorAlertNeverFallsBackToReviewGroup(t *testing.T) {
+	t.Setenv(publishSyncServiceTokenEnv, "monitor-secret")
+	groupMessages := 0
+	pipeline := &publishPipeline{
+		store: newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json")),
+		notify: func(_ context.Context, _ string) error {
+			groupMessages++
+			return nil
+		},
+	}
+	mux := http.NewServeMux()
+	registerPublishRoutes(mux, pipeline)
+	req := httptest.NewRequest(http.MethodPost, "/api/publish/monitor-alert", strings.NewReader(
+		`{"source":"wechat-official","status":"heartbeat","summary":"日报完成"}`,
+	))
+	req.Header.Set(publishSyncServiceHeader, "monitor-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || groupMessages != 0 {
+		t.Fatalf("私聊未配置时必须失败且不得回退审核群：status=%d group_messages=%d body=%s", rec.Code, groupMessages, rec.Body.String())
 	}
 }

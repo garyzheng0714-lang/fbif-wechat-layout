@@ -20,6 +20,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	t.Setenv("FEISHU_APP_ID", "cli_secret_app")
 	t.Setenv("FEISHU_APP_SECRET", "secret-feishu-app")
 	t.Setenv("FEISHU_REVIEW_CHAT_ID", "oc_secret_chat")
+	t.Setenv("PUBLISH_MONITOR_FEISHU_USER_ID", "secret-monitor-user")
 	t.Setenv("FEISHU_VERIFICATION_TOKEN", "secret-verification")
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_secret_reviewer")
 	t.Setenv("ARK_API_KEY", "secret-ark-key")
@@ -39,7 +40,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 		t.Fatalf("readiness 应 200，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
 	for _, secret := range []string{
-		"secret-render-token", "secret-feishu-app", "oc_secret_chat", "ou_secret_reviewer", "secret-ark-key", "test-token",
+		"secret-render-token", "secret-feishu-app", "oc_secret_chat", "secret-monitor-user", "ou_secret_reviewer", "secret-ark-key", "test-token",
 	} {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Fatalf("readiness 不得泄露配置值 %q：%s", secret, rec.Body.String())
@@ -53,7 +54,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 		!got.FoodTalks.TargetMatchesExpected || got.EnrichMode != "dual" {
 		t.Fatalf("readiness 核心状态错误：%+v", got)
 	}
-	if !got.Feishu.NotifyConfigured || !got.Feishu.WSConfigured ||
+	if !got.Feishu.NotifyConfigured || !got.Feishu.MonitorNotifyConfigured || !got.Feishu.WSConfigured ||
 		!got.Feishu.WebhookConfigured || !got.Feishu.ReviewerAllowlistConfigured {
 		t.Fatalf("飞书 readiness 错误：%+v", got.Feishu)
 	}
@@ -198,6 +199,7 @@ func TestPublishReadinessOverallFlagIncludesRuntimeDependencies(t *testing.T) {
 	t.Setenv("FEISHU_APP_ID", "app")
 	t.Setenv("FEISHU_APP_SECRET", "secret")
 	t.Setenv("FEISHU_REVIEW_CHAT_ID", "chat")
+	t.Setenv("PUBLISH_MONITOR_FEISHU_USER_ID", "monitor-user")
 	t.Setenv("ARK_API_KEY", "key")
 	t.Setenv("ARK_MODEL_ID", "model-a")
 	t.Setenv("ARK_MODEL_ID_B", "model-b")
@@ -212,6 +214,12 @@ func TestPublishReadinessOverallFlagIncludesRuntimeDependencies(t *testing.T) {
 	got = currentPublishReadiness(env.pipeline)
 	if got.Feishu.NotifyConfigured || got.Ready {
 		t.Fatalf("缺审核通知目标不得使 overall readiness 假绿：%+v", got)
+	}
+	t.Setenv("FEISHU_REVIEW_CHAT_ID", "chat")
+	t.Setenv("PUBLISH_MONITOR_FEISHU_USER_ID", "")
+	got = currentPublishReadiness(env.pipeline)
+	if got.Feishu.MonitorNotifyConfigured || got.Ready {
+		t.Fatalf("缺监控私聊目标不得使 overall readiness 假绿：%+v", got)
 	}
 }
 

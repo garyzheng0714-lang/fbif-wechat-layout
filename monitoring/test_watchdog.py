@@ -66,7 +66,7 @@ class WatchdogTest(unittest.TestCase):
                 "PUBLISH_SYNC_SERVICE_TOKEN": "service-token",
                 "FEISHU_APP_ID": "app-id",
                 "FEISHU_APP_SECRET": "app-secret",
-                "FEISHU_REVIEW_CHAT_ID": "chat-id",
+                "PUBLISH_MONITOR_FEISHU_USER_ID": "test-monitor-user",
             },
             clear=True,
         ), mock.patch.object(watchdog, "send_feishu_app") as sender:
@@ -88,6 +88,23 @@ class WatchdogTest(unittest.TestCase):
             self.assertEqual(0, watchdog.run(args))
             self.assertEqual(2, sender.call_count)
             self.assertIn("已恢复", sender.call_args.args[3])
+
+    def test_feishu_sender_uses_private_user_id(self):
+        calls = []
+
+        def fake_post(url, payload, headers, timeout, name):
+            calls.append((url, payload, headers, timeout, name))
+            if name == "feishu_token":
+                return {"code": 0, "tenant_access_token": "token"}
+            return {"code": 0}
+
+        with mock.patch.object(watchdog, "_post_json", side_effect=fake_post):
+            watchdog.send_feishu_app("app-id", "app-secret", "test-monitor-user", "私聊测试", 1.0)
+
+        self.assertEqual(2, len(calls))
+        message_url, payload, _, _, _ = calls[1]
+        self.assertTrue(message_url.endswith("?receive_id_type=user_id"))
+        self.assertEqual("test-monitor-user", payload["receive_id"])
 
 
 if __name__ == "__main__":

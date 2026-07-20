@@ -229,6 +229,7 @@ jobs:
             .foodtalks.categories_valid == true and
             .render.configured == true and
             .feishu.notify_configured == true and
+            .feishu.monitor_notify_configured == true and
             .feishu.ws_configured == true and
             .feishu.reviewer_allowlist_configured == true and
             .enrich_mode == "dual" and
@@ -254,6 +255,7 @@ jobs:
             .store_valid == true and
             .service_auth.configured == true and
             .http_review_enabled == false and
+            .feishu.monitor_notify_configured == true and
             .feishu.reviewer_allowlist_configured == true and
             .enrich_mode == "dual"
           ' >/dev/null
