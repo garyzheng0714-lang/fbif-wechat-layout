@@ -1,0 +1,70 @@
+name: CI
+
+# PR 阶段测试门禁：与 deploy.yml 的部署门禁保持同一套测试，任何一项失败都不允许合并。
+# main 分支保护的 required status checks 引用下面三个 job 的 name，改名前先同步分支保护配置。
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js-tests:
+    name: JS tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Run JS tests
+        run: |
+          npm ci
+          npm test
+
+  e2e-tests:
+    name: Browser e2e tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Run browser interaction tests
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          E2E_PORT=19190 npm run test:e2e:ci
+
+  go-tests:
+    name: Go tests & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache-dependency-path: api/go.sum
+
+      - name: Run Go tests
+        run: |
+          cd api
+          go test ./...
+
+      - name: Build API server
+        run: |
+          cd api
+          go build ./...
