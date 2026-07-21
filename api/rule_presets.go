@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -25,14 +28,19 @@ const foodTalksSeriesSiteDefaultRulePresetID = "ft-series-v1" // 网站系列独
 const wowFoodRuleAccountID = "wowfood"                        // = registry pack.id
 const wowFoodDefaultRulePresetID = "wowfood-default"          // WowFood爆品超市 独立 preset
 const maxRulePresetVersions = 20
-const currentRuleStoreSchemaVersion = 3
+const currentRuleStoreSchemaVersion = 4
+const maxRuleConflictPaths = 20
 
 type rulePreset struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-	Channel     string `json:"channel,omitempty"`
-	RuleFamily  string `json:"rule_family,omitempty"`
+	Version     int    `json:"version,omitempty"`
+	// BaseRevision 是管理端写入前读到的 Version。它只是 HTTP
+	// 条件写入令牌，不进入历史版本；0 仅表示“新建且必须不存在”。
+	BaseRevision *int   `json:"base_revision,omitempty"`
+	Channel      string `json:"channel,omitempty"`
+	RuleFamily   string `json:"rule_family,omitempty"`
 	// BaselineID 显式指向一个内置账号基线 preset。自建规则不再从
 	// ID/当前账号猜继承关系；只允许 defaultRuleDefinitions 中的受控 id。
 	BaselineID string `json:"baseline_id"`
@@ -43,6 +51,7 @@ type rulePreset struct {
 	MigrationConfirmed bool           `json:"migration_confirmed,omitempty"`
 	Config             map[string]any `json:"config"`
 	Behavior           map[string]any `json:"behavior,omitempty"`
+	ConfigHash         string         `json:"config_hash,omitempty"`
 	UpdatedAt          string         `json:"updated_at"`
 }
 
@@ -54,10 +63,11 @@ type rulePresetDocument struct {
 }
 
 type ruleAccountBinding struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	ActiveID  string `json:"active_id"`
-	UpdatedAt string `json:"updated_at"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	ActiveID       string `json:"active_id"`
+	ActiveRevision int    `json:"active_revision"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 type rulePresetVersion struct {
@@ -87,7 +97,34 @@ type ruleAccount struct {
 	Name              string `json:"name"`
 	ActiveRuleID      string `json:"active_rule_id"`
 	ActiveRuleVersion int    `json:"active_rule_version"`
+	Revision          int    `json:"revision"`
 	UpdatedAt         string `json:"updated_at"`
+}
+
+type ruleRevisionConflictError struct {
+	RuleID           string
+	ExpectedRevision int
+	CurrentRevision  int
+	ChangedPaths     []string
+}
+
+func (e *ruleRevisionConflictError) Error() string {
+	message := fmt.Sprintf("规则 %q 已由其他管理员从修订 %d 更新到 %d；请重新加载后合并", e.RuleID, e.ExpectedRevision, e.CurrentRevision)
+	if len(e.ChangedPaths) > 0 {
+		message += "。服务端变化：" + strings.Join(e.ChangedPaths, "、")
+	}
+	return message
+}
+
+type accountRevisionConflictError struct {
+	AccountID        string
+	ExpectedRevision int
+	CurrentRevision  int
+	CurrentActiveID  string
+}
+
+func (e *accountRevisionConflictError) Error() string {
+	return fmt.Sprintf("账号 %q 的生效规则已由其他管理员更新（修订 %d → %d，当前为 %q）；请重新加载后再操作", e.AccountID, e.ExpectedRevision, e.CurrentRevision, e.CurrentActiveID)
 }
 
 type ruleStoreDocumentV2 struct {
@@ -380,6 +417,7 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 		}
 		normalizedRules[rule.ID] = rule
 	}
+	upgradedBuiltinRuleIDs := map[string]bool{}
 	for id, def := range defaultRuleDefinitions(now) {
 		existing, ok := normalizedRules[id]
 		if !ok {
@@ -388,10 +426,23 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 		}
 		// 内置默认 preset 的代码版本领先持久化 → 用代码默认覆盖（修复历史持久化旧数据，
 		// 并让后续对内置默认的代码更新能落地已部署环境）。只覆盖 defaultRuleDefinitions 里
-		// 的固定 id；用户自建 preset 的 id 不在其中，永不被波及。账号 active 绑定不在此处改
-		// （下方 accounts 循环会把失效的 ActiveRuleVersion 校正到最新）。
+		// 的固定 id；用户自建 preset 的 id 不在其中，永不被波及。下方 accounts
+		// 循环会把正在使用该内置规则的绑定推进到新版本，并递增绑定修订。
 		if existing.BuiltinVersion < def.BuiltinVersion {
+			// 旧实现直接用代码默认的 version=1 替换整条规则，会产生
+			// 1 → 1 的 ABA：部署前打开的管理页仍可以 base_revision=1
+			// 覆盖部署后新默认。内置升级现在作为新的单调版本追加，
+			// 并保留有界历史，以便 409 返回真实字段 diff。
+			upgradeVersion := latestRuleVersion(def)
+			upgradeVersion.Version = latestRuleVersion(existing).Version + 1
+			upgradeVersion.CreatedAt = now
+			def.Versions = append(append([]rulePresetVersion{}, existing.Versions...), upgradeVersion)
+			if len(def.Versions) > maxRulePresetVersions {
+				def.Versions = def.Versions[len(def.Versions)-maxRulePresetVersions:]
+			}
+			def.UpdatedAt = now
 			normalizedRules[id] = def
+			upgradedBuiltinRuleIDs[id] = true
 		}
 	}
 	doc.SchemaVersion = currentRuleStoreSchemaVersion
@@ -401,6 +452,8 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 	}
 	for accountID, defaultAccount := range defaultRuleAccounts(now) {
 		account := doc.Accounts[accountID]
+		previousActiveID := account.ActiveRuleID
+		previousActiveVersion := account.ActiveRuleVersion
 		if account.Name == "" {
 			account.Name = defaultAccount.Name
 		}
@@ -408,8 +461,17 @@ func normalizeRuleStoreDocument(doc ruleStoreDocumentV2) ruleStoreDocumentV2 {
 		if account.ActiveRuleID == "" || doc.Rules[account.ActiveRuleID].ID == "" {
 			account.ActiveRuleID = defaultAccount.ActiveRuleID
 		}
-		if !ruleHasVersion(doc.Rules[account.ActiveRuleID], account.ActiveRuleVersion) {
+		if upgradedBuiltinRuleIDs[account.ActiveRuleID] {
 			account.ActiveRuleVersion = latestRuleVersion(doc.Rules[account.ActiveRuleID]).Version
+		} else if !ruleHasVersion(doc.Rules[account.ActiveRuleID], account.ActiveRuleVersion) {
+			account.ActiveRuleVersion = latestRuleVersion(doc.Rules[account.ActiveRuleID]).Version
+		}
+		if account.Revision <= 0 {
+			account.Revision = 1
+		} else if account.ActiveRuleID != previousActiveID || account.ActiveRuleVersion != previousActiveVersion {
+			// 启动期内置规则升级/失效引用校正也是一次绑定状态变化。
+			// 递增修订号，防止部署前打开的旧页面覆盖新状态。
+			account.Revision++
 		}
 		if account.UpdatedAt == "" {
 			account.UpdatedAt = now
@@ -444,10 +506,11 @@ func accountBindingsFromStore(doc ruleStoreDocumentV2) []ruleAccountBinding {
 			continue
 		}
 		out = append(out, ruleAccountBinding{
-			ID:        id,
-			Name:      account.Name,
-			ActiveID:  account.ActiveRuleID,
-			UpdatedAt: account.UpdatedAt,
+			ID:             id,
+			Name:           account.Name,
+			ActiveID:       account.ActiveRuleID,
+			ActiveRevision: account.Revision,
+			UpdatedAt:      account.UpdatedAt,
 		})
 	}
 	return out
@@ -488,6 +551,7 @@ func legacyDocumentFromStore(doc ruleStoreDocumentV2) rulePresetDocument {
 			ID:                rule.ID,
 			Name:              rule.Name,
 			Description:       rule.Description,
+			Version:           version.Version,
 			Channel:           ruleChannelForBaseline(rule.BaselineID),
 			RuleFamily:        ruleFamilyForBaseline(rule.BaselineID),
 			BaselineID:        rule.BaselineID,
@@ -632,22 +696,124 @@ func (s *rulePresetStore) activeForAccount(accountID string) (rulePreset, error)
 		// 按该账号自己的受控默认基线合并，不把占位 baseline 串到其他渠道。
 		baselineID = meta.DefaultPresetID
 	}
+	config := mergeRuleDefaults(baselineID, version.Config)
+	behavior := mergeRuleBehavior(baselineID, version.Behavior)
 	return rulePreset{
 		ID:                rule.ID,
 		Name:              rule.Name,
 		Description:       rule.Description,
+		Version:           version.Version,
 		Channel:           ruleChannelForBaseline(baselineID),
 		RuleFamily:        ruleFamilyForBaseline(baselineID),
 		BaselineID:        baselineID,
 		MigrationRequired: rule.MigrationRequired,
 		MigrationNote:     rule.MigrationNote,
-		Config:            mergeRuleDefaults(baselineID, version.Config),
-		Behavior:          mergeRuleBehavior(baselineID, version.Behavior),
+		Config:            config,
+		Behavior:          behavior,
+		ConfigHash:        ruleConfigHash(config, behavior),
 		UpdatedAt:         rule.UpdatedAt,
 	}, nil
 }
 
+// ruleConfigHash covers every rule byte that can affect rendering. The name is
+// retained for the external contract, while behavior is deliberately included
+// so changing a matcher/template also invalidates the immutable render ref.
+func ruleConfigHash(config, behavior map[string]any) string {
+	var canonical bytes.Buffer
+	encoder := json.NewEncoder(&canonical)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(map[string]any{
+		"behavior": behavior,
+		"config":   config,
+	})
+	payload := bytes.TrimSpace(canonical.Bytes())
+	digest := sha256.Sum256(payload)
+	return fmt.Sprintf("sha256:%x", digest[:])
+}
+
+func ruleChangedPaths(rule ruleDefinition, expectedRevision int) []string {
+	if rule.ID == "" {
+		return nil
+	}
+	if expectedRevision == 0 {
+		return []string{"rule_created"}
+	}
+	var expected rulePresetVersion
+	found := false
+	for _, version := range rule.Versions {
+		if version.Version == expectedRevision {
+			expected = version
+			found = true
+			break
+		}
+	}
+	if !found {
+		return []string{"history_unavailable"}
+	}
+	current := latestRuleVersion(rule)
+	paths := make([]string, 0, 4)
+	collectChangedRulePaths(expected.Config, current.Config, "config", &paths)
+	collectChangedRulePaths(expected.Behavior, current.Behavior, "behavior", &paths)
+	if len(paths) == 0 {
+		// 名称、描述和基线属于 definition 元数据，旧 schema 没有逐版保留。
+		// 仍要明确告知页面修订已变，不得将空 diff 误当成可安全覆盖。
+		return []string{"revision"}
+	}
+	return paths
+}
+
+func collectChangedRulePaths(before, after any, path string, paths *[]string) {
+	if len(*paths) >= maxRuleConflictPaths || reflect.DeepEqual(before, after) {
+		return
+	}
+	beforeMap, beforeIsMap := before.(map[string]any)
+	afterMap, afterIsMap := after.(map[string]any)
+	if beforeIsMap && afterIsMap {
+		keys := make([]string, 0, len(beforeMap)+len(afterMap))
+		seen := make(map[string]bool, len(beforeMap)+len(afterMap))
+		for key := range beforeMap {
+			seen[key] = true
+			keys = append(keys, key)
+		}
+		for key := range afterMap {
+			if !seen[key] {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if len(*paths) >= maxRuleConflictPaths {
+				return
+			}
+			nextPath := key
+			if path != "" {
+				nextPath = path + "." + key
+			}
+			beforeValue, beforeOK := beforeMap[key]
+			afterValue, afterOK := afterMap[key]
+			if !beforeOK || !afterOK {
+				*paths = append(*paths, nextPath)
+				continue
+			}
+			collectChangedRulePaths(beforeValue, afterValue, nextPath, paths)
+		}
+		return
+	}
+	if path == "" {
+		path = "value"
+	}
+	*paths = append(*paths, path)
+}
+
 func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
+	return s.upsertWithExpectedRevision(p, nil)
+}
+
+func (s *rulePresetStore) upsertAtRevision(p rulePreset, expectedRevision int) (rulePresetDocument, error) {
+	return s.upsertWithExpectedRevision(p, &expectedRevision)
+}
+
+func (s *rulePresetStore) upsertWithExpectedRevision(p rulePreset, expectedRevision *int) (rulePresetDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := s.readStoreLocked()
@@ -673,6 +839,18 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 		p.BaselineID = sanitizeRulePresetID(p.BaselineID)
 	}
 	rule := doc.Rules[p.ID]
+	currentRevision := 0
+	if rule.ID != "" {
+		currentRevision = latestRuleVersion(rule).Version
+	}
+	if expectedRevision != nil && *expectedRevision != currentRevision {
+		return legacyDocumentFromStore(doc), &ruleRevisionConflictError{
+			RuleID:           p.ID,
+			ExpectedRevision: *expectedRevision,
+			CurrentRevision:  currentRevision,
+			ChangedPaths:     ruleChangedPaths(rule, *expectedRevision),
+		}
+	}
 	if rule.MigrationRequired {
 		if !p.MigrationConfirmed {
 			return legacyDocumentFromStore(doc), fmt.Errorf("规则 %q 尚未确认历史基线；请在规则后台显式选择 baseline_id", rule.ID)
@@ -719,6 +897,11 @@ func (s *rulePresetStore) upsert(p rulePreset) (rulePresetDocument, error) {
 	for accountID, account := range doc.Accounts {
 		if account.ActiveRuleID == p.ID {
 			account.ActiveRuleVersion = nextVersion
+			if account.Revision <= 0 {
+				account.Revision = 1
+			} else {
+				account.Revision++
+			}
 			account.UpdatedAt = p.UpdatedAt
 			doc.Accounts[accountID] = account
 		}
@@ -734,6 +917,14 @@ func (s *rulePresetStore) setActive(id string) (rulePresetDocument, error) {
 }
 
 func (s *rulePresetStore) setActiveForAccount(accountID, id string) (rulePresetDocument, error) {
+	return s.setActiveForAccountWithExpectedRevision(accountID, id, nil)
+}
+
+func (s *rulePresetStore) setActiveForAccountAtRevision(accountID, id string, expectedRevision int) (rulePresetDocument, error) {
+	return s.setActiveForAccountWithExpectedRevision(accountID, id, &expectedRevision)
+}
+
+func (s *rulePresetStore) setActiveForAccountWithExpectedRevision(accountID, id string, expectedRevision *int) (rulePresetDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := s.readStoreLocked()
@@ -759,8 +950,24 @@ func (s *rulePresetStore) setActiveForAccount(accountID, id string) (rulePresetD
 	if account.Name == "" {
 		account.Name = accountID
 	}
+	if account.Revision <= 0 {
+		account.Revision = 1
+	}
+	if expectedRevision != nil && account.Revision != *expectedRevision {
+		return legacyDocumentFromStore(doc), &accountRevisionConflictError{
+			AccountID:        accountID,
+			ExpectedRevision: *expectedRevision,
+			CurrentRevision:  account.Revision,
+			CurrentActiveID:  account.ActiveRuleID,
+		}
+	}
+	latestVersion := latestRuleVersion(rule).Version
+	if account.ActiveRuleID == id && account.ActiveRuleVersion == latestVersion {
+		return legacyDocumentFromStore(doc), nil
+	}
 	account.ActiveRuleID = id
-	account.ActiveRuleVersion = latestRuleVersion(rule).Version
+	account.ActiveRuleVersion = latestVersion
+	account.Revision++
 	account.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	doc.Accounts[accountID] = account
 	if err := s.writeStoreLocked(doc); err != nil {
@@ -794,6 +1001,11 @@ func (s *rulePresetStore) delete(id string) (rulePresetDocument, error) {
 			}
 			account.ActiveRuleID = fallbackID
 			account.ActiveRuleVersion = latestRuleVersion(doc.Rules[fallbackID]).Version
+			if account.Revision <= 0 {
+				account.Revision = 1
+			} else {
+				account.Revision++
+			}
 			account.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 			doc.Accounts[accountID] = account
 		}
@@ -919,22 +1131,26 @@ func migrateLegacyRuleBaselines(doc *ruleStoreDocumentV2) {
 	if doc == nil {
 		return
 	}
-	for id, rule := range doc.Rules {
-		ruleID := sanitizeRulePresetID(firstNonEmpty(rule.ID, id))
-		baselineID := sanitizeRulePresetID(rule.BaselineID)
-		if baselineID == "" {
-			if isProtectedDefaultPreset(ruleID) {
-				baselineID = ruleID
-			} else {
-				var migrationRequired bool
-				var migrationNote string
-				baselineID, migrationRequired, migrationNote = legacyBaselineFromAccountBindings(*doc, ruleID)
-				rule.MigrationRequired = migrationRequired
-				rule.MigrationNote = migrationNote
+	// schema v3 已把 baseline_id 定为必填契约。v3 → v4 只增加账号
+	// 绑定修订号，不能把损坏的 v3 文档重新当成可推断的旧库。
+	if doc.SchemaVersion < 3 {
+		for id, rule := range doc.Rules {
+			ruleID := sanitizeRulePresetID(firstNonEmpty(rule.ID, id))
+			baselineID := sanitizeRulePresetID(rule.BaselineID)
+			if baselineID == "" {
+				if isProtectedDefaultPreset(ruleID) {
+					baselineID = ruleID
+				} else {
+					var migrationRequired bool
+					var migrationNote string
+					baselineID, migrationRequired, migrationNote = legacyBaselineFromAccountBindings(*doc, ruleID)
+					rule.MigrationRequired = migrationRequired
+					rule.MigrationNote = migrationNote
+				}
 			}
+			rule.BaselineID = baselineID
+			doc.Rules[id] = rule
 		}
-		rule.BaselineID = baselineID
-		doc.Rules[id] = rule
 	}
 	doc.SchemaVersion = currentRuleStoreSchemaVersion
 }
@@ -1024,6 +1240,29 @@ func writeRulePresetDocument(w http.ResponseWriter, status int, doc rulePresetDo
 	})
 }
 
+func writeRuleRevisionConflict(w http.ResponseWriter, conflict *ruleRevisionConflictError) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":             conflict.Error(),
+		"code":              "revision_conflict",
+		"rule_id":           conflict.RuleID,
+		"expected_revision": conflict.ExpectedRevision,
+		"current_revision":  conflict.CurrentRevision,
+		"changed_paths":     conflict.ChangedPaths,
+	})
+}
+
+func writeAccountRevisionConflict(w http.ResponseWriter, conflict *accountRevisionConflictError) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":             conflict.Error(),
+		"code":              "binding_revision_conflict",
+		"account_id":        conflict.AccountID,
+		"expected_revision": conflict.ExpectedRevision,
+		"current_revision":  conflict.CurrentRevision,
+		"current_active_id": conflict.CurrentActiveID,
+		"changed_paths":     []string{"active_rule"},
+	})
+}
+
 func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 	mux.HandleFunc("GET /api/rules/active", func(w http.ResponseWriter, r *http.Request) {
 		preset, err := store.activeForAccount(r.URL.Query().Get("account"))
@@ -1091,8 +1330,23 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		doc, err := store.upsert(req)
+		if req.BaseRevision == nil {
+			writeJSON(w, http.StatusPreconditionRequired, map[string]any{
+				"error": "缺少 base_revision；请重新加载规则后再保存",
+				"code":  "precondition_required",
+			})
+			return
+		}
+		if *req.BaseRevision < 0 {
+			writeError(w, http.StatusBadRequest, "base_revision 不能小于 0")
+			return
+		}
+		doc, err := store.upsertAtRevision(req, *req.BaseRevision)
 		if err != nil {
+			if conflict, ok := err.(*ruleRevisionConflictError); ok {
+				writeRuleRevisionConflict(w, conflict)
+				return
+			}
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -1107,15 +1361,32 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 			return
 		}
 		var req struct {
-			ID        string `json:"id"`
-			AccountID string `json:"account_id"`
+			ID           string `json:"id"`
+			AccountID    string `json:"account_id"`
+			BaseRevision *int   `json:"base_revision"`
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		doc, err := store.setActiveForAccount(req.AccountID, req.ID)
+		if req.BaseRevision == nil {
+			writeJSON(w, http.StatusPreconditionRequired, map[string]any{
+				"error": "缺少 base_revision；请重新加载账号绑定后再操作",
+				"code":  "precondition_required",
+			})
+			return
+		}
+		if *req.BaseRevision < 0 {
+			writeError(w, http.StatusBadRequest, "base_revision 不能小于 0")
+			return
+		}
+		doc, err := store.setActiveForAccountAtRevision(req.AccountID, req.ID, *req.BaseRevision)
 		if err != nil {
+			if conflict, ok := err.(*accountRevisionConflictError); ok {
+				writeAccountRevisionConflict(w, conflict)
+				return
+			}
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

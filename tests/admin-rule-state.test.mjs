@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  accountBindingRevision,
   baselinePresetForNewRule,
   compatibleRulePresets,
   migrationBaselinePresets,
@@ -24,6 +25,17 @@ test('账号状态回退只读该账号 binding，不把网站回退到 legacy F
   };
   assert.equal(presetForAccount(doc, 'ft-series')?.id, 'site-custom');
   assert.equal(presetForAccount(doc, 'missing')?.id, undefined, '未知账号不得静默读 FBIF active_id');
+});
+
+test('账号绑定修订号只从当前账号读取', () => {
+  const doc = {
+    accounts: [
+      { id: 'fbif', active_revision: 4 },
+      { id: 'ft-series', active_revision: 9 },
+    ],
+  };
+  assert.equal(accountBindingRevision(doc, 'ft-series'), 9);
+  assert.equal(accountBindingRevision(doc, 'missing'), 0);
 });
 
 test('新建规则从显式 baseline preset 起步，不从 FBIF DEFAULT_RULE_CONFIG 起步', () => {

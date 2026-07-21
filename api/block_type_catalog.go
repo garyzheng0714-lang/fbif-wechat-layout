@@ -247,7 +247,8 @@ export function defaultFieldsForType(type) {
 }
 
 // validateBlockRegistryConsistency：committed 的 block-registry.gen.js 必须与 blockTypeCatalog
-// 生成结果逐字节一致。文件缺失只告警（不 brick 生产），存在但不一致则返回错误（由 main 决定 fatal）。
+// 生成结果逐字节一致。文件缺失在本地只告警、ENV=production 为 fatal；存在但不一致
+// 在所有环境都 fatal。具体环境策略由 validateGeneratedArtifactsForStartup 统一执行。
 func validateBlockRegistryConsistency(publicDir string) error {
 	path := filepath.Join(publicDir, "js", "blocks", "block-registry.gen.js")
 	raw, err := os.ReadFile(path)

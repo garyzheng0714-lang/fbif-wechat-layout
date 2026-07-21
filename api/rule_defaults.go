@@ -136,6 +136,7 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 			Name:              m.AccountName,
 			ActiveRuleID:      m.DefaultPresetID,
 			ActiveRuleVersion: 1,
+			Revision:          1,
 			UpdatedAt:         now,
 		}
 	}

@@ -11,6 +11,7 @@
 
 import { resolveAssetRefs } from '../asset-library.js';
 import { richTextToInline } from '../blocks/rich-text-render.js';
+import { filterSafeFooterHTMLLines } from '../footer-html-policy.js';
 
 // footer.html 标题/正文统一字体栈（mp-quote 优先 + 微信端字体回退）。&quot; 是 footer 原始转义形态，保留。
 const FONT_FAMILY = 'mp-quote, &quot;PingFang SC&quot;, system-ui, -apple-system, BlinkMacSystemFont, &quot;Helvetica Neue&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei UI&quot;, &quot;Microsoft YaHei&quot;, Arial, sans-serif';
@@ -125,7 +126,7 @@ export function mpBlockRenderers(assetLibrary, scope = 'global', opts = {}) {
     },
 
     // 自定义内容：html_lines 原样输出（历史段无损迁移 / 高级兜底）。
-    rich_html: (f) => resolve(asLines(f.html_lines)),
+    rich_html: (f) => resolve(filterSafeFooterHTMLLines(asLines(f.html_lines))),
 
     // 更多文章：标题 + 空卡片容器（带 mergeIntoFooter 锚点）。卡片由现有 more-articles 复制链路委托填充。
     // paragraph 外层【无 style】——必须与 more-articles.js 的 PARAGRAPH_WRAPPER_OPEN 字节一致。

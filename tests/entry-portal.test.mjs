@@ -181,10 +181,14 @@ test('site.html uses absolute /js/ paths for dynamic imports', async () => {
 });
 
 test('local dev build IDs do not reuse stale versioned JS cache', async () => {
+  const refresh = await readFile(new URL('../public/js/version-refresh.js', import.meta.url), 'utf8');
   for (const name of ['app.html', 'site.html']) {
     const html = await readFile(new URL('../public/' + name, import.meta.url), 'utf8');
     assert.match(html, /rawBuildId === 'dev'/, name + ' should detect local dev builds');
     assert.match(html, /'dev-' \+ Date\.now\(\)/, name + ' should create a fresh local asset version');
-    assert.match(html, /!isDevBuild && latestBuildId !== rawBuildId/, name + ' should not reload-loop on dev builds');
+    assert.match(html, /installVersionRefresh\(\{ currentBuildId: rawBuildId, isDevBuild, loadVersionInfo \}\)/,
+      name + ' should pass dev-build state to the shared refresh controller');
   }
+  assert.match(refresh, /if \(isDevBuild \|\| !latestBuildId \|\| latestBuildId === currentBuildId\) return 'none'/,
+    'shared refresh controller should not reload-loop on dev builds');
 });

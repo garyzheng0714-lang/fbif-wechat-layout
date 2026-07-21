@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "groups": {
+    "api_managed": {
+      "allow_unknown": false,
+      "version_key": "FBIF_CONFIG_SCHEMA_VERSION",
+      "variables": {
+        "ENV": { "required": true, "secret": false },
+        "FBIF_CONFIG_SCHEMA_VERSION": { "required": true, "secret": false },
+        "ADMIN_PASSWORD": { "required": true, "secret": true },
+        "PUBLIC_DIR": { "required": true, "secret": false },
+        "WECHAT_UPLOAD_ORIGIN": { "required": true, "secret": false },
+        "RENDER_TOKEN": { "required": true, "secret": true },
+        "RENDER_SERVICE_URL": { "required": true, "secret": false },
+        "DEPLOYMENT_WRITES_PAUSED": { "required": true, "secret": false },
+        "LIBREOFFICE_URL": { "required": false, "secret": false },
+        "LIBREOFFICE_TOKEN": { "required": false, "secret": true },
+        "CLOUDCONVERT_API_KEY": { "required": false, "secret": true }
+      }
+    },
+    "api_publish": {
+      "allow_unknown": false,
+      "variables": {
+        "RULES_STORE_PATH": { "required": false, "secret": false },
+        "PUBLISH_JOBS_PATH": { "required": false, "secret": false },
+        "PUBLISH_SYNC_SERVICE_TOKEN": { "required": true, "secret": true },
+        "PUBLISH_HTTP_REVIEW_ENABLED": { "required": false, "secret": false },
+        "PUBLISH_HTTP_REVIEWER_OPEN_ID": { "required": false, "secret": false },
+        "WECHAT_UPLOAD_ENDPOINT": { "required": false, "secret": true },
+        "EXPENSIVE_API_TOKEN": { "required": false, "secret": true },
+        "FOODTALKS_BASE_URL": { "required": true, "secret": false },
+        "FOODTALKS_TOKEN": { "required": true, "secret": true },
+        "FOODTALKS_ORIGIN": { "required": false, "secret": false },
+        "FOODTALKS_FRONT_URL": { "required": true, "secret": false },
+        "FOODTALKS_ADMIN_ARTICLE_URL": { "required": true, "secret": false },
+        "FOODTALKS_CATEGORY_IDS": { "required": true, "secret": false },
+        "FOODTALKS_EXPECTED_TARGET": { "required": true, "secret": false },
+        "SITE_OWN_ACCOUNTS": { "required": false, "secret": false },
+        "FEISHU_APP_ID": { "required": true, "secret": false },
+        "FEISHU_APP_SECRET": { "required": true, "secret": true },
+        "FEISHU_REVIEW_CHAT_ID": { "required": true, "secret": false },
+        "PUBLISH_MONITOR_FEISHU_USER_ID": { "required": true, "secret": false },
+        "FEISHU_CALLBACK_MODE": { "required": true, "secret": false },
+        "FEISHU_VERIFICATION_TOKEN": { "required": false, "secret": true },
+        "FEISHU_REVIEWER_OPEN_IDS": { "required": true, "secret": false },
+        "ARK_API_KEY": { "required": true, "secret": true },
+        "ARK_MODEL_ID": { "required": false, "secret": false },
+        "ARK_MODEL_ID_B": { "required": true, "secret": false },
+        "ARK_JUDGE_MODEL_ID": { "required": true, "secret": false },
+        "ARK_BASE_URL": { "required": false, "secret": false },
+        "LAYOUT_MONITOR_URL": { "required": false, "secret": false },
+        "FEED_MONITOR_URL": { "required": false, "secret": false },
+        "OFFICIAL_MONITOR_URL": { "required": false, "secret": false }
+      }
+    },
+    "render": {
+      "allow_unknown": false,
+      "version_key": "FBIF_CONFIG_SCHEMA_VERSION",
+      "variables": {
+        "FBIF_CONFIG_SCHEMA_VERSION": { "required": true, "secret": false },
+        "NODE_ENV": { "required": true, "secret": false },
+        "RENDER_PORT": { "required": true, "secret": false },
+        "RENDER_TOKEN": { "required": true, "secret": true },
+        "PUBLIC_DIR": { "required": true, "secret": false },
+        "RULES_API_ORIGIN": { "required": true, "secret": false },
+        "ASSET_ORIGIN": { "required": true, "secret": false },
+        "RENDER_BUILD_SHA": { "required": true, "secret": false }
+      }
+    }
+  }
+}

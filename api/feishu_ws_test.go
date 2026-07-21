@@ -73,7 +73,7 @@ func TestFeishuWSEventParamsEmpty(t *testing.T) {
 		"全空 Request": {Event: &callback.CardActionTriggerRequest{}},
 	} {
 		openID, rawValue := feishuWSEventParams(event)
-		if rawValue != nil && len(rawValue) > 0 {
+		if len(rawValue) > 0 {
 			t.Fatalf("%s：应返回空 value，实际 %s", name, rawValue)
 		}
 		if name == "nil Action" && openID != "ou_a" {

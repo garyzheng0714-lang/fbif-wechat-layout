@@ -95,7 +95,6 @@
       </div>
       <div class="error" id="error"></div>
       <div class="sidebar-stats" id="statsBar"></div>
-      <div class="batch-list" id="batchList" style="display:none;"></div>
 
       <details class="site-editor-section site-section-card site-top-info-section" data-site-section="top-info" open>
         <summary class="site-section-summary">
@@ -319,20 +318,11 @@ for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
   if (!href || /^https?:\/\//i.test(href) || href.includes('?')) continue;
   link.setAttribute('href', href + '?v=' + assetVersion);
 }
-async function reloadIfUpdated() {
-  try {
-    const latest = await loadVersionInfo();
-    const latestBuildId = String(latest.build || latest.commit || '');
-    if (!isDevBuild && latestBuildId !== rawBuildId) location.reload();
-  } catch {}
-}
-window.addEventListener('focus', reloadIfUpdated);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadIfUpdated(); });
-// bfcache 还原（前进/后退）不会重跑模块加载，可能停在旧构建——补 pageshow 校验。
-window.addEventListener('pageshow', (e) => { if (e.persisted) reloadIfUpdated(); });
-// 长期前台 tab 永不触发 focus/visibilitychange，新部署后会持续跑旧 JS。定时轮询 version.json，
-// build 变化时自动刷到最新构建（reload 前 beforeunload 兜底保存快照）。与 app.html 对称。
-setInterval(reloadIfUpdated, 5 * 60 * 1000);
+const { installVersionRefresh } = await import('/js/version-refresh.js?v=' + assetVersion);
+installVersionRefresh({ currentBuildId: rawBuildId, isDevBuild, loadVersionInfo });
+const { setRuleReadinessState } = await import('/js/rule-readiness.js?v=' + assetVersion);
+window._setRuleReadinessState = setRuleReadinessState;
+setRuleReadinessState('unresolved');
 
 // ---- Log ----
 window._pushLog = function(level, msg, detail) {
@@ -835,7 +825,18 @@ function syncWorkflowControls() {
 
 // ---- Load engine + template ----
 const { initApp } = await import('/js/engine.js?v=' + assetVersion);
-hydrateActiveRulePreset(activeRulePack.id).catch(err => console.warn('[rules] active hydrate failed', err));
+window._activeRuleReady = false;
+setRuleReadinessState('loading');
+window._activeRuleReadyPromise = hydrateActiveRulePreset(activeRulePack.id).then(value => {
+  window._activeRuleReady = true;
+  setRuleReadinessState(value && value.source === 'server' ? 'resolved' : 'stale-cache', { error: value && value.error });
+  return value;
+}).catch(err => {
+  window._activeRuleReady = true;
+  setRuleReadinessState('failed', { error: err && err.message });
+  console.warn('[rules] active hydrate failed', err);
+  return null;
+});
 refreshActiveRuleCatalog(activeRulePack.id).catch(err => console.warn('[rules] catalog hydrate failed', err));
 
 async function loadTemplate(templateId) {
@@ -1293,7 +1294,7 @@ window.addEventListener('fbif:article-restored', event => {
   setSiteStrategyFromInput(restoredInput, cs.is_repost);
 });
 
-restoreCurrentChannel();
+await restoreCurrentChannel();
 
 {
   const shareButton = document.getElementById('ftShareButton');

@@ -44,6 +44,16 @@ test('behavior validation rejects script-like templates and unsafe URLs', () => 
   assert.match(result.errors.join('\n'), /模板包含不允许/);
 });
 
+test('behavior validation rejects browser-unsafe regex params with an exact path', () => {
+  const result = validateRuleBehavior({
+    params: {
+      author_line_regex: { type: 'string', default: '(a+)+$' },
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /behavior\.params\.author_line_regex\.default/);
+});
+
 test('behavior URL validation rejects attribute-breaking sources', () => {
   assert.equal(isSafeBehaviorURL('/assets/mote.png'), true);
   assert.equal(isSafeBehaviorURL('https://example.com/assets/mote.png'), true);

@@ -51,9 +51,9 @@ test('engine.js: all process call sites pass config through the unified renderer
   }
 });
 
-test('engine.js: 当前文章由统一 session 激活，批量和重排不直接 showPreview', async () => {
+test('engine.js: 当前文章由统一 session 激活，重排不直接 showPreview', async () => {
   // WHY：底部名片、正文页脚、复制层不能各自维护状态。当前文章必须由一个 session 统一激活，
-  // 否则批量处理或规则晚到时会出现左侧有名片、正文底部没有名片的分裂状态。
+  // 否则规则晚到时会出现左侧有名片、正文底部没有名片的分裂状态。
   const src = await readFile(
     new URL('../public/js/engine.js', import.meta.url),
     'utf8'
@@ -64,9 +64,7 @@ test('engine.js: 当前文章由统一 session 激活，批量和重排不直接
   const rerender = src.slice(src.indexOf('async function _engineRerender'));
   assert.match(rerender, /buildArticleSession\(renderInput, result/, '重排应用本次固定输入重建 session');
   assert.match(rerender, /activateArticleSession\(session\)/, '重排应通过 session 激活预览');
-  const batchClick = src.slice(src.indexOf('function showBatchList'), src.indexOf('function updateBatchStatus'));
-  assert.match(batchClick, /activateArticleSession\(_batchResults\[i\]\)/, '批量点击应激活对应 session');
-  assert.doesNotMatch(batchClick, /showPreview\(/, '批量点击不得绕过 session 直接 showPreview');
+  assert.doesNotMatch(src, /showBatchList|_batchResults|batch-upload/, '单篇产品不得保留不可达的批量队列');
 });
 
 test('engine.js: 上传前等待当前规则加载，避免 FoodTalks 底部区块漏渲', async () => {
@@ -77,7 +75,10 @@ test('engine.js: 上传前等待当前规则加载，避免 FoodTalks 底部区�
     'utf8'
   );
   assert.match(src, /function\s+waitForActiveRuleConfigReady/, 'engine 必须有规则 ready 等待');
-  assert.ok((src.match(/await waitForActiveRuleConfigReady\(/g) || []).length >= 3, '单篇/批量/blocks 三条上传路径都要等待规则 ready');
+  assert.ok((src.match(/await waitForActiveRuleConfigReady\(/g) || []).length >= 2, '单篇/blocks 两条上传路径都要等待规则 ready');
+  const waitFn = src.slice(src.indexOf('async function waitForActiveRuleConfigReady'), src.indexOf('function resolveAuthorCardOverrideForArticle'));
+  assert.doesNotMatch(waitFn, /Promise\.race|3000/, '规则加载不得三秒后静默使用旧配置继续');
+  assert.match(waitFn, /state !== 'resolved'/, '只有服务端确认的规则才能生成最终排版');
   assert.match(src, /addEventListener\('fbif:rules-ready'/, '规则晚到时必须触发补渲染');
   const rerender = src.slice(src.indexOf('async function _engineRerender'));
   assert.match(rerender, /autofillAuthorCard: !!options\.autofillAuthorCard/, '普通重排不得默认覆盖用户手动替换的作者名片');

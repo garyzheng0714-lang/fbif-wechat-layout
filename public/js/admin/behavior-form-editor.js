@@ -7,6 +7,8 @@
 //
 // 中性：不 import 渲染器，只做表单与回写。
 
+import { compileBehaviorRegex } from '../rule-behavior-utils.js';
+
 function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
 function esc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -104,8 +106,8 @@ export function createBehaviorFormEditor({ container, behavior, onChange, doc = 
       const run = () => {
         const pat = input.value, txt = sample.value;
         if (!txt) { result.textContent = ''; return; }
-        try { const ok = new RegExp(pat).test(txt); result.textContent = ok ? '✓ 命中' : '✗ 不匹配'; result.className = 'bfe-try-r ' + (ok ? 'bfe-ok' : 'bfe-no'); }
-        catch (e) { result.textContent = '正则语法错误'; result.className = 'bfe-try-r bfe-no'; }
+        try { const ok = compileBehaviorRegex(pat).test(txt); result.textContent = ok ? '✓ 命中' : '✗ 不匹配'; result.className = 'bfe-try-r ' + (ok ? 'bfe-ok' : 'bfe-no'); }
+        catch (e) { result.textContent = '正则不安全或语法错误'; result.className = 'bfe-try-r bfe-no'; }
       };
       sample.oninput = run; input.addEventListener('input', run);
       tryWrap.appendChild(sample); tryWrap.appendChild(result);

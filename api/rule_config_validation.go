@@ -137,6 +137,246 @@ var ruleFontFamily = regexp.MustCompile(`^[A-Za-z0-9一-龥 -]{1,40}$`)
 var behaviorUnsafeTemplate = regexp.MustCompile(`(?i)<script|on\w+\s*=|javascript:`)
 var behaviorUnsafeURL = regexp.MustCompile(`[\x00-\x20\x7F"'<>\\]`)
 
+type browserRegexAtom struct {
+	valid             bool
+	group             bool
+	wildcard          bool
+	hasVariableRepeat bool
+	hasAlternation    bool
+}
+
+type browserRegexFrame struct {
+	hasVariableRepeat bool
+	hasAlternation    bool
+	hasWildcard       bool
+	last              browserRegexAtom
+}
+
+type browserRegexQuantifier struct {
+	variable  bool
+	unbounded bool
+	max       int
+}
+
+func isRuleBehaviorRegexKey(key string) bool {
+	lower := strings.ToLower(key)
+	return strings.Contains(lower, "regex") || strings.Contains(lower, "pattern") ||
+		strings.Contains(lower, "marker") || strings.Contains(lower, "signature")
+}
+
+// validateBrowserSafeRegex keeps server-side RE2 validation aligned with the
+// smaller regex subset that is safe to execute in JavaScript's backtracking
+// engine. Runtime code also caps inspected text, but unsafe structures are
+// rejected here so a saved rule cannot turn into a browser-side ReDoS payload.
+func validateBrowserSafeRegex(path, source string, maxRunes int) error {
+	if len([]rune(source)) > maxRunes {
+		return fmt.Errorf("%s is too long", path)
+	}
+	if _, err := regexp.Compile(source); err != nil {
+		return fmt.Errorf("%s is not a valid regex", path)
+	}
+	if reason := browserUnsafeRegexReason(source); reason != "" {
+		return fmt.Errorf("%s is not browser-safe: %s", path, reason)
+	}
+	return nil
+}
+
+func stripBrowserRegexInlineFlags(source string) (string, string) {
+	if !strings.HasPrefix(source, "(?") || len(source) < 4 || source[2] < 'a' || source[2] > 'z' {
+		return source, ""
+	}
+	close := strings.IndexByte(source, ')')
+	if close < 3 {
+		return source, ""
+	}
+	flags := source[2:close]
+	for _, flag := range flags {
+		if flag != 'i' && flag != 'm' && flag != 's' {
+			return source, "only a leading (?i), (?m), or (?s) flag group is supported"
+		}
+	}
+	return source[close+1:], ""
+}
+
+func parseBrowserRegexBraceQuantifier(source string, start int) (browserRegexQuantifier, int, bool) {
+	i := start + 1
+	minStart := i
+	for i < len(source) && source[i] >= '0' && source[i] <= '9' {
+		i++
+	}
+	if i == minStart {
+		return browserRegexQuantifier{}, start, false
+	}
+	min, err := strconv.Atoi(source[minStart:i])
+	if err != nil {
+		return browserRegexQuantifier{}, start, false
+	}
+	if i < len(source) && source[i] == '}' {
+		return browserRegexQuantifier{max: min}, i + 1, true
+	}
+	if i >= len(source) || source[i] != ',' {
+		return browserRegexQuantifier{}, start, false
+	}
+	i++
+	maxStart := i
+	for i < len(source) && source[i] >= '0' && source[i] <= '9' {
+		i++
+	}
+	if i >= len(source) || source[i] != '}' {
+		return browserRegexQuantifier{}, start, false
+	}
+	if i == maxStart {
+		return browserRegexQuantifier{variable: true, unbounded: true}, i + 1, true
+	}
+	max, err := strconv.Atoi(source[maxStart:i])
+	if err != nil {
+		return browserRegexQuantifier{}, start, false
+	}
+	return browserRegexQuantifier{variable: min != max, max: max}, i + 1, true
+}
+
+func isBrowserRegexWildcardClass(source string) bool {
+	return strings.HasPrefix(source, "[^") ||
+		(strings.Contains(source, `\s`) && strings.Contains(source, `\S`)) ||
+		(strings.Contains(source, `\d`) && strings.Contains(source, `\D`)) ||
+		(strings.Contains(source, `\w`) && strings.Contains(source, `\W`))
+}
+
+func applyBrowserRegexQuantifier(frame *browserRegexFrame, quantifier browserRegexQuantifier, unboundedWildcards *int) string {
+	if !frame.last.valid {
+		return "a quantifier must follow an atom"
+	}
+	repeatsMoreThanOnce := quantifier.unbounded || quantifier.max > 1
+	if frame.last.group && repeatsMoreThanOnce && (frame.last.hasVariableRepeat || frame.last.hasAlternation) {
+		return "nested or ambiguous repetition is not allowed"
+	}
+	if frame.last.wildcard && quantifier.unbounded {
+		*unboundedWildcards++
+		if *unboundedWildcards > 1 {
+			return "multiple unbounded wildcard repetitions are not allowed"
+		}
+	}
+	if quantifier.variable {
+		frame.hasVariableRepeat = true
+	}
+	return ""
+}
+
+func browserUnsafeRegexReason(source string) string {
+	var reason string
+	source, reason = stripBrowserRegexInlineFlags(source)
+	if reason != "" {
+		return reason
+	}
+	frames := []browserRegexFrame{{}}
+	unboundedWildcards := 0
+	for i := 0; i < len(source); {
+		frame := &frames[len(frames)-1]
+		switch source[i] {
+		case '\\':
+			if i+1 >= len(source) {
+				return "a trailing escape is not allowed"
+			}
+			if (source[i+1] >= '1' && source[i+1] <= '9') || source[i+1] == 'k' {
+				return "backreferences are not supported"
+			}
+			frame.last = browserRegexAtom{valid: true}
+			i += 2
+		case '[':
+			end := i + 1
+			for end < len(source) {
+				if source[end] == '\\' {
+					end += 2
+					continue
+				}
+				if source[end] == ']' {
+					break
+				}
+				end++
+			}
+			if end >= len(source) {
+				return "an unterminated character class is not allowed"
+			}
+			wildcard := isBrowserRegexWildcardClass(source[i : end+1])
+			frame.hasWildcard = frame.hasWildcard || wildcard
+			frame.last = browserRegexAtom{valid: true, wildcard: wildcard}
+			i = end + 1
+		case '(':
+			if i+1 < len(source) && source[i+1] == '?' {
+				if i+2 >= len(source) || source[i+2] != ':' {
+					return "only non-capturing (?:...) groups are supported after (?"
+				}
+				i += 3
+			} else {
+				i++
+			}
+			frames = append(frames, browserRegexFrame{})
+		case ')':
+			if len(frames) == 1 {
+				return "an unmatched closing group is not allowed"
+			}
+			closed := frames[len(frames)-1]
+			frames = frames[:len(frames)-1]
+			parent := &frames[len(frames)-1]
+			parent.hasVariableRepeat = parent.hasVariableRepeat || closed.hasVariableRepeat
+			parent.hasAlternation = parent.hasAlternation || closed.hasAlternation
+			parent.hasWildcard = parent.hasWildcard || closed.hasWildcard
+			parent.last = browserRegexAtom{
+				valid:             true,
+				group:             true,
+				wildcard:          closed.hasWildcard,
+				hasVariableRepeat: closed.hasVariableRepeat,
+				hasAlternation:    closed.hasAlternation,
+			}
+			i++
+		case '|':
+			frame.hasAlternation = true
+			frame.last = browserRegexAtom{}
+			i++
+		case '*', '+', '?':
+			quantifier := browserRegexQuantifier{variable: true, max: 1}
+			if source[i] == '*' || source[i] == '+' {
+				quantifier.unbounded = true
+			}
+			if reason := applyBrowserRegexQuantifier(frame, quantifier, &unboundedWildcards); reason != "" {
+				return reason
+			}
+			i++
+			if i < len(source) && source[i] == '?' {
+				i++ // lazy suffix; it does not change the repetition bound
+			}
+		case '{':
+			quantifier, end, ok := parseBrowserRegexBraceQuantifier(source, i)
+			if !ok {
+				frame.last = browserRegexAtom{valid: true}
+				i++
+				continue
+			}
+			if reason := applyBrowserRegexQuantifier(frame, quantifier, &unboundedWildcards); reason != "" {
+				return reason
+			}
+			i = end
+			if i < len(source) && source[i] == '?' {
+				i++
+			}
+		case '.':
+			frame.hasWildcard = true
+			frame.last = browserRegexAtom{valid: true, wildcard: true}
+			i++
+		case '^', '$':
+			frame.last = browserRegexAtom{}
+			i++
+		default:
+			frame.last = browserRegexAtom{valid: true}
+			i++
+		}
+	}
+	if len(frames) != 1 {
+		return "an unterminated group is not allowed"
+	}
+	return ""
+}
+
 func validateRuleConfig(config map[string]any) error {
 	if err := validateRuleConfigKeys(config); err != nil {
 		return err
@@ -221,23 +461,20 @@ func validateRuleBehaviorPayload(baselineID string, raw map[string]any) error {
 		}
 	}
 	// behavior.lists：网站识别词表/标记列表（红线下放）。每项 []string；
-	// 名含 marker/signature/regex 的做 RE2 可编译校验；全部做 XSS 防护与长度上限。
+	// 名含 marker/signature/regex/pattern 的项同时校验浏览器安全子集；全部做 XSS 防护与长度上限。
 	if err := validateRuleBehaviorLists(raw["lists"]); err != nil {
 		return err
 	}
 	// FoodTalks 网站 behavior 的识别正则（作者/提示/参考来源行）——红线：规则后台可配。
-	// 校验为长度受限、可编译的合法 RE2 正则。
+	// 校验为长度受限、RE2/JavaScript 语义兼容且不会触发典型回溯爆炸的安全正则。
 	for key := range regexFields {
 		if v, ok := raw[key]; ok {
 			s, ok := v.(string)
 			if !ok {
 				return fmt.Errorf("behavior %s must be a string", key)
 			}
-			if len([]rune(s)) > 200 {
-				return fmt.Errorf("behavior %s too long", key)
-			}
-			if _, err := regexp.Compile(s); err != nil {
-				return fmt.Errorf("behavior %s is not a valid regex", key)
+			if err := validateBrowserSafeRegex("behavior."+key, s, 200); err != nil {
+				return err
 			}
 		}
 	}
@@ -305,15 +542,13 @@ func validateRuleBehaviorPayload(baselineID string, raw map[string]any) error {
 			return fmt.Errorf("behavior template %s contains unsafe HTML", key)
 		}
 	}
-	if contracts != nil {
-		for key, value := range contracts {
-			contract, ok := value.(map[string]any)
-			if !ok {
-				return fmt.Errorf("behavior output contract %s must be an object", key)
-			}
-			if n := int(ruleBehaviorNumber(contract["max_length"])); n < 0 || n > 2000 {
-				return fmt.Errorf("behavior output contract %s has invalid max_length", key)
-			}
+	for key, value := range contracts {
+		contract, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("behavior output contract %s must be an object", key)
+		}
+		if n := int(ruleBehaviorNumber(contract["max_length"])); n < 0 || n > 2000 {
+			return fmt.Errorf("behavior output contract %s has invalid max_length", key)
 		}
 	}
 	return nil
@@ -336,6 +571,19 @@ func validateRuleBehaviorParam(key string, spec map[string]any) error {
 	}
 	if typ == "url" && defaultValue != "" && !isSafeRuleBehaviorURL(defaultValue) {
 		return fmt.Errorf("behavior url param must be a site path or HTTPS URL: %s", key)
+	}
+	if isRuleBehaviorRegexKey(key) {
+		rawDefault, exists := spec["default"]
+		if !exists || rawDefault == nil {
+			return nil
+		}
+		source, ok := rawDefault.(string)
+		if !ok {
+			return fmt.Errorf("behavior.params.%s.default must be a string regex", key)
+		}
+		if err := validateBrowserSafeRegex("behavior.params."+key+".default", source, 300); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -601,7 +849,8 @@ func validateRuleStructuredField(key string, value any) error {
 //
 //	{ enabled?, active_preset_id?, segment_order?[], segments?{key:{html_lines:[]string}}, presets?[{id,name,segments{key:bool}}] }
 //
-// html_lines 做 XSS 防护（禁 <script>/on*=/javascript:）；保留 inline style/<img>/<a> 等正常排版标签。
+// html_lines 走解析器白名单；保留受控的 inline style/<img>/<a>/<table>，拒绝可执行、
+// 可嵌入、表单标签以及危险 URL/CSS。验证不重写 HTML，避免默认页脚 golden 字节漂移。
 func validateFBIFFooterModule(raw any) error {
 	m, ok := raw.(map[string]any)
 	if !ok {
@@ -613,24 +862,46 @@ func validateFBIFFooterModule(raw any) error {
 			return fmt.Errorf("unknown fbif_footer field: %s", k)
 		}
 	}
-	if segs, ok := m["segments"].(map[string]any); ok {
+	if rawSegments, exists := m["segments"]; exists {
+		segs, ok := rawSegments.(map[string]any)
+		if !ok {
+			return fmt.Errorf("fbif_footer segments must be an object")
+		}
+		if len(segs) > 100 {
+			return fmt.Errorf("fbif_footer has too many segments")
+		}
 		for segKey, segVal := range segs {
 			sv, ok := segVal.(map[string]any)
 			if !ok {
 				return fmt.Errorf("fbif_footer segment %q must be an object", segKey)
 			}
+			for key := range sv {
+				if key != "html_lines" {
+					return fmt.Errorf("fbif_footer segment %q has unknown field: %s", segKey, key)
+				}
+			}
 			lines, ok := sv["html_lines"].([]any)
 			if !ok {
 				return fmt.Errorf("fbif_footer segment %q html_lines must be an array", segKey)
 			}
-			for _, l := range lines {
+			if len(lines) > 200 {
+				return fmt.Errorf("fbif_footer segment %q has too many html_lines", segKey)
+			}
+			combinedLines := make([]string, 0, len(lines))
+			for lineIndex, l := range lines {
 				s, ok := l.(string)
 				if !ok {
 					return fmt.Errorf("fbif_footer segment %q html_lines must be strings", segKey)
 				}
-				if behaviorUnsafeTemplate.MatchString(s) {
-					return fmt.Errorf("fbif_footer segment %q 含不安全 HTML（script/on*=/javascript:）", segKey)
+				if err := validateFooterHTML(s); err != nil {
+					return fmt.Errorf("fbif_footer.segments.%s.html_lines[%d]: %w", segKey, lineIndex, err)
 				}
+				combinedLines = append(combinedLines, s)
+			}
+			// 渲染器会用换行拼接所有片段；再校验一次拼接结果，阻断把标签名、属性或
+			// table 上下文拆到多行后绕过逐行解析的攻击。
+			if err := validateFooterHTML(strings.Join(combinedLines, "\n")); err != nil {
+				return fmt.Errorf("fbif_footer.segments.%s.html_lines: %w", segKey, err)
 			}
 		}
 	}
@@ -908,9 +1179,8 @@ func validateRuleBehaviorLists(raw any) error {
 		if len(items) > 200 {
 			return fmt.Errorf("behavior list %q has too many items", key)
 		}
-		isRegex := strings.Contains(key, "marker") || strings.Contains(key, "signature") ||
-			strings.Contains(key, "regex") || strings.Contains(key, "pattern")
-		for _, item := range items {
+		isRegex := isRuleBehaviorRegexKey(key)
+		for index, item := range items {
 			s, ok := item.(string)
 			if !ok {
 				return fmt.Errorf("behavior list %q items must be strings", key)
@@ -922,9 +1192,9 @@ func validateRuleBehaviorLists(raw any) error {
 				return fmt.Errorf("behavior list %q item contains unsafe HTML", key)
 			}
 			if isRegex {
-				// 客户端可能以 (?i) 前缀表达大小写不敏感；RE2 原生支持，可直接编译校验。
-				if _, err := regexp.Compile(s); err != nil {
-					return fmt.Errorf("behavior list %q item is not a valid regex", key)
+				path := fmt.Sprintf("behavior.lists.%s[%d]", key, index)
+				if err := validateBrowserSafeRegex(path, s, 300); err != nil {
+					return err
 				}
 			}
 		}

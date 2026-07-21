@@ -22,6 +22,10 @@ func validMoreArticlesDefaultCards() []any {
 	}
 }
 
+func ruleRevisionPointer(value int) *int {
+	return &value
+}
+
 func articleFooterDefaultsWithProfiles(n int) map[string]any {
 	aliases := map[string]any{}
 	profiles := []any{}
@@ -185,7 +189,7 @@ func TestRuleStoreV2MarksUnboundCustomRuleAsMigrationRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(b, []byte(`"schema_version": 3`)) || !bytes.Contains(b, []byte(`"migration_required": true`)) {
+	if !bytes.Contains(b, []byte(fmt.Sprintf(`"schema_version": %d`, currentRuleStoreSchemaVersion))) || !bytes.Contains(b, []byte(`"migration_required": true`)) {
 		t.Fatalf("回写后必须持久化待确认标记：%s", b)
 	}
 }
@@ -761,7 +765,7 @@ func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, store)
 
-	custom := rulePreset{ID: "foodtalks-custom", Name: "FoodTalks Custom", BaselineID: foodTalksDefaultRulePresetID, Config: defaultRuleConfig()}
+	custom := rulePreset{ID: "foodtalks-custom", Name: "FoodTalks Custom", BaseRevision: ruleRevisionPointer(0), BaselineID: foodTalksDefaultRulePresetID, Config: defaultRuleConfig()}
 	body, _ := json.Marshal(custom)
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("X-Admin-Password", "secret")
@@ -771,7 +775,7 @@ func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
 		t.Fatalf("save custom code = %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodPut, "/api/rules/admin/active", bytes.NewBufferString(`{"account_id":"foodtalks-series","id":"foodtalks-custom"}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/rules/admin/active", bytes.NewBufferString(`{"account_id":"foodtalks-series","id":"foodtalks-custom","base_revision":1}`))
 	req.Header.Set("X-Admin-Password", "secret")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -852,6 +856,11 @@ func TestRulePresetPublicCatalogOmitsRuleBodies(t *testing.T) {
 	if len(payload.Accounts) != 5 {
 		t.Fatalf("catalog accounts = %d, want 5", len(payload.Accounts))
 	}
+	for _, binding := range payload.Accounts {
+		if binding.ActiveRevision <= 0 {
+			t.Fatalf("catalog account %q missing active_revision: %+v", binding.ID, binding)
+		}
+	}
 }
 
 func TestRulePresetAdminHandlersRequirePassword(t *testing.T) {
@@ -859,7 +868,7 @@ func TestRulePresetAdminHandlersRequirePassword(t *testing.T) {
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
-	body, _ := json.Marshal(rulePreset{ID: "test", Name: "Test", BaselineID: defaultRulePresetID, Config: defaultRuleConfig()})
+	body, _ := json.Marshal(rulePreset{ID: "test", Name: "Test", BaseRevision: ruleRevisionPointer(0), BaselineID: defaultRulePresetID, Config: defaultRuleConfig()})
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1309,9 +1318,10 @@ func TestRulePresetAdminAcceptsThemeJustifyParagraphs(t *testing.T) {
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
 	body, _ := json.Marshal(rulePreset{
-		ID:         "theme-justify",
-		Name:       "Theme Justify",
-		BaselineID: defaultRulePresetID,
+		ID:           "theme-justify",
+		Name:         "Theme Justify",
+		BaseRevision: ruleRevisionPointer(0),
+		BaselineID:   defaultRulePresetID,
 		Config: map[string]any{
 			"schema_version": float64(2),
 			"modules": map[string]any{
@@ -1340,9 +1350,10 @@ func TestRulePresetAcceptsMoreArticlesDefaultCards(t *testing.T) {
 	registerRulePresetHandlers(mux, store)
 
 	body, _ := json.Marshal(rulePreset{
-		ID:         "custom-more-articles",
-		Name:       "Custom More Articles",
-		BaselineID: defaultRulePresetID,
+		ID:           "custom-more-articles",
+		Name:         "Custom More Articles",
+		BaseRevision: ruleRevisionPointer(0),
+		BaselineID:   defaultRulePresetID,
 		Config: map[string]any{
 			"schema_version": float64(2),
 			"modules": map[string]any{
@@ -1498,9 +1509,10 @@ func TestRulePresetAdminAcceptsModularConfigAndProjectsFlatLegacyPreset(t *testi
 	registerRulePresetHandlers(mux, store)
 
 	body, _ := json.Marshal(rulePreset{
-		ID:         "modular",
-		Name:       "Modular",
-		BaselineID: defaultRulePresetID,
+		ID:           "modular",
+		Name:         "Modular",
+		BaseRevision: ruleRevisionPointer(0),
+		BaselineID:   defaultRulePresetID,
 		Config: map[string]any{
 			"schema_version": float64(2),
 			"font_size":      "15",

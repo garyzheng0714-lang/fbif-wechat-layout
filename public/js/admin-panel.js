@@ -14,7 +14,7 @@ import {
   setActiveRulePreset,
   validateRuleConfig,
 } from './rule-presets.js';
-import { DEFAULT_BEHAVIOR, validateRuleBehavior } from './rule-behavior.js';
+import { DEFAULT_BEHAVIOR, validateBehaviorRegexDocument, validateRuleBehavior } from './rule-behavior.js';
 import { createMoreArticlesRuleEditor } from './more-articles-rule-editor.js';
 import { createFooterLibraryEditor } from './footer-library-rule-editor.js';
 import { defaultFooterData, footerFromPreset } from './admin-footer-data.js';
@@ -24,7 +24,7 @@ import { bottomBlocksFromPreset, createBlockEditorBinder, renderRuleBottomTabHtm
 import { articleFooterDefaultsSeedForAccount, articleFooterDefaultsFromPreset, bindArticleFooterDefaultsEditor } from './admin-article-footer-defaults.js';
 import { createBehaviorFormBinder } from './admin-behavior-data.js';
 import { preserveUneditableRuleConfig, serverRuleConfigDocument } from './admin-rule-payload.js';
-import { applyPersistedRuleConfig, baselinePresetForNewRule, compatibleRulePresets, createAdminOperationGate, migrationBaselinePresets, presetForAccount, uniqueClientRuleID } from './admin-rule-state.js';
+import { accountBindingRevision, applyPersistedRuleConfig, baselinePresetForNewRule, compatibleRulePresets, createAdminOperationGate, migrationBaselinePresets, presetForAccount, uniqueClientRuleID } from './admin-rule-state.js';
 import { syncRuleVisualEditor } from './admin-rule-visual-sync.js';
 import { adminDirtyCount, updateDirtyChip } from './admin-dirty-state.js';
 import { numberField, bindSteppers } from './admin-field-controls.js';
@@ -93,7 +93,6 @@ function renderGroups(config) {
 function presetByID(doc, id) {
   return (doc && doc.presets || []).find(p => p.id === id) || null;
 }
-
 export function initAdminPanel(options = {}) {
   const button = document.getElementById('adminLockBtn');
   if (!button) return;
@@ -339,7 +338,7 @@ export function initAdminPanel(options = {}) {
     } catch {
       throw new Error('代码化规则 JSON 格式不正确');
     }
-    if (isFtDefaultPack()) { if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('网站行为规则必须是对象'); return normalizedBehavior(raw, selectedPreset()); }
+    if (isFtDefaultPack()) { if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('网站行为规则必须是对象'); validateBehaviorRegexDocument(raw); return normalizedBehavior(raw, selectedPreset()); }
     const result = validateRuleBehavior(raw);
     if (!result.ok) throw new Error(result.errors[0] || '代码化规则校验失败');
     return result.behavior;
@@ -608,7 +607,7 @@ export function initAdminPanel(options = {}) {
         const accountID = select.dataset.accountRule;
         const ruleID = select.value;
         run(async operation => {
-          doc = operationGate.commit(operation, await setActiveRulePreset(operation.password, ruleID, accountID), '规则绑定已在服务端更新，但当前账号已变化；请重新打开后台确认');
+          doc = operationGate.commit(operation, await setActiveRulePreset(operation.password, ruleID, accountID, accountBindingRevision(doc, accountID)), '规则绑定已在服务端更新，但当前账号已变化；请重新打开后台确认');
           const selected = presetByID(doc, ruleID);
           if (accountID === operation.accountID) {
             workingConfig = normalizeRuleConfig(selected ? selected.config : workingConfig);
@@ -783,7 +782,8 @@ export function initAdminPanel(options = {}) {
       if (RULE_PACKS[operation.accountID]?.templateId === 'foodtalks-site') {
         configDoc.modules.fbif_footer = JSON.parse(JSON.stringify(workingFooter || defaultFooterData()));
       }
-      const body = { id: preset.id, name: preset.name, description: preset.description, baseline_id: preset.baseline_id || sourcePreset.baseline_id, migration_confirmed: preset.migration_confirmed === true, config: serverRuleConfigDocument(configDoc), behavior: preset.behavior };
+      const persistedPreset = presetByID(doc, preset.id), baseRevision = Number(persistedPreset && persistedPreset.version);
+      const body = { id: preset.id, name: preset.name, description: preset.description, baseline_id: preset.baseline_id || sourcePreset.baseline_id, migration_confirmed: preset.migration_confirmed === true, base_revision: Number.isInteger(baseRevision) && baseRevision >= 0 ? baseRevision : 0, config: serverRuleConfigDocument(configDoc), behavior: preset.behavior };
       const resp = await fetch('/api/rules/admin/presets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': String(operation.password || '').trim() }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
@@ -812,7 +812,7 @@ export function initAdminPanel(options = {}) {
           config: savedConfig,
           behavior: savedBehavior,
         }, operation), SAVED_AFTER_CONTEXT_CHANGE);
-        operationGate.commit(operation, await setActiveRulePreset(operation.password, selected.id, operation.accountID), APPLIED_AFTER_CONTEXT_CHANGE);
+        operationGate.commit(operation, await setActiveRulePreset(operation.password, selected.id, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
         doc = operationGate.commit(operation, await listRulePresets(operation.password), APPLIED_AFTER_CONTEXT_CHANGE);
         draftPreset = null;
         const persisted = presetByID(doc, selected.id);
@@ -828,7 +828,7 @@ export function initAdminPanel(options = {}) {
         const description = workingDescription.trim();
         const savedConfig = workingConfig, savedBehavior = workingBehavior;
         doc = operationGate.commit(operation, await savePresetWithFooter({ id, name, description, baseline_id: selectedPreset()?.baseline_id, config: savedConfig, behavior: savedBehavior }, operation), SAVED_AFTER_CONTEXT_CHANGE);
-        operationGate.commit(operation, await setActiveRulePreset(operation.password, id, operation.accountID), APPLIED_AFTER_CONTEXT_CHANGE);
+        operationGate.commit(operation, await setActiveRulePreset(operation.password, id, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
         doc = operationGate.commit(operation, await listRulePresets(operation.password), APPLIED_AFTER_CONTEXT_CHANGE);
         draftPreset = null;
         selectedID = id;
@@ -841,7 +841,7 @@ export function initAdminPanel(options = {}) {
         throw new Error('新规则需要先保存');
       }
       const ruleID = selectedID, savedConfig = workingConfig, savedBehavior = workingBehavior;
-      operationGate.commit(operation, await setActiveRulePreset(operation.password, ruleID, operation.accountID), APPLIED_AFTER_CONTEXT_CHANGE);
+      operationGate.commit(operation, await setActiveRulePreset(operation.password, ruleID, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
       doc = operationGate.commit(operation, await listRulePresets(operation.password), APPLIED_AFTER_CONTEXT_CHANGE);
       return operationGate.commit(operation, await applyPersistedConfig(savedConfig, { ...presetByID(doc, ruleID), behavior: savedBehavior }, { source: 'server' }), APPLIED_AFTER_CONTEXT_CHANGE);
     }, '已应用到当前公众号'));

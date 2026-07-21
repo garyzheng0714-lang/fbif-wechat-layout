@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -236,7 +235,7 @@ func (c *foodTalksClient) send(ctx context.Context, method string, body foodTalk
 		return nil, fmt.Errorf("FoodTalks 接口不可达（%s %s）: %w", method, foodTalksNewsPath, err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
 	if err != nil {
 		return nil, fmt.Errorf("foodtalks: 读响应: %w", err)
 	}
@@ -306,7 +305,7 @@ func (c *foodTalksClient) PreviewToken(ctx context.Context, newsID int64) (strin
 		return "", fmt.Errorf("FoodTalks 接口不可达（POST %s）: %w", path, err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
 	if err != nil {
 		return "", fmt.Errorf("foodtalks: 读预览 token 响应: %w", err)
 	}

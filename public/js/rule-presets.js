@@ -561,7 +561,13 @@ export function applyActiveRuleConfig(config, preset) {
 async function parseJSONResponse(resp) {
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new Error(data.error || ('HTTP ' + resp.status));
+    const error = new Error(data.error || ('HTTP ' + resp.status));
+    error.status = resp.status;
+    error.code = data.code || '';
+    error.expectedRevision = data.expected_revision;
+    error.currentRevision = data.current_revision;
+    error.changedPaths = Array.isArray(data.changed_paths) ? data.changed_paths : [];
+    throw error;
   }
   return data;
 }
@@ -585,7 +591,7 @@ export async function loadActiveRulePreset(accountID = DEFAULT_RULE_ACCOUNT_ID) 
     };
   } catch (err) {
     console.warn('[rules] using local fallback', err);
-    return { source: 'local', preset: fallback };
+    return { source: 'local', preset: fallback, error: String((err && err.message) || err || '规则服务不可用') };
   }
 }
 
@@ -619,11 +625,17 @@ export async function listRulePresets(password) {
 }
 
 export async function saveRulePreset(password, preset) {
+  const requestedRevision = Number(preset && preset.base_revision);
+  const presetRevision = Number(preset && preset.version);
+  const baseRevision = Number.isInteger(requestedRevision) && requestedRevision >= 0
+    ? requestedRevision
+    : (Number.isInteger(presetRevision) && presetRevision >= 0 ? presetRevision : 0);
   const resp = await fetchWithTimeout('/api/rules/admin/presets', {
     method: 'POST',
     headers: adminHeaders(password),
     body: JSON.stringify({
       ...preset,
+      base_revision: baseRevision,
       config: normalizeRuleConfigForRule(preset.config, preset),
       behavior: normalizeRuleBehaviorForRule(preset.behavior, preset),
     }),
@@ -631,13 +643,15 @@ export async function saveRulePreset(password, preset) {
   return parseJSONResponse(resp);
 }
 
-export async function setActiveRulePreset(password, id, accountID = DEFAULT_RULE_ACCOUNT_ID) {
+export async function setActiveRulePreset(password, id, accountID = DEFAULT_RULE_ACCOUNT_ID, baseRevision = 0) {
+  const revision = Number(baseRevision);
   const resp = await fetchWithTimeout('/api/rules/admin/active', {
     method: 'PUT',
     headers: adminHeaders(password),
     body: JSON.stringify({
       id,
       account_id: normalizeAccountID(accountID),
+      base_revision: Number.isInteger(revision) && revision >= 0 ? revision : 0,
     }),
   }, { timeoutMs: 10000 });
   return parseJSONResponse(resp);

@@ -6,9 +6,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"strings"
 	"time"
 )
@@ -20,8 +22,12 @@ const (
 	publishNotificationPublicizeFailed    = "publicize_failed"
 	publishNotificationPublicizeUncertain = "publicize_uncertain"
 
-	publishNotificationStatePending = "pending"
-	publishNotificationStateSending = "sending"
+	publishNotificationStatePending    = "pending"
+	publishNotificationStateSending    = "sending"
+	publishNotificationStateDeadLetter = "dead_letter"
+
+	publishNotificationMaxAttempts = 10
+	publishNotificationMaxDelay    = 30 * time.Minute
 )
 
 func enqueuePublishNotification(job *publishJob, kind string) {
@@ -84,16 +90,21 @@ func (p *publishPipeline) dispatchPublishNotification(jobID int64) {
 			current.NotificationKind == claimed.NotificationKind &&
 			current.NotificationState == publishNotificationStateSending
 	}, func(j *publishJob) {
-		j.NotificationState = publishNotificationStatePending
+		if j.NotificationAttempts >= publishNotificationMaxAttempts {
+			j.NotificationState = publishNotificationStateDeadLetter
+		} else {
+			j.NotificationState = publishNotificationStatePending
+		}
 		j.NotificationError = truncateRunes(strings.Join(strings.Fields(sendErr.Error()), " "), 500)
 	})
 	if persistErr != nil {
 		log.Printf("publish: persist job %d notification failure failed: %v", jobID, persistErr)
 		return
 	}
-	if restored && p.retryNotification != nil {
+	if restored && failed.NotificationState == publishNotificationStatePending && p.retryNotification != nil {
 		delay := publishNotificationRetryDelay(failed.NotificationAttempts)
-		p.retryNotification(delay, func() { p.dispatchPublishNotification(jobID) })
+		delay += randomNotificationJitter(delay / 4)
+		p.retryNotification(delay, func() { p.schedulePublishNotification(jobID) })
 	}
 }
 
@@ -101,10 +112,25 @@ func publishNotificationRetryDelay(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
-	if attempt > 5 {
-		attempt = 5
+	if attempt > publishNotificationMaxAttempts {
+		attempt = publishNotificationMaxAttempts
 	}
-	return time.Duration(1<<uint(attempt)) * time.Second
+	delay := time.Duration(1<<uint(attempt)) * time.Second
+	if delay > publishNotificationMaxDelay {
+		return publishNotificationMaxDelay
+	}
+	return delay
+}
+
+func randomNotificationJitter(max time.Duration) time.Duration {
+	if max <= 0 {
+		return 0
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)+1))
+	if err != nil {
+		return 0
+	}
+	return time.Duration(n.Int64())
 }
 
 func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publishJob) error {
@@ -187,6 +213,9 @@ func (p *publishPipeline) recoverPublishNotification(job publishJob) {
 	if job.NotificationKind == "" {
 		return
 	}
+	if job.NotificationState == publishNotificationStateDeadLetter {
+		return
+	}
 	if job.NotificationState != publishNotificationStatePending {
 		updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 			return current.NotificationSeq == job.NotificationSeq && current.NotificationKind != ""
@@ -204,4 +233,26 @@ func (p *publishPipeline) recoverPublishNotification(job publishJob) {
 		job = updated
 	}
 	p.schedulePublishNotification(job.ID)
+}
+
+func (p *publishPipeline) replayPublishNotification(jobID int64) (publishJob, error) {
+	if publishWorkersPaused() {
+		job, _ := p.store.byID(jobID)
+		return job, errPublishWorkersPaused
+	}
+	job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
+		return current.NotificationKind != "" && current.NotificationState == publishNotificationStateDeadLetter
+	}, func(j *publishJob) {
+		j.NotificationState = publishNotificationStatePending
+		j.NotificationAttempts = 0
+		j.NotificationError = ""
+	})
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !swapped {
+		return job, fmt.Errorf("任务没有可重放的通知 dead letter")
+	}
+	p.schedulePublishNotification(jobID)
+	return job, nil
 }

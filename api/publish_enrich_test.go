@@ -92,8 +92,8 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 		"<p>作者：Mote莫特</p><p>正文</p>",
 		1,
 	)
-	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string) (string, error) {
-		return renderedWithAuthor, nil
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error) {
+		return successfulPublishRenderResult(renderedWithAuthor, rule), nil
 	}
 	aiCover := ossURLFor("https://mmbiz.qpic.cn/b.jpg")
 	gotReq := newARKStub(t, func() (int, string) {

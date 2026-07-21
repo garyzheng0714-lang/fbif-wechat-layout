@@ -36,6 +36,9 @@ func TestNormalizeOverridesStaleBuiltinPreset(t *testing.T) {
 	if got.BuiltinVersion != wantVersion {
 		t.Fatalf("BuiltinVersion 应提升到 %d，实际 %d", wantVersion, got.BuiltinVersion)
 	}
+	if latestRuleVersion(got).Version != 2 {
+		t.Fatalf("内置升级必须追加单调规则修订，实际 %d", latestRuleVersion(got).Version)
+	}
 	cfg := latestRuleVersion(got).Config
 	if cfg["table_border_color"] != "#888888" {
 		t.Fatalf("旧内置 preset 应被代码默认覆盖：table_border_color=%v，期望 #888888", cfg["table_border_color"])
@@ -43,6 +46,44 @@ func TestNormalizeOverridesStaleBuiltinPreset(t *testing.T) {
 	mods, _ := cfg["modules"].(map[string]any)
 	if _, ok := mods["ft_series_materials"]; !ok {
 		t.Fatalf("覆盖后应含 modules.ft_series_materials（18 群/BD 名片），实际 modules=%v", cfg["modules"])
+	}
+}
+
+func TestNormalizeBuiltinUpgradeAdvancesActiveBindingRevision(t *testing.T) {
+	now := "2026-07-01T00:00:00Z"
+	staleBuiltinVersion := builtinVersionForDefaultRule(defaultRulePresetID) - 1
+	doc := ruleStoreDocumentV2{
+		SchemaVersion: currentRuleStoreSchemaVersion,
+		Rules: map[string]ruleDefinition{
+			defaultRulePresetID: {
+				ID:             defaultRulePresetID,
+				Name:           "部署前默认",
+				BaselineID:     defaultRulePresetID,
+				BuiltinVersion: staleBuiltinVersion,
+				Versions: []rulePresetVersion{{
+					Version: 41, Config: map[string]any{"font_size": "14"}, Behavior: defaultRuleBehavior(), CreatedAt: now,
+				}},
+			},
+		},
+		Accounts: map[string]ruleAccount{
+			defaultRuleAccountID: {
+				Name: "FBIF", ActiveRuleID: defaultRulePresetID, ActiveRuleVersion: 41, Revision: 8, UpdatedAt: now,
+			},
+		},
+	}
+
+	got := normalizeRuleStoreDocument(doc)
+	rule := got.Rules[defaultRulePresetID]
+	if latestRuleVersion(rule).Version != 42 {
+		t.Fatalf("内置规则修订 = %d，want 42", latestRuleVersion(rule).Version)
+	}
+	account := got.Accounts[defaultRuleAccountID]
+	if account.ActiveRuleVersion != 42 || account.Revision != 9 {
+		t.Fatalf("内置升级必须同步推进绑定修订：%+v", account)
+	}
+	paths := ruleChangedPaths(rule, 41)
+	if len(paths) == 0 {
+		t.Fatal("部署前规则与升级后规则必须可生成冲突 diff")
 	}
 }
 

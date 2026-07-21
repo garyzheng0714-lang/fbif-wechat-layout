@@ -78,6 +78,13 @@ export function presetForAccount(doc, accountID) {
     .find(preset => preset && preset.id === activeID) || null;
 }
 
+export function accountBindingRevision(doc, accountID) {
+  const binding = (doc && Array.isArray(doc.accounts) ? doc.accounts : [])
+    .find(account => account && account.id === accountID);
+  const revision = Number(binding && binding.active_revision);
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0;
+}
+
 export function baselinePresetForNewRule(doc, selected) {
   const baselineID = selected && selected.baseline_id;
   if (!baselineID) return null;

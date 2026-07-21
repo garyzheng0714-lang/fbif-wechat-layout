@@ -233,7 +233,7 @@ async function loadBaseFooterHtml(opts = {}) {
 }
 
 // Module-level flag: true when the current article was fetched from a URL
-// (i.e. it is a repost). Set explicitly by handleFile/processFile at each
+// (i.e. it is a repost). Set explicitly by each article-input entry
 // entry so flags never leak across articles. Read by applyRepostTransform
 // at every footer-rebuild site.
 let _isRepost = false;
@@ -380,14 +380,13 @@ function migrateStoredBottomBlocksOverride(accountId, override) {
 
 async function waitForActiveRuleConfigReady(reason) {
   const p = typeof window !== 'undefined' && window._activeRuleReadyPromise;
-  if (!p || typeof p.then !== 'function' || window._activeRuleReady === true) return;
-  try {
-    await Promise.race([
-      p.catch(() => null),
-      new Promise(resolve => setTimeout(resolve, 3000)),
-    ]);
-  } catch (err) {
-    logConv('warn', '当前规则加载较慢，先使用已有规则继续排版', { reason, error: err && err.message });
+  if (p && typeof p.then === 'function' && window._activeRuleReady !== true) {
+    await p;
+  }
+  const state = typeof window !== 'undefined' && window._activeRuleState;
+  if (state && state !== 'resolved') {
+    logConv('error', '规则尚未由服务端确认，已停止生成最终排版', { reason, state });
+    throw new Error('排版规则尚未加载成功，请点击顶部“重试加载”后再导入。');
   }
 }
 
@@ -509,7 +508,6 @@ export function initApp(initialTemplate) {
   const progressFill = document.getElementById('progressFill');
   const progressText = document.getElementById('progressText');
   const errorEl = document.getElementById('error');
-  const batchList = document.getElementById('batchList');
   const importZone = document.getElementById('importZone');
   const docZone = document.getElementById('docZone');
   const docName = document.getElementById('docName');
@@ -670,38 +668,6 @@ export function initApp(initialTemplate) {
   // shape: { kind: 'docx'|'md'|'blocks', payload: <data>, isRepost, title? }
   let _articleSession = null;
   // shape: { input, title, articleHtml, footerHtml, stats, articleMeta, articleFooterProfile, bottomBlocksOverride, bottomBlocksAccountId, sourceIsDocx, bodyOnly }
-
-  // Batch file queue
-  let _batchFiles = [];
-  let _batchResults = [];
-
-  function showBatchList(files) {
-    _batchFiles = files;
-    _batchResults = files.map(() => null);
-    if (!batchList) return;
-    if (files.length <= 1) { batchList.style.display = 'none'; return; }
-
-    batchList.style.display = 'block';
-    batchList.innerHTML = '<div class="batch-title">文件队列 (' + files.length + ')</div>';
-    files.forEach((f, i) => {
-      const item = document.createElement('div');
-      item.className = 'batch-item';
-      item.id = 'batch-' + i;
-      item.innerHTML = '<span class="batch-name">' + f.name + '</span>' +
-        '<span class="batch-status" id="batch-status-' + i + '">等待中</span>';
-      item.addEventListener('click', () => {
-        if (_batchResults[i]) {
-          activateArticleSession(_batchResults[i]);
-        }
-      });
-      batchList.appendChild(item);
-    });
-  }
-
-  function updateBatchStatus(idx, status, cls) {
-    const el = document.getElementById('batch-status-' + idx);
-    if (el) { el.textContent = status; el.className = 'batch-status ' + (cls || ''); }
-  }
 
   async function parseFileToArticleInput(file, isRepost, opts = {}) {
     const sourceIsDocx = file.name.toLowerCase().endsWith('.docx');
@@ -866,35 +832,6 @@ export function initApp(initialTemplate) {
     flushRerenderAfterInput();
   }
 
-  async function handleFiles(files, opts) {
-    const valid = Array.from(files).filter(isValidFile);
-    if (valid.length === 0) {
-      showImportEntry();
-      showError('请上传 ' + template.formats.join(' 或 ') + ' 文件');
-      return;
-    }
-    if (valid.length === 1) {
-      handleFile(valid[0], opts);
-      return;
-    }
-    // Batch mode
-    showBatchList(valid);
-    errorEl.style.display = 'none';
-    for (let i = 0; i < valid.length; i++) {
-      updateBatchStatus(i, '处理中...', 'processing');
-      try {
-        const result = await processFile(valid[i], opts);
-        _batchResults[i] = result;
-        updateBatchStatus(i, '✓ 完成', 'done');
-      } catch (err) {
-        updateBatchStatus(i, '✗ 失败', 'failed');
-      }
-    }
-    if (_batchResults[0]) {
-      activateArticleSession(_batchResults[0]);
-    }
-  }
-
   function handleUploadFiles(files, opts) {
     const list = Array.from(files || []);
     if (list.length === 0) return;
@@ -906,26 +843,7 @@ export function initApp(initialTemplate) {
     }
     const selected = valid[0];
     showUploadFile(selected);
-    handleFiles([selected], opts);
-  }
-
-  async function processFile(file, opts) {
-    // Repost flag 局部捕获：footer 选预设全程用此局部，绝不在 await 之后回读模块级 _isRepost
-    // （并发导入交错会污染全局；codex re-review）。全局仍同步设置，供快照/renderBottomFooter 兜底。
-    const isRepost = !!(opts && opts.isRepost);
-    _isRepost = isRepost;
-    const t0 = performance.now();
-    file = await normalizeToDocx(file);
-    await waitForActiveRuleConfigReady('batch-upload');
-    const input = await parseFileToArticleInput(file, isRepost, opts);
-    const result = await renderArticleInput(input);
-    // New article upload resets the "更多文章" section to this rule's saved
-    // recommendation list. Per-article edits must not leak into the next file.
-    return await buildArticleSession(input, result, {
-      resetArticleArtifacts: true,
-      startedAt: t0,
-      autofillAuthorCard: true,
-    });
+    handleFile(selected, opts);
   }
 
   dropZone.addEventListener('click', () => {
@@ -1025,6 +943,7 @@ export function initApp(initialTemplate) {
     if (!converted) return false;
     if (window._resetCopyFeedback) window._resetCopyFeedback();
     _plainTextCopy = converted;
+    _copyArtifactUnavailableReason = '';
     _lastCopiedHtml = '';
     _articleSession = null;
     _lastRenderInput = null;
@@ -1112,7 +1031,7 @@ export function initApp(initialTemplate) {
     clearQueuedInputRerender();
     const inputCommit = articleInputGate.capture();
     _articleInputPending = true;
-    // Repost flag 局部捕获（同 processFile/handleFile）：footer 链路用局部，不回读全局。
+    // Repost flag 局部捕获（同 handleFile）：footer 链路用局部，不回读全局。
     const isRepost = !!(opts && opts.isRepost);
     _isRepost = isRepost;
     _convLog.length = 0;
@@ -1394,8 +1313,8 @@ export function initApp(initialTemplate) {
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       }
 
-      // Single-file upload path — same reset behavior as batch path: discard
-      // the prior article's edits and restore this rule's recommendation list.
+      // New input discards the prior article's per-article edits and restores
+      // this rule's recommendation list.
       const session = await buildArticleSession(input, result, {
         resetArticleArtifacts: true,
         startedAt: t0,
@@ -1466,6 +1385,8 @@ export function initApp(initialTemplate) {
   const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
   let _plainTextCopy = null;
   let _lastCopiedHtml = '';
+  let _copyArtifactUnavailableReason = '';
+  window._copyInProgress = false;
 
   function findWechatImageSrcs(html) {
     const urls = [];
@@ -1597,6 +1518,7 @@ export function initApp(initialTemplate) {
     // 渲染新文章 → 复位上一篇的复制状态（按钮变身 + 后台入口），避免显示陈旧的「✓已复制」。
     if (window._resetCopyFeedback) window._resetCopyFeedback();
     _plainTextCopy = null;
+    _copyArtifactUnavailableReason = '';
     document.body.classList.remove('plain-text-preview');
     document.body.classList.toggle('article-text-preview', bodyOnly);
     _articleHtml = normalizeRich(articleContent);
@@ -1861,14 +1783,68 @@ export function initApp(initialTemplate) {
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
 
   // ---- Copy (with CSS inlining) ----
+  function copyBodyHasMeaningfulContent(html) {
+    const source = String(html || '').trim();
+    if (!source) return false;
+    if (/<img\b[^>]*\bsrc\s*=\s*(["'])[^"']+\1/i.test(source) || /<table\b/i.test(source)) return true;
+    const visibleText = source
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&(nbsp|ensp|emsp|#160|#xa0);/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return visibleText.length > 0;
+  }
+
+  function copyArtifactFingerprint(html) {
+    const source = String(html || '');
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < source.length; i++) {
+      hash ^= source.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }
+
   window.copyContent = async function() {
     copyActionGate.invalidate();
     const copyAction = copyActionGate.capture();
     const content = document.getElementById('contentArea');
     const btn = document.getElementById('copyBtn');
 
+    if (window._activeRuleState && window._activeRuleState !== 'resolved') {
+      _lastCopiedHtml = '';
+      logConv('error', '复制已阻止：排版规则尚未由服务端确认', { state: window._activeRuleState });
+      showError('排版规则尚未加载成功，请点击顶部“重试加载”后再复制。');
+      btn.textContent = '规则未就绪';
+      btn.classList.remove('copied');
+      btn.style.background = '';
+      return false;
+    }
+
+    if (_copyArtifactUnavailableReason) {
+      _lastCopiedHtml = '';
+      window._copyImageWarning = 0;
+      logConv('error', '复制已阻止：恢复会话缺少安全复制产物', { reason: 'degraded-session' });
+      showError(_copyArtifactUnavailableReason);
+      btn.textContent = '请重新导入';
+      btn.classList.remove('copied');
+      btn.style.background = '';
+      return false;
+    }
+
     if (_plainTextCopy !== null) {
       const text = getPlainTextCopyValue();
+      if (!String(text || '').trim()) {
+        _lastCopiedHtml = '';
+        logConv('error', '纯文字复制已阻止：正文为空');
+        showError('当前正文为空，请重新导入后再复制。');
+        btn.textContent = '请重新导入';
+        btn.classList.remove('copied');
+        btn.style.background = '';
+        return false;
+      }
       const ok = await copyPlainTextToClipboard(text);
       if (copyAction.stale()) return false;
       _plainTextCopy = text;
@@ -1886,7 +1862,18 @@ export function initApp(initialTemplate) {
     if (!_articleBodyOnly) prepareMoreArticlesForCopy('copy-click');
 
     const enabled = isFooterEnabledForCurrentArticle();
-    let html = _articleCopy + '\n' + (enabled ? _footerCopy : '');
+    if (!copyBodyHasMeaningfulContent(_articleCopy)) {
+      _lastCopiedHtml = '';
+      logConv('error', '复制已阻止：正文复制产物为空');
+      showError('当前正文复制产物为空，请重新导入后再复制。');
+      btn.textContent = '请重新导入';
+      btn.classList.remove('copied');
+      btn.style.background = '';
+      return false;
+    }
+    const sourceArtifact = _articleCopy + '\n' + (enabled ? _footerCopy : '');
+    const artifactHash = copyArtifactFingerprint(sourceArtifact);
+    let html = sourceArtifact;
     const pendingWechatSrcs = _copyRequiresWechatImageTransfer ? findWechatImageSrcs(html) : [];
     if (pendingWechatSrcs.length > 0) {
       const waiting = _uploadPromise && !_uploadDone;
@@ -1906,6 +1893,16 @@ export function initApp(initialTemplate) {
     const config = (window._activeConfig && window._activeConfig.config) || {};
     const themeCSS = await _themeCSSReady;
     if (copyAction.stale()) return false;
+    const currentArtifact = _articleCopy + '\n' + (isFooterEnabledForCurrentArticle() ? _footerCopy : '');
+    if (copyArtifactFingerprint(currentArtifact) !== artifactHash) {
+      _lastCopiedHtml = '';
+      logConv('warn', '复制已取消：排版产物在复制期间更新', { artifactHash });
+      showError('排版内容刚刚更新，请再次点击复制。');
+      btn.textContent = '复制全文';
+      btn.classList.remove('copied');
+      btn.style.background = '';
+      return false;
+    }
     html = processForCopy(html, themeCSS, config);
     html = normalizeRich(html);
     const unsafeCopyRefs = findUnsafeCopyImageRefs(html, _copyRequiresWechatImageTransfer);
@@ -1914,7 +1911,9 @@ export function initApp(initialTemplate) {
     // 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次
     // 都要手动删的"二维码图下方空行"。在这里附一个零高度 <p>，让编辑器认
     // 为尾部已有可定位段，不再追加可见空段。
-    html += '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
+    if (!isWebsiteTemplate()) {
+      html += '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
+    }
 
     const plainText = content.textContent || '';
 
@@ -1937,7 +1936,7 @@ export function initApp(initialTemplate) {
     }
 
     if (copyAction.stale()) return false;
-    _lastCopiedHtml = html;
+    _lastCopiedHtml = ok ? html : '';
     const imgCount = (html.match(/<img[\s>]/gi) || []).length;
     // 复制已写入剪贴板，但若仍有图片上传失败（_failedSrcs 非空），粘进后台这些图会缺失。
     // 必须显式告警、不能静默显示「✓已复制」让用户白发一篇（A 线 P0：消灭复制假成功）。
@@ -1949,16 +1948,47 @@ export function initApp(initialTemplate) {
       ok ? (failedImgCount ? '复制完成，但有图片未上传成功' : '复制完成') : '复制失败', {
         method,
         htmlSize: (html.length / 1024).toFixed(1) + 'KB',
+        textChars: plainText.length,
         imgCount,
         failedImgs: failedImgCount || undefined,
+        channel: (_activeTemplate && _activeTemplate.id) || 'unknown',
+        ruleRevision: (window._activeConfig && (window._activeConfig.revision || window._activeConfig.version)) || undefined,
+        artifactHash,
       });
 
     btn.textContent = ok ? '\u2713 已复制' : '复制失败';
     if (ok && failedImgCount) btn.textContent = '已复制·' + failedImgCount + '张图缺失';
-    btn.classList.add('copied');
+    btn.classList.toggle('copied', ok);
     // 按钮底色：有图缺失→橙色警告；正常/失败态清空 inline，回归默认（.copied 绿 / .tb-primary 蓝）。
     btn.style.background = failedImgCount ? 'var(--fs-warning)' : '';
     return ok;
+  };
+
+  const immediateCopyContent = window.copyContent;
+  window.copyContent = function(...args) {
+    window._copyInProgress = true;
+    try {
+      return Promise.resolve(immediateCopyContent(...args)).finally(() => {
+        window._copyInProgress = false;
+      });
+    } catch (error) {
+      window._copyInProgress = false;
+      throw error;
+    }
+  };
+
+  window._hasUnsavedEditorWork = function() {
+    const previewContent = document.getElementById('previewContent');
+    const importInput = document.getElementById('urlInput');
+    return !!(
+      window._copyInProgress
+      || _articleInputPending
+      || (_uploadPromise && !_uploadDone)
+      || dropZone.classList.contains('processing')
+      || (previewContent && previewContent.style.display !== 'none')
+      || (importInput && String(importInput.value || '').trim())
+      || document.body.classList.contains('has-preview')
+    );
   };
 
   window.getClipboardHtml = function() { return _lastCopiedHtml; };
@@ -1983,6 +2013,7 @@ export function initApp(initialTemplate) {
     document.body.classList.remove('has-preview', 'plain-text-preview', 'article-text-preview');
 
     _plainTextCopy = null;
+    _copyArtifactUnavailableReason = '';
     _articleBodyOnly = false;
     _articleSession = null;
     window._articleMeta = {};
@@ -2030,7 +2061,6 @@ export function initApp(initialTemplate) {
     const previewContent = document.getElementById('previewContent');
     const emptyState = document.getElementById('emptyState');
     const wxFooter = document.getElementById('wxFooter');
-    const batchListEl = document.getElementById('batchList');
     return {
       schema_version: 1,
       timestamp: Date.now(),
@@ -2039,7 +2069,8 @@ export function initApp(initialTemplate) {
         article_copy: _articleCopy,
         footer_html: _footerHtml,
         footer_copy: _footerCopy,
-        plain_text_copy: getPlainTextCopyValue(),
+        copy_unavailable_reason: _copyArtifactUnavailableReason,
+        plain_text_copy: _plainTextCopy === null ? null : getPlainTextCopyValue(),
         is_repost: _isRepost,
         source_is_docx: _sourceIsDocx,
         article_body_only: _articleBodyOnly,
@@ -2048,13 +2079,6 @@ export function initApp(initialTemplate) {
         upload_done: _uploadDone,
         last_render_input: clonePlain(_lastRenderInput),
         article_session: clonePlain(_articleSession),
-      },
-      batch_state: {
-        // File objects can't be serialized; persist only result metadata so a
-        // restored editor can still display the batch list. Re-running a batch
-        // requires re-uploading the files.
-        file_meta: _batchFiles ? _batchFiles.map(f => ({ name: f.name, size: f.size })) : [],
-        results: _batchResults ? JSON.parse(JSON.stringify(_batchResults)) : [],
       },
       dom: {
         content_area_html: ca ? ca.innerHTML : '',
@@ -2066,8 +2090,6 @@ export function initApp(initialTemplate) {
         preview_visible: previewContent ? previewContent.style.display !== 'none' : false,
         empty_visible: emptyState ? emptyState.style.display !== 'none' : true,
         footer_visible: wxFooter ? wxFooter.style.display !== 'none' : false,
-        batch_visible: batchListEl ? batchListEl.style.display !== 'none' : false,
-        batch_html: batchListEl ? batchListEl.innerHTML : '',
         has_preview_class: document.body.classList.contains('has-preview'),
         plain_text_preview: document.body.classList.contains('plain-text-preview'),
         article_text_preview: document.body.classList.contains('article-text-preview'),
@@ -2112,6 +2134,12 @@ export function initApp(initialTemplate) {
     _articleInputPending = false;
     clearQueuedInputRerender();
     _plainTextCopy = cs.plain_text_copy != null ? cs.plain_text_copy : null;
+    const restoredCopyMissing = !!dom.preview_visible && _plainTextCopy === null && !String(_articleCopy || '').trim();
+    _copyArtifactUnavailableReason = String(
+      cs.copy_unavailable_reason
+        || snap.degraded_reason
+        || ((snap.degraded || restoredCopyMissing) ? '文章内容过大，仅恢复了预览。请重新导入后再复制。' : '')
+    );
     _isRepost = !!cs.is_repost;
     _sourceIsDocx = !!cs.source_is_docx;
     _articleBodyOnly = !!cs.article_body_only || !!dom.article_text_preview;
@@ -2136,10 +2164,6 @@ export function initApp(initialTemplate) {
         sourceIsDocx: _sourceIsDocx,
         bodyOnly: _articleBodyOnly,
       };
-    }
-    if (snap.batch_state) {
-      _batchFiles = [];
-      _batchResults = snap.batch_state.results || [];
     }
     const ca = document.getElementById('contentArea');
     if (ca) {
@@ -2178,11 +2202,6 @@ export function initApp(initialTemplate) {
     } else {
       resetImportEntry();
     }
-    const batchListEl = document.getElementById('batchList');
-    if (batchListEl) {
-      batchListEl.innerHTML = dom.batch_html || '';
-      batchListEl.style.display = dom.batch_visible ? '' : 'none';
-    }
     document.body.classList.toggle('has-preview', !!dom.has_preview_class);
     document.body.classList.toggle('plain-text-preview', !!dom.plain_text_preview);
     document.body.classList.toggle('article-text-preview', !!dom.article_text_preview);
@@ -2197,6 +2216,7 @@ export function initApp(initialTemplate) {
     } else {
       dispatchArticleEvent('fbif:article-restored', { snapshot: snap });
     }
+    if (_copyArtifactUnavailableReason) showError(_copyArtifactUnavailableReason);
     return true;
   };
 }

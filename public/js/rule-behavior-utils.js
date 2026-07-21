@@ -8,14 +8,241 @@
 // 契约测试：tests/rule-behavior-utils.test.mjs。
 
 // ── 正则 ──
-// 正则字符串 → RegExp。识别开头 (?i) 等内联 flag（服务端 RE2 用 (?i) 表达大小写
-// 不敏感，JS new RegExp 不支持内联 flag 组，这里转成构造函数 flag）。RegExp 实例透传。
+// 规则正则由 Go/RE2 校验、由浏览器回溯引擎执行。两者并不具有相同的最坏时间复杂度，
+// 因此这里与服务端共同限定一个保守安全子集，并拒绝超长输入。这样旧数据即使绕过保存
+// 校验，也不能用 (a+)+、(a|aa)+ 或多个 .* 把编辑器主线程卡死。
+export const MAX_BEHAVIOR_REGEX_LENGTH = 300;
+export const MAX_BEHAVIOR_REGEX_INPUT = 4096;
+
+function regexKey(key) {
+  const source = String(key || '').toLowerCase();
+  return source.includes('regex') || source.includes('pattern') ||
+    source.includes('marker') || source.includes('signature');
+}
+
+function normalizeInlineFlags(source) {
+  let pattern = source;
+  let flags = '';
+  const match = pattern.match(/^\(\?([a-z]+)\)/);
+  if (match) {
+    if (!/^[ims]+$/.test(match[1])) {
+      throw new Error('只支持开头的 (?i)、(?m) 或 (?s) 标志');
+    }
+    flags = Array.from(new Set(match[1])).join('');
+    pattern = pattern.slice(match[0].length);
+  }
+  return { pattern, flags };
+}
+
+function parseBraceQuantifier(source, start) {
+  let i = start + 1;
+  const minStart = i;
+  while (i < source.length && /[0-9]/.test(source[i])) i++;
+  if (i === minStart) return null;
+  const min = Number(source.slice(minStart, i));
+  if (source[i] === '}') return { variable: false, unbounded: false, max: min, end: i + 1 };
+  if (source[i] !== ',') return null;
+  i++;
+  const maxStart = i;
+  while (i < source.length && /[0-9]/.test(source[i])) i++;
+  if (source[i] !== '}') return null;
+  if (i === maxStart) return { variable: true, unbounded: true, max: 0, end: i + 1 };
+  const max = Number(source.slice(maxStart, i));
+  return { variable: min !== max, unbounded: false, max, end: i + 1 };
+}
+
+function isWildcardClass(source) {
+  return source.startsWith('[^') ||
+    (source.includes('\\s') && source.includes('\\S')) ||
+    (source.includes('\\d') && source.includes('\\D')) ||
+    (source.includes('\\w') && source.includes('\\W'));
+}
+
+function assertSafeRegexStructure(source) {
+  const frames = [{ hasVariableRepeat: false, hasAlternation: false, hasWildcard: false, last: null }];
+  let unboundedWildcards = 0;
+
+  const applyQuantifier = (frame, quantifier) => {
+    if (!frame.last) throw new Error('量词前必须有可匹配内容');
+    const repeatsMoreThanOnce = quantifier.unbounded || quantifier.max > 1;
+    if (frame.last.group && repeatsMoreThanOnce &&
+        (frame.last.hasVariableRepeat || frame.last.hasAlternation)) {
+      throw new Error('不允许嵌套量词或带分支的重复组');
+    }
+    if (frame.last.wildcard && quantifier.unbounded && ++unboundedWildcards > 1) {
+      throw new Error('不允许多个无上界通配符');
+    }
+    if (quantifier.variable) frame.hasVariableRepeat = true;
+  };
+
+  for (let i = 0; i < source.length;) {
+    let frame = frames[frames.length - 1];
+    const ch = source[i];
+    if (ch === '\\') {
+      if (i + 1 >= source.length) throw new Error('正则不能以转义符结尾');
+      if (/[1-9k]/.test(source[i + 1])) throw new Error('不支持反向引用');
+      frame.last = { group: false, wildcard: false };
+      i += 2;
+      continue;
+    }
+    if (ch === '[') {
+      let end = i + 1;
+      while (end < source.length) {
+        if (source[end] === '\\') { end += 2; continue; }
+        if (source[end] === ']') break;
+        end++;
+      }
+      if (end >= source.length) throw new Error('字符组没有闭合');
+      const wildcard = isWildcardClass(source.slice(i, end + 1));
+      frame.hasWildcard ||= wildcard;
+      frame.last = { group: false, wildcard };
+      i = end + 1;
+      continue;
+    }
+    if (ch === '(') {
+      if (source[i + 1] === '?') {
+        if (source[i + 2] !== ':') throw new Error('(? 后只允许非捕获组 (?:...)');
+        i += 3;
+      } else {
+        i++;
+      }
+      frames.push({ hasVariableRepeat: false, hasAlternation: false, hasWildcard: false, last: null });
+      continue;
+    }
+    if (ch === ')') {
+      if (frames.length === 1) throw new Error('存在多余的右括号');
+      const closed = frames.pop();
+      frame = frames[frames.length - 1];
+      frame.hasVariableRepeat ||= closed.hasVariableRepeat;
+      frame.hasAlternation ||= closed.hasAlternation;
+      frame.hasWildcard ||= closed.hasWildcard;
+      frame.last = {
+        group: true,
+        wildcard: closed.hasWildcard,
+        hasVariableRepeat: closed.hasVariableRepeat,
+        hasAlternation: closed.hasAlternation,
+      };
+      i++;
+      continue;
+    }
+    if (ch === '|') {
+      frame.hasAlternation = true;
+      frame.last = null;
+      i++;
+      continue;
+    }
+    if (ch === '*' || ch === '+' || ch === '?') {
+      applyQuantifier(frame, {
+        variable: true,
+        unbounded: ch === '*' || ch === '+',
+        max: 1,
+      });
+      i++;
+      if (source[i] === '?') i++; // 懒惰后缀不改变重复上界
+      continue;
+    }
+    if (ch === '{') {
+      const quantifier = parseBraceQuantifier(source, i);
+      if (!quantifier) {
+        frame.last = { group: false, wildcard: false };
+        i++;
+        continue;
+      }
+      applyQuantifier(frame, quantifier);
+      i = quantifier.end;
+      if (source[i] === '?') i++;
+      continue;
+    }
+    if (ch === '.') {
+      frame.hasWildcard = true;
+      frame.last = { group: false, wildcard: true };
+      i++;
+      continue;
+    }
+    if (ch === '^' || ch === '$') {
+      frame.last = null;
+      i++;
+      continue;
+    }
+    frame.last = { group: false, wildcard: false };
+    i++;
+  }
+  if (frames.length !== 1) throw new Error('存在未闭合的分组');
+}
+
+export function validateBehaviorRegexSource(src) {
+  const source = String(src);
+  if (Array.from(source).length > MAX_BEHAVIOR_REGEX_LENGTH) {
+    throw new Error(`正则不能超过 ${MAX_BEHAVIOR_REGEX_LENGTH} 个字符`);
+  }
+  const normalized = normalizeInlineFlags(source);
+  assertSafeRegexStructure(normalized.pattern);
+  // 最后交给原生编译器检查普通语法错误；安全检查不能替代语法检查。
+  new RegExp(normalized.pattern, normalized.flags);
+  return normalized;
+}
+
+class BoundedBehaviorRegExp extends RegExp {
+  exec(input) {
+    const source = String(input);
+    if (source.length > MAX_BEHAVIOR_REGEX_INPUT) {
+      this.lastIndex = 0;
+      return null;
+    }
+    return super.exec(source);
+  }
+}
+
+// 正则字符串 → 受限 RegExp。识别开头 (?i) 等 RE2 内联 flag；可信代码中的
+// RegExp 常量保持透传，规则数据字符串则始终走安全校验和输入上限。
 export function compileBehaviorRegex(src) {
   if (src instanceof RegExp) return src;
-  let s = String(src), flags = '';
-  const m = s.match(/^\(\?([a-z]+)\)/);
-  if (m) { flags = m[1].replace(/[^gimsuy]/g, ''); s = s.slice(m[0].length); }
-  return new RegExp(s, flags);
+  const { pattern, flags } = validateBehaviorRegexSource(src);
+  return new BoundedBehaviorRegExp(pattern, flags);
+}
+
+const reportedRegexErrors = new Set();
+export function tryCompileBehaviorRegex(src, path = 'behavior.regex') {
+  try {
+    return compileBehaviorRegex(src);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const reportKey = `${path}:${message}`;
+    if (!reportedRegexErrors.has(reportKey)) {
+      reportedRegexErrors.add(reportKey);
+      globalThis.console?.error?.(`[rule-regex] ${path}: ${message}`);
+    }
+    return null;
+  }
+}
+
+export function validateBehaviorRegexDocument(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return true;
+  for (const [key, value] of Object.entries(raw)) {
+    if (!regexKey(key) || typeof value !== 'string') continue;
+    try { validateBehaviorRegexSource(value); }
+    catch (error) { throw new Error(`behavior.${key}: ${error.message}`); }
+  }
+  if (raw.params && typeof raw.params === 'object' && !Array.isArray(raw.params)) {
+    for (const [key, spec] of Object.entries(raw.params)) {
+      if (!regexKey(key) || !spec || typeof spec !== 'object' || Array.isArray(spec) || spec.default == null) continue;
+      if (typeof spec.default !== 'string') throw new Error(`behavior.params.${key}.default: 正则必须是字符串`);
+      try { validateBehaviorRegexSource(spec.default); }
+      catch (error) { throw new Error(`behavior.params.${key}.default: ${error.message}`); }
+    }
+  }
+  if (raw.lists && typeof raw.lists === 'object' && !Array.isArray(raw.lists)) {
+    for (const [key, items] of Object.entries(raw.lists)) {
+      if (!regexKey(key)) continue;
+      if (!Array.isArray(items)) throw new Error(`behavior.lists.${key}: 正则列表必须是数组`);
+      items.forEach((item, index) => {
+        if (typeof item !== 'string') throw new Error(`behavior.lists.${key}[${index}]: 正则必须是字符串`);
+        try { validateBehaviorRegexSource(item); }
+        catch (error) { throw new Error(`behavior.lists.${key}[${index}]: ${error.message}`); }
+      });
+    }
+  }
+  return true;
 }
 
 // ── behavior 派签名（以 behavior 对象为参；rule-behavior-foodtalks.js 口径）──
@@ -48,7 +275,7 @@ export function behList(config, key, fallback) {
 // 单条正则：优先 behavior.params.<key>.default，非法/缺省降级编译 fallback 字符串。
 export function behaviorRegex(config, key, fallbackStr) {
   const src = behParamStr(config, key, fallbackStr);
-  try { return compileBehaviorRegex(src); } catch (e) { return compileBehaviorRegex(fallbackStr); }
+  return tryCompileBehaviorRegex(src, `behavior.params.${key}.default`) || compileBehaviorRegex(fallbackStr);
 }
 
 // ── 中立文本提取 ──

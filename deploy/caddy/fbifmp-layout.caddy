@@ -5,12 +5,18 @@
 # 服务器主 Caddyfile（15 个站点共用）只保留一行 `import sites/fbifmp-layout.caddy`，
 # 本项目部署不再对主文件做注入式 patch（旧脚本曾因此连修 6 次路由）。
 #
-# 内容为 2026-07-10 拆分时对生产现状的保真迁移；已知遗留（勿顺手清理，需单独验证）：
-#   - /api/wechat-draft、/api/oss-presign 仍指向 localhost:9000 的旧服务；
-#   - /api/oss-upload、/api/wechat-upload 在 @fbifUploadApi（9001）已匹配，
-#     下方 9000 的同名 handle 是永不命中的死配置，保留只为与拆分前逐字节语义一致。
+# 仅 /api/wechat-draft、/api/oss-presign 仍是 localhost:9000 的显式遗留端点；
+# 其余 /api 全部交给 Go 9001，未知 API 由 Go 统一返回 JSON 404，
+# 绝不落到 SPA 静态 fallback 形成 HTML 假 200。
 
 fbifmp-layout.foodtalks.cn {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+
 	@fbifAppShell path / /index.html /app.html /version.json
 	header @fbifAppShell Cache-Control "no-cache"
 
@@ -26,31 +32,15 @@ fbifmp-layout.foodtalks.cn {
 	@fbifImageAssets path *.png *.jpg *.jpeg *.webp *.gif *.svg *.ico
 	header @fbifImageAssets >Cache-Control "public, max-age=86400"
 
-	@fbifRulesApi path /api/rules /api/rules/*
-	handle @fbifRulesApi {
-		reverse_proxy localhost:9001
-	}
-
 	@fbifChannels path /mp /mp/* /ft /ft/*
 	handle @fbifChannels {
 		reverse_proxy localhost:9001
 	}
 
-	@fbifUploadApi path /api/oss-upload /api/wechat-upload
-	handle @fbifUploadApi {
-		reverse_proxy localhost:9001
-	}
-
-	@fbifRenderApi path /api/render /api/html-to-blocks
-	handle @fbifRenderApi {
-		reverse_proxy localhost:9001
-	}
-
-	# 发布流水线（M4-M7）：审核预览页 + 任务管理 API + 飞书卡片回调（Webhook 备用线）。
-	# 2026-07-10 踩坑：本 vhost 是路径白名单，漏登记的路径会落到静态兜底 try_files
-	# 返回 index.html 空壳——用户点卡片「预览效果」看到空页即此因。新增 9001 端点必须
-	# 同步登记到这里。
-	@fbifPublish path /preview/* /api/publish/* /api/feishu/*
+	# 发布流水线（M4-M7）：审核预览页 + 任务管理 API + 飞书卡片回调。
+	# FEISHU_CALLBACK_MODE=websocket 时 API 对公网 Webhook 精确返回 404；只有显式
+	# webhook 模式才开放该 POST 端点，两种传输层不再同时可用。
+	@fbifPublish path /preview/*
 	handle @fbifPublish {
 		reverse_proxy localhost:9001
 	}
@@ -63,37 +53,15 @@ fbifmp-layout.foodtalks.cn {
 	handle /api/oss-presign {
 		reverse_proxy localhost:9000
 	}
-	handle /api/oss-upload {
-		reverse_proxy localhost:9000
-	}
-	handle /api/wechat-upload {
-		reverse_proxy localhost:9000
-	}
-	handle /api/fetch-article {
-		reverse_proxy localhost:9001
-	}
-	handle /api/fetch-article-meta {
-		reverse_proxy localhost:9001
-	}
-	handle /api/image-proxy {
-		reverse_proxy localhost:9001
-	}
-	handle /api/config/* {
-		reverse_proxy localhost:9001
-	}
-	handle /api/health {
-		reverse_proxy localhost:9001
-	}
-	handle /api/doc-to-docx {
+
+	@fbifAPI path /api /api/*
+	handle @fbifAPI {
 		reverse_proxy localhost:9001 {
 			transport http {
 				read_timeout 180s
 				write_timeout 180s
 			}
 		}
-	}
-	handle /api/doc-cache/* {
-		reverse_proxy localhost:9001
 	}
 
 	handle {

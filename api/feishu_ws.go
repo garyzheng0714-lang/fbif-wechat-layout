@@ -2,10 +2,7 @@ package main
 
 // feishu_ws.go — 飞书卡片回调·长连接（WebSocket）模式（2026-07-10 升级）。
 //
-// ⚠️ 两模式并存：本长连接与 Webhook 端点（feishu_card_callback.go 的
-// POST /api/feishu/card-callback）同时存在，**生效哪条由飞书开放平台后台
-// 「事件与回调 → 订阅方式」单选决定**——用户已选「使用长连接接收回调」，
-// Webhook 端点保留作备用通道（后台改回「将事件发送至开发者服务器」即切回）。
+// FEISHU_CALLBACK_MODE 明确选择 websocket/webhook，两个入口不再同时开放。
 //
 // 与 Webhook 的差异只有传输层：
 //   - 鉴权：长连接由官方 SDK 建连时用 app_id/app_secret 内置鉴权，
@@ -29,7 +26,7 @@ import (
 )
 
 // maybeStartFeishuWS FEISHU_APP_ID/FEISHU_APP_SECRET 齐了就 goroutine 启动长连接
-// 客户端；缺任一则 log 一行跳过（Webhook 备用通道仍在，不影响其余功能）。
+// 客户端；缺任一则 log 一行跳过并由 readiness fail closed。
 // 长连接失败不 fatal——它是审核交互的加速器，不是发布流水线的闸门。
 func maybeStartFeishuWS(p *publishPipeline) {
 	if publishWorkersPaused() {
@@ -39,7 +36,7 @@ func maybeStartFeishuWS(p *publishPipeline) {
 	appID := strings.TrimSpace(os.Getenv("FEISHU_APP_ID"))
 	appSecret := strings.TrimSpace(os.Getenv("FEISHU_APP_SECRET"))
 	if appID == "" || appSecret == "" {
-		log.Printf("publish: FEISHU_APP_ID/FEISHU_APP_SECRET 未配置，跳过飞书长连接（Webhook 回调端点仍可用）")
+		log.Printf("publish: FEISHU_APP_ID/FEISHU_APP_SECRET 未配置，跳过飞书长连接")
 		return
 	}
 	// 长连接模式无需 verification token / encrypt key（SDK 建连鉴权），两参传空。
@@ -49,7 +46,7 @@ func maybeStartFeishuWS(p *publishPipeline) {
 		larkws.WithEventHandler(handler),
 		larkws.WithAutoReconnect(true),
 		larkws.WithOnReady(func() {
-			log.Printf("publish: 飞书长连接已建立，卡片回调改由长连接接收（Webhook 端点保留作备用）")
+			log.Printf("publish: 飞书长连接已建立")
 		}),
 		larkws.WithOnReconnecting(func() {
 			log.Printf("publish: 飞书长连接断开，SDK 正在自动重连……")
@@ -63,9 +60,9 @@ func maybeStartFeishuWS(p *publishPipeline) {
 	)
 	go func() {
 		// Start 阻塞运行（内部含 SDK 自动重连循环）；返回错误说明连不上且不再重试
-		// （如凭证错误），只记日志不拖垮进程——Webhook 备用通道还在。
+		// （如凭证错误），只记日志；readiness 配置检查仍保持 fail closed。
 		if err := cli.Start(context.Background()); err != nil {
-			log.Printf("publish: 飞书长连接启动失败（卡片回调退回 Webhook 通道）：%v", err)
+			log.Printf("publish: 飞书长连接启动失败：%v", err)
 		}
 	}()
 }

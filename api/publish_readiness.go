@@ -16,10 +16,12 @@ const (
 var errPublishWorkersPaused = errors.New("发布流水线正在部署验收，写操作与后台 worker 暂停，请稍后重试")
 
 type publishReadinessStatus struct {
-	Ready         bool `json:"ready"`
-	WorkersPaused bool `json:"workers_paused"`
-	StoreValid    bool `json:"store_valid"`
-	ServiceAuth   struct {
+	Ready          bool                      `json:"ready"`
+	ConfigSchema   runtimeConfigSchemaStatus `json:"config_schema"`
+	WorkersPaused  bool                      `json:"workers_paused"`
+	StoreValid     bool                      `json:"store_valid"`
+	GeneratedFiles generatedArtifactsStatus  `json:"generated_files"`
+	ServiceAuth    struct {
 		Configured bool `json:"configured"`
 	} `json:"service_auth"`
 	HTTPReviewEnabled bool `json:"http_review_enabled"`
@@ -37,11 +39,14 @@ type publishReadinessStatus struct {
 		Configured bool `json:"configured"`
 	} `json:"render"`
 	Feishu struct {
-		NotifyConfigured            bool `json:"notify_configured"`
-		MonitorNotifyConfigured     bool `json:"monitor_notify_configured"`
-		WSConfigured                bool `json:"ws_configured"`
-		WebhookConfigured           bool `json:"webhook_configured"`
-		ReviewerAllowlistConfigured bool `json:"reviewer_allowlist_configured"`
+		NotifyConfigured            bool   `json:"notify_configured"`
+		MonitorNotifyConfigured     bool   `json:"monitor_notify_configured"`
+		WSConfigured                bool   `json:"ws_configured"`
+		WebhookConfigured           bool   `json:"webhook_configured"`
+		CallbackMode                string `json:"callback_mode"`
+		CallbackModeExplicit        bool   `json:"callback_mode_explicit"`
+		CallbackConfigured          bool   `json:"callback_configured"`
+		ReviewerAllowlistConfigured bool   `json:"reviewer_allowlist_configured"`
 	} `json:"feishu"`
 	EnrichMode      string `json:"enrich_mode"`
 	JudgeConfigured bool   `json:"judge_configured"`
@@ -126,8 +131,12 @@ func classifyFoodTalksTarget(base, front, admin string) string {
 
 func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	var out publishReadinessStatus
+	out.ConfigSchema = currentRuntimeConfigSchemaStatus()
 	out.WorkersPaused = publishWorkersPaused()
 	out.StoreValid = p != nil && p.store != nil
+	if p != nil {
+		out.GeneratedFiles = currentGeneratedArtifactsStatus(p.publicDir)
+	}
 	if out.StoreValid {
 		_, storeErr := p.store.all()
 		out.StoreValid = storeErr == nil
@@ -156,14 +165,22 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.Feishu.NotifyConfigured = out.Feishu.WSConfigured && chatID != ""
 	out.Feishu.MonitorNotifyConfigured = out.Feishu.WSConfigured && monitorUserID != ""
 	out.Feishu.WebhookConfigured = strings.TrimSpace(os.Getenv("FEISHU_VERIFICATION_TOKEN")) != ""
+	out.Feishu.CallbackMode, out.Feishu.CallbackModeExplicit = configuredFeishuCallbackMode()
+	if out.Feishu.CallbackMode == feishuCallbackModeWebhook {
+		out.Feishu.CallbackConfigured = out.Feishu.WebhookConfigured
+	} else {
+		out.Feishu.CallbackConfigured = out.Feishu.WSConfigured
+	}
 	out.Feishu.ReviewerAllowlistConfigured = feishuReviewerAllowlistConfigured()
 	out.ServiceAuth.Configured = publishSyncServiceTokenConfigured()
 	out.HTTPReviewEnabled = publishHTTPReviewEnabled()
 	out.EnrichMode = publishEnrichMode()
 	out.JudgeConfigured = strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv)) != ""
-	out.Ready = adminPasswordConfigured() && out.ServiceAuth.Configured && !out.HTTPReviewEnabled &&
+	out.Ready = out.ConfigSchema.Matches && adminPasswordConfigured() && out.ServiceAuth.Configured && !out.HTTPReviewEnabled &&
+		out.GeneratedFiles.ready() &&
 		out.StoreValid && out.FoodTalks.Configured && out.Feishu.ReviewerAllowlistConfigured &&
 		out.FoodTalks.Categories && out.Render.Configured && out.Feishu.NotifyConfigured &&
-		out.Feishu.MonitorNotifyConfigured && out.Feishu.WSConfigured && out.EnrichMode == "dual" && out.JudgeConfigured
+		out.Feishu.MonitorNotifyConfigured && out.Feishu.CallbackModeExplicit && out.Feishu.CallbackConfigured &&
+		out.EnrichMode == "dual" && out.JudgeConfigured
 	return out
 }

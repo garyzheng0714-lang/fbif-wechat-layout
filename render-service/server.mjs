@@ -6,7 +6,17 @@ import { renderArticle, SUPPORTED_PACK_IDS } from './render.mjs';
 
 const PORT = Number(process.env.RENDER_PORT || 19091);
 const TOKEN = (process.env.RENDER_TOKEN || '').trim();
+const EXPECTED_CONFIG_SCHEMA_VERSION = '1';
+const CONFIG_SCHEMA_VERSION = String(
+  process.env.FBIF_CONFIG_SCHEMA_VERSION || (process.env.NODE_ENV === 'production' ? '' : EXPECTED_CONFIG_SCHEMA_VERSION),
+).trim();
 const MAX_BODY = 8 * 1024 * 1024; // 8MB，长文+多图 blocks 足够
+
+if (CONFIG_SCHEMA_VERSION !== EXPECTED_CONFIG_SCHEMA_VERSION) {
+  throw new Error(
+    `FBIF_CONFIG_SCHEMA_VERSION=${JSON.stringify(CONFIG_SCHEMA_VERSION)}; expected ${EXPECTED_CONFIG_SCHEMA_VERSION}`,
+  );
+}
 
 function sendJSON(res, status, obj) {
   const body = JSON.stringify(obj);
@@ -34,7 +44,10 @@ function readBody(req) {
 
 const server = createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/healthz') {
-    return sendJSON(res, 200, { ok: true });
+    return sendJSON(res, 200, {
+      ok: true,
+      config_schema_version: CONFIG_SCHEMA_VERSION,
+    });
   }
   if (req.method !== 'POST' || req.url !== '/render') {
     return sendJSON(res, 404, { error: 'not found' });

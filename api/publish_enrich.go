@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -169,7 +168,7 @@ func arkResponsesCall(ctx context.Context, apiKey, model, systemPrompt string, u
 		return "", fmt.Errorf("ARK 接口不可达: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	respBody, err := readBoundedBody(resp.Body, 4<<20)
 	if err != nil {
 		return "", fmt.Errorf("读 ARK 响应失败: %w", err)
 	}

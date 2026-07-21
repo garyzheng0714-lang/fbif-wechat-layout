@@ -35,6 +35,42 @@
 @keyframes acct-pop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .topbar-spacer { flex: 1; }
 .tb-actions { display: flex; align-items: center; gap: 8px; }
+.version-update-banner {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 10px;
+  border-radius: var(--fs-r-s);
+  color: var(--fs-text-2);
+  background: var(--fs-bg-nested);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.version-update-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.version-update-action {
+  flex: none;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--fs-r-xs);
+  color: var(--fs-brand);
+  background: var(--fs-brand-soft);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+.version-update-action:hover { color: #fff; background: var(--fs-brand); }
+.version-update-action:focus-visible { outline: 2px solid var(--fs-brand); outline-offset: 2px; }
+.version-update-action.secondary { color: var(--fs-text-2); background: transparent; }
+.version-update-action.secondary:hover { color: var(--fs-brand); background: var(--fs-bg-hover); }
 
 /* Buttons */
 .btn {
@@ -803,6 +839,8 @@ body.article-text-preview .phone-frame {
 @media (max-width: 520px) {
   .global-channel-bar { padding: 0 10px; gap: 8px; }
   .global-channel-bar .btn-primary { padding: 0 12px; }
+  .version-update-banner { padding-left: 4px; }
+  .version-update-message { display: none; }
 }
 @media (max-width: 820px), (pointer: coarse) {
   .global-channel-bar .btn,

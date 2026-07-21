@@ -133,6 +133,24 @@ func TestStaticCache_VersionFileStaysNoCache(t *testing.T) {
 	}
 }
 
+func TestUnknownAPIRouteReturnsJSON404InsteadOfStaticHTML(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/new-route-missing", nil)
+	rec := httptest.NewRecorder()
+	handleUnknownAPI(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"api_not_found"`) {
+		t.Fatalf("unexpected JSON error body: %s", rec.Body.String())
+	}
+	if strings.Contains(strings.ToLower(rec.Body.String()), "<html") {
+		t.Fatalf("unknown API must never return static HTML: %s", rec.Body.String())
+	}
+}
+
 func mustWriteStaticAsset(t *testing.T, name string, content []byte) string {
 	t.Helper()
 	dir := t.TempDir()

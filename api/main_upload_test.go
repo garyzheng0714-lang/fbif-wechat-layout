@@ -26,6 +26,7 @@ func TestHandleImageUploadProxyAddsForwardedOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
 	req.Host = "fbifmp-layout.foodtalks.cn"
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://fbifmp-layout.foodtalks.cn")
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
 
@@ -58,9 +59,11 @@ func TestHandleImageUploadProxyPreservesRequestOrigin(t *testing.T) {
 	t.Setenv("WECHAT_UPLOAD_ORIGIN", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
+	req.Host = "fbifmp-layout.foodtalks.cn"
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://fbifmp-layout.foodtalks.cn")
 	req.Header.Set("Referer", "https://fbifmp-layout.foodtalks.cn/ft/default")
+	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
 
 	handleImageUpload(rec, req)
@@ -91,6 +94,7 @@ func TestHandleImageUploadProxyRoutesOSSAliasToOSSUpstream(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://example.com")
 	rec := httptest.NewRecorder()
 
 	handleImageUpload(rec, req)
@@ -118,6 +122,7 @@ func TestHandleImageUploadProxyKeepsWechatAliasOnWechatUpstream(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/wechat-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://example.com")
 	rec := httptest.NewRecorder()
 
 	handleImageUpload(rec, req)

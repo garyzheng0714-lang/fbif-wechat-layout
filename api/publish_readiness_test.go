@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -22,6 +23,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	t.Setenv("FEISHU_REVIEW_CHAT_ID", "oc_secret_chat")
 	t.Setenv("PUBLISH_MONITOR_FEISHU_USER_ID", "secret-monitor-user")
 	t.Setenv("FEISHU_VERIFICATION_TOKEN", "secret-verification")
+	t.Setenv("FEISHU_CALLBACK_MODE", "websocket")
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_secret_reviewer")
 	t.Setenv("ARK_API_KEY", "secret-ark-key")
 	t.Setenv("ARK_MODEL_ID", "model-a")
@@ -50,13 +52,59 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Ready || !got.WorkersPaused || !got.ServiceAuth.Configured || got.HTTPReviewEnabled || got.FoodTalks.Target != "test" ||
+	if !got.Ready || !got.ConfigSchema.Matches || got.ConfigSchema.Expected != runtimeConfigSchemaVersion ||
+		got.ConfigSchema.Actual != runtimeConfigSchemaVersion || !got.WorkersPaused ||
+		!got.ServiceAuth.Configured || got.HTTPReviewEnabled || got.FoodTalks.Target != "test" ||
 		!got.FoodTalks.TargetMatchesExpected || got.EnrichMode != "dual" {
 		t.Fatalf("readiness 核心状态错误：%+v", got)
 	}
+	if !got.GeneratedFiles.ready() {
+		t.Fatalf("生成文件 readiness 错误：%+v", got.GeneratedFiles)
+	}
 	if !got.Feishu.NotifyConfigured || !got.Feishu.MonitorNotifyConfigured || !got.Feishu.WSConfigured ||
-		!got.Feishu.WebhookConfigured || !got.Feishu.ReviewerAllowlistConfigured {
+		!got.Feishu.WebhookConfigured || got.Feishu.CallbackMode != feishuCallbackModeWebSocket ||
+		!got.Feishu.CallbackModeExplicit || !got.Feishu.CallbackConfigured || !got.Feishu.ReviewerAllowlistConfigured {
 		t.Fatalf("飞书 readiness 错误：%+v", got.Feishu)
+	}
+}
+
+func TestPublishReadinessRejectsMissingOrStaleConfigSchema(t *testing.T) {
+	env := newPublishTestEnv(t)
+	for _, value := range []string{"", "0", "2"} {
+		t.Setenv(runtimeConfigSchemaEnv, value)
+		got := currentPublishReadiness(env.pipeline)
+		if got.ConfigSchema.Matches || got.Ready || got.ConfigSchema.Actual != value {
+			t.Fatalf("schema %q must fail readiness without hiding actual version: %+v", value, got)
+		}
+	}
+}
+
+func TestPublishReadinessFailsClosedWhenGeneratedArtifactsAreMissing(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.publicDir = t.TempDir()
+	got := currentPublishReadiness(env.pipeline)
+	if got.GeneratedFiles.RegistryPresent || got.GeneratedFiles.RegistryHashMatches ||
+		got.GeneratedFiles.BlockRegistryPresent || got.GeneratedFiles.BlockRegistryHashMatches || got.Ready {
+		t.Fatalf("missing generated artifacts must fail readiness: %+v", got)
+	}
+}
+
+func TestPublishReadinessRequiresExplicitFeishuCallbackMode(t *testing.T) {
+	env := newPublishTestEnv(t)
+	t.Setenv("FEISHU_APP_ID", "app")
+	t.Setenv("FEISHU_APP_SECRET", "secret")
+
+	t.Setenv("FEISHU_CALLBACK_MODE", "")
+	got := currentPublishReadiness(env.pipeline)
+	if got.Feishu.CallbackMode != feishuCallbackModeWebSocket || got.Feishu.CallbackModeExplicit || !got.Feishu.CallbackConfigured || got.Ready {
+		t.Fatalf("缺模式应安全回落 websocket 且 readiness=false：%+v", got.Feishu)
+	}
+
+	t.Setenv("FEISHU_CALLBACK_MODE", "webhook")
+	t.Setenv("FEISHU_VERIFICATION_TOKEN", "")
+	got = currentPublishReadiness(env.pipeline)
+	if got.Feishu.CallbackMode != feishuCallbackModeWebhook || !got.Feishu.CallbackModeExplicit || got.Feishu.CallbackConfigured || got.Ready {
+		t.Fatalf("webhook 缺 token 必须 fail closed：%+v", got.Feishu)
 	}
 }
 
@@ -129,7 +177,7 @@ func TestPublishWorkersPausedBlocksHTTPRecoveryAndReview(t *testing.T) {
 	if after.Stage != publishStageCreated || env.fetchCalls != 0 {
 		t.Fatalf("暂停态恢复不得改状态/启动 worker：stage=%q fetch=%d", after.Stage, env.fetchCalls)
 	}
-	if _, err := env.pipeline.review(nil, job.ID, publishReviewApprove, ""); !errors.Is(err, errPublishWorkersPaused) {
+	if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, ""); !errors.Is(err, errPublishWorkersPaused) {
 		t.Fatalf("暂停态业务核心也必须拒绝审核，实际 err=%v", err)
 	}
 	if got, err := env.store.byID(job.ID); err != nil || got.Stage != publishStageCreated {

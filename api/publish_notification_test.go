@@ -159,6 +159,73 @@ func TestPublishNotificationFailurePersistsAndRetries(t *testing.T) {
 	}
 }
 
+func TestPublishNotificationMovesToDeadLetterAfterMaxAttempts(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job := seedPendingReviewNotification(t, env, publishNotificationStatePending)
+	if _, err := env.store.update(job.ID, func(j *publishJob) {
+		j.NotificationAttempts = publishNotificationMaxAttempts - 1
+	}); err != nil {
+		t.Fatal(err)
+	}
+	env.pipeline.notify = func(context.Context, string) error { return errors.New("feishu remains unavailable") }
+	retried := false
+	env.pipeline.retryNotification = func(time.Duration, func()) { retried = true }
+
+	env.pipeline.dispatchPublishNotification(job.ID)
+
+	got, _ := env.store.byID(job.ID)
+	if got.NotificationState != publishNotificationStateDeadLetter || got.NotificationAttempts != publishNotificationMaxAttempts {
+		t.Fatalf("dead letter state = %+v", got)
+	}
+	if retried {
+		t.Fatal("dead-letter notification must not schedule another automatic retry")
+	}
+}
+
+func TestPublishNotificationDeadLetterRequiresExplicitReplay(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job := seedPendingReviewNotification(t, env, publishNotificationStateDeadLetter)
+	if _, err := env.store.update(job.ID, func(j *publishJob) {
+		j.NotificationAttempts = publishNotificationMaxAttempts
+		j.NotificationError = "configuration missing"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	env.notified = nil
+	env.pipeline.recoverJobs()
+	if len(env.notified) != 0 {
+		t.Fatalf("startup must not replay dead letter automatically: %v", env.notified)
+	}
+
+	replayed, err := env.pipeline.replayPublishNotification(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.NotificationState != publishNotificationStatePending || replayed.NotificationAttempts != 0 {
+		t.Fatalf("replayed notification = %+v", replayed)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.NotificationKind != "" || len(env.notified) != 1 {
+		t.Fatalf("explicit replay should deliver and clear outbox: job=%+v notified=%v", got, env.notified)
+	}
+}
+
+func TestPublishNotificationRetryAddsBoundedJitter(t *testing.T) {
+	base := publishNotificationRetryDelay(4)
+	if base != 16*time.Second {
+		t.Fatalf("base delay = %s", base)
+	}
+	if got := publishNotificationRetryDelay(100); got > publishNotificationMaxDelay {
+		t.Fatalf("capped delay = %s", got)
+	}
+	for i := 0; i < 20; i++ {
+		jitter := randomNotificationJitter(base / 4)
+		if jitter < 0 || jitter > base/4 {
+			t.Fatalf("jitter = %s, want [0,%s]", jitter, base/4)
+		}
+	}
+}
+
 func TestPublishTerminalStateAndNotificationAreAtomic(t *testing.T) {
 	env := newPublishTestEnv(t)
 	job, _, err := env.pipeline.submit(testPublishSourceURL)

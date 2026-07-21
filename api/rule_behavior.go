@@ -28,7 +28,7 @@ func defaultRuleBehavior() map[string]any {
 			"docx_front_matter_marker_regex": map[string]any{"type": "string", "default": `^(正文|标题|封面|推荐语|校对|引言)[：:]?$`},
 			"docx_front_matter_scan_limit":   map[string]any{"type": "number", "default": float64(25)},
 			"md_metadata_skip_regex":         map[string]any{"type": "string", "default": `(?i)^Author:\s|^Published:\s|^Source:\s`},
-			"image_caption_max_chars":       map[string]any{"type": "number", "default": defaultImageCaptionMaxChars},
+			"image_caption_max_chars":        map[string]any{"type": "number", "default": defaultImageCaptionMaxChars},
 			"image_caption_center_max_chars": map[string]any{
 				"type":    "number",
 				"default": defaultImageCaptionCenterMaxChars,

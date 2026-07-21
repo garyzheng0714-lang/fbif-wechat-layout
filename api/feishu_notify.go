@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -136,7 +135,10 @@ func (n *feishuNotifier) sendMessage(ctx context.Context, msgType, content strin
 		return fmt.Errorf("飞书接口不可达: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return fmt.Errorf("飞书发消息响应读取失败或超过 1 MB: %w", err)
+	}
 	var env struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -172,7 +174,10 @@ func (n *feishuNotifier) tenantAccessToken(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("飞书鉴权接口不可达: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return "", fmt.Errorf("飞书鉴权响应读取失败或超过 1 MB: %w", err)
+	}
 	var env struct {
 		Code              int    `json:"code"`
 		Msg               string `json:"msg"`
@@ -213,9 +218,9 @@ func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (s
 	if dlResp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("封面图下载失败（HTTP %d）", dlResp.StatusCode)
 	}
-	imgBytes, err := io.ReadAll(io.LimitReader(dlResp.Body, 10<<20))
+	imgBytes, err := readBoundedBody(dlResp.Body, 10<<20)
 	if err != nil {
-		return "", fmt.Errorf("读封面图失败: %w", err)
+		return "", fmt.Errorf("读封面图失败或超过 10 MB: %w", err)
 	}
 	imgBytes, err = squareFeishuCoverPNG(imgBytes)
 	if err != nil {
@@ -249,7 +254,10 @@ func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (s
 		return "", fmt.Errorf("飞书图片接口不可达: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return "", fmt.Errorf("飞书图片上传响应读取失败或超过 1 MB: %w", err)
+	}
 	var env struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`

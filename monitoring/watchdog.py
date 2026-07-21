@@ -58,6 +58,14 @@ def fetch_json(name: str, url: str, headers: dict[str, str], timeout: float) -> 
 def evaluate(name: str, payload: dict[str, Any]) -> list[str]:
     if payload.get("ready") is True:
         return []
+    # New probes separate ordinary in-flight work from alert-worthy failures.
+    # An explicit empty alert_issues list means "busy but within SLO" and must
+    # not page P0. Older probes without this field keep the fail-closed behavior.
+    if "alert_issues" in payload:
+        alert_issues = payload.get("alert_issues")
+        if not isinstance(alert_issues, list):
+            return [f"{name}:invalid_alert_issues"]
+        return [f"{name}:{clean_text(str(issue), 240)}" for issue in alert_issues]
     issues = payload.get("issues")
     if not isinstance(issues, list) or not issues:
         return [f"{name}:not_ready"]
@@ -153,7 +161,8 @@ def heartbeat_due(previous: dict[str, Any], now: datetime) -> bool:
 
 
 def decide_notification(
-    previous: dict[str, Any], issues: list[str], now: datetime, drill: bool
+    previous: dict[str, Any], issues: list[str], now: datetime, drill: bool,
+    closure_ready: bool = True,
 ) -> tuple[dict[str, Any], str, str]:
     issues = sorted(set(issues))
     current_fingerprint = fingerprint(issues)
@@ -164,6 +173,7 @@ def decide_notification(
         **previous,
         "checked_at": now.astimezone(timezone.utc).isoformat(),
         "healthy": not issues,
+        "closure_ready": closure_ready,
         "issues": issues,
         "fingerprint": current_fingerprint,
         "consecutive_failures": consecutive_failures,
@@ -181,14 +191,14 @@ def decide_notification(
             + "\n".join(f"- {issue}" for issue in issues)
         )
         return state, "critical", message
-    if not issues and incident_open:
+    if not issues and incident_open and closure_ready:
         return (
             state,
             "recovery",
             f"{prefix}[FBIF 公众号监控 P0] 已恢复\n检查时间：{checked_at}\n"
             "监控已确认的当日文章批次完整、普通文章全部进入审核、审核卡全部送达；三条探针无未完成项。",
         )
-    if not issues and heartbeat_due(previous, now):
+    if not issues and closure_ready and heartbeat_due(previous, now):
         return (
             state,
             "heartbeat",
@@ -217,6 +227,10 @@ def record_notification(state: dict[str, Any], kind: str, now: datetime) -> None
 def run(args: argparse.Namespace) -> int:
     now = datetime.now(timezone.utc)
     state_path = pathlib.Path(args.state)
+    deployment_check_value = str(getattr(args, "deployment_check_marker", "")).strip()
+    deployment_check_requested = bool(
+        deployment_check_value and pathlib.Path(deployment_check_value).is_file()
+    )
     previous = load_state(state_path)
     service_token = os.getenv("PUBLISH_SYNC_SERVICE_TOKEN", "").strip()
     reporter = (
@@ -225,6 +239,8 @@ def run(args: argparse.Namespace) -> int:
         os.getenv("PUBLISH_MONITOR_FEISHU_USER_ID", "").strip(),
     )
     issues: list[str] = []
+    closure_ready = True
+    busy_probes: list[str] = []
     if not service_token:
         issues.append("watchdog:service_token_missing")
     if not all(reporter):
@@ -241,8 +257,13 @@ def run(args: argparse.Namespace) -> int:
         ]
         for name, url in checks:
             try:
-                issues.extend(evaluate(name, fetch_json(name, url, {"X-Publish-Sync-Token": service_token}, args.timeout)))
+                payload = fetch_json(name, url, {"X-Publish-Sync-Token": service_token}, args.timeout)
+                if payload.get("ready") is not True:
+                    closure_ready = False
+                    busy_probes.append(name)
+                issues.extend(evaluate(name, payload))
             except RuntimeError as error:
+                closure_ready = False
                 issues.append(str(error))
     if args.inject_issue:
         if not args.drill:
@@ -250,8 +271,30 @@ def run(args: argparse.Namespace) -> int:
             return 2
         issues.append("drill:" + clean_text(args.inject_issue, 240))
 
-    state, kind, message = decide_notification(previous, issues, now, args.drill)
+    state, kind, message = decide_notification(previous, issues, now, args.drill, closure_ready)
+    state["busy_probes"] = sorted(set(busy_probes))
     reporter_failed = not all(reporter)
+    if deployment_check_requested and not reporter_failed:
+        checked_at = now.astimezone(SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
+        result = "健康" if not issues and closure_ready else "存在异常" if issues else "业务处理中"
+        details = "\n".join(f"- {issue}" for issue in sorted(set(issues)))
+        deployment_message = (
+            f"[FBIF 公众号监控] 部署自检\n"
+            f"检查时间：{checked_at}\n真实探针：{result}\n"
+            "飞书私聊上报链路已验证。"
+        )
+        if details:
+            deployment_message += "\n" + details
+        try:
+            send_feishu_app(*reporter, deployment_message, args.timeout)
+            state["deployment_check_at"] = now.astimezone(timezone.utc).isoformat()
+            # 部署自检已经是当次绿色确认，同一次执行不再重复发心跳。
+            if kind == "heartbeat":
+                kind = ""
+                message = ""
+        except Exception as error:
+            reporter_failed = True
+            state["notification_error"] = clean_text(f"{type(error).__name__}:{error}", 300)
     if kind and not reporter_failed:
         try:
             send_feishu_app(*reporter, message, args.timeout)
@@ -271,6 +314,9 @@ def run(args: argparse.Namespace) -> int:
     if issues:
         print("watchdog: unhealthy: " + "; ".join(sorted(set(issues))))
         return 1
+    if not closure_ready:
+        print("watchdog: busy within SLO: " + "; ".join(sorted(set(busy_probes))))
+        return 0
     print("watchdog: healthy")
     return 0
 
@@ -294,6 +340,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--drill", action="store_true")
     parser.add_argument("--fixture-ready", action="store_true")
     parser.add_argument("--inject-issue", default="")
+    parser.add_argument("--deployment-check-marker", default="")
     return parser.parse_args()
 
 

@@ -1,0 +1,35 @@
+[Unit]
+Description=FBIF content layout and publishing API
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/var/www/api
+Environment=FBIF_CONFIG_SCHEMA_VERSION=1
+EnvironmentFile=/var/www/api/.env
+EnvironmentFile=/var/www/api/publish.env
+ExecStart=/var/www/api/fbif-api -port 9001 -public /var/www/wechat-layout
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=30s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/var/www/api
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
