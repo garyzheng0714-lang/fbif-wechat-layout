@@ -187,6 +187,10 @@ start_monitoring() {
   systemctl enable --now fbif-monitor-watchdog.timer
   systemctl is-enabled --quiet fbif-monitor-watchdog.timer
   systemctl is-active --quiet fbif-monitor-watchdog.timer
+  local next_trigger
+  next_trigger=$(systemctl show --property=NextElapseUSecMonotonic --value fbif-monitor-watchdog.timer)
+  [[ -n "$next_trigger" && "$next_trigger" != "infinity" ]] ||
+    die "watchdog timer is active but has no future trigger"
   touch "$(marker monitoring.started)"
 }
 
@@ -367,6 +371,10 @@ finalize_release() {
     die "watchdog timer is not enabled"
   systemctl is-active --quiet fbif-monitor-watchdog.timer ||
     die "watchdog timer is not active"
+  local next_trigger
+  next_trigger=$(systemctl show --property=NextElapseUSecMonotonic --value fbif-monitor-watchdog.timer)
+  [[ -n "$next_trigger" && "$next_trigger" != "infinity" ]] ||
+    die "watchdog timer has no future trigger"
 
   # 历史目录是 root 操作的固定路径；不接受软链接或外部参数。
   [[ ! -L "$HISTORY_ROOT" ]] || die "history root must not be a symlink"

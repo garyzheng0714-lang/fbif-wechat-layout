@@ -16,6 +16,7 @@ test('deploy transaction shell is syntactically valid and restores every live su
   const scriptURL = new URL('../deploy/scripts/deploy-transaction.sh', import.meta.url);
   await execFileAsync('bash', ['-n', fileURLToPath(scriptURL)]);
   const script = await readFile(scriptURL, 'utf8');
+  const watchdogTimer = await projectFile('deploy/monitoring/fbif-monitor-watchdog.timer');
 
   for (const surface of [
     'public', 'render', 'api', 'env', 'caddy',
@@ -53,6 +54,13 @@ test('deploy transaction shell is syntactically valid and restores every live su
   assert.match(script, /watchdog_timer\.was_enabled/,
     '回滚必须恢复旧 timer 的 enable 状态');
   assert.match(script, /candidate watchdog timer must remain disabled/);
+  assert.match(watchdogTimer, /^OnActiveSec=2min$/m,
+    '长时间运行的主机重新启用 timer 时也必须产生未来触发点');
+  assert.match(watchdogTimer, /^OnUnitActiveSec=2min$/m,
+    '首次触发后必须持续每两分钟调度');
+  assert.match(script, /NextElapseUSecMonotonic/,
+    'active (elapsed) 但没有下一次触发的 timer 必须阻止部署');
+  assert.match(script, /watchdog timer is active but has no future trigger/);
   assert.match(script, /ExecMainStatus/,
     'systemd 将探针异常视为可预期退出时，部署仍必须显式要求首次探测为 0');
   assert.match(script, /touch "\$WATCHDOG_DIR\/deployment-check"/,
