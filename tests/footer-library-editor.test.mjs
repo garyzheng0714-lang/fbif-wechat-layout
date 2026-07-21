@@ -109,15 +109,15 @@ test('JSON 区域 data-role="json-area"', () => {
   assert.match(src, /data-role="json-area"/, '应含 json-area textarea');
 });
 
-// ── XSS 校验 ──
+// ── HTML 安全校验 ──
 
-test('含 XSS 正则（script/on*=/javascript:）', () => {
-  assert.match(src, /<script/, '应检测 <script');
-  assert.match(src, /on\\w\+\\s\*=|on\\w\+=/, '应检测 on*= 事件属性');
-  assert.match(src, /javascript:/, '应检测 javascript: 协议');
+test('HTML 校验复用解析器白名单，而非可绕过的 XSS 子串正则', () => {
+  assert.match(src, /from ['"]\.\/footer-html-policy\.js['"]/, '应导入共享页脚 HTML 策略');
+  assert.match(src, /validateFooterHTMLLines/, '应使用解析器白名单校验');
+  assert.doesNotMatch(src, /const\s+XSS_RE/, '不得退回少数字符串黑名单');
 });
 
-test('XSS 校验对齐后端（validateHtmlLines 函数存在）', () => {
+test('HTML 校验对齐后端（validateHtmlLines 函数存在）', () => {
   assert.match(src, /validateHtmlLines/, '应定义 validateHtmlLines 校验函数');
 });
 
@@ -159,7 +159,7 @@ test('含图片链接快速替换行', () => {
 
 test('图片 URL 校验', () => {
   assert.match(src, /validateImgUrl/, '应定义 validateImgUrl');
-  assert.match(src, /https?:\/\//, '应校验 http(s)://');
+  assert.match(src, /isSafeFooterURL/, '应复用只允许 HTTPS/站内路径的 URL 策略');
 });
 
 // ── 引用默认常量 ──

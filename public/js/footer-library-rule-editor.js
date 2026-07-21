@@ -2,6 +2,7 @@
 // 导出：createFooterLibraryEditor({ container, footerData, onChange })
 import { FOOTER_SEGMENTS_DEFAULT, FOOTER_SEGMENT_ORDER_DEFAULT, FOOTER_PRESETS_DEFAULT } from './footer-segments-defaults.js';
 import { buildFooterHtml } from './rule-behavior-foodtalks.js';
+import { isSafeFooterURL, validateFooterHTMLLines } from './footer-html-policy.js';
 
 const SEGMENT_LABELS = {
   biz_coop: '商务合作',
@@ -13,8 +14,6 @@ const SEGMENT_LABELS = {
   more_info: '点击获取更多',
 };
 const BASE_SEG_KEYS = ['biz_coop', 'join_group', 'follow_account', 'logo', 'more_info'];
-const XSS_RE = /<script|on\w+\s*=|javascript:/i;
-
 const clone = o => JSON.parse(JSON.stringify(o));
 const esc = v => String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
@@ -28,13 +27,29 @@ function normalizeAssets(assetLibrary) {
 
 function validateImgUrl(url) {
   if (!url) return '请输入图片链接';
-  if (!/^https?:\/\//i.test(url)) return '链接须以 http:// 或 https:// 开头';
-  if (/[\s"'<>]/.test(url)) return '链接不能含空格或引号/尖括号';
+  if (!isSafeFooterURL(url)) return '图片链接只允许 HTTPS 或站内路径';
   return '';
 }
 
 function validateHtmlLines(lines) {
-  return XSS_RE.test(lines.join('\n')) ? '内容含不安全代码（<script> / on*= / javascript:），请删除后再保存' : '';
+  const error = validateFooterHTMLLines(lines);
+  return error ? `内容不安全：${error}` : '';
+}
+
+function validateFooterData(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return '顶层必须是对象';
+  if (data.segments !== undefined && (!data.segments || typeof data.segments !== 'object' || Array.isArray(data.segments))) {
+    return 'segments 必须是对象';
+  }
+  for (const [key, segment] of Object.entries(data.segments || {})) {
+    if (!segment || typeof segment !== 'object' || !Array.isArray(segment.html_lines)) {
+      return `片段 ${key} 的 html_lines 必须是数组`;
+    }
+    const error = validateHtmlLines(segment.html_lines);
+    if (error) return `片段 ${key}：${error}`;
+  }
+  if (data.presets !== undefined && !Array.isArray(data.presets)) return 'presets 必须是数组';
+  return '';
 }
 
 function isSegChanged(key, lines, fallbackDefault) {
@@ -246,7 +261,12 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
       const ta = container.querySelector('[data-role="json-area"]');
       const errEl = container.querySelector('[data-role="json-err"]');
       if (!ta || !errEl) return;
-      try { JSON.parse(ta.value); setJsonFeedback(errEl, '✓ JSON 格式正确', 'success'); }
+      try {
+        const parsed = JSON.parse(ta.value);
+        const validationError = validateFooterData(parsed);
+        if (validationError) throw new Error(validationError);
+        setJsonFeedback(errEl, '✓ JSON 格式和 HTML 安全校验均通过', 'success');
+      }
       catch(ex) { setJsonFeedback(errEl, 'JSON 解析失败：'+ex.message, 'error'); }
       return;
     }
@@ -256,9 +276,8 @@ export function createFooterLibraryEditor({ container, footerData, assetLibrary,
       if (!ta || !errEl) return;
       try {
         const p = JSON.parse(ta.value);
-        if (typeof p !== 'object' || p === null) throw new Error('顶层必须是对象');
-        if (p.segments && typeof p.segments !== 'object') throw new Error('segments 必须是对象');
-        if (p.presets !== undefined && !Array.isArray(p.presets)) throw new Error('presets 必须是数组');
+        const validationError = validateFooterData(p);
+        if (validationError) throw new Error(validationError);
         emit(p);
         const nextDetails = container.querySelector('.footer-lib-json-details');
         const nextErr = container.querySelector('[data-role="json-err"]');

@@ -661,12 +661,44 @@ test('admin active rule writes include the selected account id', async () => {
   };
 
   try {
-    await setActiveRulePreset('secret', 'foodtalks-rule', 'foodtalks-series');
+    await setActiveRulePreset('secret', 'foodtalks-rule', 'foodtalks-series', 12);
     assert.equal(calls[0].url, '/api/rules/admin/active');
     assert.deepEqual(JSON.parse(calls[0].options.body), {
       id: 'foodtalks-rule',
       account_id: 'foodtalks-series',
+      base_revision: 12,
     });
+  } finally {
+    delete globalThis.fetch;
+  }
+});
+
+test('admin write conflict preserves revisions and changed paths for the UI', async () => {
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 409,
+    async json() {
+      return {
+        error: '规则已由其他管理员更新；请重新加载后合并。服务端变化：config.font_size',
+        code: 'revision_conflict',
+        expected_revision: 3,
+        current_revision: 4,
+        changed_paths: ['config.font_size'],
+      };
+    },
+  });
+  try {
+    await assert.rejects(
+      () => saveRulePreset('secret', { id: 'shared', version: 3, baseline_id: 'default', config: {} }),
+      error => {
+        assert.equal(error.code, 'revision_conflict');
+        assert.equal(error.expectedRevision, 3);
+        assert.equal(error.currentRevision, 4);
+        assert.deepEqual(error.changedPaths, ['config.font_size']);
+        assert.match(error.message, /重新加载/);
+        return true;
+      },
+    );
   } finally {
     delete globalThis.fetch;
   }
@@ -706,6 +738,7 @@ test('admin preset save preserves structured modules', async () => {
       },
     });
     const body = JSON.parse(calls[0].options.body);
+    assert.equal(body.base_revision, 0, '新规则必须以不存在修订 0 做条件写入');
     assert.equal(body.baseline_id, 'ft-default-v1', '显式规则基线必须透传到保存 API');
     assert.equal(body.behavior.author_regex, '^\\s*署名[：:]\\s*');
     assert.deepEqual(body.behavior.lists.wechat_trailer_markers, ['网站自定义尾标']);
@@ -729,6 +762,7 @@ test('保存 FoodTalks 系列 preset 原样发送独立 behavior，不注入 Mot
       config: { heading_color: '#02396b' }, behavior,
     });
     const body = JSON.parse(calls[0].options.body);
+    assert.equal(body.base_revision, 0);
     assert.deepEqual(body.behavior, behavior);
     assert.equal(body.behavior.actions, undefined);
     assert.equal(body.config.heading_color, '#02396b');

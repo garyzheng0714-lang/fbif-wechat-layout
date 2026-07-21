@@ -2,10 +2,9 @@ package main
 
 // feishu_card_callback.go — 飞书卡片回调端点（施工图 M4）：POST /api/feishu/card-callback。
 //
-// ⚠️ 两模式并存（2026-07-10 升级长连接后）：卡片回调有 Webhook（本文件端点）与
-// 长连接 WebSocket（feishu_ws.go）两条通道，**生效哪条由飞书开放平台后台
-// 「事件与回调 → 订阅方式」单选决定**——选「使用长连接接收回调」时飞书不再调本端点。
-// 本端点保留作备用通道，事件解析后的业务段抽在 reviewCardAction，两模式共用一份。
+// FEISHU_CALLBACK_MODE 明确选择 Webhook（本文件端点）或长连接 WebSocket
+//（feishu_ws.go）；两个传输入口不再同时开放。事件解析后的业务段抽在
+// reviewCardAction，两种模式共用一份。
 //
 // 安全模型（与其他 /api/publish/* 端点不同，本端点由飞书开放平台服务器调用，
 // **不能**上 ADMIN_PASSWORD 门）：
@@ -35,6 +34,25 @@ import (
 	"strconv"
 	"strings"
 )
+
+const (
+	feishuCallbackModeEnv       = "FEISHU_CALLBACK_MODE"
+	feishuCallbackModeWebSocket = "websocket"
+	feishuCallbackModeWebhook   = "webhook"
+)
+
+// configuredFeishuCallbackMode 强制两种传输层互斥。未配置或配置非法时采用更安全的
+// websocket 行为（公网 Webhook 返回 404），同时由 readiness 标记为未显式配置。
+func configuredFeishuCallbackMode() (mode string, explicit bool) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(feishuCallbackModeEnv))) {
+	case feishuCallbackModeWebSocket:
+		return feishuCallbackModeWebSocket, true
+	case feishuCallbackModeWebhook:
+		return feishuCallbackModeWebhook, true
+	default:
+		return feishuCallbackModeWebSocket, false
+	}
+}
 
 // feishuCardCallbackPayload 回调请求的联合形态：url_verification 的字段在顶层，
 // card.action.trigger（事件 v2）的 verification token 在 header.token。
@@ -83,6 +101,20 @@ func registerFeishuCardCallbackRoute(mux *http.ServeMux, p *publishPipeline) {
 		}
 		writeJSON(w, http.StatusOK, p.handleReviewCardAction(r, payload))
 	})
+}
+
+// registerConfiguredFeishuCallbackRoute 只在显式 webhook 模式下开放公网审核端点。
+// websocket（以及缺失/非法配置）模式仍注册精确 404，避免 POST 落入静态站兜底。
+func registerConfiguredFeishuCallbackRoute(mux *http.ServeMux, p *publishPipeline) (string, bool) {
+	mode, explicit := configuredFeishuCallbackMode()
+	if mode == feishuCallbackModeWebhook && explicit {
+		registerFeishuCardCallbackRoute(mux, p)
+		return mode, explicit
+	}
+	mux.HandleFunc("POST /api/feishu/card-callback", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	return mode, explicit
 }
 
 // feishuCallbackTokenOK verification token 校验。配置缺失同样拒绝（fail-closed）；

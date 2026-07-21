@@ -12,17 +12,19 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/html"
@@ -53,6 +55,11 @@ func main() {
 	if strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")) == "" {
 		log.Fatal("ADMIN_PASSWORD 未设置：拒绝以无规则后台密码的状态启动（正式端必须配置；本地开发可临时设任意值）")
 	}
+	if productionRuntime() {
+		if err := validateRuntimeConfigSchema(); err != nil {
+			log.Fatalf("运行配置 schema 不匹配：%v", err)
+		}
+	}
 
 	mux := http.NewServeMux()
 	publicDir := *publicFlag
@@ -63,29 +70,15 @@ func main() {
 		}
 	}
 
-	// 启动期账号一致性校验：registry.js 与 accountCatalog 漂移则 fail loud（消灭 D1/D3 静默降级）。
-	// 文件缺失（部署路径差异）只告警，不 brick 生产。
-	if err := validateRegistryConsistency(publicDir); err != nil {
-		if strings.HasPrefix(err.Error(), "warn:") {
-			log.Printf("账号一致性校验：%v", err)
-		} else {
-			log.Fatalf("账号一致性校验失败：%v", err)
-		}
+	// 生成物存在但漂移在所有环境都 fatal；ENV=production 时文件缺失/不可读也 fatal。
+	// 本地 codegen/source-only 工作流仍允许缺文件告警，readiness 则始终如实标红。
+	if err := validateGeneratedArtifactsForStartup(publicDir, productionRuntime()); err != nil {
+		log.Fatalf("生成文件启动校验失败：%v", err)
 	}
 
 	// 启动期账号↔preset 挂链校验：DefaultPresetID 悬空则 fail loud（无文件依赖，纯内存比对）。
 	if err := validateAccountPresetLinkage(); err != nil {
 		log.Fatalf("账号 preset 挂链校验失败：%v", err)
-	}
-
-	// 启动期区块注册表一致性校验：block-registry.gen.js 与 blockTypeCatalog 漂移则 fail loud。
-	// 文件缺失（部署路径差异）只告警，不 brick 生产。
-	if err := validateBlockRegistryConsistency(publicDir); err != nil {
-		if strings.HasPrefix(err.Error(), "warn:") {
-			log.Printf("区块注册表一致性校验：%v", err)
-		} else {
-			log.Fatalf("区块注册表一致性校验失败：%v", err)
-		}
 	}
 
 	ruleStore := newRulePresetStore(*rulesPath)
@@ -129,6 +122,8 @@ func main() {
 	defer publishLock.Close()
 	publishStore := newPublishJobStore(publishPath)
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
+	publishPipe.publicDir = publicDir
+	publishPipe.enableBoundedWorkers(4, 128)
 	if !feishuReviewerAllowlistConfigured() {
 		log.Printf("publish: FEISHU_REVIEWER_OPEN_IDS 未配置，所有卡片审核动作将 fail closed")
 	}
@@ -144,12 +139,13 @@ func main() {
 		publishPipe.recoverJobs()
 	}
 	registerPublishRoutes(mux, publishPipe)
-	// 飞书卡片审核回调（M4）：飞书服务器调用，无 ADMIN_PASSWORD 门，安全靠
-	// FEISHU_VERIFICATION_TOKEN 校验 + review 核心的业务态校验（见 feishu_card_callback.go）。
-	registerFeishuCardCallbackRoute(mux, publishPipe)
-	// 飞书卡片回调·长连接模式（2026-07-10 升级）：与上方 Webhook 端点并存，生效哪个
-	// 由飞书后台「订阅方式」单选决定；业务段两模式共用（见 feishu_ws.go）。
-	if !publishWorkersPaused() {
+	// 飞书回调传输层必须显式互斥；缺失/非法配置安全回落 websocket 行为，公网
+	// Webhook 精确返回 404，但 readiness=false，防止部署在含糊配置下假绿。
+	feishuMode, feishuModeExplicit := registerConfiguredFeishuCallbackRoute(mux, publishPipe)
+	if !feishuModeExplicit {
+		log.Printf("publish: %s 未显式配置为 websocket/webhook；安全禁用公网 Webhook，readiness=false", feishuCallbackModeEnv)
+	}
+	if !publishWorkersPaused() && feishuMode == feishuCallbackModeWebSocket {
 		maybeStartFeishuWS(publishPipe)
 	}
 	// 未上架预览页（M4「预览链接」裁定）：免登录但 HMAC 签名门（key=ADMIN_PASSWORD），
@@ -161,9 +157,19 @@ func main() {
 
 	// Health check
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		cacheStats := docImageCache.stats(time.Now())
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":                "ok",
+			"config_schema_version": runtimeConfigSchemaVersion,
+			"doc_cache_entries":     cacheStats.Entries,
+			"doc_cache_bytes":       cacheStats.Bytes,
+			"doc_cache_evictions":   cacheStats.Evictions,
+		})
 	})
+	// Caddy 将未命中的 /api/* 也交给 Go；必须在静态 FileServer
+	// 前统一返回 JSON 404，避免新 API 漏登记时落到 SPA HTML 假 200。
+	mux.HandleFunc("/api", handleUnknownAPI)
+	mux.HandleFunc("/api/", handleUnknownAPI)
 
 	registerChannelRoutes(mux, publicDir)
 
@@ -181,8 +187,69 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
-	if err := http.ListenAndServe(addr, withCORS(mux)); err != nil {
+	srv := newHTTPServer(addr, withSecurityHeaders(mux))
+	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	if err := serveUntilShutdown(shutdownSignal, srv, publishPipe.shutdownWorkers); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func handleUnknownAPI(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusNotFound, map[string]string{
+		"error": "API endpoint not found",
+		"code":  "api_not_found",
+	})
+}
+
+const gracefulShutdownTimeout = 30 * time.Second
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      150 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+}
+
+func serveUntilShutdown(shutdownSignal context.Context, srv *http.Server, shutdownHook func(context.Context) error) error {
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+
+	select {
+	case err := <-errCh:
+		ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+		defer cancel()
+		if shutdownHook != nil {
+			if hookErr := shutdownHook(ctx); hookErr != nil {
+				return errors.Join(err, hookErr)
+			}
+		}
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-shutdownSignal.Done():
+		log.Printf("FBIF server shutting down gracefully")
+		ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+		defer cancel()
+		shutdownErr := srv.Shutdown(ctx)
+		if shutdownHook != nil {
+			shutdownErr = errors.Join(shutdownErr, shutdownHook(ctx))
+		}
+		if shutdownErr != nil {
+			_ = srv.Close()
+			return fmt.Errorf("graceful shutdown: %w", shutdownErr)
+		}
+		err := <-errCh
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
 	}
 }
 
@@ -234,14 +301,17 @@ func isImageAssetPath(p string) bool {
 	return false
 }
 
-func withCORS(next http.Handler) http.Handler {
+func withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Admin-Password")
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(204)
-			return
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+		if comma := strings.IndexByte(proto, ','); comma >= 0 {
+			proto = strings.TrimSpace(proto[:comma])
+		}
+		if r.TLS != nil || proto == "https" {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -261,9 +331,25 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 
 // ---- Image Upload (base64 from DOCX → OSS or legacy proxy) ----
 
+const maxImageUploadBodyBytes = 50 << 20
+
+var uploadProxyHTTPClient = &http.Client{Timeout: 65 * time.Second}
+
 func handleImageUpload(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 50<<20)) // 50MB limit
+	release, ok := authorizeExpensiveRequest(w, r, imageUploadCostGuard)
+	if !ok {
+		return
+	}
+	defer release()
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxImageUploadBodyBytes)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeError(w, http.StatusRequestEntityTooLarge, "上传内容过大（最大 50 MB）")
+			return
+		}
 		writeError(w, 400, "failed to read body")
 		return
 	}
@@ -277,15 +363,24 @@ func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "proxy error: "+err.Error())
 			return
 		}
-		resp, err := http.DefaultClient.Do(proxyReq)
+		resp, err := uploadProxyHTTPClient.Do(proxyReq)
 		if err != nil {
-			writeError(w, 502, "upstream error: "+err.Error())
+			writeError(w, 502, "upload service unavailable")
 			return
 		}
 		defer resp.Body.Close()
+		respBody, readErr := readBoundedBody(resp.Body, 8<<20)
+		if errors.Is(readErr, errOutboundResponseTooLarge) {
+			writeError(w, 502, "upload service response too large")
+			return
+		}
+		if readErr != nil {
+			writeError(w, 502, "failed to read upload service response")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
+		_, _ = w.Write(respBody)
 		return
 	}
 
@@ -396,10 +491,6 @@ func uploadProxyOrigin(r *http.Request) string {
 
 // ---- Article Fetch (URL repost via x-reader) ----
 
-func handleFetchArticle(w http.ResponseWriter, r *http.Request) {
-	handleFetchArticleWithStore(nil)(w, r)
-}
-
 func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -412,11 +503,12 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 			return
 		}
 
-		// Validate URL format
-		if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-			writeError(w, 400, "invalid URL: must start with http:// or https://")
+		validatedURL, err := parsePublicWebURL(req.URL)
+		if err != nil {
+			writeError(w, 400, "invalid or unsafe public URL")
 			return
 		}
+		req.URL = validatedURL.String()
 
 		// Preferred path: direct HTTP → structured Blocks. Preserves visual
 		// signals (font-size, color, align, bold) so heading/caption/body
@@ -432,36 +524,15 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 			})
 			return
 		}
-		// Fall back to x-reader only if direct fetch failed. Ship its
-		// Markdown to the frontend so the legacy classifyMd path can still
-		// handle non-WeChat URLs that x-reader renders better.
-		content, xrTitle, xrErr := fetchWithXReader(req.URL)
-		if xrErr == nil {
-			writeJSON(w, 200, map[string]interface{}{
-				"title":   xrTitle,
-				"content": content,
-				"source":  req.URL,
-			})
-			return
-		}
-		// 两条路径都没拿到内容。内部错误（x-reader 未安装、传输细节等）只记日志，
-		// 不抛给终端用户——给一句可操作的中文提示。
-		internalErr := derr
-		if internalErr == nil {
-			internalErr = xrErr
-		}
-		if internalErr != nil {
-			log.Printf("handleFetchArticle failed for %s: direct=%v xreader=%v", req.URL, derr, xrErr)
+		// Do not hand attacker-controlled URLs to an external reader process:
+		// its redirect/DNS behavior cannot share the Go transport's SSRF guard.
+		if derr != nil {
+			log.Printf("handleFetchArticle failed for %s: direct=%v", req.URL, derr)
 		}
 		writeError(w, 502, "文章抓取失败，请稍后重试（公众号可能临时限流）")
 	}
 }
 
-// fetchDirectBlocks is the new primary URL-import path: GET the raw HTML
-// and walk it into a Block slice via extractArticleBlocks. Shares the
-// HTTP boilerplate via fetchRawHTML so the paths can't drift on timeouts,
-// UA, or body-size limits.
-//
 // Retries with backoff on transport failure OR empty blocks: WeChat
 // rate-limits/serves an anti-scrape interstitial intermittently, and a
 // plain retry a moment later almost always succeeds — far more reliable
@@ -471,12 +542,6 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 // Contract: returns a non-nil err only when every attempt hit a
 // transport-level failure. An empty `blocks` slice with err==nil is a
 // valid (non-error) outcome — a page genuinely without article content.
-// The caller at handleFetchArticle gates on `len(blocks) > 0`.
-func fetchDirectBlocks(url string) (title string, blocks []Block, err error) {
-	title, blocks, _, _, _, err = fetchDirectBlocksWithOptions(url, defaultArticleBlockOptions())
-	return title, blocks, err
-}
-
 // 第 4/5 个返回值是页面结构化元数据（extractWechatArticleMeta，2026-07-10 M7 修正：
 // 旧说法「extractArticleBlocks 一直在产出公众号名」与代码不符——那条链路恒返回空串，
 // 生产 job #1/#2 的 source_name 为空即此暗伤）：sourceName=公众号名（var nickname），
@@ -550,6 +615,8 @@ func behaviorParamInt(params map[string]any, key string, fallback int) int {
 	return fallback
 }
 
+var articleFetchHTTPClient = newOutboundHTTPClient(20*time.Second, publicWebURLPolicy)
+
 func fetchRawHTML(url string) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -558,7 +625,7 @@ func fetchRawHTML(url string) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doOutboundRequest(articleFetchHTTPClient, req, publicWebURLPolicy)
 	if err != nil {
 		return nil, "", err
 	}
@@ -566,35 +633,11 @@ func fetchRawHTML(url string) ([]byte, string, error) {
 	if resp.StatusCode != 200 {
 		return nil, resp.Request.URL.String(), fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	body, err := readBoundedBody(resp.Body, 5*1024*1024)
+	if errors.Is(err, errOutboundResponseTooLarge) {
+		return nil, resp.Request.URL.String(), fmt.Errorf("article response exceeds 5 MB")
+	}
 	return body, resp.Request.URL.String(), err
-}
-
-func fetchWithXReader(url string) (content, title string, err error) {
-	// x-reader outputs markdown by default
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "x-reader", url, "--format", "markdown")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", "", fmt.Errorf("x-reader failed: %s %v", stderr.String(), err)
-	}
-
-	output := stdout.String()
-	joined, title := cleanXReaderMarkdown(output)
-
-	// x-reader returns HTTP 200 even when WeChat serves a CAPTCHA/env-exception
-	// stub. Surface those as errors so handleFetchArticle falls back to the
-	// direct HTTP + extractArticle path (which preserves bold/refs).
-	if looksLikeWeChatBlock(joined) {
-		return "", "", fmt.Errorf("x-reader returned wechat block page")
-	}
-
-	return joined, title, nil
 }
 
 // looksLikeWeChatBlock reports whether the x-reader output is a WeChat
@@ -646,10 +689,12 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.URL = strings.Join(strings.Fields(req.URL), "")
-	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-		writeError(w, 400, "invalid URL: must start with http:// or https://")
+	validatedURL, err := parsePublicWebURL(req.URL)
+	if err != nil {
+		writeError(w, 400, "invalid or unsafe public URL")
 		return
 	}
+	req.URL = validatedURL.String()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
@@ -704,7 +749,7 @@ func fetchArticleHTML(ctx context.Context, rawURL string) (string, string, error
 	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	httpReq.Header.Set("Accept", "text/html,application/xhtml+xml")
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := doOutboundRequest(articleFetchHTTPClient, httpReq, publicWebURLPolicy)
 	if err != nil {
 		return "", "", err
 	}
@@ -712,7 +757,10 @@ func fetchArticleHTML(ctx context.Context, rawURL string) (string, string, error
 	if resp.StatusCode != 200 {
 		return "", resp.Request.URL.String(), fmt.Errorf("upstream HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024)) // 8MB cap
+	body, err := readBoundedBody(resp.Body, 8*1024*1024)
+	if errors.Is(err, errOutboundResponseTooLarge) {
+		return "", resp.Request.URL.String(), fmt.Errorf("article response exceeds 8 MB")
+	}
 	if err != nil {
 		return "", resp.Request.URL.String(), fmt.Errorf("read body: %w", err)
 	}
@@ -983,53 +1031,87 @@ func decodeJSString(s string) string {
 // handleImageProxy streams an allowlisted image URL so the frontend Canvas can
 // read its pixels without tainting. Only WeChat CDN hosts are allowed so this
 // cannot be abused as an open proxy.
+var imageProxyHTTPClient = newOutboundHTTPClient(20*time.Second, imageProxyURLPolicy)
+
 func handleImageProxy(w http.ResponseWriter, r *http.Request) {
-	target := r.URL.Query().Get("url")
-	if target == "" {
-		writeError(w, 400, "url query param required")
-		return
-	}
-	u, err := url.Parse(target)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		writeError(w, 400, "invalid URL")
-		return
-	}
-	hostOK := false
-	for _, h := range hostAllowlistCDN {
-		if u.Host == h || strings.HasSuffix(u.Host, "."+h) {
-			hostOK = true
-			break
+	handleImageProxyWithClient(imageProxyHTTPClient)(w, r)
+}
+
+func handleImageProxyWithClient(client *http.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		target := r.URL.Query().Get("url")
+		if target == "" {
+			writeError(w, 400, "url query param required")
+			return
 		}
-	}
-	if !hostOK {
-		writeError(w, 403, "host not allowed: "+u.Host)
-		return
-	}
+		u, err := parsePublicWebURL(target)
+		if err != nil {
+			writeError(w, 400, "invalid or unsafe public URL")
+			return
+		}
+		if err := imageProxyURLPolicy(u); err != nil {
+			writeError(w, 403, "image host not allowed")
+			return
+		}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Referer", "https://mp.weixin.qq.com/")
-	resp, err := http.DefaultClient.Do(req)
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+		if err != nil {
+			writeError(w, 400, "invalid URL")
+			return
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		req.Header.Set("Referer", "https://mp.weixin.qq.com/")
+		resp, err := doOutboundRequest(client, req, imageProxyURLPolicy)
+		if err != nil {
+			writeError(w, 502, "image fetch failed")
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			writeError(w, 502, fmt.Sprintf("upstream HTTP %d", resp.StatusCode))
+			return
+		}
+
+		body, err := readBoundedBody(resp.Body, 10*1024*1024)
+		if errors.Is(err, errOutboundResponseTooLarge) {
+			writeError(w, 413, "image exceeds 10 MB")
+			return
+		}
+		if err != nil {
+			writeError(w, 502, "failed to read image")
+			return
+		}
+		ct := detectedRasterImageType(body)
+		if ct == "" {
+			writeError(w, http.StatusUnsupportedMediaType, "upstream response is not a supported raster image")
+			return
+		}
+
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}
+}
+
+func detectedRasterImageType(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	detected, _, err := mime.ParseMediaType(http.DetectContentType(body))
 	if err != nil {
-		writeError(w, 502, "fetch failed: "+err.Error())
-		return
+		return ""
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		writeError(w, 502, fmt.Sprintf("upstream HTTP %d", resp.StatusCode))
-		return
+	switch detected {
+	case "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/x-icon":
+		return detected
+	default:
+		return ""
 	}
-
-	ct := resp.Header.Get("Content-Type")
-	if ct == "" {
-		ct = "image/jpeg"
-	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	io.Copy(w, io.LimitReader(resp.Body, 10*1024*1024)) // 10MB cap
 }
 
 func init() {
@@ -1042,36 +1124,160 @@ func init() {
 // ---- Doc image cache (strip from .docx, serve on demand) ----
 
 type docCacheEntry struct {
-	files   map[string][]byte
-	expires time.Time
+	files      map[string][]byte
+	expires    time.Time
+	lastAccess time.Time
+	bytes      int64
 }
 
-var (
-	docImageCacheMu sync.Mutex
-	docImageCache   = map[string]docCacheEntry{}
+const (
+	docCacheTTL              = 15 * time.Minute
+	maxDocCacheBytes   int64 = 512 << 20
+	maxDocCacheEntries       = 128
+	maxDocMediaBytes   int64 = 100 << 20
+	maxDocImageBytes   int64 = 15 << 20
+	maxDocMediaFiles         = 100
+	maxDocxEntries           = 5000
+	maxDocxEntryBytes  int64 = 100 << 20
+	maxDocxTotalBytes  int64 = 200 << 20
 )
 
-const docCacheTTL = 15 * time.Minute
-
-func docCachePut(hash string, files map[string][]byte) {
-	docImageCacheMu.Lock()
-	defer docImageCacheMu.Unlock()
-	docImageCache[hash] = docCacheEntry{files: files, expires: time.Now().Add(docCacheTTL)}
+type docCacheStats struct {
+	Entries   int
+	Bytes     int64
+	Evictions uint64
 }
 
-func docCacheGet(hash, filename string) ([]byte, bool) {
-	docImageCacheMu.Lock()
-	defer docImageCacheMu.Unlock()
-	e, ok := docImageCache[hash]
+type docImageMemoryCache struct {
+	mu         sync.Mutex
+	entries    map[string]docCacheEntry
+	totalBytes int64
+	evictions  uint64
+	maxBytes   int64
+	maxEntries int
+	ttl        time.Duration
+}
+
+func newDocImageMemoryCache(maxBytes int64, maxEntries int, ttl time.Duration) *docImageMemoryCache {
+	return &docImageMemoryCache{
+		entries:    make(map[string]docCacheEntry),
+		maxBytes:   maxBytes,
+		maxEntries: maxEntries,
+		ttl:        ttl,
+	}
+}
+
+var docImageCache = newDocImageMemoryCache(maxDocCacheBytes, maxDocCacheEntries, docCacheTTL)
+
+func validateDocCacheFiles(files map[string][]byte) (int64, error) {
+	if len(files) > maxDocMediaFiles {
+		return 0, fmt.Errorf("too many document images: %d > %d", len(files), maxDocMediaFiles)
+	}
+	var total int64
+	for name, data := range files {
+		if int64(len(data)) > maxDocImageBytes {
+			return 0, fmt.Errorf("document image %s exceeds %d MB", name, maxDocImageBytes>>20)
+		}
+		if int64(len(data)) > maxDocMediaBytes-total {
+			return 0, fmt.Errorf("document media exceeds %d MB", maxDocMediaBytes>>20)
+		}
+		total += int64(len(data))
+	}
+	return total, nil
+}
+
+func (c *docImageMemoryCache) put(hash string, files map[string][]byte, now time.Time) error {
+	size, err := validateDocCacheFiles(files)
+	if err != nil {
+		return err
+	}
+	if size > c.maxBytes || c.maxEntries < 1 {
+		return fmt.Errorf("document image cache entry exceeds global capacity")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.removeExpiredLocked(now)
+	if _, exists := c.entries[hash]; exists {
+		c.removeLocked(hash, false)
+	}
+	for len(c.entries) >= c.maxEntries || c.totalBytes > c.maxBytes-size {
+		oldestKey := ""
+		var oldest time.Time
+		for key, entry := range c.entries {
+			if oldestKey == "" || entry.lastAccess.Before(oldest) {
+				oldestKey = key
+				oldest = entry.lastAccess
+			}
+		}
+		if oldestKey == "" {
+			return fmt.Errorf("document image cache cannot free enough capacity")
+		}
+		c.removeLocked(oldestKey, true)
+	}
+	c.entries[hash] = docCacheEntry{
+		files:      files,
+		expires:    now.Add(c.ttl),
+		lastAccess: now,
+		bytes:      size,
+	}
+	c.totalBytes += size
+	return nil
+}
+
+func (c *docImageMemoryCache) get(hash, filename string, now time.Time) ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[hash]
 	if !ok {
 		return nil, false
 	}
-	if time.Now().After(e.expires) {
-		delete(docImageCache, hash)
+	if !now.Before(entry.expires) {
+		c.removeLocked(hash, true)
 		return nil, false
 	}
-	data, ok := e.files[filename]
-	return data, ok
+	data, ok := entry.files[filename]
+	if !ok {
+		return nil, false
+	}
+	entry.lastAccess = now
+	c.entries[hash] = entry
+	return data, true
+}
+
+func (c *docImageMemoryCache) stats(now time.Time) docCacheStats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.removeExpiredLocked(now)
+	return docCacheStats{Entries: len(c.entries), Bytes: c.totalBytes, Evictions: c.evictions}
+}
+
+func (c *docImageMemoryCache) removeExpiredLocked(now time.Time) {
+	for key, entry := range c.entries {
+		if !now.Before(entry.expires) {
+			c.removeLocked(key, true)
+		}
+	}
+}
+
+func (c *docImageMemoryCache) removeLocked(hash string, evicted bool) {
+	entry, ok := c.entries[hash]
+	if !ok {
+		return
+	}
+	delete(c.entries, hash)
+	c.totalBytes -= entry.bytes
+	if evicted {
+		c.evictions++
+	}
+}
+
+func docCachePut(hash string, files map[string][]byte) error {
+	return docImageCache.put(hash, files, time.Now())
+}
+
+func docCacheGet(hash, filename string) ([]byte, bool) {
+	return docImageCache.get(hash, filename, time.Now())
 }
 
 func startDocImageCacheGC() {
@@ -1079,14 +1285,7 @@ func startDocImageCacheGC() {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
 		for range t.C {
-			docImageCacheMu.Lock()
-			now := time.Now()
-			for k, e := range docImageCache {
-				if now.After(e.expires) {
-					delete(docImageCache, k)
-				}
-			}
-			docImageCacheMu.Unlock()
+			docImageCache.stats(time.Now())
 		}
 	}()
 }
@@ -1101,27 +1300,62 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open zip: %w", err)
 	}
+	if len(zr.File) > maxDocxEntries {
+		return nil, fmt.Errorf("docx has too many zip entries: %d > %d", len(zr.File), maxDocxEntries)
+	}
+	var declaredTotal uint64
+	for _, f := range zr.File {
+		if f.UncompressedSize64 > uint64(maxDocxEntryBytes) {
+			return nil, fmt.Errorf("docx entry %s exceeds %d MB", f.Name, maxDocxEntryBytes>>20)
+		}
+		if f.UncompressedSize64 > uint64(maxDocxTotalBytes)-declaredTotal {
+			return nil, fmt.Errorf("docx uncompressed content exceeds %d MB", maxDocxTotalBytes>>20)
+		}
+		declaredTotal += f.UncompressedSize64
+		if suspiciousZipExpansion(f, 1000) {
+			return nil, fmt.Errorf("docx entry %s has an unsafe compression ratio", f.Name)
+		}
+	}
 
 	sum := sha256.Sum256(docxBytes)
 	hash := hex.EncodeToString(sum[:])[:16]
 
 	images := map[string][]byte{}
 	imageUrls := map[string]string{}
+	var mediaBytes int64
+	var actualTotal int64
 
 	var out bytes.Buffer
 	zw := zip.NewWriter(&out)
 	for _, f := range zr.File {
 		if strings.HasPrefix(f.Name, "word/media/") && !f.FileInfo().IsDir() {
+			if len(images) >= maxDocMediaFiles {
+				return nil, fmt.Errorf("docx has too many media files: more than %d", maxDocMediaFiles)
+			}
+			base := strings.TrimPrefix(f.Name, "word/media/")
+			if base == "" || path.Base(base) != base || strings.ContainsAny(base, "/\\") || strings.HasPrefix(base, ".") {
+				return nil, fmt.Errorf("unsafe media path: %s", f.Name)
+			}
+			if f.UncompressedSize64 > uint64(maxDocImageBytes) || suspiciousZipExpansion(f, 200) {
+				return nil, fmt.Errorf("document image %s exceeds safe size or compression ratio", base)
+			}
 			rc, err := f.Open()
 			if err != nil {
 				return nil, fmt.Errorf("read %s: %w", f.Name, err)
 			}
-			data, err := io.ReadAll(rc)
-			rc.Close()
+			data, err := readBoundedBody(rc, maxDocImageBytes)
+			closeErr := rc.Close()
 			if err != nil {
 				return nil, fmt.Errorf("read %s: %w", f.Name, err)
 			}
-			base := strings.TrimPrefix(f.Name, "word/media/")
+			if closeErr != nil {
+				return nil, fmt.Errorf("close %s: %w", f.Name, closeErr)
+			}
+			if int64(len(data)) > maxDocMediaBytes-mediaBytes || int64(len(data)) > maxDocxTotalBytes-actualTotal {
+				return nil, fmt.Errorf("document media exceeds safe uncompressed size")
+			}
+			mediaBytes += int64(len(data))
+			actualTotal += int64(len(data))
 			images[base] = data
 			imageUrls[base] = "/api/doc-cache/" + hash + "/" + base
 			continue
@@ -1136,11 +1370,20 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open %s: %w", f.Name, err)
 		}
-		_, err = io.Copy(w, rc)
-		rc.Close()
+		remaining := maxDocxTotalBytes - actualTotal
+		entryLimit := maxDocxEntryBytes
+		if remaining < entryLimit {
+			entryLimit = remaining
+		}
+		written, err := copyBounded(w, rc, entryLimit)
+		closeErr := rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("copy %s: %w", f.Name, err)
 		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close %s: %w", f.Name, closeErr)
+		}
+		actualTotal += written
 	}
 
 	if len(imageUrls) > 0 {
@@ -1162,9 +1405,36 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 	}
 
 	if len(images) > 0 {
-		docCachePut(hash, images)
+		if err := docCachePut(hash, images); err != nil {
+			return nil, fmt.Errorf("cache document images: %w", err)
+		}
 	}
 	return out.Bytes(), nil
+}
+
+func suspiciousZipExpansion(f *zip.File, maxRatio uint64) bool {
+	if f == nil || f.UncompressedSize64 == 0 {
+		return false
+	}
+	if f.CompressedSize64 == 0 {
+		return true
+	}
+	return f.UncompressedSize64/f.CompressedSize64 > maxRatio
+}
+
+func copyBounded(dst io.Writer, src io.Reader, maxBytes int64) (int64, error) {
+	if maxBytes < 0 {
+		return 0, errOutboundResponseTooLarge
+	}
+	limited := &io.LimitedReader{R: src, N: maxBytes + 1}
+	written, err := io.Copy(dst, limited)
+	if err != nil {
+		return written, err
+	}
+	if written > maxBytes {
+		return written, errOutboundResponseTooLarge
+	}
+	return written, nil
 }
 
 func handleDocImageCache(w http.ResponseWriter, r *http.Request) {
@@ -1186,6 +1456,8 @@ func handleDocImageCache(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Cache-Control", "private, max-age=900")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Write(data)
 }
@@ -1220,12 +1492,21 @@ var ole2Magic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 const maxDocUploadBytes = 50 << 20 // 50 MB cap for /api/doc-to-docx
 
-// sameOrigin enforces a CSRF-style check for endpoints that may spend
-// paid backend quota (CloudConvert). A cross-site <form>/fetch from a
-// third-party page always ships an Origin header; same-origin fetches
-// from our own app match r.Host. curl / server-to-server traffic omits
-// both headers and is allowed.
+// sameOrigin is the browser half of the expensive-endpoint boundary. Missing
+// Origin/Referer fails closed; non-browser callers must use EXPENSIVE_API_TOKEN
+// (or the existing admin credential) instead of being treated as trusted.
 func sameOrigin(r *http.Request) bool {
+	expectedScheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	if comma := strings.IndexByte(expectedScheme, ','); comma >= 0 {
+		expectedScheme = strings.TrimSpace(expectedScheme[:comma])
+	}
+	if expectedScheme != "http" && expectedScheme != "https" {
+		if r.TLS != nil {
+			expectedScheme = "https"
+		} else {
+			expectedScheme = "http"
+		}
+	}
 	check := func(raw string) (matched, decided bool) {
 		if raw == "" {
 			return false, false
@@ -1234,7 +1515,7 @@ func sameOrigin(r *http.Request) bool {
 		if err != nil || u.Host == "" {
 			return false, true
 		}
-		return u.Host == r.Host, true
+		return u.Scheme == expectedScheme && strings.EqualFold(u.Host, r.Host), true
 	}
 	if ok, decided := check(r.Header.Get("Origin")); decided {
 		return ok
@@ -1242,7 +1523,7 @@ func sameOrigin(r *http.Request) bool {
 	if ok, decided := check(r.Header.Get("Referer")); decided {
 		return ok
 	}
-	return true
+	return false
 }
 
 // handleDocToDocx accepts a multipart upload with field "file" containing an
@@ -1250,10 +1531,11 @@ func sameOrigin(r *http.Request) bool {
 // LibreOffice service first (fast, unlimited, private); falls back to
 // CloudConvert if that's not configured or fails (network/5xx).
 func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
-		writeError(w, 403, "cross-origin request not allowed")
+	release, ok := authorizeExpensiveRequest(w, r, docConvertCostGuard)
+	if !ok {
 		return
 	}
+	defer release()
 	// Hard cap the request body before ParseMultipartForm so Go doesn't
 	// spill arbitrarily large uploads to temp files.
 	r.Body = http.MaxBytesReader(w, r.Body, maxDocUploadBytes)
@@ -1312,6 +1594,11 @@ func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
 		if apiKey == "" {
 			log.Printf("doc-to-docx: no converter available (LIBREOFFICE_URL/TOKEN and CLOUDCONVERT_API_KEY all unset)")
 			writeError(w, 500, "文件转换服务暂不可用，请将文件另存为 .docx 后重新上传")
+			return
+		}
+		if !validExpensiveCredential(r) {
+			log.Printf("doc-to-docx: blocked anonymous CloudConvert fallback")
+			writeError(w, http.StatusForbidden, "自动付费转换未授权，请将文件另存为 .docx 后重试")
 			return
 		}
 		docx, err = cloudConvertDocToDocx(ctx, apiKey, data, header.Filename)
@@ -1379,10 +1666,17 @@ func convertViaLibreOffice(ctx context.Context, baseURL, token string, docBytes 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		body, readErr := readBoundedBody(resp.Body, 4<<10)
+		if readErr != nil {
+			return nil, fmt.Errorf("libreoffice status %d（响应读取失败或超过 4 KB）", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("libreoffice status %d: %s", resp.StatusCode, string(body))
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 100<<20))
+	body, err := readBoundedBody(resp.Body, 100<<20)
+	if err != nil {
+		return nil, fmt.Errorf("libreoffice 响应读取失败或超过 100 MB: %w", err)
+	}
+	return body, nil
 }
 
 // registerChannelRoutes 注册渠道路由：
@@ -1429,8 +1723,11 @@ func cloudConvertDocToDocx(ctx context.Context, apiKey string, docBytes []byte, 
 	if err != nil {
 		return nil, fmt.Errorf("create job: %w", err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, err := readBoundedBody(resp.Body, 1<<20)
 	resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("create job response: %w", err)
+	}
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("create job status %d: %s", resp.StatusCode, string(body))
 	}
@@ -1498,8 +1795,11 @@ func cloudConvertDocToDocx(ctx context.Context, apiKey string, docBytes []byte, 
 	if err != nil {
 		return nil, fmt.Errorf("upload: %w", err)
 	}
-	upBody, _ := io.ReadAll(upResp.Body)
+	upBody, readErr := readBoundedBody(upResp.Body, 1<<20)
 	upResp.Body.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("upload response: %w", readErr)
+	}
 	if upResp.StatusCode >= 300 {
 		return nil, fmt.Errorf("upload status %d: %s", upResp.StatusCode, string(upBody))
 	}
@@ -1520,8 +1820,11 @@ pollLoop:
 		if err != nil {
 			return nil, fmt.Errorf("poll: %w", err)
 		}
-		pollBody, _ := io.ReadAll(pollResp.Body)
+		pollBody, readErr := readBoundedBody(pollResp.Body, 1<<20)
 		pollResp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("poll response: %w", readErr)
+		}
 		if pollResp.StatusCode >= 300 {
 			return nil, fmt.Errorf("poll status %d: %s", pollResp.StatusCode, string(pollBody))
 		}
@@ -1589,5 +1892,9 @@ pollLoop:
 	if dlResp.StatusCode >= 300 {
 		return nil, fmt.Errorf("download status %d", dlResp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(dlResp.Body, 100<<20))
+	body, err = readBoundedBody(dlResp.Body, 100<<20)
+	if err != nil {
+		return nil, fmt.Errorf("download response: %w", err)
+	}
+	return body, nil
 }

@@ -98,11 +98,24 @@ export function createActiveRuleSelector({
   async function loadRuleCatalog() {
     try {
       const data = await listPublicRulePresets();
-      return { presets: Array.isArray(data.presets) ? data.presets : [] };
+      return {
+        presets: Array.isArray(data.presets) ? data.presets : [],
+        accounts: Array.isArray(data.accounts) ? data.accounts : [],
+      };
     } catch {
       const preset = currentPresetFromConfig();
-      return { presets: preset.id ? [{ id: preset.id, name: preset.name || preset.id }] : [] };
+      return {
+        presets: preset.id ? [{ id: preset.id, name: preset.name || preset.id }] : [],
+        accounts: [],
+      };
     }
+  }
+
+  function activeBindingRevision(accountID) {
+    const binding = (activeRuleCatalog.accounts || [])
+      .find(account => account && account.id === accountID);
+    const revision = Number(binding && binding.active_revision);
+    return Number.isInteger(revision) && revision >= 0 ? revision : 0;
   }
 
   async function ensureRuleAdminPassword() {
@@ -242,7 +255,7 @@ export function createActiveRuleSelector({
       try {
         const password = await ensureRuleAdminPassword();
         if (stale()) return false;
-        await setActiveRulePreset(password, nextID, accountID);
+        await setActiveRulePreset(password, nextID, accountID, activeBindingRevision(accountID));
         if (stale()) return false;
         const [loaded, catalog] = await Promise.all([
           loadActiveRulePreset(accountID),

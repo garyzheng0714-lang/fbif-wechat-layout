@@ -2,6 +2,32 @@ import { defineConfig } from '@playwright/test';
 
 const e2ePort = Number(process.env.E2E_PORT || 19090);
 const baseURL = `http://127.0.0.1:${e2ePort}`;
+const crossBrowserEnabled = process.env.E2E_CROSS_BROWSER === '1';
+const smokeTests = /(?:1-初始空状态|2-上传DOCX全流程|8-网站渠道视图) \[desktop-1440\]/;
+
+const projects = [
+  {
+    name: 'chromium',
+    use: { browserName: 'chromium' },
+  },
+];
+
+// 本地视觉基线绑定 Chromium/macOS 字体渲染。CI 额外用 Firefox/WebKit
+// 跑桌面关键路径，验证解析、上传与渠道入口没有浏览器专属故障。
+if (crossBrowserEnabled) {
+  projects.push(
+    {
+      name: 'firefox-smoke',
+      grep: smokeTests,
+      use: { browserName: 'firefox' },
+    },
+    {
+      name: 'webkit-smoke',
+      grep: smokeTests,
+      use: { browserName: 'webkit' },
+    },
+  );
+}
 
 // 视觉回归（架构体检 S5，2026-07-10）：
 // - webServer 自动起当前工作树的 Go API；默认不复用已有端口，避免静默测到别的 worktree。
@@ -17,7 +43,8 @@ export default defineConfig({
   testDir: './tests',
   testMatch: '**/e2e-regression.spec.mjs',
   timeout: 120000,
-  retries: 0,
+  retries: process.env.CI ? 1 : 0,
+  outputDir: 'test-results/e2e',
   updateSnapshots: process.env.E2E_UPDATE_BASELINE === '1' ? 'all' : 'none',
   snapshotPathTemplate: '{testDir}/e2e-baselines/{arg}{ext}',
   webServer: {
@@ -34,14 +61,10 @@ export default defineConfig({
   },
   use: {
     baseURL,
-    screenshot: 'off',
-    trace: 'off',
+    screenshot: 'only-on-failure',
+    trace: 'retain-on-failure',
+    video: process.env.CI ? 'retain-on-failure' : 'off',
   },
-  projects: [
-    {
-      name: 'chromium',
-      use: { browserName: 'chromium' },
-    },
-  ],
+  projects,
   reporter: [['list'], ['json', { outputFile: 'tests/e2e-screenshots/regression-results.json' }]],
 });

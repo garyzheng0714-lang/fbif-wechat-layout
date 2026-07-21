@@ -35,8 +35,11 @@ function makeEnv({
       { id: 'rule-x', name: '新规则', channel: 'mp', rule_family: 'fbif' },
       { id: 'legacy-ambiguous', name: '待迁移规则', channel: 'mp', rule_family: 'fbif', migration_required: true },
       { id: 'site-rule', name: '网站规则', channel: 'ft', rule_family: 'foodtalks-site' },
+    ], accounts: [
+      { id: 'fbif', active_revision: 7 },
+      { id: 'ft-default', active_revision: 9 },
     ] }),
-    setActiveRulePreset: async (pw, id, acct) => calls.setActive.push({ pw, id, acct }),
+    setActiveRulePreset: async (pw, id, acct, revision) => calls.setActive.push({ pw, id, acct, revision }),
   };
   // 页面真实实现里 refreshRuleConsumers 会重渲选择器卡片（saveActiveRuleSelection
   // 成功路径依赖它），桩保持同一契约。
@@ -119,7 +122,7 @@ test('保存流程：选新规则 → 输密码 → setActiveRulePreset → 回�
   assert.ok(!save.hasAttribute('disabled'), '选了不同规则后保存应可用');
   save.dispatchEvent(new window.Event('click', { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(calls.setActive[0], { pw: 'good-pass', id: 'rule-x', acct: 'fbif' });
+  assert.deepEqual(calls.setActive[0], { pw: 'good-pass', id: 'rule-x', acct: 'fbif', revision: 7 });
   assert.match(document.getElementById('activeRuleCard').innerHTML, /已保存/);
 });
 
@@ -350,7 +353,7 @@ test('保存 guard：A 保存后切 B，旧 A 后返不得 apply 或缓存到 B'
         window._activeConfig = { config, preset };
       },
       adminLogin: async () => {},
-      listPublicRulePresets: async () => ({ presets: [{ id: 'default' }, { id: 'rule-x' }] }),
+      listPublicRulePresets: async () => ({ presets: [{ id: 'default' }, { id: 'rule-x' }], accounts: [{ id: 'account-a', active_revision: 11 }] }),
       setActiveRulePreset: async (...args) => { calls.setActive.push(args); return setTask.promise; },
     },
     refreshRuleConsumers: () => selector.renderActiveRuleCard(),
@@ -379,7 +382,7 @@ test('保存 guard：A 保存后切 B，旧 A 后返不得 apply 或缓存到 B'
   assert.deepEqual(calls.applied, [{ rule: 'rule-b', account: 'account-b' }]);
   assert.deepEqual(calls.saved, [{ owner: 'B', id: 'account-b' }]);
   assert.equal(window._activeConfig.preset.id, 'rule-b');
-  assert.deepEqual(calls.setActive[0].slice(1), ['rule-x', 'account-a'], '保存请求必须固定启动时账号');
+  assert.deepEqual(calls.setActive[0].slice(1), ['rule-x', 'account-a', 11], '保存请求必须固定启动时账号及绑定修订');
 });
 
 test('保存 single-flight：保存中再点击不得发第二个 PUT', async () => {

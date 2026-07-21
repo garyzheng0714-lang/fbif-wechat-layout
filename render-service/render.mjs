@@ -17,6 +17,7 @@
 //     留空标题反而难看；后续接自动选卡再放开（footerVisibilityOverride 已预留）
 //   - 非 mp.weixin.qq.com 的 <a> 降为正文样式纯文本（微信草稿会过滤外链，先降级保版式；仅公众号）
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DOMParser } from 'linkedom';
@@ -43,6 +44,15 @@ const PUBLIC_DIR = process.env.PUBLIC_DIR || path.resolve(__dirname, '../public'
 const RULES_API_ORIGIN = (process.env.RULES_API_ORIGIN || 'http://127.0.0.1:9000').replace(/\/$/, '');
 // 页脚素材（Bobo 名片等）在规则里是站内相对路径，进公众号草稿/网站 CMS 前必须绝对化到线上域名。
 const ASSET_ORIGIN = (process.env.ASSET_ORIGIN || 'https://fbifmp-layout.foodtalks.cn').replace(/\/$/, '');
+
+let RENDERER_BUILD_SHA = String(process.env.RENDER_BUILD_SHA || '').trim();
+if (!RENDERER_BUILD_SHA) {
+  try {
+    const version = JSON.parse(await readFile(path.join(PUBLIC_DIR, 'version.json'), 'utf8'));
+    RENDERER_BUILD_SHA = String(version.build || version.commit || '').trim();
+  } catch {}
+}
+if (!RENDERER_BUILD_SHA) RENDERER_BUILD_SHA = 'development';
 
 const mod = (p) => import(pathToFileURL(path.join(PUBLIC_DIR, 'js', p)).href);
 
@@ -140,6 +150,54 @@ export function fallbackRuleForPack(packId) {
   return cloneRuleValue(fallback);
 }
 
+function stableJSONStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(stableJSONStringify).join(',') + ']';
+  return '{' + Object.keys(value).sort().map(key =>
+    JSON.stringify(key) + ':' + stableJSONStringify(value[key])
+  ).join(',') + '}';
+}
+
+export function renderRuleConfigHash(config, behavior) {
+  const payload = stableJSONStringify({ behavior, config });
+  return 'sha256:' + createHash('sha256').update(payload).digest('hex');
+}
+
+function exactRuleEntry(channel, snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw Object.assign(new Error('exact 渲染缺少规则快照'), { status: 409 });
+  }
+  const accountID = String(snapshot.account_id || '');
+  const presetID = String(snapshot.preset_id || '');
+  const revision = Number(snapshot.revision);
+  const configHash = String(snapshot.config_hash || '');
+  if (accountID !== channel.rulesAccount || !presetID || !Number.isInteger(revision) || revision < 1) {
+    throw Object.assign(new Error('规则快照身份与渲染渠道不匹配'), { status: 409 });
+  }
+  if (!snapshot.config || typeof snapshot.config !== 'object' || Array.isArray(snapshot.config) ||
+      !snapshot.behavior || typeof snapshot.behavior !== 'object' || Array.isArray(snapshot.behavior)) {
+    throw Object.assign(new Error('规则快照内容不完整'), { status: 409 });
+  }
+  const actualHash = renderRuleConfigHash(snapshot.config, snapshot.behavior);
+  if (configHash !== actualHash) {
+    throw Object.assign(new Error('规则快照 config_hash 不匹配'), { status: 409 });
+  }
+  const profile = RULE_PROFILES[channel.ruleProfile];
+  const behavior = profile.normalizeBehavior(snapshot.behavior);
+  const preset = {
+    id: presetID,
+    version: revision,
+    config_hash: configHash,
+    raw_config: cloneRuleValue(snapshot.config),
+    config: normalizeRuleConfig(snapshot.config),
+    behavior,
+  };
+  return {
+    at: Date.now(), preset, config: preset.config, behavior,
+    source: 'snapshot', configHash,
+  };
+}
+
 // 两渠道复制层用同一份主题 CSS：site.html 与 app.html 都引 /css/wx-theme.css，
 // engine.js copyContent 对网站输出同样跑 processForCopy（网站 HTML 本就全内联，近似 no-op）。
 const themeCSS = await readFile(path.join(PUBLIC_DIR, 'css', 'wx-theme.css'), 'utf8');
@@ -155,7 +213,7 @@ async function activeRulePreset(packId, channel) {
   if (hit && Date.now() - hit.at < 60_000) return hit;
   const profile = RULE_PROFILES[channel.ruleProfile];
   const fallback = fallbackRuleForPack(packId);
-  const entry = { at: Date.now(), preset: null, config: fallback.config, behavior: fallback.behavior };
+  const entry = { at: Date.now(), preset: null, config: fallback.config, behavior: fallback.behavior, source: 'default' };
   try {
     const resp = await realFetch(RULES_API_ORIGIN + '/api/rules/active?account=' + encodeURIComponent(account), { signal: AbortSignal.timeout(5000) });
     if (resp.ok) {
@@ -168,6 +226,8 @@ async function activeRulePreset(packId, channel) {
           behavior: profile.normalizeBehavior(data.preset.behavior),
         };
         entry.behavior = entry.preset.behavior;
+        entry.configHash = data.preset.config_hash || renderRuleConfigHash(data.preset.config, data.preset.behavior || {});
+        entry.source = 'server';
       }
     }
   } catch (err) {
@@ -227,7 +287,10 @@ export function absolutizeAssetURLs(html, origin = ASSET_ORIGIN) {
 // packId（默认 fbif）：按 CHANNELS 表选渲染器与渠道参数；未知 packId 显式 400。
 // withFooter（默认开）：按生产规则 bottom_blocks 渲染整段页脚——与网页版人工排版同一数据源、
 // 同一渲染器（公众号转载走 repost 预设：提示声明 + Bobo 名片等）。
-export async function renderArticle({ packId = 'fbif', title, source, blocks, isRepost = true, withFooter = true } = {}) {
+export async function renderArticle({
+  packId = 'fbif', title, source, blocks, isRepost = true, withFooter = true,
+  ruleMode = 'interactive', ruleSnapshot,
+} = {}) {
   const channel = CHANNELS[packId];
   if (!channel) {
     throw Object.assign(new Error('暂只支持 packId=' + SUPPORTED_PACK_IDS.join(' / ') + '，收到：' + packId), { status: 400 });
@@ -235,7 +298,12 @@ export async function renderArticle({ packId = 'fbif', title, source, blocks, is
   if (!Array.isArray(blocks) || blocks.length === 0) {
     throw Object.assign(new Error('blocks 不能为空'), { status: 400 });
   }
-  const entry = await activeRulePreset(packId, channel);
+  if (ruleMode !== 'interactive' && ruleMode !== 'exact') {
+    throw Object.assign(new Error('未知 ruleMode：' + ruleMode), { status: 400 });
+  }
+  const entry = ruleMode === 'exact'
+    ? exactRuleEntry(channel, ruleSnapshot)
+    : await activeRulePreset(packId, channel);
   // —— 以下到函数尾全部同步：window._activeConfig 是进程级全局，写入与消费之间不得有 await ——
   const template = templates[packId];
   const config = channel.configViaOpts
@@ -263,5 +331,21 @@ export async function renderArticle({ packId = 'fbif', title, source, blocks, is
   if (channel.stripExternalAnchors) html = stripExternalAnchors(html);
   html = processForCopy(html, themeCSS, config);
   if (channel.normalizeWechat) html = normalizeWechatRichHtml(html);
-  return { html, imgN: result.imgN, headingN: result.headingN };
+  const resolvedConfig = entry.preset?.raw_config || entry.config || {};
+  const resolvedBehavior = entry.preset?.behavior || entry.behavior || {};
+  const configHash = entry.configHash || renderRuleConfigHash(resolvedConfig, resolvedBehavior);
+  return {
+    html,
+    imgN: result.imgN,
+    headingN: result.headingN,
+    resolved_rule: {
+      account_id: channel.rulesAccount,
+      preset_id: entry.preset?.id || 'builtin-fallback',
+      revision: Number(entry.preset?.version || 0),
+      config_hash: configHash,
+      source: entry.source || 'default',
+    },
+    renderer_build_sha: RENDERER_BUILD_SHA,
+    output_hash: 'sha256:' + createHash('sha256').update(html).digest('hex'),
+  };
 }

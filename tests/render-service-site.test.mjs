@@ -38,10 +38,20 @@ globalThis.fetch = async (url) => {
   return { ok: false, json: async () => ({}) };
 };
 
-const { renderArticle, SUPPORTED_PACK_IDS, fallbackRuleForPack } = await import('../render-service/render.mjs');
+const {
+  renderArticle, SUPPORTED_PACK_IDS, fallbackRuleForPack, renderRuleConfigHash,
+} = await import('../render-service/render.mjs');
 const { SAMPLE_ARTICLE } = await import('./fixtures/render-service-sample-blocks.mjs');
 
 const golden = await readFile(new URL('./golden/render-service-fbif.html', import.meta.url), 'utf8');
+
+test('Go/Node 规则 config_hash 使用同一份 canonical JSON 合同', () => {
+  const got = renderRuleConfigHash(
+    { footer: '<p>中文 & text</p>', nested: { z: 1, a: true } },
+    { regex: '^作者' },
+  );
+  assert.equal(got, 'sha256:3a5ec985cf4d715ae701e4a67bdbc810e6a348a47803949d95cfe70faa061078');
+});
 
 const siteResult = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default' });
 const siteHtml = siteResult.html;
@@ -77,6 +87,49 @@ test('ft-default：headless 保留网站 behavior 的顶层正则与 lists，不
   assert.doesNotMatch(custom.html, /自定义网站尾标|这段必须被规则切掉/,
     'lists.wechat_trailer_markers 必须保留并生效');
   assert.doesNotMatch(custom.html, /wx-mote-author|#396FBC/i, '公众号 Mote 动作不得注入网站');
+});
+
+test('ft-default exact：只使用调用方固定的规则快照并回传可复现证据', async () => {
+  const snapshot = {
+    account_id: 'ft-default',
+    preset_id: 'ft-default-v1',
+    revision: 17,
+    config: ftRules.preset.config,
+    behavior: ftRules.preset.behavior,
+  };
+  snapshot.config_hash = renderRuleConfigHash(snapshot.config, snapshot.behavior);
+  const fetchCountBefore = fetchedAccounts.length;
+  const exact = await renderArticle({
+    ...SAMPLE_ARTICLE,
+    packId: 'ft-default',
+    ruleMode: 'exact',
+    ruleSnapshot: snapshot,
+  });
+  assert.deepEqual(exact.resolved_rule, {
+    account_id: snapshot.account_id,
+    preset_id: snapshot.preset_id,
+    revision: snapshot.revision,
+    config_hash: snapshot.config_hash,
+    source: 'snapshot',
+  });
+  assert.equal(fetchedAccounts.length, fetchCountBefore, 'exact 模式不得再读取可能漂移的活动规则 API');
+  assert.match(exact.renderer_build_sha, /\S/);
+  assert.match(exact.output_hash, /^sha256:[0-9a-f]{64}$/);
+});
+
+test('ft-default exact：缺失或篡改规则指纹必须 409 fail closed', async () => {
+  await assert.rejects(
+    () => renderArticle({
+      ...SAMPLE_ARTICLE,
+      packId: 'ft-default',
+      ruleMode: 'exact',
+      ruleSnapshot: {
+        account_id: 'ft-default', preset_id: 'ft-default-v1', revision: 17,
+        config_hash: 'sha256:tampered', config: ftRules.preset.config, behavior: ftRules.preset.behavior,
+      },
+    }),
+    error => error.status === 409 && /config_hash/.test(error.message),
+  );
 });
 
 test('ft-default：规则 API 失败的离线基线也是网站口径', () => {

@@ -24,12 +24,12 @@ func TestValidateRichTextHTMLAccepts(t *testing.T) {
 // 富文本白名单：拒绝 XSS 与白名单外的标签/属性/style。
 func TestValidateRichTextHTMLRejects(t *testing.T) {
 	bad := map[string]string{
-		"script":          `<p><script>alert(1)</script></p>`,
-		"img":             `<p><img src="x"></p>`,
-		"onclick":         `<p onclick="evil()">x</p>`,
-		"javascript href": `<a href="javascript:alert(1)">x</a>`,
-		"bad tag div":     `<div>x</div>`,
-		"bad attr class":  `<p class="x">y</p>`,
+		"script":           `<p><script>alert(1)</script></p>`,
+		"img":              `<p><img src="x"></p>`,
+		"onclick":          `<p onclick="evil()">x</p>`,
+		"javascript href":  `<a href="javascript:alert(1)">x</a>`,
+		"bad tag div":      `<div>x</div>`,
+		"bad attr class":   `<p class="x">y</p>`,
 		"bad style prop":   `<p style="position: fixed;">x</p>`,
 		"style url":        `<p style="background-color: url(evil);">x</p>`,
 		"style expr":       `<span style="color: expression(alert(1));">x</span>`,

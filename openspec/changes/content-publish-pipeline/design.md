@@ -179,6 +179,19 @@ created → fetching（fetch-article 拉 blocks）
 - FoodTalks token env-only；接口文档里的抓包 token 视为已泄露级别，正式上线换服务级凭证。
 - 所有出站调用打审计日志（job_id、动作、操作人），但日志不含任何 secret。
 
+### D9. 审计整改边界：先封堵运行时风险，结构迁移独立实施
+
+2026-07-21 的代码内整改已经覆盖出站请求、资源上限、复制与会话一致性、规则版本、并发背压、通知恢复、部署门禁和 CI/浏览器证据。以下边界仍是生产事实，不能因测试闭环而写成“已具备高可用”：
+
+- 发布任务、规则和 outbox 仍以原子 JSON 文件持久化，并依赖“同一路径单个 Go API 写进程”契约；它不支持多实例并发写。迁移到 SQLite WAL 或正式数据库必须作为独立变更，包含旧数据导入校验、备份、灰度、回滚及灾难恢复演练。
+- 有界 worker pool 提供进程内背压和 panic 隔离，但不是持久队列，也没有跨进程 lease。进程崩溃后的安全性仍依赖已持久 intent、CAS 和 reconciliation，不能把它描述为 exactly-once。
+- 规则 revision/hash 已成为渲染、复制和发布的不可变依赖；版本不一致时必须 fail-closed，不允许回退到“最新规则猜测执行”。
+- sessionStorage 只承担小型短期快照；大稿件与离线恢复迁到 IndexedDB 前，容量不足只能安全降级，不能承诺完整恢复。
+- 当前管理面仍是共享管理员凭证；企业身份、细粒度 RBAC、字段级操作审计以及独立供应商的 synthetic/dead-man 监控需要单独的身份与运维方案。
+- `DocumentState` 单一不可变状态和 10 万任务规模基线属于后续重构/容量项目。当前版本以版本门、latest-wins、有限队列和故障注入守住正确性，但不据此声明完成结构性重构。
+
+因此，本轮允许发布的结论是“代码本地可封堵的高风险项已整改并有自动化证据”；SQLite、RBAC、独立外部监控、IndexedDB 和大规模容量验证继续留在 tasks 6B.8–6B.10，完成前不得宣传为生产能力。
+
 ## Risks / Trade-offs
 
 - [FoodTalks「隐藏态」语义与假设不符（比如 isPublic=0 仍出现在列表/搜索）] → **已应验并已解决（2026-07-10 冒烟）**：isPublic=0 确实不隐藏（未登录直链完整可见）；正确的隐藏进站态是 `publishStatus=0`（草稿），全流程已走通，见 `docs/foodtalks-api-contract.md`。

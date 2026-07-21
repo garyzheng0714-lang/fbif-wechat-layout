@@ -85,13 +85,41 @@ func TestValidateFtSeriesSiteFooterDefaults(t *testing.T) {
 }
 
 func TestFooterModuleRejectsUnsafeHTML(t *testing.T) {
-	bad := map[string]any{
-		"segments": map[string]any{
-			"biz_coop": map[string]any{"html_lines": []any{`<p onclick="evil()">x</p>`}},
-		},
+	tests := map[string]string{
+		"event attr":               `<p onclick="evil()">x</p>`,
+		"encoded script scheme":    `<a href="java&#x73;cript:alert(1)">x</a>`,
+		"iframe srcdoc":            `<iframe srcdoc="<script>alert(1)</script>"></iframe>`,
+		"object":                   `<object data="https://example.com/x"></object>`,
+		"embed":                    `<embed src="https://example.com/x">`,
+		"form":                     `<form action="/x"><input name="x"></form>`,
+		"meta refresh":             `<meta http-equiv="refresh" content="0;url=https://example.com">`,
+		"svg":                      `<svg><a href="javascript:alert(1)">x</a></svg>`,
+		"image script scheme":      `<img src="JaVaScRiPt:alert(1)">`,
+		"image SVG data URI":       `<img src="data:image/svg+xml,&lt;svg onload=alert(1)&gt;">`,
+		"image srcset":             `<img src="https://example.com/a.png" srcset="javascript:alert(1) 2x">`,
+		"style URL":                `<p style="background-color:url(https://example.com/x)">x</p>`,
+		"style positioning":        `<p style="position:fixed">x</p>`,
+		"CSS escape":               `<p style="color:\6a avascript">x</p>`,
+		"oversized CSS width":      `<p style="width:999999px">x</p>`,
+		"oversized image":          `<img src="https://example.com/a.png" width="999999">`,
+		"blank target no noopener": `<a href="https://example.com" target="_blank">x</a>`,
+		"HTML comment":             `<p><!-- hidden --></p>`,
 	}
-	if err := validateFBIFFooterModule(bad); err == nil {
-		t.Fatal("含 onclick 的页脚片段应被拒绝")
+	for name, fragment := range tests {
+		t.Run(name, func(t *testing.T) {
+			bad := map[string]any{
+				"segments": map[string]any{
+					"biz_coop": map[string]any{"html_lines": []any{fragment}},
+				},
+			}
+			err := validateFBIFFooterModule(bad)
+			if err == nil {
+				t.Fatalf("unsafe footer fragment should be rejected: %s", fragment)
+			}
+			if !strings.Contains(err.Error(), "fbif_footer.segments.biz_coop.html_lines[0]") {
+				t.Fatalf("error should point to the exact footer line, got: %v", err)
+			}
+		})
 	}
 }
 
@@ -114,10 +142,112 @@ func TestFooterModuleAcceptsEditedContent(t *testing.T) {
 	}
 }
 
+func TestFooterModuleAcceptsControlledTableAndAssetReferences(t *testing.T) {
+	good := map[string]any{
+		"segments": map[string]any{
+			"coop_table": map[string]any{"html_lines": []any{
+				`<table style="border-collapse: collapse; width: 100%;"><tbody><tr><td colspan="3" style="border: 1px solid #7f7f7f; padding: 8px; text-align: center; background-color: #01396a; color: #ffffff; font-size: 16px;"><strong>合作方案</strong></td></tr></tbody></table>`,
+				`<p><img class="mc-img" style="display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;" src="{{asset#ft_footer_logo}}" alt="FoodTalks logo" width="130" height="27" border="0"></p>`,
+			}},
+		},
+	}
+	if err := validateFBIFFooterModule(good); err != nil {
+		t.Fatalf("controlled footer table and asset reference should pass: %v", err)
+	}
+}
+
+func TestFooterModuleRejectsDangerousMarkupSplitAcrossLines(t *testing.T) {
+	bad := map[string]any{
+		"segments": map[string]any{
+			"split": map[string]any{"html_lines": []any{
+				`<img src="https://example.com/x.png"`,
+				` onerror="alert(1)">`,
+			}},
+		},
+	}
+	if err := validateFBIFFooterModule(bad); err == nil {
+		t.Fatal("footer HTML must be validated again after html_lines are joined")
+	}
+}
+
+func TestBottomBlocksRejectUnsafeRawHTML(t *testing.T) {
+	module := map[string]any{
+		"schema_version":   float64(2),
+		"enabled":          true,
+		"active_preset_id": "default",
+		"presets": []any{map[string]any{
+			"id":    "default",
+			"order": []any{"unsafe"},
+			"blocks": map[string]any{
+				"unsafe": map[string]any{
+					"type":   "rich_html",
+					"fields": map[string]any{"html_lines": []any{`<img src="https://example.com/x.png" onerror="alert(1)">`}},
+				},
+			},
+		}},
+	}
+	if err := validateBottomBlocksModule(module); err == nil {
+		t.Fatal("bottom_blocks rich_html must use the same footer HTML policy")
+	}
+}
+
 func TestBehaviorRejectsBadRegex(t *testing.T) {
 	beh := map[string]any{"author_regex": "([unclosed"}
 	if err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, beh); err == nil {
 		t.Fatal("非法正则应被拒绝")
+	}
+}
+
+func TestBehaviorRejectsBrowserUnsafeRegex(t *testing.T) {
+	tests := []struct {
+		name     string
+		behavior map[string]any
+		path     string
+	}{
+		{
+			name:     "nested repetition in top-level field",
+			behavior: map[string]any{"author_regex": `(a+)+$`},
+			path:     "behavior.author_regex",
+		},
+		{
+			name: "ambiguous repetition in param",
+			behavior: map[string]any{"params": map[string]any{
+				"author_line_regex": map[string]any{"type": "string", "default": `(a|aa)+$`},
+			}},
+			path: "behavior.params.author_line_regex.default",
+		},
+		{
+			name: "multiple unbounded wildcards in list",
+			behavior: map[string]any{"lists": map[string]any{
+				"wechat_trailer_markers": []any{`.*separator.*`},
+			}},
+			path: "behavior.lists.wechat_trailer_markers[0]",
+		},
+		{
+			name: "JS-incompatible scoped flags",
+			behavior: map[string]any{"params": map[string]any{
+				"footer_prompt_detection_regex": map[string]any{"type": "string", "default": `(?i:unsafe)`},
+			}},
+			path: "behavior.params.footer_prompt_detection_regex.default",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateRuleBehaviorPayload(foodTalksSiteDefaultRulePresetID, tc.behavior)
+			if err == nil {
+				t.Fatal("可能触发浏览器回溯爆炸或与 JS 不兼容的正则应被拒绝")
+			}
+			if !strings.Contains(err.Error(), tc.path) {
+				t.Fatalf("错误应指出精确规则路径 %q，实际: %v", tc.path, err)
+			}
+		})
+	}
+}
+
+func TestBrowserSafeRegexAllowsBoundedWildcards(t *testing.T) {
+	pattern := `长按.{0,4}识别.{0,2}二维码`
+	if err := validateBrowserSafeRegex("behavior.test", pattern, 300); err != nil {
+		t.Fatalf("小范围、有上界的通配符是现有合法规则，不应被拒绝: %v", err)
 	}
 }
 

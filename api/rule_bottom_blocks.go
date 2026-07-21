@@ -261,6 +261,7 @@ func validateBottomBlocksField(blockID string, bt blockType, key string, value a
 		if len(lines) > 200 {
 			return fmt.Errorf("bottom_blocks block %q field %q has too many lines", blockID, key)
 		}
+		combinedLines := make([]string, 0, len(lines))
 		for i, ln := range lines {
 			s, ok := ln.(string)
 			if !ok {
@@ -269,6 +270,13 @@ func validateBottomBlocksField(blockID string, bt blockType, key string, value a
 			if len([]rune(s)) > 4000 {
 				return fmt.Errorf("bottom_blocks block %q field %q line %d too long", blockID, key, i)
 			}
+			if err := validateFooterHTML(s); err != nil {
+				return fmt.Errorf("bottom_blocks block %q field %q line %d: %w", blockID, key, i, err)
+			}
+			combinedLines = append(combinedLines, s)
+		}
+		if err := validateFooterHTML(strings.Join(combinedLines, "\n")); err != nil {
+			return fmt.Errorf("bottom_blocks block %q field %q: %w", blockID, key, err)
 		}
 	}
 	return nil

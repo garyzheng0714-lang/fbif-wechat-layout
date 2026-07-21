@@ -472,23 +472,24 @@ func TestPublishJobStoreConcurrentCreate(t *testing.T) {
 func TestRenderSiteHTMLReusesProxyCore(t *testing.T) {
 	var gotAuth, gotPath string
 	var gotBody map[string]any
+	rule := testPublishRenderRule()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotPath = r.URL.Path
 		json.NewDecoder(r.Body).Decode(&gotBody)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"html":"<p>ok</p>"}`)
+		json.NewEncoder(w).Encode(successfulPublishRenderResult("<p>ok</p>", rule))
 	}))
 	defer srv.Close()
 	t.Setenv("RENDER_SERVICE_URL", srv.URL)
 	t.Setenv("RENDER_TOKEN", "render-tok")
 
-	html, err := renderSiteHTML(context.Background(), "标题", "https://mp.weixin.qq.com/s/x", `[{"k":"p","text":"正文"}]`)
+	result, err := renderSiteHTML(context.Background(), "标题", "https://mp.weixin.qq.com/s/x", `[{"k":"p","text":"正文"}]`, rule)
 	if err != nil {
 		t.Fatalf("renderSiteHTML: %v", err)
 	}
-	if html != "<p>ok</p>" {
-		t.Fatalf("html = %q", html)
+	if result.HTML != "<p>ok</p>" {
+		t.Fatalf("html = %q", result.HTML)
 	}
 	if gotPath != "/render" || gotAuth != "Bearer render-tok" {
 		t.Fatalf("转发内核请求形态不符：path=%q auth=%q", gotPath, gotAuth)
@@ -496,9 +497,12 @@ func TestRenderSiteHTMLReusesProxyCore(t *testing.T) {
 	if gotBody["packId"] != sitePublishRulePackID || gotBody["isRepost"] != true {
 		t.Fatalf("渲染参数不符：packId=%v isRepost=%v", gotBody["packId"], gotBody["isRepost"])
 	}
+	if gotBody["ruleMode"] != "exact" || gotBody["ruleSnapshot"] == nil {
+		t.Fatalf("自动发布必须携带 exact 规则快照：%v", gotBody)
+	}
 	// 缺 RENDER_TOKEN 必须 fail loud，不得无鉴权裸调。
 	t.Setenv("RENDER_TOKEN", "")
-	if _, err := renderSiteHTML(context.Background(), "标题", "src", "[]"); err == nil {
+	if _, err := renderSiteHTML(context.Background(), "标题", "src", "[]", rule); err == nil {
 		t.Fatalf("RENDER_TOKEN 缺失应报错")
 	}
 }

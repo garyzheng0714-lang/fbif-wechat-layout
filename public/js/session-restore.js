@@ -1,60 +1,123 @@
 // session-restore.js
 //
-// Cross-channel editor state preservation. When the top channel pill switches
-// the user from /mp/* to /ft/* (or back), the destination page reloads — all
-// in-memory editor state (engine.js closure variables, DOM contents) would
-// otherwise be lost. This module bridges that gap via sessionStorage.
-//
-// Contract:
-//   - engine.js exposes window._captureSessionSnapshot() / _restoreSessionSnapshot(snap).
-//   - This module serializes those snapshots under per-channel keys.
-//   - The top pill's switchChannel() calls captureCurrentChannel() then navigates.
-//   - On the destination page, restoreCurrentChannel() runs after engine.js has
-//     wired up its hooks (otherwise _restoreSessionSnapshot is undefined).
-//
-// Capacity guard: sessionStorage typically caps at 5–10 MB per origin. Large
-// articles (heavy images encoded as base64 in `_articleCopy`) can blow past
-// that. If serialized snapshot exceeds 4 MB, we degrade gracefully by storing
-// only the DOM-visible portion (no closure copies) — preview survives but
-// copy button will hand back stale/empty content until the user re-uploads.
+// Cross-channel editor draft preservation. Drafts are scoped to the exact
+// channel/account/document and carry rule/build fingerprints, so a snapshot
+// from another account or an older renderer can never be restored silently.
 
-const STORAGE_KEY_PREFIX = 'fbif_session_snapshot_';
-const SCHEMA_VERSION = 1;
+const DRAFT_KEY_PREFIX = 'fbif_draft:';
+const INDEX_KEY_PREFIX = 'fbif_draft_index:';
+const LEGACY_KEY_PREFIX = 'fbif_session_snapshot_';
+const SCHEMA_VERSION = 2;
+const EDITOR_SNAPSHOT_SCHEMA_VERSION = 1;
 const MAX_BYTES = 4 * 1024 * 1024;
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+const DEGRADED_COPY_MESSAGE = '文章内容过大，仅恢复了预览。请重新导入后再复制。';
 
-function keyFor(channel) {
-  return STORAGE_KEY_PREFIX + channel;
+let activeDocumentID = '';
+let activeDocumentCreatedAt = '';
+let pendingRestore = null;
+
+function storage() {
+  return globalThis.sessionStorage;
+}
+
+function encodeKeyPart(value) {
+  return encodeURIComponent(String(value || '').trim());
+}
+
+function indexKey(channel, accountID) {
+  return INDEX_KEY_PREFIX + encodeKeyPart(channel) + ':' + encodeKeyPart(accountID);
+}
+
+function draftKey(channel, accountID, documentID) {
+  return DRAFT_KEY_PREFIX + encodeKeyPart(channel) + ':' + encodeKeyPart(accountID) + ':' + encodeKeyPart(documentID);
 }
 
 function currentChannel() {
-  const p = location.pathname;
+  const p = globalThis.location?.pathname || globalThis.window?.location?.pathname || '';
   if (p.startsWith('/mp')) return 'mp';
   if (p.startsWith('/ft')) return 'ft';
   return null;
 }
 
-function safeGetSnapshot() {
-  if (typeof window._captureSessionSnapshot !== 'function') return null;
+function stableSerialize(value, seen = new WeakSet()) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value ?? null);
+  if (seen.has(value)) return '"[Circular]"';
+  seen.add(value);
+  let result;
+  if (Array.isArray(value)) {
+    result = '[' + value.map(item => stableSerialize(item, seen)).join(',') + ']';
+  } else {
+    result = '{' + Object.keys(value).sort().map(key => (
+      JSON.stringify(key) + ':' + stableSerialize(value[key], seen)
+    )).join(',') + '}';
+  }
+  seen.delete(value);
+  return result;
+}
+
+// beforeunload capture must stay synchronous, so use a deterministic lightweight
+// fingerprint rather than asynchronous Web Crypto. Account, revision and build
+// are checked alongside it; this is an identity guard, not a security signature.
+function fingerprint(value) {
+  const text = typeof value === 'string' ? value : stableSerialize(value);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return 'fnv1a32-' + hash.toString(16).padStart(8, '0');
+}
+
+function rendererBuild() {
+  const info = globalThis.window?.__APP_BUILD_INFO || {};
+  return String(info.build || info.commit || info.asset_version || 'unknown');
+}
+
+function currentDraftContext(channel) {
+  const win = globalThis.window;
+  const accountID = String(win?._activeRulePack?.id || '').trim();
+  if (!channel || !accountID) return null;
+  const active = win?._activeConfig || {};
+  const preset = active.preset || {};
+  const configHash = fingerprint({ config: active.config || {}, behavior: active.behavior || {} });
+  return {
+    channel,
+    accountID,
+    ruleID: String(preset.id || 'local'),
+    ruleRevision: String(preset.version || preset.revision || preset.updated_at || configHash),
+    configHash,
+    rendererBuild: rendererBuild(),
+  };
+}
+
+function newDocumentID() {
   try {
-    return window._captureSessionSnapshot();
-  } catch (e) {
-    console.warn('[session-restore] capture failed:', e);
+    if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
+  } catch {}
+  return 'draft-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+}
+
+function safeGetEditorSnapshot() {
+  const capture = globalThis.window?._captureSessionSnapshot;
+  if (typeof capture !== 'function') return null;
+  try {
+    return capture();
+  } catch (error) {
+    console.warn('[session-restore] capture failed:', error);
     return null;
   }
 }
 
-function approxByteLength(obj) {
+function byteLength(text) {
   try {
-    return new Blob([JSON.stringify(obj)]).size;
+    return new TextEncoder().encode(text).byteLength;
   } catch {
-    return JSON.stringify(obj).length * 2;
+    return text.length * 2;
   }
 }
 
-function downgradeSnapshot(snap) {
-  // Drop closure-only fields, keep DOM so the user at least sees the preview.
-  // Copy button will operate on stale closure state (empty after restore),
-  // forcing a re-upload — acceptable degradation for large articles.
+function downgradeEditorSnapshot(snap) {
   return {
     schema_version: snap.schema_version,
     timestamp: snap.timestamp,
@@ -63,105 +126,307 @@ function downgradeSnapshot(snap) {
       article_copy: '',
       footer_html: '',
       footer_copy: '',
+      copy_unavailable_reason: DEGRADED_COPY_MESSAGE,
+      plain_text_copy: null,
       is_repost: false,
       source_is_docx: false,
       failed_srcs: [],
       upload_done: false,
     },
-    batch_state: { file_meta: [], results: [] },
     dom: snap.dom,
     degraded: true,
+    degraded_reason: DEGRADED_COPY_MESSAGE,
   };
 }
 
+function sourceHash(editorSnapshot) {
+  const state = editorSnapshot?.closure_state || {};
+  return fingerprint(state.last_render_input || state.article_session?.input || {
+    title: editorSnapshot?.dom?.title_input_value || editorSnapshot?.dom?.article_title_text || '',
+    importValue: editorSnapshot?.dom?.import_input_value || '',
+  });
+}
+
+function artifactHash(editorSnapshot) {
+  const state = editorSnapshot?.closure_state || {};
+  return fingerprint({
+    article: state.article_copy || state.article_html || '',
+    footer: state.footer_copy || state.footer_html || '',
+    preview: editorSnapshot?.dom?.content_area_html || '',
+  });
+}
+
+function makeEnvelope(context, editorSnapshot) {
+  const now = Date.now();
+  if (!activeDocumentID) activeDocumentID = newDocumentID();
+  if (!activeDocumentCreatedAt) activeDocumentCreatedAt = new Date(now).toISOString();
+  return {
+    schema_version: SCHEMA_VERSION,
+    document_id: activeDocumentID,
+    channel: context.channel,
+    account_id: context.accountID,
+    rule_id: context.ruleID,
+    rule_revision: context.ruleRevision,
+    config_hash: context.configHash,
+    renderer_build: context.rendererBuild,
+    created_at: activeDocumentCreatedAt,
+    expires_at: new Date(now + DRAFT_TTL_MS).toISOString(),
+    source_hash: sourceHash(editorSnapshot),
+    artifact_hash: artifactHash(editorSnapshot),
+    editor_snapshot: editorSnapshot,
+  };
+}
+
+function parseJSON(raw) {
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+function readIndex(store, key) {
+  const value = parseJSON(store.getItem(key));
+  return value && typeof value.document_id === 'string' ? value : null;
+}
+
 export function captureChannel(channel) {
-  if (!channel) return false;
-  const snap = safeGetSnapshot();
-  if (!snap) return false;
-  // Don't persist empty editors — saves quota and avoids noise.
-  if (!snap.dom?.preview_visible && !snap.dom?.batch_visible) {
-    sessionStorage.removeItem(keyFor(channel));
+  const context = currentDraftContext(channel);
+  if (!context) return false;
+  const editorSnapshot = safeGetEditorSnapshot();
+  if (!editorSnapshot) return false;
+  if (!editorSnapshot.dom?.preview_visible) {
+    clearChannel(channel);
     return false;
   }
-  let payload = snap;
-  if (approxByteLength(payload) > MAX_BYTES) {
-    payload = downgradeSnapshot(snap);
+
+  let envelope = makeEnvelope(context, editorSnapshot);
+  let serialized = JSON.stringify(envelope);
+  if (byteLength(serialized) > MAX_BYTES) {
+    const degraded = downgradeEditorSnapshot(editorSnapshot);
+    envelope = {
+      ...makeEnvelope(context, degraded),
+      degraded: true,
+      degraded_reason: DEGRADED_COPY_MESSAGE,
+    };
+    serialized = JSON.stringify(envelope);
     console.warn('[session-restore] snapshot exceeds %d bytes, degraded to DOM-only', MAX_BYTES);
   }
+
+  const store = storage();
+  if (!store) return false;
+  const pointerKey = indexKey(channel, context.accountID);
+  const previous = readIndex(store, pointerKey);
+  const key = draftKey(channel, context.accountID, envelope.document_id);
   try {
-    sessionStorage.setItem(keyFor(channel), JSON.stringify(payload));
+    // Draft first, pointer second: a quota failure cannot leave an index pointing
+    // at a document that was never persisted.
+    store.setItem(key, serialized);
+    store.setItem(pointerKey, JSON.stringify({
+      document_id: envelope.document_id,
+      expires_at: envelope.expires_at,
+    }));
+    store.removeItem(LEGACY_KEY_PREFIX + channel);
+    if (previous && previous.document_id !== envelope.document_id) {
+      store.removeItem(draftKey(channel, context.accountID, previous.document_id));
+    }
     return true;
-  } catch (e) {
-    console.warn('[session-restore] sessionStorage.setItem failed:', e);
+  } catch (error) {
+    console.warn('[session-restore] sessionStorage.setItem failed:', error);
     return false;
   }
 }
 
-export function restoreChannel(channel) {
-  if (!channel) return false;
-  if (typeof window._restoreSessionSnapshot !== 'function') return false;
-  let raw;
+function discardEnvelope(channel, accountID, documentID) {
+  const store = storage();
+  if (!store) return;
   try {
-    raw = sessionStorage.getItem(keyFor(channel));
-  } catch {
-    return false;
-  }
-  if (!raw) return false;
-  let snap;
+    store.removeItem(draftKey(channel, accountID, documentID));
+    store.removeItem(indexKey(channel, accountID));
+  } catch {}
+}
+
+function envelopeIntegrityOK(envelope) {
+  const editorSnapshot = envelope?.editor_snapshot;
+  return !!(
+    editorSnapshot &&
+    editorSnapshot.schema_version === EDITOR_SNAPSHOT_SCHEMA_VERSION &&
+    envelope.source_hash === sourceHash(editorSnapshot) &&
+    envelope.artifact_hash === artifactHash(editorSnapshot)
+  );
+}
+
+function compatibilityMismatches(envelope, context) {
+  const mismatches = [];
+  if (envelope.renderer_build !== context.rendererBuild) mismatches.push('版本');
+  if (envelope.rule_id !== context.ruleID || envelope.rule_revision !== context.ruleRevision) mismatches.push('规则');
+  if (envelope.config_hash !== context.configHash) mismatches.push('配置');
+  return Array.from(new Set(mismatches));
+}
+
+function restoreEnvelope(envelope) {
+  const restore = globalThis.window?._restoreSessionSnapshot;
+  if (typeof restore !== 'function') return false;
   try {
-    snap = JSON.parse(raw);
-  } catch {
-    sessionStorage.removeItem(keyFor(channel));
+    const restored = restore(envelope.editor_snapshot) === true;
+    if (restored) {
+      activeDocumentID = envelope.document_id;
+      activeDocumentCreatedAt = envelope.created_at;
+    }
+    return restored;
+  } catch (error) {
+    console.warn('[session-restore] restore failed:', error);
     return false;
   }
-  if (!snap || snap.schema_version !== SCHEMA_VERSION) {
-    sessionStorage.removeItem(keyFor(channel));
+}
+
+function removeRestoreNotice() {
+  globalThis.document?.getElementById('draftRestoreNotice')?.remove();
+}
+
+export async function restorePending(useCurrentRules = false) {
+  const pending = pendingRestore;
+  if (!pending) return false;
+  const restored = restoreEnvelope(pending.envelope);
+  if (!restored) return false;
+  pendingRestore = null;
+  removeRestoreNotice();
+  if (useCurrentRules && typeof globalThis.window?._engineApi?.rerender === 'function') {
+    await globalThis.window._engineApi.rerender({ __detailedOutcome: true });
+  }
+  return true;
+}
+
+function showRestoreNotice(mismatches) {
+  const doc = globalThis.document;
+  if (!doc || doc.getElementById('draftRestoreNotice')) return;
+  const banner = doc.createElement('div');
+  banner.id = 'draftRestoreNotice';
+  banner.className = 'version-update-banner';
+  banner.setAttribute('role', 'status');
+  banner.setAttribute('aria-live', 'polite');
+
+  const message = doc.createElement('span');
+  message.className = 'version-update-message';
+  message.textContent = '检测到旧草稿，但它使用了不同的' + mismatches.join('、') + '，未自动恢复。';
+
+  const restoreOriginal = doc.createElement('button');
+  restoreOriginal.type = 'button';
+  restoreOriginal.className = 'version-update-action secondary';
+  restoreOriginal.textContent = '恢复原稿';
+  restoreOriginal.addEventListener('click', () => { restorePending(false); }, { once: true });
+
+  const rerender = doc.createElement('button');
+  rerender.type = 'button';
+  rerender.className = 'version-update-action';
+  rerender.textContent = '按当前规则重排';
+  rerender.addEventListener('click', () => { restorePending(true); }, { once: true });
+
+  banner.append(message, restoreOriginal, rerender);
+  const spacer = doc.querySelector('.global-channel-bar .topbar-spacer');
+  if (spacer) spacer.before(banner);
+  else doc.body?.prepend(banner);
+}
+
+async function waitForActiveRules() {
+  const ready = globalThis.window?._activeRuleReadyPromise;
+  if (!ready || typeof ready.then !== 'function') return;
+  try { await ready; } catch {}
+}
+
+export async function restoreChannel(channel) {
+  await waitForActiveRules();
+  const context = currentDraftContext(channel);
+  const restore = globalThis.window?._restoreSessionSnapshot;
+  if (!context || typeof restore !== 'function') return false;
+  const store = storage();
+  if (!store) return false;
+  try { store.removeItem(LEGACY_KEY_PREFIX + channel); } catch {}
+
+  let pointer;
+  try { pointer = readIndex(store, indexKey(channel, context.accountID)); } catch { return false; }
+  if (!pointer) return false;
+  const key = draftKey(channel, context.accountID, pointer.document_id);
+  let envelope;
+  try { envelope = parseJSON(store.getItem(key)); } catch { return false; }
+  if (!envelope || envelope.schema_version !== SCHEMA_VERSION ||
+      envelope.channel !== channel || envelope.account_id !== context.accountID ||
+      envelope.document_id !== pointer.document_id || !envelopeIntegrityOK(envelope)) {
+    discardEnvelope(channel, context.accountID, pointer.document_id);
     return false;
   }
-  try {
-    return window._restoreSessionSnapshot(snap);
-  } catch (e) {
-    console.warn('[session-restore] restore failed:', e);
+  const expiresAt = Date.parse(envelope.expires_at);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    discardEnvelope(channel, context.accountID, pointer.document_id);
     return false;
   }
+
+  const mismatches = compatibilityMismatches(envelope, context);
+  if (mismatches.length) {
+    pendingRestore = { envelope, mismatches };
+    globalThis.window._sessionRestoreLastRejection = {
+      document_id: envelope.document_id,
+      reasons: mismatches.slice(),
+    };
+    showRestoreNotice(mismatches);
+    return false;
+  }
+  return restoreEnvelope(envelope);
 }
 
 export function clearChannel(channel) {
   if (!channel) return;
-  try { sessionStorage.removeItem(keyFor(channel)); } catch {}
+  const accountID = String(globalThis.window?._activeRulePack?.id || '').trim();
+  const store = storage();
+  if (!store) return;
+  try {
+    store.removeItem(LEGACY_KEY_PREFIX + channel);
+    if (accountID) {
+      const pointerKey = indexKey(channel, accountID);
+      const pointer = readIndex(store, pointerKey);
+      if (pointer) store.removeItem(draftKey(channel, accountID, pointer.document_id));
+      store.removeItem(pointerKey);
+    }
+  } catch {}
+  activeDocumentID = '';
+  activeDocumentCreatedAt = '';
+  pendingRestore = null;
+  removeRestoreNotice();
 }
 
 export function clearCurrentChannel() {
-  const ch = currentChannel();
-  if (!ch) return false;
-  clearChannel(ch);
+  const channel = currentChannel();
+  if (!channel) return false;
+  clearChannel(channel);
   return true;
 }
 
-// Wire up the top channel pill so clicks flush state before navigating.
-// 跨渠道编辑器快照兜底：账号切换走统一顶栏菜单（account-menu.js），跨模板时用
-// location.href 整页导航——这里在 beforeunload 时 captureChannel 保存当前渠道快照。
-// 覆盖关 tab、手动改 URL、菜单导航等所有 in-tab 离开路径。旧的 .channel-switcher
-// 锚点切换器已删（2026-06-02 单层账号菜单），不再有 click 拦截分支。
 export function bindChannelSwitcher() {
-  window.addEventListener('beforeunload', () => {
-    const ch = currentChannel();
-    if (ch) captureChannel(ch);
+  const win = globalThis.window;
+  if (!win || win._sessionRestoreBound) return;
+  win._sessionRestoreBound = true;
+  win.addEventListener('beforeunload', () => {
+    const channel = currentChannel();
+    if (channel) captureChannel(channel);
+  });
+  win.addEventListener('fbif:article-input-started', () => {
+    activeDocumentID = newDocumentID();
+    activeDocumentCreatedAt = new Date().toISOString();
+    pendingRestore = null;
+    removeRestoreNotice();
+  });
+  win.addEventListener('fbif:article-cleared', () => {
+    clearCurrentChannel();
   });
 }
 
-// Auto-restore on load — call after engine.js has initialized.
-export function restoreCurrentChannel() {
-  const ch = currentChannel();
-  if (!ch) return false;
-  return restoreChannel(ch);
+export async function restoreCurrentChannel() {
+  const channel = currentChannel();
+  if (!channel) return false;
+  return restoreChannel(channel);
 }
 
-// Convenience export for inline scripts / debugging.
-if (typeof window !== 'undefined') {
-  window._sessionRestore = {
+if (typeof globalThis.window !== 'undefined') {
+  globalThis.window._sessionRestore = {
     capture: captureChannel,
     restore: restoreChannel,
+    restorePending,
     clear: clearChannel,
     clearCurrent: clearCurrentChannel,
     bindSwitcher: bindChannelSwitcher,

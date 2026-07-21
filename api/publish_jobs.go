@@ -62,6 +62,12 @@ type publishJob struct {
 	SupersededByJobID int64    `json:"superseded_by_job_id,omitempty"`
 	BlocksJSON        string   `json:"blocks_json,omitempty"` // 中立 Block[] 序列化（先落库再推进，链接过期不回源）
 	ContentHTML       string   `json:"content_html,omitempty"`
+	RulePresetID      string   `json:"rule_preset_id,omitempty"`
+	RuleRevision      int      `json:"rule_revision,omitempty"`
+	RuleConfigHash    string   `json:"rule_config_hash,omitempty"`
+	RuleSnapshotJSON  string   `json:"rule_snapshot_json,omitempty"` // 首次 rendering 前持久化；重试不追随活动规则漂移
+	RendererBuildSHA  string   `json:"renderer_build_sha,omitempty"`
+	RenderOutputHash  string   `json:"render_output_hash,omitempty"`
 	CoverURL          string   `json:"cover_url,omitempty"`
 	ImageMap          string   `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
 	// 内容版本契约：权威顺序 official_api > supplier > web_fetch。高权威
@@ -272,19 +278,17 @@ func publishJobHasSourceKey(job publishJob, sourceKey string) bool {
 // publishSourceKeysEqual 让旧存储中曾把 sn 写进 key 的长链与新版
 // biz/mid/idx 身份无缝兼容，避免上线后因 key 算法升级反而重复建文。
 func publishSourceKeysEqual(a, b string) bool {
-	if a == b {
-		return true
-	}
-	canonical := func(key string) string {
-		if !strings.HasPrefix(key, "site:") {
-			return key
-		}
-		if normalized, err := normalizeSiteSourceKey(strings.TrimPrefix(key, "site:")); err == nil {
-			return normalized
-		}
+	return canonicalPublishSourceKey(a) == canonicalPublishSourceKey(b)
+}
+
+func canonicalPublishSourceKey(key string) string {
+	if !strings.HasPrefix(key, "site:") {
 		return key
 	}
-	return canonical(a) == canonical(b)
+	if normalized, err := normalizeSiteSourceKey(strings.TrimPrefix(key, "site:")); err == nil {
+		return normalized
+	}
+	return key
 }
 
 // claimSourceAlias 在抓取到公众号页面的 og:url / 最终 URL 后，原子声明

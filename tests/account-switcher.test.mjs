@@ -84,8 +84,8 @@ test('app shell renders a unified top-bar account menu (single layer)', async ()
   assert.match(selectorJs, /data-action="cancel-active-rule"/);
   assert.match(selectorJs, /data-rule-option/);
   assert.match(selectorJs, /listPublicRulePresets/);
-  assert.match(selectorJs, /const accountID = getPack\(\)\.id[\s\S]{0,900}setActiveRulePreset\(password,\s*nextID,\s*accountID\)/,
-    '保存必须固定启动时账号，不得在 await 后重读 getPack');
+  assert.match(selectorJs, /const accountID = getPack\(\)\.id[\s\S]{0,1200}setActiveRulePreset\(password,\s*nextID,\s*accountID,\s*activeBindingRevision\(accountID\)\)/,
+    '保存必须固定启动时账号与绑定修订，不得在 await 后重读 getPack');
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
   assert.match(allCss, /\.acct-trigger/);

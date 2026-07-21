@@ -20,12 +20,14 @@ import {
   FOOTER_PRESETS_DEFAULT,
 } from './footer-segments-defaults.js';
 import { resolveAssetRefs } from './asset-library.js';
+import { filterSafeFooterHTMLLines } from './footer-html-policy.js';
 
 // ── 规则读取助手：共享实现收敛到 rule-behavior-utils.js（架构体检 S6，勿再本地复制）──
 // behavior = config.behavior（服务端 raw 下发：{templates, params, lists, *_regex}）。
 import {
   behaviorTemplate, behaviorParamStr, behaviorListRaw,
-  compileBehaviorRegex, runsToText, elemText, stripSectionPrefix, hasSectionPrefix,
+  compileBehaviorRegex, tryCompileBehaviorRegex,
+  runsToText, elemText, stripSectionPrefix, hasSectionPrefix,
 } from './rule-behavior-utils.js';
 
 // 兼容导出：templates/foodtalks-site.js 等外部消费方仍以 compileSiteRegex 命名引用。
@@ -35,7 +37,10 @@ function compileMarkerList(behavior, key, fallback) {
   const strs = behaviorListRaw(behavior, key);
   if (strs) {
     const out = [];
-    for (const x of strs) { try { out.push(compileSiteRegex(x)); } catch (e) { /* 跳过非法项 */ } }
+    for (let index = 0; index < strs.length; index++) {
+      const compiled = tryCompileBehaviorRegex(strs[index], `behavior.lists.${key}[${index}]`);
+      if (compiled) out.push(compiled);
+    }
     if (out.length) return out;
   }
   return fallback;
@@ -43,7 +48,11 @@ function compileMarkerList(behavior, key, fallback) {
 // 单条正则：优先 behavior.params.<key>.default，非法/缺省降级 fallback 字符串。
 function behaviorRegex(behavior, key, fallback) {
   const src = behaviorParamStr(behavior, key, fallback);
-  try { return compileSiteRegex(src); } catch (e) { return compileSiteRegex(fallback); }
+  return tryCompileBehaviorRegex(src, `behavior.params.${key}.default`) || compileSiteRegex(fallback);
+}
+function behaviorFieldRegex(behavior, key, fallback) {
+  const src = typeof behavior[key] === 'string' && behavior[key] ? behavior[key] : fallback;
+  return tryCompileBehaviorRegex(src, `behavior.${key}`) || compileSiteRegex(fallback);
 }
 
 function activeFooterSegmentsFromConfig(config) {
@@ -314,10 +323,10 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   if (!Array.isArray(elems)) return elems;
 
   const behavior = (config && config.behavior) || {};
-  const authorRe    = new RegExp(behavior.author_regex     || '^\\s*作者[：:]\\s*');
-  const tipRe       = new RegExp(behavior.tip_regex        || '^\\s*提示[：:]');
-  const refHeaderRe = new RegExp(behavior.ref_header_regex || '^\\s*参考(?:来源|资料)[：:]?\\s*$');
-  const refItemRe   = new RegExp(behavior.ref_item_regex   || '^\\s*\\[\\d+\\]');
+  const authorRe    = behaviorFieldRegex(behavior, 'author_regex', '^\\s*作者[：:]\\s*');
+  const tipRe       = behaviorFieldRegex(behavior, 'tip_regex', '^\\s*提示[：:]');
+  const refHeaderRe = behaviorFieldRegex(behavior, 'ref_header_regex', '^\\s*参考(?:来源|资料)[：:]?\\s*$');
+  const refItemRe   = behaviorFieldRegex(behavior, 'ref_item_regex', '^\\s*\\[\\d+\\]');
   // 文末小字（14px 灰斜体）：图源/作者说明 + 正文「*注：…」补充注释（62303 实测同口径）。
   const footerNoteRe = behaviorRegex(behavior, 'footer_note_regex', '^(?:本文(?:未标注来源|作者\\s*[：:]|图片来源)|图片均来自|[*＊]\\s*注[：:])');
   // 商务合作导联行（62139/62303 实测：14px 斜体、文本 #7f7f7f、链接保留）。
@@ -522,7 +531,7 @@ export function buildFooterHtml(enabledSegments, library, assetLibrary, scope = 
     if (!entry) continue;
     // 兼容服务端 {html_lines:[...]} 与纯数组两种结构
     const htmlLines = Array.isArray(entry) ? entry : (Array.isArray(entry.html_lines) ? entry.html_lines : []);
-    lines.push(...resolveAssetRefs(htmlLines, assets, scope));
+    lines.push(...resolveAssetRefs(filterSafeFooterHTMLLines(htmlLines), assets, scope));
   }
   return lines.join('\n');
 }

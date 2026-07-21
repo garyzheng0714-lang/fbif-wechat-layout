@@ -272,7 +272,8 @@ export function getRulePackIDFromLocation(locationLike = globalThis.location) {
 // location/CHANNEL_DEFAULTS 漂移都会被捕获；也防住有人手改了生成文件、或改 catalog 没跑
 // gen:registry。比正则逐字段解析既更完整也无脆弱性（不怕字段值里含引号/`})` 等）。
 //
-// 文件缺失只告警（避免部署路径差异 brick 生产）；存在但不一致则返回错误（由 main 决定 fatal）。
+// 文件缺失返回带 warn 前缀的错误：本地开发只告警，ENV=production 由统一启动策略提升为 fatal；
+// 存在但不一致在所有环境都 fatal。
 func validateRegistryConsistency(publicDir string) error {
 	path := filepath.Join(publicDir, "js", "rule-packs", "registry.js")
 	raw, err := os.ReadFile(path)

@@ -47,7 +47,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **受控发布流水线**：手动提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
 - **编辑部规范数据化**：摘要、标签、作者和原创 / 转载判定已按历史发布样本沉淀为声明式规范与封闭标签词表。AI 只负责预填和出处抽取；完整评测仍在进行，且 FoodTalks 的标签 PUT 缺陷修复前不会把标签写入正式请求。
 - **发布状态边界**：测试环境已经完成隐藏草稿、审核卡片与状态机全链路验证；正式环境接入仍等待外部白名单和服务级凭证，不能把测试闭环写成正式生产已上线。
-- **部署门禁**：`main` 部署串行排队；完整 Node/Go 测试通过后，API、静态资源、render service、env 与 Caddy 全部先进入隔离 staging，再事务切换。服务或公网 SHA/健康/鉴权验收失败会恢复上一版。
+- **部署门禁**：`main` 部署串行排队；完整 Node/Go 测试通过后，API、静态资源、render service、env schema、systemd 单元与 Caddy 全部先进入隔离 staging，再事务切换。候选监控在 worker 暂停时安装验证，解暂停后真实探测并发飞书自检；任一可回滚验收失败会恢复上一版。
 
 ## 功能
 
@@ -61,8 +61,8 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - “更多文章”是规则里的可选模块：规则后台可开启/关闭，并用卡片编辑器维护新文章默认推荐列表；JSON 中对应 `modules.more_articles.enabled` 和 `modules.more_articles.default_cards`。
 - “更多文章”URL 粘贴支持移动端 input-only 行为；输入合法微信文章链接后会自动抓取，重复输入同一链接不闪烁状态。
 - 支持旧版 `.doc` 经 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
-- 支持多文件队列处理、品牌页脚开关和“更多文章”组合页脚。
-- 支持多账号规则绑定，当前 5 个账号：`FBIF食品饮料创新`、`WowFood爆品超市`（公众号，复用 fbif 模板）、`FoodTalks什么是系列`（公众号，独立 foodtalks-series 模板）、`网站默认 ft-default`与`网站·什么是系列 ft-series`（网站渠道，foodtalks-site 模板），各有独立服务端默认规则绑定；规则库 schema v3 为每条规则保存受限 `baseline_id`，自建规则必须显式选择继承基线，不再默认串到 FBIF；规则配置可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数，并保存渠道独立的 `behavior`，本地设置仅作离线降级。
+- 编辑器一次只处理一篇文章；支持品牌页脚开关和“更多文章”组合页脚。
+- 支持多账号规则绑定，当前 5 个账号：`FBIF食品饮料创新`、`WowFood爆品超市`（公众号，复用 fbif 模板）、`FoodTalks什么是系列`（公众号，独立 foodtalks-series 模板）、`网站默认 ft-default`与`网站·什么是系列 ft-series`（网站渠道，foodtalks-site 模板），各有独立服务端默认规则绑定；规则库 schema v4 为每条规则保存受限 `baseline_id`，并为账号绑定保存单调修订号。自建规则必须显式选择继承基线，不再默认串到 FBIF；规则配置可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数，并保存渠道独立的 `behavior`，本地设置仅作离线降级。
 - 原创 DOCX 以首个 `作者：` 行作为正文起点；该行之前的编辑前置材料不进入编辑器预览。
 - DOCX 连续正文段落会保留紧凑排版；只有原文空段分隔的位置才恢复标准段后间距。
 - URL 导入的文章级 `来源：`、`作者：`、`编辑：` 会收集到正文末尾，并在标准 FBIF `提示：` 页脚前只渲染一次。
@@ -74,8 +74,9 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 
 - 前端：原生 HTML / CSS / JavaScript ES modules
 - 后端：Go 1.26，标准库 `net/http`
-- 测试：Node.js `node --test`、Go test
-- 部署：GitHub Actions、rsync、systemd API 服务
+- 测试：Node.js `node --test`、Playwright、Go test，并设 JavaScript/Go 覆盖率棘轮门槛
+- 质量门禁：JS 语法与 import cycle、Go fmt/vet/staticcheck/race/govulncheck、npm audit、ShellCheck、Python 编译与 env schema
+- 部署：GitHub Actions、rsync、可版本化 systemd API/renderer 服务
 
 ## 项目结构
 
@@ -126,7 +127,11 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 │   ├── foodtalks.go                # FoodTalks API 客户端与环境差异合同
 │   └── feishu_*.go                 # 审核通知、卡片回调与长连接
 ├── render-service/                 # Node headless 渲染服务
-├── deploy/caddy/                   # 声明式 Caddy vhost
+├── deploy/
+│   ├── caddy/                       # 声明式 Caddy vhost
+│   ├── systemd/                     # API / renderer 可版本化服务单元
+│   ├── config/                      # env-schema.json 与无密钥示例
+│   └── scripts/                     # 事务部署与 env schema 验证器
 ├── tests/                          # 前端模块测试
 ├── DESIGN.md                       # 设计系统和交互约束
 ├── package.json
@@ -190,8 +195,8 @@ curl http://127.0.0.1:9000/api/health
 | `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default`）当前规则；未传 `account` 时默认读取 FBIF |
 | `POST` | `/api/rules/admin/login` | 校验规则后台密码；成功返回 `{ "ok": true }` |
 | `GET` | `/api/rules/admin/presets` | 列出规则预设，需 `X-Admin-Password` |
-| `POST` | `/api/rules/admin/presets` | 保存规则预设，需 `X-Admin-Password` |
-| `PUT` | `/api/rules/admin/active` | 绑定某个公众号当前应用的规则，支持 `{ "account_id": "...", "id": "..." }`，需 `X-Admin-Password` |
+| `POST` | `/api/rules/admin/presets` | 保存规则预设，需 `X-Admin-Password` 及客户端读到的 `base_revision`（新建为 `0`）；过期写入返回 `409 revision_conflict` 和变化字段 |
+| `PUT` | `/api/rules/admin/active` | 绑定某个账号当前应用的规则，请求为 `{ "account_id": "...", "id": "...", "base_revision": 1 }`，其中修订号来自账号的 `active_revision`；过期写入返回 `409 binding_revision_conflict` |
 | `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需 `X-Admin-Password` |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
@@ -200,12 +205,12 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文 |
 | `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权。任一任务仍在 processing、审核通知仍 pending/sending、审核卡缺失或失败/对账积压时均 `ready=false`；进程存活不等于业务完成 |
 | `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员密码 |
-| `GET` | `/api/publish/readiness` | 部署/运维只读验收：存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员密码且只返回布尔/模式信息 |
+| `GET` | `/api/publish/readiness` | 部署/运维只读验收：生成物存在/一致性、存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员密码且只返回布尔/模式信息 |
 | `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员密码 |
 | `POST` | `/api/publish/jobs/{id}/review` | HTTP 审核默认关闭；仅显式开启、管理员鉴权且固定审核人位于飞书白名单时可用。approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
 | `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员密码 |
-| `POST` | `/api/feishu/card-callback` | 飞书审核卡片 Webhook 备用通道 |
+| `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 
 ## 配置
@@ -214,6 +219,8 @@ curl http://127.0.0.1:9000/api/health
 
 | 变量 | 说明 |
 | --- | --- |
+| `ENV` | 运行环境；生产必须显式为 `production`，此时账号/区块生成注册表缺失或不可读会拒绝启动 |
+| `FBIF_CONFIG_SCHEMA_VERSION` | 运行配置结构版本；当前必须为 `1`，API 生产启动、renderer 健康检查和 publish readiness 都会 fail closed |
 | `WECHAT_UPLOAD_ENDPOINT` | 图片上传代理上游；未设置时返回原始 base64，预览仍可用 |
 | `LIBREOFFICE_URL` | `.doc` 转 `.docx` 的 LibreOffice 转换服务地址 |
 | `LIBREOFFICE_TOKEN` | LibreOffice 转换服务鉴权 token |
@@ -221,6 +228,7 @@ curl http://127.0.0.1:9000/api/health
 | `ADMIN_PASSWORD` | 规则后台密码；未设置时登录返回 503，后台写操作不可用 |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
 | `RENDER_TOKEN` / `RENDER_SERVICE_URL` | 程序化排版 API 鉴权与 Node 渲染服务地址 |
+| `RENDER_PORT` / `RULES_API_ORIGIN` / `ASSET_ORIGIN` / `RENDER_BUILD_SHA` | renderer 的端口、规则 API、素材域名和可追溯构建 SHA；生产由流水线生成 `render-service.env` |
 | `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
 | `PUBLISH_SYNC_SERVICE_TOKEN` | feed 与 112 调用发布提交、紧凑状态和监控端点的独立服务令牌；不能访问完整任务、审核、重试、对账或规则管理接口 |
 | `PUBLISH_HTTP_REVIEW_ENABLED` / `PUBLISH_HTTP_REVIEWER_OPEN_ID` | HTTP 审核应保持默认关闭；仅应急启用时，固定审核人仍必须命中 `FEISHU_REVIEWER_OPEN_IDS` |
@@ -231,13 +239,16 @@ curl http://127.0.0.1:9000/api/health
 | `DEPLOYMENT_WRITES_PAUSED` | 部署候选实例专用；为 `1` 时暂停发布/rules 写入口、恢复任务、通知 worker 与飞书长连接，验收通过后由事务脚本清零 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REVIEW_CHAT_ID` | 审核通知和长连接回调 |
 | `PUBLISH_MONITOR_FEISHU_USER_ID` | P0 异常、恢复和每日心跳的飞书私聊收件人 `user_id`；与审核群分开，缺失时 readiness 失败且不回退群聊 |
+| `FEISHU_CALLBACK_MODE` | 必须显式为 `websocket` 或 `webhook`；推荐生产使用 `websocket`，此时公网 Webhook 固定返回 404；缺失/非法时 readiness 失败 |
 | `FEISHU_VERIFICATION_TOKEN` | Webhook 回调来源校验；长连接模式不使用 |
 | `FEISHU_REVIEWER_OPEN_IDS` | 可执行审核的飞书 `open_id` 白名单，逗号分隔；空值时卡片审核和可选 HTTP 审核全部 fail-closed，readiness 失败 |
 | `ARK_API_KEY` / `ARK_MODEL_ID` / `ARK_BASE_URL` | AI 元数据预填与发布风险检查；缺失或失败时风险结论 fail-safe 降级为 `warning`，不阻断进入人工审核 |
 | `ARK_MODEL_ID_B` / `ARK_JUDGE_MODEL_ID` | 可选双模型预填与独立判决；未配置 B 时保持单模型，判决失败回落主模型方案 |
 | `SITE_OWN_ACCOUNTS` | 自有账号清单，用于代码侧确定原创 / 转载；留空使用内置清单 |
 
-部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`ADMIN_PASSWORD` 等 GitHub Secrets。生产规则后台密码只存放在 GitHub Secret 和本地忽略提交的 `.env` 中；不要把微信、LibreOffice、CloudConvert、服务器密钥或后台密码提交到仓库。
+环境变量的完整机器可读合同在 `deploy/config/env-schema.json`，三份无密钥示例分别对应流水线 API env、服务器 `publish.env` 和 renderer env。部署会在改写 live 路径前检查未知键、重复键、必填空值和 schema 版本；验证器只输出变量名，不输出值。
+
+部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_KNOWN_HOSTS`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`ADMIN_PASSWORD` 等 GitHub Secrets。`SERVER_KNOWN_HOSTS` 必须通过可信渠道取得并人工核验服务器公钥，内容采用 OpenSSH `known_hosts` 格式；工作流不会再用 `ssh-keyscan` 临时信任首次看到的主机。生产 `/var/www/api/publish.env` 还必须显式设置 `FEISHU_CALLBACK_MODE=websocket`（如确需 Webhook 才改为 `webhook`）。生产规则后台密码只存放在 GitHub Secret 和本地忽略提交的 `.env` 中；不要把微信、LibreOffice、CloudConvert、服务器密钥或后台密码提交到仓库。
 
 发布任务当前采用 JSON 文件 + 进程内互斥锁，部署约束是同一 `PUBLISH_JOBS_PATH` 只能由一个 API 进程写入；如扩为多实例，必须先迁移到带唯一约束和事务的共享数据库，不能让多个进程直接共写该文件。
 
@@ -268,12 +279,14 @@ go test ./...
 
 推送到 `main` 会触发 `.github/workflows/deploy.yml`：
 
-1. 执行 `npm ci && npm test`、隔离端口 Playwright 25 个功能场景、`cd api && go test ./...`，任何失败都会阻止部署；视觉基线只能用显式本地命令更新。
-2. 使用 Go 1.26 构建 `api/fbif-api`，并写入 `public/version.json`。
-3. 把 `public/`、API、render service、Caddy 与 env 同步进隔离 release；候选 env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
-4. 原子切换当前 release，验证 systemd、Caddy、公网 commit SHA、健康与鉴权，并用管理员鉴权的 `/api/publish/readiness` 检查 JSON store、独立服务令牌、HTTP 审核关闭、审核人白名单、显式 FoodTalks 目标、分类、渲染、飞书与双模型配置。
-5. 任何候选验收失败都恢复上一 release；验收成功后确认 release、关闭自动回滚，再把 pause 清零并重启 API。
-6. 解暂停后再次检查健康与 readiness。此时外部副作用可能恢复，只允许向前修复，不自动切回旧版制造重复发布。
+1. 执行 JavaScript 语法/import cycle、全量 Node 测试与覆盖率、npm audit、隔离端口 Playwright，以及 Go fmt/vet/staticcheck/test/coverage/race/govulncheck、ShellCheck、Python 与 env schema 门禁；任何失败都阻止部署。
+2. 使用已修复已知标准库漏洞的 Go 1.26.5 构建 `api/fbif-api`，并写入 `public/version.json`。
+3. 把 `public/`、API、render service、Caddy、systemd 单元、env schema 与候选 env 同步进隔离 release；候选 API env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
+4. 在任何 live 切换前验证三类 env、Caddy、systemd 单元和当前服务；然后事务式切换 API、renderer、静态资源、单元、Caddy 与配置 schema。
+5. 验证公网 commit SHA、健康、鉴权和 `/api/publish/readiness`；readiness 同时锁定配置版本、两个生成注册表哈希、JSON store、独立服务令牌、HTTP 审核关闭、审核人白名单、FoodTalks 目标、分类、渲染、飞书与双模型配置。
+6. 监控脚本和 timer 在写暂停窗口完成安装、Python 编译和 `systemd-analyze verify`，但 timer 保持 disabled。任何可回滚验收失败都恢复上一 release。
+7. 验收后关闭自动回滚、解除 worker 暂停，再做一次真实三探针并发送飞书私聊部署自检，成功后才 enable timer。此时外部副作用可能恢复，只允许向前修复。
+8. `finalize` 将已验收产物保留到 `/var/www/.fbif-layout-history/<deploy-id>/`，最多 5 份；快照包含 API、renderer、public、Caddy、systemd 和 env schema，明确不含 `.env`、`publish.env` 或 `render-service.env`。快照成功后才删除短期事务备份。
 
 当前生产配置显式锁定 `FOODTALKS_EXPECTED_TARGET=test`；切换正式 FoodTalks 是单独的外部环境变更，必须同时更新 API、前台、后台 URL 与凭证后再通过 readiness。`PUBLISH_SYNC_SERVICE_TOKEN`、`PUBLISH_MONITOR_FEISHU_USER_ID` 或 `FEISHU_REVIEWER_OPEN_IDS` 缺失、HTTP 审核意外开启时，readiness 均失败。发布任务 JSON store 带进程锁，只允许一个 API 实例持有；横向扩容前必须迁移到支持事务与锁的存储。
 

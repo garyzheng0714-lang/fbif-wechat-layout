@@ -6,6 +6,8 @@ const ruleModule = await import('../rule-presets.js' + assetQuery);
 const { getActiveRuleConfig, getActiveRuleBehavior, getRuleNumber, getRuleBoolean } = ruleModule;
 const behaviorModule = await import('../rule-behavior.js' + assetQuery);
 const { applyBehaviorToElems, normalizeAuthorName, renderBehaviorTemplate } = behaviorModule;
+const behaviorUtilsModule = await import('../rule-behavior-utils.js' + assetQuery);
+const { tryCompileBehaviorRegex } = behaviorUtilsModule;
 // DOCX 内容结构分类已抽到共享模块（公众号与 FoodTalks 网站共用一套，红线#19：
 // 两渲染器不互相 import，都只 import 本数据模块）。公众号走默认 opts（consumeAuthorLine
 // / classifyReferences 均为 true），输出与抽取前逐字节一致（golden tea-pyramid 守卫）。
@@ -58,17 +60,14 @@ function activeBehaviorAccount() {
 }
 
 // 读 behavior.params.<key>.default 编译为正则（红线下放：公众号识别正则规则后台可配；
-// 读不到/非法时降级到传入的 fallback RegExp const）。识别开头 (?i) 内联 flag —— 服务端
-// 用 RE2 (?i) 表达大小写不敏感，JS new RegExp 不支持内联 flag 组，这里转为构造函数 flag。
+// 读不到/非法时降级到传入的 fallback RegExp const）。共享编译器负责 RE2 内联 flag、
+// 浏览器安全子集与输入长度上限，避免这里形成第二套正则执行口径。
 function behaviorRegexParam(key, fallbackRe) {
   try {
     const params = getActiveRuleBehavior().params || {};
     const src = params[key] && params[key].default;
     if (typeof src === 'string' && src) {
-      let s = src, flags = '';
-      const m = s.match(/^\(\?([a-z]+)\)/);
-      if (m) { flags = m[1].replace(/[^gimsuy]/g, ''); s = s.slice(m[0].length); }
-      return new RegExp(s, flags);
+      return tryCompileBehaviorRegex(src, `behavior.params.${key}.default`) || fallbackRe;
     }
   } catch (e) { /* 降级到 const */ }
   return fallbackRe;

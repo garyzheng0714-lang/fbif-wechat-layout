@@ -9,7 +9,9 @@ import assert from 'node:assert/strict';
 const {
   behOf, behTemplate, behParamStr, behList, behaviorRegex,
   behaviorTemplate, behaviorParamStr, behaviorListRaw,
-  compileBehaviorRegex, runsToText, elemText, stripSectionPrefix, hasSectionPrefix,
+  compileBehaviorRegex, validateBehaviorRegexDocument, validateBehaviorRegexSource,
+  MAX_BEHAVIOR_REGEX_INPUT,
+  runsToText, elemText, stripSectionPrefix, hasSectionPrefix,
 } = await import('../public/js/rule-behavior-utils.js');
 
 test('compileBehaviorRegex: (?i) 内联 flag 转构造函数 flag（服务端 RE2 口径）', () => {
@@ -23,16 +25,36 @@ test('compileBehaviorRegex: RegExp 实例透传不重编译', () => {
   assert.equal(compileBehaviorRegex(src), src);
 });
 
-test('compileBehaviorRegex: 非法 flag 字符被清洗、合法保留', () => {
-  const re = compileBehaviorRegex('(?imz)a'); // z 非法，im 保留
-  assert.equal(re.flags, 'im');
-  assert.equal(re.source, 'a');
+test('compileBehaviorRegex: 服务端不支持的 flag 不再静默清洗', () => {
+  assert.throws(() => compileBehaviorRegex('(?imz)a'), /只支持开头/);
 });
 
 test('compileBehaviorRegex: 无内联 flag 时原样编译', () => {
   const re = compileBehaviorRegex('^\\d+$');
   assert.equal(re.flags, '');
   assert.ok(re.test('42'));
+});
+
+test('compileBehaviorRegex: 拒绝浏览器回溯爆炸结构，保留现有有界通配符', () => {
+  assert.throws(() => validateBehaviorRegexSource('(a+)+$'), /嵌套量词/);
+  assert.throws(() => validateBehaviorRegexSource('(a|aa)+$'), /带分支/);
+  assert.throws(() => validateBehaviorRegexSource('.*separator.*'), /多个无上界通配符/);
+  assert.doesNotThrow(() => validateBehaviorRegexSource('长按.{0,4}识别.{0,2}二维码'));
+});
+
+test('compileBehaviorRegex: 超长待匹配文本 fail closed，不进入正则引擎', () => {
+  const re = compileBehaviorRegex('^a');
+  assert.equal(re.test('a'.repeat(MAX_BEHAVIOR_REGEX_INPUT)), true);
+  assert.equal(re.test('a'.repeat(MAX_BEHAVIOR_REGEX_INPUT + 1)), false);
+});
+
+test('validateBehaviorRegexDocument: 参数和列表错误返回精确 JSON 路径', () => {
+  assert.throws(() => validateBehaviorRegexDocument({
+    params: { author_line_regex: { type: 'string', default: '(a+)+$' } },
+  }), /behavior\.params\.author_line_regex\.default/);
+  assert.throws(() => validateBehaviorRegexDocument({
+    lists: { wechat_trailer_markers: ['ok', '.*x.*'] },
+  }), /behavior\.lists\.wechat_trailer_markers\[1\]/);
 });
 
 test('behParamStr: 读 config.behavior.params.<key>.default；空串/非字符串/缺省一律降级 fallback', () => {

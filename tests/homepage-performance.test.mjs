@@ -27,20 +27,22 @@ test('Caddy vhost overrides no-cache headers for cacheable assets', async () => 
   assert.ok(vhost.includes('header @fbifImageAssets >Cache-Control "public, max-age=86400"'));
 });
 
-// WHY：声明式 vhost 是路径白名单；新增 Go 路由若漏登记，会被末尾 try_files 静默
-// 吞成 index.html（GET=200 HTML、POST=405），应用单测仍会全绿。发布 API、审核回调和
-// 签名预览必须作为一个合同组代理到 9001，并且 matcher 必须出现在静态兜底之前。
-test('Caddy vhost exposes the complete publishing route group before the SPA fallback', async () => {
+// WHY：新增 Go API 不应再依赖人工白名单；/api 统一交给 Go，签名预览仍是
+// 非 API 的显式路由。两者都必须在 SPA fallback 前，避免返回 index.html 假 200。
+test('Caddy vhost routes publishing APIs and previews before the SPA fallback', async () => {
   const vhost = await readFile(new URL('../deploy/caddy/fbifmp-layout.caddy', import.meta.url), 'utf8');
-  const matcher = '@fbifPublish path /preview/* /api/publish/* /api/feishu/*';
-  const matcherAt = vhost.indexOf(matcher);
+  const matcherAt = vhost.indexOf('@fbifPublish path /preview/*');
   const proxyAt = vhost.indexOf('handle @fbifPublish');
+  const apiMatcherAt = vhost.indexOf('@fbifAPI path /api /api/*');
+  const apiProxyAt = vhost.indexOf('handle @fbifAPI');
   const fallbackAt = vhost.indexOf('\n\thandle {');
 
-  assert.ok(matcherAt >= 0, '发布预览、任务 API 与飞书回调必须成组登记');
-  assert.ok(proxyAt > matcherAt, '发布路由 matcher 后必须存在 reverse_proxy handle');
+  assert.ok(matcherAt >= 0, '签名预览路由必须显式登记');
+  assert.ok(proxyAt > matcherAt, '预览路由 matcher 后必须存在 reverse_proxy handle');
+  assert.ok(apiMatcherAt >= 0 && apiProxyAt > apiMatcherAt, '全部 API 必须交给 Go 统一处理');
   assert.match(vhost.slice(proxyAt, fallbackAt), /reverse_proxy localhost:9001/);
-  assert.ok(fallbackAt > proxyAt, '发布路由必须位于 SPA 静态兜底之前');
+  assert.match(vhost.slice(apiProxyAt, fallbackAt), /reverse_proxy localhost:9001/);
+  assert.ok(fallbackAt > proxyAt && fallbackAt > apiProxyAt, '发布路由必须位于 SPA 静态兜底之前');
 });
 
 // WHY：编辑器 HTML 用 ?v=assetVersion 给每个 JS import 打版本，部署后 JS 必然刷新；但 <head>

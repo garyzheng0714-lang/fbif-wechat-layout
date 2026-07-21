@@ -77,6 +77,19 @@
 - [x] 6A.5 CI 增加部分批次、未完成审核、worker panic、重试耗尽和通知状态故障注入
 - [ ] 6A.6 接入独立于当前供应商的第二发现源（优先评估 10:38 已有消息的飞书 Dudu 群），消除“供应商整体漏掉单篇 idx=1 时我方无信号”的物理盲区
 
+### 6B. 安全与稳定性审计整改（2026-07-21）
+
+- [x] 6B.1 所有服务端出站 HTTP 统一执行 URL、端口、DNS 结果和每跳重定向校验；响应体限长，图片代理增加域名白名单、MIME 与文件特征双重验证，并补表驱动与模糊测试
+- [x] 6B.2 高成本入口统一增加鉴权/同源校验、请求体与 DOCX 解压上限、限流、并发门和有界缓存；后台任务使用有界 worker pool，panic 不再击穿 worker
+- [x] 6B.3 复制与会话恢复改为 fail-closed：剪贴板拒绝不得显示成功；快照带文章/账号/规则/构建指纹和版本门；过期异步任务不得覆盖新文章
+- [x] 6B.4 规则与绑定增加 schema 校验、精确 revision/hash 和乐观并发；生成目录损坏在生产启动与 readiness 中显式失败
+- [x] 6B.5 发布、审核、通知、监控和恢复路径补齐超时、CAS、持久 outbox、抖动退避、死信/重放、严重度语义和两阶段部署验收
+- [x] 6B.6 CI 增加 JavaScript 语法/循环依赖/覆盖率/依赖审计、Go vet/staticcheck/race/govulncheck、Shell/Python/env 校验；浏览器矩阵覆盖 Chromium 全量与 Firefox/WebKit 核心冒烟，并保留失败证据
+- [x] 6B.7 删除已不可达的多文件批处理 UI、状态和文档描述，产品契约统一为“一次处理一篇文章”
+- [ ] 6B.8 独立迁移：将发布任务、outbox、规则与大对象从单进程 JSON/sessionStorage 迁到 SQLite WAL（或正式数据库）与 IndexedDB；需要迁移校验、备份和回滚演练，不能夹带在安全补丁中
+- [ ] 6B.9 独立治理：接入企业身份、细粒度 RBAC、完整操作审计与独立供应商的外部 synthetic/dead-man 监控
+- [ ] 6B.10 独立重构与压测：收敛不可变 `DocumentState`，建立 10 万任务规模基线与持续 fuzz/故障注入预算
+
 ## 7. Phase 6 — 分级自动化（仓库 FBIF资讯订阅，默认关）
 
 - [ ] 7.1 自动公开策略开关（管理后台/env 可配）：原创 + pass + 图片全成功 + staging 成功 → 跳过人审直接 publicizing；warning 必人审；block 禁止通过

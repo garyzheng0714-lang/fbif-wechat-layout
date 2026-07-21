@@ -71,6 +71,13 @@ test('copy keeps legacy DOCX skip-upload behavior', async () => {
   assert.match(engine, /return ok;/);
 });
 
+test('copy is fail-closed while the active rule is unresolved or cache-only', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));
+  assert.match(copyFn, /_activeRuleState[^\n]*!== 'resolved'/);
+  assert.match(copyFn, /复制已阻止：排版规则尚未由服务端确认/);
+});
+
 test('网站渠道跳过公众号导向的图片归一化（内联 logo 不被强制居中）', async () => {
   // 红线#19/#20：normalizeWechatRichHtml 给所有 <img> 强制 display:block + margin:0 auto，
   // 会把网站页脚的内联 FoodTalks logo 误居中（预览与复制都中招）。网站渲染器输出已是干净
@@ -128,6 +135,7 @@ test('copyContent writes clipboard before pending more-articles preparation reso
       },
     },
     _plainTextCopy: null,
+    _copyArtifactUnavailableReason: '',
     getPlainTextCopyValue: () => '',
     copyPlainTextToClipboard: async () => false,
     PLAIN_TEXT_RULE_LABEL: 'plain',
@@ -141,6 +149,8 @@ test('copyContent writes clipboard before pending more-articles preparation reso
     isFooterEnabledForCurrentArticle: () => true,
     _articleCopy: '<section class="wx-p">正文</section>',
     _footerCopy: '<section>更多文章安全副本</section>',
+    copyBodyHasMeaningfulContent: () => true,
+    copyArtifactFingerprint: () => 'artifact-hash',
     _copyRequiresWechatImageTransfer: false,
     findWechatImageSrcs: () => [],
     _uploadPromise: null,
@@ -148,6 +158,8 @@ test('copyContent writes clipboard before pending more-articles preparation reso
     _themeCSSReady: Promise.resolve(''),
     processForCopy(html) { return html; },
     normalizeRich(html) { return html; },
+    isWebsiteTemplate: () => false,
+    _activeTemplate: { id: 'fbif' },
     findUnsafeCopyImageRefs: () => [],
     async copyByClipboardApi(html) {
       events.push(`clipboard:${prepareResolved ? 'after' : 'before'}`);
@@ -174,6 +186,94 @@ test('copyContent writes clipboard before pending more-articles preparation reso
 
   prepareResolve();
   await pendingPreparation;
+});
+
+test('degraded restored preview refuses copy instead of reporting false success', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
+  const classes = new Set(['copied']);
+  const button = {
+    textContent: '复制全文',
+    classList: {
+      add(name) { classes.add(name); },
+      remove(name) { classes.delete(name); },
+      toggle(name, force) {
+        if (force) classes.add(name);
+        else classes.delete(name);
+      },
+    },
+    style: { background: 'red' },
+  };
+  let copied = false;
+  let shownError = '';
+  const deps = {
+    copyActionGate: { invalidate() {}, capture: () => ({ stale: () => false }) },
+    document: {
+      getElementById(id) {
+        if (id === 'contentArea') return { textContent: '仍可见的预览正文' };
+        if (id === 'copyBtn') return button;
+        return null;
+      },
+    },
+    window: {},
+    _copyArtifactUnavailableReason: '文章过大，仅恢复了预览。请重新导入后再复制。',
+    _plainTextCopy: null,
+    logConv() {},
+    showError(message) { shownError = message; },
+    copyPlainTextToClipboard: async () => { copied = true; return true; },
+  };
+  const copyContent = new Function('deps', `with (deps) { return (${copyExpr}); }`)(deps);
+
+  const result = await copyContent();
+
+  assert.equal(result, false);
+  assert.equal(copied, false, 'unavailable copy artifact must never reach a clipboard writer');
+  assert.equal(shownError, deps._copyArtifactUnavailableReason);
+  assert.equal(button.textContent, '请重新导入');
+  assert.equal(classes.has('copied'), false);
+  assert.equal(button.style.background, '');
+});
+
+test('footer-only copy artifact is rejected before clipboard write', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
+  let clipboardCalls = 0;
+  let shownError = '';
+  const button = {
+    textContent: '复制全文',
+    classList: { remove() {}, toggle() {} },
+    style: {},
+  };
+  const deps = {
+    copyActionGate: { invalidate() {}, capture: () => ({ stale: () => false }) },
+    document: { getElementById: id => id === 'copyBtn' ? button : { textContent: '预览仍有页脚' } },
+    window: {},
+    _copyArtifactUnavailableReason: '',
+    _plainTextCopy: null,
+    _articleBodyOnly: false,
+    prepareMoreArticlesForCopy() {},
+    isFooterEnabledForCurrentArticle: () => true,
+    _articleCopy: '',
+    _footerCopy: '<section>只有页脚</section>',
+    copyBodyHasMeaningfulContent: () => false,
+    _lastCopiedHtml: 'stale',
+    logConv() {},
+    showError(message) { shownError = message; },
+    copyByClipboardApi: async () => { clipboardCalls++; return true; },
+  };
+  const copyContent = new Function('deps', `with (deps) { return (${copyExpr}); }`)(deps);
+
+  assert.equal(await copyContent(), false);
+  assert.equal(clipboardCalls, 0);
+  assert.match(shownError, /正文复制产物为空/);
+  assert.equal(button.textContent, '请重新导入');
+});
+
+test('failed clipboard write does not receive copied styling', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
+  assert.match(copyExpr, /btn\.classList\.toggle\('copied', ok\)/);
+  assert.doesNotMatch(copyExpr, /btn\.classList\.add\('copied'\)/);
 });
 
 test('more articles prepared footer copy is projected through copy-safe cards before replacing the copy layer', async () => {
@@ -313,8 +413,6 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
     _moreArticlesCopyJob: null,
     _lastRenderInput: null,
     _articleSession: null,
-    _batchFiles: [],
-    _batchResults: [],
   };
 
   const restoreSessionSnapshot = new Function('deps', `with (deps) { return (${restoreExpr}); }`)(deps);
@@ -480,7 +578,7 @@ test('新文章导入原子作废上一篇的更多文章预热 job（防跨文�
     /if \(options\.resetArticleArtifacts\) resetMoreArticlesForNewArticle\(\)/,
     'session 构建应负责原子 reset'
   );
-  assert.ok((engine.match(/resetArticleArtifacts: true/g) || []).length >= 3, '单篇/批量/blocks 三处新稿入口都要传 reset 标记');
+  assert.ok((engine.match(/resetArticleArtifacts: true/g) || []).length >= 2, '单篇/blocks 两处新稿入口都要传 reset 标记');
   // 双保险：在途 job resolve 的两个 await 边界都校验版本门，过期则自我丢弃，不写回 _footerCopy。
   assert.ok((engine.match(/if \(gate\.stale\(\)\) return false/g) || []).length >= 2, '≥2 处版本门校验（原 742/747 seq 校验）');
   // showPreview 仍保留作废，供 rerender（同篇换配置）丢弃旧预热并重建。
@@ -521,9 +619,10 @@ test('website copy blocks when WeChat image CDN URLs still remain', async () => 
   assert.doesNotMatch(copyFn, /本次复制使用当前可粘贴内容/);
 });
 
-test('copy keeps the final WeChat cursor paragraph zero-height', async () => {
+test('copy keeps the final WeChat cursor paragraph zero-height only for WeChat', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyFn = engine.slice(engine.indexOf('window.copyContent = async function()'));
+  assert.match(copyFn, /if \(!isWebsiteTemplate\(\)\)/);
   assert.ok(copyFn.includes('html += \'<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>\';'));
 });
 

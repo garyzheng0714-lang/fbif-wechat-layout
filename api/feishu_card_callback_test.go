@@ -47,6 +47,30 @@ func TestFeishuCallbackMissingTokenFailClosed(t *testing.T) {
 	}
 }
 
+func TestConfiguredFeishuCallbackRouteIsMutuallyExclusive(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mode       string
+		wantStatus int
+	}{
+		{name: "websocket 关闭公网端点", mode: "websocket", wantStatus: http.StatusNotFound},
+		{name: "未配置安全关闭公网端点", mode: "", wantStatus: http.StatusNotFound},
+		{name: "非法配置安全关闭公网端点", mode: "both", wantStatus: http.StatusNotFound},
+		{name: "webhook 显式开放并校验 token", mode: "webhook", wantStatus: http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newPublishTestEnv(t)
+			t.Setenv(feishuCallbackModeEnv, tc.mode)
+			mux := http.NewServeMux()
+			registerConfiguredFeishuCallbackRoute(mux, env.pipeline)
+			rec := postCardCallback(mux, `{}`)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("mode=%q status=%d want=%d body=%s", tc.mode, rec.Code, tc.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}
+
 // TestFeishuReviewerAllowlistFailClosed Webhook 与长连接共用 reviewCardAction：
 // 非白名单、空白名单与非法 open_id 均默认拒绝。
 func TestFeishuReviewerAllowlistFailClosed(t *testing.T) {

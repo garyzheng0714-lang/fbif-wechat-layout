@@ -25,11 +25,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -84,18 +84,79 @@ type foodTalksAPI interface {
 	UpdateNews(ctx context.Context, n foodTalksNews) error
 }
 
+type publishRenderRule struct {
+	AccountID  string         `json:"account_id"`
+	PresetID   string         `json:"preset_id"`
+	Revision   int            `json:"revision"`
+	ConfigHash string         `json:"config_hash"`
+	Config     map[string]any `json:"config"`
+	Behavior   map[string]any `json:"behavior"`
+}
+
+type publishResolvedRule struct {
+	AccountID  string `json:"account_id"`
+	PresetID   string `json:"preset_id"`
+	Revision   int    `json:"revision"`
+	ConfigHash string `json:"config_hash"`
+	Source     string `json:"source"`
+}
+
+type publishRenderResult struct {
+	HTML             string              `json:"html"`
+	ResolvedRule     publishResolvedRule `json:"resolved_rule"`
+	RendererBuildSHA string              `json:"renderer_build_sha"`
+	OutputHash       string              `json:"output_hash"`
+	Error            string              `json:"error,omitempty"`
+}
+
+func publishRenderRuleFromPreset(accountID string, preset rulePreset) publishRenderRule {
+	hash := strings.TrimSpace(preset.ConfigHash)
+	if hash == "" {
+		hash = ruleConfigHash(preset.Config, preset.Behavior)
+	}
+	return publishRenderRule{
+		AccountID: accountID, PresetID: preset.ID, Revision: preset.Version,
+		ConfigHash: hash, Config: preset.Config, Behavior: preset.Behavior,
+	}
+}
+
+func (r publishRenderRule) validate() error {
+	if r.AccountID != foodTalksSiteRuleAccountID || strings.TrimSpace(r.PresetID) == "" || r.Revision < 1 {
+		return errors.New("自动发布规则快照身份无效")
+	}
+	if r.Config == nil || r.Behavior == nil {
+		return errors.New("自动发布规则快照内容不完整")
+	}
+	wantHash := ruleConfigHash(r.Config, r.Behavior)
+	if r.ConfigHash == "" || r.ConfigHash != wantHash {
+		return fmt.Errorf("自动发布规则快照指纹不匹配：want %s, got %s", wantHash, r.ConfigHash)
+	}
+	return nil
+}
+
+func publishRenderOutputHash(html string) string {
+	digest := sha256.Sum256([]byte(html))
+	return fmt.Sprintf("sha256:%x", digest[:])
+}
+
 // publishPipeline 状态机执行器。函数字段的默认值在 newPublishPipeline 装配为
 // 进程内复用实现，测试逐项替换。
 type publishPipeline struct {
 	store *publishJobStore
 	rules *rulePresetStore
+	// publicDir 只用于 readiness 复核部署生成物；生产入口必须写入实际静态目录。
+	publicDir string
+	// workerPool 仅在生产入口显式启用。单元测试默认保留可注入的同步/异步
+	// spawn，避免每个测试 pipeline 都创建常驻 goroutine。
+	workerPool *boundedWorkerPool
 
 	// fetch 公众号 URL → 标题 + 公众号名 + 结构化作者署名 + 页面规范 URL + 中立 Block[] JSON
 	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
 	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7）
 	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, canonicalURL, blocksJSON string, err error)
 	// render Block[] → ft-default 规则包内联 HTML（默认走 render_proxy 转发内核）
-	render func(ctx context.Context, title, source, blocksJSON string) (string, error)
+	resolveRenderRule func() (publishRenderRule, error)
+	render            func(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error)
 	// ossUpload 整批图片 URL → OSS 转存（默认走 /api/oss-upload 的上游代理内核，urls 模式）
 	ossUpload func(ctx context.Context, urls []string) (map[string]string, error)
 	// enrich AI 预填发布参数（M5，默认 arkEnrichArticle）；nil / 失败都走规则兜底，
@@ -123,6 +184,26 @@ type publishPipeline struct {
 	now               func() time.Time
 }
 
+// enableBoundedWorkers 把所有发布任务和通知发送收敛到固定数量的 worker。
+// 队列满时 submit 会形成背压；任务本身已经持久化，进程退出期间未执行的任务
+// 会在下一次启动时由 recoverJobs 恢复。
+func (p *publishPipeline) enableBoundedWorkers(workerCount, queueCapacity int) {
+	pool := newBoundedWorkerPool(workerCount, queueCapacity)
+	p.workerPool = pool
+	p.spawn = func(f func()) {
+		if !pool.submit(f) {
+			log.Printf("publish: worker pool 已停止，拒绝新的异步任务")
+		}
+	}
+}
+
+func (p *publishPipeline) shutdownWorkers(ctx context.Context) error {
+	if p.workerPool == nil {
+		return nil
+	}
+	return p.workerPool.shutdown(ctx)
+}
+
 // newPublishPipeline 生产装配：全部依赖用进程内复用的默认实现。
 func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publishPipeline {
 	p := &publishPipeline{
@@ -136,6 +217,16 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		spawn:             func(f func()) { go f() },
 		retryNotification: func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
 		now:               time.Now,
+	}
+	p.resolveRenderRule = func() (publishRenderRule, error) {
+		if rules == nil {
+			return publishRenderRule{}, errors.New("规则存储未初始化")
+		}
+		preset, err := rules.activeForAccount(foodTalksSiteRuleAccountID)
+		if err != nil {
+			return publishRenderRule{}, fmt.Errorf("读取自动发布规则失败: %w", err)
+		}
+		return publishRenderRuleFromPreset(foodTalksSiteRuleAccountID, preset), nil
 	}
 	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
 		return fetchSiteArticle(rules, articleURL)
@@ -227,52 +318,52 @@ func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string
 	return title, sourceName, byline, canonicalURL, string(raw), nil
 }
 
-// renderSiteHTML 进程内复用 render_proxy.go 的转发内核，packId=ft-default。
-func renderSiteHTML(ctx context.Context, title, source, blocksJSON string) (string, error) {
+// renderSiteHTML 进程内复用 render_proxy.go 的转发内核，packId=ft-default；自动发布
+// 强制 exact 模式并携带已持久化规则快照，Node 不再自行读取“当前规则”。
+func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error) {
 	token := renderToken()
 	if token == "" {
-		return "", errors.New("RENDER_TOKEN 未配置：无法调用渲染服务")
+		return publishRenderResult{}, errors.New("RENDER_TOKEN 未配置：无法调用渲染服务")
 	}
 	payload, err := json.Marshal(map[string]any{
-		"title":    title,
-		"source":   source,
-		"blocks":   json.RawMessage(blocksJSON),
-		"isRepost": true,
-		"packId":   sitePublishRulePackID,
+		"title":        title,
+		"source":       source,
+		"blocks":       json.RawMessage(blocksJSON),
+		"isRepost":     true,
+		"packId":       sitePublishRulePackID,
+		"ruleMode":     "exact",
+		"ruleSnapshot": rule,
 	})
 	if err != nil {
-		return "", fmt.Errorf("序列化渲染请求失败: %w", err)
+		return publishRenderResult{}, fmt.Errorf("序列化渲染请求失败: %w", err)
 	}
 	req, err := newRenderServiceRequest(ctx, payload, "Bearer "+token)
 	if err != nil {
-		return "", err
+		return publishRenderResult{}, err
 	}
 	resp, err := renderServiceHTTPClient().Do(req)
 	if err != nil {
-		return "", fmt.Errorf("渲染服务未就绪（render-service 未启动或不可达）: %w", err)
+		return publishRenderResult{}, fmt.Errorf("渲染服务未就绪（render-service 未启动或不可达）: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	body, err := readBoundedBody(resp.Body, 16<<20)
 	if err != nil {
-		return "", fmt.Errorf("读渲染服务响应失败: %w", err)
+		return publishRenderResult{}, fmt.Errorf("读渲染服务响应失败: %w", err)
 	}
-	var out struct {
-		HTML  string `json:"html"`
-		Error string `json:"error"`
-	}
+	var out publishRenderResult
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("渲染服务响应异常（HTTP %d）: %w", resp.StatusCode, err)
+		return publishRenderResult{}, fmt.Errorf("渲染服务响应异常（HTTP %d）: %w", resp.StatusCode, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		if out.Error != "" {
-			return "", fmt.Errorf("渲染服务错误（HTTP %d）: %s", resp.StatusCode, out.Error)
+			return publishRenderResult{}, fmt.Errorf("渲染服务错误（HTTP %d）: %s", resp.StatusCode, out.Error)
 		}
-		return "", fmt.Errorf("渲染服务错误（HTTP %d）", resp.StatusCode)
+		return publishRenderResult{}, fmt.Errorf("渲染服务错误（HTTP %d）", resp.StatusCode)
 	}
 	if strings.TrimSpace(out.HTML) == "" {
-		return "", errors.New("渲染服务返回空 HTML")
+		return publishRenderResult{}, errors.New("渲染服务返回空 HTML")
 	}
-	return out.HTML, nil
+	return out, nil
 }
 
 // ossUploadByURLs 进程内复用 handleImageUpload 的上游代理内核（urls 模式：上游服务器
@@ -301,7 +392,7 @@ func ossUploadByURLs(ctx context.Context, urls []string) (map[string]string, err
 		return nil, fmt.Errorf("图片转存上游不可达: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	respBody, err := readBoundedBody(resp.Body, 8<<20)
 	if err != nil {
 		return nil, fmt.Errorf("读转存响应失败: %w", err)
 	}
@@ -488,19 +579,94 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 	return err
 }
 
-// stageRender blocks → ft-default 规则包内联 HTML（与网站人工排版同源）。
+func (p *publishPipeline) pinnedRenderRule(job publishJob) (publishRenderRule, error) {
+	if strings.TrimSpace(job.RuleSnapshotJSON) != "" {
+		var rule publishRenderRule
+		if err := json.Unmarshal([]byte(job.RuleSnapshotJSON), &rule); err != nil {
+			return publishRenderRule{}, fmt.Errorf("任务中的规则快照损坏: %w", err)
+		}
+		if err := rule.validate(); err != nil {
+			return publishRenderRule{}, err
+		}
+		if job.RulePresetID != rule.PresetID || job.RuleRevision != rule.Revision || job.RuleConfigHash != rule.ConfigHash {
+			return publishRenderRule{}, errors.New("任务规则引用与持久化快照不一致")
+		}
+		return rule, nil
+	}
+	if p.resolveRenderRule == nil {
+		return publishRenderRule{}, errors.New("自动发布规则解析器未配置")
+	}
+	rule, err := p.resolveRenderRule()
+	if err != nil {
+		return publishRenderRule{}, err
+	}
+	if err := rule.validate(); err != nil {
+		return publishRenderRule{}, err
+	}
+	snapshot, err := json.Marshal(rule)
+	if err != nil {
+		return publishRenderRule{}, fmt.Errorf("序列化自动发布规则快照失败: %w", err)
+	}
+	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		return current.Stage == publishStageRendering && current.ContentVersion == job.ContentVersion &&
+			current.PendingContentHash == "" && current.RuleSnapshotJSON == ""
+	}, func(current *publishJob) {
+		current.RulePresetID = rule.PresetID
+		current.RuleRevision = rule.Revision
+		current.RuleConfigHash = rule.ConfigHash
+		current.RuleSnapshotJSON = string(snapshot)
+	})
+	if err != nil {
+		return publishRenderRule{}, fmt.Errorf("持久化自动发布规则快照失败: %w", err)
+	}
+	if !swapped {
+		return publishRenderRule{}, errPublishContentSuperseded
+	}
+	return rule, nil
+}
+
+func validatePublishRenderResult(result publishRenderResult, rule publishRenderRule) error {
+	if strings.TrimSpace(result.HTML) == "" {
+		return errors.New("渲染服务返回空 HTML")
+	}
+	resolved := result.ResolvedRule
+	if resolved.AccountID != rule.AccountID || resolved.PresetID != rule.PresetID ||
+		resolved.Revision != rule.Revision || resolved.ConfigHash != rule.ConfigHash || resolved.Source != "snapshot" {
+		return errors.New("渲染服务没有使用任务固定的规则快照")
+	}
+	if strings.TrimSpace(result.RendererBuildSHA) == "" {
+		return errors.New("渲染服务未返回 renderer build SHA")
+	}
+	wantOutputHash := publishRenderOutputHash(result.HTML)
+	if result.OutputHash != wantOutputHash {
+		return fmt.Errorf("渲染输出指纹不匹配：want %s, got %s", wantOutputHash, result.OutputHash)
+	}
+	return nil
+}
+
+// stageRender blocks → ft-default 规则包内联 HTML（与网站人工排版同源）。规则快照必须
+// 在调用 renderer 前落盘；失败重试继续使用同一 revision，绝不追随当前活动规则。
 func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error {
 	if strings.TrimSpace(job.BlocksJSON) == "" {
 		return errors.New("任务缺少已抓取的内容块（blocks），无法排版；请重试从抓取阶段续跑")
 	}
-	rendered, err := p.render(ctx, job.Title, job.SourceURL, job.BlocksJSON)
+	rule, err := p.pinnedRenderRule(job)
 	if err != nil {
+		return err
+	}
+	result, err := p.render(ctx, job.Title, job.SourceURL, job.BlocksJSON, rule)
+	if err != nil {
+		return err
+	}
+	if err := validatePublishRenderResult(result, rule); err != nil {
 		return err
 	}
 	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageRendering && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
 	}, func(j *publishJob) {
-		j.ContentHTML = rendered
+		j.ContentHTML = result.HTML
+		j.RendererBuildSHA = result.RendererBuildSHA
+		j.RenderOutputHash = result.OutputHash
 		j.Stage = publishStageMirroring
 		j.FailedStage = ""
 		j.Error = ""

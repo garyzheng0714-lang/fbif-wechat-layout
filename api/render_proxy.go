@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -31,7 +32,7 @@ func renderServiceURL() string {
 }
 
 // requireRenderToken 校验 Bearer token；RENDER_TOKEN 未配置时拒绝服务而非裸奔
-//（同 ADMIN_PASSWORD 的缺配置哲学）。
+// （同 ADMIN_PASSWORD 的缺配置哲学）。
 func requireRenderToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := renderToken()
@@ -71,10 +72,16 @@ func renderServiceHTTPClient() *http.Client {
 }
 
 // handleRenderProxy 原样转发请求体到本机 Node 渲染服务。渲染服务未就绪时返回明确 502
-//（调用方据此把发布任务置为 failed，提示「排版服务未就绪」，不得挂起）。
+// （调用方据此把发布任务置为 failed，提示「排版服务未就绪」，不得挂起）。
 func handleRenderProxy(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "请求体过大（最大 8 MB）"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "读取请求体失败: " + err.Error()})
 		return
 	}
@@ -89,9 +96,14 @@ func handleRenderProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 16<<20)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "渲染服务响应过大或读取失败"})
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = w.Write(respBody)
 }
 
 // handleHTMLToBlocks 文章 HTML → 中立 Block[]，供无原文 URL（或抓取失败）的调用方降级使用。
@@ -100,7 +112,13 @@ func handleHTMLToBlocks(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		HTML string `json:"html"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&req); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "请求体过大（最大 8 MB）"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体不是合法 JSON: " + err.Error()})
 		return
 	}

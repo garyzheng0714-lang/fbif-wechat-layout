@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -84,7 +83,7 @@ func arkAssessPublishRisk(ctx context.Context, job publishJob) (publishRiskAsses
 		return publishRiskAssessment{}, fmt.Errorf("风险审核接口不可达: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	respBody, err := readBoundedBody(resp.Body, 4<<20)
 	if err != nil {
 		return publishRiskAssessment{}, fmt.Errorf("读取风险审核响应失败: %w", err)
 	}

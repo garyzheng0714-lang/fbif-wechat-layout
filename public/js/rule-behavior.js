@@ -1,3 +1,6 @@
+import { validateBehaviorRegexDocument } from './rule-behavior-utils.js';
+export { validateBehaviorRegexDocument } from './rule-behavior-utils.js';
+
 const MOTE_REF_HEAD_IMAGE_URL = 'https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/fbif-attachment-to-url/2026/05/tblMQeXvSGd7Hebf_-CkOuPdpNzb-_3u9Rxc5KA_1778028720411/img_v3_0211e_8b79127d-72a5-4011-9f01-fe3b30c7548g_1778028720565.png';
 
 export const DEFAULT_BEHAVIOR = Object.freeze({
@@ -216,6 +219,8 @@ export function validateRuleBehavior(raw) {
   const behavior = normalizeRuleBehavior(raw);
   const errors = [];
   validateRawBehaviorShape(raw, errors);
+  try { validateBehaviorRegexDocument(raw); }
+  catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
   if (raw && isPlainObject(raw) && raw.schema_version != null && Number(raw.schema_version) !== 1) {
     errors.push('不支持的行为规则版本：' + raw.schema_version);
   }

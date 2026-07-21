@@ -222,6 +222,21 @@ test('editor shells load JSZip from the same-origin vendor asset', async () => {
   }
 });
 
+test('single-article product has no unreachable batch UI or documentation promise', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
+  const site = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../public/app.css', import.meta.url), 'utf8');
+  const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
+
+  assert.match(engine, /fileInputEl\.multiple = false/);
+  assert.doesNotMatch(engine, /showBatchList|_batchResults|batch_state|batch-upload/);
+  assert.doesNotMatch(app + site, /id="batchList"/);
+  assert.doesNotMatch(css, /\.batch-(?:list|title|item|status)/);
+  assert.doesNotMatch(readme, /支持多文件队列处理/);
+  assert.match(readme, /编辑器一次只处理一篇文章/);
+});
+
 test('公众号上传摘要收进文件卡片，网站页保留旧统计行', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const site = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
@@ -272,8 +287,13 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   );
   assert.match(
     engine,
-    /if \(_plainTextCopy !== null\) \{[\s\S]{0,260}const text = getPlainTextCopyValue\(\);[\s\S]{0,80}copyPlainTextToClipboard\(text\)/,
+    /if \(_plainTextCopy !== null\) \{[\s\S]{0,260}const text = getPlainTextCopyValue\(\);[\s\S]{0,700}copyPlainTextToClipboard\(text\)/,
     '顶部复制全文在纯文字模式应复制结果文本区当前内容，而不是复用公众号 HTML 复制链路'
+  );
+  assert.match(
+    engine,
+    /const text = getPlainTextCopyValue\(\);[\s\S]{0,180}if \(!String\(text \|\| ''\)\.trim\(\)\)/,
+    '纯文字结果为空时必须在写剪贴板前 fail closed'
   );
   assert.doesNotMatch(
     engine,

@@ -10,6 +10,7 @@
 
 import { resolveAssetRefs } from '../asset-library.js';
 import { richTextToInline } from '../blocks/rich-text-render.js';
+import { filterSafeFooterHTMLLines } from '../footer-html-policy.js';
 
 function asLines(v) {
   if (Array.isArray(v)) return v;
@@ -101,7 +102,7 @@ export function siteBlockRenderers(assetLibrary, scope = 'ft-default', opts = {}
     },
 
     // 自定义内容：原样输出（网站默认页脚段即此型，字节一致）。
-    rich_html: (f) => resolve(asLines(f.html_lines)),
+    rich_html: (f) => resolve(filterSafeFooterHTMLLines(asLines(f.html_lines))),
 
     // 更多文章：网站渠道无公众号「更多文章」卡片系统，按栏目标题渲染（仅标题，无委托卡片）。
     more_articles: (f) => {

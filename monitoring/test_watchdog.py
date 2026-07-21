@@ -56,6 +56,28 @@ class WatchdogTest(unittest.TestCase):
         self.assertEqual([], watchdog.evaluate("feed", {"ready": True}))
         self.assertEqual(["feed:not_ready"], watchdog.evaluate("feed", {}))
         self.assertEqual(["feed:gap:1"], watchdog.evaluate("feed", {"ready": False, "issues": ["gap:1"]}))
+        self.assertEqual([], watchdog.evaluate("layout", {
+            "ready": False,
+            "health": "busy",
+            "issues": ["business_processing:1"],
+            "alert_issues": [],
+        }))
+        self.assertEqual(["layout:processing_stale:1201s"], watchdog.evaluate("layout", {
+            "ready": False,
+            "alert_issues": ["processing_stale:1201s"],
+        }))
+
+    def test_busy_probe_neither_pages_nor_sends_false_green_heartbeat(self):
+        now = datetime(2026, 7, 17, 2, 0, tzinfo=timezone.utc)
+        state, kind, _ = watchdog.decide_notification({}, [], now, False, closure_ready=False)
+        self.assertEqual("", kind)
+        self.assertTrue(state["healthy"])
+        self.assertFalse(state["closure_ready"])
+
+        previous = {"incident_open": True, "consecutive_failures": 2}
+        state, kind, _ = watchdog.decide_notification(previous, [], now, False, closure_ready=False)
+        self.assertEqual("", kind)
+        self.assertTrue(state["incident_open"])
 
     def test_drill_fixture_sends_incident_then_recovery(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
@@ -103,6 +125,36 @@ class WatchdogTest(unittest.TestCase):
         message_url, payload, _, _, _ = calls[1]
         self.assertTrue(message_url.endswith("?receive_id_type=user_id"))
         self.assertEqual("test-monitor-user", payload["receive_id"])
+
+    def test_deployment_check_verifies_reporting_path_even_when_healthy(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ,
+            {
+                "PUBLISH_SYNC_SERVICE_TOKEN": "service-token",
+                "FEISHU_APP_ID": "app-id",
+                "FEISHU_APP_SECRET": "app-secret",
+                "PUBLISH_MONITOR_FEISHU_USER_ID": "test-monitor-user",
+            },
+            clear=True,
+        ), mock.patch.object(watchdog, "send_feishu_app") as sender:
+            marker = pathlib.Path(directory, "deployment-check")
+            marker.touch()
+            args = SimpleNamespace(
+                state=str(pathlib.Path(directory, "state.json")),
+                timeout=1.0,
+                layout_url="unused",
+                feed_url="unused",
+                official_url="unused",
+                drill=True,
+                fixture_ready=True,
+                inject_issue="",
+                deployment_check_marker=str(marker),
+            )
+
+            self.assertEqual(0, watchdog.run(args))
+            self.assertEqual(1, sender.call_count)
+            self.assertIn("部署自检", sender.call_args.args[3])
+            self.assertIn("上报链路已验证", sender.call_args.args[3])
 
 
 if __name__ == "__main__":

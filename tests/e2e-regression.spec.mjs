@@ -536,6 +536,109 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
     await context.close();
   });
+
+  // ---- Scenario 10: 浏览器拒绝两种剪贴板写法时必须明确失败 ----
+  test('10-剪贴板权限失败不得显示复制成功', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+
+    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+    await waitForAppReady(page);
+    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
+    await page.waitForFunction(() => {
+      const el = document.getElementById('previewContent');
+      return el && el.style.display !== 'none';
+    }, { timeout: 30000 });
+
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          write: async () => { throw new DOMException('clipboard denied', 'NotAllowedError'); },
+        },
+      });
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: () => false,
+      });
+    });
+
+    const copyButton = page.locator('#copyBtn');
+    await copyButton.click();
+    await expect(copyButton).toHaveText('复制失败');
+    await expect(copyButton).not.toHaveClass(/\bcopied\b/);
+    await expect(page.locator('#copySuccess')).toBeHidden();
+    await expect(page.locator('#copyPasteHint')).toHaveCount(0);
+    const copyLog = await page.evaluate(() => (
+      window.getConvLog().findLast(entry => entry.msg === '复制失败')
+    ));
+    expect(copyLog).toMatchObject({ level: 'error', msg: '复制失败' });
+    expect(copyLog.detail.artifactHash).toMatch(/^[0-9a-f]{8}$/);
+
+    await context.close();
+  });
+
+  // ---- Scenario 11: 1440px 桌面在浏览器 125%/150% 缩放后的 CSS viewport ----
+  for (const zoom of [125, 150]) {
+    test(`11-浏览器缩放 ${zoom}% 无水平溢出`, async ({ browser }) => {
+      const scale = zoom / 100;
+      const bp = {
+        name: `desktop-zoom-${zoom}`,
+        width: Math.floor(1440 / scale),
+        height: Math.floor(900 / scale),
+      };
+      const context = await browser.newContext({
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+      await page.locator('#fileInput').setInputFiles(DOCX_PATH);
+      await page.waitForFunction(() => {
+        const el = document.getElementById('previewContent');
+        return el && el.style.display !== 'none';
+      }, { timeout: 30000 });
+
+      await expect(page.locator('.global-channel-bar')).toBeVisible();
+      await expect(page.locator('#copyBtn')).toBeVisible();
+      const result = await captureAndCheck(page, `11-browser-zoom-${zoom}`, bp);
+      expect(result.issues).toEqual([]);
+
+      await context.close();
+    });
+  }
+
+  // ---- Scenario 12: 规则 API 弱网期间输出保持 fail-closed，响应后自动解锁 ----
+  test('12-规则 API 延迟期间禁用复制并在解析后恢复', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    let releaseRuleRequest;
+    let markRuleRequest;
+    const ruleRequestHeld = new Promise(resolve => { releaseRuleRequest = resolve; });
+    const ruleRequestSeen = new Promise(resolve => { markRuleRequest = resolve; });
+
+    await page.route('**/api/rules/active?**', async route => {
+      markRuleRequest();
+      await ruleRequestHeld;
+      await route.continue();
+    });
+
+    const navigation = page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+    await ruleRequestSeen;
+    try {
+      await expect(page.locator('#copyBtn')).toBeDisabled();
+      await expect.poll(() => page.evaluate(() => window._activeRuleState)).toBe('loading');
+    } finally {
+      releaseRuleRequest();
+    }
+    await navigation;
+    await waitForAppReady(page);
+    await expect.poll(() => page.evaluate(() => window._activeRuleState)).toBe('resolved');
+    await expect(page.locator('#copyBtn')).toBeEnabled();
+
+    await context.close();
+  });
 });
 
 // ---- Generate report after all tests ----

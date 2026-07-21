@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -70,6 +71,71 @@ func TestPublishMonitoringReportsOnlyOperationalMetrics(t *testing.T) {
 	}
 }
 
+func TestPublishMonitoringSeparatesBusyDegradedAndUnhealthy(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	job, _, err := store.create("site:https://mp.weixin.qq.com/s/slow", "https://mp.weixin.qq.com/s/slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStageRendering
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339, job.UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	busy := currentPublishMonitoring(store, updatedAt.Add(5*time.Minute))
+	if busy.Ready || !busy.Busy || busy.Health != "busy" || len(busy.AlertIssues) != 0 {
+		t.Fatalf("normal processing should be busy without P0 alert: %+v", busy)
+	}
+
+	degraded := currentPublishMonitoring(store, updatedAt.Add(11*time.Minute))
+	if degraded.Health != "degraded" || len(degraded.AlertIssues) != 0 ||
+		!publishMonitoringHasIssue(publishMonitoringStatus{Issues: degraded.Warnings}, "processing_slow:") {
+		t.Fatalf("near-SLO processing should be warning-only: %+v", degraded)
+	}
+
+	unhealthy := currentPublishMonitoring(store, updatedAt.Add(21*time.Minute))
+	if unhealthy.Health != "unhealthy" || !publishMonitoringHasIssue(publishMonitoringStatus{Issues: unhealthy.AlertIssues}, "processing_stale:") {
+		t.Fatalf("over-SLO processing should alert: %+v", unhealthy)
+	}
+}
+
+func TestPublishMonitoringAlertsOnStaleQueueAndAgesReconciliation(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	queued, _, err := store.create("site:https://mp.weixin.qq.com/s/queued", "https://mp.weixin.qq.com/s/queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queuedAt, _ := time.Parse(time.RFC3339, queued.UpdatedAt)
+	queueStatus := currentPublishMonitoring(store, queuedAt.Add(16*time.Minute))
+	if !publishMonitoringHasIssue(publishMonitoringStatus{Issues: queueStatus.AlertIssues}, "queue_stale:") {
+		t.Fatalf("stale queue must alert: %+v", queueStatus)
+	}
+
+	reconciliation, err := store.update(queued.ID, func(current *publishJob) {
+		current.Stage = publishStageReconciliationRequired
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconciliationAt, _ := time.Parse(time.RFC3339, reconciliation.UpdatedAt)
+	warning := currentPublishMonitoring(store, reconciliationAt.Add(5*time.Minute))
+	if warning.Health != "degraded" || len(warning.AlertIssues) != 0 {
+		t.Fatalf("fresh reconciliation should be warning-only: %+v", warning)
+	}
+	critical := currentPublishMonitoring(store, reconciliationAt.Add(31*time.Minute))
+	if !publishMonitoringHasIssue(publishMonitoringStatus{Issues: critical.AlertIssues}, "reconciliation_stale:") {
+		t.Fatalf("stale reconciliation must alert: %+v", critical)
+	}
+}
+
 func TestPublishMonitoringGuardsReviewNotificationAndDeduplication(t *testing.T) {
 	t.Setenv(deploymentWritesPausedEnv, "0")
 	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
@@ -112,6 +178,65 @@ func TestPublishMonitoringGuardsReviewNotificationAndDeduplication(t *testing.T)
 		if !publishMonitoringHasIssue(status, prefix) {
 			t.Fatalf("missing issue %q in %+v", prefix, status.Issues)
 		}
+	}
+}
+
+func TestPublishMonitoringReportsNotificationDeadLetters(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	job, _, err := store.create("site:https://mp.weixin.qq.com/s/dead-letter", "https://mp.weixin.qq.com/s/dead-letter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStageAwaitingReview
+		current.NotificationKind = publishNotificationReviewPending
+		current.NotificationState = publishNotificationStateDeadLetter
+		current.NotificationError = "delivery exhausted"
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	status := currentPublishMonitoring(store, time.Now())
+	if status.Ready || status.NotificationDeadLetters != 1 || !publishMonitoringHasIssue(status, "notification_dead_letters:") {
+		t.Fatalf("monitoring status = %+v", status)
+	}
+}
+
+func TestCountDuplicatePublishSourceKeysHandlesAliasesOncePerJob(t *testing.T) {
+	jobs := []publishJob{
+		{ID: 1, SourceKey: "site:https://mp.weixin.qq.com/s/first", Stage: publishStagePublished},
+		{ID: 2, SourceKey: "site:https://mp.weixin.qq.com/s/second", SourceAliases: []string{"site:https://mp.weixin.qq.com/s/first"}, Stage: publishStagePublished},
+		{ID: 3, SourceKey: "site:https://mp.weixin.qq.com/s/third", SourceAliases: []string{
+			"site:https://mp.weixin.qq.com/s/first",
+			"site:https://mp.weixin.qq.com/s/second",
+		}, Stage: publishStagePublished},
+		{ID: 4, SourceKey: "site:https://mp.weixin.qq.com/s/first", Stage: publishStageSupersededDuplicate},
+	}
+
+	if got := countDuplicatePublishSourceKeys(jobs); got != 2 {
+		t.Fatalf("duplicate jobs = %d, want 2", got)
+	}
+}
+
+func TestCountDuplicatePublishSourceKeysScalesLinearly(t *testing.T) {
+	const jobCount = 50_000
+	jobs := make([]publishJob, jobCount)
+	for i := range jobs {
+		jobs[i] = publishJob{
+			ID:        int64(i + 1),
+			SourceKey: fmt.Sprintf("site:https://mp.weixin.qq.com/s/article-%d", i),
+			Stage:     publishStagePublished,
+		}
+	}
+	jobs[jobCount-1].SourceAliases = []string{jobs[123].SourceKey}
+
+	started := time.Now()
+	if got := countDuplicatePublishSourceKeys(jobs); got != 1 {
+		t.Fatalf("duplicate jobs = %d, want 1", got)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("50k duplicate scan took %s; expected indexed linear scan", elapsed)
 	}
 }
 
