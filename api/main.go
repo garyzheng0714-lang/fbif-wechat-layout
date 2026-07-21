@@ -387,9 +387,18 @@ func handleImageUpload(w http.ResponseWriter, r *http.Request) {
 	// No upload endpoint — return base64 as-is (preview works; WeChat re-hosts on paste)
 	var req struct {
 		Base64Images map[string]string `json:"base64_images"`
+		URLs         []string          `json:"urls"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, 400, "invalid JSON")
+		return
+	}
+	// URL mode is used by the website channel and cannot safely fall back to
+	// returning the original WeChat CDN URLs. Fail loudly so deployment smoke
+	// tests and the browser retry state expose a missing upload service instead
+	// of reporting a misleading 200 with an empty result map.
+	if req.URLs != nil {
+		writeError(w, http.StatusServiceUnavailable, "图片转存服务未配置")
 		return
 	}
 

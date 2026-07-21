@@ -24,6 +24,9 @@ type publishReadinessStatus struct {
 	ServiceAuth    struct {
 		Configured bool `json:"configured"`
 	} `json:"service_auth"`
+	ImageUpload struct {
+		Configured bool `json:"configured"`
+	} `json:"image_upload"`
 	HTTPReviewEnabled bool `json:"http_review_enabled"`
 	FoodTalks         struct {
 		Configured            bool   `json:"configured"`
@@ -173,10 +176,11 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	}
 	out.Feishu.ReviewerAllowlistConfigured = feishuReviewerAllowlistConfigured()
 	out.ServiceAuth.Configured = publishSyncServiceTokenConfigured()
+	out.ImageUpload.Configured = configuredHTTPBaseURL(os.Getenv("WECHAT_UPLOAD_ENDPOINT"))
 	out.HTTPReviewEnabled = publishHTTPReviewEnabled()
 	out.EnrichMode = publishEnrichMode()
 	out.JudgeConfigured = strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv)) != ""
-	out.Ready = out.ConfigSchema.Matches && adminPasswordConfigured() && out.ServiceAuth.Configured && !out.HTTPReviewEnabled &&
+	out.Ready = out.ConfigSchema.Matches && adminPasswordConfigured() && out.ServiceAuth.Configured && out.ImageUpload.Configured && !out.HTTPReviewEnabled &&
 		out.GeneratedFiles.ready() &&
 		out.StoreValid && out.FoodTalks.Configured && out.Feishu.ReviewerAllowlistConfigured &&
 		out.FoodTalks.Categories && out.Render.Configured && out.Feishu.NotifyConfigured &&

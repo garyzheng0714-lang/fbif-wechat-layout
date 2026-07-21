@@ -9,8 +9,9 @@ User=root
 Group=root
 WorkingDirectory=/var/www/api
 Environment=FBIF_CONFIG_SCHEMA_VERSION=1
-EnvironmentFile=/var/www/api/.env
 EnvironmentFile=/var/www/api/publish.env
+# 部署托管配置最后加载，覆盖旧 publish.env 里可能残留的空上传地址。
+EnvironmentFile=/var/www/api/.env
 ExecStart=/var/www/api/fbif-api -port 9001 -public /var/www/wechat-layout
 Restart=on-failure
 RestartSec=3s

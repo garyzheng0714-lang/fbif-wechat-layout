@@ -72,6 +72,10 @@ test('versioned API and render units pin paths, config version and service harde
   assert.match(api, /^Environment=FBIF_CONFIG_SCHEMA_VERSION=1$/m);
   assert.match(api, /^EnvironmentFile=\/var\/www\/api\/\.env$/m);
   assert.match(api, /^EnvironmentFile=\/var\/www\/api\/publish\.env$/m);
+  assert.ok(
+    api.indexOf('EnvironmentFile=/var/www/api/publish.env') < api.indexOf('EnvironmentFile=/var/www/api/.env'),
+    '部署托管配置必须最后加载，不能再被旧 publish.env 的空上传地址覆盖',
+  );
   assert.match(api, /^ExecStart=\/var\/www\/api\/fbif-api -port 9001 -public \/var\/www\/wechat-layout$/m);
   assert.match(api, /^ProtectSystem=strict$/m);
   assert.match(api, /^ReadWritePaths=\/var\/www\/api$/m);
