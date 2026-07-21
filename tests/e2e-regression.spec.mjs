@@ -323,6 +323,9 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       // Check button feedback
       const btnText = await copyBtn.textContent();
       result.copyBtnText = btnText;
+      const copyWarning = await page.evaluate(() => window._copyImageWarning || 0);
+      expect(copyWarning).toBe(0);
+      expect(btnText).toBe('✓ 已复制');
 
       if (consoleErrors.length > 0) {
         result.issues.push(`控制台错误: ${consoleErrors.join('; ')}`);

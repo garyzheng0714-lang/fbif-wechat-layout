@@ -139,6 +139,10 @@ function makePreviewRaceHarness(engine, { skipUpload = false } = {}) {
     _isRepost: false,
     _moreArticlesCopyJob: null,
   };
+  deps.reconcileFailedImageRefs = function(value = deps._failedSrcs) {
+    deps._failedSrcs = Array.from(value || []);
+    return deps._failedSrcs;
+  };
   window._skipUpload = skipUpload;
   const resetRetryUploadUISource = extractFunction(engine, 'resetRetryUploadUI');
   const showPreviewSource = extractFunction(engine, 'showPreview');
@@ -546,6 +550,11 @@ test('文章 A 重试上传期间导入 B，A 重试结果不得回写 B', async
     markFailedImages(value) { marked.push(Array.from(value || [])); },
     hasDocumentSummaryCard: () => false,
     logConv(...args) { logs.push(args); },
+    reconcileFailedImageRefs(value = deps._failedSrcs) {
+      deps._failedSrcs = Array.from(value || []);
+      return deps._failedSrcs;
+    },
+    resetRetryUploadUI() {},
     _articleCopy: '<p>article-A</p>',
     _footerCopy: '<p>footer-A</p>',
     _failedSrcs: ['a-failed'],
