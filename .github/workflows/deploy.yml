@@ -146,6 +146,20 @@ jobs:
             echo "SERVER_KNOWN_HOSTS does not contain SERVER_HOST" >&2
             exit 1
           fi
+          # GitHub-hosted Runner 到生产机的 SSH 偶发卡在握手/半开连接。所有 ssh/rsync
+          # 统一 fail-fast，防止尚未激活的 staging 无限占住串行部署队列。
+          cat > ~/.ssh/config <<'EOF'
+          Host *
+            BatchMode yes
+            ConnectTimeout 15
+            ConnectionAttempts 3
+            ServerAliveInterval 15
+            ServerAliveCountMax 3
+            TCPKeepAlive yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+          EOF
+          chmod 600 ~/.ssh/config
 
           DEPLOY_ID="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RELEASE_DIR="/var/www/.fbif-layout-releases/${DEPLOY_ID}"
