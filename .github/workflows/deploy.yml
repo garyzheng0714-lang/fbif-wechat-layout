@@ -249,7 +249,7 @@ jobs:
             "cd '$RELEASE_DIR/render' && npm ci --omit=dev --no-audit --no-fund"
 
           # publish.env 是手工维护的独立 EnvironmentFile，不在这里覆盖。
-          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nRENDER_TOKEN=%s\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "$RENDER_TOKEN" "http://127.0.0.1:19096" | base64 -w 0)
+          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_TOKEN=%s\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "$RENDER_TOKEN" "http://127.0.0.1:19096" | base64 -w 0)
           printf -v env_stage_command 'umask 077; base64 -d > %q' "$RELEASE_DIR/api.env"
           printf '%s' "$ENV_CONTENT" | ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "$env_stage_command"
           RENDER_ENV_CONTENT=$(printf 'FBIF_CONFIG_SCHEMA_VERSION=1\nNODE_ENV=production\nRENDER_PORT=19096\nRENDER_TOKEN=%s\nPUBLIC_DIR=%s\nRULES_API_ORIGIN=http://127.0.0.1:9001\nASSET_ORIGIN=%s\nRENDER_BUILD_SHA=%s\n' "$RENDER_TOKEN" "${DEPLOY_PATH}" "$SITE_ORIGIN" "$GITHUB_SHA" | base64 -w 0)
@@ -270,6 +270,16 @@ jobs:
           version_json=$(curl --silent --show-error --fail --retry 12 --retry-delay 2 --retry-all-errors \
             "${SITE_ORIGIN}/version.json?deploy=${GITHUB_SHA}")
           echo "$version_json" | jq -e --arg sha "$GITHUB_SHA" '.commit == $sha and .build == $sha' >/dev/null
+
+          # 上游会把非法 URL 记为单图失败并返回空 results，不写 OSS；用它验收
+          # 「公网 Go → 本机上传服务」整条链路。缺配置或上游不可达都会阻止部署。
+          image_upload_json=$(curl --silent --show-error --fail --retry 3 --retry-delay 1 --retry-all-errors \
+            --header 'Content-Type: application/json' \
+            --header "Origin: ${SITE_ORIGIN}" \
+            --header "Referer: ${SITE_ORIGIN}/ft/ft-default" \
+            --data '{"urls":["not-a-url"]}' \
+            "${SITE_ORIGIN}/api/oss-upload")
+          echo "$image_upload_json" | jq -e '.results | type == "object"' >/dev/null
 
           rules_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             "${SITE_ORIGIN}/api/rules/admin/presets")
@@ -297,6 +307,7 @@ jobs:
             .generated_files.block_registry_present == true and
             .generated_files.block_registry_hash_matches == true and
             .service_auth.configured == true and
+            .image_upload.configured == true and
             .http_review_enabled == false and
             .foodtalks.configured == true and
             .foodtalks.target_matches_expected == true and

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -132,5 +133,38 @@ func TestHandleImageUploadProxyKeepsWechatAliasOnWechatUpstream(t *testing.T) {
 	}
 	if gotPath != "/api/wechat-upload" {
 		t.Fatalf("upstream path = %q", gotPath)
+	}
+}
+
+func TestHandleImageUploadURLModeFailsLoudlyWithoutUpstream(t *testing.T) {
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"urls":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://example.com")
+	rec := httptest.NewRecorder()
+
+	handleImageUpload(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "图片转存服务未配置") {
+		t.Fatalf("missing actionable error: %s", rec.Body.String())
+	}
+}
+
+func TestHandleImageUploadBase64FallbackRemainsAvailableWithoutUpstream(t *testing.T) {
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://example.com")
+	rec := httptest.NewRecorder()
+
+	handleImageUpload(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "data:image/png;base64,AA==") {
+		t.Fatalf("base64 preview fallback changed: status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }

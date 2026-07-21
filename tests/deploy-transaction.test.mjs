@@ -106,6 +106,7 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   const finalizeAt = workflow.indexOf('remote_transaction finalize');
   const versionCheckAt = workflow.indexOf("'.commit == $sha and .build == $sha'");
   const readinessAt = workflow.indexOf('/api/publish/readiness');
+  const imageUploadAt = workflow.indexOf("image_upload_json=$(curl");
   const acceptAt = workflow.indexOf('release_accepted=1');
   const unpauseAt = workflow.indexOf('remote_transaction unpause');
   const prepareMonitoringAt = workflow.indexOf('remote_transaction prepare-monitoring');
@@ -165,6 +166,8 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     '公网验收窗口收到取消信号时也必须请求远端回滚');
   assert.ok(activateAt >= 0 && versionCheckAt > activateAt && finalizeAt > versionCheckAt,
     '公网版本验收必须发生在 activate 后、删除 rollback 备份前');
+  assert.ok(imageUploadAt > versionCheckAt && readinessAt > imageUploadAt,
+    '图片转存整链路必须在 activate 后、readiness 前的可回滚窗口验收');
   assert.ok(
     readinessAt > versionCheckAt &&
     prepareMonitoringAt > readinessAt &&
@@ -177,6 +180,10 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   assert.match(workflow, /DEPLOYMENT_WRITES_PAUSED=1/);
   assert.match(workflow, /ENV=production/);
   assert.match(workflow, /FBIF_CONFIG_SCHEMA_VERSION=1/);
+  assert.match(workflow, /WECHAT_UPLOAD_ENDPOINT=http:\/\/127\.0\.0\.1:9000\/api\/wechat-upload/);
+  assert.match(workflow, /\.image_upload\.configured == true/);
+  assert.match(workflow, /'\{"urls":\["not-a-url"\]\}'/,
+    '上传服务整链路探针不得写入 OSS');
   assert.match(workflow, /deploy\/systemd\//,
     'API/render systemd 单元必须与 release 一起上传');
   assert.match(workflow, /deploy\/config\//,
@@ -198,6 +205,7 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     '/api/rules/admin/presets',
     '/api/publish/jobs',
     '/api/feishu/card-callback',
+    '/api/oss-upload',
     '/api/publish/readiness',
   ]) {
     assert.ok(workflow.includes(contract), `缺少部署验收：${contract}`);

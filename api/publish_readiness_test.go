@@ -18,6 +18,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	t.Setenv("DEPLOYMENT_WRITES_PAUSED", "1")
 	t.Setenv("RENDER_SERVICE_URL", "http://127.0.0.1:19096")
 	t.Setenv("RENDER_TOKEN", "secret-render-token")
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "http://127.0.0.1:9000/api/wechat-upload")
 	t.Setenv("FEISHU_APP_ID", "cli_secret_app")
 	t.Setenv("FEISHU_APP_SECRET", "secret-feishu-app")
 	t.Setenv("FEISHU_REVIEW_CHAT_ID", "oc_secret_chat")
@@ -54,7 +55,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	}
 	if !got.Ready || !got.ConfigSchema.Matches || got.ConfigSchema.Expected != runtimeConfigSchemaVersion ||
 		got.ConfigSchema.Actual != runtimeConfigSchemaVersion || !got.WorkersPaused ||
-		!got.ServiceAuth.Configured || got.HTTPReviewEnabled || got.FoodTalks.Target != "test" ||
+		!got.ServiceAuth.Configured || !got.ImageUpload.Configured || got.HTTPReviewEnabled || got.FoodTalks.Target != "test" ||
 		!got.FoodTalks.TargetMatchesExpected || got.EnrichMode != "dual" {
 		t.Fatalf("readiness 核心状态错误：%+v", got)
 	}
@@ -65,6 +66,21 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 		!got.Feishu.WebhookConfigured || got.Feishu.CallbackMode != feishuCallbackModeWebSocket ||
 		!got.Feishu.CallbackModeExplicit || !got.Feishu.CallbackConfigured || !got.Feishu.ReviewerAllowlistConfigured {
 		t.Fatalf("飞书 readiness 错误：%+v", got.Feishu)
+	}
+}
+
+func TestPublishReadinessFailsClosedWithoutImageUploadEndpoint(t *testing.T) {
+	env := newPublishTestEnv(t)
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
+	got := currentPublishReadiness(env.pipeline)
+	if got.ImageUpload.Configured || got.Ready {
+		t.Fatalf("缺图片转存上游必须使 readiness=false：%+v", got)
+	}
+
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "http://127.0.0.1:9000/api/wechat-upload")
+	got = currentPublishReadiness(env.pipeline)
+	if !got.ImageUpload.Configured {
+		t.Fatalf("本机图片转存上游应被识别为已配置：%+v", got.ImageUpload)
 	}
 }
 

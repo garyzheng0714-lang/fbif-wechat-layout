@@ -221,7 +221,7 @@ curl http://127.0.0.1:9000/api/health
 | --- | --- |
 | `ENV` | 运行环境；生产必须显式为 `production`，此时账号/区块生成注册表缺失或不可读会拒绝启动 |
 | `FBIF_CONFIG_SCHEMA_VERSION` | 运行配置结构版本；当前必须为 `1`，API 生产启动、renderer 健康检查和 publish readiness 都会 fail closed |
-| `WECHAT_UPLOAD_ENDPOINT` | 图片上传代理上游；未设置时返回原始 base64，预览仍可用 |
+| `WECHAT_UPLOAD_ENDPOINT` | 图片上传代理上游；生产由部署托管为本机 `127.0.0.1:9000` 上传服务。未设置时仅保留 base64 预览降级，网站 URL 图片转存会明确失败 |
 | `LIBREOFFICE_URL` | `.doc` 转 `.docx` 的 LibreOffice 转换服务地址 |
 | `LIBREOFFICE_TOKEN` | LibreOffice 转换服务鉴权 token |
 | `CLOUDCONVERT_API_KEY` | LibreOffice 不可用时的 CloudConvert fallback |
