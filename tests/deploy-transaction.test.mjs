@@ -101,6 +101,8 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     .join('\n');
   await execFileAsync('bash', ['-n', '-c', runScript]);
   const requiredAt = workflow.indexOf('for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH ADMIN_PASSWORD RENDER_TOKEN');
+  const sshTimeoutAt = workflow.indexOf('ConnectTimeout 15');
+  const firstSSHAt = workflow.indexOf('ssh -i ~/.ssh/deploy_key');
   const firstRsyncAt = workflow.indexOf('rsync -avz');
   const activateAt = workflow.indexOf('remote_transaction activate');
   const finalizeAt = workflow.indexOf('remote_transaction finalize');
@@ -113,6 +115,12 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   const startMonitoringAt = workflow.indexOf('remote_transaction start-monitoring');
 
   assert.ok(requiredAt >= 0 && requiredAt < firstRsyncAt, 'secret preflight 必须早于任何 rsync');
+  assert.ok(sshTimeoutAt >= 0 && sshTimeoutAt < firstSSHAt,
+    'SSH 连接与保活超时必须在第一次远端调用前生效');
+  assert.match(workflow, /ConnectionAttempts 3/);
+  assert.match(workflow, /ServerAliveInterval 15/);
+  assert.match(workflow, /ServerAliveCountMax 3/);
+  assert.match(workflow, /StrictHostKeyChecking yes/);
   assert.match(workflow, /DEPLOY_PATH must be exactly \/var\/www\/wechat-layout/,
     '误配的部署路径必须在任何远程写入前失败');
   assert.match(workflow, /KNOWN_HOSTS: \$\{\{ secrets\.SERVER_KNOWN_HOSTS \}\}/,
