@@ -130,6 +130,46 @@ test('uploadNonCdnImages uploads local asset refs before copy', async (t) => {
   assert.match(result.footerCopy, /https:\/\/oss\.example\/bobo-card\.webp/);
 });
 
+test('uploadNonCdnImages keeps safe bitmap data when optional OSS upload fails', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('busy', { status: 503 });
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const safeData = 'data:image/png;base64,c2FmZS1iaXRtYXA=';
+  const result = await uploadNonCdnImages(`<p><img src="${safeData}"></p>`, '');
+
+  assert.equal(result.failed, 1);
+  assert.match(result.articleCopy, new RegExp(safeData.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('uploadNonCdnImages leaves headroom under the server six-request concurrency guard', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let active = 0;
+  let maxActive = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), '/api/oss-upload');
+    const body = JSON.parse(options.body || '{}');
+    const key = Object.keys(body.base64_images || {})[0];
+    active++;
+    maxActive = Math.max(maxActive, active);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    active--;
+    return new Response(JSON.stringify({ results: { [key]: `https://oss.example/${key}.png` } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const html = Array.from({ length: 12 }, (_, i) => (
+    `<img src="data:image/png;base64,aW1hZ2Ut${i}">`
+  )).join('');
+  const result = await uploadNonCdnImages(html, '');
+
+  assert.equal(result.failed, 0);
+  assert.ok(maxActive <= 4, `expected at most 4 parallel uploads, observed ${maxActive}`);
+});
+
 test('uploadNonCdnImages: WeChat channel (transferMmbiz=false) leaves mmbiz URLs untouched', async (t) => {
   const originalFetch = globalThis.fetch;
   const calls = [];

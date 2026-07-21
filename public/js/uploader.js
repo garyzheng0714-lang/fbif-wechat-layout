@@ -9,6 +9,11 @@ const WECHAT_IMAGE_HOSTS = new Set([
   'wx.qlogo.cn',
 ]);
 
+// The API admits at most six concurrent expensive image requests in total.
+// Keep two slots free for the independently prepared more-articles image and
+// explicit asset uploads from the same editor session.
+const BASE64_UPLOAD_CONCURRENCY = 4;
+
 export function isMmbizUrl(url) {
   try {
     const u = new URL(String(url || ''));
@@ -240,7 +245,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
 
   let done = 0;
   const failedTasks = [];
-  const CONCURRENCY = Math.min(tasks.length, 50);
+  const concurrency = Math.min(tasks.length, BASE64_UPLOAD_CONCURRENCY);
   let next = 0;
 
   async function worker() {
@@ -271,7 +276,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker()));
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
   const failedSrcs = lazyFailedSrcs.concat(mmbizFailedSrcs, failedTasks.map(t => t.src));
   if (failedSrcs.length > 0) {

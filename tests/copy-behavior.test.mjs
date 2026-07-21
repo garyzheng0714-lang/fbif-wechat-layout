@@ -170,7 +170,7 @@ test('copyContent writes clipboard before pending more-articles preparation reso
       events.push('fallback');
       return false;
     },
-    _failedSrcs: [],
+    _failedSrcs: ['data:image/png;base64,safe-background-fallback'],
     Array,
     Set,
   };
@@ -183,6 +183,7 @@ test('copyContent writes clipboard before pending more-articles preparation reso
   assert.equal(prepareResolved, false, 'copyContent must finish before more-articles preparation resolves');
   assert.deepEqual(events, ['prepare:copy-click', 'clipboard:before']);
   assert.match(deps.copiedHtml, /更多文章安全副本/);
+  assert.equal(deps.window._copyImageWarning, 0, '安全的 data: 兜底不得因后台上传失败而误报缺图');
 
   prepareResolve();
   await pendingPreparation;
@@ -285,8 +286,13 @@ test('more articles prepared footer copy is projected through copy-safe cards be
 
   assert.match(prepareFn, /const copySafeCards = uploaded\.map\(copySafeMoreArticleCard\)/);
   assert.match(prepareFn, /const mergedFooter = normalizeWechatRichHtml\(mergeMoreArticlesIntoFooter\(baseFooter, copySafeCards\)\)/);
+  assert.match(
+    prepareFn,
+    /await materializeLazyImages\('', mergedFooter,/,
+    '更多文章权威重建页脚后，必须重新安全化 Bobo 等本地素材'
+  );
   assert.doesNotMatch(prepareFn, /await uploadNonCdnImages\('', mergedFooter,/);
-  assert.match(prepareFn, /_footerCopy = mergedFooter/);
+  assert.match(prepareFn, /_footerCopy = materializedFooter\.footerCopy/);
 });
 
 test('background image preparation re-projects MP footer copy through copy-safe more-article cards before writeback', async () => {
@@ -408,6 +414,10 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
     _articleBodyOnly: false,
     _copyRequiresWechatImageTransfer: false,
     _failedSrcs: [],
+    reconcileFailedImageRefs(value = deps._failedSrcs) {
+      deps._failedSrcs = Array.from(value || []);
+      return deps._failedSrcs;
+    },
     _uploadDone: false,
     _uploadPromise: null,
     _moreArticlesCopyJob: null,
@@ -510,7 +520,29 @@ test('copy warning is derived from final HTML unsafe image src and imgurl refs',
   assert.match(engine, /function findUnsafeCopyImageRefs\(html, requiresWechatTransfer\)/);
   assert.match(engine, /src\|imgurl/);
   assert.match(copyFn, /const unsafeCopyRefs = findUnsafeCopyImageRefs\(html, _copyRequiresWechatImageTransfer\)/);
-  assert.match(copyFn, /new Set\(\[ \.\.\.\(_failedSrcs \|\| \[\]\), \.\.\.unsafeCopyRefs \]\)/);
+  assert.match(copyFn, /const failedImgCount = ok\s*\? unsafeCopyRefs\.length\s*:\s*0/);
+  assert.doesNotMatch(
+    copyFn,
+    /new Set\(\[ \.\.\.\(_failedSrcs \|\| \[\]\), \.\.\.unsafeCopyRefs \]\)/,
+    '后台 OSS 上传失败不能代替最终剪贴板安全检查'
+  );
+});
+
+test('过期上传失败引用只保留当前复制产物中仍存在的图片', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const filterFailedImageRefsInHtml = new Function(`
+    ${extractFunction(engine, 'filterFailedImageRefsInHtml')}
+    return filterFailedImageRefsInHtml;
+  `)();
+
+  const current = 'data:image/png;base64,current';
+  const stale = 'data:image/png;base64,stale-footer';
+  const prefixOnly = 'data:image/png;base64,cur';
+  assert.deepEqual(
+    filterFailedImageRefsInHtml([stale, prefixOnly, current, current, ''], `<img src="${current}">`),
+    [current],
+    '失败列表必须以当前复制 HTML 为真值，并去重'
+  );
 });
 
 test('materialized DOCX image srcs are copy-safe but metadata image refs still warn', async () => {

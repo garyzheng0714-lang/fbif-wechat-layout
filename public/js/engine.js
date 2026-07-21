@@ -1431,12 +1431,37 @@ export function initApp(initialTemplate) {
     return refs;
   }
 
+  function filterFailedImageRefsInHtml(failedSrcs, html) {
+    const present = new Set();
+    const attrRe = /\b(?:src|imgurl)=(["'])([^"']+)\1/gi;
+    let match;
+    while ((match = attrRe.exec(String(html || ''))) !== null) present.add(match[2]);
+    const refs = [];
+    const seen = new Set();
+    for (const value of Array.isArray(failedSrcs) ? failedSrcs : []) {
+      const ref = String(value || '').trim();
+      if (!ref || seen.has(ref) || !present.has(ref)) continue;
+      seen.add(ref);
+      refs.push(ref);
+    }
+    return refs;
+  }
+
+  function reconcileFailedImageRefs(failedSrcs = _failedSrcs) {
+    const includeFooter = !_articleBodyOnly && isFooterEnabledForCurrentArticle();
+    const currentCopyHtml = _articleCopy + '\n' + (includeFooter ? _footerCopy : '');
+    _failedSrcs = filterFailedImageRefsInHtml(failedSrcs, currentCopyHtml);
+    return _failedSrcs;
+  }
+
   function markFailedImages(failedSrcs) {
-    if (!failedSrcs.length) return;
-    const imgs = document.getElementById('contentArea').querySelectorAll('img');
+    const contentArea = document.getElementById('contentArea');
+    if (!contentArea) return;
+    const refs = Array.isArray(failedSrcs) ? failedSrcs : [];
+    const imgs = contentArea.querySelectorAll('img');
     imgs.forEach(img => {
       const src = img.getAttribute('src') || '';
-      if (failedSrcs.some(fs => src.includes(fs.substring(0, 60)))) {
+      if (refs.some(fs => src.includes(fs.substring(0, 60)))) {
         img.style.outline = '3px solid #ff4d4f';
         img.style.outlineOffset = '-3px';
         img.title = '上传失败 — 点击"重试上传"';
@@ -1500,8 +1525,24 @@ export function initApp(initialTemplate) {
       const copySafeCards = uploaded.map(copySafeMoreArticleCard);
       const mergedFooter = normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(baseFooter, copySafeCards));
       if (gate.stale()) return false;
-      _footerCopy = mergedFooter;
+      // Rebuilding from the base footer reintroduces same-origin assets such as
+      // the Bobo card. Materialize them again before this path becomes the
+      // authoritative copy footer; bitmap data remains immediately safe even
+      // when the optional OSS enhancement is unavailable.
+      const materializedFooter = await materializeLazyImages('', mergedFooter, {
+        onLog(...args) {
+          if (!gate.stale()) logConv(...args);
+        },
+      });
+      if (gate.stale()) return false;
+      const pendingFailedRefs = (_failedSrcs || []).concat(materializedFooter.failedSrcs || []);
+      _footerCopy = materializedFooter.footerCopy;
       footerCopyGate.invalidate();
+      reconcileFailedImageRefs(pendingFailedRefs);
+      if (!_failedSrcs.length) {
+        resetRetryUploadUI();
+        markFailedImages([]);
+      }
       logConv('info', '更多文章图片已后台准备完成', { reason });
       return true;
     }).catch(err => {
@@ -1666,10 +1707,11 @@ export function initApp(initialTemplate) {
         if (articleResult.stale()) return false;
         _articleCopy = result.articleCopy;
         if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
-        _failedSrcs = result.failedSrcs || [];
+        reconcileFailedImageRefs(result.failedSrcs || []);
         _uploadDone = true;
-        if (result.failed > 0) {
-          statsBar.textContent = uploadStatus(stableStats, result.failed + '张图片准备失败');
+        const failedCount = _failedSrcs.length;
+        if (failedCount > 0) {
+          statsBar.textContent = uploadStatus(stableStats, failedCount + '张图片准备失败');
           markFailedImages(_failedSrcs);
         } else {
           statsBar.textContent = stableStats;
@@ -1703,16 +1745,17 @@ export function initApp(initialTemplate) {
         if (articleResult.stale()) return;
         _articleCopy = result.articleCopy;
         if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
-        _failedSrcs = result.failedSrcs || [];
+        reconcileFailedImageRefs(result.failedSrcs || []);
       },
     }).then(result => {
       if (articleResult.stale()) return false;
       _articleCopy = result.articleCopy;
       if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
-      _failedSrcs = result.failedSrcs || [];
+      reconcileFailedImageRefs(result.failedSrcs || []);
       _uploadDone = true;
-      if (result.failed > 0) {
-        statsBar.textContent = uploadStatus(stableStats, result.failed + '张图片上传失败');
+      const failedCount = _failedSrcs.length;
+      if (failedCount > 0) {
+        statsBar.textContent = uploadStatus(stableStats, failedCount + '张图片上传失败');
         markFailedImages(_failedSrcs);
         if (retryBtn) retryBtn.style.display = 'inline-block';
       } else {
@@ -1724,7 +1767,11 @@ export function initApp(initialTemplate) {
   }
 
   window.retryUpload = async function() {
-    if (!_failedSrcs.length) return;
+    reconcileFailedImageRefs();
+    if (!_failedSrcs.length) {
+      resetRetryUploadUI();
+      return true;
+    }
     retryGate.invalidate();
     const retryCommit = retryGate.capture();
     const retryBtn = document.getElementById('retryBtn');
@@ -1746,10 +1793,11 @@ export function initApp(initialTemplate) {
       if (articleResult.stale() || retryCommit.stale()) return false;
       _articleCopy = result.articleCopy;
       if (!footerWriteGate.stale()) _footerCopy = copySafeFooterAfterImagePreparation(result.footerCopy);
-      _failedSrcs = result.failedSrcs;
+      reconcileFailedImageRefs(result.failedSrcs);
 
-      if (result.failed > 0) {
-        statsBar.textContent = result.failed + '张图片仍然失败';
+      const failedCount = _failedSrcs.length;
+      if (failedCount > 0) {
+        statsBar.textContent = failedCount + '张图片仍然失败';
         markFailedImages(_failedSrcs);
       } else {
         statsBar.textContent = hasDocumentSummaryCard() ? '' : '全部图片已就绪';
@@ -1938,14 +1986,12 @@ export function initApp(initialTemplate) {
     if (copyAction.stale()) return false;
     _lastCopiedHtml = ok ? html : '';
     const imgCount = (html.match(/<img[\s>]/gi) || []).length;
-    // 复制已写入剪贴板，但若仍有图片上传失败（_failedSrcs 非空），粘进后台这些图会缺失。
-    // 必须显式告警、不能静默显示「✓已复制」让用户白发一篇（A 线 P0：消灭复制假成功）。
-    const failedImgCount = ok
-      ? Array.from(new Set([ ...(_failedSrcs || []), ...unsafeCopyRefs ])).length
-      : 0;
+    // 告警只以已写入剪贴板的最终 HTML 为真值。OSS 上传是后台增强；
+    // 公众号 <img src> 中的位图 data: 仍会被微信粘贴转存，不得误报为缺图。
+    const failedImgCount = ok ? unsafeCopyRefs.length : 0;
     window._copyImageWarning = failedImgCount;
     logConv(ok ? (failedImgCount ? 'warn' : 'info') : 'error',
-      ok ? (failedImgCount ? '复制完成，但有图片未上传成功' : '复制完成') : '复制失败', {
+      ok ? (failedImgCount ? '复制完成，但有图片无法安全粘贴' : '复制完成') : '复制失败', {
         method,
         htmlSize: (html.length / 1024).toFixed(1) + 'KB',
         textChars: plainText.length,
@@ -2165,6 +2211,7 @@ export function initApp(initialTemplate) {
         bodyOnly: _articleBodyOnly,
       };
     }
+    reconcileFailedImageRefs();
     const ca = document.getElementById('contentArea');
     if (ca) {
       ca.innerHTML = dom.content_area_html || '';
