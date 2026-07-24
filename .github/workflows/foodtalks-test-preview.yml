@@ -99,6 +99,8 @@ jobs:
               echo "job_id=${job_id}" >>"${GITHUB_OUTPUT}"
               echo "news_id=${news_id}" >>"${GITHUB_OUTPUT}"
               echo "preview_url=${preview_url}" >>"${GITHUB_OUTPUT}"
+              echo "FoodTalks test news ID: ${news_id}"
+              echo "Preview URL: ${preview_url}"
               exit 0
             fi
 
