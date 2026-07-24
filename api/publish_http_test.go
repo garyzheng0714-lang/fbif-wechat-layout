@@ -472,19 +472,18 @@ func TestPublishJobStoreConcurrentCreate(t *testing.T) {
 func TestRenderSiteHTMLReusesProxyCore(t *testing.T) {
 	var gotAuth, gotPath string
 	var gotBody map[string]any
-	rule := testPublishRenderRule()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotPath = r.URL.Path
 		json.NewDecoder(r.Body).Decode(&gotBody)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(successfulPublishRenderResult("<p>ok</p>", rule))
+		json.NewEncoder(w).Encode(successfulPublishRenderResult("<p>ok</p>", testPublishResolvedRule()))
 	}))
 	defer srv.Close()
 	t.Setenv("RENDER_SERVICE_URL", srv.URL)
 	t.Setenv("RENDER_TOKEN", "render-tok")
 
-	result, err := renderSiteHTML(context.Background(), "标题", "https://mp.weixin.qq.com/s/x", `[{"k":"p","text":"正文"}]`, rule)
+	result, err := renderSiteHTML(context.Background(), "标题", "https://mp.weixin.qq.com/s/x", `[{"k":"p","text":"正文"}]`, true)
 	if err != nil {
 		t.Fatalf("renderSiteHTML: %v", err)
 	}
@@ -497,12 +496,12 @@ func TestRenderSiteHTMLReusesProxyCore(t *testing.T) {
 	if gotBody["packId"] != sitePublishRulePackID || gotBody["isRepost"] != true {
 		t.Fatalf("渲染参数不符：packId=%v isRepost=%v", gotBody["packId"], gotBody["isRepost"])
 	}
-	if gotBody["ruleMode"] != "exact" || gotBody["ruleSnapshot"] == nil {
-		t.Fatalf("自动发布必须携带 exact 规则快照：%v", gotBody)
+	if gotBody["ruleMode"] != "latest" || gotBody["ruleSnapshot"] != nil {
+		t.Fatalf("自动发布必须现场读取最新规则，不能携带旧快照：%v", gotBody)
 	}
 	// 缺 RENDER_TOKEN 必须 fail loud，不得无鉴权裸调。
 	t.Setenv("RENDER_TOKEN", "")
-	if _, err := renderSiteHTML(context.Background(), "标题", "src", "[]", rule); err == nil {
+	if _, err := renderSiteHTML(context.Background(), "标题", "src", "[]", true); err == nil {
 		t.Fatalf("RENDER_TOKEN 缺失应报错")
 	}
 }

@@ -92,8 +92,8 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 		"<p>作者：Mote莫特</p><p>正文</p>",
 		1,
 	)
-	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error) {
-		return successfulPublishRenderResult(renderedWithAuthor, rule), nil
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		return successfulPublishRenderResult(renderedWithAuthor, testPublishResolvedRule()), nil
 	}
 	aiCover := ossURLFor("https://mmbiz.qpic.cn/b.jpg")
 	gotReq := newARKStub(t, func() (int, string) {
@@ -157,6 +157,22 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 	}
 	if !strings.Contains(userText, "测试标题") || !strings.Contains(userText, "正文") {
 		t.Fatalf("user 文本应含标题与纯文本正文：%q", userText)
+	}
+}
+
+func TestPublishSiteIsRepostMatchesWebsiteEditorSemantics(t *testing.T) {
+	t.Setenv(siteOwnAccountsEnv, "FBIF食品饮料创新,FoodTalks")
+	plain := `[{"k":"txt","runs":[{"type":"txt","text":"正文内容"}]}]`
+	disclosed := `[{"k":"txt","runs":[{"type":"txt","text":"* 本文为转载文章。"}]},{"k":"txt","runs":[{"type":"txt","text":"正文内容"}]}]`
+
+	if publishSiteIsRepost("FBIF食品饮料创新", plain) {
+		t.Fatal("自家公众号且无转载声明时应按原创渲染")
+	}
+	if !publishSiteIsRepost("外部食品媒体", plain) {
+		t.Fatal("外部公众号应按转载渲染")
+	}
+	if !publishSiteIsRepost("FBIF食品饮料创新", disclosed) {
+		t.Fatal("自家公众号正文明确声明转载时，必须按转载渲染")
 	}
 }
 
@@ -325,6 +341,13 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 	news, _ = p.buildSiteNews(job, foodTalksPublishStatusDraft)
 	if news.SourceType != 1 || news.SourceName != "小食代" {
 		t.Fatalf("声明出处应判转载：type=%d name=%q", news.SourceType, news.SourceName)
+	}
+	// 即使 AI 未抽到外部来源，自家号正文明确声明转载时，CMS 与排版仍必须一致按转载。
+	job.AISource = ""
+	job.BlocksJSON = `[{"k":"txt","runs":[{"type":"txt","text":"本文为转载文章。"}]}]`
+	news, _ = p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	if news.SourceType != 1 {
+		t.Fatalf("正文明确转载时 CMS sourceType 必须与排版一致：type=%d", news.SourceType)
 	}
 }
 

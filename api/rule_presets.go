@@ -1265,6 +1265,7 @@ func writeAccountRevisionConflict(w http.ResponseWriter, conflict *accountRevisi
 
 func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 	mux.HandleFunc("GET /api/rules/active", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		preset, err := store.activeForAccount(r.URL.Query().Get("account"))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

@@ -84,15 +84,6 @@ type foodTalksAPI interface {
 	UpdateNews(ctx context.Context, n foodTalksNews) error
 }
 
-type publishRenderRule struct {
-	AccountID  string         `json:"account_id"`
-	PresetID   string         `json:"preset_id"`
-	Revision   int            `json:"revision"`
-	ConfigHash string         `json:"config_hash"`
-	Config     map[string]any `json:"config"`
-	Behavior   map[string]any `json:"behavior"`
-}
-
 type publishResolvedRule struct {
 	AccountID  string `json:"account_id"`
 	PresetID   string `json:"preset_id"`
@@ -107,31 +98,6 @@ type publishRenderResult struct {
 	RendererBuildSHA string              `json:"renderer_build_sha"`
 	OutputHash       string              `json:"output_hash"`
 	Error            string              `json:"error,omitempty"`
-}
-
-func publishRenderRuleFromPreset(accountID string, preset rulePreset) publishRenderRule {
-	hash := strings.TrimSpace(preset.ConfigHash)
-	if hash == "" {
-		hash = ruleConfigHash(preset.Config, preset.Behavior)
-	}
-	return publishRenderRule{
-		AccountID: accountID, PresetID: preset.ID, Revision: preset.Version,
-		ConfigHash: hash, Config: preset.Config, Behavior: preset.Behavior,
-	}
-}
-
-func (r publishRenderRule) validate() error {
-	if r.AccountID != foodTalksSiteRuleAccountID || strings.TrimSpace(r.PresetID) == "" || r.Revision < 1 {
-		return errors.New("自动发布规则快照身份无效")
-	}
-	if r.Config == nil || r.Behavior == nil {
-		return errors.New("自动发布规则快照内容不完整")
-	}
-	wantHash := ruleConfigHash(r.Config, r.Behavior)
-	if r.ConfigHash == "" || r.ConfigHash != wantHash {
-		return fmt.Errorf("自动发布规则快照指纹不匹配：want %s, got %s", wantHash, r.ConfigHash)
-	}
-	return nil
 }
 
 func publishRenderOutputHash(html string) string {
@@ -154,9 +120,9 @@ type publishPipeline struct {
 	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
 	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7）
 	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, canonicalURL, blocksJSON string, err error)
-	// render Block[] → ft-default 规则包内联 HTML（默认走 render_proxy 转发内核）
-	resolveRenderRule func() (publishRenderRule, error)
-	render            func(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error)
+	// render Block[] → ft-default 规则包内联 HTML（默认走 render_proxy 转发内核）。
+	// 规则由渲染服务在每次请求内读取最新激活版本，调用方只传文章语义。
+	render func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error)
 	// ossUpload 整批图片 URL → OSS 转存（默认走 /api/oss-upload 的上游代理内核，urls 模式）
 	ossUpload func(ctx context.Context, urls []string) (map[string]string, error)
 	// enrich AI 预填发布参数（M5，默认 arkEnrichArticle）；nil / 失败都走规则兜底，
@@ -217,16 +183,6 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		spawn:             func(f func()) { go f() },
 		retryNotification: func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
 		now:               time.Now,
-	}
-	p.resolveRenderRule = func() (publishRenderRule, error) {
-		if rules == nil {
-			return publishRenderRule{}, errors.New("规则存储未初始化")
-		}
-		preset, err := rules.activeForAccount(foodTalksSiteRuleAccountID)
-		if err != nil {
-			return publishRenderRule{}, fmt.Errorf("读取自动发布规则失败: %w", err)
-		}
-		return publishRenderRuleFromPreset(foodTalksSiteRuleAccountID, preset), nil
 	}
 	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
 		return fetchSiteArticle(rules, articleURL)
@@ -319,20 +275,19 @@ func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string
 }
 
 // renderSiteHTML 进程内复用 render_proxy.go 的转发内核，packId=ft-default；自动发布
-// 强制 exact 模式并携带已持久化规则快照，Node 不再自行读取“当前规则”。
-func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error) {
+// 强制 latest 模式，由 Node 在每次请求内读取最新激活规则，不接受任务内旧快照。
+func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
 	token := renderToken()
 	if token == "" {
 		return publishRenderResult{}, errors.New("RENDER_TOKEN 未配置：无法调用渲染服务")
 	}
 	payload, err := json.Marshal(map[string]any{
-		"title":        title,
-		"source":       source,
-		"blocks":       json.RawMessage(blocksJSON),
-		"isRepost":     true,
-		"packId":       sitePublishRulePackID,
-		"ruleMode":     "exact",
-		"ruleSnapshot": rule,
+		"title":    title,
+		"source":   source,
+		"blocks":   json.RawMessage(blocksJSON),
+		"isRepost": isRepost,
+		"packId":   sitePublishRulePackID,
+		"ruleMode": "latest",
 	})
 	if err != nil {
 		return publishRenderResult{}, fmt.Errorf("序列化渲染请求失败: %w", err)
@@ -579,60 +534,16 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 	return err
 }
 
-func (p *publishPipeline) pinnedRenderRule(job publishJob) (publishRenderRule, error) {
-	if strings.TrimSpace(job.RuleSnapshotJSON) != "" {
-		var rule publishRenderRule
-		if err := json.Unmarshal([]byte(job.RuleSnapshotJSON), &rule); err != nil {
-			return publishRenderRule{}, fmt.Errorf("任务中的规则快照损坏: %w", err)
-		}
-		if err := rule.validate(); err != nil {
-			return publishRenderRule{}, err
-		}
-		if job.RulePresetID != rule.PresetID || job.RuleRevision != rule.Revision || job.RuleConfigHash != rule.ConfigHash {
-			return publishRenderRule{}, errors.New("任务规则引用与持久化快照不一致")
-		}
-		return rule, nil
-	}
-	if p.resolveRenderRule == nil {
-		return publishRenderRule{}, errors.New("自动发布规则解析器未配置")
-	}
-	rule, err := p.resolveRenderRule()
-	if err != nil {
-		return publishRenderRule{}, err
-	}
-	if err := rule.validate(); err != nil {
-		return publishRenderRule{}, err
-	}
-	snapshot, err := json.Marshal(rule)
-	if err != nil {
-		return publishRenderRule{}, fmt.Errorf("序列化自动发布规则快照失败: %w", err)
-	}
-	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
-		return current.Stage == publishStageRendering && current.ContentVersion == job.ContentVersion &&
-			current.PendingContentHash == "" && current.RuleSnapshotJSON == ""
-	}, func(current *publishJob) {
-		current.RulePresetID = rule.PresetID
-		current.RuleRevision = rule.Revision
-		current.RuleConfigHash = rule.ConfigHash
-		current.RuleSnapshotJSON = string(snapshot)
-	})
-	if err != nil {
-		return publishRenderRule{}, fmt.Errorf("持久化自动发布规则快照失败: %w", err)
-	}
-	if !swapped {
-		return publishRenderRule{}, errPublishContentSuperseded
-	}
-	return rule, nil
-}
+var publishRuleConfigHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-func validatePublishRenderResult(result publishRenderResult, rule publishRenderRule) error {
+func validatePublishRenderResult(result publishRenderResult) error {
 	if strings.TrimSpace(result.HTML) == "" {
 		return errors.New("渲染服务返回空 HTML")
 	}
 	resolved := result.ResolvedRule
-	if resolved.AccountID != rule.AccountID || resolved.PresetID != rule.PresetID ||
-		resolved.Revision != rule.Revision || resolved.ConfigHash != rule.ConfigHash || resolved.Source != "snapshot" {
-		return errors.New("渲染服务没有使用任务固定的规则快照")
+	if resolved.AccountID != foodTalksSiteRuleAccountID || strings.TrimSpace(resolved.PresetID) == "" ||
+		resolved.Revision < 1 || !publishRuleConfigHashPattern.MatchString(resolved.ConfigHash) || resolved.Source != "server" {
+		return errors.New("渲染服务没有返回本次请求实际使用的最新激活规则")
 	}
 	if strings.TrimSpace(result.RendererBuildSHA) == "" {
 		return errors.New("渲染服务未返回 renderer build SHA")
@@ -644,27 +555,28 @@ func validatePublishRenderResult(result publishRenderResult, rule publishRenderR
 	return nil
 }
 
-// stageRender blocks → ft-default 规则包内联 HTML（与网站人工排版同源）。规则快照必须
-// 在调用 renderer 前落盘；失败重试继续使用同一 revision，绝不追随当前活动规则。
+// stageRender blocks → ft-default 规则包内联 HTML（与网站人工排版同源）。
+// 每次调用 renderer 都读取最新激活规则；失败重试同样追随重试时的最新规则。
 func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error {
 	if strings.TrimSpace(job.BlocksJSON) == "" {
 		return errors.New("任务缺少已抓取的内容块（blocks），无法排版；请重试从抓取阶段续跑")
 	}
-	rule, err := p.pinnedRenderRule(job)
+	isRepost := publishSiteIsRepost(job.SourceName, job.BlocksJSON)
+	result, err := p.render(ctx, job.Title, job.SourceURL, job.BlocksJSON, isRepost)
 	if err != nil {
 		return err
 	}
-	result, err := p.render(ctx, job.Title, job.SourceURL, job.BlocksJSON, rule)
-	if err != nil {
-		return err
-	}
-	if err := validatePublishRenderResult(result, rule); err != nil {
+	if err := validatePublishRenderResult(result); err != nil {
 		return err
 	}
 	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageRendering && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
 	}, func(j *publishJob) {
 		j.ContentHTML = result.HTML
+		j.RulePresetID = result.ResolvedRule.PresetID
+		j.RuleRevision = result.ResolvedRule.Revision
+		j.RuleConfigHash = result.ResolvedRule.ConfigHash
+		j.RuleSnapshotJSON = ""
 		j.RendererBuildSHA = result.RendererBuildSHA
 		j.RenderOutputHash = result.OutputHash
 		j.Stage = publishStageMirroring
@@ -1696,7 +1608,7 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 //  3. 其余 → 转载，来源=公众号名（直接监控外部公众号的场景）。
 //
 // source_type 语义 0=原创/自有、1=转载，来自 mc-fb 库近一月 163 篇实测分布（规范 §1）。
-func siteSourceFor(job publishJob) (int, string) {
+func siteOwnAccounts() map[string]bool {
 	own := map[string]bool{}
 	raw := strings.TrimSpace(os.Getenv(siteOwnAccountsEnv))
 	if raw == "" {
@@ -1707,14 +1619,52 @@ func siteSourceFor(job publishJob) (int, string) {
 			own[name] = true
 		}
 	}
+	return own
+}
+
+var explicitSiteRepostDisclosure = regexp.MustCompile(`^本文为转载文章(?:[，,：:].*)?[。.!！]?$`)
+
+// publishSiteIsRepost 与网页编辑器使用同一口径：正文明确转载声明优先；
+// 否则自家公众号按原创，其余公众号按转载。规则只决定文章语义，排版样式仍由
+// 每次 /api/render 请求现场读取的最新激活规则决定。
+func publishSiteIsRepost(sourceName, blocksJSON string) bool {
+	var blocks []Block
+	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err == nil {
+		for _, block := range blocks {
+			text := block.Text
+			if len(block.Runs) > 0 {
+				var b strings.Builder
+				for _, run := range block.Runs {
+					if run.Type != "img" && run.Type != "br" {
+						b.WriteString(run.Text)
+					}
+				}
+				text = b.String()
+			}
+			text = strings.Map(func(r rune) rune {
+				if r == '*' || r == '＊' || r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+					return -1
+				}
+				return r
+			}, text)
+			if explicitSiteRepostDisclosure.MatchString(text) {
+				return true
+			}
+		}
+	}
+	return !siteOwnAccounts()[strings.TrimSpace(sourceName)]
+}
+
+func siteSourceFor(job publishJob) (int, string) {
+	own := siteOwnAccounts()
 	if src := strings.TrimSpace(job.AISource); src != "" && !own[src] {
 		return 1, src
 	}
 	name := strings.TrimSpace(job.SourceName)
-	if own[name] {
-		return 0, name
+	if publishSiteIsRepost(name, job.BlocksJSON) {
+		return 1, name
 	}
-	return 1, name
+	return 0, name
 }
 
 // siteFrontURL 前台地址（article_url 回填用），默认测试环境；生产切换只改 env。

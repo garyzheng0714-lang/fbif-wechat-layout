@@ -23,8 +23,9 @@
   `content_source_url` 字段承载。
 - **鉴权**：两个新端点都要求 `Authorization: Bearer $RENDER_TOKEN`（env，缺失=fail loud 拒答，
   沿用 ADMIN_PASSWORD 的「缺配置拒绝服务」哲学）。Node 服务只监听 127.0.0.1，双层校验。
-- **规则配置**：渲染时从 Go API `GET /api/rules/active?account=fbif` 拉当前生效预设（60s 缓存），
-  拉不到降级 `DEFAULT_RULE_CONFIG`——与网页端 loadActiveRulePreset 的降级行为一致。
+- **规则配置**：渲染时每次都从 Go API `GET /api/rules/active?account=fbif` 拉当前生效预设，
+  不做进程内缓存；拉取失败显式失败，不使用默认样式伪装成功。运营保存并激活规则后，下一次
+  `/api/render` 请求立即生效，无需通知调用方或重启服务。
 
 ## 改动清单
 
@@ -83,8 +84,9 @@
   flat 参数 + behavior + 原始结构化 modules（normalizeRuleConfig 会丢 bottom_blocks 等，须走 raw）；
   mctoc 锚点强制关（与 site.html 同口径，且 genMctocId 随机、开了输出不可复现）；
   无 localStorage 单篇覆盖 → 服务端默认即最终态。
-- **规则缓存改按账号分 key**（Map，各 60s）；window._activeConfig 每请求在同步段重灌，
-  拉取失败显式清空（不留上一账号规则让 fbif.js 错读别家页脚）。交错渲染互不污染有测试守。
+- **规则读取改为逐请求实时加载**；window._activeConfig 每请求在同步段重灌，拉取失败直接
+  中止渲染（不留上一账号规则让 fbif.js 错读别家页脚，也不降级到默认版式）。交错渲染互不
+  污染与“相邻两次请求立即读到新 revision”都有测试守。
 - **表格 CMS 存活开关（红线 #24）确认沿 headless 路径生效**：outerBorder/cmsSurvival 写死在
   foodtalks-site.js renderTable 调用处（渠道属性，非运行时开关），API 路径自然携带；
   输出实测 table border/cellpadding + td align/bgcolor + 表头 strong 齐全。

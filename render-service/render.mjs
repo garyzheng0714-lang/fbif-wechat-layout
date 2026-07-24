@@ -58,7 +58,7 @@ const mod = (p) => import(pathToFileURL(path.join(PUBLIC_DIR, 'js', p)).href);
 
 // —— 渠道参数表（差异只能以参数进入；渲染主流程按表驱动，不写 if(packId===...) 散落分支）——
 //   templatePath          L2 渲染器（按渠道物理隔离，红线 #19）
-//   rulesAccount          L3 规则账号（/api/rules/active?account=<id>；缓存按账号分 key）
+//   rulesAccount          L3 规则账号（每次请求读取 /api/rules/active?account=<id>）
 //   configViaOpts         模板读规则的方式：fbif.js 自行读 window._activeConfig（模板契约），
 //                         foodtalks-site.js 读 opts.config（engine.js renderArticleInput 同款）
 //   footerViaTemplate     页脚出口：fbif 用 renderBottomFooter 单独渲染拼接；
@@ -202,39 +202,47 @@ function exactRuleEntry(channel, snapshot) {
 // engine.js copyContent 对网站输出同样跑 processForCopy（网站 HTML 本就全内联，近似 no-op）。
 const themeCSS = await readFile(path.join(PUBLIC_DIR, 'css', 'wx-theme.css'), 'utf8');
 
-// 当前生效规则预设：与网页端 loadActiveRulePreset 同语义——服务端为准、拉不到降级默认。
-// 缓存按账号分 key（Map），两个渠道各自 60s 过期，互不污染。
+// 当前生效规则预设：每次渲染都从规则 API 读取，服务端是唯一真相源。
+// 不做进程内缓存：运营保存并激活规则后，下一次 /api/render 必须立即生效。
+// 拉取失败也不能用内置默认值伪装成功，否则会把错误版式写进正式草稿。
 // 注意：这里只取数不碰全局；window._activeConfig 的写入收敛在 applyChannelRuleConfig，
 // 且必须在渲染前的同步段执行（避免并发请求间 await 交错互踩全局）。
-const _ruleCache = new Map(); // rulesAccount -> { at, preset|null, config }
 async function activeRulePreset(packId, channel) {
   const account = channel.rulesAccount;
-  const hit = _ruleCache.get(account);
-  if (hit && Date.now() - hit.at < 60_000) return hit;
   const profile = RULE_PROFILES[channel.ruleProfile];
-  const fallback = fallbackRuleForPack(packId);
-  const entry = { at: Date.now(), preset: null, config: fallback.config, behavior: fallback.behavior, source: 'default' };
+  const entry = { preset: null, config: {}, behavior: {}, source: 'server' };
   try {
-    const resp = await realFetch(RULES_API_ORIGIN + '/api/rules/active?account=' + encodeURIComponent(account), { signal: AbortSignal.timeout(5000) });
-    if (resp.ok) {
-      const data = await resp.json();
-      if (data && data.preset && data.preset.config) {
-        entry.preset = {
-          ...data.preset,
-          raw_config: data.preset.config,
-          config: normalizeRuleConfig(data.preset.config),
-          behavior: profile.normalizeBehavior(data.preset.behavior),
-        };
-        entry.behavior = entry.preset.behavior;
-        entry.configHash = data.preset.config_hash || renderRuleConfigHash(data.preset.config, data.preset.behavior || {});
-        entry.source = 'server';
-      }
+    const resp = await realFetch(
+      RULES_API_ORIGIN + '/api/rules/active?account=' + encodeURIComponent(account),
+      {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(5000),
+      },
+    );
+    if (!resp.ok) {
+      throw new Error('HTTP ' + resp.status);
     }
+    const data = await resp.json();
+    if (!data || !data.preset || !data.preset.config) {
+      throw new Error('响应缺少 preset.config');
+    }
+    entry.preset = {
+      ...data.preset,
+      raw_config: data.preset.config,
+      config: normalizeRuleConfig(data.preset.config),
+      behavior: profile.normalizeBehavior(data.preset.behavior),
+    };
+    entry.config = entry.preset.config;
+    entry.behavior = entry.preset.behavior;
+    entry.configHash = data.preset.config_hash || renderRuleConfigHash(data.preset.config, data.preset.behavior || {});
+    return entry;
   } catch (err) {
-    console.warn('[render] 规则预设拉取失败（account=' + account + '），使用该渠道默认配置：', err.message || err);
+    throw Object.assign(
+      new Error('无法读取最新激活规则（account=' + account + '）：' + String(err && (err.message || err))),
+      { status: 503 },
+    );
   }
-  _ruleCache.set(account, entry);
-  return entry;
 }
 
 // 把该账号规则灌进 window._activeConfig（fbif.js rawActiveModules / getActiveRuleConfig 的数据源），
@@ -289,7 +297,7 @@ export function absolutizeAssetURLs(html, origin = ASSET_ORIGIN) {
 // 同一渲染器（公众号转载走 repost 预设：提示声明 + Bobo 名片等）。
 export async function renderArticle({
   packId = 'fbif', title, source, blocks, isRepost = true, withFooter = true,
-  ruleMode = 'interactive', ruleSnapshot,
+  ruleMode = 'latest', ruleSnapshot,
 } = {}) {
   const channel = CHANNELS[packId];
   if (!channel) {
@@ -298,7 +306,7 @@ export async function renderArticle({
   if (!Array.isArray(blocks) || blocks.length === 0) {
     throw Object.assign(new Error('blocks 不能为空'), { status: 400 });
   }
-  if (ruleMode !== 'interactive' && ruleMode !== 'exact') {
+  if (ruleMode !== 'latest' && ruleMode !== 'interactive' && ruleMode !== 'exact') {
     throw Object.assign(new Error('未知 ruleMode：' + ruleMode), { status: 400 });
   }
   const entry = ruleMode === 'exact'

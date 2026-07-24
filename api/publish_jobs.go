@@ -65,7 +65,7 @@ type publishJob struct {
 	RulePresetID      string   `json:"rule_preset_id,omitempty"`
 	RuleRevision      int      `json:"rule_revision,omitempty"`
 	RuleConfigHash    string   `json:"rule_config_hash,omitempty"`
-	RuleSnapshotJSON  string   `json:"rule_snapshot_json,omitempty"` // 首次 rendering 前持久化；重试不追随活动规则漂移
+	RuleSnapshotJSON  string   `json:"rule_snapshot_json,omitempty"` // 历史兼容字段；最新规则模式不再写入
 	RendererBuildSHA  string   `json:"renderer_build_sha,omitempty"`
 	RenderOutputHash  string   `json:"render_output_hash,omitempty"`
 	CoverURL          string   `json:"cover_url,omitempty"`
