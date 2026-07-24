@@ -301,7 +301,9 @@ export function createUrlImportHandler({
         try { onBlocks(blocks, { title, url }); } catch { /* 摘要等附加填充失败不阻断导入 */ }
         if (stale()) return false;
         const articlePayload = { title, blocks, source: url };
-        if (sourceName) articlePayload.sourceName = sourceName;
+        // 保留 /api/fetch-article 的字段契约。渲染模板直接消费
+        // source_name 作为“正文无显式来源”时的公众号名称兜底。
+        if (sourceName) articlePayload.source_name = sourceName;
         if (byline) articlePayload.byline = byline;
         handleBlocks(articlePayload, { isRepost, source: 'url-import' });
         if (stale()) return false;
