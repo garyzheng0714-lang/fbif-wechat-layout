@@ -1,0 +1,135 @@
+name: Create FoodTalks test preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      article_url:
+        description: WeChat article URL to format into a FoodTalks test draft
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# The publishing store is single-writer and source-key idempotent. Serialize
+# manual preview runs so two operators cannot race the same draft workflow.
+concurrency:
+  group: foodtalks-test-preview
+  cancel-in-progress: false
+
+jobs:
+  create-preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      ARTICLE_URL: ${{ inputs.article_url }}
+      SITE_ORIGIN: https://fbifmp-layout.foodtalks.cn
+    steps:
+      - name: Create or resume a draft-only preview job
+        id: preview
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          if [ -z "${ADMIN_PASSWORD:-}" ]; then
+            echo "ADMIN_PASSWORD is not configured" >&2
+            exit 1
+          fi
+          case "${ARTICLE_URL}" in
+            https://mp.weixin.qq.com/*) ;;
+            *)
+              echo "article_url must be an https://mp.weixin.qq.com/ URL" >&2
+              exit 1
+              ;;
+          esac
+
+          readiness_json=$(curl --silent --show-error --fail \
+            --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
+            "${SITE_ORIGIN}/api/publish/readiness")
+          jq -e '
+            .ready == true and
+            .workers_paused == false and
+            .foodtalks.configured == true and
+            .foodtalks.target == "test" and
+            .foodtalks.target_matches_expected == true and
+            .http_review_enabled == false
+          ' <<<"${readiness_json}" >/dev/null
+
+          request_json=$(jq -n --arg url "${ARTICLE_URL}" '{url: $url}')
+          create_json=$(curl --silent --show-error --fail \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
+            --data "${request_json}" \
+            "${SITE_ORIGIN}/api/publish/site-sync")
+          job_id=$(jq -er '.job.id' <<<"${create_json}")
+
+          retry_sent=0
+          for _ in $(seq 1 90); do
+            detail_json=$(curl --silent --show-error --fail \
+              --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
+              "${SITE_ORIGIN}/api/publish/jobs/${job_id}")
+            stage=$(jq -er '.job.stage' <<<"${detail_json}")
+
+            if [ "${stage}" = "awaiting_review" ]; then
+              preview_sig=$(python3 - "${job_id}" <<'PY'
+          import hashlib
+          import hmac
+          import os
+          import sys
+
+          job_id = sys.argv[1]
+          key = os.environ["ADMIN_PASSWORD"].encode()
+          message = f"publish-preview:{job_id}".encode()
+          print(hmac.new(key, message, hashlib.sha256).hexdigest())
+          PY
+              )
+              preview_url="${SITE_ORIGIN}/preview/publish/${job_id}?t=${preview_sig}"
+              news_id=$(jq -er '.job.foodtalks_news_id' <<<"${detail_json}")
+              {
+                echo "### FoodTalks test preview"
+                echo
+                echo "- Draft job: #${job_id}"
+                echo "- FoodTalks test news ID: ${news_id}"
+                echo "- Preview: ${preview_url}"
+                echo
+                echo "This workflow creates a test draft only. It never approves or publishes it."
+              } >>"${GITHUB_STEP_SUMMARY}"
+              echo "job_id=${job_id}" >>"${GITHUB_OUTPUT}"
+              echo "news_id=${news_id}" >>"${GITHUB_OUTPUT}"
+              echo "preview_url=${preview_url}" >>"${GITHUB_OUTPUT}"
+              exit 0
+            fi
+
+            if [ "${stage}" = "failed" ]; then
+              if [ "${retry_sent}" -eq 0 ]; then
+                failed_stage=$(jq -r '.job.failed_stage // ""' <<<"${detail_json}")
+                review_action=$(jq -r '.job.review_action // ""' <<<"${detail_json}")
+                case "${failed_stage}:${review_action}" in
+                  created:|fetching:|rendering:|mirroring:|enriching:|assessing:|staging:)
+                    curl --silent --show-error --fail \
+                      --request POST \
+                      --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
+                      "${SITE_ORIGIN}/api/publish/jobs/${job_id}/retry" >/dev/null
+                    retry_sent=1
+                    sleep 5
+                    continue
+                    ;;
+                  *)
+                    error_message=$(jq -r '.job.error // "unknown publishing error"' <<<"${detail_json}")
+                    echo "Preview job #${job_id} stopped at non-retriable stage ${failed_stage}: ${error_message}" >&2
+                    exit 1
+                    ;;
+                esac
+              else
+                error_message=$(jq -r '.job.error // "unknown publishing error"' <<<"${detail_json}")
+                echo "Preview job #${job_id} failed: ${error_message}" >&2
+                exit 1
+              fi
+            fi
+            sleep 5
+          done
+
+          echo "Preview job #${job_id} did not reach awaiting_review within 7.5 minutes" >&2
+          exit 1
