@@ -84,6 +84,16 @@ function behaviorNumberParam(key, fallback) {
   return fallback;
 }
 
+// 读 behavior.params.<key>.default 为布尔值；缺失或非法时降级到 fallback。
+function behaviorBooleanParam(key, fallback) {
+  try {
+    const params = getActiveRuleBehavior().params || {};
+    const v = params[key] && params[key].default;
+    if (typeof v === 'boolean') return v;
+  } catch (e) { /* 降级到 fallback */ }
+  return fallback;
+}
+
 function behaviorContext(author, source) {
   return {
     article: {
@@ -679,6 +689,17 @@ function classifyBlocks(data) {
     // li and txt render the same (FBIF template has no dedicated list style);
     // collapsing them here keeps the renderer's switch simple.
     elems.push({ k: 'txt', runs, blankBefore: !!b.blankBefore, compact: !!b.compact });
+  }
+
+  // 微信抓取结构会返回公众号名称 source_name。仅当正文没有显式
+  // 来源/出品行时才用它兜底；正文署名始终优先，避免公众号名覆盖文章来源。
+  if (!isClipboardText && !source &&
+      behaviorBooleanParam('url_source_name_fallback_enabled', true)) {
+    const sourceName = String(data && data.source_name || '').trim();
+    if (sourceName) {
+      source = sourceName;
+      pushUniqueAttribution(attrs, { role: '来源', name: sourceName });
+    }
   }
 
   return { elems: elems.concat(orderArticleAttributions(attrs)), author, source, title: title || '', imgN };
