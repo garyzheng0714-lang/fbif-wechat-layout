@@ -483,7 +483,8 @@ test('createUrlImportHandler lets the website channel classify an owned WeChat s
   await handler();
 
   assert.equal(calls[0].options.isRepost, false);
-  assert.equal(calls[0].payload.sourceName, 'FBIF食品饮料创新');
+  assert.equal(calls[0].payload.source_name, 'FBIF食品饮料创新');
+  assert.equal(calls[0].payload.sourceName, undefined, '结构化渲染载荷必须保留 API 的 source_name 字段契约');
   assert.equal(calls[0].payload.byline, 'Sage');
   assert.deepEqual(calls[1].meta, {
     isRepost: false,
