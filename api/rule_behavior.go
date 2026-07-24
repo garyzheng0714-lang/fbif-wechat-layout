@@ -21,11 +21,14 @@ func defaultRuleBehavior() map[string]any {
 			// URL 导入开头署名扫描上限：微信原文常把「作者 | X」做成粗体/大字，
 			// 通用 DOM 分类会先把它判成 h。FBIF 渲染器在此前 N 个内容块内先按
 			// 署名语义识别，再接受 h/txt 等结构类型，避免正文中段同名标题被误搬。
-			"url_attribution_scan_limit":    map[string]any{"type": "number", "default": float64(12)},
-			"ref_section_regex":             map[string]any{"type": "string", "default": `^(参考(来源|文献|资料|链接)|信息来源)[：:]?$`},
-			"footer_prompt_marker":          map[string]any{"type": "string", "default": `^提示[：:]$`},
-			"footer_prompt_detection_regex": map[string]any{"type": "string", "default": `(?i)本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1`},
-			"docx_author_line_regex":        map[string]any{"type": "string", "default": `^作者[：:]\s*(.+)$`},
+			"url_attribution_scan_limit": map[string]any{"type": "number", "default": float64(12)},
+			// URL 正文没有显式来源/出品时，用微信抓取结构的 source_name（公众号名称）
+			// 作为文章来源兜底；正文显式来源始终优先。
+			"url_source_name_fallback_enabled": map[string]any{"type": "boolean", "default": true},
+			"ref_section_regex":                map[string]any{"type": "string", "default": `^(参考(来源|文献|资料|链接)|信息来源)[：:]?$`},
+			"footer_prompt_marker":             map[string]any{"type": "string", "default": `^提示[：:]$`},
+			"footer_prompt_detection_regex":    map[string]any{"type": "string", "default": `(?i)本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1`},
+			"docx_author_line_regex":           map[string]any{"type": "string", "default": `^作者[：:]\s*(.+)$`},
 			// DOCX 前置扫描：编辑部结构标记（整行「正文/封面/推荐语」等）命中即重置扫描窗口，
 			// 防止前置材料过长时作者行掉出上限 25（2026-07-11 生产事故：作者识别为空 →
 			// 前置不剥离 + Mote 署名图/名片开关连锁消失）。
