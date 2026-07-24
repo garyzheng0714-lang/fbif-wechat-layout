@@ -524,12 +524,14 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		// classification is deterministic, not inferred from a lossy MD
 		// intermediate. See wechat_blocks.go.
 		accountID := firstNonEmpty(req.AccountID, req.Account)
-		title, blocks, _, _, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
+		title, blocks, sourceName, byline, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
 		if derr == nil && len(blocks) > 0 {
 			writeJSON(w, 200, map[string]interface{}{
-				"title":  title,
-				"blocks": blocks,
-				"source": req.URL,
+				"title":       title,
+				"blocks":      blocks,
+				"source":      req.URL,
+				"source_name": sourceName,
+				"byline":      byline,
 			})
 			return
 		}

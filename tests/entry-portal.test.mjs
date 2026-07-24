@@ -169,7 +169,8 @@ test('site.html updates DOCX summary without wiping URL summaries, and resets MD
   assert.match(html, /fbif:article-session-activated/, '网站页应监听渲染 session 激活事件');
   assert.match(html, /session\.input\.kind !== 'docx' && session\.input\.kind !== 'md'/, 'blocks 路径摘要由 URL onBlocks 管，不应被事件重置');
   assert.match(html, /session\.input\.kind === 'docx'[\s\S]{0,120}session\.result\.summary/, 'DOCX 摘要应来自渲染结果');
-  assert.match(html, /summaryEl\.textContent = summary \|\| FOODTALKS_PREVIEW_META\.summary/, 'MD 等本地文件应重置为默认摘要，避免残留上一篇 DOCX 摘要');
+  assert.match(html, /summaryEl\.textContent = summary;/, 'MD 等本地文件应重置为空摘要，避免残留上一篇 DOCX 摘要或展示假数据');
+  assert.doesNotMatch(html, /summary:\s*['"]这是一段摘要['"]/, '网站摘要不得使用演示占位文本冒充真实内容');
 });
 
 test('site.html uses absolute /js/ paths for dynamic imports', async () => {

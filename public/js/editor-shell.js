@@ -60,6 +60,7 @@ function isSingleHttpUrl(text) {
 // opts.consume=true 时命中段从 blocks 原地移除（对齐 62139：摘要句不进正文流）。
 export function extractSiteSummary(blocks, opts = {}) {
   const maxLen = Number(opts.maxLen) > 0 ? Number(opts.maxLen) : 50;
+  const metadataLineRe = /^(?:作者|编辑|编审|责编|主编|美编|撰文|撰稿|来源|出处|出品|Author)\s*[：:]|^本文(?:系|为).{0,60}(?:原创|首发|授权)/i;
   for (let i = 0; i < (blocks || []).length; i++) {
     const b = blocks[i];
     if (!b || !b.k) continue;
@@ -70,11 +71,34 @@ export function extractSiteSummary(blocks, opts = {}) {
       ? b.runs.filter(r => r && (r.type === 'txt' || r.type === 'link')).map(r => r.text || '').join('')
       : (b.text || '')).trim();
     if (!text) continue;
+    // 作者/编辑/来源一旦出现在正文开头，说明这篇文章没有可安全自动消费的摘要。
+    // 不能继续向后猜首段，更不能把署名当摘要从 blocks 原地删除。
+    if (metadataLineRe.test(text)) return '';
     if (text.length > maxLen) return '';
     if (opts.consume) blocks.splice(i, 1);
     return text;
   }
   return '';
+}
+
+function importBlockText(block) {
+  if (!block || typeof block !== 'object') return '';
+  if (Array.isArray(block.runs)) {
+    return block.runs
+      .filter(run => run && run.type !== 'img' && run.type !== 'br')
+      .map(run => run.text || '')
+      .join('');
+  }
+  return block.text || '';
+}
+
+export function hasExplicitRepostDisclosure(blocks) {
+  return (blocks || []).some(block => {
+    const text = importBlockText(block)
+      .replace(/^[\s*＊]+|[\s*＊]+$/g, '')
+      .replace(/\s+/g, '');
+    return /^本文为转载文章(?:[，,：:].*)?[。.!！]?$/.test(text);
+  });
 }
 
 export function bindRailDivider({
@@ -182,6 +206,7 @@ export function createUrlImportHandler({
   onArticleIntent = () => {},
   onArticleUrl = () => {},
   onBlocks = () => {},
+  resolveIsRepost = () => true,
   importText = null,
   errorMessage = defaultFetchErrorMessage,
 } = {}) {
@@ -261,24 +286,36 @@ export function createUrlImportHandler({
       const payload = await resp.json();
       if (stale()) return false;
       const { title, blocks, content } = payload;
+      const sourceName = String(payload.source_name || '').trim();
+      const byline = String(payload.byline || '').trim();
+      let isRepost = true;
+      try {
+        isRepost = resolveIsRepost(payload) !== false;
+      } catch {
+        // 来源识别异常时保持 fail-closed：未知来源按转载处理。
+        isRepost = true;
+      }
       if (Array.isArray(blocks) && blocks.length > 0) {
         const handleBlocks = getHandleBlocks();
         if (!handleBlocks) throw new Error('blocks 路径未就绪');
         try { onBlocks(blocks, { title, url }); } catch { /* 摘要等附加填充失败不阻断导入 */ }
         if (stale()) return false;
-        handleBlocks({ title, blocks, source: url }, { isRepost: true, source: 'url-import' });
+        const articlePayload = { title, blocks, source: url };
+        if (sourceName) articlePayload.sourceName = sourceName;
+        if (byline) articlePayload.byline = byline;
+        handleBlocks(articlePayload, { isRepost, source: 'url-import' });
         if (stale()) return false;
         handedOffToRenderer = true;
-        onArticleUrl(url);
+        onArticleUrl(url, { isRepost, sourceName, byline });
       } else if (content) {
         const file = new FileCtor([content], (title || 'article') + '.md', { type: 'text/markdown' });
         const handleFile = getHandleFile();
         if (handleFile) {
           if (stale()) return false;
-          handleFile(file, { isRepost: true, source: 'url-import' });
+          handleFile(file, { isRepost, source: 'url-import' });
           if (stale()) return false;
           handedOffToRenderer = true;
-          onArticleUrl(url);
+          onArticleUrl(url, { isRepost, sourceName, byline });
         } else {
           const fi = documentRef.getElementById('fileInput');
           const dt = new DataTransferCtor();
