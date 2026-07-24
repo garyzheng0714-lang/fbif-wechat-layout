@@ -504,6 +504,68 @@ test('url-import attribution is emitted once at article tail before the standard
   assert.ok(html.indexOf('来源：剁椒Spicy') < html.indexOf('作者：亚娜'));
 });
 
+test('url-import opening attribution wins over heading classification and renders as two compact tail lines', () => {
+  const result = template.processBlocks({
+    title: '测试文章',
+    blocks: [
+      { k: 'img', src: 'https://example.com/banner.gif' },
+      { k: 'h', text: '编辑 | 少华' },
+      { k: 'h', text: '作者 | 少华' },
+      { k: 'h', text: '来源 | 咖门' },
+      txtBlock('正文第一段'),
+    ],
+  }, { isRepost: true });
+  const html = result.lines.join('\n');
+
+  assert.deepEqual(result.articleMeta, {
+    author: '少华',
+    source: '咖门',
+    author_normalized: '少华',
+  });
+  assert.equal(result.headingN, 0, '开头被误判成 h 的署名行不再计作正文标题');
+  assert.equal((html.match(/来源：咖门/g) || []).length, 1);
+  assert.equal((html.match(/作者：少华/g) || []).length, 1);
+  assert.equal((html.match(/编辑：少华/g) || []).length, 1);
+  assert.doesNotMatch(html, /class="wx-th">(?:来源|作者|编辑)/);
+  assert.ok(html.indexOf('正文第一段') < html.indexOf('来源：咖门'));
+  assert.ok(html.indexOf('来源：咖门') < html.indexOf('作者：少华，编辑：少华'));
+
+  const sourceSection = sectionForText(html, '来源：咖门');
+  const authorSection = sectionForText(html, '作者：少华，编辑：少华');
+  assert.doesNotMatch(sourceSection, /wx-gap/, '来源与作者/编辑之间不插空行');
+  assert.match(authorSection, /wx-gap/, '署名组结束后恢复标准段距');
+});
+
+test('url-import tail attribution keeps the requested blue 1.75 copy style', async () => {
+  const html = renderBlocks([
+    txtBlock('来源：咖门'),
+    txtBlock('作者：少华'),
+    txtBlock('编辑：少华'),
+    txtBlock('正文'),
+  ]);
+  const themeCSS = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
+  const copyHtml = processForCopy(html, themeCSS, DEFAULT_RULE_CONFIG);
+  const sourceSection = sectionForText(copyHtml, '来源：咖门');
+  const authorSection = sectionForText(copyHtml, '作者：少华，编辑：少华');
+
+  for (const section of [sourceSection, authorSection]) {
+    assert.match(section, /color:\s*#0070C0/i);
+    assert.match(section, /line-height:\s*1\.75/);
+  }
+  assert.match(sourceSection, /margin-bottom:\s*0/);
+});
+
+test('url-import heading-like attribution outside the opening scan window stays a heading', () => {
+  const blocks = Array.from({ length: 12 }, (_, i) => txtBlock(`正文第${i + 1}段`));
+  blocks.push({ k: 'h', text: '作者 | 品牌故事' });
+  const result = template.processBlocks({ title: '测试文章', blocks }, { isRepost: true });
+  const html = result.lines.join('\n');
+
+  assert.equal(result.articleMeta.author, '');
+  assert.equal(result.headingN, 1);
+  assert.match(html, /class="wx-th">作者 \| 品牌故事/);
+});
+
 test('clipboard article blocks keep author as body text and pasted paragraphs compact', () => {
   const result = template.processBlocks({
     title: '',
