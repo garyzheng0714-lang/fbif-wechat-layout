@@ -21,20 +21,28 @@ const ftRules = JSON.parse(await readFile(new URL('./fixtures/render-service-rul
 // 「页脚开启时 bottom_blocks 主路径正确渲染」，故桩里显式开启，模拟运营态。
 ftRules.preset.config.modules.bottom_blocks.enabled = true;
 ftRules.preset.config.modules.fbif_footer.enabled = true; // tip 片段开关挂在页脚库上
+fbifRules.preset.version = 1;
+ftRules.preset.version = 1;
 // 守网站 behavior 原始结构：这些字段不在公众号 normalizeRuleBehavior schema 里。
 // 若 headless 路径误走公众号 normalizer，author_regex/lists 会被删除。
 ftRules.preset.behavior.author_regex = '^\\s*(?:作者|署名)[：:]\\s*';
 ftRules.preset.behavior.lists.wechat_trailer_markers = ['自定义网站尾标'];
 
 // 规则拉取桩：必须在 import render.mjs 之前设置（render.mjs 顶层捕获 realFetch）。
-// 按 account 分流并计数——顺带守「缓存按账号分 key」（两账号各拉一次，互不污染）。
+// 按 account 分流并计数，守住「每次渲染现场读取最新激活规则」的用户合同。
 const fetchedAccounts = [];
+let liveFbifRules = fbifRules;
+let liveFtRules = ftRules;
+let failFtRules = false;
 globalThis.fetch = async (url) => {
   const u = String(url);
   const account = (u.match(/[?&]account=([^&]+)/) || [])[1] || '';
   fetchedAccounts.push(account);
-  if (account === 'fbif') return { ok: true, json: async () => fbifRules };
-  if (account === 'ft-default') return { ok: true, json: async () => ftRules };
+  if (account === 'fbif') return { ok: true, json: async () => liveFbifRules };
+  if (account === 'ft-default' && failFtRules) {
+    return { ok: false, status: 503, json: async () => ({ error: 'rules unavailable' }) };
+  }
+  if (account === 'ft-default') return { ok: true, json: async () => liveFtRules };
   return { ok: false, json: async () => ({}) };
 };
 
@@ -51,6 +59,38 @@ test('Go/Node 规则 config_hash 使用同一份 canonical JSON 合同', () => {
     { regex: '^作者' },
   );
   assert.equal(got, 'sha256:3a5ec985cf4d715ae701e4a67bdbc810e6a348a47803949d95cfe70faa061078');
+});
+
+test('latest：相邻两次请求都读取规则 API，第二次立即使用刚激活的新版本', async () => {
+  const original = liveFtRules;
+  const before = fetchedAccounts.length;
+  const first = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default' });
+  const changed = structuredClone(original);
+  changed.preset.version = first.resolved_rule.revision + 1;
+  changed.preset.config.tip_title_color = '#7a1f5c';
+  changed.preset.config_hash = renderRuleConfigHash(changed.preset.config, changed.preset.behavior);
+  liveFtRules = changed;
+  try {
+    const second = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default' });
+    assert.equal(fetchedAccounts.length - before, 2, '两次渲染必须分别读取规则 API');
+    assert.equal(second.resolved_rule.revision, changed.preset.version);
+    assert.equal(second.resolved_rule.config_hash, changed.preset.config_hash);
+    assert.equal(second.resolved_rule.source, 'server');
+  } finally {
+    liveFtRules = original;
+  }
+});
+
+test('latest：规则 API 不可用时明确失败，不能用默认样式伪装成功', async () => {
+  failFtRules = true;
+  try {
+    await assert.rejects(
+      () => renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default' }),
+      error => error.status === 503 && /无法读取最新激活规则/.test(error.message),
+    );
+  } finally {
+    failFtRules = false;
+  }
 });
 
 const siteResult = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default' });
@@ -216,17 +256,20 @@ test('fbif：接入网站渠道后输出与重构前 golden 逐字节一致（�
   assert.doesNotMatch(html, /cellpadding|bgcolor|align="center"/, 'CMS 存活防御层零泄漏到公众号');
 });
 
-test('fbif ↔ ft-default 交错渲染互不污染（规则缓存按账号分 key + 全局 config 按请求重灌）', async () => {
-  // WHY：window._activeConfig 是进程级全局，渲染服务是常驻进程——若两账号共用一个缓存槽
-  // 或全局残留上一账号规则，公众号草稿会错渲网站页脚（渠道串台，历史头号事故源）。
+test('fbif ↔ ft-default 交错渲染互不污染，且每次请求都重新读取对应账号规则', async () => {
+  // WHY：window._activeConfig 是进程级全局，渲染服务是常驻进程——若全局残留上一账号规则，
+  // 公众号草稿会错渲网站页脚（渠道串台，历史头号事故源）。
+  const fetchCountBefore = fetchedAccounts.length;
   const ft1 = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default' });
   const fbif1 = await renderArticle(SAMPLE_ARTICLE);
   const ft2 = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default' });
   assert.equal(fbif1.html, golden, '夹在两次网站渲染之间的 fbif 输出仍与 golden 逐字节一致');
   assert.equal(ft2.html, ft1.html, '夹了 fbif 渲染后网站输出不漂移');
-  // 60s 缓存内每账号只应拉一次规则；计数>2 说明缓存 key 被互相冲掉。
-  assert.deepEqual([...new Set(fetchedAccounts)].sort(), ['fbif', 'ft-default'], '只拉这两个账号');
-  assert.equal(fetchedAccounts.length, 2, '每账号 60s 内只拉一次（缓存未被另一账号污染冲掉）');
+  assert.deepEqual(
+    fetchedAccounts.slice(fetchCountBefore),
+    ['ft-default', 'fbif', 'ft-default'],
+    '三次请求必须逐次读取各自账号的最新规则',
+  );
 });
 
 test('未知 packId 显式 400 失败（不静默降级到公众号模板）', async () => {

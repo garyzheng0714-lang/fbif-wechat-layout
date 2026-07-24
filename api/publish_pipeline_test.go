@@ -226,25 +226,20 @@ func ossURLFor(src string) string {
 	return "https://oss.example.com/" + strings.TrimPrefix(src, "https://mmbiz.qpic.cn/")
 }
 
-func testPublishRenderRule() publishRenderRule {
-	rule := publishRenderRule{
-		AccountID: foodTalksSiteRuleAccountID,
-		PresetID:  foodTalksSiteDefaultRulePresetID,
-		Revision:  7,
-		Config:    map[string]any{"font_size": float64(16)},
-		Behavior:  map[string]any{},
+func testPublishResolvedRule() publishResolvedRule {
+	return publishResolvedRule{
+		AccountID:  foodTalksSiteRuleAccountID,
+		PresetID:   foodTalksSiteDefaultRulePresetID,
+		Revision:   7,
+		ConfigHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Source:     "server",
 	}
-	rule.ConfigHash = ruleConfigHash(rule.Config, rule.Behavior)
-	return rule
 }
 
-func successfulPublishRenderResult(html string, rule publishRenderRule) publishRenderResult {
+func successfulPublishRenderResult(html string, rule publishResolvedRule) publishRenderResult {
 	return publishRenderResult{
-		HTML: html,
-		ResolvedRule: publishResolvedRule{
-			AccountID: rule.AccountID, PresetID: rule.PresetID, Revision: rule.Revision,
-			ConfigHash: rule.ConfigHash, Source: "snapshot",
-		},
+		HTML:             html,
+		ResolvedRule:     rule,
 		RendererBuildSHA: "test-render-build",
 		OutputHash:       publishRenderOutputHash(html),
 	}
@@ -260,15 +255,12 @@ func newPublishTestEnv(t *testing.T) *publishTestEnv {
 	env.pipeline = &publishPipeline{
 		store:     env.store,
 		publicDir: "../public",
-		resolveRenderRule: func() (publishRenderRule, error) {
-			return testPublishRenderRule(), nil
-		},
 		fetch: func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
 			env.fetchCalls++
 			return "测试标题", "测试公众号", "", articleURL, testPublishBlocksJSON, nil
 		},
-		render: func(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error) {
-			return successfulPublishRenderResult(testPublishRenderedHTML, rule), nil
+		render: func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+			return successfulPublishRenderResult(testPublishRenderedHTML, testPublishResolvedRule()), nil
 		},
 		ossUpload: func(ctx context.Context, urls []string) (map[string]string, error) {
 			env.ossCalls = append(env.ossCalls, append([]string{}, urls...))
@@ -336,25 +328,19 @@ func TestPublishPipelineStopsAtAwaitingReview(t *testing.T) {
 	if job.Title != "测试标题" || job.SourceName != "测试公众号" {
 		t.Fatalf("title/source_name 落库不符: %q / %q", job.Title, job.SourceName)
 	}
-	if job.RulePresetID == "" || job.RuleRevision < 1 || !strings.HasPrefix(job.RuleConfigHash, "sha256:") || job.RuleSnapshotJSON == "" {
-		t.Fatalf("rendering 前必须持久化完整规则引用与快照: %+v", job)
+	if job.RulePresetID == "" || job.RuleRevision < 1 || !strings.HasPrefix(job.RuleConfigHash, "sha256:") || job.RuleSnapshotJSON != "" {
+		t.Fatalf("必须记录渲染器实际使用的最新规则，且不能固化旧快照: %+v", job)
 	}
 	if job.RendererBuildSHA != "test-render-build" || job.RenderOutputHash != publishRenderOutputHash(testPublishRenderedHTML) {
 		t.Fatalf("renderer build/output hash 未落库: build=%q output=%q", job.RendererBuildSHA, job.RenderOutputHash)
 	}
 }
 
-func TestPublishRenderRetryUsesPinnedRuleSnapshot(t *testing.T) {
+func TestPublishRenderRetryUsesLatestRuleAtRetryTime(t *testing.T) {
 	env := newPublishTestEnv(t)
-	originalRule := testPublishRenderRule()
-	resolveCalls := 0
-	env.pipeline.resolveRenderRule = func() (publishRenderRule, error) {
-		resolveCalls++
-		return originalRule, nil
-	}
-	seenRules := []publishRenderRule{}
-	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error) {
-		seenRules = append(seenRules, rule)
+	renderCalls := 0
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		renderCalls++
 		return publishRenderResult{}, errors.New("temporary renderer outage")
 	}
 
@@ -363,21 +349,16 @@ func TestPublishRenderRetryUsesPinnedRuleSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	failed, _ := env.store.byID(job.ID)
-	if failed.Stage != publishStageFailed || failed.FailedStage != publishStageRendering || failed.RuleSnapshotJSON == "" {
-		t.Fatalf("首次渲染失败也必须先保留规则快照: %+v", failed)
+	if failed.Stage != publishStageFailed || failed.FailedStage != publishStageRendering || failed.RuleSnapshotJSON != "" {
+		t.Fatalf("首次渲染失败不得固化旧规则快照: %+v", failed)
 	}
 
-	newRule := originalRule
+	newRule := testPublishResolvedRule()
 	newRule.Revision++
-	newRule.Config = map[string]any{"font_size": float64(18)}
-	newRule.ConfigHash = ruleConfigHash(newRule.Config, newRule.Behavior)
-	env.pipeline.resolveRenderRule = func() (publishRenderRule, error) {
-		resolveCalls++
-		return newRule, nil
-	}
-	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, rule publishRenderRule) (publishRenderResult, error) {
-		seenRules = append(seenRules, rule)
-		return successfulPublishRenderResult(testPublishRenderedHTML, rule), nil
+	newRule.ConfigHash = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		renderCalls++
+		return successfulPublishRenderResult(testPublishRenderedHTML, newRule), nil
 	}
 	if _, err := env.pipeline.retry(job.ID); err != nil {
 		t.Fatal(err)
@@ -386,9 +367,17 @@ func TestPublishRenderRetryUsesPinnedRuleSnapshot(t *testing.T) {
 	if done.Stage != publishStageAwaitingReview {
 		t.Fatalf("retry 后应完成到待审核，实际 %+v", done)
 	}
-	if resolveCalls != 1 || len(seenRules) != 2 || seenRules[1].Revision != originalRule.Revision ||
-		seenRules[1].ConfigHash != originalRule.ConfigHash {
-		t.Fatalf("retry 不得追随后来活动规则：resolve=%d seen=%+v", resolveCalls, seenRules)
+	if renderCalls != 2 || done.RuleRevision != newRule.Revision || done.RuleConfigHash != newRule.ConfigHash ||
+		done.RuleSnapshotJSON != "" {
+		t.Fatalf("retry 必须使用并记录重试时的最新规则：calls=%d job=%+v", renderCalls, done)
+	}
+}
+
+func TestValidatePublishRenderResultRejectsMalformedRuleHash(t *testing.T) {
+	result := successfulPublishRenderResult(testPublishRenderedHTML, testPublishResolvedRule())
+	result.ResolvedRule.ConfigHash = "sha256:old"
+	if err := validatePublishRenderResult(result); err == nil {
+		t.Fatal("不完整的规则指纹必须被拒绝")
 	}
 }
 

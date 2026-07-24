@@ -3,6 +3,16 @@
 // 断言的是「必须内联样式、外链必须降级、图片与文字不能丢」这些发布安全性质，不是具体像素。
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const fbifRules = JSON.parse(await readFile(
+  new URL('./fixtures/render-service-rules-fbif.json', import.meta.url),
+  'utf8',
+));
+globalThis.fetch = async () => ({
+  ok: true,
+  json: async () => fbifRules,
+});
 
 // render.mjs 自带 globals 桩（node --test 每文件独立进程，不污染其他测试）。
 const { renderArticle, stripExternalAnchors } = await import('../render-service/render.mjs');

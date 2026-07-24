@@ -789,6 +789,9 @@ func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("foodtalks active code = %d body=%s", rec.Code, rec.Body.String())
 	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("active rule Cache-Control = %q, want no-store", got)
+	}
 	var payload struct {
 		Preset rulePreset `json:"preset"`
 	}
