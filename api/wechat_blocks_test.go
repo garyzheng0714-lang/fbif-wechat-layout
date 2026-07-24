@@ -794,6 +794,80 @@ func TestWechatNumberTitleHeadingsStaySeparateAndLongBoldBodyStaysTxt(t *testing
 	}
 }
 
+func TestWechatVisualHeadingLinesWithZeroBottomMarginAreJoined(t *testing.T) {
+	html := jsContentWrap(
+		`<section style="text-align:center;margin-bottom:0;line-height:2em">` +
+			`<span style="font-size:20px;font-weight:bold">六线并进</span></section>` +
+			`<section style="text-align:center;margin-bottom:24px;line-height:2em">` +
+			`<span style="font-size:20px;font-weight:bold">一个标准仓的收支账</span></section>` +
+			`<p>这是足够长的正文内容，用来建立正常正文流并结束标题分组。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	var headings []string
+	for _, block := range blocks {
+		if block.K == "h" {
+			headings = append(headings, block.Text)
+		}
+	}
+	if len(headings) != 1 || headings[0] != "六线并进，一个标准仓的收支账" {
+		t.Fatalf("two visual lines should become one heading, got %q; kinds=%v", headings, findKinds(blocks))
+	}
+}
+
+func TestWechatVisualHeadingContinuationStartingWithConjunctionNeedsNoComma(t *testing.T) {
+	html := jsContentWrap(
+		`<section style="text-align:center;margin-bottom:0"><strong><span style="font-size:20px">窗口期、点位战</span></strong></section>` +
+			`<section style="text-align:center;margin-bottom:24px"><strong><span style="font-size:20px">与结构性机会</span></strong></section>` +
+			`<p>这是足够长的正文内容，用来建立正常正文流并结束标题分组。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	var headings []string
+	for _, block := range blocks {
+		if block.K == "h" {
+			headings = append(headings, block.Text)
+		}
+	}
+	if len(headings) != 1 || headings[0] != "窗口期、点位战与结构性机会" {
+		t.Fatalf("conjunction continuation should join directly, got %q; kinds=%v", headings, findKinds(blocks))
+	}
+}
+
+func TestAdjacentExplicitHeadingsAreNeverJoined(t *testing.T) {
+	html := jsContentWrap(`<h2 style="margin-bottom:0">一级标题</h2><h3>二级标题</h3><p>正文内容。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	var headings []string
+	for _, block := range blocks {
+		if block.K == "h" {
+			headings = append(headings, block.Text)
+		}
+	}
+	if len(headings) != 2 {
+		t.Fatalf("semantic headings must stay separate, got %q; kinds=%v", headings, findKinds(blocks))
+	}
+}
+
+func TestFoodTalksNativeImageDimensionsFallBackToWidthHeight(t *testing.T) {
+	html := jsContentWrap(
+		`<figure class="image"><img class="mc-img" src="https://static.foodtalks.cn/a.jpg" width="918" height="593">` +
+			`<figcaption><p>图片说明</p></figcaption></figure>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	var image *Block
+	for i := range blocks {
+		if blocks[i].K == "img" {
+			image = &blocks[i]
+			break
+		}
+	}
+	if image == nil {
+		t.Fatalf("native FoodTalks image missing; kinds=%v", findKinds(blocks))
+	}
+	if image.DataW != "918" || image.DataH != "593" {
+		t.Fatalf("native width/height must survive extraction, got dataW=%q dataH=%q", image.DataW, image.DataH)
+	}
+}
+
 func TestLargeNonBoldFontIsNotHeading(t *testing.T) {
 	// Font-size alone doesn't promote — avoids treating every decorative
 	// oversized callout as a heading.

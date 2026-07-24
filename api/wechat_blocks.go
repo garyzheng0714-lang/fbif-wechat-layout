@@ -399,7 +399,13 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				cur.runs = nil
 				cur.textStyles = nil
 			}
-			w.appendImageBlock(n, Block{K: "img", Src: src, DataW: getAttr(n, "data-w"), DataH: getAttr(n, "data-h"), DataRatio: getAttr(n, "data-ratio")})
+			w.appendImageBlock(n, Block{
+				K:         "img",
+				Src:       src,
+				DataW:     firstNonEmpty(getAttr(n, "data-w"), getAttr(n, "width")),
+				DataH:     firstNonEmpty(getAttr(n, "data-h"), getAttr(n, "height")),
+				DataRatio: getAttr(n, "data-ratio"),
+			})
 			return
 		case "video":
 			// FoodTalks 网站文章视频 = <video src=mp4 poster=jpg>（成品口径）。
@@ -719,6 +725,12 @@ type ObservedBlock struct {
 	ReferenceContinue bool
 	BodyLikeEnding    bool
 	ImageRatio        float64
+	// ContinuesVisualHeading records an explicit source-DOM line break inside
+	// one visual heading. WeChat editors commonly split a two-line heading into
+	// sibling <section> nodes and set margin-bottom:0 on every line except the
+	// last. The resolver can then join only those lines without collapsing
+	// genuine adjacent h2/h3 headings.
+	ContinuesVisualHeading bool
 }
 
 type articleProfile struct {
@@ -777,27 +789,28 @@ func (w *blockWalker) appendTextBlock(cx *blockCtx, b Block) {
 	trimmed := strings.TrimSpace(text)
 	proof, scopeID, mediaID := w.captionIndex.captionEvidenceForNode(cx.node)
 	obs := ObservedBlock{
-		RawKind:           "text",
-		NodeID:            w.captionIndex.nodeIDs[cx.node],
-		MediaID:           mediaID,
-		CaptionScopeID:    scopeID,
-		CaptionProof:      proof,
-		Tag:               cx.tag,
-		Classes:           append([]string(nil), cx.classes...),
-		Style:             cx.style,
-		TextStyles:        append([]computedStyle(nil), cx.textStyles...),
-		Text:              trimmed,
-		TextLen:           utf8.RuneCountInString(trimmed),
-		Centered:          isTextCentered(cx),
-		HeadingFontSize:   hasHeadingFontSize(cx),
-		AllBold:           allRunsBold(b.Runs),
-		AllUnderBoldTag:   allRunsUnderBoldTag(cx),
-		MutedOrSmallStyle: hasMutedOrSmallStyle(cx),
-		ImageSourceLine:   isImageSourceLine(trimmed),
-		ReferenceHead:     refSectionHeadRe.MatchString(trimmed),
-		ReferenceItem:     refItemRe.MatchString(trimmed),
-		ReferenceContinue: refContinuationRe.MatchString(trimmed),
-		BodyLikeEnding:    sentenceEndsLikeBody(trimmed),
+		RawKind:                "text",
+		NodeID:                 w.captionIndex.nodeIDs[cx.node],
+		MediaID:                mediaID,
+		CaptionScopeID:         scopeID,
+		CaptionProof:           proof,
+		Tag:                    cx.tag,
+		Classes:                append([]string(nil), cx.classes...),
+		Style:                  cx.style,
+		TextStyles:             append([]computedStyle(nil), cx.textStyles...),
+		Text:                   trimmed,
+		TextLen:                utf8.RuneCountInString(trimmed),
+		Centered:               isTextCentered(cx),
+		HeadingFontSize:        hasHeadingFontSize(cx),
+		AllBold:                allRunsBold(b.Runs),
+		AllUnderBoldTag:        allRunsUnderBoldTag(cx),
+		MutedOrSmallStyle:      hasMutedOrSmallStyle(cx),
+		ImageSourceLine:        isImageSourceLine(trimmed),
+		ReferenceHead:          refSectionHeadRe.MatchString(trimmed),
+		ReferenceItem:          refItemRe.MatchString(trimmed),
+		ReferenceContinue:      refContinuationRe.MatchString(trimmed),
+		BodyLikeEnding:         sentenceEndsLikeBody(trimmed),
+		ContinuesVisualHeading: hasExplicitZeroMarginBottom(cx.node),
 	}
 	w.appendObservedBlock(b, obs)
 }
@@ -1258,7 +1271,122 @@ func resolveRoleDecisions(observed []ObservedBlock, profile articleProfile, capt
 			Block:        blockFromRoleDecision(obs, role),
 		})
 	}
-	return decisions
+	return mergeVisualHeadingContinuations(decisions, observed)
+}
+
+func mergeVisualHeadingContinuations(decisions []RoleDecision, observed []ObservedBlock) []RoleDecision {
+	if len(decisions) < 2 {
+		return decisions
+	}
+	out := make([]RoleDecision, 0, len(decisions))
+	for i := 0; i < len(decisions); i++ {
+		merged := decisions[i]
+		last := i
+		for last+1 < len(decisions) &&
+			canMergeVisualHeadingContinuation(merged, decisions[last+1], observed, decisions[last].Index) {
+			next := decisions[last+1]
+			merged.Block.Text = joinVisualHeadingLines(merged.Block.Text, next.Block.Text)
+			merged.Block.Runs = nil
+			merged.Reason = "visual-heading-lines"
+			last++
+		}
+		out = append(out, merged)
+		i = last
+	}
+	return out
+}
+
+func canMergeVisualHeadingContinuation(current, next RoleDecision, observed []ObservedBlock, currentObservedIndex int) bool {
+	if current.Role != "h" || next.Role != "h" ||
+		current.Group != next.Group ||
+		!mergeableVisualHeadingDecision(current) || !mergeableVisualHeadingDecision(next) ||
+		currentObservedIndex < 0 || currentObservedIndex >= len(observed) ||
+		next.Index != currentObservedIndex+1 || next.Block.BlankBefore {
+		return false
+	}
+	curObs := observed[currentObservedIndex]
+	nextObs := observed[next.Index]
+	if !curObs.ContinuesVisualHeading || !curObs.Centered || !nextObs.Centered ||
+		!curObs.HeadingFontSize || !nextObs.HeadingFontSize ||
+		!curObs.AllBold || !nextObs.AllBold {
+		return false
+	}
+	return utf8.RuneCountInString(strings.TrimSpace(current.Block.Text)+strings.TrimSpace(next.Block.Text)) <= 80
+}
+
+func mergeableVisualHeadingDecision(decision RoleDecision) bool {
+	if decision.Group == "SectionHeaderGroup" &&
+		(decision.Reason == "marker-title-body" || decision.Reason == "visual-heading-lines") {
+		return true
+	}
+	return decision.Group == "StandaloneHeading" &&
+		(decision.Reason == "visual-heading" || decision.Reason == "visual-heading-lines")
+}
+
+func joinVisualHeadingLines(first, second string) string {
+	first = strings.TrimSpace(first)
+	second = strings.TrimSpace(second)
+	if first == "" {
+		return second
+	}
+	if second == "" {
+		return first
+	}
+	if strings.HasPrefix(second, "与") || strings.HasPrefix(second, "和") ||
+		strings.HasPrefix(second, "及") || strings.HasPrefix(second, "暨") ||
+		strings.HasPrefix(second, "以及") || strings.HasPrefix(second, "或") ||
+		hasHeadingJoinPunctuation(first) {
+		return first + second
+	}
+	return first + "，" + second
+}
+
+func hasHeadingJoinPunctuation(text string) bool {
+	for _, suffix := range []string{"，", ",", "、", "：", ":", "；", ";", "—", "-"} {
+		if strings.HasSuffix(text, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasExplicitZeroMarginBottom(n *html.Node) bool {
+	if n == nil {
+		return false
+	}
+	for _, decl := range strings.Split(getAttr(n, "style"), ";") {
+		kv := strings.SplitN(decl, ":", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		prop := strings.ToLower(strings.TrimSpace(kv[0]))
+		value := strings.TrimSpace(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(kv[1])), "!important"))
+		switch prop {
+		case "margin-bottom":
+			return cssLengthIsZero(value)
+		case "margin":
+			parts := strings.Fields(value)
+			switch len(parts) {
+			case 1, 2:
+				return cssLengthIsZero(parts[0])
+			case 3, 4:
+				return cssLengthIsZero(parts[2])
+			}
+		}
+	}
+	return false
+}
+
+func cssLengthIsZero(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, suffix := range []string{"rem", "px", "pt", "em", "%"} {
+		value = strings.TrimSuffix(value, suffix)
+	}
+	number, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	return err == nil && number == 0
 }
 
 func defaultRoleDecisionGroup(obs ObservedBlock, role string) string {

@@ -114,18 +114,32 @@ func validExpensiveCredential(r *http.Request) bool {
 		return true
 	}
 	want := strings.TrimSpace(os.Getenv(expensiveAPITokenEnv))
-	if want == "" {
-		return false
-	}
 	got := strings.TrimSpace(r.Header.Get("X-Expensive-API-Token"))
 	if got == "" {
-		const bearer = "Bearer "
-		authorization := strings.TrimSpace(r.Header.Get("Authorization"))
-		if len(authorization) > len(bearer) && strings.EqualFold(authorization[:len(bearer)], bearer) {
-			got = strings.TrimSpace(authorization[len(bearer):])
-		}
+		got = bearerCredential(r)
 	}
-	return len(got) == len(want) && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	if constantTimeCredentialMatch(got, want) {
+		return true
+	}
+	// 网站发布服务本来就持有 RENDER_TOKEN，并且必须在同一流水线里调用
+	// /api/render 与 /api/oss-upload。只对图片转存这一条路复用该服务凭证；
+	// /api/doc-to-docx 等其他付费端点仍只接受 EXPENSIVE_API_TOKEN/admin。
+	return r.URL.Path == "/api/oss-upload" &&
+		constantTimeCredentialMatch(bearerCredential(r), renderToken())
+}
+
+func bearerCredential(r *http.Request) string {
+	const bearer = "Bearer "
+	authorization := strings.TrimSpace(r.Header.Get("Authorization"))
+	if len(authorization) <= len(bearer) || !strings.EqualFold(authorization[:len(bearer)], bearer) {
+		return ""
+	}
+	return strings.TrimSpace(authorization[len(bearer):])
+}
+
+func constantTimeCredentialMatch(got, want string) bool {
+	return want != "" && len(got) == len(want) &&
+		subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func authorizeExpensiveRequest(w http.ResponseWriter, r *http.Request, guard *requestCostGuard) (func(), bool) {
