@@ -328,6 +328,25 @@ function pushUniqueAttribution(attrs, attr) {
   attrs.push({ k: 'attr', role: attr.role, name: attr.name });
 }
 
+// URL 导入的文章级署名固定输出为两行：
+//   1. 来源
+//   2. 作者，编辑（如有）
+// 同一角色只取开头首次出现的值，避免原文重复署名在文末重复渲染。
+function orderArticleAttributions(attrs) {
+  const first = role => attrs.find(attr => attr && attr.role === role);
+  const source = first('来源');
+  const author = first('作者');
+  const editor = first('编辑');
+  const ordered = [];
+  if (source) ordered.push(source);
+  if (author) {
+    ordered.push(editor ? { ...author, editorName: editor.name } : author);
+  } else if (editor) {
+    ordered.push(editor);
+  }
+  return ordered;
+}
+
 // 页脚分界词「提示：」默认正则（红线下放 behavior.params.footer_prompt_marker）。
 const RE_FOOTER_PROMPT_MARKER = /^提示[：:]$/;
 function isFooterPromptText(text) {
@@ -505,7 +524,12 @@ function render(elems, author, source, opts) {
         lines.push(sec(renderRuns(e.runs), spaceAfter));
         break;
       case 'attr':
-        lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' + esc(attributionText(e.role, e.name, context, behavior)) + '</span>'), spaceAfter));
+        lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' +
+          esc(attributionText(e.role, e.name, context, behavior) +
+            (e.role === '作者' && e.editorName
+              ? '，' + attributionText('编辑', e.editorName, context, behavior)
+              : '')) +
+          '</span>'), spaceAfter));
         break;
       case 'refH': {
         const refHeadText = (e.text || '参考来源').replace(/[：:]?$/, '：');
@@ -548,10 +572,27 @@ function classifyBlocks(data) {
   let author = '', source = '';
   let imgN = 0, inRef = false;
   const inputBlocks = blocks || [];
+  const leadingAttributionScanLimit = behaviorNumberParam('url_attribution_scan_limit', 12);
 
   for (let blockIndex = 0; blockIndex < inputBlocks.length; blockIndex++) {
     const b = inputBlocks[blockIndex];
     if (!b || !b.k) continue;
+
+    // 微信原文常把开头「作者 | X / 来源：Y / 编辑：Z」做成粗体或大字号，
+    // 通用 DOM 分类因此可能把它判成 h。文章级语义比视觉角色优先：仅在开头
+    // 有界窗口内，对可承载文字的块先识别署名；cap/img/table 不参与，避免把
+    // 「图片来源」误搬成文章来源。窗口外的同名标题保持原结构。
+    const canCarryAttribution = b.k === 'h' || b.k === 'txt' || b.k === 'bq' || b.k === 'li';
+    if (!isClipboardText && blockIndex < leadingAttributionScanLimit && canCarryAttribution) {
+      const attr = parseAttribution(rawBlockText(b));
+      if (attr) {
+        if (attr.role === '作者' && !author) author = attr.name;
+        if (attr.role === '来源' && !source) source = attr.name;
+        pushUniqueAttribution(attrs, attr);
+        inRef = false;
+        continue;
+      }
+    }
 
     if (b.k === 'img') {
       const w = Number(b.dataW || 0);
@@ -640,7 +681,7 @@ function classifyBlocks(data) {
     elems.push({ k: 'txt', runs, blankBefore: !!b.blankBefore, compact: !!b.compact });
   }
 
-  return { elems: elems.concat(attrs), author, source, title: title || '', imgN };
+  return { elems: elems.concat(orderArticleAttributions(attrs)), author, source, title: title || '', imgN };
 }
 
 export default {

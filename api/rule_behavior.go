@@ -15,9 +15,13 @@ func defaultRuleBehavior() map[string]any {
 			},
 			// 公众号识别正则（红线下放：规则后台可配；客户端 fbif.js 读 .default，
 			// 读不到/非法时降级到代码内同值 const 离线兜底）。
-			"author_line_regex":             map[string]any{"type": "string", "default": `^(?:\*\*)?(?:作者|撰文|撰稿|文)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
-			"source_line_regex":             map[string]any{"type": "string", "default": `^(?:\*\*)?(?:出品|来源|出处)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
-			"editor_line_regex":             map[string]any{"type": "string", "default": `^(?:\*\*)?(?:编辑|责编)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
+			"author_line_regex": map[string]any{"type": "string", "default": `^(?:\*\*)?(?:作者|撰文|撰稿|文)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
+			"source_line_regex": map[string]any{"type": "string", "default": `^(?:\*\*)?(?:出品|来源|出处)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
+			"editor_line_regex": map[string]any{"type": "string", "default": `^(?:\*\*)?(?:编辑|责编)(?:\*\*)?[\s]*[：:/|｜]\s*(.+)`},
+			// URL 导入开头署名扫描上限：微信原文常把「作者 | X」做成粗体/大字，
+			// 通用 DOM 分类会先把它判成 h。FBIF 渲染器在此前 N 个内容块内先按
+			// 署名语义识别，再接受 h/txt 等结构类型，避免正文中段同名标题被误搬。
+			"url_attribution_scan_limit":    map[string]any{"type": "number", "default": float64(12)},
 			"ref_section_regex":             map[string]any{"type": "string", "default": `^(参考(来源|文献|资料|链接)|信息来源)[：:]?$`},
 			"footer_prompt_marker":          map[string]any{"type": "string", "default": `^提示[：:]$`},
 			"footer_prompt_detection_regex": map[string]any{"type": "string", "default": `(?i)本文为.*转载|转载请|FBIF投稿|商务合作|fbifmedia1`},
