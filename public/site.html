@@ -116,7 +116,7 @@
           <label class="site-field-row" for="siteArticleSummaryInput">
             <span class="site-field-label">摘要 <span aria-hidden="true">*</span></span>
             <span class="site-input-wrap">
-              <textarea class="site-field-control site-field-textarea" id="siteArticleSummaryInput" rows="4" maxlength="200"></textarea>
+              <textarea class="site-field-control site-field-textarea" id="siteArticleSummaryInput" rows="4" maxlength="200" placeholder="请输入文章摘要"></textarea>
               <span class="site-field-count" data-site-count-for="siteArticleSummaryInput">0/200</span>
             </span>
           </label>
@@ -249,7 +249,7 @@
             </div>
           </div>
           <div class="ft-preview-tags" id="ftPreviewTags" aria-label="文章标签"></div>
-          <blockquote class="ft-summary" id="ftSummary"></blockquote>
+          <blockquote class="ft-summary" id="ftSummary" hidden></blockquote>
         </div>
         <div class="phone-frame" id="phoneFrame">
           <div id="contentArea"></div>
@@ -341,6 +341,7 @@ const {
   createUrlImportHandler,
   extractSiteSummary,
   foodTalksFetchErrorMessage,
+  hasExplicitRepostDisclosure,
   pasteTargetsForChannel,
   resolveInitialRulePackID,
   wrapBackFeedback,
@@ -934,7 +935,7 @@ if (siteArticleTitleInput) siteArticleTitleInput.value = siteArticleMeta.title;
 const FOODTALKS_PREVIEW_META = Object.freeze({
   articleDate: '2026-05-26',
   readCount: '8888',
-  summary: '这是一段摘要',
+  summary: '',
   shareQrCaption: '微信扫一扫',
   shareCopyText: '复制链接',
   tags: Object.freeze([
@@ -1115,7 +1116,11 @@ function syncSiteArticleMetaPreview() {
   if (articleTitle) articleTitle.textContent = siteArticleMeta.title;
   document.querySelectorAll(siteAuthorPreviewSelector).forEach(el => { el.textContent = siteArticleMeta.author || ((activeRulePack && (activeRulePack.previewAccountName || activeRulePack.accountName)) || 'FBIF食品饮料创新'); });
   const summaryEl = document.getElementById(siteSummaryPreviewID);
-  if (summaryEl) summaryEl.textContent = siteArticleMeta.summary || FOODTALKS_PREVIEW_META.summary;
+  if (summaryEl) {
+    const summary = String(siteArticleMeta.summary || '').trim();
+    summaryEl.textContent = summary;
+    summaryEl.hidden = !summary;
+  }
   const tagsEl = document.getElementById(siteTagsPreviewID);
   if (tagsEl) {
     tagsEl.replaceChildren();
@@ -1281,9 +1286,12 @@ window.addEventListener('fbif:article-session-activated', event => {
     const summary = session.input.kind === 'docx' && session.result && typeof session.result.summary === 'string'
       ? session.result.summary.trim()
       : '';
-    setSiteArticleMeta({ summary: summary || FOODTALKS_PREVIEW_META.summary });
+    setSiteArticleMeta({ summary });
     const summaryEl = document.getElementById(siteSummaryPreviewID);
-    if (summaryEl) summaryEl.textContent = summary || FOODTALKS_PREVIEW_META.summary;
+    if (summaryEl) {
+      summaryEl.textContent = summary;
+      summaryEl.hidden = !summary;
+    }
   }
 });
 
@@ -1361,16 +1369,22 @@ window.fetchArticle = createUrlImportHandler({
   onArticleIntent() {
     if (window._engineApi && typeof window._engineApi.invalidatePendingWork === 'function') window._engineApi.invalidatePendingWork();
   },
-  onArticleUrl(url) {
+  resolveIsRepost(payload) {
+    if (hasExplicitRepostDisclosure(payload && payload.blocks)) return true;
+    const sourceName = String(payload && payload.source_name || '').replace(/\s+/g, '').toLowerCase();
+    const ownedName = String(activeRulePack && activeRulePack.previewAccountName || '').replace(/\s+/g, '').toLowerCase();
+    return !sourceName || !ownedName || sourceName !== ownedName;
+  },
+  onArticleUrl(url, meta = {}) {
     window._currentArticleUrl = url;
     setSiteImportCompact('FoodTalks 链接', url);
-    setSiteStrategy('repost', { rerender: false });
+    setSiteStrategy(meta.isRepost === false ? 'original' : 'repost', { rerender: false });
   },
   // 摘要自动填充（飞书反馈问题七）：原文开头短导语 → 预览【摘要】框，并从正文流移除
   // （62139 成品：摘要句不在正文重复）。提取不到合适导语时保持占位，由编辑自填。
   onBlocks(blocks) {
     const summary = extractSiteSummary(blocks, { consume: true });
-    pendingUrlSummary = summary || FOODTALKS_PREVIEW_META.summary;
+    pendingUrlSummary = summary;
   },
 });
 window.addEventListener('fbif:article-input-started', event => {

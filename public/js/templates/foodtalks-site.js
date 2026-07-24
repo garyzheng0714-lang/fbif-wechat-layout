@@ -52,6 +52,8 @@ function behParamBool(config, key, fallback) {
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
 const { promoteHeuristicHeadings, hasExplicitDocxHeadings } = headingModule;
+const interviewModule = await import('../site-interview.js' + assetQuery);
+const { markInterviewSpeakerPrefixes } = interviewModule;
 const { applySeriesContactLayout } = await import('../site-contact-layout.js' + assetQuery);
 const { activeFooterSegments } = await import('../site-footer-active.js' + assetQuery);
 const imageWidthModule = await import('../image-width.js' + assetQuery);
@@ -369,11 +371,15 @@ function markTocEntries(elems) {
   return out;
 }
 
-function renderRuns(runs) {
+function renderRuns(runs, config = {}) {
   return (runs || []).filter(r => r.type !== 'img').map(r => {
     if (r.type === 'txt') {
       let s = esc(normalizeChinesePunctuation(r.text));
-      if (r.bold) s = '<strong>' + s + '</strong>';
+      if (r.bold || r.interviewSpeaker) s = '<strong>' + s + '</strong>';
+      if (r.interviewSpeaker === 'publication') {
+        const color = cfgColor(config, 'tip_title_color', '#01396a');
+        s = `<span style="color: ${color};">${s}</span>`;
+      }
       if (r.italic) s = '<em>' + s + '</em>';
       return s;
     }
@@ -408,7 +414,7 @@ function renderHeading(level, text, config = {}) {
 }
 
 function renderParagraph(runs, elem = {}, config = {}) {
-  const inner = renderRuns(runs);
+  const inner = renderRuns(runs, config);
   if (!inner) return BLANK_LINE;
   if (elem.center) {
     if (elem.contactNote) {
@@ -513,10 +519,10 @@ function renderImageCaption(text, config = {}) {
 // 网站渲染器本就全 inline-style（粘进 FoodTalks 后台编辑器），表格同样把 border/底色/字号/
 // 内距内联到每个 td。颜色/字号/边框/内距读扁平 config 键（cfgColor/cfgNum，红线下放规则后台
 // 可配），缺省降级到与服务端 defaultRuleConfig 逐字一致的 const（与公众号同一套默认值=统一）。
-function tableRunRenderers() {
+function tableRunRenderers(config = {}) {
   return {
-    text: r => renderRuns([r]),
-    link: r => renderRuns([r]),
+    text: r => renderRuns([r], config),
+    link: r => renderRuns([r], config),
     image(r) {
     if (r.type === 'img') {
       if (!r.src) return '';
@@ -548,7 +554,7 @@ function renderTable(elem, config = {}) {
     headerBold: !(config && config.table_header_bold === false),
     outerBorder: true,
     cmsSurvival: true,
-    renderers: tableRunRenderers(),
+    renderers: tableRunRenderers(config),
   });
 }
 
@@ -746,7 +752,7 @@ function render(elems, config = {}) {
       );
       // 第二段：正文（灰色斜体，保留链接）
       const restRuns = e.rest_runs || e.runs || [];
-      const restInner = renderRuns(restRuns);
+      const restInner = renderRuns(restRuns, config);
       if (restInner) {
         lines.push(
           `<p style="text-align: justify;"><em><span style="font-size: ${tipFs}px; color: ${tipBodyColor};">` +
@@ -800,7 +806,7 @@ function render(elems, config = {}) {
     if (e.k === 'ref-item') {
       // 用 renderRuns 而不是 runsToPlain：参考条目可能含超链接（如 [1] 论文标题 https://...），
       // runsToPlain 仅保留 txt 类型 run，会把 link 文本吃掉。
-      const inner = renderRuns(e.runs);
+      const inner = renderRuns(e.runs, config);
       const refColor = (config && config.muted_color) || '#888888';
       lines.push(
         `<p style="text-align: justify;"><span style="color: ${refColor};">` +
@@ -1089,7 +1095,7 @@ export default {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache, config);
     const docxSummary = extractDocxSummary(elems, config);
     const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(docxSummary.elems, config)), config);
-    const behaved = applyFoodTalksBehavior(normalized, config, { isRepost });
+    const behaved = markInterviewSpeakerPrefixes(applyFoodTalksBehavior(normalized, config, { isRepost }));
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
@@ -1106,7 +1112,7 @@ export default {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = await classifyMd(text);
     const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
-    const behaved = applyFoodTalksBehavior(normalized, config, { isRepost: !!(opts && opts.isRepost), title });
+    const behaved = markInterviewSpeakerPrefixes(applyFoodTalksBehavior(normalized, config, { isRepost: !!(opts && opts.isRepost), title }));
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     const finalElems = markSeriesAboutLogoImages(promoted, config);
     return {
@@ -1122,11 +1128,11 @@ export default {
     const { elems, imgN, title } = classifyBlocks(data);
     // data.source 是后端抓取的原文 URL（公众号链接），用于提示声明的标题超链接。
     const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
-    const behaved = applyFoodTalksBehavior(normalized, config, {
+    const behaved = markInterviewSpeakerPrefixes(applyFoodTalksBehavior(normalized, config, {
       isRepost: !!(opts && opts.isRepost),
       title,
       sourceUrl: (data && data.source) || '',
-    });
+    }));
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     const finalElems = markSeriesAboutLogoImages(promoted, config);
     return {

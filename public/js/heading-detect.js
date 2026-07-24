@@ -58,6 +58,9 @@ export function isBoldHeading(runs, opts) {
   if (ARABIC_LIST_PREFIX_RE.test(plain)) return false;
   if (/[。.]$/.test(plain)) return false;
   if (/[，,；;]$/.test(plain)) return false;
+  // 「健康意识觉醒：」「女性经济崛起：」这类冒号结尾短句是下文标签，
+  // 不是独立章节标题；真标题中的冒号后应还有标题正文。
+  if (/[：:]$/.test(plain)) return false;
   if (/^(?:最后|那么|所以|因此|总之|说到底)[，,].*[：:]$/.test(plain)) return false;
   if (captionRe.test(plain)) return false;
   return true;

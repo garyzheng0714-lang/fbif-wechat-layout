@@ -7,6 +7,7 @@ import {
   bindUrlImportShortcuts,
   createUrlImportHandler,
   foodTalksFetchErrorMessage,
+  hasExplicitRepostDisclosure,
   resolveInitialRulePackID,
 } from '../public/js/editor-shell.js';
 import * as rulePackModule from '../public/js/rule-packs/registry.js';
@@ -449,6 +450,61 @@ test('createUrlImportHandler passes source URL with structured blocks', async ()
   assert.equal(elements.get('progressText').textContent, '正在提取...');
 });
 
+test('createUrlImportHandler lets the website channel classify an owned WeChat source as original', async () => {
+  const calls = [];
+  const elements = new Map();
+  const makeElement = value => ({ value, textContent: '', disabled: false, hidden: false, style: { display: '' } });
+  elements.set('urlInput', makeElement('https://mp.weixin.qq.com/s/fbif-original'));
+  elements.set('urlFetchBtn', makeElement(''));
+  elements.set('error', makeElement(''));
+  elements.set('importZone', makeElement(''));
+  elements.set('docZone', makeElement(''));
+  elements.set('progress', makeElement(''));
+  elements.set('progressFill', { style: { width: '' } });
+  elements.set('progressText', makeElement(''));
+
+  const handler = createUrlImportHandler({
+    documentRef: { getElementById: id => elements.get(id) },
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        title: 'FBIF 原创',
+        source_name: 'FBIF食品饮料创新',
+        byline: 'Sage',
+        blocks: [{ k: 'txt', runs: [{ type: 'txt', text: '作者：Sage' }] }],
+      }),
+    }),
+    getAccountID: () => 'ft-default',
+    getHandleBlocks: () => (payload, options) => calls.push({ payload, options }),
+    resolveIsRepost: payload => payload.source_name !== 'FBIF食品饮料创新',
+    onArticleUrl: (url, meta) => calls.push({ url, meta }),
+  });
+
+  await handler();
+
+  assert.equal(calls[0].options.isRepost, false);
+  assert.equal(calls[0].payload.sourceName, 'FBIF食品饮料创新');
+  assert.equal(calls[0].payload.byline, 'Sage');
+  assert.deepEqual(calls[1].meta, {
+    isRepost: false,
+    sourceName: 'FBIF食品饮料创新',
+    byline: 'Sage',
+  });
+});
+
+test('网站转载声明优先于公众号归属，避免把代发转载稿误判为原创', () => {
+  assert.equal(hasExplicitRepostDisclosure([
+    { k: 'txt', runs: [{ type: 'txt', text: '* 本文为转载文章。' }] },
+  ]), true);
+  assert.equal(hasExplicitRepostDisclosure([
+    { k: 'txt', runs: [{ type: 'txt', text: '* 本文为转载文章，原文标题：《示例》。' }] },
+  ]), true);
+  assert.equal(hasExplicitRepostDisclosure([
+    { k: 'txt', runs: [{ type: 'txt', text: '本文为原创文章。' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '正文提到转载文章的行业现象。' }] },
+  ]), false);
+});
+
 test('URL 只在成功交给渲染器后提交：抓取或 handoff 失败保留旧稿来源', async () => {
   const elements = new Map();
   const makeElement = value => ({ value, textContent: '', disabled: false, hidden: false, style: { display: '' } });
@@ -799,4 +855,17 @@ test('extractSiteSummary consume：命中段从 blocks 原地移除（62139：�
   assert.equal(extractSiteSummary(blocks, { consume: true }), '短导语摘要句');
   assert.equal(blocks.length, 2);
   assert.ok(!blocks.some(b => (b.runs || []).some(r => r.text === '短导语摘要句')));
+});
+
+test('extractSiteSummary：作者/编辑开头不是摘要，且不得从正文删除', async () => {
+  const { extractSiteSummary } = await import('../public/js/editor-shell.js');
+  const blocks = [
+    { k: 'txt', runs: [{ type: 'txt', text: '作者：Sage' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '编辑：Bobo' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '在上海南京东路，你可能会看到一家坚果零食店。' }] },
+  ];
+  const before = structuredClone(blocks);
+
+  assert.equal(extractSiteSummary(blocks, { consume: true }), '');
+  assert.deepEqual(blocks, before, '作者行、编辑行和首段正文都必须保留');
 });

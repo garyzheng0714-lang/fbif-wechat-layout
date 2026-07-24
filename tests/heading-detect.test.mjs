@@ -91,6 +91,12 @@ test('isBoldHeading 拒绝编号步骤、装饰线和未完句（黄仁勋样本
   assert.equal(isBoldHeading([{ type: 'txt', text: '最后，想问问你：', bold: true }]), false);
 });
 
+for (const label of ['健康意识觉醒：', '女性经济崛起：', '代际变迁：', '经济下行：']) {
+  test(`isBoldHeading 拒绝真露评测集中的正文标签: ${label}`, () => {
+    assert.equal(isBoldHeading([{ type: 'txt', text: label, bold: true }]), false);
+  });
+}
+
 test('isBoldHeading 拒绝空 runs', () => {
   assert.equal(isBoldHeading([]), false);
   assert.equal(isBoldHeading([{ type: 'txt', text: '   ', bold: true }]), false);

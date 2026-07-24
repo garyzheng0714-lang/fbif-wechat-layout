@@ -362,6 +362,49 @@ test('网站什么是系列 URL 导入：分节图转文字标题，图片标题
   assert.match(html, /<br><em><span style="font-size: 14px; color: #7f7f7f;">本文作者：Ian, FoodTalks/, '文末作者应拆到下一行');
 });
 
+test('网站默认 URL 导入：冒号结尾的加粗正文标签不得误升为 h2', () => {
+  const labels = ['健康意识觉醒：', '女性经济崛起：', '代际变迁：', '经济下行：'];
+  const result = template.processBlocks({
+    title: '真露评测样例',
+    blocks: labels.flatMap(label => [
+      { k: 'txt', runs: [{ type: 'txt', text: label, bold: true }] },
+      { k: 'txt', runs: [{ type: 'txt', text: '这是标签对应的解释正文。' }] },
+    ]),
+  }, {
+    config: { muted_color: '#888888' },
+    isRepost: true,
+  });
+  const html = result.lines.join('\n');
+
+  assert.equal(result.headingN, 0);
+  for (const label of labels) {
+    assert.doesNotMatch(html, new RegExp(`<h2[^>]*>${label}</h2>`));
+    assert.match(html, new RegExp(`<p[^>]*><strong>${label}</strong></p>`));
+  }
+});
+
+test('网站默认 URL 导入：重复访谈角色前缀按正式网站样式加粗，媒体名使用品牌蓝', () => {
+  const pair = [
+    { k: 'txt', runs: [{ type: 'txt', text: '《中国企业家》：这是问题？' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '朱富强：这是回答。' }] },
+  ];
+  const result = template.processBlocks({
+    title: '赛百味访谈评测样例',
+    blocks: [...pair, ...pair, ...pair],
+  }, {
+    config: { tip_title_color: '#01396a', muted_color: '#888888' },
+    isRepost: true,
+  });
+  const html = result.lines.join('\n');
+
+  assert.match(
+    html,
+    /<span style="color: #01396a;"><strong>《中国企业家》<\/strong><\/span>：这是问题？/,
+  );
+  assert.match(html, /<strong>朱富强<\/strong>：这是回答。/);
+  assert.equal((html.match(/<strong>/g) || []).length, 6, '每个问答段只补一个角色前缀粗体');
+});
+
 test('网站什么是系列 URL 导入：联系区信息块居中，组内紧凑，仅显式空段拉开', () => {
   // WHY：橙宝样例的「联系橙宝」不是普通正文段列表；公司信息与 BD 信息应成组居中。
   // 此前网站渲染器给每个 p 后都塞 <p><br></p>，导致姓名/职位/电话之间出现异常空行。
