@@ -58,6 +58,33 @@ func TestHandleImageUploadAllowsServerTokenWithoutBrowserOrigin(t *testing.T) {
 	}
 }
 
+func TestHandleImageUploadAllowsRenderServiceToken(t *testing.T) {
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
+	t.Setenv("EXPENSIVE_API_TOKEN", "")
+	t.Setenv("RENDER_TOKEN", "render-service-secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer render-service-secret")
+	rec := httptest.NewRecorder()
+
+	handleImageUpload(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRenderServiceTokenDoesNotAuthorizeOtherExpensiveEndpoints(t *testing.T) {
+	t.Setenv("EXPENSIVE_API_TOKEN", "")
+	t.Setenv("RENDER_TOKEN", "render-service-secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/doc-to-docx", nil)
+	req.Header.Set("Authorization", "Bearer render-service-secret")
+
+	if validExpensiveCredential(req) {
+		t.Fatal("RENDER_TOKEN must only authorize /api/oss-upload")
+	}
+}
+
 func TestCloudConvertFallbackRequiresExplicitCredential(t *testing.T) {
 	t.Setenv("LIBREOFFICE_URL", "")
 	t.Setenv("LIBREOFFICE_TOKEN", "")
