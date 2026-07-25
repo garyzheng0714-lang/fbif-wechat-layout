@@ -610,6 +610,12 @@ body.channel-portal-body {
   margin: 12px 0 8px;
   font-weight: bold;
 }
+.preview-site #contentArea h4 {
+  color: #01396a;
+  font-size: 16px;
+  margin: 10px 0 6px;
+  font-weight: bold;
+}
 
 /* 链接：FoodTalks 蓝色 + 下划线 */
 .preview-site #contentArea a {
@@ -626,6 +632,11 @@ body.channel-portal-body {
   display: block;
   margin-left: auto;
   margin-right: auto;
+}
+.preview-site #contentArea figure.image,
+.preview-site #contentArea figure.image figcaption {
+  margin: 0;
+  padding: 0;
 }
 
 /* ========== 页脚库（footer library）：预设分段 + 片段勾选 ========== */

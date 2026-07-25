@@ -903,13 +903,11 @@ export function initApp(initialTemplate) {
 
   function copyPlainTextToClipboard(text) {
     return (async () => {
-      try {
-        if (navigator.clipboard) {
-          await navigator.clipboard.writeText(text);
-          return true;
-        }
-      } catch {}
-
+      // HTML 源码可能很长。部分 WebView 的 navigator.clipboard.writeText()
+      // 会一直 pending，导致菜单不收起且没有反馈。先使用用户点击手势内可同步
+      // 完成的 selection copy；只有浏览器拒绝该路径时才调用现代 API，并给它
+      // 明确超时，避免复制入口永久卡住。
+      const previousFocus = document.activeElement;
       const ta = document.createElement('textarea');
       ta.value = text;
       ta.setAttribute('readonly', '');
@@ -921,7 +919,18 @@ export function initApp(initialTemplate) {
       let ok = false;
       try { ok = document.execCommand('copy'); } catch {}
       ta.remove();
-      return ok;
+      if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+      if (ok) return true;
+
+      try {
+        if (navigator.clipboard) {
+          return await Promise.race([
+            navigator.clipboard.writeText(text).then(() => true, () => false),
+            new Promise(resolve => setTimeout(() => resolve(false), 1200)),
+          ]);
+        }
+      } catch {}
+      return false;
     })();
   }
 
@@ -1846,6 +1855,26 @@ export function initApp(initialTemplate) {
     return visibleText.length > 0;
   }
 
+  function copyButtonLabel(btn) {
+    if (!btn) return '复制全文';
+    const label = typeof btn.querySelector === 'function' ? btn.querySelector('[data-copy-label]') : null;
+    return (label ? label.textContent : btn.textContent) || '复制全文';
+  }
+
+  function setCopyButtonLabel(btn, text) {
+    if (!btn) return;
+    const label = typeof btn.querySelector === 'function' ? btn.querySelector('[data-copy-label]') : null;
+    if (label) label.textContent = text;
+    else btn.textContent = text;
+  }
+
+  function setCopyButtonCopied(btn, copied) {
+    if (!btn) return;
+    btn.classList.toggle('copied', !!copied);
+    const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
+    if (group) group.classList.toggle('is-copied', !!copied);
+  }
+
   function copyArtifactFingerprint(html) {
     const source = String(html || '');
     let hash = 0x811c9dc5;
@@ -1866,8 +1895,8 @@ export function initApp(initialTemplate) {
       _lastCopiedHtml = '';
       logConv('error', '复制已阻止：排版规则尚未由服务端确认', { state: window._activeRuleState });
       showError('排版规则尚未加载成功，请点击顶部“重试加载”后再复制。');
-      btn.textContent = '规则未就绪';
-      btn.classList.remove('copied');
+      setCopyButtonLabel(btn, '规则未就绪');
+      setCopyButtonCopied(btn, false);
       btn.style.background = '';
       return false;
     }
@@ -1877,8 +1906,8 @@ export function initApp(initialTemplate) {
       window._copyImageWarning = 0;
       logConv('error', '复制已阻止：恢复会话缺少安全复制产物', { reason: 'degraded-session' });
       showError(_copyArtifactUnavailableReason);
-      btn.textContent = '请重新导入';
-      btn.classList.remove('copied');
+      setCopyButtonLabel(btn, '请重新导入');
+      setCopyButtonCopied(btn, false);
       btn.style.background = '';
       return false;
     }
@@ -1889,8 +1918,8 @@ export function initApp(initialTemplate) {
         _lastCopiedHtml = '';
         logConv('error', '纯文字复制已阻止：正文为空');
         showError('当前正文为空，请重新导入后再复制。');
-        btn.textContent = '请重新导入';
-        btn.classList.remove('copied');
+        setCopyButtonLabel(btn, '请重新导入');
+        setCopyButtonCopied(btn, false);
         btn.style.background = '';
         return false;
       }
@@ -1902,8 +1931,8 @@ export function initApp(initialTemplate) {
         rule: PLAIN_TEXT_RULE_LABEL,
         chars: text.length,
       });
-      btn.textContent = ok ? '\u2713 已复制' : '复制失败';
-      btn.classList.toggle('copied', ok);
+      setCopyButtonLabel(btn, ok ? '\u2713 已复制' : '复制失败');
+      setCopyButtonCopied(btn, ok);
       btn.style.background = '';
       return ok;
     }
@@ -1915,8 +1944,8 @@ export function initApp(initialTemplate) {
       _lastCopiedHtml = '';
       logConv('error', '复制已阻止：正文复制产物为空');
       showError('当前正文复制产物为空，请重新导入后再复制。');
-      btn.textContent = '请重新导入';
-      btn.classList.remove('copied');
+      setCopyButtonLabel(btn, '请重新导入');
+      setCopyButtonCopied(btn, false);
       btn.style.background = '';
       return false;
     }
@@ -1932,9 +1961,9 @@ export function initApp(initialTemplate) {
         count: pendingWechatSrcs.length,
         first: pendingWechatSrcs[0].slice(0, 80),
       });
-      const originalText = btn.textContent || '复制全文';
-      btn.textContent = waiting ? '图片准备中' : '图片需重试';
-      setTimeout(() => { if (!copyAction.stale()) btn.textContent = originalText; }, 1600);
+      const originalText = copyButtonLabel(btn);
+      setCopyButtonLabel(btn, waiting ? '图片准备中' : '图片需重试');
+      setTimeout(() => { if (!copyAction.stale()) setCopyButtonLabel(btn, originalText); }, 1600);
       return false;
     }
 
@@ -1947,12 +1976,12 @@ export function initApp(initialTemplate) {
       _lastCopiedHtml = '';
       logConv('warn', '复制已取消：排版产物在复制期间更新', { artifactHash });
       showError('排版内容刚刚更新，请再次点击复制。');
-      btn.textContent = '复制全文';
-      btn.classList.remove('copied');
+      setCopyButtonLabel(btn, '复制全文');
+      setCopyButtonCopied(btn, false);
       btn.style.background = '';
       return false;
     }
-    html = processForCopy(html, themeCSS, config);
+    html = processForCopy(html, themeCSS, config, { preserveClasses: isWebsiteTemplate() });
     html = normalizeRich(html);
     const unsafeCopyRefs = findUnsafeCopyImageRefs(html, _copyRequiresWechatImageTransfer);
 
@@ -2003,11 +2032,82 @@ export function initApp(initialTemplate) {
         artifactHash,
       });
 
-    btn.textContent = ok ? '\u2713 已复制' : '复制失败';
-    if (ok && failedImgCount) btn.textContent = '已复制·' + failedImgCount + '张图缺失';
-    btn.classList.toggle('copied', ok);
+    setCopyButtonLabel(btn, ok ? '\u2713 已复制' : '复制失败');
+    if (ok && failedImgCount) setCopyButtonLabel(btn, '已复制·' + failedImgCount + '张图缺失');
+    setCopyButtonCopied(btn, ok);
     // 按钮底色：有图缺失→橙色警告；正常/失败态清空 inline，回归默认（.copied 绿 / .tb-primary 蓝）。
     btn.style.background = failedImgCount ? 'var(--fs-warning)' : '';
+    return ok;
+  };
+
+  window.copyHTMLSource = async function() {
+    copyActionGate.invalidate();
+    const copyAction = copyActionGate.capture();
+
+    if (!isWebsiteTemplate()) {
+      showError('复制 HTML 仅用于网站排版。');
+      return false;
+    }
+    if (window._activeRuleState && window._activeRuleState !== 'resolved') {
+      _lastCopiedHtml = '';
+      showError('排版规则尚未加载成功，请点击顶部“重试加载”后再复制。');
+      return false;
+    }
+    if (_copyArtifactUnavailableReason) {
+      _lastCopiedHtml = '';
+      showError(_copyArtifactUnavailableReason);
+      return false;
+    }
+    if (_plainTextCopy !== null) {
+      _lastCopiedHtml = '';
+      showError('当前是纯文字结果，没有可复制的 HTML。');
+      return false;
+    }
+
+    if (!_articleBodyOnly) prepareMoreArticlesForCopy('copy-html-click');
+    if (!copyBodyHasMeaningfulContent(_articleCopy)) {
+      _lastCopiedHtml = '';
+      showError('当前正文复制产物为空，请重新导入后再复制。');
+      return false;
+    }
+
+    const enabled = isFooterEnabledForCurrentArticle();
+    const sourceArtifact = _articleCopy + '\n' + (enabled ? _footerCopy : '');
+    const artifactHash = copyArtifactFingerprint(sourceArtifact);
+    const pendingWechatSrcs = _copyRequiresWechatImageTransfer ? findWechatImageSrcs(sourceArtifact) : [];
+    if (pendingWechatSrcs.length > 0) {
+      _lastCopiedHtml = '';
+      showError(_uploadPromise && !_uploadDone
+        ? '网站图片仍在转存，请稍后再复制 HTML。'
+        : '仍有微信图床图片未转存，请先重试上传。');
+      return false;
+    }
+
+    const config = (window._activeConfig && window._activeConfig.config) || {};
+    const themeCSS = await _themeCSSReady;
+    if (copyAction.stale()) return false;
+    const currentArtifact = _articleCopy + '\n' + (isFooterEnabledForCurrentArticle() ? _footerCopy : '');
+    if (copyArtifactFingerprint(currentArtifact) !== artifactHash) {
+      _lastCopiedHtml = '';
+      showError('排版内容刚刚更新，请再次点击复制 HTML。');
+      return false;
+    }
+
+    const html = normalizeRich(processForCopy(
+      sourceArtifact,
+      themeCSS,
+      config,
+      { preserveClasses: isWebsiteTemplate() },
+    ));
+    const ok = await copyPlainTextToClipboard(html);
+    if (copyAction.stale()) return false;
+    _lastCopiedHtml = ok ? html : '';
+    logConv(ok ? 'info' : 'error', ok ? 'HTML 源码复制完成' : 'HTML 源码复制失败', {
+      htmlSize: (html.length / 1024).toFixed(1) + 'KB',
+      channel: (_activeTemplate && _activeTemplate.id) || 'unknown',
+      ruleRevision: (window._activeConfig && (window._activeConfig.revision || window._activeConfig.version)) || undefined,
+      artifactHash,
+    });
     return ok;
   };
 
@@ -2016,6 +2116,19 @@ export function initApp(initialTemplate) {
     window._copyInProgress = true;
     try {
       return Promise.resolve(immediateCopyContent(...args)).finally(() => {
+        window._copyInProgress = false;
+      });
+    } catch (error) {
+      window._copyInProgress = false;
+      throw error;
+    }
+  };
+
+  const immediateCopyHTMLSource = window.copyHTMLSource;
+  window.copyHTMLSource = function(...args) {
+    window._copyInProgress = true;
+    try {
+      return Promise.resolve(immediateCopyHTMLSource(...args)).finally(() => {
         window._copyInProgress = false;
       });
     } catch (error) {
@@ -2072,7 +2185,10 @@ export function initApp(initialTemplate) {
     resetImportEntry();
     fileInput.value = '';
     const copyBtn = document.getElementById('copyBtn');
-    if (copyBtn) { copyBtn.textContent = '复制全文'; copyBtn.classList.remove('copied'); }
+    if (copyBtn) {
+      setCopyButtonLabel(copyBtn, '复制全文');
+      setCopyButtonCopied(copyBtn, false);
+    }
     const contentArea = document.getElementById('contentArea');
     if (contentArea) contentArea.innerHTML = '';
     document.getElementById('statsBar').textContent = '';
