@@ -379,6 +379,82 @@ func TestPublishSiteSyncIdempotentHTTP(t *testing.T) {
 	}
 }
 
+func TestPublishSiteSyncRerenderLatestReusesExistingDraft(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	renderCalls := 0
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		renderCalls++
+		rule := testPublishResolvedRule()
+		rule.Revision = 6 + renderCalls
+		html := fmt.Sprintf(
+			`<p>最新规则第 %d 版</p><img src="https://mmbiz.qpic.cn/rerender-cover.jpg">`,
+			rule.Revision,
+		)
+		return successfulPublishRenderResult(html, rule), nil
+	}
+
+	body := fmt.Sprintf(
+		`{"url":%q,"title":"重新排版测试","content_html":"<p>这是足够长的结构化正文，用于验证同一草稿按最新规则重排。</p><p><img src=\"https://mmbiz.qpic.cn/rerender-cover.jpg\"></p>"}`,
+		testPublishSourceURL,
+	)
+	first := doPublishReq(mux, http.MethodPost, "/api/publish/site-sync", body, true)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("首次提交应 201，实际 %d body=%s", first.Code, first.Body.String())
+	}
+	var firstResp struct {
+		Job publishSyncJobSummary `json:"job"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstResp); err != nil {
+		t.Fatal(err)
+	}
+	before, err := env.store.byID(firstResp.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rerenderBody := strings.TrimSuffix(body, "}") + `,"rerender_latest":true}`
+	second := doPublishReq(mux, http.MethodPost, "/api/publish/site-sync", rerenderBody, true)
+	if second.Code != http.StatusOK {
+		t.Fatalf("重新排版应 200，实际 %d body=%s", second.Code, second.Body.String())
+	}
+	var secondResp struct {
+		Job        publishSyncJobSummary `json:"job"`
+		Existing   bool                  `json:"existing"`
+		Rerendered bool                  `json:"rerendered"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondResp); err != nil {
+		t.Fatal(err)
+	}
+	after, err := env.store.byID(firstResp.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !secondResp.Existing || !secondResp.Rerendered || secondResp.Job.ID != firstResp.Job.ID {
+		t.Fatalf("必须复用同一任务并确认已重排：%+v", secondResp)
+	}
+	if after.FoodTalksNewsID != before.FoodTalksNewsID || after.ContentVersion != before.ContentVersion+1 ||
+		after.RuleRevision != 8 || after.ReviewAction != "" {
+		t.Fatalf("同一草稿最新规则重排结果不符：before=%+v after=%+v", before, after)
+	}
+	if createN, updateN := env.ft.counts(); createN != 1 || updateN != 1 {
+		t.Fatalf("必须 Create 一次、更新同一草稿一次，实际 create=%d update=%d", createN, updateN)
+	}
+
+	if _, err := env.store.update(after.ID, func(current *publishJob) {
+		current.Stage = publishStageRendering
+	}); err != nil {
+		t.Fatal(err)
+	}
+	inProgress := doPublishReq(mux, http.MethodPost, "/api/publish/site-sync", rerenderBody, true)
+	if inProgress.Code != http.StatusConflict {
+		t.Fatalf("相同内容仍在处理中时不得伪报已重排，实际 %d body=%s", inProgress.Code, inProgress.Body.String())
+	}
+	if createN, updateN := env.ft.counts(); createN != 1 || updateN != 1 {
+		t.Fatalf("冲突请求不得新增或更新网站草稿，实际 create=%d update=%d", createN, updateN)
+	}
+}
+
 // TestPublishReviewAndDetailHTTP 审核端点走通 approve 全链路，详情端点回读全量字段。
 func TestPublishReviewAndDetailHTTP(t *testing.T) {
 	env := newPublishTestEnv(t)

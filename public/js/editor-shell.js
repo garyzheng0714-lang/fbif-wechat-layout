@@ -458,11 +458,23 @@ export function wrapCopyFeedback({
 } = {}) {
   if (!windowRef || !windowRef.copyContent) return;
 
+  function setButtonLabel(btn, text) {
+    if (!btn) return;
+    const label = typeof btn.querySelector === 'function' ? btn.querySelector('[data-copy-label]') : null;
+    if (label) label.textContent = text;
+    else btn.textContent = text;
+  }
+
   // 复位：按钮回「复制全文」、收起后台入口、隐藏底部 pill。挂到 window 上，供新文章
   // 渲染(showPreview)与返回(goBack)调用——实现「状态保持到下一次动作才复位」。
   function resetCopyFeedback() {
     const btn = documentRef.getElementById(buttonID);
-    if (btn) { btn.textContent = resetText; btn.classList.remove('copied'); }
+    if (btn) {
+      setButtonLabel(btn, resetText);
+      btn.classList.remove('copied');
+      const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
+      if (group) group.classList.remove('is-copied');
+    }
     const hint = documentRef.getElementById(hintID);
     if (hint) hint.style.display = 'none';
     const success = documentRef.getElementById(successID);
@@ -479,7 +491,8 @@ export function wrapCopyFeedback({
       hint = documentRef.createElement('span');
       hint.id = hintID;
       hint.className = 'copy-paste-hint';
-      btn.insertAdjacentElement('afterend', hint);
+      const anchor = typeof btn.closest === 'function' ? (btn.closest('.copy-split') || btn) : btn;
+      anchor.insertAdjacentElement('afterend', hint);
     }
     hint.title = '已复制，可在编辑器中粘贴 ⌘/Ctrl + V'; // 粘贴说明走最轻的 hover 提示
     hint.innerHTML = pasteTargets.map((t, i) =>

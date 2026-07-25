@@ -14,6 +14,7 @@ import (
 // renderer can consume them without translation.
 type Block struct {
 	K           string        `json:"k"`
+	Level       int           `json:"level,omitempty"`
 	Text        string        `json:"text,omitempty"`
 	Runs        []Run         `json:"runs,omitempty"`
 	Src         string        `json:"src,omitempty"`
@@ -1582,6 +1583,7 @@ func blockFromRoleDecision(obs ObservedBlock, role string) Block {
 	switch role {
 	case "h":
 		b.K = "h"
+		b.Level = headingLevelFromTag(obs.Tag)
 		b.Text = obs.Text
 		b.Runs = nil
 	case "cap":
@@ -1596,6 +1598,22 @@ func blockFromRoleDecision(obs ObservedBlock, role string) Block {
 		}
 	}
 	return b
+}
+
+// headingLevelFromTag preserves explicit source semantics for the website
+// renderer. Heuristically detected visual headings intentionally return zero
+// so existing account renderers can keep applying their own default level.
+func headingLevelFromTag(tag string) int {
+	switch strings.ToLower(strings.TrimSpace(tag)) {
+	case "h1", "h2":
+		return 2
+	case "h3":
+		return 3
+	case "h4", "h5", "h6":
+		return 4
+	default:
+		return 0
+	}
 }
 
 // hasMutedOrSmallStyle only records visual facts. It is used after a

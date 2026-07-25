@@ -950,8 +950,8 @@ test('网站什么是系列 DOCX：上海艾录 6/15 反馈回归', () => {
 
   assert.match(
     html,
-    /乳白色效果<\/span><\/p>\n<h3>\(二\)减少材料用量，降低采购成本<\/h3>/,
-    '图片图注后接 h3 时不得插空行'
+    /乳白色效果<\/span><\/p><\/figcaption><\/figure>\n<h3>\(二\)减少材料用量，降低采购成本<\/h3>/,
+    '原生 figure 图注后接 h3 时不得插空行'
   );
   assert.match(html, /src="blob:logo"[^>]*width="300"/, '关于区 logo 图固定宽 300');
   assert.match(

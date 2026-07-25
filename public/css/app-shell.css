@@ -30,6 +30,116 @@
   min-width: 0;
   flex: 0 1 auto;
 }
+
+/* 网站复制分体按钮：主操作保持“复制全文”，低频源码复制收进独立菜单。 */
+.copy-split {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+
+.copy-split .copy-split-primary {
+  border-radius: var(--fs-r-s) 0 0 var(--fs-r-s);
+}
+
+.copy-split-toggle {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--fs-brand-on) 55%, transparent);
+  border-radius: 0 var(--fs-r-s) var(--fs-r-s) 0;
+  background: var(--fs-brand);
+  color: var(--fs-brand-on);
+  cursor: pointer;
+  transition: background var(--fs-t-fast) var(--fs-ease-out);
+}
+
+.copy-split-toggle:hover,
+.copy-split.is-open .copy-split-toggle {
+  background: var(--fs-brand-hover);
+}
+
+.copy-split.is-copied .copy-split-toggle {
+  background: var(--fs-success);
+}
+
+.copy-split-toggle:active {
+  background: var(--fs-brand-active);
+}
+
+.copy-split-toggle:focus-visible,
+.copy-split-menu-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft);
+}
+
+.copy-split-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--fs-divider);
+  border-radius: var(--fs-r-m);
+  background: var(--fs-bg-card);
+  box-shadow: var(--fs-sh-s3);
+}
+
+.copy-split-menu[hidden] {
+  display: none;
+}
+
+.copy-split-menu-item {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  border-radius: var(--fs-r-s);
+  background: transparent;
+  color: var(--fs-text-1);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.copy-split-menu-item:hover,
+.copy-split-menu-item:focus-visible {
+  background: var(--fs-bg-hover);
+}
+
+.copy-split-menu-item:disabled {
+  color: var(--fs-text-disabled);
+  cursor: wait;
+}
+
+.copy-split-menu-meta {
+  color: var(--fs-text-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+@media (pointer: coarse) {
+  .copy-split-toggle,
+  .copy-split-menu-item {
+    min-height: 44px;
+  }
+  .copy-split-toggle {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* 账号菜单展开：CSS-only 入场（不动 account-menu.js，红线#2 单层菜单不变） */
 .acct-panel:not([hidden]) { transform-origin: top left; animation: acct-pop 160ms var(--fs-ease-out, ease); }
 @keyframes acct-pop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }

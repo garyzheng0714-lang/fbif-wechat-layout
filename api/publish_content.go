@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -102,6 +103,12 @@ func applyPublishContentSeed(job *publishJob, seed publishContentSeed) {
 		job.ContentVersion = 1
 	}
 	job.ContentHTML = ""
+	job.RulePresetID = ""
+	job.RuleRevision = 0
+	job.RuleConfigHash = ""
+	job.RuleSnapshotJSON = ""
+	job.RendererBuildSHA = ""
+	job.RenderOutputHash = ""
 	job.ImageMap = ""
 	job.Summary = ""
 	job.Tags = nil
@@ -124,6 +131,60 @@ func applyPublishContentSeed(job *publishJob, seed publishContentSeed) {
 	job.ReviewAction = ""
 	job.ApprovedRiskVersion = ""
 	cancelPublishNotification(job)
+}
+
+func publishContentRerenderable(job publishJob) bool {
+	if job.Stage == publishStageAwaitingReview {
+		return true
+	}
+	return job.Stage == publishStageFailed && !publishContentHasUncertainIntent(job)
+}
+
+// rerenderLatest keeps the permanent source_key and existing FoodTalks draft,
+// but invalidates the old render/review evidence and runs the persisted neutral
+// blocks through the current active rule again. Published/rejected or uncertain
+// external-call states stay fail-closed.
+func (p *publishPipeline) rerenderLatest(jobID int64) (publishJob, error) {
+	current, err := p.store.byID(jobID)
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !publishContentRerenderable(current) {
+		return current, fmt.Errorf("任务阶段 %s 不允许按最新规则重新排版", current.Stage)
+	}
+	if strings.TrimSpace(current.BlocksJSON) == "" {
+		return current, errors.New("任务缺少可重放的结构化正文，不能按最新规则重新排版")
+	}
+
+	source := current.ContentSource
+	if source == "" {
+		source = publishContentWebFetch
+	}
+	seed := newPublishContentSeed(
+		source,
+		current.Title,
+		current.SourceName,
+		current.Author,
+		current.BlocksJSON,
+		current.CoverURL,
+	)
+	reset, swapped, err := p.store.updateIf(jobID, func(latest publishJob) bool {
+		return latest.ContentVersion == current.ContentVersion && publishContentRerenderable(latest)
+	}, func(latest *publishJob) {
+		applyPublishContentSeed(latest, seed)
+	})
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !swapped {
+		return reset, errors.New("任务状态刚刚变化，请刷新后重试重新排版")
+	}
+
+	p.spawn(func() { p.runJob(jobID) })
+	if latest, loadErr := p.store.byID(jobID); loadErr == nil {
+		return latest, nil
+	}
+	return reset, nil
 }
 
 func setPendingPublishContent(job *publishJob, seed publishContentSeed, now time.Time) {

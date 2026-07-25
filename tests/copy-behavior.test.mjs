@@ -1,6 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+
+const copyButtonFeedbackDeps = {
+  copyButtonLabel(btn) {
+    if (!btn) return '复制全文';
+    const label = typeof btn.querySelector === 'function' ? btn.querySelector('[data-copy-label]') : null;
+    return (label ? label.textContent : btn.textContent) || '复制全文';
+  },
+  setCopyButtonLabel(btn, text) {
+    if (!btn) return;
+    const label = typeof btn.querySelector === 'function' ? btn.querySelector('[data-copy-label]') : null;
+    if (label) label.textContent = text;
+    else btn.textContent = text;
+  },
+  setCopyButtonCopied(btn, copied) {
+    if (!btn) return;
+    btn.classList.toggle('copied', !!copied);
+    const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
+    if (group) group.classList.toggle('is-copied', !!copied);
+  },
+};
 import { copyCompositeCacheKey, copySafeMoreArticleCard, mergeIntoFooter } from '../public/js/more-articles.js';
 import { normalizeWechatRichHtml } from '../public/js/wechat-normalize.js';
 
@@ -105,6 +125,17 @@ test('copy click does not wait on background image or more-articles preparation'
   assert.match(copyFn, /prepareMoreArticlesForCopy\('copy-click'\)/);
 });
 
+test('HTML 源码复制先走同步 selection copy，现代剪贴板挂起也有超时', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const helper = extractFunction(engine, 'copyPlainTextToClipboard');
+  const legacyIndex = helper.indexOf("document.execCommand('copy')");
+  const modernIndex = helper.indexOf('navigator.clipboard.writeText(text)');
+
+  assert.ok(legacyIndex >= 0 && modernIndex > legacyIndex, '同步 selection copy 必须先于可能挂起的现代 API');
+  assert.match(helper, /Promise\.race\(/);
+  assert.match(helper, /setTimeout\(\(\) => resolve\(false\), 1200\)/);
+});
+
 test('copyContent writes clipboard before pending more-articles preparation resolves', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
@@ -119,6 +150,7 @@ test('copyContent writes clipboard before pending more-articles preparation reso
   });
   const events = [];
   const deps = {
+    ...copyButtonFeedbackDeps,
     copyActionGate: { invalidate() {}, capture: () => ({ stale: () => false }) },
     window: {},
     document: {
@@ -208,6 +240,7 @@ test('degraded restored preview refuses copy instead of reporting false success'
   let copied = false;
   let shownError = '';
   const deps = {
+    ...copyButtonFeedbackDeps,
     copyActionGate: { invalidate() {}, capture: () => ({ stale: () => false }) },
     document: {
       getElementById(id) {
@@ -246,6 +279,7 @@ test('footer-only copy artifact is rejected before clipboard write', async () =>
     style: {},
   };
   const deps = {
+    ...copyButtonFeedbackDeps,
     copyActionGate: { invalidate() {}, capture: () => ({ stale: () => false }) },
     document: { getElementById: id => id === 'copyBtn' ? button : { textContent: '预览仍有页脚' } },
     window: {},
@@ -273,7 +307,11 @@ test('footer-only copy artifact is rejected before clipboard write', async () =>
 test('failed clipboard write does not receive copied styling', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
-  assert.match(copyExpr, /btn\.classList\.toggle\('copied', ok\)/);
+  assert.match(copyExpr, /setCopyButtonCopied\(btn, ok\)/);
+  assert.match(
+    engine,
+    /function setCopyButtonCopied\(btn, copied\)[\s\S]*?btn\.classList\.toggle\('copied', !!copied\)/,
+  );
   assert.doesNotMatch(copyExpr, /btn\.classList\.add\('copied'\)/);
 });
 

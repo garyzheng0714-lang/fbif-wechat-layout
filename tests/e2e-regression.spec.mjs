@@ -642,6 +642,42 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
     await context.close();
   });
+
+  // ---- Scenario 13: 网站分裂按钮复制当前最终 HTML 源码 ----
+  test('13-网站复制 HTML 写入真实剪贴板并保留 CMS 结构', async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      permissions: ['clipboard-read', 'clipboard-write'],
+    });
+    const page = await context.newPage();
+
+    await page.goto(BASE + '/ft/ft-default', { waitUntil: 'networkidle' });
+    await waitForAppReady(page);
+    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
+    await page.waitForFunction(() => {
+      const el = document.getElementById('previewContent');
+      return el && el.style.display !== 'none';
+    }, { timeout: 30000 });
+
+    await page.locator('#copyMenuBtn').click();
+    await expect(page.locator('#copyMenuBtn')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('menuitem', { name: '复制 HTML' })).toBeVisible();
+    await page.getByRole('menuitem', { name: '复制 HTML' }).click();
+
+    await expect(page.locator('#copyMenu')).toBeHidden();
+    await expect(page.locator('#copySuccess')).toHaveText('已复制 HTML 源码');
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toMatch(/^\s*</);
+    expect(copied).toContain('<h2');
+    expect(copied).toContain('<strong>');
+    expect(copied).toContain('<a ');
+    expect(copied).toContain('<figure class="image">');
+    expect(copied).toMatch(/<img\b[^>]*class="mc-img"/);
+    expect(copied).toContain('<figcaption>');
+    expect(copied).not.toMatch(/<script\b/i);
+
+    await context.close();
+  });
 });
 
 // ---- Generate report after all tests ----
