@@ -70,6 +70,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			ContentKind       string `json:"content_kind"`
 			Classification    string `json:"classification"`
 			ClassifierVersion string `json:"classifier_version"`
+			RerenderLatest    bool   `json:"rerender_latest"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&req); err != nil || req.URL == "" {
 			writeError(w, http.StatusBadRequest, "url is required")
@@ -84,9 +85,10 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		}
 		var job publishJob
 		var created bool
+		var restarted bool
 		var err error
 		if strings.TrimSpace(req.ContentHTML) != "" {
-			job, created, err = p.submitSupplierWithContext(r.Context(), officialPublishInput{
+			job, created, restarted, err = p.submitSupplierWithRestartContext(r.Context(), officialPublishInput{
 				URL: req.URL, Title: req.Title, SourceName: req.SourceName,
 				Author: req.Author, ContentHTML: req.ContentHTML, CoverURL: req.CoverURL,
 			})
@@ -96,6 +98,20 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		rerendered := false
+		if req.RerenderLatest && !created {
+			if restarted {
+				// A changed structured payload already restarted this same job.
+				rerendered = true
+			} else {
+				job, err = p.rerenderLatest(job.ID)
+				if err != nil {
+					writeError(w, http.StatusConflict, err.Error())
+					return
+				}
+				rerendered = true
+			}
 		}
 		if req.Classification != "" {
 			job, err = p.store.update(job.ID, func(current *publishJob) {
@@ -113,7 +129,9 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		if created {
 			status = http.StatusCreated
 		}
-		writeJSON(w, status, map[string]any{"job": newPublishSyncJobSummary(job), "existing": !created})
+		writeJSON(w, status, map[string]any{
+			"job": newPublishSyncJobSummary(job), "existing": !created, "rerendered": rerendered,
+		})
 	})
 
 	// 微信官方 API 正文直入：不抓公众号网页，直接把官方返回的 HTML 转 blocks 后

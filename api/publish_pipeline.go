@@ -1405,14 +1405,31 @@ func (p *publishPipeline) submitSupplier(input officialPublishInput) (publishJob
 }
 
 func (p *publishPipeline) submitOfficialWithContext(ctx context.Context, input officialPublishInput) (publishJob, bool, error) {
-	return p.submitStructuredContent(ctx, input, publishContentOfficial)
+	return p.submitStructuredContent(ctx, input, publishContentOfficial, nil)
 }
 
 func (p *publishPipeline) submitSupplierWithContext(ctx context.Context, input officialPublishInput) (publishJob, bool, error) {
-	return p.submitStructuredContent(ctx, input, publishContentSupplier)
+	return p.submitStructuredContent(ctx, input, publishContentSupplier, nil)
 }
 
-func (p *publishPipeline) submitStructuredContent(ctx context.Context, input officialPublishInput, contentSource string) (publishJob, bool, error) {
+func (p *publishPipeline) submitSupplierWithRestartContext(
+	ctx context.Context,
+	input officialPublishInput,
+) (publishJob, bool, bool, error) {
+	restarted := false
+	job, created, err := p.submitStructuredContent(ctx, input, publishContentSupplier, &restarted)
+	return job, created, restarted, err
+}
+
+func (p *publishPipeline) submitStructuredContent(
+	ctx context.Context,
+	input officialPublishInput,
+	contentSource string,
+	restartedOut *bool,
+) (publishJob, bool, error) {
+	if restartedOut != nil {
+		*restartedOut = false
+	}
 	if publishWorkersPaused() {
 		return publishJob{}, false, errPublishWorkersPaused
 	}
@@ -1485,6 +1502,9 @@ func (p *publishPipeline) submitStructuredContent(ctx context.Context, input off
 			return publishJob{}, false, err
 		}
 		if restart {
+			if restartedOut != nil {
+				*restartedOut = true
+			}
 			p.spawn(func() { p.runJob(job.ID) })
 		}
 	} else {
