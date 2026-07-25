@@ -1,7 +1,7 @@
 // FBIF 公众号排版模板 — CSS class-based rendering
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource, convertRuns } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource, convertRuns, convertText } = engineModule;
 const ruleModule = await import('../rule-presets.js' + assetQuery);
 const { getActiveRuleConfig, getActiveRuleBehavior, getRuleNumber, getRuleBoolean } = ruleModule;
 const behaviorModule = await import('../rule-behavior.js' + assetQuery);
@@ -466,6 +466,14 @@ async function classifyMd(text) {
   return { elems, author, source, title, imgN };
 }
 
+// 小标题（h）和图注（cap）是纯字符串 elem，不带 runs，因此两条解析路径
+// （Markdown 和 URL→blocks）都绕过了 convertRuns 的标点转换，括号一直是半角。
+// 在渲染处统一补上，口径与正文完全一致：同一套 auto 语言判定，整段判为英文时
+// 不动，中文语境里 (x) 一律转成（x）。
+function localizePunct(text) {
+  return convertText(String(text || ''));
+}
+
 // ---- HTML Rendering (class-based) ----
 // opts.isRepost — 转载路径保持微信原色（var(--wx-link-color)）；原创路径
 // 给作者行加 wx-ta-author，覆盖为 #396FBC（FBIF 视觉规范）。
@@ -513,7 +521,7 @@ function render(elems, author, source, opts) {
 
     switch (e.k) {
       case 'h':
-        lines.push(sec(leafWrap('<span textstyle="" class="wx-th">' + esc(e.text) + '</span>'), spaceAfter));
+        lines.push(sec(leafWrap('<span textstyle="" class="wx-th">' + esc(localizePunct(e.text)) + '</span>'), spaceAfter));
         break;
       case 'img': {
         const src = e.src || '';
@@ -528,7 +536,7 @@ function render(elems, author, source, opts) {
         break;
       }
       case 'cap':
-        lines.push(secCenter(leafWrap('<span textstyle="" class="wx-tc">' + esc(e.text) + '</span>'), spaceAfter));
+        lines.push(secCenter(leafWrap('<span textstyle="" class="wx-tc">' + esc(localizePunct(e.text)) + '</span>'), spaceAfter));
         break;
       case 'txt':
         lines.push(sec(renderRuns(e.runs), spaceAfter));

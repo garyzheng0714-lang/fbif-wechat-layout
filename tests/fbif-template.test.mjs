@@ -724,3 +724,32 @@ test('公众号表格单元格 GIF / http 图：data-type=gif + referrerpolicy �
   assert.match(html, /<img src="https:\/\/cdn\.example\.com\/anim\.gif"[^>]*referrerpolicy="no-referrer"/, 'http 图加防盗链');
   assert.doesNotMatch(html, /src="blob:p2"[^>]*referrerpolicy/, '本地 blob 图不加 referrerpolicy');
 });
+
+// ---- 中文语境括号一律全角（2026-07-25 用户裁定） ----
+// WHY：中文正文里混着半角括号是排版事故。改前有两个缺口：(1) 标题和图注是纯字符串
+// elem、不带 runs，两条解析路径都绕过了标点转换，括号永远是半角；(2) 正文里「括号内
+// 是纯英文且紧贴英文单词」曾被当成英文行文保护半角，同一篇文章里括号风格因此不统一。
+// 现在统一口径：中文语境下 ( ) 一律转（ ），标题图注走同一条转换。
+// 仍然保留的例外只有两类：整段判为英文的段落，以及被遮罩保护的 URL / 代码 / 邮箱。
+test('括号：小标题里的英文括号转全角', () => {
+  const html = renderBlocks([{ k: 'h', text: '雀巢(Nestle)的新动作' }]);
+  assert.ok(html.includes('雀巢（Nestle）的新动作'), html);
+  assert.doesNotMatch(html, /雀巢\(Nestle\)/, '标题不得残留半角括号');
+});
+
+test('括号：图注里的英文括号转全角', () => {
+  const html = renderBlocks([{ k: 'cap', text: '图片来源：Oatly(官网)' }]);
+  assert.ok(html.includes('图片来源：Oatly（官网）'), html);
+});
+
+test('括号：正文里紧贴英文单词的括号也转（旧保护例外已废）', () => {
+  const html = renderBlocks([txtBlock('这家公司 FoodTech (NYSE: FDN) 完成融资，增长很快。')]);
+  assert.ok(html.includes('FoodTech（NYSE: FDN）完成融资'), html);
+  // 括号内是英文行文，冒号仍是英文标点，不该被转成全角。
+  assert.doesNotMatch(html, /NYSE：/, '括号内英文冒号保持半角');
+});
+
+test('括号：URL 里的括号不动（转了链接就废了）', () => {
+  const html = renderBlocks([txtBlock('详见 https://a.com/x(y) 的说明。')]);
+  assert.ok(html.includes('https://a.com/x(y)'), html);
+});
