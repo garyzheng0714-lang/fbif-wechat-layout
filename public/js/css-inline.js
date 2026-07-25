@@ -86,8 +86,9 @@ function mergeStyles(styles) {
   return order.map(name => name + ': ' + values.get(name) + ';').join(' ');
 }
 
-export function inlineCSS(html, resolvedCSS) {
+export function inlineCSS(html, resolvedCSS, options = {}) {
   const rules = parseRules(resolvedCSS);
+  const preserveClasses = options.preserveClasses === true;
   return html.replace(/<([A-Za-z][\w:-]*)([^<>]*?)>/g, (tag) => {
     const classRe = /\sclass=(["'])([^"']*)\1/i;
     const classMatch = tag.match(classRe);
@@ -97,7 +98,7 @@ export function inlineCSS(html, resolvedCSS) {
     const classStyles = Object.entries(rules)
       .filter(([className]) => classSet.has(className))
       .map(([, style]) => style);
-    let next = tag.replace(classRe, '');
+    let next = preserveClasses ? tag : tag.replace(classRe, '');
     if (!classStyles.length) return next;
 
     const styleRe = /\sstyle=(["'])([\s\S]*?)\1/i;
@@ -108,9 +109,9 @@ export function inlineCSS(html, resolvedCSS) {
   });
 }
 
-export function processForCopy(html, rawCSS, config) {
+export function processForCopy(html, rawCSS, config, options = {}) {
   const resolved = resolveVars(rawCSS, config);
-  return inlineCSS(html, resolved);
+  return inlineCSS(html, resolved, options);
 }
 
 export function applyThemeVars(el, config) {

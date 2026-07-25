@@ -337,7 +337,7 @@ export async function renderArticle({
   }
   html = absolutizeAssetURLs(html);
   if (channel.stripExternalAnchors) html = stripExternalAnchors(html);
-  html = processForCopy(html, themeCSS, config);
+  html = processForCopy(html, themeCSS, config, { preserveClasses: channel.configViaOpts });
   if (channel.normalizeWechat) html = normalizeWechatRichHtml(html);
   const resolvedConfig = entry.preset?.raw_config || entry.config || {};
   const resolvedBehavior = entry.preset?.behavior || entry.behavior || {};

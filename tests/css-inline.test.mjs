@@ -55,3 +55,12 @@ test('copy CSS inlining keeps explicit inline style higher priority than class s
   assert.match(sectionTag, /margin-bottom:\s*4px/);
   assert.equal((sectionTag.match(/margin-bottom:/g) || []).length, 1);
 });
+
+test('网站 HTML 内联时保留 FoodTalks CMS 原生 class', async () => {
+  const css = await themeCSS();
+  const html = '<figure class="image"><img class="mc-img" src="x.jpg"></figure>';
+  const out = processForCopy(html, css, DEFAULT_RULE_CONFIG, { preserveClasses: true });
+
+  assert.match(out, /<figure class="image">/);
+  assert.match(out, /<img class="mc-img"/);
+});

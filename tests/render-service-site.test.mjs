@@ -108,6 +108,51 @@ test('ft-default：输出网站口径特征（署名 #888888、h2 无 mctoc 锚�
   assert.ok(siteResult.headingN >= 1);
 });
 
+test('ft-default：保留标题层级、正文富文本，并绑定图片与图注', async () => {
+  const structuredResult = await renderArticle({
+    packId: 'ft-default',
+    title: '结构样本',
+    source: '结构测试',
+    blocks: [
+      { k: 'h', level: 2, text: '一级章节' },
+      { k: 'h', level: 3, text: '二级章节' },
+      { k: 'h', level: 4, text: '三级章节' },
+      {
+        k: 'txt',
+        runs: [
+          { type: 'txt', text: '据', bold: true },
+          { type: 'link', text: '外部报道', href: 'https://example.com/news/1' },
+        ],
+      },
+      {
+        k: 'img',
+        src: 'https://img.example.com/foodtalks.jpg',
+        w: '600',
+        h: '338',
+      },
+      { k: 'cap', text: '图片来源：品牌官网' },
+    ],
+  });
+
+  const { html } = structuredResult;
+  assert.match(html, /<h2 style="text-align: justify;">一级章节<\/h2>/);
+  assert.match(html, /<h3 style="text-align: justify;">二级章节<\/h3>/);
+  assert.match(html, /<h4 style="text-align: justify;">三级章节<\/h4>/);
+  assert.match(html, /<strong>据<\/strong>/, '正文加粗 run 必须进入最终 HTML');
+  assert.match(
+    html,
+    /<a href="https:\/\/example\.com\/news\/1" target="_blank" rel="noopener">外部报道<\/a>/,
+    '正文链接 run 必须进入最终 HTML',
+  );
+  assert.match(
+    html,
+    /<figure class="image">[\s\S]*<img[^>]*width="600"[^>]*class="mc-img"[\s\S]*<figcaption>[\s\S]*图片来源：品牌官网[\s\S]*<\/figcaption>[\s\S]*<\/figure>/,
+    '图片与连续图注必须作为 FoodTalks 原生 figure/figcaption 输出',
+  );
+  assert.equal(structuredResult.imgN, 1);
+  assert.equal(structuredResult.headingN, 3);
+});
+
 test('ft-default：headless 保留网站 behavior 的顶层正则与 lists，不走公众号 normalizer', async () => {
   const custom = await renderArticle({
     title: '网站原始 behavior',

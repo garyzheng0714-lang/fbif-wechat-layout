@@ -177,7 +177,7 @@ test('M2: 图注颜色是 #888888（不再是 #7f7f7f）', () => {
   assert.doesNotMatch(captionFnMatch[0], /#7f7f7f/, '图注不能再用 #7f7f7f');
 });
 
-test('M2: 图片 wrapper 改为 <p><img style="display:block; margin:auto">', () => {
+test('M2: 图片输出 FoodTalks 原生 figure.image + mc-img', () => {
   const imgFnMatch = templateSource.match(
     /function\s+renderImage\s*\([\s\S]+?\n\}/
   );
@@ -185,7 +185,13 @@ test('M2: 图片 wrapper 改为 <p><img style="display:block; margin:auto">', ()
   assert.match(imgFnMatch[0], /display:\s*block/, '图片必须 display: block');
   assert.match(imgFnMatch[0], /margin-left:\s*auto/, '图片必须 margin-left: auto');
   assert.match(imgFnMatch[0], /class=["']mc-img["']/, '图片必须有 class="mc-img"');
+  assert.match(imgFnMatch[0], /<figure class="image">/, '图片必须使用 FoodTalks 编辑器原生 figure.image');
   assert.doesNotMatch(imgFnMatch[0], /display:\s*inline-block/, '不再用 inline-block');
+});
+
+test('FoodTalks 图片与图注使用 figcaption 绑定，不拆成两个正文段', () => {
+  assert.match(templateSource, /function\s+renderFigureCaption/);
+  assert.match(templateSource, /<figcaption>/);
 });
 
 test('M2: 标题 mctoc_ ID 生成可由 config 开关', () => {

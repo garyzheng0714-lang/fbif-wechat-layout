@@ -1,11 +1,10 @@
 // FoodTalks 网站排版模板 — 输出 inline-style HTML，给 FoodTalks 网站后台编辑器粘贴用
 // 输出契约（M2，基于 8 篇真实 foodtalks.cn 文章采样对齐，参见
 // docs/superpowers/specs/2026-05-27-foodtalks-site-layout-design.md）：
-//   - <h2 id="mctoc_xxxxxxxxxxxx">/<h3 id=...> 当 config.modules.mctoc.enabled 开启时带锚点 ID，否则纯标签
+//   - <h2>/<h3>/<h4> 按原稿层级输出；config.modules.mctoc.enabled 开启时带锚点 ID
 //   - <p style="text-align: justify;"> 所有段落两端对齐
 //   - 空行：<p style="text-align: justify;"><br></p>（显式标签）
-//   - 图片：<p><img style="display: block; margin-left: auto; margin-right: auto;" class="mc-img" width=...></p>
-//   - 图注：<p style="text-align: center;"><span style="font-size: 12px; color: #888888;">...</span></p>
+//   - 图片与图注：<figure class="image"><img ... class="mc-img"><figcaption>...</figcaption></figure>
 //   - 参考来源：ref-header / ref-item 分支，14px #888888 段落，保留作者原始 [n] 编号（不再自动补）
 //   - 链接：a 标签补 target="_blank" rel="noopener"
 //   - 作者署名 / 提示行：由 applyFoodTalksBehavior 行为模板从文档中提升识别
@@ -408,8 +407,8 @@ function renderHeading(level, text, config = {}) {
   // mctoc 模块显式开启时补 id。
   const mctocEnabled = !!(config.modules && config.modules.mctoc && config.modules.mctoc.enabled);
   const idAttr = mctocEnabled ? ` id="${genMctocId()}"` : '';
-  const tag = level === 3 ? 'h3' : 'h2';
-  const t = level === 3 ? normalizeSubheadingParens(text) : text;
+  const tag = level === 4 ? 'h4' : (level === 3 ? 'h3' : 'h2');
+  const t = level >= 3 ? normalizeSubheadingParens(text) : text;
   return `<${tag}${idAttr} style="text-align: justify;">${esc(t)}</${tag}>`;
 }
 
@@ -473,7 +472,7 @@ function renderedImageWidth(naturalWidth, naturalHeight, config = {}, elem = {})
   return adaptiveImageWidth(w, h, opts);
 }
 
-function renderImage(src, alt, naturalWidth, naturalHeight, config = {}, elem = {}) {
+function renderImage(src, alt, naturalWidth, naturalHeight, config = {}, elem = {}, captionHTML = '') {
   const safeSrc = escAttr(src || '');
   const safeAlt = escAttr(alt || '');
   const width = renderedImageWidth(naturalWidth, naturalHeight, config, elem);
@@ -484,10 +483,11 @@ function renderImage(src, alt, naturalWidth, naturalHeight, config = {}, elem = 
   // 内联 max-width:100% 是给外部 CMS / 邮件客户端用的兜底——本工具的 .mc-img 仅
   // 在预览页 CSS 中生效，复制粘贴到不带样式的容器时大图会溢出。
   return (
-    `<p>` +
+    `<figure class="image">` +
     `<img style="display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;" ` +
     `src="${safeSrc}" alt="${safeAlt}" width="${width}" class="mc-img"${rpol}>` +
-    `</p>`
+    captionHTML +
+    `</figure>`
   );
 }
 
@@ -513,6 +513,11 @@ function renderImageCaption(text, config = {}) {
     `<span style="font-size: ${fs}px; color: ${color};">${esc(text)}</span>` +
     `</p>`
   );
+}
+
+function renderFigureCaption(captionElems, config = {}) {
+  const captions = (captionElems || []).map(e => renderImageCaption(runsToPlain(e.runs), config)).join('');
+  return captions ? `<figcaption>${captions}</figcaption>` : '';
 }
 
 // ---- 表格渲染（统一表格样式，与公众号物理隔离：各写各的 renderTable，共享中性表格结构）----
@@ -653,14 +658,14 @@ function render(elems, config = {}) {
       // 二级标题前 1 个空行；三级标题（(一)…）紧贴上文（62303 后台源码：h3 前无空行
       // div，间距由后台 CSS margin 提供——飞书反馈问题十/十二核对）。p 分支已在每段后
       // 留空行，这里避免再叠加成双空行。
-      const lv = e.level === 3 ? 3 : 2;
+      const lv = e.level === 4 ? 4 : (e.level === 3 ? 3 : 2);
       const prev = elems[i - 1];
       const last = lines[lines.length - 1];
       if (isSeriesSiteConfig(config) && prev && (prev.k === 'img' || prev.k === 'video' || prev.k === 'cap') &&
           (last === BLANK_LINE || last === CENTER_BLANK_LINE)) {
         lines.pop();
-      } else if (lv === 3) {
-        // h3 紧贴：吃掉 p 分支刚补的尾空行，对齐 62303「正文段→h3 直接相连」结构
+      } else if (lv >= 3) {
+        // h3/h4 紧贴：吃掉 p 分支刚补的尾空行，对齐 FoodTalks 次级标题结构
         if (lines.length > 0 && lines[lines.length - 1] === BLANK_LINE) lines.pop();
       } else if (!prevWasHeading && lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
         lines.push(BLANK_LINE);
@@ -766,11 +771,22 @@ function render(elems, config = {}) {
       continue;
     }
     if (e.k === 'img') {
-      lines.push(renderImage(e.src, e.alt, e.width, e.height, config, e));
-      // 图片后若不是图注，补空行（基石：图→正文间有空行；图→图注紧贴无空行）
-      if (!elems[i + 1] || elems[i + 1].k !== 'cap') {
-        lines.push(BLANK_LINE);
+      const captions = [];
+      while (elems[i + 1] && elems[i + 1].k === 'cap') {
+        captions.push(elems[i + 1]);
+        i += 1;
       }
+      lines.push(renderImage(
+        e.src,
+        e.alt,
+        e.width,
+        e.height,
+        config,
+        e,
+        renderFigureCaption(captions, config),
+      ));
+      // 图与图注现在是一个原生 figure；块后保留原有空行语义。
+      lines.push(captions.length ? CENTER_BLANK_LINE : BLANK_LINE);
       prevWasHeading = false;
       prevWasStandaloneLink = false;
       continue;
@@ -892,7 +908,7 @@ function render(elems, config = {}) {
 }
 
 function runsToPlain(runs) {
-  return (runs || []).filter(r => r.type === 'txt').map(r => r.text).join('');
+  return (runs || []).filter(r => r.type === 'txt' || r.type === 'link').map(r => r.text).join('');
 }
 
 // 判断段是不是"独立链接段"：runs 里只有 1 个 link、其他没有可见内容（image 也算 hidden）
@@ -934,7 +950,9 @@ function adaptNeutralToSite(e) {
   if (e.k === 'img') return e.src ? { k: 'img', src: e.src, alt: '', width: 0, height: 0, w: e.w, aspect: e.aspect, blankBefore: e.blankBefore } : null;
   if (e.k === 'video') return e.src ? { k: 'video', src: e.src, poster: e.poster || '', blankBefore: e.blankBefore } : null;
   if (e.k === 'h') {
-    const level = /heading\s*[3-6]/.test(String(e.styleName || '').toLowerCase()) ? 3 : 2;
+    const styleLevel = String(e.styleName || '').match(/(?:heading|标题)\s*([1-9])/i);
+    const sourceLevel = styleLevel ? Number(styleLevel[1]) : 2;
+    const level = sourceLevel >= 4 ? 4 : (sourceLevel === 3 ? 3 : 2);
     return { k: 'h', level, runs: [{ type: 'txt', text: e.text }], blankBefore: e.blankBefore };
   }
   if (e.k === 'cap') return { k: 'cap', runs: [{ type: 'txt', text: e.text }], blankBefore: e.blankBefore };
@@ -998,12 +1016,10 @@ async function classifyMd(text) {
   for (const line of lines) {
     if (!line.trim()) continue;
     let m;
-    if ((m = line.match(/^#{1,2}\s+(.*)$/))) {
-      elems.push({ k: 'h', level: 2, runs: parseMdRuns(m[1]) });
-      continue;
-    }
-    if ((m = line.match(/^#{3,6}\s+(.*)$/))) {
-      elems.push({ k: 'h', level: 3, runs: parseMdRuns(m[1]) });
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+      const sourceLevel = m[1].length;
+      const level = sourceLevel >= 4 ? 4 : (sourceLevel === 3 ? 3 : 2);
+      elems.push({ k: 'h', level, runs: parseMdRuns(m[2]) });
       continue;
     }
     if ((m = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/))) {
@@ -1053,7 +1069,11 @@ function classifyBlocks(data) {
     if (b.k === 'h') {
       // 「（一）…」编号标题是次级标题 → h3（62303 成品：(一)/(二) 全部 heading-3）。
       const hText = b.text || '';
-      const hLevel = /^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]/.test(hText.trim()) ? 3 : 2;
+      const explicitLevel = Number(b.level);
+      const hLevel = explicitLevel >= 4
+        ? 4
+        : (explicitLevel === 3 ||
+          /^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]/.test(hText.trim()) ? 3 : 2);
       elems.push({ k: 'h', level: hLevel, runs: [{ type: 'txt', text: hText }], ...meta(b) });
       continue;
     }
