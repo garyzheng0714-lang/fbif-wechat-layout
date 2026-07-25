@@ -49,10 +49,11 @@ export function detectHeadingLevel(text, opts) {
 // 段内允许逗号/顿号/冒号（"疯狂的梦想：5年要开到1000家店"是标题）。
 export function isBoldHeading(runs, opts) {
   const captionRe = (opts && opts.captionLeadRe) || CAPTION_LEAD_RE;
-  const txtRuns = (runs || []).filter(r => r && r.type === 'txt' && r.text && r.text.trim());
-  if (!txtRuns.length) return false;
-  if (!txtRuns.every(r => r.bold)) return false;
-  const plain = txtRuns.map(r => r.text).join('').trim();
+  const visibleRuns = (runs || []).filter(r =>
+    r && (r.type === 'txt' || r.type === 'link') && r.text && r.text.trim());
+  if (!visibleRuns.length) return false;
+  if (!visibleRuns.every(r => r.bold)) return false;
+  const plain = visibleRuns.map(r => r.text).join('').trim();
   if (plain.length === 0 || plain.length > 36) return false;
   if (DECORATIVE_LINE_RE.test(plain)) return false;
   if (ARABIC_LIST_PREFIX_RE.test(plain)) return false;
@@ -81,7 +82,7 @@ export function promoteHeuristicHeadings(elems, opts) {
   return (elems || []).map(e => {
     if (!e || e.k !== 'p') return e;
     if (e.skipHeadingPromote) return e;
-    const plain = (e.runs || []).filter(r => r.type === 'txt').map(r => r.text).join('');
+    const plain = (e.runs || []).filter(r => r.type === 'txt' || r.type === 'link').map(r => r.text).join('');
     const level = detectHeadingLevel(plain, opts);
     if (level !== 0) return { k: 'h', level, runs: e.runs };
     if (isBoldHeading(e.runs, opts)) return { k: 'h', level: 2, runs: e.runs };

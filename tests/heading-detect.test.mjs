@@ -79,6 +79,14 @@ test('isBoldHeading 拒绝部分加粗的正文（混排非粗体）', () => {
   assert.equal(isBoldHeading(runs), false);
 });
 
+test('isBoldHeading 不忽略段内链接，避免加粗开头把整段链接正文误升标题', () => {
+  const runs = [
+    { type: 'txt', text: '据', bold: true },
+    { type: 'link', text: '外部报道', href: 'https://example.com/news' },
+  ];
+  assert.equal(isBoldHeading(runs), false);
+});
+
 test('isBoldHeading 拒绝加粗的图注/来源行', () => {
   assert.equal(isBoldHeading([{ type: 'txt', text: '图片来源：大塚食品', bold: true }]), false);
   assert.equal(isBoldHeading([{ type: 'txt', text: '拍摄：Mote莫特', bold: true }]), false);

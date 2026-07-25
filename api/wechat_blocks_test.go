@@ -376,6 +376,26 @@ func TestImageCaptionByCenterShort(t *testing.T) {
 	}
 }
 
+func TestExplicitHeadingTagsPreserveFoodTalksLevels(t *testing.T) {
+	html := jsContentWrap(
+		`<h2>一级章节</h2>` +
+			`<h3>二级章节</h3>` +
+			`<h4>三级章节</h4>`)
+	_, blocks, _ := extractArticleBlocks(html)
+
+	want := map[string]int{
+		"一级章节": 2,
+		"二级章节": 3,
+		"三级章节": 4,
+	}
+	for text, level := range want {
+		block := findBlockByText(blocks, text)
+		if block == nil || block.K != "h" || block.Level != level {
+			t.Fatalf("%q heading = %+v, want level %d", text, block, level)
+		}
+	}
+}
+
 func TestImageCaptionGroupKeepsImageSourceAsCaption(t *testing.T) {
 	html := jsContentWrap(
 		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
