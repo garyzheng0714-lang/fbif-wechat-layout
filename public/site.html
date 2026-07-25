@@ -353,7 +353,6 @@ const {
   createUrlImportHandler,
   extractSiteSummary,
   foodTalksFetchErrorMessage,
-  hasExplicitRepostDisclosure,
   pasteTargetsForChannel,
   resolveInitialRulePackID,
   wrapBackFeedback,
@@ -1382,12 +1381,15 @@ window.fetchArticle = createUrlImportHandler({
   onArticleIntent() {
     if (window._engineApi && typeof window._engineApi.invalidatePendingWork === 'function') window._engineApi.invalidatePendingWork();
   },
-  resolveIsRepost(payload) {
-    if (hasExplicitRepostDisclosure(payload && payload.blocks)) return true;
-    const sourceName = String(payload && payload.source_name || '').replace(/\s+/g, '').toLowerCase();
-    const ownedName = String(activeRulePack && activeRulePack.previewAccountName || '').replace(/\s+/g, '').toLowerCase();
-    return !sourceName || !ownedName || sourceName !== ownedName;
-  },
+  // resolveIsRepost 不再覆盖：URL 导入的源头一定是微信公众号文章，FoodTalks 站点
+  // 转载它，对站点而言永远是转载，与公众号渠道的默认行为（editor-shell 的
+  // resolveIsRepost = () => true）一致。
+  //
+  // 旧实现拿 previewAccountName 当站点身份，与抓到的 source_name 比对，相同即判原创。
+  // 但 ft-default 的 previewAccountName 是 `FBIF食品饮料创新`——那是基石 62285 的预览
+  // 署名，不是站点身份。于是 FBIF 公众号自己的稿子被判成「原创」，连带丢掉转载页脚
+  // （bottom_blocks/fbif_footer 都不输出）且不剪微信尾部导流段，而侧栏开关仍显示开启，
+  // 肉眼不可见。来源换成别家公众号时才碰巧正确——这正是该缺陷长期未被发现的原因。
   onArticleUrl(url, meta = {}) {
     window._currentArticleUrl = url;
     setSiteImportCompact('FoodTalks 链接', url);
