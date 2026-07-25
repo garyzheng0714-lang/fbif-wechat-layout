@@ -1,7 +1,7 @@
 # fbif-wechat-layout
 
 ![类型](https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E5%86%85%E5%AE%B9%E6%8E%92%E7%89%88%E4%B8%8E%E5%8F%91%E5%B8%83-2563eb)
-![Go](https://img.shields.io/badge/Go-1.26.1-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8?logo=go&logoColor=white)
 ![前端](https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-Vanilla%20JS-f7df1e?logo=javascript&logoColor=111827)
 ![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a)
 ![README](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-brightgreen)
@@ -37,7 +37,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - DOCX 首个"作者："行之前的前置材料默认剥离
 - 表格：蓝底白字表头 + 浅灰网格线、全格居中、列宽按 Word gridCol 比例；关键视觉以 HTML 属性 + 内容层双写（`border`/`cellpadding`/`align`/`bgcolor`/`width` 属性、表头 `<strong>`），保证粘进 FoodTalks 后台被清洗内联样式后不丢样；表格内图片按 Word 里设置的显示宽度统一尺寸（2026-07-06）
 
-## 最新状态（2026-07-10）
+## 当前状态（核对至 2026-07-24）
 
 - **账号目录单一真相源**：账号先登记在 `api/account_catalog.go`，再运行 `npm run gen:registry` 生成 `public/js/rule-packs/registry.js`；生成文件不手改。账号与默认 preset 在启动时做成对校验。
 - **统一底部区块模型**：公众号与网站渠道共用 `modules.bottom_blocks` 数据结构和区块面板交互，但视觉输出仍由 `fbif`、`foodtalks-series`、`foodtalks-site` 三套渲染器物理隔离。旧 `fbif_footer` 只保留兼容回退，不再是网站页脚主路径。
@@ -65,7 +65,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - 支持多账号规则绑定，当前 5 个账号：`FBIF食品饮料创新`、`WowFood爆品超市`（公众号，复用 fbif 模板）、`FoodTalks什么是系列`（公众号，独立 foodtalks-series 模板）、`网站默认 ft-default`与`网站·什么是系列 ft-series`（网站渠道，foodtalks-site 模板），各有独立服务端默认规则绑定；规则库 schema v4 为每条规则保存受限 `baseline_id`，并为账号绑定保存单调修订号。自建规则必须显式选择继承基线，不再默认串到 FBIF；规则配置可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数，并保存渠道独立的 `behavior`，本地设置仅作离线降级。
 - 原创 DOCX 以首个 `作者：` 行作为正文起点；该行之前的编辑前置材料不进入编辑器预览。
 - DOCX 连续正文段落会保留紧凑排版；只有原文空段分隔的位置才恢复标准段后间距。
-- URL 导入的文章级 `来源：`、`作者：`、`编辑：` 会收集到正文末尾，并在标准 FBIF `提示：` 页脚前只渲染一次。
+- URL 导入会识别文章级 `来源 / 出处 / 出品`、`作者 / 撰文 / 撰稿 / 文`、`编辑 / 责编`，分隔符支持 `：`、`:`、`/`、`|`、`｜`。这些信息统一移到正文末尾、标准 FBIF `提示：` 页脚前，只渲染一次：第一行是来源，第二行合并作者与编辑（如有）。正文有显式来源时优先使用；没有时以微信抓取结构里的 `source_name`（公众号名称）补 `来源：`，不会把结构化 `byline` 擅自补成作者。署名行使用公众号蓝色、`1.75` 行高和正常字形，不斜体，连续两行之间不额外空行。
 - 正文最后一段（包括参考来源末行）与标准 FBIF `提示：` 页脚之间保留标准段落间距，避免正文尾部贴住页脚。
 - 默认行为规则下，作者为 `Mote莫特` 或 `Mote 莫特` 时，会在“参考来源”上方自动插入固定署名图片；后台 `代码化规则` 可调整作者/来源/页脚文案和这类受限插图动作。
 - 支持内部内容发布任务：同一来源 URL 幂等建单，任务失败可从失败阶段续跑；AI 只预填封面、摘要、标签、作者和优化说明，不允许修改正文 HTML。
@@ -299,6 +299,7 @@ go test ./...
 
 ## 维护说明
 
+- 文档入口见 [`docs/INDEX.md`](docs/INDEX.md)。根目录 `WORKLOG-*.md` 和 `openspec/changes/` 是过程记录，不作为当前规则的单一真相源；是否仍在推进要结合文件状态、issue tracker 和当前代码判断。稳定能力以 README、长期契约、ADR、`openspec/specs/` 和当前代码为准。
 - `DESIGN.md` 记录界面和公众号预览页的设计约束。
 - 渲染器按渠道分三套且物理隔离（红线#19）：公众号默认走 `fbif`，网站走 `foodtalks-site`，FoodTalks系列走 `foodtalks-series`，底部分别由 `mp-blocks`（661px）/ `site-blocks`（满宽）渲染。各渠道功能应以对应渲染器为准，不要用 `fbif.js` 描述网站 / 系列行为。
 - 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；受限行为规则集中在 `public/js/rule-behavior.js`。服务端规则持久化、账号绑定和写入校验集中在 `api/rule_presets.go`、`api/rule_behavior.go`、`api/rule_config_validation.go`；各账号 / preset 的默认成对登记在 `api/rule_defaults.go` 与 `api/account_catalog.go`，底部区块默认与校验在 `api/rule_bottom_blocks.go`（统一 `schema_version=2`）。
@@ -309,6 +310,6 @@ go test ./...
 - “更多文章”选图链路由 `api/main.go` 的 `/api/fetch-article-meta` 返回 `image_urls`，`public/js/more-articles.js` 持久化到卡片状态，`public/js/more-articles-ui.js` 合并为选图候选并处理 URL 输入自动抓取。候选顺序为自定义封面、抓取头图、当前卡片正文媒体图、主文章图片兜底；旧卡片缺少 `image_urls` 时，点击替换会按卡片链接补抓一次。
 - DOCX 作者规则集中在 `public/js/templates/fbif.js`：首个 `作者：` 行之前内容默认隐藏；`Mote莫特` / `Mote 莫特` 会触发参考来源上方的固定署名图片。
 - DOCX 段距规则也在 `public/js/templates/fbif.js`：连续非空正文段落在 Word 段距较小时保持紧凑；如果中间出现空段，则下一段前恢复标准 `wx-gap`。
-- URL 导入结构化块由 `api/wechat_blocks.go` 输出，`public/js/templates/fbif.js` 渲染。图片说明组必须保留为 `cap`；文章级来源、作者、编辑必须在正文尾部、标准页脚前只渲染一次；正文尾段即使没有后续正文块，也必须带 `wx-gap`，给标准 `提示：` 页脚留出段落间距。
-- 排版契约需要测试保护：`api/wechat_blocks_test.go` 覆盖连续图注和图片来源，`tests/fbif-template.test.mjs` 覆盖图注样式、作者来源去重、页脚位置和 DOCX 连续段落紧凑规则。
+- URL 导入结构化块由 `api/wechat_blocks.go` 输出，`public/js/editor-shell.js` 必须把 API 的 `source_name` 原字段名传给 `public/js/templates/fbif.js`。图片说明组必须保留为 `cap`；文章级署名别名和分隔符按“功能”一节归一，显式来源优先，缺失时才用公众号名称兜底；来源、作者、编辑在正文尾部、标准页脚前只渲染一次。正文尾段即使没有后续正文块，也必须带 `wx-gap`，给标准 `提示：` 页脚留出段落间距。
+- 排版契约需要测试保护：`api/wechat_blocks_test.go` 覆盖连续图注和图片来源，`tests/editor-shell.test.mjs` 锁定 `source_name` 传递，`tests/fbif-template.test.mjs` 覆盖图注样式、署名别名与分隔符、公众号名称兜底、作者来源去重、页脚位置和 DOCX 连续段落紧凑规则。
 - FoodTalks 编辑部元数据口径见 [`docs/editorial-norms-foodtalks.md`](docs/editorial-norms-foodtalks.md)；API 环境差异、可见性状态与未解限制见 [`docs/foodtalks-api-contract.md`](docs/foodtalks-api-contract.md)。
