@@ -186,7 +186,10 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // fbif v16→v17（2026-06-30）：Mote 作者默认隐藏参考文献前署名图，仍允许前台按单篇开启。
 // fbif v17→v18（2026-07-05）：用户裁定 Mote 作者默认【显示】Bobo 名片（byline）与参考文献前
 // 署名图（mote_ref_author_card），推翻 v16/v17 的默认隐藏；单篇仍可按需关闭。
-const currentBuiltinRuleVersion = 17
+// v17→v18（2026-07-26）：ft-default 网站页脚默认开启（fbif_footer + 由它派生的
+// bottom_blocks）。旧默认 enabled=false 让页脚只能靠前台 localStorage override 打开，
+// 新环境静默丢页脚；仅覆盖 ft-default-v1。
+const currentBuiltinRuleVersion = 18
 const defaultBuiltinRuleVersion = 16
 const fbifBuiltinRuleVersion = 18
 const ftSeriesSiteBuiltinRuleVersion = 16
@@ -360,7 +363,10 @@ func defaultFBIFFooterModule() map[string]any {
 		return map[string]any{"html_lines": arr}
 	}
 	return map[string]any{
-		"enabled":          false,
+		// 默认开启：红线 #20 要求网站页脚由工具完整输出六段。此前默认 false，
+		// 页脚只能靠前台单篇 override（localStorage）打开——老浏览器存过状态的人看得到，
+		// 换电脑 / 清缓存 / 新同事第一次用就静默丢页脚，而侧栏开关仍显示开启。
+		"enabled":          true,
 		"active_preset_id": "fbif-original",
 		"segment_order":    []any{"biz_coop", "join_group", "follow_account", "logo", "more_info"},
 		"segments": map[string]any{

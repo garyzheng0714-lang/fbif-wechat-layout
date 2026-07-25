@@ -1498,10 +1498,13 @@ func TestDefaultRuleStoreDocumentIncludesFoodTalksSite(t *testing.T) {
 	} else if mctoc["enabled"] != true {
 		t.Errorf("modules.mctoc.enabled = %v, want true", mctoc["enabled"])
 	}
+	// 页脚默认开启（v18，2026-07-26）。红线 #20 要求网站页脚由工具完整输出六段；
+	// 旧默认 false 让页脚只能靠前台 localStorage override 打开，浏览器存过状态的人
+	// 看得到，换电脑 / 清缓存 / 新同事第一次用就静默丢页脚，侧栏开关却仍显示开启。
 	if footer, ok := modules["fbif_footer"].(map[string]any); !ok {
 		t.Error("modules.fbif_footer not present or not a map")
-	} else if footer["enabled"] != false {
-		t.Errorf("modules.fbif_footer.enabled = %v, want false", footer["enabled"])
+	} else if footer["enabled"] != true {
+		t.Errorf("modules.fbif_footer.enabled = %v, want true（网站页脚必须默认输出）", footer["enabled"])
 	}
 }
 
