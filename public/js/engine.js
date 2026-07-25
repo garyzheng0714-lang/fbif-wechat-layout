@@ -24,9 +24,10 @@ export {
 
 // Re-export convertRuns so templates can apply punctuation rules to runs
 // that arrive pre-formed (e.g. the new URL→blocks path, where runs come
-// from the Go backend and bypass parseMdRuns).
+// from the Go backend and bypass parseMdRuns). convertText covers the
+// plain-string elems (headings, captions) that carry no runs at all.
 const punctuationModule = await import('./punctuation.js' + assetQuery);
-export const { convertRuns } = punctuationModule;
+export const { convertRuns, convertText } = punctuationModule;
 
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
 import { createCopySession } from './copy-session.js';

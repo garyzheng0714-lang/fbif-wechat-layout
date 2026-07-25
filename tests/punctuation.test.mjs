@@ -49,10 +49,28 @@ test('convert: keeps English sentence period before a Chinese closing quote', ()
   assert.equal(convertText(input), input);
 });
 
-test('convert: keeps ASCII parentheses when the parenthetical belongs to an English phrase', () => {
+// Editorial rule: a Chinese paragraph never carries halfwidth parens, even when
+// the parenthetical is a pure English phrase glued to an English word. The
+// colon INSIDE stays halfwidth — that is English sentence punctuation, and the
+// surrounding ASCII spaces collapse against the fullwidth delimiters.
+test('convert: localizes ASCII parentheses even around an English phrase', () => {
   const input = '这家公司 FoodTech (NYSE: FDN) 完成融资,增长很快。';
-  const expected = '这家公司 FoodTech (NYSE: FDN) 完成融资，增长很快。';
+  const expected = '这家公司 FoodTech（NYSE: FDN）完成融资，增长很快。';
   assert.equal(convertText(input), expected);
+});
+
+// Regression: the old "both neighbors are ASCII" guard fired on `(` but not on
+// the trailing `)` at end of line, emitting the mismatched pair `(2025）`.
+test('convert: parenthesis pair never comes out half-converted', () => {
+  assert.equal(
+    convertText('数据来源是 Euromonitor(2025)，这个品类还在增长。'),
+    '数据来源是 Euromonitor（2025），这个品类还在增长。',
+  );
+});
+
+test('convert: parens inside masked URL and code stay halfwidth', () => {
+  assert.equal(convertText('参考 https://a.com/x(y) 的说明。'), '参考 https://a.com/x(y) 的说明。');
+  assert.ok(convertText('使用 `arr.push(1,2)` 即可。').includes('`arr.push(1,2)`'));
 });
 
 test('convert: still localizes parenthesis around an English brand alias in Chinese copy', () => {

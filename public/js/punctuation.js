@@ -5,6 +5,12 @@
 //   2. Chinese paragraphs convert ASCII punctuation to full-width, EXCEPT where
 //      both neighboring non-space chars are ASCII alphanumeric (protects `Co., Ltd.`,
 //      numbers like `35,000`, decimals, etc.).
+//   2b. Parentheses are the one exception to rule 2: inside a Chinese paragraph
+//      `(` / `)` ALWAYS become `（` / `）`, even when flanked by ASCII
+//      (`FoodTech (NYSE: FDN)` → `FoodTech（NYSE: FDN）`). Editorial rule: a
+//      Chinese paragraph must not carry halfwidth parens. Punctuation *inside*
+//      an English parenthetical is still protected by rule 2, and masked
+//      regions (rule 5) are still exempt, so URLs and code keep their parens.
 //   3. Double and single quotes strictly alternate open → close → open → ...
 //      per type, independently. The emitted direction depends only on the
 //      direction of the previous same-type quote in the paragraph; context
@@ -46,7 +52,20 @@ function convertSingleParagraph(text) {
   out = convertEllipsisAndDash(out);
   out = convertQuotes(out);
   out = convertBasicPunct(out, englishFragmentProtectedIndexes(out));
+  out = tidyParenSpacing(out);
   return unmask(out, slots);
+}
+
+// `Oatly (Sweden) 进入中国` localizes to `Oatly （Sweden） 进入中国`, leaving the
+// original ASCII spaces hugging a fullwidth paren — visually loose and wrong for
+// Chinese typesetting. Runs before unmask, so spaces inside masked URLs/code
+// (already sentinels at this point) are never touched.
+function tidyParenSpacing(text) {
+  return text
+    .replace(/[ \t]+（/g, '（')
+    .replace(/（[ \t]+/g, '（')
+    .replace(/[ \t]+）/g, '）')
+    .replace(/）[ \t]+/g, '）');
 }
 
 export function convertRuns(runs) {
@@ -186,6 +205,10 @@ const BASIC_MAP = {
   ')': '）',
 };
 
+// Parens are always localized in a Chinese paragraph — they never take the
+// "both neighbors are ASCII" escape hatch that protects `Co., Ltd.` and `35,000`.
+const ALWAYS_FULLWIDTH = new Set(['(', ')']);
+
 function convertBasicPunct(text, protectedIndexes = new Set()) {
   let out = '';
   for (let i = 0; i < text.length; i++) {
@@ -193,7 +216,7 @@ function convertBasicPunct(text, protectedIndexes = new Set()) {
     const full = BASIC_MAP[ch];
     if (full) {
       if (protectedIndexes.has(i)) { out += ch; continue; }
-      if (bothSidesAscii(text, i)) { out += ch; continue; }
+      if (!ALWAYS_FULLWIDTH.has(ch) && bothSidesAscii(text, i)) { out += ch; continue; }
       // Abbreviation / sentence-end guard: `.` after ASCII letter and followed
       // immediately by whitespace (or end-of-text) is an English period — keep.
       // Covers `Ltd. 的`, `Inc. 成立`, `etc. 还有`, `The quick brown fox.` etc.
@@ -211,15 +234,13 @@ function convertBasicPunct(text, protectedIndexes = new Set()) {
 
 const PROTECTED_INNER_PUNCT = new Set(['.', ',', ';', ':', '!', '?']);
 
+// Only the punctuation INSIDE an English parenthetical is protected. The
+// delimiters themselves are never added here — see ALWAYS_FULLWIDTH.
 function englishFragmentProtectedIndexes(text) {
   const protectedIndexes = new Set();
   for (const pair of englishLikePairs(text)) {
     for (let i = pair.start + 1; i < pair.end; i++) {
       if (PROTECTED_INNER_PUNCT.has(text[i])) protectedIndexes.add(i);
-    }
-    if (pair.keepAsciiDelimiters) {
-      protectedIndexes.add(pair.start);
-      protectedIndexes.add(pair.end);
     }
   }
   return protectedIndexes;
@@ -250,11 +271,7 @@ function englishLikePairs(text) {
       stack.splice(j, 1);
       const content = text.slice(start + 1, i);
       if (!isEnglishFragment(content)) break;
-      pairs.push({
-        start,
-        end: i,
-        keepAsciiDelimiters: open === '(' && ch === ')' && shouldKeepAsciiParenPair(text, start, i),
-      });
+      pairs.push({ start, end: i });
       break;
     }
   }
@@ -280,14 +297,6 @@ function hasHan(text) {
     ) return true;
   }
   return false;
-}
-
-function shouldKeepAsciiParenPair(text, start, end) {
-  return isAsciiWord(neighbor(text, start, -1)) || isAsciiWord(neighbor(text, end, +1));
-}
-
-function isAsciiWord(ch) {
-  return /[A-Za-z0-9_]/.test(ch || '');
 }
 
 function bothSidesAscii(text, i) {
