@@ -1,18 +1,27 @@
-# fbif-wechat-layout
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="FBIF 排版工具：把 DOCX、Markdown、粘贴正文或文章链接，转成适配微信公众号和 FoodTalks 的 HTML">
+</p>
 
-![类型](https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E5%86%85%E5%AE%B9%E6%8E%92%E7%89%88%E4%B8%8E%E5%8F%91%E5%B8%83-2563eb)
-![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8?logo=go&logoColor=white)
-![前端](https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-Vanilla%20JS-f7df1e?logo=javascript&logoColor=111827)
-![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a)
-![README](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-brightgreen)
+<p align="center">
+  <img src="https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E6%8E%92%E7%89%88%E4%B8%8E%E5%8F%97%E6%8E%A7%E5%8F%91%E5%B8%83-2563eb?style=flat-square" alt="排版与受控发布">
+  <img src="https://img.shields.io/badge/Go-1.26.5-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.26.5">
+  <img src="https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-Vanilla%20JS-f7df1e?style=flat-square&logo=javascript&logoColor=111827" alt="Vanilla JS">
+  <img src="https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a?style=flat-square" alt="生产使用中">
+</p>
 
-FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文或文章链接转换成适配微信公众号或 FoodTalks CMS 的 HTML，并提供“公众号文章 → FoodTalks 隐藏草稿 → 飞书审核 → 人工公开”的受控发布流水线。
+# FBIF 排版工具
+
+编辑手里是一份 DOCX、一段粘贴的正文，或者一条公众号文章链接。这个工具把它们转成**能直接粘进微信公众号编辑器或 FoodTalks CMS 的 HTML**——标题层级、图注、参考文献、表格、署名行和页脚，都按各渠道的规则排好。
+
+再往后是一条受控发布流水线：公众号文章 URL → FoodTalks 隐藏草稿 → 飞书审核 → **人工**公开。
+
+![排版工具界面：左侧上传区与「更多文章」卡片，右侧是排版后的公众号文章预览](./assets/readme/screen-editor.png)
 
 ## 仓库定位
 
 - **分类**：内容工具 / 多渠道排版 / 受控发布流水线。
-- **服务对象**：FBIF 公众号编辑、FoodTalks 网站编辑和需要统一文章样式与审核流程的内容运营人员。
-- **服务宿主**：交互式输出面向微信公众号编辑器和 FoodTalks CMS；程序化接口供内部内容流水线调用。本仓库不是浏览器插件，也不是飞书多维表格插件。
+- **服务对象**：FBIF 公众号编辑、FoodTalks 网站编辑，以及需要统一文章样式与审核流程的内容运营人员。
+- **服务宿主**：交互式输出面向微信公众号编辑器和 FoodTalks CMS；程序化接口供内部内容流水线调用。本仓库**不是**浏览器插件，也**不是**飞书多维表格插件。
 
 ## 渠道与账号入口
 
@@ -37,7 +46,10 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - DOCX 首个"作者："行之前的前置材料默认剥离
 - 表格：蓝底白字表头 + 浅灰网格线、全格居中、列宽按 Word gridCol 比例；关键视觉以 HTML 属性 + 内容层双写（`border`/`cellpadding`/`align`/`bgcolor`/`width` 属性、表头 `<strong>`），保证粘进 FoodTalks 后台被清洗内联样式后不丢样；表格内图片按 Word 里设置的显示宽度统一尺寸（2026-07-06）
 
-## 当前状态（核对至 2026-07-24）
+<details>
+<summary><b>当前状态（核对至 2026-07-24）</b></summary>
+
+<br>
 
 - **账号目录单一真相源**：账号先登记在 `api/account_catalog.go`，再运行 `npm run gen:registry` 生成 `public/js/rule-packs/registry.js`；生成文件不手改。账号与默认 preset 在启动时做成对校验。
 - **统一底部区块模型**：公众号与网站渠道共用 `modules.bottom_blocks` 数据结构和区块面板交互，但视觉输出仍由 `fbif`、`foodtalks-series`、`foodtalks-site` 三套渲染器物理隔离。旧 `fbif_footer` 只保留兼容回退，不再是网站页脚主路径。
@@ -48,6 +60,8 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **编辑部规范数据化**：摘要、标签、作者和原创 / 转载判定已按历史发布样本沉淀为声明式规范与封闭标签词表。AI 只负责预填和出处抽取；完整评测仍在进行，且 FoodTalks 的标签 PUT 缺陷修复前不会把标签写入正式请求。
 - **发布状态边界**：测试环境已经完成隐藏草稿、审核卡片与状态机全链路验证；正式环境接入仍等待外部白名单和服务级凭证，不能把测试闭环写成正式生产已上线。
 - **部署门禁**：`main` 部署串行排队；完整 Node/Go 测试通过后，API、静态资源、render service、env schema、systemd 单元与 Caddy 全部先进入隔离 staging，再事务切换。候选监控在 worker 暂停时安装验证，解暂停后真实探测并发飞书自检；任一可回滚验收失败会恢复上一版。
+
+</details>
 
 ## 功能
 
