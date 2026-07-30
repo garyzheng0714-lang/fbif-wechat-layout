@@ -432,6 +432,8 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
     restoredImportInputValue: () => '',
     normalizeFooterVisibilityOverride: value => value || null,
     normalizeArticleArtifactOverride: value => value || null,
+    adoptPreviewContent: () => false,
+    isFooterEnabledForCurrentArticle: () => true,
     showImportSummary() {},
     formatSidebarStatus: text => text,
     resetImportEntry() {},
