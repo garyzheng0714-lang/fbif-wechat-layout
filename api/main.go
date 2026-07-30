@@ -1142,10 +1142,11 @@ func init() {
 // ---- Doc image cache (strip from .docx, serve on demand) ----
 
 type docCacheEntry struct {
-	files      map[string][]byte
-	expires    time.Time
-	lastAccess time.Time
-	bytes      int64
+	files        map[string][]byte
+	mirroredURLs map[string]string
+	expires      time.Time
+	lastAccess   time.Time
+	bytes        int64
 }
 
 const (
@@ -1216,7 +1217,9 @@ func (c *docImageMemoryCache) put(hash string, files map[string][]byte, now time
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.removeExpiredLocked(now)
-	if _, exists := c.entries[hash]; exists {
+	var mirroredURLs map[string]string
+	if existing, exists := c.entries[hash]; exists {
+		mirroredURLs = cloneStringMap(existing.mirroredURLs)
 		c.removeLocked(hash, false)
 	}
 	for len(c.entries) >= c.maxEntries || c.totalBytes > c.maxBytes-size {
@@ -1234,13 +1237,60 @@ func (c *docImageMemoryCache) put(hash string, files map[string][]byte, now time
 		c.removeLocked(oldestKey, true)
 	}
 	c.entries[hash] = docCacheEntry{
-		files:      files,
-		expires:    now.Add(c.ttl),
-		lastAccess: now,
-		bytes:      size,
+		files:        files,
+		mirroredURLs: mirroredURLs,
+		expires:      now.Add(c.ttl),
+		lastAccess:   now,
+		bytes:        size,
 	}
 	c.totalBytes += size
 	return nil
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func (c *docImageMemoryCache) mirroredURLs(hash string, now time.Time) (map[string]string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[hash]
+	if !ok {
+		return nil, false
+	}
+	if !now.Before(entry.expires) {
+		c.removeLocked(hash, true)
+		return nil, false
+	}
+	if len(entry.mirroredURLs) == 0 {
+		return nil, false
+	}
+	entry.lastAccess = now
+	c.entries[hash] = entry
+	return cloneStringMap(entry.mirroredURLs), true
+}
+
+func (c *docImageMemoryCache) setMirroredURLs(hash string, urls map[string]string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[hash]
+	if !ok || !now.Before(entry.expires) {
+		if ok {
+			c.removeLocked(hash, true)
+		}
+		return false
+	}
+	entry.mirroredURLs = cloneStringMap(urls)
+	entry.lastAccess = now
+	c.entries[hash] = entry
+	return true
 }
 
 func (c *docImageMemoryCache) get(hash, filename string, now time.Time) ([]byte, bool) {
@@ -1296,6 +1346,14 @@ func docCachePut(hash string, files map[string][]byte) error {
 
 func docCacheGet(hash, filename string) ([]byte, bool) {
 	return docImageCache.get(hash, filename, time.Now())
+}
+
+func docCacheMirroredURLs(hash string) (map[string]string, bool) {
+	return docImageCache.mirroredURLs(hash, time.Now())
+}
+
+func docCacheSetMirroredURLs(hash string, urls map[string]string) bool {
+	return docImageCache.setMirroredURLs(hash, urls, time.Now())
 }
 
 func startDocImageCacheGC() {

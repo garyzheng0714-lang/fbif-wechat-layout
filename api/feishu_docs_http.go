@@ -172,9 +172,30 @@ func (s *authService) handleFeishuDocumentExport(w http.ResponseWriter, r *http.
 	stripStartedAt := time.Now()
 	optimized := exported.Content
 	imagesDeferred := false
+	imagesMirrored := false
+	imageCount := 0
+	mirrorDuration := time.Duration(0)
 	if stub, stripErr := stripImagesFromDocx(exported.Content); stripErr == nil {
 		optimized = stub
 		imagesDeferred = docxContainsEntry(stub, "word/_fbif_imageUrls.json")
+		if imagesDeferred && docImageMirroringConfigured() {
+			mirrorStartedAt := time.Now()
+			mirrored, mirroredCount, mirrorErr := mirrorCachedDocxImagesToOSS(r.Context(), exported.Content, stub)
+			mirrorDuration = time.Since(mirrorStartedAt)
+			if mirrorErr != nil {
+				log.Printf(
+					"feishu-doc-export image-mirror-fallback request_id=%s elapsed_ms=%d error=%q",
+					requestID,
+					mirrorDuration.Milliseconds(),
+					mirrorErr.Error(),
+				)
+			} else {
+				optimized = mirrored
+				imageCount = mirroredCount
+				imagesDeferred = false
+				imagesMirrored = mirroredCount > 0
+			}
+		}
 	} else {
 		// Import must remain available for uncommon DOCX variants. Falling back
 		// to the full file is slower, but preferable to turning a successfully
@@ -195,13 +216,16 @@ func (s *authService) handleFeishuDocumentExport(w http.ResponseWriter, r *http.
 	w.Header().Set("X-FBIF-Docx-Original-Bytes", strconv.Itoa(originalBytes))
 	w.Header().Set("X-FBIF-Docx-Optimized-Bytes", strconv.Itoa(len(optimized)))
 	w.Header().Set("X-FBIF-Images-Deferred", strconv.FormatBool(imagesDeferred))
+	w.Header().Set("X-FBIF-Images-Mirrored", strconv.FormatBool(imagesMirrored))
+	w.Header().Set("X-FBIF-Image-Count", strconv.Itoa(imageCount))
 	w.Header().Set("Server-Timing", fmt.Sprintf(
-		"feishu_resolve;dur=%.1f, feishu_create;dur=%.1f, feishu_poll;dur=%.1f, feishu_download;dur=%.1f, docx_optimize;dur=%.1f",
+		"feishu_resolve;dur=%.1f, feishu_create;dur=%.1f, feishu_poll;dur=%.1f, feishu_download;dur=%.1f, docx_optimize;dur=%.1f, image_mirror;dur=%.1f",
 		float64(exported.Metrics.ResolveDuration.Microseconds())/1000,
 		float64(exported.Metrics.CreateDuration.Microseconds())/1000,
 		float64(exported.Metrics.PollDuration.Microseconds())/1000,
 		float64(exported.Metrics.DownloadDuration.Microseconds())/1000,
 		float64(stripDuration.Microseconds())/1000,
+		float64(mirrorDuration.Microseconds())/1000,
 	))
 	w.WriteHeader(http.StatusOK)
 	if _, writeErr := w.Write(optimized); writeErr != nil {
@@ -214,7 +238,7 @@ func (s *authService) handleFeishuDocumentExport(w http.ResponseWriter, r *http.
 		return
 	}
 	log.Printf(
-		"feishu-doc-export success request_id=%s total_ms=%d resolve_ms=%d create_ms=%d poll_ms=%d download_ms=%d optimize_ms=%d poll_attempts=%d original_bytes=%d optimized_bytes=%d images_deferred=%t",
+		"feishu-doc-export success request_id=%s total_ms=%d resolve_ms=%d create_ms=%d poll_ms=%d download_ms=%d optimize_ms=%d mirror_ms=%d poll_attempts=%d original_bytes=%d optimized_bytes=%d images_deferred=%t images_mirrored=%t image_count=%d",
 		requestID,
 		time.Since(startedAt).Milliseconds(),
 		exported.Metrics.ResolveDuration.Milliseconds(),
@@ -222,9 +246,12 @@ func (s *authService) handleFeishuDocumentExport(w http.ResponseWriter, r *http.
 		exported.Metrics.PollDuration.Milliseconds(),
 		exported.Metrics.DownloadDuration.Milliseconds(),
 		stripDuration.Milliseconds(),
+		mirrorDuration.Milliseconds(),
 		exported.Metrics.PollAttempts,
 		originalBytes,
 		len(optimized),
 		imagesDeferred,
+		imagesMirrored,
+		imageCount,
 	)
 }

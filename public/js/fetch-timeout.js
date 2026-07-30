@@ -10,11 +10,26 @@ export function fetchWithTimeout(url, options = {}, {
 } = {}) {
   const doFetch = fetchImpl || globalThis.fetch;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const externalSignal = options && options.signal;
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort(externalSignal && externalSignal.reason);
+  if (externalSignal && typeof externalSignal.addEventListener === 'function') {
+    if (externalSignal.aborted) abortFromCaller();
+    else externalSignal.addEventListener('abort', abortFromCaller, { once: true });
+  }
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   return Promise.resolve(doFetch(url, { ...options, signal: controller.signal }))
     .catch((err) => {
-      if (err && err.name === 'AbortError') throw new Error(timeoutMessage);
+      if (err && err.name === 'AbortError' && timedOut) throw new Error(timeoutMessage);
       throw err;
     })
-    .finally(() => clearTimeout(timer));
+    .finally(() => {
+      clearTimeout(timer);
+      if (externalSignal && typeof externalSignal.removeEventListener === 'function') {
+        externalSignal.removeEventListener('abort', abortFromCaller);
+      }
+    });
 }

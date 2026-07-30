@@ -68,7 +68,13 @@ const {
   collectReusableArticleImages,
 } = previewDomModule;
 const previewImageLoaderModule = await import('./preview-image-loader.js' + assetQuery);
-const { preloadLocalPreviewImages, refreshLocalPreviewImages } = previewImageLoaderModule;
+const {
+  preloadLocalPreviewImages,
+  preloadArticlePreviewImages,
+  refreshLocalPreviewImages,
+} = previewImageLoaderModule;
+const feishuDocReadyModule = await import('./feishu-doc-ready.js' + assetQuery);
+const { prepareFeishuArticlePreview } = feishuDocReadyModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -1223,6 +1229,8 @@ export function initApp(initialTemplate) {
   });
   function invalidatePendingArticleWork() {
     copySession.resetForNewArticle();
+    if (_articlePreparationController) _articlePreparationController.abort();
+    _articlePreparationController = null;
     _articleInputPending = false;
     clearQueuedInputRerender();
     _moreArticlesCopyJob = null;
@@ -1303,6 +1311,9 @@ export function initApp(initialTemplate) {
 
   async function handleFile(file, opts) {
     copySession.resetForNewArticle();
+    if (_articlePreparationController) _articlePreparationController.abort();
+    const preparationController = typeof AbortController === 'function' ? new AbortController() : null;
+    _articlePreparationController = preparationController;
     clearQueuedInputRerender();
     const inputCommit = articleInputGate.capture();
     _articleInputPending = true;
@@ -1344,7 +1355,8 @@ export function initApp(initialTemplate) {
       const result = await renderArticleInput(input);
       if (inputCommit.stale()) return false;
       const articleHtml = result.lines.join('\n');
-      const preparedImagesPromise = input.kind === 'docx'
+      const isFeishuDocument = opts && opts.source === 'feishu-doc-import';
+      const preparedImagesPromise = input.kind === 'docx' && !isFeishuDocument
         ? preloadLocalPreviewImages(input.payload && input.payload.imgCache, { articleHtml })
         : Promise.resolve(new Map());
       if (input.kind === 'docx') {
@@ -1364,8 +1376,42 @@ export function initApp(initialTemplate) {
         commitGate: inputCommit,
       });
       if (!session || inputCommit.stale()) return false;
-      const preparedImages = await preparedImagesPromise;
+      let preparedImages = await preparedImagesPromise;
       if (inputCommit.stale()) return false;
+      if (isFeishuDocument) {
+        const ready = await prepareFeishuArticlePreview(session.articleHtml, {
+          materialize: materializeLazyImages,
+          preload: preloadArticlePreviewImages,
+          isStale: () => inputCommit.stale(),
+          signal: preparationController && preparationController.signal,
+          onProgress({ phase, done, total }) {
+            if (inputCommit.stale()) return;
+            progressFill.style.width = '99%';
+            if (total > 0) {
+              progressText.textContent = phase === 'download'
+                ? `正在准备正文图片 ${done}/${total}…`
+                : `正在确认图片 ${done}/${total}…`;
+            } else {
+              progressText.textContent = '正在确认文章可立即复制…';
+            }
+          },
+        });
+        if (ready.stale || inputCommit.stale()) return false;
+        session.articleHtml = ready.articleHtml;
+        preparedImages = ready.preparedImages;
+        if (ready.replacements.size > 0 && session.input?.payload?.imgCache) {
+          const imgCache = Object.fromEntries(
+            Object.entries(session.input.payload.imgCache).map(([key, value]) => [
+              key,
+              ready.replacements.get(value) || value,
+            ]),
+          );
+          session.input = {
+            ...session.input,
+            payload: { ...session.input.payload, imgCache },
+          };
+        }
+      }
       await refreshLocalPreviewImages(preparedImages);
       if (inputCommit.stale()) return false;
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
@@ -1398,6 +1444,10 @@ export function initApp(initialTemplate) {
       showError('排版失败: ' + sanitizeErrMsg(err.message));
       flushRerenderAfterInput();
       return false;
+    } finally {
+      if (_articlePreparationController === preparationController) {
+        _articlePreparationController = null;
+      }
     }
   }
 
@@ -1431,6 +1481,7 @@ export function initApp(initialTemplate) {
     retryGate,
   } = copySession;
   let _articleInputPending = false;
+  let _articlePreparationController = null;
   let _rerenderAfterInput = false;
   let _rerenderAfterInputOptions = null;
   const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
