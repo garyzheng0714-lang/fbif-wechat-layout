@@ -1149,7 +1149,7 @@ type docCacheEntry struct {
 }
 
 const (
-	docCacheTTL              = 15 * time.Minute
+	docCacheTTL              = 2 * time.Hour
 	maxDocCacheBytes   int64 = 512 << 20
 	maxDocCacheEntries       = 128
 	maxDocMediaBytes   int64 = 100 << 20

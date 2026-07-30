@@ -252,6 +252,14 @@ test('file 输入 A→B 且 A 后完成时，只允许 B activateArticleSession'
   assert.deepEqual(activated, ['B']);
 });
 
+test('公开的 _handleFile 必须返回排版 Promise，供飞书导入等待真实结果', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  assert.match(
+    engine,
+    /window\._handleFile\s*=\s*\(file,\s*opts\)\s*=>\s*\{[\s\S]*?return handleFile\(file,\s*opts\);[\s\S]*?\};/,
+  );
+});
+
 test('blocks 输入 A→B 且 A 后完成时，只允许 B activateArticleSession', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const handleBlocksSource = extractAssignedAsyncArrow(engine, 'window._handleBlocks =');
