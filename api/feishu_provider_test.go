@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -158,5 +159,93 @@ func TestHTTPFeishuProviderRejectsNonDocxDownload(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "did not return a DOCX") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestHTTPFeishuProviderRetriesTransientStatusFailure(t *testing.T) {
+	statusCalls := 0
+	docx := []byte{'P', 'K', 3, 4, 'o', 'k'}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/open-apis/drive/v1/export_tasks" && r.Method == http.MethodPost:
+			_, _ = io.WriteString(w, `{"code":0,"data":{"ticket":"ticket-1"}}`)
+		case strings.Contains(r.URL.Path, "/export_tasks/ticket-1"):
+			statusCalls++
+			if statusCalls == 1 {
+				http.Error(w, "temporary", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = io.WriteString(w, `{"code":0,"data":{"result":{"file_token":"boxcn_export","job_status":0}}}`)
+		default:
+			_, _ = w.Write(docx)
+		}
+	}))
+	defer server.Close()
+
+	provider := newHTTPFeishuProvider(server.Client())
+	provider.apiBaseURL = server.URL
+	provider.exportPollInterval = 0
+	exported, err := provider.ExportDocument(context.Background(), "u-user-token", feishuDocumentRef{
+		Token: "doccn_test",
+		Type:  "doc",
+	})
+	if err != nil {
+		t.Fatalf("export after transient poll failure: %v", err)
+	}
+	if statusCalls != 2 || !reflect.DeepEqual(exported.Content, docx) {
+		t.Fatalf("statusCalls=%d exported=%+v", statusCalls, exported)
+	}
+}
+
+func TestHTTPFeishuProviderSurfacesTerminalJobStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/open-apis/drive/v1/export_tasks" && r.Method == http.MethodPost:
+			_, _ = io.WriteString(w, `{"code":0,"data":{"ticket":"ticket-1"}}`)
+		default:
+			_, _ = io.WriteString(w, `{"code":0,"data":{"result":{"job_status":110}}}`)
+		}
+	}))
+	defer server.Close()
+
+	provider := newHTTPFeishuProvider(server.Client())
+	provider.apiBaseURL = server.URL
+	provider.exportPollInterval = 0
+	_, err := provider.ExportDocument(context.Background(), "u-user-token", feishuDocumentRef{
+		Token: "doccn_test",
+		Type:  "doc",
+	})
+	var taskErr *feishuExportTaskError
+	if !errors.As(err, &taskErr) || taskErr.JobStatus != 110 {
+		t.Fatalf("err=%v, want feishuExportTaskError status 110", err)
+	}
+}
+
+func TestHTTPFeishuProviderStopsAfterBoundedStatusFailures(t *testing.T) {
+	statusCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/open-apis/drive/v1/export_tasks" && r.Method == http.MethodPost:
+			_, _ = io.WriteString(w, `{"code":0,"data":{"ticket":"ticket-1"}}`)
+		default:
+			statusCalls++
+			http.Error(w, "temporary", http.StatusServiceUnavailable)
+		}
+	}))
+	defer server.Close()
+
+	provider := newHTTPFeishuProvider(server.Client())
+	provider.apiBaseURL = server.URL
+	provider.exportPollInterval = 0
+	provider.exportMaxPollErrors = 2
+	_, err := provider.ExportDocument(context.Background(), "u-user-token", feishuDocumentRef{
+		Token: "doccn_test",
+		Type:  "doc",
+	})
+	if err == nil || !strings.Contains(err.Error(), "status unavailable") {
+		t.Fatalf("err=%v, want bounded status failure", err)
+	}
+	if statusCalls != 2 {
+		t.Fatalf("status calls=%d, want 2", statusCalls)
 	}
 }

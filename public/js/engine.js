@@ -899,7 +899,7 @@ export function initApp(initialTemplate) {
   window._handleFile = (file, opts) => {
     if (opts && opts.isRepost) clearUploadVisual();
     if (opts && opts.source === 'feishu-doc-import') showUploadFile(file);
-    handleFile(file, opts);
+    return handleFile(file, opts);
   };
 
   function copyPlainTextToClipboard(text) {
@@ -1298,7 +1298,8 @@ export function initApp(initialTemplate) {
     showImportEntry();
     dropZone.classList.add('processing');
     progress.style.display = 'block';
-    progressFill.style.width = '50%';
+    progress.classList?.remove('is-indeterminate');
+    progressFill.style.width = opts && opts.source === 'feishu-doc-import' ? '82%' : '50%';
     progressText.textContent = '正在解析...';
     try {
       const t0 = performance.now();
@@ -1343,11 +1344,16 @@ export function initApp(initialTemplate) {
       // the next file. (Previously only the error branch cleared it, so a
       // successful upload left pointer-events:none on the drop zone.)
       dropZone.classList.remove('processing');
-      setTimeout(() => {
+      const activationDelayMs = Number.isFinite(Number(opts && opts.activationDelayMs))
+        ? Math.max(0, Number(opts.activationDelayMs))
+        : 200;
+      const activate = () => {
         if (inputCommit.stale()) return;
         _articleInputPending = false;
         activateArticleSession(session);
-      }, 200);
+      };
+      if (activationDelayMs > 0) setTimeout(activate, activationDelayMs);
+      else activate();
       return true;
     } catch (err) {
       if (inputCommit.stale()) return false;
