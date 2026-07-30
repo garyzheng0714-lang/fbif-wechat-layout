@@ -141,10 +141,28 @@ func newHTTPFeishuProvider(client *http.Client) *httpFeishuProvider {
 		client:              client,
 		apiBaseURL:          feishuOpenAPIBaseURL,
 		exportPollAttempts:  30,
-		exportPollInterval:  time.Second,
+		exportPollInterval:  250 * time.Millisecond,
 		exportStatusTimeout: 8 * time.Second,
 		exportMaxPollErrors: 3,
 	}
+}
+
+func feishuExportPollDelay(base time.Duration, attempt int) time.Duration {
+	if base <= 0 || attempt <= 0 {
+		return 0
+	}
+	multiplier := 1
+	switch {
+	case attempt >= 5:
+		multiplier = 4
+	case attempt >= 3:
+		multiplier = 2
+	}
+	delay := time.Duration(multiplier) * base
+	if delay > time.Second {
+		return time.Second
+	}
+	return delay
 }
 
 func (p *httpFeishuProvider) configure(appID, appSecret string) {
@@ -409,18 +427,20 @@ func validateFeishuDocumentRef(ref feishuDocumentRef) (feishuDocumentRef, error)
 func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken string, ref feishuDocumentRef) (feishuExportedFile, error) {
 	startedAt := time.Now()
 	metrics := feishuExportMetrics{}
+	resolveStarted := time.Now()
+	reportFeishuExportProgress(ctx, "resolve", 0, 1, "document")
 	ref, err := validateFeishuDocumentRef(ref)
 	if err != nil {
 		return feishuExportedFile{}, err
 	}
 	if ref.Type == "wiki" {
-		phaseStarted := time.Now()
 		ref, err = p.resolveWikiDocument(ctx, accessToken, ref)
-		metrics.ResolveDuration = time.Since(phaseStarted)
 		if err != nil {
 			return feishuExportedFile{}, err
 		}
 	}
+	metrics.ResolveDuration = time.Since(resolveStarted)
+	reportFeishuExportProgress(ctx, "resolve", 1, 1, "document")
 	var createResponse struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -429,6 +449,7 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		} `json:"data"`
 	}
 	phaseStarted := time.Now()
+	reportFeishuExportProgress(ctx, "create", 0, 1, "task")
 	if err := p.doJSON(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/drive/v1/export_tasks", accessToken, map[string]string{
 		"file_extension": "docx",
 		"token":          ref.Token,
@@ -440,6 +461,7 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 	if createResponse.Code != 0 || createResponse.Data.Ticket == "" {
 		return feishuExportedFile{}, errors.New("could not create feishu export task")
 	}
+	reportFeishuExportProgress(ctx, "create", 1, 1, "task")
 
 	var fileToken string
 	var fileName string
@@ -459,14 +481,15 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		maxPollErrors = 3
 	}
 	phaseStarted = time.Now()
+	reportFeishuExportProgress(ctx, "export_wait", 0, 0, "")
 	for attempt := 0; attempt < pollAttempts; attempt++ {
 		metrics.PollAttempts = attempt + 1
 		if attempt > 0 {
-			if pollInterval > 0 {
+			if delay := feishuExportPollDelay(pollInterval, attempt); delay > 0 {
 				select {
 				case <-ctx.Done():
 					return feishuExportedFile{}, ctx.Err()
-				case <-time.After(pollInterval):
+				case <-time.After(delay):
 				}
 			}
 		}
@@ -520,6 +543,7 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		if result.FileToken != "" && result.JobStatus == 0 {
 			fileToken = result.FileToken
 			fileName = result.FileName
+			reportFeishuExportProgress(ctx, "export_wait", 1, 1, "task")
 			break
 		}
 		switch result.JobStatus {
@@ -560,7 +584,17 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 	if resp.StatusCode != http.StatusOK {
 		return feishuExportedFile{}, fmt.Errorf("feishu export download status %d", resp.StatusCode)
 	}
-	content, err := readBoundedBody(resp.Body, 100<<20)
+	downloadTotal := resp.ContentLength
+	if downloadTotal < 0 {
+		downloadTotal = 0
+	}
+	if downloadTotal > 100<<20 {
+		return feishuExportedFile{}, errors.New("feishu export is larger than 100 MB")
+	}
+	reportFeishuExportProgress(ctx, "download", 0, downloadTotal, "bytes")
+	content, err := readBoundedBodyWithProgress(ctx, resp.Body, 100<<20, downloadTotal, func(done int64) {
+		reportFeishuExportProgress(ctx, "download", done, downloadTotal, "bytes")
+	})
 	if err != nil {
 		return feishuExportedFile{}, fmt.Errorf("feishu export is larger than 100 MB: %w", err)
 	}
@@ -574,6 +608,50 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 	metrics.DownloadDuration = time.Since(phaseStarted)
 	metrics.TotalDuration = time.Since(startedAt)
 	return feishuExportedFile{Filename: fileName, Content: content, Metrics: metrics}, nil
+}
+
+func readBoundedBodyWithProgress(
+	ctx context.Context,
+	body io.Reader,
+	maxBytes int64,
+	total int64,
+	report func(done int64),
+) ([]byte, error) {
+	if maxBytes < 0 {
+		return nil, errOutboundResponseTooLarge
+	}
+	limited := &io.LimitedReader{R: body, N: maxBytes + 1}
+	var out bytes.Buffer
+	buffer := make([]byte, 64<<10)
+	var done int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		read, readErr := limited.Read(buffer)
+		if read > 0 {
+			if _, err := out.Write(buffer[:read]); err != nil {
+				return nil, err
+			}
+			done += int64(read)
+			if done > maxBytes {
+				return nil, errOutboundResponseTooLarge
+			}
+			if report != nil {
+				report(done)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+	}
+	if total > 0 && done != total {
+		return nil, io.ErrUnexpectedEOF
+	}
+	return out.Bytes(), nil
 }
 
 func sanitizeExportFilename(raw string) string {

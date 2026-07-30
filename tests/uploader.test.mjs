@@ -326,3 +326,67 @@ test('uploadNonCdnImages: website channel 后端转存失败的图保留原 mmbi
   assert.match(result.articleCopy, /mmbiz\.qpic\.cn\/bad\.png/, '失败的图保留原 mmbiz 链接');
   assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn\/good\.png/, '成功的图被替换');
 });
+
+test('copy-transfer progress has one combined denominator across mmbiz and base64 work', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), '/api/oss-upload');
+    const body = JSON.parse(options.body || '{}');
+    if (Array.isArray(body.urls)) {
+      return new Response(JSON.stringify({
+        results: Object.fromEntries(body.urls.map(src => [src, 'https://oss.example/mmbiz.png'])),
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    const key = Object.keys(body.base64_images || {})[0];
+    return new Response(JSON.stringify({
+      results: { [key]: `https://oss.example/${key}.png` },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const progress = [];
+  const result = await uploadNonCdnImages(
+    [
+      '<img src="https://mmbiz.qpic.cn/one.png">',
+      '<img src="https://mmbiz.qpic.cn/two.png">',
+      '<img src="data:image/png;base64,AQID">',
+    ].join(''),
+    '',
+    {
+      transferMmbiz: true,
+      onProgress(done, total) { progress.push([done, total]); },
+    },
+  );
+
+  assert.equal(result.failed, 0);
+  assert.deepEqual(progress, [[0, 3], [1, 3], [2, 3], [3, 3]]);
+});
+
+test('superseding an upload aborts remaining transfer work', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let calls = 0;
+  globalThis.fetch = async (_url, options = {}) => {
+    calls++;
+    return await new Promise((resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(
+        Object.assign(new Error('aborted'), { name: 'AbortError' }),
+      ), { once: true });
+      setTimeout(() => resolve(new Response(JSON.stringify({
+        results: { img_0: 'https://oss.example/late.png' },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })), 100);
+    });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const pending = uploadNonCdnImages(
+    '<img src="data:image/png;base64,AQID"><img src="data:image/png;base64,BAUG">',
+    '',
+    { signal: controller.signal },
+  );
+  await new Promise(resolve => setTimeout(resolve, 5));
+  controller.abort();
+
+  await assert.rejects(pending, error => error?.name === 'AbortError');
+  assert.ok(calls <= 2, `aborted upload started unexpected extra work: ${calls}`);
+});

@@ -1372,6 +1372,29 @@ func startDocImageCacheGC() {
 // word/_fbif_imageUrls.json mapping filename → /api/doc-cache/<hash>/<filename>
 // so the frontend parseDocx can wire <img src> without fetching bytes again.
 func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
+	return stripImagesFromDocxWithProgress(context.Background(), docxBytes)
+}
+
+type docxContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r docxContextReader) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	read, err := r.reader.Read(buffer)
+	if err == nil {
+		if contextErr := r.ctx.Err(); contextErr != nil {
+			return read, contextErr
+		}
+	}
+	return read, err
+}
+
+func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]byte, error) {
+	reportFeishuExportProgress(ctx, "optimize", 0, 0, "operations")
 	zr, err := zip.NewReader(bytes.NewReader(docxBytes), int64(len(docxBytes)))
 	if err != nil {
 		return nil, fmt.Errorf("open zip: %w", err)
@@ -1379,8 +1402,13 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 	if len(zr.File) > maxDocxEntries {
 		return nil, fmt.Errorf("docx has too many zip entries: %d > %d", len(zr.File), maxDocxEntries)
 	}
+	totalOperations := int64(len(zr.File) + 2)
+	reportFeishuExportProgress(ctx, "optimize", 0, totalOperations, "operations")
 	var declaredTotal uint64
 	for _, f := range zr.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if f.UncompressedSize64 > uint64(maxDocxEntryBytes) {
 			return nil, fmt.Errorf("docx entry %s exceeds %d MB", f.Name, maxDocxEntryBytes>>20)
 		}
@@ -1403,7 +1431,10 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 
 	var out bytes.Buffer
 	zw := zip.NewWriter(&out)
-	for _, f := range zr.File {
+	for index, f := range zr.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if strings.HasPrefix(f.Name, "word/media/") && !f.FileInfo().IsDir() {
 			if len(images) >= maxDocMediaFiles {
 				return nil, fmt.Errorf("docx has too many media files: more than %d", maxDocMediaFiles)
@@ -1419,7 +1450,7 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("read %s: %w", f.Name, err)
 			}
-			data, err := readBoundedBody(rc, maxDocImageBytes)
+			data, err := readBoundedBody(docxContextReader{ctx: ctx, reader: rc}, maxDocImageBytes)
 			closeErr := rc.Close()
 			if err != nil {
 				return nil, fmt.Errorf("read %s: %w", f.Name, err)
@@ -1434,6 +1465,7 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 			actualTotal += int64(len(data))
 			images[base] = data
 			imageUrls[base] = "/api/doc-cache/" + hash + "/" + base
+			reportFeishuExportProgress(ctx, "optimize", int64(index+1), totalOperations, "operations")
 			continue
 		}
 		// Copy every other entry verbatim
@@ -1451,7 +1483,7 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 		if remaining < entryLimit {
 			entryLimit = remaining
 		}
-		written, err := copyBounded(w, rc, entryLimit)
+		written, err := copyBounded(w, docxContextReader{ctx: ctx, reader: rc}, entryLimit)
 		closeErr := rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("copy %s: %w", f.Name, err)
@@ -1460,6 +1492,7 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 			return nil, fmt.Errorf("close %s: %w", f.Name, closeErr)
 		}
 		actualTotal += written
+		reportFeishuExportProgress(ctx, "optimize", int64(index+1), totalOperations, "operations")
 	}
 
 	if len(imageUrls) > 0 {
@@ -1479,12 +1512,14 @@ func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
 	if err := zw.Close(); err != nil {
 		return nil, fmt.Errorf("close zip: %w", err)
 	}
+	reportFeishuExportProgress(ctx, "optimize", int64(len(zr.File)+1), totalOperations, "operations")
 
 	if len(images) > 0 {
 		if err := docCachePut(hash, images); err != nil {
 			return nil, fmt.Errorf("cache document images: %w", err)
 		}
 	}
+	reportFeishuExportProgress(ctx, "optimize", totalOperations, totalOperations, "operations")
 	return out.Bytes(), nil
 }
 

@@ -207,6 +207,49 @@ test('resetForNewArticle 一次作废全部 gate（新文章导入后旧任务�
   assert.equal(retry.stale(), true);
 });
 
+test('resetForPreviewCommit 作废旧复制任务，但保留当前输入与重排事务的提交权', () => {
+  const s = createCopySession();
+  const input = s.articleInputGate.capture();
+  const render = s.renderCommitGate.capture();
+  const article = s.articleResultGate.capture();
+  const footer = s.footerCopyGate.capture();
+  const ma = s.moreArticlesGate.capture();
+  const preview = s.moreArticlesPreviewGate.capture();
+  const copy = s.copyActionGate.capture();
+  const retry = s.retryGate.capture();
+
+  s.resetForPreviewCommit();
+
+  assert.equal(input.stale(), false, '预览提交不能把自己的文件导入事务判成 stale');
+  assert.equal(render.stale(), false, '预览提交不能把自己的重排事务判成 stale');
+  assert.equal(article.stale(), true);
+  assert.equal(footer.stale(), true);
+  assert.equal(ma.stale(), true);
+  assert.equal(preview.stale(), true);
+  assert.equal(copy.stale(), true);
+  assert.equal(retry.stale(), true);
+});
+
+test('真实 showPreview 提交不会让当前 articleInputGate 失效', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const harness = makePreviewRaceHarness(engine, { skipUpload: true });
+  const input = harness.deps.copySession.articleInputGate.capture();
+  const render = harness.deps.copySession.renderCommitGate.capture();
+
+  harness.showPreview('新稿', '<p>正文</p>', '', '完成', '新稿', {
+    copyPrepared: true,
+    articleCopy: '<p>正文</p>',
+    preparedClipboardArtifact: {
+      html: '<p style="margin:0">正文</p>',
+      sourceHash: 'test',
+      preparationHash: 'test',
+    },
+  });
+
+  assert.equal(input.stale(), false);
+  assert.equal(render.stale(), false);
+});
+
 test('file 输入 A→B 且 A 后完成时，只允许 B activateArticleSession', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const handleFileSource = extractExactAsyncFunction(engine, 'async function handleFile(');
@@ -244,6 +287,7 @@ test('file 输入 A→B 且 A 后完成时，只允许 B activateArticleSession'
     },
     buildArticleSession: async (input, result) => ({ input, title: result.label }),
     refreshLocalPreviewImages: async images => images,
+    discardPreparedPreviewContent() {},
     formatRenderStats: result => result.label,
     activateArticleSession: article => activated.push(article.title),
     setTimeout: fn => fn(),
@@ -307,6 +351,7 @@ test('DOCX A 图片预解码晚于 B 完成时，不得激活旧文章', async (
     }),
     buildArticleSession: async (input, result) => ({ input, title: result.label }),
     refreshLocalPreviewImages: async images => images,
+    discardPreparedPreviewContent() {},
     formatRenderStats: result => result.label,
     activateArticleSession: article => activated.push(article.title),
     setTimeout: fn => fn(),
@@ -323,6 +368,62 @@ test('DOCX A 图片预解码晚于 B 完成时，不得激活旧文章', async (
   await a;
 
   assert.deepEqual(activated, ['B.docx']);
+});
+
+test('外层飞书意图在 renderer handoff 后取消时，引擎不得激活旧文章', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const handleFileSource = extractExactAsyncFunction(engine, 'async function handleFile(');
+  const session = createCopySession();
+  const render = deferred();
+  const activated = [];
+  const removedClasses = [];
+  let flushed = 0;
+  const external = new AbortController();
+  const deps = {
+    copySession: session,
+    articleInputGate: session.articleInputGate,
+    _articleInputPending: false,
+    _articlePreparationController: null,
+    AbortController,
+    clearQueuedInputRerender() {},
+    _isRepost: false,
+    _convLog: [],
+    dispatchArticleEvent() {}, logConv() {}, showImportEntry() {}, showError() {},
+    sanitizeErrMsg: value => value,
+    errorEl: { style: {} },
+    dropZone: { classList: { add() {}, remove(value) { removedClasses.push(value); } } },
+    progress: { style: {}, classList: { remove() {} } },
+    progressFill: { style: {} },
+    progressText: {},
+    performance: { now: () => 0 },
+    normalizeToDocx: async file => file,
+    waitForActiveRuleConfigReady: async () => {},
+    parseFileToArticleInput: async file => ({ kind: 'md', title: file.name }),
+    renderArticleInput: async () => render.promise,
+    buildArticleSession: async (input, result) => ({ input, title: result.label }),
+    refreshLocalPreviewImages: async images => images,
+    discardPreparedPreviewContent() {},
+    flushRerenderAfterInput() { flushed++; },
+    formatRenderStats: result => result.label,
+    activateArticleSession: article => activated.push(article.title),
+    setTimeout: fn => fn(),
+  };
+  const handleFile = new Function('deps', `with (deps) { ${handleFileSource}; return handleFile; }`)(deps);
+  const pending = handleFile({ name: '旧飞书文档.docx', size: 1 }, {
+    source: 'feishu-doc-import',
+    signal: external.signal,
+  });
+  for (let index = 0; index < 6; index++) await Promise.resolve();
+
+  external.abort();
+  render.resolve({ label: '旧飞书文档', lines: [], imgN: 0, headingN: 0 });
+  const result = await pending;
+
+  assert.equal(result, false);
+  assert.deepEqual(activated, []);
+  assert.equal(deps._articleInputPending, false);
+  assert.ok(removedClasses.includes('processing'));
+  assert.equal(flushed, 1);
 });
 
 test('公开的 _handleFile 必须返回排版 Promise，供飞书导入等待真实结果', async () => {

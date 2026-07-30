@@ -122,6 +122,7 @@ type authService struct {
 	feishu            feishuProvider
 	accessMu          sync.Mutex
 	accessCache       map[string]cachedUserAccessToken
+	feishuExportJobs  *feishuExportJobManager
 	loginLimiter      *authLoginLimiter
 	dummyPasswordHash string
 }
@@ -146,11 +147,14 @@ func newAuthService(config authConfig, users *authUserStore, provider feishuProv
 	if err != nil {
 		return nil, fmt.Errorf("initialize password verifier: %w", err)
 	}
+	feishuExportJobs := newFeishuExportJobManager(config.Now)
+	feishuExportJobs.startGC(feishuExportJobGCInterval)
 	return &authService{
 		config:            config,
 		users:             users,
 		feishu:            provider,
 		accessCache:       map[string]cachedUserAccessToken{},
+		feishuExportJobs:  feishuExportJobs,
 		loginLimiter:      newAuthLoginLimiter(),
 		dummyPasswordHash: dummyPasswordHash,
 	}, nil

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeFeishuTokenResponseExplainsMissingOfflineAccess(t *testing.T) {
@@ -20,6 +21,29 @@ func TestNormalizeFeishuTokenResponseExplainsMissingOfflineAccess(t *testing.T) 
 	})
 	if err == nil || !strings.Contains(err.Error(), "offline_access") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestFeishuExportPollDelayStartsFastThenBacksOff(t *testing.T) {
+	base := 250 * time.Millisecond
+	want := []time.Duration{
+		0,
+		250 * time.Millisecond,
+		250 * time.Millisecond,
+		500 * time.Millisecond,
+		500 * time.Millisecond,
+		time.Second,
+	}
+	for attempt, expected := range want {
+		if got := feishuExportPollDelay(base, attempt); got != expected {
+			t.Fatalf("attempt %d delay=%s want=%s", attempt, got, expected)
+		}
+	}
+	if got := feishuExportPollDelay(0, 3); got != 0 {
+		t.Fatalf("zero base delay=%s want=0", got)
+	}
+	if got := feishuExportPollDelay(time.Second, 3); got != time.Second {
+		t.Fatalf("delay cap=%s want=1s", got)
 	}
 }
 

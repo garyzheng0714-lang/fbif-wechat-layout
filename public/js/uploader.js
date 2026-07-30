@@ -97,19 +97,28 @@ function isRemoteUploadUrl(url) {
 }
 
 // Upload a single base64 image to OSS. Returns OSS URL or null on failure.
-async function uploadOne(task) {
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
+  throw new DOMException('The operation was aborted', 'AbortError');
+}
+
+async function uploadOne(task, { signal } = {}) {
+  throwIfAborted(signal);
   const body = JSON.stringify({ base64_images: { [task.key]: task.src } });
   try {
     const resp = await fetchWithTimeout('/api/oss-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
+      signal,
     }, { timeoutMs: 20000 });
     if (!resp.ok) return null;
     const { results } = await resp.json();
     const url = results[task.key] || Object.values(results)[0] || null;
     return isRemoteUploadUrl(url) ? url : null;
-  } catch {
+  } catch (err) {
+    throwIfAborted(signal);
     return null; // 超时/网络错误与上传失败同等处理，交给上层重试机制
   }
 }
@@ -189,11 +198,47 @@ export async function materializeLazyImages(articleCopy, footerCopy, {
 //
 // Returns { articleCopy, footerCopy, total, failed, failedSrcs }.
 // failedSrcs contains original src strings of images that failed even after retry.
-export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, onLog, onMaterialized, transferMmbiz = false } = {}) {
-  const materialized = await materializeLazyImages(articleCopy, footerCopy, { onLog });
+export async function uploadNonCdnImages(articleCopy, footerCopy, {
+  onProgress,
+  onLog,
+  onMaterialized,
+  transferMmbiz = false,
+  signal,
+} = {}) {
+  throwIfAborted(signal);
+  const materialized = await materializeLazyImages(articleCopy, footerCopy, { onLog, signal });
+  throwIfAborted(signal);
   articleCopy = materialized.articleCopy;
   footerCopy = materialized.footerCopy;
   const lazyFailedSrcs = materialized.failedSrcs || [];
+
+  const mmbizUrls = new Set();
+  if (transferMmbiz) {
+    let mm;
+    const mmRe = /src="(https?:\/\/[^"]+)"/g;
+    const combined = articleCopy + '\n' + footerCopy;
+    while ((mm = mmRe.exec(combined)) !== null) {
+      if (isMmbizUrl(mm[1])) mmbizUrls.add(mm[1]);
+    }
+  }
+  const initialBase64Tasks = [];
+  let b64Match;
+  const initialBase64Re = /src="(data:image\/[^"]+)"/g;
+  const materializedHtml = articleCopy + '\n' + footerCopy;
+  while ((b64Match = initialBase64Re.exec(materializedHtml)) !== null) {
+    initialBase64Tasks.push({
+      type: 'base64',
+      src: b64Match[1],
+      key: 'img_' + initialBase64Tasks.length,
+    });
+  }
+  const transferTotal = mmbizUrls.size + initialBase64Tasks.length;
+  let transferDone = 0;
+  const reportTransfer = (increment = 0) => {
+    transferDone = Math.min(transferTotal, transferDone + increment);
+    onProgress && onProgress(transferDone, transferTotal);
+  };
+  reportTransfer();
 
   // Website channel: re-host WeChat image CDN images on our CDN. Pull each URL through
   // the server proxy → base64, so the upload pass below re-hosts it and replaces
@@ -201,17 +246,9 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   // as-is inside mp.weixin.qq.com and re-hosting would strip GIF animation.
   const mmbizFailedSrcs = [];
   if (transferMmbiz) {
-    const mmbizUrls = new Set();
-    let mm;
-    const mmRe = /src="(https?:\/\/[^"]+)"/g;
-    const combined = articleCopy + '\n' + footerCopy;
-    while ((mm = mmRe.exec(combined)) !== null) {
-      if (isMmbizUrl(mm[1])) mmbizUrls.add(mm[1]);
-    }
     if (mmbizUrls.size > 0) {
       const urlList = [...mmbizUrls];
       onLog && onLog('info', '网站渠道：转存微信图床到 CDN', { count: urlList.length });
-      onProgress && onProgress(0, urlList.length);
       // 把 mmbiz URL 列表整体交给后端 /api/oss-upload 的 urls 模式：后端在服务器内部
       // 并发「取图 + 传 OSS」，直接返回 {mmbiz_url: oss_url}。比前端逐张「取图→base64
       // →上传」快一个量级——后端服务器并发取 mmbiz 不触发微信反爬限流（浏览器并发才
@@ -221,11 +258,12 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ urls: urlList }),
+          signal,
         }, { timeoutMs: 60000, timeoutMessage: '图床转存超时' });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const { results } = await resp.json();
-        let done = 0;
         for (const url of urlList) {
+          throwIfAborted(signal);
           const ossUrl = results && results[url];
           if (ossUrl) {
             articleCopy = articleCopy.split(url).join(ossUrl);
@@ -234,14 +272,14 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
             onLog && onLog('error', '微信图床转存失败（保留原链接）', { url: url.slice(0, 60) });
             mmbizFailedSrcs.push(url);
           }
-          done++;
-          onProgress && onProgress(done, urlList.length);
+          reportTransfer(1);
         }
       } catch (err) {
+        throwIfAborted(signal);
         // 整体请求失败：全部保留原 mmbiz 链接，标记失败（可重试）。
         onLog && onLog('error', '微信图床批量转存请求失败', { err: String(err) });
         for (const url of urlList) mmbizFailedSrcs.push(url);
-        onProgress && onProgress(urlList.length, urlList.length);
+        reportTransfer(urlList.length);
       }
     }
   }
@@ -254,22 +292,16 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
     failedSrcs: preUploadFailed,
   });
 
-  const tasks = [];
-  let m, mmbizCount = 0;
+  const tasks = initialBase64Tasks;
+  let mmbizCount = 0;
 
   // Refresh combined HTML if any lazy / mmbiz → data: substitutions happened.
   const refreshedHtml = articleCopy + '\n' + footerCopy;
 
-  // base64 data URIs (from DOCX, materialized lazy refs, and any mmbiz we just
-  // converted above) — upload to OSS
-  const b64Re = /src="(data:image\/[^"]+)"/g;
-  while ((m = b64Re.exec(refreshedHtml)) !== null) {
-    tasks.push({ type: 'base64', src: m[1], key: 'img_' + tasks.length });
-  }
-
   // HTTP URLs — use directly, no upload needed
   // (any remaining mmbiz URLs are kept as-is; other external URLs work as-is)
   const urlRe = /src="(https?:\/\/[^"]+)"/g;
+  let m;
   while ((m = urlRe.exec(refreshedHtml)) !== null) {
     if (isMmbizUrl(m[1])) mmbizCount++;
   }
@@ -287,26 +319,29 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
   }
 
   onLog && onLog('info', '开始上传Base64图片到OSS', { base64: tasks.length, 外链直接使用: true, mmbiz跳过: mmbizCount });
-  onProgress && onProgress(0, tasks.length);
 
-  let done = 0;
   const failedTasks = [];
   const concurrency = Math.min(tasks.length, BASE64_UPLOAD_CONCURRENCY);
   let next = 0;
 
   async function worker() {
     while (next < tasks.length) {
+      throwIfAborted(signal);
       const task = tasks[next++];
       let cdnUrl = null;
       try {
-        cdnUrl = await uploadOne(task);
-      } catch {}
+        cdnUrl = await uploadOne(task, { signal });
+      } catch (err) {
+        throwIfAborted(signal);
+      }
 
       // Auto-retry once on failure
       if (!cdnUrl) {
         try {
-          cdnUrl = await uploadOne(task);
-        } catch {}
+          cdnUrl = await uploadOne(task, { signal });
+        } catch (err) {
+          throwIfAborted(signal);
+        }
       }
 
       if (cdnUrl) {
@@ -317,8 +352,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
         failedTasks.push(task);
         onLog && onLog('error', '图片上传失败(已重试)', { src: task.src.substring(0, 80) });
       }
-      done++;
-      onProgress && onProgress(done, tasks.length);
+      reportTransfer(1);
     }
   }
 
