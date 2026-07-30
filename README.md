@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="FBIF 排版工具：把 DOCX、Markdown、粘贴正文或文章链接，转成适配微信公众号和 FoodTalks 的 HTML">
+  <img src="./assets/readme/hero.svg" width="100%" alt="FBIF 排版工具：把 DOCX、Markdown、粘贴正文、文章链接或飞书云文档，转成适配微信公众号和 FoodTalks 的 HTML">
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
 
 # FBIF 排版工具
 
-编辑手里是一份 DOCX、一段粘贴的正文，或者一条公众号文章链接。这个工具把它们转成**能直接粘进微信公众号编辑器或 FoodTalks CMS 的 HTML**——标题层级、图注、参考文献、表格、署名行和页脚，都按各渠道的规则排好。
+编辑手里是一份 DOCX、一段粘贴的正文、一条公众号文章链接，或者飞书云文档。这个工具把它们转成**能直接粘进微信公众号编辑器或 FoodTalks CMS 的 HTML**——标题层级、图注、参考文献、表格、署名行和页脚，都按各渠道的规则排好。
 
 再往后是一条受控发布流水线：公众号文章 URL → FoodTalks 隐藏草稿 → 飞书审核 → **人工**公开。
 
@@ -47,7 +47,7 @@
 - 表格：蓝底白字表头 + 浅灰网格线、全格居中、列宽按 Word gridCol 比例；关键视觉以 HTML 属性 + 内容层双写（`border`/`cellpadding`/`align`/`bgcolor`/`width` 属性、表头 `<strong>`），保证粘进 FoodTalks 后台被清洗内联样式后不丢样；表格内图片按 Word 里设置的显示宽度统一尺寸（2026-07-06）
 
 <details>
-<summary><b>当前状态（核对至 2026-07-24）</b></summary>
+<summary><b>当前状态（以现行代码与对应长期契约为准）</b></summary>
 
 <br>
 
@@ -56,6 +56,7 @@
 - **微信草稿存活保护**：公众号复制层对更多文章卡片、微信图床属性、位图占位和异步回写做 T0 安全约束，防止内容粘贴后在“保存草稿”阶段被微信清洗掉。
 - **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
 - **程序化渲染**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 复用交互式编辑器的同一套解析、规则与渲染实现，支持 `fbif` 和 `ft-default`。
+- **飞书云文档导入**：飞书登录用户可在正文输入框输入 `@关键词` 搜索并选择云文档。总进度只按服务端导出、传输、解析、图片解码和复制产物等真实工作量推进；导入期间保留旧预览，只有右侧排版和复制产物同步就绪后才到 `100%`。
 - **受控发布流水线**：手动提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
 - **编辑部规范数据化**：摘要、标签、作者和原创 / 转载判定已按历史发布样本沉淀为声明式规范与封闭标签词表。AI 只负责预填和出处抽取；完整评测仍在进行，且 FoodTalks 的标签 PUT 缺陷修复前不会把标签写入正式请求。
 - **发布状态边界**：测试环境已经完成隐藏草稿、审核卡片与状态机全链路验证；正式环境接入仍等待外部白名单和服务级凭证，不能把测试闭环写成正式生产已上线。
@@ -66,6 +67,7 @@
 ## 功能
 
 - 解析 DOCX / Markdown，保留标题、正文、图片、超链接、列表、引用和参考来源等结构。
+- 飞书登录用户可输入 `@关键词` 搜索云文档；选择后由服务端异步导出 DOCX 并复用同一套排版链路。账号密码登录不具备飞书云文档能力。
 - 粘贴正文会作为临时 TXT / Markdown 文档进入同一套解析、标点和渲染链路。
 - 粘贴微信公众号文章或网页链接后，由 Go API 抓取并转换为结构化内容；失败时回退到备用读取路径。
 - URL 导入会保留微信文章的图片说明组：`图片 -> 图注 -> 图片来源` 必须连续渲染为浅灰图注，不得把 `图片来源：` 当成正文或文章来源。
@@ -105,7 +107,10 @@
 │   ├── footer.html                 # 页脚模板
 │   ├── css/wx-theme.css            # 微信内容样式
 │   ├── js/
-│   │   ├── engine.js               # UI 协调、批处理、页脚、复制流程
+│   │   ├── engine.js               # UI 协调、批处理、页脚、原子预览与复制流程
+│   │   ├── feishu-doc-import.js    # @ 搜索、异步导出任务与真实总进度
+│   │   ├── import-progress.js      # 按可验证工作单元聚合 0–100%
+│   │   ├── preview-dom.js          # 连接态 staging 与一次性 DOM 提交
 │   │   ├── editor-shell.js         # 编辑器外壳、初始账号解析、快捷键
 │   │   ├── account-menu.js         # 单层顶栏头像账号菜单（mountAccountMenu）
 │   │   ├── session-restore.js      # 跨渠道编辑器快照保存与恢复
@@ -139,7 +144,8 @@
 │   ├── wechat_blocks.go            # 微信文章块提取
 │   ├── publish_*.go                # FoodTalks 发布任务、状态机、审核、预览与 AI 元数据
 │   ├── foodtalks.go                # FoodTalks API 客户端与环境差异合同
-│   └── feishu_*.go                 # 审核通知、卡片回调与长连接
+│   ├── auth_*.go                   # 账号密码、飞书 OAuth、会话与用户能力
+│   └── feishu_*.go                 # 文档搜索/导出任务、审核通知、卡片回调与长连接
 ├── render-service/                 # Node headless 渲染服务
 ├── deploy/
 │   ├── caddy/                       # 声明式 Caddy vhost
@@ -186,7 +192,7 @@ curl http://127.0.0.1:9000/api/health
 
 ## 使用流程
 
-1. 上传 DOCX / Markdown，或粘贴文章链接 / 正文。
+1. 上传 DOCX / Markdown，粘贴文章链接 / 正文；使用飞书登录时，也可以在同一输入框输入 `@关键词` 并选择云文档。
 2. 检查预览层中的正文、图片、引用和“更多文章”卡片。
 3. 原创 DOCX 默认读取首个 `作者：` 行作为作者信息；作者行会显示为蓝色、非斜体，不要在正文中重复保留。
 4. URL 导入文章时，图片来源应显示为浅灰小字号图注；文章级来源、作者、编辑应在提示页脚前只出现一次。
@@ -206,6 +212,11 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
+| `GET` | `/api/feishu/docs/search?q=<关键词>&limit=8` | 搜索当前飞书登录用户可访问的云文档 |
+| `POST` | `/api/feishu/docs/export/jobs` | 创建飞书文档 DOCX 导出任务；返回 `202` 和带真实工作量的任务状态 |
+| `GET` | `/api/feishu/docs/export/jobs/{job_id}` | 查询导出状态；支持 `after` + `wait_ms` 版本长轮询 |
+| `GET` | `/api/feishu/docs/export/jobs/{job_id}/result` | 导出完成后下载 DOCX 结果 |
+| `DELETE` | `/api/feishu/docs/export/jobs/{job_id}` | 取消当前用户的导出任务 |
 | `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default`）当前规则；未传 `account` 时默认读取 FBIF |
 | `POST` | `/api/rules/admin/login` | 校验规则后台密码；成功返回 `{ "ok": true }` |
 | `GET` | `/api/rules/admin/presets` | 列出规则预设，需 `X-Admin-Password` |
@@ -251,6 +262,7 @@ curl http://127.0.0.1:9000/api/health
 | `FOODTALKS_FRONT_URL` / `FOODTALKS_ADMIN_ARTICLE_URL` / `FOODTALKS_CATEGORY_IDS` | 前台、后台文章入口与发布分类；三类 URL 必须指向同一目标环境 |
 | `FOODTALKS_EXPECTED_TARGET` | 显式声明 `test` 或 `production`；readiness 会拒绝缺失、未知或与 FoodTalks URL 不一致的配置 |
 | `DEPLOYMENT_WRITES_PAUSED` | 部署候选实例专用；为 `1` 时暂停发布/rules 写入口、恢复任务、通知 worker 与飞书长连接，验收通过后由事务脚本清零 |
+| `FEISHU_LOGIN_APP_ID` / `FEISHU_LOGIN_APP_SECRET` / `FEISHU_LOGIN_REDIRECT_URI` | 飞书登录与云文档搜索/导出；回调地址必须与开放平台白名单完全一致 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REVIEW_CHAT_ID` | 审核通知和长连接回调 |
 | `PUBLISH_MONITOR_FEISHU_USER_ID` | P0 异常、恢复和每日心跳的飞书私聊收件人 `user_id`；与审核群分开，缺失时 readiness 失败且不回退群聊 |
 | `FEISHU_CALLBACK_MODE` | 必须显式为 `websocket` 或 `webhook`；推荐生产使用 `websocket`，此时公网 Webhook 固定返回 404；缺失/非法时 readiness 失败 |
@@ -314,6 +326,7 @@ go test ./...
 ## 维护说明
 
 - 文档入口见 [`docs/INDEX.md`](docs/INDEX.md)。根目录 `WORKLOG-*.md` 和 `openspec/changes/` 是过程记录，不作为当前规则的单一真相源；是否仍在推进要结合文件状态、issue tracker 和当前代码判断。稳定能力以 README、长期契约、ADR、`openspec/specs/` 和当前代码为准。
+- 飞书云文档 `@` 搜索、异步导出任务、总进度、原子预览与真实浏览器验收口径见 [`docs/feishu-document-import.md`](docs/feishu-document-import.md)。进度不得按时间插值，`100%` 必须等于右侧排版、最终图片和复制产物同时就绪。
 - `DESIGN.md` 记录界面和公众号预览页的设计约束。
 - 渲染器按渠道分三套且物理隔离（红线#19）：公众号默认走 `fbif`，网站走 `foodtalks-site`，FoodTalks系列走 `foodtalks-series`，底部分别由 `mp-blocks`（661px）/ `site-blocks`（满宽）渲染。各渠道功能应以对应渲染器为准，不要用 `fbif.js` 描述网站 / 系列行为。
 - 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；受限行为规则集中在 `public/js/rule-behavior.js`。服务端规则持久化、账号绑定和写入校验集中在 `api/rule_presets.go`、`api/rule_behavior.go`、`api/rule_config_validation.go`；各账号 / preset 的默认成对登记在 `api/rule_defaults.go` 与 `api/account_catalog.go`，底部区块默认与校验在 `api/rule_bottom_blocks.go`（统一 `schema_version=2`）。

@@ -17,6 +17,7 @@
 
 - [共用与隔离的四层模型](adr/2026-07-10-share-vs-isolate-boundary.md)
 - [素材引用统一使用 `{{asset#id}}`](adr/2026-06-03-asset-reference-id.md)
+- [飞书云文档导入契约](feishu-document-import.md)：`@` 搜索、真实总进度、非白屏原子提交、任务 API 与验收门禁。
 - [微信公众号标题识别规范](../openspec/specs/wechat-heading-detection/spec.md)
 - [微信公众号 URL 块分类规范](../openspec/specs/wechat-url-block-classification/spec.md)
 - [微信草稿存活复制规范](../openspec/specs/wechat-draft-survival-copy/spec.md)
