@@ -1,0 +1,388 @@
+:root {
+  color: #1f2329;
+  font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.auth-login-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #e4e9f0;
+}
+
+.auth-login-card {
+  display: grid;
+  width: min(100%, 372px);
+  overflow: hidden;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 14px 44px rgba(20, 40, 80, 0.10);
+}
+
+.auth-login-illustration {
+  display: none;
+  background: #eef1f5;
+}
+
+.auth-login-illustration img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+}
+
+.auth-login-column {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 28px;
+}
+
+.auth-login-form {
+  width: 100%;
+  max-width: 300px;
+}
+
+.auth-login-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 32px;
+}
+
+.auth-login-logo img {
+  display: block;
+  width: auto;
+  height: 46px;
+  user-select: none;
+}
+
+.auth-feishu-button {
+  width: 100%;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1.5px solid #e6e8ec;
+  border-radius: 9999px;
+  background: #fff;
+  color: #1f2329;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.auth-feishu-button:hover {
+  border-color: #cdd2d9;
+  background: #fafbfc;
+}
+
+.auth-login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: #8a8f99;
+  font-size: 12.5px;
+}
+
+.auth-login-divider::before,
+.auth-login-divider::after {
+  height: 1px;
+  flex: 1;
+  background: #e6e8ec;
+  content: "";
+}
+
+.auth-login-divider span {
+  white-space: nowrap;
+}
+
+#passwordLoginForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth-pill-field {
+  display: flex;
+  width: 100%;
+  height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 0 20px;
+  border: 1.5px solid #e6e8ec;
+  border-radius: 999px;
+  background: #fff;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.auth-pill-field:focus-within {
+  border-color: #1f2329;
+  box-shadow: 0 0 0 2px rgba(31, 35, 41, 0.10);
+}
+
+.auth-pill-field.is-invalid {
+  border-color: #d96662;
+}
+
+.auth-field-icon {
+  flex: 0 0 auto;
+  color: #9aa0a8;
+}
+
+.auth-pill-field input {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #1f2329;
+  font-size: 14px;
+}
+
+.auth-pill-field input::placeholder {
+  color: #9aa0a8;
+}
+
+.auth-pill-field input:-webkit-autofill {
+  -webkit-text-fill-color: #1f2329;
+  box-shadow: inset 0 0 0 1000px #fff;
+}
+
+.auth-password-toggle,
+.auth-text-action,
+.auth-footer-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.auth-password-toggle {
+  display: grid;
+  width: 24px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #9aa0a8;
+}
+
+.auth-password-toggle:hover,
+.auth-password-toggle:focus-visible {
+  color: #1f2329;
+}
+
+.auth-password-toggle svg {
+  grid-area: 1 / 1;
+}
+
+.auth-eye-closed,
+.auth-password-toggle[aria-pressed="true"] .auth-eye-open {
+  opacity: 0;
+}
+
+.auth-password-toggle[aria-pressed="true"] .auth-eye-closed {
+  opacity: 1;
+}
+
+.auth-account-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #1f2329;
+  font-size: 13px;
+}
+
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.auth-remember input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #1f2329;
+}
+
+.auth-text-action {
+  color: #8a8f99;
+}
+
+.auth-text-action:hover,
+.auth-text-action:focus-visible,
+.auth-footer-action:hover,
+.auth-footer-action:focus-visible {
+  color: #1f2329;
+}
+
+.auth-password-submit {
+  width: 100%;
+  height: 48px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: #1f2329;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+
+.auth-password-submit:hover {
+  opacity: 0.9;
+}
+
+.auth-password-submit:disabled,
+.auth-feishu-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.auth-feishu-button:focus-visible,
+.auth-password-submit:focus-visible {
+  outline: 3px solid rgba(51, 112, 255, 0.24);
+  outline-offset: 3px;
+}
+
+.auth-login-error {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid #f0d4d2;
+  border-radius: 8px;
+  background: #fdf2f1;
+  color: #b83430;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.auth-account-help {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid #d8e6f4;
+  border-radius: 10px;
+  background: #eef4fb;
+  color: #114e84;
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.auth-account-footer {
+  margin: 24px 0 0;
+  color: #8a8f99;
+  font-size: 13px;
+  text-align: center;
+}
+
+.auth-footer-action {
+  margin-left: 2px;
+  color: #1f2329;
+  font-weight: 600;
+}
+
+.auth-login-caption {
+  margin: 14px 0 0;
+  color: #8a8f99;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.auth-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (min-width: 640px) {
+  .auth-login-page {
+    padding: 24px;
+  }
+
+  .auth-login-column {
+    padding-inline: 40px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .auth-login-card {
+    width: min(100%, 820px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .auth-login-illustration {
+    display: block;
+  }
+
+  .auth-login-column {
+    padding-block: 40px;
+  }
+}
+
+@media (max-width: 430px) {
+  .auth-login-page {
+    padding: 0;
+    background: #fff;
+  }
+
+  .auth-login-card {
+    min-height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .auth-login-column {
+    padding: 40px 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

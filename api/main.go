@@ -88,6 +88,13 @@ func main() {
 		log.Fatalf("规则库校验失败：%v", err)
 	}
 
+	authService, err := newRuntimeAuthService(*rulesPath)
+	if err != nil {
+		log.Fatalf("登录服务启动失败：%v", err)
+	}
+	registerAuthRoutes(mux, authService)
+	registerFeishuDocumentRoutes(mux, authService)
+
 	// Image upload to OSS (base64 from DOCX)
 	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
 	mux.HandleFunc("POST /api/wechat-upload", handleImageUpload) // legacy alias

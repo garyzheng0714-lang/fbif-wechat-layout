@@ -362,12 +362,14 @@ export function bindUrlImportShortcuts({
   ignoreClassNames = [],
   focusTargetSelector = '',
   onInputCleared = null,
+  shouldSubmitValue = () => true,
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
 
   function submitImportValue(value) {
     const text = String(value || '').trim();
     if (!text) return false;
+    if (!shouldSubmitValue(text)) return false;
     if (urlInput) urlInput.value = text;
     if (isSingleHttpUrl(text)) {
       fetchArticle();

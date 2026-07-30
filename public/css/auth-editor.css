@@ -1,0 +1,410 @@
+body.auth-pending > :not(script) {
+  visibility: hidden;
+}
+
+body.auth-unavailable > :not(script) {
+  display: none !important;
+}
+
+body.auth-unavailable::before {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--fs-bg-sunken, #f2f3f5);
+  color: var(--fs-text-2, #646a73);
+  font-size: 14px;
+  text-align: center;
+  content: "账号服务暂不可用，请刷新页面重试";
+}
+
+.user-identity {
+  position: relative;
+  z-index: 70;
+  flex: 0 0 auto;
+}
+
+.user-identity-trigger {
+  width: 100%;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--fs-divider);
+  border-radius: var(--fs-r-m);
+  background: var(--fs-bg-card);
+  color: var(--fs-text-1);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fs-t-fast) var(--fs-ease-out),
+              border-color var(--fs-t-fast) var(--fs-ease-out),
+              box-shadow var(--fs-t-fast) var(--fs-ease-out);
+}
+
+.user-identity-trigger:hover,
+.user-identity-trigger[aria-expanded="true"] {
+  border-color: var(--fs-border-control);
+  background: var(--fs-bg-nested);
+}
+
+.user-identity-trigger[aria-expanded="true"] {
+  box-shadow: var(--fs-sh-s1);
+}
+
+.user-identity-trigger:focus-visible,
+.user-identity-switch:focus-visible,
+.user-identity-logout:focus-visible,
+.feishu-doc-result:focus-visible,
+.feishu-doc-locked a:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
+}
+
+.user-identity-avatar {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #dfe8ff;
+  color: #2454b8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.user-identity-avatar.is-large {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+  font-size: 15px;
+}
+
+.user-identity-avatar.is-password {
+  background: #edeff2;
+  color: #646a73;
+}
+
+.user-identity-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-identity-summary,
+.user-identity-profile-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.user-identity-name,
+.user-identity-profile-name {
+  overflow: hidden;
+  color: var(--fs-text-1);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-identity-capability,
+.user-identity-mode {
+  margin-top: 2px;
+  color: var(--fs-text-2);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.user-identity-caret {
+  flex: 0 0 auto;
+  color: var(--fs-text-3);
+  font-size: 16px;
+  transition: transform var(--fs-t-fast) var(--fs-ease-out);
+}
+
+.user-identity-trigger[aria-expanded="true"] .user-identity-caret {
+  transform: rotate(180deg);
+}
+
+.user-identity-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  z-index: 80;
+  padding: 8px;
+  border: 1px solid rgba(31, 35, 41, 0.08);
+  border-radius: var(--fs-r-m);
+  background: var(--fs-bg-card);
+  box-shadow: var(--fs-sh-s3);
+}
+
+.user-identity-profile {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px;
+}
+
+.user-identity-profile-name {
+  font-size: 14px;
+}
+
+.user-identity-status {
+  margin: 2px 4px 8px;
+  padding: 9px 10px;
+  border-radius: var(--fs-r-s);
+  background: #edf8f4;
+  color: #17815e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.user-identity-status.is-locked {
+  background: #fff7e8;
+  color: #9b5d00;
+}
+
+.user-identity-switch,
+.user-identity-logout {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--fs-r-s);
+  background: transparent;
+  color: var(--fs-text-1);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-identity-switch {
+  margin-bottom: 4px;
+  border: 1px solid var(--fs-border-control);
+  text-align: center;
+}
+
+.user-identity-switch:hover {
+  border-color: var(--fs-brand);
+  color: var(--fs-brand);
+}
+
+.user-identity-logout {
+  color: var(--fs-danger);
+}
+
+.user-identity-logout:hover {
+  background: var(--fs-danger-soft);
+}
+
+.user-identity-divider {
+  height: 1px;
+  margin: 4px;
+  background: var(--fs-divider);
+}
+
+.import-label-row {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.import-label-row .import-input-label {
+  min-height: 0;
+  padding: 0;
+  line-height: 30px;
+}
+
+.feishu-doc-capability {
+  flex: 0 0 auto;
+  color: var(--fs-brand);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.feishu-doc-capability.is-locked {
+  color: var(--fs-text-3);
+}
+
+.feishu-doc-search {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  z-index: 65;
+  max-height: min(356px, calc(100dvh - 210px));
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid rgba(31, 35, 41, 0.10);
+  border-radius: var(--fs-r-m);
+  background: var(--fs-bg-card);
+  box-shadow: var(--fs-sh-s3);
+}
+
+.feishu-doc-search-head {
+  padding: 7px 9px 5px;
+  color: var(--fs-text-3);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.feishu-doc-results {
+  display: grid;
+  gap: 2px;
+}
+
+.feishu-doc-result {
+  width: 100%;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--fs-r-s);
+  background: transparent;
+  color: var(--fs-text-1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.feishu-doc-result:hover,
+.feishu-doc-result.is-active {
+  background: var(--fs-brand-soft);
+}
+
+.feishu-doc-result-icon {
+  width: 32px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  border-radius: 6px;
+  background: #3370ff;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.feishu-doc-result-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.feishu-doc-result-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feishu-doc-result-meta {
+  overflow: hidden;
+  color: var(--fs-text-2);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feishu-doc-message {
+  padding: 18px 12px;
+  text-align: center;
+}
+
+.feishu-doc-message-title {
+  color: var(--fs-text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.feishu-doc-message-detail {
+  margin-top: 4px;
+  color: var(--fs-text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.feishu-doc-message.is-loading .feishu-doc-message-title::before {
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+  margin-right: 7px;
+  border: 2px solid var(--fs-brand-soft);
+  border-top-color: var(--fs-brand);
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: feishu-doc-spin 0.8s linear infinite;
+  content: "";
+}
+
+.feishu-doc-message.is-error .feishu-doc-message-title {
+  color: var(--fs-danger);
+}
+
+.feishu-doc-locked {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--fs-r-s);
+  background: #fff7e8;
+}
+
+.feishu-doc-locked-copy {
+  min-width: 0;
+  display: grid;
+  flex: 1;
+  gap: 3px;
+}
+
+.feishu-doc-locked-copy strong {
+  color: #7a4d00;
+  font-size: 12px;
+}
+
+.feishu-doc-locked-copy span {
+  color: #9b6a16;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.feishu-doc-locked a {
+  flex: 0 0 auto;
+  color: var(--fs-brand);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@keyframes feishu-doc-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 520px) {
+  .feishu-doc-capability {
+    max-width: 132px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feishu-doc-message.is-loading .feishu-doc-message-title::before {
+    animation-duration: 1.8s;
+  }
+}

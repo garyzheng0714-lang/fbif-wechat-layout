@@ -809,6 +809,44 @@ test('bindUrlImportShortcuts clears the rendered article when the import box is 
   assert.equal(cleared, 1);
 });
 
+test('bindUrlImportShortcuts leaves @ document mentions to the Feishu document controller', () => {
+  const inputHandlers = {};
+  let imported = 0;
+  let fetched = 0;
+  const urlInput = {
+    value: '@新品趋势',
+    tagName: 'TEXTAREA',
+    classList: { contains: () => false },
+    addEventListener(type, handler) { inputHandlers[type] = handler; },
+  };
+  const documentRef = {
+    activeElement: urlInput,
+    getElementById(id) {
+      if (id === 'urlInput') return urlInput;
+      if (id === 'previewContent') return { style: { display: 'none' } };
+      return null;
+    },
+    addEventListener() {},
+    querySelectorAll() { return []; },
+  };
+  bindUrlImportShortcuts({
+    documentRef,
+    fetchArticle: () => { fetched += 1; },
+    importText: () => { imported += 1; },
+    shouldSubmitValue: value => !value.startsWith('@'),
+  });
+  let prevented = false;
+  inputHandlers.keydown({
+    key: 'Enter',
+    metaKey: true,
+    ctrlKey: false,
+    preventDefault() { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(imported, 0);
+  assert.equal(fetched, 0);
+});
+
 test('foodTalksFetchErrorMessage keeps internal details out of the UI', () => {
   assert.equal(
     foodTalksFetchErrorMessage(new Error('exec /usr/bin/tool: PATH not found')),
