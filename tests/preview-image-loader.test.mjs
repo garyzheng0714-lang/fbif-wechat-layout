@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   localPreviewImageRefs,
   preloadLocalPreviewImages,
+  refreshLocalPreviewImages,
 } from '../public/js/preview-image-loader.js';
 
 test('localPreviewImageRefs only keeps unique in-memory DOCX image refs', () => {
@@ -12,6 +13,17 @@ test('localPreviewImageRefs only keeps unique in-memory DOCX image refs', () => 
     c: 'blob:first',
     d: 'blob:second',
   }), ['blob:first', 'blob:second']);
+});
+
+test('localPreviewImageRefs only decodes blob refs actually rendered in the article', () => {
+  assert.deepEqual(localPreviewImageRefs({
+    unused: 'blob:unused-large-image',
+    second: 'blob:second',
+    first: 'blob:first',
+  }, '<section><img src="blob:first"><img src="blob:second"></section>'), [
+    'blob:first',
+    'blob:second',
+  ]);
 });
 
 test('preloadLocalPreviewImages decodes local images concurrently', async () => {
@@ -44,20 +56,67 @@ test('preloadLocalPreviewImages decodes local images concurrently', async () => 
   assert.equal(decoded.get('blob:first').naturalWidth, 640);
 });
 
-test('preloadLocalPreviewImages fails open when an image cannot decode', async () => {
+test('preloadLocalPreviewImages does not treat dimensions or load as decoded pixels', async () => {
+  let releaseDecode;
+  let settled = false;
+  const image = {
+    complete: true,
+    naturalWidth: 640,
+    onload: null,
+    onerror: null,
+    set src(value) { this.currentSrc = value; },
+    decode: () => new Promise(resolve => { releaseDecode = resolve; }),
+  };
+  const pending = preloadLocalPreviewImages({
+    hero: 'blob:hero',
+  }, {
+    articleHtml: '<img src="blob:hero">',
+    createImage: () => image,
+  }).then(result => {
+    settled = true;
+    return result;
+  });
+
+  await Promise.resolve();
+  image.onload?.();
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  releaseDecode();
+  const decoded = await pending;
+  assert.equal(decoded.get('blob:hero'), image);
+});
+
+test('preloadLocalPreviewImages fails open when an image decode rejects', async () => {
   const decoded = await preloadLocalPreviewImages({
     broken: 'blob:broken',
   }, {
-    timeoutMs: 5,
+    articleHtml: '<img src="blob:broken">',
     createImage: () => ({
       complete: false,
       naturalWidth: 0,
       onload: null,
       onerror: null,
       set src(value) { this.currentSrc = value; },
-      decode: () => new Promise(() => {}),
+      decode: async () => { throw new Error('broken image'); },
     }),
   });
 
   assert.equal(decoded.size, 0);
+});
+
+test('refreshLocalPreviewImages re-decodes detached nodes immediately before commit', async () => {
+  let calls = 0;
+  const image = {
+    complete: true,
+    naturalWidth: 640,
+    async decode() { calls++; },
+  };
+  const prepared = new Map([['blob:hero', image]]);
+
+  const refreshed = await refreshLocalPreviewImages(prepared);
+
+  assert.equal(refreshed, prepared);
+  assert.equal(calls, 1);
+  assert.equal(refreshed.get('blob:hero'), image);
 });

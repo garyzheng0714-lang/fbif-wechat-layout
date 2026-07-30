@@ -28,7 +28,7 @@ function usePreparedImages(content, preparedImages) {
   for (const placeholder of content.querySelectorAll('img')) {
     const src = placeholder.getAttribute('src') || '';
     const prepared = preparedImages.get(src);
-    if (!prepared || !prepared.complete || prepared.naturalWidth <= 0) continue;
+    if (!prepared) continue;
     for (const attr of Array.from(prepared.attributes)) {
       if (attr.name !== 'src' && !placeholder.hasAttribute(attr.name)) {
         prepared.removeAttribute(attr.name);
@@ -40,6 +40,25 @@ function usePreparedImages(content, preparedImages) {
     placeholder.replaceWith(prepared);
     preparedImages.delete(src);
   }
+}
+
+export function collectReusableArticleImages(container) {
+  const reusable = new Map();
+  if (!container) return reusable;
+  const marker = findFooterMarker(container);
+  for (const child of container.childNodes) {
+    if (child === marker) break;
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+    const images = child.matches('img')
+      ? [child]
+      : Array.from(child.querySelectorAll('img'));
+    for (const image of images) {
+      const src = image.getAttribute('src') || '';
+      if (!src.startsWith('blob:') || reusable.has(src)) continue;
+      reusable.set(src, image);
+    }
+  }
+  return reusable;
 }
 
 export function renderPreviewContent(container, articleHtml, footerHtml, { preparedImages } = {}) {

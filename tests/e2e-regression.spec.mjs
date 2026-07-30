@@ -748,6 +748,28 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 15: 本地 DOCX 首屏图片不得先透明再淡入 ----
   test('15-本地DOCX正文与已解码图片同帧出现', async ({ browser }) => {
     const context = await newAuthenticatedContext(browser, { viewport: { width: 1440, height: 900 } });
+    await context.addInitScript(() => {
+      const originalDecode = HTMLImageElement.prototype.decode;
+      window.__pendingBlobDecodes = 0;
+      HTMLImageElement.prototype.decode = function delayedBlobDecode() {
+        const image = this;
+        const decoded = originalDecode.call(image);
+        if (!String(image.src || '').startsWith('blob:')) return decoded;
+        window.__pendingBlobDecodes++;
+        return decoded.then(
+          value => new Promise(resolve => {
+            setTimeout(() => {
+              window.__pendingBlobDecodes--;
+              resolve(value);
+            }, 400);
+          }),
+          error => {
+            window.__pendingBlobDecodes--;
+            throw error;
+          },
+        );
+      };
+    });
     const page = await context.newPage();
 
     await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
@@ -760,6 +782,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
           count: images.length,
           incomplete: images.filter(img => !img.complete || img.naturalWidth === 0).length,
           hidden: images.filter(img => img.classList.contains('wx-img-loading')).length,
+          pendingDecodes: window.__pendingBlobDecodes,
         };
       }, { once: true });
     });
@@ -771,6 +794,27 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
     expect(state.count).toBeGreaterThan(0);
     expect(state.incomplete).toBe(0);
     expect(state.hidden).toBe(0);
+    expect(state.pendingDecodes).toBe(0);
+
+    await page.evaluate(() => {
+      const firstImage = document.querySelector('#contentArea img[src^="blob:"]');
+      firstImage.__e2eDecodedNode = 'preserve';
+    });
+    const rerender = await page.evaluate(() => window._engineRerender({ __detailedOutcome: true }));
+    expect(rerender.status).toBe('committed');
+    const preserved = await page.evaluate(() => {
+      const firstImage = document.querySelector('#contentArea img[src^="blob:"]');
+      return {
+        marker: firstImage?.__e2eDecodedNode || '',
+        incomplete: !firstImage?.complete || firstImage.naturalWidth === 0,
+        hidden: firstImage?.classList.contains('wx-img-loading') || false,
+      };
+    });
+    expect(preserved).toEqual({
+      marker: 'preserve',
+      incomplete: false,
+      hidden: false,
+    });
     await context.close();
   });
 });
