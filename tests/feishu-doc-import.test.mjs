@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseHTML } from 'linkedom';
 
-import { mountFeishuDocumentImport } from '../public/js/feishu-doc-import.js';
+import {
+  mountFeishuDocumentImport,
+  readResponseBlobWithProgress,
+} from '../public/js/feishu-doc-import.js';
 
 function makeShell() {
   return parseHTML(`
@@ -10,6 +13,10 @@ function makeShell() {
       <textarea id="urlInput"></textarea>
       <div id="feishuDocCapability"></div>
       <div id="feishuDocSearch" hidden></div>
+      <div id="progress" style="display:none">
+        <div id="progressFill"></div>
+        <div id="progressText"></div>
+      </div>
     </main>
   `);
 }
@@ -81,8 +88,9 @@ test('Feishu login searches by @keyword and exports the selected document throug
         },
       });
     },
-    getHandleFile: () => (file, options) => {
+    getHandleFile: () => async (file, options) => {
       handedOff = { file, options };
+      return true;
     },
     FileCtor: window.File,
     debounceMs: 0,
@@ -105,10 +113,9 @@ test('Feishu login searches by @keyword and exports the selected document throug
   controller.destroy();
 });
 
-test('a newer import intent invalidates an older Feishu export before renderer handoff', async () => {
+test('Feishu import waits for the renderer and preserves the query when rendering fails', async () => {
   const { document, window } = makeShell();
-  let resolveExport;
-  let handoffCount = 0;
+  let resolveRender;
   const controller = mountFeishuDocumentImport({
     documentRef: document,
     windowRef: window,
@@ -120,6 +127,72 @@ test('a newer import intent invalidates an older Feishu export before renderer h
       if (String(url).startsWith('/api/feishu/docs/search')) {
         return jsonResponse({ documents: [{ token: 'dox_a', type: 'docx', title: 'A' }] });
       }
+      return new Response(new Blob(['PK\u0003\u0004docx-test']), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Length': '13',
+        },
+      });
+    },
+    getHandleFile: () => () => new Promise(resolve => {
+      resolveRender = resolve;
+    }),
+    FileCtor: window.File,
+    debounceMs: 0,
+  });
+
+  input(window, document.getElementById('urlInput'), '@A');
+  await new Promise(resolve => setTimeout(resolve, 8));
+  document.querySelector('[data-feishu-doc-result]').click();
+  await new Promise(resolve => setTimeout(resolve, 8));
+
+  assert.equal(document.getElementById('urlInput').value, '@A');
+  assert.equal(document.getElementById('progress').style.display, 'block');
+  resolveRender(false);
+  await new Promise(resolve => setTimeout(resolve, 8));
+
+  assert.equal(document.getElementById('urlInput').value, '@A');
+  assert.match(document.getElementById('feishuDocSearch').textContent, /导入失败/);
+  controller.destroy();
+});
+
+test('Feishu export download reports real byte progress', async () => {
+  const updates = [];
+  const response = new Response(new Uint8Array([1, 2, 3, 4, 5, 6]), {
+    headers: {
+      'Content-Length': '6',
+      'Content-Type': 'application/octet-stream',
+    },
+  });
+  const blob = await readResponseBlobWithProgress(response, {
+    onProgress(update) {
+      updates.push(update);
+    },
+  });
+
+  assert.equal(blob.size, 6);
+  assert.ok(updates.length >= 1);
+  assert.deepEqual(updates.at(-1), { loaded: 6, total: 6 });
+});
+
+test('a newer import intent invalidates an older Feishu export before renderer handoff', async () => {
+  const { document, window } = makeShell();
+  let resolveExport;
+  let exportSignal;
+  let handoffCount = 0;
+  const controller = mountFeishuDocumentImport({
+    documentRef: document,
+    windowRef: window,
+    user: {
+      auth_mode: 'feishu',
+      capabilities: { feishu_documents: true },
+    },
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).startsWith('/api/feishu/docs/search')) {
+        return jsonResponse({ documents: [{ token: 'dox_a', type: 'docx', title: 'A' }] });
+      }
+      exportSignal = options.signal;
       return new Promise(resolve => {
         resolveExport = () => resolve(new Response(new Blob(['PK\u0003\u0004old']), {
           status: 200,
@@ -136,6 +209,7 @@ test('a newer import intent invalidates an older Feishu export before renderer h
   document.querySelector('[data-feishu-doc-result]').click();
   await new Promise(resolve => setTimeout(resolve, 1));
   controller.invalidate();
+  assert.equal(exportSignal?.aborted, true);
   resolveExport();
   await new Promise(resolve => setTimeout(resolve, 8));
   assert.equal(handoffCount, 0);

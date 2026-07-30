@@ -21,6 +21,53 @@ const (
 )
 
 var errFeishuInvalidDocument = errors.New("invalid Feishu document")
+var errFeishuExportTimeout = errors.New("feishu export timed out")
+
+type feishuExportTaskError struct {
+	JobStatus int
+	Message   string
+}
+
+func (e *feishuExportTaskError) Error() string {
+	if e == nil {
+		return "feishu export task failed"
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return fmt.Sprintf("feishu export task failed with status %d: %s", e.JobStatus, e.Message)
+	}
+	return fmt.Sprintf("feishu export task failed with status %d", e.JobStatus)
+}
+
+func feishuExportStatusLabel(status int) string {
+	switch status {
+	case 0:
+		return "success"
+	case 1:
+		return "new"
+	case 2:
+		return "processing"
+	case 3:
+		return "internal_error"
+	case 107:
+		return "export_size_limit"
+	case 108:
+		return "timeout"
+	case 109:
+		return "export_block_not_permitted"
+	case 110:
+		return "no_permission"
+	case 111:
+		return "document_deleted"
+	case 122:
+		return "copying_denied"
+	case 123:
+		return "document_not_found"
+	case 6000:
+		return "export_images_exceed_limit"
+	default:
+		return fmt.Sprintf("status_%d", status)
+	}
+}
 
 type feishuUserToken struct {
 	AccessToken  string
@@ -55,6 +102,16 @@ type feishuDocumentRef struct {
 type feishuExportedFile struct {
 	Filename string
 	Content  []byte
+	Metrics  feishuExportMetrics
+}
+
+type feishuExportMetrics struct {
+	ResolveDuration  time.Duration
+	CreateDuration   time.Duration
+	PollDuration     time.Duration
+	DownloadDuration time.Duration
+	TotalDuration    time.Duration
+	PollAttempts     int
 }
 
 type feishuProvider interface {
@@ -66,17 +123,28 @@ type feishuProvider interface {
 }
 
 type httpFeishuProvider struct {
-	client     *http.Client
-	appID      string
-	appSecret  string
-	apiBaseURL string
+	client              *http.Client
+	appID               string
+	appSecret           string
+	apiBaseURL          string
+	exportPollAttempts  int
+	exportPollInterval  time.Duration
+	exportStatusTimeout time.Duration
+	exportMaxPollErrors int
 }
 
 func newHTTPFeishuProvider(client *http.Client) *httpFeishuProvider {
 	if client == nil {
 		client = &http.Client{Timeout: 45 * time.Second}
 	}
-	return &httpFeishuProvider{client: client, apiBaseURL: feishuOpenAPIBaseURL}
+	return &httpFeishuProvider{
+		client:              client,
+		apiBaseURL:          feishuOpenAPIBaseURL,
+		exportPollAttempts:  30,
+		exportPollInterval:  time.Second,
+		exportStatusTimeout: 8 * time.Second,
+		exportMaxPollErrors: 3,
+	}
 }
 
 func (p *httpFeishuProvider) configure(appID, appSecret string) {
@@ -336,12 +404,16 @@ func validateFeishuDocumentRef(ref feishuDocumentRef) (feishuDocumentRef, error)
 }
 
 func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken string, ref feishuDocumentRef) (feishuExportedFile, error) {
+	startedAt := time.Now()
+	metrics := feishuExportMetrics{}
 	ref, err := validateFeishuDocumentRef(ref)
 	if err != nil {
 		return feishuExportedFile{}, err
 	}
 	if ref.Type == "wiki" {
+		phaseStarted := time.Now()
 		ref, err = p.resolveWikiDocument(ctx, accessToken, ref)
+		metrics.ResolveDuration = time.Since(phaseStarted)
 		if err != nil {
 			return feishuExportedFile{}, err
 		}
@@ -353,6 +425,7 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 			Ticket string `json:"ticket"`
 		} `json:"data"`
 	}
+	phaseStarted := time.Now()
 	if err := p.doJSON(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/drive/v1/export_tasks", accessToken, map[string]string{
 		"file_extension": "docx",
 		"token":          ref.Token,
@@ -360,18 +433,38 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 	}, &createResponse); err != nil {
 		return feishuExportedFile{}, err
 	}
+	metrics.CreateDuration = time.Since(phaseStarted)
 	if createResponse.Code != 0 || createResponse.Data.Ticket == "" {
 		return feishuExportedFile{}, errors.New("could not create feishu export task")
 	}
 
 	var fileToken string
 	var fileName string
-	for attempt := 0; attempt < 30; attempt++ {
+	var lastPollErr error
+	successfulPolls := 0
+	consecutivePollErrors := 0
+	pollAttempts := p.exportPollAttempts
+	if pollAttempts <= 0 {
+		pollAttempts = 30
+	}
+	pollInterval := p.exportPollInterval
+	if pollInterval < 0 {
+		pollInterval = 0
+	}
+	maxPollErrors := p.exportMaxPollErrors
+	if maxPollErrors <= 0 {
+		maxPollErrors = 3
+	}
+	phaseStarted = time.Now()
+	for attempt := 0; attempt < pollAttempts; attempt++ {
+		metrics.PollAttempts = attempt + 1
 		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return feishuExportedFile{}, ctx.Err()
-			case <-time.After(time.Second):
+			if pollInterval > 0 {
+				select {
+				case <-ctx.Done():
+					return feishuExportedFile{}, ctx.Err()
+				case <-time.After(pollInterval):
+				}
 			}
 		}
 		var statusResponse struct {
@@ -388,24 +481,65 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		}
 		endpoint := p.apiBaseURL + "/open-apis/drive/v1/export_tasks/" +
 			url.PathEscape(createResponse.Data.Ticket) + "?token=" + url.QueryEscape(ref.Token)
-		if err := p.doJSON(ctx, http.MethodGet, endpoint, accessToken, nil, &statusResponse); err != nil {
-			return feishuExportedFile{}, err
+		statusCtx := ctx
+		cancelStatus := func() {}
+		if p.exportStatusTimeout > 0 {
+			statusCtx, cancelStatus = context.WithTimeout(ctx, p.exportStatusTimeout)
+		}
+		statusErr := p.doJSON(statusCtx, http.MethodGet, endpoint, accessToken, nil, &statusResponse)
+		cancelStatus()
+		if statusErr != nil {
+			// Feishu export is an asynchronous task. A short-lived status
+			// lookup failure must not discard a healthy task that is still
+			// running; keep the ticket alive and retry within the bounded poll
+			// window, matching the official Lark CLI behavior.
+			lastPollErr = statusErr
+			consecutivePollErrors++
+			if consecutivePollErrors >= maxPollErrors {
+				return feishuExportedFile{}, fmt.Errorf("feishu export status unavailable: %w", lastPollErr)
+			}
+			continue
 		}
 		if statusResponse.Code != 0 {
-			return feishuExportedFile{}, errors.New("feishu export task failed")
+			lastPollErr = fmt.Errorf(
+				"feishu export status API rejected request: code=%d",
+				statusResponse.Code,
+			)
+			consecutivePollErrors++
+			if consecutivePollErrors >= maxPollErrors {
+				return feishuExportedFile{}, fmt.Errorf("feishu export status unavailable: %w", lastPollErr)
+			}
+			continue
 		}
+		consecutivePollErrors = 0
+		successfulPolls++
 		result := statusResponse.Data.Result
-		if result.FileToken != "" {
+		if result.FileToken != "" && result.JobStatus == 0 {
 			fileToken = result.FileToken
 			fileName = result.FileName
 			break
 		}
-		if result.JobErrorMsg != "" && !strings.EqualFold(result.JobErrorMsg, "success") {
-			return feishuExportedFile{}, errors.New("feishu export task failed")
+		switch result.JobStatus {
+		case 0, 1, 2:
+			if result.JobErrorMsg != "" && !strings.EqualFold(result.JobErrorMsg, "success") {
+				return feishuExportedFile{}, &feishuExportTaskError{
+					JobStatus: result.JobStatus,
+					Message:   result.JobErrorMsg,
+				}
+			}
+		default:
+			return feishuExportedFile{}, &feishuExportTaskError{
+				JobStatus: result.JobStatus,
+				Message:   feishuExportStatusLabel(result.JobStatus),
+			}
 		}
 	}
+	metrics.PollDuration = time.Since(phaseStarted)
 	if fileToken == "" {
-		return feishuExportedFile{}, errors.New("feishu export timed out")
+		if successfulPolls == 0 && lastPollErr != nil {
+			return feishuExportedFile{}, fmt.Errorf("feishu export status unavailable: %w", lastPollErr)
+		}
+		return feishuExportedFile{}, errFeishuExportTimeout
 	}
 
 	downloadURL := p.apiBaseURL + "/open-apis/drive/v1/export_tasks/file/" + url.PathEscape(fileToken) + "/download"
@@ -414,6 +548,7 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		return feishuExportedFile{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
+	phaseStarted = time.Now()
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return feishuExportedFile{}, fmt.Errorf("download Feishu export: %w", err)
@@ -433,7 +568,9 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		fileName = ref.Title
 	}
 	fileName = sanitizeExportFilename(fileName)
-	return feishuExportedFile{Filename: fileName, Content: content}, nil
+	metrics.DownloadDuration = time.Since(phaseStarted)
+	metrics.TotalDuration = time.Since(startedAt)
+	return feishuExportedFile{Filename: fileName, Content: content, Metrics: metrics}, nil
 }
 
 func sanitizeExportFilename(raw string) string {

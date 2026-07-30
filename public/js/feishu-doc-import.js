@@ -11,6 +11,10 @@ export function parseFeishuMention(value) {
 function responseErrorMessage(payload, fallback) {
   if (payload?.code === 'feishu_login_required') return '飞书云文档功能需要使用飞书登录';
   if (payload?.code === 'authentication_required') return '登录状态已失效，请重新登录';
+  if (payload?.code === 'feishu_export_timeout') return '飞书生成 Word 超时，请稍后重试';
+  if (payload?.code === 'feishu_export_too_large') return '文档或图片过多，飞书无法导出，请精简后重试';
+  if (payload?.code === 'feishu_document_permission_denied') return '当前账号没有导出这篇文档的权限';
+  if (payload?.code === 'feishu_document_not_found') return '文档已删除或不存在';
   return payload?.error || fallback;
 }
 
@@ -51,6 +55,33 @@ function isFeishuCapable(user) {
   return user?.auth_mode === 'feishu' && user?.capabilities?.feishu_documents === true;
 }
 
+export async function readResponseBlobWithProgress(response, {
+  BlobCtor = globalThis.Blob,
+  onProgress = () => {},
+} = {}) {
+  const total = Number(response?.headers?.get?.('Content-Length')) || 0;
+  const reader = response?.body?.getReader?.();
+  if (!reader || typeof BlobCtor !== 'function') {
+    const blob = await response.blob();
+    onProgress({ loaded: blob.size, total: total || blob.size });
+    return blob;
+  }
+
+  const chunks = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress({ loaded, total });
+  }
+  return new BlobCtor(chunks, {
+    type: response.headers.get('Content-Type') || DOCX_MIME,
+  });
+}
+
 export function mountFeishuDocumentImport({
   documentRef = globalThis.document,
   windowRef = globalThis.window,
@@ -58,6 +89,8 @@ export function mountFeishuDocumentImport({
   fetchImpl,
   storage,
   FileCtor = globalThis.File,
+  BlobCtor = globalThis.Blob,
+  AbortControllerCtor = globalThis.AbortController,
   getHandleFile = () => windowRef?._handleFile,
   getAccountID = () => '',
   onArticleIntent = () => {
@@ -69,6 +102,9 @@ export function mountFeishuDocumentImport({
   const input = documentRef?.getElementById('urlInput');
   const panel = documentRef?.getElementById('feishuDocSearch');
   const capability = documentRef?.getElementById('feishuDocCapability');
+  const progress = documentRef?.getElementById('progress');
+  const progressFill = documentRef?.getElementById('progressFill');
+  const progressText = documentRef?.getElementById('progressText');
   if (!input || !panel) return { invalidate() {}, destroy() {} };
 
   const capable = isFeishuCapable(user);
@@ -77,6 +113,7 @@ export function mountFeishuDocumentImport({
   let documents = [];
   let activeIndex = -1;
   let destroyed = false;
+  let activeExportController = null;
 
   if (capability) {
     capability.textContent = capable ? '输入 @ 搜索飞书文档' : '飞书文档需飞书登录';
@@ -89,6 +126,27 @@ export function mountFeishuDocumentImport({
 
   function stale(ticket, accountID) {
     return destroyed || ticket !== generation || String(getAccountID() || '') !== accountID;
+  }
+
+  function setImportProgress({ text, percent = null, indeterminate = false, visible = true } = {}) {
+    if (!progress) return;
+    progress.style.display = visible ? 'block' : 'none';
+    progress.classList.toggle('is-indeterminate', visible && indeterminate);
+    if (progressText && text) progressText.textContent = text;
+    if (progressFill) {
+      if (Number.isFinite(percent)) {
+        progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      } else if (indeterminate) {
+        progressFill.style.width = '34%';
+      }
+    }
+  }
+
+  function stopImportProgress() {
+    if (!progress) return;
+    progress.classList.remove('is-indeterminate');
+    progress.style.display = 'none';
+    if (progressFill) progressFill.style.width = '0%';
   }
 
   function showPanel() {
@@ -157,12 +215,34 @@ export function mountFeishuDocumentImport({
 
   async function chooseDocument(document, ticket = ++generation) {
     const accountID = String(getAccountID() || '');
+    if (activeExportController) activeExportController.abort();
+    const controller = typeof AbortControllerCtor === 'function' ? new AbortControllerCtor() : null;
+    activeExportController = controller;
+    const waitStartedAt = Date.now();
+    const setIntervalFn = windowRef?.setInterval?.bind(windowRef) || globalThis.setInterval;
+    const clearIntervalFn = windowRef?.clearInterval?.bind(windowRef) || globalThis.clearInterval;
+    let waitTimer = null;
     onArticleIntent({ source: 'feishu-doc-import', document });
     renderMessage('正在从飞书导入并排版…', document.title || '飞书文档', 'loading');
+    setImportProgress({
+      text: '飞书正在生成 Word…',
+      indeterminate: true,
+    });
+    if (typeof setIntervalFn === 'function') {
+      waitTimer = setIntervalFn(() => {
+        if (stale(ticket, accountID)) return;
+        const elapsedSeconds = Math.max(1, Math.round((Date.now() - waitStartedAt) / 1000));
+        setImportProgress({
+          text: `飞书正在生成 Word，已等待 ${elapsedSeconds} 秒…`,
+          indeterminate: true,
+        });
+      }, 1000);
+    }
     try {
       const response = await doFetch('/api/feishu/docs/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller?.signal,
         body: JSON.stringify({
           token: document.token,
           type: document.type,
@@ -174,18 +254,48 @@ export function mountFeishuDocumentImport({
       if (!response.ok) {
         throw new Error(await readError(response, '飞书文档导入失败'));
       }
-      const blob = await response.blob();
+      if (waitTimer && typeof clearIntervalFn === 'function') {
+        clearIntervalFn(waitTimer);
+        waitTimer = null;
+      }
+      setImportProgress({
+        text: 'Word 已生成，正在接收优化后的正文…',
+        percent: 15,
+      });
+      const blob = await readResponseBlobWithProgress(response, {
+        BlobCtor,
+        onProgress({ loaded, total }) {
+          if (stale(ticket, accountID)) return;
+          if (total > 0) {
+            const ratio = Math.min(1, loaded / total);
+            const downloadPercent = Math.round(ratio * 100);
+            setImportProgress({
+              text: `正在接收文档 ${downloadPercent}%`,
+              percent: 15 + Math.round(ratio * 65),
+            });
+          } else {
+            setImportProgress({
+              text: `正在接收文档 ${Math.max(1, Math.round(loaded / 1024))} KB`,
+              indeterminate: true,
+            });
+          }
+        },
+      });
       if (stale(ticket, accountID)) return false;
       const filename = filenameFromDisposition(response.headers.get('Content-Disposition'), document.title);
       const file = new FileCtor([blob], filename, { type: DOCX_MIME });
       const handleFile = getHandleFile();
       if (typeof handleFile !== 'function') throw new Error('排版引擎尚未就绪，请稍后重试');
       if (stale(ticket, accountID)) return false;
-      input.value = '';
       hidePanel();
-      handleFile(file, {
+      setImportProgress({
+        text: '正在提取正文并排版…',
+        percent: 82,
+      });
+      const rendered = await handleFile(file, {
         isRepost: false,
         source: 'feishu-doc-import',
+        activationDelayMs: 0,
         sourceDocument: {
           token: document.token,
           type: document.type,
@@ -193,11 +303,20 @@ export function mountFeishuDocumentImport({
           url: document.url || '',
         },
       });
+      if (stale(ticket, accountID)) return false;
+      if (rendered !== true) {
+        throw new Error('文档解析或排版失败，请检查文档后重试');
+      }
+      input.value = '';
       return true;
     } catch (error) {
       if (stale(ticket, accountID)) return false;
+      stopImportProgress();
       renderMessage('导入失败', error?.message || '飞书文档导入失败', 'error');
       return false;
+    } finally {
+      if (waitTimer && typeof clearIntervalFn === 'function') clearIntervalFn(waitTimer);
+      if (activeExportController === controller) activeExportController = null;
     }
   }
 
@@ -267,6 +386,11 @@ export function mountFeishuDocumentImport({
 
   function invalidate() {
     generation++;
+    stopImportProgress();
+    if (activeExportController) {
+      activeExportController.abort();
+      activeExportController = null;
+    }
     if (timer) {
       windowRef.clearTimeout(timer);
       timer = null;
@@ -274,24 +398,21 @@ export function mountFeishuDocumentImport({
   }
 
   function onInput() {
+    invalidate();
     const query = parseFeishuMention(input.value);
     if (query === null) {
-      invalidate();
       hidePanel();
       return;
     }
     if (!capable) {
-      invalidate();
       renderLocked();
       return;
     }
     if (!query) {
-      invalidate();
       renderMessage('搜索飞书文档', '继续输入文档名称或关键词。', 'empty');
       return;
     }
-    const ticket = ++generation;
-    if (timer) windowRef.clearTimeout(timer);
+    const ticket = generation;
     timer = windowRef.setTimeout(() => {
       timer = null;
       search(query, ticket);

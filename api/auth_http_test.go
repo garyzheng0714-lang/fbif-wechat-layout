@@ -1,9 +1,11 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +20,7 @@ type fakeFeishuProvider struct {
 	userInfo      feishuUserProfile
 	searchResults []feishuDocument
 	exportResult  feishuExportedFile
+	exportErr     error
 	searchCalls   int
 	exportCalls   int
 }
@@ -46,6 +49,9 @@ func (f *fakeFeishuProvider) ExportDocument(_ context.Context, _ string, ref fei
 	f.exportCalls++
 	if ref.Token == "" {
 		return feishuExportedFile{}, errFeishuInvalidDocument
+	}
+	if f.exportErr != nil {
+		return feishuExportedFile{}, f.exportErr
 	}
 	return f.exportResult, nil
 }
@@ -266,6 +272,108 @@ func TestFeishuLoginCanSearchAndExportDocx(t *testing.T) {
 	}
 	if provider.searchCalls != 1 || provider.exportCalls != 1 {
 		t.Fatalf("provider calls search=%d export=%d", provider.searchCalls, provider.exportCalls)
+	}
+}
+
+func TestFeishuDocumentExportStripsEmbeddedImagesBeforeBrowserDownload(t *testing.T) {
+	imageBytes := make([]byte, 32<<10)
+	if _, err := rand.New(rand.NewSource(1)).Read(imageBytes); err != nil {
+		t.Fatal(err)
+	}
+	docx := zipFixture(t, map[string][]byte{
+		"word/document.xml":            []byte(`<w:document/>`),
+		"word/_rels/document.xml.rels": []byte(`<Relationships/>`),
+		"word/media/image1.png":        imageBytes,
+		"[Content_Types].xml":          []byte(`<Types/>`),
+		"_rels/.rels":                  []byte(`<Relationships/>`),
+	})
+	provider := &fakeFeishuProvider{
+		exportResult: feishuExportedFile{
+			Filename: "图片文章.docx",
+			Content:  docx,
+		},
+	}
+	service := newTestAuthService(t, provider)
+	session := mustSessionForUser(t, service, authUser{
+		ID:                     "feishu:ou_test",
+		Name:                   "张三",
+		AuthMode:               authModeFeishu,
+		Status:                 authUserActive,
+		FeishuOpenID:           "ou_test",
+		FeishuRefreshTokenSeal: "test-refresh-seal",
+	})
+	service.putAccessToken("feishu:ou_test", "u-test", service.now().Add(time.Hour))
+
+	rec := httptest.NewRecorder()
+	body := []byte(`{"token":"doxcn_test","type":"docx","title":"图片文章"}`)
+	registerTestAuthMux(service).ServeHTTP(
+		rec,
+		requestWithSession(http.MethodPost, "/api/feishu/docs/export", session, body),
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-FBIF-Docx-Original-Bytes"); got == "" {
+		t.Fatal("missing original byte count")
+	}
+	if got := rec.Header().Get("X-FBIF-Docx-Optimized-Bytes"); got == "" {
+		t.Fatal("missing optimized byte count")
+	}
+	if got := rec.Header().Get("X-FBIF-Images-Deferred"); got != "true" {
+		t.Fatalf("images deferred=%q, want true", got)
+	}
+	if rec.Body.Len() >= len(docx) {
+		t.Fatalf("optimized docx size=%d, original=%d", rec.Body.Len(), len(docx))
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatalf("open optimized docx: %v", err)
+	}
+	names := map[string]bool{}
+	for _, file := range zr.File {
+		names[file.Name] = true
+	}
+	if names["word/media/image1.png"] {
+		t.Fatal("embedded image was still sent inside the browser DOCX")
+	}
+	if !names["word/_fbif_imageUrls.json"] {
+		t.Fatal("optimized DOCX is missing deferred image URL map")
+	}
+}
+
+func TestFeishuDocumentExportMapsPermissionFailure(t *testing.T) {
+	provider := &fakeFeishuProvider{
+		exportErr: &feishuExportTaskError{JobStatus: 110, Message: "no permission"},
+	}
+	service := newTestAuthService(t, provider)
+	session := mustSessionForUser(t, service, authUser{
+		ID:                     "feishu:ou_test",
+		Name:                   "张三",
+		AuthMode:               authModeFeishu,
+		Status:                 authUserActive,
+		FeishuOpenID:           "ou_test",
+		FeishuRefreshTokenSeal: "test-refresh-seal",
+	})
+	service.putAccessToken("feishu:ou_test", "u-test", service.now().Add(time.Hour))
+
+	rec := httptest.NewRecorder()
+	body := []byte(`{"token":"doxcn_test","type":"docx","title":"无权限文档"}`)
+	registerTestAuthMux(service).ServeHTTP(
+		rec,
+		requestWithSession(http.MethodPost, "/api/feishu/docs/export", session, body),
+	)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("export status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Code != "feishu_document_permission_denied" {
+		t.Fatalf("code=%q", payload.Code)
 	}
 }
 
