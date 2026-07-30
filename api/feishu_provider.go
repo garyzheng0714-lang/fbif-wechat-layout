@@ -1,0 +1,451 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"path"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	feishuAccountsBaseURL = "https://accounts.feishu.cn"
+	feishuOpenAPIBaseURL  = "https://open.feishu.cn"
+)
+
+var errFeishuInvalidDocument = errors.New("invalid Feishu document")
+
+type feishuUserToken struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    time.Duration
+}
+
+type feishuUserProfile struct {
+	OpenID    string
+	UnionID   string
+	Name      string
+	AvatarURL string
+	Email     string
+}
+
+type feishuDocument struct {
+	Token      string    `json:"token"`
+	Type       string    `json:"type"`
+	Title      string    `json:"title"`
+	URL        string    `json:"url,omitempty"`
+	OwnerName  string    `json:"owner_name,omitempty"`
+	ModifiedAt time.Time `json:"modified_at,omitempty"`
+}
+
+type feishuDocumentRef struct {
+	Token string `json:"token"`
+	Type  string `json:"type"`
+	Title string `json:"title,omitempty"`
+	URL   string `json:"url,omitempty"`
+}
+
+type feishuExportedFile struct {
+	Filename string
+	Content  []byte
+}
+
+type feishuProvider interface {
+	ExchangeCode(ctx context.Context, code, redirectURI string) (feishuUserToken, error)
+	RefreshUserToken(ctx context.Context, refreshToken string) (feishuUserToken, error)
+	GetUserProfile(ctx context.Context, accessToken string) (feishuUserProfile, error)
+	SearchDocuments(ctx context.Context, accessToken, query string, limit int) ([]feishuDocument, error)
+	ExportDocument(ctx context.Context, accessToken string, ref feishuDocumentRef) (feishuExportedFile, error)
+}
+
+type httpFeishuProvider struct {
+	client     *http.Client
+	appID      string
+	appSecret  string
+	apiBaseURL string
+}
+
+func newHTTPFeishuProvider(client *http.Client) *httpFeishuProvider {
+	if client == nil {
+		client = &http.Client{Timeout: 45 * time.Second}
+	}
+	return &httpFeishuProvider{client: client, apiBaseURL: feishuOpenAPIBaseURL}
+}
+
+func (p *httpFeishuProvider) configure(appID, appSecret string) {
+	p.appID = strings.TrimSpace(appID)
+	p.appSecret = strings.TrimSpace(appSecret)
+}
+
+func (p *httpFeishuProvider) doJSON(ctx context.Context, method, endpoint, accessToken string, payload any, target any) error {
+	var body io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	}
+	if accessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("feishu API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	responseBody, err := readBoundedBody(resp.Body, 4<<20)
+	if err != nil {
+		return fmt.Errorf("feishu API response too large: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("feishu API status %d", resp.StatusCode)
+	}
+	if err := json.Unmarshal(responseBody, target); err != nil {
+		return fmt.Errorf("decode feishu API response: %w", err)
+	}
+	return nil
+}
+
+type feishuTokenResponse struct {
+	Code                  int    `json:"code"`
+	Msg                   string `json:"msg"`
+	Error                 string `json:"error"`
+	ErrorDescription      string `json:"error_description"`
+	AccessToken           string `json:"access_token"`
+	ExpiresIn             int64  `json:"expires_in"`
+	RefreshToken          string `json:"refresh_token"`
+	RefreshTokenExpiresIn int64  `json:"refresh_token_expires_in"`
+}
+
+func normalizeFeishuTokenResponse(resp feishuTokenResponse) (feishuUserToken, error) {
+	if resp.Code != 0 || resp.Error != "" {
+		return feishuUserToken{}, errors.New("feishu OAuth rejected the request")
+	}
+	if resp.AccessToken == "" || resp.RefreshToken == "" || resp.ExpiresIn <= 0 {
+		return feishuUserToken{}, errors.New("feishu OAuth response is incomplete")
+	}
+	return feishuUserToken{
+		AccessToken:  resp.AccessToken,
+		RefreshToken: resp.RefreshToken,
+		ExpiresIn:    time.Duration(resp.ExpiresIn) * time.Second,
+	}, nil
+}
+
+func (p *httpFeishuProvider) ExchangeCode(ctx context.Context, code, redirectURI string) (feishuUserToken, error) {
+	var response feishuTokenResponse
+	err := p.doJSON(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/authen/v2/oauth/token", "", map[string]string{
+		"grant_type":    "authorization_code",
+		"client_id":     p.appID,
+		"client_secret": p.appSecret,
+		"code":          code,
+		"redirect_uri":  redirectURI,
+	}, &response)
+	if err != nil {
+		return feishuUserToken{}, err
+	}
+	return normalizeFeishuTokenResponse(response)
+}
+
+func (p *httpFeishuProvider) RefreshUserToken(ctx context.Context, refreshToken string) (feishuUserToken, error) {
+	var response feishuTokenResponse
+	err := p.doJSON(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/authen/v2/oauth/token", "", map[string]string{
+		"grant_type":    "refresh_token",
+		"client_id":     p.appID,
+		"client_secret": p.appSecret,
+		"refresh_token": refreshToken,
+	}, &response)
+	if err != nil {
+		return feishuUserToken{}, err
+	}
+	return normalizeFeishuTokenResponse(response)
+}
+
+func (p *httpFeishuProvider) GetUserProfile(ctx context.Context, accessToken string) (feishuUserProfile, error) {
+	var response struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			OpenID    string `json:"open_id"`
+			UnionID   string `json:"union_id"`
+			Name      string `json:"name"`
+			AvatarURL string `json:"avatar_url"`
+			AvatarBig string `json:"avatar_big"`
+			Email     string `json:"email"`
+		} `json:"data"`
+	}
+	if err := p.doJSON(ctx, http.MethodGet, p.apiBaseURL+"/open-apis/authen/v1/user_info", accessToken, nil, &response); err != nil {
+		return feishuUserProfile{}, err
+	}
+	if response.Code != 0 || response.Data.OpenID == "" {
+		return feishuUserProfile{}, errors.New("feishu user profile is unavailable")
+	}
+	avatar := response.Data.AvatarBig
+	if avatar == "" {
+		avatar = response.Data.AvatarURL
+	}
+	return feishuUserProfile{
+		OpenID:    response.Data.OpenID,
+		UnionID:   response.Data.UnionID,
+		Name:      response.Data.Name,
+		AvatarURL: avatar,
+		Email:     response.Data.Email,
+	}, nil
+}
+
+func normalizeFeishuDocumentType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "doc":
+		return "doc"
+	case "docx":
+		return "docx"
+	case "wiki":
+		return "wiki"
+	default:
+		return ""
+	}
+}
+
+func (p *httpFeishuProvider) SearchDocuments(ctx context.Context, accessToken, query string, limit int) ([]feishuDocument, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []feishuDocument{}, nil
+	}
+	if limit < 1 {
+		limit = 8
+	}
+	if limit > 20 {
+		limit = 20
+	}
+	var response struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			DocsEntities []struct {
+				Token      string `json:"docs_token"`
+				Type       string `json:"docs_type"`
+				Title      string `json:"title"`
+				URL        string `json:"url"`
+				OwnerName  string `json:"owner_name"`
+				EditTime   string `json:"edit_time"`
+				UpdateTime string `json:"update_time"`
+			} `json:"docs_entities"`
+		} `json:"data"`
+	}
+	err := p.doJSON(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/suite/docs-api/search/object", accessToken, map[string]any{
+		"search_key": query,
+		"count":      limit,
+		"offset":     0,
+		"docs_types": []string{"doc"},
+	}, &response)
+	if err != nil {
+		return nil, err
+	}
+	if response.Code != 0 {
+		return nil, errors.New("feishu document search failed")
+	}
+	documents := make([]feishuDocument, 0, len(response.Data.DocsEntities))
+	for _, entity := range response.Data.DocsEntities {
+		docType := normalizeFeishuDocumentType(entity.Type)
+		if docType == "" || entity.Token == "" {
+			continue
+		}
+		modifiedAt := parseFeishuTimestamp(entity.EditTime)
+		if modifiedAt.IsZero() {
+			modifiedAt = parseFeishuTimestamp(entity.UpdateTime)
+		}
+		documents = append(documents, feishuDocument{
+			Token:      entity.Token,
+			Type:       docType,
+			Title:      strings.TrimSpace(entity.Title),
+			URL:        strings.TrimSpace(entity.URL),
+			OwnerName:  strings.TrimSpace(entity.OwnerName),
+			ModifiedAt: modifiedAt,
+		})
+	}
+	return documents, nil
+}
+
+func parseFeishuTimestamp(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	if unix, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if unix > 1_000_000_000_000 {
+			unix /= 1000
+		}
+		return time.Unix(unix, 0).UTC()
+	}
+	parsed, _ := time.Parse(time.RFC3339, raw)
+	return parsed.UTC()
+}
+
+func (p *httpFeishuProvider) resolveWikiDocument(ctx context.Context, accessToken string, ref feishuDocumentRef) (feishuDocumentRef, error) {
+	var response struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Node struct {
+				ObjToken string `json:"obj_token"`
+				ObjType  string `json:"obj_type"`
+				Title    string `json:"title"`
+			} `json:"node"`
+		} `json:"data"`
+	}
+	endpoint := p.apiBaseURL + "/open-apis/wiki/v2/spaces/get_node?token=" + url.QueryEscape(ref.Token)
+	if err := p.doJSON(ctx, http.MethodGet, endpoint, accessToken, nil, &response); err != nil {
+		return ref, err
+	}
+	docType := normalizeFeishuDocumentType(response.Data.Node.ObjType)
+	if response.Code != 0 || response.Data.Node.ObjToken == "" || (docType != "doc" && docType != "docx") {
+		return ref, errors.New("the wiki node is not an exportable document")
+	}
+	ref.Token = response.Data.Node.ObjToken
+	ref.Type = docType
+	if ref.Title == "" {
+		ref.Title = response.Data.Node.Title
+	}
+	return ref, nil
+}
+
+func validateFeishuDocumentRef(ref feishuDocumentRef) (feishuDocumentRef, error) {
+	ref.Token = strings.TrimSpace(ref.Token)
+	ref.Type = normalizeFeishuDocumentType(ref.Type)
+	ref.Title = strings.TrimSpace(ref.Title)
+	ref.URL = strings.TrimSpace(ref.URL)
+	if ref.Token == "" || ref.Type == "" || len(ref.Token) > 128 {
+		return ref, errFeishuInvalidDocument
+	}
+	return ref, nil
+}
+
+func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken string, ref feishuDocumentRef) (feishuExportedFile, error) {
+	ref, err := validateFeishuDocumentRef(ref)
+	if err != nil {
+		return feishuExportedFile{}, err
+	}
+	if ref.Type == "wiki" {
+		ref, err = p.resolveWikiDocument(ctx, accessToken, ref)
+		if err != nil {
+			return feishuExportedFile{}, err
+		}
+	}
+	var createResponse struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Ticket string `json:"ticket"`
+		} `json:"data"`
+	}
+	if err := p.doJSON(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/drive/v1/export_tasks", accessToken, map[string]string{
+		"file_extension": "docx",
+		"token":          ref.Token,
+		"type":           ref.Type,
+	}, &createResponse); err != nil {
+		return feishuExportedFile{}, err
+	}
+	if createResponse.Code != 0 || createResponse.Data.Ticket == "" {
+		return feishuExportedFile{}, errors.New("could not create feishu export task")
+	}
+
+	var fileToken string
+	var fileName string
+	for attempt := 0; attempt < 30; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return feishuExportedFile{}, ctx.Err()
+			case <-time.After(time.Second):
+			}
+		}
+		var statusResponse struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				Result struct {
+					FileName    string `json:"file_name"`
+					FileToken   string `json:"file_token"`
+					JobErrorMsg string `json:"job_error_msg"`
+					JobStatus   int    `json:"job_status"`
+				} `json:"result"`
+			} `json:"data"`
+		}
+		endpoint := p.apiBaseURL + "/open-apis/drive/v1/export_tasks/" +
+			url.PathEscape(createResponse.Data.Ticket) + "?token=" + url.QueryEscape(ref.Token)
+		if err := p.doJSON(ctx, http.MethodGet, endpoint, accessToken, nil, &statusResponse); err != nil {
+			return feishuExportedFile{}, err
+		}
+		if statusResponse.Code != 0 {
+			return feishuExportedFile{}, errors.New("feishu export task failed")
+		}
+		result := statusResponse.Data.Result
+		if result.FileToken != "" {
+			fileToken = result.FileToken
+			fileName = result.FileName
+			break
+		}
+		if result.JobErrorMsg != "" && !strings.EqualFold(result.JobErrorMsg, "success") {
+			return feishuExportedFile{}, errors.New("feishu export task failed")
+		}
+	}
+	if fileToken == "" {
+		return feishuExportedFile{}, errors.New("feishu export timed out")
+	}
+
+	downloadURL := p.apiBaseURL + "/open-apis/drive/v1/export_tasks/file/" + url.PathEscape(fileToken) + "/download"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return feishuExportedFile{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return feishuExportedFile{}, fmt.Errorf("download Feishu export: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return feishuExportedFile{}, fmt.Errorf("feishu export download status %d", resp.StatusCode)
+	}
+	content, err := readBoundedBody(resp.Body, 100<<20)
+	if err != nil {
+		return feishuExportedFile{}, fmt.Errorf("feishu export is larger than 100 MB: %w", err)
+	}
+	if len(content) < 4 || !bytes.Equal(content[:4], []byte{'P', 'K', 3, 4}) {
+		return feishuExportedFile{}, errors.New("feishu export did not return a DOCX file")
+	}
+	if strings.TrimSpace(fileName) == "" {
+		fileName = ref.Title
+	}
+	fileName = sanitizeExportFilename(fileName)
+	return feishuExportedFile{Filename: fileName, Content: content}, nil
+}
+
+func sanitizeExportFilename(raw string) string {
+	raw = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(raw, "\r", ""), "\n", ""))
+	raw = path.Base(strings.ReplaceAll(raw, "\\", "/"))
+	raw = strings.TrimSuffix(raw, ".docx")
+	if raw == "" || raw == "." {
+		raw = "飞书文档"
+	}
+	runes := []rune(raw)
+	if len(runes) > 120 {
+		raw = string(runes[:120])
+	}
+	return raw + ".docx"
+}

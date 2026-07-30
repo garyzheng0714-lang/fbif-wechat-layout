@@ -898,6 +898,7 @@ export function initApp(initialTemplate) {
   // isRepost=true so the footer swaps to the 转载 variant.
   window._handleFile = (file, opts) => {
     if (opts && opts.isRepost) clearUploadVisual();
+    if (opts && opts.source === 'feishu-doc-import') showUploadFile(file);
     handleFile(file, opts);
   };
 

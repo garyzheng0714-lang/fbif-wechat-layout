@@ -1,0 +1,346 @@
+import { authFetch } from './auth-session.js';
+
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+export function parseFeishuMention(value) {
+  const normalized = String(value || '').trimStart();
+  if (!normalized.startsWith('@')) return null;
+  return normalized.slice(1).trim();
+}
+
+function responseErrorMessage(payload, fallback) {
+  if (payload?.code === 'feishu_login_required') return '飞书云文档功能需要使用飞书登录';
+  if (payload?.code === 'authentication_required') return '登录状态已失效，请重新登录';
+  return payload?.error || fallback;
+}
+
+async function readError(response, fallback) {
+  const payload = await response.json().catch(() => null);
+  return responseErrorMessage(payload, fallback);
+}
+
+function filenameFromDisposition(header, fallbackTitle) {
+  const value = String(header || '');
+  const encoded = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1].trim());
+    } catch {
+      // Fall through to the safe title.
+    }
+  }
+  const plain = value.match(/filename="?([^";]+)"?/i);
+  if (plain && plain[1] && plain[1] !== 'feishu-document.docx') return plain[1].trim();
+  const title = String(fallbackTitle || '飞书文档').trim().replace(/[\r\n/\\]/g, ' ');
+  return `${title || '飞书文档'}.docx`;
+}
+
+function formatModifiedAt(raw) {
+  if (!raw) return '';
+  const value = new Date(raw);
+  if (Number.isNaN(value.getTime())) return '';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(value);
+}
+
+function isFeishuCapable(user) {
+  return user?.auth_mode === 'feishu' && user?.capabilities?.feishu_documents === true;
+}
+
+export function mountFeishuDocumentImport({
+  documentRef = globalThis.document,
+  windowRef = globalThis.window,
+  user,
+  fetchImpl,
+  storage,
+  FileCtor = globalThis.File,
+  getHandleFile = () => windowRef?._handleFile,
+  getAccountID = () => '',
+  onArticleIntent = () => {
+    if (windowRef?.fetchArticle?.invalidate) windowRef.fetchArticle.invalidate();
+    if (windowRef?._engineApi?.invalidatePendingWork) windowRef._engineApi.invalidatePendingWork();
+  },
+  debounceMs = 240,
+} = {}) {
+  const input = documentRef?.getElementById('urlInput');
+  const panel = documentRef?.getElementById('feishuDocSearch');
+  const capability = documentRef?.getElementById('feishuDocCapability');
+  if (!input || !panel) return { invalidate() {}, destroy() {} };
+
+  const capable = isFeishuCapable(user);
+  let generation = 0;
+  let timer = null;
+  let documents = [];
+  let activeIndex = -1;
+  let destroyed = false;
+
+  if (capability) {
+    capability.textContent = capable ? '输入 @ 搜索飞书文档' : '飞书文档需飞书登录';
+    capability.classList.toggle('is-locked', !capable);
+  }
+
+  const doFetch = fetchImpl
+    ? (url, options) => fetchImpl(url, options)
+    : (url, options) => authFetch(url, options, { storage });
+
+  function stale(ticket, accountID) {
+    return destroyed || ticket !== generation || String(getAccountID() || '') !== accountID;
+  }
+
+  function showPanel() {
+    panel.hidden = false;
+  }
+
+  function hidePanel() {
+    panel.hidden = true;
+    panel.replaceChildren();
+    documents = [];
+    activeIndex = -1;
+  }
+
+  function renderMessage(title, detail = '', state = '') {
+    panel.replaceChildren();
+    const box = documentRef.createElement('div');
+    box.className = `feishu-doc-message${state ? ` is-${state}` : ''}`;
+    const heading = documentRef.createElement('div');
+    heading.className = 'feishu-doc-message-title';
+    heading.textContent = title;
+    box.append(heading);
+    if (detail) {
+      const copy = documentRef.createElement('div');
+      copy.className = 'feishu-doc-message-detail';
+      copy.textContent = detail;
+      box.append(copy);
+    }
+    panel.append(box);
+    showPanel();
+  }
+
+  function renderLocked() {
+    panel.replaceChildren();
+    const box = documentRef.createElement('div');
+    box.className = 'feishu-doc-locked';
+    const copy = documentRef.createElement('div');
+    copy.className = 'feishu-doc-locked-copy';
+    const title = documentRef.createElement('strong');
+    title.textContent = '搜索飞书文档需要使用飞书登录';
+    const detail = documentRef.createElement('span');
+    detail.textContent = '账号密码用户仍可上传文件、粘贴正文和文章链接。';
+    copy.append(title, detail);
+    const link = documentRef.createElement('a');
+    const location = windowRef?.location;
+    const returnTo = `${location?.pathname || '/mp/fbif'}${location?.search || ''}`;
+    link.href = `/auth/feishu/fbif/login?return_to=${encodeURIComponent(returnTo)}`;
+    link.textContent = '改用飞书登录';
+    box.append(copy, link);
+    panel.append(box);
+    showPanel();
+  }
+
+  function updateActiveResult(nextIndex) {
+    const results = Array.from(panel.querySelectorAll('[data-feishu-doc-result]'));
+    if (!results.length) {
+      activeIndex = -1;
+      return;
+    }
+    activeIndex = Math.max(0, Math.min(nextIndex, results.length - 1));
+    results.forEach((result, index) => {
+      result.classList.toggle('is-active', index === activeIndex);
+      result.setAttribute('aria-selected', String(index === activeIndex));
+    });
+    results[activeIndex]?.scrollIntoView?.({ block: 'nearest' });
+  }
+
+  async function chooseDocument(document, ticket = ++generation) {
+    const accountID = String(getAccountID() || '');
+    onArticleIntent({ source: 'feishu-doc-import', document });
+    renderMessage('正在从飞书导入并排版…', document.title || '飞书文档', 'loading');
+    try {
+      const response = await doFetch('/api/feishu/docs/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: document.token,
+          type: document.type,
+          title: document.title,
+          url: document.url || undefined,
+        }),
+      });
+      if (stale(ticket, accountID)) return false;
+      if (!response.ok) {
+        throw new Error(await readError(response, '飞书文档导入失败'));
+      }
+      const blob = await response.blob();
+      if (stale(ticket, accountID)) return false;
+      const filename = filenameFromDisposition(response.headers.get('Content-Disposition'), document.title);
+      const file = new FileCtor([blob], filename, { type: DOCX_MIME });
+      const handleFile = getHandleFile();
+      if (typeof handleFile !== 'function') throw new Error('排版引擎尚未就绪，请稍后重试');
+      if (stale(ticket, accountID)) return false;
+      input.value = '';
+      hidePanel();
+      handleFile(file, {
+        isRepost: false,
+        source: 'feishu-doc-import',
+        sourceDocument: {
+          token: document.token,
+          type: document.type,
+          title: document.title,
+          url: document.url || '',
+        },
+      });
+      return true;
+    } catch (error) {
+      if (stale(ticket, accountID)) return false;
+      renderMessage('导入失败', error?.message || '飞书文档导入失败', 'error');
+      return false;
+    }
+  }
+
+  function renderResults(results, query, ticket) {
+    panel.replaceChildren();
+    const heading = documentRef.createElement('div');
+    heading.className = 'feishu-doc-search-head';
+    heading.textContent = `“${query}”的搜索结果`;
+    panel.append(heading);
+    if (!results.length) {
+      renderMessage('没有找到对应文档', '请换一个文档名称或关键词。', 'empty');
+      return;
+    }
+    const list = documentRef.createElement('div');
+    list.className = 'feishu-doc-results';
+    list.setAttribute('role', 'listbox');
+    results.forEach((document, index) => {
+      const button = documentRef.createElement('button');
+      button.type = 'button';
+      button.className = 'feishu-doc-result';
+      button.dataset.feishuDocResult = '';
+      button.setAttribute('role', 'option');
+      button.setAttribute('aria-selected', 'false');
+      const icon = documentRef.createElement('span');
+      icon.className = 'feishu-doc-result-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = '文';
+      const copy = documentRef.createElement('span');
+      copy.className = 'feishu-doc-result-copy';
+      const title = documentRef.createElement('span');
+      title.className = 'feishu-doc-result-title';
+      title.textContent = document.title || '未命名文档';
+      const meta = documentRef.createElement('span');
+      meta.className = 'feishu-doc-result-meta';
+      meta.textContent = [document.owner_name, formatModifiedAt(document.modified_at)].filter(Boolean).join(' · ') || '飞书云文档';
+      copy.append(title, meta);
+      button.append(icon, copy);
+      button.addEventListener('mouseenter', () => updateActiveResult(index));
+      button.addEventListener('click', () => chooseDocument(document, ++generation));
+      list.append(button);
+    });
+    panel.append(list);
+    showPanel();
+    updateActiveResult(Math.min(activeIndex < 0 ? 0 : activeIndex, results.length - 1));
+  }
+
+  async function search(query, ticket) {
+    const accountID = String(getAccountID() || '');
+    renderMessage('正在搜索飞书文档…', query, 'loading');
+    try {
+      const response = await doFetch(`/api/feishu/docs/search?q=${encodeURIComponent(query)}&limit=8`, {
+        method: 'GET',
+      });
+      if (stale(ticket, accountID)) return;
+      if (!response.ok) {
+        throw new Error(await readError(response, '飞书文档搜索失败'));
+      }
+      const payload = await response.json();
+      if (stale(ticket, accountID)) return;
+      documents = Array.isArray(payload.documents) ? payload.documents : [];
+      renderResults(documents, query, ticket);
+    } catch (error) {
+      if (stale(ticket, accountID)) return;
+      renderMessage('搜索失败', error?.message || '飞书文档搜索失败', 'error');
+    }
+  }
+
+  function invalidate() {
+    generation++;
+    if (timer) {
+      windowRef.clearTimeout(timer);
+      timer = null;
+    }
+  }
+
+  function onInput() {
+    const query = parseFeishuMention(input.value);
+    if (query === null) {
+      invalidate();
+      hidePanel();
+      return;
+    }
+    if (!capable) {
+      invalidate();
+      renderLocked();
+      return;
+    }
+    if (!query) {
+      invalidate();
+      renderMessage('搜索飞书文档', '继续输入文档名称或关键词。', 'empty');
+      return;
+    }
+    const ticket = ++generation;
+    if (timer) windowRef.clearTimeout(timer);
+    timer = windowRef.setTimeout(() => {
+      timer = null;
+      search(query, ticket);
+    }, debounceMs);
+  }
+
+  function onKeydown(event) {
+    if (parseFeishuMention(input.value) === null) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      hidePanel();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      updateActiveResult(activeIndex < 0 ? 0 : activeIndex + step);
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (activeIndex >= 0 && documents[activeIndex]) {
+        chooseDocument(documents[activeIndex], ++generation);
+      }
+    }
+  }
+
+  function onExternalArticleInput(event) {
+    if (event?.detail?.origin === 'feishu-doc-import') return;
+    invalidate();
+    hidePanel();
+  }
+
+  input.addEventListener('input', onInput);
+  input.addEventListener('keydown', onKeydown, true);
+  windowRef.addEventListener?.('fbif:article-input-started', onExternalArticleInput);
+
+  return {
+    invalidate,
+    destroy() {
+      destroyed = true;
+      invalidate();
+      input.removeEventListener('input', onInput);
+      input.removeEventListener('keydown', onKeydown, true);
+      windowRef.removeEventListener?.('fbif:article-input-started', onExternalArticleInput);
+      hidePanel();
+    },
+  };
+}

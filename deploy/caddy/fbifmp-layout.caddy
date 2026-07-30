@@ -17,7 +17,7 @@ fbifmp-layout.foodtalks.cn {
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	@fbifAppShell path / /index.html /app.html /version.json
+	@fbifAppShell path / /index.html /app.html /login.html /auth-callback.html /version.json
 	header @fbifAppShell Cache-Control "no-cache"
 
 	@fbifVersionedAssets {
@@ -52,6 +52,11 @@ fbifmp-layout.foodtalks.cn {
 	}
 	handle /api/oss-presign {
 		reverse_proxy localhost:9000
+	}
+
+	@fbifAuth path /auth/feishu/* /auth/password/login
+	handle @fbifAuth {
+		reverse_proxy localhost:9001
 	}
 
 	@fbifAPI path /api /api/*

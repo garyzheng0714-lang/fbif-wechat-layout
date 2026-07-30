@@ -121,12 +121,16 @@ jobs:
           CLOUDCONVERT_API_KEY: ${{ secrets.CLOUDCONVERT_API_KEY }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           RENDER_TOKEN: ${{ secrets.RENDER_TOKEN }}
+          AUTH_SESSION_SECRET: ${{ secrets.AUTH_SESSION_SECRET }}
+          AUTH_PASSWORD_USERS_B64: ${{ secrets.AUTH_PASSWORD_USERS_B64 }}
+          FEISHU_LOGIN_APP_ID: ${{ secrets.FEISHU_LOGIN_APP_ID }}
+          FEISHU_LOGIN_APP_SECRET: ${{ secrets.FEISHU_LOGIN_APP_SECRET }}
         run: |
           set -Eeuo pipefail
 
           # 所有必需配置必须在任何远端 live 写入前 fail loud。只打印变量名，绝不打印值。
           # ADMIN_PASSWORD GitHub secret is required for the rule admin backend.
-          for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH ADMIN_PASSWORD RENDER_TOKEN; do
+          for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH ADMIN_PASSWORD RENDER_TOKEN AUTH_SESSION_SECRET AUTH_PASSWORD_USERS_B64 FEISHU_LOGIN_APP_ID FEISHU_LOGIN_APP_SECRET; do
             if [ -z "${!required:-}" ]; then
               echo "Missing required deployment secret: ${required}" >&2
               exit 1
@@ -263,7 +267,7 @@ jobs:
             "cd '$RELEASE_DIR/render' && npm ci --omit=dev --no-audit --no-fund"
 
           # publish.env 是手工维护的独立 EnvironmentFile，不在这里覆盖。
-          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_TOKEN=%s\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "$RENDER_TOKEN" "http://127.0.0.1:19096" | base64 -w 0)
+          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nADMIN_PASSWORD=%s\nAUTH_SESSION_SECRET=%s\nAUTH_USERS_PATH=/var/www/api/data/auth-users.json\nAUTH_PASSWORD_USERS_B64=%s\nFEISHU_LOGIN_APP_ID=%s\nFEISHU_LOGIN_APP_SECRET=%s\nFEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/callback\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_TOKEN=%s\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$ADMIN_PASSWORD" "$AUTH_SESSION_SECRET" "$AUTH_PASSWORD_USERS_B64" "$FEISHU_LOGIN_APP_ID" "$FEISHU_LOGIN_APP_SECRET" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "$RENDER_TOKEN" "http://127.0.0.1:19096" | base64 -w 0)
           printf -v env_stage_command 'umask 077; base64 -d > %q' "$RELEASE_DIR/api.env"
           printf '%s' "$ENV_CONTENT" | ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "$env_stage_command"
           RENDER_ENV_CONTENT=$(printf 'FBIF_CONFIG_SCHEMA_VERSION=1\nNODE_ENV=production\nRENDER_PORT=19096\nRENDER_TOKEN=%s\nPUBLIC_DIR=%s\nRULES_API_ORIGIN=http://127.0.0.1:9001\nASSET_ORIGIN=%s\nRENDER_BUILD_SHA=%s\n' "$RENDER_TOKEN" "${DEPLOY_PATH}" "$SITE_ORIGIN" "$GITHUB_SHA" | base64 -w 0)
