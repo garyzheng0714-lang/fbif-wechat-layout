@@ -711,6 +711,39 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
     await context.close();
   });
+
+  // ---- Scenario 14: 底部更新不得重建正文图片 ----
+  test('14-底部更新保留正文图片节点，避免长文图片闪烁与重复解码', async ({ browser }) => {
+    const context = await newAuthenticatedContext(browser, { viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+
+    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+    await waitForAppReady(page);
+    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
+    await page.waitForFunction(() => {
+      const images = Array.from(document.querySelectorAll('#contentArea img[src^="blob:"]'));
+      return images.length > 0 && images.every(img => img.complete && img.naturalWidth > 0);
+    }, { timeout: 30000 });
+
+    const firstImage = await page.evaluateHandle(() => document.querySelector('#contentArea img[src^="blob:"]'));
+    await page.evaluate(() => window._updateFooter?.(null));
+    const footerUpdate = await page.evaluate((before) => ({
+      connected: before.isConnected,
+      sameNode: before === document.querySelector('#contentArea img[src^="blob:"]'),
+    }), firstImage);
+
+    expect(footerUpdate).toEqual({ connected: true, sameNode: true });
+
+    await page.evaluate(() => window._updateMoreArticles?.());
+    const moreArticlesUpdate = await page.evaluate((before) => ({
+      connected: before.isConnected,
+      sameNode: before === document.querySelector('#contentArea img[src^="blob:"]'),
+    }), firstImage);
+
+    expect(moreArticlesUpdate).toEqual({ connected: true, sameNode: true });
+    await firstImage.dispose();
+    await context.close();
+  });
 });
 
 // ---- Generate report after all tests ----

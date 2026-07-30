@@ -75,6 +75,34 @@ test('materializeLazyImages replaces local asset and image proxy refs with data 
   assert.match(result.footerCopy, /src="data:image\/webp;base64,CgsM"/);
 });
 
+test('materializeLazyImages uses bounded parallel reads for image-heavy DOCX files', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let active = 0;
+  let maxActive = 0;
+  const progress = [];
+  globalThis.fetch = async () => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+    return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const html = Array.from({ length: 10 }, (_, i) => (
+    `<img src="blob:docx-image-${i}">`
+  )).join('');
+  const result = await materializeLazyImages(html, '', {
+    onProgress(done, total) { progress.push([done, total]); },
+  });
+
+  assert.equal(result.failed, 0);
+  assert.ok(maxActive > 1, `expected parallel image reads, observed ${maxActive}`);
+  assert.ok(maxActive <= 4, `expected at most 4 parallel image reads, observed ${maxActive}`);
+  assert.deepEqual(progress.at(-1), [10, 10]);
+  assert.equal((result.articleCopy.match(/data:image\/png;base64,AQID/g) || []).length, 10);
+});
+
 test('uploadNonCdnImages uses refreshed HTML after lazy image materialization', async (t) => {
   const originalFetch = globalThis.fetch;
   const uploads = [];

@@ -13,6 +13,7 @@ const WECHAT_IMAGE_HOSTS = new Set([
 // Keep two slots free for the independently prepared more-articles image and
 // explicit asset uploads from the same editor session.
 const BASE64_UPLOAD_CONCURRENCY = 4;
+const IMAGE_MATERIALIZE_CONCURRENCY = 4;
 
 export function isMmbizUrl(url) {
   try {
@@ -40,8 +41,28 @@ async function imageRefToDataUrl(src) {
   if (!resp.ok) throw new Error('fetch ' + src + ' -> ' + resp.status);
   const blob = await resp.blob();
   const mime = blob.type || 'image/png';
+  if (typeof FileReader !== 'undefined') {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        if (result.startsWith('data:')) resolve(result);
+        else reject(new Error('图片读取失败'));
+      };
+      reader.onerror = () => reject(reader.error || new Error('图片读取失败'));
+      reader.readAsDataURL(blob);
+    });
+  }
   const base64 = arrayBufferToBase64(await blob.arrayBuffer());
   return 'data:' + mime + ';base64,' + base64;
+}
+
+function replaceMaterializedImageRefs(html, replacements) {
+  if (!replacements.size) return html;
+  return String(html || '').replace(/src=(["'])([^"']+)\1/g, (full, quote, src) => {
+    const replacement = replacements.get(src);
+    return replacement ? `src=${quote}${replacement}${quote}` : full;
+  });
 }
 
 function currentOrigin() {
@@ -120,19 +141,28 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
   onProgress && onProgress(0, lazyUrls.size);
 
   let done = 0;
-  const failedSrcs = [];
-  for (const src of lazyUrls) {
-    try {
-      const dataUrl = await imageRefToDataUrl(src);
-      articleCopy = articleCopy.split(src).join(dataUrl);
-      footerCopy = footerCopy.split(src).join(dataUrl);
-    } catch (err) {
-      onLog && onLog('error', '图片转 base64 失败', { url: src.slice(0, 60), err: String(err) });
-      failedSrcs.push(src);
+  let nextIndex = 0;
+  const urls = [...lazyUrls];
+  const replacements = new Map();
+  const failed = new Set();
+  async function worker() {
+    while (nextIndex < urls.length) {
+      const src = urls[nextIndex++];
+      try {
+        replacements.set(src, await imageRefToDataUrl(src));
+      } catch (err) {
+        onLog && onLog('error', '图片转 base64 失败', { url: src.slice(0, 60), err: String(err) });
+        failed.add(src);
+      }
+      done++;
+      onProgress && onProgress(done, urls.length);
     }
-    done++;
-    onProgress && onProgress(done, lazyUrls.size);
   }
+  const workerCount = Math.min(IMAGE_MATERIALIZE_CONCURRENCY, urls.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  articleCopy = replaceMaterializedImageRefs(articleCopy, replacements);
+  footerCopy = replaceMaterializedImageRefs(footerCopy, replacements);
+  const failedSrcs = urls.filter(src => failed.has(src));
 
   return { articleCopy, footerCopy, total: lazyUrls.size, failed: failedSrcs.length, failedSrcs };
 }

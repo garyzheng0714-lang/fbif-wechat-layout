@@ -60,6 +60,8 @@ const blockMergeModule = await import('./blocks/block-merge.js' + assetQuery);
 const { stripReadonlyOverride } = blockMergeModule;
 const articleFooterDefaultsModule = await import('./article-footer-defaults.js' + assetQuery);
 const { normalizeArticleFooterProfileOverride } = articleFooterDefaultsModule;
+const previewDomModule = await import('./preview-dom.js' + assetQuery);
+const { renderPreviewContent, updatePreviewFooter, adoptPreviewContent } = previewDomModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -151,7 +153,9 @@ async function normalizeToDocx(file, onProgress) {
 // fade it in atomically.
 function hookPreviewImages(container) {
   if (!container) return;
-  const imgs = container.querySelectorAll('img');
+  const imgs = typeof container.querySelectorAll === 'function'
+    ? container.querySelectorAll('img')
+    : container;
   for (const img of imgs) {
     if (img.complete && img.naturalWidth > 0) continue;
     img.classList.add('wx-img-loading');
@@ -649,6 +653,15 @@ export function initApp(initialTemplate) {
     return hasManagedBottomBlocksFooter() || !!(footerEl && footerEl.checked);
   }
 
+  function renderPreviewFooter(contentArea, footerHtml) {
+    const result = updatePreviewFooter(contentArea, footerHtml);
+    const images = result.preservedArticle
+      ? result.images
+      : renderPreviewContent(contentArea, _articleHtml, footerHtml);
+    hookPreviewImages(images);
+    return result.preservedArticle;
+  }
+
   function refreshFooterPreviewFromVisibility() {
     if (typeof window._updateFooter === 'function') {
       window._updateFooter('');
@@ -657,8 +670,7 @@ export function initApp(initialTemplate) {
     const contentArea = document.getElementById('contentArea');
     if (!contentArea || !_articleHtml) return false;
     const enabled = isFooterEnabledForCurrentArticle();
-    contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
-    hookPreviewImages(contentArea);
+    renderPreviewFooter(contentArea, enabled ? _footerHtml : '');
     markFailedImages(_failedSrcs);
     return true;
   }
@@ -1607,8 +1619,7 @@ export function initApp(initialTemplate) {
     // Apply theme CSS variables to contentArea for preview
     const contentArea = document.getElementById('contentArea');
     if (window._activeConfig) applyThemeVars(contentArea, window._activeConfig.config);
-    contentArea.innerHTML = _articleHtml + '\n' + (bodyOnly ? '' : _footerHtml);
-    hookPreviewImages(contentArea);
+    hookPreviewImages(renderPreviewContent(contentArea, _articleHtml, bodyOnly ? '' : _footerHtml));
     document.getElementById('statsBar').textContent = settledSidebarStatus(stats);
 
     const retryBtn = document.getElementById('retryBtn');
@@ -1616,8 +1627,7 @@ export function initApp(initialTemplate) {
 
     window._updateFooter = function(newHtml) {
       if (bodyOnly) {
-        contentArea.innerHTML = _articleHtml;
-        hookPreviewImages(contentArea);
+        renderPreviewFooter(contentArea, '');
         return;
       }
       if (typeof newHtml === 'string' && newHtml !== '') {
@@ -1632,8 +1642,7 @@ export function initApp(initialTemplate) {
         prepareMoreArticlesForCopy('footer-edit');
       }
       const enabled = isFooterEnabledForCurrentArticle();
-      contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
-      hookPreviewImages(contentArea);
+      renderPreviewFooter(contentArea, enabled ? _footerHtml : '');
       markFailedImages(_failedSrcs);
     };
 
@@ -1688,8 +1697,7 @@ export function initApp(initialTemplate) {
         _articleSession.footerCopy = copySafeMerged;
       }
       const enabled = isFooterEnabledForCurrentArticle();
-      contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
-      hookPreviewImages(contentArea);
+      renderPreviewFooter(contentArea, enabled ? _footerHtml : '');
       markFailedImages(_failedSrcs);
       prepareMoreArticlesForCopy('edit');
       return true;
@@ -2339,6 +2347,7 @@ export function initApp(initialTemplate) {
     const ca = document.getElementById('contentArea');
     if (ca) {
       ca.innerHTML = dom.content_area_html || '';
+      adoptPreviewContent(ca, _articleBodyOnly || !isFooterEnabledForCurrentArticle() ? '' : _footerHtml);
       if (dom.content_area_style) ca.setAttribute('style', dom.content_area_style);
       else ca.removeAttribute('style');
       if (dom.plain_text_preview) {

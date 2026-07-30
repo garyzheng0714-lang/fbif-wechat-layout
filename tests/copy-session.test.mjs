@@ -101,6 +101,14 @@ function makePreviewRaceHarness(engine, { skipUpload = false } = {}) {
     showImportSummary() {},
     applyThemeVars() {},
     hookPreviewImages() {},
+    renderPreviewContent(container, articleHtml, footerHtml) {
+      container.innerHTML = String(articleHtml || '') + String(footerHtml || '');
+      return [];
+    },
+    renderPreviewFooter(container, footerHtml) {
+      container.innerHTML = String(deps._articleHtml || '') + String(footerHtml || '');
+      return false;
+    },
     settledSidebarStatus: value => `settled:${value}`,
     uploadStatus: (stable, status) => `${stable}|${status}`,
     dispatchArticleEvent() {},
