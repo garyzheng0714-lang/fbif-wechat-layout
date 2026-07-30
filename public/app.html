@@ -17,9 +17,10 @@
 <link rel="stylesheet" href="/admin-panel.css">
 <link rel="stylesheet" href="/css/rule-admin.css">
 <link rel="stylesheet" href="/css/app-shell.css">
+<link rel="stylesheet" href="/css/auth-editor.css">
 <link rel="stylesheet" href="/css/wx-theme.css">
 </head>
-<body>
+<body class="auth-pending">
 
 <header class="global-channel-bar">
   <div class="acct-menu" id="acctMenu" aria-label="切换公众号"></div>
@@ -38,6 +39,7 @@
     <div class="rail-body sidebar-body scroll-y">
       <span id="pageTitle" style="display:none;"></span>
       <span id="pageSubtitle" style="display:none;"></span>
+      <div id="userIdentity"></div>
       <div class="import-zone" id="importZone">
         <div class="import-card">
           <div class="import-card-head">
@@ -70,9 +72,13 @@
           </div>
           <div class="url-row url-row-inline import-composer" data-url-focus-target>
             <div class="import-input-stack">
-              <label class="import-input-label" for="urlInput">正文 / 链接</label>
-              <textarea class="field url-input-inline import-textarea" id="urlInput" rows="5" spellcheck="false" placeholder="粘贴公众号链接、正文或 Markdown。系统会自动识别输入类型，并按当前账号规则排版。"></textarea>
+              <div class="import-label-row">
+                <label class="import-input-label" for="urlInput">正文 / 链接 / 飞书文档</label>
+                <span class="feishu-doc-capability" id="feishuDocCapability"></span>
+              </div>
+              <textarea class="field url-input-inline import-textarea" id="urlInput" rows="5" spellcheck="false" placeholder="粘贴公众号链接、正文或 Markdown，输入 @ 搜索飞书文档。"></textarea>
             </div>
+            <div class="feishu-doc-search" id="feishuDocSearch" hidden></div>
           </div>
           <div class="progress import-progress" id="progress">
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
@@ -173,6 +179,11 @@
 <span id="zoomLabel" style="display:none;">200%</span>
 
 <script type="module">
+const authSession = await import('/js/auth-session.js');
+const authUser = await authSession.ensureAuthenticatedSession();
+if (!authUser) await new Promise(() => {});
+authSession.mountUserIdentity(document.getElementById('userIdentity'), authUser);
+
 // ---- Version ----
 async function loadVersionInfo() {
   try { const r = await fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' }); if (r.ok) return await r.json(); } catch {}
@@ -482,6 +493,7 @@ async function switchAccount(accountID, options = {}) {
   if (nextPack.id === activeRulePack.id) return;
   const generation = ++accountSwitchGeneration;
   if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
+  if (window._feishuDocImport && typeof window._feishuDocImport.invalidate === 'function') window._feishuDocImport.invalidate();
   if (window._engineApi && typeof window._engineApi.invalidatePendingWork === 'function') window._engineApi.invalidatePendingWork();
   const rollbackState = committedAccountState;
   if (nextPack.channel !== rollbackState.pack.channel) {
@@ -795,12 +807,14 @@ const clearRenderedImport = () => {
   clearCurrentChannel();
   if (window.goBack) window.goBack();
 };
+let feishuDocImport = null;
 window.fetchArticle = createUrlImportHandler({
   documentRef: document,
   fetchImpl: fetch,
   getAccountID: () => activeRulePack.id,
   importText: importClipboardText,
   onArticleIntent() {
+    if (feishuDocImport) feishuDocImport.invalidate();
     if (window._engineApi && typeof window._engineApi.invalidatePendingWork === 'function') window._engineApi.invalidatePendingWork();
   },
   onArticleUrl(url) {
@@ -812,12 +826,20 @@ window.addEventListener('fbif:article-input-started', event => {
   if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
 });
 
+const { mountFeishuDocumentImport } = await import('/js/feishu-doc-import.js?v=' + assetVersion);
+feishuDocImport = mountFeishuDocumentImport({
+  user: authUser,
+  getAccountID: () => activeRulePack.id,
+});
+window._feishuDocImport = feishuDocImport;
+
 // ---- Keyboard shortcuts ----
 bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
   importText: importClipboardText,
   onInputCleared: clearRenderedImport,
+  shouldSubmitValue: value => !value.trimStart().startsWith('@'),
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 </script>
