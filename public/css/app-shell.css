@@ -644,11 +644,30 @@ body.is-resizing-rail .rail { transition: none; }
 .btn-sm:disabled { opacity: .45; cursor: not-allowed; }
 
 .import-progress {
-  padding: 8px 0 0;
+  padding: 10px 0 0;
   background: var(--fs-bg-card);
 }
+.progress-heading {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+  color: var(--fs-text-1);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.import-progress[data-total-progress="true"] .progress-heading {
+  display: flex;
+}
+.progress-heading strong {
+  color: var(--fs-brand);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
 .progress-bar {
-  height: 3px;
+  height: 6px;
   border-radius: var(--fs-r-full);
   background: var(--fs-bg-sunken);
   overflow: hidden;
@@ -660,6 +679,9 @@ body.is-resizing-rail .rail { transition: none; }
   background: var(--fs-brand);
   transition: width var(--fs-t-slow) var(--fs-ease-out);
 }
+.import-progress.is-complete .progress-fill {
+  transition: none;
+}
 .import-progress.is-indeterminate .progress-fill {
   animation: import-progress-indeterminate 1.1s linear infinite;
 }
@@ -668,11 +690,15 @@ body.is-resizing-rail .rail { transition: none; }
   to { transform: translateX(300%); }
 }
 .progress-text {
-  margin-top: 5px;
+  margin-top: 7px;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--fs-text-2);
 }
 @media (prefers-reduced-motion: reduce) {
+  .progress-fill {
+    transition: none;
+  }
   .import-progress.is-indeterminate .progress-fill {
     width: 100% !important;
     opacity: .35;

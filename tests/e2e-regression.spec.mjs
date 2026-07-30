@@ -9,6 +9,7 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
+import JSZip from 'jszip';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
 const VISUAL_ENABLED = process.env.E2E_SKIP_VISUAL !== '1';
@@ -815,6 +816,300 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       incomplete: false,
       hidden: false,
     });
+    await context.close();
+  });
+
+  // ---- Scenario 16: 飞书总进度 100% 必须和可见、可复制原子完成 ----
+  test('16-飞书真实工作量进度到100时已排版且可立即复制', async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      permissions: ['clipboard-read', 'clipboard-write'],
+    });
+    const page = await context.newPage();
+    const docx = fs.readFileSync(DOCX_PATH);
+    const cancelledImportSentinel = '取消导入绝不能覆盖原文';
+    const cancelledImportZip = await JSZip.loadAsync(docx);
+    const documentXmlPath = 'word/document.xml';
+    const documentXml = await cancelledImportZip.file(documentXmlPath).async('string');
+    expect(documentXml).toContain('Tea Forté的金字塔茶包');
+    cancelledImportZip.file(
+      documentXmlPath,
+      documentXml.replace('Tea Forté的金字塔茶包', cancelledImportSentinel),
+    );
+    const cancelledImportDocx = await cancelledImportZip.generateAsync({ type: 'nodebuffer' });
+    const deterministicRemoteImage = fs.readFileSync(path.resolve('public/fbif-logo.png'));
+    const statuses = [
+      { state: 'running', phase: 'resolve', done: 1, total: 1, unit: 'document' },
+      { state: 'running', phase: 'create', done: 1, total: 1, unit: 'task' },
+      { state: 'running', phase: 'export_wait', done: 0, total: 0, unit: '' },
+      { state: 'running', phase: 'export_wait', done: 1, total: 1, unit: 'task' },
+      { state: 'running', phase: 'download', done: 2048, total: 4096, unit: 'bytes' },
+      { state: 'running', phase: 'download', done: 4096, total: 4096, unit: 'bytes' },
+      { state: 'running', phase: 'optimize', done: 1, total: 3, unit: 'entries' },
+      { state: 'running', phase: 'optimize', done: 3, total: 3, unit: 'entries' },
+      { state: 'running', phase: 'image_enumerate', done: 2, total: 2, unit: 'images' },
+      { state: 'running', phase: 'image_upload', done: 1, total: 2, unit: 'images' },
+      { state: 'running', phase: 'image_upload', done: 2, total: 2, unit: 'images' },
+      { state: 'running', phase: 'image_map', done: 2, total: 2, unit: 'images' },
+      { state: 'completed', phase: 'finalize', done: 1, total: 1, unit: 'document' },
+    ];
+    let statusIndex = 0;
+    let exportAttempt = 0;
+    let optionalUploadRequests = 0;
+    let remoteImageElementRequests = 0;
+
+    await page.route('**/api/me', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        user: {
+          id: 'ou_feishu_e2e',
+          name: '飞书 E2E',
+          auth_mode: 'feishu',
+          capabilities: { feishu_documents: true },
+        },
+      }),
+    }));
+    // tea-pyramid 的 Mote 规则会插入一张远端署名图。E2E 不依赖公网，
+    // 但仍让这张真实可见图片完成 load/decode，才能验收 100% 原子契约。
+    await page.route('https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/**', route => {
+      if (route.request().resourceType() === 'image') remoteImageElementRequests++;
+      return route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        headers: { 'Cache-Control': 'no-store' },
+        body: deterministicRemoteImage,
+      });
+    });
+    await page.route('**/api/feishu/docs/search?*', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        documents: [{
+          token: 'doxcn_feishu_progress_e2e',
+          type: 'docx',
+          title: '飞书总进度验收文档',
+          url: 'https://example.feishu.cn/docx/doxcn_feishu_progress_e2e',
+        }],
+      }),
+    }));
+    await page.route('**/api/feishu/docs/export/jobs**', async route => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (request.method() === 'POST' && url.pathname === '/api/feishu/docs/export/jobs') {
+        exportAttempt++;
+        await route.fulfill({
+          status: 202,
+          contentType: 'application/json; charset=utf-8',
+          body: JSON.stringify({
+            job_id: 'job_e2e',
+            state: 'queued',
+            phase: 'queued',
+            done: 0,
+            total: 0,
+            unit: '',
+            version: 1,
+            status_url: '/api/feishu/docs/export/jobs/job_e2e',
+            result_url: '/api/feishu/docs/export/jobs/job_e2e/result',
+          }),
+        });
+        return;
+      }
+      if (request.method() === 'GET' && url.pathname.endsWith('/result')) {
+        const resultDocx = exportAttempt >= 2 ? cancelledImportDocx : docx;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          headers: {
+            'Content-Length': String(resultDocx.byteLength),
+            'Content-Disposition': "attachment; filename*=UTF-8''feishu-progress-e2e.docx",
+          },
+          body: resultDocx,
+        });
+        return;
+      }
+      if (request.method() === 'GET' && url.pathname.endsWith('/job_e2e')) {
+        await new Promise(resolve => setTimeout(resolve, 70));
+        const current = statuses[Math.min(statusIndex, statuses.length - 1)];
+        statusIndex++;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json; charset=utf-8',
+          body: JSON.stringify({
+            job_id: 'job_e2e',
+            ...current,
+            version: statusIndex + 1,
+            result_url: '/api/feishu/docs/export/jobs/job_e2e/result',
+          }),
+        });
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        await route.fulfill({ status: 204 });
+        return;
+      }
+      await route.abort();
+    });
+    await page.route('**/api/oss-upload', async route => {
+      optionalUploadRequests++;
+      try {
+        return await route.fulfill({
+          status: 503,
+          contentType: 'application/json; charset=utf-8',
+          body: JSON.stringify({ error: 'E2E optional CDN unavailable' }),
+        });
+      } catch {
+        return undefined;
+      }
+    });
+
+    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+    await waitForAppReady(page);
+    await expect(page.locator('#feishuDocCapability')).toHaveText('输入 @ 搜索飞书文档');
+
+    // 先放一篇真实 DOCX 在右侧，锁定“等待期间旧预览不能变白”的契约。
+    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
+    await page.waitForFunction(() => {
+      const area = document.getElementById('contentArea');
+      return area && area.innerHTML.trim().length > 0;
+    }, { timeout: 30000 });
+    await page.waitForFunction(() => {
+      const images = Array.from(document.querySelectorAll('#contentArea img'))
+        .filter(image => image.getClientRects().length > 0);
+      return images.length > 0 && images.every(image => image.complete && image.naturalWidth > 0);
+    }, { timeout: 30000 });
+    const remoteRequestsBeforeFeishuImport = remoteImageElementRequests;
+
+    await page.evaluate(() => {
+      window.__feishuProgressSamples = [];
+      const progress = document.getElementById('progress');
+      const record = () => {
+        const visible = getComputedStyle(progress).display !== 'none';
+        const raw = progress.getAttribute('aria-valuenow');
+        if (!visible || raw === null) return;
+        const images = Array.from(document.querySelectorAll('#contentArea img'))
+          .filter(image => image.getClientRects().length > 0);
+        window.__feishuProgressSamples.push({
+          percent: Number(raw),
+          status: document.getElementById('progressText')?.textContent || '',
+          contentLength: document.getElementById('contentArea')?.innerHTML.trim().length || 0,
+          previewVisible: getComputedStyle(document.getElementById('previewContent')).display !== 'none',
+          imageCount: images.length,
+          imagesReady: images.every(image => image.complete && image.naturalWidth > 0),
+        });
+      };
+      new MutationObserver(record).observe(progress, {
+        attributes: true,
+        attributeFilter: ['aria-valuenow'],
+      });
+      record();
+    });
+
+    await page.locator('#urlInput').fill('@进度');
+    await expect(page.locator('[data-feishu-doc-result]')).toHaveCount(1);
+    await page.locator('[data-feishu-doc-result]').click();
+    const importOutcome = await page.waitForFunction(
+      () => {
+        if (window.__feishuProgressSamples.some(sample => sample.percent === 100)) return 'complete';
+        if (document.querySelector('.feishu-doc-message.is-error')) return 'failed';
+        return '';
+      },
+      { timeout: 60000 },
+    );
+    const outcome = await importOutcome.jsonValue();
+    if (outcome !== 'complete') {
+      const diagnostics = await page.evaluate(() => ({
+        logs: window.getConvLog?.() || [],
+        samples: window.__feishuProgressSamples,
+        currentImages: Array.from(document.querySelectorAll('#contentArea img')).map(image => ({
+          src: String(image.getAttribute('src') || '').slice(0, 160),
+          srcLength: String(image.getAttribute('src') || '').length,
+          className: image.className || '',
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          style: image.getAttribute('style') || '',
+        })),
+      }));
+      console.log('飞书进度 E2E 诊断:', JSON.stringify(diagnostics, null, 2));
+    }
+    expect(outcome).toBe('complete');
+
+    const samples = await page.evaluate(() => window.__feishuProgressSamples);
+    const percents = samples.map(sample => sample.percent);
+    expect(new Set(percents).size).toBeGreaterThan(6);
+    expect(percents.every((value, index) => index === 0 || value >= percents[index - 1])).toBeTruthy();
+    expect(samples.filter(sample => sample.percent < 100).every(sample => sample.contentLength > 0)).toBeTruthy();
+    const firstHundred = samples.find(sample => sample.percent === 100);
+    expect(firstHundred).toMatchObject({
+      previewVisible: true,
+      imagesReady: true,
+    });
+    expect(firstHundred.contentLength).toBeGreaterThan(0);
+    await expect(page.locator('#error')).toBeHidden();
+    expect(remoteImageElementRequests - remoteRequestsBeforeFeishuImport).toBe(
+      1,
+      '最终请求属性必须在首次加载前写入，离屏组装不得触发第二次图片请求',
+    );
+
+    const uploadsBeforeCopy = optionalUploadRequests;
+    const copyResult = await page.evaluate(async () => {
+      const started = performance.now();
+      const ok = await window.copyContent();
+      return { ok, elapsed: performance.now() - started };
+    });
+    expect(copyResult.ok).toBeTruthy();
+    expect(copyResult.elapsed).toBeLessThan(1000);
+    expect(optionalUploadRequests).toBe(uploadsBeforeCopy);
+    await expect(page.locator('#copyBtn')).toHaveText('✓ 已复制');
+
+    // Renderer handoff 后再修改 @ 查询：必须中止同一个引擎意图，不能让旧文档
+    // 偷偷提交，也不能遗留 connected staging 或伪报 100%。
+    const committedHtml = await page.locator('#contentArea').evaluate(node => node.innerHTML);
+    await page.evaluate((sentinel) => {
+      window.__cancelledFeishuCommits = 0;
+      window.addEventListener('fbif:article-session-activated', (event) => {
+        const articleHtml = String(event.detail?.session?.articleHtml || '');
+        if (articleHtml.includes(sentinel)) window.__cancelledFeishuCommits++;
+      });
+    }, cancelledImportSentinel);
+    await page.evaluate(() => {
+      const originalDecode = HTMLImageElement.prototype.decode;
+      let blocked = false;
+      window.__slowStagingDecodeStarted = false;
+      window.__restoreStagingDecode = () => {
+        HTMLImageElement.prototype.decode = originalDecode;
+      };
+      HTMLImageElement.prototype.decode = function (...args) {
+        if (!blocked && this.closest?.('[data-preview-staging]')) {
+          blocked = true;
+          window.__slowStagingDecodeStarted = true;
+          return new Promise(() => {});
+        }
+        return originalDecode.apply(this, args);
+      };
+    });
+    await page.locator('#urlInput').fill('@取消中的文档');
+    await expect(page.locator('[data-feishu-doc-result]')).toHaveCount(1);
+    await page.locator('[data-feishu-doc-result]').click();
+    await page.waitForFunction(() => (
+      window.__slowStagingDecodeStarted
+      && document.querySelector('[data-preview-staging]')
+    ), {
+      timeout: 60000,
+    });
+    await page.locator('#urlInput').fill('@新的用户意图');
+    await page.waitForFunction(() => !document.querySelector('[data-preview-staging]'), {
+      timeout: 10000,
+    });
+    await page.waitForTimeout(1700);
+
+    expect(await page.evaluate(() => window.__cancelledFeishuCommits)).toBe(0);
+    expect(await page.locator('#contentArea').evaluate(node => node.innerHTML)).toBe(committedHtml);
+    await expect(page.locator('#contentArea')).not.toContainText(cancelledImportSentinel);
+    await expect(page.locator('#progress')).toBeHidden();
+    await expect(page.locator('#dropZone')).not.toHaveClass(/processing/);
+    await page.evaluate(() => window.__restoreStagingDecode?.());
+
     await context.close();
   });
 });

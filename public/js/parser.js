@@ -422,8 +422,12 @@ export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null) {
 // Note: parseDocx depends on JSZip (global) and DOMParser (browser).
 // It stays here for co-location with extractParagraph, but is only
 // callable in a browser environment.
-export async function parseDocx(file) {
+export async function parseDocx(file, options = {}) {
+  const report = (done, status) => {
+    if (typeof options.onProgress === 'function') options.onProgress(done, 6, status);
+  };
   const zip = await JSZip.loadAsync(file);
+  report(1, '已打开 Word 文档');
 
   // Some writers (Windows tooling, older Pages/Keynote exports, WPS variants)
   // store zip entries with backslashes or unusual casing instead of the
@@ -436,6 +440,7 @@ export async function parseDocx(file) {
   for (const key of Object.keys(zip.files)) {
     zipIndex[canonicalize(key)] = zip.files[key];
   }
+  report(2, '已核对文档结构');
   const zipFile = (p) => {
     const entry = zipIndex[canonicalize(p)];
     return entry && !entry.dir ? entry : null;
@@ -458,6 +463,7 @@ export async function parseDocx(file) {
     if (rtype.includes('image')) ridToFile[rid] = target.replace('media/', '');
     else if (rtype.includes('hyperlink')) ridToUrl[rid] = (target || '').replace(/&amp;/g, '&');
   }
+  report(3, '已读取图片和链接关系');
 
   // imgCache values are strings usable as <img src>. Two paths:
   //  (1) SERVER-STRIPPED DOCX: the backend removes word/media/* and injects
@@ -494,9 +500,11 @@ export async function parseDocx(file) {
       imgCache[fn] = URL.createObjectURL(typed);
     }));
   }
+  report(4, '已准备文档媒体');
 
   const docXml = await docEntry.async('string');
   const docDom = new DOMParser().parseFromString(docXml, 'text/xml');
+  report(5, '已读取正文结构');
   const stylesEntry = zipFile('word/styles.xml');
   const styleSheet = stylesEntry
     ? parseDocxStyles(new DOMParser().parseFromString(await stylesEntry.async('string'), 'text/xml'))
@@ -504,6 +512,7 @@ export async function parseDocx(file) {
   const body = findOne(docDom.documentElement, W, 'body');
   const paragraphs = [];
   collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs, styleSheet);
+  report(6, 'Word 正文解析完成');
 
   return { paragraphs, imgCache };
 }

@@ -80,7 +80,11 @@
             </div>
             <div class="feishu-doc-search" id="feishuDocSearch" hidden></div>
           </div>
-          <div class="progress import-progress" id="progress">
+          <div class="progress import-progress" id="progress" role="progressbar" aria-label="导入总进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="progress-heading">
+              <span>总进度</span>
+              <strong id="progressPercent">0%</strong>
+            </div>
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
             <div class="progress-text" id="progressText">正在排版...</div>
           </div>
@@ -825,10 +829,14 @@ window.addEventListener('fbif:article-input-started', event => {
   if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
 });
 
-const { mountFeishuDocumentImport } = await import('/js/feishu-doc-import.js?v=' + assetVersion);
+const {
+  mountFeishuDocumentImport,
+  createFeishuImportProgressTracker,
+} = await import('/js/feishu-doc-import.js?v=' + assetVersion);
 feishuDocImport = mountFeishuDocumentImport({
   user: authUser,
   getAccountID: () => activeRulePack.id,
+  createProgressTracker: () => createFeishuImportProgressTracker({ documentRef: document }),
 });
 window._feishuDocImport = feishuDocImport;
 

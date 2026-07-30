@@ -1,6 +1,69 @@
 import { authFetch } from './auth-session.js';
+import {
+  bindImportProgressDom,
+  createImportProgressTracker,
+} from './import-progress.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+// These are workflow work units, not a time estimate. Each phase advances only
+// from a real server/client done÷total value; weights reflect the amount of
+// independently verifiable work in that phase (bytes, ZIP entries, images, or
+// parser/commit gates). Unknown totals deliberately hold still.
+const SERVER_EXPORT_PHASES = [
+  { id: 'resolve', weight: 1 },
+  { id: 'create', weight: 1 },
+  { id: 'export_wait', weight: 1 },
+  { id: 'download', weight: 4 },
+  { id: 'optimize', weight: 4 },
+  { id: 'image_enumerate', weight: 2 },
+  { id: 'image_upload', weight: 6 },
+  { id: 'image_map', weight: 3 },
+  { id: 'finalize', weight: 1 },
+];
+const SERVER_EXPORT_PHASE_IDS = SERVER_EXPORT_PHASES.map(phase => phase.id);
+const FEISHU_IMPORT_PHASES = [
+  ...SERVER_EXPORT_PHASES,
+  { id: 'result-download', weight: 4 },
+  { id: 'rules', weight: 1 },
+  { id: 'parse', weight: 6 },
+  { id: 'render', weight: 4 },
+  { id: 'session', weight: 4 },
+  { id: 'materialize', weight: 6 },
+  { id: 'decode', weight: 6 },
+  { id: 'refresh', weight: 3 },
+  { id: 'copy-transfer', weight: 6 },
+  { id: 'theme', weight: 1 },
+  { id: 'preview-commit', weight: 2 },
+  { id: 'copy-commit', weight: 3 },
+];
+
+const SERVER_PHASE_STATUS = {
+  resolve: '正在确认飞书文档…',
+  create: '正在创建 Word 导出任务…',
+  export_wait: '飞书正在生成 Word…',
+  download: '正在从飞书接收 Word…',
+  optimize: '正在优化 Word 文档…',
+  image_enumerate: '正在核对正文图片…',
+  image_upload: '正在准备正文图片…',
+  image_map: '正在写入图片索引…',
+  finalize: 'Word 已生成，正在交给排版引擎…',
+};
+
+export function createFeishuImportProgressTracker({
+  documentRef = globalThis.document,
+} = {}) {
+  const root = documentRef?.getElementById('progress');
+  const render = bindImportProgressDom({
+    root,
+    fill: documentRef?.getElementById('progressFill'),
+    text: documentRef?.getElementById('progressText'),
+    percent: documentRef?.getElementById('progressPercent'),
+  });
+  return createImportProgressTracker({
+    phases: FEISHU_IMPORT_PHASES,
+    onChange: render,
+  });
+}
 
 export function parseFeishuMention(value) {
   const normalized = String(value || '').trimStart();
@@ -37,6 +100,14 @@ function filenameFromDisposition(header, fallbackTitle) {
   if (plain && plain[1] && plain[1] !== 'feishu-document.docx') return plain[1].trim();
   const title = String(fallbackTitle || '飞书文档').trim().replace(/[\r\n/\\]/g, ' ');
   return `${title || '飞书文档'}.docx`;
+}
+
+function safeExportJobPath(value, fallback) {
+  const path = String(value || '').trim();
+  if (/^\/api\/feishu\/docs\/export\/jobs\/[A-Za-z0-9_-]+(?:\/result)?$/.test(path)) {
+    return path;
+  }
+  return fallback;
 }
 
 function formatModifiedAt(raw) {
@@ -91,6 +162,7 @@ export function mountFeishuDocumentImport({
   FileCtor = globalThis.File,
   BlobCtor = globalThis.Blob,
   AbortControllerCtor = globalThis.AbortController,
+  createProgressTracker,
   getHandleFile = () => windowRef?._handleFile,
   getAccountID = () => '',
   onArticleIntent = () => {
@@ -105,6 +177,7 @@ export function mountFeishuDocumentImport({
   const progress = documentRef?.getElementById('progress');
   const progressFill = documentRef?.getElementById('progressFill');
   const progressText = documentRef?.getElementById('progressText');
+  const progressPercent = documentRef?.getElementById('progressPercent');
   if (!input || !panel) return { invalidate() {}, destroy() {} };
 
   const capable = isFeishuCapable(user);
@@ -114,6 +187,8 @@ export function mountFeishuDocumentImport({
   let activeIndex = -1;
   let destroyed = false;
   let activeExportController = null;
+  let activeProgressTracker = null;
+  let activeExportJobURL = '';
 
   if (capability) {
     capability.textContent = capable ? '输入 @ 搜索飞书文档' : '飞书文档需飞书登录';
@@ -135,9 +210,14 @@ export function mountFeishuDocumentImport({
     if (progressText && text) progressText.textContent = text;
     if (progressFill) {
       if (Number.isFinite(percent)) {
-        progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+        const value = Math.max(0, Math.min(100, Math.round(percent)));
+        progressFill.style.width = `${value}%`;
+        progress.setAttribute('aria-valuenow', String(value));
+        if (progressPercent) progressPercent.textContent = `${value}%`;
       } else if (indeterminate) {
         progressFill.style.width = '34%';
+        progress.removeAttribute('aria-valuenow');
+        if (progressPercent) progressPercent.textContent = '—';
       }
     }
   }
@@ -145,8 +225,104 @@ export function mountFeishuDocumentImport({
   function stopImportProgress() {
     if (!progress) return;
     progress.classList.remove('is-indeterminate');
+    progress.classList.remove('is-complete');
+    progress.dataset.totalProgress = 'false';
     progress.style.display = 'none';
     if (progressFill) progressFill.style.width = '0%';
+    progress.setAttribute('aria-valuenow', '0');
+    if (progressPercent) progressPercent.textContent = '0%';
+  }
+
+  function updateServerProgress(tracker, status) {
+    if (!tracker || !status) return;
+    const phase = String(status.phase || '').trim();
+    const phaseIndex = SERVER_EXPORT_PHASE_IDS.indexOf(phase);
+    if (phaseIndex >= 0) {
+      for (let index = 0; index < phaseIndex; index++) {
+        tracker.completePhase(SERVER_EXPORT_PHASE_IDS[index]);
+      }
+      tracker.updatePhase(phase, status.done, status.total, {
+        status: SERVER_PHASE_STATUS[phase] || '正在生成 Word…',
+      });
+    } else if (phase && phase !== 'queued') {
+      // Tests and future API versions can expose a finer-grained phase. A
+      // custom tracker may know it; the production tracker keeps the same
+      // honest export_wait denominator when it does not.
+      try {
+        tracker.updatePhase(phase, status.done, status.total, {
+          status: '飞书正在生成 Word…',
+        });
+      } catch {
+        tracker.updatePhase('export_wait', status.done, status.total, {
+          status: '飞书正在生成 Word…',
+        });
+      }
+    } else {
+      tracker.updatePhase('resolve', 0, 0, { status: '任务已创建，等待处理…' });
+    }
+    if (status.state === 'completed') {
+      for (const id of SERVER_EXPORT_PHASE_IDS) {
+        tracker.completePhase(id, {
+          status: id === 'finalize' ? SERVER_PHASE_STATUS.finalize : undefined,
+        });
+      }
+    }
+  }
+
+  async function cancelExportJob(jobURL) {
+    if (!jobURL) return;
+    try {
+      await doFetch(jobURL, { method: 'DELETE' });
+    } catch {
+      // Best effort: the request AbortController already prevents stale UI
+      // commits, while the server independently expires abandoned jobs.
+    }
+  }
+
+  async function startExportJob(document, controller, tracker, ticket, accountID) {
+    const created = await doFetch('/api/feishu/docs/export/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller?.signal,
+      body: JSON.stringify({
+        token: document.token,
+        type: document.type,
+        title: document.title,
+        url: document.url || undefined,
+      }),
+    });
+    if (!created.ok) throw new Error(await readError(created, '飞书文档导入失败'));
+    const initial = await created.json();
+    if (stale(ticket, accountID)) return null;
+    const jobID = String(initial.job_id || '');
+    if (!/^[A-Za-z0-9_-]+$/.test(jobID)) throw new Error('飞书导出任务信息无效，请重试');
+    const fallbackStatusURL = `/api/feishu/docs/export/jobs/${encodeURIComponent(jobID)}`;
+    const statusURL = safeExportJobPath(initial.status_url, fallbackStatusURL);
+    const resultURL = safeExportJobPath(initial.result_url, `${statusURL}/result`);
+    activeExportJobURL = statusURL;
+    let status = initial;
+    for (;;) {
+      if (stale(ticket, accountID)) return null;
+      updateServerProgress(tracker, status);
+      if (status.state === 'completed') break;
+      if (status.state === 'failed' || status.state === 'canceled') {
+        throw new Error(responseErrorMessage(status, '飞书文档导入失败'));
+      }
+      const after = Math.max(0, Number(status.version) || 0);
+      const response = await doFetch(`${statusURL}?after=${after}&wait_ms=25000`, {
+        method: 'GET',
+        signal: controller?.signal,
+      });
+      if (!response.ok) throw new Error(await readError(response, '读取导入进度失败'));
+      status = await response.json();
+    }
+    if (stale(ticket, accountID)) return null;
+    const result = await doFetch(safeExportJobPath(status.result_url, resultURL), {
+      method: 'GET',
+      signal: controller?.signal,
+    });
+    if (!result.ok) throw new Error(await readError(result, '获取 Word 文档失败'));
+    return result;
   }
 
   function showPanel() {
@@ -216,57 +392,54 @@ export function mountFeishuDocumentImport({
   async function chooseDocument(document, ticket = ++generation) {
     const accountID = String(getAccountID() || '');
     if (activeExportController) activeExportController.abort();
+    if (activeProgressTracker) activeProgressTracker.cancel('superseded');
+    if (activeExportJobURL) void cancelExportJob(activeExportJobURL);
     const controller = typeof AbortControllerCtor === 'function' ? new AbortControllerCtor() : null;
     activeExportController = controller;
-    const waitStartedAt = Date.now();
-    const setIntervalFn = windowRef?.setInterval?.bind(windowRef) || globalThis.setInterval;
-    const clearIntervalFn = windowRef?.clearInterval?.bind(windowRef) || globalThis.clearInterval;
-    let waitTimer = null;
+    const tracker = typeof createProgressTracker === 'function' ? createProgressTracker() : null;
+    activeProgressTracker = tracker;
+    activeExportJobURL = '';
+    let completed = false;
     onArticleIntent({ source: 'feishu-doc-import', document });
     renderMessage('正在从飞书导入并排版…', document.title || '飞书文档', 'loading');
-    setImportProgress({
-      text: '正在生成并准备 Word…',
-      indeterminate: true,
-    });
-    if (typeof setIntervalFn === 'function') {
-      waitTimer = setIntervalFn(() => {
-        if (stale(ticket, accountID)) return;
-        const elapsedSeconds = Math.max(1, Math.round((Date.now() - waitStartedAt) / 1000));
-        setImportProgress({
-          text: `正在生成并准备 Word，已等待 ${elapsedSeconds} 秒…`,
-          indeterminate: true,
-        });
-      }, 1000);
-    }
+    if (tracker) tracker.updatePhase('resolve', 0, 0, { status: '正在创建飞书导入任务…' });
+    else setImportProgress({ text: '正在生成并准备 Word…', indeterminate: true });
     try {
-      const response = await doFetch('/api/feishu/docs/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller?.signal,
-        body: JSON.stringify({
-          token: document.token,
-          type: document.type,
-          title: document.title,
-          url: document.url || undefined,
-        }),
-      });
+      const response = tracker
+        ? await startExportJob(document, controller, tracker, ticket, accountID)
+        : await doFetch('/api/feishu/docs/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller?.signal,
+          body: JSON.stringify({
+            token: document.token,
+            type: document.type,
+            title: document.title,
+            url: document.url || undefined,
+          }),
+        });
+      if (!response) return false;
       if (stale(ticket, accountID)) return false;
       if (!response.ok) {
         throw new Error(await readError(response, '飞书文档导入失败'));
       }
-      if (waitTimer && typeof clearIntervalFn === 'function') {
-        clearIntervalFn(waitTimer);
-        waitTimer = null;
+      if (!tracker) {
+        setImportProgress({
+          text: 'Word 已生成，正在接收优化后的正文…',
+          percent: 15,
+        });
       }
-      setImportProgress({
-        text: 'Word 已生成，正在接收优化后的正文…',
-        percent: 15,
-      });
       const blob = await readResponseBlobWithProgress(response, {
         BlobCtor,
         onProgress({ loaded, total }) {
           if (stale(ticket, accountID)) return;
-          if (total > 0) {
+          if (tracker) {
+            tracker.updatePhase('result-download', loaded, total, {
+              status: total > 0
+                ? `正在接收 Word ${Math.round((loaded / total) * 100)}%`
+                : `正在接收 Word ${Math.max(1, Math.round(loaded / 1024))} KB`,
+            });
+          } else if (total > 0) {
             const ratio = Math.min(1, loaded / total);
             const downloadPercent = Math.round(ratio * 100);
             setImportProgress({
@@ -282,20 +455,21 @@ export function mountFeishuDocumentImport({
         },
       });
       if (stale(ticket, accountID)) return false;
+      if (tracker) tracker.completePhase('result-download', { status: 'Word 已接收，正在解析…' });
       const filename = filenameFromDisposition(response.headers.get('Content-Disposition'), document.title);
       const file = new FileCtor([blob], filename, { type: DOCX_MIME });
       const handleFile = getHandleFile();
       if (typeof handleFile !== 'function') throw new Error('排版引擎尚未就绪，请稍后重试');
       if (stale(ticket, accountID)) return false;
       hidePanel();
-      setImportProgress({
-        text: '正在提取正文并排版…',
-        percent: 82,
-      });
+      if (!tracker) setImportProgress({ text: '正在提取正文并排版…', percent: 82 });
       const rendered = await handleFile(file, {
         isRepost: false,
         source: 'feishu-doc-import',
+        importProgress: tracker,
         activationDelayMs: 0,
+        signal: controller?.signal,
+        isStale: () => stale(ticket, accountID),
         sourceDocument: {
           token: document.token,
           type: document.type,
@@ -308,15 +482,18 @@ export function mountFeishuDocumentImport({
         throw new Error('文档解析或排版失败，请检查文档后重试');
       }
       input.value = '';
+      completed = true;
       return true;
     } catch (error) {
       if (stale(ticket, accountID)) return false;
+      tracker?.cancel('failed');
       stopImportProgress();
       renderMessage('导入失败', error?.message || '飞书文档导入失败', 'error');
       return false;
     } finally {
-      if (waitTimer && typeof clearIntervalFn === 'function') clearIntervalFn(waitTimer);
       if (activeExportController === controller) activeExportController = null;
+      if (activeProgressTracker === tracker && completed) activeProgressTracker = null;
+      if (completed) activeExportJobURL = '';
     }
   }
 
@@ -386,7 +563,17 @@ export function mountFeishuDocumentImport({
 
   function invalidate() {
     generation++;
+    if (activeProgressTracker) {
+      activeProgressTracker.cancel('superseded');
+      activeProgressTracker = null;
+    }
+    // cancel() emits the tracker's last (<100) snapshot, so hide only after
+    // that emission; otherwise a canceled import can make the bar reappear.
     stopImportProgress();
+    if (activeExportJobURL) {
+      void cancelExportJob(activeExportJobURL);
+      activeExportJobURL = '';
+    }
     if (activeExportController) {
       activeExportController.abort();
       activeExportController = null;
