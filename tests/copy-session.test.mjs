@@ -241,6 +241,7 @@ test('file 输入 A→B 且 A 后完成时，只允许 B activateArticleSession'
       return task.promise;
     },
     buildArticleSession: async (input, result) => ({ input, title: result.label }),
+    refreshLocalPreviewImages: async images => images,
     formatRenderStats: result => result.label,
     activateArticleSession: article => activated.push(article.title),
     setTimeout: fn => fn(),
@@ -301,6 +302,7 @@ test('DOCX A 图片预解码晚于 B 完成时，不得激活旧文章', async (
       headingN: 0,
     }),
     buildArticleSession: async (input, result) => ({ input, title: result.label }),
+    refreshLocalPreviewImages: async images => images,
     formatRenderStats: result => result.label,
     activateArticleSession: article => activated.push(article.title),
     setTimeout: fn => fn(),
@@ -402,6 +404,7 @@ test('_engineRerender latest-wins：旧规则重排后返不得覆盖新规则',
       return task.promise;
     },
     buildArticleSession: async (input, result) => ({ input, title: result }),
+    refreshLocalPreviewImages: async images => images,
     activateArticleSession: article => activated.push(article.title),
     console,
   };

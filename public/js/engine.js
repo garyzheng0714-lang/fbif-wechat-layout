@@ -61,9 +61,14 @@ const { stripReadonlyOverride } = blockMergeModule;
 const articleFooterDefaultsModule = await import('./article-footer-defaults.js' + assetQuery);
 const { normalizeArticleFooterProfileOverride } = articleFooterDefaultsModule;
 const previewDomModule = await import('./preview-dom.js' + assetQuery);
-const { renderPreviewContent, updatePreviewFooter, adoptPreviewContent } = previewDomModule;
+const {
+  renderPreviewContent,
+  updatePreviewFooter,
+  adoptPreviewContent,
+  collectReusableArticleImages,
+} = previewDomModule;
 const previewImageLoaderModule = await import('./preview-image-loader.js' + assetQuery);
-const { preloadLocalPreviewImages } = previewImageLoaderModule;
+const { preloadLocalPreviewImages, refreshLocalPreviewImages } = previewImageLoaderModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -1194,7 +1199,12 @@ export function initApp(initialTemplate) {
         commitGate: renderCommit,
       });
       if (!session || renderCommit.stale()) return outcome('superseded', false);
-      activateArticleSession(session);
+      const reusableImages = renderInput.kind === 'docx'
+        ? collectReusableArticleImages(document.getElementById('contentArea'))
+        : new Map();
+      await refreshLocalPreviewImages(reusableImages);
+      if (renderCommit.stale()) return outcome('superseded', false);
+      activateArticleSession(session, { preparedImages: reusableImages });
       return outcome('committed', true);
     } catch (err) {
       if (renderCommit.stale()) return outcome('superseded', false);
@@ -1331,13 +1341,16 @@ export function initApp(initialTemplate) {
 
       const input = await parseFileToArticleInput(file, isRepost, opts);
       if (inputCommit.stale()) return false;
-      const preparedImagesPromise = input.kind === 'docx'
-        ? preloadLocalPreviewImages(input.payload && input.payload.imgCache)
-        : Promise.resolve(new Map());
       const result = await renderArticleInput(input);
       if (inputCommit.stale()) return false;
+      const articleHtml = result.lines.join('\n');
+      const preparedImagesPromise = input.kind === 'docx'
+        ? preloadLocalPreviewImages(input.payload && input.payload.imgCache, { articleHtml })
+        : Promise.resolve(new Map());
       if (input.kind === 'docx') {
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
+        progressFill.style.width = '98%';
+        progressText.textContent = '正在准备图片...';
       } else if (input.kind === 'md') {
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       }
@@ -1352,6 +1365,8 @@ export function initApp(initialTemplate) {
       });
       if (!session || inputCommit.stale()) return false;
       const preparedImages = await preparedImagesPromise;
+      if (inputCommit.stale()) return false;
+      await refreshLocalPreviewImages(preparedImages);
       if (inputCommit.stale()) return false;
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       session.stats = formatRenderStats(result, elapsed);
