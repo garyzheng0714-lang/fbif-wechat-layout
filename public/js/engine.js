@@ -62,6 +62,8 @@ const articleFooterDefaultsModule = await import('./article-footer-defaults.js' 
 const { normalizeArticleFooterProfileOverride } = articleFooterDefaultsModule;
 const previewDomModule = await import('./preview-dom.js' + assetQuery);
 const { renderPreviewContent, updatePreviewFooter, adoptPreviewContent } = previewDomModule;
+const previewImageLoaderModule = await import('./preview-image-loader.js' + assetQuery);
+const { preloadLocalPreviewImages } = previewImageLoaderModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -145,18 +147,17 @@ async function normalizeToDocx(file, onProgress) {
   return file;
 }
 
-// Defer <img> display until the full bytes land. By default browsers paint
-// PNG/JPEG top-down as bytes arrive, which looks like "half an image" for
-// 1–2 s on any noticeable round-trip — especially for server-cached .doc
-// images pulled via /api/doc-cache/. We add `wx-img-loading` before the
-// image has finished loading, and drop the class on `load` so CSS can
-// fade it in atomically.
+// Remote/server-cached images can paint top-down while bytes arrive, so keep
+// their atomic fade. Local DOCX blob images are pre-decoded and moved into the
+// preview as ready nodes; never hide those behind the remote loading class.
 function hookPreviewImages(container) {
   if (!container) return;
   const imgs = typeof container.querySelectorAll === 'function'
     ? container.querySelectorAll('img')
     : container;
   for (const img of imgs) {
+    const src = img.getAttribute('src') || '';
+    if (src.startsWith('blob:')) continue;
     if (img.complete && img.naturalWidth > 0) continue;
     img.classList.add('wx-img-loading');
     const clear = () => img.classList.remove('wx-img-loading');
@@ -818,7 +819,7 @@ export function initApp(initialTemplate) {
     };
   }
 
-  function activateArticleSession(session) {
+  function activateArticleSession(session, options = {}) {
     if (!session) return;
     _articleInputPending = false;
     _articleSession = session;
@@ -838,6 +839,7 @@ export function initApp(initialTemplate) {
     showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats, session.displayName || session.title || '', {
       bodyOnly: _articleBodyOnly,
       footerCopy: session.footerCopy,
+      preparedImages: options.preparedImages,
     });
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('fbif:article-session-activated', { detail: { session } }));
@@ -1329,6 +1331,9 @@ export function initApp(initialTemplate) {
 
       const input = await parseFileToArticleInput(file, isRepost, opts);
       if (inputCommit.stale()) return false;
+      const preparedImagesPromise = input.kind === 'docx'
+        ? preloadLocalPreviewImages(input.payload && input.payload.imgCache)
+        : Promise.resolve(new Map());
       const result = await renderArticleInput(input);
       if (inputCommit.stale()) return false;
       if (input.kind === 'docx') {
@@ -1346,6 +1351,8 @@ export function initApp(initialTemplate) {
         commitGate: inputCommit,
       });
       if (!session || inputCommit.stale()) return false;
+      const preparedImages = await preparedImagesPromise;
+      if (inputCommit.stale()) return false;
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       session.stats = formatRenderStats(result, elapsed);
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
@@ -1358,11 +1365,11 @@ export function initApp(initialTemplate) {
       dropZone.classList.remove('processing');
       const activationDelayMs = Number.isFinite(Number(opts && opts.activationDelayMs))
         ? Math.max(0, Number(opts.activationDelayMs))
-        : 200;
+        : 0;
       const activate = () => {
         if (inputCommit.stale()) return;
         _articleInputPending = false;
-        activateArticleSession(session);
+        activateArticleSession(session, { preparedImages });
       };
       if (activationDelayMs > 0) setTimeout(activate, activationDelayMs);
       else activate();
@@ -1619,7 +1626,12 @@ export function initApp(initialTemplate) {
     // Apply theme CSS variables to contentArea for preview
     const contentArea = document.getElementById('contentArea');
     if (window._activeConfig) applyThemeVars(contentArea, window._activeConfig.config);
-    hookPreviewImages(renderPreviewContent(contentArea, _articleHtml, bodyOnly ? '' : _footerHtml));
+    hookPreviewImages(renderPreviewContent(
+      contentArea,
+      _articleHtml,
+      bodyOnly ? '' : _footerHtml,
+      { preparedImages: opts && opts.preparedImages },
+    ));
     document.getElementById('statsBar').textContent = settledSidebarStatus(stats);
 
     const retryBtn = document.getElementById('retryBtn');

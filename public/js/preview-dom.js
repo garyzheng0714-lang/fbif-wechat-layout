@@ -23,12 +23,32 @@ function findFooterMarker(container) {
   return null;
 }
 
-export function renderPreviewContent(container, articleHtml, footerHtml) {
+function usePreparedImages(content, preparedImages) {
+  if (!(preparedImages instanceof Map) || preparedImages.size === 0) return;
+  for (const placeholder of content.querySelectorAll('img')) {
+    const src = placeholder.getAttribute('src') || '';
+    const prepared = preparedImages.get(src);
+    if (!prepared || !prepared.complete || prepared.naturalWidth <= 0) continue;
+    for (const attr of Array.from(prepared.attributes)) {
+      if (attr.name !== 'src' && !placeholder.hasAttribute(attr.name)) {
+        prepared.removeAttribute(attr.name);
+      }
+    }
+    for (const attr of Array.from(placeholder.attributes)) {
+      if (attr.name !== 'src') prepared.setAttribute(attr.name, attr.value);
+    }
+    placeholder.replaceWith(prepared);
+    preparedImages.delete(src);
+  }
+}
+
+export function renderPreviewContent(container, articleHtml, footerHtml, { preparedImages } = {}) {
   if (!container) return [];
   const content = document.createDocumentFragment();
   content.append(fragmentFromHtml(articleHtml));
   content.append(document.createComment(FOOTER_MARKER));
   content.append(fragmentFromHtml(footerHtml));
+  usePreparedImages(content, preparedImages);
   const images = Array.from(content.querySelectorAll('img'));
   container.replaceChildren(content);
   renderedFooterHtml.set(container, String(footerHtml || ''));

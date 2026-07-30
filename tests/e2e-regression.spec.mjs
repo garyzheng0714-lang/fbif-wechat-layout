@@ -744,6 +744,35 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
     await firstImage.dispose();
     await context.close();
   });
+
+  // ---- Scenario 15: 本地 DOCX 首屏图片不得先透明再淡入 ----
+  test('15-本地DOCX正文与已解码图片同帧出现', async ({ browser }) => {
+    const context = await newAuthenticatedContext(browser, { viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+
+    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+    await waitForAppReady(page);
+    await page.evaluate(() => {
+      window.__docxImageStateAtPreview = null;
+      window.addEventListener('fbif:article-previewed', () => {
+        const images = Array.from(document.querySelectorAll('#contentArea img[src^="blob:"]'));
+        window.__docxImageStateAtPreview = {
+          count: images.length,
+          incomplete: images.filter(img => !img.complete || img.naturalWidth === 0).length,
+          hidden: images.filter(img => img.classList.contains('wx-img-loading')).length,
+        };
+      }, { once: true });
+    });
+
+    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
+    await page.waitForFunction(() => window.__docxImageStateAtPreview !== null, { timeout: 30000 });
+    const state = await page.evaluate(() => window.__docxImageStateAtPreview);
+
+    expect(state.count).toBeGreaterThan(0);
+    expect(state.incomplete).toBe(0);
+    expect(state.hidden).toBe(0);
+    await context.close();
+  });
 });
 
 // ---- Generate report after all tests ----

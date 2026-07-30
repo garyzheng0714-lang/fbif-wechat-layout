@@ -260,6 +260,65 @@ test('file 输入 A→B 且 A 后完成时，只允许 B activateArticleSession'
   assert.deepEqual(activated, ['B']);
 });
 
+test('DOCX A 图片预解码晚于 B 完成时，不得激活旧文章', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const handleFileSource = extractExactAsyncFunction(engine, 'async function handleFile(');
+  const session = createCopySession();
+  const decodes = [];
+  const activated = [];
+  const deps = {
+    copySession: session,
+    articleInputGate: session.articleInputGate,
+    _articleInputPending: false,
+    clearQueuedInputRerender() {},
+    _isRepost: false,
+    _convLog: [],
+    dispatchArticleEvent() {}, logConv() {}, showImportEntry() {}, showError() {},
+    sanitizeErrMsg: value => value,
+    errorEl: { style: {} },
+    dropZone: { classList: { add() {}, remove() {} } },
+    progress: { style: {}, classList: { remove() {} } },
+    progressFill: { style: {} },
+    progressText: {},
+    performance: { now: () => 0 },
+    normalizeToDocx: async file => file,
+    waitForActiveRuleConfigReady: async () => {},
+    parseFileToArticleInput: async file => ({
+      kind: 'docx',
+      id: file.name,
+      title: file.name,
+      payload: { imgCache: { cover: `blob:${file.name}` } },
+    }),
+    preloadLocalPreviewImages(imageCache) {
+      const task = deferred();
+      decodes.push({ src: imageCache.cover, ...task });
+      return task.promise;
+    },
+    renderArticleInput: async input => ({
+      label: input.id,
+      lines: [],
+      imgN: 1,
+      headingN: 0,
+    }),
+    buildArticleSession: async (input, result) => ({ input, title: result.label }),
+    formatRenderStats: result => result.label,
+    activateArticleSession: article => activated.push(article.title),
+    setTimeout: fn => fn(),
+  };
+  const handleFile = new Function('deps', `with (deps) { ${handleFileSource}; return handleFile; }`)(deps);
+  const a = handleFile({ name: 'A.docx', size: 1 }, {});
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  const b = handleFile({ name: 'B.docx', size: 1 }, {});
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+
+  decodes.find(task => task.src === 'blob:B.docx').resolve(new Map());
+  await b;
+  decodes.find(task => task.src === 'blob:A.docx').resolve(new Map());
+  await a;
+
+  assert.deepEqual(activated, ['B.docx']);
+});
+
 test('公开的 _handleFile 必须返回排版 Promise，供飞书导入等待真实结果', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   assert.match(
