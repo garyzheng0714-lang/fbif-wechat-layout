@@ -103,6 +103,27 @@ test('materializeLazyImages uses bounded parallel reads for image-heavy DOCX fil
   assert.equal((result.articleCopy.match(/data:image\/png;base64,AQID/g) || []).length, 10);
 });
 
+test('materializeLazyImages accepts a higher bounded concurrency for atomic Feishu import', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let active = 0;
+  let maxActive = 0;
+  globalThis.fetch = async () => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    await new Promise(resolve => setTimeout(resolve, 8));
+    active--;
+    return new Response(new Blob([new Uint8Array([1])], { type: 'image/png' }));
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const html = Array.from({ length: 12 }, (_, i) => `<img src="/api/doc-cache/hash/${i}.png">`).join('');
+  const result = await materializeLazyImages(html, '', { concurrency: 6, timeoutMs: 90000 });
+
+  assert.equal(result.failed, 0);
+  assert.ok(maxActive > 4, `expected Feishu override above default concurrency, observed ${maxActive}`);
+  assert.ok(maxActive <= 6, `expected at most six parallel reads, observed ${maxActive}`);
+});
+
 test('uploadNonCdnImages uses refreshed HTML after lazy image materialization', async (t) => {
   const originalFetch = globalThis.fetch;
   const uploads = [];

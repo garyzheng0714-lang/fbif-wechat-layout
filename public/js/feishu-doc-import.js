@@ -225,7 +225,7 @@ export function mountFeishuDocumentImport({
     onArticleIntent({ source: 'feishu-doc-import', document });
     renderMessage('正在从飞书导入并排版…', document.title || '飞书文档', 'loading');
     setImportProgress({
-      text: '飞书正在生成 Word…',
+      text: '正在生成并准备 Word…',
       indeterminate: true,
     });
     if (typeof setIntervalFn === 'function') {
@@ -233,7 +233,7 @@ export function mountFeishuDocumentImport({
         if (stale(ticket, accountID)) return;
         const elapsedSeconds = Math.max(1, Math.round((Date.now() - waitStartedAt) / 1000));
         setImportProgress({
-          text: `飞书正在生成 Word，已等待 ${elapsedSeconds} 秒…`,
+          text: `正在生成并准备 Word，已等待 ${elapsedSeconds} 秒…`,
           indeterminate: true,
         });
       }, 1000);

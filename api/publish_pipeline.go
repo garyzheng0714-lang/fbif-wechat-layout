@@ -325,11 +325,19 @@ func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, isRep
 // 内网并发「取图+传 OSS」）。返回 {原url: oss_url}；上游取图失败的 URL 不在响应里，
 // 缺失项的重试与 fail loud 由 stageMirror 负责。
 func ossUploadByURLs(ctx context.Context, urls []string) (map[string]string, error) {
+	return ossUploadPayload(ctx, map[string]any{"urls": urls})
+}
+
+func ossUploadByBase64Images(ctx context.Context, images map[string]string) (map[string]string, error) {
+	return ossUploadPayload(ctx, map[string]any{"base64_images": images})
+}
+
+func ossUploadPayload(ctx context.Context, payload map[string]any) (map[string]string, error) {
 	endpoint := strings.TrimSpace(os.Getenv("WECHAT_UPLOAD_ENDPOINT"))
 	if endpoint == "" {
 		return nil, errors.New("WECHAT_UPLOAD_ENDPOINT 未配置：图片转存不可用")
 	}
-	body, err := json.Marshal(map[string]any{"urls": urls})
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("序列化转存请求失败: %w", err)
 	}

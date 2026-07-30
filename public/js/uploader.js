@@ -36,8 +36,8 @@ function arrayBufferToBase64(buffer) {
 
 // Fetch a blob: or server cache URL and encode it as a base64 data URL so the
 // skip-upload copy path can paste usable image bytes instead of page-local URLs.
-async function imageRefToDataUrl(src) {
-  const resp = await fetchWithTimeout(src, {}, { timeoutMs: 20000, timeoutMessage: '图片下载超时' });
+async function imageRefToDataUrl(src, { timeoutMs = 20000, signal } = {}) {
+  const resp = await fetchWithTimeout(src, { signal }, { timeoutMs, timeoutMessage: '图片下载超时' });
   if (!resp.ok) throw new Error('fetch ' + src + ' -> ' + resp.status);
   const blob = await resp.blob();
   const mime = blob.type || 'image/png';
@@ -123,7 +123,13 @@ export async function uploadAssetFile(file) {
   return url;
 }
 
-export async function materializeLazyImages(articleCopy, footerCopy, { onProgress, onLog } = {}) {
+export async function materializeLazyImages(articleCopy, footerCopy, {
+  onProgress,
+  onLog,
+  timeoutMs = 20000,
+  concurrency = IMAGE_MATERIALIZE_CONCURRENCY,
+  signal,
+} = {}) {
   const allHtml = articleCopy + '\n' + footerCopy;
   let m;
 
@@ -149,7 +155,7 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
     while (nextIndex < urls.length) {
       const src = urls[nextIndex++];
       try {
-        replacements.set(src, await imageRefToDataUrl(src));
+        replacements.set(src, await imageRefToDataUrl(src, { timeoutMs, signal }));
       } catch (err) {
         onLog && onLog('error', '图片转 base64 失败', { url: src.slice(0, 60), err: String(err) });
         failed.add(src);
@@ -158,13 +164,23 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
       onProgress && onProgress(done, urls.length);
     }
   }
-  const workerCount = Math.min(IMAGE_MATERIALIZE_CONCURRENCY, urls.length);
+  const workerCount = Math.min(
+    Math.max(1, Number.isFinite(Number(concurrency)) ? Math.floor(Number(concurrency)) : IMAGE_MATERIALIZE_CONCURRENCY),
+    urls.length,
+  );
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   articleCopy = replaceMaterializedImageRefs(articleCopy, replacements);
   footerCopy = replaceMaterializedImageRefs(footerCopy, replacements);
   const failedSrcs = urls.filter(src => failed.has(src));
 
-  return { articleCopy, footerCopy, total: lazyUrls.size, failed: failedSrcs.length, failedSrcs };
+  return {
+    articleCopy,
+    footerCopy,
+    total: lazyUrls.size,
+    failed: failedSrcs.length,
+    failedSrcs,
+    replacements,
+  };
 }
 
 // Upload base64 images from DOCX to OSS. External URLs are used directly.

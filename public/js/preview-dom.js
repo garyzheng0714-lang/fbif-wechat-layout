@@ -54,7 +54,7 @@ export function collectReusableArticleImages(container) {
       : Array.from(child.querySelectorAll('img'));
     for (const image of images) {
       const src = image.getAttribute('src') || '';
-      if (!src.startsWith('blob:') || reusable.has(src)) continue;
+      if (!src || reusable.has(src) || !image.complete || image.naturalWidth <= 0) continue;
       reusable.set(src, image);
     }
   }

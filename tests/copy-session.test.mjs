@@ -218,6 +218,8 @@ test('file 输入 A→B 且 A 后完成时，只允许 B activateArticleSession'
     articleInputGate: session.articleInputGate,
     renderCommitGate: session.renderCommitGate,
     _articleInputPending: false,
+    _articlePreparationController: null,
+    AbortController,
     _rerenderAfterInput: true,
     _rerenderAfterInputOptions: { articleArtifactOverride: { from: 'old-file' } },
     clearQueuedInputRerender() {
@@ -271,6 +273,8 @@ test('DOCX A 图片预解码晚于 B 完成时，不得激活旧文章', async (
     copySession: session,
     articleInputGate: session.articleInputGate,
     _articleInputPending: false,
+    _articlePreparationController: null,
+    AbortController,
     clearQueuedInputRerender() {},
     _isRepost: false,
     _convLog: [],
@@ -467,11 +471,15 @@ test('URL / 账号切换作废文件解析时，必须同步解锁上传区', as
   const retry = session.retryGate.capture();
   const removed = [];
   let retryReset = 0;
+  let preparationAborts = 0;
   const deps = {
     copySession: session,
     articleInputGate: session.articleInputGate,
     renderCommitGate: session.renderCommitGate,
     _articleInputPending: true,
+    _articlePreparationController: {
+      abort() { preparationAborts++; },
+    },
     _rerenderAfterInput: true,
     _rerenderAfterInputOptions: { articleArtifactOverride: { from: 'old' } },
     _moreArticlesCopyJob: { old: true },
@@ -495,6 +503,8 @@ test('URL / 账号切换作废文件解析时，必须同步解锁上传区', as
   assert.equal(copy.stale(), true);
   assert.equal(retry.stale(), true);
   assert.equal(deps._articleInputPending, false);
+  assert.equal(deps._articlePreparationController, null);
+  assert.equal(preparationAborts, 1);
   assert.equal(deps._rerenderAfterInput, false);
   assert.equal(deps._rerenderAfterInputOptions, null);
   assert.equal(deps._moreArticlesCopyJob, null);

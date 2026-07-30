@@ -33,3 +33,20 @@ test('非超时错误原样冒泡（不被误判成超时）', async () => {
   const fetchImpl = async () => { throw new Error('boom-network'); };
   await assert.rejects(fetchWithTimeout('/x', {}, { fetchImpl }), /boom-network/);
 });
+
+test('调用方作废旧任务时立即 abort，不能伪装成网络超时', async () => {
+  const controller = new AbortController();
+  const fetchImpl = (_url, opts) => new Promise((_resolve, reject) => {
+    opts.signal.addEventListener('abort', () => {
+      reject(Object.assign(new Error('superseded'), { name: 'AbortError' }));
+    });
+  });
+  const pending = fetchWithTimeout('/x', { signal: controller.signal }, {
+    fetchImpl,
+    timeoutMs: 1000,
+    timeoutMessage: '不应出现这个超时提示',
+  });
+  controller.abort();
+
+  await assert.rejects(pending, /superseded/);
+});

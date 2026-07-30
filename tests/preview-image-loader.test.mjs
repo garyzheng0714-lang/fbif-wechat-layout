@@ -1,10 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  articlePreviewImageRefs,
   localPreviewImageRefs,
+  preloadArticlePreviewImages,
   preloadLocalPreviewImages,
   refreshLocalPreviewImages,
 } from '../public/js/preview-image-loader.js';
+
+test('articlePreviewImageRefs keeps every rendered image in document order', () => {
+  assert.deepEqual(articlePreviewImageRefs([
+    '<img src="https://oss.example/hero.png">',
+    '<img src="data:image/png;base64,AQID">',
+    '<img src="https://oss.example/hero.png">',
+  ].join('')), [
+    'https://oss.example/hero.png',
+    'data:image/png;base64,AQID',
+  ]);
+});
 
 test('localPreviewImageRefs only keeps unique in-memory DOCX image refs', () => {
   assert.deepEqual(localPreviewImageRefs({
@@ -103,6 +116,34 @@ test('preloadLocalPreviewImages fails open when an image decode rejects', async 
   });
 
   assert.equal(decoded.size, 0);
+});
+
+test('preloadArticlePreviewImages reports decode failures and bounded progress', async () => {
+  const progress = [];
+  const result = await preloadArticlePreviewImages(
+    '<img src="https://oss.example/good.png"><img src="https://oss.example/broken.png">',
+    {
+      concurrency: 2,
+      onProgress(done, total) { progress.push([done, total]); },
+      createImage: () => ({
+        complete: false,
+        naturalWidth: 0,
+        onload: null,
+        onerror: null,
+        set src(value) { this.currentSrc = value; },
+        async decode() {
+          if (this.currentSrc.includes('broken')) throw new Error('broken');
+          this.complete = true;
+          this.naturalWidth = 640;
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.total, 2);
+  assert.equal(result.images.size, 1);
+  assert.deepEqual(result.failedSrcs, ['https://oss.example/broken.png']);
+  assert.deepEqual(progress.at(-1), [2, 2]);
 });
 
 test('refreshLocalPreviewImages re-decodes detached nodes immediately before commit', async () => {
