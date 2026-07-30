@@ -101,6 +101,20 @@ async function captureAndCheck(page, scenario, bp, extraChecks = null, screensho
 // ============ Test Suite ============
 
 test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
+  test('0-未登录可直接进入排版工具', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+
+    await page.goto(BASE + '/mp/fbif', { waitUntil: 'domcontentloaded' });
+    await waitForAppReady(page);
+
+    expect(new URL(page.url()).pathname).toBe('/mp/fbif');
+    await expect(page.locator('#emptyState')).toBeVisible();
+    await expect(page.locator('#userIdentity')).toBeEmpty();
+    await expect(page.locator('#feishuDocCapability')).toHaveText('飞书文档需飞书登录');
+    await context.close();
+  });
+
   // ---- Scenario 1: 初始空状态 ----
   for (const bp of BREAKPOINTS) {
     test(`1-初始空状态 [${bp.name}]`, async ({ browser }) => {

@@ -129,7 +129,7 @@ export function mountFeishuDocumentImport({
     const title = documentRef.createElement('strong');
     title.textContent = '搜索飞书文档需要使用飞书登录';
     const detail = documentRef.createElement('span');
-    detail.textContent = '账号密码用户仍可上传文件、粘贴正文和文章链接。';
+    detail.textContent = '仍可上传文件、粘贴正文和文章链接。';
     copy.append(title, detail);
     const link = documentRef.createElement('a');
     const location = windowRef?.location;
