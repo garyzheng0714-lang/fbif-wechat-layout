@@ -137,8 +137,11 @@ func normalizeFeishuTokenResponse(resp feishuTokenResponse) (feishuUserToken, er
 	if resp.Code != 0 || resp.Error != "" {
 		return feishuUserToken{}, errors.New("feishu OAuth rejected the request")
 	}
-	if resp.AccessToken == "" || resp.RefreshToken == "" || resp.ExpiresIn <= 0 {
+	if resp.AccessToken == "" || resp.ExpiresIn <= 0 {
 		return feishuUserToken{}, errors.New("feishu OAuth response is incomplete")
+	}
+	if resp.RefreshToken == "" {
+		return feishuUserToken{}, errors.New("feishu OAuth response has no refresh_token; offline_access must be granted")
 	}
 	return feishuUserToken{
 		AccessToken:  resp.AccessToken,

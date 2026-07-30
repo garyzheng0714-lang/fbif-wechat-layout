@@ -11,6 +11,17 @@ import (
 	"testing"
 )
 
+func TestNormalizeFeishuTokenResponseExplainsMissingOfflineAccess(t *testing.T) {
+	_, err := normalizeFeishuTokenResponse(feishuTokenResponse{
+		Code:        0,
+		AccessToken: "u-user-token",
+		ExpiresIn:   7200,
+	})
+	if err == nil || !strings.Contains(err.Error(), "offline_access") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestHTTPFeishuProviderSearchUsesUserTokenAndDocumentFilter(t *testing.T) {
 	var gotAuthorization string
 	var gotBody map[string]any
