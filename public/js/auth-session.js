@@ -97,6 +97,22 @@ export async function ensureAuthenticatedSession({
   }
 }
 
+export async function loadOptionalCurrentUser({
+  documentRef = globalThis.document,
+  fetchImpl = globalThis.fetch,
+  storage,
+} = {}) {
+  let user = null;
+  try {
+    user = await loadCurrentUser({ fetchImpl, storage });
+  } catch {
+    // The editor is intentionally public while the login rollout is paused.
+    // Account-service failures must not block local files, text, or URL import.
+  }
+  documentRef?.body?.classList.remove('auth-pending', 'auth-unavailable');
+  return user;
+}
+
 export async function logoutSession({
   fetchImpl = globalThis.fetch,
   storage,

@@ -5,6 +5,7 @@ import { parseHTML } from 'linkedom';
 import {
   SESSION_STORAGE_KEY,
   loadCurrentUser,
+  loadOptionalCurrentUser,
   mountUserIdentity,
 } from '../public/js/auth-session.js';
 
@@ -54,6 +55,28 @@ test('loadCurrentUser returns null and clears an expired fallback token on 401',
   });
   assert.equal(result, null);
   assert.equal(stored.has(SESSION_STORAGE_KEY), false);
+});
+
+test('optional editor session lets anonymous users continue without navigating to login', async () => {
+  const { document } = parseHTML('<body class="auth-pending"></body>');
+  const user = await loadOptionalCurrentUser({
+    documentRef: document,
+    fetchImpl: async () => jsonResponse({ code: 'authentication_required' }, 401),
+  });
+  assert.equal(user, null);
+  assert.equal(document.body.classList.contains('auth-pending'), false);
+  assert.equal(document.body.classList.contains('auth-unavailable'), false);
+});
+
+test('optional editor session fails open when the account service is unavailable', async () => {
+  const { document } = parseHTML('<body class="auth-pending auth-unavailable"></body>');
+  const user = await loadOptionalCurrentUser({
+    documentRef: document,
+    fetchImpl: async () => jsonResponse({ code: 'account_service_failed' }, 503),
+  });
+  assert.equal(user, null);
+  assert.equal(document.body.classList.contains('auth-pending'), false);
+  assert.equal(document.body.classList.contains('auth-unavailable'), false);
 });
 
 test('mountUserIdentity renders name, login mode and Feishu capability in the left rail', () => {

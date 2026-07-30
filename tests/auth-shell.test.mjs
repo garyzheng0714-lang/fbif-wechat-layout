@@ -20,7 +20,9 @@ test('both editor shells put user identity in the left rail and keep the global 
     assert.match(shell, /id="feishuDocCapability"/);
     assert.match(shell, /id="feishuDocSearch"/);
     assert.match(shell, /输入 @ 搜索飞书文档/);
-    assert.match(shell, /mountUserIdentity\(document\.getElementById\('userIdentity'\), authUser\)/);
+    assert.match(shell, /loadOptionalCurrentUser\(\)/);
+    assert.match(shell, /if \(authUser\) authSession\.mountUserIdentity\(document\.getElementById\('userIdentity'\), authUser\)/);
+    assert.doesNotMatch(shell, /ensureAuthenticatedSession\(\)/);
     assert.match(shell, /mountFeishuDocumentImport/);
   }
   const appToolbar = app.slice(app.indexOf('id="previewToolbar"'), app.indexOf('</header>'));

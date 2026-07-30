@@ -180,9 +180,8 @@
 
 <script type="module">
 const authSession = await import('/js/auth-session.js');
-const authUser = await authSession.ensureAuthenticatedSession();
-if (!authUser) await new Promise(() => {});
-authSession.mountUserIdentity(document.getElementById('userIdentity'), authUser);
+const authUser = await authSession.loadOptionalCurrentUser();
+if (authUser) authSession.mountUserIdentity(document.getElementById('userIdentity'), authUser);
 
 // ---- Version ----
 async function loadVersionInfo() {
