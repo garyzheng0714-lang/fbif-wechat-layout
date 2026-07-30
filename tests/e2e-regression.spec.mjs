@@ -25,8 +25,27 @@ const BREAKPOINTS = [
 ];
 
 const RESULTS = [];
+const E2E_USERNAME = 'e2e-editor';
+const E2E_PASSWORD = 'e2e-local-only-password';
 
 // ============ Helpers ============
+
+async function newAuthenticatedContext(browser, options = {}) {
+  const context = await browser.newContext(options);
+  const response = await context.request.post(`${BASE}/auth/password/login`, {
+    data: {
+      username: E2E_USERNAME,
+      password: E2E_PASSWORD,
+      remember: false,
+    },
+  });
+  if (!response.ok()) {
+    const body = await response.text();
+    await context.close();
+    throw new Error(`E2E 登录失败（${response.status()}）：${body}`);
+  }
+  return context;
+}
 
 function screenshotName(scenario, bp) {
   return `${scenario}__${bp.name}.png`;
@@ -85,7 +104,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 1: 初始空状态 ----
   for (const bp of BREAKPOINTS) {
     test(`1-初始空状态 [${bp.name}]`, async ({ browser }) => {
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
       });
       const page = await context.newPage();
@@ -125,7 +144,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 2: 上传 DOCX 全流程 ----
   for (const bp of BREAKPOINTS) {
     test(`2-上传DOCX全流程 [${bp.name}]`, async ({ browser }) => {
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
       });
       const page = await context.newPage();
@@ -177,7 +196,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 3: URL 导入全流程 ----
   for (const bp of BREAKPOINTS) {
     test(`3-URL导入全流程 [${bp.name}]`, async ({ browser }) => {
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
       });
       const page = await context.newPage();
@@ -229,7 +248,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 4: 排版完成状态 ----
   for (const bp of BREAKPOINTS) {
     test(`4-排版完成状态 [${bp.name}]`, async ({ browser }) => {
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
       });
       const page = await context.newPage();
@@ -282,7 +301,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 5: 复制成功状态 ----
   for (const bp of BREAKPOINTS) {
     test(`5-复制成功状态 [${bp.name}]`, async ({ browser }) => {
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
         permissions: ['clipboard-read', 'clipboard-write'],
       });
@@ -339,7 +358,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 6: 抓取失败状态 ----
   for (const bp of BREAKPOINTS) {
     test(`6-抓取失败状态 [${bp.name}]`, async ({ browser }) => {
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
       });
       const page = await context.newPage();
@@ -394,7 +413,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 7: 规则后台视图 ----
   for (const bp of BREAKPOINTS) {
     test(`7-规则后台视图 [${bp.name}]`, async ({ browser }) => {
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
       });
       const page = await context.newPage();
@@ -448,7 +467,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
   // ---- Scenario 8: 网站渠道视图 ----
   for (const bp of BREAKPOINTS) {
     test(`8-网站渠道视图 [${bp.name}]`, async ({ browser }) => {
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
       });
       const page = await context.newPage();
@@ -484,7 +503,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
   // ---- Scenario 9: 更多文章编辑必须实时反映到右侧预览 ----
   test('9-更多文章链接抓取后实时更新预览', async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const context = await newAuthenticatedContext(browser, { viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
     const nextURL = 'https://mp.weixin.qq.com/s/e2e-live-preview';
     const nextCover = 'https://example.com/e2e-live-preview.png';
@@ -542,7 +561,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
   // ---- Scenario 10: 浏览器拒绝两种剪贴板写法时必须明确失败 ----
   test('10-剪贴板权限失败不得显示复制成功', async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const context = await newAuthenticatedContext(browser, { viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
 
     await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
@@ -590,7 +609,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
         width: Math.floor(1440 / scale),
         height: Math.floor(900 / scale),
       };
-      const context = await browser.newContext({
+      const context = await newAuthenticatedContext(browser, {
         viewport: { width: bp.width, height: bp.height },
       });
       const page = await context.newPage();
@@ -614,7 +633,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
   // ---- Scenario 12: 规则 API 弱网期间输出保持 fail-closed，响应后自动解锁 ----
   test('12-规则 API 延迟期间禁用复制并在解析后恢复', async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const context = await newAuthenticatedContext(browser, { viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
     let releaseRuleRequest;
     let markRuleRequest;
@@ -645,7 +664,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
   // ---- Scenario 13: 网站分裂按钮复制当前最终 HTML 源码 ----
   test('13-网站复制 HTML 写入真实剪贴板并保留 CMS 结构', async ({ browser }) => {
-    const context = await browser.newContext({
+    const context = await newAuthenticatedContext(browser, {
       viewport: { width: 1440, height: 900 },
       permissions: ['clipboard-read', 'clipboard-write'],
     });
