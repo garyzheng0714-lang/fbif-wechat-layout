@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+const feishuOAuthScopes = "offline_access drive:drive.search:readonly drive:export:readonly"
+
 func authUsersPath(rulesPath string) string {
 	if explicit := strings.TrimSpace(os.Getenv("AUTH_USERS_PATH")); explicit != "" {
 		return explicit
@@ -143,6 +145,7 @@ func (s *authService) handleFeishuLogin(w http.ResponseWriter, r *http.Request) 
 		"client_id":     {s.config.FeishuAppID},
 		"redirect_uri":  {s.config.RedirectURI},
 		"response_type": {"code"},
+		"scope":         {feishuOAuthScopes},
 		"state":         {state},
 	}
 	http.Redirect(w, r, feishuAccountsBaseURL+"/open-apis/authen/v1/authorize?"+query.Encode(), http.StatusFound)

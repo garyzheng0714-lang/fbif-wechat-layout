@@ -298,6 +298,9 @@ func TestFeishuOAuthStateRejectsOpenRedirectAndTampering(t *testing.T) {
 	if state == "" {
 		t.Fatalf("authorize URL missing state: %s", authorizeURL.String())
 	}
+	if got := authorizeURL.Query().Get("scope"); got != "offline_access drive:drive.search:readonly drive:export:readonly" {
+		t.Fatalf("authorize scope=%q", got)
+	}
 
 	callbackRec := httptest.NewRecorder()
 	callbackTarget := "/auth/feishu/fbif/callback?code=code-test&state=" + url.QueryEscape(state)
