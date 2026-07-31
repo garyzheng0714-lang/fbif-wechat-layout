@@ -48,6 +48,11 @@ const SERVER_PHASE_STATUS = {
   image_map: '正在写入图片索引…',
   finalize: 'Word 已生成，正在交给排版引擎…',
 };
+const FEISHU_DOCUMENT_HOST_SUFFIXES = [
+  'feishu.cn',
+  'larkoffice.com',
+  'larksuite.com',
+];
 
 export function createFeishuImportProgressTracker({
   documentRef = globalThis.document,
@@ -69,6 +74,50 @@ export function parseFeishuMention(value) {
   const normalized = String(value || '').trimStart();
   if (!normalized.startsWith('@')) return null;
   return normalized.slice(1).trim();
+}
+
+function isOfficialFeishuDocumentHost(hostname) {
+  const normalized = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  return FEISHU_DOCUMENT_HOST_SUFFIXES.some(suffix => (
+    normalized === suffix || normalized.endsWith(`.${suffix}`)
+  ));
+}
+
+export function parseFeishuDocumentUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || /\s/.test(raw)) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (
+    parsed.protocol !== 'https:'
+    || parsed.username
+    || parsed.password
+    || parsed.port
+    || !isOfficialFeishuDocumentHost(parsed.hostname)
+  ) {
+    return null;
+  }
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  if (segments.length !== 2) return null;
+  const pathKind = String(segments[0] || '').toLowerCase();
+  const type = pathKind === 'docs' ? 'doc' : pathKind;
+  const token = String(segments[1] || '');
+  if (
+    (type !== 'doc' && type !== 'docx' && type !== 'wiki')
+    || !/^[A-Za-z0-9_-]{4,128}$/.test(token)
+  ) {
+    return null;
+  }
+  return {
+    token,
+    type,
+    title: '飞书文档',
+    url: parsed.href,
+  };
 }
 
 function responseErrorMessage(payload, fallback) {
@@ -191,7 +240,7 @@ export function mountFeishuDocumentImport({
   let activeExportJobURL = '';
 
   if (capability) {
-    capability.textContent = capable ? '输入 @ 搜索飞书文档' : '飞书文档需飞书登录';
+    capability.textContent = capable ? '输入 @ 搜索，或粘贴飞书文档链接' : '飞书文档需飞书登录';
     capability.classList.toggle('is-locked', !capable);
   }
 
@@ -354,14 +403,14 @@ export function mountFeishuDocumentImport({
     showPanel();
   }
 
-  function renderLocked() {
+  function renderLocked(action = '搜索') {
     panel.replaceChildren();
     const box = documentRef.createElement('div');
     box.className = 'feishu-doc-locked';
     const copy = documentRef.createElement('div');
     copy.className = 'feishu-doc-locked-copy';
     const title = documentRef.createElement('strong');
-    title.textContent = '搜索飞书文档需要使用飞书登录';
+    title.textContent = `${action}飞书文档需要使用飞书登录`;
     const detail = documentRef.createElement('span');
     detail.textContent = '仍可上传文件、粘贴正文和文章链接。';
     copy.append(title, detail);
@@ -584,6 +633,18 @@ export function mountFeishuDocumentImport({
     }
   }
 
+  function importValue(value) {
+    const document = parseFeishuDocumentUrl(value);
+    if (!document) return false;
+    invalidate();
+    if (!capable) {
+      renderLocked('导入');
+      return true;
+    }
+    void chooseDocument(document, ++generation);
+    return true;
+  }
+
   function onInput() {
     invalidate();
     const query = parseFeishuMention(input.value);
@@ -641,6 +702,7 @@ export function mountFeishuDocumentImport({
   windowRef.addEventListener?.('fbif:article-input-started', onExternalArticleInput);
 
   return {
+    importValue,
     invalidate,
     destroy() {
       destroyed = true;

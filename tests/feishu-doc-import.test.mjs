@@ -4,6 +4,7 @@ import { parseHTML } from 'linkedom';
 
 import {
   mountFeishuDocumentImport,
+  parseFeishuDocumentUrl,
   readResponseBlobWithProgress,
 } from '../public/js/feishu-doc-import.js';
 
@@ -34,6 +35,40 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
+test('Feishu document URLs are parsed only from official hosts and supported document paths', () => {
+  assert.deepEqual(
+    parseFeishuDocumentUrl('https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc?from=navigation'),
+    {
+      token: 'HosadQWiIoiX4CxG3g7cPXaUnwc',
+      type: 'docx',
+      title: '飞书文档',
+      url: 'https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc?from=navigation',
+    },
+  );
+  assert.deepEqual(
+    parseFeishuDocumentUrl('https://bytedance.larkoffice.com/wiki/HZQswdqYJirjPskb1wCczyb0nHb'),
+    {
+      token: 'HZQswdqYJirjPskb1wCczyb0nHb',
+      type: 'wiki',
+      title: '飞书文档',
+      url: 'https://bytedance.larkoffice.com/wiki/HZQswdqYJirjPskb1wCczyb0nHb',
+    },
+  );
+  assert.deepEqual(
+    parseFeishuDocumentUrl('https://workspace.larksuite.com/docs/doccn_abcdef123456'),
+    {
+      token: 'doccn_abcdef123456',
+      type: 'doc',
+      title: '飞书文档',
+      url: 'https://workspace.larksuite.com/docs/doccn_abcdef123456',
+    },
+  );
+  assert.equal(parseFeishuDocumentUrl('https://foodtalks.feishu.cn.evil.test/docx/token1234'), null);
+  assert.equal(parseFeishuDocumentUrl('http://foodtalks.feishu.cn/docx/token1234'), null);
+  assert.equal(parseFeishuDocumentUrl('https://foodtalks.feishu.cn/base/token1234'), null);
+  assert.equal(parseFeishuDocumentUrl('not a URL'), null);
+});
+
 test('password login shows a real locked state and never calls the Feishu API', async () => {
   const { document, window } = makeShell();
   let calls = 0;
@@ -55,6 +90,100 @@ test('password login shows a real locked state and never calls the Feishu API', 
   assert.equal(calls, 0);
   assert.equal(document.getElementById('feishuDocSearch').hidden, false);
   assert.match(document.getElementById('feishuDocSearch').textContent, /需要使用飞书登录/);
+});
+
+test('password login recognizes a Feishu document link and offers Feishu login instead of generic URL import', () => {
+  const { document, window } = makeShell();
+  let calls = 0;
+  const controller = mountFeishuDocumentImport({
+    documentRef: document,
+    windowRef: window,
+    user: {
+      auth_mode: 'password',
+      capabilities: { feishu_documents: false },
+    },
+    fetchImpl: async () => {
+      calls++;
+      throw new Error('must not be called');
+    },
+  });
+
+  const handled = controller.importValue(
+    'https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc?from=navigation',
+  );
+
+  assert.equal(handled, true);
+  assert.equal(calls, 0);
+  assert.equal(document.getElementById('feishuDocSearch').hidden, false);
+  assert.match(document.getElementById('feishuDocSearch').textContent, /导入飞书文档需要使用飞书登录/);
+  controller.destroy();
+});
+
+test('Feishu login imports a pasted docx link without running a search first', async () => {
+  const { document, window } = makeShell();
+  const calls = [];
+  let handedOff;
+  const controller = mountFeishuDocumentImport({
+    documentRef: document,
+    windowRef: window,
+    user: {
+      auth_mode: 'feishu',
+      capabilities: { feishu_documents: true },
+    },
+    fetchImpl: async (url, options = {}) => {
+      calls.push([String(url), options]);
+      return new Response(new Blob(['PK\u0003\u0004docx-test']), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': "attachment; filename*=UTF-8''%E4%B8%AD%E5%9B%BD%E8%B1%86%E8%85%90.docx",
+        },
+      });
+    },
+    getHandleFile: () => async (file, options) => {
+      handedOff = { file, options };
+      return true;
+    },
+    FileCtor: window.File,
+  });
+  const link = 'https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc?from=navigation';
+  document.getElementById('urlInput').value = link;
+
+  assert.equal(controller.importValue(link), true);
+  await new Promise(resolve => setTimeout(resolve, 12));
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], '/api/feishu/docs/export');
+  assert.deepEqual(JSON.parse(calls[0][1].body), {
+    token: 'HosadQWiIoiX4CxG3g7cPXaUnwc',
+    type: 'docx',
+    title: '飞书文档',
+    url: link,
+  });
+  assert.equal(handedOff.file.name, '中国豆腐.docx');
+  assert.deepEqual(handedOff.options.sourceDocument, {
+    token: 'HosadQWiIoiX4CxG3g7cPXaUnwc',
+    type: 'docx',
+    title: '飞书文档',
+    url: link,
+  });
+  assert.equal(document.getElementById('urlInput').value, '');
+  controller.destroy();
+});
+
+test('unrelated links stay available to the generic URL importer', () => {
+  const { document, window } = makeShell();
+  const controller = mountFeishuDocumentImport({
+    documentRef: document,
+    windowRef: window,
+    user: {
+      auth_mode: 'feishu',
+      capabilities: { feishu_documents: true },
+    },
+  });
+
+  assert.equal(controller.importValue('https://mp.weixin.qq.com/s/example'), false);
+  controller.destroy();
 });
 
 test('Feishu login searches by @keyword and exports the selected document through _handleFile', async () => {
@@ -261,7 +390,7 @@ test('a newer import intent invalidates an older Feishu export before renderer h
   assert.equal(handoffCount, 0);
 });
 
-test('Feishu export job maps only real status/byte counts into one tracker and hands it to the renderer', async () => {
+test('a pasted wiki link uses the real export job progress and hands one tracker to the renderer', async () => {
   const { document, window } = makeShell();
   const intervalCallbacks = [];
   window.setInterval = callback => {
@@ -299,11 +428,6 @@ test('Feishu export job maps only real status/byte counts into one tracker and h
     },
     fetchImpl: async (url, options = {}) => {
       calls.push([String(url), options]);
-      if (String(url).startsWith('/api/feishu/docs/search')) {
-        return jsonResponse({
-          documents: [{ token: 'dox_job', type: 'docx', title: '有真实进度的文档' }],
-        });
-      }
       if (url === '/api/feishu/docs/export/jobs') {
         return jsonResponse({
           job_id: 'job_1',
@@ -362,9 +486,9 @@ test('Feishu export job maps only real status/byte counts into one tracker and h
     debounceMs: 0,
   });
 
-  input(window, document.getElementById('urlInput'), '@真实进度');
-  await new Promise(resolve => setTimeout(resolve, 8));
-  document.querySelector('[data-feishu-doc-result]').click();
+  const link = 'https://bytedance.larkoffice.com/wiki/HZQswdqYJirjPskb1wCczyb0nHb?from=navigation';
+  document.getElementById('urlInput').value = link;
+  assert.equal(controller.importValue(link), true);
   await new Promise(resolve => setTimeout(resolve, 20));
 
   const beforeTimerTicks = trackerCalls.length;
@@ -380,6 +504,14 @@ test('Feishu export job maps only real status/byte counts into one tracker and h
   );
 
   assert.ok(calls.some(([url]) => url === '/api/feishu/docs/export/jobs'));
+  const createCall = calls.find(([url]) => url === '/api/feishu/docs/export/jobs');
+  assert.deepEqual(JSON.parse(createCall[1].body), {
+    token: 'HZQswdqYJirjPskb1wCczyb0nHb',
+    type: 'wiki',
+    title: '飞书文档',
+    url: link,
+  });
+  assert.equal(calls.some(([url]) => url.startsWith('/api/feishu/docs/search')), false);
   assert.equal(statusReads, 2);
   assert.ok(calls.some(([url]) => url === '/api/feishu/docs/export/jobs/job_1/result'));
   assert.equal(calls.some(([url]) => url.startsWith('https://evil.example/')), false);

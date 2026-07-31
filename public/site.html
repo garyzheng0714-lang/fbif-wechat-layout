@@ -1440,6 +1440,7 @@ bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
   importText: importClipboardText,
+  tryImportValue: value => feishuDocImport?.importValue(value) === true,
   onInputCleared: clearRenderedImport,
   shouldSubmitValue: value => !value.trimStart().startsWith('@'),
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
