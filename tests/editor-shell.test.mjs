@@ -114,6 +114,8 @@ test('editor shells both import the shared editor-shell helpers', async () => {
     '新本地输入必须作废在途 URL 请求');
   assert.match(app, /bindUrlImportShortcuts/);
   assert.match(site, /bindUrlImportShortcuts/);
+  assert.match(app, /tryImportValue:\s*value\s*=>\s*feishuDocImport\?\.importValue/);
+  assert.match(site, /tryImportValue:\s*value\s*=>\s*feishuDocImport\?\.importValue/);
   assert.match(app, /onInputCleared:\s*clearRenderedImport/);
   assert.match(site, /onInputCleared:\s*clearRenderedImport/);
   assert.match(app, /bindRailDivider/);
@@ -844,6 +846,48 @@ test('bindUrlImportShortcuts leaves @ document mentions to the Feishu document c
   });
   assert.equal(prevented, true);
   assert.equal(imported, 0);
+  assert.equal(fetched, 0);
+});
+
+test('bindUrlImportShortcuts gives a recognized special link to its importer before generic URL fetch', () => {
+  const inputHandlers = {};
+  let specialValue = '';
+  let fetched = 0;
+  const urlInput = {
+    value: 'https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc',
+    tagName: 'TEXTAREA',
+    classList: { contains: () => false },
+    addEventListener(type, handler) { inputHandlers[type] = handler; },
+  };
+  const documentRef = {
+    activeElement: urlInput,
+    getElementById(id) {
+      if (id === 'urlInput') return urlInput;
+      if (id === 'previewContent') return { style: { display: 'none' } };
+      return null;
+    },
+    addEventListener() {},
+    querySelectorAll() { return []; },
+  };
+  bindUrlImportShortcuts({
+    documentRef,
+    fetchArticle: () => { fetched += 1; },
+    tryImportValue(value) {
+      specialValue = value;
+      return true;
+    },
+  });
+
+  let prevented = false;
+  inputHandlers.keydown({
+    key: 'Enter',
+    metaKey: true,
+    ctrlKey: false,
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(specialValue, urlInput.value);
   assert.equal(fetched, 0);
 });
 

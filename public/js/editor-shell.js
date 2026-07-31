@@ -359,6 +359,7 @@ export function bindUrlImportShortcuts({
   documentRef = globalThis.document,
   fetchArticle,
   importText = null,
+  tryImportValue = null,
   ignoreClassNames = [],
   focusTargetSelector = '',
   onInputCleared = null,
@@ -371,6 +372,9 @@ export function bindUrlImportShortcuts({
     if (!text) return false;
     if (!shouldSubmitValue(text)) return false;
     if (urlInput) urlInput.value = text;
+    if (typeof tryImportValue === 'function' && tryImportValue(text) === true) {
+      return true;
+    }
     if (isSingleHttpUrl(text)) {
       fetchArticle();
       return true;

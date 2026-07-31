@@ -24,6 +24,98 @@ func TestNormalizeFeishuTokenResponseExplainsMissingOfflineAccess(t *testing.T) 
 	}
 }
 
+func TestParseFeishuDocumentURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		wantToken string
+		wantType  string
+		wantErr   bool
+	}{
+		{
+			name:      "Feishu docx",
+			raw:       "https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc?from=navigation",
+			wantToken: "HosadQWiIoiX4CxG3g7cPXaUnwc",
+			wantType:  "docx",
+		},
+		{
+			name:      "Lark wiki",
+			raw:       "https://bytedance.larkoffice.com/wiki/HZQswdqYJirjPskb1wCczyb0nHb",
+			wantToken: "HZQswdqYJirjPskb1wCczyb0nHb",
+			wantType:  "wiki",
+		},
+		{
+			name:      "legacy Lark doc",
+			raw:       "https://workspace.larksuite.com/docs/doccn_abcdef123456",
+			wantToken: "doccn_abcdef123456",
+			wantType:  "doc",
+		},
+		{
+			name:    "lookalike host",
+			raw:     "https://foodtalks.feishu.cn.evil.test/docx/HosadQWiIoiX4CxG3g7cPXaUnwc",
+			wantErr: true,
+		},
+		{
+			name:    "insecure scheme",
+			raw:     "http://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc",
+			wantErr: true,
+		},
+		{
+			name:    "unsupported kind",
+			raw:     "https://foodtalks.feishu.cn/base/HosadQWiIoiX4CxG3g7cPXaUnwc",
+			wantErr: true,
+		},
+		{
+			name:    "extra path",
+			raw:     "https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc/edit",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ref, err := parseFeishuDocumentURL(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseFeishuDocumentURL(%q)=%+v, want error", tt.raw, ref)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseFeishuDocumentURL(%q): %v", tt.raw, err)
+			}
+			if ref.Token != tt.wantToken || ref.Type != tt.wantType || ref.URL != tt.raw {
+				t.Fatalf("parseFeishuDocumentURL(%q)=%+v", tt.raw, ref)
+			}
+		})
+	}
+}
+
+func TestValidateFeishuDocumentRefCanResolveAndCrossCheckURL(t *testing.T) {
+	raw := "https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc?from=navigation"
+	ref, err := validateFeishuDocumentRef(feishuDocumentRef{URL: raw})
+	if err != nil {
+		t.Fatalf("validate URL-only ref: %v", err)
+	}
+	if ref.Token != "HosadQWiIoiX4CxG3g7cPXaUnwc" || ref.Type != "docx" || ref.URL != raw {
+		t.Fatalf("URL-only ref=%+v", ref)
+	}
+
+	if _, err := validateFeishuDocumentRef(feishuDocumentRef{
+		Token: "anotherToken123",
+		Type:  "docx",
+		URL:   raw,
+	}); err == nil {
+		t.Fatal("mismatched token and URL must fail")
+	}
+	if _, err := validateFeishuDocumentRef(feishuDocumentRef{
+		Token: "HosadQWiIoiX4CxG3g7cPXaUnwc",
+		Type:  "wiki",
+		URL:   raw,
+	}); err == nil {
+		t.Fatal("mismatched type and URL must fail")
+	}
+}
+
 func TestFeishuExportPollDelayStartsFastThenBacksOff(t *testing.T) {
 	base := 250 * time.Millisecond
 	want := []time.Duration{

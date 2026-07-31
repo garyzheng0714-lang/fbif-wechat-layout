@@ -310,6 +310,65 @@ func normalizeFeishuDocumentType(raw string) string {
 	}
 }
 
+func validFeishuDocumentToken(token string) bool {
+	if len(token) < 4 || len(token) > 128 {
+		return false
+	}
+	for _, char := range token {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_' ||
+			char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func officialFeishuDocumentHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	for _, suffix := range []string{"feishu.cn", "larkoffice.com", "larksuite.com"} {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseFeishuDocumentURL(raw string) (feishuDocumentRef, error) {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil ||
+		parsed.Scheme != "https" ||
+		parsed.User != nil ||
+		parsed.Port() != "" ||
+		!officialFeishuDocumentHost(parsed.Hostname()) {
+		return feishuDocumentRef{}, errFeishuInvalidDocument
+	}
+	segments := strings.Split(strings.Trim(parsed.EscapedPath(), "/"), "/")
+	if len(segments) != 2 {
+		return feishuDocumentRef{}, errFeishuInvalidDocument
+	}
+	pathKind := strings.ToLower(segments[0])
+	docType := normalizeFeishuDocumentType(pathKind)
+	if pathKind == "docs" {
+		docType = "doc"
+	}
+	token, unescapeErr := url.PathUnescape(segments[1])
+	if unescapeErr != nil ||
+		(docType != "doc" && docType != "docx" && docType != "wiki") ||
+		!validFeishuDocumentToken(token) {
+		return feishuDocumentRef{}, errFeishuInvalidDocument
+	}
+	return feishuDocumentRef{
+		Token: token,
+		Type:  docType,
+		URL:   parsed.String(),
+	}, nil
+}
+
 func (p *httpFeishuProvider) SearchDocuments(ctx context.Context, accessToken, query string, limit int) ([]feishuDocument, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -418,7 +477,24 @@ func validateFeishuDocumentRef(ref feishuDocumentRef) (feishuDocumentRef, error)
 	ref.Type = normalizeFeishuDocumentType(ref.Type)
 	ref.Title = strings.TrimSpace(ref.Title)
 	ref.URL = strings.TrimSpace(ref.URL)
-	if ref.Token == "" || ref.Type == "" || len(ref.Token) > 128 {
+	if ref.URL != "" {
+		parsed, err := parseFeishuDocumentURL(ref.URL)
+		if err != nil {
+			return ref, errFeishuInvalidDocument
+		}
+		if ref.Token == "" {
+			ref.Token = parsed.Token
+		} else if ref.Token != parsed.Token {
+			return ref, errFeishuInvalidDocument
+		}
+		if ref.Type == "" {
+			ref.Type = parsed.Type
+		} else if ref.Type != parsed.Type {
+			return ref, errFeishuInvalidDocument
+		}
+		ref.URL = parsed.URL
+	}
+	if !validFeishuDocumentToken(ref.Token) || ref.Type == "" {
 		return ref, errFeishuInvalidDocument
 	}
 	return ref, nil
