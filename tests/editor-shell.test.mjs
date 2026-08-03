@@ -64,9 +64,9 @@ function makeRailElement({ width = 300 } = {}) {
   return element;
 }
 
-function makeRailFixture({ mobile = false, includeNodes = true } = {}) {
+function makeRailFixture({ mobile = false, includeNodes = true, railWidth = 300 } = {}) {
   const layout = makeRailElement();
-  const rail = makeRailElement({ width: 300 });
+  const rail = makeRailElement({ width: railWidth });
   const divider = makeRailElement();
   const button = makeRailElement();
   const body = { classList: makeClassList() };
@@ -185,6 +185,29 @@ test('bindRailDivider resizes on desktop drag and cleans listeners on release', 
   assert.equal(fixture.divider.listeners.get('pointermove').length, 0);
   assert.equal(fixture.divider.listeners.get('pointerup').length, 0);
   assert.equal(fixture.divider.listeners.get('pointercancel').length, 0);
+});
+
+test('bindRailDivider keeps the rail usable at 360px and collapses below 320px', () => {
+  const fixture = makeRailFixture({ railWidth: 420 });
+  bindRailDivider(fixture);
+
+  fixture.divider.dispatch('pointerdown', {
+    pointerId: 9,
+    clientX: 438,
+    target: fixture.divider,
+    preventDefault() {},
+  });
+
+  fixture.divider.dispatch('pointermove', { clientX: 368 });
+  assert.equal(fixture.layout.style.getPropertyValue('--rail-current-w'), '360px');
+  assert.equal(fixture.layout.classList.contains('rail-collapsed'), false);
+
+  fixture.divider.dispatch('pointermove', { clientX: 328 });
+  assert.equal(fixture.layout.classList.contains('rail-collapsed'), true);
+  assert.equal(fixture.button.getAttribute('aria-expanded'), 'false');
+
+  fixture.divider.dispatch('pointerup');
+  assert.equal(fixture.body.classList.contains('is-resizing-rail'), false);
 });
 
 test('editor shells bind upload before remote rule hydration settles', async () => {

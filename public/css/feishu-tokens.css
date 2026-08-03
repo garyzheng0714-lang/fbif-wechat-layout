@@ -35,6 +35,8 @@
   --fs-r-l: 10px;
   --fs-r-full: 9999px;
 
+  --fs-space-md: 12px;
+
   --fs-sh-s1: 0 1px 3px rgba(31,35,39,0.04), 0 1px 2px rgba(31,35,39,0.03);
   --fs-sh-s2: 0 2px 8px rgba(31,35,39,0.06), 0 1px 3px rgba(31,35,39,0.04);
   --fs-sh-s3: 0 12px 32px rgba(31,35,39,0.12), 0 4px 12px rgba(31,35,39,0.06);
