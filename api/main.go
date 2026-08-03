@@ -194,7 +194,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
-	srv := newHTTPServer(addr, withSecurityHeaders(mux))
+	srv := newHTTPServer(addr, withSecurityHeaders(withEditorAuthGate(authService, mux)))
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	if err := serveUntilShutdown(shutdownSignal, srv, publishPipe.shutdownWorkers); err != nil {

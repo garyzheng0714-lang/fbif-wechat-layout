@@ -4,8 +4,8 @@ import { parseHTML } from 'linkedom';
 
 import {
   SESSION_STORAGE_KEY,
+  ensureAuthenticatedSession,
   loadCurrentUser,
-  loadOptionalCurrentUser,
   mountUserIdentity,
 } from '../public/js/auth-session.js';
 
@@ -57,26 +57,38 @@ test('loadCurrentUser returns null and clears an expired fallback token on 401',
   assert.equal(stored.has(SESSION_STORAGE_KEY), false);
 });
 
-test('optional editor session lets anonymous users continue without navigating to login', async () => {
-  const { document } = parseHTML('<body class="auth-pending"></body>');
-  const user = await loadOptionalCurrentUser({
+test('strict editor session keeps the shell hidden and sends anonymous users to login', async () => {
+  const { document } = parseHTML('<html><body class="auth-pending"></body></html>');
+  const navigations = [];
+  const user = await ensureAuthenticatedSession({
+    windowRef: {
+      location: {
+        pathname: '/mp/fbif',
+        search: '?v=test',
+        hash: '',
+        assign: target => navigations.push(target),
+      },
+    },
     documentRef: document,
     fetchImpl: async () => jsonResponse({ code: 'authentication_required' }, 401),
   });
   assert.equal(user, null);
-  assert.equal(document.body.classList.contains('auth-pending'), false);
+  assert.deepEqual(navigations, ['/login.html?return_to=%2Fmp%2Ffbif%3Fv%3Dtest']);
+  assert.equal(document.body.classList.contains('auth-pending'), true);
   assert.equal(document.body.classList.contains('auth-unavailable'), false);
 });
 
-test('optional editor session fails open when the account service is unavailable', async () => {
-  const { document } = parseHTML('<body class="auth-pending auth-unavailable"></body>');
-  const user = await loadOptionalCurrentUser({
-    documentRef: document,
-    fetchImpl: async () => jsonResponse({ code: 'account_service_failed' }, 503),
-  });
-  assert.equal(user, null);
+test('strict editor session fails closed when the account service is unavailable', async () => {
+  const { document } = parseHTML('<html><body class="auth-pending auth-unavailable"></body></html>');
+  await assert.rejects(
+    ensureAuthenticatedSession({
+      documentRef: document,
+      fetchImpl: async () => jsonResponse({ code: 'account_service_failed' }, 503),
+    }),
+    /账号服务暂不可用/,
+  );
   assert.equal(document.body.classList.contains('auth-pending'), false);
-  assert.equal(document.body.classList.contains('auth-unavailable'), false);
+  assert.equal(document.body.classList.contains('auth-unavailable'), true);
 });
 
 test('mountUserIdentity renders name, login mode and Feishu capability in the left rail', () => {
