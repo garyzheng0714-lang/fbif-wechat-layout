@@ -39,17 +39,16 @@ test('site.html removes public-account specific DOM', async () => {
 
 test('site.html keeps upload + URL + preview + copy button', async () => {
   const html = await readFile(new URL('../public/site.html', import.meta.url), 'utf8');
-  assert.match(html, /class=['"][^'"]*\bimport-card-head\b[^'"]*['"]/, 'website import area should have a quiet source panel header');
-  assert.match(html, /class=['"][^'"]*\bimport-title\b[^'"]*['"][^>]*>导入内容</);
+  assert.doesNotMatch(html, /class=['"][^'"]*\bimport-card-head\b[^'"]*['"]/, 'the unified import frame should not regain a redundant title header');
   assert.doesNotMatch(html, /import-mode-badge/, 'import panel should not add decorative badges that compete with the editor input');
-  assert.match(html, /class=['"][^'"]*\bimport-actions\b[^'"]*['"]/, 'website import area should keep the file entry as a first-class zone');
+  assert.match(html, /class=['"][^'"]*\bimport-composer-addon\b[^'"]*['"]/, 'website import area should keep all import actions in one composer footer');
   assert.match(html, /id=['"]dropZone['"]/);
-  assert.match(html, /data-upload-label[^>]*>粘贴或拖拽至这里上传</, 'upload zone should explain paste and drag inside the box');
-  assert.match(html, /data-add-file-text[^>]*>添加本地文件</, 'file picker should be expressed inside the upload zone');
+  assert.match(html, /id=['"]dropZone['"][^>]*role=['"]group['"][^>]*aria-label=['"]导入内容['"]/, 'one composer should own text, file and Feishu import semantics');
+  assert.match(html, /data-upload-label[^>]*[\s\S]{0,500}<strong>松开导入</, 'full composer should expose a clear file-drop state');
   assert.match(html, /data-uploaded-file hidden/, 'upload zone should have a centered uploaded-file state');
   assert.match(html, /class=['"][^'"]*\bimport-card\b[^'"]*['"]/);
   assert.match(html, /class=['"][^'"]*\bdropzone\b[^'"]*['"][^>]*id=['"]dropZone['"]/);
-  assert.match(html, /class=['"][^'"]*\burl-row\b[^'"]*['"][^>]*data-url-focus-target/);
+  assert.match(html, /class=['"][^'"]*\bimport-composer-input\b[^'"]*['"][^>]*data-url-focus-target/);
   assert.doesNotMatch(html, /id=['"]urlFetchBtn['"]/, 'import panel should not keep a hidden third action; paste and keyboard shortcuts route URL/text formatting');
   assert.match(html, /id=['"]urlInput['"]/);
   assert.match(html, /<textarea[^>]*id=['"]urlInput['"]/, 'shared import box should accept multi-line pasted text');
@@ -59,15 +58,14 @@ test('site.html keeps upload + URL + preview + copy button', async () => {
 
 test('app.html uses the unified source import panel', async () => {
   const html = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
-  assert.match(html, /class=['"][^'"]*\bimport-card-head\b[^'"]*['"]/);
-  assert.match(html, /class=['"][^'"]*\bimport-title\b[^'"]*['"][^>]*>导入内容</);
+  assert.doesNotMatch(html, /class=['"][^'"]*\bimport-card-head\b[^'"]*['"]/, 'one-frame import entry should not add a title-only third layer');
   assert.doesNotMatch(html, /import-mode-badge/);
-  assert.match(html, /class=['"][^'"]*\bimport-actions\b[^'"]*['"]/);
+  assert.match(html, /class=['"][^'"]*\bimport-composer-addon\b[^'"]*['"]/);
   assert.match(html, /class=['"][^'"]*\bdropzone\b[^'"]*['"][^>]*id=['"]dropZone['"]/);
-  assert.match(html, /data-upload-label[^>]*>粘贴或拖拽至这里上传</);
-  assert.match(html, /data-add-file-text[^>]*>添加本地文件</);
+  assert.match(html, /id=['"]dropZone['"][^>]*role=['"]group['"][^>]*aria-label=['"]导入内容['"]/);
+  assert.match(html, /data-upload-label[^>]*[\s\S]{0,500}<strong>松开导入</);
   assert.match(html, /data-uploaded-file hidden/);
-  assert.match(html, /class=['"][^'"]*\burl-row\b[^'"]*['"][^>]*data-url-focus-target/);
+  assert.match(html, /class=['"][^'"]*\bimport-composer-input\b[^'"]*['"][^>]*data-url-focus-target/);
   assert.match(html, /<textarea[^>]*id=['"]urlInput['"]/);
   assert.doesNotMatch(html, /id=['"]urlFetchBtn['"]/);
   assert.match(html, /id=['"]docZone['"][^>]*hidden/, 'public-account page should keep the imported-source summary card');
@@ -160,8 +158,7 @@ test('site.html 导入后左栏保持可滚动且导入区半折叠', async () =
   assert.match(html, /id=['"]siteImportSummary['"]/, '导入区应有已导入内容摘要条');
   assert.match(html, /function\s+setSiteImportCompact\(/, '导入后应进入半折叠状态');
   assert.match(html, /function\s+clearSiteImportCompact\(/, '清空导入时应恢复完整导入区');
-  assert.match(css, /\.import-zone\.is-compact[\s\S]{0,260}\.import-actions/, '半折叠状态应隐藏大上传区');
-  assert.match(css, /\.import-zone\.is-compact[\s\S]{0,320}\.url-row/, '半折叠状态应隐藏大文本框');
+  assert.match(css, /\.import-zone\.is-compact \.import-composer-shell/, '半折叠状态应隐藏整个统一导入框');
 });
 
 test('site.html updates DOCX summary without wiping URL summaries, and resets MD summaries', async () => {

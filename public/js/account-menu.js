@@ -1,9 +1,10 @@
-// account-menu.js — 统一顶栏账号菜单（Google 头像菜单式）。
+// account-menu.js — 统一发布账号菜单（shadcn/Radix team-switcher 交互语法）。
 //
 // 把原来的两层切换器（顶部圆形「渠道」胶囊 + 侧栏方角「规则包」分段）合并成
-// 一个顶栏头像菜单：列出全部账号，渠道（公众号 / 网站）降为菜单内的分组标签。
-// 用户 2026-06-02 裁定「不要两层」——单层账号菜单取代两层（推翻旧红线 #2 的
-// 圆角/方角分层契约）。数据源仍是 registry.js（红线：账号唯一入口）。
+// 一个头像菜单：列出全部账号，渠道（公众号 / 网站）降为菜单内的分组标签。
+// 用户 2026-08-01 将它从全局身份位移动到导入任务框内，用来回答“这篇内容排版
+// 到哪里”；登录用户身份成为顶栏左侧唯一 owner。菜单仍保持单层，数据源仍是
+// registry.js（红线：账号唯一入口）。
 //
 // onSwitch(id) 由各页注入，承载页面级切换语义：
 //   - app.html 传 switchAccount：同模板原地切（FBIF↔WowFood）/ 跨模板整页 reload。
@@ -104,7 +105,7 @@ export function mountAccountMenu({ container, activeId, onSwitch, settingsAction
     const cur = activePack();
     const groups = buildAccountGroups(packs, activeId);
     container.innerHTML =
-      `<button type="button" class="acct-trigger" aria-haspopup="menu" aria-controls="${esc(panelID)}" aria-expanded="${isOpen}">` +
+      `<button type="button" class="acct-trigger" aria-label="排版到 ${esc(cur.accountName)}" aria-haspopup="menu" aria-controls="${esc(panelID)}" aria-expanded="${isOpen}">` +
         avatarHtml(cur.channel, cur.avatarUrl, 'acct-trigger-avatar') +
         `<span class="acct-trigger-name">${esc(cur.accountName)}</span>` +
         `<svg class="acct-trigger-caret" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">` +

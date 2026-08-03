@@ -23,7 +23,6 @@
 <body class="auth-pending">
 
 <header class="global-channel-bar">
-  <div class="acct-menu" id="acctMenu" aria-label="切换公众号"></div>
   <div class="topbar-spacer"></div>
   <div class="tb-actions preview-toolbar" id="previewToolbar">
     <button class="tb-retry" id="retryBtn" type="button" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
@@ -39,46 +38,59 @@
     <div class="rail-body sidebar-body scroll-y">
       <span id="pageTitle" style="display:none;"></span>
       <span id="pageSubtitle" style="display:none;"></span>
-      <div id="userIdentity"></div>
       <div class="import-zone" id="importZone">
         <div class="import-card">
-          <div class="import-card-head">
-            <div>
-              <div class="import-title">导入内容</div>
-            </div>
+          <div class="import-a11y-copy">
+            <div class="import-description" id="importHelp">粘贴正文或文章链接，也可以上传文件或搜索飞书文档，系统会自动排版</div>
           </div>
-          <div class="import-actions">
-            <div class="dropzone upload-zone" id="dropZone" tabindex="0" role="button" aria-label="粘贴或拖拽文件到这里上传，点击添加本地文件">
-              <div class="dropzone-inner">
-                <div class="dropzone-empty" data-upload-empty>
-                  <svg class="dropzone-cloud" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M22 46H17.5C10.6 46 6 41.4 6 35.5C6 30.1 10 25.8 15.3 25.1C17.5 15.3 25.2 9 34.3 9C44.5 9 52.5 17 52.8 27.1C58 28.7 61 32.7 61 37.7C61 43.2 56.5 46 50.6 46H44"/>
-                    <path d="M33 55V32"/>
-                    <path d="M23.5 41.5L33 32L42.5 41.5"/>
-                  </svg>
-                  <div class="dropzone-title upload-text" data-upload-label>粘贴或拖拽至这里上传</div>
-                </div>
-                <div class="dropzone-file" data-uploaded-file hidden>
-                  <div class="dropzone-file-icon" data-file-ext>T</div>
-                  <div class="dropzone-file-overlay">
-                    <span class="dropzone-file-name" data-uploaded-name></span>
-                    <button class="dropzone-file-remove" type="button" data-remove-upload aria-label="移除已选择文件">×</button>
-                  </div>
-                </div>
+          <div class="import-composer-shell">
+            <div class="import-composer dropzone upload-zone" id="dropZone" role="group" aria-label="导入内容" aria-describedby="importHelp feishuDocCapability">
+              <div class="import-destination">
+                <span class="import-destination-label">排版到</span>
+                <div class="acct-menu import-account-target" id="acctMenu" aria-label="选择排版公众号"></div>
               </div>
-              <div class="dropzone-add-row"><span aria-hidden="true">＋</span><span data-add-file-text>添加本地文件</span></div>
+              <div class="import-composer-input" data-url-focus-target>
+                <textarea class="field url-input-inline import-textarea" id="urlInput" rows="5" spellcheck="false" aria-label="粘贴文章链接、正文或 Markdown，或搜索飞书文档" placeholder="粘贴公众号文章 / 飞书文档链接，或正文"></textarea>
+              </div>
+              <div class="feishu-doc-selection" id="feishuDocSelection" role="status" aria-live="polite" hidden>
+                <span class="feishu-doc-selection-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></svg></span>
+                <span class="feishu-doc-selection-copy">
+                  <strong id="feishuDocSelectionTitle">飞书文档</strong>
+                  <span id="feishuDocSelectionStatus">正在准备导入…</span>
+                </span>
+                <button class="feishu-doc-selection-cancel" id="feishuDocSelectionCancel" type="button" aria-label="取消导入飞书文档">×</button>
+              </div>
+              <div class="feishu-doc-search" id="feishuDocSearch" hidden></div>
+              <div class="dropzone-file" data-uploaded-file hidden>
+                <span class="dropzone-file-icon" data-file-ext>T</span>
+                <span class="dropzone-file-name" data-uploaded-name></span>
+                <span class="dropzone-file-size" data-uploaded-size></span>
+                <button class="dropzone-file-remove" type="button" data-remove-upload aria-label="移除已选择文件">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <div class="import-composer-addon">
+                <div class="import-composer-actions">
+                  <button class="import-action-button import-upload-trigger" id="uploadTrigger" type="button" data-upload-trigger aria-label="上传文件">
+                    <span class="import-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5 12 20a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.6l-9 9a2 2 0 1 1-2.9-2.8l8.4-8.4"/></svg></span>
+                    <span class="import-action-label" data-add-file-text>上传文件</span>
+                  </button>
+                  <button class="import-action-button import-feishu-trigger" id="feishuDocTrigger" type="button" data-feishu-doc-trigger aria-label="搜索飞书云文档" aria-controls="feishuDocSearch" aria-expanded="false">
+                    <span class="import-action-icon import-at-icon" aria-hidden="true">@</span>
+                    <span class="import-action-label">飞书云文档</span>
+                  </button>
+                </div>
+                <span class="import-composer-spacer"></span>
+                <span class="feishu-doc-capability import-capability-status" id="feishuDocCapability">粘贴后自动排版</span>
+                <button class="import-submit-button" id="importSubmitBtn" type="button" hidden>导入排版</button>
+              </div>
+              <div class="dropzone-drag-prompt" data-upload-label aria-live="polite">
+                <span class="dropzone-drag-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M12 11v7m-3-3 3 3 3-3"/></svg></span>
+                <strong>松开导入</strong>
+                <span>支持 Word / Markdown 文件</span>
+              </div>
               <input type="file" id="fileInput">
             </div>
-          </div>
-          <div class="url-row url-row-inline import-composer" data-url-focus-target>
-            <div class="import-input-stack">
-              <div class="import-label-row">
-                <label class="import-input-label" for="urlInput">正文 / 链接 / 飞书文档</label>
-                <span class="feishu-doc-capability" id="feishuDocCapability"></span>
-              </div>
-              <textarea class="field url-input-inline import-textarea" id="urlInput" rows="5" spellcheck="false" placeholder="粘贴公众号链接、正文或 Markdown，输入 @ 搜索飞书文档。"></textarea>
-            </div>
-            <div class="feishu-doc-search" id="feishuDocSearch" hidden></div>
           </div>
           <div class="progress import-progress" id="progress" role="progressbar" aria-label="导入总进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <div class="progress-heading">
@@ -105,10 +117,10 @@
       </div>
 
       <div class="error" id="error"></div>
-      <div class="rail-sep"></div>
       <div class="ma-section" id="moreArticlesSection" style="display:none;">
         <div id="moreArticlesEmbed">
-          <div class="ma-embed-head" style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+          <!-- 这段会被 block-panel 摘进「更多文章」区块里，那里已经有区块标题，所以这里不再重复标题。 -->
+          <div class="ma-embed-head">
             <button class="ma-reset-btn" id="maResetBtn" type="button" title="清空所有卡片">清空更多文章</button>
           </div>
           <div class="more-articles-editor" id="moreArticlesEditor">
@@ -122,11 +134,14 @@
       </div>
     </div>
 
+    <div class="rail-foot">
+      <div class="user-identity rail-user-identity" id="userIdentity" aria-label="当前登录用户"></div>
+    </div>
   </aside>
 
   <div class="rail-divider" id="railDivider" role="separator" aria-orientation="vertical" aria-label="调整左栏宽度">
     <button class="rail-divider-toggle" id="railToggleBtn" type="button" aria-label="收起左栏" aria-expanded="true" title="收起左栏">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
   </div>
 
@@ -845,9 +860,9 @@ bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
   importText: importClipboardText,
-  tryImportValue: value => feishuDocImport?.importValue(value) === true,
   onInputCleared: clearRenderedImport,
   shouldSubmitValue: value => !value.trimStart().startsWith('@'),
+  tryImportValue: value => feishuDocImport?.importValue?.(value) === true,
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 </script>

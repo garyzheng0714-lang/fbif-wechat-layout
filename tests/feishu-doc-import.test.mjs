@@ -66,6 +66,7 @@ test('Feishu document URLs are parsed only from official hosts and supported doc
   assert.equal(parseFeishuDocumentUrl('https://foodtalks.feishu.cn.evil.test/docx/token1234'), null);
   assert.equal(parseFeishuDocumentUrl('http://foodtalks.feishu.cn/docx/token1234'), null);
   assert.equal(parseFeishuDocumentUrl('https://foodtalks.feishu.cn/base/token1234'), null);
+  assert.equal(parseFeishuDocumentUrl('https://foodtalks.feishu.cn/docx/token1234/extra'), null);
   assert.equal(parseFeishuDocumentUrl('not a URL'), null);
 });
 

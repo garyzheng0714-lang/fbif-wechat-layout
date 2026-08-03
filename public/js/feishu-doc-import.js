@@ -222,12 +222,22 @@ export function mountFeishuDocumentImport({
 } = {}) {
   const input = documentRef?.getElementById('urlInput');
   const panel = documentRef?.getElementById('feishuDocSearch');
+  const feishuTrigger = documentRef?.getElementById('feishuDocTrigger');
   const capability = documentRef?.getElementById('feishuDocCapability');
+  const dropZone = documentRef?.getElementById('dropZone');
+  const selection = documentRef?.getElementById('feishuDocSelection');
+  const selectionTitle = documentRef?.getElementById('feishuDocSelectionTitle');
+  const selectionStatus = documentRef?.getElementById('feishuDocSelectionStatus');
+  const selectionCancel = documentRef?.getElementById('feishuDocSelectionCancel');
   const progress = documentRef?.getElementById('progress');
   const progressFill = documentRef?.getElementById('progressFill');
   const progressText = documentRef?.getElementById('progressText');
   const progressPercent = documentRef?.getElementById('progressPercent');
   if (!input || !panel) return { invalidate() {}, destroy() {} };
+
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-controls', panel.id || 'feishuDocSearch');
+  input.setAttribute('aria-expanded', 'false');
 
   const capable = isFeishuCapable(user);
   let generation = 0;
@@ -240,9 +250,11 @@ export function mountFeishuDocumentImport({
   let activeExportJobURL = '';
 
   if (capability) {
-    capability.textContent = capable ? '输入 @ 搜索，或粘贴飞书文档链接' : '飞书文档需飞书登录';
+    capability.textContent = capable ? '粘贴后自动排版' : '飞书文档需飞书登录';
     capability.classList.toggle('is-locked', !capable);
   }
+  feishuTrigger?.classList.toggle('is-restricted', !capable);
+  if (!capable && feishuTrigger) feishuTrigger.title = '需要使用飞书登录';
 
   const doFetch = fetchImpl
     ? (url, options) => fetchImpl(url, options)
@@ -376,13 +388,58 @@ export function mountFeishuDocumentImport({
 
   function showPanel() {
     panel.hidden = false;
+    dropZone?.classList.add('has-feishu-search');
+    input.setAttribute('aria-expanded', 'true');
+    feishuTrigger?.setAttribute('aria-expanded', 'true');
   }
 
   function hidePanel() {
     panel.hidden = true;
+    dropZone?.classList.remove('has-feishu-search');
+    input.setAttribute('aria-expanded', 'false');
+    feishuTrigger?.setAttribute('aria-expanded', 'false');
     panel.replaceChildren();
     documents = [];
     activeIndex = -1;
+  }
+
+  function showSelectedDocument(document, status = '正在从飞书生成 Word…') {
+    if (!selection) return;
+    if (selectionTitle) selectionTitle.textContent = document?.title || '飞书文档';
+    if (selectionStatus) selectionStatus.textContent = status;
+    selection.hidden = false;
+    dropZone?.classList.add('is-feishu-selected');
+  }
+
+  function updateSelectedDocumentStatus(status) {
+    if (selectionStatus && status) selectionStatus.textContent = status;
+  }
+
+  function hideSelectedDocument() {
+    if (selection) selection.hidden = true;
+    dropZone?.classList.remove('is-feishu-selected');
+  }
+
+  function appendHighlightedText(node, value, query) {
+    const text = String(value || '');
+    const needle = String(query || '').trim();
+    if (!needle) {
+      node.textContent = text;
+      return;
+    }
+    const normalizedText = text.toLocaleLowerCase('zh-CN');
+    const normalizedNeedle = needle.toLocaleLowerCase('zh-CN');
+    let cursor = 0;
+    for (;;) {
+      const index = normalizedText.indexOf(normalizedNeedle, cursor);
+      if (index < 0) break;
+      if (index > cursor) node.append(documentRef.createTextNode(text.slice(cursor, index)));
+      const mark = documentRef.createElement('mark');
+      mark.textContent = text.slice(index, index + needle.length);
+      node.append(mark);
+      cursor = index + needle.length;
+    }
+    if (cursor < text.length) node.append(documentRef.createTextNode(text.slice(cursor)));
   }
 
   function renderMessage(title, detail = '', state = '') {
@@ -450,7 +507,8 @@ export function mountFeishuDocumentImport({
     activeExportJobURL = '';
     let completed = false;
     onArticleIntent({ source: 'feishu-doc-import', document });
-    renderMessage('正在从飞书导入并排版…', document.title || '飞书文档', 'loading');
+    hidePanel();
+    showSelectedDocument(document);
     if (tracker) tracker.updatePhase('resolve', 0, 0, { status: '正在创建飞书导入任务…' });
     else setImportProgress({ text: '正在生成并准备 Word…', indeterminate: true });
     try {
@@ -478,6 +536,7 @@ export function mountFeishuDocumentImport({
           percent: 15,
         });
       }
+      updateSelectedDocumentStatus('Word 已生成，正在接收正文…');
       const blob = await readResponseBlobWithProgress(response, {
         BlobCtor,
         onProgress({ loaded, total }) {
@@ -505,6 +564,7 @@ export function mountFeishuDocumentImport({
       });
       if (stale(ticket, accountID)) return false;
       if (tracker) tracker.completePhase('result-download', { status: 'Word 已接收，正在解析…' });
+      updateSelectedDocumentStatus('Word 已生成，正在排版…');
       const filename = filenameFromDisposition(response.headers.get('Content-Disposition'), document.title);
       const file = new FileCtor([blob], filename, { type: DOCX_MIME });
       const handleFile = getHandleFile();
@@ -532,11 +592,13 @@ export function mountFeishuDocumentImport({
       }
       input.value = '';
       completed = true;
+      hideSelectedDocument();
       return true;
     } catch (error) {
       if (stale(ticket, accountID)) return false;
       tracker?.cancel('failed');
       stopImportProgress();
+      hideSelectedDocument();
       renderMessage('导入失败', error?.message || '飞书文档导入失败', 'error');
       return false;
     } finally {
@@ -550,7 +612,7 @@ export function mountFeishuDocumentImport({
     panel.replaceChildren();
     const heading = documentRef.createElement('div');
     heading.className = 'feishu-doc-search-head';
-    heading.textContent = `“${query}”的搜索结果`;
+    heading.textContent = `${results.length} 个结果`;
     panel.append(heading);
     if (!results.length) {
       renderMessage('没有找到对应文档', '请换一个文档名称或关键词。', 'empty');
@@ -574,7 +636,7 @@ export function mountFeishuDocumentImport({
       copy.className = 'feishu-doc-result-copy';
       const title = documentRef.createElement('span');
       title.className = 'feishu-doc-result-title';
-      title.textContent = document.title || '未命名文档';
+      appendHighlightedText(title, document.title || '未命名文档', query);
       const meta = documentRef.createElement('span');
       meta.className = 'feishu-doc-result-meta';
       meta.textContent = [document.owner_name, formatModifiedAt(document.modified_at)].filter(Boolean).join(' · ') || '飞书云文档';
@@ -618,6 +680,7 @@ export function mountFeishuDocumentImport({
     }
     // cancel() emits the tracker's last (<100) snapshot, so hide only after
     // that emission; otherwise a canceled import can make the bar reappear.
+    hideSelectedDocument();
     stopImportProgress();
     if (activeExportJobURL) {
       void cancelExportJob(activeExportJobURL);
@@ -657,7 +720,7 @@ export function mountFeishuDocumentImport({
       return;
     }
     if (!query) {
-      renderMessage('搜索飞书文档', '继续输入文档名称或关键词。', 'empty');
+      renderMessage('搜索飞书云文档', '继续输入文档名称或关键词。', 'empty');
       return;
     }
     const ticket = generation;
@@ -667,8 +730,23 @@ export function mountFeishuDocumentImport({
     }, debounceMs);
   }
 
+  function openFeishuSearch() {
+    input.focus();
+    const currentValue = String(input.value || '');
+    if (!currentValue.trim()) {
+      input.value = '@';
+      input.dispatchEvent(new windowRef.Event('input', { bubbles: true }));
+      return;
+    }
+    if (parseFeishuMention(currentValue) !== null) {
+      onInput();
+      return;
+    }
+    renderMessage('搜索飞书云文档', '请先清空当前输入内容，再选择飞书文档。', 'empty');
+  }
+
   function onKeydown(event) {
-    if (parseFeishuMention(input.value) === null) return;
+    if (panel.hidden || parseFeishuMention(input.value) === null) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -697,8 +775,28 @@ export function mountFeishuDocumentImport({
     hidePanel();
   }
 
+  function onDocumentClick(event) {
+    if (panel.hidden) return;
+    const target = event?.target;
+    const path = typeof event?.composedPath === 'function' ? event.composedPath() : [];
+    if (target === input || panel.contains(target) || path.includes(panel) || feishuTrigger?.contains(target)) return;
+    invalidate();
+    hidePanel();
+  }
+
+  function onSelectionCancel(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    invalidate();
+    input.focus();
+    if (parseFeishuMention(input.value) !== null) onInput();
+  }
+
   input.addEventListener('input', onInput);
   input.addEventListener('keydown', onKeydown, true);
+  feishuTrigger?.addEventListener('click', openFeishuSearch);
+  selectionCancel?.addEventListener('click', onSelectionCancel);
+  documentRef.addEventListener('click', onDocumentClick);
   windowRef.addEventListener?.('fbif:article-input-started', onExternalArticleInput);
 
   return {
@@ -709,8 +807,12 @@ export function mountFeishuDocumentImport({
       invalidate();
       input.removeEventListener('input', onInput);
       input.removeEventListener('keydown', onKeydown, true);
+      feishuTrigger?.removeEventListener('click', openFeishuSearch);
+      selectionCancel?.removeEventListener('click', onSelectionCancel);
+      documentRef.removeEventListener('click', onDocumentClick);
       windowRef.removeEventListener?.('fbif:article-input-started', onExternalArticleInput);
       hidePanel();
+      hideSelectedDocument();
     },
   };
 }

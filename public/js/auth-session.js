@@ -151,6 +151,24 @@ function appendTextLine(documentRef, parent, className, text) {
   return line;
 }
 
+// 身份菜单固定在左栏底部并向上展开，所以静止态的箭头朝上；展开时 CSS 旋转 180° 指回收起方向。
+function makeCaretIcon(documentRef) {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = documentRef.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 20 20');
+  icon.setAttribute('width', '14');
+  icon.setAttribute('height', '14');
+  icon.setAttribute('fill', 'none');
+  const path = documentRef.createElementNS(namespace, 'path');
+  path.setAttribute('d', 'm6 12 4-4 4 4');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.7');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  icon.append(path);
+  return icon;
+}
+
 export function mountUserIdentity(container, user, {
   documentRef = globalThis.document,
   windowRef = globalThis.window,
@@ -164,6 +182,7 @@ export function mountUserIdentity(container, user, {
   const trigger = documentRef.createElement('button');
   trigger.type = 'button';
   trigger.className = 'user-identity-trigger';
+  trigger.setAttribute('aria-label', `当前用户：${user.name || '未命名用户'}`);
   trigger.setAttribute('aria-haspopup', 'menu');
   trigger.setAttribute('aria-expanded', 'false');
   trigger.append(makeAvatar(documentRef, user));
@@ -175,13 +194,15 @@ export function mountUserIdentity(container, user, {
     documentRef,
     summary,
     'user-identity-capability',
-    user.capabilities?.feishu_documents ? '云文档已连接' : '云文档不可用',
+    `${user.auth_mode === 'password' ? '账号登录' : '飞书登录'} · ${
+      user.capabilities?.feishu_documents ? '云文档已连接' : '云文档不可用'
+    }`,
   );
   trigger.append(summary);
   const caret = documentRef.createElement('span');
   caret.className = 'user-identity-caret';
   caret.setAttribute('aria-hidden', 'true');
-  caret.textContent = '⌄';
+  caret.append(makeCaretIcon(documentRef));
   trigger.append(caret);
 
   const menu = documentRef.createElement('div');
@@ -214,24 +235,6 @@ export function mountUserIdentity(container, user, {
   );
   capability.setAttribute('role', 'status');
 
-  if (!user.capabilities?.feishu_documents) {
-    const switchButton = documentRef.createElement('button');
-    switchButton.type = 'button';
-    switchButton.className = 'user-identity-switch';
-    switchButton.dataset.switchFeishuLogin = '';
-    switchButton.textContent = '改用飞书登录';
-    switchButton.addEventListener('click', async () => {
-      switchButton.disabled = true;
-      try {
-        await logoutSession({ fetchImpl, storage });
-      } finally {
-        const returnTo = currentReturnTo(windowRef);
-        navigate(windowRef, `/auth/feishu/fbif/login?return_to=${encodeURIComponent(returnTo)}`);
-      }
-    });
-    menu.append(switchButton);
-  }
-
   const divider = documentRef.createElement('div');
   divider.className = 'user-identity-divider';
   menu.append(divider);
@@ -253,6 +256,7 @@ export function mountUserIdentity(container, user, {
   function setOpen(open) {
     menu.hidden = !open;
     trigger.setAttribute('aria-expanded', String(open));
+    container.closest?.('.rail')?.classList.toggle('identity-menu-open', open);
   }
   function onDocumentClick(event) {
     if (!container.contains(event.target)) setOpen(false);
@@ -271,6 +275,7 @@ export function mountUserIdentity(container, user, {
     destroy() {
       documentRef.removeEventListener('click', onDocumentClick);
       documentRef.removeEventListener('keydown', onDocumentKeydown);
+      container.closest?.('.rail')?.classList.remove('identity-menu-open');
       container.replaceChildren();
     },
   };

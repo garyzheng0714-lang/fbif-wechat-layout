@@ -24,33 +24,35 @@ function deferred() {
   return { promise, resolve };
 }
 
-test('app shell renders a unified top-bar account menu (single layer)', async () => {
+test('app shell renders one publishing-account menu inside the import card', async () => {
   const app = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/app.css', import.meta.url), 'utf8');
   const channelBarCss = await readFile(new URL('../public/css/channel-bar.css', import.meta.url), 'utf8');
   const menuJs = await readFile(new URL('../public/js/account-menu.js', import.meta.url), 'utf8');
   const allCss = css + '\n' + channelBarCss;
 
-  // 单层账号菜单：顶栏左上角头像菜单取代旧的
-  // 侧栏方角分段 + 顶部圆形渠道胶囊。渲染逻辑在 account-menu.js，挂载点 #acctMenu。
+  // 单层发布账号菜单：住在左栏导入卡第一行——工具贴着它作用的对象（这次导入去哪个账号）。
+  // 顶栏只留当前页面动作；登录身份在左栏底部。渲染逻辑仍在 account-menu.js，挂载点仍是唯一的 #acctMenu。
   assert.match(app, /id="acctMenu"/);
   assert.match(app, /mountAccountMenu/);
   assert.match(app, /account-menu\.js/);
   const headerStart = app.indexOf('<header class="global-channel-bar">');
   const headerEnd = app.indexOf('</header>', headerStart);
-  const railStart = app.indexOf('<aside class="rail sidebar"');
-  const railBodyStart = app.indexOf('<div class="rail-body sidebar-body scroll-y">', railStart);
   const header = app.slice(headerStart, headerEnd);
-  const railHead = app.slice(railStart, railBodyStart);
   const visibleShell = app.slice(0, app.indexOf('<script type="module">'));
-  assert.match(header, /id="acctMenu"/, '公众号菜单应回到全局顶栏左上角');
+  const dropZoneAt = app.indexOf('id="dropZone"');
+  const composerInputAt = app.indexOf('data-url-focus-target');
+  const accountAt = app.indexOf('id="acctMenu"');
+  assert.doesNotMatch(header, /id="userIdentity"/, '顶栏不再承载登录身份');
+  assert.doesNotMatch(header, /id="acctMenu"/, '顶栏不再承载发布账号菜单');
+  assert.match(app, /class="import-destination-label">排版到</, '导入卡应说明「排版到」这层关系');
+  assert.ok(accountAt > dropZoneAt && accountAt < composerInputAt, '公众号菜单应是导入卡的第一行');
   assert.doesNotMatch(app, /captureArticleTab|_articleTabs|mountArticleTabs/, '账号切换不应再绑定文章标签页状态');
   assert.doesNotMatch(header, /FBIF文章排版工具|class="app-brand-logo"|class="app-brand"/, '全局顶栏不应展示产品身份文案');
-  assert.match(header, /id="acctMenu"[\s\S]*class="topbar-spacer"[\s\S]*id="previewToolbar"[\s\S]*id="copyBtn"/, '复制全文应留在右侧操作区');
+  assert.match(header, /class="topbar-spacer"[\s\S]*id="previewToolbar"[\s\S]*id="copyBtn"/, '顶栏只剩当前页面动作，复制全文靠右');
   assert.doesNotMatch(header, /id="adminLockBtn"/, '设置入口不应常驻顶栏');
   assert.match(app, /settingsAction:\s*\{[\s\S]*id:\s*'adminLockBtn'[\s\S]*label:\s*'规则设置'/, '设置入口应收进账号菜单底部');
   assert.doesNotMatch(header, /id="articleRefreshBtn"/, '刷新按钮不应出现在顶栏');
-  assert.doesNotMatch(railHead, /class="rail-account-bar"|id="acctMenu"/, '公众号菜单不应留在左侧工具区顶部');
   // 旧的两层切换器残骸必须清掉
   assert.doesNotMatch(app, /id="accountSwitcher"/, '旧侧栏方角分段已移除');
   assert.doesNotMatch(app, /class="channel-switcher"/, '旧顶部圆形渠道胶囊已移除');
