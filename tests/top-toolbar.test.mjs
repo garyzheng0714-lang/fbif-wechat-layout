@@ -115,6 +115,7 @@ test('app rail divider stays visually slim and the handle behaves like a clickab
   assert.match(shellJs, /export function bindRailDivider\(/, 'rail divider behavior should live in the shared shell helper');
   assert.match(authCss, /\.rail-foot > \.user-identity\s*\{[\s\S]*?width:\s*100%;/, 'signed-in identity should fill the rail footer');
   assert.match(css, /\.rail-foot\s*\{[\s\S]*?padding:\s*0;[\s\S]*?align-items:\s*stretch;/, 'the login footer should attach directly to its divider without an inset gap');
+  assert.doesNotMatch(css, /\.dropzone\.is-feishu-selected\s+\.import-composer-input\s*\{[^}]*display:\s*none;/s, 'a newer typed intent must remain reachable while a Feishu import is pending');
   assert.match(authCss, /\.rail-foot \.user-identity-trigger\s*\{[\s\S]*?min-height:\s*55px;[\s\S]*?padding:\s*0 10px;[\s\S]*?border-radius:\s*0;/, 'the login row should fill the footer surface edge to edge');
   assert.match(authCss, /\.rail-foot \.user-identity-menu\s*\{[\s\S]*?bottom:\s*calc\(100% \+ 7px\);/, 'the rail-footer identity menu must open upward, not off-screen');
   assert.match(css, /\.import-account-target \.acct-trigger\s*\{[\s\S]*?height:\s*26px;/, 'publishing account should be a compact chip inside the import card');

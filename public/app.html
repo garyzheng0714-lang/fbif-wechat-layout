@@ -75,10 +75,12 @@
                     <span class="import-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5 12 20a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.6l-9 9a2 2 0 1 1-2.9-2.8l8.4-8.4"/></svg></span>
                     <span class="import-action-label" data-add-file-text>上传文件</span>
                   </button>
-                  <button class="import-action-button import-feishu-trigger" id="feishuDocTrigger" type="button" data-feishu-doc-trigger aria-label="搜索飞书云文档" aria-controls="feishuDocSearch" aria-expanded="false">
-                    <span class="import-action-icon import-at-icon" aria-hidden="true">@</span>
-                    <span class="import-action-label">飞书云文档</span>
-                  </button>
+                  <span class="import-feishu-action-wrap is-login-required" id="feishuDocTriggerWrap" title="上传飞书云文档需登录FBIF内部账号">
+                    <button class="import-action-button import-feishu-trigger" id="feishuDocTrigger" type="button" data-feishu-doc-trigger aria-label="搜索飞书云文档" aria-controls="feishuDocSearch" aria-expanded="false" aria-disabled="true" disabled>
+                      <span class="import-action-icon import-at-icon" aria-hidden="true">@</span>
+                      <span class="import-action-label">飞书云文档</span>
+                    </button>
+                  </span>
                 </div>
                 <span class="import-composer-spacer"></span>
                 <span class="feishu-doc-capability import-capability-status" id="feishuDocCapability">粘贴后自动排版</span>

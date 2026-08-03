@@ -40,6 +40,8 @@ test('both editor shells put the publishing target inside the import card and th
     assert.match(shell, /if \(authUser\) authSession\.mountUserIdentity\(document\.getElementById\('userIdentity'\), authUser\)/);
     assert.doesNotMatch(shell, /ensureAuthenticatedSession\(\)/);
     assert.match(shell, /data-feishu-doc-trigger/);
+    assert.match(shell, /id="feishuDocTriggerWrap"[^>]*title="上传飞书云文档需登录FBIF内部账号"/);
+    assert.match(shell, /id="feishuDocTrigger"[^>]*aria-disabled="true" disabled/);
     assert.match(shell, /mountFeishuDocumentImport/);
   }
   const appToolbar = app.slice(app.indexOf('id="previewToolbar"'), app.indexOf('</header>'));

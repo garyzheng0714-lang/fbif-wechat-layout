@@ -965,7 +965,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
     await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
     await waitForAppReady(page);
-    await expect(page.locator('#feishuDocCapability')).toHaveText('输入 @ 搜索，或粘贴飞书文档链接');
+    await expect(page.locator('#feishuDocCapability')).toHaveText('粘贴后自动排版');
 
     // 先放一篇真实 DOCX 在右侧，锁定“等待期间旧预览不能变白”的契约。
     await page.locator('#fileInput').setInputFiles(DOCX_PATH);

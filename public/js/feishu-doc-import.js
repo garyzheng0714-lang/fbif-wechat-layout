@@ -223,6 +223,7 @@ export function mountFeishuDocumentImport({
   const input = documentRef?.getElementById('urlInput');
   const panel = documentRef?.getElementById('feishuDocSearch');
   const feishuTrigger = documentRef?.getElementById('feishuDocTrigger');
+  const feishuTriggerWrap = documentRef?.getElementById('feishuDocTriggerWrap');
   const capability = documentRef?.getElementById('feishuDocCapability');
   const dropZone = documentRef?.getElementById('dropZone');
   const selection = documentRef?.getElementById('feishuDocSelection');
@@ -240,6 +241,7 @@ export function mountFeishuDocumentImport({
   input.setAttribute('aria-expanded', 'false');
 
   const capable = isFeishuCapable(user);
+  const loginRequired = !user;
   let generation = 0;
   let timer = null;
   let documents = [];
@@ -250,11 +252,29 @@ export function mountFeishuDocumentImport({
   let activeExportJobURL = '';
 
   if (capability) {
-    capability.textContent = capable ? '粘贴后自动排版' : '飞书文档需飞书登录';
-    capability.classList.toggle('is-locked', !capable);
+    capability.textContent = '粘贴后自动排版';
+    capability.classList.remove('is-locked');
   }
   feishuTrigger?.classList.toggle('is-restricted', !capable);
-  if (!capable && feishuTrigger) feishuTrigger.title = '需要使用飞书登录';
+  if (feishuTrigger) {
+    feishuTrigger.disabled = loginRequired;
+    feishuTrigger.setAttribute('aria-disabled', String(loginRequired));
+    if (loginRequired) {
+      feishuTrigger.removeAttribute('title');
+    } else if (!capable) {
+      feishuTrigger.title = '需要使用飞书登录';
+    } else {
+      feishuTrigger.removeAttribute('title');
+    }
+  }
+  if (feishuTriggerWrap) {
+    feishuTriggerWrap.classList.toggle('is-login-required', loginRequired);
+    if (loginRequired) {
+      feishuTriggerWrap.title = '上传飞书云文档需登录FBIF内部账号';
+    } else {
+      feishuTriggerWrap.removeAttribute('title');
+    }
+  }
 
   const doFetch = fetchImpl
     ? (url, options) => fetchImpl(url, options)
@@ -731,6 +751,7 @@ export function mountFeishuDocumentImport({
   }
 
   function openFeishuSearch() {
+    if (loginRequired || feishuTrigger?.disabled) return;
     input.focus();
     const currentValue = String(input.value || '');
     if (!currentValue.trim()) {
