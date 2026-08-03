@@ -112,7 +112,13 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
     expect(new URL(page.url()).pathname).toBe('/mp/fbif');
     await expect(page.locator('#emptyState')).toBeVisible();
     await expect(page.locator('#userIdentity')).toBeEmpty();
-    await expect(page.locator('#feishuDocCapability')).toHaveText('飞书文档需飞书登录');
+    await expect(page.locator('#feishuDocCapability')).toHaveText('粘贴后自动排版');
+    await expect(page.locator('#feishuDocTrigger')).toBeDisabled();
+    await expect(page.locator('#feishuDocTrigger')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('#feishuDocTriggerWrap')).toHaveAttribute(
+      'title',
+      '上传飞书云文档需登录FBIF内部账号',
+    );
     await context.close();
   });
 
