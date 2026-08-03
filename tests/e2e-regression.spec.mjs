@@ -24,6 +24,10 @@ const BREAKPOINTS = [
   { name: 'tablet-768', width: 768, height: 1024 },
   { name: 'mobile-390', width: 390, height: 844 },
 ];
+const PANE_WIDE_BREAKPOINTS = [
+  { name: 'wide-1920', width: 1920, height: 1080 },
+  { name: 'ultrawide-2560', width: 2560, height: 1440 },
+];
 
 const RESULTS = [];
 const E2E_USERNAME = 'e2e-editor';
@@ -57,6 +61,48 @@ async function waitForAppReady(page) {
   await page.waitForSelector('.app-layout', { timeout: 15000 });
   // Wait a bit for dynamic JS to settle
   await page.waitForTimeout(2000);
+}
+
+async function expectRoundedPaneShell(page, bp) {
+  const geometry = await page.evaluate(() => {
+    const box = selector => {
+      const element = document.querySelector(selector);
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        x: rect.x,
+        y: rect.y,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+        borderRadius: style.borderRadius,
+        background: style.backgroundColor,
+        display: style.display,
+      };
+    };
+    return {
+      layout: box('.app-layout'),
+      rail: box('.rail'),
+      divider: box('.rail-divider'),
+      preview: box('.preview-panel'),
+    };
+  });
+
+  expect(geometry.layout.background).toBe('rgb(255, 255, 255)');
+  expect(geometry.rail.borderRadius).toBe('10px');
+  expect(geometry.preview.borderRadius).toBe('10px');
+  expect(geometry.preview.background).toBe('rgb(255, 255, 255)');
+
+  if (bp.width > 820) {
+    expect(geometry.preview.x - geometry.rail.right).toBe(12);
+    expect(geometry.preview.y).toBe(geometry.rail.y);
+    expect(geometry.divider.width).toBe(12);
+  } else {
+    expect(geometry.preview.y - geometry.rail.bottom).toBe(12);
+    expect(geometry.preview.x).toBe(geometry.rail.x);
+    expect(geometry.divider.display).toBe('none');
+  }
 }
 
 async function captureAndCheck(page, scenario, bp, extraChecks = null, screenshotOptions = {}) {
@@ -130,6 +176,21 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
       await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
       await waitForAppReady(page);
+      await expectRoundedPaneShell(page, bp);
+
+      if (bp.width > 820) {
+        await page.locator('#railToggleBtn').click();
+        await expect(page.locator('.app-layout')).toHaveClass(/rail-collapsed/);
+        await expect.poll(() => page.locator('#rail').evaluate(element => element.getBoundingClientRect().width)).toBe(0);
+        await expect.poll(() => page.locator('#railDivider').evaluate(element => element.getBoundingClientRect().width)).toBe(0);
+        const collapsedPreview = await page.locator('.preview-panel').evaluate(element => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: innerWidth - rect.right };
+        });
+        expect(collapsedPreview).toEqual({ left: 12, right: 12 });
+        await page.locator('#railToggleBtn').click();
+        await expect(page.locator('.app-layout')).not.toHaveClass(/rail-collapsed/);
+      }
 
       // Verify empty state is visible
       const emptyState = page.locator('#emptyState');
@@ -155,6 +216,49 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       await context.close();
     });
   }
+
+  for (const bp of PANE_WIDE_BREAKPOINTS) {
+    test(`1b-圆角分栏宽屏 [${bp.name}]`, async ({ browser }) => {
+      const context = await newAuthenticatedContext(browser, {
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+
+      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+      await expectRoundedPaneShell(page, bp);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+      await context.close();
+    });
+  }
+
+  test('1c-左栏拖动保持可用下限并越界收起', async ({ browser }) => {
+    const context = await newAuthenticatedContext(browser, {
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await context.newPage();
+
+    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
+    await waitForAppReady(page);
+    const dividerBox = await page.locator('#railDivider').boundingBox();
+    expect(dividerBox).not.toBeNull();
+    const startX = dividerBox.x + dividerBox.width / 2;
+    const startY = dividerBox.y + dividerBox.height / 2;
+
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX - 70, startY);
+    await expect.poll(() => page.locator('#rail').evaluate(element => element.getBoundingClientRect().width)).toBe(360);
+    await expect(page.locator('.app-layout')).not.toHaveClass(/rail-collapsed/);
+
+    await page.mouse.move(startX - 110, startY);
+    await expect(page.locator('.app-layout')).toHaveClass(/rail-collapsed/);
+    await expect.poll(() => page.locator('#rail').evaluate(element => element.getBoundingClientRect().width)).toBe(0);
+    await page.mouse.up();
+
+    await context.close();
+  });
 
   // ---- Scenario 2: 上传 DOCX 全流程 ----
   for (const bp of BREAKPOINTS) {

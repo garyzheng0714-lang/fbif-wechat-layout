@@ -200,7 +200,13 @@
 /* ============================================================
    Layout
    ============================================================ */
-.app-layout { display: flex; height: calc(100dvh - var(--topbar-h)); position: relative; }
+.app-layout {
+  display: flex;
+  height: calc(100dvh - var(--topbar-h));
+  padding: var(--fs-space-md);
+  position: relative;
+  background: var(--fs-bg-card);
+}
 body.is-resizing-rail {
   cursor: col-resize;
   user-select: none;
@@ -212,7 +218,8 @@ body.is-resizing-rail {
 .rail {
   width: var(--rail-current-w, var(--rail-w)); flex-shrink: 0;
   background: var(--fs-bg-card);
-  border-right: none;
+  border: 1px solid var(--fs-border-card);
+  border-radius: var(--fs-r-l);
   display: flex; flex-direction: column;
   overflow: hidden;
   z-index: 20;
@@ -237,7 +244,10 @@ body.is-resizing-rail {
   margin-bottom: 6px;
 }
 body.is-resizing-rail .rail { transition: none; }
-.app-layout.rail-collapsed .rail { width: 0; }
+.app-layout.rail-collapsed .rail {
+  width: 0;
+  border-inline: 0;
+}
 .rail-account-bar {
   flex-shrink: 0;
   padding: 10px 14px;
@@ -288,14 +298,23 @@ body.is-resizing-rail .rail { transition: none; }
 .rail-link svg { width: 14px; height: 14px; }
 .rail-sep { height: 1px; background: var(--fs-divider); margin: 2px 0; }
 .rail-divider {
-  width: 4px;
-  flex: 0 0 4px;
+  width: var(--fs-space-md);
+  flex: 0 0 var(--fs-space-md);
   position: relative;
-  background: var(--fs-bg-sunken);
-  box-shadow: inset -1px 0 0 var(--fs-divider);
+  background: transparent;
+  box-shadow: none;
   cursor: col-resize;
   touch-action: none;
   z-index: 30;
+  transition: width var(--fs-t-mid) var(--fs-ease-out),
+              flex-basis var(--fs-t-mid) var(--fs-ease-out);
+}
+body.is-resizing-rail .rail-divider {
+  transition: none;
+}
+.app-layout.rail-collapsed .rail-divider {
+  width: 0;
+  flex-basis: 0;
 }
 .rail-divider-toggle {
   position: absolute;
@@ -1073,7 +1092,17 @@ body.is-resizing-rail .rail { transition: none; }
 /* ============================================================
    Center stage
    ============================================================ */
-.preview-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; position: relative; }
+.preview-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--fs-border-card);
+  border-radius: var(--fs-r-l);
+  overflow: hidden;
+  background: #fff;
+  position: relative;
+}
 .preview-scroll { flex: 1; overflow-y: auto; position: relative; background: #fff; }
 
 /* Empty state */
@@ -1243,9 +1272,9 @@ body.article-text-preview .phone-frame {
 }
 @media (max-width: 820px) {
   /* 无汉堡抽屉：左栏直接竖向堆在预览上方 */
-  .app-layout { flex-direction: column; height: auto; min-height: calc(100dvh - var(--topbar-h)); }
-  .rail { width: auto; border-right: none; border-bottom: 1px solid var(--fs-divider); }
-  .app-layout.rail-collapsed .rail { width: auto; }
+  .app-layout { flex-direction: column; gap: var(--fs-space-md); height: auto; min-height: calc(100dvh - var(--topbar-h)); }
+  .rail { width: auto; }
+  .app-layout.rail-collapsed .rail { width: auto; border-inline: 1px solid var(--fs-border-card); }
   .rail-divider { display: none; }
   .preview-panel { min-height: 60vh; }
 }

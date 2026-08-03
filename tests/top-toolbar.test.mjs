@@ -104,12 +104,18 @@ test('site toolbar lives in the global top-right bar, not the article preview pa
   assert.match(html, /bindRailDivider\(\);/, 'site.html should bind finite drag and collapse behavior');
 });
 
-test('app rail divider stays visually slim and the handle behaves like a clickable control', async () => {
+test('editor shell separates two rounded panes with spacing while keeping the resize handle', async () => {
   const css = await readPublic('css/app-shell.css');
+  const tokens = await readPublic('css/feishu-tokens.css');
   const channelCss = await readPublic('css/channel-bar.css');
   const authCss = await readPublic('css/auth-editor.css');
   const shellJs = await readPublic('js/editor-shell.js');
-  assert.match(css, /\.rail-divider\s*\{[\s\S]*?width:\s*4px;/, 'rail divider should stay slim');
+  assert.match(tokens, /--fs-space-md:\s*12px;/, 'the pane gap should use the project spacing token');
+  assert.match(css, /\.app-layout\s*\{[\s\S]*?padding:\s*var\(--fs-space-md\);[\s\S]*?background:\s*var\(--fs-bg-card\);/, 'the shell should inset both panes on a white canvas');
+  assert.match(css, /\.rail\s*\{[\s\S]*?border:\s*1px solid var\(--fs-border-card\);[\s\S]*?border-radius:\s*var\(--fs-r-l\);[\s\S]*?overflow:\s*hidden;/, 'the left rail should own its rounded surface');
+  assert.match(css, /\.preview-panel\s*\{[\s\S]*?border:\s*1px solid var\(--fs-border-card\);[\s\S]*?border-radius:\s*var\(--fs-r-l\);[\s\S]*?overflow:\s*hidden;[\s\S]*?background:\s*#fff;/, 'the preview should own a clipped, pure-white rounded surface');
+  assert.match(css, /\.rail-divider\s*\{[\s\S]*?width:\s*var\(--fs-space-md\);[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/, 'the resize hit area should read as spacing instead of a divider line');
+  assert.match(css, /@media \(max-width: 820px\)[\s\S]*?\.app-layout\s*\{[^}]*gap:\s*var\(--fs-space-md\);/, 'stacked panes should retain the same semantic gap');
   assert.match(css, /\.rail-divider-toggle\s*\{[\s\S]*?width:\s*22px;[\s\S]*?height:\s*38px;[\s\S]*?backdrop-filter:\s*blur\(8px\);[\s\S]*?cursor:\s*pointer;/, 'rail handle should be compact, softly blurred, and clickable');
   assert.match(css, /\.rail-divider-toggle:hover\s*\{[\s\S]*?--rail-toggle-scale:\s*1\.03;/, 'rail handle should use restrained hover motion');
   assert.match(shellJs, /export function bindRailDivider\(/, 'rail divider behavior should live in the shared shell helper');

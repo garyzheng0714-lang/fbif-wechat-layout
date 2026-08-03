@@ -108,9 +108,9 @@ export function bindRailDivider({
   railID = 'rail',
   dividerID = 'railDivider',
   buttonID = 'railToggleBtn',
-  minWidth = 220,
+  minWidth = 360,
   maxWidth = 420,
-  collapseThreshold = 180,
+  collapseThreshold = 320,
 } = {}) {
   const layout = documentRef.querySelector(layoutSelector);
   const rail = documentRef.getElementById(railID);
