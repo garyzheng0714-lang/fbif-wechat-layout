@@ -69,7 +69,9 @@ function ensureStyle(doc) {
 .bp-switch-knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:var(--fs-r-full,9999px);background:var(--fs-bg-card,#fff);box-shadow:var(--fs-sh-s1,0 1px 2px rgba(31,35,39,.12));transition:transform var(--fs-t-fast,150ms) var(--fs-ease-out,ease-out);}
 .bp-switch[aria-checked="true"] .bp-switch-knob{transform:translateX(16px);}
 .bp-footer{display:flex;flex-direction:column;gap:10px;}
-.bp-footer-details{background:var(--fs-bg-nested,#f7f8fa);border-radius:var(--fs-r-m,8px);padding:0;}
+/* 左栏工作区本身就是 bg-nested 灰底，所以区块面板必须是白卡才成立——
+   跟导入卡同一套外壳语言（白底 + border-card + 静止轻托）。 */
+.bp-footer-details{background:var(--fs-bg-card,#fff);border:1px solid var(--fs-border-card,#e5e6eb);border-radius:var(--fs-r-l,10px);box-shadow:var(--fs-sh-s1,0 1px 3px rgba(31,35,39,.04));padding:0;}
 .bp-footer-details summary{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:40px;padding:0 10px;cursor:pointer;outline:none;list-style:none;}
 .bp-footer-details summary::-webkit-details-marker{display:none;}
 .bp-footer-details summary::marker{content:'';}

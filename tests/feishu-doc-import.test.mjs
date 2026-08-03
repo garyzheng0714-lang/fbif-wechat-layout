@@ -13,7 +13,12 @@ function makeShell() {
     <main>
       <textarea id="urlInput"></textarea>
       <div id="feishuDocCapability"></div>
-      <div id="feishuDocSearch" hidden></div>
+      <div id="dropZone">
+        <span id="feishuDocTriggerWrap" class="import-feishu-action-wrap is-login-required" title="上传飞书云文档需登录FBIF内部账号">
+          <button id="feishuDocTrigger" aria-expanded="false" aria-disabled="true" disabled>飞书云文档</button>
+        </span>
+        <div id="feishuDocSearch" hidden></div>
+      </div>
       <div id="progress" style="display:none">
         <div id="progressFill"></div>
         <div id="progressText"></div>
@@ -22,6 +27,31 @@ function makeShell() {
     </main>
   `);
 }
+
+test('anonymous users see a disabled Feishu button with the internal-account login hint', () => {
+  const { document, window } = makeShell();
+  let calls = 0;
+  mountFeishuDocumentImport({
+    documentRef: document,
+    windowRef: window,
+    user: null,
+    fetchImpl: async () => {
+      calls++;
+      throw new Error('must not be called');
+    },
+  });
+
+  const trigger = document.getElementById('feishuDocTrigger');
+  const wrapper = document.getElementById('feishuDocTriggerWrap');
+  assert.equal(trigger.disabled, true);
+  assert.equal(trigger.getAttribute('aria-disabled'), 'true');
+  assert.equal(wrapper.classList.contains('is-login-required'), true);
+  assert.equal(wrapper.title, '上传飞书云文档需登录FBIF内部账号');
+  assert.equal(document.getElementById('feishuDocCapability').textContent, '粘贴后自动排版');
+  trigger.click();
+  assert.equal(calls, 0);
+  assert.equal(document.getElementById('feishuDocSearch').hidden, true);
+});
 
 function input(window, node, value) {
   node.value = value;
@@ -66,6 +96,7 @@ test('Feishu document URLs are parsed only from official hosts and supported doc
   assert.equal(parseFeishuDocumentUrl('https://foodtalks.feishu.cn.evil.test/docx/token1234'), null);
   assert.equal(parseFeishuDocumentUrl('http://foodtalks.feishu.cn/docx/token1234'), null);
   assert.equal(parseFeishuDocumentUrl('https://foodtalks.feishu.cn/base/token1234'), null);
+  assert.equal(parseFeishuDocumentUrl('https://foodtalks.feishu.cn/docx/token1234/extra'), null);
   assert.equal(parseFeishuDocumentUrl('not a URL'), null);
 });
 
@@ -85,6 +116,9 @@ test('password login shows a real locked state and never calls the Feishu API', 
     },
     debounceMs: 0,
   });
+  assert.equal(document.getElementById('feishuDocTrigger').disabled, false);
+  assert.equal(document.getElementById('feishuDocTriggerWrap').hasAttribute('title'), false);
+  assert.equal(document.getElementById('feishuDocCapability').textContent, '粘贴后自动排版');
   input(window, document.getElementById('urlInput'), '@新品');
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(calls, 0);

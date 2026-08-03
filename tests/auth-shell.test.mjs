@@ -11,24 +11,43 @@ const login = fs.readFileSync(path.join(root, 'public/login.html'), 'utf8');
 const loginCSS = fs.readFileSync(path.join(root, 'public/css/auth-login.css'), 'utf8');
 const caddy = fs.readFileSync(path.join(root, 'deploy/caddy/fbifmp-layout.caddy'), 'utf8');
 
-test('both editor shells put user identity in the left rail and keep the global right toolbar unchanged', () => {
+test('both editor shells put the publishing target inside the import card and the signed-in identity in the rail footer', () => {
   for (const shell of [app, site]) {
-    const railStart = shell.indexOf('class="rail-body');
+    const headerStart = shell.indexOf('<header class="global-channel-bar">');
+    const headerEnd = shell.indexOf('</header>', headerStart);
+    const dropZoneAt = shell.indexOf('id="dropZone"');
+    const composerInputAt = shell.indexOf('data-url-focus-target');
+    const railFootAt = shell.indexOf('<div class="rail-foot">');
+    const railEndAt = shell.indexOf('</aside>');
     const identityAt = shell.indexOf('id="userIdentity"');
-    const importAt = shell.indexOf('id="importZone"');
-    assert.ok(railStart >= 0 && identityAt > railStart && identityAt < importAt);
+    const accountAt = shell.indexOf('id="acctMenu"');
+    assert.ok(headerStart >= 0 && headerEnd > headerStart);
+    const header = shell.slice(headerStart, headerEnd);
+    assert.doesNotMatch(header, /id="userIdentity"/, 'the top bar keeps only page actions, not the signed-in identity');
+    assert.doesNotMatch(header, /id="acctMenu"/, 'the top bar keeps only page actions, not the publishing target');
+    assert.ok(
+      accountAt > dropZoneAt && accountAt < composerInputAt,
+      'publishing target should be the first row inside the import card, above the composer input',
+    );
+    assert.ok(
+      railFootAt > 0 && identityAt > railFootAt && identityAt < railEndAt,
+      'signed-in identity should live in the left rail footer',
+    );
     assert.match(shell, /id="feishuDocCapability"/);
     assert.match(shell, /id="feishuDocSearch"/);
-    assert.match(shell, /输入 @ 搜索飞书文档/);
+    assert.match(shell, /粘贴后自动排版/);
     assert.match(shell, /loadOptionalCurrentUser\(\)/);
     assert.match(shell, /if \(authUser\) authSession\.mountUserIdentity\(document\.getElementById\('userIdentity'\), authUser\)/);
     assert.doesNotMatch(shell, /ensureAuthenticatedSession\(\)/);
+    assert.match(shell, /data-feishu-doc-trigger/);
+    assert.match(shell, /id="feishuDocTriggerWrap"[^>]*title="上传飞书云文档需登录FBIF内部账号"/);
+    assert.match(shell, /id="feishuDocTrigger"[^>]*aria-disabled="true" disabled/);
     assert.match(shell, /mountFeishuDocumentImport/);
   }
   const appToolbar = app.slice(app.indexOf('id="previewToolbar"'), app.indexOf('</header>'));
   const siteToolbar = site.slice(site.indexOf('id="previewToolbar"'), site.indexOf('</header>'));
-  assert.doesNotMatch(appToolbar, /userIdentity|user-avatar|退出登录/);
-  assert.doesNotMatch(siteToolbar, /userIdentity|user-avatar|退出登录/);
+  assert.match(appToolbar, /id="copyBtn"/, 'app copy action stays in the top bar');
+  assert.match(siteToolbar, /id="copyBtn"/, 'site copy action stays in the top bar');
 });
 
 test('login page reuses the approved production mascot gate with the password-account variant', () => {

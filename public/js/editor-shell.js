@@ -366,15 +366,14 @@ export function bindUrlImportShortcuts({
   shouldSubmitValue = () => true,
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
+  const submitButton = documentRef.getElementById('importSubmitBtn');
 
   function submitImportValue(value) {
     const text = String(value || '').trim();
     if (!text) return false;
     if (!shouldSubmitValue(text)) return false;
     if (urlInput) urlInput.value = text;
-    if (typeof tryImportValue === 'function' && tryImportValue(text) === true) {
-      return true;
-    }
+    if (typeof tryImportValue === 'function' && tryImportValue(text)) return true;
     if (isSingleHttpUrl(text)) {
       fetchArticle();
       return true;
@@ -384,6 +383,12 @@ export function bindUrlImportShortcuts({
       return true;
     }
     return false;
+  }
+
+  function syncSubmitButton() {
+    if (!submitButton || !urlInput) return;
+    const value = String(urlInput.value || '').trim();
+    submitButton.hidden = !value || !shouldSubmitValue(value);
   }
 
   if (focusTargetSelector && urlInput && typeof documentRef.querySelectorAll === 'function') {
@@ -412,20 +417,16 @@ export function bindUrlImportShortcuts({
     const tag = ae && ae.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     const text = (event.clipboardData || globalThis.window.clipboardData).getData('text').trim();
-    if (text && submitImportValue(text)) {
-      event.preventDefault();
-    }
+    if (!text || !shouldSubmitValue(text)) return;
+    event.preventDefault();
+    urlInput.value = text;
+    syncSubmitButton();
+    urlInput.focus();
   });
   if (!urlInput) return;
   urlInput.addEventListener('input', () => {
-    if ((urlInput.value || '').trim()) return;
-    if (typeof onInputCleared === 'function') onInputCleared();
-  });
-  urlInput.addEventListener('paste', () => {
-    setTimeout(() => {
-      const value = (urlInput.value || '').trim();
-      submitImportValue(value);
-    }, 0);
+    syncSubmitButton();
+    if (!(urlInput.value || '').trim() && typeof onInputCleared === 'function') onInputCleared();
   });
   urlInput.addEventListener('keydown', event => {
     const isMultiline = urlInput.tagName === 'TEXTAREA';
@@ -434,6 +435,8 @@ export function bindUrlImportShortcuts({
       submitImportValue(urlInput.value);
     }
   });
+  submitButton?.addEventListener('click', () => submitImportValue(urlInput.value));
+  syncSubmitButton();
 }
 
 // 复制后的「去后台粘贴」引导（概念 A：复制键就地变身 + 旁边内联出现后台入口）。

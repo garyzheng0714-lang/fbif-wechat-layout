@@ -1,7 +1,6 @@
-/* Top global bar — holds the unified account menu (left, see account-menu.js)
-   and the preview action toolbar (right). The old two-layer switcher (round
-   channel pill + square rule-pack segmented control) was removed 2026-06-02
-   when account switching collapsed to a single top-bar menu (红线 #2). */
+/* Shared account-menu primitive. The publishing destination lives inside the
+   left rail's import card; the authenticated user sits in the rail footer.
+   The global top bar keeps only the current page's actions. */
 
 .global-channel-bar {
   height: 56px;
@@ -35,9 +34,8 @@
   .acct-trigger-name { max-width: 130px; }
 }
 
-/* ── 统一顶栏账号菜单（Google 头像菜单式）──────────────────────────────
-   合并原「渠道胶囊 + 规则包分段」两层切换器为单层（用户 2026-06-02 裁定）。
-   触发器=头像+账号名+下拉箭头，置于顶栏左侧；面板按渠道分组列出全部账号。 */
+/* ── 统一发布账号菜单（shadcn/Radix team-switcher 语法）──────────────
+   触发器=头像+账号名+下拉箭头；面板仍按渠道分组列出全部账号。 */
 .acct-menu { position: relative; display: inline-flex; }
 
 .acct-trigger {
@@ -58,6 +56,12 @@
 }
 .acct-trigger:hover { background: var(--fs-bg-sunken, #f2f3f5); }
 .acct-trigger[aria-expanded="true"] { background: var(--fs-bg-sunken, #f2f3f5); }
+.acct-trigger:focus-visible,
+.acct-item:focus-visible,
+.acct-settings-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
+}
 .acct-trigger-avatar {
   width: 24px; height: 24px;
   border-radius: var(--fs-r-s, 6px);
