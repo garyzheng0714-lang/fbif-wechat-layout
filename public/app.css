@@ -331,7 +331,7 @@ input[type="file"] { display: none; }
 }
 
 /* URL input */
-.url-row-inline { display: flex; gap: 8px; }
+.url-row-inline { display: block; }
 .url-input-inline {
   flex: 1; padding: 7px 10px; border: 1px solid var(--fs-border-control);
   border-radius: var(--fs-r-s); font-size: 12px; font-family: inherit;

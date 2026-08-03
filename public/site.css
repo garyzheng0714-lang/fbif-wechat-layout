@@ -187,18 +187,13 @@ body.channel-portal-body {
   box-shadow: 0 0 0 2px var(--fs-brand-soft);
 }
 
-.import-zone.is-compact .import-actions,
-.import-zone.is-compact .url-row {
+.import-zone.is-compact .import-composer-shell {
   display: none;
 }
 
 .import-zone.is-compact .import-card {
   gap: 8px;
   padding: 10px 12px;
-}
-
-.import-zone.is-compact .import-card-head {
-  padding-bottom: 0;
 }
 
 /* 高级选项折叠 — 飞书风（工具页侧栏，复用 app.css 共享的 --fs- token） */

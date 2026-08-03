@@ -53,7 +53,6 @@ body.auth-unavailable::before {
 }
 
 .user-identity-trigger:focus-visible,
-.user-identity-switch:focus-visible,
 .user-identity-logout:focus-visible,
 .feishu-doc-result:focus-visible,
 .feishu-doc-locked a:focus-visible {
@@ -145,6 +144,90 @@ body.auth-unavailable::before {
   box-shadow: var(--fs-sh-s3);
 }
 
+/* 左栏底部只表达“谁在使用工具”；排版目标住在导入卡里。菜单向上展开。 */
+.rail-foot > .user-identity {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+}
+
+.rail-foot .user-identity-trigger {
+  width: 100%;
+  min-height: 55px;
+  gap: 9px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rail-foot .user-identity-trigger:hover,
+.rail-foot .user-identity-trigger[aria-expanded="true"] {
+  border-color: transparent;
+  background: var(--fs-bg-hover);
+  box-shadow: none;
+}
+
+.rail-foot .user-identity-avatar {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  font-size: 12px;
+}
+
+.rail-foot .user-identity-summary {
+  display: block;
+  overflow: hidden;
+}
+
+.rail-foot .user-identity-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rail-foot .user-identity-capability {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-foot .user-identity-caret {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0;
+}
+
+.rail-foot .user-identity-caret svg {
+  width: 14px;
+  height: 14px;
+}
+
+.rail-foot .user-identity-menu {
+  top: auto;
+  right: 0;
+  bottom: calc(100% + 7px);
+  left: 0;
+}
+
+/* 窄屏下左栏堆到预览上方，身份栏横跨整幅——按内容收窄，别把头像和箭头拉到两端。 */
+@media (max-width: 820px) {
+  .rail-foot > .user-identity {
+    width: auto;
+  }
+
+  .rail-foot .user-identity-trigger {
+    width: auto;
+  }
+
+  .rail-foot .user-identity-menu {
+    right: auto;
+    width: min(280px, calc(100vw - 24px));
+  }
+}
+
 .user-identity-profile {
   display: flex;
   align-items: center;
@@ -171,7 +254,7 @@ body.auth-unavailable::before {
   color: #9b5d00;
 }
 
-.user-identity-switch,
+
 .user-identity-logout {
   width: 100%;
   min-height: 36px;
@@ -183,17 +266,6 @@ body.auth-unavailable::before {
   font-size: 13px;
   text-align: left;
   cursor: pointer;
-}
-
-.user-identity-switch {
-  margin-bottom: 4px;
-  border: 1px solid var(--fs-border-control);
-  text-align: center;
-}
-
-.user-identity-switch:hover {
-  border-color: var(--fs-brand);
-  color: var(--fs-brand);
 }
 
 .user-identity-logout {
@@ -210,25 +282,12 @@ body.auth-unavailable::before {
   background: var(--fs-divider);
 }
 
-.import-label-row {
-  min-height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 10px;
-}
-
-.import-label-row .import-input-label {
-  min-height: 0;
-  padding: 0;
-  line-height: 30px;
-}
-
+/* 导入卡底部的静默状态行：它解释「现在粘贴会发生什么」，不是动作，所以不用行动蓝。 */
 .feishu-doc-capability {
   flex: 0 0 auto;
-  color: var(--fs-brand);
-  font-size: 11px;
+  padding-right: 4px;
+  color: var(--fs-text-3);
+  font-size: 12px;
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -238,50 +297,55 @@ body.auth-unavailable::before {
 }
 
 .feishu-doc-search {
-  position: absolute;
-  top: calc(100% + 7px);
-  right: 0;
-  left: 0;
-  z-index: 65;
-  max-height: min(356px, calc(100dvh - 210px));
-  overflow: auto;
-  padding: 6px;
-  border: 1px solid rgba(31, 35, 41, 0.10);
+  position: static;
+  max-height: min(356px, calc(100dvh - 250px));
+  margin: 0 10px 6px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--fs-border-card);
   border-radius: var(--fs-r-m);
   background: var(--fs-bg-card);
-  box-shadow: var(--fs-sh-s3);
+  box-shadow: none;
 }
 
 .feishu-doc-search-head {
-  padding: 7px 9px 5px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--fs-divider);
   color: var(--fs-text-3);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .feishu-doc-results {
   display: grid;
-  gap: 2px;
+  gap: 0;
+  max-height: min(272px, calc(100dvh - 310px));
+  overflow: auto;
 }
 
 .feishu-doc-result {
   width: 100%;
-  min-height: 54px;
+  min-height: 62px;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 9px;
+  padding: 8px 12px;
   border: 0;
-  border-radius: var(--fs-r-s);
+  border-bottom: 1px solid var(--fs-divider);
+  border-radius: 0;
   background: transparent;
   color: var(--fs-text-1);
   text-align: left;
   cursor: pointer;
 }
 
+.feishu-doc-result:last-child {
+  border-bottom: 0;
+}
+
 .feishu-doc-result:hover,
 .feishu-doc-result.is-active {
-  background: var(--fs-brand-soft);
+  background: var(--fs-bg-hover);
 }
 
 .feishu-doc-result-icon {
@@ -291,8 +355,8 @@ body.auth-unavailable::before {
   place-items: center;
   flex: 0 0 32px;
   border-radius: 6px;
-  background: #3370ff;
-  color: #fff;
+  background: var(--fs-brand-soft);
+  color: var(--fs-brand);
   font-size: 13px;
   font-weight: 700;
 }
@@ -310,6 +374,13 @@ body.auth-unavailable::before {
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.feishu-doc-result-title mark {
+  padding: 0;
+  background: transparent;
+  color: var(--fs-brand);
+  font: inherit;
 }
 
 .feishu-doc-result-meta {

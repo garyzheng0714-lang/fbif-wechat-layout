@@ -56,7 +56,7 @@ test('loadCurrentUser returns null and clears an expired fallback token on 401',
   assert.equal(stored.has(SESSION_STORAGE_KEY), false);
 });
 
-test('mountUserIdentity renders name, login mode and Feishu capability in the left rail', () => {
+test('mountUserIdentity renders name, login mode and Feishu capability for the shell identity menu', () => {
   const { document, window } = parseHTML('<main><div id="identity"></div></main>');
   const user = {
     id: 'feishu:ou_test',
@@ -91,5 +91,5 @@ test('password identity keeps the name visible and states that cloud documents a
   assert.match(text, /外部编辑/);
   assert.match(text, /账号密码登录/);
   assert.match(text, /云文档不可用/);
-  assert.ok(document.querySelector('[data-switch-feishu-login]'));
+  assert.equal(document.querySelector('[data-switch-feishu-login]'), null, '顶栏账号菜单不能主动要求改用飞书登录');
 });

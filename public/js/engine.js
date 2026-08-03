@@ -498,13 +498,14 @@ export function initApp(initialTemplate) {
 
   const dropZone = document.getElementById('dropZone');
   const fileInput = fileInputEl;
-  const uploadLabel = dropZone ? dropZone.querySelector('[data-upload-label]') : null;
+  const uploadTrigger = dropZone ? dropZone.querySelector('[data-upload-trigger]') : null;
+  const importInput = document.getElementById('urlInput');
   const addFileText = dropZone ? dropZone.querySelector('[data-add-file-text]') : null;
   const uploadedFile = dropZone ? dropZone.querySelector('[data-uploaded-file]') : null;
   const uploadedName = dropZone ? dropZone.querySelector('[data-uploaded-name]') : null;
+  const uploadedSize = dropZone ? dropZone.querySelector('[data-uploaded-size]') : null;
   const uploadExt = dropZone ? dropZone.querySelector('[data-file-ext]') : null;
   const removeUpload = dropZone ? dropZone.querySelector('[data-remove-upload]') : null;
-  const defaultUploadLabel = uploadLabel ? uploadLabel.textContent : '粘贴或拖拽至这里上传';
   const progress = document.getElementById('progress');
   const progressFill = document.getElementById('progressFill');
   const progressText = document.getElementById('progressText');
@@ -525,21 +526,25 @@ export function initApp(initialTemplate) {
     return ext ? ext.slice(0, 3) : 'T';
   }
 
+  function displayFileSize(file) {
+    const bytes = Number(file && file.size);
+    if (!Number.isFinite(bytes) || bytes <= 0) return '';
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
   function setDropActive(active) {
     if (!dropZone) return;
     dropZone.classList.toggle('dragover', !!active);
-    if (uploadLabel && !dropZone.classList.contains('has-file')) {
-      uploadLabel.textContent = active ? '粘贴或拖拽上传' : defaultUploadLabel;
-    }
   }
 
   function clearUploadVisual() {
     if (!dropZone) return;
     setDropActive(false);
     dropZone.classList.remove('has-file');
-    if (uploadLabel) uploadLabel.textContent = defaultUploadLabel;
-    if (addFileText) addFileText.textContent = '添加本地文件';
+    if (addFileText) addFileText.textContent = '上传文件';
     if (uploadedName) uploadedName.textContent = '';
+    if (uploadedSize) uploadedSize.textContent = '';
     if (uploadExt) uploadExt.textContent = 'T';
     if (uploadedFile) uploadedFile.hidden = true;
     if (fileInput) fileInput.value = '';
@@ -551,6 +556,7 @@ export function initApp(initialTemplate) {
     dropZone.classList.add('has-file');
     if (addFileText) addFileText.textContent = '重新选择文件';
     if (uploadedName) uploadedName.textContent = file.name || '未命名文件';
+    if (uploadedSize) uploadedSize.textContent = displayFileSize(file);
     if (uploadExt) uploadExt.textContent = displayFileExt(file);
     if (uploadedFile) uploadedFile.hidden = false;
   }
@@ -847,13 +853,8 @@ export function initApp(initialTemplate) {
     handleFile(selected, opts);
   }
 
-  dropZone.addEventListener('click', () => {
+  uploadTrigger?.addEventListener('click', () => {
     fileInput.value = '';
-    fileInput.click();
-  });
-  dropZone.addEventListener('keydown', e => {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    e.preventDefault();
     fileInput.click();
   });
   dropZone.addEventListener('dragenter', e => { e.preventDefault(); setDropActive(true); });
@@ -877,6 +878,7 @@ export function initApp(initialTemplate) {
       e.stopPropagation();
       clearUploadVisual();
       fileInput.value = '';
+      importInput?.focus();
     });
   }
   document.addEventListener('paste', e => {

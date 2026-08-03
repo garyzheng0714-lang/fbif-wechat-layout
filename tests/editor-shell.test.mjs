@@ -338,13 +338,13 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   );
   assert.match(
     css,
-    /\.dropzone\.dragover \.dropzone-cloud[\s\S]{0,100}animation: upload-float/,
-    '文件拖入时应有明确的上传动效反馈'
+    /\.dropzone\.dragover \.dropzone-drag-prompt\s*\{[\s\S]{0,80}display:\s*flex/,
+    '文件拖入时整个输入框应切换成明确的松开导入状态'
   );
   assert.match(
     css,
-    /\.dropzone\.has-file \.dropzone-empty/,
-    '上传完成后应切换到居中的文件状态，而不是继续显示空态'
+    /\.dropzone\.has-file \.import-composer-input/,
+    '上传完成后应在同一个总框内切换到文件状态'
   );
   assert.match(
     app,
@@ -733,7 +733,7 @@ test('bindUrlImportShortcuts leaves other text inputs alone on paste', () => {
   assert.equal(fetched, 0);
 });
 
-test('bindUrlImportShortcuts imports non-URL clipboard text from the page', () => {
+test('bindUrlImportShortcuts puts pasted page text into the composer for explicit submit', () => {
   const documentHandlers = {};
   let imported = '';
   let fetched = 0;
@@ -742,6 +742,7 @@ test('bindUrlImportShortcuts imports non-URL clipboard text from the page', () =
     value: '',
     tagName: 'TEXTAREA',
     classList: { contains: () => false },
+    focus() {},
     addEventListener() {},
   };
   const documentRef = {
@@ -768,7 +769,7 @@ test('bindUrlImportShortcuts imports non-URL clipboard text from the page', () =
   });
 
   assert.equal(prevented, true);
-  assert.equal(imported, '这是一段正文,需要直接排版。');
+  assert.equal(imported, '');
   assert.equal(urlInput.value, '这是一段正文,需要直接排版。');
   assert.equal(fetched, 0);
 });

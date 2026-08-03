@@ -4,6 +4,7 @@ import { parseHTML } from 'linkedom';
 
 import {
   mountFeishuDocumentImport,
+  parseFeishuDocumentUrl,
   readResponseBlobWithProgress,
 } from '../public/js/feishu-doc-import.js';
 
@@ -32,6 +33,21 @@ function jsonResponse(payload, status = 200) {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+
+test('飞书文档链接只接受官方 HTTPS 文档地址', () => {
+  assert.deepEqual(
+    parseFeishuDocumentUrl('https://example.feishu.cn/docx/doxcn_test'),
+    {
+      token: 'doxcn_test',
+      type: 'docx',
+      title: '飞书文档',
+      url: 'https://example.feishu.cn/docx/doxcn_test',
+    },
+  );
+  assert.equal(parseFeishuDocumentUrl('https://evil.example.com/docx/doxcn_test'), null);
+  assert.equal(parseFeishuDocumentUrl('http://example.feishu.cn/docx/doxcn_test'), null);
+  assert.equal(parseFeishuDocumentUrl('https://example.feishu.cn/docx/doxcn_test/extra'), null);
+});
 
 test('password login shows a real locked state and never calls the Feishu API', async () => {
   const { document, window } = makeShell();
