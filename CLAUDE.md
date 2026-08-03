@@ -36,7 +36,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
 2. **多账号绑定只用单层账号菜单，位置在左栏导入卡第一行** — 新增账号以 `api/account_catalog.go` 为单一真相源，并在 `api/rule_defaults.go` 成对登记 preset；改完运行 `npm run gen:registry` 生成 `public/js/rule-packs/registry.js`，不得手改生成文件。账号菜单统一用 `account-menu.js` 的 `mountAccountMenu` 挂到 `#acctMenu`，公众号 / 网站只作为菜单分组。同模板账号原地切换，跨模板账号整页 reload；不得恢复渠道胶囊与规则包分段组成的两层切换器。
-   **左栏两段式（2026-08-03 用户裁定，取代 2026-08-02 标题栏方案）**：不渲染 `.rail-head` 或可见的「导入内容」标题容器；`.rail-body` 是 `--fs-bg-nested` 灰底工作区，导入卡与区块面板都必须是白卡；`.rail-foot` 放 `#userIdentity`，登录行必须贴紧工作区分隔线和右侧栏边，不留卡片式内缩缝隙，菜单向上展开。全局顶栏只留当前页面动作（复制全文 / 规则），不得把 `#acctMenu` 或 `#userIdentity` 搬回顶栏。导入组合框必须用 `aria-label="导入内容"` 保留可访问名称。未登录时「飞书云文档」按钮灰色禁用，悬停提示「上传飞书云文档需登录FBIF内部账号」；状态文案保持「粘贴后自动排版」。（2026-08-03 用户裁定）守护：`tests/top-toolbar.test.mjs`、`tests/account-switcher.test.mjs`、`tests/auth-shell.test.mjs`。
+   **左栏两段式（2026-08-03 用户裁定，取代 2026-08-02 标题栏方案）**：不渲染 `.rail-head` 或可见的「导入内容」标题容器；`.rail-body` 是 `--fs-bg-nested` 灰底工作区，导入卡与区块面板都必须是白卡；`.rail-foot` 放 `#userIdentity`，登录行必须贴紧工作区分隔线和右侧栏边，不留卡片式内缩缝隙，菜单向上展开。全局顶栏只留当前页面动作（复制全文 / 规则），不得把 `#acctMenu` 或 `#userIdentity` 搬回顶栏。导入组合框必须用 `aria-label="导入内容"` 保留可访问名称。编辑器必须先过登录门禁，未登录不得进入主页面；「飞书云文档」灰色禁用态及提示只作鉴权完成前的安全初始值；状态文案保持「粘贴后自动排版」。（2026-08-03 用户裁定）守护：`tests/auth-session.test.mjs`、`tests/e2e-regression.spec.mjs`、`tests/auth-shell.test.mjs`。
    **已知取舍**：收起左栏会同时收走排版目标与登录身份，需要时展开左栏；不要为此在顶栏另做一份只读副本。
 3. **规则服务端保存 + 本地降级** — 参数预设和 `behavior` 行为配置以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
 4. **页面级动作在顶部工具栏** — 预览区下方不放操作按钮条。左栏导入卡里的「导入排版」和左栏底部的身份栏不在此列：前者是贴着输入框的就地提交，后者不是动作条。

@@ -102,23 +102,17 @@ async function captureAndCheck(page, scenario, bp, extraChecks = null, screensho
 // ============ Test Suite ============
 
 test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
-  test('0-未登录可直接进入排版工具', async ({ browser }) => {
+  test('0-未登录必须先经过登录门禁', async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
 
     await page.goto(BASE + '/mp/fbif', { waitUntil: 'domcontentloaded' });
-    await waitForAppReady(page);
+    await page.waitForURL('**/login.html?return_to=*');
 
-    expect(new URL(page.url()).pathname).toBe('/mp/fbif');
-    await expect(page.locator('#emptyState')).toBeVisible();
-    await expect(page.locator('#userIdentity')).toBeEmpty();
-    await expect(page.locator('#feishuDocCapability')).toHaveText('粘贴后自动排版');
-    await expect(page.locator('#feishuDocTrigger')).toBeDisabled();
-    await expect(page.locator('#feishuDocTrigger')).toHaveAttribute('aria-disabled', 'true');
-    await expect(page.locator('#feishuDocTriggerWrap')).toHaveAttribute(
-      'title',
-      '上传飞书云文档需登录FBIF内部账号',
-    );
+    expect(new URL(page.url()).pathname).toBe('/login.html');
+    expect(new URL(page.url()).searchParams.get('return_to')).toBe('/mp/fbif');
+    await expect(page.locator('#feishuLoginButton')).toBeVisible();
+    await expect(page.locator('#passwordLoginForm')).toBeVisible();
     await context.close();
   });
 
@@ -827,7 +821,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
   // ---- Scenario 16: 飞书总进度 100% 必须和可见、可复制原子完成 ----
   test('16-飞书真实工作量进度到100时已排版且可立即复制', async ({ browser }) => {
-    const context = await browser.newContext({
+    const context = await newAuthenticatedContext(browser, {
       viewport: { width: 1440, height: 900 },
       permissions: ['clipboard-read', 'clipboard-write'],
     });
