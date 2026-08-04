@@ -4,6 +4,11 @@ const e2ePort = Number(process.env.E2E_PORT || 19090);
 const baseURL = `http://127.0.0.1:${e2ePort}`;
 const crossBrowserEnabled = process.env.E2E_CROSS_BROWSER === '1';
 const smokeTests = /(?:1-初始空状态|2-上传DOCX全流程|8-网站渠道视图) \[desktop-1440\]/;
+const e2ePasswordUsers = Buffer.from(JSON.stringify([{
+  username: 'e2e',
+  password: 'e2e-local-session-password',
+  name: 'E2E 测试账号',
+}])).toString('base64');
 
 const projects = [
   {
@@ -48,7 +53,8 @@ export default defineConfig({
   updateSnapshots: process.env.E2E_UPDATE_BASELINE === '1' ? 'all' : 'none',
   snapshotPathTemplate: '{testDir}/e2e-baselines/{arg}{ext}',
   webServer: {
-    command: `cd api && AUTH_SESSION_SECRET=local-e2e-session-secret-for-tests go run . -port ${e2ePort}`,
+    // 编辑器现在要求先登录；这个账号只注入本地/CI 的临时 Go 进程，不进入生产配置。
+    command: `cd api && AUTH_SESSION_SECRET=local-e2e-session-secret-for-tests AUTH_PASSWORD_USERS_B64=${e2ePasswordUsers} go run . -port ${e2ePort}`,
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 90000,
