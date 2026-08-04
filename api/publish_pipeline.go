@@ -292,13 +292,9 @@ func normalizeSiteSourceKey(rawURL string) (string, error) {
 
 // ---- 默认阶段实现（进程内复用既有内核，不复制第二份）----
 
-// fetchSiteArticle 进程内复用 main.go 的抓取主路径 fetchDirectBlocksWithOptions
-// （含限流重试）；x-reader Markdown 回退喂不进渲染器，此处按失败处理（fail loud）。
-// 旧调用默认使用 ft-default；带规则包的发布 worker 走下面的 Context 版本。
-func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string, string, string, string, error) {
-	return fetchSiteArticleWithContext(context.Background(), rules, articleURL)
-}
-
+// fetchSiteArticleWithContext 进程内复用 main.go 的抓取主路径
+// fetchDirectBlocksWithOptions（含限流重试）；x-reader Markdown 回退喂不进渲染器，
+// 此处按失败处理（fail loud）。规则包从当前 worker context 进入。
 func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (string, string, string, string, string, error) {
 	rulePackID := publishRulePackIDFromContext(ctx)
 	title, blocks, sourceName, byline, canonicalURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))

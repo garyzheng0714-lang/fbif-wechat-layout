@@ -130,6 +130,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 				}
 				if req.RefetchLatest {
 					job, err = p.refetchLatestWithRulePack(r.Context(), job.ID, rerenderPackID)
+				} else if !explicitRulePack {
+					job, err = p.rerenderLatest(job.ID)
 				} else {
 					job, err = p.rerenderLatestWithRulePack(job.ID, rerenderPackID)
 				}
