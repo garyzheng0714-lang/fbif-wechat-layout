@@ -115,6 +115,116 @@ func TestPublishSyncServiceTokenHasLeastPrivilege(t *testing.T) {
 	}
 }
 
+func TestPublishMachineSiteSyncAcceptsURLOnlyAndFetchesInsideLayoutPipeline(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q,"content_kind":"article","classification":"ordinary_confirmed","classifier_version":"monitor-v1"}`, testPublishSourceURL))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("机器只传原文链接应能建单，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Job publishSyncJobSummary `json:"job"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	job, err := env.store.byID(response.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ContentSource != publishContentWebFetch || job.ContentHTML == "" || job.Stage != publishStageAwaitingReview {
+		t.Fatalf("URL-only 入口必须由排版工具回源抓取并停在人审前：%+v", job)
+	}
+	if job.RulePackID != sitePublishRulePackID || response.Job.RulePackID != sitePublishRulePackID {
+		t.Fatalf("未指定规则包时应落默认 ft-default：job=%q summary=%q", job.RulePackID, response.Job.RulePackID)
+	}
+}
+
+func TestPublishSiteSyncPersistsAndUsesSelectedRulePack(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		if got := publishRulePackIDFromContext(ctx); got != foodTalksSeriesSiteRuleAccountID {
+			return publishRenderResult{}, fmt.Errorf("render received rule pack %q", got)
+		}
+		rule := testPublishResolvedRule()
+		rule.AccountID = foodTalksSeriesSiteRuleAccountID
+		rule.PresetID = foodTalksSeriesSiteDefaultRulePresetID
+		return successfulPublishRenderResult(testPublishRenderedHTML, rule), nil
+	}
+	mux := newPublishTestMux(t, env)
+	rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q,"rule_pack_id":"ft-series","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"monitor-v1"}`, testPublishSourceURL))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("选择 ft-series 应能建单，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Job publishSyncJobSummary `json:"job"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	job, err := env.store.byID(response.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.RulePackID != foodTalksSeriesSiteRuleAccountID || response.Job.RulePackID != foodTalksSeriesSiteRuleAccountID ||
+		job.RulePresetID != foodTalksSeriesSiteDefaultRulePresetID {
+		t.Fatalf("规则包选择没有贯穿任务与渲染证据：job=%+v summary=%+v", job, response.Job)
+	}
+}
+
+func TestPublishSiteSyncRejectsUnknownRulePack(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q,"rule_pack_id":"fbif","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"monitor-v1"}`, testPublishSourceURL))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "规则包") {
+		t.Fatalf("非网站规则包必须在建单前拒绝：status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
+		t.Fatalf("非法规则包不得创建任务：jobs=%d err=%v", len(jobs), err)
+	}
+}
+
+func TestPublishSiteSyncRerenderCanSwitchExplicitRulePack(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	first := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q,"content_kind":"article","classification":"ordinary_confirmed","classifier_version":"monitor-v1"}`, testPublishSourceURL))
+	if first.Code != http.StatusCreated {
+		t.Fatalf("首次 URL-only 提交失败：%d %s", first.Code, first.Body.String())
+	}
+	var firstResponse struct {
+		Job publishSyncJobSummary `json:"job"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstResponse); err != nil {
+		t.Fatal(err)
+	}
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		if got := publishRulePackIDFromContext(ctx); got != foodTalksSeriesSiteRuleAccountID {
+			return publishRenderResult{}, fmt.Errorf("rerender received rule pack %q", got)
+		}
+		rule := testPublishResolvedRule()
+		rule.AccountID = foodTalksSeriesSiteRuleAccountID
+		rule.PresetID = foodTalksSeriesSiteDefaultRulePresetID
+		return successfulPublishRenderResult(testPublishRenderedHTML, rule), nil
+	}
+	second := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q,"rule_pack_id":"ft-series","rerender_latest":true,"content_kind":"article","classification":"ordinary_confirmed","classifier_version":"monitor-v1"}`, testPublishSourceURL))
+	if second.Code != http.StatusOK {
+		t.Fatalf("切换规则重排失败：%d %s", second.Code, second.Body.String())
+	}
+	job, err := env.store.byID(firstResponse.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.RulePackID != foodTalksSeriesSiteRuleAccountID || job.RulePresetID != foodTalksSeriesSiteDefaultRulePresetID ||
+		job.Stage != publishStageAwaitingReview {
+		t.Fatalf("重排后规则包/阶段不符：%+v", job)
+	}
+}
+
 func TestPublishMachineSiteSyncFailsClosedWithoutOrdinaryEvidence(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
@@ -452,6 +562,55 @@ func TestPublishSiteSyncRerenderLatestReusesExistingDraft(t *testing.T) {
 	}
 	if createN, updateN := env.ft.counts(); createN != 1 || updateN != 1 {
 		t.Fatalf("冲突请求不得新增或更新网站草稿，实际 create=%d update=%d", createN, updateN)
+	}
+}
+
+func TestPublishSiteSyncRefetchLatestReplacesSupplierContentFromOriginalURL(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	first := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q,"content_kind":"article","classification":"ordinary_confirmed","classifier_version":"monitor-v1"}`, testPublishSourceURL))
+	if first.Code != http.StatusCreated {
+		t.Fatalf("首次 URL-only 提交失败：%d %s", first.Code, first.Body.String())
+	}
+	var firstResp struct {
+		Job publishSyncJobSummary `json:"job"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstResp); err != nil {
+		t.Fatal(err)
+	}
+	before, err := env.store.byID(firstResp.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refetchedBlocks := `[{"k":"p","text":"原文回源后的第一段"},{"k":"h","text":"原文回源后的标题"}]`
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+		if got := publishRulePackIDFromContext(ctx); got != sitePublishRulePackID {
+			t.Fatalf("回源抓取必须沿用网站默认规则包，实际 %q", got)
+		}
+		return "原文标题", "原文公众号", "原文作者", articleURL, refetchedBlocks, nil
+	}
+	second := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
+		fmt.Sprintf(`{"url":%q,"refetch_latest":true,"rule_pack_id":"ft-default","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"monitor-v1"}`, testPublishSourceURL))
+	if second.Code != http.StatusOK {
+		t.Fatalf("从原文回源重排失败：%d %s", second.Code, second.Body.String())
+	}
+	var secondResp struct {
+		Job        publishSyncJobSummary `json:"job"`
+		Rerendered bool                  `json:"rerendered"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondResp); err != nil {
+		t.Fatal(err)
+	}
+	after, err := env.store.byID(firstResp.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !secondResp.Rerendered || secondResp.Job.ID != firstResp.Job.ID ||
+		after.ContentSource != publishContentWebFetch || after.Title != "原文标题" || after.Author != "原文作者" ||
+		after.BlocksJSON != refetchedBlocks || after.FoodTalksNewsID != before.FoodTalksNewsID ||
+		after.ContentVersion != before.ContentVersion+1 || after.Stage != publishStageAwaitingReview {
+		t.Fatalf("回源重排必须替换 supplier 内容并复用同一隐藏草稿：before=%+v after=%+v response=%+v", before, after, secondResp)
 	}
 }
 

@@ -56,7 +56,8 @@ type publishJob struct {
 	FailedStage       string   `json:"failed_stage,omitempty"` // stage=failed 时的续跑起点
 	Error             string   `json:"error,omitempty"`
 	Title             string   `json:"title,omitempty"`
-	SourceName        string   `json:"source_name,omitempty"` // 公众号名（fetching 阶段解析）
+	SourceName        string   `json:"source_name,omitempty"`  // 公众号名（fetching 阶段解析）
+	RulePackID        string   `json:"rule_pack_id,omitempty"` // 网站排版规则包 ID；空值兼容旧任务，按 ft-default 处理
 	Classification    string   `json:"classification,omitempty"`
 	Classifier        string   `json:"classifier_version,omitempty"`
 	SupersededByJobID int64    `json:"superseded_by_job_id,omitempty"`

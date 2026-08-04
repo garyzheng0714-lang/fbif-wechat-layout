@@ -33,6 +33,7 @@ ftRules.preset.behavior.lists.wechat_trailer_markers = ['自定义网站尾标']
 const fetchedAccounts = [];
 let liveFbifRules = fbifRules;
 let liveFtRules = ftRules;
+let liveFtSeriesRules = structuredClone(ftRules);
 let failFtRules = false;
 globalThis.fetch = async (url) => {
   const u = String(url);
@@ -43,6 +44,7 @@ globalThis.fetch = async (url) => {
     return { ok: false, status: 503, json: async () => ({ error: 'rules unavailable' }) };
   }
   if (account === 'ft-default') return { ok: true, json: async () => liveFtRules };
+  if (account === 'ft-series') return { ok: true, json: async () => liveFtSeriesRules };
   return { ok: false, json: async () => ({}) };
 };
 
@@ -318,10 +320,16 @@ test('fbif ↔ ft-default 交错渲染互不污染，且每次请求都重新读
 });
 
 test('未知 packId 显式 400 失败（不静默降级到公众号模板）', async () => {
-  assert.deepEqual([...SUPPORTED_PACK_IDS].sort(), ['fbif', 'ft-default']);
+  assert.deepEqual([...SUPPORTED_PACK_IDS].sort(), ['fbif', 'ft-default', 'ft-series']);
   await assert.rejects(
-    () => renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-series' }),
+    () => renderArticle({ ...SAMPLE_ARTICLE, packId: 'not-a-real-pack' }),
     (err) => err.status === 400 && /暂只支持 packId=/.test(err.message),
     '未接入的渠道必须显式报错——静默 fallback 到 fbif 会把网站文章排成公众号版式',
   );
+});
+
+test('ft-series：规则包 ID 映射到网站渲染器与 ft-series 规则账号', async () => {
+  const result = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-series' });
+  assert.equal(result.resolved_rule.account_id, 'ft-series');
+  assert.match(result.html, /color: #888888|color: rgb\(136, 136, 136\)/i);
 });

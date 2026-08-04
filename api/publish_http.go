@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -62,6 +63,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		}
 		var req struct {
 			URL               string `json:"url"`
+			RulePackID        string `json:"rule_pack_id"`
+			RuleID            string `json:"rule_id,omitempty"` // 兼容监控方更短的字段名；内部统一为 rule_pack_id
 			Title             string `json:"title"`
 			SourceName        string `json:"source_name"`
 			Author            string `json:"author"`
@@ -71,9 +74,15 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			Classification    string `json:"classification"`
 			ClassifierVersion string `json:"classifier_version"`
 			RerenderLatest    bool   `json:"rerender_latest"`
+			RefetchLatest     bool   `json:"refetch_latest"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&req); err != nil || req.URL == "" {
 			writeError(w, http.StatusBadRequest, "url is required")
+			return
+		}
+		rulePackID, ruleErr := normalizeSitePublishRulePackID(firstNonEmpty(req.RulePackID, req.RuleID))
+		if ruleErr != nil {
+			writeError(w, http.StatusBadRequest, ruleErr.Error())
 			return
 		}
 		machineRequest := strings.TrimSpace(r.Header.Get(publishSyncServiceHeader)) != ""
@@ -83,6 +92,10 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 				return
 			}
 		}
+		if req.RefetchLatest && strings.TrimSpace(req.ContentHTML) != "" {
+			writeError(w, http.StatusBadRequest, "refetch_latest 只能与 URL-only 提交一起使用")
+			return
+		}
 		var job publishJob
 		var created bool
 		var restarted bool
@@ -91,21 +104,35 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			job, created, restarted, err = p.submitSupplierWithRestartContext(r.Context(), officialPublishInput{
 				URL: req.URL, Title: req.Title, SourceName: req.SourceName,
 				Author: req.Author, ContentHTML: req.ContentHTML, CoverURL: req.CoverURL,
+				RulePackID: rulePackID, Classification: req.Classification, ClassifierVersion: req.ClassifierVersion,
 			})
 		} else {
-			job, created, err = p.submitWithContext(r.Context(), req.URL)
+			job, created, err = p.submitWithRulePackAndMetadataContext(r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion)
 		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		explicitRulePack := strings.TrimSpace(req.RulePackID) != "" || strings.TrimSpace(req.RuleID) != ""
+		if !created && explicitRulePack && firstNonEmpty(job.RulePackID, sitePublishRulePackID) != rulePackID && !req.RerenderLatest {
+			writeError(w, http.StatusConflict, fmt.Sprintf("同一原文已绑定规则包 %q；如需切换规则，请同时设置 rerender_latest=true", firstNonEmpty(job.RulePackID, sitePublishRulePackID)))
+			return
+		}
 		rerendered := false
-		if req.RerenderLatest && !created {
+		if (req.RerenderLatest || req.RefetchLatest) && !created {
 			if restarted {
 				// A changed structured payload already restarted this same job.
 				rerendered = true
 			} else {
-				job, err = p.rerenderLatest(job.ID)
+				rerenderPackID := rulePackID
+				if !explicitRulePack {
+					rerenderPackID = firstNonEmpty(job.RulePackID, sitePublishRulePackID)
+				}
+				if req.RefetchLatest {
+					job, err = p.refetchLatestWithRulePack(r.Context(), job.ID, rerenderPackID)
+				} else {
+					job, err = p.rerenderLatestWithRulePack(job.ID, rerenderPackID)
+				}
 				if err != nil {
 					writeError(w, http.StatusConflict, err.Error())
 					return
@@ -145,6 +172,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		}
 		var req struct {
 			URL               string `json:"url"`
+			RulePackID        string `json:"rule_pack_id"`
+			RuleID            string `json:"rule_id,omitempty"`
 			Title             string `json:"title"`
 			SourceName        string `json:"source_name"`
 			Author            string `json:"author"`
@@ -158,6 +187,11 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		rulePackID, ruleErr := normalizeSitePublishRulePackID(firstNonEmpty(req.RulePackID, req.RuleID))
+		if ruleErr != nil {
+			writeError(w, http.StatusBadRequest, ruleErr.Error())
+			return
+		}
 		machineRequest := strings.TrimSpace(r.Header.Get(publishSyncServiceHeader)) != ""
 		if machineRequest {
 			if evidenceErr := validatePublishMachineEvidence(req.ContentKind, req.Classification, req.ClassifierVersion, req.ContentHTML); evidenceErr != nil {
@@ -168,6 +202,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		job, created, err := p.submitOfficialWithContext(r.Context(), officialPublishInput{
 			URL: req.URL, Title: req.Title, SourceName: req.SourceName,
 			Author: req.Author, ContentHTML: req.ContentHTML, CoverURL: req.CoverURL,
+			RulePackID: rulePackID, Classification: req.Classification, ClassifierVersion: req.ClassifierVersion,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -393,6 +428,7 @@ type publishSyncJobSummary struct {
 	SourceKey         string   `json:"source_key"`
 	SourceURL         string   `json:"source_url"`
 	Title             string   `json:"title,omitempty"`
+	RulePackID        string   `json:"rule_pack_id"`
 	Stage             string   `json:"stage"`
 	FailedStage       string   `json:"failed_stage,omitempty"`
 	Error             string   `json:"error,omitempty"`
@@ -428,7 +464,8 @@ func newPublishSyncJobSummary(job publishJob) publishSyncJobSummary {
 	}
 	return publishSyncJobSummary{
 		ID: job.ID, SourceKey: job.SourceKey, SourceURL: job.SourceURL, Title: job.Title,
-		Stage: job.Stage, FailedStage: job.FailedStage, Error: truncateRunes(job.Error, 500),
+		RulePackID: firstNonEmpty(job.RulePackID, sitePublishRulePackID),
+		Stage:      job.Stage, FailedStage: job.FailedStage, Error: truncateRunes(job.Error, 500),
 		FoodTalksNewsID: job.FoodTalksNewsID, ArticleURL: job.ArticleURL,
 		SupersededByJobID: job.SupersededByJobID,
 		ReviewAction:      job.ReviewAction, ReviewedBy: job.ReviewedBy, ReviewedAt: job.ReviewedAt,

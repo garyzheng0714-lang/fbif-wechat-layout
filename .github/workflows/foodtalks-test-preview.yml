@@ -7,6 +7,21 @@ on:
         description: WeChat article URL to format into a FoodTalks test draft
         required: true
         type: string
+      rule_pack_id:
+        description: Website rule pack ID; leave empty for ft-default
+        required: false
+        default: ft-default
+        type: string
+      rerender_latest:
+        description: Re-render the existing idempotent task instead of only resuming it
+        required: false
+        default: false
+        type: boolean
+      refetch_latest:
+        description: Re-fetch the original URL before re-rendering the existing task
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -24,6 +39,9 @@ jobs:
     env:
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       ARTICLE_URL: ${{ inputs.article_url }}
+      RULE_PACK_ID: ${{ inputs.rule_pack_id }}
+      RERENDER_LATEST: ${{ inputs.rerender_latest }}
+      REFETCH_LATEST: ${{ inputs.refetch_latest }}
       SITE_ORIGIN: https://fbifmp-layout.foodtalks.cn
     steps:
       - name: Create or resume a draft-only preview job
@@ -56,7 +74,13 @@ jobs:
             .http_review_enabled == false
           ' <<<"${readiness_json}" >/dev/null
 
-          request_json=$(jq -n --arg url "${ARTICLE_URL}" '{url: $url}')
+          request_json=$(jq -n \
+            --arg url "${ARTICLE_URL}" \
+            --arg rule_pack_id "${RULE_PACK_ID}" \
+            --argjson rerender_latest "${RERENDER_LATEST}" \
+            --argjson refetch_latest "${REFETCH_LATEST}" \
+            '{url: $url, rule_pack_id: $rule_pack_id, rerender_latest: $rerender_latest, refetch_latest: $refetch_latest}
+             | if .rule_pack_id == "" then del(.rule_pack_id) else . end')
           create_json=$(curl --silent --show-error --fail \
             --request POST \
             --header "Content-Type: application/json" \

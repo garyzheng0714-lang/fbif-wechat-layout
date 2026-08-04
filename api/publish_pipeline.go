@@ -42,8 +42,44 @@ import (
 	"golang.org/x/net/html"
 )
 
-// sitePublishRulePackID 网站渠道排版规则包（registry 的 ft-default，FoodTalks 视觉口径）。
+// sitePublishRulePackID 网站渠道默认排版规则包（registry 的 ft-default）。
 const sitePublishRulePackID = "ft-default"
+
+// publishRulePackContextKey 让抓取与渲染这两个既有函数签名继续保持稳定，
+// 同时把一次提交选择的规则包沿着当前 worker 传下去。规则包本身会持久化在
+// publishJob.RulePackID，context 只负责把它带到本次外部调用。
+type publishRulePackContextKey struct{}
+
+func normalizeSitePublishRulePackID(raw string) (string, error) {
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		id = sitePublishRulePackID
+	}
+	meta, ok := accountMetaByID(id)
+	if !ok || meta.Channel != "ft" || meta.TemplateID != "foodtalks-site" {
+		return "", fmt.Errorf("未知网站规则包 %q：请使用 account_catalog 中登记的 ft 规则包", id)
+	}
+	return id, nil
+}
+
+func withPublishRulePackID(ctx context.Context, rulePackID string) context.Context {
+	return context.WithValue(ctx, publishRulePackContextKey{}, rulePackID)
+}
+
+func publishRulePackIDFromContext(ctx context.Context) string {
+	if ctx != nil {
+		if id, ok := ctx.Value(publishRulePackContextKey{}).(string); ok {
+			if normalized, err := normalizeSitePublishRulePackID(id); err == nil {
+				return normalized
+			}
+		}
+	}
+	return sitePublishRulePackID
+}
+
+func publishRulePackIDForJob(job publishJob) (string, error) {
+	return normalizeSitePublishRulePackID(job.RulePackID)
+}
 
 // 可配项 env（MVP 先 env/常量，绝不散落硬编码，后续进管理后台）。
 const (
@@ -120,7 +156,7 @@ type publishPipeline struct {
 	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
 	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7）
 	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, canonicalURL, blocksJSON string, err error)
-	// render Block[] → ft-default 规则包内联 HTML（默认走 render_proxy 转发内核）。
+	// render Block[] → 选定网站规则包内联 HTML（默认走 render_proxy 转发内核）。
 	// 规则由渲染服务在每次请求内读取最新激活版本，调用方只传文章语义。
 	render func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error)
 	// ossUpload 整批图片 URL → OSS 转存（默认走 /api/oss-upload 的上游代理内核，urls 模式）
@@ -185,7 +221,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		now:               time.Now,
 	}
 	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
-		return fetchSiteArticle(rules, articleURL)
+		return fetchSiteArticleWithContext(ctx, rules, articleURL)
 	}
 	if n := newFeishuNotifierFromEnv(); n != nil {
 		p.notify = n.send
@@ -258,9 +294,14 @@ func normalizeSiteSourceKey(rawURL string) (string, error) {
 
 // fetchSiteArticle 进程内复用 main.go 的抓取主路径 fetchDirectBlocksWithOptions
 // （含限流重试）；x-reader Markdown 回退喂不进渲染器，此处按失败处理（fail loud）。
-// caption 参数取网站渠道账号（ft-default）的规则配置，与人工导入同口径。
+// 旧调用默认使用 ft-default；带规则包的发布 worker 走下面的 Context 版本。
 func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string, string, string, string, error) {
-	title, blocks, sourceName, byline, canonicalURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, foodTalksSiteRuleAccountID))
+	return fetchSiteArticleWithContext(context.Background(), rules, articleURL)
+}
+
+func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (string, string, string, string, string, error) {
+	rulePackID := publishRulePackIDFromContext(ctx)
+	title, blocks, sourceName, byline, canonicalURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
 	if err != nil {
 		return "", "", "", "", "", fmt.Errorf("文章抓取失败: %w", err)
 	}
@@ -274,9 +315,17 @@ func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string
 	return title, sourceName, byline, canonicalURL, string(raw), nil
 }
 
-// renderSiteHTML 进程内复用 render_proxy.go 的转发内核，packId=ft-default；自动发布
-// 强制 latest 模式，由 Node 在每次请求内读取最新激活规则，不接受任务内旧快照。
+// renderSiteHTML 进程内复用 render_proxy.go 的转发内核；自动发布强制 latest 模式，
+// 由 Node 在每次请求内读取选定规则包的最新激活规则，不接受任务内旧快照。
 func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+	return renderSiteHTMLForPack(ctx, publishRulePackIDFromContext(ctx), title, source, blocksJSON, isRepost)
+}
+
+func renderSiteHTMLForPack(ctx context.Context, rulePackID, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+	rulePackID, err := normalizeSitePublishRulePackID(rulePackID)
+	if err != nil {
+		return publishRenderResult{}, err
+	}
 	token := renderToken()
 	if token == "" {
 		return publishRenderResult{}, errors.New("RENDER_TOKEN 未配置：无法调用渲染服务")
@@ -286,7 +335,7 @@ func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, isRep
 		"source":   source,
 		"blocks":   json.RawMessage(blocksJSON),
 		"isRepost": isRepost,
-		"packId":   sitePublishRulePackID,
+		"packId":   rulePackID,
 		"ruleMode": "latest",
 	})
 	if err != nil {
@@ -485,7 +534,11 @@ func (p *publishPipeline) runJob(jobID int64) {
 // stageFetch 抓公众号文章 → 标题 + 公众号名 + 结构化作者署名 + Block[] 落库。
 // blocks 必须先落库再推进：公众号临时链接（含 chksm）会过期，后续阶段失败重试不再回源。
 func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error {
-	title, sourceName, byline, canonicalURL, blocksJSON, err := p.fetch(ctx, job.SourceURL)
+	rulePackID, err := publishRulePackIDForJob(job)
+	if err != nil {
+		return err
+	}
+	title, sourceName, byline, canonicalURL, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
 	if err != nil {
 		return err
 	}
@@ -537,13 +590,21 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 var publishRuleConfigHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 func validatePublishRenderResult(result publishRenderResult) error {
+	return validatePublishRenderResultForPack(result, sitePublishRulePackID)
+}
+
+func validatePublishRenderResultForPack(result publishRenderResult, rulePackID string) error {
 	if strings.TrimSpace(result.HTML) == "" {
 		return errors.New("渲染服务返回空 HTML")
 	}
+	meta, ok := accountMetaByID(rulePackID)
+	if !ok {
+		return fmt.Errorf("未知网站规则包 %q", rulePackID)
+	}
 	resolved := result.ResolvedRule
-	if resolved.AccountID != foodTalksSiteRuleAccountID || strings.TrimSpace(resolved.PresetID) == "" ||
+	if resolved.AccountID != meta.ID || strings.TrimSpace(resolved.PresetID) == "" ||
 		resolved.Revision < 1 || !publishRuleConfigHashPattern.MatchString(resolved.ConfigHash) || resolved.Source != "server" {
-		return errors.New("渲染服务没有返回本次请求实际使用的最新激活规则")
+		return fmt.Errorf("渲染服务没有返回规则包 %q 本次请求实际使用的最新激活规则", rulePackID)
 	}
 	if strings.TrimSpace(result.RendererBuildSHA) == "" {
 		return errors.New("渲染服务未返回 renderer build SHA")
@@ -555,18 +616,22 @@ func validatePublishRenderResult(result publishRenderResult) error {
 	return nil
 }
 
-// stageRender blocks → ft-default 规则包内联 HTML（与网站人工排版同源）。
+// stageRender blocks → 选定网站规则包内联 HTML（与网站人工排版同源）。
 // 每次调用 renderer 都读取最新激活规则；失败重试同样追随重试时的最新规则。
 func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error {
 	if strings.TrimSpace(job.BlocksJSON) == "" {
 		return errors.New("任务缺少已抓取的内容块（blocks），无法排版；请重试从抓取阶段续跑")
 	}
-	isRepost := publishSiteIsRepost(job.SourceName, job.BlocksJSON)
-	result, err := p.render(ctx, job.Title, job.SourceURL, job.BlocksJSON, isRepost)
+	rulePackID, err := publishRulePackIDForJob(job)
 	if err != nil {
 		return err
 	}
-	if err := validatePublishRenderResult(result); err != nil {
+	isRepost := publishSiteIsRepost(job.SourceName, job.BlocksJSON)
+	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, job.SourceURL, job.BlocksJSON, isRepost)
+	if err != nil {
+		return err
+	}
+	if err := validatePublishRenderResultForPack(result, rulePackID); err != nil {
 		return err
 	}
 	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
@@ -1324,9 +1389,22 @@ func (p *publishPipeline) submit(sourceURL string) (publishJob, bool, error) {
 }
 
 func (p *publishPipeline) submitWithContext(ctx context.Context, sourceURL string) (publishJob, bool, error) {
+	return p.submitWithRulePackAndMetadataContext(ctx, sourceURL, sitePublishRulePackID, "", "")
+}
+
+func (p *publishPipeline) submitWithRulePackAndMetadataContext(
+	ctx context.Context, sourceURL, rulePackID, classification, classifier string,
+) (publishJob, bool, error) {
 	if publishWorkersPaused() {
 		return publishJob{}, false, errPublishWorkersPaused
 	}
+	rulePackID, err := normalizeSitePublishRulePackID(rulePackID)
+	if err != nil {
+		return publishJob{}, false, err
+	}
+	classification = strings.TrimSpace(classification)
+	classifier = strings.TrimSpace(classifier)
+	ctx = withPublishRulePackID(ctx, rulePackID)
 	sourceKey, err := normalizeSiteSourceKey(sourceURL)
 	if err != nil {
 		return publishJob{}, false, err
@@ -1353,6 +1431,9 @@ func (p *publishPipeline) submitWithContext(ctx context.Context, sourceURL strin
 		seed := newPublishContentSeed(publishContentWebFetch, title, sourceName, byline, blocksJSON, "")
 		job, created, createErr := p.store.createSeeded(canonicalKey, sourceURL, func(j *publishJob) {
 			j.SourceAliases = []string{sourceKey}
+			j.RulePackID = rulePackID
+			j.Classification = classification
+			j.Classifier = classifier
 			applyPublishContentSeed(j, seed)
 		})
 		if createErr != nil {
@@ -1363,7 +1444,11 @@ func (p *publishPipeline) submitWithContext(ctx context.Context, sourceURL strin
 		}
 		return job, created, nil
 	}
-	job, created, err := p.store.create(sourceKey, sourceURL)
+	job, created, err := p.store.createSeeded(sourceKey, sourceURL, func(j *publishJob) {
+		j.RulePackID = rulePackID
+		j.Classification = classification
+		j.Classifier = classifier
+	})
 	if err != nil {
 		return publishJob{}, false, err
 	}
@@ -1386,12 +1471,15 @@ func publishSourceKeyIsShort(sourceKey string) bool {
 }
 
 type officialPublishInput struct {
-	URL         string
-	Title       string
-	SourceName  string
-	Author      string
-	ContentHTML string
-	CoverURL    string
+	URL               string
+	Title             string
+	SourceName        string
+	Author            string
+	ContentHTML       string
+	CoverURL          string
+	RulePackID        string
+	Classification    string
+	ClassifierVersion string
 }
 
 // submitOfficial 让微信公众号官方 API 返回的正文直接进入既有排版状态机。
@@ -1433,6 +1521,12 @@ func (p *publishPipeline) submitStructuredContent(
 	if publishWorkersPaused() {
 		return publishJob{}, false, errPublishWorkersPaused
 	}
+	rulePackID, err := normalizeSitePublishRulePackID(input.RulePackID)
+	if err != nil {
+		return publishJob{}, false, err
+	}
+	classification := strings.TrimSpace(input.Classification)
+	classifier := strings.TrimSpace(input.ClassifierVersion)
 	sourceKey, err := normalizeSiteSourceKey(input.URL)
 	if err != nil {
 		return publishJob{}, false, err
@@ -1442,7 +1536,7 @@ func (p *publishPipeline) submitStructuredContent(
 		if p.fetch == nil {
 			return publishJob{}, false, errors.New("短链缺少 canonical identity 解析器，未创建发布任务")
 		}
-		_, _, _, canonicalURL, _, fetchErr := p.fetch(ctx, input.URL)
+		_, _, _, canonicalURL, _, fetchErr := p.fetch(withPublishRulePackID(ctx, rulePackID), input.URL)
 		if fetchErr != nil {
 			return publishJob{}, false, fmt.Errorf("短链规范身份解析失败，未创建发布任务: %w", fetchErr)
 		}
@@ -1480,6 +1574,9 @@ func (p *publishPipeline) submitStructuredContent(
 	}
 	seed := newPublishContentSeed(contentSource, input.Title, input.SourceName, input.Author, string(blocksJSON), input.CoverURL)
 	job, created, err := p.store.createSeeded(sourceKey, input.URL, func(j *publishJob) {
+		j.RulePackID = rulePackID
+		j.Classification = classification
+		j.Classifier = classifier
 		if originalSourceKey != sourceKey {
 			j.SourceAliases = []string{originalSourceKey}
 		}

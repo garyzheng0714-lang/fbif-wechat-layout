@@ -91,6 +91,13 @@ func validatePublishMachineEvidence(contentKind, classification, classifierVersi
 		publishUnsafeHTMLAttrPattern.MatchString(contentHTML) || publishUnsafeHTMLURLPattern.MatchString(contentHTML)) {
 		return fmt.Errorf("machine sync content contains unsafe active HTML")
 	}
+	// URL-only machine submissions are the primary monitoring contract: the
+	// monitor supplies positive type evidence, while the layout service fetches
+	// the article from the original URL itself.  A body is still validated when
+	// a supplier intentionally sends content_html.
+	if strings.TrimSpace(contentHTML) == "" {
+		return nil
+	}
 	if len([]rune(strings.TrimSpace(htmlToPlainText(contentHTML)))) < 20 {
 		return fmt.Errorf("machine sync requires a non-empty ordinary article body")
 	}
