@@ -48,7 +48,7 @@ export default defineConfig({
   updateSnapshots: process.env.E2E_UPDATE_BASELINE === '1' ? 'all' : 'none',
   snapshotPathTemplate: '{testDir}/e2e-baselines/{arg}{ext}',
   webServer: {
-    command: `cd api && ADMIN_PASSWORD=local-e2e-only go run . -port ${e2ePort}`,
+    command: `cd api && AUTH_SESSION_SECRET=local-e2e-session-secret-for-tests go run . -port ${e2ePort}`,
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 90000,

@@ -10,10 +10,12 @@ import (
 )
 
 const (
-	publishSyncServiceTokenEnv = "PUBLISH_SYNC_SERVICE_TOKEN"
-	publishSyncServiceHeader   = "X-Publish-Sync-Token"
-	publishHTTPReviewEnv       = "PUBLISH_HTTP_REVIEW_ENABLED"
-	publishHTTPReviewerEnv     = "PUBLISH_HTTP_REVIEWER_OPEN_ID"
+	publishSyncServiceTokenEnv  = "PUBLISH_SYNC_SERVICE_TOKEN"
+	publishSyncServiceHeader    = "X-Publish-Sync-Token"
+	publishAdminServiceTokenEnv = "PUBLISH_ADMIN_SERVICE_TOKEN"
+	publishAdminServiceHeader   = "X-Publish-Admin-Token"
+	publishHTTPReviewEnv        = "PUBLISH_HTTP_REVIEW_ENABLED"
+	publishHTTPReviewerEnv      = "PUBLISH_HTTP_REVIEWER_OPEN_ID"
 )
 
 var (
@@ -37,6 +39,16 @@ func validPublishSyncServiceToken(input string) bool {
 	return want != "" && len(got) == len(want) && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
+func publishAdminServiceToken() string {
+	return strings.TrimSpace(os.Getenv(publishAdminServiceTokenEnv))
+}
+
+func validPublishAdminServiceToken(input string) bool {
+	got := strings.TrimSpace(input)
+	want := publishAdminServiceToken()
+	return want != "" && len(got) == len(want) && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
 func requirePublishServiceToken(w http.ResponseWriter, r *http.Request) bool {
 	if !publishSyncServiceTokenConfigured() {
 		writeError(w, http.StatusServiceUnavailable, publishSyncServiceTokenEnv+" is not configured")
@@ -49,9 +61,9 @@ func requirePublishServiceToken(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// requirePublishSubmitOrAdmin 给机器调用方最小的 submit/status 权限；管理密码仍可
-// 供人工后台使用，但机器凭证不能借此进入 review/retry/reconcile/rules 管理面。
-func requirePublishSubmitOrAdmin(w http.ResponseWriter, r *http.Request) bool {
+// requirePublishSubmitOrAdmin 给机器调用方最小的 submit/status 权限；人工操作
+// 使用登录会话角色，机器凭证不能借此进入 review/retry/reconcile/rules 管理面。
+func requirePublishSubmitOrAdmin(w http.ResponseWriter, r *http.Request, auth *authService) bool {
 	if got := r.Header.Get(publishSyncServiceHeader); strings.TrimSpace(got) != "" {
 		if !publishSyncServiceTokenConfigured() {
 			writeError(w, http.StatusServiceUnavailable, publishSyncServiceTokenEnv+" is not configured")
@@ -63,7 +75,7 @@ func requirePublishSubmitOrAdmin(w http.ResponseWriter, r *http.Request) bool {
 		}
 		return true
 	}
-	return requireAdminPassword(w, r)
+	return requirePublishAdmin(w, r, auth)
 }
 
 func publishHTTPReviewEnabled() bool {

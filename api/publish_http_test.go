@@ -16,12 +16,12 @@ import (
 	"testing"
 )
 
-const testAdminPassword = "test-admin-pw"
+const testPublishAdminToken = "test-publish-admin-token"
 const testPublishSyncServiceToken = "test-publish-sync-service-token"
 
 func newPublishTestMux(t *testing.T, env *publishTestEnv) *http.ServeMux {
 	t.Helper()
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", testPublishAdminToken)
 	t.Setenv("PUBLISH_SYNC_SERVICE_TOKEN", testPublishSyncServiceToken)
 	mux := http.NewServeMux()
 	registerPublishRoutes(mux, env.pipeline)
@@ -31,7 +31,7 @@ func newPublishTestMux(t *testing.T, env *publishTestEnv) *http.ServeMux {
 func doPublishReq(mux *http.ServeMux, method, target, body string, withAuth bool) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	if withAuth {
-		req.Header.Set("X-Admin-Password", testAdminPassword)
+		req.Header.Set("X-Publish-Admin-Token", testPublishAdminToken)
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -46,9 +46,9 @@ func doPublishServiceReq(mux *http.ServeMux, method, target, body string) *httpt
 	return rec
 }
 
-// TestPublishEndpointsRequireAdminPassword 发布管理面全部端点都在 ADMIN_PASSWORD 门后：
+// TestPublishEndpointsRequireAdminRole 发布管理面全部端点都在登录角色/CI 令牌门后：
 // 提交/查看/审核/重试任何一个裸奔，翻公开闸门就等于没锁。
-func TestPublishEndpointsRequireAdminPassword(t *testing.T) {
+func TestPublishEndpointsRequireAdminRole(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
 	cases := []struct{ method, target, body string }{
@@ -68,6 +68,40 @@ func TestPublishEndpointsRequireAdminPassword(t *testing.T) {
 	// 红线连带断言：以上未过门的请求不得触发任何 FoodTalks 调用。
 	if createN, updateN := env.ft.counts(); createN != 0 || updateN != 0 {
 		t.Fatalf("未过鉴权门的请求触发了 FoodTalks 调用（create=%d update=%d）", createN, updateN)
+	}
+}
+
+func TestPublishAdminRoutesRequireFeishuSessionWhenRuntimeAuthIsAttached(t *testing.T) {
+	env := newPublishTestEnv(t)
+	service := newTestAuthService(t, &fakeFeishuProvider{})
+	mux := http.NewServeMux()
+	registerPublishRoutes(mux, env.pipeline, service)
+	req := httptest.NewRequest(http.MethodGet, "/api/publish/delivery-settings", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("runtime publish admin without Feishu session status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPublishLifecycleHTTPAcceptsEmptyRequestBody(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.ft.forbidPublish = false
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "ou_reviewer"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	rec := doPublishReq(newPublishTestMux(t, env), http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/unpublish", job.ID), "", true)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("empty lifecycle body status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	current, err := env.store.byID(job.ID)
+	if err != nil || current.Stage != publishStageOffline {
+		t.Fatalf("empty lifecycle body did not run request: job=%+v err=%v", current, err)
 	}
 }
 

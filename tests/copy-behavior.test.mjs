@@ -707,9 +707,12 @@ test('footer original and repost notices come from behavior rules', async () => 
   assert.match(engine, /\* 本文为转载文章。/);
 });
 
-test('deploy writes rule admin password to production env', async () => {
+test('deploy writes role-based rule admin credentials to production env', async () => {
   const workflow = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /ADMIN_PASSWORD:\s*\$\{\{ secrets\.ADMIN_PASSWORD \}\}/);
-  assert.match(workflow, /ADMIN_PASSWORD GitHub secret is required/);
-  assert.match(workflow, /ADMIN_PASSWORD=%s\\n/);
+  assert.match(workflow, /PUBLISH_ADMIN_SERVICE_TOKEN:\s*\$\{\{ secrets\.PUBLISH_ADMIN_SERVICE_TOKEN \}\}/);
+  assert.match(workflow, /RULE_SUPER_ADMIN_OPEN_IDS:\s*\$\{\{ secrets\.RULE_SUPER_ADMIN_OPEN_IDS \}\}/);
+  assert.match(workflow, /PUBLISH_ADMIN_SERVICE_TOKEN GitHub secret is required|PUBLISH_ADMIN_SERVICE_TOKEN/);
+  assert.match(workflow, /PUBLISH_ADMIN_SERVICE_TOKEN=%s\\n/);
+  assert.match(workflow, /RULE_SUPER_ADMIN_OPEN_IDS=%s\\n/);
+  assert.doesNotMatch(workflow, /ADMIN_PASSWORD/);
 });

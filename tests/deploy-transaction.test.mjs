@@ -100,7 +100,7 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     .map(line => line.startsWith('          ') ? line.slice(10) : line)
     .join('\n');
   await execFileAsync('bash', ['-n', '-c', runScript]);
-  const requiredAt = workflow.indexOf('for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH ADMIN_PASSWORD RENDER_TOKEN');
+  const requiredAt = workflow.indexOf('for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH PUBLISH_ADMIN_SERVICE_TOKEN RULE_SUPER_ADMIN_OPEN_IDS RENDER_TOKEN');
   const sshTimeoutAt = workflow.indexOf('ConnectTimeout 15');
   const firstSSHAt = workflow.indexOf('ssh -i ~/.ssh/deploy_key');
   const firstRsyncAt = workflow.indexOf('rsync -avz');

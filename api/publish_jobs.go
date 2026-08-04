@@ -19,6 +19,10 @@ import (
 //	created → fetching → rendering → mirroring → enriching → assessing → staging → awaiting_review
 //	        → [review approve] → publicizing → publicizing_updating → published
 //	                                      └→ publicize_reconciliation_required
+//	        → [published] → unpublishing → unpublishing_updating → offline
+//	                                      └→ unpublish_reconciliation_required
+//	        → [offline] → republishing → republishing_updating → published
+//	                                      └→ republish_reconciliation_required
 //	        → [review reject]  → rejected（终态；FoodTalks 侧留草稿不动）
 //	任一步失败 → failed（failed_stage 记录续跑起点，retry 端点续跑）
 const (
@@ -41,6 +45,13 @@ const (
 	publishStagePublicizingUpdating             = "publicizing_updating"
 	publishStagePublicizeReconciliationRequired = "publicize_reconciliation_required"
 	publishStagePublished                       = "published"
+	publishStageUnpublishing                    = "unpublishing" // 人工下线已接受，尚未发出外部 PUT
+	publishStageUnpublishingUpdating            = "unpublishing_updating"
+	publishStageUnpublishReconciliationRequired = "unpublish_reconciliation_required"
+	publishStageOffline                         = "offline"
+	publishStageRepublishing                    = "republishing" // 人工重新发布已接受，尚未发出外部 PUT
+	publishStageRepublishingUpdating            = "republishing_updating"
+	publishStageRepublishReconciliationRequired = "republish_reconciliation_required"
 	publishStageRejected                        = "rejected"
 	publishStageSupersededDuplicate             = "superseded_duplicate"
 	publishStageFailed                          = "failed"
@@ -90,6 +101,17 @@ type publishJob struct {
 	ContentConflictNote  string `json:"content_conflict_note,omitempty"`
 	FoodTalksNewsID      int64  `json:"foodtalks_news_id,omitempty"`
 	ArticleURL           string `json:"article_url,omitempty"`
+	PublishedAt          string `json:"published_at,omitempty"`
+	UnpublishedAt        string `json:"unpublished_at,omitempty"`
+	// 文章首次成功公开时从网站规则中固化的下线窗口。0 表示关闭下线能力。
+	// 不跟随之后的规则修改，避免历史文章的可操作边界漂移。
+	UnpublishWindowHours int    `json:"unpublish_window_hours"`
+	UnpublishPolicySet   bool   `json:"unpublish_policy_set,omitempty"`
+	UnpublishWindowUntil string `json:"unpublish_window_until,omitempty"`
+	// 最近一次公开生命周期动作，用于同一张飞书卡片上的操作留痕。
+	PublicationAction   string `json:"publication_action,omitempty"` // publish / unpublish / republish
+	PublicationActor    string `json:"publication_actor,omitempty"`
+	PublicationActionAt string `json:"publication_action_at,omitempty"`
 	// FoodTalks CreateNews 没有服务端幂等键：外调前先持久化本地 intent。
 	// 调用结果不确定时凭此转人工核对，禁止自动 POST 第二次。
 	StagingIntentKey string `json:"staging_intent_key,omitempty"`
@@ -98,6 +120,11 @@ type publishJob struct {
 	// 发出不可逆请求，崩溃/断线后只能人工核对，不得盲目重放。
 	PublicizeIntentKey string `json:"publicize_intent_key,omitempty"`
 	PublicizeIntentAt  string `json:"publicize_intent_at,omitempty"`
+	// 下线 / 重新发布同样先落 intent；进入 updating 后结果不确定只能人工对账。
+	UnpublishIntentKey string `json:"unpublish_intent_key,omitempty"`
+	UnpublishIntentAt  string `json:"unpublish_intent_at,omitempty"`
+	RepublishIntentKey string `json:"republish_intent_key,omitempty"`
+	RepublishIntentAt  string `json:"republish_intent_at,omitempty"`
 	// M5 AI 预填发布参数（enriching 阶段落库；AI 失败时是规则兜底值，任务照常推进）。
 	// 口径见 docs/editorial-norms-foodtalks.md（M7 从编辑部历史文章倒推）。
 	Summary   string            `json:"summary,omitempty"`    // 摘要（一句话钩子 10~40 字；兜底=正文纯文本前 40 字）
@@ -121,15 +148,21 @@ type publishJob struct {
 	ReviewedAt           string `json:"reviewed_at,omitempty"`           // 审核时刻（RFC3339 UTC）
 	ReviewAction         string `json:"review_action,omitempty"`         // approve / reject；publicizing 恢复的授权凭据
 	ApprovedRiskVersion  string `json:"approved_risk_version,omitempty"` // approve 当刻与风险快照绑定的摘要
-	ReviewCardMsgID      string `json:"review_card_msg_id,omitempty"`    // 飞书审核卡消息 ID；终态原位更新用
-	CreatedAt            string `json:"created_at"`
-	UpdatedAt            string `json:"updated_at"`
+	ReviewCardMsgID      string `json:"review_card_msg_id,omitempty"`    // 旧任务单卡片兼容
+	// 新配置支持同一张审核卡投递到多个群；map 的 key 是 chat_id，value 是
+	// 对应群里的 message_id。ReviewCardMsgID 保留给旧任务兼容。
+	ReviewDeliveryAppID   string            `json:"review_delivery_app_id,omitempty"`
+	ReviewDeliveryChatIDs []string          `json:"review_delivery_chat_ids,omitempty"`
+	ReviewCardMsgIDs      map[string]string `json:"review_card_msg_ids,omitempty"`
+	CreatedAt             string            `json:"created_at"`
+	UpdatedAt             string            `json:"updated_at"`
 }
 
 // terminal 终态判定：published / rejected 之后任务盖棺；failed 不算终态（可 retry 续跑），
 // 因此同 source_key 再提交会幂等返回 failed 任务而不是建新单。
 func (j publishJob) terminal() bool {
-	return j.Stage == publishStagePublished || j.Stage == publishStageRejected || j.Stage == publishStageSupersededDuplicate
+	return j.Stage == publishStagePublished || j.Stage == publishStageOffline ||
+		j.Stage == publishStageRejected || j.Stage == publishStageSupersededDuplicate
 }
 
 type publishJobDocument struct {

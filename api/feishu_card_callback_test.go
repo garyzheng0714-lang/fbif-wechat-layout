@@ -177,7 +177,7 @@ func TestFeishuCallbackChallenge(t *testing.T) {
 }
 
 // TestFeishuCallbackTokenMismatch401 verification token 是回调端点唯一的来源门
-// （无 ADMIN_PASSWORD）：不匹配必须 401，且不得触发任何审核动作与 FoodTalks 调用。
+// （无登录角色凭证）：不匹配必须 401，且不得触发任何审核动作与 FoodTalks 调用。
 func TestFeishuCallbackTokenMismatch401(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newCardCallbackMux(t, env)
@@ -391,7 +391,7 @@ func TestReviewCardRiskChangeExpiresOldVersion(t *testing.T) {
 // 2026-07-15 收紧首屏：封面/标题/原生标签/摘要/预览链接归入同一个白底横向
 // 媒体容器；元信息压成两行，排版与风险说明默认折叠，不再叠灰色卡片。
 func TestReviewPendingCardContract(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	t.Setenv("WECHAT_UPLOAD_ORIGIN", "https://preview.test")
 	job := publishJob{
 		ID: 7, Title: "示例标题", SourceName: "示例公众号",
@@ -523,7 +523,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 }
 
 func TestReviewCardEscapesExternalMarkdownFields(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	malicious := `<at id=all></at> [恶链](https://evil.example) **粗体** # 标题`
 	job := publishJob{
 		ID: 9, Stage: publishStageAwaitingReview, FoodTalksNewsID: 7240,

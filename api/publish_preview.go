@@ -5,10 +5,10 @@ package main
 // job 的 content_html（就是将要发布的字节）+ 标题 + AI 预填参数页尾。
 //
 // 安全模型：
-//   - 签名 t = hex(HMAC-SHA256(key=ADMIN_PASSWORD, msg="publish-preview:"+id))——
+//   - 签名 t = hex(HMAC-SHA256(key=由 AUTH_SESSION_SECRET 派生的子密钥, msg="publish-preview:"+id))——
 //     免登录可分享给审核人，但不可遍历、不可伪造；未发布内容不裸奔。
 //   - 签名错 / 任务不存在 / 阶段太早，一律同一个 404（不区分成因，防探测遍历）。
-//   - ADMIN_PASSWORD 未配置（签名无密钥可算）→ 503。
+//   - AUTH_SESSION_SECRET 未配置（签名无密钥可算）→ 503。
 //   - 仅 awaiting_review 及之后阶段（awaiting_review/publicizing/published/rejected）
 //     可预览——此时 content_html 已定型；更早阶段（含 failed 半成品）404。
 //
@@ -42,14 +42,15 @@ func publishPreviewBaseURL() string {
 	return defaultPublishPreviewBaseURL
 }
 
-// publishPreviewSig 预览签名：HMAC-SHA256(key=ADMIN_PASSWORD, "publish-preview:"+id)。
-// 密钥复用规则后台密码（不新增平行凭证）；未配置时返回空串，端点侧 503。
+// publishPreviewSig 预览签名：HMAC-SHA256(key=由 AUTH_SESSION_SECRET 派生的独立子密钥,
+// "publish-preview:"+id)。规则后台不再有共享密码；未配置时返回空串，端点侧 503。
 func publishPreviewSig(jobID int64) string {
-	key := adminPassword()
-	if key == "" {
+	secret := strings.TrimSpace(os.Getenv("AUTH_SESSION_SECRET"))
+	if secret == "" {
 		return ""
 	}
-	mac := hmac.New(sha256.New, []byte(key))
+	derived := sha256.Sum256(append([]byte("fbif-publish-preview\x00"), []byte(secret)...))
+	mac := hmac.New(sha256.New, derived[:])
 	mac.Write([]byte("publish-preview:" + strconv.FormatInt(jobID, 10)))
 	return hex.EncodeToString(mac.Sum(nil))
 }
@@ -71,7 +72,7 @@ func publishPreviewAllowed(stage string) bool {
 
 func registerPublishPreviewRoute(mux *http.ServeMux, store *publishJobStore) {
 	mux.HandleFunc("GET /preview/publish/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if !adminPasswordConfigured() {
+		if publishPreviewSig(0) == "" {
 			http.Error(w, "预览服务未配置", http.StatusServiceUnavailable)
 			return
 		}

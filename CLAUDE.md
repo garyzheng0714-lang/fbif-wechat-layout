@@ -83,16 +83,16 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
-- 规则后台需要 `ADMIN_PASSWORD` 环境变量；生产值只能放 GitHub Secret 和本地忽略提交的 `.env`
+- 规则后台使用飞书登录会话与角色权限；超级管理员来自 `RULE_SUPER_ADMIN_OPEN_IDS`，部署/运维另用 `PUBLISH_ADMIN_SERVICE_TOKEN`
 - 规则预设默认写入 `data/rule-presets.json`；可用 `RULES_STORE_PATH` 覆盖
 - 启动：`cd api && go run . -port 19090`
 
 ## Deploy
 - 推送 `main` 触发 `.github/workflows/deploy.yml`
-- 部署会把 `LIBREOFFICE_URL`、`LIBREOFFICE_TOKEN`、`CLOUDCONVERT_API_KEY`、`ADMIN_PASSWORD` 写入服务器 `/var/www/api/.env`
-- `ADMIN_PASSWORD` 缺失时部署必须失败，不能让正式端进入“规则后台未配置密码”状态
+- 部署会把 `LIBREOFFICE_URL`、`LIBREOFFICE_TOKEN`、`CLOUDCONVERT_API_KEY`、`PUBLISH_ADMIN_SERVICE_TOKEN`、`RULE_SUPER_ADMIN_OPEN_IDS` 写入服务器 `/var/www/api/.env`
+- `RULE_SUPER_ADMIN_OPEN_IDS` 缺失时生产启动必须失败，不能让正式端进入“没有可识别超级管理员”的状态
 - 部署工作流必须确保 `/`、`/index.html`、`/app.html`、`/version.json` 响应头为 `Cache-Control: no-cache`
-- 修改正式后台密码时，更新 GitHub Secret 后重跑部署，并用 `/api/rules/admin/login` 做 200/401 双向验证
+- 修改正式后台权限时，更新 `RULE_SUPER_ADMIN_OPEN_IDS` 或由超级管理员在“权限管理”中授权，再重跑部署/刷新会话验证 `/api/me` 与后台接口
 
 ## Rule Hygiene
 - Rules in this file must describe current behavior, not historical requests.

@@ -58,6 +58,63 @@ func TestHTTPFeishuProviderSearchUsesUserTokenAndDocumentFilter(t *testing.T) {
 	}
 }
 
+func TestHTTPFeishuProviderListsOnlyGroupChatsAcrossPages(t *testing.T) {
+	var pageTokens []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/open-apis/im/v1/chats" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer user-chat-token" {
+			t.Fatalf("authorization=%q", got)
+		}
+		if got := r.URL.Query().Get("user_id_type"); got != "open_id" {
+			t.Fatalf("user_id_type=%q", got)
+		}
+		pageToken := r.URL.Query().Get("page_token")
+		pageTokens = append(pageTokens, pageToken)
+		if pageToken == "" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"code": 0,
+				"data": map[string]any{
+					"items": []map[string]any{
+						{"chat_id": "oc_group_1", "name": "内容审核群", "chat_mode": "group"},
+						{"chat_id": "ou_direct", "name": "单聊", "chat_mode": "p2p"},
+					},
+					"has_more":   true,
+					"page_token": "next-page",
+				},
+			})
+			return
+		}
+		if pageToken != "next-page" {
+			t.Fatalf("unexpected page token=%q", pageToken)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"items": []map[string]any{
+					{"chat_id": "oc_topic_2", "name": "专题审核群", "chat_mode": "topic", "external": true},
+				},
+				"has_more": false,
+			},
+		})
+	}))
+	defer server.Close()
+
+	provider := newHTTPFeishuProvider(server.Client())
+	provider.apiBaseURL = server.URL
+	chats, err := provider.ListChats(context.Background(), "user-chat-token")
+	if err != nil {
+		t.Fatalf("list chats: %v", err)
+	}
+	if !reflect.DeepEqual(pageTokens, []string{"", "next-page"}) {
+		t.Fatalf("page tokens=%v", pageTokens)
+	}
+	if len(chats) != 2 || chats[0].ChatID != "oc_group_1" || chats[1].ChatID != "oc_topic_2" || !chats[1].External {
+		t.Fatalf("filtered chats=%+v", chats)
+	}
+}
+
 func TestHTTPFeishuProviderExportsWikiNodeAsDocx(t *testing.T) {
 	var createBody map[string]string
 	var requestPaths []string

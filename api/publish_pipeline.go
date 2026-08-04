@@ -146,6 +146,9 @@ func publishRenderOutputHash(html string) string {
 type publishPipeline struct {
 	store *publishJobStore
 	rules *rulePresetStore
+	// deliverySettings 是审核卡投递配置的服务端真相源。任务进入待审核时
+	// 会把当前选择快照到 publishJob，后续改后台配置不会把旧卡切到别的群。
+	deliverySettings *publishDeliverySettingsStore
 	// publicDir 只用于 readiness 复核部署生成物；生产入口必须写入实际静态目录。
 	publicDir string
 	// workerPool 仅在生产入口显式启用。单元测试默认保留可注入的同步/异步
@@ -447,7 +450,9 @@ func (p *publishPipeline) runJob(jobID int64) {
 		}
 		if job.terminal() || job.Stage == publishStageAwaitingReview || job.Stage == publishStageFailed ||
 			job.Stage == publishStageStagingCreating || job.Stage == publishStageReconciliationRequired ||
-			job.Stage == publishStagePublicizingUpdating || job.Stage == publishStagePublicizeReconciliationRequired {
+			job.Stage == publishStagePublicizingUpdating || job.Stage == publishStagePublicizeReconciliationRequired ||
+			job.Stage == publishStageUnpublishingUpdating || job.Stage == publishStageUnpublishReconciliationRequired ||
+			job.Stage == publishStageRepublishingUpdating || job.Stage == publishStageRepublishReconciliationRequired {
 			return
 		}
 		var stageErr error
@@ -478,6 +483,10 @@ func (p *publishPipeline) runJob(jobID int64) {
 			stageErr = p.stageStage(ctx, job)
 		case publishStagePublicizing:
 			stageErr = p.stagePublicize(ctx, job)
+		case publishStageUnpublishing:
+			stageErr = p.stageUnpublish(ctx, job)
+		case publishStageRepublishing:
+			stageErr = p.stageRepublish(ctx, job)
 		default:
 			stageErr = fmt.Errorf("未知任务阶段 %q", job.Stage)
 		}
@@ -491,7 +500,8 @@ func (p *publishPipeline) runJob(jobID int64) {
 			if latest, loadErr := p.store.byID(jobID); loadErr == nil && latest.PendingContentHash != "" && publishContentPromotableStage(latest) {
 				continue
 			}
-			if errors.Is(stageErr, errStagingOutcomeUncertain) || errors.Is(stageErr, errPublicizeOutcomeUncertain) {
+			if errors.Is(stageErr, errStagingOutcomeUncertain) || errors.Is(stageErr, errPublicizeOutcomeUncertain) ||
+				errors.Is(stageErr, errUnpublishOutcomeUncertain) || errors.Is(stageErr, errRepublishOutcomeUncertain) {
 				// 已经进入持久 intent 窗口；Create 盲重放会建重文，
 				// publicize 盲重放则会掩盖不可逆动作的真实结果。
 				log.Printf("publish: job %d stage %s outcome uncertain: %v", jobID, job.Stage, stageErr)
@@ -518,6 +528,30 @@ func (p *publishPipeline) runJob(jobID int64) {
 				}
 				if failed.PendingContentHash != "" && publishContentPromotableStage(failed) {
 					continue
+				}
+				p.schedulePublishNotification(failed.ID)
+				return
+			}
+			if job.Stage == publishStageUnpublishing || job.Stage == publishStageRepublishing {
+				kind := publishNotificationUnpublishFailed
+				if job.Stage == publishStageRepublishing {
+					kind = publishNotificationRepublishFailed
+				}
+				failed, swapped, persistErr := p.store.updateIf(jobID, func(current publishJob) bool {
+					return current.Stage == job.Stage &&
+						current.UnpublishIntentKey == "" && current.RepublishIntentKey == ""
+				}, func(j *publishJob) {
+					j.Stage = publishStageFailed
+					j.FailedStage = job.Stage
+					j.Error = stageErr.Error()
+					enqueuePublishNotification(j, kind)
+				})
+				if persistErr != nil {
+					log.Printf("publish: record job %d lifecycle failure failed: %v", jobID, persistErr)
+					return
+				}
+				if !swapped {
+					return
 				}
 				p.schedulePublishNotification(failed.ID)
 				return
@@ -806,7 +840,7 @@ func (p *publishPipeline) stageAssessRisk(ctx context.Context, job publishJob) e
 		j.FailedStage = ""
 		j.Error = ""
 		if nextStage == publishStageAwaitingReview {
-			enqueuePublishNotification(j, publishNotificationReviewPending)
+			p.enqueueReviewNotification(j)
 		}
 	})
 	if err == nil && !swapped {
@@ -860,7 +894,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 			j.FailedStage = ""
 			j.Error = ""
 			if j.PendingContentHash == "" {
-				enqueuePublishNotification(j, publishNotificationReviewPending)
+				p.enqueueReviewNotification(j)
 			}
 		})
 		if err != nil {
@@ -930,7 +964,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		j.FailedStage = ""
 		j.Error = ""
 		if j.PendingContentHash == "" {
-			enqueuePublishNotification(j, publishNotificationReviewPending)
+			p.enqueueReviewNotification(j)
 		}
 	})
 	if err != nil {
@@ -964,6 +998,20 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		return err
 	}
 	news.ID = job.FoodTalksNewsID
+	rulePackID, err := publishRulePackIDForJob(job)
+	if err != nil {
+		return err
+	}
+	hours, err := p.snapshotPublishLifecyclePolicy(rulePackID, publishResolvedRule{
+		AccountID:  rulePackID,
+		PresetID:   job.RulePresetID,
+		Revision:   job.RuleRevision,
+		ConfigHash: job.RuleConfigHash,
+		Source:     "server",
+	})
+	if err != nil {
+		return err
+	}
 	intentKey := fmt.Sprintf("foodtalks-publicize:job-%d:%s", job.ID, job.ApprovedRiskVersion)
 	claimed, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStagePublicizing && current.PublicizeIntentKey == "" &&
@@ -972,6 +1020,11 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		j.Stage = publishStagePublicizingUpdating
 		j.PublicizeIntentKey = intentKey
 		j.PublicizeIntentAt = p.now().UTC().Format(time.RFC3339)
+		j.UnpublishWindowHours = hours
+		j.UnpublishPolicySet = true
+		j.PublicationAction = publishPublicationActionPublish
+		j.PublicationActor = strings.TrimSpace(j.ReviewedBy)
+		j.PublicationActionAt = j.ReviewedAt
 		j.Error = ""
 	})
 	if err != nil {
@@ -994,6 +1047,7 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		p.markPublicizeReconciliation(job.ID, intentKey, msg)
 		return fmt.Errorf("%w：%s", errPublicizeOutcomeUncertain, msg)
 	}
+	publishedAt := pipelineNow(p)
 	articleURL := siteFrontURL() + "/news/" + strconv.FormatInt(job.FoodTalksNewsID, 10)
 	updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStagePublicizingUpdating && current.PublicizeIntentKey == intentKey
@@ -1002,6 +1056,8 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		j.Stage = publishStagePublished
 		j.FailedStage = ""
 		j.Error = ""
+		j.PublishedAt = publishedAt.Format(time.RFC3339)
+		j.UnpublishWindowUntil = publishWindowUntil(publishedAt, j.UnpublishWindowHours)
 		enqueuePublishNotification(j, publishNotificationPublished)
 	})
 	if err != nil || !swapped {
@@ -1050,7 +1106,7 @@ func (p *publishPipeline) markPublicizeReconciliation(jobID int64, intentKey, re
 	}
 }
 
-// review 人审动作核心：HTTP 端点（ADMIN_PASSWORD 门）与飞书卡片回调（token+
+// review 人审动作核心：HTTP 端点（登录角色门）与飞书卡片回调（token+
 // reviewer 白名单门）共用这一个函数——仅 awaiting_review 可操作；approve 只持久化
 // publicizing intent 并排队后台 worker，不在请求内等待 FoodTalks。reviewedBy 是审核人留痕（卡片回调传
 // operator.open_id，HTTP 端点传空），落 reviewed_by/reviewed_at 进终态卡与任务存储。
@@ -1061,7 +1117,7 @@ func (p *publishPipeline) review(ctx context.Context, jobID int64, action, revie
 }
 
 // reviewWithRiskVersion 把卡片上看到的风险版本纳入同一次存储 CAS，消除
-// “先读版本、后审核”的 TOCTOU。expectedRiskVersion 为空表示 ADMIN_PASSWORD
+// “先读版本、后审核”的 TOCTOU。expectedRiskVersion 为空表示后台人工操作
 // 管理端明确审批 CAS 当刻的最新风险快照；两条路径都会持久化该版本。
 func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, action, reviewedBy, expectedRiskVersion string) (publishJob, error) {
 	if publishWorkersPaused() {
@@ -1169,6 +1225,17 @@ func (p *publishPipeline) retry(jobID int64) (publishJob, error) {
 			(!validPersistedPublishApproval(current) || current.PublicizeIntentKey != "") {
 			return false
 		}
+		if (target == publishStageUnpublishing || target == publishStageRepublishing) &&
+			(current.UnpublishIntentKey != "" || current.RepublishIntentKey != "") {
+			return false
+		}
+		if target == publishStageUnpublishing &&
+			(!publishUnpublishWindowOpen(current, pipelineNow(p))) {
+			return false
+		}
+		if target == publishStageRepublishing && !validPersistedPublishApproval(current) {
+			return false
+		}
 		// 旧数据若在 staging failed 上已有 intent，也必须人工对账，不可重发 POST。
 		if target == publishStageStaging && current.StagingIntentKey != "" && current.FoodTalksNewsID == 0 {
 			return false
@@ -1246,6 +1313,20 @@ func (p *publishPipeline) recoverJobs() {
 		case publishStagePublicizingUpdating:
 			p.markPublicizeReconciliation(job.ID, job.PublicizeIntentKey,
 				"进程在不可逆 UpdateNews 调用窗口中断，外部结果不确定，启动时禁止自动重放")
+		case publishStageUnpublishing:
+			if publishUnpublishWindowOpen(job, pipelineNow(p)) && job.UnpublishIntentKey == "" {
+				p.spawn(func() { p.runJob(job.ID) })
+			}
+		case publishStageUnpublishingUpdating:
+			p.markUnpublishReconciliation(job.ID, job.UnpublishIntentKey,
+				"进程在下线 UpdateNews 调用窗口中断，外部结果不确定，启动时禁止自动重放")
+		case publishStageRepublishing:
+			if validPersistedPublishApproval(job) && job.RepublishIntentKey == "" {
+				p.spawn(func() { p.runJob(job.ID) })
+			}
+		case publishStageRepublishingUpdating:
+			p.markRepublishReconciliation(job.ID, job.RepublishIntentKey,
+				"进程在重新发布 UpdateNews 调用窗口中断，外部结果不确定，启动时禁止自动重放")
 		}
 	}
 }
@@ -1308,7 +1389,7 @@ func (p *publishPipeline) reconcileStaging(jobID, newsID int64, confirmNotCreate
 			j.FoodTalksNewsID = newsID
 			if publishRiskLevelKnown(j.RiskLevel) {
 				j.Stage = publishStageAwaitingReview
-				enqueuePublishNotification(j, publishNotificationReviewPending)
+				p.enqueueReviewNotification(j)
 			} else {
 				j.Stage = publishStageAssessingReview
 			}

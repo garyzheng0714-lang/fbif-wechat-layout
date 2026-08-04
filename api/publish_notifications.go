@@ -21,6 +21,12 @@ const (
 	publishNotificationRejected           = "rejected"
 	publishNotificationPublicizeFailed    = "publicize_failed"
 	publishNotificationPublicizeUncertain = "publicize_uncertain"
+	publishNotificationOffline            = "offline"
+	publishNotificationRepublished        = "republished"
+	publishNotificationUnpublishFailed    = "unpublish_failed"
+	publishNotificationUnpublishUncertain = "unpublish_uncertain"
+	publishNotificationRepublishFailed    = "republish_failed"
+	publishNotificationRepublishUncertain = "republish_uncertain"
 
 	publishNotificationStatePending    = "pending"
 	publishNotificationStateSending    = "sending"
@@ -143,6 +149,12 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 	case publishNotificationRejected:
 		return p.sendTerminalPublishNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】已驳回\n标题：%s\n文章留在 FoodTalks 草稿态，不对外可见", job.Title))
+	case publishNotificationOffline:
+		return p.sendTerminalPublishNotification(ctx, job, fmt.Sprintf(
+			"【网站同步】已下线\n标题：%s\n文章已从 FoodTalks 前台下线，仍可在窗口内重新发布。", job.Title))
+	case publishNotificationRepublished:
+		return p.sendTerminalPublishNotification(ctx, job, fmt.Sprintf(
+			"【网站同步】已重新发布\n标题：%s\n文章已恢复为 FoodTalks 公开状态。", job.Title))
 	case publishNotificationPublicizeFailed:
 		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
 			"【网站同步】发布失败\n标题：%s\n任务 #%d 在发出公开请求前已确认失败，网站仍保持草稿态；修复配置后可安全重试。\n原因：%s",
@@ -150,6 +162,22 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 	case publishNotificationPublicizeUncertain:
 		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, true), fmt.Sprintf(
 			"【网站同步】公开结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n任务 #%d 不会自动重试，请先在网站前台/后台确认是否已公开，再调用人工对账。\n原因：%s",
+			job.Title, job.FoodTalksNewsID, job.ID, job.Error))
+	case publishNotificationUnpublishFailed:
+		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
+			"【网站同步】下线失败\n标题：%s\n任务 #%d 尚未确认下线，修复配置后可重试。\n原因：%s",
+			job.Title, job.ID, job.Error))
+	case publishNotificationUnpublishUncertain:
+		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, true), fmt.Sprintf(
+			"【网站同步】下线结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n任务 #%d 不会自动重试，请先确认文章当前是否已下线，再进行对账。\n原因：%s",
+			job.Title, job.FoodTalksNewsID, job.ID, job.Error))
+	case publishNotificationRepublishFailed:
+		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
+			"【网站同步】重新发布失败\n标题：%s\n任务 #%d 仍保持下线状态，修复配置后可重试。\n原因：%s",
+			job.Title, job.ID, job.Error))
+	case publishNotificationRepublishUncertain:
+		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, true), fmt.Sprintf(
+			"【网站同步】重新发布结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n任务 #%d 不会自动重试，请先确认文章当前是否已公开，再进行对账。\n原因：%s",
 			job.Title, job.FoodTalksNewsID, job.ID, job.Error))
 	default:
 		return fmt.Errorf("未知发布通知类型 %q", job.NotificationKind)
@@ -166,6 +194,15 @@ func (p *publishPipeline) sendTerminalPublishNotification(ctx context.Context, j
 // 或更新接口暂时不可用时，兼容发送一张新终态卡，再降级文本。新任务的正常路径
 // 只会命中第一分支，因此不会在群里追加第二张结果卡。
 func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job publishJob, card map[string]any, fallbackText string) error {
+	if p != nil && p.deliverySettings != nil {
+		if err := p.sendConfiguredReviewCardToTargets(ctx, job, card); err == nil {
+			return nil
+		} else {
+			// 配置过应用/多群后，不能退回旧的单群 notifier；否则用户会看到
+			// 两张卡，且终态可能落到错误的群里。让 outbox 按原配置重试。
+			return err
+		}
+	}
 	if messageID := strings.TrimSpace(job.ReviewCardMsgID); messageID != "" && p.updateCard != nil {
 		if err := p.updateCard(ctx, messageID, card); err == nil {
 			return nil
@@ -188,8 +225,14 @@ func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job 
 
 func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job publishJob) error {
 	coverImgKey := ""
-	if p.coverImgKey != nil && strings.TrimSpace(job.CoverURL) != "" {
-		key, err := p.coverImgKey(ctx, job.CoverURL)
+	if strings.TrimSpace(job.CoverURL) != "" {
+		var key string
+		var err error
+		if p != nil && p.deliverySettings != nil {
+			key, err = p.uploadReviewCoverForJob(ctx, job)
+		} else if p.coverImgKey != nil {
+			key, err = p.coverImgKey(ctx, job.CoverURL)
+		}
 		if err != nil {
 			log.Printf("publish: WARN 封面转存飞书失败（卡片将不带图）: %v", err)
 		} else {
@@ -197,6 +240,9 @@ func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job
 		}
 	}
 	card := buildReviewPendingCard(job, coverImgKey)
+	if p != nil && p.deliverySettings != nil {
+		return p.sendConfiguredReviewCardToTargets(ctx, job, card)
+	}
 	if messageID := strings.TrimSpace(job.ReviewCardMsgID); messageID != "" && p.updateCard != nil {
 		if err := p.updateCard(ctx, messageID, card); err == nil {
 			return nil
@@ -231,6 +277,59 @@ func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job
 	return p.notify(ctx, fmt.Sprintf(
 		"【网站同步】待审核\n标题：%s\n原文：%s\n%s\n草稿已进站（外界不可见），FoodTalks 资讯 ID：%d\n%s",
 		job.Title, job.SourceURL, formatPublishRiskText(job), job.FoodTalksNewsID, instruction))
+}
+
+// sendConfiguredReviewCardToTargets 是应用 + 多群配置的唯一卡片投递路径。
+// 每个群各自持久化 message_id：部分群发送成功后，重试只更新已成功的卡，
+// 不会因为某一个群暂时失败而在其它群追加重复卡片。
+func (p *publishPipeline) sendConfiguredReviewCardToTargets(ctx context.Context, job publishJob, card map[string]any) error {
+	settings, _, err := p.reviewDeliveryForJob(job)
+	if err != nil {
+		return err
+	}
+	if len(settings.ChatIDs) == 0 {
+		return errors.New("发布审核通知尚未选择审核群")
+	}
+	for _, chatID := range settings.ChatIDs {
+		chatID = strings.TrimSpace(chatID)
+		if chatID == "" {
+			continue
+		}
+		messageID := reviewCardMessageID(job, chatID)
+		if messageID != "" {
+			if err := p.updateConfiguredReviewCard(ctx, job, chatID, messageID, card); err != nil {
+				return fmt.Errorf("更新审核群 %s 的卡片失败：%w", chatID, err)
+			}
+			continue
+		}
+		messageID, err := p.sendConfiguredReviewCard(ctx, job, chatID, card)
+		if err != nil {
+			return fmt.Errorf("向审核群 %s 发送卡片失败：%w", chatID, err)
+		}
+		if err := p.rememberReviewCardMessageIDForChat(job, chatID, messageID); err != nil {
+			return err
+		}
+		job.ReviewCardMsgIDs = cloneStringMap(job.ReviewCardMsgIDs)
+		if job.ReviewCardMsgIDs == nil {
+			job.ReviewCardMsgIDs = map[string]string{}
+		}
+		job.ReviewCardMsgIDs[chatID] = messageID
+		if job.ReviewCardMsgID == "" {
+			job.ReviewCardMsgID = messageID
+		}
+	}
+	return nil
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 // rememberReviewCardMessageID 把发送成功得到的卡片消息 ID 写回任务。允许旧 ID

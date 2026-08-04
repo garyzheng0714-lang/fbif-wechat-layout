@@ -50,11 +50,6 @@ func main() {
 		return
 	}
 
-	// 启动期 fail loud：缺 ADMIN_PASSWORD 拒绝启动，杜绝正式端进入「规则后台未配置密码」状态
-	// （CLAUDE.md Deploy 契约）。codegen 模式 -emit-* 已在上方 return，不受此限；本地开发设任意值即可。
-	if strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")) == "" {
-		log.Fatal("ADMIN_PASSWORD 未设置：拒绝以无规则后台密码的状态启动（正式端必须配置；本地开发可临时设任意值）")
-	}
 	if productionRuntime() {
 		if err := validateRuntimeConfigSchema(); err != nil {
 			log.Fatalf("运行配置 schema 不匹配：%v", err)
@@ -94,6 +89,7 @@ func main() {
 	}
 	registerAuthRoutes(mux, authService)
 	registerFeishuDocumentRoutes(mux, authService)
+	registerFeishuChatRoutes(mux, authService)
 
 	// Image upload to OSS (base64 from DOCX)
 	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
@@ -114,13 +110,14 @@ func main() {
 	// Cached image payload for images stripped from converted docx
 	mux.HandleFunc("GET /api/doc-cache/{hash}/{filename}", handleDocImageCache)
 
-	registerRulePresetHandlers(mux, ruleStore)
+	registerRulePresetHandlers(mux, ruleStore, authService)
+	registerRuleAdminAccessHandlers(mux, authService)
 
 	// 程序化排版 API（/api/render 代理 + /api/html-to-blocks，Bearer RENDER_TOKEN）
 	registerRenderRoutes(mux)
 
 	// 发布流水线（公众号 → FoodTalks 网站）：JSON 任务存储 + 状态机 + 人审端点。
-	// 机器提交使用最小权限同步凭证；管理端保留 ADMIN_PASSWORD，生产 HTTP 审核默认关闭。
+	// 机器提交使用最小权限同步凭证；人工管理使用登录会话角色，生产 HTTP 审核默认关闭。
 	publishPath := publishJobsPath(*rulesPath)
 	publishLock, err := acquirePublishProcessLock(publishPath)
 	if err != nil {
@@ -129,6 +126,7 @@ func main() {
 	defer publishLock.Close()
 	publishStore := newPublishJobStore(publishPath)
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
+	publishPipe.deliverySettings = newPublishDeliverySettingsStore(publishDeliverySettingsPath(*rulesPath))
 	publishPipe.publicDir = publicDir
 	publishPipe.enableBoundedWorkers(4, 128)
 	if !feishuReviewerAllowlistConfigured() {
@@ -145,7 +143,7 @@ func main() {
 	} else {
 		publishPipe.recoverJobs()
 	}
-	registerPublishRoutes(mux, publishPipe)
+	registerPublishRoutes(mux, publishPipe, authService)
 	// 飞书回调传输层必须显式互斥；缺失/非法配置安全回落 websocket 行为，公网
 	// Webhook 精确返回 404，但 readiness=false，防止部署在含糊配置下假绿。
 	feishuMode, feishuModeExplicit := registerConfiguredFeishuCallbackRoute(mux, publishPipe)
@@ -155,7 +153,7 @@ func main() {
 	if !publishWorkersPaused() && feishuMode == feishuCallbackModeWebSocket {
 		maybeStartFeishuWS(publishPipe)
 	}
-	// 未上架预览页（M4「预览链接」裁定）：免登录但 HMAC 签名门（key=ADMIN_PASSWORD），
+	// 未上架预览页（M4「预览链接」裁定）：免登录但 HMAC 签名门（key=AUTH_SESSION_SECRET 派生），
 	// 签名错/不存在/阶段太早一律 404（见 publish_preview.go 安全模型）。
 	registerPublishPreviewRoute(mux, publishStore)
 

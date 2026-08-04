@@ -23,10 +23,14 @@ var (
 	errAuthenticationRequired = errors.New("authentication required")
 	errFeishuLoginRequired    = errors.New("feishu login required")
 	errInvalidSession         = errors.New("invalid session")
+	errRuleAdminRequired      = errors.New("rule admin required")
+	errSuperAdminRequired     = errors.New("super admin required")
 )
 
 type authCapabilities struct {
 	FeishuDocuments bool `json:"feishu_documents"`
+	RuleAdmin       bool `json:"rule_admin"`
+	RuleSuperAdmin  bool `json:"rule_super_admin"`
 }
 
 type authPublicUser struct {
@@ -35,6 +39,7 @@ type authPublicUser struct {
 	AvatarURL    string           `json:"avatar_url,omitempty"`
 	Email        string           `json:"email,omitempty"`
 	AuthMode     string           `json:"auth_mode"`
+	Role         string           `json:"role"`
 	Capabilities authCapabilities `json:"capabilities"`
 }
 
@@ -45,6 +50,7 @@ type authConfig struct {
 	RedirectURI   string
 	SessionTTL    time.Duration
 	Now           func() time.Time
+	SuperAdminIDs map[string]struct{}
 }
 
 type authSessionClaims struct {
@@ -160,15 +166,33 @@ func (s *authService) now() time.Time {
 	return s.config.Now().UTC()
 }
 
-func publicAuthUser(user authUser) authPublicUser {
+func (s *authService) effectiveRole(user authUser) authRole {
+	if user.AuthMode == authModeFeishu {
+		if _, ok := s.config.SuperAdminIDs[strings.TrimSpace(user.FeishuOpenID)]; ok {
+			return authRoleSuperAdmin
+		}
+	}
+	// 超级管理员身份只来自部署配置，不能靠篡改 JSON 用户库自授予。
+	role := normalizeAuthRole(user.Role)
+	if role == authRoleSuperAdmin {
+		return authRoleAdmin
+	}
+	return role
+}
+
+func (s *authService) publicAuthUser(user authUser) authPublicUser {
+	role := s.effectiveRole(user)
 	return authPublicUser{
 		ID:        user.ID,
 		Name:      user.Name,
 		AvatarURL: user.AvatarURL,
 		Email:     user.Email,
 		AuthMode:  string(user.AuthMode),
+		Role:      string(role),
 		Capabilities: authCapabilities{
 			FeishuDocuments: user.AuthMode == authModeFeishu,
+			RuleAdmin:       role == authRoleAdmin || role == authRoleSuperAdmin,
+			RuleSuperAdmin:  role == authRoleSuperAdmin,
 		},
 	}
 }
@@ -266,6 +290,29 @@ func (s *authService) requireFeishuUser(r *http.Request) (authUser, error) {
 	}
 	if user.AuthMode != authModeFeishu {
 		return authUser{}, errFeishuLoginRequired
+	}
+	return user, nil
+}
+
+func (s *authService) requireRuleAdmin(r *http.Request) (authUser, error) {
+	user, err := s.currentUser(r)
+	if err != nil {
+		return authUser{}, err
+	}
+	role := s.effectiveRole(user)
+	if role != authRoleAdmin && role != authRoleSuperAdmin {
+		return authUser{}, errRuleAdminRequired
+	}
+	return user, nil
+}
+
+func (s *authService) requireSuperAdmin(r *http.Request) (authUser, error) {
+	user, err := s.currentUser(r)
+	if err != nil {
+		return authUser{}, err
+	}
+	if s.effectiveRole(user) != authRoleSuperAdmin {
+		return authUser{}, errSuperAdminRequired
 	}
 	return user, nil
 }

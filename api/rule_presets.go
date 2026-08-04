@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1200,32 +1199,6 @@ func validateRuleStoreBaselines(doc ruleStoreDocumentV2) error {
 	return nil
 }
 
-func adminPassword() string {
-	return strings.TrimSpace(os.Getenv("ADMIN_PASSWORD"))
-}
-
-func adminPasswordConfigured() bool {
-	return adminPassword() != ""
-}
-
-func validAdminPassword(input string) bool {
-	got := strings.TrimSpace(input)
-	want := adminPassword()
-	return want != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
-}
-
-func requireAdminPassword(w http.ResponseWriter, r *http.Request) bool {
-	if !adminPasswordConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "ADMIN_PASSWORD is not configured")
-		return false
-	}
-	if !validAdminPassword(r.Header.Get("X-Admin-Password")) {
-		writeError(w, http.StatusUnauthorized, "admin password required")
-		return false
-	}
-	return true
-}
-
 func writeRulePresetDocument(w http.ResponseWriter, status int, doc rulePresetDocument) {
 	writeJSON(w, status, struct {
 		ActiveID  string               `json:"active_id"`
@@ -1263,7 +1236,11 @@ func writeAccountRevisionConflict(w http.ResponseWriter, conflict *accountRevisi
 	})
 }
 
-func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
+func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore, authServices ...*authService) {
+	var auth *authService
+	if len(authServices) > 0 {
+		auth = authServices[0]
+	}
 	mux.HandleFunc("GET /api/rules/active", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		preset, err := store.activeForAccount(r.URL.Query().Get("account"))
@@ -1284,26 +1261,11 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 	})
 
 	mux.HandleFunc("POST /api/rules/admin/login", func(w http.ResponseWriter, r *http.Request) {
-		if !adminPasswordConfigured() {
-			writeError(w, http.StatusServiceUnavailable, "规则后台未配置密码")
-			return
-		}
-		var req struct {
-			Password string `json:"password"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON")
-			return
-		}
-		if !validAdminPassword(req.Password) {
-			writeError(w, http.StatusUnauthorized, "密码不正确")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		writeError(w, http.StatusGone, "规则后台密码入口已移除，请使用已登录账号和角色权限")
 	})
 
 	mux.HandleFunc("GET /api/rules/admin/presets", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requireRuleAdminRequest(w, r, auth) {
 			return
 		}
 		doc, err := store.list()
@@ -1315,7 +1277,7 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 	})
 
 	mux.HandleFunc("POST /api/rules/admin/presets", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requireRuleAdminRequest(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
@@ -1355,7 +1317,7 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 	})
 
 	mux.HandleFunc("PUT /api/rules/admin/active", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requireRuleAdminRequest(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
@@ -1395,7 +1357,7 @@ func registerRulePresetHandlers(mux *http.ServeMux, store *rulePresetStore) {
 	})
 
 	mux.HandleFunc("DELETE /api/rules/admin/presets/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requireRuleAdminRequest(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {

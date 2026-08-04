@@ -7,7 +7,7 @@ package main
 // reviewCardAction，两种模式共用一份。
 //
 // 安全模型（与其他 /api/publish/* 端点不同，本端点由飞书开放平台服务器调用，
-// **不能**上 ADMIN_PASSWORD 门）：
+// **不能**依赖后台登录角色门）：
 //  1. verification token 校验：env FEISHU_VERIFICATION_TOKEN 与请求携带的 token 比对，
 //     不匹配或未配置一律 401；challenge 同样 fail-closed，须先配置 token 再验证 URL。
 //     （长连接模式无此项：SDK 建连时内置鉴权。）
@@ -199,9 +199,10 @@ type reviewCardOutcome struct {
 // 审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
 func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID string, rawValue json.RawMessage) reviewCardOutcome {
 	var value struct {
-		Action        string `json:"action"`
-		JobID         any    `json:"job_id"`
-		ReviewVersion string `json:"review_version"`
+		Action           string `json:"action"`
+		JobID            any    `json:"job_id"`
+		ReviewVersion    string `json:"review_version"`
+		LifecycleVersion string `json:"lifecycle_version"`
 	}
 	if len(rawValue) > 0 {
 		if err := json.Unmarshal(rawValue, &value); err != nil {
@@ -209,7 +210,8 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 		}
 	}
 	jobID := coerceFeishuJobID(value.JobID)
-	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionReject) {
+	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionReject &&
+		value.Action != feishuCardActionUnpublish && value.Action != feishuCardActionRepublish) {
 		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位发布任务"}
 	}
 	if !feishuReviewerAllowed(operatorOpenID) {
@@ -218,6 +220,30 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 	job, err := p.store.byID(jobID)
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
+	}
+	// 下线 / 重新发布是已发布任务的后续生命周期动作，必须在 terminal 判断前
+	// 分流；offline / published 虽是业务终态，卡片仍允许显示对应的下一步按钮。
+	if value.Action == feishuCardActionUnpublish || value.Action == feishuCardActionRepublish {
+		if !lifecycleVersionMatches(value.LifecycleVersion, job) {
+			return reviewCardOutcome{toastType: "error", toastContent: "生命周期卡片已过期，请使用最新一张卡片"}
+		}
+		var next publishJob
+		var lifecycleErr error
+		if value.Action == feishuCardActionUnpublish {
+			next, lifecycleErr = p.requestUnpublish(jobID, operatorOpenID, value.LifecycleVersion)
+		} else {
+			next, lifecycleErr = p.requestRepublish(jobID, operatorOpenID, value.LifecycleVersion)
+		}
+		if lifecycleErr != nil {
+			return reviewCardOutcome{toastType: "error", toastContent: lifecycleErr.Error()}
+		}
+		return reviewCardOutcome{
+			toastType: "success", toastContent: map[string]string{
+				feishuCardActionUnpublish: "已受理下线请求",
+				feishuCardActionRepublish: "已受理重新发布请求",
+			}[value.Action],
+			card: buildReviewLifecycleProgressCard(next, value.Action),
+		}
 	}
 	// 防重复点击：任务已进终态 → 提示已被处理，并把卡片刷成当前终态（update_multi
 	// 让群里其他人手里的旧「待审核」卡也一起变终态）。

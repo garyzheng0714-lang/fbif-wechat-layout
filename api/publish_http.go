@@ -1,19 +1,49 @@
 package main
 
 // publish_http.go — 发布流水线 HTTP 端点（施工图 S5）。机器提交/紧凑状态查询使用
-// 独立 PUBLISH_SYNC_SERVICE_TOKEN；完整详情、重试与对账仍在 ADMIN_PASSWORD 管理门后。
+// 独立 PUBLISH_SYNC_SERVICE_TOKEN；完整详情、重试与对账使用登录角色或 CI 专用操作令牌。
 // HTTP 审核默认关闭，生产审批只接受飞书白名单审核人的持久化决策。
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
+func requirePublishAdmin(w http.ResponseWriter, r *http.Request, auth *authService) bool {
+	if validPublishAdminServiceToken(r.Header.Get(publishAdminServiceHeader)) {
+		return true
+	}
+	if auth != nil {
+		if _, err := auth.requireRuleAdmin(r); err != nil {
+			writeRuleAdminAccessError(w, err)
+			return false
+		}
+		return true
+	}
+	writeError(w, http.StatusUnauthorized, "authentication_required")
+	return false
+}
+
+func publishAdminActor(r *http.Request, auth *authService) string {
+	if auth != nil {
+		if user, err := auth.requireFeishuUser(r); err == nil && strings.TrimSpace(user.FeishuOpenID) != "" {
+			return user.FeishuOpenID
+		}
+	}
+	return "admin"
+}
+
+func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices ...*authService) {
+	var auth *authService
+	if len(authServices) > 0 {
+		auth = authServices[0]
+	}
 	mux.HandleFunc("POST /api/publish/monitor-alert", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishServiceToken(w, r) {
 			return
@@ -40,22 +70,90 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 	})
 
 	mux.HandleFunc("GET /api/publish/monitoring", func(w http.ResponseWriter, r *http.Request) {
-		if !requirePublishSubmitOrAdmin(w, r) {
+		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
 		}
 		writeJSON(w, http.StatusOK, currentPublishMonitoring(p.store, time.Now()))
 	})
 
 	mux.HandleFunc("GET /api/publish/readiness", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
 		writeJSON(w, http.StatusOK, currentPublishReadiness(p))
 	})
 
+	// 发布链路配置只返回应用名称和当前登录用户可选的群 ID；应用密钥永不
+	// 出现在响应里，群名称也只来自 /api/feishu/chats 的实时目录。
+	mux.HandleFunc("GET /api/publish/delivery-settings", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		store := p.deliverySettings
+		if store == nil {
+			store = newPublishDeliverySettingsStore("")
+		}
+		settings, apps, err := store.resolve()
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, publishDeliverySettingsView(settings, apps))
+	})
+
+	mux.HandleFunc("PUT /api/publish/delivery-settings", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		if auth == nil {
+			writeError(w, http.StatusServiceUnavailable, "发布链路配置需要飞书登录服务")
+			return
+		}
+		user, err := auth.requireFeishuUser(r)
+		if err != nil {
+			writeFeishuCapabilityError(w, err)
+			return
+		}
+		chats, err := auth.listFeishuChats(r.Context(), user)
+		if err != nil {
+			writeFeishuCapabilityError(w, err)
+			return
+		}
+		var body struct {
+			AppProfileID string   `json:"app_profile_id"`
+			ChatIDs      []string `json:"chat_ids"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		if p.deliverySettings == nil {
+			writeError(w, http.StatusServiceUnavailable, "发布通知配置存储未初始化")
+			return
+		}
+		current, apps, err := p.deliverySettings.resolve()
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		settings, err := publishDeliverySelectionFromRequest(body, current, apps, chats, user.FeishuOpenID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := p.deliverySettings.write(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, publishDeliverySettingsView(settings, apps))
+	})
+
 	// 提交同步任务：source_key 幂等（已有未终态 job 返回它）→ 建 job → goroutine 异步推进。
 	mux.HandleFunc("POST /api/publish/site-sync", func(w http.ResponseWriter, r *http.Request) {
-		if !requirePublishSubmitOrAdmin(w, r) {
+		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
@@ -166,7 +264,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 	// 微信官方 API 正文直入：不抓公众号网页，直接把官方返回的 HTML 转 blocks 后
 	// 进入 ft-default 排版、图片转存、风险检查和待审核草稿流程。
 	mux.HandleFunc("POST /api/publish/official-sync", func(w http.ResponseWriter, r *http.Request) {
-		if !requirePublishSubmitOrAdmin(w, r) {
+		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
@@ -232,7 +330,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 	// 同步中心批量读取紧凑状态。只返回跨系统编排所需字段，不返回正文、blocks、
 	// 图片映射、风险模型原文或通知载荷。
 	mux.HandleFunc("POST /api/publish/sync-status", func(w http.ResponseWriter, r *http.Request) {
-		if !requirePublishSubmitOrAdmin(w, r) {
+		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
 		}
 		var req struct {
@@ -278,7 +376,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 	})
 
 	mux.HandleFunc("GET /api/publish/jobs", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
 		limit := 20
@@ -296,7 +394,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 	})
 
 	mux.HandleFunc("GET /api/publish/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
 		id, ok := publishJobIDFromPath(w, r)
@@ -318,7 +416,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			http.NotFound(w, r)
 			return
 		}
-		if !requireAdminPassword(w, r) {
+		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
@@ -348,9 +446,65 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		writeJSON(w, http.StatusOK, map[string]any{"job": job})
 	})
 
+	mux.HandleFunc("POST /api/publish/jobs/{id}/unpublish", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			LifecycleVersion string `json:"lifecycle_version"`
+		}
+		if r.Body != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, http.StatusBadRequest, "invalid JSON")
+				return
+			}
+		}
+		job, err := p.requestUnpublish(id, publishAdminActor(r, auth), req.LifecycleVersion)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": job})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"job": job})
+	})
+
+	mux.HandleFunc("POST /api/publish/jobs/{id}/republish", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			LifecycleVersion string `json:"lifecycle_version"`
+		}
+		if r.Body != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, http.StatusBadRequest, "invalid JSON")
+				return
+			}
+		}
+		job, err := p.requestRepublish(id, publishAdminActor(r, auth), req.LifecycleVersion)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": job})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"job": job})
+	})
+
 	// failed 任务从 failed_stage 续跑（异步）。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
@@ -369,7 +523,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 	})
 
 	mux.HandleFunc("POST /api/publish/jobs/{id}/notification-replay", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
@@ -390,7 +544,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 	// CreateNews 结果不确定态的人工对账。运营在 FoodTalks 后台核对后，只能二选一：
 	// 回填已存在 news id；或明确确认未创建，才重新进入 staging 发起新 POST。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/reconcile", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdminPassword(w, r) {
+		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
@@ -401,10 +555,13 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 			return
 		}
 		var req struct {
-			FoodTalksNewsID     int64 `json:"foodtalks_news_id"`
-			ConfirmNotCreated   bool  `json:"confirm_not_created"`
-			ConfirmPublished    bool  `json:"confirm_published"`
-			ConfirmNotPublished bool  `json:"confirm_not_published"`
+			FoodTalksNewsID       int64 `json:"foodtalks_news_id"`
+			ConfirmNotCreated     bool  `json:"confirm_not_created"`
+			ConfirmPublished      bool  `json:"confirm_published"`
+			ConfirmNotPublished   bool  `json:"confirm_not_published"`
+			ConfirmOffline        bool  `json:"confirm_offline"`
+			ConfirmStillPublished bool  `json:"confirm_still_published"`
+			ConfirmStillOffline   bool  `json:"confirm_still_offline"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -412,9 +569,19 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 		}
 		var job publishJob
 		var err error
-		if req.ConfirmPublished || req.ConfirmNotPublished {
+		current, loadErr := p.store.byID(id)
+		if loadErr != nil {
+			writeError(w, http.StatusNotFound, loadErr.Error())
+			return
+		}
+		switch current.Stage {
+		case publishStageUnpublishReconciliationRequired:
+			job, err = p.reconcileUnpublish(id, req.ConfirmOffline, req.ConfirmStillPublished)
+		case publishStageRepublishReconciliationRequired:
+			job, err = p.reconcileRepublish(id, req.ConfirmPublished, req.ConfirmStillOffline)
+		case publishStagePublicizeReconciliationRequired:
 			job, err = p.reconcilePublicize(id, req.ConfirmPublished, req.ConfirmNotPublished)
-		} else {
+		default:
 			job, err = p.reconcileStaging(id, req.FoodTalksNewsID, req.ConfirmNotCreated)
 		}
 		if err != nil {
@@ -426,33 +593,42 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline) {
 }
 
 type publishSyncJobSummary struct {
-	ID                int64    `json:"id"`
-	SourceKey         string   `json:"source_key"`
-	SourceURL         string   `json:"source_url"`
-	Title             string   `json:"title,omitempty"`
-	RulePackID        string   `json:"rule_pack_id"`
-	Stage             string   `json:"stage"`
-	FailedStage       string   `json:"failed_stage,omitempty"`
-	Error             string   `json:"error,omitempty"`
-	FoodTalksNewsID   int64    `json:"foodtalks_news_id,omitempty"`
-	ArticleURL        string   `json:"article_url,omitempty"`
-	SupersededByJobID int64    `json:"superseded_by_job_id,omitempty"`
-	ReviewAction      string   `json:"review_action,omitempty"`
-	ReviewedBy        string   `json:"reviewed_by,omitempty"`
-	ReviewedAt        string   `json:"reviewed_at,omitempty"`
-	CreatedAt         string   `json:"created_at"`
-	UpdatedAt         string   `json:"updated_at"`
-	Retryable         bool     `json:"retryable"`
-	RetryBlockReason  string   `json:"retry_block_reason,omitempty"`
-	ReconcileRequired bool     `json:"reconcile_required"`
-	AvailableActions  []string `json:"available_actions"`
+	ID                   int64    `json:"id"`
+	SourceKey            string   `json:"source_key"`
+	SourceURL            string   `json:"source_url"`
+	Title                string   `json:"title,omitempty"`
+	RulePackID           string   `json:"rule_pack_id"`
+	Stage                string   `json:"stage"`
+	FailedStage          string   `json:"failed_stage,omitempty"`
+	Error                string   `json:"error,omitempty"`
+	FoodTalksNewsID      int64    `json:"foodtalks_news_id,omitempty"`
+	ArticleURL           string   `json:"article_url,omitempty"`
+	PublishedAt          string   `json:"published_at,omitempty"`
+	UnpublishedAt        string   `json:"unpublished_at,omitempty"`
+	UnpublishWindowHours int      `json:"unpublish_window_hours,omitempty"`
+	UnpublishWindowUntil string   `json:"unpublish_window_until,omitempty"`
+	PublicationAction    string   `json:"publication_action,omitempty"`
+	PublicationActor     string   `json:"publication_actor,omitempty"`
+	PublicationActionAt  string   `json:"publication_action_at,omitempty"`
+	SupersededByJobID    int64    `json:"superseded_by_job_id,omitempty"`
+	ReviewAction         string   `json:"review_action,omitempty"`
+	ReviewedBy           string   `json:"reviewed_by,omitempty"`
+	ReviewedAt           string   `json:"reviewed_at,omitempty"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
+	Retryable            bool     `json:"retryable"`
+	RetryBlockReason     string   `json:"retry_block_reason,omitempty"`
+	ReconcileRequired    bool     `json:"reconcile_required"`
+	AvailableActions     []string `json:"available_actions"`
 }
 
 func newPublishSyncJobSummary(job publishJob) publishSyncJobSummary {
 	retryable, retryBlockReason := publishJobRetryability(job)
 	reconcileRequired := job.Stage == publishStageReconciliationRequired ||
 		job.Stage == publishStagePublicizeReconciliationRequired ||
-		job.Stage == publishStageStagingCreating || job.Stage == publishStagePublicizingUpdating
+		job.Stage == publishStageStagingCreating || job.Stage == publishStagePublicizingUpdating ||
+		job.Stage == publishStageUnpublishReconciliationRequired || job.Stage == publishStageRepublishReconciliationRequired ||
+		job.Stage == publishStageUnpublishingUpdating || job.Stage == publishStageRepublishingUpdating
 	actions := make([]string, 0, 1)
 	switch {
 	case retryable:
@@ -461,6 +637,10 @@ func newPublishSyncJobSummary(job publishJob) publishSyncJobSummary {
 		actions = append(actions, "reconcile")
 	case job.Stage == publishStageAwaitingReview:
 		actions = append(actions, "review_in_feishu")
+	case job.Stage == publishStagePublished && publishUnpublishWindowOpen(job, time.Now().UTC()):
+		actions = append(actions, "unpublish")
+	case job.Stage == publishStageOffline && validPersistedPublishApproval(job):
+		actions = append(actions, "republish")
 	case job.Stage == publishStageSupersededDuplicate && job.SupersededByJobID > 0:
 		actions = append(actions, "open_winner")
 	}
@@ -469,8 +649,12 @@ func newPublishSyncJobSummary(job publishJob) publishSyncJobSummary {
 		RulePackID: firstNonEmpty(job.RulePackID, sitePublishRulePackID),
 		Stage:      job.Stage, FailedStage: job.FailedStage, Error: truncateRunes(job.Error, 500),
 		FoodTalksNewsID: job.FoodTalksNewsID, ArticleURL: job.ArticleURL,
-		SupersededByJobID: job.SupersededByJobID,
-		ReviewAction:      job.ReviewAction, ReviewedBy: job.ReviewedBy, ReviewedAt: job.ReviewedAt,
+		PublishedAt: job.PublishedAt, UnpublishedAt: job.UnpublishedAt,
+		UnpublishWindowHours: job.UnpublishWindowHours, UnpublishWindowUntil: job.UnpublishWindowUntil,
+		PublicationAction: job.PublicationAction, PublicationActor: job.PublicationActor,
+		PublicationActionAt: job.PublicationActionAt,
+		SupersededByJobID:   job.SupersededByJobID,
+		ReviewAction:        job.ReviewAction, ReviewedBy: job.ReviewedBy, ReviewedAt: job.ReviewedAt,
 		CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Retryable: retryable,
 		RetryBlockReason: retryBlockReason, ReconcileRequired: reconcileRequired,
 		AvailableActions: actions,
@@ -488,6 +672,19 @@ func publishJobRetryability(job publishJob) (bool, string) {
 	if target == publishStagePublicizing &&
 		(!validPersistedPublishApproval(job) || job.PublicizeIntentKey != "") {
 		return false, "publicize approval is missing, stale, or already entered the external-call window"
+	}
+	if target == publishStageUnpublishing {
+		if job.UnpublishIntentKey != "" || job.RepublishIntentKey != "" {
+			return false, "unpublish intent is already in the external-call window"
+		}
+		if !publishUnpublishWindowOpen(job, time.Now().UTC()) {
+			return false, "unpublish window has expired"
+		}
+	}
+	if target == publishStageRepublishing {
+		if job.UnpublishIntentKey != "" || job.RepublishIntentKey != "" || !validPersistedPublishApproval(job) {
+			return false, "republish approval is missing, stale, or already entered the external-call window"
+		}
 	}
 	if target == publishStageStaging && job.StagingIntentKey != "" && job.FoodTalksNewsID == 0 {
 		return false, "CreateNews may already have been executed; reconciliation is required"

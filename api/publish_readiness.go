@@ -42,14 +42,17 @@ type publishReadinessStatus struct {
 		Configured bool `json:"configured"`
 	} `json:"render"`
 	Feishu struct {
-		NotifyConfigured            bool   `json:"notify_configured"`
-		MonitorNotifyConfigured     bool   `json:"monitor_notify_configured"`
-		WSConfigured                bool   `json:"ws_configured"`
-		WebhookConfigured           bool   `json:"webhook_configured"`
-		CallbackMode                string `json:"callback_mode"`
-		CallbackModeExplicit        bool   `json:"callback_mode_explicit"`
-		CallbackConfigured          bool   `json:"callback_configured"`
-		ReviewerAllowlistConfigured bool   `json:"reviewer_allowlist_configured"`
+		NotifyConfigured             bool   `json:"notify_configured"`
+		DeliverySettingsConfigured   bool   `json:"delivery_settings_configured"`
+		DeliveryAppsConfigured       bool   `json:"delivery_apps_configured"`
+		DeliveryRecipientsConfigured bool   `json:"delivery_recipients_configured"`
+		MonitorNotifyConfigured      bool   `json:"monitor_notify_configured"`
+		WSConfigured                 bool   `json:"ws_configured"`
+		WebhookConfigured            bool   `json:"webhook_configured"`
+		CallbackMode                 string `json:"callback_mode"`
+		CallbackModeExplicit         bool   `json:"callback_mode_explicit"`
+		CallbackConfigured           bool   `json:"callback_configured"`
+		ReviewerAllowlistConfigured  bool   `json:"reviewer_allowlist_configured"`
 	} `json:"feishu"`
 	EnrichMode      string `json:"enrich_mode"`
 	JudgeConfigured bool   `json:"judge_configured"`
@@ -165,7 +168,16 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	chatID := strings.TrimSpace(os.Getenv("FEISHU_REVIEW_CHAT_ID"))
 	monitorUserID := strings.TrimSpace(os.Getenv(publishMonitorFeishuUserIDEnv))
 	out.Feishu.WSConfigured = appID != "" && appSecret != ""
-	out.Feishu.NotifyConfigured = out.Feishu.WSConfigured && chatID != ""
+	out.Feishu.DeliveryAppsConfigured = out.Feishu.WSConfigured
+	out.Feishu.DeliveryRecipientsConfigured = chatID != ""
+	if p != nil && p.deliverySettings != nil {
+		if settings, apps, err := p.deliverySettings.resolve(); err == nil {
+			out.Feishu.DeliverySettingsConfigured = settings.AppProfileID != "" && len(settings.ChatIDs) > 0
+			out.Feishu.DeliveryAppsConfigured = out.Feishu.DeliverySettingsConfigured && len(apps) > 0
+			out.Feishu.DeliveryRecipientsConfigured = out.Feishu.DeliverySettingsConfigured
+		}
+	}
+	out.Feishu.NotifyConfigured = out.Feishu.DeliveryAppsConfigured && out.Feishu.DeliveryRecipientsConfigured
 	out.Feishu.MonitorNotifyConfigured = out.Feishu.WSConfigured && monitorUserID != ""
 	out.Feishu.WebhookConfigured = strings.TrimSpace(os.Getenv("FEISHU_VERIFICATION_TOKEN")) != ""
 	out.Feishu.CallbackMode, out.Feishu.CallbackModeExplicit = configuredFeishuCallbackMode()
@@ -180,7 +192,7 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.HTTPReviewEnabled = publishHTTPReviewEnabled()
 	out.EnrichMode = publishEnrichMode()
 	out.JudgeConfigured = strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv)) != ""
-	out.Ready = out.ConfigSchema.Matches && adminPasswordConfigured() && out.ServiceAuth.Configured && out.ImageUpload.Configured && !out.HTTPReviewEnabled &&
+	out.Ready = out.ConfigSchema.Matches && out.ServiceAuth.Configured && out.ImageUpload.Configured && !out.HTTPReviewEnabled &&
 		out.GeneratedFiles.ready() &&
 		out.StoreValid && out.FoodTalks.Configured && out.Feishu.ReviewerAllowlistConfigured &&
 		out.FoodTalks.Categories && out.Render.Configured && out.Feishu.NotifyConfigured &&

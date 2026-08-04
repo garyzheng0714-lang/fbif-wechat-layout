@@ -1,10 +1,6 @@
-// admin-panel.js — password-gated rule preset editor.
-// Keeps UI orchestration separate from the rule schema and from the rendering
-// engine, so adding an editable field means updating rule-document.js first.
 import {
   DEFAULT_RULE_CONFIG,
   RULE_SCHEMA,
-  adminLogin,
   buildRuleConfigDocument,
   deleteRulePreset,
   listRulePresets,
@@ -14,6 +10,7 @@ import {
   setActiveRulePreset,
   validateRuleConfig,
 } from './rule-presets.js';
+import { authFetch } from './auth-session.js';
 import { DEFAULT_BEHAVIOR, validateBehaviorRegexDocument, validateRuleBehavior } from './rule-behavior.js';
 import { createMoreArticlesRuleEditor } from './more-articles-rule-editor.js';
 import { createFooterLibraryEditor } from './footer-library-rule-editor.js';
@@ -31,8 +28,10 @@ import { numberField, bindSteppers } from './admin-field-controls.js';
 import { livePreviewHTML, applyLivePreview, targetForKey } from './admin-live-preview.js';
 import { bindRovingTabs, createAdminDialogA11y } from './admin-dialog-a11y.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
+import { createAdminDeliveryController } from './admin-delivery.js';
+import { createAdminAccessController, renderRuleAdminAccessDenied, renderRuleAdminAccessLoading } from './admin-access.js';
 export { uniqueClientRuleID } from './admin-rule-state.js';
-const ADMIN_HINT = '为防止外部人员篡改，请找 Gary 要密码';
+const ADMIN_HINT = '仅限已登录的超级管理员、管理员或已授权账号';
 const SAVED_AFTER_CONTEXT_CHANGE = '规则已保存，但未应用：当前账号已变化；请重新打开后台确认', APPLIED_AFTER_CONTEXT_CHANGE = '规则已应用到原账号，但当前账号已变化；请重新打开后台确认', DELETED_AFTER_CONTEXT_CHANGE = '规则已在服务端删除，但当前账号已变化；请重新打开后台确认';
 function esc(s) {
   return String(s == null ? '' : s)
@@ -89,14 +88,12 @@ function renderGroups(config) {
     </section>
   `).join('');
 }
-
 function presetByID(doc, id) {
   return (doc && doc.presets || []).find(p => p.id === id) || null;
 }
 export function initAdminPanel(options = {}) {
   const button = document.getElementById('adminLockBtn');
   if (!button) return;
-
   const getConfig = options.getConfig || (() => (window._activeConfig && window._activeConfig.config) || {});
   const getPreset = options.getPreset || (() => (window._activeConfig && window._activeConfig.preset) || null);
   const getBehavior = options.getBehavior || (() => (window._activeConfig && window._activeConfig.behavior) || DEFAULT_BEHAVIOR);
@@ -106,10 +103,10 @@ export function initAdminPanel(options = {}) {
   });
   const applyPersistedConfig = (config, preset, meta) => applyPersistedRuleConfig(applyConfig, config, preset, meta);
   const rulePacks = Array.isArray(options.rulePacks) ? options.rulePacks : [];
+  const currentAuthUser = options.authUser || (typeof window !== 'undefined' && window.__AUTH_USER) || {};
 
   let overlay = null;
   let dialogA11y = null;
-  let password = '';
   let doc = null;
   let selectedID = '';
   let draftPreset = null;
@@ -135,11 +132,16 @@ export function initAdminPanel(options = {}) {
   let activeRuleTab = 'params';
   let busyOperation = null, pendingOperationNotice = '';
   const operationGate = createAdminOperationGate(currentAccountID, () => overlay);
-
+  const deliveryController = createAdminDeliveryController({ getOverlay: () => overlay, rerender: () => renderMain(), onMessage: text => { status = text || ''; const el = overlay && overlay.querySelector('.admin-foot .admin-status'); if (el) el.textContent = status; } });
+  const accessController = createAdminAccessController({
+    getOverlay: () => overlay,
+    getAuthUser: () => currentAuthUser,
+    rerender: () => renderMain(),
+    onMessage: text => { status = text || ''; const el = overlay && overlay.querySelector('.admin-foot .admin-status'); if (el) el.textContent = status; },
+  });
   function setStatus(text) { status = text || ''; render(); }
-
   async function refreshDoc(operation) {
-    const nextDoc = operationGate.commit(operation, await listRulePresets(operation.password));
+    const nextDoc = operationGate.commit(operation, await listRulePresets());
     const selected = presetForAccount(nextDoc, operation.accountID);
     if (!selected) throw new Error('当前账号没有可用的规则绑定');
     doc = nextDoc;
@@ -157,23 +159,24 @@ export function initAdminPanel(options = {}) {
     syncBehaviorText();
     operationGate.commit(operation, await Promise.resolve(applyConfig(workingConfig, presetWithBehavior(selected), { source: 'server' })));
   }
-
   function close() {
     if (!overlay) return;
     let dc = 0;
     try { dc = dirtyCount(); } catch { dc = 0; }
     if (dc > 0 && !window.confirm('有 ' + dc + ' 项未保存改动，关闭后不会应用到公众号。确定关闭吗？')) return;
     operationGate.invalidate(); busy = false; busyOperation = null;
+    deliveryController.reset();
+    accessController.reset();
     window.clearTimeout(jsonSyncTimer);
     overlay.remove();
     overlay = null;
     dialogA11y?.release();
     dialogA11y = null;
   }
-
   function open() {
     if (overlay) return;
     operationGate.invalidate();
+    deliveryController.reset();
     if (pendingOperationNotice) status = pendingOperationNotice;
     const opener = document.activeElement;
     overlay = document.createElement('div');
@@ -181,13 +184,31 @@ export function initAdminPanel(options = {}) {
     document.body.appendChild(overlay);
     dialogA11y = createAdminDialogA11y({ document, overlay, opener, onEscape: close });
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    const operation = operationGate.capture();
+    busy = true;
+    busyOperation = operation;
+    status = '正在验证当前登录账号…';
     render();
+    refreshDoc(operation).then(() => {
+      if (!operationGate.current(operation)) return;
+      busy = false;
+      busyOperation = null;
+      status = '';
+      render();
+    }).catch(err => {
+      if (!operationGate.current(operation)) return;
+      busy = false;
+      busyOperation = null;
+      doc = null;
+      status = err.message || '当前账号没有进入规则后台的权限';
+      render();
+    });
   }
 
   async function run(action, okText) {
     if (busy) return;
     const operation = operationGate.capture();
-    operation.password = password; busyOperation = operation; busy = true; pendingOperationNotice = '';
+    busyOperation = operation; busy = true; pendingOperationNotice = '';
     setStatus('处理中...');
     try {
       const resultText = operationGate.commit(operation, await action(operation));
@@ -203,42 +224,17 @@ export function initAdminPanel(options = {}) {
       if (busyOperation === operation) { busy = false; busyOperation = null; if (operationGate.current(operation)) render(); }
     }
   }
-
-  function renderLogin() {
+  function renderAccessState() {
     const focusSelector = dialogA11y?.focusSelectorFor(document.activeElement) || '';
-    overlay.innerHTML = `
-      <div class="admin-dialog compact" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
-        <div class="admin-head">
-          <div>
-            <div class="admin-title" id="adminTitle">规则后台</div>
-            <div class="admin-subtitle">${ADMIN_HINT}</div>
-          </div>
-          <button type="button" class="admin-close" aria-label="关闭">×</button>
-        </div>
-        <form class="admin-login-form">
-          <label class="admin-login-field">
-            <span>访问密码</span>
-            <input type="password" autocomplete="current-password" autofocus>
-          </label>
-          <button type="submit" class="admin-primary">进入后台</button>
-          <div class="admin-status" role="status" aria-live="polite">${esc(status)}</div>
-        </form>
-      </div>`;
+    overlay.innerHTML = renderRuleAdminAccessDenied(status, ADMIN_HINT);
     overlay.querySelector('.admin-close').addEventListener('click', close);
-    const form = overlay.querySelector('.admin-login-form');
-    const input = form.querySelector('input');
-    form.addEventListener('submit', async e => {
-      e.preventDefault();
-      password = input.value.trim();
-      await run(async operation => {
-        operationGate.commit(operation, await adminLogin(operation.password));
-        if (typeof options.onAuthenticated === 'function') options.onAuthenticated(operation.password);
-        await refreshDoc(operation);
-      }, '已进入后台');
-    });
-    dialogA11y?.focusAfterRender(focusSelector, '.admin-login-form input');
+    dialogA11y?.focusAfterRender(focusSelector, '.admin-close');
   }
-
+  function renderAccessLoading() {
+    overlay.innerHTML = renderRuleAdminAccessLoading(ADMIN_HINT);
+    overlay.querySelector('.admin-close').addEventListener('click', close);
+    dialogA11y?.focusAfterRender('', '.admin-close');
+  }
   function renderWarningsHTML() {
     const warnings = validateRuleConfig(workingConfig);
     if (warnings.length === 0) {
@@ -246,12 +242,10 @@ export function initAdminPanel(options = {}) {
     }
     return '<ul class="admin-warnings">' + warnings.map(w => '<li>' + esc(w) + '</li>').join('') + '</ul>';
   }
-
   function refreshWarnings() {
     const el = overlay && overlay.querySelector('[data-role="rule-warnings"]');
     if (el) el.innerHTML = renderWarningsHTML();
   }
-
   function renderRuleTabs() {
     const tabs = [['params', '参数'], ['bottom', '底部']];
     return `
@@ -261,14 +255,12 @@ export function initAdminPanel(options = {}) {
         `).join('')}
       </div>`;
   }
-
   function selectedPreset() {
     return presetByID(doc, selectedID) ||
       (draftPreset && draftPreset.id === selectedID ? draftPreset : null) ||
       presetForAccount(doc, currentAccountID()) ||
       getPreset();
   }
-
   function dirtyCount() { return adminDirtyCount({ draftPreset, selectedID, selected: selectedPreset(), workingName, workingDescription, workingConfig, workingBehavior, workingAssets, workingBottomBlocks, workingArticleFooterDefaults, workingFooter, isFtDefault: isFtDefaultPack(), accountID: currentAccountID() }); }
   function refreshDirtyChip() { updateDirtyChip(overlay, dirtyCount()); }
 
@@ -393,6 +385,8 @@ export function initAdminPanel(options = {}) {
         <button type="button" data-view="assignments" class="${activeView === 'assignments' ? 'active' : ''}"${activeView === 'assignments' ? ' aria-current="page"' : ''}>账号</button>
         <button type="button" data-view="rules" class="${activeView === 'rules' ? 'active' : ''}"${activeView === 'rules' ? ' aria-current="page"' : ''}>规则</button>
         <button type="button" data-view="assets" class="${activeView === 'assets' ? 'active' : ''}"${activeView === 'assets' ? ' aria-current="page"' : ''}>素材库</button>
+        <button type="button" data-view="delivery" class="${activeView === 'delivery' ? 'active' : ''}"${activeView === 'delivery' ? ' aria-current="page"' : ''}>发布链路</button>
+        ${accessController.canManage() ? `<button type="button" data-view="access" class="${activeView === 'access' ? 'active' : ''}"${activeView === 'access' ? ' aria-current="page"' : ''}>权限管理</button>` : ''}
       </nav>`;
   }
 
@@ -406,7 +400,7 @@ export function initAdminPanel(options = {}) {
     }).join('');
   }
 
-  function currentAccountID() { return (window._activeRulePack && window._activeRulePack.id) || 'fbif'; }
+  function currentAccountID() { return (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'fbif'; }
 
   function defaultArticleFooterDefaultsForCurrentAccount() { return articleFooterDefaultsSeedForAccount(currentAccountID()); }
 
@@ -505,6 +499,8 @@ export function initAdminPanel(options = {}) {
       ? renderAssignments()
       : activeView === 'assets'
       ? renderAssetsLibraryView()
+      : activeView === 'delivery' ? deliveryController.render()
+      : activeView === 'access' && accessController.canManage() ? accessController.render()
       : renderRulesEditor(optionsHTML);
     overlay.innerHTML = `
       <div class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
@@ -594,6 +590,7 @@ export function initAdminPanel(options = {}) {
         renderMain();
       });
     });
+    if (activeView === 'access' && accessController.canManage()) { accessController.bind(); return; }
     bindRovingTabs([...overlay.querySelectorAll('[data-rule-tab]')], btn => {
       if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
       if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
@@ -607,7 +604,7 @@ export function initAdminPanel(options = {}) {
         const accountID = select.dataset.accountRule;
         const ruleID = select.value;
         run(async operation => {
-          doc = operationGate.commit(operation, await setActiveRulePreset(operation.password, ruleID, accountID, accountBindingRevision(doc, accountID)), '规则绑定已在服务端更新，但当前账号已变化；请重新打开后台确认');
+          doc = operationGate.commit(operation, await setActiveRulePreset(ruleID, accountID, accountBindingRevision(doc, accountID)), '规则绑定已在服务端更新，但当前账号已变化；请重新打开后台确认');
           const selected = presetByID(doc, ruleID);
           if (accountID === operation.accountID) {
             workingConfig = normalizeRuleConfig(selected ? selected.config : workingConfig);
@@ -622,6 +619,7 @@ export function initAdminPanel(options = {}) {
         }, '已更新规则配置');
       });
     });
+    if (activeView === 'delivery') { deliveryController.bind(); return; }
     if (activeView === 'assets') { bindAssetLibraryEditor(); return; }
     if (activeView !== 'rules') return;
     bindMoreArticlesRuleEditor();
@@ -784,7 +782,7 @@ export function initAdminPanel(options = {}) {
       }
       const persistedPreset = presetByID(doc, preset.id), baseRevision = Number(persistedPreset && persistedPreset.version);
       const body = { id: preset.id, name: preset.name, description: preset.description, baseline_id: preset.baseline_id || sourcePreset.baseline_id, migration_confirmed: preset.migration_confirmed === true, base_revision: Number.isInteger(baseRevision) && baseRevision >= 0 ? baseRevision : 0, config: serverRuleConfigDocument(configDoc), behavior: preset.behavior };
-      const resp = await fetch('/api/rules/admin/presets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': String(operation.password || '').trim() }, body: JSON.stringify(body) });
+      const resp = await authFetch('/api/rules/admin/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
       return data;
@@ -812,8 +810,8 @@ export function initAdminPanel(options = {}) {
           config: savedConfig,
           behavior: savedBehavior,
         }, operation), SAVED_AFTER_CONTEXT_CHANGE);
-        operationGate.commit(operation, await setActiveRulePreset(operation.password, selected.id, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
-        doc = operationGate.commit(operation, await listRulePresets(operation.password), APPLIED_AFTER_CONTEXT_CHANGE);
+        operationGate.commit(operation, await setActiveRulePreset(selected.id, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
+        doc = operationGate.commit(operation, await listRulePresets(), APPLIED_AFTER_CONTEXT_CHANGE);
         draftPreset = null;
         const persisted = presetByID(doc, selected.id);
         return operationGate.commit(operation, await applyPersistedConfig(savedConfig, { ...persisted, behavior: savedBehavior }, { source: 'server' }), APPLIED_AFTER_CONTEXT_CHANGE);
@@ -828,8 +826,8 @@ export function initAdminPanel(options = {}) {
         const description = workingDescription.trim();
         const savedConfig = workingConfig, savedBehavior = workingBehavior;
         doc = operationGate.commit(operation, await savePresetWithFooter({ id, name, description, baseline_id: selectedPreset()?.baseline_id, config: savedConfig, behavior: savedBehavior }, operation), SAVED_AFTER_CONTEXT_CHANGE);
-        operationGate.commit(operation, await setActiveRulePreset(operation.password, id, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
-        doc = operationGate.commit(operation, await listRulePresets(operation.password), APPLIED_AFTER_CONTEXT_CHANGE);
+        operationGate.commit(operation, await setActiveRulePreset(id, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
+        doc = operationGate.commit(operation, await listRulePresets(), APPLIED_AFTER_CONTEXT_CHANGE);
         draftPreset = null;
         selectedID = id;
         const persisted = presetByID(doc, id);
@@ -841,8 +839,8 @@ export function initAdminPanel(options = {}) {
         throw new Error('新规则需要先保存');
       }
       const ruleID = selectedID, savedConfig = workingConfig, savedBehavior = workingBehavior;
-      operationGate.commit(operation, await setActiveRulePreset(operation.password, ruleID, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
-      doc = operationGate.commit(operation, await listRulePresets(operation.password), APPLIED_AFTER_CONTEXT_CHANGE);
+      operationGate.commit(operation, await setActiveRulePreset(ruleID, operation.accountID, accountBindingRevision(doc, operation.accountID)), APPLIED_AFTER_CONTEXT_CHANGE);
+      doc = operationGate.commit(operation, await listRulePresets(), APPLIED_AFTER_CONTEXT_CHANGE);
       return operationGate.commit(operation, await applyPersistedConfig(savedConfig, { ...presetByID(doc, ruleID), behavior: savedBehavior }, { source: 'server' }), APPLIED_AFTER_CONTEXT_CHANGE);
     }, '已应用到当前公众号'));
     const deleteBtn = overlay.querySelector('[data-action="delete"]');
@@ -870,7 +868,7 @@ export function initAdminPanel(options = {}) {
         return operationGate.commit(operation, await applyPersistedConfig(workingConfig, presetWithBehavior(selected), { source: 'server' }));
       }
       const deletedID = selectedID;
-      doc = operationGate.commit(operation, await deleteRulePreset(operation.password, deletedID), DELETED_AFTER_CONTEXT_CHANGE);
+      doc = operationGate.commit(operation, await deleteRulePreset(deletedID), DELETED_AFTER_CONTEXT_CHANGE);
       draftPreset = null;
       const selected = presetForAccount(doc, operation.accountID);
       selectedID = selected && selected.id;
@@ -891,7 +889,8 @@ export function initAdminPanel(options = {}) {
 
   function render() {
     if (!overlay) return;
-    if (!password || !doc) renderLogin();
+    if (busy && !doc) renderAccessLoading();
+    else if (!doc) renderAccessState();
     else renderMain();
   }
 

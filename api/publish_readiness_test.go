@@ -126,7 +126,7 @@ func TestPublishReadinessRequiresExplicitFeishuCallbackMode(t *testing.T) {
 
 func TestPublishReadinessFailsClosedWithoutReviewerAllowlistOrServiceToken(t *testing.T) {
 	env := newPublishTestEnv(t)
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", testPublishAdminToken)
 	t.Setenv("PUBLISH_SYNC_SERVICE_TOKEN", testPublishSyncServiceToken)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "")
 	got := currentPublishReadiness(env.pipeline)
@@ -202,7 +202,7 @@ func TestPublishWorkersPausedBlocksHTTPRecoveryAndReview(t *testing.T) {
 }
 
 func TestDeploymentPauseBlocksRuleWritesButAllowsReadinessReads(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", testPublishAdminToken)
 	t.Setenv("DEPLOYMENT_WRITES_PAUSED", "1")
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 	mux := http.NewServeMux()
@@ -210,7 +210,7 @@ func TestDeploymentPauseBlocksRuleWritesButAllowsReadinessReads(t *testing.T) {
 
 	body := []byte(`{"id":"paused-rule","name":"不应保存","baseline_id":"default","config":{}}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
-	req.Header.Set("X-Admin-Password", testAdminPassword)
+	req.Header.Set("X-Publish-Admin-Token", testPublishAdminToken)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
@@ -227,7 +227,7 @@ func TestDeploymentPauseBlocksRuleWritesButAllowsReadinessReads(t *testing.T) {
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "/api/rules/admin/presets", nil)
-	get.Header.Set("X-Admin-Password", testAdminPassword)
+	get.Header.Set("X-Publish-Admin-Token", testPublishAdminToken)
 	getRec := httptest.NewRecorder()
 	mux.ServeHTTP(getRec, get)
 	if getRec.Code != http.StatusOK {
@@ -251,7 +251,7 @@ func TestPublishReadinessDistinguishesSingleAndFallbackEnrichment(t *testing.T) 
 
 func TestPublishReadinessOverallFlagIncludesRuntimeDependencies(t *testing.T) {
 	env := newPublishTestEnv(t)
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", testPublishAdminToken)
 	t.Setenv("FOODTALKS_BASE_URL", "https://api-we-test.foodtalks.cn")
 	t.Setenv("FOODTALKS_TOKEN", "token")
 	t.Setenv("FOODTALKS_FRONT_URL", "https://test.foodtalks.cn")
@@ -289,7 +289,7 @@ func TestPublishReadinessOverallFlagIncludesRuntimeDependencies(t *testing.T) {
 
 func TestPublishReadinessRejectsMixedTargetsAndCorruptStore(t *testing.T) {
 	env := newPublishTestEnv(t)
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", testPublishAdminToken)
 	t.Setenv("FOODTALKS_BASE_URL", "https://api-we-test.foodtalks.cn")
 	t.Setenv("FOODTALKS_TOKEN", "token")
 	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")

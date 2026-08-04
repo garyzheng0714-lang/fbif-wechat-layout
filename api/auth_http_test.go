@@ -21,8 +21,10 @@ type fakeFeishuProvider struct {
 	searchResults []feishuDocument
 	exportResult  feishuExportedFile
 	exportErr     error
+	chatResults   []feishuChat
 	searchCalls   int
 	exportCalls   int
+	chatCalls     int
 }
 
 func (f *fakeFeishuProvider) ExchangeCode(_ context.Context, _, _ string) (feishuUserToken, error) {
@@ -56,6 +58,11 @@ func (f *fakeFeishuProvider) ExportDocument(_ context.Context, _ string, ref fei
 	return f.exportResult, nil
 }
 
+func (f *fakeFeishuProvider) ListChats(_ context.Context, _ string) ([]feishuChat, error) {
+	f.chatCalls++
+	return f.chatResults, nil
+}
+
 func newTestAuthService(t *testing.T, provider feishuProvider) *authService {
 	t.Helper()
 	store := newAuthUserStore(filepath.Join(t.TempDir(), "auth-users.json"))
@@ -77,6 +84,7 @@ func registerTestAuthMux(service *authService) *http.ServeMux {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, service)
 	registerFeishuDocumentRoutes(mux, service)
+	registerFeishuChatRoutes(mux, service)
 	return mux
 }
 
@@ -217,6 +225,24 @@ func TestFeishuDocumentRoutesRequireAuthentication(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"code":"authentication_required"`) {
 		t.Fatalf("unexpected body: %s", rec.Body.String())
+	}
+}
+
+func TestFeishuChatRouteUsesLoggedInUserToken(t *testing.T) {
+	provider := &fakeFeishuProvider{chatResults: []feishuChat{{ChatID: "oc_chat_1", Name: "内容审核群", ChatMode: "group"}}}
+	service := newTestAuthService(t, provider)
+	session := mustSessionForUser(t, service, authUser{
+		ID: "feishu:ou_chat", Name: "张三", AuthMode: authModeFeishu, Status: authUserActive,
+		FeishuOpenID: "ou_chat", FeishuRefreshTokenSeal: "test-refresh-seal",
+	})
+	service.putAccessToken("feishu:ou_chat", "user-token", service.now().Add(time.Hour))
+	rec := httptest.NewRecorder()
+	registerTestAuthMux(service).ServeHTTP(rec, requestWithSession(http.MethodGet, "/api/feishu/chats", session, nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "内容审核群") {
+		t.Fatalf("chat list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if provider.chatCalls != 1 {
+		t.Fatalf("chat provider calls=%d, want 1", provider.chatCalls)
 	}
 }
 

@@ -37,7 +37,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      PUBLISH_ADMIN_SERVICE_TOKEN: ${{ secrets.PUBLISH_ADMIN_SERVICE_TOKEN }}
+      AUTH_SESSION_SECRET: ${{ secrets.AUTH_SESSION_SECRET }}
       ARTICLE_URL: ${{ inputs.article_url }}
       RULE_PACK_ID: ${{ inputs.rule_pack_id }}
       RERENDER_LATEST: ${{ inputs.rerender_latest }}
@@ -50,8 +51,8 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          if [ -z "${ADMIN_PASSWORD:-}" ]; then
-            echo "ADMIN_PASSWORD is not configured" >&2
+          if [ -z "${PUBLISH_ADMIN_SERVICE_TOKEN:-}" ]; then
+            echo "PUBLISH_ADMIN_SERVICE_TOKEN is not configured" >&2
             exit 1
           fi
           case "${ARTICLE_URL}" in
@@ -63,7 +64,7 @@ jobs:
           esac
 
           readiness_json=$(curl --silent --show-error --fail \
-            --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
+            --header "X-Publish-Admin-Token: ${PUBLISH_ADMIN_SERVICE_TOKEN}" \
             "${SITE_ORIGIN}/api/publish/readiness")
           jq -e '
             .ready == true and
@@ -84,7 +85,7 @@ jobs:
           create_json=$(curl --silent --show-error --fail \
             --request POST \
             --header "Content-Type: application/json" \
-            --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
+            --header "X-Publish-Admin-Token: ${PUBLISH_ADMIN_SERVICE_TOKEN}" \
             --data "${request_json}" \
             "${SITE_ORIGIN}/api/publish/site-sync")
           job_id=$(jq -er '.job.id' <<<"${create_json}")
@@ -92,7 +93,7 @@ jobs:
           retry_sent=0
           for _ in $(seq 1 90); do
             detail_json=$(curl --silent --show-error --fail \
-              --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
+              --header "X-Publish-Admin-Token: ${PUBLISH_ADMIN_SERVICE_TOKEN}" \
               "${SITE_ORIGIN}/api/publish/jobs/${job_id}")
             stage=$(jq -er '.job.stage' <<<"${detail_json}")
 
@@ -104,7 +105,8 @@ jobs:
           import sys
 
           job_id = sys.argv[1]
-          key = os.environ["ADMIN_PASSWORD"].encode()
+          secret = os.environ["AUTH_SESSION_SECRET"].encode()
+          key = hashlib.sha256(b"fbif-publish-preview\x00" + secret).digest()
           message = f"publish-preview:{job_id}".encode()
           print(hmac.new(key, message, hashlib.sha256).hexdigest())
           PY
@@ -136,7 +138,7 @@ jobs:
                   created:|fetching:|rendering:|mirroring:|enriching:|assessing:|staging:)
                     curl --silent --show-error --fail \
                       --request POST \
-                      --header "X-Admin-Password: ${ADMIN_PASSWORD}" \
+                      --header "X-Publish-Admin-Token: ${PUBLISH_ADMIN_SERVICE_TOKEN}" \
                       "${SITE_ORIGIN}/api/publish/jobs/${job_id}/retry" >/dev/null
                     retry_sent=1
                     sleep 5

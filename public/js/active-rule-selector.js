@@ -39,7 +39,6 @@ export function createActiveRuleSelector({
     saveLocalRuleConfig,
     saveLocalRulePreset,
     applyActiveRuleConfig,
-    adminLogin,
     listPublicRulePresets,
     setActiveRulePreset,
   } = ruleModule;
@@ -50,7 +49,6 @@ export function createActiveRuleSelector({
   let activeRuleSelectorOpen = false;
   let activeRuleSelectorDraftID = initialPresetID || 'default';
   let activeRuleSelectorStatus = '';
-  let activeRuleAdminPassword = '';
   let activeRuleOutsideHandler = null;
   let accountHydrationGeneration = 0;
   let selectorUIGeneration = 0;
@@ -116,15 +114,6 @@ export function createActiveRuleSelector({
       .find(account => account && account.id === accountID);
     const revision = Number(binding && binding.active_revision);
     return Number.isInteger(revision) && revision >= 0 ? revision : 0;
-  }
-
-  async function ensureRuleAdminPassword() {
-    if (activeRuleAdminPassword) return activeRuleAdminPassword;
-    const input = windowRef.prompt('请输入规则后台密码');
-    if (!input) throw new Error('需要规则后台密码');
-    activeRuleAdminPassword = input.trim();
-    await adminLogin(activeRuleAdminPassword);
-    return activeRuleAdminPassword;
   }
 
   function ruleSelectorOptions(currentPreset) {
@@ -253,9 +242,8 @@ export function createActiveRuleSelector({
     renderActiveRuleCard();
     const task = (async () => {
       try {
-        const password = await ensureRuleAdminPassword();
         if (stale()) return false;
-        await setActiveRulePreset(password, nextID, accountID, activeBindingRevision(accountID));
+        await setActiveRulePreset(nextID, accountID, activeBindingRevision(accountID));
         if (stale()) return false;
         const [loaded, catalog] = await Promise.all([
           loadActiveRulePreset(accountID),
@@ -276,7 +264,6 @@ export function createActiveRuleSelector({
         renderActiveRuleCard();
         return true;
       } catch (err) {
-        if (/password|密码|401|unauthorized/i.test(String(err && err.message))) activeRuleAdminPassword = '';
         if (stale()) return false;
         activeRuleSelectorStatus = err.message || '保存失败';
         activeRuleSaving = false;
@@ -459,12 +446,10 @@ export function createActiveRuleSelector({
     refreshActiveRuleCatalog,
     beginActiveRuleEdit,
     cancelActiveRuleEdit,
-    ensureRuleAdminPassword,
     cacheServerRuleFallback,
     localActiveRulePreset,
     loadRuleCatalog,
     getSource: () => activeRuleSource,
     setSource: (v) => { activeRuleSource = v; },
-    setAdminPassword: (v) => { activeRuleAdminPassword = String(v || '').trim(); },
   };
 }

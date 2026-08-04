@@ -123,7 +123,9 @@ test('rule admin has configuration and rule-management views', async () => {
   assert.match(adminPanel, /已应用到：/);
   assert.match(adminPanel, /未应用/);
   assert.match(adminPanel, /renderApplicationBadges/);
-  assert.match(adminPanel, /setActiveRulePreset\(operation\.password, ruleID, accountID, accountBindingRevision\(doc, accountID\)\)/);
+  assert.match(adminPanel, /setActiveRulePreset\(ruleID, accountID, accountBindingRevision\(doc, accountID\)\)/);
+  assert.match(adminPanel, /authFetch\(/);
+  assert.doesNotMatch(adminPanel, /X-Admin-Password|adminLogin|operation\.password/);
   assert.match(adminPanel, /仅在预览中查看，未改变公众号应用规则/);
   assert.match(css, /\.admin-layout/);
   assert.match(css, /\.admin-side-nav/);

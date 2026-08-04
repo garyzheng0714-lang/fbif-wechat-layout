@@ -334,6 +334,7 @@ import {
 const authSession = await import('/js/auth-session.js');
 const authUser = await authSession.ensureAuthenticatedSession();
 if (!authUser) await new Promise(() => {});
+window.__AUTH_USER = authUser;
 authSession.mountUserIdentity(document.getElementById('userIdentity'), authUser);
 
 // ---- Version ----
@@ -425,7 +426,6 @@ const {
   loadLocalRuleConfig,
   saveLocalRuleConfig,
   applyActiveRuleConfig,
-  adminLogin,
   listPublicRulePresets,
   normalizeRuleConfig,
   setActiveRulePreset,
@@ -447,7 +447,7 @@ const ruleSelector = createActiveRuleSelector({
 });
 const {
   renderActiveRuleCard, hydrateActiveRulePreset, refreshActiveRuleCatalog,
-  beginActiveRuleEdit, cancelActiveRuleEdit, ensureRuleAdminPassword,
+  beginActiveRuleEdit, cancelActiveRuleEdit,
   cacheServerRuleFallback, localActiveRulePreset, loadRuleCatalog,
 } = ruleSelector;
 
@@ -907,9 +907,7 @@ initAdminPanel({
   rulePacks: rulePackModule.listRulePacks(),
   getConfig: loadConfig,
   getPreset: () => (window._activeConfig && window._activeConfig.preset) || null,
-  onAuthenticated(password) {
-    ruleSelector.setAdminPassword(password);
-  },
+  authUser,
   applyConfig(config, preset, meta = {}) {
     const generation = ++adminApplyGeneration;
     if (meta.source === 'server') {

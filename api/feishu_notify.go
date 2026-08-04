@@ -1,9 +1,10 @@
 package main
 
 // feishu_notify.go — 飞书通知（施工图 S4，极简实现不引 SDK）。
-// 应用「FBIF文章排版工具」（cli_aac5d107d9381bdf）按用途选择收件人：
-//   - 审核卡与发布结果：FEISHU_REVIEW_CHAT_ID 审核群；
-//   - P0 异常、恢复与心跳：PUBLISH_MONITOR_FEISHU_USER_ID 私聊。
+// 审核卡与发布结果使用后台选定的应用 profile 和多个审核群；凭证来自
+// FEISHU_NOTIFICATION_APPS_JSON（未配置时兼容 FEISHU_APP_ID/SECRET +
+// FEISHU_REVIEW_CHAT_ID）。P0 异常、恢复与心跳仍使用默认应用私聊
+// PUBLISH_MONITOR_FEISHU_USER_ID，避免监控跟随文章审核群配置串线。
 //   1) POST /open-apis/auth/v3/tenant_access_token/internal 换 tenant_access_token（缓存，
 //      过期前刷新，简单 mutex）
 //   2) POST /open-apis/im/v1/messages，审核走 chat_id，监控走 user_id；审核卡
@@ -74,11 +75,20 @@ func newFeishuNotifierFromEnv() *feishuNotifier {
 	if appID == "" || appSecret == "" || chatID == "" {
 		return nil
 	}
+	return newFeishuNotifierForProfile(feishuNotificationApp{
+		ID: "default", Name: "FBIF文章排版工具", AppID: appID, AppSecret: appSecret,
+	}, chatID)
+}
+
+func newFeishuNotifierForProfile(profile feishuNotificationApp, chatID string) *feishuNotifier {
+	if strings.TrimSpace(profile.AppID) == "" || strings.TrimSpace(profile.AppSecret) == "" || strings.TrimSpace(chatID) == "" {
+		return nil
+	}
 	return &feishuNotifier{
 		baseURL:     defaultFeishuBaseURL,
-		appID:       appID,
-		appSecret:   appSecret,
-		receiveID:   chatID,
+		appID:       strings.TrimSpace(profile.AppID),
+		appSecret:   strings.TrimSpace(profile.AppSecret),
+		receiveID:   strings.TrimSpace(chatID),
 		receiveType: feishuReceiveIDTypeChat,
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
 	}

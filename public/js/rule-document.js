@@ -72,6 +72,7 @@ export const RULE_SCHEMA = Object.freeze([
     fields: Object.freeze([
       { key: 'footer_enabled', label: '默认显示页脚', type: 'boolean', default: true },
       { key: 'skip_upload', label: 'DOCX 跳过上传', type: 'boolean', default: true },
+      { key: 'unpublish_window_hours', label: '发布后可下线时限（小时）', type: 'number', min: 0, max: 720, step: 1, default: '8' },
     ]),
   },
 ]);

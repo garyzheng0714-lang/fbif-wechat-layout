@@ -45,11 +45,28 @@ func authConfigFromEnvironment() (authConfig, error) {
 		FeishuSecret:  strings.TrimSpace(os.Getenv("FEISHU_LOGIN_APP_SECRET")),
 		RedirectURI:   strings.TrimSpace(os.Getenv("FEISHU_LOGIN_REDIRECT_URI")),
 		SessionTTL:    30 * 24 * time.Hour,
+		SuperAdminIDs: parseAuthOpenIDList(os.Getenv("RULE_SUPER_ADMIN_OPEN_IDS")),
 	}
 	if productionRuntime() && (config.FeishuAppID == "" || config.FeishuSecret == "" || config.RedirectURI == "") {
 		return authConfig{}, errors.New("FEISHU_LOGIN_APP_ID、FEISHU_LOGIN_APP_SECRET 和 FEISHU_LOGIN_REDIRECT_URI 必须完整配置")
 	}
+	if productionRuntime() && len(config.SuperAdminIDs) == 0 {
+		return authConfig{}, errors.New("RULE_SUPER_ADMIN_OPEN_IDS 必须配置至少一个超级管理员")
+	}
 	return config, nil
+}
+
+func parseAuthOpenIDList(raw string) map[string]struct{} {
+	ids := make(map[string]struct{})
+	for _, item := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	}) {
+		id := strings.TrimSpace(item)
+		if feishuOpenIDSafe(id) {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
 }
 
 type passwordAccountSeed struct {
@@ -97,6 +114,7 @@ func syncPasswordAccountsFromEnvironment(service *authService) error {
 		if ok {
 			user.CreatedAt = existing.CreatedAt
 			user.SessionVersion = existing.SessionVersion
+			user.Role = existing.Role
 		}
 		if err := service.users.Upsert(user); err != nil {
 			return err
@@ -143,9 +161,20 @@ func (s *authService) handleFeishuLogin(w http.ResponseWriter, r *http.Request) 
 		"client_id":     {s.config.FeishuAppID},
 		"redirect_uri":  {s.config.RedirectURI},
 		"response_type": {"code"},
+		"scope":         {feishuLoginScopes()},
 		"state":         {state},
 	}
 	http.Redirect(w, r, feishuAccountsBaseURL+"/open-apis/authen/v1/authorize?"+query.Encode(), http.StatusFound)
+}
+
+// feishuLoginScopes 是登录后持续使用飞书 API 的权限契约。默认值覆盖已有
+// 云文档导入能力和发布后台的群列表能力；部署可用环境变量显式替换，但必须
+// 保留 offline_access，否则后端无法在 access_token 过期后安全刷新。
+func feishuLoginScopes() string {
+	if configured := strings.TrimSpace(os.Getenv("FEISHU_LOGIN_SCOPES")); configured != "" {
+		return configured
+	}
+	return "offline_access drive:drive.search:readonly drive:export:readonly im:chat:read"
 }
 
 func (s *authService) handleFeishuCallback(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +230,9 @@ func (s *authService) handleFeishuCallback(w http.ResponseWriter, r *http.Reques
 		FeishuUnionID:          profile.UnionID,
 		FeishuRefreshTokenSeal: refreshSeal,
 		LastLoginAt:            s.now(),
+	}
+	if _, isSuperAdmin := s.config.SuperAdminIDs[profile.OpenID]; isSuperAdmin {
+		user.Role = authRoleSuperAdmin
 	}
 	if exists {
 		user.CreatedAt = existing.CreatedAt
@@ -296,7 +328,7 @@ func (s *authService) handlePasswordLogin(w http.ResponseWriter, r *http.Request
 	s.setSessionCookiePersistence(w, sessionToken, remember)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
-		"user":          publicAuthUser(stored),
+		"user":          s.publicAuthUser(stored),
 		"session_token": sessionToken,
 	})
 }
@@ -315,7 +347,7 @@ func (s *authService) handleCurrentUser(w http.ResponseWriter, r *http.Request) 
 	s.setSessionCookie(w, sessionToken)
 	w.Header().Set("X-Session-Token", sessionToken)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user":          publicAuthUser(user),
+		"user":          s.publicAuthUser(user),
 		"session_token": sessionToken,
 	})
 }

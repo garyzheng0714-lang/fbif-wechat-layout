@@ -74,7 +74,7 @@ func TestRulePresetConcurrentCASAllowsExactlyOneWriter(t *testing.T) {
 }
 
 func TestRulePresetHTTPRejectsStaleSaveWithFieldDiff(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, store)
@@ -92,7 +92,7 @@ func TestRulePresetHTTPRejectsStaleSaveWithFieldDiff(t *testing.T) {
 		}
 		req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Admin-Password", "secret")
+		req.Header.Set("X-Publish-Admin-Token", "secret")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec
@@ -140,7 +140,7 @@ func TestRulePresetHTTPRejectsStaleSaveWithFieldDiff(t *testing.T) {
 }
 
 func TestRuleBindingHTTPRejectsStaleRevision(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, store)
@@ -156,7 +156,7 @@ func TestRuleBindingHTTPRejectsStaleRevision(t *testing.T) {
 		}
 		req := httptest.NewRequest(http.MethodPut, "/api/rules/admin/active", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Admin-Password", "secret")
+		req.Header.Set("X-Publish-Admin-Token", "secret")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec
@@ -221,14 +221,14 @@ func TestSavingActiveRuleAdvancesBindingRevision(t *testing.T) {
 }
 
 func TestRuleWriteHandlersRequireRevisionPrecondition(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
 	body := []byte(`{"id":"without-revision","name":"Without Revision","baseline_id":"default","config":{}}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusPreconditionRequired {
@@ -237,7 +237,7 @@ func TestRuleWriteHandlersRequireRevisionPrecondition(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPut, "/api/rules/admin/active", bytes.NewBufferString(`{"account_id":"fbif","id":"default"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusPreconditionRequired {

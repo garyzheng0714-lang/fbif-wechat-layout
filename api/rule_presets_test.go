@@ -760,7 +760,7 @@ func TestRulePresetRejectsInvalidBehavior(t *testing.T) {
 }
 
 func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, store)
@@ -768,7 +768,7 @@ func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
 	custom := rulePreset{ID: "foodtalks-custom", Name: "FoodTalks Custom", BaseRevision: ruleRevisionPointer(0), BaselineID: foodTalksDefaultRulePresetID, Config: defaultRuleConfig()}
 	body, _ := json.Marshal(custom)
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -776,7 +776,7 @@ func TestRuleActiveCanBeSelectedPerAccount(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPut, "/api/rules/admin/active", bytes.NewBufferString(`{"account_id":"foodtalks-series","id":"foodtalks-custom","base_revision":1}`))
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -866,8 +866,8 @@ func TestRulePresetPublicCatalogOmitsRuleBodies(t *testing.T) {
 	}
 }
 
-func TestRulePresetAdminHandlersRequirePassword(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+func TestRulePresetAdminHandlersRequireRole(t *testing.T) {
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
@@ -877,52 +877,44 @@ func TestRulePresetAdminHandlersRequirePassword(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("without password code = %d, want 401", rec.Code)
+		t.Fatalf("without login code = %d, want 401", rec.Code)
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("with password code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("with CI role token code = %d, want 200 body=%s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestRulePresetLoginValidatesPassword(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+func TestRulePresetPasswordLoginEndpointRemoved(t *testing.T) {
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/login", bytes.NewBufferString(`{"password":"bad"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/login", bytes.NewBufferString(`{"password":"legacy"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("bad password code = %d, want 401", rec.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/api/rules/admin/login", bytes.NewBufferString(`{"password":"secret"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("good password code = %d, want 200", rec.Code)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("removed password endpoint code = %d, want 410", rec.Code)
 	}
 }
 
-func TestAdminHandlersRequireConfiguredPassword(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "")
+func TestRuleAdminDoesNotDependOnPasswordConfiguration(t *testing.T) {
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/login", bytes.NewBufferString(`{"password":"FBIF2026"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewBufferString(`{}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("login without configured password code = %d, want 503", rec.Code)
+	if rec.Code == http.StatusServiceUnavailable {
+		t.Fatalf("规则后台不能因为旧密码配置缺失而不可用：%d", rec.Code)
 	}
 }
 
@@ -1045,7 +1037,7 @@ func TestRulePresetStoreWritesRollbackReadableLegacyShadowFields(t *testing.T) {
 }
 
 func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	path := filepath.Join(t.TempDir(), "rules.json")
 	store := newRulePresetStore(path)
 	if _, err := store.upsert(rulePreset{
@@ -1060,7 +1052,7 @@ func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
 	registerRulePresetHandlers(mux, store)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/rules/admin/presets", nil)
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1107,7 +1099,7 @@ func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
 }
 
 func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
@@ -1305,7 +1297,7 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 			})
 			req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Admin-Password", "secret")
+			req.Header.Set("X-Publish-Admin-Token", "secret")
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 			if rec.Code != http.StatusBadRequest {
@@ -1316,7 +1308,7 @@ func TestRulePresetAdminRejectsInvalidConfig(t *testing.T) {
 }
 
 func TestRulePresetAdminAcceptsThemeJustifyParagraphs(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, newRulePresetStore(filepath.Join(t.TempDir(), "rules.json")))
 
@@ -1337,7 +1329,7 @@ func TestRulePresetAdminAcceptsThemeJustifyParagraphs(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1346,7 +1338,7 @@ func TestRulePresetAdminAcceptsThemeJustifyParagraphs(t *testing.T) {
 }
 
 func TestRulePresetAcceptsMoreArticlesDefaultCards(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	path := filepath.Join(t.TempDir(), "rules.json")
 	store := newRulePresetStore(path)
 	mux := http.NewServeMux()
@@ -1369,7 +1361,7 @@ func TestRulePresetAcceptsMoreArticlesDefaultCards(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1509,7 +1501,7 @@ func TestDefaultRuleStoreDocumentIncludesFoodTalksSite(t *testing.T) {
 }
 
 func TestRulePresetAdminAcceptsModularConfigAndProjectsFlatLegacyPreset(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", "secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "secret")
 	store := newRulePresetStore(filepath.Join(t.TempDir(), "rules.json"))
 	mux := http.NewServeMux()
 	registerRulePresetHandlers(mux, store)
@@ -1534,7 +1526,7 @@ func TestRulePresetAdminAcceptsModularConfigAndProjectsFlatLegacyPreset(t *testi
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/rules/admin/presets", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Admin-Password", "secret")
+	req.Header.Set("X-Publish-Admin-Token", "secret")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
