@@ -1254,8 +1254,7 @@ body.article-text-preview .phone-frame {
   .rail-foot .user-identity-trigger,
   .import-card .btn-sm,
   .empty-action .btn-sm { height: 44px; }
-  .acct-item,
-  .acct-settings-item { min-height: 44px; }
+  .acct-item { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

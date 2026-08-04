@@ -195,8 +195,8 @@ type reviewCardOutcome struct {
 }
 
 // reviewCardAction 卡片按钮动作的业务核心（两模式共用唯一入口）：解析 value
-// （action + job_id，兼容数字/字符串）→ 业务态校验 → review 核心 → 发布中/终态卡。
-// 审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
+// （action + job_id，兼容数字/字符串）→ 读取最新任务状态 → 业务态校验 → review 核心
+// → 发布中/终态卡。审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
 func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID string, rawValue json.RawMessage) reviewCardOutcome {
 	var value struct {
 		Action           string `json:"action"`
@@ -224,8 +224,14 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 	// 下线 / 重新发布是已发布任务的后续生命周期动作，必须在 terminal 判断前
 	// 分流；offline / published 虽是业务终态，卡片仍允许显示对应的下一步按钮。
 	if value.Action == feishuCardActionUnpublish || value.Action == feishuCardActionRepublish {
+		// 管理后台和飞书卡片可能几乎同时操作同一篇文章。先按持久化状态做一次
+		// 幂等判断，避免把“已经下线/正在下线”误报成卡片过期，也避免再次发出
+		// FoodTalks PUT；返回当前状态卡，让群内旧卡一起收敛到同一张卡片。
+		if outcome, handled := lifecycleCardStateOutcome(value.Action, job); handled {
+			return outcome
+		}
 		if !lifecycleVersionMatches(value.LifecycleVersion, job) {
-			return reviewCardOutcome{toastType: "error", toastContent: "生命周期卡片已过期，请使用最新一张卡片"}
+			return lifecycleCardStaleOutcome(value.Action, job)
 		}
 		var next publishJob
 		var lifecycleErr error
@@ -235,6 +241,13 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 			next, lifecycleErr = p.requestRepublish(jobID, operatorOpenID, value.LifecycleVersion)
 		}
 		if lifecycleErr != nil {
+			// 状态可能在第一次读取之后被管理后台抢先更新。重新读取一次，
+			// 将竞态收敛为“已处理/处理中”提示，而不是暴露内部 CAS 错误。
+			if latest, loadErr := p.store.byID(jobID); loadErr == nil {
+				if outcome, handled := lifecycleCardStateOutcome(value.Action, latest); handled {
+					return outcome
+				}
+			}
 			return reviewCardOutcome{toastType: "error", toastContent: lifecycleErr.Error()}
 		}
 		return reviewCardOutcome{
@@ -268,6 +281,83 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在发布", card: buildReviewPublishingCard(reviewed)}
 	}
 	return reviewCardOutcome{toastType: "success", toastContent: "已驳回", card: buildReviewDoneCard(reviewed)}
+}
+
+// lifecycleCardStateOutcome 在卡片回调调用外部 FoodTalks 之前读取的本地持久状态。
+// 本地状态是发布意图、worker 和 outbox 的共同真相源：卡片回调不能在 3 秒响应窗口内
+// 依赖一个慢的外部查询，更不能在已经进入外部调用窗口后盲目重试。返回 handled=true
+// 表示当前动作已经被处理、正在处理，或必须人工对账，调用方不得再发 PUT。
+func lifecycleCardStateOutcome(action string, job publishJob) (reviewCardOutcome, bool) {
+	progress := func(progressAction, toast string) (reviewCardOutcome, bool) {
+		return reviewCardOutcome{
+			toastType:    "info",
+			toastContent: toast,
+			card:         buildReviewLifecycleProgressCard(job, progressAction),
+		}, true
+	}
+	issue := func(toast string) (reviewCardOutcome, bool) {
+		return reviewCardOutcome{
+			toastType:    "error",
+			toastContent: toast,
+			card:         buildReviewIssueCard(job, true),
+		}, true
+	}
+
+	switch action {
+	case feishuCardActionUnpublish:
+		switch job.Stage {
+		case publishStageOffline:
+			return reviewCardOutcome{
+				toastType:    "info",
+				toastContent: "文章已下线，无需重复操作",
+				card:         buildReviewDoneCard(job),
+			}, true
+		case publishStageUnpublishing, publishStageUnpublishingUpdating:
+			return progress(feishuCardActionUnpublish, "文章正在下线处理中，请稍候")
+		case publishStageUnpublishReconciliationRequired:
+			return issue("下线结果待人工核对，请先到管理后台确认文章状态")
+		case publishStageRepublishing, publishStageRepublishingUpdating:
+			return progress(feishuCardActionRepublish, "文章正在重新发布，暂时不能下线")
+		case publishStageRepublishReconciliationRequired:
+			return issue("重新发布结果待人工核对，暂时不能下线")
+		}
+	case feishuCardActionRepublish:
+		switch job.Stage {
+		case publishStagePublished:
+			return reviewCardOutcome{
+				toastType:    "info",
+				toastContent: "文章已重新发布，无需重复操作",
+				card:         buildReviewDoneCard(job),
+			}, true
+		case publishStageRepublishing, publishStageRepublishingUpdating:
+			return progress(feishuCardActionRepublish, "文章正在重新发布处理中，请稍候")
+		case publishStageRepublishReconciliationRequired:
+			return issue("重新发布结果待人工核对，请先到管理后台确认文章状态")
+		case publishStageUnpublishing, publishStageUnpublishingUpdating:
+			return progress(feishuCardActionUnpublish, "文章正在下线，暂时不能重新发布")
+		case publishStageUnpublishReconciliationRequired:
+			return issue("下线结果待人工核对，暂时不能重新发布")
+		}
+	}
+	return reviewCardOutcome{}, false
+}
+
+// lifecycleCardStaleOutcome 处理仍处于可操作状态、但按钮版本已落后的情况。
+// 给出最新终态卡而不是只吐错误 toast，用户可以直接看到新的窗口/按钮状态。
+func lifecycleCardStaleOutcome(action string, job publishJob) reviewCardOutcome {
+	if outcome, handled := lifecycleCardStateOutcome(action, job); handled {
+		return outcome
+	}
+	outcome := reviewCardOutcome{
+		toastType:    "error",
+		toastContent: "生命周期卡片已过期，请使用最新一张卡片",
+	}
+	if job.Stage == publishStagePublished || job.Stage == publishStageOffline {
+		outcome.toastType = "info"
+		outcome.toastContent = "文章状态已更新，请使用最新卡片上的操作"
+		outcome.card = buildReviewDoneCard(job)
+	}
+	return outcome
 }
 
 // publishReviewCardVersion 将风险结论、内容哈希和冻结版本绑定到卡片按钮：补检、

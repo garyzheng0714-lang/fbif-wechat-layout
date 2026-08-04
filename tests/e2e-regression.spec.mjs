@@ -425,10 +425,11 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
       await waitForAppReady(page);
 
-      // Click the rule settings entry inside the account menu.
-      await page.locator('.acct-trigger').click();
-      const adminBtn = page.locator('#adminLockBtn');
-      if (await adminBtn.isVisible()) {
+      // Click the rule settings entry inside the signed-in identity menu.
+      await page.locator('.rail-foot .user-identity-trigger').click();
+      const adminBtn = page.locator('.user-identity-menu #adminLockBtn');
+      const adminEntryVisible = await adminBtn.isVisible();
+      if (adminEntryVisible) {
         await adminBtn.click();
         await page.waitForTimeout(2000);
       }
@@ -437,7 +438,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       // 带构建号的 URL；换链期间旧缓存可能仍把 overlay 当成 app-layout 内的绝对定位，
       // 即使 padding/max-width 已经相同，截图仍会随机上下偏移一个顶栏高度。这里等待
       // 最终样式合同全部落稳：overlay 固定铺满视口，tablet 抽屉保留 12px 安全边距。
-      if (bp.width === 768) {
+      if (bp.width === 768 && adminEntryVisible) {
         await expect(page.locator('.admin-overlay')).toHaveCSS('padding', '12px');
         await expect(page.locator('.admin-overlay')).toHaveCSS('position', 'fixed');
         await expect(page.locator('.admin-overlay')).toHaveCSS('top', '0px');

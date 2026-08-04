@@ -57,8 +57,7 @@
 .acct-trigger:hover { background: var(--fs-bg-sunken, #f2f3f5); }
 .acct-trigger[aria-expanded="true"] { background: var(--fs-bg-sunken, #f2f3f5); }
 .acct-trigger:focus-visible,
-.acct-item:focus-visible,
-.acct-settings-item:focus-visible {
+.acct-item:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
 }
@@ -135,38 +134,3 @@
   white-space: nowrap;
 }
 .acct-item-check { color: var(--fs-brand, #1456f0); flex-shrink: 0; }
-
-.acct-menu-divider {
-  height: 1px;
-  margin: 6px 4px;
-  background: var(--fs-divider, rgba(31,35,39,0.08));
-}
-.acct-settings-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: var(--fs-r-s, 6px);
-  background: transparent;
-  color: var(--fs-text-2, #646a73);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--fs-t-fast, 0.12s) var(--fs-ease-out, ease),
-              color var(--fs-t-fast, 0.12s) var(--fs-ease-out, ease);
-}
-.acct-settings-item:hover {
-  background: var(--fs-bg-sunken, #f2f3f5);
-  color: var(--fs-text-1, #1f2329);
-}
-.acct-settings-icon {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
-  color: var(--fs-text-3, #8f959e);
-}
-.acct-settings-item:hover .acct-settings-icon { color: var(--fs-text-2, #646a73); }

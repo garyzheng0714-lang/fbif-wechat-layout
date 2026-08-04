@@ -405,10 +405,6 @@ const accountMenu = mountAccountMenu({
   container: document.getElementById('acctMenu'),
   activeId: activeRulePack.id,
   onSwitch: (id) => { switchAccount(id).catch(err => console.warn('[account] switch failed', err)); },
-  settingsAction: {
-    id: 'adminLockBtn',
-    label: '规则设置',
-  },
 });
 
 // #moreArticlesEmbed 的稳定引用：缓存一次，之后即使被 block-panel 的 innerHTML='' 摘下 DOM，
