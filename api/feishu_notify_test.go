@@ -130,6 +130,56 @@ func TestFeishuNotifierSendAndTokenCache(t *testing.T) {
 	}
 }
 
+func TestFeishuNotifierCardLifecycleUsesMessageID(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
+	var gotUpdate struct {
+		Content string `json:"content"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			fmt.Fprint(w, `{"code":0,"msg":"ok","tenant_access_token":"tok-card","expire":7200}`)
+		case "/open-apis/im/v1/messages":
+			gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+			fmt.Fprint(w, `{"code":0,"msg":"ok","data":{"message_id":"om_card_1"}}`)
+		case "/open-apis/im/v1/messages/om_card_1":
+			gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+			if err := json.NewDecoder(r.Body).Decode(&gotUpdate); err != nil {
+				t.Errorf("decode update body: %v", err)
+			}
+			fmt.Fprint(w, `{"code":0,"msg":"ok"}`)
+		default:
+			t.Errorf("飞书桩收到意外路径 %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	n := &feishuNotifier{
+		baseURL: srv.URL, appID: "cli_test", appSecret: "secret_test",
+		receiveID: "oc_test_chat", receiveType: feishuReceiveIDTypeChat, httpClient: srv.Client(),
+	}
+	card := map[string]any{"schema": "2.0", "header": map[string]any{"title": "待审核"}}
+	messageID, err := n.sendCardWithID(context.Background(), card)
+	if err != nil || messageID != "om_card_1" {
+		t.Fatalf("发送审核卡应返回 message_id：id=%q err=%v", messageID, err)
+	}
+	if err := n.updateCard(context.Background(), messageID, map[string]any{"schema": "2.0", "header": map[string]any{"title": "已发布"}}); err != nil {
+		t.Fatalf("原位更新审核卡: %v", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/open-apis/im/v1/messages/om_card_1" || gotAuth != "Bearer tok-card" {
+		t.Fatalf("更新卡片请求形态不符：method=%q path=%q auth=%q", gotMethod, gotPath, gotAuth)
+	}
+	var updatedCard map[string]any
+	if err := json.Unmarshal([]byte(gotUpdate.Content), &updatedCard); err != nil {
+		t.Fatalf("更新 content 应是卡片 JSON: %v", err)
+	}
+	if updatedCard["schema"] != "2.0" {
+		t.Fatalf("更新 content 不是卡片本体：%v", updatedCard)
+	}
+}
+
 func TestFeishuMonitorNotifierUsesPrivateUserID(t *testing.T) {
 	t.Setenv("FEISHU_APP_ID", "cli_test")
 	t.Setenv("FEISHU_APP_SECRET", "secret_test")

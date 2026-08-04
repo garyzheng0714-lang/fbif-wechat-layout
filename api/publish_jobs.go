@@ -121,6 +121,7 @@ type publishJob struct {
 	ReviewedAt           string `json:"reviewed_at,omitempty"`           // 审核时刻（RFC3339 UTC）
 	ReviewAction         string `json:"review_action,omitempty"`         // approve / reject；publicizing 恢复的授权凭据
 	ApprovedRiskVersion  string `json:"approved_risk_version,omitempty"` // approve 当刻与风险快照绑定的摘要
+	ReviewCardMsgID      string `json:"review_card_msg_id,omitempty"`    // 飞书审核卡消息 ID；终态原位更新用
 	CreatedAt            string `json:"created_at"`
 	UpdatedAt            string `json:"updated_at"`
 }

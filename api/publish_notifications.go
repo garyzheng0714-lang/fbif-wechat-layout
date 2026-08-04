@@ -144,17 +144,11 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 		return p.sendTerminalPublishNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】已驳回\n标题：%s\n文章留在 FoodTalks 草稿态，不对外可见", job.Title))
 	case publishNotificationPublicizeFailed:
-		if p.notify == nil {
-			return errors.New("飞书发布失败通知未配置")
-		}
-		return p.notify(ctx, fmt.Sprintf(
+		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
 			"【网站同步】发布失败\n标题：%s\n任务 #%d 在发出公开请求前已确认失败，网站仍保持草稿态；修复配置后可安全重试。\n原因：%s",
 			job.Title, job.ID, job.Error))
 	case publishNotificationPublicizeUncertain:
-		if p.notify == nil {
-			return errors.New("飞书公开结果异常通知未配置")
-		}
-		return p.notify(ctx, fmt.Sprintf(
+		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, true), fmt.Sprintf(
 			"【网站同步】公开结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n任务 #%d 不会自动重试，请先在网站前台/后台确认是否已公开，再调用人工对账。\n原因：%s",
 			job.Title, job.FoodTalksNewsID, job.ID, job.Error))
 	default:
@@ -162,12 +156,25 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 	}
 }
 
-// sendTerminalPublishNotification 优先发不可审核的终态卡，让 approve 回调
-// 返回的「请求已受理」进度卡之后一定有明确结果。现有发卡接口不返回
-// message_id，暂时无法原位 PATCH；卡片失败时仍降级文本，交由 outbox 持久重试。
+// sendTerminalPublishNotification 更新 approve/reject 对应的终态卡，让回调
+// 返回的「请求已受理」进度卡在同一条消息里落到最终结果。
 func (p *publishPipeline) sendTerminalPublishNotification(ctx context.Context, job publishJob, fallbackText string) error {
+	return p.sendTerminalCardNotification(ctx, job, buildReviewDoneCard(job), fallbackText)
+}
+
+// sendTerminalCardNotification 先尝试原位更新审核卡；旧任务没有 message_id、
+// 或更新接口暂时不可用时，兼容发送一张新终态卡，再降级文本。新任务的正常路径
+// 只会命中第一分支，因此不会在群里追加第二张结果卡。
+func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job publishJob, card map[string]any, fallbackText string) error {
+	if messageID := strings.TrimSpace(job.ReviewCardMsgID); messageID != "" && p.updateCard != nil {
+		if err := p.updateCard(ctx, messageID, card); err == nil {
+			return nil
+		} else {
+			log.Printf("publish: 原位更新审核卡失败，兼容发送新终态卡: %v", err)
+		}
+	}
 	if p.notifyCard != nil {
-		if err := p.notifyCard(ctx, buildReviewDoneCard(job)); err == nil {
+		if err := p.notifyCard(ctx, card); err == nil {
 			return nil
 		} else {
 			log.Printf("publish: 终态卡片发送失败，降级文本通知: %v", err)
@@ -180,17 +187,35 @@ func (p *publishPipeline) sendTerminalPublishNotification(ctx context.Context, j
 }
 
 func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job publishJob) error {
-	if p.notifyCard != nil {
-		coverImgKey := ""
-		if p.coverImgKey != nil && strings.TrimSpace(job.CoverURL) != "" {
-			key, err := p.coverImgKey(ctx, job.CoverURL)
-			if err != nil {
-				log.Printf("publish: WARN 封面转存飞书失败（卡片将不带图）: %v", err)
-			} else {
-				coverImgKey = key
-			}
+	coverImgKey := ""
+	if p.coverImgKey != nil && strings.TrimSpace(job.CoverURL) != "" {
+		key, err := p.coverImgKey(ctx, job.CoverURL)
+		if err != nil {
+			log.Printf("publish: WARN 封面转存飞书失败（卡片将不带图）: %v", err)
+		} else {
+			coverImgKey = key
 		}
-		if err := p.notifyCard(ctx, buildReviewPendingCard(job, coverImgKey)); err == nil {
+	}
+	card := buildReviewPendingCard(job, coverImgKey)
+	if messageID := strings.TrimSpace(job.ReviewCardMsgID); messageID != "" && p.updateCard != nil {
+		if err := p.updateCard(ctx, messageID, card); err == nil {
+			return nil
+		} else {
+			log.Printf("publish: 原位恢复待审核卡失败，兼容发送新审核卡: %v", err)
+		}
+	}
+	if p.notifyCardWithID != nil {
+		messageID, err := p.notifyCardWithID(ctx, card)
+		if err == nil {
+			if rememberErr := p.rememberReviewCardMessageID(job, messageID); rememberErr != nil {
+				return rememberErr
+			}
+			return nil
+		}
+		log.Printf("publish: 审核卡片发送失败，降级文本通知: %v", err)
+	}
+	if p.notifyCard != nil {
+		if err := p.notifyCard(ctx, card); err == nil {
 			return nil
 		} else {
 			log.Printf("publish: 审核卡片发送失败，降级文本通知: %v", err)
@@ -206,6 +231,39 @@ func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job
 	return p.notify(ctx, fmt.Sprintf(
 		"【网站同步】待审核\n标题：%s\n原文：%s\n%s\n草稿已进站（外界不可见），FoodTalks 资讯 ID：%d\n%s",
 		job.Title, job.SourceURL, formatPublishRiskText(job), job.FoodTalksNewsID, instruction))
+}
+
+// rememberReviewCardMessageID 把发送成功得到的卡片消息 ID 写回任务。允许旧 ID
+// 等于发送前快照时被新卡替换（例如原卡已被撤回），但不会覆盖并发重试已经登记的
+// 更新 ID。这样审核回调取消 review_pending 后，发送线程仍能把 ID 留下来供终态使用。
+func (p *publishPipeline) rememberReviewCardMessageID(job publishJob, messageID string) error {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return errors.New("飞书审核卡发送成功但没有 message_id")
+	}
+	expected := strings.TrimSpace(job.ReviewCardMsgID)
+	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		currentID := strings.TrimSpace(current.ReviewCardMsgID)
+		return currentID == "" || currentID == expected || currentID == messageID
+	}, func(current *publishJob) {
+		current.ReviewCardMsgID = messageID
+	})
+	if err != nil {
+		return fmt.Errorf("保存审核卡 message_id 失败: %w", err)
+	}
+	if swapped {
+		return nil
+	}
+	// 另一个并发发送已经登记了 canonical 卡片 ID；不因重复通知把 outbox
+	// 重新打回失败，终态会更新已经登记的那一张。
+	current, loadErr := p.store.byID(job.ID)
+	if loadErr != nil {
+		return fmt.Errorf("确认审核卡 message_id 失败: %w", loadErr)
+	}
+	if strings.TrimSpace(current.ReviewCardMsgID) != "" {
+		return nil
+	}
+	return errors.New("保存审核卡 message_id 未生效")
 }
 
 // recoverPublishNotification 将崩溃遗留 sending 重新置 pending，再调度 drain。

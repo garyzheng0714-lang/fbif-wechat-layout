@@ -501,6 +501,12 @@ func TestReviewPendingCardContract(t *testing.T) {
 	if !strings.Contains(s, `"tag":"collapsible_panel"`) || !strings.Contains(s, `"expanded":false`) {
 		t.Fatalf("排版与风险说明应默认折叠：%s", s)
 	}
+	warningJob := job
+	warningJob.RiskLevel = publishRiskWarning
+	warningRaw, _ := json.Marshal(buildReviewPendingCard(warningJob, "img_v3_test_cover_key"))
+	if !strings.Contains(string(warningRaw), `"tag":"collapsible_panel"`) || !strings.Contains(string(warningRaw), `"expanded":false`) {
+		t.Fatalf("有风险提醒时排版与风险说明也应默认折叠：%s", warningRaw)
+	}
 	// 无封面 img_key 时卡片不得残留空 img 元素。
 	rawNoCover, _ := json.Marshal(buildReviewPendingCard(job, ""))
 	if strings.Contains(string(rawNoCover), `"tag":"img"`) {

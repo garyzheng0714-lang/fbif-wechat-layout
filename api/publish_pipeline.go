@@ -176,6 +176,11 @@ type publishPipeline struct {
 	monitorNotify func(ctx context.Context, text string) error
 	// notifyCard 审核交互卡片发送（M4）；nil 或失败降级回 notify 文本，同样不阻断流水线
 	notifyCard func(ctx context.Context, card map[string]any) error
+	// notifyCardWithID 与 notifyCard 相同，但返回飞书 message_id，供同一张审核卡后续原位更新。
+	// 旧注入点保留作兼容回退；生产环境优先使用带 ID 的发送器。
+	notifyCardWithID func(ctx context.Context, card map[string]any) (string, error)
+	// updateCard 更新当前应用发送的飞书交互卡；没有已持久化 message_id 时不调用。
+	updateCard func(ctx context.Context, messageID string, card map[string]any) error
 	// coverImgKey 封面 URL → 飞书图片素材 img_key（卡片内呈现封面用）；nil 或失败
 	// 降级为卡片不带图，同样不阻断流水线
 	coverImgKey func(ctx context.Context, imgURL string) (string, error)
@@ -226,6 +231,8 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 	if n := newFeishuNotifierFromEnv(); n != nil {
 		p.notify = n.send
 		p.notifyCard = n.sendCard
+		p.notifyCardWithID = n.sendCardWithID
+		p.updateCard = n.updateCard
 		p.coverImgKey = n.uploadImageByURL
 	} else {
 		log.Printf("publish: 飞书通知未配置（需 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_REVIEW_CHAT_ID），审核群通知禁用")

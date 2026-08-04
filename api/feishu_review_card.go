@@ -13,7 +13,7 @@ package main
 //   - config.update_multi=true：回调响应带新卡时群内所有人同步看到终态。
 //
 // 状态色联动（规范 §4）：蓝=待审核（tag 黄）、绿=已发布（succeed_filled + tag 绿）、
-// 红=已驳回（tag 红）。
+// 红=已驳回/失败、橙=公开结果待核对。
 
 import (
 	"fmt"
@@ -197,6 +197,55 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 	}
 }
 
+// buildReviewIssueCard 是发布窗口的异常终态：仍更新原审核卡，不另起一张通知卡。
+// uncertain=true 表示外部 PUT 的结果无法确认，不能误报为失败，也不能自动重试。
+func buildReviewIssueCard(job publishJob, uncertain bool) map[string]any {
+	header := map[string]any{
+		"title":    feishuPlainText(reviewCardHeaderTitle),
+		"icon":     map[string]any{"tag": "standard_icon", "token": "readinfo_outlined"},
+		"template": "red",
+	}
+	status := "发布失败"
+	subtitle := "公开请求未完成，文章仍保留在 FoodTalks 草稿态"
+	actionLabel := "发布失败"
+	color := "red"
+	if uncertain {
+		header["template"] = "orange"
+		status = "待人工核对"
+		subtitle = "公开结果暂时无法确认，请先核对网站状态"
+		actionLabel = "公开结果待核对"
+		color = "orange"
+	}
+	header["subtitle"] = feishuPlainText(subtitle)
+	header["text_tag_list"] = []any{map[string]any{
+		"tag": "text_tag", "text": feishuPlainText(status), "color": color,
+	}}
+	elements := []any{reviewCardInfoBlock(job), map[string]any{
+		"tag":       "markdown",
+		"text_size": "notation",
+		"content":   "<font color='grey'>处理说明</font>\n" + reviewCardSafeOrDash(job.Error, 600),
+	}}
+	elements = append(elements, map[string]any{
+		"tag":       "markdown",
+		"text_size": "notation",
+		"content":   reviewCardAuditTrail(job, actionLabel),
+		"margin":    "4px 0px 0px 0px",
+	})
+	return map[string]any{
+		"schema": "2.0",
+		"config": map[string]any{"update_multi": true},
+		"header": header,
+		"body": map[string]any{
+			"direction":        "vertical",
+			"padding":          "12px 12px 12px 12px",
+			"vertical_spacing": "8px",
+			"horizontal_align": "left",
+			"vertical_align":   "top",
+			"elements":         elements,
+		},
+	}
+}
+
 // reviewCardHeroBlock 把封面、标题、标签、摘要和预览键收进同一个横向媒体容器：
 // 封面素材已在上传前生成方形画布，在紧凑左栏内等比显示；文案列占据剩余宽度，
 // 原图不被裁切且竖图不再主导整卡高度。无封面时自动退化为单列，不留空白占位。
@@ -340,8 +389,10 @@ func reviewCardDetailsPanel(job publishJob) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"tag":      "collapsible_panel",
-		"expanded": job.RiskLevel != publishRiskPass,
+		"tag": "collapsible_panel",
+		// 首屏只保留风险等级标签；详细说明由审核人主动展开，避免
+		// warning/block 文章把长风险清单直接撑开审核卡片。
+		"expanded": false,
 		"header": map[string]any{
 			"title":         feishuPlainText("查看排版与风险说明"),
 			"width":         "auto_when_fold",

@@ -43,7 +43,7 @@ test('site.html keeps upload + URL + preview + copy button', async () => {
   assert.doesNotMatch(html, /import-mode-badge/, 'import panel should not add decorative badges that compete with the editor input');
   assert.match(html, /class=['"][^'"]*\bimport-composer-addon\b[^'"]*['"]/, 'website import area should keep all import actions in one composer footer');
   assert.match(html, /id=['"]dropZone['"]/);
-  assert.match(html, /id=['"]dropZone['"][^>]*role=['"]group['"][^>]*aria-labelledby=['"]importTitle['"]/, 'one composer should own text, file and Feishu import semantics');
+  assert.match(html, /id=['"]dropZone['"][^>]*role=['"]group['"][^>]*aria-label=['"]导入内容['"]/, 'one composer should own text, file and Feishu import semantics');
   assert.match(html, /data-upload-label[^>]*[\s\S]{0,500}<strong>松开导入</, 'full composer should expose a clear file-drop state');
   assert.match(html, /data-uploaded-file hidden/, 'upload zone should have a centered uploaded-file state');
   assert.match(html, /class=['"][^'"]*\bimport-card\b[^'"]*['"]/);
@@ -62,7 +62,7 @@ test('app.html uses the unified source import panel', async () => {
   assert.doesNotMatch(html, /import-mode-badge/);
   assert.match(html, /class=['"][^'"]*\bimport-composer-addon\b[^'"]*['"]/);
   assert.match(html, /class=['"][^'"]*\bdropzone\b[^'"]*['"][^>]*id=['"]dropZone['"]/);
-  assert.match(html, /id=['"]dropZone['"][^>]*role=['"]group['"][^>]*aria-labelledby=['"]importTitle['"]/);
+  assert.match(html, /id=['"]dropZone['"][^>]*role=['"]group['"][^>]*aria-label=['"]导入内容['"]/);
   assert.match(html, /data-upload-label[^>]*[\s\S]{0,500}<strong>松开导入</);
   assert.match(html, /data-uploaded-file hidden/);
   assert.match(html, /class=['"][^'"]*\bimport-composer-input\b[^'"]*['"][^>]*data-url-focus-target/);

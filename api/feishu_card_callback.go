@@ -18,8 +18,9 @@ package main
 //
 // 协议（cardkit 规范 04）：
 //   - url_verification（配置回调地址时的 challenge 握手）→ 原样回 {"challenge": ...}
-//   - card.action.trigger → 3 秒内回 {toast, card}；card 为终态卡（update_multi 使群内
-//     所有人同步看到），审核人取 operator.open_id（唯一可信的「谁」）。
+//   - card.action.trigger → 3 秒内回 {toast, card}；approve 先把同一条消息刷新为
+//     发布中（update_multi 使群内所有人同步看到），后台完成后再由 outbox 原位更新终态。
+//     审核人取 operator.open_id（唯一可信的「谁」）。
 //   - 业务性失败（任务不存在 / 已被处理）回 200 + toast，不回非 2xx——否则飞书会重试
 //     轰炸端点；只有鉴权失败才 401。
 
@@ -190,11 +191,11 @@ func (p *publishPipeline) handleReviewCardAction(r *http.Request, payload feishu
 type reviewCardOutcome struct {
 	toastType    string // success / info / error
 	toastContent string
-	card         map[string]any // 非 nil 时以 raw 形态刷新卡片（终态卡，update_multi 群内同步）
+	card         map[string]any // 非 nil 时以 raw 形态刷新当前卡片（update_multi 群内同步）
 }
 
 // reviewCardAction 卡片按钮动作的业务核心（两模式共用唯一入口）：解析 value
-// （action + job_id，兼容数字/字符串）→ 业务态校验 → review 核心 → 终态卡。
+// （action + job_id，兼容数字/字符串）→ 业务态校验 → review 核心 → 发布中/终态卡。
 // 审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
 func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID string, rawValue json.RawMessage) reviewCardOutcome {
 	var value struct {
