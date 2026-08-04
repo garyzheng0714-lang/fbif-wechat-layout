@@ -462,23 +462,6 @@ func (p *publishPipeline) sendConfiguredReviewCard(ctx context.Context, job publ
 	return notifier.sendCardWithID(ctx, card)
 }
 
-func (p *publishPipeline) sendConfiguredReviewText(ctx context.Context, job publishJob, text string) error {
-	settings, apps, err := p.reviewDeliveryForJob(job)
-	if err != nil {
-		return err
-	}
-	for _, chatID := range settings.ChatIDs {
-		notifier, notifierErr := p.configuredReviewNotifier(settings, apps, chatID)
-		if notifierErr != nil {
-			return notifierErr
-		}
-		if err := notifier.send(ctx, text); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (p *publishPipeline) uploadReviewCoverForJob(ctx context.Context, job publishJob) (string, error) {
 	if p != nil && p.deliverySettings != nil {
 		settings, apps, err := p.reviewDeliveryForJob(job)
