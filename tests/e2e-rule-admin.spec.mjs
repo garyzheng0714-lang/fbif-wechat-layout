@@ -58,7 +58,14 @@ async function openAdminPanel(page) {
 }
 
 function collectPageProblems(page, sink) {
-  page.on('console', msg => { if (msg.type() === 'error') sink.push(`[console] ${msg.text().slice(0, 200)}`); });
+  page.on('console', msg => {
+    if (msg.type() !== 'error') return;
+    // 与下方 response 豁免对齐：/api/feishu/chats 对密码账号 403 是既定降级路径，
+    // 浏览器仍会为它记一条 Failed to load resource 的 console error，不算问题。
+    const sourceUrl = (msg.location() && msg.location().url) || '';
+    if (sourceUrl.includes('/api/feishu/chats')) return;
+    sink.push(`[console] ${msg.text().slice(0, 200)}`);
+  });
   page.on('pageerror', error => sink.push(`[pageerror] ${String(error).slice(0, 200)}`));
   page.on('response', response => {
     // 飞书群列表对密码账号返回 403 是既定降级路径，界面会提示改用飞书登录。
