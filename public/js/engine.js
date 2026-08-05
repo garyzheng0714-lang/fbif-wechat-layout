@@ -50,6 +50,8 @@ export { inferWechatImageType, looksLikeGifSource };
 
 const uploaderModule = await import('./uploader.js' + assetQuery);
 const { uploadNonCdnImages, retryFailedImages, materializeLazyImages, isMmbizUrl } = uploaderModule;
+const previewReadyModule = await import('./preview-ready.js' + assetQuery);
+const { preparePreviewArticle } = previewReadyModule;
 const rulePresetModule = await import('./rule-presets.js' + assetQuery);
 const { getActiveRuleBehavior } = rulePresetModule;
 const behaviorModule = await import('./rule-behavior.js' + assetQuery);
@@ -1336,9 +1338,36 @@ export function initApp(initialTemplate) {
         commitGate: inputCommit,
       });
       if (!session || inputCommit.stale()) return false;
-      // 提交预览不等待 /api/doc-cache/* 图片回填或解码。正文先进入页面，
-      // 图片继续走浏览器直链并行加载；复制层仍由 showPreview 的后台准备链路
-      // 回填，并在站内占位尚未清除时由 copyContent 瞬时挡回，绝不交付缺图产物。
+      // 恢复 2026-07-31 的原子预览契约（8d2fdbc）：.doc 转换和飞书导出的
+      // /api/doc-cache/* 剥离图先全部并发回填并解码，正文与图片才一次性出现。
+      // 准备期间沿用导入进度，不向用户展示残缺正文或被透明图片撑开的空洞。
+      const previewReady = await preparePreviewArticle(session.articleHtml, {
+        materialize: materializeLazyImages,
+        isStale: () => inputCommit.stale(),
+        onProgress({ phase, done, total }) {
+          if (inputCommit.stale()) return;
+          progressFill.style.width = '99%';
+          progressText.textContent = phase === 'decode'
+            ? '正在确认图片 ' + done + '/' + total + '…'
+            : '正在准备正文图片 ' + done + '/' + total + '…';
+        },
+      });
+      if (previewReady.stale || inputCommit.stale()) return false;
+      if (previewReady.changed) {
+        session.articleHtml = previewReady.articleHtml;
+        if (previewReady.replacements.size > 0 && session.input?.payload?.imgCache) {
+          const imgCache = Object.fromEntries(
+            Object.entries(session.input.payload.imgCache).map(([key, value]) => [
+              key,
+              previewReady.replacements.get(value) || value,
+            ]),
+          );
+          session.input = {
+            ...session.input,
+            payload: { ...session.input.payload, imgCache },
+          };
+        }
+      }
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       session.stats = formatRenderStats(result, elapsed);
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
