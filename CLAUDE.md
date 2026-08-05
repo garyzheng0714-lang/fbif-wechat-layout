@@ -44,7 +44,9 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F
 7. **文章标题左对齐** — 在文章正上方，27px 粗体
 8. **复制后不自动打开外部网站** — 复制按钮只复制内容；微信公众号后台只能通过显式链接手动打开
-9. **复制按钮必须立即反馈** — `copyContent()` 不得等待图片上传或“更多文章”合成；这些准备工作只能提前或后台刷新复制层，点击后应立刻写剪贴板并显示复制结果
+9. **复制按钮必须立即反馈，但绝不交付缺图产物** — `copyContent()` 不得 `await` 图片上传或“更多文章”合成；这些准备工作只能提前或后台刷新复制层，点击后应立刻写剪贴板并显示复制结果。
+   **唯一例外是“此刻还没有图可复制”（2026-08-05 用户裁定）**：服务端会把飞书云文档导出与 `.doc` 转换的 DOCX 图片剥离成 `/api/doc-cache/*` 占位，位图由 `materializeLazyImages` 后台回填。若复制产物里仍有站内占位地址（`/api/doc-cache/*`、`/assets/*`、`blob:`）且 `_uploadPromise && !_uploadDone`，必须立即挡回并显示「图片准备中」，回填完成后按钮自动恢复——这仍是瞬时返回，不是等待，规则不变。站内相对地址出了这个页面就取不到，交付一份微信必然缺图的剪贴板比让用户多等一秒更糟；`copyHTMLSource` 同理。
+   **回填必须并发**（`MATERIALIZE_CONCURRENCY`）：串行取图会把“预览已出现”到“复制产物真的有图”的窗口拉到数秒，一篇 10 MB 正文图的飞书文档足够让用户在窗口内点中复制。守护：`tests/copy-behavior.test.mjs`、`tests/uploader.test.mjs`。
 10. **表单只填数字** — 不要 px/em 后缀，颜色用 color picker
 11. **不要 phone-frame 边框** — 文章直接在白底上流动
 12. **原创 DOCX 作者行规则** — 首个 `作者：` 行是文章正文起点；它之前的编辑前置材料默认不显示在编辑器里

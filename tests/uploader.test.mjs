@@ -75,6 +75,65 @@ test('materializeLazyImages replaces local asset and image proxy refs with data 
   assert.match(result.footerCopy, /src="data:image\/webp;base64,CgsM"/);
 });
 
+test('materializeLazyImages fetches lazy refs concurrently', async (t) => {
+  // 服务端剥离后的飞书 DOCX 可以带 10+ MB 正文图。串行取图会把「预览已出现」到
+  // 「复制产物真的有图」的窗口拉到数秒，用户在窗口内点复制就复制到缺图产物。
+  const originalFetch = globalThis.fetch;
+  let inFlight = 0;
+  let peakInFlight = 0;
+  const release = [];
+  globalThis.fetch = async () => {
+    inFlight++;
+    peakInFlight = Math.max(peakInFlight, inFlight);
+    await new Promise(resolve => release.push(resolve));
+    inFlight--;
+    return new Response(new Blob([new Uint8Array([7])], { type: 'image/png' }));
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const imgs = Array.from({ length: 8 }, (_, i) => `<img src="/api/doc-cache/hash/image${i}.png">`).join('');
+  const pending = materializeLazyImages(imgs, '');
+
+  // 让所有已发出的请求依次完成，同时观察峰值并发。
+  while (release.length) {
+    const resolve = release.shift();
+    resolve();
+    await new Promise(r => setTimeout(r, 0));
+  }
+  const result = await pending;
+
+  assert.equal(result.failed, 0);
+  assert.equal(result.total, 8);
+  assert.ok(peakInFlight > 1, `取图必须并发，实测峰值并发 ${peakInFlight}`);
+  assert.doesNotMatch(result.articleCopy, /\/api\/doc-cache\//);
+});
+
+test('materializeLazyImages reports failures in document order regardless of completion order', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const name = String(url);
+    // 后发的先失败：并发下完成顺序与文档顺序不一致，失败列表仍须稳定。
+    if (name.includes('image1.png')) {
+      await new Promise(r => setTimeout(r, 10));
+      throw new Error('boom');
+    }
+    if (name.includes('image3.png')) throw new Error('boom');
+    return new Response(new Blob([new Uint8Array([9])], { type: 'image/png' }));
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const imgs = Array.from({ length: 4 }, (_, i) => `<img src="/api/doc-cache/hash/image${i}.png">`).join('');
+  const result = await materializeLazyImages(imgs, '');
+
+  assert.deepEqual(result.failedSrcs, [
+    '/api/doc-cache/hash/image1.png',
+    '/api/doc-cache/hash/image3.png',
+  ]);
+  assert.equal(result.failed, 2);
+  assert.match(result.articleCopy, /image1\.png/, '失败的引用必须原样保留，供重试使用');
+  assert.doesNotMatch(result.articleCopy, /doc-cache\/hash\/image0\.png/, '成功的引用必须已被替换');
+});
+
 test('uploadNonCdnImages uses refreshed HTML after lazy image materialization', async (t) => {
   const originalFetch = globalThis.fetch;
   const uploads = [];

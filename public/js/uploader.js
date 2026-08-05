@@ -14,6 +14,13 @@ const WECHAT_IMAGE_HOSTS = new Set([
 // explicit asset uploads from the same editor session.
 const BASE64_UPLOAD_CONCURRENCY = 4;
 
+// Materializing lazy refs is a plain read: blob: comes from memory, /api/doc-cache/*
+// and /assets/* are static byte reads with no upstream call. Serial fetching used to
+// dominate the window between "preview is on screen" and "the copy artifact actually
+// holds pasteable images" — a server-stripped Feishu export can carry 10+ MB of body
+// images, and every one of them had to wait for the previous round trip.
+const MATERIALIZE_CONCURRENCY = 4;
+
 export function isMmbizUrl(url) {
   try {
     const u = new URL(String(url || ''));
@@ -117,24 +124,48 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
   while ((m = lazyRe.exec(allHtml)) !== null) {
     if (isMaterializableImageRef(m[2])) lazyUrls.add(m[2]);
   }
-  onProgress && onProgress(0, lazyUrls.size);
+  const pending = [...lazyUrls];
+  onProgress && onProgress(0, pending.length);
 
   let done = 0;
-  const failedSrcs = [];
-  for (const src of lazyUrls) {
-    try {
-      const dataUrl = await imageRefToDataUrl(src);
-      articleCopy = articleCopy.split(src).join(dataUrl);
-      footerCopy = footerCopy.split(src).join(dataUrl);
-    } catch (err) {
-      onLog && onLog('error', '图片转 base64 失败', { url: src.slice(0, 60), err: String(err) });
-      failedSrcs.push(src);
+  let next = 0;
+  const resolved = new Map();
+  const failed = new Set();
+
+  // Substitution stays outside the workers: each replacement rewrites the whole
+  // article string, so interleaving it with in-flight fetches would make the
+  // result depend on completion order. Fetch concurrently, splice once.
+  async function worker() {
+    while (next < pending.length) {
+      const src = pending[next++];
+      try {
+        resolved.set(src, await imageRefToDataUrl(src));
+      } catch (err) {
+        onLog && onLog('error', '图片转 base64 失败', { url: src.slice(0, 60), err: String(err) });
+        failed.add(src);
+      }
+      done++;
+      onProgress && onProgress(done, pending.length);
     }
-    done++;
-    onProgress && onProgress(done, lazyUrls.size);
   }
 
-  return { articleCopy, footerCopy, total: lazyUrls.size, failed: failedSrcs.length, failedSrcs };
+  await Promise.all(
+    Array.from({ length: Math.min(pending.length, MATERIALIZE_CONCURRENCY) }, () => worker()),
+  );
+
+  // Keep the original document order so failure reporting and retries stay stable.
+  const failedSrcs = [];
+  for (const src of pending) {
+    const dataUrl = resolved.get(src);
+    if (dataUrl === undefined) {
+      if (failed.has(src)) failedSrcs.push(src);
+      continue;
+    }
+    articleCopy = articleCopy.split(src).join(dataUrl);
+    footerCopy = footerCopy.split(src).join(dataUrl);
+  }
+
+  return { articleCopy, footerCopy, total: pending.length, failed: failedSrcs.length, failedSrcs };
 }
 
 // Upload base64 images from DOCX to OSS. External URLs are used directly.

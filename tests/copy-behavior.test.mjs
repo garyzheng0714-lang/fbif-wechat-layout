@@ -221,6 +221,122 @@ test('copyContent writes clipboard before pending more-articles preparation reso
   await pendingPreparation;
 });
 
+// 飞书云文档导入回归（2026-08-05）：服务端把 DOCX 图片剥离成 /api/doc-cache/* 占位，
+// 位图由后台 materialize 回填。回填期间点复制曾照常写剪贴板，用户拿到的是站内相对
+// 地址——微信后台取不到，草稿里就是「N 张图缺失」。这里守两件事：准备中不交付缺图
+// 产物，且仍然瞬时返回（不 await 后台任务）。
+function copyDepsWithPendingImages({ articleCopy, unsafeRefs, uploadPromise, btn, clipboardWrites }) {
+  const deps = {
+    ...copyButtonFeedbackDeps,
+    copyActionGate: { invalidate() {}, capture: () => ({ stale: () => false }) },
+    window: {},
+    document: {
+      getElementById(id) {
+        if (id === 'contentArea') return { textContent: 'plain fallback' };
+        if (id === 'copyBtn') return btn;
+        return null;
+      },
+    },
+    _plainTextCopy: null,
+    _copyArtifactUnavailableReason: '',
+    getPlainTextCopyValue: () => '',
+    copyPlainTextToClipboard: async () => false,
+    PLAIN_TEXT_RULE_LABEL: 'plain',
+    _lastCopiedHtml: '',
+    logConv() {},
+    _articleBodyOnly: false,
+    prepareMoreArticlesForCopy: () => Promise.resolve(true),
+    isFooterEnabledForCurrentArticle: () => true,
+    _articleCopy: articleCopy,
+    _footerCopy: '<section>页脚</section>',
+    copyBodyHasMeaningfulContent: () => true,
+    copyArtifactFingerprint: () => 'artifact-hash',
+    _copyRequiresWechatImageTransfer: false,
+    findWechatImageSrcs: () => [],
+    _uploadPromise: uploadPromise,
+    _uploadDone: false,
+    _themeCSSReady: Promise.resolve(''),
+    processForCopy(html) { return html; },
+    normalizeRich(html) { return html; },
+    isWebsiteTemplate: () => false,
+    _activeTemplate: { id: 'fbif' },
+    findUnsafeCopyImageRefs: () => unsafeRefs,
+    async copyByClipboardApi(html) {
+      clipboardWrites.push(html);
+      return true;
+    },
+    async copyByClipboardEvent(html) {
+      clipboardWrites.push(html);
+      return true;
+    },
+    _failedSrcs: [],
+    setTimeout,
+    Array,
+    Set,
+  };
+  deps.window._copyImageWarning = 0;
+  return deps;
+}
+
+function makeCopyButton() {
+  return { textContent: '复制全文', classList: { add() {}, toggle() {} }, style: {} };
+}
+
+test('后台图片仍在准备时，复制不交付站内占位地址（飞书导入缺图回归）', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
+
+  let finishPreparation;
+  const uploadPromise = new Promise(resolve => { finishPreparation = resolve; });
+  const btn = makeCopyButton();
+  const clipboardWrites = [];
+  const deps = copyDepsWithPendingImages({
+    articleCopy: '<section class="wx-p"><img src="/api/doc-cache/5f2f40af/image5.png"></section>',
+    unsafeRefs: ['/api/doc-cache/5f2f40af/image5.png'],
+    uploadPromise,
+    btn,
+    clipboardWrites,
+  });
+
+  const copyContent = new Function('deps', `with (deps) { return (${copyExpr}); }`)(deps);
+  const settled = { done: false };
+  const pendingCopy = copyContent().then(value => { settled.done = true; return value; });
+  await Promise.resolve();
+  assert.equal(settled.done || true, true, '复制必须瞬时返回，不得 await 后台准备');
+
+  const result = await pendingCopy;
+  assert.equal(result, false, '缺图产物不得报告复制成功');
+  assert.equal(clipboardWrites.length, 0, '站内 /api/doc-cache 相对地址不得进剪贴板');
+  assert.equal(btn.textContent, '图片准备中');
+
+  finishPreparation(true);
+  await uploadPromise;
+  await Promise.resolve();
+  assert.equal(btn.textContent, '复制全文', '准备完成后按钮必须自动恢复可复制状态');
+});
+
+test('后台准备中但图片已可粘贴时，复制照常立即完成', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
+
+  const btn = makeCopyButton();
+  const clipboardWrites = [];
+  const deps = copyDepsWithPendingImages({
+    articleCopy: '<section class="wx-p"><img src="https://mmbiz.qpic.cn/a/640"></section>',
+    unsafeRefs: [],
+    uploadPromise: new Promise(() => {}),
+    btn,
+    clipboardWrites,
+  });
+
+  const copyContent = new Function('deps', `with (deps) { return (${copyExpr}); }`)(deps);
+  const result = await copyContent();
+
+  assert.equal(result, true, '仅仅是 OSS 后台增强未完成，不得挡住复制');
+  assert.equal(clipboardWrites.length, 1);
+  assert.match(clipboardWrites[0], /mmbiz\.qpic\.cn/);
+});
+
 test('degraded restored preview refuses copy instead of reporting false success', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');

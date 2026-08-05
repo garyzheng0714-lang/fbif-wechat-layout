@@ -1976,6 +1976,27 @@ export function initApp(initialTemplate) {
       return false;
     }
 
+    // 服务端剥离图片的 DOCX（飞书云文档导入、.doc 转换）先用 /api/doc-cache/* 占位，
+    // 真正能粘进公众号的位图由后台 materialize 回填。回填期间点复制，写进剪贴板的是
+    // 站内相对地址——微信后台取不到，草稿里就是空图。后台还在跑时立刻挡回：按钮照旧
+    // 瞬时反馈（复制速度契约不变），只是不再交付一份注定缺图的剪贴板；准备完成后按钮
+    // 自动恢复，期间左栏状态条持续显示「准备图片 (x/y)」。
+    if (_uploadPromise && !_uploadDone) {
+      const preparingRefs = findUnsafeCopyImageRefs(html, _copyRequiresWechatImageTransfer);
+      if (preparingRefs.length > 0) {
+        logConv('warn', '图片仍在准备，已阻止复制缺图产物', {
+          count: preparingRefs.length,
+          first: preparingRefs[0].slice(0, 80),
+        });
+        const originalText = copyButtonLabel(btn);
+        setCopyButtonLabel(btn, '图片准备中');
+        setCopyButtonCopied(btn, false);
+        const restore = () => { if (!copyAction.stale()) setCopyButtonLabel(btn, originalText); };
+        _uploadPromise.then(restore, restore);
+        return false;
+      }
+    }
+
     // Inline CSS classes → style attributes for WeChat compatibility
     const config = (window._activeConfig && window._activeConfig.config) || {};
     const themeCSS = await _themeCSSReady;
@@ -2089,6 +2110,15 @@ export function initApp(initialTemplate) {
       showError(_uploadPromise && !_uploadDone
         ? '网站图片仍在转存，请稍后再复制 HTML。'
         : '仍有微信图床图片未转存，请先重试上传。');
+      return false;
+    }
+
+    // 与 copyContent 同一条红线：站内占位地址出了这个页面就取不到，
+    // HTML 源码同样不能在图片回填完成前交付。
+    if (_uploadPromise && !_uploadDone
+      && findUnsafeCopyImageRefs(sourceArtifact, _copyRequiresWechatImageTransfer).length > 0) {
+      _lastCopiedHtml = '';
+      showError('图片仍在准备，请等状态条显示准备完成后再复制 HTML。');
       return false;
     }
 
