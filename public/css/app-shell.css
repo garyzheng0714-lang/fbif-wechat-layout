@@ -911,31 +911,19 @@ body.is-resizing-rail .rail { transition: none; }
 .import-card .btn-sm:active { background: var(--fs-brand-active); }
 .btn-sm:disabled { opacity: .45; cursor: not-allowed; }
 
+/* 导入进度是导入卡内部的状态行，不是灰底工作区上的第二张白卡。
+   （2026-08-05 用户裁定）卡片已经提供白底、圆角与描边，这里只负责一条细
+   进度和一行「状态文案 + 百分比」；绝不再自带 background，否则会在灰底上
+   露出一块无圆角白块。 */
 .import-progress {
-  padding: 10px 0 0;
-  background: var(--fs-bg-card);
-}
-.progress-heading {
-  display: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 7px;
-  color: var(--fs-text-1);
-  font-size: 12px;
-  line-height: 1.4;
-}
-.import-progress[data-total-progress="true"] .progress-heading {
-  display: flex;
-}
-.progress-heading strong {
-  color: var(--fs-brand);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
+  /* 卡片本身没有 padding，卡内每一行自带 14px 水平内边距；进度行必须跟着，
+     否则会满卡宽、和输入框与动作按钮不对齐。上方间距由动作行的 padding-bottom
+     提供，这里只补底部呼吸空间。 */
+  padding: 0 14px 14px;
+  background: transparent;
 }
 .progress-bar {
-  height: 6px;
+  height: 3px;
   border-radius: var(--fs-r-full);
   background: var(--fs-bg-sunken);
   overflow: hidden;
@@ -957,11 +945,37 @@ body.is-resizing-rail .rail { transition: none; }
   from { transform: translateX(-120%); }
   to { transform: translateX(300%); }
 }
+.progress-status {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--fs-s-md);
+  margin-top: 6px;
+}
 .progress-text {
-  margin-top: 7px;
+  /* 状态文案单行：异常长的文案换行会把右侧百分比挤进文字中间，读起来像
+     「…检验换61%」。截断保证百分比始终占住右端的独立位置。 */
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: 12px;
-  line-height: 1.5;
+  font-weight: 500;
+  line-height: 1.45;
   color: var(--fs-text-2);
+}
+.progress-percent {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--fs-text-1);
+  /* 等宽数字：百分比逐帧变化时不让左侧文案被推着抖动。 */
+  font-variant-numeric: tabular-nums;
+}
+/* 分母未知的阶段（不确定进度）不展示会误导的百分比。 */
+.import-progress.is-indeterminate .progress-percent {
+  visibility: hidden;
 }
 @media (prefers-reduced-motion: reduce) {
   .progress-fill {
