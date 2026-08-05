@@ -83,6 +83,9 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 30. **FBIF 公众号监控是 P0 上线红线（2026-07-17）** — 任意改动必须通过无 paths 过滤的 `.github/workflows/p0-monitoring-contract.yml`，失败不得合并或部署。生产独立 systemd 看门狗每两分钟外检 layout/feed/official，连续两次异常告警、恢复通知、09:20 心跳；监控 fail closed 覆盖同步缺口、45 分钟未到审核态、通知/卡片错误、重复 `source_key`、轮询陈旧和队列积压。禁止删测、skip、降级或忽略故障来“修绿”。
 
+31. **飞书云文档导入必须走异步作业 + 服务端批量镜像（2026-08-05 恢复上线）** — 交互式导入只走 `POST /api/feishu/docs/export/jobs` 加 long-poll `?after=<version>&wait_ms=`，服务端逐阶段上报真实 `done/total`（resolve→create→export_wait→download→optimize→image_enumerate→image_upload→image_map）；正文图必须在服务端一次 `base64_images` 批量镜像到 OSS，不得让浏览器逐张回源 `/api/doc-cache/*`。导出轮询 `250ms` 加递增退避，不得改回固定 `1s`。预览走 `preview-image-loader` 预解码加 `preview-dom` 离屏 staging 整帧提交，导入期间旧文章保持可见。**禁止**退回同步导出端点，或删除 `api/feishu_export_jobs.go`、`api/doc_image_mirror.go`、`public/js/preview-dom.js`、`public/js/preview-image-loader.js`、`public/js/feishu-doc-ready.js`、`public/js/import-progress.js`。
+   **处理 merge 冲突不得整树取一侧**（如「树以本分支为准」），必须逐文件裁决，合并后核对 `git diff --diff-filter=D <父> <merge>` 无意外删除——上面这套体系连同守护测试就是被 `32e8dcd` 这样整树删掉的，测试一起消失所以 CI 不红。守护：`tests/e2e-preview-speed.spec.mjs`、`tests/e2e-feishu-import-progress.spec.mjs`、`api/feishu_export_jobs_test.go`、`tests/preview-dom.test.mjs`、`tests/preview-image-loader.test.mjs`、`tests/feishu-doc-ready.test.mjs`、`tests/import-progress.test.mjs`。
+
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
