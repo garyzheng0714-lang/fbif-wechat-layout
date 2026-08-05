@@ -1914,6 +1914,14 @@ export function initApp(initialTemplate) {
     btn.classList.toggle('copied', !!copied);
     const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
     if (group) group.classList.toggle('is-copied', !!copied);
+    if (!copied) setCopyButtonWarning(btn, false);
+  }
+
+  function setCopyButtonWarning(btn, warning) {
+    if (!btn) return;
+    btn.classList.toggle('is-warning', !!warning);
+    const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
+    if (group) group.classList.toggle('is-warning', !!warning);
   }
 
   function copyArtifactFingerprint(html) {
@@ -2097,8 +2105,8 @@ export function initApp(initialTemplate) {
     setCopyButtonLabel(btn, ok ? '\u2713 已复制' : '复制失败');
     if (ok && failedImgCount) setCopyButtonLabel(btn, '已复制·' + failedImgCount + '张图缺失');
     setCopyButtonCopied(btn, ok);
-    // 按钮底色：有图缺失→橙色警告；正常/失败态清空 inline，回归默认（.copied 绿 / .tb-primary 蓝）。
-    btn.style.background = failedImgCount ? 'var(--fs-warning)' : '';
+    setCopyButtonWarning(btn, ok && failedImgCount > 0);
+    btn.style.background = '';
     return ok;
   };
 

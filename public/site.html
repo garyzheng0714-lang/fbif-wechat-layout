@@ -28,7 +28,7 @@
   <div class="tb-actions preview-toolbar" id="previewToolbar">
     <button class="tb-retry" id="retryBtn" type="button" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
     <div class="copy-split" id="copySplit">
-      <button class="btn btn-primary tb-primary copy-split-primary" id="copyBtn" type="button" onclick="copyContent()">
+      <button class="btn btn-primary tb-primary copy-split-primary" id="copyBtn" type="button" aria-label="复制全文" onclick="copyContent()">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         <span data-copy-label>复制全文</span>
       </button>
@@ -286,7 +286,7 @@
         <div class="phone-frame" id="phoneFrame">
           <div id="contentArea"></div>
         </div>
-        <div class="copy-success" id="copySuccess">已复制到剪贴板</div>
+        <div class="copy-success" id="copySuccess" role="status" aria-live="polite" aria-atomic="true">已复制到剪贴板</div>
       </div>
 
       <!-- WeChat footer -->

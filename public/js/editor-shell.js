@@ -481,8 +481,12 @@ export function wrapCopyFeedback({
     if (btn) {
       setButtonLabel(btn, resetText);
       btn.classList.remove('copied');
+      btn.classList.remove('is-warning');
       const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
-      if (group) group.classList.remove('is-copied');
+      if (group) {
+        group.classList.remove('is-copied');
+        group.classList.remove('is-warning');
+      }
     }
     const hint = documentRef.getElementById(hintID);
     if (hint) hint.style.display = 'none';

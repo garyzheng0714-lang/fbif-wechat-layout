@@ -29,19 +29,26 @@
 
 /* 网站复制分体按钮：主操作保持“复制全文”，低频源码复制收进独立菜单。 */
 .copy-split {
+  --copy-split-control-size: 36px;
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
   align-items: stretch;
+  height: var(--copy-split-control-size);
 }
 
-.copy-split .copy-split-primary {
+.global-channel-bar .copy-split > .copy-split-primary {
+  height: 100%;
   border-radius: var(--fs-r-s) 0 0 var(--fs-r-s);
+}
+
+.global-channel-bar .copy-split > .copy-split-primary:active {
+  transform: none;
 }
 
 .copy-split-toggle {
   width: 36px;
-  height: 36px;
+  height: 100%;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -64,8 +71,19 @@
   background: var(--fs-success);
 }
 
+.copy-split.is-warning .copy-split-toggle {
+  background: var(--fs-warning);
+}
+
 .copy-split-toggle:active {
   background: var(--fs-brand-active);
+}
+
+.copy-split .copy-split-toggle:disabled {
+  background: var(--fs-bg-sunken);
+  border-left-color: var(--fs-border-control);
+  color: var(--fs-text-disabled);
+  cursor: not-allowed;
 }
 
 .copy-split-toggle:focus-visible,
@@ -115,8 +133,9 @@
 }
 
 .copy-split-menu-item:disabled {
+  background: transparent;
   color: var(--fs-text-disabled);
-  cursor: wait;
+  cursor: not-allowed;
 }
 
 .copy-split-menu-meta {
@@ -126,14 +145,7 @@
 }
 
 @media (pointer: coarse) {
-  .copy-split-toggle,
-  .copy-split-menu-item {
-    min-height: 44px;
-  }
-  .copy-split-toggle {
-    width: 44px;
-    height: 44px;
-  }
+  .copy-split-menu-item { min-height: 44px; }
 }
 
 /* 账号菜单展开：CSS-only 入场（不动 account-menu.js，红线#2 单层菜单不变） */
@@ -195,6 +207,12 @@
 .btn-primary:hover { background: var(--fs-brand-hover); }
 .btn-primary:active { background: var(--fs-brand-active); }
 .btn-primary.is-copied { background: var(--fs-success); }
+.btn-primary.is-warning { background: var(--fs-warning); }
+.btn-primary:disabled {
+  background: var(--fs-bg-sunken);
+  color: var(--fs-text-disabled);
+  cursor: not-allowed;
+}
 .btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand); }
 
 /* ============================================================
@@ -1249,6 +1267,8 @@ body.article-text-preview .phone-frame {
   .version-update-message { display: none; }
 }
 @media (max-width: 820px), (pointer: coarse) {
+  .copy-split { --copy-split-control-size: 44px; }
+  .copy-split-toggle { width: 44px; }
   .global-channel-bar .btn,
   .import-account-target .acct-trigger,
   .rail-foot .user-identity-trigger,

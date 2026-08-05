@@ -20,6 +20,12 @@ const copyButtonFeedbackDeps = {
     const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
     if (group) group.classList.toggle('is-copied', !!copied);
   },
+  setCopyButtonWarning(btn, warning) {
+    if (!btn) return;
+    btn.classList.toggle('is-warning', !!warning);
+    const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
+    if (group) group.classList.toggle('is-warning', !!warning);
+  },
 };
 import { copyCompositeCacheKey, copySafeMoreArticleCard, mergeIntoFooter } from '../public/js/more-articles.js';
 import { normalizeWechatRichHtml } from '../public/js/wechat-normalize.js';
@@ -675,6 +681,8 @@ test('copy warning is derived from final HTML unsafe image src and imgurl refs',
   assert.match(engine, /src\|imgurl/);
   assert.match(copyFn, /const unsafeCopyRefs = findUnsafeCopyImageRefs\(html, _copyRequiresWechatImageTransfer\)/);
   assert.match(copyFn, /const failedImgCount = ok\s*\? unsafeCopyRefs\.length\s*:\s*0/);
+  assert.match(copyFn, /setCopyButtonWarning\(btn, ok && failedImgCount > 0\)/);
+  assert.doesNotMatch(copyFn, /btn\.style\.background = failedImgCount/);
   assert.doesNotMatch(
     copyFn,
     /new Set\(\[ \.\.\.\(_failedSrcs \|\| \[\]\), \.\.\.unsafeCopyRefs \]\)/,

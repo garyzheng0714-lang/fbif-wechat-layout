@@ -109,14 +109,18 @@ export function mountCopySplitButton({
     event.preventDefault();
     event.stopPropagation();
     if (htmlButton.disabled || typeof windowRef.copyHTMLSource !== 'function') return;
+    htmlButton.dataset.copyPending = 'true';
     htmlButton.disabled = true;
+    htmlButton.setAttribute('aria-busy', 'true');
     try {
       const ok = await windowRef.copyHTMLSource();
       showHTMLCopyFeedback(ok !== false);
     } catch {
       showHTMLCopyFeedback(false);
     } finally {
-      htmlButton.disabled = false;
+      delete htmlButton.dataset.copyPending;
+      htmlButton.removeAttribute('aria-busy');
+      if (htmlButton.dataset.ruleBlocked !== 'true') htmlButton.disabled = false;
       closeMenu({ restoreFocus: true });
     }
   });

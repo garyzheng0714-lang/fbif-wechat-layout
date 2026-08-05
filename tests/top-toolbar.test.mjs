@@ -24,6 +24,8 @@ function assertToolbarInGlobalHeader(html, label) {
   assert.ok(headerEnd < appLayoutStart, `${label} header should sit above the app layout`);
   assert.match(header, /id="previewToolbar"/, `${label} toolbar should live in the global top bar`);
   assert.match(header, /id="copyBtn"/, `${label} copy button should live in the top bar`);
+  assert.match(header, /id="copyBtn"[^>]*aria-label="复制全文"/, `${label} icon-only responsive copy button should keep an accessible name`);
+  assert.match(html, /id="copySuccess"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/, `${label} copy result should be announced to assistive technology`);
   assert.doesNotMatch(previewPanelTop, /id="previewToolbar"/, `${label} toolbar must not sit inside the article preview panel`);
 }
 
@@ -65,6 +67,8 @@ test('app global header keeps only page actions while the rail owns target and i
   assert.match(html, /class="import-destination-label">排版到</, 'publishing selector should explain the destination relationship');
   assert.match(header, /id="previewToolbar"/, 'app.html copy toolbar should live in the global top bar');
   assert.match(header, /id="copyBtn"/, 'app.html copy button should be a global top-right action');
+  assert.match(header, /id="copyBtn"[^>]*aria-label="复制全文"/, 'app.html icon-only responsive copy button should keep an accessible name');
+  assert.match(html, /id="copySuccess"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/, 'app.html copy result should be announced to assistive technology');
   assert.match(header, /class="topbar-spacer"[\s\S]*id="previewToolbar"[\s\S]*id="copyBtn"/, 'app.html top bar should right-align the remaining page action');
   assert.doesNotMatch(header, /id="adminLockBtn"|topbar-settings-btn/, 'app.html settings should not be a persistent top-bar icon');
   assert.doesNotMatch(html, /settingsAction|acct-settings-item/, 'app.html should not put settings in the publishing account menu');
