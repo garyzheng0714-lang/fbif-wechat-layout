@@ -24,6 +24,23 @@ export function uniqueClientRuleID(name, doc) {
   return base + '-' + suffix;
 }
 
+// ID 会自动去重，显示名却曾原样沿用：复制「FBIF默认规则」后下拉里并排两条一模一样
+// 的名字，只能靠「· 正在使用」后缀猜哪条是哪条。名称按同样的语义去重。
+export function uniqueClientRuleName(name, doc) {
+  const raw = String(name || '').trim() || '新规则';
+  const used = new Set(
+    ruleListFromDoc(doc).map(rule => String((rule && rule.name) || '').trim()).filter(Boolean),
+  );
+  if (!used.has(raw)) return raw;
+  // 复制一份「X 副本」时先还原出「X」再递增，否则会叠成「X 副本 副本」。
+  const base = raw.replace(/\s*副本(?:\s+\d+)?$/, '').trim() || raw;
+  const copy = base + ' 副本';
+  if (!used.has(copy)) return copy;
+  let suffix = 2;
+  while (used.has(copy + ' ' + suffix)) suffix++;
+  return copy + ' ' + suffix;
+}
+
 export async function applyPersistedRuleConfig(applyConfig, config, preset, meta = {}) {
   try {
     const applied = await Promise.resolve(applyConfig(config, preset, meta));

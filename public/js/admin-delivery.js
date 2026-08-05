@@ -12,125 +12,287 @@ function esc(value) {
     .replace(/"/g, '&quot;');
 }
 
-async function responseError(response, fallback) {
-  const payload = await response.json().catch(() => ({}));
-  if (response.status === 401) return '后台需要先完成飞书登录';
-  if (response.status === 403) return payload.error || '当前登录账号没有读取飞书群列表的权限';
-  return payload.error || `${fallback}（HTTP ${response.status}）`;
+function issue(kind, title, message) {
+  return { kind, title, message };
 }
 
-export function createAdminDeliveryController({ getOverlay, rerender, onMessage } = {}) {
+function isDeliveryIssue(value) {
+  return !!(value && typeof value === 'object' && value.kind && value.title && value.message);
+}
+
+export function deliveryFailureIssue(error, fallback = '读取发布链路失败') {
+  if (isDeliveryIssue(error)) return error;
+  const detail = String(error?.message || error || '').trim();
+  if (error instanceof TypeError || /failed to fetch|networkerror|load failed|fetch failed/i.test(detail)) {
+    return issue(
+      'network',
+      '无法连接发布服务',
+      '请确认本地预览或服务器仍在运行，然后重新读取。现有发布配置没有被改动。',
+    );
+  }
+  return issue('server', fallback, detail || '服务暂时没有返回结果，请稍后重新读取。');
+}
+
+export async function deliveryResponseIssue(response, fallback) {
+  const payload = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    return issue('auth', '登录状态已失效', '请重新登录后再配置发布链路。');
+  }
+  if (response.status === 403 && fallback.includes('群列表')) {
+    return issue(
+      'feishu-login',
+      '需要使用飞书账号登录',
+      '当前账号不能读取飞书群列表。请使用飞书账号登录后读取可加入的审核群；关闭后台，在左栏退出后即可切换登录方式。',
+    );
+  }
+  if (response.status === 403) {
+    return issue('permission', '当前账号没有配置权限', payload.error || '请联系超级管理员调整权限。');
+  }
+  return issue('server', fallback, payload.error || `服务返回 HTTP ${response.status}，请稍后重新读取。`);
+}
+
+function normalizeSettings(value) {
+  const chatIDs = Array.isArray(value?.chat_ids) ? value.chat_ids : [];
+  return {
+    app_profile_id: String(value?.app_profile_id || '').trim(),
+    chat_ids: [...new Set(chatIDs.map(id => String(id || '').trim()).filter(Boolean))],
+  };
+}
+
+function sameSettings(left, right) {
+  const a = normalizeSettings(left);
+  const b = normalizeSettings(right);
+  return a.app_profile_id === b.app_profile_id
+    && a.chat_ids.length === b.chat_ids.length
+    && a.chat_ids.every(id => b.chat_ids.includes(id));
+}
+
+function renderIssue(problem, { retry = true } = {}) {
+  if (!problem) return '';
+  return `<div class="admin-delivery-issue" role="alert" data-delivery-issue="${esc(problem.kind)}">
+    <div class="admin-delivery-issue-copy">
+      <strong>${esc(problem.title)}</strong>
+      <p>${esc(problem.message)}</p>
+    </div>
+    ${retry ? '<button type="button" class="admin-secondary admin-delivery-retry" data-delivery-action="refresh">重新读取</button>' : ''}
+  </div>`;
+}
+
+export function createAdminDeliveryController({ getOverlay, rerender, onMessage, request = authFetch } = {}) {
   let generation = 0;
   let attempted = false;
   let loading = false;
   let saving = false;
-  let error = '';
+  let settingsIssue = null;
+  let chatsIssue = null;
+  let saveIssue = null;
+  let notice = '';
   let apps = [];
   let chats = [];
-  let settings = { app_profile_id: '', chat_ids: [] };
+  let settings = normalizeSettings();
+  let savedSettings = normalizeSettings();
 
   function reset() {
     generation += 1;
     attempted = false;
     loading = false;
     saving = false;
-    error = '';
+    settingsIssue = null;
+    chatsIssue = null;
+    saveIssue = null;
+    notice = '';
     apps = [];
     chats = [];
-    settings = { app_profile_id: '', chat_ids: [] };
+    settings = normalizeSettings();
+    savedSettings = normalizeSettings();
   }
 
-  function render() {
-    const selected = new Set(Array.isArray(settings.chat_ids) ? settings.chat_ids : []);
-    const appOptions = apps.length
-      ? apps.map(app => `<option value="${esc(app.id)}" ${app.id === settings.app_profile_id ? 'selected' : ''}>${esc(app.name || app.id)}</option>`).join('')
-      : '<option value="">暂无可用推送应用</option>';
-    let chatHTML = '';
-    if (loading && !chats.length) {
-      chatHTML = '<div class="admin-delivery-empty">正在读取当前账号加入的群…</div>';
-    } else if (!chats.length) {
-      chatHTML = '<div class="admin-delivery-empty">当前账号没有可选择的群，或飞书群列表权限尚未开通。</div>';
+  function selectedVisibleChatIDs() {
+    const available = new Set(chats.map(chat => String(chat.chat_id || '').trim()).filter(Boolean));
+    return settings.chat_ids.filter(id => available.has(id));
+  }
+
+  function footerState() {
+    const appAvailable = apps.some(app => String(app.id || '').trim() === settings.app_profile_id);
+    const selectedChats = selectedVisibleChatIDs();
+    const dirty = !sameSettings(settings, savedSettings);
+    let message = notice;
+    if (saving) message = '正在保存发布链路…';
+    else if (loading) message = chats.length || apps.length ? '正在更新发布链路…' : '正在读取发布链路…';
+    else if (settingsIssue?.kind === 'network' && chatsIssue?.kind === 'network') message = '发布服务不可达；恢复服务后重新读取';
+    else if (settingsIssue) message = '推送应用读取失败，暂不能保存';
+    else if (chatsIssue) message = '审核群读取失败，暂不能保存';
+    else if (!apps.length) message = '需要先在服务器配置推送应用';
+    else if (!chats.length) message = '当前没有可选择的审核群';
+    else if (!appAvailable) message = '请选择推送应用';
+    else if (!selectedChats.length) message = '至少选择一个审核群';
+    else if (saveIssue) message = saveIssue.title;
+    else if (dirty) message = '有未保存的发布链路更改';
+    else message = message || '当前发布链路已保存';
+    return {
+      dirty,
+      disabled: loading || saving || !!settingsIssue || !!chatsIssue || !appAvailable || !selectedChats.length || !dirty,
+      label: saving ? '保存中…' : '保存发布链路',
+      message,
+    };
+  }
+
+  function renderAppStep(globalNetworkIssue) {
+    let content = '';
+    if (globalNetworkIssue) {
+      content = '<div class="admin-delivery-empty"><strong>等待发布服务恢复</strong><p>连接恢复并重新读取后，这里会显示可用的推送应用。</p></div>';
+    } else if (loading && !apps.length) {
+      content = '<div class="admin-delivery-empty" role="status"><strong>正在读取应用配置…</strong><p>读取完成后会显示可用于发送审核卡的应用。</p></div>';
+    } else if (settingsIssue && !globalNetworkIssue) {
+      content = renderIssue(settingsIssue);
+    } else if (!apps.length) {
+      content = '<div class="admin-delivery-empty"><strong>尚未配置推送应用</strong><p>请先在服务器配置至少一个推送应用，完成后重新读取。</p></div>';
     } else {
-      chatHTML = chats.map(chat => {
+      const hasSelectedApp = apps.some(app => String(app.id || '').trim() === settings.app_profile_id);
+      const options = `${hasSelectedApp ? '' : '<option value="" selected>请选择推送应用</option>'}${apps.map(app => {
+        const id = String(app.id || '').trim();
+        return `<option value="${esc(id)}" ${id === settings.app_profile_id ? 'selected' : ''}>${esc(app.name || id)}</option>`;
+      }).join('')}`;
+      content = `<label class="admin-delivery-control">
+        <span>选择应用</span>
+        <select data-delivery-app ${loading || saving || settingsIssue ? 'disabled' : ''}>${options}</select>
+      </label>`;
+    }
+    return `<li class="admin-delivery-step">
+      <span class="admin-delivery-step-index" aria-hidden="true">1</span>
+      <div class="admin-delivery-step-content">
+        <div class="admin-delivery-step-heading">
+          <div><h4>推送应用</h4><p>选择负责发送审核卡的飞书应用；应用凭证只保存在服务器。</p></div>
+        </div>
+        ${content}
+      </div>
+    </li>`;
+  }
+
+  function renderChatStep(globalNetworkIssue) {
+    const selected = new Set(settings.chat_ids);
+    let content = '';
+    if (globalNetworkIssue) {
+      content = '<div class="admin-delivery-empty"><strong>等待发布服务恢复</strong><p>连接恢复并重新读取后，这里会显示当前飞书账号可加入的群。</p></div>';
+    } else if (loading && !chats.length) {
+      content = '<div class="admin-delivery-empty" role="status"><strong>正在读取审核群…</strong><p>只会列出当前飞书账号可以访问的群。</p></div>';
+    } else if (chatsIssue) {
+      content = renderIssue(chatsIssue);
+    } else if (!chats.length) {
+      content = '<div class="admin-delivery-empty"><strong>没有可选择的审核群</strong><p>请确认当前飞书账号已加入目标群，并已授予群列表读取权限。</p></div>';
+    } else {
+      const rows = chats.map(chat => {
         const id = String(chat.chat_id || '').trim();
         const name = String(chat.name || id || '未命名群').trim();
         return `<label class="admin-delivery-chat">
-          <input type="checkbox" data-delivery-chat="${esc(id)}" ${selected.has(id) ? 'checked' : ''}>
+          <input type="checkbox" data-delivery-chat="${esc(id)}" ${selected.has(id) ? 'checked' : ''} ${loading || saving ? 'disabled' : ''}>
           <span class="admin-delivery-chat-copy"><span>${esc(name)}</span>${chat.external ? '<small>外部群</small>' : ''}</span>
         </label>`;
       }).join('');
+      content = `<fieldset class="admin-delivery-chat-list"><legend class="admin-sr-only">审核群（可多选）</legend>${rows}</fieldset>`;
     }
-    return `<section class="admin-delivery-view">
-      <div class="admin-delivery-heading">
-        <div><h3>发布链路</h3><p class="admin-panel-note">审核卡会由所选应用推送到所选群。每篇已生成任务会继续使用创建时的目标。</p></div>
-        <button type="button" class="admin-secondary admin-delivery-refresh" data-delivery-action="refresh" ${loading || saving ? 'disabled' : ''}>${loading ? '读取中…' : '刷新群列表'}</button>
+    const refresh = attempted && !loading && !settingsIssue && !chatsIssue
+      ? '<button type="button" class="admin-secondary admin-delivery-refresh" data-delivery-action="refresh">更新群列表</button>'
+      : '';
+    return `<li class="admin-delivery-step">
+      <span class="admin-delivery-step-index" aria-hidden="true">2</span>
+      <div class="admin-delivery-step-content">
+        <div class="admin-delivery-step-heading">
+          <div><h4>审核群</h4><p>可多选；新任务生成的审核卡会同时发送到这些群。</p></div>
+          ${refresh}
+        </div>
+        ${content}
       </div>
-      <div class="admin-delivery-section">
-        <label class="admin-field admin-delivery-app-field"><span>推送应用</span><select data-delivery-app ${saving ? 'disabled' : ''}>${appOptions}</select></label>
-        <div class="admin-delivery-section-title"><span>审核群</span><small>可多选</small></div>
-        <div class="admin-delivery-chat-list">${chatHTML}</div>
+    </li>`;
+  }
+
+  function render() {
+    const globalNetworkIssue = settingsIssue?.kind === 'network' && chatsIssue?.kind === 'network'
+      ? settingsIssue
+      : null;
+    return `<section class="admin-delivery-view" aria-labelledby="admin-delivery-title">
+      <div class="admin-section-heading admin-delivery-heading">
+        <h3 id="admin-delivery-title">发布链路</h3>
+        <p class="admin-panel-note">配置新任务的审核卡发送目标。已经生成的任务仍使用创建时保存的应用和群，不会被这里的修改覆盖。</p>
       </div>
-      ${error ? `<div class="admin-delivery-error" role="alert">${esc(error)}</div>` : ''}
-      <div class="admin-delivery-actions"><button type="button" class="admin-primary" data-delivery-action="save" ${saving || loading || !apps.length || !chats.length ? 'disabled' : ''}>${saving ? '保存中…' : '保存发布链路'}</button></div>
+      ${globalNetworkIssue ? renderIssue(globalNetworkIssue) : ''}
+      <ol class="admin-delivery-steps">
+        ${renderAppStep(globalNetworkIssue)}
+        ${renderChatStep(globalNetworkIssue)}
+      </ol>
+      ${saveIssue ? renderIssue(saveIssue, { retry: false }) : ''}
     </section>`;
   }
 
-  async function load() {
-    if (loading) return;
-    const token = ++generation;
-    attempted = true;
-    loading = true;
-    error = '';
-    rerender?.();
+  async function readEndpoint(path, fallback) {
     try {
-      const [settingsResponse, chatsResponse] = await Promise.all([
-        authFetch('/api/publish/delivery-settings', { cache: 'no-store' }),
-        authFetch('/api/feishu/chats', { cache: 'no-store' }),
-      ]);
-      if (token !== generation) return;
-      if (!settingsResponse.ok) throw new Error(await responseError(settingsResponse, '读取发布链路失败'));
-      if (!chatsResponse.ok) throw new Error(await responseError(chatsResponse, '读取飞书群列表失败'));
-      const delivery = await settingsResponse.json();
-      const chatPayload = await chatsResponse.json();
-      apps = Array.isArray(delivery.apps) ? delivery.apps : [];
-      settings = delivery.settings || { app_profile_id: '', chat_ids: [] };
-      chats = Array.isArray(chatPayload.chats) ? chatPayload.chats : [];
-    } catch (loadError) {
-      if (token !== generation) return;
-      error = loadError?.message || '读取发布链路失败';
-    } finally {
-      if (token !== generation) return;
-      loading = false;
-      rerender?.();
+      const response = await request(path, { cache: 'no-store' });
+      if (!response.ok) throw await deliveryResponseIssue(response, fallback);
+      return await response.json();
+    } catch (error) {
+      throw deliveryFailureIssue(error, fallback);
     }
   }
 
+  async function load() {
+    if (loading || saving) return;
+    const token = ++generation;
+    attempted = true;
+    loading = true;
+    settingsIssue = null;
+    chatsIssue = null;
+    saveIssue = null;
+    notice = '';
+    rerender?.();
+    const [deliveryResult, chatsResult] = await Promise.allSettled([
+      readEndpoint('/api/publish/delivery-settings', '读取推送应用失败'),
+      readEndpoint('/api/feishu/chats', '读取飞书群列表失败'),
+    ]);
+    if (token !== generation) return;
+    if (deliveryResult.status === 'fulfilled') {
+      const delivery = deliveryResult.value || {};
+      apps = Array.isArray(delivery.apps) ? delivery.apps : [];
+      settings = normalizeSettings(delivery.settings);
+      savedSettings = normalizeSettings(delivery.settings);
+    } else {
+      settingsIssue = deliveryFailureIssue(deliveryResult.reason, '读取推送应用失败');
+    }
+    if (chatsResult.status === 'fulfilled') {
+      const chatPayload = chatsResult.value || {};
+      chats = Array.isArray(chatPayload.chats) ? chatPayload.chats : [];
+    } else {
+      chatsIssue = deliveryFailureIssue(chatsResult.reason, '读取飞书群列表失败');
+    }
+    loading = false;
+    rerender?.();
+  }
+
   async function save() {
-    if (saving || loading) return;
-    const overlay = getOverlay?.();
-    if (!overlay) return;
-    const appID = overlay.querySelector('[data-delivery-app]')?.value || '';
-    const chatIDs = [...overlay.querySelectorAll('[data-delivery-chat]:checked')].map(input => input.dataset.deliveryChat).filter(Boolean);
+    const state = footerState();
+    if (state.disabled) return;
     const token = ++generation;
     saving = true;
-    error = '';
+    saveIssue = null;
+    notice = '';
     onMessage?.('正在保存发布链路…');
     rerender?.();
     try {
-      const response = await authFetch('/api/publish/delivery-settings', {
+      const response = await request('/api/publish/delivery-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ app_profile_id: appID, chat_ids: chatIDs }),
+        body: JSON.stringify(settings),
       });
       if (token !== generation) return;
-      if (!response.ok) throw new Error(await responseError(response, '保存发布链路失败'));
+      if (!response.ok) throw await deliveryResponseIssue(response, '保存发布链路失败');
       const payload = await response.json();
-      settings = payload.settings || { app_profile_id: appID, chat_ids: chatIDs };
-      onMessage?.('发布链路已保存；新任务将按当前应用和群发送');
-    } catch (saveError) {
+      settings = normalizeSettings(payload.settings || settings);
+      savedSettings = normalizeSettings(settings);
+      notice = '发布链路已保存；新任务会使用当前应用和审核群';
+      onMessage?.(notice);
+    } catch (error) {
       if (token !== generation) return;
-      error = saveError?.message || '保存发布链路失败';
-      onMessage?.(error);
+      saveIssue = deliveryFailureIssue(error, '保存发布链路失败');
+      onMessage?.(saveIssue.title);
     } finally {
       if (token !== generation) return;
       saving = false;
@@ -141,10 +303,25 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage 
   function bind() {
     const overlay = getOverlay?.();
     if (!overlay) return;
-    overlay.querySelector('[data-delivery-action="refresh"]')?.addEventListener('click', load);
+    overlay.querySelectorAll('[data-delivery-action="refresh"]').forEach(button => button.addEventListener('click', load));
     overlay.querySelector('[data-delivery-action="save"]')?.addEventListener('click', save);
+    overlay.querySelector('[data-delivery-app]')?.addEventListener('change', event => {
+      settings = normalizeSettings({ ...settings, app_profile_id: event.target.value });
+      notice = '';
+      saveIssue = null;
+      rerender?.();
+    });
+    overlay.querySelectorAll('[data-delivery-chat]').forEach(input => input.addEventListener('change', () => {
+      const selected = [...overlay.querySelectorAll('[data-delivery-chat]:checked')]
+        .map(item => item.dataset.deliveryChat)
+        .filter(Boolean);
+      settings = normalizeSettings({ ...settings, chat_ids: selected });
+      notice = '';
+      saveIssue = null;
+      rerender?.();
+    }));
     if (!attempted) load();
   }
 
-  return { render, bind, reset };
+  return { render, bind, reset, footerState };
 }

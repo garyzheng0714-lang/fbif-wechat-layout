@@ -133,6 +133,7 @@ test('规则后台完整状态机：按当前账号加载/保存系列私有模�
         /\u5df2\u4fdd\u5b58\u5e76\u5e94\u7528/.test(overlay.querySelector('.admin-foot .admin-status')?.textContent || ''),
       '保存新规则后未完成回读与应用',
     );
+    assert.equal(overlay.querySelector('[data-role="dirty-chip"]')?.textContent, '已保存', '保存回读后不应残留假未保存状态');
     overlay.querySelector('.admin-close').click();
     assert.ok(!document.body.classList.contains('admin-panel-open'), '关闭后恢复页面滚动');
     assert.ok(!opener.hasAttribute('inert'), '关闭后恢复页面交互');
@@ -185,7 +186,7 @@ test('待迁移规则后台只允许显式确认基线，不允许编辑后直�
 
     assert.ok(overlay.querySelector('[data-role="migration-baseline"]'));
     assert.equal(overlay.querySelector('[data-rule-key]'), null, '确认前不渲染可编辑参数表单');
-    assert.ok(overlay.querySelector('[data-action="set-active"]').disabled);
+    assert.equal(overlay.querySelector('[data-action="set-active"]'), null, '迁移规则不应提供提前应用入口');
     overlay.querySelector('[data-action="save"]').click();
     await waitFor(() => /请先选择/.test(overlay.querySelector('.admin-status')?.textContent || ''));
     await new Promise(resolve => setTimeout(resolve, 0));

@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { serverRuleConfigDocument } from '../public/js/admin-rule-payload.js';
 import { syncRuleVisualEditor } from '../public/js/admin-rule-visual-sync.js';
+import {
+  createAdminDeliveryController,
+  deliveryFailureIssue,
+  deliveryResponseIssue,
+} from '../public/js/admin-delivery.js';
 
 async function readProjectFile(path) {
   return readFile(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -17,9 +22,9 @@ test('规则后台：参数为可视化表单(无 JSON 代码框)，规则控件
   assert.doesNotMatch(adminPanel, /<textarea data-role="rule-json"/);
   // 规则控件保留
   assert.match(adminPanel, /data-action="new"/);
-  assert.match(adminPanel, /应用到当前公众号/);
-  assert.match(adminPanel, /复制为新规则/);
-  assert.match(adminPanel, /保存修改/);
+  assert.match(adminPanel, /应用这条规则/);
+  assert.match(adminPanel, /复制当前规则/);
+  assert.match(adminPanel, /保存并应用/);
   assert.match(adminPanel, /closest\('#adminLockBtn'\)/, '规则后台入口应使用事件委托，账号菜单重绘后仍可打开');
   assert.doesNotMatch(adminPanel, />设为当前规则</);
   assert.match(adminPanel, /createMoreArticlesRuleEditor/);
@@ -119,19 +124,59 @@ test('rule admin has configuration and rule-management views', async () => {
   assert.match(adminPanel, /activeView = 'assignments'/);
   assert.match(adminPanel, /data-view="assignments"/);
   assert.match(adminPanel, /data-view="rules"/);
-  assert.match(adminPanel, /规则配置/);
+  assert.match(adminPanel, /账号绑定/);
   assert.match(adminPanel, /已应用到：/);
   assert.match(adminPanel, /未应用/);
   assert.match(adminPanel, /renderApplicationBadges/);
   assert.match(adminPanel, /setActiveRulePreset\(ruleID, accountID, accountBindingRevision\(doc, accountID\)\)/);
   assert.match(adminPanel, /authFetch\(/);
   assert.doesNotMatch(adminPanel, /X-Admin-Password|adminLogin|operation\.password/);
-  assert.match(adminPanel, /仅在预览中查看，未改变公众号应用规则/);
+  assert.match(adminPanel, /仅在预览中查看，未改变.*正在使用的规则/);
+  assert.match(adminPanel, /p\.id === activeID \? ' · 正在使用'/, '账号列表必须按账号自己的 active_id 标记正在使用');
+  assert.match(adminPanel, /pack\.id === currentAccountID\(\).*doc && doc\.active_id/, '全局 active_id 只能为当前账号兜底，不能污染其他账号');
   assert.match(css, /\.admin-layout/);
   assert.match(css, /\.admin-side-nav/);
   assert.match(css, /\.admin-applied-badges/);
   assert.match(css, /@media \(max-width: 768px\)[\s\S]*?\.admin-layout\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\)/,
     '窄屏单列 Grid 必须让导航按内容高度、正文占剩余空间，避免 768px 导航撑高');
+});
+
+test('发布链路把群权限错误解释为审核群登录要求', async () => {
+  const delivery = await readProjectFile('public/js/admin-delivery.js');
+  assert.match(delivery, /response\.status === 403 && fallback\.includes\('群列表'\)/);
+  assert.match(delivery, /请使用飞书账号登录后读取可加入的审核群/);
+});
+
+test('发布链路区分服务离线、飞书登录和可配置步骤', async () => {
+  const network = deliveryFailureIssue(new TypeError('Failed to fetch'), '读取推送应用失败');
+  assert.deepEqual(network, {
+    kind: 'network',
+    title: '无法连接发布服务',
+    message: '请确认本地预览或服务器仍在运行，然后重新读取。现有发布配置没有被改动。',
+  });
+  assert.doesNotMatch(`${network.title}${network.message}`, /Failed to fetch/);
+
+  const denied = await deliveryResponseIssue(new Response(JSON.stringify({ error: 'forbidden' }), {
+    status: 403,
+    headers: { 'Content-Type': 'application/json' },
+  }), '读取飞书群列表失败');
+  assert.equal(denied.kind, 'feishu-login');
+  assert.match(denied.message, /使用飞书账号登录/);
+
+  const html = createAdminDeliveryController().render();
+  assert.match(html, /admin-delivery-steps/);
+  assert.match(html, /<h4>推送应用<\/h4>/);
+  assert.match(html, /<h4>审核群<\/h4>/);
+  assert.doesNotMatch(html, /data-delivery-action="save"/, '保存动作应归入规则后台统一底部操作区');
+
+  const [adminPanel, css] = await Promise.all([
+    readProjectFile('public/js/admin-panel.js'),
+    readProjectFile('public/admin-panel.css'),
+  ]);
+  assert.match(adminPanel, /data-delivery-action="save"/);
+  assert.match(adminPanel, /deliveryController\.footerState\(\)/);
+  assert.match(css, /\.admin-delivery-step/);
+  assert.doesNotMatch(css, /\.admin-delivery-actions/);
 });
 
 test('rule admin seeds article footer defaults from the current account', async () => {
@@ -162,7 +207,7 @@ test('rule admin deletes from the rule row with explicit confirmation', async ()
   assert.match(adminPanel, /class="admin-icon-danger"/);
   assert.match(adminPanel, /aria-label="删除当前规则"/);
   assert.match(adminPanel, /window\.confirm/);
-  assert.match(adminPanel, /删除后无法恢复，正在使用它的公众号会回到默认规则/);
+  assert.match(adminPanel, /删除后无法恢复，正在使用它的账号会回到默认规则/);
   assert.doesNotMatch(adminPanel, /class="admin-secondary danger" data-action="delete"/);
   assert.match(css, /\.admin-preset-control/);
   assert.match(css, /\.admin-icon-danger/);
@@ -180,8 +225,8 @@ test('规则后台：删掉「代码化规则」「校验预览」tab，但 beha
   assert.match(adminPanel, /normalizeRuleBehaviorForRule/);
   assert.doesNotMatch(adminPanel, /\bnormalizeRuleBehavior\(/,
     '规则后台不得绕过渠道边界直接调公众号 normalizer');
-  assert.ok((adminPanel.match(/normalizedBehavior\(/g) || []).length >= 8,
-    '初始加载、规则切换、新建、删除回落等全部 behavior 入口应走渠道感知帮手');
+  assert.match(adminPanel, /function adoptWorkingPreset[\s\S]{0,300}normalizedBehavior\(/,
+    '规则加载、切换、保存回读和删除回落应收敛到渠道感知的工作副本入口');
   assert.match(adminPanel, /isFtDefaultPack\(\)[\s\S]{0,220}return normalizedBehavior\(raw, selectedPreset\(\)\)/,
     '网站 JSON behavior 应保留原始 schema，不进公众号 validateRuleBehavior');
   assert.match(adminPanel, /behavior:\s*workingBehavior/);
@@ -219,7 +264,8 @@ test('rule admin has footer-library tab and workingFooter save injection', async
 
   // 网站页脚库收敛到统一「底部」分区里，仅对 ft-default 系展示
   assert.match(adminPanel, /\['bottom', '底部'\]/);
-  assert.match(blockData, /isFt \? '<h3>网站页脚库<\/h3><div data-role="footer-library-editor"><\/div>'/); // 渲染移到 admin-block-data helper
+  assert.match(blockData, /页脚内容库（高级）/);
+  assert.match(blockData, /admin-advanced-section/);
   assert.match(blockData, /<h3>文章默认方案<\/h3><div data-role="article-footer-defaults-editor"><\/div>/, '公众号后台不应把作者默认写成某个作者专属模块');
   assert.doesNotMatch(blockData, /<h3>作者默认<\/h3>/);
 
@@ -243,7 +289,7 @@ test('rule admin has footer-library tab and workingFooter save injection', async
   assert.match(adminPanel, /savePresetWithFooter/);
   assert.match(adminPanel, /configDoc\.modules\.fbif_footer/);
   assert.match(adminPanel, /serverRuleConfigDocument\(configDoc\)/);
-  assert.match(adminPanel, /preserveUneditableRuleConfig\(configDoc, oc\)/,
+  assert.match(adminPanel, /preserveUneditableRuleConfig\(configDoc, oldConfig\)/,
     '保存/另存不得丢弃账号专属顶层字段与结构化模块');
 	assert.match(adminPanel, /baseline_id:\s*preset\.baseline_id\s*\|\|\s*sourcePreset\.baseline_id/,
 	  '保存已有规则和另存新规则都必须携带显式基线');
@@ -255,10 +301,10 @@ test('rule admin has footer-library tab and workingFooter save injection', async
     '保存 API 应原样发送 channel-aware working behavior');
   assert.ok((adminPanel.match(/savePresetWithFooter\(\{[^}]*behavior:\s*savedBehavior/g) || []).length >= 2,
     '保存与另存都必须传送当前网站 behavior，不得重新公众号化');
-  assert.match(adminPanel, /workingBehavior\s*=\s*normalizedBehavior\(selected\s*\?\s*selected\.behavior\s*:\s*getBehavior\(\),\s*selected\)/,
-    '规则下拉切换必须走 channel-aware behavior 边界');
-  assert.match(adminPanel, /normalizedBehavior\(selected\s*\?\s*selected\.behavior\s*:\s*workingBehavior,\s*selected,\s*accountID\)/,
-    '账号绑定切换必须显式传 accountID，避免网站 behavior 被当成公众号');
+  assert.match(adminPanel, /workingBehavior\s*=\s*normalizedBehavior\(selected\s*\?\s*selected\.behavior\s*:\s*getBehavior\(\),\s*selected,\s*accountID\)/,
+    '统一工作副本入口必须显式传 accountID，避免网站 behavior 被当成公众号');
+  assert.match(adminPanel, /adoptWorkingPreset\(selected, accountID\)/,
+    '账号绑定切换必须走 channel-aware 工作副本入口');
 
   // 行数守护
   assert.ok(adminPanel.split('\n').length <= 900, `admin-panel.js 超过 900 行`);

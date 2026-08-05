@@ -7,6 +7,7 @@ import {
   compatibleRulePresets,
   migrationBaselinePresets,
   presetForAccount,
+  uniqueClientRuleName,
 } from '../public/js/admin-rule-state.js';
 import { preserveUneditableRuleConfig } from '../public/js/admin-rule-payload.js';
 
@@ -16,6 +17,28 @@ const presets = [
   { id: 'ft-series-v1', baseline_id: 'ft-series-v1', channel: 'ft', rule_family: 'foodtalks-site', config: { text_color: '#333333', justify_paragraphs: false } },
   { id: 'site-custom', baseline_id: 'ft-series-v1', channel: 'ft', rule_family: 'foodtalks-site', config: { text_color: '#abcdef' } },
 ];
+
+// 复制规则时 ID 一直会去重，显示名却曾原样沿用——下拉里两条同名规则用户无从分辨。
+test('规则名去重：复制与新建都不得产生同名规则', () => {
+  const doc = { presets: [{ name: 'FBIF默认规则' }, { name: '新规则' }] };
+
+  assert.equal(uniqueClientRuleName('WowFood默认规则', doc), 'WowFood默认规则', '不重名时保持原名');
+  assert.equal(uniqueClientRuleName('FBIF默认规则', doc), 'FBIF默认规则 副本');
+  assert.equal(uniqueClientRuleName('新规则', doc), '新规则 副本');
+
+  const withCopy = { presets: [...doc.presets, { name: 'FBIF默认规则 副本' }] };
+  assert.equal(uniqueClientRuleName('FBIF默认规则', withCopy), 'FBIF默认规则 副本 2', '第二次复制继续递增');
+
+  const withCopy2 = { presets: [...withCopy.presets, { name: 'FBIF默认规则 副本 2' }] };
+  assert.equal(uniqueClientRuleName('FBIF默认规则', withCopy2), 'FBIF默认规则 副本 3');
+
+  // 复制一份副本时要还原出原名再递增，否则会叠成「副本 副本」。
+  assert.equal(uniqueClientRuleName('FBIF默认规则 副本', withCopy), 'FBIF默认规则 副本 2');
+  assert.equal(uniqueClientRuleName('FBIF默认规则 副本 2', withCopy2), 'FBIF默认规则 副本 3');
+
+  assert.equal(uniqueClientRuleName('  ', doc), '新规则 副本', '空名回落到默认名后仍须去重');
+  assert.equal(uniqueClientRuleName('FBIF默认规则', { presets: [] }), 'FBIF默认规则', '空规则库不加后缀');
+});
 
 test('账号状态回退只读该账号 binding，不把网站回退到 legacy FBIF active_id', () => {
   const doc = {
