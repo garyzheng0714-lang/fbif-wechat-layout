@@ -36,13 +36,21 @@ test('规则后台有素材库页签，并保存 workingAssets 到 asset_library
   assert.match(adminSrc, /\['bottom', '底部'\]/);
   assert.match(adminSrc, /data-view="assets"/);                   // 素材库提升为左侧独立 view（用户裁定 2026-06-06）
   assert.match(adminSrc, /data-role="asset-library-editor"/);     // 素材库 view 挂载点(admin-panel renderAssetsLibraryView)
-  assert.match(adminSrc, /compact:\s*true/);
+  assert.match(adminSrc, /compact:\s*activeView !== 'assets'/, '独立素材库使用完整工具栏，嵌入视图才紧凑');
   assert.match(blockDataSrc, /data-role="block-editor"/);
   assert.match(adminSrc, /workingAssets/);
   assert.match(adminSrc, /configDoc\.modules\.asset_library/);
   assert.match(adminSrc, /assetLibraryFromPreset\(selected\)/);
   assert.match(adminSrc, /adminDirtyCount/);
   assert.ok(adminSrc.split('\n').length <= 900, 'admin-panel.js 必须不超过 900 行');
+});
+
+test('素材库默认聚焦当前账号，并用业务名称替代内部枚举', () => {
+  assert.match(editorSrc, /filterScope = currentScope !== 'global'.*\? 'context' : 'all'/);
+  assert.match(editorSrc, /当前账号 \+ 共用/);
+  assert.match(editorSrc, /USAGE_LABELS/);
+  assert.match(editorSrc, /scopeLabel/);
+  assert.doesNotMatch(editorSrc, /\$\{esc\(asset\.usage\)\} · \$\{esc\(asset\.scope\)\} · \$\{esc\(asset\.id\)\}/);
 });
 
 test('素材库编辑器按引用索引阻断删除，并把素材 ID 设为只读', () => {

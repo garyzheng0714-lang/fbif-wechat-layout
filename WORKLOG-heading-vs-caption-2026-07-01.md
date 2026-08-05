@@ -3,7 +3,7 @@
 - 日期：2026-07-01
 - 触发样例：https://mp.weixin.qq.com/s/swJQCw5THd0gJVF2GOoMIQ
   （标题《开了七年，排队七年，为何它成为"餐饮界胖东来"？》）
-- 状态：**根因已定位，修复已实现并通过测试**
+- 状态：**根因已定位，修复已实现并提交；commit `389a177`（核心修复链含 `72b17f6`）**
 
 ## 现象
 
@@ -76,7 +76,7 @@ caption 加"大字否决"（避免以防万一的冗余实现）。
 - `npm test`：584 pass / 9 fail，9 个失败在干净基线(git stash 后)完全相同，
   均为本 workspace 分支既有失败，与本次改动无关。
 
-## 未决 / 交接
+## 交接
 
-- 未提交。当前分支 `garyzheng0714-lang/baton-rouge`，等用户决定是否 commit。
-- `.context/article.html`（抓取样例）与截图为 gitignored 验证素材，保留。
+- 已随 commit `389a177` 提交；“未提交 / 等用户决定”的旧状态已关闭。
+- `.context/article.html`（抓取样例）与截图是当时 gitignored 的验证素材，不属于长期真相源；是否仍存在不影响当前实现。

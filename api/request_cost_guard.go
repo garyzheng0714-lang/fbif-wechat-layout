@@ -110,9 +110,6 @@ var (
 )
 
 func validExpensiveCredential(r *http.Request) bool {
-	if validAdminPassword(r.Header.Get("X-Admin-Password")) {
-		return true
-	}
 	want := strings.TrimSpace(os.Getenv(expensiveAPITokenEnv))
 	got := strings.TrimSpace(r.Header.Get("X-Expensive-API-Token"))
 	if got == "" {

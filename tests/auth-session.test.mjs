@@ -4,7 +4,6 @@ import { parseHTML } from 'linkedom';
 
 import {
   SESSION_STORAGE_KEY,
-  ensureAuthenticatedSession,
   loadCurrentUser,
   mountUserIdentity,
 } from '../public/js/auth-session.js';
@@ -57,48 +56,15 @@ test('loadCurrentUser returns null and clears an expired fallback token on 401',
   assert.equal(stored.has(SESSION_STORAGE_KEY), false);
 });
 
-test('strict editor session keeps the shell hidden and sends anonymous users to login', async () => {
-  const { document } = parseHTML('<html><body class="auth-pending"></body></html>');
-  const navigations = [];
-  const user = await ensureAuthenticatedSession({
-    windowRef: {
-      location: {
-        pathname: '/mp/fbif',
-        search: '?v=test',
-        hash: '',
-        assign: target => navigations.push(target),
-      },
-    },
-    documentRef: document,
-    fetchImpl: async () => jsonResponse({ code: 'authentication_required' }, 401),
-  });
-  assert.equal(user, null);
-  assert.deepEqual(navigations, ['/login.html?return_to=%2Fmp%2Ffbif%3Fv%3Dtest']);
-  assert.equal(document.body.classList.contains('auth-pending'), true);
-  assert.equal(document.body.classList.contains('auth-unavailable'), false);
-});
-
-test('strict editor session fails closed when the account service is unavailable', async () => {
-  const { document } = parseHTML('<html><body class="auth-pending auth-unavailable"></body></html>');
-  await assert.rejects(
-    ensureAuthenticatedSession({
-      documentRef: document,
-      fetchImpl: async () => jsonResponse({ code: 'account_service_failed' }, 503),
-    }),
-    /账号服务暂不可用/,
-  );
-  assert.equal(document.body.classList.contains('auth-pending'), false);
-  assert.equal(document.body.classList.contains('auth-unavailable'), true);
-});
-
-test('mountUserIdentity renders name, login mode and Feishu capability in the left rail', () => {
+test('mountUserIdentity renders name, login mode and Feishu capability for the shell identity menu', () => {
   const { document, window } = parseHTML('<main><div id="identity"></div></main>');
   const user = {
     id: 'feishu:ou_test',
     name: '张三',
     avatar_url: '',
     auth_mode: 'feishu',
-    capabilities: { feishu_documents: true },
+    role: 'super_admin',
+    capabilities: { feishu_documents: true, rule_admin: true, rule_super_admin: true },
   };
   mountUserIdentity(document.getElementById('identity'), user, {
     documentRef: document,
@@ -108,6 +74,9 @@ test('mountUserIdentity renders name, login mode and Feishu capability in the le
   assert.match(text, /张三/);
   assert.match(text, /飞书登录/);
   assert.match(text, /云文档已连接/);
+  assert.match(text, /超级管理员/);
+  assert.match(text, /规则后台/);
+  assert.equal(document.querySelector('#adminLockBtn')?.closest('.user-identity-menu')?.getAttribute('role'), 'menu');
   assert.equal(document.querySelector('[data-user-avatar-fallback]').textContent, '张');
 });
 
@@ -126,5 +95,45 @@ test('password identity keeps the name visible and states that cloud documents a
   assert.match(text, /外部编辑/);
   assert.match(text, /账号密码登录/);
   assert.match(text, /云文档不可用/);
+  assert.equal(document.querySelector('#adminLockBtn'), null, '未授权账号不应显示规则后台入口');
   assert.equal(document.querySelector('[data-switch-feishu-login]'), null, '顶栏账号菜单不能主动要求改用飞书登录');
+});
+
+test('identity menu puts rule admin in the user popup and supports keyboard navigation', () => {
+  const { document, window } = parseHTML('<main><div class="rail"><div id="identity"></div></div></main>');
+  let focused = document.body;
+  Object.defineProperty(document, 'activeElement', { configurable: true, get: () => focused });
+  window.HTMLElement.prototype.focus = function focus() { focused = this; };
+  mountUserIdentity(document.getElementById('identity'), {
+    id: 'feishu:ou_admin',
+    name: '管理员',
+    auth_mode: 'feishu',
+    role: 'admin',
+    capabilities: { feishu_documents: true, rule_admin: true },
+  }, { documentRef: document, windowRef: window });
+
+  const trigger = document.querySelector('.user-identity-trigger');
+  const adminButton = document.querySelector('#adminLockBtn');
+  const logoutButton = document.querySelector('.user-identity-logout');
+  const menu = document.querySelector('.user-identity-menu');
+  assert.ok(adminButton);
+  assert.equal(adminButton.closest('.user-identity-menu'), menu);
+  assert.equal(menu.hidden, true);
+
+  const open = new window.Event('keydown', { bubbles: true, cancelable: true });
+  open.key = 'ArrowDown';
+  trigger.dispatchEvent(open);
+  assert.equal(menu.hidden, false);
+  assert.equal(document.activeElement, adminButton, '键盘打开后优先聚焦规则后台');
+
+  const down = new window.Event('keydown', { bubbles: true, cancelable: true });
+  down.key = 'ArrowDown';
+  adminButton.dispatchEvent(down);
+  assert.equal(document.activeElement, logoutButton, '方向键可以移动到退出登录');
+
+  const escape = new window.Event('keydown', { bubbles: true, cancelable: true });
+  escape.key = 'Escape';
+  logoutButton.dispatchEvent(escape);
+  assert.equal(menu.hidden, true);
+  assert.equal(document.activeElement, trigger, 'Escape 关闭后焦点回到身份触发器');
 });

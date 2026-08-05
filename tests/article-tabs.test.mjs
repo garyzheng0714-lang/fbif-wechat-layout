@@ -5,6 +5,7 @@ import { access, readFile } from 'node:fs/promises';
 test('app shell stays single-article and does not render article tabs', async () => {
   const html = await readFile(new URL('../public/app.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/css/app-shell.css', import.meta.url), 'utf8');
+  const authSession = await readFile(new URL('../public/js/auth-session.js', import.meta.url), 'utf8');
   const headerStart = html.indexOf('<header class="global-channel-bar">');
   const headerEnd = html.indexOf('</header>', headerStart);
   const header = html.slice(headerStart, headerEnd);
@@ -13,8 +14,9 @@ test('app shell stays single-article and does not render article tabs', async ()
   const previewHead = html.slice(previewPanelStart, previewScrollStart);
 
   assert.match(header, /id="previewToolbar"[\s\S]*id="copyBtn"/, '复制按钮应位于全局顶栏右上角');
-  assert.match(html, /settingsAction:\s*\{[\s\S]*label:\s*'规则设置'/, '设置入口应收进账号下拉菜单底部');
+  assert.doesNotMatch(html, /settingsAction|acct-settings-item/, '设置入口不应再挂在发布账号菜单');
   assert.doesNotMatch(header, /id="adminLockBtn"/, '设置按钮不应常驻顶栏');
+  assert.match(authSession, /id = 'adminLockBtn'/, '规则后台入口应由个人身份菜单按权限挂载');
   assert.doesNotMatch(header, /id="articleRefreshBtn"/, '顶栏不应显示刷新按钮');
   assert.doesNotMatch(previewHead, /id="previewToolbar"|id="copyBtn"|id="articleRefreshBtn"|preview-toolbar-strip/, '正文预览区顶部不应再放操作条');
   assert.doesNotMatch(html, /articleTabsHost|article-tabs-strip|article-tab-|mountArticleTabs|\/js\/article-tabs\.js/, 'app.html 不应再挂载文章标签页');

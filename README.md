@@ -1,27 +1,18 @@
-<p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="FBIF 排版工具：把 DOCX、Markdown、粘贴正文、文章链接或飞书云文档，转成适配微信公众号和 FoodTalks 的 HTML">
-</p>
+# fbif-wechat-layout
 
-<p align="center">
-  <img src="https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E6%8E%92%E7%89%88%E4%B8%8E%E5%8F%97%E6%8E%A7%E5%8F%91%E5%B8%83-2563eb?style=flat-square" alt="排版与受控发布">
-  <img src="https://img.shields.io/badge/Go-1.26.5-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.26.5">
-  <img src="https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-Vanilla%20JS-f7df1e?style=flat-square&logo=javascript&logoColor=111827" alt="Vanilla JS">
-  <img src="https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a?style=flat-square" alt="生产使用中">
-</p>
+![类型](https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E5%86%85%E5%AE%B9%E6%8E%92%E7%89%88%E4%B8%8E%E5%8F%91%E5%B8%83-2563eb)
+![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8?logo=go&logoColor=white)
+![前端](https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-Vanilla%20JS-f7df1e?logo=javascript&logoColor=111827)
+![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a)
+![README](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-brightgreen)
 
-# FBIF 排版工具
-
-编辑手里是一份 DOCX、一段粘贴的正文、一条公众号文章链接，或者飞书云文档。这个工具把它们转成**能直接粘进微信公众号编辑器或 FoodTalks CMS 的 HTML**——标题层级、图注、参考文献、表格、署名行和页脚，都按各渠道的规则排好。
-
-再往后是一条受控发布流水线：公众号文章 URL → FoodTalks 隐藏草稿 → 飞书审核 → **人工**公开。
-
-![排版工具界面：左侧上传区与「更多文章」卡片，右侧是排版后的公众号文章预览](./assets/readme/screen-editor.png)
+FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文或文章链接转换成适配微信公众号或 FoodTalks CMS 的 HTML，并提供“公众号文章 → FoodTalks 隐藏草稿 → 飞书审核 → 人工公开”的受控发布流水线。
 
 ## 仓库定位
 
 - **分类**：内容工具 / 多渠道排版 / 受控发布流水线。
-- **服务对象**：FBIF 公众号编辑、FoodTalks 网站编辑，以及需要统一文章样式与审核流程的内容运营人员。
-- **服务宿主**：交互式输出面向微信公众号编辑器和 FoodTalks CMS；程序化接口供内部内容流水线调用。本仓库**不是**浏览器插件，也**不是**飞书多维表格插件。
+- **服务对象**：FBIF 公众号编辑、FoodTalks 网站编辑和需要统一文章样式与审核流程的内容运营人员。
+- **服务宿主**：交互式输出面向微信公众号编辑器和 FoodTalks CMS；程序化接口供内部内容流水线调用。本仓库不是浏览器插件，也不是飞书多维表格插件。
 
 ## 渠道与账号入口
 
@@ -35,39 +26,33 @@
 
 **网站工具的排版规则**（参考 [VanilMsou/FoodtalksArticleLayout](https://github.com/VanilMsou/FoodtalksArticleLayout) 已移植）：
 
-- `<h2>` / `<h3>` 纯标签输出，无 inline style
-- 正文 `<p>` 无 style，空行用显式 `<p><br /></p>`
-- 图片 600px 居中（极端狭长图自适应：宽高比 ≥3→280px / ≥2.2→360px / ≥1.6→480px）
-- 图片注释 `<span style="font-size: 12px; color: #7f7f7f;">`，13 个关键词智能识别（图片来源/资料来源/数据来源/来源/制图/截图/图注/注/Source/Photo/Image/Credit）
-- 参考文献 `<span style="font-size: 16px; color: #7f7f7f;">`，自动补 `[1]` `[2]` `[3]` 编号
+- `ft-default` 的 `<h2>` / `<h3>` 和正文 `<p>` 输出 `text-align: justify`；`ft-series` 在 `justify_paragraphs=false` 时去掉这层 inline style
+- 空行显式输出 `<p><br /></p>`（`ft-default` 同时保留两端对齐样式）
+- 图片与图注输出为 `figure.image > img.mc-img + figcaption`；普通图片按规则配置和原图尺寸自适应（横图默认 600、纵图长边默认 375、小二维码默认 150），表格内 DOCX 图片按 Word 显示宽度输出
+- 图片注释使用 12px、`#888888`，按关键词智能识别（图片来源/资料来源/数据来源/来源/制图/截图/图注/注/Source/Photo/Image/Credit）
+- 参考来源使用 `#888888`，自动补 `[1]` `[2]` `[3]` 编号
 - 标题自动等级识别：`一二三 + 中文标点` → h2、`（一）（二）` → h3、9 个关键词（背景/简介/总结/分析/案例/介绍/概述/结论/展望）+ 短句 → h2
 - 中文标点转换：跟 CJK 字符邻接的 ASCII 标点 `,:;?!().` 转为中文形态，保留小数和域名里的点
 - 连续独立链接段之间不插空行
 - DOCX 首个"作者："行之前的前置材料默认剥离
 - 表格：蓝底白字表头 + 浅灰网格线、全格居中、列宽按 Word gridCol 比例；关键视觉以 HTML 属性 + 内容层双写（`border`/`cellpadding`/`align`/`bgcolor`/`width` 属性、表头 `<strong>`），保证粘进 FoodTalks 后台被清洗内联样式后不丢样；表格内图片按 Word 里设置的显示宽度统一尺寸（2026-07-06）
 
-<details>
-<summary><b>当前状态（以现行代码与对应长期契约为准）</b></summary>
-
-<br>
+## 当前状态（核对至 2026-07-26）
 
 - **账号目录单一真相源**：账号先登记在 `api/account_catalog.go`，再运行 `npm run gen:registry` 生成 `public/js/rule-packs/registry.js`；生成文件不手改。账号与默认 preset 在启动时做成对校验。
 - **统一底部区块模型**：公众号与网站渠道共用 `modules.bottom_blocks` 数据结构和区块面板交互，但视觉输出仍由 `fbif`、`foodtalks-series`、`foodtalks-site` 三套渲染器物理隔离。旧 `fbif_footer` 只保留兼容回退，不再是网站页脚主路径。
+- **FoodTalks URL 导入与页脚默认值**：网站渠道的公众号 URL 导入一律按转载处理，先移除微信原文导流尾，再输出网站转载声明；`ft-default` 的完整页脚在全新浏览器中默认开启，不依赖历史 localStorage 状态。
 - **微信草稿存活保护**：公众号复制层对更多文章卡片、微信图床属性、位图占位和异步回写做 T0 安全约束，防止内容粘贴后在“保存草稿”阶段被微信清洗掉。
 - **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
 - **程序化渲染**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 复用交互式编辑器的同一套解析、规则与渲染实现，支持 `fbif` 和 `ft-default`。
-- **飞书云文档导入**：飞书登录用户可在正文输入框输入 `@关键词` 搜索并选择云文档。总进度只按服务端导出、传输、解析、图片解码和复制产物等真实工作量推进；导入期间保留旧预览，只有右侧排版和复制产物同步就绪后才到 `100%`。
 - **受控发布流水线**：手动提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
 - **编辑部规范数据化**：摘要、标签、作者和原创 / 转载判定已按历史发布样本沉淀为声明式规范与封闭标签词表。AI 只负责预填和出处抽取；完整评测仍在进行，且 FoodTalks 的标签 PUT 缺陷修复前不会把标签写入正式请求。
 - **发布状态边界**：测试环境已经完成隐藏草稿、审核卡片与状态机全链路验证；正式环境接入仍等待外部白名单和服务级凭证，不能把测试闭环写成正式生产已上线。
 - **部署门禁**：`main` 部署串行排队；完整 Node/Go 测试通过后，API、静态资源、render service、env schema、systemd 单元与 Caddy 全部先进入隔离 staging，再事务切换。候选监控在 worker 暂停时安装验证，解暂停后真实探测并发飞书自检；任一可回滚验收失败会恢复上一版。
 
-</details>
-
 ## 功能
 
 - 解析 DOCX / Markdown，保留标题、正文、图片、超链接、列表、引用和参考来源等结构。
-- 飞书登录用户可输入 `@关键词` 搜索云文档；选择后由服务端异步导出 DOCX 并复用同一套排版链路。账号密码登录不具备飞书云文档能力。
 - 粘贴正文会作为临时 TXT / Markdown 文档进入同一套解析、标点和渲染链路。
 - 粘贴微信公众号文章或网页链接后，由 Go API 抓取并转换为结构化内容；失败时回退到备用读取路径。
 - URL 导入会保留微信文章的图片说明组：`图片 -> 图注 -> 图片来源` 必须连续渲染为浅灰图注，不得把 `图片来源：` 当成正文或文章来源。
@@ -107,10 +92,7 @@
 │   ├── footer.html                 # 页脚模板
 │   ├── css/wx-theme.css            # 微信内容样式
 │   ├── js/
-│   │   ├── engine.js               # UI 协调、批处理、页脚、原子预览与复制流程
-│   │   ├── feishu-doc-import.js    # @ 搜索、异步导出任务与真实总进度
-│   │   ├── import-progress.js      # 按可验证工作单元聚合 0–100%
-│   │   ├── preview-dom.js          # 连接态 staging 与一次性 DOM 提交
+│   │   ├── engine.js               # UI 协调、批处理、页脚、复制流程
 │   │   ├── editor-shell.js         # 编辑器外壳、初始账号解析、快捷键
 │   │   ├── account-menu.js         # 单层顶栏头像账号菜单（mountAccountMenu）
 │   │   ├── session-restore.js      # 跨渠道编辑器快照保存与恢复
@@ -144,8 +126,7 @@
 │   ├── wechat_blocks.go            # 微信文章块提取
 │   ├── publish_*.go                # FoodTalks 发布任务、状态机、审核、预览与 AI 元数据
 │   ├── foodtalks.go                # FoodTalks API 客户端与环境差异合同
-│   ├── auth_*.go                   # 账号密码、飞书 OAuth、会话与用户能力
-│   └── feishu_*.go                 # 文档搜索/导出任务、审核通知、卡片回调与长连接
+│   └── feishu_*.go                 # 审核通知、卡片回调与长连接
 ├── render-service/                 # Node headless 渲染服务
 ├── deploy/
 │   ├── caddy/                       # 声明式 Caddy vhost
@@ -192,7 +173,7 @@ curl http://127.0.0.1:9000/api/health
 
 ## 使用流程
 
-1. 上传 DOCX / Markdown，粘贴文章链接 / 正文；使用飞书登录时，也可以在同一输入框输入 `@关键词` 并选择云文档。
+1. 上传 DOCX / Markdown，或粘贴文章链接 / 正文。
 2. 检查预览层中的正文、图片、引用和“更多文章”卡片。
 3. 原创 DOCX 默认读取首个 `作者：` 行作为作者信息；作者行会显示为蓝色、非斜体，不要在正文中重复保留。
 4. URL 导入文章时，图片来源应显示为浅灰小字号图注；文章级来源、作者、编辑应在提示页脚前只出现一次。
@@ -212,29 +193,25 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
-| `GET` | `/api/feishu/docs/search?q=<关键词>&limit=8` | 搜索当前飞书登录用户可访问的云文档 |
-| `POST` | `/api/feishu/docs/export/jobs` | 创建飞书文档 DOCX 导出任务；返回 `202` 和带真实工作量的任务状态 |
-| `GET` | `/api/feishu/docs/export/jobs/{job_id}` | 查询导出状态；支持 `after` + `wait_ms` 版本长轮询 |
-| `GET` | `/api/feishu/docs/export/jobs/{job_id}/result` | 导出完成后下载 DOCX 结果 |
-| `DELETE` | `/api/feishu/docs/export/jobs/{job_id}` | 取消当前用户的导出任务 |
-| `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default`）当前规则；未传 `account` 时默认读取 FBIF |
-| `POST` | `/api/rules/admin/login` | 校验规则后台密码；成功返回 `{ "ok": true }` |
-| `GET` | `/api/rules/admin/presets` | 列出规则预设，需 `X-Admin-Password` |
-| `POST` | `/api/rules/admin/presets` | 保存规则预设，需 `X-Admin-Password` 及客户端读到的 `base_revision`（新建为 `0`）；过期写入返回 `409 revision_conflict` 和变化字段 |
+| `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default/ft-series`）当前规则；未传 `account` 时默认读取 FBIF |
+| `GET` | `/api/rules/admin/presets` | 列出规则预设，需已登录且角色为管理员/超级管理员 |
+| `POST` | `/api/rules/admin/presets` | 保存规则预设，需已登录且角色为管理员/超级管理员，以及客户端读到的 `base_revision`（新建为 `0`）；过期写入返回 `409 revision_conflict` 和变化字段 |
 | `PUT` | `/api/rules/admin/active` | 绑定某个账号当前应用的规则，请求为 `{ "account_id": "...", "id": "...", "base_revision": 1 }`，其中修订号来自账号的 `active_revision`；过期写入返回 `409 binding_revision_conflict` |
-| `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需 `X-Admin-Password` |
+| `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需已登录且角色为管理员/超级管理员 |
+| `GET` | `/api/rules/admin/access-users` | 超级管理员读取已登录账号列表与后台角色 |
+| `PUT` | `/api/rules/admin/access-users/{id}` | 超级管理员授权/收回管理员角色；超级管理员只能通过 `RULE_SUPER_ADMIN_OPEN_IDS` 配置 |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
 | `POST` | `/api/publish/site-sync` | 供应商正文或公众号 URL 提交；机器调用需 `X-Publish-Sync-Token`、普通图文正向分类证据、有效 classifier version、至少 20 字可见正文且不得含活动 HTML，管理员仍可手工 URL 导入 |
 | `POST` | `/api/publish/official-sync` | 微信官方 API 正文提交；机器调用同样需要服务令牌、完整普通图文正文与 fail-closed 证据 |
 | `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文 |
 | `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权。任一任务仍在 processing、审核通知仍 pending/sending、审核卡缺失或失败/对账积压时均 `ready=false`；进程存活不等于业务完成 |
-| `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员密码 |
-| `GET` | `/api/publish/readiness` | 部署/运维只读验收：生成物存在/一致性、存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员密码且只返回布尔/模式信息 |
-| `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员密码 |
+| `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员/超级管理员登录，或部署专用 `PUBLISH_ADMIN_SERVICE_TOKEN` |
+| `GET` | `/api/publish/readiness` | 部署/运维只读验收：生成物存在/一致性、存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员角色或部署专用服务令牌，且只返回布尔/模式信息 |
+| `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员/超级管理员登录，或部署专用服务令牌 |
 | `POST` | `/api/publish/jobs/{id}/review` | HTTP 审核默认关闭；仅显式开启、管理员鉴权且固定审核人位于飞书白名单时可用。approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
-| `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员密码 |
+| `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员角色或部署专用服务令牌 |
 | `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 
@@ -250,7 +227,8 @@ curl http://127.0.0.1:9000/api/health
 | `LIBREOFFICE_URL` | `.doc` 转 `.docx` 的 LibreOffice 转换服务地址 |
 | `LIBREOFFICE_TOKEN` | LibreOffice 转换服务鉴权 token |
 | `CLOUDCONVERT_API_KEY` | LibreOffice 不可用时的 CloudConvert fallback |
-| `ADMIN_PASSWORD` | 规则后台密码；未设置时登录返回 503，后台写操作不可用 |
+| `PUBLISH_ADMIN_SERVICE_TOKEN` | 部署/运维调用发布管理接口的机器服务令牌；不作为网页登录密码，也不下发到浏览器 |
+| `RULE_SUPER_ADMIN_OPEN_IDS` | 超级管理员飞书 `open_id` 白名单，逗号分隔；郑梽煌当前使用 `ou_5491fab63b2bf26e3986b85bd06ceb5a` |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
 | `RENDER_TOKEN` / `RENDER_SERVICE_URL` | 程序化排版 API 鉴权与 Node 渲染服务地址 |
 | `RENDER_PORT` / `RULES_API_ORIGIN` / `ASSET_ORIGIN` / `RENDER_BUILD_SHA` | renderer 的端口、规则 API、素材域名和可追溯构建 SHA；生产由流水线生成 `render-service.env` |
@@ -262,7 +240,6 @@ curl http://127.0.0.1:9000/api/health
 | `FOODTALKS_FRONT_URL` / `FOODTALKS_ADMIN_ARTICLE_URL` / `FOODTALKS_CATEGORY_IDS` | 前台、后台文章入口与发布分类；三类 URL 必须指向同一目标环境 |
 | `FOODTALKS_EXPECTED_TARGET` | 显式声明 `test` 或 `production`；readiness 会拒绝缺失、未知或与 FoodTalks URL 不一致的配置 |
 | `DEPLOYMENT_WRITES_PAUSED` | 部署候选实例专用；为 `1` 时暂停发布/rules 写入口、恢复任务、通知 worker 与飞书长连接，验收通过后由事务脚本清零 |
-| `FEISHU_LOGIN_APP_ID` / `FEISHU_LOGIN_APP_SECRET` / `FEISHU_LOGIN_REDIRECT_URI` | 飞书登录与云文档搜索/导出；回调地址必须与开放平台白名单完全一致 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REVIEW_CHAT_ID` | 审核通知和长连接回调 |
 | `PUBLISH_MONITOR_FEISHU_USER_ID` | P0 异常、恢复和每日心跳的飞书私聊收件人 `user_id`；与审核群分开，缺失时 readiness 失败且不回退群聊 |
 | `FEISHU_CALLBACK_MODE` | 必须显式为 `websocket` 或 `webhook`；推荐生产使用 `websocket`，此时公网 Webhook 固定返回 404；缺失/非法时 readiness 失败 |
@@ -274,7 +251,7 @@ curl http://127.0.0.1:9000/api/health
 
 环境变量的完整机器可读合同在 `deploy/config/env-schema.json`，三份无密钥示例分别对应流水线 API env、服务器 `publish.env` 和 renderer env。部署会在改写 live 路径前检查未知键、重复键、必填空值和 schema 版本；验证器只输出变量名，不输出值。
 
-部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_KNOWN_HOSTS`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`ADMIN_PASSWORD` 等 GitHub Secrets。`SERVER_KNOWN_HOSTS` 必须通过可信渠道取得并人工核验服务器公钥，内容采用 OpenSSH `known_hosts` 格式；工作流不会再用 `ssh-keyscan` 临时信任首次看到的主机。生产 `/var/www/api/publish.env` 还必须显式设置 `FEISHU_CALLBACK_MODE=websocket`（如确需 Webhook 才改为 `webhook`）。生产规则后台密码只存放在 GitHub Secret 和本地忽略提交的 `.env` 中；不要把微信、LibreOffice、CloudConvert、服务器密钥或后台密码提交到仓库。
+部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_KNOWN_HOSTS`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`PUBLISH_ADMIN_SERVICE_TOKEN`、`RULE_SUPER_ADMIN_OPEN_IDS` 等 GitHub Secrets。`SERVER_KNOWN_HOSTS` 必须通过可信渠道取得并人工核验服务器公钥，内容采用 OpenSSH `known_hosts` 格式；工作流不会再用 `ssh-keyscan` 临时信任首次看到的主机。生产 `/var/www/api/publish.env` 还必须显式设置 `FEISHU_CALLBACK_MODE=websocket`（如确需 Webhook 才改为 `webhook`）。网页规则后台不再使用共享密码；不要把飞书、发布服务令牌、LibreOffice、CloudConvert 或服务器密钥提交到仓库。
 
 发布任务当前采用 JSON 文件 + 进程内互斥锁，部署约束是同一 `PUBLISH_JOBS_PATH` 只能由一个 API 进程写入；如扩为多实例，必须先迁移到带唯一约束和事务的共享数据库，不能让多个进程直接共写该文件。
 
@@ -316,17 +293,16 @@ go test ./...
 
 当前生产配置显式锁定 `FOODTALKS_EXPECTED_TARGET=test`；切换正式 FoodTalks 是单独的外部环境变更，必须同时更新 API、前台、后台 URL 与凭证后再通过 readiness。`PUBLISH_SYNC_SERVICE_TOKEN`、`PUBLISH_MONITOR_FEISHU_USER_ID` 或 `FEISHU_REVIEWER_OPEN_IDS` 缺失、HTTP 审核意外开启时，readiness 均失败。发布任务 JSON store 带进程锁，只允许一个 API 实例持有；横向扩容前必须迁移到支持事务与锁的存储。
 
-生产规则后台密码变更流程：
+规则后台权限配置流程：
 
-1. 更新仓库的 GitHub Actions Secret：`ADMIN_PASSWORD`。
-2. 同步更新本地 `.env`，便于本机冒烟验证；`.env` 已被 `.gitignore` 忽略。
-3. 重跑 `Deploy to server` 工作流或推送 `main` 触发部署。
-4. 用 `/api/rules/admin/login` 验证新密码返回 `200`，并用旧密码确认返回 `401`。
+1. 在 GitHub Secret `RULE_SUPER_ADMIN_OPEN_IDS` 中维护超级管理员飞书 `open_id`；当前超级管理员是郑梽煌。
+2. 超级管理员登录后打开“规则后台 → 权限管理”，把已经登录过的账号切换为“管理员”。
+3. 规则后台所有网页请求复用登录会话；旧的密码接口不再提供后台权限。
+4. 部署/运维脚本使用独立的 `PUBLISH_ADMIN_SERVICE_TOKEN`，它与网页角色权限分离。
 
 ## 维护说明
 
 - 文档入口见 [`docs/INDEX.md`](docs/INDEX.md)。根目录 `WORKLOG-*.md` 和 `openspec/changes/` 是过程记录，不作为当前规则的单一真相源；是否仍在推进要结合文件状态、issue tracker 和当前代码判断。稳定能力以 README、长期契约、ADR、`openspec/specs/` 和当前代码为准。
-- 飞书云文档 `@` 搜索、异步导出任务、总进度、原子预览与真实浏览器验收口径见 [`docs/feishu-document-import.md`](docs/feishu-document-import.md)。进度不得按时间插值，`100%` 必须等于右侧排版、最终图片和复制产物同时就绪。
 - `DESIGN.md` 记录界面和公众号预览页的设计约束。
 - 渲染器按渠道分三套且物理隔离（红线#19）：公众号默认走 `fbif`，网站走 `foodtalks-site`，FoodTalks系列走 `foodtalks-series`，底部分别由 `mp-blocks`（661px）/ `site-blocks`（满宽）渲染。各渠道功能应以对应渲染器为准，不要用 `fbif.js` 描述网站 / 系列行为。
 - 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；受限行为规则集中在 `public/js/rule-behavior.js`。服务端规则持久化、账号绑定和写入校验集中在 `api/rule_presets.go`、`api/rule_behavior.go`、`api/rule_config_validation.go`；各账号 / preset 的默认成对登记在 `api/rule_defaults.go` 与 `api/account_catalog.go`，底部区块默认与校验在 `api/rule_bottom_blocks.go`（统一 `schema_version=2`）。

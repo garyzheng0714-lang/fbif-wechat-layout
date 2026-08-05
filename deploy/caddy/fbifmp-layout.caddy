@@ -32,8 +32,7 @@ fbifmp-layout.foodtalks.cn {
 	@fbifImageAssets path *.png *.jpg *.jpeg *.webp *.gif *.svg *.ico
 	header @fbifImageAssets >Cache-Control "public, max-age=86400"
 
-	# 所有编辑器入口统一交给 Go 的登录门禁；登录页、回调和静态资源仍由 Caddy 提供。
-	@fbifChannels path / /index.html /app /app.html /site.html /mp /mp/* /ft /ft/*
+	@fbifChannels path /mp /mp/* /ft /ft/*
 	handle @fbifChannels {
 		reverse_proxy localhost:9001
 	}

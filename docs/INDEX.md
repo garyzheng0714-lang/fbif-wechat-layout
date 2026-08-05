@@ -17,7 +17,6 @@
 
 - [共用与隔离的四层模型](adr/2026-07-10-share-vs-isolate-boundary.md)
 - [素材引用统一使用 `{{asset#id}}`](adr/2026-06-03-asset-reference-id.md)
-- [飞书云文档导入契约](feishu-document-import.md)：`@` 搜索、真实总进度、非白屏原子提交、任务 API 与验收门禁。
 - [微信公众号标题识别规范](../openspec/specs/wechat-heading-detection/spec.md)
 - [微信公众号 URL 块分类规范](../openspec/specs/wechat-url-block-classification/spec.md)
 - [微信草稿存活复制规范](../openspec/specs/wechat-draft-survival-copy/spec.md)
@@ -28,6 +27,13 @@
 - [FoodTalks 正文排版评测集](agents/foodtalks-2026-07-23-body-layout-evaluation-set.md)：当前状态和未通过项以文件顶部结论为准。
 - [FoodTalks 编辑部发布规范](editorial-norms-foodtalks.md)
 - [FoodTalks 发布 API 实测契约](foodtalks-api-contract.md)
+
+### 公众号数据与监控
+
+- 历史已发布文章总量仍是**未完成、未核验**状态；任何单一官方接口、单张表或素材库行数都不能称为“历史全量”。
+- `freepublish` 只覆盖“发布”对象，不能代表后台“群发”；素材库是资产来源，不是已发布文章真相源。多源原始响应尚未按稳定标识完成关联、去重、分页、时间与字段覆盖审计。
+- 飞书多维表格自动同步在审计完成并经用户确认前保持关闭；已发布轮询必须独立于草稿接口执行，小绿书 / 图集无法可靠判成普通文章时必须 fail closed。
+- P0 监控契约以 [CLAUDE](../CLAUDE.md) 的红线 #28–#30、无 paths 过滤的 `.github/workflows/p0-monitoring-contract.yml` 和当前代码为准。旧的 [历史文章库 WORKLOG](../WORKLOG-wechat-mp-archive-2026-07-12.md) 已明确撤销“接口计数就是全量”的旧结论。
 
 ### Agent 协作
 

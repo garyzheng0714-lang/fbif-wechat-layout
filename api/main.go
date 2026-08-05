@@ -50,11 +50,6 @@ func main() {
 		return
 	}
 
-	// 启动期 fail loud：缺 ADMIN_PASSWORD 拒绝启动，杜绝正式端进入「规则后台未配置密码」状态
-	// （CLAUDE.md Deploy 契约）。codegen 模式 -emit-* 已在上方 return，不受此限；本地开发设任意值即可。
-	if strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")) == "" {
-		log.Fatal("ADMIN_PASSWORD 未设置：拒绝以无规则后台密码的状态启动（正式端必须配置；本地开发可临时设任意值）")
-	}
 	if productionRuntime() {
 		if err := validateRuntimeConfigSchema(); err != nil {
 			log.Fatalf("运行配置 schema 不匹配：%v", err)
@@ -94,6 +89,7 @@ func main() {
 	}
 	registerAuthRoutes(mux, authService)
 	registerFeishuDocumentRoutes(mux, authService)
+	registerFeishuChatRoutes(mux, authService)
 
 	// Image upload to OSS (base64 from DOCX)
 	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
@@ -114,13 +110,14 @@ func main() {
 	// Cached image payload for images stripped from converted docx
 	mux.HandleFunc("GET /api/doc-cache/{hash}/{filename}", handleDocImageCache)
 
-	registerRulePresetHandlers(mux, ruleStore)
+	registerRulePresetHandlers(mux, ruleStore, authService)
+	registerRuleAdminAccessHandlers(mux, authService)
 
 	// 程序化排版 API（/api/render 代理 + /api/html-to-blocks，Bearer RENDER_TOKEN）
 	registerRenderRoutes(mux)
 
 	// 发布流水线（公众号 → FoodTalks 网站）：JSON 任务存储 + 状态机 + 人审端点。
-	// 机器提交使用最小权限同步凭证；管理端保留 ADMIN_PASSWORD，生产 HTTP 审核默认关闭。
+	// 机器提交使用最小权限同步凭证；人工管理使用登录会话角色，生产 HTTP 审核默认关闭。
 	publishPath := publishJobsPath(*rulesPath)
 	publishLock, err := acquirePublishProcessLock(publishPath)
 	if err != nil {
@@ -129,6 +126,7 @@ func main() {
 	defer publishLock.Close()
 	publishStore := newPublishJobStore(publishPath)
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
+	publishPipe.deliverySettings = newPublishDeliverySettingsStore(publishDeliverySettingsPath(*rulesPath))
 	publishPipe.publicDir = publicDir
 	publishPipe.enableBoundedWorkers(4, 128)
 	if !feishuReviewerAllowlistConfigured() {
@@ -145,7 +143,7 @@ func main() {
 	} else {
 		publishPipe.recoverJobs()
 	}
-	registerPublishRoutes(mux, publishPipe)
+	registerPublishRoutes(mux, publishPipe, authService)
 	// 飞书回调传输层必须显式互斥；缺失/非法配置安全回落 websocket 行为，公网
 	// Webhook 精确返回 404，但 readiness=false，防止部署在含糊配置下假绿。
 	feishuMode, feishuModeExplicit := registerConfiguredFeishuCallbackRoute(mux, publishPipe)
@@ -155,7 +153,7 @@ func main() {
 	if !publishWorkersPaused() && feishuMode == feishuCallbackModeWebSocket {
 		maybeStartFeishuWS(publishPipe)
 	}
-	// 未上架预览页（M4「预览链接」裁定）：免登录但 HMAC 签名门（key=ADMIN_PASSWORD），
+	// 未上架预览页（M4「预览链接」裁定）：免登录但 HMAC 签名门（key=AUTH_SESSION_SECRET 派生），
 	// 签名错/不存在/阶段太早一律 404（见 publish_preview.go 安全模型）。
 	registerPublishPreviewRoute(mux, publishStore)
 
@@ -194,7 +192,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
-	srv := newHTTPServer(addr, withSecurityHeaders(withEditorAuthGate(authService, mux)))
+	srv := newHTTPServer(addr, withSecurityHeaders(mux))
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	if err := serveUntilShutdown(shutdownSignal, srv, publishPipe.shutdownWorkers); err != nil {
@@ -1142,11 +1140,10 @@ func init() {
 // ---- Doc image cache (strip from .docx, serve on demand) ----
 
 type docCacheEntry struct {
-	files        map[string][]byte
-	mirroredURLs map[string]string
-	expires      time.Time
-	lastAccess   time.Time
-	bytes        int64
+	files      map[string][]byte
+	expires    time.Time
+	lastAccess time.Time
+	bytes      int64
 }
 
 const (
@@ -1217,9 +1214,7 @@ func (c *docImageMemoryCache) put(hash string, files map[string][]byte, now time
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.removeExpiredLocked(now)
-	var mirroredURLs map[string]string
-	if existing, exists := c.entries[hash]; exists {
-		mirroredURLs = cloneStringMap(existing.mirroredURLs)
+	if _, exists := c.entries[hash]; exists {
 		c.removeLocked(hash, false)
 	}
 	for len(c.entries) >= c.maxEntries || c.totalBytes > c.maxBytes-size {
@@ -1237,60 +1232,13 @@ func (c *docImageMemoryCache) put(hash string, files map[string][]byte, now time
 		c.removeLocked(oldestKey, true)
 	}
 	c.entries[hash] = docCacheEntry{
-		files:        files,
-		mirroredURLs: mirroredURLs,
-		expires:      now.Add(c.ttl),
-		lastAccess:   now,
-		bytes:        size,
+		files:      files,
+		expires:    now.Add(c.ttl),
+		lastAccess: now,
+		bytes:      size,
 	}
 	c.totalBytes += size
 	return nil
-}
-
-func cloneStringMap(source map[string]string) map[string]string {
-	if len(source) == 0 {
-		return nil
-	}
-	cloned := make(map[string]string, len(source))
-	for key, value := range source {
-		cloned[key] = value
-	}
-	return cloned
-}
-
-func (c *docImageMemoryCache) mirroredURLs(hash string, now time.Time) (map[string]string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry, ok := c.entries[hash]
-	if !ok {
-		return nil, false
-	}
-	if !now.Before(entry.expires) {
-		c.removeLocked(hash, true)
-		return nil, false
-	}
-	if len(entry.mirroredURLs) == 0 {
-		return nil, false
-	}
-	entry.lastAccess = now
-	c.entries[hash] = entry
-	return cloneStringMap(entry.mirroredURLs), true
-}
-
-func (c *docImageMemoryCache) setMirroredURLs(hash string, urls map[string]string, now time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry, ok := c.entries[hash]
-	if !ok || !now.Before(entry.expires) {
-		if ok {
-			c.removeLocked(hash, true)
-		}
-		return false
-	}
-	entry.mirroredURLs = cloneStringMap(urls)
-	entry.lastAccess = now
-	c.entries[hash] = entry
-	return true
 }
 
 func (c *docImageMemoryCache) get(hash, filename string, now time.Time) ([]byte, bool) {
@@ -1348,14 +1296,6 @@ func docCacheGet(hash, filename string) ([]byte, bool) {
 	return docImageCache.get(hash, filename, time.Now())
 }
 
-func docCacheMirroredURLs(hash string) (map[string]string, bool) {
-	return docImageCache.mirroredURLs(hash, time.Now())
-}
-
-func docCacheSetMirroredURLs(hash string, urls map[string]string) bool {
-	return docImageCache.setMirroredURLs(hash, urls, time.Now())
-}
-
 func startDocImageCacheGC() {
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
@@ -1372,29 +1312,6 @@ func startDocImageCacheGC() {
 // word/_fbif_imageUrls.json mapping filename → /api/doc-cache/<hash>/<filename>
 // so the frontend parseDocx can wire <img src> without fetching bytes again.
 func stripImagesFromDocx(docxBytes []byte) ([]byte, error) {
-	return stripImagesFromDocxWithProgress(context.Background(), docxBytes)
-}
-
-type docxContextReader struct {
-	ctx    context.Context
-	reader io.Reader
-}
-
-func (r docxContextReader) Read(buffer []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	read, err := r.reader.Read(buffer)
-	if err == nil {
-		if contextErr := r.ctx.Err(); contextErr != nil {
-			return read, contextErr
-		}
-	}
-	return read, err
-}
-
-func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]byte, error) {
-	reportFeishuExportProgress(ctx, "optimize", 0, 0, "operations")
 	zr, err := zip.NewReader(bytes.NewReader(docxBytes), int64(len(docxBytes)))
 	if err != nil {
 		return nil, fmt.Errorf("open zip: %w", err)
@@ -1402,13 +1319,8 @@ func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]b
 	if len(zr.File) > maxDocxEntries {
 		return nil, fmt.Errorf("docx has too many zip entries: %d > %d", len(zr.File), maxDocxEntries)
 	}
-	totalOperations := int64(len(zr.File) + 2)
-	reportFeishuExportProgress(ctx, "optimize", 0, totalOperations, "operations")
 	var declaredTotal uint64
 	for _, f := range zr.File {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		if f.UncompressedSize64 > uint64(maxDocxEntryBytes) {
 			return nil, fmt.Errorf("docx entry %s exceeds %d MB", f.Name, maxDocxEntryBytes>>20)
 		}
@@ -1431,10 +1343,7 @@ func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]b
 
 	var out bytes.Buffer
 	zw := zip.NewWriter(&out)
-	for index, f := range zr.File {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	for _, f := range zr.File {
 		if strings.HasPrefix(f.Name, "word/media/") && !f.FileInfo().IsDir() {
 			if len(images) >= maxDocMediaFiles {
 				return nil, fmt.Errorf("docx has too many media files: more than %d", maxDocMediaFiles)
@@ -1450,7 +1359,7 @@ func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]b
 			if err != nil {
 				return nil, fmt.Errorf("read %s: %w", f.Name, err)
 			}
-			data, err := readBoundedBody(docxContextReader{ctx: ctx, reader: rc}, maxDocImageBytes)
+			data, err := readBoundedBody(rc, maxDocImageBytes)
 			closeErr := rc.Close()
 			if err != nil {
 				return nil, fmt.Errorf("read %s: %w", f.Name, err)
@@ -1465,7 +1374,6 @@ func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]b
 			actualTotal += int64(len(data))
 			images[base] = data
 			imageUrls[base] = "/api/doc-cache/" + hash + "/" + base
-			reportFeishuExportProgress(ctx, "optimize", int64(index+1), totalOperations, "operations")
 			continue
 		}
 		// Copy every other entry verbatim
@@ -1483,7 +1391,7 @@ func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]b
 		if remaining < entryLimit {
 			entryLimit = remaining
 		}
-		written, err := copyBounded(w, docxContextReader{ctx: ctx, reader: rc}, entryLimit)
+		written, err := copyBounded(w, rc, entryLimit)
 		closeErr := rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("copy %s: %w", f.Name, err)
@@ -1492,7 +1400,6 @@ func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]b
 			return nil, fmt.Errorf("close %s: %w", f.Name, closeErr)
 		}
 		actualTotal += written
-		reportFeishuExportProgress(ctx, "optimize", int64(index+1), totalOperations, "operations")
 	}
 
 	if len(imageUrls) > 0 {
@@ -1512,14 +1419,12 @@ func stripImagesFromDocxWithProgress(ctx context.Context, docxBytes []byte) ([]b
 	if err := zw.Close(); err != nil {
 		return nil, fmt.Errorf("close zip: %w", err)
 	}
-	reportFeishuExportProgress(ctx, "optimize", int64(len(zr.File)+1), totalOperations, "operations")
 
 	if len(images) > 0 {
 		if err := docCachePut(hash, images); err != nil {
 			return nil, fmt.Errorf("cache document images: %w", err)
 		}
 	}
-	reportFeishuExportProgress(ctx, "optimize", totalOperations, totalOperations, "operations")
 	return out.Bytes(), nil
 }
 

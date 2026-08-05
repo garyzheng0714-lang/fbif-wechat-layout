@@ -2,7 +2,7 @@ package main
 
 // publish_preview_test.go — 未上架预览页安全模型与渲染契约测试。
 // 锁死：签名门（HMAC，错误/缺失/不存在/阶段太早一律 404 不区分成因）、
-// 无 ADMIN_PASSWORD 时 503、页面含警示横幅 + 转义标题 + 原样正文 + AI 参数页尾。
+// 无 AUTH_SESSION_SECRET 时 503、页面含警示横幅 + 转义标题 + 原样正文 + AI 参数页尾。
 
 import (
 	"context"
@@ -18,7 +18,7 @@ func itoa64(v int64) string { return strconv.FormatInt(v, 10) }
 
 func newPreviewMux(t *testing.T, env *publishTestEnv) *http.ServeMux {
 	t.Helper()
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	mux := http.NewServeMux()
 	registerPublishPreviewRoute(mux, env.store)
 	return mux
@@ -110,7 +110,7 @@ func TestPublishPreviewRendersArticle(t *testing.T) {
 }
 
 // TestPublishPreviewStageGate 仅 awaiting_review 及之后可预览：更早阶段（content_html
-// 未定型）即使签名正确也 404；无 ADMIN_PASSWORD 配置时端点 503（签名无密钥可算）。
+// 未定型）即使签名正确也 404；无 AUTH_SESSION_SECRET 配置时端点 503（签名无密钥可算）。
 func TestPublishPreviewStageGate(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPreviewMux(t, env)
@@ -133,10 +133,10 @@ func TestPublishPreviewStageGate(t *testing.T) {
 	if rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t="+publishPreviewSig(job.ID)+"&local=1"); rec.Code != http.StatusOK {
 		t.Fatalf("rejected 终态应仍可预览，实际 %d", rec.Code)
 	}
-	// 无 ADMIN_PASSWORD → 503。
-	t.Setenv("ADMIN_PASSWORD", "")
+	// 无 AUTH_SESSION_SECRET → 503。
+	t.Setenv("AUTH_SESSION_SECRET", "")
 	if rec := getPreview(mux, "/preview/publish/"+itoa64(job.ID)+"?t=whatever"); rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("无 ADMIN_PASSWORD 应 503，实际 %d", rec.Code)
+		t.Fatalf("无 AUTH_SESSION_SECRET 应 503，实际 %d", rec.Code)
 	}
 }
 

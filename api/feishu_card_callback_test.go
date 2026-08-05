@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testFeishuVerificationToken = "vt-secret"
@@ -177,7 +178,7 @@ func TestFeishuCallbackChallenge(t *testing.T) {
 }
 
 // TestFeishuCallbackTokenMismatch401 verification token 是回调端点唯一的来源门
-// （无 ADMIN_PASSWORD）：不匹配必须 401，且不得触发任何审核动作与 FoodTalks 调用。
+// （无登录角色凭证）：不匹配必须 401，且不得触发任何审核动作与 FoodTalks 调用。
 func TestFeishuCallbackTokenMismatch401(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newCardCallbackMux(t, env)
@@ -384,6 +385,127 @@ func TestReviewCardRiskChangeExpiresOldVersion(t *testing.T) {
 	}
 }
 
+func seedLifecyclePublishedJob(t *testing.T, env *publishTestEnv) (publishJob, string) {
+	t.Helper()
+	now := time.Now().UTC()
+	job, _, err := env.store.create("site:lifecycle-card-state", testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("create lifecycle job: %v", err)
+	}
+	job, err = env.store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStagePublished
+		current.FoodTalksNewsID = 7240
+		current.PublishedAt = now.Add(-time.Hour).Format(time.RFC3339)
+		current.UnpublishWindowHours = 8
+		current.UnpublishPolicySet = true
+		current.UnpublishWindowUntil = now.Add(7 * time.Hour).Format(time.RFC3339)
+		current.RiskLevel = publishRiskPass
+		current.ReviewAction = publishReviewApprove
+		current.ReviewedBy = "ou_reviewer_1"
+		current.ReviewedAt = now.Add(-time.Hour).Format(time.RFC3339)
+		current.ApprovedRiskVersion = publishReviewCardVersion(*current)
+		current.PublicationAction = publishPublicationActionPublish
+	})
+	if err != nil {
+		t.Fatalf("seed lifecycle job: %v", err)
+	}
+	return job, publishLifecycleCardVersion(job)
+}
+
+func lifecycleCardActionValue(action string, jobID int64, version string) json.RawMessage {
+	return json.RawMessage(fmt.Sprintf(`{"action":%q,"job_id":%d,"lifecycle_version":%q}`, action, jobID, version))
+}
+
+// TestReviewCardLifecycleCallbackReadsCurrentState 防止管理后台已经下线/正在下线时，
+// 群里旧卡再次点击「下线文章」仍发出第二个 PUT 或只显示含糊的过期错误。
+func TestReviewCardLifecycleCallbackReadsCurrentState(t *testing.T) {
+	tests := []struct {
+		name      string
+		stage     string
+		wantToast string
+		wantCard  string
+		wantType  string
+	}{
+		{name: "already offline", stage: publishStageOffline, wantToast: "文章已下线，无需重复操作", wantCard: "已下线", wantType: "info"},
+		{name: "unpublishing", stage: publishStageUnpublishing, wantToast: "文章正在下线处理中，请稍候", wantCard: "下线中", wantType: "info"},
+		{name: "unpublish reconciliation", stage: publishStageUnpublishReconciliationRequired, wantToast: "下线结果待人工核对，请先到管理后台确认文章状态", wantCard: "待人工核对", wantType: "error"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+			env := newPublishTestEnv(t)
+			job, oldVersion := seedLifecyclePublishedJob(t, env)
+			_, err := env.store.update(job.ID, func(current *publishJob) {
+				current.Stage = tc.stage
+				current.PublicationAction = publishPublicationActionUnpublish
+				if tc.stage == publishStageOffline {
+					current.UnpublishedAt = time.Now().UTC().Format(time.RFC3339)
+				}
+				if tc.stage == publishStageUnpublishReconciliationRequired {
+					current.Error = "需要核对 FoodTalks 当前状态"
+				}
+			})
+			if err != nil {
+				t.Fatalf("update lifecycle state: %v", err)
+			}
+
+			out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", lifecycleCardActionValue(feishuCardActionUnpublish, job.ID, oldVersion))
+			if out.toastType != tc.wantType || out.toastContent != tc.wantToast {
+				t.Fatalf("toast=%q/%q, want %q/%q", out.toastType, out.toastContent, tc.wantType, tc.wantToast)
+			}
+			if out.card == nil || !strings.Contains(fmt.Sprint(out.card), tc.wantCard) {
+				t.Fatalf("状态变化应刷新同一张卡片，实际 card=%#v", out.card)
+			}
+			if _, updates := env.ft.counts(); updates != 0 {
+				t.Fatalf("重复/并发下线不得触发 FoodTalks PUT，实际 %d", updates)
+			}
+			got, err := env.store.byID(job.ID)
+			if err != nil || got.Stage != tc.stage {
+				t.Fatalf("回调不得再次推进状态：job=%+v err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestReviewCardLifecycleCallbackReadsCurrentRepublishState(t *testing.T) {
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	env := newPublishTestEnv(t)
+	job, _ := seedLifecyclePublishedJob(t, env)
+	job, err := env.store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStageOffline
+		current.PublicationAction = publishPublicationActionUnpublish
+		current.UnpublishedAt = time.Now().UTC().Format(time.RFC3339)
+	})
+	if err != nil {
+		t.Fatalf("seed offline lifecycle state: %v", err)
+	}
+	oldVersion := publishLifecycleCardVersion(job)
+	job, err = env.store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStagePublished
+		current.PublicationAction = publishPublicationActionRepublish
+		current.PublishedAt = time.Now().UTC().Format(time.RFC3339)
+		current.UnpublishWindowUntil = time.Now().UTC().Add(7 * time.Hour).Format(time.RFC3339)
+	})
+	if err != nil {
+		t.Fatalf("seed republished lifecycle state: %v", err)
+	}
+
+	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", lifecycleCardActionValue(feishuCardActionRepublish, job.ID, oldVersion))
+	if out.toastType != "info" || out.toastContent != "文章已重新发布，无需重复操作" {
+		t.Fatalf("重复重新发布提示不符：%+v", out)
+	}
+	if out.card == nil || !strings.Contains(fmt.Sprint(out.card), "已发布") {
+		t.Fatalf("重复重新发布应刷新为当前终态卡：%#v", out.card)
+	}
+	if _, updates := env.ft.counts(); updates != 0 {
+		t.Fatalf("重复重新发布不得触发 FoodTalks PUT，实际 %d", updates)
+	}
+	got, err := env.store.byID(job.ID)
+	if err != nil || got.Stage != publishStagePublished {
+		t.Fatalf("重复重新发布不得改变状态：job=%+v err=%v", got, err)
+	}
+}
+
 // TestReviewPendingCardContract 待审核卡 JSON 契约（cardkit 红线，字符串断言）：
 // 无 emoji、「通过并发布」「驳回」都带 confirm 二次确认、schema 2.0 不含 action/note
 // 容器、callback value 带 action+job_id、update_multi 开启（群内同步刷新的前提）。
@@ -391,7 +513,7 @@ func TestReviewCardRiskChangeExpiresOldVersion(t *testing.T) {
 // 2026-07-15 收紧首屏：封面/标题/原生标签/摘要/预览链接归入同一个白底横向
 // 媒体容器；元信息压成两行，排版与风险说明默认折叠，不再叠灰色卡片。
 func TestReviewPendingCardContract(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	t.Setenv("WECHAT_UPLOAD_ORIGIN", "https://preview.test")
 	job := publishJob{
 		ID: 7, Title: "示例标题", SourceName: "示例公众号",
@@ -501,6 +623,12 @@ func TestReviewPendingCardContract(t *testing.T) {
 	if !strings.Contains(s, `"tag":"collapsible_panel"`) || !strings.Contains(s, `"expanded":false`) {
 		t.Fatalf("排版与风险说明应默认折叠：%s", s)
 	}
+	warningJob := job
+	warningJob.RiskLevel = publishRiskWarning
+	warningRaw, _ := json.Marshal(buildReviewPendingCard(warningJob, "img_v3_test_cover_key"))
+	if !strings.Contains(string(warningRaw), `"tag":"collapsible_panel"`) || !strings.Contains(string(warningRaw), `"expanded":false`) {
+		t.Fatalf("有风险提醒时排版与风险说明也应默认折叠：%s", warningRaw)
+	}
 	// 无封面 img_key 时卡片不得残留空 img 元素。
 	rawNoCover, _ := json.Marshal(buildReviewPendingCard(job, ""))
 	if strings.Contains(string(rawNoCover), `"tag":"img"`) {
@@ -517,7 +645,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 }
 
 func TestReviewCardEscapesExternalMarkdownFields(t *testing.T) {
-	t.Setenv("ADMIN_PASSWORD", testAdminPassword)
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	malicious := `<at id=all></at> [恶链](https://evil.example) **粗体** # 标题`
 	job := publishJob{
 		ID: 9, Stage: publishStageAwaitingReview, FoodTalksNewsID: 7240,

@@ -1,7 +1,7 @@
 // 契约测试：active-rule-selector.js —— 顶部「当前规则」选择器（外壳共享模块，S1）。
 // 意图：这一族此前在 app.html/site.html 各复制一份且已分叉、零行为覆盖（架构体检
 // 认定的最大裸奔区之一）。本测试用真实 DOM（linkedom）锁定：两种渠道只读视图口径、
-// 编辑-保存状态机、密码失败回收、server 预设落本地缓存的渠道变换——任何人改共享
+// 编辑-保存状态机、服务端拒绝反馈、server 预设落本地缓存的渠道变换——任何人改共享
 // 实现导致两页行为漂移时，必须先让这里红。
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,11 +17,12 @@ function makeEnv({
   pack = { id: 'fbif', channel: 'mp', templateId: 'fbif' },
   currentPreset,
   refreshRuleConsumers: refreshRuleConsumersOverride,
+  setActiveRulePreset: setActiveRulePresetOverride,
 } = {}) {
   const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
   const initialPreset = currentPreset || { id: 'default', name: 'FBIF默认规则', channel: 'mp', config: { a: 1 } };
   window._activeConfig = { preset: initialPreset, config: initialPreset.config };
-  const calls = { saveLocal: [], saveLocalPreset: [], setActive: [], adminLogin: [], applied: [] };
+  const calls = { saveLocal: [], saveLocalPreset: [], setActive: [], applied: [] };
   const ruleModule = {
     loadActiveRulePreset: async () => ({ source: 'server', preset: { id: 'rule-x', name: '新规则', config: { b: 2 } } }),
     loadLocalRuleConfig: () => ({ local: true }),
@@ -29,7 +30,6 @@ function makeEnv({
     saveLocalRuleConfig: (config, acct) => calls.saveLocal.push({ config, acct }),
     saveLocalRulePreset: (preset, acct) => calls.saveLocalPreset.push({ preset, acct }),
     applyActiveRuleConfig: (config, preset) => calls.applied.push({ config, preset }),
-    adminLogin: async (pw) => { calls.adminLogin.push(pw); if (pw === 'bad') { const e = new Error('401 unauthorized'); throw e; } },
     listPublicRulePresets: async () => ({ presets: [
       { id: 'default', name: 'FBIF默认规则', channel: 'mp', rule_family: 'fbif' },
       { id: 'rule-x', name: '新规则', channel: 'mp', rule_family: 'fbif' },
@@ -39,7 +39,7 @@ function makeEnv({
       { id: 'fbif', active_revision: 7 },
       { id: 'ft-default', active_revision: 9 },
     ] }),
-    setActiveRulePreset: async (pw, id, acct, revision) => calls.setActive.push({ pw, id, acct, revision }),
+    setActiveRulePreset: setActiveRulePresetOverride || (async (id, acct, revision) => calls.setActive.push({ id, acct, revision })),
   };
   // 页面真实实现里 refreshRuleConsumers 会重渲选择器卡片（saveActiveRuleSelection
   // 成功路径依赖它），桩保持同一契约。
@@ -107,9 +107,8 @@ test('待确认基线的历史规则不进入前台绑定菜单', async () => {
   assert.ok(document.querySelector('[data-rule-option="rule-x"]'));
 });
 
-test('保存流程：选新规则 → 输密码 → setActiveRulePreset → 回只读并显示已保存', async () => {
+test('保存流程：选新规则 → setActiveRulePreset → 回只读并显示已保存', async () => {
   const { document, window, selector, calls } = makeEnv({ readonlyEditEntry: true });
-  window.prompt = () => 'good-pass';
   await selector.beginActiveRuleEdit();
   // 直接走保存路径（draft 换为 rule-x）
   const card = document.getElementById('activeRuleCard');
@@ -122,7 +121,7 @@ test('保存流程：选新规则 → 输密码 → setActiveRulePreset → 回�
   assert.ok(!save.hasAttribute('disabled'), '选了不同规则后保存应可用');
   save.dispatchEvent(new window.Event('click', { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(calls.setActive[0], { pw: 'good-pass', id: 'rule-x', acct: 'fbif', revision: 7 });
+  assert.deepEqual(calls.setActive[0], { id: 'rule-x', acct: 'fbif', revision: 7 });
   assert.match(document.getElementById('activeRuleCard').innerHTML, /已保存/);
 });
 
@@ -133,7 +132,6 @@ test('规则保存必须等预览提交后才离开保存中', async () => {
     readonlyEditEntry: true,
     refreshRuleConsumers: () => preview,
   });
-  window.prompt = () => 'good-pass';
   await selector.beginActiveRuleEdit();
   document.querySelector('#activeRuleSelect').click();
   document.querySelector('[data-rule-option="rule-x"]').click();
@@ -155,7 +153,6 @@ test('服务端规则已保存但预览失败时，不得伪装整体回滚或�
     readonlyEditEntry: true,
     refreshRuleConsumers: async () => ({ status: 'failed', error: 'render failed' }),
   });
-  window.prompt = () => 'good-pass';
   await selector.beginActiveRuleEdit();
   document.querySelector('#activeRuleSelect').click();
   document.querySelector('[data-rule-option="rule-x"]').click();
@@ -166,10 +163,11 @@ test('服务端规则已保存但预览失败时，不得伪装整体回滚或�
   assert.match(document.getElementById('activeRuleCard').textContent, /规则已保存，但当前预览刷新失败/);
 });
 
-test('密码错误：401 类失败清空缓存密码并显示错误状态', async () => {
-  const { document, window, selector } = makeEnv({ readonlyEditEntry: true });
-  let prompts = 0;
-  window.prompt = () => { prompts++; return 'bad'; };
+test('服务端拒绝规则绑定时显示权限错误且不伪装成已保存', async () => {
+  const { document, window, selector } = makeEnv({
+    readonlyEditEntry: true,
+    setActiveRulePreset: async () => { throw new Error('当前账号没有规则后台权限'); },
+  });
   await selector.beginActiveRuleEdit();
   window._activeConfig.preset.id = 'default';
   const card = document.getElementById('activeRuleCard');
@@ -177,14 +175,8 @@ test('密码错误：401 类失败清空缓存密码并显示错误状态', asyn
   document.querySelector('[data-rule-option="rule-x"]').dispatchEvent(new window.Event('click', { bubbles: true }));
   document.querySelector('[data-action="save-active-rule"]').dispatchEvent(new window.Event('click', { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
-  assert.match(document.getElementById('activeRuleCard').innerHTML, /401/);
-  // 再保存一次会重新 prompt（密码已被清空）——这是「密码错误可重试」的契约
-  document.querySelector('[data-action="save-active-rule"]') ||
-    await selector.beginActiveRuleEdit();
-  const before = prompts;
-  document.querySelector('[data-action="save-active-rule"]').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await new Promise(r => setTimeout(r, 20));
-  assert.ok(prompts > before, '缓存密码清空后重试必须重新询问密码');
+  assert.match(document.getElementById('activeRuleCard').innerHTML, /当前账号没有规则后台权限/);
+  assert.doesNotMatch(document.getElementById('activeRuleCard').innerHTML, /已保存/);
 });
 
 test('server 预设落本地缓存经过渠道 fallbackTransform（公众号 structuredFallbackConfig 口径）', async () => {
@@ -236,7 +228,6 @@ test('adoptAccount：A→B 快速切换且 A 后返时，旧 A 不 apply 也不�
       calls.applied.push(preset.id);
       window._activeConfig = { config, preset };
     },
-    adminLogin: async () => {},
     listPublicRulePresets: async () => ({ presets: [] }),
     setActiveRulePreset: async () => {},
   };
@@ -300,7 +291,6 @@ test('hydrate guard：A→B→A 后，最早的 A 响应不得覆盖新 A', asyn
         applied.push(preset.id);
         window._activeConfig = { config, preset };
       },
-      adminLogin: async () => {},
       listPublicRulePresets: async () => ({ presets: [] }),
       setActiveRulePreset: async () => {},
     },
@@ -326,7 +316,6 @@ test('保存 guard：A 保存后切 B，旧 A 后返不得 apply 或缓存到 B'
   const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
   let accountID = 'account-a';
   window._activeConfig = { preset: { id: 'default', name: 'Default', config: {} }, config: {} };
-  window.prompt = () => 'good-pass';
   const defer = () => {
     let resolve;
     const promise = new Promise(r => { resolve = r; });
@@ -352,7 +341,6 @@ test('保存 guard：A 保存后切 B，旧 A 后返不得 apply 或缓存到 B'
         calls.applied.push({ rule: preset.id, account: accountID });
         window._activeConfig = { config, preset };
       },
-      adminLogin: async () => {},
       listPublicRulePresets: async () => ({ presets: [{ id: 'default' }, { id: 'rule-x' }], accounts: [{ id: 'account-a', active_revision: 11 }] }),
       setActiveRulePreset: async (...args) => { calls.setActive.push(args); return setTask.promise; },
     },
@@ -382,13 +370,11 @@ test('保存 guard：A 保存后切 B，旧 A 后返不得 apply 或缓存到 B'
   assert.deepEqual(calls.applied, [{ rule: 'rule-b', account: 'account-b' }]);
   assert.deepEqual(calls.saved, [{ owner: 'B', id: 'account-b' }]);
   assert.equal(window._activeConfig.preset.id, 'rule-b');
-  assert.deepEqual(calls.setActive[0].slice(1), ['rule-x', 'account-a', 11], '保存请求必须固定启动时账号及绑定修订');
+  assert.deepEqual(calls.setActive[0], ['rule-x', 'account-a', 11], '保存请求必须固定启动时账号及绑定修订');
 });
 
 test('保存 single-flight：保存中再点击不得发第二个 PUT', async () => {
   const { document, window, selector, calls } = makeEnv({ readonlyEditEntry: true });
-  window.prompt = () => 'good-pass';
-  selector.setAdminPassword('good-pass');
   await selector.beginActiveRuleEdit();
   document.querySelector('#activeRuleSelect').click();
   document.querySelector('[data-rule-option="rule-x"]').click();
@@ -403,7 +389,6 @@ test('保存 single-flight：保存中再点击不得发第二个 PUT', async ()
 test('保存中取消必须禁用，PUT 成功后仍水合并应用新规则', async () => {
   const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
   window._activeConfig = { preset: { id: 'default', name: '默认', channel: 'mp', config: {} }, config: {} };
-  window.prompt = () => 'secret';
   let release;
   const pendingPut = new Promise(resolve => { release = resolve; });
   const applied = [];
@@ -416,7 +401,6 @@ test('保存中取消必须禁用，PUT 成功后仍水合并应用新规则', a
       loadActiveRulePreset: async () => ({ source: 'server', preset: { id: 'rule-x', name: 'X', channel: 'mp', config: {} } }),
       loadLocalRuleConfig: () => ({}), saveLocalRuleConfig: () => {},
       applyActiveRuleConfig(config, preset) { applied.push(preset.id); window._activeConfig = { config, preset }; },
-      adminLogin: async () => {},
       listPublicRulePresets: async () => ({ presets: [{ id: 'default', rule_family: 'fbif' }, { id: 'rule-x', rule_family: 'fbif' }] }),
       setActiveRulePreset: () => pendingPut,
     },
@@ -440,7 +424,6 @@ test('保存中取消必须禁用，PUT 成功后仍水合并应用新规则', a
 test('保存 PUT 成功后并发刷新目录，不得把保存事务误判 stale 卡在保存中', async () => {
   const { document, window } = parseHTML('<!doctype html><html><body><div id="activeRuleCard"></div></body></html>');
   window._activeConfig = { preset: { id: 'default', name: '默认', channel: 'mp', config: {} }, config: {} };
-  window.prompt = () => 'secret';
   const defer = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
   const activeLoad = defer();
   const saveCatalog = defer();
@@ -457,7 +440,6 @@ test('保存 PUT 成功后并发刷新目录，不得把保存事务误判 stale
       loadLocalRuleConfig: () => ({}),
       saveLocalRuleConfig: () => {},
       applyActiveRuleConfig(config, preset) { applied.push(preset.id); window._activeConfig = { config, preset }; },
-      adminLogin: async () => {},
       setActiveRulePreset: async () => {},
       listPublicRulePresets() {
         catalogCalls++;
@@ -503,7 +485,6 @@ test('begin edit 后切账号：旧目录后返不得让新账号重新进入编
       loadActiveRulePreset: async id => ({ source: 'server', preset: { id: 'rule-' + id, config: {} } }),
       loadLocalRuleConfig: () => ({}), saveLocalRuleConfig: () => {},
       applyActiveRuleConfig(config, preset) { window._activeConfig = { config, preset }; },
-      adminLogin: async () => {},
       listPublicRulePresets() {
         const task = defer();
         catalogLoads.push(task);

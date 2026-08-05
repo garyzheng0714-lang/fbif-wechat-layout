@@ -50,6 +50,8 @@ export { inferWechatImageType, looksLikeGifSource };
 
 const uploaderModule = await import('./uploader.js' + assetQuery);
 const { uploadNonCdnImages, retryFailedImages, materializeLazyImages, isMmbizUrl } = uploaderModule;
+const previewReadyModule = await import('./preview-ready.js' + assetQuery);
+const { preparePreviewArticle } = previewReadyModule;
 const rulePresetModule = await import('./rule-presets.js' + assetQuery);
 const { getActiveRuleBehavior } = rulePresetModule;
 const behaviorModule = await import('./rule-behavior.js' + assetQuery);
@@ -60,29 +62,6 @@ const blockMergeModule = await import('./blocks/block-merge.js' + assetQuery);
 const { stripReadonlyOverride } = blockMergeModule;
 const articleFooterDefaultsModule = await import('./article-footer-defaults.js' + assetQuery);
 const { normalizeArticleFooterProfileOverride } = articleFooterDefaultsModule;
-const previewDomModule = await import('./preview-dom.js' + assetQuery);
-const {
-  commitPreparedPreviewContent,
-  discardPreparedPreviewContent,
-  renderPreviewContent,
-  prepareConnectedPreviewContent,
-  preparePreviewContent,
-  validatePreparedPreview,
-  updatePreviewFooter,
-  adoptPreviewContent,
-  collectReusableArticleImages,
-  indexPreparedPreviewImages,
-} = previewDomModule;
-const previewImageLoaderModule = await import('./preview-image-loader.js' + assetQuery);
-const {
-  preloadLocalPreviewImages,
-  refreshLocalPreviewImages,
-} = previewImageLoaderModule;
-const feishuDocReadyModule = await import('./feishu-doc-ready.js' + assetQuery);
-const {
-  finalizeFeishuArticlePreview,
-  prepareFeishuArticlePreview,
-} = feishuDocReadyModule;
 
 // Pre-load theme CSS
 const _themeCSSReady = loadThemeCSS();
@@ -166,17 +145,16 @@ async function normalizeToDocx(file, onProgress) {
   return file;
 }
 
-// Remote/server-cached images can paint top-down while bytes arrive, so keep
-// their atomic fade. Local DOCX blob images are pre-decoded and moved into the
-// preview as ready nodes; never hide those behind the remote loading class.
+// Defer <img> display until the full bytes land. By default browsers paint
+// PNG/JPEG top-down as bytes arrive, which looks like "half an image" for
+// 1–2 s on any noticeable round-trip — especially for server-cached .doc
+// images pulled via /api/doc-cache/. We add `wx-img-loading` before the
+// image has finished loading, and drop the class on `load` so CSS can
+// fade it in atomically.
 function hookPreviewImages(container) {
   if (!container) return;
-  const imgs = typeof container.querySelectorAll === 'function'
-    ? container.querySelectorAll('img')
-    : container;
+  const imgs = container.querySelectorAll('img');
   for (const img of imgs) {
-    const src = img.getAttribute('src') || '';
-    if (src.startsWith('blob:')) continue;
     if (img.complete && img.naturalWidth > 0) continue;
     img.classList.add('wx-img-loading');
     const clear = () => img.classList.remove('wx-img-loading');
@@ -596,7 +574,6 @@ export function initApp(initialTemplate) {
     clearUploadVisual();
     progress.style.display = 'none';
     progressFill.style.width = '0%';
-    progress.setAttribute?.('aria-valuenow', '0');
     progressText.textContent = '正在排版...';
     fileInput.value = '';
   }
@@ -632,7 +609,7 @@ export function initApp(initialTemplate) {
     return [stats || '', suffix || ''].filter(Boolean).join(' | ');
   }
 
-  function showImportSummary(title, stats, options = {}) {
+  function showImportSummary(title, stats) {
     if (docZone) {
       if (docName) docName.textContent = title || '未命名文档';
       if (docStat) docStat.textContent = formatImportStat(stats);
@@ -640,7 +617,7 @@ export function initApp(initialTemplate) {
     }
     if (importZone) importZone.hidden = false;
     dropZone.classList.remove('processing');
-    if (!options.keepProgressVisible) progress.style.display = 'none';
+    progress.style.display = 'none';
   }
 
   function clonePlain(value) {
@@ -680,26 +657,6 @@ export function initApp(initialTemplate) {
     return hasManagedBottomBlocksFooter() || !!(footerEl && footerEl.checked);
   }
 
-  function isFooterEnabledForSession(session) {
-    if (!session || session.bodyOnly) return false;
-    const footerVisibilityOverride = normalizeFooterVisibilityOverride(
-      session.footerVisibilityOverride
-    );
-    if (footerVisibilityOverride && visibilityOverrideHides(footerVisibilityOverride.enabled)) return false;
-    if (footerVisibilityOverride && visibilityOverrideShows(footerVisibilityOverride.enabled)) return true;
-    const footerEl = document.getElementById('footerEnabled');
-    return hasManagedBottomBlocksFooter() || !!(footerEl && footerEl.checked);
-  }
-
-  function renderPreviewFooter(contentArea, footerHtml) {
-    const result = updatePreviewFooter(contentArea, footerHtml);
-    const images = result.preservedArticle
-      ? result.images
-      : renderPreviewContent(contentArea, _articleHtml, footerHtml);
-    hookPreviewImages(images);
-    return result.preservedArticle;
-  }
-
   function refreshFooterPreviewFromVisibility() {
     if (typeof window._updateFooter === 'function') {
       window._updateFooter('');
@@ -708,7 +665,8 @@ export function initApp(initialTemplate) {
     const contentArea = document.getElementById('contentArea');
     if (!contentArea || !_articleHtml) return false;
     const enabled = isFooterEnabledForCurrentArticle();
-    renderPreviewFooter(contentArea, enabled ? _footerHtml : '');
+    contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+    hookPreviewImages(contentArea);
     markFailedImages(_failedSrcs);
     return true;
   }
@@ -728,14 +686,7 @@ export function initApp(initialTemplate) {
     const displayName = opts.displayName ? String(opts.displayName) : '';
     const articleArtifactOverride = normalizeArticleArtifactOverride(opts.articleArtifactOverride);
     if (sourceIsDocx) {
-      const importProgress = opts && opts.importProgress;
-      const docxData = await parseDocx(file, {
-        onProgress(done, total, status) {
-          importProgress?.updatePhase('parse', done, total, {
-            status: status || '正在解析 Word 正文…',
-          });
-        },
-      });
+      const docxData = await parseDocx(file);
       return { kind: 'docx', payload: docxData, isRepost, title: fallbackTitle, displayName, sourceIsDocx, articleArtifactOverride };
     }
     if (typeof template.processMd === 'function') {
@@ -863,7 +814,7 @@ export function initApp(initialTemplate) {
     };
   }
 
-  function activateArticleSession(session, options = {}) {
+  function activateArticleSession(session) {
     if (!session) return;
     _articleInputPending = false;
     _articleSession = session;
@@ -883,13 +834,6 @@ export function initApp(initialTemplate) {
     showPreview(session.title || '', session.articleHtml, session.footerHtml, session.stats, session.displayName || session.title || '', {
       bodyOnly: _articleBodyOnly,
       footerCopy: session.footerCopy,
-      preparedImages: options.preparedImages,
-      preparedPreview: options.preparedPreview,
-      preparedClipboardArtifact: options.preparedClipboardArtifact,
-      keepProgressVisible: options.keepProgressVisible,
-      copyPrepared: options.copyPrepared,
-      articleCopy: options.articleCopy,
-      requiresWechatTransfer: options.requiresWechatTransfer,
     });
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('fbif:article-session-activated', { detail: { session } }));
@@ -1038,7 +982,6 @@ export function initApp(initialTemplate) {
     showImportEntry();
     progress.style.display = 'none';
     progressFill.style.width = '0%';
-    progress.setAttribute?.('aria-valuenow', '0');
     dropZone.classList.remove('processing');
 
     const emptyState = document.getElementById('emptyState');
@@ -1120,7 +1063,6 @@ export function initApp(initialTemplate) {
     dropZone.classList.add('processing');
     progress.style.display = 'block';
     progressFill.style.width = '70%';
-    progress.setAttribute?.('aria-valuenow', '70');
     progressText.textContent = '正在排版...';
     try {
       const t0 = performance.now();
@@ -1158,7 +1100,6 @@ export function initApp(initialTemplate) {
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
 
       progressFill.style.width = '100%';
-      progress.setAttribute?.('aria-valuenow', '100');
       progressText.textContent = '排版完成!';
       dropZone.classList.remove('processing');
       setTimeout(() => {
@@ -1243,12 +1184,7 @@ export function initApp(initialTemplate) {
         commitGate: renderCommit,
       });
       if (!session || renderCommit.stale()) return outcome('superseded', false);
-      const reusableImages = renderInput.kind === 'docx'
-        ? collectReusableArticleImages(document.getElementById('contentArea'))
-        : new Map();
-      await refreshLocalPreviewImages(reusableImages);
-      if (renderCommit.stale()) return outcome('superseded', false);
-      activateArticleSession(session, { preparedImages: reusableImages });
+      activateArticleSession(session);
       return outcome('committed', true);
     } catch (err) {
       if (renderCommit.stale()) return outcome('superseded', false);
@@ -1267,15 +1203,12 @@ export function initApp(initialTemplate) {
   });
   function invalidatePendingArticleWork() {
     copySession.resetForNewArticle();
-    if (_articlePreparationController) _articlePreparationController.abort();
-    _articlePreparationController = null;
     _articleInputPending = false;
     clearQueuedInputRerender();
     _moreArticlesCopyJob = null;
     dropZone.classList.remove('processing');
     progress.style.display = 'none';
     progressFill.style.width = '0%';
-    progress.setAttribute?.('aria-valuenow', '0');
     resetRetryUploadUI();
   }
   window._engineSwitchTemplate = async function(nextTemplate, options = {}) {
@@ -1349,36 +1282,9 @@ export function initApp(initialTemplate) {
   };
 
   async function handleFile(file, opts) {
-    const importProgress = opts && opts.importProgress;
-    const hasImportProgress = !!(
-      importProgress
-      && typeof importProgress.updatePhase === 'function'
-      && typeof importProgress.completePhase === 'function'
-    );
     copySession.resetForNewArticle();
-    if (_articlePreparationController) _articlePreparationController.abort();
-    const preparationController = typeof AbortController === 'function' ? new AbortController() : null;
-    _articlePreparationController = preparationController;
-    const externalSignal = opts && opts.signal;
-    let externallyAborted = !!externalSignal?.aborted;
-    const abortFromExternalIntent = () => {
-      externallyAborted = true;
-      preparationController?.abort();
-    };
-    externalSignal?.addEventListener?.('abort', abortFromExternalIntent, { once: true });
-    if (externallyAborted) preparationController?.abort();
     clearQueuedInputRerender();
-    const capturedInputCommit = articleInputGate.capture();
-    // The Feishu chooser owns an outer latest-wins generation. Its signal and
-    // stale callback must participate in every engine commit check, otherwise a
-    // canceled @ import could still replace the preview after handoff.
-    const inputCommit = {
-      stale: () => (
-        externallyAborted
-        || !!opts?.isStale?.()
-        || capturedInputCommit.stale()
-      ),
-    };
+    const inputCommit = articleInputGate.capture();
     _articleInputPending = true;
     // Repost flag 局部捕获：footer 选预设全程用此局部，绝不在 await 之后回读模块级 _isRepost
     // （并发导入交错会污染全局；codex re-review）。全局仍同步设置，供快照/renderBottomFooter 兜底。
@@ -1395,150 +1301,65 @@ export function initApp(initialTemplate) {
     errorEl.style.display = 'none';
     showImportEntry();
     dropZone.classList.add('processing');
-    if (!hasImportProgress) {
-      progress.style.display = 'block';
-      progress.classList?.remove('is-indeterminate');
-      const legacyPercent = opts && opts.source === 'feishu-doc-import' ? 82 : 50;
-      progressFill.style.width = legacyPercent + '%';
-      progress.setAttribute?.('aria-valuenow', String(legacyPercent));
-      progressText.textContent = '正在解析...';
-    }
-    const superseded = () => {
-      importProgress?.cancel?.('superseded');
-      return false;
-    };
-    let preparedPreview = null;
+    progress.style.display = 'block';
+    progress.classList?.remove('is-indeterminate');
+    progressFill.style.width = opts && opts.source === 'feishu-doc-import' ? '82%' : '50%';
+    progressText.textContent = '正在解析...';
     try {
       const t0 = performance.now();
 
       file = await normalizeToDocx(file, (pct, msg) => {
         if (inputCommit.stale()) return;
-        if (!hasImportProgress) {
-          progressText.textContent = msg;
-          progressFill.style.width = pct + '%';
-          progress.setAttribute?.('aria-valuenow', String(Math.max(0, Math.min(100, Math.round(pct)))));
-        }
+        progressText.textContent = msg;
+        progressFill.style.width = pct + '%';
       });
-      if (inputCommit.stale()) return superseded();
-      importProgress?.updatePhase?.('rules', 0, 1, { status: '正在确认排版规则…' });
+      if (inputCommit.stale()) return false;
       await waitForActiveRuleConfigReady('single-upload');
-      if (inputCommit.stale()) return superseded();
-      importProgress?.completePhase?.('rules', { status: '排版规则已确认' });
-      if (!hasImportProgress) {
-        progressFill.style.width = '97%';
-        progress.setAttribute?.('aria-valuenow', '97');
-        progressText.textContent = '正在解析...';
-      } else {
-        importProgress.updatePhase('parse', 0, 6, { status: '正在打开 Word 文档…' });
-      }
+      if (inputCommit.stale()) return false;
+      progressFill.style.width = '97%';
+      progressText.textContent = '正在解析...';
 
       const input = await parseFileToArticleInput(file, isRepost, opts);
-      if (inputCommit.stale()) return superseded();
-      importProgress?.completePhase?.('parse', { status: 'Word 正文解析完成' });
-      importProgress?.updatePhase?.('render', 0, 1, { status: '正在生成排版结构…' });
+      if (inputCommit.stale()) return false;
       const result = await renderArticleInput(input);
-      if (inputCommit.stale()) return superseded();
-      importProgress?.completePhase?.('render', { status: '排版结构已生成' });
-      const articleHtml = result.lines.join('\n');
-      const isFeishuDocument = opts && opts.source === 'feishu-doc-import';
-      let preparedClipboardArtifact = null;
-      let requiresWechatTransfer = false;
-      const preparedImagesPromise = input.kind === 'docx' && !isFeishuDocument
-        ? preloadLocalPreviewImages(input.payload && input.payload.imgCache, { articleHtml })
-        : Promise.resolve(new Map());
+      if (inputCommit.stale()) return false;
       if (input.kind === 'docx') {
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
-        if (!hasImportProgress) {
-          progressFill.style.width = '98%';
-          progress.setAttribute?.('aria-valuenow', '98');
-          progressText.textContent = '正在准备图片...';
-        }
       } else if (input.kind === 'md') {
         logConv('info', 'Markdown解析完成', { paragraphs: result.lines.length, images: result.imgN });
       }
 
       // New input discards the prior article's per-article edits and restores
       // this rule's recommendation list.
-      importProgress?.updatePhase?.('session', 0, 1, { status: '正在组装文章与底部模块…' });
       const session = await buildArticleSession(input, result, {
         resetArticleArtifacts: true,
         startedAt: t0,
         autofillAuthorCard: true,
         commitGate: inputCommit,
       });
-      if (!session || inputCommit.stale()) return superseded();
-      importProgress?.completePhase?.('session', { status: '文章结构已组装' });
-      let preparedImages = await preparedImagesPromise;
-      if (inputCommit.stale()) return superseded();
-      if (isFeishuDocument) {
-        importProgress?.updatePhase?.('theme', 0, 1, { status: '正在准备立即复制所需样式…' });
-        await _themeCSSReady;
-        if (inputCommit.stale()) return superseded();
-        importProgress?.completePhase?.('theme', { status: '复制样式已准备' });
-        const ready = await prepareFeishuArticlePreview(session.articleHtml, {
-          footerHtml: session.footerCopy,
-          previewFooterHtml: isFooterEnabledForSession(session) ? session.footerHtml : '',
-          materialize: materializeLazyImages,
-          isStale: () => inputCommit.stale(),
-          signal: preparationController && preparationController.signal,
-          onProgress({ phase, done, total }) {
-            if (inputCommit.stale()) return;
-            const status = phase === 'materialize'
-              ? '正在准备正文图片'
-              : '正在准备右侧排版';
-            importProgress?.updatePhase?.(phase, done, total, {
-              status: total > 0 ? `${status} ${done}/${total}…` : `${status}…`,
-            });
-          },
-        });
-        if (ready.stale || inputCommit.stale()) return superseded();
-        session.articleHtml = ready.articleHtml;
-        session.footerHtml = ready.previewFooterHtml;
-        session.articleCopy = ready.articleHtml;
-        session.footerCopy = ready.footerCopy;
-        // Create the final image nodes while they are already connected to an
-        // invisible staging root. This gives Chromium one real request per
-        // occurrence and keeps the previous article visible throughout.
-        session.articleHtml = normalizeRich(session.articleHtml);
-        session.footerHtml = normalizeRich(session.footerHtml);
-        preparedPreview = prepareConnectedPreviewContent(
-          session.articleHtml,
-          isFooterEnabledForSession(session) ? session.footerHtml : '',
-        );
-        preparedImages = indexPreparedPreviewImages(preparedPreview);
-        importProgress?.completePhase?.('materialize', { status: '正文图片已准备' });
-        const stagedImageRefs = preparedPreview.images
-          .map(image => image.getAttribute('src') || '')
-          .filter(Boolean);
-        const stagedDecode = await refreshLocalPreviewImages(preparedImages, {
-          concurrency: 6,
-          refs: stagedImageRefs,
-          report: true,
-          signal: preparationController && preparationController.signal,
-          onProgress(done, total) {
-            if (inputCommit.stale()) return;
-            importProgress?.updatePhase?.('decode', done, total, {
-              status: total > 0
-                ? `正在确认图片像素 ${done}/${total}…`
-                : '正在确认图片像素…',
-            });
-          },
-        });
-        if (inputCommit.stale()) return superseded();
-        if (stagedDecode.failedSrcs.length > 0) {
-          throw new Error(`飞书文档有 ${stagedDecode.failedSrcs.length} 张图片无法显示，已保留当前预览，请重试`);
-        }
-        preparedImages = stagedDecode.images;
-        const stagedValidation = validatePreparedPreview(preparedPreview);
-        if (stagedValidation.ready !== stagedValidation.total) {
-          throw new Error(`飞书文档有 ${stagedValidation.total - stagedValidation.ready} 张图片尚未准备完成，已保留当前预览，请重试`);
-        }
-        importProgress?.completePhase?.('decode', { status: '显示图片像素已确认' });
-        if (ready.replacements.size > 0 && session.input?.payload?.imgCache) {
+      if (!session || inputCommit.stale()) return false;
+      // 预览就绪门：正文还有 /api/doc-cache/* 等站内占位（.doc 转换 / 飞书导出的
+      // 剥离图）时，必须先全部回填成 data: 位图并解码成功，预览才允许提交——
+      // 提前显示就是大片白屏（2026-08-05 用户裁定，恢复 8d2fdbc 原子预览契约）。
+      const previewReady = await preparePreviewArticle(session.articleHtml, {
+        materialize: materializeLazyImages,
+        isStale: () => inputCommit.stale(),
+        onProgress({ phase, done, total }) {
+          if (inputCommit.stale()) return;
+          progressFill.style.width = '99%';
+          progressText.textContent = phase === 'decode'
+            ? '正在确认图片 ' + done + '/' + total + '…'
+            : '正在准备正文图片 ' + done + '/' + total + '…';
+        },
+      });
+      if (previewReady.stale || inputCommit.stale()) return false;
+      if (previewReady.changed) {
+        session.articleHtml = previewReady.articleHtml;
+        if (previewReady.replacements.size > 0 && session.input?.payload?.imgCache) {
           const imgCache = Object.fromEntries(
             Object.entries(session.input.payload.imgCache).map(([key, value]) => [
               key,
-              ready.replacements.get(value) || value,
+              previewReady.replacements.get(value) || value,
             ]),
           );
           session.input = {
@@ -1546,146 +1367,30 @@ export function initApp(initialTemplate) {
             payload: { ...session.input.payload, imgCache },
           };
         }
-        importProgress?.updatePhase?.('copy-transfer', 0, 0, {
-          status: '正在准备可立即复制的图片版本…',
-        });
-        const needsCopyTransfer = !(window._skipUpload && input.sourceIsDocx);
-        if (needsCopyTransfer) {
-          const transferMmbiz = template.transferMmbiz != null
-            ? !!template.transferMmbiz
-            : template.id === 'foodtalks-site';
-          requiresWechatTransfer = transferMmbiz;
-          const copyReady = await uploadNonCdnImages(session.articleCopy, session.footerCopy, {
-            transferMmbiz,
-            signal: preparationController && preparationController.signal,
-            onProgress(done, total) {
-              if (inputCommit.stale()) return;
-              importProgress?.updatePhase?.('copy-transfer', done, total, {
-                status: total > 0
-                  ? `正在准备可立即复制的图片版本 ${done}/${total}…`
-                  : '正在准备可立即复制的图片版本…',
-              });
-            },
-            onLog(...args) {
-              if (!inputCommit.stale()) logConv(...args);
-            },
-          });
-          if (inputCommit.stale()) return superseded();
-          if (copyReady.failed > 0) {
-            // 公众号允许 bitmap data: 作为立即可复制的安全降级；OSS 增强失败
-            // 不能反过来阻断导入。网站残留 mmbiz、blob/本地引用等不安全形态
-            // 会由 prepareClipboardArtifact 的最终产物检查统一 fail closed。
-            logConv('warn', '部分图片未完成可选 CDN 增强，继续做最终复制安全校验', {
-              failed: copyReady.failed,
-              transferMmbiz,
-            });
-          }
-          session.articleCopy = copyReady.articleCopy;
-          session.footerCopy = copyReady.footerCopy;
-        }
-        session.copyPrepared = true;
-        importProgress?.completePhase?.('copy-transfer', { status: '可立即复制的图片版本已准备' });
-        session.articleCopy = normalizeRich(session.articleCopy);
-        session.footerCopy = normalizeRich(session.footerCopy);
-
-        const finalizedPreview = await finalizeFeishuArticlePreview({
-          ...ready,
-          articleHtml: session.articleHtml,
-          previewFooterHtml: session.footerHtml,
-          footerCopy: session.footerCopy,
-          preparedImages,
-        }, {
-          refresh: refreshLocalPreviewImages,
-          isStale: () => inputCommit.stale(),
-          signal: preparationController && preparationController.signal,
-          onProgress({ done, total }) {
-            if (inputCommit.stale()) return;
-            importProgress?.updatePhase?.('refresh', done, total, {
-              status: total > 0
-                ? `正在做显示前的最后图片校验 ${done}/${total}…`
-                : '正在做显示前的最后图片校验…',
-            });
-          }
-        });
-        if (finalizedPreview.stale || inputCommit.stale()) return superseded();
-        preparedImages = finalizedPreview.preparedImages;
-        importProgress?.completePhase?.('refresh', { status: '全部显示图片最终校验完成' });
-
-        const previewValidation = validatePreparedPreview(preparedPreview);
-        if (previewValidation.ready !== previewValidation.total) {
-          throw new Error(`仍有 ${previewValidation.total - previewValidation.ready} 张图片尚未显示，已保留当前预览，请重试`);
-        }
-        preparedClipboardArtifact = await prepareClipboardArtifact(
-          session.articleCopy,
-          session.footerCopy,
-          {
-            includeFooter: isFooterEnabledForSession(session),
-            requiresWechatTransfer,
-            signal: preparationController && preparationController.signal,
-          },
-        );
-        if (inputCommit.stale()) return superseded();
-      } else {
-        await refreshLocalPreviewImages(preparedImages);
       }
-      if (inputCommit.stale()) return superseded();
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       session.stats = formatRenderStats(result, elapsed);
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
 
+      progressFill.style.width = '100%';
+      progressText.textContent = '排版完成!';
       // Drop the processing state so the upload zone is clickable again for
       // the next file. (Previously only the error branch cleared it, so a
       // successful upload left pointer-events:none on the drop zone.)
       dropZone.classList.remove('processing');
       const activationDelayMs = Number.isFinite(Number(opts && opts.activationDelayMs))
         ? Math.max(0, Number(opts.activationDelayMs))
-        : 0;
+        : 200;
       const activate = () => {
         if (inputCommit.stale()) return;
         _articleInputPending = false;
-        activateArticleSession(session, {
-          preparedImages,
-          preparedPreview,
-          preparedClipboardArtifact,
-          keepProgressVisible: hasImportProgress,
-          copyPrepared: !!session.copyPrepared,
-          articleCopy: session.articleCopy,
-          requiresWechatTransfer,
-        });
+        activateArticleSession(session);
       };
-      if (hasImportProgress) {
-        activate();
-        if (inputCommit.stale()) return superseded();
-        const sourceArtifact = _articleCopy + '\n' + (isFooterEnabledForCurrentArticle() ? _footerCopy : '');
-        if (!matchingPreparedClipboardArtifact(sourceArtifact)) {
-          throw new Error('复制内容尚未完成最终确认，已停止完成进度，请重试');
-        }
-        importProgress.completePhase('preview-commit', { status: '右侧排版已显示' });
-        importProgress.completePhase('copy-commit', { status: '复制内容已准备' });
-        if (!importProgress.commit({ status: '排版完成，可以立即复制' })) {
-          throw new Error('总进度校验未通过，请重试');
-        }
-        const committedTracker = importProgress;
-        setTimeout(() => {
-          if (
-            committedTracker.snapshot?.().committed
-            && progress.getAttribute('aria-valuenow') === '100'
-          ) {
-            progress.style.display = 'none';
-            progress.dataset.totalProgress = 'false';
-          }
-        }, 700);
-      } else {
-        progressFill.style.width = '100%';
-        progress.setAttribute?.('aria-valuenow', '100');
-        progressText.textContent = '排版完成!';
-        if (activationDelayMs > 0) setTimeout(activate, activationDelayMs);
-        else activate();
-      }
+      if (activationDelayMs > 0) setTimeout(activate, activationDelayMs);
+      else activate();
       return true;
     } catch (err) {
       if (inputCommit.stale()) return false;
-      importProgress?.cancel?.('failed');
       _articleInputPending = false;
       logConv('error', '排版失败', { error: err.message });
       dropZone.classList.remove('processing');
@@ -1693,18 +1398,6 @@ export function initApp(initialTemplate) {
       showError('排版失败: ' + sanitizeErrMsg(err.message));
       flushRerenderAfterInput();
       return false;
-    } finally {
-      discardPreparedPreviewContent(preparedPreview);
-      externalSignal?.removeEventListener?.('abort', abortFromExternalIntent);
-      const stillOwnsPreparation = _articlePreparationController === preparationController;
-      if (stillOwnsPreparation && inputCommit.stale()) {
-        _articleInputPending = false;
-        dropZone.classList.remove('processing');
-        flushRerenderAfterInput();
-      }
-      if (stillOwnsPreparation) {
-        _articlePreparationController = null;
-      }
     }
   }
 
@@ -1738,14 +1431,12 @@ export function initApp(initialTemplate) {
     retryGate,
   } = copySession;
   let _articleInputPending = false;
-  let _articlePreparationController = null;
   let _rerenderAfterInput = false;
   let _rerenderAfterInputOptions = null;
   const PLAIN_TEXT_RULE_LABEL = '中文标点规则';
   let _plainTextCopy = null;
   let _lastCopiedHtml = '';
   let _copyArtifactUnavailableReason = '';
-  let _preparedClipboardArtifact = null;
   window._copyInProgress = false;
 
   function findWechatImageSrcs(html) {
@@ -1860,7 +1551,6 @@ export function initApp(initialTemplate) {
     saveMoreArticlesCards(makeFreshUploadCards());
     moreArticlesGate.invalidate();
     _moreArticlesCopyJob = null;
-    _preparedClipboardArtifact = null;
     if (window._refreshMoreArticlesSidebar) window._refreshMoreArticlesSidebar();
   }
 
@@ -1898,7 +1588,6 @@ export function initApp(initialTemplate) {
       if (gate.stale()) return false;
       const pendingFailedRefs = (_failedSrcs || []).concat(materializedFooter.failedSrcs || []);
       _footerCopy = materializedFooter.footerCopy;
-      _preparedClipboardArtifact = null;
       footerCopyGate.invalidate();
       reconcileFailedImageRefs(pendingFailedRefs);
       if (!_failedSrcs.length) {
@@ -1925,16 +1614,15 @@ export function initApp(initialTemplate) {
     document.body.classList.remove('plain-text-preview');
     document.body.classList.toggle('article-text-preview', bodyOnly);
     _articleHtml = normalizeRich(articleContent);
-    _articleCopy = normalizeRich((opts && opts.articleCopy) || _articleHtml);
+    _articleCopy = _articleHtml;
     _footerHtml = bodyOnly ? '' : normalizeRich(footerContent);
     _footerCopy = bodyOnly ? '' : normalizeRich((opts && opts.footerCopy) || footerContent);
-    _preparedClipboardArtifact = opts?.preparedClipboardArtifact || null;
     _failedSrcs = [];
-    _copyRequiresWechatImageTransfer = !!opts?.requiresWechatTransfer;
+    _copyRequiresWechatImageTransfer = false;
     // 文章级重置：作废全部在途异步回写（footer 写权 + 更多文章预热 job）。
     // 新文章导入路径已在更早的 resetMoreArticlesForNewArticle() 原子作废（codex re-review #3）；
     // 此处再作废对新稿无害、对 rerender 必要（同篇换配置时丢弃旧预热并重建）。
-    copySession.resetForPreviewCommit();
+    copySession.resetForNewArticle();
     _moreArticlesCopyJob = null;
 
     // Split layout: show preview content, hide empty state
@@ -1948,22 +1636,13 @@ export function initApp(initialTemplate) {
 
     document.getElementById('titleInput').value = bodyOnly ? '' : title;
     document.getElementById('previewTitleDisplay').textContent = bodyOnly ? '' : title;
+    showImportSummary(importTitle, stats);
 
     // Apply theme CSS variables to contentArea for preview
     const contentArea = document.getElementById('contentArea');
     if (window._activeConfig) applyThemeVars(contentArea, window._activeConfig.config);
-    const renderedImages = opts?.preparedPreview
-      ? commitPreparedPreviewContent(contentArea, opts.preparedPreview)
-      : renderPreviewContent(
-        contentArea,
-        _articleHtml,
-        bodyOnly ? '' : _footerHtml,
-        { preparedImages: opts && opts.preparedImages },
-      );
-    hookPreviewImages(renderedImages);
-    showImportSummary(importTitle, stats, {
-      keepProgressVisible: !!(opts && opts.keepProgressVisible),
-    });
+    contentArea.innerHTML = _articleHtml + '\n' + (bodyOnly ? '' : _footerHtml);
+    hookPreviewImages(contentArea);
     document.getElementById('statsBar').textContent = settledSidebarStatus(stats);
 
     const retryBtn = document.getElementById('retryBtn');
@@ -1971,13 +1650,13 @@ export function initApp(initialTemplate) {
 
     window._updateFooter = function(newHtml) {
       if (bodyOnly) {
-        renderPreviewFooter(contentArea, '');
+        contentArea.innerHTML = _articleHtml;
+        hookPreviewImages(contentArea);
         return;
       }
       if (typeof newHtml === 'string' && newHtml !== '') {
         _footerHtml = normalizeRich(newHtml);
         _footerCopy = _footerHtml;
-        _preparedClipboardArtifact = null;
         footerCopyGate.invalidate();
         if (_articleSession) _articleSession.footerHtml = _footerHtml;
         // 预览层可能含 data: 合成图 / 本地素材引用；立即重建复制安全层，
@@ -1987,7 +1666,8 @@ export function initApp(initialTemplate) {
         prepareMoreArticlesForCopy('footer-edit');
       }
       const enabled = isFooterEnabledForCurrentArticle();
-      renderPreviewFooter(contentArea, enabled ? _footerHtml : '');
+      contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      hookPreviewImages(contentArea);
       markFailedImages(_failedSrcs);
     };
 
@@ -2036,14 +1716,14 @@ export function initApp(initialTemplate) {
       if (previewGate.stale()) return false;
       _footerHtml = merged;
       _footerCopy = copySafeMerged;
-      _preparedClipboardArtifact = null;
       footerCopyGate.invalidate();
       if (_articleSession) {
         _articleSession.footerHtml = merged;
         _articleSession.footerCopy = copySafeMerged;
       }
       const enabled = isFooterEnabledForCurrentArticle();
-      renderPreviewFooter(contentArea, enabled ? _footerHtml : '');
+      contentArea.innerHTML = _articleHtml + '\n' + (enabled ? _footerHtml : '');
+      hookPreviewImages(contentArea);
       markFailedImages(_failedSrcs);
       prepareMoreArticlesForCopy('edit');
       return true;
@@ -2062,11 +1742,6 @@ export function initApp(initialTemplate) {
     if (bodyOnly) {
       _uploadDone = true;
       statsBar.textContent = settledSidebarStatus(stats);
-      return;
-    }
-    if (opts && opts.copyPrepared) {
-      _uploadDone = true;
-      statsBar.textContent = stableStats;
       return;
     }
     if (skipUploadForThisFile) {
@@ -2239,6 +1914,14 @@ export function initApp(initialTemplate) {
     btn.classList.toggle('copied', !!copied);
     const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
     if (group) group.classList.toggle('is-copied', !!copied);
+    if (!copied) setCopyButtonWarning(btn, false);
+  }
+
+  function setCopyButtonWarning(btn, warning) {
+    if (!btn) return;
+    btn.classList.toggle('is-warning', !!warning);
+    const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
+    if (group) group.classList.toggle('is-warning', !!warning);
   }
 
   function copyArtifactFingerprint(html) {
@@ -2249,61 +1932,6 @@ export function initApp(initialTemplate) {
       hash = Math.imul(hash, 0x01000193);
     }
     return (hash >>> 0).toString(16).padStart(8, '0');
-  }
-
-  function copyPreparationFingerprint(sourceArtifact, config) {
-    return copyArtifactFingerprint([
-      sourceArtifact,
-      JSON.stringify(config || {}),
-      isWebsiteTemplate() ? 'website' : 'wechat',
-    ].join('\n'));
-  }
-
-  async function prepareClipboardArtifact(articleCopy, footerCopy, {
-    includeFooter,
-    requiresWechatTransfer,
-    signal,
-  } = {}) {
-    if (!copyBodyHasMeaningfulContent(articleCopy)) {
-      throw new Error('当前正文复制产物为空，已保留当前预览，请检查飞书文档后重试');
-    }
-    if (signal?.aborted) throw signal.reason || new DOMException('The operation was aborted', 'AbortError');
-    const sourceArtifact = String(articleCopy || '') + '\n' + (includeFooter ? String(footerCopy || '') : '');
-    const pendingWechatSrcs = requiresWechatTransfer ? findWechatImageSrcs(sourceArtifact) : [];
-    if (pendingWechatSrcs.length > 0) {
-      throw new Error(`仍有 ${pendingWechatSrcs.length} 张微信图片未完成转存，已保留当前预览，请重试`);
-    }
-    const config = (window._activeConfig && window._activeConfig.config) || {};
-    const themeCSS = await _themeCSSReady;
-    if (signal?.aborted) throw signal.reason || new DOMException('The operation was aborted', 'AbortError');
-    let html = normalizeRich(processForCopy(
-      sourceArtifact,
-      themeCSS,
-      config,
-      { preserveClasses: isWebsiteTemplate() },
-    ));
-    const unsafeCopyRefs = findUnsafeCopyImageRefs(html, requiresWechatTransfer);
-    if (unsafeCopyRefs.length > 0) {
-      throw new Error(`仍有 ${unsafeCopyRefs.length} 张图片未准备为可复制版本，已保留当前预览，请重试`);
-    }
-    if (!isWebsiteTemplate()) {
-      html += '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
-    }
-    return {
-      html,
-      sourceHash: copyArtifactFingerprint(sourceArtifact),
-      preparationHash: copyPreparationFingerprint(sourceArtifact, config),
-      unsafeCopyRefs,
-    };
-  }
-
-  function matchingPreparedClipboardArtifact(sourceArtifact) {
-    const prepared = _preparedClipboardArtifact;
-    if (!prepared?.html) return null;
-    const config = (window._activeConfig && window._activeConfig.config) || {};
-    if (prepared.sourceHash !== copyArtifactFingerprint(sourceArtifact)) return null;
-    if (prepared.preparationHash !== copyPreparationFingerprint(sourceArtifact, config)) return null;
-    return prepared;
   }
 
   window.copyContent = async function() {
@@ -2358,6 +1986,8 @@ export function initApp(initialTemplate) {
       return ok;
     }
 
+    if (!_articleBodyOnly) prepareMoreArticlesForCopy('copy-click');
+
     const enabled = isFooterEnabledForCurrentArticle();
     if (!copyBodyHasMeaningfulContent(_articleCopy)) {
       _lastCopiedHtml = '';
@@ -2370,13 +2000,7 @@ export function initApp(initialTemplate) {
     }
     const sourceArtifact = _articleCopy + '\n' + (enabled ? _footerCopy : '');
     const artifactHash = copyArtifactFingerprint(sourceArtifact);
-    const preparedArtifact = (
-      typeof _preparedClipboardArtifact !== 'undefined'
-      && _preparedClipboardArtifact?.html
-      && _preparedClipboardArtifact.sourceHash === artifactHash
-    ) ? _preparedClipboardArtifact : null;
-    if (!preparedArtifact && !_articleBodyOnly) prepareMoreArticlesForCopy('copy-click');
-    let html = preparedArtifact?.html || sourceArtifact;
+    let html = sourceArtifact;
     const pendingWechatSrcs = _copyRequiresWechatImageTransfer ? findWechatImageSrcs(html) : [];
     if (pendingWechatSrcs.length > 0) {
       const waiting = _uploadPromise && !_uploadDone;
@@ -2392,33 +2016,52 @@ export function initApp(initialTemplate) {
       return false;
     }
 
-    if (!preparedArtifact) {
-      // Inline CSS classes → style attributes for WeChat compatibility
-      const config = (window._activeConfig && window._activeConfig.config) || {};
-      const themeCSS = await _themeCSSReady;
-      if (copyAction.stale()) return false;
-      const currentArtifact = _articleCopy + '\n' + (isFooterEnabledForCurrentArticle() ? _footerCopy : '');
-      if (copyArtifactFingerprint(currentArtifact) !== artifactHash) {
-        _lastCopiedHtml = '';
-        logConv('warn', '复制已取消：排版产物在复制期间更新', { artifactHash });
-        showError('排版内容刚刚更新，请再次点击复制。');
-        setCopyButtonLabel(btn, '复制全文');
+    // 服务端剥离图片的 DOCX（飞书云文档导入、.doc 转换）先用 /api/doc-cache/* 占位，
+    // 真正能粘进公众号的位图由后台 materialize 回填。回填期间点复制，写进剪贴板的是
+    // 站内相对地址——微信后台取不到，草稿里就是空图。后台还在跑时立刻挡回：按钮照旧
+    // 瞬时反馈（复制速度契约不变），只是不再交付一份注定缺图的剪贴板；准备完成后按钮
+    // 自动恢复，期间左栏状态条持续显示「准备图片 (x/y)」。
+    if (_uploadPromise && !_uploadDone) {
+      const preparingRefs = findUnsafeCopyImageRefs(html, _copyRequiresWechatImageTransfer);
+      if (preparingRefs.length > 0) {
+        logConv('warn', '图片仍在准备，已阻止复制缺图产物', {
+          count: preparingRefs.length,
+          first: preparingRefs[0].slice(0, 80),
+        });
+        const originalText = copyButtonLabel(btn);
+        setCopyButtonLabel(btn, '图片准备中');
         setCopyButtonCopied(btn, false);
-        btn.style.background = '';
+        const restore = () => { if (!copyAction.stale()) setCopyButtonLabel(btn, originalText); };
+        _uploadPromise.then(restore, restore);
         return false;
       }
-      html = processForCopy(html, themeCSS, config, { preserveClasses: isWebsiteTemplate() });
-      html = normalizeRich(html);
-
-      // 公众号 ProseMirror 在粘贴 HTML 末尾若是 <img>/<section> 而无段落节点，
-      // 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次
-      // 都要手动删的"二维码图下方空行"。在这里附一个零高度 <p>，让编辑器认
-      // 为尾部已有可定位段，不再追加可见空段。
-      if (!isWebsiteTemplate()) {
-        html += '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
-      }
     }
+
+    // Inline CSS classes → style attributes for WeChat compatibility
+    const config = (window._activeConfig && window._activeConfig.config) || {};
+    const themeCSS = await _themeCSSReady;
+    if (copyAction.stale()) return false;
+    const currentArtifact = _articleCopy + '\n' + (isFooterEnabledForCurrentArticle() ? _footerCopy : '');
+    if (copyArtifactFingerprint(currentArtifact) !== artifactHash) {
+      _lastCopiedHtml = '';
+      logConv('warn', '复制已取消：排版产物在复制期间更新', { artifactHash });
+      showError('排版内容刚刚更新，请再次点击复制。');
+      setCopyButtonLabel(btn, '复制全文');
+      setCopyButtonCopied(btn, false);
+      btn.style.background = '';
+      return false;
+    }
+    html = processForCopy(html, themeCSS, config, { preserveClasses: isWebsiteTemplate() });
+    html = normalizeRich(html);
     const unsafeCopyRefs = findUnsafeCopyImageRefs(html, _copyRequiresWechatImageTransfer);
+
+    // 公众号 ProseMirror 在粘贴 HTML 末尾若是 <img>/<section> 而无段落节点，
+    // 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次
+    // 都要手动删的"二维码图下方空行"。在这里附一个零高度 <p>，让编辑器认
+    // 为尾部已有可定位段，不再追加可见空段。
+    if (!isWebsiteTemplate()) {
+      html += '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
+    }
 
     const plainText = content.textContent || '';
 
@@ -2462,8 +2105,8 @@ export function initApp(initialTemplate) {
     setCopyButtonLabel(btn, ok ? '\u2713 已复制' : '复制失败');
     if (ok && failedImgCount) setCopyButtonLabel(btn, '已复制·' + failedImgCount + '张图缺失');
     setCopyButtonCopied(btn, ok);
-    // 按钮底色：有图缺失→橙色警告；正常/失败态清空 inline，回归默认（.copied 绿 / .tb-primary 蓝）。
-    btn.style.background = failedImgCount ? 'var(--fs-warning)' : '';
+    setCopyButtonWarning(btn, ok && failedImgCount > 0);
+    btn.style.background = '';
     return ok;
   };
 
@@ -2507,6 +2150,15 @@ export function initApp(initialTemplate) {
       showError(_uploadPromise && !_uploadDone
         ? '网站图片仍在转存，请稍后再复制 HTML。'
         : '仍有微信图床图片未转存，请先重试上传。');
+      return false;
+    }
+
+    // 与 copyContent 同一条红线：站内占位地址出了这个页面就取不到，
+    // HTML 源码同样不能在图片回填完成前交付。
+    if (_uploadPromise && !_uploadDone
+      && findUnsafeCopyImageRefs(sourceArtifact, _copyRequiresWechatImageTransfer).length > 0) {
+      _lastCopiedHtml = '';
+      showError('图片仍在准备，请等状态条显示准备完成后再复制 HTML。');
       return false;
     }
 
@@ -2759,7 +2411,6 @@ export function initApp(initialTemplate) {
     const ca = document.getElementById('contentArea');
     if (ca) {
       ca.innerHTML = dom.content_area_html || '';
-      adoptPreviewContent(ca, _articleBodyOnly || !isFooterEnabledForCurrentArticle() ? '' : _footerHtml);
       if (dom.content_area_style) ca.setAttribute('style', dom.content_area_style);
       else ca.removeAttribute('style');
       if (dom.plain_text_preview) {

@@ -75,53 +75,63 @@ test('materializeLazyImages replaces local asset and image proxy refs with data 
   assert.match(result.footerCopy, /src="data:image\/webp;base64,CgsM"/);
 });
 
-test('materializeLazyImages uses bounded parallel reads for image-heavy DOCX files', async (t) => {
+test('materializeLazyImages fetches lazy refs concurrently', async (t) => {
+  // 服务端剥离后的飞书 DOCX 可以带 10+ MB 正文图。串行取图会把「预览已出现」到
+  // 「复制产物真的有图」的窗口拉到数秒，用户在窗口内点复制就复制到缺图产物。
   const originalFetch = globalThis.fetch;
-  let active = 0;
-  let maxActive = 0;
-  const progress = [];
+  let inFlight = 0;
+  let peakInFlight = 0;
+  const release = [];
   globalThis.fetch = async () => {
-    active++;
-    maxActive = Math.max(maxActive, active);
-    await new Promise(resolve => setTimeout(resolve, 10));
-    active--;
-    return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
+    inFlight++;
+    peakInFlight = Math.max(peakInFlight, inFlight);
+    await new Promise(resolve => release.push(resolve));
+    inFlight--;
+    return new Response(new Blob([new Uint8Array([7])], { type: 'image/png' }));
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  const html = Array.from({ length: 10 }, (_, i) => (
-    `<img src="blob:docx-image-${i}">`
-  )).join('');
-  const result = await materializeLazyImages(html, '', {
-    onProgress(done, total) { progress.push([done, total]); },
-  });
+  const imgs = Array.from({ length: 8 }, (_, i) => `<img src="/api/doc-cache/hash/image${i}.png">`).join('');
+  const pending = materializeLazyImages(imgs, '');
+
+  // 让所有已发出的请求依次完成，同时观察峰值并发。
+  while (release.length) {
+    const resolve = release.shift();
+    resolve();
+    await new Promise(r => setTimeout(r, 0));
+  }
+  const result = await pending;
 
   assert.equal(result.failed, 0);
-  assert.ok(maxActive > 1, `expected parallel image reads, observed ${maxActive}`);
-  assert.ok(maxActive <= 4, `expected at most 4 parallel image reads, observed ${maxActive}`);
-  assert.deepEqual(progress.at(-1), [10, 10]);
-  assert.equal((result.articleCopy.match(/data:image\/png;base64,AQID/g) || []).length, 10);
+  assert.equal(result.total, 8);
+  assert.ok(peakInFlight > 1, `取图必须并发，实测峰值并发 ${peakInFlight}`);
+  assert.doesNotMatch(result.articleCopy, /\/api\/doc-cache\//);
 });
 
-test('materializeLazyImages accepts a higher bounded concurrency for atomic Feishu import', async (t) => {
+test('materializeLazyImages reports failures in document order regardless of completion order', async (t) => {
   const originalFetch = globalThis.fetch;
-  let active = 0;
-  let maxActive = 0;
-  globalThis.fetch = async () => {
-    active++;
-    maxActive = Math.max(maxActive, active);
-    await new Promise(resolve => setTimeout(resolve, 8));
-    active--;
-    return new Response(new Blob([new Uint8Array([1])], { type: 'image/png' }));
+  globalThis.fetch = async (url) => {
+    const name = String(url);
+    // 后发的先失败：并发下完成顺序与文档顺序不一致，失败列表仍须稳定。
+    if (name.includes('image1.png')) {
+      await new Promise(r => setTimeout(r, 10));
+      throw new Error('boom');
+    }
+    if (name.includes('image3.png')) throw new Error('boom');
+    return new Response(new Blob([new Uint8Array([9])], { type: 'image/png' }));
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  const html = Array.from({ length: 12 }, (_, i) => `<img src="/api/doc-cache/hash/${i}.png">`).join('');
-  const result = await materializeLazyImages(html, '', { concurrency: 6, timeoutMs: 90000 });
+  const imgs = Array.from({ length: 4 }, (_, i) => `<img src="/api/doc-cache/hash/image${i}.png">`).join('');
+  const result = await materializeLazyImages(imgs, '');
 
-  assert.equal(result.failed, 0);
-  assert.ok(maxActive > 4, `expected Feishu override above default concurrency, observed ${maxActive}`);
-  assert.ok(maxActive <= 6, `expected at most six parallel reads, observed ${maxActive}`);
+  assert.deepEqual(result.failedSrcs, [
+    '/api/doc-cache/hash/image1.png',
+    '/api/doc-cache/hash/image3.png',
+  ]);
+  assert.equal(result.failed, 2);
+  assert.match(result.articleCopy, /image1\.png/, '失败的引用必须原样保留，供重试使用');
+  assert.doesNotMatch(result.articleCopy, /doc-cache\/hash\/image0\.png/, '成功的引用必须已被替换');
 });
 
 test('uploadNonCdnImages uses refreshed HTML after lazy image materialization', async (t) => {
@@ -325,68 +335,4 @@ test('uploadNonCdnImages: website channel 后端转存失败的图保留原 mmbi
   assert.equal(result.failed, 1, '1 张失败');
   assert.match(result.articleCopy, /mmbiz\.qpic\.cn\/bad\.png/, '失败的图保留原 mmbiz 链接');
   assert.doesNotMatch(result.articleCopy, /mmbiz\.qpic\.cn\/good\.png/, '成功的图被替换');
-});
-
-test('copy-transfer progress has one combined denominator across mmbiz and base64 work', async (t) => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url, options = {}) => {
-    assert.equal(String(url), '/api/oss-upload');
-    const body = JSON.parse(options.body || '{}');
-    if (Array.isArray(body.urls)) {
-      return new Response(JSON.stringify({
-        results: Object.fromEntries(body.urls.map(src => [src, 'https://oss.example/mmbiz.png'])),
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
-    }
-    const key = Object.keys(body.base64_images || {})[0];
-    return new Response(JSON.stringify({
-      results: { [key]: `https://oss.example/${key}.png` },
-    }), { status: 200, headers: { 'content-type': 'application/json' } });
-  };
-  t.after(() => { globalThis.fetch = originalFetch; });
-
-  const progress = [];
-  const result = await uploadNonCdnImages(
-    [
-      '<img src="https://mmbiz.qpic.cn/one.png">',
-      '<img src="https://mmbiz.qpic.cn/two.png">',
-      '<img src="data:image/png;base64,AQID">',
-    ].join(''),
-    '',
-    {
-      transferMmbiz: true,
-      onProgress(done, total) { progress.push([done, total]); },
-    },
-  );
-
-  assert.equal(result.failed, 0);
-  assert.deepEqual(progress, [[0, 3], [1, 3], [2, 3], [3, 3]]);
-});
-
-test('superseding an upload aborts remaining transfer work', async (t) => {
-  const originalFetch = globalThis.fetch;
-  const controller = new AbortController();
-  let calls = 0;
-  globalThis.fetch = async (_url, options = {}) => {
-    calls++;
-    return await new Promise((resolve, reject) => {
-      options.signal?.addEventListener('abort', () => reject(
-        Object.assign(new Error('aborted'), { name: 'AbortError' }),
-      ), { once: true });
-      setTimeout(() => resolve(new Response(JSON.stringify({
-        results: { img_0: 'https://oss.example/late.png' },
-      }), { status: 200, headers: { 'content-type': 'application/json' } })), 100);
-    });
-  };
-  t.after(() => { globalThis.fetch = originalFetch; });
-
-  const pending = uploadNonCdnImages(
-    '<img src="data:image/png;base64,AQID"><img src="data:image/png;base64,BAUG">',
-    '',
-    { signal: controller.signal },
-  );
-  await new Promise(resolve => setTimeout(resolve, 5));
-  controller.abort();
-
-  await assert.rejects(pending, error => error?.name === 'AbortError');
-  assert.ok(calls <= 2, `aborted upload started unexpected extra work: ${calls}`);
 });

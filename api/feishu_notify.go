@@ -1,12 +1,14 @@
 package main
 
 // feishu_notify.go — 飞书通知（施工图 S4，极简实现不引 SDK）。
-// 应用「FBIF文章排版工具」（cli_aac5d107d9381bdf）按用途选择收件人：
-//   - 审核卡与发布结果：FEISHU_REVIEW_CHAT_ID 审核群；
-//   - P0 异常、恢复与心跳：PUBLISH_MONITOR_FEISHU_USER_ID 私聊。
+// 审核卡与发布结果使用后台选定的应用 profile 和多个审核群；凭证来自
+// FEISHU_NOTIFICATION_APPS_JSON（未配置时兼容 FEISHU_APP_ID/SECRET +
+// FEISHU_REVIEW_CHAT_ID）。P0 异常、恢复与心跳仍使用默认应用私聊
+// PUBLISH_MONITOR_FEISHU_USER_ID，避免监控跟随文章审核群配置串线。
 //   1) POST /open-apis/auth/v3/tenant_access_token/internal 换 tenant_access_token（缓存，
 //      过期前刷新，简单 mutex）
-//   2) POST /open-apis/im/v1/messages，审核走 chat_id，监控走 user_id。
+//   2) POST /open-apis/im/v1/messages，审核走 chat_id，监控走 user_id；审核卡
+//      读取返回的 message_id，并用 PATCH 原位更新后续状态。
 // 任一路径缺少自己的收件人配置就单独禁用，监控不得回退到审核群。
 
 import (
@@ -17,6 +19,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -72,11 +75,20 @@ func newFeishuNotifierFromEnv() *feishuNotifier {
 	if appID == "" || appSecret == "" || chatID == "" {
 		return nil
 	}
+	return newFeishuNotifierForProfile(feishuNotificationApp{
+		ID: "default", Name: "FBIF文章排版工具", AppID: appID, AppSecret: appSecret,
+	}, chatID)
+}
+
+func newFeishuNotifierForProfile(profile feishuNotificationApp, chatID string) *feishuNotifier {
+	if strings.TrimSpace(profile.AppID) == "" || strings.TrimSpace(profile.AppSecret) == "" || strings.TrimSpace(chatID) == "" {
+		return nil
+	}
 	return &feishuNotifier{
 		baseURL:     defaultFeishuBaseURL,
-		appID:       appID,
-		appSecret:   appSecret,
-		receiveID:   chatID,
+		appID:       strings.TrimSpace(profile.AppID),
+		appSecret:   strings.TrimSpace(profile.AppSecret),
+		receiveID:   strings.TrimSpace(chatID),
 		receiveType: feishuReceiveIDTypeChat,
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
 	}
@@ -94,26 +106,47 @@ func (n *feishuNotifier) send(ctx context.Context, text string) error {
 // sendCard 发一张 interactive 卡片（M4：审核卡）。content 是卡片 JSON 对象本体；
 // 构建/发送失败由调用方降级回文本通知，卡片永远不是发布流水线的闸门。
 func (n *feishuNotifier) sendCard(ctx context.Context, card map[string]any) error {
+	_, err := n.sendCardWithID(ctx, card)
+	return err
+}
+
+// sendCardWithID 发送 interactive 卡片并返回 message_id。只有拿到这个 ID，
+// 发布终态才能更新当前卡片，而不是在群里再发一张新卡。
+func (n *feishuNotifier) sendCardWithID(ctx context.Context, card map[string]any) (string, error) {
 	content, err := json.Marshal(card)
 	if err != nil {
-		return fmt.Errorf("feishu: 序列化卡片: %w", err)
+		return "", fmt.Errorf("feishu: 序列化卡片: %w", err)
 	}
-	return n.sendMessage(ctx, "interactive", string(content))
+	messageID, err := n.sendMessageWithID(ctx, "interactive", string(content))
+	if err != nil {
+		return "", err
+	}
+	if !feishuMessageIDSafe(messageID) {
+		return "", errors.New("feishu: 发卡响应缺少有效 message_id")
+	}
+	return messageID, nil
 }
 
 // sendMessage 发送内核：text 与 interactive 共用同一条 im/v1/messages 通道。
 func (n *feishuNotifier) sendMessage(ctx context.Context, msgType, content string) error {
+	_, err := n.sendMessageWithID(ctx, msgType, content)
+	return err
+}
+
+// sendMessageWithID 发送消息并读取响应里的 data.message_id。文本通知不需要
+// 使用该 ID，但审核卡必须保存它以便后续 PATCH 原卡。
+func (n *feishuNotifier) sendMessageWithID(ctx context.Context, msgType, content string) (string, error) {
 	receiveIDType := strings.TrimSpace(n.receiveType)
 	receiveID := strings.TrimSpace(n.receiveID)
 	if receiveID == "" {
-		return errors.New("feishu: 缺少消息收件人")
+		return "", errors.New("feishu: 缺少消息收件人")
 	}
 	if receiveIDType != feishuReceiveIDTypeChat && receiveIDType != feishuReceiveIDTypeUser {
-		return errors.New("feishu: 不支持的消息收件人类型")
+		return "", errors.New("feishu: 不支持的消息收件人类型")
 	}
 	token, err := n.tenantAccessToken(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	body, err := json.Marshal(map[string]string{
 		"receive_id": receiveID,
@@ -121,35 +154,100 @@ func (n *feishuNotifier) sendMessage(ctx context.Context, msgType, content strin
 		"content":    content,
 	})
 	if err != nil {
-		return fmt.Errorf("feishu: 序列化请求体: %w", err)
+		return "", fmt.Errorf("feishu: 序列化请求体: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		n.baseURL+"/open-apis/im/v1/messages?receive_id_type="+receiveIDType, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("feishu: 构造请求: %w", err)
+		return "", fmt.Errorf("feishu: 构造请求: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := n.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("飞书接口不可达: %w", err)
+		return "", fmt.Errorf("飞书接口不可达: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, err := readBoundedBody(resp.Body, 1<<20)
 	if err != nil {
-		return fmt.Errorf("飞书发消息响应读取失败或超过 1 MB: %w", err)
+		return "", fmt.Errorf("飞书发消息响应读取失败或超过 1 MB: %w", err)
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			MessageID string `json:"message_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return "", fmt.Errorf("飞书发消息响应异常（HTTP %d）: %w", resp.StatusCode, err)
+	}
+	if env.Code != 0 {
+		return "", fmt.Errorf("飞书发消息失败 code=%d msg=%s", env.Code, env.Msg)
+	}
+	return strings.TrimSpace(env.Data.MessageID), nil
+}
+
+// updateCard 原位更新当前应用发送的交互卡。飞书卡片使用 PATCH，而不是普通
+// 文本消息的 PUT；content 仍是卡片 JSON 序列化后的字符串。
+func (n *feishuNotifier) updateCard(ctx context.Context, messageID string, card map[string]any) error {
+	messageID = strings.TrimSpace(messageID)
+	if !feishuMessageIDSafe(messageID) {
+		return errors.New("feishu: message_id 无效")
+	}
+	content, err := json.Marshal(card)
+	if err != nil {
+		return fmt.Errorf("feishu: 序列化更新卡片: %w", err)
+	}
+	body, err := json.Marshal(map[string]string{"content": string(content)})
+	if err != nil {
+		return fmt.Errorf("feishu: 序列化更新卡片请求体: %w", err)
+	}
+	token, err := n.tenantAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
+		n.baseURL+"/open-apis/im/v1/messages/"+url.PathEscape(messageID), bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("feishu: 构造更新卡片请求: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("飞书更新卡片接口不可达: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return fmt.Errorf("飞书更新卡片响应读取失败或超过 1 MB: %w", err)
 	}
 	var env struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return fmt.Errorf("飞书发消息响应异常（HTTP %d）: %w", resp.StatusCode, err)
+		return fmt.Errorf("飞书更新卡片响应异常（HTTP %d）: %w", resp.StatusCode, err)
 	}
 	if env.Code != 0 {
-		return fmt.Errorf("飞书发消息失败 code=%d msg=%s", env.Code, env.Msg)
+		return fmt.Errorf("飞书更新卡片失败 code=%d msg=%s", env.Code, env.Msg)
 	}
 	return nil
+}
+
+func feishuMessageIDSafe(messageID string) bool {
+	if messageID == "" || len(messageID) > 256 {
+		return false
+	}
+	for _, r := range messageID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // tenantAccessToken 获取并缓存 tenant_access_token；离过期不足 60s 视为过期提前刷新。

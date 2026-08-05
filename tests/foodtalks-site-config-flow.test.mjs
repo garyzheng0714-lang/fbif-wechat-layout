@@ -63,11 +63,7 @@ test('engine.js: 当前文章由统一 session 激活，重排不直接 showPrev
   assert.match(src, /function activateArticleSession/, 'engine 应集中激活当前文章');
   const rerender = src.slice(src.indexOf('async function _engineRerender'));
   assert.match(rerender, /buildArticleSession\(renderInput, result/, '重排应用本次固定输入重建 session');
-  assert.match(
-    rerender,
-    /activateArticleSession\(session,\s*\{\s*preparedImages:\s*reusableImages\s*\}\)/,
-    '重排应通过 session 激活预览并复用当前图片节点'
-  );
+  assert.match(rerender, /activateArticleSession\(session\)/, '重排应通过 session 激活预览');
   assert.doesNotMatch(src, /showBatchList|_batchResults|batch-upload/, '单篇产品不得保留不可达的批量队列');
 });
 

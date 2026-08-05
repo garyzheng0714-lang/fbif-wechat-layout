@@ -4,13 +4,22 @@ const e2ePort = Number(process.env.E2E_PORT || 19090);
 const baseURL = `http://127.0.0.1:${e2ePort}`;
 const crossBrowserEnabled = process.env.E2E_CROSS_BROWSER === '1';
 const smokeTests = /(?:1-初始空状态|2-上传DOCX全流程|8-网站渠道视图) \[desktop-1440\]/;
-const e2ePasswordUsers = Buffer.from(JSON.stringify([
-  {
-    username: 'e2e-editor',
-    password: 'e2e-local-only-password',
-    name: 'E2E 编辑',
-  },
-])).toString('base64');
+const e2ePasswordUsers = Buffer.from(JSON.stringify([{
+  username: 'e2e',
+  password: 'e2e-local-session-password',
+  name: 'E2E 测试账号',
+}, {
+  // 规则后台需要 rule_admin 角色。密码账号配置里没有角色字段，角色住在用户库
+  // JSON 里，所以 tests/e2e-rule-admin.spec.mjs 会在登录后把这个账号提权后再进
+  // 后台（用户库每次读盘，无需重启）。单独一个账号，避免污染其他场景的无权限断言。
+  username: 'e2e-admin',
+  password: 'e2e-local-admin-password',
+  name: 'E2E 管理员',
+}])).toString('base64');
+
+// 规则、发布任务与用户库都落在这里。默认会写进 api/data（开发机的真实本地数据），
+// 让 e2e 反过来污染手工调试的规则库，也让测试结果依赖开发机状态。
+const e2eDataDir = 'test-results/e2e-data';
 
 const projects = [
   {
@@ -48,14 +57,17 @@ if (crossBrowserEnabled) {
 // 默认 updateSnapshots=none，干净 checkout 缺基线会失败，不会拿候选自己当基线。
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/e2e-regression.spec.mjs',
+  testMatch: '**/e2e-*.spec.mjs',
   timeout: 120000,
   retries: process.env.CI ? 1 : 0,
   outputDir: 'test-results/e2e',
   updateSnapshots: process.env.E2E_UPDATE_BASELINE === '1' ? 'all' : 'none',
   snapshotPathTemplate: '{testDir}/e2e-baselines/{arg}{ext}',
   webServer: {
-    command: `cd api && ADMIN_PASSWORD=local-e2e-only AUTH_SESSION_SECRET=e2e-local-session-secret-at-least-32-bytes AUTH_PASSWORD_USERS_B64=${e2ePasswordUsers} go run . -port ${e2ePort}`,
+    // 编辑器现在要求先登录；这个账号只注入本地/CI 的临时 Go 进程，不进入生产配置。
+    // 每次运行都从空库起：规则、绑定与用户库都会被用例写脏，留到下一次运行会让
+    // 「复制出的规则不得重名」这类断言依赖上一轮的残留数据，红绿不可复现。
+    command: `rm -rf ${e2eDataDir} && mkdir -p ${e2eDataDir} && cd api &&AUTH_SESSION_SECRET=local-e2e-session-secret-for-tests AUTH_PASSWORD_USERS_B64=${e2ePasswordUsers} RULES_STORE_PATH=../${e2eDataDir}/rules.json go run . -port ${e2ePort}`,
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 90000,

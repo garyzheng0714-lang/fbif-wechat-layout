@@ -5,7 +5,7 @@
 > 已落地：注册 / 样式 / 商务合作底部 / BD 素材（本地浏览器验证 + go test + npm 537 全绿）。
 > 搁置：**视频 UI 实测**（代码已随包上线，`extractVideo` 默认 false 对公众号/ft-default 零影响，golden 守，待真实带视频文章验证）。
 > 遗留：商务合作「相关合作」3 行表、BD 切换器（默认 Eileen，换 soso/tiki 侧栏选择器待接）。
-> 生产终验缺口：生产域名是 deploy secret，未做生产侧 `curl /api/rules/active?account=ft-series` 与浏览器 /ft 终验，待用户提供域名/页面。
+> 以上“搁置 / 遗留 / 生产终验缺口”是 2026-06-08 的历史快照，不自动成为当前需求。后续全渠道已经统一到 `modules.bottom_blocks` + `mountBlockPanel`；当前账号、页脚和验收边界以 README、CLAUDE.md 与现行源码为准，不能照本文件恢复旧 `fbif_footer` 主路径。
 
 ## 目标
 在 **FoodTalks 网站渠道（channel `ft`）** 新增一个「什么是系列」排版规则包 `ft-series`，
@@ -61,8 +61,8 @@ BD 名片：用户给的 Eileen.png/soso.jpg/tiki.png（满宽 banner）。
   - 共享层 `docx-article-model.js`：`extractVideo` 开关（默认 false=公众号字节不变，红线#19）；网站 `buildDocxOpts` 传 true，「（插入视频）」超链接→video elem（href 作 src、前图作 poster）。
   - ⚠️ **验证缺口**：URL 路径需真实带视频的 FoodTalks 文章 URL；docx 路径需真实含视频源 docx 确认超链接 href 结构。渲染输出按安姆科成品真值写、由 golden 测试守。
 - [x] **第 4 块·商务合作底部版块**（✅ 已浏览器验证：内容/图片/默认输出全对）
-  - 实现：`rule_ft_series_footer.go` 的 `defaultFtSeriesBizCoopFooterModule`（fbif_footer 页脚库 6 段：biz_coop/bd_card/join_group/follow_account/logo/more_info）；素材 `defaultFtSeriesSiteCoopAssets`（前缀 `ftss_` 避开公众号系列 `ft_series_`，scope=global）；ft-series config 覆盖 fbif_footer + **清空继承的 bottom_blocks**（否则 render 底部优先走 bottom_blocks、忽略 fbif_footer）。
-  - site.html footer 首次默认从服务端 `fbif_footer.enabled` 初始化（ft-series=true 默认输出；ft-default=false 不变）。
+  - 当时实现：`rule_ft_series_footer.go` 的 `defaultFtSeriesBizCoopFooterModule` 先落到 `fbif_footer` 兼容结构；后续已由统一 `bottom_blocks` 合同接管，不能把这里的过渡实现当现行架构。
+  - 当时 site.html 从 `fbif_footer.enabled` 初始化；当前状态与默认值以服务端 `modules.bottom_blocks` 和统一面板为准。
   - ✅ 浏览器验证：清 localStorage 后商务合作仍默认输出，标题/创意策划文案/创意名片图/BD名片Eileen/群二维码/公众号二维码banner/logo/更多 全部渲染，图片 src 全解析。
   - **遗留**：①「相关合作」3 行表暂未纳入（标注待表格 HTML 精修）②BD 切换器（默认 Eileen，换 soso/tiki 的侧栏选择器待接）③侧栏页脚面板 active_segments 兜底含 FBIF 的 tip（无害，segment 内容是 ft-series；面板 label 为 ft-default 设计）。
 - [x] **第 3 块·视频块** 见上（代码完成+编译/语法过；UI 验证待真实带视频输入）
@@ -79,8 +79,8 @@ BD 名片：用户给的 Eileen.png/soso.jpg/tiki.png（满宽 banner）。
     9.「点击获取更多」全球食品资讯 →foodtalks.cn
   - **BD 名片（Eileen/soso/tiki）**：本篇成品**无** BD 名片；docx 规范「此外还有BD选择」=可选项。**待用户确认**：每篇是否放 BD 名片、放哪张、插在版块何处、不同 BD 文案差异。
   - 实现方案：仿 `defaultFBIFFooterModule` 给 ft-series 做商务合作 footer segments（biz_coop_intro 大固定块 + coop_table + bd_card 可选 + join_group + follow_account + logo + more_info），可勾选。素材用成品 static.foodtalks.cn URL（网站 transferMmbiz 只转 mmbiz、foodtalks.cn 图保留）。
-- [ ] 第 5 块·BD 名片等素材落地
-- [ ] 第 6 块·golden 测试 + 浏览器逐元素验证
+- [x] 第 5 块·BD 名片等素材已落地；当前服务端素材与页脚校验覆盖 Eileen / Soso / Tiki 和独立“相关合作”表
+- [x] 第 6 块·golden / fidelity 测试与当时浏览器验收已完成；后续回归以当前测试和统一 `bottom_blocks` 契约为准
 
 ## 待解风险
 - `foodtalks-site.js` 已 699 行（上限 900），加视频/参考字号后若超需拆分。

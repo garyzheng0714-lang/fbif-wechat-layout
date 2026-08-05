@@ -14,7 +14,7 @@
 - **THEN** 两者正文 HTML 结构与样式一致（允许仅复制层包装差异）
 
 ### Requirement: 网站输出遵守 CMS 存活契约
-`packId=ft-default` 的输出 MUST 启用 `shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival` 开关（td 属性与 inline style 双写），表格内图片 MUST 按 `wpx` 输出 `width` 属性+style 双写，保证经 FoodTalks CMS 粘贴清洗后版式存活（红线 #24）。
+`packId=ft-default` 的输出 MUST 启用 `public/js/templates/shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival` 开关（td 属性与 inline style 双写），表格内图片 MUST 按 `wpx` 输出 `width` 属性+style 双写，保证经 FoodTalks CMS 粘贴清洗后版式存活（红线 #24）。
 
 #### Scenario: 表格经 CMS 清洗后存活
 - **WHEN** 渲染含表格的文章并经模拟 CMS 清洗（剥除 table/td 内联样式，保留 HTML 属性）

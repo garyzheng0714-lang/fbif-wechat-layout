@@ -32,7 +32,7 @@ func renderServiceURL() string {
 }
 
 // requireRenderToken 校验 Bearer token；RENDER_TOKEN 未配置时拒绝服务而非裸奔
-// （同 ADMIN_PASSWORD 的缺配置哲学）。
+// （同运行期服务凭证的缺配置哲学）。
 func requireRenderToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := renderToken()

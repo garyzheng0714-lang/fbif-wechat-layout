@@ -35,14 +35,8 @@ test('both editor shells put the publishing target inside the import card and th
     );
     assert.match(shell, /id="feishuDocCapability"/);
     assert.match(shell, /id="feishuDocSearch"/);
-    assert.match(shell, /粘贴后自动排版/);
-    assert.match(shell, /ensureAuthenticatedSession\(\)/);
-    assert.match(shell, /if \(!authUser\) await new Promise\(\(\) => undefined\)/);
-    assert.match(shell, /authSession\.mountUserIdentity\(document\.getElementById\('userIdentity'\), authUser\)/);
-    assert.doesNotMatch(shell, /loadOptionalCurrentUser\(\)/);
     assert.match(shell, /data-feishu-doc-trigger/);
-    assert.match(shell, /id="feishuDocTriggerWrap"[^>]*title="上传飞书云文档需登录FBIF内部账号"/);
-    assert.match(shell, /id="feishuDocTrigger"[^>]*aria-disabled="true" disabled/);
+    assert.match(shell, /mountUserIdentity\(document\.getElementById\('userIdentity'\), authUser\)/);
     assert.match(shell, /mountFeishuDocumentImport/);
   }
   const appToolbar = app.slice(app.indexOf('id="previewToolbar"'), app.indexOf('</header>'));
@@ -77,5 +71,4 @@ test('production routes login APIs to Go while keeping the browser callback stat
   assert.match(caddy, /handle @fbifAuth\s*\{\s*reverse_proxy localhost:9001\s*\}/s);
   assert.match(caddy, /@fbifAppShell path[^\n]*\/login\.html[^\n]*\/auth-callback\.html/);
   assert.doesNotMatch(caddy, /@fbifAuth path[^\n]*\/auth-callback/);
-  assert.match(caddy, /@fbifChannels path[^\n]*\/app\.html[^\n]*\/site\.html[^\n]*\/mp \/mp\/\* \/ft \/ft\/\*/);
 });

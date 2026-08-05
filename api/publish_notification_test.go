@@ -85,6 +85,82 @@ func TestPublishTerminalNotificationsPreferDoneCardAndFallbackText(t *testing.T)
 	}
 }
 
+func TestPublishTerminalNotificationsUpdateExistingCardInPlace(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job := publishJob{
+		ID: 8, Stage: publishStagePublished, NotificationKind: publishNotificationPublished,
+		ReviewCardMsgID: "om_review_8", Title: "原位更新测试", SourceURL: testPublishSourceURL,
+		FoodTalksNewsID: 7240, ArticleURL: "https://test.foodtalks.cn/news/7240",
+		ReviewAction: publishReviewApprove, ReviewedBy: "ou_reviewer_1",
+	}
+	var updatedID string
+	var updatedCard map[string]any
+	env.pipeline.updateCard = func(_ context.Context, messageID string, card map[string]any) error {
+		updatedID = messageID
+		updatedCard = card
+		return nil
+	}
+	env.pipeline.notifyCard = func(context.Context, map[string]any) error {
+		t.Fatal("原位更新成功后不应再发送第二张终态卡")
+		return nil
+	}
+	env.notified = nil
+	if err := env.pipeline.sendPublishNotification(context.Background(), job); err != nil {
+		t.Fatalf("send terminal card in place: %v", err)
+	}
+	raw, _ := json.Marshal(updatedCard)
+	if updatedID != job.ReviewCardMsgID || !strings.Contains(string(raw), "已发布") {
+		t.Fatalf("应使用原 message_id 更新已发布卡：id=%q card=%s", updatedID, raw)
+	}
+	if len(env.notified) != 0 {
+		t.Fatalf("原位更新成功后不应再发文本：%v", env.notified)
+	}
+}
+
+func TestPublishPendingNotificationStoresAndReusesCardMessageID(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.store.create("site:notification:same-card", testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	job, err = env.store.update(job.ID, func(j *publishJob) {
+		j.Stage = publishStageAwaitingReview
+		j.Title = "审核卡原位更新测试"
+		j.SourceName = "测试公众号"
+		j.FoodTalksNewsID = 7240
+		j.RiskLevel = publishRiskPass
+		enqueuePublishNotification(j, publishNotificationReviewPending)
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	var sends int
+	env.pipeline.notifyCardWithID = func(_ context.Context, _ map[string]any) (string, error) {
+		sends++
+		return "om_review_same_card", nil
+	}
+	if err := env.pipeline.sendReviewPendingNotification(context.Background(), job); err != nil {
+		t.Fatalf("send pending card: %v", err)
+	}
+	stored, err := env.store.byID(job.ID)
+	if err != nil || stored.ReviewCardMsgID != "om_review_same_card" {
+		t.Fatalf("审核卡 message_id 必须持久化：job=%+v err=%v", stored, err)
+	}
+
+	var updatedID string
+	env.pipeline.updateCard = func(_ context.Context, messageID string, mapCard map[string]any) error {
+		updatedID = messageID
+		return nil
+	}
+	current, _ := env.store.byID(job.ID)
+	if err := env.pipeline.sendReviewPendingNotification(context.Background(), current); err != nil {
+		t.Fatalf("reuse pending card: %v", err)
+	}
+	if sends != 1 || updatedID != "om_review_same_card" {
+		t.Fatalf("已有审核卡应直接复用：sends=%d updatedID=%q", sends, updatedID)
+	}
+}
+
 func TestPublishNotificationRecoverySendsPendingAndAbandonedSending(t *testing.T) {
 	for _, state := range []string{publishNotificationStatePending, publishNotificationStateSending} {
 		t.Run(state, func(t *testing.T) {

@@ -24,6 +24,8 @@ function assertToolbarInGlobalHeader(html, label) {
   assert.ok(headerEnd < appLayoutStart, `${label} header should sit above the app layout`);
   assert.match(header, /id="previewToolbar"/, `${label} toolbar should live in the global top bar`);
   assert.match(header, /id="copyBtn"/, `${label} copy button should live in the top bar`);
+  assert.match(header, /id="copyBtn"[^>]*aria-label="复制全文"/, `${label} icon-only responsive copy button should keep an accessible name`);
+  assert.match(html, /id="copySuccess"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/, `${label} copy result should be announced to assistive technology`);
   assert.doesNotMatch(previewPanelTop, /id="previewToolbar"/, `${label} toolbar must not sit inside the article preview panel`);
 }
 
@@ -46,6 +48,7 @@ function assertUnifiedImportComposer(html, label) {
 
 test('app global header keeps only page actions while the rail owns target and identity', async () => {
   const html = await readShell('app.html');
+  const authSession = await readPublic('js/auth-session.js');
 
   const headerStart = html.indexOf('<header class="global-channel-bar">');
   const headerEnd = html.indexOf('</header>', headerStart);
@@ -64,9 +67,13 @@ test('app global header keeps only page actions while the rail owns target and i
   assert.match(html, /class="import-destination-label">排版到</, 'publishing selector should explain the destination relationship');
   assert.match(header, /id="previewToolbar"/, 'app.html copy toolbar should live in the global top bar');
   assert.match(header, /id="copyBtn"/, 'app.html copy button should be a global top-right action');
+  assert.match(header, /id="copyBtn"[^>]*aria-label="复制全文"/, 'app.html icon-only responsive copy button should keep an accessible name');
+  assert.match(html, /id="copySuccess"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/, 'app.html copy result should be announced to assistive technology');
   assert.match(header, /class="topbar-spacer"[\s\S]*id="previewToolbar"[\s\S]*id="copyBtn"/, 'app.html top bar should right-align the remaining page action');
   assert.doesNotMatch(header, /id="adminLockBtn"|topbar-settings-btn/, 'app.html settings should not be a persistent top-bar icon');
-  assert.match(html, /settingsAction:\s*\{[\s\S]*id:\s*'adminLockBtn'[\s\S]*label:\s*'规则设置'/, 'app.html settings should be registered as an account-menu footer action');
+  assert.doesNotMatch(html, /settingsAction|acct-settings-item/, 'app.html should not put settings in the publishing account menu');
+  assert.match(authSession, /user-identity-action/, 'rule admin should be rendered as an identity-menu action');
+  assert.match(authSession, /id = 'adminLockBtn'/, 'rule admin should keep one delegated opener id');
   assert.doesNotMatch(header, /app-brand|app-brand-logo|FBIF文章排版工具/, 'app.html should not show product branding in the top bar');
   assert.doesNotMatch(header, /id="articleRefreshBtn"/, 'app.html should not show a refresh button in the top bar');
   assert.doesNotMatch(previewPanelTop, /id="previewToolbar"|id="copyBtn"|id="articleRefreshBtn"|preview-toolbar-strip/, 'app.html preview panel should not own the top actions');
@@ -97,33 +104,26 @@ test('site toolbar lives in the global top-right bar, not the article preview pa
   assert.match(html, /<div class="rail-foot">[\s\S]*?id="userIdentity"/, 'site.html signed-in identity should sit in the rail footer');
   assert.match(html, /class="import-destination-label">排版到</, 'site publishing selector should explain the destination relationship');
   assertUnifiedImportComposer(html, 'site.html');
-  assert.match(header, /id="adminLockBtn"/, 'site.html rule admin button should remain in the top bar');
+  assert.doesNotMatch(header, /id="adminLockBtn"/, 'site.html rule admin should move into the identity menu');
   assert.match(html, /class="rail-divider"/, 'site.html should render the shared rail divider');
   assert.match(html, /id="railToggleBtn"/, 'site.html rail divider should expose a real collapse control');
   assert.match(html, /const \{[\s\S]*bindRailDivider[\s\S]*\} = editorShell;/, 'site.html should import the shared rail divider behavior');
   assert.match(html, /bindRailDivider\(\);/, 'site.html should bind finite drag and collapse behavior');
 });
 
-test('editor shell separates two rounded panes with spacing while keeping the resize handle', async () => {
+test('app rail divider stays visually slim and the handle behaves like a clickable control', async () => {
   const css = await readPublic('css/app-shell.css');
-  const tokens = await readPublic('css/feishu-tokens.css');
   const channelCss = await readPublic('css/channel-bar.css');
   const authCss = await readPublic('css/auth-editor.css');
   const shellJs = await readPublic('js/editor-shell.js');
-  assert.match(tokens, /--fs-space-md:\s*12px;/, 'the pane gap should use the project spacing token');
-  assert.match(css, /\.app-layout\s*\{[\s\S]*?padding:\s*var\(--fs-space-md\);[\s\S]*?background:\s*var\(--fs-bg-card\);/, 'the shell should inset both panes on a white canvas');
-  assert.match(css, /\.rail\s*\{[\s\S]*?border:\s*1px solid var\(--fs-border-card\);[\s\S]*?border-radius:\s*var\(--fs-r-l\);[\s\S]*?overflow:\s*hidden;/, 'the left rail should own its rounded surface');
-  assert.match(css, /\.preview-panel\s*\{[\s\S]*?border:\s*1px solid var\(--fs-border-card\);[\s\S]*?border-radius:\s*var\(--fs-r-l\);[\s\S]*?overflow:\s*hidden;[\s\S]*?background:\s*#fff;/, 'the preview should own a clipped, pure-white rounded surface');
-  assert.match(css, /\.rail-divider\s*\{[\s\S]*?width:\s*var\(--fs-space-md\);[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/, 'the resize hit area should read as spacing instead of a divider line');
-  assert.match(css, /@media \(max-width: 820px\)[\s\S]*?\.app-layout\s*\{[^}]*gap:\s*var\(--fs-space-md\);/, 'stacked panes should retain the same semantic gap');
+  assert.match(css, /\.rail-divider\s*\{[\s\S]*?width:\s*4px;/, 'rail divider should stay slim');
   assert.match(css, /\.rail-divider-toggle\s*\{[\s\S]*?width:\s*22px;[\s\S]*?height:\s*38px;[\s\S]*?backdrop-filter:\s*blur\(8px\);[\s\S]*?cursor:\s*pointer;/, 'rail handle should be compact, softly blurred, and clickable');
   assert.match(css, /\.rail-divider-toggle:hover\s*\{[\s\S]*?--rail-toggle-scale:\s*1\.03;/, 'rail handle should use restrained hover motion');
   assert.match(shellJs, /export function bindRailDivider\(/, 'rail divider behavior should live in the shared shell helper');
   assert.match(authCss, /\.rail-foot > \.user-identity\s*\{[\s\S]*?width:\s*100%;/, 'signed-in identity should fill the rail footer');
   assert.match(css, /\.rail-foot\s*\{[\s\S]*?padding:\s*0;[\s\S]*?align-items:\s*stretch;/, 'the login footer should attach directly to its divider without an inset gap');
-  assert.doesNotMatch(css, /\.dropzone\.is-feishu-selected\s+\.import-composer-input\s*\{[^}]*display:\s*none;/s, 'a newer typed intent must remain reachable while a Feishu import is pending');
-  assert.match(authCss, /\.rail-foot \.user-identity-trigger\s*\{[\s\S]*?min-height:\s*55px;[\s\S]*?padding:\s*0 10px;[\s\S]*?border-radius:\s*0;/, 'the login row should fill the footer surface edge to edge');
-  assert.match(authCss, /\.rail-foot \.user-identity-menu\s*\{[\s\S]*?bottom:\s*calc\(100% \+ 7px\);/, 'the rail-footer identity menu must open upward, not off-screen');
+  assert.match(authCss, /\.rail-foot \.user-identity-trigger\s*\{[\s\S]*?min-height:\s*56px;[\s\S]*?padding:\s*0 12px;[\s\S]*?border-radius:\s*0;/, 'the login row should fill the footer surface edge to edge');
+  assert.match(authCss, /\.rail-foot \.user-identity-menu\s*\{[\s\S]*?bottom:\s*calc\(100% \+ 8px\);/, 'the rail-footer identity menu must open upward, not off-screen');
   assert.match(css, /\.import-account-target \.acct-trigger\s*\{[\s\S]*?height:\s*26px;/, 'publishing account should be a compact chip inside the import card');
   assert.doesNotMatch(css, /\.rail-head(?:-title)?\s*\{/, 'the removed title container should not leave dead shell styles');
   assert.match(css, /\.rail-body\s*\{[\s\S]*?background:\s*var\(--fs-bg-nested\);/, 'the rail work area should be the nested surface the import card floats on');
@@ -140,7 +140,9 @@ test('editor shell separates two rounded panes with spacing while keeping the re
   assert.doesNotMatch(css, /preview-toolbar-strip|app-brand|tb-icon-action|article-refresh-spin/, 'old preview action strip and refresh styles should not be restored');
   assert.doesNotMatch(css, /article-tabs|article-tab/, 'article tab styles should not be restored');
   assert.doesNotMatch(css, /topbar-settings-btn|topbar-settings-tooltip/, 'app shell should not keep dead top-bar settings styles');
-  assert.match(channelCss, /\.acct-menu-divider\s*\{[\s\S]*?background:\s*var\(--fs-divider/, 'account menu settings should be separated from account choices');
-  assert.match(channelCss, /\.acct-settings-item\s*\{[\s\S]*?color:\s*var\(--fs-text-2/, 'account menu settings should be a muted menu action');
+  assert.doesNotMatch(channelCss, /acct-settings|acct-menu-divider/, 'publishing account menu should only switch publishing accounts');
+  assert.match(authCss, /\.user-identity-menu\s*\{[\s\S]*?font-family:\s*var\(--fs-font\)/, 'identity menu should use the project typography token');
+  assert.match(authCss, /\.user-identity-status\s*\{[\s\S]*?background:\s*var\(--fs-success-soft\)[\s\S]*?color:\s*var\(--fs-success\)/, 'identity status should use semantic tokens');
+  assert.match(authCss, /\.rail-foot \.user-identity-menu\s*\{[\s\S]*?bottom:\s*calc\(100% \+ 8px\);[\s\S]*?width:\s*min\(340px, calc\(100% - 24px\), calc\(100vw - 24px\)\)/, 'identity menu should stay inside the rail and viewport');
   assert.doesNotMatch(css, /\.sidebar-footer\s+\.active-rule-card/, 'left-bottom rule card styles should not be restored');
 });

@@ -13,7 +13,13 @@ const WECHAT_IMAGE_HOSTS = new Set([
 // Keep two slots free for the independently prepared more-articles image and
 // explicit asset uploads from the same editor session.
 const BASE64_UPLOAD_CONCURRENCY = 4;
-const IMAGE_MATERIALIZE_CONCURRENCY = 4;
+
+// Materializing lazy refs is a plain read: blob: comes from memory, /api/doc-cache/*
+// and /assets/* are static byte reads with no upstream call. Serial fetching used to
+// dominate the window between "preview is on screen" and "the copy artifact actually
+// holds pasteable images" — a server-stripped Feishu export can carry 10+ MB of body
+// images, and every one of them had to wait for the previous round trip.
+const MATERIALIZE_CONCURRENCY = 4;
 
 export function isMmbizUrl(url) {
   try {
@@ -36,33 +42,13 @@ function arrayBufferToBase64(buffer) {
 
 // Fetch a blob: or server cache URL and encode it as a base64 data URL so the
 // skip-upload copy path can paste usable image bytes instead of page-local URLs.
-async function imageRefToDataUrl(src, { timeoutMs = 20000, signal } = {}) {
-  const resp = await fetchWithTimeout(src, { signal }, { timeoutMs, timeoutMessage: '图片下载超时' });
+async function imageRefToDataUrl(src) {
+  const resp = await fetchWithTimeout(src, {}, { timeoutMs: 20000, timeoutMessage: '图片下载超时' });
   if (!resp.ok) throw new Error('fetch ' + src + ' -> ' + resp.status);
   const blob = await resp.blob();
   const mime = blob.type || 'image/png';
-  if (typeof FileReader !== 'undefined') {
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = String(reader.result || '');
-        if (result.startsWith('data:')) resolve(result);
-        else reject(new Error('图片读取失败'));
-      };
-      reader.onerror = () => reject(reader.error || new Error('图片读取失败'));
-      reader.readAsDataURL(blob);
-    });
-  }
   const base64 = arrayBufferToBase64(await blob.arrayBuffer());
   return 'data:' + mime + ';base64,' + base64;
-}
-
-function replaceMaterializedImageRefs(html, replacements) {
-  if (!replacements.size) return html;
-  return String(html || '').replace(/src=(["'])([^"']+)\1/g, (full, quote, src) => {
-    const replacement = replacements.get(src);
-    return replacement ? `src=${quote}${replacement}${quote}` : full;
-  });
 }
 
 function currentOrigin() {
@@ -97,28 +83,19 @@ function isRemoteUploadUrl(url) {
 }
 
 // Upload a single base64 image to OSS. Returns OSS URL or null on failure.
-function throwIfAborted(signal) {
-  if (!signal?.aborted) return;
-  if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
-  throw new DOMException('The operation was aborted', 'AbortError');
-}
-
-async function uploadOne(task, { signal } = {}) {
-  throwIfAborted(signal);
+async function uploadOne(task) {
   const body = JSON.stringify({ base64_images: { [task.key]: task.src } });
   try {
     const resp = await fetchWithTimeout('/api/oss-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
-      signal,
     }, { timeoutMs: 20000 });
     if (!resp.ok) return null;
     const { results } = await resp.json();
     const url = results[task.key] || Object.values(results)[0] || null;
     return isRemoteUploadUrl(url) ? url : null;
-  } catch (err) {
-    throwIfAborted(signal);
+  } catch {
     return null; // 超时/网络错误与上传失败同等处理，交给上层重试机制
   }
 }
@@ -132,13 +109,7 @@ export async function uploadAssetFile(file) {
   return url;
 }
 
-export async function materializeLazyImages(articleCopy, footerCopy, {
-  onProgress,
-  onLog,
-  timeoutMs = 20000,
-  concurrency = IMAGE_MATERIALIZE_CONCURRENCY,
-  signal,
-} = {}) {
+export async function materializeLazyImages(articleCopy, footerCopy, { onProgress, onLog } = {}) {
   const allHtml = articleCopy + '\n' + footerCopy;
   let m;
 
@@ -153,43 +124,49 @@ export async function materializeLazyImages(articleCopy, footerCopy, {
   while ((m = lazyRe.exec(allHtml)) !== null) {
     if (isMaterializableImageRef(m[2])) lazyUrls.add(m[2]);
   }
-  onProgress && onProgress(0, lazyUrls.size);
+  const pending = [...lazyUrls];
+  onProgress && onProgress(0, pending.length);
 
   let done = 0;
-  let nextIndex = 0;
-  const urls = [...lazyUrls];
-  const replacements = new Map();
+  let next = 0;
+  const resolved = new Map();
   const failed = new Set();
+
+  // Substitution stays outside the workers: each replacement rewrites the whole
+  // article string, so interleaving it with in-flight fetches would make the
+  // result depend on completion order. Fetch concurrently, splice once.
   async function worker() {
-    while (nextIndex < urls.length) {
-      const src = urls[nextIndex++];
+    while (next < pending.length) {
+      const src = pending[next++];
       try {
-        replacements.set(src, await imageRefToDataUrl(src, { timeoutMs, signal }));
+        resolved.set(src, await imageRefToDataUrl(src));
       } catch (err) {
         onLog && onLog('error', '图片转 base64 失败', { url: src.slice(0, 60), err: String(err) });
         failed.add(src);
       }
       done++;
-      onProgress && onProgress(done, urls.length);
+      onProgress && onProgress(done, pending.length);
     }
   }
-  const workerCount = Math.min(
-    Math.max(1, Number.isFinite(Number(concurrency)) ? Math.floor(Number(concurrency)) : IMAGE_MATERIALIZE_CONCURRENCY),
-    urls.length,
-  );
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  articleCopy = replaceMaterializedImageRefs(articleCopy, replacements);
-  footerCopy = replaceMaterializedImageRefs(footerCopy, replacements);
-  const failedSrcs = urls.filter(src => failed.has(src));
 
-  return {
-    articleCopy,
-    footerCopy,
-    total: lazyUrls.size,
-    failed: failedSrcs.length,
-    failedSrcs,
-    replacements,
-  };
+  await Promise.all(
+    Array.from({ length: Math.min(pending.length, MATERIALIZE_CONCURRENCY) }, () => worker()),
+  );
+
+  // Keep the original document order so failure reporting and retries stay stable.
+  const failedSrcs = [];
+  for (const src of pending) {
+    const dataUrl = resolved.get(src);
+    if (dataUrl === undefined) {
+      if (failed.has(src)) failedSrcs.push(src);
+      continue;
+    }
+    articleCopy = articleCopy.split(src).join(dataUrl);
+    footerCopy = footerCopy.split(src).join(dataUrl);
+  }
+
+  // replacements 让预览就绪门把回填结果写回 imgCache，重渲染不再退回占位。
+  return { articleCopy, footerCopy, total: pending.length, failed: failedSrcs.length, failedSrcs, replacements: resolved };
 }
 
 // Upload base64 images from DOCX to OSS. External URLs are used directly.
@@ -198,47 +175,11 @@ export async function materializeLazyImages(articleCopy, footerCopy, {
 //
 // Returns { articleCopy, footerCopy, total, failed, failedSrcs }.
 // failedSrcs contains original src strings of images that failed even after retry.
-export async function uploadNonCdnImages(articleCopy, footerCopy, {
-  onProgress,
-  onLog,
-  onMaterialized,
-  transferMmbiz = false,
-  signal,
-} = {}) {
-  throwIfAborted(signal);
-  const materialized = await materializeLazyImages(articleCopy, footerCopy, { onLog, signal });
-  throwIfAborted(signal);
+export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, onLog, onMaterialized, transferMmbiz = false } = {}) {
+  const materialized = await materializeLazyImages(articleCopy, footerCopy, { onLog });
   articleCopy = materialized.articleCopy;
   footerCopy = materialized.footerCopy;
   const lazyFailedSrcs = materialized.failedSrcs || [];
-
-  const mmbizUrls = new Set();
-  if (transferMmbiz) {
-    let mm;
-    const mmRe = /src="(https?:\/\/[^"]+)"/g;
-    const combined = articleCopy + '\n' + footerCopy;
-    while ((mm = mmRe.exec(combined)) !== null) {
-      if (isMmbizUrl(mm[1])) mmbizUrls.add(mm[1]);
-    }
-  }
-  const initialBase64Tasks = [];
-  let b64Match;
-  const initialBase64Re = /src="(data:image\/[^"]+)"/g;
-  const materializedHtml = articleCopy + '\n' + footerCopy;
-  while ((b64Match = initialBase64Re.exec(materializedHtml)) !== null) {
-    initialBase64Tasks.push({
-      type: 'base64',
-      src: b64Match[1],
-      key: 'img_' + initialBase64Tasks.length,
-    });
-  }
-  const transferTotal = mmbizUrls.size + initialBase64Tasks.length;
-  let transferDone = 0;
-  const reportTransfer = (increment = 0) => {
-    transferDone = Math.min(transferTotal, transferDone + increment);
-    onProgress && onProgress(transferDone, transferTotal);
-  };
-  reportTransfer();
 
   // Website channel: re-host WeChat image CDN images on our CDN. Pull each URL through
   // the server proxy → base64, so the upload pass below re-hosts it and replaces
@@ -246,9 +187,17 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, {
   // as-is inside mp.weixin.qq.com and re-hosting would strip GIF animation.
   const mmbizFailedSrcs = [];
   if (transferMmbiz) {
+    const mmbizUrls = new Set();
+    let mm;
+    const mmRe = /src="(https?:\/\/[^"]+)"/g;
+    const combined = articleCopy + '\n' + footerCopy;
+    while ((mm = mmRe.exec(combined)) !== null) {
+      if (isMmbizUrl(mm[1])) mmbizUrls.add(mm[1]);
+    }
     if (mmbizUrls.size > 0) {
       const urlList = [...mmbizUrls];
       onLog && onLog('info', '网站渠道：转存微信图床到 CDN', { count: urlList.length });
+      onProgress && onProgress(0, urlList.length);
       // 把 mmbiz URL 列表整体交给后端 /api/oss-upload 的 urls 模式：后端在服务器内部
       // 并发「取图 + 传 OSS」，直接返回 {mmbiz_url: oss_url}。比前端逐张「取图→base64
       // →上传」快一个量级——后端服务器并发取 mmbiz 不触发微信反爬限流（浏览器并发才
@@ -258,12 +207,11 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ urls: urlList }),
-          signal,
         }, { timeoutMs: 60000, timeoutMessage: '图床转存超时' });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const { results } = await resp.json();
+        let done = 0;
         for (const url of urlList) {
-          throwIfAborted(signal);
           const ossUrl = results && results[url];
           if (ossUrl) {
             articleCopy = articleCopy.split(url).join(ossUrl);
@@ -272,14 +220,14 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, {
             onLog && onLog('error', '微信图床转存失败（保留原链接）', { url: url.slice(0, 60) });
             mmbizFailedSrcs.push(url);
           }
-          reportTransfer(1);
+          done++;
+          onProgress && onProgress(done, urlList.length);
         }
       } catch (err) {
-        throwIfAborted(signal);
         // 整体请求失败：全部保留原 mmbiz 链接，标记失败（可重试）。
         onLog && onLog('error', '微信图床批量转存请求失败', { err: String(err) });
         for (const url of urlList) mmbizFailedSrcs.push(url);
-        reportTransfer(urlList.length);
+        onProgress && onProgress(urlList.length, urlList.length);
       }
     }
   }
@@ -292,16 +240,22 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, {
     failedSrcs: preUploadFailed,
   });
 
-  const tasks = initialBase64Tasks;
-  let mmbizCount = 0;
+  const tasks = [];
+  let m, mmbizCount = 0;
 
   // Refresh combined HTML if any lazy / mmbiz → data: substitutions happened.
   const refreshedHtml = articleCopy + '\n' + footerCopy;
 
+  // base64 data URIs (from DOCX, materialized lazy refs, and any mmbiz we just
+  // converted above) — upload to OSS
+  const b64Re = /src="(data:image\/[^"]+)"/g;
+  while ((m = b64Re.exec(refreshedHtml)) !== null) {
+    tasks.push({ type: 'base64', src: m[1], key: 'img_' + tasks.length });
+  }
+
   // HTTP URLs — use directly, no upload needed
   // (any remaining mmbiz URLs are kept as-is; other external URLs work as-is)
   const urlRe = /src="(https?:\/\/[^"]+)"/g;
-  let m;
   while ((m = urlRe.exec(refreshedHtml)) !== null) {
     if (isMmbizUrl(m[1])) mmbizCount++;
   }
@@ -319,29 +273,26 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, {
   }
 
   onLog && onLog('info', '开始上传Base64图片到OSS', { base64: tasks.length, 外链直接使用: true, mmbiz跳过: mmbizCount });
+  onProgress && onProgress(0, tasks.length);
 
+  let done = 0;
   const failedTasks = [];
   const concurrency = Math.min(tasks.length, BASE64_UPLOAD_CONCURRENCY);
   let next = 0;
 
   async function worker() {
     while (next < tasks.length) {
-      throwIfAborted(signal);
       const task = tasks[next++];
       let cdnUrl = null;
       try {
-        cdnUrl = await uploadOne(task, { signal });
-      } catch (err) {
-        throwIfAborted(signal);
-      }
+        cdnUrl = await uploadOne(task);
+      } catch {}
 
       // Auto-retry once on failure
       if (!cdnUrl) {
         try {
-          cdnUrl = await uploadOne(task, { signal });
-        } catch (err) {
-          throwIfAborted(signal);
-        }
+          cdnUrl = await uploadOne(task);
+        } catch {}
       }
 
       if (cdnUrl) {
@@ -352,7 +303,8 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, {
         failedTasks.push(task);
         onLog && onLog('error', '图片上传失败(已重试)', { src: task.src.substring(0, 80) });
       }
-      reportTransfer(1);
+      done++;
+      onProgress && onProgress(done, tasks.length);
     }
   }
 

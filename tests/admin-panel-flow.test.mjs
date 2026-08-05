@@ -66,7 +66,6 @@ test('规则后台完整状态机：按当前账号加载/保存系列私有模�
     const path = String(url);
     const method = options.method || 'GET';
     requests.push(method + ' ' + path);
-    if (path === '/api/rules/admin/login') return { ok: true, status: 200, json: async () => ({ ok: true }) };
     if (path === '/api/rules/admin/presets' && method === 'GET') return { ok: true, status: 200, json: async () => doc };
     if (path === '/api/rules/admin/presets' && method === 'POST') {
       const body = JSON.parse(options.body);
@@ -101,18 +100,9 @@ test('规则后台完整状态机：按当前账号加载/保存系列私有模�
     opener.focus();
     opener.click();
     const overlay = document.body.lastElementChild;
-    const form = overlay.querySelector('.admin-login-form');
+    await waitFor(() => overlay.querySelector('[data-view="assignments"]'), '后台权限校验未完成');
     assert.ok(document.body.classList.contains('admin-panel-open'), '打开后台时锁住页面滚动');
     assert.ok(opener.hasAttribute('inert'), '后台打开时页面其余内容不可聚焦');
-    const submit = form.querySelector('button[type="submit"]');
-    submit.focus();
-    const tab = new window.Event('keydown', { bubbles: true, cancelable: true });
-    tab.key = 'Tab';
-    submit.dispatchEvent(tab);
-    assert.ok(document.activeElement?.classList.contains('admin-close'), 'Tab 在对话框末尾应回到首个控件');
-    form.querySelector('input').value = 'secret';
-    form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-    await waitFor(() => overlay.querySelector('[data-view="rules"]'), '后台登录未完成');
     overlay.querySelector('[data-view="rules"]').click();
     assert.equal(overlay.querySelector('[data-view="rules"]').getAttribute('aria-current'), 'page', '侧栏标记当前分区');
     const activeRuleTab = overlay.querySelector('.admin-rule-tabs [aria-selected="true"]');
@@ -143,6 +133,7 @@ test('规则后台完整状态机：按当前账号加载/保存系列私有模�
         /\u5df2\u4fdd\u5b58\u5e76\u5e94\u7528/.test(overlay.querySelector('.admin-foot .admin-status')?.textContent || ''),
       '保存新规则后未完成回读与应用',
     );
+    assert.equal(overlay.querySelector('[data-role="dirty-chip"]')?.textContent, '已保存', '保存回读后不应残留假未保存状态');
     overlay.querySelector('.admin-close').click();
     assert.ok(!document.body.classList.contains('admin-panel-open'), '关闭后恢复页面滚动');
     assert.ok(!opener.hasAttribute('inert'), '关闭后恢复页面交互');
@@ -169,7 +160,6 @@ test('待迁移规则后台只允许显式确认基线，不允许编辑后直�
   const posts = [];
   globalThis.fetch = async (url, options = {}) => {
     const method = options.method || 'GET';
-    if (String(url) === '/api/rules/admin/login') return { ok: true, status: 200, json: async () => ({ ok: true }) };
     if (String(url) === '/api/rules/admin/presets' && method === 'GET') return { ok: true, status: 200, json: async () => doc };
     if (String(url) === '/api/rules/admin/presets' && method === 'POST') {
       const body = JSON.parse(options.body);
@@ -191,15 +181,12 @@ test('待迁移规则后台只允许显式确认基线，不允许编辑后直�
     });
     document.getElementById('adminLockBtn').click();
     const overlay = document.body.lastElementChild;
-    const form = overlay.querySelector('.admin-login-form');
-    form.querySelector('input').value = 'secret';
-    form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-    await waitFor(() => overlay.querySelector('[data-view="rules"]'));
+    await waitFor(() => overlay.querySelector('[data-view="rules"]'), '后台权限校验未完成');
     overlay.querySelector('[data-view="rules"]').click();
 
     assert.ok(overlay.querySelector('[data-role="migration-baseline"]'));
     assert.equal(overlay.querySelector('[data-rule-key]'), null, '确认前不渲染可编辑参数表单');
-    assert.ok(overlay.querySelector('[data-action="set-active"]').disabled);
+    assert.equal(overlay.querySelector('[data-action="set-active"]'), null, '迁移规则不应提供提前应用入口');
     overlay.querySelector('[data-action="save"]').click();
     await waitFor(() => /请先选择/.test(overlay.querySelector('.admin-status')?.textContent || ''));
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -253,7 +240,6 @@ test('保存或另存 POST 在途中关闭并切账号，已落库规则不得�
     const activeWrites = [];
     globalThis.fetch = async (url, options = {}) => {
       const method = options.method || 'GET';
-      if (String(url) === '/api/rules/admin/login') return { ok: true, status: 200, json: async () => ({ ok: true }) };
       if (String(url) === '/api/rules/admin/presets' && method === 'GET') return { ok: true, status: 200, json: async () => doc };
       if (String(url) === '/api/rules/admin/presets' && method === 'POST') {
         const body = JSON.parse(options.body);
@@ -282,10 +268,7 @@ test('保存或另存 POST 在途中关闭并切账号，已落库规则不得�
       });
       document.getElementById('adminLockBtn').click();
       let overlay = document.body.lastElementChild;
-      const form = overlay.querySelector('.admin-login-form');
-      form.querySelector('input').value = 'secret';
-      form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-      await waitFor(() => overlay.querySelector('[data-view="rules"]'));
+      await waitFor(() => overlay.querySelector('[data-view="rules"]'), '后台权限校验未完成');
       overlay.querySelector('[data-view="rules"]').click();
       overlay.querySelector(`[data-action="${action}"]`).click();
       await waitFor(() => typeof resolvePost === 'function', action + ' 未发出 POST');

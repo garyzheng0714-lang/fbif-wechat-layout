@@ -32,6 +32,7 @@ var ruleNumberFields = map[string]ruleNumberField{
 	"md_heading_max_chars":     {min: 10, max: 120},
 	"decorative_image_max_px":  {min: 120, max: 1000},
 	"more_articles_slots":      {min: 0, max: 8},
+	"unpublish_window_hours":   {min: 0, max: 720},
 	"banner_overlay_alpha":     {min: 0, max: 1},
 	"banner_title_x":           {min: 0, max: 400},
 	"banner_title_y":           {min: 0, max: 220},
@@ -127,8 +128,9 @@ var ruleModuleFields = map[string]map[string]bool{
 		"table_cell_padding":      true,
 	},
 	"workflow": {
-		"footer_enabled": true,
-		"skip_upload":    true,
+		"footer_enabled":         true,
+		"skip_upload":            true,
+		"unpublish_window_hours": true,
 	},
 }
 

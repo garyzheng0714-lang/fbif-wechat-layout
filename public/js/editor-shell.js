@@ -108,9 +108,9 @@ export function bindRailDivider({
   railID = 'rail',
   dividerID = 'railDivider',
   buttonID = 'railToggleBtn',
-  minWidth = 360,
+  minWidth = 220,
   maxWidth = 420,
-  collapseThreshold = 320,
+  collapseThreshold = 180,
 } = {}) {
   const layout = documentRef.querySelector(layoutSelector);
   const rail = documentRef.getElementById(railID);
@@ -359,11 +359,11 @@ export function bindUrlImportShortcuts({
   documentRef = globalThis.document,
   fetchArticle,
   importText = null,
-  tryImportValue = null,
   ignoreClassNames = [],
   focusTargetSelector = '',
   onInputCleared = null,
   shouldSubmitValue = () => true,
+  tryImportValue = null,
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
   const submitButton = documentRef.getElementById('importSubmitBtn');
@@ -481,8 +481,12 @@ export function wrapCopyFeedback({
     if (btn) {
       setButtonLabel(btn, resetText);
       btn.classList.remove('copied');
+      btn.classList.remove('is-warning');
       const group = typeof btn.closest === 'function' ? btn.closest('.copy-split') : null;
-      if (group) group.classList.remove('is-copied');
+      if (group) {
+        group.classList.remove('is-copied');
+        group.classList.remove('is-warning');
+      }
     }
     const hint = documentRef.getElementById(hintID);
     if (hint) hint.style.display = 'none';

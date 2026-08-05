@@ -29,6 +29,7 @@ test('app shell renders one publishing-account menu inside the import card', asy
   const css = await readFile(new URL('../public/app.css', import.meta.url), 'utf8');
   const channelBarCss = await readFile(new URL('../public/css/channel-bar.css', import.meta.url), 'utf8');
   const menuJs = await readFile(new URL('../public/js/account-menu.js', import.meta.url), 'utf8');
+  const authSession = await readFile(new URL('../public/js/auth-session.js', import.meta.url), 'utf8');
   const allCss = css + '\n' + channelBarCss;
 
   // 单层发布账号菜单：住在左栏导入卡第一行——工具贴着它作用的对象（这次导入去哪个账号）。
@@ -51,7 +52,7 @@ test('app shell renders one publishing-account menu inside the import card', asy
   assert.doesNotMatch(header, /FBIF文章排版工具|class="app-brand-logo"|class="app-brand"/, '全局顶栏不应展示产品身份文案');
   assert.match(header, /class="topbar-spacer"[\s\S]*id="previewToolbar"[\s\S]*id="copyBtn"/, '顶栏只剩当前页面动作，复制全文靠右');
   assert.doesNotMatch(header, /id="adminLockBtn"/, '设置入口不应常驻顶栏');
-  assert.match(app, /settingsAction:\s*\{[\s\S]*id:\s*'adminLockBtn'[\s\S]*label:\s*'规则设置'/, '设置入口应收进账号菜单底部');
+  assert.doesNotMatch(app, /settingsAction|acct-settings-item/, '发布账号菜单不应承载规则后台入口');
   assert.doesNotMatch(header, /id="articleRefreshBtn"/, '刷新按钮不应出现在顶栏');
   // 旧的两层切换器残骸必须清掉
   assert.doesNotMatch(app, /id="accountSwitcher"/, '旧侧栏方角分段已移除');
@@ -61,8 +62,9 @@ test('app shell renders one publishing-account menu inside the import card', asy
   assert.match(menuJs, /CHANNEL_LABEL/);
   assert.match(menuJs, /is-active/);
   assert.match(menuJs, /setActive/);
-  assert.match(menuJs, /acct-menu-divider/);
-  assert.match(menuJs, /data-acct-settings-action/);
+  assert.doesNotMatch(menuJs, /acct-menu-divider|data-acct-settings-action|settingsAction/);
+  assert.match(authSession, /user-identity-action/);
+  assert.match(authSession, /adminLockBtn/);
   assert.match(app, /switchAccount/);
   // S1(2026-07-10)：账号切换的「水合+拉目录+复位选择器」收编进共享模块
   // active-rule-selector.js（行为契约见 tests/active-rule-selector.test.mjs 的
@@ -86,14 +88,14 @@ test('app shell renders one publishing-account menu inside the import card', asy
   assert.match(selectorJs, /data-action="cancel-active-rule"/);
   assert.match(selectorJs, /data-rule-option/);
   assert.match(selectorJs, /listPublicRulePresets/);
-  assert.match(selectorJs, /const accountID = getPack\(\)\.id[\s\S]{0,1200}setActiveRulePreset\(password,\s*nextID,\s*accountID,\s*activeBindingRevision\(accountID\)\)/,
+  assert.match(selectorJs, /const accountID = getPack\(\)\.id[\s\S]{0,1200}setActiveRulePreset\(nextID,\s*accountID,\s*activeBindingRevision\(accountID\)\)/,
     '保存必须固定启动时账号与绑定修订，不得在 await 后重读 getPack');
   assert.doesNotMatch(app, /id="settingsEditBtn"/);
   assert.doesNotMatch(app, /id="settingsForm"/);
   assert.match(allCss, /\.acct-trigger/);
   assert.match(allCss, /\.acct-panel/);
   assert.match(allCss, /\.acct-item\.is-active/);
-  assert.match(allCss, /\.acct-settings-item/);
+  assert.doesNotMatch(allCss, /\.acct-settings-item|\.acct-menu-divider/);
   assert.doesNotMatch(css, /\.sidebar-footer\s+\.active-rule-card/);
   assert.doesNotMatch(css, /\.rail-icon-btn/);
   assert.match(css, /\.active-rule-card\.editing/);

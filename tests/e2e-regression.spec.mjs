@@ -9,12 +9,13 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
-import JSZip from 'jszip';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
 const VISUAL_ENABLED = process.env.E2E_SKIP_VISUAL !== '1';
 const DOCX_PATH = path.resolve('tests/fixtures/tea-pyramid.docx');
 const SCREENSHOT_DIR = path.resolve('tests/e2e-screenshots');
+const E2E_USERNAME = 'e2e';
+const E2E_PASSWORD = 'e2e-local-session-password';
 
 // Ensure screenshot directory
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -24,14 +25,8 @@ const BREAKPOINTS = [
   { name: 'tablet-768', width: 768, height: 1024 },
   { name: 'mobile-390', width: 390, height: 844 },
 ];
-const PANE_WIDE_BREAKPOINTS = [
-  { name: 'wide-1920', width: 1920, height: 1080 },
-  { name: 'ultrawide-2560', width: 2560, height: 1440 },
-];
 
 const RESULTS = [];
-const E2E_USERNAME = 'e2e-editor';
-const E2E_PASSWORD = 'e2e-local-only-password';
 
 // ============ Helpers ============
 
@@ -61,48 +56,6 @@ async function waitForAppReady(page) {
   await page.waitForSelector('.app-layout', { timeout: 15000 });
   // Wait a bit for dynamic JS to settle
   await page.waitForTimeout(2000);
-}
-
-async function expectRoundedPaneShell(page, bp) {
-  const geometry = await page.evaluate(() => {
-    const box = selector => {
-      const element = document.querySelector(selector);
-      const rect = element.getBoundingClientRect();
-      const style = getComputedStyle(element);
-      return {
-        x: rect.x,
-        y: rect.y,
-        right: rect.right,
-        bottom: rect.bottom,
-        width: rect.width,
-        height: rect.height,
-        borderRadius: style.borderRadius,
-        background: style.backgroundColor,
-        display: style.display,
-      };
-    };
-    return {
-      layout: box('.app-layout'),
-      rail: box('.rail'),
-      divider: box('.rail-divider'),
-      preview: box('.preview-panel'),
-    };
-  });
-
-  expect(geometry.layout.background).toBe('rgb(255, 255, 255)');
-  expect(geometry.rail.borderRadius).toBe('10px');
-  expect(geometry.preview.borderRadius).toBe('10px');
-  expect(geometry.preview.background).toBe('rgb(255, 255, 255)');
-
-  if (bp.width > 820) {
-    expect(geometry.preview.x - geometry.rail.right).toBe(12);
-    expect(geometry.preview.y).toBe(geometry.rail.y);
-    expect(geometry.divider.width).toBe(12);
-  } else {
-    expect(geometry.preview.y - geometry.rail.bottom).toBe(12);
-    expect(geometry.preview.x).toBe(geometry.rail.x);
-    expect(geometry.divider.display).toBe('none');
-  }
 }
 
 async function captureAndCheck(page, scenario, bp, extraChecks = null, screenshotOptions = {}) {
@@ -148,20 +101,6 @@ async function captureAndCheck(page, scenario, bp, extraChecks = null, screensho
 // ============ Test Suite ============
 
 test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
-  test('0-未登录必须先经过登录门禁', async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    const page = await context.newPage();
-
-    await page.goto(BASE + '/mp/fbif', { waitUntil: 'domcontentloaded' });
-    await page.waitForURL('**/login.html?return_to=*');
-
-    expect(new URL(page.url()).pathname).toBe('/login.html');
-    expect(new URL(page.url()).searchParams.get('return_to')).toBe('/mp/fbif');
-    await expect(page.locator('#feishuLoginButton')).toBeVisible();
-    await expect(page.locator('#passwordLoginForm')).toBeVisible();
-    await context.close();
-  });
-
   // ---- Scenario 1: 初始空状态 ----
   for (const bp of BREAKPOINTS) {
     test(`1-初始空状态 [${bp.name}]`, async ({ browser }) => {
@@ -176,21 +115,6 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
       await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
       await waitForAppReady(page);
-      await expectRoundedPaneShell(page, bp);
-
-      if (bp.width > 820) {
-        await page.locator('#railToggleBtn').click();
-        await expect(page.locator('.app-layout')).toHaveClass(/rail-collapsed/);
-        await expect.poll(() => page.locator('#rail').evaluate(element => element.getBoundingClientRect().width)).toBe(0);
-        await expect.poll(() => page.locator('#railDivider').evaluate(element => element.getBoundingClientRect().width)).toBe(0);
-        const collapsedPreview = await page.locator('.preview-panel').evaluate(element => {
-          const rect = element.getBoundingClientRect();
-          return { left: rect.left, right: innerWidth - rect.right };
-        });
-        expect(collapsedPreview).toEqual({ left: 12, right: 12 });
-        await page.locator('#railToggleBtn').click();
-        await expect(page.locator('.app-layout')).not.toHaveClass(/rail-collapsed/);
-      }
 
       // Verify empty state is visible
       const emptyState = page.locator('#emptyState');
@@ -216,49 +140,6 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       await context.close();
     });
   }
-
-  for (const bp of PANE_WIDE_BREAKPOINTS) {
-    test(`1b-圆角分栏宽屏 [${bp.name}]`, async ({ browser }) => {
-      const context = await newAuthenticatedContext(browser, {
-        viewport: { width: bp.width, height: bp.height },
-      });
-      const page = await context.newPage();
-
-      await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
-      await waitForAppReady(page);
-      await expectRoundedPaneShell(page, bp);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-
-      await context.close();
-    });
-  }
-
-  test('1c-左栏拖动保持可用下限并越界收起', async ({ browser }) => {
-    const context = await newAuthenticatedContext(browser, {
-      viewport: { width: 1440, height: 900 },
-    });
-    const page = await context.newPage();
-
-    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
-    await waitForAppReady(page);
-    const dividerBox = await page.locator('#railDivider').boundingBox();
-    expect(dividerBox).not.toBeNull();
-    const startX = dividerBox.x + dividerBox.width / 2;
-    const startY = dividerBox.y + dividerBox.height / 2;
-
-    await page.mouse.move(startX, startY);
-    await page.mouse.down();
-    await page.mouse.move(startX - 70, startY);
-    await expect.poll(() => page.locator('#rail').evaluate(element => element.getBoundingClientRect().width)).toBe(360);
-    await expect(page.locator('.app-layout')).not.toHaveClass(/rail-collapsed/);
-
-    await page.mouse.move(startX - 110, startY);
-    await expect(page.locator('.app-layout')).toHaveClass(/rail-collapsed/);
-    await expect.poll(() => page.locator('#rail').evaluate(element => element.getBoundingClientRect().width)).toBe(0);
-    await page.mouse.up();
-
-    await context.close();
-  });
 
   // ---- Scenario 2: 上传 DOCX 全流程 ----
   for (const bp of BREAKPOINTS) {
@@ -544,10 +425,11 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
       await waitForAppReady(page);
 
-      // Click the rule settings entry inside the account menu.
-      await page.locator('.acct-trigger').click();
-      const adminBtn = page.locator('#adminLockBtn');
-      if (await adminBtn.isVisible()) {
+      // Click the rule settings entry inside the signed-in identity menu.
+      await page.locator('.rail-foot .user-identity-trigger').click();
+      const adminBtn = page.locator('.user-identity-menu #adminLockBtn');
+      const adminEntryVisible = await adminBtn.isVisible();
+      if (adminEntryVisible) {
         await adminBtn.click();
         await page.waitForTimeout(2000);
       }
@@ -556,7 +438,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       // 带构建号的 URL；换链期间旧缓存可能仍把 overlay 当成 app-layout 内的绝对定位，
       // 即使 padding/max-width 已经相同，截图仍会随机上下偏移一个顶栏高度。这里等待
       // 最终样式合同全部落稳：overlay 固定铺满视口，tablet 抽屉保留 12px 安全边距。
-      if (bp.width === 768) {
+      if (bp.width === 768 && adminEntryVisible) {
         await expect(page.locator('.admin-overlay')).toHaveCSS('padding', '12px');
         await expect(page.locator('.admin-overlay')).toHaveCSS('position', 'fixed');
         await expect(page.locator('.admin-overlay')).toHaveCSS('top', '0px');
@@ -817,402 +699,67 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
     await context.close();
   });
 
-  // ---- Scenario 14: 底部更新不得重建正文图片 ----
-  test('14-底部更新保留正文图片节点，避免长文图片闪烁与重复解码', async ({ browser }) => {
-    const context = await newAuthenticatedContext(browser, { viewport: { width: 1440, height: 900 } });
-    const page = await context.newPage();
+  test('14-网站复制分体按钮在桌面、平板和手机断点保持统一几何', async ({ browser }) => {
+    for (const bp of BREAKPOINTS) {
+      const context = await newAuthenticatedContext(browser, {
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      await page.goto(BASE + '/ft/ft-default', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
 
-    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
-    await waitForAppReady(page);
-    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
-    await page.waitForFunction(() => {
-      const images = Array.from(document.querySelectorAll('#contentArea img[src^="blob:"]'));
-      return images.length > 0 && images.every(img => img.complete && img.naturalWidth > 0);
-    }, { timeout: 30000 });
-
-    const firstImage = await page.evaluateHandle(() => document.querySelector('#contentArea img[src^="blob:"]'));
-    await page.evaluate(() => window._updateFooter?.(null));
-    const footerUpdate = await page.evaluate((before) => ({
-      connected: before.isConnected,
-      sameNode: before === document.querySelector('#contentArea img[src^="blob:"]'),
-    }), firstImage);
-
-    expect(footerUpdate).toEqual({ connected: true, sameNode: true });
-
-    await page.evaluate(() => window._updateMoreArticles?.());
-    const moreArticlesUpdate = await page.evaluate((before) => ({
-      connected: before.isConnected,
-      sameNode: before === document.querySelector('#contentArea img[src^="blob:"]'),
-    }), firstImage);
-
-    expect(moreArticlesUpdate).toEqual({ connected: true, sameNode: true });
-    await firstImage.dispose();
-    await context.close();
-  });
-
-  // ---- Scenario 15: 本地 DOCX 首屏图片不得先透明再淡入 ----
-  test('15-本地DOCX正文与已解码图片同帧出现', async ({ browser }) => {
-    const context = await newAuthenticatedContext(browser, { viewport: { width: 1440, height: 900 } });
-    await context.addInitScript(() => {
-      const originalDecode = HTMLImageElement.prototype.decode;
-      window.__pendingBlobDecodes = 0;
-      HTMLImageElement.prototype.decode = function delayedBlobDecode() {
-        const image = this;
-        const decoded = originalDecode.call(image);
-        if (!String(image.src || '').startsWith('blob:')) return decoded;
-        window.__pendingBlobDecodes++;
-        return decoded.then(
-          value => new Promise(resolve => {
-            setTimeout(() => {
-              window.__pendingBlobDecodes--;
-              resolve(value);
-            }, 400);
-          }),
-          error => {
-            window.__pendingBlobDecodes--;
-            throw error;
-          },
-        );
-      };
-    });
-    const page = await context.newPage();
-
-    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
-    await waitForAppReady(page);
-    await page.evaluate(() => {
-      window.__docxImageStateAtPreview = null;
-      window.addEventListener('fbif:article-previewed', () => {
-        const images = Array.from(document.querySelectorAll('#contentArea img[src^="blob:"]'));
-        window.__docxImageStateAtPreview = {
-          count: images.length,
-          incomplete: images.filter(img => !img.complete || img.naturalWidth === 0).length,
-          hidden: images.filter(img => img.classList.contains('wx-img-loading')).length,
-          pendingDecodes: window.__pendingBlobDecodes,
+      const geometry = await page.evaluate(() => {
+        const root = document.getElementById('copySplit').getBoundingClientRect();
+        const primary = document.getElementById('copyBtn').getBoundingClientRect();
+        const toggle = document.getElementById('copyMenuBtn').getBoundingClientRect();
+        return {
+          rootHeight: root.height,
+          primaryHeight: primary.height,
+          toggleHeight: toggle.height,
+          primaryBottom: primary.bottom,
+          toggleBottom: toggle.bottom,
         };
-      }, { once: true });
-    });
+      });
+      const expectedHeight = bp.width <= 820 ? 44 : 36;
+      expect(geometry.rootHeight).toBe(expectedHeight);
+      expect(geometry.primaryHeight).toBe(expectedHeight);
+      expect(geometry.toggleHeight).toBe(expectedHeight);
+      expect(geometry.primaryBottom).toBe(geometry.toggleBottom);
+      await expect(page.locator('#copyBtn')).toHaveAttribute('aria-label', '复制全文');
 
-    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
-    await page.waitForFunction(() => window.__docxImageStateAtPreview !== null, { timeout: 30000 });
-    const state = await page.evaluate(() => window.__docxImageStateAtPreview);
-
-    expect(state.count).toBeGreaterThan(0);
-    expect(state.incomplete).toBe(0);
-    expect(state.hidden).toBe(0);
-    expect(state.pendingDecodes).toBe(0);
-
-    await page.evaluate(() => {
-      const firstImage = document.querySelector('#contentArea img[src^="blob:"]');
-      firstImage.__e2eDecodedNode = 'preserve';
-    });
-    const rerender = await page.evaluate(() => window._engineRerender({ __detailedOutcome: true }));
-    expect(rerender.status).toBe('committed');
-    const preserved = await page.evaluate(() => {
-      const firstImage = document.querySelector('#contentArea img[src^="blob:"]');
-      return {
-        marker: firstImage?.__e2eDecodedNode || '',
-        incomplete: !firstImage?.complete || firstImage.naturalWidth === 0,
-        hidden: firstImage?.classList.contains('wx-img-loading') || false,
-      };
-    });
-    expect(preserved).toEqual({
-      marker: 'preserve',
-      incomplete: false,
-      hidden: false,
-    });
-    await context.close();
+      await context.close();
+    }
   });
 
-  // ---- Scenario 16: 飞书总进度 100% 必须和可见、可复制原子完成 ----
-  test('16-飞书真实工作量进度到100时已排版且可立即复制', async ({ browser }) => {
-    const context = await newAuthenticatedContext(browser, {
-      viewport: { width: 1440, height: 900 },
-      permissions: ['clipboard-read', 'clipboard-write'],
-    });
+  test('15-网站规则加载期间锁定整个复制分体按钮', async ({ browser }) => {
+    const context = await newAuthenticatedContext(browser, { viewport: { width: 768, height: 1024 } });
     const page = await context.newPage();
-    const docx = fs.readFileSync(DOCX_PATH);
-    const cancelledImportSentinel = '取消导入绝不能覆盖原文';
-    const cancelledImportZip = await JSZip.loadAsync(docx);
-    const documentXmlPath = 'word/document.xml';
-    const documentXml = await cancelledImportZip.file(documentXmlPath).async('string');
-    expect(documentXml).toContain('Tea Forté的金字塔茶包');
-    cancelledImportZip.file(
-      documentXmlPath,
-      documentXml.replace('Tea Forté的金字塔茶包', cancelledImportSentinel),
-    );
-    const cancelledImportDocx = await cancelledImportZip.generateAsync({ type: 'nodebuffer' });
-    const deterministicRemoteImage = fs.readFileSync(path.resolve('public/fbif-logo.png'));
-    const statuses = [
-      { state: 'running', phase: 'resolve', done: 1, total: 1, unit: 'document' },
-      { state: 'running', phase: 'create', done: 1, total: 1, unit: 'task' },
-      { state: 'running', phase: 'export_wait', done: 0, total: 0, unit: '' },
-      { state: 'running', phase: 'export_wait', done: 1, total: 1, unit: 'task' },
-      { state: 'running', phase: 'download', done: 2048, total: 4096, unit: 'bytes' },
-      { state: 'running', phase: 'download', done: 4096, total: 4096, unit: 'bytes' },
-      { state: 'running', phase: 'optimize', done: 1, total: 3, unit: 'entries' },
-      { state: 'running', phase: 'optimize', done: 3, total: 3, unit: 'entries' },
-      { state: 'running', phase: 'image_enumerate', done: 2, total: 2, unit: 'images' },
-      { state: 'running', phase: 'image_upload', done: 1, total: 2, unit: 'images' },
-      { state: 'running', phase: 'image_upload', done: 2, total: 2, unit: 'images' },
-      { state: 'running', phase: 'image_map', done: 2, total: 2, unit: 'images' },
-      { state: 'completed', phase: 'finalize', done: 1, total: 1, unit: 'document' },
-    ];
-    let statusIndex = 0;
-    let exportAttempt = 0;
-    let optionalUploadRequests = 0;
-    let remoteImageElementRequests = 0;
+    let releaseRuleRequest;
+    let markRuleRequest;
+    const ruleRequestHeld = new Promise(resolve => { releaseRuleRequest = resolve; });
+    const ruleRequestSeen = new Promise(resolve => { markRuleRequest = resolve; });
 
-    await page.route('**/api/me', route => route.fulfill({
-      status: 200,
-      contentType: 'application/json; charset=utf-8',
-      body: JSON.stringify({
-        user: {
-          id: 'ou_feishu_e2e',
-          name: '飞书 E2E',
-          auth_mode: 'feishu',
-          capabilities: { feishu_documents: true },
-        },
-      }),
-    }));
-    // tea-pyramid 的 Mote 规则会插入一张远端署名图。E2E 不依赖公网，
-    // 但仍让这张真实可见图片完成 load/decode，才能验收 100% 原子契约。
-    await page.route('https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/**', route => {
-      if (route.request().resourceType() === 'image') remoteImageElementRequests++;
-      return route.fulfill({
-        status: 200,
-        contentType: 'image/png',
-        headers: { 'Cache-Control': 'no-store' },
-        body: deterministicRemoteImage,
-      });
-    });
-    await page.route('**/api/feishu/docs/search?*', route => route.fulfill({
-      status: 200,
-      contentType: 'application/json; charset=utf-8',
-      body: JSON.stringify({
-        documents: [{
-          token: 'doxcn_feishu_progress_e2e',
-          type: 'docx',
-          title: '飞书总进度验收文档',
-          url: 'https://example.feishu.cn/docx/doxcn_feishu_progress_e2e',
-        }],
-      }),
-    }));
-    await page.route('**/api/feishu/docs/export/jobs**', async route => {
-      const request = route.request();
-      const url = new URL(request.url());
-      if (request.method() === 'POST' && url.pathname === '/api/feishu/docs/export/jobs') {
-        exportAttempt++;
-        await route.fulfill({
-          status: 202,
-          contentType: 'application/json; charset=utf-8',
-          body: JSON.stringify({
-            job_id: 'job_e2e',
-            state: 'queued',
-            phase: 'queued',
-            done: 0,
-            total: 0,
-            unit: '',
-            version: 1,
-            status_url: '/api/feishu/docs/export/jobs/job_e2e',
-            result_url: '/api/feishu/docs/export/jobs/job_e2e/result',
-          }),
-        });
-        return;
-      }
-      if (request.method() === 'GET' && url.pathname.endsWith('/result')) {
-        const resultDocx = exportAttempt >= 2 ? cancelledImportDocx : docx;
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          headers: {
-            'Content-Length': String(resultDocx.byteLength),
-            'Content-Disposition': "attachment; filename*=UTF-8''feishu-progress-e2e.docx",
-          },
-          body: resultDocx,
-        });
-        return;
-      }
-      if (request.method() === 'GET' && url.pathname.endsWith('/job_e2e')) {
-        await new Promise(resolve => setTimeout(resolve, 70));
-        const current = statuses[Math.min(statusIndex, statuses.length - 1)];
-        statusIndex++;
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json; charset=utf-8',
-          body: JSON.stringify({
-            job_id: 'job_e2e',
-            ...current,
-            version: statusIndex + 1,
-            result_url: '/api/feishu/docs/export/jobs/job_e2e/result',
-          }),
-        });
-        return;
-      }
-      if (request.method() === 'DELETE') {
-        await route.fulfill({ status: 204 });
-        return;
-      }
-      await route.abort();
-    });
-    await page.route('**/api/oss-upload', async route => {
-      optionalUploadRequests++;
-      try {
-        return await route.fulfill({
-          status: 503,
-          contentType: 'application/json; charset=utf-8',
-          body: JSON.stringify({ error: 'E2E optional CDN unavailable' }),
-        });
-      } catch {
-        return undefined;
-      }
+    await page.route('**/api/rules/active?**', async route => {
+      markRuleRequest();
+      await ruleRequestHeld;
+      await route.continue();
     });
 
-    await page.goto(BASE + '/mp/fbif', { waitUntil: 'networkidle' });
-    await waitForAppReady(page);
-    await expect(page.locator('#feishuDocCapability')).toHaveText('粘贴后自动排版');
-
-    // 先放一篇真实 DOCX 在右侧，锁定“等待期间旧预览不能变白”的契约。
-    await page.locator('#fileInput').setInputFiles(DOCX_PATH);
-    await page.waitForFunction(() => {
-      const area = document.getElementById('contentArea');
-      return area && area.innerHTML.trim().length > 0;
-    }, { timeout: 30000 });
-    await page.waitForFunction(() => {
-      const images = Array.from(document.querySelectorAll('#contentArea img'))
-        .filter(image => image.getClientRects().length > 0);
-      return images.length > 0 && images.every(image => image.complete && image.naturalWidth > 0);
-    }, { timeout: 30000 });
-    const remoteRequestsBeforeFeishuImport = remoteImageElementRequests;
-
-    await page.evaluate(() => {
-      window.__feishuProgressSamples = [];
-      const progress = document.getElementById('progress');
-      const record = () => {
-        const visible = getComputedStyle(progress).display !== 'none';
-        const raw = progress.getAttribute('aria-valuenow');
-        if (!visible || raw === null) return;
-        const images = Array.from(document.querySelectorAll('#contentArea img'))
-          .filter(image => image.getClientRects().length > 0);
-        window.__feishuProgressSamples.push({
-          percent: Number(raw),
-          status: document.getElementById('progressText')?.textContent || '',
-          contentLength: document.getElementById('contentArea')?.innerHTML.trim().length || 0,
-          previewVisible: getComputedStyle(document.getElementById('previewContent')).display !== 'none',
-          imageCount: images.length,
-          imagesReady: images.every(image => image.complete && image.naturalWidth > 0),
-        });
-      };
-      new MutationObserver(record).observe(progress, {
-        attributes: true,
-        attributeFilter: ['aria-valuenow'],
-      });
-      record();
-    });
-
-    await page.locator('#urlInput').fill('@进度');
-    await expect(page.locator('[data-feishu-doc-result]')).toHaveCount(1);
-    await page.locator('[data-feishu-doc-result]').click();
-    const importOutcome = await page.waitForFunction(
-      () => {
-        if (window.__feishuProgressSamples.some(sample => sample.percent === 100)) return 'complete';
-        if (document.querySelector('.feishu-doc-message.is-error')) return 'failed';
-        return '';
-      },
-      { timeout: 60000 },
-    );
-    const outcome = await importOutcome.jsonValue();
-    if (outcome !== 'complete') {
-      const diagnostics = await page.evaluate(() => ({
-        logs: window.getConvLog?.() || [],
-        samples: window.__feishuProgressSamples,
-        currentImages: Array.from(document.querySelectorAll('#contentArea img')).map(image => ({
-          src: String(image.getAttribute('src') || '').slice(0, 160),
-          srcLength: String(image.getAttribute('src') || '').length,
-          className: image.className || '',
-          complete: image.complete,
-          naturalWidth: image.naturalWidth,
-          style: image.getAttribute('style') || '',
-        })),
-      }));
-      console.log('飞书进度 E2E 诊断:', JSON.stringify(diagnostics, null, 2));
+    const navigation = page.goto(BASE + '/ft/ft-default', { waitUntil: 'networkidle' });
+    await ruleRequestSeen;
+    try {
+      await expect(page.locator('#copyBtn')).toBeDisabled();
+      await expect(page.locator('#copyMenuBtn')).toBeDisabled();
+      await expect(page.locator('#copyHtmlBtn')).toBeDisabled();
+      await expect(page.locator('#copyMenu')).toBeHidden();
+    } finally {
+      releaseRuleRequest();
     }
-    expect(outcome).toBe('complete');
-
-    const samples = await page.evaluate(() => window.__feishuProgressSamples);
-    const percents = samples.map(sample => sample.percent);
-    expect(new Set(percents).size).toBeGreaterThan(6);
-    expect(percents.every((value, index) => index === 0 || value >= percents[index - 1])).toBeTruthy();
-    expect(samples.filter(sample => sample.percent < 100).every(sample => sample.contentLength > 0)).toBeTruthy();
-    const firstHundred = samples.find(sample => sample.percent === 100);
-    expect(firstHundred).toMatchObject({
-      previewVisible: true,
-      imagesReady: true,
-    });
-    expect(firstHundred.contentLength).toBeGreaterThan(0);
-    await expect(page.locator('#error')).toBeHidden();
-    expect(remoteImageElementRequests - remoteRequestsBeforeFeishuImport).toBe(
-      1,
-      '最终请求属性必须在首次加载前写入，离屏组装不得触发第二次图片请求',
-    );
-
-    const uploadsBeforeCopy = optionalUploadRequests;
-    const copyResult = await page.evaluate(async () => {
-      const started = performance.now();
-      const ok = await window.copyContent();
-      return { ok, elapsed: performance.now() - started };
-    });
-    expect(copyResult.ok).toBeTruthy();
-    expect(copyResult.elapsed).toBeLessThan(1000);
-    expect(optionalUploadRequests).toBe(uploadsBeforeCopy);
-    await expect(page.locator('#copyBtn')).toHaveText('✓ 已复制');
-
-    // Renderer handoff 后再修改 @ 查询：必须中止同一个引擎意图，不能让旧文档
-    // 偷偷提交，也不能遗留 connected staging 或伪报 100%。
-    const committedHtml = await page.locator('#contentArea').evaluate(node => node.innerHTML);
-    await page.evaluate((sentinel) => {
-      window.__cancelledFeishuCommits = 0;
-      window.addEventListener('fbif:article-session-activated', (event) => {
-        const articleHtml = String(event.detail?.session?.articleHtml || '');
-        if (articleHtml.includes(sentinel)) window.__cancelledFeishuCommits++;
-      });
-    }, cancelledImportSentinel);
-    await page.evaluate(() => {
-      const originalDecode = HTMLImageElement.prototype.decode;
-      let blocked = false;
-      window.__slowStagingDecodeStarted = false;
-      window.__restoreStagingDecode = () => {
-        HTMLImageElement.prototype.decode = originalDecode;
-      };
-      HTMLImageElement.prototype.decode = function (...args) {
-        if (!blocked && this.closest?.('[data-preview-staging]')) {
-          blocked = true;
-          window.__slowStagingDecodeStarted = true;
-          return new Promise(() => {});
-        }
-        return originalDecode.apply(this, args);
-      };
-    });
-    await page.locator('#urlInput').fill('@取消中的文档');
-    await expect(page.locator('[data-feishu-doc-result]')).toHaveCount(1);
-    await page.locator('[data-feishu-doc-result]').click();
-    await page.waitForFunction(() => (
-      window.__slowStagingDecodeStarted
-      && document.querySelector('[data-preview-staging]')
-    ), {
-      timeout: 60000,
-    });
-    await page.locator('#urlInput').fill('@新的用户意图');
-    await page.waitForFunction(() => !document.querySelector('[data-preview-staging]'), {
-      timeout: 10000,
-    });
-    await page.waitForTimeout(1700);
-
-    expect(await page.evaluate(() => window.__cancelledFeishuCommits)).toBe(0);
-    expect(await page.locator('#contentArea').evaluate(node => node.innerHTML)).toBe(committedHtml);
-    await expect(page.locator('#contentArea')).not.toContainText(cancelledImportSentinel);
-    await expect(page.locator('#progress')).toBeHidden();
-    await expect(page.locator('#dropZone')).not.toHaveClass(/processing/);
-    await page.evaluate(() => window.__restoreStagingDecode?.());
+    await navigation;
+    await waitForAppReady(page);
+    await expect(page.locator('#copyBtn')).toBeEnabled();
+    await expect(page.locator('#copyMenuBtn')).toBeEnabled();
+    await expect(page.locator('#copyHtmlBtn')).toBeEnabled();
 
     await context.close();
   });

@@ -6,15 +6,15 @@ import { reduced } from './anim.js';
 
 export function livePreviewHTML() {
   return `
-    <aside class="admin-live" aria-label="实时预览">
-      <div class="admin-live-head"><span class="admin-live-dot"></span>实时预览</div>
+    <aside class="admin-live" aria-label="排版样例">
+      <div class="admin-live-head"><strong>排版样例</strong><span>修改后即时更新</span></div>
       <div class="admin-live-paper">
-        <div class="admin-live-title" data-lv="title">占位标题：实时预览排版效果</div>
-        <p class="admin-live-p" data-lv="p1">这里是占位正文，用于演示当前规则的字号、行高与段距。调整左侧参数会立刻反映在这段文字上。</p>
-        <p class="admin-live-p" data-lv="p2">占位段落含<strong data-lv="strong">加粗重点</strong>与<a data-lv="link">蓝色链接</a>，便于核对强调与链接颜色。</p>
-        <div class="admin-live-figure"><span>配图</span></div>
-        <p class="admin-live-cap" data-lv="cap">配图说明占位文本</p>
-        <p class="admin-live-attr" data-lv="attr">来源：占位来源　作者：占位作者</p>
+        <div class="admin-live-title" data-lv="title">食品创新，正在从概念走向日常</div>
+        <p class="admin-live-p" data-lv="p1">新技术只有进入真实消费场景，才能形成稳定价值。排版规则需要让读者更轻松地理解内容。</p>
+        <p class="admin-live-p" data-lv="p2">这段样例包含<strong data-lv="strong">加粗重点</strong>与<a data-lv="link">内容链接</a>，用于核对强调层级和颜色。</p>
+        <div class="admin-live-figure"><span>产品应用场景</span></div>
+        <p class="admin-live-cap" data-lv="cap">图：产品应用场景示例</p>
+        <p class="admin-live-attr" data-lv="attr">来源：FoodTalks　作者：编辑部</p>
       </div>
     </aside>`;
 }

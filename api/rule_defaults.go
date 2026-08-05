@@ -12,26 +12,28 @@ import (
 
 func defaultRuleConfig() map[string]any {
 	return map[string]any{
-		"font_size":                   "15",
-		"heading_size":                "18",
-		"text_color":                  "#544545",
-		"link_color":                  "#0070C0",
-		"muted_color":                 "#888888",
-		"line_height":                 "1.75",
-		"letter_spacing":              "0.034",
-		"font_family":                 "PingFang SC",
-		"footer_enabled":              true,
-		"skip_upload":                 true,
-		"paragraph_margin_x":          "8",
-		"paragraph_gap":               "20",
-		"caption_font_size":           "12",
-		"attribution_font_size":       "15",
-		"blockquote_padding_left":     "12",
-		"blockquote_border_width":     "3",
-		"md_heading_max_chars":        "60",
-		"decorative_image_max_px":     "640",
-		"more_articles_enabled":       true,
-		"more_articles_slots":         "3",
+		"font_size":               "15",
+		"heading_size":            "18",
+		"text_color":              "#544545",
+		"link_color":              "#0070C0",
+		"muted_color":             "#888888",
+		"line_height":             "1.75",
+		"letter_spacing":          "0.034",
+		"font_family":             "PingFang SC",
+		"footer_enabled":          true,
+		"skip_upload":             true,
+		"paragraph_margin_x":      "8",
+		"paragraph_gap":           "20",
+		"caption_font_size":       "12",
+		"attribution_font_size":   "15",
+		"blockquote_padding_left": "12",
+		"blockquote_border_width": "3",
+		"md_heading_max_chars":    "60",
+		"decorative_image_max_px": "640",
+		"more_articles_enabled":   true,
+		"more_articles_slots":     "3",
+		// 网站发布后默认允许在 8 小时内下线；规则后台可按网站账号调整。
+		"unpublish_window_hours":      "8",
 		"more_articles_default_cards": defaultMoreArticleCards(),
 		// 统一表格样式（公众号与网站共享这一套默认；各 preset 可在规则后台独立覆盖）。
 		// 默认复刻 FBIF/FoodTalks 既有公众号表格：FoodTalks 蓝表头 + 白字 + 浅灰网格线。
@@ -349,6 +351,7 @@ func defaultFoodTalksSiteRuleConfig() map[string]any {
 			"bottom_blocks":           defaultBottomBlocksModule(),
 			"article_footer_defaults": disabledArticleFooterDefaultsModule(),
 		},
+		"unpublish_window_hours": "8",
 	}
 }
 

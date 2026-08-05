@@ -135,6 +135,13 @@ function appendTextLine(documentRef, parent, className, text) {
   return line;
 }
 
+function ruleAdminRoleLabel(user) {
+  const role = String(user?.role || '').trim();
+  if (role === 'super_admin' || user?.capabilities?.rule_super_admin === true) return '超级管理员';
+  if (role === 'admin' || user?.capabilities?.rule_admin === true) return '管理员';
+  return '';
+}
+
 // 身份菜单固定在左栏底部并向上展开，所以静止态的箭头朝上；展开时 CSS 旋转 180° 指回收起方向。
 function makeCaretIcon(documentRef) {
   const namespace = 'http://www.w3.org/2000/svg';
@@ -147,6 +154,48 @@ function makeCaretIcon(documentRef) {
   path.setAttribute('d', 'm6 12 4-4 4 4');
   path.setAttribute('stroke', 'currentColor');
   path.setAttribute('stroke-width', '1.7');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  icon.append(path);
+  return icon;
+}
+
+function makeRuleAdminIcon(documentRef) {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = documentRef.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('width', '18');
+  icon.setAttribute('height', '18');
+  icon.setAttribute('fill', 'none');
+  icon.setAttribute('aria-hidden', 'true');
+  const paths = [
+    ['M4 21v-7', 'M4 10V3', 'M12 21v-9', 'M12 8V3', 'M20 21v-5', 'M20 12V3'],
+    ['M1 14h6', 'M9 8h6', 'M17 16h6'],
+  ];
+  paths.flat().forEach(d => {
+    const path = documentRef.createElementNS(namespace, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.7');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    icon.append(path);
+  });
+  return icon;
+}
+
+function makeActionChevronIcon(documentRef) {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = documentRef.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 16 16');
+  icon.setAttribute('width', '14');
+  icon.setAttribute('height', '14');
+  icon.setAttribute('fill', 'none');
+  icon.setAttribute('aria-hidden', 'true');
+  const path = documentRef.createElementNS(namespace, 'path');
+  path.setAttribute('d', 'm6 3 5 5-5 5');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.6');
   path.setAttribute('stroke-linecap', 'round');
   path.setAttribute('stroke-linejoin', 'round');
   icon.append(path);
@@ -191,8 +240,12 @@ export function mountUserIdentity(container, user, {
 
   const menu = documentRef.createElement('div');
   menu.className = 'user-identity-menu';
+  const menuID = `${container.id || 'userIdentity'}Menu`;
+  menu.id = menuID;
   menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', '个人身份菜单');
   menu.hidden = true;
+  trigger.setAttribute('aria-controls', menuID);
 
   const profile = documentRef.createElement('div');
   profile.className = 'user-identity-profile';
@@ -200,35 +253,70 @@ export function mountUserIdentity(container, user, {
   const profileCopy = documentRef.createElement('div');
   profileCopy.className = 'user-identity-profile-copy';
   appendTextLine(documentRef, profileCopy, 'user-identity-profile-name', user.name || '未命名用户');
-  appendTextLine(
-    documentRef,
-    profileCopy,
-    'user-identity-mode',
-    user.auth_mode === 'feishu' ? '飞书登录' : '账号密码登录',
-  );
+  const profileMeta = documentRef.createElement('div');
+  profileMeta.className = 'user-identity-profile-meta';
+  const loginMode = documentRef.createElement('span');
+  loginMode.className = 'user-identity-mode';
+  loginMode.textContent = user.auth_mode === 'feishu' ? '飞书登录' : '账号密码登录';
+  profileMeta.append(loginMode);
+  const adminRole = ruleAdminRoleLabel(user);
+  if (adminRole) {
+    const roleBadge = documentRef.createElement('span');
+    roleBadge.className = 'user-identity-role';
+    roleBadge.textContent = adminRole;
+    profileMeta.append(roleBadge);
+  }
+  profileCopy.append(profileMeta);
   profile.append(profileCopy);
   menu.append(profile);
 
-  const capability = appendTextLine(
-    documentRef,
-    menu,
-    `user-identity-status${user.capabilities?.feishu_documents ? '' : ' is-locked'}`,
-    user.capabilities?.feishu_documents
-      ? '飞书云文档已连接，可在输入框中使用 @ 搜索并导入。'
-      : '飞书文档搜索、提取和生成功能不可用。',
-  );
+  const capability = documentRef.createElement('div');
+  capability.className = `user-identity-status${user.capabilities?.feishu_documents ? '' : ' is-locked'}`;
+  const statusDot = documentRef.createElement('span');
+  statusDot.className = 'user-identity-status-dot';
+  statusDot.setAttribute('aria-hidden', 'true');
+  const statusText = documentRef.createElement('span');
+  statusText.textContent = user.capabilities?.feishu_documents
+    ? '飞书云文档已连接'
+    : '飞书云文档不可用';
+  capability.append(statusDot, statusText);
   capability.setAttribute('role', 'status');
+  capability.setAttribute('aria-live', 'polite');
+  menu.append(capability);
 
   const divider = documentRef.createElement('div');
   divider.className = 'user-identity-divider';
   menu.append(divider);
+
+  if (adminRole) {
+    const adminButton = documentRef.createElement('button');
+    adminButton.type = 'button';
+    adminButton.id = 'adminLockBtn';
+    adminButton.className = 'user-identity-action';
+    adminButton.setAttribute('role', 'menuitem');
+    adminButton.setAttribute('aria-label', '打开规则后台');
+    adminButton.append(makeRuleAdminIcon(documentRef));
+    const adminCopy = documentRef.createElement('span');
+    adminCopy.className = 'user-identity-action-copy';
+    appendTextLine(documentRef, adminCopy, 'user-identity-action-label', '规则后台');
+    appendTextLine(documentRef, adminCopy, 'user-identity-action-meta', '管理排版规则与权限');
+    adminButton.append(adminCopy, makeActionChevronIcon(documentRef));
+    menu.append(adminButton);
+    const actionDivider = documentRef.createElement('div');
+    actionDivider.className = 'user-identity-divider';
+    menu.append(actionDivider);
+    adminButton.addEventListener('click', () => setOpen(false));
+  }
+
   const logoutButton = documentRef.createElement('button');
   logoutButton.type = 'button';
   logoutButton.className = 'user-identity-logout';
   logoutButton.setAttribute('role', 'menuitem');
+  logoutButton.setAttribute('aria-label', '退出登录');
   logoutButton.textContent = '退出登录';
   logoutButton.addEventListener('click', async () => {
     logoutButton.disabled = true;
+    setOpen(false);
     try {
       await logoutSession({ fetchImpl, storage });
     } finally {
@@ -237,10 +325,21 @@ export function mountUserIdentity(container, user, {
   });
   menu.append(logoutButton);
 
-  function setOpen(open) {
+  function menuItems() {
+    return [...menu.querySelectorAll('[role="menuitem"]:not([disabled])')];
+  }
+
+  function focusMenuItem(last = false) {
+    const items = menuItems();
+    if (!items.length) return;
+    items[last ? items.length - 1 : 0]?.focus();
+  }
+
+  function setOpen(open, focusTarget = '') {
     menu.hidden = !open;
     trigger.setAttribute('aria-expanded', String(open));
     container.closest?.('.rail')?.classList.toggle('identity-menu-open', open);
+    if (open && focusTarget) focusMenuItem(focusTarget === 'last');
   }
   function onDocumentClick(event) {
     if (!container.contains(event.target)) setOpen(false);
@@ -250,7 +349,33 @@ export function mountUserIdentity(container, user, {
     setOpen(false);
     trigger.focus();
   }
+  function onTriggerKeydown(event) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    setOpen(true, event.key === 'ArrowUp' ? 'last' : 'first');
+  }
+  function onMenuKeydown(event) {
+    const items = menuItems();
+    const current = items.indexOf(event.currentTarget);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setOpen(false);
+      trigger.focus();
+      return;
+    }
+    if (current < 0) return;
+    let next = current;
+    if (event.key === 'ArrowDown') next = (current + 1) % items.length;
+    else if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = items.length - 1;
+    else return;
+    event.preventDefault();
+    items[next]?.focus();
+  }
   trigger.addEventListener('click', () => setOpen(menu.hidden));
+  trigger.addEventListener('keydown', onTriggerKeydown);
+  menu.querySelectorAll('[role="menuitem"]').forEach(item => item.addEventListener('keydown', onMenuKeydown));
   documentRef.addEventListener('click', onDocumentClick);
   documentRef.addEventListener('keydown', onDocumentKeydown);
   container.append(trigger, menu);
@@ -259,6 +384,8 @@ export function mountUserIdentity(container, user, {
     destroy() {
       documentRef.removeEventListener('click', onDocumentClick);
       documentRef.removeEventListener('keydown', onDocumentKeydown);
+      trigger.removeEventListener('keydown', onTriggerKeydown);
+      menu.querySelectorAll('[role="menuitem"]').forEach(item => item.removeEventListener('keydown', onMenuKeydown));
       container.closest?.('.rail')?.classList.remove('identity-menu-open');
       container.replaceChildren();
     },

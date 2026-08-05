@@ -26,7 +26,7 @@
   <div class="topbar-spacer"></div>
   <div class="tb-actions preview-toolbar" id="previewToolbar">
     <button class="tb-retry" id="retryBtn" type="button" style="display:none;" onclick="window.retryUpload && window.retryUpload()">重试上传</button>
-    <button class="btn btn-primary tb-primary" id="copyBtn" type="button" onclick="copyContent()">
+    <button class="btn btn-primary tb-primary" id="copyBtn" type="button" aria-label="复制全文" onclick="copyContent()">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       <span>复制全文</span>
     </button>
@@ -75,12 +75,10 @@
                     <span class="import-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5 12 20a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.6l-9 9a2 2 0 1 1-2.9-2.8l8.4-8.4"/></svg></span>
                     <span class="import-action-label" data-add-file-text>上传文件</span>
                   </button>
-                  <span class="import-feishu-action-wrap is-login-required" id="feishuDocTriggerWrap" title="上传飞书云文档需登录FBIF内部账号">
-                    <button class="import-action-button import-feishu-trigger" id="feishuDocTrigger" type="button" data-feishu-doc-trigger aria-label="搜索飞书云文档" aria-controls="feishuDocSearch" aria-expanded="false" aria-disabled="true" disabled>
-                      <span class="import-action-icon import-at-icon" aria-hidden="true">@</span>
-                      <span class="import-action-label">飞书云文档</span>
-                    </button>
-                  </span>
+                  <button class="import-action-button import-feishu-trigger" id="feishuDocTrigger" type="button" data-feishu-doc-trigger aria-label="搜索飞书云文档" aria-controls="feishuDocSearch" aria-expanded="false">
+                    <span class="import-action-icon import-at-icon" aria-hidden="true">@</span>
+                    <span class="import-action-label">飞书云文档</span>
+                  </button>
                 </div>
                 <span class="import-composer-spacer"></span>
                 <span class="feishu-doc-capability import-capability-status" id="feishuDocCapability">粘贴后自动排版</span>
@@ -172,7 +170,7 @@
         <div class="phone-frame" id="phoneFrame">
           <div id="contentArea"></div>
         </div>
-        <div class="copy-success" id="copySuccess">已复制到剪贴板</div>
+        <div class="copy-success" id="copySuccess" role="status" aria-live="polite" aria-atomic="true">已复制到剪贴板</div>
       </div>
       <div class="wx-footer" id="wxFooter" style="display:none;">
         <div class="wx-footer-inner">
@@ -202,7 +200,8 @@
 <script type="module">
 const authSession = await import('/js/auth-session.js');
 const authUser = await authSession.ensureAuthenticatedSession();
-if (!authUser) await new Promise(() => undefined);
+if (!authUser) await new Promise(() => {});
+window.__AUTH_USER = authUser;
 authSession.mountUserIdentity(document.getElementById('userIdentity'), authUser);
 
 // ---- Version ----
@@ -277,7 +276,6 @@ const {
   loadLocalRuleConfig,
   saveLocalRuleConfig,
   applyActiveRuleConfig,
-  adminLogin,
   listPublicRulePresets,
   normalizeRuleConfig,
   setActiveRulePreset,
@@ -302,7 +300,7 @@ const ruleSelector = createActiveRuleSelector({
 });
 const {
   renderActiveRuleCard, hydrateActiveRulePreset, refreshActiveRuleCatalog,
-  beginActiveRuleEdit, cancelActiveRuleEdit, ensureRuleAdminPassword,
+  beginActiveRuleEdit, cancelActiveRuleEdit,
   cacheServerRuleFallback, localActiveRulePreset, loadRuleCatalog,
 } = ruleSelector;
 
@@ -407,10 +405,6 @@ const accountMenu = mountAccountMenu({
   container: document.getElementById('acctMenu'),
   activeId: activeRulePack.id,
   onSwitch: (id) => { switchAccount(id).catch(err => console.warn('[account] switch failed', err)); },
-  settingsAction: {
-    id: 'adminLockBtn',
-    label: '规则设置',
-  },
 });
 
 // #moreArticlesEmbed 的稳定引用：缓存一次，之后即使被 block-panel 的 innerHTML='' 摘下 DOM，
@@ -770,9 +764,7 @@ initAdminPanel({
   rulePacks: rulePackModule.listRulePacks(),
   getConfig: loadConfig,
   getPreset: () => (window._activeConfig && window._activeConfig.preset) || null,
-  onAuthenticated(password) {
-    ruleSelector.setAdminPassword(password);
-  },
+  authUser,
   applyConfig(config, preset, meta = {}) {
     const generation = ++adminApplyGeneration;
     if (meta.source === 'server') {
@@ -847,14 +839,10 @@ window.addEventListener('fbif:article-input-started', event => {
   if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
 });
 
-const {
-  mountFeishuDocumentImport,
-  createFeishuImportProgressTracker,
-} = await import('/js/feishu-doc-import.js?v=' + assetVersion);
+const { mountFeishuDocumentImport } = await import('/js/feishu-doc-import.js?v=' + assetVersion);
 feishuDocImport = mountFeishuDocumentImport({
   user: authUser,
   getAccountID: () => activeRulePack.id,
-  createProgressTracker: () => createFeishuImportProgressTracker({ documentRef: document }),
 });
 window._feishuDocImport = feishuDocImport;
 

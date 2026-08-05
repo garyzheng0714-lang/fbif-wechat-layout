@@ -52,7 +52,7 @@ const server = createServer(async (req, res) => {
   if (req.method !== 'POST' || req.url !== '/render') {
     return sendJSON(res, 404, { error: 'not found' });
   }
-  // fail loud：缺 RENDER_TOKEN 拒答而非裸奔（同 ADMIN_PASSWORD 缺配置哲学）。
+  // fail loud：缺 RENDER_TOKEN 拒答而非裸奔（同服务端凭证缺配置哲学）。
   if (!TOKEN) {
     return sendJSON(res, 503, { error: 'RENDER_TOKEN 未配置：渲染服务拒绝无鉴权提供服务' });
   }

@@ -54,17 +54,6 @@ export function createCopySession() {
     moreArticlesPreviewGate,
     copyActionGate,
     retryGate,
-    // 预览提交时只作废依赖旧 DOM / 旧复制层的后台任务，不能作废正在
-    // 提交这篇文章的 articleInputGate 或 renderCommitGate。否则
-    // showPreview() 会把自己的主事务判成 stale。
-    resetForPreviewCommit() {
-      articleResultGate.invalidate();
-      footerCopyGate.invalidate();
-      moreArticlesGate.invalidate();
-      moreArticlesPreviewGate.invalidate();
-      copyActionGate.invalidate();
-      retryGate.invalidate();
-    },
     // 文章级重置（新文章导入 / goBack / 快照恢复 / 纯文字重置）唯一入口：
     // 所有在途异步回写全部作废。新增 gate 时在此登记，调用方零改动。
     resetForNewArticle() {

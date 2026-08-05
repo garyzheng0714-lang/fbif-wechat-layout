@@ -23,7 +23,7 @@ func publishMonitoringHasIssue(status publishMonitoringStatus, prefix string) bo
 
 func TestPublishMonitoringReportsOnlyOperationalMetrics(t *testing.T) {
 	t.Setenv(publishSyncServiceTokenEnv, "monitor-secret")
-	t.Setenv("ADMIN_PASSWORD", "admin-secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "admin-service-token")
 	t.Setenv(deploymentWritesPausedEnv, "0")
 	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
 	job, _, err := store.create("site:https://mp.weixin.qq.com/s/a", "https://mp.weixin.qq.com/s/a")
@@ -269,7 +269,7 @@ func TestPublishMonitoringOldFailureRemainsVisibleWithoutPermanentOutage(t *test
 
 func TestPublishMonitorAlertRequiresMachineTokenAndDelivers(t *testing.T) {
 	t.Setenv(publishSyncServiceTokenEnv, "monitor-secret")
-	t.Setenv("ADMIN_PASSWORD", "admin-secret")
+	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "admin-service-token")
 	var delivered string
 	pipeline := &publishPipeline{
 		store: newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json")),
@@ -289,7 +289,7 @@ func TestPublishMonitorAlertRequiresMachineTokenAndDelivers(t *testing.T) {
 	}
 
 	adminOnly := httptest.NewRequest(http.MethodPost, "/api/publish/monitor-alert", strings.NewReader(string(payload)))
-	adminOnly.Header.Set("X-Admin-Password", "admin-secret")
+	adminOnly.Header.Set("X-Publish-Admin-Token", "admin-service-token")
 	adminResult := httptest.NewRecorder()
 	mux.ServeHTTP(adminResult, adminOnly)
 	if adminResult.Code != http.StatusUnauthorized {

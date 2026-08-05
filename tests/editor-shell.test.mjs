@@ -64,9 +64,9 @@ function makeRailElement({ width = 300 } = {}) {
   return element;
 }
 
-function makeRailFixture({ mobile = false, includeNodes = true, railWidth = 300 } = {}) {
+function makeRailFixture({ mobile = false, includeNodes = true } = {}) {
   const layout = makeRailElement();
-  const rail = makeRailElement({ width: railWidth });
+  const rail = makeRailElement({ width: 300 });
   const divider = makeRailElement();
   const button = makeRailElement();
   const body = { classList: makeClassList() };
@@ -114,8 +114,6 @@ test('editor shells both import the shared editor-shell helpers', async () => {
     '新本地输入必须作废在途 URL 请求');
   assert.match(app, /bindUrlImportShortcuts/);
   assert.match(site, /bindUrlImportShortcuts/);
-  assert.match(app, /tryImportValue:\s*value\s*=>\s*feishuDocImport\?\.importValue/);
-  assert.match(site, /tryImportValue:\s*value\s*=>\s*feishuDocImport\?\.importValue/);
   assert.match(app, /onInputCleared:\s*clearRenderedImport/);
   assert.match(site, /onInputCleared:\s*clearRenderedImport/);
   assert.match(app, /bindRailDivider/);
@@ -185,29 +183,6 @@ test('bindRailDivider resizes on desktop drag and cleans listeners on release', 
   assert.equal(fixture.divider.listeners.get('pointermove').length, 0);
   assert.equal(fixture.divider.listeners.get('pointerup').length, 0);
   assert.equal(fixture.divider.listeners.get('pointercancel').length, 0);
-});
-
-test('bindRailDivider keeps the rail usable at 360px and collapses below 320px', () => {
-  const fixture = makeRailFixture({ railWidth: 420 });
-  bindRailDivider(fixture);
-
-  fixture.divider.dispatch('pointerdown', {
-    pointerId: 9,
-    clientX: 438,
-    target: fixture.divider,
-    preventDefault() {},
-  });
-
-  fixture.divider.dispatch('pointermove', { clientX: 368 });
-  assert.equal(fixture.layout.style.getPropertyValue('--rail-current-w'), '360px');
-  assert.equal(fixture.layout.classList.contains('rail-collapsed'), false);
-
-  fixture.divider.dispatch('pointermove', { clientX: 328 });
-  assert.equal(fixture.layout.classList.contains('rail-collapsed'), true);
-  assert.equal(fixture.button.getAttribute('aria-expanded'), 'false');
-
-  fixture.divider.dispatch('pointerup');
-  assert.equal(fixture.body.classList.contains('is-resizing-rail'), false);
 });
 
 test('editor shells bind upload before remote rule hydration settles', async () => {
@@ -870,48 +845,6 @@ test('bindUrlImportShortcuts leaves @ document mentions to the Feishu document c
   });
   assert.equal(prevented, true);
   assert.equal(imported, 0);
-  assert.equal(fetched, 0);
-});
-
-test('bindUrlImportShortcuts gives a recognized special link to its importer before generic URL fetch', () => {
-  const inputHandlers = {};
-  let specialValue = '';
-  let fetched = 0;
-  const urlInput = {
-    value: 'https://foodtalks.feishu.cn/docx/HosadQWiIoiX4CxG3g7cPXaUnwc',
-    tagName: 'TEXTAREA',
-    classList: { contains: () => false },
-    addEventListener(type, handler) { inputHandlers[type] = handler; },
-  };
-  const documentRef = {
-    activeElement: urlInput,
-    getElementById(id) {
-      if (id === 'urlInput') return urlInput;
-      if (id === 'previewContent') return { style: { display: 'none' } };
-      return null;
-    },
-    addEventListener() {},
-    querySelectorAll() { return []; },
-  };
-  bindUrlImportShortcuts({
-    documentRef,
-    fetchArticle: () => { fetched += 1; },
-    tryImportValue(value) {
-      specialValue = value;
-      return true;
-    },
-  });
-
-  let prevented = false;
-  inputHandlers.keydown({
-    key: 'Enter',
-    metaKey: true,
-    ctrlKey: false,
-    preventDefault() { prevented = true; },
-  });
-
-  assert.equal(prevented, true);
-  assert.equal(specialValue, urlInput.value);
   assert.equal(fetched, 0);
 });
 

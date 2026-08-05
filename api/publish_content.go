@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -145,6 +146,13 @@ func publishContentRerenderable(job publishJob) bool {
 // blocks through the current active rule again. Published/rejected or uncertain
 // external-call states stay fail-closed.
 func (p *publishPipeline) rerenderLatest(jobID int64) (publishJob, error) {
+	return p.rerenderLatestWithRulePack(jobID, "")
+}
+
+// rerenderLatestWithRulePack 与原有重排动作相同，但允许调用方在明确要求时
+// 一并切换网站规则包。没有传规则包时沿用任务原绑定，避免重复提交一个 ft-series
+// 任务时被可选参数的默认值误切回 ft-default。
+func (p *publishPipeline) rerenderLatestWithRulePack(jobID int64, requestedRulePackID string) (publishJob, error) {
 	current, err := p.store.byID(jobID)
 	if err != nil {
 		return publishJob{}, err
@@ -154,6 +162,15 @@ func (p *publishPipeline) rerenderLatest(jobID int64) (publishJob, error) {
 	}
 	if strings.TrimSpace(current.BlocksJSON) == "" {
 		return current, errors.New("任务缺少可重放的结构化正文，不能按最新规则重新排版")
+	}
+	rulePackID := strings.TrimSpace(requestedRulePackID)
+	if rulePackID == "" {
+		rulePackID, err = publishRulePackIDForJob(current)
+	} else {
+		rulePackID, err = normalizeSitePublishRulePackID(rulePackID)
+	}
+	if err != nil {
+		return current, err
 	}
 
 	source := current.ContentSource
@@ -172,12 +189,76 @@ func (p *publishPipeline) rerenderLatest(jobID int64) (publishJob, error) {
 		return latest.ContentVersion == current.ContentVersion && publishContentRerenderable(latest)
 	}, func(latest *publishJob) {
 		applyPublishContentSeed(latest, seed)
+		latest.RulePackID = rulePackID
 	})
 	if err != nil {
 		return publishJob{}, err
 	}
 	if !swapped {
 		return reset, errors.New("任务状态刚刚变化，请刷新后重试重新排版")
+	}
+
+	p.spawn(func() { p.runJob(jobID) })
+	if latest, loadErr := p.store.byID(jobID); loadErr == nil {
+		return latest, nil
+	}
+	return reset, nil
+}
+
+// refetchLatestWithRulePack 重新从任务保存的公众号原文 URL 抓取 blocks，再复用同一
+// FoodTalks 草稿按最新规则排版。它与普通 rerender 分开，避免把“只换规则重排”误变成
+// 回源抓取；URL-only 监控重跑历史 supplier 任务时必须显式选择本动作。
+func (p *publishPipeline) refetchLatestWithRulePack(ctx context.Context, jobID int64, requestedRulePackID string) (publishJob, error) {
+	current, err := p.store.byID(jobID)
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !publishContentRerenderable(current) {
+		return current, fmt.Errorf("任务阶段 %s 不允许从原文链接重新抓取排版", current.Stage)
+	}
+	if strings.TrimSpace(current.SourceURL) == "" {
+		return current, errors.New("任务缺少公众号原文链接，不能回源重新排版")
+	}
+	rulePackID := strings.TrimSpace(requestedRulePackID)
+	if rulePackID == "" {
+		rulePackID, err = publishRulePackIDForJob(current)
+	} else {
+		rulePackID, err = normalizeSitePublishRulePackID(rulePackID)
+	}
+	if err != nil {
+		return current, err
+	}
+	if p.fetch == nil {
+		return current, errors.New("排版工具缺少原文抓取内核，不能回源重新排版")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	title, sourceName, byline, _, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), current.SourceURL)
+	if err != nil {
+		return current, fmt.Errorf("从公众号原文回源抓取失败: %w", err)
+	}
+	if strings.TrimSpace(title) == "" {
+		title = current.Title
+	}
+	if strings.TrimSpace(title) == "" {
+		return current, errors.New("原文回源未解析出标题，不能重新排版")
+	}
+	if strings.TrimSpace(blocksJSON) == "" {
+		return current, errors.New("原文回源未解析出结构化内容，不能重新排版")
+	}
+	seed := newPublishContentSeed(publishContentWebFetch, title, sourceName, byline, blocksJSON, current.CoverURL)
+	reset, swapped, err := p.store.updateIf(jobID, func(latest publishJob) bool {
+		return latest.ContentVersion == current.ContentVersion && publishContentRerenderable(latest)
+	}, func(latest *publishJob) {
+		applyPublishContentSeed(latest, seed)
+		latest.RulePackID = rulePackID
+	})
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !swapped {
+		return reset, errors.New("任务状态刚刚变化，请刷新后重试从原文链接重新排版")
 	}
 
 	p.spawn(func() { p.runJob(jobID) })

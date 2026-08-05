@@ -661,7 +661,7 @@ test('admin active rule writes include the selected account id', async () => {
   };
 
   try {
-    await setActiveRulePreset('secret', 'foodtalks-rule', 'foodtalks-series', 12);
+    await setActiveRulePreset('foodtalks-rule', 'foodtalks-series', 12);
     assert.equal(calls[0].url, '/api/rules/admin/active');
     assert.deepEqual(JSON.parse(calls[0].options.body), {
       id: 'foodtalks-rule',
@@ -689,7 +689,7 @@ test('admin write conflict preserves revisions and changed paths for the UI', as
   });
   try {
     await assert.rejects(
-      () => saveRulePreset('secret', { id: 'shared', version: 3, baseline_id: 'default', config: {} }),
+      () => saveRulePreset({ id: 'shared', version: 3, baseline_id: 'default', config: {} }),
       error => {
         assert.equal(error.code, 'revision_conflict');
         assert.equal(error.expectedRevision, 3);
@@ -717,7 +717,7 @@ test('admin preset save preserves structured modules', async () => {
   };
 
   try {
-    await saveRulePreset('secret', {
+    await saveRulePreset({
       id: 'structured-save',
       name: '结构化保存',
       baseline_id: 'ft-default-v1',
@@ -757,7 +757,7 @@ test('保存 FoodTalks 系列 preset 原样发送独立 behavior，不注入 Mot
   };
   const behavior = { params: { level1_regex: { type: 'string', default: '^章节' } }, lists: { image_caption_keywords: ['图源'] } };
   try {
-    await saveRulePreset('secret', {
+    await saveRulePreset({
       id: 'series-custom', name: '系列自定义', baseline_id: 'foodtalks-series-default',
       config: { heading_color: '#02396b' }, behavior,
     });

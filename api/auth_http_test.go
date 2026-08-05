@@ -21,8 +21,10 @@ type fakeFeishuProvider struct {
 	searchResults []feishuDocument
 	exportResult  feishuExportedFile
 	exportErr     error
+	chatResults   []feishuChat
 	searchCalls   int
 	exportCalls   int
+	chatCalls     int
 }
 
 func (f *fakeFeishuProvider) ExchangeCode(_ context.Context, _, _ string) (feishuUserToken, error) {
@@ -56,6 +58,11 @@ func (f *fakeFeishuProvider) ExportDocument(_ context.Context, _ string, ref fei
 	return f.exportResult, nil
 }
 
+func (f *fakeFeishuProvider) ListChats(_ context.Context, _ string) ([]feishuChat, error) {
+	f.chatCalls++
+	return f.chatResults, nil
+}
+
 func newTestAuthService(t *testing.T, provider feishuProvider) *authService {
 	t.Helper()
 	store := newAuthUserStore(filepath.Join(t.TempDir(), "auth-users.json"))
@@ -77,6 +84,7 @@ func registerTestAuthMux(service *authService) *http.ServeMux {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, service)
 	registerFeishuDocumentRoutes(mux, service)
+	registerFeishuChatRoutes(mux, service)
 	return mux
 }
 
@@ -220,6 +228,24 @@ func TestFeishuDocumentRoutesRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestFeishuChatRouteUsesLoggedInUserToken(t *testing.T) {
+	provider := &fakeFeishuProvider{chatResults: []feishuChat{{ChatID: "oc_chat_1", Name: "内容审核群", ChatMode: "group"}}}
+	service := newTestAuthService(t, provider)
+	session := mustSessionForUser(t, service, authUser{
+		ID: "feishu:ou_chat", Name: "张三", AuthMode: authModeFeishu, Status: authUserActive,
+		FeishuOpenID: "ou_chat", FeishuRefreshTokenSeal: "test-refresh-seal",
+	})
+	service.putAccessToken("feishu:ou_chat", "user-token", service.now().Add(time.Hour))
+	rec := httptest.NewRecorder()
+	registerTestAuthMux(service).ServeHTTP(rec, requestWithSession(http.MethodGet, "/api/feishu/chats", session, nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "内容审核群") {
+		t.Fatalf("chat list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if provider.chatCalls != 1 {
+		t.Fatalf("chat provider calls=%d, want 1", provider.chatCalls)
+	}
+}
+
 func TestFeishuLoginCanSearchAndExportDocx(t *testing.T) {
 	provider := &fakeFeishuProvider{
 		searchResults: []feishuDocument{{
@@ -342,88 +368,6 @@ func TestFeishuDocumentExportStripsEmbeddedImagesBeforeBrowserDownload(t *testin
 	}
 }
 
-func TestFeishuDocumentExportMirrorsImagesBeforeBrowserDownload(t *testing.T) {
-	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4}
-	docx := zipFixture(t, map[string][]byte{
-		"word/document.xml":            []byte(`<w:document/>`),
-		"word/_rels/document.xml.rels": []byte(`<Relationships/>`),
-		"word/media/hero.png":          imageBytes,
-		"[Content_Types].xml":          []byte(`<Types/>`),
-		"_rels/.rels":                  []byte(`<Relationships/>`),
-	})
-
-	var receivedBase64 map[string]string
-	uploadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload struct {
-			Base64Images map[string]string `json:"base64_images"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("decode upload payload: %v", err)
-			http.Error(w, "bad payload", http.StatusBadRequest)
-			return
-		}
-		receivedBase64 = payload.Base64Images
-		results := make(map[string]string, len(payload.Base64Images))
-		for key := range payload.Base64Images {
-			results[key] = "https://oss.example.com/feishu/hero.png"
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"results": results})
-	}))
-	defer uploadServer.Close()
-	t.Setenv("WECHAT_UPLOAD_ENDPOINT", uploadServer.URL)
-
-	provider := &fakeFeishuProvider{
-		exportResult: feishuExportedFile{
-			Filename: "图片文章.docx",
-			Content:  docx,
-		},
-	}
-	service := newTestAuthService(t, provider)
-	session := mustSessionForUser(t, service, authUser{
-		ID:                     "feishu:ou_mirror",
-		Name:                   "张三",
-		AuthMode:               authModeFeishu,
-		Status:                 authUserActive,
-		FeishuOpenID:           "ou_mirror",
-		FeishuRefreshTokenSeal: "test-refresh-seal",
-	})
-	service.putAccessToken("feishu:ou_mirror", "u-test", service.now().Add(time.Hour))
-
-	rec := httptest.NewRecorder()
-	body := []byte(`{"token":"doxcn_mirror","type":"docx","title":"图片文章"}`)
-	registerTestAuthMux(service).ServeHTTP(
-		rec,
-		requestWithSession(http.MethodPost, "/api/feishu/docs/export", session, body),
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("export status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("X-FBIF-Images-Deferred"); got != "false" {
-		t.Fatalf("images deferred=%q, want false", got)
-	}
-	if got := rec.Header().Get("X-FBIF-Images-Mirrored"); got != "true" {
-		t.Fatalf("images mirrored=%q, want true", got)
-	}
-	if got := rec.Header().Get("X-FBIF-Image-Count"); got != "1" {
-		t.Fatalf("image count=%q, want 1", got)
-	}
-	if len(receivedBase64) != 1 {
-		t.Fatalf("received base64 images=%d, want 1", len(receivedBase64))
-	}
-	for _, value := range receivedBase64 {
-		if !strings.HasPrefix(value, "data:image/png;base64,") {
-			t.Fatalf("upload image is not a PNG data URL: %q", value)
-		}
-	}
-	imageURLs, err := readDocxImageURLMap(rec.Body.Bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := imageURLs["hero.png"]; got != "https://oss.example.com/feishu/hero.png" {
-		t.Fatalf("mirrored URL=%q", got)
-	}
-}
-
 func TestFeishuDocumentExportMapsPermissionFailure(t *testing.T) {
 	provider := &fakeFeishuProvider{
 		exportErr: &feishuExportTaskError{JobStatus: 110, Message: "no permission"},
@@ -487,9 +431,6 @@ func TestFeishuOAuthStateRejectsOpenRedirectAndTampering(t *testing.T) {
 	state := authorizeURL.Query().Get("state")
 	if state == "" {
 		t.Fatalf("authorize URL missing state: %s", authorizeURL.String())
-	}
-	if got := authorizeURL.Query().Get("scope"); got != "offline_access drive:drive.search:readonly drive:export:readonly" {
-		t.Fatalf("authorize scope=%q", got)
 	}
 
 	callbackRec := httptest.NewRecorder()

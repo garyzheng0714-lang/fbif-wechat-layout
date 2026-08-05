@@ -6,6 +6,7 @@ import { uploadAssetFile } from './uploader.js';
 import { listRulePacks } from './rule-packs/registry.js';
 
 const USAGES = ['qr_group', 'qr_account', 'logo', 'banner', 'avatar', 'decor', 'custom'];
+const USAGE_LABELS = { qr_group: '入群二维码', qr_account: '公众号二维码', logo: '品牌标志', banner: '横幅', avatar: '头像', decor: '装饰图', custom: '其他素材' };
 const clone = value => JSON.parse(JSON.stringify(value));
 const esc = value => String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const ASSET_REF_RE = /\{\{asset(?::([a-z0-9_-]+)|#([a-z0-9_-]+))\}\}/ig;
@@ -14,6 +15,11 @@ function scopeOptions() {
   const ids = ['global'];
   for (const pack of listRulePacks()) if (pack && pack.id && !ids.includes(pack.id)) ids.push(pack.id);
   return ids;
+}
+
+function scopeLabel(scope) {
+  if (scope === 'global') return '共用素材';
+  return listRulePacks().find(pack => pack && pack.id === scope)?.accountName || scope;
 }
 
 function isSafeURL(value) {
@@ -130,7 +136,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
   const snapshot = normalizeLibrary(assetLibrary);
   let state = normalizeLibrary(assetLibrary);
   let status = '';
-  let filterScope = 'all';
+  let filterScope = currentScope !== 'global' && scopeOptions().includes(currentScope) ? 'context' : 'all';
   let filterUsage = 'all';
   let filterText = '';
   const expanded = new Set(); // 默认折叠：素材列表为可扫的紧凑行，点开某素材才展开 8 字段编辑表单
@@ -144,7 +150,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     const text = filterText.trim().toLowerCase();
     return state.assets
       .map((asset, index) => ({ asset, index }))
-      .filter(({ asset }) => filterScope === 'all' || asset.scope === filterScope)
+      .filter(({ asset }) => filterScope === 'all' || (filterScope === 'context' ? asset.scope === 'global' || asset.scope === currentScope : asset.scope === filterScope))
       .filter(({ asset }) => filterUsage === 'all' || asset.usage === filterUsage)
       .filter(({ asset }) => {
         if (!text) return true;
@@ -184,7 +190,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
       <div class="asset-lib-thumb">${ok ? `<img src="${esc(asset.url)}" alt="">` : '<span>无图</span>'}</div>
       <div class="asset-lib-rowmeta">
         <div class="asset-lib-rowname">${esc(asset.label)}</div>
-        <div class="asset-lib-rowsub">${esc(asset.usage)} · ${esc(asset.scope)} · ${esc(asset.id)}</div>
+        <div class="asset-lib-rowsub">${esc(USAGE_LABELS[asset.usage] || asset.usage)} · ${esc(scopeLabel(asset.scope))}</div>
       </div>
       <span class="asset-lib-ref ${refs.length ? 'used' : ''}" title="${esc(refTitle)}">被 ${refs.length} 处引用</span>
       <span class="asset-lib-caret ${open ? 'open' : ''}" aria-hidden="true">▸</span>
@@ -194,8 +200,8 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
       <div class="asset-lib-fields">
         <label><span>名称</span><input data-field="label" value="${esc(asset.label)}"></label>
         <label><span>ID</span><input value="${esc(asset.id)}" readonly title="素材 ID 创建后不可改，避免已引用区块失效"></label>
-        <label><span>用途</span><select data-field="usage">${USAGES.map(u => `<option value="${u}" ${asset.usage === u ? 'selected' : ''}>${u}</option>`).join('')}</select></label>
-        <label><span>范围</span><select data-field="scope">${scopeOptions().map(s => `<option value="${s}" ${asset.scope === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+        <label><span>用途</span><select data-field="usage">${USAGES.map(u => `<option value="${u}" ${asset.usage === u ? 'selected' : ''}>${esc(USAGE_LABELS[u] || u)}</option>`).join('')}</select></label>
+        <label><span>范围</span><select data-field="scope">${scopeOptions().map(s => `<option value="${s}" ${asset.scope === s ? 'selected' : ''}>${esc(scopeLabel(s))}</option>`).join('')}</select></label>
         <label class="asset-lib-wide"><span>链接</span><input data-field="url" value="${esc(asset.url)}" placeholder="https:// 或 /assets/..."></label>
         <label><span>宽</span><input data-field="width" type="number" min="0" max="5000" value="${esc(asset.width || '')}"></label>
         <label><span>高</span><input data-field="height" type="number" min="0" max="5000" value="${esc(asset.height || '')}"></label>
@@ -219,7 +225,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     }
     return USAGES.filter(usage => grouped.has(usage)).map(usage => `
       <section class="asset-lib-group">
-        <div class="asset-lib-group-title">${esc(usage)}</div>
+        <div class="asset-lib-group-title">${esc(USAGE_LABELS[usage] || usage)}</div>
         ${grouped.get(usage).map(({ asset, index }) => renderAsset(asset, index)).join('')}
       </section>`).join('');
   }
@@ -230,11 +236,11 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     const tags = tagOptions();
     container.innerHTML = `<div class="asset-lib-editor ${compact ? 'compact' : ''}">
       <div class="asset-lib-toolbar">
-        <span class="asset-lib-status ${dirty ? 'dirty' : 'synced'}">${dirty ? '有未保存改动' : '已同步 ✓'}</span>
-        <input class="asset-lib-search" data-filter="text" value="${esc(filterText)}" placeholder="搜索名称、ID、标签">
-        <select data-filter="scope"><option value="all">全部范围</option>${scopeOptions().map(s => `<option value="${s}" ${filterScope === s ? 'selected' : ''}>${s}</option>`).join('')}</select>
-        <select data-filter="usage"><option value="all">全部用途</option>${USAGES.map(u => `<option value="${u}" ${filterUsage === u ? 'selected' : ''}>${u}</option>`).join('')}</select>
-        <button type="button" class="admin-secondary" data-action="add-url">新增链接素材</button>
+        <span class="asset-lib-status ${dirty ? 'dirty' : 'synced'}">${dirty ? '有未保存改动' : `${visible.length} / ${state.assets.length} 项素材`}</span>
+        <input class="asset-lib-search" data-filter="text" value="${esc(filterText)}" placeholder="搜索名称、ID、标签" aria-label="搜索素材">
+        <select data-filter="scope" aria-label="按素材范围筛选"><option value="context" ${filterScope === 'context' ? 'selected' : ''}>当前账号 + 共用</option><option value="all" ${filterScope === 'all' ? 'selected' : ''}>全部范围</option>${scopeOptions().map(s => `<option value="${s}" ${filterScope === s ? 'selected' : ''}>${esc(scopeLabel(s))}</option>`).join('')}</select>
+        <select data-filter="usage" aria-label="按素材用途筛选"><option value="all">全部用途</option>${USAGES.map(u => `<option value="${u}" ${filterUsage === u ? 'selected' : ''}>${esc(USAGE_LABELS[u] || u)}</option>`).join('')}</select>
+        <button type="button" class="admin-secondary" data-action="add-url">添加链接</button>
         <button type="button" class="admin-secondary" data-action="upload-new">上传并入库</button>
         <button type="button" class="admin-secondary" data-action="undo" ${dirty ? '' : 'disabled'}>撤销所有修改</button>
         <input type="file" accept="image/*" hidden data-role="asset-file">
@@ -338,6 +344,7 @@ export function createAssetLibraryEditor({ container, assetLibrary, onChange, re
     const style = document.createElement('style');
     style.id = 'asset-lib-styles';
     style.textContent = `.asset-lib-editor{display:grid;gap:12px}.asset-lib-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.asset-lib-toolbar select,.asset-lib-search{height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-search{min-width:190px}.asset-lib-status{font-size:12px;font-weight:700}.asset-lib-status.synced{color:var(--fs-success,#00A870)}.asset-lib-status.dirty{color:var(--fs-warning,#FF8800)}.asset-lib-tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.asset-lib-tags span{font-size:11px;color:var(--fs-text-3,#8F959E);font-weight:700}.asset-lib-tags button{border:0;border-radius:var(--fs-r-full,9999px);padding:3px 8px;background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-2,#646A73);font-size:11px;font-family:inherit;cursor:pointer}.asset-lib-tags button:hover,.asset-lib-tags button.active{background:var(--fs-brand-soft,#EBF1FF);color:var(--fs-brand,#1456F0)}.asset-lib-error{padding:8px 10px;border-radius:var(--fs-r-s,6px);background:rgba(255,136,0,.08);color:var(--fs-warning,#FF8800);font-size:12px}.asset-lib-list{display:grid;gap:10px}.asset-lib-group{display:grid;gap:6px}.asset-lib-group-title{font-size:11px;color:var(--fs-text-3,#8F959E);font-weight:700;text-transform:uppercase}.asset-lib-empty{padding:18px;text-align:center;color:var(--fs-text-3,#8F959E);background:var(--fs-bg-nested,#F7F8FA);border-radius:var(--fs-r-m,8px);font-size:13px}.asset-lib-card{border-radius:var(--fs-r-m,8px);background:var(--fs-bg-nested,#F7F8FA);overflow:hidden}.asset-lib-card.open{box-shadow:inset 0 0 0 1px var(--fs-border-control,#D9DCE0)}.asset-lib-row{display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;transition:background .12s}.asset-lib-row:hover{background:var(--fs-bg-hover,rgba(31,35,39,.045))}.asset-lib-rowmeta{flex:1;min-width:0}.asset-lib-rowname{font-size:13px;font-weight:600;color:var(--fs-text-1,#1F2329);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.asset-lib-rowsub{font-size:11px;color:var(--fs-text-3,#8F959E);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}.asset-lib-caret{flex:none;color:var(--fs-text-3,#8F959E);font-size:12px;transition:transform .15s}.asset-lib-caret.open{transform:rotate(90deg)}.asset-lib-detail{padding:6px 12px 14px;border-top:1px solid var(--fs-divider,rgba(31,35,39,.08));display:grid;gap:10px}.asset-lib-thumb{width:44px;height:44px;flex:none;border-radius:var(--fs-r-s,6px);background:var(--fs-bg-card,#fff);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--fs-text-3,#8F959E);font-size:11px}.asset-lib-thumb img{max-width:100%;max-height:100%;object-fit:contain}.asset-lib-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.asset-lib-fields label{display:grid;gap:4px}.asset-lib-fields span{font-size:12px;color:var(--fs-text-2,#646A73)}.asset-lib-fields input,.asset-lib-fields select{min-width:0;height:32px;border:1px solid var(--fs-border-control,#D9DCE0);border-radius:var(--fs-r-xs,4px);padding:0 8px;background:var(--fs-bg-card,#fff);font-family:inherit;font-size:12px}.asset-lib-fields input[readonly]{background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E)}.asset-lib-fields input:focus,.asset-lib-fields select:focus,.asset-lib-toolbar select:focus,.asset-lib-search:focus{outline:none;border-color:var(--fs-brand,#1456F0);box-shadow:0 0 0 2px var(--fs-brand-soft,#EBF1FF)}.asset-lib-wide{grid-column:span 2}.asset-lib-actions{display:flex;gap:8px}.asset-lib-ref{flex:none;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:0 8px;border-radius:var(--fs-r-full,9999px);background:var(--fs-bg-sunken,#F2F3F5);color:var(--fs-text-3,#8F959E);font-size:11px;font-weight:600}.asset-lib-ref.used{background:var(--fs-brand-soft,#EBF1FF);color:var(--fs-brand,#1456F0)}.asset-lib-editor.compact .asset-lib-toolbar{display:grid;grid-template-columns:1fr;align-items:stretch}.asset-lib-editor.compact .asset-lib-search{min-width:0;width:100%;box-sizing:border-box}.asset-lib-editor.compact .asset-lib-toolbar select,.asset-lib-editor.compact .asset-lib-toolbar button{width:100%;box-sizing:border-box}.asset-lib-editor.compact .asset-lib-row{padding:7px 8px}.asset-lib-editor.compact .asset-lib-thumb{width:38px;height:38px}.asset-lib-editor.compact .asset-lib-ref{display:none}.asset-lib-editor.compact .asset-lib-fields{grid-template-columns:1fr}.asset-lib-editor.compact .asset-lib-wide{grid-column:auto}@media(max-width:900px){.asset-lib-fields{grid-template-columns:1fr}.asset-lib-wide{grid-column:auto}.asset-lib-detail{padding:6px 10px 12px}}`;
+    style.textContent += `.asset-lib-toolbar{padding-block:2px}.asset-lib-status.synced{color:var(--fs-text-2,#646A73)}.asset-lib-list{gap:18px}.asset-lib-group{gap:0;border-bottom:1px solid var(--fs-divider,rgba(31,35,39,.08))}.asset-lib-group-title{padding:6px 2px 8px;text-transform:none}.asset-lib-card{border-radius:0;background:var(--fs-bg-card,#fff);border-top:1px solid var(--fs-divider,rgba(31,35,39,.08))}.asset-lib-card.open{box-shadow:none}.asset-lib-row{padding:9px 2px}.asset-lib-detail{background:var(--fs-bg-nested,#F7F8FA)}@media(max-width:700px){.asset-lib-toolbar{display:grid;grid-template-columns:1fr 1fr}.asset-lib-toolbar .asset-lib-status,.asset-lib-toolbar .asset-lib-search{grid-column:1/-1}.asset-lib-search{width:100%;box-sizing:border-box}.asset-lib-toolbar button{width:100%}.asset-lib-ref{display:none}}`;
     document.head.appendChild(style);
   }
 

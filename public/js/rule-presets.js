@@ -4,6 +4,7 @@
 // in rule-document.js.
 import { DEFAULT_BEHAVIOR, normalizeRuleBehavior } from './rule-behavior.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { authFetch } from './auth-session.js';
 
 import {
   normalizeMoreArticleDefaultCards,
@@ -600,68 +601,59 @@ export async function listPublicRulePresets() {
   return parseJSONResponse(resp);
 }
 
-export async function adminLogin(password) {
-  const resp = await fetchWithTimeout('/api/rules/admin/login', {
-    method: 'POST',
+function adminRequest(url, options = {}) {
+  return fetchWithTimeout(url, options, {
+    timeoutMs: 10000,
+    fetchImpl: (input, init) => authFetch(input, init),
+  });
+}
+
+export async function listRulePresets() {
+  const resp = await adminRequest('/api/rules/admin/presets', {
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: String(password || '').trim() }),
-  }, { timeoutMs: 10000 });
-  return parseJSONResponse(resp);
-}
-
-function adminHeaders(password) {
-  return {
-    'Content-Type': 'application/json',
-    'X-Admin-Password': String(password || '').trim(),
-  };
-}
-
-export async function listRulePresets(password) {
-  const resp = await fetchWithTimeout('/api/rules/admin/presets', {
-    headers: adminHeaders(password),
     cache: 'no-store',
-  }, { timeoutMs: 10000 });
+  });
   return parseJSONResponse(resp);
 }
 
-export async function saveRulePreset(password, preset) {
+export async function saveRulePreset(preset) {
   const requestedRevision = Number(preset && preset.base_revision);
   const presetRevision = Number(preset && preset.version);
   const baseRevision = Number.isInteger(requestedRevision) && requestedRevision >= 0
     ? requestedRevision
     : (Number.isInteger(presetRevision) && presetRevision >= 0 ? presetRevision : 0);
-  const resp = await fetchWithTimeout('/api/rules/admin/presets', {
+  const resp = await adminRequest('/api/rules/admin/presets', {
     method: 'POST',
-    headers: adminHeaders(password),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ...preset,
       base_revision: baseRevision,
       config: normalizeRuleConfigForRule(preset.config, preset),
       behavior: normalizeRuleBehaviorForRule(preset.behavior, preset),
     }),
-  }, { timeoutMs: 10000 });
+  });
   return parseJSONResponse(resp);
 }
 
-export async function setActiveRulePreset(password, id, accountID = DEFAULT_RULE_ACCOUNT_ID, baseRevision = 0) {
+export async function setActiveRulePreset(id, accountID = DEFAULT_RULE_ACCOUNT_ID, baseRevision = 0) {
   const revision = Number(baseRevision);
-  const resp = await fetchWithTimeout('/api/rules/admin/active', {
+  const resp = await adminRequest('/api/rules/admin/active', {
     method: 'PUT',
-    headers: adminHeaders(password),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       id,
       account_id: normalizeAccountID(accountID),
       base_revision: Number.isInteger(revision) && revision >= 0 ? revision : 0,
     }),
-  }, { timeoutMs: 10000 });
+  });
   return parseJSONResponse(resp);
 }
 
-export async function deleteRulePreset(password, id) {
-  const resp = await fetchWithTimeout('/api/rules/admin/presets/' + encodeURIComponent(id), {
+export async function deleteRulePreset(id) {
+  const resp = await adminRequest('/api/rules/admin/presets/' + encodeURIComponent(id), {
     method: 'DELETE',
-    headers: adminHeaders(password),
-  }, { timeoutMs: 10000 });
+    headers: { 'Content-Type': 'application/json' },
+  });
   return parseJSONResponse(resp);
 }
 

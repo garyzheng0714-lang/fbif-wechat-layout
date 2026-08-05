@@ -2,7 +2,10 @@
 
 The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
 
-> **状态戳（source / date / status）**：来源 mattpocock/skills triage 约定；最近核对 2026-06-08。右列 4 个标签（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human`）**尚未在本仓库 GitHub tracker 创建**——`gh label list` 当前仅 `wontfix` 存在；skill 执行 `gh issue edit --add-label` 前需先 `gh label create` 建好对应标签，否则会因标签不存在而失败。
+> **状态戳（source / date / status）**：来源 mattpocock/skills triage 约定；2026-07-26 用
+> `gh label list` 核对。本仓库已有 GitHub 默认标签和 `wontfix`，但右列 4 个 canonical 标签
+> （`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human`）仍未创建；skill
+> 执行 `gh issue edit --add-label` 前需先建好对应标签，否则会失败。
 
 | Label in mattpocock/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |

@@ -22,6 +22,14 @@ const (
 	authUserDisabled          = "disabled"
 )
 
+type authRole string
+
+const (
+	authRoleUser       authRole = "user"
+	authRoleAdmin      authRole = "admin"
+	authRoleSuperAdmin authRole = "super_admin"
+)
+
 type authUser struct {
 	ID                     string    `json:"id"`
 	Name                   string    `json:"name"`
@@ -30,6 +38,7 @@ type authUser struct {
 	Username               string    `json:"username,omitempty"`
 	PasswordHash           string    `json:"password_hash,omitempty"`
 	AuthMode               authMode  `json:"auth_mode"`
+	Role                   authRole  `json:"role,omitempty"`
 	Status                 string    `json:"status"`
 	FeishuOpenID           string    `json:"feishu_open_id,omitempty"`
 	FeishuUnionID          string    `json:"feishu_union_id,omitempty"`
@@ -125,6 +134,8 @@ func normalizeAuthUser(user authUser, existing *authUser, now time.Time) authUse
 	user.AvatarURL = strings.TrimSpace(user.AvatarURL)
 	user.Email = strings.TrimSpace(user.Email)
 	user.Username = strings.ToLower(strings.TrimSpace(user.Username))
+	rawRole := strings.TrimSpace(string(user.Role))
+	user.Role = normalizeAuthRole(user.Role)
 	user.Status = strings.TrimSpace(user.Status)
 	if user.Status == "" {
 		user.Status = authUserActive
@@ -142,12 +153,30 @@ func normalizeAuthUser(user authUser, existing *authUser, now time.Time) authUse
 		if user.FeishuRefreshTokenSeal == "" {
 			user.FeishuRefreshTokenSeal = existing.FeishuRefreshTokenSeal
 		}
+		if rawRole == "" {
+			// 登录回调只携带身份资料，不应把已授权的管理员降级成普通用户。
+			// 显式的降级由权限管理接口完成，并传入新的角色。
+			if existing.Role == authRoleAdmin || existing.Role == authRoleSuperAdmin {
+				user.Role = existing.Role
+			}
+		}
 	}
 	if user.CreatedAt.IsZero() {
 		user.CreatedAt = now
 	}
 	user.UpdatedAt = now
 	return user
+}
+
+func normalizeAuthRole(role authRole) authRole {
+	switch authRole(strings.TrimSpace(string(role))) {
+	case authRoleAdmin:
+		return authRoleAdmin
+	case authRoleSuperAdmin:
+		return authRoleSuperAdmin
+	default:
+		return authRoleUser
+	}
 }
 
 func (s *authUserStore) Upsert(user authUser) error {
@@ -185,6 +214,39 @@ func (s *authUserStore) Get(id string) (authUser, bool, error) {
 		}
 	}
 	return authUser{}, false, nil
+}
+
+func (s *authUserStore) List() ([]authUser, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	doc, err := s.loadLocked()
+	if err != nil {
+		return nil, err
+	}
+	users := append([]authUser(nil), doc.Users...)
+	return users, nil
+}
+
+func (s *authUserStore) UpdateRole(id string, role authRole, now time.Time) (authUser, error) {
+	role = normalizeAuthRole(role)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadLocked()
+	if err != nil {
+		return authUser{}, err
+	}
+	for idx := range doc.Users {
+		if doc.Users[idx].ID != id {
+			continue
+		}
+		doc.Users[idx].Role = role
+		doc.Users[idx].UpdatedAt = now.UTC()
+		if err := s.saveLocked(doc); err != nil {
+			return authUser{}, err
+		}
+		return doc.Users[idx], nil
+	}
+	return authUser{}, errors.New("auth user not found")
 }
 
 func (s *authUserStore) FindByUsername(username string) (authUser, bool, error) {

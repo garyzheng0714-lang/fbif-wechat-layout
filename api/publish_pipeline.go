@@ -42,8 +42,44 @@ import (
 	"golang.org/x/net/html"
 )
 
-// sitePublishRulePackID 网站渠道排版规则包（registry 的 ft-default，FoodTalks 视觉口径）。
+// sitePublishRulePackID 网站渠道默认排版规则包（registry 的 ft-default）。
 const sitePublishRulePackID = "ft-default"
+
+// publishRulePackContextKey 让抓取与渲染这两个既有函数签名继续保持稳定，
+// 同时把一次提交选择的规则包沿着当前 worker 传下去。规则包本身会持久化在
+// publishJob.RulePackID，context 只负责把它带到本次外部调用。
+type publishRulePackContextKey struct{}
+
+func normalizeSitePublishRulePackID(raw string) (string, error) {
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		id = sitePublishRulePackID
+	}
+	meta, ok := accountMetaByID(id)
+	if !ok || meta.Channel != "ft" || meta.TemplateID != "foodtalks-site" {
+		return "", fmt.Errorf("未知网站规则包 %q：请使用 account_catalog 中登记的 ft 规则包", id)
+	}
+	return id, nil
+}
+
+func withPublishRulePackID(ctx context.Context, rulePackID string) context.Context {
+	return context.WithValue(ctx, publishRulePackContextKey{}, rulePackID)
+}
+
+func publishRulePackIDFromContext(ctx context.Context) string {
+	if ctx != nil {
+		if id, ok := ctx.Value(publishRulePackContextKey{}).(string); ok {
+			if normalized, err := normalizeSitePublishRulePackID(id); err == nil {
+				return normalized
+			}
+		}
+	}
+	return sitePublishRulePackID
+}
+
+func publishRulePackIDForJob(job publishJob) (string, error) {
+	return normalizeSitePublishRulePackID(job.RulePackID)
+}
 
 // 可配项 env（MVP 先 env/常量，绝不散落硬编码，后续进管理后台）。
 const (
@@ -110,6 +146,9 @@ func publishRenderOutputHash(html string) string {
 type publishPipeline struct {
 	store *publishJobStore
 	rules *rulePresetStore
+	// deliverySettings 是审核卡投递配置的服务端真相源。任务进入待审核时
+	// 会把当前选择快照到 publishJob，后续改后台配置不会把旧卡切到别的群。
+	deliverySettings *publishDeliverySettingsStore
 	// publicDir 只用于 readiness 复核部署生成物；生产入口必须写入实际静态目录。
 	publicDir string
 	// workerPool 仅在生产入口显式启用。单元测试默认保留可注入的同步/异步
@@ -120,7 +159,7 @@ type publishPipeline struct {
 	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
 	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7）
 	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, canonicalURL, blocksJSON string, err error)
-	// render Block[] → ft-default 规则包内联 HTML（默认走 render_proxy 转发内核）。
+	// render Block[] → 选定网站规则包内联 HTML（默认走 render_proxy 转发内核）。
 	// 规则由渲染服务在每次请求内读取最新激活版本，调用方只传文章语义。
 	render func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error)
 	// ossUpload 整批图片 URL → OSS 转存（默认走 /api/oss-upload 的上游代理内核，urls 模式）
@@ -140,6 +179,11 @@ type publishPipeline struct {
 	monitorNotify func(ctx context.Context, text string) error
 	// notifyCard 审核交互卡片发送（M4）；nil 或失败降级回 notify 文本，同样不阻断流水线
 	notifyCard func(ctx context.Context, card map[string]any) error
+	// notifyCardWithID 与 notifyCard 相同，但返回飞书 message_id，供同一张审核卡后续原位更新。
+	// 旧注入点保留作兼容回退；生产环境优先使用带 ID 的发送器。
+	notifyCardWithID func(ctx context.Context, card map[string]any) (string, error)
+	// updateCard 更新当前应用发送的飞书交互卡；没有已持久化 message_id 时不调用。
+	updateCard func(ctx context.Context, messageID string, card map[string]any) error
 	// coverImgKey 封面 URL → 飞书图片素材 img_key（卡片内呈现封面用）；nil 或失败
 	// 降级为卡片不带图，同样不阻断流水线
 	coverImgKey func(ctx context.Context, imgURL string) (string, error)
@@ -185,11 +229,13 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		now:               time.Now,
 	}
 	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
-		return fetchSiteArticle(rules, articleURL)
+		return fetchSiteArticleWithContext(ctx, rules, articleURL)
 	}
 	if n := newFeishuNotifierFromEnv(); n != nil {
 		p.notify = n.send
 		p.notifyCard = n.sendCard
+		p.notifyCardWithID = n.sendCardWithID
+		p.updateCard = n.updateCard
 		p.coverImgKey = n.uploadImageByURL
 	} else {
 		log.Printf("publish: 飞书通知未配置（需 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_REVIEW_CHAT_ID），审核群通知禁用")
@@ -256,11 +302,12 @@ func normalizeSiteSourceKey(rawURL string) (string, error) {
 
 // ---- 默认阶段实现（进程内复用既有内核，不复制第二份）----
 
-// fetchSiteArticle 进程内复用 main.go 的抓取主路径 fetchDirectBlocksWithOptions
-// （含限流重试）；x-reader Markdown 回退喂不进渲染器，此处按失败处理（fail loud）。
-// caption 参数取网站渠道账号（ft-default）的规则配置，与人工导入同口径。
-func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string, string, string, string, error) {
-	title, blocks, sourceName, byline, canonicalURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, foodTalksSiteRuleAccountID))
+// fetchSiteArticleWithContext 进程内复用 main.go 的抓取主路径
+// fetchDirectBlocksWithOptions（含限流重试）；x-reader Markdown 回退喂不进渲染器，
+// 此处按失败处理（fail loud）。规则包从当前 worker context 进入。
+func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (string, string, string, string, string, error) {
+	rulePackID := publishRulePackIDFromContext(ctx)
+	title, blocks, sourceName, byline, canonicalURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
 	if err != nil {
 		return "", "", "", "", "", fmt.Errorf("文章抓取失败: %w", err)
 	}
@@ -274,9 +321,17 @@ func fetchSiteArticle(rules *rulePresetStore, articleURL string) (string, string
 	return title, sourceName, byline, canonicalURL, string(raw), nil
 }
 
-// renderSiteHTML 进程内复用 render_proxy.go 的转发内核，packId=ft-default；自动发布
-// 强制 latest 模式，由 Node 在每次请求内读取最新激活规则，不接受任务内旧快照。
+// renderSiteHTML 进程内复用 render_proxy.go 的转发内核；自动发布强制 latest 模式，
+// 由 Node 在每次请求内读取选定规则包的最新激活规则，不接受任务内旧快照。
 func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+	return renderSiteHTMLForPack(ctx, publishRulePackIDFromContext(ctx), title, source, blocksJSON, isRepost)
+}
+
+func renderSiteHTMLForPack(ctx context.Context, rulePackID, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+	rulePackID, err := normalizeSitePublishRulePackID(rulePackID)
+	if err != nil {
+		return publishRenderResult{}, err
+	}
 	token := renderToken()
 	if token == "" {
 		return publishRenderResult{}, errors.New("RENDER_TOKEN 未配置：无法调用渲染服务")
@@ -286,7 +341,7 @@ func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, isRep
 		"source":   source,
 		"blocks":   json.RawMessage(blocksJSON),
 		"isRepost": isRepost,
-		"packId":   sitePublishRulePackID,
+		"packId":   rulePackID,
 		"ruleMode": "latest",
 	})
 	if err != nil {
@@ -325,19 +380,11 @@ func renderSiteHTML(ctx context.Context, title, source, blocksJSON string, isRep
 // 内网并发「取图+传 OSS」）。返回 {原url: oss_url}；上游取图失败的 URL 不在响应里，
 // 缺失项的重试与 fail loud 由 stageMirror 负责。
 func ossUploadByURLs(ctx context.Context, urls []string) (map[string]string, error) {
-	return ossUploadPayload(ctx, map[string]any{"urls": urls})
-}
-
-func ossUploadByBase64Images(ctx context.Context, images map[string]string) (map[string]string, error) {
-	return ossUploadPayload(ctx, map[string]any{"base64_images": images})
-}
-
-func ossUploadPayload(ctx context.Context, payload map[string]any) (map[string]string, error) {
 	endpoint := strings.TrimSpace(os.Getenv("WECHAT_UPLOAD_ENDPOINT"))
 	if endpoint == "" {
 		return nil, errors.New("WECHAT_UPLOAD_ENDPOINT 未配置：图片转存不可用")
 	}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(map[string]any{"urls": urls})
 	if err != nil {
 		return nil, fmt.Errorf("序列化转存请求失败: %w", err)
 	}
@@ -403,7 +450,9 @@ func (p *publishPipeline) runJob(jobID int64) {
 		}
 		if job.terminal() || job.Stage == publishStageAwaitingReview || job.Stage == publishStageFailed ||
 			job.Stage == publishStageStagingCreating || job.Stage == publishStageReconciliationRequired ||
-			job.Stage == publishStagePublicizingUpdating || job.Stage == publishStagePublicizeReconciliationRequired {
+			job.Stage == publishStagePublicizingUpdating || job.Stage == publishStagePublicizeReconciliationRequired ||
+			job.Stage == publishStageUnpublishingUpdating || job.Stage == publishStageUnpublishReconciliationRequired ||
+			job.Stage == publishStageRepublishingUpdating || job.Stage == publishStageRepublishReconciliationRequired {
 			return
 		}
 		var stageErr error
@@ -434,6 +483,10 @@ func (p *publishPipeline) runJob(jobID int64) {
 			stageErr = p.stageStage(ctx, job)
 		case publishStagePublicizing:
 			stageErr = p.stagePublicize(ctx, job)
+		case publishStageUnpublishing:
+			stageErr = p.stageUnpublish(ctx, job)
+		case publishStageRepublishing:
+			stageErr = p.stageRepublish(ctx, job)
 		default:
 			stageErr = fmt.Errorf("未知任务阶段 %q", job.Stage)
 		}
@@ -447,7 +500,8 @@ func (p *publishPipeline) runJob(jobID int64) {
 			if latest, loadErr := p.store.byID(jobID); loadErr == nil && latest.PendingContentHash != "" && publishContentPromotableStage(latest) {
 				continue
 			}
-			if errors.Is(stageErr, errStagingOutcomeUncertain) || errors.Is(stageErr, errPublicizeOutcomeUncertain) {
+			if errors.Is(stageErr, errStagingOutcomeUncertain) || errors.Is(stageErr, errPublicizeOutcomeUncertain) ||
+				errors.Is(stageErr, errUnpublishOutcomeUncertain) || errors.Is(stageErr, errRepublishOutcomeUncertain) {
 				// 已经进入持久 intent 窗口；Create 盲重放会建重文，
 				// publicize 盲重放则会掩盖不可逆动作的真实结果。
 				log.Printf("publish: job %d stage %s outcome uncertain: %v", jobID, job.Stage, stageErr)
@@ -478,6 +532,30 @@ func (p *publishPipeline) runJob(jobID int64) {
 				p.schedulePublishNotification(failed.ID)
 				return
 			}
+			if job.Stage == publishStageUnpublishing || job.Stage == publishStageRepublishing {
+				kind := publishNotificationUnpublishFailed
+				if job.Stage == publishStageRepublishing {
+					kind = publishNotificationRepublishFailed
+				}
+				failed, swapped, persistErr := p.store.updateIf(jobID, func(current publishJob) bool {
+					return current.Stage == job.Stage &&
+						current.UnpublishIntentKey == "" && current.RepublishIntentKey == ""
+				}, func(j *publishJob) {
+					j.Stage = publishStageFailed
+					j.FailedStage = job.Stage
+					j.Error = stageErr.Error()
+					enqueuePublishNotification(j, kind)
+				})
+				if persistErr != nil {
+					log.Printf("publish: record job %d lifecycle failure failed: %v", jobID, persistErr)
+					return
+				}
+				if !swapped {
+					return
+				}
+				p.schedulePublishNotification(failed.ID)
+				return
+			}
 			failed, err := p.store.setFailed(jobID, job.Stage, stageErr.Error())
 			if err != nil {
 				log.Printf("publish: record job %d failure failed: %v", jobID, err)
@@ -493,7 +571,11 @@ func (p *publishPipeline) runJob(jobID int64) {
 // stageFetch 抓公众号文章 → 标题 + 公众号名 + 结构化作者署名 + Block[] 落库。
 // blocks 必须先落库再推进：公众号临时链接（含 chksm）会过期，后续阶段失败重试不再回源。
 func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error {
-	title, sourceName, byline, canonicalURL, blocksJSON, err := p.fetch(ctx, job.SourceURL)
+	rulePackID, err := publishRulePackIDForJob(job)
+	if err != nil {
+		return err
+	}
+	title, sourceName, byline, canonicalURL, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
 	if err != nil {
 		return err
 	}
@@ -545,13 +627,21 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 var publishRuleConfigHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 func validatePublishRenderResult(result publishRenderResult) error {
+	return validatePublishRenderResultForPack(result, sitePublishRulePackID)
+}
+
+func validatePublishRenderResultForPack(result publishRenderResult, rulePackID string) error {
 	if strings.TrimSpace(result.HTML) == "" {
 		return errors.New("渲染服务返回空 HTML")
 	}
+	meta, ok := accountMetaByID(rulePackID)
+	if !ok {
+		return fmt.Errorf("未知网站规则包 %q", rulePackID)
+	}
 	resolved := result.ResolvedRule
-	if resolved.AccountID != foodTalksSiteRuleAccountID || strings.TrimSpace(resolved.PresetID) == "" ||
+	if resolved.AccountID != meta.ID || strings.TrimSpace(resolved.PresetID) == "" ||
 		resolved.Revision < 1 || !publishRuleConfigHashPattern.MatchString(resolved.ConfigHash) || resolved.Source != "server" {
-		return errors.New("渲染服务没有返回本次请求实际使用的最新激活规则")
+		return fmt.Errorf("渲染服务没有返回规则包 %q 本次请求实际使用的最新激活规则", rulePackID)
 	}
 	if strings.TrimSpace(result.RendererBuildSHA) == "" {
 		return errors.New("渲染服务未返回 renderer build SHA")
@@ -563,18 +653,22 @@ func validatePublishRenderResult(result publishRenderResult) error {
 	return nil
 }
 
-// stageRender blocks → ft-default 规则包内联 HTML（与网站人工排版同源）。
+// stageRender blocks → 选定网站规则包内联 HTML（与网站人工排版同源）。
 // 每次调用 renderer 都读取最新激活规则；失败重试同样追随重试时的最新规则。
 func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error {
 	if strings.TrimSpace(job.BlocksJSON) == "" {
 		return errors.New("任务缺少已抓取的内容块（blocks），无法排版；请重试从抓取阶段续跑")
 	}
-	isRepost := publishSiteIsRepost(job.SourceName, job.BlocksJSON)
-	result, err := p.render(ctx, job.Title, job.SourceURL, job.BlocksJSON, isRepost)
+	rulePackID, err := publishRulePackIDForJob(job)
 	if err != nil {
 		return err
 	}
-	if err := validatePublishRenderResult(result); err != nil {
+	isRepost := publishSiteIsRepost(job.SourceName, job.BlocksJSON)
+	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, job.SourceURL, job.BlocksJSON, isRepost)
+	if err != nil {
+		return err
+	}
+	if err := validatePublishRenderResultForPack(result, rulePackID); err != nil {
 		return err
 	}
 	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
@@ -746,7 +840,7 @@ func (p *publishPipeline) stageAssessRisk(ctx context.Context, job publishJob) e
 		j.FailedStage = ""
 		j.Error = ""
 		if nextStage == publishStageAwaitingReview {
-			enqueuePublishNotification(j, publishNotificationReviewPending)
+			p.enqueueReviewNotification(j)
 		}
 	})
 	if err == nil && !swapped {
@@ -800,7 +894,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 			j.FailedStage = ""
 			j.Error = ""
 			if j.PendingContentHash == "" {
-				enqueuePublishNotification(j, publishNotificationReviewPending)
+				p.enqueueReviewNotification(j)
 			}
 		})
 		if err != nil {
@@ -870,7 +964,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		j.FailedStage = ""
 		j.Error = ""
 		if j.PendingContentHash == "" {
-			enqueuePublishNotification(j, publishNotificationReviewPending)
+			p.enqueueReviewNotification(j)
 		}
 	})
 	if err != nil {
@@ -904,6 +998,20 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		return err
 	}
 	news.ID = job.FoodTalksNewsID
+	rulePackID, err := publishRulePackIDForJob(job)
+	if err != nil {
+		return err
+	}
+	hours, err := p.snapshotPublishLifecyclePolicy(rulePackID, publishResolvedRule{
+		AccountID:  rulePackID,
+		PresetID:   job.RulePresetID,
+		Revision:   job.RuleRevision,
+		ConfigHash: job.RuleConfigHash,
+		Source:     "server",
+	})
+	if err != nil {
+		return err
+	}
 	intentKey := fmt.Sprintf("foodtalks-publicize:job-%d:%s", job.ID, job.ApprovedRiskVersion)
 	claimed, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStagePublicizing && current.PublicizeIntentKey == "" &&
@@ -912,6 +1020,11 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		j.Stage = publishStagePublicizingUpdating
 		j.PublicizeIntentKey = intentKey
 		j.PublicizeIntentAt = p.now().UTC().Format(time.RFC3339)
+		j.UnpublishWindowHours = hours
+		j.UnpublishPolicySet = true
+		j.PublicationAction = publishPublicationActionPublish
+		j.PublicationActor = strings.TrimSpace(j.ReviewedBy)
+		j.PublicationActionAt = j.ReviewedAt
 		j.Error = ""
 	})
 	if err != nil {
@@ -934,6 +1047,7 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		p.markPublicizeReconciliation(job.ID, intentKey, msg)
 		return fmt.Errorf("%w：%s", errPublicizeOutcomeUncertain, msg)
 	}
+	publishedAt := pipelineNow(p)
 	articleURL := siteFrontURL() + "/news/" + strconv.FormatInt(job.FoodTalksNewsID, 10)
 	updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStagePublicizingUpdating && current.PublicizeIntentKey == intentKey
@@ -942,6 +1056,8 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		j.Stage = publishStagePublished
 		j.FailedStage = ""
 		j.Error = ""
+		j.PublishedAt = publishedAt.Format(time.RFC3339)
+		j.UnpublishWindowUntil = publishWindowUntil(publishedAt, j.UnpublishWindowHours)
 		enqueuePublishNotification(j, publishNotificationPublished)
 	})
 	if err != nil || !swapped {
@@ -990,7 +1106,7 @@ func (p *publishPipeline) markPublicizeReconciliation(jobID int64, intentKey, re
 	}
 }
 
-// review 人审动作核心：HTTP 端点（ADMIN_PASSWORD 门）与飞书卡片回调（token+
+// review 人审动作核心：HTTP 端点（登录角色门）与飞书卡片回调（token+
 // reviewer 白名单门）共用这一个函数——仅 awaiting_review 可操作；approve 只持久化
 // publicizing intent 并排队后台 worker，不在请求内等待 FoodTalks。reviewedBy 是审核人留痕（卡片回调传
 // operator.open_id，HTTP 端点传空），落 reviewed_by/reviewed_at 进终态卡与任务存储。
@@ -1001,7 +1117,7 @@ func (p *publishPipeline) review(ctx context.Context, jobID int64, action, revie
 }
 
 // reviewWithRiskVersion 把卡片上看到的风险版本纳入同一次存储 CAS，消除
-// “先读版本、后审核”的 TOCTOU。expectedRiskVersion 为空表示 ADMIN_PASSWORD
+// “先读版本、后审核”的 TOCTOU。expectedRiskVersion 为空表示后台人工操作
 // 管理端明确审批 CAS 当刻的最新风险快照；两条路径都会持久化该版本。
 func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, action, reviewedBy, expectedRiskVersion string) (publishJob, error) {
 	if publishWorkersPaused() {
@@ -1109,6 +1225,17 @@ func (p *publishPipeline) retry(jobID int64) (publishJob, error) {
 			(!validPersistedPublishApproval(current) || current.PublicizeIntentKey != "") {
 			return false
 		}
+		if (target == publishStageUnpublishing || target == publishStageRepublishing) &&
+			(current.UnpublishIntentKey != "" || current.RepublishIntentKey != "") {
+			return false
+		}
+		if target == publishStageUnpublishing &&
+			(!publishUnpublishWindowOpen(current, pipelineNow(p))) {
+			return false
+		}
+		if target == publishStageRepublishing && !validPersistedPublishApproval(current) {
+			return false
+		}
 		// 旧数据若在 staging failed 上已有 intent，也必须人工对账，不可重发 POST。
 		if target == publishStageStaging && current.StagingIntentKey != "" && current.FoodTalksNewsID == 0 {
 			return false
@@ -1186,6 +1313,20 @@ func (p *publishPipeline) recoverJobs() {
 		case publishStagePublicizingUpdating:
 			p.markPublicizeReconciliation(job.ID, job.PublicizeIntentKey,
 				"进程在不可逆 UpdateNews 调用窗口中断，外部结果不确定，启动时禁止自动重放")
+		case publishStageUnpublishing:
+			if publishUnpublishWindowOpen(job, pipelineNow(p)) && job.UnpublishIntentKey == "" {
+				p.spawn(func() { p.runJob(job.ID) })
+			}
+		case publishStageUnpublishingUpdating:
+			p.markUnpublishReconciliation(job.ID, job.UnpublishIntentKey,
+				"进程在下线 UpdateNews 调用窗口中断，外部结果不确定，启动时禁止自动重放")
+		case publishStageRepublishing:
+			if validPersistedPublishApproval(job) && job.RepublishIntentKey == "" {
+				p.spawn(func() { p.runJob(job.ID) })
+			}
+		case publishStageRepublishingUpdating:
+			p.markRepublishReconciliation(job.ID, job.RepublishIntentKey,
+				"进程在重新发布 UpdateNews 调用窗口中断，外部结果不确定，启动时禁止自动重放")
 		}
 	}
 }
@@ -1248,7 +1389,7 @@ func (p *publishPipeline) reconcileStaging(jobID, newsID int64, confirmNotCreate
 			j.FoodTalksNewsID = newsID
 			if publishRiskLevelKnown(j.RiskLevel) {
 				j.Stage = publishStageAwaitingReview
-				enqueuePublishNotification(j, publishNotificationReviewPending)
+				p.enqueueReviewNotification(j)
 			} else {
 				j.Stage = publishStageAssessingReview
 			}
@@ -1332,9 +1473,22 @@ func (p *publishPipeline) submit(sourceURL string) (publishJob, bool, error) {
 }
 
 func (p *publishPipeline) submitWithContext(ctx context.Context, sourceURL string) (publishJob, bool, error) {
+	return p.submitWithRulePackAndMetadataContext(ctx, sourceURL, sitePublishRulePackID, "", "")
+}
+
+func (p *publishPipeline) submitWithRulePackAndMetadataContext(
+	ctx context.Context, sourceURL, rulePackID, classification, classifier string,
+) (publishJob, bool, error) {
 	if publishWorkersPaused() {
 		return publishJob{}, false, errPublishWorkersPaused
 	}
+	rulePackID, err := normalizeSitePublishRulePackID(rulePackID)
+	if err != nil {
+		return publishJob{}, false, err
+	}
+	classification = strings.TrimSpace(classification)
+	classifier = strings.TrimSpace(classifier)
+	ctx = withPublishRulePackID(ctx, rulePackID)
 	sourceKey, err := normalizeSiteSourceKey(sourceURL)
 	if err != nil {
 		return publishJob{}, false, err
@@ -1361,6 +1515,9 @@ func (p *publishPipeline) submitWithContext(ctx context.Context, sourceURL strin
 		seed := newPublishContentSeed(publishContentWebFetch, title, sourceName, byline, blocksJSON, "")
 		job, created, createErr := p.store.createSeeded(canonicalKey, sourceURL, func(j *publishJob) {
 			j.SourceAliases = []string{sourceKey}
+			j.RulePackID = rulePackID
+			j.Classification = classification
+			j.Classifier = classifier
 			applyPublishContentSeed(j, seed)
 		})
 		if createErr != nil {
@@ -1371,7 +1528,11 @@ func (p *publishPipeline) submitWithContext(ctx context.Context, sourceURL strin
 		}
 		return job, created, nil
 	}
-	job, created, err := p.store.create(sourceKey, sourceURL)
+	job, created, err := p.store.createSeeded(sourceKey, sourceURL, func(j *publishJob) {
+		j.RulePackID = rulePackID
+		j.Classification = classification
+		j.Classifier = classifier
+	})
 	if err != nil {
 		return publishJob{}, false, err
 	}
@@ -1394,12 +1555,15 @@ func publishSourceKeyIsShort(sourceKey string) bool {
 }
 
 type officialPublishInput struct {
-	URL         string
-	Title       string
-	SourceName  string
-	Author      string
-	ContentHTML string
-	CoverURL    string
+	URL               string
+	Title             string
+	SourceName        string
+	Author            string
+	ContentHTML       string
+	CoverURL          string
+	RulePackID        string
+	Classification    string
+	ClassifierVersion string
 }
 
 // submitOfficial 让微信公众号官方 API 返回的正文直接进入既有排版状态机。
@@ -1441,6 +1605,12 @@ func (p *publishPipeline) submitStructuredContent(
 	if publishWorkersPaused() {
 		return publishJob{}, false, errPublishWorkersPaused
 	}
+	rulePackID, err := normalizeSitePublishRulePackID(input.RulePackID)
+	if err != nil {
+		return publishJob{}, false, err
+	}
+	classification := strings.TrimSpace(input.Classification)
+	classifier := strings.TrimSpace(input.ClassifierVersion)
 	sourceKey, err := normalizeSiteSourceKey(input.URL)
 	if err != nil {
 		return publishJob{}, false, err
@@ -1450,7 +1620,7 @@ func (p *publishPipeline) submitStructuredContent(
 		if p.fetch == nil {
 			return publishJob{}, false, errors.New("短链缺少 canonical identity 解析器，未创建发布任务")
 		}
-		_, _, _, canonicalURL, _, fetchErr := p.fetch(ctx, input.URL)
+		_, _, _, canonicalURL, _, fetchErr := p.fetch(withPublishRulePackID(ctx, rulePackID), input.URL)
 		if fetchErr != nil {
 			return publishJob{}, false, fmt.Errorf("短链规范身份解析失败，未创建发布任务: %w", fetchErr)
 		}
@@ -1488,6 +1658,9 @@ func (p *publishPipeline) submitStructuredContent(
 	}
 	seed := newPublishContentSeed(contentSource, input.Title, input.SourceName, input.Author, string(blocksJSON), input.CoverURL)
 	job, created, err := p.store.createSeeded(sourceKey, input.URL, func(j *publishJob) {
+		j.RulePackID = rulePackID
+		j.Classification = classification
+		j.Classifier = classifier
 		if originalSourceKey != sourceKey {
 			j.SourceAliases = []string{originalSourceKey}
 		}

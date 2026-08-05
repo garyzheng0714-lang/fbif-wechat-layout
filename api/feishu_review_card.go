@@ -13,7 +13,7 @@ package main
 //   - config.update_multi=true：回调响应带新卡时群内所有人同步看到终态。
 //
 // 状态色联动（规范 §4）：蓝=待审核（tag 黄）、绿=已发布（succeed_filled + tag 绿）、
-// 红=已驳回（tag 红）。
+// 红=已驳回/失败、橙=公开结果待核对。
 
 import (
 	"fmt"
@@ -25,8 +25,10 @@ import (
 // feishuCardActionApprove / Reject 回调 value 的 action 取值（发送与回调两侧共用，
 // 字面量漂移会让按钮点了没反应）。
 const (
-	feishuCardActionApprove = "approve"
-	feishuCardActionReject  = "reject"
+	feishuCardActionApprove   = "approve"
+	feishuCardActionReject    = "reject"
+	feishuCardActionUnpublish = "unpublish"
+	feishuCardActionRepublish = "republish"
 )
 
 const reviewCardHeaderTitle = "网站发布审核"
@@ -49,7 +51,7 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 		"icon":  map[string]any{"tag": "standard_icon", "token": "done_outlined"},
 		"confirm": map[string]any{
 			"title": feishuPlainText("通过并发布？"),
-			"text":  feishuPlainText("发布后文章公开可见，且发布动作不可逆。"),
+			"text":  feishuPlainText("发布公开动作不可逆；如需纠正内容，可在配置的窗口内下线，之后也能重新发布。"),
 		},
 		"behaviors": []any{map[string]any{"type": "callback", "value": approveValue}},
 	}
@@ -137,10 +139,47 @@ func buildReviewPublishingCard(job publishJob) map[string]any {
 	}
 }
 
+// buildReviewLifecycleProgressCard 保留发布、下线、重新发布的“已受理”中间态，
+// 但始终由同一张卡片更新到最终状态。
+func buildReviewLifecycleProgressCard(job publishJob, action string) map[string]any {
+	label := "处理中"
+	content := "后台正在处理这篇文章，最终结果会更新到同一张卡片。"
+	switch action {
+	case feishuCardActionUnpublish:
+		label = "下线中"
+		content = "已受理下线请求，正在等待 FoodTalks 返回最终结果。"
+	case feishuCardActionRepublish:
+		label = "重新发布中"
+		content = "已受理重新发布请求，正在等待 FoodTalks 返回最终结果。"
+	}
+	elements := []any{reviewCardInfoBlock(job), map[string]any{
+		"tag": "markdown", "text_size": "notation",
+		"content": content + "\n\n" + reviewCardAuditTrail(job, content),
+	}}
+	return map[string]any{
+		"schema": "2.0",
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"template": "blue",
+			"icon":     map[string]any{"tag": "standard_icon", "token": "readinfo_outlined"},
+			"title":    feishuPlainText(reviewCardHeaderTitle),
+			"subtitle": feishuPlainText("请求已受理，最终结果以随后终态卡为准"),
+			"text_tag_list": []any{map[string]any{
+				"tag": "text_tag", "text": feishuPlainText(label), "color": "blue",
+			}},
+		},
+		"body": map[string]any{
+			"direction": "vertical", "padding": "12px 12px 12px 12px",
+			"vertical_spacing": "8px", "elements": elements,
+		},
+	}
+}
+
 // buildReviewDoneCard 终态卡：按 job 当前终态渲染。approve → 绿「已发布」+ 查看文章；
 // reject → 红「已驳回」。底部一行操作留痕（person capsule + 动作 + 时间，规范 §6.4）。
 func buildReviewDoneCard(job publishJob) map[string]any {
 	published := job.Stage == publishStagePublished
+	offline := job.Stage == publishStageOffline
 	header := map[string]any{
 		"title": feishuPlainText(reviewCardHeaderTitle),
 	}
@@ -149,11 +188,14 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 	if published {
 		header["template"] = "green"
 		header["icon"] = map[string]any{"tag": "standard_icon", "token": "succeed_filled"}
-		header["subtitle"] = feishuPlainText("文章已在 FoodTalks 公开可见")
+		header["subtitle"] = feishuPlainText("文章已在 FoodTalks 公开可见 · " + publishUnpublishWindowLabel(job, time.Now().UTC()))
 		header["text_tag_list"] = []any{map[string]any{
 			"tag": "text_tag", "text": feishuPlainText("已发布"), "color": "green",
 		}}
 		actionLabel = "通过并发布了本文"
+		if job.PublicationAction == publishPublicationActionRepublish {
+			actionLabel = "重新发布了本文"
+		}
 		if job.ArticleURL != "" {
 			elements = append(elements, feishuButtonRow(map[string]any{
 				"tag":   "button",
@@ -168,6 +210,42 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 				}},
 			}))
 		}
+		if publishUnpublishWindowOpen(job, time.Now().UTC()) {
+			unpublishValue := map[string]any{
+				"action": feishuCardActionUnpublish, "job_id": job.ID,
+				"lifecycle_version": publishLifecycleCardVersion(job),
+			}
+			elements = append(elements, feishuButtonRow(map[string]any{
+				"tag": "button", "text": feishuPlainText("下线文章"), "type": "danger",
+				"size": "medium", "width": "fill",
+				"confirm": map[string]any{
+					"title": feishuPlainText("下线这篇文章？"),
+					"text":  feishuPlainText("文章会暂时从 FoodTalks 前台下线，仍可在窗口内重新发布。"),
+				},
+				"behaviors": []any{map[string]any{"type": "callback", "value": unpublishValue}},
+			}))
+		}
+	} else if offline {
+		header["template"] = "orange"
+		header["icon"] = map[string]any{"tag": "standard_icon", "token": "readinfo_outlined"}
+		header["subtitle"] = feishuPlainText("文章已下线，可重新发布")
+		header["text_tag_list"] = []any{map[string]any{
+			"tag": "text_tag", "text": feishuPlainText("已下线"), "color": "orange",
+		}}
+		actionLabel = "下线了本文"
+		republishValue := map[string]any{
+			"action": feishuCardActionRepublish, "job_id": job.ID,
+			"lifecycle_version": publishLifecycleCardVersion(job),
+		}
+		elements = append(elements, feishuButtonRow(map[string]any{
+			"tag": "button", "text": feishuPlainText("重新发布"), "type": "primary_filled",
+			"size": "medium", "width": "fill",
+			"confirm": map[string]any{
+				"title": feishuPlainText("重新发布这篇文章？"),
+				"text":  feishuPlainText("将使用原审核通过的版本恢复为公开状态。"),
+			},
+			"behaviors": []any{map[string]any{"type": "callback", "value": republishValue}},
+		}))
 	} else {
 		header["template"] = "red"
 		header["subtitle"] = feishuPlainText("任务终止，文章保留在 FoodTalks 草稿态")
@@ -176,6 +254,64 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 		}}
 		actionLabel = "驳回了本文"
 	}
+	elements = append(elements, map[string]any{
+		"tag":       "markdown",
+		"text_size": "notation",
+		"content":   reviewCardAuditTrail(job, actionLabel),
+		"margin":    "4px 0px 0px 0px",
+	})
+	return map[string]any{
+		"schema": "2.0",
+		"config": map[string]any{"update_multi": true},
+		"header": header,
+		"body": map[string]any{
+			"direction":        "vertical",
+			"padding":          "12px 12px 12px 12px",
+			"vertical_spacing": "8px",
+			"horizontal_align": "left",
+			"vertical_align":   "top",
+			"elements":         elements,
+		},
+	}
+}
+
+// buildReviewIssueCard 是发布窗口的异常终态：仍更新原审核卡，不另起一张通知卡。
+// uncertain=true 表示外部 PUT 的结果无法确认，不能误报为失败，也不能自动重试。
+func buildReviewIssueCard(job publishJob, uncertain bool) map[string]any {
+	header := map[string]any{
+		"title":    feishuPlainText(reviewCardHeaderTitle),
+		"icon":     map[string]any{"tag": "standard_icon", "token": "readinfo_outlined"},
+		"template": "red",
+	}
+	status := "发布失败"
+	subtitle := "公开请求未完成，文章仍保留在 FoodTalks 草稿态"
+	actionLabel := "发布失败"
+	color := "red"
+	if job.PublicationAction == publishPublicationActionUnpublish {
+		status = "下线失败"
+		subtitle = "下线请求未完成，文章仍保持公开状态"
+		actionLabel = "下线失败"
+	} else if job.PublicationAction == publishPublicationActionRepublish {
+		status = "重新发布失败"
+		subtitle = "重新发布请求未完成，文章仍保持下线状态"
+		actionLabel = "重新发布失败"
+	}
+	if uncertain {
+		header["template"] = "orange"
+		status = "待人工核对"
+		subtitle = "操作结果暂时无法确认，请先核对网站状态"
+		actionLabel = "操作结果待核对"
+		color = "orange"
+	}
+	header["subtitle"] = feishuPlainText(subtitle)
+	header["text_tag_list"] = []any{map[string]any{
+		"tag": "text_tag", "text": feishuPlainText(status), "color": color,
+	}}
+	elements := []any{reviewCardInfoBlock(job), map[string]any{
+		"tag":       "markdown",
+		"text_size": "notation",
+		"content":   "<font color='grey'>处理说明</font>\n" + reviewCardSafeOrDash(job.Error, 600),
+	}}
 	elements = append(elements, map[string]any{
 		"tag":       "markdown",
 		"text_size": "notation",
@@ -340,8 +476,10 @@ func reviewCardDetailsPanel(job publishJob) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"tag":      "collapsible_panel",
-		"expanded": job.RiskLevel != publishRiskPass,
+		"tag": "collapsible_panel",
+		// 首屏只保留风险等级标签；详细说明由审核人主动展开，避免
+		// warning/block 文章把长风险清单直接撑开审核卡片。
+		"expanded": false,
 		"header": map[string]any{
 			"title":         feishuPlainText("查看排版与风险说明"),
 			"width":         "auto_when_fold",
@@ -551,11 +689,19 @@ func reviewCardSafeOrDash(v string, limit int) string {
 // reviewCardAuditTrail 底部操作留痕：卡片回调有 operator.open_id 时用 person capsule
 // 嵌人；HTTP 审核（无 open_id）退化为「经管理后台」纯文本，谁都不冒充。
 func reviewCardAuditTrail(job publishJob, actionLabel string) string {
-	when := formatReviewCardTime(job.ReviewedAt)
-	if feishuOpenIDSafe(job.ReviewedBy) {
+	actor := strings.TrimSpace(job.PublicationActor)
+	whenRaw := strings.TrimSpace(job.PublicationActionAt)
+	if actor == "" {
+		actor = strings.TrimSpace(job.ReviewedBy)
+	}
+	if whenRaw == "" {
+		whenRaw = job.ReviewedAt
+	}
+	when := formatReviewCardTime(whenRaw)
+	if feishuOpenIDSafe(actor) {
 		return fmt.Sprintf(
 			"<person id=\"%s\" show_avatar=\"true\" show_name=\"true\" style=\"capsule\"></person> %s <font color='grey'>%s</font>",
-			job.ReviewedBy, actionLabel, when)
+			actor, actionLabel, when)
 	}
 	return fmt.Sprintf("经管理后台%s <font color='grey'>%s</font>", actionLabel, when)
 }

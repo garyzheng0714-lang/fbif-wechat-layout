@@ -22,6 +22,7 @@ function uid(type, existing) {
   return id;
 }
 const KIND_LABELS = { text: '文字', image: '图片', recommendations: '推荐文章', spacer: '间距' };
+const BLOCK_ID_LABELS = { tip: '提示声明', biz_coop: '商务合作', join_group: '加入微信群', follow_account: '关注公众号', logo: '品牌标志', more_info: '获取更多内容' };
 function typeGroupLabel(type) {
   return KIND_LABELS[type && type.kind] || '图片';
 }
@@ -34,9 +35,10 @@ function assetIDFromRef(value) {
   const m = /^\{\{asset#([a-z0-9_-]+)\}\}$/i.exec(String(value == null ? '' : value).trim());
   return m ? m[1] : '';
 }
-function blockDisplayLabel(block, type, assetLibrary, scope) {
+function blockDisplayLabel(block, type, assetLibrary, scope, blockID = '') {
   const custom = String(block && block.display_name || '').trim();
-  if (custom) return custom;
+  if (custom && custom !== String(type && type.label || '').trim()) return custom;
+  if (BLOCK_ID_LABELS[blockID]) return BLOCK_ID_LABELS[blockID];
   const f = isObj(block && block.fields) ? block.fields : {};
   const title = typeof f.title === 'string' ? f.title.replace(/^[\s/]+|[\s/]+$/g, '').trim() : '';
   if (title) return title;
@@ -47,7 +49,7 @@ function blockDisplayLabel(block, type, assetLibrary, scope) {
     const assetScope = asset && (asset.scope || 'global');
     if (asset && asset.id === id && (assetScope === 'global' || assetScope === scope)) return String(asset.label || '').trim();
   }
-  return (type && type.label) || (block && block.type) || '';
+  return custom || (type && type.label) || (block && block.type) || '';
 }
 
 const STYLE_ID = 'be-style';
@@ -345,7 +347,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
     const mcb = doc.createElement('input'); mcb.type = 'checkbox'; mcb.checked = mod.enabled !== false;
     mcb.onchange = () => setMaster(mcb.checked);
     master.appendChild(mcb);
-    const ml = doc.createElement('span'); ml.textContent = '默认启用底部区块'; master.appendChild(ml);
+    const ml = doc.createElement('span'); ml.textContent = channel === 'ft' ? '新文章默认显示网站页脚' : '新文章默认显示底部区块'; master.appendChild(ml);
     head.appendChild(master);
 
     // gap（模块间空行）仅单套结构有意义；双套（原创/转载）间距由「间距」块承载，不显示此开关。
@@ -368,7 +370,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
       types.forEach(t => { const op = doc.createElement('option'); op.value = t.type; op.textContent = t.label; og.appendChild(op); });
       sel.appendChild(og);
     }
-    const addBtn = doc.createElement('button'); addBtn.type = 'button'; addBtn.textContent = '新增区块';
+    const addBtn = doc.createElement('button'); addBtn.type = 'button'; addBtn.textContent = '添加页脚区块';
     addBtn.onclick = () => sel.value && addBlock(sel.value);
     add.appendChild(sel); add.appendChild(addBtn);
     head.appendChild(add);
@@ -409,13 +411,13 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
     const L = layer();
     const order = L.order.filter(id => L.blocks[id]);
     if (!order.length) {
-      const e = doc.createElement('div'); e.className = 'be-empty'; e.textContent = '暂无区块。用右上「新增区块」添加（如名片）。';
+      const e = doc.createElement('div'); e.className = 'be-empty'; e.textContent = '暂无页脚区块，可从上方选择类型并添加。';
       wrap.appendChild(e);
     }
     for (const [orderIndex, id] of order.entries()) {
       const block = L.blocks[id];
       const type = getBlockType(block.type) || { label: block.type, fields: [] };
-      const displayLabel = blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, getScope ? getScope() : '') || id;
+      const displayLabel = blockDisplayLabel(block, type, getAssetLibrary ? getAssetLibrary() : null, getScope ? getScope() : '', id) || id;
       const card = doc.createElement('div'); card.className = 'be-card';
       card.setAttribute('draggable', 'true'); card.dataset.id = id;
       card.setAttribute('role', 'group');
@@ -437,7 +439,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
       toggle.setAttribute('aria-controls', fieldsID);
       const name = doc.createElement('span'); name.className = 'be-name';
-      name.innerHTML = esc(displayLabel) + `<span class="be-type">${esc(typeGroupLabel(type))} · ${esc(block.type)} · ${esc(id)}</span>`;
+      name.innerHTML = esc(displayLabel) + `<span class="be-type">${esc(typeGroupLabel(type))}</span>`;
       const caret = doc.createElement('span'); caret.className = 'be-caret'; caret.setAttribute('aria-hidden', 'true'); caret.textContent = open ? '▾' : '▸';
       toggle.appendChild(name); toggle.appendChild(caret);
       toggle.onclick = () => { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); render(`[data-block-toggle="${cssAttrValue(id)}"]`); };
@@ -478,7 +480,7 @@ export function createBlockEditor({ container, module, channel = 'mp', getAssetL
         const labelTitle = doc.createElement('div'); labelTitle.className = 'be-flabel'; labelTitle.innerHTML = '<span>模块名称</span><span class="be-defmark">显示名</span>';
         const labelInput = doc.createElement('input'); labelInput.className = 'be-input'; labelInput.type = 'text'; labelInput.value = block.display_name || '';
         labelInput.setAttribute('aria-label', '模块名称（显示名）');
-        labelInput.placeholder = blockDisplayLabel({ ...block, display_name: '' }, type, getAssetLibrary ? getAssetLibrary() : null, getScope ? getScope() : '');
+        labelInput.placeholder = blockDisplayLabel({ ...block, display_name: '' }, type, getAssetLibrary ? getAssetLibrary() : null, getScope ? getScope() : '', id);
         labelInput.oninput = () => setBlockDisplayName(id, labelInput.value);
         labelField.appendChild(labelTitle); labelField.appendChild(labelInput); fields.appendChild(labelField);
         const fdefs = type.fields || [];

@@ -63,19 +63,29 @@ export function setRuleReadinessState(state, {
   const normalized = RULE_STATES.has(state) ? state : 'failed';
   win._activeRuleState = normalized;
   const copyButton = doc.getElementById('copyBtn');
+  const copyMenuButton = doc.getElementById('copyMenuBtn');
+  const copyHTMLButton = doc.getElementById('copyHtmlBtn');
   const blocked = normalized !== FINAL_RULE_STATE;
-  if (copyButton) {
+  const controlledCopyButtons = [copyButton, copyMenuButton, copyHTMLButton].filter(Boolean);
+  for (const button of controlledCopyButtons) {
     if (blocked) {
-      copyButton.dataset.ruleBlocked = 'true';
-      copyButton.disabled = true;
-      copyButton.setAttribute('aria-disabled', 'true');
-      copyButton.title = normalized === 'loading' ? '正在加载排版规则' : '规则未确认，暂不能复制';
-    } else if (copyButton.dataset.ruleBlocked === 'true') {
-      delete copyButton.dataset.ruleBlocked;
-      copyButton.disabled = false;
-      copyButton.removeAttribute('aria-disabled');
-      copyButton.removeAttribute('title');
+      button.dataset.ruleBlocked = 'true';
+      button.disabled = true;
+      button.setAttribute('aria-disabled', 'true');
+      button.title = normalized === 'loading' ? '正在加载排版规则' : '规则未确认，暂不能复制';
+    } else if (button.dataset.ruleBlocked === 'true') {
+      delete button.dataset.ruleBlocked;
+      if (button.dataset.copyPending !== 'true') button.disabled = false;
+      button.removeAttribute('aria-disabled');
+      button.removeAttribute('title');
     }
+  }
+  if (blocked) {
+    const copyRoot = doc.getElementById('copySplit');
+    const copyMenu = doc.getElementById('copyMenu');
+    if (copyMenu) copyMenu.hidden = true;
+    if (copyRoot) copyRoot.classList.remove('is-open');
+    if (copyMenuButton) copyMenuButton.setAttribute('aria-expanded', 'false');
   }
 
   const banner = doc.getElementById('ruleStatusBanner');

@@ -1,9 +1,5 @@
 node_modules/
 .env
-.env.*
-!.env.example
-*.pem
-*.key
 .DS_Store
 .context/
 api/api
@@ -21,7 +17,6 @@ docs/*
 !docs/INDEX.md
 !docs/agents/
 !docs/adr/
-!docs/feishu-document-import.md
 # 外部 API 实测契约是流水线代码的依据，必须随仓库走（openspec design.md 引用它）
 !docs/foodtalks-api-contract.md
 
@@ -38,3 +33,7 @@ stage*.png
 tests/e2e-screenshots/
 tests/e2e-baselines/
 test-results/
+
+# 本地产物：Go 覆盖率输出与 graphify 代码图谱（勿入库）
+api/coverage.out
+graphify-out/

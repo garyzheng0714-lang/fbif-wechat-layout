@@ -1,10 +1,14 @@
 # Design: 公众号 → FoodTalks 网站内容自动化发布流水线
 
+> **演进设计说明（2026-07-26 对齐）**：本文保留方案演进背景；当前不可逆公开动作一律受
+> CLAUDE.md 红线 #26 约束，必须有持久化人工 `approve`，任何风险等级都不能自动绕过人审。
+> 图片转存已统一走排版工具 `/api/oss-upload`，不再等待 FoodTalks 图片上传接口。
+
 ## Context
 
 **现状链路**：公众号发文 → 人打开排版工具 `https://fbifmp-layout.foodtalks.cn/ft/<账号>` 粘贴原文链接 → 工具排出网站版 → 人复制 → 网站后台（TinyMCE CMS）粘贴 → 填标题/封面/分类 → 发布。
 
-**目标链路**：公众号发文 →（轮询自动发现 或 人贴 URL）→ 流水线自动完成「抓取 → 网站排版 → 图片转存 → FoodTalks 隐藏发布」→ 飞书审核卡片 → 人点「通过」→ 文章公开 + 群通知。后期低风险文章跳过人工审核。
+**目标链路**：公众号发文 →（轮询自动发现 或 人贴 URL）→ 流水线自动完成「抓取 → 网站排版 → 图片转存 → FoodTalks 隐藏发布」→ 飞书审核卡片 → 人点「通过」→ 文章公开 + 群通知。风险评估可自动化，但不得替代人工批准。
 
 **三方已有资产（调研结论，全部已核实）**：
 
@@ -12,12 +16,12 @@
 |---|---|---|
 | 排版工具（本仓库，`fbifmp-layout.foodtalks.cn`） | `POST /api/fetch-article`（公众号 URL→Block[]）、`POST /api/html-to-blocks`、`POST /api/render`（Block[]→内联 HTML，Bearer `RENDER_TOKEN`，systemd `fbif-render` 已上线） | render 只支持 `packId=fbif` 微信模板；网站模板 `foodtalks-site.js` 未接入 |
 | FBIF资讯订阅（`feed.foodtalks.cn`，Go+PG） | `publish_jobs` 状态机（created→optimizing→rendering→drafting→awaiting_confirm→publishing→终态，幂等续跑）、`internal/wechat`（token/传图/AddDraft/freepublish Publish+Status）、`internal/publishing`（LayoutClient 已会调排版工具两个接口）、`internal/imagecache`（qpic 防盗链下载）、`internal/feishu`（文本私信）、豆包 OptimizeClient、RBAC | 无 FoodTalks 客户端；无「拉取已发布文章」能力；无飞书卡片/群消息/回调；流水线只有 wechat_mp 方向 |
-| FoodTalks 网站 | `POST/PUT api-we-test.foodtalks.cn/news/admin/news`（测试环境抓包文档），字段含 `publishStatus`/`isPublic`/`content`(HTML)/`coverImg`/`categoryIds` 等 | 正式环境地址未知；鉴权是抓包的个人登录 Bearer（会过期）；响应结构/枚举未知；**图片上传接口未知** |
+| FoodTalks 网站 | `POST/PUT api-we-test.foodtalks.cn/news/admin/news`（测试环境抓包文档），字段含 `publishStatus`/`isPublic`/`content`(HTML)/`coverImg`/`categoryIds` 等 | 正式环境地址、服务级鉴权及部分枚举仍待确认；图片转存已由排版工具 `/api/oss-upload` 解决 |
 
 **约束（不可violate）**：
 - 本仓库红线 #19：`fbif.js` 在网站任务中字节级不动；网站与公众号渲染器物理隔离。
-- 本仓库红线 #24：网站渠道表格必须走 `shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival` 开关；发布进 CMS 的 HTML 要活过 CMS 清洗。
-- 资讯订阅铁律：PG 迁移不自动、部署前手动跑；只新增不改既有逻辑；发布不可逆动作必须人工确认（本变更沿用：「公开翻转」前必须过审核闸门，直到分级自动化被显式开启）。
+- 本仓库红线 #24：网站渠道表格必须走 `public/js/templates/shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival` 开关；发布进 CMS 的 HTML 要活过 CMS 清洗。
+- 资讯订阅铁律：PG 迁移不自动、部署前手动跑；只新增不改既有逻辑；发布不可逆动作必须经过持久化人工确认，风险分级和配置开关都不能绕过审核闸门。
 - 全局规则：规则数据不硬编码（分类 ID、页脚文案等走可配置）；密钥 env-only。
 - **用户明确指令（2026-07-10）：本变更先只产出计划；任何对外调用（FoodTalks 冒烟、飞书发消息、微信拉文）都要等用户批准后按 tasks 执行。**
 
@@ -62,7 +66,7 @@ POST /api/render
 ```
 
 **必须带的网站契约**（这正是「不能让资讯订阅自己拼 HTML」的原因）：
-- 表格走 `shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival`（属性+style 双写，红线 #24），图片按 `wpx` 输出 `width` 属性+style 双写。
+- 表格走 `public/js/templates/shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival`（属性+style 双写，红线 #24），图片按 `wpx` 输出 `width` 属性+style 双写。
 - 页脚走 `modules.bottom_blocks` 主路径（`ft-default` 服务端规则默认，红线 #20/#22），规则从 `GET /api/rules/active?account=ft-default` 拉取（fbif 链路同款 60s 缓存 + 降级）。
 - 公众号 fbif 模板路径零改动：不传新开关、输出字节不变；`tests/wechat-draft-survival.test.mjs` 与 `tests/site-footer-parity.test.mjs` 必须全绿。
 - 与微信链路不同：**外链不降纯文本**（网站可以带外链）；`mp.weixin.qq.com` 临时链接（`chksm` 参数会过期）是否保留由行为规则决定，默认转纯文本并把原文链接放来源行。
@@ -128,18 +132,20 @@ render 输出 HTML → 枚举 img src（mmbiz/外站）
 **被否掉的方案**：*直接引用 mmbiz 外链*（防盗链裂图）；*索要 FoodTalks 上传接口*（实测证明不需要——API 不校验域名；已发布成品里的 static.foodtalks.cn 是 CMS 编辑器粘贴时的二次转存，API 路径不触发）。
 **记录在案的权衡**：图片资产落我方 OSS（fbif-gary-img-hz）而非 FoodTalks 存储，桶停用则文章图全挂；长期可与网站后端商定归一，不阻塞 MVP。
 
-### D5. 触发：轮询 `freepublish/batchget` 为主，**不启用微信「服务器配置」事件推送**；手动贴 URL 是 MVP 主路径与永久兜底
+### D5. 触发：多发现路径物理解耦；手动贴 URL 是永久兜底
 
 **选择**：
 - **手动触发（Phase 3，MVP）**：资讯订阅新增 `POST /api/publish/site-sync`（body: 公众号文章 URL），直接建 job 跑流水线。这条不依赖微信任何接口，先把 90% 的价值（排版/转图/发布/审核）拿到手。
-- **自动发现（Phase 5）**：poller 定时（建议 15 分钟）调 `freepublish/batchget` 拉最近已发布列表 → 与去重表（`article_id`/URL hash 唯一索引）比对 → 新文章逐篇（多图文按 index 拆分）建 job。
-- **明确不做**：在公众号后台启用「服务器配置」接收事件推送。
+- **“发布”自动发现（Phase 5）**：08:30–18:30 的 poller 独立调用 `freepublish/batchget` 最新页，与持久去重表比对后逐篇建 job；draft / 素材接口失败不得阻断这条轮询。
+- **“群发”自动发现**：不能由 `freepublish` 代替，必须作为另一条持久、幂等的发现路径接入，并与发布路径在 canonical identity 层收敛。
+- **类型闸门**：小绿书 / 图集或信号冲突时 fail closed；只有正向证据确认普通文章才自动投递。
+- **服务器配置**：不是永久禁止，但启用公众号统一“服务器配置”前必须核实现有回调、自动回复和菜单影响；官方群发结果事件若接入，只能作为独立持久发现路径，禁止直接覆盖现有配置。
 
-**理由（这是对用户原始设想「事件订阅推送到多维表格」的关键反驳）**：
-1. 微信没有「后台人工发布成功」的对外事件；`PUBLISHJOBFINISH` 只回推 API 发起的发布。
-2. **启用服务器配置后，公众号的自动回复、部分后台功能会被开发者模式接管——FBIF 是运营中的大号，这个副作用不可接受**（需与运营确认，但默认按不可接受设计）。
-3. 轮询只需 AppSecret + IP 白名单，不动公众号任何运营配置，风险为零；15 分钟延迟对「同步到网站」完全无感。
-- **需实测的覆盖度风险**：公众号后台「群发」和「发布」是两个动作，`freepublish/batchget` 官方口径只覆盖「发布」体系。若实测发现运营日常用的「群发」文章拉不到 → 自动发现降级为「运营在飞书群贴链接/贴进表单」的半自动，手动触发路径本来就在，链路不受影响。这是 Phase 5 第一个验证项。
+**理由**：
+1. 公众号后台“群发”和 `freepublish`“发布”是不同覆盖路径，单靠任一接口都不能宣称完整。
+2. 已发布轮询是 P0 真相路径之一，必须独立执行并把失败、陈旧和缺口暴露给监控。
+3. 公众号统一“服务器配置”可能影响既有自动回复、菜单和回调，只有完成现状审计与迁移方案后才能改。
+4. 手动 URL 不依赖微信列表接口，始终作为缺口处理与应急入口。
 
 ### D6. 飞书审核：应用机器人交互卡片 + 回调端点；通知与审核分层
 
@@ -170,7 +176,7 @@ created → fetching（fetch-article 拉 blocks）
 
 新增列：`source_key`（唯一索引）、`source_url`、`foodtalks_news_id`、`review_card_msg_id`、`risk_notes`。版本化迁移，生产 PG 手动跑（铁律）。推进器按 target 分发到两套 stage 序列，`wechat_mp` 代码路径零改动（外科手术）。
 
-**风险审核节点**：`rendering` 后调豆包出 `risk_notes`（复用 OptimizeClient 骨架，prompt 换成红线清单：功效表达/转载授权/竞品评价/数据来源），结果只进卡片展示。分级自动化（Phase 6）：`pass` 且原创且图片全成功 → 可配置跳过 `awaiting_review` 直接 `publicizing`；`warning` 必须人审；`block` 只能驳回或人工处理。默认全人审。
+**风险审核节点**：`rendering` 后调豆包出 `risk_notes`（复用 OptimizeClient 骨架，prompt 换成红线清单：功效表达/转载授权/竞品评价/数据来源），结果用于卡片展示、排队和人工决策。`pass|warning` 都必须在审核版本匹配后取得持久化人工 `approve` 才能进入 `publicizing`；`block`、缺失或未知结果一律 fail closed。Phase 6 只允许自动评估、排序、提醒和准备审核材料，不允许自动公开。
 
 ### D8. 安全与凭证
 
@@ -195,9 +201,9 @@ created → fetching（fetch-article 拉 blocks）
 ## Risks / Trade-offs
 
 - [FoodTalks「隐藏态」语义与假设不符（比如 isPublic=0 仍出现在列表/搜索）] → **已应验并已解决（2026-07-10 冒烟）**：isPublic=0 确实不隐藏（未登录直链完整可见）；正确的隐藏进站态是 `publishStatus=0`（草稿），全流程已走通，见 `docs/foodtalks-api-contract.md`。
-- [FoodTalks 图片上传接口拿不到] → 硬阻塞，Phase 0 通过抓包 CMS 编辑器或直接询问网站后端解决；过渡方案（自有 OSS+CDN）需先确认 CMS 不清洗外域 img src。
+- [FoodTalks 图片上传接口拿不到] → **已解除（2026-07-10）**：按 D4 使用排版工具 `/api/oss-upload` 转存到我方 OSS；FoodTalks API 与前台引用行为已实测，长期归一网站存储不阻塞当前链路。
 - [抓包 token 过期导致线上任务集体失败] → 客户端对 401/403 专项识别，job 错误信息直接写「凭证过期，联系 ×× 换发」；Phase 0 争取长效服务凭证是正解。
-- [freepublish/batchget 拉不到「群发」文章] → 自动发现降级半自动（群里贴链接），流水线本体不受影响（D5 已设计为触发可插拔）。
+- [`freepublish/batchget` 拉不到“群发”文章] → 这是已确认的覆盖边界，不得降级成“拉到多少算多少”；群发必须有独立发现路径，缺口期间由手动 URL 兜底且监控保持非绿色。
 - [公众号临时链接（含 chksm）过期导致 fetch-article 失败] → 轮询路径用 batchget 返回的永久 URL；手动路径提示尽快处理；失败可重试。
 - [渲染器改版让 render-service 网站模板桩失效] → 网站渲染冒烟测试进本仓库 `npm test`（与 fbif 同款守护）；CMS 存活断言复用 `tests/table-renderer-shared.test.mjs` 的模拟清洗器。
 - [卡片回调依赖飞书事件订阅配置，部署复杂] → Phase 3 MVP 用文本通知 + 前端确认兜底，卡片是增强不是阻塞。
@@ -206,21 +212,21 @@ created → fetching（fetch-article 拉 blocks）
 
 ## Migration Plan
 
-1. **Phase 0（人工前置，用户醒来后）**：重置飞书 App Secret；向网站后端索要正式环境/服务级 token/图片上传接口/枚举表；与运营确认公众号日常用「群发」还是「发布」；建审核群、机器人入群。
+1. **Phase 0（人工前置）**：按用户 2026-07-10 裁定不代为重置飞书 App Secret，继续遵守 env-only；向网站后端索要正式环境、服务级 token 和剩余枚举表；与运营确认公众号日常用「群发」还是「发布」；建审核群、机器人入群。图片转存已由 D4 解决。
 2. **Phase 1**：FoodTalks 测试环境冒烟（创建隐藏文章→前台验证不可见→PUT 编辑→翻公开→再翻回/下线），产出《字段枚举与响应结构》文档回填本设计。
 3. **Phase 2（本仓库）**：render-service 接 ft-default → 本地渲染真实公众号样例 → 与人工 `/ft/` 排版结果 diff 验证同源 → 测试进 CI → 部署。
 4. **Phase 3（资讯订阅，MVP 闭环）**：`internal/foodtalks` + 流水线 site 链路 + 手动 URL 端点 + 文本群通知；PG 迁移手动跑；测试环境全链路真机验收。
 5. **Phase 4**：飞书交互卡片 + 回调 + 结果通知，替换文本降级路径。
-6. **Phase 5**：freepublish 轮询自动发现（先实测覆盖度）。
-7. **Phase 6**：分级自动化开关（默认关，积累人审数据后再开）。
+6. **Phase 5**：独立 freepublish “发布”轮询 + 独立“群发”发现路径 + canonical 去重与类型 fail-closed。
+7. **Phase 6**：风险提示、排队和提醒自动化；历史回放只校准提示质量，公开动作仍必须人工批准。
 8. **回滚**：全部是新端点/新 target/新按钮，回滚=停 poller+下端点，表保留无害；网站侧误发可 PUT 翻回隐藏。
 
 ## Open Questions
 
 - FoodTalks 正式环境 Base URL、服务级鉴权方案？（Phase 0，问网站后端）
-- 图片上传到 FoodTalks 存储的接口？（Phase 0，抓包或索要——当前最大阻塞）
+- ~~图片上传到 FoodTalks 存储的接口？~~ **已不阻塞**：当前统一走排版工具 `/api/oss-upload`；网站存储归一是长期优化，不是发布前提。
 - ~~`publishStatus` 的「前台完全不可见」正确组合？~~ **已实测**：0=草稿/2=下线均不可见，1=发布可见，单向门 1↛0（`docs/foodtalks-api-contract.md`）。仍待后端确认：`isPublic` 真实语义、`sourceType`/`isLatest`/`commentEnable` 枚举、publishStatus 2 vs 3 官方口径、「有料」categoryId 表。
-- FBIF 订阅号运营日常动作是「群发」还是「发布」？决定 Phase 5 自动发现的可行性。（Phase 0，问运营）
+- ~~FBIF 订阅号运营日常动作是「群发」还是「发布」？~~ 已确认两者都有且不固定；Phase 5 必须覆盖两条独立路径。
 - 网站文章的 `categoryIds` 由谁定：固定默认？LLM 按内容选？人在审核卡片上改？（MVP 先可配置默认值，卡片改分类留到 Phase 4+）
 - 资讯订阅生产环境出口 IP 是否已在公众号 IP 白名单？（agent-publish-pipeline 用的是测试号 Ecooo，正式号白名单需另配）
 - 审核群 chat_id（等群建好、机器人入群后获取）。

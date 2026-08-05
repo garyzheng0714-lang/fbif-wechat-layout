@@ -36,7 +36,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 1. **预览页背景必须全白** — 不要加任何灰色背景，不要 #F7F7F7，不要 #EDEDED
 2. **多账号绑定只用单层账号菜单，位置在左栏导入卡第一行** — 新增账号以 `api/account_catalog.go` 为单一真相源，并在 `api/rule_defaults.go` 成对登记 preset；改完运行 `npm run gen:registry` 生成 `public/js/rule-packs/registry.js`，不得手改生成文件。账号菜单统一用 `account-menu.js` 的 `mountAccountMenu` 挂到 `#acctMenu`，公众号 / 网站只作为菜单分组。同模板账号原地切换，跨模板账号整页 reload；不得恢复渠道胶囊与规则包分段组成的两层切换器。
-   **左栏两段式（2026-08-03 用户裁定，取代 2026-08-02 标题栏方案）**：不渲染 `.rail-head` 或可见的「导入内容」标题容器；`.rail-body` 是 `--fs-bg-nested` 灰底工作区，导入卡与区块面板都必须是白卡；`.rail-foot` 放 `#userIdentity`，登录行必须贴紧工作区分隔线和右侧栏边，不留卡片式内缩缝隙，菜单向上展开。全局顶栏只留当前页面动作（复制全文 / 规则），不得把 `#acctMenu` 或 `#userIdentity` 搬回顶栏。导入组合框必须用 `aria-label="导入内容"` 保留可访问名称。编辑器必须先过登录门禁，未登录不得进入主页面；「飞书云文档」灰色禁用态及提示只作鉴权完成前的安全初始值；状态文案保持「粘贴后自动排版」。（2026-08-03 用户裁定）守护：`tests/auth-session.test.mjs`、`tests/e2e-regression.spec.mjs`、`tests/auth-shell.test.mjs`。
+   **左栏两段式（2026-08-03 用户裁定，取代 2026-08-02 标题栏方案）**：不渲染 `.rail-head` 或可见的「导入内容」标题容器；`.rail-body` 是 `--fs-bg-nested` 灰底工作区，导入卡与区块面板都必须是白卡；`.rail-foot` 放 `#userIdentity`，登录行必须贴紧工作区分隔线和右侧栏边，不留卡片式内缩缝隙，菜单向上展开。全局顶栏只留当前页面动作（复制全文 / 规则），不得把 `#acctMenu` 或 `#userIdentity` 搬回顶栏。导入组合框必须用 `aria-label="导入内容"` 保留可访问名称。守护：`tests/top-toolbar.test.mjs`、`tests/account-switcher.test.mjs`、`tests/auth-shell.test.mjs`。
    **已知取舍**：收起左栏会同时收走排版目标与登录身份，需要时展开左栏；不要为此在顶栏另做一份只读副本。
 3. **规则服务端保存 + 本地降级** — 参数预设和 `behavior` 行为配置以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
 4. **页面级动作在顶部工具栏** — 预览区下方不放操作按钮条。左栏导入卡里的「导入排版」和左栏底部的身份栏不在此列：前者是贴着输入框的就地提交，后者不是动作条。
@@ -44,7 +44,9 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F
 7. **文章标题左对齐** — 在文章正上方，27px 粗体
 8. **复制后不自动打开外部网站** — 复制按钮只复制内容；微信公众号后台只能通过显式链接手动打开
-9. **复制按钮必须立即反馈** — `copyContent()` 不得等待图片上传或“更多文章”合成；这些准备工作只能提前或后台刷新复制层，点击后应立刻写剪贴板并显示复制结果
+9. **复制按钮必须立即反馈，但绝不交付缺图产物** — `copyContent()` 不得 `await` 图片上传或“更多文章”合成；这些准备工作只能提前或后台刷新复制层，点击后应立刻写剪贴板并显示复制结果。
+   **唯一例外是“此刻还没有图可复制”（2026-08-05 用户裁定）**：服务端会把飞书云文档导出与 `.doc` 转换的 DOCX 图片剥离成 `/api/doc-cache/*` 占位，位图由 `materializeLazyImages` 后台回填。若复制产物里仍有站内占位地址（`/api/doc-cache/*`、`/assets/*`、`blob:`）且 `_uploadPromise && !_uploadDone`，必须立即挡回并显示「图片准备中」，回填完成后按钮自动恢复——这仍是瞬时返回，不是等待，规则不变。站内相对地址出了这个页面就取不到，交付一份微信必然缺图的剪贴板比让用户多等一秒更糟；`copyHTMLSource` 同理。
+   **回填必须并发**（`MATERIALIZE_CONCURRENCY`）：串行取图会把“预览已出现”到“复制产物真的有图”的窗口拉到数秒，一篇 10 MB 正文图的飞书文档足够让用户在窗口内点中复制。守护：`tests/copy-behavior.test.mjs`、`tests/uploader.test.mjs`。
 10. **表单只填数字** — 不要 px/em 后缀，颜色用 color picker
 11. **不要 phone-frame 边框** — 文章直接在白底上流动
 12. **原创 DOCX 作者行规则** — 首个 `作者：` 行是文章正文起点；它之前的编辑前置材料默认不显示在编辑器里
@@ -83,16 +85,16 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
-- 规则后台需要 `ADMIN_PASSWORD` 环境变量；生产值只能放 GitHub Secret 和本地忽略提交的 `.env`
+- 规则后台使用飞书登录会话与角色权限；超级管理员来自 `RULE_SUPER_ADMIN_OPEN_IDS`，部署/运维另用 `PUBLISH_ADMIN_SERVICE_TOKEN`
 - 规则预设默认写入 `data/rule-presets.json`；可用 `RULES_STORE_PATH` 覆盖
 - 启动：`cd api && go run . -port 19090`
 
 ## Deploy
 - 推送 `main` 触发 `.github/workflows/deploy.yml`
-- 部署会把 `LIBREOFFICE_URL`、`LIBREOFFICE_TOKEN`、`CLOUDCONVERT_API_KEY`、`ADMIN_PASSWORD` 写入服务器 `/var/www/api/.env`
-- `ADMIN_PASSWORD` 缺失时部署必须失败，不能让正式端进入“规则后台未配置密码”状态
+- 部署会把 `LIBREOFFICE_URL`、`LIBREOFFICE_TOKEN`、`CLOUDCONVERT_API_KEY`、`PUBLISH_ADMIN_SERVICE_TOKEN`、`RULE_SUPER_ADMIN_OPEN_IDS` 写入服务器 `/var/www/api/.env`
+- `RULE_SUPER_ADMIN_OPEN_IDS` 缺失时生产启动必须失败，不能让正式端进入“没有可识别超级管理员”的状态
 - 部署工作流必须确保 `/`、`/index.html`、`/app.html`、`/version.json` 响应头为 `Cache-Control: no-cache`
-- 修改正式后台密码时，更新 GitHub Secret 后重跑部署，并用 `/api/rules/admin/login` 做 200/401 双向验证
+- 修改正式后台权限时，更新 `RULE_SUPER_ADMIN_OPEN_IDS` 或由超级管理员在“权限管理”中授权，再重跑部署/刷新会话验证 `/api/me` 与后台接口
 
 ## Rule Hygiene
 - Rules in this file must describe current behavior, not historical requests.

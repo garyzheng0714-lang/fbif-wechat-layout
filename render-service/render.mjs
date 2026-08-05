@@ -5,7 +5,7 @@
 //   - fbif（公众号）：流程对齐 engine.js copyContent：processBlocks →
 //     renderBottomFooter（bottom_blocks 页脚，转载走 repost 预设）→ 外链降纯文本 →
 //     素材绝对化 → processForCopy(内联) → normalizeWechatRichHtml。
-//   - ft-default（FoodTalks 网站）：processBlocks(opts.config) 已含 bottom_blocks 页脚 →
+//   - ft-default / ft-series（FoodTalks 网站）：processBlocks(opts.config) 已含 bottom_blocks 页脚 →
 //     素材绝对化 → processForCopy(内联)。粘贴目标是 FoodTalks CMS（TinyMCE），
 //     不做微信归一化（engine.js isWebsiteTemplate 同语义——归一化会把网站内联 logo
 //     误居中），也不降级外链（网站文章保留外链是正常形态）。
@@ -78,6 +78,15 @@ const CHANNELS = {
   'ft-default': {
     templatePath: 'templates/foodtalks-site.js',
     rulesAccount: 'ft-default',
+    configViaOpts: true,
+    footerViaTemplate: false,
+    stripExternalAnchors: false,
+    normalizeWechat: false,
+    ruleProfile: 'foodtalks-site',
+  },
+  'ft-series': {
+    templatePath: 'templates/foodtalks-site.js',
+    rulesAccount: 'ft-series',
     configViaOpts: true,
     footerViaTemplate: false,
     stripExternalAnchors: false,
