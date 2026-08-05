@@ -127,10 +127,16 @@ test('7 月 31 日原子预览：24 张剥图并发准备、显示真实进度�
   ).toBeLessThan(1000);
   await expect(page.locator('#progress'), '图片准备期间必须显示导入进度').toBeVisible();
   await expect(page.locator('#contentArea'), '图片未齐时不得提前展示残缺正文').not.toContainText(PREVIEW_TEXT);
+  // 分母是本次真正要准备的图片总数：正文 24 张之外还有页脚图，它们同样要在
+  // 上屏前就绪。这里只要求分母真实（≥ 正文张数），不写死成 24。
   await expect(page.locator('#progressText'), '进度文案必须真实报告图片完成数').toContainText(
-    new RegExp(`正在准备正文图片 \\d+/${IMAGE_COUNT}`),
+    /正在准备正文图片 \d+\/\d+/,
     { timeout: 2500 },
   );
+  const preparationTotal = Number(
+    (await page.locator('#progressText').textContent())?.match(/\d+\/(\d+)/)?.[1] || 0,
+  );
+  expect(preparationTotal, '准备阶段分母必须覆盖全部正文图片').toBeGreaterThanOrEqual(IMAGE_COUNT);
 
   await expect(page.locator('#contentArea'), '24 张图片齐备后正文须在 3 秒内完整出现').toContainText(
     PREVIEW_TEXT,

@@ -839,10 +839,14 @@ window.addEventListener('fbif:article-input-started', event => {
   if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
 });
 
-const { mountFeishuDocumentImport } = await import('/js/feishu-doc-import.js?v=' + assetVersion);
+const {
+  mountFeishuDocumentImport,
+  createFeishuImportProgressTracker,
+} = await import('/js/feishu-doc-import.js?v=' + assetVersion);
 feishuDocImport = mountFeishuDocumentImport({
   user: authUser,
   getAccountID: () => activeRulePack.id,
+  createProgressTracker: () => createFeishuImportProgressTracker({ documentRef: document }),
 });
 window._feishuDocImport = feishuDocImport;
 
