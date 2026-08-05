@@ -164,15 +164,21 @@ test('decodePreviewImages 只解码 data: 位图并汇报失败清单', async ()
   assert.deepEqual(result.failedSrcs, ['data:image/png;base64,BAD1']);
 });
 
-test('文件预览不等待图片就绪门，同时保留飞书导入进度反馈', async () => {
+test('文件预览恢复 7 月 31 日就绪门，并保留飞书导入进度反馈', async () => {
   const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
   const handleStart = engine.indexOf('async function handleFile(');
   const handleEnd = engine.indexOf('\n  // Dual-layer rendering:', handleStart);
   assert.ok(handleStart >= 0 && handleEnd > handleStart, '必须能定位真实 handleFile');
   const handleFile = engine.slice(handleStart, handleEnd);
 
-  assert.doesNotMatch(handleFile, /await\s+(?:preparePreviewArticle|materializeLazyImages|uploadNonCdnImages)/);
-  assert.doesNotMatch(engine, /import\('\.\/preview-ready\.js/);
+  assert.match(handleFile, /await\s+preparePreviewArticle/);
+  assert.match(engine, /import\('\.\/preview-ready\.js/);
+  assert.match(handleFile, /正在准备正文图片/);
+  assert.match(handleFile, /正在确认图片/);
+  assert.ok(
+    handleFile.indexOf('await preparePreviewArticle') < handleFile.indexOf('activateArticleSession(session)'),
+    '全部图片回填和解码必须发生在预览提交之前',
+  );
 
   const feishuImport = await readFile(new URL('../public/js/feishu-doc-import.js', import.meta.url), 'utf8');
   assert.match(feishuImport, /飞书正在生成 Word/);
