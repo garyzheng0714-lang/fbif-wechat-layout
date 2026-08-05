@@ -698,6 +698,71 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
 
     await context.close();
   });
+
+  test('14-网站复制分体按钮在桌面、平板和手机断点保持统一几何', async ({ browser }) => {
+    for (const bp of BREAKPOINTS) {
+      const context = await newAuthenticatedContext(browser, {
+        viewport: { width: bp.width, height: bp.height },
+      });
+      const page = await context.newPage();
+      await page.goto(BASE + '/ft/ft-default', { waitUntil: 'networkidle' });
+      await waitForAppReady(page);
+
+      const geometry = await page.evaluate(() => {
+        const root = document.getElementById('copySplit').getBoundingClientRect();
+        const primary = document.getElementById('copyBtn').getBoundingClientRect();
+        const toggle = document.getElementById('copyMenuBtn').getBoundingClientRect();
+        return {
+          rootHeight: root.height,
+          primaryHeight: primary.height,
+          toggleHeight: toggle.height,
+          primaryBottom: primary.bottom,
+          toggleBottom: toggle.bottom,
+        };
+      });
+      const expectedHeight = bp.width <= 820 ? 44 : 36;
+      expect(geometry.rootHeight).toBe(expectedHeight);
+      expect(geometry.primaryHeight).toBe(expectedHeight);
+      expect(geometry.toggleHeight).toBe(expectedHeight);
+      expect(geometry.primaryBottom).toBe(geometry.toggleBottom);
+      await expect(page.locator('#copyBtn')).toHaveAttribute('aria-label', '复制全文');
+
+      await context.close();
+    }
+  });
+
+  test('15-网站规则加载期间锁定整个复制分体按钮', async ({ browser }) => {
+    const context = await newAuthenticatedContext(browser, { viewport: { width: 768, height: 1024 } });
+    const page = await context.newPage();
+    let releaseRuleRequest;
+    let markRuleRequest;
+    const ruleRequestHeld = new Promise(resolve => { releaseRuleRequest = resolve; });
+    const ruleRequestSeen = new Promise(resolve => { markRuleRequest = resolve; });
+
+    await page.route('**/api/rules/active?**', async route => {
+      markRuleRequest();
+      await ruleRequestHeld;
+      await route.continue();
+    });
+
+    const navigation = page.goto(BASE + '/ft/ft-default', { waitUntil: 'networkidle' });
+    await ruleRequestSeen;
+    try {
+      await expect(page.locator('#copyBtn')).toBeDisabled();
+      await expect(page.locator('#copyMenuBtn')).toBeDisabled();
+      await expect(page.locator('#copyHtmlBtn')).toBeDisabled();
+      await expect(page.locator('#copyMenu')).toBeHidden();
+    } finally {
+      releaseRuleRequest();
+    }
+    await navigation;
+    await waitForAppReady(page);
+    await expect(page.locator('#copyBtn')).toBeEnabled();
+    await expect(page.locator('#copyMenuBtn')).toBeEnabled();
+    await expect(page.locator('#copyHtmlBtn')).toBeEnabled();
+
+    await context.close();
+  });
 });
 
 // ---- Generate report after all tests ----
