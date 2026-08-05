@@ -37,13 +37,14 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - DOCX 首个"作者："行之前的前置材料默认剥离
 - 表格：蓝底白字表头 + 浅灰网格线、全格居中、列宽按 Word gridCol 比例；关键视觉以 HTML 属性 + 内容层双写（`border`/`cellpadding`/`align`/`bgcolor`/`width` 属性、表头 `<strong>`），保证粘进 FoodTalks 后台被清洗内联样式后不丢样；表格内图片按 Word 里设置的显示宽度统一尺寸（2026-07-06）
 
-## 当前状态（核对至 2026-07-26）
+## 当前状态（核对至 2026-08-05）
 
 - **账号目录单一真相源**：账号先登记在 `api/account_catalog.go`，再运行 `npm run gen:registry` 生成 `public/js/rule-packs/registry.js`；生成文件不手改。账号与默认 preset 在启动时做成对校验。
 - **统一底部区块模型**：公众号与网站渠道共用 `modules.bottom_blocks` 数据结构和区块面板交互，但视觉输出仍由 `fbif`、`foodtalks-series`、`foodtalks-site` 三套渲染器物理隔离。旧 `fbif_footer` 只保留兼容回退，不再是网站页脚主路径。
 - **FoodTalks URL 导入与页脚默认值**：网站渠道的公众号 URL 导入一律按转载处理，先移除微信原文导流尾，再输出网站转载声明；`ft-default` 的完整页脚在全新浏览器中默认开启，不依赖历史 localStorage 状态。
 - **微信草稿存活保护**：公众号复制层对更多文章卡片、微信图床属性、位图占位和异步回写做 T0 安全约束，防止内容粘贴后在“保存草稿”阶段被微信清洗掉。
 - **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
+- **飞书云文档导入走异步作业**：导出、剥图与图片镜像在服务端作业里完成，前端用 long-poll 拿真实阶段进度；正文图一次性批量镜像到 OSS，浏览器不再逐张回源。预览在离屏 staging 备齐并解码后整帧提交，导入期间旧文章保持可见。这套机制在 2026-08-05 曾被一次整树覆盖式合并误删，恢复后由 `tests/e2e-preview-speed.spec.mjs`、`tests/e2e-feishu-import-progress.spec.mjs` 与 `api/feishu_export_jobs_test.go` 守护。**未决**：真实飞书 API 往返与 10MB 级正文图批量镜像的生产耗时尚未实测（本地无飞书凭据，飞书接口 base URL 在服务端硬编码无注入点）；未排期，触发条件是下一次用真实多图文档做生产验收。
 - **程序化渲染**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 复用交互式编辑器的同一套解析、规则与渲染实现，支持 `fbif` 和 `ft-default`。
 - **受控发布流水线**：手动提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
 - **编辑部规范数据化**：摘要、标签、作者和原创 / 转载判定已按历史发布样本沉淀为声明式规范与封闭标签词表。AI 只负责预填和出处抽取；完整评测仍在进行，且 FoodTalks 的标签 PUT 缺陷修复前不会把标签写入正式请求。
@@ -55,6 +56,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - 解析 DOCX / Markdown，保留标题、正文、图片、超链接、列表、引用和参考来源等结构。
 - 粘贴正文会作为临时 TXT / Markdown 文档进入同一套解析、标点和渲染链路。
 - 粘贴微信公众号文章或网页链接后，由 Go API 抓取并转换为结构化内容；失败时回退到备用读取路径。
+- 导入飞书云文档：在导入框输入 `@` 搜索，或直接粘贴飞书文档链接。服务端以异步作业导出 Word、剥离正文图并一次性批量镜像到 OSS，前端按作业上报的真实阶段推进进度条；正文与图片在离屏准备就绪后整帧上屏，导入期间旧文章保持可见。需使用飞书登录。
 - URL 导入会保留微信文章的图片说明组：`图片 -> 图注 -> 图片来源` 必须连续渲染为浅灰图注，不得把 `图片来源：` 当成正文或文章来源。
 - 使用 `public/js/templates/fbif.js` 和 `public/css/wx-theme.css` 生成 FBIF 公众号样式。
 - 区分预览层与复制层：预览可使用原图；复制按钮点击时立即写入当前可粘贴 HTML，CSS 内联、微信兼容结构和已准备好的图片结果会进入复制层。
@@ -126,7 +128,10 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 │   ├── wechat_blocks.go            # 微信文章块提取
 │   ├── publish_*.go                # FoodTalks 发布任务、状态机、审核、预览与 AI 元数据
 │   ├── foodtalks.go                # FoodTalks API 客户端与环境差异合同
-│   └── feishu_*.go                 # 审核通知、卡片回调与长连接
+│   ├── feishu_docs_http.go         # 飞书云文档搜索与异步导出作业路由
+│   ├── feishu_export_jobs.go       # 导出作业管理器：阶段进度、long-poll、限流与过期回收
+│   ├── doc_image_mirror.go         # 剥离图批量镜像到 OSS 并重写 DOCX 图片 URL
+│   └── feishu_*.go                 # 飞书登录、审核通知、卡片回调与长连接
 ├── render-service/                 # Node headless 渲染服务
 ├── deploy/
 │   ├── caddy/                       # 声明式 Caddy vhost
@@ -193,6 +198,13 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
+| `GET` | `/api/feishu/docs/search?q=&limit=` | 按关键词搜索当前飞书登录用户可见的云文档，供编辑器 `@` 导入下拉使用；需飞书登录 |
+| `POST` | `/api/feishu/docs/export/jobs` | 创建飞书云文档导出作业，立即返回 `job_id` 与 `status_url` / `result_url`；导出、剥图与图片镜像在后台执行 |
+| `GET` | `/api/feishu/docs/export/jobs/{job_id}?after=&wait_ms=` | long-poll 读取作业进度：服务端在 `version` 超过 `after` 时立即返回，逐阶段上报真实 `phase`/`done`/`total`（resolve、create、export_wait、download、optimize、image_enumerate、image_upload、image_map） |
+| `GET` | `/api/feishu/docs/export/jobs/{job_id}/result` | 取回作业产物 DOCX；正文图已镜像成公网 URL，响应头带 `X-FBIF-Images-Mirrored` 与 `X-FBIF-Image-Count` |
+| `DELETE` | `/api/feishu/docs/export/jobs/{job_id}` | 取消作业；前端切换或放弃导入时调用，服务端也会自行过期回收 |
+| `POST` | `/api/feishu/docs/export` | 同步导出兼容入口（无进度）；仅作降级路径，交互式导入走上面的作业接口 |
+| `GET` | `/api/feishu/chats` | 读取当前飞书登录用户所在群列表，供规则后台选择审核群；需飞书登录 |
 | `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default/ft-series`）当前规则；未传 `account` 时默认读取 FBIF |
 | `GET` | `/api/rules/admin/presets` | 列出规则预设，需已登录且角色为管理员/超级管理员 |
 | `POST` | `/api/rules/admin/presets` | 保存规则预设，需已登录且角色为管理员/超级管理员，以及客户端读到的 `base_revision`（新建为 `0`）；过期写入返回 `409 revision_conflict` 和变化字段 |
