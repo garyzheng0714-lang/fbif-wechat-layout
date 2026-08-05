@@ -55,7 +55,7 @@ FoodTalks 冒烟测试（已批准）排在本任务之后。
 
 **执行进度（实时）**：
 - [x] S6（commit 8e9f345）：rule-behavior-utils.js 收敛 4 份助手拷贝（13 契约测试先行）；author-card-autofill 迁出中立层；KNOWN_CHANNELS Go 测试守护。772 测试全绿。
-- [x] S3（commit 027d35d 起步，2026-07-10 二次对抗审查补齐）：规则库 schema v3 为内置/自建规则持久化受限 `baseline_id`；新建缺基线在保存期报错，v3 存储缺基线在启动期拒绝，v1/v2 存量自建规则显式迁移为历史 `default` 基线。同时补齐 headless 与 site.html 交互路径的 channel-aware behavior 边界，FoodTalks 网站顶层正则/lists 不再被公众号 normalizer 裁掉或注入 Mote actions。
+- [x] S3（commit 027d35d 起步，2026-07-10 二次对抗审查补齐）：当时规则库 schema v3 为内置/自建规则持久化受限 `baseline_id`；新建缺基线在保存期报错，v3 存储缺基线在启动期拒绝，v1/v2 存量自建规则显式迁移为历史 `default` 基线。同时补齐 headless 与 site.html 交互路径的 channel-aware behavior 边界，FoodTalks 网站顶层正则/lists 不再被公众号 normalizer 裁掉或注入 Mote actions。当前规则库已升级到 schema v4，现行约束以 ADR 和源码为准。
 - [x] S4（commit fc320f6，生产已验证）：生产 Caddyfile 拆分完成（备份 bak-s4-split-20260710-064916，拆分前后 7 路径+缓存头零漂移）；deploy.yml 注入脚本 250 行 → 声明式 rsync+validate+自动回滚（376→151 行）；部署实战通过。已知遗留显式标注：/api/wechat-draft、/api/oss-presign 指向 9000 旧服务，@fbifUploadApi 下方两个 9000 handle 是死配置。
 - [x] S5（commit 9fb3e16）：e2e 一键可跑（webServer 自动起 Go 服务）+ 24 张像素基线自动对比（toHaveScreenshot，禁动画+mask 日期）；两个抓取场景 route 桩确定性化；修 spec 三处已改版 UI 死 selector。基线不入库（23M 绑定 macOS 渲染，本地防线）；首建 `npm run test:e2e:baseline`。
 - [x] S1（commit 61f3e7e）：规则选择器族（17 函数 + escText，~500 行×2 已分叉）收敛为 active-rule-selector.js 工厂模块，渠道差异 options 注入（readonlyEditEntry/fallbackTransform/afterHydrate）；app switchAccount 手工展开段收编为 adoptAccount()。7 项 linkedom 行为契约先行（此前零行为覆盖）。app 内联 740→479 行。剩余小函数（版本热更新等 ~60 行）收益递减列后续；syncEngineConfig/loadTemplate 属真渠道差异保留各页。视觉基线 24/24 零像素回归（两页手术各验一轮）。

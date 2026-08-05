@@ -1,12 +1,14 @@
 # 红线落地：硬编码规则数据下放服务端 · 盘点 + 分批计划（2026-05-31）
 
+> **历史计划，不是当前执行清单。** 多个批次已经被后续规则 schema、`modules.bottom_blocks`、素材库和四层架构模型取代；本文中的 `fbif_footer` 主路径、待清理项和批次顺序只用于追溯 2026-05-31 的决策。当前边界以 [CLAUDE.md](../../../CLAUDE.md)、[README.md](../../../README.md) 和 [共用与隔离 ADR](../../adr/2026-07-10-share-vs-isolate-boundary.md) 为准。
+
 > 红线（[[project_rules_no_hardcode_redline]]）：所有规则数据不允许硬编码，必须 `/api/rules` 规则后台可配。
 > 边界（用户裁定）：**数据/参数下放服务端，行为算法留引擎**（但开关/参数尽量可配）。
 > 完整逐条清单见 `2026-05-31-hardcoded-rules-inventory.json`（86 项，is_rule_data=true 约 60 条）。
 
 ## 已下放（不重复做）
 - FoodTalks 网站识别正则 `author/tip/ref_header/ref_item_regex` → `behavior.*`（**但代码侧仍有 fallback 字符串待清理**）
-- 页脚库 `FOOTER_SEGMENTS/PRESETS` → `config.modules.fbif_footer`（编辑器已上线）
+- 页脚库当时下放到 `config.modules.fbif_footer`；当前主路径已经统一为 `modules.bottom_blocks`，`fbif_footer` 只作兼容回退
 
 ## 贯穿所有批次的【铁律】
 1. **必须保留 const 作为离线兜底**：每条规则下放后，代码侧保留原值作 fallback，「优先服务端、读不到降级 const」。否则服务端字段缺失会让排版**彻底损坏**（作者行/颜色/页脚全失效）。这是盘点识别的最高风险。

@@ -3,7 +3,7 @@
 - 日期：2026-07-05
 - 触发样例：`玛黑兄弟，我最“讨厌”的茶，为什么全世界都在学它？.docx`（Mote 文章）
   正文段「**更残酷的事实是什么呢？**」被升级成 h2 小节标题。
-- 状态：**已修复，全量验证通过（含真实浏览器），未提交等用户确认**
+- 状态：**已修复并提交，全量验证通过（含真实浏览器）；commit `a320e39`**
 
 ## 现象
 
@@ -78,7 +78,7 @@ isBoldHeading`。该启发式判据（全加粗 + ≤36字 + 非句号结尾 + �
 - 改动文件：`public/js/heading-detect.js`（+`hasExplicitDocxHeadings`）、
   `public/js/templates/fbif.js`、`public/js/templates/foodtalks-site.js`、
   三个测试文件、本 WORKLOG。
-- 未提交，等用户确认后 commit（push main 会触发生产部署）。
+- 已随 commit `a320e39` 提交；本记录中的验证数字是 2026-07-05 当时快照，后续状态以当前测试和部署证据为准。
 - 未动的同族领域：URL 导入的加粗→标题判定在 Go 侧 `api/wechat_blocks.go`
   （输入是微信 HTML，几乎不含真 h2，信号生态不同），本次刻意不碰；若日后
   URL 导入也出现「源页有真 h2 仍误升」再按同一原则处理。

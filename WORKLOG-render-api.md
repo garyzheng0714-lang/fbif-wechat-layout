@@ -1,5 +1,7 @@
 # WORKLOG — 程序化渲染 API（/api/render + /api/html-to-blocks）
 
+> 状态：**已实现并部署**。本文按时间追加，前文出现的“待做”是早期阶段快照；当前能力与限制以 README、现行 OpenSpec 和代码为准。
+
 ## 目标
 
 让外部系统（FBIF 资讯订阅的一键发布流水线）能程序化调用本工具的排版能力：
@@ -34,7 +36,7 @@
 - `api/render_proxy.go` — `POST /api/render` 代理 + `POST /api/html-to-blocks` + token 校验（新增）
 - `api/main.go` — 注册上述路由（一行）
 - `tests/render-service.test.mjs` — 冒烟：样例 blocks → 断言内联样式/外链降级/图片保留（新增）
-- `.github/workflows/deploy.yml` — 部署 render-service + systemd 单元 + RENDER_TOKEN 写 .env（待做）
+- `.github/workflows/deploy.yml` — 部署 render-service + systemd 单元 + RENDER_TOKEN 写 `.env`（当时待做，已于 2026-07-05 完成）
 
 ## 状态
 
@@ -99,8 +101,8 @@
   样例 blocks 单一真相在 tests/fixtures/render-service-sample-blocks.mjs。npm test 792 全绿。
 - server.mjs 白名单与 CHANNELS 表同源（SUPPORTED_PACK_IDS），未知 packId 400；
   本地 curl 冒烟：healthz 200 / 无 token 401 / 未知 packId 400 / 两渠道 200。
-- 遗留：任务 3.6（真实文章与人工 /ft/ 结构 diff）、3.7–3.8（部署 + 线上冒烟）未做——
-  需要真实文章样本与部署动作，不在本次范围。
+- 当时遗留的 3.6–3.8 已在后续批次关闭：真实文章同源验证通过，部署版本 `7fad2fc`，
+  线上重放结果与本地同长；完整证据见 `WORKLOG-pipeline-phase1-phase2-2026-07-10.md`。
 
 ## 环境变量
 

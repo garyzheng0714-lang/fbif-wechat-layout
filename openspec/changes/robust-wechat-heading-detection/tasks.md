@@ -29,9 +29,11 @@
 - [x] 4.4 真实浏览器导入病样 URL，肉眼确认 02「四大品牌差异化竞争策略拆解」渲染为加粗小标题
 - [x] 4.5 加固后真实文章探针复核：01/02 仍稳判 `h`，未被句号否决误伤
 
-## 5. 防再犯护栏（待办）
+## 5. 防再犯护栏
 
-- [ ] 5.1 把决策 3 的「分类器修复协议」补进 `CLAUDE.md`/`AGENTS.md` 的规则区（标题/图注判据改动强制流程）
+- [x] 5.1 「分类器修复协议」已沉淀到稳定规范
+      `openspec/specs/wechat-heading-detection/spec.md`，并由 `docs/INDEX.md` 纳入长期契约入口；
+      为避免根规则继续膨胀，不再重复抄进 `CLAUDE.md` / `AGENTS.md`
 - [ ] 5.2 （可选，待用户拍板）沉淀标题识别回归语料目录：收集 `nGe2BIRRWeItV1p3O6wxOQ`、
       `swJQCw5THd0gJVF2GOoMIQ` 及 WORKLOG 提到的 5 篇原生文章真实 HTML 为共享 fixture，
       让每次判据改动一次性跑通全部历史病样

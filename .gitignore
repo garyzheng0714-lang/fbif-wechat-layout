@@ -33,3 +33,7 @@ stage*.png
 tests/e2e-screenshots/
 tests/e2e-baselines/
 test-results/
+
+# 本地产物：Go 覆盖率输出与 graphify 代码图谱（勿入库）
+api/coverage.out
+graphify-out/

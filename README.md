@@ -26,21 +26,22 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 
 **网站工具的排版规则**（参考 [VanilMsou/FoodtalksArticleLayout](https://github.com/VanilMsou/FoodtalksArticleLayout) 已移植）：
 
-- `<h2>` / `<h3>` 纯标签输出，无 inline style
-- 正文 `<p>` 无 style，空行用显式 `<p><br /></p>`
-- 图片 600px 居中（极端狭长图自适应：宽高比 ≥3→280px / ≥2.2→360px / ≥1.6→480px）
-- 图片注释 `<span style="font-size: 12px; color: #7f7f7f;">`，13 个关键词智能识别（图片来源/资料来源/数据来源/来源/制图/截图/图注/注/Source/Photo/Image/Credit）
-- 参考文献 `<span style="font-size: 16px; color: #7f7f7f;">`，自动补 `[1]` `[2]` `[3]` 编号
+- `ft-default` 的 `<h2>` / `<h3>` 和正文 `<p>` 输出 `text-align: justify`；`ft-series` 在 `justify_paragraphs=false` 时去掉这层 inline style
+- 空行显式输出 `<p><br /></p>`（`ft-default` 同时保留两端对齐样式）
+- 图片与图注输出为 `figure.image > img.mc-img + figcaption`；普通图片按规则配置和原图尺寸自适应（横图默认 600、纵图长边默认 375、小二维码默认 150），表格内 DOCX 图片按 Word 显示宽度输出
+- 图片注释使用 12px、`#888888`，按关键词智能识别（图片来源/资料来源/数据来源/来源/制图/截图/图注/注/Source/Photo/Image/Credit）
+- 参考来源使用 `#888888`，自动补 `[1]` `[2]` `[3]` 编号
 - 标题自动等级识别：`一二三 + 中文标点` → h2、`（一）（二）` → h3、9 个关键词（背景/简介/总结/分析/案例/介绍/概述/结论/展望）+ 短句 → h2
 - 中文标点转换：跟 CJK 字符邻接的 ASCII 标点 `,:;?!().` 转为中文形态，保留小数和域名里的点
 - 连续独立链接段之间不插空行
 - DOCX 首个"作者："行之前的前置材料默认剥离
 - 表格：蓝底白字表头 + 浅灰网格线、全格居中、列宽按 Word gridCol 比例；关键视觉以 HTML 属性 + 内容层双写（`border`/`cellpadding`/`align`/`bgcolor`/`width` 属性、表头 `<strong>`），保证粘进 FoodTalks 后台被清洗内联样式后不丢样；表格内图片按 Word 里设置的显示宽度统一尺寸（2026-07-06）
 
-## 当前状态（核对至 2026-07-24）
+## 当前状态（核对至 2026-07-26）
 
 - **账号目录单一真相源**：账号先登记在 `api/account_catalog.go`，再运行 `npm run gen:registry` 生成 `public/js/rule-packs/registry.js`；生成文件不手改。账号与默认 preset 在启动时做成对校验。
 - **统一底部区块模型**：公众号与网站渠道共用 `modules.bottom_blocks` 数据结构和区块面板交互，但视觉输出仍由 `fbif`、`foodtalks-series`、`foodtalks-site` 三套渲染器物理隔离。旧 `fbif_footer` 只保留兼容回退，不再是网站页脚主路径。
+- **FoodTalks URL 导入与页脚默认值**：网站渠道的公众号 URL 导入一律按转载处理，先移除微信原文导流尾，再输出网站转载声明；`ft-default` 的完整页脚在全新浏览器中默认开启，不依赖历史 localStorage 状态。
 - **微信草稿存活保护**：公众号复制层对更多文章卡片、微信图床属性、位图占位和异步回写做 T0 安全约束，防止内容粘贴后在“保存草稿”阶段被微信清洗掉。
 - **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
 - **程序化渲染**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 复用交互式编辑器的同一套解析、规则与渲染实现，支持 `fbif` 和 `ft-default`。
@@ -192,24 +193,25 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
-| `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default`）当前规则；未传 `account` 时默认读取 FBIF |
-| `POST` | `/api/rules/admin/login` | 校验规则后台密码；成功返回 `{ "ok": true }` |
-| `GET` | `/api/rules/admin/presets` | 列出规则预设，需 `X-Admin-Password` |
-| `POST` | `/api/rules/admin/presets` | 保存规则预设，需 `X-Admin-Password` 及客户端读到的 `base_revision`（新建为 `0`）；过期写入返回 `409 revision_conflict` 和变化字段 |
+| `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default/ft-series`）当前规则；未传 `account` 时默认读取 FBIF |
+| `GET` | `/api/rules/admin/presets` | 列出规则预设，需已登录且角色为管理员/超级管理员 |
+| `POST` | `/api/rules/admin/presets` | 保存规则预设，需已登录且角色为管理员/超级管理员，以及客户端读到的 `base_revision`（新建为 `0`）；过期写入返回 `409 revision_conflict` 和变化字段 |
 | `PUT` | `/api/rules/admin/active` | 绑定某个账号当前应用的规则，请求为 `{ "account_id": "...", "id": "...", "base_revision": 1 }`，其中修订号来自账号的 `active_revision`；过期写入返回 `409 binding_revision_conflict` |
-| `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需 `X-Admin-Password` |
+| `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需已登录且角色为管理员/超级管理员 |
+| `GET` | `/api/rules/admin/access-users` | 超级管理员读取已登录账号列表与后台角色 |
+| `PUT` | `/api/rules/admin/access-users/{id}` | 超级管理员授权/收回管理员角色；超级管理员只能通过 `RULE_SUPER_ADMIN_OPEN_IDS` 配置 |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
 | `POST` | `/api/publish/site-sync` | 供应商正文或公众号 URL 提交；机器调用需 `X-Publish-Sync-Token`、普通图文正向分类证据、有效 classifier version、至少 20 字可见正文且不得含活动 HTML，管理员仍可手工 URL 导入 |
 | `POST` | `/api/publish/official-sync` | 微信官方 API 正文提交；机器调用同样需要服务令牌、完整普通图文正文与 fail-closed 证据 |
 | `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文 |
 | `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权。任一任务仍在 processing、审核通知仍 pending/sending、审核卡缺失或失败/对账积压时均 `ready=false`；进程存活不等于业务完成 |
-| `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员密码 |
-| `GET` | `/api/publish/readiness` | 部署/运维只读验收：生成物存在/一致性、存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员密码且只返回布尔/模式信息 |
-| `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员密码 |
+| `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员/超级管理员登录，或部署专用 `PUBLISH_ADMIN_SERVICE_TOKEN` |
+| `GET` | `/api/publish/readiness` | 部署/运维只读验收：生成物存在/一致性、存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员角色或部署专用服务令牌，且只返回布尔/模式信息 |
+| `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员/超级管理员登录，或部署专用服务令牌 |
 | `POST` | `/api/publish/jobs/{id}/review` | HTTP 审核默认关闭；仅显式开启、管理员鉴权且固定审核人位于飞书白名单时可用。approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
-| `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员密码 |
+| `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员角色或部署专用服务令牌 |
 | `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 
@@ -225,7 +227,8 @@ curl http://127.0.0.1:9000/api/health
 | `LIBREOFFICE_URL` | `.doc` 转 `.docx` 的 LibreOffice 转换服务地址 |
 | `LIBREOFFICE_TOKEN` | LibreOffice 转换服务鉴权 token |
 | `CLOUDCONVERT_API_KEY` | LibreOffice 不可用时的 CloudConvert fallback |
-| `ADMIN_PASSWORD` | 规则后台密码；未设置时登录返回 503，后台写操作不可用 |
+| `PUBLISH_ADMIN_SERVICE_TOKEN` | 部署/运维调用发布管理接口的机器服务令牌；不作为网页登录密码，也不下发到浏览器 |
+| `RULE_SUPER_ADMIN_OPEN_IDS` | 超级管理员飞书 `open_id` 白名单，逗号分隔；郑梽煌当前使用 `ou_5491fab63b2bf26e3986b85bd06ceb5a` |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
 | `RENDER_TOKEN` / `RENDER_SERVICE_URL` | 程序化排版 API 鉴权与 Node 渲染服务地址 |
 | `RENDER_PORT` / `RULES_API_ORIGIN` / `ASSET_ORIGIN` / `RENDER_BUILD_SHA` | renderer 的端口、规则 API、素材域名和可追溯构建 SHA；生产由流水线生成 `render-service.env` |
@@ -248,7 +251,7 @@ curl http://127.0.0.1:9000/api/health
 
 环境变量的完整机器可读合同在 `deploy/config/env-schema.json`，三份无密钥示例分别对应流水线 API env、服务器 `publish.env` 和 renderer env。部署会在改写 live 路径前检查未知键、重复键、必填空值和 schema 版本；验证器只输出变量名，不输出值。
 
-部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_KNOWN_HOSTS`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`ADMIN_PASSWORD` 等 GitHub Secrets。`SERVER_KNOWN_HOSTS` 必须通过可信渠道取得并人工核验服务器公钥，内容采用 OpenSSH `known_hosts` 格式；工作流不会再用 `ssh-keyscan` 临时信任首次看到的主机。生产 `/var/www/api/publish.env` 还必须显式设置 `FEISHU_CALLBACK_MODE=websocket`（如确需 Webhook 才改为 `webhook`）。生产规则后台密码只存放在 GitHub Secret 和本地忽略提交的 `.env` 中；不要把微信、LibreOffice、CloudConvert、服务器密钥或后台密码提交到仓库。
+部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_KNOWN_HOSTS`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`PUBLISH_ADMIN_SERVICE_TOKEN`、`RULE_SUPER_ADMIN_OPEN_IDS` 等 GitHub Secrets。`SERVER_KNOWN_HOSTS` 必须通过可信渠道取得并人工核验服务器公钥，内容采用 OpenSSH `known_hosts` 格式；工作流不会再用 `ssh-keyscan` 临时信任首次看到的主机。生产 `/var/www/api/publish.env` 还必须显式设置 `FEISHU_CALLBACK_MODE=websocket`（如确需 Webhook 才改为 `webhook`）。网页规则后台不再使用共享密码；不要把飞书、发布服务令牌、LibreOffice、CloudConvert 或服务器密钥提交到仓库。
 
 发布任务当前采用 JSON 文件 + 进程内互斥锁，部署约束是同一 `PUBLISH_JOBS_PATH` 只能由一个 API 进程写入；如扩为多实例，必须先迁移到带唯一约束和事务的共享数据库，不能让多个进程直接共写该文件。
 
@@ -290,12 +293,12 @@ go test ./...
 
 当前生产配置显式锁定 `FOODTALKS_EXPECTED_TARGET=test`；切换正式 FoodTalks 是单独的外部环境变更，必须同时更新 API、前台、后台 URL 与凭证后再通过 readiness。`PUBLISH_SYNC_SERVICE_TOKEN`、`PUBLISH_MONITOR_FEISHU_USER_ID` 或 `FEISHU_REVIEWER_OPEN_IDS` 缺失、HTTP 审核意外开启时，readiness 均失败。发布任务 JSON store 带进程锁，只允许一个 API 实例持有；横向扩容前必须迁移到支持事务与锁的存储。
 
-生产规则后台密码变更流程：
+规则后台权限配置流程：
 
-1. 更新仓库的 GitHub Actions Secret：`ADMIN_PASSWORD`。
-2. 同步更新本地 `.env`，便于本机冒烟验证；`.env` 已被 `.gitignore` 忽略。
-3. 重跑 `Deploy to server` 工作流或推送 `main` 触发部署。
-4. 用 `/api/rules/admin/login` 验证新密码返回 `200`，并用旧密码确认返回 `401`。
+1. 在 GitHub Secret `RULE_SUPER_ADMIN_OPEN_IDS` 中维护超级管理员飞书 `open_id`；当前超级管理员是郑梽煌。
+2. 超级管理员登录后打开“规则后台 → 权限管理”，把已经登录过的账号切换为“管理员”。
+3. 规则后台所有网页请求复用登录会话；旧的密码接口不再提供后台权限。
+4. 部署/运维脚本使用独立的 `PUBLISH_ADMIN_SERVICE_TOKEN`，它与网页角色权限分离。
 
 ## 维护说明
 
