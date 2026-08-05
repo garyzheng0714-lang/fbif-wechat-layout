@@ -535,7 +535,18 @@ export function initApp(initialTemplate) {
   const progress = document.getElementById('progress');
   const progressFill = document.getElementById('progressFill');
   const progressText = document.getElementById('progressText');
+  const progressPercentEl = document.getElementById('progressPercent');
   const errorEl = document.getElementById('error');
+  // 外壳侧写进度只走这里：条宽、aria 值和卡内可见百分比必须一起更新，
+  // 否则那个百分比会停在旧数字上——可见控件不许说假话。
+  // （飞书导入路径由 import-progress.js 的 bindImportProgressDom 统一渲染。）
+  function setShellProgress(percent) {
+    const value = Math.max(0, Math.min(100, Number(percent) || 0));
+    progressFill.style.width = value + '%';
+    const rounded = Math.round(value);
+    progress.setAttribute?.('aria-valuenow', String(rounded));
+    if (progressPercentEl) progressPercentEl.textContent = rounded + '%';
+  }
   const importZone = document.getElementById('importZone');
   const docZone = document.getElementById('docZone');
   const docName = document.getElementById('docName');
@@ -601,8 +612,7 @@ export function initApp(initialTemplate) {
     dropZone.classList.remove('processing');
     clearUploadVisual();
     progress.style.display = 'none';
-    progressFill.style.width = '0%';
-    progress.setAttribute?.('aria-valuenow', '0');
+    setShellProgress(0);
     progressText.textContent = '正在排版...';
     fileInput.value = '';
   }
@@ -1045,8 +1055,7 @@ export function initApp(initialTemplate) {
     clearUploadVisual();
     showImportEntry();
     progress.style.display = 'none';
-    progressFill.style.width = '0%';
-    progress.setAttribute?.('aria-valuenow', '0');
+    setShellProgress(0);
     dropZone.classList.remove('processing');
 
     const emptyState = document.getElementById('emptyState');
@@ -1127,8 +1136,7 @@ export function initApp(initialTemplate) {
     showImportEntry();
     dropZone.classList.add('processing');
     progress.style.display = 'block';
-    progressFill.style.width = '70%';
-    progress.setAttribute?.('aria-valuenow', '70');
+    setShellProgress(70);
     progressText.textContent = '正在排版...';
     try {
       const t0 = performance.now();
@@ -1165,8 +1173,7 @@ export function initApp(initialTemplate) {
       session.stats = formatRenderStats(result, elapsed);
       logConv('info', '排版完成', { elapsed: elapsed + 's', headings: result.headingN });
 
-      progressFill.style.width = '100%';
-      progress.setAttribute?.('aria-valuenow', '100');
+      setShellProgress(100);
       progressText.textContent = '排版完成!';
       dropZone.classList.remove('processing');
       setTimeout(() => {
@@ -1282,8 +1289,7 @@ export function initApp(initialTemplate) {
     _moreArticlesCopyJob = null;
     dropZone.classList.remove('processing');
     progress.style.display = 'none';
-    progressFill.style.width = '0%';
-    progress.setAttribute?.('aria-valuenow', '0');
+    setShellProgress(0);
     resetRetryUploadUI();
   }
   window._engineSwitchTemplate = async function(nextTemplate, options = {}) {
@@ -1406,9 +1412,11 @@ export function initApp(initialTemplate) {
     if (!hasImportProgress) {
       progress.style.display = 'block';
       progress.classList?.remove('is-indeterminate');
-      const legacyPercent = opts && opts.source === 'feishu-doc-import' ? 82 : 50;
-      progressFill.style.width = legacyPercent + '%';
-      progress.setAttribute?.('aria-valuenow', String(legacyPercent));
+      // 本地上传的进度权重按真实耗时分配：解析很快，图片准备才是大头。
+      // 先前解析阶段直接冲到 97%，把主要等待压进最后 1.5%，导致出现
+      // 「1/13 图 → 98%」这种自相矛盾的读数。
+      const legacyPercent = opts && opts.source === 'feishu-doc-import' ? 20 : 8;
+      setShellProgress(legacyPercent);
       progressText.textContent = '正在解析...';
     }
     const superseded = () => {
@@ -1417,12 +1425,14 @@ export function initApp(initialTemplate) {
     };
     // 本地上传的图片准备进度：把真实 done/total 写进进度条，占准备阶段
     // 98%→99.5% 这一小段，进度只前进、不倒退。
-    const reportLocalPreparationProgress = (text, done, total) => {
+    // 图片准备（回填 40→75%）与像素确认（解码 75→95%）是导入的主要耗时，
+    // 因此占进度条的主段；文案里的 done/total 与这里的百分比必须互相自洽。
+    const LOCAL_PHASE_RANGE = { materialize: [40, 75], decode: [75, 95] };
+    const reportLocalPreparationProgress = (text, done, total, phase = 'materialize') => {
       progressText.textContent = text;
       if (!(total > 0)) return;
-      const percent = 98 + Math.min(1.5, (done / total) * 1.5);
-      progressFill.style.width = percent.toFixed(1) + '%';
-      progress.setAttribute?.('aria-valuenow', String(Math.round(percent)));
+      const [from, to] = LOCAL_PHASE_RANGE[phase] || LOCAL_PHASE_RANGE.materialize;
+      setShellProgress(from + (Math.min(done, total) / total) * (to - from));
     };
     let preparedPreview = null;
     try {
@@ -1432,8 +1442,9 @@ export function initApp(initialTemplate) {
         if (inputCommit.stale()) return;
         if (!hasImportProgress) {
           progressText.textContent = msg;
-          progressFill.style.width = pct + '%';
-          progress.setAttribute?.('aria-valuenow', String(Math.max(0, Math.min(100, Math.round(pct)))));
+          // .doc→.docx 转换自带 0–100 的进度，映射进总进度的 8→30 段，
+          // 不能直传，否则转换一结束进度条就冲到满格再退回去。
+          setShellProgress(8 + Math.max(0, Math.min(100, Number(pct) || 0)) * 0.22);
         }
       });
       if (inputCommit.stale()) return superseded();
@@ -1442,8 +1453,7 @@ export function initApp(initialTemplate) {
       if (inputCommit.stale()) return superseded();
       importProgress?.completePhase?.('rules', { status: '排版规则已确认' });
       if (!hasImportProgress) {
-        progressFill.style.width = '97%';
-        progress.setAttribute?.('aria-valuenow', '97');
+        setShellProgress(35);
         progressText.textContent = '正在解析...';
       } else {
         importProgress.updatePhase('parse', 0, 6, { status: '正在打开 Word 文档…' });
@@ -1471,8 +1481,7 @@ export function initApp(initialTemplate) {
       if (input.kind === 'docx') {
         logConv('info', 'DOCX解析完成', { paragraphs: result.lines.length, images: result.imgN });
         if (!hasImportProgress) {
-          progressFill.style.width = '98%';
-          progress.setAttribute?.('aria-valuenow', '98');
+          setShellProgress(40);
           progressText.textContent = '正在准备图片...';
         }
       } else if (input.kind === 'md') {
@@ -1545,7 +1554,7 @@ export function initApp(initialTemplate) {
               ? `正在确认图片像素 ${done}/${total}…`
               : '正在确认图片像素…';
             importProgress?.updatePhase?.('decode', done, total, { status: text });
-            if (!hasImportProgress) reportLocalPreparationProgress(text, done, total);
+            if (!hasImportProgress) reportLocalPreparationProgress(text, done, total, 'decode');
           },
         });
         if (inputCommit.stale()) return superseded();
@@ -1703,8 +1712,7 @@ export function initApp(initialTemplate) {
           }
         }, 700);
       } else {
-        progressFill.style.width = '100%';
-        progress.setAttribute?.('aria-valuenow', '100');
+        setShellProgress(100);
         progressText.textContent = '排版完成!';
         if (activationDelayMs > 0) setTimeout(activate, activationDelayMs);
         else activate();

@@ -103,6 +103,13 @@
                 <span class="feishu-doc-capability import-capability-status" id="feishuDocCapability">粘贴后自动排版</span>
                 <button class="import-submit-button" id="importSubmitBtn" type="button" hidden>导入排版</button>
               </div>
+              <div class="progress import-progress" id="progress" role="progressbar" aria-label="导入总进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                <div class="progress-status">
+                  <span class="progress-text" id="progressText">正在排版...</span>
+                  <strong class="progress-percent" id="progressPercent">0%</strong>
+                </div>
+              </div>
               <div class="dropzone-drag-prompt" data-upload-label aria-live="polite">
                 <span class="dropzone-drag-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M12 11v7m-3-3 3 3 3-3"/></svg></span>
                 <strong>松开导入</strong>
@@ -110,14 +117,6 @@
               </div>
               <input type="file" id="fileInput">
             </div>
-          </div>
-          <div class="progress import-progress" id="progress" role="progressbar" aria-label="导入总进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <div class="progress-heading">
-              <span>总进度</span>
-              <strong id="progressPercent">0%</strong>
-            </div>
-            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-            <div class="progress-text" id="progressText">正在排版...</div>
           </div>
         </div>
       </div>
