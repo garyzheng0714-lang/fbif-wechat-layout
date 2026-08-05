@@ -77,7 +77,8 @@ function decodeOne(src, createImage, timeoutMs) {
   });
 }
 
-// 回填产物（data: 位图）逐张预解码。并发有界；返回失败清单交上层裁决。
+// 回填产物（data: 位图）逐张预解码。每张图同时启动一个本地解码任务；
+// 返回失败清单交上层裁决。
 export async function decodePreviewImages(articleHtml, options = {}) {
   const refs = dataImageRefs(articleHtml);
   const createImage = typeof options.createImage === 'function'
@@ -89,24 +90,14 @@ export async function decodePreviewImages(articleHtml, options = {}) {
     return { total: refs.length, failedSrcs: [] };
   }
   const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 20000;
-  const requested = Number(options.concurrency);
-  const concurrency = Math.min(
-    Math.max(1, Number.isFinite(requested) ? Math.floor(requested) : 4),
-    refs.length,
-  );
   const failedSrcs = [];
-  let nextIndex = 0;
   let done = 0;
-  async function worker() {
-    while (nextIndex < refs.length) {
-      const src = refs[nextIndex++];
-      const ok = await decodeOne(src, createImage, timeoutMs);
-      if (!ok) failedSrcs.push(src);
-      done++;
-      if (typeof options.onProgress === 'function') options.onProgress(done, refs.length);
-    }
-  }
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  await Promise.all(refs.map(async src => {
+    const ok = await decodeOne(src, createImage, timeoutMs);
+    if (!ok) failedSrcs.push(src);
+    done++;
+    if (typeof options.onProgress === 'function') options.onProgress(done, refs.length);
+  }));
   return { total: refs.length, failedSrcs };
 }
 
