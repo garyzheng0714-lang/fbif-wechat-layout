@@ -233,6 +233,9 @@ test('file 输入 A→B 且 A 后完成时，只允许 B activateArticleSession'
       return task.promise;
     },
     buildArticleSession: async (input, result) => ({ input, title: result.label }),
+    // 预览就绪门在此 harness 中直接放行：本测试只验证 latest-wins 竞态门。
+    materializeLazyImages: async () => ({ articleCopy: '', footerCopy: '', total: 0, failed: 0, failedSrcs: [], replacements: new Map() }),
+    preparePreviewArticle: async articleHtml => ({ stale: false, changed: false, articleHtml, replacements: new Map() }),
     formatRenderStats: result => result.label,
     activateArticleSession: article => activated.push(article.title),
     setTimeout: fn => fn(),

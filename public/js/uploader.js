@@ -165,7 +165,8 @@ export async function materializeLazyImages(articleCopy, footerCopy, { onProgres
     footerCopy = footerCopy.split(src).join(dataUrl);
   }
 
-  return { articleCopy, footerCopy, total: pending.length, failed: failedSrcs.length, failedSrcs };
+  // replacements 让预览就绪门把回填结果写回 imgCache，重渲染不再退回占位。
+  return { articleCopy, footerCopy, total: pending.length, failed: failedSrcs.length, failedSrcs, replacements: resolved };
 }
 
 // Upload base64 images from DOCX to OSS. External URLs are used directly.
