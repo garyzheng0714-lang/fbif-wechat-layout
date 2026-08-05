@@ -583,6 +583,10 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
     _moreArticlesCopyJob: null,
     _lastRenderInput: null,
     _articleSession: null,
+    // 恢复路径会把快照正文交给 preview-dom 的整帧提交；本用例只验证复制层，
+    // 直接返回 false 表示没有可复用的预备内容，走常规重绘。
+    adoptPreviewContent: () => false,
+    isFooterEnabledForCurrentArticle: () => true,
   };
 
   const restoreSessionSnapshot = new Function('deps', `with (deps) { return (${restoreExpr}); }`)(deps);

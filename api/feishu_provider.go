@@ -92,19 +92,6 @@ type feishuDocument struct {
 	ModifiedAt time.Time `json:"modified_at,omitempty"`
 }
 
-// feishuChat 是管理后台展示用的最小群信息。chat_id 只作为服务端配置键
-// 使用，不在前端直接要求用户输入；名称、头像等展示字段来自当前登录用户
-// 可见的群列表。
-type feishuChat struct {
-	ChatID           string `json:"chat_id"`
-	Name             string `json:"name"`
-	Avatar           string `json:"avatar,omitempty"`
-	Description      string `json:"description,omitempty"`
-	External         bool   `json:"external,omitempty"`
-	ChatMode         string `json:"chat_mode,omitempty"`
-	GroupMessageType string `json:"group_message_type,omitempty"`
-}
-
 type feishuDocumentRef struct {
 	Token string `json:"token"`
 	Type  string `json:"type"`
@@ -155,10 +142,28 @@ func newHTTPFeishuProvider(client *http.Client) *httpFeishuProvider {
 		client:              client,
 		apiBaseURL:          feishuOpenAPIBaseURL,
 		exportPollAttempts:  30,
-		exportPollInterval:  time.Second,
+		exportPollInterval:  250 * time.Millisecond,
 		exportStatusTimeout: 8 * time.Second,
 		exportMaxPollErrors: 3,
 	}
+}
+
+func feishuExportPollDelay(base time.Duration, attempt int) time.Duration {
+	if base <= 0 || attempt <= 0 {
+		return 0
+	}
+	multiplier := 1
+	switch {
+	case attempt >= 5:
+		multiplier = 4
+	case attempt >= 3:
+		multiplier = 2
+	}
+	delay := time.Duration(multiplier) * base
+	if delay > time.Second {
+		return time.Second
+	}
+	return delay
 }
 
 func (p *httpFeishuProvider) configure(appID, appSecret string) {
@@ -219,8 +224,11 @@ func normalizeFeishuTokenResponse(resp feishuTokenResponse) (feishuUserToken, er
 	if resp.Code != 0 || resp.Error != "" {
 		return feishuUserToken{}, errors.New("feishu OAuth rejected the request")
 	}
-	if resp.AccessToken == "" || resp.RefreshToken == "" || resp.ExpiresIn <= 0 {
+	if resp.AccessToken == "" || resp.ExpiresIn <= 0 {
 		return feishuUserToken{}, errors.New("feishu OAuth response is incomplete")
+	}
+	if resp.RefreshToken == "" {
+		return feishuUserToken{}, errors.New("feishu OAuth response has no refresh_token; offline_access must be granted")
 	}
 	return feishuUserToken{
 		AccessToken:  resp.AccessToken,
@@ -303,6 +311,65 @@ func normalizeFeishuDocumentType(raw string) string {
 	}
 }
 
+func validFeishuDocumentToken(token string) bool {
+	if len(token) < 4 || len(token) > 128 {
+		return false
+	}
+	for _, char := range token {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_' ||
+			char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func officialFeishuDocumentHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	for _, suffix := range []string{"feishu.cn", "larkoffice.com", "larksuite.com"} {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseFeishuDocumentURL(raw string) (feishuDocumentRef, error) {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil ||
+		parsed.Scheme != "https" ||
+		parsed.User != nil ||
+		parsed.Port() != "" ||
+		!officialFeishuDocumentHost(parsed.Hostname()) {
+		return feishuDocumentRef{}, errFeishuInvalidDocument
+	}
+	segments := strings.Split(strings.Trim(parsed.EscapedPath(), "/"), "/")
+	if len(segments) != 2 {
+		return feishuDocumentRef{}, errFeishuInvalidDocument
+	}
+	pathKind := strings.ToLower(segments[0])
+	docType := normalizeFeishuDocumentType(pathKind)
+	if pathKind == "docs" {
+		docType = "doc"
+	}
+	token, unescapeErr := url.PathUnescape(segments[1])
+	if unescapeErr != nil ||
+		(docType != "doc" && docType != "docx" && docType != "wiki") ||
+		!validFeishuDocumentToken(token) {
+		return feishuDocumentRef{}, errFeishuInvalidDocument
+	}
+	return feishuDocumentRef{
+		Token: token,
+		Type:  docType,
+		URL:   parsed.String(),
+	}, nil
+}
+
 func (p *httpFeishuProvider) SearchDocuments(ctx context.Context, accessToken, query string, limit int) ([]feishuDocument, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -363,79 +430,6 @@ func (p *httpFeishuProvider) SearchDocuments(ctx context.Context, accessToken, q
 	return documents, nil
 }
 
-// ListChats 使用当前登录用户的 user_access_token 获取其所在的群。分页和
-// chat_mode 过滤都在服务端完成，前端只接收可以用于选择的群展示信息。
-func (p *httpFeishuProvider) ListChats(ctx context.Context, accessToken string) ([]feishuChat, error) {
-	const pageSize = 100
-	const maxChats = 5000
-	pageToken := ""
-	chats := make([]feishuChat, 0, 32)
-	for page := 0; page < 100; page++ {
-		var response struct {
-			Code int    `json:"code"`
-			Msg  string `json:"msg"`
-			Data struct {
-				Items []struct {
-					ChatID           string `json:"chat_id"`
-					Name             string `json:"name"`
-					Avatar           string `json:"avatar"`
-					Description      string `json:"description"`
-					External         bool   `json:"external"`
-					ChatMode         string `json:"chat_mode"`
-					GroupMessageType string `json:"group_message_type"`
-				} `json:"items"`
-				PageToken string `json:"page_token"`
-				HasMore   bool   `json:"has_more"`
-			} `json:"data"`
-		}
-		values := url.Values{}
-		values.Set("user_id_type", "open_id")
-		values.Set("page_size", strconv.Itoa(pageSize))
-		if pageToken != "" {
-			values.Set("page_token", pageToken)
-		}
-		endpoint := p.apiBaseURL + "/open-apis/im/v1/chats?" + values.Encode()
-		if err := p.doJSON(ctx, http.MethodGet, endpoint, accessToken, nil, &response); err != nil {
-			return nil, err
-		}
-		if response.Code != 0 {
-			return nil, fmt.Errorf("feishu chat list failed code=%d msg=%s", response.Code, response.Msg)
-		}
-		for _, item := range response.Data.Items {
-			chatID := strings.TrimSpace(item.ChatID)
-			if chatID == "" {
-				continue
-			}
-			// 用户所在的会话列表可能包含 p2p 单聊。发布审核只允许群，
-			// 但兼容旧响应没有 chat_mode 的情况，不误删可用群。
-			mode := strings.ToLower(strings.TrimSpace(item.ChatMode))
-			if mode != "" && mode != "group" && mode != "topic" {
-				continue
-			}
-			chats = append(chats, feishuChat{
-				ChatID:           chatID,
-				Name:             strings.TrimSpace(item.Name),
-				Avatar:           strings.TrimSpace(item.Avatar),
-				Description:      strings.TrimSpace(item.Description),
-				External:         item.External,
-				ChatMode:         mode,
-				GroupMessageType: strings.TrimSpace(item.GroupMessageType),
-			})
-			if len(chats) >= maxChats {
-				return chats, nil
-			}
-		}
-		if !response.Data.HasMore || strings.TrimSpace(response.Data.PageToken) == "" {
-			break
-		}
-		if response.Data.PageToken == pageToken {
-			return nil, errors.New("feishu chat list returned a repeated page token")
-		}
-		pageToken = strings.TrimSpace(response.Data.PageToken)
-	}
-	return chats, nil
-}
-
 func parseFeishuTimestamp(raw string) time.Time {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -484,7 +478,24 @@ func validateFeishuDocumentRef(ref feishuDocumentRef) (feishuDocumentRef, error)
 	ref.Type = normalizeFeishuDocumentType(ref.Type)
 	ref.Title = strings.TrimSpace(ref.Title)
 	ref.URL = strings.TrimSpace(ref.URL)
-	if ref.Token == "" || ref.Type == "" || len(ref.Token) > 128 {
+	if ref.URL != "" {
+		parsed, err := parseFeishuDocumentURL(ref.URL)
+		if err != nil {
+			return ref, errFeishuInvalidDocument
+		}
+		if ref.Token == "" {
+			ref.Token = parsed.Token
+		} else if ref.Token != parsed.Token {
+			return ref, errFeishuInvalidDocument
+		}
+		if ref.Type == "" {
+			ref.Type = parsed.Type
+		} else if ref.Type != parsed.Type {
+			return ref, errFeishuInvalidDocument
+		}
+		ref.URL = parsed.URL
+	}
+	if !validFeishuDocumentToken(ref.Token) || ref.Type == "" {
 		return ref, errFeishuInvalidDocument
 	}
 	return ref, nil
@@ -493,18 +504,20 @@ func validateFeishuDocumentRef(ref feishuDocumentRef) (feishuDocumentRef, error)
 func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken string, ref feishuDocumentRef) (feishuExportedFile, error) {
 	startedAt := time.Now()
 	metrics := feishuExportMetrics{}
+	resolveStarted := time.Now()
+	reportFeishuExportProgress(ctx, "resolve", 0, 1, "document")
 	ref, err := validateFeishuDocumentRef(ref)
 	if err != nil {
 		return feishuExportedFile{}, err
 	}
 	if ref.Type == "wiki" {
-		phaseStarted := time.Now()
 		ref, err = p.resolveWikiDocument(ctx, accessToken, ref)
-		metrics.ResolveDuration = time.Since(phaseStarted)
 		if err != nil {
 			return feishuExportedFile{}, err
 		}
 	}
+	metrics.ResolveDuration = time.Since(resolveStarted)
+	reportFeishuExportProgress(ctx, "resolve", 1, 1, "document")
 	var createResponse struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -513,6 +526,7 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		} `json:"data"`
 	}
 	phaseStarted := time.Now()
+	reportFeishuExportProgress(ctx, "create", 0, 1, "task")
 	if err := p.doJSON(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/drive/v1/export_tasks", accessToken, map[string]string{
 		"file_extension": "docx",
 		"token":          ref.Token,
@@ -524,6 +538,7 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 	if createResponse.Code != 0 || createResponse.Data.Ticket == "" {
 		return feishuExportedFile{}, errors.New("could not create feishu export task")
 	}
+	reportFeishuExportProgress(ctx, "create", 1, 1, "task")
 
 	var fileToken string
 	var fileName string
@@ -543,14 +558,15 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		maxPollErrors = 3
 	}
 	phaseStarted = time.Now()
+	reportFeishuExportProgress(ctx, "export_wait", 0, 0, "")
 	for attempt := 0; attempt < pollAttempts; attempt++ {
 		metrics.PollAttempts = attempt + 1
 		if attempt > 0 {
-			if pollInterval > 0 {
+			if delay := feishuExportPollDelay(pollInterval, attempt); delay > 0 {
 				select {
 				case <-ctx.Done():
 					return feishuExportedFile{}, ctx.Err()
-				case <-time.After(pollInterval):
+				case <-time.After(delay):
 				}
 			}
 		}
@@ -604,6 +620,7 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 		if result.FileToken != "" && result.JobStatus == 0 {
 			fileToken = result.FileToken
 			fileName = result.FileName
+			reportFeishuExportProgress(ctx, "export_wait", 1, 1, "task")
 			break
 		}
 		switch result.JobStatus {
@@ -644,7 +661,17 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 	if resp.StatusCode != http.StatusOK {
 		return feishuExportedFile{}, fmt.Errorf("feishu export download status %d", resp.StatusCode)
 	}
-	content, err := readBoundedBody(resp.Body, 100<<20)
+	downloadTotal := resp.ContentLength
+	if downloadTotal < 0 {
+		downloadTotal = 0
+	}
+	if downloadTotal > 100<<20 {
+		return feishuExportedFile{}, errors.New("feishu export is larger than 100 MB")
+	}
+	reportFeishuExportProgress(ctx, "download", 0, downloadTotal, "bytes")
+	content, err := readBoundedBodyWithProgress(ctx, resp.Body, 100<<20, downloadTotal, func(done int64) {
+		reportFeishuExportProgress(ctx, "download", done, downloadTotal, "bytes")
+	})
 	if err != nil {
 		return feishuExportedFile{}, fmt.Errorf("feishu export is larger than 100 MB: %w", err)
 	}
@@ -658,6 +685,50 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 	metrics.DownloadDuration = time.Since(phaseStarted)
 	metrics.TotalDuration = time.Since(startedAt)
 	return feishuExportedFile{Filename: fileName, Content: content, Metrics: metrics}, nil
+}
+
+func readBoundedBodyWithProgress(
+	ctx context.Context,
+	body io.Reader,
+	maxBytes int64,
+	total int64,
+	report func(done int64),
+) ([]byte, error) {
+	if maxBytes < 0 {
+		return nil, errOutboundResponseTooLarge
+	}
+	limited := &io.LimitedReader{R: body, N: maxBytes + 1}
+	var out bytes.Buffer
+	buffer := make([]byte, 64<<10)
+	var done int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		read, readErr := limited.Read(buffer)
+		if read > 0 {
+			if _, err := out.Write(buffer[:read]); err != nil {
+				return nil, err
+			}
+			done += int64(read)
+			if done > maxBytes {
+				return nil, errOutboundResponseTooLarge
+			}
+			if report != nil {
+				report(done)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+	}
+	if total > 0 && done != total {
+		return nil, io.ErrUnexpectedEOF
+	}
+	return out.Bytes(), nil
 }
 
 func sanitizeExportFilename(raw string) string {
