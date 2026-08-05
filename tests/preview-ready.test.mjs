@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
   pendingPreviewRefs,
@@ -161,4 +162,20 @@ test('decodePreviewImages 只解码 data: 位图并汇报失败清单', async ()
   });
   assert.equal(result.total, 2);
   assert.deepEqual(result.failedSrcs, ['data:image/png;base64,BAD1']);
+});
+
+test('文件预览不等待图片就绪门，同时保留飞书导入进度反馈', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const handleStart = engine.indexOf('async function handleFile(');
+  const handleEnd = engine.indexOf('\n  // Dual-layer rendering:', handleStart);
+  assert.ok(handleStart >= 0 && handleEnd > handleStart, '必须能定位真实 handleFile');
+  const handleFile = engine.slice(handleStart, handleEnd);
+
+  assert.doesNotMatch(handleFile, /await\s+(?:preparePreviewArticle|materializeLazyImages|uploadNonCdnImages)/);
+  assert.doesNotMatch(engine, /import\('\.\/preview-ready\.js/);
+
+  const feishuImport = await readFile(new URL('../public/js/feishu-doc-import.js', import.meta.url), 'utf8');
+  assert.match(feishuImport, /飞书正在生成 Word/);
+  assert.match(feishuImport, /正在接收文档/);
+  assert.match(feishuImport, /正在提取正文并排版/);
 });
