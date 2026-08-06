@@ -1603,6 +1603,9 @@ func (p *publishPipeline) submitSupplierWithContext(ctx context.Context, input o
 	return p.submitStructuredContent(ctx, input, publishContentSupplier, nil)
 }
 
+// submitSupplierWithRestartContext 随 site-sync 的正文入口一并下线：该函数唯一的
+// 调用点是「外部提交的正文变了就重启同一条任务」，而发布接口已不再接收正文。
+
 func (p *publishPipeline) submitStructuredContent(
 	ctx context.Context,
 	input officialPublishInput,
