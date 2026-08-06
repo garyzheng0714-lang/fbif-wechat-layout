@@ -81,7 +81,7 @@ jobs:
         run: |
           shellcheck deploy/scripts/*.sh
           bash -n deploy/scripts/deploy-transaction.sh
-          python3 -m py_compile monitoring/watchdog.py deploy/scripts/validate-env.py
+          python3 -m py_compile deploy/scripts/validate-env.py
           python3 deploy/scripts/validate-env.py deploy/config/env-schema.json api_managed deploy/config/api.env.example
           python3 deploy/scripts/validate-env.py deploy/config/env-schema.json api_publish deploy/config/publish.env.example
           python3 deploy/scripts/validate-env.py deploy/config/env-schema.json render deploy/config/render.env.example
@@ -90,9 +90,6 @@ jobs:
         run: |
           cd api
           go test . -run 'TestPublishMonitoring(ReportsOnlyOperationalMetrics|GuardsReviewNotificationAndDeduplication)'
-
-      - name: Run P0 watchdog tests (gate)
-        run: python3 -m unittest monitoring/test_watchdog.py
 
       - name: Build API server
         run: |
@@ -215,7 +212,7 @@ jobs:
 
           # SSH / sudo / current-service preflight. Creating an isolated staging directory is
           # allowed here; no live static, binary, env, render or Caddy path has been touched.
-          remote_setup_command='uid=$(id -u); gid=$(id -g); sudo rm -rf -- "$1"; sudo install -d -m 755 -o "$uid" -g "$gid" "$1" "$1/public" "$1/api" "$1/render" "$1/caddy" "$1/config" "$1/systemd" "$1/monitoring"'
+          remote_setup_command='uid=$(id -u); gid=$(id -g); sudo rm -rf -- "$1"; sudo install -d -m 755 -o "$uid" -g "$gid" "$1" "$1/public" "$1/api" "$1/render" "$1/caddy" "$1/config" "$1/systemd"'
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" bash -s -- "$RELEASE_DIR" <<<"$remote_setup_command"
 
           # Upload every artifact into the isolated release. render dependencies are resolved
@@ -249,13 +246,6 @@ jobs:
             -e "ssh -i ~/.ssh/deploy_key" \
             deploy/systemd/ \
             "${USER}@${HOST}:${RELEASE_DIR}/systemd/"
-
-          rsync -avz \
-            -e "ssh -i ~/.ssh/deploy_key" \
-            monitoring/watchdog.py \
-            deploy/monitoring/fbif-monitor-watchdog.service \
-            deploy/monitoring/fbif-monitor-watchdog.timer \
-            "${USER}@${HOST}:${RELEASE_DIR}/monitoring/"
 
           rsync -avz \
             -e "ssh -i ~/.ssh/deploy_key" \
@@ -345,8 +335,8 @@ jobs:
           ' >/dev/null
           echo "Publish target: $(echo "$readiness_json" | jq -r '.foodtalks.target')"
 
-          # 监控脚本、权限、EnvironmentFile 和 systemd 单元先在写暂停窗口内
-          # 完成安装和校验，timer 保持 disabled。这一步失败仍可完整 rollback。
+          # 监控已迁往监控端（FoodTalks_Feed 的 fbif-link-watchdog）。这一步只把
+          # 本机残留的旧 watchdog 单元与目录摘干净，幂等；失败仍可完整 rollback。
           remote_transaction prepare-monitoring
 
           # 到这里候选代码、静态资源、鉴权边界、运行配置和监控已验收。先关闭自动 rollback，
@@ -376,10 +366,6 @@ jobs:
             .feishu.reviewer_allowlist_configured == true and
             .enrich_mode == "dual"
           ' >/dev/null
-
-          # 候选监控已经在可回滚窗口安装完成。worker 恢复后先做一次真实
-          # 探测，成功后才 enable timer；此时若失败，只允许前向修复。
-          remote_transaction start-monitoring
 
           remote_transaction finalize
           release_accepted=0
