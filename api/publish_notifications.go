@@ -421,3 +421,45 @@ func (p *publishPipeline) replayPublishNotification(jobID int64) (publishJob, er
 	p.schedulePublishNotification(jobID)
 	return job, nil
 }
+
+// refreshReviewCard 用当前代码重建审核卡并推到已配置的审核群。
+//
+// 与 replayPublishNotification 的分工：那个只救「发送失败躺在 dead letter 里」的
+// 通知；这个管「已经发成功、但卡片样式或内容需要按新版本重出」的情况——卡片改版
+// 后，历史任务的卡还停在旧样式上，群里回看到的仍是旧信息。
+//
+// 已记过 message_id 的群走原位更新（sendConfiguredReviewCardToTargets 内部判定），
+// 所以刷新不会在群里刷屏，看到的是同一张卡变成新样子。
+// 通知状态机不参与：这是人工触发的一次性运维动作，不改 NotificationState，
+// 免得与正在跑的通知 worker 抢同一条记录。
+func (p *publishPipeline) refreshReviewCard(ctx context.Context, jobID int64) (publishJob, error) {
+	job, err := p.store.byID(jobID)
+	if err != nil {
+		return publishJob{}, err
+	}
+	// 旧任务没存过封面 img_key（该字段晚于它们加入），这里补传一次，
+	// 否则刷新出来的卡片仍是无封面单列。失败只降级为不带图，不阻断刷新。
+	if strings.TrimSpace(job.ReviewCoverImgKey) == "" && strings.TrimSpace(job.CoverURL) != "" {
+		if key, upErr := p.uploadReviewCoverForJob(ctx, job); upErr != nil {
+			log.Printf("publish: WARN 刷新卡片时封面转存失败（卡片将不带图）: %v", upErr)
+		} else if updated, updErr := p.store.update(job.ID, func(current *publishJob) {
+			current.ReviewCoverImgKey = key
+		}); updErr != nil {
+			log.Printf("publish: WARN 刷新卡片时保存封面 img_key 失败: %v", updErr)
+		} else {
+			job = updated
+		}
+	}
+	switch job.Stage {
+	case publishStageAwaitingReview:
+		return job, p.sendReviewPendingNotification(ctx, job)
+	case publishStagePublished, publishStageOffline, publishStageRejected:
+		return job, p.sendTerminalCardNotification(ctx, job, buildReviewDoneCard(job), fmt.Sprintf(
+			"【网站同步】任务 #%d 审核卡已刷新\n标题：%s", job.ID, job.Title))
+	case publishStageFailed:
+		return job, p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
+			"【网站同步】任务 #%d 审核卡已刷新\n标题：%s", job.ID, job.Title))
+	default:
+		return job, fmt.Errorf("任务当前阶段（%s）没有对应的审核卡，无法刷新", job.Stage)
+	}
+}
