@@ -16,11 +16,9 @@ test('deploy transaction shell is syntactically valid and restores every live su
   const scriptURL = new URL('../deploy/scripts/deploy-transaction.sh', import.meta.url);
   await execFileAsync('bash', ['-n', fileURLToPath(scriptURL)]);
   const script = await readFile(scriptURL, 'utf8');
-  const watchdogTimer = await projectFile('deploy/monitoring/fbif-monitor-watchdog.timer');
 
   for (const surface of [
     'public', 'render', 'api', 'env', 'caddy',
-    'watchdog', 'watchdog_service', 'watchdog_timer',
     'api_service', 'render_service', 'render_env', 'config_schema',
   ]) {
     assert.match(script, new RegExp(`restore_path ${surface}\\b`), `${surface} 必须进入 rollback`);
@@ -47,29 +45,30 @@ test('deploy transaction shell is syntactically valid and restores every live su
     '生产静态目录必须是精确 allowlist');
   assert.match(script, /unpause_release\(\)/);
   assert.match(script, /DEPLOYMENT_WRITES_PAUSED=0/);
-  assert.match(script, /prepare_monitoring\(\)/);
-  assert.match(script, /start_monitoring\(\)/);
-  assert.match(script, /systemd-analyze verify "\$WATCHDOG_SERVICE_TARGET" "\$WATCHDOG_TIMER_TARGET"/,
-    '候选 systemd 单元必须在解暂停前验证');
-  assert.match(script, /watchdog_timer\.was_enabled/,
-    '回滚必须恢复旧 timer 的 enable 状态');
-  assert.match(script, /candidate watchdog timer must remain disabled/);
-  assert.match(watchdogTimer, /^OnActiveSec=2min$/m,
-    '长时间运行的主机重新启用 timer 时也必须产生未来触发点');
-  assert.match(watchdogTimer, /^OnUnitActiveSec=2min$/m,
-    '首次触发后必须持续每两分钟调度');
-  assert.match(script, /NextElapseUSecMonotonic/,
-    'active (elapsed) 但没有下一次触发的 timer 必须阻止部署');
-  assert.match(script, /watchdog timer is active but has no future trigger/);
-  assert.match(script, /ExecMainStatus/,
-    'systemd 将探针异常视为可预期退出时，部署仍必须显式要求首次探测为 0');
-  assert.match(script, /touch "\$WATCHDOG_DIR\/deployment-check"/,
-    '首次探测必须验证飞书私聊上报链路');
+  // 外检看门狗已迁往监控端（CLAUDE.md 规则 30）。部署链路这一步的职责从「安装并
+  // 验收探针」变成「把残留摘干净」，测试跟着守新契约：必须摘、必须断言摘掉了、
+  // 且回滚不得把它装回来——否则下次部署又会长出一个探上游死活的探针。
+  assert.match(script, /cleanup_legacy_watchdog\(\)/);
+  assert.doesNotMatch(script, /prepare_monitoring\(\)/,
+    '不得恢复安装探针的旧流程');
+  assert.doesNotMatch(script, /start_monitoring\(\)/,
+    '不得恢复 enable timer 的旧流程');
+  assert.doesNotMatch(script, /systemctl enable --now fbif-monitor-watchdog/,
+    '部署不得重新启用已迁出的看门狗');
+  assert.match(script, /rm -f -- \/etc\/systemd\/system\/fbif-monitor-watchdog\.service/);
+  assert.match(script, /rm -f -- \/etc\/systemd\/system\/fbif-monitor-watchdog\.timer/);
+  assert.match(script, /rm -rf -- \/opt\/fbif-monitor-watchdog/);
+  assert.match(script, /legacy watchdog timer is still enabled after cleanup/,
+    '摘不干净必须让部署失败，不能静默放过');
+  assert.doesNotMatch(script, /restore_path watchdog/,
+    '回滚不得恢复已迁出的看门狗');
   assert.match(script, /HISTORY_ROOT=\/var\/www\/\.fbif-layout-history/);
   assert.match(script, /HISTORY_RETENTION=5/);
   assert.match(script, /finalize_release\(\)/);
   assert.match(script, /cp -a --reflink=auto -- "\$PUBLIC_TARGET" "\$history_pending\/public"/);
-  assert.match(script, /cp -a --reflink=auto -- "\$WATCHDOG_SERVICE_TARGET"/,
+  assert.match(script, /cp -a --reflink=auto -- "\$API_SERVICE_TARGET" "\$history_pending\/systemd\/fbif-api\.service"/,
+    '历史快照必须保留 systemd 单元');
+  assert.match(script, /cp -a --reflink=auto -- "\$RENDER_SERVICE_TARGET" "\$history_pending\/systemd\/fbif-render\.service"/,
     '历史快照必须保留 systemd 单元');
   assert.match(script, /cp -a --reflink=auto -- "\$API_SERVICE_TARGET"/);
   assert.match(script, /cp -a --reflink=auto -- "\$CONFIG_SCHEMA_TARGET"/);
@@ -112,7 +111,6 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   const acceptAt = workflow.indexOf('release_accepted=1');
   const unpauseAt = workflow.indexOf('remote_transaction unpause');
   const prepareMonitoringAt = workflow.indexOf('remote_transaction prepare-monitoring');
-  const startMonitoringAt = workflow.indexOf('remote_transaction start-monitoring');
 
   assert.ok(requiredAt >= 0 && requiredAt < firstRsyncAt, 'secret preflight 必须早于任何 rsync');
   assert.ok(sshTimeoutAt >= 0 && sshTimeoutAt < firstSSHAt,
@@ -127,6 +125,8 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     '部署必须使用预先核验的 SSH 主机公钥 Secret');
   assert.match(workflow, /ssh-keygen -F "\$HOST" -f ~\/\.ssh\/known_hosts/,
     '预置 known_hosts 必须覆盖目标 HOST');
+  assert.doesNotMatch(workflow, /remote_transaction start-monitoring/,
+    '看门狗已迁出监控端，不得恢复启动探针的部署步骤');
   assert.doesNotMatch(workflow, /ssh-keyscan/,
     '运行时 ssh-keyscan 是 TOFU，不能作为生产主机身份依据');
   assert.doesNotMatch(workflow, /\$\{USER\}@\$\{HOST\}:\$\{DEPLOY_PATH\}\//,
@@ -181,9 +181,10 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     prepareMonitoringAt > readinessAt &&
     acceptAt > prepareMonitoringAt &&
     unpauseAt > acceptAt &&
-    startMonitoringAt > unpauseAt &&
-    finalizeAt > startMonitoringAt,
-    'readiness 和监控准备必须在暂停态验收；解暂停后才启动真实探测并 finalize',
+    finalizeAt > unpauseAt,
+    // 看门狗迁出后 start-monitoring 一步已删（CLAUDE.md 规则 30），但暂停态验收的
+    // 顺序不变：readiness 与遗留探针清理都在写暂停窗口内做完、接受候选、再解暂停。
+    'readiness 和遗留探针清理必须在暂停态完成；接受候选并解暂停后才 finalize',
   );
   assert.match(workflow, /DEPLOYMENT_WRITES_PAUSED=1/);
   assert.match(workflow, /ENV=production/);

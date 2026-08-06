@@ -1,5 +1,23 @@
 # FBIF 公众号排版 — Agent 规则
 
+## 🔴 动手前先看这里：三系统边界（2026-08-06 用户裁定）
+
+FBIF 内容链路由**三个互相独立的系统**组成，各有各的代码库、数据库和服务器。**唯一的通信方式是 HTTP API，不共享任何存储。**
+
+| 系统 | 干什么 | 数据库 | 域名 |
+| --- | --- | --- | --- |
+| **本项目**（FBIF公众号排版） | **加工**：排版、风险检查、飞书审核、分发到公众号/FoodTalks | JSON 文件 | `fbifmp-layout.foodtalks.cn` |
+| FoodTalks_Feed | **监控**：RSS/供应商资讯采集、分类、判断、筛选 | PostgreSQL（它自己的） | `feed.foodtalks.cn` |
+| fbif-wechat-article | **监控**：微信公众号官方 API 归档、阅读/粉丝指标 | SQLite（它自己的） | `112.124.103.65:3002` |
+
+**本项目的定位一句话：只做加工。** 两个监控端把「原文链接 + 规则编号 + 分类证据」推进来，本项目负责抓原文、排版、风险检查、送飞书审核、审核通过后分发。
+
+### 三条不得跨越的线
+
+1. **只接收链接**（红线 33）。`site-sync` 与 `official-sync` 对 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400。上游两个监控端都已收敛到位（`6fd97c83`、`5f036db`），不得为任何调用方重开正文旁路。
+2. **不碰监控端的代码库。** 上游怎么发现文章、怎么分类、怎么判断价值，都不是本项目该改的。看出问题就说出来，由他们改。反过来他们也不该改本项目。
+3. **监控职责归监控端。** 服务健康探针、告警发送、失败计数属于监控端，本项目**只提供被探的健康端点**（`GET /api/publish/monitoring`），不主动探别人的死活。反例：`monitoring/watchdog.py` 曾住在本仓库探三个服务，其中两个是上游；配错了（3002 公网不通 + 探针统一发 `X-Publish-Sync-Token` 而 official 认 `API_KEY`）连续失败 715 次没人发现，因为不在负责人手上。该 watchdog 正在迁往监控端。
+
 ## Skill routing
 
 When the user's request matches an available skill, ALWAYS invoke it using the Skill
@@ -81,7 +99,8 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 29. **已发布监控不得依赖草稿（2026-07-16）** — 08:30–18:30 的 `freepublish` 最新页轮询必须独立执行，任何 draft / 素材失败不得阻断；“群发”须走另一条持久、幂等的发现路径。启用统一“服务器配置”前必须审计现有回调、自动回复和菜单；小绿书、图集或类型不明一律 fail closed。
 
-30. **FBIF 公众号监控是 P0 上线红线（2026-07-17）** — 任意改动必须通过无 paths 过滤的 `.github/workflows/p0-monitoring-contract.yml`，失败不得合并或部署。生产独立 systemd 看门狗每两分钟外检 layout/feed/official，连续两次异常告警、恢复通知、09:20 心跳；监控 fail closed 覆盖同步缺口、45 分钟未到审核态、通知/卡片错误、重复 `source_key`、轮询陈旧和队列积压。禁止删测、skip、降级或忽略故障来“修绿”。
+30. **FBIF 公众号监控是 P0 上线红线（2026-07-17，2026-08-06 修订看门狗归属）** — 任意改动必须通过无 paths 过滤的 `.github/workflows/p0-monitoring-contract.yml`，失败不得合并或部署。本仓库这一侧守的是**加工链路**的 fail closed：同步缺口、45 分钟未到审核态、通知/卡片错误、重复 `source_key`、轮询陈旧和队列积压，全部由 `GET /api/publish/monitoring` 如实上报（任一任务仍在 processing、通知仍 pending/sending、审核卡缺失或失败时 `ready=false`；进程存活不等于业务完成）。禁止删测、skip、降级或忽略故障来“修绿”。
+    **外检看门狗不在本仓库**（2026-08-06 迁往监控端 `FoodTalks_Feed`，服务名 `fbif-link-watchdog`）。原来住在这里的 `monitoring/watchdog.py` 每两分钟外检 layout/feed/official 三个服务，其中两个是上游；它配错了（3002 端口公网不通 + 三条探针统一发 `X-Publish-Sync-Token` 而 official 认自己的 `API_KEY`）连续失败 715 次无人处理——探针不该住在被探对象手里。本仓库**只提供被探端点，不主动探别人的死活**；部署链路里 `prepare-monitoring` 已改为幂等的 `cleanup_legacy_watchdog`，只负责把生产上残留的单元和 `/opt/fbif-monitor-watchdog` 摘干净，且回滚不恢复。不要在本仓库重建任何外检探针。
 
 31. **飞书云文档导入必须走异步作业 + 服务端批量镜像（2026-08-05 恢复上线）** — 交互式导入只走 `POST /api/feishu/docs/export/jobs` 加 long-poll `?after=<version>&wait_ms=`，服务端逐阶段上报真实 `done/total`（resolve→create→export_wait→download→optimize→image_enumerate→image_upload→image_map）；正文图必须在服务端一次 `base64_images` 批量镜像到 OSS，不得让浏览器逐张回源 `/api/doc-cache/*`。导出轮询 `250ms` 加递增退避，不得改回固定 `1s`。预览走 `preview-image-loader` 预解码加 `preview-dom` 离屏 staging 整帧提交，导入期间旧文章保持可见。**禁止**退回同步导出端点，或删除 `api/feishu_export_jobs.go`、`api/doc_image_mirror.go`、`public/js/preview-dom.js`、`public/js/preview-image-loader.js`、`public/js/feishu-doc-ready.js`、`public/js/import-progress.js`。
    **处理 merge 冲突不得整树取一侧**（如「树以本分支为准」），必须逐文件裁决，合并后核对 `git diff --diff-filter=D <父> <merge>` 无意外删除——上面这套体系连同守护测试就是被 `32e8dcd` 这样整树删掉的，测试一起消失所以 CI 不红。守护：`tests/e2e-preview-speed.spec.mjs`、`tests/e2e-feishu-import-progress.spec.mjs`、`api/feishu_export_jobs_test.go`、`tests/preview-dom.test.mjs`、`tests/preview-image-loader.test.mjs`、`tests/feishu-doc-ready.test.mjs`、`tests/import-progress.test.mjs`。
@@ -94,6 +113,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
    **例外**：`POST /api/html-to-blocks`（Bearer `RENDER_TOKEN`）不在此列——它是 HTML→Block 的纯转换工具，调用方 `FoodTalks_Feed` 排版的是自有资讯，根本不存在可抓的微信原文链接。它不创建发布任务。
 
 34. **审核卡四种形态都必须能认出是哪篇文章（2026-08-06 用户裁定）** — 待审核 / 已发布 / 已驳回 / 异常四张卡全部渲染 `reviewCardHeroBlock`：封面图、粗体标题、标签、摘要、`预览效果 · 公众号原文` 链接缺一不可。**不得**让终态卡退化成只有 `reviewCardInfoBlock`（来源/作者/时间 + 任务号两行灰字）——卡片在群里长期留存，是事后回看「到底发了什么」的唯一入口，压成一个编号等于信息归零。封面复用待审核时存下的 `publishJob.ReviewCoverImgKey`（卡片回调必须同步返回新卡，不能在回调里现传图片）；旧任务没有该值时退化为无封面单列，不留空图位。守护：`api/feishu_review_card_test.go`。
+   **改完卡片要把历史任务的卡也刷一遍**：已发出的卡不会自己变样，群里回看到的仍是旧信息。用 `POST /api/publish/jobs/{id}/card-refresh`（管理员或 `PUBLISH_ADMIN_SERVICE_TOKEN`，同步服务令牌不可用）；有 message_id 的群走原位更新，不刷屏。它与 `notification-replay` 分工不同：那个只救躺在 dead letter 里的失败通知，救不了「发成功但样式过期」。
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API

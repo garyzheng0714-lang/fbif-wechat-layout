@@ -46,7 +46,9 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
 - **飞书云文档导入走异步作业**：导出、剥图与图片镜像在服务端作业里完成，前端用 long-poll 拿真实阶段进度；正文图一次性批量镜像到 OSS，浏览器不再逐张回源。预览在离屏 staging 备齐并解码后整帧提交，导入期间旧文章保持可见。这套机制在 2026-08-05 曾被一次整树覆盖式合并误删，恢复后由 `tests/e2e-preview-speed.spec.mjs`、`tests/e2e-feishu-import-progress.spec.mjs` 与 `api/feishu_export_jobs_test.go` 守护。**未决**：真实飞书 API 往返与 10MB 级正文图批量镜像的生产耗时尚未实测（本地无飞书凭据，飞书接口 base URL 在服务端硬编码无注入点）；未排期，触发条件是下一次用真实多图文档做生产验收。
 - **程序化渲染**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 复用交互式编辑器的同一套解析、规则与渲染实现，支持 `fbif` 和 `ft-default`。
-- **受控发布流水线**：手动提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
+- **受控发布流水线**：提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`；只有飞书卡片或管理员审核的 `approve` 动作能翻公开。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
+- **上游只交链接（2026-08-06 起）**：上游 FBIF 资讯订阅（`FoodTalks_Feed`）只做监控——发现订阅源有更新，就把 `url` + `rule_pack_id` + 分类证据推过来，正文获取与排版全在本仓库。此前上游会连正文一起提交，导致流水线走 supplier 分支不再回源，抓取路径上的规则包解析选项与微信页面结构信号全部失效；生产任务 #72 因此产出 4.7 万字长文零小标题。同一篇原文实测：传正文 0 个小标题，只传链接 7 个。上游已于提交 `6fd97c83` 收敛并部署，本侧接口同步改为显式 400（红线 33）。
+- **审核卡可重出**：`POST /api/publish/jobs/{id}/card-refresh` 用当前代码重建卡片并投递。卡片改版后历史任务的卡不会自己变，这个端点让它们跟上；已记过 message_id 的群原位更新，群里不会多消息。
 - **编辑部规范数据化**：摘要、标签、作者和原创 / 转载判定已按历史发布样本沉淀为声明式规范与封闭标签词表。AI 只负责预填和出处抽取；完整评测仍在进行，且 FoodTalks 的标签 PUT 缺陷修复前不会把标签写入正式请求。
 - **发布状态边界**：测试环境已经完成隐藏草稿、审核卡片与状态机全链路验证；正式环境接入仍等待外部白名单和服务级凭证，不能把测试闭环写成正式生产已上线。
 - **部署门禁**：`main` 部署串行排队；完整 Node/Go 测试通过后，API、静态资源、render service、env schema、systemd 单元与 Caddy 全部先进入隔离 staging，再事务切换。候选监控在 worker 暂停时安装验证，解暂停后真实探测并发飞书自检；任一可回滚验收失败会恢复上一版。
@@ -214,8 +216,8 @@ curl http://127.0.0.1:9000/api/health
 | `PUT` | `/api/rules/admin/access-users/{id}` | 超级管理员授权/收回管理员角色；超级管理员只能通过 `RULE_SUPER_ADMIN_OPEN_IDS` 配置 |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
-| `POST` | `/api/publish/site-sync` | 供应商正文或公众号 URL 提交；机器调用需 `X-Publish-Sync-Token`、普通图文正向分类证据、有效 classifier version、至少 20 字可见正文且不得含活动 HTML，管理员仍可手工 URL 导入 |
-| `POST` | `/api/publish/official-sync` | 微信官方 API 正文提交；机器调用同样需要服务令牌、完整普通图文正文与 fail-closed 证据 |
+| `POST` | `/api/publish/site-sync` | **只接收文章链接**：`url` + 可选 `rule_pack_id` + 分类证据。带 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400（见下方红线）。机器调用需 `X-Publish-Sync-Token` 与普通图文正向分类证据、有效 classifier version |
+| `POST` | `/api/publish/official-sync` | 同样只接收链接，红线与判定同 site-sync；机器调用需要服务令牌与 fail-closed 证据 |
 | `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文 |
 | `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权。任一任务仍在 processing、审核通知仍 pending/sending、审核卡缺失或失败/对账积压时均 `ready=false`；进程存活不等于业务完成 |
 | `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员/超级管理员登录，或部署专用 `PUBLISH_ADMIN_SERVICE_TOKEN` |
@@ -224,6 +226,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/jobs/{id}/review` | HTTP 审核默认关闭；仅显式开启、管理员鉴权且固定审核人位于飞书白名单时可用。approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
 | `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员角色或部署专用服务令牌 |
+| `POST` | `/api/publish/jobs/{id}/card-refresh` | 用当前代码重出审核卡（卡片改版后让历史任务的卡跟上）。已记过 message_id 的群原位更新，不刷屏；旧任务缺封面 img_key 时刷新会补传一次。需管理员角色或部署专用服务令牌，同步服务令牌不可用 |
 | `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 

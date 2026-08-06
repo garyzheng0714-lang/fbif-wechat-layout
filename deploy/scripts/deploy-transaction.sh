@@ -34,10 +34,11 @@ CADDY_TARGET=/etc/caddy/sites/fbifmp-layout.caddy
 API_SERVICE_TARGET=/etc/systemd/system/fbif-api.service
 RENDER_SERVICE_TARGET=/etc/systemd/system/fbif-render.service
 CONFIG_SCHEMA_TARGET=/etc/fbif-layout/env-schema.json
-WATCHDOG_DIR=/opt/fbif-monitor-watchdog
-WATCHDOG_TARGET=$WATCHDOG_DIR/watchdog.py
-WATCHDOG_SERVICE_TARGET=/etc/systemd/system/fbif-monitor-watchdog.service
-WATCHDOG_TIMER_TARGET=/etc/systemd/system/fbif-monitor-watchdog.timer
+# 监控 watchdog 已于 2026-08-06 迁往监控端 FoodTalks_Feed（服务名 fbif-link-watchdog）。
+# 本项目只提供被探的健康端点 GET /api/publish/monitoring，不再安装、验收或回滚任何探针
+# ——它探的三个服务里有两个是上游，配错了也没人看得见（曾连续失败 715 次）。见 CLAUDE.md
+# 「三系统边界」第 3 条。旧的 /opt/fbif-monitor-watchdog 与两个 systemd 单元由本次部署的
+# cleanup_legacy_watchdog 从生产摘除。
 BACKUP_ROOT=/var/www/.fbif-layout-backups/$DEPLOY_ID
 HISTORY_ROOT=/var/www/.fbif-layout-history
 HISTORY_RETENTION=5
@@ -94,10 +95,7 @@ validate_release() {
     "$RELEASE_DIR/config/api.env.example" \
     "$RELEASE_DIR/config/publish.env.example" \
     "$RELEASE_DIR/config/render.env.example" \
-    "$RELEASE_DIR/validate-env.py" \
-    "$RELEASE_DIR/monitoring/watchdog.py" \
-    "$RELEASE_DIR/monitoring/fbif-monitor-watchdog.service" \
-    "$RELEASE_DIR/monitoring/fbif-monitor-watchdog.timer"; do
+    "$RELEASE_DIR/validate-env.py"; do
     [[ -e "$required" ]] || die "missing staged artifact: $required"
   done
   [[ -x "$RELEASE_DIR/api/fbif-api" ]] || die "staged API binary is not executable"
@@ -130,68 +128,33 @@ validate_release() {
   wait_http_ok http://127.0.0.1:19096/healthz 5
 }
 
-prepare_monitoring() {
+# cleanup_legacy_watchdog 把已迁出的 fbif-monitor-watchdog 从生产彻底摘除。
+#
+# 幂等：单元不存在就什么都不做，因此重复部署安全。它替代了原来的
+# prepare_monitoring/start_monitoring——那两步会安装探针、验收「timer 必须
+# enabled 且 active」，等于每次部署都把已经停用的 watchdog 重新拉起来。
+#
+# 只摘除，不恢复：回滚不会把它装回来。这是有意的——监控职责已归监控端，
+# 本项目回滚到旧产物也不该重新长出一个探别人死活的探针。
+cleanup_legacy_watchdog() {
   [[ -d "$BACKUP_ROOT" ]] || die "active transaction backup not found: $BACKUP_ROOT"
-  grep -qx 'DEPLOYMENT_WRITES_PAUSED=1' "$ENV_TARGET" ||
-    die "monitoring must be prepared while deployment writes remain paused"
-  [[ -r /var/www/api/publish.env ]] || die "publish.env is required by monitoring watchdog"
-  [[ ! -e "$(marker monitoring.prepared)" ]] || die "monitoring is already prepared"
 
-  # 先记录旧 timer 状态。候选单元在整个可回滚验收窗口内保持停用，
-  # 避免把预期的 worker paused 状态误报为生产事故。
-  if systemctl is-enabled --quiet fbif-monitor-watchdog.timer; then
-    touch "$(marker watchdog_timer.was_enabled)"
-  fi
-  if systemctl is-active --quiet fbif-monitor-watchdog.timer; then
-    touch "$(marker watchdog_timer.was_active)"
-    systemctl stop fbif-monitor-watchdog.timer
-  fi
-  if systemctl is-enabled --quiet fbif-monitor-watchdog.timer; then
-    systemctl disable fbif-monitor-watchdog.timer
-  fi
-  if systemctl is-active --quiet fbif-monitor-watchdog.service; then
-    systemctl stop fbif-monitor-watchdog.service
-  fi
-
-  install_file watchdog "$RELEASE_DIR/monitoring/watchdog.py" "$WATCHDOG_TARGET" 0755
-  install_file watchdog_service "$RELEASE_DIR/monitoring/fbif-monitor-watchdog.service" "$WATCHDOG_SERVICE_TARGET" 0644
-  install_file watchdog_timer "$RELEASE_DIR/monitoring/fbif-monitor-watchdog.timer" "$WATCHDOG_TIMER_TARGET" 0644
-
-  # compile() 只读候选脚本，不在 release 目录留 __pycache__。
-  python3 -c 'import pathlib,sys; path=pathlib.Path(sys.argv[1]); compile(path.read_bytes(), str(path), "exec")' "$WATCHDOG_TARGET"
-  systemctl daemon-reload
-  systemd-analyze verify "$WATCHDOG_SERVICE_TARGET" "$WATCHDOG_TIMER_TARGET"
-  systemctl disable fbif-monitor-watchdog.timer >/dev/null
-  systemctl stop fbif-monitor-watchdog.timer
-  ! systemctl is-enabled --quiet fbif-monitor-watchdog.timer || die "candidate watchdog timer must remain disabled"
-  ! systemctl is-active --quiet fbif-monitor-watchdog.timer || die "candidate watchdog timer must remain inactive"
-  rm -f -- "$WATCHDOG_DIR/deployment-check"
-  touch "$(marker monitoring.prepared)"
-}
-
-start_monitoring() {
-  [[ -d "$BACKUP_ROOT" ]] || die "active transaction backup not found: $BACKUP_ROOT"
-  [[ -e "$(marker monitoring.prepared)" ]] || die "monitoring has not been prepared"
-  grep -qx 'DEPLOYMENT_WRITES_PAUSED=0' "$ENV_TARGET" ||
-    die "monitoring may only start after deployment writes are unpaused"
-
-  # 先执行一次真实探测并发送明确的飞书部署自检消息；配置、网络、
-  # 探针健康或飞书上报任一失败，都不会 enable 定时器。
-  touch "$WATCHDOG_DIR/deployment-check"
+  systemctl stop fbif-monitor-watchdog.timer >/dev/null 2>&1 || true
+  systemctl stop fbif-monitor-watchdog.service >/dev/null 2>&1 || true
+  systemctl disable fbif-monitor-watchdog.timer >/dev/null 2>&1 || true
   systemctl reset-failed fbif-monitor-watchdog.service >/dev/null 2>&1 || true
-  systemctl start fbif-monitor-watchdog.service
-  local probe_status
-  probe_status=$(systemctl show --property=ExecMainStatus --value fbif-monitor-watchdog.service)
-  [[ "$probe_status" == "0" ]] || die "initial watchdog probe was not healthy: exit $probe_status"
-  rm -f -- "$WATCHDOG_DIR/deployment-check"
-  systemctl enable --now fbif-monitor-watchdog.timer
-  systemctl is-enabled --quiet fbif-monitor-watchdog.timer
-  systemctl is-active --quiet fbif-monitor-watchdog.timer
-  local next_trigger
-  next_trigger=$(systemctl show --property=NextElapseUSecMonotonic --value fbif-monitor-watchdog.timer)
-  [[ -n "$next_trigger" && "$next_trigger" != "infinity" ]] ||
-    die "watchdog timer is active but has no future trigger"
-  touch "$(marker monitoring.started)"
+  rm -f -- /etc/systemd/system/fbif-monitor-watchdog.service
+  rm -f -- /etc/systemd/system/fbif-monitor-watchdog.timer
+  rm -rf -- /opt/fbif-monitor-watchdog
+  systemctl daemon-reload
+
+  # 摘干净才算数：残留的 unit 会让后来者以为探针还在守着。
+  ! systemctl is-enabled --quiet fbif-monitor-watchdog.timer ||
+    die "legacy watchdog timer is still enabled after cleanup"
+  ! systemctl is-active --quiet fbif-monitor-watchdog.timer ||
+    die "legacy watchdog timer is still active after cleanup"
+
+  touch "$(marker monitoring.prepared)"
 }
 
 restore_path() {
@@ -222,13 +185,7 @@ rollback_impl() {
   set +e
   local failed=0
 
-  # 候选监控也是 live surface。先停掉它，再恢复脚本和单元文件。
-  systemctl stop fbif-monitor-watchdog.timer fbif-monitor-watchdog.service >/dev/null 2>&1 || true
-  systemctl disable fbif-monitor-watchdog.timer >/dev/null 2>&1 || true
-  rm -f -- "$WATCHDOG_DIR/deployment-check" || failed=1
-  restore_path watchdog "$WATCHDOG_TARGET" || failed=1
-  restore_path watchdog_service "$WATCHDOG_SERVICE_TARGET" || failed=1
-  restore_path watchdog_timer "$WATCHDOG_TIMER_TARGET" || failed=1
+  # 监控已迁往监控端，回滚不恢复 watchdog（见 cleanup_legacy_watchdog）。
   restore_path api_service "$API_SERVICE_TARGET" || failed=1
   restore_path render_service "$RENDER_SERVICE_TARGET" || failed=1
   restore_path render_env "$RENDER_ENV_TARGET" || failed=1
@@ -240,16 +197,6 @@ rollback_impl() {
   restore_path caddy "$CADDY_TARGET" || failed=1
 
   systemctl daemon-reload || failed=1
-  if [[ -e "$(marker watchdog_timer.was_enabled)" ]]; then
-    systemctl enable fbif-monitor-watchdog.timer || failed=1
-  elif [[ -e "$WATCHDOG_TIMER_TARGET" ]]; then
-    systemctl disable fbif-monitor-watchdog.timer >/dev/null || failed=1
-  fi
-  if [[ -e "$(marker watchdog_timer.was_active)" ]]; then
-    systemctl start fbif-monitor-watchdog.timer || failed=1
-  elif [[ -e "$WATCHDOG_TIMER_TARGET" ]]; then
-    systemctl stop fbif-monitor-watchdog.timer || failed=1
-  fi
 
   # 首次部署原本没有 vhost 时，restore_path 会删掉失败候选而不恢复任何文件。
   caddy validate --config /etc/caddy/Caddyfile >/dev/null || failed=1
@@ -364,17 +311,9 @@ unpause_release() {
 
 finalize_release() {
   [[ -d "$BACKUP_ROOT" ]] || die "active transaction backup not found: $BACKUP_ROOT"
-  [[ -e "$(marker monitoring.started)" ]] || die "monitoring did not complete its initial probe"
+  [[ -e "$(marker monitoring.prepared)" ]] || die "legacy watchdog cleanup did not run"
   grep -qx 'DEPLOYMENT_WRITES_PAUSED=0' "$ENV_TARGET" ||
     die "release cannot be finalized while deployment writes are paused"
-  systemctl is-enabled --quiet fbif-monitor-watchdog.timer ||
-    die "watchdog timer is not enabled"
-  systemctl is-active --quiet fbif-monitor-watchdog.timer ||
-    die "watchdog timer is not active"
-  local next_trigger
-  next_trigger=$(systemctl show --property=NextElapseUSecMonotonic --value fbif-monitor-watchdog.timer)
-  [[ -n "$next_trigger" && "$next_trigger" != "infinity" ]] ||
-    die "watchdog timer has no future trigger"
 
   # 历史目录是 root 操作的固定路径；不接受软链接或外部参数。
   [[ ! -L "$HISTORY_ROOT" ]] || die "history root must not be a symlink"
@@ -397,8 +336,7 @@ finalize_release() {
       "$history_pending/api" \
       "$history_pending/caddy" \
       "$history_pending/config" \
-      "$history_pending/systemd" \
-      "$history_pending/monitoring"
+      "$history_pending/systemd"
 
     # 只复制已验收的当前 live 产物。.env、publish.env 和任何其他
     # 明文密钥都不进历史目录。reflink 可用时使用 CoW，不可用时正常复制。
@@ -409,9 +347,6 @@ finalize_release() {
     cp -a --reflink=auto -- "$CONFIG_SCHEMA_TARGET" "$history_pending/config/env-schema.json"
     cp -a --reflink=auto -- "$API_SERVICE_TARGET" "$history_pending/systemd/fbif-api.service"
     cp -a --reflink=auto -- "$RENDER_SERVICE_TARGET" "$history_pending/systemd/fbif-render.service"
-    cp -a --reflink=auto -- "$WATCHDOG_TARGET" "$history_pending/monitoring/watchdog.py"
-    cp -a --reflink=auto -- "$WATCHDOG_SERVICE_TARGET" "$history_pending/systemd/fbif-monitor-watchdog.service"
-    cp -a --reflink=auto -- "$WATCHDOG_TIMER_TARGET" "$history_pending/systemd/fbif-monitor-watchdog.timer"
     printf 'deploy_id=%s\nfinalized_at=%s\n' "$DEPLOY_ID" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
       > "$history_pending/release.meta"
 
@@ -449,10 +384,7 @@ case "$ACTION" in
     unpause_release
     ;;
   prepare-monitoring)
-    prepare_monitoring
-    ;;
-  start-monitoring)
-    start_monitoring
+    cleanup_legacy_watchdog
     ;;
   rollback)
     if [[ -d "$BACKUP_ROOT" ]]; then
@@ -463,6 +395,6 @@ case "$ACTION" in
     finalize_release
     ;;
   *)
-    die "usage: $0 {preflight|activate|prepare-monitoring|unpause|start-monitoring|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
+    die "usage: $0 {preflight|activate|prepare-monitoring|unpause|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
     ;;
 esac

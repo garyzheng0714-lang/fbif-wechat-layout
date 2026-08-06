@@ -14,6 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 外检看门狗已于 2026-08-06 迁往监控端 FoodTalks_Feed（fbif-link-watchdog），
+  # 它的测试随之迁走。本仓库这一侧继续无 paths 过滤地守住加工链路的 P0 契约：
+  # 幂等 intake、审核卡 outbox、监控不变量与告警转发。
+  #
+  # ⚠️ job 名 backend-and-watchdog 是 main 分支保护的必需检查（required status
+  # check）之一，且 enforce_admins=true。改名会让那个检查永远不出现，PR 永久
+  # BLOCKED 且管理员也合不了——要改名必须同步更新分支保护配置。名字里的
+  # watchdog 已是历史，实际内容见上。
   backend-and-watchdog:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -38,9 +46,6 @@ jobs:
       - name: Race-test publishing contracts
         working-directory: api
         run: go test -race ./...
-
-      - name: Test independent watchdog and fault transitions
-        run: python3 -m unittest monitoring/test_watchdog.py
 
   frontend-contracts:
     runs-on: ubuntu-latest

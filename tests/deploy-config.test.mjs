@@ -37,7 +37,7 @@ test('versioned env schema validates every checked-in example without exposing v
   }
 });
 
-test('env schema covers every runtime environment variable referenced by API, renderer and watchdog', async () => {
+test('env schema covers every runtime environment variable referenced by API and renderer', async () => {
   const schema = JSON.parse(await text('deploy/config/env-schema.json'));
   const declared = new Set(Object.values(schema.groups).flatMap(group => Object.keys(group.variables)));
   const referenced = new Set();
@@ -58,8 +58,8 @@ test('env schema covers every runtime environment variable referenced by API, re
     const source = await text(filename);
     for (const match of source.matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) referenced.add(match[1]);
   }
-  const watchdog = await text('monitoring/watchdog.py');
-  for (const match of watchdog.matchAll(/os\.getenv\("([A-Z][A-Z0-9_]*)"/g)) referenced.add(match[1]);
+  // 外检看门狗已迁往监控端（CLAUDE.md 规则 30），它的环境变量归那边的 schema 管；
+  // 本仓库只声明 API 与渲染服务自己用到的变量。
 
   assert.deepEqual([...referenced].filter(name => !declared.has(name)).sort(), [],
     '新增运行环境变量时必须同步 schema');
