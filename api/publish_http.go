@@ -30,6 +30,52 @@ func requirePublishAdmin(w http.ResponseWriter, r *http.Request, auth *authServi
 	return false
 }
 
+// rejectedPublishContentFields 返回请求里出现的、发布入口一律拒绝的内容类字段名。
+//
+// 红线（2026-08-06 用户裁定）：对外发布接口**只接收文章链接**，`site-sync` 与
+// `official-sync` 同此一条，不留任何正文旁路。允许外部提交正文有两重代价：
+//
+//  1. 排版路径分叉。外部正文走 extractArticleBlocks（硬编码 defaultArticleBlockOptions），
+//     自抓正文走 extractArticleBlocksWithOptions + articleBlockOptionsForAccount——
+//     后者按账号规则包取图注阈值等参数，前者读不到。当前 rule_behavior.go 里这些
+//     参数的默认值恰好等于硬编码默认值，所以差异要等有人在后台调过参数才显形；
+//     但两条路径本身就不同，喂进来的还是官方 API 的二手 HTML（与网页版结构不同，
+//     靠字号判定的 hasHeadingFontSize 小标题识别是否等价，无样本可证）。
+//     用户报告的任务 #72 排版崩坏（长文零小标题、正文段落被排成灰色小字图注）
+//     即出自这条正文路径；具体崩在哪一步未经复现，故此处只陈述机制不断言成因。
+//  2. 内容可信度。外部可投递任意正文，而 publishContentRank 里 official_api/
+//     supplier 的优先级高于自抓的 web_fetch，投什么就发什么。
+//
+// 因此两个入口共用这一份判定（ADR 四层模型 L1：能力代码只此一份，杜绝复制漂移）。
+// 静默忽略比拒绝更危险：调用方会以为自己传的正文生效了。
+func rejectedPublishContentFields(contentHTML, title, sourceName, author, coverURL string) []string {
+	candidates := []struct {
+		name  string
+		value string
+	}{
+		{"content_html", contentHTML},
+		{"title", title},
+		{"source_name", sourceName},
+		{"author", author},
+		{"cover_url", coverURL},
+	}
+	var rejected []string
+	for _, c := range candidates {
+		if strings.TrimSpace(c.value) != "" {
+			rejected = append(rejected, c.name)
+		}
+	}
+	return rejected
+}
+
+// publishContentRejectionMessage 两个发布入口共用的拒绝文案：说清楚被挡的是哪些
+// 字段，以及正文究竟由谁负责——让调用方能自己改对，而不是来回猜。
+func publishContentRejectionMessage(rejected []string) string {
+	return fmt.Sprintf(
+		"本接口只接收文章链接，请移除 %s。正文、标题、来源、作者与封面一律由排版服务从原文现抓，"+
+			"外部提交的内容不会被采用。", strings.Join(rejected, "、"))
+}
+
 func publishAdminActor(r *http.Request, auth *authService) string {
 	if auth != nil {
 		if user, err := auth.requireFeishuUser(r); err == nil && strings.TrimSpace(user.FeishuOpenID) != "" {
@@ -163,19 +209,29 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			URL               string `json:"url"`
 			RulePackID        string `json:"rule_pack_id"`
 			RuleID            string `json:"rule_id,omitempty"` // 兼容监控方更短的字段名；内部统一为 rule_pack_id
-			Title             string `json:"title"`
-			SourceName        string `json:"source_name"`
-			Author            string `json:"author"`
-			ContentHTML       string `json:"content_html"`
-			CoverURL          string `json:"cover_url"`
 			ContentKind       string `json:"content_kind"`
 			Classification    string `json:"classification"`
 			ClassifierVersion string `json:"classifier_version"`
 			RerenderLatest    bool   `json:"rerender_latest"`
 			RefetchLatest     bool   `json:"refetch_latest"`
+
+			// 以下字段只为「显式拒绝」而保留，绝不参与排版（红线，见函数头注释）。
+			// 静默忽略比拒绝更危险：调用方会以为自己传的正文生效了。
+			ContentHTML string `json:"content_html"`
+			Title       string `json:"title"`
+			SourceName  string `json:"source_name"`
+			Author      string `json:"author"`
+			CoverURL    string `json:"cover_url"`
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&req); err != nil || req.URL == "" {
+		// 只收链接，正文入口关闭 → body 上限从 8MB 收到 64KB，超限即 400。
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil || req.URL == "" {
 			writeError(w, http.StatusBadRequest, "url is required")
+			return
+		}
+		if rejected := rejectedPublishContentFields(
+			req.ContentHTML, req.Title, req.SourceName, req.Author, req.CoverURL,
+		); len(rejected) > 0 {
+			writeError(w, http.StatusBadRequest, publishContentRejectionMessage(rejected))
 			return
 		}
 		rulePackID, ruleErr := normalizeSitePublishRulePackID(firstNonEmpty(req.RulePackID, req.RuleID))
@@ -185,28 +241,14 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		}
 		machineRequest := strings.TrimSpace(r.Header.Get(publishSyncServiceHeader)) != ""
 		if machineRequest {
-			if evidenceErr := validatePublishMachineEvidence(req.ContentKind, req.Classification, req.ClassifierVersion, req.ContentHTML); evidenceErr != nil {
+			// 正文入口已关闭，机器提交恒为 URL-only，证据校验不再看正文。
+			if evidenceErr := validatePublishMachineEvidence(req.ContentKind, req.Classification, req.ClassifierVersion, ""); evidenceErr != nil {
 				writeError(w, http.StatusUnprocessableEntity, evidenceErr.Error())
 				return
 			}
 		}
-		if req.RefetchLatest && strings.TrimSpace(req.ContentHTML) != "" {
-			writeError(w, http.StatusBadRequest, "refetch_latest 只能与 URL-only 提交一起使用")
-			return
-		}
-		var job publishJob
-		var created bool
-		var restarted bool
-		var err error
-		if strings.TrimSpace(req.ContentHTML) != "" {
-			job, created, restarted, err = p.submitSupplierWithRestartContext(r.Context(), officialPublishInput{
-				URL: req.URL, Title: req.Title, SourceName: req.SourceName,
-				Author: req.Author, ContentHTML: req.ContentHTML, CoverURL: req.CoverURL,
-				RulePackID: rulePackID, Classification: req.Classification, ClassifierVersion: req.ClassifierVersion,
-			})
-		} else {
-			job, created, err = p.submitWithRulePackAndMetadataContext(r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion)
-		}
+		job, created, err := p.submitWithRulePackAndMetadataContext(
+			r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -218,27 +260,22 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		}
 		rerendered := false
 		if (req.RerenderLatest || req.RefetchLatest) && !created {
-			if restarted {
-				// A changed structured payload already restarted this same job.
-				rerendered = true
-			} else {
-				rerenderPackID := rulePackID
-				if !explicitRulePack {
-					rerenderPackID = firstNonEmpty(job.RulePackID, sitePublishRulePackID)
-				}
-				if req.RefetchLatest {
-					job, err = p.refetchLatestWithRulePack(r.Context(), job.ID, rerenderPackID)
-				} else if !explicitRulePack {
-					job, err = p.rerenderLatest(job.ID)
-				} else {
-					job, err = p.rerenderLatestWithRulePack(job.ID, rerenderPackID)
-				}
-				if err != nil {
-					writeError(w, http.StatusConflict, err.Error())
-					return
-				}
-				rerendered = true
+			rerenderPackID := rulePackID
+			if !explicitRulePack {
+				rerenderPackID = firstNonEmpty(job.RulePackID, sitePublishRulePackID)
 			}
+			if req.RefetchLatest {
+				job, err = p.refetchLatestWithRulePack(r.Context(), job.ID, rerenderPackID)
+			} else if !explicitRulePack {
+				job, err = p.rerenderLatest(job.ID)
+			} else {
+				job, err = p.rerenderLatestWithRulePack(job.ID, rerenderPackID)
+			}
+			if err != nil {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
+			rerendered = true
 		}
 		if req.Classification != "" {
 			job, err = p.store.update(job.ID, func(current *publishJob) {
@@ -261,8 +298,13 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		})
 	})
 
-	// 微信官方 API 正文直入：不抓公众号网页，直接把官方返回的 HTML 转 blocks 后
-	// 进入 ft-default 排版、图片转存、风险检查和待审核草稿流程。
+	// 微信官方来源的已发布文章提交口。**只接收链接**（红线，见
+	// rejectedPublishContentFields）：正文由排版服务按 rule_pack_id 现抓现排，与
+	// 用户在网页工具粘链接完全同一条解析路径，杜绝二手 HTML 造成的排版失真。
+	//
+	// 与 site-sync 的唯一区别是身份证据：调用方已用官方草稿类型确认这是普通图文，
+	// 因此这里把 classification 钉成 ordinary_confirmed，防止小绿书/图集误投
+	// （红线 29 fail closed）。除此之外两个入口的排版行为必须一致。
 	mux.HandleFunc("POST /api/publish/official-sync", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
@@ -274,17 +316,30 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			URL               string `json:"url"`
 			RulePackID        string `json:"rule_pack_id"`
 			RuleID            string `json:"rule_id,omitempty"`
-			Title             string `json:"title"`
-			SourceName        string `json:"source_name"`
-			Author            string `json:"author"`
-			ContentHTML       string `json:"content_html"`
-			CoverURL          string `json:"cover_url"`
 			ContentKind       string `json:"content_kind"`
 			Classification    string `json:"classification"`
 			ClassifierVersion string `json:"classifier_version"`
+
+			// 以下字段只为「显式拒绝」而保留，绝不参与排版（红线）。
+			ContentHTML string `json:"content_html"`
+			Title       string `json:"title"`
+			SourceName  string `json:"source_name"`
+			Author      string `json:"author"`
+			CoverURL    string `json:"cover_url"`
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&req); err != nil {
+		// 只收链接，正文入口关闭 → body 上限从 8MB 收到 64KB，超限即 400。
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		if strings.TrimSpace(req.URL) == "" {
+			writeError(w, http.StatusBadRequest, "url is required")
+			return
+		}
+		if rejected := rejectedPublishContentFields(
+			req.ContentHTML, req.Title, req.SourceName, req.Author, req.CoverURL,
+		); len(rejected) > 0 {
+			writeError(w, http.StatusBadRequest, publishContentRejectionMessage(rejected))
 			return
 		}
 		rulePackID, ruleErr := normalizeSitePublishRulePackID(firstNonEmpty(req.RulePackID, req.RuleID))
@@ -294,16 +349,14 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		}
 		machineRequest := strings.TrimSpace(r.Header.Get(publishSyncServiceHeader)) != ""
 		if machineRequest {
-			if evidenceErr := validatePublishMachineEvidence(req.ContentKind, req.Classification, req.ClassifierVersion, req.ContentHTML); evidenceErr != nil {
+			// 正文入口已关闭，机器提交恒为 URL-only，证据校验不再看正文。
+			if evidenceErr := validatePublishMachineEvidence(req.ContentKind, req.Classification, req.ClassifierVersion, ""); evidenceErr != nil {
 				writeError(w, http.StatusUnprocessableEntity, evidenceErr.Error())
 				return
 			}
 		}
-		job, created, err := p.submitOfficialWithContext(r.Context(), officialPublishInput{
-			URL: req.URL, Title: req.Title, SourceName: req.SourceName,
-			Author: req.Author, ContentHTML: req.ContentHTML, CoverURL: req.CoverURL,
-			RulePackID: rulePackID, Classification: req.Classification, ClassifierVersion: req.ClassifierVersion,
-		})
+		job, created, err := p.submitWithRulePackAndMetadataContext(
+			r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

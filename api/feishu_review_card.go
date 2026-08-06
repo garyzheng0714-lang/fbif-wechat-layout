@@ -177,6 +177,11 @@ func buildReviewLifecycleProgressCard(job publishJob, action string) map[string]
 
 // buildReviewDoneCard 终态卡：按 job 当前终态渲染。approve → 绿「已发布」+ 查看文章；
 // reject → 红「已驳回」。底部一行操作留痕（person capsule + 动作 + 时间，规范 §6.4）。
+//
+// 终态卡与待审核卡共用 reviewCardHeroBlock：审核前能看到的封面、标题、标签、摘要、
+// 预览与原文链接，审核后必须一个不少。这张卡在群里会长期留存，是事后回看「发了什么」
+// 的唯一入口；只留来源/作者/时间和任务号，等于把一篇文章压成一个查不动的编号。
+// 封面用待审核时存下的 img_key（卡片回调要同步返回新卡，不能在这里现传图片）。
 func buildReviewDoneCard(job publishJob) map[string]any {
 	published := job.Stage == publishStagePublished
 	offline := job.Stage == publishStageOffline
@@ -184,7 +189,10 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 		"title": feishuPlainText(reviewCardHeaderTitle),
 	}
 	var actionLabel string
-	elements := []any{reviewCardInfoBlock(job)}
+	elements := []any{
+		reviewCardHeroBlock(job, strings.TrimSpace(job.ReviewCoverImgKey)),
+		reviewCardInfoBlock(job),
+	}
 	if published {
 		header["template"] = "green"
 		header["icon"] = map[string]any{"tag": "standard_icon", "token": "succeed_filled"}
@@ -307,11 +315,16 @@ func buildReviewIssueCard(job publishJob, uncertain bool) map[string]any {
 	header["text_tag_list"] = []any{map[string]any{
 		"tag": "text_tag", "text": feishuPlainText(status), "color": color,
 	}}
-	elements := []any{reviewCardInfoBlock(job), map[string]any{
-		"tag":       "markdown",
-		"text_size": "notation",
-		"content":   "<font color='grey'>处理说明</font>\n" + reviewCardSafeOrDash(job.Error, 600),
-	}}
+	// 异常卡同样长期留在群里，且往往需要有人接手排查——不能只留一个任务号，
+	// 让人无从判断是哪篇文章出的问题（与终态卡同口径）。
+	elements := []any{
+		reviewCardHeroBlock(job, strings.TrimSpace(job.ReviewCoverImgKey)),
+		reviewCardInfoBlock(job),
+		map[string]any{
+			"tag":       "markdown",
+			"text_size": "notation",
+			"content":   "<font color='grey'>处理说明</font>\n" + reviewCardSafeOrDash(job.Error, 600),
+		}}
 	elements = append(elements, map[string]any{
 		"tag":       "markdown",
 		"text_size": "notation",

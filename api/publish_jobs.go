@@ -154,6 +154,10 @@ type publishJob struct {
 	ReviewDeliveryAppID   string            `json:"review_delivery_app_id,omitempty"`
 	ReviewDeliveryChatIDs []string          `json:"review_delivery_chat_ids,omitempty"`
 	ReviewCardMsgIDs      map[string]string `json:"review_card_msg_ids,omitempty"`
+	// ReviewCoverImgKey 待审核卡上传封面时拿到的飞书 img_key。终态卡复用它，
+	// 才能在审核通过后仍然展示封面——卡片回调必须同步返回新卡，不能在那里
+	// 现走一次图片上传。旧任务没有这个值时终态卡自动退化为无封面单列。
+	ReviewCoverImgKey string `json:"review_cover_img_key,omitempty"`
 	CreatedAt             string            `json:"created_at"`
 	UpdatedAt             string            `json:"updated_at"`
 }

@@ -1574,8 +1574,19 @@ type officialPublishInput struct {
 	ClassifierVersion string
 }
 
-// submitOfficial 让微信公众号官方 API 返回的正文直接进入既有排版状态机。
-// HTML 只在进程内转成中立 blocks；任务从 rendering 开始，永不回源抓公众号网页。
+// ⚠️ 以下 submitOfficial* / submitSupplier* / submitStructuredContent 这条「外部
+// 投递正文」通道**已无生产调用方**，仅存单元测试。2026-08-06 用户裁定的红线是
+// 「对外发布接口只接收链接」，site-sync 与 official-sync 两个 HTTP 入口都已在
+// rejectedPublishContentFields 处把正文字段 400 挡掉。
+//
+// 不要把它接回任何 HTTP 入口。用户报告的任务 #72 排版崩坏（长文零小标题、正文段落
+// 被排成灰色图注）就出自这条通道：它用 extractArticleBlocks 解析外部投递的官方 API
+// HTML，与抓取路径的 extractArticleBlocksWithOptions + articleBlockOptionsForAccount
+// 不是同一条路；而 publishContentRank 里 official_api/supplier 的优先级又高于自抓的
+// web_fetch，投什么就发什么。（#72 具体崩在哪一步未复现——没有留存的原始正文样本。）
+//
+// 保留而非立即删除，是为了把这一轮改动面收窄到「关入口」；整条通道连同
+// officialPlainTextBlocks 的清理另行安排。
 func (p *publishPipeline) submitOfficial(input officialPublishInput) (publishJob, bool, error) {
 	return p.submitOfficialWithContext(context.Background(), input)
 }
