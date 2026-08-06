@@ -575,6 +575,28 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"job": job})
 	})
 
+	// 用当前代码重出审核卡。卡片改版后，历史任务的卡还停在旧样式上，群里回看
+	// 到的仍是旧信息；已记过 message_id 的群走原位更新，不会刷屏。
+	// 与 notification-replay 的分工见 refreshReviewCard 注释。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/card-refresh", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		job, err := p.refreshReviewCard(r.Context(), id)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "refreshed": true})
+	})
+
 	mux.HandleFunc("POST /api/publish/jobs/{id}/notification-replay", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {
 			return
