@@ -733,7 +733,7 @@ test('bindUrlImportShortcuts leaves other text inputs alone on paste', () => {
   assert.equal(fetched, 0);
 });
 
-test('bindUrlImportShortcuts puts pasted page text into the composer for explicit submit', () => {
+test('bindUrlImportShortcuts 在页面上粘贴正文，直接排版并回填导入框', () => {
   const documentHandlers = {};
   let imported = '';
   let fetched = 0;
@@ -769,9 +769,113 @@ test('bindUrlImportShortcuts puts pasted page text into the composer for explici
   });
 
   assert.equal(prevented, true);
-  assert.equal(imported, '');
+  assert.equal(imported, '这是一段正文,需要直接排版。');
   assert.equal(urlInput.value, '这是一段正文,需要直接排版。');
   assert.equal(fetched, 0);
+});
+
+// 「粘贴即排版」（2026-08-06 用户裁定）：链接和正文一视同仁，没有「导入排版」按钮。
+function mountImportShortcuts({ initialValue = '', shouldSubmitValue } = {}) {
+  const documentHandlers = {};
+  const inputHandlers = {};
+  const calls = { fetched: 0, imported: [], tried: [] };
+  const urlInput = {
+    value: initialValue,
+    tagName: 'TEXTAREA',
+    classList: { contains: () => false },
+    focus() {},
+    addEventListener(type, handler) { inputHandlers[type] = handler; },
+  };
+  const documentRef = {
+    activeElement: null,
+    getElementById(id) {
+      if (id === 'urlInput') return urlInput;
+      if (id === 'previewContent') return { style: { display: 'none' } };
+      return null;
+    },
+    addEventListener(type, handler) { documentHandlers[type] = handler; },
+    querySelectorAll() { return []; },
+  };
+  bindUrlImportShortcuts({
+    documentRef,
+    fetchArticle: () => { calls.fetched += 1; },
+    importText: text => { calls.imported.push(text); },
+    tryImportValue: value => {
+      if (!/feishu\.cn\/(docx|wiki)\//.test(value)) return false;
+      calls.tried.push(value);
+      return true;
+    },
+    shouldSubmitValue: shouldSubmitValue || (value => !value.trimStart().startsWith('@')),
+  });
+  return { documentHandlers, inputHandlers, urlInput, calls };
+}
+
+const nextTick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('bindUrlImportShortcuts 在输入框里粘贴单条链接立即排版，不用点导入按钮', async () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts();
+
+  urlInput.value = 'https://mp.weixin.qq.com/s/abcdef';
+  inputHandlers.paste({});
+  await nextTick();
+
+  assert.equal(calls.fetched, 1);
+  assert.deepEqual(calls.imported, []);
+});
+
+test('bindUrlImportShortcuts 页面上直接粘贴链接也立即排版', () => {
+  const { documentHandlers, urlInput, calls } = mountImportShortcuts();
+
+  documentHandlers.paste({
+    clipboardData: { getData: () => 'https://www.foodtalks.cn/news/62285' },
+    preventDefault() {},
+  });
+
+  assert.equal(urlInput.value, 'https://www.foodtalks.cn/news/62285');
+  assert.equal(calls.fetched, 1);
+});
+
+test('bindUrlImportShortcuts 粘贴飞书文档链接走飞书导入，同样不用点击', async () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts();
+
+  urlInput.value = 'https://xxx.feishu.cn/docx/AbCdEf123';
+  inputHandlers.paste({});
+  await nextTick();
+
+  assert.deepEqual(calls.tried, ['https://xxx.feishu.cn/docx/AbCdEf123']);
+  assert.equal(calls.fetched, 0);
+});
+
+test('bindUrlImportShortcuts 在输入框里粘贴正文同样直接排版', async () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts();
+
+  urlInput.value = '这是一段粘进来的正文。\n第二段。';
+  inputHandlers.paste({});
+  await nextTick();
+
+  assert.deepEqual(calls.imported, ['这是一段粘进来的正文。\n第二段。']);
+  assert.equal(calls.fetched, 0);
+});
+
+test('bindUrlImportShortcuts 追加粘贴按框里的最终全文重排', async () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts({ initialValue: '开头写了几句' });
+
+  urlInput.value = '开头写了几句\n又粘进来一段。';
+  inputHandlers.paste({});
+  await nextTick();
+
+  assert.deepEqual(calls.imported, ['开头写了几句\n又粘进来一段。']);
+  assert.equal(calls.fetched, 0);
+});
+
+test('bindUrlImportShortcuts 只把 @ 开头留给飞书文档搜索', async () => {
+  const mention = mountImportShortcuts();
+  mention.urlInput.value = '@https://mp.weixin.qq.com/s/abcdef';
+  mention.inputHandlers.paste({});
+  await nextTick();
+
+  assert.equal(mention.calls.fetched, 0);
+  assert.deepEqual(mention.calls.imported, []);
 });
 
 test('bindUrlImportShortcuts clears the rendered article when the import box is emptied', () => {

@@ -18,12 +18,18 @@ async function assertProgressInsideImportCard(file) {
   const html = await readPublic(file);
   const cardStart = html.indexOf('class="import-composer dropzone upload-zone"');
   const cardEnd = html.indexOf('<input type="file" id="fileInput">', cardStart);
-  const submitAt = html.indexOf('id="importSubmitBtn"', cardStart);
+  // 「导入排版」按钮已随「粘贴即排版」删除（2026-08-06）；动作行末尾的锚点改为状态文案。
+  const addonEndAt = html.indexOf('id="feishuDocCapability"', cardStart);
   const progressAt = html.indexOf('class="progress import-progress"', cardStart);
 
   assert.ok(cardStart >= 0, `${file} 应保留统一导入卡`);
   assert.ok(cardEnd > cardStart, `${file} 导入卡应以隐藏 file input 收尾`);
-  assert.ok(progressAt > submitAt, `${file} 进度应排在提交按钮之后`);
+  assert.ok(progressAt > addonEndAt, `${file} 进度应排在动作行之后`);
+  assert.doesNotMatch(
+    html.slice(cardStart, cardEnd),
+    /id="importSubmitBtn"/,
+    `${file} 不得恢复「导入排版」按钮——粘贴即排版是用户裁定的主路径`,
+  );
   assert.ok(
     progressAt < cardEnd,
     `${file} 进度必须在导入卡内部——它曾是卡外一块无圆角白底，用户已裁定不要`,

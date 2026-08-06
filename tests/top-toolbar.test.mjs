@@ -36,14 +36,16 @@ function assertUnifiedImportComposer(html, label) {
   const actionsStart = html.indexOf('<div class="import-composer-actions">', inputStart);
   const uploadStart = html.indexOf('data-upload-trigger', actionsStart);
   const feishuStart = html.indexOf('data-feishu-doc-trigger', uploadStart);
-  const submitStart = html.indexOf('id="importSubmitBtn"', feishuStart);
+  // 粘贴即排版（2026-08-06 用户裁定）：动作行末尾是状态文案，不再有提交按钮。
+  const capabilityStart = html.indexOf('id="feishuDocCapability"', feishuStart);
   const progressStart = html.indexOf('class="progress import-progress"', composerStart);
 
   assert.ok(cardStart >= 0, `${label} should keep one import card`);
   assert.ok(composerStart > cardStart && inputStart > composerStart, `${label} should use one unified import composer`);
   assert.ok(actionsStart > inputStart && uploadStart > actionsStart && feishuStart > uploadStart, `${label} upload and Feishu should be addon actions inside the same composer`);
-  assert.ok(submitStart > feishuStart && progressStart > submitStart, `${label} contextual submit and progress should remain inside the same task`);
-  assert.match(html.slice(actionsStart, submitStart), />上传文件<[\s\S]*?>飞书云文档</, `${label} should keep both import action labels expanded`);
+  assert.ok(capabilityStart > feishuStart && progressStart > capabilityStart, `${label} capability status and progress should remain inside the same task`);
+  assert.doesNotMatch(html, /id="importSubmitBtn"/, `${label} must not bring back the explicit import button`);
+  assert.match(html.slice(actionsStart, capabilityStart), />上传文件<[\s\S]*?>飞书云文档</, `${label} should keep both import action labels expanded`);
 }
 
 test('app global header keeps only page actions while the rail owns target and identity', async () => {

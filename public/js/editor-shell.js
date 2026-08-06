@@ -366,7 +366,6 @@ export function bindUrlImportShortcuts({
   tryImportValue = null,
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
-  const submitButton = documentRef.getElementById('importSubmitBtn');
 
   function submitImportValue(value) {
     const text = String(value || '').trim();
@@ -385,10 +384,12 @@ export function bindUrlImportShortcuts({
     return false;
   }
 
-  function syncSubmitButton() {
-    if (!submitButton || !urlInput) return;
-    const value = String(urlInput.value || '').trim();
-    submitButton.hidden = !value || !shouldSubmitValue(value);
+  // 粘贴即排版（2026-08-06 用户裁定）：链接和正文一视同仁，粘完直接出结果，
+  // 没有「导入排版」按钮这一步。追加粘贴按框里的最终全文重排；`@` 开头交给
+  // 飞书文档搜索（由 shouldSubmitValue 挡下）。手打输入仍可用 Cmd/Ctrl+Enter 提交。
+  function autoSubmitFromInput() {
+    if (!urlInput) return;
+    submitImportValue(urlInput.value);
   }
 
   if (focusTargetSelector && urlInput && typeof documentRef.querySelectorAll === 'function') {
@@ -420,13 +421,16 @@ export function bindUrlImportShortcuts({
     if (!text || !shouldSubmitValue(text)) return;
     event.preventDefault();
     urlInput.value = text;
-    syncSubmitButton();
     urlInput.focus();
+    submitImportValue(text);
   });
   if (!urlInput) return;
   urlInput.addEventListener('input', () => {
-    syncSubmitButton();
     if (!(urlInput.value || '').trim() && typeof onInputCleared === 'function') onInputCleared();
+  });
+  // paste 事件里 value 还是粘贴前的旧值，等一拍再按框内最终内容提交。
+  urlInput.addEventListener('paste', () => {
+    setTimeout(autoSubmitFromInput, 0);
   });
   urlInput.addEventListener('keydown', event => {
     const isMultiline = urlInput.tagName === 'TEXTAREA';
@@ -435,8 +439,6 @@ export function bindUrlImportShortcuts({
       submitImportValue(urlInput.value);
     }
   });
-  submitButton?.addEventListener('click', () => submitImportValue(urlInput.value));
-  syncSubmitButton();
 }
 
 // 复制后的「去后台粘贴」引导（概念 A：复制键就地变身 + 旁边内联出现后台入口）。
