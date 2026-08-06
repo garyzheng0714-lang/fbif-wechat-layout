@@ -1603,15 +1603,6 @@ func (p *publishPipeline) submitSupplierWithContext(ctx context.Context, input o
 	return p.submitStructuredContent(ctx, input, publishContentSupplier, nil)
 }
 
-func (p *publishPipeline) submitSupplierWithRestartContext(
-	ctx context.Context,
-	input officialPublishInput,
-) (publishJob, bool, bool, error) {
-	restarted := false
-	job, created, err := p.submitStructuredContent(ctx, input, publishContentSupplier, &restarted)
-	return job, created, restarted, err
-}
-
 func (p *publishPipeline) submitStructuredContent(
 	ctx context.Context,
 	input officialPublishInput,
