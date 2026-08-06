@@ -237,6 +237,14 @@ func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job
 			log.Printf("publish: WARN 封面转存飞书失败（卡片将不带图）: %v", err)
 		} else {
 			coverImgKey = key
+			// 记住 img_key，终态卡直接复用；存不下也只记日志，绝不阻塞发卡。
+			if updated, updateErr := p.store.update(job.ID, func(current *publishJob) {
+				current.ReviewCoverImgKey = key
+			}); updateErr != nil {
+				log.Printf("publish: WARN 保存审核卡封面 img_key 失败（终态卡将不带图）: %v", updateErr)
+			} else {
+				job = updated
+			}
 		}
 	}
 	card := buildReviewPendingCard(job, coverImgKey)

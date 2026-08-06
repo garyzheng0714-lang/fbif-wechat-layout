@@ -110,7 +110,7 @@ func TestPublishSyncServiceTokenHasLeastPrivilege(t *testing.T) {
 	mux := newPublishTestMux(t, env)
 
 	created := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
-		fmt.Sprintf(`{"url":%q,"title":"普通文章","content_html":"<p>这是足够长的普通公众号文章正文，用于验证最小权限提交。</p>","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"test-v1"}`, testPublishSourceURL))
+		fmt.Sprintf(`{"url":%q,"rule_pack_id":"ft-default","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"test-v1"}`, testPublishSourceURL))
 	if created.Code != http.StatusCreated {
 		t.Fatalf("同步服务凭证应能提交任务，实际 %d body=%s", created.Code, created.Body.String())
 	}
@@ -272,23 +272,45 @@ func TestPublishMachineSiteSyncFailsClosedWithoutOrdinaryEvidence(t *testing.T) 
 	}
 }
 
-func TestPublishMachineSiteSyncFailsClosedWithEmptyBody(t *testing.T) {
+// TestPublishSiteSyncRejectsCallerSuppliedContent 守红线：site-sync 只接收链接。
+// 允许外部提交正文，排版服务就会跳过自己的抓取器（微信小标题识别、图注关键词
+// 识别、导流尾剥离全在抓取路径上），产出零小标题、正文被排成灰色图注的成品。
+// 每个内容类字段都必须被单独挡住，且一律不建任务——静默忽略比拒绝更危险。
+func TestPublishSiteSyncRejectsCallerSuppliedContent(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
-	body := fmt.Sprintf(`{"url":%q,"content_html":"<p> </p>","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"test-v1"}`, testPublishSourceURL)
-	rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync", body)
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "non-empty") {
-		t.Fatalf("empty machine body must be held: status=%d body=%s", rec.Code, rec.Body.String())
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"content_html", "<p>这是调用方自己抓来的正文，本接口一律不收。</p>"},
+		{"title", "调用方给的标题"},
+		{"source_name", "调用方给的来源"},
+		{"author", "调用方给的作者"},
+		{"cover_url", "https://example.com/cover.jpg"},
+	} {
+		body, err := json.Marshal(map[string]string{
+			"url": testPublishSourceURL, "content_kind": "article",
+			"classification": "ordinary_confirmed", "classifier_version": "test-v1",
+			field.name: field.value,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync", string(body))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), field.name) {
+			t.Fatalf("字段 %s 应被显式拒绝: status=%d body=%s", field.name, rec.Code, rec.Body.String())
+		}
 	}
 	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
-		t.Fatalf("empty body request must not create a job: jobs=%d err=%v", len(jobs), err)
+		t.Fatalf("被拒请求不得建任务: jobs=%d err=%v", len(jobs), err)
 	}
 }
 
 func TestPublishMachineOfficialSyncFailsClosedWithoutOrdinaryEvidence(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
-	body := fmt.Sprintf(`{"url":%q,"title":"官方标题","content_html":"<p>这是足够长的官方普通文章正文内容。</p>"}`, testPublishSourceURL)
+	body := fmt.Sprintf(`{"url":%q}`, testPublishSourceURL)
 	rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/official-sync", body)
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "ordinary") {
 		t.Fatalf("official machine request without type evidence must be held: status=%d body=%s", rec.Code, rec.Body.String())
@@ -298,36 +320,38 @@ func TestPublishMachineOfficialSyncFailsClosedWithoutOrdinaryEvidence(t *testing
 	}
 }
 
-func TestPublishMachineSyncRejectsUnsafeActiveHTMLBeforeJobCreation(t *testing.T) {
+// TestPublishMachineSyncRejectsActiveHTMLAtTheDoor 正文入口关闭后，不安全活动 HTML
+// 不再需要「检查」——两个入口都在更前面把 content_html 整个字段 400 挡掉，攻击面
+// 从「内容过滤是否够严」降级成「根本收不到内容」。这是比过滤更强的保证，测试锁死它。
+func TestPublishMachineSyncRejectsActiveHTMLAtTheDoor(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
-	cases := []struct {
-		path string
-		html string
-	}{
-		{"/api/publish/site-sync", `<p>普通正文</p><iframe src="https://example.com/embed"></iframe>`},
-		{"/api/publish/official-sync", `<p onclick="publish()">普通正文</p>`},
-		{"/api/publish/official-sync", `<a href="javascript:alert(1)">普通正文链接</a>`},
+	paths := []string{"/api/publish/site-sync", "/api/publish/official-sync"}
+	payloads := []string{
+		`<p>普通正文</p><iframe src="https://example.com/embed"></iframe>`,
+		`<p onclick="publish()">普通正文</p>`,
+		`<a href="javascript:alert(1)">普通正文链接</a>`,
 	}
-	for index, tc := range cases {
-		body, err := json.Marshal(map[string]string{
-			"url":                fmt.Sprintf("https://mp.weixin.qq.com/s?__biz=MzUnsafe&mid=%d&idx=1", index+1),
-			"title":              "不安全正文",
-			"content_html":       tc.html,
-			"content_kind":       "article",
-			"classification":     "ordinary_confirmed",
-			"classifier_version": "test-v1",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		rec := doPublishServiceReq(mux, http.MethodPost, tc.path, string(body))
-		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "unsafe") {
-			t.Fatalf("unsafe machine HTML should be rejected: path=%s status=%d body=%s", tc.path, rec.Code, rec.Body.String())
+	for _, path := range paths {
+		for index, html := range payloads {
+			body, err := json.Marshal(map[string]string{
+				"url":                fmt.Sprintf("https://mp.weixin.qq.com/s?__biz=MzUnsafe&mid=%d&idx=1", index+1),
+				"content_html":       html,
+				"content_kind":       "article",
+				"classification":     "ordinary_confirmed",
+				"classifier_version": "test-v1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := doPublishServiceReq(mux, http.MethodPost, path, string(body))
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "content_html") {
+				t.Fatalf("正文字段应在入口被拒: path=%s status=%d body=%s", path, rec.Code, rec.Body.String())
+			}
 		}
 	}
 	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
-		t.Fatalf("unsafe machine HTML must not create jobs: jobs=%d err=%v", len(jobs), err)
+		t.Fatalf("被拒请求不得建任务: jobs=%d err=%v", len(jobs), err)
 	}
 }
 
@@ -349,25 +373,19 @@ func TestPublishHTTPReviewDisabledByDefault(t *testing.T) {
 	}
 }
 
-// TestPublishOfficialSyncUsesOfficialContent 官方 API 正文直入必须跳过网页 fetch，
-// 同时复用原有排版、图片转存、草稿进站与永久幂等链路。
-func TestPublishOfficialSyncUsesOfficialContent(t *testing.T) {
+// TestPublishOfficialSyncFetchesFromURL official-sync 与 site-sync 排版行为必须一致：
+// 都只收链接、都由排版服务自己抓原文（规则包因此生效），差异只剩 classification 证据。
+// 这是任务 #72 的回归锁：当时 official-sync 收调用方正文并走另一条解析路径，产出了
+// 用户报告的零小标题、正文变灰色图注的成品。断言 fetchCalls==1 是这条锁的核心——
+// 只要有人把正文旁路接回去，任务就会重新变成「不抓原文」，这里立刻红。
+func TestPublishOfficialSyncFetchesFromURL(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
-	body, err := json.Marshal(map[string]string{
-		"url":          testPublishSourceURL,
-		"title":        "官方接口标题",
-		"source_name":  "FBIF食品饮料创新",
-		"author":       "官方作者",
-		"content_html": `<p>官方 API 正文</p><img src="https://mmbiz.qpic.cn/a.jpg"><img src="https://mmbiz.qpic.cn/b.jpg">`,
-		"cover_url":    "https://mmbiz.qpic.cn/a.jpg",
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	first := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", string(body), true)
+	body := fmt.Sprintf(`{"url":%q}`, testPublishSourceURL)
+
+	first := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", body, true)
 	if first.Code != http.StatusCreated {
-		t.Fatalf("首次官方正文提交应 201，实际 %d body=%s", first.Code, first.Body.String())
+		t.Fatalf("首次提交应 201，实际 %d body=%s", first.Code, first.Body.String())
 	}
 	var response struct {
 		Job      publishJob `json:"job"`
@@ -376,103 +394,88 @@ func TestPublishOfficialSyncUsesOfficialContent(t *testing.T) {
 	if err := json.Unmarshal(first.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if env.fetchCalls != 0 {
-		t.Fatalf("官方正文直入不得抓公众号网页，实际 fetch=%d", env.fetchCalls)
+	if env.fetchCalls != 1 {
+		t.Fatalf("official-sync 必须自己抓原文，实际 fetch=%d", env.fetchCalls)
 	}
 	job, err := env.store.byID(response.Job.ID)
 	if err != nil {
 		t.Fatalf("byID: %v", err)
 	}
-	if job.Stage != publishStageAwaitingReview || job.Title != "官方接口标题" || job.SourceName != "FBIF食品饮料创新" || job.Author != "官方作者" {
-		t.Fatalf("官方正文任务字段/阶段不符: stage=%q title=%q source=%q author=%q", job.Stage, job.Title, job.SourceName, job.Author)
+	// 标题/来源来自抓取结果（mock fetch），不是调用方投递的字面量。
+	if job.Stage != publishStageAwaitingReview || job.Title != "测试标题" || job.SourceName != "测试公众号" {
+		t.Fatalf("任务字段应来自抓取: stage=%q title=%q source=%q", job.Stage, job.Title, job.SourceName)
+	}
+	if job.Classification != "ordinary_confirmed" {
+		t.Fatalf("official-sync 必须钉死普通图文证据，实际 classification=%q", job.Classification)
 	}
 	if strings.TrimSpace(job.BlocksJSON) == "" {
-		t.Fatalf("官方 HTML 应先持久化为 blocks")
+		t.Fatalf("抓取结果应持久化为 blocks")
 	}
 	if createN, updateN := env.ft.counts(); createN != 1 || updateN != 0 {
 		t.Fatalf("自动流程只能创建一份待审草稿，实际 create=%d update=%d", createN, updateN)
 	}
 
-	second := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", string(body), true)
+	second := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", body, true)
 	if second.Code != http.StatusOK {
-		t.Fatalf("重复官方正文提交应 200，实际 %d body=%s", second.Code, second.Body.String())
+		t.Fatalf("重复提交应 200，实际 %d body=%s", second.Code, second.Body.String())
 	}
 	if createN, _ := env.ft.counts(); createN != 1 {
 		t.Fatalf("同文重复提交不得重复建稿，实际 create=%d", createN)
 	}
 }
 
-func TestPublishOfficialSyncAcceptsOfficialPlainText(t *testing.T) {
+// TestPublishOfficialSyncRejectsCallerSuppliedContent official-sync 与 site-sync
+// 共用同一条拒绝规则，逐字段验证——静默忽略会让调用方以为自己传的正文生效了。
+func TestPublishOfficialSyncRejectsCallerSuppliedContent(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPublishTestMux(t, env)
-	body, err := json.Marshal(map[string]string{
-		"url":          "https://mp.weixin.qq.com/s?__biz=MzPlainText&mid=101&idx=1&sn=plain",
-		"title":        "官方纯文本快讯",
-		"source_name":  "FBIF食品饮料创新",
-		"content_html": "第一段官方正文。\n\n第二段官方正文。\n\n参考来源：官方公告",
-		"cover_url":    "https://mmbiz.qpic.cn/a.jpg",
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"content_html", "<p>这是调用方自己抓来的正文，本接口一律不收。</p>"},
+		{"title", "调用方给的标题"},
+		{"source_name", "调用方给的来源"},
+		{"author", "调用方给的作者"},
+		{"cover_url", "https://example.com/cover.jpg"},
+	} {
+		body, err := json.Marshal(map[string]string{
+			"url": testPublishSourceURL, "content_kind": "article",
+			"classification": "ordinary_confirmed", "classifier_version": "test-v1",
+			field.name: field.value,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := doPublishServiceReq(mux, http.MethodPost, "/api/publish/official-sync", string(body))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), field.name) {
+			t.Fatalf("字段 %s 应被显式拒绝: status=%d body=%s", field.name, rec.Code, rec.Body.String())
+		}
 	}
-	rec := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", string(body), true)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("官方纯文本提交应 201，实际 %d body=%s", rec.Code, rec.Body.String())
+	if env.fetchCalls != 0 {
+		t.Fatalf("被拒请求不得触发抓取: fetch=%d", env.fetchCalls)
 	}
-	var response struct {
-		Job publishJob `json:"job"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	job, err := env.store.byID(response.Job.ID)
-	if err != nil {
-		t.Fatalf("byID: %v", err)
-	}
-	if env.fetchCalls != 0 || job.Stage != publishStageAwaitingReview {
-		t.Fatalf("纯文本官方正文应跳过网页抓取并进入待审：fetch=%d stage=%q", env.fetchCalls, job.Stage)
-	}
-	var blocks []Block
-	if err := json.Unmarshal([]byte(job.BlocksJSON), &blocks); err != nil {
-		t.Fatalf("decode blocks: %v", err)
-	}
-	if len(blocks) != 3 || blocks[0].Text != "第一段官方正文。" || !blocks[1].BlankBefore {
-		t.Fatalf("纯文本段落转换不符：%+v", blocks)
+	if jobs, err := env.store.all(); err != nil || len(jobs) != 0 {
+		t.Fatalf("被拒请求不得建任务: jobs=%d err=%v", len(jobs), err)
 	}
 }
 
-func TestPublishOfficialSyncAcceptsPlainTextWithInlineLinks(t *testing.T) {
-	env := newPublishTestEnv(t)
-	mux := newPublishTestMux(t, env)
-	body, err := json.Marshal(map[string]string{
-		"url":          "https://mp.weixin.qq.com/s?__biz=MzPlainText&mid=102&idx=1&sn=links",
-		"title":        "官方纯文本带链接快讯",
-		"source_name":  "FBIF食品饮料创新",
-		"content_html": "第一段官方正文。\n\n更多阅读：\n<a href=\"https://mp.weixin.qq.com/s/related\">相关历史文章</a>",
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+// TestOfficialPlainTextBlocks 纯文本正文的段落/空行/行内链接转换。
+//
+// 曾经挂在 official-sync 的 HTTP 正文入口上验证。入口按红线关闭后，覆盖下沉到
+// officialPlainTextBlocks 函数本身：不再给已废除的 HTTP 契约背书，同时保住这段
+// 转换逻辑的行为覆盖。注意该函数当前已无生产调用方（见 submitStructuredContent
+// 的死代码待清理说明），这份测试只锁行为，不代表入口还在。
+func TestOfficialPlainTextBlocks(t *testing.T) {
+	blocks := officialPlainTextBlocks("第一段官方正文。\n\n第二段官方正文。\n\n参考来源：官方公告")
+	if len(blocks) != 3 || blocks[0].Text != "第一段官方正文。" || !blocks[1].BlankBefore {
+		t.Fatalf("纯文本段落转换不符：%+v", blocks)
 	}
-	rec := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", string(body), true)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("带行内链接的官方纯文本提交应 201，实际 %d body=%s", rec.Code, rec.Body.String())
-	}
-	var response struct {
-		Job publishJob `json:"job"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	job, err := env.store.byID(response.Job.ID)
-	if err != nil {
-		t.Fatalf("byID: %v", err)
-	}
-	var blocks []Block
-	if err := json.Unmarshal([]byte(job.BlocksJSON), &blocks); err != nil {
-		t.Fatalf("decode blocks: %v", err)
-	}
-	if len(blocks) != 3 || blocks[2].Runs[0].Type != "link" || blocks[2].Runs[0].Text != "相关历史文章" {
-		t.Fatalf("带行内链接的纯文本段落转换不符：%+v", blocks)
+
+	linked := officialPlainTextBlocks(
+		"第一段官方正文。\n\n更多阅读：\n<a href=\"https://mp.weixin.qq.com/s/related\">相关历史文章</a>")
+	if len(linked) != 3 || linked[2].Runs[0].Type != "link" || linked[2].Runs[0].Text != "相关历史文章" {
+		t.Fatalf("带行内链接的纯文本段落转换不符：%+v", linked)
 	}
 }
 
@@ -538,10 +541,7 @@ func TestPublishSiteSyncRerenderLatestReusesExistingDraft(t *testing.T) {
 		return successfulPublishRenderResult(html, rule), nil
 	}
 
-	body := fmt.Sprintf(
-		`{"url":%q,"title":"重新排版测试","content_html":"<p>这是足够长的结构化正文，用于验证同一草稿按最新规则重排。</p><p><img src=\"https://mmbiz.qpic.cn/rerender-cover.jpg\"></p>"}`,
-		testPublishSourceURL,
-	)
+	body := fmt.Sprintf(`{"url":%q}`, testPublishSourceURL)
 	first := doPublishReq(mux, http.MethodPost, "/api/publish/site-sync", body, true)
 	if first.Code != http.StatusCreated {
 		t.Fatalf("首次提交应 201，实际 %d body=%s", first.Code, first.Body.String())

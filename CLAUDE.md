@@ -88,6 +88,13 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 32. **粘贴即排版，导入卡没有提交按钮（2026-08-06 用户裁定）** — 往导入框粘贴内容，`bindUrlImportShortcuts` 立即按框里的**最终全文**提交：链接（含飞书文档链接，走 `tryImportValue`）和正文/Markdown 一视同仁，追加粘贴则整篇重排。唯一不自动的是 `@` 开头的飞书文档搜索（由 `shouldSubmitValue` 挡下）。`#importSubmitBtn` / `.import-submit-button` 已删除，**不得恢复**；动作行末尾只留状态文案 `粘贴后自动排版`。删按钮后手打输入的键盘出口是 `Cmd/Ctrl+Enter`（design.md 否决项：键盘必须能完成核心操作），改导入卡时不得连它一起删。这条行为原本就是自动的，在 `a9bd5d1`「polish rail import composer」改版时被换成必须点击的按钮，不得重复该退化。守护：`tests/editor-shell.test.mjs`、`tests/top-toolbar.test.mjs`、`tests/import-progress-component.test.mjs`、`tests/e2e-paste-autoformat.spec.mjs`。
 
+33. **对外发布接口只接收链接（2026-08-06 用户裁定，红线）** — `POST /api/publish/site-sync` 与 `POST /api/publish/official-sync` **只收 `url`**，正文由排版服务自己从原文现抓，走与网页工具粘链接完全同一条解析路径。`content_html` / `title` / `source_name` / `author` / `cover_url` 五个字段一律 **400 显式拒绝**（不是静默忽略——调用方会以为自己传的正文生效了），body 上限 `64KB`，判定共用 `rejectedPublishContentFields` 一份，不得复制第二份。两个入口的差异只剩类型证据：official-sync 把 `classification` 钉成 `ordinary_confirmed`（调用方已用官方 `article_type=news` 确认），防小绿书/图集误投。
+   **不得把正文旁路接回任何 HTTP 入口**：`submitStructuredContent` / `submitOfficial*` / `submitSupplier*` / `officialPlainTextBlocks` 已无生产调用方，只余单测；`publishContentRank` 里 `official_api`/`supplier` 优先级高于自抓的 `web_fetch`，接回去就是「投什么发什么」。用户报告的任务 #72 排版崩坏（长文零小标题、正文段落被排成灰色小字图注）即出自该通道（具体崩在哪一步未复现，无留存样本，**不要在文档里把成因写死**）。
+   **机器提交鉴权是 `X-Publish-Sync-Token`**；`X-Admin-Password` 自 `f591217`（2026-08-04 会话角色改造）起已不被认，调用方 `fbif-wechat-article-official-api` 需配 `LAYOUT_SYNC_TOKEN`（= 本服务 `PUBLISH_SYNC_SERVICE_TOKEN`），旧的 `LAYOUT_ADMIN_PASSWORD` 已废弃。守护：`tests` 侧见 `api/publish_http_test.go` 的 `TestPublishOfficialSyncFetchesFromURL`（断言 `fetchCalls==1`，正文旁路一接回就红）、`TestPublishOfficialSyncRejectsCallerSuppliedContent`、`TestPublishSiteSyncRejectsCallerSuppliedContent`、`TestPublishMachineSyncRejectsActiveHTMLAtTheDoor`。
+   **例外**：`POST /api/html-to-blocks`（Bearer `RENDER_TOKEN`）不在此列——它是 HTML→Block 的纯转换工具，调用方 `FoodTalks_Feed` 排版的是自有资讯，根本不存在可抓的微信原文链接。它不创建发布任务。
+
+34. **审核卡四种形态都必须能认出是哪篇文章（2026-08-06 用户裁定）** — 待审核 / 已发布 / 已驳回 / 异常四张卡全部渲染 `reviewCardHeroBlock`：封面图、粗体标题、标签、摘要、`预览效果 · 公众号原文` 链接缺一不可。**不得**让终态卡退化成只有 `reviewCardInfoBlock`（来源/作者/时间 + 任务号两行灰字）——卡片在群里长期留存，是事后回看「到底发了什么」的唯一入口，压成一个编号等于信息归零。封面复用待审核时存下的 `publishJob.ReviewCoverImgKey`（卡片回调必须同步返回新卡，不能在回调里现传图片）；旧任务没有该值时退化为无封面单列，不留空图位。守护：`api/feishu_review_card_test.go`。
+
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
