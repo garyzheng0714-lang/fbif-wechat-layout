@@ -40,7 +40,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
    **导入进度是导入卡内部的状态行（2026-08-05 用户裁定）**：`#progress` 必须留在 `#dropZone` 内、排在提交按钮之后，背景透明由卡片提供白底，`14px` 水平内边距与输入框及动作按钮对齐；形态是 `3px` 细条 + 「状态文案 / 百分比」状态行，不确定态隐藏百分比。禁止恢复卡外那块自带 `--fs-bg-card` 的无圆角白底和满宽粗条。外壳侧写进度只能经 `engine.js` 的 `setShellProgress`（条宽、`aria-valuenow`、可见百分比必须一起更新），且快阶段不得先冲到 95% 以上。守护：`tests/import-progress-component.test.mjs`、`tests/e2e-progress-component.spec.mjs`。
    **已知取舍**：收起左栏会同时收走排版目标与登录身份，需要时展开左栏；不要为此在顶栏另做一份只读副本。
 3. **规则服务端保存 + 本地降级** — 参数预设和 `behavior` 行为配置以服务器 `/api/rules/*` 为准，localStorage 只作为兼容与离线降级；不要再新增 `/api/config/*` 这类平行规则入口
-4. **页面级动作在顶部工具栏** — 预览区下方不放操作按钮条。左栏导入卡里的「导入排版」和左栏底部的身份栏不在此列：前者是贴着输入框的就地提交，后者不是动作条。
+4. **页面级动作在顶部工具栏** — 预览区下方不放操作按钮条。左栏底部的身份栏不在此列，它不是动作条。导入卡里没有提交按钮（见规则 32）。
 5. **不要 TOC/目录** — 已删除
 6. **底部栏复刻微信** — 白底，分隔线不贯穿（max-width 680px 居中），图标颜色 #7F7F7F
 7. **文章标题左对齐** — 在文章正上方，27px 粗体
@@ -85,6 +85,8 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 31. **飞书云文档导入必须走异步作业 + 服务端批量镜像（2026-08-05 恢复上线）** — 交互式导入只走 `POST /api/feishu/docs/export/jobs` 加 long-poll `?after=<version>&wait_ms=`，服务端逐阶段上报真实 `done/total`（resolve→create→export_wait→download→optimize→image_enumerate→image_upload→image_map）；正文图必须在服务端一次 `base64_images` 批量镜像到 OSS，不得让浏览器逐张回源 `/api/doc-cache/*`。导出轮询 `250ms` 加递增退避，不得改回固定 `1s`。预览走 `preview-image-loader` 预解码加 `preview-dom` 离屏 staging 整帧提交，导入期间旧文章保持可见。**禁止**退回同步导出端点，或删除 `api/feishu_export_jobs.go`、`api/doc_image_mirror.go`、`public/js/preview-dom.js`、`public/js/preview-image-loader.js`、`public/js/feishu-doc-ready.js`、`public/js/import-progress.js`。
    **处理 merge 冲突不得整树取一侧**（如「树以本分支为准」），必须逐文件裁决，合并后核对 `git diff --diff-filter=D <父> <merge>` 无意外删除——上面这套体系连同守护测试就是被 `32e8dcd` 这样整树删掉的，测试一起消失所以 CI 不红。守护：`tests/e2e-preview-speed.spec.mjs`、`tests/e2e-feishu-import-progress.spec.mjs`、`api/feishu_export_jobs_test.go`、`tests/preview-dom.test.mjs`、`tests/preview-image-loader.test.mjs`、`tests/feishu-doc-ready.test.mjs`、`tests/import-progress.test.mjs`。
+
+32. **粘贴即排版，导入卡没有提交按钮（2026-08-06 用户裁定）** — 往导入框粘贴内容，`bindUrlImportShortcuts` 立即按框里的**最终全文**提交：链接（含飞书文档链接，走 `tryImportValue`）和正文/Markdown 一视同仁，追加粘贴则整篇重排。唯一不自动的是 `@` 开头的飞书文档搜索（由 `shouldSubmitValue` 挡下）。`#importSubmitBtn` / `.import-submit-button` 已删除，**不得恢复**；动作行末尾只留状态文案 `粘贴后自动排版`。删按钮后手打输入的键盘出口是 `Cmd/Ctrl+Enter`（design.md 否决项：键盘必须能完成核心操作），改导入卡时不得连它一起删。这条行为原本就是自动的，在 `a9bd5d1`「polish rail import composer」改版时被换成必须点击的按钮，不得重复该退化。守护：`tests/editor-shell.test.mjs`、`tests/top-toolbar.test.mjs`、`tests/import-progress-component.test.mjs`、`tests/e2e-paste-autoformat.spec.mjs`。
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API

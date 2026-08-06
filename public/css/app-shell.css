@@ -577,10 +577,6 @@ body.is-resizing-rail .rail { transition: none; }
   flex: 1 1 auto;
   min-width: 4px;
 }
-/* 状态文案和「导入排版」互斥：有可提交内容时让位给主按钮，一行只留一个结论。 */
-.import-composer-addon:has(.import-submit-button:not([hidden])) .import-capability-status {
-  display: none;
-}
 /* 排版目标住在导入卡第一行：工具贴着它作用的对象（这一次导入去哪个账号）。 */
 .import-destination {
   flex: 0 0 auto;
@@ -654,7 +650,7 @@ body.is-resizing-rail .rail { transition: none; }
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-/* 两个次要入口常驻浅灰底：它们要看起来可点，但绝不与蓝色「导入排版」争主角。 */
+/* 两个次要入口常驻浅灰底：它们要看起来可点，但主路径是粘贴即排版，不做视觉主角。 */
 .import-action-button {
   flex: 0 0 auto;
   height: 30px;
@@ -718,38 +714,6 @@ body.is-resizing-rail .rail { transition: none; }
 }
 .import-at-icon {
   font-family: Arial, sans-serif;
-}
-.import-submit-button[hidden] {
-  display: none;
-}
-.import-submit-button {
-  flex: 0 0 auto;
-  height: 30px;
-  padding: 0 14px;
-  display: inline-flex;
-  align-items: center;
-  border: 0;
-  border-radius: var(--fs-r-s);
-  background: var(--fs-brand);
-  color: var(--fs-brand-on);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background var(--fs-t-fast) var(--fs-ease-out), transform var(--fs-t-fast) var(--fs-ease-out);
-}
-.import-submit-button:hover {
-  background: var(--fs-brand-hover);
-}
-.import-submit-button:active {
-  background: var(--fs-brand-active);
-  transform: translateY(1px);
-}
-.import-submit-button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--fs-bg-card), 0 0 0 4px var(--fs-brand);
 }
 .dropzone-drag-prompt {
   display: none;
