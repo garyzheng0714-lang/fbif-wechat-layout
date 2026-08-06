@@ -158,8 +158,8 @@ type publishJob struct {
 	// 才能在审核通过后仍然展示封面——卡片回调必须同步返回新卡，不能在那里
 	// 现走一次图片上传。旧任务没有这个值时终态卡自动退化为无封面单列。
 	ReviewCoverImgKey string `json:"review_cover_img_key,omitempty"`
-	CreatedAt             string            `json:"created_at"`
-	UpdatedAt             string            `json:"updated_at"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 // terminal 终态判定：published / rejected 之后任务盖棺；failed 不算终态（可 retry 续跑），
