@@ -890,15 +890,20 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 	if newsID > 0 {
 		// 幂等锚点已回填：全量覆盖更新既有草稿，绝不重复 CreateNews
 		//（网站无删除接口，重复创建即垃圾数据）。
+		if guardErr := publishStagingTargetMismatch(job); guardErr != nil {
+			return guardErr
+		}
 		news.ID = newsID
 		if err := ft.UpdateNews(ctx, news); err != nil {
 			return err
 		}
+		stagedTarget := currentFoodTalksTarget()
 		updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 			return current.Stage == publishStageStaging && current.ContentVersion == job.ContentVersion &&
 				current.ContentFrozenVersion == job.ContentVersion
 		}, func(j *publishJob) {
 			j.Stage = publishStageAwaitingReview
+			j.StagingTarget = stagedTarget
 			j.FailedStage = ""
 			j.Error = ""
 			if j.PendingContentHash == "" {
@@ -964,10 +969,12 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		}
 		return fmt.Errorf("%w：%s", errStagingOutcomeUncertain, msg)
 	}
+	createdTarget := currentFoodTalksTarget()
 	updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageStagingCreating && current.StagingIntentKey == intentKey && current.FoodTalksNewsID == 0
 	}, func(j *publishJob) {
 		j.FoodTalksNewsID = newsID
+		j.StagingTarget = createdTarget
 		j.Stage = publishStageAwaitingReview
 		j.FailedStage = ""
 		j.Error = ""
@@ -996,6 +1003,9 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 	}
 	if !validPersistedPublishApproval(job) {
 		return errors.New("公开授权无效：缺少 approve/reviewed_at，或审核的风险版本已变化")
+	}
+	if guardErr := publishStagingTargetMismatch(job); guardErr != nil {
+		return guardErr
 	}
 	ft, err := p.foodTalks()
 	if err != nil {
@@ -1151,6 +1161,7 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 				return false
 			}
 			return current.Stage == publishStageAwaitingReview && current.FoodTalksNewsID > 0 &&
+				publishStagingTargetMismatch(current) == nil &&
 				publishRiskAllowsManualApprove(current.RiskLevel) && currentVersion != "" &&
 				publishContentVersionReadyForReview(current)
 		}, func(j *publishJob) {
@@ -1171,6 +1182,9 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 		if !swapped {
 			if versionMismatch {
 				return job, errors.New("审核卡已过期：风险结论在点击期间发生变化，请使用最新卡片")
+			}
+			if guardErr := publishStagingTargetMismatch(job); guardErr != nil {
+				return job, guardErr
 			}
 			if !publishRiskLevelKnown(job.RiskLevel) {
 				return job, fmt.Errorf("任务尚无有效风险结论（risk_level=%q），为防止漏审已禁止发布；请先完成风险检查", job.RiskLevel)

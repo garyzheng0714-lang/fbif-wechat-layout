@@ -71,8 +71,8 @@ func maybeStartFeishuWS(p *publishPipeline) {
 // （toast + raw 终态卡）。SDK 负责把返回值在 3 秒窗口内回给飞书。
 func feishuWSCardActionHandler(p *publishPipeline) func(ctx context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
 	return func(ctx context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
-		openID, rawValue := feishuWSEventParams(event)
-		out := p.reviewCardAction(ctx, openID, rawValue)
+		openID, chatID, rawValue := feishuWSEventParams(event)
+		out := p.reviewCardAction(ctx, openID, chatID, rawValue)
 		log.Printf("publish: 飞书长连接收到卡片动作 operator=%s → %s（%s）", openID, out.toastType, out.toastContent)
 		resp := &callback.CardActionTriggerResponse{
 			Toast: &callback.Toast{Type: out.toastType, Content: out.toastContent},
@@ -89,17 +89,20 @@ func feishuWSCardActionHandler(p *publishPipeline) func(ctx context.Context, eve
 // action.value（SDK 解出的 map 重编码为 JSON，交给与 Webhook 同一套解析——
 // job_id 数字/字符串两形态由 coerceFeishuJobID 兼容）。空事件不 panic，
 // 返回空参让业务段回「按钮数据不完整」toast。
-func feishuWSEventParams(event *callback.CardActionTriggerEvent) (openID string, rawValue json.RawMessage) {
+func feishuWSEventParams(event *callback.CardActionTriggerEvent) (openID, chatID string, rawValue json.RawMessage) {
 	if event == nil || event.Event == nil {
-		return "", nil
+		return "", "", nil
 	}
 	if op := event.Event.Operator; op != nil {
 		openID = op.OpenID
+	}
+	if evtCtx := event.Event.Context; evtCtx != nil {
+		chatID = evtCtx.OpenChatID
 	}
 	if action := event.Event.Action; action != nil && action.Value != nil {
 		if b, err := json.Marshal(action.Value); err == nil {
 			rawValue = b
 		}
 	}
-	return openID, rawValue
+	return openID, chatID, rawValue
 }

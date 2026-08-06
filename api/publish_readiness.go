@@ -186,7 +186,7 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	} else {
 		out.Feishu.CallbackConfigured = out.Feishu.WSConfigured
 	}
-	out.Feishu.ReviewerAllowlistConfigured = feishuReviewerAllowlistConfigured()
+	out.Feishu.ReviewerAllowlistConfigured = feishuReviewerAuthConfigured()
 	out.ServiceAuth.Configured = publishSyncServiceTokenConfigured()
 	out.ImageUpload.Configured = configuredHTTPBaseURL(os.Getenv("WECHAT_UPLOAD_ENDPOINT"))
 	out.HTTPReviewEnabled = publishHTTPReviewEnabled()

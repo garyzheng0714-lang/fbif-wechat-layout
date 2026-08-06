@@ -181,6 +181,7 @@ func (p *publishPipeline) requestUnpublish(jobID int64, actor, expectedVersion s
 			return false
 		}
 		return current.Stage == publishStagePublished && current.FoodTalksNewsID > 0 &&
+			publishStagingTargetMismatch(current) == nil &&
 			publishUnpublishWindowOpen(current, now) && current.UnpublishIntentKey == "" && current.RepublishIntentKey == ""
 	}, func(current *publishJob) {
 		current.Stage = publishStageUnpublishing
@@ -199,6 +200,9 @@ func (p *publishPipeline) requestUnpublish(jobID int64, actor, expectedVersion s
 	if !swapped {
 		if versionMismatch {
 			return job, errors.New("审核卡已过期，请使用最新一张卡片")
+		}
+		if guardErr := publishStagingTargetMismatch(job); guardErr != nil {
+			return job, guardErr
 		}
 		if job.Stage == publishStagePublished && !publishUnpublishWindowOpen(job, now) {
 			return job, fmt.Errorf("文章已超过下线窗口：%s", publishUnpublishWindowLabel(job, now))
@@ -224,6 +228,7 @@ func (p *publishPipeline) requestRepublish(jobID int64, actor, expectedVersion s
 			return false
 		}
 		return current.Stage == publishStageOffline && current.FoodTalksNewsID > 0 &&
+			publishStagingTargetMismatch(current) == nil &&
 			current.RepublishIntentKey == "" && current.UnpublishIntentKey == "" &&
 			validPersistedPublishApproval(current)
 	}, func(current *publishJob) {
@@ -243,6 +248,9 @@ func (p *publishPipeline) requestRepublish(jobID int64, actor, expectedVersion s
 	if !swapped {
 		if versionMismatch {
 			return job, errors.New("审核卡已过期，请使用最新一张卡片")
+		}
+		if guardErr := publishStagingTargetMismatch(job); guardErr != nil {
+			return job, guardErr
 		}
 		if job.Stage == publishStageOffline && !validPersistedPublishApproval(job) {
 			return job, errors.New("原审核风险结论已失效，不能直接重新发布；请重新生成审核任务")
@@ -276,6 +284,7 @@ func (p *publishPipeline) stageUnpublish(ctx context.Context, job publishJob) er
 	claimed, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageUnpublishing && current.UnpublishIntentKey == "" &&
 			current.RepublishIntentKey == "" && current.FoodTalksNewsID > 0 &&
+			publishStagingTargetMismatch(current) == nil &&
 			publishUnpublishWindowOpen(current, now)
 	}, func(current *publishJob) {
 		current.Stage = publishStageUnpublishingUpdating
@@ -344,7 +353,8 @@ func (p *publishPipeline) stageRepublish(ctx context.Context, job publishJob) er
 	intentKey := fmt.Sprintf("foodtalks-republish:job-%d:%s", job.ID, job.PublicationActionAt)
 	claimed, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageRepublishing && current.RepublishIntentKey == "" &&
-			current.UnpublishIntentKey == "" && current.FoodTalksNewsID > 0 && validPersistedPublishApproval(current)
+			current.UnpublishIntentKey == "" && current.FoodTalksNewsID > 0 &&
+			publishStagingTargetMismatch(current) == nil && validPersistedPublishApproval(current)
 	}, func(current *publishJob) {
 		current.Stage = publishStageRepublishingUpdating
 		current.RepublishIntentKey = intentKey

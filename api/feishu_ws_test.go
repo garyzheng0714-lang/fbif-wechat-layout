@@ -32,7 +32,7 @@ func TestFeishuWSEventParams(t *testing.T) {
 	event := wsCardEvent("ou_ws_reviewer", map[string]interface{}{
 		"action": "approve", "job_id": float64(7),
 	})
-	openID, rawValue := feishuWSEventParams(event)
+	openID, _, rawValue := feishuWSEventParams(event)
 	if openID != "ou_ws_reviewer" {
 		t.Fatalf("open_id 应为 ou_ws_reviewer，实际 %q", openID)
 	}
@@ -51,7 +51,7 @@ func TestFeishuWSEventParams(t *testing.T) {
 	}
 
 	// 字符串形态 job_id（飞书回调两形态之一）同样要通。
-	_, rawStr := feishuWSEventParams(wsCardEvent("ou_x", map[string]interface{}{
+	_, _, rawStr := feishuWSEventParams(wsCardEvent("ou_x", map[string]interface{}{
 		"action": "reject", "job_id": "42",
 	}))
 	if err := json.Unmarshal(rawStr, &value); err != nil {
@@ -72,7 +72,7 @@ func TestFeishuWSEventParamsEmpty(t *testing.T) {
 		"nil Value":  {Event: &callback.CardActionTriggerRequest{Action: &callback.CallBackAction{}}},
 		"全空 Request": {Event: &callback.CardActionTriggerRequest{}},
 	} {
-		openID, rawValue := feishuWSEventParams(event)
+		openID, _, rawValue := feishuWSEventParams(event)
 		if len(rawValue) > 0 {
 			t.Fatalf("%s：应返回空 value，实际 %s", name, rawValue)
 		}
@@ -82,7 +82,7 @@ func TestFeishuWSEventParamsEmpty(t *testing.T) {
 	}
 	// 空参进业务段 → error toast「按钮数据不完整」，不触发任何审核动作。
 	env := newPublishTestEnv(t)
-	out := env.pipeline.reviewCardAction(context.Background(), "", nil)
+	out := env.pipeline.reviewCardAction(context.Background(), "", "", nil)
 	if out.toastType != "error" || out.card != nil {
 		t.Fatalf("空参应回 error toast 且不带卡片，实际 %+v", out)
 	}

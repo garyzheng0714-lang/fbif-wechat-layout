@@ -91,6 +91,8 @@ validate_release() {
     "$RELEASE_DIR/caddy/fbifmp-layout.caddy" \
     "$RELEASE_DIR/systemd/fbif-api.service" \
     "$RELEASE_DIR/systemd/fbif-render.service" \
+    "$RELEASE_DIR/systemd/fbif-monitoring-report.service" \
+    "$RELEASE_DIR/systemd/fbif-monitoring-report.timer" \
     "$RELEASE_DIR/config/env-schema.json" \
     "$RELEASE_DIR/config/api.env.example" \
     "$RELEASE_DIR/config/publish.env.example" \
@@ -188,6 +190,8 @@ rollback_impl() {
   # 监控已迁往监控端，回滚不恢复 watchdog（见 cleanup_legacy_watchdog）。
   restore_path api_service "$API_SERVICE_TARGET" || failed=1
   restore_path render_service "$RENDER_SERVICE_TARGET" || failed=1
+  restore_path monitoring_report_service /etc/systemd/system/fbif-monitoring-report.service || failed=1
+  restore_path monitoring_report_timer /etc/systemd/system/fbif-monitoring-report.timer || failed=1
   restore_path render_env "$RENDER_ENV_TARGET" || failed=1
   restore_path config_schema "$CONFIG_SCHEMA_TARGET" || failed=1
   restore_path public "$PUBLIC_TARGET" || failed=1
@@ -272,6 +276,11 @@ activate_release() {
 
   install_file api_service "$RELEASE_DIR/systemd/fbif-api.service" "$API_SERVICE_TARGET" 0644
   install_file render_service "$RELEASE_DIR/systemd/fbif-render.service" "$RENDER_SERVICE_TARGET" 0644
+  # 审核群早间监控播报（08:30 CST）：oneshot service + timer，随部署安装并启用。
+  install_file monitoring_report_service "$RELEASE_DIR/systemd/fbif-monitoring-report.service" \
+    /etc/systemd/system/fbif-monitoring-report.service 0644
+  install_file monitoring_report_timer "$RELEASE_DIR/systemd/fbif-monitoring-report.timer" \
+    /etc/systemd/system/fbif-monitoring-report.timer 0644
   install_file render_env "$RELEASE_DIR/render.env" "$RENDER_ENV_TARGET" 0600
   install_file config_schema "$RELEASE_DIR/config/env-schema.json" "$CONFIG_SCHEMA_TARGET" 0644
   install_file api "$RELEASE_DIR/api/fbif-api" "$API_TARGET" 0755
@@ -289,6 +298,9 @@ activate_release() {
   wait_runtime_config_ok http://127.0.0.1:19096/healthz config_schema_version
   systemctl restart fbif-api
   wait_runtime_config_ok http://127.0.0.1:9001/api/health config_schema_version
+  systemctl enable --now fbif-monitoring-report.timer
+  systemctl is-active --quiet fbif-monitoring-report.timer ||
+    die "fbif-monitoring-report.timer is not active after enable"
   systemctl reload caddy
 
   trap - ERR HUP INT TERM
