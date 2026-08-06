@@ -1,5 +1,23 @@
 # FBIF 公众号排版 — Agent 规则
 
+## 🔴 动手前先看这里：三系统边界（2026-08-06 用户裁定）
+
+FBIF 内容链路由**三个互相独立的系统**组成，各有各的代码库、数据库和服务器。**唯一的通信方式是 HTTP API，不共享任何存储。**
+
+| 系统 | 干什么 | 数据库 | 域名 |
+| --- | --- | --- | --- |
+| **本项目**（FBIF公众号排版） | **加工**：排版、风险检查、飞书审核、分发到公众号/FoodTalks | JSON 文件 | `fbifmp-layout.foodtalks.cn` |
+| FoodTalks_Feed | **监控**：RSS/供应商资讯采集、分类、判断、筛选 | PostgreSQL（它自己的） | `feed.foodtalks.cn` |
+| fbif-wechat-article | **监控**：微信公众号官方 API 归档、阅读/粉丝指标 | SQLite（它自己的） | `112.124.103.65:3002` |
+
+**本项目的定位一句话：只做加工。** 两个监控端把「原文链接 + 规则编号 + 分类证据」推进来，本项目负责抓原文、排版、风险检查、送飞书审核、审核通过后分发。
+
+### 三条不得跨越的线
+
+1. **只接收链接**（红线 33）。`site-sync` 与 `official-sync` 对 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400。上游两个监控端都已收敛到位（`6fd97c83`、`5f036db`），不得为任何调用方重开正文旁路。
+2. **不碰监控端的代码库。** 上游怎么发现文章、怎么分类、怎么判断价值，都不是本项目该改的。看出问题就说出来，由他们改。反过来他们也不该改本项目。
+3. **监控职责归监控端。** 服务健康探针、告警发送、失败计数属于监控端，本项目**只提供被探的健康端点**（`GET /api/publish/monitoring`），不主动探别人的死活。反例：`monitoring/watchdog.py` 曾住在本仓库探三个服务，其中两个是上游；配错了（3002 公网不通 + 探针统一发 `X-Publish-Sync-Token` 而 official 认 `API_KEY`）连续失败 715 次没人发现，因为不在负责人手上。该 watchdog 正在迁往监控端。
+
 ## Skill routing
 
 When the user's request matches an available skill, ALWAYS invoke it using the Skill
@@ -94,6 +112,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
    **例外**：`POST /api/html-to-blocks`（Bearer `RENDER_TOKEN`）不在此列——它是 HTML→Block 的纯转换工具，调用方 `FoodTalks_Feed` 排版的是自有资讯，根本不存在可抓的微信原文链接。它不创建发布任务。
 
 34. **审核卡四种形态都必须能认出是哪篇文章（2026-08-06 用户裁定）** — 待审核 / 已发布 / 已驳回 / 异常四张卡全部渲染 `reviewCardHeroBlock`：封面图、粗体标题、标签、摘要、`预览效果 · 公众号原文` 链接缺一不可。**不得**让终态卡退化成只有 `reviewCardInfoBlock`（来源/作者/时间 + 任务号两行灰字）——卡片在群里长期留存，是事后回看「到底发了什么」的唯一入口，压成一个编号等于信息归零。封面复用待审核时存下的 `publishJob.ReviewCoverImgKey`（卡片回调必须同步返回新卡，不能在回调里现传图片）；旧任务没有该值时退化为无封面单列，不留空图位。守护：`api/feishu_review_card_test.go`。
+   **改完卡片要把历史任务的卡也刷一遍**：已发出的卡不会自己变样，群里回看到的仍是旧信息。用 `POST /api/publish/jobs/{id}/card-refresh`（管理员或 `PUBLISH_ADMIN_SERVICE_TOKEN`，同步服务令牌不可用）；有 message_id 的群走原位更新，不刷屏。它与 `notification-replay` 分工不同：那个只救躺在 dead letter 里的失败通知，救不了「发成功但样式过期」。
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
