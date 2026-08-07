@@ -357,3 +357,36 @@ func TestHTTPFeishuProviderWikiNonDocumentNodeIsRejected(t *testing.T) {
 		t.Fatalf("status=%d code=%q", status, code)
 	}
 }
+
+func TestHTTPFeishuProviderWikiNotFoundSurvivesHTTPStatusError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/open-apis/wiki/v2/spaces/get_node" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.RequestURI())
+		}
+		// 飞书对「节点不可见」把业务码放在 HTTP 404 的 JSON 体里返回，
+		// 而不是 HTTP 200 + code；错误映射必须能穿透状态码拿到 131005。
+		writeJSON(w, http.StatusNotFound, map[string]any{
+			"code": 131005,
+			"msg":  "not found",
+		})
+	}))
+	defer server.Close()
+
+	provider := newHTTPFeishuProvider(server.Client())
+	provider.apiBaseURL = server.URL
+	_, err := provider.ExportDocument(context.Background(), "u-user-token", feishuDocumentRef{
+		Token: "wikcn_test",
+		Type:  "wiki",
+	})
+	var wikiErr *feishuWikiAccessError
+	if !errors.As(err, &wikiErr) || wikiErr.code != 131005 {
+		t.Fatalf("expected feishuWikiAccessError 131005, got %v", err)
+	}
+	status, code, message := feishuExportErrorResponse(err)
+	if status != http.StatusNotFound || code != "feishu_wiki_not_found" {
+		t.Fatalf("status=%d code=%q", status, code)
+	}
+	if !strings.Contains(message, "找不到这篇知识库文档") {
+		t.Fatalf("message=%q", message)
+	}
+}

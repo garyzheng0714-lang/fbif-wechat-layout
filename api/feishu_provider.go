@@ -184,6 +184,13 @@ func (p *httpFeishuProvider) configure(appID, appSecret string) {
 }
 
 func (p *httpFeishuProvider) doJSON(ctx context.Context, method, endpoint, accessToken string, payload any, target any) error {
+	return p.doJSONMode(ctx, method, endpoint, accessToken, payload, target, false)
+}
+
+// tolerantStatus=true 时非 2xx 也尝试解析飞书标准错误体 {code,msg} 进 target，
+// 让调用方拿到业务错误码（如 wiki 131005 not found，飞书放在 HTTP 404 里返回）；
+// 解析不出 JSON 才退回状态错误。
+func (p *httpFeishuProvider) doJSONMode(ctx context.Context, method, endpoint, accessToken string, payload any, target any, tolerantStatus bool) error {
 	var body io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -213,6 +220,9 @@ func (p *httpFeishuProvider) doJSON(ctx context.Context, method, endpoint, acces
 		return fmt.Errorf("feishu API response too large: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if tolerantStatus && json.Unmarshal(responseBody, target) == nil {
+			return nil
+		}
 		return fmt.Errorf("feishu API status %d", resp.StatusCode)
 	}
 	if err := json.Unmarshal(responseBody, target); err != nil {
@@ -470,7 +480,7 @@ func (p *httpFeishuProvider) resolveWikiDocument(ctx context.Context, accessToke
 		} `json:"data"`
 	}
 	endpoint := p.apiBaseURL + "/open-apis/wiki/v2/spaces/get_node?token=" + url.QueryEscape(ref.Token)
-	if err := p.doJSON(ctx, http.MethodGet, endpoint, accessToken, nil, &response); err != nil {
+	if err := p.doJSONMode(ctx, http.MethodGet, endpoint, accessToken, nil, &response, true); err != nil {
 		return ref, err
 	}
 	if response.Code != 0 || response.Data.Node.ObjToken == "" {
