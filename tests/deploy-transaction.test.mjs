@@ -275,3 +275,26 @@ test('Caddy sends every API to Go before static fallback and keeps only named le
     assert.ok(covered(route), `Go 路由 ${route} 未被 Caddy 白名单覆盖`);
   }
 });
+
+// 审核群早间监控播报（2026-08-06 用户裁定）：部署必须安装并启用 08:30 CST 的
+// 播报 timer，启用失败要让部署失败；回滚同样覆盖这两个单元。
+test('deploy installs and enables the review-chat monitoring report timer', async () => {
+  const script = await projectFile('deploy/scripts/deploy-transaction.sh');
+  assert.match(script, /fbif-monitoring-report\.service/);
+  assert.match(script, /fbif-monitoring-report\.timer/);
+  assert.match(script, /systemctl enable --now fbif-monitoring-report\.timer/);
+  assert.match(script, /fbif-monitoring-report\.timer is not active after enable/,
+    'timer 启用失败必须让部署失败，不能静默放过');
+  assert.match(script, /restore_path monitoring_report_service/);
+  assert.match(script, /restore_path monitoring_report_timer/);
+
+  const service = await projectFile('deploy/systemd/fbif-monitoring-report.service');
+  assert.match(service, /Type=oneshot/);
+  assert.match(service, /X-Publish-Admin-Token/, '播报走管理员令牌，不得用同步令牌');
+  assert.match(service, /monitoring-report/, '必须调用播报端点');
+  assert.match(service, /EnvironmentFile=\/var\/www\/api\/\.env/, '管理员令牌在 .env');
+
+  const timer = await projectFile('deploy/systemd/fbif-monitoring-report.timer');
+  assert.match(timer, /OnCalendar=\*-\*-\* 08:30:00/);
+  assert.match(timer, /Persistent=true/, '停机跨过 08:30 时补发一次');
+});

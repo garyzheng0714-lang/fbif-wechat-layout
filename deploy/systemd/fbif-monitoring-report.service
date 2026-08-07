@@ -1,0 +1,19 @@
+[Unit]
+Description=FBIF publish monitoring report to review chat
+# 审核群早间监控播报（2026-08-06 用户裁定）：把 /api/publish/monitoring 的状态
+# 用人话发进审核群。播报失败只影响本次播报，由 timer 次日重试，不影响 API 服务。
+After=fbif-api.service
+Wants=fbif-api.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/var/www/api/publish.env
+EnvironmentFile=/var/www/api/.env
+ExecStart=/usr/bin/curl -sS --fail-with-body -m 30 -X POST http://127.0.0.1:9001/api/publish/monitoring-report -H "X-Publish-Admin-Token: ${PUBLISH_ADMIN_SERVICE_TOKEN}"
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+UMask=0077

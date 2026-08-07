@@ -90,7 +90,7 @@ func TestFeishuReviewerAllowlistFailClosed(t *testing.T) {
 				t.Fatalf("submit: %v", err)
 			}
 			raw := json.RawMessage(fmt.Sprintf(`{"action":"approve","job_id":%d}`, job.ID))
-			out := env.pipeline.reviewCardAction(context.Background(), tc.operator, raw)
+			out := env.pipeline.reviewCardAction(context.Background(), tc.operator, "", raw)
 			if out.toastType != "error" || !strings.Contains(out.toastContent, "权限") {
 				t.Fatalf("未授权审核应回 error 权限提示，实际 %+v", out)
 			}
@@ -375,7 +375,7 @@ func TestReviewCardRiskChangeExpiresOldVersion(t *testing.T) {
 	}
 	raw := json.RawMessage(fmt.Sprintf(
 		`{"action":"approve","job_id":%d,"review_version":%q}`, job.ID, oldVersion))
-	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", raw)
+	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", raw)
 	if out.toastType != "error" || !strings.Contains(out.toastContent, "过期") {
 		t.Fatalf("风险变化后旧卡必须失效，实际 %+v", out)
 	}
@@ -449,7 +449,7 @@ func TestReviewCardLifecycleCallbackReadsCurrentState(t *testing.T) {
 				t.Fatalf("update lifecycle state: %v", err)
 			}
 
-			out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", lifecycleCardActionValue(feishuCardActionUnpublish, job.ID, oldVersion))
+			out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", lifecycleCardActionValue(feishuCardActionUnpublish, job.ID, oldVersion))
 			if out.toastType != tc.wantType || out.toastContent != tc.wantToast {
 				t.Fatalf("toast=%q/%q, want %q/%q", out.toastType, out.toastContent, tc.wantType, tc.wantToast)
 			}
@@ -490,7 +490,7 @@ func TestReviewCardLifecycleCallbackReadsCurrentRepublishState(t *testing.T) {
 		t.Fatalf("seed republished lifecycle state: %v", err)
 	}
 
-	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", lifecycleCardActionValue(feishuCardActionRepublish, job.ID, oldVersion))
+	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", lifecycleCardActionValue(feishuCardActionRepublish, job.ID, oldVersion))
 	if out.toastType != "info" || out.toastContent != "文章已重新发布，无需重复操作" {
 		t.Fatalf("重复重新发布提示不符：%+v", out)
 	}
@@ -794,7 +794,7 @@ func TestFeishuReviewerClosedWhenUnset(t *testing.T) {
 	}
 	current, _ := env.store.byID(job.ID)
 	raw := json.RawMessage(fmt.Sprintf(`{"action":"approve","job_id":%d,"review_version":%q}`, job.ID, publishReviewCardVersion(current)))
-	out := env.pipeline.reviewCardAction(context.Background(), "ou_any_group_member", raw)
+	out := env.pipeline.reviewCardAction(context.Background(), "ou_any_group_member", "", raw)
 	if out.toastType != "error" || !strings.Contains(out.toastContent, "权限") {
 		t.Fatalf("未配置白名单时必须拒绝审核，实际 %+v", out)
 	}

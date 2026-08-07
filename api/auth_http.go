@@ -174,7 +174,11 @@ func feishuLoginScopes() string {
 	if configured := strings.TrimSpace(os.Getenv("FEISHU_LOGIN_SCOPES")); configured != "" {
 		return configured
 	}
-	return "offline_access drive:drive.search:readonly drive:export:readonly im:chat:read"
+	// im:chat:readonly 是飞书真实存在的权限名；此前误写作 im:chat:read（飞书无此
+	// 权限，授权时被静默丢弃），导致发布链路后台「审核群」列表始终读取失败。
+	// wiki:node:read 供 /wiki/<token> 链接经 wiki/v2/spaces/get_node 换算出真实
+	// 文档 token；缺它时知识库链接在 resolve 阶段就被飞书拒绝。
+	return "offline_access drive:drive.search:readonly drive:export:readonly im:chat:readonly wiki:node:read"
 }
 
 func (s *authService) handleFeishuCallback(w http.ResponseWriter, r *http.Request) {

@@ -115,6 +115,21 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]bool{"delivered": true})
 	})
 
+	// 审核群监控播报：定时器（部署机 systemd timer，每天 08:30 CST）或管理员手动
+	// 触发，把当前监控状态用人话发进审核群。与 monitor-alert 的私聊 relay 分工见
+	// publish_monitoring_report.go 顶部注释。
+	mux.HandleFunc("POST /api/publish/monitoring-report", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		text, err := p.sendMonitoringReport(r.Context())
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"delivered": true, "text": text})
+	})
+
 	mux.HandleFunc("GET /api/publish/monitoring", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
@@ -589,7 +604,9 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		if !ok {
 			return
 		}
-		job, err := p.refreshReviewCard(r.Context(), id)
+		// ?resend=1：撤回群里旧卡并发一张全新卡（默认仍是原位更新不刷屏）。
+		resend := r.URL.Query().Get("resend") == "1"
+		job, err := p.refreshReviewCard(r.Context(), id, resend)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
 			return

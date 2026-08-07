@@ -30,6 +30,7 @@
     "api_publish": {
       "allow_unknown": false,
       "variables": {
+        "FEISHU_LOGIN_SCOPES": { "required": false, "secret": false },
         "RULES_STORE_PATH": { "required": false, "secret": false },
         "PUBLISH_JOBS_PATH": { "required": false, "secret": false },
         "PUBLISH_DELIVERY_SETTINGS_PATH": { "required": false, "secret": false },
@@ -54,6 +55,7 @@
         "FEISHU_CALLBACK_MODE": { "required": true, "secret": false },
         "FEISHU_VERIFICATION_TOKEN": { "required": false, "secret": true },
         "FEISHU_REVIEWER_OPEN_IDS": { "required": true, "secret": false },
+        "FEISHU_REVIEWER_ALLOW_CHAT_MEMBERS": { "required": false, "secret": false },
         "ARK_API_KEY": { "required": true, "secret": true },
         "ARK_MODEL_ID": { "required": false, "secret": false },
         "ARK_MODEL_ID_B": { "required": true, "secret": false },

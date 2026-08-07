@@ -227,6 +227,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
 | `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员角色或部署专用服务令牌 |
 | `POST` | `/api/publish/jobs/{id}/card-refresh` | 用当前代码重出审核卡（卡片改版后让历史任务的卡跟上）。已记过 message_id 的群原位更新，不刷屏；旧任务缺封面 img_key 时刷新会补传一次。需管理员角色或部署专用服务令牌，同步服务令牌不可用 |
+| `POST` | `/api/publish/monitoring-report` | 把当前监控状态用人话发进审核群（早间播报）。部署机 `fbif-monitoring-report.timer` 每天 08:30 CST 自动触发，也可管理员手动调用；权限同 card-refresh |
 | `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 
@@ -250,10 +251,11 @@ curl http://127.0.0.1:9000/api/health
 | `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
 | `PUBLISH_SYNC_SERVICE_TOKEN` | feed 与 112 调用发布提交、紧凑状态和监控端点的独立服务令牌；不能访问完整任务、审核、重试、对账或规则管理接口 |
 | `PUBLISH_HTTP_REVIEW_ENABLED` / `PUBLISH_HTTP_REVIEWER_OPEN_ID` | HTTP 审核应保持默认关闭；仅应急启用时，固定审核人仍必须命中 `FEISHU_REVIEWER_OPEN_IDS` |
+| `FEISHU_REVIEWER_ALLOW_CHAT_MEMBERS` | 群成员审核模式（2026-08-06 用户裁定）：开启后，来自 `FEISHU_REVIEW_CHAT_ID` 审核群内的卡片操作即有审核权限（依据：只有群成员能点到群消息里的按钮，事件 `open_chat_id` 由飞书服务端注入）；卡片被转发到其他会话后群 id 不同，一律拒绝。白名单继续兼容 |
 | `FOODTALKS_BASE_URL` / `FOODTALKS_TOKEN` | FoodTalks API 与凭证；缺失时发布任务显式失败 |
 | `FOODTALKS_ORIGIN` | 测试环境浏览器头模式开关；正式白名单模式保持为空 |
 | `FOODTALKS_FRONT_URL` / `FOODTALKS_ADMIN_ARTICLE_URL` / `FOODTALKS_CATEGORY_IDS` | 前台、后台文章入口与发布分类；三类 URL 必须指向同一目标环境 |
-| `FOODTALKS_EXPECTED_TARGET` | 显式声明 `test` 或 `production`；readiness 会拒绝缺失、未知或与 FoodTalks URL 不一致的配置 |
+| `FOODTALKS_EXPECTED_TARGET` | 显式声明 `test` 或 `production`；readiness 会拒绝缺失、未知或与 FoodTalks URL 不一致的配置。任务在草稿进站时记录 `staging_target`，环境守卫拒绝拿 A 环境的资讯 id 去 B 环境读写（切环境后旧任务须重新暂存才能发布，见 `api/publish_target_guard.go`） |
 | `DEPLOYMENT_WRITES_PAUSED` | 部署候选实例专用；为 `1` 时暂停发布/rules 写入口、恢复任务、通知 worker 与飞书长连接，验收通过后由事务脚本清零 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REVIEW_CHAT_ID` | 审核通知和长连接回调 |
 | `PUBLISH_MONITOR_FEISHU_USER_ID` | P0 异常、恢复和每日心跳的飞书私聊收件人 `user_id`；与审核群分开，缺失时 readiness 失败且不回退群聊 |

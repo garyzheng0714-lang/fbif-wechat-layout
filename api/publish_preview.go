@@ -97,7 +97,8 @@ func registerPublishPreviewRoute(mux *http.ServeMux, store *publishJobStore) {
 		// 短期 token（每次点击都新铸，避免复用已过期 token）302 到 FoodTalks 官方预览页——网站
 		// 真实渲染，视觉保真度最高。铸造失败 / 草稿未进站 / ?local=1 → 本地预览页兜底
 		//（本地页仍展示 AI 参数全量，且不依赖 FoodTalks 可用性）。
-		if job.FoodTalksNewsID > 0 && r.URL.Query().Get("local") != "1" {
+		if job.FoodTalksNewsID > 0 && r.URL.Query().Get("local") != "1" &&
+			publishStagingTargetMismatch(job) == nil {
 			if ft, ferr := newFoodTalksClientFromEnv(); ferr == nil {
 				if tok, terr := ft.PreviewToken(r.Context(), job.FoodTalksNewsID); terr == nil {
 					if target, targetErr := officialPublishPreviewURL(siteFrontURL(), job.FoodTalksNewsID, tok); targetErr == nil {

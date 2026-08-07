@@ -233,7 +233,7 @@ func TestPublishStartupBackfillsRiskForLegacyStages(t *testing.T) {
 			}
 			if stage == publishStageAwaitingReview {
 				oldValue := json.RawMessage(`{"action":"approve","job_id":1}`)
-				out := env.pipeline.reviewCardAction(context.Background(), "ou_legacy_reviewer", oldValue)
+				out := env.pipeline.reviewCardAction(context.Background(), "ou_legacy_reviewer", "", oldValue)
 				if out.toastType != "error" || !strings.Contains(out.toastContent, "过期") {
 					t.Fatalf("补检前旧卡必须失效，实际 %+v", out)
 				}

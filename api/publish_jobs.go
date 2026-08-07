@@ -100,9 +100,12 @@ type publishJob struct {
 	ContentConflict      bool   `json:"content_conflict,omitempty"`
 	ContentConflictNote  string `json:"content_conflict_note,omitempty"`
 	FoodTalksNewsID      int64  `json:"foodtalks_news_id,omitempty"`
-	ArticleURL           string `json:"article_url,omitempty"`
-	PublishedAt          string `json:"published_at,omitempty"`
-	UnpublishedAt        string `json:"unpublished_at,omitempty"`
+	// 草稿建在哪个 FoodTalks 环境（test/production，口径同 foodTalksURLTarget）。
+	// 环境守卫据此拒绝拿着 A 环境的资讯 id 去 B 环境读写（见 publish_target_guard.go）。
+	StagingTarget string `json:"staging_target,omitempty"`
+	ArticleURL    string `json:"article_url,omitempty"`
+	PublishedAt   string `json:"published_at,omitempty"`
+	UnpublishedAt string `json:"unpublished_at,omitempty"`
 	// 文章首次成功公开时从网站规则中固化的下线窗口。0 表示关闭下线能力。
 	// 不跟随之后的规则修改，避免历史文章的可操作边界漂移。
 	UnpublishWindowHours int    `json:"unpublish_window_hours"`
@@ -147,6 +150,7 @@ type publishJob struct {
 	ReviewedBy           string `json:"reviewed_by,omitempty"`           // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
 	ReviewedAt           string `json:"reviewed_at,omitempty"`           // 审核时刻（RFC3339 UTC）
 	ReviewAction         string `json:"review_action,omitempty"`         // approve / reject；publicizing 恢复的授权凭据
+	ReviewForced         bool   `json:"review_forced,omitempty"`         // 阻断级风险下的强制发布（2026-08-07 用户裁定），终态卡与留痕据此标注
 	ApprovedRiskVersion  string `json:"approved_risk_version,omitempty"` // approve 当刻与风险快照绑定的摘要
 	ReviewCardMsgID      string `json:"review_card_msg_id,omitempty"`    // 旧任务单卡片兼容
 	// 新配置支持同一张审核卡投递到多个群；map 的 key 是 chat_id，value 是

@@ -31,7 +31,14 @@ func registerFeishuDocumentRoutes(mux *http.ServeMux, service *authService) {
 
 func feishuExportErrorResponse(err error) (int, string, string) {
 	var taskErr *feishuExportTaskError
+	var wikiErr *feishuWikiAccessError
 	switch {
+	case errors.As(err, &wikiErr):
+		return http.StatusForbidden, "feishu_wiki_access_denied",
+			"飞书拒绝访问这篇知识库文档。如果你在飞书里能打开它，请退出登录后重新用飞书登录（授予「查看知识库节点」权限）再试"
+	case errors.Is(err, errFeishuWikiNotDocument):
+		return http.StatusBadRequest, "feishu_wiki_not_document",
+			"这个知识库节点不是文档（可能是表格、多维表格或目录），暂不支持导入"
 	case errors.Is(err, errAuthenticationRequired):
 		return http.StatusUnauthorized, "authentication_required", "请先登录"
 	case errors.Is(err, errFeishuLoginRequired):

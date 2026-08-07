@@ -295,3 +295,65 @@ func TestHTTPFeishuProviderStopsAfterBoundedStatusFailures(t *testing.T) {
 		t.Fatalf("status calls=%d, want 2", statusCalls)
 	}
 }
+
+func TestHTTPFeishuProviderWikiResolveDeniedMapsToReloginHint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/open-apis/wiki/v2/spaces/get_node" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.RequestURI())
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"code": 99991679,
+			"msg":  "Unauthorized",
+		})
+	}))
+	defer server.Close()
+
+	provider := newHTTPFeishuProvider(server.Client())
+	provider.apiBaseURL = server.URL
+	_, err := provider.ExportDocument(context.Background(), "u-user-token", feishuDocumentRef{
+		Token: "wikcn_test",
+		Type:  "wiki",
+	})
+	var wikiErr *feishuWikiAccessError
+	if !errors.As(err, &wikiErr) {
+		t.Fatalf("expected feishuWikiAccessError, got %v", err)
+	}
+	status, code, message := feishuExportErrorResponse(err)
+	if status != http.StatusForbidden || code != "feishu_wiki_access_denied" {
+		t.Fatalf("status=%d code=%q", status, code)
+	}
+	if !strings.Contains(message, "重新用飞书登录") {
+		t.Fatalf("message=%q", message)
+	}
+}
+
+func TestHTTPFeishuProviderWikiNonDocumentNodeIsRejected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/open-apis/wiki/v2/spaces/get_node" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.RequestURI())
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"code": 0,
+			"data": map[string]any{"node": map[string]any{
+				"obj_token": "shtcn_sheet",
+				"obj_type":  "sheet",
+				"title":     "知识库表格",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	provider := newHTTPFeishuProvider(server.Client())
+	provider.apiBaseURL = server.URL
+	_, err := provider.ExportDocument(context.Background(), "u-user-token", feishuDocumentRef{
+		Token: "wikcn_test",
+		Type:  "wiki",
+	})
+	if !errors.Is(err, errFeishuWikiNotDocument) {
+		t.Fatalf("expected errFeishuWikiNotDocument, got %v", err)
+	}
+	status, code, _ := feishuExportErrorResponse(err)
+	if status != http.StatusBadRequest || code != "feishu_wiki_not_document" {
+		t.Fatalf("status=%d code=%q", status, code)
+	}
+}

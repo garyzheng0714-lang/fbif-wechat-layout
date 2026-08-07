@@ -72,6 +72,9 @@ type feishuCardCallbackPayload struct {
 		Action struct {
 			Value json.RawMessage `json:"value"`
 		} `json:"action"`
+		Context struct {
+			OpenChatID string `json:"open_chat_id"`
+		} `json:"context"`
 	} `json:"event"`
 }
 
@@ -180,9 +183,69 @@ func feishuReviewerAllowlistConfigured() bool {
 	return false
 }
 
+// feishuReviewerChatModeEnabled 群成员审核模式（2026-08-06 用户裁定：「只要在群里
+// 面，就有权限点这个卡片」）。显式 env 开关，默认关闭保持旧白名单行为。
+func feishuReviewerChatModeEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FEISHU_REVIEWER_ALLOW_CHAT_MEMBERS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// reviewChatAllowed 判定卡片动作发生的群是否是配置过的审核群：FEISHU_REVIEW_CHAT_ID
+// 或规则后台投递设置里的任一群。只有这些群里才会出现审核卡；卡片被转发到其他
+// 会话后群 id 不同，一律拒绝。
+func (p *publishPipeline) reviewChatAllowed(chatID string) bool {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return false
+	}
+	if envChat := strings.TrimSpace(os.Getenv("FEISHU_REVIEW_CHAT_ID")); envChat != "" && envChat == chatID {
+		return true
+	}
+	if p != nil && p.deliverySettings != nil {
+		if settings, _, err := p.deliverySettings.resolve(); err == nil {
+			for _, configured := range settings.ChatIDs {
+				if strings.TrimSpace(configured) == chatID {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// feishuReviewActionAllowed 卡片审核动作的权限总闸：静态审核人白名单，或（群成员
+// 模式开启时）动作来自配置的审核群。群成员语义依赖飞书事实：只有群成员能看到并
+// 点击群消息里的按钮，事件 context.open_chat_id 由飞书服务端注入、不可由客户端伪造。
+func (p *publishPipeline) feishuReviewActionAllowed(operatorOpenID, actionChatID string) bool {
+	if feishuReviewerAllowed(operatorOpenID) {
+		return true
+	}
+	if !feishuReviewerChatModeEnabled() {
+		return false
+	}
+	// 群成员模式仍要求 operator open_id 形态合法：审核留痕（reviewed_by）必须可信。
+	if !feishuOpenIDSafe(strings.TrimSpace(operatorOpenID)) {
+		return false
+	}
+	return p.reviewChatAllowed(actionChatID)
+}
+
+// feishuReviewerAuthConfigured readiness 口径：白名单与群成员模式二者有其一即算
+// 配置完备；群成员模式必须同时有明确的审核群配置，否则等于没有任何权限来源。
+func feishuReviewerAuthConfigured() bool {
+	if feishuReviewerAllowlistConfigured() {
+		return true
+	}
+	return feishuReviewerChatModeEnabled() && strings.TrimSpace(os.Getenv("FEISHU_REVIEW_CHAT_ID")) != ""
+}
+
 // handleReviewCardAction Webhook 模式薄壳：事件字段 → 共用业务段 → 3 秒响应体 {toast, card}。
 func (p *publishPipeline) handleReviewCardAction(r *http.Request, payload feishuCardCallbackPayload) map[string]any {
-	out := p.reviewCardAction(r.Context(), payload.Event.Operator.OpenID, payload.Event.Action.Value)
+	out := p.reviewCardAction(r.Context(), payload.Event.Operator.OpenID, payload.Event.Context.OpenChatID, payload.Event.Action.Value)
 	return feishuCardToast(out.toastType, out.toastContent, out.card)
 }
 
@@ -197,7 +260,7 @@ type reviewCardOutcome struct {
 // reviewCardAction 卡片按钮动作的业务核心（两模式共用唯一入口）：解析 value
 // （action + job_id，兼容数字/字符串）→ 读取最新任务状态 → 业务态校验 → review 核心
 // → 发布中/终态卡。审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
-func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID string, rawValue json.RawMessage) reviewCardOutcome {
+func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage) reviewCardOutcome {
 	var value struct {
 		Action           string `json:"action"`
 		JobID            any    `json:"job_id"`
@@ -210,12 +273,13 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 		}
 	}
 	jobID := coerceFeishuJobID(value.JobID)
-	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionReject &&
+	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionForceApprove &&
+		value.Action != feishuCardActionReject &&
 		value.Action != feishuCardActionUnpublish && value.Action != feishuCardActionRepublish) {
 		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位发布任务"}
 	}
-	if !feishuReviewerAllowed(operatorOpenID) {
-		return reviewCardOutcome{toastType: "error", toastContent: "你没有网站发布审核权限，请联系管理员配置审核人白名单"}
+	if !p.feishuReviewActionAllowed(operatorOpenID, actionChatID) {
+		return reviewCardOutcome{toastType: "error", toastContent: "你没有网站发布审核权限：请在审核群内操作卡片，或联系管理员配置审核人白名单"}
 	}
 	job, err := p.store.byID(jobID)
 	if err != nil {
@@ -277,8 +341,12 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID s
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	if value.Action == feishuCardActionApprove {
-		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在发布", card: buildReviewPublishingCard(reviewed)}
+	if value.Action == feishuCardActionApprove || value.Action == feishuCardActionForceApprove {
+		toast := "已受理，正在发布"
+		if value.Action == feishuCardActionForceApprove {
+			toast = "已受理，正在强制发布"
+		}
+		return reviewCardOutcome{toastType: "success", toastContent: toast, card: buildReviewPublishingCard(reviewed)}
 	}
 	return reviewCardOutcome{toastType: "success", toastContent: "已驳回", card: buildReviewDoneCard(reviewed)}
 }
