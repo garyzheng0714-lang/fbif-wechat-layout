@@ -477,3 +477,32 @@ func TestFeishuOAuthStateRejectsOpenRedirectAndTampering(t *testing.T) {
 		t.Fatalf("denied callback status=%d location=%q", deniedRec.Code, deniedRec.Header().Get("Location"))
 	}
 }
+
+func TestFeishuLoginRequestsWikiNodeScope(t *testing.T) {
+	service := newTestAuthService(t, &fakeFeishuProvider{})
+	mux := registerTestAuthMux(service)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/feishu/fbif/login", nil))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("login status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	authorizeURL, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse authorize URL: %v", err)
+	}
+	scopes := strings.Fields(authorizeURL.Query().Get("scope"))
+	required := []string{"offline_access", "drive:export:readonly", "wiki:node:read"}
+	for _, want := range required {
+		found := false
+		for _, scope := range scopes {
+			if scope == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("authorize scope missing %q, got %v", want, scopes)
+		}
+	}
+}

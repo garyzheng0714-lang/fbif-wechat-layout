@@ -22,6 +22,18 @@ const (
 
 var errFeishuInvalidDocument = errors.New("invalid Feishu document")
 var errFeishuExportTimeout = errors.New("feishu export timed out")
+var errFeishuWikiNotDocument = errors.New("the wiki node is not an exportable document")
+
+// feishuWikiAccessError：wiki/v2/spaces/get_node 被飞书拒绝。既可能是登录会话
+// 缺 wiki:node:read（重新登录可解），也可能是账号本身看不到该知识库。
+type feishuWikiAccessError struct {
+	code int
+	msg  string
+}
+
+func (e *feishuWikiAccessError) Error() string {
+	return fmt.Sprintf("feishu wiki node access denied (code %d): %s", e.code, e.msg)
+}
 
 type feishuExportTaskError struct {
 	JobStatus int
@@ -461,9 +473,12 @@ func (p *httpFeishuProvider) resolveWikiDocument(ctx context.Context, accessToke
 	if err := p.doJSON(ctx, http.MethodGet, endpoint, accessToken, nil, &response); err != nil {
 		return ref, err
 	}
+	if response.Code != 0 || response.Data.Node.ObjToken == "" {
+		return ref, &feishuWikiAccessError{code: response.Code, msg: response.Msg}
+	}
 	docType := normalizeFeishuDocumentType(response.Data.Node.ObjType)
-	if response.Code != 0 || response.Data.Node.ObjToken == "" || (docType != "doc" && docType != "docx") {
-		return ref, errors.New("the wiki node is not an exportable document")
+	if docType != "doc" && docType != "docx" {
+		return ref, errFeishuWikiNotDocument
 	}
 	ref.Token = response.Data.Node.ObjToken
 	ref.Type = docType
