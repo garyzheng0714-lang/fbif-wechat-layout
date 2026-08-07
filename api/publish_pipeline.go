@@ -97,6 +97,9 @@ const (
 const (
 	publishReviewApprove = "approve"
 	publishReviewReject  = "reject"
+	// 阻断级风险下的强制发布（2026-08-07 用户裁定：风险阻断只当警示不当锁）。
+	// 持久化时归一为 approve + ReviewForced=true，publicize 侧凭 ReviewForced 放行。
+	publishReviewForceApprove = "force_approve"
 )
 
 // errStagingOutcomeUncertain 表示 CreateNews 可能已被服务端执行，调用方绝不能把任务
@@ -184,6 +187,8 @@ type publishPipeline struct {
 	notifyCardWithID func(ctx context.Context, card map[string]any) (string, error)
 	// updateCard 更新当前应用发送的飞书交互卡；没有已持久化 message_id 时不调用。
 	updateCard func(ctx context.Context, messageID string, card map[string]any) error
+	// recallCard 撤回当前应用发送的消息；仅 card-refresh 的 resend 路径使用。
+	recallCard func(ctx context.Context, messageID string) error
 	// coverImgKey 封面 URL → 飞书图片素材 img_key（卡片内呈现封面用）；nil 或失败
 	// 降级为卡片不带图，同样不阻断流水线
 	coverImgKey func(ctx context.Context, imgURL string) (string, error)
@@ -236,6 +241,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		p.notifyCard = n.sendCard
 		p.notifyCardWithID = n.sendCardWithID
 		p.updateCard = n.updateCard
+		p.recallCard = n.recallMessage
 		p.coverImgKey = n.uploadImageByURL
 	} else {
 		log.Printf("publish: 飞书通知未配置（需 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_REVIEW_CHAT_ID），审核群通知禁用")
@@ -1097,8 +1103,10 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 }
 
 func validPersistedPublishApproval(job publishJob) bool {
+	riskAllows := publishRiskAllowsManualApprove(job.RiskLevel) ||
+		(job.ReviewForced && job.RiskLevel == publishRiskBlock)
 	if job.ReviewAction != publishReviewApprove || strings.TrimSpace(job.ReviewedAt) == "" ||
-		!publishRiskAllowsManualApprove(job.RiskLevel) || strings.TrimSpace(job.ApprovedRiskVersion) == "" ||
+		!riskAllows || strings.TrimSpace(job.ApprovedRiskVersion) == "" ||
 		!publishContentVersionReadyForReview(job) {
 		return false
 	}
@@ -1142,12 +1150,18 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 		job, _ := p.store.byID(jobID)
 		return job, errPublishWorkersPaused
 	}
-	if action != publishReviewApprove && action != publishReviewReject {
+	if action != publishReviewApprove && action != publishReviewReject && action != publishReviewForceApprove {
 		job, err := p.store.byID(jobID)
 		if err != nil {
 			return publishJob{}, err
 		}
-		return job, fmt.Errorf("未知审核动作 %q（支持 approve / reject）", action)
+		return job, fmt.Errorf("未知审核动作 %q（支持 approve / reject / force_approve）", action)
+	}
+	// 强制发布归一为 approve 流程；force 只放宽「阻断级不可通过」这一条，
+	// 版本比对、内容冻结、环境守卫等其余闸门全部保持不变。
+	force := action == publishReviewForceApprove
+	if force {
+		action = publishReviewApprove
 	}
 	reviewedAt := p.now().UTC().Format(time.RFC3339)
 	switch action {
@@ -1160,9 +1174,11 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 				versionMismatch = true
 				return false
 			}
+			riskAllows := publishRiskAllowsManualApprove(current.RiskLevel) ||
+				(force && current.RiskLevel == publishRiskBlock)
 			return current.Stage == publishStageAwaitingReview && current.FoodTalksNewsID > 0 &&
 				publishStagingTargetMismatch(current) == nil &&
-				publishRiskAllowsManualApprove(current.RiskLevel) && currentVersion != "" &&
+				riskAllows && currentVersion != "" &&
 				publishContentVersionReadyForReview(current)
 		}, func(j *publishJob) {
 			j.Stage = publishStagePublicizing
@@ -1171,6 +1187,7 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 			j.ReviewedBy = reviewedBy
 			j.ReviewedAt = reviewedAt
 			j.ReviewAction = publishReviewApprove
+			j.ReviewForced = force && j.RiskLevel == publishRiskBlock
 			j.ApprovedRiskVersion = publishReviewCardVersion(*j)
 			j.PublicizeIntentKey = ""
 			j.PublicizeIntentAt = ""
@@ -1190,7 +1207,7 @@ func (p *publishPipeline) reviewWithRiskVersion(_ context.Context, jobID int64, 
 				return job, fmt.Errorf("任务尚无有效风险结论（risk_level=%q），为防止漏审已禁止发布；请先完成风险检查", job.RiskLevel)
 			}
 			if job.RiskLevel == publishRiskBlock {
-				return job, errors.New("任务风险级别为 block，禁止通过并发布；请驳回或人工处理风险后重新评估")
+				return job, errors.New("任务风险级别为 block，普通「通过」不可用；确需发布请使用卡片上的「强制发布」，或驳回后人工处理风险")
 			}
 			if !publishContentVersionReadyForReview(job) {
 				return job, errors.New("任务正文版本尚未冻结或有更高权威内容待处理，禁止按旧版本发布")

@@ -373,6 +373,50 @@ func (p *publishPipeline) rememberReviewCardMessageID(job publishJob, messageID 
 	return errors.New("保存审核卡 message_id 未生效")
 }
 
+// recallReviewCards 撤回任务在各审核群里已发出的卡片。撤回是尽力而为：任一失败
+// 只记 WARN（如超出撤回窗口），调用方随后重发新卡即可收敛。
+func (p *publishPipeline) recallReviewCards(ctx context.Context, job publishJob) {
+	recallOne := func(chatID, messageID string) {
+		messageID = strings.TrimSpace(messageID)
+		if messageID == "" {
+			return
+		}
+		var err error
+		if p.deliverySettings != nil {
+			settings, apps, resolveErr := p.reviewDeliveryForJob(job)
+			if resolveErr != nil {
+				err = resolveErr
+			} else {
+				target := chatID
+				if target == "" && len(settings.ChatIDs) > 0 {
+					target = settings.ChatIDs[0]
+				}
+				notifier, notifierErr := p.configuredReviewNotifier(settings, apps, target)
+				if notifierErr != nil {
+					err = notifierErr
+				} else {
+					err = notifier.recallMessage(ctx, messageID)
+				}
+			}
+		} else if p.recallCard != nil {
+			err = p.recallCard(ctx, messageID)
+		} else {
+			err = errors.New("撤回能力未配置")
+		}
+		if err != nil {
+			log.Printf("publish: WARN 任务 %d 旧审核卡撤回失败（将直接重发新卡）message_id=%s: %v", job.ID, messageID, err)
+		}
+	}
+	seen := map[string]bool{}
+	for chatID, messageID := range job.ReviewCardMsgIDs {
+		recallOne(chatID, messageID)
+		seen[strings.TrimSpace(messageID)] = true
+	}
+	if legacy := strings.TrimSpace(job.ReviewCardMsgID); legacy != "" && !seen[legacy] {
+		recallOne("", legacy)
+	}
+}
+
 // recoverPublishNotification 将崩溃遗留 sending 重新置 pending，再调度 drain。
 func (p *publishPipeline) recoverPublishNotification(job publishJob) {
 	if job.NotificationKind == "" {
@@ -432,10 +476,23 @@ func (p *publishPipeline) replayPublishNotification(jobID int64) (publishJob, er
 // 所以刷新不会在群里刷屏，看到的是同一张卡变成新样子。
 // 通知状态机不参与：这是人工触发的一次性运维动作，不改 NotificationState，
 // 免得与正在跑的通知 worker 抢同一条记录。
-func (p *publishPipeline) refreshReviewCard(ctx context.Context, jobID int64) (publishJob, error) {
+func (p *publishPipeline) refreshReviewCard(ctx context.Context, jobID int64, resend bool) (publishJob, error) {
 	job, err := p.store.byID(jobID)
 	if err != nil {
 		return publishJob{}, err
+	}
+	// resend：先撤回群里已有的卡，再清掉 message_id 记录，让下面的发送路径发一张
+	// 全新卡（而不是原位更新）。撤回失败（超窗等）只记日志继续——新卡必须发出去。
+	if resend {
+		p.recallReviewCards(ctx, job)
+		cleared, clearErr := p.store.update(job.ID, func(current *publishJob) {
+			current.ReviewCardMsgIDs = nil
+			current.ReviewCardMsgID = ""
+		})
+		if clearErr != nil {
+			return job, fmt.Errorf("清除旧卡 message_id 失败，未重发：%w", clearErr)
+		}
+		job = cleared
 	}
 	// 旧任务没存过封面 img_key（该字段晚于它们加入），这里补传一次，
 	// 否则刷新出来的卡片仍是无封面单列。失败只降级为不带图，不阻断刷新。

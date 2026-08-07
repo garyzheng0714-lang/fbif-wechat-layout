@@ -29,9 +29,22 @@ const (
 	feishuCardActionReject    = "reject"
 	feishuCardActionUnpublish = "unpublish"
 	feishuCardActionRepublish = "republish"
+	// 阻断级风险卡上的强制发布（2026-08-07 用户裁定：阻断只当警示不当锁）。
+	feishuCardActionForceApprove = "force_approve"
 )
 
 const reviewCardHeaderTitle = "网站发布审核"
+
+// reviewCardTagsWithForced 在 header 标签末尾追加「强制发布」红标（仅 ReviewForced
+// 任务）：群里长期留存的卡必须一眼看出这篇是无视阻断结论发出去的。
+func reviewCardTagsWithForced(job publishJob, tags ...any) []any {
+	if !job.ReviewForced {
+		return tags
+	}
+	return append(tags, map[string]any{
+		"tag": "text_tag", "text": feishuPlainText("强制发布"), "color": "red",
+	})
+}
 
 // buildReviewPendingCard 待审核卡：蓝 header + 「待审核」黄 tag + grey-100 信息色块
 // （封面/标题/标签/摘要/预览）+ 基础信息 + AI 优化说明段 + 审核按钮行。
@@ -69,8 +82,25 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 	}
 	buttons := feishuButtonRow(approveButton, rejectButton)
 	if !publishRiskAllowsManualApprove(job.RiskLevel) {
-		// block/缺失/未知级别不能只靠回调端挡：卡片本身不呈现 approve，避免错误暗示。
+		// 缺失/未知级别（检查没跑完）仍只呈现驳回；阻断级给「强制发布」显式出口
+		//（2026-08-07 用户裁定），确认文案明说是在无视阻断结论。
 		buttons = feishuButtonRow(rejectButton)
+		if job.RiskLevel == publishRiskBlock {
+			forceValue := map[string]any{"action": feishuCardActionForceApprove, "job_id": job.ID, "review_version": publishReviewCardVersion(job)}
+			forceButton := map[string]any{
+				"tag":   "button",
+				"text":  feishuPlainText("强制发布"),
+				"type":  "danger",
+				"size":  "medium",
+				"width": "fill",
+				"confirm": map[string]any{
+					"title": feishuPlainText("无视风险阻断，强制发布？"),
+					"text":  feishuPlainText("风险检查判定为阻断级。强制发布将忽略该结论，文章公开可见且不可逆，操作以你的名义留痕。"),
+				},
+				"behaviors": []any{map[string]any{"type": "callback", "value": forceValue}},
+			}
+			buttons = feishuButtonRow(forceButton, rejectButton)
+		}
 	}
 	elements := []any{reviewCardHeroBlock(job, coverImgKey), reviewCardInfoBlock(job)}
 	if details := reviewCardDetailsPanel(job); details != nil {
@@ -128,9 +158,9 @@ func buildReviewPublishingCard(job publishJob) map[string]any {
 			"icon":     map[string]any{"tag": "standard_icon", "token": "readinfo_outlined"},
 			"title":    feishuPlainText(reviewCardHeaderTitle),
 			"subtitle": feishuPlainText("请求已受理，最终结果以随后终态卡为准"),
-			"text_tag_list": []any{map[string]any{
+			"text_tag_list": reviewCardTagsWithForced(job, map[string]any{
 				"tag": "text_tag", "text": feishuPlainText("发布中"), "color": "blue",
-			}},
+			}),
 		},
 		"body": map[string]any{
 			"direction": "vertical", "padding": "12px 12px 12px 12px",
@@ -197,10 +227,13 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 		header["template"] = "green"
 		header["icon"] = map[string]any{"tag": "standard_icon", "token": "succeed_filled"}
 		header["subtitle"] = feishuPlainText("文章已在 FoodTalks 公开可见 · " + publishUnpublishWindowLabel(job, time.Now().UTC()))
-		header["text_tag_list"] = []any{map[string]any{
+		header["text_tag_list"] = reviewCardTagsWithForced(job, map[string]any{
 			"tag": "text_tag", "text": feishuPlainText("已发布"), "color": "green",
-		}}
+		})
 		actionLabel = "通过并发布了本文"
+		if job.ReviewForced {
+			actionLabel = "强制发布了本文（当时风险结论为阻断级）"
+		}
 		if job.PublicationAction == publishPublicationActionRepublish {
 			actionLabel = "重新发布了本文"
 		}

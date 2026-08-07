@@ -236,6 +236,45 @@ func (n *feishuNotifier) updateCard(ctx context.Context, messageID string, card 
 	return nil
 }
 
+// recallMessage 撤回机器人自己发出的消息（DELETE /im/v1/messages/{id}）。
+// 用于审核卡「撤回重发」：超出撤回窗口等失败由调用方决定是否降级继续。
+func (n *feishuNotifier) recallMessage(ctx context.Context, messageID string) error {
+	messageID = strings.TrimSpace(messageID)
+	if !feishuMessageIDSafe(messageID) {
+		return errors.New("feishu: message_id 无效")
+	}
+	token, err := n.tenantAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		n.baseURL+"/open-apis/im/v1/messages/"+url.PathEscape(messageID), nil)
+	if err != nil {
+		return fmt.Errorf("feishu: 构造撤回请求: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("飞书撤回接口不可达: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return fmt.Errorf("飞书撤回响应读取失败: %w", err)
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return fmt.Errorf("飞书撤回响应异常（HTTP %d）: %w", resp.StatusCode, err)
+	}
+	if env.Code != 0 {
+		return fmt.Errorf("飞书撤回失败 code=%d msg=%s", env.Code, env.Msg)
+	}
+	return nil
+}
+
 func feishuMessageIDSafe(messageID string) bool {
 	if messageID == "" || len(messageID) > 256 {
 		return false

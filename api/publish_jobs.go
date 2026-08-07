@@ -150,6 +150,7 @@ type publishJob struct {
 	ReviewedBy           string `json:"reviewed_by,omitempty"`           // 审核人 open_id（飞书卡片回调 operator；HTTP 审核为空）
 	ReviewedAt           string `json:"reviewed_at,omitempty"`           // 审核时刻（RFC3339 UTC）
 	ReviewAction         string `json:"review_action,omitempty"`         // approve / reject；publicizing 恢复的授权凭据
+	ReviewForced         bool   `json:"review_forced,omitempty"`         // 阻断级风险下的强制发布（2026-08-07 用户裁定），终态卡与留痕据此标注
 	ApprovedRiskVersion  string `json:"approved_risk_version,omitempty"` // approve 当刻与风险快照绑定的摘要
 	ReviewCardMsgID      string `json:"review_card_msg_id,omitempty"`    // 旧任务单卡片兼容
 	// 新配置支持同一张审核卡投递到多个群；map 的 key 是 chat_id，value 是

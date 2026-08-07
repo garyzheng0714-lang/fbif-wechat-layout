@@ -273,7 +273,8 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 		}
 	}
 	jobID := coerceFeishuJobID(value.JobID)
-	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionReject &&
+	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionForceApprove &&
+		value.Action != feishuCardActionReject &&
 		value.Action != feishuCardActionUnpublish && value.Action != feishuCardActionRepublish) {
 		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位发布任务"}
 	}
@@ -340,8 +341,12 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	if value.Action == feishuCardActionApprove {
-		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在发布", card: buildReviewPublishingCard(reviewed)}
+	if value.Action == feishuCardActionApprove || value.Action == feishuCardActionForceApprove {
+		toast := "已受理，正在发布"
+		if value.Action == feishuCardActionForceApprove {
+			toast = "已受理，正在强制发布"
+		}
+		return reviewCardOutcome{toastType: "success", toastContent: toast, card: buildReviewPublishingCard(reviewed)}
 	}
 	return reviewCardOutcome{toastType: "success", toastContent: "已驳回", card: buildReviewDoneCard(reviewed)}
 }

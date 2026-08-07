@@ -604,7 +604,9 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		if !ok {
 			return
 		}
-		job, err := p.refreshReviewCard(r.Context(), id)
+		// ?resend=1：撤回群里旧卡并发一张全新卡（默认仍是原位更新不刷屏）。
+		resend := r.URL.Query().Get("resend") == "1"
+		job, err := p.refreshReviewCard(r.Context(), id, resend)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
 			return
