@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -538,6 +539,9 @@ func (m *feishuExportJobManager) finish(jobID string, result preparedFeishuDocum
 		return
 	} else {
 		code, message := feishuExportPublicError(err)
+		// 内部错误串只含飞书状态码/业务码，不含令牌；对外只展示 message，
+		// 真实原因必须落日志，否则线上失败无从排查（2026-08-07 wiki 事故）。
+		log.Printf("feishu export job %s failed (%s): %v", job.id, code, err)
 		job.state = "failed"
 		job.progress = feishuExportProgress{Phase: "failed", Done: 0, Total: 0, Unit: ""}
 		job.result = nil

@@ -34,6 +34,12 @@ func feishuExportErrorResponse(err error) (int, string, string) {
 	var wikiErr *feishuWikiAccessError
 	switch {
 	case errors.As(err, &wikiErr):
+		// 131005：节点对当前用户不可见（已删除/移动，或账号无权）。与「缺授权
+		// 范围」分开报，否则用户会被误导去反复重登。
+		if wikiErr.code == 131005 {
+			return http.StatusNotFound, "feishu_wiki_not_found",
+				"飞书找不到这篇知识库文档：可能已被删除、移动，或当前登录的飞书账号看不到它。请先确认你自己在飞书里能打开这条链接"
+		}
 		return http.StatusForbidden, "feishu_wiki_access_denied",
 			"飞书拒绝访问这篇知识库文档。如果你在飞书里能打开它，请退出登录后重新用飞书登录（授予「查看知识库节点」权限）再试"
 	case errors.Is(err, errFeishuWikiNotDocument):
