@@ -136,8 +136,11 @@ type publishJob struct {
 	AISource  string            `json:"ai_source,omitempty"`  // 正文声明的原始出处（自家号转发他人文章时命中；决定 sourceType/sourceName）
 	AINotes   string            `json:"ai_notes,omitempty"`   // AI 优化说明（人话 2-4 句；兜底="AI 预填未执行（原因）"）
 	RiskLevel string            `json:"risk_level,omitempty"` // pass / warning / block；block 禁止 approve
-	RiskItems []publishRiskItem `json:"risk_items,omitempty"` // 四类红线的证据与原因
-	RiskNotes string            `json:"risk_notes,omitempty"`
+	RiskItems []publishRiskItem `json:"risk_items,omitempty"` // 五类红线的证据与原因（含 certainty 分层）
+	// RiskHeadline 审核卡首屏那句话（≤100 字）。旧任务为空时由
+	// publishRiskHeadlineOrFallback 现场合成，不需要数据迁移。
+	RiskHeadline string `json:"risk_headline,omitempty"`
+	RiskNotes    string `json:"risk_notes,omitempty"`
 	RiskRaw   string            `json:"risk_raw,omitempty"` // 模型解析失败时留痕，最多 2000 字
 	// 持久 notification outbox：状态迁移与待发送事件同一次 JSON 原子写；sending
 	// 在进程启动时视为上次崩溃遗留并重置 pending。seq 防旧发送结果清掉新事件。

@@ -848,6 +848,7 @@ func (p *publishPipeline) stageAssessRisk(ctx context.Context, job publishJob) e
 	}, func(j *publishJob) {
 		j.RiskLevel = result.Level
 		j.RiskItems = append([]publishRiskItem(nil), result.Items...)
+		j.RiskHeadline = result.Headline
 		j.RiskNotes = result.Notes
 		j.RiskRaw = result.Raw
 		j.Stage = nextStage

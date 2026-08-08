@@ -117,6 +117,7 @@ func applyPublishContentSeed(job *publishJob, seed publishContentSeed) {
 	job.AINotes = ""
 	job.RiskLevel = ""
 	job.RiskItems = nil
+	job.RiskHeadline = ""
 	job.RiskNotes = ""
 	job.RiskRaw = ""
 	job.ContentFrozenVersion = 0
