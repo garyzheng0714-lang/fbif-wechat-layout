@@ -19,38 +19,89 @@ const (
 	publishRiskWarning = "warning"
 	publishRiskBlock   = "block"
 
+	publishRiskCategoryFactual       = "factual"
 	publishRiskCategoryEfficacy      = "efficacy"
 	publishRiskCategoryRepublication = "republication"
 	publishRiskCategoryCompetitor    = "competitor"
 	publishRiskCategoryDataSource    = "data_source"
 	publishRiskCategorySystem        = "system"
+
+	// certainty 决定这条提示出现在审核卡的哪一层（2026-08-08 用户裁定）：
+	// confirmed = 能凭常识或正文自身矛盾指认的实质性错误，直接推到卡片首屏；
+	// unverified = 存疑但证明不了，收进折叠的完整报告，不占审核人注意力。
+	// 模型拿不准一律 unverified；缺失/未知值按 unverified 处理（fail-soft 到折叠层，
+	// 但首屏文案不会因此谎称「检查通过」，见 reviewCardHeadlineBlock）。
+	publishRiskCertaintyConfirmed  = "confirmed"
+	publishRiskCertaintyUnverified = "unverified"
 )
 
 type publishRiskItem struct {
-	Category string `json:"category"`
-	Level    string `json:"level"`
-	Evidence string `json:"evidence"`
-	Reason   string `json:"reason"`
+	Category  string `json:"category"`
+	Level     string `json:"level"`
+	Certainty string `json:"certainty,omitempty"`
+	Evidence  string `json:"evidence"`
+	Reason    string `json:"reason"`
 }
 
 type publishRiskAssessment struct {
-	Level string            `json:"level"`
-	Items []publishRiskItem `json:"items"`
-	Notes string            `json:"notes,omitempty"`
-	Raw   string            `json:"raw,omitempty"`
+	Level string `json:"level"`
+	// Headline 给审核人的一句话结论（≤100 字），卡片首屏唯一的长文本。
+	Headline string            `json:"headline,omitempty"`
+	Items    []publishRiskItem `json:"items"`
+	Notes    string            `json:"notes,omitempty"`
+	Raw      string            `json:"raw,omitempty"`
+}
+
+// publishRiskHeadlineMaxRunes 首屏一句话结论的硬上限（用户裁定 100 字内）。
+const publishRiskHeadlineMaxRunes = 100
+
+// publishRiskItemConfirmed 该条是否属于「已证实的实质性问题」——只有这类才上首屏。
+// 转载授权无论确不确定都归档到完整报告（用户裁定：那些不太需要知道）；
+// 风险检查异常（system）是流程状态不是文章问题，也不上首屏。
+func publishRiskItemConfirmed(item publishRiskItem) bool {
+	switch item.Category {
+	case publishRiskCategoryRepublication, publishRiskCategorySystem:
+		return false
+	}
+	return item.Certainty == publishRiskCertaintyConfirmed
+}
+
+// splitPublishRiskItems 把风险条目分成「首屏必看」与「完整报告」两层。
+func splitPublishRiskItems(items []publishRiskItem) (confirmed, deferred []publishRiskItem) {
+	for _, item := range items {
+		if publishRiskItemConfirmed(item) {
+			confirmed = append(confirmed, item)
+			continue
+		}
+		deferred = append(deferred, item)
+	}
+	return confirmed, deferred
 }
 
 func publishRiskSystemPrompt() string {
 	return `你是 FoodTalks 发布前风险审核助手。请用简体中文，只输出 JSON，不要 markdown。
 你只做提示与分级，不拥有发布决策权，不得改写正文。
 
-检查四类红线：
-1. 功效表达 efficacy：食品健康、治疗、减肥、改善身体等承诺是否缺证据或可能违法。
-2. 转载授权 republication：是否无法确认转载许可、原作者或原出处。
-3. 竞品评价 competitor：是否含无证据的贬损、排名、比较或结论性评价。
-4. 数据来源 data_source：关键数字、市场份额、销量、研究结论是否缺明确来源。
+审核编辑最需要你抓出来的是**文章里写错了的事实**，其次才是合规红线。一篇文章十有八九没有实质性错误，那就干脆地说没有——不要为了显得尽责而把常规现象包装成问题。
 
-输出：{"level":"pass|warning|block","items":[{"category":"efficacy|republication|competitor|data_source","level":"warning|block","evidence":"正文原句","reason":"为什么需要人工处理"}],"notes":"给审核人的简短说明"}
+检查五类：
+1. 事实与常识 factual（最高优先级）：年份、日期、地点、数字、人名、公司名、机构名、职务、事件经过、单位换算，是否与公认常识相矛盾，或与本文自身前后矛盾。例：正文写「2018 年的北京冬奥会」，而北京冬奥会实际在 2022 年举办。这类错误必须报。
+2. 功效表达 efficacy：食品健康、治疗、减肥、改善身体等承诺是否缺证据或可能违法。
+3. 转载授权 republication：是否无法确认转载许可、原作者或原出处。
+4. 竞品评价 competitor：是否含无证据的贬损、排名、比较或结论性评价。
+5. 数据来源 data_source：关键数字、市场份额、销量、研究结论是否缺明确来源。
+
+每一条都必须标 certainty，它决定这条会出现在审核卡的哪一层：
+- confirmed：你能凭公认常识或正文自身的前后矛盾**直接指认它是错的**，并说得出正确的应该是什么。这类会直接推到审核人眼前。
+- unverified：你觉得可疑，但凭手上的正文和常识证明不了，只能提醒人去核。这类收进折叠的完整报告。
+拿不准一律填 unverified。宁可漏一条 confirmed，也不许把猜测标成 confirmed。
+「文中数据没写来源」「未标注转载授权」这类**普遍现象**永远是 unverified，除非正文自身就自相矛盾。
+
+headline：给审核人的一句话结论，**不超过 100 个字**，用大白话直接说事，不要「经检查」「本文」这类套话。
+- 有 confirmed 条目时：只讲最要紧的那一条，写清错在哪里、正确的是什么。例：「正文把北京冬奥会写成 2018 年举办，实际是 2022 年。」
+- 没有 confirmed 条目时：写「未发现可证实的实质性错误」，可再补一句还有几条待核提示。
+
+输出：{"level":"pass|warning|block","headline":"...","items":[{"category":"factual|efficacy|republication|competitor|data_source","level":"warning|block","certainty":"confirmed|unverified","evidence":"正文原句","reason":"为什么需要人工处理；confirmed 的必须写清正确的应该是什么"}],"notes":"给审核人的简短补充说明"}
 规则：pass 时 items 必须为空；有疑点至少 warning；存在明显违法/授权硬缺口才 block；证据必须引用输入正文，禁止编造。`
 }
 
@@ -138,13 +189,22 @@ func parsePublishRiskAssessment(text string) (publishRiskAssessment, error) {
 	}
 	highest := publishRiskPass
 	allowedCategories := map[string]bool{
-		publishRiskCategoryEfficacy: true, publishRiskCategoryRepublication: true,
-		publishRiskCategoryCompetitor: true, publishRiskCategoryDataSource: true,
+		publishRiskCategoryFactual: true, publishRiskCategoryEfficacy: true,
+		publishRiskCategoryRepublication: true,
+		publishRiskCategoryCompetitor:    true, publishRiskCategoryDataSource: true,
 	}
 	for i := range result.Items {
 		item := &result.Items[i]
 		item.Category = strings.ToLower(strings.TrimSpace(item.Category))
 		item.Level = strings.ToLower(strings.TrimSpace(item.Level))
+		// certainty 不做严格校验而是收敛：只有明确的 confirmed 才升到首屏，
+		// 其余（拼写错、缺失、未来新值）一律落回 unverified。模型漏填不该把
+		// 一条待核提示误升成「已证实的错误」。
+		if strings.ToLower(strings.TrimSpace(item.Certainty)) == publishRiskCertaintyConfirmed {
+			item.Certainty = publishRiskCertaintyConfirmed
+		} else {
+			item.Certainty = publishRiskCertaintyUnverified
+		}
 		item.Evidence = truncateRunes(strings.TrimSpace(item.Evidence), 500)
 		item.Reason = truncateRunes(strings.TrimSpace(item.Reason), 500)
 		if !allowedCategories[item.Category] {
@@ -168,9 +228,37 @@ func parsePublishRiskAssessment(text string) (publishRiskAssessment, error) {
 	if highest == publishRiskBlock || (highest == publishRiskWarning && result.Level == publishRiskPass) {
 		result.Level = highest
 	}
+	result.Headline = truncateRunes(strings.Join(strings.Fields(result.Headline), " "), publishRiskHeadlineMaxRunes)
 	result.Notes = truncateRunes(strings.TrimSpace(result.Notes), 600)
 	result.Raw = ""
 	return result, nil
+}
+
+// publishRiskHeadlineOrFallback 卡片首屏那句话的唯一取值口径。模型没给 headline、
+// 旧任务没有该字段时，代码自己合成一句——首屏永远有话说，且绝不在有已证实问题时
+// 显示成「未发现」。
+func publishRiskHeadlineOrFallback(job publishJob) string {
+	if h := strings.TrimSpace(job.RiskHeadline); h != "" {
+		return truncateRunes(h, publishRiskHeadlineMaxRunes)
+	}
+	confirmed, deferred := splitPublishRiskItems(job.RiskItems)
+	if len(confirmed) > 0 {
+		lead := strings.Join(strings.Fields(confirmed[0].Reason), " ")
+		if lead == "" {
+			lead = strings.Join(strings.Fields(confirmed[0].Evidence), " ")
+		}
+		return truncateRunes(publishRiskCategoryLabel(confirmed[0].Category)+"："+lead, publishRiskHeadlineMaxRunes)
+	}
+	if !publishRiskLevelKnown(job.RiskLevel) {
+		return "风险检查未完成，发布前需人工核对。"
+	}
+	if job.RiskLevel == publishRiskBlock {
+		// 阻断结论没有对应的已证实条目时，首屏也必须把阻断说出来。
+		return fmt.Sprintf("判定为阻断级，%d 条提示需人工处理后再决定。", len(deferred))
+	}
+	// 待核条数由折叠条标题承担，这里不再说第二遍——两行紧挨着复读同一个数字
+	// 是 2026-08-08 真机截图上最刺眼的地方。
+	return "未发现可证实的实质性错误。"
 }
 
 func validPublishRiskLevel(level string, allowPass bool) bool {
@@ -183,12 +271,14 @@ func fallbackPublishRisk(raw string, cause error) publishRiskAssessment {
 		reason = truncateRunes(strings.Join(strings.Fields(cause.Error()), " "), 300)
 	}
 	return publishRiskAssessment{
-		Level: publishRiskWarning,
+		Level:    publishRiskWarning,
+		Headline: "风险检查未完成，这篇没有经过任何自动核对，请人工通读后再决定。",
 		Items: []publishRiskItem{{
-			Category: publishRiskCategorySystem,
-			Level:    publishRiskWarning,
-			Evidence: "风险模型未能产出可验证的结构化结果",
-			Reason:   reason,
+			Category:  publishRiskCategorySystem,
+			Level:     publishRiskWarning,
+			Certainty: publishRiskCertaintyUnverified,
+			Evidence:  "风险模型未能产出可验证的结构化结果",
+			Reason:    reason,
 		}},
 		Notes: "风险检查未完成，必须由审核人手工核对后再决定。原因：" + reason,
 		Raw:   truncateRunes(strings.TrimSpace(raw), 2000),
@@ -220,6 +310,8 @@ func publishRiskLevelKnown(level string) bool {
 
 func publishRiskCategoryLabel(category string) string {
 	switch category {
+	case publishRiskCategoryFactual:
+		return "事实与常识"
 	case publishRiskCategoryEfficacy:
 		return "功效表达"
 	case publishRiskCategoryRepublication:
@@ -241,12 +333,17 @@ func formatPublishRiskText(job publishJob) string {
 	var b strings.Builder
 	b.WriteString("风险审核：")
 	b.WriteString(publishRiskLevelLabel(job.RiskLevel))
-	limit := len(job.RiskItems)
+	b.WriteString("\n")
+	b.WriteString(publishRiskHeadlineOrFallback(job))
+	// 纯文本降级同样先给已证实的实质性问题，再给待核提示（与卡片同一优先级）。
+	confirmed, deferred := splitPublishRiskItems(job.RiskItems)
+	ordered := append(append([]publishRiskItem(nil), confirmed...), deferred...)
+	limit := len(ordered)
 	if limit > 4 {
 		limit = 4
 	}
 	for i := 0; i < limit; i++ {
-		item := job.RiskItems[i]
+		item := ordered[i]
 		b.WriteString("\n- ")
 		b.WriteString(publishRiskCategoryLabel(item.Category))
 		b.WriteString("：")
@@ -255,8 +352,8 @@ func formatPublishRiskText(job publishJob) string {
 		b.WriteString(truncateRunes(strings.Join(strings.Fields(item.Reason), " "), 100))
 		b.WriteString("）")
 	}
-	if len(job.RiskItems) > limit {
-		b.WriteString(fmt.Sprintf("\n- 另有 %d 条，请在预览中查看", len(job.RiskItems)-limit))
+	if len(ordered) > limit {
+		b.WriteString(fmt.Sprintf("\n- 另有 %d 条，请在预览中查看", len(ordered)-limit))
 	}
 	if strings.TrimSpace(job.RiskNotes) != "" {
 		b.WriteString("\n说明：")

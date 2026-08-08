@@ -148,7 +148,7 @@ func TestPublishRiskBlockCannotApproveAndCardHasNoApproveAction(t *testing.T) {
 		t.Fatalf("marshal card: %v", err)
 	}
 	card := string(raw)
-	for _, want := range []string{"风险审核", "阻断", "转载授权", "转载自某媒体", "未确认转载授权", "禁止一键发布"} {
+	for _, want := range []string{"检查结论", "阻断", "转载授权", "转载自某媒体", "未确认转载授权", "禁止一键发布"} {
 		if !strings.Contains(card, want) {
 			t.Fatalf("block 卡片缺少 %q：%s", want, card)
 		}

@@ -102,7 +102,10 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 			buttons = feishuButtonRow(forceButton, rejectButton)
 		}
 	}
-	elements := []any{reviewCardHeroBlock(job, coverImgKey), reviewCardInfoBlock(job)}
+	elements := []any{reviewCardHeroBlock(job, coverImgKey), reviewCardInfoBlock(job, true)}
+	if headline := reviewCardRiskHeadlineBlock(job); headline != nil {
+		elements = append(elements, headline)
+	}
 	if details := reviewCardDetailsPanel(job); details != nil {
 		elements = append(elements, details)
 	}
@@ -145,7 +148,7 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 // buildReviewPublishingCard approve 已被 CAS 接受后立即返回的无按钮进度卡。FoodTalks
 // PUT 在后台执行，回调不等待外部网络；失败/成功都可由任务详情与终态通知追踪。
 func buildReviewPublishingCard(job publishJob) map[string]any {
-	elements := []any{reviewCardInfoBlock(job), map[string]any{
+	elements := []any{reviewCardInfoBlock(job, false), map[string]any{
 		"tag":       "markdown",
 		"text_size": "notation",
 		"content":   reviewCardAuditTrail(job, "已通过本文，后台正在发布"),
@@ -182,7 +185,7 @@ func buildReviewLifecycleProgressCard(job publishJob, action string) map[string]
 		label = "重新发布中"
 		content = "已受理重新发布请求，正在等待 FoodTalks 返回最终结果。"
 	}
-	elements := []any{reviewCardInfoBlock(job), map[string]any{
+	elements := []any{reviewCardInfoBlock(job, false), map[string]any{
 		"tag": "markdown", "text_size": "notation",
 		"content": content + "\n\n" + reviewCardAuditTrail(job, content),
 	}}
@@ -221,7 +224,7 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 	var actionLabel string
 	elements := []any{
 		reviewCardHeroBlock(job, strings.TrimSpace(job.ReviewCoverImgKey)),
-		reviewCardInfoBlock(job),
+		reviewCardInfoBlock(job, false),
 	}
 	if published {
 		header["template"] = "green"
@@ -352,7 +355,7 @@ func buildReviewIssueCard(job publishJob, uncertain bool) map[string]any {
 	// 让人无从判断是哪篇文章出的问题（与终态卡同口径）。
 	elements := []any{
 		reviewCardHeroBlock(job, strings.TrimSpace(job.ReviewCoverImgKey)),
-		reviewCardInfoBlock(job),
+		reviewCardInfoBlock(job, false),
 		map[string]any{
 			"tag":       "markdown",
 			"text_size": "notation",
@@ -452,16 +455,25 @@ func reviewCardTagMarkup(tags []string) string {
 
 // reviewCardInfoBlock 把来源、作者、进站时间、目标环境和风险结论压成两行轻量上下文，
 // 不再用第二层灰色卡片与主内容争夺视觉焦点。
-func reviewCardInfoBlock(job publishJob) map[string]any {
+//
+// compact=true 用于待审核卡：那里 header 副标题已经写了「环境 · 任务 #N」，首屏也
+// 已有独立的检查结论块，再重复一遍环境、任务号和风险标签就是同义信息刷三遍
+// （真机截图实证：副标题与信息行第二行一字不差）。其余卡片的 header 副标题是状态
+// 文案、不带任务号，仍需这一行兜住身份与当时的风险结论。
+func reviewCardInfoBlock(job publishJob, compact bool) map[string]any {
 	sourceName := job.SourceName
 	if sourceName == "" {
 		sourceName = "未知"
 	}
 	content := fmt.Sprintf(
-		"<font color='grey'>来源</font> %s　·　<font color='grey'>作者</font> %s　·　<font color='grey'>进站</font> %s\n<font color='grey'>%s　·　任务 #%d</font>　%s",
+		"<font color='grey'>来源</font> %s　·　<font color='grey'>作者</font> %s　·　<font color='grey'>进站</font> %s",
 		reviewCardSafeText(sourceName, 100),
 		reviewCardSafeOrDash(job.Author, 100),
-		formatReviewCardTime(job.UpdatedAt), reviewCardEnvironmentLabel(), job.ID, reviewCardRiskTag(job.RiskLevel))
+		formatReviewCardTime(job.UpdatedAt))
+	if !compact {
+		content += fmt.Sprintf("\n<font color='grey'>%s　·　任务 #%d</font>　%s",
+			reviewCardEnvironmentLabel(), job.ID, reviewCardRiskTag(job.RiskLevel))
+	}
 	return map[string]any{
 		"tag": "markdown", "content": content, "text_size": "notation",
 	}
@@ -510,24 +522,152 @@ func reviewCardSafeURL(raw string) string {
 	).Replace(safe)
 }
 
+// reviewCardRiskHeadlineBlock 审核卡首屏唯一的检查结论（2026-08-08 用户裁定）。
+//
+// 首屏只放**已证实的实质性问题**：一句话结论（≤100 字）+ 至多 3 条逐条指认。
+// 转载授权、证明不了的存疑项、排版说明这些每篇都长一个样的内容全部沉到折叠的
+// 完整检查报告里——审核人扫一眼就要下判断，重复内容占满首屏等于什么都没说。
+// 没有已证实问题时这里只剩一行小字，明确区分「干净」与「有几条待核」，
+// 绝不因为模型没标 certainty 就谎称检查通过。
+func reviewCardRiskHeadlineBlock(job publishJob) map[string]any {
+	if strings.TrimSpace(job.RiskLevel) == "" && strings.TrimSpace(job.RiskHeadline) == "" {
+		return nil
+	}
+	confirmed, _ := splitPublishRiskItems(job.RiskItems)
+	headline := reviewCardSafeText(publishRiskHeadlineOrFallback(job), publishRiskHeadlineMaxRunes)
+	if len(confirmed) > 0 {
+		return reviewCardConfirmedRiskBlock(confirmed, headline)
+	}
+	// 无已证实问题：一行小字，不与标题摘要争视觉焦点。
+	//
+	// 正常态**不挂状态标签**：标签写「无实质性错误」、后面紧跟「未发现可证实的
+	// 实质性错误」，是同一句话说两遍（2026-08-08 真机截图）；而且它和标题下方的
+	// 蓝色文章标签形状一模一样、语义完全不同，扫一眼容易混。标签只留给阻断和
+	// 检查未完成这两种真正的异常——那时它才携带信息。
+	var content strings.Builder
+	switch {
+	case !publishRiskLevelKnown(job.RiskLevel):
+		content.WriteString("<text_tag color='orange'>检查未完成</text_tag> ")
+	case job.RiskLevel == publishRiskBlock:
+		// 阻断级即使没有已证实条目也绝不能显示成绿色「无实质性错误」——
+		// header 是红的，首屏说没事，等于教审核人无视阻断结论。
+		content.WriteString("<text_tag color='red'>风险阻断</text_tag> ")
+	default:
+		content.WriteString("<font color='grey'>检查结论　</font>")
+	}
+	content.WriteString("<font color='grey'>")
+	content.WriteString(headline)
+	content.WriteString("</font>")
+	return map[string]any{
+		"tag": "markdown", "content": content.String(), "text_size": "notation",
+		// 与上方来源行贴成一组「这篇文章的背景信息」，同折叠条、按钮拉开距离：
+		// 四行等距平铺会让卡片下半身散掉。
+		"margin": "-6px 0px 0px 0px",
+	}
+}
+
+// reviewCardConfirmedRiskBlock 已证实问题的红色块——审核人唯一必须停下来看的东西。
+//
+// 四条排版纪律（2026-08-08 真机截图 + 用户反馈后定的）：
+//   - **层级靠元素间距，不靠换行符**：飞书 markdown 吃掉单个 \n，同一段里的
+//     「原句」会直接粘在上一句尾巴上（`…是平昌冬奥会原句 2018年的…`）。每一行
+//     都必须是独立元素，由 column 的 vertical_spacing 分隔。
+//   - **状态标签不进正文首**：块顶只放一个灰色小标题，与折叠区的「检查结论」
+//     「排版说明」同一套语法；状态色由 header 的 template 与 text_tag 承担，
+//     红底本身已经在喊「这里有问题」，正文再插一个红标签就是第三遍编码同一件事
+//     （cardkit alert-form 脚手架同样是第一行直接给结论，不内联标签）。
+//   - **不重复说同一件事**：只有一条问题时省掉 headline——它和该条 reason 本来
+//     就是同一句话的两种写法，并排放着像复读。多条时 headline 才有概括价值，
+//     此时条目改用无序列表，让「概括 + 几条明细」的从属关系一眼可见。
+//   - **不重复折叠条已经说的话**：「另有 N 条待核提示」由折叠条标题承担，这里不再说。
+func reviewCardConfirmedRiskBlock(confirmed []publishRiskItem, headline string) map[string]any {
+	limit := len(confirmed)
+	if limit > 3 {
+		limit = 3
+	}
+	// 首行把「需要确认」和一句话总括合成一句（用户 2026-08-08 手写的格式）：
+	// 单条时下面那条本身就是结论，重复一遍等于复读，只留标签词。
+	lead := "**需要确认**"
+	if limit > 1 {
+		lead += "：" + headline
+	}
+	elements := []any{map[string]any{"tag": "markdown", "content": lead}}
+	elements = append(elements, map[string]any{
+		"tag":     "markdown",
+		"content": reviewCardRiskItemList(confirmed[:limit], 120, 100),
+	})
+	if len(confirmed) > limit {
+		elements = append(elements, map[string]any{
+			"tag":       "markdown",
+			"text_size": "notation",
+			"content": fmt.Sprintf("<font color='grey'>另有 %d 条已证实问题，见下方完整检查报告。</font>",
+				len(confirmed)-limit),
+		})
+	}
+	// 背景色块把这一组从卡片里"抬"出来（规范 §3）：平铺成文字会和摘要、来源行混成一片。
+	return map[string]any{
+		"tag":       "column_set",
+		"flex_mode": "none",
+		"columns": []any{map[string]any{
+			"tag":              "column",
+			"width":            "weighted",
+			"weight":           1,
+			"direction":        "vertical",
+			"background_style": "red-100",
+			"padding":          "12px 12px 12px 12px",
+			"vertical_spacing": "8px",
+			"elements":         elements,
+		}},
+	}
+}
+
+// reviewCardRiskItemList 风险条目 → 飞书官方无序列表（首屏红块与折叠报告共用一份，
+// 语法只维护一处）。
+//
+// 两条来自官方文档的硬约束（open.feishu.cn 卡片 markdown 语法，2026-08-08 查证）：
+//   - 列表项之间用 `\n` 分隔；
+//   - **列表项内换行必须用 `<br>`**——单个 `\n` 是软换行，官方明说「渲染时可能被
+//     忽略」，实测就是被忽略的（原句会粘到上一句尾巴上）。用 `<br>` 原句才留在
+//     列表项内部，自动跟着圆点缩进对齐，不需要手画点号或用空格凑缩进。
+//
+// `<br>` 由本函数拼接，外部文本仍先经 reviewCardSafeText 收敛（其中 `<` 会被换成
+// 全角，注入不进标签）。
+func reviewCardRiskItemList(items []publishRiskItem, reasonLimit, evidenceLimit int) string {
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		label := reviewCardSafeText(publishRiskCategoryLabel(item.Category), 40)
+		if item.Category == publishRiskCategorySystem {
+			lines = append(lines, fmt.Sprintf(
+				"- **%s**：风险模型未返回可验证的结构化结果。<br><font color='grey'>请人工核对事实常识、功效表达、转载授权、竞品评价和数据来源后再决定。</font>",
+				label))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- **%s**：%s<br><font color='grey'>原句：“%s”</font>",
+			label,
+			reviewCardSafeText(item.Reason, reasonLimit),
+			reviewCardSafeText(item.Evidence, evidenceLimit)))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func reviewCardDetailsPanel(job publishJob) map[string]any {
 	elements := []any{}
+	// 顺序即重要性：待核提示（人还得看）→ 排版说明（知道 AI 干了什么就行）。
+	if risk := reviewCardRiskDetailBlock(job); risk != nil {
+		elements = append(elements, risk)
+	}
 	if notes := reviewCardAINotesBlock(job); notes != nil {
 		elements = append(elements, notes)
-	}
-	if risk := reviewCardRiskBlock(job); risk != nil {
-		elements = append(elements, risk)
 	}
 	if len(elements) == 0 {
 		return nil
 	}
 	return map[string]any{
 		"tag": "collapsible_panel",
-		// 首屏只保留风险等级标签；详细说明由审核人主动展开，避免
-		// warning/block 文章把长风险清单直接撑开审核卡片。
+		// 首屏只留一句话结论；转载说明、存疑项与排版说明由审核人主动展开。
 		"expanded": false,
 		"header": map[string]any{
-			"title":         feishuPlainText("查看排版与风险说明"),
+			"title":         feishuPlainText(reviewCardDetailsPanelTitle(job)),
 			"width":         "auto_when_fold",
 			"icon":          map[string]any{"tag": "standard_icon", "token": "info_outlined", "color": "grey"},
 			"icon_position": "left",
@@ -535,6 +675,15 @@ func reviewCardDetailsPanel(job publishJob) map[string]any {
 		"vertical_spacing": "4px",
 		"elements":         elements,
 	}
+}
+
+// reviewCardDetailsPanelTitle 折叠条自己说清里面有多少东西，否则审核人无从判断值不值得展开。
+func reviewCardDetailsPanelTitle(job publishJob) string {
+	_, deferred := splitPublishRiskItems(job.RiskItems)
+	if len(deferred) > 0 {
+		return fmt.Sprintf("点此查看完整检查报告（%d 条待核提示）", len(deferred))
+	}
+	return "点此查看完整检查报告"
 }
 
 // reviewCardAINotesBlock AI 优化说明段（M5）。notes 为空时不渲染。
@@ -658,40 +807,41 @@ func reviewCardAINoteLabel(item string) (string, string) {
 	return "", item
 }
 
-// reviewCardRiskBlock 展示持久化的风险结论与证据。模型输出按纯文本收敛后再拼
-// markdown，避免正文片段注入标签/链接；卡片最多展示 6 条，完整结果仍在任务详情。
-func reviewCardRiskBlock(job publishJob) map[string]any {
+// reviewCardRiskDetailBlock 折叠区里的完整检查报告。已证实的实质性问题已在首屏
+// 逐条指认过，这里只承载「证明不了、但请你留意」的那一层：存疑项、转载授权说明、
+// 检查异常。模型输出按纯文本收敛后再拼 markdown，避免正文片段注入标签/链接；
+// 卡片最多展示 6 条，完整结果仍在任务详情。
+func reviewCardRiskDetailBlock(job publishJob) map[string]any {
 	if strings.TrimSpace(job.RiskLevel) == "" {
 		return nil
 	}
+	confirmed, deferred := splitPublishRiskItems(job.RiskItems)
 	var content strings.Builder
-	content.WriteString("<font color='grey'>风险审核</font>\n**")
+	content.WriteString("<font color='grey'>检查结论</font>\n**")
 	content.WriteString(reviewCardSafeText(publishRiskLevelLabel(job.RiskLevel), 40))
 	content.WriteString("**")
 	if job.RiskLevel == publishRiskBlock {
 		content.WriteString(" · 禁止一键发布")
 	}
-	limit := len(job.RiskItems)
+	if len(confirmed) > 0 {
+		content.WriteString(fmt.Sprintf(" · <font color='grey'>%d 条已证实问题见上方</font>", len(confirmed)))
+	}
+	if len(deferred) == 0 {
+		content.WriteString("\n\n<font color='grey'>没有其他待核提示。</font>")
+		return map[string]any{
+			"tag": "markdown", "content": content.String(), "text_size": "notation",
+		}
+	}
+	content.WriteString("\n\n<font color='grey'>以下是证明不了、但请你留意的提示：</font>")
+	limit := len(deferred)
 	if limit > 6 {
 		limit = 6
 	}
-	for i := 0; i < limit; i++ {
-		item := job.RiskItems[i]
-		content.WriteString("\n\n")
-		content.WriteString(fmt.Sprintf("%d. **%s**", i+1,
-			reviewCardSafeText(publishRiskCategoryLabel(item.Category), 40)))
-		if item.Category == publishRiskCategorySystem {
-			content.WriteString("\n   发现：风险模型未返回可验证的结构化结果。")
-			content.WriteString("\n   处理建议：请人工核对功效表达、转载授权、竞品评价和数据来源后再决定。")
-			continue
-		}
-		content.WriteString("\n   发现：")
-		content.WriteString(reviewCardSafeText(item.Evidence, 140))
-		content.WriteString("\n   原因：")
-		content.WriteString(reviewCardSafeText(item.Reason, 140))
-	}
-	if len(job.RiskItems) > limit {
-		content.WriteString(fmt.Sprintf("\n\n另有 %d 条，请在任务详情中查看。", len(job.RiskItems)-limit))
+	// 与首屏红块同一套无序列表语法（条数由折叠条标题承担，这里不再编号）。
+	content.WriteString("\n\n")
+	content.WriteString(reviewCardRiskItemList(deferred[:limit], 140, 140))
+	if len(deferred) > limit {
+		content.WriteString(fmt.Sprintf("\n\n另有 %d 条，请在任务详情中查看。", len(deferred)-limit))
 	}
 	if strings.TrimSpace(job.RiskNotes) != "" && !reviewCardHasSystemRisk(job.RiskItems) {
 		content.WriteString("\n\n**补充说明**：")

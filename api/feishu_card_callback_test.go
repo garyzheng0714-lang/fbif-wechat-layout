@@ -701,11 +701,11 @@ func TestReviewCardHumanizesSystemRisk(t *testing.T) {
 		}},
 		RiskNotes: `风险检查未完成，必须人工核对。原因：https://ark.example Client.Timeout`,
 	}
-	block := reviewCardRiskBlock(job)
+	block := reviewCardRiskDetailBlock(job)
 	content := fmt.Sprint(block["content"])
 	for _, want := range []string{
-		"1. **风险检查异常**", "发现：风险模型未返回可验证的结构化结果。",
-		"处理建议：请人工核对功效表达、转载授权、竞品评价和数据来源后再决定。",
+		"- **风险检查异常**", "风险模型未返回可验证的结构化结果。",
+		"请人工核对事实常识、功效表达、转载授权、竞品评价和数据来源后再决定。",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("风险说明缺少 %q：%s", want, content)
