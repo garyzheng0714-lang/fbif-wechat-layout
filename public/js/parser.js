@@ -93,7 +93,15 @@ function readPPr(pPr) {
   if (contextualSpacing !== undefined) out.contextualSpacing = contextualSpacing;
   const widowControl = readOnOff(findOne(pPr, W, 'widowControl'));
   if (widowControl !== undefined) out.widowControl = widowControl;
-  if (findOne(pPr, W, 'numPr')) out.numPr = true;
+  const numPr = findOne(pPr, W, 'numPr');
+  if (numPr) {
+    out.numPr = true;
+    // numId 指向 numbering.xml 里的列表定义，是还原项目符号（•/◦/–）的唯一线索。
+    // 只记 id，符号解析交给 parseDocxNumbering —— readPPr 不该依赖另一个 zip 条目。
+    const numIdEl = findOne(numPr, W, 'numId');
+    const numId = numIdEl ? wattr(numIdEl, 'val') : '';
+    if (numId) out.numId = numId;
+  }
   if (findOne(pPr, W, 'outlineLvl')) out.outlineLevel = true;
 
   const jc = findOne(pPr, W, 'jc');
@@ -107,6 +115,7 @@ function mergePPr(base, next) {
     ...next,
     spacing: { ...(base && base.spacing ? base.spacing : {}), ...(next && next.spacing ? next.spacing : {}) },
     numPr: Boolean((base && base.numPr) || (next && next.numPr)),
+    numId: (next && next.numId) || (base && base.numId) || '',
     outlineLevel: Boolean((base && base.outlineLevel) || (next && next.outlineLevel)),
   };
 }
@@ -131,6 +140,47 @@ function looksLikeListStyle(styleId, styleName) {
   const id = compactStyleText(styleId);
   return /^list\b/.test(name) || /^(列表|清单)/.test(name) ||
     /^list/.test(id) || /^(列表|清单)/.test(id);
+}
+
+// 解析 word/numbering.xml → { numId: { fmt, text, color } }。
+// 飞书/Word 导出把项目符号的字形（• ◦ –）和颜色放在这里，正文段落只留一个 numId 引用；
+// 不读它就只能拿到「这是列表」这个布尔，符号本身无从还原（导入后列表塌成普通段落的根因）。
+// 只取每个 abstractNum 的首个 <w:lvl>（lvl 0）：公众号正文不做多级缩进，嵌套层级统一按一级符号渲染。
+export function parseDocxNumbering(numberingDom) {
+  const root = numberingDom && (numberingDom.documentElement || numberingDom);
+  const map = {};
+  if (!root) return map;
+
+  const abstracts = {};
+  for (const abs of findAll(root, W, 'abstractNum')) {
+    const id = wattr(abs, 'abstractNumId');
+    const lvl = findOne(abs, W, 'lvl');
+    if (!id || !lvl) continue;
+    const rPr = findOne(lvl, W, 'rPr');
+    abstracts[id] = {
+      fmt: wattr(findOne(lvl, W, 'numFmt'), 'val'),
+      text: wattr(findOne(lvl, W, 'lvlText'), 'val'),
+      color: rPr ? wattr(findOne(rPr, W, 'color'), 'val') : '',
+    };
+  }
+
+  for (const num of findAll(root, W, 'num')) {
+    const numId = wattr(num, 'numId');
+    const absId = wattr(findOne(num, W, 'abstractNumId'), 'val');
+    if (numId && abstracts[absId]) map[numId] = abstracts[absId];
+  }
+  return map;
+}
+
+// 段落的项目符号字面量。只还原【无序】列表（numFmt=bullet）：有序列表的序号需要跨段落
+// 计数状态（同一 numId 内递增、w:start、重启规则），没有可核验的导出样本前不猜，
+// 有序列表维持既有的「按普通段落渲染」行为。
+export function resolveListMarker(numbering, numId) {
+  const def = numbering && numId ? numbering[numId] : null;
+  if (!def || def.fmt !== 'bullet') return { marker: '', markerColor: '' };
+  const marker = String(def.text || '').trim();
+  if (!marker) return { marker: '', markerColor: '' };
+  return { marker, markerColor: def.color || '' };
 }
 
 export function parseDocxStyles(stylesDom) {
@@ -349,6 +399,8 @@ function buildParagraph(runs, base) {
     hasImg: runs.some(r => r.type === 'img'),
     isEmpty: !runs.some(r => r.type === 'img') && !text.trim(),
     isList: base.isList,
+    listMarker: base.listMarker || '',
+    listMarkerColor: base.listMarkerColor || '',
     styleId: base.styleId,
     styleName: base.styleName,
     styleChain: base.styleChain,
@@ -368,7 +420,7 @@ function buildParagraph(runs, base) {
 // multiple visual paragraphs into a single <w:p> with <w:br/> separators —
 // we split on those breaks so downstream rendering treats each line as its
 // own paragraph. Heading/outline style only applies to the first slice.
-export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null) {
+export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null, numbering = null) {
   const pPr = findOne(p, W, 'pPr');
   let align = 'left', isList = false, hasOutlineLevel = false, hasHeadingStyle = false;
   let styleId = '', styleName = '', isListStyle = false, contextualSpacing = false, spacing = {}, styleChain = [];
@@ -389,13 +441,15 @@ export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null) {
   hasHeadingStyle = looksLikeHeadingStyle(styleId, styleName);
   contextualSpacing = Boolean(effectivePPr.contextualSpacing);
   spacing = effectivePPr.spacing || {};
+  const { marker: listMarker, markerColor: listMarkerColor } =
+    resolveListMarker(numbering, effectivePPr.numId);
 
   const runs = [];
   const ctx = { fieldState: 'none', fieldInstr: '', fieldHref: '', linkHref: '' };
   walkParagraph(p, ctx, runs, ridToFile, ridToUrl);
 
   const base = {
-    align, isList, styleId, styleName, styleChain, isListStyle,
+    align, isList, listMarker, listMarkerColor, styleId, styleName, styleChain, isListStyle,
     contextualSpacing, spacing, hasOutlineLevel, hasHeadingStyle
   };
   if (!runs.some(r => r.type === 'br')) {
@@ -413,9 +467,11 @@ export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null) {
   // empty <w:br/>-only slices (common in WPS exports — e.g. blank line before
   // "信息来源" heading) would otherwise consume and lose the heading flags.
   const firstNonEmptyIdx = groups.findIndex(g => g.length > 0);
+  // listMarker 同理只留给首个非空切片：<w:br/> 是列表项【内部】的软换行，
+  // Word 里也只在项首画一个符号，每片都补一个会凭空多出符号。
   return groups.map((g, i) => buildParagraph(g, i === firstNonEmptyIdx
     ? base
-    : { ...base, hasOutlineLevel: false, hasHeadingStyle: false }));
+    : { ...base, hasOutlineLevel: false, hasHeadingStyle: false, listMarker: '', listMarkerColor: '' }));
 }
 
 // ---- DOCX Infrastructure ----
@@ -501,9 +557,13 @@ export async function parseDocx(file) {
   const styleSheet = stylesEntry
     ? parseDocxStyles(new DOMParser().parseFromString(await stylesEntry.async('string'), 'text/xml'))
     : parseDocxStyles(null);
+  const numberingEntry = zipFile('word/numbering.xml');
+  const numbering = numberingEntry
+    ? parseDocxNumbering(new DOMParser().parseFromString(await numberingEntry.async('string'), 'text/xml'))
+    : null;
   const body = findOne(docDom.documentElement, W, 'body');
   const paragraphs = [];
-  collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs, styleSheet);
+  collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs, styleSheet, numbering);
 
   return { paragraphs, imgCache };
 }
@@ -511,16 +571,16 @@ export async function parseDocx(file) {
 // Walk block-level content collecting paragraphs. Descends into tables
 // (flattening cells row-by-row), sdt wrappers, and mc:AlternateContent
 // so table text and SDT-wrapped paragraphs aren't silently dropped.
-export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styleSheet = null) {
+export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styleSheet = null, numbering = null) {
   for (const child of elementChildren(container)) {
     if (child.namespaceURI === W) {
       const tag = child.localName;
       if (tag === 'p') {
-        out.push(...extractParagraph(child, ridToFile, ridToUrl, styleSheet));
+        out.push(...extractParagraph(child, ridToFile, ridToUrl, styleSheet, numbering));
         continue;
       }
       if (tag === 'tbl') {
-        out.push(buildTableBlock(child, ridToFile, ridToUrl, styleSheet));
+        out.push(buildTableBlock(child, ridToFile, ridToUrl, styleSheet, numbering));
         continue;
       }
       // Skip metadata / bookkeeping elements that never hold content.
@@ -529,14 +589,14 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styl
           tag === 'sdtEndPr' || tag === 'bookmarkStart' ||
           tag === 'bookmarkEnd' || tag === 'proofErr') continue;
       // Other w:* wrappers (sdt, sdtContent, ins, etc.) — recurse.
-      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet);
+      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, numbering);
     } else if (child.namespaceURI === MC && child.localName === 'AlternateContent') {
       let pick = null;
       for (const c of elementChildren(child)) { if (c.localName === 'Choice') { pick = c; break; } }
       if (!pick) for (const c of elementChildren(child)) { if (c.localName === 'Fallback') { pick = c; break; } }
-      if (pick) collectBlockParagraphs(pick, ridToFile, ridToUrl, out, styleSheet);
+      if (pick) collectBlockParagraphs(pick, ridToFile, ridToUrl, out, styleSheet, numbering);
     } else {
-      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet);
+      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, numbering);
     }
   }
 }
@@ -549,7 +609,7 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styl
 // opts in (w:firstRow="1") — Word's standard heading-row signal. The block
 // carries the same fallback fields a paragraph has so downstream paragraph
 // scans (classifyDocxArticle) see a safe, non-empty, non-heading element.
-export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null) {
+export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null, numbering = null) {
   let headerRow = false;
   const tblPr = findOne(tbl, W, 'tblPr');
   if (tblPr) {
@@ -572,7 +632,7 @@ export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null) {
     const cells = [];
     for (const tc of findAll(tr, W, 'tc')) {
       const cellParas = [];
-      collectBlockParagraphs(tc, ridToFile, ridToUrl, cellParas, styleSheet);
+      collectBlockParagraphs(tc, ridToFile, ridToUrl, cellParas, styleSheet, numbering);
       const runs = [];
       for (let p = 0; p < cellParas.length; p++) {
         if (p > 0 && runs.length) runs.push({ type: 'br' });
@@ -587,7 +647,7 @@ export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null) {
     type: 'table', rows, colWidths,
     // 段落兜底字段：让下游段落扫描零改动也不崩（isEmpty/isHeading 安全默认）。
     align: 'left', runs: [], text: '', hasImg: anyImg, isEmpty: false,
-    isList: false, styleId: '', styleName: '', styleChain: [],
+    isList: false, listMarker: '', listMarkerColor: '', styleId: '', styleName: '', styleChain: [],
     isListStyle: false, contextualSpacing: false, spacing: {},
     hasHL: false, hasOutlineLevel: false, hasHeadingStyle: false,
     allBold: false, fontSizes: [],

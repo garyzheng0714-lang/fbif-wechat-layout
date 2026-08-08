@@ -131,12 +131,40 @@ function attributionText(role, name, baseContext, behavior) {
   return role + '：' + name;
 }
 
+// DOCX run 的显式着色（<w:rPr><w:color w:val="..">）→ inline style。
+// 不着色的 run 一个字节都不变，继续吃 .wx-t 的规则正文色；css-inline 把 class 样式排在
+// inline style 之前合并，所以这里写的颜色在预览和微信复制层都赢过正文色。
+// 两个值【不算】着色意图，必须忽略，否则整篇正文会盖掉规则包的正文色：
+//   - 'auto'：OOXML 明确表示「跟随默认前景色」；
+//   - '000000'：Word/WPS 在作者没动过颜色时也会给每个 run 补一份的默认黑。
+// 飞书导出只在作者真正改过颜色处才写 w:color（本文 613 段里仅 5 处灰 #8f959e），
+// 这正是导入后灰色注释被排成正文黑的根因。
+const RUN_HEX_COLOR_RE = /^[0-9a-fA-F]{6}$/;
+function runColorStyle(color) {
+  const v = String(color || '').trim().replace(/^#/, '');
+  if (!RUN_HEX_COLOR_RE.test(v)) return '';
+  if (/^0{6}$/.test(v)) return '';
+  return ' style="color: #' + v.toLowerCase() + ';"';
+}
+
+// 无序列表的项目符号。公众号不产 <ul>/<li>：微信编辑器会重排列表结构，css-inline 也只
+// 认 .wx-* class，裸 <li> 到了微信就丢样式。所以符号渲染成正文行首的一个 span——结构上
+// 仍是普通段落（间距/署名/参考来源等既有判定全部不受影响），视觉上还原「• 内容」。
+// 符号字形与颜色都来自 numbering.xml 原值（飞书是蓝点 #3370ff），拿不到颜色就跟随正文色。
+// 符号与正文之间用不间断空格 U+00A0：普通空格会让微信在窄屏把符号单独甩到上一行末尾。
+function renderListMarker(e) {
+  const marker = (e && e.listMarker) || '';
+  if (!marker) return '';
+  return leafWrap('<span textstyle="" class="wx-t"' + runColorStyle(e.listMarkerColor) +
+    '>' + esc(marker) + '\u00A0</span>');
+}
+
 function renderRuns(runs, opts) {
   const textCls = (opts && opts.textCls) || 'wx-t';
   return runs.filter(r => r.type !== 'img').map(r => {
     if (r.type === 'txt') {
       const cls = r.bold ? textCls + ' wx-bold' : textCls;
-      return leafWrap('<span textstyle="" class="' + cls + '">' + esc(r.text) + '</span>');
+      return leafWrap('<span textstyle="" class="' + cls + '"' + runColorStyle(r.color) + '>' + esc(r.text) + '</span>');
     }
     if (r.type === 'link') {
       const h = (r.href || '');
@@ -539,7 +567,7 @@ function render(elems, author, source, opts) {
         lines.push(secCenter(leafWrap('<span textstyle="" class="wx-tc">' + esc(localizePunct(e.text)) + '</span>'), spaceAfter));
         break;
       case 'txt':
-        lines.push(sec(renderRuns(e.runs), spaceAfter));
+        lines.push(sec(renderListMarker(e) + renderRuns(e.runs), spaceAfter));
         break;
       case 'attr':
         lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' +

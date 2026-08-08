@@ -753,3 +753,56 @@ test('括号：URL 里的括号不动（转了链接就废了）', () => {
   const html = renderBlocks([txtBlock('详见 https://a.com/x(y) 的说明。')]);
   assert.ok(html.includes('https://a.com/x(y)'), html);
 });
+
+// ---- 飞书云文档格式保真（用户报告：灰色列表被排成正文黑、项目符号消失）----
+
+test('a run that carries an explicit DOCX color keeps that color', () => {
+  const html = renderDocx([
+    docxBody('表内为伊藤园单体数据。', {
+      runs: [{ type: 'txt', text: '表内为伊藤园单体数据。', color: '8f959e' }],
+    }),
+  ]);
+
+  assert.match(html, /style="color: #8f959e;"/);
+});
+
+test('an uncolored run stays on the rule text color — no inline color at all', () => {
+  const html = renderDocx([docxBody('我有4个问题：')]);
+
+  assert.doesNotMatch(html, /style="color:/);
+});
+
+test("'auto' and default black are not authoring intent and must not override the rule color", () => {
+  for (const color of ['auto', '000000', '#000000']) {
+    const html = renderDocx([
+      docxBody('正文', { runs: [{ type: 'txt', text: '正文', color }] }),
+    ]);
+    assert.doesNotMatch(html, /style="color:/, `color=${color} 不该产生 inline 着色`);
+  }
+});
+
+test('the run color survives CSS inlining and beats .wx-t on the copy path', async () => {
+  const html = renderDocx([
+    docxBody('表内为伊藤园单体数据。', {
+      runs: [{ type: 'txt', text: '表内为伊藤园单体数据。', color: '8f959e' }],
+    }),
+  ]);
+  const themeCSS = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
+  const copyHtml = processForCopy(html, themeCSS, DEFAULT_RULE_CONFIG);
+
+  const span = copyHtml.slice(copyHtml.indexOf('<span textstyle'), copyHtml.indexOf('</span>'));
+  const colors = [...span.matchAll(/color:\s*(#[0-9a-fA-F]{6})/g)].map(m => m[1].toLowerCase());
+  // class 样式在前、inline 在后 → 合并后最后一个 color 生效。
+  assert.equal(colors[colors.length - 1], '#8f959e');
+});
+
+test('a bullet list item renders its bullet, an ordinary paragraph does not', () => {
+  const html = renderDocx([
+    docxBody('表内为伊藤园单体数据。', { isList: true, listMarker: '•', listMarkerColor: '3370ff' }),
+    docxBody('我有4个问题：'),
+  ]);
+
+  // 符号与正文之间必须是 U+00A0，不是普通空格（窄屏防拆行）。
+  assert.match(html, /class="wx-t" style="color: #3370ff;">•\u00A0<\/span>/);
+  assert.equal((html.match(/•/g) || []).length, 1);
+});
