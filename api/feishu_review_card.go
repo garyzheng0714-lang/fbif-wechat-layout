@@ -546,7 +546,9 @@ func reviewCardRiskHeadlineBlock(job publishJob) map[string]any {
 	// 检查未完成这两种真正的异常——那时它才携带信息。
 	var content strings.Builder
 	switch {
-	case !publishRiskLevelKnown(job.RiskLevel):
+	case !publishRiskLevelKnown(job.RiskLevel) || publishRiskHasSystemFailure(job.RiskItems):
+		// 检查跑失败的任务会被 fallback 降级成 warning（级别看着正常），但它没查过
+		// 任何东西。这种必须挂橙标，不能混进「正常态」那条安静的灰字里。
 		content.WriteString("<text_tag color='orange'>检查未完成</text_tag> ")
 	case job.RiskLevel == publishRiskBlock:
 		// 阻断级即使没有已证实条目也绝不能显示成绿色「无实质性错误」——
@@ -843,22 +845,13 @@ func reviewCardRiskDetailBlock(job publishJob) map[string]any {
 	if len(deferred) > limit {
 		content.WriteString(fmt.Sprintf("\n\n另有 %d 条，请在任务详情中查看。", len(deferred)-limit))
 	}
-	if strings.TrimSpace(job.RiskNotes) != "" && !reviewCardHasSystemRisk(job.RiskItems) {
+	if strings.TrimSpace(job.RiskNotes) != "" && !publishRiskHasSystemFailure(job.RiskItems) {
 		content.WriteString("\n\n**补充说明**：")
 		content.WriteString(reviewCardSafeText(job.RiskNotes, 180))
 	}
 	return map[string]any{
 		"tag": "markdown", "content": content.String(), "text_size": "notation",
 	}
-}
-
-func reviewCardHasSystemRisk(items []publishRiskItem) bool {
-	for _, item := range items {
-		if item.Category == publishRiskCategorySystem {
-			return true
-		}
-	}
-	return false
 }
 
 // reviewCardSafeText 把文章/模型等外部文本收敛成 Feishu markdown 内的纯文本。

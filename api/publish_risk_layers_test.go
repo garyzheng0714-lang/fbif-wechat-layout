@@ -136,6 +136,12 @@ func TestHeadlineBlockDoesNotClaimCleanWhenItIsNot(t *testing.T) {
 		{"block", riskLayersJob(publishRiskBlock, deferredItem), "风险阻断", []string{"未发现"}},
 		{"级别未知", riskLayersJob(""), "", nil},
 		{"级别非法", riskLayersJob("future_level"), "检查未完成", []string{"检查通过"}},
+		// 真实任务 #79：风险检查跑失败被 fallback 降级成 warning，级别看着正常，
+		// 但它什么都没查过。首屏说「未发现实质性错误」就是替一篇没体检的文章背书。
+		{"检查跑失败降级成 warning", riskLayersJob(publishRiskWarning, publishRiskItem{
+			Category: publishRiskCategorySystem, Level: publishRiskWarning,
+			Evidence: "风险模型未能产出可验证的结构化结果", Reason: "接口不可达",
+		}), "检查未完成", []string{"未发现"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

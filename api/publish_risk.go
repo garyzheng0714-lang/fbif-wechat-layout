@@ -66,6 +66,18 @@ func publishRiskItemConfirmed(item publishRiskItem) bool {
 	return item.Certainty == publishRiskCertaintyConfirmed
 }
 
+// publishRiskHasSystemFailure 本次风险检查是否压根没跑成（模型不可达、输出不可解析
+// 等，统一落成一条 system 条目）。这种任务的首屏**不许**说「未发现实质性错误」——
+// 没查过和查过没发现是两回事，混为一谈等于替一篇没体检的文章背书。
+func publishRiskHasSystemFailure(items []publishRiskItem) bool {
+	for _, item := range items {
+		if item.Category == publishRiskCategorySystem {
+			return true
+		}
+	}
+	return false
+}
+
 // splitPublishRiskItems 把风险条目分成「首屏必看」与「完整报告」两层。
 func splitPublishRiskItems(items []publishRiskItem) (confirmed, deferred []publishRiskItem) {
 	for _, item := range items {
@@ -249,8 +261,10 @@ func publishRiskHeadlineOrFallback(job publishJob) string {
 		}
 		return truncateRunes(publishRiskCategoryLabel(confirmed[0].Category)+"："+lead, publishRiskHeadlineMaxRunes)
 	}
-	if !publishRiskLevelKnown(job.RiskLevel) {
-		return "风险检查未完成，发布前需人工核对。"
+	if !publishRiskLevelKnown(job.RiskLevel) || publishRiskHasSystemFailure(job.RiskItems) {
+		// 检查没跑成的任务被 fallback 降级成 warning，级别看着是「已知」的，
+		// 但它其实什么都没查——首屏必须说这件事（真实任务 #79 就是这种）。
+		return "风险检查未完成，这篇没有经过自动核对，请人工通读后再决定。"
 	}
 	if job.RiskLevel == publishRiskBlock {
 		// 阻断结论没有对应的已证实条目时，首屏也必须把阻断说出来。
