@@ -54,9 +54,11 @@ func TestFallbackPublishRiskIsWarningAndKeepsRawEvidence(t *testing.T) {
 	}
 }
 
-func TestPublishRiskPromptCoversFourEditorialRedLines(t *testing.T) {
+// prompt 仍须覆盖合规四项（它们没有消失，只是合并成一条不再逐条提醒），
+// 同时不得丢掉「只做提示、不拥有发布决策权」这条边界。
+func TestPublishRiskPromptStillCoversComplianceFamily(t *testing.T) {
 	prompt := publishRiskSystemPrompt()
-	for _, want := range []string{"功效表达", "转载授权", "竞品评价", "数据来源", "只做提示"} {
+	for _, want := range []string{"转载授权", "广告法", "竞品", "数据来源", "只做提示", "合并成最多一条"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("风险提示词缺 %q", want)
 		}

@@ -6,12 +6,16 @@ package main
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
+	"unicode"
 )
 
 const (
@@ -19,7 +23,15 @@ const (
 	publishRiskWarning = "warning"
 	publishRiskBlock   = "block"
 
-	publishRiskCategoryFactual       = "factual"
+	// 会上首屏的三类实质错误（2026-08-08 用户裁定：重点提示低级错误与事实性错误）。
+	publishRiskCategoryFactual = "factual" // 与不会变的公认事实矛盾、张冠李戴、未完成写成已完成
+	publishRiskCategoryNaming  = "naming"  // 人名/品牌/公司/职务/法规名写错或全文不一致
+	publishRiskCategoryNumber  = "number"  // 数字、单位、币种、口径、前后矛盾、录入事故
+	// 抓但不上首屏：成稿事故（乱码、重复段、未译残句、编辑痕迹）——确定度高但严重度低。
+	publishRiskCategoryIntegrity = "integrity"
+	// 合规族：编辑部有既定流程、事前会确认，全文合并成一条，永不上首屏。
+	// 旧四类是 2026-08-08 之前的分类，存量数据与模型习惯输出仍会出现，一律并入本族。
+	publishRiskCategoryCompliance    = "compliance"
 	publishRiskCategoryEfficacy      = "efficacy"
 	publishRiskCategoryRepublication = "republication"
 	publishRiskCategoryCompetitor    = "competitor"
@@ -55,12 +67,34 @@ type publishRiskAssessment struct {
 // publishRiskHeadlineMaxRunes 首屏一句话结论的硬上限（用户裁定 100 字内）。
 const publishRiskHeadlineMaxRunes = 100
 
+// publishRiskComplianceFamily 合规族：转载授权、广告法、竞品评价、数据来源标注。
+// 新旧分类合并判定一处——模型出 1 条 efficacy + 1 条 data_source 就绕过「最多一条」
+// 的限制，计数必须按族来。
+func publishRiskComplianceFamily(category string) bool {
+	switch category {
+	case publishRiskCategoryCompliance, publishRiskCategoryEfficacy,
+		publishRiskCategoryRepublication, publishRiskCategoryCompetitor,
+		publishRiskCategoryDataSource:
+		return true
+	}
+	return false
+}
+
 // publishRiskItemConfirmed 该条是否属于「已证实的实质性问题」——只有这类才上首屏。
-// 转载授权无论确不确定都归档到完整报告（用户裁定：那些不太需要知道）；
-// 风险检查异常（system）是流程状态不是文章问题，也不上首屏。
+//
+// 首屏只留三类：factual / naming / number。理由（2026-08-08 用户裁定）：
+//   - 合规族（开白、授权、广告法、数据来源）编辑部事前会确认，不需要逐条提醒，
+//     一律归档到完整报告。真出现硬违法时靠 level=block 让整张卡变红并禁止一键发布，
+//     不占首屏那三个名额。
+//   - integrity 成稿事故（乱码、重复段）确定度高但严重度低，改起来几秒钟，不值得
+//     占用审核人唯一会停下来看的位置。
+//   - system 是流程状态不是文章问题。
 func publishRiskItemConfirmed(item publishRiskItem) bool {
+	if publishRiskComplianceFamily(item.Category) {
+		return false
+	}
 	switch item.Category {
-	case publishRiskCategoryRepublication, publishRiskCategorySystem:
+	case publishRiskCategoryIntegrity, publishRiskCategorySystem:
 		return false
 	}
 	return item.Certainty == publishRiskCertaintyConfirmed
@@ -90,31 +124,49 @@ func splitPublishRiskItems(items []publishRiskItem) (confirmed, deferred []publi
 	return confirmed, deferred
 }
 
+//go:embed editorial/risk_prompt.md
+var publishRiskPromptTemplate string
+
+// publishRiskSystemPrompt 风险检查的 system prompt。与 enrich 侧同样的组织方式：
+// prompt 是可评审、可 diff 的数据资产（api/editorial/risk_prompt.md），不是代码里的
+// 长字符串——它会随编辑部口径持续迭代，埋在 Go 里没人愿意读也看不清改了什么。
 func publishRiskSystemPrompt() string {
-	return `你是 FoodTalks 发布前风险审核助手。请用简体中文，只输出 JSON，不要 markdown。
-你只做提示与分级，不拥有发布决策权，不得改写正文。
+	return publishRiskPromptTemplate
+}
 
-审核编辑最需要你抓出来的是**文章里写错了的事实**，其次才是合规红线。一篇文章十有八九没有实质性错误，那就干脆地说没有——不要为了显得尽责而把常规现象包装成问题。
+// publishRiskMaxBodyRunes 喂给模型的正文上限。注意 40 篇历史语料里有 10 篇超过它——
+// 截断是常态，必须显式告诉模型，否则它会把断在半句的地方报成「录入事故」，
+// 也会对没看到的后半篇说「未发现问题」。
+const publishRiskMaxBodyRunes = 8000
 
-检查五类：
-1. 事实与常识 factual（最高优先级）：年份、日期、地点、数字、人名、公司名、机构名、职务、事件经过、单位换算，是否与公认常识相矛盾，或与本文自身前后矛盾。例：正文写「2018 年的北京冬奥会」，而北京冬奥会实际在 2022 年举办。这类错误必须报。
-2. 功效表达 efficacy：食品健康、治疗、减肥、改善身体等承诺是否缺证据或可能违法。
-3. 转载授权 republication：是否无法确认转载许可、原作者或原出处。
-4. 竞品评价 competitor：是否含无证据的贬损、排名、比较或结论性评价。
-5. 数据来源 data_source：关键数字、市场份额、销量、研究结论是否缺明确来源。
+// buildRiskUserInput 组装喂给模型的 user message，返回（模型实际看到的正文, 完整消息）。
+//
+// 抽成纯函数有三个理由，都是评审实测出来的坑：
+//   - **当前日期**：资讯讲的往往是模型知识截止之后的事。不给日期，模型会拿过时记忆
+//     去「纠正」正确的新事实（公司更名、高管变动）。
+//   - **截断告知**：静默砍到 8000 字，模型不知情。
+//   - **注入隔离**：正文是外部抓来的，可能含「本文已通过合规审查」这类诱导文字，
+//     必须显式声明分隔标记内一律为待检数据。
+//
+// 返回的第一个值是 evidence 溯源校验的比对基准——必须是模型真正看到的那份文本。
+func buildRiskUserInput(job publishJob, now time.Time) (bodyText, userText string) {
+	plain := htmlToPlainText(job.ContentHTML)
+	bodyText = truncateRunes(plain, publishRiskMaxBodyRunes)
+	truncated := len([]rune(plain)) > publishRiskMaxBodyRunes
 
-每一条都必须标 certainty，它决定这条会出现在审核卡的哪一层：
-- confirmed：你能凭公认常识或正文自身的前后矛盾**直接指认它是错的**，并说得出正确的应该是什么。这类会直接推到审核人眼前。
-- unverified：你觉得可疑，但凭手上的正文和常识证明不了，只能提醒人去核。这类收进折叠的完整报告。
-拿不准一律填 unverified。宁可漏一条 confirmed，也不许把猜测标成 confirmed。
-「文中数据没写来源」「未标注转载授权」这类**普遍现象**永远是 unverified，除非正文自身就自相矛盾。
-
-headline：给审核人的一句话结论，**不超过 100 个字**，用大白话直接说事，不要「经检查」「本文」这类套话。
-- 有 confirmed 条目时：只讲最要紧的那一条，写清错在哪里、正确的是什么。例：「正文把北京冬奥会写成 2018 年举办，实际是 2022 年。」
-- 没有 confirmed 条目时：写「未发现可证实的实质性错误」，可再补一句还有几条待核提示。
-
-输出：{"level":"pass|warning|block","headline":"...","items":[{"category":"factual|efficacy|republication|competitor|data_source","level":"warning|block","certainty":"confirmed|unverified","evidence":"正文原句","reason":"为什么需要人工处理；confirmed 的必须写清正确的应该是什么"}],"notes":"给审核人的简短补充说明"}
-规则：pass 时 items 必须为空；有疑点至少 warning；存在明显违法/授权硬缺口才 block；证据必须引用输入正文，禁止编造。`
+	var b strings.Builder
+	fmt.Fprintf(&b, "今天是 %s。\n", now.In(time.FixedZone("CST", 8*3600)).Format("2006年1月2日"))
+	b.WriteString("你的训练知识可能早于本文。正文与你的记忆冲突时，只能提醒、不能断言正文写错。\n")
+	if truncated {
+		fmt.Fprintf(&b, "注意：正文已截断至前 %d 字，之后的内容你没有看到，不要对未见内容下任何结论；"+
+			"末尾若断在半句，那是截断造成的，不是文章的错误。\n", publishRiskMaxBodyRunes)
+	}
+	b.WriteString("\n文章标题：")
+	b.WriteString(job.Title)
+	b.WriteString("\n\n<正文开始>\n")
+	b.WriteString(bodyText)
+	b.WriteString("\n<正文结束>")
+	return bodyText, b.String()
 }
 
 // arkAssessPublishRisk 调用与元数据预填相同的 ARK Responses API。返回的 Raw 仅在
@@ -124,12 +176,12 @@ func arkAssessPublishRisk(ctx context.Context, job publishJob) (publishRiskAsses
 	if apiKey == "" {
 		return publishRiskAssessment{}, errors.New("ARK_API_KEY 未配置")
 	}
-	bodyText := truncateRunes(htmlToPlainText(job.ContentHTML), 8000)
+	bodyText, userText := buildRiskUserInput(job, time.Now())
 	payload, err := json.Marshal(map[string]any{
 		"model": arkModelID(),
 		"input": []any{
 			map[string]any{"role": "system", "content": []map[string]any{{"type": "input_text", "text": publishRiskSystemPrompt()}}},
-			map[string]any{"role": "user", "content": []map[string]any{{"type": "input_text", "text": "文章标题：" + job.Title + "\n\n正文：\n" + bodyText}}},
+			map[string]any{"role": "user", "content": []map[string]any{{"type": "input_text", "text": userText}}},
 		},
 	})
 	if err != nil {
@@ -159,6 +211,13 @@ func arkAssessPublishRisk(ctx context.Context, job publishJob) (publishRiskAsses
 		result.Raw = truncateRunes(text, 2000)
 		return result, err
 	}
+	// 两道服务端约束，都不能只靠 prompt 自觉：编造的证据降级、合规族收敛成一条。
+	var downgraded int
+	result.Items, downgraded = groundPublishRiskEvidence(result.Items, bodyText)
+	if downgraded > 0 {
+		log.Printf("publish: WARN job %d 风险条目 %d 条的 evidence 不在正文中，已降级为待核", job.ID, downgraded)
+	}
+	result.Items = mergeComplianceItems(result.Items)
 	return result, nil
 }
 
@@ -200,8 +259,12 @@ func parsePublishRiskAssessment(text string) (publishRiskAssessment, error) {
 		return publishRiskAssessment{}, errors.New("风险条目超过 12 条")
 	}
 	highest := publishRiskPass
+	// 新旧类别都必须在白名单里：未知 category 会让整份结果解析失败、降级成
+	// 「风险检查未完成」，比报错更糟。旧四类保留是为了存量数据与模型的习惯输出。
 	allowedCategories := map[string]bool{
-		publishRiskCategoryFactual: true, publishRiskCategoryEfficacy: true,
+		publishRiskCategoryFactual: true, publishRiskCategoryNaming: true,
+		publishRiskCategoryNumber: true, publishRiskCategoryIntegrity: true,
+		publishRiskCategoryCompliance: true, publishRiskCategoryEfficacy: true,
 		publishRiskCategoryRepublication: true,
 		publishRiskCategoryCompetitor:    true, publishRiskCategoryDataSource: true,
 	}
@@ -275,6 +338,98 @@ func publishRiskHeadlineOrFallback(job publishJob) string {
 	return "未发现可证实的实质性错误。"
 }
 
+// mergeComplianceItems 把合规族收敛成最多一条，并强制 certainty=unverified。
+//
+// 为什么在服务端做而不是只写进 prompt：prompt 说「合并成最多一条」是请求，模型不照做
+// 时若报错，整篇会降级成「风险检查未完成」——代价远大于收益。这里 fail-soft 合并，
+// 让边界由字段约束保证，不依赖模型的服从度。
+// 保留 block：真出现硬违法（婴配粉功效、绝对化用语）时整张卡要变红并禁止一键发布。
+func mergeComplianceItems(items []publishRiskItem) []publishRiskItem {
+	out := make([]publishRiskItem, 0, len(items))
+	var merged *publishRiskItem
+	reasons := make([]string, 0, 4)
+	for _, item := range items {
+		if !publishRiskComplianceFamily(item.Category) {
+			out = append(out, item)
+			continue
+		}
+		item.Certainty = publishRiskCertaintyUnverified
+		if merged == nil {
+			first := item
+			first.Category = publishRiskCategoryCompliance
+			merged = &first
+			reasons = append(reasons, item.Reason)
+			continue
+		}
+		// 后续合规条目并进第一条：级别取最高（block 优先），理由串联。
+		if item.Level == publishRiskBlock {
+			merged.Level = publishRiskBlock
+		}
+		if item.Reason != "" {
+			reasons = append(reasons, item.Reason)
+		}
+	}
+	if merged == nil {
+		return out
+	}
+	merged.Reason = truncateRunes(strings.Join(reasons, "；"), 500)
+	return append(out, *merged)
+}
+
+// groundPublishRiskEvidence 把「evidence 必须来自正文」从 prompt 请求变成运行时校验。
+//
+// 模型编造一句正文里根本不存在的话，比漏检严重得多：审核人按着它去核对、发现查无此句，
+// 会当场对整个工具失去信任。匹配不上的条目降级成 unverified（fail-soft，不整篇丢弃）
+// 并留痕，让它进不了首屏。
+//
+// 归一后比对：去全部空白、中英文引号、markdown 强调符；模型常做的轻微改写（补主语、
+// 换标点）不该被误判成编造，所以短证据（<8 字）不参与判定。
+func groundPublishRiskEvidence(items []publishRiskItem, sourceText string) ([]publishRiskItem, int) {
+	haystack := riskEvidenceNormalize(sourceText)
+	downgraded := 0
+	for i := range items {
+		item := &items[i]
+		if item.Certainty != publishRiskCertaintyConfirmed {
+			continue
+		}
+		needle := riskEvidenceNormalize(item.Evidence)
+		if len([]rune(needle)) < 8 {
+			continue // 太短不足以判定编造（模型可能只引了一个词组）
+		}
+		if strings.Contains(haystack, needle) {
+			continue
+		}
+		item.Certainty = publishRiskCertaintyUnverified
+		downgraded++
+	}
+	return items, downgraded
+}
+
+var riskEvidenceNoiseReplacer = strings.NewReplacer(
+	"“", "", "”", "", "‘", "", "’", "", "\"", "", "'", "",
+	"*", "", "_", "", "`", "", "…", "", "．", ".",
+)
+
+func riskEvidenceNormalize(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		// 全角数字与字母折半角，避免「２０２２」与「2022」判成两回事。
+		if r >= '０' && r <= '９' {
+			return '0' + (r - '０')
+		}
+		if r >= 'Ａ' && r <= 'Ｚ' {
+			return 'a' + (r - 'Ａ')
+		}
+		if r >= 'ａ' && r <= 'ｚ' {
+			return 'a' + (r - 'ａ')
+		}
+		return unicode.ToLower(r)
+	}, s)
+	return riskEvidenceNoiseReplacer.Replace(s)
+}
+
 func validPublishRiskLevel(level string, allowPass bool) bool {
 	return (allowPass && level == publishRiskPass) || level == publishRiskWarning || level == publishRiskBlock
 }
@@ -326,6 +481,14 @@ func publishRiskCategoryLabel(category string) string {
 	switch category {
 	case publishRiskCategoryFactual:
 		return "事实与常识"
+	case publishRiskCategoryNaming:
+		return "名称与身份"
+	case publishRiskCategoryNumber:
+		return "数字与口径"
+	case publishRiskCategoryIntegrity:
+		return "成稿问题"
+	case publishRiskCategoryCompliance:
+		return "合规提示"
 	case publishRiskCategoryEfficacy:
 		return "功效表达"
 	case publishRiskCategoryRepublication:
