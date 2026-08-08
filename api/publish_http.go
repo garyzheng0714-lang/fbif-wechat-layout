@@ -5,6 +5,7 @@ package main
 // HTTP 审核默认关闭，生产审批只接受飞书白名单审核人的持久化决策。
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -627,7 +628,13 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		if !ok {
 			return
 		}
-		job, err := p.recheckPublishRisk(r.Context(), id)
+		// 不用 r.Context()：模型通读全文要一到几分钟，而网关会在 60 秒左右切断连接，
+		// 请求 context 一取消，ARK 调用就跟着 context canceled、落进 fallback。
+		// 用独立 context 让检查跑完，客户端拿不到响应也没关系——结论已落库，
+		// 卡片也已刷新（2026-08-08 首次真机重跑踩到）。
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 6*time.Minute)
+		defer cancel()
+		job, err := p.recheckPublishRisk(ctx, id)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
 			return

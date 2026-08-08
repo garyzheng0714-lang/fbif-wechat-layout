@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -67,6 +68,51 @@ func TestRiskRecheckAbortsWhenJobGetsApprovedMidway(t *testing.T) {
 	got, _ := env.store.byID(job.ID)
 	if got.RiskHeadline == "重跑发现了新问题" {
 		t.Fatal("已审批任务的风险结论不得被重跑结果覆盖")
+	}
+}
+
+// 重跑失败绝不能覆盖已有结论（2026-08-08 首次真机重跑踩到）：
+// 模型调用被取消时 fallback 会产出一条 system「检查未完成」，写进去等于用一次
+// 失败的重试把这篇文章原本已经查出来的问题全部抹掉——比不重跑糟得多。
+func TestRiskRecheckFailureKeepsExistingAssessment(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.assessRisk = func(context.Context, publishJob) (publishRiskAssessment, error) {
+		return publishRiskAssessment{
+			Level:    publishRiskWarning,
+			Headline: "原有结论：正文把北京冬奥会写成 2018 年。",
+			Items: []publishRiskItem{{
+				Category: publishRiskCategoryFactual, Level: publishRiskWarning,
+				Certainty: publishRiskCertaintyConfirmed,
+				Evidence:  "在2018年的北京冬奥会中", Reason: "实际举办时间为2022年",
+			}},
+		}, nil
+	}
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	before, _ := env.store.byID(job.ID)
+	if len(before.RiskItems) != 1 {
+		t.Fatalf("前置条件：应先有一条结论，实际 %d", len(before.RiskItems))
+	}
+
+	// 重跑时模型不可达 → assessPublishRiskWithFallback 产出 system 条目。
+	env.pipeline.assessRisk = func(context.Context, publishJob) (publishRiskAssessment, error) {
+		return publishRiskAssessment{}, errors.New("风险审核接口不可达: context canceled")
+	}
+	if _, err := env.pipeline.recheckPublishRisk(context.Background(), job.ID); err == nil ||
+		!strings.Contains(err.Error(), "已保留原有结论") {
+		t.Fatalf("重跑失败应报错并保留原结论，实际 err=%v", err)
+	}
+	after, _ := env.store.byID(job.ID)
+	if len(after.RiskItems) != 1 || after.RiskItems[0].Category != publishRiskCategoryFactual {
+		t.Fatalf("原有结论被失败的重跑抹掉了：%+v", after.RiskItems)
+	}
+	if after.RiskHeadline != before.RiskHeadline {
+		t.Fatalf("原有 headline 被覆盖：%q", after.RiskHeadline)
+	}
+	if publishRiskHasSystemFailure(after.RiskItems) {
+		t.Fatal("失败的重跑不得把任务打成「检查未完成」")
 	}
 }
 

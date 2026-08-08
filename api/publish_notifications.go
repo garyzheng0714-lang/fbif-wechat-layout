@@ -487,6 +487,16 @@ func (p *publishPipeline) recheckPublishRisk(ctx context.Context, jobID int64) (
 		return job, fmt.Errorf("只有待审核任务可以重跑风险检查，当前阶段为 %s", job.Stage)
 	}
 	result := assessPublishRiskWithFallback(ctx, job, p.assessRisk)
+	// 重跑失败**绝不能**覆盖已有结论。fallback 会产出一条 system「检查未完成」，
+	// 写进去等于用一次失败的重试，把这篇文章原本已经查出来的问题全部抹掉——
+	// 比不重跑糟得多。失败就保持原样并如实报错（2026-08-08 首次真机重跑踩到）。
+	if publishRiskHasSystemFailure(result.Items) {
+		reason := strings.TrimSpace(result.Notes)
+		if reason == "" {
+			reason = "模型未产出可验证的结构化结果"
+		}
+		return job, fmt.Errorf("重跑未完成，已保留原有结论：%s", reason)
+	}
 	updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		// 重跑期间任务被审批或正文被换掉，结论就作废——不能把旧正文的结论盖到新内容上。
 		return current.Stage == publishStageAwaitingReview &&
