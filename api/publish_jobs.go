@@ -141,7 +141,7 @@ type publishJob struct {
 	// publishRiskHeadlineOrFallback 现场合成，不需要数据迁移。
 	RiskHeadline string `json:"risk_headline,omitempty"`
 	RiskNotes    string `json:"risk_notes,omitempty"`
-	RiskRaw   string            `json:"risk_raw,omitempty"` // 模型解析失败时留痕，最多 2000 字
+	RiskRaw      string `json:"risk_raw,omitempty"` // 模型解析失败时留痕，最多 2000 字
 	// 持久 notification outbox：状态迁移与待发送事件同一次 JSON 原子写；sending
 	// 在进程启动时视为上次崩溃遗留并重置 pending。seq 防旧发送结果清掉新事件。
 	NotificationKind     string `json:"notification_kind,omitempty"`
