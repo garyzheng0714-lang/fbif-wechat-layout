@@ -115,7 +115,14 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
    **例外**：`POST /api/html-to-blocks`（Bearer `RENDER_TOKEN`）不在此列——它是 HTML→Block 的纯转换工具，调用方 `FoodTalks_Feed` 排版的是自有资讯，根本不存在可抓的微信原文链接。它不创建发布任务。
 
 34. **审核卡四种形态都必须能认出是哪篇文章（2026-08-06 用户裁定）** — 待审核 / 已发布 / 已驳回 / 异常四张卡全部渲染 `reviewCardHeroBlock`：封面图、粗体标题、标签、摘要、`预览效果 · 公众号原文` 链接缺一不可。**不得**让终态卡退化成只有 `reviewCardInfoBlock`（来源/作者/时间 + 任务号两行灰字）——卡片在群里长期留存，是事后回看「到底发了什么」的唯一入口，压成一个编号等于信息归零。封面复用待审核时存下的 `publishJob.ReviewCoverImgKey`（卡片回调必须同步返回新卡，不能在回调里现传图片）；旧任务没有该值时退化为无封面单列，不留空图位。守护：`api/feishu_review_card_test.go`。
-   **改完卡片要把历史任务的卡也刷一遍**：已发出的卡不会自己变样，群里回看到的仍是旧信息。用 `POST /api/publish/jobs/{id}/card-refresh`（管理员或 `PUBLISH_ADMIN_SERVICE_TOKEN`，同步服务令牌不可用）；有 message_id 的群走原位更新，不刷屏。它与 `notification-replay` 分工不同：那个只救躺在 dead letter 里的失败通知，救不了「发成功但样式过期」。
+   **改完卡片要把历史任务的卡也刷一遍**：已发出的卡不会自己变样，群里回看到的仍是旧信息。用 `POST /api/publish/jobs/{id}/card-refresh`（管理员或 `PUBLISH_ADMIN_SERVICE_TOKEN`，同步服务令牌不可用）；有 message_id 的群走原位更新，不刷屏。它与 `notification-replay` 分工不同：那个只救躺在 dead letter 里的失败通知，救不了「发成功但样式过期」。**card-refresh 只换样式，不重跑检查**：旧任务的 `RiskItems` 没有 `certainty`、没有 `RiskHeadline`，刷新后一律落折叠层，首屏合成「未发现可证实的实质性错误」——这对它们是准确的（当时就没查事实错误），但别指望刷一下就能把旧文章里的硬伤翻出来。
+
+35. **审核卡的检查信息分两层，实质性错误上首屏（2026-08-08 用户裁定）** — 首屏红块（`reviewCardConfirmedRiskBlock`）只放**已证实的实质性问题**，最多 3 条；转载授权无论 `certainty` 是什么、以及 `system` 类，一律沉到折叠的「点此查看完整检查报告（N 条待核提示）」。判定口径在 `publishRiskItemConfirmed` / `splitPublishRiskItems` 一处，不得在卡片层另写一份。
+    **`certainty` 只认显式 `confirmed`**：解析层对缺失、拼错、未来新值一律收敛为 `unverified`（`parsePublishRiskAssessment`）。猜测冒充已证实的错误被推到审核人眼前，比漏报更糟。
+    **没有已证实问题时首屏不许谎称干净**：pass 无条目才说「检查通过」口径的话；有待核提示说「未发现可证实的实质性错误」；`block` 必须显示「风险阻断」（header 是红的、首屏说没事等于教人无视阻断结论）；级别未知显示「检查未完成」。状态标签只留给阻断与检查未完成——正常态挂标签既和紧随其后的结论复读，又和标题下的蓝色文章标签形状雷同。
+    **同义信息只说一遍**：待核条数由折叠条标题承担（首屏与 headline 都不复读）；待审核卡的 `reviewCardInfoBlock` 传 `compact=true`，不重复 header 副标题已有的环境与任务号。
+    **条目排版用飞书官方无序列表，项内换行必须 `<br>`**：单个 `\n` 是软换行，官方文档明说渲染时可能被忽略，实测就是被忽略的——「原句」会粘到上一句尾巴上。首屏与折叠区共用 `reviewCardRiskItemList`，语法只维护一份。守护：`api/publish_risk_layers_test.go`。
+    **对应的 PRO 在 `publishRiskSystemPrompt`**：五类检查里 `factual`（事实与常识）是最高优先级，`headline` ≤100 字且代码层硬截断、模型不给时由 `publishRiskHeadlineOrFallback` 合成。
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
