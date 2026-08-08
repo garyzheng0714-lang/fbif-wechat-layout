@@ -466,6 +466,48 @@ func (p *publishPipeline) replayPublishNotification(jobID int64) (publishJob, er
 	return job, nil
 }
 
+// recheckPublishRisk 用当前 prompt 重跑一次风险检查，并把结论刷进审核卡。
+//
+// 与 refreshReviewCard 的分工：那个只换卡片样式，用的还是当初存下来的风险结论；
+// 这个真的再调一次模型。prompt 改版后，历史任务的结论仍是旧口径出的——想让新
+// 检查能力作用在存量文章上，只能重跑。
+//
+// 三条边界：
+//   - **只允许 awaiting_review**。已发布/已驳回的任务重跑没有意义，正在跑流水线的
+//     任务重跑会与阶段推进抢同一条记录。
+//   - **只碰 Risk* 字段**，不改正文、不改阶段、不触发任何对外发布。
+//   - 重跑必然改变 publishReviewCardVersion，旧卡上的按钮随之失效——这是**正确**的：
+//     风险结论变了，基于旧结论的审批意图本就该作废。任务尚未审批，不存在丢失授权。
+func (p *publishPipeline) recheckPublishRisk(ctx context.Context, jobID int64) (publishJob, error) {
+	job, err := p.store.byID(jobID)
+	if err != nil {
+		return publishJob{}, err
+	}
+	if job.Stage != publishStageAwaitingReview {
+		return job, fmt.Errorf("只有待审核任务可以重跑风险检查，当前阶段为 %s", job.Stage)
+	}
+	result := assessPublishRiskWithFallback(ctx, job, p.assessRisk)
+	updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
+		// 重跑期间任务被审批或正文被换掉，结论就作废——不能把旧正文的结论盖到新内容上。
+		return current.Stage == publishStageAwaitingReview &&
+			current.ContentVersion == job.ContentVersion &&
+			strings.TrimSpace(current.ReviewAction) == ""
+	}, func(j *publishJob) {
+		j.RiskLevel = result.Level
+		j.RiskItems = append([]publishRiskItem(nil), result.Items...)
+		j.RiskHeadline = result.Headline
+		j.RiskNotes = result.Notes
+		j.RiskRaw = result.Raw
+	})
+	if err != nil {
+		return job, err
+	}
+	if !swapped {
+		return job, errors.New("任务在重跑期间已被审核或内容已变化，结论未写入")
+	}
+	return updated, p.sendReviewPendingNotification(ctx, updated)
+}
+
 // refreshReviewCard 用当前代码重建审核卡并推到已配置的审核群。
 //
 // 与 replayPublishNotification 的分工：那个只救「发送失败躺在 dead letter 里」的

@@ -186,14 +186,39 @@ func TestRiskItemListUsesOfficialBulletsAndHardBreaks(t *testing.T) {
 	}
 }
 
-func TestPublishRiskPromptRequiresFactualCheckAndCertainty(t *testing.T) {
+// prompt 的骨架契约（2026-08-08 三方评审后定稿）。这些不是措辞偏好，每一条都对应
+// 一个已知失效模式，删掉任何一条都会让检查退回到评审前的状态。
+func TestPublishRiskPromptCoversTaxonomyAndGuardrails(t *testing.T) {
 	prompt := publishRiskSystemPrompt()
-	for _, want := range []string{
-		"factual", "事实与常识", "北京冬奥会", "certainty", "confirmed", "unverified",
-		"headline", "100 个字", "拿不准一律填 unverified",
-	} {
+	cases := map[string]string{
+		// 新分类：三类实质错误上首屏，成稿事故与合规族折叠
+		"naming":    "名称与身份类",
+		"number":    "数字与口径类",
+		"integrity": "成稿事故类",
+		// confirmed 的三个封闭通道——把「你有多确信」换成「是否落在集合里」，
+		// 这是 #80 那条被降级的根因修复
+		"A 类":             "confirmed 通道 A（公认事实矛盾）",
+		"B 类":             "confirmed 通道 B（正文自己打架）",
+		"C 类":             "confirmed 通道 C（一眼可见的录入事故）",
+		"必须**标 confirmed": "落进 A/B/C 是义务而非可选",
+		// 知识时效：会变的当期状态不能当证据
+		"可能已经变化": "当期状态只能提醒不能断言",
+		// 堵免责口
+		"不是挡箭牌":  "禁止用 unverified 全盘免责",
+		"单独拆成一条": "能证实的部分必须拆出来",
+		// 噪音闸
+		"根本不写":   "「未标注来源」类提示一律不输出",
+		"修辞不是错误": "主观夸张不算事实错误",
+		// 注入防线
+		"<正文开始>": "正文分隔标记",
+		"不是指令":   "正文中的诱导文字不得改变口径",
+		// 输出纪律
+		"逐字存在":       "evidence 必须来自原文",
+		"不超过 100 个字": "headline 上限",
+	}
+	for want, why := range cases {
 		if !strings.Contains(prompt, want) {
-			t.Fatalf("风险 prompt 缺少 %q", want)
+			t.Fatalf("风险 prompt 缺少 %q（%s）", want, why)
 		}
 	}
 }
