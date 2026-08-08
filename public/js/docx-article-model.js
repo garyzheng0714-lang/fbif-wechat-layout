@@ -44,6 +44,8 @@ function docxMeta(pd) {
   return {
     fromDocx: true,
     isList: !!pd.isList,
+    listMarker: pd.listMarker || '',
+    listMarkerColor: pd.listMarkerColor || '',
     styleId: pd.styleId || '',
     styleName: pd.styleName || '',
     contextualSpacing: !!pd.contextualSpacing,

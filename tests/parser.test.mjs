@@ -4,7 +4,8 @@ import { DOMParser } from '@xmldom/xmldom';
 import {
   esc, escAttr, extractParagraph, parseDocxStyles, parseMdRuns, parseMdFrontmatter,
   normalizeClipboardTextForMarkdown, hasImageLikeLink, formatPlainTextForCopy,
-  looksLikeArticleClipboardText, buildClipboardArticleBlocks, buildTableBlock
+  looksLikeArticleClipboardText, buildClipboardArticleBlocks, buildTableBlock,
+  parseDocxNumbering, resolveListMarker
 } from '../public/js/parser.js';
 
 const WNS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -290,4 +291,92 @@ test('buildTableBlock 携带段落兜底字段（下游段落扫描不崩）', (
   assert.equal(block.text, '');
   assert.equal(block.hasOutlineLevel, false);
   assert.equal(block.hasHeadingStyle, false);
+});
+
+// ---- 飞书云文档格式保真：run 显式着色 + 无序列表项目符号 ----
+// 用户报告的根因样本（文档 YM3td8b6lo6aMdxhly2c4OZknre 的「表格注释」段）：飞书导出的
+// DOCX 里灰色注释带 <w:color w:val="8f959e"/> 且挂 numPr，导入后颜色与项目符号双双丢失。
+
+function wordNumbering(inner) {
+  return new DOMParser().parseFromString(
+    `<w:numbering xmlns:w="${WNS}">${inner}</w:numbering>`,
+    'text/xml'
+  );
+}
+
+// 逐字取自飞书真实导出的 word/numbering.xml。
+const FEISHU_NUMBERING = wordNumbering(`
+  <w:abstractNum w:abstractNumId="872000">
+    <w:lvl><w:numFmt w:val="bullet"/><w:suff w:val="tab"/><w:lvlText w:val="•"/>
+      <w:rPr><w:color w:val="3370ff"/></w:rPr></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="872000"/></w:num>
+`);
+
+test('parseDocxNumbering maps numId to the bullet glyph and its color', () => {
+  const map = parseDocxNumbering(FEISHU_NUMBERING);
+  assert.deepEqual(map['1'], { fmt: 'bullet', text: '•', color: '3370ff' });
+});
+
+test('parseDocxNumbering on a missing numbering.xml yields an empty map, not a crash', () => {
+  assert.deepEqual(parseDocxNumbering(null), {});
+});
+
+test('resolveListMarker returns the bullet for unordered lists', () => {
+  const map = parseDocxNumbering(FEISHU_NUMBERING);
+  assert.deepEqual(resolveListMarker(map, '1'), { marker: '•', markerColor: '3370ff' });
+});
+
+test('resolveListMarker leaves ordered lists alone (numbering needs cross-paragraph counting)', () => {
+  const map = parseDocxNumbering(wordNumbering(`
+    <w:abstractNum w:abstractNumId="9">
+      <w:lvl><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="9"/></w:num>
+  `));
+  assert.deepEqual(resolveListMarker(map, '1'), { marker: '', markerColor: '' });
+});
+
+test('extractParagraph keeps the run color and the bullet of a 飞书 list item', () => {
+  const p = xml(`
+    <w:p xmlns:w="${WNS}">
+      <w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:rPr><w:color w:val="8f959e"/></w:rPr><w:t>表内为伊藤园单体数据。</w:t></w:r>
+    </w:p>
+  `);
+
+  const [para] = extractParagraph(p, {}, {}, null, parseDocxNumbering(FEISHU_NUMBERING));
+
+  assert.equal(para.isList, true);
+  assert.equal(para.listMarker, '•');
+  assert.equal(para.listMarkerColor, '3370ff');
+  assert.equal(para.runs[0].color, '8f959e');
+});
+
+test('extractParagraph draws the bullet once per list item, not once per soft break', () => {
+  const p = xml(`
+    <w:p xmlns:w="${WNS}">
+      <w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>第一行</w:t><w:br/><w:t>同一项的第二行</w:t></w:r>
+    </w:p>
+  `);
+
+  const paras = extractParagraph(p, {}, {}, null, parseDocxNumbering(FEISHU_NUMBERING));
+
+  assert.equal(paras.length, 2);
+  assert.equal(paras[0].listMarker, '•');
+  assert.equal(paras[1].listMarker, '');
+});
+
+test('a paragraph outside any list carries no marker', () => {
+  const p = xml(`
+    <w:p xmlns:w="${WNS}">
+      <w:r><w:t>我有4个问题：</w:t></w:r>
+    </w:p>
+  `);
+
+  const [para] = extractParagraph(p, {}, {}, null, parseDocxNumbering(FEISHU_NUMBERING));
+
+  assert.equal(para.isList, false);
+  assert.equal(para.listMarker, '');
 });
