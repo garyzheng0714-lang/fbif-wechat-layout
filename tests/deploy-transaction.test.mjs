@@ -276,25 +276,25 @@ test('Caddy sends every API to Go before static fallback and keeps only named le
   }
 });
 
-// 审核群早间监控播报（2026-08-06 用户裁定）：部署必须安装并启用 08:30 CST 的
-// 播报 timer，启用失败要让部署失败；回滚同样覆盖这两个单元。
-test('deploy installs and enables the review-chat monitoring report timer', async () => {
+// 审核群只发卡片（2026-08-09 用户裁定，取代 2026-08-06 的早间播报）：
+// 「这种播报不要发群里面，群里面只发卡片消息。因为大部分的运营他们不需要知道
+// 这些东西，会给他们带来误解。」部署必须把残留的播报单元幂等摘除，且回滚不恢复。
+test('deploy removes the review-chat broadcast timer and never restores it', async () => {
   const script = await projectFile('deploy/scripts/deploy-transaction.sh');
-  assert.match(script, /fbif-monitoring-report\.service/);
-  assert.match(script, /fbif-monitoring-report\.timer/);
-  assert.match(script, /systemctl enable --now fbif-monitoring-report\.timer/);
-  assert.match(script, /fbif-monitoring-report\.timer is not active after enable/,
-    'timer 启用失败必须让部署失败，不能静默放过');
-  assert.match(script, /restore_path monitoring_report_service/);
-  assert.match(script, /restore_path monitoring_report_timer/);
+  assert.match(script, /cleanup_group_broadcast\(\)/);
+  assert.match(script, /cleanup_group_broadcast\n/, 'prepare-monitoring 必须真的调用它');
+  assert.match(script, /systemctl disable fbif-monitoring-report\.timer/);
+  assert.match(script, /rm -f -- \/etc\/systemd\/system\/fbif-monitoring-report\.timer/);
+  assert.match(script, /group broadcast timer is still enabled after cleanup/,
+    '摘不干净必须让部署失败——残留单元会让播报第二天照发');
 
-  const service = await projectFile('deploy/systemd/fbif-monitoring-report.service');
-  assert.match(service, /Type=oneshot/);
-  assert.match(service, /X-Publish-Admin-Token/, '播报走管理员令牌，不得用同步令牌');
-  assert.match(service, /monitoring-report/, '必须调用播报端点');
-  assert.match(service, /EnvironmentFile=\/var\/www\/api\/\.env/, '管理员令牌在 .env');
+  assert.doesNotMatch(script, /systemctl enable --now fbif-monitoring-report\.timer/,
+    '不得再安装启用播报 timer');
+  assert.doesNotMatch(script, /install_file monitoring_report_/,
+    '不得再把播报单元装进生产');
+  assert.doesNotMatch(script, /restore_path monitoring_report_/,
+    '只摘不恢复：回滚也不该让播报重新长回群里');
 
-  const timer = await projectFile('deploy/systemd/fbif-monitoring-report.timer');
-  assert.match(timer, /OnCalendar=\*-\*-\* 08:30:00/);
-  assert.match(timer, /Persistent=true/, '停机跨过 08:30 时补发一次');
+  await assert.rejects(projectFile('deploy/systemd/fbif-monitoring-report.timer'),
+    '播报 unit 文件必须已从仓库删除');
 });

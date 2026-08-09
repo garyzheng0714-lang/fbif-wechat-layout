@@ -91,8 +91,6 @@ validate_release() {
     "$RELEASE_DIR/caddy/fbifmp-layout.caddy" \
     "$RELEASE_DIR/systemd/fbif-api.service" \
     "$RELEASE_DIR/systemd/fbif-render.service" \
-    "$RELEASE_DIR/systemd/fbif-monitoring-report.service" \
-    "$RELEASE_DIR/systemd/fbif-monitoring-report.timer" \
     "$RELEASE_DIR/config/env-schema.json" \
     "$RELEASE_DIR/config/api.env.example" \
     "$RELEASE_DIR/config/publish.env.example" \
@@ -159,6 +157,32 @@ cleanup_legacy_watchdog() {
   touch "$(marker monitoring.prepared)"
 }
 
+# cleanup_group_broadcast 把每天 08:30 的审核群监控播报从生产摘除。
+#
+# 2026-08-09 用户裁定：「这种播报不要发群里面，群里面只发卡片消息。因为大部分的
+# 运营他们不需要知道这些东西，会给他们带来误解。」审核群是运营的操作台，只该有
+# 「这篇要不要发」这一件事；链路状态、积压条数、失败计数是负责人关心的运维指标，
+# 混进去只会稀释卡片、还容易被误读成待办。
+#
+# 监控能力不受影响：GET /api/publish/monitoring 仍如实上报，由监控端主动来探。
+# 幂等；只摘除不恢复——回滚也不该让播报重新长回群里。
+cleanup_group_broadcast() {
+  [[ -d "$BACKUP_ROOT" ]] || die "active transaction backup not found: $BACKUP_ROOT"
+
+  systemctl stop fbif-monitoring-report.timer >/dev/null 2>&1 || true
+  systemctl stop fbif-monitoring-report.service >/dev/null 2>&1 || true
+  systemctl disable fbif-monitoring-report.timer >/dev/null 2>&1 || true
+  systemctl reset-failed fbif-monitoring-report.service >/dev/null 2>&1 || true
+  rm -f -- /etc/systemd/system/fbif-monitoring-report.service
+  rm -f -- /etc/systemd/system/fbif-monitoring-report.timer
+  systemctl daemon-reload
+
+  ! systemctl is-enabled --quiet fbif-monitoring-report.timer ||
+    die "group broadcast timer is still enabled after cleanup"
+  ! systemctl is-active --quiet fbif-monitoring-report.timer ||
+    die "group broadcast timer is still active after cleanup"
+}
+
 restore_path() {
   local name=$1
   local target=$2
@@ -190,8 +214,6 @@ rollback_impl() {
   # 监控已迁往监控端，回滚不恢复 watchdog（见 cleanup_legacy_watchdog）。
   restore_path api_service "$API_SERVICE_TARGET" || failed=1
   restore_path render_service "$RENDER_SERVICE_TARGET" || failed=1
-  restore_path monitoring_report_service /etc/systemd/system/fbif-monitoring-report.service || failed=1
-  restore_path monitoring_report_timer /etc/systemd/system/fbif-monitoring-report.timer || failed=1
   restore_path render_env "$RENDER_ENV_TARGET" || failed=1
   restore_path config_schema "$CONFIG_SCHEMA_TARGET" || failed=1
   restore_path public "$PUBLIC_TARGET" || failed=1
@@ -276,11 +298,6 @@ activate_release() {
 
   install_file api_service "$RELEASE_DIR/systemd/fbif-api.service" "$API_SERVICE_TARGET" 0644
   install_file render_service "$RELEASE_DIR/systemd/fbif-render.service" "$RENDER_SERVICE_TARGET" 0644
-  # 审核群早间监控播报（08:30 CST）：oneshot service + timer，随部署安装并启用。
-  install_file monitoring_report_service "$RELEASE_DIR/systemd/fbif-monitoring-report.service" \
-    /etc/systemd/system/fbif-monitoring-report.service 0644
-  install_file monitoring_report_timer "$RELEASE_DIR/systemd/fbif-monitoring-report.timer" \
-    /etc/systemd/system/fbif-monitoring-report.timer 0644
   install_file render_env "$RELEASE_DIR/render.env" "$RENDER_ENV_TARGET" 0600
   install_file config_schema "$RELEASE_DIR/config/env-schema.json" "$CONFIG_SCHEMA_TARGET" 0644
   install_file api "$RELEASE_DIR/api/fbif-api" "$API_TARGET" 0755
@@ -298,9 +315,6 @@ activate_release() {
   wait_runtime_config_ok http://127.0.0.1:19096/healthz config_schema_version
   systemctl restart fbif-api
   wait_runtime_config_ok http://127.0.0.1:9001/api/health config_schema_version
-  systemctl enable --now fbif-monitoring-report.timer
-  systemctl is-active --quiet fbif-monitoring-report.timer ||
-    die "fbif-monitoring-report.timer is not active after enable"
   systemctl reload caddy
 
   trap - ERR HUP INT TERM
@@ -397,6 +411,7 @@ case "$ACTION" in
     ;;
   prepare-monitoring)
     cleanup_legacy_watchdog
+    cleanup_group_broadcast
     ;;
   rollback)
     if [[ -d "$BACKUP_ROOT" ]]; then

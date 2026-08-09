@@ -124,6 +124,8 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
     **条目排版用飞书官方无序列表，项内换行必须 `<br>`**：单个 `\n` 是软换行，官方文档明说渲染时可能被忽略，实测就是被忽略的——「原句」会粘到上一句尾巴上。首屏与折叠区共用 `reviewCardRiskItemList`，语法只维护一份。守护：`api/publish_risk_layers_test.go`。
     **对应的 PRO 在 `publishRiskSystemPrompt`**：五类检查里 `factual`（事实与常识）是最高优先级，`headline` ≤100 字且代码层硬截断、模型不给时由 `publishRiskHeadlineOrFallback` 合成。
 
+36. **审核群里只发卡片（2026-08-09 用户裁定）** — 审核群是运营的操作台，只该有「这篇要不要发」这一件事。链路状态、待审积压条数、失败计数是负责人关心的运维指标，混进群里会稀释卡片、还容易被误读成待办。原来每天 08:30 的 `fbif-monitoring-report.timer` 群播报已整套删除（unit、`POST /api/publish/monitoring-report` 端点、实现与测试），部署链路改为幂等的 `cleanup_group_broadcast` 只摘不恢复——回滚也不该让播报重新长回群里。**监控能力不受影响**：`GET /api/publish/monitoring` 仍如实上报，由监控端主动来探（同红线 30 的分工：本项目只提供被探端点，不主动往外发运维播报）。守护：`tests/deploy-transaction.test.mjs`。
+
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量
