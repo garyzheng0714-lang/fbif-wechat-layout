@@ -227,7 +227,6 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
 | `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员角色或部署专用服务令牌 |
 | `POST` | `/api/publish/jobs/{id}/card-refresh` | 用当前代码重出审核卡（卡片改版后让历史任务的卡跟上）。已记过 message_id 的群原位更新，不刷屏；旧任务缺封面 img_key 时刷新会补传一次。需管理员角色或部署专用服务令牌，同步服务令牌不可用 |
-| `POST` | `/api/publish/monitoring-report` | 把当前监控状态用人话发进审核群（早间播报）。部署机 `fbif-monitoring-report.timer` 每天 08:30 CST 自动触发，也可管理员手动调用；权限同 card-refresh |
 | `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 
