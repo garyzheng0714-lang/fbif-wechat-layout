@@ -156,27 +156,27 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 		return p.sendTerminalPublishNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】已重新发布\n标题：%s\n文章已恢复为 FoodTalks 公开状态。", job.Title))
 	case publishNotificationPublicizeFailed:
-		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】发布失败\n标题：%s\n任务 #%d 在发出公开请求前已确认失败，网站仍保持草稿态；修复配置后可安全重试。\n原因：%s",
 			job.Title, job.ID, job.Error))
 	case publishNotificationPublicizeUncertain:
-		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, true), fmt.Sprintf(
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】公开结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n任务 #%d 不会自动重试，请先在网站前台/后台确认是否已公开，再调用人工对账。\n原因：%s",
 			job.Title, job.FoodTalksNewsID, job.ID, job.Error))
 	case publishNotificationUnpublishFailed:
-		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】下线失败\n标题：%s\n任务 #%d 尚未确认下线，修复配置后可重试。\n原因：%s",
 			job.Title, job.ID, job.Error))
 	case publishNotificationUnpublishUncertain:
-		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, true), fmt.Sprintf(
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】下线结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n任务 #%d 不会自动重试，请先确认文章当前是否已下线，再进行对账。\n原因：%s",
 			job.Title, job.FoodTalksNewsID, job.ID, job.Error))
 	case publishNotificationRepublishFailed:
-		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】重新发布失败\n标题：%s\n任务 #%d 仍保持下线状态，修复配置后可重试。\n原因：%s",
 			job.Title, job.ID, job.Error))
 	case publishNotificationRepublishUncertain:
-		return p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, true), fmt.Sprintf(
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】重新发布结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n任务 #%d 不会自动重试，请先确认文章当前是否已公开，再进行对账。\n原因：%s",
 			job.Title, job.FoodTalksNewsID, job.ID, job.Error))
 	default:
@@ -187,22 +187,20 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 // sendTerminalPublishNotification 更新 approve/reject 对应的终态卡，让回调
 // 返回的「请求已受理」进度卡在同一条消息里落到最终结果。
 func (p *publishPipeline) sendTerminalPublishNotification(ctx context.Context, job publishJob, fallbackText string) error {
-	return p.sendTerminalCardNotification(ctx, job, buildReviewDoneCard(job), fallbackText)
+	return p.sendTerminalCardNotification(ctx, job, fallbackText)
 }
 
 // sendTerminalCardNotification 统一串行所有终态/后续状态卡更新，并在取得发送锁后
 // 重读任务。网站生命周期 outbox 与外部分发 outbox 虽然独立持久化，但不能拿各自
 // claim 时的旧快照覆盖同一张飞书卡。
-func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job publishJob, card map[string]any, fallbackText string) error {
+func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job publishJob, fallbackText string) error {
 	p.reviewCardUpdateMu.Lock()
 	defer p.reviewCardUpdateMu.Unlock()
 	latest, err := p.store.byID(job.ID)
 	if err != nil {
 		return fmt.Errorf("发送卡片前重读任务 #%d 失败: %w", job.ID, err)
 	}
-	job = latest
-	card = buildReviewCardForCurrentState(latest)
-	return p.sendTerminalCardNotificationUnlocked(ctx, job, card, fallbackText)
+	return p.sendTerminalCardNotificationUnlocked(ctx, latest, buildReviewCardForCurrentState(latest), fallbackText)
 }
 
 // sendTerminalCardNotificationUnlocked 先尝试原位更新审核卡；旧任务没有
@@ -623,10 +621,10 @@ func (p *publishPipeline) refreshReviewCard(ctx context.Context, jobID int64, re
 	case publishStageAwaitingReview:
 		return job, p.sendReviewPendingNotification(ctx, job)
 	case publishStagePublished, publishStageOffline, publishStageRejected:
-		return job, p.sendTerminalCardNotification(ctx, job, buildReviewDoneCard(job), fmt.Sprintf(
+		return job, p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】任务 #%d 审核卡已刷新\n标题：%s", job.ID, job.Title))
 	case publishStageFailed:
-		return job, p.sendTerminalCardNotification(ctx, job, buildReviewIssueCard(job, false), fmt.Sprintf(
+		return job, p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】任务 #%d 审核卡已刷新\n标题：%s", job.ID, job.Title))
 	default:
 		return job, fmt.Errorf("任务当前阶段（%s）没有对应的审核卡，无法刷新", job.Stage)
