@@ -115,6 +115,32 @@ type publishJob struct {
 	PublicationAction   string `json:"publication_action,omitempty"` // publish / unpublish / republish
 	PublicationActor    string `json:"publication_actor,omitempty"`
 	PublicationActionAt string `json:"publication_action_at,omitempty"`
+	// 外部分发是 FoodTalks 主发布状态机之外的正交子流程。FoodTalks 允许转载；
+	// 云梭目标只允许原创，并且只能在 FoodTalks 已审核公开后由卡片人工触发。
+	// 目标账号必须在受理动作时快照，避免运行期配置变化把同一次意图发往别处。
+	ExternalDistributionState          string                              `json:"external_distribution_state,omitempty"`
+	ExternalDistributionTargets        []publishExternalDistributionTarget `json:"external_distribution_targets,omitempty"`
+	ExternalDistributionRequestedBy    string                              `json:"external_distribution_requested_by,omitempty"`
+	ExternalDistributionRequestedAt    string                              `json:"external_distribution_requested_at,omitempty"`
+	ExternalDistributionContentHash    string                              `json:"external_distribution_content_hash,omitempty"`
+	ExternalDistributionContentVersion int64                               `json:"external_distribution_content_version,omitempty"`
+	ExternalDistributionAttribution    string                              `json:"external_distribution_attribution,omitempty"`
+	ExternalDistributionSource         string                              `json:"external_distribution_source,omitempty"`
+	ExternalDistributionPayloadJSON    string                              `json:"external_distribution_payload_json,omitempty"`
+	ExternalDistributionPayloadHash    string                              `json:"external_distribution_payload_hash,omitempty"`
+	ExternalDistributionIntentKey      string                              `json:"external_distribution_intent_key,omitempty"`
+	ExternalDistributionIntentAt       string                              `json:"external_distribution_intent_at,omitempty"`
+	ExternalDistributionContentPK      string                              `json:"external_distribution_content_pk,omitempty"`
+	ExternalDistributionError          string                              `json:"external_distribution_error,omitempty"`
+	ExternalDistributionCompletedAt    string                              `json:"external_distribution_completed_at,omitempty"`
+	ExternalDistributionPollAttempts   int                                 `json:"external_distribution_poll_attempts,omitempty"`
+	ExternalDistributionLastPolledAt   string                              `json:"external_distribution_last_polled_at,omitempty"`
+	// 分发结果单独更新同一张审核卡，不占用网站发布的单槽 notification outbox。
+	ExternalDistributionCardState     string `json:"external_distribution_card_state,omitempty"`
+	ExternalDistributionCardSeq       int64  `json:"external_distribution_card_seq,omitempty"`
+	ExternalDistributionCardAttempts  int    `json:"external_distribution_card_attempts,omitempty"`
+	ExternalDistributionCardError     string `json:"external_distribution_card_error,omitempty"`
+	ExternalDistributionCardUpdatedAt string `json:"external_distribution_card_updated_at,omitempty"`
 	// FoodTalks CreateNews 没有服务端幂等键：外调前先持久化本地 intent。
 	// 调用结果不确定时凭此转人工核对，禁止自动 POST 第二次。
 	StagingIntentKey string `json:"staging_intent_key,omitempty"`
@@ -417,6 +443,7 @@ func (s *publishJobStore) list(limit int) ([]publishJob, error) {
 		j.BlocksJSON = ""
 		j.ContentHTML = ""
 		j.ImageMap = ""
+		j.ExternalDistributionPayloadJSON = ""
 		j.RiskRaw = ""
 		out = append(out, j)
 	}

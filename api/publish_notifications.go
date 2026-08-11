@@ -190,10 +190,25 @@ func (p *publishPipeline) sendTerminalPublishNotification(ctx context.Context, j
 	return p.sendTerminalCardNotification(ctx, job, buildReviewDoneCard(job), fallbackText)
 }
 
-// sendTerminalCardNotification 先尝试原位更新审核卡；旧任务没有 message_id、
-// 或更新接口暂时不可用时，兼容发送一张新终态卡，再降级文本。新任务的正常路径
-// 只会命中第一分支，因此不会在群里追加第二张结果卡。
+// sendTerminalCardNotification 统一串行所有终态/后续状态卡更新，并在取得发送锁后
+// 重读任务。网站生命周期 outbox 与外部分发 outbox 虽然独立持久化，但不能拿各自
+// claim 时的旧快照覆盖同一张飞书卡。
 func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job publishJob, card map[string]any, fallbackText string) error {
+	p.reviewCardUpdateMu.Lock()
+	defer p.reviewCardUpdateMu.Unlock()
+	latest, err := p.store.byID(job.ID)
+	if err != nil {
+		return fmt.Errorf("发送卡片前重读任务 #%d 失败: %w", job.ID, err)
+	}
+	job = latest
+	card = buildReviewCardForCurrentState(latest)
+	return p.sendTerminalCardNotificationUnlocked(ctx, job, card, fallbackText)
+}
+
+// sendTerminalCardNotificationUnlocked 先尝试原位更新审核卡；旧任务没有
+// message_id、或更新接口暂时不可用时，兼容发送一张新终态卡，再降级文本。
+// 调用方必须持有 reviewCardUpdateMu。
+func (p *publishPipeline) sendTerminalCardNotificationUnlocked(ctx context.Context, job publishJob, card map[string]any, fallbackText string) error {
 	if p != nil && p.deliverySettings != nil {
 		if err := p.sendConfiguredReviewCardToTargets(ctx, job, card); err == nil {
 			return nil
@@ -223,7 +238,40 @@ func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job 
 	return p.notify(ctx, fallbackText)
 }
 
+// buildReviewCardForCurrentState 是两个卡片 outbox 的共同渲染入口。外部分发状态
+// 会附着在网站当前真实生命周期上，而不是反过来把网站阶段强行还原为 published。
+func buildReviewCardForCurrentState(job publishJob) map[string]any {
+	switch job.Stage {
+	case publishStageAwaitingReview:
+		return buildReviewPendingCard(job, strings.TrimSpace(job.ReviewCoverImgKey))
+	case publishStagePublicizing, publishStagePublicizingUpdating:
+		return buildReviewPublishingCard(job)
+	case publishStagePublished, publishStageOffline, publishStageRejected, publishStageSupersededDuplicate:
+		return buildReviewDoneCard(job)
+	case publishStageUnpublishing, publishStageUnpublishingUpdating:
+		return buildReviewLifecycleProgressCard(job, feishuCardActionUnpublish)
+	case publishStageRepublishing, publishStageRepublishingUpdating:
+		return buildReviewLifecycleProgressCard(job, feishuCardActionRepublish)
+	case publishStageReconciliationRequired, publishStagePublicizeReconciliationRequired,
+		publishStageUnpublishReconciliationRequired, publishStageRepublishReconciliationRequired,
+		publishStageStagingCreating:
+		return buildReviewIssueCard(job, true)
+	case publishStageFailed:
+		return buildReviewIssueCard(job, false)
+	default:
+		// 只有已经存在审核卡的任务才会走到这里；未知新阶段宁可展示异常卡，
+		// 也不能用旧的“已发布”卡片掩盖当前状态。
+		return buildReviewIssueCard(job, true)
+	}
+}
+
 func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job publishJob) error {
+	p.reviewCardUpdateMu.Lock()
+	defer p.reviewCardUpdateMu.Unlock()
+	return p.sendReviewPendingNotificationUnlocked(ctx, job)
+}
+
+func (p *publishPipeline) sendReviewPendingNotificationUnlocked(ctx context.Context, job publishJob) error {
 	coverImgKey := ""
 	if strings.TrimSpace(job.CoverURL) != "" {
 		var key string
@@ -247,6 +295,18 @@ func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job
 			}
 		}
 	}
+	// 上传封面期间任务可能已经被审核并推进到发布/下线。发送前必须在同一张
+	// 卡的串行锁内重读；旧 review_pending 绝不能最后覆盖终态卡。
+	latest, err := p.store.byID(job.ID)
+	if err != nil {
+		return fmt.Errorf("发送待审核卡前重读任务 #%d 失败: %w", job.ID, err)
+	}
+	job = latest
+	if job.Stage != publishStageAwaitingReview {
+		return p.sendTerminalCardNotificationUnlocked(ctx, job, buildReviewCardForCurrentState(job), fmt.Sprintf(
+			"【网站同步】任务 #%d 状态已变化\n标题：%s", job.ID, job.Title))
+	}
+	coverImgKey = strings.TrimSpace(job.ReviewCoverImgKey)
 	card := buildReviewPendingCard(job, coverImgKey)
 	if p != nil && p.deliverySettings != nil {
 		return p.sendConfiguredReviewCardToTargets(ctx, job, card)

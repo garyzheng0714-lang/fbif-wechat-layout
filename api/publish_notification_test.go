@@ -43,14 +43,24 @@ func TestPublishTerminalNotificationsPreferDoneCardAndFallbackText(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := newPublishTestEnv(t)
-			job := publishJob{
-				ID: 8, Stage: tc.stage, NotificationKind: tc.kind,
-				Title: "终态通知测试", SourceURL: testPublishSourceURL,
-				FoodTalksNewsID: 7240, ArticleURL: "https://test.foodtalks.cn/news/7240",
-				ReviewAction: publishReviewApprove, ReviewedBy: "ou_reviewer_1",
+			job, _, err := env.store.create("site:terminal-notification:"+tc.name, testPublishSourceURL)
+			if err != nil {
+				t.Fatalf("create: %v", err)
 			}
-			if tc.stage == publishStageRejected {
-				job.ReviewAction = publishReviewReject
+			job, err = env.store.update(job.ID, func(j *publishJob) {
+				j.Stage = tc.stage
+				j.NotificationKind = tc.kind
+				j.Title = "终态通知测试"
+				j.FoodTalksNewsID = 7240
+				j.ArticleURL = "https://test.foodtalks.cn/news/7240"
+				j.ReviewAction = publishReviewApprove
+				j.ReviewedBy = "ou_reviewer_1"
+				if tc.stage == publishStageRejected {
+					j.ReviewAction = publishReviewReject
+				}
+			})
+			if err != nil {
+				t.Fatalf("seed: %v", err)
 			}
 			var card map[string]any
 			env.pipeline.notifyCard = func(_ context.Context, mapCard map[string]any) error {
@@ -87,11 +97,22 @@ func TestPublishTerminalNotificationsPreferDoneCardAndFallbackText(t *testing.T)
 
 func TestPublishTerminalNotificationsUpdateExistingCardInPlace(t *testing.T) {
 	env := newPublishTestEnv(t)
-	job := publishJob{
-		ID: 8, Stage: publishStagePublished, NotificationKind: publishNotificationPublished,
-		ReviewCardMsgID: "om_review_8", Title: "原位更新测试", SourceURL: testPublishSourceURL,
-		FoodTalksNewsID: 7240, ArticleURL: "https://test.foodtalks.cn/news/7240",
-		ReviewAction: publishReviewApprove, ReviewedBy: "ou_reviewer_1",
+	job, _, err := env.store.create("site:terminal-notification:update-in-place", testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	job, err = env.store.update(job.ID, func(j *publishJob) {
+		j.Stage = publishStagePublished
+		j.NotificationKind = publishNotificationPublished
+		j.ReviewCardMsgID = "om_review_8"
+		j.Title = "原位更新测试"
+		j.FoodTalksNewsID = 7240
+		j.ArticleURL = "https://test.foodtalks.cn/news/7240"
+		j.ReviewAction = publishReviewApprove
+		j.ReviewedBy = "ou_reviewer_1"
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
 	}
 	var updatedID string
 	var updatedCard map[string]any

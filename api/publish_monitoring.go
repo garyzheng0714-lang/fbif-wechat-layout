@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -63,10 +64,20 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 	status.DuplicateSourceKeys = countDuplicatePublishSourceKeys(jobs)
 	for _, job := range jobs {
 		age := publishMonitoringAge(now, job.UpdatedAt)
+		processingAge := int64(-1)
 		if publishMonitoringProcessingStage(job.Stage) {
+			processingAge = age
+		}
+		if publishExternalDistributionProcessing(job.ExternalDistributionState) {
+			externalAge := publishMonitoringAge(now, publishExternalDistributionStartedAt(job))
+			if externalAge > processingAge {
+				processingAge = externalAge
+			}
+		}
+		if processingAge >= 0 {
 			status.Processing++
-			if age > status.OldestProcessingAgeSeconds {
-				status.OldestProcessingAgeSeconds = age
+			if processingAge > status.OldestProcessingAgeSeconds {
+				status.OldestProcessingAgeSeconds = processingAge
 			}
 		}
 		if job.Stage == publishStageCreated {
@@ -81,10 +92,23 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 				status.OldestNotificationAgeSeconds = age
 			}
 		}
+		if job.ExternalDistributionCardState == publishExternalCardPending ||
+			job.ExternalDistributionCardState == publishExternalCardSending {
+			status.NotificationPending++
+			if age > status.OldestNotificationAgeSeconds {
+				status.OldestNotificationAgeSeconds = age
+			}
+		}
 		if job.NotificationError != "" {
 			status.NotificationErrors++
 		}
+		if job.ExternalDistributionCardError != "" {
+			status.NotificationErrors++
+		}
 		if job.NotificationState == publishNotificationStateDeadLetter {
+			status.NotificationDeadLetters++
+		}
+		if job.ExternalDistributionCardState == publishExternalCardDeadLetter {
 			status.NotificationDeadLetters++
 		}
 		if job.Stage == publishStageAwaitingReview && job.NotificationKind == "" && job.NotificationSentAt == "" {
@@ -96,10 +120,23 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 				status.FailedRecent++
 			}
 		}
+		if job.ExternalDistributionState == publishExternalDistributionFailed ||
+			job.ExternalDistributionState == publishExternalDistributionPartialFailed {
+			status.Failed++
+			if publishMonitoringIsRecent(now, job.UpdatedAt) {
+				status.FailedRecent++
+			}
+		}
 		if job.Stage == publishStageReconciliationRequired ||
 			job.Stage == publishStagePublicizeReconciliationRequired ||
 			job.Stage == publishStageStagingCreating ||
 			job.Stage == publishStagePublicizingUpdating {
+			status.ReconciliationRequired++
+			if age > status.OldestReconciliationAgeSeconds {
+				status.OldestReconciliationAgeSeconds = age
+			}
+		}
+		if job.ExternalDistributionState == publishExternalDistributionReconciliationRequired {
 			status.ReconciliationRequired++
 			if age > status.OldestReconciliationAgeSeconds {
 				status.OldestReconciliationAgeSeconds = age
@@ -188,6 +225,13 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 		status.Health = "healthy"
 	}
 	return status
+}
+
+func publishExternalDistributionStartedAt(job publishJob) string {
+	if value := strings.TrimSpace(job.ExternalDistributionIntentAt); value != "" {
+		return value
+	}
+	return strings.TrimSpace(job.ExternalDistributionRequestedAt)
 }
 
 func countDuplicatePublishSourceKeys(jobs []publishJob) int {

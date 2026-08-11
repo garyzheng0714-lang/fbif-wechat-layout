@@ -37,6 +37,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/html"
@@ -156,7 +157,11 @@ type publishPipeline struct {
 	publicDir string
 	// workerPool 仅在生产入口显式启用。单元测试默认保留可注入的同步/异步
 	// spawn，避免每个测试 pipeline 都创建常驻 goroutine。
-	workerPool *boundedWorkerPool
+	workerPool         *boundedWorkerPool
+	externalWorkerPool *boundedWorkerPool
+	// 网站生命周期与外部分发各有持久 outbox，但它们更新的是同一张飞书卡。
+	// 单进程部署下统一串行发送，并在拿锁后重读任务，避免旧快照最后覆盖新状态。
+	reviewCardUpdateMu sync.Mutex
 
 	// fetch 公众号 URL → 标题 + 公众号名 + 结构化作者署名 + 页面规范 URL + 中立 Block[] JSON
 	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
@@ -175,6 +180,12 @@ type publishPipeline struct {
 	assessRisk func(ctx context.Context, job publishJob) (publishRiskAssessment, error)
 	// foodTalks 每次任务执行现构造（凭证 env-only 运行期可变；缺配置的错误落到具体任务上）
 	foodTalks func() (foodTalksAPI, error)
+	// yunsuo 是原创文章外部分发客户端。它只在 FoodTalks 已发布卡片被人工点击后使用，
+	// 与网站主状态机正交；测试可注入 fake，绝不在流水线自动审核路径调用。
+	yunsuo func() (yunsuoAPI, error)
+	// 云梭没有回调，content_pk 落盘后以安全查询轮询最终结果。
+	externalDistributionPollInterval time.Duration
+	externalDistributionPollTimeout  time.Duration
 	// notify 人审群通知；nil 或返回错误都不阻断流水线——人可以查任务列表，通知只是加速器
 	notify func(ctx context.Context, text string) error
 	// monitorNotify P0 监控私聊；与审核群物理分开，缺配置时监控 relay 必须失败，
@@ -194,6 +205,9 @@ type publishPipeline struct {
 	coverImgKey func(ctx context.Context, imgURL string) (string, error)
 	// spawn 异步推进入口（生产 go routine；测试注入同步执行保证确定性）
 	spawn func(func())
+	// externalSpawn 将云梭的慢 HTTP 与 FoodTalks 主发布 worker 物理隔离；否则四个
+	// 30 秒请求就能占满主池，使审核发布和卡片通知一起饥饿。
+	externalSpawn func(func())
 	// retryNotification 失败通知的延迟重试调度；测试可注入捕获回调。
 	retryNotification func(time.Duration, func())
 	now               func() time.Time
@@ -204,34 +218,59 @@ type publishPipeline struct {
 // 会在下一次启动时由 recoverJobs 恢复。
 func (p *publishPipeline) enableBoundedWorkers(workerCount, queueCapacity int) {
 	pool := newBoundedWorkerPool(workerCount, queueCapacity)
+	externalPool := newBoundedWorkerPool(2, 32)
 	p.workerPool = pool
+	p.externalWorkerPool = externalPool
 	p.spawn = func(f func()) {
 		if !pool.submit(f) {
 			log.Printf("publish: worker pool 已停止，拒绝新的异步任务")
 		}
 	}
+	p.externalSpawn = func(f func()) {
+		if !externalPool.submit(f) {
+			log.Printf("publish: external worker pool 已停止，拒绝新的云梭任务")
+		}
+	}
 }
 
 func (p *publishPipeline) shutdownWorkers(ctx context.Context) error {
-	if p.workerPool == nil {
-		return nil
+	if p.externalWorkerPool != nil {
+		if err := p.externalWorkerPool.shutdown(ctx); err != nil {
+			return err
+		}
 	}
-	return p.workerPool.shutdown(ctx)
+	if p.workerPool != nil {
+		return p.workerPool.shutdown(ctx)
+	}
+	return nil
+}
+
+func (p *publishPipeline) spawnExternalWork(f func()) {
+	if p.externalSpawn != nil {
+		p.externalSpawn(f)
+		return
+	}
+	// 单测沿用可注入的同步 spawn；未启用 bounded workers 的开发模式也保持异步。
+	p.spawn(f)
 }
 
 // newPublishPipeline 生产装配：全部依赖用进程内复用的默认实现。
 func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publishPipeline {
 	p := &publishPipeline{
-		store:             store,
-		rules:             rules,
-		render:            renderSiteHTML,
-		ossUpload:         ossUploadByURLs,
-		enrich:            arkEnrichArticle,
-		assessRisk:        arkAssessPublishRisk,
-		foodTalks:         func() (foodTalksAPI, error) { return newFoodTalksClientFromEnv() },
-		spawn:             func(f func()) { go f() },
-		retryNotification: func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
-		now:               time.Now,
+		store:                            store,
+		rules:                            rules,
+		render:                           renderSiteHTML,
+		ossUpload:                        ossUploadByURLs,
+		enrich:                           arkEnrichArticle,
+		assessRisk:                       arkAssessPublishRisk,
+		foodTalks:                        func() (foodTalksAPI, error) { return newFoodTalksClientFromEnv() },
+		yunsuo:                           func() (yunsuoAPI, error) { return newYunsuoClientFromEnv() },
+		externalDistributionPollInterval: 5 * time.Second,
+		externalDistributionPollTimeout:  15 * time.Minute,
+		spawn:                            func(f func()) { go f() },
+		externalSpawn:                    func(f func()) { go f() },
+		retryNotification:                func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
+		now:                              time.Now,
 	}
 	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
 		return fetchSiteArticleWithContext(ctx, rules, articleURL)
@@ -1312,6 +1351,7 @@ func (p *publishPipeline) recoverJobs() {
 	}
 	for _, job := range jobs {
 		p.recoverPublishNotification(job)
+		p.recoverExternalDistribution(job)
 		switch job.Stage {
 		case publishStageCreated, publishStageFetching, publishStageRendering,
 			publishStageMirroring, publishStageEnriching, publishStageAssessing, publishStageAssessingReview:
@@ -1901,16 +1941,27 @@ func publishSiteIsRepost(sourceName, blocksJSON string) bool {
 	return !siteOwnAccounts()[strings.TrimSpace(sourceName)]
 }
 
-func siteSourceFor(job publishJob) (int, string) {
+// publishArticleProvenance 是所有渠道共用的文章来源真相：只负责回答“是否原创、
+// 来源是谁”，不掺任何渠道发布策略。FoodTalks 可接收两类文章；云梭等外部渠道
+// 在自己的资格函数中只接受 original=true，避免把平台名写进中立能力层。
+func publishArticleProvenance(job publishJob) (original bool, source string) {
 	own := siteOwnAccounts()
 	if src := strings.TrimSpace(job.AISource); src != "" && !own[src] {
-		return 1, src
+		return false, src
 	}
 	name := strings.TrimSpace(job.SourceName)
 	if publishSiteIsRepost(name, job.BlocksJSON) {
-		return 1, name
+		return false, name
 	}
-	return 0, name
+	return true, name
+}
+
+func siteSourceFor(job publishJob) (int, string) {
+	original, source := publishArticleProvenance(job)
+	if !original {
+		return 1, source
+	}
+	return 0, source
 }
 
 // siteFrontURL 前台地址（article_url 回填用），默认测试环境；生产切换只改 env。
