@@ -25,10 +25,11 @@ import (
 // feishuCardActionApprove / Reject 回调 value 的 action 取值（发送与回调两侧共用，
 // 字面量漂移会让按钮点了没反应）。
 const (
-	feishuCardActionApprove   = "approve"
-	feishuCardActionReject    = "reject"
-	feishuCardActionUnpublish = "unpublish"
-	feishuCardActionRepublish = "republish"
+	feishuCardActionApprove            = "approve"
+	feishuCardActionReject             = "reject"
+	feishuCardActionUnpublish          = "unpublish"
+	feishuCardActionRepublish          = "republish"
+	feishuCardActionDistributeExternal = "distribute_external"
 	// 阻断级风险卡上的强制发布（2026-08-07 用户裁定：阻断只当警示不当锁）。
 	feishuCardActionForceApprove = "force_approve"
 )
@@ -189,6 +190,7 @@ func buildReviewLifecycleProgressCard(job publishJob, action string) map[string]
 		"tag": "markdown", "text_size": "notation",
 		"content": content + "\n\n" + reviewCardAuditTrail(job, content),
 	}}
+	elements = append(elements, reviewCardExternalDistributionElements(job, false)...)
 	return map[string]any{
 		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},
@@ -254,6 +256,7 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 				}},
 			}))
 		}
+		elements = append(elements, reviewCardExternalDistributionElements(job, true)...)
 		if publishUnpublishWindowOpen(job, time.Now().UTC()) {
 			unpublishValue := map[string]any{
 				"action": feishuCardActionUnpublish, "job_id": job.ID,
@@ -290,6 +293,9 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 			},
 			"behaviors": []any{map[string]any{"type": "callback", "value": republishValue}},
 		}))
+		// 外部平台与 FoodTalks 生命周期彼此独立。若下线前已经发起分发，仍需在
+		// 同一张卡上保留其最终结果；但不再提供新的分发入口。
+		elements = append(elements, reviewCardExternalDistributionElements(job, false)...)
 	} else {
 		header["template"] = "red"
 		header["subtitle"] = feishuPlainText("任务终止，文章保留在 FoodTalks 草稿态")
@@ -317,6 +323,136 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 			"elements":         elements,
 		},
 	}
+}
+
+// reviewCardExternalDistributionElements 把外部分发作为已发布卡上的独立区块：
+// 原创且尚未分发时是一枚明确的人工按钮；转载只解释“仅自有站”，不提供死按钮；
+// 一旦开始则只呈现持久状态。目标当前固定，不用多选，减少误漏发。
+func reviewCardExternalDistributionElements(job publishJob, allowStart bool) []any {
+	state := strings.TrimSpace(job.ExternalDistributionState)
+	provenance, _, provenanceEvidence := publishExternalDistributionProvenance(job)
+	if state == "" {
+		if provenance != publishExternalProvenanceOriginal {
+			if !allowStart {
+				return nil
+			}
+			message := "转载文章仅发布至 FoodTalks，不同步外部平台。"
+			if provenance == publishExternalProvenanceUnverified {
+				message = "原创状态未完成核验，暂不开放外部分发（" + provenanceEvidence + "）。"
+			}
+			return []any{map[string]any{
+				"tag":       "markdown",
+				"text_size": "notation",
+				"content":   "<font color='grey'>" + reviewCardSafeText(message, 180) + "</font>",
+			}}
+		}
+		if !allowStart {
+			return nil
+		}
+		cfg, err := loadYunsuoConfig()
+		if err != nil || len(cfg.Targets) == 0 {
+			// readiness 会阻止缺配置版本上线；历史卡刷新时宁可不渲染一个必失败按钮。
+			return nil
+		}
+		names := make([]string, 0, len(cfg.Targets))
+		for _, target := range cfg.Targets {
+			if name := strings.TrimSpace(target.Name); name != "" {
+				names = append(names, name)
+			}
+		}
+		label := strings.Join(names, "、")
+		if label == "" {
+			label = "已配置平台"
+		}
+		value := map[string]any{
+			"action":               feishuCardActionDistributeExternal,
+			"job_id":               job.ID,
+			"distribution_version": publishExternalDistributionCardVersion(job),
+		}
+		button := map[string]any{
+			"tag": "button", "text": feishuPlainText("同步分发至其他平台"),
+			"type": "primary_filled", "size": "medium", "width": "fill",
+			"confirm": map[string]any{
+				"title": feishuPlainText("同步分发至" + label + "？"),
+				"text":  feishuPlainText("请确认本文为原创文章。外部发布独立于 FoodTalks；下线本站文章不会自动下线外部平台。确认后将立即提交发布。"),
+			},
+			"behaviors": []any{map[string]any{"type": "callback", "value": value}},
+		}
+		return []any{
+			map[string]any{
+				"tag":       "markdown",
+				"text_size": "notation",
+				"content":   "<font color='grey'>未发现转载声明；请确认原创后同步至 " + reviewCardSafeText(label, 120) + "。</font>",
+			},
+			feishuButtonRow(button),
+		}
+	}
+
+	targetNames := make([]string, 0, len(job.ExternalDistributionTargets))
+	succeeded := make([]string, 0, len(job.ExternalDistributionTargets))
+	failed := make([]string, 0, len(job.ExternalDistributionTargets))
+	for _, target := range job.ExternalDistributionTargets {
+		name := reviewCardSafeText(target.Name, 40)
+		if name == "" {
+			name = "未命名平台"
+		}
+		targetNames = append(targetNames, name)
+		switch target.State {
+		case publishExternalTargetSucceeded:
+			succeeded = append(succeeded, name)
+		case publishExternalTargetFailed, publishExternalTargetUnsupported:
+			detail := reviewCardSafeText(target.Remark, 60)
+			if detail != "" {
+				name += "（" + detail + "）"
+			}
+			failed = append(failed, name)
+		}
+	}
+	allNames := strings.Join(targetNames, "、")
+	if allNames == "" {
+		allNames = "已配置平台"
+	}
+	content := "**其他平台分发**\n"
+	switch state {
+	case publishExternalDistributionQueued, publishExternalDistributionPushing, publishExternalDistributionPolling:
+		content += "<font color='grey'>正在同步至 " + allNames + "，完成后本卡会自动更新。</font>"
+	case publishExternalDistributionSucceeded:
+		content += "<font color='green'>已同步：" + strings.Join(succeeded, "、") + "。</font>"
+	case publishExternalDistributionPartialFailed, publishExternalDistributionFailed:
+		if len(succeeded) > 0 {
+			content += "<font color='green'>已同步：" + strings.Join(succeeded, "、") + "。</font>\n"
+		}
+		if publishExternalDistributionCanSafeRetry(job) {
+			content += "<font color='red'>上次请求在云梭受理前失败：" + strings.Join(failed, "、") + "。</font>\n"
+			content += "<font color='grey'>修正配置后可安全重试，不会重复发布。</font>"
+		} else {
+			content += "<font color='red'>未完成：" + strings.Join(failed, "、") + "。请在云梭后台处理。</font>"
+		}
+	case publishExternalDistributionReconciliationRequired:
+		content += "<font color='orange'>提交结果暂时无法确认。系统不会重复发布，请先到云梭后台核对。</font>"
+	default:
+		content += "<font color='grey'>状态待确认，请在云梭后台核对。</font>"
+	}
+	elements := []any{map[string]any{
+		"tag": "markdown", "text_size": "notation", "content": content,
+	}}
+	if allowStart && provenance == publishExternalProvenanceOriginal && publishExternalDistributionCanSafeRetry(job) {
+		retryValue := map[string]any{
+			"action":               feishuCardActionDistributeExternal,
+			"job_id":               job.ID,
+			"distribution_version": publishExternalDistributionCardVersion(job),
+		}
+		elements = append(elements, feishuButtonRow(map[string]any{
+			"tag": "button", "text": feishuPlainText("重新同步分发"),
+			"type": "primary_filled", "size": "medium", "width": "fill",
+			"confirm": map[string]any{
+				"title": feishuPlainText("重新同步至" + allNames + "？"),
+				"text":  feishuPlainText("上次请求已确认未被云梭受理。本次会重新提交；请同时确认本文为原创文章。"),
+			},
+			"behaviors": []any{map[string]any{"type": "callback", "value": retryValue}},
+		}))
+	}
+	return elements
 }
 
 // buildReviewIssueCard 是发布窗口的异常终态：仍更新原审核卡，不另起一张通知卡。
@@ -361,6 +497,7 @@ func buildReviewIssueCard(job publishJob, uncertain bool) map[string]any {
 			"text_size": "notation",
 			"content":   "<font color='grey'>处理说明</font>\n" + reviewCardSafeOrDash(job.Error, 600),
 		}}
+	elements = append(elements, reviewCardExternalDistributionElements(job, false)...)
 	elements = append(elements, map[string]any{
 		"tag":       "markdown",
 		"text_size": "notation",

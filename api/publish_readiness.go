@@ -38,6 +38,11 @@ type publishReadinessStatus struct {
 		CategoriesExplicit    bool   `json:"categories_explicit"`
 		Categories            bool   `json:"categories_valid"`
 	} `json:"foodtalks"`
+	Yunsuo struct {
+		Configured  bool     `json:"configured"`
+		TargetCount int      `json:"target_count"`
+		TargetNames []string `json:"target_names,omitempty"`
+	} `json:"yunsuo"`
 	Render struct {
 		Configured bool `json:"configured"`
 	} `json:"render"`
@@ -162,6 +167,13 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.FoodTalks.Categories = out.FoodTalks.CategoriesExplicit && categoryErr == nil
 	out.FoodTalks.Configured = configuredHTTPBaseURL(baseURL) && strings.TrimSpace(os.Getenv(foodTalksTokenEnv)) != "" &&
 		out.FoodTalks.FrontExplicit && out.FoodTalks.AdminExplicit && out.FoodTalks.Categories && out.FoodTalks.TargetMatchesExpected
+	if cfg, err := loadYunsuoConfig(); err == nil && len(cfg.Targets) > 0 {
+		out.Yunsuo.Configured = true
+		out.Yunsuo.TargetCount = len(cfg.Targets)
+		for _, target := range cfg.Targets {
+			out.Yunsuo.TargetNames = append(out.Yunsuo.TargetNames, target.Name)
+		}
+	}
 	out.Render.Configured = configuredHTTPBaseURL(os.Getenv("RENDER_SERVICE_URL")) && renderToken() != ""
 	appID := strings.TrimSpace(os.Getenv("FEISHU_APP_ID"))
 	appSecret := strings.TrimSpace(os.Getenv("FEISHU_APP_SECRET"))
@@ -194,7 +206,7 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.JudgeConfigured = strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv)) != ""
 	out.Ready = out.ConfigSchema.Matches && out.ServiceAuth.Configured && out.ImageUpload.Configured && !out.HTTPReviewEnabled &&
 		out.GeneratedFiles.ready() &&
-		out.StoreValid && out.FoodTalks.Configured && out.Feishu.ReviewerAllowlistConfigured &&
+		out.StoreValid && out.FoodTalks.Configured && out.Yunsuo.Configured && out.Feishu.ReviewerAllowlistConfigured &&
 		out.FoodTalks.Categories && out.Render.Configured && out.Feishu.NotifyConfigured &&
 		out.Feishu.MonitorNotifyConfigured && out.Feishu.CallbackModeExplicit && out.Feishu.CallbackConfigured &&
 		out.EnrichMode == "dual" && out.JudgeConfigured

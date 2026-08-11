@@ -106,6 +106,30 @@ func TestPublishMonitoringSeparatesBusyDegradedAndUnhealthy(t *testing.T) {
 	}
 }
 
+func TestPublishMonitoringUsesExternalIntentAgeAcrossPollUpdates(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	job, _, err := store.create("site:https://mp.weixin.qq.com/s/external-slow", "https://mp.weixin.qq.com/s/external-slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Now().UTC().Add(-11 * time.Minute).Truncate(time.Second)
+	if _, err := store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStagePublished
+		current.ExternalDistributionState = publishExternalDistributionPolling
+		current.ExternalDistributionRequestedAt = startedAt.Add(-time.Minute).Format(time.RFC3339)
+		current.ExternalDistributionIntentAt = startedAt.Format(time.RFC3339)
+		current.ExternalDistributionLastPolledAt = time.Now().UTC().Format(time.RFC3339)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status := currentPublishMonitoring(store, time.Now().UTC())
+	if status.OldestProcessingAgeSeconds < 10*60 ||
+		!publishMonitoringHasIssue(publishMonitoringStatus{Issues: status.Warnings}, "processing_slow:") {
+		t.Fatalf("轮询更新 UpdatedAt 后仍应按外部分发 intent 计龄：%+v", status)
+	}
+}
+
 func TestPublishMonitoringAlertsOnStaleQueueAndAgesReconciliation(t *testing.T) {
 	t.Setenv(deploymentWritesPausedEnv, "0")
 	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))

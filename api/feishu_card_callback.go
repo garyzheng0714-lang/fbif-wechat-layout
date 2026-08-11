@@ -262,10 +262,11 @@ type reviewCardOutcome struct {
 // → 发布中/终态卡。审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
 func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage) reviewCardOutcome {
 	var value struct {
-		Action           string `json:"action"`
-		JobID            any    `json:"job_id"`
-		ReviewVersion    string `json:"review_version"`
-		LifecycleVersion string `json:"lifecycle_version"`
+		Action              string `json:"action"`
+		JobID               any    `json:"job_id"`
+		ReviewVersion       string `json:"review_version"`
+		LifecycleVersion    string `json:"lifecycle_version"`
+		DistributionVersion string `json:"distribution_version"`
 	}
 	if len(rawValue) > 0 {
 		if err := json.Unmarshal(rawValue, &value); err != nil {
@@ -275,15 +276,40 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 	jobID := coerceFeishuJobID(value.JobID)
 	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionForceApprove &&
 		value.Action != feishuCardActionReject &&
-		value.Action != feishuCardActionUnpublish && value.Action != feishuCardActionRepublish) {
+		value.Action != feishuCardActionUnpublish && value.Action != feishuCardActionRepublish &&
+		value.Action != feishuCardActionDistributeExternal) {
 		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位发布任务"}
 	}
 	if !p.feishuReviewActionAllowed(operatorOpenID, actionChatID) {
-		return reviewCardOutcome{toastType: "error", toastContent: "你没有网站发布审核权限：请在审核群内操作卡片，或联系管理员配置审核人白名单"}
+		return reviewCardOutcome{toastType: "error", toastContent: "你没有发布操作权限：请在审核群内操作卡片，或联系管理员配置审核人白名单"}
 	}
 	job, err := p.store.byID(jobID)
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
+	}
+	// 外部分发属于 published 任务的独立后续动作。published 在主状态机里是终态，
+	// 因此必须像下线/重发一样，在 terminal 判断之前分流。
+	if value.Action == feishuCardActionDistributeExternal {
+		if outcome, handled := externalDistributionCardStateOutcome(job); handled {
+			return outcome
+		}
+		if !externalDistributionVersionMatches(value.DistributionVersion, job) {
+			return reviewCardOutcome{
+				toastType: "error", toastContent: "分发卡片已过期，请使用最新卡片",
+			}
+		}
+		_, distributionErr := p.requestExternalDistribution(jobID, operatorOpenID, value.DistributionVersion)
+		if distributionErr != nil {
+			if latest, loadErr := p.store.byID(jobID); loadErr == nil {
+				if outcome, handled := externalDistributionCardStateOutcome(latest); handled {
+					return outcome
+				}
+			}
+			return reviewCardOutcome{toastType: "error", toastContent: distributionErr.Error()}
+		}
+		return reviewCardOutcome{
+			toastType: "success", toastContent: "已受理，正在同步分发",
+		}
 	}
 	// 下线 / 重新发布是已发布任务的后续生命周期动作，必须在 terminal 判断前
 	// 分流；offline / published 虽是业务终态，卡片仍允许显示对应的下一步按钮。
