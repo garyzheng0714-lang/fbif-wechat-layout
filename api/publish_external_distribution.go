@@ -687,7 +687,7 @@ func (p *publishPipeline) dispatchExternalDistributionCardUpdate(jobID int64) {
 	if err != nil || !swapped {
 		return
 	}
-	err = p.sendTerminalCardNotification(context.Background(), claimed, buildReviewCardForCurrentState(claimed), fmt.Sprintf(
+	err = p.sendTerminalCardNotification(context.Background(), claimed, fmt.Sprintf(
 		"【外部分发】任务 #%d 状态已更新\n标题：%s", claimed.ID, claimed.Title))
 	if err == nil {
 		_, _, ackErr := p.store.updateIf(jobID, func(current publishJob) bool {

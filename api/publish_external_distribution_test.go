@@ -270,8 +270,7 @@ func TestReviewCardOutboxesSerializeAndLatestLifecycleWins(t *testing.T) {
 	}
 	lifecycleDone := make(chan error, 1)
 	go func() {
-		lifecycleDone <- env.pipeline.sendTerminalCardNotification(context.Background(), offline,
-			buildReviewDoneCard(offline), "offline")
+		lifecycleDone <- env.pipeline.sendTerminalCardNotification(context.Background(), offline, "offline")
 	}()
 	close(releaseFirstSend)
 	<-externalDone
