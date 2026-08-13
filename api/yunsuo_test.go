@@ -229,12 +229,12 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 	if err := json.Unmarshal(encoded, &wire); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := wire["html"]; ok {
-		t.Fatalf("推送必须用官方字段 content_html，不得再发 html：%s", encoded)
+	if _, ok := wire["content_html"]; ok {
+		t.Fatalf("推送必须用官方字段 html，不得再发 content_html：%s", encoded)
 	}
-	contentHTML, _ := wire["content_html"].(string)
-	if strings.TrimSpace(contentHTML) == "" {
-		t.Fatalf("推送缺少 content_html：%s", encoded)
+	html, _ := wire["html"].(string)
+	if strings.TrimSpace(html) == "" {
+		t.Fatalf("推送缺少 html：%s", encoded)
 	}
 }
 
