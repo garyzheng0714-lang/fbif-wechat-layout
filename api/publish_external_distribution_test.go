@@ -349,8 +349,15 @@ func TestReplaceExternalDistributionAfterReconcileRebuildsContentHTML(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), `"html":`) || !strings.Contains(string(encoded), `"content_html":`) {
-		t.Fatalf("重发必须使用官方 content_html 字段：%s", encoded)
+	var wire map[string]any
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := wire["content_html"]; ok {
+		t.Fatalf("重发必须使用官方 html 字段，不得再发 content_html：%s", encoded)
+	}
+	if strings.TrimSpace(fmt.Sprint(wire["html"])) == "" {
+		t.Fatalf("重发缺少 html：%s", encoded)
 	}
 	if strings.Contains(fake.payload.HTML, "wrong-field") {
 		t.Fatalf("不得把上一份错误 payload 再发出去：%s", fake.payload.HTML)

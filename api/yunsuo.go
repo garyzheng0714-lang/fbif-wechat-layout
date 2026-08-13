@@ -157,7 +157,9 @@ type yunsuoPushPayload struct {
 	Description string   `json:"description,omitempty"`
 	Categories  string   `json:"categories"`
 	Cover       string   `json:"cover"`
-	HTML        string   `json:"content_html"`
+	// 官方图文字段名就是 html（剥离标签后不能为空）。不要改成 content_html：
+	// 那是本系统任务字段，云梭会当成没正文并返回「图文内容不能为空」。
+	HTML string `json:"html"`
 }
 
 type yunsuoAccountStatus struct {
