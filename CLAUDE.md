@@ -89,7 +89,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 
 23. **微信复制层在 T0 即可保存草稿** — 更多文章 `linktype="image"` 卡片的 `imgurl` 必须是微信图床；没有微信图床封面时不得伪装成安全卡。卡片 `<img src>` 必须是微信图床或 base64 位图，OSS / 外站 HTTP 不能是立即保存时唯一安全图，SVG data 不可用，空卡占位必须是 PNG data。三套卡片渲染器的 wrapper 锚点保持一致；`_footerCopy` 只能经 `copy-session.js` 的 `footerCopyGate` 权威重建，后台任务和旧快照不得覆盖新会话。改复制层前必须通过 `tests/wechat-draft-survival.test.mjs`、`tests/copy-session.test.mjs`；完整契约见 `openspec/specs/wechat-draft-survival-copy/spec.md`。
 
-24. **网站表格须经 CMS 清洗后存活** — FoodTalks CMS 会剥除 table/td 内联样式；site/series 必须用 `public/js/templates/shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival`，把 align/valign/bgcolor/width、cellpadding、表头 strong 与样式双写。图片按 parser `wpx` 双写 width；fbif 不开启、字节不变。守护：`tests/table-renderer-shared.test.mjs`、`tests/foodtalks-site-docx.test.mjs`；详见 `WORKLOG-table-cms-survival.md`。
+24. **网站表格须经 CMS 清洗后存活** — FoodTalks CMS 会剥除 table/td 内联样式；site/series 必须用 `public/js/templates/shared/table-renderer.js` 的 `outerBorder`+`cmsSurvival`，把 align/valign/bgcolor/width、cellpadding、表头 strong 与样式双写。图片按 parser `wpx` 双写 width；fbif 不开启、字节不变。守护：`tests/table-renderer-shared.test.mjs`、`tests/foodtalks-site-docx.test.mjs`；详见 `docs/worklogs/WORKLOG-table-cms-survival.md`。
 
 25. **异步编辑必须 latest-wins（2026-07-10 对抗式审计）** — URL 导入、文件/区块导入、重渲染、更多文章元数据、复制准备、重试、规则保存和账号切换都必须在意图开始时取得版本门，并在每个 `await` 后、提交 DOM/全局状态/持久化前确认仍是最新意图；任一新入口必须主动废止会与之竞争的旧入口。账号切换是事务：规则、模板、配置和菜单只能一起提交，失败必须保持原账号，不得出现半切换。守护：`tests/editor-shell.test.mjs`、`tests/copy-session.test.mjs`、`tests/active-rule-selector.test.mjs`、`tests/account-switcher.test.mjs` 及浏览器回归。
 

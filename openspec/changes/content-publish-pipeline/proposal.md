@@ -12,7 +12,7 @@ FBIF 公众号发布的文章目前靠人工搬运到 foodtalks.cn：人打开�
 
 | 事实 | 出处 |
 |---|---|
-| 排版工具已有 `POST /api/render`（Block[] → 内联样式 HTML）+ `POST /api/html-to-blocks` + `POST /api/fetch-article`（公众号 URL → Block[]），生产已部署（systemd `fbif-render`） | 本仓库 `WORKLOG-render-api.md`、`render-service/` |
+| 排版工具已有 `POST /api/render`（Block[] → 内联样式 HTML）+ `POST /api/html-to-blocks` + `POST /api/fetch-article`（公众号 URL → Block[]），生产已部署（systemd `fbif-render`） | 本仓库 `docs/worklogs/WORKLOG-render-api.md`、`render-service/` |
 | 但 render-service **只支持 `packId=fbif`（微信模板）**，网站模板 `foodtalks-site.js` 未接入 | `render-service/server.mjs:59` |
 | 「FBIF资讯订阅」系统（`feed.foodtalks.cn`，Go + PG）已有完整发布流水线基建：`publish_jobs` 状态机、`internal/wechat`（silenceper SDK：token/传图/草稿/freepublish）、`internal/feishu`（文本私信）、`internal/imagecache`（qpic 防盗链下载）、豆包优化客户端；`target` 字段已预留 `foodtalks_site` | 资讯订阅仓库 `openspec/changes/archive/2026-07-05-agent-publish-pipeline/` |
 | FoodTalks 发布 API：`POST/PUT https://api-we-test.foodtalks.cn/news/admin/news`（**测试环境**、抓包整理），有 `publishStatus` / `isPublic` 字段可支撑「先隐藏发布」；部分正式环境与枚举仍待确认；图片转存已由排版工具 `/api/oss-upload` 解决 | 飞书 wiki `PM9EwLPrAiD6mQkuDYWcAOPUnWb`、`docs/foodtalks-api-contract.md` §8 |

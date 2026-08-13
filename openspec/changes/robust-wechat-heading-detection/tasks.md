@@ -40,6 +40,6 @@
 
 ## 6. 上线（已完成）
 
-- [x] 6.1 补 WORKLOG `WORKLOG-wechat-heading-firstprinciples-2026-07-07.md`
+- [x] 6.1 补 WORKLOG `docs/worklogs/WORKLOG-wechat-heading-firstprinciples-2026-07-07.md`
 - [x] 6.2 提交 `e9da55d` push main，部署 run `28851022646` 成功
 - [x] 6.3 生产复核：`version.json`=e9da55d；线上 `/api/fetch-article` 02 返回 `h`；真实浏览器确认 02 渲染为小标题
