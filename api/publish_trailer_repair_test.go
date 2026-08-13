@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -77,5 +79,68 @@ func TestRepairPublishedWechatTrailerRejectsUnstrippedRender(t *testing.T) {
 	}
 	if _, err := env.pipeline.repairPublishedWechatTrailer(context.Background(), job.ID); err == nil || !strings.Contains(err.Error(), "导流尾") {
 		t.Fatalf("重排仍带导流尾必须 fail closed：%v", err)
+	}
+}
+
+func TestRepairPublishedWechatTrailerLeaksCoversMatchingJobs(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.ft.forbidPublish = false
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "ou_reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := env.store.updateIf(job.ID, func(publishJob) bool { return true }, func(j *publishJob) {
+		j.ContentHTML += `<p>欢迎转发朋友圈</p><p>/ 更多文章 /</p>`
+	}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := env.pipeline.repairPublishedWechatTrailerLeaks(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Matched != 1 || report.Repaired != 1 || report.Failed != 0 {
+		t.Fatalf("批量修复应命中并修好泄漏稿：%+v", report)
+	}
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leak := publishHTMLWechatTrailerLeak(got.ContentHTML); leak != "" {
+		t.Fatalf("批量修复后仍含导流尾 %s", leak)
+	}
+}
+
+func TestRepairPublishedWechatTrailerHTTPRequiresAdminAndRewrites(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.ft.forbidPublish = false
+	mux := newPublishTestMux(t, env)
+	if rec := doPublishReq(mux, http.MethodPost, "/api/publish/jobs/1/repair-wechat-trailer", "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("无管理员令牌应 401，实际 %d", rec.Code)
+	}
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pipeline.review(context.Background(), job.ID, publishReviewApprove, "ou_reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := env.store.updateIf(job.ID, func(publishJob) bool { return true }, func(j *publishJob) {
+		j.ContentHTML += `<p>欢迎转发朋友圈</p>`
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := doPublishReq(mux, http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/repair-wechat-trailer", job.ID), "", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("已发布泄漏稿应可修复，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leak := publishHTMLWechatTrailerLeak(got.ContentHTML); leak != "" {
+		t.Fatalf("HTTP 修复后仍含导流尾 %s", leak)
 	}
 }

@@ -57,3 +57,47 @@ func TestStripWechatTrailerBlocksJSONRejectsEmptyAfterCut(t *testing.T) {
 		t.Fatal("切光后必须失败，不能交出空正文")
 	}
 }
+
+func TestStripWechatTrailerBlocksJSONPreservesUnknownFieldsWhenUncut(t *testing.T) {
+	raw := `[{"k":"list","ordered":true,"items":["第一项"]}]`
+	got, err := stripWechatTrailerBlocksJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != raw {
+		t.Fatalf("无导流尾时应原样返回 JSON，避免丢掉 list items：%s", got)
+	}
+	if _, err := stripWechatTrailerBlocksJSON("{"); err == nil {
+		t.Fatal("无效 JSON 必须失败")
+	}
+}
+
+func TestStripWechatTrailerBlocksCutsMoreArticlesAndExternalTail(t *testing.T) {
+	more := []Block{
+		{K: "p", Text: "正文保留。"},
+		{K: "cap", Text: "/ 更多文章 /"},
+		{K: "img", Src: "https://mmbiz.qpic.cn/card.png"},
+	}
+	got := stripWechatTrailerBlocks(more)
+	if len(got) != 1 || wechatTrailerBlockText(got[0]) != "正文保留。" {
+		t.Fatalf("应从更多文章切开：%#v", got)
+	}
+
+	external := make([]Block, 0, 12)
+	for i := 0; i < 8; i++ {
+		external = append(external, Block{K: "p", Text: "正文继续 " + string(rune('A'+i))})
+	}
+	external = append(external,
+		Block{K: "h", Level: 2, Text: "延伸阅读"},
+		Block{K: "p", Text: "红餐网已同步入驻"},
+		Block{K: "p", Text: "来源：红餐网"},
+	)
+	got = stripWechatTrailerBlocks(external)
+	joined, _ := json.Marshal(got)
+	if strings.Contains(string(joined), "延伸阅读") || strings.Contains(string(joined), "红餐网已同步入驻") {
+		t.Fatalf("外部媒体尾巴应切除：%s", joined)
+	}
+	if !strings.Contains(string(joined), "正文继续") {
+		t.Fatalf("正文应保留：%s", joined)
+	}
+}
