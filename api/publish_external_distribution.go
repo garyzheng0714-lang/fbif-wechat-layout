@@ -73,11 +73,20 @@ func publishExternalDistributionProcessing(state string) bool {
 	}
 }
 
+const publishExternalAdminRetryActor = "system:admin_retry"
+
 // failed 且尚未拿到 content_pk，表示 POST 之前失败或云梭明确拒绝，能够安全地
 // 在修正配置/参数后重新提交。拿到 content_pk 的平台终态失败不走这里，避免重复稿。
 func publishExternalDistributionCanSafeRetry(job publishJob) bool {
 	return job.ExternalDistributionState == publishExternalDistributionFailed &&
 		strings.TrimSpace(job.ExternalDistributionContentPK) == ""
+}
+
+// 管理员重发只允许对账中的已发布任务：云梭已给单号，但本地确认上一份 payload
+// 字段错误、必须换正确正文再 POST 一次。飞书卡片不得走这条路。
+func publishExternalDistributionCanReplaceReconcile(job publishJob) bool {
+	return job.Stage == publishStagePublished &&
+		job.ExternalDistributionState == publishExternalDistributionReconciliationRequired
 }
 
 // publishExternalDistributionProvenance 外发只看账号与正文，不把火山检查当门槛。
@@ -247,6 +256,16 @@ func externalDistributionEligibility(job publishJob) error {
 // requestExternalDistribution 只受理一次人工动作：先构造并持久化精确 payload 快照，
 // 再把实际 HTTP 交给 worker。卡片回调因此能在 3 秒内返回，不等待云梭。
 func (p *publishPipeline) requestExternalDistribution(jobID int64, actor, expectedVersion string) (publishJob, error) {
+	return p.queueExternalDistribution(jobID, actor, expectedVersion, false)
+}
+
+// replaceExternalDistributionAfterReconcile 管理员在确认上一份云梭稿作废后，
+// 用当前代码重建 payload 再推一次。不接受飞书卡片 callback。
+func (p *publishPipeline) replaceExternalDistributionAfterReconcile(jobID int64, actor string) (publishJob, error) {
+	return p.queueExternalDistribution(jobID, actor, "", true)
+}
+
+func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expectedVersion string, replaceReconcile bool) (publishJob, error) {
 	if publishWorkersPaused() {
 		job, _ := p.store.byID(jobID)
 		return job, errPublishWorkersPaused
@@ -255,13 +274,17 @@ func (p *publishPipeline) requestExternalDistribution(jobID int64, actor, expect
 	if err != nil {
 		return publishJob{}, err
 	}
-	if strings.TrimSpace(job.ExternalDistributionState) != "" && !publishExternalDistributionCanSafeRetry(job) {
+	if replaceReconcile {
+		if !publishExternalDistributionCanReplaceReconcile(job) {
+			return job, fmt.Errorf("只有对账中的已发布任务才能由管理员重发外部分发，当前为 %s/%s", job.Stage, job.ExternalDistributionState)
+		}
+	} else if strings.TrimSpace(job.ExternalDistributionState) != "" && !publishExternalDistributionCanSafeRetry(job) {
 		return job, errors.New("这篇文章已经提交过外部分发，系统不会重复发布")
 	}
 	if strings.TrimSpace(actor) == "" {
 		return job, errors.New("外部分发必须由审核人从飞书卡片确认原创后发起")
 	}
-	if !externalDistributionVersionMatches(expectedVersion, job) {
+	if !replaceReconcile && !externalDistributionVersionMatches(expectedVersion, job) {
 		return job, errors.New("分发卡片已过期，请使用最新卡片")
 	}
 	if err := externalDistributionEligibility(job); err != nil {
@@ -289,9 +312,14 @@ func (p *publishPipeline) requestExternalDistribution(jobID int64, actor, expect
 		})
 	}
 	updated, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
+		if externalDistributionEligibility(current) != nil {
+			return false
+		}
+		if replaceReconcile {
+			return publishExternalDistributionCanReplaceReconcile(current)
+		}
 		return (strings.TrimSpace(current.ExternalDistributionState) == "" || publishExternalDistributionCanSafeRetry(current)) &&
-			externalDistributionVersionMatches(expectedVersion, current) &&
-			externalDistributionEligibility(current) == nil
+			externalDistributionVersionMatches(expectedVersion, current)
 	}, func(current *publishJob) {
 		current.ExternalDistributionState = publishExternalDistributionQueued
 		current.ExternalDistributionTargets = append([]publishExternalDistributionTarget(nil), targets...)

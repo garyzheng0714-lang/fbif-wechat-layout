@@ -221,6 +221,21 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 	if payload.Cover != "https://cdn.example/image.jpg" || len(payload.AccountIDs) != 2 || payload.Type != 0 {
 		t.Fatalf("推送快照不符合预期：%#v", payload)
 	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := wire["html"]; ok {
+		t.Fatalf("推送必须用官方字段 content_html，不得再发 html：%s", encoded)
+	}
+	contentHTML, _ := wire["content_html"].(string)
+	if strings.TrimSpace(contentHTML) == "" {
+		t.Fatalf("推送缺少 content_html：%s", encoded)
+	}
 }
 
 func TestYunsuoKeywordsRespectDocumentedLimit(t *testing.T) {
@@ -340,5 +355,20 @@ func TestYunsuoRenderStripsWechatTrailerBeforePush(t *testing.T) {
 	}
 	if leak := publishHTMLWechatTrailerLeak(payload.HTML); leak != "" {
 		t.Fatalf("冻结 payload 仍含导流尾 %s", leak)
+	}
+}
+
+func TestParseYunsuoStatusesAcceptsAPICreatedTypeString(t *testing.T) {
+	raw := json.RawMessage(`[
+		{"status":0,"remark":"等待发布","failed_count":0,"created_type":"api","accountPool":{"pk":"11111111-1111-4111-8111-111111111111","name":"头条号","platform_name":"头条号"}},
+		{"status":0,"remark":"等待发布","failed_count":0,"created_type":"api","accountPool":{"pk":"22222222-2222-4222-8222-222222222222","name":"百家号","platform_name":"百家号"}}
+	]`)
+	got, err := parseYunsuoStatuses(raw)
+	if err != nil {
+		t.Fatalf("真实云梭状态（created_type 为字符串）必须能解析：%v", err)
+	}
+	if len(got) != 2 || got[0].Status != 0 || got[0].AccountPool.ID != "11111111-1111-4111-8111-111111111111" ||
+		got[0].CreatedType != "api" || got[1].AccountPool.Name != "百家号" {
+		t.Fatalf("状态解析不符合预期：%#v", got)
 	}
 }
