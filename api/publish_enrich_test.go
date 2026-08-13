@@ -306,12 +306,27 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 		Author:      "Mote莫特",
 		CreatedAt:   "2026-07-10T00:00:00Z",
 	}
-	news, err := p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	news, err := p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
 	if err != nil {
 		t.Fatalf("buildSiteNews: %v", err)
 	}
 	if news.Summary != "AI 摘要" || news.Author != "Mote莫特" || news.CoverImg != "https://oss.example.com/b.jpg" {
 		t.Fatalf("AI 字段未被消费：summary=%q author=%q cover=%q", news.Summary, news.Author, news.CoverImg)
+	}
+	// 官方发布示例必填项：isLatest=1 才能进首页最新资讯；PUT 全量覆盖下零值会把
+	// 这三项盖成关，文章直链可见但首页没有。
+	if news.IsLatest != 1 || !news.ImgPreviewEnable || news.CommentEnable != 1 {
+		t.Fatalf("首页/必填默认值不对：isLatest=%d imgPreview=%v comment=%d", news.IsLatest, news.ImgPreviewEnable, news.CommentEnable)
+	}
+	raw, err := json.Marshal(buildFoodTalksNewsBody(json.RawMessage(`""`), news))
+	if err != nil {
+		t.Fatalf("marshal site news: %v", err)
+	}
+	body := string(raw)
+	for _, want := range []string{`"isLatest":1`, `"imgPreviewEnable":true`, `"commentEnable":1`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("请求体缺少 %s：%s", want, body)
+		}
 	}
 	// newsTags 恒空：结构已破解（[{tagId,tagName}]），但后端 PUT 带标签必 500 且会把
 	// 文章污染成「任何 PUT 都 500」（翻公开卡死），契约 §9 矩阵。修复前这条断言守住恒空。
@@ -322,8 +337,11 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 	if news.SourceType != 1 || news.SourceName != "测试公众号" {
 		t.Fatalf("外部号应判转载且带来源名：type=%d name=%q", news.SourceType, news.SourceName)
 	}
+	if news.SourceID != 0 {
+		t.Fatalf("未加载来源目录时 sourceId 必须为 0，实际 %d", news.SourceID)
+	}
 	job.Author = ""
-	news, err = p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	news, err = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
 	if err != nil {
 		t.Fatalf("buildSiteNews: %v", err)
 	}
@@ -332,22 +350,111 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 	}
 	// 自家号 → 原创（source_type=0）。
 	job.SourceName = "FBIF食品饮料创新"
-	news, _ = p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	news, _ = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
 	if news.SourceType != 0 || news.SourceName != "FBIF食品饮料创新" {
 		t.Fatalf("自家号应判原创：type=%d name=%q", news.SourceType, news.SourceName)
 	}
 	// 自家号转发他人文章：AI 从正文声明抽到出处 → 按转载算，来源名=声明出处。
 	job.AISource = "小食代"
-	news, _ = p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	news, _ = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
 	if news.SourceType != 1 || news.SourceName != "小食代" {
 		t.Fatalf("声明出处应判转载：type=%d name=%q", news.SourceType, news.SourceName)
 	}
 	// 即使 AI 未抽到外部来源，自家号正文明确声明转载时，CMS 与排版仍必须一致按转载。
 	job.AISource = ""
 	job.BlocksJSON = `[{"k":"txt","runs":[{"type":"txt","text":"本文为转载文章。"}]}]`
-	news, _ = p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	news, _ = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
 	if news.SourceType != 1 {
 		t.Fatalf("正文明确转载时 CMS sourceType 必须与排版一致：type=%d", news.SourceType)
+	}
+}
+
+// TestBuildSiteNewsResolvesSourceID CMS「来源出处」下拉绑定 sourceId（tagTypeId=10），
+// 只传 sourceName 时后台仍显示「请选择」。按名称命中目录后必须写入真实 id。
+func TestBuildSiteNewsResolvesSourceID(t *testing.T) {
+	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
+	p := &publishPipeline{now: time.Now}
+	p.sourceTags = []foodTalksTag{
+		{ID: 8801, Name: "窄播", TagTypeID: foodTalksTagTypeArticleSource},
+		{ID: 12, Name: "FBIF食品饮料创新", TagTypeID: foodTalksTagTypeArticleSource},
+	}
+	p.sourceTagsLoaded = time.Now()
+	job := publishJob{
+		Title: "标题", SourceName: "窄播", ContentHTML: "<p>正文</p>",
+		CreatedAt: "2026-07-10T00:00:00Z",
+	}
+	news, err := p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatalf("buildSiteNews: %v", err)
+	}
+	if news.SourceID != 8801 || news.SourceName != "窄播" {
+		t.Fatalf("应按名称选中来源出处：id=%d name=%q", news.SourceID, news.SourceName)
+	}
+	job.SourceName = "FBIF 食品饮料创新"
+	news, _ = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+	if news.SourceID != 12 {
+		t.Fatalf("来源名去空格后应命中自家号目录：id=%d", news.SourceID)
+	}
+	job.SourceName = "不存在的媒体"
+	news, _ = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+	if news.SourceID != 0 {
+		t.Fatalf("测试预置目录未命中不得编造 sourceId，实际 %d", news.SourceID)
+	}
+}
+
+type recordingSourceTagStub struct {
+	directFoodTalksStub
+	listed    []foodTalksTag
+	created   []string
+	createID  int64
+	createErr error
+}
+
+func (s *recordingSourceTagStub) ListTagsByType(context.Context, int64, string) ([]foodTalksTag, error) {
+	return s.listed, nil
+}
+
+func (s *recordingSourceTagStub) CreateTagByName(_ context.Context, _ int64, name string) (int64, error) {
+	s.created = append(s.created, name)
+	if s.createErr != nil {
+		return 0, s.createErr
+	}
+	return s.createID, nil
+}
+
+func TestBuildSiteNewsCreatesMissingSourceID(t *testing.T) {
+	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
+	stub := &recordingSourceTagStub{createID: 115677}
+	p := &publishPipeline{
+		now:       time.Now,
+		foodTalks: func() (foodTalksAPI, error) { return stub, nil },
+	}
+	job := publishJob{
+		Title: "标题", SourceName: "凤凰网《风暴眼》", ContentHTML: "<p>正文</p>",
+		CreatedAt: "2026-07-10T00:00:00Z",
+	}
+	news, err := p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatalf("buildSiteNews: %v", err)
+	}
+	if news.SourceID != 115677 || news.SourceName != "凤凰网《风暴眼》" {
+		t.Fatalf("目录没有时应按文章来源名创建：id=%d name=%q", news.SourceID, news.SourceName)
+	}
+	if len(stub.created) != 1 || stub.created[0] != "凤凰网《风暴眼》" {
+		t.Fatalf("应创建一次来源标签，实际 %v", stub.created)
+	}
+	news, _ = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+	if len(stub.created) != 1 {
+		t.Fatalf("同名应走缓存，不得再创建，实际 %v", stub.created)
+	}
+	stub.listed = []foodTalksTag{{ID: 14176, Name: "窄播"}}
+	job.SourceName = "窄播"
+	news, _ = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+	if news.SourceID != 14176 {
+		t.Fatalf("目录已有应直接用原 id，实际 %d", news.SourceID)
+	}
+	if len(stub.created) != 1 {
+		t.Fatalf("已有来源不得再创建，实际 %v", stub.created)
 	}
 }
 

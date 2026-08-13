@@ -33,6 +33,14 @@ func (s directFoodTalksStub) UpdateNews(context.Context, foodTalksNews) error {
 	return nil
 }
 
+func (s directFoodTalksStub) ListTagsByType(context.Context, int64, string) ([]foodTalksTag, error) {
+	return nil, nil
+}
+
+func (s directFoodTalksStub) CreateTagByName(context.Context, int64, string) (int64, error) {
+	return 0, nil
+}
+
 // TestPublishReviewCASConcurrentApprovals 两个审核请求必须只有一个能从 awaiting_review
 // 抢到 publicizing；旧实现的「先读再 update」会让两边都成功并发出两次不可逆 PUT。
 func TestPublishReviewCASConcurrentApprovals(t *testing.T) {

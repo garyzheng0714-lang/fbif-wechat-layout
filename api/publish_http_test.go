@@ -59,6 +59,7 @@ func TestPublishEndpointsRequireAdminRole(t *testing.T) {
 		{http.MethodGet, "/api/publish/jobs/1", ""},
 		{http.MethodPost, "/api/publish/jobs/1/retry", ""},
 		{http.MethodPost, "/api/publish/jobs/1/reconcile", `{"foodtalks_news_id":7240}`},
+		{http.MethodPost, "/api/publish/cms-resync", `{"day":"2026-08-13"}`},
 	}
 	for _, c := range cases {
 		if rec := doPublishReq(mux, c.method, c.target, c.body, false); rec.Code != http.StatusUnauthorized {
@@ -141,6 +142,7 @@ func TestPublishSyncServiceTokenHasLeastPrivilege(t *testing.T) {
 		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/review", response.Job.ID), `{"action":"approve"}`},
 		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/retry", response.Job.ID), ""},
 		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/reconcile", response.Job.ID), `{"confirm_not_created":true}`},
+		{http.MethodPost, "/api/publish/cms-resync", `{"day":"2026-08-13"}`},
 	} {
 		rec := doPublishServiceReq(mux, tc.method, tc.target, tc.body)
 		if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusNotFound {

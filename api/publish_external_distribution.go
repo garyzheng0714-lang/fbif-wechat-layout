@@ -80,16 +80,18 @@ func publishExternalDistributionCanSafeRetry(job publishJob) bool {
 		strings.TrimSpace(job.ExternalDistributionContentPK) == ""
 }
 
-// publishExternalDistributionProvenance 比 FoodTalks 的来源展示更严格：自有号只是
-// 必要条件；显式“转载自/来源/某媒体原创”、风险检查里的转载证据都会否决。AI 预填
-// 未执行且正文也没有自有原创声明时视为未核验，卡片不开放分发按钮。
+// publishExternalDistributionProvenance 外发只看账号与正文，不把火山检查当门槛。
+// 来源或作者命中自有号，且正文没有显式外部转载声明，即视为原创（2026-08-13 用户裁定）。
 func publishExternalDistributionProvenance(job publishJob) (status, source, evidence string) {
 	original, source := publishArticleProvenance(job)
-	if !original {
-		return publishExternalProvenanceRepost, source, "文章来源已判定为转载"
-	}
 	own := siteOwnAccounts()
-	explicitOriginal := false
+	if !original {
+		if author := strings.TrimSpace(job.Author); publishExternalSourceIsOwn(author, own) {
+			source = author
+		} else {
+			return publishExternalProvenanceRepost, source, "文章来源已判定为转载"
+		}
+	}
 	var blocks []Block
 	if err := json.Unmarshal([]byte(job.BlocksJSON), &blocks); err == nil {
 		for _, block := range blocks {
@@ -114,7 +116,6 @@ func publishExternalDistributionProvenance(job publishJob) (status, source, evid
 			if match := publishExternalOriginalLine.FindStringSubmatch(compact); len(match) > 1 {
 				declaredOwner := cleanPublishExternalSource(match[1])
 				if publishExternalSourceIsOwn(declaredOwner, own) {
-					explicitOriginal = true
 					continue
 				}
 				return publishExternalProvenanceRepost, declaredOwner, compact
@@ -126,20 +127,6 @@ func publishExternalDistributionProvenance(job publishJob) (status, source, evid
 				}
 			}
 		}
-	}
-	for _, item := range job.RiskItems {
-		text := strings.TrimSpace(item.Evidence + " " + item.Reason)
-		if strings.Contains(text, "转载自") || strings.Contains(text, "转自") ||
-			strings.Contains(text, "原文来源") || strings.Contains(text, "转载授权") {
-			return publishExternalProvenanceUnverified, source, "检查报告仍有转载来源待核提示"
-		}
-	}
-	if publishRiskHasSystemFailure(job.RiskItems) {
-		return publishExternalProvenanceUnverified, source, "风险与转载来源检查未完成"
-	}
-	notes := strings.TrimSpace(job.AINotes)
-	if !explicitOriginal && (notes == "" || strings.Contains(notes, "AI 预填未执行")) {
-		return publishExternalProvenanceUnverified, source, "自动出处核验未完成"
 	}
 	return publishExternalProvenanceOriginal, source, "自有账号且未发现转载出处；由操作人最终确认原创"
 }

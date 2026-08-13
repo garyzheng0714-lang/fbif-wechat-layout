@@ -136,7 +136,7 @@ func TestExternalDistributionRejectsRepostInCardAndServer(t *testing.T) {
 	}
 }
 
-func TestExternalDistributionFailsClosedOnExplicitAttributionAndMissingCheck(t *testing.T) {
+func TestExternalDistributionFailsClosedOnExplicitAttribution(t *testing.T) {
 	setTestYunsuoConfig(t)
 	env := newPublishTestEnv(t)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
@@ -158,15 +158,32 @@ func TestExternalDistributionFailsClosedOnExplicitAttributionAndMissingCheck(t *
 	if card = cardJSON(t, buildReviewDoneCard(job)); strings.Contains(card, "同步分发至其他平台") {
 		t.Fatalf("授权转载同样不得开放外部分发：%s", card)
 	}
+}
 
+func TestExternalDistributionOwnAccountDoesNotWaitForArk(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
 	job, _ = env.store.update(job.ID, func(current *publishJob) {
-		current.BlocksJSON = `[{"k":"p","text":"正文"}]`
+		current.Author = "FBIF"
+		current.BlocksJSON = `[{"k":"p","text":"这是一篇自有号原创正文。"}]`
 		current.AINotes = "AI 预填未执行（上游不可用）"
+		current.RiskLevel = publishRiskWarning
+		current.RiskItems = []publishRiskItem{{
+			Category:  publishRiskCategorySystem,
+			Level:     publishRiskWarning,
+			Certainty: publishRiskCertaintyUnverified,
+			Evidence:  "风险模型未能产出可验证的结构化结果",
+			Reason:    "模型不可达",
+		}}
 		current.ApprovedRiskVersion = publishReviewCardVersion(*current)
 	})
-	card = cardJSON(t, buildReviewDoneCard(job))
-	if strings.Contains(card, "同步分发至其他平台") || !strings.Contains(card, "原创状态未完成核验") {
-		t.Fatalf("出处核验未执行时必须 fail closed：%s", card)
+	card := cardJSON(t, buildReviewDoneCard(job))
+	if !strings.Contains(card, "同步分发至其他平台") {
+		t.Fatalf("自有号原创不得因火山检查未完成而隐藏外发按钮：%s", card)
+	}
+	if strings.Contains(card, "原创状态未完成核验") {
+		t.Fatalf("自有号原创不应再提示等待火山核验：%s", card)
 	}
 }
 
