@@ -160,19 +160,87 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 	}
 }
 
-func TestPublishSiteIsRepostMatchesWebsiteEditorSemantics(t *testing.T) {
+func TestPublishSiteIsRepostIsCMSProvenanceNotLayout(t *testing.T) {
 	t.Setenv(siteOwnAccountsEnv, "FBIF食品饮料创新,FoodTalks")
 	plain := `[{"k":"txt","runs":[{"type":"txt","text":"正文内容"}]}]`
 	disclosed := `[{"k":"txt","runs":[{"type":"txt","text":"* 本文为转载文章。"}]},{"k":"txt","runs":[{"type":"txt","text":"正文内容"}]}]`
 
 	if publishSiteIsRepost("FBIF食品饮料创新", plain) {
-		t.Fatal("自家公众号且无转载声明时应按原创渲染")
+		t.Fatal("自家公众号且无转载声明时 CMS 来源类型应为原创")
 	}
 	if !publishSiteIsRepost("外部食品媒体", plain) {
-		t.Fatal("外部公众号应按转载渲染")
+		t.Fatal("外部公众号 CMS 来源类型应为转载")
 	}
 	if !publishSiteIsRepost("FBIF食品饮料创新", disclosed) {
-		t.Fatal("自家公众号正文明确声明转载时，必须按转载渲染")
+		t.Fatal("自家公众号正文明确声明转载时，CMS 来源类型必须为转载")
+	}
+}
+
+func TestPublishHTMLWechatTrailerLeakRejectsWechatChrome(t *testing.T) {
+	if got := publishHTMLWechatTrailerLeak(`<p>正文</p><p>*资讯投稿与商务合作，请联系Bobo。</p><p>加入微信群</p>`); got != "" {
+		t.Fatalf("网站页脚合法文案不应判泄漏：%s", got)
+	}
+	cases := []string{
+		`* 本文为FBIF原创，欢迎转发朋友圈；`,
+		`预览时标签不可点`,
+		`<p>/ 更多文章 /</p>`,
+		`* 转载请在后台回复“转载”了解规则；`,
+		`联系Bobo（微信：fbifmedia1）`,
+	}
+	for _, html := range cases {
+		if publishHTMLWechatTrailerLeak(html) == "" {
+			t.Fatalf("应拦住公众号导流尾：%s", html)
+		}
+	}
+}
+
+func TestPublishRenderAlwaysStripsWechatTrailerForOwnAccount(t *testing.T) {
+	env := newPublishTestEnv(t)
+	var gotRepost *bool
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+		env.fetchCalls++
+		return "印尼博士创业", "FBIF食品饮料创新", "Sage", articleURL, testPublishBlocksJSON, nil
+	}
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		gotRepost = new(bool)
+		*gotRepost = isRepost
+		return successfulPublishRenderResult(testPublishRenderedHTML, testPublishResolvedRule()), nil
+	}
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRepost == nil || !*gotRepost {
+		t.Fatal("自家公众号进网站也必须按转载切尾（isRepost=true），原创只影响 CMS 来源类型")
+	}
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leak := publishHTMLWechatTrailerLeak(got.ContentHTML); leak != "" {
+		t.Fatalf("落库正文仍含公众号导流尾：%s", leak)
+	}
+}
+
+func TestPublishRenderRejectsWechatTrailerLeak(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		leaked := `<p>正文</p><p>* 本文为FBIF原创，欢迎转发朋友圈；</p><p>/ 更多文章 /</p>`
+		return successfulPublishRenderResult(leaked, testPublishResolvedRule()), nil
+	}
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stage != publishStageFailed || got.FailedStage != publishStageRendering {
+		t.Fatalf("含公众号导流尾的排版必须 fail closed，实际 stage=%q failed_stage=%q error=%q", got.Stage, got.FailedStage, got.Error)
+	}
+	if !strings.Contains(got.Error, "公众号导流尾") {
+		t.Fatalf("失败原因应写明导流尾泄漏，实际 %q", got.Error)
 	}
 }
 
@@ -323,7 +391,7 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 		t.Fatalf("marshal site news: %v", err)
 	}
 	body := string(raw)
-	for _, want := range []string{`"isLatest":1`, `"imgPreviewEnable":true`, `"commentEnable":1`} {
+	for _, want := range []string{`"isLatest":1`, `"imgPreviewEnable":true`, `"commentEnable":1`, `"toc":""`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("请求体缺少 %s：%s", want, body)
 		}

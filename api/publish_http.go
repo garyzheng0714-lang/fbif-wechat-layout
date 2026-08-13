@@ -634,6 +634,41 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, report)
 	})
 
+	// 已公开稿若带着微信导流尾，按当前规则重排后覆盖 FoodTalks。不改审核状态。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/repair-wechat-trailer", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		job, err := p.repairPublishedWechatTrailer(r.Context(), id)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "repaired": true})
+	})
+
+	mux.HandleFunc("POST /api/publish/repair-wechat-trailer", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		report, err := p.repairPublishedWechatTrailerLeaks(r.Context(), 0)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "report": report})
+			return
+		}
+		writeJSON(w, http.StatusOK, report)
+	})
+
 	// 用当前 prompt 重跑风险检查（只对待审核任务）。card-refresh 只换样式、用的还是
 	// 旧结论；prompt 改版后想让新检查能力作用在存量文章上，只能走这里真调一次模型。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/risk-recheck", func(w http.ResponseWriter, r *http.Request) {

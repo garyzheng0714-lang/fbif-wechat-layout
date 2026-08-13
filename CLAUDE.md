@@ -129,6 +129,8 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 37. **外部平台只分发已审核原创，FoodTalks 继续接收原创与转载（2026-08-11 用户裁定，2026-08-13 修订）** — 头条号、百家号等外部平台统一经云梭发布，只有任务已在 FoodTalks 公开、审核版本仍有效且判定为原创时，已发布卡才显示单一按钮「同步分发至其他平台」；目标账号由服务端固定配置，不在卡片里多选，也不接受 callback 自带任意 `account_id`。来源或作者命中自有号清单即视为原创，**不等待火山风险检查或 AI 预填完成**（2026-08-13，任务 #95：检查未完成不得挡住自有稿外发）。正文出现「转载自 / 转自 / 来源 / 其他媒体原创」仍隐藏按钮。点击确认还要由审核人再次确认原创并留 actor。FoodTalks 本身不受这条限制，转载仍可照常发布。
     **云梭是正交子状态机，不得污染网站生命周期**：先持久化冻结 payload 与 push intent，再调用云梭；未拿到 `content_pk` 的不确定结果只进人工对账，绝不盲重发。拿到 `content_pk` 后只轮询状态；明确在受理前失败才允许卡片安全重试。云梭慢请求使用独立 worker，结果通过持久 card outbox 原位更新同一张审核卡；网站生命周期与外部分发两套 outbox 必须串行并在发送前重读最新 job，callback 只回 toast，防止旧卡覆盖新状态。验证不得再发布真实文章，使用 fake/本地服务完成。
 
+38. **进网站与云梭外发一律切除微信导流尾（2026-08-13 用户裁定）** — 切尾与算不算原创无关。`isRepost` 只决定 CMS 来源类型和提示文案，不得再关掉 `stripWechatTrailer`。自动发布 `stageRender` 固定按切尾渲染；云梭从 `BlocksJSON` 直渲，必须在 Go 侧切尾后经 `publishHTMLWechatTrailerLeak` fail closed。泄漏标记不用网站页脚合法文案（加入微信群 / 关注公众号）。已公开泄漏稿走 `POST /api/publish/jobs/{id}/repair-wechat-trailer` 覆盖 FoodTalks，不重开审核。守护：`tests/foodtalks-site-behavior.test.mjs`、`api/wechat_trailer_test.go`、`api/yunsuo_test.go`、`api/publish_trailer_repair_test.go`。
+
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
 - 图片上传需要 `WECHAT_UPLOAD_ENDPOINT` 环境变量

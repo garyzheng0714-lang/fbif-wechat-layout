@@ -299,3 +299,46 @@ func TestYunsuoHTMLDropsUnmirroredAndNonPublicURLs(t *testing.T) {
 		t.Fatalf("推送快照应只使用已镜像的公网媒体：cover=%q html=%s", payload.Cover, payload.HTML)
 	}
 }
+
+func TestYunsuoRenderStripsWechatTrailerBeforePush(t *testing.T) {
+	blocks := `[
+		{"k":"txt","runs":[{"type":"txt","text":"把家乡一度被低估的食物卖到英国第一。"}]},
+		{"k":"txt","text":"参考来源："},
+		{"k":"txt","text":"[1] Food Manufacture"},
+		{"k":"txt","text":"提示："},
+		{"k":"txt","text":"* 本文为FBIF原创，欢迎转发朋友圈；"},
+		{"k":"cap","text":"/ 更多文章 /"},
+		{"k":"img","src":"https://origin.example/card.jpg"},
+		{"k":"txt","text":"预览时标签不可点"}
+	]`
+	imageMap := `{"https://origin.example/card.jpg":"https://cdn.example/card.jpg"}`
+	rendered, err := renderYunsuoHTML(blocks, imageMap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, "英国第一") || !strings.Contains(rendered, "参考来源") {
+		t.Fatalf("正文应保留：%s", rendered)
+	}
+	if leak := publishHTMLWechatTrailerLeak(rendered); leak != "" {
+		t.Fatalf("云梭 HTML 仍含导流尾 %s：%s", leak, rendered)
+	}
+	if strings.Contains(rendered, "cdn.example/card.jpg") {
+		t.Fatalf("作者名片图应随导流尾切除：%s", rendered)
+	}
+
+	payload, err := buildYunsuoPushPayload(publishJob{
+		Title:      "印尼博士创业，把家乡穷人食物卖成英国第一品牌",
+		SourceName: "FBIF食品饮料创新",
+		Summary:    "Better Nature 把天贝卖到英国品类第一。",
+		CoverURL:   "https://cdn.example/cover.jpg",
+		BlocksJSON: blocks,
+		ImageMap:   imageMap,
+	}, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}, {ID: "a-2", Name: "百家号"}},
+		[]string{"美食", "饮食文化", "财经", "消费", "公司"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leak := publishHTMLWechatTrailerLeak(payload.HTML); leak != "" {
+		t.Fatalf("冻结 payload 仍含导流尾 %s", leak)
+	}
+}
