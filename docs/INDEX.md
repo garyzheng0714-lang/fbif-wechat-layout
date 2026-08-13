@@ -36,7 +36,7 @@
 - 历史已发布文章总量仍是**未完成、未核验**状态；任何单一官方接口、单张表或素材库行数都不能称为“历史全量”。
 - `freepublish` 只覆盖“发布”对象，不能代表后台“群发”；素材库是资产来源，不是已发布文章真相源。多源原始响应尚未按稳定标识完成关联、去重、分页、时间与字段覆盖审计。
 - 飞书多维表格自动同步在审计完成并经用户确认前保持关闭；已发布轮询必须独立于草稿接口执行，小绿书 / 图集无法可靠判成普通文章时必须 fail closed。
-- P0 监控契约以 [CLAUDE](../CLAUDE.md) 的红线 #28–#30、#33–#34、无 paths 过滤的 `.github/workflows/p0-monitoring-contract.yml` 和当前代码为准。旧的 [历史文章库 WORKLOG](../WORKLOG-wechat-mp-archive-2026-07-12.md) 已明确撤销“接口计数就是全量”的旧结论。
+- P0 监控契约以 [CLAUDE](../CLAUDE.md) 的红线 #28–#30、#33–#34、无 paths 过滤的 `.github/workflows/p0-monitoring-contract.yml` 和当前代码为准。旧的 [历史文章库 WORKLOG](worklogs/WORKLOG-wechat-mp-archive-2026-07-12.md) 已明确撤销“接口计数就是全量”的旧结论。
 - **外检看门狗不在本仓库**（2026-08-06 迁往 `FoodTalks_Feed`，服务名 `fbif-link-watchdog`）。本仓库只提供被探端点 `GET /api/publish/monitoring`；部署链路里 `cleanup_legacy_watchdog` 只负责摘干净生产上的残留单元，回滚不恢复。不要在本仓库重建任何外检探针。
 - P0 workflow 的 job 名 `backend-and-watchdog` 是 `main` 分支保护的必需检查且 `enforce_admins=true`，名字里的 watchdog 已是历史。**改名会让 PR 永久 BLOCKED**，必须同步改分支保护配置。
 
@@ -48,6 +48,6 @@
 
 ## 历史材料
 
-- 根目录 `WORKLOG-*.md` 是问题排查、验收和交接记录，不是当前规则；是否仍在推进，要同时看文件顶部状态、当前工作区、issue tracker 和代码证据。
+- [`docs/worklogs/`](worklogs/) 保存问题排查、验收和交接记录，不是当前规则；是否仍在推进，要同时看文件顶部状态、当前工作区、issue tracker 和代码证据。
 - `openspec/changes/` 保存设计演进、事故复盘和任务记录；稳定能力以 `openspec/specs/` 为准。
 - WORKLOG 或历史 tasks 中的“待办 / 未决 / 待验证”只有在当前长期文档、issue tracker 或代码状态仍有对应证据时，才视为开放事项。

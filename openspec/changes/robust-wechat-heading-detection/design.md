@@ -15,8 +15,8 @@
 | `389a177` 章节标题不再误判为图注 | 继续在图注侧调字数/信号 |
 | `a320e39` 显式 Word 标题样式在场时停用启发式 | DOCX 侧（另一个领域） |
 
-两份 WORKLOG（`WORKLOG-heading-vs-caption-2026-07-01.md`、
-`WORKLOG-docx-heading-signal-priority.md`）都记录了「修了很多次修不好」。
+两份 WORKLOG（`docs/worklogs/WORKLOG-heading-vs-caption-2026-07-01.md`、
+`docs/worklogs/WORKLOG-docx-heading-signal-priority.md`）都记录了「修了很多次修不好」。
 
 ## Goals / Non-Goals
 
