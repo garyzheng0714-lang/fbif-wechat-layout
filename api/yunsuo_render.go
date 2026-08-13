@@ -30,8 +30,13 @@ type yunsuoInline struct {
 
 // renderYunsuoHTML 从中立 Block[] 直接生成外部平台可移植 HTML。
 // 它不读 FoodTalks ContentHTML，也不引用任何网站渲染器或页脚。
+// 进云梭前先切公众号导流尾：外发与网站同一口径，不看是不是原创。
 func renderYunsuoHTML(blocksJSON, imageMapJSON string) (string, error) {
-	blocks, imageMap, err := decodeYunsuoContent(blocksJSON, imageMapJSON)
+	strippedJSON, err := stripWechatTrailerBlocksJSON(blocksJSON)
+	if err != nil {
+		return "", err
+	}
+	blocks, imageMap, err := decodeYunsuoContent(strippedJSON, imageMapJSON)
 	if err != nil {
 		return "", err
 	}
@@ -129,6 +134,9 @@ func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categ
 	bodyHTML, err := renderYunsuoHTML(job.BlocksJSON, job.ImageMap)
 	if err != nil {
 		return yunsuoPushPayload{}, err
+	}
+	if leak := publishHTMLWechatTrailerLeak(bodyHTML); leak != "" {
+		return yunsuoPushPayload{}, fmt.Errorf("云梭正文仍含公众号导流尾（%s），禁止外发", leak)
 	}
 	title := compactYunsuoText(job.Title)
 	if title == "" {

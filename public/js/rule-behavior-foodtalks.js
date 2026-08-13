@@ -340,10 +340,10 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   const tipSignatures  = compileMarkerList(behavior, 'wechat_tip_signatures', WECHAT_TIP_SIGNATURES);
   const externalMarkers = compileMarkerList(behavior, 'external_media_trailer_markers', EXTERNAL_MEDIA_TRAILER_MARKERS);
 
-  // 阶段 0：切掉公众号原文尾部导流段（更多文章 / 案例库 / 加群 / 公众号"提示："
-  // 页脚 / 二维码）。网站发布版不保留这些；若切掉的是公众号转载声明页脚，则在
-  // 正文末尾补一段网站口径页脚。仅对从公众号 URL 导入的文章生效（isRepost）。
-  const trimmed = opts.isRepost ? stripWechatTrailer(elems, trailerMarkers, tipSignatures, externalMarkers, refHeaderRe) : { elems, cutWechatTip: false };
+  // 阶段 0：切掉公众号原文尾部导流段（更多文章 / 作者名片 / 案例库 / 加群 /
+  // 公众号"提示："页脚 / 二维码）。进 FoodTalks 网站一律切除——原创/转载只决定
+  // CMS 来源类型和提示文案，不决定是否切尾。DOCX 没有这些标记时切点找不到，原文不动。
+  const trimmed = stripWechatTrailer(elems, trailerMarkers, tipSignatures, externalMarkers, refHeaderRe);
 
   // 浅拷贝每个元素（runs 数组本身也新建），保证不原地修改输入
   const out = trimmed.elems.map(e => ({
@@ -376,7 +376,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   }
 
   // 阶段 1.5：开头无作者行但正文（含尾部）有「来源：X」「作者：Y」→ 合成开头作者行。
-  // 仅 isRepost 触发；扫【原始 elems】（来源/作者常在被切的尾部）。
+  // 仅外部转载触发；扫【原始 elems】（来源/作者常在被切的尾部）。自家稿开头通常已有作者行。
   if (opts.isRepost) {
     const headIsAuthor = firstIdx >= 0 && out[firstIdx] && out[firstIdx].k === 'author';
     if (!headIsAuthor) {
