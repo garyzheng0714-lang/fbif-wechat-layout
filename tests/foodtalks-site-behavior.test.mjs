@@ -405,10 +405,18 @@ test('尾部清理：公众号"提示："页脚起全切，并补网站口径页
   assert.match(lastText, /不代表FoodTalks立场，转载请联系出处/, '网站口径立场声明');
 });
 
-test('尾部清理：非 isRepost（如 DOCX 直传）不切尾部、不补页脚', () => {
-  const out = applyFoodTalksBehavior(wechatTrailerElems(), DEFAULT_CONFIG, { isRepost: false });
-  const joined = out.map(e => (e.runs || []).map(r => r.text).join('')).join('\n');
-  assert.match(joined, /更多文章/, '非 repost 不应切除尾部');
+test('尾部清理：自家稿 isRepost=false 同样切除微信导流尾', () => {
+  const out = applyFoodTalksBehavior(wechatTrailerElems(), DEFAULT_CONFIG, {
+    isRepost: false,
+    title: '印尼博士创业',
+  });
+  const joined = out.map(e => (e.runs || []).map(r => r.text).join('') + (e.text || '')).join('\n');
+  assert.doesNotMatch(joined, /更多文章/, '进网站一律切尾，与是否原创无关');
+  assert.doesNotMatch(joined, /欢迎转发朋友圈/, '公众号提示页脚应被切除');
+  assert.doesNotMatch(joined, /预览时标签不可点/, '微信更多文章残留应被切除');
+  const last = out[out.length - 1];
+  assert.equal(last.k, 'tip', '切掉公众号提示后应补网站口径提示');
+  assert.match(last.rest_runs.map(r => r.text).join(''), /本文为FBIF食品饮料创新（ID：FoodInnovation）原创/);
 });
 
 test('尾部清理：仅有导流模块、无公众号"提示："页脚时，切除但不补页脚', () => {

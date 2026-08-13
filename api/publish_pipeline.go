@@ -724,13 +724,17 @@ func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error
 	if err != nil {
 		return err
 	}
-	isRepost := publishSiteIsRepost(job.SourceName, job.BlocksJSON)
-	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, job.SourceURL, job.BlocksJSON, isRepost)
+	// 网站排版一律按转载切尾，与编辑器 URL 导入一致。publishSiteIsRepost 只决定
+	// CMS 来源类型（原创/转载）和提示文案，不得再关掉切尾。
+	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, job.SourceURL, job.BlocksJSON, true)
 	if err != nil {
 		return err
 	}
 	if err := validatePublishRenderResultForPack(result, rulePackID); err != nil {
 		return err
+	}
+	if leak := publishHTMLWechatTrailerLeak(result.HTML); leak != "" {
+		return fmt.Errorf("排版结果仍含公众号导流尾（%s），禁止发布到网站", leak)
 	}
 	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageRendering && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
@@ -1873,6 +1877,9 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 	// sourceType 是确定性规则不交模型——自家号清单命中=0（原创），否则=1（转载）；
 	// 自家号转发他人文章时 AI 从正文声明抽出真实出处（job.AISource），此时按转载算。
 	// author 不再回落 source_name：编辑部 132/163 篇作者为空、来源归 sourceName 字段。
+	if leak := publishHTMLWechatTrailerLeak(job.ContentHTML); leak != "" {
+		return foodTalksNews{}, fmt.Errorf("正文仍含公众号导流尾（%s），禁止写入 FoodTalks", leak)
+	}
 	sourceType, sourceName := siteSourceFor(job)
 	return foodTalksNews{
 		Title:         job.Title,
@@ -1989,9 +1996,8 @@ func siteOwnAccounts() map[string]bool {
 
 var explicitSiteRepostDisclosure = regexp.MustCompile(`^本文为转载文章(?:[，,：:].*)?[。.!！]?$`)
 
-// publishSiteIsRepost 与网页编辑器使用同一口径：正文明确转载声明优先；
-// 否则自家公众号按原创，其余公众号按转载。规则只决定文章语义，排版样式仍由
-// 每次 /api/render 请求现场读取的最新激活规则决定。
+// publishSiteIsRepost 只回答 CMS 来源类型：正文明确转载声明优先；否则自家公众号
+// 按原创，其余公众号按转载。它不决定是否切除微信导流尾——进网站一律切尾。
 func publishSiteIsRepost(sourceName, blocksJSON string) bool {
 	var blocks []Block
 	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err == nil {

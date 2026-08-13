@@ -176,6 +176,26 @@ test('ft-default：headless 保留网站 behavior 的顶层正则与 lists，不
   assert.doesNotMatch(custom.html, /wx-mote-author|#396FBC/i, '公众号 Mote 动作不得注入网站');
 });
 
+test('ft-default：自家稿 isRepost=false 仍切除微信导流尾', async () => {
+  const original = await renderArticle({
+    title: '印尼博士创业',
+    source: 'https://mp.weixin.qq.com/s/1DgVTUgu0K-_h1gS0BnKWg',
+    packId: 'ft-default',
+    isRepost: false,
+    blocks: [
+      { k: 'txt', runs: [{ type: 'txt', text: '作者：Sage' }] },
+      { k: 'txt', runs: [{ type: 'txt', text: '正文保留。' }] },
+      { k: 'txt', runs: [{ type: 'txt', text: '提示：' }] },
+      { k: 'txt', runs: [{ type: 'txt', text: '* 本文为FBIF原创，欢迎转发朋友圈；' }] },
+      { k: 'cap', text: '/ 更多文章 /' },
+      { k: 'txt', runs: [{ type: 'txt', text: '预览时标签不可点' }] },
+    ],
+  });
+  assert.match(original.html, /正文保留/);
+  assert.doesNotMatch(original.html, /欢迎转发朋友圈|更多文章|预览时标签不可点/,
+    '进网站一律切尾，与 CMS 原创/转载无关');
+});
+
 test('ft-default exact：只使用调用方固定的规则快照并回传可复现证据', async () => {
   const snapshot = {
     account_id: 'ft-default',
