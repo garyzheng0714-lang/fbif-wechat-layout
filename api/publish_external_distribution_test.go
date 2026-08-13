@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -296,5 +298,115 @@ func TestReviewCardOutboxesSerializeAndLatestLifecycleWins(t *testing.T) {
 	}
 	if len(cards) != 2 || !strings.Contains(cards[1], "已下线") || strings.Contains(cards[1], "同步分发至其他平台") {
 		t.Fatalf("最后写入的卡必须反映最新 offline 生命周期：%v", cards)
+	}
+}
+
+func TestReplaceExternalDistributionAfterReconcileRebuildsContentHTML(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	job, err := env.store.update(job.ID, func(current *publishJob) {
+		current.ExternalDistributionState = publishExternalDistributionReconciliationRequired
+		current.ExternalDistributionContentPK = "old-wrong-field-pk"
+		current.ExternalDistributionPayloadJSON = `{"type":0,"html":"<p>wrong-field</p>"}`
+		current.ExternalDistributionError = "云梭在轮询时限内未返回全部终态"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := cardJSON(t, buildReviewDoneCard(job))
+	if strings.Contains(card, "重新同步分发") {
+		t.Fatalf("对账中的任务不得出现卡片安全重试按钮：%s", card)
+	}
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err == nil {
+		t.Fatal("卡片路径不得对已有 content_pk 的对账任务再推一次")
+	}
+
+	fake := &fakeYunsuoAPI{
+		contentPK: "content-pk-replaced",
+		statuses: []yunsuoAccountStatus{
+			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+		},
+	}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	queued, err := env.pipeline.replaceExternalDistributionAfterReconcile(job.ID, publishExternalAdminRetryActor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.ExternalDistributionState != publishExternalDistributionQueued {
+		t.Fatalf("管理员重发应先落盘 queued 再异步推送，实际 %q", queued.ExternalDistributionState)
+	}
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExternalDistributionState != publishExternalDistributionSucceeded ||
+		got.ExternalDistributionContentPK != "content-pk-replaced" || fake.pushCalls != 1 {
+		t.Fatalf("管理员重发应对账闭环：state=%q pk=%q push=%d", got.ExternalDistributionState, got.ExternalDistributionContentPK, fake.pushCalls)
+	}
+	encoded, err := json.Marshal(fake.payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"html":`) || !strings.Contains(string(encoded), `"content_html":`) {
+		t.Fatalf("重发必须使用官方 content_html 字段：%s", encoded)
+	}
+	if strings.Contains(fake.payload.HTML, "wrong-field") {
+		t.Fatalf("不得把上一份错误 payload 再发出去：%s", fake.payload.HTML)
+	}
+}
+
+func TestReplaceExternalDistributionRejectedWhenSucceeded(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	job, err := env.store.update(job.ID, func(current *publishJob) {
+		current.ExternalDistributionState = publishExternalDistributionSucceeded
+		current.ExternalDistributionContentPK = "already-published-pk"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeYunsuoAPI{contentPK: "must-not-be-used"}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	if _, err := env.pipeline.replaceExternalDistributionAfterReconcile(job.ID, publishExternalAdminRetryActor); err == nil || fake.pushCalls != 0 {
+		t.Fatalf("已成功的外发不得管理员重发：err=%v push=%d", err, fake.pushCalls)
+	}
+}
+
+func TestRetryExternalDistributionHTTPRequiresAdminAndRebuilds(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	if rec := doPublishReq(mux, http.MethodPost, "/api/publish/jobs/1/retry-external-distribution", "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("无管理员令牌应 401，实际 %d", rec.Code)
+	}
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	if _, err := env.store.update(job.ID, func(current *publishJob) {
+		current.ExternalDistributionState = publishExternalDistributionReconciliationRequired
+		current.ExternalDistributionContentPK = "old-wrong-field-pk"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeYunsuoAPI{
+		contentPK: "content-pk-http-retry",
+		statuses: []yunsuoAccountStatus{
+			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+		},
+	}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	rec := doPublishReq(mux, http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/retry-external-distribution", job.ID), "", true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"retried":true`) {
+		t.Fatalf("对账中的已发布任务应可管理员重发，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExternalDistributionState != publishExternalDistributionSucceeded ||
+		got.ExternalDistributionContentPK != "content-pk-http-retry" || fake.pushCalls != 1 {
+		t.Fatalf("HTTP 重发未闭环：state=%q pk=%q push=%d", got.ExternalDistributionState, got.ExternalDistributionContentPK, fake.pushCalls)
 	}
 }

@@ -157,7 +157,7 @@ type yunsuoPushPayload struct {
 	Description string   `json:"description,omitempty"`
 	Categories  string   `json:"categories"`
 	Cover       string   `json:"cover"`
-	HTML        string   `json:"html"`
+	HTML        string   `json:"content_html"`
 }
 
 type yunsuoAccountStatus struct {
@@ -168,7 +168,7 @@ type yunsuoAccountStatus struct {
 	Remark        string              `json:"remark,omitempty"`
 	NextRetryTime string              `json:"next_retry_time,omitempty"`
 	FailedCount   int                 `json:"failed_count,omitempty"`
-	CreatedType   int                 `json:"created_type,omitempty"`
+	CreatedType   string              `json:"created_type,omitempty"`
 	AccountPool   yunsuoAccountTarget `json:"accountPool"`
 }
 
@@ -411,7 +411,7 @@ type yunsuoStatusWire struct {
 	Remark        string `json:"remark"`
 	NextRetryTime string `json:"next_retry_time"`
 	FailedCount   int    `json:"failed_count"`
-	CreatedType   int    `json:"created_type"`
+	CreatedType   string `json:"created_type"`
 	AccountPool   struct {
 		ID           string `json:"id"`
 		PK           string `json:"pk"`
@@ -473,7 +473,7 @@ func parseYunsuoStatuses(raw json.RawMessage) ([]yunsuoAccountStatus, error) {
 			Remark:        strings.TrimSpace(row.Remark),
 			NextRetryTime: strings.TrimSpace(row.NextRetryTime),
 			FailedCount:   row.FailedCount,
-			CreatedType:   row.CreatedType,
+			CreatedType:   strings.TrimSpace(row.CreatedType),
 			AccountPool:   yunsuoAccountTarget{ID: accountID, Name: accountName},
 		})
 	}
