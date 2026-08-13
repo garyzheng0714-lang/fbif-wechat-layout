@@ -37,6 +37,7 @@ func main() {
 	publicFlag := flag.String("public", os.Getenv("PUBLIC_DIR"), "static files directory; if empty falls back to ../public then public relative to cwd")
 	emitRegistry := flag.Bool("emit-registry", false, "print generated public/js/rule-packs/registry.js from accountCatalog and exit")
 	emitBlocks := flag.Bool("emit-blocks", false, "print generated public/js/blocks/block-registry.gen.js from blockTypeCatalog and exit")
+	cmsResyncDay := flag.String("cms-resync-day", "", "one-off: re-PUT published FoodTalks homepage/source fields for this CST day (YYYY-MM-DD) and exit")
 	flag.Parse()
 
 	// codegen：从账号单一真相源生成 registry.js（`npm run gen:registry`）。
@@ -47,6 +48,10 @@ func main() {
 	// codegen：从区块类型单一真相源生成 block-registry.gen.js（`npm run gen:blocks`）。
 	if *emitBlocks {
 		fmt.Print(renderBlockRegistryJS())
+		return
+	}
+	if day := strings.TrimSpace(*cmsResyncDay); day != "" {
+		runCMSResyncAndExit(day, *rulesPath)
 		return
 	}
 

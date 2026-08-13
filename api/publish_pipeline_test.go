@@ -142,6 +142,8 @@ type ftStub struct {
 	createStatuses []int // 每次 POST 收到的 publishStatus
 	updateStatuses []int // 每次 PUT 收到的 publishStatus
 	updateIDs      []int64
+	lastIsLatest   int
+	lastSourceID   int64
 	forbidPublish  bool // true 时收到 publishStatus=1 直接判失败（红线守卫）
 	t              *testing.T
 }
@@ -158,6 +160,16 @@ func newFTStub(t *testing.T) *ftStub {
 	t.Helper()
 	stub := &ftStub{forbidPublish: true, t: t}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/basic/tag/page" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"records":[]}}`)
+			return
+		}
+		if r.URL.Path == "/basic/admin/tag/by-name" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"code":0,"msg":"success","data":99001}`)
+			return
+		}
 		if r.URL.Path != "/news/admin/news" {
 			t.Errorf("FoodTalks 桩收到意外路径 %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -170,6 +182,8 @@ func newFTStub(t *testing.T) *ftStub {
 		var body struct {
 			ID            json.RawMessage `json:"id"`
 			PublishStatus int             `json:"publishStatus"`
+			IsLatest      int             `json:"isLatest"`
+			SourceID      int64           `json:"sourceId"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("FoodTalks 桩解析请求体失败: %v", err)
@@ -193,6 +207,8 @@ func newFTStub(t *testing.T) *ftStub {
 			}
 			stub.updateStatuses = append(stub.updateStatuses, body.PublishStatus)
 			stub.updateIDs = append(stub.updateIDs, id)
+			stub.lastIsLatest = body.IsLatest
+			stub.lastSourceID = body.SourceID
 			respID = id
 		default:
 			stub.t.Errorf("FoodTalks 桩收到意外方法 %s", r.Method)

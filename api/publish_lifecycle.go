@@ -275,7 +275,7 @@ func (p *publishPipeline) stageUnpublish(ctx context.Context, job publishJob) er
 	if err != nil {
 		return err
 	}
-	news, err := p.buildSiteNews(job, foodTalksPublishStatusOffline)
+	news, err := p.buildSiteNews(ctx, job, foodTalksPublishStatusOffline)
 	if err != nil {
 		return err
 	}
@@ -344,7 +344,7 @@ func (p *publishPipeline) stageRepublish(ctx context.Context, job publishJob) er
 	if err != nil {
 		return err
 	}
-	news, err := p.buildSiteNews(job, foodTalksPublishStatusPublished)
+	news, err := p.buildSiteNews(ctx, job, foodTalksPublishStatusPublished)
 	if err != nil {
 		return err
 	}

@@ -122,6 +122,8 @@ var errPublishDuplicateSuperseded = errors.New("publish job superseded by canoni
 type foodTalksAPI interface {
 	CreateNews(ctx context.Context, n foodTalksNews) (int64, error)
 	UpdateNews(ctx context.Context, n foodTalksNews) error
+	ListTagsByType(ctx context.Context, tagTypeID int64, keywords string) ([]foodTalksTag, error)
+	CreateTagByName(ctx context.Context, tagTypeID int64, name string) (int64, error)
 }
 
 type publishResolvedRule struct {
@@ -162,6 +164,12 @@ type publishPipeline struct {
 	// 网站生命周期与外部分发各有持久 outbox，但它们更新的是同一张飞书卡。
 	// 单进程部署下统一串行发送，并在拿锁后重读任务，避免旧快照最后覆盖新状态。
 	reviewCardUpdateMu sync.Mutex
+	// 来源出处按名称检索（type=10）的进程内短缓存。测试可预置 sourceTags。
+	sourceTagsMu     sync.Mutex
+	sourceTags       []foodTalksTag
+	sourceTagsLoaded time.Time
+	sourceIDByName   map[string]int64
+	sourceIDCacheAt  time.Time
 
 	// fetch 公众号 URL → 标题 + 公众号名 + 结构化作者署名 + 页面规范 URL + 中立 Block[] JSON
 	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
@@ -928,7 +936,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		return errPublishContentSuperseded
 	}
 	job = frozen
-	news, err := p.buildSiteNews(job, foodTalksPublishStatusDraft)
+	news, err := p.buildSiteNews(ctx, job, foodTalksPublishStatusDraft)
 	if err != nil {
 		return err
 	}
@@ -1057,7 +1065,7 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 	if err != nil {
 		return err
 	}
-	news, err := p.buildSiteNews(job, foodTalksPublishStatusPublished)
+	news, err := p.buildSiteNews(ctx, job, foodTalksPublishStatusPublished)
 	if err != nil {
 		return err
 	}
@@ -1856,7 +1864,7 @@ func officialInlineRuns(line string) []Run {
 // buildSiteNews News 组装唯一入口：staging（草稿）与 publicizing（公开）都从这一个函数
 // 拿同一份全量字段——PUT 是全量覆盖语义（契约 §7），两处各自组装一旦漂移，公开时缺的
 // 字段会被覆盖成零值。可配项集中在此走 env，绝不散落多处硬编码。
-func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (foodTalksNews, error) {
+func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, publishStatus int) (foodTalksNews, error) {
 	primary, categories, err := siteCategoryIDs()
 	if err != nil {
 		return foodTalksNews{}, err
@@ -1870,6 +1878,7 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 		Title:         job.Title,
 		CoverImg:      job.CoverURL, // mirroring 后已是转存 OSS URL；enriching 可能换成 AI 选中图
 		SourceType:    sourceType,
+		SourceID:      p.articleSourceID(ctx, sourceName),
 		SourceName:    sourceName,
 		PublishStatus: publishStatus,
 		IsPublic:      1, // ⚠️ 实测非可见性开关（契约 §4），恒 1；隐藏靠 publishStatus=0
@@ -1878,7 +1887,13 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 		// newsTags 结构已确认为 [{tagId,tagName}]，但后端 PUT 带标签仍会 500 并可能
 		// 污染文章，使之后任何 PUT 都失败（实测矩阵见契约 §9）；修复前主链路恒传空
 		// 对象数组。AI 标签只在审核卡与预览展示，真实 ID 由标签查询接口核验。
-		NewsTags:          []foodTalksNewsTag{},
+		NewsTags: []foodTalksNewsTag{},
+		// 以下三项是发布/编辑接口必填。PUT 是全量覆盖，Go 零值会把 CMS 默认值盖成
+		// 0/false。官方文档示例与字段表均为 isLatest=1 / imgPreviewEnable=true /
+		// commentEnable=1；isLatest=0 时文章可以直链可见，但进不了首页「最新资讯」。
+		IsLatest:          1,
+		ImgPreviewEnable:  true,
+		CommentEnable:     1,
 		Content:           job.ContentHTML, // mirroring 后成品（图片已全部 OSS 化；enriching 绝不改它）
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),
 		PrimaryCategoryID: primary,
@@ -1886,6 +1901,70 @@ func (p *publishPipeline) buildSiteNews(job publishJob, publishStatus int) (food
 		Language:          "ZH", // 中文站固定
 		SEOTitle:          job.Title + "-FoodTalks全球食品资讯",
 	}, nil
+}
+
+const foodTalksSourceTagCacheTTL = 10 * time.Minute
+
+func (p *publishPipeline) articleSourceID(ctx context.Context, sourceName string) int64 {
+	if strings.TrimSpace(sourceName) == "" {
+		return 0
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	now := time.Now()
+	if p != nil && p.now != nil {
+		now = p.now()
+	}
+	norm := normalizeFoodTalksSourceName(sourceName)
+	if p != nil {
+		p.sourceTagsMu.Lock()
+		if !p.sourceTagsLoaded.IsZero() && now.Sub(p.sourceTagsLoaded) < foodTalksSourceTagCacheTTL {
+			tags := p.sourceTags
+			p.sourceTagsMu.Unlock()
+			return matchFoodTalksSourceID(tags, sourceName)
+		}
+		if !p.sourceIDCacheAt.IsZero() && now.Sub(p.sourceIDCacheAt) < foodTalksSourceTagCacheTTL {
+			if id, ok := p.sourceIDByName[norm]; ok {
+				p.sourceTagsMu.Unlock()
+				return id
+			}
+		}
+		p.sourceTagsMu.Unlock()
+	}
+	if p == nil || p.foodTalks == nil {
+		return 0
+	}
+	ft, err := p.foodTalks()
+	if err != nil {
+		log.Printf("publish: 拉取来源出处列表失败，CMS 下来源无法自动选中（%s）：%v", sourceName, err)
+		return 0
+	}
+	tags, err := ft.ListTagsByType(ctx, foodTalksTagTypeArticleSource, sourceName)
+	if err != nil {
+		log.Printf("publish: 拉取来源出处列表失败，CMS 下来源无法自动选中（%s）：%v", sourceName, err)
+		return 0
+	}
+	id := matchFoodTalksSourceID(tags, sourceName)
+	if id == 0 {
+		created, err := ft.CreateTagByName(ctx, foodTalksTagTypeArticleSource, strings.TrimSpace(sourceName))
+		if err != nil {
+			log.Printf("publish: 来源出处 %q 不在 CMS 标签库，自动创建失败：%v", sourceName, err)
+		} else {
+			id = created
+			log.Printf("publish: 来源出处 %q 已写入 CMS 标签库（id=%d）", sourceName, id)
+		}
+	}
+	if id > 0 {
+		p.sourceTagsMu.Lock()
+		if p.sourceIDByName == nil || p.sourceIDCacheAt.IsZero() || now.Sub(p.sourceIDCacheAt) >= foodTalksSourceTagCacheTTL {
+			p.sourceIDByName = map[string]int64{}
+			p.sourceIDCacheAt = now
+		}
+		p.sourceIDByName[norm] = id
+		p.sourceTagsMu.Unlock()
+	}
+	return id
 }
 
 // siteSourceFor 转载/原创判定（确定性规则，规范文档 §1：能用代码就不用模型）：

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -35,6 +36,14 @@ const (
 
 	// foodTalksNewsPath 发布与编辑共用同一路径：POST 创建、PUT 全量覆盖编辑。
 	foodTalksNewsPath = "/news/admin/news"
+
+	// foodTalksTagTypeArticleSource CMS「来源出处」下拉的标签类型。
+	// 文档曾写 GET /admin/tag/type/{tagTypeId}/list，正式环境该路径 404。
+	// 2026-08-13 生产实测：GET /basic/tag/page?type=10&status=1&keywords=
+	// 缺失时 POST /basic/admin/tag/by-name {"name","typeId"}，成功 data 为标签 id，同名幂等。
+	foodTalksTagTypeArticleSource int64 = 10
+	foodTalksTagPagePath                = "/basic/tag/page"
+	foodTalksTagByNamePath              = "/basic/admin/tag/by-name"
 
 	// foodTalksBrowserUA 浏览器形 UA：nginx/WAF 层按「像不像浏览器」放行（契约 §1），
 	// 非浏览器 UA 会被拦。值本身不敏感，固定一份即可，不必可配。
@@ -78,6 +87,14 @@ type foodTalksNewsTag struct {
 	TagName string `json:"tagName"`
 }
 
+// foodTalksTag 标签库条目。来源出处下拉用 tagTypeId=10 的 id/name。
+type foodTalksTag struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	TagTypeID int64  `json:"tagTypeId"`
+	Sort      int    `json:"sort"`
+}
+
 // foodTalksNews 资讯全量字段集。JSON tag 与抓包接口文档逐字对齐（wiki「【API】FoodTalks 后台
 // 资讯发布&编辑」）；PUT 是全量覆盖语义，调用方必须带完整字段，不能只带改动项。
 // ID 不直接序列化：POST 时 API 要求传空字符串 ""、PUT 时传数字（同一字段两种形态），
@@ -90,16 +107,16 @@ type foodTalksNews struct {
 	SourceType          int                `json:"sourceType"`
 	PublishStatus       int                `json:"publishStatus"` // 只准 0/1/2，见包常量
 	IsPublic            int                `json:"isPublic"`      // ⚠️ 实测不是可见性开关（契约 §4），隐藏靠 publishStatus
-	SourceID            int64              `json:"sourceId"`
+	SourceID            int64              `json:"sourceId"`      // CMS「来源出处」下拉绑定的标签 id（tagTypeId=10）；0 时后台显示「请选择」
 	SourceName          string             `json:"sourceName"`
 	Author              string             `json:"author"`
 	Summary             string             `json:"summary"`
 	NewsTags            []foodTalksNewsTag `json:"newsTags"`
-	IsLatest            int                `json:"isLatest"`
-	ImgPreviewEnable    bool               `json:"imgPreviewEnable"` // 接口文档中唯一的布尔字段
-	CommentEnable       int                `json:"commentEnable"`
-	Content             string             `json:"content"`     // 正文 HTML；图片必须已转存（外链裸奔由流水线上游把关）
-	PublishTime         string             `json:"publishTime"` // 格式 YYYY-MM-DD HH:mm:ss
+	IsLatest            int                `json:"isLatest"`         // 是否最新资讯；官方示例恒 1，首页最新模块按此过滤
+	ImgPreviewEnable    bool               `json:"imgPreviewEnable"` // 接口文档中唯一的布尔字段；官方示例 true
+	CommentEnable       int                `json:"commentEnable"`    // 是否允许评论；官方示例 1
+	Content             string             `json:"content"`          // 正文 HTML；图片必须已转存（外链裸奔由流水线上游把关）
+	PublishTime         string             `json:"publishTime"`      // 格式 YYYY-MM-DD HH:mm:ss
 	PrimaryCategoryID   int64              `json:"primaryCategoryId"`
 	SEOTitle            string             `json:"seoTitle"`
 	SEOKeywords         string             `json:"seoKeywords"`
@@ -215,6 +232,171 @@ func (c *foodTalksClient) UpdateNews(ctx context.Context, n foodTalksNews) error
 	}
 	_, err := c.send(ctx, http.MethodPut, buildFoodTalksNewsBody(json.RawMessage(strconv.FormatInt(n.ID, 10)), n))
 	return err
+}
+
+// ListTagsByType 按标签类型查目录。来源出处下拉对应 type=10。
+// keywords 非空时按名称检索（来源库有数千条，不能全量拉取再本地过滤）。
+func (c *foodTalksClient) ListTagsByType(ctx context.Context, tagTypeID int64, keywords string) ([]foodTalksTag, error) {
+	if tagTypeID <= 0 {
+		return nil, fmt.Errorf("ListTagsByType 需要正数 tagTypeId，当前 %d", tagTypeID)
+	}
+	query := url.Values{}
+	query.Set("current", "1")
+	query.Set("size", "50")
+	query.Set("type", strconv.FormatInt(tagTypeID, 10))
+	query.Set("status", "1")
+	if strings.TrimSpace(keywords) != "" {
+		query.Set("keywords", strings.TrimSpace(keywords))
+	}
+	path := foodTalksTagPagePath + "?" + query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("foodtalks: 构造标签列表请求: %w", err)
+	}
+	c.applyHeaders(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("FoodTalks 接口不可达（GET %s）: %w", path, err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return nil, fmt.Errorf("foodtalks: 读标签列表响应: %w", err)
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnauthorized:
+		return nil, fmt.Errorf("%w（HTTP 401）", errFoodTalksUnauthorized)
+	case http.StatusForbidden:
+		if json.Valid(respBody) {
+			return nil, fmt.Errorf("%w（HTTP 403）", errFoodTalksUnauthorized)
+		}
+		return nil, fmt.Errorf("%w（HTTP 403，响应片段：%s）", errFoodTalksGatewayBlocked, foodTalksSnippet(respBody))
+	default:
+		return nil, fmt.Errorf("FoodTalks 接口异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+	}
+	tags, err := parseFoodTalksTagList(respBody)
+	if err != nil {
+		return nil, fmt.Errorf("FoodTalks 标签列表无法解析（HTTP 200，响应片段：%s）: %w", foodTalksSnippet(respBody), err)
+	}
+	return tags, nil
+}
+
+type foodTalksCreateTagBody struct {
+	Name   string `json:"name"`
+	TypeID int64  `json:"typeId"`
+}
+
+// CreateTagByName 按名称创建标签。来源出处用 typeId=10。
+// 生产实测：成功 {code:0,data:<id>}；同名再调返回同一 id，不会建重复。
+func (c *foodTalksClient) CreateTagByName(ctx context.Context, tagTypeID int64, name string) (int64, error) {
+	name = strings.TrimSpace(name)
+	if tagTypeID <= 0 {
+		return 0, fmt.Errorf("CreateTagByName 需要正数 typeId，当前 %d", tagTypeID)
+	}
+	if name == "" {
+		return 0, fmt.Errorf("CreateTagByName 需要非空名称")
+	}
+	raw, err := json.Marshal(foodTalksCreateTagBody{Name: name, TypeID: tagTypeID})
+	if err != nil {
+		return 0, fmt.Errorf("foodtalks: 序列化创建标签请求: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+foodTalksTagByNamePath, bytes.NewReader(raw))
+	if err != nil {
+		return 0, fmt.Errorf("foodtalks: 构造创建标签请求: %w", err)
+	}
+	c.applyHeaders(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("FoodTalks 接口不可达（POST %s）: %w", foodTalksTagByNamePath, err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return 0, fmt.Errorf("foodtalks: 读创建标签响应: %w", err)
+	}
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusBadRequest:
+		// 400 仍可能是 JSON 业务错误（「标签名称不能为空」），按 body.code 判定。
+	case http.StatusUnauthorized:
+		return 0, fmt.Errorf("%w（HTTP 401）", errFoodTalksUnauthorized)
+	case http.StatusForbidden:
+		if json.Valid(respBody) {
+			return 0, fmt.Errorf("%w（HTTP 403）", errFoodTalksUnauthorized)
+		}
+		return 0, fmt.Errorf("%w（HTTP 403，响应片段：%s）", errFoodTalksGatewayBlocked, foodTalksSnippet(respBody))
+	default:
+		return 0, fmt.Errorf("FoodTalks 接口异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data *int64 `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return 0, fmt.Errorf("FoodTalks 创建标签响应不是预期 JSON（HTTP %d，响应片段：%s）: %w", resp.StatusCode, foodTalksSnippet(respBody), err)
+	}
+	if env.Code != 0 {
+		return 0, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
+	}
+	if env.Data == nil || *env.Data <= 0 {
+		return 0, errors.New("FoodTalks 创建标签成功但响应 data 不是正数 id")
+	}
+	return *env.Data, nil
+}
+
+func parseFoodTalksTagList(respBody []byte) ([]foodTalksTag, error) {
+	var env struct {
+		Code int             `json:"code"`
+		Msg  string          `json:"msg"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return nil, err
+	}
+	if env.Code != 0 {
+		return nil, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
+	}
+	if len(env.Data) == 0 || string(env.Data) == "null" {
+		return []foodTalksTag{}, nil
+	}
+	var tags []foodTalksTag
+	if err := json.Unmarshal(env.Data, &tags); err == nil {
+		if tags == nil {
+			tags = []foodTalksTag{}
+		}
+		return tags, nil
+	}
+	var wrapped struct {
+		Records []foodTalksTag `json:"records"`
+	}
+	if err := json.Unmarshal(env.Data, &wrapped); err != nil {
+		return nil, err
+	}
+	if wrapped.Records == nil {
+		wrapped.Records = []foodTalksTag{}
+	}
+	return wrapped.Records, nil
+}
+
+func matchFoodTalksSourceID(tags []foodTalksTag, sourceName string) int64 {
+	want := normalizeFoodTalksSourceName(sourceName)
+	if want == "" {
+		return 0
+	}
+	for _, tag := range tags {
+		if normalizeFoodTalksSourceName(tag.Name) == want && tag.ID > 0 {
+			return tag.ID
+		}
+	}
+	return 0
+}
+
+func normalizeFoodTalksSourceName(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.ReplaceAll(name, " ", "")
+	name = strings.ReplaceAll(name, "　", "")
+	return strings.ToLower(name)
 }
 
 // send 发一次请求并按契约分类结果：网络错 / 401 / 403(JSON=凭证, HTML=网关) / code!=0 业务错。

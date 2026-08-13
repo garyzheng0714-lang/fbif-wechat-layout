@@ -600,6 +600,40 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "refreshed": true})
 	})
 
+	// 对已公开任务再 PUT 一次 FoodTalks：补 isLatest（首页）和 sourceId（来源出处）。
+	// 不改本地状态机、不发飞书通知。day 为北京时间 YYYY-MM-DD。
+	mux.HandleFunc("POST /api/publish/cms-resync", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		var req struct {
+			Day string `json:"day"`
+		}
+		if r.Body != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, http.StatusBadRequest, "invalid JSON")
+				return
+			}
+		}
+		if strings.TrimSpace(req.Day) == "" {
+			req.Day = r.URL.Query().Get("day")
+		}
+		day, err := parseCMSResyncDayCST(req.Day)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		report, err := p.resyncPublishedCMSDay(r.Context(), day)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, report)
+	})
+
 	// 用当前 prompt 重跑风险检查（只对待审核任务）。card-refresh 只换样式、用的还是
 	// 旧结论；prompt 改版后想让新检查能力作用在存量文章上，只能走这里真调一次模型。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/risk-recheck", func(w http.ResponseWriter, r *http.Request) {
