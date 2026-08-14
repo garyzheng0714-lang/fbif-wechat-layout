@@ -380,8 +380,13 @@ func reviewCardMessageID(job publishJob, chatID string) string {
 		if id := strings.TrimSpace(job.ReviewCardMsgIDs[chatID]); id != "" {
 			return id
 		}
+		// map 时代的任务：目标群在 map 里没有记录，就是没往这个群发过卡，必须发新卡。
+		// 不得回落到旧单值字段——它不带群信息，切换审核群后回落等于把「更新旧群里的
+		// 旧卡」误当成「已发到新群」，新群永远收不到卡（2026-08-14 切群实测：#78/#80
+		// 重排后的审核卡被原位更新进旧群，新群零消息，发送记录却显示成功）。
+		return ""
 	}
-	// 旧任务只有一个 message_id；新任务只有一个群时也可安全沿用它。
+	// 旧任务（map 从未建立）只有一个 message_id；目标群唯一时按历史行为沿用。
 	if chatID == "" || len(job.ReviewDeliveryChatIDs) <= 1 {
 		return strings.TrimSpace(job.ReviewCardMsgID)
 	}
