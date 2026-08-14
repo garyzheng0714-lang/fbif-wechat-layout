@@ -132,6 +132,7 @@ These have been explicitly confirmed by the user. Breaking any of these is unacc
 38. **进网站与云梭外发一律切除微信导流尾（2026-08-13 用户裁定）** — 切尾与算不算原创无关。`isRepost` 只决定 CMS 来源类型和提示文案，不得再关掉 `stripWechatTrailer`。自动发布 `stageRender` 固定按切尾渲染；云梭从 `BlocksJSON` 直渲，必须在 Go 侧切尾后经 `publishHTMLWechatTrailerLeak` fail closed。泄漏标记不用网站页脚合法文案（加入微信群 / 关注公众号）。已公开泄漏稿走 `POST /api/publish/jobs/{id}/repair-wechat-trailer` 覆盖 FoodTalks，不重开审核。守护：`tests/foodtalks-site-behavior.test.mjs`、`api/wechat_trailer_test.go`、`api/yunsuo_test.go`、`api/publish_trailer_repair_test.go`。
 
 39. **网站正文的图宽、目录与 Mote 标签（2026-08-14 用户裁定，金标准 62765 正确版）** — ① 图宽：`image-width.js` 长图（高/宽 ≥ `long_min_ratio`=2）固定宽 `long_px`=400，不再按「高 375」反推（曾把 4.72 比例表格图缩成 79px）；二维码阈值 `qr_max_natural_px` 收紧到 300（真二维码实测 ≤266，360 产品图曾被误判成 150）。② 目录：Mote/原创且 h2>5 时 `buildSiteNews` 给正文 h2 注入内容哈希派生的确定性 `mctoc_*` 锚点并写 CMS `toc` 字段；渲染器侧 `mctoc` 保持关闭，锚点只在发布组装层出现；转载不生成。③ 标签：Mote 文章（任务作者或正文作者行命中 mote/莫特）挂「Mote莫特」+ 正文「XX系列第N篇」声明的系列标签，只在 `tag_type_id=6` 按名解析、不自动创建；契约 §9 的 PUT 标签封印已于 2026-08-14 复测解除。守护：`tests/image-width.test.mjs`、`api/publish_site_enhance_test.go`。审核卡投递群自 2026-08-14 起为外部群（`FEISHU_REVIEW_CHAT_ID`，服务器 publish.env）；群成员审核模式依赖回调 chat_id 匹配当前配置群，切群后旧群里的历史卡片只有静态白名单审核人还能操作。
+    **手工发布优先（2026-08-14 用户裁定）**：运营在 CMS 后台直接发布/编辑过的稿件，以 CMS 现状为准，不得用流水线库存重渲覆盖（案例：#97/#98/#99 绕过审核卡在后台发布，本地任务停在 failed 属预期脱节，不救、不覆盖；62765 金标准同理跳过批量覆盖）。修复批量只覆盖「由流水线发布且未经人工后台改动」的稿件。
 
 ## Server
 - Go API server 同时提供静态文件（../public）和 API
