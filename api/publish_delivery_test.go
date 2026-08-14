@@ -263,6 +263,19 @@ func TestPublishDeliveryJobTargetAndCardIDBranches(t *testing.T) {
 	if got := reviewCardMessageID(publishJob{ReviewCardMsgID: "legacy"}, ""); got != "legacy" {
 		t.Fatalf("legacy card id=%q", got)
 	}
+	// 切换审核群事故（2026-08-14 #78/#80）：map 时代任务的旧卡记录在旧群名下，
+	// 目标切到新群后必须发新卡；不得回落旧单值字段把「更新旧群旧卡」当成已送达。
+	switched := publishJob{
+		ReviewCardMsgID:       "om_old_card",
+		ReviewDeliveryChatIDs: []string{"oc_new_group"},
+		ReviewCardMsgIDs:      map[string]string{"oc_old_group": "om_old_card"},
+	}
+	if got := reviewCardMessageID(switched, "oc_new_group"); got != "" {
+		t.Fatalf("切群后新群必须视为未发过卡（应发新卡），实际返回 %q", got)
+	}
+	if got := reviewCardMessageID(switched, "oc_old_group"); got != "om_old_card" {
+		t.Fatalf("旧群的卡仍应可原位更新，实际 %q", got)
+	}
 	if err := pipeline.rememberReviewCardMessageIDForChat(job, "oc_default", ""); err == nil {
 		t.Fatal("empty card id accepted")
 	}
