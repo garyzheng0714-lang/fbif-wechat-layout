@@ -159,10 +159,73 @@ func TestSiteNewsTagsForMoteArticle(t *testing.T) {
 	if len(stub2.created) != 0 {
 		t.Fatalf("缺失也不得自动创建：%v", stub2.created)
 	}
-	// 非 Mote 文章不挂标签
+	// 非 Mote 文章：不挂 Mote/系列，但 AI 预填标签照常解析
 	other := publishJob{Author: "张三", BlocksJSON: `[{"k":"txt","text":"这是我茶叶系列的第29篇。"}]`}
 	if tags := p.siteNewsTagsFor(context.Background(), other); len(tags) != 0 {
-		t.Fatalf("非 Mote 文章不得自动挂标签：%+v", tags)
+		t.Fatalf("非 Mote 且无 AI 标签时应为空：%+v", tags)
+	}
+}
+
+func TestSiteNewsTagsResolvesAITagsForAllArticles(t *testing.T) {
+	stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{
+		"瑞幸咖啡":  {{ID: 111, Name: "瑞幸咖啡", TagTypeID: 6}},
+		"新茶饮":   {{ID: 112, Name: "新茶饮", TagTypeID: 6}},
+		"Mote莫特": {{ID: 99913, Name: "Mote莫特", TagTypeID: 6}},
+		"茶叶系列":  {{ID: 114000, Name: "茶叶系列", TagTypeID: 6}},
+		"零售":    {{ID: 113, Name: "零售", TagTypeID: 6}},
+	}}
+	p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil }}
+	// 普通转载/原创：AI 预填标签按库解析（7 月实证：编辑给每篇挂 1-2 个品牌/品类词）
+	job := publishJob{Author: "张三", Tags: []string{"瑞幸咖啡", "新茶饮", "不存在的词"}}
+	tags := p.siteNewsTagsFor(context.Background(), job)
+	if len(tags) != 2 || tags[0].TagID != 111 || tags[1].TagID != 112 {
+		t.Fatalf("AI 标签应解析入库且跳过未命中项：%+v", tags)
+	}
+	if len(stub.created) != 0 {
+		t.Fatalf("不得自动创建：%v", stub.created)
+	}
+	// Mote 文章叠加 AI 标签时，Mote/系列优先且总数封顶 3
+	mote := publishJob{
+		Author:     "Mote莫特",
+		BlocksJSON: `[{"k":"txt","text":"这是我茶叶系列的第29篇。"}]`,
+		Tags:       []string{"瑞幸咖啡", "新茶饮", "零售"},
+	}
+	tags = p.siteNewsTagsFor(context.Background(), mote)
+	if len(tags) != 3 || tags[0].TagName != "Mote莫特" || tags[1].TagName != "茶叶系列" {
+		t.Fatalf("Mote/系列应优先且封顶 3 个：%+v", tags)
+	}
+	// 重名去重（AI 标签与系列名重复只算一次）
+	dup := publishJob{Author: "Mote 莫特", BlocksJSON: `[{"k":"txt","text":"这是我茶叶系列的第29篇。"}]`, Tags: []string{"茶叶系列"}}
+	tags = p.siteNewsTagsFor(context.Background(), dup)
+	if len(tags) != 2 {
+		t.Fatalf("重名标签应去重：%+v", tags)
+	}
+}
+
+func TestBuildSiteNewsCategoryBySourceType(t *testing.T) {
+	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
+	t.Setenv("FOODTALKS_REPOST_CATEGORY_IDS", "")
+	p := &publishPipeline{now: time.Now}
+	base := publishJob{Title: "标题", ContentHTML: "<p>正文</p>", CreatedAt: "2026-08-14T00:00:00Z"}
+	// 原创（自有号）→ 独家专栏（沿用 FOODTALKS_CATEGORY_IDS 默认 52,58）
+	orig := base
+	orig.SourceName = "FBIF食品饮料创新"
+	news, err := p.buildSiteNews(context.Background(), orig, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if news.PrimaryCategoryID != 52 {
+		t.Fatalf("原创主分类应为独家专栏(52)，实际 %d", news.PrimaryCategoryID)
+	}
+	// 转载 → 食品新闻(53)（2026-08-14 用户裁定：独家专栏是原创专属；7 月转载 108/120 挂食品新闻）
+	repost := base
+	repost.SourceName = "PackHorizon"
+	news, err = p.buildSiteNews(context.Background(), repost, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if news.PrimaryCategoryID != 53 || len(news.CategoryIDs) != 1 || news.CategoryIDs[0] != 53 {
+		t.Fatalf("转载主分类应为食品新闻(53)，实际 primary=%d cats=%v", news.PrimaryCategoryID, news.CategoryIDs)
 	}
 }
 
