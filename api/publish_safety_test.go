@@ -20,6 +20,14 @@ func touchRegularFile(path string) error {
 type directFoodTalksStub struct {
 	create func() (int64, error)
 	update func() error
+	search func() ([]foodTalksNewsListItem, error)
+}
+
+func (s directFoodTalksStub) SearchNewsByTitle(context.Context, string) ([]foodTalksNewsListItem, error) {
+	if s.search != nil {
+		return s.search()
+	}
+	return nil, nil
 }
 
 func (s directFoodTalksStub) CreateNews(context.Context, foodTalksNews) (int64, error) {

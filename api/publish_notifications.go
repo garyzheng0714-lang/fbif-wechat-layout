@@ -305,6 +305,8 @@ func (p *publishPipeline) sendReviewPendingNotificationUnlocked(ctx context.Cont
 			"【网站同步】任务 #%d 状态已变化\n标题：%s", job.ID, job.Title))
 	}
 	coverImgKey = strings.TrimSpace(job.ReviewCoverImgKey)
+	// 同题防重提醒（best effort）：发卡/刷卡前查一次 CMS，命中即在卡上标红。
+	job = p.refreshSiteDuplicateFlag(ctx, job)
 	card := buildReviewPendingCard(job, coverImgKey)
 	if p != nil && p.deliverySettings != nil {
 		return p.sendConfiguredReviewCardToTargets(ctx, job, card)

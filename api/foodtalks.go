@@ -468,6 +468,63 @@ func (c *foodTalksClient) applyHeaders(req *http.Request) {
 	}
 }
 
+// foodTalksNewsListItem 资讯列表页条目（同题防重用最小字段集）。
+type foodTalksNewsListItem struct {
+	ID            int64  `json:"id"`
+	Title         string `json:"title"`
+	PublishStatus int    `json:"publishStatus"`
+	SourceName    string `json:"sourceName"`
+}
+
+// SearchNewsByTitle 按标题在资讯库检索（GET /news/admin/news/page?title=，
+// 2026-08-14 实测：title 参数精确过滤，keywords 参数被后端忽略）。
+// 同题防重用：返回前 20 条即可覆盖同名场景。
+func (c *foodTalksClient) SearchNewsByTitle(ctx context.Context, title string) ([]foodTalksNewsListItem, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, nil
+	}
+	query := url.Values{}
+	query.Set("current", "1")
+	query.Set("size", "20")
+	query.Set("title", title)
+	path := foodTalksNewsPath + "/page?" + query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("foodtalks: 构造标题检索请求: %w", err)
+	}
+	c.applyHeaders(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("FoodTalks 接口不可达（GET %s）: %w", foodTalksNewsPath+"/page", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return nil, fmt.Errorf("foodtalks: 读标题检索响应: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FoodTalks 标题检索异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data *struct {
+			Records []foodTalksNewsListItem `json:"records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return nil, fmt.Errorf("FoodTalks 标题检索响应不是预期 JSON（响应片段：%s): %w", foodTalksSnippet(respBody), err)
+	}
+	if env.Code != 0 {
+		return nil, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
+	}
+	if env.Data == nil {
+		return []foodTalksNewsListItem{}, nil
+	}
+	return env.Data.Records, nil
+}
+
 // PreviewToken 为未上架文章现铸官方预览 token（2026-07-10 从管理后台前端代码挖到并
 // 实测：POST /news/admin/news/{id}/preview/token → {code:0, data:{id, token}}）。
 // token 短期有效（前台横幅「将在短期内失效」）——**每次要用时现铸，不落库**。

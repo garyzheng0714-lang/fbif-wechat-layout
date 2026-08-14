@@ -181,7 +181,11 @@ type publishJob struct {
 	ReviewAction         string `json:"review_action,omitempty"`         // approve / reject；publicizing 恢复的授权凭据
 	ReviewForced         bool   `json:"review_forced,omitempty"`         // 阻断级风险下的强制发布（2026-08-07 用户裁定），终态卡与留痕据此标注
 	ApprovedRiskVersion  string `json:"approved_risk_version,omitempty"` // approve 当刻与风险快照绑定的摘要
-	ReviewCardMsgID      string `json:"review_card_msg_id,omitempty"`    // 旧任务单卡片兼容
+	// SiteDuplicateNewsID 同题防重标记：CMS 上与本任务同题且已发布的另一篇资讯 id
+	//（多为运营手工发布），发卡/刷卡时 best effort 更新，卡片据此标红提醒。
+	SiteDuplicateNewsID int64 `json:"site_duplicate_news_id,omitempty"`
+
+	ReviewCardMsgID string `json:"review_card_msg_id,omitempty"` // 旧任务单卡片兼容
 	// 新配置支持同一张审核卡投递到多个群；map 的 key 是 chat_id，value 是
 	// 对应群里的 message_id。ReviewCardMsgID 保留给旧任务兼容。
 	ReviewDeliveryAppID   string            `json:"review_delivery_app_id,omitempty"`

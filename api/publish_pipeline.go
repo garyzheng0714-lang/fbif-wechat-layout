@@ -126,6 +126,7 @@ type foodTalksAPI interface {
 	UpdateNews(ctx context.Context, n foodTalksNews) error
 	ListTagsByType(ctx context.Context, tagTypeID int64, keywords string) ([]foodTalksTag, error)
 	CreateTagByName(ctx context.Context, tagTypeID int64, name string) (int64, error)
+	SearchNewsByTitle(ctx context.Context, title string) ([]foodTalksNewsListItem, error)
 }
 
 type publishResolvedRule struct {
@@ -1073,6 +1074,11 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 	}
 	news, err := p.buildSiteNews(ctx, job, foodTalksPublishStatusPublished)
 	if err != nil {
+		return err
+	}
+	// 同题防重硬闸（2026-08-14 用户裁定）：手工发布优先，站上已有同名已发布稿时
+	// 绝不重复公开；查询失败同样 fail closed。此时尚未持久化公开意图，纯失败可重试。
+	if err := p.sitePublishDuplicateGate(ctx, job); err != nil {
 		return err
 	}
 	news.ID = job.FoodTalksNewsID
