@@ -168,11 +168,11 @@ func TestSiteNewsTagsForMoteArticle(t *testing.T) {
 
 func TestSiteNewsTagsResolvesAITagsForAllArticles(t *testing.T) {
 	stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{
-		"瑞幸咖啡":  {{ID: 111, Name: "瑞幸咖啡", TagTypeID: 6}},
-		"新茶饮":   {{ID: 112, Name: "新茶饮", TagTypeID: 6}},
+		"瑞幸咖啡":   {{ID: 111, Name: "瑞幸咖啡", TagTypeID: 6}},
+		"新茶饮":    {{ID: 112, Name: "新茶饮", TagTypeID: 6}},
 		"Mote莫特": {{ID: 99913, Name: "Mote莫特", TagTypeID: 6}},
-		"茶叶系列":  {{ID: 114000, Name: "茶叶系列", TagTypeID: 6}},
-		"零售":    {{ID: 113, Name: "零售", TagTypeID: 6}},
+		"茶叶系列":   {{ID: 114000, Name: "茶叶系列", TagTypeID: 6}},
+		"零售":     {{ID: 113, Name: "零售", TagTypeID: 6}},
 	}}
 	p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil }}
 	// 普通转载/原创：AI 预填标签按库解析（7 月实证：编辑给每篇挂 1-2 个品牌/品类词）
