@@ -1,0 +1,45 @@
+{
+  "job_id": 75,
+  "stage": "published",
+  "news_id": 62755,
+  "title": "为什么海外年轻人纷纷涌入韩国便利店？",
+  "article_url": "https://www.foodtalks.cn/news/62755",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=8529bdddf9517149216731904ecf560428211e830131959d33f1d05f810504ea02cfcf58df7e&idx=2&mid=2652932997&scene=0&sn=f21b04bc896de07f4bb5a121a7b6c490",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-07T01:39:02Z",
+  "created_at": "2026-08-07T01:08:31Z",
+  "updated_at": "2026-08-07T01:39:03Z",
+  "content_sha256": "5c000e9d496dd354c4eee9fe05cc31ed4ab21937b54d7cbde4dea3a3601340a3",
+  "content_html_len": 20211,
+  "h2": [
+    "外国游客成便利店重要增量客群",
+    "韩国便利店提供低门槛的文化体验",
+    "便利店成旅游基础设施",
+    "韩国便利店做对了五件事",
+    "第一，高密度门店网络，让体验随手可得",
+    "第二，差异化商品，制造专程到访的理由",
+    "第三，K文化持续种草，提前完成消费教育",
+    "第四，自助组合与即食设备，增加消费参与感",
+    "第五，多语言、跨境支付和特化店，降低游客门槛",
+    "对中国便利店的启示",
+    "写在最后"
+  ],
+  "h2_count": 11,
+  "p_count": 249,
+  "table_count": 0,
+  "figure_count": 8,
+  "img_count": 12,
+  "empty_p_count": 121,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 20194,
+    "sha256": "c10d5976dbba2e36ce17ebfeca235bc07e84f113d9cc43520eaae0a61950e9df",
+    "matches_job": false,
+    "h2": 11,
+    "table": 0
+  }
+}

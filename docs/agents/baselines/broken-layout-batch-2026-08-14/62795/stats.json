@@ -1,0 +1,38 @@
+{
+  "job_id": 94,
+  "stage": "published",
+  "news_id": 62795,
+  "title": "冷冻烘焙兴起：一场关于性价比的新实验",
+  "article_url": "https://www.foodtalks.cn/news/62795",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85a7571ffc1a47d05a429b758cb4b306f0848385425c46f5c482d8728f31e647679bbb0503a9&idx=2&mid=2652933680&scene=0&sn=61484a842226cc84c87ee86dfd18fbdf",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-13T00:57:30Z",
+  "created_at": "2026-08-13T00:46:53Z",
+  "updated_at": "2026-08-13T00:57:31Z",
+  "content_sha256": "016d3afa4556a7861e8610d2aedf4c426973c4a6b3a453cf75777333c6661bc8",
+  "content_html_len": 15663,
+  "h2": [
+    "烘焙领域的零售集合店",
+    "更极致效率的门店模型",
+    "为什么这两年集中出现",
+    "尾声"
+  ],
+  "h2_count": 4,
+  "p_count": 144,
+  "table_count": 0,
+  "figure_count": 8,
+  "img_count": 12,
+  "empty_p_count": 68,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 15663,
+    "sha256": "016d3afa4556a7861e8610d2aedf4c426973c4a6b3a453cf75777333c6661bc8",
+    "matches_job": true,
+    "h2": 4,
+    "table": 0
+  }
+}

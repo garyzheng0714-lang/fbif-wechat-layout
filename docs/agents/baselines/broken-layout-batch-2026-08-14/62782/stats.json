@@ -1,0 +1,37 @@
+{
+  "job_id": 89,
+  "stage": "published",
+  "news_id": 62782,
+  "title": "“像钻石一样硬”的冰棒卖了52年，一年卖出3.35亿支",
+  "article_url": "https://www.foodtalks.cn/news/62782",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=855de58edc6b40b42845dfaa7706a967182fface3441e46b45a1d1953d8a8a853f2577c67244&idx=1&mid=2652933450&scene=0&sn=8dabaee73a89e1d6d7f352f6e2c20324",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-11T01:19:06Z",
+  "created_at": "2026-08-11T00:47:42Z",
+  "updated_at": "2026-08-13T05:39:38Z",
+  "content_sha256": "b8dd215c224d627f5ae80ee78f79d4a87d5a25a493491d9f86ae782090156fb4",
+  "content_html_len": 21863,
+  "h2": [
+    "一支冰棒硬得能砸西瓜，品牌方居然跟着一起玩梗？",
+    "曾三次推出软化版，但消费者就要吃硬的",
+    "53岁老品牌如何“去登味”？"
+  ],
+  "h2_count": 3,
+  "p_count": 197,
+  "table_count": 0,
+  "figure_count": 15,
+  "img_count": 19,
+  "empty_p_count": 83,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 21863,
+    "sha256": "b8dd215c224d627f5ae80ee78f79d4a87d5a25a493491d9f86ae782090156fb4",
+    "matches_job": true,
+    "h2": 3,
+    "table": 0
+  }
+}

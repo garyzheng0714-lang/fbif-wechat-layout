@@ -1,0 +1,53 @@
+{
+  "job_id": 81,
+  "stage": "published",
+  "news_id": 62765,
+  "title": "连续58年日本茶叶第一，年销17.6亿，伊藤园如何成为全球绿茶之王？",
+  "article_url": "https://www.foodtalks.cn/news/62765",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85724cf9d1f98efac931860230c827374cee6c7dd5b01e2334fc26b5b17cd01c36dbab03f90b&idx=1&mid=2652933295&scene=0&sn=2edfd5bdfd838ff6afca3ae4b1c8cc50",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-10T01:45:07Z",
+  "created_at": "2026-08-09T00:39:33Z",
+  "updated_at": "2026-08-13T05:39:35Z",
+  "content_sha256": "1861553511bef15c8f6bfc67dac774697e4d6c06fea09c1db7217bef5e19cb47",
+  "content_html_len": 51987,
+  "h2": [
+    "两个卖车的，发现茶叶比什么都好卖",
+    "把茶叶装进袋子，直接送进超市",
+    "一台咖啡包装机，改变了日本茶叶的命运",
+    "世界第一款罐装乌龙茶、罐装绿茶、PET瓶装绿茶",
+    "买下日本四分之一的荒茶",
+    "去澳大利亚种茶",
+    "从7个人到3500人的销售队伍",
+    "茶的百科书，还有儿童版",
+    "3413亿营收，茶叶375亿：透视茶叶需求的变迁",
+    "表格注释",
+    "第一个问题：茶饮料碾压茶叶了吗？",
+    "第四个问题：茶饮料会不会取代茶叶？",
+    "59款茶",
+    "喂，喝茶"
+  ],
+  "h2_count": 14,
+  "p_count": 557,
+  "table_count": 0,
+  "figure_count": 20,
+  "img_count": 24,
+  "empty_p_count": 246,
+  "files": [
+    "job-content.html",
+    "stats.json",
+    "viewport-top.png",
+    "section-table.png",
+    "section-59tea.png",
+    "cms-content.html",
+    "live-article-content.html"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 51987,
+    "sha256": "1861553511bef15c8f6bfc67dac774697e4d6c06fea09c1db7217bef5e19cb47",
+    "matches_job": true,
+    "h2": 14,
+    "table": 0
+  }
+}

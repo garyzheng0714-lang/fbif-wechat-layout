@@ -1,0 +1,39 @@
+{
+  "job_id": 85,
+  "stage": "published",
+  "news_id": 62772,
+  "title": "给餐厅供了43年鸡的公司，现在要进你家冰箱",
+  "article_url": "https://www.foodtalks.cn/news/62772",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=853b5705849ad4fa7c64a388e640bb700363679b617066a6e47753026261f3dd0a4071b53b7c&idx=1&mid=2652933303&scene=0&sn=8491007fe80dfe8ba082d80f7ba903cb",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-10T01:44:52Z",
+  "created_at": "2026-08-10T00:43:51Z",
+  "updated_at": "2026-08-13T05:39:37Z",
+  "content_sha256": "4e9d29bb6fb7d2b70c297694a3f281b70a292fff57527666a7120de340259b74",
+  "content_html_len": 19497,
+  "h2": [
+    "一、年肉鸡养殖能力超8亿羽，增长还能从哪里来？",
+    "二、鸡肉制品进冰箱，竞争不只发生在口味上",
+    "裹粉系列：把“0反式脂肪酸”写到包装正面",
+    "香烤系列：告别人工香精、人工色素",
+    "轻食系列：让做法更低负担",
+    "三、传统农业巨头做品牌，从0开始积累优势",
+    "四、从海外引种到输出种源，一只鸡的主动权在变化",
+    "五、养殖周期始终存在，圣农用什么穿越周期？"
+  ],
+  "h2_count": 8,
+  "p_count": 165,
+  "table_count": 0,
+  "figure_count": 14,
+  "img_count": 18,
+  "empty_p_count": 70,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 1,
+    "exists": false,
+    "msg": "不存在该资讯"
+  }
+}

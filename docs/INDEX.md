@@ -45,6 +45,7 @@
 - [领域文档读取约定](agents/domain.md)
 - [Issue tracker 约定](agents/issue-tracker.md)
 - [Triage 标签映射](agents/triage-labels.md)
+- **当前开放交接**：[最近排版稿正文错误 · 统一修复](agents/baselines/broken-layout-batch-2026-08-14/HANDOFF.md)（2026-08-14，快照已冻、尚未改代码；总表 `INDEX.md`）
 
 ## 历史材料
 

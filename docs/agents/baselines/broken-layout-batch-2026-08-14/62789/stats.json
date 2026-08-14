@@ -1,0 +1,42 @@
+{
+  "job_id": 93,
+  "stage": "published",
+  "news_id": 62789,
+  "title": "看完钟睒睒的53条思考，我才明白他这些年到底在坚守什么",
+  "article_url": "https://www.foodtalks.cn/news/62789",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85d587d3b1506b775077accfe02dbd83aa31801bea3e219345fdfed6b30a80b33e45ea3109d1&idx=2&mid=2652933529&scene=0&sn=fd4638c3ce9db68ad33525ebc36bf983",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-12T01:34:49Z",
+  "created_at": "2026-08-12T00:44:24Z",
+  "updated_at": "2026-08-12T01:34:50Z",
+  "content_sha256": "9e4f7b7a1a403fe86f073a66a83ac3c5e08bbbfc5b39e6232bc7a944377c7b3d",
+  "content_html_len": 19361,
+  "h2": [
+    "一、企业家思维：先做好一家企业，再带动整个产业",
+    "二、农业管理：只有做成产业，农业才有发展",
+    "三、平台与线下经济：授人予鱼，不如授人以渔",
+    "四、流量舆论：流量本身没有善恶",
+    "五、企业管理与传承：做决策，要看十年",
+    "六、茶文化：",
+    "中国的茶文化，应该走向世界",
+    "结语"
+  ],
+  "h2_count": 8,
+  "p_count": 186,
+  "table_count": 0,
+  "figure_count": 13,
+  "img_count": 17,
+  "empty_p_count": 93,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 25099,
+    "sha256": "430ecbeaa9eb6678d169870c87979942c49b849538dae9f23260d790f89c6ed8",
+    "matches_job": false,
+    "h2": 8,
+    "table": 0
+  }
+}

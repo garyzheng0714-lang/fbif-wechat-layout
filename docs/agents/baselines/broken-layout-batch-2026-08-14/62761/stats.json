@@ -1,0 +1,29 @@
+{
+  "job_id": 80,
+  "stage": "awaiting_review",
+  "news_id": 62761,
+  "title": "东莞沙拉酱大王，要去IPO了",
+  "article_url": "",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=850956d8387bb67cb7d3f3584b49a80e5ab1516c3bb7e6ecdccf212d4e6249ae73a5d2256f59&idx=3&mid=2652933251&scene=0&sn=05c241bf974d031f3dc022a089c637b4",
+  "rule_pack_id": "ft-default",
+  "published_at": "",
+  "created_at": "2026-08-08T00:39:44Z",
+  "updated_at": "2026-08-08T06:56:38Z",
+  "content_sha256": "0e34b9dc93514af25850ff5bdf916ae213d5581cdb0b574dfa246c2c6dfe9038",
+  "content_html_len": 12535,
+  "h2": [
+    "一台膨化机，磨了28年",
+    "藏在后厨里的生意经",
+    "一瓶酱背后，是门大生意"
+  ],
+  "h2_count": 3,
+  "p_count": 123,
+  "table_count": 0,
+  "figure_count": 3,
+  "img_count": 7,
+  "empty_p_count": 57,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ]
+}

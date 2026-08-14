@@ -1,0 +1,37 @@
+{
+  "job_id": 95,
+  "stage": "published",
+  "news_id": 62794,
+  "title": "印尼博士创业，把家乡“穷人食物”卖成英国第一",
+  "article_url": "https://www.foodtalks.cn/news/62794",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85ed8571df1626f1017c102574b9c227490b4c8b5f3aec873f78d0c80fb307289467b6ea8e80&idx=1&mid=2652933680&scene=0&sn=512fabeba6f120477870a83ad952a008",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-13T00:57:18Z",
+  "created_at": "2026-08-13T00:46:54Z",
+  "updated_at": "2026-08-13T14:03:37Z",
+  "content_sha256": "8c778c88ce45bb7a081dadd99184a50670c185f29ffb4877322308c62f80624d",
+  "content_html_len": 23664,
+  "h2": [
+    "一、一次随机分组，给Better Nature组出了基本盘",
+    "二、印尼“穷人食物”，Better Nature如何在英国重做一遍",
+    "三、小众品类，跑进主流超市"
+  ],
+  "h2_count": 3,
+  "p_count": 199,
+  "table_count": 0,
+  "figure_count": 15,
+  "img_count": 19,
+  "empty_p_count": 83,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 23664,
+    "sha256": "8c778c88ce45bb7a081dadd99184a50670c185f29ffb4877322308c62f80624d",
+    "matches_job": true,
+    "h2": 3,
+    "table": 0
+  }
+}

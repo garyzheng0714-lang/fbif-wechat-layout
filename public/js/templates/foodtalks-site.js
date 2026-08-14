@@ -432,9 +432,12 @@ function imageWidthOptions(config = {}) {
   const imgCfg = (config && config.image) || {};
   return {
     portrait: Number(imgCfg.portrait_px) || 375,
+    portraitMin: Number(imgCfg.portrait_min_px) || 300,
     landscape: Number(imgCfg.landscape_px) || 600,
     qr: Number(imgCfg.qr_px) || 150,
-    qrMaxNatural: Number(imgCfg.qr_max_natural_px) || 500,
+    qrMaxNatural: Number(imgCfg.qr_max_natural_px) || 300,
+    long: Number(imgCfg.long_px) || 400,
+    longMinRatio: Number(imgCfg.long_min_ratio) || 1.7,
   };
 }
 
@@ -465,7 +468,10 @@ function renderedImageWidth(naturalWidth, naturalHeight, config = {}, elem = {})
       if (displayPct > 0 && displayPct <= qrMaxDisplayPct && aspect >= 0.85 && aspect <= 1.18) {
         return opts.qr;
       }
-      if (aspect <= 1) return Math.round(opts.portrait * aspect);
+      // aspect = 宽/高：长图（高/宽 ≥ longMinRatio）与 adaptiveImageWidth 同口径，固定可读宽度；
+      // 竖图同样吃 portraitMin 下限
+      if (aspect > 0 && 1 / aspect >= opts.longMinRatio) return opts.long;
+      if (aspect <= 1) return Math.max(Math.round(opts.portrait * aspect), opts.portraitMin);
       return opts.landscape;
     }
   }

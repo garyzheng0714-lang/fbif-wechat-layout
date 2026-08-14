@@ -1,0 +1,37 @@
+{
+  "job_id": 76,
+  "stage": "published",
+  "news_id": 62757,
+  "title": "桂格×奈雪燕麦酸奶昔爆单，燕麦3.0功能时代来了？",
+  "article_url": "https://www.foodtalks.cn/news/62757",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=8539273397c5061e8b07cfb382e2de8a3659ae910931eb8f2f267f1ebb60b577520a2eb144c2&idx=1&mid=2652932997&scene=0&sn=8734cdfa266fc3d5223a4f0684527eb7",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-07T01:39:05Z",
+  "created_at": "2026-08-07T01:08:31Z",
+  "updated_at": "2026-08-13T05:39:33Z",
+  "content_sha256": "f41b1873da89eff2f2c4a868640d5ed92ddd0a0084760f0af8652b09ea2d24d8",
+  "content_html_len": 11009,
+  "h2": [
+    "一杯“燕麦酸奶昔”，如何同时满足口味与功能？",
+    "桂格发酵燕麦：一杯燕麦酸奶昔的“灵魂”",
+    "结语"
+  ],
+  "h2_count": 3,
+  "p_count": 95,
+  "table_count": 0,
+  "figure_count": 6,
+  "img_count": 10,
+  "empty_p_count": 39,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 11009,
+    "sha256": "f41b1873da89eff2f2c4a868640d5ed92ddd0a0084760f0af8652b09ea2d24d8",
+    "matches_job": true,
+    "h2": 3,
+    "table": 0
+  }
+}

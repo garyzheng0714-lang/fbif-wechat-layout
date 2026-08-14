@@ -1,0 +1,29 @@
+{
+  "job_id": 99,
+  "stage": "awaiting_review",
+  "news_id": 62798,
+  "title": "中国人的“香气自由”，是靠东方树叶“向上卷”出来的",
+  "article_url": "",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=853bcbe290929279af58003efcec3aee961e5b91599ca6cd7a5f931b1ef2bfa1985468d3616a&idx=2&mid=2652933765&scene=0&sn=8dced4b76fede5ee86567d93e063c1cc",
+  "rule_pack_id": "ft-default",
+  "published_at": "",
+  "created_at": "2026-08-14T00:45:32Z",
+  "updated_at": "2026-08-14T00:54:19Z",
+  "content_sha256": "86f1803af84322e433c724e5d68dbf4f5db66af24201c793f73d434701c6780f",
+  "content_html_len": 11102,
+  "h2": [
+    "茉莉花茶，一香难求的“人间第一香”",
+    "从广西横州开始的“香气平权”",
+    "瓶装茉莉花茶正在实现全民“香气自由”"
+  ],
+  "h2_count": 3,
+  "p_count": 90,
+  "table_count": 0,
+  "figure_count": 8,
+  "img_count": 12,
+  "empty_p_count": 40,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ]
+}

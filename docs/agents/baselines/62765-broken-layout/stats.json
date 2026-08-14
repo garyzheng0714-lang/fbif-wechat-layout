@@ -1,0 +1,1207 @@
+{
+  "captured_at": "2026-08-14T09:10:12+08:00",
+  "source_page": "https://www.foodtalks.cn/news/62765",
+  "wechat_source": "https://mp.weixin.qq.com/s/ZnUnyvgbIxj2xuUeBxpjWQ",
+  "label": "broken-layout-snapshot",
+  "note": "用户指定为排版有问题的已发布稿。保存时未改线上内容。任务 #81 / FoodTalks 62765 / 伊藤园。",
+  "live_dom": {
+    "root": "#article-content",
+    "child_count": 573,
+    "html_length": 51978,
+    "text_length": 17573,
+    "h2_in_page": 23,
+    "p_count": 557,
+    "img_count": 24,
+    "tag_counts": {
+      "a": 16,
+      "br": 246,
+      "em": 5,
+      "figcaption": 16,
+      "figure": 20,
+      "h2": 14,
+      "img": 24,
+      "p": 557,
+      "span": 83,
+      "strong": 23
+    },
+    "style_buckets": {
+      "12px|rgb(136, 136, 136)|normal|400|center": 18,
+      "14px|rgb(127, 127, 127)|italic|400|justify": 1,
+      "14px|rgb(127, 127, 127)|italic|400|left": 2,
+      "14px|rgb(136, 136, 136)|italic|400|justify": 1,
+      "16px|rgb(1, 57, 106)|normal|700|justify": 1,
+      "16px|rgb(136, 136, 136)|normal|400|justify": 59,
+      "16px|rgb(51, 51, 51)|normal|400|center": 16,
+      "16px|rgb(51, 51, 51)|normal|400|justify": 450,
+      "16px|rgb(51, 51, 51)|normal|400|left": 7,
+      "20px|rgb(1, 57, 106)|normal|400|left": 2
+    }
+  },
+  "cms": {
+    "http": 200,
+    "endpoint": "https://api-we.foodtalks.cn/news/news/62765?language=ZH",
+    "content_length": 51987,
+    "content_sha256": "1861553511bef15c8f6bfc67dac774697e4d6c06fea09c1db7217bef5e19cb47",
+    "data_keys": [
+      "id",
+      "title",
+      "language",
+      "coverImg",
+      "sourceType",
+      "sourceId",
+      "sourceName",
+      "author",
+      "summary",
+      "content",
+      "toc",
+      "imgPreviewEnable",
+      "commentEnable",
+      "newsTags",
+      "newsStatistics",
+      "favorited",
+      "liked",
+      "isPublic",
+      "seoTitle",
+      "seoKeywords",
+      "seoDescription",
+      "publishTime",
+      "primaryCategory"
+    ],
+    "meta": {
+      "author": "FBIF",
+      "commentEnable": 1,
+      "coverImg": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/5be6068b6f1f.png",
+      "favorited": false,
+      "id": 62765,
+      "imgPreviewEnable": true,
+      "isPublic": true,
+      "language": "ZH",
+      "liked": false,
+      "newsStatistics": {
+        "commentCount": 1,
+        "favoriteCount": 0,
+        "likeCount": 0,
+        "newsId": 62765,
+        "shareCount": 0,
+        "uvCount": 323,
+        "viewCount": 359
+      },
+      "newsTags": [],
+      "primaryCategory": {
+        "categoryTagId": 52,
+        "categoryTagName": "独家专栏",
+        "categoryTypeId": 8,
+        "childCategory": null,
+        "isPrimary": 1,
+        "tagCode": "exclusives"
+      },
+      "publishTime": "2026-08-09 08:39:33",
+      "seoDescription": "",
+      "seoKeywords": "",
+      "seoTitle": "连续58年日本茶叶第一，年销17.6亿，伊藤园如何成为全球绿茶之王？-FoodTalks全球食品资讯",
+      "sourceId": 7632,
+      "sourceName": "FBIF食品饮料创新",
+      "sourceType": 0,
+      "summary": "连续58年日本茶叶第一，伊藤园靠什么成为全球绿茶之王？",
+      "title": "连续58年日本茶叶第一，年销17.6亿，伊藤园如何成为全球绿茶之王？",
+      "toc": ""
+    },
+    "tables": 0,
+    "article_h2": [
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e93\">两个卖车的，发现茶叶比什么都好卖</h2>",
+        "i": 0,
+        "text": "两个卖车的，发现茶叶比什么都好卖"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e107\">把茶叶装进袋子，直接送进超市</h2>",
+        "i": 1,
+        "text": "把茶叶装进袋子，直接送进超市"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e117\">一台咖啡包装机，改变了日本茶叶的命运</h2>",
+        "i": 2,
+        "text": "一台咖啡包装机，改变了日本茶叶的命运"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e130\">世界第一款罐装乌龙茶、罐装绿茶、PET瓶装绿茶</h2>",
+        "i": 3,
+        "text": "世界第一款罐装乌龙茶、罐装绿茶、PET瓶装绿茶"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e153\">买下日本四分之一的荒茶</h2>",
+        "i": 4,
+        "text": "买下日本四分之一的荒茶"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e176\">去澳大利亚种茶</h2>",
+        "i": 5,
+        "text": "去澳大利亚种茶"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e196\">从7个人到3500人的销售队伍</h2>",
+        "i": 6,
+        "text": "从7个人到3500人的销售队伍"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e217\">茶的百科书，还有儿童版</h2>",
+        "i": 7,
+        "text": "茶的百科书，还有儿童版"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e244\">3413亿营收，茶叶375亿：透视茶叶需求的变迁</h2>",
+        "i": 8,
+        "text": "3413亿营收，茶叶375亿：透视茶叶需求的变迁"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e245\">表格注释</h2>",
+        "i": 9,
+        "text": "表格注释"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e257\">第一个问题：茶饮料碾压茶叶了吗？</h2>",
+        "i": 10,
+        "text": "第一个问题：茶饮料碾压茶叶了吗？"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e279\">第四个问题：茶饮料会不会取代茶叶？</h2>",
+        "i": 11,
+        "text": "第四个问题：茶饮料会不会取代茶叶？"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e287\">59款茶</h2>",
+        "i": 12,
+        "text": "59款茶"
+      },
+      {
+        "html": "<h2 style=\"text-align: justify;\" data-cursor-ref=\"e318\">喂，喝茶</h2>",
+        "i": 13,
+        "text": "喂，喝茶"
+      }
+    ],
+    "gray_paragraph_count": 81,
+    "gray_paragraphs": [
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "14px",
+        "fontStyle": "italic",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e79\"><em><span style=\"font-size: 14px; color: #888888;\">作者：Mote莫特</span></em></p>",
+        "idx": 0,
+        "text": "作者：Mote莫特"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e80\"><span style=\"font-size: 12px; color: #888888;\">伊藤园的四种茶产品：一番摘散装绿茶、宇治抹茶入三角茶包、速溶焙茶粉、冷泡烘焙麦茶包</span></p>",
+        "idx": 2,
+        "text": "伊藤园的四种茶产品：一番摘散装绿茶、宇治抹茶入三角茶包、速溶焙茶粉、冷泡烘焙麦茶包"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e108\"><span style=\"font-size: 12px; color: #888888;\">伊藤园首创的真空双层包装煎茶“寿”与“深緑”</span></p>",
+        "idx": 55,
+        "text": "伊藤园首创的真空双层包装煎茶“寿”与“深緑”"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e118\"><span style=\"font-size: 12px; color: #888888;\">伊藤园静冈建相良工厂</span></p>",
+        "idx": 73,
+        "text": "伊藤园静冈建相良工厂"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e131\"><span style=\"font-size: 12px; color: #888888;\">世界上第一款罐装绿茶：罐装煎茶</span></p>",
+        "idx": 97,
+        "text": "世界上第一款罐装绿茶：罐装煎茶"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e147\"><span style=\"font-size: 12px; color: #888888;\">“Oi Ocha”（喂，茶）600ml PET瓶装绿茶</span></p>",
+        "idx": 129,
+        "text": "“Oi Ocha”（喂，茶）600ml PET瓶装绿茶"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e154\"><span style=\"font-size: 12px; color: #888888;\">伊藤园的“新产地事业”：荒废农地被改造为大规模机械化茶园</span></p>",
+        "idx": 141,
+        "text": "伊藤园的“新产地事业”：荒废农地被改造为大规模机械化茶园"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e155\"><span style=\"font-size: 12px; color: #888888;\">伊藤园“お〜いお茶”（Oi Ocha）契约茶园</span></p>",
+        "idx": 143,
+        "text": "伊藤园“お〜いお茶”（Oi Ocha）契约茶园"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e177\"><span style=\"font-size: 12px; color: #888888;\">伊藤园澳大利亚茶园</span></p>",
+        "idx": 185,
+        "text": "伊藤园澳大利亚茶园"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e197\"><span style=\"font-size: 12px; color: #888888;\">伊藤园路线销售员</span></p>",
+        "idx": 223,
+        "text": "伊藤园路线销售员"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e218\"><span style=\"font-size: 12px; color: #888888;\">茶百科 网站</span></p>",
+        "idx": 263,
+        "text": "茶百科 网站"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e219\"><span style=\"font-size: 12px; color: #888888;\">网址：www.ocha.tv</span></p>",
+        "idx": 264,
+        "text": "网址：www.ocha.tv"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e229\"><span style=\"font-size: 12px; color: #888888;\">茶百科 儿童版</span></p>",
+        "idx": 284,
+        "text": "茶百科 儿童版"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e230\"><span style=\"font-size: 12px; color: #888888;\">网址：www.ocha.tv/kids/</span></p>",
+        "idx": 285,
+        "text": "网址：www.ocha.tv/kids/"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e237\"><span style=\"font-size: 12px; color: #888888;\">抹茶工坊</span></p>",
+        "idx": 299,
+        "text": "抹茶工坊"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e274\"><span style=\"font-size: 12px; color: #888888;\">“Oi Ocha”（喂～茶）无糖抹茶粉，30克，国产抹茶100%</span></p>",
+        "idx": 368,
+        "text": "“Oi Ocha”（喂～茶）无糖抹茶粉，30克，国产抹茶100%"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e288\"><span style=\"font-size: 12px; color: #888888;\">Oi Ocha即溶绿茶粉、Oi Ocha抹茶绿茶茶包、一番摘Oi Ocha散茶</span></p>",
+        "idx": 392,
+        "text": "Oi Ocha即溶绿茶粉、Oi Ocha抹茶绿茶茶包、一番摘Oi Ocha散茶"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e308\"><span style=\"font-size: 12px; color: #888888;\">万历之昔（万暦の昔）抹茶，30克</span></p>",
+        "idx": 432,
+        "text": "万历之昔（万暦の昔）抹茶，30克"
+      },
+      {
+        "align": "center",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "12px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: center;\" data-cursor-ref=\"e312\"><span style=\"font-size: 12px; color: #888888;\">古都之月（Koto no Tsuki）抹茶， 20克</span></p>",
+        "idx": 440,
+        "text": "古都之月（Koto no Tsuki）抹茶， 20克"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e334\"><span style=\"color: #888888;\">参考来源：</span></p>",
+        "idx": 484,
+        "text": "参考来源："
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e335\"><span style=\"color: #888888;\">[1] 2026年４月期 決算説明会資料，2026-06-02，伊藤園</span></p>",
+        "idx": 485,
+        "text": "[1] 2026年４月期 決算説明会資料，2026-06-02，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e336\"><span style=\"color: #888888;\">—披露单体销售额、茶叶业务增速及海外茶包销量</span></p>",
+        "idx": 486,
+        "text": "—披露单体销售额、茶叶业务增速及海外茶包销量"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e337\"><span style=\"color: #888888;\">[2] 伊藤園 統合レポート 2025，2025-10-30，伊藤園</span></p>",
+        "idx": 487,
+        "text": "[2] 伊藤園 統合レポート 2025，2025-10-30，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e338\"><span style=\"color: #888888;\">—披露家庭绿茶叶市场规模、伊藤园份额及海外业务数据</span></p>",
+        "idx": 488,
+        "text": "—披露家庭绿茶叶市场规模、伊藤园份额及海外业务数据"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e339\"><span style=\"color: #888888;\">[3] Climate＆Natureレポート2026，2026-07，伊藤園</span></p>",
+        "idx": 489,
+        "text": "[3] Climate＆Natureレポート2026，2026-07，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e340\"><span style=\"color: #888888;\">—确认伊藤园采购日本约四分之一荒茶及茶产地育成面积</span></p>",
+        "idx": 490,
+        "text": "—确认伊藤园采购日本约四分之一荒茶及茶产地育成面积"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e341\"><span style=\"color: #888888;\">[4] 茶をめぐる情勢，2026-07，农林水产省</span></p>",
+        "idx": 491,
+        "text": "[4] 茶をめぐる情勢，2026-07，农林水产省"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e342\"><span style=\"color: #888888;\">—提供日本茶叶生产、消费、价格及出口数据</span></p>",
+        "idx": 492,
+        "text": "—提供日本茶叶生产、消费、价格及出口数据"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e343\"><span style=\"color: #888888;\">[5] 2024年４月期 上半期 決算説明会資料，2023-12，伊藤園</span></p>",
+        "idx": 493,
+        "text": "[5] 2024年４月期 上半期 決算説明会資料，2023-12，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e344\"><span style=\"color: #888888;\">—确认高价格带绿茶茶包份额95%、即溶绿茶份额73%</span></p>",
+        "idx": 494,
+        "text": "—确认高价格带绿茶茶包份额95%、即溶绿茶份额73%"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e345\"><span style=\"color: #888888;\">[6] 2025年4月期 上半期 決算説明会資料，2024-12-02，伊藤園</span></p>",
+        "idx": 495,
+        "text": "[6] 2025年4月期 上半期 決算説明会資料，2024-12-02，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e346\"><span style=\"color: #888888;\">—披露绿茶饮料份额36%及家庭绿茶叶份额31%</span></p>",
+        "idx": 496,
+        "text": "—披露绿茶饮料份额36%及家庭绿茶叶份额31%"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e347\"><span style=\"color: #888888;\">[7] 個人投資家の皆さまへ，伊藤園（官方网站）</span></p>",
+        "idx": 497,
+        "text": "[7] 個人投資家の皆さまへ，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e348\"><span style=\"color: #888888;\">—介绍罐装绿茶开发试验、家庭茶叶市场地位及海外布局</span></p>",
+        "idx": 498,
+        "text": "—介绍罐装绿茶开发试验、家庭茶叶市场地位及海外布局"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e349\"><span style=\"color: #888888;\">[8] 伊藤園のあゆみ，伊藤園（官方网站）</span></p>",
+        "idx": 499,
+        "text": "[8] 伊藤園のあゆみ，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e350\"><span style=\"color: #888888;\">[9] 沿革，伊藤園（官方网站）</span></p>",
+        "idx": 500,
+        "text": "[9] 沿革，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e351\"><span style=\"color: #888888;\">—按年份列出公司、产品、工厂及海外发展节点</span></p>",
+        "idx": 501,
+        "text": "—按年份列出公司、产品、工厂及海外发展节点"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e352\"><span style=\"color: #888888;\">[10] Making Japanese tea a big business: The transformation of ITO EN since the 1960s，2022-07-05，Shashi: The Journal of Japanese Business and Company History</span></p>",
+        "idx": 502,
+        "text": "[10] Making Japanese tea a big business: The transformation of ITO EN since the 1960s，2022-07-05，Shashi: The Journal of "
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e353\"><span style=\"color: #888888;\">—分析伊藤园将传统茶业转变为品牌消费品业务的过程</span></p>",
+        "idx": 503,
+        "text": "—分析伊藤园将传统茶业转变为品牌消费品业务的过程"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e354\"><span style=\"color: #888888;\">[11] ITO EN, LTD。，2013，Porter Prize</span></p>",
+        "idx": 504,
+        "text": "[11] ITO EN, LTD。，2013，Porter Prize"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e355\"><span style=\"color: #888888;\">—分析伊藤园的路线销售、委托生产和茶产地育成体系</span></p>",
+        "idx": 505,
+        "text": "—分析伊藤园的路线销售、委托生产和茶产地育成体系"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e356\"><span style=\"color: #888888;\">[12] 伊藤園会長・本庄八郎氏「『お～いお茶』を世界共通言語に」，2023-11-09，財界オンライン</span></p>",
+        "idx": 506,
+        "text": "[12] 伊藤園会長・本庄八郎氏「『お～いお茶』を世界共通言語に」，2023-11-09，財界オンライン"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e357\"><span style=\"color: #888888;\">—本庄八郎回顾创业、路线销售及公司名称由来</span></p>",
+        "idx": 507,
+        "text": "—本庄八郎回顾创业、路线销售及公司名称由来"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e358\"><span style=\"color: #888888;\">[13] 会長から名誉会長に就任 伊藤園・本庄八郎が語る〝緑茶人生〟，2024-09-23，財界オンライン</span></p>",
+        "idx": 508,
+        "text": "[13] 会長から名誉会長に就任 伊藤園・本庄八郎が語る〝緑茶人生〟，2024-09-23，財界オンライン"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e359\"><span style=\"color: #888888;\">—本庄八郎回顾罐装乌龙茶与罐装绿茶的开发</span></p>",
+        "idx": 509,
+        "text": "—本庄八郎回顾罐装乌龙茶与罐装绿茶的开发"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e360\"><span style=\"color: #888888;\">[14] 伊藤園 統合レポート2021，2021，伊藤園</span></p>",
+        "idx": 510,
+        "text": "[14] 伊藤園 統合レポート2021，2021，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e361\"><span style=\"color: #888888;\">—披露约3500名销售员、196个销售据点及Voice制度</span></p>",
+        "idx": 511,
+        "text": "—披露约3500名销售员、196个销售据点及Voice制度"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e362\"><span style=\"color: #888888;\">[15] サステナビリティデータ，伊藤園（官方网站）</span></p>",
+        "idx": 512,
+        "text": "[15] サステナビリティデータ，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e363\"><span style=\"color: #888888;\">—披露茶叶处理量及14187件员工提案</span></p>",
+        "idx": 513,
+        "text": "—披露茶叶处理量及14187件员工提案"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e364\"><span style=\"color: #888888;\">[16] 新卒採用2027｜WORK｜職種紹介，伊藤園（官方网站）</span></p>",
+        "idx": 514,
+        "text": "[16] 新卒採用2027｜WORK｜職種紹介，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e365\"><span style=\"color: #888888;\">—介绍路线销售及营业事务岗位的一日工作流程</span></p>",
+        "idx": 515,
+        "text": "—介绍路线销售及营业事务岗位的一日工作流程"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e366\"><span style=\"color: #888888;\">[17] 新卒採用2027｜INTERVIEW｜白水 智也，伊藤園（官方网站）</span></p>",
+        "idx": 516,
+        "text": "[17] 新卒採用2027｜INTERVIEW｜白水 智也，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e367\"><span style=\"color: #888888;\">—介绍员工提案转化为产品的案例</span></p>",
+        "idx": 517,
+        "text": "—介绍员工提案转化为产品的案例"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e368\"><span style=\"color: #888888;\">[18] 埼玉県入間地区で“新産地事業”の展開を本格始動，2022-04-05，伊藤園</span></p>",
+        "idx": 518,
+        "text": "[18] 埼玉県入間地区で“新産地事業”の展開を本格始動，2022-04-05，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e369\"><span style=\"color: #888888;\">—确认伊藤园第七座专用荒茶工厂投入运行</span></p>",
+        "idx": 519,
+        "text": "—确认伊藤园第七座专用荒茶工厂投入运行"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e370\"><span style=\"color: #888888;\">[19] 持続可能な農業・サプライチェーンの構築，伊藤園（官方网站）</span></p>",
+        "idx": 520,
+        "text": "[19] 持続可能な農業・サプライチェーンの構築，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e371\"><span style=\"color: #888888;\">—介绍日本及澳大利亚的茶产地育成事业</span></p>",
+        "idx": 521,
+        "text": "—介绍日本及澳大利亚的茶产地育成事业"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e372\"><span style=\"color: #888888;\">[20] Growing Green Tea in Victoria, Australia，Tea Epicure</span></p>",
+        "idx": 522,
+        "text": "[20] Growing Green Tea in Victoria, Australia，Tea Epicure"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e373\"><span style=\"color: #888888;\">—实地记录澳大利亚茶园、鲜叶运输及荒茶加工</span></p>",
+        "idx": 523,
+        "text": "—实地记录澳大利亚茶园、鲜叶运输及荒茶加工"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e374\"><span style=\"color: #888888;\">[21] ITO EN Australia，2020，Sullair</span></p>",
+        "idx": 524,
+        "text": "[21] ITO EN Australia，2020，Sullair"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e375\"><span style=\"color: #888888;\">—介绍伊藤园澳大利亚茶包工厂及生产流程</span></p>",
+        "idx": 525,
+        "text": "—介绍伊藤园澳大利亚茶包工厂及生产流程"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e376\"><span style=\"color: #888888;\">[22] Matcha Market Size, Share And Growth Report, 2026-2033，2026，Grand View Research</span></p>",
+        "idx": 526,
+        "text": "[22] Matcha Market Size, Share And Growth Report, 2026-2033，2026，Grand View Research"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e377\"><span style=\"color: #888888;\">—估算全球广义抹茶市场规模及增长趋势</span></p>",
+        "idx": 527,
+        "text": "—估算全球广义抹茶市场规模及增长趋势"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e378\"><span style=\"color: #888888;\">[23] 農中総研Webセミナー講演資料『抹茶ブームと煎茶高騰 転換期にある茶の未来を考える』，2026-05-14，農林中金総合研究所</span></p>",
+        "idx": 528,
+        "text": "[23] 農中総研Webセミナー講演資料『抹茶ブームと煎茶高騰 転換期にある茶の未来を考える』，2026-05-14，農林中金総合研究所"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e379\"><span style=\"color: #888888;\">—分析抹茶需求、煎茶价格及日本茶叶生产结构变化</span></p>",
+        "idx": 529,
+        "text": "—分析抹茶需求、煎茶价格及日本茶叶生产结构变化"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e380\"><span style=\"color: #888888;\">[24] 緑茶･抹茶製品の価格改定に関するお知らせ，2025-07-31，伊藤園</span></p>",
+        "idx": 530,
+        "text": "[24] 緑茶･抹茶製品の価格改定に関するお知らせ，2025-07-31，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e381\"><span style=\"color: #888888;\">—确认19款抹茶产品涨价48.8%至100%</span></p>",
+        "idx": 531,
+        "text": "—确认19款抹茶产品涨价48.8%至100%"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e382\"><span style=\"color: #888888;\">[25] 海外のトレンドから着想を得た新ジャンルの日本茶「お～いお茶 PURE GREEN」「同 LEMON GREEN」を、3月17日（月）に新発売，2025-03-12，伊藤園</span></p>",
+        "idx": 532,
+        "text": "[25] 海外のトレンドから着想を得た新ジャンルの日本茶「お～いお茶 PURE GREEN」「同 LEMON GREEN」を、3月17日（月）に新発売，2025-03-12，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e383\"><span style=\"color: #888888;\">—确认“お～いお茶”累计销量450亿瓶及吉尼斯世界纪录口径</span></p>",
+        "idx": 533,
+        "text": "—确认“お～いお茶”累计销量450亿瓶及吉尼斯世界纪录口径"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e384\"><span style=\"color: #888888;\">[26] 「お～いお茶」リーフ製品シリーズを、9月下旬より順次販売開始，2017-09-21，伊藤園</span></p>",
+        "idx": 534,
+        "text": "[26] 「お～いお茶」リーフ製品シリーズを、9月下旬より順次販売開始，2017-09-21，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e385\"><span style=\"color: #888888;\">—确认“お～いお茶”品牌扩展至散茶产品</span></p>",
+        "idx": 535,
+        "text": "—确认“お～いお茶”品牌扩展至散茶产品"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e386\"><span style=\"color: #888888;\">[27] お茶百科，伊藤園（官方网站）</span></p>",
+        "idx": 536,
+        "text": "[27] お茶百科，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e387\"><span style=\"color: #888888;\">[28] お茶百科キッズ，伊藤園（官方网站）</span></p>",
+        "idx": 537,
+        "text": "[28] お茶百科キッズ，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e388\"><span style=\"color: #888888;\">—确认儿童版茶百科采用假名注音及儿童化表达</span></p>",
+        "idx": 538,
+        "text": "—确认儿童版茶百科采用假名注音及儿童化表达"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e389\"><span style=\"color: #888888;\">[29] お茶の未来を共創する拠点となる複合型博物館「お茶の文化創造博物館」「お～いお茶ミュージアム」を、5月1日（水）にオープン，2024-04-11，伊藤園</span></p>",
+        "idx": 539,
+        "text": "[29] お茶の未来を共創する拠点となる複合型博物館「お茶の文化創造博物館」「お～いお茶ミュージアム」を、5月1日（水）にオープン，2024-04-11，伊藤園"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e390\"><span style=\"color: #888888;\">—介绍两座茶博物馆的定位及主要展览内容</span></p>",
+        "idx": 540,
+        "text": "—介绍两座茶博物馆的定位及主要展览内容"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e391\"><span style=\"color: #888888;\">[30] 万暦の昔（ばんれきのむかし）30g，伊藤園（官方网站）</span></p>",
+        "idx": 541,
+        "text": "[30] 万暦の昔（ばんれきのむかし）30g，伊藤園（官方网站）"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(136, 136, 136)",
+        "fontSize": "16px",
+        "fontStyle": "normal",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e392\"><span style=\"color: #888888;\">—确认产品名称、里千家家元御好及浓茶属性</span></p>",
+        "idx": 542,
+        "text": "—确认产品名称、里千家家元御好及浓茶属性"
+      },
+      {
+        "align": "justify",
+        "color": "rgb(127, 127, 127)",
+        "fontSize": "14px",
+        "fontStyle": "italic",
+        "html": "<p style=\"text-align: justify;\" data-cursor-ref=\"e394\"><em><span style=\"font-size: 14px; color: #7f7f7f;\">*本文为FBIF食品饮料创新（ID：FoodInnovation）原创<a href=\"http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&amp;chksm=85724cf9d1f98efac931860230c827374cee6c7dd5b01e2334fc26b5b17cd01c36d",
+        "idx": 545,
+        "text": "*本文为FBIF食品饮料创新（ID：FoodInnovation）原创《连续58年日本茶叶第一，年销17.6亿，伊藤园如何成为全球绿茶之王？》，不代表FoodTalks立场，转载请联系出处。"
+      },
+      {
+        "align": "left",
+        "color": "rgb(127, 127, 127)",
+        "fontSize": "14px",
+        "fontStyle": "italic",
+        "html": "<p style=\"text-align: left;\" data-cursor-ref=\"e395\"><em><span style=\"color: #7f7f7f; font-size: 14px;\">*资讯投稿与商务合作，请查看“<a style=\"text-decoration: underline; color: #105b89;\" href=\"https://www.foodtalks.cn/news/30752\" target=\"_blank\" rel=\"noopener\" data-cursor-ref=\"e28\">FoodTalks商务",
+        "idx": 546,
+        "text": "*资讯投稿与商务合作，请查看“FoodTalks商务合作方案”，并联系Bobo。"
+      },
+      {
+        "align": "left",
+        "color": "rgb(127, 127, 127)",
+        "fontSize": "14px",
+        "fontStyle": "italic",
+        "html": "<p style=\"text-align: left;\" data-cursor-ref=\"e397\"><em><span style=\"color: #7f7f7f; font-size: 14px;\">*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。</span></em></p>",
+        "idx": 551,
+        "text": "*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。"
+      }
+    ],
+    "figures": [
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/5be6068b6f1f.png\" alt=\"\" w",
+        "i": 0,
+        "text": "伊藤园的四种茶产品：一番摘散装绿茶、宇治抹茶入三角茶包、速溶焙茶粉、冷泡烘焙麦茶包"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/df9c59ab15b0.png\" alt=\"\" w",
+        "i": 1,
+        "text": ""
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/587e60cf6202.png\" alt=\"\" w",
+        "i": 2,
+        "text": "伊藤园首创的真空双层包装煎茶“寿”与“深緑”"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/30252e6badc7.png\" alt=\"\" w",
+        "i": 3,
+        "text": "伊藤园静冈建相良工厂"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/1021c803e54b.jpg\" alt=\"\" w",
+        "i": 4,
+        "text": "世界上第一款罐装绿茶：罐装煎茶"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/37530dc3f18c.png\" alt=\"\" w",
+        "i": 5,
+        "text": "“Oi Ocha”（喂，茶）600ml PET瓶装绿茶"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/5ae9b55f276d.png\" alt=\"\" w",
+        "i": 6,
+        "text": "伊藤园的“新产地事业”：荒废农地被改造为大规模机械化茶园"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/1fc477233065.png\" alt=\"\" w",
+        "i": 7,
+        "text": "伊藤园“お〜いお茶”（Oi Ocha）契约茶园"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/38910f1b1aa6.jpg\" alt=\"\" w",
+        "i": 8,
+        "text": "伊藤园澳大利亚茶园"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/107643114e22.png\" alt=\"\" w",
+        "i": 9,
+        "text": "伊藤园路线销售员"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/5fa61c2ff5c5.png\" alt=\"\" w",
+        "i": 10,
+        "text": "茶百科 网站\n\n网址：www.ocha.tv"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/4875636439fb.png\" alt=\"\" w",
+        "i": 11,
+        "text": "茶百科 儿童版\n\n网址：www.ocha.tv/kids/"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/3d2d8e097056.png\" alt=\"\" w",
+        "i": 12,
+        "text": "抹茶工坊"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/199d420316af.jpg\" alt=\"\" w",
+        "i": 13,
+        "text": ""
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/8b7b5768d482.png\" alt=\"\" w",
+        "i": 14,
+        "text": "“Oi Ocha”（喂～茶）无糖抹茶粉，30克，国产抹茶100%"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/9a72f3aa7306.png\" alt=\"\" w",
+        "i": 15,
+        "text": "Oi Ocha即溶绿茶粉、Oi Ocha抹茶绿茶茶包、一番摘Oi Ocha散茶"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/cea5f95a154f.jpg\" alt=\"\" w",
+        "i": 16,
+        "text": "万历之昔（万暦の昔）抹茶，30克"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/0e5535f83f49.png\" alt=\"\" w",
+        "i": 17,
+        "text": "古都之月（Koto no Tsuki）抹茶， 20克"
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/993b0a503eab.png\" alt=\"\" w",
+        "i": 18,
+        "text": ""
+      },
+      {
+        "className": "image",
+        "html": "<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; max-width: 100%; height: auto;\" src=\"https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/c6b39de193b4.png\" alt=\"\" w",
+        "i": 19,
+        "text": ""
+      }
+    ],
+    "images": [
+      {
+        "displayH": 392,
+        "displayW": 600,
+        "height": 705,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/5be6068b6f1f.png",
+        "width": 1080
+      },
+      {
+        "displayH": 255,
+        "displayW": 600,
+        "height": 383,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/df9c59ab15b0.png",
+        "width": 900
+      },
+      {
+        "displayH": 375,
+        "displayW": 320,
+        "height": 820,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/587e60cf6202.png",
+        "width": 700
+      },
+      {
+        "displayH": 304,
+        "displayW": 600,
+        "height": 547,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/30252e6badc7.png",
+        "width": 1080
+      },
+      {
+        "displayH": 436,
+        "displayW": 600,
+        "height": 509,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/1021c803e54b.jpg",
+        "width": 700
+      },
+      {
+        "displayH": 375,
+        "displayW": 375,
+        "height": 1080,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/37530dc3f18c.png",
+        "width": 1080
+      },
+      {
+        "displayH": 382,
+        "displayW": 600,
+        "height": 478,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/5ae9b55f276d.png",
+        "width": 750
+      },
+      {
+        "displayH": 228,
+        "displayW": 600,
+        "height": 411,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/1fc477233065.png",
+        "width": 1080
+      },
+      {
+        "displayH": 400,
+        "displayW": 600,
+        "height": 685,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/38910f1b1aa6.jpg",
+        "width": 1028
+      },
+      {
+        "displayH": 406,
+        "displayW": 600,
+        "height": 404,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/107643114e22.png",
+        "width": 597
+      },
+      {
+        "displayH": 343,
+        "displayW": 600,
+        "height": 618,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/5fa61c2ff5c5.png",
+        "width": 1080
+      },
+      {
+        "displayH": 263,
+        "displayW": 600,
+        "height": 473,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/4875636439fb.png",
+        "width": 1080
+      },
+      {
+        "displayH": 336,
+        "displayW": 600,
+        "height": 605,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/3d2d8e097056.png",
+        "width": 1080
+      },
+      {
+        "displayH": 373,
+        "displayW": 79,
+        "height": 5101,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/199d420316af.jpg",
+        "width": 1080
+      },
+      {
+        "displayH": 152,
+        "displayW": 150,
+        "height": 364,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/8b7b5768d482.png",
+        "width": 360
+      },
+      {
+        "displayH": 329,
+        "displayW": 600,
+        "height": 592,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/9a72f3aa7306.png",
+        "width": 1080
+      },
+      {
+        "displayH": 459,
+        "displayW": 600,
+        "height": 826,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/cea5f95a154f.jpg",
+        "width": 1080
+      },
+      {
+        "displayH": 480,
+        "displayW": 600,
+        "height": 576,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/0e5535f83f49.png",
+        "width": 720
+      },
+      {
+        "displayH": 186,
+        "displayW": 600,
+        "height": 335,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/993b0a503eab.png",
+        "width": 1080
+      },
+      {
+        "displayH": 169,
+        "displayW": 600,
+        "height": 304,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/c6b39de193b4.png",
+        "width": 1080
+      },
+      {
+        "displayH": 175,
+        "displayW": 600,
+        "height": 283,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/07079a66940e.webp",
+        "width": 970
+      },
+      {
+        "displayH": 267,
+        "displayW": 600,
+        "height": 445,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/7228581858fa.png",
+        "width": 1000
+      },
+      {
+        "displayH": 220,
+        "displayW": 600,
+        "height": 367,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/4bf5a74e24b4.jpg",
+        "width": 1001
+      },
+      {
+        "displayH": 27,
+        "displayW": 126,
+        "height": 90,
+        "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/6e3e531b0025.png",
+        "width": 421
+      }
+    ]
+  }
+}
