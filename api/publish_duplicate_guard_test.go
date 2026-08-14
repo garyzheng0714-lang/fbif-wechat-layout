@@ -77,3 +77,49 @@ func TestReviewPendingCardShowsDuplicateWarning(t *testing.T) {
 		t.Fatalf("无重复时不得出现提醒")
 	}
 }
+
+// 端到端：走真实 sendReviewPendingNotification（真实 store），断言同题标记被持久化。
+func TestSendReviewPendingNotificationPersistsDuplicateFlag(t *testing.T) {
+	dir := t.TempDir()
+	store := newPublishJobStore(dir + "/jobs.json")
+	job, _, err := store.create("site:dup", "https://example.test/dup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStageAwaitingReview
+		current.Title = "喜茶海外走红，大家都误解了“拙趣”"
+		current.FoodTalksNewsID = 62760
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub := &dupSearchStub{items: []foodTalksNewsListItem{{ID: 62773, Title: "喜茶海外走红，大家都误解了“拙趣”", PublishStatus: 1, SourceName: "数英"}}}
+	sentCards := 0
+	p := &publishPipeline{
+		store:     store,
+		now:       time.Now,
+		foodTalks: func() (foodTalksAPI, error) { return stub, nil },
+		notifyCard: func(ctx context.Context, card map[string]any) error {
+			sentCards++
+			raw, _ := json.Marshal(card)
+			if !strings.Contains(string(raw), "同题防重") {
+				t.Errorf("发出的卡片缺少同题提醒")
+			}
+			return nil
+		},
+	}
+	if err := p.sendReviewPendingNotification(context.Background(), job); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	stored, err := store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.SiteDuplicateNewsID != 62773 {
+		t.Fatalf("同题标记未持久化：%d", stored.SiteDuplicateNewsID)
+	}
+	if sentCards != 1 {
+		t.Fatalf("卡片应发出一次，实际 %d", sentCards)
+	}
+}
