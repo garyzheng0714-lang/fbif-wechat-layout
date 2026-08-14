@@ -84,14 +84,14 @@ func publishRulePackIDForJob(job publishJob) (string, error) {
 
 // 可配项 env（MVP 先 env/常量，绝不散落硬编码，后续进管理后台）。
 const (
-	siteCategoryIDsEnv     = "FOODTALKS_CATEGORY_IDS"
-	siteRepostCategoryIDsEnv = "FOODTALKS_REPOST_CATEGORY_IDS"
-	siteFrontURLEnv        = "FOODTALKS_FRONT_URL"
-	siteOwnAccountsEnv     = "SITE_OWN_ACCOUNTS"
-	siteAdminURLEnv        = "FOODTALKS_ADMIN_ARTICLE_URL" // readiness 用于校验 API/前台/后台目标环境一致
-	defaultSiteCategoryIDs = "52,58"                       // 原创：独家专栏（与 2026-07-10 冒烟一致；契约 §9：线上分类表待后端给全集）
-	defaultSiteRepostCategoryIDs = "53"                    // 转载：食品新闻（2026-08-14 用户裁定 + 7 月实证，独家专栏是原创专属）
-	defaultSiteFrontURL    = "https://test.foodtalks.cn"   // 默认测试环境前台；生产切换只改 env
+	siteCategoryIDsEnv           = "FOODTALKS_CATEGORY_IDS"
+	siteRepostCategoryIDsEnv     = "FOODTALKS_REPOST_CATEGORY_IDS"
+	siteFrontURLEnv              = "FOODTALKS_FRONT_URL"
+	siteOwnAccountsEnv           = "SITE_OWN_ACCOUNTS"
+	siteAdminURLEnv              = "FOODTALKS_ADMIN_ARTICLE_URL" // readiness 用于校验 API/前台/后台目标环境一致
+	defaultSiteCategoryIDs       = "52,58"                       // 原创：独家专栏（与 2026-07-10 冒烟一致；契约 §9：线上分类表待后端给全集）
+	defaultSiteRepostCategoryIDs = "53"                          // 转载：食品新闻（2026-08-14 用户裁定 + 7 月实证，独家专栏是原创专属）
+	defaultSiteFrontURL          = "https://test.foodtalks.cn"   // 默认测试环境前台；生产切换只改 env
 	// 自家账号清单（原创判定，规范文档 §1）：近一月库内 source_type=0 的全部来源名。
 	defaultSiteOwnAccounts = "FBIF食品饮料创新,FBIF食品饮料创新论坛,FoodTalks,FBIF食品创新展"
 )
