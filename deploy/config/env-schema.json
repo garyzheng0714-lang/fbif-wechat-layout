@@ -45,6 +45,7 @@
         "FOODTALKS_FRONT_URL": { "required": true, "secret": false },
         "FOODTALKS_ADMIN_ARTICLE_URL": { "required": true, "secret": false },
         "FOODTALKS_CATEGORY_IDS": { "required": true, "secret": false },
+        "FOODTALKS_REPOST_CATEGORY_IDS": { "required": false, "secret": false },
         "FOODTALKS_EXPECTED_TARGET": { "required": true, "secret": false },
         "SITE_OWN_ACCOUNTS": { "required": false, "secret": false },
         "YUNSUO_BASE_URL": { "required": true, "secret": false },
