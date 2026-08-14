@@ -154,8 +154,8 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   assert.match(workflow, /uses: actions\/setup-node@v6/);
   assert.match(workflow, /package-manager-cache: false/,
     'setup-node v6 不应依赖 packageManager 自动探测改变缓存行为');
-  assert.match(workflow, /go-version: '1\.26\.5'/,
-    '必须锁定已修复当前标准库漏洞的 Go patch 版本');
+  assert.match(workflow, /go-version: '1\.26\.6'/,
+    '必须锁定已修复当前标准库漏洞的 Go patch 版本（2026-08-14 GO-2026-6218 等 5 个 stdlib 漏洞 Fixed in 1.26.6）');
   assert.match(workflow, /npm run lint:js/);
   assert.match(workflow, /npm run test:coverage/);
   assert.match(workflow, /npm run audit:deps/);
