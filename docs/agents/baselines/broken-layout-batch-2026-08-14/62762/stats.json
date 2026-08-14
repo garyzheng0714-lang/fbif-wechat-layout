@@ -1,0 +1,41 @@
+{
+  "job_id": 79,
+  "stage": "published",
+  "news_id": 62762,
+  "title": "为什么日本人天天吃预制食品？包装设计扮演了什么角色？",
+  "article_url": "https://www.foodtalks.cn/news/62762",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85174197278b3f052af906212c7484f2d616d768eb374f053fcd10640339ff8c4b3104b1321d&idx=1&mid=2652933251&scene=0&sn=1a932f607a53ca8c7a29926422d4c7eb",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-09T06:38:20Z",
+  "created_at": "2026-08-08T00:39:34Z",
+  "updated_at": "2026-08-09T06:38:21Z",
+  "content_sha256": "eaedea5b07115b46fdb4966c7373d72bea1b89921a6d360f55769ae255d2b0d5",
+  "content_html_len": 16030,
+  "h2": [
+    "日冷食品：一盘炒饭的二十年包装进化",
+    "味之素：当包装变成“操作指南”",
+    "石井食品：把溯源“印”在包装上",
+    "7-Eleven：当“供应链”成为包装背后的基础设施",
+    "NIPPN：一盘冷冻餐盘，包装就是“套餐架构师”",
+    "味之素Aete：一个纸碗，打通两个市场",
+    "PackHorizon 判断视角"
+  ],
+  "h2_count": 7,
+  "p_count": 127,
+  "table_count": 0,
+  "figure_count": 7,
+  "img_count": 11,
+  "empty_p_count": 52,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 22913,
+    "sha256": "1319401649e87d4850591c9830d25a2c0375d5840afa43a4e337c01f234622bd",
+    "matches_job": false,
+    "h2": 7,
+    "table": 0
+  }
+}

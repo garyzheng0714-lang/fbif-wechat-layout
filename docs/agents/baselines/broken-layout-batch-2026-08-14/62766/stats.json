@@ -1,0 +1,35 @@
+{
+  "job_id": 84,
+  "stage": "published",
+  "news_id": 62766,
+  "title": "Five Guys创始人专访：一切都是5个儿子和妻子在打理，绝不会与麦当劳正面竞争",
+  "article_url": "https://www.foodtalks.cn/news/62766",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=8565479e9742e4ace7d10ccc459fc2f049ab75df14812f13dbc9225fbaee9deadfb0a31a7bd4&idx=3&mid=2652933295&scene=0&sn=80e6bce30207f24631859ce02b4a9318",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-10T01:45:04Z",
+  "created_at": "2026-08-09T00:39:39Z",
+  "updated_at": "2026-08-10T01:45:05Z",
+  "content_sha256": "600fa0ae479a2f3add5a0755999fc3e0cc78a43f8efd74b0dce6c0e378e17298",
+  "content_html_len": 12045,
+  "h2": [
+    "创业灵感",
+    "食材故事",
+    "家族企业",
+    "不想退休"
+  ],
+  "h2_count": 4,
+  "p_count": 100,
+  "table_count": 0,
+  "figure_count": 7,
+  "img_count": 11,
+  "empty_p_count": 45,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 1,
+    "exists": false,
+    "msg": "不存在该资讯"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "job_id": 78,
+  "stage": "awaiting_review",
+  "news_id": 62760,
+  "title": "喜茶海外走红，大家都误解了“拙趣”",
+  "article_url": "",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=857a7226e6e36f39635a4d33303a56e9a472e78637db92a1acbdbca752b2f1beeb97023d534a&idx=2&mid=2652933251&scene=0&sn=27e1207176c4504d2a437f41fa3955a9",
+  "rule_pack_id": "ft-default",
+  "published_at": "",
+  "created_at": "2026-08-08T00:39:34Z",
+  "updated_at": "2026-08-08T03:20:15Z",
+  "content_sha256": "bbe78d113d1f87b9d1ab25e7d5226c6d3a309d2b32178f4045bbe6cef20012e7",
+  "content_html_len": 19740,
+  "h2": [
+    "424篇帖子，积累起9.4万粉丝",
+    "今年连续出现大爆款，最高播放量达540万",
+    "离开本土语境，喜茶的小片更会玩了",
+    "庆祝新年，庆祝红色",
+    "▽ 原产地，有了新的讲法",
+    "▽ 产品创意，更是灵感迸发",
+    "▽ 介绍门店开业，喜茶的灵感从不重复",
+    "活动越来越像游戏，更想玩了",
+    "网友特供“牛马系列”",
+    "“拙”是识别符号，“趣”才是传播机制"
+  ],
+  "h2_count": 10,
+  "p_count": 176,
+  "table_count": 0,
+  "figure_count": 20,
+  "img_count": 24,
+  "empty_p_count": 83,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ]
+}

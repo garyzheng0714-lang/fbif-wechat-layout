@@ -1,0 +1,28 @@
+{
+  "job_id": 98,
+  "stage": "awaiting_review",
+  "news_id": 62797,
+  "title": "金粒门和一栗：离“喜茶”近，离“鸣鸣很忙”远",
+  "article_url": "",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85cf7d18d3037c9cf38c9525ce4546e8a10d99056d670881da6ed3372f2643c31633029276e9&idx=3&mid=2652933765&scene=0&sn=6233105344c9e1794e8dabcf2d0096ef",
+  "rule_pack_id": "ft-default",
+  "published_at": "",
+  "created_at": "2026-08-14T00:45:27Z",
+  "updated_at": "2026-08-14T00:53:12Z",
+  "content_sha256": "9bade10df838f699974f5722f3178902d743c7351ea00a33dc32b7116d65f389",
+  "content_html_len": 9744,
+  "h2": [
+    "两种“向往的生活”",
+    "等待“苹果”落地"
+  ],
+  "h2_count": 2,
+  "p_count": 100,
+  "table_count": 0,
+  "figure_count": 3,
+  "img_count": 7,
+  "empty_p_count": 46,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ]
+}

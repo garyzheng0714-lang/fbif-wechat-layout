@@ -1,0 +1,30 @@
+{
+  "job_id": 97,
+  "stage": "awaiting_review",
+  "news_id": 62799,
+  "title": "不贷款、不上市，他靠一根吸管做到全球第一",
+  "article_url": "",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=854fb757987a990ee96ccb9ff97b0bffb478c427128aeff89ebcafd6ea550953ed9b36111998&idx=1&mid=2652933765&scene=0&sn=07ae77f8e7a9394b040d222f4185c70a",
+  "rule_pack_id": "ft-default",
+  "published_at": "",
+  "created_at": "2026-08-14T00:45:26Z",
+  "updated_at": "2026-08-14T00:54:51Z",
+  "content_sha256": "bf71e24b8af37c15d5b1403d1d3017a1eff163ea8167fee735cb4150aeecc208",
+  "content_html_len": 18983,
+  "h2": [
+    "父亲的一巴掌，商业人生第一课",
+    "筑建护城河",
+    "孤独而正确的事",
+    "走向开阔"
+  ],
+  "h2_count": 4,
+  "p_count": 175,
+  "table_count": 0,
+  "figure_count": 12,
+  "img_count": 16,
+  "empty_p_count": 77,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ]
+}

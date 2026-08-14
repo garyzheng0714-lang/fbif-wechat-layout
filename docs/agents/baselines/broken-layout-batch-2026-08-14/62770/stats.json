@@ -1,0 +1,42 @@
+{
+  "job_id": 86,
+  "stage": "published",
+  "news_id": 62770,
+  "title": "小店时代，美国第二大食品零售商克罗格为何押注“大店”？",
+  "article_url": "https://www.foodtalks.cn/news/62770",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=8578e92683d24d517ac0c48ee914e97c735d1971b5da291b176792f4276d54b9ce4e86ee7765&idx=3&mid=2652933303&scene=0&sn=d75831ed3101c562cb7ad95133541a1b",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-10T01:44:57Z",
+  "created_at": "2026-08-10T00:43:51Z",
+  "updated_at": "2026-08-10T01:44:58Z",
+  "content_sha256": "a7a5ad46435b74010a77eb0ca47118b3c29c30d525864de2fb374c6a4f5cd666",
+  "content_html_len": 17159,
+  "h2": [
+    "克罗格是谁？",
+    "克罗格如何读懂消费者？",
+    "克罗格为何押注“大店”？",
+    "第一，迎战巨头围剿",
+    "第二，打造社区生活枢纽",
+    "第三，改善利润结构",
+    "第四，建设即时零售基础设施",
+    "写在最后"
+  ],
+  "h2_count": 8,
+  "p_count": 190,
+  "table_count": 0,
+  "figure_count": 8,
+  "img_count": 12,
+  "empty_p_count": 91,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 17605,
+    "sha256": "3e05a18533709b0cd18dd2cf48d0fa246fc7122d49e3b178374338f77b3f228a",
+    "matches_job": false,
+    "h2": 4,
+    "table": 0
+  }
+}

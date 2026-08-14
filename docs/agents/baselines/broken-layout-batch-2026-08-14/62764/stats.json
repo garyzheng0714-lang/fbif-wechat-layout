@@ -1,0 +1,42 @@
+{
+  "job_id": 83,
+  "stage": "published",
+  "news_id": 62764,
+  "title": "上好佳联名老干妈；山姆上新茉莉奶白首款瓶装轻乳茶 | 创新周报",
+  "article_url": "https://www.foodtalks.cn/news/62764",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85f83818c3ac5da4093cfd6993e744cf9f4b950d3b5822336e75ce8033c0c8e6de5ac7c66aa8&idx=2&mid=2652933295&scene=0&sn=ad744579d35cfd056c0623dc6f85161d",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-10T01:45:12Z",
+  "created_at": "2026-08-09T00:39:38Z",
+  "updated_at": "2026-08-13T05:39:36Z",
+  "content_sha256": "bdb85ad34dad6927eea45bd6ebe778d39898b625a2b1dfb30e2ddbf3e7088799",
+  "content_html_len": 13136,
+  "h2": [
+    "本周创新看点",
+    "1、朝日推出微碳酸新品REFREZZ",
+    "2、冰峰推出经典玻璃瓶造型雪糕",
+    "3、上好佳联名老干妈推出风味鲜虾片和田园薯片",
+    "4、古茗推出瓶装饮料荔枝冰椰",
+    "5、九峰牧场上新薄荷巧脆卷生布丁",
+    "6、山姆上新茉莉奶白首款瓶装轻乳茶饮料",
+    "7、全家上新果子熟了季节限定「粉的柠檬汁」",
+    "8、简爱推出控糖子品牌Light系列",
+    "9、卡乐比上新“可以喝的红薯”植物饮料",
+    "10、Liquid Death推出花生酱杯口味气泡水"
+  ],
+  "h2_count": 11,
+  "p_count": 126,
+  "table_count": 0,
+  "figure_count": 11,
+  "img_count": 15,
+  "empty_p_count": 64,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 1,
+    "exists": false,
+    "msg": "不存在该资讯"
+  }
+}

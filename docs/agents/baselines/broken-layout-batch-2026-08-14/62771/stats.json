@@ -1,0 +1,40 @@
+{
+  "job_id": 87,
+  "stage": "published",
+  "news_id": 62771,
+  "title": "瑞幸爆火的「全冰去水」能被复制吗？",
+  "article_url": "https://www.foodtalks.cn/news/62771",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85cdbc30369c15913631acf8dc091e585aff4de10ebad840339d1bdb10ae28391bb81b55edab&idx=2&mid=2652933303&scene=0&sn=646d470ea1e99aaf90d9a81ea5528aca",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-10T01:44:55Z",
+  "created_at": "2026-08-10T00:45:08Z",
+  "updated_at": "2026-08-10T01:44:56Z",
+  "content_sha256": "b47d52dc660fb76f7b581dc75d05e464569670f87d12751461079b63036e516c",
+  "content_html_len": 18896,
+  "h2": [
+    "任务一：从评论潮里捞出Consumer信号",
+    "两个亮点",
+    "分析结果复盘",
+    "一些边界",
+    "任务二：从一次性Competition分析，到自动盯竞品",
+    "第一层：一次性竞品对比",
+    "第二层：定时任务，这次测试的记忆点",
+    "任务三：舆情扫描Company，实现3C闭环",
+    "写在最后：AI承接了流程，人回到了判断"
+  ],
+  "h2_count": 9,
+  "p_count": 163,
+  "table_count": 0,
+  "figure_count": 12,
+  "img_count": 16,
+  "empty_p_count": 73,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 1,
+    "exists": false,
+    "msg": "不存在该资讯"
+  }
+}

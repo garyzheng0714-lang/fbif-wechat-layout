@@ -1,0 +1,38 @@
+{
+  "job_id": 96,
+  "stage": "published",
+  "news_id": 62793,
+  "title": "钟睒睒炮轰电商平台的话，错了吗？",
+  "article_url": "https://www.foodtalks.cn/news/62793",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85a81a3ce99444c95b8d7f7353c2526526f2164dacc91dc41435c4cc5f9b70c3cafdd75fcf5e&idx=3&mid=2652933680&scene=0&sn=94787856afb035a528437286964a0f10",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-13T00:58:21Z",
+  "created_at": "2026-08-13T00:47:04Z",
+  "updated_at": "2026-08-13T00:58:22Z",
+  "content_sha256": "dd5c9fc58a528dc9a58b4805f60031f833e59330c169515e2e86392b23027747",
+  "content_html_len": 11403,
+  "h2": [
+    "一个连续五年登顶中国内地富豪榜的卖水老板，为什么要跟电商平台死磕？",
+    "钟睒睒到底在炮轰什么？",
+    "炮轰的话也有偏颇",
+    "真正该问的问题"
+  ],
+  "h2_count": 4,
+  "p_count": 145,
+  "table_count": 0,
+  "figure_count": 3,
+  "img_count": 7,
+  "empty_p_count": 68,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 11403,
+    "sha256": "dd5c9fc58a528dc9a58b4805f60031f833e59330c169515e2e86392b23027747",
+    "matches_job": true,
+    "h2": 4,
+    "table": 0
+  }
+}

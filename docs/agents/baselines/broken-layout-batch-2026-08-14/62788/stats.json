@@ -1,0 +1,37 @@
+{
+  "job_id": 91,
+  "stage": "published",
+  "news_id": 62788,
+  "title": "不告诉你是什么味，日本全家如何把悬念做成新商品？",
+  "article_url": "https://www.foodtalks.cn/news/62788",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85a303253a320d4da60cbab8d7b9f2b3a210f6d5f2b3e8f93ae3ff19d3c80b3ac972bb30e72e&idx=3&mid=2652933529&scene=0&sn=12dd72c97857357b0ee51ede46dad7f7",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-12T01:34:47Z",
+  "created_at": "2026-08-12T00:44:19Z",
+  "updated_at": "2026-08-12T01:34:49Z",
+  "content_sha256": "ec8ef9978f61177f552d057730eb901fdb5e18410580a98f54964d11197e750c",
+  "content_html_len": 9566,
+  "h2": [
+    "同一种“全家味”，为什么要做成三款商品",
+    "不把答案写在包装上，全家为什么敢这样做",
+    "“全家味”卖的不是配方，而是45周年的品牌记忆"
+  ],
+  "h2_count": 3,
+  "p_count": 79,
+  "table_count": 0,
+  "figure_count": 7,
+  "img_count": 11,
+  "empty_p_count": 35,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 15441,
+    "sha256": "0b4b60941b89e3a7ed08db37a68685d3b3259666e035b7cc71894da134d385c5",
+    "matches_job": false,
+    "h2": 3,
+    "table": 0
+  }
+}

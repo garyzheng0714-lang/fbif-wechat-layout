@@ -1,0 +1,37 @@
+{
+  "job_id": 92,
+  "stage": "published",
+  "news_id": 62787,
+  "title": "不务正业的迪卡侬，快成山姆超市平替了",
+  "article_url": "https://www.foodtalks.cn/news/62787",
+  "source_url": "http://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg%3D%3D&chksm=85b92dd93e0e2350287f4d74ea2081e3de7ed03ab7df234829c8b4a876da2379d7ed7f71d96c&idx=1&mid=2652933529&scene=0&sn=f5fd9609e658354b329f13abea82ce21",
+  "rule_pack_id": "ft-default",
+  "published_at": "2026-08-12T01:34:51Z",
+  "created_at": "2026-08-12T00:44:19Z",
+  "updated_at": "2026-08-12T01:34:52Z",
+  "content_sha256": "768d7bdc299f4b017cf94482b80ae96f280a6be8cdff11c1c3352eba0b7e1164",
+  "content_html_len": 11924,
+  "h2": [
+    "几级自律会去迪卡侬买零食？",
+    "迪卡侬零食，年轻人的欺骗餐",
+    "迪卡侬零食真的健康吗？"
+  ],
+  "h2_count": 3,
+  "p_count": 103,
+  "table_count": 0,
+  "figure_count": 8,
+  "img_count": 12,
+  "empty_p_count": 47,
+  "files": [
+    "job-content.html",
+    "stats.json"
+  ],
+  "cms": {
+    "code": 0,
+    "len": 18542,
+    "sha256": "f7a0f134a410a7b5b45da582aee540ae6f4a658c49eff4beff7f5fa0f3a3a6b1",
+    "matches_job": false,
+    "h2": 3,
+    "table": 0
+  }
+}
