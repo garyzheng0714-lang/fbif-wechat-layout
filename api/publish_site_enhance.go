@@ -190,14 +190,30 @@ const foodTalksTagTypeNews int64 = 6 // CMS 新闻标签库（newsTags.tagId 必
 
 const publishSiteMoteTagName = "Mote莫特"
 
-// siteNewsTagsFor Mote 文章的自动标签：「Mote莫特」+ 正文声明的内容系列。
-// 只按名字在新闻标签库精确解析（normalize 同来源出处口径），解析不到就跳过该标签；
-// 不自动创建，避免把正则抽取物写进全局标签库。非 Mote 文章返回空列表。
+const publishSiteMaxNewsTags = 3 // 7 月 256 篇实证：编辑习惯每篇 1-2 个标签，最多 3
+
+// siteNewsTagsFor 文章自动标签（2026-08-14 用户裁定「标签都要改」+ 7 月实证）：
+// Mote 文章＝「Mote莫特」+ 正文声明的内容系列（与运营 7 月给 Mote 稿手工挂
+// Mote莫特/茶叶系列的习惯一致）；所有文章再叠加 AI 预填标签（job.Tags，品牌/
+// 品类关键词，与 7 月高频标签「瑞幸咖啡/零食/新茶饮」同型）。
+// 只按名字在新闻标签库（tag_type_id=6）精确解析，解析不到就跳过；不自动创建，
+// 避免把模型输出/正则抽取物写进全局标签库。总数上限 3。
 func (p *publishPipeline) siteNewsTagsFor(ctx context.Context, job publishJob) []foodTalksNewsTag {
-	if p == nil || p.foodTalks == nil || !publishSiteIsMoteArticle(job) {
+	if p == nil || p.foodTalks == nil {
 		return nil
 	}
-	wanted := append([]string{publishSiteMoteTagName}, publishSiteSeriesNames(job.BlocksJSON)...)
+	var wanted []string
+	if publishSiteIsMoteArticle(job) {
+		wanted = append([]string{publishSiteMoteTagName}, publishSiteSeriesNames(job.BlocksJSON)...)
+	}
+	for _, t := range job.Tags {
+		if t = strings.TrimSpace(t); t != "" {
+			wanted = append(wanted, t)
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
 	ft, err := p.foodTalks()
 	if err != nil {
 		log.Printf("publish: 新闻标签解析不可用（任务 #%d）：%v", job.ID, err)
@@ -205,7 +221,16 @@ func (p *publishPipeline) siteNewsTagsFor(ctx context.Context, job publishJob) [
 	}
 	var out []foodTalksNewsTag
 	seen := map[int64]bool{}
+	seenName := map[string]bool{}
 	for _, name := range wanted {
+		if len(out) >= publishSiteMaxNewsTags {
+			break
+		}
+		norm := normalizeFoodTalksSourceName(name)
+		if seenName[norm] {
+			continue
+		}
+		seenName[norm] = true
 		tags, err := ft.ListTagsByType(ctx, foodTalksTagTypeNews, name)
 		if err != nil {
 			log.Printf("publish: 查询新闻标签 %q 失败（任务 #%d）：%v", name, job.ID, err)

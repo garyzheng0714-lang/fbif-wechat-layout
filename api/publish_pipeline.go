@@ -85,10 +85,12 @@ func publishRulePackIDForJob(job publishJob) (string, error) {
 // 可配项 env（MVP 先 env/常量，绝不散落硬编码，后续进管理后台）。
 const (
 	siteCategoryIDsEnv     = "FOODTALKS_CATEGORY_IDS"
+	siteRepostCategoryIDsEnv = "FOODTALKS_REPOST_CATEGORY_IDS"
 	siteFrontURLEnv        = "FOODTALKS_FRONT_URL"
 	siteOwnAccountsEnv     = "SITE_OWN_ACCOUNTS"
 	siteAdminURLEnv        = "FOODTALKS_ADMIN_ARTICLE_URL" // readiness 用于校验 API/前台/后台目标环境一致
-	defaultSiteCategoryIDs = "52,58"                       // 与 2026-07-10 冒烟一致（契约 §9：线上分类表待后端给全集）
+	defaultSiteCategoryIDs = "52,58"                       // 原创：独家专栏（与 2026-07-10 冒烟一致；契约 §9：线上分类表待后端给全集）
+	defaultSiteRepostCategoryIDs = "53"                    // 转载：食品新闻（2026-08-14 用户裁定 + 7 月实证，独家专栏是原创专属）
 	defaultSiteFrontURL    = "https://test.foodtalks.cn"   // 默认测试环境前台；生产切换只改 env
 	// 自家账号清单（原创判定，规范文档 §1）：近一月库内 source_type=0 的全部来源名。
 	defaultSiteOwnAccounts = "FBIF食品饮料创新,FBIF食品饮料创新论坛,FoodTalks,FBIF食品创新展"
@@ -1869,10 +1871,6 @@ func officialInlineRuns(line string) []Run {
 // 拿同一份全量字段——PUT 是全量覆盖语义（契约 §7），两处各自组装一旦漂移，公开时缺的
 // 字段会被覆盖成零值。可配项集中在此走 env，绝不散落多处硬编码。
 func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, publishStatus int) (foodTalksNews, error) {
-	primary, categories, err := siteCategoryIDs()
-	if err != nil {
-		return foodTalksNews{}, err
-	}
 	// M7 来源判定（docs/editorial-norms-foodtalks.md §1/§2/§5，从库里 163 篇倒推）：
 	// sourceType 是确定性规则不交模型——自家号清单命中=0（原创），否则=1（转载）；
 	// 自家号转发他人文章时 AI 从正文声明抽出真实出处（job.AISource），此时按转载算。
@@ -1881,6 +1879,11 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 		return foodTalksNews{}, fmt.Errorf("正文仍含公众号导流尾（%s），禁止写入 FoodTalks", leak)
 	}
 	sourceType, sourceName := siteSourceFor(job)
+	// 分类按原创/转载分派（2026-08-14 用户裁定）：原创=独家专栏，转载=食品新闻。
+	primary, categories, err := siteCategoryIDsFor(sourceType)
+	if err != nil {
+		return foodTalksNews{}, err
+	}
 	// 目录（2026-08-14 用户裁定，金标准 62765）：Mote/原创且一级标题 > 5 时注入 h2 锚点
 	// 并写 toc 字段；锚点由内容哈希派生，重复组装字节一致。转载文章不生成目录。
 	content, toc := job.ContentHTML, ""
@@ -2071,6 +2074,25 @@ func siteCategoryIDs() (int64, []int64, error) {
 	if raw == "" {
 		raw = defaultSiteCategoryIDs
 	}
+	return parseSiteCategoryIDs(raw, siteCategoryIDsEnv)
+}
+
+// siteCategoryIDsFor 按原创/转载分派分类（2026-08-14 用户裁定 + 7 月 256 篇实证：
+// 独家专栏(52)是原创专属栏目，转载 108/120 挂食品新闻(53)；此前一刀切 52 把
+// PackHorizon 等转载稿错标成独家专栏）。原创沿用 FOODTALKS_CATEGORY_IDS 现状，
+// 转载走 FOODTALKS_REPOST_CATEGORY_IDS（默认 53 食品新闻）。
+func siteCategoryIDsFor(sourceType int) (int64, []int64, error) {
+	if sourceType != 0 {
+		raw := strings.TrimSpace(os.Getenv(siteRepostCategoryIDsEnv))
+		if raw == "" {
+			raw = defaultSiteRepostCategoryIDs
+		}
+		return parseSiteCategoryIDs(raw, siteRepostCategoryIDsEnv)
+	}
+	return siteCategoryIDs()
+}
+
+func parseSiteCategoryIDs(raw, envName string) (int64, []int64, error) {
 	var ids []int64
 	for _, part := range strings.Split(raw, ",") {
 		part = strings.TrimSpace(part)
@@ -2079,12 +2101,12 @@ func siteCategoryIDs() (int64, []int64, error) {
 		}
 		id, err := strconv.ParseInt(part, 10, 64)
 		if err != nil {
-			return 0, nil, fmt.Errorf("分类配置 %s 非法（%q 不是数字）", siteCategoryIDsEnv, part)
+			return 0, nil, fmt.Errorf("分类配置 %s 非法（%q 不是数字）", envName, part)
 		}
 		ids = append(ids, id)
 	}
 	if len(ids) == 0 {
-		return 0, nil, fmt.Errorf("分类配置 %s 为空：至少需要一个分类 id", siteCategoryIDsEnv)
+		return 0, nil, fmt.Errorf("分类配置 %s 为空：至少需要一个分类 id", envName)
 	}
 	return ids[0], ids, nil
 }
