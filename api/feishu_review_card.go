@@ -18,6 +18,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -104,6 +105,9 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 		}
 	}
 	elements := []any{reviewCardHeroBlock(job, coverImgKey), reviewCardInfoBlock(job, true)}
+	if dup := reviewCardDuplicateBlock(job); dup != nil {
+		elements = append(elements, dup)
+	}
 	if headline := reviewCardRiskHeadlineBlock(job); headline != nil {
 		elements = append(elements, headline)
 	}
@@ -666,6 +670,22 @@ func reviewCardSafeURL(raw string) string {
 // 完整检查报告里——审核人扫一眼就要下判断，重复内容占满首屏等于什么都没说。
 // 没有已证实问题时这里只剩一行小字，明确区分「干净」与「有几条待核」，
 // 绝不因为模型没标 certainty 就谎称检查通过。
+// reviewCardDuplicateBlock 同题防重提醒（2026-08-14 用户裁定：手工发布优先）。
+// 站上已有同名已发布稿时标红——审核人此时点「通过」，发布阶段也会被硬闸拦下，
+// 这里提前把原因摆在眼前，别让人白点一次。
+func reviewCardDuplicateBlock(job publishJob) map[string]any {
+	if job.SiteDuplicateNewsID <= 0 {
+		return nil
+	}
+	link := reviewCardSafeURL(siteFrontURL() + "/news/" + strconv.FormatInt(job.SiteDuplicateNewsID, 10))
+	return map[string]any{
+		"tag": "markdown",
+		"content": fmt.Sprintf(
+			"<text_tag color='red'>同题防重</text_tag> <font color='red'>**站上已有同名已发布文章**</font>：[news/%d](%s)。手工发布优先——请驳回本稿；确需以本稿为准时，先下线该文章再通过。",
+			job.SiteDuplicateNewsID, link),
+	}
+}
+
 func reviewCardRiskHeadlineBlock(job publishJob) map[string]any {
 	if strings.TrimSpace(job.RiskLevel) == "" && strings.TrimSpace(job.RiskHeadline) == "" {
 		return nil

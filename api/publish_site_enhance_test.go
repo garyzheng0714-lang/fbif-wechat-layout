@@ -133,6 +133,10 @@ func (s *newsTagStub) CreateTagByName(_ context.Context, _ int64, name string) (
 	return 999, nil
 }
 
+func (s *newsTagStub) SearchNewsByTitle(context.Context, string) ([]foodTalksNewsListItem, error) {
+	return nil, nil
+}
+
 func TestSiteNewsTagsForMoteArticle(t *testing.T) {
 	stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{
 		"Mote莫特": {{ID: 99913, Name: "Mote莫特", TagTypeID: 6}},

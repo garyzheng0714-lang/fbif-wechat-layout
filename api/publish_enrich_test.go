@@ -483,6 +483,10 @@ func (s *recordingSourceTagStub) ListTagsByType(context.Context, int64, string) 
 	return s.listed, nil
 }
 
+func (s *recordingSourceTagStub) SearchNewsByTitle(context.Context, string) ([]foodTalksNewsListItem, error) {
+	return nil, nil
+}
+
 func (s *recordingSourceTagStub) CreateTagByName(_ context.Context, _ int64, name string) (int64, error) {
 	s.created = append(s.created, name)
 	if s.createErr != nil {

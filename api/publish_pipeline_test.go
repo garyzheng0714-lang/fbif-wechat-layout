@@ -170,6 +170,12 @@ func newFTStub(t *testing.T) *ftStub {
 			fmt.Fprint(w, `{"code":0,"msg":"success","data":99001}`)
 			return
 		}
+		if r.URL.Path == "/news/admin/news/page" {
+			// 同题防重的标题检索：默认无同名已发布稿
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"records":[]}}`)
+			return
+		}
 		if r.URL.Path != "/news/admin/news" {
 			t.Errorf("FoodTalks 桩收到意外路径 %s", r.URL.Path)
 			http.NotFound(w, r)
