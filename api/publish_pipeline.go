@@ -1881,6 +1881,12 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 		return foodTalksNews{}, fmt.Errorf("正文仍含公众号导流尾（%s），禁止写入 FoodTalks", leak)
 	}
 	sourceType, sourceName := siteSourceFor(job)
+	// 目录（2026-08-14 用户裁定，金标准 62765）：Mote/原创且一级标题 > 5 时注入 h2 锚点
+	// 并写 toc 字段；锚点由内容哈希派生，重复组装字节一致。转载文章不生成目录。
+	content, toc := job.ContentHTML, ""
+	if sourceType == 0 || publishSiteIsMoteArticle(job) {
+		content, toc = publishSiteTocForContent(job.ContentHTML)
+	}
 	return foodTalksNews{
 		Title:         job.Title,
 		CoverImg:      job.CoverURL, // mirroring 后已是转存 OSS URL；enriching 可能换成 AI 选中图
@@ -1891,17 +1897,19 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 		IsPublic:      1, // ⚠️ 实测非可见性开关（契约 §4），恒 1；隐藏靠 publishStatus=0
 		Author:        strings.TrimSpace(job.Author),
 		Summary:       job.Summary, // M5 AI 摘要（兜底=正文前 100 字）
-		// newsTags 结构已确认为 [{tagId,tagName}]，但后端 PUT 带标签仍会 500 并可能
-		// 污染文章，使之后任何 PUT 都失败（实测矩阵见契约 §9）；修复前主链路恒传空
-		// 对象数组。AI 标签只在审核卡与预览展示，真实 ID 由标签查询接口核验。
-		NewsTags: []foodTalksNewsTag{},
+		// newsTags（2026-08-14 复测解除封印）：契约 §9 记载的「PUT 带标签必 500 且污染
+		// 文章」已在后端修复——测试环境 7321/7322 实测 POST/PUT 带标签、重复 PUT、清空
+		// 全部 code=0 且读写闭环；生产 62765 运营带标签多次编辑亦正常。当前只给 Mote
+		// 文章挂「Mote莫特」+ 内容系列标签，且只解析不创建（见 siteNewsTagsFor）。
+		NewsTags: p.siteNewsTagsFor(ctx, job),
 		// 以下三项是发布/编辑接口必填。PUT 是全量覆盖，Go 零值会把 CMS 默认值盖成
 		// 0/false。官方文档示例与字段表均为 isLatest=1 / imgPreviewEnable=true /
 		// commentEnable=1；isLatest=0 时文章可以直链可见，但进不了首页「最新资讯」。
 		IsLatest:          1,
 		ImgPreviewEnable:  true,
 		CommentEnable:     1,
-		Content:           job.ContentHTML, // mirroring 后成品（图片已全部 OSS 化；enriching 绝不改它）
+		Content:           content, // mirroring 后成品（图片已全部 OSS 化）；仅目录场景多出 h2 锚点 id
+		TOC:               toc,
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),
 		PrimaryCategoryID: primary,
 		CategoryIDs:       categories,

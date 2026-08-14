@@ -396,10 +396,11 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 			t.Fatalf("请求体缺少 %s：%s", want, body)
 		}
 	}
-	// newsTags 恒空：结构已破解（[{tagId,tagName}]），但后端 PUT 带标签必 500 且会把
-	// 文章污染成「任何 PUT 都 500」（翻公开卡死），契约 §9 矩阵。修复前这条断言守住恒空。
+	// newsTags：未注入 foodTalks 客户端时必须保持空（标签解析不可用就宁缺勿错）；
+	// Mote 文章的自动标签契约见 publish_site_enhance_test.go（2026-08-14 PUT 标签
+	// 缺陷复测已修复，契约 §9 矩阵解除封印）。
 	if len(news.NewsTags) != 0 {
-		t.Fatalf("NewsTags 必须恒空（PUT 标签缺陷尚未修复）：%v", news.NewsTags)
+		t.Fatalf("无标签解析能力时 NewsTags 必须为空：%v", news.NewsTags)
 	}
 	// 外部公众号 → 转载（source_type=1），来源名=公众号名，author 不填就是空。
 	if news.SourceType != 1 || news.SourceName != "测试公众号" {

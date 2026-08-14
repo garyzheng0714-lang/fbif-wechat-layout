@@ -89,6 +89,8 @@ POST publishStatus=0（草稿进站，外界不可见）
 
 **🚨 后端 bug 现象**：UPDATE 路径的 newsTags 处理疑似「先写后炸、非事务」——PUT 带标签必 500，且失败的 PUT 会把文章置成「带标签」脏态，此后该文章**任何 PUT 都 500**（连 publishStatus 都改不了）。
 **2026-07-13 补充接口文档结论**：已提供标签类型、标签列表、标签分页查询、按 ID 批量取详情和创建标签接口，可用于把 AI 标签名称核验成真实 `tagId`；但文档没有提供安全的“资讯-标签关联写入”接口，并再次明确 PUT 缺陷修复前 `newsTags` 必须保持空数组。主链路因此继续不写标签；`foodTalksNews.NewsTags` 已收紧为 `[]foodTalksNewsTag`，从类型层禁止误发字符串数组。自动创建标签也不启用，避免把模型输出直接写入全局标签库。
+
+**2026-08-14 复测：PUT 标签缺陷已在后端修复，封印解除。** 测试环境 7321/7322 实测：PUT 带真实 tagId、重复 PUT、PUT 清空、POST 带标签后再 PUT 全部 code=0 且读写闭环（GET 回读与写入一致，无“污染后任何 PUT 都 500”现象）；正式环境 62765 由运营带标签多次编辑亦正常。主链路自此对 **Mote 文章**写 `newsTags`（「Mote莫特」+ 正文声明的内容系列，只按名解析 `tag_type_id=6`、不自动创建，见 `api/publish_site_enhance.go` 的 `siteNewsTagsFor`）。`toc` 字段同日启用：Mote/原创且 h2>5 时由 `buildSiteNews` 注入 h2 锚点并写 `[{id,level,title}]`（前台 toc-menu 只认这个字段，API 直发不会自动生成）。守护：`api/publish_site_enhance_test.go`。
 遗留：实验文章 7246/7247/7248 无法经 news PUT 置 2 下线，停留草稿态（前台不可见），请后端顺手清理。
 
 ## 10. 未决问题（转给网站后端 / Phase 0）

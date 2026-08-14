@@ -341,7 +341,10 @@ func defaultFoodTalksSiteRuleConfig() map[string]any {
 			"portrait_px":       375, // 纵图（高≥宽，含1:1）长边（高）目标值；宽按比例（2026-06-11 反馈问题十一）
 			"landscape_px":      600, // 横图宽度
 			"qr_px":             150, // 二维码（近正方形小图）输出宽（2026-06-11 反馈问题十五）
-			"qr_max_natural_px": 500, // 近正方形图原始宽 ≤ 此值才按二维码处理
+			"qr_max_natural_px": 300, // 近正方形图原始宽 ≤ 此值才按二维码处理（2026-08-14 62765 金标准：真二维码实测 ≤266，360 产品图曾被 500 阈值误判成 150）
+			"long_px":           400, // 长图（高/宽 ≥ long_min_ratio，表格/长截图/手机与社交截图）固定宽（2026-08-14 62765 金标准：4.72 比例表格图 400，旧规则缩成 79px）
+			"long_min_ratio":    1.7, // 高/宽比达到此值按长图处理（9:16≈1.78 手机截图曾被缩到 211px，阈值须盖住截图段）
+			"portrait_min_px":   300, // 竖图（比例 < long_min_ratio）按高 375 反推后的宽度下限（1.6 比例社交截图曾被缩到 232px）
 		},
 		"modules": map[string]any{
 			"mctoc":         map[string]any{"enabled": true},
