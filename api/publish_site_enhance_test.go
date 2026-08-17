@@ -10,12 +10,16 @@ import (
 
 // ---- 目录注入 ----
 
+// siteTocLongPara 长正文段：目录触发有 3000 字门槛（排版规范），fixture 每段 ~800 字，
+// 5 段起总字数即过线，字数条件不干扰标题数条件的断言。
+var siteTocLongPara = `<p>` + strings.Repeat("这是用于凑足排版规范目录字数门槛的正文内容。", 40) + `</p>`
+
 func siteTocTestContent(n int) string {
 	var b strings.Builder
 	b.WriteString(`<p style="text-align: justify;">开头</p>`)
 	titles := []string{"两个卖车的", "把茶叶装进袋子", "一台咖啡包装机", "买下荒茶", "去澳大利亚种茶", "59款茶", "喂，喝茶"}
 	for i := 0; i < n; i++ {
-		b.WriteString(`<h2 style="text-align: justify;">` + titles[i%len(titles)] + `</h2><p>段落</p>`)
+		b.WriteString(`<h2 style="text-align: justify;">` + titles[i%len(titles)] + `</h2>` + siteTocLongPara)
 	}
 	return b.String()
 }
@@ -55,12 +59,33 @@ func TestPublishSiteTocInjectsAnchorsAndBuildsJSON(t *testing.T) {
 }
 
 func TestPublishSiteTocSkipsShortAndAnchored(t *testing.T) {
-	content := siteTocTestContent(5)
+	// 2026-08-17 对齐排版规范：字数超 3000 且一二级标题（h2+h3）合计 ≥5 即生成。
+	content := siteTocTestContent(4)
 	got, toc := publishSiteTocForContent(content)
 	if toc != "" || got != content {
-		t.Fatalf("5 个 h2（不足 >5）不得生成目录")
+		t.Fatalf("4 个一二级标题（不足 5）不得生成目录")
 	}
-	anchored := strings.Repeat(`<h2 id="mctoc_x0" style="a">T</h2>`, 6)
+	// 5 个 h2 达标（旧口径要 >5，规范是 ≥5）
+	if _, toc := publishSiteTocForContent(siteTocTestContent(5)); toc == "" {
+		t.Fatalf("5 个 h2 且字数达标应生成目录（规范：5 个及以上）")
+	}
+	// h3 计入触发计数，但目录条目仍只收 h2
+	mixed := siteTocTestContent(3) +
+		`<h3>（一）小节</h3>` + siteTocLongPara + `<h3>（二）小节</h3>` + siteTocLongPara
+	_, toc = publishSiteTocForContent(mixed)
+	if toc == "" {
+		t.Fatalf("3 个 h2 + 2 个 h3 合计 5 应生成目录")
+	}
+	var entries []publishSiteTocEntry
+	if err := json.Unmarshal([]byte(toc), &entries); err != nil || len(entries) != 3 {
+		t.Fatalf("目录条目应只收 3 个 h2（62765 金标准），实际 %s", toc)
+	}
+	// 字数不足 3000 不生成（规范：文章字数超 3000）
+	short := strings.Repeat(`<h2>标题</h2><p>短段</p>`, 6)
+	if got, toc := publishSiteTocForContent(short); toc != "" || got != short {
+		t.Fatalf("字数不足 3000 不得生成目录")
+	}
+	anchored := strings.Repeat(`<h2 id="mctoc_x0" style="a">T</h2>`+siteTocLongPara, 6)
 	got, toc = publishSiteTocForContent(anchored)
 	if toc != "" || got != anchored {
 		t.Fatalf("已带锚点的正文不得二次注入")
@@ -68,7 +93,7 @@ func TestPublishSiteTocSkipsShortAndAnchored(t *testing.T) {
 }
 
 func TestPublishSiteTocUnescapesTitle(t *testing.T) {
-	content := strings.Repeat(`<h2>M&amp;A <span>与并购</span></h2>`, 6)
+	content := strings.Repeat(`<h2>M&amp;A <span>与并购</span></h2>`+siteTocLongPara, 6)
 	_, toc := publishSiteTocForContent(content)
 	if !strings.Contains(toc, `M&A 与并购`) && !strings.Contains(toc, `"M&A 与并购"`) {
 		var entries []publishSiteTocEntry
@@ -134,6 +159,10 @@ func (s *newsTagStub) CreateTagByName(_ context.Context, _ int64, name string) (
 }
 
 func (s *newsTagStub) SearchNewsByTitle(context.Context, string) ([]foodTalksNewsListItem, error) {
+	return nil, nil
+}
+
+func (s *newsTagStub) SearchCompanies(context.Context, string) ([]foodTalksCompany, error) {
 	return nil, nil
 }
 
@@ -206,6 +235,138 @@ func TestSiteNewsTagsResolvesAITagsForAllArticles(t *testing.T) {
 	}
 }
 
+func TestSiteNewsTagsBlocksColumnAndEventTags(t *testing.T) {
+	stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{
+		"瑞幸咖啡":         {{ID: 111, Name: "瑞幸咖啡", TagTypeID: 6}},
+		"创新周报":         {{ID: 200, Name: "创新周报", TagTypeID: 6}},
+		"FBIF2026会后报告": {{ID: 201, Name: "FBIF2026会后报告", TagTypeID: 6}},
+		"Wow食品创新奖":     {{ID: 202, Name: "Wow食品创新奖", TagTypeID: 6}},
+	}}
+	p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil }}
+	// AI 输出混入栏目/活动标签时只保留内容标签（排版规范：不添加首发栏目为标签；
+	// 编辑规范 §4：栏目·活动标签由编辑手工体系管理，AI 不打）
+	job := publishJob{Author: "张三", Tags: []string{"创新周报", "FBIF2026会后报告", "Wow食品创新奖", "瑞幸咖啡"}}
+	tags := p.siteNewsTagsFor(context.Background(), job)
+	if len(tags) != 1 || tags[0].TagID != 111 {
+		t.Fatalf("栏目/活动标签应被拦截，只留内容标签：%+v", tags)
+	}
+}
+
+func TestPublishSiteTagBlocked(t *testing.T) {
+	for _, name := range []string{"独家专栏", "创新周报", "有料", "FBIF2026", "FBIF 2026", "FBIF2026会后报告", "FBIF2026参展企业", "Wow Food Awards", "Wow食品创新奖", "vfood", "Vfood"} {
+		if !publishSiteTagBlocked(name) {
+			t.Fatalf("%q 是栏目/活动名，应被拦截", name)
+		}
+	}
+	// 品类词与品牌名是合法标签，绝不拦截
+	for _, name := range []string{"饮料", "乳品", "咖啡", "瑞幸咖啡", "盒马", "FBIF", "Mote莫特", "茶叶系列", "新品牌"} {
+		if publishSiteTagBlocked(name) {
+			t.Fatalf("%q 是合法内容标签，不得拦截", name)
+		}
+	}
+}
+
+func TestPublishDeclaredSource(t *testing.T) {
+	// 任务 #101 形态：自家号转发天下网商，正文头部「来源：天下网商（ID：xxx）」
+	blocks := `[{"k":"txt","text":"奶奶辈土味饮料翻红"},{"k":"txt","text":"来源：天下网商（ID：txws2013）"},{"k":"txt","text":"正文开始"}]`
+	if got := publishDeclaredSource(blocks); got != "天下网商" {
+		t.Fatalf("应抽出声明出处 天下网商，实际 %q", got)
+	}
+	// 「本文来自微信公众号：小食代」形态（编辑规范 §1 实例）
+	blocks = `[{"k":"txt","text":"本文来自微信公众号：小食代，作者：何丹琳"}]`
+	if got := publishDeclaredSource(blocks); got != "小食代" {
+		t.Fatalf("应抽出 小食代，实际 %q", got)
+	}
+	// 「本文为新零售原创」形态
+	blocks = `[{"k":"txt","text":"本文为新零售原创，作者：陈新生，转载请联系出处。"}]`
+	if got := publishDeclaredSource(blocks); got != "新零售" {
+		t.Fatalf("应抽出 新零售，实际 %q", got)
+	}
+	// 图注「来源：pexels」不参与（k=cap 跳过）
+	blocks = `[{"k":"txt","text":"正文"},{"k":"cap","text":"来源：pexels"}]`
+	if got := publishDeclaredSource(blocks); got != "" {
+		t.Fatalf("图注不得参与出处判定：%q", got)
+	}
+	// 正文中段的「来源：xxx」不算声明（只扫头部前 12 个文本块与尾部区域）
+	var mid strings.Builder
+	mid.WriteString(`[`)
+	for i := 0; i < 20; i++ {
+		mid.WriteString(`{"k":"txt","text":"正文段落"},`)
+	}
+	mid.WriteString(`{"k":"txt","text":"来源：某数据库"},`)
+	for i := 0; i < 30; i++ {
+		mid.WriteString(`{"k":"txt","text":"正文段落"},`)
+	}
+	mid.WriteString(`{"k":"txt","text":"结尾"}]`)
+	if got := publishDeclaredSource(mid.String()); got != "" {
+		t.Fatalf("正文中段的来源行不得当出处声明：%q", got)
+	}
+	// 尾部区域的「来源：xxx」要认（转载稿模板尾部形态，运营截图案例）
+	var tail strings.Builder
+	tail.WriteString(`[`)
+	for i := 0; i < 30; i++ {
+		tail.WriteString(`{"k":"txt","text":"正文段落"},`)
+	}
+	tail.WriteString(`{"k":"txt","text":"来源：天下网商"},{"k":"txt","text":"作者：叶晨"}]`)
+	if got := publishDeclaredSource(tail.String()); got != "天下网商" {
+		t.Fatalf("尾部声明应被识别：%q", got)
+	}
+}
+
+func TestPublishArticleProvenanceDeclaredSourceFallback(t *testing.T) {
+	// AI 漏抽出处（AISource 空）时确定性抽取兜底 → 判转载、来源=声明出处
+	job := publishJob{
+		SourceName: "FBIF食品饮料创新",
+		BlocksJSON: `[{"k":"txt","text":"来源：天下网商（ID：txws2013）"},{"k":"txt","text":"正文"}]`,
+	}
+	original, source := publishArticleProvenance(job)
+	if original || source != "天下网商" {
+		t.Fatalf("声明出处兜底应判转载且来源=天下网商，实际 original=%v source=%q", original, source)
+	}
+	// 自家原创声明（本文为FBIF食品饮料创新原创）不改判：仍按自家清单走原创
+	own := publishJob{
+		SourceName: "FBIF食品饮料创新",
+		BlocksJSON: `[{"k":"txt","text":"本文为FBIF食品饮料创新原创，转载请联系授权。"},{"k":"txt","text":"正文"}]`,
+	}
+	original, source = publishArticleProvenance(own)
+	if !original || source != "FBIF食品饮料创新" {
+		t.Fatalf("自家原创声明不得误判转载，实际 original=%v source=%q", original, source)
+	}
+	// AISource 仍然最优先
+	ai := job
+	ai.AISource = "小食代"
+	if _, source := publishArticleProvenance(ai); source != "小食代" {
+		t.Fatalf("AISource 应优先于确定性抽取：%q", source)
+	}
+}
+
+func TestPublishRenderSourceURLPrefersOriginalForRepost(t *testing.T) {
+	repost := publishJob{
+		SourceURL:         "https://mp.weixin.qq.com/s/fbif-repost",
+		OriginalSourceURL: "https://mp.weixin.qq.com/s/original",
+		SourceName:        "FBIF食品饮料创新",
+		BlocksJSON:        `[{"k":"txt","text":"来源：天下网商"}]`,
+	}
+	if got := publishRenderSourceURL(repost); got != "https://mp.weixin.qq.com/s/original" {
+		t.Fatalf("转载稿应优先用阅读原文链接：%q", got)
+	}
+	// 原创稿：即使有阅读原文链接也用提交链接（阅读原文可能是活动页）
+	original := publishJob{
+		SourceURL:         "https://mp.weixin.qq.com/s/fbif-own",
+		OriginalSourceURL: "https://mp.weixin.qq.com/s/event-page",
+		SourceName:        "FBIF食品饮料创新",
+		BlocksJSON:        `[{"k":"txt","text":"正文"}]`,
+	}
+	if got := publishRenderSourceURL(original); got != "https://mp.weixin.qq.com/s/fbif-own" {
+		t.Fatalf("原创稿应用提交链接：%q", got)
+	}
+	// 转载但没抓到阅读原文 → 回退提交链接
+	repost.OriginalSourceURL = ""
+	if got := publishRenderSourceURL(repost); got != "https://mp.weixin.qq.com/s/fbif-repost" {
+		t.Fatalf("无阅读原文时应回退提交链接：%q", got)
+	}
+}
+
 func TestBuildSiteNewsCategoryBySourceType(t *testing.T) {
 	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
 	t.Setenv("FOODTALKS_REPOST_CATEGORY_IDS", "")
@@ -251,19 +412,19 @@ func TestBuildSiteNewsInjectsTocForOriginalLongArticle(t *testing.T) {
 	if news.TOC == "" || !strings.Contains(news.Content, `id="mctoc_`) {
 		t.Fatalf("原创长文应注入目录：toc=%q", news.TOC)
 	}
-	// 转载不生成目录
+	// 转载同样生成目录（2026-08-17 用户裁定：所有文章一视同仁，历史没加多为人工漏掉）
 	repost := job
 	repost.SourceName = "外部公众号"
 	news, err = p.buildSiteNews(context.Background(), repost, foodTalksPublishStatusDraft)
 	if err != nil {
 		t.Fatalf("buildSiteNews: %v", err)
 	}
-	if news.TOC != "" || strings.Contains(news.Content, `id="mctoc_`) {
-		t.Fatalf("转载不得生成目录：toc=%q", news.TOC)
+	if news.TOC == "" || !strings.Contains(news.Content, `id="mctoc_`) {
+		t.Fatalf("转载长文也应生成目录：toc=%q", news.TOC)
 	}
-	// 标题少（≤5）不生成
+	// 标题少（<5）不生成
 	short := job
-	short.ContentHTML = siteTocTestContent(5)
+	short.ContentHTML = siteTocTestContent(4)
 	news, _ = p.buildSiteNews(context.Background(), short, foodTalksPublishStatusDraft)
 	if news.TOC != "" {
 		t.Fatalf("h2 不足不得生成目录：toc=%q", news.TOC)

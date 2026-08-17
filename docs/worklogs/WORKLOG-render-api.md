@@ -6,7 +6,7 @@
 
 让外部系统（FBIF 资讯订阅的一键发布流水线）能程序化调用本工具的排版能力：
 输入中立 `Block[]`，输出与人工「复制全文」同源的内联样式微信 HTML。
-需求与设计文档在资讯订阅仓库：`openspec/changes/agent-publish-pipeline/`（design.md D2、specs/layout-render）。
+需求与设计文档在外部 `FoodTalks_Feed` 资讯订阅仓库的 `openspec/changes/agent-publish-pipeline/`（design.md D2、specs/layout-render）；它不是本仓库相对路径。
 
 ## 为什么这么做（决策记录）
 
@@ -136,6 +136,6 @@
   再按最新激活规则更新原临时文章；已发布、已拒绝、处理中或外部结果不确定的任务拒绝
   重排，避免重复稿和越过人工审核。
 
-本轮没有恢复 TOC：项目当前规则明确不要目录，FoodTalks headless 仍关闭 `mctoc`。
+本轮没有在交互式或 headless 渲染器恢复 TOC，FoodTalks renderer 仍关闭 `mctoc`。2026-08-14 后自动发布组装层对符合条件的 Mote/原创长文会写 CMS `toc`，那是渲染器之外的受控例外。
 也没有把旧的 7274/7276 直接判成通过；需要用上述显式重排入口生成新的临时预览后，
 再按正文评测集逐项验收。

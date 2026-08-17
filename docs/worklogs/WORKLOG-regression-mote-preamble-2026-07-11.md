@@ -20,7 +20,7 @@
   - footer profile 匹配不到「Mote 作者默认」→ `block-panel.js artifactControlIDs` 返回空 → 面板「参考文献前署名图」开关消失。
   - 佐证：用户截图里「作者：Mote莫特」以普通黑色正文渲染（未被吃掉、未变 #396FBC 蓝），说明识别环节整个没跑通。
 - `npm test` 861 个测试全绿（含 tea-pyramid golden）。
-- 用真实 9MB 样例 `public/__test-tea-pyramid.docx`（系列第 9 篇，.docx 原生）在最新代码下 Node 复现：
+- 当时用未入库的 9MB 临时样例 `public/__test-tea-pyramid.docx`（系列第 9 篇，.docx 原生）在当时代码下 Node 复现；该文件现不存在，不能作为当前可执行 fixture：
   **正常**——前置全剥离、作者行识别渲染成功。⇒ .docx 原生解析主链路没坏。
 - `frontMatterScanLimit=25`（只扫前 25 个非空段找作者行）：第 9 篇作者行是第 16 个非空段，擦边通过。
   用户第 22 篇从截图看前置只有约 6 个非空段，不像超限。待用真实文件确认。

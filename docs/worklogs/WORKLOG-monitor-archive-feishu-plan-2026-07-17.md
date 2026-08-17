@@ -1,15 +1,17 @@
 # 微信公众号官方数据归档、覆盖审计与新文章待审同步
 
 - 日期：2026-07-17
-- 状态：Oracle 审核后修订，按本合同实施
+- 状态：**历史方案，已被后续合同取代**
 - 发布目标：本期只允许 FoodTalks 测试站；切正式站需另行明确授权
+
+> 2026-08-14 现行边界：本项目两个机器入口只接收链接，正文旁路已撤销；外检 watchdog 已迁到 `FoodTalks_Feed`，本仓库只提供被探端点。下文的“内容权威顺序”、测试站状态与白名单描述只代表 2026-07-17 方案，当前以 `CLAUDE.md`、`docs/publish-intake-contract.md` 和 readiness 为准。
 
 ## 一、目标与边界
 
 本期建立两条物理解耦的链路：
 
 1. feed 负责分钟级发现经正向证据确认的普通公众号文章，可靠投递给排版工具。
-2. 112 负责微信官方接口原始数据归档、各接口增量采集与覆盖审计。
+2. `fbif-wechat-article`（下称归档服务）负责微信官方接口原始数据归档、各接口增量采集与覆盖审计。
 
 排版工具负责 canonical 身份收敛、排版、图片转存、AI 预填、风险检查、FoodTalks 测试站草稿和飞书人工审核。任何自动路径只能到待审核；公开必须由持久化、版本匹配的白名单审核人决定。
 
@@ -39,11 +41,11 @@
 - 空正文、解析失败、冲突信号和未知结构全部进入 held，并保存 classifier version、证据与原因。
 - feed 和排版入口均执行 fail-closed 校验。
 
-### 3. 审核与服务鉴权
+### 3. 当时的审核与服务鉴权
 
-- feed/112 使用独立 `PUBLISH_SYNC_SERVICE_TOKEN`，只允许 submit 和紧凑 status-read。
+- `FoodTalks_Feed` / 归档服务使用独立 `PUBLISH_SYNC_SERVICE_TOKEN`，只允许 submit 和紧凑 status-read。
 - 机器凭证不得调用完整 job、review、管理员 retry、reconcile 或 rules/admin。
-- `FEISHU_REVIEWER_OPEN_IDS` 必填；为空时审核动作拒绝且 readiness=false。
+- 当时方案要求 `FEISHU_REVIEWER_OPEN_IDS` 非空；2026-08-06 后运行时另支持“群成员模式 + 当前审核群”，但部署 schema 仍要求白名单非空，当前以根 README/CLAUDE 为准。
 - HTTP review 默认关闭；应急开启时必须使用服务端配置的白名单实名并使 readiness=false。
 - FoodTalks 公开只允许持久 approve、reviewed_at、`pass|warning` 风险、审核风险版本匹配同时成立时发生。
 
@@ -95,7 +97,7 @@
 4. 同步中心采用现有 React、Tailwind、shadcn 设计系统，主体为高密度状态流水；目标固定显示 FoodTalks Test。
 5. 页面只在后端返回 `retryable=true` 时显示安全重试；reconciliation 只显示人工对账指引。
 
-### C. 112 官方采集修复
+### C. 官方归档端采集修复
 
 1. quota/runtime/collector 按 endpoint 联动重构。
 2. `is_delay` deferred 与 08:00 后重试。
@@ -111,7 +113,7 @@
 
 ## 四、验收标准
 
-1. 同一真实文章以长链参数变体、短链、两个短链、feed、112 和手工入口并发提交，最终只有一个 canonical job、一个 FoodTalks 草稿、最多一张可操作审核卡；重复项指向 winner 且不可重试。
+1. 同一真实文章以长链参数变体、短链、两个短链、feed、归档服务和手工入口并发提交，最终只有一个 canonical job、一个 FoodTalks 草稿、最多一张可操作审核卡；重复项指向 winner 且不可重试。
 2. 正常文章可投递；图集、小绿书、空正文、非法 HTML、冲突或未知类型均 held/skipped，不创建 FoodTalks 草稿。
 3. 在文章/outbox 事务边界、CreateNews intent、公开 intent 和通知发送窗口注入崩溃，恢复后不丢单、不重复外调。
 4. 机器凭证可 submit/status-read，但 review/retry/reconcile/rules-admin 均拒绝；空审核白名单 readiness=false，非白名单审核不改变任务。

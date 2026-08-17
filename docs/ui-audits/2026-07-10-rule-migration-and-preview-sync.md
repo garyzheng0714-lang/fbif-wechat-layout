@@ -24,7 +24,7 @@
 
 ## 证据
 
-本地验收截图（临时产物，不进仓）：
+本地验收截图当时位于以下临时路径，现未保留；它们不是可复用证据：
 
 - `/tmp/fbif-ui-audit/migration-320-fixed.png`
 - `/tmp/fbif-ui-audit/migration-768-fixed.png`

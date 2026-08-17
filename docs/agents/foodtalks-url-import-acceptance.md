@@ -3,7 +3,7 @@
 > 本文件是 FoodTalks 网站渠道「微信公众号链接 → 渲染 → 复制到 FoodTalks 后台」这条链路的**长期验收基准**。
 > 新会话接手此任务时，先读本文件再动手。背景由用户于 2026-05-30 注入。
 
-> **当前状态（2026-07-26）**：链路可用，URL 导入误判原创和新浏览器页脚默认关闭的问题已经修复；但整体验收仍为**不通过 / 未闭合**。图片逐图宽度、与 62285 的完整格式对照，以及 `figure/figcaption` 经 FoodTalks TinyMCE 真实粘贴后的存活情况仍待验证。当前结论以 [正文排版评测集](foodtalks-2026-07-23-body-layout-evaluation-set.md) 顶部和 §15.4 为准。
+> **当前状态（核对至 2026-08-14）**：本文件仍是长期验收基准，但整体验收保持**不通过 / 未闭合**。图宽、发布组装层目录和标签已有新实现；既有 preset 迁移与离线 fallback 尚未闭环，`figure/figcaption` 经 FoodTalks TinyMCE 的真实存活、手工复制图片安全，以及 2026-08-14 排版事故批次中的表格/图题/小标题仍缺完整实证。历史运行结果见 [正文排版评测集](foodtalks-2026-07-23-body-layout-evaluation-set.md)，不得当成当前通过证明。
 
 ## 1. 用户要的是什么（任务本质）
 
@@ -26,7 +26,7 @@
 
 用户给的后台源码就是 FoodTalks 后台最终可接受的目标形态；当前规则要求排版工具完整输出正文与 FoodTalks 页脚库。这里的"一模一样"不是逐字节复刻编辑器噪声，而是按发布后台的可粘贴结构对齐：
 
-1. **FoodTalks 页脚库完整输出**（规则 20，2026-05-31 用户裁定，2026-07-02 统一交互）：源码末尾的「资讯投稿与商务合作 / 加入微信群 / 关注公众号 / FoodTalks logo / 点击获取更多全球食品资讯」属于 FoodTalks 后台源码中的固定页脚库。当前主路径是 `modules.bottom_blocks` + 统一 `mountBlockPanel` 区块面板；`fbif_footer` 只作兼容回退。`ft-default` 的全新浏览器默认开启完整页脚。
+1. **FoodTalks 页脚库完整输出**（规则 20，2026-05-31 用户裁定，2026-07-02 统一交互目标）：源码末尾的「资讯投稿与商务合作 / 加入微信群 / 关注公众号 / FoodTalks logo / 点击获取更多全球食品资讯」属于 FoodTalks 后台源码中的固定页脚库。数据/输出主路径已是 `modules.bottom_blocks`，`fbif_footer` 只作兼容回退；但 `site.html` 仍以内联原生拖拽操作，尚未挂载统一 `mountBlockPanel` + Sortable，当前验收因此阻断。`ft-default` 的全新浏览器默认开启完整页脚。
 2. **微信导出垃圾残留不复刻**：源码里几个空的 `<div id="js_content" class="rich_media_content ...">` 是微信导出残留，无意义，不该出现在我们的输出里。
 3. **正文颜色口径统一**（规则 19）：网站署名/图注/参考来源走 FoodTalks 原生 `#888888`（14px 斜体署名；12px 图注）。公众号 Mote 的 `#396FBC` 蓝色非斜体署名不复用到网站。页脚库片段可保留后台源码中的固定链接色与辅助色。
 
@@ -40,7 +40,7 @@
 - **图注**：紧跟图片，12px，`#888888`，居中（`text-align:center`）。
 - **图片说明组不可拆散**（规则 16）：`图片 → 图注 → 图片来源/拍摄` 连续归为图注，`图片来源：`/`图源：`/`拍摄：` 不能当正文或文章级来源。
 - **正文段落**：`text-align: justify`，段间用空段（`<br/>`）分隔，对应微信原文空段语义（规则 18）。
-- **小标题**：`<h2 style="text-align: justify;">标题</h2>`，**不带 `id`**（基石里的 `id="mctoc_xxx"` 是 FoodTalks 后台生成目录时自动注入的锚点，用户 2026-05-30 确认我们不输出；网站渠道默认 `mctoc.enabled=false`）。公众号原文用「整段加粗独占一段」表达小标题，渲染器靠 `isBoldHeading`（heading-detect.js）升级成 h2，详见 §13。
+- **小标题**：交互式网站渲染器输出 `<h2 style="text-align: justify;">标题</h2>`，默认不带 `id`，`mctoc.enabled=false`。自动发布是另一层：2026-08-14 起，`buildSiteNews` 仅对 Mote/原创且 h2>5 的文章在 CMS payload 组装阶段注入确定性 `mctoc_*` 锚点并写 `toc`；转载不生成。公众号原文用「整段加粗独占一段」表达小标题，渲染器靠 `isBoldHeading`（heading-detect.js）升级成 h2，详见 §13。
 - **站内链接（内容差异，非格式问题，不强求）**：基石发布版里 Tazo→62236、豆腐→62058 等是**站内**链接，但这是 FoodTalks 编辑在后台手动把公众号互推链接替换成站内文章链接的结果。我们抓取拿到的是原始 `mp.weixin.qq.com` 链接，**没有映射表能知道 Tazo 对应哪篇站内文章**，因此保留原 mp 链接。用户 2026-05-30 明确："微信原文和网站正式版会有内容出入，可忽略，主要看格式"——故链接差异属预期，不臆造站内映射。
 - **作者/来源固定在提示前**（规则 17）：文章级 `来源：`/`作者：`/`编辑：` 只渲染一次，位置固定在标准 `提示：` 页脚前。
 - **参考来源块**：标题 `参考来源：` + 编号条目，全部 `#888888`。
@@ -99,7 +99,7 @@
 2. **尾部混公众号导流 + 公众号口径页脚** —— 公众号原文尾部自带「FBIF 原创页脚
    （欢迎转发朋友圈）+ 更多文章 + 1000个案例 + 预览时标签不可点」，后端原样抓入
    blocks。网站发布版把这堆删掉、换成网站口径声明。
-   修复：`rule-behavior-foodtalks.js` 新增 `stripWechatTrailer`（isRepost 才切）
+   当时修复：`rule-behavior-foodtalks.js` 新增 `stripWechatTrailer`（当时仅 `isRepost` 切尾）。这条范围已被 2026-08-13 红线 38 取代：进 FoodTalks 和云梭一律切尾，原创/转载只影响来源类型与提示文案。
    + `buildSiteFooterTipElem`（按标题生成网站口径提示页脚）。
    决策：切公众号导流 + 自动生成网站页脚；封面来源能抓就抓、抓不到留空。
 
@@ -176,7 +176,7 @@ footerUrl='' 契约）共多项；`npm test` 264 全过、`go test ./...` 全过
 
 ### 运维细节（改的是服务器，不在本仓库；重装/接手必看）
 
-- **改动对象**：服务器 `aliyun-prod-real`（121.40.214.5，杭州）上的上传服务
+- **改动对象**：杭州生产环境的独立上传服务（具体主机标识由部署秘密配置管理）
   `/opt/wechat-api/server.py`（"WeChat Draft API"，端口 9000，非 git 仓库，手动部署）。
   Go 后端 `WECHAT_UPLOAD_ENDPOINT=http://localhost:9000/api/wechat-upload` 转发到它。
 - **server.py 改动**：`upload_to_oss` 上传 endpoint 与返回 URL 域名分离——
@@ -220,8 +220,7 @@ footerUrl='' 契约）共多项；`npm test` 264 全过、`go test ./...` 全过
 （`uploader.js` + 服务器 `server.py`；删除前端 `mmbizUrlToDataUrl` 死代码；
 测试更新到 urls 契约 + 失败保留原链接/多图不串号用例。）
 
-实务建议：导入后等侧栏「全部图片已就绪」再点复制；复制按钮本身不阻塞（规则 9），
-但就绪前复制会带未转存的 mmbiz（粘进 foodtalks.cn 会裂）。
+历史实现要求等侧栏「全部图片已就绪」再复制；就绪前可能带未转存 mmbiz，粘进 FoodTalks 会裂。当前产品不能把这段操作提示当安全兜底：图片安全必须由复制产物契约保证，真实粘贴保存未验收前仍是开放阻断。
 
 ## 13. 章节小标题塌成正文（2026-05-30，build 17dfc62，已修复并两篇真机验证）
 
@@ -238,7 +237,7 @@ footerUrl='' 契约）共多项；`npm test` 264 全过、`go test ./...` 全过
 **修复（通配）**：新增 `public/js/heading-detect.js`（无依赖纯函数模块），核心判据
 `isBoldHeading`：整段所有 txt run 都 bold + 纯文本 ≤36 字 + **不以句号（。.）结尾** +
 非图注 → 升级 h2。`renderHeading` 输出 `<h2 style="text-align: justify;">`，默认不带
-mctoc id（`site.html` 网站渠道 `mctoc.enabled=false`）。
+mctoc id（这里指 `site.html` 交互式网站渠道，`mctoc.enabled=false`；自动发布组装层的受控 toc 例外见 §2）。
 
 **关键校准（两篇真实全加粗段数据驱动，非拍脑袋）**：
 - 句末标点判据从「排除所有句末标点」收窄到「仅排除句号」——疑问/感叹句标题真实存在
@@ -284,8 +283,8 @@ grep 源码字符串的弱契约（规则九）。`npm test` 291 全过、`go te
 | commit | 差异 | 修复 |
 |---|---|---|
 | 222f375 等 | 加粗小标题塌成 `<p><strong>` | heading-detect.js：整段加粗→h2（见 §13） |
-| cbae6cc | h2 带自造 mctoc id | 默认不输出 id（后台自动加） |
-| 74d65b5 | 竖图宽度 600（基石 400） | 后端抓 data-h/data-ratio；adaptiveImageWidth 竖图400/横图600；image-width.js |
+| cbae6cc | 交互式渲染 h2 带自造 mctoc id | 交互式渲染器默认不输出；自动发布组装层只在满足原创长文条件时注入确定性 id |
+| 74d65b5 | 竖图宽度 600（基石 400） | 历史修复口径：后端抓 data-h/data-ratio，adaptiveImageWidth 当时按竖图400/横图600；当前已改为长图400、普通竖图高375且宽不低于300 |
 | 80a2269+f3b2c46 | 参考来源被拆散（前几条误标 cap、后几条带空行） | 后端 inRefSection 强制参考区走 txt（不被图注启发式吞）；前端 refMode 纳入「—说明」延续行 |
 
 ### 验证结论（真机 + processBlocks 实测）

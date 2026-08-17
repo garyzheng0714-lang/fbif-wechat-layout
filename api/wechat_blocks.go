@@ -104,11 +104,15 @@ var (
 	wxNicknameRe   = regexp.MustCompile(`var nickname = (?:htmlDecode\()?"([^"]*)"`)
 	wxAuthorMetaRe = regexp.MustCompile(`<meta\s+name="author"\s+content="([^"]*)"`)
 	wxAuthorVarRe  = regexp.MustCompile(`var author = "([^"]*)"`)
+	// 转载文章「阅读原文」指向的原文地址（发布者填的结构化字段）。FBIF 转载稿惯例
+	// 把它设为原账号原文——网站转载声明《标题》超链接优先用它（排版规范：来源处
+	// 超链接到原文链接，不能指回自家转载页）。单双引号双写兼容。
+	wxSourceURLRe = regexp.MustCompile(`var msg_source_url = ['"]([^'"]*)['"]`)
 )
 
-// extractWechatArticleMeta 公众号页面原始 HTML → (公众号名, 作者署名)。
+// extractWechatArticleMeta 公众号页面原始 HTML → (公众号名, 作者署名, 阅读原文链接)。
 // 没署名的文章两个作者锚点都是空串——空值原样返回（空也是有效信号，宁空勿造）。
-func extractWechatArticleMeta(rawHTML string) (nickname, byline string) {
+func extractWechatArticleMeta(rawHTML string) (nickname, byline, sourceURL string) {
 	if m := wxNicknameRe.FindStringSubmatch(rawHTML); len(m) > 1 {
 		nickname = strings.TrimSpace(html.UnescapeString(m[1]))
 	}
@@ -120,7 +124,13 @@ func extractWechatArticleMeta(rawHTML string) (nickname, byline string) {
 			byline = strings.TrimSpace(html.UnescapeString(m[1]))
 		}
 	}
-	return nickname, byline
+	if m := wxSourceURLRe.FindStringSubmatch(rawHTML); len(m) > 1 {
+		u := strings.TrimSpace(html.UnescapeString(m[1]))
+		if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+			sourceURL = u
+		}
+	}
+	return nickname, byline, sourceURL
 }
 
 // extractArticleBlocks walks WeChat article HTML into a sequence of Blocks.

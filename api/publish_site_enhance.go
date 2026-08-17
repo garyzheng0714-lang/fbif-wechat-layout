@@ -1,13 +1,15 @@
 package main
 
-// 网站发布增强（2026-08-14 用户裁定，金标准 news/62765 正确版）：
-//  1. 目录：Mote/原创文章一级标题（h2）数 > 5 时，正文 h2 注入 mctoc_* 锚点 id，
-//     CMS payload 的 toc 字段写 [{id,level:1,title}] JSON——FoodTalks 前台 toc-menu
-//     只认这个字段，API 直发的文章后台不会自己生成（渲染器侧 mctoc 仍保持关闭，
-//     锚点在发布组装层注入，保证 render output_hash 可复现）。
-//  2. 标签：Mote 文章挂「Mote莫特」+ 正文声明的内容系列标签（如「这是我茶叶系列的
-//     第29篇」→「茶叶系列」）。标签只在 tag_type_id=6 新闻标签库中按名精确解析，
-//     不自动创建，解析不到就跳过——宁缺勿错，不往全局标签库里写正则抽取物。
+// 网站发布增强（2026-08-14 用户裁定，金标准 news/62765；2026-08-17 按排版规范修订）：
+//  1. 目录：所有文章（不分原创/转载，2026-08-17 用户裁定）正文非空白字符 ≥3000 且
+//     h2+h3 合计 ≥5 时，正文 h2 注入 mctoc_* 锚点 id，CMS payload 的 toc 字段写
+//     [{id,level:1,title}] JSON——FoodTalks 前台 toc-menu 只认这个字段，API 直发的
+//     文章后台不会自己生成（渲染器侧 mctoc 仍保持关闭，锚点在发布组装层注入，
+//     保证 render output_hash 可复现）。
+//  2. 标签：所有文章解析 AI 预填标签；Mote 文章优先挂「Mote莫特」+ 正文声明的
+//     内容系列标签（如「这是我茶叶系列的第29篇」→「茶叶系列」）。标签只在
+//     tag_type_id=6 新闻标签库中按规范化名称等值解析，总数最多 3 个；不自动创建；
+//     栏目/活动标签黑名单双侧拦截（publishSiteTagBlocked）。
 
 import (
 	"context"
@@ -18,13 +20,19 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // ---- 目录（toc） ----
 
-const publishSiteTocMinHeadings = 6 // 一级标题数 > 5 才生成目录
+// 触发口径对齐网站排版规范（2026-08-17，飞书《FoodTalks 网站排版规范（新）》step2-3）：
+// 「文章字数超 3000 且一二级标题 5 个及以上」→ 正文纯文本 ≥ 3000 字 且 h2+h3 合计 ≥ 5。
+// 旧口径只数 h2 且要 >5，运营反馈原创长文经常不出目录。目录条目仍只收 h2（62765 金标准）。
+const publishSiteTocMinHeadings = 5 // 一二级标题（h2+h3）合计 ≥ 5
+const publishSiteTocMinChars = 3000 // 正文纯文本（剥标签）字符数下限
 
 var publishSiteH2Re = regexp.MustCompile(`(?is)<h2(\s[^>]*)?>(.*?)</h2>`)
+var publishSiteH3Re = regexp.MustCompile(`(?is)<h3(\s[^>]*)?>`)
 var publishSiteTagStripRe = regexp.MustCompile(`(?s)<[^>]*>`)
 
 type publishSiteTocEntry struct {
@@ -36,10 +44,21 @@ type publishSiteTocEntry struct {
 // publishSiteTocForContent 给正文 h2 注入确定性锚点并生成 toc JSON。
 // 锚点 id 由正文内容哈希派生：同一份正文重复组装（staging→publicize→repair）产出
 // 字节一致的 content 与 toc，PUT 全量覆盖语义下不会来回抖动。
-// 不满足条件（h2 ≤ 5、或 h2 已带 id）时原文返回、toc 为空串。
+// 不满足条件（字数 < 3000、h2+h3 < 5、无 h2、或 h2 已带 id）时原文返回、toc 为空串。
 func publishSiteTocForContent(contentHTML string) (string, string) {
 	matches := publishSiteH2Re.FindAllStringSubmatchIndex(contentHTML, -1)
-	if len(matches) < publishSiteTocMinHeadings {
+	h3Count := len(publishSiteH3Re.FindAllStringIndex(contentHTML, -1))
+	if len(matches) == 0 || len(matches)+h3Count < publishSiteTocMinHeadings {
+		return contentHTML, ""
+	}
+	plain := html.UnescapeString(publishSiteTagStripRe.ReplaceAllString(contentHTML, ""))
+	charCount := 0
+	for _, r := range plain {
+		if !unicode.IsSpace(r) {
+			charCount++
+		}
+	}
+	if charCount < publishSiteTocMinChars {
 		return contentHTML, ""
 	}
 	sum := sha256.Sum256([]byte(contentHTML))
@@ -188,6 +207,41 @@ func isSeriesNameRune(r rune) bool {
 
 const foodTalksTagTypeNews int64 = 6 // CMS 新闻标签库（newsTags.tagId 必须来自这里，契约 §9）
 
+// 栏目/活动类标签黑名单（排版规范：「不添加首发栏目为标签」；编辑规范 §4：栏目·活动
+// 标签由编辑手工体系管理，AI 不打）。只拦纯栏目/活动专名——品类词（乳品/饮料/咖啡…）
+// 是合法标签不拦。词表注入 prompt 前与发布解析时双侧过滤（2026-08-17 运营反馈）。
+var publishSiteColumnTagNames = map[string]bool{
+	"快讯": true, "热门关注": true, "深度专题": true, "创新周报": true,
+	"食品新闻": true, "独家专栏": true, "品类动态": true, "行业观点": true,
+	"企业资讯": true, "新探": true, "食装": true, "有料": true, "设记": true,
+	"酒零后": true, "马克兔": true, "vfood": true,
+}
+
+var publishSiteColumnTagPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^FBIF\s*\d{4}`), // FBIF2026 / FBIF 2026 / FBIF2026会后报告 / FBIF2026参展企业
+	regexp.MustCompile(`会后报告`),
+	regexp.MustCompile(`参展企业`),
+	regexp.MustCompile(`(?i)Wow\s*Food\s*Awards?`),
+	regexp.MustCompile(`Wow食品创新奖`),
+}
+
+// publishSiteTagBlocked 判定标签名是否属于栏目/活动专名（不应作为文章内容标签）。
+func publishSiteTagBlocked(name string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(name))
+	if trimmed == "" {
+		return true
+	}
+	if publishSiteColumnTagNames[trimmed] {
+		return true
+	}
+	for _, re := range publishSiteColumnTagPatterns {
+		if re.MatchString(name) {
+			return true
+		}
+	}
+	return false
+}
+
 const publishSiteMoteTagName = "Mote莫特"
 
 const publishSiteMaxNewsTags = 3 // 7 月 256 篇实证：编辑习惯每篇 1-2 个标签，最多 3
@@ -196,7 +250,7 @@ const publishSiteMaxNewsTags = 3 // 7 月 256 篇实证：编辑习惯每篇 1-2
 // Mote 文章＝「Mote莫特」+ 正文声明的内容系列（与运营 7 月给 Mote 稿手工挂
 // Mote莫特/茶叶系列的习惯一致）；所有文章再叠加 AI 预填标签（job.Tags，品牌/
 // 品类关键词，与 7 月高频标签「瑞幸咖啡/零食/新茶饮」同型）。
-// 只按名字在新闻标签库（tag_type_id=6）精确解析，解析不到就跳过；不自动创建，
+// 只按规范化名称在新闻标签库（tag_type_id=6）等值解析，解析不到就跳过；不自动创建，
 // 避免把模型输出/正则抽取物写进全局标签库。总数上限 3。
 func (p *publishPipeline) siteNewsTagsFor(ctx context.Context, job publishJob) []foodTalksNewsTag {
 	if p == nil || p.foodTalks == nil {
@@ -207,9 +261,16 @@ func (p *publishPipeline) siteNewsTagsFor(ctx context.Context, job publishJob) [
 		wanted = append([]string{publishSiteMoteTagName}, publishSiteSeriesNames(job.BlocksJSON)...)
 	}
 	for _, t := range job.Tags {
-		if t = strings.TrimSpace(t); t != "" {
-			wanted = append(wanted, t)
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
 		}
+		// AI 标签过栏目/活动黑名单；Mote/系列标签不经过此过滤（上方显式添加）
+		if publishSiteTagBlocked(t) {
+			log.Printf("publish: AI 标签 %q 是栏目/活动名（任务 #%d），按规范跳过", t, job.ID)
+			continue
+		}
+		wanted = append(wanted, t)
 	}
 	if len(wanted) == 0 {
 		return nil

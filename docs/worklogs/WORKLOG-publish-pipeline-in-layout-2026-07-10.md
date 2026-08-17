@@ -1,6 +1,6 @@
 # WORKLOG：发布流水线迁入排版工具（架构反转，用户 2026-07-10 裁定）
 
-> **历史阶段记录。** 本文件中的完成项和待办反映 2026-07-10 当时状态；正式环境、飞书长连接、AI 配置、自动发现与监控后来均继续演进。特别是 IP、token、`freepublish` 覆盖和“服务器配置”判断不得从本文直接复用，当前边界以 CLAUDE.md 红线 #26–#30、README、`openspec/changes/content-publish-pipeline/tasks.md` 和当前代码 / readiness 为准。
+> **历史阶段记录。** 本文件中的完成项和待办反映 2026-07-10 当时状态；正式环境、飞书长连接、AI 配置、自动发现与监控后来均继续演进。特别是正文旁路、`newsTags` 恒空、审核人模式、IP、token、`freepublish` 覆盖和“服务器配置”判断不得从本文直接复用。2026-08-14 起标签 PUT 已恢复并用于所有文章的 AI 标签；当前边界以 CLAUDE.md 红线 #26–#39、README、长期契约和当前代码 / readiness 为准。
 
 ## 用户裁定（原话要点）
 
@@ -10,7 +10,7 @@
 
 ## 目标（本次：测试环境打通）
 
-`POST /api/publish/site-sync {url}` → 抓文章 → 排版(ft-default) → 图片转存 → FoodTalks 测试环境草稿进站 → 飞书群通知（应用 cli_aac5d107d9381bdf「FBIF文章排版工具」，已实测在审核群 oc_0e469b957145689516d8f542c175562b 里能发消息）→ **停在待审核**（红线：翻公开必须用户亲自裁决）→ `POST /api/publish/jobs/{id}/review {action}` approve/reject。
+`POST /api/publish/site-sync {url}` → 抓文章 → 排版(ft-default) → 图片转存 → FoodTalks 测试环境草稿进站 → 专用飞书应用向配置的审核群发通知 → **停在待审核**（红线：翻公开必须用户亲自裁决）→ `POST /api/publish/jobs/{id}/review {action}` approve/reject。
 
 ## 设计（实施前钉死）
 
@@ -76,7 +76,7 @@ created → fetching → rendering → mirroring → enriching → assessing →
   - S6 `api/publish_pipeline_test.go` + `api/publish_http_test.go` + `api/feishu_notify_test.go`（16 个新测试，外部调用全 httptest 桩；红线「无 approve 则 UpdateNews 永不被调」由 FoodTalks 桩 forbidPublish 守卫 + 专门测试双保险锁死）
 - [x] 测试环境全链路真机（2026-07-10 部署 5ecb1b4 后生产服务实跑）：job #1（星巴克短链）fetching→rendering→mirroring→staging 全通 → FoodTalks 测试环境草稿 **news 7243** → 停在 awaiting_review（前台 404 复核 ✓）→ 群通知已发（无 WARN 日志）→ **等用户当审核人裁决 approve/reject**
 - [x] 部署踩坑根治：deploy.yml 每次部署整文件重写 /var/www/api/.env，手工键必被抹——流水线配置改放独立 `/var/www/api/publish.env` + systemd drop-in（fbif-api.service.d/publish-env.conf 加 EnvironmentFile），部署不再破坏。切正式环境只改 publish.env 四行（BASE_URL/TOKEN/ORIGIN/FRONT_URL）+ restart
-- [ ] 正式环境接入（等 IP 白名单：**121.40.214.5**，用户下午通知后端；token 已有 ai_news 50 年）
+- [ ] 当时正式环境接入仍等待生产出口 IP 白名单；当前状态不得从本历史待办推断，应以 readiness 与秘密配置为准
 - [ ] 资讯订阅仓参考实现退役清理（design.md D1 已反转回写 89295c6）
 
 ## M4 提前：飞书卡片审核交互（2026-07-10 用户提出「点按钮回调接收事件」）
@@ -173,7 +173,7 @@ created → fetching → rendering → mirroring → enriching → assessing →
 
 ## M7：编辑部规范倒推 AI 预填提示词（2026-07-10 用户命题「摘要太长；连库看近一月历史文章，倒推转载/原创/摘要/标签规范成底层提示词；要测试准确率；换模型影响要小」）
 
-数据源：阿里云 RDS `mc-fb` 库（只读账号 rss_readonly，凭证在服务器 `/root/.mcfb.cnf`，chmod 600，不进 git）。
+数据源：FoodTalks 只读数据库；账号和凭证只由服务器秘密配置管理，不在仓库记录具体标识或路径。
 核心表：`news_news`（文章主表）/ `news_news_tag`（关联 {news_id, tag_id, tag_name}）/ `basic_tag`（标签库，新闻标签 tag_type_id=6）。
 
 ### 数据结论（2026-06-10 ~ 07-10，publish_status=1 共 163 篇）
@@ -206,7 +206,7 @@ created → fetching → rendering → mirroring → enriching → assessing →
 
 - **预览空白根治**：Caddy vhost 是路径白名单，/preview/* 没登记 → 落静态兜底回 index.html 空壳。补登记 /preview/* /api/publish/* /api/feishu/*（deploy/caddy/fbifmp-layout.caddy，仓库=真相源，已热修+提交）。教训进配置注释：**新增 9001 端点必须同步登记 vhost 白名单**。
 - **卡片带封面图**（用户要求）：feishuNotifier.uploadImageByURL（im/v1/images 转存拿 img_key）→ 待审卡顶部 img 元素；失败降级不带图 WARN，不阻塞。pipeline 新增 coverImgKey 注入点。
-- **卡片带管理后台链接**（用户要求）：信息区「去后台编辑这篇文章」行；FOODTALKS_ADMIN_ARTICLE_URL env 模板（{id} 占位），默认后台首页 https://admin-we-test.foodtalks.cn/#/ ——编辑页路由从后台 JS 包挖到 cms/:siteCode/news/edit/:id 但 siteCode 是运行时值不猜（不编造 URL 红线），**待用户贴一条真实编辑页 URL 即配深链**。正式后台 https://admin-we.foodtalks.cn/#/（用户 2026-07-10 提供）。
+- **卡片带管理后台链接**（用户要求）：信息区「去后台编辑这篇文章」行；FOODTALKS_ADMIN_ARTICLE_URL env 模板（{id} 占位），默认后台首页 https://admin-we-test.foodtalks.cn/#/ ——编辑页路由从后台 JS 包挖到 cms/:siteCode/news/edit/:id 但 siteCode 是运行时值不猜（不编造 URL 红线）；仅在用户提供真实编辑页 URL 后配置深链。正式后台 https://admin-we.foodtalks.cn/#/（用户 2026-07-10 提供）。
 - **为什么用自建预览页而非网站草稿链接**（用户问）：草稿 publishStatus=0 前台内容层 404（契约 §3 实测）、API 不返回预览链接、CMS 后台预览要登录会话——飞书卡片场景要免登录即点即看，故用 HMAC 签名预览页；后台编辑链接作为补充（有账号者去改）。
 - **并行工作流协同记录**：本仓另一代理同日在写发布安全护栏（publish_risk 红线风险提示 / staging reconciliation / recoverJobs 启动扫描），与 M7 改到同一批文件；等其收敛到全量测试绿后合车提交（31a6d17），未互相覆盖。
 
@@ -228,7 +228,7 @@ created → fetching → rendering → mirroring → enriching → assessing →
 - **双模型判决（用户提供 DeepSeekV4-pro ep-20260710175216-hb4qf，「两个一起跑，单独判决节点公平对比，判决节点用 DeepSeek」）**：ARK_MODEL_ID_B 配置即启用——豆包+DeepSeek 并行出案 → 判决节点（ARK_JUDGE_MODEL_ID，缺省=B）收到**匿名**方案一/二+编辑部规范，逐字段裁决（字段只能整体取自一案防混拼幻觉；cover 仍过候选白名单+证据校验）；verdict 并入 notes（卡片可见「双模型判决」结论）。降级链：一侧挂→用另一侧；判决挂→用主模型——多模型不是新故障点。测试锁死：判决输入必含匿名两案+规范、不得泄漏模型身份（ep-A/ep-B/豆包/DeepSeek 字样都不许出现）。
 - **生产配置**：publish.env += ARK_MODEL_ID_B / ARK_JUDGE_MODEL_ID（都是 DeepSeek 端点）。
 - **并行工作流协同（第二回合）**：风险评估流水线（assessing/assessing_review 阶段+启动风险补检）上线后，重启把历史 awaiting_review 任务迁去补检、几分钟自愈回 awaiting_review（risk=warning）——期间预览 404 属过渡态非 bug。其前端规则面板 WIP 未提交（npm 红），本次提交用 stash 隔离出 api 子集验证后推送（注意 account_catalog.go+registry.js 是逐字节校验对，必须同车）。
-- **待用户动作**：①开放平台给应用 cli_aac5d107d9381bdf 开 im:resource:upload 权限（封面进卡片用，日志有直达链接）②群里随便点一次卡片按钮（会被白名单拒绝，正常）→ 从日志收割你在本应用下的 open_id → 配 FEISHU_REVIEWER_OPEN_IDS 重启，卡片审核解锁。
+- **当时外部依赖**：①给专用飞书应用开放图片资源上传权限；②通过一次受控回调确认审核人身份后，把 `open_id` 写入秘密配置 `FEISHU_REVIEWER_OPEN_IDS`。真实应用、群和人员标识不写入仓库。
 - **评测第 5 轮（双模型判决模式）结果：全部门禁 PASS**（2086s）——摘要长度/风格/标签数量 100%、作者 8/9=89%、出处 93%、编造 0，与第 4 轮单模型基线持平（门禁指标已在天花板）；标签命中 50%/词表率 74% 较单模型微降（judge 偶尔采纳偏离词表的一案，仅报告项）。结论：双模型的价值不在均值提升，在**每篇都有第二意见+判决透明度**（verdict 上卡片）与单点模型故障韧性；代价=每篇 3 次调用、耗时 +50%。生产已启用。
 
 ## 2026-07-10 对抗审查最终收口
@@ -251,10 +251,10 @@ created → fetching → rendering → mirroring → enriching → assessing →
 - 管理员鉴权的 `GET /api/publish/readiness` 只返回布尔值和模式，不泄露凭证；校验 publish store 可读、FoodTalks API/前台/后台/期望目标一致、分类非空、render 可用、飞书通知配置、审核白名单状态与 enrich 模式。
 - 部署在 pause 状态完成公网 SHA、健康、鉴权和 readiness 验收后才接受 release；接受后禁止自动回滚，再解 pause 重启并复验。解 pause 后若失败只允许向前修复，避免旧版重复消费已经恢复的外部副作用。
 
-### 当前外部配置边界
+### 当时外部配置边界（2026-07-10 快照）
 
-- 生产服务器的 FoodTalks 配置已显式声明 `FOODTALKS_EXPECTED_TARGET=test`，并补齐测试后台入口与分类；这是对现状的安全固化，不代表获准切到正式 FoodTalks。
-- `FEISHU_REVIEWER_OPEN_IDS` 仍未配置。飞书卡片审核因此按设计拒绝；`ADMIN_PASSWORD` 保护的管理审核可用。白名单只能由用户提供授权审核人的真实 open_id，代码不得猜测或放宽。
+- 当时生产服务器的 FoodTalks 配置显式声明 `FOODTALKS_EXPECTED_TARGET=test`，并补齐测试后台入口与分类；该历史快照不能证明当前实例目标，现状只从 readiness 核验。
+- 当时 `FEISHU_REVIEWER_OPEN_IDS` 未配置，卡片审核拒绝，管理审核仍使用旧共享密码。共享密码入口后来退役，当前网页管理只认登录会话与角色。
 
 ## 抓取链路裁定（2026-07-11 用户拍板「就用主链路」）
 
@@ -262,6 +262,6 @@ created → fetching → rendering → mirroring → enriching → assessing →
 - **用户裁定：不建浏览器回退，主链路（直接抓取+3 次退避重试）即最终方案。** 实测依据：正常使用（贴新鲜文章链接）三篇全部一次成功；触发反爬的只有边缘链接（隔天过期的 chksm 临时长链、scene=21 二跳关联阅读链）——这类失败属预期，报错文案已是人话（「链接可能已过期或被限流」），用户重贴新鲜链接即可。
 - 勿翻案重做：除非未来出现「新鲜链接也频繁被拦」的实证，才重启浏览器回退议题。
 
-## 旧审核白名单裁定（2026-07-11，已被后续安全合同撤销）
+## 审核权限演进（2026-07-11 历史；2026-08-06 后续裁定）
 
-- commit `ef79035` 曾允许未配置 `FEISHU_REVIEWER_OPEN_IDS` 时由审核群成员操作；该口径已被后续对抗审查和当前红线 #26 撤销。现行合同是：白名单必填，空值时卡片审核与可选 HTTP 审核全部 fail closed，readiness 失败。不得从本历史段恢复“群成员即审核人”。
+- commit `ef79035` 曾允许审核群成员操作，随后一度被对抗审查收紧为静态白名单。2026-08-06 用户重新裁定群成员模式：开启 `FEISHU_REVIEWER_ALLOW_CHAT_MEMBERS` 后，仅当前配置审核群的回调可审核；静态白名单继续兼容，HTTP 审核仍必须命中白名单。运行时 readiness 接受两种权限来源，但当前部署 env schema 仍要求 `FEISHU_REVIEWER_OPEN_IDS` 非空，二者尚待收敛；当前口径以 CLAUDE 红线 34 与 README 为准。

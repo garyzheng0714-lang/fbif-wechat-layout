@@ -5,7 +5,7 @@ package main
 // 62773/62774 同题并存，审核人一点「通过」就会出现两篇一模一样的公开文章。
 // 两道防线：
 //  1. 待审核卡发送/刷新时按标题查 CMS 已发布同名稿，卡上标红提醒（best effort）；
-//  2. stagePublicize 翻公开前再查一次，命中即 fail closed——手工发布优先（红线 39），
+//  2. stagePublicize 翻公开前再查一次，命中即 fail closed——手工发布优先（红线 26），
 //     宁可发布失败也不产生重复稿；查询本身失败同样 fail closed。
 
 import (

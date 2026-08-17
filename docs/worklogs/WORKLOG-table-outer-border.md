@@ -1,7 +1,9 @@
 # WORKLOG:网站表格发布后外缘虚线修复
 
+> 历史状态（核对至 2026-08-14）：实现和本地 UI 证据已完成；真实 FoodTalks 后台终验没有当前证据，未排期。开放验证统一记录在 `WORKLOG-table-cms-survival.md`，本文件不另维护重复待办。
+
 - 日期:2026-07-06
-- 状态:已完成(代码+测试+本地真实 UI 验证全过);待用户在 FoodTalks 后台粘贴一次做生产侧最终确认
+- 当时状态:已完成(代码+测试+本地真实 UI 验证全过);真实后台终验未完成
 
 ## 问题
 
@@ -46,6 +48,6 @@ shared renderer 加 `opts.outerBorder` 开关(默认关):
 ## 验证备注
 
 - 公众号 fbif.js 未改动;shared renderer 不传 outerBorder 时输出与改动前字节一致(测试锁定)
-- FoodTalks 后台无账号,生产侧最终确认需用户发布链路粘贴一次看虚线消失
+- FoodTalks 后台终验需用户授权；当前未排期，触发条件与状态统一见 `WORKLOG-table-cms-survival.md`
 - 已部署生产:commit 07b35ce,deploy run 28767085200 success,
   生产 `js/templates/shared/table-renderer.js` 已确认含 outerBorder(2026-07-06)

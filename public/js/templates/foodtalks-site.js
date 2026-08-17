@@ -375,7 +375,9 @@ function renderRuns(runs, config = {}) {
     if (r.type === 'txt') {
       let s = esc(normalizeChinesePunctuation(r.text));
       if (r.bold || r.interviewSpeaker) s = '<strong>' + s + '</strong>';
-      if (r.interviewSpeaker === 'publication') {
+      // 排版规范 (6)：提问方 FoodTalks 蓝并加粗，回答方默认颜色并加粗
+      //（2026-08-17 由「书名号媒体名上蓝」改为「提问方上蓝」；'publication' 兼容旧值）。
+      if (r.interviewSpeaker === 'interviewer' || r.interviewSpeaker === 'publication') {
         const color = cfgColor(config, 'tip_title_color', '#01396a');
         s = `<span style="color: ${color};">${s}</span>`;
       }
@@ -426,7 +428,8 @@ function renderParagraph(runs, elem = {}, config = {}) {
   return `<p style="text-align: justify;">${inner}</p>`;
 }
 
-// adaptiveImageWidth（竖图400/横图600）已抽到 image-width.js（顶部 import），可独立单测。
+// adaptiveImageWidth（横图600/长图400/普通竖图高375且宽不低于300）已抽到
+// image-width.js（顶部 import），可独立单测。
 
 function imageWidthOptions(config = {}) {
   const imgCfg = (config && config.image) || {};
@@ -447,8 +450,8 @@ function parsePercent(value) {
 }
 
 function renderedImageWidth(naturalWidth, naturalHeight, config = {}, elem = {}) {
-  // 图宽规则（红线下放：config.image.portrait_px/landscape_px/qr_px/qr_max_natural_px，
-  // 缺省降级 375/600/150/500——2026-06-11 飞书反馈问题十一/十五口径）。
+  // 图宽规则（红线下放到 config.image；当前缺省为 portrait 375、portraitMin 300、
+  // landscape 600、qr 150、qrMaxNatural 300、long 400、longMinRatio 1.7）。
   const opts = imageWidthOptions(config);
   if (isSeriesSiteConfig(config)) {
     const forced = Number(elem && (elem.renderWidth || elem.widthOverride));
@@ -671,9 +674,12 @@ function render(elems, config = {}) {
           (last === BLANK_LINE || last === CENTER_BLANK_LINE)) {
         lines.pop();
       } else if (lv >= 3) {
-        // h3/h4 紧贴：吃掉 p 分支刚补的尾空行，对齐 FoodTalks 次级标题结构
-        if (lines.length > 0 && lines[lines.length - 1] === BLANK_LINE) lines.pop();
-      } else if (!prevWasHeading && lines.length > 0 && lines[lines.length - 1] !== BLANK_LINE) {
+        // h3/h4 紧贴：吃掉上一块刚补的尾空行（含图注块尾的 center 空行——排版规范：
+        // 二级标题段前不空行，上一行为图片来源仍不空行），对齐 FoodTalks 次级标题结构
+        if (lines.length > 0 && (last === BLANK_LINE || last === CENTER_BLANK_LINE)) lines.pop();
+      } else if (!prevWasHeading && lines.length > 0 && last !== BLANK_LINE && last !== CENTER_BLANK_LINE) {
+        // h2 段前恰好 1 个空行：图注块尾已压 center 空行时视同已有空行，不再叠加
+        // （2026-08-17 运营反馈：一级标题前有图+图注时会多出一个空行）。
         lines.push(BLANK_LINE);
       }
       lines.push(renderHeading(lv, runsToPlain(e.runs), config));
@@ -1038,6 +1044,30 @@ async function classifyMd(text) {
   return { elems, imgN, title: (fm.frontmatter && fm.frontmatter.title) || '' };
 }
 
+// dropRepeatedDecorHeadings：同一文本的短标题在全文出现 ≥2 次 → 全部删除。
+// 公众号原文常在每个章节前放居中/加粗的账号名装饰行（如「天下网商」×3），视觉信号
+// 与标题无异，会被误升 h2（2026-08-17 运营反馈「标题识别不准」的实锤案例；线上成品
+// news/62813 的编辑处理是删除）。真实文章标题不会整篇重复，重复即装饰水印。
+// 带中文/数字序号的标题（一、/（一）/1.）即使重复也保留，绝不误删真标题。
+function dropRepeatedDecorHeadings(elems) {
+  const list = Array.isArray(elems) ? elems : [];
+  const counts = new Map();
+  const headingText = (e) => runsToPlain(e.runs || []).trim();
+  for (const e of list) {
+    if (!e || e.k !== 'h') continue;
+    const t = headingText(e);
+    if (t) counts.set(t, (counts.get(t) || 0) + 1);
+  }
+  return list.filter(e => {
+    if (!e || e.k !== 'h') return true;
+    const t = headingText(e);
+    if (!t || t.length > 16) return true;
+    if (/^[一二三四五六七八九十\d]+\s*[、．.：:]/.test(t)) return true;
+    if (/^[（(]\s*(?:[一二三四五六七八九十]+|\d+)\s*[)）]/.test(t)) return true;
+    return (counts.get(t) || 0) < 2;
+  });
+}
+
 // ---- Blocks 分类（从后端 /api/fetch-article 来的结构化块） ----
 
 // 服务端 /api/fetch-article 返回的 block 字段契约见 api/wechat_blocks.go：
@@ -1125,7 +1155,7 @@ export default {
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
-    const finalElems = markSeriesAboutLogoImages(promoted, config);
+    const finalElems = dropRepeatedDecorHeadings(markSeriesAboutLogoImages(promoted, config));
     return {
       lines: render(finalElems, config),
       imgN,
@@ -1140,7 +1170,7 @@ export default {
     const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
     const behaved = markInterviewSpeakerPrefixes(applyFoodTalksBehavior(normalized, config, { isRepost: !!(opts && opts.isRepost), title }));
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
-    const finalElems = markSeriesAboutLogoImages(promoted, config);
+    const finalElems = dropRepeatedDecorHeadings(markSeriesAboutLogoImages(promoted, config));
     return {
       lines: render(finalElems, config),
       imgN,
@@ -1160,7 +1190,7 @@ export default {
       sourceUrl: (data && data.source) || '',
     }));
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
-    const finalElems = markSeriesAboutLogoImages(promoted, config);
+    const finalElems = dropRepeatedDecorHeadings(markSeriesAboutLogoImages(promoted, config));
     return {
       lines: render(finalElems, config),
       imgN,

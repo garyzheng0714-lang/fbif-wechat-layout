@@ -30,6 +30,10 @@ func (s directFoodTalksStub) SearchNewsByTitle(context.Context, string) ([]foodT
 	return nil, nil
 }
 
+func (s directFoodTalksStub) SearchCompanies(context.Context, string) ([]foodTalksCompany, error) {
+	return nil, nil
+}
+
 func (s directFoodTalksStub) CreateNews(context.Context, foodTalksNews) (int64, error) {
 	return s.create()
 }

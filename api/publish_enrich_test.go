@@ -197,9 +197,9 @@ func TestPublishHTMLWechatTrailerLeakRejectsWechatChrome(t *testing.T) {
 func TestPublishRenderAlwaysStripsWechatTrailerForOwnAccount(t *testing.T) {
 	env := newPublishTestEnv(t)
 	var gotRepost *bool
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
 		env.fetchCalls++
-		return "印尼博士创业", "FBIF食品饮料创新", "Sage", articleURL, testPublishBlocksJSON, nil
+		return "印尼博士创业", "FBIF食品饮料创新", "Sage", articleURL, "", testPublishBlocksJSON, nil
 	}
 	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
 		gotRepost = new(bool)
@@ -487,6 +487,10 @@ func (s *recordingSourceTagStub) SearchNewsByTitle(context.Context, string) ([]f
 	return nil, nil
 }
 
+func (s *recordingSourceTagStub) SearchCompanies(context.Context, string) ([]foodTalksCompany, error) {
+	return nil, nil
+}
+
 func (s *recordingSourceTagStub) CreateTagByName(_ context.Context, _ int64, name string) (int64, error) {
 	s.created = append(s.created, name)
 	if s.createErr != nil {
@@ -549,8 +553,8 @@ func TestHTMLToPlainText(t *testing.T) {
 // enriching 的 AI 识别值**不得覆盖**它；只有页面未署名（byline 空）时 AI 才兜底。
 func TestEnrichKeepsStructuredByline(t *testing.T) {
 	env := newPublishTestEnv(t)
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
-		return "测试标题", "FBIF食品饮料创新", "Mote莫特", articleURL, testPublishBlocksJSON, nil
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
+		return "测试标题", "FBIF食品饮料创新", "Mote莫特", articleURL, "", testPublishBlocksJSON, nil
 	}
 	env.pipeline.enrich = func(ctx context.Context, job publishJob) (publishEnrichment, error) {
 		return publishEnrichment{Summary: "钩子摘要。", Author: "正文里猜的名字"}, nil

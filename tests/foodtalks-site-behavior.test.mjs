@@ -97,11 +97,14 @@ test('作者识别：首段命中正则 → 提升为 author', () => {
   assert.equal(out[1].k, 'p', '第 1 项保持 p');
 });
 
-test('作者识别：非首段命中不提升', () => {
+test('作者识别：非首段命中不提升为开头署名', () => {
   const elems = [p('引言段。'), p('作者：xxx'), p('正文。')];
   const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG);
   assert.equal(out[0].k, 'p');
-  assert.equal(out[1].k, 'p', '非首段的"作者："不提升');
+  // 非首段的"作者："绝不提升为 author（开头署名）；短文里它落在尾部区域时
+  // 会被阶段 4.5 降级为 footer-note 灰色小字（2026-08-17 运营反馈：尾部裸署名行不再黑粗）。
+  assert.notEqual(out[1].k, 'author', '非首段的"作者："不得提升为开头署名');
+  assert.equal(out[1].k, 'footer-note', '尾部区域的裸署名行应降级为灰色小字');
 });
 
 test('作者识别：首段是空 p / 图片 / 标题时，跳到第一个非空 p', () => {

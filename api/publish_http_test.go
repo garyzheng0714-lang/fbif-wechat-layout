@@ -626,11 +626,11 @@ func TestPublishSiteSyncRefetchLatestReplacesSupplierContentFromOriginalURL(t *t
 		t.Fatal(err)
 	}
 	refetchedBlocks := `[{"k":"p","text":"原文回源后的第一段"},{"k":"h","text":"原文回源后的标题"}]`
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
 		if got := publishRulePackIDFromContext(ctx); got != sitePublishRulePackID {
 			t.Fatalf("回源抓取必须沿用网站默认规则包，实际 %q", got)
 		}
-		return "原文标题", "原文公众号", "原文作者", articleURL, refetchedBlocks, nil
+		return "原文标题", "原文公众号", "原文作者", articleURL, "", refetchedBlocks, nil
 	}
 	second := doPublishServiceReq(mux, http.MethodPost, "/api/publish/site-sync",
 		fmt.Sprintf(`{"url":%q,"refetch_latest":true,"rule_pack_id":"ft-default","content_kind":"article","classification":"ordinary_confirmed","classifier_version":"monitor-v1"}`, testPublishSourceURL))

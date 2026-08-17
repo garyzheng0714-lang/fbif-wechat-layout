@@ -127,6 +127,7 @@ type foodTalksAPI interface {
 	ListTagsByType(ctx context.Context, tagTypeID int64, keywords string) ([]foodTalksTag, error)
 	CreateTagByName(ctx context.Context, tagTypeID int64, name string) (int64, error)
 	SearchNewsByTitle(ctx context.Context, title string) ([]foodTalksNewsListItem, error)
+	SearchCompanies(ctx context.Context, keyword string) ([]foodTalksCompany, error)
 }
 
 type publishResolvedRule struct {
@@ -174,10 +175,11 @@ type publishPipeline struct {
 	sourceIDByName   map[string]int64
 	sourceIDCacheAt  time.Time
 
-	// fetch 公众号 URL → 标题 + 公众号名 + 结构化作者署名 + 页面规范 URL + 中立 Block[] JSON
+	// fetch 公众号 URL → 标题 + 公众号名 + 结构化作者署名 + 页面规范 URL + 阅读原文链接 + 中立 Block[] JSON
 	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
-	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7）
-	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, canonicalURL, blocksJSON string, err error)
+	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7。originalSourceURL 是转载稿
+	//「阅读原文」指向的原文地址，网站转载声明超链接优先用它）
+	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, canonicalURL, originalSourceURL, blocksJSON string, err error)
 	// render Block[] → 选定网站规则包内联 HTML（默认走 render_proxy 转发内核）。
 	// 规则由渲染服务在每次请求内读取最新激活版本，调用方只传文章语义。
 	render func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error)
@@ -283,7 +285,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		retryNotification:                func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
 		now:                              time.Now,
 	}
-	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
 		return fetchSiteArticleWithContext(ctx, rules, articleURL)
 	}
 	if n := newFeishuNotifierFromEnv(); n != nil {
@@ -361,20 +363,20 @@ func normalizeSiteSourceKey(rawURL string) (string, error) {
 // fetchSiteArticleWithContext 进程内复用 main.go 的抓取主路径
 // fetchDirectBlocksWithOptions（含限流重试）；x-reader Markdown 回退喂不进渲染器，
 // 此处按失败处理（fail loud）。规则包从当前 worker context 进入。
-func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (string, string, string, string, string, error) {
+func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (string, string, string, string, string, string, error) {
 	rulePackID := publishRulePackIDFromContext(ctx)
-	title, blocks, sourceName, byline, canonicalURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
+	title, blocks, sourceName, byline, canonicalURL, originalSourceURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
 	if err != nil {
-		return "", "", "", "", "", fmt.Errorf("文章抓取失败: %w", err)
+		return "", "", "", "", "", "", fmt.Errorf("文章抓取失败: %w", err)
 	}
 	if len(blocks) == 0 {
-		return "", "", "", "", "", errors.New("未能从文章解析出内容块（链接可能已过期或被限流，请稍后重试）")
+		return "", "", "", "", "", "", errors.New("未能从文章解析出内容块（链接可能已过期或被限流，请稍后重试）")
 	}
 	raw, err := json.Marshal(blocks)
 	if err != nil {
-		return "", "", "", "", "", fmt.Errorf("序列化内容块失败: %w", err)
+		return "", "", "", "", "", "", fmt.Errorf("序列化内容块失败: %w", err)
 	}
-	return title, sourceName, byline, canonicalURL, string(raw), nil
+	return title, sourceName, byline, canonicalURL, originalSourceURL, string(raw), nil
 }
 
 // renderSiteHTML 进程内复用 render_proxy.go 的转发内核；自动发布强制 latest 模式，
@@ -639,7 +641,7 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 	if err != nil {
 		return err
 	}
-	title, sourceName, byline, canonicalURL, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
+	title, sourceName, byline, canonicalURL, originalSourceURL, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
 	if err != nil {
 		return err
 	}
@@ -681,6 +683,7 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 			current.PendingContentHash == "" && publishContentRank(current.ContentSource) <= publishContentRank(seed.Source)
 	}, func(current *publishJob) {
 		applyPublishContentSeed(current, seed)
+		current.OriginalSourceURL = originalSourceURL
 	})
 	if err == nil && !swapped {
 		return errPublishContentSuperseded
@@ -717,6 +720,19 @@ func validatePublishRenderResultForPack(result publishRenderResult, rulePackID s
 	return nil
 }
 
+// publishRenderSourceURL 渲染用的「原文链接」（转载声明《标题》超链接）：转载稿优先用
+// 公众号「阅读原文」指向的原文地址（排版规范：来源处超链接到原文链接，不能指回自家
+// 转载页——2026-08-17 运营反馈）；原创稿或没抓到「阅读原文」时回退提交的公众号链接。
+func publishRenderSourceURL(job publishJob) string {
+	if original, _ := publishArticleProvenance(job); !original {
+		u := strings.TrimSpace(job.OriginalSourceURL)
+		if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+			return u
+		}
+	}
+	return job.SourceURL
+}
+
 // stageRender blocks → 选定网站规则包内联 HTML（与网站人工排版同源）。
 // 每次调用 renderer 都读取最新激活规则；失败重试同样追随重试时的最新规则。
 func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error {
@@ -729,7 +745,7 @@ func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error
 	}
 	// 网站排版一律按转载切尾，与编辑器 URL 导入一致。publishSiteIsRepost 只决定
 	// CMS 来源类型（原创/转载）和提示文案，不得再关掉切尾。
-	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, job.SourceURL, job.BlocksJSON, true)
+	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, publishRenderSourceURL(job), job.BlocksJSON, true)
 	if err != nil {
 		return err
 	}
@@ -1597,7 +1613,7 @@ func (p *publishPipeline) submitWithRulePackAndMetadataContext(
 	// 因此短链必须先抓取页面并解析 __biz/mid/idx canonical identity，再原子建单；
 	// 绝不能先创建临时 job、事后把冲突输家打成 failed。
 	if publishSourceKeyIsShort(sourceKey) {
-		title, sourceName, byline, canonicalURL, blocksJSON, fetchErr := p.fetch(ctx, sourceURL)
+		title, sourceName, byline, canonicalURL, originalSourceURL, blocksJSON, fetchErr := p.fetch(ctx, sourceURL)
 		if fetchErr != nil {
 			return publishJob{}, false, fetchErr
 		}
@@ -1619,6 +1635,7 @@ func (p *publishPipeline) submitWithRulePackAndMetadataContext(
 			j.Classification = classification
 			j.Classifier = classifier
 			applyPublishContentSeed(j, seed)
+			j.OriginalSourceURL = originalSourceURL
 		})
 		if createErr != nil {
 			return publishJob{}, false, createErr
@@ -1725,7 +1742,7 @@ func (p *publishPipeline) submitStructuredContent(
 		if p.fetch == nil {
 			return publishJob{}, false, errors.New("短链缺少 canonical identity 解析器，未创建发布任务")
 		}
-		_, _, _, canonicalURL, _, fetchErr := p.fetch(withPublishRulePackID(ctx, rulePackID), input.URL)
+		_, _, _, canonicalURL, _, _, fetchErr := p.fetch(withPublishRulePackID(ctx, rulePackID), input.URL)
 		if fetchErr != nil {
 			return publishJob{}, false, fmt.Errorf("短链规范身份解析失败，未创建发布任务: %w", fetchErr)
 		}
@@ -1890,12 +1907,20 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 	if err != nil {
 		return foodTalksNews{}, err
 	}
-	// 目录（2026-08-14 用户裁定，金标准 62765）：Mote/原创且一级标题 > 5 时注入 h2 锚点
-	// 并写 toc 字段；锚点由内容哈希派生，重复组装字节一致。转载文章不生成目录。
-	content, toc := job.ContentHTML, ""
-	if sourceType == 0 || publishSiteIsMoteArticle(job) {
-		content, toc = publishSiteTocForContent(job.ContentHTML)
+	// 公司库关联（2026-08-17 用户裁定，规范 step2-(5)）：AI 标签词精确匹配公司库后，
+	// 正文首次出现处注入 mc-company-link，relatedCompanyIds 同步写关联 id。
+	// 检索按词幂等，重复组装对同一标签集产出一致结果（同一公司库状态下确定性）。
+	companyMatches := p.siteCompanyMatchesFor(ctx, job)
+	enriched := injectCompanyLinks(job.ContentHTML, companyMatches)
+	relatedCompanyIDs := make([]int64, 0, len(companyMatches))
+	for _, m := range companyMatches {
+		relatedCompanyIDs = append(relatedCompanyIDs, m.Company.ID)
 	}
+	// 目录（2026-08-17 用户裁定：所有文章一视同仁，不分原创/转载——此前只给原创/Mote
+	// 是误解，历史转载没目录多为人工漏掉）：字数与标题数达标即注入 h2 锚点并写 toc
+	// 字段；锚点由内容哈希派生，重复组装字节一致。阈值见 publishSiteTocForContent。
+	// 在公司链接注入之后计算，锚点基于最终正文。
+	content, toc := publishSiteTocForContent(enriched)
 	return foodTalksNews{
 		Title:         job.Title,
 		CoverImg:      job.CoverURL, // mirroring 后已是转存 OSS URL；enriching 可能换成 AI 选中图
@@ -1908,8 +1933,8 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 		Summary:       job.Summary, // M5 AI 摘要（兜底=正文前 100 字）
 		// newsTags（2026-08-14 复测解除封印）：契约 §9 记载的「PUT 带标签必 500 且污染
 		// 文章」已在后端修复——测试环境 7321/7322 实测 POST/PUT 带标签、重复 PUT、清空
-		// 全部 code=0 且读写闭环；生产 62765 运营带标签多次编辑亦正常。当前只给 Mote
-		// 文章挂「Mote莫特」+ 内容系列标签，且只解析不创建（见 siteNewsTagsFor）。
+		// 全部 code=0 且读写闭环；生产 62765 运营带标签多次编辑亦正常。所有文章解析
+		// AI 标签，Mote/系列标签优先，总数最多 3 个且只解析不创建（见 siteNewsTagsFor）。
 		NewsTags: p.siteNewsTagsFor(ctx, job),
 		// 以下三项是发布/编辑接口必填。PUT 是全量覆盖，Go 零值会把 CMS 默认值盖成
 		// 0/false。官方文档示例与字段表均为 isLatest=1 / imgPreviewEnable=true /
@@ -1917,8 +1942,9 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 		IsLatest:          1,
 		ImgPreviewEnable:  true,
 		CommentEnable:     1,
-		Content:           content, // mirroring 后成品（图片已全部 OSS 化）；仅目录场景多出 h2 锚点 id
+		Content:           content, // mirroring 后成品（图片已全部 OSS 化）；组装层再注入公司链接与 h2 锚点 id
 		TOC:               toc,
+		RelatedCompanyIDs: relatedCompanyIDs,
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),
 		PrimaryCategoryID: primary,
 		CategoryIDs:       categories,
@@ -2013,6 +2039,62 @@ func siteOwnAccounts() map[string]bool {
 
 var explicitSiteRepostDisclosure = regexp.MustCompile(`^本文为转载文章(?:[，,：:].*)?[。.!！]?$`)
 
+// 确定性出处声明模式（2026-08-17 运营反馈：任务 #101 天下网商转载稿 AI 漏抽出处、
+// 被误判原创进独家专栏）。自家公众号转发他人文章时，正文头部/尾部惯例带这三类声明，
+// 用代码直取兜底，不再全靠模型（规范 §1：能用代码就不用模型）：
+//
+//	「来源：天下网商（ID：xxx）」「本文来自微信公众号：小食代」「本文为新零售原创，作者：…」
+var publishDeclaredSourcePatterns = []*regexp.Regexp{
+	// 分隔符兼容中英文冒号与竖线/斜杠（红线 17 公众号渠道同口径：来源｜天下网商）
+	regexp.MustCompile(`^(?:来源|出处|文章来源|本文来源)\s*[：:｜|/]\s*(.+)$`),
+	regexp.MustCompile(`本文(?:来自|转自|转载自|经授权转载自|首发于)\s*(?:微信)?(?:公众号)?\s*[：:「"“]?\s*([^\s，。、；：:（()）「」"”]{2,30})`),
+	regexp.MustCompile(`^本文(?:系|为)\s*([^\s，。、；：:（()）「」"”]{2,30}?)\s*(?:原创|首发|授权)`),
+}
+
+var publishDeclaredSourceIDSuffixRe = regexp.MustCompile(`[（(]\s*(?i:ID)[：:][^）)]*[）)]?\s*$`)
+
+// publishDeclaredSource 从正文块里确定性抽取出处声明的机构名；抽不到返回空串。
+// 只扫头部前 12 个文本块与尾部 35% 区域——转载声明的惯例位置；不扫正文中段，
+// 避免把「来源：某数据库」之类的行内说明误当出处。图/图注/表格块跳过。
+func publishDeclaredSource(blocksJSON string) string {
+	var blocks []Block
+	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err != nil {
+		return ""
+	}
+	tailFrom := int(float64(len(blocks)) * 0.65)
+	textSeen := 0
+	for i, block := range blocks {
+		if block.K == "img" || block.K == "cap" || block.K == "video" || block.K == "table" {
+			continue
+		}
+		textSeen++
+		if textSeen > 12 && i < tailFrom {
+			continue
+		}
+		line := strings.TrimSpace(publishExternalDistributionBlockText(block))
+		if line == "" || len([]rune(line)) > 80 {
+			continue
+		}
+		for _, re := range publishDeclaredSourcePatterns {
+			m := re.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			name := strings.TrimSpace(publishDeclaredSourceIDSuffixRe.ReplaceAllString(m[1], ""))
+			name = strings.Trim(name, `「」""“”《》`)
+			// 声明行里常跟着「，作者：xxx」等后缀，截到第一个分隔符为止
+			if idx := strings.IndexAny(name, "，,。；;："); idx >= 0 {
+				name = name[:idx]
+			}
+			name = strings.TrimSpace(name)
+			if n := len([]rune(name)); n >= 2 && n <= 30 {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
 // publishSiteIsRepost 只回答 CMS 来源类型：正文明确转载声明优先；否则自家公众号
 // 按原创，其余公众号按转载。它不决定是否切除微信导流尾——进网站一律切尾。
 func publishSiteIsRepost(sourceName, blocksJSON string) bool {
@@ -2049,6 +2131,12 @@ func publishSiteIsRepost(sourceName, blocksJSON string) bool {
 func publishArticleProvenance(job publishJob) (original bool, source string) {
 	own := siteOwnAccounts()
 	if src := strings.TrimSpace(job.AISource); src != "" && !own[src] {
+		return false, src
+	}
+	// AI 没抽到出处时用确定性声明抽取兜底（任务 #101 教训：自家号转发天下网商，
+	// AI 把机构名填进 author、AISource 为空 → 误判原创进独家专栏）。抽到自家名
+	//（如「本文为FBIF食品饮料创新原创」）时不在此返回，继续走自家清单原创判定。
+	if src := publishDeclaredSource(job.BlocksJSON); src != "" && !own[src] {
 		return false, src
 	}
 	name := strings.TrimSpace(job.SourceName)

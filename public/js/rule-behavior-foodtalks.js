@@ -487,6 +487,23 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     if (lines.length) out[i] = { k: 'footer-note', lines };
   }
 
+  // 阶段 4.5：头尾裸署名行（「来源：xxx」「作者：xxx，编辑：yyy」「文｜范婷婷」）。
+  // 转载稿头部声明行与尾部署名行此前没有任何分支接住，掉进正文段保留公众号加粗 →
+  // 黑色粗体（2026-08-17 运营反馈，排版规范：来源/作者是模板小字）。仅文章头部前几个
+  // 元素与尾部区域触发，避免把正文中段合法的「来源：某数据库」说明误降级；整行 ≤60 字
+  // 再收。分隔符兼容中英文冒号与竖线（红线 17 公众号渠道同口径：「来源｜天下网商」）。
+  const tailCreditRe = behaviorRegex(behavior, 'tail_credit_regex',
+    '^(?:来源|出处|作者|编辑|编审|责编|主编|美编|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|选题|文)\\s*[：:｜|]\\s*\\S');
+  for (let i = 0; i < out.length; i++) {
+    const e = out[i];
+    if (!e || e.k !== 'p' || e.tocEntry) continue;
+    if (i > 4 && !isNearTail(out, i)) continue;
+    const text = runsToText(e.runs).trim();
+    if (!text || text.length > 60) continue;
+    tailCreditRe.lastIndex = 0;
+    if (tailCreditRe.test(text)) out[i] = { k: 'footer-note', lines: [text] };
+  }
+
   // 阶段 5：补网站口径提示页脚。
   // 公众号转载文切掉原提示页脚时需要补；网站 beta 左栏开启「提示声明」时也应生成。
   if ((trimmed.cutWechatTip || shouldGenerateSiteTip(config)) && !out.some(e => e && e.k === 'tip')) {

@@ -12,7 +12,7 @@
 
 - 源文章（公众号原文，上海艾录）: https://mp.weixin.qq.com/s/QEUsfQfgs0tJqA1sc1QRMw
 - 正确成品（网站）: https://www.foodtalks.cn/news/62303（问题八~十六）、https://www.foodtalks.cn/news/62139（问题七）
-- 截图已下载到 /tmp/fbif-rows/row{09..19}_{before,after}.png
+- 截图当时下载到 `/tmp/fbif-rows/row{09..19}_{before,after}.png`，临时产物现未保留；不要把该路径当作当前证据。
 
 ## 初始问题清单（来自飞书表格 ROW 9-19）
 
