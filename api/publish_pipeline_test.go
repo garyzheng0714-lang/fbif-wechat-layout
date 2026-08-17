@@ -44,8 +44,8 @@ func TestLateCanonicalDuplicateBecomesSupersededWinnerReference(t *testing.T) {
 	}
 	pipeline := &publishPipeline{
 		store: store,
-		fetch: func(context.Context, string) (string, string, string, string, string, error) {
-			return "重复文章", "FBIF", "", canonicalURL, testPublishBlocksJSON, nil
+		fetch: func(context.Context, string) (string, string, string, string, string, string, error) {
+			return "重复文章", "FBIF", "", canonicalURL, "", testPublishBlocksJSON, nil
 		},
 	}
 	err = pipeline.stageFetch(context.Background(), loser)
@@ -70,8 +70,8 @@ func TestStructuredSupplierShortAliasesResolveBeforeCreatingJob(t *testing.T) {
 	canonicalURL := "https://mp.weixin.qq.com/s?__biz=MzStructured&mid=9&idx=1"
 	pipeline := &publishPipeline{
 		store: store,
-		fetch: func(context.Context, string) (string, string, string, string, string, error) {
-			return "身份解析", "FBIF", "", canonicalURL, testPublishBlocksJSON, nil
+		fetch: func(context.Context, string) (string, string, string, string, string, string, error) {
+			return "身份解析", "FBIF", "", canonicalURL, "", testPublishBlocksJSON, nil
 		},
 		spawn: func(func()) {},
 		now:   time.Now,
@@ -172,6 +172,12 @@ func newFTStub(t *testing.T) *ftStub {
 		}
 		if r.URL.Path == "/news/admin/news/page" {
 			// 同题防重的标题检索：默认无同名已发布稿
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"records":[]}}`)
+			return
+		}
+		if r.URL.Path == "/company/companies/search" {
+			// 公司库关联检索（2026-08-17）：默认无命中，不影响主链路断言
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"records":[]}}`)
 			return
@@ -277,9 +283,9 @@ func newPublishTestEnv(t *testing.T) *publishTestEnv {
 	env.pipeline = &publishPipeline{
 		store:     env.store,
 		publicDir: "../public",
-		fetch: func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+		fetch: func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
 			env.fetchCalls++
-			return "测试标题", "测试公众号", "", articleURL, testPublishBlocksJSON, nil
+			return "测试标题", "测试公众号", "", articleURL, "", testPublishBlocksJSON, nil
 		},
 		render: func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
 			return successfulPublishRenderResult(testPublishRenderedHTML, testPublishResolvedRule()), nil
@@ -706,9 +712,9 @@ func TestNormalizeSiteSourceKey(t *testing.T) {
 func TestPublishCanonicalAliasDedupesShortAndLongLinks(t *testing.T) {
 	env := newPublishTestEnv(t)
 	canonical := "https://mp.weixin.qq.com/s?__biz=MzA1&mid=2&idx=1&sn=canonical-signature"
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
 		env.fetchCalls++
-		return "同一篇文章", "测试公众号", "", canonical, testPublishBlocksJSON, nil
+		return "同一篇文章", "测试公众号", "", canonical, "", testPublishBlocksJSON, nil
 	}
 	first, created, err := env.pipeline.submit("https://mp.weixin.qq.com/s/ShortAliasA")
 	if err != nil || !created {
@@ -741,7 +747,7 @@ func TestPublishCanonicalAliasConcurrentShortLinksCreateOneJob(t *testing.T) {
 	var fetchMu sync.Mutex
 	fetchN := 0
 	bothFetched := make(chan struct{})
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, error) {
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
 		fetchMu.Lock()
 		fetchN++
 		if fetchN == 2 {
@@ -749,7 +755,7 @@ func TestPublishCanonicalAliasConcurrentShortLinksCreateOneJob(t *testing.T) {
 		}
 		fetchMu.Unlock()
 		<-bothFetched
-		return "并发同文", "测试公众号", "", canonical, testPublishBlocksJSON, nil
+		return "并发同文", "测试公众号", "", canonical, "", testPublishBlocksJSON, nil
 	}
 
 	type result struct {

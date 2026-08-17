@@ -11,8 +11,8 @@ package main
 //  1. verification token 校验：env FEISHU_VERIFICATION_TOKEN 与请求携带的 token 比对，
 //     不匹配或未配置一律 401；challenge 同样 fail-closed，须先配置 token 再验证 URL。
 //     （长连接模式无此项：SDK 建连时内置鉴权。）
-//  2. 审核人权限：operator.open_id 必须命中 FEISHU_REVIEWER_OPEN_IDS；空白名单默认拒绝，
-//     Webhook 与 WebSocket 共用同一检查。
+//  2. 审核人权限：operator.open_id 命中 FEISHU_REVIEWER_OPEN_IDS 时不检查群；否则只有
+//     启用群成员模式且 chat_id 匹配当前配置审核群（环境变量或投递设置）才放行，其他群拒绝。
 //  3. 业务态校验：审核动作走与 HTTP review 端点同一个 review 核心（publishPipeline.review），
 //     仅 awaiting_review 可操作、approve 仍是翻公开的唯一路径——按钮不是新的权限入口。
 //

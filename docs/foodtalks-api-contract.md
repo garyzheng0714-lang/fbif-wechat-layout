@@ -1,11 +1,11 @@
-# FoodTalks 发布 API 实测契约（2026-07-10 冒烟）
+# FoodTalks 发布 API 实测契约（2026-07-10 冒烟，2026-08-14 补测）
 
-> 来源：openspec change `content-publish-pipeline` Phase 1 冒烟测试实测结论。
-> 环境：测试环境 `api-we-test.foodtalks.cn`（前台 `test.foodtalks.cn`）。
-> 测试文章：7240、7241（标题带 [SYNC-TEST]，测毕均已置 `publishStatus=2` 下线，前台 404）。
+> 来源：openspec change `content-publish-pipeline` Phase 1 冒烟测试，以及 2026-08-14 双环境补测。
+> 环境：2026-07-10 的 CRUD 样本来自测试环境 `api-we-test.foodtalks.cn`（前台 `test.foodtalks.cn`）；2026-08-14 另核验了正式环境网关、标签、分类与同题查询契约。两类证据不可混写成同一环境的完整冒烟。
+> 测试文章：测试环境 7240、7241（标题带 [SYNC-TEST]，测毕均已置 `publishStatus=2` 下线，前台 404）。
 > 鉴权 token 为抓包个人 token，**不入库**（视为已泄露级别，正式上线换服务级凭证，见 tasks Phase 0）。
 
-## 1. 网关（写进未来客户端，缺一层就白忙——**两环境规则相反**，2026-07-10 全天实测）
+## 1. 网关（**两环境规则相反**；2026-07-10 测试环境、2026-08-14 正式环境实测）
 
 | 环境 | 网关规则 | 客户端头策略 |
 |---|---|---|
@@ -72,7 +72,9 @@ POST publishStatus=0（草稿进站，外界不可见）
 - **流水线图片方案（定型）**：mmbiz → 排版工具既有 `POST /api/oss-upload`（`urls` 模式：服务器内网并发「取图+传 OSS」，实测 19 张 ~1.3s；上游 `WECHAT_UPLOAD_ENDPOINT=localhost:9000/api/wechat-upload`，python 服务）→ content 直接用 OSS URL 提交。零新开发。
 - ⚠️ 记录在案的权衡：文章图片资产落在我方 OSS 而非 FoodTalks 存储——桶（fbif-gary-img-hz）若停用/欠费，已发布文章图片全挂。长期可与网站后端商定归一到 static.foodtalks.cn，不阻塞 MVP。
 
-## 9. newsTags 完整实测矩阵（2026-07-10 下午，测试环境 7246/7247/7248 实验）
+## 9. newsTags 实测与当前写入契约
+
+下表是 2026-07-10 的历史故障矩阵，用来解释旧文章为何曾禁止写标签；2026-08-14 复测已确认后端修复，表中的 PUT 失败不再代表当前行为。
 
 **结构已破解**：库表 `news_news_tag` 每行 `{news_id, tag_id, tag_name}` → API 要的是**对象数组** `[{"tagId": <int>, "tagName": <string>}]`，且 **tagId 必须真实存在**于标签库（`basic_tag`，新闻标签 `tag_type_id=6`）。字符串数组 500 的谜底就是结构不对。
 
@@ -90,15 +92,47 @@ POST publishStatus=0（草稿进站，外界不可见）
 **🚨 后端 bug 现象**：UPDATE 路径的 newsTags 处理疑似「先写后炸、非事务」——PUT 带标签必 500，且失败的 PUT 会把文章置成「带标签」脏态，此后该文章**任何 PUT 都 500**（连 publishStatus 都改不了）。
 **2026-07-13 补充接口文档结论**：已提供标签类型、标签列表、标签分页查询、按 ID 批量取详情和创建标签接口，可用于把 AI 标签名称核验成真实 `tagId`；但文档没有提供安全的“资讯-标签关联写入”接口，并再次明确 PUT 缺陷修复前 `newsTags` 必须保持空数组。主链路因此继续不写标签；`foodTalksNews.NewsTags` 已收紧为 `[]foodTalksNewsTag`，从类型层禁止误发字符串数组。自动创建标签也不启用，避免把模型输出直接写入全局标签库。
 
-**2026-08-14 复测：PUT 标签缺陷已在后端修复，封印解除。** 测试环境 7321/7322 实测：PUT 带真实 tagId、重复 PUT、PUT 清空、POST 带标签后再 PUT 全部 code=0 且读写闭环（GET 回读与写入一致，无“污染后任何 PUT 都 500”现象）；正式环境 62765 由运营带标签多次编辑亦正常。主链路自此对 **Mote 文章**写 `newsTags`（「Mote莫特」+ 正文声明的内容系列，只按名解析 `tag_type_id=6`、不自动创建，见 `api/publish_site_enhance.go` 的 `siteNewsTagsFor`）。`toc` 字段同日启用：Mote/原创且 h2>5 时由 `buildSiteNews` 注入 h2 锚点并写 `[{id,level,title}]`（前台 toc-menu 只认这个字段，API 直发不会自动生成）。守护：`api/publish_site_enhance_test.go`。
-遗留：实验文章 7246/7247/7248 无法经 news PUT 置 2 下线，停留草稿态（前台不可见），请后端顺手清理。
+**2026-08-14 复测：PUT 标签缺陷已修复，封印解除。** 测试环境 7321/7322 实测：PUT 带真实 tagId、重复 PUT、PUT 清空、POST 带标签后再 PUT 全部 `code=0`，GET 回读与写入一致；正式环境 62765 也已由运营带标签多次编辑。
 
-## 10. 未决问题（转给网站后端 / Phase 0）
+当前流水线契约：
+
+- 所有文章的 AI 预填 `job.Tags` 都参与解析；Mote 文章先放「Mote莫特」与正文声明的系列标签，再补 AI 标签。
+- 总数最多 3 个，只在新闻标签库 `tag_type_id=6` 中按规范化名称等值解析（忽略大小写与全角/半角空格）；未命中就跳过，不自动创建全局标签。
+- 栏目/活动标签双侧拦截（2026-08-17，排版规范「不添加首发栏目为标签」）：`publishSiteTagBlocked` 拦首发栏目专名（快讯/深度专题/创新周报/独家专栏二级等）与活动模式（`FBIF\d{4}`、会后报告、参展企业、Wow 奖）；发布解析时过滤 AI 标签，`editorial_norms.go` 注入 prompt 词表前同样过滤。品类词（乳品/饮料/咖啡…）与品牌名是合法标签不拦。
+- `toc`（2026-08-17 对齐排版规范 + 用户裁定「所有文章一视同仁」）：正文非空白字符 ≥3000 且 h2+h3 合计 ≥5 时，`buildSiteNews` 在 CMS payload 组装层注入确定性 h2 锚点并写 `[{id,level,title}]`（条目只收 h2，62765 金标准）；不再区分原创/转载。交互式网站渲染器仍保持 `mctoc.enabled=false`。
+- 守护：`api/publish_site_enhance_test.go`。
+
+### 公司库关联（2026-08-17 生产实测）
+
+- 检索：`GET /company/companies/search?current=1&size=10&keyword=`——前台公开接口，白名单 IP 纯 token/无 token 均可；返回字段 `id/cnName/shortCnName（逗号简称表）/urlCode`。文档记载的 `/company/admin/companies/page` 对当前服务账号返回 `Access is denied`（缺 company 模块权限），勿用。
+- 前台公司页 = `https://www.foodtalks.cn/company/<urlCode>`；数字 id 路径打不开（实测「内容不存在」）。
+- 流水线：AI 标签内容词与 cnName/shortCnName 规范化等值匹配（多条优先含「中国」，歧义放弃）；正文首次出现处注入 `mc-company-link`（`data-id/data-name/data-code/data-type=company`，对齐小工具箱成品 news/48190），标题/图注/已有链接内不注入；`relatedCompanyIds` 写命中 id。失败降级不 fail。
+- 守护：`api/publish_company_links_test.go`、`api/company_match_smoke_test.go`。
+
+## 10. 分类与 CMS 同题防重（2026-08-14）
+
+### 分类
+
+- 原创：`FOODTALKS_CATEGORY_IDS`，默认 `52,58`。
+- 转载：`FOODTALKS_REPOST_CATEGORY_IDS`，默认 `53`。
+- 两者必须显式分开，不能把转载稿继续写进原创专栏。
+
+### 标题检索
+
+出站请求：`GET /news/admin/news/page?current=1&size=20&title=<文章标题>`。2026-08-14 实测 `title` 能过滤，`keywords` 会被后端忽略；客户端仍会对返回项做二次核验：只认 `publishStatus=1`，标题去全部空白后精确相等，并排除任务自己的 `FoodTalksNewsID`。
+
+同题保护分两层：
+
+1. 发出或刷新待审核卡前 best effort 查询；命中时持久化 `site_duplicate_news_id` 并在卡片标红。查询失败只记 WARN，不阻断卡片。
+2. 首次审核公开的 `stagePublicize` 在公开 intent 落盘前重新查询；命中或查询失败都 fail closed。此时尚未进入 FoodTalks 外调窗口，恢复后可以安全重试。
+
+边界：这道硬闸目前只覆盖首次 `stagePublicize`，`stageRepublish` 尚未接入；不能把当前能力描述成“每次重新公开都防重”。运营在 CMS 手工发布或编辑过的稿件始终优先，批量修复不得用流水线库存覆盖。
+
+## 11. 未决问题（转给网站后端 / Phase 0）
 
 1. `isPublic`、`sourceType`、`isLatest`、`commentEnable` 的完整枚举与语义（sourceType 0/1=原创/转载已由 mc-fb 库 163 篇分布反推实锤，见 docs/editorial-norms-foodtalks.md §1）
 2. `publishStatus=2` vs `3` 的官方语义区分
 3. ~~图片上传接口~~ **已解除**（见 §8：API 不校验图片域名，走排版工具 OSS）
-4. 正式环境 Base URL + 服务级长效 token
-5. 「有料」标签对应的 categoryId 表；线上分类 ID 全集（本次沿用文档示例 52/58）
+4. 正式环境服务级长效 token 与当前实例目标配置仍须从秘密配置和 readiness 核验；已验证的 Base URL 不再列为未知
+5. 「有料」等全部 categoryId 的官方表；当前流水线只使用已验证的原创 `52,58` 与转载 `53`
 6. 列表页排序规则（2026 年文章混在 2023 年之后，疑有置顶/权重逻辑，同步后运营可见性预期要对齐）
-7. **修复 PUT newsTags 500，或提供安全的资讯-标签关联写接口**（§9 矩阵）——满足其一并完成双环境验证后才能开启标签直发

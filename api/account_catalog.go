@@ -27,7 +27,7 @@ type accountMeta struct {
 	ID                  string
 	Channel             string // mp | ft
 	TemplateID          string // 复用 'fbif' 原地切换；独立渲染器走自己的 templateId
-	AccountName         string // 顶栏账号菜单显示名
+	AccountName         string // 左栏导入卡账号菜单显示名
 	PreviewAccountName  string // 预览作者行显示名
 	BehaviorAccountName string // 注入页脚 {{ account.name }}
 	AvatarURL           string

@@ -3,17 +3,17 @@ package main
 // foodtalks.go — FoodTalks 网站发布 API 客户端（施工图 S3：从 FBIF资讯订阅仓
 // internal/foodtalks/client.go 搬入，逻辑逐行保真，仅改 package main 并给标识符加
 // foodTalks 前缀避免单包冲突）。唯一真相源：docs/foodtalks-api-contract.md
-//（2026-07-10 冒烟实测），要点：
-//   - 网关（契约 §1）：请求必须带 Origin + Referer + 浏览器形 UA，否则 nginx 直接 403 返回
-//     HTML 错误页（不是 JSON）；应用层无/错 token 才是 401。
+//（2026-07-10 冒烟 + 2026-08-14 双环境补测），要点：
+//   - 网关（契约 §1）：测试环境需 Origin + Referer + 浏览器形 UA；正式环境白名单模式
+//     必须反过来清空这些浏览器伪装头。应用层无/错 token 才是 401。
 //   - 响应（契约 §2）：统一 {"code":0,"msg":"success","data":<newsId>}；业务失败也是
 //     HTTP 200（code!=0 + 中文 msg），客户端必须判 code，不能信 HTTP 状态码。
 //   - publishStatus（契约 §3）：0=草稿/1=发布/2=下线；单向门 1↛0（驳回回炉用 2）。
 //     API 不校验枚举范围（乱值也 success），客户端只准发 0/1/2——本文件发前显式校验。
 //   - PUT 是全量覆盖语义（契约 §7）：请求体与 POST 同一份完整字段集，不是增量 patch。
 //
-// 凭证 env-only（FOODTALKS_BASE_URL / FOODTALKS_TOKEN / FOODTALKS_ORIGIN），绝不入库、
-// 入 git、入日志；缺任一构造即失败（fail loud），不留默认值兜底真实域名。
+// 配置 env-only（FOODTALKS_BASE_URL / FOODTALKS_TOKEN；测试环境另配 FOODTALKS_ORIGIN），
+// 绝不入库、入 git、入日志；缺 URL/token 即失败（fail loud），不以真实域名默认兜底。
 
 import (
 	"bytes"
@@ -45,8 +45,14 @@ const (
 	foodTalksTagPagePath                = "/basic/tag/page"
 	foodTalksTagByNamePath              = "/basic/admin/tag/by-name"
 
-	// foodTalksBrowserUA 浏览器形 UA：nginx/WAF 层按「像不像浏览器」放行（契约 §1），
-	// 非浏览器 UA 会被拦。值本身不敏感，固定一份即可，不必可配。
+	// foodTalksCompanySearchPath 公司库检索（2026-08-17 生产实测）：文档记载的
+	// /company/admin/companies/page 对服务账号返回「Access is denied」（缺 company
+	// 模块权限），而前台公开检索接口同域可用且字段更全（cnName/shortCnName/urlCode），
+	// 用它做正文公司库关联的解析源。
+	foodTalksCompanySearchPath = "/company/companies/search"
+
+	// foodTalksBrowserUA 仅用于 FOODTALKS_ORIGIN 非空的测试网关：该环境要求浏览器形
+	// UA；正式白名单模式恰好相反，request 构造会显式清空 UA（契约 §1）。
 	foodTalksBrowserUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
@@ -80,8 +86,8 @@ func (e *foodTalksAPIError) Error() string {
 }
 
 // foodTalksNewsTag 是发布/编辑接口确认过的 newsTags 元素结构。tagId 必须来自
-// tag_type_id=6 的真实标签库；当前后端 PUT 路径仍有污染文章的缺陷，因此主链路只会
-// 发送空数组，但类型层必须先禁止退回会直接 500 的字符串数组。
+// tag_type_id=6 的真实标签库；2026-08-14 复测确认 PUT 已修复，主链路会发送按规范化
+// 名称解析到的现有标签且不自动创建。类型层同时禁止退回会 500 的字符串数组。
 type foodTalksNewsTag struct {
 	TagID   int64  `json:"tagId"`
 	TagName string `json:"tagName"`
@@ -521,6 +527,65 @@ func (c *foodTalksClient) SearchNewsByTitle(ctx context.Context, title string) (
 	}
 	if env.Data == nil {
 		return []foodTalksNewsListItem{}, nil
+	}
+	return env.Data.Records, nil
+}
+
+// foodTalksCompany 公司库检索结果（2026-08-17 生产实测字段）。
+// URLCode 是前台公司页地址段（/company/<urlCode>；数字 id 打不开公司页，实测 404 文案）。
+type foodTalksCompany struct {
+	ID          int64  `json:"id"`
+	CnName      string `json:"cnName"`      // 全称：贵州茅台酒股份有限公司
+	ShortCnName string `json:"shortCnName"` // 简称逗号表：贵州茅台,茅台股份,茅台（可空）
+	EnName      string `json:"enName"`
+	ShortEnName string `json:"shortEnName"`
+	URLCode     string `json:"urlCode"`
+}
+
+// SearchCompanies 按关键词检索公司库（GET /company/companies/search）。
+// 返回前 10 条即可覆盖匹配场景；调用方负责精确匹配与母/子公司选择。
+func (c *foodTalksClient) SearchCompanies(ctx context.Context, keyword string) ([]foodTalksCompany, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil, nil
+	}
+	query := url.Values{}
+	query.Set("current", "1")
+	query.Set("size", "10")
+	query.Set("keyword", keyword)
+	path := foodTalksCompanySearchPath + "?" + query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("foodtalks: 构造公司检索请求: %w", err)
+	}
+	c.applyHeaders(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("FoodTalks 接口不可达（GET %s）: %w", foodTalksCompanySearchPath, err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return nil, fmt.Errorf("foodtalks: 读公司检索响应: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FoodTalks 公司检索异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data *struct {
+			Records []foodTalksCompany `json:"records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return nil, fmt.Errorf("FoodTalks 公司检索响应不是预期 JSON（响应片段：%s): %w", foodTalksSnippet(respBody), err)
+	}
+	if env.Code != 0 {
+		return nil, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
+	}
+	if env.Data == nil {
+		return []foodTalksCompany{}, nil
 	}
 	return env.Data.Records, nil
 }

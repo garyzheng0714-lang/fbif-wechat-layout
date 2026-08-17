@@ -66,6 +66,6 @@ func TestFoodTalksNewsTagsUseConfirmedObjectShape(t *testing.T) {
 		t.Fatalf("marshal empty newsTags: %v", err)
 	}
 	if !strings.Contains(string(empty), `"newsTags":[]`) {
-		t.Fatalf("修复 PUT 标签缺陷前必须显式发送空数组，不能是 null：%s", empty)
+		t.Fatalf("没有标签时必须显式发送空数组，不能是 null：%s", empty)
 	}
 }

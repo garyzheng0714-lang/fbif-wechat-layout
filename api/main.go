@@ -135,7 +135,7 @@ func main() {
 	publishPipe.publicDir = publicDir
 	publishPipe.enableBoundedWorkers(4, 128)
 	if !feishuReviewerAllowlistConfigured() {
-		log.Printf("publish: FEISHU_REVIEWER_OPEN_IDS 未配置，所有卡片审核动作将 fail closed")
+		log.Printf("publish: FEISHU_REVIEWER_OPEN_IDS 未配置；卡片审核仅在群成员模式与审核群均已配置时可用，否则 fail closed")
 	}
 	if !publishSyncServiceTokenConfigured() {
 		log.Printf("publish: PUBLISH_SYNC_SERVICE_TOKEN 未配置，机器提交与紧凑状态接口仅允许管理员调用，readiness=false")
@@ -534,7 +534,7 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		// classification is deterministic, not inferred from a lossy MD
 		// intermediate. See wechat_blocks.go.
 		accountID := firstNonEmpty(req.AccountID, req.Account)
-		title, blocks, sourceName, byline, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
+		title, blocks, sourceName, byline, _, originalSourceURL, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
 		if derr == nil && len(blocks) > 0 {
 			writeJSON(w, 200, map[string]interface{}{
 				"title":       title,
@@ -542,6 +542,8 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 				"source":      req.URL,
 				"source_name": sourceName,
 				"byline":      byline,
+				// 转载文章「阅读原文」指向的原文地址；转载声明《标题》超链接优先用它
+				"original_source_url": originalSourceURL,
 			})
 			return
 		}
@@ -568,7 +570,7 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 // 生产 job #1/#2 的 source_name 为空即此暗伤）：sourceName=公众号名（var nickname），
 // byline=发布者填的结构化作者署名（meta author / var author，没署名就是空）。
 // 发布流水线 fetching 阶段消费；handler 行为不变。
-func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title string, blocks []Block, sourceName, byline, canonicalURL string, err error) {
+func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title string, blocks []Block, sourceName, byline, canonicalURL, originalSourceURL string, err error) {
 	opts = normalizeArticleBlockOptions(opts)
 	// 3 attempts, exponential-ish backoff. WeChat 限流通常几百毫秒内恢复。
 	backoffs := []time.Duration{0, 600 * time.Millisecond, 1500 * time.Millisecond}
@@ -585,8 +587,8 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 		}
 		t, bs, _ := extractArticleBlocksWithOptions(string(bodyBytes), opts)
 		if len(bs) > 0 {
-			nickname, by := extractWechatArticleMeta(string(bodyBytes))
-			return t, bs, nickname, by, articleSourceURL(url, finalURL, string(bodyBytes)), nil
+			nickname, by, msgSourceURL := extractWechatArticleMeta(string(bodyBytes))
+			return t, bs, nickname, by, articleSourceURL(url, finalURL, string(bodyBytes)), msgSourceURL, nil
 		}
 		// 传输成功但无内容：可能是反爬中间页，重试一次可能拿到真正文。
 		transportErr = nil
@@ -594,7 +596,7 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 	}
 	// 全部尝试都没拿到内容：最后一次是传输失败则返回该 err；否则（拿到页面但空）
 	// 返回空 blocks 无 err，让调用方决定是否走 x-reader。
-	return "", nil, "", "", "", transportErr
+	return "", nil, "", "", "", "", transportErr
 }
 
 func articleBlockOptionsForAccount(store *rulePresetStore, accountID string) articleBlockOptions {

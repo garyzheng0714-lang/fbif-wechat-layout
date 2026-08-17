@@ -4,6 +4,8 @@
 - 状态：已采纳（用户发起架构体检后成文；依据 [WORKLOG-architecture-audit-2026-07-10.md](../worklogs/WORKLOG-architecture-audit-2026-07-10.md) 四路实证）
 - 背景：此前「什么能共用、什么必须隔离」散落在 CLAUDE.md 红线 #19/#20/#22/#24 里，是案例法不是原则法。加功能时没有判断标准，靠人记红线，漏一次串台一次（近 3 个月约 8 个渠道串台类 fix）。
 
+> 实现核对（2026-08-14）：本 ADR 仍是目标边界，但当前尚未完全符合。`parser.js` 仍读取 legacy `word/_fbif_imageUrls.json` 协议名，共享 `engine.js` 仍有 FBIF 专用 fallback；`site.html` 也仍以内联原生拖拽实现区块面板，未复用 `mountBlockPanel` + Sortable。这些是待迁移的实现漂移，不是本 ADR 的例外；兼容协议改名须先设计迁移，不能直接删旧入口。
+
 ## 一句话版
 
 **能力代码全渠道共用（差异只能以参数进入），视觉输出按渠道物理隔离，规则数据按账号显式配置（禁止靠默认继承兜底），操作交互全渠道统一。**

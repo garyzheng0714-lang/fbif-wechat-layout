@@ -19,6 +19,10 @@ func (s *dupSearchStub) SearchNewsByTitle(context.Context, string) ([]foodTalksN
 	return s.items, s.err
 }
 
+func (s *dupSearchStub) SearchCompanies(context.Context, string) ([]foodTalksCompany, error) {
+	return nil, nil
+}
+
 // 2026-08-14 实案：#78 的草稿（62760）与运营手工发布的 62773 同题并存，
 // 流水线 source_key 幂等看不见手工稿，审核一点通过就会出现两篇重复文章。
 func TestFindPublishedSiteDuplicate(t *testing.T) {

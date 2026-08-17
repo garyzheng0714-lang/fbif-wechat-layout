@@ -235,7 +235,7 @@ func (p *publishPipeline) refetchLatestWithRulePack(ctx context.Context, jobID i
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	title, sourceName, byline, _, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), current.SourceURL)
+	title, sourceName, byline, _, originalSourceURL, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), current.SourceURL)
 	if err != nil {
 		return current, fmt.Errorf("从公众号原文回源抓取失败: %w", err)
 	}
@@ -254,6 +254,7 @@ func (p *publishPipeline) refetchLatestWithRulePack(ctx context.Context, jobID i
 	}, func(latest *publishJob) {
 		applyPublishContentSeed(latest, seed)
 		latest.RulePackID = rulePackID
+		latest.OriginalSourceURL = originalSourceURL
 	})
 	if err != nil {
 		return publishJob{}, err

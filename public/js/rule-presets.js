@@ -139,7 +139,9 @@ function websiteRuleConfigFallback(accountID) {
     tip_body_color: '#7f7f7f',
     author_font_size: '14',
     tip_font_size: '14',
-    image: { width: 600, portrait_px: 375, landscape_px: 600, qr_px: 150, qr_max_natural_px: 500 },
+    // 与 api/rule_defaults.go defaultFoodTalksSiteRuleConfig().image 保持同值
+    //（2026-08-14 62765 金标准：长图比≥1.7 固定 400、竖图宽下限 300、二维码自然宽阈值 300）。
+    image: { width: 600, portrait_px: 375, landscape_px: 600, qr_px: 150, qr_max_natural_px: 300, long_px: 400, long_min_ratio: 1.7, portrait_min_px: 300 },
     modules: {
       mctoc: { enabled: false },
       bottom_blocks: { schema_version: 2, enabled: false, presets: [] },

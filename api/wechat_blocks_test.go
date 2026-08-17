@@ -1764,22 +1764,30 @@ func TestTableThCellsAreHeader(t *testing.T) {
 // 兜底；没署名的文章返回空串——这是发布者填的字段，宁空勿造（规范 §5）。
 func TestExtractWechatArticleMeta(t *testing.T) {
 	page := `<html><head><meta name="author" content="Mote&amp;莫特" /></head>
-<script>var nickname = htmlDecode("FBIF食品饮料创新");var author = "备用名";</script></html>`
-	nickname, byline := extractWechatArticleMeta(page)
+<script>var nickname = htmlDecode("FBIF食品饮料创新");var author = "备用名";
+var msg_source_url = 'https://mp.weixin.qq.com/s/original-article';</script></html>`
+	nickname, byline, sourceURL := extractWechatArticleMeta(page)
 	if nickname != "FBIF食品饮料创新" {
 		t.Fatalf("公众号名解析失败：%q", nickname)
 	}
 	if byline != "Mote&莫特" {
 		t.Fatalf("meta author 应优先且解码实体：%q", byline)
 	}
-	// meta 缺失 → var author 兜底；nickname 无 htmlDecode 包裹也要认。
-	nickname, byline = extractWechatArticleMeta(`<script>var nickname = "小食代";var author = "何丹琳";</script>`)
-	if nickname != "小食代" || byline != "何丹琳" {
-		t.Fatalf("var 形态解析失败：%q %q", nickname, byline)
+	if sourceURL != "https://mp.weixin.qq.com/s/original-article" {
+		t.Fatalf("阅读原文链接解析失败：%q", sourceURL)
 	}
-	// 未署名文章（2026-07-10 真实页面形态）：两个锚点都空。
-	nickname, byline = extractWechatArticleMeta(`<meta name="author" content="" /><script>var nickname = htmlDecode("FBIF食品饮料创新");var author = "";</script>`)
-	if nickname != "FBIF食品饮料创新" || byline != "" {
-		t.Fatalf("未署名文章应返回空 byline：%q %q", nickname, byline)
+	// meta 缺失 → var author 兜底；nickname 无 htmlDecode 包裹也要认；无 msg_source_url → 空。
+	nickname, byline, sourceURL = extractWechatArticleMeta(`<script>var nickname = "小食代";var author = "何丹琳";</script>`)
+	if nickname != "小食代" || byline != "何丹琳" || sourceURL != "" {
+		t.Fatalf("var 形态解析失败：%q %q %q", nickname, byline, sourceURL)
+	}
+	// 未署名文章（2026-07-10 真实页面形态）：两个锚点都空；msg_source_url 为空串同样返回空。
+	nickname, byline, sourceURL = extractWechatArticleMeta(`<meta name="author" content="" /><script>var nickname = htmlDecode("FBIF食品饮料创新");var author = "";var msg_source_url = '';</script>`)
+	if nickname != "FBIF食品饮料创新" || byline != "" || sourceURL != "" {
+		t.Fatalf("未署名文章应返回空 byline/sourceURL：%q %q %q", nickname, byline, sourceURL)
+	}
+	// 非 http(s) 值（javascript: 等）不透传。
+	if _, _, got := extractWechatArticleMeta(`<script>var msg_source_url = 'javascript:alert(1)';</script>`); got != "" {
+		t.Fatalf("非 http(s) 的 msg_source_url 应被丢弃：%q", got)
 	}
 }

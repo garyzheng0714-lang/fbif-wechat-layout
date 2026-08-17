@@ -401,7 +401,7 @@ let activeRulePack = rulePackModule.getRulePack(initialRulePackID());
 window._activeRulePack = activeRulePack;
 let currentTemplateId = activeRulePack.templateId;
 
-// 统一顶栏账号菜单：网站侧无同模板同伴，任何账号切换都是跨模板，直接跳转到目标
+// 左栏导入卡账号菜单：网站侧无同模板同伴，任何账号切换都是跨模板，直接跳转到目标
 // 账号 URL（跨渠道编辑器快照由 session-restore 的 beforeunload 兜底保存）。
 mountAccountMenu({
   container: document.getElementById('acctMenu'),

@@ -484,7 +484,7 @@ test.describe.serial('FBIF 排版工具 — 全状态回归测试', () => {
       const result = await captureAndCheck(page, '8-site-channel', bp);
 
       // Verify FoodTalks channel is active：旧 [data-channel] 渠道 tab 已随两层切换器
-      // 删除（红线 #2），现在验证顶栏账号菜单显示的是网站渠道账号。
+      // 删除（红线 #2），现在验证左栏导入卡账号菜单显示的是网站渠道账号。
       const acctName = await page.locator('.acct-trigger-name').textContent().catch(() => '');
       result.ftChannelActive = /网站/.test(acctName || '');
 

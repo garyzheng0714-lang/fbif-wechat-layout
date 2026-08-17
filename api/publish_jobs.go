@@ -60,9 +60,10 @@ const (
 // publishJob 一条「公众号 → FoodTalks 网站」发布任务（字段清单来自施工图 S1）。
 type publishJob struct {
 	ID                int64    `json:"id"`
-	SourceKey         string   `json:"source_key"`               // 归一化幂等键（normalizeSiteSourceKey）
-	SourceAliases     []string `json:"source_aliases,omitempty"` // 抓取后解出的同文规范身份（短链↔长链去重）
-	SourceURL         string   `json:"source_url"`               // 用户提交的原始公众号文章链接
+	SourceKey         string   `json:"source_key"`                    // 归一化幂等键（normalizeSiteSourceKey）
+	SourceAliases     []string `json:"source_aliases,omitempty"`      // 抓取后解出的同文规范身份（短链↔长链去重）
+	SourceURL         string   `json:"source_url"`                    // 用户提交的原始公众号文章链接
+	OriginalSourceURL string   `json:"original_source_url,omitempty"` // 公众号「阅读原文」指向的原文地址（转载稿声明链接优先用它）
 	Stage             string   `json:"stage"`
 	FailedStage       string   `json:"failed_stage,omitempty"` // stage=failed 时的续跑起点
 	Error             string   `json:"error,omitempty"`

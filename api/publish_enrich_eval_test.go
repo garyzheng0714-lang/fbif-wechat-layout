@@ -208,9 +208,9 @@ func TestEnrichEvalAgainstEditorial(t *testing.T) {
 		got   float64
 		floor float64
 	}
-	// 标签命中不做门禁（仅上方报告）：2026-07-10 后端反馈标签走单独接口、发布先不
-	// 标注（契约 §9）；且编辑部真值混有「FBIF2026会后报告」这类人工栏目标签，AI 按
-	// 规范本就不该产出。等标签接口接入时再回升为门禁。
+	// 标签命中不做门禁（仅上方报告）：发布写入虽已开启，但编辑部真值混有
+	// 「FBIF2026会后报告」这类人工栏目标签，AI 按规范本就不该产出；不能拿这些
+	// 人工专属标签惩罚模型。
 	for _, g := range []gate{
 		{"摘要长度", rate(lenOK, total), evalFloorSummaryLen},
 		{"摘要风格", rate(styleOK, total), evalFloorSummaryStyle},

@@ -66,6 +66,4 @@
   GitHub Secret `SERVER_HOST`；仓库里查不到，靠 git 历史里的 URL 反查出来。
 - 仓库 homepage 指向的 `fbif-wechat-layout.vercel.app` 是 **dev 占位部署**
   （version.json build=dev、CSS 404），**不是**真实生产，勿据它判断。
-- 本会话中 Read/grep 工具对 `app-shell.css` 多次返回**被污染的假内容**（行号跳变、
-  注入的假注释）。可靠读法：`python3` 直接读字节 + `curl` 线上实际响应。改这个文件
-  用 Python 按锚点替换，别信 Read 回显。
+- 本会话曾出现一次读取工具输出异常；这是历史会话事故，不构成当前维护规则。后续按项目统一文件工具与真实 diff 核验，不沿用这里的临时绕法。

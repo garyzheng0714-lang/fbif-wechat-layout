@@ -1000,3 +1000,103 @@ test('网站默认包：justify_paragraphs=false 不等于 ft-series 身份', ()
   assert.match(html, /少用即环保/, 'ft-default 即使 justify=false 也应保留首段正文');
   assert.match(html, /<h2>上海艾录包装股份有限公司<\/h2>/, 'ft-default 不应套用 ft-series 联系区归一化');
 });
+
+test('转载稿尾部裸「来源：/作者：」行降级为 14px 灰斜体小字，不再黑色粗体（2026-08-17 运营反馈）', () => {
+  // WHY：任务 #101 形态——FBIF 转载天下网商，公众号原文尾部「来源：天下网商」「作者：叶晨，
+  // 编辑：张洁」两行此前没有任何 behavior 分支接住，掉进正文段保留加粗 → 网站成品黑色黑体。
+  const txt = (text, bold = false) => ({ k: 'txt', runs: [{ type: 'txt', text, bold }] });
+  const result = template.processBlocks({
+    title: '康普茶样例',
+    blocks: [
+      txt('奶奶辈土味饮料翻红，一瓶6块9。'),
+      txt('门店卖到45元，是两种康普茶生意。'),
+      txt('这是第三段正文，讲品牌与渠道。'),
+      txt('这是第四段正文，讲供应链。'),
+      txt('来源：天下网商（ID：txws2013）', true),
+      txt('作者：叶晨，编辑：张洁', true),
+    ],
+  }, { config: { muted_color: '#888888' }, isRepost: true });
+  const html = result.lines.join('\n');
+  assert.match(html, /<em><span style="font-size: 14px; color: #888888;">来源：天下网商（ID：txws2013）/, '尾部来源行应为 14px 灰斜体（ft-default muted #888888）');
+  assert.match(html, /<em><span style="font-size: 14px; color: #888888;">作者：叶晨，编辑：张洁/, '尾部作者行应为 14px 灰斜体');
+  assert.match(html, /本文为天下网商原创，作者：叶晨，编辑：张洁，转载请联系出处。/, '开头应合成网站口径署名行');
+  assert.doesNotMatch(html, /<strong>来源：天下网商/, '来源行不得保留黑色加粗');
+  assert.doesNotMatch(html, /<h2[^>]*>作者：/, '加粗作者行不得被升成 h2');
+});
+
+test('图+图注后接 h2 恰好一个空行；接 h3 紧贴无空行（2026-08-17 运营反馈：标题前多空行）', () => {
+  const txt = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });
+  const result = template.processBlocks({
+    title: '空行样例',
+    blocks: [
+      txt('开头正文段。'),
+      { k: 'img', src: 'https://mmbiz.qpic.cn/pic-a.png', dataW: 900, dataRatio: 0.6 },
+      { k: 'cap', text: '图片来源：微博@星巴克中国' },
+      { k: 'h', text: '一、带图注后的大标题' },
+      txt('第二段正文。'),
+      { k: 'img', src: 'https://mmbiz.qpic.cn/pic-b.png', dataW: 900, dataRatio: 0.6 },
+      { k: 'h', text: '二、无图注图片后的大标题' },
+      txt('第三段正文。'),
+      { k: 'img', src: 'https://mmbiz.qpic.cn/pic-c.png', dataW: 900, dataRatio: 0.6 },
+      { k: 'cap', text: '图片来源：微博@喜茶' },
+      { k: 'h', text: '（一）图注后的次级标题', level: 3 },
+      txt('第四段正文。'),
+    ],
+  }, { config: { muted_color: '#888888' }, isRepost: true });
+  const lines = result.lines;
+  const isBlank = (l) => /^<p style="text-align: (justify|center);"><br><\/p>$/.test(l || '');
+  const idxH2a = lines.findIndex(l => /一、带图注后的大标题/.test(l));
+  assert.ok(idxH2a > 1, 'h2 应存在');
+  assert.ok(isBlank(lines[idxH2a - 1]), 'h2 前应有一个空行');
+  assert.ok(!isBlank(lines[idxH2a - 2]), 'h2 前不得连续两个空行（图注空行不叠加）');
+  const idxH2b = lines.findIndex(l => /二、无图注图片后的大标题/.test(l));
+  assert.ok(isBlank(lines[idxH2b - 1]) && !isBlank(lines[idxH2b - 2]), '无图注图片后的 h2 前也应恰好一个空行');
+  const idxH3 = lines.findIndex(l => /（一）图注后的次级标题/.test(l));
+  assert.ok(!isBlank(lines[idxH3 - 1]), 'h3 紧贴上文（图注空行也要吃掉）');
+});
+
+test('重复出现的账号名装饰行不升 h2（2026-08-17 天下网商案例，线上成品口径=删除）', () => {
+  const txt = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });
+  const result = template.processBlocks({
+    title: '康普茶样例',
+    blocks: [
+      txt('第一段正文内容。'),
+      { k: 'h', text: '天下网商' },
+      { k: 'h', text: '年轻人买康普茶，首先因为好奇' },
+      txt('第二段正文内容。'),
+      { k: 'h', text: '天下网商' },
+      { k: 'h', text: '6.9元和45元，是两种康普茶生意' },
+      txt('第三段正文内容。'),
+      { k: 'h', text: '天下网商' },
+      { k: 'h', text: '一、带序号的重复标题' },
+      { k: 'h', text: '一、带序号的重复标题' },
+      txt('第四段正文内容。'),
+    ],
+  }, { config: { muted_color: '#888888' }, isRepost: true });
+  const html = result.lines.join('\n');
+  assert.doesNotMatch(html, /<h2[^>]*>天下网商<\/h2>/, '重复账号名装饰行应删除');
+  assert.doesNotMatch(html, /(^|>)天下网商(<|$)/, '装饰行不得残留为正文');
+  assert.match(html, /<h2[^>]*>年轻人买康普茶，首先因为好奇<\/h2>/, '真标题保留');
+  assert.match(html, /<h2[^>]*>一、带序号的重复标题<\/h2>/, '带序号标题即使重复也不删（不误删真标题）');
+});
+
+test('转载稿头部声明行（来源｜竖线分隔）降级为灰色小字（真实文章「文｜范婷婷」形态）', () => {
+  const txt = (text, bold = false) => ({ k: 'txt', runs: [{ type: 'txt', text, bold }] });
+  const result = template.processBlocks({
+    title: '头部声明样例',
+    blocks: [
+      txt('来源｜天下网商（ID：txws2013）', true),
+      txt('文｜范婷婷'),
+      txt('这个夏天，康普茶突然变得常见。'),
+      txt('第二段正文。'),
+      txt('第三段正文。'),
+      txt('第四段正文。'),
+      txt('第五段正文。'),
+      txt('第六段正文。'),
+    ],
+  }, { config: { muted_color: '#888888' }, isRepost: true });
+  const html = result.lines.join('\n');
+  assert.match(html, /<em><span style="font-size: 14px; color: #888888;">来源｜天下网商（ID：txws2013）/, '头部来源行应为灰色小字');
+  assert.match(html, /<em><span style="font-size: 14px; color: #888888;">文｜范婷婷/, '头部作者行（竖线分隔）应为灰色小字');
+  assert.doesNotMatch(html, /<strong>来源｜天下网商/, '头部来源行不得保留黑色加粗');
+});

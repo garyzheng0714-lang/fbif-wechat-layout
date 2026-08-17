@@ -51,9 +51,13 @@ func editorialInit() {
 	}
 	names := make([]string, 0, editorialVocabPromptTopN)
 	for _, t := range editorialTags {
-		if name := strings.TrimSpace(t.TagName); name != "" {
-			names = append(names, name)
+		name := strings.TrimSpace(t.TagName)
+		// 栏目/活动标签（FBIF2026会后报告、Wow食品创新奖…）由编辑手工体系管理，
+		// AI 不打（编辑规范 §4）——词表历史混入的这类词不再注入 prompt 供 AI 选用。
+		if name == "" || publishSiteTagBlocked(name) {
+			continue
 		}
+		names = append(names, name)
 		if len(names) >= editorialVocabPromptTopN {
 			break
 		}

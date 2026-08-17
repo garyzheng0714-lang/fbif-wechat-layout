@@ -191,7 +191,13 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // v17→v18（2026-07-26）：ft-default 网站页脚默认开启（fbif_footer + 由它派生的
 // bottom_blocks）。旧默认 enabled=false 让页脚只能靠前台 localStorage override 打开，
 // 新环境静默丢页脚；仅覆盖 ft-default-v1。
-const currentBuiltinRuleVersion = 18
+// v18→v19（2026-08-17）：按运营反馈 + 网站排版规范批次修订，覆盖已持久化的 ft-default-v1：
+//
+//	① 图宽 2026-08-14 62765 金标准值落进持久化 preset（long_px=400/long_min_ratio=1.7/
+//	  portrait_min_px=300/qr_max_natural_px=300——此前只改了代码默认没升版，生产 preset 仍旧值）；
+//	② caption_lead_regex 补署名类前缀（作者/编辑…），转载稿尾部加粗署名行不再误升 h2；
+//	③ 新增 tail_credit_regex：尾部裸「来源：/作者：」行降级 14px 灰斜体小字，不再黑粗。
+const currentBuiltinRuleVersion = 19
 const defaultBuiltinRuleVersion = 16
 const fbifBuiltinRuleVersion = 18
 const ftSeriesSiteBuiltinRuleVersion = 16
@@ -429,9 +435,13 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 			"fbif_source_pattern":        map[string]any{"type": "string", "default": `(?i)FBIF|食品饮料创新|FoodInnovation`},
 			"image_caption_prefix_regex": map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|注|Source|Photo|Image|Credit)\s*[：:\s\d]`},
 			"docx_preamble_author_regex": map[string]any{"type": "string", "default": `(?i)^[\s　]*(作者|Author)\s*[:：]`},
-			"caption_lead_regex":         map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|Source|Photo|Image|Credit)\s*[：:]`},
-			"footer_note_regex":          map[string]any{"type": "string", "default": `^(?:本文(?:未标注来源|作者\s*[：:]|图片来源)|图片均来自|[*＊]\s*注[：:])`},
-			"repost_source_regex":        map[string]any{"type": "string", "default": `^来源[：:]\s*(.+)$`},
+			// 2026-08-17 运营反馈：补署名类前缀（作者/编辑…），转载稿尾部加粗署名行不再被误升 h2。
+			"caption_lead_regex": map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|作者|编辑|编审|责编|主编|美编|出品|策划|撰文|撰稿|排版|设计|校对|审校|选题|Source|Photo|Image|Credit)\s*[：:]`},
+			"footer_note_regex":  map[string]any{"type": "string", "default": `^(?:本文(?:未标注来源|作者\s*[：:]|图片来源)|图片均来自|[*＊]\s*注[：:])`},
+			// 尾部裸署名行（「来源：xxx」「作者：xxx，编辑：yyy」）→ 14px 灰斜体小字
+			//（2026-08-17 运营反馈：此前掉进正文段呈黑色粗体）。仅文章尾部区域触发。
+			"tail_credit_regex":   map[string]any{"type": "string", "default": `^(?:来源|出处|作者|编辑|编审|责编|主编|美编|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|选题|文)\s*[：:｜|]\s*\S`},
+			"repost_source_regex": map[string]any{"type": "string", "default": `^来源[：:]\s*(.+)$`},
 			// 商务合作导联行（62139/62303 成品：14px 斜体、文本 #7f7f7f、链接保留）——2026-06-11 反馈问题九。
 			"biz_coop_line_regex": map[string]any{"type": "string", "default": `^\s*(?:商务合作对接请点击|如有合作意向)`},
 		},

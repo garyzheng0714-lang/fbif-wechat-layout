@@ -96,7 +96,7 @@ test('password identity keeps the name visible and states that cloud documents a
   assert.match(text, /账号密码登录/);
   assert.match(text, /云文档不可用/);
   assert.equal(document.querySelector('#adminLockBtn'), null, '未授权账号不应显示规则后台入口');
-  assert.equal(document.querySelector('[data-switch-feishu-login]'), null, '顶栏账号菜单不能主动要求改用飞书登录');
+  assert.equal(document.querySelector('[data-switch-feishu-login]'), null, '账号菜单不能主动要求改用飞书登录');
 });
 
 test('identity menu puts rule admin in the user popup and supports keyboard navigation', () => {

@@ -191,3 +191,9 @@ test('promoteHeuristicHeadings 不升级已标记的联系信息块', () => {
   assert.equal(out[0].k, 'p', '联系信息块里的加粗短句不是正文标题');
   assert.equal(out[0].contactInfo, true);
 });
+
+test('isBoldHeading 拒绝署名行（作者/编辑/出品等前缀，2026-08-17 运营反馈：转载稿尾部署名曾被升 h2）', () => {
+  for (const t of ['作者：小食代，编辑：Bobo', '编辑：张洁', '出品：天下网商', '策划：某某团队', '撰文：叶晨']) {
+    assert.equal(isBoldHeading([{ type: 'txt', text: t, bold: true }]), false, t);
+  }
+});

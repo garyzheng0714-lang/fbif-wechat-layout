@@ -134,12 +134,17 @@ const RULE_PROFILES = Object.freeze({
         tip_body_color: '#7f7f7f',
         author_font_size: '14',
         tip_font_size: '14',
+        // 与 api/rule_defaults.go defaultFoodTalksSiteRuleConfig().image 同值
+        //（2026-08-14 62765 金标准；2026-08-17 v19 升版时同步此降级兜底）。
         image: {
           width: 600,
           portrait_px: 375,
           landscape_px: 600,
           qr_px: 150,
-          qr_max_natural_px: 500,
+          qr_max_natural_px: 300,
+          long_px: 400,
+          long_min_ratio: 1.7,
+          portrait_min_px: 300,
         },
         modules: {
           mctoc: { enabled: false },
