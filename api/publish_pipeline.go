@@ -2081,7 +2081,7 @@ func publishDeclaredSource(blocksJSON string) string {
 				continue
 			}
 			name := strings.TrimSpace(publishDeclaredSourceIDSuffixRe.ReplaceAllString(m[1], ""))
-			name = strings.Trim(name, `「」""“”《》`)
+			name = strings.Trim(name, `「」"“”《》`)
 			// 声明行里常跟着「，作者：xxx」等后缀，截到第一个分隔符为止
 			if idx := strings.IndexAny(name, "，,。；;："); idx >= 0 {
 				name = name[:idx]
