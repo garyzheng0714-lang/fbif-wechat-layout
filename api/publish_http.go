@@ -597,6 +597,27 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "rerendered": true})
 	})
 
+	// 测试站时期的存量待审单：正式站上同一资讯 id 已是另一篇文章。
+	// 先摘掉旧锚点，再按已存正文块重排并在当前环境新建隐藏草稿。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/restage-current", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		job, err := p.restageCurrentAndRerender(id)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "restaged": true, "rerendered": true})
+	})
+
 	// 用当前代码重出审核卡。卡片改版后，历史任务的卡还停在旧样式上，群里回看
 	// 到的仍是旧信息；已记过 message_id 的群走原位更新，不会刷屏。
 	// 与 notification-replay 的分工见 refreshReviewCard 注释。

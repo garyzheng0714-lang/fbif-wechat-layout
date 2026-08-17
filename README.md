@@ -243,6 +243,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/jobs/{id}/republish` | 按当前生命周期版本请求重新公开已下线稿 |
 | `POST` | `/api/publish/jobs/{id}/reconcile` | 人工处理 CreateNews / UpdateNews 结果不确定态：绑定已有草稿、确认未创建，或确认公开结果；需管理员角色或部署专用服务令牌 |
 | `POST` | `/api/publish/jobs/{id}/rerender-latest` | 按任务编号用已存正文块走最新规则重排，不回源抓微信。短链过期时 `site-sync?rerender_latest` 会 400，存量待审单走这里。需管理员或部署专用令牌 |
+| `POST` | `/api/publish/jobs/{id}/restage-current` | 丢掉不属于当前环境的旧草稿编号，再重排并在当前环境新建隐藏草稿。切正式站前的存量待审单必须走这里，禁止把测试站 id 写到正式站。需管理员或部署专用令牌 |
 | `POST` | `/api/publish/jobs/{id}/card-refresh` | 用当前代码重出审核卡。任务已有 `ReviewCardMsgIDs` 映射时，当前群有 id 就原位更新、没有就发新卡；只带 legacy `ReviewCardMsgID` 的旧任务仍可能回退更新旧群。需管理员或部署专用令牌 |
 | `POST` | `/api/publish/jobs/{id}/risk-recheck` | 对待审任务用当前 prompt 真正重跑风险检查并更新卡片；不等同于只换样式的 `card-refresh` |
 | `POST` | `/api/publish/jobs/{id}/notification-replay` | 重放失败通知 outbox；只救通知投递，不重跑业务阶段 |
