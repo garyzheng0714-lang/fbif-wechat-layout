@@ -58,6 +58,8 @@ func TestPublishEndpointsRequireAdminRole(t *testing.T) {
 		{http.MethodGet, "/api/publish/jobs", ""},
 		{http.MethodGet, "/api/publish/jobs/1", ""},
 		{http.MethodPost, "/api/publish/jobs/1/retry", ""},
+		{http.MethodPost, "/api/publish/jobs/1/rerender-latest", ""},
+		{http.MethodPost, "/api/publish/jobs/1/restage-current", ""},
 		{http.MethodPost, "/api/publish/jobs/1/reconcile", `{"foodtalks_news_id":7240}`},
 		{http.MethodPost, "/api/publish/cms-resync", `{"day":"2026-08-13"}`},
 		{http.MethodPost, "/api/publish/jobs/1/repair-wechat-trailer", ""},
@@ -531,6 +533,85 @@ func TestPublishSiteSyncIdempotentHTTP(t *testing.T) {
 	// 非公众号链接显式拒绝。
 	if rec := doPublishReq(mux, http.MethodPost, "/api/publish/site-sync", `{"url":"https://example.com/a"}`, true); rec.Code != http.StatusBadRequest {
 		t.Fatalf("非公众号链接应 400，实际 %d", rec.Code)
+	}
+}
+
+func TestPublishJobRestageCurrentDetachesForeignDraft(t *testing.T) {
+	env := newPublishTestEnv(t)
+	t.Setenv("FOODTALKS_BASE_URL", "https://api-we.foodtalks.cn")
+	mux := newPublishTestMux(t, env)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, _, err := env.store.updateIf(job.ID, func(publishJob) bool { return true }, func(j *publishJob) {
+		j.FoodTalksNewsID = 7250
+		j.StagingTarget = ""
+		j.ArticleURL = "https://www.foodtalks.cn/news/7250"
+		j.Stage = publishStageAwaitingReview
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doPublishReq(mux, http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/restage-current", job.ID), "", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("摘锚重暂存应 200，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	after, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.FoodTalksNewsID != 0 || after.StagingTarget != "" || after.ArticleURL != "" {
+		t.Fatalf("必须摘掉旧环境锚点后再重排：news=%d target=%q url=%q", after.FoodTalksNewsID, after.StagingTarget, after.ArticleURL)
+	}
+	if after.Stage == publishStageAwaitingReview && after.ContentHTML == "" {
+		t.Fatalf("摘锚后应启动重排，实际停在空正文待审")
+	}
+	if rec := doPublishReq(mux, http.MethodPost, "/api/publish/jobs/1/restage-current", "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("无凭证应 401，实际 %d", rec.Code)
+	}
+}
+
+func TestPublishJobRerenderLatestByIDSkipsSourceFetch(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	before, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doPublishReq(mux, http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/rerender-latest", job.ID), "", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("待审任务按编号重排应 200，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Job        publishSyncJobSummary `json:"job"`
+		Rerendered bool                  `json:"rerendered"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	after, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Rerendered || resp.Job.ID != job.ID || after.ContentVersion != before.ContentVersion+1 {
+		t.Fatalf("应按编号重排同一任务：resp=%+v before=%d after=%d", resp, before.ContentVersion, after.ContentVersion)
+	}
+
+	if rec := doPublishReq(mux, http.MethodPost, "/api/publish/jobs/1/rerender-latest", "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("无凭证应 401，实际 %d", rec.Code)
+	}
+	if rec := doPublishServiceReq(mux, http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/rerender-latest", job.ID), ""); rec.Code == http.StatusOK {
+		t.Fatalf("同步服务凭证不得按编号重排，实际 %d", rec.Code)
+	}
+	missing := doPublishReq(mux, http.MethodPost, "/api/publish/jobs/999999/rerender-latest", "", true)
+	if missing.Code == http.StatusOK {
+		t.Fatalf("不存在的任务不应成功: body=%s", missing.Body.String())
 	}
 }
 

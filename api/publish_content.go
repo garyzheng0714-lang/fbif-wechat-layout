@@ -150,6 +150,43 @@ func (p *publishPipeline) rerenderLatest(jobID int64) (publishJob, error) {
 	return p.rerenderLatestWithRulePack(jobID, "")
 }
 
+// restageCurrentAndRerender 丢掉不属于当前环境的旧草稿编号，再按已存
+// blocks 重排并在当前环境新建隐藏草稿。切正式站之前的存量单，资讯 id
+// 在正式站上往往是另一篇文章，必须先摘锚再 CreateNews，禁止回填
+// staging_target 后去 UpdateNews。
+func (p *publishPipeline) restageCurrentAndRerender(jobID int64) (publishJob, error) {
+	current, err := p.store.byID(jobID)
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !publishContentRerenderable(current) {
+		return current, fmt.Errorf("任务阶段 %s 不允许重新暂存并排版", current.Stage)
+	}
+	if publishContentHasUncertainIntent(current) {
+		return current, errors.New("任务仍有未确认的外部写入意图，不能重新暂存")
+	}
+	if current.FoodTalksNewsID > 0 && publishStagingTargetMismatch(current) == nil {
+		return p.rerenderLatest(jobID)
+	}
+	detached, swapped, err := p.store.updateIf(jobID, func(latest publishJob) bool {
+		return latest.ContentVersion == current.ContentVersion &&
+			publishContentRerenderable(latest) && !publishContentHasUncertainIntent(latest)
+	}, func(latest *publishJob) {
+		latest.FoodTalksNewsID = 0
+		latest.StagingTarget = ""
+		latest.StagingIntentKey = ""
+		latest.StagingIntentAt = ""
+		latest.ArticleURL = ""
+	})
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !swapped {
+		return detached, errors.New("任务状态刚刚变化，请刷新后重试重新暂存")
+	}
+	return p.rerenderLatest(jobID)
+}
+
 // rerenderLatestWithRulePack 与原有重排动作相同，但允许调用方在明确要求时
 // 一并切换网站规则包。没有传规则包时沿用任务原绑定，避免重复提交一个 ft-series
 // 任务时被可选参数的默认值误切回 ft-default。
