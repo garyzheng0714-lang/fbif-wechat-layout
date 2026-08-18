@@ -25,6 +25,8 @@ const (
 	publishPublicationActionPublish   = "publish"
 	publishPublicationActionUnpublish = "unpublish"
 	publishPublicationActionRepublish = "republish"
+	// 运营已在 FoodTalks 后台手工公开，流水线只对账、不覆盖正文。
+	publishPublicationActionManualCMS = "manual_cms"
 )
 
 var (

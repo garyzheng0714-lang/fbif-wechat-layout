@@ -987,8 +987,23 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		if guardErr := publishStagingTargetMismatch(job); guardErr != nil {
 			return guardErr
 		}
+		// 红线 26：CMS 手工稿为准。锚点文章已在网站公开时，禁止再 PUT 草稿/正文。
+		if _, published, err := p.findOwnPublishedCMSNews(ctx, job); err != nil {
+			return fmt.Errorf("核对网站是否已发布失败，未覆盖正文: %w", err)
+		} else if published {
+			if _, ackErr := p.ackManualCMSPublication(ctx, job.ID); ackErr != nil {
+				return ackErr
+			}
+			return nil
+		}
 		news.ID = newsID
 		if err := ft.UpdateNews(ctx, news); err != nil {
+			if foodTalksAlreadyPublishedDraftError(err) {
+				if _, ackErr := p.ackManualCMSPublication(ctx, job.ID); ackErr != nil {
+					return ackErr
+				}
+				return nil
+			}
 			return err
 		}
 		stagedTarget := currentFoodTalksTarget()

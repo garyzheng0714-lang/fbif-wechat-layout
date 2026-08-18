@@ -116,7 +116,7 @@ type publishJob struct {
 	UnpublishPolicySet   bool   `json:"unpublish_policy_set,omitempty"`
 	UnpublishWindowUntil string `json:"unpublish_window_until,omitempty"`
 	// 最近一次公开生命周期动作，用于同一张飞书卡片上的操作留痕。
-	PublicationAction   string `json:"publication_action,omitempty"` // publish / unpublish / republish
+	PublicationAction   string `json:"publication_action,omitempty"` // publish / unpublish / republish / manual_cms
 	PublicationActor    string `json:"publication_actor,omitempty"`
 	PublicationActionAt string `json:"publication_action_at,omitempty"`
 	// 外部分发是 FoodTalks 主发布状态机之外的正交子流程。FoodTalks 允许转载；
