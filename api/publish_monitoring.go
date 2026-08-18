@@ -40,7 +40,9 @@ type publishMonitoringStatus struct {
 	ContentConflicts               int      `json:"content_conflicts"`
 	Issues                         []string `json:"issues,omitempty"`
 	Warnings                       []string `json:"warnings,omitempty"`
-	AlertIssues                    []string `json:"alert_issues,omitempty"`
+	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
+	// 把 issues 当 P0，于是正常处理中的稿也会被喊成事故。
+	AlertIssues []string `json:"alert_issues"`
 }
 
 func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMonitoringStatus {
@@ -52,6 +54,7 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 		CheckedAt:     now.Format(time.RFC3339),
 		StoreValid:    true,
 		WorkersPaused: publishWorkersPaused(),
+		AlertIssues:   []string{},
 	}
 	jobs, err := store.all()
 	if err != nil {
