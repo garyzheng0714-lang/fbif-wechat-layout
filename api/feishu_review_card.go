@@ -246,6 +246,15 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 		if job.PublicationAction == publishPublicationActionRepublish {
 			actionLabel = "重新发布了本文"
 		}
+		if job.PublicationAction == publishPublicationActionManualCMS {
+			actionLabel = "确认本文已由人工在后台发布"
+			elements = append(elements, map[string]any{
+				"tag":       "markdown",
+				"text_size": "notation",
+				"content":   "**备注：** 这篇文章是人工手动后台发布",
+				"margin":    "4px 0px 0px 0px",
+			})
+		}
 		if job.ArticleURL != "" {
 			elements = append(elements, feishuButtonRow(map[string]any{
 				"tag":   "button",

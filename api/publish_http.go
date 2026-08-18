@@ -678,6 +678,26 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "refreshed": true})
 	})
 
+	// 网站上这篇已经是公开稿：不覆盖正文，只把本地任务记为已发布，并原位更新群卡片。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/ack-cms-published", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		job, err := p.ackManualCMSPublication(r.Context(), id)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "acked": true})
+	})
+
 	// 对已公开任务再 PUT 一次 FoodTalks：补 isLatest（首页）和 sourceId（来源出处）。
 	// 不改本地状态机、不发飞书通知。day 为北京时间 YYYY-MM-DD。
 	mux.HandleFunc("POST /api/publish/cms-resync", func(w http.ResponseWriter, r *http.Request) {

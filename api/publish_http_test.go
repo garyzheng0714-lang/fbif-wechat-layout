@@ -66,6 +66,7 @@ func TestPublishEndpointsRequireAdminRole(t *testing.T) {
 		{http.MethodPost, "/api/publish/jobs/1/repair-wechat-trailer", ""},
 		{http.MethodPost, "/api/publish/repair-wechat-trailer", ""},
 		{http.MethodPost, "/api/publish/jobs/1/retry-external-distribution", ""},
+		{http.MethodPost, "/api/publish/jobs/1/ack-cms-published", ""},
 	}
 	for _, c := range cases {
 		if rec := doPublishReq(mux, c.method, c.target, c.body, false); rec.Code != http.StatusUnauthorized {

@@ -145,6 +145,7 @@ type ftStub struct {
 	lastIsLatest   int
 	lastSourceID   int64
 	forbidPublish  bool // true 时收到 publishStatus=1 直接判失败（红线守卫）
+	searchRecords  []foodTalksNewsListItem
 	t              *testing.T
 }
 
@@ -171,9 +172,24 @@ func newFTStub(t *testing.T) *ftStub {
 			return
 		}
 		if r.URL.Path == "/news/admin/news/page" {
-			// 同题防重的标题检索：默认无同名已发布稿
+			// 同题防重 / 后台已发布对账：默认无同名已发布稿，测试可注入 searchRecords。
+			stub.mu.Lock()
+			records := stub.searchRecords
+			if records == nil {
+				records = []foodTalksNewsListItem{}
+			}
+			payload, err := json.Marshal(map[string]any{
+				"code": 0, "msg": "success",
+				"data": map[string]any{"records": records},
+			})
+			stub.mu.Unlock()
+			if err != nil {
+				t.Errorf("FoodTalks 桩序列化标题检索失败: %v", err)
+				http.Error(w, "marshal", http.StatusInternalServerError)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"records":[]}}`)
+			w.Write(payload)
 			return
 		}
 		if r.URL.Path == "/company/companies/search" {
