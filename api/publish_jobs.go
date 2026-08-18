@@ -55,6 +55,9 @@ const (
 	publishStageRejected                        = "rejected"
 	publishStageSupersededDuplicate             = "superseded_duplicate"
 	publishStageFailed                          = "failed"
+	// abandoned 是失败单的结案终态：原文已失效、或测试站旧锚点不再处理。
+	// 仍占 source_key，避免同一链接再建一文；不计入 failed_jobs_recent。
+	publishStageAbandoned = "abandoned"
 )
 
 // publishJob 一条「公众号 → FoodTalks 网站」发布任务（字段清单来自施工图 S1）。
@@ -200,11 +203,12 @@ type publishJob struct {
 	UpdatedAt         string `json:"updated_at"`
 }
 
-// terminal 终态判定：published / rejected 之后任务盖棺；failed 不算终态（可 retry 续跑），
+// terminal 终态判定：published / rejected / abandoned 之后任务盖棺；failed 不算终态（可 retry 续跑），
 // 因此同 source_key 再提交会幂等返回 failed 任务而不是建新单。
 func (j publishJob) terminal() bool {
 	return j.Stage == publishStagePublished || j.Stage == publishStageOffline ||
-		j.Stage == publishStageRejected || j.Stage == publishStageSupersededDuplicate
+		j.Stage == publishStageRejected || j.Stage == publishStageSupersededDuplicate ||
+		j.Stage == publishStageAbandoned
 }
 
 type publishJobDocument struct {
