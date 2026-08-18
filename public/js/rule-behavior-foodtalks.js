@@ -232,6 +232,27 @@ function stripWechatTrailer(elems, markers, signatures, externalMarkers, refHead
 // 标题缺失时省略书名号段，保持声明仍可读。
 // 返回值拆为 title（"提示："）+ rest_runs（正文 runs 数组，保留链接），
 // 供 foodtalks-site.js 的 tip 分支渲染为两段式。
+const OWN_ACCOUNT_NAME_RE = /FBIF|食品饮料创新|FoodInnovation|^FoodTalks$/i;
+
+export function isOwnAccountName(name) {
+  return OWN_ACCOUNT_NAME_RE.test(String(name || '').trim());
+}
+
+// 转载声明《标题》该链到哪：有阅读原文就用阅读原文；自家号转发且没有原文时
+// 空着，绝不把提交的自家公众号转载页当成出处。
+export function pickSiteTipSourceUrl(data = {}, elems = []) {
+  const original = String(data.original_source_url || '').trim();
+  if (/^https?:\/\//i.test(original)) return original;
+  const submitted = String(data.source || '').trim();
+  if (!/^https?:\/\//i.test(submitted)) return '';
+  const sourceName = String(data.source_name || '').trim();
+  const declared = extractRepostSource(elems);
+  if (isOwnAccountName(sourceName) && declared && !isOwnAccountName(declared)) {
+    return '';
+  }
+  return submitted;
+}
+
 export function buildSiteFooterTipElem(title, opts = {}) {
   const t = String(title || '').trim();
   const behavior = opts.behavior || {};
@@ -249,8 +270,10 @@ export function buildSiteFooterTipElem(title, opts = {}) {
     const label = `《${t}》`;
     // 原文链接优先用显式传入的 sourceUrl（processBlocks 从 data.source 传入），
     // 其次回退到全局变量（site.html fetchArticle 设置的 window._currentArticleUrl）。
-    const sourceUrl = String(opts.sourceUrl || '').trim() ||
-      ((typeof window !== 'undefined' && window._currentArticleUrl) || '');
+    // 显式传入空串表示「这篇转载没有可核验的原文」，不得再回退到提交的公众号链接。
+    const sourceUrl = Object.prototype.hasOwnProperty.call(opts, 'sourceUrl')
+      ? String(opts.sourceUrl || '').trim()
+      : ((typeof window !== 'undefined' && window._currentArticleUrl) || '');
     if (sourceUrl && /^https?:\/\//i.test(sourceUrl)) {
       runs.push({ type: 'link', text: label, href: sourceUrl });
     } else {
@@ -488,20 +511,26 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   }
 
   // 阶段 4.5：头尾裸署名行（「来源：xxx」「作者：xxx，编辑：yyy」「文｜范婷婷」）。
-  // 转载稿头部声明行与尾部署名行此前没有任何分支接住，掉进正文段保留公众号加粗 →
-  // 黑色粗体（2026-08-17 运营反馈，排版规范：来源/作者是模板小字）。仅文章头部前几个
-  // 元素与尾部区域触发，避免把正文中段合法的「来源：某数据库」说明误降级；整行 ≤60 字
-  // 再收。分隔符兼容中英文冒号与竖线（红线 17 公众号渠道同口径：「来源｜天下网商」）。
+  // 公众号惯例放文末；FoodTalks 网站已经在开头合成「本文为X原创，作者：Y」。
+  // 开头已有署名 → 文末这两行删掉，避免和开头重复（2026-08-18 数英稿）。
+  // 开头没有署名 → 仍降级 14px 灰斜体，避免掉进正文变黑粗。
+  // 只动头部前几个元素与尾部区域，正文中段「来源：某数据库」不动。
   const tailCreditRe = behaviorRegex(behavior, 'tail_credit_regex',
     '^(?:来源|出处|作者|编辑|编审|责编|主编|美编|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|选题|文)\\s*[：:｜|]\\s*\\S');
-  for (let i = 0; i < out.length; i++) {
+  const hasOpeningAuthor = out.some(e => e && e.k === 'author');
+  for (let i = out.length - 1; i >= 0; i--) {
     const e = out[i];
     if (!e || e.k !== 'p' || e.tocEntry) continue;
     if (i > 4 && !isNearTail(out, i)) continue;
     const text = runsToText(e.runs).trim();
     if (!text || text.length > 60) continue;
     tailCreditRe.lastIndex = 0;
-    if (tailCreditRe.test(text)) out[i] = { k: 'footer-note', lines: [text] };
+    if (!tailCreditRe.test(text)) continue;
+    if (hasOpeningAuthor) out.splice(i, 1);
+    else out[i] = { k: 'footer-note', lines: [text] };
+  }
+  if (hasOpeningAuthor) {
+    while (out.length && isEmptyP(out[out.length - 1])) out.pop();
   }
 
   // 阶段 5：补网站口径提示页脚。

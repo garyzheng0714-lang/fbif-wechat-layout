@@ -291,7 +291,7 @@ func (p *publishPipeline) refetchLatestWithRulePack(ctx context.Context, jobID i
 	}, func(latest *publishJob) {
 		applyPublishContentSeed(latest, seed)
 		latest.RulePackID = rulePackID
-		latest.OriginalSourceURL = originalSourceURL
+		latest.OriginalSourceURL = preferOriginalSourceURL(originalSourceURL, current.OriginalSourceURL)
 	})
 	if err != nil {
 		return publishJob{}, err

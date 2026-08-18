@@ -215,6 +215,9 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			ClassifierVersion string `json:"classifier_version"`
 			RerenderLatest    bool   `json:"rerender_latest"`
 			RefetchLatest     bool   `json:"refetch_latest"`
+			// 官方接口「阅读原文」：不是正文旁路，只补出处链接。
+			ContentSourceURL  string `json:"content_source_url"`
+			OriginalSourceURL string `json:"original_source_url"`
 
 			// 以下字段只为「显式拒绝」而保留，绝不参与排版（红线，见函数头注释）。
 			// 静默忽略比拒绝更危险：调用方会以为自己传的正文生效了。
@@ -249,7 +252,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			}
 		}
 		job, created, err := p.submitWithRulePackAndMetadataContext(
-			r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion)
+			r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion,
+			firstNonEmpty(req.ContentSourceURL, req.OriginalSourceURL))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -320,6 +324,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			ContentKind       string `json:"content_kind"`
 			Classification    string `json:"classification"`
 			ClassifierVersion string `json:"classifier_version"`
+			ContentSourceURL  string `json:"content_source_url"`
+			OriginalSourceURL string `json:"original_source_url"`
 
 			// 以下字段只为「显式拒绝」而保留，绝不参与排版（红线）。
 			ContentHTML string `json:"content_html"`
@@ -357,7 +363,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			}
 		}
 		job, created, err := p.submitWithRulePackAndMetadataContext(
-			r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion)
+			r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion,
+			firstNonEmpty(req.ContentSourceURL, req.OriginalSourceURL))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

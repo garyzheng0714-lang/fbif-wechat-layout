@@ -434,6 +434,36 @@ func TestPublishOfficialSyncFetchesFromURL(t *testing.T) {
 	}
 }
 
+func TestPublishOfficialSyncKeepsSubmittedContentSourceURLWhenPageEmpty(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	hint := "https://www.tmtpost.com/8103277.html"
+	body := fmt.Sprintf(
+		`{"url":%q,"content_kind":"article","classification":"ordinary_confirmed","classifier_version":"test-v1","content_source_url":%q}`,
+		testPublishSourceURL, hint,
+	)
+	rec := doPublishReq(mux, http.MethodPost, "/api/publish/official-sync", body, true)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("带阅读原文提交应 201，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	if env.fetchCalls != 1 {
+		t.Fatalf("带阅读原文仍须自己抓正文，实际 fetch=%d", env.fetchCalls)
+	}
+	var response struct {
+		Job publishJob `json:"job"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	job, err := env.store.byID(response.Job.ID)
+	if err != nil {
+		t.Fatalf("byID: %v", err)
+	}
+	if job.OriginalSourceURL != hint {
+		t.Fatalf("网页没填阅读原文时应保留官方接口带来的出处：%q", job.OriginalSourceURL)
+	}
+}
+
 // TestPublishOfficialSyncRejectsCallerSuppliedContent official-sync 与 site-sync
 // 共用同一条拒绝规则，逐字段验证——静默忽略会让调用方以为自己传的正文生效了。
 func TestPublishOfficialSyncRejectsCallerSuppliedContent(t *testing.T) {

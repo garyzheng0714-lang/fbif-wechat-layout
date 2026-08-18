@@ -438,7 +438,7 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 			// 2026-08-17 运营反馈：补署名类前缀（作者/编辑…），转载稿尾部加粗署名行不再被误升 h2。
 			"caption_lead_regex": map[string]any{"type": "string", "default": `(?i)^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|作者|编辑|编审|责编|主编|美编|出品|策划|撰文|撰稿|排版|设计|校对|审校|选题|Source|Photo|Image|Credit)\s*[：:]`},
 			"footer_note_regex":  map[string]any{"type": "string", "default": `^(?:本文(?:未标注来源|作者\s*[：:]|图片来源)|图片均来自|[*＊]\s*注[：:])`},
-			// 尾部裸署名行（「来源：xxx」「作者：xxx，编辑：yyy」）→ 14px 灰斜体小字
+			// 尾部裸署名行（「来源：xxx」「作者：xxx，编辑：yyy」）：开头已有署名则删除，否则 14px 灰斜体
 			//（2026-08-17 运营反馈：此前掉进正文段呈黑色粗体）。仅文章尾部区域触发。
 			"tail_credit_regex":   map[string]any{"type": "string", "default": `^(?:来源|出处|作者|编辑|编审|责编|主编|美编|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|选题|文)\s*[：:｜|]\s*\S`},
 			"repost_source_regex": map[string]any{"type": "string", "default": `^来源[：:]\s*(.+)$`},

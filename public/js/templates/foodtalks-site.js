@@ -16,7 +16,7 @@ const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
 // 等价于: import { applyFoodTalksBehavior, FBIF_FOOTER_HTML } from '../rule-behavior-foodtalks.js'
 // 用动态 import 是为了配合浏览器端的 cache-busting assetQuery
 const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery);
-const { applyFoodTalksBehavior, buildFooterHtml, compileSiteRegex } = behaviorModule;
+const { applyFoodTalksBehavior, buildFooterHtml, compileSiteRegex, pickSiteTipSourceUrl } = behaviorModule;
 
 // ── 规则读取助手（红线下放：优先服务端 config / config.behavior，缺省/非法降级 const）──
 // behOf/behTemplate/behParamStr/behList 共享实现收敛到 rule-behavior-utils.js（架构体检 S6）。
@@ -1182,12 +1182,13 @@ export default {
   processBlocks(data, opts) {
     const config = (opts && opts.config) || {};
     const { elems, imgN, title } = classifyBlocks(data);
-    // data.source 是后端抓取的原文 URL（公众号链接），用于提示声明的标题超链接。
+    // 转载声明《标题》链接：有阅读原文用阅读原文；自家号转发且没有原文时不链回
+    // 提交的公众号转载页。自动发布路径会把已解析的原文 URL 放进 data.source。
     const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
     const behaved = markInterviewSpeakerPrefixes(applyFoodTalksBehavior(normalized, config, {
       isRepost: !!(opts && opts.isRepost),
       title,
-      sourceUrl: (data && data.source) || '',
+      sourceUrl: pickSiteTipSourceUrl(data, elems),
     }));
     const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
     const finalElems = dropRepeatedDecorHeadings(markSeriesAboutLogoImages(promoted, config));
