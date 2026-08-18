@@ -63,6 +63,13 @@ func TestPublishMonitoringReportsOnlyOperationalMetrics(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "不得出现在") || strings.Contains(rec.Body.String(), "secret body") {
 		t.Fatalf("monitoring response leaked content: %s", rec.Body.String())
 	}
+	var wire map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := wire["alert_issues"]; !ok {
+		t.Fatalf("监控 JSON 必须带 alert_issues 空数组，否则看门狗会把 issues 当 P0：%s", rec.Body.String())
+	}
 
 	unauthorized := httptest.NewRecorder()
 	mux.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/publish/monitoring", nil))
@@ -92,6 +99,13 @@ func TestPublishMonitoringSeparatesBusyDegradedAndUnhealthy(t *testing.T) {
 	busy := currentPublishMonitoring(store, updatedAt.Add(5*time.Minute))
 	if busy.Ready || !busy.Busy || busy.Health != "busy" || len(busy.AlertIssues) != 0 {
 		t.Fatalf("normal processing should be busy without P0 alert: %+v", busy)
+	}
+	raw, err := json.Marshal(busy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"alert_issues":[]`) && !strings.Contains(string(raw), `"alert_issues": []`) {
+		t.Fatalf("busy 状态必须写出空的 alert_issues，实际 %s", raw)
 	}
 
 	degraded := currentPublishMonitoring(store, updatedAt.Add(11*time.Minute))
