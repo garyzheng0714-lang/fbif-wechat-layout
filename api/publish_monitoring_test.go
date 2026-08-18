@@ -291,6 +291,36 @@ func TestPublishMonitoringOldFailureRemainsVisibleWithoutPermanentOutage(t *test
 	}
 }
 
+func TestAbandonFailedJobClearsRecentFailureAlert(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	env := newPublishTestEnv(t)
+	job, _, err := env.store.create("site:https://mp.weixin.qq.com/s/dead-url", "https://mp.weixin.qq.com/s/dead-url")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStageFailed
+		current.FailedStage = publishStageFetching
+		current.Error = "未能从文章解析出标题"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pipeline.abandonFailedJob(job.ID, "公众号原文已失效"); err != nil {
+		t.Fatalf("结案失败: %v", err)
+	}
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stage != publishStageAbandoned || !got.terminal() {
+		t.Fatalf("结案后应为 abandoned 终态，实际 %+v", got)
+	}
+	status := currentPublishMonitoring(env.store, time.Now().UTC())
+	if !status.Ready || status.FailedRecent != 0 || publishMonitoringHasIssue(status, "failed_jobs_recent:") {
+		t.Fatalf("结案后监控应变绿，实际 %+v", status)
+	}
+}
+
 func TestPublishMonitorAlertRequiresMachineTokenAndDelivers(t *testing.T) {
 	t.Setenv(publishSyncServiceTokenEnv, "monitor-secret")
 	t.Setenv("PUBLISH_ADMIN_SERVICE_TOKEN", "admin-service-token")

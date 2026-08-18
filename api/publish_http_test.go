@@ -60,6 +60,7 @@ func TestPublishEndpointsRequireAdminRole(t *testing.T) {
 		{http.MethodPost, "/api/publish/jobs/1/retry", ""},
 		{http.MethodPost, "/api/publish/jobs/1/rerender-latest", ""},
 		{http.MethodPost, "/api/publish/jobs/1/restage-current", ""},
+		{http.MethodPost, "/api/publish/jobs/1/abandon", `{"reason":"原文已失效"}`},
 		{http.MethodPost, "/api/publish/jobs/1/reconcile", `{"foodtalks_news_id":7240}`},
 		{http.MethodPost, "/api/publish/cms-resync", `{"day":"2026-08-13"}`},
 		{http.MethodPost, "/api/publish/jobs/1/repair-wechat-trailer", ""},
@@ -146,6 +147,7 @@ func TestPublishSyncServiceTokenHasLeastPrivilege(t *testing.T) {
 		{http.MethodGet, fmt.Sprintf("/api/publish/jobs/%d", response.Job.ID), ""},
 		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/review", response.Job.ID), `{"action":"approve"}`},
 		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/retry", response.Job.ID), ""},
+		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/abandon", response.Job.ID), `{"reason":"原文已失效"}`},
 		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/reconcile", response.Job.ID), `{"confirm_not_created":true}`},
 		{http.MethodPost, "/api/publish/cms-resync", `{"day":"2026-08-13"}`},
 		{http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/repair-wechat-trailer", response.Job.ID), ""},
@@ -598,6 +600,37 @@ func TestPublishJobRestageCurrentDetachesForeignDraft(t *testing.T) {
 		t.Fatalf("摘锚后应启动重排，实际停在空正文待审")
 	}
 	if rec := doPublishReq(mux, http.MethodPost, "/api/publish/jobs/1/restage-current", "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("无凭证应 401，实际 %d", rec.Code)
+	}
+}
+
+func TestPublishJobAbandonFailedClearsAlert(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newPublishTestMux(t, env)
+	job, _, err := env.store.create(testPublishSourceURL, testPublishSourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStageFailed
+		current.FailedStage = publishStageFetching
+		current.Error = "未能从文章解析出标题"
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doPublishReq(mux, http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/abandon", job.ID), `{"reason":"公众号原文已失效"}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("结案应 200，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	after, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Stage != publishStageAbandoned {
+		t.Fatalf("结案后 stage=%q", after.Stage)
+	}
+	if rec := doPublishReq(mux, http.MethodPost, fmt.Sprintf("/api/publish/jobs/%d/abandon", job.ID), `{"reason":"再结一次"}`, false); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("无凭证应 401，实际 %d", rec.Code)
 	}
 }

@@ -1344,6 +1344,13 @@ func (p *publishPipeline) retry(jobID int64) (publishJob, error) {
 		job, _ := p.store.byID(jobID)
 		return job, errPublishWorkersPaused
 	}
+	if current, loadErr := p.store.byID(jobID); loadErr == nil &&
+		current.Stage == publishStageFailed &&
+		current.FoodTalksNewsID > 0 &&
+		publishStagingTargetMismatch(current) != nil &&
+		publishContentRerenderable(current) {
+		return p.restageCurrentAndRerender(jobID)
+	}
 	var target string
 	job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
 		if current.Stage != publishStageFailed {

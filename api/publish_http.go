@@ -625,6 +625,35 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "restaged": true, "rerendered": true})
 	})
 
+	// 无法继续的失败单结案：原文失效或测试站旧锚点不再处理。结案后不再点亮 24 小时失败铃。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/abandon", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		if r.Body != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, http.StatusBadRequest, "invalid JSON")
+				return
+			}
+		}
+		job, err := p.abandonFailedJob(id, req.Reason)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "abandoned": true})
+	})
+
 	// 用当前代码重出审核卡。卡片改版后，历史任务的卡还停在旧样式上，群里回看
 	// 到的仍是旧信息；已记过 message_id 的群走原位更新，不会刷屏。
 	// 与 notification-replay 的分工见 refreshReviewCard 注释。

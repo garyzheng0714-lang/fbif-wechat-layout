@@ -150,6 +150,58 @@ func (p *publishPipeline) rerenderLatest(jobID int64) (publishJob, error) {
 	return p.rerenderLatestWithRulePack(jobID, "")
 }
 
+// abandonFailedJob 把无法继续的失败单盖棺。原文失效、测试站旧锚点不再处理时用它，
+// 避免同一张死单每被碰一次就重新点亮 24 小时监控。
+func (p *publishPipeline) abandonFailedJob(jobID int64, reason string) (publishJob, error) {
+	if publishWorkersPaused() {
+		job, _ := p.store.byID(jobID)
+		return job, errPublishWorkersPaused
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "无法继续处理，已结案"
+	}
+	job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
+		return current.Stage == publishStageFailed && !publishContentHasUncertainIntent(current)
+	}, func(j *publishJob) {
+		j.Stage = publishStageAbandoned
+		j.FailedStage = ""
+		j.Error = reason
+		cancelPublishNotification(j)
+	})
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !swapped {
+		if job.ID == 0 {
+			return job, fmt.Errorf("发布任务 #%d 不存在", jobID)
+		}
+		return job, fmt.Errorf("任务当前阶段（%s）无法结案：仅无未确认外调的失败任务可结案", job.Stage)
+	}
+	return job, nil
+}
+
+func (p *publishPipeline) detachForeignStagingAnchor(jobID int64, current publishJob) (publishJob, error) {
+	detached, swapped, err := p.store.updateIf(jobID, func(latest publishJob) bool {
+		return latest.ContentVersion == current.ContentVersion &&
+			publishContentRerenderable(latest) && !publishContentHasUncertainIntent(latest) &&
+			latest.FoodTalksNewsID > 0 && publishStagingTargetMismatch(latest) != nil
+	}, func(latest *publishJob) {
+		latest.FoodTalksNewsID = 0
+		latest.StagingTarget = ""
+		latest.StagingIntentKey = ""
+		latest.StagingIntentAt = ""
+		latest.ArticleURL = ""
+	})
+	if err != nil {
+		return publishJob{}, err
+	}
+	if !swapped {
+		return detached, errors.New("任务状态刚刚变化，请刷新后重试重新暂存")
+	}
+	return detached, nil
+}
+
 // restageCurrentAndRerender 丢掉不属于当前环境的旧草稿编号，再按已存
 // blocks 重排并在当前环境新建隐藏草稿。切正式站之前的存量单，资讯 id
 // 在正式站上往往是另一篇文章，必须先摘锚再 CreateNews，禁止回填
@@ -168,21 +220,8 @@ func (p *publishPipeline) restageCurrentAndRerender(jobID int64) (publishJob, er
 	if current.FoodTalksNewsID > 0 && publishStagingTargetMismatch(current) == nil {
 		return p.rerenderLatest(jobID)
 	}
-	detached, swapped, err := p.store.updateIf(jobID, func(latest publishJob) bool {
-		return latest.ContentVersion == current.ContentVersion &&
-			publishContentRerenderable(latest) && !publishContentHasUncertainIntent(latest)
-	}, func(latest *publishJob) {
-		latest.FoodTalksNewsID = 0
-		latest.StagingTarget = ""
-		latest.StagingIntentKey = ""
-		latest.StagingIntentAt = ""
-		latest.ArticleURL = ""
-	})
-	if err != nil {
-		return publishJob{}, err
-	}
-	if !swapped {
-		return detached, errors.New("任务状态刚刚变化，请刷新后重试重新暂存")
+	if _, err := p.detachForeignStagingAnchor(jobID, current); err != nil {
+		return current, err
 	}
 	return p.rerenderLatest(jobID)
 }
@@ -200,6 +239,13 @@ func (p *publishPipeline) rerenderLatestWithRulePack(jobID int64, requestedRuleP
 	}
 	if strings.TrimSpace(current.BlocksJSON) == "" {
 		return current, errors.New("任务缺少可重放的结构化正文，不能按最新规则重新排版")
+	}
+	if current.FoodTalksNewsID > 0 && publishStagingTargetMismatch(current) != nil {
+		detached, detachErr := p.detachForeignStagingAnchor(jobID, current)
+		if detachErr != nil {
+			return current, detachErr
+		}
+		current = detached
 	}
 	rulePackID := strings.TrimSpace(requestedRulePackID)
 	if rulePackID == "" {
@@ -256,6 +302,13 @@ func (p *publishPipeline) refetchLatestWithRulePack(ctx context.Context, jobID i
 	}
 	if strings.TrimSpace(current.SourceURL) == "" {
 		return current, errors.New("任务缺少公众号原文链接，不能回源重新排版")
+	}
+	if current.FoodTalksNewsID > 0 && publishStagingTargetMismatch(current) != nil {
+		detached, detachErr := p.detachForeignStagingAnchor(jobID, current)
+		if detachErr != nil {
+			return current, detachErr
+		}
+		current = detached
 	}
 	rulePackID := strings.TrimSpace(requestedRulePackID)
 	if rulePackID == "" {

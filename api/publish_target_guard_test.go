@@ -127,3 +127,66 @@ func TestPublishStagingUpdateBlockedByTargetGuard(t *testing.T) {
 		t.Fatalf("被拦后不得发出 UpdateNews，实际新增 %d 次", afterUpdates-beforeUpdates)
 	}
 }
+
+// TestPublishRerenderLatestRestagesEnvironmentMismatch 重排入口遇到测试站旧锚点
+// 时必须先摘锚再建正式站草稿，不能再把同一张单打成 failed 重新点亮 24 小时铃。
+func TestPublishRerenderLatestRestagesEnvironmentMismatch(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, _, err := env.store.updateIf(job.ID, func(publishJob) bool { return true }, func(j *publishJob) {
+		j.FoodTalksNewsID = 7271
+		j.StagingTarget = ""
+		j.ArticleURL = "https://www.foodtalks.cn/news/7271"
+		j.Stage = publishStageAwaitingReview
+	}); err != nil {
+		t.Fatalf("回写任务状态: %v", err)
+	}
+	t.Setenv("FOODTALKS_BASE_URL", "https://api-we.foodtalks.cn")
+	_, beforeUpdates := env.ft.counts()
+	got, err := env.pipeline.rerenderLatest(job.ID)
+	if err != nil {
+		t.Fatalf("重排应自动摘锚重暂存，实际 err=%v", err)
+	}
+	if got.FoodTalksNewsID == 7271 {
+		t.Fatalf("不得继续拿测试站资讯 id 写正式站，news=%d", got.FoodTalksNewsID)
+	}
+	if _, afterUpdates := env.ft.counts(); afterUpdates != beforeUpdates {
+		t.Fatalf("摘锚后不得 UpdateNews 旧 id，实际新增 %d 次", afterUpdates-beforeUpdates)
+	}
+	if got.Stage == publishStageFailed && strings.Contains(got.Error, "环境守卫") {
+		t.Fatalf("自动摘锚后不得再因环境守卫失败：%s", got.Error)
+	}
+}
+
+// TestPublishRetryRestagesEnvironmentMismatch 失败单点重试时，若失败原因是
+// 跨环境旧锚点，必须改走摘锚重暂存，不能再回 staging 撞同一面墙。
+func TestPublishRetryRestagesEnvironmentMismatch(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, _, err := env.store.updateIf(job.ID, func(publishJob) bool { return true }, func(j *publishJob) {
+		j.FoodTalksNewsID = 7272
+		j.StagingTarget = ""
+		j.Stage = publishStageFailed
+		j.FailedStage = publishStageStaging
+		j.Error = "环境守卫：任务 #27 的 FoodTalks 草稿（资讯 id=7272）建在 未知（早期任务，无环境记录） 环境"
+	}); err != nil {
+		t.Fatalf("回写任务状态: %v", err)
+	}
+	t.Setenv("FOODTALKS_BASE_URL", "https://api-we.foodtalks.cn")
+	got, err := env.pipeline.retry(job.ID)
+	if err != nil {
+		t.Fatalf("重试跨环境失败单应自动摘锚，实际 err=%v", err)
+	}
+	if got.FoodTalksNewsID == 7272 {
+		t.Fatalf("重试后仍握着旧资讯 id=%d", got.FoodTalksNewsID)
+	}
+	if got.Stage == publishStageFailed && strings.Contains(got.Error, "环境守卫") {
+		t.Fatalf("自动摘锚后不得再因环境守卫失败：%s", got.Error)
+	}
+}
