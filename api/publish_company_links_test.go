@@ -135,13 +135,42 @@ func (s *companySearchStub) SearchCompanies(_ context.Context, keyword string) (
 	return s.byKeyword[keyword], nil
 }
 
+func TestPickCompanyAnchorUsesShortNameInBody(t *testing.T) {
+	c := foodTalksCompany{ID: 15259, CnName: "山姆会员商店中国", ShortCnName: "山姆中国,山姆,山姆会员店", URLCode: "sams_club_china"}
+	html := `<p>营销圈转了山姆三十周年的品牌片。</p>`
+	if got := pickCompanyAnchor(html, "山姆会员店", c); got != "山姆" {
+		t.Fatalf("正文只有「山姆」时应锚「山姆」，实际 %q", got)
+	}
+}
+
+func TestMatchFoodTalksCompanyPrefixFullName(t *testing.T) {
+	pepsi := []foodTalksCompany{{ID: 961, CnName: "百事中国", ShortCnName: "", URLCode: "pepsi_cn"}}
+	if got := matchFoodTalksCompany(pepsi, "百事"); got == nil || got.ID != 961 {
+		t.Fatalf("百事应命中百事中国：%+v", got)
+	}
+	better := []foodTalksCompany{{ID: 28401, CnName: "比优特超市", ShortCnName: "", URLCode: "better"}}
+	if got := matchFoodTalksCompany(better, "比优特"); got == nil || got.ID != 28401 {
+		t.Fatalf("比优特应命中比优特超市：%+v", got)
+	}
+	sams := []foodTalksCompany{
+		{ID: 15259, CnName: "山姆会员商店中国", ShortCnName: "山姆中国,山姆,山姆会员店", URLCode: "sams_club_china"},
+		{ID: 1229, CnName: "沃尔玛（中国）投资有限公司", ShortCnName: "沃尔玛中国,沃尔玛超市", URLCode: "Walmart_China"},
+	}
+	if got := matchFoodTalksCompany(sams, "山姆"); got == nil || got.ID != 15259 {
+		t.Fatalf("山姆应命中山姆会员商店中国：%+v", got)
+	}
+	if got := matchFoodTalksCompany(sams, "山姆会员店"); got == nil || got.ID != 15259 {
+		t.Fatalf("山姆会员店应命中同一家：%+v", got)
+	}
+}
+
 func TestSiteCompanyMatchesFor(t *testing.T) {
 	stub := &companySearchStub{byKeyword: map[string][]foodTalksCompany{
 		"茅台": {{ID: 105, CnName: "贵州茅台酒股份有限公司", ShortCnName: "贵州茅台,茅台股份,茅台", URLCode: "Kweichow_Moutai"}},
 		"饮料": {{ID: 7, CnName: "某饮料集团股份有限公司", ShortCnName: "某饮集团", URLCode: "yinliao"}},
 	}}
 	p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil }}
-	job := publishJob{ID: 1, Tags: []string{"茅台", "饮料", "创新周报"}}
+	job := publishJob{ID: 1, Tags: []string{"茅台", "饮料", "创新周报"}, ContentHTML: `<p>茅台发布业绩。</p>`}
 	got := p.siteCompanyMatchesFor(context.Background(), job)
 	if len(got) != 1 || got[0].Company.ID != 105 || got[0].Anchor != "茅台" {
 		t.Fatalf("应只命中精确匹配的茅台（品类词「饮料」非该公司官方名、栏目词被拦）：%+v", got)
@@ -151,6 +180,18 @@ func TestSiteCompanyMatchesFor(t *testing.T) {
 			t.Fatalf("栏目黑名单词不得发起公司检索")
 		}
 	}
+	samsStub := &companySearchStub{byKeyword: map[string][]foodTalksCompany{
+		"山姆会员店": {{ID: 15259, CnName: "山姆会员商店中国", ShortCnName: "山姆中国,山姆,山姆会员店", URLCode: "sams_club_china"}},
+	}}
+	samsPipe := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return samsStub, nil }}
+	sams := samsPipe.siteCompanyMatchesFor(context.Background(), publishJob{
+		ID: 3, Tags: []string{"山姆会员店"},
+		ContentHTML: `<p>营销圈转了山姆三十周年的品牌片。</p>`,
+	})
+	if len(sams) != 1 || sams[0].Anchor != "山姆" {
+		t.Fatalf("山姆会员店应对正文里的「山姆」落链：%+v", sams)
+	}
+
 	// 无标签 → 不检索
 	stub.calls = nil
 	if got := p.siteCompanyMatchesFor(context.Background(), publishJob{ID: 2}); len(got) != 0 || len(stub.calls) != 0 {

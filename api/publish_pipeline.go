@@ -683,7 +683,7 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 			current.PendingContentHash == "" && publishContentRank(current.ContentSource) <= publishContentRank(seed.Source)
 	}, func(current *publishJob) {
 		applyPublishContentSeed(current, seed)
-		current.OriginalSourceURL = originalSourceURL
+		current.OriginalSourceURL = preferOriginalSourceURL(originalSourceURL, current.OriginalSourceURL)
 	})
 	if err == nil && !swapped {
 		return errPublishContentSuperseded
@@ -720,15 +720,21 @@ func validatePublishRenderResultForPack(result publishRenderResult, rulePackID s
 	return nil
 }
 
-// publishRenderSourceURL 渲染用的「原文链接」（转载声明《标题》超链接）：转载稿优先用
-// 公众号「阅读原文」指向的原文地址（排版规范：来源处超链接到原文链接，不能指回自家
-// 转载页——2026-08-17 运营反馈）；原创稿或没抓到「阅读原文」时回退提交的公众号链接。
+// publishRenderSourceURL 渲染用的「原文链接」（转载声明《标题》超链接）。
+// 转载稿优先用公众号「阅读原文」；自家号转发且阅读原文为空时不回退提交链接
+// （那是自家转载页，不是出处原文——2026-08-18 猪油渣稿）。外号原文或自家原创
+// 仍用提交链接。
 func publishRenderSourceURL(job publishJob) string {
-	if original, _ := publishArticleProvenance(job); !original {
-		u := strings.TrimSpace(job.OriginalSourceURL)
-		if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+	original, _ := publishArticleProvenance(job)
+	if !original {
+		if u := strings.TrimSpace(job.OriginalSourceURL); isHTTPURL(u) {
 			return u
 		}
+		name := strings.TrimSpace(job.SourceName)
+		if name != "" && !siteOwnAccounts()[name] {
+			return job.SourceURL
+		}
+		return ""
 	}
 	return job.SourceURL
 }
@@ -745,6 +751,7 @@ func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error
 	}
 	// 网站排版一律按转载切尾，与编辑器 URL 导入一致。publishSiteIsRepost 只决定
 	// CMS 来源类型（原创/转载）和提示文案，不得再关掉切尾。
+	p.ensureRepostOriginalURL(ctx, &job)
 	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, publishRenderSourceURL(job), job.BlocksJSON, true)
 	if err != nil {
 		return err
@@ -864,8 +871,9 @@ func (p *publishPipeline) stageMirror(ctx context.Context, job publishJob) error
 	return err
 }
 
-// stageEnrich AI 预填发布参数（M5）：只产元数据（summary/tags/author/ai_notes +
-// 可能覆盖 cover_url），**绝不碰 ContentHTML**。AI 未装配 / 调用失败 / 解析失败 →
+// stageEnrich AI 预填发布参数（M5）：产元数据（summary/tags/author/ai_notes +
+// 可能覆盖 cover_url），并按标签把公司库链接写入 ContentHTML，预览与草稿一致。
+// AI 未装配 / 调用失败 / 解析失败 →
 // fallbackEnrichment 规则兜底 + WARN，阶段照常推进——AI 是加速器不是闸门，
 // 本函数只会因存储写失败而让任务落 failed。
 func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error {
@@ -880,6 +888,9 @@ func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error
 		log.Printf("publish: WARN job %d AI 预填失败，走规则兜底: %v", job.ID, err)
 		result = fallbackEnrichment(job, err)
 	}
+	tagged := job
+	tagged.Tags = result.Tags
+	linkedHTML, _ := p.applySiteCompanyLinks(ctx, tagged)
 	_, swapped, uerr := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageEnriching && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
 	}, func(j *publishJob) {
@@ -888,6 +899,9 @@ func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error
 		}
 		j.Summary = result.Summary
 		j.Tags = result.Tags
+		if strings.TrimSpace(linkedHTML) != "" {
+			j.ContentHTML = linkedHTML
+		}
 		if strings.TrimSpace(j.Author) == "" {
 			// 结构化署名（fetching 从页面 meta/var author 直取）优先；AI 从正文
 			// 识别只做兜底——发布者自己填的字段永远比模型猜的准（M7 用户裁定）。
@@ -959,6 +973,9 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		return errPublishContentSuperseded
 	}
 	job = frozen
+	if linked, _ := p.applySiteCompanyLinks(ctx, job); strings.TrimSpace(linked) != "" {
+		job.ContentHTML = linked
+	}
 	news, err := p.buildSiteNews(ctx, job, foodTalksPublishStatusDraft)
 	if err != nil {
 		return err
@@ -981,6 +998,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		}, func(j *publishJob) {
 			j.Stage = publishStageAwaitingReview
 			j.StagingTarget = stagedTarget
+			j.ContentHTML = job.ContentHTML
 			j.FailedStage = ""
 			j.Error = ""
 			if j.PendingContentHash == "" {
@@ -1589,11 +1607,11 @@ func (p *publishPipeline) submit(sourceURL string) (publishJob, bool, error) {
 }
 
 func (p *publishPipeline) submitWithContext(ctx context.Context, sourceURL string) (publishJob, bool, error) {
-	return p.submitWithRulePackAndMetadataContext(ctx, sourceURL, sitePublishRulePackID, "", "")
+	return p.submitWithRulePackAndMetadataContext(ctx, sourceURL, sitePublishRulePackID, "", "", "")
 }
 
 func (p *publishPipeline) submitWithRulePackAndMetadataContext(
-	ctx context.Context, sourceURL, rulePackID, classification, classifier string,
+	ctx context.Context, sourceURL, rulePackID, classification, classifier, submittedOriginalURL string,
 ) (publishJob, bool, error) {
 	if publishWorkersPaused() {
 		return publishJob{}, false, errPublishWorkersPaused
@@ -1613,7 +1631,7 @@ func (p *publishPipeline) submitWithRulePackAndMetadataContext(
 	// 因此短链必须先抓取页面并解析 __biz/mid/idx canonical identity，再原子建单；
 	// 绝不能先创建临时 job、事后把冲突输家打成 failed。
 	if publishSourceKeyIsShort(sourceKey) {
-		title, sourceName, byline, canonicalURL, originalSourceURL, blocksJSON, fetchErr := p.fetch(ctx, sourceURL)
+		title, sourceName, byline, canonicalURL, fetchedOriginalURL, blocksJSON, fetchErr := p.fetch(ctx, sourceURL)
 		if fetchErr != nil {
 			return publishJob{}, false, fetchErr
 		}
@@ -1635,7 +1653,7 @@ func (p *publishPipeline) submitWithRulePackAndMetadataContext(
 			j.Classification = classification
 			j.Classifier = classifier
 			applyPublishContentSeed(j, seed)
-			j.OriginalSourceURL = originalSourceURL
+			j.OriginalSourceURL = preferOriginalSourceURL(fetchedOriginalURL, submittedOriginalURL)
 		})
 		if createErr != nil {
 			return publishJob{}, false, createErr
@@ -1645,13 +1663,27 @@ func (p *publishPipeline) submitWithRulePackAndMetadataContext(
 		}
 		return job, created, nil
 	}
+	submittedOriginal := normalizeSubmittedOriginalSourceURL(submittedOriginalURL)
 	job, created, err := p.store.createSeeded(sourceKey, sourceURL, func(j *publishJob) {
 		j.RulePackID = rulePackID
 		j.Classification = classification
 		j.Classifier = classifier
+		if submittedOriginal != "" {
+			j.OriginalSourceURL = submittedOriginal
+		}
 	})
 	if err != nil {
 		return publishJob{}, false, err
+	}
+	if !created && submittedOriginal != "" && !isHTTPURL(job.OriginalSourceURL) {
+		updated, updateErr := p.store.update(job.ID, func(current *publishJob) {
+			if !isHTTPURL(current.OriginalSourceURL) {
+				current.OriginalSourceURL = submittedOriginal
+			}
+		})
+		if updateErr == nil {
+			job = updated
+		}
 	}
 	if created {
 		p.spawn(func() { p.runJob(job.ID) })

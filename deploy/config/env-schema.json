@@ -35,6 +35,7 @@
         "PUBLISH_JOBS_PATH": { "required": false, "secret": false },
         "PUBLISH_DELIVERY_SETTINGS_PATH": { "required": false, "secret": false },
         "PUBLISH_SYNC_SERVICE_TOKEN": { "required": true, "secret": true },
+        "FOODTALKS_FEED_BASE_URL": { "required": false, "secret": false },
         "PUBLISH_HTTP_REVIEW_ENABLED": { "required": false, "secret": false },
         "PUBLISH_HTTP_REVIEWER_OPEN_ID": { "required": false, "secret": false },
         "WECHAT_UPLOAD_ENDPOINT": { "required": false, "secret": true },

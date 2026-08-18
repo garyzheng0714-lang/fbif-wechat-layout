@@ -50,6 +50,7 @@ func (p *publishPipeline) repairPublishedWechatTrailer(ctx context.Context, jobI
 	if err != nil {
 		return job, err
 	}
+	p.ensureRepostOriginalURL(ctx, &job)
 	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, publishRenderSourceURL(job), job.BlocksJSON, true)
 	if err != nil {
 		return job, err

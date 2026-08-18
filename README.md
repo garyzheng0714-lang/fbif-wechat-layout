@@ -32,7 +32,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - 图片注释使用 12px、`#888888`，按关键词智能识别（图片来源/资料来源/数据来源/来源/制图/截图/图注/注/Source/Photo/Image/Credit）
 - 参考来源使用 `#888888`，自动补 `[1]` `[2]` `[3]` 编号
 - 标题自动等级识别：`一二三 + 中文标点` → h2、`（一）（二）` → h3、9 个关键词（背景/简介/总结/分析/案例/介绍/概述/结论/展望）+ 短句 → h2；署名行前缀（作者/编辑/出品/撰文…）不升标题；同文本 ≤16 字无序号标题全篇重复 ≥2 次判账号装饰行整体删除（2026-08-17）
-- 转载稿头尾裸署名行（来源/作者/编辑/文…，冒号或竖线分隔）自动降级 14px 灰斜体小字；转载声明《标题》超链接优先公众号「阅读原文」指向的原文地址（2026-08-17）
+- 转载稿开头已有「本文为X原创，作者：Y」时删除文末公众号口径来源/作者行；没有开头署名时仍降级 14px 灰斜体。转载声明《标题》超链接优先公众号「阅读原文」；自家号转发且阅读原文为空时检索核验原文，核验不过不链回自家转载页（2026-08-18）
 - 访谈自动识别（两个及以上「角色：」前缀各现 ≥3 次）：提问方 FoodTalks 蓝并加粗、回答方默认色加粗；提问方按书名号/问号率/首现判定；提问方前缀独立成段时与提问内容合并（2026-08-17）
 - 中文标点转换：跟 CJK 字符邻接的 ASCII 标点 `,:;?!().` 转为中文形态，保留小数和域名里的点
 - 连续独立链接段之间不插空行
@@ -228,7 +228,7 @@ curl http://127.0.0.1:9000/api/health
 | `PUT` | `/api/rules/admin/access-users/{id}` | 超级管理员授权/收回管理员角色；超级管理员只能通过 `RULE_SUPER_ADMIN_OPEN_IDS` 配置 |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
-| `POST` | `/api/publish/site-sync` | **只接收文章链接**：`url` + 可选 `rule_pack_id` + 分类证据。带 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400（见下方红线）。机器调用需 `X-Publish-Sync-Token` 与普通图文正向分类证据、有效 classifier version |
+| `POST` | `/api/publish/site-sync` | **只接收文章链接**：`url` + 可选 `rule_pack_id` + 分类证据。可选 `content_source_url` 只补「阅读原文」出处。带 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400（见下方红线）。机器调用需 `X-Publish-Sync-Token` 与普通图文正向分类证据、有效 classifier version |
 | `POST` | `/api/publish/official-sync` | 同样只接收链接，红线与判定同 site-sync；机器调用需要服务令牌与 fail-closed 证据 |
 | `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文 |
 | `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权。任一任务仍在 processing、审核通知仍 pending/sending、审核卡缺失或失败/对账积压时均 `ready=false`；进程存活不等于业务完成 |

@@ -1001,9 +1001,9 @@ test('网站默认包：justify_paragraphs=false 不等于 ft-series 身份', ()
   assert.match(html, /<h2>上海艾录包装股份有限公司<\/h2>/, 'ft-default 不应套用 ft-series 联系区归一化');
 });
 
-test('转载稿尾部裸「来源：/作者：」行降级为 14px 灰斜体小字，不再黑色粗体（2026-08-17 运营反馈）', () => {
-  // WHY：任务 #101 形态——FBIF 转载天下网商，公众号原文尾部「来源：天下网商」「作者：叶晨，
-  // 编辑：张洁」两行此前没有任何 behavior 分支接住，掉进正文段保留加粗 → 网站成品黑色黑体。
+test('转载稿开头已合成署名时删除文末公众号口径来源/作者，不再黑粗也不再重复（2026-08-18）', () => {
+  // WHY：公众号惯例把「来源：/作者：」放文末；FoodTalks 网站开头已经写成
+  // 「本文为X原创，作者：Y」。两头都留会和开头重复（数英 DIGITALING / 天下网商）。
   const txt = (text, bold = false) => ({ k: 'txt', runs: [{ type: 'txt', text, bold }] });
   const result = template.processBlocks({
     title: '康普茶样例',
@@ -1017,9 +1017,9 @@ test('转载稿尾部裸「来源：/作者：」行降级为 14px 灰斜体小�
     ],
   }, { config: { muted_color: '#888888' }, isRepost: true });
   const html = result.lines.join('\n');
-  assert.match(html, /<em><span style="font-size: 14px; color: #888888;">来源：天下网商（ID：txws2013）/, '尾部来源行应为 14px 灰斜体（ft-default muted #888888）');
-  assert.match(html, /<em><span style="font-size: 14px; color: #888888;">作者：叶晨，编辑：张洁/, '尾部作者行应为 14px 灰斜体');
   assert.match(html, /本文为天下网商原创，作者：叶晨，编辑：张洁，转载请联系出处。/, '开头应合成网站口径署名行');
+  assert.doesNotMatch(html, />来源：天下网商（ID：txws2013）/, '开头已有署名则文末来源行应删除');
+  assert.doesNotMatch(html, />作者：叶晨，编辑：张洁/, '开头已有署名则文末作者行应删除');
   assert.doesNotMatch(html, /<strong>来源：天下网商/, '来源行不得保留黑色加粗');
   assert.doesNotMatch(html, /<h2[^>]*>作者：/, '加粗作者行不得被升成 h2');
 });

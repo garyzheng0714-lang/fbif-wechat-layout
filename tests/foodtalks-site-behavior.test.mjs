@@ -6,6 +6,7 @@ import {
   extractRepostSource,
   buildAuthorLineFromSource,
   buildFooterHtml,
+  pickSiteTipSourceUrl,
   FOOTER_PRESETS,
 } from '../public/js/rule-behavior-foodtalks.js';
 import { ASSET_LIBRARY_DEFAULT } from '../public/js/footer-segments-defaults.js';
@@ -309,6 +310,35 @@ test('作者识别：开头「作者：X」+「编辑：Y」分两段 → 合并
   assert.equal(out[1].k, 'p');
 });
 
+test('pickSiteTipSourceUrl：自家号转发且无阅读原文时不链回提交的公众号页', () => {
+  const elems = [p('正文'), p('来源：惊蛰研究所（ID：jingzheyanjiusuo）')];
+  assert.equal(
+    pickSiteTipSourceUrl({
+      source: 'https://mp.weixin.qq.com/s/fbif-repost',
+      source_name: 'FBIF食品饮料创新',
+    }, elems),
+    '',
+    '不得把自家转载页当原文',
+  );
+  assert.equal(
+    pickSiteTipSourceUrl({
+      source: 'https://mp.weixin.qq.com/s/fbif-repost',
+      source_name: 'FBIF食品饮料创新',
+      original_source_url: 'https://www.tmtpost.com/8103277.html',
+    }, elems),
+    'https://www.tmtpost.com/8103277.html',
+    '有阅读原文/核验原文时用它',
+  );
+  assert.equal(
+    pickSiteTipSourceUrl({
+      source: 'https://mp.weixin.qq.com/s/jingzhe-original',
+      source_name: '惊蛰研究所',
+    }, [p('正文')]),
+    'https://mp.weixin.qq.com/s/jingzhe-original',
+    '提交的就是原账号文章时应保留',
+  );
+});
+
 test('buildSiteFooterTipElem：转载文用提取的来源机构名替换 FBIF，标题带原文链接', () => {
   const e = buildSiteFooterTipElem('某标题', { source: '食品内参', sourceUrl: 'https://mp.weixin.qq.com/s/abc' });
   const text = e.rest_runs.map(r => r.text).join('');
@@ -316,6 +346,8 @@ test('buildSiteFooterTipElem：转载文用提取的来源机构名替换 FBIF�
   assert.doesNotMatch(text, /FBIF食品饮料创新/, '转载文不写 FBIF');
   const link = e.rest_runs.find(r => r.type === 'link');
   assert.ok(link && link.href === 'https://mp.weixin.qq.com/s/abc', '标题带原文链接');
+  const noLink = buildSiteFooterTipElem('某标题', { source: '惊蛰研究所', sourceUrl: '' });
+  assert.equal(noLink.rest_runs.some(r => r.type === 'link'), false, '没有可核验原文时标题不带链接');
 });
 
 test('extractRepostSource：从「来源：X（ID：y）」提取纯机构名（去 ID）', () => {
@@ -335,6 +367,9 @@ test('作者合成：开头无作者行但尾部有「来源：X」「作者：Y
   assert.match(out[0].text, /本文为食品内参原创/);
   assert.match(out[0].text, /作者：内参君，编审：橘子/);
   assert.match(out[0].text, /转载请联系出处。$/);
+  const rest = out.map(e => (e.runs || []).map(r => r.text).join('') + (e.text || '')).join('\n');
+  assert.doesNotMatch(rest, /^来源：食品内参/m, '开头已有署名则删掉文末来源行');
+  assert.doesNotMatch(rest, /^作者：内参君/m, '开头已有署名则删掉文末作者行');
 });
 
 test('作者合成：仅有来源、无独立作者段时合成「本文为X原创，转载请联系出处。」', () => {
@@ -342,6 +377,8 @@ test('作者合成：仅有来源、无独立作者段时合成「本文为X原�
   const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true });
   assert.equal(out[0].k, 'author');
   assert.equal(out[0].text, '本文为零售圈原创，转载请联系出处。');
+  assert.ok(!out.some(e => ((e.runs || []).map(r => r.text).join('') + (e.lines || []).join('')).includes('来源：零售圈')),
+    '开头已有署名则文末来源行应删除');
 });
 
 test('作者合成：开头已有作者行时不重复合成', () => {
@@ -350,6 +387,24 @@ test('作者合成：开头已有作者行时不重复合成', () => {
   assert.equal(out[0].k, 'author');
   assert.equal(out[0].text, '作者：张三');
   assert.ok(!out.slice(1).some(e => e.k === 'author'), '不应额外合成作者行');
+});
+
+test('开头已有网站署名时删除文末公众号口径来源/作者（数英 DIGITALING 实证）', () => {
+  const elems = [
+    p('正文最后一段，一起走向下一个30年。'),
+    p('来源：数英DIGITALING（ID：digitaling）'),
+    p('作者：Weavy'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true, title: '从山姆30年里，看见长期主义' });
+  assert.equal(out[0].k, 'author');
+  assert.match(out[0].text, /本文为数英DIGITALING原创/);
+  assert.match(out[0].text, /作者：Weavy/);
+  const rest = out.slice(1).map(e => {
+    if (e.k === 'footer-note') return (e.lines || []).join('\n');
+    return (e.runs || []).map(r => r.text).join('') + (e.text || '');
+  }).join('\n');
+  assert.doesNotMatch(rest, /来源：数英/, '文末来源行应删除');
+  assert.doesNotMatch(rest, /作者：Weavy/, '文末作者行应删除');
 });
 
 test('作者合成：非 isRepost 不合成', () => {

@@ -54,6 +54,51 @@ func splitFoodTalksShortNames(raw string) []string {
 	return out
 }
 
+// companyDisplayNames 可用于正文锚点的官方名字：标签词、全称、简称表。
+// 正文里常写「山姆」而标签是「山姆会员店」，必须用出现过的官方简称落链。
+func companyDisplayNames(word string, c foodTalksCompany) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	add(word)
+	add(c.CnName)
+	for _, s := range splitFoodTalksShortNames(c.ShortCnName) {
+		add(s)
+	}
+	// 长词优先，避免「山姆会员店」正文里只命中「山姆」时被短词抢先
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if len([]rune(out[j])) > len([]rune(out[i])) {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out
+}
+
+func htmlContainsPlainText(contentHTML, needle string) bool {
+	if needle == "" || contentHTML == "" {
+		return false
+	}
+	return strings.Contains(publishSiteTagStripRe.ReplaceAllString(contentHTML, ""), needle)
+}
+
+func pickCompanyAnchor(contentHTML, word string, c foodTalksCompany) string {
+	for _, name := range companyDisplayNames(word, c) {
+		if htmlContainsPlainText(contentHTML, name) {
+			return name
+		}
+	}
+	return strings.TrimSpace(word)
+}
+
 // matchFoodTalksCompany 在检索结果中找候选词的精确归属：全称或官方简称规范化等值。
 // 多条命中时优先境内主体（cnName 含「中国」）；仍多条则返回 nil（歧义交人工）。
 func matchFoodTalksCompany(records []foodTalksCompany, word string) *foodTalksCompany {
@@ -66,17 +111,51 @@ func matchFoodTalksCompany(records []foodTalksCompany, word string) *foodTalksCo
 		if strings.TrimSpace(r.URLCode) == "" || r.ID <= 0 {
 			continue // 没有前台地址段的记录构不成链接，跳过
 		}
-		if normalizeFoodTalksSourceName(r.CnName) == norm {
+		if companyNameEqualsWord(r, norm) {
 			hits = append(hits, r)
-			continue
 		}
-		for _, s := range splitFoodTalksShortNames(r.ShortCnName) {
-			if normalizeFoodTalksSourceName(s) == norm {
+	}
+	if len(hits) == 0 {
+		// 标签「比优特 / 百事」对全称「比优特超市 / 百事中国」：仍只收检索结果里
+		// 以该词开头且仅此一家的记录，避免「茶」命中「茶百道」。
+		for _, r := range records {
+			if strings.TrimSpace(r.URLCode) == "" || r.ID <= 0 {
+				continue
+			}
+			cn := normalizeFoodTalksSourceName(r.CnName)
+			if cn == norm || strings.HasPrefix(cn, norm) {
 				hits = append(hits, r)
-				break
+			}
+		}
+		if len(hits) > 1 {
+			var prefixed []foodTalksCompany
+			for _, h := range hits {
+				if strings.HasPrefix(normalizeFoodTalksSourceName(h.CnName), norm) &&
+					normalizeFoodTalksSourceName(h.CnName) != norm {
+					prefixed = append(prefixed, h)
+				}
+			}
+			if len(prefixed) > 0 {
+				hits = prefixed
 			}
 		}
 	}
+	return pickUniqueCompanyHit(hits)
+}
+
+func companyNameEqualsWord(r foodTalksCompany, norm string) bool {
+	if normalizeFoodTalksSourceName(r.CnName) == norm {
+		return true
+	}
+	for _, s := range splitFoodTalksShortNames(r.ShortCnName) {
+		if normalizeFoodTalksSourceName(s) == norm {
+			return true
+		}
+	}
+	return false
+}
+
+func pickUniqueCompanyHit(hits []foodTalksCompany) *foodTalksCompany {
 	if len(hits) == 1 {
 		return &hits[0]
 	}
@@ -135,9 +214,23 @@ func (p *publishPipeline) siteCompanyMatchesFor(ctx context.Context, job publish
 			continue
 		}
 		seen[hit.ID] = true
-		out = append(out, siteCompanyMatch{Company: *hit, Anchor: word})
+		out = append(out, siteCompanyMatch{
+			Company: *hit,
+			Anchor:  pickCompanyAnchor(job.ContentHTML, word, *hit),
+		})
+		log.Printf("publish: 公司库命中 %q → %s #%d（任务 #%d）", word, hit.CnName, hit.ID, job.ID)
 	}
 	return out
+}
+
+// applySiteCompanyLinks 把公司链写进排版正文，预览和草稿同一份。
+func (p *publishPipeline) applySiteCompanyLinks(ctx context.Context, job publishJob) (string, []int64) {
+	matches := p.siteCompanyMatchesFor(ctx, job)
+	ids := make([]int64, 0, len(matches))
+	for _, m := range matches {
+		ids = append(ids, m.Company.ID)
+	}
+	return injectCompanyLinks(job.ContentHTML, matches), ids
 }
 
 // publishSiteCompanyLinkForbiddenTags 注入禁区：这些元素内的文本不加公司链接

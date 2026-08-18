@@ -360,10 +360,19 @@ func TestPublishRenderSourceURLPrefersOriginalForRepost(t *testing.T) {
 	if got := publishRenderSourceURL(original); got != "https://mp.weixin.qq.com/s/fbif-own" {
 		t.Fatalf("原创稿应用提交链接：%q", got)
 	}
-	// 转载但没抓到阅读原文 → 回退提交链接
+	// 自家号转发且没抓到阅读原文 → 不得回退自家转载页
 	repost.OriginalSourceURL = ""
-	if got := publishRenderSourceURL(repost); got != "https://mp.weixin.qq.com/s/fbif-repost" {
-		t.Fatalf("无阅读原文时应回退提交链接：%q", got)
+	if got := publishRenderSourceURL(repost); got != "" {
+		t.Fatalf("自家转载且无阅读原文时不得回退提交链接：%q", got)
+	}
+	// 提交的就是原账号自己的文章 → 提交链接就是原文
+	external := publishJob{
+		SourceURL:  "https://mp.weixin.qq.com/s/jingzhe-original",
+		SourceName: "惊蛰研究所",
+		BlocksJSON: `[{"k":"txt","text":"正文"}]`,
+	}
+	if got := publishRenderSourceURL(external); got != "https://mp.weixin.qq.com/s/jingzhe-original" {
+		t.Fatalf("外号原文应保留提交链接：%q", got)
 	}
 }
 
