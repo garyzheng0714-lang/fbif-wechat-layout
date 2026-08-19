@@ -18,9 +18,10 @@ func touchRegularFile(path string) error {
 
 // directFoodTalksStub 不走 HTTP，用于精确模拟 CreateNews 已被对端执行但响应/本地落盘失败。
 type directFoodTalksStub struct {
-	create func() (int64, error)
-	update func() error
-	search func() ([]foodTalksNewsListItem, error)
+	create  func() (int64, error)
+	update  func() error
+	search  func() ([]foodTalksNewsListItem, error)
+	getNews func(int64) (foodTalksNewsDetail, error)
 }
 
 func (s directFoodTalksStub) SearchNewsByTitle(context.Context, string) ([]foodTalksNewsListItem, error) {
@@ -51,6 +52,13 @@ func (s directFoodTalksStub) ListTagsByType(context.Context, int64, string) ([]f
 
 func (s directFoodTalksStub) CreateTagByName(context.Context, int64, string) (int64, error) {
 	return 0, nil
+}
+
+func (s directFoodTalksStub) GetNews(_ context.Context, id int64) (foodTalksNewsDetail, error) {
+	if s.getNews != nil {
+		return s.getNews(id)
+	}
+	return foodTalksNewsDetail{}, errors.New("测试桩未提供资讯详情")
 }
 
 // TestPublishReviewCASConcurrentApprovals 两个审核请求必须只有一个能从 awaiting_review

@@ -45,6 +45,24 @@ func setTestYunsuoConfig(t *testing.T) {
 	t.Setenv(yunsuoCategoriesEnv, "美食,饮食文化,财经,消费,公司")
 }
 
+const (
+	testDistributionNewsID   int64 = 90001
+	testDistributionLiveHTML       = `<p>这是一篇用于验证外部分发流程的原创文章正文。</p><p><img src="https://cdn.example.com/a.jpg" alt=""></p>`
+)
+
+func seedLivePublishedNews(t *testing.T, env *publishTestEnv, news foodTalksNewsDetail) {
+	t.Helper()
+	if news.ID == 0 {
+		news.ID = testDistributionNewsID
+	}
+	env.ft.mu.Lock()
+	if env.ft.newsByID == nil {
+		env.ft.newsByID = map[int64]foodTalksNewsDetail{}
+	}
+	env.ft.newsByID[news.ID] = news
+	env.ft.mu.Unlock()
+}
+
 func createPublishedDistributionJob(t *testing.T, env *publishTestEnv, sourceName string) publishJob {
 	t.Helper()
 	job, _, err := env.store.create("site:distribution-test", testPublishSourceURL)
@@ -55,6 +73,7 @@ func createPublishedDistributionJob(t *testing.T, env *publishTestEnv, sourceNam
 		current.Stage = publishStagePublished
 		current.Title = "一款中国食品品牌如何用产品创新打开新的消费市场"
 		current.SourceName = sourceName
+		current.FoodTalksNewsID = testDistributionNewsID
 		current.BlocksJSON = `[{"k":"p","text":"这是一篇用于验证外部分发流程的原创文章正文。"},{"k":"img","src":"https://mmbiz.qpic.cn/a.jpg"}]`
 		current.ImageMap = `{"https://mmbiz.qpic.cn/a.jpg":"https://cdn.example.com/a.jpg"}`
 		current.CoverURL = "https://cdn.example.com/a.jpg"
@@ -75,7 +94,141 @@ func createPublishedDistributionJob(t *testing.T, env *publishTestEnv, sourceNam
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedLivePublishedNews(t, env, foodTalksNewsDetail{
+		ID:            testDistributionNewsID,
+		Title:         job.Title,
+		CoverImg:      job.CoverURL,
+		Content:       testDistributionLiveHTML,
+		Summary:       job.Summary,
+		SourceName:    sourceName,
+		PublishStatus: foodTalksPublishStatusPublished,
+	})
 	return job
+}
+
+func TestExternalDistributionUsesLivePublishedNewsNotJobSnapshot(t *testing.T) {
+	setTestYunsuoConfig(t)
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	job, err := env.store.update(job.ID, func(current *publishJob) {
+		current.BlocksJSON = `[{"k":"p","text":"这是历史错误正文，绝对不能发到外部平台。"},{"k":"img","src":"https://mmbiz.qpic.cn/a.jpg"}]`
+		current.Title = "历史错误标题不该发出去"
+		current.ApprovedRiskVersion = publishReviewCardVersion(*current)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedLivePublishedNews(t, env, foodTalksNewsDetail{
+		ID:            testDistributionNewsID,
+		Title:         "把茶做成零食，这家166年老茶铺只开6家店，年营收1.4亿",
+		CoverImg:      "https://cdn.example.com/a.jpg",
+		Content:       `<p>这是网站上最新已发布的正确正文。</p><p><img src="https://cdn.example.com/a.jpg" alt=""></p>`,
+		Summary:       "祇园辻利把茶做成零食。",
+		Author:        "FBIF",
+		SourceName:    "FBIF食品饮料创新",
+		PublishStatus: foodTalksPublishStatusPublished,
+	})
+	fake := &fakeYunsuoAPI{
+		contentPK: "content-pk-live",
+		statuses: []yunsuoAccountStatus{
+			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+		},
+	}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+		t.Fatalf("应用最新已发布稿分发：%v", err)
+	}
+	if fake.pushCalls != 1 {
+		t.Fatalf("应只推一次，实际 %d", fake.pushCalls)
+	}
+	if !strings.Contains(fake.payload.HTML, "最新已发布的正确正文") {
+		t.Fatalf("外发必须用网站最新已发布正文：%s", fake.payload.HTML)
+	}
+	if strings.Contains(fake.payload.HTML, "历史错误正文") || strings.Contains(fake.payload.Title, "历史错误标题") {
+		t.Fatalf("不得把任务里的历史错误稿发出去：title=%q html=%s", fake.payload.Title, fake.payload.HTML)
+	}
+	if !strings.Contains(fake.payload.Title, "把茶做成零食") {
+		t.Fatalf("标题也必须用网站最新已发布稿：%q", fake.payload.Title)
+	}
+}
+
+func TestExternalDistributionFailsClosedIfCMSNotPublished(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	seedLivePublishedNews(t, env, foodTalksNewsDetail{
+		ID: testDistributionNewsID, Title: job.Title, CoverImg: job.CoverURL,
+		Content: testDistributionLiveHTML, PublishStatus: foodTalksPublishStatusDraft,
+		SourceName: "FBIF食品饮料创新",
+	})
+	fake := &fakeYunsuoAPI{contentPK: "must-not-be-used"}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err == nil || !strings.Contains(err.Error(), "还不是已发布") {
+		t.Fatalf("网站未公开时必须拒绝外发：%v", err)
+	}
+	if fake.pushCalls != 0 {
+		t.Fatalf("未公开不得 push，实际 %d", fake.pushCalls)
+	}
+}
+
+func TestExternalDistributionFailsClosedIfLiveNewsMissing(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	env.ft.mu.Lock()
+	env.ft.newsByID = map[int64]foodTalksNewsDetail{}
+	env.ft.mu.Unlock()
+	fake := &fakeYunsuoAPI{contentPK: "must-not-be-used"}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err == nil {
+		t.Fatal("读不到网站已发布稿时必须拒绝外发")
+	}
+	if fake.pushCalls != 0 {
+		t.Fatalf("读失败不得 push，实际 %d", fake.pushCalls)
+	}
+}
+
+func TestExternalDistributionManualCMSUsesLiveNewsWithoutPipelineApprove(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	job, err := env.store.update(job.ID, func(current *publishJob) {
+		current.ReviewAction = ""
+		current.ReviewedAt = ""
+		current.ReviewedBy = ""
+		current.ApprovedRiskVersion = ""
+		current.PublicationAction = publishPublicationActionManualCMS
+		current.BlocksJSON = `[{"k":"p","text":"流水线进站时的旧稿，已被后台改过。"}]`
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedLivePublishedNews(t, env, foodTalksNewsDetail{
+		ID:            testDistributionNewsID,
+		Title:         "把茶做成零食，这家166年老茶铺只开6家店，年营收1.4亿",
+		CoverImg:      "https://cdn.example.com/a.jpg",
+		Content:       `<p>后台公开后的最新正文。</p><p><img src="https://cdn.example.com/a.jpg" alt=""></p>`,
+		Summary:       "祇园辻利把茶做成零食。",
+		Author:        "FBIF",
+		SourceName:    "FBIF食品饮料创新",
+		PublishStatus: foodTalksPublishStatusPublished,
+	})
+	fake := &fakeYunsuoAPI{
+		contentPK: "content-pk-manual",
+		statuses: []yunsuoAccountStatus{
+			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+		},
+	}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+		t.Fatalf("后台公开的原创稿应可分发：%v", err)
+	}
+	if !strings.Contains(fake.payload.HTML, "后台公开后的最新正文") || strings.Contains(fake.payload.HTML, "流水线进站时的旧稿") {
+		t.Fatalf("人工后台公开后必须发最新网站稿：%s", fake.payload.HTML)
+	}
 }
 
 func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
@@ -146,6 +299,12 @@ func TestExternalDistributionFailsClosedOnExplicitAttribution(t *testing.T) {
 		current.BlocksJSON = `[{"k":"p","text":"转载自：小食代"},{"k":"p","text":"正文"}]`
 		current.ApprovedRiskVersion = publishReviewCardVersion(*current)
 	})
+	seedLivePublishedNews(t, env, foodTalksNewsDetail{
+		ID: testDistributionNewsID, Title: job.Title, CoverImg: job.CoverURL,
+		Content: `<p>转载自：小食代</p><p>正文</p><p><img src="https://cdn.example.com/a.jpg"></p>`,
+		Summary: job.Summary, SourceName: "FBIF食品饮料创新",
+		PublishStatus: foodTalksPublishStatusPublished,
+	})
 	card := cardJSON(t, buildReviewDoneCard(job))
 	if strings.Contains(card, "同步分发至其他平台") || !strings.Contains(card, "转载文章仅发布至 FoodTalks") {
 		t.Fatalf("自有号正文存在外部出处时必须隐藏按钮：%s", card)
@@ -156,6 +315,12 @@ func TestExternalDistributionFailsClosedOnExplicitAttribution(t *testing.T) {
 	job, _ = env.store.update(job.ID, func(current *publishJob) {
 		current.BlocksJSON = `[{"k":"p","text":"本文经小食代授权转载"},{"k":"p","text":"正文"}]`
 		current.ApprovedRiskVersion = publishReviewCardVersion(*current)
+	})
+	seedLivePublishedNews(t, env, foodTalksNewsDetail{
+		ID: testDistributionNewsID, Title: job.Title, CoverImg: job.CoverURL,
+		Content: `<p>本文经小食代授权转载</p><p>正文</p>`,
+		Summary: job.Summary, SourceName: "FBIF食品饮料创新",
+		PublishStatus: foodTalksPublishStatusPublished,
 	})
 	if card = cardJSON(t, buildReviewDoneCard(job)); strings.Contains(card, "同步分发至其他平台") {
 		t.Fatalf("授权转载同样不得开放外部分发：%s", card)

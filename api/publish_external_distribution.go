@@ -237,8 +237,11 @@ func externalDistributionEligibility(job publishJob) error {
 	if job.Stage != publishStagePublished {
 		return fmt.Errorf("只有已在 FoodTalks 发布的文章才能同步外部平台，当前阶段为 %s", job.Stage)
 	}
-	if !validPersistedPublishApproval(job) {
+	if !externalDistributionApprovalOK(job) {
 		return errors.New("文章缺少与当前内容版本匹配的审核通过记录，不能同步外部平台")
+	}
+	if job.FoodTalksNewsID <= 0 {
+		return errors.New("任务还没有对应的网站文章，不能同步外部平台")
 	}
 	provenance, _, evidence := publishExternalDistributionProvenance(job)
 	if provenance == publishExternalProvenanceRepost {
@@ -251,6 +254,83 @@ func externalDistributionEligibility(job publishJob) error {
 		return errors.New("文章缺少中立正文，不能生成外部分发内容")
 	}
 	return nil
+}
+
+// externalDistributionApprovalOK 外发仍要人审过；人工在后台公开的稿，
+// 公开动作本身就是终审，不再要求流水线里另有一条 approve 记录。
+func externalDistributionApprovalOK(job publishJob) bool {
+	if validPersistedPublishApproval(job) {
+		return true
+	}
+	return job.Stage == publishStagePublished &&
+		job.PublicationAction == publishPublicationActionManualCMS
+}
+
+// publishedNewsSnapshotForDistribution 外发正文只取网站当前已发布稿。
+// 任务里的 BlocksJSON / ContentHTML 可能是进站时的旧稿或排错过的历史版本，
+// 人工在 CMS 改过之后那些库存不得再发出去。
+func (p *publishPipeline) publishedNewsSnapshotForDistribution(ctx context.Context, job publishJob) (publishJob, error) {
+	if job.FoodTalksNewsID <= 0 {
+		return job, errors.New("任务还没有对应的网站文章，不能同步外部平台")
+	}
+	if p == nil || p.foodTalks == nil {
+		return job, errors.New("无法读取网站已发布文章，不能同步外部平台")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ft, err := p.foodTalks()
+	if err != nil {
+		return job, fmt.Errorf("读取网站已发布文章失败，未分发: %w", err)
+	}
+	news, err := ft.GetNews(ctx, job.FoodTalksNewsID)
+	if err != nil {
+		return job, fmt.Errorf("读取网站已发布文章失败，未分发: %w", err)
+	}
+	if news.ID != job.FoodTalksNewsID {
+		return job, fmt.Errorf("网站返回的文章不是本任务对应的已发布稿（期望 #%d，实际 #%d）", job.FoodTalksNewsID, news.ID)
+	}
+	if news.PublishStatus != foodTalksPublishStatusPublished {
+		return job, errors.New("网站上这篇还不是已发布状态，不能同步外部平台")
+	}
+	if news.SourceType == 1 {
+		return job, errors.New("转载文章仅发布至 FoodTalks，不允许同步头条号、百家号等外部平台")
+	}
+	return overlayPublishJobWithPublishedNews(job, news)
+}
+
+func overlayPublishJobWithPublishedNews(job publishJob, news foodTalksNewsDetail) (publishJob, error) {
+	if strings.TrimSpace(news.Content) == "" {
+		return job, errors.New("网站已发布文章没有正文，不能同步外部平台")
+	}
+	_, blocks, _ := extractArticleBlocks(news.Content)
+	if len(blocks) == 0 {
+		return job, errors.New("无法从网站已发布正文生成外发内容")
+	}
+	blocksJSON, err := json.Marshal(blocks)
+	if err != nil {
+		return job, fmt.Errorf("保存网站已发布正文失败: %w", err)
+	}
+	out := job
+	if title := strings.TrimSpace(news.Title); title != "" {
+		out.Title = title
+	}
+	if summary := strings.TrimSpace(news.Summary); summary != "" {
+		out.Summary = summary
+	}
+	if cover := strings.TrimSpace(news.CoverImg); cover != "" {
+		out.CoverURL = cover
+	}
+	if author := strings.TrimSpace(news.Author); author != "" {
+		out.Author = author
+	}
+	if source := strings.TrimSpace(news.SourceName); source != "" {
+		out.SourceName = source
+	}
+	out.BlocksJSON = string(blocksJSON)
+	out.ImageMap = yunsuoPublicIdentityImageMap(out.BlocksJSON, out.CoverURL)
+	out.ContentHTML = news.Content
+	return out, nil
 }
 
 // requestExternalDistribution 只受理一次人工动作：先构造并持久化精确 payload 快照，
@@ -287,14 +367,24 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	if !replaceReconcile && !externalDistributionVersionMatches(expectedVersion, job) {
 		return job, errors.New("分发卡片已过期，请使用最新卡片")
 	}
-	if err := externalDistributionEligibility(job); err != nil {
+	if job.Stage != publishStagePublished {
+		return job, fmt.Errorf("只有已在 FoodTalks 发布的文章才能同步外部平台，当前阶段为 %s", job.Stage)
+	}
+	if !externalDistributionApprovalOK(job) {
+		return job, errors.New("文章缺少与当前内容版本匹配的审核通过记录，不能同步外部平台")
+	}
+	snapshot, err := p.publishedNewsSnapshotForDistribution(context.Background(), job)
+	if err != nil {
+		return job, err
+	}
+	if err := externalDistributionEligibility(snapshot); err != nil {
 		return job, err
 	}
 	cfg, err := loadYunsuoConfig()
 	if err != nil {
 		return job, err
 	}
-	payload, err := buildYunsuoPushPayload(job, cfg.Targets, cfg.Categories)
+	payload, err := buildYunsuoPushPayload(snapshot, cfg.Targets, cfg.Categories)
 	if err != nil {
 		return job, err
 	}
@@ -312,7 +402,8 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		})
 	}
 	updated, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
-		if externalDistributionEligibility(current) != nil {
+		if current.Stage != publishStagePublished || !externalDistributionApprovalOK(current) ||
+			current.FoodTalksNewsID != job.FoodTalksNewsID || current.FoodTalksNewsID <= 0 {
 			return false
 		}
 		if replaceReconcile {

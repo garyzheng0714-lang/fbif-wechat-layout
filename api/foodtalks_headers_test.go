@@ -50,6 +50,39 @@ func TestFoodTalksBrowserHeaderModeKeepsAllThree(t *testing.T) {
 	}
 }
 
+func TestFoodTalksGetNewsReadsPublishedDetail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/news/admin/news/62852" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "msg": "success",
+			"data": map[string]any{
+				"id": 62852, "title": "把茶做成零食", "publishStatus": 1,
+				"content": "<p>最新已发布正文</p>", "coverImg": "https://cdn.example.com/a.jpg",
+				"sourceName": "FBIF食品饮料创新", "sourceType": 0,
+			},
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("FOODTALKS_BASE_URL", srv.URL)
+	t.Setenv("FOODTALKS_TOKEN", "tok")
+	t.Setenv("FOODTALKS_ORIGIN", "")
+	cli, err := newFoodTalksClientFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	news, err := cli.GetNews(context.Background(), 62852)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if news.ID != 62852 || news.PublishStatus != foodTalksPublishStatusPublished || !strings.Contains(news.Content, "最新已发布正文") {
+		t.Fatalf("GetNews 未读到已发布详情：%+v", news)
+	}
+}
+
 func TestFoodTalksNewsTagsUseConfirmedObjectShape(t *testing.T) {
 	withTag, err := json.Marshal(buildFoodTalksNewsBody(json.RawMessage(`""`), foodTalksNews{
 		NewsTags: []foodTalksNewsTag{{TagID: 10752, TagName: "沃尔玛"}},
