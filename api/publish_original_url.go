@@ -24,14 +24,20 @@ const (
 	originalURLMaxCandidates = 6
 )
 
+type feedOriginalArticleHit struct {
+	URL         string
+	KnownSource bool
+}
+
 var (
 	// 测试可替换；默认先问 Feed 订阅列表，再走公开网页检索。失败只降级，不让发布任务失败。
-	lookupFeedOriginalArticle = defaultLookupFeedOriginalArticle
-	searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
-	fetchOriginalArticlePage  = fetchRawHTML
-	hrefInHTMLRe              = regexp.MustCompile(`(?i)(?:href|data-url|data-href)\s*=\s*["']([^"']+)["']`)
-	absoluteHTTPURLRe         = regexp.MustCompile(`https?://[^\s"'<>\\]+`)
-	htmlTitleRe               = regexp.MustCompile(`(?is)<title[^>]*>([^<]+)</title>`)
+	lookupFeedOriginalArticle       = defaultLookupFeedOriginalArticle
+	lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
+	searchOriginalArticleURLs       = defaultSearchOriginalArticleURLs
+	fetchOriginalArticlePage        = fetchRawHTML
+	hrefInHTMLRe                    = regexp.MustCompile(`(?i)(?:href|data-url|data-href)\s*=\s*["']([^"']+)["']`)
+	absoluteHTTPURLRe               = regexp.MustCompile(`https?://[^\s"'<>\\]+`)
+	htmlTitleRe                     = regexp.MustCompile(`(?is)<title[^>]*>([^<]+)</title>`)
 )
 
 const (
@@ -41,9 +47,13 @@ const (
 )
 
 func defaultLookupFeedOriginalArticle(ctx context.Context, title, sourceName string) string {
+	return defaultLookupFeedOriginalArticleDetail(ctx, title, sourceName).URL
+}
+
+func defaultLookupFeedOriginalArticleDetail(ctx context.Context, title, sourceName string) feedOriginalArticleHit {
 	token := strings.TrimSpace(os.Getenv("PUBLISH_SYNC_SERVICE_TOKEN"))
 	if token == "" {
-		return ""
+		return feedOriginalArticleHit{}
 	}
 	base := strings.TrimRight(strings.TrimSpace(os.Getenv("FOODTALKS_FEED_BASE_URL")), "/")
 	if base == "" {
@@ -54,7 +64,7 @@ func defaultLookupFeedOriginalArticle(ctx context.Context, title, sourceName str
 		"source_name": sourceName,
 	})
 	if err != nil {
-		return ""
+		return feedOriginalArticleHit{}
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -63,7 +73,7 @@ func defaultLookupFeedOriginalArticle(ctx context.Context, title, sourceName str
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, base+feedOriginalArticlePath, strings.NewReader(string(payload)))
 	if err != nil {
-		return ""
+		return feedOriginalArticleHit{}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -71,28 +81,30 @@ func defaultLookupFeedOriginalArticle(ctx context.Context, title, sourceName str
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("publish: 向 Feed 查询原文链接失败：%v", err)
-		return ""
+		return feedOriginalArticleHit{}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		log.Printf("publish: Feed 查询原文链接 HTTP %d", resp.StatusCode)
-		return ""
+		return feedOriginalArticleHit{}
 	}
 	var body struct {
-		URL    string `json:"url"`
-		Status string `json:"status"`
+		URL      string `json:"url"`
+		SourceID string `json:"source_id"`
+		Status   string `json:"status"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return ""
+		return feedOriginalArticleHit{}
 	}
-	if body.Status != "found" {
-		return ""
+	hit := feedOriginalArticleHit{
+		KnownSource: strings.TrimSpace(body.SourceID) != "" || body.Status == "found",
 	}
-	cleaned, ok := sanitizeOriginalURLCandidate(body.URL)
-	if !ok {
-		return ""
+	if body.Status == "found" {
+		if cleaned, ok := sanitizeOriginalURLCandidate(body.URL); ok {
+			hit.URL = cleaned
+		}
 	}
-	return cleaned
+	return hit
 }
 
 var originalURLSearchSkipHosts = map[string]bool{
@@ -178,9 +190,27 @@ func resolveRepostOriginalURL(ctx context.Context, title, sourceName, excludeURL
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if found := lookupFeedOriginalArticle(ctx, title, sourceName); isHTTPURL(found) &&
-		canonicalOriginalURLKey(found) != canonicalOriginalURLKey(excludeURL) {
-		return found
+	feed := lookupFeedOriginalArticleDetail(ctx, title, sourceName)
+	if isHTTPURL(feed.URL) && canonicalOriginalURLKey(feed.URL) != canonicalOriginalURLKey(excludeURL) {
+		return feed.URL
+	}
+	if !feed.KnownSource {
+		if found := lookupRedfoxOriginalArticle(ctx, title, sourceName); isHTTPURL(found) &&
+			canonicalOriginalURLKey(found) != canonicalOriginalURLKey(excludeURL) {
+			return found
+		}
+	}
+	return resolveRepostOriginalURLFromSearch(ctx, title, sourceName, excludeURL)
+}
+
+func resolveRepostOriginalURLFromSearch(ctx context.Context, title, sourceName, excludeURL string) string {
+	title = strings.TrimSpace(title)
+	sourceName = strings.TrimSpace(sourceName)
+	if title == "" || sourceName == "" {
+		return ""
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	searchCtx, cancel := context.WithTimeout(ctx, originalURLSearchTimeout)
 	defer cancel()

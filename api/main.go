@@ -147,6 +147,7 @@ func main() {
 		log.Printf("publish: 候选部署暂停态，跳过任务恢复、通知 outbox 与飞书长连接")
 	} else {
 		publishPipe.recoverJobs()
+		publishPipe.startCMSPublicationSync()
 	}
 	registerPublishRoutes(mux, publishPipe, authService)
 	// 飞书回调传输层必须显式互斥；缺失/非法配置安全回落 websocket 行为，公网
