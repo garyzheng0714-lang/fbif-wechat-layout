@@ -255,7 +255,7 @@ func (s *publishRepostSourceStore) writeLocked(doc publishRepostSourcesDoc) erro
 func defaultSubscribeFeedWechatArticle(ctx context.Context, sourceName, articleURL string) error {
 	token := strings.TrimSpace(os.Getenv("PUBLISH_SYNC_SERVICE_TOKEN"))
 	if token == "" {
-		return fmt.Errorf("PUBLISH_SYNC_SERVICE_TOKEN 未配置")
+		return fmt.Errorf("同步服务令牌未配置")
 	}
 	base := strings.TrimRight(strings.TrimSpace(os.Getenv("FOODTALKS_FEED_BASE_URL")), "/")
 	if base == "" {
@@ -282,12 +282,12 @@ func defaultSubscribeFeedWechatArticle(ctx context.Context, sourceName, articleU
 	req.Header.Set("X-Publish-Sync-Token", token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("Feed 订阅接口不可达: %w", err)
+		return fmt.Errorf("订阅接口不可达: %w", err)
 	}
 	defer resp.Body.Close()
 	body, readErr := readBoundedBody(resp.Body, 1<<20)
 	if readErr != nil {
-		return fmt.Errorf("Feed 订阅响应读取失败: %w", readErr)
+		return fmt.Errorf("订阅响应读取失败: %w", readErr)
 	}
 	if resp.StatusCode == http.StatusOK {
 		return nil
@@ -299,9 +299,9 @@ func defaultSubscribeFeedWechatArticle(ctx context.Context, sourceName, articleU
 	_ = json.Unmarshal(body, &failure)
 	detail := firstNonEmpty(strings.TrimSpace(failure.Message), strings.TrimSpace(failure.Error))
 	if detail != "" {
-		return fmt.Errorf("Feed 订阅失败（HTTP %d）：%s", resp.StatusCode, detail)
+		return fmt.Errorf("订阅失败（HTTP %d）：%s", resp.StatusCode, detail)
 	}
-	return fmt.Errorf("Feed 订阅失败（HTTP %d）", resp.StatusCode)
+	return fmt.Errorf("订阅失败（HTTP %d）", resp.StatusCode)
 }
 
 func (p *publishPipeline) recordPublishedRepost(ctx context.Context, job publishJob) {
@@ -351,7 +351,7 @@ func (p *publishPipeline) completeRepostSourceSubscribe(sourceName string) {
 	}
 	var subscribeErr error
 	if p.subscribeFeedWechatArticle == nil {
-		subscribeErr = fmt.Errorf("Feed 订阅接口未配置")
+		subscribeErr = fmt.Errorf("订阅接口未配置")
 	} else {
 		subscribeErr = p.subscribeFeedWechatArticle(context.Background(), src.Name, articleURL)
 	}

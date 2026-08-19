@@ -31,7 +31,6 @@ type feedOriginalArticleHit struct {
 
 var (
 	// 测试可替换；默认先问 Feed 订阅列表，再走公开网页检索。失败只降级，不让发布任务失败。
-	lookupFeedOriginalArticle       = defaultLookupFeedOriginalArticle
 	lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
 	searchOriginalArticleURLs       = defaultSearchOriginalArticleURLs
 	fetchOriginalArticlePage        = fetchRawHTML
