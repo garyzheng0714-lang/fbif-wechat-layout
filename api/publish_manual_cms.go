@@ -14,7 +14,13 @@ import (
 	"time"
 )
 
-const defaultCMSPublicationSyncInterval = 2 * time.Minute
+const (
+	cmsSyncBusyStartHour   = 8
+	cmsSyncBusyStartMinute = 30
+	cmsSyncBusyEndHour     = 18
+	cmsSyncBusyInterval    = 2 * time.Minute
+	cmsSyncQuietInterval   = 30 * time.Minute
+)
 
 func foodTalksAlreadyPublishedDraftError(err error) bool {
 	if err == nil {
@@ -156,21 +162,58 @@ func (p *publishPipeline) cmsPublicationSyncInterval() time.Duration {
 	if p != nil && p.cmsSyncInterval > 0 {
 		return p.cmsSyncInterval
 	}
-	return defaultCMSPublicationSyncInterval
+	return cmsPublicationSyncWait(pipelineNow(p))
 }
 
-// startCMSPublicationSync 后台把草稿公开后，群卡不会自己变。定时核对本库里
-// 已有网站文章 id 的任务：网站已公开就只对账、原位改卡，不覆盖正文。
+func cmsPublicationCST(now time.Time) time.Time {
+	return now.In(time.FixedZone("CST", 8*3600))
+}
+
+func cmsPublicationBusyHours(now time.Time) bool {
+	t := cmsPublicationCST(now)
+	minutes := t.Hour()*60 + t.Minute()
+	start := cmsSyncBusyStartHour*60 + cmsSyncBusyStartMinute
+	end := cmsSyncBusyEndHour * 60
+	return minutes >= start && minutes < end
+}
+
+func cmsPublicationSyncWait(now time.Time) time.Duration {
+	t := cmsPublicationCST(now)
+	interval := cmsSyncQuietInterval
+	if cmsPublicationBusyHours(t) {
+		interval = cmsSyncBusyInterval
+	}
+	if until := cmsPublicationNextWindow(t); until > 0 && until < interval {
+		return until
+	}
+	return interval
+}
+
+func cmsPublicationNextWindow(t time.Time) time.Duration {
+	y, m, d := t.Date()
+	loc := t.Location()
+	start := time.Date(y, m, d, cmsSyncBusyStartHour, cmsSyncBusyStartMinute, 0, 0, loc)
+	end := time.Date(y, m, d, cmsSyncBusyEndHour, 0, 0, 0, loc)
+	switch {
+	case t.Before(start):
+		return start.Sub(t)
+	case t.Before(end):
+		return end.Sub(t)
+	default:
+		return start.Add(24 * time.Hour).Sub(t)
+	}
+}
+
+// startCMSPublicationSync 后台把草稿公开后，群卡不会自己变。北京时间 8:30–18:00
+// 每 2 分钟对账一次，其余时间每 30 分钟；临近时段切换时提前醒来，避免睡过上班点。
 func (p *publishPipeline) startCMSPublicationSync() {
 	if p == nil {
 		return
 	}
 	p.spawn(func() {
-		p.syncManualCMSPublications(context.Background())
-		ticker := time.NewTicker(p.cmsPublicationSyncInterval())
-		defer ticker.Stop()
-		for range ticker.C {
+		for {
 			p.syncManualCMSPublications(context.Background())
+			time.Sleep(p.cmsPublicationSyncInterval())
 		}
 	})
 }

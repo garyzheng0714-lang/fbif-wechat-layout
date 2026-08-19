@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func seedManualCMSJob(t *testing.T, env *publishTestEnv, stage string, newsID int64, title string) publishJob {
@@ -221,5 +222,55 @@ func TestSyncManualCMSPublicationsLeavesDraftJobsAlone(t *testing.T) {
 	}
 	if len(env.notified) != 0 {
 		t.Fatalf("草稿不得刷卡，实际 notified=%d", len(env.notified))
+	}
+}
+
+func TestCMSPublicationSyncWaitFollowsTidalHours(t *testing.T) {
+	cst := time.FixedZone("CST", 8*3600)
+	cases := []struct {
+		name string
+		now  time.Time
+		want time.Duration
+		busy bool
+	}{
+		{"上班前一分钟提前醒", time.Date(2026, 8, 19, 8, 29, 0, 0, cst), time.Minute, false},
+		{"八点半整点开始两分钟", time.Date(2026, 8, 19, 8, 30, 0, 0, cst), 2 * time.Minute, true},
+		{"中午仍是两分钟", time.Date(2026, 8, 19, 12, 0, 0, 0, cst), 2 * time.Minute, true},
+		{"下班前一分钟提前醒", time.Date(2026, 8, 19, 17, 59, 0, 0, cst), time.Minute, true},
+		{"十八点整改半小时", time.Date(2026, 8, 19, 18, 0, 0, 0, cst), 30 * time.Minute, false},
+		{"夜里半小时", time.Date(2026, 8, 19, 22, 0, 0, 0, cst), 30 * time.Minute, false},
+		{"凌晨半小时，不一次睡到上班", time.Date(2026, 8, 19, 0, 0, 0, 0, cst), 30 * time.Minute, false},
+		{"UTC 零点半等于北京八点半", time.Date(2026, 8, 19, 0, 30, 0, 0, time.UTC), 2 * time.Minute, true},
+		{"UTC 十点等于北京十八点", time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC), 30 * time.Minute, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cmsPublicationBusyHours(tc.now); got != tc.busy {
+				t.Fatalf("busy=%v, want %v", got, tc.busy)
+			}
+			if got := cmsPublicationSyncWait(tc.now); got != tc.want {
+				t.Fatalf("wait=%s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCMSPublicationSyncIntervalHonorsOverride(t *testing.T) {
+	p := &publishPipeline{cmsSyncInterval: 5 * time.Second}
+	if got := p.cmsPublicationSyncInterval(); got != 5*time.Second {
+		t.Fatalf("override=%s", got)
+	}
+	cst := time.FixedZone("CST", 8*3600)
+	p = &publishPipeline{now: func() time.Time {
+		return time.Date(2026, 8, 19, 12, 0, 0, 0, cst)
+	}}
+	if got := p.cmsPublicationSyncInterval(); got != 2*time.Minute {
+		t.Fatalf("白天潮汐=%s", got)
+	}
+	p.now = func() time.Time {
+		return time.Date(2026, 8, 19, 22, 0, 0, 0, cst)
+	}
+	if got := p.cmsPublicationSyncInterval(); got != 30*time.Minute {
+		t.Fatalf("夜里潮汐=%s", got)
 	}
 }
