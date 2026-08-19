@@ -482,6 +482,63 @@ type foodTalksNewsListItem struct {
 	SourceName    string `json:"sourceName"`
 }
 
+// foodTalksNewsDetail 资讯详情（GET /news/admin/news/{id}）。外发只读这篇，
+// 不用任务里存过的历史正文。ID 必须从 JSON 读出，不能复用 foodTalksNews
+// （那边的 ID 是 json:"-"，给 POST/PUT 用）。
+type foodTalksNewsDetail struct {
+	ID            int64  `json:"id"`
+	Title         string `json:"title"`
+	CoverImg      string `json:"coverImg"`
+	Content       string `json:"content"`
+	Summary       string `json:"summary"`
+	Author        string `json:"author"`
+	SourceName    string `json:"sourceName"`
+	PublishStatus int    `json:"publishStatus"`
+	SourceType    int    `json:"sourceType"`
+}
+
+// GetNews 读取一篇资讯的当前详情（GET /news/admin/news/{id}）。
+// 2026-08-19 生产实测：返回完整 content/coverImg/publishStatus，供外发只用
+// 网站上最新已发布稿，而不是流水线库存里的历史版本。
+func (c *foodTalksClient) GetNews(ctx context.Context, newsID int64) (foodTalksNewsDetail, error) {
+	if newsID <= 0 {
+		return foodTalksNewsDetail{}, fmt.Errorf("GetNews 需要已有资讯 id（>0），当前 id=%d", newsID)
+	}
+	path := foodTalksNewsPath + "/" + strconv.FormatInt(newsID, 10)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return foodTalksNewsDetail{}, fmt.Errorf("foodtalks: 构造资讯详情请求: %w", err)
+	}
+	c.applyHeaders(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return foodTalksNewsDetail{}, fmt.Errorf("FoodTalks 接口不可达（GET %s）: %w", path, err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return foodTalksNewsDetail{}, fmt.Errorf("foodtalks: 读资讯详情响应: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return foodTalksNewsDetail{}, fmt.Errorf("FoodTalks 资讯详情异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+	}
+	var env struct {
+		Code int                  `json:"code"`
+		Msg  string               `json:"msg"`
+		Data *foodTalksNewsDetail `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return foodTalksNewsDetail{}, fmt.Errorf("FoodTalks 资讯详情响应不是预期 JSON（响应片段：%s): %w", foodTalksSnippet(respBody), err)
+	}
+	if env.Code != 0 {
+		return foodTalksNewsDetail{}, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
+	}
+	if env.Data == nil || env.Data.ID == 0 {
+		return foodTalksNewsDetail{}, errors.New("FoodTalks 资讯详情响应缺 data")
+	}
+	return *env.Data, nil
+}
+
 // SearchNewsByTitle 按标题在资讯库检索（GET /news/admin/news/page?title=，
 // 2026-08-14 实测：title 参数精确过滤，keywords 参数被后端忽略）。
 // 同题防重用：返回前 20 条即可覆盖同名场景。

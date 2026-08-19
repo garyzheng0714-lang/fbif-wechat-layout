@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -146,6 +147,7 @@ type ftStub struct {
 	lastSourceID   int64
 	forbidPublish  bool // true 时收到 publishStatus=1 直接判失败（红线守卫）
 	searchRecords  []foodTalksNewsListItem
+	newsByID       map[int64]foodTalksNewsDetail
 	t              *testing.T
 }
 
@@ -196,6 +198,25 @@ func newFTStub(t *testing.T) *ftStub {
 			// 公司库关联检索（2026-08-17）：默认无命中，不影响主链路断言
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"code":0,"msg":"success","data":{"records":[]}}`)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/news/admin/news/") {
+			id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/news/admin/news/"), 10, 64)
+			stub.mu.Lock()
+			news, ok := stub.newsByID[id]
+			stub.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			if err != nil || !ok || news.ID == 0 {
+				fmt.Fprint(w, `{"code":1,"msg":"不存在该资讯","data":null}`)
+				return
+			}
+			payload, marshalErr := json.Marshal(map[string]any{"code": 0, "msg": "success", "data": news})
+			if marshalErr != nil {
+				t.Errorf("FoodTalks 桩序列化资讯详情失败: %v", marshalErr)
+				http.Error(w, "marshal", http.StatusInternalServerError)
+				return
+			}
+			w.Write(payload)
 			return
 		}
 		if r.URL.Path != "/news/admin/news" {

@@ -124,6 +124,7 @@ var errPublishDuplicateSuperseded = errors.New("publish job superseded by canoni
 type foodTalksAPI interface {
 	CreateNews(ctx context.Context, n foodTalksNews) (int64, error)
 	UpdateNews(ctx context.Context, n foodTalksNews) error
+	GetNews(ctx context.Context, newsID int64) (foodTalksNewsDetail, error)
 	ListTagsByType(ctx context.Context, tagTypeID int64, keywords string) ([]foodTalksTag, error)
 	CreateTagByName(ctx context.Context, tagTypeID int64, name string) (int64, error)
 	SearchNewsByTitle(ctx context.Context, title string) ([]foodTalksNewsListItem, error)

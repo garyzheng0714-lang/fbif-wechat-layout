@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +165,10 @@ func (s *newsTagStub) SearchNewsByTitle(context.Context, string) ([]foodTalksNew
 
 func (s *newsTagStub) SearchCompanies(context.Context, string) ([]foodTalksCompany, error) {
 	return nil, nil
+}
+
+func (s *newsTagStub) GetNews(context.Context, int64) (foodTalksNewsDetail, error) {
+	return foodTalksNewsDetail{}, errors.New("测试桩未提供资讯详情")
 }
 
 func TestSiteNewsTagsForMoteArticle(t *testing.T) {

@@ -327,6 +327,34 @@ func writeYunsuoListItem(out *strings.Builder, text string, runs []Run) {
 	out.WriteString("</li>")
 }
 
+// yunsuoPublicIdentityImageMap 把已经公开可访问的媒体登记成「原样映射」。
+// 网站已发布稿的图在 CMS 里就是 OSS / static.foodtalks.cn，没有流水线 ImageMap；
+// 不登记的话现有出站策略会把它们当未镜像丢掉。
+func yunsuoPublicIdentityImageMap(blocksJSON string, extras ...string) string {
+	blocks, _, err := decodeYunsuoContent(blocksJSON, "{}")
+	if err != nil {
+		blocks = nil
+	}
+	mapped := map[string]string{}
+	add := func(raw string) {
+		if src := publicYunsuoMediaURL(raw); src != "" {
+			mapped[src] = src
+		}
+	}
+	for _, extra := range extras {
+		add(extra)
+	}
+	for _, block := range blocks {
+		add(block.Src)
+		add(block.Poster)
+	}
+	raw, err := json.Marshal(mapped)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
 func mapYunsuoMedia(raw string, imageMap map[string]string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
