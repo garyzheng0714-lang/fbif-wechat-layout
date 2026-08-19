@@ -85,8 +85,8 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - 前端：原生 HTML / CSS / JavaScript ES modules
 - 后端：Go 1.26，标准库 `net/http`
 - 测试：Node.js `node --test`、Playwright、Go test，并设 JavaScript/Go 覆盖率棘轮门槛
-- 质量门禁：JS 语法与 import cycle、Go fmt/vet/staticcheck/race/govulncheck、npm audit、ShellCheck、Python 编译与 env schema
-- 部署：GitHub Actions、rsync、可版本化 systemd API/renderer 服务
+- 质量门禁（PR 的 P0 工作流）：JS 语法与 import cycle、Go fmt/vet/staticcheck/race/govulncheck、npm audit、ShellCheck、Python 编译与 env schema；浏览器只考 Chrome，安装结果按 lockfile 缓存
+- 部署：推 `main` 只构建并事务上线，不再重考、不再装浏览器
 
 ## 项目结构
 
@@ -328,16 +328,15 @@ go test ./...
 
 ## 部署
 
-推送到 `main` 会触发 `.github/workflows/deploy.yml`：
+合并进 `main` 前，PR 必须过 `.github/workflows/p0-monitoring-contract.yml`（无路径过滤）。推送到 `main` 只触发 `.github/workflows/deploy.yml` 发版，不再重跑考试、不装浏览器：
 
-1. 执行 JavaScript 语法/import cycle、全量 Node 测试与覆盖率、npm audit、隔离端口 Playwright，以及 Go fmt/vet/staticcheck/test/coverage/race/govulncheck、ShellCheck、Python 与 env schema 门禁；任何失败都阻止部署。
-2. 使用已修复已知标准库漏洞的 Go 1.26.6 构建 `api/fbif-api`，并写入 `public/version.json`。
-3. 把 `public/`、API、render service、Caddy、systemd 单元、env schema 与候选 env 同步进隔离 release；候选 API env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
-4. 在任何 live 切换前验证三类 env、Caddy、systemd 单元和当前服务；然后事务式切换 API、renderer、静态资源、单元、Caddy 与配置 schema。
-5. 验证公网 commit SHA、健康、鉴权和 `/api/publish/readiness`；readiness 同时锁定配置版本、两个生成注册表哈希、JSON store、独立服务令牌、HTTP 审核关闭、可用审核权限来源、FoodTalks 目标、分类、渲染、飞书与双模型配置。
-6. 写暂停窗口内执行 `prepare-monitoring`：幂等摘除历史 `fbif-monitor-watchdog` 与审核群 08:30 监控播报单元，不安装、启用或验收外检 timer。任何可回滚验收失败都恢复上一 release，但回滚也不恢复这两类已退役单元。
-7. 验收后先关闭自动回滚，再解除 worker 暂停。此时外部副作用可能恢复，失败只允许向前修复；跨系统外检由 `FoodTalks_Feed` 的 `fbif-link-watchdog` 负责。
-8. `finalize` 将已验收产物保留到 `/var/www/.fbif-layout-history/<deploy-id>/`，最多 5 份；快照包含 API、renderer、public、Caddy、systemd 和 env schema，明确不含 `.env`、`publish.env` 或 `render-service.env`。快照成功后才删除短期事务备份。
+1. 使用已修复已知标准库漏洞的 Go 1.26.6 构建 `api/fbif-api`，并写入 `public/version.json`。
+2. 把 `public/`、API、render service、Caddy、systemd 单元、env schema 与候选 env 同步进隔离 release；候选 API env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
+3. 在任何 live 切换前验证三类 env、Caddy、systemd 单元和当前服务；然后事务式切换 API、renderer、静态资源、单元、Caddy 与配置 schema。
+4. 验证公网 commit SHA、健康、鉴权和 `/api/publish/readiness`；readiness 同时锁定配置版本、两个生成注册表哈希、JSON store、独立服务令牌、HTTP 审核关闭、可用审核权限来源、FoodTalks 目标、分类、渲染、飞书与双模型配置。
+5. 写暂停窗口内执行 `prepare-monitoring`：幂等摘除历史 `fbif-monitor-watchdog` 与审核群 08:30 监控播报单元，不安装、启用或验收外检 timer。任何可回滚验收失败都恢复上一 release，但回滚也不恢复这两类已退役单元。
+6. 验收后先关闭自动回滚，再解除 worker 暂停。此时外部副作用可能恢复，失败只允许向前修复；跨系统外检由 `FoodTalks_Feed` 的 `fbif-link-watchdog` 负责。
+7. `finalize` 将已验收产物保留到 `/var/www/.fbif-layout-history/<deploy-id>/`，最多 5 份；快照包含 API、renderer、public、Caddy、systemd 和 env schema，明确不含 `.env`、`publish.env` 或 `render-service.env`。快照成功后才删除短期事务备份。
 
 `FOODTALKS_EXPECTED_TARGET` 必须与 API、前台、后台 URL 指向同一环境；实例当前目标只能从实时 readiness 核验，README 不固化生产值。`PUBLISH_SYNC_SERVICE_TOKEN`、`PUBLISH_MONITOR_FEISHU_USER_ID` 或可用审核权限来源缺失、HTTP 审核意外开启时，readiness 均失败。运行时审核权限来源可以是非空 `FEISHU_REVIEWER_OPEN_IDS`，也可以是群成员模式配合当前审核群；但部署 env schema 目前仍要求 `FEISHU_REVIEWER_OPEN_IDS` 非空，候选环境不能只配群成员模式。这项 schema/运行时差异尚未收敛。发布任务 JSON store 带进程锁，只允许一个 API 实例持有；横向扩容前必须迁移到支持事务与锁的存储。
 
