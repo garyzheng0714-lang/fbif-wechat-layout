@@ -8,10 +8,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const defaultCMSPublicationSyncInterval = 2 * time.Minute
 
 func foodTalksAlreadyPublishedDraftError(err error) bool {
 	if err == nil {
@@ -145,5 +148,57 @@ func (p *publishPipeline) ackManualCMSPublication(ctx context.Context, jobID int
 	if refreshErr != nil {
 		return updated, fmt.Errorf("已记为后台发布，但刷新群卡片失败: %w", refreshErr)
 	}
+	p.recordPublishedRepost(ctx, refreshed)
 	return refreshed, nil
+}
+
+func (p *publishPipeline) cmsPublicationSyncInterval() time.Duration {
+	if p != nil && p.cmsSyncInterval > 0 {
+		return p.cmsSyncInterval
+	}
+	return defaultCMSPublicationSyncInterval
+}
+
+// startCMSPublicationSync 后台把草稿公开后，群卡不会自己变。定时核对本库里
+// 已有网站文章 id 的任务：网站已公开就只对账、原位改卡，不覆盖正文。
+func (p *publishPipeline) startCMSPublicationSync() {
+	if p == nil {
+		return
+	}
+	p.spawn(func() {
+		p.syncManualCMSPublications(context.Background())
+		ticker := time.NewTicker(p.cmsPublicationSyncInterval())
+		defer ticker.Stop()
+		for range ticker.C {
+			p.syncManualCMSPublications(context.Background())
+		}
+	})
+}
+
+func (p *publishPipeline) syncManualCMSPublications(ctx context.Context) {
+	if p == nil || p.store == nil || publishWorkersPaused() {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	jobs, err := p.store.all()
+	if err != nil {
+		log.Printf("publish: 读取后台发布对账任务失败：%v", err)
+		return
+	}
+	for _, job := range jobs {
+		if job.Stage == publishStagePublished || !publishJobCanAckManualCMS(job) {
+			continue
+		}
+		if _, published, checkErr := p.findOwnPublishedCMSNews(ctx, job); checkErr != nil {
+			log.Printf("publish: 后台发布对账失败（任务 #%d）：%v", job.ID, checkErr)
+			continue
+		} else if !published {
+			continue
+		}
+		if _, ackErr := p.ackManualCMSPublication(ctx, job.ID); ackErr != nil {
+			log.Printf("publish: 后台发布后更新群卡失败（任务 #%d）：%v", job.ID, ackErr)
+		}
+	}
 }

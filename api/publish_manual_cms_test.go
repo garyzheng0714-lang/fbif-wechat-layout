@@ -174,3 +174,52 @@ func TestAckCMSPublishedHTTP(t *testing.T) {
 		t.Fatalf("HTTP 对账不得 UpdateNews，实际 update=%d", updateN)
 	}
 }
+
+func TestSyncManualCMSPublicationsUpdatesAwaitingReviewCard(t *testing.T) {
+	env := newPublishTestEnv(t)
+	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
+	title := "餐饮零食化，火了猪油渣"
+	job := seedManualCMSJob(t, env, publishStageAwaitingReview, 62848, title)
+	env.ft.mu.Lock()
+	env.ft.searchRecords = []foodTalksNewsListItem{{
+		ID: 62848, Title: title, PublishStatus: foodTalksPublishStatusPublished, SourceName: "惊蛰研究所",
+	}}
+	env.ft.mu.Unlock()
+
+	env.pipeline.syncManualCMSPublications(context.Background())
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.Stage != publishStagePublished || got.PublicationAction != publishPublicationActionManualCMS {
+		t.Fatalf("待审卡应对账为后台已发布，实际 stage=%s action=%s", got.Stage, got.PublicationAction)
+	}
+	if len(env.notified) == 0 {
+		t.Fatal("应对群里已有审核卡发出刷新")
+	}
+	if _, updateN := env.ft.counts(); updateN != 0 {
+		t.Fatalf("定时对账不得 UpdateNews，实际 update=%d", updateN)
+	}
+}
+
+func TestSyncManualCMSPublicationsLeavesDraftJobsAlone(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job := seedManualCMSJob(t, env, publishStageAwaitingReview, 62847, "蛋白质焦虑，带来了多少新生意")
+	env.ft.mu.Lock()
+	env.ft.searchRecords = []foodTalksNewsListItem{{
+		ID: 62847, Title: job.Title, PublishStatus: foodTalksPublishStatusDraft,
+	}}
+	env.ft.mu.Unlock()
+
+	env.pipeline.syncManualCMSPublications(context.Background())
+	got, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.Stage != publishStageAwaitingReview {
+		t.Fatalf("网站仍是草稿时不得改阶段，实际 %s", got.Stage)
+	}
+	if len(env.notified) != 0 {
+		t.Fatalf("草稿不得刷卡，实际 notified=%d", len(env.notified))
+	}
+}

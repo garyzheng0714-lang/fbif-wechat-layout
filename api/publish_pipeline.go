@@ -199,6 +199,9 @@ type publishPipeline struct {
 	// 云梭没有回调，content_pk 落盘后以安全查询轮询最终结果。
 	externalDistributionPollInterval time.Duration
 	externalDistributionPollTimeout  time.Duration
+	cmsSyncInterval                  time.Duration
+	repostSources                    *publishRepostSourceStore
+	subscribeFeedWechatArticle       func(ctx context.Context, sourceName, articleURL string) error
 	// notify 人审群通知；nil 或返回错误都不阻断流水线——人可以查任务列表，通知只是加速器
 	notify func(ctx context.Context, text string) error
 	// monitorNotify P0 监控私聊；与审核群物理分开，缺配置时监控 relay 必须失败，
@@ -278,12 +281,16 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		assessRisk:                       arkAssessPublishRisk,
 		foodTalks:                        func() (foodTalksAPI, error) { return newFoodTalksClientFromEnv() },
 		yunsuo:                           func() (yunsuoAPI, error) { return newYunsuoClientFromEnv() },
+		subscribeFeedWechatArticle:       defaultSubscribeFeedWechatArticle,
 		externalDistributionPollInterval: 5 * time.Second,
 		externalDistributionPollTimeout:  15 * time.Minute,
 		spawn:                            func(f func()) { go f() },
 		externalSpawn:                    func(f func()) { go f() },
 		retryNotification:                func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
 		now:                              time.Now,
+	}
+	if store != nil {
+		p.repostSources = newPublishRepostSourceStore(publishRepostSourcesPath(store.path))
 	}
 	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
 		return fetchSiteArticleWithContext(ctx, rules, articleURL)
@@ -1208,6 +1215,7 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		return fmt.Errorf("%w：%s", errPublicizeOutcomeUncertain, msg)
 	}
 	p.schedulePublishNotification(job.ID)
+	p.recordPublishedRepost(ctx, updated)
 	return nil
 }
 
@@ -1425,6 +1433,7 @@ func (p *publishPipeline) recoverJobs() {
 		log.Printf("publish: 启动恢复扫描失败: %v", err)
 		return
 	}
+	p.recoverRepostSourceSubscribe()
 	for _, job := range jobs {
 		p.recoverPublishNotification(job)
 		p.recoverExternalDistribution(job)

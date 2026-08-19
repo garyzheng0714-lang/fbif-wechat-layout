@@ -38,12 +38,20 @@ func TestSanitizeOriginalURLCandidateDropsSearchHosts(t *testing.T) {
 
 func TestResolveRepostOriginalURLPrefersFeedLookup(t *testing.T) {
 	t.Cleanup(func() {
-		lookupFeedOriginalArticle = defaultLookupFeedOriginalArticle
+		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
+		lookupRedfoxOriginalArticle = defaultLookupRedfoxOriginalArticle
 		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
 		fetchOriginalArticlePage = fetchRawHTML
 	})
-	lookupFeedOriginalArticle = func(context.Context, string, string) string {
-		return "http://mp.weixin.qq.com/s?__biz=MzkzNzI3NTc1Mg&mid=1&idx=1&sn=abc"
+	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
+		return feedOriginalArticleHit{
+			URL:         "http://mp.weixin.qq.com/s?__biz=MzkzNzI3NTc1Mg&mid=1&idx=1&sn=abc",
+			KnownSource: true,
+		}
+	}
+	lookupRedfoxOriginalArticle = func(context.Context, string, string) string {
+		t.Fatal("Feed 已命中时不应再查公众号作品库")
+		return ""
 	}
 	searchOriginalArticleURLs = func(context.Context, string, string) []string {
 		t.Fatal("Feed 已命中时不应再去网页检索")
@@ -72,7 +80,7 @@ func TestDefaultLookupFeedOriginalArticle(t *testing.T) {
 		}
 		gotTitle, gotSource = req.Title, req.SourceName
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"found","url":"http://mp.weixin.qq.com/s?__biz=feed"}`))
+		_, _ = w.Write([]byte(`{"status":"found","source_id":"src-1","url":"http://mp.weixin.qq.com/s?__biz=feed"}`))
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("FOODTALKS_FEED_BASE_URL", srv.URL)
@@ -87,9 +95,13 @@ func TestDefaultLookupFeedOriginalArticle(t *testing.T) {
 }
 
 func TestResolveRepostOriginalURLUsesVerifiedCandidate(t *testing.T) {
-	lookupFeedOriginalArticle = func(context.Context, string, string) string { return "" }
+	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
+		return feedOriginalArticleHit{}
+	}
+	lookupRedfoxOriginalArticle = func(context.Context, string, string) string { return "" }
 	t.Cleanup(func() {
-		lookupFeedOriginalArticle = defaultLookupFeedOriginalArticle
+		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
+		lookupRedfoxOriginalArticle = defaultLookupRedfoxOriginalArticle
 		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
 		fetchOriginalArticlePage = fetchRawHTML
 	})
@@ -114,9 +126,13 @@ func TestResolveRepostOriginalURLUsesVerifiedCandidate(t *testing.T) {
 }
 
 func TestResolveRepostOriginalURLRejectsUnverifiedCandidate(t *testing.T) {
-	lookupFeedOriginalArticle = func(context.Context, string, string) string { return "" }
+	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
+		return feedOriginalArticleHit{}
+	}
+	lookupRedfoxOriginalArticle = func(context.Context, string, string) string { return "" }
 	t.Cleanup(func() {
-		lookupFeedOriginalArticle = defaultLookupFeedOriginalArticle
+		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
+		lookupRedfoxOriginalArticle = defaultLookupRedfoxOriginalArticle
 		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
 		fetchOriginalArticlePage = fetchRawHTML
 	})
