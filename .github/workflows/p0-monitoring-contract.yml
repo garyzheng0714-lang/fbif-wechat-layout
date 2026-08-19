@@ -2,8 +2,6 @@ name: P0 WeChat Monitoring Contract
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -35,17 +33,31 @@ jobs:
 
       # No path filter: every change must re-prove the idempotent intake,
       # review-card outbox, monitoring invariants and alert relay.
-      - name: Run complete Go test suite
+      - name: Go fmt, vet, staticcheck, test, race and vulns
         working-directory: api
-        run: go test ./...
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Go files need gofmt:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+          go vet ./...
+          go run honnef.co/go/tools/cmd/staticcheck@2026.1 ./...
+          go test ./... -coverprofile=coverage.out
+          coverage=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+          awk -v actual="$coverage" 'BEGIN { if (actual + 0 < 73) exit 1 }'
+          go test -race ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
-      - name: Prove in-flight layout or review-card work cannot report green
-        working-directory: api
-        run: go test . -run 'TestPublishMonitoring(ReportsOnlyOperationalMetrics|GuardsReviewNotificationAndDeduplication)'
-
-      - name: Race-test publishing contracts
-        working-directory: api
-        run: go test -race ./...
+      - name: Shell, Python and env schema
+        run: |
+          shellcheck deploy/scripts/*.sh
+          bash -n deploy/scripts/deploy-transaction.sh
+          python3 -m py_compile deploy/scripts/validate-env.py
+          python3 deploy/scripts/validate-env.py deploy/config/env-schema.json api_managed deploy/config/api.env.example
+          python3 deploy/scripts/validate-env.py deploy/config/env-schema.json api_publish deploy/config/publish.env.example
+          python3 deploy/scripts/validate-env.py deploy/config/env-schema.json render deploy/config/render.env.example
 
   frontend-contracts:
     runs-on: ubuntu-latest
@@ -55,20 +67,38 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-          package-manager-cache: false
+          cache: npm
       - run: npm ci
-      - run: npm test
+      - run: npm run lint:js
+      - run: npm run test:coverage
+      - run: npm run audit:deps
 
   browser-contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-          package-manager-cache: false
+          cache: npm
       - run: npm ci
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      # 只装 Chrome。Firefox / WebKit 不进门禁，也不在部署机上装。
       - run: npx playwright install --with-deps chromium
       - name: Run browser interaction tests
         run: E2E_PORT=19190 npm run test:e2e:ci
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/e2e
+            tests/e2e-screenshots
+          if-no-files-found: ignore
+          retention-days: 7

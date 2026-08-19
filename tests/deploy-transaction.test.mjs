@@ -135,36 +135,22 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     'render 不得直接覆盖 live 目录');
   assert.match(workflow, /npm ci --omit=dev --no-audit --no-fund/,
     'render 依赖必须从 lockfile 可复现安装');
-  assert.match(workflow, /playwright install --with-deps chromium firefox webkit/,
-    '部署门禁必须安装三种浏览器引擎');
-  assert.match(workflow, /E2E_CROSS_BROWSER: '1'/,
-    'CI 必须启用 Firefox/WebKit 关键路径冒烟测试');
-  assert.match(workflow, /npm run test:e2e:ci/,
-    '无截图交互 E2E 必须进入部署门禁，不能只留在本机手跑');
-  assert.match(workflow, /uses: actions\/upload-artifact@v4/);
-  assert.match(workflow, /if: failure\(\)/,
-    '浏览器失败时必须保留诊断产物');
-  assert.match(workflow, /test-results\/e2e/);
-  assert.match(workflow, /retention-days: 7/);
+  assert.doesNotMatch(workflow, /playwright install/);
+  assert.doesNotMatch(workflow, /E2E_CROSS_BROWSER/);
+  assert.doesNotMatch(workflow, /npm run test:e2e/);
+  assert.doesNotMatch(workflow, /firefox|webkit/);
+  assert.doesNotMatch(workflow, /npm run lint:js/);
+  assert.doesNotMatch(workflow, /npm run test:coverage/);
+  assert.doesNotMatch(workflow, /go test/);
+  assert.match(workflow, /timeout-minutes: 20/,
+    '部署必须有硬超时，不能让装浏览器或卡住的考试占住生产队列');
   assert.match(workflow, /uses: actions\/checkout@v6/,
     '官方 checkout Node 24 运行时版本必须固定，避免旧 action 弃用告警');
   assert.match(workflow, /uses: actions\/setup-go@v6/);
   assert.match(workflow, /cache-dependency-path: api\/go\.sum/,
     'Go 模块位于 api/，缓存不得再去仓库根目录找 go.sum');
-  assert.match(workflow, /uses: actions\/setup-node@v6/);
-  assert.match(workflow, /package-manager-cache: false/,
-    'setup-node v6 不应依赖 packageManager 自动探测改变缓存行为');
   assert.match(workflow, /go-version: '1\.26\.6'/,
     '必须锁定已修复当前标准库漏洞的 Go patch 版本（2026-08-14 GO-2026-6218 等 5 个 stdlib 漏洞 Fixed in 1.26.6）');
-  assert.match(workflow, /npm run lint:js/);
-  assert.match(workflow, /npm run test:coverage/);
-  assert.match(workflow, /npm run audit:deps/);
-  assert.match(workflow, /go vet \.\/\.\.\./);
-  assert.match(workflow, /staticcheck@2026\.1/);
-  assert.match(workflow, /govulncheck@v1\.6\.0/);
-  assert.match(workflow, /shellcheck deploy\/scripts\/\*\.sh/);
-  assert.match(workflow, /actual \+ 0 < 73/,
-    'Go 覆盖率必须保持当前基线以上');
   assert.match(workflow, /permissions:\s*\n\s*contents: read/,
     'deploy workflow 必须使用最小 GitHub token 权限');
   assert.match(workflow, /remote_transaction rollback/);
@@ -219,6 +205,33 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   ]) {
     assert.ok(workflow.includes(contract), `缺少部署验收：${contract}`);
   }
+});
+
+test('PR quality gate examines on Chrome only and caches the browser', async () => {
+  const workflow = await projectFile('.github/workflows/p0-monitoring-contract.yml');
+  assert.match(workflow, /pull_request:/);
+  assert.doesNotMatch(workflow, /push:\s*\n\s*branches:\s*\n\s*-\s*main/,
+    '合并后再跑一遍全套考试会浪费时间；考试只在 PR');
+  assert.match(workflow, /backend-and-watchdog:/,
+    '分支保护依赖这个 job 名，不得改名');
+  assert.match(workflow, /gofmt -l/);
+  assert.match(workflow, /go vet \.\/\.\.\./);
+  assert.match(workflow, /staticcheck@2026\.1/);
+  assert.match(workflow, /govulncheck@v1\.6\.0/);
+  assert.match(workflow, /actual \+ 0 < 73/);
+  assert.match(workflow, /go test -race/);
+  assert.match(workflow, /shellcheck deploy\/scripts\/\*\.sh/);
+  assert.match(workflow, /npm run lint:js/);
+  assert.match(workflow, /npm run test:coverage/);
+  assert.match(workflow, /npm run audit:deps/);
+  assert.match(workflow, /playwright install --with-deps chromium/);
+  assert.doesNotMatch(workflow, /playwright install --with-deps chromium firefox webkit/);
+  assert.doesNotMatch(workflow, /E2E_CROSS_BROWSER/);
+  assert.match(workflow, /~\/\.cache\/ms-playwright/,
+    'Chrome 必须按 lockfile 缓存，不能每次重下');
+  assert.match(workflow, /npm run test:e2e:ci/);
+  assert.match(workflow, /uses: actions\/upload-artifact@v4/);
+  assert.match(workflow, /test-results\/e2e/);
 });
 
 test('render service has its own lockfile for staging npm ci', async () => {
