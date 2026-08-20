@@ -37,6 +37,263 @@ const (
 
 const reviewCardHeaderTitle = "网站发布审核"
 
+// buildReviewBatchCard 把同一投递批次的文章收进一张卡。标题点击时，已发布
+// 跳正式页，其余状态跳审核预览；底部只保留原文和当前状态的主操作。
+func buildReviewBatchCard(jobs []publishJob) map[string]any {
+	elements := make([]any, 0, len(jobs))
+	pending, published := 0, 0
+	for _, job := range jobs {
+		switch job.Stage {
+		case publishStageAwaitingReview:
+			pending++
+		case publishStagePublished:
+			published++
+		}
+		elements = append(elements, reviewBatchArticleBlock(job))
+	}
+	subtitle := fmt.Sprintf("%s · %d篇文章", reviewBatchDateLabel(jobs), len(jobs))
+	if pending > 0 {
+		subtitle += fmt.Sprintf(" · 待审核%d篇", pending)
+	}
+	if published > 0 {
+		subtitle += fmt.Sprintf(" · 已发布%d篇", published)
+	}
+	return map[string]any{
+		"schema": "2.0",
+		"config": map[string]any{
+			"update_multi": true,
+			"style": map[string]any{"text_size": map[string]any{"normal_v2": map[string]any{
+				"default": "normal", "pc": "normal", "mobile": "normal",
+			}}},
+		},
+		"header": map[string]any{
+			"template": "blue",
+			"icon":     map[string]any{"tag": "standard_icon", "token": "cloud-change_outlined"},
+			"title":    feishuPlainText("FoodTalks 内容审核"),
+			"subtitle": feishuPlainText(subtitle),
+			"padding":  "12px 12px 12px 12px",
+		},
+		"body": map[string]any{
+			"direction": "vertical", "padding": "12px 12px 12px 12px",
+			"vertical_spacing": "12px", "elements": elements,
+		},
+	}
+}
+
+func reviewBatchDateLabel(jobs []publishJob) string {
+	if len(jobs) == 0 {
+		return "今日"
+	}
+	created, err := time.Parse(time.RFC3339, jobs[0].CreatedAt)
+	if err != nil {
+		return "今日"
+	}
+	return created.In(time.FixedZone("CST", 8*3600)).Format("1月2日")
+}
+
+func reviewBatchArticleBlock(job publishJob) map[string]any {
+	columns := []any{}
+	if cover := strings.TrimSpace(job.ReviewCoverImgKey); cover != "" {
+		columns = append(columns, map[string]any{
+			"tag": "column", "width": "weighted", "weight": 1,
+			"direction": "vertical", "vertical_align": "top", "padding": "8px 8px 8px 8px",
+			"elements": []any{map[string]any{
+				"tag": "img", "img_key": cover, "alt": feishuPlainText("文章封面图"),
+				"preview": true, "transparent": true, "scale_type": "fit_horizontal", "corner_radius": "3px",
+			}},
+		})
+	}
+	copyElements := []any{map[string]any{
+		"tag": "markdown", "content": reviewBatchTitle(job), "text_size": "normal_v2",
+	}}
+	if tags := reviewCardTagMarkup(job.Tags); tags != "" {
+		copyElements = append(copyElements, map[string]any{
+			"tag": "markdown", "content": tags, "text_size": "normal_v2",
+			"icon": map[string]any{"tag": "standard_icon", "token": "tag_outlined", "color": "grey"},
+		})
+	}
+	copyElements = append(copyElements, map[string]any{
+		"tag": "markdown", "content": "<font color='grey'>" + reviewCardSafeOrDash(job.Summary, 180) + "</font>",
+		"text_size": "notation",
+	})
+	if duplicate := reviewCardDuplicateBlock(job); duplicate != nil {
+		copyElements = append(copyElements, duplicate)
+	}
+	if risk := reviewBatchRiskBlock(job); risk != nil {
+		copyElements = append(copyElements, risk)
+	}
+	copyElements = append(copyElements, reviewBatchButtonRow(job))
+	if job.Stage == publishStagePublished {
+		provenance, _, _ := publishExternalDistributionProvenance(job)
+		if strings.TrimSpace(job.ExternalDistributionState) != "" || provenance == publishExternalProvenanceOriginal {
+			copyElements = append(copyElements, reviewCardExternalDistributionElements(job, true)...)
+		}
+	}
+	columns = append(columns, map[string]any{
+		"tag": "column", "width": "weighted", "weight": 3,
+		"direction": "vertical", "vertical_align": "center", "vertical_spacing": "8px",
+		"background_style": "grey-50", "padding": "8px 8px 8px 8px", "elements": copyElements,
+	})
+	return map[string]any{
+		"tag": "column_set", "flex_mode": "flow", "background_style": "grey-100",
+		"horizontal_spacing": "8px", "horizontal_align": "left", "columns": columns,
+	}
+}
+
+func reviewBatchTitle(job publishJob) string {
+	target := publishPreviewURL(job.ID)
+	if job.Stage == publishStagePublished && strings.TrimSpace(job.ArticleURL) != "" {
+		target = job.ArticleURL
+	}
+	title := "**" + reviewCardSafeOrDash(job.Title, 200) + "**"
+	if safe := reviewCardSafeURL(target); safe != "" {
+		title = fmt.Sprintf("**[%s](%s)**", reviewCardSafeOrDash(job.Title, 200), safe)
+	}
+	status, color := reviewBatchStatus(job)
+	provenance, _, _ := publishExternalDistributionProvenance(job)
+	provenanceLabel := "转载"
+	provenanceColor := "neutral"
+	if provenance == publishExternalProvenanceOriginal {
+		provenanceLabel, provenanceColor = "原创", "green"
+	} else if provenance == publishExternalProvenanceUnverified {
+		provenanceLabel, provenanceColor = "待核", "orange"
+	}
+	return fmt.Sprintf("%s<text_tag color='%s'>%s</text_tag><text_tag color='%s'>%s</text_tag><text_tag color='green'>#%d</text_tag>",
+		title, color, status, provenanceColor, provenanceLabel, job.ID)
+}
+
+func reviewBatchStatus(job publishJob) (string, string) {
+	switch job.Stage {
+	case publishStageAwaitingReview:
+		return "待审核", "yellow"
+	case publishStagePublicizing, publishStagePublicizingUpdating:
+		return "发布中", "blue"
+	case publishStagePublished:
+		return "已发布", "green"
+	case publishStageUnpublishing, publishStageUnpublishingUpdating:
+		return "下线中", "blue"
+	case publishStageOffline:
+		return "已下线", "orange"
+	case publishStageRepublishing, publishStageRepublishingUpdating:
+		return "重新发布中", "blue"
+	case publishStageRejected:
+		return "已驳回", "red"
+	case publishStageReconciliationRequired, publishStagePublicizeReconciliationRequired,
+		publishStageUnpublishReconciliationRequired, publishStageRepublishReconciliationRequired,
+		publishStageStagingCreating:
+		return "待人工核对", "orange"
+	case publishStageSupersededDuplicate:
+		return "重复终止", "red"
+	default:
+		return "处理失败", "red"
+	}
+}
+
+func reviewBatchRiskBlock(job publishJob) map[string]any {
+	confirmed, deferred := splitPublishRiskItems(job.RiskItems)
+	if len(confirmed) > 0 || job.RiskLevel == publishRiskBlock || !publishRiskLevelKnown(job.RiskLevel) {
+		return reviewCardRiskHeadlineBlock(job)
+	}
+	if len(deferred) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"tag": "collapsible_panel", "expanded": false,
+		"header": map[string]any{
+			"title":         feishuPlainText(fmt.Sprintf("检查报告（%d条待核）", len(deferred))),
+			"width":         "auto_when_fold",
+			"icon":          map[string]any{"tag": "standard_icon", "token": "info_outlined", "color": "grey"},
+			"icon_position": "left",
+		},
+		"elements": []any{reviewCardRiskDetailBlock(job)},
+	}
+}
+
+func reviewBatchButtonRow(job publishJob) map[string]any {
+	sourceURL := reviewCardSafeURL(job.SourceURL)
+	if sourceURL == "" {
+		sourceURL = reviewCardSafeURL(publishPreviewURL(job.ID))
+	}
+	source := map[string]any{
+		"tag": "button", "text": feishuPlainText("查看原文"), "type": "default",
+		"width": "fill", "size": "tiny",
+		"icon":      map[string]any{"tag": "standard_icon", "token": "card-search_outlined"},
+		"behaviors": []any{map[string]any{"type": "open_url", "default_url": sourceURL, "pc_url": "", "ios_url": "", "android_url": ""}},
+	}
+	action := reviewBatchActionButton(job)
+	return feishuButtonRow(source, action)
+}
+
+func reviewBatchActionButton(job publishJob) map[string]any {
+	disabled := func(label string) map[string]any {
+		return map[string]any{
+			"tag": "button", "text": feishuPlainText(label), "type": "default",
+			"width": "fill", "size": "tiny", "disabled": true,
+		}
+	}
+	switch job.Stage {
+	case publishStageAwaitingReview:
+		if !publishRiskAllowsManualApprove(job.RiskLevel) && job.RiskLevel != publishRiskBlock {
+			return disabled("检查未完成")
+		}
+		action := feishuCardActionApprove
+		label, buttonType := "发布", "primary_filled"
+		confirmTitle := "通过并发布？"
+		confirmText := "文章将在 FoodTalks 公开可见。"
+		if job.RiskLevel == publishRiskBlock {
+			action, label, buttonType = feishuCardActionForceApprove, "强制发布", "danger"
+			confirmTitle = "无视风险阻断，强制发布？"
+			confirmText = "风险检查已阻断本文，操作将以你的身份留痕。"
+		}
+		return map[string]any{
+			"tag": "button", "text": feishuPlainText(label), "type": buttonType,
+			"width": "fill", "size": "tiny",
+			"icon":    map[string]any{"tag": "standard_icon", "token": "upload_outlined"},
+			"confirm": map[string]any{"title": feishuPlainText(confirmTitle), "text": feishuPlainText(confirmText)},
+			"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{
+				"action": action, "job_id": job.ID, "review_version": publishReviewCardVersion(job),
+			}}},
+		}
+	case publishStagePublished:
+		if !publishUnpublishWindowOpen(job, time.Now().UTC()) {
+			return disabled("不可下线")
+		}
+		return map[string]any{
+			"tag": "button", "text": feishuPlainText("下线"), "type": "danger",
+			"width": "fill", "size": "tiny",
+			"confirm": map[string]any{
+				"title": feishuPlainText("下线这篇文章？"),
+				"text":  feishuPlainText("文章会从 FoodTalks 前台下线，在规则窗口内可重新发布。"),
+			},
+			"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{
+				"action": feishuCardActionUnpublish, "job_id": job.ID, "lifecycle_version": publishLifecycleCardVersion(job),
+			}}},
+		}
+	case publishStageOffline:
+		return map[string]any{
+			"tag": "button", "text": feishuPlainText("重新发布"), "type": "primary_filled",
+			"width": "fill", "size": "tiny",
+			"confirm": map[string]any{
+				"title": feishuPlainText("重新发布这篇文章？"),
+				"text":  feishuPlainText("将使用原审核通过的版本恢复为公开状态。"),
+			},
+			"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{
+				"action": feishuCardActionRepublish, "job_id": job.ID, "lifecycle_version": publishLifecycleCardVersion(job),
+			}}},
+		}
+	case publishStagePublicizing, publishStagePublicizingUpdating:
+		return disabled("发布中")
+	case publishStageUnpublishing, publishStageUnpublishingUpdating:
+		return disabled("下线中")
+	case publishStageRepublishing, publishStageRepublishingUpdating:
+		return disabled("重新发布中")
+	case publishStageRejected:
+		return disabled("已驳回")
+	default:
+		return disabled("待人工处理")
+	}
+}
+
 // reviewCardTagsWithForced 在 header 标签末尾追加「强制发布」红标（仅 ReviewForced
 // 任务）：群里长期留存的卡必须一眼看出这篇是无视阻断结论发出去的。
 func reviewCardTagsWithForced(job publishJob, tags ...any) []any {
