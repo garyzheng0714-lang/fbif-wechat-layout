@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func reviewCardTestJob(stage string) publishJob {
@@ -89,6 +90,38 @@ func TestReviewDoneCardKeepsPublishedArticleLink(t *testing.T) {
 	body := cardJSON(t, buildReviewDoneCard(job))
 	if !strings.Contains(body, job.ArticleURL) {
 		t.Fatalf("已发布卡缺少站内文章链接 %q: %s", job.ArticleURL, body)
+	}
+}
+
+func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T) {
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
+	now := time.Now().UTC()
+	pending := reviewCardTestJob(publishStageAwaitingReview)
+	pending.ID = 118
+	pending.CreatedAt = "2026-08-20T01:00:00Z"
+	pending.ContentHash = "pending"
+	pending.ContentVersion = 1
+	pending.RiskLevel = publishRiskPass
+	published := reviewCardTestJob(publishStagePublished)
+	published.ID = 117
+	published.CreatedAt = pending.CreatedAt
+	published.PublishedAt = now.Add(-time.Hour).Format(time.RFC3339)
+	published.UnpublishPolicySet = true
+	published.UnpublishWindowHours = 8
+	published.UnpublishWindowUntil = now.Add(time.Hour).Format(time.RFC3339)
+
+	body := cardJSON(t, buildReviewBatchCard([]publishJob{published, pending}))
+	for _, want := range []string{
+		"FoodTalks 内容审核", "8月20日 · 2篇文章 · 待审核1篇 · 已发布1篇",
+		`"flex_mode":"flow"`, `"scale_type":"fit_horizontal"`, "#117", "#118",
+		"查看原文", `"action":"approve"`, `"action":"unpublish"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("聚合卡缺少 %q: %s", want, body)
+		}
+	}
+	if strings.Count(body, `"schema":"2.0"`) != 1 {
+		t.Fatalf("同批文章必须共用一张卡: %s", body)
 	}
 }
 

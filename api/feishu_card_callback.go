@@ -260,7 +260,7 @@ type reviewCardOutcome struct {
 // reviewCardAction 卡片按钮动作的业务核心（两模式共用唯一入口）：解析 value
 // （action + job_id，兼容数字/字符串）→ 读取最新任务状态 → 业务态校验 → review 核心
 // → 发布中/终态卡。审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
-func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage) reviewCardOutcome {
+func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage) (out reviewCardOutcome) {
 	var value struct {
 		Action              string `json:"action"`
 		JobID               any    `json:"job_id"`
@@ -280,6 +280,14 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 		value.Action != feishuCardActionDistributeExternal) {
 		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位发布任务"}
 	}
+	defer func() {
+		if out.card == nil {
+			return
+		}
+		if card, err := p.buildReviewBatchCard(jobID); err == nil {
+			out.card = card
+		}
+	}()
 	if !p.feishuReviewActionAllowed(operatorOpenID, actionChatID) {
 		return reviewCardOutcome{toastType: "error", toastContent: "你没有发布操作权限：请在审核群内操作卡片，或联系管理员配置审核人白名单"}
 	}

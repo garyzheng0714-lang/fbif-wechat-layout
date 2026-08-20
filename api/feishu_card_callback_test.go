@@ -255,9 +255,9 @@ func TestFeishuCallbackApprovePublishes(t *testing.T) {
 	if header["template"] != "blue" {
 		t.Fatalf("approve 进度卡 header 应为 blue，实际 %v", header["template"])
 	}
-	for _, want := range []string{"发布中", "ou_reviewer_1", "capsule", "后台正在发布", "最终结果以随后终态卡为准"} {
+	for _, want := range []string{"发布中", "FoodTalks 内容审核", "查看原文"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("终态卡应包含 %q，实际响应：%s", want, body)
+			t.Fatalf("聚合进度卡应包含 %q，实际响应：%s", want, body)
 		}
 	}
 	if containsEmoji(body) {
@@ -273,8 +273,8 @@ func TestFeishuCallbackApprovePublishes(t *testing.T) {
 	}
 }
 
-// TestFeishuCallbackRejectTerminates 卡片「驳回」置终态 rejected：不触发任何 FoodTalks
-// 请求（forbidPublish 守卫全程在场），响应带红终态卡 + 留痕。
+// TestFeishuCallbackRejectTerminates 历史卡的「驳回」仍置终态 rejected，
+// 但回调响应已收敛到蓝色批次卡，不再把整张卡染成单篇红色。
 func TestFeishuCallbackRejectTerminates(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newCardCallbackMux(t, env)
@@ -295,9 +295,9 @@ func TestFeishuCallbackRejectTerminates(t *testing.T) {
 		t.Fatalf("reject 不应触发 UpdateNews，实际 %d 次", updateN)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"已驳回", `"template":"red"`, "驳回了本文", "ou_reviewer_1"} {
+	for _, want := range []string{"已驳回", `"template":"blue"`, "FoodTalks 内容审核"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("驳回终态卡应包含 %q，实际响应：%s", want, body)
+			t.Fatalf("驳回后的聚合卡应包含 %q，实际响应：%s", want, body)
 		}
 	}
 }

@@ -207,6 +207,9 @@ func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job 
 // message_id、或更新接口暂时不可用时，兼容发送一张新终态卡，再降级文本。
 // 调用方必须持有 reviewCardUpdateMu。
 func (p *publishPipeline) sendTerminalCardNotificationUnlocked(ctx context.Context, job publishJob, card map[string]any, fallbackText string) error {
+	if batchCard, err := p.buildReviewBatchCard(job.ID); err == nil {
+		card = batchCard
+	}
 	if p != nil && p.deliverySettings != nil {
 		if err := p.sendConfiguredReviewCardToTargets(ctx, job, card); err == nil {
 			return nil
@@ -308,6 +311,9 @@ func (p *publishPipeline) sendReviewPendingNotificationUnlocked(ctx context.Cont
 	// 同题防重提醒（best effort）：发卡/刷卡前查一次 CMS，命中即在卡上标红。
 	job = p.refreshSiteDuplicateFlag(ctx, job)
 	card := buildReviewPendingCard(job, coverImgKey)
+	if batchCard, batchErr := p.buildReviewBatchCard(job.ID); batchErr == nil {
+		card = batchCard
+	}
 	if p != nil && p.deliverySettings != nil {
 		return p.sendConfiguredReviewCardToTargets(ctx, job, card)
 	}
@@ -358,35 +364,123 @@ func (p *publishPipeline) sendConfiguredReviewCardToTargets(ctx context.Context,
 	if len(settings.ChatIDs) == 0 {
 		return errors.New("发布审核通知尚未选择审核群")
 	}
+	batch, err := p.reviewCardBatch(job)
+	if err != nil {
+		return err
+	}
 	for _, chatID := range settings.ChatIDs {
 		chatID = strings.TrimSpace(chatID)
 		if chatID == "" {
 			continue
 		}
 		messageID := reviewCardMessageID(job, chatID)
+		if messageID == "" {
+			for _, candidate := range batch {
+				if messageID = reviewCardMessageID(candidate, chatID); messageID != "" {
+					break
+				}
+			}
+		}
 		if messageID != "" {
 			if err := p.updateConfiguredReviewCard(ctx, job, chatID, messageID, card); err != nil {
 				return fmt.Errorf("更新审核群 %s 的卡片失败：%w", chatID, err)
 			}
-			continue
+		} else {
+			messageID, err = p.sendConfiguredReviewCard(ctx, job, chatID, card)
+			if err != nil {
+				return fmt.Errorf("向审核群 %s 发送卡片失败：%w", chatID, err)
+			}
 		}
-		messageID, err := p.sendConfiguredReviewCard(ctx, job, chatID, card)
-		if err != nil {
-			return fmt.Errorf("向审核群 %s 发送卡片失败：%w", chatID, err)
-		}
-		if err := p.rememberReviewCardMessageIDForChat(job, chatID, messageID); err != nil {
-			return err
-		}
-		job.ReviewCardMsgIDs = cloneStringMap(job.ReviewCardMsgIDs)
-		if job.ReviewCardMsgIDs == nil {
-			job.ReviewCardMsgIDs = map[string]string{}
-		}
-		job.ReviewCardMsgIDs[chatID] = messageID
-		if job.ReviewCardMsgID == "" {
-			job.ReviewCardMsgID = messageID
+		for _, candidate := range batch {
+			if _, bindErr := p.store.update(candidate.ID, func(current *publishJob) {
+				if current.ReviewCardMsgIDs == nil {
+					current.ReviewCardMsgIDs = map[string]string{}
+				}
+				current.ReviewCardMsgIDs[chatID] = messageID
+				if strings.TrimSpace(current.ReviewCardMsgID) == "" {
+					current.ReviewCardMsgID = messageID
+				}
+			}); bindErr != nil {
+				return fmt.Errorf("绑定聚合审核卡 message_id 失败: %w", bindErr)
+			}
 		}
 	}
 	return nil
+}
+
+func (p *publishPipeline) buildReviewBatchCard(jobID int64) (map[string]any, error) {
+	job, err := p.store.byID(jobID)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := p.reviewCardBatch(job)
+	if err != nil {
+		return nil, err
+	}
+	return buildReviewBatchCard(jobs), nil
+}
+
+func (p *publishPipeline) reviewCardBatch(anchor publishJob) ([]publishJob, error) {
+	jobs, err := p.store.all()
+	if err != nil {
+		return nil, err
+	}
+	day := reviewCardBatchDay(anchor.CreatedAt)
+	out := make([]publishJob, 0, len(jobs))
+	for _, job := range jobs {
+		if reviewCardBatchDay(job.CreatedAt) != day || !sameReviewDelivery(anchor, job) || !reviewCardBatchStage(job) {
+			continue
+		}
+		out = append(out, job)
+	}
+	if len(out) == 0 {
+		out = append(out, anchor)
+	}
+	return out, nil
+}
+
+func reviewCardBatchDay(raw string) string {
+	created, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return raw
+	}
+	return created.In(time.FixedZone("CST", 8*3600)).Format("2006-01-02")
+}
+
+func sameReviewDelivery(a, b publishJob) bool {
+	if strings.TrimSpace(a.ReviewDeliveryAppID) != strings.TrimSpace(b.ReviewDeliveryAppID) ||
+		len(a.ReviewDeliveryChatIDs) != len(b.ReviewDeliveryChatIDs) {
+		return false
+	}
+	for _, left := range a.ReviewDeliveryChatIDs {
+		found := false
+		for _, right := range b.ReviewDeliveryChatIDs {
+			if strings.TrimSpace(left) == strings.TrimSpace(right) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func reviewCardBatchStage(job publishJob) bool {
+	switch job.Stage {
+	case publishStageAwaitingReview, publishStagePublicizing, publishStagePublicizingUpdating,
+		publishStagePublished, publishStageUnpublishing, publishStageUnpublishingUpdating,
+		publishStageOffline, publishStageRepublishing, publishStageRepublishingUpdating,
+		publishStageRejected, publishStageSupersededDuplicate, publishStageReconciliationRequired,
+		publishStagePublicizeReconciliationRequired, publishStageUnpublishReconciliationRequired,
+		publishStageRepublishReconciliationRequired, publishStageStagingCreating:
+		return true
+	case publishStageFailed:
+		return strings.TrimSpace(job.ReviewAction) != "" || strings.TrimSpace(job.ReviewCardMsgID) != "" || len(job.ReviewCardMsgIDs) > 0
+	default:
+		return false
+	}
 }
 
 func cloneStringMap(input map[string]string) map[string]string {
