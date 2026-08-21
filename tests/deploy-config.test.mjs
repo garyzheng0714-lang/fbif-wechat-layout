@@ -117,12 +117,20 @@ test('env validator fails closed on missing, unknown, duplicate and stale schema
   }
 });
 
-test('pull requests reject newly introduced high-severity vulnerable dependencies', async () => {
+test('dependency review rejects high-severity introductions only when the API is available', async () => {
   const workflow = await text('.github/workflows/dependency-review.yml');
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /permissions:\s*\n\s*contents: read/);
   assert.match(workflow, /actions\/dependency-review-action@v4/);
   assert.match(workflow, /fail-on-severity: high/);
+  // Private repos without GHAS get HTTP 403 from the compare API. Probe and
+  // skip that unsupported case so docs-only PRs do not go red. Do not use
+  // warn-only / continue-on-error on the review step; those hide real findings.
+  assert.match(workflow, /dependency-graph\/compare/);
+  assert.match(workflow, /supported=false/);
+  assert.match(workflow, /steps\.support\.outputs\.supported == 'true'/);
+  assert.doesNotMatch(workflow, /warn-only:\s*true/);
+  assert.doesNotMatch(workflow, /continue-on-error:\s*true/);
 });
 
 test('Playwright keeps failure evidence and limits cross-browser work to smoke paths', async () => {

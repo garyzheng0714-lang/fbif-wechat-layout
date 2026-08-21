@@ -7,12 +7,47 @@ on:
 permissions:
   contents: read
 
+# actions/dependency-review-action calls the Dependency review compare API.
+# That API is available on public repos and on private repos with GitHub
+# Advanced Security. This repository is private and has no GHAS license, so
+# the action hard-fails every PR with:
+#   Dependency review is not supported on this repository
+# even when the PR does not change dependencies.
+# Probe first and skip only that unsupported 403. Real findings still fail
+# when the API is available. Do not use warn-only or continue-on-error on
+# the review step — those would hide actual high-severity introductions.
 jobs:
   dependency-review:
     runs-on: ubuntu-24.04
     steps:
+      - name: Detect Dependency review support
+        id: support
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          url="${GITHUB_API_URL}/repos/${{ github.repository }}/dependency-graph/compare/${base}...${head}"
+          code=$(curl -sS -o /tmp/dep-review-probe.json -w "%{http_code}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$url")
+          echo "Dependency review compare API HTTP ${code}"
+          if [ "$code" = "403" ]; then
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping: Dependency review is not supported on this repository (private repo without GitHub Advanced Security)."
+            cat /tmp/dep-review-probe.json || true
+            exit 0
+          fi
+          echo "supported=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
+        if: steps.support.outputs.supported == 'true'
+
       - name: Reject newly introduced vulnerable dependencies
+        if: steps.support.outputs.supported == 'true'
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
