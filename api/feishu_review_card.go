@@ -40,7 +40,7 @@ const reviewCardHeaderTitle = "网站发布审核"
 // buildReviewBatchCard 把同一投递批次的文章收进一张卡。标题点击时，已发布
 // 跳正式页，其余状态跳审核预览；底部只保留原文和当前状态的主操作。
 func buildReviewBatchCard(jobs []publishJob) map[string]any {
-	elements := make([]any, 0, len(jobs))
+	elements := make([]any, 0, len(jobs)+1)
 	pending, published := 0, 0
 	for _, job := range jobs {
 		switch job.Stage {
@@ -50,6 +50,9 @@ func buildReviewBatchCard(jobs []publishJob) map[string]any {
 			published++
 		}
 		elements = append(elements, reviewBatchArticleBlock(job))
+	}
+	if risk := reviewBatchRiskSection(jobs); risk != nil {
+		elements = append(elements, risk)
 	}
 	subtitle := fmt.Sprintf("%s · %d篇文章", reviewBatchDateLabel(jobs), len(jobs))
 	if pending > 0 {
@@ -116,12 +119,6 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		"tag": "markdown", "content": "<font color='grey'>" + reviewCardSafeOrDash(job.Summary, 180) + "</font>",
 		"text_size": "notation",
 	})
-	if duplicate := reviewCardDuplicateBlock(job); duplicate != nil {
-		copyElements = append(copyElements, duplicate)
-	}
-	if risk := reviewBatchRiskBlock(job); risk != nil {
-		copyElements = append(copyElements, risk)
-	}
 	copyElements = append(copyElements, reviewBatchButtonRow(job))
 	if job.Stage == publishStagePublished {
 		provenance, _, _ := publishExternalDistributionProvenance(job)
@@ -189,23 +186,51 @@ func reviewBatchStatus(job publishJob) (string, string) {
 	}
 }
 
-func reviewBatchRiskBlock(job publishJob) map[string]any {
-	confirmed, deferred := splitPublishRiskItems(job.RiskItems)
-	if len(confirmed) > 0 || job.RiskLevel == publishRiskBlock || !publishRiskLevelKnown(job.RiskLevel) {
-		return reviewCardRiskHeadlineBlock(job)
+func reviewBatchRiskSection(jobs []publishJob) map[string]any {
+	elements := []any{}
+	for _, job := range jobs {
+		blocks := []any{map[string]any{
+			"tag": "markdown", "content": fmt.Sprintf("**#%d %s**", job.ID, reviewCardSafeOrDash(job.Title, 80)),
+		}}
+		if duplicate := reviewCardDuplicateBlock(job); duplicate != nil {
+			blocks = append(blocks, duplicate)
+		}
+		confirmed, deferred := splitPublishRiskItems(job.RiskItems)
+		if len(confirmed) > 0 || job.RiskLevel == publishRiskBlock || !publishRiskLevelKnown(job.RiskLevel) {
+			if headline := reviewCardRiskHeadlineBlock(job); headline != nil {
+				blocks = append(blocks, headline)
+			}
+		}
+		if len(deferred) > 0 {
+			if detail := reviewCardRiskDetailBlock(job); detail != nil {
+				blocks = append(blocks, detail)
+			}
+		}
+		if len(blocks) == 1 {
+			continue
+		}
+		elements = append(elements, map[string]any{
+			"tag": "column_set", "background_style": "grey-50",
+			"columns": []any{map[string]any{
+				"tag": "column", "width": "weighted", "weight": 1,
+				"direction": "vertical", "vertical_spacing": "6px", "padding": "8px 8px 8px 8px",
+				"elements": blocks,
+			}},
+		})
 	}
-	if len(deferred) == 0 {
+	if len(elements) == 0 {
 		return nil
 	}
 	return map[string]any{
 		"tag": "collapsible_panel", "expanded": false,
 		"header": map[string]any{
-			"title":         feishuPlainText(fmt.Sprintf("检查报告（%d条待核）", len(deferred))),
+			"title":         feishuPlainText(fmt.Sprintf("风险核查（%d篇有提示）", len(elements))),
 			"width":         "auto_when_fold",
 			"icon":          map[string]any{"tag": "standard_icon", "token": "info_outlined", "color": "grey"},
 			"icon_position": "left",
 		},
-		"elements": []any{reviewCardRiskDetailBlock(job)},
+		"vertical_spacing": "8px",
+		"elements":         elements,
 	}
 }
 
