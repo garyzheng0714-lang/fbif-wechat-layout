@@ -103,6 +103,13 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	pending.ContentVersion = 1
 	pending.RiskLevel = publishRiskPass
 	pending.RiskItems = []publishRiskItem{{Category: "authorization", Reason: "需人工确认转载授权", Certainty: publishRiskCertaintyUnverified}}
+	quietBody := cardJSON(t, buildReviewBatchCard([]publishJob{pending}))
+	if strings.Contains(quietBody, "风险核查") || strings.Contains(quietBody, "需人工确认转载授权") {
+		t.Fatalf("正常、待核或检查失败不得作为内容告警打扰审核人: %s", quietBody)
+	}
+	pending.RiskItems = append(pending.RiskItems, publishRiskItem{
+		Category: "factual", Reason: "已确认的事实错误", Certainty: publishRiskCertaintyConfirmed,
+	})
 	published := reviewCardTestJob(publishStagePublished)
 	published.ID = 117
 	published.CreatedAt = pending.CreatedAt
@@ -126,7 +133,8 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	}
 	if strings.Count(body, `"tag":"collapsible_panel"`) != 1 ||
 		strings.Count(body, "风险核查（1篇有提示）") != 1 ||
-		strings.Index(body, `"action":"approve"`) > strings.Index(body, "风险核查") {
+		strings.Index(body, `"action":"approve"`) > strings.Index(body, "风险核查") ||
+		!strings.Contains(body, "已确认的事实错误") || strings.Contains(body, "需人工确认转载授权") {
 		t.Fatalf("风险核查必须只在全部文章之后出现一次: %s", body)
 	}
 }

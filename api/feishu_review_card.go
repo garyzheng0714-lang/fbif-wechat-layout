@@ -195,15 +195,10 @@ func reviewBatchRiskSection(jobs []publishJob) map[string]any {
 		if duplicate := reviewCardDuplicateBlock(job); duplicate != nil {
 			blocks = append(blocks, duplicate)
 		}
-		confirmed, deferred := splitPublishRiskItems(job.RiskItems)
-		if len(confirmed) > 0 || job.RiskLevel == publishRiskBlock || !publishRiskLevelKnown(job.RiskLevel) {
+		confirmed, _ := splitPublishRiskItems(job.RiskItems)
+		if len(confirmed) > 0 || job.RiskLevel == publishRiskBlock {
 			if headline := reviewCardRiskHeadlineBlock(job); headline != nil {
 				blocks = append(blocks, headline)
-			}
-		}
-		if len(deferred) > 0 {
-			if detail := reviewCardRiskDetailBlock(job); detail != nil {
-				blocks = append(blocks, detail)
 			}
 		}
 		if len(blocks) == 1 {
