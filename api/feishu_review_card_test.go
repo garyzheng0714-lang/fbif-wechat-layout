@@ -102,6 +102,7 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	pending.ContentHash = "pending"
 	pending.ContentVersion = 1
 	pending.RiskLevel = publishRiskPass
+	pending.RiskItems = []publishRiskItem{{Category: "authorization", Reason: "需人工确认转载授权", Certainty: publishRiskCertaintyUnverified}}
 	published := reviewCardTestJob(publishStagePublished)
 	published.ID = 117
 	published.CreatedAt = pending.CreatedAt
@@ -122,6 +123,11 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	}
 	if strings.Count(body, `"schema":"2.0"`) != 1 {
 		t.Fatalf("同批文章必须共用一张卡: %s", body)
+	}
+	if strings.Count(body, `"tag":"collapsible_panel"`) != 1 ||
+		strings.Count(body, "风险核查（1篇有提示）") != 1 ||
+		strings.Index(body, `"action":"approve"`) > strings.Index(body, "风险核查") {
+		t.Fatalf("风险核查必须只在全部文章之后出现一次: %s", body)
 	}
 }
 
