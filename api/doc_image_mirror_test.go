@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -102,5 +106,128 @@ func TestFeishuDocumentExportMirrorsImagesInOneBatchAndReusesCache(t *testing.T)
 
 	if uploadCalls != 1 {
 		t.Fatalf("upload calls=%d, want 1 batch reused by the second export", uploadCalls)
+	}
+}
+
+func preparedMirrorFixture(t *testing.T, imageSizes map[string]int) (hash string, filenames []string, optimized []byte) {
+	t.Helper()
+	entries := map[string][]byte{
+		"word/document.xml":            []byte(`<w:document/>`),
+		"word/_rels/document.xml.rels": []byte(`<Relationships/>`),
+		"[Content_Types].xml":          []byte(`<Types/>`),
+		"_rels/.rels":                  []byte(`<Relationships/>`),
+	}
+	for name, size := range imageSizes {
+		if size < 3 {
+			t.Fatalf("image %s too small", name)
+		}
+		data := make([]byte, size)
+		data[0], data[1], data[2] = 0x89, 0x50, 0x4e
+		entries["word/media/"+name] = data
+	}
+	original := zipFixture(t, entries)
+	optimized, err := stripImagesFromDocx(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageURLs, err := readDocxImageURLMap(optimized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filenames = make([]string, 0, len(imageURLs))
+	for filename := range imageURLs {
+		filenames = append(filenames, filename)
+	}
+	sort.Strings(filenames)
+	sum := sha256.Sum256(original)
+	return hex.EncodeToString(sum[:])[:16], filenames, optimized
+}
+
+func startMirrorUploadServer(t *testing.T) (*int, *[]int) {
+	t.Helper()
+	uploadCalls := 0
+	batchSizes := []int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uploadCalls++
+		var payload struct {
+			Base64Images map[string]string `json:"base64_images"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode upload payload: %v", err)
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		batchSizes = append(batchSizes, len(payload.Base64Images))
+		results := make(map[string]string, len(payload.Base64Images))
+		for key := range payload.Base64Images {
+			results[key] = "https://oss.example.com/feishu/" + key + ".png"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"results": results})
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", server.URL)
+	return &uploadCalls, &batchSizes
+}
+
+func TestMirrorCachedDocxImagesSplitsBatchesUnderPayloadCap(t *testing.T) {
+	uploadCalls, batchSizes := startMirrorUploadServer(t)
+	hash, filenames, optimized := preparedMirrorFixture(t, map[string]int{
+		"a.png": 10,
+		"b.png": 10,
+		"c.png": 10,
+	})
+	rewritten, count, err := mirrorCachedDocxImagesToOSSWithLimits(
+		context.Background(), hash, filenames, optimized, 60, 25,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("mirrored count=%d, want 3", count)
+	}
+	if *uploadCalls != 2 {
+		t.Fatalf("upload calls=%d, want 2 batches", *uploadCalls)
+	}
+	if len(*batchSizes) != 2 || (*batchSizes)[0] != 2 || (*batchSizes)[1] != 1 {
+		t.Fatalf("batch sizes=%v, want [2 1]", *batchSizes)
+	}
+	imageURLs, err := readDocxImageURLMap(rewritten)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imageURLs) != 3 {
+		t.Fatalf("image URLs=%d, want 3", len(imageURLs))
+	}
+}
+
+func TestMirrorCachedDocxImagesKeepsOversizedSingleImageInOwnBatch(t *testing.T) {
+	uploadCalls, batchSizes := startMirrorUploadServer(t)
+	hash, filenames, optimized := preparedMirrorFixture(t, map[string]int{
+		"wide.png": 40,
+	})
+	if _, count, err := mirrorCachedDocxImagesToOSSWithLimits(
+		context.Background(), hash, filenames, optimized, 60, 8,
+	); err != nil {
+		t.Fatal(err)
+	} else if count != 1 {
+		t.Fatalf("mirrored count=%d, want 1", count)
+	}
+	if *uploadCalls != 1 || len(*batchSizes) != 1 || (*batchSizes)[0] != 1 {
+		t.Fatalf("calls=%d sizes=%v, want one single-image batch", *uploadCalls, *batchSizes)
+	}
+}
+
+func TestMirrorCachedDocxImagesRejectsWhenTotalExceedsLimit(t *testing.T) {
+	startMirrorUploadServer(t)
+	hash, filenames, optimized := preparedMirrorFixture(t, map[string]int{
+		"a.png": 10,
+		"b.png": 10,
+		"c.png": 10,
+	})
+	_, _, err := mirrorCachedDocxImagesToOSSWithLimits(
+		context.Background(), hash, filenames, optimized, 20, 25,
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceed direct mirror limit") {
+		t.Fatalf("err=%v, want total-size rejection", err)
 	}
 }
