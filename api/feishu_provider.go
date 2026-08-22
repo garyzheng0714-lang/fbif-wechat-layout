@@ -690,15 +690,15 @@ func (p *httpFeishuProvider) ExportDocument(ctx context.Context, accessToken str
 	if downloadTotal < 0 {
 		downloadTotal = 0
 	}
-	if downloadTotal > 100<<20 {
-		return feishuExportedFile{}, errors.New("feishu export is larger than 100 MB")
+	if downloadTotal > maxDocMirrorRawBytes {
+		return feishuExportedFile{}, errors.New("feishu export is larger than 1 GB")
 	}
 	reportFeishuExportProgress(ctx, "download", 0, downloadTotal, "bytes")
-	content, err := readBoundedBodyWithProgress(ctx, resp.Body, 100<<20, downloadTotal, func(done int64) {
+	content, err := readBoundedBodyWithProgress(ctx, resp.Body, maxDocMirrorRawBytes, downloadTotal, func(done int64) {
 		reportFeishuExportProgress(ctx, "download", done, downloadTotal, "bytes")
 	})
 	if err != nil {
-		return feishuExportedFile{}, fmt.Errorf("feishu export is larger than 100 MB: %w", err)
+		return feishuExportedFile{}, fmt.Errorf("feishu export is larger than 1 GB: %w", err)
 	}
 	if len(content) < 4 || !bytes.Equal(content[:4], []byte{'P', 'K', 3, 4}) {
 		return feishuExportedFile{}, errors.New("feishu export did not return a DOCX file")

@@ -1157,14 +1157,14 @@ type docCacheEntry struct {
 
 const (
 	docCacheTTL              = 2 * time.Hour
-	maxDocCacheBytes   int64 = 512 << 20
+	maxDocCacheBytes         = maxDocMirrorRawBytes
 	maxDocCacheEntries       = 128
-	maxDocMediaBytes   int64 = 100 << 20
+	maxDocMediaBytes         = maxDocMirrorRawBytes
 	maxDocImageBytes   int64 = 15 << 20
 	maxDocMediaFiles         = 100
 	maxDocxEntries           = 5000
 	maxDocxEntryBytes  int64 = 100 << 20
-	maxDocxTotalBytes  int64 = 200 << 20
+	maxDocxTotalBytes        = maxDocMirrorRawBytes
 )
 
 type docCacheStats struct {

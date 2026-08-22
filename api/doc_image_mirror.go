@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	docxImageURLMapEntry       = "word/_fbif_imageUrls.json"
-	maxDocMirrorRawBytes int64 = 30 << 20
+	docxImageURLMapEntry            = "word/_fbif_imageUrls.json"
+	maxDocMirrorRawBytes      int64 = 1 << 30
+	maxDocMirrorBatchRawBytes int64 = 8 << 20
 )
 
 var docImageMirrorSlots = make(chan struct{}, 2)
@@ -164,10 +165,62 @@ func mirrorCachedDocxImagesToOSS(ctx context.Context, originalDocx, optimizedDoc
 		return nil, 0, ctx.Err()
 	}
 
+	return mirrorCachedDocxImagesToOSSWithLimits(ctx, hash, filenames, optimizedDocx, maxDocMirrorRawBytes, maxDocMirrorBatchRawBytes)
+}
+
+func mirrorCachedDocxImagesToOSSWithLimits(
+	ctx context.Context,
+	hash string,
+	filenames []string,
+	optimizedDocx []byte,
+	rawLimit, batchLimit int64,
+) ([]byte, int, error) {
+	if rawLimit <= 0 {
+		rawLimit = maxDocMirrorRawBytes
+	}
+	if batchLimit <= 0 {
+		batchLimit = maxDocMirrorBatchRawBytes
+	}
+
 	var rawBytes int64
-	base64Images := make(map[string]string, len(filenames))
-	keyToFilename := make(map[string]string, len(filenames))
-	reportFeishuExportProgress(ctx, "image_enumerate", 0, int64(len(filenames)), "images")
+	mirrored := make(map[string]string, len(filenames))
+	batch := make(map[string]string)
+	batchKeys := make(map[string]string)
+	var batchBytes int64
+	uploaded := 0
+	total := int64(len(filenames))
+
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		results, err := ossUploadByBase64Images(ctx, batch)
+		if err != nil {
+			return err
+		}
+		for key, filename := range batchKeys {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			value := results[key]
+			if !validMirroredImageURL(value) {
+				return fmt.Errorf("image upload result missing for %s", filename)
+			}
+			mirrored[filename] = value
+		}
+		uploaded += len(batch)
+		reportFeishuExportProgress(ctx, "image_upload", int64(uploaded), total, "images")
+		batch = make(map[string]string)
+		batchKeys = make(map[string]string)
+		batchBytes = 0
+		return nil
+	}
+
+	reportFeishuExportProgress(ctx, "image_enumerate", 0, total, "images")
+	reportFeishuExportProgress(ctx, "image_upload", 0, total, "images")
 	for index, filename := range filenames {
 		if err := ctx.Err(); err != nil {
 			return nil, 0, err
@@ -176,37 +229,30 @@ func mirrorCachedDocxImagesToOSS(ctx context.Context, originalDocx, optimizedDoc
 		if !ok {
 			return nil, 0, fmt.Errorf("document image cache miss: %s", filename)
 		}
-		rawBytes += int64(len(data))
-		if rawBytes > maxDocMirrorRawBytes {
-			return nil, 0, fmt.Errorf("document images exceed direct mirror limit: %d MB", maxDocMirrorRawBytes>>20)
+		size := int64(len(data))
+		rawBytes += size
+		if rawBytes > rawLimit {
+			return nil, 0, fmt.Errorf("document images exceed direct mirror limit: %d MB", rawLimit>>20)
 		}
 		mime := docImageMimeFromExt(strings.ToLower(path.Ext(filename)))
 		if !strings.HasPrefix(mime, "image/") {
 			return nil, 0, fmt.Errorf("unsupported document image: %s", filename)
 		}
+		if batchBytes > 0 && batchBytes+size > batchLimit {
+			if err := flush(); err != nil {
+				return nil, 0, err
+			}
+		}
 		key := fmt.Sprintf("doc_image_%03d", index)
-		keyToFilename[key] = filename
-		base64Images[key] = "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
-		reportFeishuExportProgress(ctx, "image_enumerate", int64(index+1), int64(len(filenames)), "images")
+		batchKeys[key] = filename
+		batch[key] = "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+		batchBytes += size
+		reportFeishuExportProgress(ctx, "image_enumerate", int64(index+1), total, "images")
 	}
-
-	reportFeishuExportProgress(ctx, "image_upload", 0, int64(len(base64Images)), "images")
-	results, err := ossUploadByBase64Images(ctx, base64Images)
-	if err != nil {
+	if err := flush(); err != nil {
 		return nil, 0, err
 	}
-	reportFeishuExportProgress(ctx, "image_upload", int64(len(base64Images)), int64(len(base64Images)), "images")
-	mirrored := make(map[string]string, len(filenames))
-	for key, filename := range keyToFilename {
-		if err := ctx.Err(); err != nil {
-			return nil, 0, err
-		}
-		value := results[key]
-		if !validMirroredImageURL(value) {
-			return nil, 0, fmt.Errorf("image upload result missing for %s", filename)
-		}
-		mirrored[filename] = value
-	}
+
 	reportFeishuExportProgress(ctx, "image_map", 0, 1, "document")
 	rewritten, err := replaceDocxImageURLMap(optimizedDocx, mirrored)
 	if err != nil {
