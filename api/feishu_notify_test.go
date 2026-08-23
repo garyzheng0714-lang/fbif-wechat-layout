@@ -12,6 +12,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,9 +35,23 @@ func testCoverPNG(t *testing.T, width, height int, fill color.Color) []byte {
 	return buf.Bytes()
 }
 
-// TestSquareFeishuCoverPNG 封面上传前先生成 1:1 画布：原图完整居中，不通过
+func colorNear(got, want color.RGBA, tol int) bool {
+	dr, dg, db := int(got.R)-int(want.R), int(got.G)-int(want.G), int(got.B)-int(want.B)
+	if dr < 0 {
+		dr = -dr
+	}
+	if dg < 0 {
+		dg = -dg
+	}
+	if db < 0 {
+		db = -db
+	}
+	return dr <= tol && dg <= tol && db <= tol
+}
+
+// TestSquareFeishuCover 封面上传前先生成 1:1 画布：原图完整居中，不通过
 // crop_center 截掉商品或图内文字；空余区域使用设计系统的嵌套灰。
-func TestSquareFeishuCoverPNG(t *testing.T) {
+func TestSquareFeishuCover(t *testing.T) {
 	red := color.RGBA{R: 220, G: 40, B: 40, A: 255}
 	for _, tc := range []struct {
 		name          string
@@ -47,25 +62,54 @@ func TestSquareFeishuCoverPNG(t *testing.T) {
 		{name: "landscape", width: 4, height: 2, paddingPoint: image.Pt(feishuCoverSquareSize/2, 0)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := squareFeishuCoverPNG(testCoverPNG(t, tc.width, tc.height, red))
+			got, err := squareFeishuCover(testCoverPNG(t, tc.width, tc.height, red))
 			if err != nil {
 				t.Fatalf("square cover: %v", err)
 			}
 			img, format, err := image.Decode(bytes.NewReader(got))
-			if err != nil || format != "png" {
+			if err != nil || format != "jpeg" {
 				t.Fatalf("decode squared cover: format=%q err=%v", format, err)
 			}
 			if bounds := img.Bounds(); bounds.Dx() != feishuCoverSquareSize || bounds.Dy() != feishuCoverSquareSize {
 				t.Fatalf("封面必须为 %dx%d，实际 %v", feishuCoverSquareSize, feishuCoverSquareSize, bounds)
 			}
-			if got := color.RGBAModel.Convert(img.At(tc.paddingPoint.X, tc.paddingPoint.Y)).(color.RGBA); got != feishuCoverBackground {
-				t.Fatalf("补边颜色应为 %#v，实际 %#v", feishuCoverBackground, got)
+			pad := color.RGBAModel.Convert(img.At(tc.paddingPoint.X, tc.paddingPoint.Y)).(color.RGBA)
+			if !colorNear(pad, feishuCoverBackground, 8) {
+				t.Fatalf("补边颜色应为 %#v，实际 %#v", feishuCoverBackground, pad)
 			}
 			center := color.RGBAModel.Convert(img.At(feishuCoverSquareSize/2, feishuCoverSquareSize/2)).(color.RGBA)
 			if center.R < 200 || center.G > 60 || center.B > 60 {
 				t.Fatalf("原图主体应完整居中保留，中心像素实际 %#v", center)
 			}
 		})
+	}
+}
+
+// TestSquareFeishuCoverStaysSmall 照片级封面必须压到卡片缩略图能秒开的体积。
+func TestSquareFeishuCoverStaysSmall(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1200, 675))
+	rng := rand.New(rand.NewSource(1))
+	for y := 0; y < 675; y++ {
+		for x := 0; x < 1200; x++ {
+			src.Set(x, y, color.RGBA{
+				R: uint8(80 + rng.Intn(140)),
+				G: uint8(60 + rng.Intn(120)),
+				B: uint8(40 + rng.Intn(100)),
+				A: 255,
+			})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, src); err != nil {
+		t.Fatalf("encode source: %v", err)
+	}
+	got, err := squareFeishuCover(buf.Bytes())
+	if err != nil {
+		t.Fatalf("square cover: %v", err)
+	}
+	t.Logf("squared jpeg: %d bytes", len(got))
+	if len(got) > 120_000 {
+		t.Fatalf("封面应远小于 120KB，实际 %d KB", len(got)/1024)
 	}
 }
 
@@ -219,9 +263,9 @@ func TestFeishuMonitorNotifierUsesPrivateUserID(t *testing.T) {
 	}
 }
 
-// TestFeishuNotifierUploadCoverUsesSquarePNG 守住真实上传路径：飞书收到的必须已经是
-// 方形 PNG 素材，卡片端只负责按宽度展示，不再承担裁切。
-func TestFeishuNotifierUploadCoverUsesSquarePNG(t *testing.T) {
+// TestFeishuNotifierUploadCoverUsesSquareJPEG 守住真实上传路径：飞书收到的必须已经是
+// 方形 JPEG 素材，卡片端只负责按宽度展示，不再承担裁切。
+func TestFeishuNotifierUploadCoverUsesSquareJPEG(t *testing.T) {
 	portrait := testCoverPNG(t, 2, 4, color.RGBA{R: 220, G: 40, B: 40, A: 255})
 	var uploadedBounds image.Rectangle
 	var uploadedFormat, uploadedName string
@@ -274,8 +318,8 @@ func TestFeishuNotifierUploadCoverUsesSquarePNG(t *testing.T) {
 	if err != nil || key != "img_square" {
 		t.Fatalf("upload cover: key=%q err=%v", key, err)
 	}
-	if uploadedName != "cover.png" || uploadedFormat != "png" || uploadedBounds.Dx() != feishuCoverSquareSize || uploadedBounds.Dy() != feishuCoverSquareSize {
-		t.Fatalf("飞书收到的封面必须是方形 PNG：name=%q format=%q bounds=%v", uploadedName, uploadedFormat, uploadedBounds)
+	if uploadedName != "cover.jpg" || uploadedFormat != "jpeg" || uploadedBounds.Dx() != feishuCoverSquareSize || uploadedBounds.Dy() != feishuCoverSquareSize {
+		t.Fatalf("飞书收到的封面必须是方形 JPEG：name=%q format=%q bounds=%v", uploadedName, uploadedFormat, uploadedBounds)
 	}
 }
 

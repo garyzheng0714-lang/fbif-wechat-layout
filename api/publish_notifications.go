@@ -672,6 +672,36 @@ func (p *publishPipeline) recheckPublishRisk(ctx context.Context, jobID int64) (
 	return updated, p.sendReviewPendingNotification(ctx, updated)
 }
 
+// refreshReviewCoverKeys 按当前编码器重传这一张聚合卡上所有文章的封面。
+// 历史卡可能是过大的 PNG；失败只沿用旧 img_key，不阻断刷新。
+func (p *publishPipeline) refreshReviewCoverKeys(ctx context.Context, job publishJob) publishJob {
+	batch, err := p.reviewCardBatch(job)
+	if err != nil {
+		batch = []publishJob{job}
+	}
+	for _, item := range batch {
+		if strings.TrimSpace(item.CoverURL) == "" {
+			continue
+		}
+		key, upErr := p.uploadReviewCoverForJob(ctx, item)
+		if upErr != nil {
+			log.Printf("publish: WARN 刷新卡片时封面重传失败（沿用原封面 job=%d）: %v", item.ID, upErr)
+			continue
+		}
+		updated, updErr := p.store.update(item.ID, func(current *publishJob) {
+			current.ReviewCoverImgKey = key
+		})
+		if updErr != nil {
+			log.Printf("publish: WARN 刷新卡片时保存封面 img_key 失败: %v", updErr)
+			continue
+		}
+		if item.ID == job.ID {
+			job = updated
+		}
+	}
+	return job
+}
+
 // refreshReviewCard 用当前代码重建审核卡并推到已配置的审核群。
 //
 // 与 replayPublishNotification 的分工：那个只救「发送失败躺在 dead letter 里」的
@@ -700,19 +730,7 @@ func (p *publishPipeline) refreshReviewCard(ctx context.Context, jobID int64, re
 		}
 		job = cleared
 	}
-	// 旧任务没存过封面 img_key（该字段晚于它们加入），这里补传一次，
-	// 否则刷新出来的卡片仍是无封面单列。失败只降级为不带图，不阻断刷新。
-	if strings.TrimSpace(job.ReviewCoverImgKey) == "" && strings.TrimSpace(job.CoverURL) != "" {
-		if key, upErr := p.uploadReviewCoverForJob(ctx, job); upErr != nil {
-			log.Printf("publish: WARN 刷新卡片时封面转存失败（卡片将不带图）: %v", upErr)
-		} else if updated, updErr := p.store.update(job.ID, func(current *publishJob) {
-			current.ReviewCoverImgKey = key
-		}); updErr != nil {
-			log.Printf("publish: WARN 刷新卡片时保存封面 img_key 失败: %v", updErr)
-		} else {
-			job = updated
-		}
-	}
+	job = p.refreshReviewCoverKeys(ctx, job)
 	switch job.Stage {
 	case publishStageAwaitingReview:
 		return job, p.sendReviewPendingNotification(ctx, job)

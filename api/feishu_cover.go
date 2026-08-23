@@ -7,20 +7,24 @@ import (
 	"image/color"
 	stddraw "image/draw"
 	_ "image/gif"
-	_ "image/jpeg"
-	"image/png"
+	"image/jpeg"
+	_ "image/png"
 
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
 
-const feishuCoverSquareSize = 512
+const (
+	feishuCoverSquareSize  = 512
+	feishuCoverJPEGQuality = 80
+)
 
 var feishuCoverBackground = color.RGBA{R: 0xF7, G: 0xF8, B: 0xFA, A: 0xFF}
 
-// squareFeishuCoverPNG 把任意横竖比封面放入方形画布，保持原图完整可见。
+// squareFeishuCover 把任意横竖比封面放入方形画布，保持原图完整可见。
 // 飞书卡片只展示这个方形素材，不再通过 crop_center 猜测用户想保留的区域。
-func squareFeishuCoverPNG(src []byte) ([]byte, error) {
+// 输出 JPEG：卡片缩略图约 200px，照片走 PNG 会到约 600KB，三张卡合计超过 1MB，客户端长时间停在灰底占位。
+func squareFeishuCover(src []byte) ([]byte, error) {
 	config, _, err := image.DecodeConfig(bytes.NewReader(src))
 	if err != nil {
 		return nil, fmt.Errorf("识别封面图失败: %w", err)
@@ -51,8 +55,7 @@ func squareFeishuCoverPNG(src []byte) ([]byte, error) {
 	xdraw.CatmullRom.Scale(canvas, target, img, img.Bounds(), xdraw.Over, nil)
 
 	var out bytes.Buffer
-	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := encoder.Encode(&out, canvas); err != nil {
+	if err := jpeg.Encode(&out, canvas, &jpeg.Options{Quality: feishuCoverJPEGQuality}); err != nil {
 		return nil, fmt.Errorf("生成方形封面失败: %w", err)
 	}
 	return out.Bytes(), nil

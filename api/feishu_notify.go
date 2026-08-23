@@ -335,7 +335,7 @@ func (n *feishuNotifier) tenantAccessToken(ctx context.Context) (string, error) 
 	return n.token, nil
 }
 
-// uploadImageByURL 把一张图（OSS/外链）转成完整可见的方形封面，再上传为飞书图片
+// uploadImageByURL 把一张图（OSS/外链）转成完整可见的方形 JPEG 封面，再上传为飞书图片
 // 素材并返回 img_key（卡片 img 元素只认 img_key，不认外链 URL）。下载与上传都设
 // 上限与超时；任何失败由调用方降级为「卡片不带图」，绝不阻塞流水线。
 func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (string, error) {
@@ -359,7 +359,7 @@ func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (s
 	if err != nil {
 		return "", fmt.Errorf("读封面图失败或超过 10 MB: %w", err)
 	}
-	imgBytes, err = squareFeishuCoverPNG(imgBytes)
+	imgBytes, err = squareFeishuCover(imgBytes)
 	if err != nil {
 		return "", fmt.Errorf("生成方形封面失败: %w", err)
 	}
@@ -369,7 +369,7 @@ func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (s
 	if err := mw.WriteField("image_type", "message"); err != nil {
 		return "", fmt.Errorf("feishu: 构造上传表单: %w", err)
 	}
-	fw, err := mw.CreateFormFile("image", "cover.png")
+	fw, err := mw.CreateFormFile("image", "cover.jpg")
 	if err != nil {
 		return "", fmt.Errorf("feishu: 构造上传表单: %w", err)
 	}

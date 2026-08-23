@@ -145,6 +145,9 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 func TestPublishCardRefreshReissuesCurrentCard(t *testing.T) {
 	env := newPublishTestEnv(t)
 	env.ft.forbidPublish = false
+	env.pipeline.coverImgKey = func(ctx context.Context, imageURL string) (string, error) {
+		return "img_v3_refreshed", nil
+	}
 	mux := newPublishTestMux(t, env)
 
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
@@ -167,6 +170,50 @@ func TestPublishCardRefreshReissuesCurrentCard(t *testing.T) {
 	missing := doPublishReq(mux, http.MethodPost, "/api/publish/jobs/999999/card-refresh", "", true)
 	if missing.Code == http.StatusOK {
 		t.Fatalf("不存在的任务不应返回成功: body=%s", missing.Body.String())
+	}
+}
+
+func TestRefreshReviewCardReuploadsBatchCovers(t *testing.T) {
+	env := newPublishTestEnv(t)
+	first, _, err := env.store.create("site:cover-a", "https://example.test/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := env.store.create("site:cover-b", "https://example.test/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func(id int64, cover, key, title string) {
+		t.Helper()
+		if _, err := env.store.update(id, func(current *publishJob) {
+			current.Stage = publishStageAwaitingReview
+			current.CoverURL = cover
+			current.ReviewCoverImgKey = key
+			current.Title = title
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(first.ID, "https://oss.example.com/a.jpg", "img_old_a", "封面甲")
+	seed(second.ID, "https://oss.example.com/b.jpg", "img_old_b", "封面乙")
+
+	uploads := map[string]int{}
+	env.pipeline.coverImgKey = func(ctx context.Context, imageURL string) (string, error) {
+		uploads[imageURL]++
+		return "img_new:" + imageURL, nil
+	}
+
+	if _, err := env.pipeline.refreshReviewCard(context.Background(), first.ID, false); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if uploads["https://oss.example.com/a.jpg"] < 1 || uploads["https://oss.example.com/b.jpg"] < 1 {
+		t.Fatalf("聚合卡刷新应重传同批封面，实际 %v", uploads)
+	}
+	gotA, _ := env.store.byID(first.ID)
+	gotB, _ := env.store.byID(second.ID)
+	if gotA.ReviewCoverImgKey != "img_new:https://oss.example.com/a.jpg" ||
+		gotB.ReviewCoverImgKey != "img_new:https://oss.example.com/b.jpg" {
+		t.Fatalf("封面 img_key 未更新: a=%q b=%q", gotA.ReviewCoverImgKey, gotB.ReviewCoverImgKey)
 	}
 }
 
