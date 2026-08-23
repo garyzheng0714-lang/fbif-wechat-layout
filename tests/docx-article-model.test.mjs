@@ -386,6 +386,50 @@ test('前置超过扫描上限且无结构标记：维持原上限，不误剥�
   assert.ok(texts.some(t => t.includes('候选标题第1版')), '内容不被吞');
 });
 
+test('封面段的图保留，作者行之前的标题和推荐语仍剥离', () => {
+  const { elems, author, imgN } = classifyDocxArticle(
+    [
+      txt('候选标题第一版'),
+      txt('封面', { hasOutlineLevel: true, hasHeadingStyle: true }),
+      img('cover-a.png'),
+      img('cover-b.png'),
+      txt('茶铺门面', { align: 'center' }),
+      txt('推荐语', { hasOutlineLevel: true, hasHeadingStyle: true }),
+      txt('请把推荐语写短一点'),
+      txt('作者：Mote莫特'),
+      img('body.png'),
+      txt('正文第一段。'),
+    ],
+    {
+      'cover-a.png': 'blob:a',
+      'cover-b.png': 'blob:b',
+      'body.png': 'blob:body',
+    },
+    {}
+  );
+  assert.equal(author, 'Mote莫特');
+  assert.equal(imgN, 3);
+  const imgs = elems.filter(e => e.k === 'img');
+  assert.deepEqual(imgs.map(e => e.src), ['blob:a', 'blob:b', 'blob:body']);
+  assert.equal(elems[0].k, 'img', '正文从封面图开始');
+  const texts = elems.map(e => e.text || (e.runs || []).map(r => r.text).join(''));
+  assert.ok(!texts.some(t => t.includes('候选标题')), '候选标题仍剥离');
+  assert.ok(!texts.some(t => t.includes('请把推荐语写短一点')), '推荐语正文仍剥离');
+  assert.ok(!texts.some(t => t === '封面'), '「封面」结构标记不进正文');
+  assert.ok(texts.some(t => t.includes('茶铺门面')), '封面图注保留');
+  assert.ok(texts.some(t => t.includes('正文第一段')), '正文保留');
+});
+
+test('作者行之前没有「封面」标记的图仍按前置材料剥离', () => {
+  const { elems, imgN } = classifyDocxArticle(
+    [img('secret.png'), txt('作者：李四'), txt('正文。')],
+    { 'secret.png': 'blob:secret' },
+    {}
+  );
+  assert.equal(imgN, 0);
+  assert.ok(!elems.some(e => e.k === 'img'), '无封面标记时作者行前的图仍丢掉');
+});
+
 test('结构标记正则可由 opts.frontMatterMarkerRegex 覆盖（规则可配契约）', () => {
   const { author } = classifyDocxArticle(
     [...longPreamble(30), txt('##BODY##'), txt('作者：Mote莫特'), txt('正文。')],
