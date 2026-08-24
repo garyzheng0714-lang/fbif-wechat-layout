@@ -10,6 +10,8 @@ package main
 //     内容系列标签（如「这是我茶叶系列的第29篇」→「茶叶系列」）。标签只在
 //     tag_type_id=6 新闻标签库中按规范化名称等值解析，总数最多 3 个；不自动创建；
 //     栏目/活动标签黑名单双侧拦截（publishSiteTagBlocked）。
+//  3. Mote 系列链接：网站发布组装时把正文公众号互推链换成已发布站内稿
+//     （见 publish_mote_series_links.go；金标准 62285 Tazo→/news/62236）。
 
 import (
 	"context"

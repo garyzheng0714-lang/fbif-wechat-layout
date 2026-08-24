@@ -181,6 +181,9 @@ type publishPipeline struct {
 	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7。originalSourceURL 是转载稿
 	//「阅读原文」指向的原文地址，网站转载声明超链接优先用它）
 	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, canonicalURL, originalSourceURL, blocksJSON string, err error)
+	// fetchWechatTitle 只取公众号文章标题（Mote 系列链改站内用）。生产装配走轻量
+	// HTML 抓取；测试注入，避免组装层打到真实微信。
+	fetchWechatTitle func(ctx context.Context, articleURL string) (string, error)
 	// render Block[] → 选定网站规则包内联 HTML（默认走 render_proxy 转发内核）。
 	// 规则由渲染服务在每次请求内读取最新激活版本，调用方只传文章语义。
 	render func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error)
@@ -296,6 +299,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
 		return fetchSiteArticleWithContext(ctx, rules, articleURL)
 	}
+	p.fetchWechatTitle = defaultFetchWechatTitle
 	if n := newFeishuNotifierFromEnv(); n != nil {
 		p.notify = n.send
 		p.notifyCard = n.sendCard
@@ -1980,6 +1984,10 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 	for _, m := range companyMatches {
 		relatedCompanyIDs = append(relatedCompanyIDs, m.Company.ID)
 	}
+	// Mote 系列互推链（2026-08-24 用户裁定，金标准 62285 Tazo→/news/62236）：
+	// 仅 Mote/莫特文，把正文里的公众号文章链改成已发布站内稿；找不到保留原链。
+	// 在公司链接之后、目录之前，锚点仍基于最终正文。
+	enriched = p.rewriteMoteSeriesLinks(ctx, job, enriched)
 	// 目录（2026-08-17 用户裁定：所有文章一视同仁，不分原创/转载——此前只给原创/Mote
 	// 是误解，历史转载没目录多为人工漏掉）：字数与标题数达标即注入 h2 锚点并写 toc
 	// 字段；锚点由内容哈希派生，重复组装字节一致。阈值见 publishSiteTocForContent。
@@ -2006,7 +2014,7 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 		IsLatest:          1,
 		ImgPreviewEnable:  true,
 		CommentEnable:     1,
-		Content:           content, // mirroring 后成品（图片已全部 OSS 化）；组装层再注入公司链接与 h2 锚点 id
+		Content:           content, // mirroring 后成品（图片已全部 OSS 化）；组装层再注入公司链接、Mote 系列站内链与 h2 锚点 id
 		TOC:               toc,
 		RelatedCompanyIDs: relatedCompanyIDs,
 		PublishTime:       sitePublishTime(job.CreatedAt, p.now()),
