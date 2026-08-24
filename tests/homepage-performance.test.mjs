@@ -67,5 +67,15 @@ for (const page of ['app.html', 'site.html']) {
       /setAttribute\(['"]href['"],\s*href \+ ['"]\?v=['"] \+ assetVersion\)/,
       `${page} 必须给 stylesheet <link> 追加 ?v=assetVersion（否则 CSS 会卡旧缓存）`,
     );
+    assert.match(
+      html,
+      /stripBuildVersionFromLocation\(\)/,
+      `${page} 必须清掉地址栏里的构建号，避免收藏带上 ?v=`,
+    );
+    assert.doesNotMatch(
+      html,
+      /searchParams\.set\(['"]v['"]/,
+      `${page} 不得把构建号写进页面地址栏`,
+    );
   });
 }

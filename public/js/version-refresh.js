@@ -1,5 +1,29 @@
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 
+// The build id is only for JS/CSS cache busting. It must not sit in the page
+// URL, otherwise people bookmark /mp/fbif?v=<sha> and share a stale stamp.
+export function stripBuildVersionSearch(search) {
+  const raw = String(search || '');
+  const params = new URLSearchParams(raw.startsWith('?') ? raw.slice(1) : raw);
+  if (!params.has('v')) {
+    return { changed: false, search: raw.startsWith('?') || raw === '' ? raw : `?${raw}` };
+  }
+  params.delete('v');
+  const next = params.toString();
+  return { changed: true, search: next ? `?${next}` : '' };
+}
+
+export function stripBuildVersionFromLocation({
+  locationRef = globalThis.location,
+  historyRef = globalThis.history,
+} = {}) {
+  if (!locationRef || typeof historyRef?.replaceState !== 'function') return false;
+  const stripped = stripBuildVersionSearch(locationRef.search || '');
+  if (!stripped.changed) return false;
+  historyRef.replaceState(null, '', `${locationRef.pathname || ''}${stripped.search}${locationRef.hash || ''}`);
+  return true;
+}
+
 export function decideVersionRefresh({ currentBuildId, latestBuildId, isDevBuild, hasUnsavedWork }) {
   if (isDevBuild || !latestBuildId || latestBuildId === currentBuildId) return 'none';
   return hasUnsavedWork ? 'prompt' : 'reload';

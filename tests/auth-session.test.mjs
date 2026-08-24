@@ -4,6 +4,7 @@ import { parseHTML } from 'linkedom';
 
 import {
   SESSION_STORAGE_KEY,
+  ensureAuthenticatedSession,
   loadCurrentUser,
   mountUserIdentity,
 } from '../public/js/auth-session.js';
@@ -14,6 +15,27 @@ function jsonResponse(payload, status = 200, headers = {}) {
     headers: { 'Content-Type': 'application/json', ...headers },
   });
 }
+
+test('unauthenticated redirect drops the build version from return_to', async () => {
+  let assigned = '';
+  const windowRef = {
+    location: {
+      pathname: '/mp/fbif',
+      search: '?v=bff485e&account=legacy',
+      hash: '',
+      assign(target) { assigned = target; },
+    },
+  };
+  const result = await ensureAuthenticatedSession({
+    windowRef,
+    documentRef: { body: { classList: { remove() {}, add() {} } }, querySelectorAll: () => [] },
+    fetchImpl: async () => jsonResponse({ code: 'authentication_required' }, 401),
+    releaseGate: false,
+  });
+  assert.equal(result, null);
+  const returnTo = decodeURIComponent(String(assigned).split('return_to=')[1] || '');
+  assert.equal(returnTo, '/mp/fbif?account=legacy');
+});
 
 test('loadCurrentUser sends the fragment fallback token and stores the renewed session', async () => {
   const stored = new Map([[SESSION_STORAGE_KEY, 'old-token']]);

@@ -2,6 +2,7 @@ import {
   loadCurrentUser,
   storeSessionToken,
 } from './auth-session.js';
+import { stripBuildVersionSearch } from './version-refresh.js';
 
 const form = document.getElementById('passwordLoginForm');
 const usernameInput = document.getElementById('loginUsername');
@@ -16,9 +17,16 @@ const accountFields = Array.from(document.querySelectorAll('.auth-pill-field'));
 
 function safeReturnTo() {
   const raw = new URLSearchParams(location.search).get('return_to') || '/mp/fbif';
-  return raw.startsWith('/') && !raw.startsWith('//') && !/[\\\r\n]/.test(raw)
-    ? raw
-    : '/mp/fbif';
+  if (!(raw.startsWith('/') && !raw.startsWith('//') && !/[\\\r\n]/.test(raw))) {
+    return '/mp/fbif';
+  }
+  const hashAt = raw.indexOf('#');
+  const pathAndSearch = hashAt === -1 ? raw : raw.slice(0, hashAt);
+  const hash = hashAt === -1 ? '' : raw.slice(hashAt);
+  const queryAt = pathAndSearch.indexOf('?');
+  const pathname = queryAt === -1 ? pathAndSearch : pathAndSearch.slice(0, queryAt);
+  const stripped = stripBuildVersionSearch(queryAt === -1 ? '' : pathAndSearch.slice(queryAt));
+  return `${pathname}${stripped.search}${hash}`;
 }
 
 function showError(message, credentialsInvalid = false) {

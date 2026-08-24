@@ -64,7 +64,10 @@ export async function loadCurrentUser({
 function currentReturnTo(windowRef) {
   const location = windowRef?.location;
   if (!location) return '/mp/fbif';
-  return `${location.pathname || '/mp/fbif'}${location.search || ''}${location.hash || ''}`;
+  const params = new URLSearchParams(location.search || '');
+  params.delete('v');
+  const search = params.toString();
+  return `${location.pathname || '/mp/fbif'}${search ? `?${search}` : ''}${location.hash || ''}`;
 }
 
 function navigate(windowRef, target) {
