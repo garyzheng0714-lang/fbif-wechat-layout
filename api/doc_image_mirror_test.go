@@ -10,11 +10,12 @@ import (
 	"net/http/httptest"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-func TestFeishuDocumentExportMirrorsImagesInOneBatchAndReusesCache(t *testing.T) {
+func TestFeishuDocumentExportMirrorsEachImageConcurrentlyAndReusesCache(t *testing.T) {
 	entries := map[string][]byte{
 		"word/document.xml":            []byte(`<w:document/>`),
 		"word/_rels/document.xml.rels": []byte(`<Relationships/>`),
@@ -26,9 +27,10 @@ func TestFeishuDocumentExportMirrorsImagesInOneBatchAndReusesCache(t *testing.T)
 	}
 	docx := zipFixture(t, entries)
 
+	var mu sync.Mutex
 	uploadCalls := 0
+	inFlight, maxFlight := 0, 0
 	uploadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		uploadCalls++
 		var payload struct {
 			Base64Images map[string]string `json:"base64_images"`
 		}
@@ -37,9 +39,20 @@ func TestFeishuDocumentExportMirrorsImagesInOneBatchAndReusesCache(t *testing.T)
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		if len(payload.Base64Images) != 12 {
-			t.Errorf("base64 images=%d, want 12", len(payload.Base64Images))
+		if len(payload.Base64Images) != 1 {
+			t.Errorf("base64 images=%d, want 1", len(payload.Base64Images))
 		}
+		mu.Lock()
+		uploadCalls++
+		inFlight++
+		if inFlight > maxFlight {
+			maxFlight = inFlight
+		}
+		mu.Unlock()
+		time.Sleep(40 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
 		results := make(map[string]string, len(payload.Base64Images))
 		for key, value := range payload.Base64Images {
 			if !strings.HasPrefix(value, "data:image/png;base64,") {
@@ -104,8 +117,11 @@ func TestFeishuDocumentExportMirrorsImagesInOneBatchAndReusesCache(t *testing.T)
 		}
 	}
 
-	if uploadCalls != 1 {
-		t.Fatalf("upload calls=%d, want 1 batch reused by the second export", uploadCalls)
+	if uploadCalls != 12 {
+		t.Fatalf("upload calls=%d, want 12 images uploaded once and reused by the second export", uploadCalls)
+	}
+	if maxFlight != 12 {
+		t.Fatalf("max concurrent uploads=%d, want 12", maxFlight)
 	}
 }
 
@@ -143,12 +159,24 @@ func preparedMirrorFixture(t *testing.T, imageSizes map[string]int) (hash string
 	return hex.EncodeToString(sum[:])[:16], filenames, optimized
 }
 
-func startMirrorUploadServer(t *testing.T) (*int, *[]int) {
+type mirrorUploadStats struct {
+	mu         sync.Mutex
+	calls      int
+	batchSizes []int
+	inFlight   int
+	maxFlight  int
+}
+
+func (s *mirrorUploadStats) snapshot() (calls int, batchSizes []int, maxFlight int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls, append([]int(nil), s.batchSizes...), s.maxFlight
+}
+
+func startMirrorUploadServer(t *testing.T) *mirrorUploadStats {
 	t.Helper()
-	uploadCalls := 0
-	batchSizes := []int{}
+	stats := &mirrorUploadStats{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		uploadCalls++
 		var payload struct {
 			Base64Images map[string]string `json:"base64_images"`
 		}
@@ -157,7 +185,18 @@ func startMirrorUploadServer(t *testing.T) (*int, *[]int) {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		batchSizes = append(batchSizes, len(payload.Base64Images))
+		stats.mu.Lock()
+		stats.calls++
+		stats.batchSizes = append(stats.batchSizes, len(payload.Base64Images))
+		stats.inFlight++
+		if stats.inFlight > stats.maxFlight {
+			stats.maxFlight = stats.inFlight
+		}
+		stats.mu.Unlock()
+		time.Sleep(40 * time.Millisecond)
+		stats.mu.Lock()
+		stats.inFlight--
+		stats.mu.Unlock()
 		results := make(map[string]string, len(payload.Base64Images))
 		for key := range payload.Base64Images {
 			results[key] = "https://oss.example.com/feishu/" + key + ".png"
@@ -166,18 +205,18 @@ func startMirrorUploadServer(t *testing.T) (*int, *[]int) {
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("WECHAT_UPLOAD_ENDPOINT", server.URL)
-	return &uploadCalls, &batchSizes
+	return stats
 }
 
-func TestMirrorCachedDocxImagesSplitsBatchesUnderPayloadCap(t *testing.T) {
-	uploadCalls, batchSizes := startMirrorUploadServer(t)
+func TestMirrorCachedDocxImagesUploadsEachImageConcurrently(t *testing.T) {
+	stats := startMirrorUploadServer(t)
 	hash, filenames, optimized := preparedMirrorFixture(t, map[string]int{
 		"a.png": 10,
 		"b.png": 10,
 		"c.png": 10,
 	})
 	rewritten, count, err := mirrorCachedDocxImagesToOSSWithLimits(
-		context.Background(), hash, filenames, optimized, 60, 25,
+		context.Background(), hash, filenames, optimized, 60,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -185,11 +224,15 @@ func TestMirrorCachedDocxImagesSplitsBatchesUnderPayloadCap(t *testing.T) {
 	if count != 3 {
 		t.Fatalf("mirrored count=%d, want 3", count)
 	}
-	if *uploadCalls != 2 {
-		t.Fatalf("upload calls=%d, want 2 batches", *uploadCalls)
+	calls, batchSizes, maxFlight := stats.snapshot()
+	if calls != 3 {
+		t.Fatalf("upload calls=%d, want 3", calls)
 	}
-	if len(*batchSizes) != 2 || (*batchSizes)[0] != 2 || (*batchSizes)[1] != 1 {
-		t.Fatalf("batch sizes=%v, want [2 1]", *batchSizes)
+	if len(batchSizes) != 3 || batchSizes[0] != 1 || batchSizes[1] != 1 || batchSizes[2] != 1 {
+		t.Fatalf("batch sizes=%v, want [1 1 1]", batchSizes)
+	}
+	if maxFlight != 3 {
+		t.Fatalf("max concurrent uploads=%d, want 3", maxFlight)
 	}
 	imageURLs, err := readDocxImageURLMap(rewritten)
 	if err != nil {
@@ -200,20 +243,21 @@ func TestMirrorCachedDocxImagesSplitsBatchesUnderPayloadCap(t *testing.T) {
 	}
 }
 
-func TestMirrorCachedDocxImagesKeepsOversizedSingleImageInOwnBatch(t *testing.T) {
-	uploadCalls, batchSizes := startMirrorUploadServer(t)
+func TestMirrorCachedDocxImagesUploadsOversizedSingleImage(t *testing.T) {
+	stats := startMirrorUploadServer(t)
 	hash, filenames, optimized := preparedMirrorFixture(t, map[string]int{
 		"wide.png": 40,
 	})
 	if _, count, err := mirrorCachedDocxImagesToOSSWithLimits(
-		context.Background(), hash, filenames, optimized, 60, 8,
+		context.Background(), hash, filenames, optimized, 60,
 	); err != nil {
 		t.Fatal(err)
 	} else if count != 1 {
 		t.Fatalf("mirrored count=%d, want 1", count)
 	}
-	if *uploadCalls != 1 || len(*batchSizes) != 1 || (*batchSizes)[0] != 1 {
-		t.Fatalf("calls=%d sizes=%v, want one single-image batch", *uploadCalls, *batchSizes)
+	calls, batchSizes, maxFlight := stats.snapshot()
+	if calls != 1 || len(batchSizes) != 1 || batchSizes[0] != 1 || maxFlight != 1 {
+		t.Fatalf("calls=%d sizes=%v maxFlight=%d, want one single-image upload", calls, batchSizes, maxFlight)
 	}
 }
 
@@ -225,7 +269,7 @@ func TestMirrorCachedDocxImagesRejectsWhenTotalExceedsLimit(t *testing.T) {
 		"c.png": 10,
 	})
 	_, _, err := mirrorCachedDocxImagesToOSSWithLimits(
-		context.Background(), hash, filenames, optimized, 20, 25,
+		context.Background(), hash, filenames, optimized, 20,
 	)
 	if err == nil || !strings.Contains(err.Error(), "exceed direct mirror limit") {
 		t.Fatalf("err=%v, want total-size rejection", err)
