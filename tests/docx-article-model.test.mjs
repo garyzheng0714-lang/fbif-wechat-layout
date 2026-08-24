@@ -386,7 +386,9 @@ test('前置超过扫描上限且无结构标记：维持原上限，不误剥�
   assert.ok(texts.some(t => t.includes('候选标题第1版')), '内容不被吞');
 });
 
-test('封面段的图保留，作者行之前的标题和推荐语仍剥离', () => {
+test('封面段的图也按前置材料剥离（红线#12：从作者行才开始抓）', () => {
+  // 2026-08-24 Mote 反馈：中村藤吉稿「封面」里的选图（果冻礼盒+店面）被提到正文开头，
+  // 再叠作者行后的正文头图，预览最前面出现 3 张图。封面是选封面物料，不是正文。
   const { elems, author, imgN } = classifyDocxArticle(
     [
       txt('候选标题第一版'),
@@ -396,9 +398,11 @@ test('封面段的图保留，作者行之前的标题和推荐语仍剥离', ()
       txt('茶铺门面', { align: 'center' }),
       txt('推荐语', { hasOutlineLevel: true, hasHeadingStyle: true }),
       txt('请把推荐语写短一点'),
+      txt('正文', { hasOutlineLevel: true, hasHeadingStyle: true }),
       txt('作者：Mote莫特'),
       img('body.png'),
-      txt('正文第一段。'),
+      txt('中村藤吉 · 生茶果冻 礼盒版6杯装，抹茶和焙茶各3杯', { align: 'center' }),
+      txt('这是我茶叶系列第32篇。'),
     ],
     {
       'cover-a.png': 'blob:a',
@@ -408,16 +412,37 @@ test('封面段的图保留，作者行之前的标题和推荐语仍剥离', ()
     {}
   );
   assert.equal(author, 'Mote莫特');
-  assert.equal(imgN, 3);
+  assert.equal(imgN, 1, '封面两张图不得进正文');
   const imgs = elems.filter(e => e.k === 'img');
-  assert.deepEqual(imgs.map(e => e.src), ['blob:a', 'blob:b', 'blob:body']);
-  assert.equal(elems[0].k, 'img', '正文从封面图开始');
+  assert.deepEqual(imgs.map(e => e.src), ['blob:body']);
+  assert.equal(elems[0].k, 'img', '公众号吃掉作者行后，正文从作者行后的头图开始');
+  assert.equal(elems[0].src, 'blob:body');
   const texts = elems.map(e => e.text || (e.runs || []).map(r => r.text).join(''));
   assert.ok(!texts.some(t => t.includes('候选标题')), '候选标题仍剥离');
   assert.ok(!texts.some(t => t.includes('请把推荐语写短一点')), '推荐语正文仍剥离');
   assert.ok(!texts.some(t => t === '封面'), '「封面」结构标记不进正文');
-  assert.ok(texts.some(t => t.includes('茶铺门面')), '封面图注保留');
-  assert.ok(texts.some(t => t.includes('正文第一段')), '正文保留');
+  assert.ok(!texts.some(t => t.includes('茶铺门面')), '封面图注不得进正文');
+  assert.ok(texts.some(t => t.includes('生茶果冻')), '正文图注保留');
+  assert.ok(texts.some(t => t.includes('茶叶系列第32篇')), '正文保留');
+});
+
+test('网站口径同样从作者行起，封面图不进正文', () => {
+  const { elems, imgN } = classifyDocxArticle(
+    [
+      txt('封面', { hasOutlineLevel: true, hasHeadingStyle: true }),
+      img('cover-a.png'),
+      img('cover-b.png'),
+      txt('作者：Mote莫特'),
+      img('body.png'),
+      txt('这是我茶叶系列第32篇。'),
+    ],
+    { 'cover-a.png': 'blob:a', 'cover-b.png': 'blob:b', 'body.png': 'blob:body' },
+    { consumeAuthorLine: false, classifyReferences: false }
+  );
+  assert.equal(imgN, 1);
+  const texts = elems.map(e => e.text || (e.runs || []).map(r => r.text).join(''));
+  assert.equal(texts[0], '作者：Mote莫特', '网站从作者行开始');
+  assert.deepEqual(elems.filter(e => e.k === 'img').map(e => e.src), ['blob:body']);
 });
 
 test('作者行之前没有「封面」标记的图仍按前置材料剥离', () => {
