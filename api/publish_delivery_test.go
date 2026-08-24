@@ -31,6 +31,20 @@ func TestNotificationAppsFromEnvironmentSupportsMultipleProfiles(t *testing.T) {
 	}
 }
 
+func TestSamePublishDeliveryTargetsIgnoresAutoPublish(t *testing.T) {
+	current := publishDeliverySettings{AppProfileID: "editor", ChatIDs: []string{"oc_a", "oc_b"}}
+	same := publishDeliverySelectionRequest{AppProfileID: "editor", ChatIDs: []string{"oc_b", "oc_a"}, AutoPublish: true}
+	if !samePublishDeliveryTargets(same, current) {
+		t.Fatal("应用和群没变时应允许只改自动发布")
+	}
+	if samePublishDeliveryTargets(publishDeliverySelectionRequest{AppProfileID: "other", ChatIDs: []string{"oc_a", "oc_b"}}, current) {
+		t.Fatal("换应用必须重新校验群")
+	}
+	if samePublishDeliveryTargets(publishDeliverySelectionRequest{AppProfileID: "editor", ChatIDs: []string{"oc_a"}}, current) {
+		t.Fatal("改群必须重新校验")
+	}
+}
+
 func TestPublishDeliverySelectionRequiresCurrentUserVisibleChats(t *testing.T) {
 	apps := []feishuNotificationApp{{ID: "editor", Name: "编辑应用", AppID: "cli_editor", AppSecret: "secret-editor"}}
 	chats := []feishuChat{{ChatID: "oc_allowed", Name: "内容审核群", ChatMode: "group"}}

@@ -16,6 +16,22 @@ import (
 	"time"
 )
 
+func publishDeliveryActor(r *http.Request, auth *authService) string {
+	if auth == nil {
+		return ""
+	}
+	if user, err := auth.requireFeishuUser(r); err == nil {
+		if id := strings.TrimSpace(user.FeishuOpenID); id != "" {
+			return id
+		}
+		return strings.TrimSpace(user.ID)
+	}
+	if user, err := auth.currentUser(r); err == nil {
+		return strings.TrimSpace(user.ID)
+	}
+	return ""
+}
+
 func requirePublishAdmin(w http.ResponseWriter, r *http.Request, auth *authService) bool {
 	if validPublishAdminServiceToken(r.Header.Get(publishAdminServiceHeader)) {
 		return true
@@ -155,18 +171,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		if !requireDeploymentWritesActive(w) {
 			return
 		}
-		if auth == nil {
-			writeError(w, http.StatusServiceUnavailable, "发布链路配置需要飞书登录服务")
-			return
-		}
-		user, err := auth.requireFeishuUser(r)
-		if err != nil {
-			writeFeishuCapabilityError(w, err)
-			return
-		}
-		chats, err := auth.listFeishuChats(r.Context(), user)
-		if err != nil {
-			writeFeishuCapabilityError(w, err)
+		if p.deliverySettings == nil {
+			writeError(w, http.StatusServiceUnavailable, "发布通知配置存储未初始化")
 			return
 		}
 		var body publishDeliverySelectionRequest
@@ -174,16 +180,42 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			writeError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		if p.deliverySettings == nil {
-			writeError(w, http.StatusServiceUnavailable, "发布通知配置存储未初始化")
-			return
-		}
 		current, apps, err := p.deliverySettings.resolve()
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
 		}
-		settings, err := publishDeliverySelectionFromRequest(body, current, apps, chats, user.FeishuOpenID)
+		actor := publishDeliveryActor(r, auth)
+		if samePublishDeliveryTargets(body, current) {
+			settings := current
+			settings.AutoPublish = body.AutoPublish
+			settings.UpdatedBy = actor
+			settings.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			if err := p.deliverySettings.write(settings); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, publishDeliverySettingsView(settings, apps))
+			return
+		}
+		if auth == nil {
+			writeError(w, http.StatusServiceUnavailable, "改审核群需要飞书登录服务")
+			return
+		}
+		user, err := auth.requireFeishuUser(r)
+		if err != nil {
+			writeFeishuChatError(w, err)
+			return
+		}
+		chats, err := auth.listFeishuChats(r.Context(), user)
+		if err != nil {
+			writeFeishuChatError(w, err)
+			return
+		}
+		if actor == "" {
+			actor = strings.TrimSpace(user.FeishuOpenID)
+		}
+		settings, err := publishDeliverySelectionFromRequest(body, current, apps, chats, actor)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

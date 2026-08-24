@@ -496,6 +496,30 @@ func (p *publishPipeline) uploadReviewCoverForJob(ctx context.Context, job publi
 	return p.coverImgKey(ctx, job.CoverURL)
 }
 
+func samePublishDeliveryTargets(body publishDeliverySelectionRequest, current publishDeliverySettings) bool {
+	if strings.TrimSpace(body.AppProfileID) != strings.TrimSpace(current.AppProfileID) {
+		return false
+	}
+	left, err := normalizePublishChatIDs(body.ChatIDs)
+	if err != nil || len(left) == 0 {
+		return false
+	}
+	right, err := normalizePublishChatIDs(current.ChatIDs)
+	if err != nil || len(right) != len(left) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(right))
+	for _, id := range right {
+		seen[id] = struct{}{}
+	}
+	for _, id := range left {
+		if _, ok := seen[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func publishDeliverySelectionFromRequest(body publishDeliverySelectionRequest, current publishDeliverySettings, apps []feishuNotificationApp, chats []feishuChat, actor string) (publishDeliverySettings, error) {
 	appID := strings.TrimSpace(body.AppProfileID)
 	if appID == "" {

@@ -114,26 +114,35 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     return settings.chat_ids.filter(id => available.has(id));
   }
 
+  function chatsUnchangedAndKnown() {
+    return savedSettings.chat_ids.length > 0
+      && settings.chat_ids.length === savedSettings.chat_ids.length
+      && settings.chat_ids.every(id => savedSettings.chat_ids.includes(id));
+  }
+
   function footerState() {
     const appAvailable = apps.some(app => String(app.id || '').trim() === settings.app_profile_id);
-    const selectedChats = selectedVisibleChatIDs();
+    const reuseSavedChats = !!chatsIssue && chatsUnchangedAndKnown();
+    const selectedChats = reuseSavedChats ? savedSettings.chat_ids : selectedVisibleChatIDs();
     const dirty = !sameSettings(settings, savedSettings);
+    const chatsBlockSave = !!chatsIssue && !reuseSavedChats;
     let message = notice;
     if (saving) message = '正在保存发布链路…';
     else if (loading) message = chats.length || apps.length ? '正在更新发布链路…' : '正在读取发布链路…';
     else if (settingsIssue?.kind === 'network' && chatsIssue?.kind === 'network') message = '发布服务不可达；恢复服务后重新读取';
     else if (settingsIssue) message = '推送应用读取失败，暂不能保存';
-    else if (chatsIssue) message = '审核群读取失败，暂不能保存';
+    else if (chatsBlockSave) message = '审核群读取失败，暂不能改群';
     else if (!apps.length) message = '需要先在服务器配置推送应用';
-    else if (!chats.length) message = '当前没有可选择的审核群';
+    else if (!chats.length && !reuseSavedChats) message = '当前没有可选择的审核群';
     else if (!appAvailable) message = '请选择推送应用';
     else if (!selectedChats.length) message = '至少选择一个审核群';
     else if (saveIssue) message = saveIssue.title;
+    else if (dirty && reuseSavedChats) message = '群列表暂时读不到，保存后仍用已保存的审核群';
     else if (dirty) message = '有未保存的发布链路更改';
     else message = message || '当前发布链路已保存';
     return {
       dirty,
-      disabled: loading || saving || !!settingsIssue || !!chatsIssue || !appAvailable || !selectedChats.length || !dirty,
+      disabled: loading || saving || !!settingsIssue || chatsBlockSave || !appAvailable || !selectedChats.length || !dirty,
       label: saving ? '保存中…' : '保存发布链路',
       message,
     };
