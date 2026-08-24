@@ -169,10 +169,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			writeFeishuCapabilityError(w, err)
 			return
 		}
-		var body struct {
-			AppProfileID string   `json:"app_profile_id"`
-			ChatIDs      []string `json:"chat_ids"`
-		}
+		var body publishDeliverySelectionRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON")
 			return

@@ -287,6 +287,11 @@ body.admin-panel-open { overflow: hidden; }
   flex: 0 0 auto;
   white-space: nowrap;
 }
+.admin-delivery-step-heading .admin-toggle {
+  flex: 0 0 auto;
+  align-self: center;
+  justify-self: unset;
+}
 .admin-delivery-control {
   max-width: 460px;
   display: grid;

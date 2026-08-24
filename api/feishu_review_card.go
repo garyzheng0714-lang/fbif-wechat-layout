@@ -517,6 +517,9 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 			"tag": "text_tag", "text": feishuPlainText("已发布"), "color": "green",
 		})
 		actionLabel = "通过并发布了本文"
+		if job.ReviewedBy == publishAutoPublishActor {
+			actionLabel = "自动发布了本文"
+		}
 		if job.ReviewForced {
 			actionLabel = "强制发布了本文（当时风险结论为阻断级）"
 		}
@@ -1334,6 +1337,9 @@ func reviewCardAuditTrail(job publishJob, actionLabel string) string {
 		return fmt.Sprintf(
 			"<person id=\"%s\" show_avatar=\"true\" show_name=\"true\" style=\"capsule\"></person> %s <font color='grey'>%s</font>",
 			actor, actionLabel, when)
+	}
+	if strings.HasPrefix(actor, "system:") {
+		return fmt.Sprintf("系统%s <font color='grey'>%s</font>", actionLabel, when)
 	}
 	return fmt.Sprintf("经管理后台%s <font color='grey'>%s</font>", actionLabel, when)
 }

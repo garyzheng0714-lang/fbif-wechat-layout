@@ -8,7 +8,7 @@ package main
 //	        → mirroring（图片批量转存 OSS + 重写）→ enriching（AI 预填发布参数，M5）
 //	        → assessing（发布红线风险提示，失败降级 warning）
 //	        → staging（CreateNews 草稿进站）
-//	        → awaiting_review（人审闸门，自动推进到此为止）
+//	        → awaiting_review（人审闸门；管理后台「自动发布」打开时，pass/warning 会立刻持久化 approve 并继续公开）
 //	        → [人 approve] → publicizing（已授权）→ publicizing_updating（已落 PUT intent）→ published
 //	                                                        └→ publicize_reconciliation_required（结果不确定）
 //	        → [人 reject]  → rejected（终态；文章留在 FoodTalks 草稿态，本就不可见）
@@ -1039,6 +1039,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 			return errPublishContentSuperseded
 		}
 		p.schedulePublishNotification(updated.ID)
+		p.maybeAutoPublish(updated.ID)
 		return nil
 	}
 
@@ -1111,6 +1112,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 		return fmt.Errorf("%w：FoodTalks 已返回资讯 id=%d，但任务状态已变为 %s（intent=%s）", errStagingOutcomeUncertain, newsID, updated.Stage, intentKey)
 	}
 	p.schedulePublishNotification(updated.ID)
+	p.maybeAutoPublish(updated.ID)
 	return nil
 }
 
