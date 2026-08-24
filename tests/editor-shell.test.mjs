@@ -348,12 +348,12 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   );
   assert.match(
     app,
-    /const importClipboardText = \(text\) => \{\s*window\._currentArticleUrl = '';\s*if \(window\._handleText\)/,
-    '公众号页粘贴正文时应清空上一条 URL 导入状态'
+    /const importClipboardText = \(text\) => \{\s*window\._currentArticleUrl = '';\s*const run = \(\) => \{\s*if \(!window\._handleText\) return false;/,
+    '公众号页粘贴正文时应清空上一条 URL 导入状态，引擎未就绪时排队重试'
   );
   assert.match(
     site,
-    /const importClipboardText = \(text\) => \{\s*window\._currentArticleUrl = '';\s*if \(window\._handleText\)/,
+    /const importClipboardText = \(text\) => \{\s*window\._currentArticleUrl = '';\s*const run = \(\) => \{\s*if \(!window\._handleText\) return false;/,
     '网站页粘贴正文时应清空上一条 URL 导入状态，避免分享复制沿用旧链接'
   );
 });
@@ -854,6 +854,37 @@ test('bindUrlImportShortcuts 在输入框里粘贴正文同样直接排版', asy
   await nextTick();
 
   assert.deepEqual(calls.imported, ['这是一段粘进来的正文。\n第二段。']);
+  assert.equal(calls.fetched, 0);
+});
+
+test('输入框粘贴时即使 value 还没更新，也按剪贴板内容立即排版', () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts();
+  let prevented = false;
+
+  urlInput.value = '';
+  urlInput.selectionStart = 0;
+  urlInput.selectionEnd = 0;
+  inputHandlers.paste({
+    clipboardData: { getData: () => '先回答第一个问题：它是怎样做出不同等级的抹茶？' },
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(urlInput.value, '先回答第一个问题：它是怎样做出不同等级的抹茶？');
+  assert.deepEqual(calls.imported, ['先回答第一个问题：它是怎样做出不同等级的抹茶？']);
+  assert.equal(calls.fetched, 0);
+});
+
+test('输入框追加粘贴按选区拼出最终全文，不依赖 setTimeout', () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts({ initialValue: '开头写了几句' });
+
+  urlInput.selectionStart = urlInput.value.length;
+  urlInput.selectionEnd = urlInput.value.length;
+  inputHandlers.paste({
+    clipboardData: { getData: () => '\n又粘进来一段。' },
+  });
+
+  assert.deepEqual(calls.imported, ['开头写了几句\n又粘进来一段。']);
   assert.equal(calls.fetched, 0);
 });
 

@@ -77,6 +77,11 @@ test('engine.js: 上传前等待当前规则加载，避免 FoodTalks 底部区�
   );
   assert.match(src, /function\s+waitForActiveRuleConfigReady/, 'engine 必须有规则 ready 等待');
   assert.ok((src.match(/await waitForActiveRuleConfigReady\(/g) || []).length >= 2, '单篇/blocks 两条上传路径都要等待规则 ready');
+  assert.match(
+    src,
+    /if \(!bodyOnly\) await waitForActiveRuleConfigReady\('blocks-upload'\)/,
+    '粘贴纯文本只排正文，不能被规则加载挡住'
+  );
   const waitFn = src.slice(src.indexOf('async function waitForActiveRuleConfigReady'), src.indexOf('function resolveAuthorCardOverrideForArticle'));
   assert.doesNotMatch(waitFn, /Promise\.race|3000/, '规则加载不得三秒后静默使用旧配置继续');
   assert.match(waitFn, /state !== 'resolved'/, '只有服务端确认的规则才能生成最终排版');

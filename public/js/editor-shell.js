@@ -392,6 +392,22 @@ export function bindUrlImportShortcuts({
     submitImportValue(urlInput.value);
   }
 
+  // paste 事件触发时，textarea.value 仍是粘贴前的旧值。不能只等 setTimeout(0)，
+  // 有的浏览器会把插入放到更后面，提交就会空跑：框里有字、右侧还是空的。
+  function valueAfterPaste(input, pastedText) {
+    const current = String(input && input.value || '');
+    const pasted = String(pastedText || '');
+    if (!input) return pasted;
+    const startRaw = input.selectionStart;
+    const endRaw = input.selectionEnd;
+    if (!Number.isInteger(startRaw) || !Number.isInteger(endRaw)) {
+      return current + pasted;
+    }
+    const start = Math.max(0, Math.min(startRaw, current.length));
+    const end = Math.max(start, Math.min(endRaw, current.length));
+    return current.slice(0, start) + pasted + current.slice(end);
+  }
+
   if (focusTargetSelector && urlInput && typeof documentRef.querySelectorAll === 'function') {
     documentRef.querySelectorAll(focusTargetSelector).forEach(target => {
       target.addEventListener('click', event => {
@@ -428,8 +444,16 @@ export function bindUrlImportShortcuts({
   urlInput.addEventListener('input', () => {
     if (!(urlInput.value || '').trim() && typeof onInputCleared === 'function') onInputCleared();
   });
-  // paste 事件里 value 还是粘贴前的旧值，等一拍再按框内最终内容提交。
-  urlInput.addEventListener('paste', () => {
+  urlInput.addEventListener('paste', event => {
+    const pasted = (event && (event.clipboardData || globalThis.window?.clipboardData))
+      ? (event.clipboardData || globalThis.window.clipboardData).getData('text')
+      : '';
+    if (pasted) {
+      const next = valueAfterPaste(urlInput, pasted);
+      event?.preventDefault?.();
+      submitImportValue(next);
+      return;
+    }
     setTimeout(autoSubmitFromInput, 0);
   });
   urlInput.addEventListener('keydown', event => {

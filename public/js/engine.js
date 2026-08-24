@@ -1146,7 +1146,10 @@ export function initApp(initialTemplate) {
       // await: processBlocks is synchronous today but we're inside an
       // async context anyway, and future work (e.g. image pre-fetch)
       // might make it async. The await has zero cost on plain returns.
-      await waitForActiveRuleConfigReady('blocks-upload');
+      const bodyOnly = !!((opts && opts.bodyOnly) || (data && data.bodyOnly));
+      // 粘贴纯文本只排正文、不生成页脚。规则服务还没确认时也必须立刻出预览，
+      // 不能卡在 waitForActiveRuleConfigReady 上变成「框里有字、右侧空白」。
+      if (!bodyOnly) await waitForActiveRuleConfigReady('blocks-upload');
       if (inputCommit.stale()) return false;
       const input = {
         kind: 'blocks',
@@ -1155,7 +1158,7 @@ export function initApp(initialTemplate) {
         title: data.title,
         displayName: data.displayName || '',
         sourceIsDocx: false,
-        bodyOnly: !!((opts && opts.bodyOnly) || (data && data.bodyOnly)),
+        bodyOnly,
         articleArtifactOverride: normalizeArticleArtifactOverride(opts && opts.articleArtifactOverride),
       };
       const result = await renderArticleInput(input);
