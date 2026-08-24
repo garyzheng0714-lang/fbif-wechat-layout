@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -76,6 +77,42 @@ func TestPublishEndpointsRequireAdminRole(t *testing.T) {
 	// 红线连带断言：以上未过门的请求不得触发任何 FoodTalks 调用。
 	if createN, updateN := env.ft.counts(); createN != 0 || updateN != 0 {
 		t.Fatalf("未过鉴权门的请求触发了 FoodTalks 调用（create=%d update=%d）", createN, updateN)
+	}
+}
+
+func TestPutDeliverySettingsAutoPublishWithoutListingChats(t *testing.T) {
+	t.Setenv(publishNotificationAppsEnv, `[{"id":"editor","name":"编辑应用","app_id":"cli_editor","app_secret":"secret-editor"}]`)
+	env := newPublishTestEnv(t)
+	store := newPublishDeliverySettingsStore(filepath.Join(t.TempDir(), "delivery.json"))
+	if err := store.write(publishDeliverySettings{AppProfileID: "editor", ChatIDs: []string{"oc_review"}}); err != nil {
+		t.Fatal(err)
+	}
+	env.pipeline.deliverySettings = store
+	mux := newPublishTestMux(t, env)
+	rec := doPublishReq(mux, http.MethodPut, "/api/publish/delivery-settings",
+		`{"app_profile_id":"editor","chat_ids":["oc_review"],"auto_publish":true}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("只改自动发布应保存成功，status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	got, err := store.read()
+	if err != nil || !got.AutoPublish || got.ChatIDs[0] != "oc_review" {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	rec = doPublishReq(mux, http.MethodPut, "/api/publish/delivery-settings",
+		`{"app_profile_id":"editor","chat_ids":["oc_new"],"auto_publish":true}`, true)
+	if rec.Code == http.StatusOK {
+		t.Fatal("改审核群时不得跳过飞书群列表校验")
+	}
+}
+
+func TestFeishuChatErrorIsNotCloudDoc(t *testing.T) {
+	_, code, message := feishuChatErrorResponse(errors.New("upstream 500"))
+	if code != "feishu_chat_list_failed" || strings.Contains(message, "云文档") {
+		t.Fatalf("群列表失败不得说成云文档：code=%q message=%q", code, message)
+	}
+	status, code, _ := feishuChatErrorResponse(errFeishuLoginRequired)
+	if status != http.StatusForbidden || code != "feishu_login_required" {
+		t.Fatalf("未用飞书登录应 403 feishu_login_required，实际 %d %s", status, code)
 	}
 }
 

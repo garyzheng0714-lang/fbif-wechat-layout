@@ -123,6 +123,53 @@ test('发布链路：打开自动发布后保存到服务端', async () => {
   assert.deepEqual(persisted.chat_ids, ['oc_review']);
 });
 
+test('发布链路：群列表失败时仍能保存自动发布', async () => {
+  const { document } = parseHTML('<div id="overlay"></div>');
+  const overlay = document.querySelector('#overlay');
+  const calls = [];
+  let persisted = { app_profile_id: 'review-app', chat_ids: ['oc_review'], auto_publish: false };
+  const request = async (path, init = {}) => {
+    calls.push({ path, method: init.method || 'GET', body: init.body || '' });
+    if (path === '/api/publish/delivery-settings' && init.method === 'PUT') {
+      persisted = JSON.parse(init.body);
+      return Response.json({
+        settings: persisted,
+        apps: [{ id: 'review-app', name: '内容审核应用' }],
+      });
+    }
+    if (path === '/api/publish/delivery-settings') {
+      return Response.json({
+        settings: persisted,
+        apps: [{ id: 'review-app', name: '内容审核应用' }],
+      });
+    }
+    if (path === '/api/feishu/chats') {
+      return Response.json({ error: '飞书云文档服务暂不可用' }, { status: 502 });
+    }
+    return Response.json({ error: 'not found' }, { status: 404 });
+  };
+
+  let controller;
+  const rerender = () => {
+    const footer = controller.footerState();
+    overlay.innerHTML = `${controller.render()}<button type="button" data-delivery-action="save" ${footer.disabled ? 'disabled' : ''}>${footer.label}</button>`;
+    controller.bind();
+  };
+  controller = createAdminDeliveryController({ getOverlay: () => overlay, rerender, request });
+  rerender();
+  await waitFor(() => overlay.querySelector('[data-delivery-auto-publish]') && overlay.textContent.includes('读取飞书群列表失败'));
+
+  assert.equal(controller.footerState().disabled, true, '未改动时不应保存');
+  overlay.querySelector('[data-delivery-auto-publish]').click();
+  await waitFor(() => overlay.querySelector('[data-delivery-auto-publish]')?.getAttribute('aria-checked') === 'true');
+  assert.equal(controller.footerState().disabled, false, '群列表失败时仍应能保存自动发布');
+  assert.match(controller.footerState().message, /仍用已保存的审核群/);
+
+  overlay.querySelector('[data-delivery-action="save"]').click();
+  await waitFor(() => persisted.auto_publish === true);
+  assert.deepEqual(persisted.chat_ids, ['oc_review']);
+});
+
 test('发布链路：服务离线时不把未知状态误写成尚未配置', async () => {
   const { document } = parseHTML('<div id="overlay"></div>');
   const overlay = document.querySelector('#overlay');
