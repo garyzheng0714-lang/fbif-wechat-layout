@@ -118,6 +118,8 @@ function buildHeadingOpts(config) {
   return {
     titleKeywords: behList(config, 'title_keywords', undefined),
     captionLeadRe,
+    // 公众号→网站规范：一级=标题1（一、 / 章节句），二级=标题2（1、2、3），不进目录。
+    arabicAsSubheading: true,
   };
 }
 
@@ -403,6 +405,24 @@ function normalizeSubheadingParens(text) {
   return String(text || '').replace(/^[（(]\s*([一二三四五六七八九十]+|[0-9]+)\s*[)）]\s*/, '($1)');
 }
 
+// 公众号→网站规范（飞书《FoodTalks 网站排版规范》step2 修改标题格式）：
+//   一级 = 标题1：中文序号「一、二、三」或无序号章节句 → h2，进目录
+//   二级 = 标题2：「1、2、3」或「（一）（二）」→ h3，不进目录、段前段后不空行
+function isSiteSecondaryHeadingText(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]/.test(t)) return true;
+  if (/^\d+\s*[.、．]\s*\S/.test(t)) return true;
+  return false;
+}
+
+function resolveSiteHeadingLevel(text, explicitLevel) {
+  const n = Number(explicitLevel);
+  if (n >= 4) return 4;
+  if (n === 3 || isSiteSecondaryHeadingText(text)) return 3;
+  return 2;
+}
+
 function renderHeading(level, text, config = {}) {
   // 基石 news/62285 的标题是 <h2 style="text-align: justify;">…</h2>；id="mctoc_xxx" 是
   // FoodTalks 后台生成目录时自动注入的锚点，默认不输出（用户 2026-05-30 确认），仅在
@@ -664,10 +684,10 @@ function render(elems, config = {}) {
     const e = elems[i];
     endedWithTip = false;
     if (e.k === 'h') {
-      // 二级标题前 1 个空行；三级标题（(一)…）紧贴上文（62303 后台源码：h3 前无空行
-      // div，间距由后台 CSS margin 提供——飞书反馈问题十/十二核对）。p 分支已在每段后
-      // 留空行，这里避免再叠加成双空行。
-      const lv = e.level === 4 ? 4 : (e.level === 3 ? 3 : 2);
+      const headingText = runsToPlain(e.runs);
+      // 一级标题前 1 个空行；二级标题（标题2：1、2、3 / (一)…）紧贴上文
+      // （规范：段前、段后均不空行；62303 后台源码 h3 前无空行）。
+      const lv = resolveSiteHeadingLevel(headingText, e.level);
       const prev = elems[i - 1];
       const last = lines[lines.length - 1];
       if (isSeriesSiteConfig(config) && prev && (prev.k === 'img' || prev.k === 'video' || prev.k === 'cap') &&
@@ -682,7 +702,7 @@ function render(elems, config = {}) {
         // （2026-08-17 运营反馈：一级标题前有图+图注时会多出一个空行）。
         lines.push(BLANK_LINE);
       }
-      lines.push(renderHeading(lv, runsToPlain(e.runs), config));
+      lines.push(renderHeading(lv, headingText, config));
       prevWasHeading = true;
       prevWasStandaloneLink = false;
       continue;
@@ -964,7 +984,7 @@ function adaptNeutralToSite(e) {
   if (e.k === 'h') {
     const styleLevel = String(e.styleName || '').match(/(?:heading|标题)\s*([1-9])/i);
     const sourceLevel = styleLevel ? Number(styleLevel[1]) : 2;
-    const level = sourceLevel >= 4 ? 4 : (sourceLevel === 3 ? 3 : 2);
+    const level = resolveSiteHeadingLevel(e.text, sourceLevel >= 4 ? 4 : (sourceLevel === 3 ? 3 : 2));
     return { k: 'h', level, runs: [{ type: 'txt', text: e.text }], blankBefore: e.blankBefore };
   }
   if (e.k === 'cap') return { k: 'cap', runs: [{ type: 'txt', text: e.text }], blankBefore: e.blankBefore };
@@ -1030,8 +1050,8 @@ async function classifyMd(text) {
     let m;
     if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
       const sourceLevel = m[1].length;
-      const level = sourceLevel >= 4 ? 4 : (sourceLevel === 3 ? 3 : 2);
-      elems.push({ k: 'h', level, runs: parseMdRuns(m[2]) });
+      const mapped = sourceLevel >= 4 ? 4 : (sourceLevel === 3 ? 3 : 2);
+      elems.push({ k: 'h', level: resolveSiteHeadingLevel(m[2], mapped), runs: parseMdRuns(m[2]) });
       continue;
     }
     if ((m = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/))) {
@@ -1103,13 +1123,9 @@ function classifyBlocks(data) {
       continue;
     }
     if (b.k === 'h') {
-      // 「（一）…」编号标题是次级标题 → h3（62303 成品：(一)/(二) 全部 heading-3）。
+      // 标题1 → h2；标题2（（一）/ 1、2、3）→ h3。公众号→网站规范。
       const hText = b.text || '';
-      const explicitLevel = Number(b.level);
-      const hLevel = explicitLevel >= 4
-        ? 4
-        : (explicitLevel === 3 ||
-          /^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]/.test(hText.trim()) ? 3 : 2);
+      const hLevel = resolveSiteHeadingLevel(hText, b.level);
       elems.push({ k: 'h', level: hLevel, runs: [{ type: 'txt', text: hText }], ...meta(b) });
       continue;
     }

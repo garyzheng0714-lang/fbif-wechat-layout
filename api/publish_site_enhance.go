@@ -2,10 +2,10 @@ package main
 
 // 网站发布增强（2026-08-14 用户裁定，金标准 news/62765；2026-08-17 按排版规范修订）：
 //  1. 目录：所有文章（不分原创/转载，2026-08-17 用户裁定）正文非空白字符 ≥3000 且
-//     h2+h3 合计 ≥5 时，正文 h2 注入 mctoc_* 锚点 id，CMS payload 的 toc 字段写
+//     h2+h3 合计 ≥5 时，正文一级 h2 注入 mctoc_* 锚点 id，CMS payload 的 toc 字段写
 //     [{id,level:1,title}] JSON——FoodTalks 前台 toc-menu 只认这个字段，API 直发的
 //     文章后台不会自己生成（渲染器侧 mctoc 仍保持关闭，锚点在发布组装层注入，
-//     保证 render output_hash 可复现）。
+//     保证 render output_hash 可复现）。二级标题（（一）/ 1、2、3）不进 toc。
 //  2. 标签：所有文章解析 AI 预填标签；Mote 文章优先挂「Mote莫特」+ 正文声明的
 //     内容系列标签（如「这是我茶叶系列的第29篇」→「茶叶系列」）。标签只在
 //     tag_type_id=6 新闻标签库中按规范化名称等值解析，总数最多 3 个；不自动创建；
@@ -27,7 +27,8 @@ import (
 
 // 触发口径对齐网站排版规范（2026-08-17，飞书《FoodTalks 网站排版规范（新）》step2-3）：
 // 「文章字数超 3000 且一二级标题 5 个及以上」→ 正文纯文本 ≥ 3000 字 且 h2+h3 合计 ≥ 5。
-// 旧口径只数 h2 且要 >5，运营反馈原创长文经常不出目录。目录条目仍只收 h2（62765 金标准）。
+// 旧口径只数 h2 且要 >5，运营反馈原创长文经常不出目录。目录条目只收一级 h2
+// （62765 金标准；2026-08-24：「（一）」与「1、2、3」是二级，不进目录）。
 const publishSiteTocMinHeadings = 5 // 一二级标题（h2+h3）合计 ≥ 5
 const publishSiteTocMinChars = 3000 // 正文纯文本（剥标签）字符数下限
 
@@ -66,7 +67,8 @@ func publishSiteTocForContent(contentHTML string) (string, string) {
 	var out strings.Builder
 	entries := make([]publishSiteTocEntry, 0, len(matches))
 	prev := 0
-	for i, m := range matches {
+	anchorN := 0
+	for _, m := range matches {
 		attrRaw := ""
 		if m[2] >= 0 {
 			attrRaw = contentHTML[m[2]:m[3]]
@@ -77,7 +79,14 @@ func publishSiteTocForContent(contentHTML string) (string, string) {
 			// 已有锚点或空标题：保守起见整篇放弃注入，避免半套目录
 			return contentHTML, ""
 		}
-		id := fmt.Sprintf("mctoc_%s%d", seed, i)
+		if isSiteSecondaryHeadingText(title) {
+			// 二级标题即使被渲成 h2 也不进目录、不打一级锚点（62873「2、第二大难点」）。
+			out.WriteString(contentHTML[prev:m[1]])
+			prev = m[1]
+			continue
+		}
+		id := fmt.Sprintf("mctoc_%s%d", seed, anchorN)
+		anchorN++
 		out.WriteString(contentHTML[prev:m[0]])
 		out.WriteString(`<h2 id="` + id + `"` + attrRaw + ">")
 		out.WriteString(inner)
@@ -86,6 +95,9 @@ func publishSiteTocForContent(contentHTML string) (string, string) {
 		entries = append(entries, publishSiteTocEntry{ID: id, Level: 1, Title: title})
 	}
 	out.WriteString(contentHTML[prev:])
+	if len(entries) == 0 {
+		return contentHTML, ""
+	}
 	tocJSON, err := json.Marshal(entries)
 	if err != nil {
 		return contentHTML, ""

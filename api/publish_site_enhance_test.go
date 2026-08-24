@@ -93,6 +93,43 @@ func TestPublishSiteTocSkipsShortAndAnchored(t *testing.T) {
 	}
 }
 
+func TestPublishSiteTocSkipsArabicSecondaryHeadings(t *testing.T) {
+	// 62873：一级章节句是 h2，夹在中间的「2、第二大难点」即使误渲成 h2 也不进目录。
+	content := `<p style="text-align: justify;">开头</p>` +
+		`<h2 style="text-align: justify;">全行业卷价格，它为什么卷不动了</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">创业三大“地狱级”难题</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">2、第二大难点：改变消费场景</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">3、第三大难点：头部商超进场</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">重资产打造硬核供应链</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">结语</h2>` + siteTocLongPara
+	got, toc := publishSiteTocForContent(content)
+	if toc == "" {
+		t.Fatalf("一级标题足够时应生成目录")
+	}
+	var entries []publishSiteTocEntry
+	if err := json.Unmarshal([]byte(toc), &entries); err != nil {
+		t.Fatalf("toc 不是合法 JSON：%v", err)
+	}
+	if len(entries) != 4 {
+		t.Fatalf("目录应只收 4 条一级标题，实际 %s", toc)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Title, "难点") {
+			t.Fatalf("二级「难点」不得进目录：%q", e.Title)
+		}
+	}
+	if strings.Contains(got, `id="`) && strings.Contains(got, "第二大难点") {
+		// 二级标题原 h2 不得被打上一级锚点
+		h2 := got[strings.Index(got, "第二大难点")-80:]
+		if strings.Contains(h2[:120], `id="mctoc_`) {
+			t.Fatalf("二级标题不应打 mctoc 锚点：%s", h2[:160])
+		}
+	}
+	if !strings.Contains(got, `<h2 id="`) {
+		t.Fatalf("一级标题仍应打锚点")
+	}
+}
+
 func TestPublishSiteTocUnescapesTitle(t *testing.T) {
 	content := strings.Repeat(`<h2>M&amp;A <span>与并购</span></h2>`+siteTocLongPara, 6)
 	_, toc := publishSiteTocForContent(content)

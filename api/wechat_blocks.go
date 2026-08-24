@@ -1594,6 +1594,11 @@ func blockFromRoleDecision(obs ObservedBlock, role string) Block {
 	case "h":
 		b.K = "h"
 		b.Level = headingLevelFromTag(obs.Tag)
+		if isSiteSecondaryHeadingText(obs.Text) {
+			// 网站二级标题（（一）/ 1、2、3）固定 level=3。公众号渲染器不读 Level，
+			// 网站/云梭按 h3 输出，避免被收成一级目录。
+			b.Level = 3
+		}
 		b.Text = obs.Text
 		b.Runs = nil
 	case "cap":
@@ -1624,6 +1629,19 @@ func headingLevelFromTag(tag string) int {
 	default:
 		return 0
 	}
+}
+
+// isSiteSecondaryHeadingText 判定网站二级标题：括号序号「（一）」或阿拉伯数字
+// 「1、」「2.」后跟正文。一级是「一、二、三」或无序号章节句，不在此列。
+var siteParenHeadingRe = regexp.MustCompile(`^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]`)
+var siteArabicHeadingRe = regexp.MustCompile(`^\d+\s*[.、．]\s*\S`)
+
+func isSiteSecondaryHeadingText(text string) bool {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return false
+	}
+	return siteParenHeadingRe.MatchString(t) || siteArabicHeadingRe.MatchString(t)
 }
 
 // hasMutedOrSmallStyle only records visual facts. It is used after a

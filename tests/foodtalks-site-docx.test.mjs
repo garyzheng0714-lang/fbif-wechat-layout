@@ -818,6 +818,36 @@ test('网站 URL 导入：目录条目渲染为普通段落且条目间无空行
   assert.match(html, /一、食品包装为什么需要“轻量化”方案？<\/p>\n<p[^>]*>五、联系上海艾录<\/p>/, '目录条目间不插空行');
 });
 
+test('网站 URL 导入：规范标题2「1、2、3」渲成 h3，不进一级目录（62873）', () => {
+  const hBlock = (text, extra = {}) => ({ k: 'h', text, ...extra });
+  const txtBlock = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });
+  const boldTxt = (text) => ({ k: 'txt', runs: [{ type: 'txt', text, bold: true }] });
+  const result = template.processBlocks({
+    title: '张小米难点样例',
+    blocks: [
+      hBlock('全行业卷价格，它为什么卷不动了'),
+      txtBlock('一级章节正文。'),
+      hBlock('创业三大“地狱级”难题'),
+      boldTxt('1、第一大难点：改变消费习惯'),
+      txtBlock('难点一正文。'),
+      hBlock('2、第二大难点：改变消费场景'),
+      txtBlock('难点二正文。'),
+      hBlock('3、第三大难点：头部商超进场'),
+      txtBlock('难点三正文。'),
+      hBlock('结语'),
+    ],
+  }, { config: { modules: { fbif_footer: { enabled: false } } }, isRepost: false });
+  const html = result.lines.join('\n');
+  assert.match(html, /<h2[^>]*>全行业卷价格，它为什么卷不动了<\/h2>/, '无序号章节句是标题1 / h2');
+  assert.match(html, /<h2[^>]*>创业三大“地狱级”难题<\/h2>/);
+  assert.match(html, /<h2[^>]*>结语<\/h2>/);
+  assert.match(html, /<h3[^>]*>1、第一大难点：改变消费习惯<\/h3>/, '加粗「1、」升标题2 / h3');
+  assert.match(html, /<h3[^>]*>2、第二大难点：改变消费场景<\/h3>/);
+  assert.match(html, /<h3[^>]*>3、第三大难点：头部商超进场<\/h3>/);
+  assert.doesNotMatch(html, /<h2[^>]*>[123]、/, '标题2 不得写成标题1 / h2');
+  assert.match(html, /难点一正文。<\/p>\n<h3/, '标题2 段前不空行');
+});
+
 test('网站 URL 导入：（一）编号标题升 h3 且括号半角化（反馈问题十-2）', () => {
   const hBlock = (text) => ({ k: 'h', text });
   const txtBlock = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });

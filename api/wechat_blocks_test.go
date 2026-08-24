@@ -396,6 +396,37 @@ func TestExplicitHeadingTagsPreserveFoodTalksLevels(t *testing.T) {
 	}
 }
 
+func TestArabicNumberedHeadingIsSiteSecondaryLevel(t *testing.T) {
+	html := jsContentWrap(
+		`<p style="font-size: 20px;"><strong>创业三大“地狱级”难题</strong></p>` +
+			`<p style="font-size: 20px;"><strong>2、第二大难点：改变消费场景</strong></p>` +
+			`<p>这是足够长的正文，用来建立正常正文流。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	chapter := findBlockByText(blocks, "创业三大")
+	if chapter == nil || chapter.K != "h" {
+		t.Fatalf("无序号章节句应为标题，got %+v", chapter)
+	}
+	if chapter.Level != 0 && chapter.Level != 2 {
+		t.Fatalf("无序号视觉标题 Level 应为 0 或 2，got %d", chapter.Level)
+	}
+	sub := findBlockByText(blocks, "第二大难点")
+	if sub == nil || sub.K != "h" {
+		t.Fatalf("阿拉伯数字小标题应为标题，got %+v; kinds=%v", sub, findKinds(blocks))
+	}
+	if sub.Level != 3 {
+		t.Fatalf("「2、第二大难点」应为二级 Level=3，got %d", sub.Level)
+	}
+}
+
+func TestExplicitH2ArabicNumberedHeadingDemotesToLevel3(t *testing.T) {
+	html := jsContentWrap(`<h2>2、第二大难点：改变消费场景</h2><p>正文开始</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	b := findBlockByText(blocks, "第二大难点")
+	if b == nil || b.K != "h" || b.Level != 3 {
+		t.Fatalf("源 HTML 即使是 h2，阿拉伯数字序号也要记成 Level=3，got %+v", b)
+	}
+}
+
 func TestImageCaptionGroupKeepsImageSourceAsCaption(t *testing.T) {
 	html := jsContentWrap(
 		`<p><img data-src="https://mmbiz.qpic.cn/a.jpg" /></p>` +
