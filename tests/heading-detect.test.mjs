@@ -99,6 +99,18 @@ test('isBoldHeading 拒绝编号步骤、装饰线和未完句（黄仁勋样本
   assert.equal(isBoldHeading([{ type: 'txt', text: '最后，想问问你：', bold: true }]), false);
 });
 
+test('网站渠道 arabicAsSubheading：加粗「2、难点」升二级标题，公众号默认仍不升', () => {
+  const t = '2、第二大难点：改变消费者固有认知';
+  assert.equal(isBoldHeading([{ type: 'txt', text: t, bold: true }]), false);
+  assert.equal(isBoldHeading([{ type: 'txt', text: t, bold: true }], { arabicAsSubheading: true }), true);
+  const out = promoteHeuristicHeadings(
+    [{ k: 'p', runs: [{ type: 'txt', text: t, bold: true }] }],
+    { arabicAsSubheading: true },
+  );
+  assert.equal(out[0].k, 'h');
+  assert.equal(out[0].level, 3);
+});
+
 for (const label of ['健康意识觉醒：', '女性经济崛起：', '代际变迁：', '经济下行：']) {
   test(`isBoldHeading 拒绝真露评测集中的正文标签: ${label}`, () => {
     assert.equal(isBoldHeading([{ type: 'txt', text: label, bold: true }]), false);

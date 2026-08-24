@@ -58,7 +58,8 @@ export function isBoldHeading(runs, opts) {
   const plain = visibleRuns.map(r => r.text).join('').trim();
   if (plain.length === 0 || plain.length > 36) return false;
   if (DECORATIVE_LINE_RE.test(plain)) return false;
-  if (ARABIC_LIST_PREFIX_RE.test(plain)) return false;
+  // 网站渠道把「1、2、3」当二级标题（标题2）；公众号仍把阿拉伯数字编号当步骤列表，不升标题。
+  if (ARABIC_LIST_PREFIX_RE.test(plain) && !(opts && opts.arabicAsSubheading)) return false;
   if (/[。.]$/.test(plain)) return false;
   if (/[，,；;]$/.test(plain)) return false;
   // 「健康意识觉醒：」「女性经济崛起：」这类冒号结尾短句是下文标签，
@@ -87,7 +88,10 @@ export function promoteHeuristicHeadings(elems, opts) {
     const plain = (e.runs || []).filter(r => r.type === 'txt' || r.type === 'link').map(r => r.text).join('');
     const level = detectHeadingLevel(plain, opts);
     if (level !== 0) return { k: 'h', level, runs: e.runs };
-    if (isBoldHeading(e.runs, opts)) return { k: 'h', level: 2, runs: e.runs };
+    if (isBoldHeading(e.runs, opts)) {
+      const lv = (opts && opts.arabicAsSubheading && ARABIC_LIST_PREFIX_RE.test(plain)) ? 3 : 2;
+      return { k: 'h', level: lv, runs: e.runs };
+    }
     return e;
   });
 }
