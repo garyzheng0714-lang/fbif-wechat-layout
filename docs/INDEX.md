@@ -30,7 +30,7 @@
 - [FoodTalks 正文排版评测集](agents/foodtalks-2026-07-23-body-layout-evaluation-set.md)：当前状态和未通过项以文件顶部结论为准。
 - [FoodTalks 编辑部发布规范](editorial-norms-foodtalks.md)
 - [FoodTalks 发布 API 实测契约](foodtalks-api-contract.md)
-- 发布审核、CMS 手工稿优先、同题防重、云梭外部分发与切尾的当前红线统一见 [CLAUDE #26–#39](../CLAUDE.md)；历史 WORKLOG 不能覆盖这些规则。
+- 发布审核、CMS 手工稿优先、同题防重、云梭外部分发、切尾、公司库与 Mote 系列链的当前红线统一见 [CLAUDE #26–#42](../CLAUDE.md)；历史 WORKLOG 不能覆盖这些规则。
 
 ### 公众号数据与监控
 
