@@ -4,7 +4,34 @@ import assert from 'node:assert/strict';
 import {
   createVersionRefreshController,
   decideVersionRefresh,
+  stripBuildVersionFromLocation,
+  stripBuildVersionSearch,
 } from '../public/js/version-refresh.js';
+
+test('build version is stripped from page search without dropping other params', () => {
+  assert.deepEqual(stripBuildVersionSearch(''), { changed: false, search: '' });
+  assert.deepEqual(stripBuildVersionSearch('?account=fbif'), { changed: false, search: '?account=fbif' });
+  assert.deepEqual(stripBuildVersionSearch('?v=bff485e'), { changed: true, search: '' });
+  assert.deepEqual(stripBuildVersionSearch('?v=bff485e&account=legacy'), { changed: true, search: '?account=legacy' });
+  assert.deepEqual(stripBuildVersionSearch('?account=legacy&v=bff485e'), { changed: true, search: '?account=legacy' });
+});
+
+test('page location drops the build version stamp for bookmarks', () => {
+  const calls = [];
+  const locationRef = {
+    pathname: '/mp/fbif',
+    search: '?v=bff485e863bfd353b13359b04e17e77db0cd5ed3',
+    hash: '',
+  };
+  const historyRef = {
+    replaceState(_state, _title, url) { calls.push(url); },
+  };
+  assert.equal(stripBuildVersionFromLocation({ locationRef, historyRef }), true);
+  assert.deepEqual(calls, ['/mp/fbif']);
+  locationRef.search = '';
+  assert.equal(stripBuildVersionFromLocation({ locationRef, historyRef }), false);
+  assert.deepEqual(calls, ['/mp/fbif']);
+});
 
 test('version refresh policy reloads only clean editors', () => {
   assert.equal(decideVersionRefresh({ currentBuildId: 'a', latestBuildId: 'a', isDevBuild: false, hasUnsavedWork: true }), 'none');

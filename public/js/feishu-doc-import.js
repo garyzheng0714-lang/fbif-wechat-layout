@@ -3,6 +3,7 @@ import {
   bindImportProgressDom,
   createImportProgressTracker,
 } from './import-progress.js';
+import { stripBuildVersionSearch } from './version-refresh.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const FEISHU_DOCUMENT_HOST_SUFFIXES = ['feishu.cn', 'larkoffice.com', 'larksuite.com'];
@@ -359,7 +360,8 @@ export function mountFeishuDocumentImport({
     copy.append(title, detail);
     const link = documentRef.createElement('a');
     const location = windowRef?.location;
-    const returnTo = `${location?.pathname || '/mp/fbif'}${location?.search || ''}`;
+    const stripped = stripBuildVersionSearch(location?.search || '');
+    const returnTo = `${location?.pathname || '/mp/fbif'}${stripped.search}`;
     link.href = `/auth/feishu/fbif/login?return_to=${encodeURIComponent(returnTo)}`;
     link.textContent = '改用飞书登录';
     box.append(copy, link);
