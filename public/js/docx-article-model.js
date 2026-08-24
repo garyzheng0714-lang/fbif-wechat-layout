@@ -60,42 +60,6 @@ export function parseAuthorLineWith(text, regex) {
   return m ? (m[1] != null ? m[1].trim() : '') : '';
 }
 
-// 「封面」到下一个结构标记之间的图留给正文；标题/推荐语/校对仍剥掉。
-function collectCoverRegionParagraphs(pds, contentStart, markerRe) {
-  const out = [];
-  let inCover = false;
-  const limit = Math.min(contentStart, pds.length);
-  for (let i = 0; i < limit; i++) {
-    const pd = pds[i];
-    const lineText = String(pd.text || '').trim();
-    if (markerRe.test(lineText)) {
-      inCover = lineText.replace(/[：:]$/, '') === '封面';
-      continue;
-    }
-    if (!inCover) continue;
-    if (pd.isEmpty) {
-      if (out.length) out.push(pd);
-      continue;
-    }
-    if (pd.hasImg) {
-      out.push(pd);
-      continue;
-    }
-    const last = out[out.length - 1];
-    if (
-      last && last.hasImg
-      && pd.type !== 'table'
-      && !pd.isHeading
-      && pd.align === 'center'
-      && lineText
-    ) {
-      out.push(pd);
-    }
-  }
-  while (out.length && out[out.length - 1].isEmpty) out.pop();
-  return out;
-}
-
 // 把 DOCX 段落数组分类成中性文章元素模型。
 //   paragraphs：parser.buildParagraph 产出的段落对象数组
 //   imgCache：{ 文件名 -> 可用作 <img src> 的字符串 }
@@ -204,10 +168,8 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
     return meta;
   };
 
-  const stream = collectCoverRegionParagraphs(pds, contentStart, frontMatterMarkerRegex)
-    .concat(pds.slice(contentStart));
-  for (let i = 0; i < stream.length; i++) {
-    const pd = stream[i];
+  for (let i = contentStart; i < pds.length; i++) {
+    const pd = pds[i];
     if (pd.isEmpty) { if (elems.length) blankBefore = true; continue; }
     if (pd.hasHL && pd.text.includes('插入视频')) {
       // 网站口径：docx 用「（插入视频）」+超链接标记视频位置。转 video elem——src 取超链接
@@ -303,8 +265,8 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
           .replace(/^[（(]插入视频[）)]\s*/, '');
         if (ct) elems.push({ k: 'cap', text: ct });
       }
-      while (i + 1 < stream.length) {
-        const nx = stream[i + 1];
+      while (i + 1 < pds.length) {
+        const nx = pds[i + 1];
         if (nx.isEmpty) { i++; continue; }
         if (!nx.hasImg && !nx.isHeading && nx.align === 'center' && nx.text.trim()) {
           let ct = nx.text.trim().replace(/^[（(]插入视频[）)]\s*/, '');
