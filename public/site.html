@@ -1382,10 +1382,17 @@ function wrapEngineFunctions() {
 // ---- URL repost ----
 const importClipboardText = (text) => {
   window._currentArticleUrl = '';
-  if (window._handleText) {
+  const run = () => {
+    if (!window._handleText) return false;
     resetSiteArticleMetaForNewInput('original');
     window._handleText(text, { source: 'clipboard' });
-  }
+    return true;
+  };
+  if (run()) return;
+  const started = Date.now();
+  const timer = setInterval(() => {
+    if (run() || Date.now() - started > 8000) clearInterval(timer);
+  }, 50);
 };
 const clearRenderedImport = () => {
   if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
@@ -1432,6 +1439,16 @@ window.addEventListener('fbif:article-input-started', event => {
   if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
 });
 
+bindUrlImportShortcuts({
+  documentRef: document,
+  fetchArticle: () => window.fetchArticle(),
+  importText: importClipboardText,
+  onInputCleared: clearRenderedImport,
+  shouldSubmitValue: value => !value.trimStart().startsWith('@'),
+  tryImportValue: value => feishuDocImport?.importValue?.(value) === true,
+  ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
+});
+
 const {
   mountFeishuDocumentImport,
   createFeishuImportProgressTracker,
@@ -1442,17 +1459,6 @@ feishuDocImport = mountFeishuDocumentImport({
   createProgressTracker: () => createFeishuImportProgressTracker({ documentRef: document }),
 });
 window._feishuDocImport = feishuDocImport;
-
-// ---- Keyboard shortcuts ----
-bindUrlImportShortcuts({
-  documentRef: document,
-  fetchArticle: () => window.fetchArticle(),
-  importText: importClipboardText,
-  onInputCleared: clearRenderedImport,
-  shouldSubmitValue: value => !value.trimStart().startsWith('@'),
-  tryImportValue: value => feishuDocImport?.importValue?.(value) === true,
-  ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
-});
 
 document.addEventListener('click', event => {
   if (event.target && event.target.closest && event.target.closest('[data-remove-upload]')) {
