@@ -49,7 +49,7 @@
 23. **微信草稿 T0 存活**：更多文章 `linktype=image` 的 `imgurl` 必须微信图床；卡片 `<img src>` 只能微信图床或 base64 位图，OSS/外站 HTTP 不得是唯一安全图，禁 SVG data，空占位用 PNG data。三渲染器 wrapper 锚点一致；`_footerCopy` 仅由 `footerCopyGate` 重建，旧快照/后台任务不得覆盖新会话。权威契约：[wechat-draft-survival-copy](openspec/specs/wechat-draft-survival-copy/spec.md)。
 24. **CMS 表格存活**：site/series 用共享 `table-renderer.js` 的 `outerBorder+cmsSurvival`，align/valign/bgcolor/width、cellpadding、表头 strong 与样式双写；图片按 `wpx` 双写 width；fbif 不启用且字节不动。见 [契约](docs/worklogs/WORKLOG-table-cms-survival.md)。
 25. **异步 latest-wins（2026-07-10 审计）**：各类导入、重渲染、更多文章元数据、复制准备、重试、规则保存、账号切换均先取版本门；每个 await 后及提交 DOM/全局/持久化前复核；新入口废止竞争旧入口。账号切换须规则/模板/配置/菜单同提交，失败保留原账号。
-26. **发布安全与恢复（2026-07-10 审计；2026-08-14 手工优先裁定）**：公开须持久人工 approve/时间、风险 `pass|warning`、版本匹配；否则 fail closed。外调前落 intent；不确定结果进 reconciliation，禁盲重试；`source_key` 永久去重。飞书验 token/审核人、清洗外部文本、持久 outbox；回调只落决策，发布异步可恢复。JSON store 仅单实例。CMS 手工稿为准，库存禁覆盖；卡片前标题查重标红，`stagePublicize` 落 intent 前复查，命中/查询失败 fail closed；仅修流水线未人工改稿。**`stageRepublish` 尚无同题硬门，暂不可发布。**
+26. **发布安全与恢复（2026-07-10 审计；2026-08-14 手工优先裁定；2026-08-24 自动发布开关）**：公开须持久 approve（人工，或管理后台「发布链路 → 自动发布」打开后的系统 `system:auto_publish`）+ 时间、风险 `pass|warning`、版本匹配；否则 fail closed。开关默认关；只作用于新同步稿，已在待审核的不受影响。阻断级、同题已发布仍停待审核，不自动翻开。群卡保留，已发布卡可下线。外调前落 intent；不确定结果进 reconciliation，禁盲重试；`source_key` 永久去重。飞书验 token/审核人、清洗外部文本、持久 outbox；回调只落决策，发布异步可恢复。JSON store 仅单实例。CMS 手工稿为准，库存禁覆盖；卡片前标题查重标红，`stagePublicize` 落 intent 前复查，命中/查询失败 fail closed；仅修流水线未人工改稿。**`stageRepublish` 尚无同题硬门，暂不可发布。**
 27. **部署事务（2026-07-10 审计）**：候选以 `DEPLOYMENT_WRITES_PAUSED=1` 启动，暂停发布/rules 写入、恢复任务、通知 worker、飞书长连；公网 SHA/健康/鉴权/管理员 readiness 全过才 release。接受后先停自动回滚再解暂停；解暂停后失败只向前修。`FOODTALKS_EXPECTED_TARGET=test|production` 必须与 API/前台/后台一致。
 28. **微信历史全量口径（2026-07-15，最高优先级）**：`273/311`、单接口/表/素材库数均非总量。完成多响应/多表按 msgid/msg_data_id/序号/article_id/URL/日期去重及分页/时间/字段审计前，只能写“未完成/未核验”；原始响应/字段全落库，飞书历史同步关闭。
 29. **已发布监控独立（2026-07-16）**：08:30–18:30 `freepublish` 最新页轮询不得被 draft/素材失败阻断；“群发”另走持久幂等路径。启用统一服务器配置前审计回调、自动回复、菜单；小绿书/图集/未知类型 fail closed。
@@ -72,7 +72,7 @@
 - 2/32：`top-toolbar/account-switcher/auth-shell/import-progress-component/e2e-progress-component/editor-shell/e2e-paste-autoformat`。
 - 9/23/25：`copy-behavior/uploader/wechat-draft-survival/copy-session/active-rule-selector`。
 - 19–24：`site-footer-parity/series-blocks-fidelity/foodtalks-site-config-flow/table-renderer-shared/foodtalks-site-docx`。
-- 26：`api/publish_duplicate_guard_test.go`；27/36：`tests/deploy-transaction.test.mjs`。
+- 26：`api/publish_duplicate_guard_test.go`、`api/publish_auto_publish_test.go`；27/36：`tests/deploy-transaction.test.mjs`。
 - 30：`.github/workflows/p0-monitoring-contract.yml`。
 - 31：`e2e-preview-speed/e2e-feishu-import-progress/preview-dom/preview-image-loader/feishu-doc-ready/import-progress`、`api/feishu_export_jobs_test.go`。
 - 33：`api/publish_http_test.go` 中 `TestPublishOfficialSyncFetchesFromURL` 及三个 reject 测试。

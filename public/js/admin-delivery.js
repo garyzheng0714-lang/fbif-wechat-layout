@@ -56,6 +56,7 @@ function normalizeSettings(value) {
   return {
     app_profile_id: String(value?.app_profile_id || '').trim(),
     chat_ids: [...new Set(chatIDs.map(id => String(id || '').trim()).filter(Boolean))],
+    auto_publish: value?.auto_publish === true,
   };
 }
 
@@ -63,6 +64,7 @@ function sameSettings(left, right) {
   const a = normalizeSettings(left);
   const b = normalizeSettings(right);
   return a.app_profile_id === b.app_profile_id
+    && a.auto_publish === b.auto_publish
     && a.chat_ids.length === b.chat_ids.length
     && a.chat_ids.every(id => b.chat_ids.includes(id));
 }
@@ -206,6 +208,25 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     </li>`;
   }
 
+  function renderAutoPublishStep() {
+    const on = settings.auto_publish === true;
+    const disabled = loading || saving || !!settingsIssue;
+    return `<li class="admin-delivery-step">
+      <span class="admin-delivery-step-index" aria-hidden="true">3</span>
+      <div class="admin-delivery-step-content">
+        <div class="admin-delivery-step-heading">
+          <div>
+            <h4>自动发布</h4>
+            <p>打开后，新同步过来的文章会直接上线，不必再点卡片通过。群里仍发卡片，也可以从卡片下线。已经在待审核的稿不受影响。</p>
+          </div>
+          <button type="button" class="toggle-switch admin-toggle${on ? ' on' : ''}" data-delivery-auto-publish role="switch" aria-checked="${on ? 'true' : 'false'}" aria-label="同步后自动发布"${disabled ? ' disabled' : ''}>
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
+      </div>
+    </li>`;
+  }
+
   function render() {
     const globalNetworkIssue = settingsIssue?.kind === 'network' && chatsIssue?.kind === 'network'
       ? settingsIssue
@@ -213,12 +234,13 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     return `<section class="admin-delivery-view" aria-labelledby="admin-delivery-title">
       <div class="admin-section-heading admin-delivery-heading">
         <h3 id="admin-delivery-title">发布链路</h3>
-        <p class="admin-panel-note">配置新任务的审核卡发送目标。已经生成的任务仍使用创建时保存的应用和群，不会被这里的修改覆盖。</p>
+        <p class="admin-panel-note">配置新任务的审核卡发送目标和是否自动上线。已经生成的任务仍使用创建时保存的应用和群，不会被这里的修改覆盖。</p>
       </div>
       ${globalNetworkIssue ? renderIssue(globalNetworkIssue) : ''}
       <ol class="admin-delivery-steps">
         ${renderAppStep(globalNetworkIssue)}
         ${renderChatStep(globalNetworkIssue)}
+        ${renderAutoPublishStep()}
       </ol>
       ${saveIssue ? renderIssue(saveIssue, { retry: false }) : ''}
     </section>`;
@@ -287,7 +309,7 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
       const payload = await response.json();
       settings = normalizeSettings(payload.settings || settings);
       savedSettings = normalizeSettings(settings);
-      notice = '发布链路已保存；新任务会使用当前应用和审核群';
+      notice = '发布链路已保存；新任务会按当前应用、审核群和发布方式执行';
       onMessage?.(notice);
     } catch (error) {
       if (token !== generation) return;
@@ -320,6 +342,13 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
       saveIssue = null;
       rerender?.();
     }));
+    overlay.querySelector('[data-delivery-auto-publish]')?.addEventListener('click', event => {
+      if (event.currentTarget.disabled) return;
+      settings = normalizeSettings({ ...settings, auto_publish: !settings.auto_publish });
+      notice = '';
+      saveIssue = null;
+      rerender?.();
+    });
     if (!attempted) load();
   }
 

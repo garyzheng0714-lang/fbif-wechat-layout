@@ -34,15 +34,12 @@ func TestNotificationAppsFromEnvironmentSupportsMultipleProfiles(t *testing.T) {
 func TestPublishDeliverySelectionRequiresCurrentUserVisibleChats(t *testing.T) {
 	apps := []feishuNotificationApp{{ID: "editor", Name: "编辑应用", AppID: "cli_editor", AppSecret: "secret-editor"}}
 	chats := []feishuChat{{ChatID: "oc_allowed", Name: "内容审核群", ChatMode: "group"}}
-	body := struct {
-		AppProfileID string   `json:"app_profile_id"`
-		ChatIDs      []string `json:"chat_ids"`
-	}{AppProfileID: "editor", ChatIDs: []string{"oc_allowed"}}
+	body := publishDeliverySelectionRequest{AppProfileID: "editor", ChatIDs: []string{"oc_allowed"}, AutoPublish: true}
 	settings, err := publishDeliverySelectionFromRequest(body, publishDeliverySettings{}, apps, chats, "ou_reviewer")
 	if err != nil {
 		t.Fatalf("valid selection rejected: %v", err)
 	}
-	if settings.AppProfileID != "editor" || len(settings.ChatIDs) != 1 || settings.UpdatedBy != "ou_reviewer" {
+	if settings.AppProfileID != "editor" || len(settings.ChatIDs) != 1 || settings.UpdatedBy != "ou_reviewer" || !settings.AutoPublish {
 		t.Fatalf("settings=%+v", settings)
 	}
 
@@ -55,7 +52,7 @@ func TestPublishDeliverySelectionRequiresCurrentUserVisibleChats(t *testing.T) {
 func TestPublishDeliverySettingsStoreRoundTripsWithRestrictedFileMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "publish-delivery.json")
 	store := newPublishDeliverySettingsStore(path)
-	want := publishDeliverySettings{AppProfileID: "editor", ChatIDs: []string{"oc_allowed"}, UpdatedBy: "ou_reviewer", UpdatedAt: "2026-08-04T04:00:00Z"}
+	want := publishDeliverySettings{AppProfileID: "editor", ChatIDs: []string{"oc_allowed"}, AutoPublish: true, UpdatedBy: "ou_reviewer", UpdatedAt: "2026-08-04T04:00:00Z"}
 	if err := store.write(want); err != nil {
 		t.Fatalf("write settings: %v", err)
 	}
@@ -63,7 +60,7 @@ func TestPublishDeliverySettingsStoreRoundTripsWithRestrictedFileMode(t *testing
 	if err != nil {
 		t.Fatalf("read settings: %v", err)
 	}
-	if got.AppProfileID != want.AppProfileID || len(got.ChatIDs) != 1 || got.UpdatedBy != want.UpdatedBy {
+	if got.AppProfileID != want.AppProfileID || len(got.ChatIDs) != 1 || got.UpdatedBy != want.UpdatedBy || !got.AutoPublish {
 		t.Fatalf("got=%+v want=%+v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -190,10 +187,7 @@ func TestPublishDeliveryConfigurationBranches(t *testing.T) {
 	if view["settings"] == nil || len(view["apps"].([]map[string]any)) != 1 {
 		t.Fatalf("settings view=%+v", view)
 	}
-	if _, err := publishDeliverySelectionFromRequest(struct {
-		AppProfileID string   `json:"app_profile_id"`
-		ChatIDs      []string `json:"chat_ids"`
-	}{AppProfileID: "editor", ChatIDs: nil}, resolved, resolvedApps, []feishuChat{{ChatID: "oc_legacy"}}, "ou_reviewer"); err == nil {
+	if _, err := publishDeliverySelectionFromRequest(publishDeliverySelectionRequest{AppProfileID: "editor", ChatIDs: nil}, resolved, resolvedApps, []feishuChat{{ChatID: "oc_legacy"}}, "ou_reviewer"); err == nil {
 		t.Fatal("empty chat selection accepted")
 	}
 	if err := validatePublishDeliveryChatSelection([]string{"oc_missing"}, []feishuChat{{ChatID: "oc_legacy"}}); err == nil {

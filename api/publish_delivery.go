@@ -36,8 +36,15 @@ type publishDeliverySettings struct {
 	SchemaVersion int      `json:"schema_version"`
 	AppProfileID  string   `json:"app_profile_id"`
 	ChatIDs       []string `json:"chat_ids"`
+	AutoPublish   bool     `json:"auto_publish,omitempty"`
 	UpdatedBy     string   `json:"updated_by,omitempty"`
 	UpdatedAt     string   `json:"updated_at,omitempty"`
+}
+
+type publishDeliverySelectionRequest struct {
+	AppProfileID string   `json:"app_profile_id"`
+	ChatIDs      []string `json:"chat_ids"`
+	AutoPublish  bool     `json:"auto_publish"`
 }
 
 type publishDeliverySettingsStore struct {
@@ -292,6 +299,7 @@ func publishDeliverySettingsView(settings publishDeliverySettings, apps []feishu
 		"settings": map[string]any{
 			"app_profile_id": settings.AppProfileID,
 			"chat_ids":       settings.ChatIDs,
+			"auto_publish":   settings.AutoPublish,
 			"updated_by":     settings.UpdatedBy,
 			"updated_at":     settings.UpdatedAt,
 		},
@@ -488,10 +496,7 @@ func (p *publishPipeline) uploadReviewCoverForJob(ctx context.Context, job publi
 	return p.coverImgKey(ctx, job.CoverURL)
 }
 
-func publishDeliverySelectionFromRequest(body struct {
-	AppProfileID string   `json:"app_profile_id"`
-	ChatIDs      []string `json:"chat_ids"`
-}, current publishDeliverySettings, apps []feishuNotificationApp, chats []feishuChat, actor string) (publishDeliverySettings, error) {
+func publishDeliverySelectionFromRequest(body publishDeliverySelectionRequest, current publishDeliverySettings, apps []feishuNotificationApp, chats []feishuChat, actor string) (publishDeliverySettings, error) {
 	appID := strings.TrimSpace(body.AppProfileID)
 	if appID == "" {
 		return publishDeliverySettings{}, errors.New("请选择审核应用")
@@ -510,6 +515,7 @@ func publishDeliverySelectionFromRequest(body struct {
 		SchemaVersion: publishDeliverySchema,
 		AppProfileID:  appID,
 		ChatIDs:       chatIDs,
+		AutoPublish:   body.AutoPublish,
 		UpdatedBy:     strings.TrimSpace(actor),
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
 	}, nil
