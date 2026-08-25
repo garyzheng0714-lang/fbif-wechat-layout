@@ -32,7 +32,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - 图片注释使用 12px、`#888888`，按关键词智能识别（图片来源/资料来源/数据来源/来源/制图/截图/图注/注/Source/Photo/Image/Credit）
 - 参考来源使用 `#888888`，自动补 `[1]` `[2]` `[3]` 编号
 - 标题自动等级识别：`一二三 + 中文标点` → h2、`（一）（二）` → h3、9 个关键词（背景/简介/总结/分析/案例/介绍/概述/结论/展望）+ 短句 → h2；署名行前缀（作者/编辑/出品/撰文…）不升标题；同文本 ≤16 字无序号标题全篇重复 ≥2 次判账号装饰行整体删除（2026-08-17）
-- 转载稿开头已有「本文为X原创，作者：Y」时删除文末公众号口径来源/作者行；没有开头署名时仍降级 14px 灰斜体。转载声明《标题》超链接优先公众号「阅读原文」；自家号转发且阅读原文为空时检索核验原文，核验不过不链回自家转载页（2026-08-18）
+- 转载稿开头已有「本文为X原创，作者：Y」时删除文末公众号口径来源/作者行；没有开头署名时仍降级 14px 灰斜体。转载声明《标题》超链接优先公众号「阅读原文」；自家号转发且阅读原文为空时先查 Feed 订阅列表，未订该号再 TikHub 广域搜（搜一搜），标题+出处都对上才用，核验不过不链回自家转载页（2026-08-18；补链 2026-08-25）
 - 访谈自动识别（两个及以上「角色：」前缀各现 ≥3 次）：提问方 FoodTalks 蓝并加粗、回答方默认色加粗；提问方按书名号/问号率/首现判定；提问方前缀独立成段时与提问内容合并（2026-08-17）
 - 中文标点转换：跟 CJK 字符邻接的 ASCII 标点 `,:;?!().` 转为中文形态，保留小数和域名里的点
 - 连续独立链接段之间不插空行
@@ -276,6 +276,9 @@ curl http://127.0.0.1:9000/api/health
 | `RENDER_PORT` / `RULES_API_ORIGIN` / `ASSET_ORIGIN` / `RENDER_BUILD_SHA` | renderer 的端口、规则 API、素材域名和可追溯构建 SHA；生产由流水线生成 `render-service.env` |
 | `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
 | `PUBLISH_SYNC_SERVICE_TOKEN` | `FoodTalks_Feed` 与 `fbif-wechat-article` 调用发布提交、紧凑状态和监控端点的独立服务令牌；不能访问完整任务、审核、重试、对账或规则管理接口 |
+| `FOODTALKS_FEED_BASE_URL` | 向 Feed 查转载原文；缺省 `https://feed.foodtalks.cn`；鉴权共用上面的同步令牌 |
+| `TIKHUB_API_KEY` / `TIKHUB_API_BASE_URL` | 可选。Feed 未订该公众号、自家号转发又没填「阅读原文」时，用 TikHub 广域搜（搜一搜）按标题+出处补微信链接；国内默认 `https://api.tikhub.dev`。失败只降级 |
+| `REDFOX_API_KEY` / `REDFOX_API_BASE_URL` | 旧红狐兼容键；本服务不再读取，只为旧 `publish.env` 过渡保留 |
 | `PUBLISH_HTTP_REVIEW_ENABLED` / `PUBLISH_HTTP_REVIEWER_OPEN_ID` | HTTP 审核应保持默认关闭；仅应急启用时，固定审核人仍必须命中 `FEISHU_REVIEWER_OPEN_IDS` |
 | `FEISHU_REVIEWER_ALLOW_CHAT_MEMBERS` | 群成员审核模式（2026-08-06 用户裁定）：开启后，来自 `FEISHU_REVIEW_CHAT_ID` 审核群内的卡片操作即有审核权限（依据：只有群成员能点到群消息里的按钮，事件 `open_chat_id` 由飞书服务端注入）；卡片被转发到其他会话后群 id 不同，一律拒绝。白名单继续兼容 |
 | `FOODTALKS_BASE_URL` / `FOODTALKS_TOKEN` | FoodTalks API 与凭证；缺失时发布任务显式失败 |

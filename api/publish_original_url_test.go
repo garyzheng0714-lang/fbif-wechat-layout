@@ -50,7 +50,7 @@ func TestResolveRepostOriginalURLPrefersFeedLookup(t *testing.T) {
 		}
 	}
 	lookupWechatOriginalArticle = func(context.Context, string, string) string {
-		t.Fatal("Feed 已命中时不应再查公众号作品库")
+		t.Fatal("Feed 已命中时不应再查 TikHub")
 		return ""
 	}
 	searchOriginalArticleURLs = func(context.Context, string, string) []string {
