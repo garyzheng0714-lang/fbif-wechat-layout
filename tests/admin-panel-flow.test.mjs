@@ -103,7 +103,9 @@ test('规则后台完整状态机：按当前账号加载/保存系列私有模�
     await waitFor(() => overlay.querySelector('[data-view="assignments"]'), '后台权限校验未完成');
     assert.ok(document.body.classList.contains('admin-panel-open'), '打开后台时锁住页面滚动');
     assert.ok(opener.hasAttribute('inert'), '后台打开时页面其余内容不可聚焦');
+    const dialog = overlay.querySelector('.admin-dialog');
     overlay.querySelector('[data-view="rules"]').click();
+    assert.equal(overlay.querySelector('.admin-dialog'), dialog, '切栏目不得拆掉面板重滑');
     assert.equal(overlay.querySelector('[data-view="rules"]').getAttribute('aria-current'), 'page', '侧栏标记当前分区');
     const activeRuleTab = overlay.querySelector('.admin-rule-tabs [aria-selected="true"]');
     assert.equal(activeRuleTab?.getAttribute('role'), 'tab', '规则分区使用完整 tab 语义');
