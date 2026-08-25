@@ -87,18 +87,18 @@ func TestRecordPublishedRepostSubscribesAfterFive(t *testing.T) {
 	}
 }
 
-func TestResolveRepostOriginalURLSkipsRedfoxWhenFeedHasSource(t *testing.T) {
+func TestResolveRepostOriginalURLSkipsWechatLookupWhenFeedHasSource(t *testing.T) {
 	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
 		return feedOriginalArticleHit{KnownSource: true}
 	}
-	lookupRedfoxOriginalArticle = func(context.Context, string, string) string {
+	lookupWechatOriginalArticle = func(context.Context, string, string) string {
 		t.Fatal("订阅源已有这个公众号时不应再走付费接口")
 		return ""
 	}
 	searchOriginalArticleURLs = func(context.Context, string, string) []string { return nil }
 	t.Cleanup(func() {
 		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
-		lookupRedfoxOriginalArticle = defaultLookupRedfoxOriginalArticle
+		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
 		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
 	})
 	if got := resolveRepostOriginalURL(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所", ""); got != "" {
