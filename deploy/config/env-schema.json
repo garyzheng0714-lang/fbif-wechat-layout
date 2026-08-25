@@ -37,6 +37,8 @@
         "PUBLISH_REPOST_SOURCES_PATH": { "required": false, "secret": false },
         "PUBLISH_SYNC_SERVICE_TOKEN": { "required": true, "secret": true },
         "FOODTALKS_FEED_BASE_URL": { "required": false, "secret": false },
+        "TIKHUB_API_KEY": { "required": false, "secret": true },
+        "TIKHUB_API_BASE_URL": { "required": false, "secret": false },
         "REDFOX_API_KEY": { "required": false, "secret": true },
         "REDFOX_API_BASE_URL": { "required": false, "secret": false },
         "PUBLISH_HTTP_REVIEW_ENABLED": { "required": false, "secret": false },

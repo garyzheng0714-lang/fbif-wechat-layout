@@ -39,7 +39,7 @@ func TestSanitizeOriginalURLCandidateDropsSearchHosts(t *testing.T) {
 func TestResolveRepostOriginalURLPrefersFeedLookup(t *testing.T) {
 	t.Cleanup(func() {
 		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
-		lookupRedfoxOriginalArticle = defaultLookupRedfoxOriginalArticle
+		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
 		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
 		fetchOriginalArticlePage = fetchRawHTML
 	})
@@ -49,7 +49,7 @@ func TestResolveRepostOriginalURLPrefersFeedLookup(t *testing.T) {
 			KnownSource: true,
 		}
 	}
-	lookupRedfoxOriginalArticle = func(context.Context, string, string) string {
+	lookupWechatOriginalArticle = func(context.Context, string, string) string {
 		t.Fatal("Feed 已命中时不应再查公众号作品库")
 		return ""
 	}
@@ -98,10 +98,10 @@ func TestResolveRepostOriginalURLUsesVerifiedCandidate(t *testing.T) {
 	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
 		return feedOriginalArticleHit{}
 	}
-	lookupRedfoxOriginalArticle = func(context.Context, string, string) string { return "" }
+	lookupWechatOriginalArticle = func(context.Context, string, string) string { return "" }
 	t.Cleanup(func() {
 		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
-		lookupRedfoxOriginalArticle = defaultLookupRedfoxOriginalArticle
+		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
 		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
 		fetchOriginalArticlePage = fetchRawHTML
 	})
@@ -129,10 +129,10 @@ func TestResolveRepostOriginalURLRejectsUnverifiedCandidate(t *testing.T) {
 	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
 		return feedOriginalArticleHit{}
 	}
-	lookupRedfoxOriginalArticle = func(context.Context, string, string) string { return "" }
+	lookupWechatOriginalArticle = func(context.Context, string, string) string { return "" }
 	t.Cleanup(func() {
 		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
-		lookupRedfoxOriginalArticle = defaultLookupRedfoxOriginalArticle
+		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
 		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
 		fetchOriginalArticlePage = fetchRawHTML
 	})

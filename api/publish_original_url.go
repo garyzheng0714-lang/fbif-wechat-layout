@@ -194,7 +194,7 @@ func resolveRepostOriginalURL(ctx context.Context, title, sourceName, excludeURL
 		return feed.URL
 	}
 	if !feed.KnownSource {
-		if found := lookupRedfoxOriginalArticle(ctx, title, sourceName); isHTTPURL(found) &&
+		if found := lookupWechatOriginalArticle(ctx, title, sourceName); isHTTPURL(found) &&
 			canonicalOriginalURLKey(found) != canonicalOriginalURLKey(excludeURL) {
 			return found
 		}
