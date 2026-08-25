@@ -28,6 +28,7 @@ import { bindSteppers } from './admin-field-controls.js';
 import { livePreviewHTML, applyLivePreview, targetForKey } from './admin-live-preview.js';
 import { renderRuleSettingsGroups } from './admin-rule-settings-view.js';
 import { bindRovingTabs, createAdminDialogA11y } from './admin-dialog-a11y.js';
+import { bindAdminWorkbenchShell, ensureAdminWorkbench, patchAdminWorkbenchFooter, syncAdminWorkbenchNav } from './admin-workbench.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 import { createAdminDeliveryController } from './admin-delivery.js';
 import { createAdminAccessController, renderRuleAdminAccessDenied, renderRuleAdminAccessLoading } from './admin-access.js';
@@ -127,6 +128,14 @@ export function initAdminPanel(options = {}) {
     document.body.appendChild(overlay);
     dialogA11y = createAdminDialogA11y({ document, overlay, opener, onEscape: close });
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    bindAdminWorkbenchShell(overlay, {
+      onClose: close,
+      onViewChange(next) {
+        if (next === activeView) return;
+        activeView = next;
+        renderMain();
+      },
+    });
     const operation = operationGate.capture();
     busy = true;
     busyOperation = operation;
@@ -170,12 +179,10 @@ export function initAdminPanel(options = {}) {
   function renderAccessState() {
     const focusSelector = dialogA11y?.focusSelectorFor(document.activeElement) || '';
     overlay.innerHTML = renderRuleAdminAccessDenied(status, ADMIN_ACCESS_HINT);
-    overlay.querySelector('.admin-close').addEventListener('click', close);
     dialogA11y?.focusAfterRender(focusSelector, '.admin-close');
   }
   function renderAccessLoading() {
     overlay.innerHTML = renderRuleAdminAccessLoading(ADMIN_ACCESS_HINT);
-    overlay.querySelector('.admin-close').addEventListener('click', close);
     dialogA11y?.focusAfterRender('', '.admin-close');
   }
   function renderWarningsHTML() {
@@ -482,6 +489,13 @@ export function initAdminPanel(options = {}) {
       </div>`}`;
   }
 
+  function destroyMountedEditors() {
+    if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
+    if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
+    blockBinder.destroy();
+    behaviorBinder.destroy();
+  }
+
   function renderMain() {
     const focusSelector = dialogA11y?.focusSelectorFor(document.activeElement) || '';
     const presets = compatibleRulePresets((doc && doc.presets) || [], RULE_PACKS[currentAccountID()]?.templateId);
@@ -514,25 +528,23 @@ export function initAdminPanel(options = {}) {
       : showPrimarySave
         ? `<button type="button" class="admin-primary admin-save-primary" data-action="save" ${busy || (activeView === 'assets' && migrationRule) ? 'disabled' : ''}>${busy ? '保存中…' : saveLabel}</button>`
         : '';
-    overlay.innerHTML = `
-      <div class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
-        <div class="admin-head">
-          <div>
-            <div class="admin-title" id="adminTitle">规则后台</div>
-            <div class="admin-subtitle">${esc(adminContextSubtitle())}</div>
-          </div>
-          <button type="button" class="admin-close" aria-label="关闭">×</button>
-        </div>
-        <div class="admin-layout">
-          ${renderSideNav()}
-          <div class="admin-body">${contentHTML}</div>
-        </div>
-        <div class="admin-foot">
-          <div class="admin-status" role="status" aria-live="polite">${esc(footerMessage)}</div>
-          ${tracksDraft ? `<span class="admin-dirty-chip ${changes ? 'dirty' : ''}" data-role="dirty-chip">${changes ? changes + ' 项未保存' : '已保存'}</span>` : ''}
-          ${footerAction}
-        </div>
-      </div>`;
+    destroyMountedEditors();
+    ensureAdminWorkbench(overlay);
+    const subtitle = overlay.querySelector('[data-role="admin-subtitle"]');
+    if (subtitle) subtitle.textContent = adminContextSubtitle();
+    syncAdminWorkbenchNav(overlay, {
+      activeView,
+      navHTML: renderSideNav(),
+      wantAccess: accessController.canManage(),
+    });
+    const body = overlay.querySelector('.admin-body');
+    if (body) body.innerHTML = contentHTML;
+    patchAdminWorkbenchFooter(overlay, {
+      message: footerMessage,
+      actionHTML: footerAction,
+      tracksDraft,
+      changes,
+    });
     bindMain();
     dialogA11y?.focusAfterRender(focusSelector, `[data-view="${activeView}"]`);
   }
@@ -648,13 +660,6 @@ export function initAdminPanel(options = {}) {
   }
 
   function bindMain() {
-    overlay.querySelector('.admin-close').addEventListener('click', close);
-    overlay.querySelectorAll('[data-view]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        activeView = btn.dataset.view;
-        renderMain();
-      });
-    });
     if (activeView === 'access' && accessController.canManage()) { accessController.bind(); return; }
     bindRovingTabs([...overlay.querySelectorAll('[data-rule-tab]')], btn => {
       if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
