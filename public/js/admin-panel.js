@@ -28,6 +28,7 @@ import { bindSteppers } from './admin-field-controls.js';
 import { livePreviewHTML, applyLivePreview, targetForKey } from './admin-live-preview.js';
 import { renderRuleSettingsGroups } from './admin-rule-settings-view.js';
 import { bindRovingTabs, createAdminDialogA11y } from './admin-dialog-a11y.js';
+import { bindAdminWorkbenchShell, ensureAdminWorkbench, patchAdminWorkbenchFooter, syncAdminWorkbenchNav } from './admin-workbench.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 import { createAdminDeliveryController } from './admin-delivery.js';
 import { createAdminAccessController, renderRuleAdminAccessDenied, renderRuleAdminAccessLoading } from './admin-access.js';
@@ -127,7 +128,14 @@ export function initAdminPanel(options = {}) {
     document.body.appendChild(overlay);
     dialogA11y = createAdminDialogA11y({ document, overlay, opener, onEscape: close });
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    bindShellOnce();
+    bindAdminWorkbenchShell(overlay, {
+      onClose: close,
+      onViewChange(next) {
+        if (next === activeView) return;
+        activeView = next;
+        renderMain();
+      },
+    });
     const operation = operationGate.capture();
     busy = true;
     busyOperation = operation;
@@ -481,96 +489,11 @@ export function initAdminPanel(options = {}) {
       </div>`}`;
   }
 
-  function bindShellOnce() {
-    if (!overlay || overlay.dataset.adminShellBound === '1') return;
-    overlay.dataset.adminShellBound = '1';
-    overlay.addEventListener('click', event => {
-      if (event.target.closest('.admin-close')) {
-        close();
-        return;
-      }
-      const viewBtn = event.target.closest('[data-view]');
-      if (!viewBtn || !overlay.querySelector('.admin-side-nav')?.contains(viewBtn)) return;
-      const next = viewBtn.dataset.view;
-      if (!next || next === activeView) return;
-      activeView = next;
-      renderMain();
-    });
-  }
-
   function destroyMountedEditors() {
     if (footerEditorInstance) { footerEditorInstance.destroy(); footerEditorInstance = null; }
     if (assetEditorInstance) { assetEditorInstance.destroy(); assetEditorInstance = null; }
     blockBinder.destroy();
     behaviorBinder.destroy();
-  }
-
-  function ensureFullDialogShell() {
-    const existing = overlay.querySelector('.admin-dialog.admin-workbench');
-    if (existing) return existing;
-    overlay.innerHTML = `
-      <div class="admin-dialog admin-workbench is-entering" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
-        <div class="admin-head">
-          <div>
-            <div class="admin-title" id="adminTitle">规则后台</div>
-            <div class="admin-subtitle" data-role="admin-subtitle"></div>
-          </div>
-          <button type="button" class="admin-close" aria-label="关闭">×</button>
-        </div>
-        <div class="admin-layout">
-          <div data-role="admin-nav"></div>
-          <div class="admin-body"></div>
-        </div>
-        <div class="admin-foot">
-          <div class="admin-status" role="status" aria-live="polite"></div>
-          <span class="admin-dirty-chip" data-role="dirty-chip" hidden></span>
-          <div data-role="admin-foot-action"></div>
-        </div>
-      </div>`;
-    const dialog = overlay.querySelector('.admin-dialog');
-    const dropEntering = () => dialog.classList.remove('is-entering');
-    dialog.addEventListener('animationend', dropEntering, { once: true });
-    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      dropEntering();
-    }
-    return dialog;
-  }
-
-  function syncSideNav() {
-    const mount = overlay.querySelector('[data-role="admin-nav"]');
-    if (!mount) return;
-    const nav = mount.querySelector('.admin-side-nav');
-    const wantAccess = accessController.canManage();
-    const hasAccess = !!(nav && nav.querySelector('[data-view="access"]'));
-    if (!nav || wantAccess !== hasAccess) {
-      mount.innerHTML = renderSideNav();
-      return;
-    }
-    nav.querySelectorAll('[data-view]').forEach(btn => {
-      const on = btn.dataset.view === activeView;
-      btn.classList.toggle('active', on);
-      if (on) btn.setAttribute('aria-current', 'page');
-      else btn.removeAttribute('aria-current');
-    });
-  }
-
-  function patchFooter(footerMessage, footerAction, tracksDraft, changes) {
-    const statusEl = overlay.querySelector('.admin-foot .admin-status');
-    if (statusEl) statusEl.textContent = footerMessage || '';
-    const chip = overlay.querySelector('[data-role="dirty-chip"]');
-    if (chip) {
-      if (tracksDraft) {
-        chip.hidden = false;
-        chip.classList.toggle('dirty', !!changes);
-        chip.textContent = changes ? changes + ' 项未保存' : '已保存';
-      } else {
-        chip.hidden = true;
-        chip.classList.remove('dirty');
-        chip.textContent = '';
-      }
-    }
-    const actionMount = overlay.querySelector('[data-role="admin-foot-action"]');
-    if (actionMount) actionMount.innerHTML = footerAction || '';
   }
 
   function renderMain() {
@@ -606,13 +529,22 @@ export function initAdminPanel(options = {}) {
         ? `<button type="button" class="admin-primary admin-save-primary" data-action="save" ${busy || (activeView === 'assets' && migrationRule) ? 'disabled' : ''}>${busy ? '保存中…' : saveLabel}</button>`
         : '';
     destroyMountedEditors();
-    ensureFullDialogShell();
+    ensureAdminWorkbench(overlay);
     const subtitle = overlay.querySelector('[data-role="admin-subtitle"]');
     if (subtitle) subtitle.textContent = adminContextSubtitle();
-    syncSideNav();
+    syncAdminWorkbenchNav(overlay, {
+      activeView,
+      navHTML: renderSideNav(),
+      wantAccess: accessController.canManage(),
+    });
     const body = overlay.querySelector('.admin-body');
     if (body) body.innerHTML = contentHTML;
-    patchFooter(footerMessage, footerAction, tracksDraft, changes);
+    patchAdminWorkbenchFooter(overlay, {
+      message: footerMessage,
+      actionHTML: footerAction,
+      tracksDraft,
+      changes,
+    });
     bindMain();
     dialogA11y?.focusAfterRender(focusSelector, `[data-view="${activeView}"]`);
   }

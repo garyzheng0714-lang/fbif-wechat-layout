@@ -312,6 +312,7 @@ test('rule admin has footer-library tab and workingFooter save injection', async
 
 test('rule admin：素材库提升为左侧独立 view（用户裁定 2026-06-06，推翻旧「嵌胶囊 tab」）', async () => {
   const adminPanel = await readProjectFile('public/js/admin-panel.js');
+  const workbench = await readProjectFile('public/js/admin-workbench.js');
   const blockData = await readProjectFile('public/js/admin-block-data.js');
   const css = await readFile(new URL('../public/admin-panel.css', import.meta.url), 'utf8');
 
@@ -325,7 +326,7 @@ test('rule admin：素材库提升为左侧独立 view（用户裁定 2026-06-06
   // 底部 tab 仍是区块编辑器
   assert.match(adminPanel, /\['bottom', '底部'\]/);
   assert.match(blockData, /data-role="block-editor"/);
-  assert.match(adminPanel, /data-role="dirty-chip"/);
+  assert.match(workbench, /data-role="dirty-chip"/);
   assert.match(adminPanel, /adminDirtyCount/);
   assert.match(css, /\.admin-dirty-chip/);
 });
