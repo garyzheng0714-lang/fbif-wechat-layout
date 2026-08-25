@@ -104,7 +104,7 @@ func TestResolveRepostOriginalURLPrefersWechatLookupBeforeSearch(t *testing.T) {
 		return "https://mp.weixin.qq.com/s?__biz=MzkzNzI3NTc1Mg==&mid=2247499622&idx=1"
 	}
 	searchOriginalArticleURLs = func(context.Context, string, string) []string {
-		t.Fatal("作品库已命中时不应再去网页检索")
+		t.Fatal("广域搜已命中时不应再去网页检索")
 		return nil
 	}
 	t.Cleanup(func() {
