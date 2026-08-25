@@ -14,20 +14,17 @@ import (
 	"time"
 )
 
-// 自家号转发缺「阅读原文」、Feed 又还没订这个公众号时，用 TikHub 补微信原文链接。
-// 先按标题搜文章，作者和标题都对上才用；搜不到再按号名搜唯一公众号、拉文章列表。
+// 自家号转发缺「阅读原文」、Feed 又还没订这个公众号时，用 TikHub 广域搜补微信原文链接。
+// 内部订阅列表先查；没有再按标题搜一搜（最大池子），作者和标题都对上才用。
 // 失败只降级，不让发布任务失败。
 
 const (
-	tikhubSearchPath          = "/api/v1/wechat_search/v2/fetch_search"
-	tikhubAccountArticlesPath = "/api/v1/wechat_mp/v2/fetch_account_articles"
-	defaultTikhubAPIBase      = "https://api.tikhub.dev"
-	tikhubLookupTimeout       = 70 * time.Second
-	tikhubRequestTimeout      = 30 * time.Second
-	tikhubSearchMaxPages      = 2
-	tikhubWorkListMaxPages    = 3
-	tikhubWorkListPageSize    = 20
-	tikhubSuccessCode         = 200
+	tikhubSearchPath     = "/api/v1/wechat_search/v2/fetch_search"
+	defaultTikhubAPIBase = "https://api.tikhub.dev"
+	tikhubLookupTimeout  = 70 * time.Second
+	tikhubRequestTimeout = 30 * time.Second
+	tikhubSearchMaxPages = 2
+	tikhubSuccessCode    = 200
 )
 
 var (
@@ -64,14 +61,7 @@ func defaultLookupWechatOriginalArticle(ctx context.Context, title, sourceName s
 	}
 	budget, cancel := context.WithTimeout(ctx, tikhubLookupTimeout)
 	defer cancel()
-	if found := lookupTikhubArticleSearch(budget, title, wantTitle, wantSource); found != "" {
-		return found
-	}
-	account := resolveTikhubAccount(budget, sourceName)
-	if account == "" {
-		return ""
-	}
-	return lookupTikhubAccountArticles(budget, account, wantTitle, wantSource)
+	return lookupTikhubArticleSearch(budget, title, wantTitle, wantSource)
 }
 
 func lookupTikhubArticleSearch(ctx context.Context, keyword, wantTitle, wantSource string) string {
@@ -96,7 +86,7 @@ func lookupTikhubArticleSearch(ctx context.Context, keyword, wantTitle, wantSour
 			log.Printf("publish: TikHub 搜文章失败：%v", err)
 			return ""
 		}
-		if found := pickWechatWorkURL(collectWechatWorkItems(data), wantTitle, wantSource, true); found != "" {
+		if found := pickWechatWorkURL(collectWechatWorkItems(data), wantTitle, wantSource); found != "" {
 			return found
 		}
 		next := tikhubString(data, "cursor")
@@ -109,81 +99,10 @@ func lookupTikhubArticleSearch(ctx context.Context, keyword, wantTitle, wantSour
 	return ""
 }
 
-func resolveTikhubAccount(ctx context.Context, sourceName string) string {
-	data, err := tikhubPOST(ctx, tikhubSearchPath, map[string]any{
-		"keyword":       sourceName,
-		"business_type": "account",
-		"raw":           false,
-	})
-	if err != nil {
-		log.Printf("publish: TikHub 搜公众号失败（%s）：%v", sourceName, err)
-		return ""
-	}
-	want := normalizeFoodTalksSourceName(sourceName)
-	var exact []string
-	seen := map[string]bool{}
-	for _, account := range collectTikhubAccounts(data) {
-		if normalizeFoodTalksSourceName(account.Name) != want {
-			continue
-		}
-		if account.Username == "" || seen[account.Username] {
-			continue
-		}
-		seen[account.Username] = true
-		exact = append(exact, account.Username)
-	}
-	if len(exact) != 1 {
-		return ""
-	}
-	return exact[0]
-}
-
-func lookupTikhubAccountArticles(ctx context.Context, username, wantTitle, wantSource string) string {
-	offset := ""
-	seenOffset := map[string]bool{}
-	for page := 0; page < tikhubWorkListMaxPages; page++ {
-		if err := ctx.Err(); err != nil {
-			return ""
-		}
-		payload := map[string]any{
-			"username":  username,
-			"page_size": tikhubWorkListPageSize,
-			"raw":       false,
-		}
-		if offset != "" {
-			payload["offset"] = offset
-		}
-		data, err := tikhubPOST(ctx, tikhubAccountArticlesPath, payload)
-		if err != nil {
-			log.Printf("publish: TikHub 拉公众号文章失败：%v", err)
-			return ""
-		}
-		items := collectWechatWorkItems(data)
-		if found := pickWechatWorkURL(items, wantTitle, wantSource, false); found != "" {
-			return found
-		}
-		if tikhubFlag(data, "is_end", "isEnd") {
-			return ""
-		}
-		next := tikhubString(data, "next_offset", "nextOffset")
-		if next == "" || seenOffset[next] {
-			return ""
-		}
-		seenOffset[next] = true
-		offset = next
-	}
-	return ""
-}
-
 type wechatWorkItem struct {
 	Title  string
 	URL    string
 	Author string
-}
-
-type tikhubAccount struct {
-	Username string
-	Name     string
 }
 
 func tikhubPOST(ctx context.Context, path string, payload any) (any, error) {
@@ -304,59 +223,6 @@ func extractWechatWorkItem(m map[string]any) (wechatWorkItem, bool) {
 	return wechatWorkItem{Title: title, URL: articleURL, Author: author}, true
 }
 
-func collectTikhubAccounts(v any) []tikhubAccount {
-	var out []tikhubAccount
-	seen := map[string]bool{}
-	var walk func(any)
-	walk = func(node any) {
-		switch n := node.(type) {
-		case map[string]any:
-			if account, ok := extractTikhubAccount(n); ok {
-				if !seen[account.Username] {
-					seen[account.Username] = true
-					out = append(out, account)
-				}
-			}
-			for _, child := range n {
-				walk(child)
-			}
-		case []any:
-			for _, child := range n {
-				walk(child)
-			}
-		}
-	}
-	walk(v)
-	return out
-}
-
-func extractTikhubAccount(m map[string]any) (tikhubAccount, bool) {
-	username := firstGHUsername(m)
-	name := stripSearchHighlight(firstString(m, "nickName", "nick_name", "title", "name", "accountName", "account_name"))
-	if jump, ok := nestedMap(m, "jumpInfo", "jump_info"); ok {
-		if username == "" {
-			username = firstGHUsername(jump)
-		}
-		if name == "" || ghUsernameRe.MatchString(name) {
-			name = stripSearchHighlight(firstString(jump, "nickName", "nick_name", "title", "name"))
-		}
-	}
-	if username == "" {
-		return tikhubAccount{}, false
-	}
-	return tikhubAccount{Username: username, Name: name}, true
-}
-
-func firstGHUsername(m map[string]any) string {
-	for _, key := range []string{"userName", "username", "user_name", "biz_username", "wxId", "wx_id"} {
-		s := strings.TrimSpace(fmt.Sprint(m[key]))
-		if ghUsernameRe.MatchString(s) {
-			return s
-		}
-	}
-	return ""
-}
-
 func firstWechatURL(v any) string {
 	switch n := v.(type) {
 	case string:
@@ -469,17 +335,12 @@ func normalizeWechatWorkURL(raw string) (string, bool) {
 	return cleaned, true
 }
 
-func pickWechatWorkURL(items []wechatWorkItem, wantTitle, wantSource string, requireAuthor bool) string {
+func pickWechatWorkURL(items []wechatWorkItem, wantTitle, wantSource string) string {
 	for _, item := range items {
 		if normalizeOriginalTitle(item.Title) != wantTitle {
 			continue
 		}
-		author := normalizeFoodTalksSourceName(item.Author)
-		if requireAuthor {
-			if author != wantSource {
-				continue
-			}
-		} else if author != "" && author != wantSource {
+		if normalizeFoodTalksSourceName(item.Author) != wantSource {
 			continue
 		}
 		articleURL, ok := normalizeWechatWorkURL(item.URL)
