@@ -33,6 +33,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -40,6 +41,10 @@ const (
 	feishuCallbackModeWebSocket = "websocket"
 	feishuCallbackModeWebhook   = "webhook"
 )
+
+// 飞书 card.action.trigger 限 3 秒回包，超时即 108002。
+// 2.5 秒仍未做完就先回 toast，审核 CAS 继续在后台跑。测试可缩短。
+var feishuCardActionSLA = 2500 * time.Millisecond
 
 // configuredFeishuCallbackMode 强制两种传输层互斥。未配置或配置非法时采用更安全的
 // websocket 行为（公网 Webhook 返回 404），同时由 readiness 标记为未显式配置。
@@ -242,11 +247,28 @@ func feishuReviewerAuthConfigured() bool {
 	return feishuReviewerChatModeEnabled() && strings.TrimSpace(os.Getenv("FEISHU_REVIEW_CHAT_ID")) != ""
 }
 
-// handleReviewCardAction Webhook 模式薄壳：事件字段 → 共用业务段 → 3 秒响应体 {toast, card}。
+// handleReviewCardAction Webhook 模式薄壳：事件字段 → 共用业务段 → 3 秒内只回 {toast}。
 func (p *publishPipeline) handleReviewCardAction(r *http.Request, payload feishuCardCallbackPayload) map[string]any {
-	out := p.reviewCardAction(r.Context(), payload.Event.Operator.OpenID, payload.Event.Context.OpenChatID, payload.Event.Action.Value)
-	// 3 秒窗口只回 toast。整张日批次卡由后台原位更新，避免连点时在回调里读整库超时（飞书 108002）。
+	out := p.reviewCardActionWithinSLA(r.Context(), payload.Event.Operator.OpenID, payload.Event.Context.OpenChatID, payload.Event.Action.Value)
 	return feishuCardToast(out.toastType, out.toastContent, nil)
+}
+
+// reviewCardActionWithinSLA 保证飞书 3 秒窗口内必有 toast。
+// 连点会串行写整份任务库；超过 SLA 仍把审核做完，只是先告诉飞书「正在处理」。
+func (p *publishPipeline) reviewCardActionWithinSLA(parent context.Context, openID, chatID string, rawValue json.RawMessage) reviewCardOutcome {
+	ctx := context.WithoutCancel(parent)
+	done := make(chan reviewCardOutcome, 1)
+	go func() {
+		done <- p.reviewCardAction(ctx, openID, chatID, rawValue)
+	}()
+	timer := time.NewTimer(feishuCardActionSLA)
+	defer timer.Stop()
+	select {
+	case out := <-done:
+		return out
+	case <-timer.C:
+		return reviewCardOutcome{toastType: "info", toastContent: "已受理，正在处理"}
+	}
 }
 
 // reviewCardOutcome 卡片按钮业务处理结果——Webhook 与长连接两模式共用的中立形态，

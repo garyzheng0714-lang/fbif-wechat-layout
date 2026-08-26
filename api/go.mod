@@ -10,6 +10,6 @@ require golang.org/x/crypto v0.53.0
 
 require (
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.9
 )

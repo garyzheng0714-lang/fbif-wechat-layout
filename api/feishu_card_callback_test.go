@@ -263,6 +263,56 @@ func TestFeishuCallbackApprovePublishes(t *testing.T) {
 	}
 }
 
+// TestFeishuCallbackSLAReturnsToastWhenStoreBusy 连点会把任务库锁住。
+// 3 秒窗口必须先回 toast，不能让飞书报 108002；审核在锁释放后继续做完。
+func TestFeishuCallbackSLAReturnsToastWhenStoreBusy(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newCardCallbackMux(t, env)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	env.ft.mu.Lock()
+	env.ft.forbidPublish = false
+	env.ft.mu.Unlock()
+	ready, _ := env.store.byID(job.ID)
+
+	origSLA := feishuCardActionSLA
+	feishuCardActionSLA = 80 * time.Millisecond
+	t.Cleanup(func() { feishuCardActionSLA = origSLA })
+
+	env.store.mu.Lock()
+	start := time.Now()
+	rec := postCardCallback(mux, cardActionBody(testFeishuVerificationToken, feishuCardActionApprove, job.ID, publishReviewCardVersion(ready)))
+	elapsed := time.Since(start)
+	env.store.mu.Unlock()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("锁住任务库时仍应 200 toast，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	if elapsed > time.Second {
+		t.Fatalf("应在 SLA 内回 toast，实际耗时 %s", elapsed)
+	}
+	if !strings.Contains(rec.Body.String(), "已受理，正在处理") {
+		t.Fatalf("超时路径应先回正在处理，实际 %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"card"`) {
+		t.Fatalf("3 秒响应不得带整张卡，实际 %s", rec.Body.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, err := env.store.byID(job.ID)
+		if err == nil && (got.Stage == publishStagePublicizing || got.Stage == publishStagePublished) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("锁释放后审核应继续，实际 stage=%q err=%v", got.Stage, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // TestFeishuCallbackRejectTerminates 历史卡的「驳回」仍置终态 rejected，
 // 但回调响应已收敛到蓝色批次卡，不再把整张卡染成单篇红色。
 func TestFeishuCallbackRejectTerminates(t *testing.T) {
