@@ -200,8 +200,8 @@ func TestFeishuCallbackTokenMismatch401(t *testing.T) {
 }
 
 // TestFeishuCallbackApprovePublishes 卡片「通过并发布」走与 HTTP 端点同一个 review
-// 核心：3 秒响应只做 CAS 接受并回「发布中」卡，不等待 FoodTalks；后台 worker
-// 随后落 published，UpdateNews 收 publishStatus=1，审核人留痕保持。
+// 核心：3 秒响应只做 CAS 接受并回 toast，不等待 FoodTalks、不在回调里重建日批次卡；
+// 后台 worker 随后落 published。
 func TestFeishuCallbackApprovePublishes(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newCardCallbackMux(t, env)
@@ -222,8 +222,8 @@ func TestFeishuCallbackApprovePublishes(t *testing.T) {
 		t.Fatalf("approve 回调应 200，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
 	got, _ := env.store.byID(job.ID)
-	if got.Stage != publishStagePublicizing || len(queued) != 1 {
-		t.Fatalf("回调返回时应 publicizing + 1 个后台 worker，实际 stage=%q queued=%d", got.Stage, len(queued))
+	if got.Stage != publishStagePublicizing || len(queued) == 0 {
+		t.Fatalf("回调返回时应 publicizing + 后台任务，实际 stage=%q queued=%d", got.Stage, len(queued))
 	}
 	if got.ReviewedBy != "ou_reviewer_1" || got.ReviewedAt == "" {
 		t.Fatalf("审核留痕未落库：reviewed_by=%q reviewed_at=%q", got.ReviewedBy, got.ReviewedAt)
@@ -248,28 +248,68 @@ func TestFeishuCallbackApprovePublishes(t *testing.T) {
 	if resp.Toast.Type != "success" || resp.Toast.Content != "已受理，正在发布" {
 		t.Fatalf("toast 不符：%+v", resp.Toast)
 	}
-	if resp.Card.Type != "raw" || resp.Card.Data["schema"] != "2.0" {
-		t.Fatalf("响应应带 raw 进度卡：%+v", resp.Card)
+	if resp.Card.Type != "" || resp.Card.Data != nil {
+		t.Fatalf("3 秒响应不得带整张卡（避免连点 108002），实际 %+v body=%s", resp.Card, body)
 	}
-	header, _ := resp.Card.Data["header"].(map[string]any)
-	if header["template"] != "blue" {
-		t.Fatalf("approve 进度卡 header 应为 blue，实际 %v", header["template"])
+	for _, task := range queued {
+		task()
 	}
-	for _, want := range []string{"发布中", "FoodTalks 内容审核", "查看原文"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("聚合进度卡应包含 %q，实际响应：%s", want, body)
-		}
-	}
-	if containsEmoji(body) {
-		t.Fatalf("进度卡含 emoji（cardkit 红线）：%s", body)
-	}
-	queued[0]()
 	got, _ = env.store.byID(job.ID)
 	if got.Stage != publishStagePublished {
 		t.Fatalf("后台 worker 后应 published，实际 stage=%q error=%q", got.Stage, got.Error)
 	}
 	if _, updateN := env.ft.counts(); updateN != 1 || env.ft.updateStatuses[0] != foodTalksPublishStatusPublished {
 		t.Fatalf("后台 UpdateNews 应恰一次 publishStatus=1，实际 statuses=%v", env.ft.updateStatuses)
+	}
+}
+
+// TestFeishuCallbackSLAReturnsToastWhenStoreBusy 连点会把任务库锁住。
+// 3 秒窗口必须先回 toast，不能让飞书报 108002；审核在锁释放后继续做完。
+func TestFeishuCallbackSLAReturnsToastWhenStoreBusy(t *testing.T) {
+	env := newPublishTestEnv(t)
+	mux := newCardCallbackMux(t, env)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	env.ft.mu.Lock()
+	env.ft.forbidPublish = false
+	env.ft.mu.Unlock()
+	ready, _ := env.store.byID(job.ID)
+
+	origSLA := feishuCardActionSLA
+	feishuCardActionSLA = 80 * time.Millisecond
+	t.Cleanup(func() { feishuCardActionSLA = origSLA })
+
+	env.store.mu.Lock()
+	start := time.Now()
+	rec := postCardCallback(mux, cardActionBody(testFeishuVerificationToken, feishuCardActionApprove, job.ID, publishReviewCardVersion(ready)))
+	elapsed := time.Since(start)
+	env.store.mu.Unlock()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("锁住任务库时仍应 200 toast，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	if elapsed > time.Second {
+		t.Fatalf("应在 SLA 内回 toast，实际耗时 %s", elapsed)
+	}
+	if !strings.Contains(rec.Body.String(), "已受理，正在处理") {
+		t.Fatalf("超时路径应先回正在处理，实际 %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"card"`) {
+		t.Fatalf("3 秒响应不得带整张卡，实际 %s", rec.Body.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, err := env.store.byID(job.ID)
+		if err == nil && (got.Stage == publishStagePublicizing || got.Stage == publishStagePublished) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("锁释放后审核应继续，实际 stage=%q err=%v", got.Stage, err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -295,10 +335,11 @@ func TestFeishuCallbackRejectTerminates(t *testing.T) {
 		t.Fatalf("reject 不应触发 UpdateNews，实际 %d 次", updateN)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"已驳回", `"template":"blue"`, "FoodTalks 内容审核"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("驳回后的聚合卡应包含 %q，实际响应：%s", want, body)
-		}
+	if !strings.Contains(body, "已驳回") {
+		t.Fatalf("驳回回调应 toast 已驳回，实际响应：%s", body)
+	}
+	if strings.Contains(body, `"card"`) {
+		t.Fatalf("3 秒响应不得带整张卡（避免连点 108002），实际响应：%s", body)
 	}
 }
 

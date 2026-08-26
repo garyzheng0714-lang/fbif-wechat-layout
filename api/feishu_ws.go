@@ -68,19 +68,17 @@ func maybeStartFeishuWS(p *publishPipeline) {
 }
 
 // feishuWSCardActionHandler card.action.trigger 事件 → 共用业务段 → SDK 响应
-// （toast + raw 终态卡）。SDK 负责把返回值在 3 秒窗口内回给飞书。
+// （3 秒窗口只回 toast；日批次卡后台原位更新）。SDK 负责把返回值在 3 秒窗口内回给飞书。
 func feishuWSCardActionHandler(p *publishPipeline) func(ctx context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
 	return func(ctx context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
 		openID, chatID, rawValue := feishuWSEventParams(event)
-		out := p.reviewCardAction(ctx, openID, chatID, rawValue)
+		out := p.reviewCardActionWithinSLA(ctx, openID, chatID, rawValue)
 		log.Printf("publish: 飞书长连接收到卡片动作 operator=%s → %s（%s）", openID, out.toastType, out.toastContent)
 		resp := &callback.CardActionTriggerResponse{
 			Toast: &callback.Toast{Type: out.toastType, Content: out.toastContent},
 		}
-		if out.card != nil {
-			// 与 Webhook 响应同形态：type=raw + 卡片 JSON 对象（update_multi 群内同步刷新）。
-			resp.Card = &callback.Card{Type: "raw", Data: out.card}
-		}
+		// 3 秒窗口只回 toast。日批次卡由 scheduleReviewBatchCardRefresh 原位更新，
+		// 避免连点时在回调里重建整卡导致飞书 108002。
 		return resp, nil
 	}
 }
