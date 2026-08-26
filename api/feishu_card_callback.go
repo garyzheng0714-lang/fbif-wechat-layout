@@ -18,9 +18,8 @@ package main
 //
 // 协议（cardkit 规范 04）：
 //   - url_verification（配置回调地址时的 challenge 握手）→ 原样回 {"challenge": ...}
-//   - card.action.trigger → 3 秒内回 {toast, card}；approve 先把同一条消息刷新为
-//     发布中（update_multi 使群内所有人同步看到），后台完成后再由 outbox 原位更新终态。
-//     审核人取 operator.open_id（唯一可信的「谁」）。
+//   - card.action.trigger → 3 秒内只回 {toast}；整张日批次卡由后台原位更新，
+//     避免连点时在回调里读整库超时（飞书 108002）。审核人取 operator.open_id。
 //   - 业务性失败（任务不存在 / 已被处理）回 200 + toast，不回非 2xx——否则飞书会重试
 //     轰炸端点；只有鉴权失败才 401。
 
@@ -246,7 +245,8 @@ func feishuReviewerAuthConfigured() bool {
 // handleReviewCardAction Webhook 模式薄壳：事件字段 → 共用业务段 → 3 秒响应体 {toast, card}。
 func (p *publishPipeline) handleReviewCardAction(r *http.Request, payload feishuCardCallbackPayload) map[string]any {
 	out := p.reviewCardAction(r.Context(), payload.Event.Operator.OpenID, payload.Event.Context.OpenChatID, payload.Event.Action.Value)
-	return feishuCardToast(out.toastType, out.toastContent, out.card)
+	// 3 秒窗口只回 toast。整张日批次卡由后台原位更新，避免连点时在回调里读整库超时（飞书 108002）。
+	return feishuCardToast(out.toastType, out.toastContent, nil)
 }
 
 // reviewCardOutcome 卡片按钮业务处理结果——Webhook 与长连接两模式共用的中立形态，
@@ -284,9 +284,7 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 		if out.card == nil {
 			return
 		}
-		if card, err := p.buildReviewBatchCard(jobID); err == nil {
-			out.card = card
-		}
+		p.scheduleReviewBatchCardRefresh(jobID)
 	}()
 	if !p.feishuReviewActionAllowed(operatorOpenID, actionChatID) {
 		return reviewCardOutcome{toastType: "error", toastContent: "你没有发布操作权限：请在审核群内操作卡片，或联系管理员配置审核人白名单"}
@@ -518,7 +516,8 @@ func coerceFeishuJobID(v any) int64 {
 	}
 }
 
-// feishuCardToast 组装 3 秒响应体：toast 必带；card 非 nil 时以 raw 形态同步刷新卡片。
+// feishuCardToast 组装 3 秒响应体：toast 必带。回调热路径不再带整张卡，
+// 避免连点超时；card 参数保留给单测直接断言业务段产物。
 func feishuCardToast(typ, content string, card map[string]any) map[string]any {
 	resp := map[string]any{
 		"toast": map[string]any{"type": typ, "content": content},

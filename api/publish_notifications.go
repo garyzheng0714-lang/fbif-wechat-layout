@@ -57,6 +57,25 @@ func (p *publishPipeline) schedulePublishNotification(jobID int64) {
 	p.spawn(func() { p.dispatchPublishNotification(jobID) })
 }
 
+// scheduleReviewBatchCardRefresh 卡片按钮 3 秒响应之后，后台重画当天那张聚合卡。
+// 不能放进回调热路径：会读整份任务库，连点时超过飞书时限就会弹 108002。
+func (p *publishPipeline) scheduleReviewBatchCardRefresh(jobID int64) {
+	if p == nil || p.spawn == nil {
+		return
+	}
+	p.spawn(func() {
+		job, err := p.store.byID(jobID)
+		if err != nil {
+			log.Printf("publish: 刷新审核卡前读任务 #%d 失败：%v", jobID, err)
+			return
+		}
+		if err := p.sendTerminalCardNotification(context.Background(), job, fmt.Sprintf(
+			"【网站同步】任务 #%d 卡片已更新", jobID)); err != nil {
+			log.Printf("publish: 后台刷新审核卡失败（任务 #%d）：%v", jobID, err)
+		}
+	})
+}
+
 func (p *publishPipeline) dispatchPublishNotification(jobID int64) {
 	claimed, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
 		return current.NotificationKind != "" && current.NotificationState == publishNotificationStatePending

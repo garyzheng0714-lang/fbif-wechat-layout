@@ -89,8 +89,8 @@ func TestFeishuWSEventParamsEmpty(t *testing.T) {
 }
 
 // TestFeishuWSCardActionApprove 长连接事件驱动与 Webhook 同一个 review 核心：
-// approve 事件 → CAS 落 publicizing 后立即回 success + raw 蓝进度卡；后台 worker
-// 再执行 UpdateNews，避免长连接 3 秒响应等待外部 API。
+// approve 事件 → CAS 落 publicizing 后立即回 success toast；3 秒窗口不带整张卡。
+// 后台 worker 再执行 UpdateNews。
 func TestFeishuWSCardActionApprove(t *testing.T) {
 	env := newPublishTestEnv(t)
 	t.Setenv("FOODTALKS_FRONT_URL", "")
@@ -114,8 +114,8 @@ func TestFeishuWSCardActionApprove(t *testing.T) {
 		t.Fatalf("handler 不应返回 error（业务失败走 toast）：%v", err)
 	}
 	got, _ := env.store.byID(job.ID)
-	if got.Stage != publishStagePublicizing || len(queued) != 1 {
-		t.Fatalf("响应时应 publicizing + 后台 worker，实际 stage=%q queued=%d", got.Stage, len(queued))
+	if got.Stage != publishStagePublicizing || len(queued) == 0 {
+		t.Fatalf("响应时应 publicizing + 后台任务，实际 stage=%q queued=%d", got.Stage, len(queued))
 	}
 	if got.ReviewedBy != "ou_ws_reviewer" || got.ReviewedAt == "" {
 		t.Fatalf("审核留痕未落库：reviewed_by=%q reviewed_at=%q", got.ReviewedBy, got.ReviewedAt)
@@ -126,18 +126,12 @@ func TestFeishuWSCardActionApprove(t *testing.T) {
 	if resp.Toast == nil || resp.Toast.Type != "success" || resp.Toast.Content != "已受理，正在发布" {
 		t.Fatalf("toast 不符：%+v", resp.Toast)
 	}
-	if resp.Card == nil || resp.Card.Type != "raw" {
-		t.Fatalf("响应应带 raw 进度卡：%+v", resp.Card)
+	if resp.Card != nil {
+		t.Fatalf("3 秒响应不得带整张卡（避免连点 108002），实际 %+v", resp.Card)
 	}
-	card, ok := resp.Card.Data.(map[string]any)
-	if !ok || card["schema"] != "2.0" {
-		t.Fatalf("进度卡应为 schema 2.0 卡片对象：%+v", resp.Card.Data)
+	for _, task := range queued {
+		task()
 	}
-	header, _ := card["header"].(map[string]any)
-	if header["template"] != "blue" {
-		t.Fatalf("approve 进度卡 header 应为 blue，实际 %v", header["template"])
-	}
-	queued[0]()
 	got, _ = env.store.byID(job.ID)
 	if got.Stage != publishStagePublished {
 		t.Fatalf("后台 worker 后应 published，实际 stage=%q error=%q", got.Stage, got.Error)
