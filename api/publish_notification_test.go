@@ -95,6 +95,51 @@ func TestPublishTerminalNotificationsPreferDoneCardAndFallbackText(t *testing.T)
 	}
 }
 
+func TestPublishTerminalNotificationBackfillsCoverAfterPendingWasCanceled(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.store.create("site:terminal-notification:backfill-cover", testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	job, err = env.store.update(job.ID, func(j *publishJob) {
+		j.Stage = publishStagePublished
+		j.NotificationKind = publishNotificationPublished
+		j.Title = "自动发布封面回补测试"
+		j.CoverURL = "https://oss.example.com/cover.jpg"
+		j.FoodTalksNewsID = 7240
+		j.ArticleURL = "https://test.foodtalks.cn/news/7240"
+		j.ReviewAction = publishReviewApprove
+		j.ReviewedBy = publishAutoPublishActor
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	const coverKey = "img_terminal_cover"
+	env.pipeline.coverImgKey = func(_ context.Context, imageURL string) (string, error) {
+		if imageURL != job.CoverURL {
+			t.Fatalf("cover URL = %q", imageURL)
+		}
+		return coverKey, nil
+	}
+	var card map[string]any
+	env.pipeline.notifyCard = func(_ context.Context, got map[string]any) error {
+		card = got
+		return nil
+	}
+	if err := env.pipeline.sendPublishNotification(context.Background(), job); err != nil {
+		t.Fatalf("send terminal card: %v", err)
+	}
+	stored, err := env.store.byID(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := cardJSON(t, card)
+	if stored.ReviewCoverImgKey != coverKey || !strings.Contains(raw, coverKey) {
+		t.Fatalf("终态卡应回补并复用飞书封面：job=%+v card=%s", stored, raw)
+	}
+}
+
 func TestPublishTerminalNotificationsUpdateExistingCardInPlace(t *testing.T) {
 	env := newPublishTestEnv(t)
 	job, _, err := env.store.create("site:terminal-notification:update-in-place", testPublishSourceURL)
