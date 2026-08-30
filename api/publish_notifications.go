@@ -219,6 +219,7 @@ func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job 
 	if err != nil {
 		return fmt.Errorf("发送卡片前重读任务 #%d 失败: %w", job.ID, err)
 	}
+	latest = p.prepareReviewCoverImgKey(ctx, latest)
 	return p.sendTerminalCardNotificationUnlocked(ctx, latest, buildReviewCardForCurrentState(latest), fallbackText)
 }
 
@@ -291,30 +292,30 @@ func (p *publishPipeline) sendReviewPendingNotification(ctx context.Context, job
 	return p.sendReviewPendingNotificationUnlocked(ctx, job)
 }
 
-func (p *publishPipeline) sendReviewPendingNotificationUnlocked(ctx context.Context, job publishJob) error {
-	coverImgKey := ""
-	if strings.TrimSpace(job.CoverURL) != "" {
-		var key string
-		var err error
-		if p != nil && p.deliverySettings != nil {
-			key, err = p.uploadReviewCoverForJob(ctx, job)
-		} else if p.coverImgKey != nil {
-			key, err = p.coverImgKey(ctx, job.CoverURL)
-		}
-		if err != nil {
-			log.Printf("publish: WARN 封面转存飞书失败（卡片将不带图）: %v", err)
-		} else {
-			coverImgKey = key
-			// 记住 img_key，终态卡直接复用；存不下也只记日志，绝不阻塞发卡。
-			if updated, updateErr := p.store.update(job.ID, func(current *publishJob) {
-				current.ReviewCoverImgKey = key
-			}); updateErr != nil {
-				log.Printf("publish: WARN 保存审核卡封面 img_key 失败（终态卡将不带图）: %v", updateErr)
-			} else {
-				job = updated
-			}
-		}
+// prepareReviewCoverImgKey 是待审核卡与终态卡共用的封面准备口。
+// 自动发布可能在 review_pending outbox 执行前就取消它，因此终态卡
+// 不能假设待审核路径已经上传过封面。调用方持有 reviewCardUpdateMu。
+func (p *publishPipeline) prepareReviewCoverImgKey(ctx context.Context, job publishJob) publishJob {
+	if strings.TrimSpace(job.ReviewCoverImgKey) != "" || strings.TrimSpace(job.CoverURL) == "" {
+		return job
 	}
+	key, err := p.uploadReviewCoverForJob(ctx, job)
+	if err != nil {
+		log.Printf("publish: WARN 封面转存飞书失败（卡片将不带图）: %v", err)
+		return job
+	}
+	updated, err := p.store.update(job.ID, func(current *publishJob) {
+		current.ReviewCoverImgKey = key
+	})
+	if err != nil {
+		log.Printf("publish: WARN 保存审核卡封面 img_key 失败（卡片将不带图）: %v", err)
+		return job
+	}
+	return updated
+}
+
+func (p *publishPipeline) sendReviewPendingNotificationUnlocked(ctx context.Context, job publishJob) error {
+	job = p.prepareReviewCoverImgKey(ctx, job)
 	// 上传封面期间任务可能已经被审核并推进到发布/下线。发送前必须在同一张
 	// 卡的串行锁内重读；旧 review_pending 绝不能最后覆盖终态卡。
 	latest, err := p.store.byID(job.ID)
@@ -326,16 +327,19 @@ func (p *publishPipeline) sendReviewPendingNotificationUnlocked(ctx context.Cont
 		return p.sendTerminalCardNotificationUnlocked(ctx, job, buildReviewCardForCurrentState(job), fmt.Sprintf(
 			"【网站同步】任务 #%d 状态已变化\n标题：%s", job.ID, job.Title))
 	}
-	coverImgKey = strings.TrimSpace(job.ReviewCoverImgKey)
 	// 同题防重提醒（best effort）：发卡/刷卡前查一次 CMS，命中即在卡上标红。
 	job = p.refreshSiteDuplicateFlag(ctx, job)
-	card := buildReviewPendingCard(job, coverImgKey)
+	card := buildReviewPendingCard(job, strings.TrimSpace(job.ReviewCoverImgKey))
 	if batchCard, batchErr := p.buildReviewBatchCard(job.ID); batchErr == nil {
 		card = batchCard
 	}
 	if p != nil && p.deliverySettings != nil {
 		return p.sendConfiguredReviewCardToTargets(ctx, job, card)
 	}
+	return p.sendLegacyReviewPendingCard(ctx, job, card)
+}
+
+func (p *publishPipeline) sendLegacyReviewPendingCard(ctx context.Context, job publishJob, card map[string]any) error {
 	if messageID := strings.TrimSpace(job.ReviewCardMsgID); messageID != "" && p.updateCard != nil {
 		if err := p.updateCard(ctx, messageID, card); err == nil {
 			return nil
@@ -363,13 +367,17 @@ func (p *publishPipeline) sendReviewPendingNotificationUnlocked(ctx context.Cont
 	if p.notify == nil {
 		return errors.New("飞书审核卡片与文本通知均未配置")
 	}
+	return p.notify(ctx, reviewPendingFallbackText(job))
+}
+
+func reviewPendingFallbackText(job publishJob) string {
 	instruction := fmt.Sprintf("请对发布任务 #%d 操作通过或驳回", job.ID)
 	if job.RiskLevel == publishRiskBlock {
 		instruction = fmt.Sprintf("发布任务 #%d 为阻断级，仅可驳回或人工处理风险后重新评估", job.ID)
 	}
-	return p.notify(ctx, fmt.Sprintf(
+	return fmt.Sprintf(
 		"【网站同步】待审核\n标题：%s\n原文：%s\n%s\n草稿已进站（外界不可见），FoodTalks 资讯 ID：%d\n%s",
-		job.Title, job.SourceURL, formatPublishRiskText(job), job.FoodTalksNewsID, instruction))
+		job.Title, job.SourceURL, formatPublishRiskText(job), job.FoodTalksNewsID, instruction)
 }
 
 // sendConfiguredReviewCardToTargets 是应用 + 多群配置的唯一卡片投递路径。
