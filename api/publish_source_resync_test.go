@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -10,6 +11,17 @@ import (
 func TestPublishedSourceResyncUpdatesSameFoodTalksArticle(t *testing.T) {
 	env, published := publishedSourceResyncTestJob(t)
 	seedSourceResyncLiveNews(t, env, published, "")
+	env.ft.mu.Lock()
+	live := env.ft.newsByID[published.FoodTalksNewsID]
+	live.CoverImg = "https://oss.example.com/cms-cover.png"
+	live.Summary = "运营在 CMS 保留的摘要"
+	live.NewsTags = []foodTalksNewsTag{{TagID: 114000, TagName: "茶叶系列"}}
+	live.NewsCategories = []foodTalksNewsCategoryDetail{{
+		CategoryTagID:   54,
+		ChildCategories: []foodTalksNewsCategoryDetail{{IsPrimary: 1, CategoryTagID: 76}},
+	}}
+	env.ft.newsByID[published.FoodTalksNewsID] = live
+	env.ft.mu.Unlock()
 
 	latestBlocks := `[{"k":"p","text":"公众号刚刚更新的正文"}]`
 	env.pipeline.fetch = func(context.Context, string) (string, string, string, string, string, string, error) {
@@ -120,23 +132,56 @@ func TestSourceResyncCardActionUsesVersionedButton(t *testing.T) {
 	}
 }
 
-func TestSourceResyncManualGuardCoversFullPUTMetadata(t *testing.T) {
-	expected := foodTalksNews{
-		Title: "标题", CoverImg: "https://oss.example/cover.png", SourceType: 0, SourceID: 7,
-		SourceName: "FoodTalks", Author: "FBIF", Summary: "摘要", Content: "<p>正文</p>",
-		NewsTags: []foodTalksNewsTag{{TagID: 9, TagName: "茶饮"}}, PublishStatus: 1,
-		IsPublic: 1, IsLatest: 1, ImgPreviewEnable: true, CommentEnable: 1,
-		PublishTime: "2026-09-01 08:00:00", PrimaryCategoryID: 52, CategoryIDs: []int64{52, 58},
-		Language: "ZH", SEOTitle: "标题-FoodTalks全球食品资讯",
+func TestSourceResyncLegacyGuardAcceptsEquivalentCMSMarkup(t *testing.T) {
+	stored := `<p>茶叶<a href="https://mp.weixin.qq.com/s/old">系列</a></p><p><img src="https://oss.example.com/a.jpg"></p>`
+	live := `<p id="mctoc_1"><span>茶叶</span><a href="https://www.foodtalks.cn/news/1">系列</a></p><p><img width="600" src="https://oss.example.com/a.jpg" /></p>`
+	if foodTalksManualContentChanged(live, stored, "") {
+		t.Fatal("旧稿缺字节基线时，CMS 序列化与站内链接差异不应误判为人工改正文")
 	}
-	live := foodTalksDetailFromExpected(62915, expected)
-	if changes := foodTalksManualChangeFields(live, expected, ""); len(changes) != 0 {
-		t.Fatalf("未修改的 CMS 现稿不应被拦截：%v", changes)
+	if !foodTalksManualContentChanged(strings.Replace(live, "系列", "新系列", 1), stored, "") {
+		t.Fatal("旧稿的可见文字变化必须拦截")
 	}
-	live.Summary = "运营手工改过的摘要"
-	changes := foodTalksManualChangeFields(live, expected, "")
-	if len(changes) != 1 || !strings.Contains(changes[0], "发布字段") {
-		t.Fatalf("全量 PUT 会覆盖的元数据也必须拦截：%v", changes)
+	if !foodTalksManualContentChanged(strings.Replace(live, "a.jpg", "b.jpg", 1), stored, "") {
+		t.Fatal("旧稿的正文图片变化必须拦截")
+	}
+	if !foodTalksManualContentChanged(live, stored, publishRenderOutputHash(stored)) {
+		t.Fatal("已有字节基线的新稿必须继续严格拦截任意 HTML 变化")
+	}
+}
+
+func TestSourceResyncPreservesCurrentCMSMetadata(t *testing.T) {
+	next := foodTalksNews{Content: "<p>公众号新正文</p>", TOC: `[{"id":"new"}]`}
+	live := foodTalksNewsDetail{
+		Title: "网站标题", CoverImg: "https://oss.example.com/cms-cover.png",
+		SourceType: 0, SourceID: 7632, SourceName: "FBIF食品饮料创新", Author: "Mote莫特",
+		Summary: "网站摘要", PublishStatus: 1, IsPublic: true, IsLatest: 1,
+		ImgPreviewEnable: true, CommentEnable: 1, PublishTime: "2026-09-01 08:43:55",
+		NewsCategories: []foodTalksNewsCategoryDetail{{
+			CategoryTagID:   54,
+			ChildCategories: []foodTalksNewsCategoryDetail{{IsPrimary: 1, CategoryTagID: 76}},
+		}},
+		NewsTags:           []foodTalksNewsTag{{TagID: 114000, TagName: "茶叶系列"}},
+		NewsRelation:       []foodTalksNewsRelationDetail{{RelationNewsID: 20}},
+		TopicSectionIDList: []int64{11},
+		RelatedCompanies:   []foodTalksRelatedCompanyDetail{{CompanyID: 30}},
+		RelatedFoodpedias:  []foodTalksRelatedFoodpedia{{FoodpediaID: 40}},
+		Language:           "ZH", SEOTitle: "网站 SEO", SEOKeywords: "茶叶", SEODescription: "网站 SEO 摘要",
+	}
+	preserveFoodTalksLiveMetadata(&next, live)
+	if next.Content != "<p>公众号新正文</p>" || next.TOC != `[{"id":"new"}]` {
+		t.Fatal("重新同步只能替换正文与随正文生成的目录")
+	}
+	if next.Title != live.Title || next.CoverImg != live.CoverImg || next.Summary != live.Summary ||
+		next.SourceID != live.SourceID || next.PublishTime != live.PublishTime || next.PrimaryCategoryID != 76 {
+		t.Fatalf("网站现有标量发布字段未完整保留：%+v", next)
+	}
+	if !slices.Equal(next.CategoryIDs, []int64{54, 76}) ||
+		!slices.Equal(next.NewsTags, live.NewsTags) ||
+		!slices.Equal(next.TopicSectionIDList, live.TopicSectionIDList) ||
+		!slices.Equal(next.NewsRelationIDs, []int64{20}) ||
+		!slices.Equal(next.RelatedCompanyIDs, []int64{30}) ||
+		!slices.Equal(next.RelatedFoodpediaIDs, []int64{40}) {
+		t.Fatalf("网站现有关联发布字段未完整保留：%+v", next)
 	}
 }
 
