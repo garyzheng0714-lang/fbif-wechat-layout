@@ -488,7 +488,7 @@ test('url-import keeps numeric heading groups tight without merging headings', (
   assert.doesNotMatch(sectionForText(html, '这是标题之后的正文。'), /wx-th/);
 });
 
-test('url-import attribution is emitted once at article tail before the standard footer', () => {
+test('url-import repost attribution is emitted once at article start', () => {
   const html = renderBlocks([
     txtBlock('正文第一段'),
     txtBlock('来源：剁椒Spicy'),
@@ -500,11 +500,22 @@ test('url-import attribution is emitted once at article tail before the standard
   assert.equal((html.match(/来源：剁椒Spicy/g) || []).length, 1);
   assert.equal((html.match(/作者：亚娜/g) || []).length, 1);
   assert.doesNotMatch(html, /提示：/);
-  assert.ok(html.indexOf('正文第一段') < html.indexOf('来源：剁椒Spicy'));
   assert.ok(html.indexOf('来源：剁椒Spicy') < html.indexOf('作者：亚娜'));
+  assert.ok(html.indexOf('作者：亚娜') < html.indexOf('正文第一段'));
 });
 
-test('url-import opening attribution wins over heading classification and renders as two compact tail lines', () => {
+test('url-import original attribution stays at article tail', () => {
+  const html = renderBlocks([
+    txtBlock('正文第一段'),
+    txtBlock('来源：FBIF'),
+    txtBlock('作者：编辑部'),
+  ], { isRepost: false });
+
+  assert.ok(html.indexOf('正文第一段') < html.indexOf('来源：FBIF'));
+  assert.ok(html.indexOf('来源：FBIF') < html.indexOf('作者：编辑部'));
+});
+
+test('url-import opening attribution wins over heading classification and renders as compact repost lead lines', () => {
   const result = template.processBlocks({
     title: '测试文章',
     blocks: [
@@ -527,13 +538,16 @@ test('url-import opening attribution wins over heading classification and render
   assert.equal((html.match(/作者：少华/g) || []).length, 1);
   assert.equal((html.match(/编辑：少华/g) || []).length, 1);
   assert.doesNotMatch(html, /class="wx-th">(?:来源|作者|编辑)/);
-  assert.ok(html.indexOf('正文第一段') < html.indexOf('来源：咖门'));
-  assert.ok(html.indexOf('来源：咖门') < html.indexOf('作者：少华，编辑：少华'));
+  assert.ok(html.indexOf('来源：咖门') < html.indexOf('作者：少华'));
+  assert.ok(html.indexOf('作者：少华') < html.indexOf('编辑：少华'));
+  assert.ok(html.indexOf('编辑：少华') < html.indexOf('正文第一段'));
 
   const sourceSection = sectionForText(html, '来源：咖门');
-  const authorSection = sectionForText(html, '作者：少华，编辑：少华');
-  assert.doesNotMatch(sourceSection, /wx-gap/, '来源与作者/编辑之间不插空行');
-  assert.match(authorSection, /wx-gap/, '署名组结束后恢复标准段距');
+  const authorSection = sectionForText(html, '作者：少华');
+  const editorSection = sectionForText(html, '编辑：少华');
+  assert.doesNotMatch(sourceSection, /wx-gap/, '来源与作者之间不插空行');
+  assert.doesNotMatch(authorSection, /wx-gap/, '作者与编辑之间不插空行');
+  assert.match(editorSection, /wx-gap/, '署名组结束后恢复标准段距');
 });
 
 test('url-import slash attribution aliases normalize 出品 to 来源 and 撰文 to 作者', () => {
@@ -558,8 +572,8 @@ test('url-import slash attribution aliases normalize 出品 to 来源 and 撰文
   assert.match(html, /作者：鄰娜/);
   assert.doesNotMatch(html, /出品\/联商网|撰文\/鄰娜/);
   assert.doesNotMatch(html, /PackHorizon/, '正文显式出品优先于公众号名称');
-  assert.ok(html.indexOf('正文第一段') < html.indexOf('来源：联商网'));
   assert.ok(html.indexOf('来源：联商网') < html.indexOf('作者：鄰娜'));
+  assert.ok(html.indexOf('作者：鄰娜') < html.indexOf('正文第一段'));
 });
 
 test('url-import falls back to WeChat source_name when article has no source line', () => {
@@ -576,11 +590,11 @@ test('url-import falls back to WeChat source_name when article has no source lin
   assert.equal(result.articleMeta.source, 'PackHorizon');
   assert.equal(result.articleMeta.author, '');
   assert.equal((html.match(/来源：PackHorizon/g) || []).length, 1);
-  assert.ok(html.indexOf('正文第一段') < html.indexOf('来源：PackHorizon'));
+  assert.ok(html.indexOf('来源：PackHorizon') < html.indexOf('正文第一段'));
   assert.doesNotMatch(html, /作者：Sofiia Oswald/, 'byline 不在本规则中自动转换为作者');
 });
 
-test('url-import tail attribution keeps the requested blue 1.75 copy style', async () => {
+test('url-import attribution keeps the requested blue 1.75 copy style', async () => {
   const html = renderBlocks([
     txtBlock('来源：咖门'),
     txtBlock('作者：少华'),
@@ -590,14 +604,16 @@ test('url-import tail attribution keeps the requested blue 1.75 copy style', asy
   const themeCSS = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
   const copyHtml = processForCopy(html, themeCSS, DEFAULT_RULE_CONFIG);
   const sourceSection = sectionForText(copyHtml, '来源：咖门');
-  const authorSection = sectionForText(copyHtml, '作者：少华，编辑：少华');
+  const authorSection = sectionForText(copyHtml, '作者：少华');
+  const editorSection = sectionForText(copyHtml, '编辑：少华');
 
-  for (const section of [sourceSection, authorSection]) {
+  for (const section of [sourceSection, authorSection, editorSection]) {
     assert.match(section, /color:\s*#0070C0/i);
     assert.match(section, /line-height:\s*1\.75/);
     assert.match(section, /font-style:\s*normal/i);
   }
   assert.match(sourceSection, /margin-bottom:\s*0/);
+  assert.match(authorSection, /margin-bottom:\s*0/);
 });
 
 test('url-import heading-like attribution outside the opening scan window stays a heading', () => {

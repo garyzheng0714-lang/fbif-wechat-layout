@@ -1,15 +1,15 @@
-// render-service 网站渠道（packId=ft-default）契约 + fbif 逐字节防回归。
+// render-service 网站渠道（packId=ft-default）契约 + fbif 当前金样防回归。
 //
 // WHY：/api/render 是资讯订阅发布流水线的机器排版出口，本文件守三条合同：
 //   1. 网站渠道输出必须是「粘进 FoodTalks CMS（TinyMCE）能存活」的网站口径 HTML——
 //      署名 #888888、外链保留、不做微信归一化、表格带 CMS 存活属性（红线 #24）；
 //   2. 页脚走 config.modules.bottom_blocks 主路径（红线 #20/#22），素材引用解析 + 绝对化；
-//   3. 接入网站渠道不许动公众号一个字节（红线 #19）——fbif 输出与重构前 golden 逐字节一致。
+//   3. 网站渠道改动不许影响公众号（红线 #19）——fbif 输出与当前运营 golden 逐字节一致。
 //
 // 规则拉取用 fixture 桩（不调真实 API）：fixture 由本仓库 Go API 的默认种子 dump 而来
 // （RULES_STORE_PATH 指向临时文件启动 `go run . -port <n>` 后 curl /api/rules/active）。
-// golden/render-service-fbif.html 由【重构前】render.mjs + 同一 fixture + 同一样例生成，
-// 是「fbif 逐字节不变」的真值。样例 blocks 单一真相在 fixtures/render-service-sample-blocks.mjs。
+// golden/render-service-fbif.html 由 render.mjs + 同一 fixture + 同一样例生成，是当前公众号
+// 运营合同的真值。样例 blocks 单一真相在 fixtures/render-service-sample-blocks.mjs。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -312,11 +312,11 @@ test('ft-default：表格 CMS 存活开关沿 headless 路径传到 shared/table
   assert.match(washed, /<td align="center">植物基饮料<\/td>/, '清洗后正文格仍居中');
 });
 
-test('fbif：接入网站渠道后输出与重构前 golden 逐字节一致（红线 #19）', async () => {
-  // golden 由重构前 render.mjs + 同一 fixture + 同一样例生成（生成方式见文件头）。
+test('fbif：网站渠道接入不影响当前公众号 golden（红线 #19）', async () => {
+  // golden 由当前 render.mjs + 同一 fixture + 同一样例生成（生成方式见文件头）。
   // 任何 fbif 字节漂移（哪怕空格）都意味着渠道参数化渗漏进了公众号路径——直接打回。
   const { html, imgN, headingN } = await renderArticle(SAMPLE_ARTICLE);
-  assert.equal(html, golden, 'fbif 输出必须与重构前逐字节一致');
+  assert.equal(html, golden, 'fbif 输出必须与当前公众号运营合同逐字节一致');
   assert.equal(imgN, 1);
   assert.equal(headingN, 1);
   // 公众号表格不得沾染 CMS 存活属性（cmsSurvival 只属网站渠道）。
