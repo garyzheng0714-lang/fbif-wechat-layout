@@ -1,8 +1,9 @@
 package main
 
 // publish_source_resync.go — 已发布稿从原公众号重新抓取、排版并覆盖
-// 同一个 FoodTalks 资讯 ID。它不改主 Stage；外调前先核对 CMS 现状，
-// 发现人工改稿就停，已进入 PUT 窗口后则只能人工对账。
+// 同一个 FoodTalks 资讯 ID。它不改主 Stage；外调前先核对 CMS 正文，
+// 发现人工改正文就停，其余全量 PUT 字段沿用 CMS 现值；已进入 PUT
+// 窗口后则只能人工对账。
 
 import (
 	"context"
@@ -12,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -203,11 +203,6 @@ func (p *publishPipeline) runSourceResync(jobID int64) {
 		p.markSourceResyncFailed(job, err)
 		return
 	}
-	previousNews, err := p.buildSiteNews(ctx, job, foodTalksPublishStatusPublished)
-	if err != nil {
-		p.markSourceResyncFailed(job, err)
-		return
-	}
 	ft, err := p.foodTalks()
 	if err != nil {
 		p.markSourceResyncFailed(job, err)
@@ -218,11 +213,12 @@ func (p *publishPipeline) runSourceResync(jobID int64) {
 		p.markSourceResyncFailed(job, fmt.Errorf("更新前读取 FoodTalks 现稿失败，未覆盖: %w", err))
 		return
 	}
-	if changes := foodTalksManualChangeFields(live, previousNews, job.SiteContentHash); len(changes) > 0 {
-		p.markSourceResyncFailed(job, fmt.Errorf("检测到 FoodTalks 后台已有人工修改（%s），未覆盖", strings.Join(changes, "、")))
+	if foodTalksManualContentChanged(live.Content, job.ContentHTML, job.SiteContentHash) {
+		p.markSourceResyncFailed(job, errors.New("检测到 FoodTalks 后台已有人工修改（正文），未覆盖"))
 		return
 	}
-	if len(foodTalksManualChangeFields(live, nextNews, "")) == 0 {
+	preserveFoodTalksLiveMetadata(&nextNews, live)
+	if live.Content == nextNews.Content && live.TOC == nextNews.TOC {
 		p.finishSourceResync(job, candidate, nextNews, publishSourceResyncPreparing, "")
 		return
 	}
@@ -496,89 +492,39 @@ func (p *publishPipeline) recoverSourceResync(job publishJob) {
 	}
 }
 
-type foodTalksSiteMetadata struct {
-	Title, CoverImg, SourceName, Author, Summary, TOC string
-	Language, SEOTitle, SEOKeywords, SEODescription   string
-	SourceType, PublishStatus, IsPublic, IsLatest     int
-	SourceID                                          int64
-	ImgPreviewEnable                                  bool
-	CommentEnable                                     int
-	PublishTime                                       string
-	PrimaryCategoryID                                 int64
-	CategoryIDs, TopicSectionIDs                      []int64
-	NewsTags                                          []foodTalksNewsTag
-	NewsRelationIDs, RelatedCompanyIDs                []int64
-	RelatedFoodpediaIDs                               []int64
-}
-
-func foodTalksManualChangeFields(live foodTalksNewsDetail, expected foodTalksNews, siteContentHash string) []string {
-	changes := []string{}
-	contentMatches := live.Content == expected.Content
+func foodTalksManualContentChanged(liveContent, storedContent, siteContentHash string) bool {
 	if strings.TrimSpace(siteContentHash) != "" {
-		contentMatches = publishRenderOutputHash(live.Content) == siteContentHash
+		return publishRenderOutputHash(liveContent) != siteContentHash
 	}
-	if !contentMatches {
-		changes = append(changes, "正文")
-	}
-	if !reflect.DeepEqual(foodTalksLiveMetadata(live), foodTalksExpectedMetadata(expected)) {
-		changes = append(changes, "标题/封面/分类/标签等发布字段")
-	}
-	return changes
+	liveText := strings.Join(strings.Fields(htmlToPlainText(liveContent)), " ")
+	storedText := strings.Join(strings.Fields(htmlToPlainText(storedContent)), " ")
+	return liveText != storedText || !slices.Equal(extractImgSrcs(liveContent), extractImgSrcs(storedContent))
 }
 
-func foodTalksExpectedMetadata(news foodTalksNews) foodTalksSiteMetadata {
-	metadata := foodTalksSiteMetadata{
-		Title: news.Title, CoverImg: news.CoverImg, SourceName: news.SourceName,
-		Author: news.Author, Summary: news.Summary, TOC: news.TOC, Language: news.Language,
-		SEOTitle: news.SEOTitle, SEOKeywords: news.SEOKeywords, SEODescription: news.SEODescription,
-		SourceType: news.SourceType, SourceID: news.SourceID, PublishStatus: news.PublishStatus,
-		IsPublic: news.IsPublic, IsLatest: news.IsLatest, ImgPreviewEnable: news.ImgPreviewEnable,
-		CommentEnable: news.CommentEnable, PublishTime: news.PublishTime,
-		PrimaryCategoryID: news.PrimaryCategoryID,
-		CategoryIDs:       append([]int64{}, news.CategoryIDs...), TopicSectionIDs: append([]int64{}, news.TopicSectionIDList...),
-		NewsTags: append([]foodTalksNewsTag{}, news.NewsTags...), NewsRelationIDs: append([]int64{}, news.NewsRelationIDs...),
-		RelatedCompanyIDs: append([]int64{}, news.RelatedCompanyIDs...), RelatedFoodpediaIDs: append([]int64{}, news.RelatedFoodpediaIDs...),
-	}
-	return normalizeFoodTalksSiteMetadata(metadata)
-}
-
-func foodTalksLiveMetadata(news foodTalksNewsDetail) foodTalksSiteMetadata {
-	primary, categories := foodTalksDetailCategoryIDs(news.NewsCategories)
-	metadata := foodTalksSiteMetadata{
-		Title: news.Title, CoverImg: news.CoverImg, SourceName: news.SourceName,
-		Author: news.Author, Summary: news.Summary, TOC: news.TOC, Language: news.Language,
-		SEOTitle: news.SEOTitle, SEOKeywords: news.SEOKeywords, SEODescription: news.SEODescription,
-		SourceType: news.SourceType, SourceID: news.SourceID, PublishStatus: news.PublishStatus,
-		IsLatest: news.IsLatest, ImgPreviewEnable: news.ImgPreviewEnable,
-		CommentEnable: news.CommentEnable, PublishTime: news.PublishTime,
-		PrimaryCategoryID: primary, CategoryIDs: categories,
-		TopicSectionIDs: append([]int64{}, news.TopicSectionIDList...), NewsTags: append([]foodTalksNewsTag{}, news.NewsTags...),
-		NewsRelationIDs:     foodTalksDetailNewsRelationIDs(news.NewsRelation),
-		RelatedCompanyIDs:   foodTalksDetailCompanyIDs(news.RelatedCompanies),
-		RelatedFoodpediaIDs: foodTalksDetailFoodpediaIDs(news.RelatedFoodpedias),
-	}
-	if news.IsPublic {
-		metadata.IsPublic = 1
-	}
-	return normalizeFoodTalksSiteMetadata(metadata)
-}
-
-func normalizeFoodTalksSiteMetadata(metadata foodTalksSiteMetadata) foodTalksSiteMetadata {
-	slices.Sort(metadata.CategoryIDs)
-	slices.Sort(metadata.TopicSectionIDs)
-	slices.Sort(metadata.NewsRelationIDs)
-	slices.Sort(metadata.RelatedCompanyIDs)
-	slices.Sort(metadata.RelatedFoodpediaIDs)
-	slices.SortFunc(metadata.NewsTags, func(a, b foodTalksNewsTag) int {
-		if a.TagID < b.TagID {
-			return -1
-		}
-		if a.TagID > b.TagID {
-			return 1
-		}
-		return strings.Compare(a.TagName, b.TagName)
-	})
-	return metadata
+func preserveFoodTalksLiveMetadata(news *foodTalksNews, live foodTalksNewsDetail) {
+	news.Title = live.Title
+	news.CoverImg = live.CoverImg
+	news.SourceType = live.SourceType
+	news.SourceID = live.SourceID
+	news.SourceName = live.SourceName
+	news.Author = live.Author
+	news.Summary = live.Summary
+	news.NewsTags = append([]foodTalksNewsTag{}, live.NewsTags...)
+	news.PublishStatus = live.PublishStatus
+	news.IsPublic = boolInt(live.IsPublic)
+	news.IsLatest = live.IsLatest
+	news.ImgPreviewEnable = live.ImgPreviewEnable
+	news.CommentEnable = live.CommentEnable
+	news.PublishTime = live.PublishTime
+	news.PrimaryCategoryID, news.CategoryIDs = foodTalksDetailCategoryIDs(live.NewsCategories)
+	news.SEOTitle = live.SEOTitle
+	news.SEOKeywords = live.SEOKeywords
+	news.SEODescription = live.SEODescription
+	news.NewsRelationIDs = foodTalksDetailNewsRelationIDs(live.NewsRelation)
+	news.TopicSectionIDList = append([]int64{}, live.TopicSectionIDList...)
+	news.RelatedCompanyIDs = foodTalksDetailCompanyIDs(live.RelatedCompanies)
+	news.RelatedFoodpediaIDs = foodTalksDetailFoodpediaIDs(live.RelatedFoodpedias)
+	news.Language = live.Language
 }
 
 func foodTalksDetailCategoryIDs(categories []foodTalksNewsCategoryDetail) (int64, []int64) {
