@@ -16,17 +16,20 @@ import (
 )
 
 const (
-	publishNotificationReviewPending      = "review_pending"
-	publishNotificationPublished          = "published"
-	publishNotificationRejected           = "rejected"
-	publishNotificationPublicizeFailed    = "publicize_failed"
-	publishNotificationPublicizeUncertain = "publicize_uncertain"
-	publishNotificationOffline            = "offline"
-	publishNotificationRepublished        = "republished"
-	publishNotificationUnpublishFailed    = "unpublish_failed"
-	publishNotificationUnpublishUncertain = "unpublish_uncertain"
-	publishNotificationRepublishFailed    = "republish_failed"
-	publishNotificationRepublishUncertain = "republish_uncertain"
+	publishNotificationReviewPending         = "review_pending"
+	publishNotificationPublished             = "published"
+	publishNotificationRejected              = "rejected"
+	publishNotificationPublicizeFailed       = "publicize_failed"
+	publishNotificationPublicizeUncertain    = "publicize_uncertain"
+	publishNotificationOffline               = "offline"
+	publishNotificationRepublished           = "republished"
+	publishNotificationUnpublishFailed       = "unpublish_failed"
+	publishNotificationUnpublishUncertain    = "unpublish_uncertain"
+	publishNotificationRepublishFailed       = "republish_failed"
+	publishNotificationRepublishUncertain    = "republish_uncertain"
+	publishNotificationSourceResyncSucceeded = "source_resync_succeeded"
+	publishNotificationSourceResyncFailed    = "source_resync_failed"
+	publishNotificationSourceResyncUncertain = "source_resync_uncertain"
 
 	publishNotificationStatePending    = "pending"
 	publishNotificationStateSending    = "sending"
@@ -162,6 +165,23 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 	switch job.NotificationKind {
 	case publishNotificationReviewPending:
 		return p.sendReviewPendingNotification(ctx, job)
+	case publishNotificationPublished, publishNotificationRejected,
+		publishNotificationOffline, publishNotificationRepublished:
+		return p.sendPublishStateNotification(ctx, job)
+	case publishNotificationPublicizeFailed, publishNotificationPublicizeUncertain,
+		publishNotificationUnpublishFailed, publishNotificationUnpublishUncertain,
+		publishNotificationRepublishFailed, publishNotificationRepublishUncertain:
+		return p.sendPublishIssueNotification(ctx, job)
+	case publishNotificationSourceResyncSucceeded, publishNotificationSourceResyncFailed,
+		publishNotificationSourceResyncUncertain:
+		return p.sendSourceResyncNotification(ctx, job)
+	default:
+		return fmt.Errorf("未知发布通知类型 %q", job.NotificationKind)
+	}
+}
+
+func (p *publishPipeline) sendPublishStateNotification(ctx context.Context, job publishJob) error {
+	switch job.NotificationKind {
 	case publishNotificationPublished:
 		return p.sendTerminalPublishNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】已发布\n标题：%s\n链接：%s", job.Title, job.ArticleURL))
@@ -174,6 +194,13 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 	case publishNotificationRepublished:
 		return p.sendTerminalPublishNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】已重新发布\n标题：%s\n文章已恢复为 FoodTalks 公开状态。", job.Title))
+	default:
+		return fmt.Errorf("未知发布结果通知类型 %q", job.NotificationKind)
+	}
+}
+
+func (p *publishPipeline) sendPublishIssueNotification(ctx context.Context, job publishJob) error {
+	switch job.NotificationKind {
 	case publishNotificationPublicizeFailed:
 		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
 			"【网站同步】发布失败\n标题：%s\n任务 #%d 在发出公开请求前已确认失败，网站仍保持草稿态；修复配置后可安全重试。\n原因：%s",
@@ -199,7 +226,24 @@ func (p *publishPipeline) sendPublishNotification(ctx context.Context, job publi
 			"【网站同步】重新发布结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n任务 #%d 不会自动重试，请先确认文章当前是否已公开，再进行对账。\n原因：%s",
 			job.Title, job.FoodTalksNewsID, job.ID, job.Error))
 	default:
-		return fmt.Errorf("未知发布通知类型 %q", job.NotificationKind)
+		return fmt.Errorf("未知发布异常通知类型 %q", job.NotificationKind)
+	}
+}
+
+func (p *publishPipeline) sendSourceResyncNotification(ctx context.Context, job publishJob) error {
+	switch job.NotificationKind {
+	case publishNotificationSourceResyncSucceeded:
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
+			"【网站同步】已按公众号最新正文覆盖\n标题：%s\n链接：%s", job.Title, job.ArticleURL))
+	case publishNotificationSourceResyncFailed:
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
+			"【网站同步】重新同步失败，网站稿未覆盖\n标题：%s\n原因：%s", job.Title, job.SourceResyncError))
+	case publishNotificationSourceResyncUncertain:
+		return p.sendTerminalCardNotification(ctx, job, fmt.Sprintf(
+			"【网站同步】更新结果待核对\n标题：%s\nFoodTalks 资讯 ID：%d\n系统不会自动重试。\n原因：%s",
+			job.Title, job.FoodTalksNewsID, job.SourceResyncError))
+	default:
+		return fmt.Errorf("未知来源重新同步通知类型 %q", job.NotificationKind)
 	}
 }
 

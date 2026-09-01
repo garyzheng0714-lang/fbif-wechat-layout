@@ -31,6 +31,7 @@ const (
 	feishuCardActionUnpublish          = "unpublish"
 	feishuCardActionRepublish          = "republish"
 	feishuCardActionDistributeExternal = "distribute_external"
+	feishuCardActionResyncSource       = "resync_source"
 	// 阻断级风险卡上的强制发布（2026-08-07 用户裁定：阻断只当警示不当锁）。
 	feishuCardActionForceApprove = "force_approve"
 )
@@ -96,14 +97,19 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 
 func reviewBatchArticleBlock(job publishJob) map[string]any {
 	columns := []any{}
-	if cover := strings.TrimSpace(job.ReviewCoverImgKey); cover != "" {
+	cover := strings.TrimSpace(job.ReviewCoverImgKey)
+	if cover != "" {
+		coverElements := []any{map[string]any{
+			"tag": "img", "img_key": cover, "alt": feishuPlainText("文章封面图"),
+			"preview": true, "transparent": true, "scale_type": "fit_horizontal", "corner_radius": "3px",
+		}}
+		if button := reviewCardSourceResyncButton(job, "tiny"); button != nil {
+			coverElements = append(coverElements, button)
+		}
 		columns = append(columns, map[string]any{
 			"tag": "column", "width": "weighted", "weight": 1,
-			"direction": "vertical", "vertical_align": "top", "padding": "8px 8px 8px 8px",
-			"elements": []any{map[string]any{
-				"tag": "img", "img_key": cover, "alt": feishuPlainText("文章封面图"),
-				"preview": true, "transparent": true, "scale_type": "fit_horizontal", "corner_radius": "3px",
-			}},
+			"direction": "vertical", "vertical_align": "top", "vertical_spacing": "6px", "padding": "8px 8px 8px 8px",
+			"elements": coverElements,
 		})
 	}
 	copyElements := []any{map[string]any{
@@ -119,7 +125,15 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		"tag": "markdown", "content": "<font color='grey'>" + reviewCardSafeOrDash(job.Summary, 180) + "</font>",
 		"text_size": "notation",
 	})
+	if status := reviewCardSourceResyncStatus(job); status != nil {
+		copyElements = append(copyElements, status)
+	}
 	copyElements = append(copyElements, reviewBatchButtonRow(job))
+	if cover == "" {
+		if button := reviewCardSourceResyncButton(job, "tiny"); button != nil {
+			copyElements = append(copyElements, feishuButtonRow(button))
+		}
+	}
 	if job.Stage == publishStagePublished {
 		provenance, _, _ := publishExternalDistributionProvenance(job)
 		if strings.TrimSpace(job.ExternalDistributionState) != "" || provenance == publishExternalProvenanceOriginal {
@@ -245,38 +259,12 @@ func reviewBatchButtonRow(job publishJob) map[string]any {
 }
 
 func reviewBatchActionButton(job publishJob) map[string]any {
-	disabled := func(label string) map[string]any {
-		return map[string]any{
-			"tag": "button", "text": feishuPlainText(label), "type": "default",
-			"width": "fill", "size": "tiny", "disabled": true,
-		}
-	}
 	switch job.Stage {
 	case publishStageAwaitingReview:
-		if !publishRiskAllowsManualApprove(job.RiskLevel) && job.RiskLevel != publishRiskBlock {
-			return disabled("检查未完成")
-		}
-		action := feishuCardActionApprove
-		label, buttonType := "发布", "primary_filled"
-		confirmTitle := "通过并发布？"
-		confirmText := "文章将在 FoodTalks 公开可见。"
-		if job.RiskLevel == publishRiskBlock {
-			action, label, buttonType = feishuCardActionForceApprove, "强制发布", "danger"
-			confirmTitle = "无视风险阻断，强制发布？"
-			confirmText = "风险检查已阻断本文，操作将以你的身份留痕。"
-		}
-		return map[string]any{
-			"tag": "button", "text": feishuPlainText(label), "type": buttonType,
-			"width": "fill", "size": "tiny",
-			"icon":    map[string]any{"tag": "standard_icon", "token": "upload_outlined"},
-			"confirm": map[string]any{"title": feishuPlainText(confirmTitle), "text": feishuPlainText(confirmText)},
-			"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{
-				"action": action, "job_id": job.ID, "review_version": publishReviewCardVersion(job),
-			}}},
-		}
+		return reviewBatchAwaitingActionButton(job)
 	case publishStagePublished:
 		if !publishUnpublishWindowOpen(job, time.Now().UTC()) {
-			return disabled("不可下线")
+			return reviewBatchDisabledActionButton("不可下线")
 		}
 		return map[string]any{
 			"tag": "button", "text": feishuPlainText("下线"), "type": "danger",
@@ -302,16 +290,99 @@ func reviewBatchActionButton(job publishJob) map[string]any {
 			}}},
 		}
 	case publishStagePublicizing, publishStagePublicizingUpdating:
-		return disabled("发布中")
+		return reviewBatchDisabledActionButton("发布中")
 	case publishStageUnpublishing, publishStageUnpublishingUpdating:
-		return disabled("下线中")
+		return reviewBatchDisabledActionButton("下线中")
 	case publishStageRepublishing, publishStageRepublishingUpdating:
-		return disabled("重新发布中")
+		return reviewBatchDisabledActionButton("重新发布中")
 	case publishStageRejected:
-		return disabled("已驳回")
+		return reviewBatchDisabledActionButton("已驳回")
 	default:
-		return disabled("待人工处理")
+		return reviewBatchDisabledActionButton("待人工处理")
 	}
+}
+
+func reviewBatchDisabledActionButton(label string) map[string]any {
+	return map[string]any{
+		"tag": "button", "text": feishuPlainText(label), "type": "default",
+		"width": "fill", "size": "tiny", "disabled": true,
+	}
+}
+
+func reviewBatchAwaitingActionButton(job publishJob) map[string]any {
+	if !publishRiskAllowsManualApprove(job.RiskLevel) && job.RiskLevel != publishRiskBlock {
+		return reviewBatchDisabledActionButton("检查未完成")
+	}
+	action := feishuCardActionApprove
+	label, buttonType := "发布", "primary_filled"
+	confirmTitle := "通过并发布？"
+	confirmText := "文章将在 FoodTalks 公开可见。"
+	if job.RiskLevel == publishRiskBlock {
+		action, label, buttonType = feishuCardActionForceApprove, "强制发布", "danger"
+		confirmTitle = "无视风险阻断，强制发布？"
+		confirmText = "风险检查已阻断本文，操作将以你的身份留痕。"
+	}
+	return map[string]any{
+		"tag": "button", "text": feishuPlainText(label), "type": buttonType,
+		"width": "fill", "size": "tiny",
+		"icon":    map[string]any{"tag": "standard_icon", "token": "upload_outlined"},
+		"confirm": map[string]any{"title": feishuPlainText(confirmTitle), "text": feishuPlainText(confirmText)},
+		"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{
+			"action": action, "job_id": job.ID, "review_version": publishReviewCardVersion(job),
+		}}},
+	}
+}
+
+func reviewCardSourceResyncButton(job publishJob, size string) map[string]any {
+	if job.Stage != publishStagePublished || job.PublicationAction == publishPublicationActionManualCMS ||
+		job.FoodTalksNewsID <= 0 || strings.TrimSpace(job.SourceURL) == "" ||
+		strings.TrimSpace(job.ExternalDistributionState) != "" {
+		return nil
+	}
+	button := map[string]any{
+		"tag": "button", "text": feishuPlainText("重新同步至网站"), "type": "default",
+		"width": "fill", "size": size,
+		"icon": map[string]any{"tag": "standard_icon", "token": "cloud-change_outlined"},
+	}
+	switch job.SourceResyncState {
+	case publishSourceResyncQueued, publishSourceResyncPreparing, publishSourceResyncUpdating:
+		button["text"] = feishuPlainText("正在重新同步")
+		button["disabled"] = true
+		return button
+	case publishSourceResyncReconciliationRequired:
+		button["text"] = feishuPlainText("更新结果待核对")
+		button["disabled"] = true
+		return button
+	}
+	button["confirm"] = map[string]any{
+		"title": feishuPlainText("重新同步至网站？"),
+		"text":  feishuPlainText("将重新抓取公众号最新正文，按当前 FoodTalks 规则排版，并覆盖原文章；不会新建文章。若检测到后台人工修改，系统会停止覆盖。"),
+	}
+	button["behaviors"] = []any{map[string]any{"type": "callback", "value": map[string]any{
+		"action": feishuCardActionResyncSource, "job_id": job.ID,
+		"source_resync_version": publishSourceResyncCardVersion(job),
+	}}}
+	return button
+}
+
+func reviewCardSourceResyncStatus(job publishJob) map[string]any {
+	content := ""
+	switch job.SourceResyncState {
+	case publishSourceResyncQueued, publishSourceResyncPreparing:
+		content = "<font color='grey'>正在重新抓取公众号正文并排版……</font>"
+	case publishSourceResyncUpdating:
+		content = "<font color='grey'>正在覆盖同一篇 FoodTalks 文章……</font>"
+	case publishSourceResyncSucceeded:
+		content = "<font color='grey'>最近一次重新同步已完成：" + reviewCardSafeText(formatReviewCardTime(job.SourceResyncCompletedAt), 60) + "</font>"
+	case publishSourceResyncFailed:
+		content = "<font color='red'>上次同步失败，网站稿未覆盖：" + reviewCardSafeText(job.SourceResyncError, 180) + "</font>"
+	case publishSourceResyncReconciliationRequired:
+		content = "<font color='orange'>更新结果待核对，系统不会自动重试。</font>"
+	}
+	if content == "" {
+		return nil
+	}
+	return map[string]any{"tag": "markdown", "text_size": "notation", "content": content}
 }
 
 // reviewCardTagsWithForced 在 header 标签末尾追加「强制发布」红标（仅 ReviewForced

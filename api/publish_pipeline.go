@@ -1227,6 +1227,9 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 }
 
 func validPersistedPublishApproval(job publishJob) bool {
+	if validPublishedSourceResyncApproval(job) {
+		return true
+	}
 	riskAllows := publishRiskAllowsManualApprove(job.RiskLevel) ||
 		(job.ReviewForced && job.RiskLevel == publishRiskBlock)
 	if job.ReviewAction != publishReviewApprove || strings.TrimSpace(job.ReviewedAt) == "" ||

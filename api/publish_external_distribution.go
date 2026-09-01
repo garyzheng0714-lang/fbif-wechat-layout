@@ -237,6 +237,9 @@ func externalDistributionEligibility(job publishJob) error {
 	if job.Stage != publishStagePublished {
 		return fmt.Errorf("只有已在 FoodTalks 发布的文章才能同步外部平台，当前阶段为 %s", job.Stage)
 	}
+	if publishSourceResyncBlocksOtherActions(job) {
+		return errors.New("文章正在重新同步到 FoodTalks，或更新结果待核对，暂时不能外发")
+	}
 	if !externalDistributionApprovalOK(job) {
 		return errors.New("文章缺少与当前内容版本匹配的审核通过记录，不能同步外部平台")
 	}
@@ -830,6 +833,7 @@ func (p *publishPipeline) dispatchExternalDistributionCardUpdate(jobID int64) {
 }
 
 func (p *publishPipeline) recoverExternalDistribution(job publishJob) {
+	p.recoverSourceResync(job)
 	if job.ExternalDistributionCardState == publishExternalCardSending {
 		reset, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 			return current.ExternalDistributionCardState == publishExternalCardSending
