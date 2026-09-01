@@ -228,11 +228,14 @@ function renderTable(elem) {
 }
 
 // ---- Spacing & Section Helpers ----
+function sectionClass(name, gap) {
+  return name + (gap ? ' wx-gap' : '');
+}
 function sec(inner, gap) {
-  return '<section class="wx-p' + (gap ? ' wx-gap' : '') + '">' + inner + '</section>';
+  return '<section class="' + sectionClass('wx-p', gap) + '">' + inner + '</section>';
 }
 function secCenter(inner, gap) {
-  return '<section class="wx-pc' + (gap ? ' wx-gap' : '') + '">' + inner + '</section>';
+  return '<section class="' + sectionClass('wx-pc', gap) + '">' + inner + '</section>';
 }
 
 function sameDocxStyle(a, b) {
@@ -366,23 +369,14 @@ function pushUniqueAttribution(attrs, attr) {
   attrs.push({ k: 'attr', role: attr.role, name: attr.name });
 }
 
-// URL 导入的文章级署名固定输出为两行：
+// URL 导入的文章级署名固定归一为三行：
 //   1. 来源
-//   2. 作者，编辑（如有）
-// 同一角色只取开头首次出现的值，避免原文重复署名在文末重复渲染。
+//   2. 作者
+//   3. 编辑
+// 同一角色只取开头首次出现的值，避免原文重复署名重复渲染。
 function orderArticleAttributions(attrs) {
-  const first = role => attrs.find(attr => attr && attr.role === role);
-  const source = first('来源');
-  const author = first('作者');
-  const editor = first('编辑');
-  const ordered = [];
-  if (source) ordered.push(source);
-  if (author) {
-    ordered.push(editor ? { ...author, editorName: editor.name } : author);
-  } else if (editor) {
-    ordered.push(editor);
-  }
-  return ordered;
+  const first = role => attrs.find(attr => attr?.role === role);
+  return [first('来源'), first('作者'), first('编辑')].filter(Boolean);
 }
 
 // 页脚分界词「提示：」默认正则（红线下放 behavior.params.footer_prompt_marker）。
@@ -505,9 +499,7 @@ function localizePunct(text) {
 // ---- HTML Rendering (class-based) ----
 // opts.isRepost — 转载路径保持微信原色（var(--wx-link-color)）；原创路径
 // 给作者行加 wx-ta-author，覆盖为 #396FBC（FBIF 视觉规范）。
-function render(elems, author, source, opts) {
-  const isRepost = !!(opts && opts.isRepost);
-  const showTopAttribution = !(opts && opts.suppressTopAttribution);
+function prepareRenderState(elems, author, source, opts) {
   const behavior = getActiveRuleBehavior();
   const context = behaviorContext(author, source);
   const mods = rawActiveModules();
@@ -516,7 +508,7 @@ function render(elems, author, source, opts) {
   const selection = resolveArticleFooterSelection({
     articleMeta: context.article,
     footerDefaults: mods.article_footer_defaults,
-    profileOverride: opts && opts.articleFooterProfileOverride,
+    profileOverride: opts?.articleFooterProfileOverride,
   });
   if (selection.authorNormalizedOverride !== undefined) {
     context.article = { ...context.article, author_normalized: selection.authorNormalizedOverride };
@@ -526,77 +518,85 @@ function render(elems, author, source, opts) {
     : undefined;
   const articleArtifactOverride = mergeArticleArtifactOverrides(
     artifactDefaults,
-    opts && opts.articleArtifactOverride,
+    opts?.articleArtifactOverride,
   );
-  elems = applyBehaviorToElems(elems, context, behavior, {
-    articleArtifactOverride,
-  });
-  const lines = [];
+  return {
+    behavior,
+    context,
+    elems: applyBehaviorToElems(elems, context, behavior, { articleArtifactOverride }),
+  };
+}
 
-  // Author and source lines at the top
-  if (showTopAttribution && author) {
-    const authorCls = isRepost ? 'wx-ta' : 'wx-ta wx-ta-author';
+function renderTopAttributionLines(author, source, opts, context, behavior) {
+  if (opts?.suppressTopAttribution) return [];
+  const lines = [];
+  if (author) {
+    const authorCls = opts?.isRepost ? 'wx-ta' : 'wx-ta wx-ta-author';
     lines.push(sec(leafWrapAuthor('<span textstyle="" class="' + authorCls + '">' + esc(attributionText('作者', author, context, behavior)) + '</span>'), !source));
   }
-  if (showTopAttribution && source) {
+  if (source) {
     lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' + esc(attributionText('来源', source, context, behavior)) + '</span>'), true));
   }
+  return lines;
+}
 
-  for (let i = 0; i < elems.length; i++) {
-    const e = elems[i];
-    const next = i + 1 < elems.length ? elems[i + 1] : null;
-    const spaceAfter = shouldSpaceAfter(e, next);
+function renderImageElement(elem, spaceAfter) {
+  const src = elem.src || '';
+  const isGif = elem.gif || looksLikeGifSource(src);
+  const referrerPolicy = src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
+  const gifAttr = isGif ? ' data-type="gif"' : '';
+  const sizeStyle = elem.maxPx
+    ? 'max-width: ' + elem.maxPx + 'px; width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;'
+    : 'width: ' + elem.w + '; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;';
+  return '<section class="' + sectionClass('wx-pi' + elemExtraClass(elem), spaceAfter) + '">' +
+    '<img src="' + escAttr(src) + '"' + gifAttr + referrerPolicy + ' style="' + sizeStyle + '" /></section>';
+}
 
-    switch (e.k) {
-      case 'h':
-        lines.push(sec(leafWrap('<span textstyle="" class="wx-th">' + esc(localizePunct(e.text)) + '</span>'), spaceAfter));
-        break;
-      case 'img': {
-        const src = e.src || '';
-        const isGif = e.gif || looksLikeGifSource(src);
-        const rpol = src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
-        const gifAttr = isGif ? ' data-type="gif"' : '';
-        const sizeStyle = e.maxPx
-          ? 'max-width: ' + e.maxPx + 'px; width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;'
-          : 'width: ' + e.w + '; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;';
-        lines.push('<section class="wx-pi' + elemExtraClass(e) + (spaceAfter ? ' wx-gap' : '') + '">' +
-          '<img src="' + escAttr(src) + '"' + gifAttr + rpol + ' style="' + sizeStyle + '" /></section>');
-        break;
-      }
-      case 'cap':
-        lines.push(secCenter(leafWrap('<span textstyle="" class="wx-tc">' + esc(localizePunct(e.text)) + '</span>'), spaceAfter));
-        break;
-      case 'txt':
-        lines.push(sec(renderListMarker(e) + renderRuns(e.runs), spaceAfter));
-        break;
-      case 'attr':
-        lines.push(sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' +
-          esc(attributionText(e.role, e.name, context, behavior) +
-            (e.role === '作者' && e.editorName
-              ? '，' + attributionText('编辑', e.editorName, context, behavior)
-              : '')) +
-          '</span>'), spaceAfter));
-        break;
-      case 'refH': {
-        const refHeadText = (e.text || '参考来源').replace(/[：:]?$/, '：');
-        lines.push(sec(leafWrap('<span textstyle="" class="wx-tr">' + esc(refHeadText) + '</span>'), false));
-        break;
-      }
-      case 'ref':
-        lines.push(sec(renderRuns(e.runs, { textCls: 'wx-tr' }), spaceAfter));
-        break;
-      case 'bq':
-        lines.push('<section class="wx-bq' + (spaceAfter ? ' wx-gap' : '') + '">' +
-          renderRuns(e.runs, { textCls: 'wx-tr' }) + '</section>');
-        break;
-      case 'table': {
-        // 表格整体走 inline-style（含外层间距）：css-inline 不碰裸 table，间距也得内联。
-        const gapPx = spaceAfter ? (getRuleNumber(getActiveRuleConfig(), 'paragraph_gap') || 20) : 0;
-        lines.push('<section style="margin: 0 0 ' + gapPx + 'px; overflow-x: auto;">' +
-          renderTable(e) + '</section>');
-        break;
-      }
+function renderTableElement(elem, spaceAfter) {
+  // 表格整体走 inline-style（含外层间距）：css-inline 不碰裸 table，间距也得内联。
+  const gapPx = spaceAfter ? (getRuleNumber(getActiveRuleConfig(), 'paragraph_gap') || 20) : 0;
+  return '<section style="margin: 0 0 ' + gapPx + 'px; overflow-x: auto;">' +
+    renderTable(elem) + '</section>';
+}
+
+function renderElement(elem, spaceAfter, context, behavior) {
+  switch (elem.k) {
+    case 'h':
+      return sec(leafWrap('<span textstyle="" class="wx-th">' + esc(localizePunct(elem.text)) + '</span>'), spaceAfter);
+    case 'img':
+      return renderImageElement(elem, spaceAfter);
+    case 'cap':
+      return secCenter(leafWrap('<span textstyle="" class="wx-tc">' + esc(localizePunct(elem.text)) + '</span>'), spaceAfter);
+    case 'txt':
+      return sec(renderListMarker(elem) + renderRuns(elem.runs), spaceAfter);
+    case 'attr':
+      return sec(leafWrapAuthor('<span textstyle="" class="wx-ta">' +
+        esc(attributionText(elem.role, elem.name, context, behavior)) + '</span>'), spaceAfter);
+    case 'refH': {
+      const heading = elem.text.replace(/[：:]?$/, '：');
+      return sec(leafWrap('<span textstyle="" class="wx-tr">' + esc(heading) + '</span>'), false);
     }
+    case 'ref':
+      return sec(renderRuns(elem.runs, { textCls: 'wx-tr' }), spaceAfter);
+    case 'bq':
+      return '<section class="' + sectionClass('wx-bq', spaceAfter) + '">' +
+        renderRuns(elem.runs, { textCls: 'wx-tr' }) + '</section>';
+    case 'table':
+      return renderTableElement(elem, spaceAfter);
+    default:
+      return '';
+  }
+}
+
+function render(elems, author, source, opts) {
+  const prepared = prepareRenderState(elems, author, source, opts);
+  const lines = renderTopAttributionLines(author, source, opts, prepared.context, prepared.behavior);
+
+  for (let index = 0; index < prepared.elems.length; index++) {
+    const elem = prepared.elems[index];
+    const next = index + 1 < prepared.elems.length ? prepared.elems[index + 1] : null;
+    const line = renderElement(elem, shouldSpaceAfter(elem, next), prepared.context, prepared.behavior);
+    if (line) lines.push(line);
   }
 
   // 底部区块不再追加到正文末——改由 export default 的 renderBottomFooter() 作为整段页脚渲染，
@@ -610,135 +610,154 @@ function render(elems, author, source, opts) {
 // paragraphs to 'attr' blocks, and track 参考文献/信息来源 sections. No
 // visual-heuristic role-guessing — that was the whole point of moving to
 // structured blocks. See api/wechat_blocks.go for the upstream contract.
-function classifyBlocks(data) {
-  const { title, blocks } = data || {};
-  const elems = [];
-  const attrs = [];
-  const isClipboardText = data && data.source === 'clipboard-text';
-  let author = '', source = '';
-  let imgN = 0, inRef = false;
-  const inputBlocks = blocks || [];
-  const leadingAttributionScanLimit = behaviorNumberParam('url_attribution_scan_limit', 12);
+const ATTRIBUTION_BLOCK_KINDS = new Set(['h', 'txt', 'bq', 'li']);
 
-  for (let blockIndex = 0; blockIndex < inputBlocks.length; blockIndex++) {
-    const b = inputBlocks[blockIndex];
-    if (!b || !b.k) continue;
+function captureBlockAttribution(state, attr, replaceSource) {
+  if (attr.role === '作者' && !state.author) state.author = attr.name;
+  if (attr.role === '来源' && (replaceSource || !state.source)) state.source = attr.name;
+  pushUniqueAttribution(state.attrs, attr);
+  state.inRef = false;
+}
 
-    // 微信原文常把开头「作者 | X / 来源：Y / 编辑：Z」做成粗体或大字号，
-    // 通用 DOM 分类因此可能把它判成 h。文章级语义比视觉角色优先：仅在开头
-    // 有界窗口内，对可承载文字的块先识别署名；cap/img/table 不参与，避免把
-    // 「图片来源」误搬成文章来源。窗口外的同名标题保持原结构。
-    const canCarryAttribution = b.k === 'h' || b.k === 'txt' || b.k === 'bq' || b.k === 'li';
-    if (!isClipboardText && blockIndex < leadingAttributionScanLimit && canCarryAttribution) {
-      const attr = parseAttribution(rawBlockText(b));
-      if (attr) {
-        if (attr.role === '作者' && !author) author = attr.name;
-        if (attr.role === '来源' && !source) source = attr.name;
-        pushUniqueAttribution(attrs, attr);
-        inRef = false;
-        continue;
-      }
+function takeLeadingAttribution(state, block, blockIndex) {
+  if (state.isClipboardText ||
+      blockIndex >= state.leadingAttributionScanLimit ||
+      !ATTRIBUTION_BLOCK_KINDS.has(block.k)) return false;
+
+  const attr = parseAttribution(rawBlockText(block));
+  if (!attr) return false;
+  captureBlockAttribution(state, attr, false);
+  return true;
+}
+
+function takeStructuralBlock(state, block) {
+  switch (block.k) {
+    case 'img': {
+      const width = Number(block.dataW);
+      const maxPx = width > 0 && width < ruleNumber('decorative_image_max_px') ? width : 0;
+      const src = typeof block.src === 'string' ? block.src : '';
+      state.imgN++;
+      state.inRef = false;
+      state.elems.push({ k: 'img', src, w: '100%', maxPx, gif: looksLikeGifSource(src) });
+      return true;
     }
-
-    if (b.k === 'img') {
-      const w = Number(b.dataW || 0);
-      const maxPx = w > 0 && w < ruleNumber('decorative_image_max_px') ? w : 0;
-      imgN++;
-      inRef = false;
-      elems.push({ k: 'img', src: b.src || '', w: '100%', maxPx, gif: looksLikeGifSource(b.src || '') });
-      continue;
+    case 'cap': {
+      state.elems.push({ k: 'cap', text: block.text });
+      return true;
     }
-
-    if (b.k === 'cap') {
-      elems.push({ k: 'cap', text: b.text || '' });
-      continue;
-    }
-
-    if (b.k === 'table') {
-      inRef = false;
-      elems.push({
+    case 'table': {
+      state.inRef = false;
+      state.elems.push({
         k: 'table',
-        rows: (b.rows || []).map(row => (row || []).map(c => ({
-          runs: convertRuns(c.runs || []),
-          header: !!c.header,
-        }))),
+        rows: (block.rows || []).map(row => (row || []).map(cell => {
+          const { runs = [], header = false } = cell;
+          return { runs: convertRuns(runs), header: !!header };
+        })),
       });
-      continue;
+      return true;
     }
-
-    if (b.k === 'h') {
-      const ht = (b.text || '').trim();
-      if (/^(参考(来源|文献|资料|链接)|信息来源)/.test(ht)) {
-        inRef = true;
-        elems.push({ k: 'refH', text: ht.replace(/[：:].*$/, '').trim() });
-      } else {
-        inRef = false;
-        elems.push({ k: 'h', text: ht });
-      }
-      continue;
+    case 'h': {
+      const text = block.text.trim();
+      const isReference = /^(参考(来源|文献|资料|链接)|信息来源)/.test(text);
+      state.inRef = isReference;
+      state.elems.push(isReference
+        ? { k: 'refH', text: text.replace(/[：:].*$/, '').trim() }
+        : { k: 'h', text });
+      return true;
     }
+    default:
+      return false;
+  }
+}
 
-    // txt / bq / li — all carry runs. Apply punctuation pass.
-    const runs = convertRuns(b.runs || []);
-    // Text used for attribution / 参考文献 regex matching. Include both
-    // txt and link run types so "作者：<a>张三</a>" still yields
-    // "作者：张三" (link runs carry display text, not the URL).
-    const text = runs
-      .filter(r => r && (r.type === 'txt' || r.type === 'link'))
-      .map(r => r.text || '')
-      .join('')
-      .trim();
+function blockRunsText(runs) {
+  return runs
+    .filter(run => run?.type === 'txt' || run?.type === 'link')
+    .map(run => run.text || '')
+    .join('')
+    .trim();
+}
 
-    if (!isClipboardText && attrs.length && isFooterPromptText(text) && isStandardFooterPrompt(inputBlocks, blockIndex)) {
-      break;
-    }
+function appendRunsBlock(state, block, blockIndex) {
+  // txt / bq / li — all carry runs. Apply punctuation pass.
+  const runs = convertRuns(block.runs);
+  // Include txt and link display text so "作者：<a>张三</a>" still yields "作者：张三".
+  const text = blockRunsText(runs);
+  if (!state.isClipboardText && state.attrs.length > 0 &&
+      isFooterPromptText(text) && isStandardFooterPrompt(state.inputBlocks, blockIndex)) return false;
 
-    if (b.k === 'bq') {
-      inRef = false;
-      elems.push({ k: 'bq', runs });
-      continue;
-    }
-
-    // URL imports use the standard FBIF footer, so article-level attribution
-    // is collected and emitted once at the article tail before that footer.
-    const attr = isClipboardText ? null : parseAttribution(text);
-    if (attr) {
-      if (attr.role === '作者' && !author) author = attr.name;
-      if (attr.role === '来源') source = attr.name;
-      pushUniqueAttribution(attrs, attr);
-      inRef = false;
-      continue;
-    }
-
-    // Reference section marker. Text-level, not style-level — same rule as MD path.
-    if (behaviorRegexParam('ref_section_regex', RE_REF_SECTION).test(text)) {
-      inRef = true;
-      elems.push({ k: 'refH', text: text.replace(/[：:]$/, '') });
-      continue;
-    }
-
-    if (inRef) {
-      elems.push({ k: 'ref', runs, blankBefore: !!b.blankBefore, compact: !!b.compact });
-      continue;
-    }
-
-    // li and txt render the same (FBIF template has no dedicated list style);
-    // collapsing them here keeps the renderer's switch simple.
-    elems.push({ k: 'txt', runs, blankBefore: !!b.blankBefore, compact: !!b.compact });
+  if (block.k === 'bq') {
+    state.inRef = false;
+    state.elems.push({ k: 'bq', runs });
+    return true;
   }
 
-  // 微信抓取结构会返回公众号名称 source_name。仅当正文没有显式
-  // 来源/出品行时才用它兜底；正文署名始终优先，避免公众号名覆盖文章来源。
-  if (!isClipboardText && !source &&
-      behaviorBooleanParam('url_source_name_fallback_enabled', true)) {
-    const sourceName = String(data && data.source_name || '').trim();
-    if (sourceName) {
-      source = sourceName;
-      pushUniqueAttribution(attrs, { role: '来源', name: sourceName });
-    }
+  const attr = state.isClipboardText ? null : parseAttribution(text);
+  if (attr) {
+    captureBlockAttribution(state, attr, true);
+    return true;
   }
 
-  return { elems: elems.concat(orderArticleAttributions(attrs)), author, source, title: title || '', imgN };
+  if (behaviorRegexParam('ref_section_regex', RE_REF_SECTION).test(text)) {
+    state.inRef = true;
+    state.elems.push({ k: 'refH', text: text.replace(/[：:]$/, '') });
+    return true;
+  }
+
+  if (state.inRef) {
+    state.elems.push({ k: 'ref', runs, blankBefore: !!block.blankBefore, compact: !!block.compact });
+    return true;
+  }
+
+  // li and txt render the same; collapsing them keeps the renderer switch simple.
+  state.elems.push({ k: 'txt', runs, blankBefore: !!block.blankBefore, compact: !!block.compact });
+  return true;
+}
+
+function applySourceNameFallback(state, data) {
+  if (state.isClipboardText || state.source ||
+      !behaviorBooleanParam('url_source_name_fallback_enabled', true)) return;
+
+  const sourceName = String(data.source_name || '').trim();
+  if (!sourceName) return;
+  state.source = sourceName;
+  pushUniqueAttribution(state.attrs, { role: '来源', name: sourceName });
+}
+
+function classifyBlocks(data) {
+  const input = data || {};
+  const state = {
+    elems: [],
+    attrs: [],
+    author: '',
+    source: '',
+    imgN: 0,
+    inRef: false,
+    isClipboardText: input.source === 'clipboard-text',
+    inputBlocks: input.blocks || [],
+    leadingAttributionScanLimit: behaviorNumberParam('url_attribution_scan_limit', 12),
+  };
+
+  for (let blockIndex = 0; blockIndex < state.inputBlocks.length; blockIndex++) {
+    const block = state.inputBlocks[blockIndex];
+    if (!block?.k) continue;
+
+    // 微信原文可能把开头署名判成 h；仅在有界窗口内先识别文章级署名。
+    if (takeLeadingAttribution(state, block, blockIndex)) continue;
+    if (takeStructuralBlock(state, block)) continue;
+    if (!appendRunsBlock(state, block, blockIndex)) break;
+  }
+
+  // 正文无显式来源时才用公众号名称 source_name 兜底。
+  applySourceNameFallback(state, input);
+  return {
+    elems: state.elems,
+    attributions: orderArticleAttributions(state.attrs),
+    author: state.author,
+    source: state.source,
+    title: input.title || '',
+    imgN: state.imgN,
+  };
 }
 
 export default {
@@ -771,9 +790,11 @@ export default {
   },
   processBlocks(data, { config: _config, ...opts } = {}) {
     // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
-    const { elems, author, source, title, imgN } = classifyBlocks(data);
+    const { elems, attributions, author, source, title, imgN } = classifyBlocks(data);
+    // 2026-09-01 用户裁定：转载署名放正文开头；原创维持标准页脚前的位置。
+    const positionedElems = opts.isRepost ? attributions.concat(elems) : elems.concat(attributions);
     return {
-      lines: render(elems, author, source, { ...opts, suppressTopAttribution: true }),
+      lines: render(positionedElems, author, source, { ...opts, suppressTopAttribution: true }),
       imgN,
       headingN: elems.filter(e => e.k === 'h').length,
       title,

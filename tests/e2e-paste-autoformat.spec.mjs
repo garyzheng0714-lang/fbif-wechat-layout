@@ -16,6 +16,9 @@ const ARTICLE = {
   title: '粘贴即排版：一条链接就够了',
   source_name: 'FBIF食品饮料创新',
   blocks: [
+    { k: 'txt', runs: [{ type: 'txt', text: '来源：轻食online' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '作者：RR' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '编辑：TiTi' }] },
     { k: 'txt', runs: [{ type: 'txt', text: '这一段来自被拦截的抓取接口，用来确认排版真的跑完了。' }] },
     { k: 'txt', runs: [{ type: 'txt', text: '第二段正文，验证多段落也正常落到预览区。' }] },
   ],
@@ -64,6 +67,8 @@ test('粘贴一条链接后不点任何按钮，文章自动排版出来', async
 
   await expect(page.locator('#previewContent')).toContainText(ARTICLE.title, { timeout: 15000 });
   await expect(page.locator('#previewContent')).toContainText('这一段来自被拦截的抓取接口');
+  const previewText = await page.locator('#previewContent').innerText();
+  expect(previewText).toMatch(/来源：轻食online[\s\S]*作者：RR[\s\S]*编辑：TiTi[\s\S]*这一段来自被拦截的抓取接口/);
   expect(await page.evaluate(() => window.__clicks)).toBe(0);
 
   await page.screenshot({ path: path.join(SHOT_DIR, 'paste-autoformat-link.png'), fullPage: false });

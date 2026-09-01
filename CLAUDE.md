@@ -40,7 +40,7 @@
 14. **更多文章可选**：`enabled=false` 不渲染；`default_cards` 是新稿默认，单稿可换/删/排/裁。
 15. **更多文章选图**：`fetch-article-meta` 返回 `image_urls`；依次选卡片封面、抓取头图、该卡正文媒体，主稿图仅兜底；旧卡缺媒体按链接补抓。
 16. **图片说明不可拆**：`图片→图注→图片来源` 连续归图注；`图片来源/图源` 不得进正文或文章级来源。
-17. **URL 署名**：来源/出处/出品、作者/撰文/撰稿/文、编辑/责编兼容中英文冒号与 `/|｜`，归一后仅在“提示：”前渲染一次；正文来源优先，否则用 `source_name`；禁将 `byline` 补成作者。署名公众号蓝、1.75 行高、常规字形、连续行无额外空行；传递链保留 `source_name`。
+17. **URL 署名（2026-09-01 用户裁定）**：来源/出处/出品、作者/撰文/撰稿/文、编辑/责编兼容中英文冒号与 `/|｜`；转载稿归一后在正文开头只渲染一次，原创稿仍在“提示：”前只渲染一次；来源、作者、编辑依次独立成行（有值才显示）。正文来源优先，否则用 `source_name`；禁将 `byline` 补成作者。署名公众号蓝、1.75 行高、常规字形、连续行无额外空行；传递链保留 `source_name`。
 18. **DOCX 空段语义**：连续正文按 Word 小段距紧凑；仅原文空段使下一段恢复 `wx-gap`。
 19. **渠道物理隔离**：FoodTalks 渲染器、behavior、页脚、署名与公众号分离，双方渲染器禁互相 import；网站署名 `#888`、14px、斜体；改网站时 `templates/fbif.js` 字节不动。
 20. **网站页脚**：完整输出 `tip/biz_coop/join_group/follow_account/logo/more_info`；主路径 `bottom_blocks.rich_html`，`fbif_footer+buildFooterHtml` 仅等字节回退。单稿只用 `site-footer-state.js` override；规则未就绪禁本地写；换图写 `overrides[seg].fields` 并保留 `{{asset#id}}`。
