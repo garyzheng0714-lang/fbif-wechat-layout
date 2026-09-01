@@ -97,15 +97,20 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 
 func reviewBatchArticleBlock(job publishJob) map[string]any {
 	columns := []any{}
+	resyncElements := make([]any, 0, 2)
+	if button := reviewCardSourceResyncButton(job, "tiny"); button != nil {
+		resyncElements = append(resyncElements, button)
+	}
+	if status := reviewCardSourceResyncStatus(job); status != nil {
+		resyncElements = append(resyncElements, status)
+	}
 	cover := strings.TrimSpace(job.ReviewCoverImgKey)
 	if cover != "" {
 		coverElements := []any{map[string]any{
 			"tag": "img", "img_key": cover, "alt": feishuPlainText("文章封面图"),
 			"preview": true, "transparent": true, "scale_type": "fit_horizontal", "corner_radius": "3px",
 		}}
-		if button := reviewCardSourceResyncButton(job, "tiny"); button != nil {
-			coverElements = append(coverElements, button)
-		}
+		coverElements = append(coverElements, resyncElements...)
 		columns = append(columns, map[string]any{
 			"tag": "column", "width": "weighted", "weight": 1,
 			"direction": "vertical", "vertical_align": "top", "vertical_spacing": "6px", "padding": "8px 8px 8px 8px",
@@ -125,15 +130,10 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		"tag": "markdown", "content": "<font color='grey'>" + reviewCardSafeOrDash(job.Summary, 180) + "</font>",
 		"text_size": "notation",
 	})
-	if status := reviewCardSourceResyncStatus(job); status != nil {
-		copyElements = append(copyElements, status)
+	if cover == "" {
+		copyElements = append(copyElements, resyncElements...)
 	}
 	copyElements = append(copyElements, reviewBatchButtonRow(job))
-	if cover == "" {
-		if button := reviewCardSourceResyncButton(job, "tiny"); button != nil {
-			copyElements = append(copyElements, feishuButtonRow(button))
-		}
-	}
 	if job.Stage == publishStagePublished {
 		provenance, _, _ := publishExternalDistributionProvenance(job)
 		if strings.TrimSpace(job.ExternalDistributionState) != "" || provenance == publishExternalProvenanceOriginal {
@@ -369,13 +369,13 @@ func reviewCardSourceResyncStatus(job publishJob) map[string]any {
 	content := ""
 	switch job.SourceResyncState {
 	case publishSourceResyncQueued, publishSourceResyncPreparing:
-		content = "<font color='grey'>正在重新抓取公众号正文并排版……</font>"
+		content = "<font color='grey'>同步中：正在获取公众号最新内容并排版……</font>"
 	case publishSourceResyncUpdating:
-		content = "<font color='grey'>正在覆盖同一篇 FoodTalks 文章……</font>"
+		content = "<font color='grey'>同步中：正在覆盖同一篇 FoodTalks 文章……</font>"
 	case publishSourceResyncSucceeded:
-		content = "<font color='grey'>最近一次重新同步已完成：" + reviewCardSafeText(formatReviewCardTime(job.SourceResyncCompletedAt), 60) + "</font>"
+		content = "<font color='green'>同步成功 · " + reviewCardSafeText(formatReviewCardTime(job.SourceResyncCompletedAt), 60) + "</font>"
 	case publishSourceResyncFailed:
-		content = "<font color='red'>上次同步失败，网站稿未覆盖：" + reviewCardSafeText(job.SourceResyncError, 180) + "</font>"
+		content = "<font color='red'>同步失败，网站稿未覆盖：" + reviewCardSafeText(job.SourceResyncError, 180) + "</font>"
 	case publishSourceResyncReconciliationRequired:
 		content = "<font color='orange'>更新结果待核对，系统不会自动重试。</font>"
 	}
