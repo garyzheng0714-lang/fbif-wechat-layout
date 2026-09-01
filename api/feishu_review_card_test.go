@@ -118,6 +118,30 @@ func TestPublishedReviewCardShowsSourceResyncButtonBelowCover(t *testing.T) {
 	}
 }
 
+func TestPublishedReviewCardShowsSourceResyncResultBelowButton(t *testing.T) {
+	job := reviewCardTestJob(publishStagePublished)
+	job.FoodTalksNewsID = 7318
+	job.PublicationAction = publishPublicationActionPublish
+	job.SourceResyncState = publishSourceResyncSucceeded
+	job.SourceResyncCompletedAt = "2026-09-01T06:30:00Z"
+	body := cardJSON(t, buildReviewBatchCard([]publishJob{job}))
+	buttonAt := strings.Index(body, "重新同步至网站")
+	successAt := strings.Index(body, "同步成功")
+	if buttonAt < 0 || successAt < buttonAt || !strings.Contains(body, "color='green'") {
+		t.Fatalf("同步成功提示应以绿色显示在按钮下方: %s", body)
+	}
+
+	job.SourceResyncState = publishSourceResyncFailed
+	job.SourceResyncError = "公众号正文抓取失败"
+	body = cardJSON(t, buildReviewBatchCard([]publishJob{job}))
+	buttonAt = strings.Index(body, "重新同步至网站")
+	failureAt := strings.Index(body, "同步失败")
+	if buttonAt < 0 || failureAt < buttonAt || !strings.Contains(body, "color='red'") ||
+		!strings.Contains(body, job.SourceResyncError) {
+		t.Fatalf("同步失败提示应以红色显示在按钮下方并给出原因: %s", body)
+	}
+}
+
 func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T) {
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	now := time.Now().UTC()
