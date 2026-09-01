@@ -93,6 +93,9 @@ type publishJob struct {
 	ContentVersion       int64  `json:"content_version,omitempty"`
 	ContentFrozenVersion int64  `json:"content_frozen_version,omitempty"`
 	ContentFrozenAt      string `json:"content_frozen_at,omitempty"`
+	// SiteContentHash 是最近一次由流水线成功 PUT 的站点正文指纹。
+	// 已发布稿回源更新前用它识别 CMS 人工改稿，命中时拒绝覆盖。
+	SiteContentHash      string `json:"site_content_hash,omitempty"`
 	PendingContentSource string `json:"pending_content_source,omitempty"`
 	PendingContentHash   string `json:"pending_content_hash,omitempty"`
 	PendingTitle         string `json:"pending_title,omitempty"`
@@ -145,6 +148,18 @@ type publishJob struct {
 	ExternalDistributionCardAttempts  int    `json:"external_distribution_card_attempts,omitempty"`
 	ExternalDistributionCardError     string `json:"external_distribution_card_error,omitempty"`
 	ExternalDistributionCardUpdatedAt string `json:"external_distribution_card_updated_at,omitempty"`
+	// 已发布稿的「重新同步至网站」是不改主 Stage 的正交子流程。
+	// updating 表示已可能发出 FoodTalks PUT，之后的断线只能对账。
+	SourceResyncState           string `json:"source_resync_state,omitempty"`
+	SourceResyncRequestedBy     string `json:"source_resync_requested_by,omitempty"`
+	SourceResyncRequestedAt     string `json:"source_resync_requested_at,omitempty"`
+	SourceResyncCompletedAt     string `json:"source_resync_completed_at,omitempty"`
+	SourceResyncError           string `json:"source_resync_error,omitempty"`
+	SourceResyncIntentKey       string `json:"source_resync_intent_key,omitempty"`
+	SourceResyncIntentAt        string `json:"source_resync_intent_at,omitempty"`
+	SourceResyncApprovedBy      string `json:"source_resync_approved_by,omitempty"`
+	SourceResyncApprovedAt      string `json:"source_resync_approved_at,omitempty"`
+	SourceResyncApprovedVersion string `json:"source_resync_approved_version,omitempty"`
 	// FoodTalks CreateNews 没有服务端幂等键：外调前先持久化本地 intent。
 	// 调用结果不确定时凭此转人工核对，禁止自动 POST 第二次。
 	StagingIntentKey string `json:"staging_intent_key,omitempty"`

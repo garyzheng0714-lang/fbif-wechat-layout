@@ -45,6 +45,20 @@ type publishMonitoringStatus struct {
 	AlertIssues []string `json:"alert_issues"`
 }
 
+type publishMonitoringLevel uint8
+
+const (
+	publishMonitoringIssue publishMonitoringLevel = 1 << iota
+	publishMonitoringWarning
+	publishMonitoringAlert
+)
+
+type publishMonitoringSignal struct {
+	condition bool
+	message   string
+	levels    publishMonitoringLevel
+}
+
 func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMonitoringStatus {
 	if now.IsZero() {
 		now = time.Now()
@@ -67,151 +81,138 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 	status.DuplicateSourceKeys = countDuplicatePublishSourceKeys(jobs)
 	for _, job := range jobs {
 		age := publishMonitoringAge(now, job.UpdatedAt)
-		processingAge := int64(-1)
-		if publishMonitoringProcessingStage(job.Stage) {
-			processingAge = age
-		}
-		if publishExternalDistributionProcessing(job.ExternalDistributionState) {
-			externalAge := publishMonitoringAge(now, publishExternalDistributionStartedAt(job))
-			if externalAge > processingAge {
-				processingAge = externalAge
-			}
-		}
-		if processingAge >= 0 {
-			status.Processing++
-			if processingAge > status.OldestProcessingAgeSeconds {
-				status.OldestProcessingAgeSeconds = processingAge
-			}
-		}
-		if job.Stage == publishStageCreated {
-			status.Queued++
-			if age > status.OldestQueueAgeSeconds {
-				status.OldestQueueAgeSeconds = age
-			}
-		}
-		if job.NotificationState == publishNotificationStatePending || job.NotificationState == publishNotificationStateSending {
-			status.NotificationPending++
-			if age > status.OldestNotificationAgeSeconds {
-				status.OldestNotificationAgeSeconds = age
-			}
-		}
-		if job.ExternalDistributionCardState == publishExternalCardPending ||
-			job.ExternalDistributionCardState == publishExternalCardSending {
-			status.NotificationPending++
-			if age > status.OldestNotificationAgeSeconds {
-				status.OldestNotificationAgeSeconds = age
-			}
-		}
-		if job.NotificationError != "" {
-			status.NotificationErrors++
-		}
-		if job.ExternalDistributionCardError != "" {
-			status.NotificationErrors++
-		}
-		if job.NotificationState == publishNotificationStateDeadLetter {
-			status.NotificationDeadLetters++
-		}
-		if job.ExternalDistributionCardState == publishExternalCardDeadLetter {
-			status.NotificationDeadLetters++
-		}
-		if job.Stage == publishStageAwaitingReview && job.NotificationKind == "" && job.NotificationSentAt == "" {
-			status.ReviewCardsMissing++
-		}
-		if job.Stage == publishStageFailed {
-			status.Failed++
-			if publishMonitoringIsRecent(now, job.UpdatedAt) {
-				status.FailedRecent++
-			}
-		}
-		if job.ExternalDistributionState == publishExternalDistributionFailed ||
-			job.ExternalDistributionState == publishExternalDistributionPartialFailed {
-			status.Failed++
-			if publishMonitoringIsRecent(now, job.UpdatedAt) {
-				status.FailedRecent++
-			}
-		}
-		if job.Stage == publishStageReconciliationRequired ||
-			job.Stage == publishStagePublicizeReconciliationRequired ||
-			job.Stage == publishStageStagingCreating ||
-			job.Stage == publishStagePublicizingUpdating {
-			status.ReconciliationRequired++
-			if age > status.OldestReconciliationAgeSeconds {
-				status.OldestReconciliationAgeSeconds = age
-			}
-		}
-		if job.ExternalDistributionState == publishExternalDistributionReconciliationRequired {
-			status.ReconciliationRequired++
-			if age > status.OldestReconciliationAgeSeconds {
-				status.OldestReconciliationAgeSeconds = age
-			}
-		}
+		updatePublishMonitoringWork(&status, job, now, age)
+		updatePublishMonitoringNotifications(&status, job, age)
+		updatePublishMonitoringFailures(&status, job, now)
+		updatePublishMonitoringReconciliation(&status, job, now, age)
 		if job.ContentConflict {
 			status.ContentConflicts++
 		}
 	}
-	if status.WorkersPaused {
-		status.Issues = append(status.Issues, "deployment_writes_paused")
-		status.AlertIssues = append(status.AlertIssues, "deployment_writes_paused")
+	finalizePublishMonitoring(&status)
+	return status
+}
+
+func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob, now time.Time, age int64) {
+	processingAge := int64(-1)
+	if publishMonitoringProcessingStage(job.Stage) {
+		processingAge = age
 	}
-	// 健康的含义是业务闭环已经完成，不是“进程还活着”。只要仍有任务在排版，
-	// 或审核卡仍在 outbox 中，就绝不能向外部看门狗返回绿色。
-	if status.Processing > 0 {
-		status.Issues = append(status.Issues, fmt.Sprintf("business_processing:%d", status.Processing))
-	}
-	if status.NotificationPending > 0 {
-		status.Issues = append(status.Issues, fmt.Sprintf("review_notification_pending:%d", status.NotificationPending))
-	}
-	if status.OldestProcessingAgeSeconds > int64(publishProcessingWarningAfter/time.Second) {
-		status.Warnings = append(status.Warnings, fmt.Sprintf("processing_slow:%ds", status.OldestProcessingAgeSeconds))
-	}
-	if status.OldestProcessingAgeSeconds > int64(publishProcessingCriticalAfter/time.Second) {
-		status.AlertIssues = append(status.AlertIssues, fmt.Sprintf("processing_stale:%ds", status.OldestProcessingAgeSeconds))
-	}
-	if status.OldestQueueAgeSeconds > int64(publishQueueCriticalAfter/time.Second) {
-		status.AlertIssues = append(status.AlertIssues, fmt.Sprintf("queue_stale:%ds", status.OldestQueueAgeSeconds))
-	}
-	if status.OldestNotificationAgeSeconds > int64(publishNotificationCriticalAfter/time.Second) {
-		issue := fmt.Sprintf("notification_outbox_stale:%ds", status.OldestNotificationAgeSeconds)
-		status.Issues = append(status.Issues, issue)
-		status.AlertIssues = append(status.AlertIssues, issue)
-	}
-	if status.NotificationErrors > 0 {
-		status.Issues = append(status.Issues, fmt.Sprintf("notification_errors:%d", status.NotificationErrors))
-		status.Warnings = append(status.Warnings, fmt.Sprintf("notification_errors:%d", status.NotificationErrors))
-	}
-	if status.NotificationDeadLetters > 0 {
-		issue := fmt.Sprintf("notification_dead_letters:%d", status.NotificationDeadLetters)
-		status.Issues = append(status.Issues, issue)
-		status.AlertIssues = append(status.AlertIssues, issue)
-	}
-	if status.ReviewCardsMissing > 0 {
-		issue := fmt.Sprintf("review_cards_missing:%d", status.ReviewCardsMissing)
-		status.Issues = append(status.Issues, issue)
-		status.AlertIssues = append(status.AlertIssues, issue)
-	}
-	if status.DuplicateSourceKeys > 0 {
-		issue := fmt.Sprintf("duplicate_source_keys:%d", status.DuplicateSourceKeys)
-		status.Issues = append(status.Issues, issue)
-		status.AlertIssues = append(status.AlertIssues, issue)
-	}
-	if status.FailedRecent > 0 {
-		issue := fmt.Sprintf("failed_jobs_recent:%d", status.FailedRecent)
-		status.Issues = append(status.Issues, issue)
-		status.AlertIssues = append(status.AlertIssues, issue)
-	}
-	if status.ReconciliationRequired > 0 {
-		issue := fmt.Sprintf("reconciliation_backlog:%d", status.ReconciliationRequired)
-		status.Issues = append(status.Issues, issue)
-		status.Warnings = append(status.Warnings, issue)
-		if status.OldestReconciliationAgeSeconds > int64(publishReconciliationCriticalAfter/time.Second) {
-			status.AlertIssues = append(status.AlertIssues, fmt.Sprintf("reconciliation_stale:%ds", status.OldestReconciliationAgeSeconds))
+	if publishExternalDistributionProcessing(job.ExternalDistributionState) {
+		externalAge := publishMonitoringAge(now, publishExternalDistributionStartedAt(job))
+		if externalAge > processingAge {
+			processingAge = externalAge
 		}
 	}
-	if status.ContentConflicts > 0 {
-		issue := fmt.Sprintf("content_conflicts:%d", status.ContentConflicts)
-		status.Issues = append(status.Issues, issue)
-		status.AlertIssues = append(status.AlertIssues, issue)
+	if publishSourceResyncProcessing(job.SourceResyncState) {
+		resyncAge := publishMonitoringAge(now, publishSourceResyncStartedAt(job))
+		if resyncAge > processingAge {
+			processingAge = resyncAge
+		}
 	}
+	if processingAge >= 0 {
+		status.Processing++
+		if processingAge > status.OldestProcessingAgeSeconds {
+			status.OldestProcessingAgeSeconds = processingAge
+		}
+	}
+	if job.Stage == publishStageCreated {
+		status.Queued++
+		if age > status.OldestQueueAgeSeconds {
+			status.OldestQueueAgeSeconds = age
+		}
+	}
+}
+
+func updatePublishMonitoringNotifications(status *publishMonitoringStatus, job publishJob, age int64) {
+	pending := boolInt(job.NotificationState == publishNotificationStatePending || job.NotificationState == publishNotificationStateSending)
+	pending += boolInt(job.ExternalDistributionCardState == publishExternalCardPending || job.ExternalDistributionCardState == publishExternalCardSending)
+	status.NotificationPending += pending
+	if pending > 0 && age > status.OldestNotificationAgeSeconds {
+		status.OldestNotificationAgeSeconds = age
+	}
+	status.NotificationErrors += boolInt(job.NotificationError != "") + boolInt(job.ExternalDistributionCardError != "")
+	status.NotificationDeadLetters += boolInt(job.NotificationState == publishNotificationStateDeadLetter) +
+		boolInt(job.ExternalDistributionCardState == publishExternalCardDeadLetter)
+	if job.Stage == publishStageAwaitingReview && job.NotificationKind == "" && job.NotificationSentAt == "" {
+		status.ReviewCardsMissing++
+	}
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publishJob, now time.Time) {
+	jobFailed := job.Stage == publishStageFailed
+	externalFailed := job.ExternalDistributionState == publishExternalDistributionFailed ||
+		job.ExternalDistributionState == publishExternalDistributionPartialFailed
+	resyncFailed := job.SourceResyncState == publishSourceResyncFailed
+	status.Failed += boolInt(jobFailed) + boolInt(externalFailed) + boolInt(resyncFailed)
+	if jobFailed && publishMonitoringIsRecent(now, job.UpdatedAt) {
+		status.FailedRecent++
+	}
+	if externalFailed && publishMonitoringIsRecent(now, job.UpdatedAt) {
+		status.FailedRecent++
+	}
+	if resyncFailed && publishMonitoringIsRecent(now, firstNonEmpty(job.SourceResyncCompletedAt, job.UpdatedAt)) {
+		status.FailedRecent++
+	}
+}
+
+func updatePublishMonitoringReconciliation(status *publishMonitoringStatus, job publishJob, now time.Time, age int64) {
+	stageRequired := publishMonitoringReconciliationStage(job.Stage)
+	externalRequired := job.ExternalDistributionState == publishExternalDistributionReconciliationRequired
+	resyncRequired := job.SourceResyncState == publishSourceResyncReconciliationRequired
+	status.ReconciliationRequired += boolInt(stageRequired) + boolInt(externalRequired) + boolInt(resyncRequired)
+	if stageRequired && age > status.OldestReconciliationAgeSeconds {
+		status.OldestReconciliationAgeSeconds = age
+	}
+	if externalRequired && age > status.OldestReconciliationAgeSeconds {
+		status.OldestReconciliationAgeSeconds = age
+	}
+	if resyncRequired {
+		resyncAge := publishMonitoringAge(now, publishSourceResyncStartedAt(job))
+		if resyncAge > status.OldestReconciliationAgeSeconds {
+			status.OldestReconciliationAgeSeconds = resyncAge
+		}
+	}
+}
+
+func publishMonitoringReconciliationStage(stage string) bool {
+	switch stage {
+	case publishStageReconciliationRequired, publishStagePublicizeReconciliationRequired,
+		publishStageStagingCreating, publishStagePublicizingUpdating:
+		return true
+	default:
+		return false
+	}
+}
+
+func finalizePublishMonitoring(status *publishMonitoringStatus) {
+	// 健康的含义是业务闭环已完成，不是“进程还活着”。仍在处理或
+	// 卡在 outbox 的任务必须进 issues，超时后才升级为 alert。
+	signals := []publishMonitoringSignal{
+		{status.WorkersPaused, "deployment_writes_paused", publishMonitoringIssue | publishMonitoringAlert},
+		{status.Processing > 0, fmt.Sprintf("business_processing:%d", status.Processing), publishMonitoringIssue},
+		{status.NotificationPending > 0, fmt.Sprintf("review_notification_pending:%d", status.NotificationPending), publishMonitoringIssue},
+		{status.OldestProcessingAgeSeconds > int64(publishProcessingWarningAfter/time.Second), fmt.Sprintf("processing_slow:%ds", status.OldestProcessingAgeSeconds), publishMonitoringWarning},
+		{status.OldestProcessingAgeSeconds > int64(publishProcessingCriticalAfter/time.Second), fmt.Sprintf("processing_stale:%ds", status.OldestProcessingAgeSeconds), publishMonitoringAlert},
+		{status.OldestQueueAgeSeconds > int64(publishQueueCriticalAfter/time.Second), fmt.Sprintf("queue_stale:%ds", status.OldestQueueAgeSeconds), publishMonitoringAlert},
+		{status.OldestNotificationAgeSeconds > int64(publishNotificationCriticalAfter/time.Second), fmt.Sprintf("notification_outbox_stale:%ds", status.OldestNotificationAgeSeconds), publishMonitoringIssue | publishMonitoringAlert},
+		{status.NotificationErrors > 0, fmt.Sprintf("notification_errors:%d", status.NotificationErrors), publishMonitoringIssue | publishMonitoringWarning},
+		{status.NotificationDeadLetters > 0, fmt.Sprintf("notification_dead_letters:%d", status.NotificationDeadLetters), publishMonitoringIssue | publishMonitoringAlert},
+		{status.ReviewCardsMissing > 0, fmt.Sprintf("review_cards_missing:%d", status.ReviewCardsMissing), publishMonitoringIssue | publishMonitoringAlert},
+		{status.DuplicateSourceKeys > 0, fmt.Sprintf("duplicate_source_keys:%d", status.DuplicateSourceKeys), publishMonitoringIssue | publishMonitoringAlert},
+		{status.FailedRecent > 0, fmt.Sprintf("failed_jobs_recent:%d", status.FailedRecent), publishMonitoringIssue | publishMonitoringAlert},
+		{status.ReconciliationRequired > 0, fmt.Sprintf("reconciliation_backlog:%d", status.ReconciliationRequired), publishMonitoringIssue | publishMonitoringWarning},
+		{status.ReconciliationRequired > 0 && status.OldestReconciliationAgeSeconds > int64(publishReconciliationCriticalAfter/time.Second), fmt.Sprintf("reconciliation_stale:%ds", status.OldestReconciliationAgeSeconds), publishMonitoringAlert},
+		{status.ContentConflicts > 0, fmt.Sprintf("content_conflicts:%d", status.ContentConflicts), publishMonitoringIssue | publishMonitoringAlert},
+	}
+	appendPublishMonitoringSignals(status, signals)
 	sort.Strings(status.Issues)
 	sort.Strings(status.Warnings)
 	sort.Strings(status.AlertIssues)
@@ -227,7 +228,23 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 	default:
 		status.Health = "healthy"
 	}
-	return status
+}
+
+func appendPublishMonitoringSignals(status *publishMonitoringStatus, signals []publishMonitoringSignal) {
+	for _, signal := range signals {
+		if !signal.condition {
+			continue
+		}
+		if signal.levels&publishMonitoringIssue != 0 {
+			status.Issues = append(status.Issues, signal.message)
+		}
+		if signal.levels&publishMonitoringWarning != 0 {
+			status.Warnings = append(status.Warnings, signal.message)
+		}
+		if signal.levels&publishMonitoringAlert != 0 {
+			status.AlertIssues = append(status.AlertIssues, signal.message)
+		}
+	}
 }
 
 func publishExternalDistributionStartedAt(job publishJob) string {
@@ -237,6 +254,13 @@ func publishExternalDistributionStartedAt(job publishJob) string {
 	return strings.TrimSpace(job.ExternalDistributionRequestedAt)
 }
 
+func publishSourceResyncStartedAt(job publishJob) string {
+	if value := strings.TrimSpace(job.SourceResyncIntentAt); value != "" {
+		return value
+	}
+	return strings.TrimSpace(job.SourceResyncRequestedAt)
+}
+
 func countDuplicatePublishSourceKeys(jobs []publishJob) int {
 	seen := make(map[string]int64, len(jobs))
 	duplicates := 0
@@ -244,30 +268,31 @@ func countDuplicatePublishSourceKeys(jobs []publishJob) int {
 		if job.Stage == publishStageSupersededDuplicate {
 			continue
 		}
-		identity := job.ID
-		if identity == 0 {
-			identity = -int64(index + 1)
-		}
-		duplicate := false
-		keys := append([]string{job.SourceKey}, job.SourceAliases...)
-		for _, rawKey := range keys {
-			key := canonicalPublishSourceKey(rawKey)
-			if key == "" {
-				continue
-			}
-			if previous, ok := seen[key]; ok {
-				if previous != identity {
-					duplicate = true
-				}
-				continue
-			}
-			seen[key] = identity
-		}
-		if duplicate {
+		if publishJobHasDuplicateSourceKey(job, index, seen) {
 			duplicates++
 		}
 	}
 	return duplicates
+}
+
+func publishJobHasDuplicateSourceKey(job publishJob, index int, seen map[string]int64) bool {
+	identity := job.ID
+	if identity == 0 {
+		identity = -int64(index + 1)
+	}
+	duplicate := false
+	for _, rawKey := range append([]string{job.SourceKey}, job.SourceAliases...) {
+		key := canonicalPublishSourceKey(rawKey)
+		if key == "" {
+			continue
+		}
+		if previous, ok := seen[key]; ok {
+			duplicate = duplicate || previous != identity
+			continue
+		}
+		seen[key] = identity
+	}
+	return duplicate
 }
 
 func publishMonitoringIsRecent(now time.Time, value string) bool {

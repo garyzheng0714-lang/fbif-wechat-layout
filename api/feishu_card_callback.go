@@ -28,6 +28,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -279,34 +280,27 @@ type reviewCardOutcome struct {
 	card         map[string]any // 非 nil 时以 raw 形态刷新当前卡片（update_multi 群内同步）
 }
 
+type reviewCardActionValue struct {
+	Action              string `json:"action"`
+	JobID               any    `json:"job_id"`
+	ReviewVersion       string `json:"review_version"`
+	LifecycleVersion    string `json:"lifecycle_version"`
+	DistributionVersion string `json:"distribution_version"`
+	SourceResyncVersion string `json:"source_resync_version"`
+}
+
 // reviewCardAction 卡片按钮动作的业务核心（两模式共用唯一入口）：解析 value
 // （action + job_id，兼容数字/字符串）→ 读取最新任务状态 → 业务态校验 → review 核心
 // → 发布中/终态卡。审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
 func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage) (out reviewCardOutcome) {
-	var value struct {
-		Action              string `json:"action"`
-		JobID               any    `json:"job_id"`
-		ReviewVersion       string `json:"review_version"`
-		LifecycleVersion    string `json:"lifecycle_version"`
-		DistributionVersion string `json:"distribution_version"`
-	}
-	if len(rawValue) > 0 {
-		if err := json.Unmarshal(rawValue, &value); err != nil {
-			return reviewCardOutcome{toastType: "error", toastContent: "按钮数据无法解析"}
-		}
-	}
-	jobID := coerceFeishuJobID(value.JobID)
-	if jobID <= 0 || (value.Action != feishuCardActionApprove && value.Action != feishuCardActionForceApprove &&
-		value.Action != feishuCardActionReject &&
-		value.Action != feishuCardActionUnpublish && value.Action != feishuCardActionRepublish &&
-		value.Action != feishuCardActionDistributeExternal) {
-		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位发布任务"}
+	value, jobID, parseErr := parseReviewCardActionValue(rawValue)
+	if parseErr != nil {
+		return reviewCardOutcome{toastType: "error", toastContent: parseErr.Error()}
 	}
 	defer func() {
-		if out.card == nil {
-			return
+		if out.card != nil {
+			p.scheduleReviewBatchCardRefresh(jobID)
 		}
-		p.scheduleReviewBatchCardRefresh(jobID)
 	}()
 	if !p.feishuReviewActionAllowed(operatorOpenID, actionChatID) {
 		return reviewCardOutcome{toastType: "error", toastContent: "你没有发布操作权限：请在审核群内操作卡片，或联系管理员配置审核人白名单"}
@@ -315,75 +309,106 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	// 外部分发属于 published 任务的独立后续动作。published 在主状态机里是终态，
-	// 因此必须像下线/重发一样，在 terminal 判断之前分流。
-	if value.Action == feishuCardActionDistributeExternal {
-		if outcome, handled := externalDistributionCardStateOutcome(job); handled {
-			return outcome
-		}
-		if !externalDistributionVersionMatches(value.DistributionVersion, job) {
-			return reviewCardOutcome{
-				toastType: "error", toastContent: "分发卡片已过期，请使用最新卡片",
-			}
-		}
-		_, distributionErr := p.requestExternalDistribution(jobID, operatorOpenID, value.DistributionVersion)
-		if distributionErr != nil {
-			if latest, loadErr := p.store.byID(jobID); loadErr == nil {
-				if outcome, handled := externalDistributionCardStateOutcome(latest); handled {
-					return outcome
-				}
-			}
-			return reviewCardOutcome{toastType: "error", toastContent: distributionErr.Error()}
-		}
-		return reviewCardOutcome{
-			toastType: "success", toastContent: "已受理，正在同步分发",
+	switch value.Action {
+	case feishuCardActionResyncSource:
+		return p.handleSourceResyncCardAction(job, operatorOpenID, value.SourceResyncVersion)
+	case feishuCardActionDistributeExternal:
+		return p.handleExternalDistributionCardAction(job, operatorOpenID, value.DistributionVersion)
+	case feishuCardActionUnpublish, feishuCardActionRepublish:
+		return p.handleLifecycleCardAction(job, operatorOpenID, value.Action, value.LifecycleVersion)
+	default:
+		return p.handleReviewDecisionCardAction(ctx, job, operatorOpenID, value)
+	}
+}
+
+func parseReviewCardActionValue(rawValue json.RawMessage) (reviewCardActionValue, int64, error) {
+	var value reviewCardActionValue
+	if len(rawValue) > 0 {
+		if err := json.Unmarshal(rawValue, &value); err != nil {
+			return value, 0, errors.New("按钮数据无法解析")
 		}
 	}
-	// 下线 / 重新发布是已发布任务的后续生命周期动作，必须在 terminal 判断前
-	// 分流；offline / published 虽是业务终态，卡片仍允许显示对应的下一步按钮。
-	if value.Action == feishuCardActionUnpublish || value.Action == feishuCardActionRepublish {
-		// 管理后台和飞书卡片可能几乎同时操作同一篇文章。先按持久化状态做一次
-		// 幂等判断，避免把“已经下线/正在下线”误报成卡片过期，也避免再次发出
-		// FoodTalks PUT；返回当前状态卡，让群内旧卡一起收敛到同一张卡片。
-		if outcome, handled := lifecycleCardStateOutcome(value.Action, job); handled {
-			return outcome
-		}
-		if !lifecycleVersionMatches(value.LifecycleVersion, job) {
-			return lifecycleCardStaleOutcome(value.Action, job)
-		}
-		var next publishJob
-		var lifecycleErr error
-		if value.Action == feishuCardActionUnpublish {
-			next, lifecycleErr = p.requestUnpublish(jobID, operatorOpenID, value.LifecycleVersion)
-		} else {
-			next, lifecycleErr = p.requestRepublish(jobID, operatorOpenID, value.LifecycleVersion)
-		}
-		if lifecycleErr != nil {
-			// 状态可能在第一次读取之后被管理后台抢先更新。重新读取一次，
-			// 将竞态收敛为“已处理/处理中”提示，而不是暴露内部 CAS 错误。
-			if latest, loadErr := p.store.byID(jobID); loadErr == nil {
-				if outcome, handled := lifecycleCardStateOutcome(value.Action, latest); handled {
-					return outcome
-				}
-			}
-			return reviewCardOutcome{toastType: "error", toastContent: lifecycleErr.Error()}
-		}
-		return reviewCardOutcome{
-			toastType: "success", toastContent: map[string]string{
-				feishuCardActionUnpublish: "已受理下线请求",
-				feishuCardActionRepublish: "已受理重新发布请求",
-			}[value.Action],
-			card: buildReviewLifecycleProgressCard(next, value.Action),
-		}
+	jobID := coerceFeishuJobID(value.JobID)
+	if jobID <= 0 || !reviewCardActionSupported(value.Action) {
+		return value, 0, errors.New("按钮数据不完整，无法定位发布任务")
 	}
+	return value, jobID, nil
+}
+
+func reviewCardActionSupported(action string) bool {
+	switch action {
+	case feishuCardActionApprove, feishuCardActionForceApprove, feishuCardActionReject,
+		feishuCardActionUnpublish, feishuCardActionRepublish,
+		feishuCardActionDistributeExternal, feishuCardActionResyncSource:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, actor, version string) reviewCardOutcome {
+	if outcome, handled := externalDistributionCardStateOutcome(job); handled {
+		return outcome
+	}
+	if !externalDistributionVersionMatches(version, job) {
+		return reviewCardOutcome{toastType: "error", toastContent: "分发卡片已过期，请使用最新卡片"}
+	}
+	if _, err := p.requestExternalDistribution(job.ID, actor, version); err != nil {
+		if latest, loadErr := p.store.byID(job.ID); loadErr == nil {
+			if outcome, handled := externalDistributionCardStateOutcome(latest); handled {
+				return outcome
+			}
+		}
+		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
+	}
+	return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在同步分发"}
+}
+
+func (p *publishPipeline) handleLifecycleCardAction(job publishJob, actor, action, version string) reviewCardOutcome {
+	if outcome, handled := lifecycleCardStateOutcome(action, job); handled {
+		return outcome
+	}
+	if !lifecycleVersionMatches(version, job) {
+		return lifecycleCardStaleOutcome(action, job)
+	}
+	var next publishJob
+	var err error
+	if action == feishuCardActionUnpublish {
+		next, err = p.requestUnpublish(job.ID, actor, version)
+	} else {
+		next, err = p.requestRepublish(job.ID, actor, version)
+	}
+	if err != nil {
+		if latest, loadErr := p.store.byID(job.ID); loadErr == nil {
+			if outcome, handled := lifecycleCardStateOutcome(action, latest); handled {
+				return outcome
+			}
+		}
+		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
+	}
+	return reviewCardOutcome{
+		toastType: "success",
+		toastContent: map[string]string{
+			feishuCardActionUnpublish: "已受理下线请求",
+			feishuCardActionRepublish: "已受理重新发布请求",
+		}[action],
+		card: buildReviewLifecycleProgressCard(next, action),
+	}
+}
+
+func reviewCardVersionMatches(expected string, job publishJob) bool {
+	want := publishReviewCardVersion(job)
+	return want == "" || len(expected) == len(want) &&
+		subtle.ConstantTimeCompare([]byte(expected), []byte(want)) == 1
+}
+
+func (p *publishPipeline) handleReviewDecisionCardAction(ctx context.Context, job publishJob, actor string, value reviewCardActionValue) reviewCardOutcome {
 	// 防重复点击：任务已进终态 → 提示已被处理，并把卡片刷成当前终态（update_multi
 	// 让群里其他人手里的旧「待审核」卡也一起变终态）。
 	if job.terminal() {
 		return reviewCardOutcome{toastType: "info", toastContent: "该任务已被处理", card: buildReviewDoneCard(job)}
 	}
-	wantVersion := publishReviewCardVersion(job)
-	if wantVersion != "" && (len(value.ReviewVersion) != len(wantVersion) ||
-		subtle.ConstantTimeCompare([]byte(value.ReviewVersion), []byte(wantVersion)) != 1) {
+	if !reviewCardVersionMatches(value.ReviewVersion, job) {
 		return reviewCardOutcome{toastType: "error", toastContent: "审核卡已过期，请使用最新一张包含风险结论的卡片"}
 	}
 	if job.Stage != publishStageAwaitingReview {
@@ -391,15 +416,14 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 		return reviewCardOutcome{toastType: "info", toastContent: fmt.Sprintf("任务当前阶段（%s）无法在卡片上操作，请到管理后台处理", job.Stage)}
 	}
 	// 审核人身份唯一可信来源是 operator.open_id（cardkit 规范 04），不信 value 自带字段。
-	reviewed, err := p.reviewWithRiskVersion(ctx, jobID, value.Action, operatorOpenID, value.ReviewVersion)
+	reviewed, err := p.reviewWithRiskVersion(ctx, job.ID, value.Action, actor, value.ReviewVersion)
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	if value.Action == feishuCardActionApprove || value.Action == feishuCardActionForceApprove {
-		toast := "已受理，正在发布"
-		if value.Action == feishuCardActionForceApprove {
-			toast = "已受理，正在强制发布"
-		}
+	if toast, approved := map[string]string{
+		feishuCardActionApprove:      "已受理，正在发布",
+		feishuCardActionForceApprove: "已受理，正在强制发布",
+	}[value.Action]; approved {
 		return reviewCardOutcome{toastType: "success", toastContent: toast, card: buildReviewPublishingCard(reviewed)}
 	}
 	return reviewCardOutcome{toastType: "success", toastContent: "已驳回", card: buildReviewDoneCard(reviewed)}

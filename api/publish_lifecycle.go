@@ -147,19 +147,20 @@ func publishWindowUntil(now time.Time, hours int) string {
 
 func publishLifecycleCardVersion(job publishJob) string {
 	payload, _ := json.Marshal(struct {
-		ID          int64  `json:"id"`
-		Stage       string `json:"stage"`
-		NewsID      int64  `json:"news_id"`
-		ContentHash string `json:"content_hash"`
-		ContentVer  int64  `json:"content_version"`
-		PublishedAt string `json:"published_at"`
-		WindowUntil string `json:"window_until"`
-		Action      string `json:"action"`
+		ID                int64  `json:"id"`
+		Stage             string `json:"stage"`
+		NewsID            int64  `json:"news_id"`
+		ContentHash       string `json:"content_hash"`
+		ContentVer        int64  `json:"content_version"`
+		PublishedAt       string `json:"published_at"`
+		WindowUntil       string `json:"window_until"`
+		Action            string `json:"action"`
+		SourceResyncState string `json:"source_resync_state"`
 	}{
 		ID: job.ID, Stage: job.Stage, NewsID: job.FoodTalksNewsID,
 		ContentHash: job.ContentHash, ContentVer: job.ContentFrozenVersion,
 		PublishedAt: job.PublishedAt, WindowUntil: job.UnpublishWindowUntil,
-		Action: job.PublicationAction,
+		Action: job.PublicationAction, SourceResyncState: job.SourceResyncState,
 	})
 	digest := sha256.Sum256(payload)
 	return fmt.Sprintf("lifecycle-v1:%d:%x", job.ID, digest[:8])
@@ -178,13 +179,7 @@ func (p *publishPipeline) requestUnpublish(jobID int64, actor, expectedVersion s
 	now := pipelineNow(p)
 	versionMismatch := false
 	job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
-		if expectedVersion != "" && !lifecycleVersionMatches(expectedVersion, current) {
-			versionMismatch = true
-			return false
-		}
-		return current.Stage == publishStagePublished && current.FoodTalksNewsID > 0 &&
-			publishStagingTargetMismatch(current) == nil &&
-			publishUnpublishWindowOpen(current, now) && current.UnpublishIntentKey == "" && current.RepublishIntentKey == ""
+		return publishUnpublishRequestEligible(current, expectedVersion, now, &versionMismatch)
 	}, func(current *publishJob) {
 		current.Stage = publishStageUnpublishing
 		current.FailedStage = ""
@@ -200,21 +195,39 @@ func (p *publishPipeline) requestUnpublish(jobID int64, actor, expectedVersion s
 		return publishJob{}, err
 	}
 	if !swapped {
-		if versionMismatch {
-			return job, errors.New("审核卡已过期，请使用最新一张卡片")
-		}
-		if guardErr := publishStagingTargetMismatch(job); guardErr != nil {
-			return job, guardErr
-		}
-		if job.Stage == publishStagePublished && !publishUnpublishWindowOpen(job, now) {
-			return job, fmt.Errorf("文章已超过下线窗口：%s", publishUnpublishWindowLabel(job, now))
-		}
-		return job, fmt.Errorf("任务当前阶段（%s）无法下线", job.Stage)
+		return job, publishUnpublishRequestError(job, now, versionMismatch)
 	}
 	if p.spawn != nil {
 		p.spawn(func() { p.runJob(jobID) })
 	}
 	return job, nil
+}
+
+func publishUnpublishRequestEligible(job publishJob, expectedVersion string, now time.Time, versionMismatch *bool) bool {
+	if expectedVersion != "" && !lifecycleVersionMatches(expectedVersion, job) {
+		*versionMismatch = true
+		return false
+	}
+	return job.Stage == publishStagePublished && job.FoodTalksNewsID > 0 &&
+		publishStagingTargetMismatch(job) == nil &&
+		!publishSourceResyncBlocksOtherActions(job) && publishUnpublishWindowOpen(job, now) &&
+		job.UnpublishIntentKey == "" && job.RepublishIntentKey == ""
+}
+
+func publishUnpublishRequestError(job publishJob, now time.Time, versionMismatch bool) error {
+	if versionMismatch {
+		return errors.New("审核卡已过期，请使用最新一张卡片")
+	}
+	if err := publishStagingTargetMismatch(job); err != nil {
+		return err
+	}
+	if job.Stage == publishStagePublished && !publishUnpublishWindowOpen(job, now) {
+		return fmt.Errorf("文章已超过下线窗口：%s", publishUnpublishWindowLabel(job, now))
+	}
+	if job.Stage == publishStagePublished && publishSourceResyncBlocksOtherActions(job) {
+		return errors.New("文章正在重新同步或结果待核对，暂时不能下线")
+	}
+	return fmt.Errorf("任务当前阶段（%s）无法下线", job.Stage)
 }
 
 func (p *publishPipeline) requestRepublish(jobID int64, actor, expectedVersion string) (publishJob, error) {

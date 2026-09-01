@@ -305,6 +305,36 @@ func TestPublishMonitoringOldFailureRemainsVisibleWithoutPermanentOutage(t *test
 	}
 }
 
+func TestPublishMonitoringIncludesSourceResyncSubstate(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	job, _, err := store.create("site:https://mp.weixin.qq.com/s/resync", "https://mp.weixin.qq.com/s/resync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	if _, err := store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStagePublished
+		current.SourceResyncState = publishSourceResyncPreparing
+		current.SourceResyncRequestedAt = startedAt
+	}); err != nil {
+		t.Fatal(err)
+	}
+	processing := currentPublishMonitoring(store, time.Now().UTC())
+	if processing.Ready || processing.Processing != 1 || !publishMonitoringHasIssue(processing, "business_processing:") {
+		t.Fatalf("重新同步进行中不得报绿：%+v", processing)
+	}
+	if _, err := store.update(job.ID, func(current *publishJob) {
+		current.SourceResyncState = publishSourceResyncReconciliationRequired
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reconciliation := currentPublishMonitoring(store, time.Now().UTC())
+	if reconciliation.ReconciliationRequired != 1 || !publishMonitoringHasIssue(reconciliation, "reconciliation_backlog:") {
+		t.Fatalf("重新同步待对账必须进入监控积压：%+v", reconciliation)
+	}
+}
+
 func TestAbandonFailedJobClearsRecentFailureAlert(t *testing.T) {
 	t.Setenv(deploymentWritesPausedEnv, "0")
 	env := newPublishTestEnv(t)

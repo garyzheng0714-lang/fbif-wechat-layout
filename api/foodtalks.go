@@ -486,15 +486,54 @@ type foodTalksNewsListItem struct {
 // 不用任务里存过的历史正文。ID 必须从 JSON 读出，不能复用 foodTalksNews
 // （那边的 ID 是 json:"-"，给 POST/PUT 用）。
 type foodTalksNewsDetail struct {
-	ID            int64  `json:"id"`
-	Title         string `json:"title"`
-	CoverImg      string `json:"coverImg"`
-	Content       string `json:"content"`
-	Summary       string `json:"summary"`
-	Author        string `json:"author"`
-	SourceName    string `json:"sourceName"`
-	PublishStatus int    `json:"publishStatus"`
-	SourceType    int    `json:"sourceType"`
+	ID                 int64                           `json:"id"`
+	Title              string                          `json:"title"`
+	Language           string                          `json:"language"`
+	CoverImg           string                          `json:"coverImg"`
+	SourceType         int                             `json:"sourceType"`
+	SourceID           int64                           `json:"sourceId"`
+	SourceName         string                          `json:"sourceName"`
+	Author             string                          `json:"author"`
+	Summary            string                          `json:"summary"`
+	Content            string                          `json:"content"`
+	TOC                string                          `json:"toc"`
+	NewsCategories     []foodTalksNewsCategoryDetail   `json:"newsCategories"`
+	NewsTags           []foodTalksNewsTag              `json:"newsTags"`
+	NewsRelation       []foodTalksNewsRelationDetail   `json:"newsRelation"`
+	RelatedCompanies   []foodTalksRelatedCompanyDetail `json:"relatedCompanies"`
+	RelatedFoodpedias  []foodTalksRelatedFoodpedia     `json:"relatedFoodpedias"`
+	TopicSectionIDList []int64                         `json:"topicSectionIdList"`
+	PublishStatus      int                             `json:"publishStatus"`
+	IsPublic           bool                            `json:"isPublic"`
+	IsLatest           int                             `json:"isLatest"`
+	ImgPreviewEnable   bool                            `json:"imgPreviewEnable"`
+	CommentEnable      int                             `json:"commentEnable"`
+	SEOTitle           string                          `json:"seoTitle"`
+	SEOKeywords        string                          `json:"seoKeywords"`
+	SEODescription     string                          `json:"seoDescription"`
+	PublishTime        string                          `json:"publishTime"`
+}
+
+type foodTalksNewsCategoryDetail struct {
+	IsPrimary       int                           `json:"isPrimary"`
+	CategoryTagID   int64                         `json:"categoryTagId"`
+	ChildCategories []foodTalksNewsCategoryDetail `json:"childCategories"`
+}
+
+type foodTalksNewsRelationDetail struct {
+	ID             int64 `json:"id"`
+	NewsID         int64 `json:"newsId"`
+	RelationNewsID int64 `json:"relationNewsId"`
+}
+
+type foodTalksRelatedCompanyDetail struct {
+	ID        int64 `json:"id"`
+	CompanyID int64 `json:"companyId"`
+}
+
+type foodTalksRelatedFoodpedia struct {
+	ID          int64 `json:"id"`
+	FoodpediaID int64 `json:"foodpediaId"`
 }
 
 // GetNews 读取一篇资讯的当前详情（GET /news/admin/news/{id}）。

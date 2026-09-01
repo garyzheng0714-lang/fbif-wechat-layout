@@ -93,6 +93,31 @@ func TestReviewDoneCardKeepsPublishedArticleLink(t *testing.T) {
 	}
 }
 
+func TestPublishedReviewCardShowsSourceResyncButtonBelowCover(t *testing.T) {
+	job := reviewCardTestJob(publishStagePublished)
+	job.FoodTalksNewsID = 7318
+	job.PublicationAction = publishPublicationActionPublish
+	body := cardJSON(t, buildReviewBatchCard([]publishJob{job}))
+	imageAt := strings.Index(body, `"tag":"img"`)
+	buttonAt := strings.Index(body, "重新同步至网站")
+	for _, want := range []string{
+		`"action":"resync_source"`, `"source_resync_version":`,
+		`"token":"cloud-change_outlined"`, "不会新建文章", "后台人工修改",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("已发布卡片缺少 %q: %s", want, body)
+		}
+	}
+	if imageAt < 0 || buttonAt < imageAt {
+		t.Fatalf("重新同步按钮应在封面图下方: %s", body)
+	}
+
+	job.PublicationAction = publishPublicationActionManualCMS
+	if manual := cardJSON(t, buildReviewBatchCard([]publishJob{job})); strings.Contains(manual, "resync_source") {
+		t.Fatalf("后台人工发布稿不得显示覆盖按钮: %s", manual)
+	}
+}
+
 func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T) {
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	now := time.Now().UTC()
