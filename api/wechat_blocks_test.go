@@ -716,6 +716,26 @@ func TestLongStyledCaptionStaysCaption(t *testing.T) {
 	}
 }
 
+func TestReported62915LongStyledSentenceCaptionStaysCaption(t *testing.T) {
+	caption := "宇治川与两岸的山间茶园。镰仓时代明惠上人在此开辟茶园，室町将军足利义满又拓出七座茶园，" +
+		"宇治茶八百年的历史就从这片山水开始。伊藤久右卫门的本店就在这条河边，紧邻国宝平等院。"
+	html := jsContentWrap(
+		`<p><img data-src="https://mmbiz.qpic.cn/uji.jpg" data-w="1080" data-h="720" data-ratio="0.667" /></p>` +
+			`<p style="text-align: center;"><span style="font-size: 12px; color: #7f7f7f;">` + caption + `</span></p>` +
+			`<p>日本茶叶甜品三部曲写到第三篇，可以做个横向比较了。</p>`)
+	decisions := extractArticleRoleDecisionsForTest(html)
+
+	d := findDecisionByText(decisions, "宇治川与两岸")
+	if d == nil || d.Role != "cap" || d.CaptionProof != CaptionProofLegacyAssociation ||
+		d.MediaID <= 0 || d.CaptionScope <= 0 {
+		t.Fatalf("62915 的小字灰色完整句图注必须与图片绑定，got %+v", d)
+	}
+	body := findDecisionByText(decisions, "日本茶叶甜品三部曲")
+	if body == nil || body.Role != "txt" {
+		t.Fatalf("图注后的正文不得继承图注角色，got %+v", body)
+	}
+}
+
 // 防过度放宽：图片后的长【普通正文】段即使超过基础上限，也必须保持正文；
 // 视觉上限选择不能为未绑定文本创建图注资格。
 func TestLongPlainParagraphAfterImageStaysBody(t *testing.T) {

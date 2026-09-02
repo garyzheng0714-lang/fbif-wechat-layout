@@ -1206,7 +1206,8 @@ export default {
       title,
       sourceUrl: pickSiteTipSourceUrl(data, elems),
     }));
-    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
+    // URL Blocks 已由服务端完成媒体绑定、正文屏障和字数限制，cap/txt 是最终角色。
+    const promoted = promoteHeuristicHeadings(behaved, buildHeadingOpts(config));
     const finalElems = dropRepeatedDecorHeadings(markSeriesAboutLogoImages(promoted, config));
     return {
       lines: render(finalElems, config),

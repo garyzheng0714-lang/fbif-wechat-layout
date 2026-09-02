@@ -362,6 +362,21 @@ test('网站什么是系列 URL 导入：分节图转文字标题，图片标题
   assert.match(html, /<br><em><span style="font-size: 14px; color: #7f7f7f;">本文作者：Ian, FoodTalks/, '文末作者应拆到下一行');
 });
 
+test('网站 URL 导入：服务端 txt 角色是最终结果，不得在渲染器重新提升为图注', () => {
+  const text = '图片来源：' + '源'.repeat(80);
+  const result = template.processBlocks({
+    title: '服务端角色样例',
+    blocks: [
+      { k: 'img', src: 'https://mmbiz.qpic.cn/content.jpg', dataW: '1080', dataH: '720' },
+      { k: 'txt', runs: [{ type: 'txt', text }] },
+    ],
+  }, { config: { muted_color: '#888888' }, isRepost: true });
+  const html = result.lines.join('\n');
+
+  assert.doesNotMatch(html, /<figcaption>/, '服务端已降级的超限文本不能被前端绕过');
+  assert.match(html, new RegExp(`<p style="text-align: justify;">${text}</p>`));
+});
+
 test('网站默认 URL 导入：冒号结尾的加粗正文标签不得误升为 h2', () => {
   const labels = ['健康意识觉醒：', '女性经济崛起：', '代际变迁：', '经济下行：'];
   const result = template.processBlocks({
