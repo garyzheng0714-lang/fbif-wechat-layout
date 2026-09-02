@@ -1097,16 +1097,17 @@ func inferCompatibleCaptionBindings(
 	return bindings
 }
 
+func isCompatibleCaptionTextCandidate(obs ObservedBlock, profile articleProfile) bool {
+	return obs.RawKind == "text" && obs.TextLen > 0 && !profile.refFlow[obs.Index] &&
+		!blocksCaptionAssociationAsArticleCredit(obs.Text) && !isStandaloneHeadingObservation(obs)
+}
+
 func isCompatibleCaptionFirstLine(media ObservedBlock, obs ObservedBlock, profile articleProfile, opts articleBlockOptions) bool {
-	if obs.RawKind != "text" || obs.TextLen == 0 || profile.refFlow[obs.Index] ||
-		blocksCaptionAssociationAsArticleCredit(obs.Text) || isStandaloneHeadingObservation(obs) {
+	if !isCompatibleCaptionTextCandidate(obs, profile) {
 		return false
 	}
 	if obs.ImageSourceLine || classListSignalsCaption(obs.Classes) {
 		return true
-	}
-	if obs.BodyLikeEnding {
-		return false
 	}
 	if matchesArticleBodyVisual(obs, profile) {
 		return false
@@ -1114,15 +1115,17 @@ func isCompatibleCaptionFirstLine(media ObservedBlock, obs ObservedBlock, profil
 	if obs.MutedOrSmallStyle {
 		return obs.TextLen <= opts.CaptionStrongMaxChars
 	}
-	if obs.HeadingFontSize || obs.TextLen > opts.CaptionMaxChars {
+	if obs.BodyLikeEnding {
 		return false
 	}
-	return media.ImageRatio > 0 && obs.Centered && obs.TextLen <= opts.CaptionCenterMaxChars
+	if obs.HeadingFontSize || media.ImageRatio <= 0 || !obs.Centered {
+		return false
+	}
+	return obs.TextLen <= min(opts.CaptionMaxChars, opts.CaptionCenterMaxChars)
 }
 
 func isCompatibleCaptionContinuation(obs ObservedBlock, profile articleProfile, opts articleBlockOptions) bool {
-	if obs.RawKind != "text" || obs.TextLen == 0 || profile.refFlow[obs.Index] ||
-		blocksCaptionAssociationAsArticleCredit(obs.Text) || isStandaloneHeadingObservation(obs) {
+	if !isCompatibleCaptionTextCandidate(obs, profile) {
 		return false
 	}
 	if obs.ImageSourceLine || classListSignalsCaption(obs.Classes) {
