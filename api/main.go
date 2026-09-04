@@ -641,14 +641,41 @@ func behaviorParamInt(params map[string]any, key string, fallback int) int {
 
 var articleFetchHTTPClient = newOutboundHTTPClient(20*time.Second, publicWebURLPolicy)
 
+const (
+	desktopArticleUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	wechatArticleUserAgent  = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.49"
+)
+
+func newArticleFetchRequest(ctx context.Context, rawURL string) (*http.Request, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	isWeChat := isSafeWeChatArticleURL(u.String())
+	if isWeChat {
+		query := u.Query()
+		query.Del("poc_token")
+		u.RawQuery = query.Encode()
+		u.ForceQuery = false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", desktopArticleUserAgent)
+	if isWeChat {
+		req.Header.Set("User-Agent", wechatArticleUserAgent)
+	}
+	return req, nil
+}
+
 func fetchRawHTML(url string) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := newArticleFetchRequest(ctx, url)
 	if err != nil {
 		return nil, "", fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	resp, err := doOutboundRequest(articleFetchHTTPClient, req, publicWebURLPolicy)
 	if err != nil {
 		return nil, "", err
@@ -766,11 +793,10 @@ func handleFetchArticleMeta(w http.ResponseWriter, r *http.Request) {
 }
 
 func fetchArticleHTML(ctx context.Context, rawURL string) (string, string, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	httpReq, err := newArticleFetchRequest(ctx, rawURL)
 	if err != nil {
 		return "", "", err
 	}
-	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	httpReq.Header.Set("Accept", "text/html,application/xhtml+xml")
 
 	resp, err := doOutboundRequest(articleFetchHTTPClient, httpReq, publicWebURLPolicy)
