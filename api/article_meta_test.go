@@ -1,6 +1,26 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
+
+func TestNewArticleFetchRequestNormalizesWeChatChallengeURL(t *testing.T) {
+	req, err := newArticleFetchRequest(context.Background(), "https://mp.weixin.qq.com/s/article?poc_token=expired&scene=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.URL.Query().Get("poc_token"); got != "" {
+		t.Fatalf("poc_token = %q, want removed", got)
+	}
+	if got := req.URL.Query().Get("scene"); got != "1" {
+		t.Fatalf("scene = %q, want preserved", got)
+	}
+	if ua := req.Header.Get("User-Agent"); !strings.Contains(ua, "MicroMessenger/") {
+		t.Fatalf("User-Agent = %q, want WeChat mobile UA", ua)
+	}
+}
 
 func TestExtractMetaHandlesNameAndSingleQuotes(t *testing.T) {
 	raw := `<html><head><meta name='twitter:image' content='https://mmbiz.qpic.cn/cover.jpg?wx_fmt=jpeg&amp;tp=webp'></head></html>`
