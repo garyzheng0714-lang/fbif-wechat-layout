@@ -477,6 +477,18 @@ test('尾部清理：自家稿 isRepost=false 同样切除微信导流尾', () =
   assert.match(last.rest_runs.map(r => r.text).join(''), /本文为FBIF食品饮料创新（ID：FoodInnovation）原创/);
 });
 
+test('尾部清理：「提示：」被识别成标题或图注时仍切除公众号尾注', () => {
+  // 2026-09-08 头条任务 #175：「提示：」抓成 h，尾注残留导致发布被拦截。
+  for (const tip of [h(2, '提示：'), cap('提示：')]) {
+    const elems = wechatTrailerElems();
+    elems[2] = tip;
+    const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, REPOST);
+    assert.doesNotMatch(JSON.stringify(out), /欢迎转发朋友圈|fbifmedia|更多文章/);
+    assert.ok(out.some(e => e.k === 'ref-item'), '正文参考来源必须保留');
+    assert.equal(out.at(-1).k, 'tip', '切尾后仍补网站口径提示');
+  }
+});
+
 test('尾部清理：仅有导流模块、无公众号"提示："页脚时，切除但不补页脚', () => {
   const elems = [
     p('正文结尾。'),
