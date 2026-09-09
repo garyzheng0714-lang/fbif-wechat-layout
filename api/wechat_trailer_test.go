@@ -51,6 +51,25 @@ func TestStripWechatTrailerBlocksSkipsMarkerBeforeReferences(t *testing.T) {
 	}
 }
 
+func TestStripWechatTrailerBlocksCutsHeadingOrCaptionTip(t *testing.T) {
+	for _, kind := range []string{"h", "cap"} {
+		t.Run(kind, func(t *testing.T) {
+			blocks := []Block{
+				{K: "txt", Text: "正文保留。"},
+				{K: "txt", Text: "参考来源："},
+				{K: "txt", Text: "[1] 乐天家庭购物"},
+				{K: kind, Text: "提示："},
+				{K: "txt", Text: "* 本文为FBIF原创，欢迎转发朋友圈；"},
+				{K: "cap", Text: "/ 更多文章 /"},
+			}
+			got := stripWechatTrailerBlocks(blocks)
+			if len(got) != 3 {
+				t.Fatalf("%s 提示必须从尾注前切除，保留正文与参考来源，得到 %#v", kind, got)
+			}
+		})
+	}
+}
+
 func TestStripWechatTrailerBlocksJSONRejectsEmptyAfterCut(t *testing.T) {
 	raw := `[{"k":"txt","text":"提示："},{"k":"txt","text":"* 本文为FBIF原创，欢迎转发朋友圈；"}]`
 	if _, err := stripWechatTrailerBlocksJSON(raw); err == nil {

@@ -43,6 +43,8 @@ type publishMonitoringStatus struct {
 	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
 	// 把 issues 当 P0，于是正常处理中的稿也会被喊成事故。
 	AlertIssues []string `json:"alert_issues"`
+
+	failedUnresolved int
 }
 
 type publishMonitoringLevel uint8
@@ -152,6 +154,8 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 		job.ExternalDistributionState == publishExternalDistributionPartialFailed
 	resyncFailed := job.SourceResyncState == publishSourceResyncFailed
 	status.Failed += boolInt(jobFailed) + boolInt(externalFailed) + boolInt(resyncFailed)
+	// 主发布仍停在 failed 就尚未闭环，不得因超过近期窗口而停止告警。
+	status.failedUnresolved += boolInt(jobFailed)
 	if jobFailed && publishMonitoringIsRecent(now, job.UpdatedAt) {
 		status.FailedRecent++
 	}
@@ -208,6 +212,7 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		{status.ReviewCardsMissing > 0, fmt.Sprintf("review_cards_missing:%d", status.ReviewCardsMissing), publishMonitoringIssue | publishMonitoringAlert},
 		{status.DuplicateSourceKeys > 0, fmt.Sprintf("duplicate_source_keys:%d", status.DuplicateSourceKeys), publishMonitoringIssue | publishMonitoringAlert},
 		{status.FailedRecent > 0, fmt.Sprintf("failed_jobs_recent:%d", status.FailedRecent), publishMonitoringIssue | publishMonitoringAlert},
+		{status.failedUnresolved > 0, fmt.Sprintf("failed_jobs_unresolved:%d", status.failedUnresolved), publishMonitoringIssue | publishMonitoringAlert},
 		{status.ReconciliationRequired > 0, fmt.Sprintf("reconciliation_backlog:%d", status.ReconciliationRequired), publishMonitoringIssue | publishMonitoringWarning},
 		{status.ReconciliationRequired > 0 && status.OldestReconciliationAgeSeconds > int64(publishReconciliationCriticalAfter/time.Second), fmt.Sprintf("reconciliation_stale:%ds", status.OldestReconciliationAgeSeconds), publishMonitoringAlert},
 		{status.ContentConflicts > 0, fmt.Sprintf("content_conflicts:%d", status.ContentConflicts), publishMonitoringIssue | publishMonitoringAlert},

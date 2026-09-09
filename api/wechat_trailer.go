@@ -85,15 +85,6 @@ func wechatTrailerIsTextKind(k string) bool {
 	}
 }
 
-func wechatTrailerIsParagraphKind(k string) bool {
-	switch strings.ToLower(strings.TrimSpace(k)) {
-	case "p", "txt":
-		return true
-	default:
-		return false
-	}
-}
-
 func wechatTrailerCollectFollowing(blocks []Block, i int) string {
 	var b strings.Builder
 	b.WriteString(wechatTrailerBlockText(blocks[i]))
@@ -162,7 +153,7 @@ func stripWechatTrailerBlocks(blocks []Block) []Block {
 			continue
 		}
 		text := wechatTrailerBlockText(block)
-		if wechatTrailerIsParagraphKind(block.K) && wechatTrailerTipLineRe.MatchString(text) &&
+		if wechatTrailerTipLineRe.MatchString(text) &&
 			anyWechatTrailerRegexp(wechatTrailerCollectFollowing(blocks, i), wechatTrailerTipSigs) {
 			if wechatTrailerHasRefAfter(blocks, i) {
 				continue

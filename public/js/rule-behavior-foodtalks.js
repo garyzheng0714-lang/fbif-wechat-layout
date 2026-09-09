@@ -206,8 +206,8 @@ function stripWechatTrailer(elems, markers, signatures, externalMarkers, refHead
     // 导流标记可能落在正文段(p)或图注(cap，如 "/ 更多文章 /")里，两者都要检查；
     // 图(img)无文本，跳过其文本判定但不阻断扫描。
     const text = (e.k === 'p' || e.k === 'h' || e.k === 'cap') ? elemText(e) : '';
-    // 公众号"提示："页脚：从这一段起切除，并标记需补网站页脚
-    if (e.k === 'p' && /^\s*提示[：:]/.test(text) &&
+    // 「提示：」可能被抓成标题或图注；以文案和后续尾注确认切点。
+    if (/^\s*提示[：:]/.test(text) &&
         tipSignatures.some(re => re.test(collectFollowingText(elems, i)))) {
       if (hasRefSectionAfter(elems, i, refHeaderRe)) continue;
       return { elems: elems.slice(0, i), cutWechatTip: true };

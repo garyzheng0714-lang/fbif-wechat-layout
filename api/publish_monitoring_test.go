@@ -278,7 +278,7 @@ func TestCountDuplicatePublishSourceKeysScalesLinearly(t *testing.T) {
 	}
 }
 
-func TestPublishMonitoringOldFailureRemainsVisibleWithoutPermanentOutage(t *testing.T) {
+func TestPublishMonitoringUnresolvedFailureDoesNotAgeOut(t *testing.T) {
 	t.Setenv(deploymentWritesPausedEnv, "0")
 	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
 	job, _, err := store.create("site:https://mp.weixin.qq.com/s/old-failure", "https://mp.weixin.qq.com/s/old-failure")
@@ -287,6 +287,7 @@ func TestPublishMonitoringOldFailureRemainsVisibleWithoutPermanentOutage(t *test
 	}
 	job, err = store.update(job.ID, func(current *publishJob) {
 		current.Stage = publishStageFailed
+		current.FailedStage = publishStageRendering
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -300,8 +301,51 @@ func TestPublishMonitoringOldFailureRemainsVisibleWithoutPermanentOutage(t *test
 		t.Fatalf("recent failure = %+v", recent)
 	}
 	old := currentPublishMonitoring(store, updatedAt.Add(publishRecentFailureWindow+time.Minute))
-	if !old.Ready || old.Failed != 1 || old.FailedRecent != 0 || publishMonitoringHasIssue(old, "failed_jobs") {
-		t.Fatalf("historical failure should remain metric-only = %+v", old)
+	if old.Ready || old.Health != "unhealthy" || old.Failed != 1 || old.FailedRecent != 0 ||
+		!publishMonitoringHasIssue(old, "failed_jobs_unresolved:") ||
+		!publishMonitoringHasIssue(publishMonitoringStatus{Issues: old.AlertIssues}, "failed_jobs_unresolved:") {
+		t.Fatalf("unresolved publishing failure must keep alerting after 24 hours = %+v", old)
+	}
+	if _, err := store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStageAbandoned
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolved := currentPublishMonitoring(store, updatedAt.Add(publishRecentFailureWindow+time.Minute))
+	if !resolved.Ready || resolved.Failed != 0 || len(resolved.AlertIssues) != 0 {
+		t.Fatalf("resolved publishing failure must stop alerting = %+v", resolved)
+	}
+}
+
+func TestPublishMonitoringPublishedOldSubflowFailuresRemainMetricOnly(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	for _, state := range []string{publishExternalDistributionFailed, publishExternalDistributionPartialFailed, "source_resync"} {
+		t.Run(state, func(t *testing.T) {
+			store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+			job, _, err := store.create("site:https://mp.weixin.qq.com/s/published", "https://mp.weixin.qq.com/s/published")
+			if err != nil {
+				t.Fatal(err)
+			}
+			job, err = store.update(job.ID, func(current *publishJob) {
+				current.Stage = publishStagePublished
+				if state == "source_resync" {
+					current.SourceResyncState = publishSourceResyncFailed
+				} else {
+					current.ExternalDistributionState = state
+				}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			updatedAt, err := time.Parse(time.RFC3339, job.UpdatedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := currentPublishMonitoring(store, updatedAt.Add(publishRecentFailureWindow+time.Minute))
+			if !old.Ready || old.Failed != 1 || old.FailedRecent != 0 || len(old.AlertIssues) != 0 {
+				t.Fatalf("published article's old subflow failure must remain metric-only = %+v", old)
+			}
+		})
 	}
 }
 
