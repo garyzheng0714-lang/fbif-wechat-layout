@@ -241,6 +241,72 @@ func TestSiteNewsTagsForMoteArticle(t *testing.T) {
 	}
 }
 
+func TestBuildSiteNewsLinksOnlyOpeningSeriesTag(t *testing.T) {
+	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
+	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
+	tests := []struct {
+		name        string
+		series      string
+		declaration string
+		tagID       int64
+		href        string
+	}{
+		{name: "有的", series: "茶叶系列", declaration: "这是我茶叶系列的第33篇。", tagID: 114000, href: "https://www.foodtalks.cn/news/tag/114000"},
+		{name: "无的", series: "咖啡系列", declaration: "这是我咖啡系列第8篇。", tagID: 114001, href: "https://www.foodtalks.cn/news/tag/114001"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{
+				"Mote莫特":  {{ID: 99913, Name: "Mote莫特", TagTypeID: 6}},
+				tc.series: {{ID: tc.tagID, Name: tc.series, TagTypeID: 6}},
+			}}
+			p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil }}
+			job := publishJob{
+				Title:       "系列文章",
+				Author:      "Mote莫特",
+				SourceName:  "FBIF食品饮料创新",
+				BlocksJSON:  `[{"k":"txt","text":"作者：Mote莫特"},{"k":"img"},{"k":"cap","text":"` + tc.series + `封面"},{"k":"txt","text":"` + tc.declaration + `"},{"k":"txt","text":"后文提到` + tc.series + `"}]`,
+				ContentHTML: `<p>作者：Mote莫特</p><figure><img><figcaption><p>` + tc.series + `封面</p></figcaption></figure><p>` + tc.declaration + `</p><p>后文提到` + tc.series + `，再提` + tc.series + `。</p>`,
+				CreatedAt:   "2026-09-03T00:00:00Z",
+			}
+			news, err := p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+			if err != nil {
+				t.Fatalf("buildSiteNews: %v", err)
+			}
+			if strings.Count(news.Content, tc.href) != 1 {
+				t.Fatalf("开头系列标签链应且只应出现一次：%s", news.Content)
+			}
+			if !strings.Contains(news.Content, `<a href="`+tc.href+`" target="_blank" rel="noopener">`+tc.series+`</a>`) {
+				t.Fatalf("开头声明的系列名未链到已解析 tag：%s", news.Content)
+			}
+			if !strings.Contains(news.Content, `<p>后文提到`+tc.series+`，再提`+tc.series+`。</p>`) {
+				t.Fatalf("后文系列名不得加链：%s", news.Content)
+			}
+		})
+	}
+
+	stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{
+		"Mote莫特": {{ID: 99913, Name: "Mote莫特", TagTypeID: 6}},
+		"茶叶系列":   {{ID: 114000, Name: "茶叶系列", TagTypeID: 6}},
+	}}
+	p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil }}
+	late := publishJob{
+		Title:       "非开头系列声明",
+		Author:      "Mote莫特",
+		SourceName:  "FBIF食品饮料创新",
+		BlocksJSON:  `[{"k":"txt","text":"正文已经开始"},{"k":"txt","text":"这是我茶叶系列第33篇。"}]`,
+		ContentHTML: `<p>正文已经开始</p><p>这是我茶叶系列第33篇。</p>`,
+		CreatedAt:   "2026-09-03T00:00:00Z",
+	}
+	news, err := p.buildSiteNews(context.Background(), late, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatalf("buildSiteNews late declaration: %v", err)
+	}
+	if strings.Contains(news.Content, "/news/tag/") {
+		t.Fatalf("非开头段的系列声明不得加链：%s", news.Content)
+	}
+}
+
 func TestSiteNewsTagsResolvesAITagsForAllArticles(t *testing.T) {
 	stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{
 		"瑞幸咖啡":   {{ID: 111, Name: "瑞幸咖啡", TagTypeID: 6}},

@@ -2003,6 +2003,10 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 	// 仅 Mote/莫特文，把正文里的公众号文章链改成已发布站内稿；找不到保留原链。
 	// 在公司链接之后、目录之前，锚点仍基于最终正文。
 	enriched = p.rewriteMoteSeriesLinks(ctx, job, enriched)
+	// 开头「这是我 XX 系列（的）第 N 篇」只给该声明段的系列名加标签链。
+	// 复用同一次真实 tag 解析；库里没有就不加链，也不创建新 tag。
+	newsTags := p.siteNewsTagsFor(ctx, job)
+	enriched = publishSiteLinkOpeningSeriesTag(enriched, job.BlocksJSON, newsTags)
 	// 目录（2026-08-17 用户裁定：所有文章一视同仁，不分原创/转载——此前只给原创/Mote
 	// 是误解，历史转载没目录多为人工漏掉）：字数与标题数达标即注入 h2 锚点并写 toc
 	// 字段；锚点由内容哈希派生，重复组装字节一致。阈值见 publishSiteTocForContent。
@@ -2022,7 +2026,7 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 		// 文章」已在后端修复——测试环境 7321/7322 实测 POST/PUT 带标签、重复 PUT、清空
 		// 全部 code=0 且读写闭环；生产 62765 运营带标签多次编辑亦正常。所有文章解析
 		// AI 标签，Mote/系列标签优先，总数最多 3 个且只解析不创建（见 siteNewsTagsFor）。
-		NewsTags: p.siteNewsTagsFor(ctx, job),
+		NewsTags: newsTags,
 		// 以下三项是发布/编辑接口必填。PUT 是全量覆盖，Go 零值会把 CMS 默认值盖成
 		// 0/false。官方文档示例与字段表均为 isLatest=1 / imgPreviewEnable=true /
 		// commentEnable=1；isLatest=0 时文章可以直链可见，但进不了首页「最新资讯」。
