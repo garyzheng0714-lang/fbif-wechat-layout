@@ -38,6 +38,7 @@ type publishMonitoringStatus struct {
 	ReconciliationRequired         int      `json:"reconciliation_required"`
 	OldestReconciliationAgeSeconds int64    `json:"oldest_reconciliation_age_seconds"`
 	ContentConflicts               int      `json:"content_conflicts"`
+	FoodTalksCredentialInvalid     bool     `json:"foodtalks_credential_invalid"`
 	Issues                         []string `json:"issues,omitempty"`
 	Warnings                       []string `json:"warnings,omitempty"`
 	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
@@ -61,7 +62,9 @@ type publishMonitoringSignal struct {
 	levels    publishMonitoringLevel
 }
 
-func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMonitoringStatus {
+// credentialInvalid 来自最近一次 FoodTalks 鉴权结论：它不依赖任务积压，
+// 没有稿件在跑时凭证失效也要立刻告警。
+func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, now time.Time) publishMonitoringStatus {
 	if now.IsZero() {
 		now = time.Now()
 	}
@@ -71,6 +74,8 @@ func currentPublishMonitoring(store *publishJobStore, now time.Time) publishMoni
 		StoreValid:    true,
 		WorkersPaused: publishWorkersPaused(),
 		AlertIssues:   []string{},
+
+		FoodTalksCredentialInvalid: credentialInvalid,
 	}
 	jobs, err := store.all()
 	if err != nil {
@@ -216,6 +221,7 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		{status.ReconciliationRequired > 0, fmt.Sprintf("reconciliation_backlog:%d", status.ReconciliationRequired), publishMonitoringIssue | publishMonitoringWarning},
 		{status.ReconciliationRequired > 0 && status.OldestReconciliationAgeSeconds > int64(publishReconciliationCriticalAfter/time.Second), fmt.Sprintf("reconciliation_stale:%ds", status.OldestReconciliationAgeSeconds), publishMonitoringAlert},
 		{status.ContentConflicts > 0, fmt.Sprintf("content_conflicts:%d", status.ContentConflicts), publishMonitoringIssue | publishMonitoringAlert},
+		{status.FoodTalksCredentialInvalid, "foodtalks_credential_invalid", publishMonitoringIssue | publishMonitoringAlert},
 	}
 	appendPublishMonitoringSignals(status, signals)
 	sort.Strings(status.Issues)

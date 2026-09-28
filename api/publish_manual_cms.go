@@ -235,6 +235,11 @@ func (p *publishPipeline) syncManualCMSPublications(ctx context.Context) {
 			continue
 		}
 		if _, published, checkErr := p.findOwnPublishedCMSNews(ctx, job); checkErr != nil {
+			if errors.Is(checkErr, errFoodTalksUnauthorized) {
+				// 凭证失效对每个任务都一样，逐个再查只会按任务数刷屏；本轮停下等下一轮。
+				log.Printf("publish: 后台发布对账本轮中止（任务 #%d 起）：%v", job.ID, checkErr)
+				return
+			}
 			log.Printf("publish: 后台发布对账失败（任务 #%d）：%v", job.ID, checkErr)
 			continue
 		} else if !published {

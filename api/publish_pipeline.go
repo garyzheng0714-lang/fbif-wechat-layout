@@ -197,6 +197,8 @@ type publishPipeline struct {
 	assessRisk func(ctx context.Context, job publishJob) (publishRiskAssessment, error)
 	// foodTalks 每次任务执行现构造（凭证 env-only 运行期可变；缺配置的错误落到具体任务上）
 	foodTalks func() (foodTalksAPI, error)
+	// foodTalksAuth 汇总所有现建客户端的鉴权结论；nil 时监控不报凭证信号（测试装配）。
+	foodTalksAuth *foodTalksAuthHealth
 	// yunsuo 是原创文章外部分发客户端。它只在 FoodTalks 已发布卡片被人工点击后使用，
 	// 与网站主状态机正交；测试可注入 fake，绝不在流水线自动审核路径调用。
 	yunsuo func() (yunsuoAPI, error)
@@ -283,7 +285,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		ossUpload:                        ossUploadByURLs,
 		enrich:                           arkEnrichArticle,
 		assessRisk:                       arkAssessPublishRisk,
-		foodTalks:                        func() (foodTalksAPI, error) { return newFoodTalksClientFromEnv() },
+		foodTalksAuth:                    &foodTalksAuthHealth{},
 		yunsuo:                           func() (yunsuoAPI, error) { return newYunsuoClientFromEnv() },
 		subscribeFeedWechatArticle:       defaultSubscribeFeedWechatArticle,
 		externalDistributionPollInterval: 5 * time.Second,
@@ -292,6 +294,14 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		externalSpawn:                    func(f func()) { go f() },
 		retryNotification:                func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
 		now:                              time.Now,
+	}
+	p.foodTalks = func() (foodTalksAPI, error) {
+		c, err := newFoodTalksClientFromEnv()
+		if err != nil {
+			return nil, err
+		}
+		c.authHealth = p.foodTalksAuth
+		return c, nil
 	}
 	if store != nil {
 		p.repostSources = newPublishRepostSourceStore(publishRepostSourcesPath(store.path))
