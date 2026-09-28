@@ -6,7 +6,6 @@
 
 - [README](../README.md)：产品用途、入口、功能、运行、测试和部署。
 - [PRODUCT](../PRODUCT.md)：用户、产品目标和不可牺牲的体验原则。
-- [DESIGN](../DESIGN.md)：编辑器外壳与公众号 / FoodTalks 内容的视觉契约。
 - [CLAUDE](../CLAUDE.md)：项目级工程红线和维护约束。
 
 事实优先级为：当前源码、配置与测试 > README 和长期契约 > ADR > 历史 WORKLOG / OpenSpec 变更记录。生产状态必须重新用真实环境核验，不能从旧日志或旧截图推断。

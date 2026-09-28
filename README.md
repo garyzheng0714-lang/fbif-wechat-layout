@@ -146,7 +146,6 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 │   ├── config/                      # env-schema.json 与无密钥示例
 │   └── scripts/                     # 事务部署与 env schema 验证器
 ├── tests/                          # 前端模块测试
-├── DESIGN.md                       # 设计系统和交互约束
 ├── package.json
 └── README.md
 ```
@@ -353,7 +352,6 @@ go test ./...
 ## 维护说明
 
 - 文档入口见 [`docs/INDEX.md`](docs/INDEX.md)。[`docs/worklogs/`](docs/worklogs/) 和 `openspec/changes/` 是过程记录，不作为当前规则的单一真相源；是否仍在推进要结合文件状态、issue tracker 和当前代码判断。稳定能力以 README、长期契约、ADR、`openspec/specs/` 和当前代码为准。
-- `DESIGN.md` 记录界面和公众号预览页的设计约束。
 - 渲染器按渠道分三套且物理隔离（红线#19）：公众号默认走 `fbif`，网站走 `foodtalks-site`，FoodTalks系列走 `foodtalks-series`，底部分别由 `mp-blocks`（661px）/ `site-blocks`（满宽）渲染。各渠道功能应以对应渲染器为准，不要用 `fbif.js` 描述网站 / 系列行为。
 - 规则配置的字段 schema、默认值、前端校验和服务端 API 封装集中在 `public/js/rule-presets.js`；受限行为规则集中在 `public/js/rule-behavior.js`。服务端规则持久化、账号绑定和写入校验集中在 `api/rule_presets.go`、`api/rule_behavior.go`、`api/rule_config_validation.go`；各账号 / preset 的默认成对登记在 `api/rule_defaults.go` 与 `api/account_catalog.go`，底部区块默认与校验在 `api/rule_bottom_blocks.go`（统一 `schema_version=2`）。
 - `behavior` 不是任意 JavaScript。第一阶段只允许 schema 校验过的参数、条件、动作和模板槽位，用于作者/来源行、Mote 署名图、原创/转载页脚提示等轻量业务规则；解析、上传、复制、重试和图片处理仍必须留在代码里并由测试保护。

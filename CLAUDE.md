@@ -19,7 +19,7 @@
 ## 工作入口
 
 - 匹配 skill 时先完整读取；禁伪造调用。
-- UI 前读 `DESIGN.md`，不得偏离；QA 报不一致。
+- 编辑器外壳与发布正文隔离：外壳样式不进入 `.wx-*`、`#contentArea` 与各渠道渲染器，文章级作者/来源/编辑的位置与次数只由渲染契约决定；预览按目标渠道宽度模拟（公众号 ≤680px、FoodTalks ≤865px），正文效果以真实公众号后台 / FoodTalks CMS 粘贴保存结果为准。
 - 新功能遵守 [四层边界](docs/adr/2026-07-10-share-vs-isolate-boundary.md)：能力共用（差异参数化）、视觉按渠道隔离、规则按账号显式配置、交互统一。禁中立层写账号字面量、渲染器互相 import、默认继承 `bottom_blocks`、复制 helper、向 `app.html/site.html` 内联新逻辑。
 
 ## 红线
