@@ -274,3 +274,35 @@ func TestCMSPublicationSyncIntervalHonorsOverride(t *testing.T) {
 		t.Fatalf("夜里潮汐=%s", got)
 	}
 }
+
+func TestSyncManualCMSPublicationsStopsRoundOnUnauthorized(t *testing.T) {
+	// 2026-09-24 事故：凭证失效后每轮对每个待审单各检索一次、各记一条 401 日志，
+	// 每天约 2.5 万行。凭证失效对所有任务同样成立，本轮应在第一次 401 后停下。
+	env := newPublishTestEnv(t)
+	jobs := []publishJob{
+		seedManualCMSJob(t, env, publishStageAwaitingReview, 63001, "凭证失效对账一"),
+		seedManualCMSJob(t, env, publishStageAwaitingReview, 63002, "凭证失效对账二"),
+		seedManualCMSJob(t, env, publishStageAwaitingReview, 63003, "凭证失效对账三"),
+	}
+	env.ft.mu.Lock()
+	env.ft.searchAuthFail = true
+	env.ft.mu.Unlock()
+
+	env.pipeline.syncManualCMSPublications(context.Background())
+
+	env.ft.mu.Lock()
+	calls := env.ft.searchCalls
+	env.ft.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("凭证失效后本轮应只检索 1 次，实际 %d 次", calls)
+	}
+	for _, job := range jobs {
+		got, err := env.store.byID(job.ID)
+		if err != nil {
+			t.Fatalf("reload #%d: %v", job.ID, err)
+		}
+		if got.Stage != publishStageAwaitingReview {
+			t.Fatalf("凭证失效不得改任务阶段，#%d 实际 %s", job.ID, got.Stage)
+		}
+	}
+}

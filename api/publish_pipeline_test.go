@@ -147,6 +147,8 @@ type ftStub struct {
 	lastSourceID   int64
 	forbidPublish  bool // true 时收到 publishStatus=1 直接判失败（红线守卫）
 	searchRecords  []foodTalksNewsListItem
+	searchCalls    int
+	searchAuthFail bool // true 时标题检索按生产形态回 401 并回显 token
 	newsByID       map[int64]foodTalksNewsDetail
 	t              *testing.T
 }
@@ -176,6 +178,13 @@ func newFTStub(t *testing.T) *ftStub {
 		if r.URL.Path == "/news/admin/news/page" {
 			// 同题防重 / 后台已发布对账：默认无同名已发布稿，测试可注入 searchRecords。
 			stub.mu.Lock()
+			stub.searchCalls++
+			if stub.searchAuthFail {
+				stub.mu.Unlock()
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprint(w, `{"code":401,"msg":"error","data":"`+r.Header.Get("Authorization")+`"}`)
+				return
+			}
 			records := stub.searchRecords
 			if records == nil {
 				records = []foodTalksNewsListItem{}

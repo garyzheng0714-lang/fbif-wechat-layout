@@ -183,7 +183,8 @@ type foodTalksClient struct {
 	httpClient *http.Client
 	baseURL    string
 	token      string
-	origin     string // Origin 头原值；Referer 由它派生（契约 §1：值随意有效域即可）
+	origin     string               // Origin 头原值；Referer 由它派生（契约 §1：值随意有效域即可）
+	authHealth *foodTalksAuthHealth // 可空；生产由 pipeline 装配，监控据此报凭证失效
 }
 
 // newFoodTalksClientFromEnv 从 env 构造；任一凭证缺失返回 errFoodTalksNotConfigured
@@ -260,7 +261,7 @@ func (c *foodTalksClient) ListTagsByType(ctx context.Context, tagTypeID int64, k
 		return nil, fmt.Errorf("foodtalks: 构造标签列表请求: %w", err)
 	}
 	c.applyHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("FoodTalks 接口不可达（GET %s）: %w", path, err)
 	}
@@ -271,19 +272,12 @@ func (c *foodTalksClient) ListTagsByType(ctx context.Context, tagTypeID int64, k
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
-	case http.StatusUnauthorized:
-		return nil, fmt.Errorf("%w（HTTP 401）", errFoodTalksUnauthorized)
-	case http.StatusForbidden:
-		if json.Valid(respBody) {
-			return nil, fmt.Errorf("%w（HTTP 403）", errFoodTalksUnauthorized)
-		}
-		return nil, fmt.Errorf("%w（HTTP 403，响应片段：%s）", errFoodTalksGatewayBlocked, foodTalksSnippet(respBody))
 	default:
-		return nil, fmt.Errorf("FoodTalks 接口异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+		return nil, c.statusError("接口", resp.StatusCode, respBody)
 	}
 	tags, err := parseFoodTalksTagList(respBody)
 	if err != nil {
-		return nil, fmt.Errorf("FoodTalks 标签列表无法解析（HTTP 200，响应片段：%s）: %w", foodTalksSnippet(respBody), err)
+		return nil, fmt.Errorf("FoodTalks 标签列表无法解析（HTTP 200，响应片段：%s）: %w", c.snippet(respBody), err)
 	}
 	return tags, nil
 }
@@ -312,7 +306,7 @@ func (c *foodTalksClient) CreateTagByName(ctx context.Context, tagTypeID int64, 
 		return 0, fmt.Errorf("foodtalks: 构造创建标签请求: %w", err)
 	}
 	c.applyHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return 0, fmt.Errorf("FoodTalks 接口不可达（POST %s）: %w", foodTalksTagByNamePath, err)
 	}
@@ -324,15 +318,8 @@ func (c *foodTalksClient) CreateTagByName(ctx context.Context, tagTypeID int64, 
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusBadRequest:
 		// 400 仍可能是 JSON 业务错误（「标签名称不能为空」），按 body.code 判定。
-	case http.StatusUnauthorized:
-		return 0, fmt.Errorf("%w（HTTP 401）", errFoodTalksUnauthorized)
-	case http.StatusForbidden:
-		if json.Valid(respBody) {
-			return 0, fmt.Errorf("%w（HTTP 403）", errFoodTalksUnauthorized)
-		}
-		return 0, fmt.Errorf("%w（HTTP 403，响应片段：%s）", errFoodTalksGatewayBlocked, foodTalksSnippet(respBody))
 	default:
-		return 0, fmt.Errorf("FoodTalks 接口异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+		return 0, c.statusError("接口", resp.StatusCode, respBody)
 	}
 	var env struct {
 		Code int    `json:"code"`
@@ -340,7 +327,7 @@ func (c *foodTalksClient) CreateTagByName(ctx context.Context, tagTypeID int64, 
 		Data *int64 `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return 0, fmt.Errorf("FoodTalks 创建标签响应不是预期 JSON（HTTP %d，响应片段：%s）: %w", resp.StatusCode, foodTalksSnippet(respBody), err)
+		return 0, fmt.Errorf("FoodTalks 创建标签响应不是预期 JSON（HTTP %d，响应片段：%s）: %w", resp.StatusCode, c.snippet(respBody), err)
 	}
 	if env.Code != 0 {
 		return 0, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
@@ -418,7 +405,7 @@ func (c *foodTalksClient) send(ctx context.Context, method string, body foodTalk
 	}
 	c.applyHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("FoodTalks 接口不可达（%s %s）: %w", method, foodTalksNewsPath, err)
 	}
@@ -431,16 +418,8 @@ func (c *foodTalksClient) send(ctx context.Context, method string, body foodTalk
 	switch resp.StatusCode {
 	case http.StatusOK:
 		// 继续走 body 判定——HTTP 200 不代表成功（契约 §2）。
-	case http.StatusUnauthorized:
-		return nil, fmt.Errorf("%w（HTTP 401）", errFoodTalksUnauthorized)
-	case http.StatusForbidden:
-		// 403 两种成因必须分开指路：应用层 JSON → 换凭证；nginx HTML → 查请求头/出口 IP。
-		if json.Valid(respBody) {
-			return nil, fmt.Errorf("%w（HTTP 403）", errFoodTalksUnauthorized)
-		}
-		return nil, fmt.Errorf("%w（HTTP 403，响应片段：%s）", errFoodTalksGatewayBlocked, foodTalksSnippet(respBody))
 	default:
-		return nil, fmt.Errorf("FoodTalks 接口异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+		return nil, c.statusError("接口", resp.StatusCode, respBody)
 	}
 
 	var env struct {
@@ -449,7 +428,7 @@ func (c *foodTalksClient) send(ctx context.Context, method string, body foodTalk
 		Data *int64 `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return nil, fmt.Errorf("FoodTalks 响应不是预期 JSON（HTTP 200，响应片段：%s）: %w", foodTalksSnippet(respBody), err)
+		return nil, fmt.Errorf("FoodTalks 响应不是预期 JSON（HTTP 200，响应片段：%s）: %w", c.snippet(respBody), err)
 	}
 	if env.Code != 0 {
 		return nil, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
@@ -549,7 +528,7 @@ func (c *foodTalksClient) GetNews(ctx context.Context, newsID int64) (foodTalksN
 		return foodTalksNewsDetail{}, fmt.Errorf("foodtalks: 构造资讯详情请求: %w", err)
 	}
 	c.applyHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return foodTalksNewsDetail{}, fmt.Errorf("FoodTalks 接口不可达（GET %s）: %w", path, err)
 	}
@@ -559,7 +538,7 @@ func (c *foodTalksClient) GetNews(ctx context.Context, newsID int64) (foodTalksN
 		return foodTalksNewsDetail{}, fmt.Errorf("foodtalks: 读资讯详情响应: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return foodTalksNewsDetail{}, fmt.Errorf("FoodTalks 资讯详情异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+		return foodTalksNewsDetail{}, c.statusError("资讯详情", resp.StatusCode, respBody)
 	}
 	var env struct {
 		Code int                  `json:"code"`
@@ -567,7 +546,7 @@ func (c *foodTalksClient) GetNews(ctx context.Context, newsID int64) (foodTalksN
 		Data *foodTalksNewsDetail `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return foodTalksNewsDetail{}, fmt.Errorf("FoodTalks 资讯详情响应不是预期 JSON（响应片段：%s): %w", foodTalksSnippet(respBody), err)
+		return foodTalksNewsDetail{}, fmt.Errorf("FoodTalks 资讯详情响应不是预期 JSON（响应片段：%s): %w", c.snippet(respBody), err)
 	}
 	if env.Code != 0 {
 		return foodTalksNewsDetail{}, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
@@ -596,7 +575,7 @@ func (c *foodTalksClient) SearchNewsByTitle(ctx context.Context, title string) (
 		return nil, fmt.Errorf("foodtalks: 构造标题检索请求: %w", err)
 	}
 	c.applyHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("FoodTalks 接口不可达（GET %s）: %w", foodTalksNewsPath+"/page", err)
 	}
@@ -606,7 +585,7 @@ func (c *foodTalksClient) SearchNewsByTitle(ctx context.Context, title string) (
 		return nil, fmt.Errorf("foodtalks: 读标题检索响应: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("FoodTalks 标题检索异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+		return nil, c.statusError("标题检索", resp.StatusCode, respBody)
 	}
 	var env struct {
 		Code int    `json:"code"`
@@ -616,7 +595,7 @@ func (c *foodTalksClient) SearchNewsByTitle(ctx context.Context, title string) (
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return nil, fmt.Errorf("FoodTalks 标题检索响应不是预期 JSON（响应片段：%s): %w", foodTalksSnippet(respBody), err)
+		return nil, fmt.Errorf("FoodTalks 标题检索响应不是预期 JSON（响应片段：%s): %w", c.snippet(respBody), err)
 	}
 	if env.Code != 0 {
 		return nil, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
@@ -655,7 +634,7 @@ func (c *foodTalksClient) SearchCompanies(ctx context.Context, keyword string) (
 		return nil, fmt.Errorf("foodtalks: 构造公司检索请求: %w", err)
 	}
 	c.applyHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("FoodTalks 接口不可达（GET %s）: %w", foodTalksCompanySearchPath, err)
 	}
@@ -665,7 +644,7 @@ func (c *foodTalksClient) SearchCompanies(ctx context.Context, keyword string) (
 		return nil, fmt.Errorf("foodtalks: 读公司检索响应: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("FoodTalks 公司检索异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+		return nil, c.statusError("公司检索", resp.StatusCode, respBody)
 	}
 	var env struct {
 		Code int    `json:"code"`
@@ -675,7 +654,7 @@ func (c *foodTalksClient) SearchCompanies(ctx context.Context, keyword string) (
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return nil, fmt.Errorf("FoodTalks 公司检索响应不是预期 JSON（响应片段：%s): %w", foodTalksSnippet(respBody), err)
+		return nil, fmt.Errorf("FoodTalks 公司检索响应不是预期 JSON（响应片段：%s): %w", c.snippet(respBody), err)
 	}
 	if env.Code != 0 {
 		return nil, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
@@ -700,7 +679,7 @@ func (c *foodTalksClient) PreviewToken(ctx context.Context, newsID int64) (strin
 		return "", fmt.Errorf("foodtalks: 构造预览 token 请求: %w", err)
 	}
 	c.applyHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return "", fmt.Errorf("FoodTalks 接口不可达（POST %s）: %w", path, err)
 	}
@@ -710,7 +689,7 @@ func (c *foodTalksClient) PreviewToken(ctx context.Context, newsID int64) (strin
 		return "", fmt.Errorf("foodtalks: 读预览 token 响应: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("FoodTalks 预览 token 接口异常（HTTP %d，响应片段：%s）", resp.StatusCode, foodTalksSnippet(respBody))
+		return "", c.statusError("预览 token 接口", resp.StatusCode, respBody)
 	}
 	var env struct {
 		Code int    `json:"code"`
@@ -720,7 +699,7 @@ func (c *foodTalksClient) PreviewToken(ctx context.Context, newsID int64) (strin
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return "", fmt.Errorf("FoodTalks 预览 token 响应不是预期 JSON（响应片段：%s): %w", foodTalksSnippet(respBody), err)
+		return "", fmt.Errorf("FoodTalks 预览 token 响应不是预期 JSON（响应片段：%s): %w", c.snippet(respBody), err)
 	}
 	if env.Code != 0 {
 		return "", &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
@@ -731,9 +710,41 @@ func (c *foodTalksClient) PreviewToken(ctx context.Context, newsID int64) (strin
 	return env.Data.Token, nil
 }
 
-// foodTalksSnippet 截取响应前 200 字节进错误信息（够定位 nginx 错误页/意外形态，不刷屏日志）。
-func foodTalksSnippet(b []byte) string {
+// do 是全部 FoodTalks 请求的唯一出口：任何 2xx 都说明凭证被接受（业务 code 另判）。
+// 失效结论由 statusError 记录，两处合起来就是监控的凭证信号。
+func (c *foodTalksClient) do(req *http.Request) (*http.Response, error) {
+	resp, err := c.httpClient.Do(req)
+	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		c.authHealth.record(true)
+	}
+	return resp, err
+}
+
+// statusError 把非成功 HTTP 状态归类：401 与带 JSON 体的 403 是凭证失效（换 token），
+// HTML 403 是网关拦截（查请求头/出口 IP），其余带打码片段原样报出。
+func (c *foodTalksClient) statusError(what string, status int, body []byte) error {
+	switch {
+	case status == http.StatusUnauthorized:
+		c.authHealth.record(false)
+		return fmt.Errorf("%w（HTTP 401）", errFoodTalksUnauthorized)
+	case status == http.StatusForbidden && json.Valid(body):
+		c.authHealth.record(false)
+		return fmt.Errorf("%w（HTTP 403）", errFoodTalksUnauthorized)
+	case status == http.StatusForbidden:
+		return fmt.Errorf("%w（HTTP 403，响应片段：%s）", errFoodTalksGatewayBlocked, c.snippet(body))
+	default:
+		return fmt.Errorf("FoodTalks %s异常（HTTP %d，响应片段：%s）", what, status, c.snippet(body))
+	}
+}
+
+// snippet 截取响应前 200 字进错误信息（够定位 nginx 错误页/意外形态，不刷屏日志）。
+// FoodTalks 鉴权失败会在 data 里原样回显所传 token（2026-09-28 生产实测），
+// 所以先打码再截断——先截断会把切在边界上的半截 token 漏进日志。
+func (c *foodTalksClient) snippet(b []byte) string {
 	s := strings.TrimSpace(string(b))
+	if c.token != "" {
+		s = strings.ReplaceAll(s, c.token, "[FOODTALKS_TOKEN]")
+	}
 	r := []rune(s)
 	if len(r) > 200 {
 		return string(r[:200]) + "…"

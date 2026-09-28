@@ -136,7 +136,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
 		}
-		writeJSON(w, http.StatusOK, currentPublishMonitoring(p.store, time.Now()))
+		writeJSON(w, http.StatusOK, currentPublishMonitoring(p.store, p.foodTalksAuth.invalid(), time.Now()))
 	})
 
 	mux.HandleFunc("GET /api/publish/readiness", func(w http.ResponseWriter, r *http.Request) {

@@ -40,7 +40,7 @@ func TestPublishMonitoringReportsOnlyOperationalMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Add(20 * time.Minute)
-	status := currentPublishMonitoring(store, now)
+	status := currentPublishMonitoring(store, false, now)
 	if status.Ready || status.Processing != 1 || status.NotificationPending != 1 {
 		t.Fatalf("monitoring status = %+v", status)
 	}
@@ -96,7 +96,7 @@ func TestPublishMonitoringSeparatesBusyDegradedAndUnhealthy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	busy := currentPublishMonitoring(store, updatedAt.Add(5*time.Minute))
+	busy := currentPublishMonitoring(store, false, updatedAt.Add(5*time.Minute))
 	if busy.Ready || !busy.Busy || busy.Health != "busy" || len(busy.AlertIssues) != 0 {
 		t.Fatalf("normal processing should be busy without P0 alert: %+v", busy)
 	}
@@ -108,13 +108,13 @@ func TestPublishMonitoringSeparatesBusyDegradedAndUnhealthy(t *testing.T) {
 		t.Fatalf("busy 状态必须写出空的 alert_issues，实际 %s", raw)
 	}
 
-	degraded := currentPublishMonitoring(store, updatedAt.Add(11*time.Minute))
+	degraded := currentPublishMonitoring(store, false, updatedAt.Add(11*time.Minute))
 	if degraded.Health != "degraded" || len(degraded.AlertIssues) != 0 ||
 		!publishMonitoringHasIssue(publishMonitoringStatus{Issues: degraded.Warnings}, "processing_slow:") {
 		t.Fatalf("near-SLO processing should be warning-only: %+v", degraded)
 	}
 
-	unhealthy := currentPublishMonitoring(store, updatedAt.Add(21*time.Minute))
+	unhealthy := currentPublishMonitoring(store, false, updatedAt.Add(21*time.Minute))
 	if unhealthy.Health != "unhealthy" || !publishMonitoringHasIssue(publishMonitoringStatus{Issues: unhealthy.AlertIssues}, "processing_stale:") {
 		t.Fatalf("over-SLO processing should alert: %+v", unhealthy)
 	}
@@ -137,7 +137,7 @@ func TestPublishMonitoringUsesExternalIntentAgeAcrossPollUpdates(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	status := currentPublishMonitoring(store, time.Now().UTC())
+	status := currentPublishMonitoring(store, false, time.Now().UTC())
 	if status.OldestProcessingAgeSeconds < 10*60 ||
 		!publishMonitoringHasIssue(publishMonitoringStatus{Issues: status.Warnings}, "processing_slow:") {
 		t.Fatalf("轮询更新 UpdatedAt 后仍应按外部分发 intent 计龄：%+v", status)
@@ -152,7 +152,7 @@ func TestPublishMonitoringAlertsOnStaleQueueAndAgesReconciliation(t *testing.T) 
 		t.Fatal(err)
 	}
 	queuedAt, _ := time.Parse(time.RFC3339, queued.UpdatedAt)
-	queueStatus := currentPublishMonitoring(store, queuedAt.Add(16*time.Minute))
+	queueStatus := currentPublishMonitoring(store, false, queuedAt.Add(16*time.Minute))
 	if !publishMonitoringHasIssue(publishMonitoringStatus{Issues: queueStatus.AlertIssues}, "queue_stale:") {
 		t.Fatalf("stale queue must alert: %+v", queueStatus)
 	}
@@ -164,11 +164,11 @@ func TestPublishMonitoringAlertsOnStaleQueueAndAgesReconciliation(t *testing.T) 
 		t.Fatal(err)
 	}
 	reconciliationAt, _ := time.Parse(time.RFC3339, reconciliation.UpdatedAt)
-	warning := currentPublishMonitoring(store, reconciliationAt.Add(5*time.Minute))
+	warning := currentPublishMonitoring(store, false, reconciliationAt.Add(5*time.Minute))
 	if warning.Health != "degraded" || len(warning.AlertIssues) != 0 {
 		t.Fatalf("fresh reconciliation should be warning-only: %+v", warning)
 	}
-	critical := currentPublishMonitoring(store, reconciliationAt.Add(31*time.Minute))
+	critical := currentPublishMonitoring(store, false, reconciliationAt.Add(31*time.Minute))
 	if !publishMonitoringHasIssue(publishMonitoringStatus{Issues: critical.AlertIssues}, "reconciliation_stale:") {
 		t.Fatalf("stale reconciliation must alert: %+v", critical)
 	}
@@ -208,7 +208,7 @@ func TestPublishMonitoringGuardsReviewNotificationAndDeduplication(t *testing.T)
 		t.Fatal(err)
 	}
 
-	status := currentPublishMonitoring(store, time.Now().UTC())
+	status := currentPublishMonitoring(store, false, time.Now().UTC())
 	if status.Ready || status.NotificationErrors != 1 || status.ReviewCardsMissing != 1 || status.DuplicateSourceKeys != 1 {
 		t.Fatalf("monitoring invariants = %+v", status)
 	}
@@ -235,7 +235,7 @@ func TestPublishMonitoringReportsNotificationDeadLetters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status := currentPublishMonitoring(store, time.Now())
+	status := currentPublishMonitoring(store, false, time.Now())
 	if status.Ready || status.NotificationDeadLetters != 1 || !publishMonitoringHasIssue(status, "notification_dead_letters:") {
 		t.Fatalf("monitoring status = %+v", status)
 	}
@@ -296,11 +296,11 @@ func TestPublishMonitoringUnresolvedFailureDoesNotAgeOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recent := currentPublishMonitoring(store, updatedAt.Add(time.Minute))
+	recent := currentPublishMonitoring(store, false, updatedAt.Add(time.Minute))
 	if recent.Ready || recent.Failed != 1 || recent.FailedRecent != 1 || !publishMonitoringHasIssue(recent, "failed_jobs_recent:") {
 		t.Fatalf("recent failure = %+v", recent)
 	}
-	old := currentPublishMonitoring(store, updatedAt.Add(publishRecentFailureWindow+time.Minute))
+	old := currentPublishMonitoring(store, false, updatedAt.Add(publishRecentFailureWindow+time.Minute))
 	if old.Ready || old.Health != "unhealthy" || old.Failed != 1 || old.FailedRecent != 0 ||
 		!publishMonitoringHasIssue(old, "failed_jobs_unresolved:") ||
 		!publishMonitoringHasIssue(publishMonitoringStatus{Issues: old.AlertIssues}, "failed_jobs_unresolved:") {
@@ -311,7 +311,7 @@ func TestPublishMonitoringUnresolvedFailureDoesNotAgeOut(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	resolved := currentPublishMonitoring(store, updatedAt.Add(publishRecentFailureWindow+time.Minute))
+	resolved := currentPublishMonitoring(store, false, updatedAt.Add(publishRecentFailureWindow+time.Minute))
 	if !resolved.Ready || resolved.Failed != 0 || len(resolved.AlertIssues) != 0 {
 		t.Fatalf("resolved publishing failure must stop alerting = %+v", resolved)
 	}
@@ -341,7 +341,7 @@ func TestPublishMonitoringPublishedOldSubflowFailuresRemainMetricOnly(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			old := currentPublishMonitoring(store, updatedAt.Add(publishRecentFailureWindow+time.Minute))
+			old := currentPublishMonitoring(store, false, updatedAt.Add(publishRecentFailureWindow+time.Minute))
 			if !old.Ready || old.Failed != 1 || old.FailedRecent != 0 || len(old.AlertIssues) != 0 {
 				t.Fatalf("published article's old subflow failure must remain metric-only = %+v", old)
 			}
@@ -364,7 +364,7 @@ func TestPublishMonitoringIncludesSourceResyncSubstate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	processing := currentPublishMonitoring(store, time.Now().UTC())
+	processing := currentPublishMonitoring(store, false, time.Now().UTC())
 	if processing.Ready || processing.Processing != 1 || !publishMonitoringHasIssue(processing, "business_processing:") {
 		t.Fatalf("重新同步进行中不得报绿：%+v", processing)
 	}
@@ -373,7 +373,7 @@ func TestPublishMonitoringIncludesSourceResyncSubstate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	reconciliation := currentPublishMonitoring(store, time.Now().UTC())
+	reconciliation := currentPublishMonitoring(store, false, time.Now().UTC())
 	if reconciliation.ReconciliationRequired != 1 || !publishMonitoringHasIssue(reconciliation, "reconciliation_backlog:") {
 		t.Fatalf("重新同步待对账必须进入监控积压：%+v", reconciliation)
 	}
@@ -403,7 +403,7 @@ func TestAbandonFailedJobClearsRecentFailureAlert(t *testing.T) {
 	if got.Stage != publishStageAbandoned || !got.terminal() {
 		t.Fatalf("结案后应为 abandoned 终态，实际 %+v", got)
 	}
-	status := currentPublishMonitoring(env.store, time.Now().UTC())
+	status := currentPublishMonitoring(env.store, false, time.Now().UTC())
 	if !status.Ready || status.FailedRecent != 0 || publishMonitoringHasIssue(status, "failed_jobs_recent:") {
 		t.Fatalf("结案后监控应变绿，实际 %+v", status)
 	}
