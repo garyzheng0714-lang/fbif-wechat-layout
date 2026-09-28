@@ -10,7 +10,9 @@ package main
 //     内容系列标签（如「这是我茶叶系列的第29篇」→「茶叶系列」）。标签只在
 //     tag_type_id=6 新闻标签库中按规范化名称等值解析，总数最多 3 个；不自动创建；
 //     栏目/活动标签黑名单双侧拦截（publishSiteTagBlocked）。
-//  3. Mote 系列链接：网站发布组装时把正文公众号互推链换成已发布站内稿
+//  3. 系列标签链接：只把开头「这是我 XX 系列（的）第 N 篇」声明中的系列名
+//     链到已解析的 FoodTalks 标签页；后文同词不加链。
+//  4. Mote 系列链接：网站发布组装时把正文公众号互推链换成已发布站内稿
 //     （见 publish_mote_series_links.go；金标准 62285 Tazo→/news/62236）。
 
 import (
@@ -215,6 +217,68 @@ func isSeriesNameRune(r rune) bool {
 		return true
 	}
 	return r == '·'
+}
+
+var publishSiteOpeningSeriesRe = regexp.MustCompile(`^这是我([\p{Han}A-Za-z0-9·]{2,10}系列)(?:的)?第[0-9零〇一二三四五六七八九十百千两]+篇[。.]?$`)
+var publishSiteOpeningSeriesParagraphRe = regexp.MustCompile(`(?is)<p\b[^>]*>\s*这是我([\p{Han}A-Za-z0-9·]{2,10}系列)(?:的)?第[0-9零〇一二三四五六七八九十百千两]+篇[。.]?\s*</p>`)
+
+func publishSiteOpeningSeriesCandidateText(block Block) string {
+	if block.K != "txt" {
+		return ""
+	}
+	text := strings.TrimSpace(publishExternalDistributionBlockText(block))
+	if publishSiteAuthorLineRe.MatchString(text) {
+		return ""
+	}
+	return text
+}
+
+// publishSiteOpeningSeriesName 只读开头首个正文段；署名、空段和头图不算正文。
+// 若普通正文已经开始，后面再出现「XX 系列第 N 篇」也不认。
+func publishSiteOpeningSeriesName(blocksJSON string) string {
+	var blocks []Block
+	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err != nil {
+		return ""
+	}
+	for _, block := range blocks {
+		text := publishSiteOpeningSeriesCandidateText(block)
+		if text == "" {
+			continue
+		}
+		match := publishSiteOpeningSeriesRe.FindStringSubmatch(text)
+		if match == nil {
+			return ""
+		}
+		return match[1]
+	}
+	return ""
+}
+
+func publishSiteNewsTagID(tags []foodTalksNewsTag, name string) int64 {
+	want := normalizeFoodTalksSourceName(name)
+	for _, tag := range tags {
+		if tag.TagID > 0 && normalizeFoodTalksSourceName(tag.TagName) == want {
+			return tag.TagID
+		}
+	}
+	return 0
+}
+
+func publishSiteLinkOpeningSeriesTag(contentHTML, blocksJSON string, tags []foodTalksNewsTag) string {
+	name := publishSiteOpeningSeriesName(blocksJSON)
+	if name == "" {
+		return contentHTML
+	}
+	tagID := publishSiteNewsTagID(tags, name)
+	if tagID == 0 {
+		return contentHTML
+	}
+	match := publishSiteOpeningSeriesParagraphRe.FindStringSubmatchIndex(contentHTML)
+	if match == nil || contentHTML[match[2]:match[3]] != name {
+		return contentHTML
+	}
+	link := fmt.Sprintf(`<a href="%s/news/tag/%d" target="_blank" rel="noopener">%s</a>`, escapeHTMLAttr(siteFrontURL()), tagID, html.EscapeString(name))
+	return contentHTML[:match[2]] + link + contentHTML[match[3]:]
 }
 
 // ---- 新闻标签解析（tag_type_id=6，只解析不创建） ----

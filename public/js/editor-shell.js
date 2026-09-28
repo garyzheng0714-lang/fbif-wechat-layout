@@ -366,6 +366,7 @@ export function bindUrlImportShortcuts({
   tryImportValue = null,
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
+  let pasteFallbackTimer = null;
 
   function submitImportValue(value) {
     const text = String(value || '').trim();
@@ -441,8 +442,13 @@ export function bindUrlImportShortcuts({
     submitImportValue(text);
   });
   if (!urlInput) return;
-  urlInput.addEventListener('input', () => {
+  urlInput.addEventListener('input', event => {
     if (!(urlInput.value || '').trim() && typeof onInputCleared === 'function') onInputCleared();
+    if (event && event.inputType === 'insertFromPaste') {
+      clearTimeout(pasteFallbackTimer);
+      pasteFallbackTimer = null;
+      autoSubmitFromInput();
+    }
   });
   urlInput.addEventListener('paste', event => {
     const pasted = (event && (event.clipboardData || globalThis.window?.clipboardData))
@@ -454,7 +460,11 @@ export function bindUrlImportShortcuts({
       submitImportValue(next);
       return;
     }
-    setTimeout(autoSubmitFromInput, 0);
+    clearTimeout(pasteFallbackTimer);
+    pasteFallbackTimer = setTimeout(() => {
+      pasteFallbackTimer = null;
+      autoSubmitFromInput();
+    }, 0);
   });
   urlInput.addEventListener('keydown', event => {
     const isMultiline = urlInput.tagName === 'TEXTAREA';

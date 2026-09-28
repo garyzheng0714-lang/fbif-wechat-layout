@@ -857,6 +857,16 @@ test('bindUrlImportShortcuts 在输入框里粘贴正文同样直接排版', asy
   assert.equal(calls.fetched, 0);
 });
 
+test('移动端只触发 insertFromPaste input 时也会自动排版', () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts();
+
+  urlInput.value = '移动端粘贴进来的正文。';
+  inputHandlers.input({ inputType: 'insertFromPaste' });
+
+  assert.deepEqual(calls.imported, ['移动端粘贴进来的正文。']);
+  assert.equal(calls.fetched, 0);
+});
+
 test('输入框粘贴时即使 value 还没更新，也按剪贴板内容立即排版', () => {
   const { inputHandlers, urlInput, calls } = mountImportShortcuts();
   let prevented = false;
