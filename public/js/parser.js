@@ -2,6 +2,7 @@
 // (except DOMParser which is available in Node 20+ via jsdom if needed)
 
 import { convertRuns, convertText } from './punctuation.js';
+import { createListMarkers, NO_LIST_MARKER } from './docx-list-markers.js';
 
 const EXT_TO_MIME = {
   gif: 'image/gif',
@@ -101,6 +102,9 @@ function readPPr(pPr) {
     const numIdEl = findOne(numPr, W, 'numId');
     const numId = numIdEl ? wattr(numIdEl, 'val') : '';
     if (numId) out.numId = numId;
+    const ilvlEl = findOne(numPr, W, 'ilvl');
+    const ilvl = ilvlEl ? wattr(ilvlEl, 'val') : '';
+    if (ilvl) out.ilvl = ilvl;
   }
   if (findOne(pPr, W, 'outlineLvl')) out.outlineLevel = true;
 
@@ -116,6 +120,7 @@ function mergePPr(base, next) {
     spacing: { ...(base && base.spacing ? base.spacing : {}), ...(next && next.spacing ? next.spacing : {}) },
     numPr: Boolean((base && base.numPr) || (next && next.numPr)),
     numId: (next && next.numId) || (base && base.numId) || '',
+    ilvl: (next && next.ilvl) || (base && base.ilvl) || '',
     outlineLevel: Boolean((base && base.outlineLevel) || (next && next.outlineLevel)),
   };
 }
@@ -142,10 +147,10 @@ function looksLikeListStyle(styleId, styleName) {
     /^list/.test(id) || /^(列表|清单)/.test(id);
 }
 
-// 解析 word/numbering.xml → { numId: { fmt, text, color } }。
-// 飞书/Word 导出把项目符号的字形（• ◦ –）和颜色放在这里，正文段落只留一个 numId 引用；
-// 不读它就只能拿到「这是列表」这个布尔，符号本身无从还原（导入后列表塌成普通段落的根因）。
-// 只取每个 abstractNum 的首个 <w:lvl>（lvl 0）：公众号正文不做多级缩进，嵌套层级统一按一级符号渲染。
+// 解析 word/numbering.xml → { numId: { absId, fmt, text, color, start, startOverride } }。
+// 飞书/Word 导出把项目符号的字形（• ◦ –）、有序列表的序号格式与起始值都放在这里，正文段落
+// 只留一个 numId 引用；不读它就只能拿到「这是列表」这个布尔，符号和序号无从还原。
+// 只取每个 abstractNum 的首个 <w:lvl>（lvl 0）：公众号正文不做多级缩进，嵌套层级统一按一级处理。
 export function parseDocxNumbering(numberingDom) {
   const root = numberingDom && (numberingDom.documentElement || numberingDom);
   const map = {};
@@ -158,29 +163,28 @@ export function parseDocxNumbering(numberingDom) {
     if (!id || !lvl) continue;
     const rPr = findOne(lvl, W, 'rPr');
     abstracts[id] = {
+      absId: id,
       fmt: wattr(findOne(lvl, W, 'numFmt'), 'val'),
       text: wattr(findOne(lvl, W, 'lvlText'), 'val'),
       color: rPr ? wattr(findOne(rPr, W, 'color'), 'val') : '',
+      start: readListNumber(findOne(lvl, W, 'start')) ?? 1,
     };
   }
 
   for (const num of findAll(root, W, 'num')) {
     const numId = wattr(num, 'numId');
     const absId = wattr(findOne(num, W, 'abstractNumId'), 'val');
-    if (numId && abstracts[absId]) map[numId] = abstracts[absId];
+    if (!numId || !abstracts[absId]) continue;
+    const override = findAll(num, W, 'lvlOverride').find(o => (wattr(o, 'ilvl') || '0') === '0');
+    const startOverride = override ? readListNumber(findOne(override, W, 'startOverride')) : null;
+    map[numId] = { ...abstracts[absId], startOverride };
   }
   return map;
 }
 
-// 段落的项目符号字面量。只还原【无序】列表（numFmt=bullet）：有序列表的序号需要跨段落
-// 计数状态（同一 numId 内递增、w:start、重启规则），没有可核验的导出样本前不猜，
-// 有序列表维持既有的「按普通段落渲染」行为。
-export function resolveListMarker(numbering, numId) {
-  const def = numbering && numId ? numbering[numId] : null;
-  if (!def || def.fmt !== 'bullet') return { marker: '', markerColor: '' };
-  const marker = String(def.text || '').trim();
-  if (!marker) return { marker: '', markerColor: '' };
-  return { marker, markerColor: def.color || '' };
+function readListNumber(el) {
+  const n = parseInt(wattr(el, 'val'), 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 export function parseDocxStyles(stylesDom) {
@@ -420,7 +424,7 @@ function buildParagraph(runs, base) {
 // multiple visual paragraphs into a single <w:p> with <w:br/> separators —
 // we split on those breaks so downstream rendering treats each line as its
 // own paragraph. Heading/outline style only applies to the first slice.
-export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null, numbering = null) {
+export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null, listMarkerFor = null) {
   const pPr = findOne(p, W, 'pPr');
   let align = 'left', isList = false, hasOutlineLevel = false, hasHeadingStyle = false;
   let styleId = '', styleName = '', isListStyle = false, contextualSpacing = false, spacing = {}, styleChain = [];
@@ -441,8 +445,9 @@ export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null, numb
   hasHeadingStyle = looksLikeHeadingStyle(styleId, styleName);
   contextualSpacing = Boolean(effectivePPr.contextualSpacing);
   spacing = effectivePPr.spacing || {};
-  const { marker: listMarker, markerColor: listMarkerColor } =
-    resolveListMarker(numbering, effectivePPr.numId);
+  const { marker: listMarker, markerColor: listMarkerColor } = listMarkerFor
+    ? listMarkerFor(effectivePPr.numId, effectivePPr.ilvl)
+    : NO_LIST_MARKER;
 
   const runs = [];
   const ctx = { fieldState: 'none', fieldInstr: '', fieldHref: '', linkHref: '' };
@@ -561,9 +566,10 @@ export async function parseDocx(file) {
   const numbering = numberingEntry
     ? parseDocxNumbering(new DOMParser().parseFromString(await numberingEntry.async('string'), 'text/xml'))
     : null;
+  const listMarkerFor = createListMarkers(numbering);
   const body = findOne(docDom.documentElement, W, 'body');
   const paragraphs = [];
-  collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs, styleSheet, numbering);
+  collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs, styleSheet, listMarkerFor);
 
   return { paragraphs, imgCache };
 }
@@ -571,16 +577,16 @@ export async function parseDocx(file) {
 // Walk block-level content collecting paragraphs. Descends into tables
 // (flattening cells row-by-row), sdt wrappers, and mc:AlternateContent
 // so table text and SDT-wrapped paragraphs aren't silently dropped.
-export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styleSheet = null, numbering = null) {
+export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styleSheet = null, listMarkerFor = null) {
   for (const child of elementChildren(container)) {
     if (child.namespaceURI === W) {
       const tag = child.localName;
       if (tag === 'p') {
-        out.push(...extractParagraph(child, ridToFile, ridToUrl, styleSheet, numbering));
+        out.push(...extractParagraph(child, ridToFile, ridToUrl, styleSheet, listMarkerFor));
         continue;
       }
       if (tag === 'tbl') {
-        out.push(buildTableBlock(child, ridToFile, ridToUrl, styleSheet, numbering));
+        out.push(buildTableBlock(child, ridToFile, ridToUrl, styleSheet, listMarkerFor));
         continue;
       }
       // Skip metadata / bookkeeping elements that never hold content.
@@ -589,14 +595,14 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styl
           tag === 'sdtEndPr' || tag === 'bookmarkStart' ||
           tag === 'bookmarkEnd' || tag === 'proofErr') continue;
       // Other w:* wrappers (sdt, sdtContent, ins, etc.) — recurse.
-      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, numbering);
+      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, listMarkerFor);
     } else if (child.namespaceURI === MC && child.localName === 'AlternateContent') {
       let pick = null;
       for (const c of elementChildren(child)) { if (c.localName === 'Choice') { pick = c; break; } }
       if (!pick) for (const c of elementChildren(child)) { if (c.localName === 'Fallback') { pick = c; break; } }
-      if (pick) collectBlockParagraphs(pick, ridToFile, ridToUrl, out, styleSheet, numbering);
+      if (pick) collectBlockParagraphs(pick, ridToFile, ridToUrl, out, styleSheet, listMarkerFor);
     } else {
-      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, numbering);
+      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, listMarkerFor);
     }
   }
 }
@@ -609,7 +615,7 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styl
 // opts in (w:firstRow="1") — Word's standard heading-row signal. The block
 // carries the same fallback fields a paragraph has so downstream paragraph
 // scans (classifyDocxArticle) see a safe, non-empty, non-heading element.
-export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null, numbering = null) {
+export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null, listMarkerFor = null) {
   let headerRow = false;
   const tblPr = findOne(tbl, W, 'tblPr');
   if (tblPr) {
@@ -632,7 +638,7 @@ export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null, num
     const cells = [];
     for (const tc of findAll(tr, W, 'tc')) {
       const cellParas = [];
-      collectBlockParagraphs(tc, ridToFile, ridToUrl, cellParas, styleSheet, numbering);
+      collectBlockParagraphs(tc, ridToFile, ridToUrl, cellParas, styleSheet, listMarkerFor);
       const runs = [];
       for (let p = 0; p < cellParas.length; p++) {
         if (p > 0 && runs.length) runs.push({ type: 'br' });

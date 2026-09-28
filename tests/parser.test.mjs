@@ -5,8 +5,9 @@ import {
   esc, escAttr, extractParagraph, parseDocxStyles, parseMdRuns, parseMdFrontmatter,
   normalizeClipboardTextForMarkdown, hasImageLikeLink, formatPlainTextForCopy,
   looksLikeArticleClipboardText, buildClipboardArticleBlocks, buildTableBlock,
-  parseDocxNumbering, resolveListMarker
+  parseDocxNumbering
 } from '../public/js/parser.js';
+import { createListMarkers } from '../public/js/docx-list-markers.js';
 
 const WNS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
@@ -315,26 +316,109 @@ const FEISHU_NUMBERING = wordNumbering(`
 
 test('parseDocxNumbering maps numId to the bullet glyph and its color', () => {
   const map = parseDocxNumbering(FEISHU_NUMBERING);
-  assert.deepEqual(map['1'], { fmt: 'bullet', text: '•', color: '3370ff' });
+  assert.deepEqual(map['1'], {
+    absId: '872000', fmt: 'bullet', text: '•', color: '3370ff', start: 1, startOverride: null,
+  });
 });
 
 test('parseDocxNumbering on a missing numbering.xml yields an empty map, not a crash', () => {
   assert.deepEqual(parseDocxNumbering(null), {});
 });
 
-test('resolveListMarker returns the bullet for unordered lists', () => {
-  const map = parseDocxNumbering(FEISHU_NUMBERING);
-  assert.deepEqual(resolveListMarker(map, '1'), { marker: '•', markerColor: '3370ff' });
+test('createListMarkers returns the bullet for unordered lists', () => {
+  const markerFor = createListMarkers(parseDocxNumbering(FEISHU_NUMBERING));
+  assert.deepEqual(markerFor('1'), { marker: '•', markerColor: '3370ff' });
 });
 
-test('resolveListMarker leaves ordered lists alone (numbering needs cross-paragraph counting)', () => {
-  const map = parseDocxNumbering(wordNumbering(`
-    <w:abstractNum w:abstractNumId="9">
-      <w:lvl><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
-    </w:abstractNum>
+// 逐字取自飞书真实导出（小罐茶稿）：每个有序列表项独占一个 abstractNum，w:start 就是显示序号。
+const FEISHU_ORDERED_NUMBERING = wordNumbering(`
+  <w:abstractNum w:abstractNumId="201232"><w:lvl><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:suff w:val="tab"/><w:lvlText w:val="%1."/><w:rPr><w:color w:val="3370ff"/></w:rPr></w:lvl></w:abstractNum>
+  <w:abstractNum w:abstractNumId="201233"><w:lvl><w:start w:val="2"/><w:numFmt w:val="decimal"/><w:suff w:val="tab"/><w:lvlText w:val="%1."/><w:rPr><w:color w:val="3370ff"/></w:rPr></w:lvl></w:abstractNum>
+  <w:abstractNum w:abstractNumId="201237"><w:lvl><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:suff w:val="tab"/><w:lvlText w:val="%1."/><w:rPr><w:color w:val="3370ff"/></w:rPr></w:lvl></w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="201232"/></w:num>
+  <w:num w:numId="2"><w:abstractNumId w:val="201233"/></w:num>
+  <w:num w:numId="6"><w:abstractNumId w:val="201237"/></w:num>
+`);
+
+test('createListMarkers: 飞书 per-item numbering shows each item\'s own number', () => {
+  const markerFor = createListMarkers(parseDocxNumbering(FEISHU_ORDERED_NUMBERING));
+  assert.deepEqual(['1', '2', '6'].map(id => markerFor(id)), [
+    { marker: '1.', markerColor: '3370ff' },
+    { marker: '2.', markerColor: '3370ff' },
+    { marker: '1.', markerColor: '3370ff' },
+  ]);
+});
+
+const WORD_ORDERED_NUMBERING = wordNumbering(`
+  <w:abstractNum w:abstractNumId="9">
+    <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+    <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%2)"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="9"/></w:num>
+  <w:num w:numId="2"><w:abstractNumId w:val="9"/>
+    <w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>
+  <w:num w:numId="3"><w:abstractNumId w:val="9"/></w:num>
+`);
+
+test('createListMarkers: Word items sharing one numId count up in document order', () => {
+  const markerFor = createListMarkers(parseDocxNumbering(WORD_ORDERED_NUMBERING));
+  assert.deepEqual(['1', '1', '1'].map(id => markerFor(id).marker), ['1.', '2.', '3.']);
+});
+
+test('createListMarkers: startOverride restarts a list, a plain num continues it', () => {
+  const markerFor = createListMarkers(parseDocxNumbering(WORD_ORDERED_NUMBERING));
+  const seq = ['1', '1', '2', '2', '3'].map(id => markerFor(id).marker);
+  // numId 2 带 startOverride=1 → 重新从 1 起；numId 3 同一 abstractNum、无 override → 接着数。
+  assert.deepEqual(seq, ['1.', '2.', '1.', '2.', '3.']);
+});
+
+test('createListMarkers: missing w:start counts from 1', () => {
+  const markerFor = createListMarkers(parseDocxNumbering(wordNumbering(`
+    <w:abstractNum w:abstractNumId="9"><w:lvl><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>
     <w:num w:numId="1"><w:abstractNumId w:val="9"/></w:num>
-  `));
-  assert.deepEqual(resolveListMarker(map, '1'), { marker: '', markerColor: '' });
+  `)));
+  assert.equal(markerFor('1').marker, '1.');
+});
+
+test('createListMarkers: nested ordered items get no marker and do not advance level 0', () => {
+  const markerFor = createListMarkers(parseDocxNumbering(WORD_ORDERED_NUMBERING));
+  const seq = [['1', '0'], ['1', '1'], ['1', '1'], ['1', '0']].map(([id, lvl]) => markerFor(id, lvl).marker);
+  assert.deepEqual(seq, ['1.', '', '', '2.']);
+});
+
+test('createListMarkers: unverified formats and multi-level text keep today\'s no-marker behavior', () => {
+  const markerFor = createListMarkers(parseDocxNumbering(wordNumbering(`
+    <w:abstractNum w:abstractNumId="1"><w:lvl><w:numFmt w:val="chineseCounting"/><w:lvlText w:val="%1、"/></w:lvl></w:abstractNum>
+    <w:abstractNum w:abstractNumId="2"><w:lvl><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>
+    <w:abstractNum w:abstractNumId="3"><w:lvl><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2."/></w:lvl></w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+    <w:num w:numId="2"><w:abstractNumId w:val="2"/></w:num>
+    <w:num w:numId="3"><w:abstractNumId w:val="3"/></w:num>
+  `)));
+  for (const id of ['1', '2', '3']) assert.deepEqual(markerFor(id), { marker: '', markerColor: '' });
+});
+
+test('createListMarkers: each document parse starts its own count', () => {
+  const numbering = parseDocxNumbering(WORD_ORDERED_NUMBERING);
+  const first = createListMarkers(numbering);
+  first('1'); first('1');
+  assert.equal(createListMarkers(numbering)('1').marker, '1.');
+});
+
+test('extractParagraph numbers an ordered item once, even across soft breaks', () => {
+  const markerFor = createListMarkers(parseDocxNumbering(WORD_ORDERED_NUMBERING));
+  const item = () => xml(`
+    <w:p xmlns:w="${WNS}">
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>第一行</w:t><w:br/><w:t>同一项的第二行</w:t></w:r>
+    </w:p>
+  `);
+
+  const first = extractParagraph(item(), {}, {}, null, markerFor);
+  const second = extractParagraph(item(), {}, {}, null, markerFor);
+
+  assert.deepEqual(first.map(p => p.listMarker), ['1.', '']);
+  assert.deepEqual(second.map(p => p.listMarker), ['2.', '']);
 });
 
 test('extractParagraph keeps the run color and the bullet of a 飞书 list item', () => {
@@ -345,7 +429,7 @@ test('extractParagraph keeps the run color and the bullet of a 飞书 list item'
     </w:p>
   `);
 
-  const [para] = extractParagraph(p, {}, {}, null, parseDocxNumbering(FEISHU_NUMBERING));
+  const [para] = extractParagraph(p, {}, {}, null, createListMarkers(parseDocxNumbering(FEISHU_NUMBERING)));
 
   assert.equal(para.isList, true);
   assert.equal(para.listMarker, '•');
@@ -361,7 +445,7 @@ test('extractParagraph draws the bullet once per list item, not once per soft br
     </w:p>
   `);
 
-  const paras = extractParagraph(p, {}, {}, null, parseDocxNumbering(FEISHU_NUMBERING));
+  const paras = extractParagraph(p, {}, {}, null, createListMarkers(parseDocxNumbering(FEISHU_NUMBERING)));
 
   assert.equal(paras.length, 2);
   assert.equal(paras[0].listMarker, '•');
@@ -375,7 +459,7 @@ test('a paragraph outside any list carries no marker', () => {
     </w:p>
   `);
 
-  const [para] = extractParagraph(p, {}, {}, null, parseDocxNumbering(FEISHU_NUMBERING));
+  const [para] = extractParagraph(p, {}, {}, null, createListMarkers(parseDocxNumbering(FEISHU_NUMBERING)));
 
   assert.equal(para.isList, false);
   assert.equal(para.listMarker, '');

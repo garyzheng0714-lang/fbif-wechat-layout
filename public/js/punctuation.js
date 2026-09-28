@@ -11,6 +11,10 @@
 //      Chinese paragraph must not carry halfwidth parens. Punctuation *inside*
 //      an English parenthetical is still protected by rule 2, and masked
 //      regions (rule 5) are still exempt, so URLs and code keep their parens.
+//   2c. A line-start Arabic ordinal (`1.`, `12.`) keeps its halfwidth period —
+//      it is a list/heading marker, not a sentence end (`1. “洗茶”` must not
+//      become `1。 “洗茶”`). Only 1–3 digits at line start: mid-sentence
+//      `达到100.下一步` and a 4-digit year `2024.` still convert.
 //   3. Double and single quotes strictly alternate open → close → open → ...
 //      per type, independently. The emitted direction depends only on the
 //      direction of the previous same-type quote in the paragraph; context
@@ -51,7 +55,9 @@ function convertSingleParagraph(text) {
   let out = masked;
   out = convertEllipsisAndDash(out);
   out = convertQuotes(out);
-  out = convertBasicPunct(out, englishFragmentProtectedIndexes(out));
+  const protectedIndexes = englishFragmentProtectedIndexes(out);
+  for (const i of leadingOrdinalPeriodIndexes(out)) protectedIndexes.add(i);
+  out = convertBasicPunct(out, protectedIndexes);
   out = tidyParenSpacing(out);
   return unmask(out, slots);
 }
@@ -230,6 +236,16 @@ function convertBasicPunct(text, protectedIndexes = new Set()) {
     }
   }
   return out;
+}
+
+// Rule 2c: index of the `.` in each line-start ordinal. `(?!\d)` leaves
+// decimals like `1.5亿` to the both-sides-ASCII rule.
+const LEADING_ORDINAL_RE = /(^|\n)[ \t　 ]*\d{1,3}(?=\.(?!\d))/g;
+
+function leadingOrdinalPeriodIndexes(text) {
+  const indexes = new Set();
+  for (const m of text.matchAll(LEADING_ORDINAL_RE)) indexes.add(m.index + m[0].length);
+  return indexes;
 }
 
 const PROTECTED_INNER_PUNCT = new Set(['.', ',', ';', ':', '!', '?']);
