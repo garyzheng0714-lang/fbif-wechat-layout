@@ -471,3 +471,48 @@ test('orphan: never emits identical-direction adjacent pair', () => {
   assert.ok(!out.includes('““'));
   assert.ok(!out.includes('””'));
 });
+
+// ---- Leading ordinal marker ----
+// 行首阿拉伯数字序号「1.」是序次语，国标用下脚点，转成「1。」是错的。
+// 真实样本：飞书小罐茶稿 9 个三级标题「1. “洗茶”」「2. 名字好记」… 全被转成「1。」。
+
+test('ordinal: heading "1. “洗茶”" keeps its halfwidth period', () => {
+  assert.equal(convertText('1. "洗茶"'), '1. “洗茶”');
+  assert.equal(convertText('1. “洗茶”'), '1. “洗茶”');
+});
+
+test('ordinal: marker followed directly by Chinese keeps its period', () => {
+  assert.equal(convertText('2. 名字好记'), '2. 名字好记');
+  assert.equal(convertText('3.包装设计美感与体验'), '3.包装设计美感与体验');
+});
+
+test('ordinal: rest of the line is still localized', () => {
+  assert.equal(convertText('4. 标准化任重道远的路:自己的茶园'), '4. 标准化任重道远的路：自己的茶园');
+});
+
+test('ordinal: leading halfwidth / fullwidth space and multi-digit markers', () => {
+  assert.equal(convertText('  12. 茶饮料，缺乏沉稳'), '  12. 茶饮料，缺乏沉稳');
+  assert.equal(convertText('　2. 定位的矛盾'), '　2. 定位的矛盾');
+});
+
+test('ordinal: every line start of a soft-wrapped list keeps its marker', () => {
+  assert.equal(convertText('1. 大红袍茶\n2. 滇红茶'), '1. 大红袍茶\n2. 滇红茶');
+});
+
+test('ordinal: only the line-start marker is protected, not mid-sentence numbers', () => {
+  assert.equal(convertText('规模达到100.下一步是出海'), '规模达到100。下一步是出海');
+  assert.equal(convertText('包括:1.洗茶;2.包装'), '包括：1。洗茶；2。包装');
+});
+
+test('ordinal: a 4-digit year at line start is not an ordinal', () => {
+  assert.equal(convertText('2024.这一年变化很大'), '2024。这一年变化很大');
+});
+
+test('ordinal: marker split across DOCX runs is still protected', () => {
+  const runs = [
+    { type: 'txt', text: '1.', bold: true },
+    { type: 'txt', text: ' "洗茶"', bold: true },
+  ];
+  const out = convertRuns(runs);
+  assert.equal(out.map(r => r.text).join(''), '1. “洗茶”');
+});
