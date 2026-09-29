@@ -2010,8 +2010,8 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 	// 目录（2026-08-17 用户裁定：所有文章一视同仁，不分原创/转载——此前只给原创/Mote
 	// 是误解，历史转载没目录多为人工漏掉）：字数与标题数达标即注入 h2 锚点并写 toc
 	// 字段；锚点由内容哈希派生，重复组装字节一致。阈值见 publishSiteTocForContent。
-	// 在公司链接注入之后计算，锚点基于最终正文。
-	content, toc := publishSiteTocForContent(enriched)
+	// 在公司链接注入之后计算，锚点基于最终正文。Mote 文章二级标题也进目录（2026-09-29）。
+	content, toc := publishSiteTocForContent(enriched, publishSiteIsMoteArticle(job))
 	return foodTalksNews{
 		Title:         job.Title,
 		CoverImg:      job.CoverURL, // mirroring 后已是转存 OSS URL；enriching 可能换成 AI 选中图

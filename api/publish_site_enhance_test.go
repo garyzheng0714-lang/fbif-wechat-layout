@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func siteTocTestContent(n int) string {
 
 func TestPublishSiteTocInjectsAnchorsAndBuildsJSON(t *testing.T) {
 	content := siteTocTestContent(6)
-	got, toc := publishSiteTocForContent(content)
+	got, toc := publishSiteTocForContent(content, false)
 	if toc == "" {
 		t.Fatalf("6 个 h2 应生成目录")
 	}
@@ -53,7 +54,7 @@ func TestPublishSiteTocInjectsAnchorsAndBuildsJSON(t *testing.T) {
 		t.Fatalf("目录标题应取 h2 文本：%q", entries[0].Title)
 	}
 	// 确定性：同一份正文重复组装必须字节一致（staging→publicize→repair 走 PUT 全量覆盖）
-	got2, toc2 := publishSiteTocForContent(content)
+	got2, toc2 := publishSiteTocForContent(content, false)
 	if got2 != got || toc2 != toc {
 		t.Fatalf("同一正文重复注入结果必须一致")
 	}
@@ -62,18 +63,18 @@ func TestPublishSiteTocInjectsAnchorsAndBuildsJSON(t *testing.T) {
 func TestPublishSiteTocSkipsShortAndAnchored(t *testing.T) {
 	// 2026-08-17 对齐排版规范：字数超 3000 且一二级标题（h2+h3）合计 ≥5 即生成。
 	content := siteTocTestContent(4)
-	got, toc := publishSiteTocForContent(content)
+	got, toc := publishSiteTocForContent(content, false)
 	if toc != "" || got != content {
 		t.Fatalf("4 个一二级标题（不足 5）不得生成目录")
 	}
 	// 5 个 h2 达标（旧口径要 >5，规范是 ≥5）
-	if _, toc := publishSiteTocForContent(siteTocTestContent(5)); toc == "" {
+	if _, toc := publishSiteTocForContent(siteTocTestContent(5), false); toc == "" {
 		t.Fatalf("5 个 h2 且字数达标应生成目录（规范：5 个及以上）")
 	}
 	// h3 计入触发计数，但目录条目仍只收 h2
 	mixed := siteTocTestContent(3) +
 		`<h3>（一）小节</h3>` + siteTocLongPara + `<h3>（二）小节</h3>` + siteTocLongPara
-	_, toc = publishSiteTocForContent(mixed)
+	_, toc = publishSiteTocForContent(mixed, false)
 	if toc == "" {
 		t.Fatalf("3 个 h2 + 2 个 h3 合计 5 应生成目录")
 	}
@@ -83,11 +84,11 @@ func TestPublishSiteTocSkipsShortAndAnchored(t *testing.T) {
 	}
 	// 字数不足 3000 不生成（规范：文章字数超 3000）
 	short := strings.Repeat(`<h2>标题</h2><p>短段</p>`, 6)
-	if got, toc := publishSiteTocForContent(short); toc != "" || got != short {
+	if got, toc := publishSiteTocForContent(short, false); toc != "" || got != short {
 		t.Fatalf("字数不足 3000 不得生成目录")
 	}
 	anchored := strings.Repeat(`<h2 id="mctoc_x0" style="a">T</h2>`+siteTocLongPara, 6)
-	got, toc = publishSiteTocForContent(anchored)
+	got, toc = publishSiteTocForContent(anchored, false)
 	if toc != "" || got != anchored {
 		t.Fatalf("已带锚点的正文不得二次注入")
 	}
@@ -102,7 +103,7 @@ func TestPublishSiteTocSkipsArabicSecondaryHeadings(t *testing.T) {
 		`<h2 style="text-align: justify;">3、第三大难点：头部商超进场</h2>` + siteTocLongPara +
 		`<h2 style="text-align: justify;">重资产打造硬核供应链</h2>` + siteTocLongPara +
 		`<h2 style="text-align: justify;">结语</h2>` + siteTocLongPara
-	got, toc := publishSiteTocForContent(content)
+	got, toc := publishSiteTocForContent(content, false)
 	if toc == "" {
 		t.Fatalf("一级标题足够时应生成目录")
 	}
@@ -130,9 +131,58 @@ func TestPublishSiteTocSkipsArabicSecondaryHeadings(t *testing.T) {
 	}
 }
 
+// 63116 小罐茶（2026-09-29 用户裁定）：Mote 文章二级标题也进目录（level=2），
+// 挂在所属一级标题之后；非 Mote 文章同一正文仍只收一级。
+func TestBuildSiteNewsTocIncludesSecondaryForMote(t *testing.T) {
+	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
+	content := `<p>作者：Mote莫特</p>` +
+		`<h2 style="text-align: justify;">二、 为什么做茶？</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">三、 小罐茶的5个不一样</h2>` + siteTocLongPara +
+		`<h3 style="text-align: justify;">1. “洗茶”</h3>` + siteTocLongPara +
+		`<h3 style="text-align: justify;">2. 名字好记</h3>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">四、 7款我喝过的茶</h2>` + siteTocLongPara
+	build := func(author string) ([]publishSiteTocEntry, string) {
+		t.Helper()
+		p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return &newsTagStub{}, nil }}
+		job := publishJob{Title: "小罐茶", Author: author, SourceName: "FBIF食品饮料创新", BlocksJSON: `[]`, ContentHTML: content, CreatedAt: "2026-09-29T00:00:00Z"}
+		news, err := p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+		if err != nil {
+			t.Fatalf("buildSiteNews: %v", err)
+		}
+		var entries []publishSiteTocEntry
+		if err := json.Unmarshal([]byte(news.TOC), &entries); err != nil {
+			t.Fatalf("toc 不是合法 JSON：%v（%s）", err, news.TOC)
+		}
+		for _, e := range entries {
+			if !strings.Contains(news.Content, ` id="`+e.ID+`" style="text-align: justify;">`) {
+				t.Fatalf("目录条目 %q 在正文里缺锚点：%s", e.Title, news.Content)
+			}
+		}
+		return entries, news.Content
+	}
+
+	mote, _ := build("Mote莫特")
+	var got []string
+	for _, e := range mote {
+		got = append(got, fmt.Sprintf("%d:%s", e.Level, e.Title))
+	}
+	want := []string{"1:二、 为什么做茶？", "1:三、 小罐茶的5个不一样", "2:1. “洗茶”", "2:2. 名字好记", "1:四、 7款我喝过的茶"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("Mote 目录应按正文顺序收一二级：\n got %v\nwant %v", got, want)
+	}
+
+	other, otherContent := build("张三")
+	if len(other) != 3 {
+		t.Fatalf("非 Mote 目录只收一级，实际 %+v", other)
+	}
+	if strings.Contains(otherContent, `<h3 id=`) {
+		t.Fatalf("非 Mote 二级标题不打锚点：%s", otherContent)
+	}
+}
+
 func TestPublishSiteTocUnescapesTitle(t *testing.T) {
 	content := strings.Repeat(`<h2>M&amp;A <span>与并购</span></h2>`+siteTocLongPara, 6)
-	_, toc := publishSiteTocForContent(content)
+	_, toc := publishSiteTocForContent(content, false)
 	if !strings.Contains(toc, `M&A 与并购`) && !strings.Contains(toc, `"M&A 与并购"`) {
 		var entries []publishSiteTocEntry
 		_ = json.Unmarshal([]byte(toc), &entries)
@@ -304,6 +354,29 @@ func TestBuildSiteNewsLinksOnlyOpeningSeriesTag(t *testing.T) {
 	}
 	if strings.Contains(news.Content, "/news/tag/") {
 		t.Fatalf("非开头段的系列声明不得加链：%s", news.Content)
+	}
+
+	// 63116 小罐茶（2026-09-29 用户反馈）：公众号原文里系列名已链到公众号合集，
+	// 网站上必须换成 FoodTalks 标签页，不能留公众号链接。
+	albumHref := `https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzA3ODEzMjg5Mg==&amp;action=getalbum&amp;album_id=4500314305401487362&amp;scene=126&amp;sessionid=#wechat_redirect`
+	linked := publishJob{
+		Title:       "小罐茶：杜国楹的最后一次创业",
+		Author:      "Mote莫特",
+		SourceName:  "FBIF食品饮料创新",
+		BlocksJSON:  `[{"k":"txt","runs":[{"type":"txt","text":"作者：Mote莫特"}]},{"k":"img"},{"k":"txt","runs":[{"type":"txt","text":"这是我"},{"type":"link","text":"茶叶系列","href":"https://mp.weixin.qq.com/mp/appmsgalbum?album_id=4500314305401487362"},{"type":"txt","text":"的第37篇。"}]},{"k":"txt","runs":[{"type":"txt","text":"后文"},{"type":"link","text":"全球茶叶品牌","href":"https://mp.weixin.qq.com/mp/appmsgalbum?album_id=1"}]}]`,
+		ContentHTML: `<p>作者：Mote莫特</p><figure><img></figure><p style="text-align: justify;">这是我<a href="` + albumHref + `" target="_blank" rel="noopener">茶叶系列</a>的第37篇。</p><p>后文<a href="` + albumHref + `" target="_blank" rel="noopener">全球茶叶品牌</a></p>`,
+		CreatedAt:   "2026-09-29T00:00:00Z",
+	}
+	news, err = p.buildSiteNews(context.Background(), linked, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatalf("buildSiteNews linked declaration: %v", err)
+	}
+	want := `<p style="text-align: justify;">这是我<a href="https://www.foodtalks.cn/news/tag/114000" target="_blank" rel="noopener">茶叶系列</a>的第37篇。</p>`
+	if !strings.Contains(news.Content, want) {
+		t.Fatalf("已带公众号合集链的系列名应改链到 tag：%s", news.Content)
+	}
+	if strings.Count(news.Content, "appmsgalbum") != 1 {
+		t.Fatalf("只替换开头声明段的链接，后文合集链保持不动：%s", news.Content)
 	}
 }
 
