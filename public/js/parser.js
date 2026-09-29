@@ -1,7 +1,7 @@
 // DOCX/Markdown parsing — pure functions, no browser dependencies
 // (except DOMParser which is available in Node 20+ via jsdom if needed)
 
-import { convertRuns, convertText } from './punctuation.js';
+const { convertRuns, convertText } = await import('./punctuation.js' + new URL(import.meta.url).search);
 import { createListMarkers, NO_LIST_MARKER } from './docx-list-markers.js';
 
 const EXT_TO_MIME = {
@@ -392,8 +392,8 @@ function walkParagraph(node, ctx, runs, ridToFile, ridToUrl) {
 // Build a Paragraph data object from a list of runs and shared block-level
 // properties. Heading/outline flags are passed in so split paragraphs can
 // downgrade trailing slices to plain body text.
-function buildParagraph(runs, base) {
-  runs = convertRuns(runs);
+function buildParagraph(runs, base, punctuation) {
+  runs = convertRuns(runs, punctuation);
   const text = runs.filter(r => r.type !== 'img' && r.type !== 'br').map(r => r.text || '').join('');
   const textRuns = runs.filter(r => r.type === 'txt');
   return {
@@ -424,7 +424,7 @@ function buildParagraph(runs, base) {
 // multiple visual paragraphs into a single <w:p> with <w:br/> separators —
 // we split on those breaks so downstream rendering treats each line as its
 // own paragraph. Heading/outline style only applies to the first slice.
-export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null, listMarkerFor = null) {
+export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null, listMarkerFor = null, punctuation) {
   const pPr = findOne(p, W, 'pPr');
   let align = 'left', isList = false, hasOutlineLevel = false, hasHeadingStyle = false;
   let styleId = '', styleName = '', isListStyle = false, contextualSpacing = false, spacing = {}, styleChain = [];
@@ -458,7 +458,7 @@ export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null, list
     contextualSpacing, spacing, hasOutlineLevel, hasHeadingStyle
   };
   if (!runs.some(r => r.type === 'br')) {
-    return [buildParagraph(runs, base)];
+    return [buildParagraph(runs, base, punctuation)];
   }
 
   const groups = [];
@@ -476,14 +476,14 @@ export function extractParagraph(p, ridToFile, ridToUrl, styleSheet = null, list
   // Word 里也只在项首画一个符号，每片都补一个会凭空多出符号。
   return groups.map((g, i) => buildParagraph(g, i === firstNonEmptyIdx
     ? base
-    : { ...base, hasOutlineLevel: false, hasHeadingStyle: false, listMarker: '', listMarkerColor: '' }));
+    : { ...base, hasOutlineLevel: false, hasHeadingStyle: false, listMarker: '', listMarkerColor: '' }, punctuation));
 }
 
 // ---- DOCX Infrastructure ----
 // Note: parseDocx depends on JSZip (global) and DOMParser (browser).
 // It stays here for co-location with extractParagraph, but is only
 // callable in a browser environment.
-export async function parseDocx(file) {
+export async function parseDocx(file, { punctuation } = {}) {
   const zip = await JSZip.loadAsync(file);
 
   // Some writers (Windows tooling, older Pages/Keynote exports, WPS variants)
@@ -569,7 +569,7 @@ export async function parseDocx(file) {
   const listMarkerFor = createListMarkers(numbering);
   const body = findOne(docDom.documentElement, W, 'body');
   const paragraphs = [];
-  collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs, styleSheet, listMarkerFor);
+  collectBlockParagraphs(body, ridToFile, ridToUrl, paragraphs, styleSheet, listMarkerFor, punctuation);
 
   return { paragraphs, imgCache };
 }
@@ -577,16 +577,16 @@ export async function parseDocx(file) {
 // Walk block-level content collecting paragraphs. Descends into tables
 // (flattening cells row-by-row), sdt wrappers, and mc:AlternateContent
 // so table text and SDT-wrapped paragraphs aren't silently dropped.
-export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styleSheet = null, listMarkerFor = null) {
+export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styleSheet = null, listMarkerFor = null, punctuation) {
   for (const child of elementChildren(container)) {
     if (child.namespaceURI === W) {
       const tag = child.localName;
       if (tag === 'p') {
-        out.push(...extractParagraph(child, ridToFile, ridToUrl, styleSheet, listMarkerFor));
+        out.push(...extractParagraph(child, ridToFile, ridToUrl, styleSheet, listMarkerFor, punctuation));
         continue;
       }
       if (tag === 'tbl') {
-        out.push(buildTableBlock(child, ridToFile, ridToUrl, styleSheet, listMarkerFor));
+        out.push(buildTableBlock(child, ridToFile, ridToUrl, styleSheet, listMarkerFor, punctuation));
         continue;
       }
       // Skip metadata / bookkeeping elements that never hold content.
@@ -595,14 +595,14 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styl
           tag === 'sdtEndPr' || tag === 'bookmarkStart' ||
           tag === 'bookmarkEnd' || tag === 'proofErr') continue;
       // Other w:* wrappers (sdt, sdtContent, ins, etc.) — recurse.
-      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, listMarkerFor);
+      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, listMarkerFor, punctuation);
     } else if (child.namespaceURI === MC && child.localName === 'AlternateContent') {
       let pick = null;
       for (const c of elementChildren(child)) { if (c.localName === 'Choice') { pick = c; break; } }
       if (!pick) for (const c of elementChildren(child)) { if (c.localName === 'Fallback') { pick = c; break; } }
-      if (pick) collectBlockParagraphs(pick, ridToFile, ridToUrl, out, styleSheet, listMarkerFor);
+      if (pick) collectBlockParagraphs(pick, ridToFile, ridToUrl, out, styleSheet, listMarkerFor, punctuation);
     } else {
-      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, listMarkerFor);
+      collectBlockParagraphs(child, ridToFile, ridToUrl, out, styleSheet, listMarkerFor, punctuation);
     }
   }
 }
@@ -615,7 +615,7 @@ export function collectBlockParagraphs(container, ridToFile, ridToUrl, out, styl
 // opts in (w:firstRow="1") — Word's standard heading-row signal. The block
 // carries the same fallback fields a paragraph has so downstream paragraph
 // scans (classifyDocxArticle) see a safe, non-empty, non-heading element.
-export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null, listMarkerFor = null) {
+export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null, listMarkerFor = null, punctuation) {
   let headerRow = false;
   const tblPr = findOne(tbl, W, 'tblPr');
   if (tblPr) {
@@ -638,7 +638,7 @@ export function buildTableBlock(tbl, ridToFile, ridToUrl, styleSheet = null, lis
     const cells = [];
     for (const tc of findAll(tr, W, 'tc')) {
       const cellParas = [];
-      collectBlockParagraphs(tc, ridToFile, ridToUrl, cellParas, styleSheet, listMarkerFor);
+      collectBlockParagraphs(tc, ridToFile, ridToUrl, cellParas, styleSheet, listMarkerFor, punctuation);
       const runs = [];
       for (let p = 0; p < cellParas.length; p++) {
         if (p > 0 && runs.length) runs.push({ type: 'br' });
@@ -677,7 +677,7 @@ function pushBoldSplit(runs, text, startBold = false) {
   return bold;
 }
 
-export function parseMdRuns(text) {
+export function parseMdRuns(text, punctuation) {
   text = text.replace(/\s*\n\s*/g, '');
   const runs = [];
   // Match [display text](url) — url is any non-space, non-`)` sequence.
@@ -693,7 +693,7 @@ export function parseMdRuns(text) {
   }
   const rest = text.slice(lastIdx);
   if (rest) pushBoldSplit(runs, rest, curBold);
-  return convertRuns(runs);
+  return convertRuns(runs, punctuation);
 }
 
 export function normalizeClipboardTextForMarkdown(text) {
@@ -703,8 +703,9 @@ export function normalizeClipboardTextForMarkdown(text) {
   return lines.join('\n\n');
 }
 
-function normalizePlainTextLine(text) {
-  return tidyPlainTextChineseSpacing(convertText(String(text || '').trim(), { locale: 'zh' }));
+function normalizePlainTextLine(text, punctuation = { locale: 'zh' }) {
+  const converted = convertText(String(text || '').trim(), punctuation);
+  return punctuation.trimParenSpacing === false ? converted : tidyPlainTextChineseSpacing(converted);
 }
 
 function nonEmptyClipboardLines(text) {
@@ -729,7 +730,7 @@ export function looksLikeArticleClipboardText(text) {
   return lines.slice(1, 5).some(line => /^(作者|撰文|撰稿|文)[：:/|｜]\s*\S+/.test(line));
 }
 
-export function buildClipboardArticleBlocks(text) {
+export function buildClipboardArticleBlocks(text, punctuation) {
   const rawLines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
   const firstContentIndex = rawLines.findIndex(line => String(line || '').trim());
   if (firstContentIndex < 0) return { title: '', blocks: [], source: 'clipboard-text', bodyOnly: true };
@@ -744,7 +745,7 @@ export function buildClipboardArticleBlocks(text) {
       if (sawContent) blankBefore = true;
       continue;
     }
-    const line = normalizePlainTextLine(raw);
+    const line = normalizePlainTextLine(raw, punctuation);
     if (!line) continue;
     blocks.push({
       k: 'txt',

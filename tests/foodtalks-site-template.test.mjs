@@ -90,16 +90,17 @@ test('foodtalks-site renderHeading outputs text-align: justify and conditional m
   assert.match(templateSource, /mctocEnabled\s*\?\s*` id="\$\{genMctocId\(\)\}"`/);
 });
 
-test('foodtalks-site has normalizeChinesePunctuation with CJK-adjacent rule', () => {
-  assert.match(templateSource, /normalizeChinesePunctuation/);
-  assert.match(templateSource, /isCjk/);
-  assert.match(templateSource, /isDigit/);
-  assert.match(templateSource, /isAsciiLetter/);
+test('foodtalks-site declares adjacent policy and delegates punctuation to the shared engine', () => {
+  // 架构契约迁移：不再要求复制的私有 helper 存在；行为由浏览器 E2E 验证。
+  assert.doesNotMatch(templateSource, /normalizeChinesePunctuation|LEADING_ORDINAL_TAIL_RE|function isCjk/);
+  assert.match(templateSource, /context: 'adjacent'/);
+  assert.match(templateSource, /punctuation: PUNCTUATION/);
+  assert.match(templateSource, /convertRuns\(e\.runs, PUNCTUATION\)/);
 });
 
-test('foodtalks-site only applies CJK punctuation conversion to txt runs (not href / alt)', () => {
-  // 通过源码检查 renderRuns 里 esc(normalizeChinesePunctuation(r.text)) 出现
-  assert.match(templateSource, /esc\(normalizeChinesePunctuation\(/);
+test('foodtalks-site converts complete cell runs and does not convert href or alt', () => {
+  assert.match(templateSource, /convertRuns\(cell\.runs, PUNCTUATION\)/);
+  assert.doesNotMatch(templateSource, /convertText\((?:r|e)\.(?:href|alt)/);
 });
 
 test('foodtalks-site has isStandaloneLinkParagraph', () => {

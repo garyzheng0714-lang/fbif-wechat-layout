@@ -746,6 +746,7 @@ export function initApp(initialTemplate) {
     if (sourceIsDocx) {
       const importProgress = opts && opts.importProgress;
       const docxData = await parseDocx(file, {
+        punctuation: template.punctuation,
         onProgress(done, total, status) {
           importProgress?.updatePhase('parse', done, total, {
             status: status || '正在解析 Word 正文…',
@@ -1102,7 +1103,7 @@ export function initApp(initialTemplate) {
     if (!body) return;
     clearUploadVisual();
     if (!hasImageLikeLink(body)) {
-      window._handleBlocks(buildClipboardArticleBlocks(raw), { ...opts, isRepost: false, bodyOnly: true });
+      window._handleBlocks(buildClipboardArticleBlocks(raw, template.punctuation), { ...opts, isRepost: false, bodyOnly: true });
       return;
     }
     const file = new File([body], 'clipboard.md', { type: 'text/markdown' });

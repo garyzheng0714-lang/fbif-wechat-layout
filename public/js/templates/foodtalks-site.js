@@ -12,7 +12,12 @@
 
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, convertText, convertRuns } = engineModule;
+// Explicit behavior policy, shared by parser, browser renderer and render-service.
+const PUNCTUATION = Object.freeze({
+  context: 'adjacent', quotes: 'preserve', sequences: 'preserve',
+  parentheses: 'paired', trimParenSpacing: false,
+});
 // 等价于: import { applyFoodTalksBehavior, FBIF_FOOTER_HTML } from '../rule-behavior-foodtalks.js'
 // 用动态 import 是为了配合浏览器端的 cache-busting assetQuery
 const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery);
@@ -125,59 +130,6 @@ function buildHeadingOpts(config) {
 
 function stripHtml(text) {
   return String(text || '').replace(/<[^>]+>/g, '');
-}
-
-function isCjk(ch) {
-  if (!ch) return false;
-  const c = ch.charCodeAt(0);
-  return (c >= 0x4e00 && c <= 0x9fff) ||
-    (c >= 0x3400 && c <= 0x4dbf) ||
-    (c >= 0x3000 && c <= 0x303f) ||
-    (c >= 0xff00 && c <= 0xffef);
-}
-function isAsciiLetter(ch) { return !!ch && /[a-zA-Z]/.test(ch); }
-function isDigit(ch) { return !!ch && /[0-9]/.test(ch); }
-
-// 行首阿拉伯序号（`1.`、`12.`）是列表/标题标记，不是句末，保留半角点
-// （公众号原文 `1. 金骏眉` 不得变 `1。 金骏眉`；与 punctuation.js 规则 2c 同口径）。
-// 只认行首 1–3 位数字，句中 `达到100.下一步`、四位年份 `2024.` 仍转换。
-// leading 是同段此前各 run 的文本，序号可能单独成 run（如加粗）。
-const LEADING_ORDINAL_TAIL_RE = /(?:^|\n)[ \t\u3000\u00a0]*\d{1,3}$/;
-
-function normalizeChinesePunctuation(text, leading = '') {
-  const chars = String(text || '').split('');
-  const findTextChar = (i, step) => {
-    let j = i + step;
-    while (j >= 0 && j < chars.length && /\s/.test(chars[j])) j += step;
-    return j >= 0 && j < chars.length ? chars[j] : '';
-  };
-  const touchesChinese = (i) => {
-    const prev = findTextChar(i, -1);
-    const next = findTextChar(i, +1);
-    return isCjk(prev) || isCjk(next);
-  };
-  return chars.map((ch, i) => {
-    if (!touchesChinese(i)) return ch;
-    const prev = findTextChar(i, -1);
-    const next = findTextChar(i, +1);
-    if (ch === ',') return '，';
-    if (ch === ':') return '：';
-    if (ch === ';') return '；';
-    if (ch === '?') return '？';
-    if (ch === '!') return '！';
-    if (ch === '(') return '（';
-    if (ch === ')') return '）';
-    if (ch === '.') {
-      if ((isDigit(prev) && isDigit(next)) || (isAsciiLetter(prev) && isAsciiLetter(next))) {
-        return ch;
-      }
-      if (!isDigit(chars[i + 1]) && LEADING_ORDINAL_TAIL_RE.test(leading + chars.slice(0, i).join(''))) {
-        return ch;
-      }
-      return '。';
-    }
-    return ch;
-  }).join('');
 }
 
 function isImageCaption(text, capOpts) {
@@ -382,12 +334,9 @@ function markTocEntries(elems) {
 }
 
 function renderRuns(runs, config = {}) {
-  let leading = '';
   return (runs || []).filter(r => r.type !== 'img').map(r => {
-    const before = leading;
-    leading += r.text || '';
     if (r.type === 'txt') {
-      let s = esc(normalizeChinesePunctuation(r.text, before));
+      let s = esc(r.text || '');
       if (r.bold || r.interviewSpeaker) s = '<strong>' + s + '</strong>';
       // 排版规范 (6)：提问方 FoodTalks 蓝并加粗，回答方默认颜色并加粗
       //（2026-08-17 由「书名号媒体名上蓝」改为「提问方上蓝」；'publication' 兼容旧值）。
@@ -686,6 +635,17 @@ function markSeriesAboutLogoImages(elems, config = {}) {
 // ---- 渲染主入口：把分类后的 elems 拼装成 HTML 行数组 ----
 
 function render(elems, config = {}) {
+  // Convert complete elements/cells before splitting runs for visual output.
+  // Headings, captions, references and cooperation lines share the same path.
+  elems = elems.map(e => ({
+    ...e,
+    ...(typeof e.text === 'string' ? { text: convertText(e.text, PUNCTUATION) } : {}),
+    ...(e.runs ? { runs: convertRuns(e.runs, PUNCTUATION) } : {}),
+    ...(e.rest_runs ? { rest_runs: convertRuns(e.rest_runs, PUNCTUATION) } : {}),
+    ...(e.rows ? { rows: e.rows.map(row => row.map(cell => ({
+      ...cell, runs: convertRuns(cell.runs, PUNCTUATION),
+    }))) } : {}),
+  }));
   const lines = [];
   let prevWasHeading = false;
   let prevWasStandaloneLink = false;
@@ -728,7 +688,7 @@ function render(elems, config = {}) {
         if (r.type === 'link' && /^https?:\/\//i.test(r.href || '')) {
           return '<a href="' + escAttr(r.href) + '" target="_blank" rel="noopener">' + esc(r.text) + '</a>';
         }
-        return `<span style="color: ${coopColor};">${esc(normalizeChinesePunctuation(r.text || ''))}</span>`;
+        return `<span style="color: ${coopColor};">${esc(r.text || '')}</span>`;
       }).join('');
       lines.push(`<p><em><span style="font-size: ${coopFs}px;">${inner}</span></em></p>`);
       lines.push(BLANK_LINE);
@@ -1063,7 +1023,7 @@ async function classifyMd(text) {
     if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
       const sourceLevel = m[1].length;
       const mapped = sourceLevel >= 4 ? 4 : (sourceLevel === 3 ? 3 : 2);
-      elems.push({ k: 'h', level: resolveSiteHeadingLevel(m[2], mapped), runs: parseMdRuns(m[2]) });
+      elems.push({ k: 'h', level: resolveSiteHeadingLevel(m[2], mapped), runs: parseMdRuns(m[2], PUNCTUATION) });
       continue;
     }
     if ((m = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/))) {
@@ -1071,7 +1031,7 @@ async function classifyMd(text) {
       imgN += 1;
       continue;
     }
-    elems.push({ k: 'p', runs: parseMdRuns(line) });
+    elems.push({ k: 'p', runs: parseMdRuns(line, PUNCTUATION) });
   }
   return { elems, imgN, title: (fm.frontmatter && fm.frontmatter.title) || '' };
 }
@@ -1174,6 +1134,7 @@ export default {
   formats: ['.docx', '.doc', '.md', '.txt'],
   // 渠道能力声明：网站渠道 mmbiz 图需转存自有 CDN（engine.js 读此标志，替代硬编码 id 判断）。
   transferMmbiz: true,
+  punctuation: PUNCTUATION,
 
   processDocx({ paragraphs, imgCache, config = {}, isRepost = false }) {
     const { elems, imgN } = classifyDocx(paragraphs, imgCache, config);
