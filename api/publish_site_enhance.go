@@ -232,6 +232,7 @@ func isSeriesNameRune(r rune) bool {
 }
 
 var publishSiteOpeningSeriesRe = regexp.MustCompile(`^这是我([\p{Han}A-Za-z0-9·]{2,10}系列)(?:的)?第[0-9零〇一二三四五六七八九十百千两]+篇[。.]?$`)
+
 // 系列名在公众号原文里常已链到公众号合集（63116 小罐茶「茶叶系列」→ appmsgalbum），
 // 此时组 1 是整个既有 <a>、组 2 是其中的名字；纯文本时组 3 是名字。两种都整段替换成标签链。
 var publishSiteOpeningSeriesParagraphRe = regexp.MustCompile(`(?is)<p\b[^>]*>\s*这是我(?:(<a\b[^>]*>\s*([\p{Han}A-Za-z0-9·]{2,10}系列)\s*</a>)|([\p{Han}A-Za-z0-9·]{2,10}系列))(?:的)?第[0-9零〇一二三四五六七八九十百千两]+篇[。.]?\s*</p>`)
