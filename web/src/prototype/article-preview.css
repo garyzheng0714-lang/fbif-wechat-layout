@@ -1,0 +1,100 @@
+/*
+ * 预览区：模拟公众号正文和微信底栏，不是编辑器界面，所以数值来自公众号与项目红线，不走 Su Design 刻度。
+ * 正文样式沿用渲染器契约 public/css/wx-theme.css（复制链路的真源）。
+ * 红线 7：标题正文正上方左对齐 27px 粗体；红线 6：底栏白底，分隔线 max-width 680px 居中不贯穿，图标 #7F7F7F；
+ * 正文列按公众号宽度模拟 ≤680px。
+ */
+@import "../../../public/css/wx-theme.css";
+
+.article-preview {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 16px 96px;
+  background: #fff;
+  color: var(--wx-text-color);
+  font-family: var(--wx-font-stack);
+}
+
+.article-preview-title {
+  margin: 0 8px 12px;
+  font-size: 27px;
+  line-height: 1.4;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.9);
+}
+
+.article-preview-meta {
+  display: flex;
+  gap: 8px;
+  margin: 0 8px 32px;
+  font-size: 15px;
+  color: rgba(0, 0, 0, 0.3);
+}
+
+.article-preview-meta b {
+  font-weight: 400;
+  color: #576b95;
+}
+
+.article-preview img {
+  max-width: 100%;
+  height: auto;
+}
+
+.wx-bar {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  background: #fff;
+  padding: 0 16px;
+}
+
+.wx-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 680px;
+  height: 56px;
+  margin: 0 auto;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  font-family: var(--wx-font-stack);
+}
+
+.wx-bar-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.wx-bar-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.9);
+}
+
+.wx-bar-verified {
+  width: 16px;
+  height: 16px;
+  color: #576b95;
+}
+
+.wx-bar-stats {
+  display: flex;
+  gap: 20px;
+  margin-left: auto;
+  font-size: 13px;
+  color: #7f7f7f;
+}
+
+.wx-bar-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wx-bar-stats svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.5;
+}

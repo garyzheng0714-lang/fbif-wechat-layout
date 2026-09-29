@@ -1,0 +1,6 @@
+node_modules
+dist
+.env.local
+# 原型用的未发布稿件样例，只在本机
+public/prototype-media/
+src/prototype/sample-article.html

@@ -1,0 +1,371 @@
+/*
+ * 设计变量（唯一真源），三层（DESIGN.md §6）：
+ * 1. 结构：尺寸、宽度、间距、时长、曲线。
+ * 2. 基础参数：约 25 个原值（表面、墨、线、动作色、字体、基准圆角、影）。
+ *    微调只改这一层：在使用方的 CSS 里覆盖 --base-*（网站右侧「参数」面板调好后可一键复制）。
+ * 3. 派生：次级文字、悬停、当前灰底、线、圆角阶梯——由基础参数按固定比例算出，不许手改。
+ * 组件只读 --ds-*，不直接读 --base-*。
+ * 深色：在 <html> 或任意祖先上设 data-theme="dark"。
+ */
+
+/* ── 1 结构 ── */
+:root {
+  --ds-gutter: 8px;
+  --ds-header-h: 44px; /* 顶栏 */
+  --ds-sidebar-w: 256px;
+  --ds-rail-w: 56px;
+  --ds-list-w: 368px;
+  --ds-reading-max: 672px; /* 页面正文宽 */
+  --ds-page-doc: 864px; /* 文档页：正文 672 + 两侧 96（DESIGN.md §3.2） */
+  --ds-page-wide: 1344px; /* 宽版：画布、三栏示例 */
+  --ds-page-top: 104px; /* 顶栏下到页面标题字头 */
+  --ds-page-bottom: 128px;
+  /* 布局区块的内容宽（实测参考站共用一套 12 列，容器只有这几档）：宽 1200 · 中 1040 · 窄 800；两侧留白窄屏 24、宽屏 48 */
+  --ds-block-wide: 1200px;
+  --ds-block-mid: 1040px;
+  --ds-block-narrow: 800px;
+  --ds-pad-track: 2px;
+  /* CTA 悬停抬起 */
+  --ds-shadow-lift: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 2px 4px rgb(0 0 0 / 0.16), 0 18px 40px -10px rgb(0 0 0 / 0.34);
+
+  /*
+   * 动效（DESIGN.md §5.2，JS 侧同值在 ui/ease.tsx）。不用 ease-in；CSS 里的弹簧只用不过冲的（bounce 0，已编译成 linear()），可打断的交互用 ui/ease 的 SPRINGS。
+   * 交互：进出同一条强 ease-out（离开短一档）· 原地移动 · 面板进入 · 柔展开（说明文字、数字翻滚）。
+   * 出场（每页只播一次）：区块入场 400 · 截图放大入场 700 · 首屏 1200；同组错落 50。
+   */
+  --ds-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --ds-ease-move: cubic-bezier(0.77, 0, 0.175, 1);
+  --ds-ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
+  --ds-ease-soft: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ds-ease-media: cubic-bezier(0.87, 0, 0.13, 1);
+  --ds-ease-expo: cubic-bezier(0.19, 1, 0.22, 1);
+  --ds-ease-settle: linear(0, 0.0192, 0.0669, 0.1317, 0.2054, 0.2824, 0.3586, 0.4317, 0.5001, 0.563, 0.62, 0.6711, 0.7164, 0.7564, 0.7914, 0.8219, 0.8483, 0.8711, 0.8907, 0.9075, 0.9218, 0.9341, 0.9445, 0.9533, 0.9608, 0.9671, 0.9724, 0.9769, 0.9807, 0.9839, 0.9865, 0.9888, 0.9906, 0.9922, 0.9935, 0.9946, 0.9955, 0.9963, 0.9969, 0.9974, 0.9979, 0.9982, 0.9985, 0.9988, 1);
+  --ds-dur-press: 100ms;
+  --ds-dur-fast: 150ms;
+  --ds-dur-base: 200ms;
+  --ds-dur-slow: 300ms;
+  --ds-dur-enter: 400ms;
+  --ds-dur-media: 700ms;
+  --ds-dur-hero: 1200ms;
+  --ds-stagger: 50ms;
+}
+
+/*
+ * ── 2 基础参数（DESIGN.md §6）──
+ * 本系统只有一套风格（用户 2026-09-27：只保留这一套，它就是我们自己的主题），浅色与深色两份取值，深色在 <html> 或任意祖先上设 data-theme="dark"。
+ * 微冷灰的底上放纯白的卡，墨是一种深冷灰、次级按比例取，主题色只有 --base-primary 一个，连续圆角；
+ * 字体全用无衬线 Inter + 苹方（用户 2026-09-25 选定）（没有苹方的系统用思源黑体），标题靠 600 字重与收紧字距出层级。
+ * 字体需使用方自己加载（Google Fonts：Inter、Geist Mono，可选 Noto Sans SC 给没有苹方的系统），registry 不打包字体文件。
+ */
+
+/* 浅色（默认） */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  /* 表面 */
+  /*
+   * 底色（用户 2026-09-28：原来的暖白 #fbfaf6 灰蒙蒙、偏黄）：画布先垫一层微弱的冷灰，浮在上面的纯白卡片才立得住；
+   * 纯白只留给需要突出的容器（卡片、弹层、当前项）。侧栏再深一档冷灰，和画布分开。
+   */
+  --base-canvas: #f9fafb;
+  --base-sidebar: #f3f4f6;
+  --base-card: #ffffff;
+  --base-well: rgb(0 0 0 / 0.035);
+  /* 墨：一种墨，次级与注释按比例从它取（72% / 62%） */
+  --base-ink: #111827; /* 极深的冷灰：柔和、分量够、对比舒适（用户 2026-09-28 给的配色）；次级墨按比例从它取 */
+  --base-muted: 72%;
+  --base-subtle: 62%; /* 13px 注释在白底上对比度 ≥ 4.5 */
+  /* 线与灰底：纯黑按比例取，不带色偏 */
+  --base-line: rgb(0 0 0);
+  --base-tint: rgb(0 0 0);
+  /* 次按钮：实色灰底（底色叠 7%，悬停 11%）+ 发丝线，不投影 */
+  --base-fill-mix: 9%; /* 次按钮：平的浅灰块，无边无影 */
+  --base-fill-hover-mix: 13%;
+  --base-shadow-secondary: none;
+  /* 动作与状态 */
+  /* 主题色：全站只有这一个颜色变量（用户 2026-09-28：默认用 Notion 的蓝，要换品牌色只改这一行）。
+     主按钮、开关、复选框、选中的日期、链接、焦点环、未读点都从它派生；深色模式不另设，链接和焦点环在派生层按 --base-accent-lift 提亮 */
+  --base-primary: #2383e2;
+  --base-primary-fg: #ffffff;
+  --base-accent-lift: 0%; /* 链接、焦点环往白色提亮多少：浅色不提 */
+  --base-warning: #d9730d;
+  --base-danger: #cd3c3a;
+  --base-success: #448361;
+  --base-inverse: #0f0f0f;
+  --base-inverse-fg: rgb(255 255 255 / 0.9);
+  --base-scrim: rgb(0 0 0 / 0.3); /* 轻遮罩：背后的页面还看得见 */
+  /* 字：标题与正文同一家族（实测好产品都这样）；按钮字不加粗；标题 600、收紧字距 */
+  --base-font-sans: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica,
+    "PingFang SC", "Noto Sans SC", "Microsoft YaHei", "Apple Color Emoji", Arial, sans-serif;
+  --base-font-display: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica,
+    "PingFang SC", "Noto Sans SC", "Microsoft YaHei", "Apple Color Emoji", Arial, sans-serif;
+  --base-font-mono: "Geist Mono", "SFMono-Regular", Menlo, Consolas, "PT Mono", "Liberation Mono", Courier, monospace;
+  --base-weight-control: 500;
+  --base-weight-title: 600;
+  --base-weight-heading: 600;
+  --base-tracking-display: -0.01em; /* 中文标题不宜收紧太多 */
+  --base-weight-lead: 400; /* 引导段落、卡片正文、主按钮字。不用 350：苹方没有这一档，会被取成 Light，中西文粗细对不上 */
+  --base-weight-nav: 400; /* 导航项：侧栏字多，500 显得又灰又粗 */
+  /* 形：基准 10，卡片 +8 = 18（阶梯 8 · 10 · 12 · 14 · 18） */
+  --base-r-base: 10px;
+  --base-r-card-step: 8px;
+  /*
+   * 尺寸与密度：用户 2026-09-25 定稿——字大一号且统一、控件高、留白多。
+   * 连续圆角：拐角是超椭圆（n≈3），弯曲范围约为控件高的 40%；浏览器支持 corner-shape 时
+   * 圆角乘 --base-corner-k 并换成超椭圆，不支持时按上面的圆角画普通圆弧（派生层 @supports）。
+   */
+  --base-corner-shape: superellipse(1.6);
+  --base-corner-k: 1.5;
+  --base-h-sm: 28px;
+  --base-h-md: 36px;
+  --base-h-lg: 40px;
+  --base-h-row: 36px;
+  --base-gap-row: 4px;
+  --base-pad-x-sm: 10px;
+  --base-pad-x-md: 16px;
+  --base-pad-x-lg: 20px;
+  --base-inset-min: 8px; /* 容器内边距 = 8 + 容器宽 ÷ 24（见文件末尾「间距由容器算」）：一份跟字走的底，一份跟容器走的比例 */
+  --base-inset-ratio: 24;
+  --base-pad-popover: 6px;
+  --base-w-dialog: 460px;
+  /* 侧栏当前项：和底色反着来——灰底的侧栏上，当前项是一张白色凸起小卡；白底上的列表当前项仍是灰底 */
+  --base-nav-lift: 1;
+  --base-nav-current-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.06);
+  --base-text-xs: 13px;
+  --base-lh-xs: 20px;
+  --base-text-sm: 15px; /* 界面 15 / 阅读 17，比值 1.13：两档分得开（原 16/17 只差 6%，层级糊） */
+  --base-lh-sm: 24px;
+  --base-text-base: 17px;
+  --base-lh-base: 28px; /* 中文多行段落行高 ≥ 1.6 */
+  /* 影：光从正上方来。凹 < 平 < 凸 < 浮 < 悬 < 罩（影子收在下方） */
+  --base-shadow-inset: inset 0 0 0 1px rgb(0 0 0 / 0.06);
+  --base-shadow-raised: inset 0 0 0 1px rgb(0 0 0 / 0.09), 0 1px 2px rgb(0 0 0 / 0.06);
+  --base-shadow-solid: inset 0 1px 0 rgb(255 255 255 / 0.14), 0 1px 2px rgb(0 0 0 / 0.16);
+  --base-shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 0 0 1px rgb(0 0 0 / 0.06);
+  --base-shadow-popover: 0 2px 8px rgb(0 0 0 / 0.06), 0 0 2px rgb(0 0 0 / 0.04), 0 0 0 1px rgb(0 0 0 / 0.08);
+  --base-shadow-overlay: 0 1px 2px rgb(0 0 0 / 0.04), 0 12px 28px -12px rgb(0 0 0 / 0.1), 0 28px 56px -28px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.06);
+  /* 展示组件：便当卡片描边、截图窗口影、贴底截图的 filter 影、底部弧形暖影、首屏光斑原色 */
+  --base-line-tile: rgb(0 0 0 / 0.3);
+  --base-shadow-media: 0 1px 2px rgb(0 0 0 / 0.04), 0 12px 28px -12px rgb(0 0 0 / 0.1), 0 28px 56px -28px rgb(0 0 0 / 0.12);
+  --base-drop-media: drop-shadow(0 2px 4px rgb(0 0 0 / 0.04)) drop-shadow(0 18px 24px rgb(0 0 0 / 0.05)) drop-shadow(0 40px 64px rgb(0 0 0 / 0.07));
+  --base-shadow-arch: 0 -1px 2px -1px rgb(45 35 24 / 0.09), 0 -7px 18px -8px rgb(73 54 34 / 0.09), 0 -20px 44px -20px rgb(101 76 47 / 0.1);
+  --base-sun: #ffcb30;
+  --base-sun-shade: #d6a21a;
+  --base-sun-glow: #ffe48c;
+  --base-sun-fg: #ffffff; /* 压在光斑上的首屏文字 */
+}
+
+/* 深色 */
+[data-theme="dark"] {
+  color-scheme: dark;
+  /* 暗色（用户 2026-09-28 给的配色）：底是带一点冷蓝的近黑（不是死黑），卡片比底亮约 10% 自然浮起；字是微弱的米白，亮字不在暗底上晕开 */
+  --base-canvas: #0a0a0c;
+  --base-sidebar: #111114;
+  --base-card: #18181b;
+  --base-well: rgb(255 255 255 / 0.055);
+  --base-ink: #f4f4f5;
+  --base-line: rgb(255 255 255);
+  --base-tint: rgb(255 255 255);
+  --base-accent-lift: 24%; /* 深底上链接、焦点环提亮一些才读得清；主按钮仍是原色 */
+  --base-warning: #ffa344;
+  --base-danger: #df5452;
+  --base-success: #4dab9a;
+  --base-inverse: #3f3f3f;
+  --base-inverse-fg: rgb(255 255 255 / 0.9);
+  --base-scrim: rgb(0 0 0 / 0.6);
+  --base-shadow-secondary: none;
+  --base-shadow-inset: inset 0 0 0 1px rgb(255 255 255 / 0.075);
+  --base-shadow-raised: inset 0 0 0 1px rgb(255 255 255 / 0.08), 0 1px 2px rgb(0 0 0 / 0.2);
+  /* 深色的实心按钮不加顶部高光：暗底上看不出凸起，只剩连续圆角拐角处的锯齿（用户 2026-09-28：「毛边那么严重」） */
+  --base-shadow-solid: 0 1px 2px rgb(0 0 0 / 0.3);
+  --base-shadow-card: 0 0 0 1px rgb(255 255 255 / 0.08);
+  --base-nav-current-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.075), 0 1px 2px rgb(0 0 0 / 0.2);
+  --base-shadow-popover: 0 0 0 1px rgb(255 255 255 / 0.08), 0 3px 6px rgb(0 0 0 / 0.2), 0 9px 24px rgb(0 0 0 / 0.2);
+  --base-shadow-overlay: 0 0 0 1px rgb(255 255 255 / 0.08), 0 5px 10px rgb(0 0 0 / 0.2), 0 15px 40px rgb(0 0 0 / 0.4);
+  --base-line-tile: rgb(255 255 255 / 0.2);
+  --base-shadow-media: 0 0 0 1px rgb(255 255 255 / 0.08), 0 12px 28px -12px rgb(0 0 0 / 0.5), 0 28px 56px -28px rgb(0 0 0 / 0.6);
+  --base-drop-media: drop-shadow(0 2px 4px rgb(0 0 0 / 0.3)) drop-shadow(0 18px 24px rgb(0 0 0 / 0.35));
+  --base-shadow-arch: 0 -1px 2px -1px rgb(0 0 0 / 0.3), 0 -7px 18px -8px rgb(0 0 0 / 0.3), 0 -20px 44px -20px rgb(0 0 0 / 0.35);
+  --base-sun: #4a3a10;
+  --base-sun-shade: #2e240a;
+  --base-sun-glow: #6b5520;
+  --base-sun-fg: rgb(255 255 255 / 0.92);
+}
+
+/*
+ * ── 3 派生 ──
+ * 派生写在每个设了 data-theme 的元素上，切换时在那个元素上重新计算。
+ * 次级与注释文字的比例是基础参数（72% / 62%）。
+ */
+:root,
+[data-theme] {
+  --ds-canvas: var(--base-canvas);
+  --ds-sidebar: var(--base-sidebar);
+  --ds-card: var(--base-card);
+  --ds-well: var(--base-well);
+  --ds-card-hover: color-mix(in srgb, var(--base-tint) 8%, var(--base-card));
+  /* 次按钮：灰底，无边无影 */
+  --ds-fill: color-mix(in srgb, var(--base-tint) var(--base-fill-mix), var(--base-card));
+  --ds-fill-hover: color-mix(in srgb, var(--base-tint) var(--base-fill-hover-mix), var(--base-card));
+  --ds-shadow-secondary: var(--base-shadow-secondary);
+  --ds-hover: color-mix(in srgb, var(--base-tint) 6%, transparent);
+  --ds-active: color-mix(in srgb, var(--base-tint) 10%, transparent);
+
+  --ds-fg: var(--base-ink);
+  --ds-fg-muted: color-mix(in srgb, var(--base-ink) var(--base-muted), transparent);
+  --ds-fg-subtle: color-mix(in srgb, var(--base-ink) var(--base-subtle), transparent);
+
+  --ds-line: color-mix(in srgb, var(--base-line) 7%, transparent);
+  --ds-line-strong: color-mix(in srgb, var(--base-line) 11%, transparent);
+
+  --ds-primary: var(--base-primary);
+  --ds-primary-fg: var(--base-primary-fg);
+  --ds-primary-hover: color-mix(in srgb, var(--base-primary) 84%, var(--base-canvas));
+  --ds-accent: color-mix(in srgb, var(--base-primary) calc(100% - var(--base-accent-lift)), white);
+  --ds-focus: var(--ds-accent);
+  --ds-warning: var(--base-warning);
+  --ds-danger: var(--base-danger);
+  --ds-success: var(--base-success);
+  --ds-scrim: var(--base-scrim);
+  --ds-inverse: var(--base-inverse);
+  --ds-inverse-fg: var(--base-inverse-fg);
+
+  --ds-shadow-inset: var(--base-shadow-inset);
+  --ds-shadow-raised: var(--base-shadow-raised);
+  --ds-shadow-pressed: var(--base-shadow-inset);
+  --ds-shadow-solid: var(--base-shadow-solid);
+  --ds-shadow-solid-pressed: none;
+  --ds-shadow-card: var(--base-shadow-card);
+  --ds-shadow-popover: var(--base-shadow-popover);
+  --ds-shadow-overlay: var(--base-shadow-overlay);
+  --ds-shadow-media: var(--base-shadow-media);
+  --ds-shadow-arch: var(--base-shadow-arch);
+  --ds-drop-media: var(--base-drop-media);
+  --ds-line-tile: var(--base-line-tile);
+  --ds-sun: var(--base-sun);
+  --ds-sun-shade: var(--base-sun-shade);
+  --ds-sun-glow: var(--base-sun-glow);
+  --ds-sun-fg: var(--base-sun-fg);
+
+  /* 尺寸与密度（触屏放大见下方 @media） */
+  --ds-h-sm: var(--base-h-sm);
+  --ds-h-md: var(--base-h-md);
+  --ds-h-lg: var(--base-h-lg);
+  --ds-h-row: var(--base-h-row);
+  --ds-gap-row: var(--base-gap-row);
+  --ds-pad-x-sm: var(--base-pad-x-sm);
+  --ds-pad-x-md: var(--base-pad-x-md);
+  /* 图标贴在圆角框一端时离端点的距离 = 它离上下边的距离（模糊后贴着同心内轮廓，detail.design「blur trick」）：(控件高 − 图标 16) / 2 */
+  --ds-pad-icon: calc((var(--ds-h-md) - 16px) / 2);
+  --ds-pad-x-lg: var(--base-pad-x-lg);
+  --ds-pad-popover: var(--base-pad-popover);
+  --ds-w-dialog: var(--base-w-dialog);
+  --ds-nav-current: color-mix(in srgb, var(--ds-card) calc(var(--base-nav-lift) * 100%), var(--ds-active));
+  --ds-nav-current-shadow: var(--base-nav-current-shadow);
+  --ds-text-xs: var(--base-text-xs);
+  --ds-lh-xs: var(--base-lh-xs);
+  --ds-text-sm: var(--base-text-sm);
+  --ds-lh-sm: var(--base-lh-sm);
+  --ds-text-base: var(--base-text-base);
+  --ds-lh-base: var(--base-lh-base);
+
+  /*
+   * 圆角阶梯：同心，内圆角 = 外圆角 − 内边距（先按普通圆弧算，再整体乘 --ds-corner-k）。
+   * 基准 10 → 8 · 10 · 12 · 14 · 18，支持 corner-shape 时 ×1.5 并换成超椭圆。
+   */
+  --ds-corner-k: 1;
+  --ds-corner-shape: round;
+  --ds-r-sm: calc((var(--base-r-base) - 2px) * var(--ds-corner-k));
+  --ds-r-control: calc(var(--base-r-base) * var(--ds-corner-k));
+  --ds-r-row: calc(var(--base-r-base) * var(--ds-corner-k));
+  --ds-r-track: calc((var(--base-r-base) + 2px) * var(--ds-corner-k));
+  --ds-r-popover: calc((var(--base-r-base) + 4px) * var(--ds-corner-k));
+  --ds-r-card: calc((var(--base-r-base) + var(--base-r-card-step)) * var(--ds-corner-k));
+  --ds-r-tile: calc((var(--base-r-base) + 4px) * var(--ds-corner-k)); /* 便当卡片 */
+  --ds-r-media: calc((var(--base-r-base) + 4px) * var(--ds-corner-k)); /* 截图窗口 */
+  --ds-r-popover-item: calc((var(--base-r-base) + 4px - var(--base-pad-popover)) * var(--ds-corner-k));
+  --ds-r-track-item: calc((var(--base-r-base) + 2px - var(--ds-pad-track)) * var(--ds-corner-k));
+
+  --ds-font-sans: var(--base-font-sans);
+  --ds-font-display: var(--base-font-display);
+  --ds-font-mono: var(--base-font-mono);
+  --ds-weight-control: var(--base-weight-control);
+  --ds-weight-title: var(--base-weight-title);
+  --ds-weight-heading: var(--base-weight-heading);
+  --ds-tracking-display: var(--base-tracking-display);
+  --ds-weight-lead: var(--base-weight-lead);
+  --ds-weight-nav: var(--base-weight-nav);
+}
+
+/*
+ * 连续圆角（渐进增强）：浏览器认 corner-shape 时，圆角按 --base-corner-k 放大并换成超椭圆；
+ * 不认的浏览器（目前 Safari）保持上面的普通圆弧，同心算法不受影响。
+ */
+@supports (corner-shape: superellipse(2)) {
+  :root,
+  [data-theme] {
+    --ds-corner-k: var(--base-corner-k);
+    --ds-corner-shape: var(--base-corner-shape);
+  }
+}
+
+/* 触屏设备：控件至少 32 / 44 / 48（Apple 与 WCAG 建议点击目标不小于 44）；本身更大时取本身的值。 */
+@media (pointer: coarse) {
+  :root,
+  [data-theme] {
+    --ds-h-sm: max(var(--base-h-sm), 32px);
+    --ds-h-md: max(var(--base-h-md), 44px);
+    --ds-h-lg: max(var(--base-h-lg), 48px);
+  }
+}
+
+/*
+ * ── 间距由容器算（DESIGN.md §3.0「间距律」；用户 2026-09-28：「间距是容器和组件之间的间距」）──
+ * 带 data-space 的元素是一个容器：它量自己的宽度，给里面的东西四个间距。组件自己不带外边距，页面和区块也不再手填数字。
+ *   inset  边 → 内容        = 8 + 宽 ÷ 24（--base-inset-min、--base-inset-ratio），取 4 的倍数，12–64；
+ *                            面里再套的面（data-surface 里的 data-surface）比例部分减半：8 + 宽 ÷ 48
+ *   group  组 ↔ 组          = inset × 0.75
+ *   item   同组的项 ↔ 项     = inset × 0.4
+ *   part   一项里的部件      = inset × 0.2（至少 4）
+ * 固定的 8 跟着字（再小的容器，字也要离边半行）；比例的部分跟着容器。所以小卡不挤、大窗不空：
+ * 214 的便签 16 · 384 的卡 24 · 460 的对话框 28 · 800 的舞台 40 · 928 的窗口 48。
+ * 两条推论：容器越大越松、越小越紧；
+ * 越往里越紧（inset > group > item > part，邻近原则写成了不等式）。
+ * 位置固定、宽度已知的容器（对话框、抽屉）不查询尺寸：在自己身上写 data-inset 和 --ds-inset-basis（它的宽度公式）。
+ * 视口本身也是容器：:root 按视口宽算。
+ * 注册成长度（@property）：在容器里算出的像素往下继承，更深处不会拿别的容器重算。
+ * 放在 base 层：工具类（[--ds-inset-basis:…]）能覆盖它。
+ */
+/* 光学对齐（ds-theme.css 的 edge-start / edge-end）读元素自己身上的这两个值，不往下继承：外层按钮的内边距不会漏给里面的图标按钮 */
+@property --ds-edge { syntax: "*"; inherits: false; }
+@property --ds-ink-inset { syntax: "*"; inherits: false; }
+@property --ds-inset { syntax: "<length>"; inherits: true; initial-value: 16px; }
+@property --ds-group { syntax: "<length>"; inherits: true; initial-value: 12px; }
+@property --ds-item { syntax: "<length>"; inherits: true; initial-value: 8px; }
+@property --ds-part { syntax: "<length>"; inherits: true; initial-value: 4px; }
+@property --ds-r-in { syntax: "<length>"; inherits: true; initial-value: 6px; }
+
+@layer base {
+  [data-space] {
+    container-type: inline-size;
+  }
+  :root,
+  [data-space] > * {
+    --ds-inset-basis: 100cqi;
+  }
+  /* 越往里越紧，面也一样：套在别的面里的面（窗口里的一条消息、卡里的一块凹槽）比例减半 */
+  [data-surface] [data-surface] > *,
+  [data-surface] [data-surface][data-inset] {
+    --ds-inset-divisor: calc(var(--base-inset-ratio) * 2);
+  }
+  :root,
+  [data-space] > *,
+  [data-inset] {
+    --ds-inset: clamp(12px, round(nearest, calc(var(--base-inset-min) + var(--ds-inset-basis) / var(--ds-inset-divisor, var(--base-inset-ratio))), 4px), 64px);
+    --ds-group: max(8px, round(nearest, calc(var(--ds-inset) * 0.75), 4px));
+    --ds-item: max(4px, round(nearest, calc(var(--ds-inset) * 0.4), 4px));
+    --ds-part: max(4px, round(nearest, calc(var(--ds-inset) * 0.2), 4px));
+    /* 贴着内边距的东西（卡里的图、凹槽）的圆角：同心 = 外圆角 − 内边距，至少 sm */
+    --ds-r-in: max(var(--ds-r-sm), calc(var(--ds-r-card) - var(--ds-inset) * var(--ds-corner-k)));
+  }
+}
