@@ -1145,3 +1145,28 @@ test('转载稿头部声明行（来源｜竖线分隔）降级为灰色小字�
   assert.match(html, /<em><span style="font-size: 14px; color: #888888;">文｜范婷婷/, '头部作者行（竖线分隔）应为灰色小字');
   assert.doesNotMatch(html, /<strong>来源｜天下网商/, '头部来源行不得保留黑色加粗');
 });
+
+test('行首阿拉伯序号保留半角点，句中/年份仍转换（2026-09-29 小罐茶网站稿 `1。 金骏眉` 回归）', () => {
+  const txt = (runs) => ({ k: 'txt', runs });
+  const t = (text, bold = false) => ({ type: 'txt', text, bold });
+  const result = template.processBlocks({
+    title: '序号标点样例',
+    blocks: [
+      txt([t('莫兰迪组合茶的茶叶体验如下：')]),
+      txt([t('1. 金骏眉：同样是地瓜香，这款温和一点点。')]),
+      txt([t('12.滇红茶：温润、柔和。')]),
+      txt([t('3', true), t('. 铁观音茶：兰花香型。')]),
+      txt([t('产量达到100.下一步再扩产。')]),
+      txt([t('2024.这一年很关键。')]),
+      txt([t('价格涨了1.5倍。')]),
+    ],
+  }, { config: { muted_color: '#888888' } });
+  const html = result.lines.join('\n');
+  assert.match(html, /1\. 金骏眉/);
+  assert.match(html, /12\.滇红茶/);
+  assert.match(html, /<strong>3<\/strong>\. 铁观音茶/, '序号单独成 run 时仍按段首判断');
+  assert.doesNotMatch(html, /\d。 ?(金骏眉|滇红茶|铁观音)/);
+  assert.match(html, /100。下一步/, '句中数字后的点仍转全角');
+  assert.match(html, /2024。这一年/, '四位年份不算序号');
+  assert.match(html, /1\.5倍/, '小数不动');
+});

@@ -138,7 +138,13 @@ function isCjk(ch) {
 function isAsciiLetter(ch) { return !!ch && /[a-zA-Z]/.test(ch); }
 function isDigit(ch) { return !!ch && /[0-9]/.test(ch); }
 
-function normalizeChinesePunctuation(text) {
+// 行首阿拉伯序号（`1.`、`12.`）是列表/标题标记，不是句末，保留半角点
+// （公众号原文 `1. 金骏眉` 不得变 `1。 金骏眉`；与 punctuation.js 规则 2c 同口径）。
+// 只认行首 1–3 位数字，句中 `达到100.下一步`、四位年份 `2024.` 仍转换。
+// leading 是同段此前各 run 的文本，序号可能单独成 run（如加粗）。
+const LEADING_ORDINAL_TAIL_RE = /(?:^|\n)[ \t\u3000\u00a0]*\d{1,3}$/;
+
+function normalizeChinesePunctuation(text, leading = '') {
   const chars = String(text || '').split('');
   const findTextChar = (i, step) => {
     let j = i + step;
@@ -163,6 +169,9 @@ function normalizeChinesePunctuation(text) {
     if (ch === ')') return '）';
     if (ch === '.') {
       if ((isDigit(prev) && isDigit(next)) || (isAsciiLetter(prev) && isAsciiLetter(next))) {
+        return ch;
+      }
+      if (!isDigit(chars[i + 1]) && LEADING_ORDINAL_TAIL_RE.test(leading + chars.slice(0, i).join(''))) {
         return ch;
       }
       return '。';
@@ -373,9 +382,12 @@ function markTocEntries(elems) {
 }
 
 function renderRuns(runs, config = {}) {
+  let leading = '';
   return (runs || []).filter(r => r.type !== 'img').map(r => {
+    const before = leading;
+    leading += r.text || '';
     if (r.type === 'txt') {
-      let s = esc(normalizeChinesePunctuation(r.text));
+      let s = esc(normalizeChinesePunctuation(r.text, before));
       if (r.bold || r.interviewSpeaker) s = '<strong>' + s + '</strong>';
       // 排版规范 (6)：提问方 FoodTalks 蓝并加粗，回答方默认颜色并加粗
       //（2026-08-17 由「书名号媒体名上蓝」改为「提问方上蓝」；'publication' 兼容旧值）。
