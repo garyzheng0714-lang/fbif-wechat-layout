@@ -117,12 +117,15 @@ test('env validator fails closed on missing, unknown, duplicate and stale schema
   }
 });
 
-test('pull requests reject newly introduced high-severity vulnerable dependencies', async () => {
-  const workflow = await text('.github/workflows/dependency-review.yml');
-  assert.match(workflow, /pull_request:/);
-  assert.match(workflow, /permissions:\s*\n\s*contents: read/);
-  assert.match(workflow, /actions\/dependency-review-action@v4/);
-  assert.match(workflow, /fail-on-severity: high/);
+test('high-severity vulnerable dependencies are rejected before every deploy', async () => {
+  // dependency-review-action 需要 GitHub Advanced Security 依赖图，本私有仓库不支持，
+  // 每次都假红（2026-10-08 删除）。漏洞依赖由 deploy 前必跑的 P0 考试拦截。
+  const p0 = await text('.github/workflows/p0-monitoring-contract.yml');
+  const pkg = JSON.parse(await text('package.json'));
+  assert.match(p0, /npm run audit:deps/);
+  assert.match(pkg.scripts['audit:deps'], /--audit-level=high/);
+  assert.match(p0, /govulncheck@/);
+  await assert.rejects(text('.github/workflows/dependency-review.yml'), 'dependency-review 在本仓库只会假红，不得恢复');
 });
 
 test('Playwright keeps failure evidence and limits cross-browser work to smoke paths', async () => {
