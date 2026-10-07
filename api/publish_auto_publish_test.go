@@ -138,3 +138,31 @@ func TestAutoPublishOffStillStopsForReview(t *testing.T) {
 		t.Fatalf("开关关闭不得翻公开，UpdateNews=%d", updateN)
 	}
 }
+
+// TestAutoPublishSkipsRestagedLegacyReview 2026-10-08 事故回归：早已在审核群挂卡的老待审稿，
+// 回源重排后再次暂存，即使自动发布已开也必须停在待审核，不得被系统公开。
+func TestAutoPublishSkipsRestagedLegacyReview(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, err := env.store.update(job.ID, func(j *publishJob) {
+		j.ReviewCardMsgIDs = map[string]string{"oc_review": "om_legacy_card"}
+		j.NotificationSentAt = "2026-07-17T08:00:00Z"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	enableAutoPublish(t, env)
+	env.ft.mu.Lock()
+	env.ft.forbidPublish = true // 红线守卫：任何 publishStatus=1 都算失败
+	env.ft.mu.Unlock()
+
+	if _, err := env.pipeline.refetchLatestWithRulePack(context.Background(), job.ID, ""); err != nil {
+		t.Fatalf("refetch: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageAwaitingReview || got.ReviewedBy != "" || got.AutoPublishEligible {
+		t.Fatalf("老待审稿重排后必须停在待审核：stage=%s reviewed_by=%q eligible=%v", got.Stage, got.ReviewedBy, got.AutoPublishEligible)
+	}
+}

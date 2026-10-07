@@ -1070,6 +1070,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 			return current.Stage == publishStageStaging && current.ContentVersion == job.ContentVersion &&
 				current.ContentFrozenVersion == job.ContentVersion
 		}, func(j *publishJob) {
+			j.AutoPublishEligible = publishFirstReviewEntry(j)
 			j.Stage = publishStageAwaitingReview
 			j.StagingTarget = stagedTarget
 			j.ContentHTML = job.ContentHTML
@@ -1145,6 +1146,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 	}, func(j *publishJob) {
 		j.FoodTalksNewsID = newsID
 		j.StagingTarget = createdTarget
+		j.AutoPublishEligible = publishFirstReviewEntry(j)
 		j.Stage = publishStageAwaitingReview
 		j.FailedStage = ""
 		j.Error = ""

@@ -7,6 +7,13 @@ import (
 
 const publishAutoPublishActor = "system:auto_publish"
 
+// publishFirstReviewEntry 在进入待审核前调用：从未发过审核卡、从未有审核记录，才算新同步稿
+// 第一次进审核。审核卡在进审核之后才异步发送，所以新稿此刻这些字段都为空。
+func publishFirstReviewEntry(j *publishJob) bool {
+	return j.NotificationSentAt == "" && j.ReviewCardMsgID == "" && len(j.ReviewCardMsgIDs) == 0 &&
+		j.ReviewedAt == "" && j.ReviewedBy == ""
+}
+
 func (p *publishPipeline) autoPublishEnabled() bool {
 	if p == nil || p.deliverySettings == nil {
 		return false
@@ -32,6 +39,11 @@ func (p *publishPipeline) maybeAutoPublish(jobID int64) {
 		return
 	}
 	if job.Stage != publishStageAwaitingReview {
+		return
+	}
+	if !job.AutoPublishEligible {
+		// 2026-10-08 事故：7 月的待审稿 #19 被回源重排后再次暂存，被当成新稿自动公开。
+		log.Printf("publish: 自动发布跳过（任务 #%d）：不是新同步稿第一次进审核，须人工处理", job.ID)
 		return
 	}
 	job = p.refreshSiteDuplicateFlag(context.Background(), job)
