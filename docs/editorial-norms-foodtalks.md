@@ -65,10 +65,10 @@
 ## 7. 准确率评测（换模型的回归门）
 
 - 评测集：`tools/enrich-eval/eval_set.json`——近一月 40 篇真实文章（30 篇最新 + 10 篇有署名；25 原创/15 转载），输入=标题+正文 HTML，期望=编辑部实际 summary/tags/author/source_name。
-- 评测器：`api/publish_enrich_eval_test.go`，`ENRICH_EVAL=1 ARK_API_KEY=... go test -run TestEnrichEval -v -timeout 30m` 真调 ARK，走与生产逐字节相同的 `arkEnrichArticle` 链路。
+- 评测器：`api/publish_enrich_eval_test.go`，`ENRICH_EVAL=1 MIMO_API_KEY=... go test -run TestEnrichEval -v -timeout 30m` 真调 MiMo，走与生产逐字节相同的 `aiEnrichArticle` 链路。
 - 指标与达标线：摘要长度合规（5~45 字）≥90%、摘要风格合规（无禁用开头、单句）≥90%、标签数量合规（1~3）≥95%、作者精确率 ≥80%（仅对编辑部有填的样本；匹配用「一方包含另一方」——编辑部对同一人有 Mote莫特/Mote/mote 三种写法，AI 照抄正文原署名不算错）、出处抽取（转载样本）≥70%、作者幻觉编造 =0（红线）。
 - 标签命中率仍只报告、不做门禁。发布写入已开启，但编辑部真值混有「FBIF2026会后报告」等只由人工维护的栏目标签，不能用这些缺失项惩罚 AI；标签数量、词表约束与“不得自由造词”继续作为门禁。
-- 换模型流程：改 `ARK_MODEL_ID` env → 重跑评测 → 全部达标即可切，prompt 不用动（声明式规范+范例，无模型特定语法）。
+- 换模型流程：改 `MIMO_PRO_MODEL` env（档位分工见 `api/ai_models.go`） → 重跑评测 → 全部达标即可切，prompt 不用动（声明式规范+范例，无模型特定语法）。
 
 ## 8. 数据再生（规范演化时重跑）
 

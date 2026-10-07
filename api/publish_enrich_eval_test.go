@@ -2,13 +2,13 @@ package main
 
 // publish_enrich_eval_test.go — M7 准确率评测（docs/editorial-norms-foodtalks.md §7）。
 // 用真实历史文章（tools/enrich-eval/eval_set.json，输入=标题+正文，期望=编辑部实际
-// 发布参数）真调 ARK，走与生产逐字节相同的 arkEnrichArticle 链路，量化 AI 预填质量。
+// 发布参数）真调 MiMo，走与生产逐字节相同的 aiEnrichArticle 链路，量化 AI 预填质量。
 //
 // 平时 CI 自动跳过（要花钱、要网络）；手动运行：
 //
-//	cd api && ENRICH_EVAL=1 ARK_API_KEY=... go test -run TestEnrichEval -v -timeout 30m
+//	cd api && ENRICH_EVAL=1 MIMO_API_KEY=... go test -run TestEnrichEval -v -timeout 30m
 //
-// 换模型回归：加 ARK_MODEL_ID=<新端点> 重跑，全部达标即可切换（prompt 与模型解耦，
+// 换模型回归：加 MIMO_PRO_MODEL=<新模型名> 重跑，全部达标即可切换（prompt 与模型解耦，
 // 不用改代码）。可用 ENRICH_EVAL_N=5 先抽样冒烟。
 //
 // 评测口径说明：
@@ -61,10 +61,10 @@ func evalNorm(s string) string {
 
 func TestEnrichEvalAgainstEditorial(t *testing.T) {
 	if os.Getenv("ENRICH_EVAL") == "" {
-		t.Skip("评测需 ENRICH_EVAL=1（真调 ARK，花钱且慢）")
+		t.Skip("评测需 ENRICH_EVAL=1（真调 MiMo，花钱且慢）")
 	}
-	if strings.TrimSpace(os.Getenv(arkAPIKeyEnv)) == "" {
-		t.Fatal("评测需 ARK_API_KEY")
+	if !aiConfigured() {
+		t.Fatal("评测需 MIMO_API_KEY")
 	}
 	raw, err := os.ReadFile("../tools/enrich-eval/eval_set.json")
 	if err != nil {
@@ -100,7 +100,7 @@ func TestEnrichEvalAgainstEditorial(t *testing.T) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			job := publishJob{Title: art.Title, ContentHTML: evalImgTagRe.ReplaceAllString(art.Content, "")}
-			out, err := arkEnrichArticle(context.Background(), job)
+			out, err := aiEnrichArticle(context.Background(), job)
 			results[i] = evalResult{art: art, out: out, err: err}
 		}(i, art)
 	}
@@ -117,7 +117,7 @@ func TestEnrichEvalAgainstEditorial(t *testing.T) {
 	for _, r := range results {
 		if r.err != nil {
 			apiFail++
-			t.Logf("✗ #%d %s ARK 失败: %v", r.art.ID, r.art.Title, r.err)
+			t.Logf("✗ #%d %s MiMo 失败: %v", r.art.ID, r.art.Title, r.err)
 			continue
 		}
 		total++
@@ -187,7 +187,7 @@ func TestEnrichEvalAgainstEditorial(t *testing.T) {
 			r.art.ID, sumLen, thisLenOK, thisStyleOK, r.out.Summary, r.out.Tags, r.art.Tags, r.out.Author, r.art.Author, r.out.SourceName)
 	}
 	if total == 0 {
-		t.Fatalf("全部 %d 篇 ARK 调用失败，无法评测", apiFail)
+		t.Fatalf("全部 %d 篇 MiMo 调用失败，无法评测", apiFail)
 	}
 	rate := func(n, d int) float64 {
 		if d == 0 {
@@ -195,7 +195,7 @@ func TestEnrichEvalAgainstEditorial(t *testing.T) {
 		}
 		return float64(n) / float64(d)
 	}
-	t.Logf("========== 评测汇总（模型 %s，样本 %d，API 失败 %d）==========", arkModelID(), total, apiFail)
+	t.Logf("========== 评测汇总（模型 %s，样本 %d，API 失败 %d）==========", aiModel(aiTierPro), total, apiFail)
 	t.Logf("摘要长度合规  %d/%d = %.0f%%（达标线 %.0f%%）", lenOK, total, rate(lenOK, total)*100, evalFloorSummaryLen*100)
 	t.Logf("摘要风格合规  %d/%d = %.0f%%（达标线 %.0f%%）", styleOK, total, rate(styleOK, total)*100, evalFloorSummaryStyle*100)
 	t.Logf("标签数量合规  %d/%d = %.0f%%（达标线 %.0f%%）", tagCountOK, total, rate(tagCountOK, total)*100, evalFloorTagCount*100)

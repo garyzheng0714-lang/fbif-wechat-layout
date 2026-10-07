@@ -325,7 +325,8 @@ func (p *publishPipeline) refetchLatestWithRulePack(ctx context.Context, jobID i
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	title, sourceName, byline, _, originalSourceURL, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), current.SourceURL)
+	fetched, err := p.fetch(withPublishRulePackID(ctx, rulePackID), current.SourceURL)
+	title, originalSourceURL, blocksJSON := fetched.Title, fetched.OriginalSourceURL, fetched.BlocksJSON
 	if err != nil {
 		return current, fmt.Errorf("从公众号原文回源抓取失败: %w", err)
 	}
@@ -338,7 +339,10 @@ func (p *publishPipeline) refetchLatestWithRulePack(ctx context.Context, jobID i
 	if strings.TrimSpace(blocksJSON) == "" {
 		return current, errors.New("原文回源未解析出结构化内容，不能重新排版")
 	}
-	seed := newPublishContentSeed(publishContentWebFetch, title, sourceName, byline, blocksJSON, current.CoverURL)
+	// 回源重排整条流水线重跑（含 AI 重选封面），默认封面跟随最新公众号原封面；
+	// 旧封面可能是早期误选的页脚名片，只在原文没带封面时沿用。
+	seed := newPublishContentSeed(publishContentWebFetch, title, fetched.SourceName, fetched.Byline, blocksJSON,
+		firstNonEmpty(fetched.CoverURL, current.CoverURL))
 	reset, swapped, err := p.store.updateIf(jobID, func(latest publishJob) bool {
 		return latest.ContentVersion == current.ContentVersion && publishContentRerenderable(latest)
 	}, func(latest *publishJob) {

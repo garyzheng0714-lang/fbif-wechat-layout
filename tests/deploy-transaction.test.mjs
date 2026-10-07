@@ -191,7 +191,9 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   assert.match(workflow, /\.generated_files\.block_registry_present == true/);
   assert.match(workflow, /\.generated_files\.block_registry_hash_matches == true/);
   assert.match(workflow, /\.foodtalks\.target_matches_expected == true/);
-  assert.match(workflow, /\.enrich_mode == "dual"/);
+  assert.match(workflow, /\.enrich_mode == "mimo"/);
+  assert.doesNotMatch(workflow, /judge_configured|enrich_mode == "dual"/,
+    '2026-10-07 起 AI 预填只走 MiMo，部署验收不得再要求双模型判决');
   assert.match(workflow, /Release already accepted; refusing automatic rollback/,
     'worker 恢复后不得再自动回滚旧二进制');
   for (const contract of [

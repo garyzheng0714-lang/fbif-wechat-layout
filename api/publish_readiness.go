@@ -59,8 +59,11 @@ type publishReadinessStatus struct {
 		CallbackConfigured           bool   `json:"callback_configured"`
 		ReviewerAllowlistConfigured  bool   `json:"reviewer_allowlist_configured"`
 	} `json:"feishu"`
-	EnrichMode      string `json:"enrich_mode"`
-	JudgeConfigured bool   `json:"judge_configured"`
+	EnrichMode string `json:"enrich_mode"`
+	AIModels   struct {
+		Pro   string `json:"pro"`
+		Flash string `json:"flash"`
+	} `json:"ai_models"`
 }
 
 func publishWorkersPaused() bool {
@@ -80,16 +83,13 @@ func requireDeploymentWritesActive(w http.ResponseWriter) bool {
 	return true
 }
 
+// publishEnrichMode "mimo" = AI 预填与风险检查已接 MiMo；"fallback" = 缺 MIMO_API_KEY，
+// 只能走规则兜底（生产 readiness 不允许）。
 func publishEnrichMode() string {
-	if strings.TrimSpace(os.Getenv(arkAPIKeyEnv)) == "" {
+	if !aiConfigured() {
 		return "fallback"
 	}
-	modelB := strings.TrimSpace(os.Getenv(arkModelIDBEnv))
-	judge := strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv))
-	if modelB != "" && modelB != arkModelID() && judge != "" {
-		return "dual"
-	}
-	return "single"
+	return "mimo"
 }
 
 func configuredHTTPBaseURL(raw string) bool {
@@ -203,12 +203,13 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.ImageUpload.Configured = configuredHTTPBaseURL(os.Getenv("WECHAT_UPLOAD_ENDPOINT"))
 	out.HTTPReviewEnabled = publishHTTPReviewEnabled()
 	out.EnrichMode = publishEnrichMode()
-	out.JudgeConfigured = strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv)) != ""
+	out.AIModels.Pro = aiModel(aiTierPro)
+	out.AIModels.Flash = aiModel(aiTierFlash)
 	out.Ready = out.ConfigSchema.Matches && out.ServiceAuth.Configured && out.ImageUpload.Configured && !out.HTTPReviewEnabled &&
 		out.GeneratedFiles.ready() &&
 		out.StoreValid && out.FoodTalks.Configured && out.Yunsuo.Configured && out.Feishu.ReviewerAllowlistConfigured &&
 		out.FoodTalks.Categories && out.Render.Configured && out.Feishu.NotifyConfigured &&
 		out.Feishu.MonitorNotifyConfigured && out.Feishu.CallbackModeExplicit && out.Feishu.CallbackConfigured &&
-		out.EnrichMode == "dual" && out.JudgeConfigured
+		out.EnrichMode == "mimo"
 	return out
 }

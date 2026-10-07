@@ -24,8 +24,8 @@ func TestPublishedSourceResyncUpdatesSameFoodTalksArticle(t *testing.T) {
 	env.ft.mu.Unlock()
 
 	latestBlocks := `[{"k":"p","text":"公众号刚刚更新的正文"}]`
-	env.pipeline.fetch = func(context.Context, string) (string, string, string, string, string, string, error) {
-		return published.Title, published.SourceName, published.Author, published.SourceURL, "", latestBlocks, nil
+	env.pipeline.fetch = func(context.Context, string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: published.Title, SourceName: published.SourceName, Byline: published.Author, CanonicalURL: published.SourceURL, BlocksJSON: latestBlocks}, nil
 	}
 	latestHTML := `<section><p>公众号刚刚更新的正文</p></section>`
 	env.pipeline.render = func(context.Context, string, string, string, bool) (publishRenderResult, error) {
@@ -84,8 +84,8 @@ func assertSingleFoodTalksUpdate(t *testing.T, ft *ftStub, beforeUpdate int, wan
 func TestPublishedSourceResyncStopsBeforePUTWhenCMSWasEdited(t *testing.T) {
 	env, published := publishedSourceResyncTestJob(t)
 	seedSourceResyncLiveNews(t, env, published, `<p>运营在 CMS 手工修改的正文</p>`)
-	env.pipeline.fetch = func(context.Context, string) (string, string, string, string, string, string, error) {
-		return published.Title, published.SourceName, published.Author, published.SourceURL, "", `[{"k":"p","text":"公众号新正文"}]`, nil
+	env.pipeline.fetch = func(context.Context, string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: published.Title, SourceName: published.SourceName, Byline: published.Author, CanonicalURL: published.SourceURL, BlocksJSON: `[{"k":"p","text":"公众号新正文"}]`}, nil
 	}
 	env.pipeline.render = func(context.Context, string, string, string, bool) (publishRenderResult, error) {
 		return successfulPublishRenderResult(`<p>公众号新正文</p>`, testPublishResolvedRule()), nil
@@ -115,8 +115,8 @@ func TestSourceResyncCardActionUsesVersionedButton(t *testing.T) {
 	env, published := publishedSourceResyncTestJob(t)
 	seedSourceResyncLiveNews(t, env, published, "")
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_resync_editor")
-	env.pipeline.fetch = func(context.Context, string) (string, string, string, string, string, string, error) {
-		return published.Title, published.SourceName, published.Author, published.SourceURL, "", published.BlocksJSON, nil
+	env.pipeline.fetch = func(context.Context, string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: published.Title, SourceName: published.SourceName, Byline: published.Author, CanonicalURL: published.SourceURL, BlocksJSON: published.BlocksJSON}, nil
 	}
 
 	raw, err := json.Marshal(map[string]any{
