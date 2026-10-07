@@ -67,25 +67,29 @@ type publishJob struct {
 	SourceAliases     []string `json:"source_aliases,omitempty"`      // 抓取后解出的同文规范身份（短链↔长链去重）
 	SourceURL         string   `json:"source_url"`                    // 用户提交的原始公众号文章链接
 	OriginalSourceURL string   `json:"original_source_url,omitempty"` // 公众号「阅读原文」指向的原文地址（转载稿声明链接优先用它）
-	Stage             string   `json:"stage"`
-	FailedStage       string   `json:"failed_stage,omitempty"` // stage=failed 时的续跑起点
-	Error             string   `json:"error,omitempty"`
-	Title             string   `json:"title,omitempty"`
-	SourceName        string   `json:"source_name,omitempty"`  // 公众号名（fetching 阶段解析）
-	RulePackID        string   `json:"rule_pack_id,omitempty"` // 网站排版规则包 ID；空值兼容旧任务，按 ft-default 处理
-	Classification    string   `json:"classification,omitempty"`
-	Classifier        string   `json:"classifier_version,omitempty"`
-	SupersededByJobID int64    `json:"superseded_by_job_id,omitempty"`
-	BlocksJSON        string   `json:"blocks_json,omitempty"` // 中立 Block[] 序列化（先落库再推进，链接过期不回源）
-	ContentHTML       string   `json:"content_html,omitempty"`
-	RulePresetID      string   `json:"rule_preset_id,omitempty"`
-	RuleRevision      int      `json:"rule_revision,omitempty"`
-	RuleConfigHash    string   `json:"rule_config_hash,omitempty"`
-	RuleSnapshotJSON  string   `json:"rule_snapshot_json,omitempty"` // 历史兼容字段；最新规则模式不再写入
-	RendererBuildSHA  string   `json:"renderer_build_sha,omitempty"`
-	RenderOutputHash  string   `json:"render_output_hash,omitempty"`
-	CoverURL          string   `json:"cover_url,omitempty"`
-	ImageMap          string   `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
+	// SourceCoverURL / SourceDigest 公众号原封面（转存前原址）与摘要。网站封面、摘要与
+	// 公众号保持一致（2026-10-07 用户裁定）；AI 只在缺值时兜底。
+	SourceCoverURL    string `json:"source_cover_url,omitempty"`
+	SourceDigest      string `json:"source_digest,omitempty"`
+	Stage             string `json:"stage"`
+	FailedStage       string `json:"failed_stage,omitempty"` // stage=failed 时的续跑起点
+	Error             string `json:"error,omitempty"`
+	Title             string `json:"title,omitempty"`
+	SourceName        string `json:"source_name,omitempty"`  // 公众号名（fetching 阶段解析）
+	RulePackID        string `json:"rule_pack_id,omitempty"` // 网站排版规则包 ID；空值兼容旧任务，按 ft-default 处理
+	Classification    string `json:"classification,omitempty"`
+	Classifier        string `json:"classifier_version,omitempty"`
+	SupersededByJobID int64  `json:"superseded_by_job_id,omitempty"`
+	BlocksJSON        string `json:"blocks_json,omitempty"` // 中立 Block[] 序列化（先落库再推进，链接过期不回源）
+	ContentHTML       string `json:"content_html,omitempty"`
+	RulePresetID      string `json:"rule_preset_id,omitempty"`
+	RuleRevision      int    `json:"rule_revision,omitempty"`
+	RuleConfigHash    string `json:"rule_config_hash,omitempty"`
+	RuleSnapshotJSON  string `json:"rule_snapshot_json,omitempty"` // 历史兼容字段；最新规则模式不再写入
+	RendererBuildSHA  string `json:"renderer_build_sha,omitempty"`
+	RenderOutputHash  string `json:"render_output_hash,omitempty"`
+	CoverURL          string `json:"cover_url,omitempty"`
+	ImageMap          string `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
 	// 内容版本契约：权威顺序 official_api > supplier > web_fetch。高权威
 	// 内容晚到时先持久化；可逆阶段重跑草稿，已进入不确定/公开窗口则只留冲突证据。
 	ContentSource        string `json:"content_source,omitempty"`

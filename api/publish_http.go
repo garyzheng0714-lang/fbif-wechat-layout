@@ -708,6 +708,26 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 	})
 
 	// 网站上这篇已经是公开稿：不覆盖正文，只把本地任务记为已发布，并原位更新群卡片。
+	// 已发布稿的封面/摘要与公众号对齐：只替换没人手工改过的字段，其余按网站现稿原样写回。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/sync-wechat-meta", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		res, err := p.syncPublishedWechatMeta(r.Context(), id)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "result": res})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"result": res})
+	})
+
 	mux.HandleFunc("POST /api/publish/jobs/{id}/ack-cms-published", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {
 			return
