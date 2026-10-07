@@ -84,6 +84,7 @@
 
 ## 运行/规则卫生
 
+- 只有 `main` 一个分支（2026-10-08 用户裁定）：禁止建分支/PR 分支，改动本地跑完 Go/Node 全测后直接提交推 `main`（即触发 deploy）。未合并的旧工作已存为 tag `archive/codex-unify-punctuation`、`archive/su-design-migration`。
 - 运行见 [README](README.md)。生产缺 `RULE_SUPER_ADMIN_OPEN_IDS` 必须启动失败；推 `main` 触发 deploy；四个入口（`/`、index/app/version）须 `no-cache`；改权限后验 `/api/me`。
 - 只写当前行为；偏好标来源/日期/状态。`behavior` 仅限署名/来源、Mote 图、原创/转载页脚，禁任意 JS。
 - 复制禁导航；后台工作不得塞进按钮或改成准备态。
