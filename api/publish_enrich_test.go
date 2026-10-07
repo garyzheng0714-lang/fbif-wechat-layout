@@ -721,6 +721,7 @@ func TestEnrichCandidatesExcludeSiteFooterImages(t *testing.T) {
 		t.Fatalf("候选图应只含公众号原封面 + 原文配图，实际 %v", got)
 	}
 }
+
 // TestAIResponsesRetriesRateLimit 429（账号级 100 RPM）退避后重试成功。
 func TestAIResponsesRetriesRateLimit(t *testing.T) {
 	var calls int
