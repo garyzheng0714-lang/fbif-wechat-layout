@@ -731,15 +731,12 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 	return err
 }
 
-// applyWechatSourceMeta 记下公众号原封面与摘要（只在抓到时覆盖）；enriching 据此
-// 让网站封面/摘要与公众号保持一致，AI 只在缺值时兜底。
+// applyWechatSourceMeta 记下本次成功抓取到的公众号原封面与摘要（空也如实记录，抓取
+// 失败的调用方不会走到这里）；enriching 据此让网站封面/摘要与公众号保持一致，AI 只在
+// 缺值时兜底。空值必须覆盖：否则旧的错误摘要（#5 图片消息全文）会一直残留。
 func applyWechatSourceMeta(job *publishJob, fetched publishFetchedArticle) {
-	if cover := strings.TrimSpace(fetched.CoverURL); cover != "" {
-		job.SourceCoverURL = cover
-	}
-	if digest := strings.TrimSpace(fetched.Digest); digest != "" {
-		job.SourceDigest = digest
-	}
+	job.SourceCoverURL = strings.TrimSpace(fetched.CoverURL)
+	job.SourceDigest = strings.TrimSpace(fetched.Digest)
 }
 
 var publishRuleConfigHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)

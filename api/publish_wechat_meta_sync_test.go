@@ -178,3 +178,25 @@ func TestSyncWechatMetaHTTPRequiresAdmin(t *testing.T) {
 		t.Fatalf("响应应报告替换结果：%s", rec.Body.String())
 	}
 }
+
+// TestRefetchClearsStaleDigest 重新抓取到「没有摘要」时必须清掉旧摘要（#5：旧值是图片消息全文）。
+func TestRefetchClearsStaleDigest(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, err := env.store.update(job.ID, func(j *publishJob) { j.SourceDigest = "旧的错误全文摘要" }); err != nil {
+		t.Fatal(err)
+	}
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: "测试标题", CanonicalURL: articleURL, BlocksJSON: testPublishBlocksJSON}, nil
+	}
+	if _, err := env.pipeline.refetchLatestWithRulePack(context.Background(), job.ID, ""); err != nil {
+		t.Fatalf("refetch: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.SourceDigest != "" || got.Summary == "旧的错误全文摘要" {
+		t.Fatalf("旧摘要必须被清掉：digest=%q summary=%q", got.SourceDigest, got.Summary)
+	}
+}
