@@ -18,6 +18,15 @@ func TestExtractArticleDigest(t *testing.T) {
 	if got := extractArticleDigest(`<meta property="og:description" content="只有 og &amp; 摘要" />`); got != "只有 og & 摘要" {
 		t.Fatalf("无 msg_desc 时回退 og:description，实际 %q", got)
 	}
+	// 图片消息（item_show_type=8）没有 msg_desc，og:description 是带 \x0a 的全文：不当摘要。
+	full := `<meta property="og:description" content="7月10日，沃尔玛中国宣布推出新系列。\x0a\x0a第二段正文" />`
+	if got := extractArticleDigest(full); got != "" {
+		t.Fatalf("含换行的全文不是摘要，应为空，实际 %q", got)
+	}
+	long := `<script>var msg_desc = htmlDecode("` + strings.Repeat("长", 121) + `");</script>`
+	if got := extractArticleDigest(long); got != "" {
+		t.Fatalf("超过 120 字不是公众号摘要，应为空，实际 %d 字", len([]rune(got)))
+	}
 	if got := extractArticleDigest(`<p>无摘要</p>`); got != "" {
 		t.Fatalf("没有摘要应为空，实际 %q", got)
 	}

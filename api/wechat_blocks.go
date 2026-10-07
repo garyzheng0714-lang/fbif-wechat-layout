@@ -112,17 +112,29 @@ var (
 	wxDigestRe = regexp.MustCompile(`var msg_desc = htmlDecode\("((?:[^"\\]|\\.)*)"\)`)
 )
 
-// extractArticleDigest 公众号摘要：优先 msg_desc 原值，其次 og:description / description。
+// wechatDigestMaxRunes 公众号后台「摘要」上限 120 字。超长的不是编辑填的摘要：图片消息
+// （item_show_type=8）没有 msg_desc，og:description 装的是全文（2026-10-08 #5 实证）。
+const wechatDigestMaxRunes = 120
+
+// extractArticleDigest 公众号摘要：优先 msg_desc 原值，其次 og:description / description；
+// 超过 120 字视为没有摘要（返回空，由 AI 兜底）。
 func extractArticleDigest(rawHTML string) string {
+	candidates := []string{}
 	if m := wxDigestRe.FindStringSubmatch(rawHTML); len(m) > 1 {
-		if v := strings.TrimSpace(html.UnescapeString(unescapeJSString(m[1]))); v != "" {
-			return v
-		}
+		candidates = append(candidates, m[1])
 	}
 	for _, key := range []string{"og:description", "description"} {
-		if v := strings.TrimSpace(extractMeta(rawHTML, key)); v != "" {
-			return v
+		candidates = append(candidates, extractMeta(rawHTML, key))
+	}
+	for _, raw := range candidates {
+		v := strings.TrimSpace(html.UnescapeString(unescapeJSString(raw)))
+		if v == "" {
+			continue
 		}
+		if len([]rune(v)) > wechatDigestMaxRunes || strings.ContainsAny(v, "\n\r") {
+			return ""
+		}
+		return v
 	}
 	return ""
 }
