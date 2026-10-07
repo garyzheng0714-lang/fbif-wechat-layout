@@ -1,10 +1,10 @@
 package main
 
-// publish_enrich_test.go — M5「AI 预填发布参数」测试（ARK 走 httptest 桩，绝不触真实
+// publish_enrich_test.go — M5「AI 预填发布参数」测试（MiMo 走 httptest 桩，绝不触真实
 // API）。锁死三条契约：
 //   1. enriching 只产元数据：AI 成功注入 summary/tags/author/ai_notes、可换封面，
 //      但 content_html 必须逐字节不变（AI 没有正文篡改面）；
-//   2. AI 是加速器不是闸门：ARK 失败走规则兜底，job 照常推进到 awaiting_review，
+//   2. AI 是加速器不是闸门：MiMo 失败走规则兜底，job 照常推进到 awaiting_review，
 //      绝不 fail；
 //   3. buildSiteNews 消费 AI 字段（Summary/Author/NewsTags/CoverImg）。
 
@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -31,8 +30,8 @@ func mirroredPublishHTML() string {
 	return s
 }
 
-// arkStubRequest ARK 桩收到的请求体（断言请求形态用）。
-type arkStubRequest struct {
+// aiStubRequest MiMo 桩收到的请求体（断言请求形态用）。
+type aiStubRequest struct {
 	Model string `json:"model"`
 	Input []struct {
 		Role    string `json:"role"`
@@ -44,20 +43,20 @@ type arkStubRequest struct {
 	} `json:"input"`
 }
 
-// newARKStub 起 ARK responses API 桩并把 env 指向它（arkEnrichArticle 走真实客户端代码）。
+// newAIStub 起 MiMo Responses API 桩并把 env 指向它（aiEnrichArticle 走真实客户端代码）。
 // respond 返回 (HTTP 状态码, 模型输出文本)；文本为空时回 error 响应体。
-func newARKStub(t *testing.T, respond func() (int, string)) *arkStubRequest {
+func newAIStub(t *testing.T, respond func() (int, string)) *aiStubRequest {
 	t.Helper()
-	got := &arkStubRequest{}
+	got := &aiStubRequest{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != arkResponsesPath {
-			t.Errorf("ARK 桩收到意外路径 %s", r.URL.Path)
+		if r.URL.Path != mimoResponsesPath {
+			t.Errorf("MiMo 桩收到意外路径 %s", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer test-ark-key" {
-			t.Errorf("ARK 桩收到错误鉴权头 %q", r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != "Bearer test-mimo-key" {
+			t.Errorf("MiMo 桩收到错误鉴权头 %q", r.Header.Get("Authorization"))
 		}
 		if err := json.NewDecoder(r.Body).Decode(got); err != nil {
-			t.Errorf("ARK 桩解析请求体失败: %v", err)
+			t.Errorf("MiMo 桩解析请求体失败: %v", err)
 		}
 		status, text := respond()
 		w.Header().Set("Content-Type", "application/json")
@@ -76,8 +75,9 @@ func newARKStub(t *testing.T, respond func() (int, string)) *arkStubRequest {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("ARK_API_KEY", "test-ark-key")
-	t.Setenv("ARK_BASE_URL", srv.URL)
+	t.Setenv("MIMO_API_KEY", "test-mimo-key")
+	t.Setenv("MIMO_BASE_URL", srv.URL)
+	noAIRetryDelay(t)
 	return got
 }
 
@@ -96,13 +96,13 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 		return successfulPublishRenderResult(renderedWithAuthor, testPublishResolvedRule()), nil
 	}
 	aiCover := ossURLFor("https://mmbiz.qpic.cn/b.jpg")
-	gotReq := newARKStub(t, func() (int, string) {
+	gotReq := newAIStub(t, func() (int, string) {
 		return http.StatusOK, "```json\n" + fmt.Sprintf(
 			`{"cover_url":%q,"summary":"这是一段模型生成的文章摘要。","tags":["食品","饮料","新品"],"author":"Mote莫特","notes":"封面选第二张图，构图更完整。正文格式规范。摘要取自导语。"}`,
 			aiCover) + "\n```"
 	})
-	t.Setenv("ARK_MODEL_ID", "ep-test-model")
-	env.pipeline.enrich = arkEnrichArticle
+	t.Setenv("MIMO_FLASH_MODEL", "mimo-test-vision")
+	env.pipeline.enrich = aiEnrichArticle
 
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
 	if err != nil {
@@ -133,8 +133,8 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 		t.Fatalf("AI 选中封面应覆盖默认第一图：%q", got.CoverURL)
 	}
 	// 请求形态：model 取 env、system 提示强制简体中文、图片多模态入参齐全。
-	if gotReq.Model != "ep-test-model" {
-		t.Fatalf("model = %q，应取 ARK_MODEL_ID", gotReq.Model)
+	if gotReq.Model != "mimo-test-vision" {
+		t.Fatalf("model = %q，看图预填应取看图档（2026-10-07 用户裁定 Flash，MIMO_FLASH_MODEL）", gotReq.Model)
 	}
 	if len(gotReq.Input) != 2 || gotReq.Input[0].Role != "system" {
 		t.Fatalf("input 形态不符：%+v", gotReq.Input)
@@ -143,13 +143,17 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 		t.Fatalf("system 提示必须含「请用简体中文回复」：%q", gotReq.Input[0].Content[0].Text)
 	}
 	var imageURLs []string
-	userText := ""
-	for _, c := range gotReq.Input[1].Content {
-		switch c.Type {
-		case "input_image":
-			imageURLs = append(imageURLs, c.ImageURL)
-		case "input_text":
-			userText = c.Text
+	userContent := gotReq.Input[1].Content
+	userText := userContent[0].Text
+	for i, c := range userContent {
+		if c.Type != "input_image" {
+			continue
+		}
+		imageURLs = append(imageURLs, c.ImageURL)
+		// 每张图正前方必须是它自己的 URL 标注（防模型看对图、抄错相邻 URL）。
+		label := fmt.Sprintf("候选图 %d：%s", len(imageURLs), c.ImageURL)
+		if i == 0 || userContent[i-1].Type != "input_text" || userContent[i-1].Text != label {
+			t.Fatalf("第 %d 张图前应紧贴标注 %q，实际 %+v", len(imageURLs), label, userContent[max(i-1, 0)])
 		}
 	}
 	if len(imageURLs) != 2 || imageURLs[0] != ossURLFor("https://mmbiz.qpic.cn/a.jpg") {
@@ -197,9 +201,9 @@ func TestPublishHTMLWechatTrailerLeakRejectsWechatChrome(t *testing.T) {
 func TestPublishRenderAlwaysStripsWechatTrailerForOwnAccount(t *testing.T) {
 	env := newPublishTestEnv(t)
 	var gotRepost *bool
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
 		env.fetchCalls++
-		return "印尼博士创业", "FBIF食品饮料创新", "Sage", articleURL, "", testPublishBlocksJSON, nil
+		return publishFetchedArticle{Title: "印尼博士创业", SourceName: "FBIF食品饮料创新", Byline: "Sage", CanonicalURL: articleURL, BlocksJSON: testPublishBlocksJSON}, nil
 	}
 	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
 		gotRepost = new(bool)
@@ -244,13 +248,13 @@ func TestPublishRenderRejectsWechatTrailerLeak(t *testing.T) {
 	}
 }
 
-// TestPublishEnrichFallbackOnARKFailure ARK 挂了（HTTP 500）：走规则兜底
+// TestPublishEnrichFallbackOnAIFailure MiMo Pro 与 Flash 都挂了（HTTP 500）：走规则兜底
 // （摘要=正文前 40 字、author 空【编辑部宁空勿造，规范 §5】、tags 空、notes 说明
 // 未执行原因），job 绝不 fail，照常推进到 awaiting_review、CreateNews 恰一次。
-func TestPublishEnrichFallbackOnARKFailure(t *testing.T) {
+func TestPublishEnrichFallbackOnAIFailure(t *testing.T) {
 	env := newPublishTestEnv(t)
-	newARKStub(t, func() (int, string) { return http.StatusInternalServerError, "" })
-	env.pipeline.enrich = arkEnrichArticle
+	newAIStub(t, func() (int, string) { return http.StatusInternalServerError, "" })
+	env.pipeline.enrich = aiEnrichArticle
 
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
 	if err != nil {
@@ -283,21 +287,21 @@ func TestPublishEnrichFallbackOnARKFailure(t *testing.T) {
 	}
 }
 
-// TestPublishEnrichKeyMissingFallback ARK_API_KEY 未配置：不发任何请求直接走兜底
+// TestPublishEnrichKeyMissingFallback MIMO_API_KEY 未配置：不发任何请求直接走兜底
 // （newPublishTestEnv 未注入 enrich 时同样兜底——两种缺配置形态都不阻断流水线）。
 func TestPublishEnrichKeyMissingFallback(t *testing.T) {
 	env := newPublishTestEnv(t)
-	t.Setenv("ARK_API_KEY", "")
-	env.pipeline.enrich = arkEnrichArticle
+	t.Setenv("MIMO_API_KEY", "")
+	env.pipeline.enrich = aiEnrichArticle
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	got, _ := env.store.byID(job.ID)
 	if got.Stage != publishStageAwaitingReview {
-		t.Fatalf("缺 ARK_API_KEY 不得 fail job，实际 stage=%q", got.Stage)
+		t.Fatalf("缺 MIMO_API_KEY 不得 fail job，实际 stage=%q", got.Stage)
 	}
-	if !strings.Contains(got.AINotes, "ARK_API_KEY 未配置") {
+	if !strings.Contains(got.AINotes, "MIMO_API_KEY 未配置") {
 		t.Fatalf("notes 应写明原因，实际 %q", got.AINotes)
 	}
 }
@@ -553,8 +557,8 @@ func TestHTMLToPlainText(t *testing.T) {
 // enriching 的 AI 识别值**不得覆盖**它；只有页面未署名（byline 空）时 AI 才兜底。
 func TestEnrichKeepsStructuredByline(t *testing.T) {
 	env := newPublishTestEnv(t)
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
-		return "测试标题", "FBIF食品饮料创新", "Mote莫特", articleURL, "", testPublishBlocksJSON, nil
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: "测试标题", SourceName: "FBIF食品饮料创新", Byline: "Mote莫特", CanonicalURL: articleURL, BlocksJSON: testPublishBlocksJSON}, nil
 	}
 	env.pipeline.enrich = func(ctx context.Context, job publishJob) (publishEnrichment, error) {
 		return publishEnrichment{Summary: "钩子摘要。", Author: "正文里猜的名字"}, nil
@@ -572,39 +576,40 @@ func TestEnrichKeepsStructuredByline(t *testing.T) {
 	}
 }
 
-// newARKModelRouterStub 双模型场景的 ARK 桩：按请求体 model 路由响应（A/B/判决三个
-// 端点各自剧本），并记录每个 model 收到的完整请求文本（断言判决输入形态用）。
-func newARKModelRouterStub(t *testing.T, scripts map[string]string, failModels map[string]bool) *sync.Map {
+// newAIModelRouterStub MiMo 桩：按请求体 model 路由响应，failModels 里的 model 回指定
+// HTTP 状态；记录每个 model 收到的请求次数与 user 内容类型（断言多模态入参用）。
+func newAIModelRouterStub(t *testing.T, scripts map[string]string, failModels map[string]int) *sync.Map {
 	t.Helper()
-	seen := &sync.Map{} // model → 拼接后的 user 文本
+	seen := &sync.Map{}
+	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req arkStubRequest
+		var req aiStubRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Errorf("ARK 桩解析请求体失败: %v", err)
+			t.Errorf("MiMo 桩解析请求体失败: %v", err)
 		}
-		var userText string
 		var userContentTypes []string
 		for _, in := range req.Input {
+			if in.Role != "user" {
+				continue
+			}
 			for _, c := range in.Content {
-				if c.Type == "input_text" {
-					userText += in.Role + "::" + c.Text + "\n"
-				}
-				if in.Role == "user" {
-					userContentTypes = append(userContentTypes, c.Type)
-				}
+				userContentTypes = append(userContentTypes, c.Type)
 			}
 		}
-		seen.Store(req.Model, userText)
+		mu.Lock()
+		n, _ := seen.LoadOrStore(req.Model+"::calls", 0)
+		seen.Store(req.Model+"::calls", n.(int)+1)
+		mu.Unlock()
 		seen.Store(req.Model+"::content_types", userContentTypes)
 		w.Header().Set("Content-Type", "application/json")
-		if failModels[req.Model] {
-			w.WriteHeader(http.StatusInternalServerError)
+		if status := failModels[req.Model]; status != 0 {
+			w.WriteHeader(status)
 			fmt.Fprint(w, `{"error":{"message":"模型服务不可用"}}`)
 			return
 		}
 		text, ok := scripts[req.Model]
 		if !ok {
-			t.Errorf("ARK 桩收到无剧本的 model %q", req.Model)
+			t.Errorf("MiMo 桩收到无剧本的 model %q", req.Model)
 			text = "{}"
 		}
 		json.NewEncoder(w).Encode(map[string]any{
@@ -614,114 +619,239 @@ func newARKModelRouterStub(t *testing.T, scripts map[string]string, failModels m
 		})
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("ARK_API_KEY", "test-ark-key")
-	t.Setenv("ARK_BASE_URL", srv.URL)
+	t.Setenv("MIMO_API_KEY", "test-mimo-key")
+	t.Setenv("MIMO_BASE_URL", srv.URL)
+	noAIRetryDelay(t)
 	return seen
 }
 
-// TestDualModelJudgeArbitrates 双模型对比 + 判决节点（2026-07-10 用户裁定）：
-// A/B 并行各出方案 → 判决模型收到匿名的方案一/方案二与编辑部规范 → 逐字段裁决；
-// 最终结果=判决产出，verdict 判决说明并入 notes（审核人可见两案对比结论）。
-func TestDualModelJudgeArbitrates(t *testing.T) {
-	seen := newARKModelRouterStub(t, map[string]string{
-		"ep-A": `{"cover_url":"","summary":"方案A的摘要钩子。","tags":["食品"],"author":"","source_name":"","notes":"A案说明"}`,
-		"ep-B": `{"cover_url":"","summary":"方案B的摘要钩子。","tags":["饮料"],"author":"","source_name":"","notes":"B案说明"}`,
-		"ep-J": `{"cover_url":"","summary":"方案B的摘要钩子。","tags":["饮料"],"author":"","source_name":"","notes":"综合两案：摘要取更凝练的一版。","verdict":"摘要与标签采用方案二：更贴近一句话钩子规范；其余字段两案一致。"}`,
+func noAIRetryDelay(t *testing.T) {
+	t.Helper()
+	old := aiRetryDelays
+	aiRetryDelays = []time.Duration{0, 0}
+	t.Cleanup(func() { aiRetryDelays = old })
+}
+
+func stubCalls(seen *sync.Map, model string) int {
+	n, _ := seen.Load(model + "::calls")
+	v, _ := n.(int)
+	return v
+}
+
+func stubGotImage(seen *sync.Map, model string) bool {
+	raw, _ := seen.Load(model + "::content_types")
+	types, _ := raw.([]string)
+	for _, typ := range types {
+		if typ == "input_image" {
+			return true
+		}
+	}
+	return false
+}
+
+const aiEnrichTestHTML = `<p>正文内容，提到了饮料与食品。</p><img src="https://cdn.example.com/cover.jpg">`
+const aiEnrichTestBlocks = `[{"k":"p","text":"正文内容，提到了饮料与食品。"},{"k":"img","src":"https://cdn.example.com/cover.jpg"}]`
+
+// TestAIEnrichUsesVisionTierWithImages 模型分工（2026-10-07 用户裁定）：看图预填用
+// mimo-v2.6-flash，且必须带上候选图本身；不得调用 Pro。
+func TestAIEnrichUsesVisionTierWithImages(t *testing.T) {
+	seen := newAIModelRouterStub(t, map[string]string{
+		defaultMimoFlashModel: `{"cover_url":"https://cdn.example.com/cover.jpg","summary":"Flash 的摘要钩子。","tags":["饮料"],"author":"","source_name":"","notes":"说明"}`,
 	}, nil)
-	t.Setenv("ARK_MODEL_ID", "ep-A")
-	t.Setenv("ARK_MODEL_ID_B", "ep-B")
-	t.Setenv("ARK_JUDGE_MODEL_ID", "ep-J")
-	got, err := arkEnrichArticle(context.Background(), publishJob{
-		Title: "测试标题", ContentHTML: `<p>正文内容，提到了饮料与食品。</p><img src="https://cdn.example.com/cover.jpg">`,
-	})
+	got, err := aiEnrichArticle(context.Background(), publishJob{Title: "测试标题", ContentHTML: aiEnrichTestHTML, BlocksJSON: aiEnrichTestBlocks})
 	if err != nil {
-		t.Fatalf("arkEnrichArticle: %v", err)
+		t.Fatalf("aiEnrichArticle: %v", err)
 	}
-	if got.Summary != "方案B的摘要钩子。" || len(got.Tags) != 1 || got.Tags[0] != "饮料" {
-		t.Fatalf("最终结果应为判决产出：%+v", got)
+	if got.Summary != "Flash 的摘要钩子。" || got.CoverURL != "https://cdn.example.com/cover.jpg" {
+		t.Fatalf("应采用看图档结果：%+v", got)
 	}
-	if !strings.Contains(got.Notes, "【双模型判决】") || !strings.Contains(got.Notes, "采用方案二") {
-		t.Fatalf("notes 应并入判决说明：%q", got.Notes)
+	if !stubGotImage(seen, defaultMimoFlashModel) {
+		t.Fatal("看图档必须收到候选图片（input_image）才能选封面")
 	}
-	rawJ, ok := seen.Load("ep-J")
-	if !ok {
-		t.Fatal("判决模型未被调用")
-	}
-	judgeText := rawJ.(string)
-	// 判决输入必须匿名带两案 + 文章 + 规范（判决标准）。
-	for _, want := range []string{"方案一", "方案二", "方案A的摘要钩子。", "方案B的摘要钩子。", "测试标题", "编辑部规范"} {
-		if !strings.Contains(judgeText, want) {
-			t.Fatalf("判决输入缺 %q", want)
-		}
-	}
-	for _, banned := range []string{"ep-A", "ep-B", "豆包", "DeepSeek", "Doubao"} {
-		if strings.Contains(judgeText, banned) {
-			t.Fatalf("判决输入泄漏模型身份 %q（必须匿名保证公平）", banned)
-		}
-	}
-	hasType := func(model, want string) bool {
-		raw, ok := seen.Load(model + "::content_types")
-		if !ok {
-			t.Fatalf("模型 %s 未记录请求内容类型", model)
-		}
-		for _, gotType := range raw.([]string) {
-			if gotType == want {
-				return true
-			}
-		}
-		return false
-	}
-	if !hasType("ep-A", "input_image") {
-		t.Fatal("主模型必须收到候选图片，才能执行视觉判断")
-	}
-	if hasType("ep-B", "input_image") || hasType("ep-J", "input_image") {
-		t.Fatal("文本对比模型与判决节点不得收到 input_image")
+	if n := stubCalls(seen, defaultMimoProModel); n != 0 {
+		t.Fatalf("看图预填不得调用 Pro，实际 %d 次", n)
 	}
 }
 
-func TestDualModelJudgeCannotInventOrMixFields(t *testing.T) {
-	newARKModelRouterStub(t, map[string]string{
-		"ep-A": `{"cover_url":"","summary":"A摘要。","tags":["食品","饮料"],"author":"","source_name":"","notes":"A案"}`,
-		"ep-B": `{"cover_url":"","summary":"B摘要。","tags":["零食"],"author":"","source_name":"","notes":"B案"}`,
-		"ep-J": `{"cover_url":"","summary":"判决节点自创摘要。","tags":["食品","零食"],"author":"虚构作者","source_name":"虚构来源","notes":"判决说明","verdict":"自行综合"}`,
-	}, nil)
-	t.Setenv("ARK_MODEL_ID", "ep-A")
-	t.Setenv("ARK_MODEL_ID_B", "ep-B")
-	t.Setenv("ARK_JUDGE_MODEL_ID", "ep-J")
-
-	got, err := arkEnrichArticle(context.Background(), publishJob{
-		Title: "测试标题", ContentHTML: "<p>正文提到了食品、饮料与零食，但没有作者和出处。</p>",
-	})
-	if err != nil {
-		t.Fatalf("arkEnrichArticle: %v", err)
+// TestAIEnrichRetriesServerErrorsButNotClientErrors 500 按退避重试后失败交给规则兜底；
+// 401 这类不可重试错误只打一次。
+func TestAIEnrichRetriesServerErrorsButNotClientErrors(t *testing.T) {
+	seen := newAIModelRouterStub(t, nil, map[string]int{defaultMimoFlashModel: http.StatusInternalServerError})
+	if _, err := aiEnrichArticle(context.Background(), publishJob{Title: "标题", ContentHTML: "<p>正文零食。</p>"}); err == nil {
+		t.Fatal("500 重试耗尽后应返回 error（由 stageEnrich 规则兜底）")
 	}
-	if got.Summary != "A摘要。" || !reflect.DeepEqual(got.Tags, []string{"食品", "饮料"}) {
-		t.Fatalf("自创/混拼字段必须回退方案一：%+v", got)
+	if n := stubCalls(seen, defaultMimoFlashModel); n != 1+len(aiRetryDelays) {
+		t.Fatalf("500 应重试 %d 次，实际调用 %d 次", len(aiRetryDelays), n)
 	}
-	if got.Author != "" || got.SourceName != "" {
-		t.Fatalf("作者/出处不得脱离两案与正文证据：%+v", got)
+	seen = newAIModelRouterStub(t, nil, map[string]int{defaultMimoFlashModel: http.StatusUnauthorized})
+	if _, err := aiEnrichArticle(context.Background(), publishJob{Title: "标题", ContentHTML: "<p>正文零食。</p>"}); err == nil {
+		t.Fatal("401 应返回 error")
 	}
-	for _, field := range []string{"摘要", "标签", "作者", "出处"} {
-		if !strings.Contains(got.Notes, field) {
-			t.Fatalf("notes 应留痕无效字段 %q：%q", field, got.Notes)
-		}
+	if n := stubCalls(seen, defaultMimoFlashModel); n != 1 {
+		t.Fatalf("401 不得重试，实际调用 %d 次", n)
 	}
 }
 
-// TestDualModelOneSideFailureDegrades 一侧模型失败：不进判决、直接采用存活侧方案，
-// notes 说明降级原因——多模型是增强器不是新故障点。
-func TestDualModelOneSideFailureDegrades(t *testing.T) {
-	newARKModelRouterStub(t, map[string]string{
-		"ep-B": `{"cover_url":"","summary":"存活侧摘要。","tags":["零食"],"author":"","source_name":"","notes":"B案说明"}`,
-	}, map[string]bool{"ep-A": true})
-	t.Setenv("ARK_MODEL_ID", "ep-A")
-	t.Setenv("ARK_MODEL_ID_B", "ep-B")
-	t.Setenv("ARK_JUDGE_MODEL_ID", "ep-J")
-	got, err := arkEnrichArticle(context.Background(), publishJob{Title: "标题", ContentHTML: "<p>正文零食。</p>"})
-	if err != nil {
-		t.Fatalf("单侧失败不应整体失败: %v", err)
+// footer263HTML 复刻 #263 的成品形态：原文配图在前，网站页脚（商务合作名片、加群
+// 二维码、公众号二维码、logo）在后——页脚图来自规则素材，不在原文 blocks 里。
+const footer263HTML = `<p>正文</p><img src="https://oss.example.com/a.png">` +
+	`<p>*资讯投稿与商务合作，请联系Bobo。</p><img src="https://oss.example.com/bobo-card.webp" alt="Bobo二维码">` +
+	`<img src="https://oss.example.com/group-qr.png"><img src="https://oss.example.com/follow.jpg">`
+
+func footer263Job() publishJob {
+	return publishJob{
+		Title:       "全市场都在卷自营",
+		ContentHTML: footer263HTML,
+		BlocksJSON:  `[{"k":"p","text":"正文"},{"k":"img","src":"https://mmbiz.qpic.cn/mmbiz_png/body-a?wx_fmt=png&amp;from=appmsg"}]`,
+		ImageMap: `{"https://mmbiz.qpic.cn/mmbiz_png/body-a?wx_fmt=png&from=appmsg":"https://oss.example.com/a.png",` +
+			`"https://fbifmp-layout.foodtalks.cn/assets/fbif/bobo-card.webp":"https://oss.example.com/bobo-card.webp",` +
+			`"https://static.foodtalks.cn/image/news/qr.png":"https://oss.example.com/group-qr.png",` +
+			`"https://static.foodtalks.cn/image/post/follow.jpg":"https://oss.example.com/follow.jpg"}`,
 	}
-	if got.Summary != "存活侧摘要。" || !strings.Contains(got.Notes, "主模型失败") {
-		t.Fatalf("应采用存活侧并注明降级：%+v", got)
+}
+
+// TestEnrichCandidatesExcludeSiteFooterImages #263 回归：页脚名片/二维码永远不进封面候选；
+// 当前封面（公众号原封面）排第一。
+func TestEnrichCandidatesExcludeSiteFooterImages(t *testing.T) {
+	job := footer263Job()
+	job.CoverURL = "https://oss.example.com/wechat-cover.jpg"
+	got := enrichCandidateImages(job)
+	want := []string{"https://oss.example.com/wechat-cover.jpg", "https://oss.example.com/a.png"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("候选图应只含公众号原封面 + 原文配图，实际 %v", got)
+	}
+}
+// TestAIResponsesRetriesRateLimit 429（账号级 100 RPM）退避后重试成功。
+func TestAIResponsesRetriesRateLimit(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":{"message":"rate limited"}}`)
+			return
+		}
+		fmt.Fprint(w, "\n\n"+`{"output":[{"type":"message","content":[{"type":"output_text","text":"好"}]}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MIMO_API_KEY", "k")
+	t.Setenv("MIMO_BASE_URL", srv.URL)
+	noAIRetryDelay(t)
+	text, err := aiResponsesCall(context.Background(), aiModel(aiTierFlash), "sys", []map[string]any{{"type": "input_text", "text": "hi"}})
+	if err != nil || text != "好" || calls != 2 {
+		t.Fatalf("429 应重试一次后成功（且容忍保活换行）：text=%q err=%v calls=%d", text, err, calls)
+	}
+}
+
+// TestAIModelTiers 默认档位与 env 覆盖。
+func TestAIModelTiers(t *testing.T) {
+	t.Setenv("MIMO_PRO_MODEL", "")
+	t.Setenv("MIMO_FLASH_MODEL", "")
+	if aiModel(aiTierPro) != "mimo-v2.6-pro" || aiModel(aiTierFlash) != "mimo-v2.6-flash" {
+		t.Fatalf("默认档位不符：pro=%q flash=%q", aiModel(aiTierPro), aiModel(aiTierFlash))
+	}
+	t.Setenv("MIMO_PRO_MODEL", "mimo-v2.6-pro-ultraspeed")
+	if aiModel(aiTierPro) != "mimo-v2.6-pro-ultraspeed" {
+		t.Fatalf("MIMO_PRO_MODEL 覆盖未生效：%q", aiModel(aiTierPro))
+	}
+}
+
+// TestPublishFetchSeedsWechatCoverAsDefault 抓取阶段带回的公众号原封面成为默认封面
+// （AI 未改选时即最终封面），与正文首图无关。
+func TestPublishFetchSeedsWechatCoverAsDefault(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: "测试标题", SourceName: "测试公众号", CanonicalURL: articleURL,
+			BlocksJSON: testPublishBlocksJSON, CoverURL: "https://mmbiz.qpic.cn/wechat-cover.jpg"}, nil
+	}
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageAwaitingReview {
+		t.Fatalf("stage = %q（error=%q）", got.Stage, got.Error)
+	}
+	if got.CoverURL != ossURLFor("https://mmbiz.qpic.cn/wechat-cover.jpg") {
+		t.Fatalf("默认封面应为转存后的公众号原封面，实际 %q", got.CoverURL)
+	}
+}
+
+// TestPublishMirrorNeverDefaultsCoverToFooterImage #5 回归：原文无配图、页面也没带封面时，
+// 成品里只剩网站页脚名片/二维码——不得把它们兜底成封面，必须显式失败给出路。
+func TestPublishMirrorNeverDefaultsCoverToFooterImage(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: "沃集鲜推出药食同源系列", SourceName: "测试公众号", CanonicalURL: articleURL,
+			BlocksJSON: `[{"k":"p","text":"正文没有配图"}]`}, nil
+	}
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		return successfulPublishRenderResult(`<p>正文没有配图</p><p>*商务合作请联系Bobo。</p>`+
+			`<img src="https://mmbiz.qpic.cn/bobo-card.webp" alt="Bobo二维码"><img src="https://mmbiz.qpic.cn/group-qr.png">`,
+			testPublishResolvedRule()), nil
+	}
+	job, _, _ := env.pipeline.submit(testPublishSourceURL)
+	got, _ := env.store.byID(job.ID)
+	if got.Stage != publishStageFailed || got.FailedStage != publishStageMirroring {
+		t.Fatalf("只有页脚图时应在 mirroring 显式失败，实际 stage=%q failed=%q cover=%q", got.Stage, got.FailedStage, got.CoverURL)
+	}
+	if !strings.Contains(got.Error, "页脚名片") {
+		t.Fatalf("失败原因应说明页脚图不能当封面：%q", got.Error)
+	}
+}
+
+// TestPublishMirrorDefaultCoverSkipsFooterImage 没有公众号封面时，默认封面取原文自带
+// 的第一张图，即使页脚图在成品里排得更靠前也不选。
+func TestPublishMirrorDefaultCoverSkipsFooterImage(t *testing.T) {
+	env := newPublishTestEnv(t)
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		return successfulPublishRenderResult(`<img src="https://mmbiz.qpic.cn/site-banner.png"><p>正文</p>`+
+			`<img src="https://mmbiz.qpic.cn/a.jpg"><img src="https://mmbiz.qpic.cn/b.jpg">`, testPublishResolvedRule()), nil
+	}
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	got, _ := env.store.byID(job.ID)
+	if got.CoverURL != ossURLFor("https://mmbiz.qpic.cn/a.jpg") {
+		t.Fatalf("默认封面应为原文第一张图，实际 %q（stage=%q error=%q）", got.CoverURL, got.Stage, got.Error)
+	}
+}
+
+// TestLegacyFooterCoverIsDiscarded 旧任务遗留的页脚名片封面（#263）不得以「当前封面」
+// 身份混进候选，mirroring 也要作废它、改取原文首图。
+func TestLegacyFooterCoverIsDiscarded(t *testing.T) {
+	job := footer263Job()
+	job.CoverURL = "https://oss.example.com/bobo-card.webp"
+	got := enrichCandidateImages(job)
+	if strings.Join(got, "|") != "https://oss.example.com/a.png" {
+		t.Fatalf("页脚名片封面必须作废，候选应只剩原文配图，实际 %v", got)
+	}
+
+	env := newPublishTestEnv(t)
+	submitted, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	// 模拟旧任务回到 mirroring：成品带页脚名片，封面字段停在名片上。
+	legacy, err := env.store.update(submitted.ID, func(j *publishJob) {
+		j.Stage = publishStageMirroring
+		j.ContentHTML = testPublishRenderedHTML + `<img src="https://mmbiz.qpic.cn/bobo-card.webp">`
+		j.CoverURL = "https://mmbiz.qpic.cn/bobo-card.webp"
+		j.ImageMap = ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.pipeline.stageMirror(context.Background(), legacy); err != nil {
+		t.Fatalf("stageMirror: %v", err)
+	}
+	mirrored, _ := env.store.byID(submitted.ID)
+	if mirrored.CoverURL != ossURLFor("https://mmbiz.qpic.cn/a.jpg") {
+		t.Fatalf("mirroring 应作废页脚名片封面并取原文首图，实际 %q", mirrored.CoverURL)
 	}
 }

@@ -267,8 +267,7 @@ jobs:
             .feishu.callback_mode_explicit == true and
             .feishu.callback_configured == true and
             .feishu.reviewer_allowlist_configured == true and
-            .enrich_mode == "dual" and
-            .judge_configured == true
+            .enrich_mode == "mimo"
           ' >/dev/null
           echo "Publish target: $(echo "$readiness_json" | jq -r '.foodtalks.target')"
 
@@ -301,7 +300,7 @@ jobs:
             .http_review_enabled == false and
             .feishu.monitor_notify_configured == true and
             .feishu.reviewer_allowlist_configured == true and
-            .enrich_mode == "dual"
+            .enrich_mode == "mimo"
           ' >/dev/null
 
           remote_transaction finalize

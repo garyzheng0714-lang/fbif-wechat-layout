@@ -45,8 +45,8 @@ func TestLateCanonicalDuplicateBecomesSupersededWinnerReference(t *testing.T) {
 	}
 	pipeline := &publishPipeline{
 		store: store,
-		fetch: func(context.Context, string) (string, string, string, string, string, string, error) {
-			return "重复文章", "FBIF", "", canonicalURL, "", testPublishBlocksJSON, nil
+		fetch: func(context.Context, string) (publishFetchedArticle, error) {
+			return publishFetchedArticle{Title: "重复文章", SourceName: "FBIF", CanonicalURL: canonicalURL, BlocksJSON: testPublishBlocksJSON}, nil
 		},
 	}
 	err = pipeline.stageFetch(context.Background(), loser)
@@ -71,8 +71,8 @@ func TestStructuredSupplierShortAliasesResolveBeforeCreatingJob(t *testing.T) {
 	canonicalURL := "https://mp.weixin.qq.com/s?__biz=MzStructured&mid=9&idx=1"
 	pipeline := &publishPipeline{
 		store: store,
-		fetch: func(context.Context, string) (string, string, string, string, string, string, error) {
-			return "身份解析", "FBIF", "", canonicalURL, "", testPublishBlocksJSON, nil
+		fetch: func(context.Context, string) (publishFetchedArticle, error) {
+			return publishFetchedArticle{Title: "身份解析", SourceName: "FBIF", CanonicalURL: canonicalURL, BlocksJSON: testPublishBlocksJSON}, nil
 		},
 		spawn: func(func()) {},
 		now:   time.Now,
@@ -329,9 +329,9 @@ func newPublishTestEnv(t *testing.T) *publishTestEnv {
 	env.pipeline = &publishPipeline{
 		store:     env.store,
 		publicDir: "../public",
-		fetch: func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
+		fetch: func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
 			env.fetchCalls++
-			return "测试标题", "测试公众号", "", articleURL, "", testPublishBlocksJSON, nil
+			return publishFetchedArticle{Title: "测试标题", SourceName: "测试公众号", CanonicalURL: articleURL, BlocksJSON: testPublishBlocksJSON}, nil
 		},
 		render: func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
 			return successfulPublishRenderResult(testPublishRenderedHTML, testPublishResolvedRule()), nil
@@ -758,9 +758,9 @@ func TestNormalizeSiteSourceKey(t *testing.T) {
 func TestPublishCanonicalAliasDedupesShortAndLongLinks(t *testing.T) {
 	env := newPublishTestEnv(t)
 	canonical := "https://mp.weixin.qq.com/s?__biz=MzA1&mid=2&idx=1&sn=canonical-signature"
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
 		env.fetchCalls++
-		return "同一篇文章", "测试公众号", "", canonical, "", testPublishBlocksJSON, nil
+		return publishFetchedArticle{Title: "同一篇文章", SourceName: "测试公众号", CanonicalURL: canonical, BlocksJSON: testPublishBlocksJSON}, nil
 	}
 	first, created, err := env.pipeline.submit("https://mp.weixin.qq.com/s/ShortAliasA")
 	if err != nil || !created {
@@ -793,7 +793,7 @@ func TestPublishCanonicalAliasConcurrentShortLinksCreateOneJob(t *testing.T) {
 	var fetchMu sync.Mutex
 	fetchN := 0
 	bothFetched := make(chan struct{})
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
 		fetchMu.Lock()
 		fetchN++
 		if fetchN == 2 {
@@ -801,7 +801,7 @@ func TestPublishCanonicalAliasConcurrentShortLinksCreateOneJob(t *testing.T) {
 		}
 		fetchMu.Unlock()
 		<-bothFetched
-		return "并发同文", "测试公众号", "", canonical, "", testPublishBlocksJSON, nil
+		return publishFetchedArticle{Title: "并发同文", SourceName: "测试公众号", CanonicalURL: canonical, BlocksJSON: testPublishBlocksJSON}, nil
 	}
 
 	type result struct {

@@ -4,15 +4,12 @@ package main
 // 审核；解析失败必须降级 warning 并保留原始返回，不能把“模型没看懂”误当 pass。
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
-	"os"
 	"strings"
 	"time"
 	"unicode"
@@ -169,40 +166,16 @@ func buildRiskUserInput(job publishJob, now time.Time) (bodyText, userText strin
 	return bodyText, b.String()
 }
 
-// arkAssessPublishRisk 调用与元数据预填相同的 ARK Responses API。返回的 Raw 仅在
-// 解析失败时供 fallback 留痕，成功结果不保存整段模型响应。
-func arkAssessPublishRisk(ctx context.Context, job publishJob) (publishRiskAssessment, error) {
-	apiKey := strings.TrimSpace(os.Getenv(arkAPIKeyEnv))
-	if apiKey == "" {
-		return publishRiskAssessment{}, errors.New("ARK_API_KEY 未配置")
+// aiAssessPublishRisk 风险检查走 MiMo Pro（ai_models.go）：不看图，但它是公开前的
+// 高价值把关（2026-10-07 用户裁定 Pro 承担高价值任务）。返回的 Raw 仅在解析失败时供
+// fallback 留痕，成功结果不保存整段模型响应。
+func aiAssessPublishRisk(ctx context.Context, job publishJob) (publishRiskAssessment, error) {
+	if !aiConfigured() {
+		return publishRiskAssessment{}, errAIKeyMissing
 	}
 	bodyText, userText := buildRiskUserInput(job, time.Now())
-	payload, err := json.Marshal(map[string]any{
-		"model": arkModelID(),
-		"input": []any{
-			map[string]any{"role": "system", "content": []map[string]any{{"type": "input_text", "text": publishRiskSystemPrompt()}}},
-			map[string]any{"role": "user", "content": []map[string]any{{"type": "input_text", "text": userText}}},
-		},
-	})
-	if err != nil {
-		return publishRiskAssessment{}, fmt.Errorf("序列化风险审核请求失败: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, arkBaseURL()+arkResponsesPath, bytes.NewReader(payload))
-	if err != nil {
-		return publishRiskAssessment{}, fmt.Errorf("构造风险审核请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	resp, err := arkHTTPClient.Do(req)
-	if err != nil {
-		return publishRiskAssessment{}, fmt.Errorf("风险审核接口不可达: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, err := readBoundedBody(resp.Body, 4<<20)
-	if err != nil {
-		return publishRiskAssessment{}, fmt.Errorf("读取风险审核响应失败: %w", err)
-	}
-	text, err := arkExtractOutputText(respBody, resp.StatusCode)
+	text, err := aiResponsesCall(ctx, aiModel(aiTierPro), publishRiskSystemPrompt(),
+		[]map[string]any{{"type": "input_text", "text": userText}})
 	if err != nil {
 		return publishRiskAssessment{}, err
 	}

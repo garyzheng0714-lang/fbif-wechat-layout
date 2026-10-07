@@ -1280,6 +1280,8 @@ func reviewCardSplitSentences(value string) []string {
 	return out
 }
 
+// reviewCardModelStatus 模型状态行 → 审核人看得懂的一句话，绝不透出内部错误串。
+// 「【双模型…】」是 2026-10-07 前旧任务的留痕，card-refresh 重渲染旧卡时仍要认得。
 func reviewCardModelStatus(raw string) (string, bool) {
 	switch {
 	case strings.Contains(raw, "对比模型失败"):

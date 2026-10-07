@@ -9,7 +9,7 @@ package main
 //	  （含 tag_id，供标签查询接口核验 AI 标签是否命中真实标签库）
 //
 // 规范与模型解耦：prompt 只有声明式规则和范例，无模型特定语法；换模型只改
-// ARK_MODEL_ID 并重跑 publish_enrich_eval_test.go 评测（达标线见规范文档 §7）。
+// MIMO_PRO_MODEL 并重跑 publish_enrich_eval_test.go 评测（达标线见规范文档 §7）。
 
 import (
 	_ "embed"

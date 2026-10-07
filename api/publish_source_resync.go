@@ -276,7 +276,8 @@ func (p *publishPipeline) fetchSourceResyncBlocks(ctx context.Context, job publi
 	if p.fetch == nil {
 		return "", "", errors.New("排版工具缺少公众号原文抓取内核")
 	}
-	title, _, _, _, originalSourceURL, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
+	fetched, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
+	title, originalSourceURL, blocksJSON := fetched.Title, fetched.OriginalSourceURL, fetched.BlocksJSON
 	if err != nil {
 		return "", "", fmt.Errorf("从公众号原文重新抓取失败: %w", err)
 	}

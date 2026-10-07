@@ -62,8 +62,8 @@ func TestPublishPreviewSignatureGate(t *testing.T) {
 func TestPublishPreviewRendersArticle(t *testing.T) {
 	env := newPublishTestEnv(t)
 	mux := newPreviewMux(t, env)
-	env.pipeline.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
-		return `恶意<script>标题 & "引号"`, "测试公众号", "", articleURL, "", testPublishBlocksJSON, nil
+	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: `恶意<script>标题 & "引号"`, SourceName: "测试公众号", CanonicalURL: articleURL, BlocksJSON: testPublishBlocksJSON}, nil
 	}
 	job, _, err := env.pipeline.submit(testPublishSourceURL)
 	if err != nil {

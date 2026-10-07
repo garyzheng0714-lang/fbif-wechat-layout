@@ -26,10 +26,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	t.Setenv("FEISHU_VERIFICATION_TOKEN", "secret-verification")
 	t.Setenv("FEISHU_CALLBACK_MODE", "websocket")
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_secret_reviewer")
-	t.Setenv("ARK_API_KEY", "secret-ark-key")
-	t.Setenv("ARK_MODEL_ID", "model-a")
-	t.Setenv("ARK_MODEL_ID_B", "model-b")
-	t.Setenv("ARK_JUDGE_MODEL_ID", "model-judge")
+	t.Setenv("MIMO_API_KEY", "secret-mimo-key")
 	t.Setenv("FOODTALKS_BASE_URL", "https://api-we-test.foodtalks.cn")
 	t.Setenv("FOODTALKS_FRONT_URL", "https://test.foodtalks.cn")
 	t.Setenv("FOODTALKS_ADMIN_ARTICLE_URL", "https://admin-we-test.foodtalks.cn/#/")
@@ -48,7 +45,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 		t.Fatalf("readiness 应 200，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
 	for _, secret := range []string{
-		"secret-render-token", "secret-feishu-app", "oc_secret_chat", "secret-monitor-user", "ou_secret_reviewer", "secret-ark-key", "secret-yunsuo-key", "test-token",
+		"secret-render-token", "secret-feishu-app", "oc_secret_chat", "secret-monitor-user", "ou_secret_reviewer", "secret-mimo-key", "secret-yunsuo-key", "test-token",
 	} {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Fatalf("readiness 不得泄露配置值 %q：%s", secret, rec.Body.String())
@@ -61,7 +58,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	if !got.Ready || !got.ConfigSchema.Matches || got.ConfigSchema.Expected != runtimeConfigSchemaVersion ||
 		got.ConfigSchema.Actual != runtimeConfigSchemaVersion || !got.WorkersPaused ||
 		!got.ServiceAuth.Configured || !got.ImageUpload.Configured || got.HTTPReviewEnabled || got.FoodTalks.Target != "test" ||
-		!got.FoodTalks.TargetMatchesExpected || !got.Yunsuo.Configured || got.Yunsuo.TargetCount != 2 || got.EnrichMode != "dual" {
+		!got.FoodTalks.TargetMatchesExpected || !got.Yunsuo.Configured || got.Yunsuo.TargetCount != 2 || got.EnrichMode != "mimo" {
 		t.Fatalf("readiness 核心状态错误：%+v", got)
 	}
 	if !got.GeneratedFiles.ready() {
@@ -240,17 +237,16 @@ func TestDeploymentPauseBlocksRuleWritesButAllowsReadinessReads(t *testing.T) {
 	}
 }
 
-func TestPublishReadinessDistinguishesSingleAndFallbackEnrichment(t *testing.T) {
-	t.Setenv("ARK_API_KEY", "key")
-	t.Setenv("ARK_MODEL_ID", "same-model")
-	t.Setenv("ARK_MODEL_ID_B", "same-model")
-	t.Setenv("ARK_JUDGE_MODEL_ID", "judge")
-	if got := publishEnrichMode(); got != "single" {
-		t.Fatalf("A/B 相同不能伪报双模型，实际 %q", got)
+func TestPublishReadinessDistinguishesMimoAndFallbackEnrichment(t *testing.T) {
+	t.Setenv("MIMO_API_KEY", "key")
+	if got := publishEnrichMode(); got != "mimo" {
+		t.Fatalf("配置 MIMO_API_KEY 应报告 mimo，实际 %q", got)
 	}
-	t.Setenv("ARK_API_KEY", "")
+	// 旧 ARK 键不再被读取：只有它们时必须如实报 fallback，不能假绿。
+	t.Setenv("MIMO_API_KEY", "")
+	t.Setenv("ARK_API_KEY", "legacy")
 	if got := publishEnrichMode(); got != "fallback" {
-		t.Fatalf("缺 Key 应报告 fallback，实际 %q", got)
+		t.Fatalf("缺 MIMO_API_KEY 应报告 fallback，实际 %q", got)
 	}
 }
 
@@ -269,10 +265,7 @@ func TestPublishReadinessOverallFlagIncludesRuntimeDependencies(t *testing.T) {
 	t.Setenv("FEISHU_APP_SECRET", "secret")
 	t.Setenv("FEISHU_REVIEW_CHAT_ID", "chat")
 	t.Setenv("PUBLISH_MONITOR_FEISHU_USER_ID", "monitor-user")
-	t.Setenv("ARK_API_KEY", "key")
-	t.Setenv("ARK_MODEL_ID", "model-a")
-	t.Setenv("ARK_MODEL_ID_B", "model-b")
-	t.Setenv("ARK_JUDGE_MODEL_ID", "judge")
+	t.Setenv("MIMO_API_KEY", "key")
 
 	got := currentPublishReadiness(env.pipeline)
 	if got.Render.Configured || got.Ready {

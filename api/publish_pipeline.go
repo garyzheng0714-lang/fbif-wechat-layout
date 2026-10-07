@@ -176,11 +176,8 @@ type publishPipeline struct {
 	sourceIDByName   map[string]int64
 	sourceIDCacheAt  time.Time
 
-	// fetch 公众号 URL → 标题 + 公众号名 + 结构化作者署名 + 页面规范 URL + 阅读原文链接 + 中立 Block[] JSON
-	//（默认复用 fetchDirectBlocksWithOptions；byline 是发布者填的结构化字段，
-	// 比 AI 从正文猜准确——AI 只在它为空时兜底，M7。originalSourceURL 是转载稿
-	//「阅读原文」指向的原文地址，网站转载声明超链接优先用它）
-	fetch func(ctx context.Context, articleURL string) (title, sourceName, byline, canonicalURL, originalSourceURL, blocksJSON string, err error)
+	// fetch 公众号 URL → publishFetchedArticle（默认复用 fetchDirectBlocksWithOptions）。
+	fetch func(ctx context.Context, articleURL string) (publishFetchedArticle, error)
 	// fetchWechatTitle 只取公众号文章标题（Mote 系列链改站内用）。生产装配走轻量
 	// HTML 抓取；测试注入，避免组装层打到真实微信。
 	fetchWechatTitle func(ctx context.Context, articleURL string) (string, error)
@@ -189,7 +186,7 @@ type publishPipeline struct {
 	render func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error)
 	// ossUpload 整批图片 URL → OSS 转存（默认走 /api/oss-upload 的上游代理内核，urls 模式）
 	ossUpload func(ctx context.Context, urls []string) (map[string]string, error)
-	// enrich AI 预填发布参数（M5，默认 arkEnrichArticle）；nil / 失败都走规则兜底，
+	// enrich AI 预填发布参数（M5，默认 aiEnrichArticle）；nil / 失败都走规则兜底，
 	// WARN 不 fail job——AI 是加速器不是闸门
 	enrich func(ctx context.Context, job publishJob) (publishEnrichment, error)
 	// assessRisk 发布前红线风险检查；失败降级 warning 并留痕，绝不把未检查当 pass，
@@ -283,8 +280,8 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		rules:                            rules,
 		render:                           renderSiteHTML,
 		ossUpload:                        ossUploadByURLs,
-		enrich:                           arkEnrichArticle,
-		assessRisk:                       arkAssessPublishRisk,
+		enrich:                           aiEnrichArticle,
+		assessRisk:                       aiAssessPublishRisk,
 		foodTalksAuth:                    &foodTalksAuthHealth{},
 		yunsuo:                           func() (yunsuoAPI, error) { return newYunsuoClientFromEnv() },
 		subscribeFeedWechatArticle:       defaultSubscribeFeedWechatArticle,
@@ -306,7 +303,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 	if store != nil {
 		p.repostSources = newPublishRepostSourceStore(publishRepostSourcesPath(store.path))
 	}
-	p.fetch = func(ctx context.Context, articleURL string) (string, string, string, string, string, string, error) {
+	p.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
 		return fetchSiteArticleWithContext(ctx, rules, articleURL)
 	}
 	p.fetchWechatTitle = defaultFetchWechatTitle
@@ -385,20 +382,36 @@ func normalizeSiteSourceKey(rawURL string) (string, error) {
 // fetchSiteArticleWithContext 进程内复用 main.go 的抓取主路径
 // fetchDirectBlocksWithOptions（含限流重试）；x-reader Markdown 回退喂不进渲染器，
 // 此处按失败处理（fail loud）。规则包从当前 worker context 进入。
-func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (string, string, string, string, string, string, error) {
+// publishFetchedArticle 原文抓取结果。Byline 是发布者填的结构化署名，比 AI 从正文猜
+// 准确——AI 只在它为空时兜底（M7）；OriginalSourceURL 是转载稿「阅读原文」地址，网站
+// 转载声明超链接优先用它；CoverURL 是公众号原封面，作默认封面（页脚名片永远不是候选）。
+type publishFetchedArticle struct {
+	Title             string
+	SourceName        string
+	Byline            string
+	CanonicalURL      string
+	OriginalSourceURL string
+	BlocksJSON        string
+	CoverURL          string
+}
+
+func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (publishFetchedArticle, error) {
 	rulePackID := publishRulePackIDFromContext(ctx)
-	title, blocks, sourceName, byline, canonicalURL, originalSourceURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
+	title, blocks, sourceName, byline, canonicalURL, originalSourceURL, coverURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
 	if err != nil {
-		return "", "", "", "", "", "", fmt.Errorf("文章抓取失败: %w", err)
+		return publishFetchedArticle{}, fmt.Errorf("文章抓取失败: %w", err)
 	}
 	if len(blocks) == 0 {
-		return "", "", "", "", "", "", errors.New("未能从文章解析出内容块（链接可能已过期或被限流，请稍后重试）")
+		return publishFetchedArticle{}, errors.New("未能从文章解析出内容块（链接可能已过期或被限流，请稍后重试）")
 	}
 	raw, err := json.Marshal(blocks)
 	if err != nil {
-		return "", "", "", "", "", "", fmt.Errorf("序列化内容块失败: %w", err)
+		return publishFetchedArticle{}, fmt.Errorf("序列化内容块失败: %w", err)
 	}
-	return title, sourceName, byline, canonicalURL, originalSourceURL, string(raw), nil
+	return publishFetchedArticle{
+		Title: title, SourceName: sourceName, Byline: byline, CanonicalURL: canonicalURL,
+		OriginalSourceURL: originalSourceURL, BlocksJSON: string(raw), CoverURL: coverURL,
+	}, nil
 }
 
 // renderSiteHTML 进程内复用 render_proxy.go 的转发内核；自动发布强制 latest 模式，
@@ -663,10 +676,11 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 	if err != nil {
 		return err
 	}
-	title, sourceName, byline, canonicalURL, originalSourceURL, blocksJSON, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
+	fetched, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
 	if err != nil {
 		return err
 	}
+	title, canonicalURL, originalSourceURL := fetched.Title, fetched.CanonicalURL, fetched.OriginalSourceURL
 	if strings.TrimSpace(title) == "" {
 		title = job.Title // 抓取无标题时保留任务上已有标题（人工补填路径）
 	}
@@ -699,7 +713,8 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 	if strings.TrimSpace(title) == "" {
 		return errors.New("未能从文章解析出标题：请确认链接是公众号文章页，或稍后重试")
 	}
-	seed := newPublishContentSeed(publishContentWebFetch, title, sourceName, byline, blocksJSON, job.CoverURL)
+	seed := newPublishContentSeed(publishContentWebFetch, title, fetched.SourceName, fetched.Byline, fetched.BlocksJSON,
+		firstNonEmpty(job.CoverURL, fetched.CoverURL))
 	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageFetching && current.ContentVersion == job.ContentVersion &&
 			current.PendingContentHash == "" && publishContentRank(current.ContentSource) <= publishContentRank(seed.Source)
@@ -806,7 +821,8 @@ func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error
 
 // stageMirror 图片整批转存 OSS + 重写 src：一次整批 + 缺失单次重试，任一图仍失败即
 // fail loud 列出 URL——mmbiz 图有防盗链，外链裸奔进站等于发布后丢图，不允许半成品继续
-// 推进。封面同通道：无封面用正文第一张图兜底，再无则显式失败给出路。
+// 推进。封面同通道：抓取阶段已带公众号原封面；没有时用原文自带的第一张图兜底
+// （网站页脚名片/二维码来自规则素材，绝不当封面），再无则显式失败给出路。
 func (p *publishPipeline) stageMirror(ctx context.Context, job publishJob) error {
 	imageMap := map[string]string{}
 	if strings.TrimSpace(job.ImageMap) != "" {
@@ -816,16 +832,18 @@ func (p *publishPipeline) stageMirror(ctx context.Context, job publishJob) error
 	}
 	srcs := extractImgSrcs(job.ContentHTML)
 	cover := strings.TrimSpace(job.CoverURL)
-	if cover == "" || strings.HasPrefix(cover, "data:") {
+	article := publishArticleImageSet(job)
+	if cover == "" || strings.HasPrefix(cover, "data:") || publishCoverIsTemplateImage(cover, srcs, article) {
+		cover = ""
 		for _, src := range srcs {
-			if !strings.HasPrefix(src, "data:") {
+			if !strings.HasPrefix(src, "data:") && article.has(src) {
 				cover = src
 				break
 			}
 		}
 	}
 	if cover == "" {
-		return errors.New("文章无可用封面图：正文没有图片且任务未设置封面，请补充封面后重试")
+		return errors.New("文章无可用封面图：原文没有封面和配图（页脚名片/二维码不能当封面），请补充封面后重试")
 	}
 
 	// 待转存集合 = 正文外链图 + 封面；跳过 data: 内联图与已有锚点的（重试不重传）。
@@ -1682,7 +1700,8 @@ func (p *publishPipeline) submitWithRulePackAndMetadataContext(
 	// 因此短链必须先抓取页面并解析 __biz/mid/idx canonical identity，再原子建单；
 	// 绝不能先创建临时 job、事后把冲突输家打成 failed。
 	if publishSourceKeyIsShort(sourceKey) {
-		title, sourceName, byline, canonicalURL, fetchedOriginalURL, blocksJSON, fetchErr := p.fetch(ctx, sourceURL)
+		fetched, fetchErr := p.fetch(ctx, sourceURL)
+		title, canonicalURL, fetchedOriginalURL, blocksJSON := fetched.Title, fetched.CanonicalURL, fetched.OriginalSourceURL, fetched.BlocksJSON
 		if fetchErr != nil {
 			return publishJob{}, false, fetchErr
 		}
@@ -1697,7 +1716,7 @@ func (p *publishPipeline) submitWithRulePackAndMetadataContext(
 		if title == "" || strings.TrimSpace(blocksJSON) == "" {
 			return publishJob{}, false, errors.New("短链解析结果缺少标题或正文内容块，未创建发布任务")
 		}
-		seed := newPublishContentSeed(publishContentWebFetch, title, sourceName, byline, blocksJSON, "")
+		seed := newPublishContentSeed(publishContentWebFetch, title, fetched.SourceName, fetched.Byline, blocksJSON, fetched.CoverURL)
 		job, created, createErr := p.store.createSeeded(canonicalKey, sourceURL, func(j *publishJob) {
 			j.SourceAliases = []string{sourceKey}
 			j.RulePackID = rulePackID
@@ -1825,7 +1844,8 @@ func (p *publishPipeline) submitStructuredContent(
 		if p.fetch == nil {
 			return publishJob{}, false, errors.New("短链缺少 canonical identity 解析器，未创建发布任务")
 		}
-		_, _, _, canonicalURL, _, _, fetchErr := p.fetch(withPublishRulePackID(ctx, rulePackID), input.URL)
+		fetched, fetchErr := p.fetch(withPublishRulePackID(ctx, rulePackID), input.URL)
+		canonicalURL := fetched.CanonicalURL
 		if fetchErr != nil {
 			return publishJob{}, false, fmt.Errorf("短链规范身份解析失败，未创建发布任务: %w", fetchErr)
 		}

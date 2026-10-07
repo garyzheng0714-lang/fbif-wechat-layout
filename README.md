@@ -293,8 +293,9 @@ curl http://127.0.0.1:9000/api/health
 | `FEISHU_CALLBACK_MODE` | 必须显式为 `websocket` 或 `webhook`；推荐生产使用 `websocket`，此时公网 Webhook 固定返回 404；缺失/非法时 readiness 失败 |
 | `FEISHU_VERIFICATION_TOKEN` | Webhook 回调来源校验；长连接模式不使用 |
 | `FEISHU_REVIEWER_OPEN_IDS` | 可执行审核的飞书 `open_id` 白名单，逗号分隔。运行时允许“空白名单 + 群成员模式 + 当前审核群”授权卡片操作，HTTP 审核仍必须命中白名单；但当前 env schema 把该变量列为 required，空值会在部署预检直接失败。因此生产配置仍须非空，schema 与运行时授权口径尚待收敛 |
-| `ARK_API_KEY` / `ARK_MODEL_ID` / `ARK_BASE_URL` | AI 元数据预填与发布风险检查；缺失或失败时风险结论 fail-safe 降级为 `warning`，不阻断进入人工审核 |
-| `ARK_MODEL_ID_B` / `ARK_JUDGE_MODEL_ID` | 可选双模型预填与独立判决；未配置 B 时保持单模型，判决失败回落主模型方案 |
+| `MIMO_API_KEY` / `MIMO_BASE_URL` | AI 元数据预填（看图选封面）与发布风险检查，走 Xiaomi MiMo Responses 接口；缺 Key 时 readiness 报 `enrich_mode=fallback`，预填走规则兜底、风险结论 fail-safe 降级为 `warning` |
+| `MIMO_PRO_MODEL` / `MIMO_FLASH_MODEL` | 档位模型名，留空即 `mimo-v2.6-pro` / `mimo-v2.6-flash`。分工（2026-10-07 用户裁定）：看图（预填选封面）与翻译等批量任务用 Flash，风险检查等高价值任务用 Pro |
+| `ARK_*` | 旧豆包/DeepSeek 配置，已不读取，仅为旧 `publish.env` 兼容保留 |
 | `SITE_OWN_ACCOUNTS` | 自有账号清单，用于代码侧确定原创 / 转载；留空使用内置清单 |
 | `YUNSUO_BASE_URL` / `YUNSUO_USER_CODE` / `YUNSUO_API_KEY` | 云梭 API、用户码与凭证；只用于已审核自有原创的外部分发 |
 | `YUNSUO_TARGET_ACCOUNTS_JSON` / `YUNSUO_CATEGORIES` | 服务端固定的目标账号和分类；卡片 callback 不接受任意 `account_id` |

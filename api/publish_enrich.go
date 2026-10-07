@@ -2,56 +2,38 @@ package main
 
 // publish_enrich.go — M5「AI 预填发布参数」（施工图 WORKLOG-publish-pipeline-in-layout-
 // 2026-07-10.md M5 节）。enriching 阶段（mirroring 后 staging 前，此时正文图已 OSS 化，
-// 模型看到的封面候选就是最终 URL）调豆包 ARK responses API，产出：
+// 模型看到的封面候选就是最终 URL）调 MiMo 多模态（ai_models.go），产出：
 //
-//	cover_url（从正文图候选里选一张）/ summary（10-40 字一句话钩子）/ tags（1-3 个标签）
+//	cover_url（从候选图里选一张）/ summary（10-40 字一句话钩子）/ tags（1-3 个标签）
 //	/ author（从正文识别的作者名）/ notes（2-4 句人话优化说明）
 //
 // 🚨 边界（施工图钉死）：本文件只产**元数据**，绝不碰 job.ContentHTML——AI 没有正文
 // 篡改面；排版修补是另一条线（届时上三道铁闸）。
 //
-// 降级哲学：AI 是加速器不是闸门。ARK_API_KEY 未配置 / 调用失败 / 解析失败 →
-// fallbackEnrichment 规则兜底（封面维持 mirroring 已定的正文第一图、摘要=正文纯文本
-// 前 40 字、author/source_name 留空、tags 空、notes 写明未执行原因），WARN 不 fail job，
+// 封面要看图，模型必须真的收到图片（2026-10-07 用户裁定：看图用 Flash）。此前
+// 「豆包 A + 纯文本 DeepSeek B + 纯文本判决」已删除：看不见图的 B 与判决凭网址顺序
+// 编造了「歪马送酒实物照」，把页脚商务名片选成了 #263 的封面。候选图也只认原文自带
+// 的图（enrichCandidateImages），网站页脚的名片/二维码/logo 永远不进候选。
+//
+// 降级哲学：AI 是加速器不是闸门。MIMO_API_KEY 未配置 / 调用失败 / 解析失败 →
+// fallbackEnrichment 规则兜底（封面维持 mirroring 已定值、摘要=正文纯文本前 40 字、
+// author/source_name 留空、tags 空、notes 写明未执行原因），WARN 不 fail job，
 // 阶段照常推进。
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html"
-	"net/http"
-	"os"
 	"regexp"
 	"strings"
-	"sync"
-	"time"
 	"unicode"
-)
-
-// ARK 可配项：API Key 必配（缺失走兜底）；模型与 Base URL 有默认值，env 可覆盖
-// （Base URL 覆盖同时服务测试 httptest 桩，与 FOODTALKS_BASE_URL 同模式）。
-const (
-	arkAPIKeyEnv  = "ARK_API_KEY"
-	arkModelIDEnv = "ARK_MODEL_ID"
-	// 双模型对比 + 判决节点（2026-07-10 用户裁定「两个一起跑，讨论对比，最终由单独的
-	// 判决节点公平对比给出判决，判决节点用 DeepSeek」）：ARK_MODEL_ID_B 配置即启用
-	// 双模型（并行跑 A/B → 判决节点逐字段裁决）；判决模型取 ARK_JUDGE_MODEL_ID，
-	// 缺省回落 B（DeepSeek）。B 未配置 → 单模型路径，与旧行为完全一致。
-	arkModelIDBEnv     = "ARK_MODEL_ID_B"
-	arkJudgeModelIDEnv = "ARK_JUDGE_MODEL_ID"
-	arkBaseURLEnv      = "ARK_BASE_URL"
-	defaultARKModelID  = "ep-20260623134011-qljpn" // Doubao-Seed-2.1-pro endpoint
-	defaultARKBaseURL  = "https://ark.cn-beijing.volces.com"
-	arkResponsesPath   = "/api/v3/responses"
 )
 
 // 输入裁剪（控 token 成本，够模型判断即可）：正文纯文本最多 6000 字、候选图最多前 8 张。
 const (
-	arkEnrichMaxBodyRunes = 6000
-	arkEnrichMaxImages    = 8
+	aiEnrichMaxBodyRunes = 6000
+	aiEnrichMaxImages    = 8
 )
 
 // system prompt 见 editorial_norms.go（M7：从编辑部历史文章倒推的规范 + 词表组装，
@@ -70,254 +52,41 @@ type publishEnrichment struct {
 // enrichMaxTags 编辑部口径每篇 1~3 个标签（规范文档 §4），模型超发时硬截断。
 const enrichMaxTags = 3
 
-// arkEnrichArticle 生产默认实现：多模态调 ARK responses API（标题 + 纯文本正文 +
-// 正文图 input_image），要求严格 JSON 输出并容错解析。任何失败都返回 error，
-// 由 stageEnrich 统一降级兜底——本函数自身不兜底，职责单一。
-// ARK_MODEL_ID_B 配置时升级为双模型对比：A/B 并行各出一份方案 → 判决节点（DeepSeek）
-// 逐字段公平裁决，判决说明并入 notes 给审核人看；任一侧失败自动降级单侧，判决节点
-// 失败降级主模型方案——多模型永远是增强器不是新故障点。
-func arkEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, error) {
-	apiKey := strings.TrimSpace(os.Getenv(arkAPIKeyEnv))
-	if apiKey == "" {
-		return publishEnrichment{}, errors.New("ARK_API_KEY 未配置")
+// aiEnrichArticle 生产默认实现：多模态调 MiMo 看图档（aiTierVision，标题 + 纯文本
+// 正文 + 候选图 input_image），要求严格 JSON 输出并容错解析。失败返回 error，由
+// stageEnrich 统一走规则兜底——本函数自身不兜底，职责单一。
+func aiEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, error) {
+	if !aiConfigured() {
+		return publishEnrichment{}, errAIKeyMissing
 	}
-	images := enrichCandidateImages(job.ContentHTML)
-	bodyText := truncateRunes(htmlToPlainText(job.ContentHTML), arkEnrichMaxBodyRunes)
+	images := enrichCandidateImages(job)
+	bodyText := truncateRunes(htmlToPlainText(job.ContentHTML), aiEnrichMaxBodyRunes)
 	evidence := job.Title + "\n" + bodyText
 
 	userText := "文章标题：" + job.Title + "\n\n正文（纯文本）：\n" + bodyText
 	if len(images) > 0 {
-		userText += "\n\n候选封面图 URL（按正文出现顺序，cover_url 必须从中原样选一个）：\n" + strings.Join(images, "\n")
+		userText += fmt.Sprintf("\n\n下面附 %d 张候选封面图，每张图紧挨在它自己的「候选图 N：URL」标注之后。"+
+			"cover_url 必须原样抄写你所选那张图正上方标注里的 URL，不要按序号推算。", len(images))
 	} else {
-		userText += "\n\n本文正文没有可用图片，cover_url 请给空字符串。"
+		userText += "\n\n本文没有可用的候选封面图，cover_url 请给空字符串。"
 	}
+	// 每张图前紧贴自己的 URL 标注：2026-10-07 实测只在开头列 URL 清单时，模型看对了图
+	// 却抄错相邻一张的 URL（#263 想选歪马海报、返回了时间线图表）。
 	userContent := []map[string]any{{"type": "input_text", "text": userText}}
-	for _, u := range images {
-		userContent = append(userContent, map[string]any{"type": "input_image", "image_url": u})
+	for i, u := range images {
+		userContent = append(userContent,
+			map[string]any{"type": "input_text", "text": fmt.Sprintf("候选图 %d：%s", i+1, u)},
+			map[string]any{"type": "input_image", "image_url": u})
 	}
-	textOnlyContent := []map[string]any{{"type": "input_text", "text": userText}}
-
-	callOne := func(model string, content []map[string]any) (publishEnrichment, error) {
-		text, err := arkResponsesCall(ctx, apiKey, model, editorialEnrichSystemPrompt(), content)
-		if err != nil {
-			return publishEnrichment{}, err
-		}
-		result, err := parseEnrichmentJSON(text, images)
-		if err != nil {
-			return publishEnrichment{}, err
-		}
-		return enforceEnrichmentEvidence(result, evidence), nil
-	}
-
-	modelB := strings.TrimSpace(os.Getenv(arkModelIDBEnv))
-	if modelB == "" || modelB == arkModelID() {
-		return callOne(arkModelID(), userContent) // 单模型路径（旧行为）
-	}
-
-	// 双模型并行出方案。
-	var (
-		wg         sync.WaitGroup
-		resA, resB publishEnrichment
-		errA, errB error
-	)
-	wg.Add(2)
-	go func() { defer wg.Done(); resA, errA = callOne(arkModelID(), userContent) }()
-	// 当前对比模型是文本模型。候选图 URL 已写进 userText，不能再发送 input_image，
-	// 否则 ARK 会因 messages.content.image_url 不受支持而拒绝整个请求。
-	go func() { defer wg.Done(); resB, errB = callOne(modelB, textOnlyContent) }()
-	wg.Wait()
-	switch {
-	case errA != nil && errB != nil:
-		return publishEnrichment{}, fmt.Errorf("双模型全部失败：主模型 %v；对比模型 %v", errA, errB)
-	case errA != nil:
-		resB.Notes = "【双模型】主模型失败（" + truncateRunes(errA.Error(), 80) + "），采用对比模型方案。\n" + resB.Notes
-		return resB, nil
-	case errB != nil:
-		resA.Notes = "【双模型】对比模型失败（" + truncateRunes(errB.Error(), 80) + "），采用主模型方案。\n" + resA.Notes
-		return resA, nil
-	}
-	judged, err := arkJudgeEnrichments(ctx, apiKey, userText, images, evidence, resA, resB)
-	if err != nil {
-		resA.Notes = "【双模型】判决节点失败（" + truncateRunes(err.Error(), 80) + "），采用主模型方案。\n" + resA.Notes
-		return resA, nil
-	}
-	return judged, nil
-}
-
-// arkResponsesCall responses API 调用内核（A/B 模型与判决节点共用）：payload 组装、
-// HTTP、输出文本提取。userContent 允许含 input_image（多模态）；判决节点只传文本。
-func arkResponsesCall(ctx context.Context, apiKey, model, systemPrompt string, userContent []map[string]any) (string, error) {
-	payload, err := json.Marshal(map[string]any{
-		"model": model,
-		"input": []any{
-			map[string]any{"role": "system", "content": []map[string]any{{"type": "input_text", "text": systemPrompt}}},
-			map[string]any{"role": "user", "content": userContent},
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("序列化 ARK 请求失败: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, arkBaseURL()+arkResponsesPath, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("构造 ARK 请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	resp, err := arkHTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("ARK 接口不可达: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, err := readBoundedBody(resp.Body, 4<<20)
-	if err != nil {
-		return "", fmt.Errorf("读 ARK 响应失败: %w", err)
-	}
-	return arkExtractOutputText(respBody, resp.StatusCode)
-}
-
-// arkJudgeEnrichments 判决节点：把 A/B 两案匿名为方案一/方案二（判决模型不知道来源，
-// 不预设偏好），连同文章与编辑部规范交给判决模型逐字段裁决。产出最终参数 + verdict
-// 判决说明（并入 notes，审核人在卡片上能看到两案对比结论）。
-func arkJudgeEnrichments(ctx context.Context, apiKey, articleText string, images []string, evidence string, a, b publishEnrichment) (publishEnrichment, error) {
-	judgeModel := strings.TrimSpace(os.Getenv(arkJudgeModelIDEnv))
-	if judgeModel == "" {
-		judgeModel = strings.TrimSpace(os.Getenv(arkModelIDBEnv)) // 用户裁定判决节点用 DeepSeek（即 B）
-	}
-	marshal := func(e publishEnrichment) string {
-		raw, _ := json.Marshal(map[string]any{
-			"cover_url": e.CoverURL, "summary": e.Summary, "tags": e.Tags,
-			"author": e.Author, "source_name": e.SourceName, "notes": e.Notes,
-		})
-		return string(raw)
-	}
-	systemPrompt := `你是发布参数的终审判决节点。同一篇文章有两份预填方案（方案一、方案二），来自两个不同的模型，已匿名——你不知道也不要猜测来源，必须逐字段公平比较。请用简体中文回复，思考过程也用简体中文。
-
-判决标准是下面这份编辑部规范（哪个方案更贴近规范就采用哪个）：
-=== 编辑部规范开始 ===
-` + editorialEnrichSystemPrompt() + `
-=== 编辑部规范结束 ===
-
-裁决规则：
-- cover_url / summary / tags / author / source_name 五个字段逐一比较，每个字段只能整体采用其中一案的取值（不得自创新值、不得混拼半截）；两案相同就照抄。
-- notes 你来重写：给审核编辑的 2~4 句直白优化说明（可综合两案的信息）。
-- 只输出一个 JSON 对象（不要 markdown 代码围栏）：
-{"cover_url":"...","summary":"...","tags":["..."],"author":"...","source_name":"...","notes":"...","verdict":"2~4 句判决说明：每个有分歧的字段采用了哪个方案、为什么，直白人话"}`
-	userText := articleText + "\n\n=== 方案一 ===\n" + marshal(a) + "\n\n=== 方案二 ===\n" + marshal(b)
-	text, err := arkResponsesCall(ctx, apiKey, judgeModel, systemPrompt, []map[string]any{{"type": "input_text", "text": userText}})
+	text, err := aiResponsesCall(ctx, aiModel(aiTierVision), editorialEnrichSystemPrompt(), userContent)
 	if err != nil {
 		return publishEnrichment{}, err
 	}
-	judged, err := parseEnrichmentJSON(text, images)
+	result, err := parseEnrichmentJSON(text, images)
 	if err != nil {
 		return publishEnrichment{}, err
 	}
-	judged, invalidFields := enforceJudgeFieldChoices(judged, a, b)
-	if len(invalidFields) > 0 {
-		judged.Notes = strings.TrimSpace(judged.Notes + " 判决节点返回了不属于任一候选方案的" + strings.Join(invalidFields, "、") + "，已回退方案一对应值。")
-	}
-	judged = enforceEnrichmentEvidence(judged, evidence)
-	if verdict := parseJudgeVerdict(text); verdict != "" {
-		judged.Notes = strings.TrimSpace(judged.Notes + "\n【双模型判决】" + verdict)
-	}
-	return judged, nil
-}
-
-// enforceJudgeFieldChoices 把“判决节点只能逐字段二选一”从 prompt 提升为运行时约束。
-// 模型若自创摘要、混拼标签或改写封面等，相关字段回退方案一并留痕；notes 是判决节点
-// 唯一允许重写的字段，不在此约束。
-func enforceJudgeFieldChoices(judged, a, b publishEnrichment) (publishEnrichment, []string) {
-	invalid := make([]string, 0, 5)
-	chooseString := func(label string, got *string, left, right string) {
-		if *got == left || *got == right {
-			return
-		}
-		*got = left
-		invalid = append(invalid, label)
-	}
-	chooseString("封面", &judged.CoverURL, a.CoverURL, b.CoverURL)
-	chooseString("摘要", &judged.Summary, a.Summary, b.Summary)
-	if !equalStringSlices(judged.Tags, a.Tags) && !equalStringSlices(judged.Tags, b.Tags) {
-		judged.Tags = append([]string(nil), a.Tags...)
-		invalid = append(invalid, "标签")
-	}
-	chooseString("作者", &judged.Author, a.Author, b.Author)
-	chooseString("出处", &judged.SourceName, a.SourceName, b.SourceName)
-	return judged, invalid
-}
-
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// parseJudgeVerdict 从判决输出里提取 verdict 字段（解析失败返回空串——判决说明是
-// 增强信息，不因它失败而丢整个判决结果）。
-func parseJudgeVerdict(text string) string {
-	cleaned := stripMarkdownFence(text)
-	if start, end := strings.Index(cleaned, "{"), strings.LastIndex(cleaned, "}"); start >= 0 && end > start {
-		cleaned = cleaned[start : end+1]
-	}
-	var v struct {
-		Verdict string `json:"verdict"`
-	}
-	if err := json.Unmarshal([]byte(cleaned), &v); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(v.Verdict)
-}
-
-// arkHTTPClient 多模态推理慢（要看图、要思考长文）：2026-07-10 评测实测 120s 会让
-// 40% 的长文超时（走兜底浪费 AI），放宽到 300s——enriching 是异步阶段，慢无妨；
-// 测试桩即回不受影响。
-var arkHTTPClient = &http.Client{Timeout: 300 * time.Second}
-
-// arkExtractOutputText responses API 响应 → 模型输出文本：遍历 output[].content[] 拼接
-// output_text（跳过 reasoning 等非 message 项），HTTP/业务错误显式报错。
-func arkExtractOutputText(respBody []byte, statusCode int) (string, error) {
-	var out struct {
-		Output []struct {
-			Type    string `json:"type"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"output"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(respBody, &out); err != nil {
-		return "", fmt.Errorf("ARK 响应不是预期 JSON（HTTP %d）: %w", statusCode, err)
-	}
-	if out.Error != nil && out.Error.Message != "" {
-		return "", fmt.Errorf("ARK 调用失败（HTTP %d）: %s", statusCode, out.Error.Message)
-	}
-	if statusCode != http.StatusOK {
-		return "", fmt.Errorf("ARK 调用失败（HTTP %d）", statusCode)
-	}
-	var sb strings.Builder
-	for _, item := range out.Output {
-		if item.Type != "" && item.Type != "message" {
-			continue
-		}
-		for _, c := range item.Content {
-			if c.Type == "output_text" {
-				sb.WriteString(c.Text)
-			}
-		}
-	}
-	text := strings.TrimSpace(sb.String())
-	if text == "" {
-		return "", errors.New("ARK 响应没有模型输出文本")
-	}
-	return text, nil
+	return enforceEnrichmentEvidence(result, evidence), nil
 }
 
 // parseEnrichmentJSON 模型输出文本 → publishEnrichment。容错：剥 markdown 代码围栏、
@@ -429,20 +198,96 @@ func fallbackEnrichment(job publishJob, cause error) publishEnrichment {
 	}
 }
 
-// enrichCandidateImages 封面候选 = 正文 img src（mirroring 后已是 OSS URL），
-// 跳过 data: 内联图，最多前 8 张（多模态每张图都是真金白银的 token）。
-func enrichCandidateImages(contentHTML string) []string {
+// enrichCandidateImages 封面候选 = 当前封面（公众号原封面或正文首图，已 OSS 化）+
+// 原文自带的正文图（mirroring 后已是 OSS URL），跳过 data: 内联图，最多 8 张（多模态
+// 每张图都是真金白银的 token）。网站页脚的名片/二维码/logo 来自规则素材而非原文，
+// 一律不进候选（#263 页脚名片被选成封面的根因之一）。
+func enrichCandidateImages(job publishJob) []string {
+	article := publishArticleImageSet(job)
+	srcs := extractImgSrcs(job.ContentHTML)
 	var out []string
-	for _, src := range extractImgSrcs(contentHTML) {
-		if strings.HasPrefix(src, "data:") {
-			continue
+	seen := map[string]bool{}
+	add := func(src string) {
+		src = strings.TrimSpace(src)
+		if src == "" || strings.HasPrefix(src, "data:") || seen[src] || len(out) >= aiEnrichMaxImages {
+			return
 		}
+		seen[src] = true
 		out = append(out, src)
-		if len(out) >= arkEnrichMaxImages {
-			break
+	}
+	if !publishCoverIsTemplateImage(job.CoverURL, srcs, article) {
+		add(job.CoverURL)
+	}
+	for _, src := range srcs {
+		if article.has(src) {
+			add(src)
 		}
 	}
 	return out
+}
+
+// publishCoverIsTemplateImage 封面是网站页脚/模板图（出现在成品里却不来自原文）。
+// 公众号原封面通常不出现在正文里，原文配图在 article 里，两者都不算模板图；旧任务
+// 遗留的页脚名片封面（#263、#5）命中这里，必须作废重选。
+func publishCoverIsTemplateImage(cover string, srcs []string, article publishArticleImages) bool {
+	id := publishImageIdentity(cover)
+	if id == "" || article.has(cover) {
+		return false
+	}
+	for _, src := range srcs {
+		if publishImageIdentity(src) == id {
+			return true
+		}
+	}
+	return false
+}
+
+// publishArticleImages 原文自带图片的集合：BlocksJSON 里的 img src，以及它们经
+// ImageMap 转存后的 OSS URL。比较忽略 query/fragment（mmbiz 同图常带不同 wx_fmt 参数）。
+type publishArticleImages map[string]bool
+
+func publishArticleImageSet(job publishJob) publishArticleImages {
+	set := publishArticleImages{}
+	var blocks []Block
+	if err := json.Unmarshal([]byte(job.BlocksJSON), &blocks); err != nil {
+		return set
+	}
+	imageMap := map[string]string{}
+	if strings.TrimSpace(job.ImageMap) != "" {
+		_ = json.Unmarshal([]byte(job.ImageMap), &imageMap)
+	}
+	mirrored := map[string]string{}
+	for src, oss := range imageMap {
+		mirrored[publishImageIdentity(src)] = oss
+	}
+	for _, b := range blocks {
+		src := b.Src
+		if b.K == "video" {
+			src = b.Poster
+		} else if b.K != "img" {
+			continue
+		}
+		if strings.TrimSpace(src) == "" {
+			continue
+		}
+		id := publishImageIdentity(src)
+		set[id] = true
+		if oss := mirrored[id]; oss != "" {
+			set[publishImageIdentity(oss)] = true
+		}
+	}
+	return set
+}
+
+func (s publishArticleImages) has(src string) bool { return s[publishImageIdentity(src)] }
+
+func publishImageIdentity(src string) string {
+	src = strings.TrimSpace(html.UnescapeString(src))
+	if i := strings.IndexAny(src, "?#"); i >= 0 {
+		src = src[:i]
+	}
+	src = strings.TrimPrefix(strings.TrimPrefix(src, "https:"), "http:")
+	return strings.ToLower(strings.TrimPrefix(src, "//"))
 }
 
 var (
@@ -487,19 +332,4 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
-}
-
-// arkModelID / arkBaseURL env 优先，默认常量兜底（同 siteFrontURL 模式）。
-func arkModelID() string {
-	if v := strings.TrimSpace(os.Getenv(arkModelIDEnv)); v != "" {
-		return v
-	}
-	return defaultARKModelID
-}
-
-func arkBaseURL() string {
-	if v := strings.TrimRight(strings.TrimSpace(os.Getenv(arkBaseURLEnv)), "/"); v != "" {
-		return v
-	}
-	return defaultARKBaseURL
 }
