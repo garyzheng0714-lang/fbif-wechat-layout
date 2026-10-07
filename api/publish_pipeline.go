@@ -384,7 +384,8 @@ func normalizeSiteSourceKey(rawURL string) (string, error) {
 // 此处按失败处理（fail loud）。规则包从当前 worker context 进入。
 // publishFetchedArticle 原文抓取结果。Byline 是发布者填的结构化署名，比 AI 从正文猜
 // 准确——AI 只在它为空时兜底（M7）；OriginalSourceURL 是转载稿「阅读原文」地址，网站
-// 转载声明超链接优先用它；CoverURL 是公众号原封面，作默认封面（页脚名片永远不是候选）。
+// 转载声明超链接优先用它；CoverURL/Digest 是公众号原封面与摘要，网站直接沿用
+// （2026-10-07 用户裁定「与公众号保持一致」）。
 type publishFetchedArticle struct {
 	Title             string
 	SourceName        string
@@ -393,11 +394,12 @@ type publishFetchedArticle struct {
 	OriginalSourceURL string
 	BlocksJSON        string
 	CoverURL          string
+	Digest            string
 }
 
 func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (publishFetchedArticle, error) {
 	rulePackID := publishRulePackIDFromContext(ctx)
-	title, blocks, sourceName, byline, canonicalURL, originalSourceURL, coverURL, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
+	title, blocks, sourceName, byline, canonicalURL, originalSourceURL, coverURL, digest, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
 	if err != nil {
 		return publishFetchedArticle{}, fmt.Errorf("文章抓取失败: %w", err)
 	}
@@ -410,7 +412,7 @@ func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, ar
 	}
 	return publishFetchedArticle{
 		Title: title, SourceName: sourceName, Byline: byline, CanonicalURL: canonicalURL,
-		OriginalSourceURL: originalSourceURL, BlocksJSON: string(raw), CoverURL: coverURL,
+		OriginalSourceURL: originalSourceURL, BlocksJSON: string(raw), CoverURL: coverURL, Digest: digest,
 	}, nil
 }
 
@@ -721,11 +723,23 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 	}, func(current *publishJob) {
 		applyPublishContentSeed(current, seed)
 		current.OriginalSourceURL = preferOriginalSourceURL(originalSourceURL, current.OriginalSourceURL)
+		applyWechatSourceMeta(current, fetched)
 	})
 	if err == nil && !swapped {
 		return errPublishContentSuperseded
 	}
 	return err
+}
+
+// applyWechatSourceMeta 记下公众号原封面与摘要（只在抓到时覆盖）；enriching 据此
+// 让网站封面/摘要与公众号保持一致，AI 只在缺值时兜底。
+func applyWechatSourceMeta(job *publishJob, fetched publishFetchedArticle) {
+	if cover := strings.TrimSpace(fetched.CoverURL); cover != "" {
+		job.SourceCoverURL = cover
+	}
+	if digest := strings.TrimSpace(fetched.Digest); digest != "" {
+		job.SourceDigest = digest
+	}
 }
 
 var publishRuleConfigHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -934,10 +948,15 @@ func (p *publishPipeline) stageEnrich(ctx context.Context, job publishJob) error
 	_, swapped, uerr := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageEnriching && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
 	}, func(j *publishJob) {
-		if result.CoverURL != "" {
-			j.CoverURL = result.CoverURL // AI 从候选里选中的封面覆盖默认第一图
+		// 与公众号保持一致（2026-10-07 用户裁定）：有公众号原封面就不让 AI 改选；
+		// 有公众号摘要就直接用，AI 摘要只在原文没填摘要时兜底。
+		if result.CoverURL != "" && strings.TrimSpace(j.SourceCoverURL) == "" {
+			j.CoverURL = result.CoverURL
 		}
 		j.Summary = result.Summary
+		if digest := strings.TrimSpace(j.SourceDigest); digest != "" {
+			j.Summary = digest
+		}
 		j.Tags = result.Tags
 		if strings.TrimSpace(linkedHTML) != "" {
 			j.ContentHTML = linkedHTML
@@ -1724,6 +1743,7 @@ func (p *publishPipeline) submitWithRulePackAndMetadataContext(
 			j.Classifier = classifier
 			applyPublishContentSeed(j, seed)
 			j.OriginalSourceURL = preferOriginalSourceURL(fetchedOriginalURL, submittedOriginalURL)
+			applyWechatSourceMeta(j, fetched)
 		})
 		if createErr != nil {
 			return publishJob{}, false, createErr

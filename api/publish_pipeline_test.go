@@ -145,7 +145,8 @@ type ftStub struct {
 	updateIDs      []int64
 	lastIsLatest   int
 	lastSourceID   int64
-	forbidPublish  bool // true 时收到 publishStatus=1 直接判失败（红线守卫）
+	lastPut        foodTalksNews // 最近一次 PUT 的完整业务字段
+	forbidPublish  bool          // true 时收到 publishStatus=1 直接判失败（红线守卫）
 	searchRecords  []foodTalksNewsListItem
 	searchCalls    int
 	searchAuthFail bool // true 时标题检索按生产形态回 401 并回显 token
@@ -238,10 +239,8 @@ func newFTStub(t *testing.T) *ftStub {
 			t.Errorf("FoodTalks 桩收到缺头请求 Origin=%q Referer=%q", r.Header.Get("Origin"), r.Header.Get("Referer"))
 		}
 		var body struct {
-			ID            json.RawMessage `json:"id"`
-			PublishStatus int             `json:"publishStatus"`
-			IsLatest      int             `json:"isLatest"`
-			SourceID      int64           `json:"sourceId"`
+			ID json.RawMessage `json:"id"`
+			foodTalksNews
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("FoodTalks 桩解析请求体失败: %v", err)
@@ -267,6 +266,7 @@ func newFTStub(t *testing.T) *ftStub {
 			stub.updateIDs = append(stub.updateIDs, id)
 			stub.lastIsLatest = body.IsLatest
 			stub.lastSourceID = body.SourceID
+			stub.lastPut = body.foodTalksNews
 			respID = id
 		default:
 			stub.t.Errorf("FoodTalks 桩收到意外方法 %s", r.Method)

@@ -108,7 +108,57 @@ var (
 	// 把它设为原账号原文——网站转载声明《标题》超链接优先用它（排版规范：来源处
 	// 超链接到原文链接，不能指回自家转载页）。单双引号双写兼容。
 	wxSourceURLRe = regexp.MustCompile(`var msg_source_url = ['"]([^'"]*)['"]`)
+	// 公众号摘要（发布者在后台填的「摘要」）。网站摘要必须与它一致（2026-10-07 用户裁定）。
+	wxDigestRe = regexp.MustCompile(`var msg_desc = htmlDecode\("((?:[^"\\]|\\.)*)"\)`)
 )
+
+// extractArticleDigest 公众号摘要：优先 msg_desc 原值，其次 og:description / description。
+func extractArticleDigest(rawHTML string) string {
+	if m := wxDigestRe.FindStringSubmatch(rawHTML); len(m) > 1 {
+		if v := strings.TrimSpace(html.UnescapeString(unescapeJSString(m[1]))); v != "" {
+			return v
+		}
+	}
+	for _, key := range []string{"og:description", "description"} {
+		if v := strings.TrimSpace(extractMeta(rawHTML, key)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// unescapeJSString 还原 JS 双引号字符串里的反斜杠转义（\" \\ \n \xNN）。
+func unescapeJSString(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'x':
+			if i+2 < len(s) {
+				if v, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
+					b.WriteByte(byte(v))
+					i += 2
+					continue
+				}
+			}
+			b.WriteByte('x')
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
 
 // extractWechatArticleMeta 公众号页面原始 HTML → (公众号名, 作者署名, 阅读原文链接)。
 // 没署名的文章两个作者锚点都是空串——空值原样返回（空也是有效信号，宁空勿造）。

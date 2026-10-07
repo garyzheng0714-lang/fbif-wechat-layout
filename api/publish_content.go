@@ -349,6 +349,7 @@ func (p *publishPipeline) refetchLatestWithRulePack(ctx context.Context, jobID i
 		applyPublishContentSeed(latest, seed)
 		latest.RulePackID = rulePackID
 		latest.OriginalSourceURL = preferOriginalSourceURL(originalSourceURL, current.OriginalSourceURL)
+		applyWechatSourceMeta(latest, fetched)
 	})
 	if err != nil {
 		return publishJob{}, err

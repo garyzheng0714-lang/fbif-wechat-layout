@@ -59,7 +59,10 @@ func aiEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, er
 	if !aiConfigured() {
 		return publishEnrichment{}, errAIKeyMissing
 	}
-	images := enrichCandidateImages(job)
+	var images []string
+	if strings.TrimSpace(job.SourceCoverURL) == "" {
+		images = enrichCandidateImages(job) // 有公众号原封面时封面已定，不再花多模态 token 选图
+	}
 	bodyText := truncateRunes(htmlToPlainText(job.ContentHTML), aiEnrichMaxBodyRunes)
 	evidence := job.Title + "\n" + bodyText
 
@@ -67,6 +70,8 @@ func aiEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, er
 	if len(images) > 0 {
 		userText += fmt.Sprintf("\n\n下面附 %d 张候选封面图，每张图紧挨在它自己的「候选图 N：URL」标注之后。"+
 			"cover_url 必须原样抄写你所选那张图正上方标注里的 URL，不要按序号推算。", len(images))
+	} else if strings.TrimSpace(job.SourceCoverURL) != "" {
+		userText += "\n\n封面已沿用公众号原封面，cover_url 请给空字符串。"
 	} else {
 		userText += "\n\n本文没有可用的候选封面图，cover_url 请给空字符串。"
 	}
