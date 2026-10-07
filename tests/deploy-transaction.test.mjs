@@ -209,11 +209,16 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   }
 });
 
-test('PR quality gate examines on Chrome only and caches the browser', async () => {
+test('P0 quality gate runs before every deploy, on Chrome only with a cached browser', async () => {
   const workflow = await projectFile('.github/workflows/p0-monitoring-contract.yml');
-  assert.match(workflow, /pull_request:/);
+  const deploy = await projectFile('.github/workflows/deploy.yml');
+  // 只有 main 一个分支（2026-10-08 用户裁定）：推 main 由 deploy 调用本工作流考试，通过才上线。
+  assert.match(workflow, /workflow_call:/);
+  assert.match(deploy, /uses: \.\/\.github\/workflows\/p0-monitoring-contract\.yml/,
+    '推 main 必须先跑完整 P0 考试');
+  assert.match(deploy, /needs: \[p0\]/, '考试不过不得进入部署');
   assert.doesNotMatch(workflow, /push:\s*\n\s*branches:\s*\n\s*-\s*main/,
-    '合并后再跑一遍全套考试会浪费时间；考试只在 PR');
+    '考试由 deploy 调用，不另挂 push 触发，避免同一提交考两遍');
   assert.match(workflow, /backend-and-watchdog:/,
     '分支保护依赖这个 job 名，不得改名');
   assert.match(workflow, /gofmt -l/);

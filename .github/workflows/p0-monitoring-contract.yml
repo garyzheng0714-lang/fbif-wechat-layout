@@ -3,6 +3,9 @@ name: P0 WeChat Monitoring Contract
 on:
   pull_request:
   workflow_dispatch:
+  # 只有 main 一个分支（2026-10-08 用户裁定），改动直接推 main：deploy.yml 先调用本
+  # 工作流跑完全部考试，通过才上线。
+  workflow_call:
 
 permissions:
   contents: read
@@ -17,8 +20,8 @@ jobs:
   # 幂等 intake、审核卡 outbox、监控不变量与告警转发。
   #
   # ⚠️ job 名 backend-and-watchdog 是 main 分支保护的必需检查（required status
-  # check）之一，且 enforce_admins=true。改名会让那个检查永远不出现，PR 永久
-  # BLOCKED 且管理员也合不了——要改名必须同步更新分支保护配置。名字里的
+  # check）之一。2026-10-08 起只有 main 一个分支，管理员直接推 main（enforce_admins
+  # 关闭），考试改由 deploy.yml 在上线前调用本工作流；改名须同步分支保护配置。名字里的
   # watchdog 已是历史，实际内容见上。
   backend-and-watchdog:
     runs-on: ubuntu-latest
