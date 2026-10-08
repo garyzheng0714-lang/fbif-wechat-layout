@@ -20,7 +20,8 @@ import (
 	"time"
 )
 
-const publishMoteSeriesMaxTitleFetches = 20
+// 每篇最多查 60 个公众号链接的标题：Mote 系列文末常列出前面几十篇（2026-10-08，20 不够）。
+const publishMoteSeriesMaxTitleFetches = 60
 
 // 只改 <a href> 的属性值，不 round-trip 整篇 HTML。Go regexp 没有反向引用，引号拆两条。
 // href 必须是独立属性（前面是空白），避免误吃 data-href。
