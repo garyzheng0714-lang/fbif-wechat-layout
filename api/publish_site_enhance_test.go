@@ -678,3 +678,16 @@ func TestPublishSiteLinkSeriesTagsRealForms(t *testing.T) {
 		}
 	}
 }
+
+// TestPublishSiteLinkSeriesAlbums 63149 正文中途的「茶叶系列」链到公众号合集：网站有同名标签就换成
+// 标签页；「伴手礼系列」没有同名标签、「全球茶叶品牌」不是系列名，都保留合集链。
+func TestPublishSiteLinkSeriesAlbums(t *testing.T) {
+	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
+	resolve := func(name string) int64 { return map[string]int64{"茶叶系列": 114000}[name] }
+	album := `https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzA3ODEzMjg5Mg==&amp;action=getalbum&amp;album_id=4500314305401487362#wechat_redirect`
+	in := `<p>我写<a href="` + album + `" target="_blank" rel="noopener">茶叶系列</a>时，也写过<a href="` + album + `">伴手礼系列</a>和<a href="` + album + `">全球茶叶品牌</a>。</p>`
+	want := `<p>我写<a href="https://www.foodtalks.cn/news/tag/114000" target="_blank" rel="noopener">茶叶系列</a>时，也写过<a href="` + album + `">伴手礼系列</a>和<a href="` + album + `">全球茶叶品牌</a>。</p>`
+	if got := publishSiteLinkSeriesTags(in, resolve); got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+}

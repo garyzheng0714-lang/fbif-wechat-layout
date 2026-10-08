@@ -275,11 +275,31 @@ func publishSiteLinkSeriesTags(contentHTML string, tagIDFor func(name string) in
 		fmt.Fprintf(&b, `<a href="%s" target="_blank" rel="noopener">%s</a>`, escapeHTMLAttr(href), text)
 		last = end
 	}
-	if last == 0 {
-		return contentHTML
+	if last > 0 {
+		b.WriteString(contentHTML[last:])
+		contentHTML = b.String()
 	}
-	b.WriteString(contentHTML[last:])
-	return b.String()
+	return publishSiteLinkSeriesAlbums(contentHTML, tagIDFor)
+}
+
+// 正文里链到公众号合集的「XX系列」（如 63149 中途的「茶叶系列」「伴手礼系列」）：网站有同名标签就
+// 把 href 换成标签页，锚文字与其他属性不动；没有同名标签保留合集链（2026-10-08 用户裁定）。
+var publishSiteAlbumAnchorRe = regexp.MustCompile(`(?is)(<a\s(?:[^>]*?\s)?href\s*=\s*")([^"]*mp\.weixin\.qq\.com/mp/appmsgalbum[^"]*)("[^>]*>)(.*?)</a>`)
+
+func publishSiteLinkSeriesAlbums(contentHTML string, tagIDFor func(name string) int64) string {
+	return publishSiteAlbumAnchorRe.ReplaceAllStringFunc(contentHTML, func(anchor string) string {
+		m := publishSiteAlbumAnchorRe.FindStringSubmatch(anchor)
+		name := strings.TrimSpace(publishSiteSeriesTagName(m[4]))
+		if !strings.HasSuffix(name, "系列") {
+			return anchor
+		}
+		tagID := tagIDFor(name)
+		if tagID == 0 {
+			return anchor
+		}
+		href := fmt.Sprintf("%s/news/tag/%d", siteFrontURL(), tagID)
+		return m[1] + escapeHTMLAttr(href) + m[3] + m[4] + "</a>"
+	})
 }
 
 // siteSeriesTagResolver 按系列名查 CMS 新闻标签（tag_type_id=6，规范化等值），同名只查一次。
