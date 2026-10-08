@@ -459,6 +459,7 @@ type foodTalksNewsListItem struct {
 	Title         string `json:"title"`
 	PublishStatus int    `json:"publishStatus"`
 	SourceName    string `json:"sourceName"`
+	PublishTime   string `json:"publishTime"` // YYYY-MM-DD HH:mm:ss，北京时间
 }
 
 // foodTalksNewsDetail 资讯详情（GET /news/admin/news/{id}）。外发只读这篇，

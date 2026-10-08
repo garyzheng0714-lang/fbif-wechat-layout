@@ -95,12 +95,12 @@ func TestRewriteMoteSeriesLinksByWechatTitle(t *testing.T) {
 	p := &publishPipeline{
 		now:       time.Now,
 		foodTalks: func() (foodTalksAPI, error) { return stub, nil },
-		fetchWechatTitle: func(_ context.Context, articleURL string) (string, error) {
+		fetchWechatTitle: func(_ context.Context, articleURL string) (wechatArticleRef, error) {
 			fetched = append(fetched, articleURL)
 			if articleURL == moteSeriesItoenWechat {
-				return "伊藤园把茶卖成了国民饮料", nil
+				return wechatArticleRef{Title: "伊藤园把茶卖成了国民饮料"}, nil
 			}
-			return "", errors.New("未知链接")
+			return wechatArticleRef{}, errors.New("未知链接")
 		},
 	}
 	html := moteSeriesLinkHTML(moteSeriesItoenWechat, "伊藤园") + moteSeriesLinkHTML(moteSeriesItoenWechat, "伊藤园")
@@ -125,22 +125,24 @@ func TestRewriteMoteSeriesLinksKeepsOriginalOnMissOrError(t *testing.T) {
 	p := &publishPipeline{
 		now:       time.Now,
 		foodTalks: func() (foodTalksAPI, error) { return &moteSeriesSearchStub{}, nil },
-		fetchWechatTitle: func(context.Context, string) (string, error) {
-			return "一篇网站上没有的茶文", nil
+		fetchWechatTitle: func(context.Context, string) (wechatArticleRef, error) {
+			return wechatArticleRef{Title: "一篇网站上没有的茶文"}, nil
 		},
 	}
 	if got := p.rewriteMoteSeriesLinks(context.Background(), job, html); got != html {
 		t.Fatalf("站内无稿应保留原链：%s", got)
 	}
 
-	p.fetchWechatTitle = func(context.Context, string) (string, error) {
-		return "", errors.New("微信限流")
+	p.fetchWechatTitle = func(context.Context, string) (wechatArticleRef, error) {
+		return wechatArticleRef{}, errors.New("微信限流")
 	}
 	if got := p.rewriteMoteSeriesLinks(context.Background(), job, html); got != html {
 		t.Fatalf("抓标题失败应保留原链：%s", got)
 	}
 
-	p.fetchWechatTitle = func(context.Context, string) (string, error) { return "限流后的标题", nil }
+	p.fetchWechatTitle = func(context.Context, string) (wechatArticleRef, error) {
+		return wechatArticleRef{Title: "限流后的标题"}, nil
+	}
 	p.foodTalks = func() (foodTalksAPI, error) { return nil, errFoodTalksNotConfigured }
 	if got := p.rewriteMoteSeriesLinks(context.Background(), job, html); got != html {
 		t.Fatalf("CMS 不可用应保留原链：%s", got)
@@ -200,7 +202,7 @@ func TestRewriteMoteSeriesLinksAmbiguousTitleKeepsOriginal(t *testing.T) {
 				{ID: 12, Title: "同题", PublishStatus: foodTalksPublishStatusPublished},
 			}}, nil
 		},
-		fetchWechatTitle: func(context.Context, string) (string, error) { return "同题", nil },
+		fetchWechatTitle: func(context.Context, string) (wechatArticleRef, error) { return wechatArticleRef{Title: "同题"}, nil },
 	}
 	job := publishJob{Author: "Mote莫特", ContentHTML: html}
 	if got := p.rewriteMoteSeriesLinks(context.Background(), job, html); got != html {

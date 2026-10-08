@@ -54,11 +54,11 @@ func TestRepairNewsLinks(t *testing.T) {
 		},
 	}
 	p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil },
-		fetchWechatTitle: func(_ context.Context, u string) (string, error) {
+		fetchWechatTitle: func(_ context.Context, u string) (wechatArticleRef, error) {
 			if strings.Contains(u, "mid=2652931174") {
-				return "新加坡TWG，如何打造出全球最大的奢侈品茶叶连锁？", nil
+				return wechatArticleRef{Title: "新加坡TWG，如何打造出全球最大的奢侈品茶叶连锁？"}, nil
 			}
-			return "站内没有的文章", nil
+			return wechatArticleRef{Title: "站内没有的文章"}, nil
 		}}
 
 	res, err := p.repairNewsLinks(context.Background(), 63149, true)
@@ -109,24 +109,71 @@ func TestFetchWechatTitleTikhub(t *testing.T) {
 		if r.URL.Path != tikhubArticleDetailPath || !strings.Contains(body["url"].(string), "mid=2652931174") || r.Header.Get("Authorization") != "Bearer ak_test" {
 			t.Fatalf("path=%s body=%s auth=%q", r.URL.Path, raw, r.Header.Get("Authorization"))
 		}
-		_, _ = w.Write([]byte(`{"code":200,"data":{"url":"x","content":{"title":"新加坡TWG，如何打造出全球最大的奢侈品茶叶连锁？","nick_name":"FBIF食品饮料创新"}}}`))
+		_, _ = w.Write([]byte(`{"code":200,"data":{"url":"x","content":{"title":"新加坡TWG，如何打造出全球最大的奢侈品茶叶连锁？","nick_name":"FBIF食品饮料创新","create_timestamp":1779496200}}}`))
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("TIKHUB_API_BASE_URL", srv.URL)
 	t.Setenv("TIKHUB_API_KEY", "ak_test")
 	u := "https://mp.weixin.qq.com/s?__biz=MzA3ODEzMjg5Mg==&mid=2652931174&idx=1&sn=e2949c&scene=21#wechat_redirect"
-	title, err := fetchWechatTitleTikhub(context.Background(), u)
-	if err != nil || title != "新加坡TWG，如何打造出全球最大的奢侈品茶叶连锁？" {
-		t.Fatalf("title=%q err=%v", title, err)
+	ref, err := fetchWechatTitleTikhub(context.Background(), u)
+	if err != nil || ref.Title != "新加坡TWG，如何打造出全球最大的奢侈品茶叶连锁？" || ref.PublishedAt.Unix() != 1779496200 {
+		t.Fatalf("ref=%+v err=%v", ref, err)
 	}
 
 	key, err := normalizeSiteSourceKey(u)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wechatTitleCache.Store(key, "缓存里的标题")
+	wechatTitleCache.Store(key, wechatArticleRef{Title: "缓存里的标题"})
 	t.Cleanup(func() { wechatTitleCache.Delete(key) })
-	if got, err := defaultFetchWechatTitle(context.Background(), u); err != nil || got != "缓存里的标题" || calls != 1 {
+	if got, err := defaultFetchWechatTitle(context.Background(), u); err != nil || got.Title != "缓存里的标题" || calls != 1 {
 		t.Fatalf("命中缓存不应再请求：got=%q err=%v calls=%d", got, err, calls)
+	}
+}
+
+// TestPickMoteSeriesNews 真实三种情况：唯一同题直接用（不看日期）；网站重复稿取离公众号发文最近的；
+// 编辑往标题里加了品牌名（Tea Forté）且 7 天内也算；超出 7 天或不知道发文时间就保留公众号链。
+func TestPickMoteSeriesNews(t *testing.T) {
+	at := func(s string) time.Time {
+		v, err := time.ParseInLocation("2006-01-02 15:04:05", s, publishSiteTimeZone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	pub := foodTalksPublishStatusPublished
+	unique := []foodTalksNewsListItem{{ID: 1419, Title: "老文章", PublishStatus: pub, PublishTime: "2021-01-01 08:00:00"}}
+	if got := pickMoteSeriesNews(wechatArticleRef{Title: "老文章", PublishedAt: at("2019-06-01 08:00:00")}, unique, 0); got != 1419 {
+		t.Errorf("唯一同题不看日期：got %d", got)
+	}
+	dups := []foodTalksNewsListItem{
+		{ID: 54237, Title: "FBIF 航海书发布", PublishStatus: pub, PublishTime: "2024-10-25 00:00:00"},
+		{ID: 54254, Title: "FBIF 航海书发布", PublishStatus: pub, PublishTime: "2024-11-05 17:36:39"},
+		{ID: 54252, Title: "FBIF 航海书发布", PublishStatus: pub, PublishTime: "2024-11-05 17:37:28"},
+		{ID: 54242, Title: "FBIF 航海书发布", PublishStatus: foodTalksPublishStatusDraft},
+	}
+	if got := pickMoteSeriesNews(wechatArticleRef{Title: "FBIF 航海书发布", PublishedAt: at("2024-11-05 12:00:00")}, dups, 0); got != 54254 {
+		t.Errorf("重复稿取发布时间最近的一篇：got %d", got)
+	}
+	if got := pickMoteSeriesNews(wechatArticleRef{Title: "FBIF 航海书发布"}, dups, 0); got != 0 {
+		t.Errorf("不知道发文时间时重复稿应放弃：got %d", got)
+	}
+	if got := pickMoteSeriesNews(wechatArticleRef{Title: "FBIF 航海书发布", PublishedAt: at("2025-03-01 12:00:00")}, dups, 0); got != 0 {
+		t.Errorf("重复稿都超出 7 天应放弃：got %d", got)
+	}
+	edited := []foodTalksNewsListItem{{ID: 62231, Title: "把茶包做成金字塔，Tea Forté进入35个国家高端酒店，年收1540万美元", PublishStatus: pub, PublishTime: "2026-05-25 11:30:04"}}
+	ref := wechatArticleRef{Title: "把茶包做成金字塔，进入35个国家高端酒店，年收1540万美元", PublishedAt: time.Unix(1779496200, 0)}
+	if got := pickMoteSeriesNews(ref, edited, 0); got != 62231 {
+		t.Errorf("编辑加了品牌名、7 天内应命中：got %d", got)
+	}
+	ref.PublishedAt = ref.PublishedAt.AddDate(0, -2, 0)
+	if got := pickMoteSeriesNews(ref, edited, 0); got != 0 {
+		t.Errorf("近题但相差两个月不得命中：got %d", got)
+	}
+	if got := pickMoteSeriesNews(wechatArticleRef{Title: "老文章", PublishedAt: at("2021-01-01 08:00:00")}, unique, 1419); got != 0 {
+		t.Errorf("不得链到本稿：got %d", got)
+	}
+	if got := longestTitleClause("把茶包做成金字塔，进入35个国家高端酒店，年收1540万美元"); got != "进入35个国家高端酒店" {
+		t.Errorf("最长分句：got %q", got)
 	}
 }

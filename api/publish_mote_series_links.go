@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const publishMoteSeriesMaxTitleFetches = 20
@@ -189,101 +190,202 @@ func (p *publishPipeline) lookupMoteSeriesNewsIDByTitle(ctx context.Context, job
 		log.Printf("publish: Mote 系列链接标题检索不可用（任务 #%d）：%v", job.ID, err)
 		return 0
 	}
-	title, err := p.wechatArticleTitle(ctx, href)
+	ref, err := p.wechatArticleTitle(ctx, href)
 	if fetches != nil {
 		*fetches++
 	}
-	if err != nil || strings.TrimSpace(title) == "" {
+	title := strings.TrimSpace(ref.Title)
+	if err != nil || title == "" {
 		if err != nil {
 			log.Printf("publish: Mote 系列链接读公众号标题失败（任务 #%d，%s）：%v", job.ID, href, err)
 		}
 		return 0
 	}
-	items, err := ft.SearchNewsByTitle(ctx, title)
-	if err != nil {
-		log.Printf("publish: Mote 系列链接站内搜题失败（任务 #%d，%q）：%v", job.ID, title, err)
-		return 0
+	// 先整题检索（CMS title 参数是包含匹配）；编辑改过标题时整题搜不到，再用最长的一个分句检索。
+	queries := []string{title}
+	if clause := longestTitleClause(title); clause != "" && clause != title && !ref.PublishedAt.IsZero() {
+		queries = append(queries, clause)
 	}
-	want := normalizeSiteTitle(title)
-	var hit int64
-	for _, item := range items {
-		if item.PublishStatus != foodTalksPublishStatusPublished || item.ID <= 0 {
-			continue
-		}
-		if job.FoodTalksNewsID > 0 && item.ID == job.FoodTalksNewsID {
-			continue
-		}
-		if normalizeSiteTitle(item.Title) != want {
-			continue
-		}
-		if hit > 0 && hit != item.ID {
-			log.Printf("publish: Mote 系列链接标题 %q 命中多篇已发布稿，保留原链（任务 #%d）", title, job.ID)
+	for _, q := range queries {
+		items, err := ft.SearchNewsByTitle(ctx, q)
+		if err != nil {
+			log.Printf("publish: Mote 系列链接站内搜题失败（任务 #%d，%q）：%v", job.ID, q, err)
 			return 0
 		}
-		hit = item.ID
+		if hit := pickMoteSeriesNews(ref, items, job.FoodTalksNewsID); hit > 0 {
+			log.Printf("publish: Mote 系列链接按标题 %q → news/%d（任务 #%d）", title, hit, job.ID)
+			return hit
+		}
 	}
-	if hit > 0 {
-		log.Printf("publish: Mote 系列链接按标题 %q → news/%d（任务 #%d）", title, hit, job.ID)
-	}
-	return hit
+	return 0
 }
 
-func (p *publishPipeline) wechatArticleTitle(ctx context.Context, articleURL string) (string, error) {
+const publishMoteSeriesDateWindow = 7 * 24 * time.Hour
+
+var publishSiteTimeZone = time.FixedZone("CST", 8*3600)
+
+// pickMoteSeriesNews 从站内检索结果里挑公众号文章对应的已发布稿（不含本稿）：
+//   - 标题相同且只有一篇：就是它（老文可能很晚才搬上网站，不看日期）；
+//   - 标题相同但有多篇（网站重复稿，如「FBIF 航海书」发了 11 篇）：取发布时间离公众号发文最近、
+//     相差 7 天内的一篇；
+//   - 标题不同但编辑只往里加了字（公众号标题是站内标题的子序列，63149 的 Tea Forté）：同样要求
+//     7 天内，取最近的一篇。
+//
+// 不知道公众号发文时间时只认第一种。
+func pickMoteSeriesNews(ref wechatArticleRef, items []foodTalksNewsListItem, selfID int64) int64 {
+	want := normalizeSiteTitle(ref.Title)
+	var exact []foodTalksNewsListItem
+	var near []foodTalksNewsListItem
+	for _, item := range items {
+		if item.PublishStatus != foodTalksPublishStatusPublished || item.ID <= 0 || item.ID == selfID {
+			continue
+		}
+		got := normalizeSiteTitle(item.Title)
+		switch {
+		case got == want:
+			exact = append(exact, item)
+		case len([]rune(want)) >= 8 && isRuneSubsequence(want, got):
+			near = append(near, item)
+		}
+	}
+	if len(exact) == 1 {
+		return exact[0].ID
+	}
+	if ref.PublishedAt.IsZero() {
+		return 0
+	}
+	if len(exact) == 0 {
+		exact = near
+	}
+	var best int64
+	var bestGap time.Duration
+	for _, item := range exact {
+		at, err := time.ParseInLocation("2006-01-02 15:04:05", strings.TrimSpace(item.PublishTime), publishSiteTimeZone)
+		if err != nil {
+			continue
+		}
+		gap := at.Sub(ref.PublishedAt)
+		if gap < 0 {
+			gap = -gap
+		}
+		if gap > publishMoteSeriesDateWindow {
+			continue
+		}
+		if best == 0 || gap < bestGap || (gap == bestGap && item.ID < best) {
+			best, bestGap = item.ID, gap
+		}
+	}
+	return best
+}
+
+func isRuneSubsequence(short, long string) bool {
+	rest := []rune(long)
+	for _, r := range short {
+		i := 0
+		for i < len(rest) && rest[i] != r {
+			i++
+		}
+		if i == len(rest) {
+			return false
+		}
+		rest = rest[i+1:]
+	}
+	return true
+}
+
+var titleClauseSplitRe = regexp.MustCompile(`[，,：:！!？?｜|；;。 　]+`)
+
+// longestTitleClause 标题按标点拆开后最长的一段（至少 4 个字），整题搜不到时拿它检索。
+func longestTitleClause(title string) string {
+	best := ""
+	for _, part := range titleClauseSplitRe.Split(title, -1) {
+		if len([]rune(part)) > len([]rune(best)) {
+			best = part
+		}
+	}
+	if len([]rune(best)) < 4 {
+		return ""
+	}
+	return best
+}
+
+// wechatArticleRef 公众号文章的标题与发文时间（时间可能为零值：读不到）。
+type wechatArticleRef struct {
+	Title       string
+	PublishedAt time.Time
+}
+
+func (p *publishPipeline) wechatArticleTitle(ctx context.Context, articleURL string) (wechatArticleRef, error) {
 	if p != nil && p.fetchWechatTitle != nil {
 		return p.fetchWechatTitle(ctx, articleURL)
 	}
-	return "", errMoteSeriesTitleFetcherMissing
+	return wechatArticleRef{}, errMoteSeriesTitleFetcherMissing
 }
 
-// wechatTitleCache 公众号文章身份 → 标题。TikHub 按次计费，同一链接进程内只查一次。
+// wechatTitleCache 公众号文章身份 → wechatArticleRef。TikHub 按次计费，同一链接进程内只查一次。
 var wechatTitleCache sync.Map
 
 const tikhubArticleDetailPath = "/api/v1/wechat_mp/v2/fetch_article_detail"
 
+var wechatCreateTimeRe = regexp.MustCompile(`create_time\s*[:=]\s*['"](\d{10})['"]`)
+
 // defaultFetchWechatTitle 先直连公众号页；读不到标题再走 TikHub。Mote 正文里的互推链多是
 // 带 __biz/mid/idx/sn、不带 chksm 的长链，微信对服务器和浏览器都只回验证页（2026-10-08 实测，
 // 63149 的 TWG/玛黑兄弟/Tea Forté 因此一直没换成站内链）；短链和带 chksm 的链直连照常。
-func defaultFetchWechatTitle(ctx context.Context, articleURL string) (string, error) {
+func defaultFetchWechatTitle(ctx context.Context, articleURL string) (wechatArticleRef, error) {
 	key, keyErr := normalizeSiteSourceKey(articleURL)
 	if keyErr == nil {
 		if v, ok := wechatTitleCache.Load(key); ok {
-			return v.(string), nil
+			return v.(wechatArticleRef), nil
 		}
 	}
-	title, err := fetchWechatTitleDirect(ctx, articleURL)
+	ref, err := fetchWechatTitleDirect(ctx, articleURL)
 	if err != nil && tikhubAPIKey() != "" {
-		title, err = fetchWechatTitleTikhub(ctx, articleURL)
+		ref, err = fetchWechatTitleTikhub(ctx, articleURL)
 	}
 	if err == nil && keyErr == nil {
-		wechatTitleCache.Store(key, title)
+		wechatTitleCache.Store(key, ref)
 	}
-	return title, err
+	return ref, err
 }
 
-func fetchWechatTitleDirect(ctx context.Context, articleURL string) (string, error) {
+func fetchWechatTitleDirect(ctx context.Context, articleURL string) (wechatArticleRef, error) {
 	raw, _, err := fetchArticleHTML(ctx, articleURL)
 	if err != nil {
-		return "", err
+		return wechatArticleRef{}, err
 	}
 	title, _ := extractArticleMeta(raw)
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return "", errors.New("公众号页未解析到标题")
+		return wechatArticleRef{}, errors.New("公众号页未解析到标题")
 	}
-	return title, nil
+	ref := wechatArticleRef{Title: title}
+	if m := wechatCreateTimeRe.FindStringSubmatch(raw); m != nil {
+		if sec, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+			ref.PublishedAt = time.Unix(sec, 0)
+		}
+	}
+	return ref, nil
 }
 
-func fetchWechatTitleTikhub(ctx context.Context, articleURL string) (string, error) {
+func fetchWechatTitleTikhub(ctx context.Context, articleURL string) (wechatArticleRef, error) {
 	data, err := tikhubPOST(ctx, tikhubArticleDetailPath, map[string]any{"url": articleURL, "raw": false})
 	if err != nil {
-		return "", fmt.Errorf("TikHub 读公众号标题失败: %w", err)
+		return wechatArticleRef{}, fmt.Errorf("TikHub 读公众号标题失败: %w", err)
 	}
 	m, _ := data.(map[string]any)
-	title := strings.TrimSpace(tikhubString(m["content"], "title"))
+	content, _ := m["content"].(map[string]any)
+	title := strings.TrimSpace(tikhubString(content, "title"))
 	if title == "" {
-		return "", errors.New("TikHub 未返回公众号标题")
+		return wechatArticleRef{}, errors.New("TikHub 未返回公众号标题")
 	}
-	return title, nil
+	ref := wechatArticleRef{Title: title}
+	if sec, ok := content["create_timestamp"].(float64); ok && sec > 0 {
+		ref.PublishedAt = time.Unix(int64(sec), 0)
+	} else if at, err := time.ParseInLocation("2006-01-02 15:04", tikhubString(content, "create_time"), publishSiteTimeZone); err == nil {
+		ref.PublishedAt = at
+	}
+	return ref, nil
 }
 
 var errMoteSeriesTitleFetcherMissing = errors.New("未配置公众号标题抓取，跳过系列链接标题回退")

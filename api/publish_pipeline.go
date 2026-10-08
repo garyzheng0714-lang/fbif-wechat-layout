@@ -178,9 +178,9 @@ type publishPipeline struct {
 
 	// fetch 公众号 URL → publishFetchedArticle（默认复用 fetchDirectBlocksWithOptions）。
 	fetch func(ctx context.Context, articleURL string) (publishFetchedArticle, error)
-	// fetchWechatTitle 只取公众号文章标题（Mote 系列链改站内用）。生产装配走轻量
-	// HTML 抓取；测试注入，避免组装层打到真实微信。
-	fetchWechatTitle func(ctx context.Context, articleURL string) (string, error)
+	// fetchWechatTitle 只取公众号文章标题与发文时间（Mote 系列链改站内用）。生产装配走
+	// 轻量 HTML 抓取、读不到再走 TikHub；测试注入，避免组装层打到真实微信。
+	fetchWechatTitle func(ctx context.Context, articleURL string) (wechatArticleRef, error)
 	// render Block[] → 选定网站规则包内联 HTML（默认走 render_proxy 转发内核）。
 	// 规则由渲染服务在每次请求内读取最新激活版本，调用方只传文章语义。
 	render func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error)
