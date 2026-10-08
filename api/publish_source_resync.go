@@ -547,17 +547,14 @@ func foodTalksDetailCategoryIDs(categories []foodTalksNewsCategoryDetail) (int64
 	return primary, ids
 }
 
+// foodTalksDetailNewsRelationIDs 只取 relatedNewsId。旧版读错字段名后回落到 newsId，
+// 写回时把相关文章全改成了本稿自己（2026-10-08 43083）；自引用一律丢弃。
 func foodTalksDetailNewsRelationIDs(items []foodTalksNewsRelationDetail) []int64 {
 	ids := make([]int64, 0, len(items))
 	for _, item := range items {
-		id := item.RelationNewsID
-		if id == 0 {
-			id = item.NewsID
+		if item.RelatedNewsID > 0 && item.RelatedNewsID != item.NewsID {
+			ids = append(ids, item.RelatedNewsID)
 		}
-		if id == 0 {
-			id = item.ID
-		}
-		ids = append(ids, id)
 	}
 	return ids
 }

@@ -161,7 +161,7 @@ func TestSourceResyncPreservesCurrentCMSMetadata(t *testing.T) {
 			ChildCategories: []foodTalksNewsCategoryDetail{{IsPrimary: 1, CategoryTagID: 76}},
 		}},
 		NewsTags:           []foodTalksNewsTag{{TagID: 114000, TagName: "茶叶系列"}},
-		NewsRelation:       []foodTalksNewsRelationDetail{{RelationNewsID: 20}},
+		NewsRelation:       []foodTalksNewsRelationDetail{{RelatedNewsID: 20}},
 		TopicSectionIDList: []int64{11},
 		RelatedCompanies:   []foodTalksRelatedCompanyDetail{{CompanyID: 30}},
 		RelatedFoodpedias:  []foodTalksRelatedFoodpedia{{FoodpediaID: 40}},
@@ -240,7 +240,7 @@ func foodTalksDetailFromExpected(id int64, news foodTalksNews) foodTalksNewsDeta
 	}
 	relations := make([]foodTalksNewsRelationDetail, 0, len(news.NewsRelationIDs))
 	for _, relationID := range news.NewsRelationIDs {
-		relations = append(relations, foodTalksNewsRelationDetail{RelationNewsID: relationID})
+		relations = append(relations, foodTalksNewsRelationDetail{RelatedNewsID: relationID})
 	}
 	return foodTalksNewsDetail{
 		ID: id, Title: news.Title, Language: news.Language, CoverImg: news.CoverImg,
@@ -253,5 +253,22 @@ func foodTalksDetailFromExpected(id int64, news foodTalksNews) foodTalksNewsDeta
 		ImgPreviewEnable: news.ImgPreviewEnable, CommentEnable: news.CommentEnable,
 		SEOTitle: news.SEOTitle, SEOKeywords: news.SEOKeywords, SEODescription: news.SEODescription,
 		PublishTime: news.PublishTime,
+	}
+}
+
+// TestFoodTalksNewsRelationIDsUsesRelatedNewsID 生产详情的相关文章用 relatedNewsId；读错字段会
+// 回落成本稿 id，把 43083 的三篇相关文章写成了自己（2026-10-08）。
+func TestFoodTalksNewsRelationIDsUsesRelatedNewsID(t *testing.T) {
+	var live foodTalksNewsDetail
+	raw := `{"id":43083,"newsRelation":[
+		{"id":329654,"newsId":43083,"relatedNewsId":43102,"title":"a"},
+		{"id":329655,"newsId":43083,"relatedNewsId":42674,"title":"b"},
+		{"id":485897,"newsId":43083,"relatedNewsId":43083,"title":"self"}]}`
+	if err := json.Unmarshal([]byte(raw), &live); err != nil {
+		t.Fatal(err)
+	}
+	got := foodTalksDetailNewsRelationIDs(live.NewsRelation)
+	if len(got) != 2 || got[0] != 43102 || got[1] != 42674 {
+		t.Fatalf("应只保留真实相关文章 id、丢弃自引用：%v", got)
 	}
 }

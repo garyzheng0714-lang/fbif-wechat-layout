@@ -499,10 +499,12 @@ type foodTalksNewsCategoryDetail struct {
 	ChildCategories []foodTalksNewsCategoryDetail `json:"childCategories"`
 }
 
+// foodTalksNewsRelationDetail 相关文章一行。2026-10-08 生产实测：关联文章 id 字段是
+// relatedNewsId；id 是关联记录自身 id，newsId 是本稿 id，二者都不是关联文章。
 type foodTalksNewsRelationDetail struct {
-	ID             int64 `json:"id"`
-	NewsID         int64 `json:"newsId"`
-	RelationNewsID int64 `json:"relationNewsId"`
+	ID            int64 `json:"id"`
+	NewsID        int64 `json:"newsId"`
+	RelatedNewsID int64 `json:"relatedNewsId"`
 }
 
 type foodTalksRelatedCompanyDetail struct {
