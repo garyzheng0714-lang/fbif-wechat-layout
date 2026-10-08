@@ -655,6 +655,8 @@ func TestPublishSiteLinkSeriesTagsRealForms(t *testing.T) {
 		{`<p>本文为“北海道伴手礼系列”的第一篇，之后我们将分享白色恋人。</p>`, `<p>本文为“` + link("北海道伴手礼系列") + `”的第一篇，之后我们将分享白色恋人。</p>`},
 		{`<p>这是茶叶系列第7篇。前6篇写了立顿。</p>`, `<p>这是` + link("茶叶系列") + `第7篇。前6篇写了立顿。</p>`},
 		{`<p style="text-align: justify;">这是我` + album + `的第38篇。</p>`, `<p style="text-align: justify;">这是我` + link("茶叶系列") + `的第38篇。</p>`},
+		{`<p>这是我&ldquo;<strong>男人味</strong>&rdquo;系列的第2篇。</p>`, `<p>这是我<a href="https://www.foodtalks.cn/news/tag/114013" target="_blank" rel="noopener">&ldquo;<strong>男人味</strong>&rdquo;系列</a>的第2篇。</p>`},
+		{`<p>这是我&ldquo;茶叶系列&rdquo;的第3篇。</p>`, `<p>这是我&ldquo;` + link("茶叶系列") + `&rdquo;的第3篇。</p>`},
 		{`<p>这是我“男人味”系列的第2篇。第1篇写的男前豆腐。</p>`, `<p>这是我<a href="https://www.foodtalks.cn/news/tag/114013" target="_blank" rel="noopener">“男人味”系列</a>的第2篇。第1篇写的男前豆腐。</p>`},
 	}
 	for _, c := range linked {

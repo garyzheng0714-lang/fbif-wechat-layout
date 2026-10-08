@@ -234,10 +234,17 @@ func isSeriesNameRune(r rune) bool {
 // 系列声明段：段首「这是我 / 这篇是 / 本文为 … XX系列（的）第 N 篇」，后面可接其他话。
 // 开头和文末的声明都算（63149，2026-10-08）；正文句子中途提到的「XX系列第N篇」不算。
 // 系列名三种写法：已链到公众号合集或旧链接（组 1 整个 <a>、组 2 其中的名字）、纯文本（组 3）、
-// 引号只包住前半截的「“男人味”系列」（组 4，查标签时去掉引号）。
-var publishSiteSeriesDeclarationRe = regexp.MustCompile(`(?is)<p\b[^>]*>\s*(?:这篇[，,]?是|这是|本文为|本文是)我?的?[“「"]?(?:(<a\b[^>]*>\s*([\p{Han}A-Za-z0-9·]{1,10}系列)\s*</a>)|([\p{Han}A-Za-z0-9·]{1,10}系列)|([“「"][\p{Han}A-Za-z0-9·]{1,10}[”」"]系列))[”」"]?的?第\s*[0-9零〇一二三四五六七八九十百千两]+\s*篇`)
+// 引号只包住前半截的「“男人味”系列」（组 4；CMS 编辑器会存成 &ldquo;<strong>男人味</strong>&rdquo;系列，
+// 查标签时去掉加粗、实体和引号，61948）。
+var publishSiteSeriesDeclarationRe = regexp.MustCompile(`(?is)<p\b[^>]*>\s*(?:这篇[，,]?是|这是|本文为|本文是)我?的?(?:[“「"]|&ldquo;)?(?:(<a\b[^>]*>\s*([\p{Han}A-Za-z0-9·]{1,10}系列)\s*</a>)|([\p{Han}A-Za-z0-9·]{1,10}系列)|((?:[“「"]|&ldquo;)(?:<(?:strong|b)>)?[\p{Han}A-Za-z0-9·]{1,10}(?:</(?:strong|b)>)?(?:[”」"]|&rdquo;)系列))(?:[”」"]|&rdquo;)?的?第\s*[0-9零〇一二三四五六七八九十百千两]+\s*篇`)
 
-var publishSiteSeriesQuoteStripper = strings.NewReplacer("“", "", "”", "", "「", "", "」", "", `"`, "")
+// publishSiteSeriesTagName 由声明里的系列名 HTML 得到查标签用的名字：去掉加粗标签、实体和引号。
+func publishSiteSeriesTagName(nameHTML string) string {
+	plain := html.UnescapeString(publishSiteSeriesInlineTagRe.ReplaceAllString(nameHTML, ""))
+	return strings.NewReplacer("“", "", "”", "", "「", "", "」", "", `"`, "").Replace(plain)
+}
+
+var publishSiteSeriesInlineTagRe = regexp.MustCompile(`</?(?:strong|b)>`)
 
 // publishSiteLinkSeriesTags 把每个系列声明段里的系列名链到同名 FoodTalks 标签页。
 // tagIDFor 返回 0（标签库没有）时不加链、不创建；已链到同一标签的保持原样。
@@ -256,7 +263,7 @@ func publishSiteLinkSeriesTags(contentHTML string, tagIDFor func(name string) in
 		if text == "" {
 			text = contentHTML[start:end]
 		}
-		tagID := tagIDFor(publishSiteSeriesQuoteStripper.Replace(text))
+		tagID := tagIDFor(publishSiteSeriesTagName(text))
 		if tagID == 0 {
 			continue
 		}
