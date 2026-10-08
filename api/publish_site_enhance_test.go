@@ -713,6 +713,14 @@ func TestSiteSeriesTags(t *testing.T) {
 	if got := newSiteSeriesTags(ctx, stub, own, false).id("北海道伴手礼系列", true); got != 114091 {
 		t.Errorf("本文已挂的系列标签：got %d", got)
 	}
+	// 63149：本文挂着「茶叶系列」，合集链接「伴手礼系列」不得套用本文标签
+	teaOwn := []foodTalksNewsTag{{TagID: 99913, TagName: "Mote莫特"}, {TagID: 114000, TagName: "茶叶系列"}}
+	if got := newSiteSeriesTags(ctx, stub, teaOwn, false).id("伴手礼系列", false); got != 114091 {
+		t.Errorf("合集链接按以系列名结尾的唯一标签找，不套本文标签：got %d", got)
+	}
+	if got := newSiteSeriesTags(ctx, stub, teaOwn, false).id("西点系列", false); got != 0 {
+		t.Errorf("合集链接找不到时不得套本文的茶叶系列：got %d", got)
+	}
 	if got := s.id("咖啡系列", true); got != 0 || len(stub.created) != 0 {
 		t.Errorf("不允许新建时不建：got %d created %v", got, stub.created)
 	}

@@ -305,8 +305,8 @@ func publishSiteLinkSeriesAlbums(contentHTML string, tagIDFor func(name string, 
 
 // siteSeriesTags 系列名 → CMS 新闻标签（2026-10-08 用户裁定：以后出新系列不靠人判断）。依次找：
 //  1. 同名标签；
-//  2. 本文已挂的唯一「…系列」标签——编辑起名常和文中写法不同（61483 文中「北海道伴手礼系列」，
-//     实挂「日本伴手礼系列」）；
+//  2. 仅段首声明：本文已挂的唯一「…系列」标签——编辑起名常和文中写法不同（61483 文中「北海道伴手礼
+//     系列」，实挂「日本伴手礼系列」）；
 //  3. 名字以该系列名结尾的唯一标签（63149 的「伴手礼系列」→「日本伴手礼系列」）；
 //  4. 都没有、且名字来自段首声明、且允许新建（Mote 文发布组装）时，按声明名新建——新系列第 1 篇
 //     建好，后面各篇按同名找到同一个标签。查询出错不新建，免得建出重名标签。
@@ -336,7 +336,8 @@ func (s *siteSeriesTags) id(name string, declared bool) int64 {
 		return 0
 	}
 	id, tagName := matchFoodTalksSourceID(tags, name), name
-	if id == 0 {
+	if id == 0 && declared {
+		// 只有段首声明说的是本文自己的系列；合集链接指向的是别的系列（63149 的「伴手礼系列」），不能套本文标签。
 		id, tagName = uniqueSeriesTag(s.own, func(n string) bool { return strings.HasSuffix(n, "系列") })
 	}
 	if id == 0 {
