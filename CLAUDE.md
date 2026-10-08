@@ -80,7 +80,7 @@
 - 38：`foodtalks-site-behavior`、`api/{wechat_trailer,yunsuo,publish_trailer_repair}_test.go`；39：`tests/image-width.test.mjs`、`api/publish_site_enhance_test.go`。
 - 40：`tests/{foodtalks-site-docx,foodtalks-site-behavior,heading-detect,site-interview}.test.mjs`、`api/publish_site_enhance_test.go`（declared-source/provenance/render-source 用例）、`api/wechat_blocks_test.go`（meta 三值）、`api/publish_original_url.go`、`api/publish_tikhub_worklist.go`。
 - 41：`api/publish_company_links_test.go`、`api/company_match_smoke_test.go`（2026-08-17 生产检索快照）。
-- 42：`api/publish_mote_series_links_test.go`。
+- 42：`api/publish_mote_series_links_test.go`；39/42 存量修复与 TikHub 取标题：`api/publish_series_tag_repair_test.go`。
 
 ## 运行/规则卫生
 

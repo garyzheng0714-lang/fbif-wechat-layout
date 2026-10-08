@@ -51,7 +51,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **受控发布流水线**：提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`。默认只有飞书卡片或管理员审核的 `approve` 能翻公开；管理后台「发布链路」打开自动发布后，新同步且风险为 `pass|warning` 的稿会由系统持久化 approve 后直接上线，群卡和下线按钮仍保留。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
 - **上游只交链接**：`site-sync` 与 `official-sync` 只接收链接、规则包和分类证据；正文、标题、来源、作者或封面一旦出现就显式 400。详细字段、状态码与幂等见 [发布接入契约](docs/publish-intake-contract.md)。
 - **审核卡与风险分层**：待审、已发布、已驳回、异常卡都保留封面、标题、标签、摘要和预览/原文入口。只有显式 `confirmed` 的实质性问题进首屏，其余待核提示收进完整报告；审核群只发卡片。`card-refresh` 可原位重建历史卡；任务已经使用 `ReviewCardMsgIDs` 多群映射时，切群后新群没有自己的 message id 就发新卡。只带 legacy `ReviewCardMsgID` 的旧任务仍可能回退更新旧群，是待修兼容风险。
-- **FoodTalks 内容组装**：原创与转载分别走独立分类配置；所有文章的 AI 标签都在 `tag_type_id=6` 中按规范化名称等值解析，Mote 文章再优先加 Mote/系列标签，最多 3 个且不自动建标签。进 FoodTalks 和云梭的正文都切除微信导流尾；Mote/原创且 h2>5 时在发布组装层写确定性目录。
+- **FoodTalks 内容组装**：原创与转载分别走独立分类配置；所有文章的 AI 标签都在 `tag_type_id=6` 中按规范化名称等值解析、从不新建；Mote 文章再优先加 Mote/系列标签，最多 3 个，只有 Mote 新系列（段首「这是我XX系列的第N篇」）会自动建系列标签。系列声明段与链到公众号合集的「XX系列」链到系列标签页；Mote 正文里的公众号文章链换成站内已发布稿，找不到才留公众号链。进 FoodTalks 和云梭的正文都切除微信导流尾；正文非空白字符 ≥3000 且 h2+h3 ≥5 时在发布组装层写确定性目录。
 - **外部分发是正交子状态机**：FoodTalks 继续接收原创与转载；只有已审核、已在 FoodTalks 公开且确认为自有原创的任务，才能由卡片确认后经云梭分发。未拿到 `content_pk` 的不确定结果只进人工对账，不盲重发。
 - **手工发布优先且同题防重**：运营在 CMS 手工发布/编辑的稿件不用流水线库存覆盖。待审卡会 best effort 标红同题已发布稿；首次审核公开的 `stagePublicize` 在写入公开意图前再硬检，命中或 CMS 查询失败都 fail closed。
 - **环境状态不写死在文档**：代码同时支持 `test|production`，当前生产实例实际指向必须现场核验 `/api/publish/readiness` 与对应 URL，不从 README 或旧日志推断。
@@ -78,7 +78,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - URL 导入会识别文章级 `来源 / 出处 / 出品`、`作者 / 撰文 / 撰稿 / 文`、`编辑 / 责编`，分隔符支持 `：`、`:`、`/`、`|`、`｜`。转载稿把这些信息移到正文开头，原创稿仍放在正文末尾、标准 FBIF `提示：` 页脚前；两者都只渲染一次，来源、作者、编辑依次独立成行（有值才显示）。正文有显式来源时优先使用；没有时以微信抓取结构里的 `source_name`（公众号名称）补 `来源：`，不会把结构化 `byline` 擅自补成作者。署名行使用公众号蓝色、`1.75` 行高和正常字形，不斜体，连续署名行之间不额外空行。
 - 正文最后一段（包括参考来源末行）与标准 FBIF `提示：` 页脚之间保留标准段落间距，避免正文尾部贴住页脚。
 - 默认行为规则下，作者为 `Mote莫特` 或 `Mote 莫特` 时，会在“参考来源”上方自动插入固定署名图片；后台 `代码化规则` 可调整作者/来源/页脚文案和这类受限插图动作。
-- 支持内部内容发布任务：同一来源 URL 幂等建单，任务失败可从失败阶段续跑；AI 只预填封面、摘要、标签、作者和优化说明，不允许修改正文 HTML。
+- 支持内部内容发布任务：同一来源 URL 幂等建单，任务失败可从失败阶段续跑；封面、摘要优先用公众号原封面和原摘要（`msg_desc`），AI 只在原文缺值时兜底并预填标签、作者和优化说明，不允许修改正文 HTML。
 
 ## 技术栈
 
@@ -250,6 +250,8 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/cms-resync` | 按北京日期补写已公开稿的 `isLatest` 与来源 ID；不改本地状态机 |
 | `POST` | `/api/publish/jobs/{id}/repair-wechat-trailer` | 对单篇已公开稿按当前规则切除微信导流尾并覆盖 FoodTalks，不重开审核 |
 | `POST` | `/api/publish/repair-wechat-trailer` | 扫描并修复流水线可安全覆盖的已公开泄漏稿；CMS 人工稿优先 |
+| `POST` | `/api/publish/jobs/{id}/sync-wechat-meta` | 已公开稿的封面/摘要与公众号对齐，只替换没人手改过的字段 |
+| `POST` | `/api/publish/news/{id}/repair-links` | 按资讯 id 补链接（流水线稿与编辑手工稿都行）：系列声明/合集链→系列标签页，Mote 公众号文章链→站内稿；只链已有标签，`?dry_run=1` 只报告 |
 | `POST` | `/api/publish/jobs/{id}/retry-external-distribution` | 管理员确认旧云梭稿作废后，才以冻结 payload 重建分发意图 |
 | `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
@@ -277,7 +279,7 @@ curl http://127.0.0.1:9000/api/health
 | `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
 | `PUBLISH_SYNC_SERVICE_TOKEN` | `FoodTalks_Feed` 与 `fbif-wechat-article` 调用发布提交、紧凑状态和监控端点的独立服务令牌；不能访问完整任务、审核、重试、对账或规则管理接口 |
 | `FOODTALKS_FEED_BASE_URL` | 向 Feed 查转载原文；缺省 `https://feed.foodtalks.cn`；鉴权共用上面的同步令牌 |
-| `TIKHUB_API_KEY` / `TIKHUB_API_BASE_URL` | 可选。Feed 未订该公众号、自家号转发又没填「阅读原文」时，用 TikHub 广域搜（搜一搜）按标题+出处补微信链接；国内默认 `https://api.tikhub.dev`。失败只降级 |
+| `TIKHUB_API_KEY` / `TIKHUB_API_BASE_URL` | 可选，按次计费（0.01$/次）。Feed 未订该公众号、自家号转发又没填「阅读原文」时，用 TikHub 广域搜（搜一搜）按标题+出处补微信链接；Mote 正文的公众号长链微信只回验证页时，用文章详情接口取标题与发文时间，换成站内稿；国内默认 `https://api.tikhub.dev`。失败只降级 |
 | `REDFOX_API_KEY` / `REDFOX_API_BASE_URL` | 旧红狐兼容键；本服务不再读取，只为旧 `publish.env` 过渡保留 |
 | `PUBLISH_HTTP_REVIEW_ENABLED` / `PUBLISH_HTTP_REVIEWER_OPEN_ID` | HTTP 审核应保持默认关闭；仅应急启用时，固定审核人仍必须命中 `FEISHU_REVIEWER_OPEN_IDS` |
 | `FEISHU_REVIEWER_ALLOW_CHAT_MEMBERS` | 群成员审核模式（2026-08-06 用户裁定）：开启后，来自 `FEISHU_REVIEW_CHAT_ID` 审核群内的卡片操作即有审核权限（依据：只有群成员能点到群消息里的按钮，事件 `open_chat_id` 由飞书服务端注入）；卡片被转发到其他会话后群 id 不同，一律拒绝。白名单继续兼容 |
@@ -337,7 +339,7 @@ go test ./...
 1. 使用已修复已知标准库漏洞的 Go 1.26.6 构建 `api/fbif-api`，并写入 `public/version.json`。
 2. 把 `public/`、API、render service、Caddy、systemd 单元、env schema 与候选 env 同步进隔离 release；候选 API env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
 3. 在任何 live 切换前验证三类 env、Caddy、systemd 单元和当前服务；然后事务式切换 API、renderer、静态资源、单元、Caddy 与配置 schema。
-4. 验证公网 commit SHA、健康、鉴权和 `/api/publish/readiness`；readiness 同时锁定配置版本、两个生成注册表哈希、JSON store、独立服务令牌、HTTP 审核关闭、可用审核权限来源、FoodTalks 目标、分类、渲染、飞书与双模型配置。
+4. 验证公网 commit SHA、健康、鉴权和 `/api/publish/readiness`；readiness 同时锁定配置版本、两个生成注册表哈希、JSON store、独立服务令牌、HTTP 审核关闭、可用审核权限来源、FoodTalks 目标、分类、渲染、飞书与 MiMo 配置（`enrich_mode=mimo`）。
 5. 写暂停窗口内执行 `prepare-monitoring`：幂等摘除历史 `fbif-monitor-watchdog` 与审核群 08:30 监控播报单元，不安装、启用或验收外检 timer。任何可回滚验收失败都恢复上一 release，但回滚也不恢复这两类已退役单元。
 6. 验收后先关闭自动回滚，再解除 worker 暂停。此时外部副作用可能恢复，失败只允许向前修复；跨系统外检由 `FoodTalks_Feed` 的 `fbif-link-watchdog` 负责。
 7. `finalize` 将已验收产物保留到 `/var/www/.fbif-layout-history/<deploy-id>/`，最多 5 份；快照包含 API、renderer、public、Caddy、systemd 和 env schema，明确不含 `.env`、`publish.env` 或 `render-service.env`。快照成功后才删除短期事务备份。
