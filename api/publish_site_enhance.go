@@ -246,9 +246,10 @@ func publishSiteSeriesTagName(nameHTML string) string {
 
 var publishSiteSeriesInlineTagRe = regexp.MustCompile(`</?(?:strong|b)>`)
 
-// publishSiteLinkSeriesTags 把每个系列声明段里的系列名链到同名 FoodTalks 标签页。
-// tagIDFor 返回 0（标签库没有）时不加链、不创建；已链到同一标签的保持原样。
-func publishSiteLinkSeriesTags(contentHTML string, tagIDFor func(name string) int64) string {
+// publishSiteLinkSeriesTags 把每个系列声明段里的系列名、以及链到公众号合集的「XX系列」链到系列标签页。
+// tagIDFor(name, declared) 返回 0 时不加链；declared 表示名字来自段首声明（只有它允许新建标签）。
+// 已链到同一标签的保持原样。
+func publishSiteLinkSeriesTags(contentHTML string, tagIDFor func(name string, declared bool) int64) string {
 	var b strings.Builder
 	last := 0
 	for _, m := range publishSiteSeriesDeclarationRe.FindAllStringSubmatchIndex(contentHTML, -1) {
@@ -263,7 +264,7 @@ func publishSiteLinkSeriesTags(contentHTML string, tagIDFor func(name string) in
 		if text == "" {
 			text = contentHTML[start:end]
 		}
-		tagID := tagIDFor(publishSiteSeriesTagName(text))
+		tagID := tagIDFor(publishSiteSeriesTagName(text), true)
 		if tagID == 0 {
 			continue
 		}
@@ -286,14 +287,14 @@ func publishSiteLinkSeriesTags(contentHTML string, tagIDFor func(name string) in
 // 把 href 换成标签页，锚文字与其他属性不动；没有同名标签保留合集链（2026-10-08 用户裁定）。
 var publishSiteAlbumAnchorRe = regexp.MustCompile(`(?is)(<a\s(?:[^>]*?\s)?href\s*=\s*")([^"]*mp\.weixin\.qq\.com/mp/appmsgalbum[^"]*)("[^>]*>)(.*?)</a>`)
 
-func publishSiteLinkSeriesAlbums(contentHTML string, tagIDFor func(name string) int64) string {
+func publishSiteLinkSeriesAlbums(contentHTML string, tagIDFor func(name string, declared bool) int64) string {
 	return publishSiteAlbumAnchorRe.ReplaceAllStringFunc(contentHTML, func(anchor string) string {
 		m := publishSiteAlbumAnchorRe.FindStringSubmatch(anchor)
 		name := strings.TrimSpace(publishSiteSeriesTagName(m[4]))
 		if !strings.HasSuffix(name, "系列") {
 			return anchor
 		}
-		tagID := tagIDFor(name)
+		tagID := tagIDFor(name, false)
 		if tagID == 0 {
 			return anchor
 		}
@@ -302,23 +303,112 @@ func publishSiteLinkSeriesAlbums(contentHTML string, tagIDFor func(name string) 
 	})
 }
 
-// siteSeriesTagResolver 按系列名查 CMS 新闻标签（tag_type_id=6，规范化等值），同名只查一次。
-// 查询失败或没有同名标签都返回 0。
-func siteSeriesTagResolver(ctx context.Context, ft foodTalksAPI) func(string) int64 {
-	cache := map[string]int64{}
-	return func(name string) int64 {
-		if id, ok := cache[name]; ok {
-			return id
-		}
-		var id int64
-		if tags, err := ft.ListTagsByType(ctx, foodTalksTagTypeNews, name); err != nil {
-			log.Printf("publish: 查询系列标签 %q 失败：%v", name, err)
-		} else {
-			id = matchFoodTalksSourceID(tags, name)
-		}
-		cache[name] = id
+// siteSeriesTags 系列名 → CMS 新闻标签（2026-10-08 用户裁定：以后出新系列不靠人判断）。依次找：
+//  1. 同名标签；
+//  2. 本文已挂的唯一「…系列」标签——编辑起名常和文中写法不同（61483 文中「北海道伴手礼系列」，
+//     实挂「日本伴手礼系列」）；
+//  3. 名字以该系列名结尾的唯一标签（63149 的「伴手礼系列」→「日本伴手礼系列」）；
+//  4. 都没有、且名字来自段首声明、且允许新建（Mote 文发布组装）时，按声明名新建——新系列第 1 篇
+//     建好，后面各篇按同名找到同一个标签。查询出错不新建，免得建出重名标签。
+//
+// used 记下本稿用到的系列标签，发布组装把它们挂到文章标签上。
+type siteSeriesTags struct {
+	ctx    context.Context
+	ft     foodTalksAPI
+	own    []foodTalksNewsTag
+	create bool
+	cache  map[string]int64
+	used   []foodTalksNewsTag
+}
+
+func newSiteSeriesTags(ctx context.Context, ft foodTalksAPI, own []foodTalksNewsTag, create bool) *siteSeriesTags {
+	return &siteSeriesTags{ctx: ctx, ft: ft, own: own, create: create, cache: map[string]int64{}}
+}
+
+func (s *siteSeriesTags) id(name string, declared bool) int64 {
+	want := normalizeFoodTalksSourceName(name)
+	if id := s.cache[want]; id > 0 {
 		return id
 	}
+	tags, err := s.ft.ListTagsByType(s.ctx, foodTalksTagTypeNews, name)
+	if err != nil {
+		log.Printf("publish: 查询系列标签 %q 失败：%v", name, err)
+		return 0
+	}
+	id, tagName := matchFoodTalksSourceID(tags, name), name
+	if id == 0 {
+		id, tagName = uniqueSeriesTag(s.own, func(n string) bool { return strings.HasSuffix(n, "系列") })
+	}
+	if id == 0 {
+		var candidates []foodTalksNewsTag
+		for _, t := range tags {
+			candidates = append(candidates, foodTalksNewsTag{TagID: t.ID, TagName: t.Name})
+		}
+		id, tagName = uniqueSeriesTag(candidates, func(n string) bool { return strings.HasSuffix(n, want) })
+	}
+	if id == 0 && declared && s.create {
+		created, err := s.ft.CreateTagByName(s.ctx, foodTalksTagTypeNews, name)
+		if err != nil {
+			log.Printf("publish: 新建系列标签 %q 失败：%v", name, err)
+			return 0
+		}
+		log.Printf("publish: 新系列 %q 已建标签 id=%d", name, created)
+		id, tagName = created, name
+	}
+	if id <= 0 {
+		return 0
+	}
+	s.cache[want] = id
+	for _, t := range s.used {
+		if t.TagID == id {
+			return id
+		}
+	}
+	s.used = append(s.used, foodTalksNewsTag{TagID: id, TagName: tagName})
+	return id
+}
+
+// uniqueSeriesTag 返回唯一满足条件（按规范化名判断）的标签；零个或多个都返回 0。
+func uniqueSeriesTag(tags []foodTalksNewsTag, ok func(normalizedName string) bool) (int64, string) {
+	var hit foodTalksNewsTag
+	for _, t := range tags {
+		if t.TagID <= 0 || !ok(normalizeFoodTalksSourceName(t.TagName)) || t.TagID == hit.TagID {
+			continue
+		}
+		if hit.TagID > 0 {
+			return 0, ""
+		}
+		hit = t
+	}
+	return hit.TagID, hit.TagName
+}
+
+// publishSiteMergeSeriesTags 把本稿用到的系列标签补进文章标签：紧跟 Mote 标签之后，总数仍最多 3 个
+// （Mote/系列优先，超出的 AI 标签让位）。
+func publishSiteMergeSeriesTags(tags, series []foodTalksNewsTag) []foodTalksNewsTag {
+	have := map[int64]bool{}
+	for _, t := range tags {
+		have[t.TagID] = true
+	}
+	var add []foodTalksNewsTag
+	for _, t := range series {
+		if !have[t.TagID] {
+			have[t.TagID] = true
+			add = append(add, t)
+		}
+	}
+	if len(add) == 0 {
+		return tags
+	}
+	at := 0
+	if len(tags) > 0 && tags[0].TagName == publishSiteMoteTagName {
+		at = 1
+	}
+	out := append(append(append([]foodTalksNewsTag{}, tags[:at]...), add...), tags[at:]...)
+	if len(out) > publishSiteMaxNewsTags {
+		out = out[:publishSiteMaxNewsTags]
+	}
+	return out
 }
 
 // ---- 新闻标签解析（tag_type_id=6，只解析不创建） ----

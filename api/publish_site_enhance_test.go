@@ -642,7 +642,7 @@ func TestBuildSiteNewsInjectsTocForOriginalLongArticle(t *testing.T) {
 func TestPublishSiteLinkSeriesTagsRealForms(t *testing.T) {
 	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
 	ids := map[string]int64{"茶叶系列": 114000, "豆腐系列": 114002, "北海道伴手礼系列": 114003, "男人味系列": 114013}
-	resolve := func(name string) int64 { return ids[name] }
+	resolve := func(name string, _ bool) int64 { return ids[name] }
 	link := func(name string) string {
 		return fmt.Sprintf(`<a href="https://www.foodtalks.cn/news/tag/%d" target="_blank" rel="noopener">%s</a>`, ids[name], name)
 	}
@@ -683,11 +683,109 @@ func TestPublishSiteLinkSeriesTagsRealForms(t *testing.T) {
 // 标签页；「伴手礼系列」没有同名标签、「全球茶叶品牌」不是系列名，都保留合集链。
 func TestPublishSiteLinkSeriesAlbums(t *testing.T) {
 	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
-	resolve := func(name string) int64 { return map[string]int64{"茶叶系列": 114000}[name] }
+	resolve := func(name string, _ bool) int64 { return map[string]int64{"茶叶系列": 114000}[name] }
 	album := `https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzA3ODEzMjg5Mg==&amp;action=getalbum&amp;album_id=4500314305401487362#wechat_redirect`
 	in := `<p>我写<a href="` + album + `" target="_blank" rel="noopener">茶叶系列</a>时，也写过<a href="` + album + `">伴手礼系列</a>和<a href="` + album + `">全球茶叶品牌</a>。</p>`
 	want := `<p>我写<a href="https://www.foodtalks.cn/news/tag/114000" target="_blank" rel="noopener">茶叶系列</a>时，也写过<a href="` + album + `">伴手礼系列</a>和<a href="` + album + `">全球茶叶品牌</a>。</p>`
 	if got := publishSiteLinkSeriesTags(in, resolve); got != want {
 		t.Fatalf("\n got %s\nwant %s", got, want)
 	}
+}
+
+// TestSiteSeriesTags 找系列标签的四步（2026-10-08 真实情况）：同名；本文已挂的唯一「…系列」标签
+// （61483 文中「北海道伴手礼系列」实挂「日本伴手礼系列」）；以系列名结尾的唯一标签（63149「伴手礼系列」）；
+// Mote 文段首声明的新系列按声明名新建。正文提到/合集锚文字不新建，查询出错不新建。
+func TestSiteSeriesTags(t *testing.T) {
+	stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{
+		"茶叶系列":  {{ID: 114000, Name: "茶叶系列", TagTypeID: 6}},
+		"伴手礼系列": {{ID: 114091, Name: "日本伴手礼系列", TagTypeID: 6}},
+	}}
+	ctx := context.Background()
+
+	s := newSiteSeriesTags(ctx, stub, nil, false)
+	if got := s.id("茶叶系列", true); got != 114000 {
+		t.Errorf("同名：got %d", got)
+	}
+	if got := s.id("伴手礼系列", false); got != 114091 {
+		t.Errorf("以系列名结尾的唯一标签：got %d", got)
+	}
+	own := []foodTalksNewsTag{{TagID: 24035, TagName: "薯条"}, {TagID: 99913, TagName: "Mote莫特"}, {TagID: 114091, TagName: "日本伴手礼系列"}}
+	if got := newSiteSeriesTags(ctx, stub, own, false).id("北海道伴手礼系列", true); got != 114091 {
+		t.Errorf("本文已挂的系列标签：got %d", got)
+	}
+	if got := s.id("咖啡系列", true); got != 0 || len(stub.created) != 0 {
+		t.Errorf("不允许新建时不建：got %d created %v", got, stub.created)
+	}
+
+	mote := newSiteSeriesTags(ctx, stub, nil, true)
+	if got := mote.id("咖啡系列", false); got != 0 || len(stub.created) != 0 {
+		t.Errorf("合集锚文字/正文提到不得新建：got %d created %v", got, stub.created)
+	}
+	if got := mote.id("咖啡系列", true); got != 999 || len(stub.created) != 1 || stub.created[0] != "咖啡系列" {
+		t.Errorf("Mote 段首声明的新系列应按声明名新建：got %d created %v", got, stub.created)
+	}
+	if got := mote.id("咖啡系列", true); got != 999 || len(stub.created) != 1 {
+		t.Errorf("同一稿内同名只建一次：got %d created %v", got, stub.created)
+	}
+	if len(mote.used) != 1 || mote.used[0].TagID != 999 || mote.used[0].TagName != "咖啡系列" {
+		t.Errorf("used 应记下新建的系列标签：%+v", mote.used)
+	}
+
+	merged := publishSiteMergeSeriesTags(
+		[]foodTalksNewsTag{{TagID: 99913, TagName: publishSiteMoteTagName}, {TagID: 1, TagName: "AI词1"}, {TagID: 2, TagName: "AI词2"}},
+		mote.used)
+	if len(merged) != 3 || merged[0].TagID != 99913 || merged[1].TagID != 999 || merged[2].TagID != 1 {
+		t.Errorf("系列标签紧跟 Mote、总数 3、AI 词让位：%+v", merged)
+	}
+}
+
+// TestBuildSiteNewsCreatesNewSeriesTag 新系列第 1 篇：网站还没有标签，Mote 文发布组装按声明名新建、
+// 链上并挂到文章标签；非 Mote 文同样的声明不建。
+func TestBuildSiteNewsCreatesNewSeriesTag(t *testing.T) {
+	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
+	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
+	job := publishJob{
+		Title: "新系列第一篇", Author: "Mote莫特", SourceName: "FBIF食品饮料创新",
+		BlocksJSON:  `[{"k":"txt","text":"作者：Mote莫特"},{"k":"txt","text":"这是我咖啡系列的第1篇。"}]`,
+		ContentHTML: `<p>作者：Mote莫特</p><p>这是我咖啡系列的第1篇。</p>`,
+		CreatedAt:   "2026-10-08T00:00:00Z",
+	}
+	stub := &newsTagStub{byKeyword: map[string][]foodTalksTag{"Mote莫特": {{ID: 99913, Name: "Mote莫特", TagTypeID: 6}}}}
+	p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil }}
+	news, err := p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countString(stub.created, "咖啡系列"); n != 1 {
+		t.Fatalf("应新建一次咖啡系列标签：%v", stub.created)
+	}
+	if !strings.Contains(news.Content, `<a href="https://www.foodtalks.cn/news/tag/999" target="_blank" rel="noopener">咖啡系列</a>`) {
+		t.Fatalf("声明段应链到新标签：%s", news.Content)
+	}
+	if len(news.NewsTags) < 2 || news.NewsTags[0].TagID != 99913 || news.NewsTags[1].TagID != 999 {
+		t.Fatalf("新系列标签应挂在 Mote 之后：%+v", news.NewsTags)
+	}
+
+	other := job
+	other.Author = "张三"
+	other.BlocksJSON = `[{"k":"txt","text":"这是我咖啡系列的第1篇。"}]`
+	other.ContentHTML = `<p>这是我咖啡系列的第1篇。</p>`
+	stub2 := &newsTagStub{byKeyword: map[string][]foodTalksTag{}}
+	p2 := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub2, nil }}
+	if _, err := p2.buildSiteNews(context.Background(), other, foodTalksPublishStatusDraft); err != nil {
+		t.Fatal(err)
+	}
+	if countString(stub2.created, "咖啡系列") != 0 {
+		t.Fatalf("非 Mote 文不得新建系列标签：%v", stub2.created)
+	}
+}
+
+func countString(list []string, want string) int {
+	n := 0
+	for _, v := range list {
+		if v == want {
+			n++
+		}
+	}
+	return n
 }

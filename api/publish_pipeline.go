@@ -2042,12 +2042,14 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 	// 仅 Mote/莫特文，把正文里的公众号文章链改成已发布站内稿；找不到保留原链。
 	// 在公司链接之后、目录之前，锚点仍基于最终正文。
 	enriched = p.rewriteMoteSeriesLinks(ctx, job, enriched)
-	// 段首「这是我 XX系列（的）第 N 篇」声明（开头、文末都算）把系列名链到同名标签页；
-	// 库里没有就不加链，也不创建新 tag。
+	// 系列标签链：段首「这是我 XX系列（的）第 N 篇」声明与链到公众号合集的「XX系列」都链到系列标签页，
+	// 找标签的顺序见 siteSeriesTags；Mote 文的新系列按声明名新建，用到的系列标签补进文章标签。
 	newsTags := p.siteNewsTagsFor(ctx, job)
 	if p.foodTalks != nil {
 		if ft, ftErr := p.foodTalks(); ftErr == nil {
-			enriched = publishSiteLinkSeriesTags(enriched, siteSeriesTagResolver(ctx, ft))
+			series := newSiteSeriesTags(ctx, ft, newsTags, publishSiteIsMoteArticle(job))
+			enriched = publishSiteLinkSeriesTags(enriched, series.id)
+			newsTags = publishSiteMergeSeriesTags(newsTags, series.used)
 		}
 	}
 	// 目录（2026-08-17 用户裁定：所有文章一视同仁，不分原创/转载——此前只给原创/Mote

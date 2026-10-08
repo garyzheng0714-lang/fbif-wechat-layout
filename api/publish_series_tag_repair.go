@@ -33,7 +33,8 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 	if err != nil {
 		return res, fmt.Errorf("读取网站现稿失败: %w", err)
 	}
-	content := publishSiteLinkSeriesTags(live.Content, siteSeriesTagResolver(ctx, ft))
+	// 存量稿只链到已有标签，不新建、不改文章标签。
+	content := publishSiteLinkSeriesTags(live.Content, newSiteSeriesTags(ctx, ft, live.NewsTags, false).id)
 	job := p.newsLinkRepairJob(newsID, live)
 	if res.Mote = publishSiteIsMoteArticle(job); res.Mote {
 		content = p.rewriteMoteSeriesLinks(ctx, job, content)
