@@ -1,22 +1,24 @@
 package main
 
-// publish_series_tag_repair.go — 已发布稿补系列标签链（2026-10-08 用户反馈 63149：文末
-// 「这是我茶叶系列的第38篇」仍链公众号合集）。按资讯 id 直接改网站现稿，流水线稿和编辑
-// 手工稿都适用：只替换系列声明段里的系列名链接，其余正文与字段按 CMS 现稿原样写回。
+// publish_series_tag_repair.go — 已发布网站稿补链接（2026-10-08 用户反馈 63149）。按资讯 id
+// 直接改网站现稿，流水线稿和编辑手工稿都适用，只动两类链接，其余正文与字段按 CMS 现稿原样写回：
+//   - 系列声明段的系列名 → 同名标签页（publishSiteLinkSeriesTags）；
+//   - Mote 文章里的公众号文章链 → 已发布的站内 /news/{id}，找不到保留原链（rewriteMoteSeriesLinks）。
 
 import (
 	"context"
 	"fmt"
 )
 
-type seriesTagRepairResult struct {
+type newsLinkRepairResult struct {
 	FoodTalksNewsID int64 `json:"foodtalks_news_id"`
+	Mote            bool  `json:"mote"`
 	Changed         bool  `json:"changed"`
 	DryRun          bool  `json:"dry_run"`
 }
 
-func (p *publishPipeline) repairNewsSeriesTagLink(ctx context.Context, newsID int64, dryRun bool) (seriesTagRepairResult, error) {
-	res := seriesTagRepairResult{FoodTalksNewsID: newsID, DryRun: dryRun}
+func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dryRun bool) (newsLinkRepairResult, error) {
+	res := newsLinkRepairResult{FoodTalksNewsID: newsID, DryRun: dryRun}
 	if publishWorkersPaused() {
 		return res, errPublishWorkersPaused
 	}
@@ -32,6 +34,10 @@ func (p *publishPipeline) repairNewsSeriesTagLink(ctx context.Context, newsID in
 		return res, fmt.Errorf("读取网站现稿失败: %w", err)
 	}
 	content := publishSiteLinkSeriesTags(live.Content, siteSeriesTagResolver(ctx, ft))
+	job := p.newsLinkRepairJob(newsID, live)
+	if res.Mote = publishSiteIsMoteArticle(job); res.Mote {
+		content = p.rewriteMoteSeriesLinks(ctx, job, content)
+	}
 	if content == live.Content {
 		return res, nil
 	}
@@ -45,4 +51,19 @@ func (p *publishPipeline) repairNewsSeriesTagLink(ctx context.Context, newsID in
 		return res, fmt.Errorf("写回网站失败: %w", err)
 	}
 	return res, nil
+}
+
+// newsLinkRepairJob 流水线发过的稿用任务库里那单（作者、正文块、公众号身份都在）；编辑手工稿
+// 只有网站作者，Mote 判定靠它（流水线稿网站作者常是「FBIF」，所以先查任务库）。
+func (p *publishPipeline) newsLinkRepairJob(newsID int64, live foodTalksNewsDetail) publishJob {
+	if p.store != nil {
+		if jobs, err := p.store.all(); err == nil {
+			for _, j := range jobs {
+				if j.FoodTalksNewsID == newsID && j.Stage == publishStagePublished {
+					return j
+				}
+			}
+		}
+	}
+	return publishJob{FoodTalksNewsID: newsID, Author: live.Author}
 }

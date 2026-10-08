@@ -728,8 +728,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"result": res})
 	})
 
-	// 网站稿（按资讯 id，流水线稿与编辑手工稿都行）的系列声明段改链到同名标签页；?dry_run=1 只报告。
-	mux.HandleFunc("POST /api/publish/news/{id}/repair-series-tag-link", func(w http.ResponseWriter, r *http.Request) {
+	// 网站稿（按资讯 id，流水线稿与编辑手工稿都行）补链接：系列声明段→同名标签页，Mote 的公众号文章链→站内稿；?dry_run=1 只报告。
+	mux.HandleFunc("POST /api/publish/news/{id}/repair-links", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
@@ -741,7 +741,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			writeError(w, http.StatusBadRequest, "资讯 id 必须是正整数")
 			return
 		}
-		res, err := p.repairNewsSeriesTagLink(r.Context(), id, r.URL.Query().Get("dry_run") == "1")
+		res, err := p.repairNewsLinks(r.Context(), id, r.URL.Query().Get("dry_run") == "1")
 		if err != nil {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "result": res})
 			return

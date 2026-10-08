@@ -10,11 +10,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"html"
 	"log"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const publishMoteSeriesMaxTitleFetches = 20
@@ -233,7 +235,32 @@ func (p *publishPipeline) wechatArticleTitle(ctx context.Context, articleURL str
 	return "", errMoteSeriesTitleFetcherMissing
 }
 
+// wechatTitleCache 公众号文章身份 → 标题。TikHub 按次计费，同一链接进程内只查一次。
+var wechatTitleCache sync.Map
+
+const tikhubArticleDetailPath = "/api/v1/wechat_mp/v2/fetch_article_detail"
+
+// defaultFetchWechatTitle 先直连公众号页；读不到标题再走 TikHub。Mote 正文里的互推链多是
+// 带 __biz/mid/idx/sn、不带 chksm 的长链，微信对服务器和浏览器都只回验证页（2026-10-08 实测，
+// 63149 的 TWG/玛黑兄弟/Tea Forté 因此一直没换成站内链）；短链和带 chksm 的链直连照常。
 func defaultFetchWechatTitle(ctx context.Context, articleURL string) (string, error) {
+	key, keyErr := normalizeSiteSourceKey(articleURL)
+	if keyErr == nil {
+		if v, ok := wechatTitleCache.Load(key); ok {
+			return v.(string), nil
+		}
+	}
+	title, err := fetchWechatTitleDirect(ctx, articleURL)
+	if err != nil && tikhubAPIKey() != "" {
+		title, err = fetchWechatTitleTikhub(ctx, articleURL)
+	}
+	if err == nil && keyErr == nil {
+		wechatTitleCache.Store(key, title)
+	}
+	return title, err
+}
+
+func fetchWechatTitleDirect(ctx context.Context, articleURL string) (string, error) {
 	raw, _, err := fetchArticleHTML(ctx, articleURL)
 	if err != nil {
 		return "", err
@@ -242,6 +269,19 @@ func defaultFetchWechatTitle(ctx context.Context, articleURL string) (string, er
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return "", errors.New("公众号页未解析到标题")
+	}
+	return title, nil
+}
+
+func fetchWechatTitleTikhub(ctx context.Context, articleURL string) (string, error) {
+	data, err := tikhubPOST(ctx, tikhubArticleDetailPath, map[string]any{"url": articleURL, "raw": false})
+	if err != nil {
+		return "", fmt.Errorf("TikHub 读公众号标题失败: %w", err)
+	}
+	m, _ := data.(map[string]any)
+	title := strings.TrimSpace(tikhubString(m["content"], "title"))
+	if title == "" {
+		return "", errors.New("TikHub 未返回公众号标题")
 	}
 	return title, nil
 }
