@@ -291,7 +291,7 @@ func TestSiteNewsTagsForMoteArticle(t *testing.T) {
 	}
 }
 
-func TestBuildSiteNewsLinksOnlyOpeningSeriesTag(t *testing.T) {
+func TestBuildSiteNewsLinksSeriesDeclarations(t *testing.T) {
 	t.Setenv("FOODTALKS_CATEGORY_IDS", "")
 	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
 	tests := []struct {
@@ -324,7 +324,7 @@ func TestBuildSiteNewsLinksOnlyOpeningSeriesTag(t *testing.T) {
 				t.Fatalf("buildSiteNews: %v", err)
 			}
 			if strings.Count(news.Content, tc.href) != 1 {
-				t.Fatalf("开头系列标签链应且只应出现一次：%s", news.Content)
+				t.Fatalf("系列标签链应且只应出现一次：%s", news.Content)
 			}
 			if !strings.Contains(news.Content, `<a href="`+tc.href+`" target="_blank" rel="noopener">`+tc.series+`</a>`) {
 				t.Fatalf("开头声明的系列名未链到已解析 tag：%s", news.Content)
@@ -352,8 +352,8 @@ func TestBuildSiteNewsLinksOnlyOpeningSeriesTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSiteNews late declaration: %v", err)
 	}
-	if strings.Contains(news.Content, "/news/tag/") {
-		t.Fatalf("非开头段的系列声明不得加链：%s", news.Content)
+	if !strings.Contains(news.Content, `<p>这是我<a href="https://www.foodtalks.cn/news/tag/114000" target="_blank" rel="noopener">茶叶系列</a>第33篇。</p>`) {
+		t.Fatalf("文末的系列声明段也要链到标签：%s", news.Content)
 	}
 
 	// 63116 小罐茶（2026-09-29 用户反馈）：公众号原文里系列名已链到公众号合集，
@@ -376,7 +376,7 @@ func TestBuildSiteNewsLinksOnlyOpeningSeriesTag(t *testing.T) {
 		t.Fatalf("已带公众号合集链的系列名应改链到 tag：%s", news.Content)
 	}
 	if strings.Count(news.Content, "appmsgalbum") != 1 {
-		t.Fatalf("只替换开头声明段的链接，后文合集链保持不动：%s", news.Content)
+		t.Fatalf("只替换声明段的链接，后文合集链保持不动：%s", news.Content)
 	}
 
 	// 63149 T9 茶（2026-10-08 用户反馈）：文末重复同一声明并链公众号合集，也要换成标签链；
@@ -633,5 +633,46 @@ func TestBuildSiteNewsInjectsTocForOriginalLongArticle(t *testing.T) {
 	news, _ = p.buildSiteNews(context.Background(), short, foodTalksPublishStatusDraft)
 	if news.TOC != "" {
 		t.Fatalf("h2 不足不得生成目录：toc=%q", news.TOC)
+	}
+}
+
+// TestPublishSiteLinkSeriesTagsRealForms 用 2026-10-08 全量扫描 619 篇 Mote 稿里的真实写法：
+// 段首声明（任意系列名、带不带「我/的」、引号、后面接别的话）都加链；正文中途提到的不加链；
+// 标签库没有同名标签不加链；已链到同一标签的不动。
+func TestPublishSiteLinkSeriesTagsRealForms(t *testing.T) {
+	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
+	ids := map[string]int64{"茶叶系列": 114000, "豆腐系列": 114002, "北海道伴手礼系列": 114003}
+	resolve := func(name string) int64 { return ids[name] }
+	link := func(name string) string {
+		return fmt.Sprintf(`<a href="https://www.foodtalks.cn/news/tag/%d" target="_blank" rel="noopener">%s</a>`, ids[name], name)
+	}
+	album := `<a href="https://mp.weixin.qq.com/mp/appmsgalbum?album_id=1" target="_blank">茶叶系列</a>`
+	linked := []struct{ in, want string }{
+		{`<p>这是我豆腐系列第4篇文章（前3篇：日本男前豆腐）</p>`, `<p>这是我` + link("豆腐系列") + `第4篇文章（前3篇：日本男前豆腐）</p>`},
+		{`<p>这是我豆腐系列的第 9 篇。</p>`, `<p>这是我` + link("豆腐系列") + `的第 9 篇。</p>`},
+		{`<p>这篇是我茶叶系列第4篇。</p>`, `<p>这篇是我` + link("茶叶系列") + `第4篇。</p>`},
+		{`<p>这篇，是「北海道伴手礼系列」的第二篇。上篇我带大家聊了薯条三兄弟。</p>`, `<p>这篇，是「` + link("北海道伴手礼系列") + `」的第二篇。上篇我带大家聊了薯条三兄弟。</p>`},
+		{`<p>本文为“北海道伴手礼系列”的第一篇，之后我们将分享白色恋人。</p>`, `<p>本文为“` + link("北海道伴手礼系列") + `”的第一篇，之后我们将分享白色恋人。</p>`},
+		{`<p>这是茶叶系列第7篇。前6篇写了立顿。</p>`, `<p>这是` + link("茶叶系列") + `第7篇。前6篇写了立顿。</p>`},
+		{`<p style="text-align: justify;">这是我` + album + `的第38篇。</p>`, `<p style="text-align: justify;">这是我` + link("茶叶系列") + `的第38篇。</p>`},
+	}
+	for _, c := range linked {
+		if got := publishSiteLinkSeriesTags(c.in, resolve); got != c.want {
+			t.Errorf("应加链：\n in %s\ngot %s\nwant %s", c.in, got, c.want)
+		}
+	}
+	unchanged := []string{
+		`<p>我在茶叶系列第12篇写过的美国Teavana。</p>`,
+		`<p>下一篇，茶叶系列第6篇，我要讲一个韩国品牌。</p>`,
+		`<p>请期待我的豆腐系列的第6篇，韩国希杰。</p>`,
+		`<p>豆腐系列第9篇，我会写她的故事。</p>`,
+		`<p>这是我咖啡系列第1篇。</p>`,                 // 标签库没有「咖啡系列」
+		`<p>这是我“男人味”系列的第2篇。</p>`,             // 引号把系列名拆开，不认
+		`<p>这是我` + link("茶叶系列") + `第8篇。</p>`, // 已链到同一标签
+	}
+	for _, in := range unchanged {
+		if got := publishSiteLinkSeriesTags(in, resolve); got != in {
+			t.Errorf("不应改动：\n in %s\ngot %s", in, got)
+		}
 	}
 }

@@ -728,19 +728,20 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"result": res})
 	})
 
-	// 已发布稿的「这是我 XX 系列第 N 篇」声明段改链到 FoodTalks 标签页；?dry_run=1 只报告。
-	mux.HandleFunc("POST /api/publish/jobs/{id}/repair-series-tag-link", func(w http.ResponseWriter, r *http.Request) {
+	// 网站稿（按资讯 id，流水线稿与编辑手工稿都行）的系列声明段改链到同名标签页；?dry_run=1 只报告。
+	mux.HandleFunc("POST /api/publish/news/{id}/repair-series-tag-link", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
 		if !requireDeploymentWritesActive(w) {
 			return
 		}
-		id, ok := publishJobIDFromPath(w, r)
-		if !ok {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusBadRequest, "资讯 id 必须是正整数")
 			return
 		}
-		res, err := p.repairPublishedSeriesTagLink(r.Context(), id, r.URL.Query().Get("dry_run") == "1")
+		res, err := p.repairNewsSeriesTagLink(r.Context(), id, r.URL.Query().Get("dry_run") == "1")
 		if err != nil {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "result": res})
 			return

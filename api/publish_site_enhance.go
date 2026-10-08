@@ -231,80 +231,32 @@ func isSeriesNameRune(r rune) bool {
 	return r == '·'
 }
 
-var publishSiteOpeningSeriesRe = regexp.MustCompile(`^这是我([\p{Han}A-Za-z0-9·]{2,10}系列)(?:的)?第[0-9零〇一二三四五六七八九十百千两]+篇[。.]?$`)
+// 系列声明段：段首「这是我 / 这篇是 / 本文为 … XX系列（的）第 N 篇」，后面可接其他话。
+// 开头和文末的声明都算（63149，2026-10-08）；正文句子中途提到的「XX系列第N篇」不算。
+// 系列名可能已链到公众号合集或旧链接（组 1 整个 <a>、组 2 其中的名字），也可能是纯文本（组 3）。
+var publishSiteSeriesDeclarationRe = regexp.MustCompile(`(?is)<p\b[^>]*>\s*(?:这篇[，,]?是|这是|本文为|本文是)我?的?[“「"]?(?:(<a\b[^>]*>\s*([\p{Han}A-Za-z0-9·]{1,10}系列)\s*</a>)|([\p{Han}A-Za-z0-9·]{1,10}系列))[”」"]?的?第\s*[0-9零〇一二三四五六七八九十百千两]+\s*篇`)
 
-// 系列名在公众号原文里常已链到公众号合集（63116 小罐茶「茶叶系列」→ appmsgalbum），
-// 此时组 1 是整个既有 <a>、组 2 是其中的名字；纯文本时组 3 是名字。两种都整段替换成标签链。
-var publishSiteOpeningSeriesParagraphRe = regexp.MustCompile(`(?is)<p\b[^>]*>\s*这是我(?:(<a\b[^>]*>\s*([\p{Han}A-Za-z0-9·]{2,10}系列)\s*</a>)|([\p{Han}A-Za-z0-9·]{2,10}系列))(?:的)?第[0-9零〇一二三四五六七八九十百千两]+篇[。.]?\s*</p>`)
-
-func publishSiteOpeningSeriesCandidateText(block Block) string {
-	if block.K != "txt" {
-		return ""
-	}
-	text := strings.TrimSpace(publishExternalDistributionBlockText(block))
-	if publishSiteAuthorLineRe.MatchString(text) {
-		return ""
-	}
-	return text
-}
-
-// publishSiteOpeningSeriesName 只读开头首个正文段；署名、空段和头图不算正文。
-// 若普通正文已经开始，后面再出现「XX 系列第 N 篇」也不认。
-func publishSiteOpeningSeriesName(blocksJSON string) string {
-	var blocks []Block
-	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err != nil {
-		return ""
-	}
-	for _, block := range blocks {
-		text := publishSiteOpeningSeriesCandidateText(block)
-		if text == "" {
-			continue
-		}
-		match := publishSiteOpeningSeriesRe.FindStringSubmatch(text)
-		if match == nil {
-			return ""
-		}
-		return match[1]
-	}
-	return ""
-}
-
-func publishSiteNewsTagID(tags []foodTalksNewsTag, name string) int64 {
-	want := normalizeFoodTalksSourceName(name)
-	for _, tag := range tags {
-		if tag.TagID > 0 && normalizeFoodTalksSourceName(tag.TagName) == want {
-			return tag.TagID
-		}
-	}
-	return 0
-}
-
-// publishSiteLinkOpeningSeriesTag 由开头首个正文段确定系列名；该名字的每个「这是我 XX 系列
-// （的）第 N 篇」独立声明段都链到标签页——Mote 文末常重复一次同一声明并链公众号合集
-// （63149 T9 茶，2026-10-08 用户反馈），也要换成标签链。散落在正文句子里的系列名不加链。
-func publishSiteLinkOpeningSeriesTag(contentHTML, blocksJSON string, tags []foodTalksNewsTag) string {
-	name := publishSiteOpeningSeriesName(blocksJSON)
-	if name == "" {
-		return contentHTML
-	}
-	tagID := publishSiteNewsTagID(tags, name)
-	if tagID == 0 {
-		return contentHTML
-	}
-	link := fmt.Sprintf(`<a href="%s/news/tag/%d" target="_blank" rel="noopener">%s</a>`, escapeHTMLAttr(siteFrontURL()), tagID, html.EscapeString(name))
+// publishSiteLinkSeriesTags 把每个系列声明段里的系列名链到同名 FoodTalks 标签页。
+// tagIDFor 返回 0（标签库没有）时不加链、不创建；已链到同一标签的保持原样。
+func publishSiteLinkSeriesTags(contentHTML string, tagIDFor func(name string) int64) string {
 	var b strings.Builder
 	last := 0
-	for _, match := range publishSiteOpeningSeriesParagraphRe.FindAllStringSubmatchIndex(contentHTML, -1) {
-		// 替换区间：既有 <a> 整体（组 1，名字在组 2），或纯文本名字（组 3）。
-		start, end, nameStart, nameEnd := match[6], match[7], match[6], match[7]
-		if match[2] >= 0 {
-			start, end, nameStart, nameEnd = match[2], match[3], match[4], match[5]
+	for _, m := range publishSiteSeriesDeclarationRe.FindAllStringSubmatchIndex(contentHTML, -1) {
+		start, end, nameStart, nameEnd := m[6], m[7], m[6], m[7]
+		if m[2] >= 0 {
+			start, end, nameStart, nameEnd = m[2], m[3], m[4], m[5]
 		}
-		if contentHTML[nameStart:nameEnd] != name {
+		name := contentHTML[nameStart:nameEnd]
+		tagID := tagIDFor(name)
+		if tagID == 0 {
+			continue
+		}
+		href := fmt.Sprintf("%s/news/tag/%d", siteFrontURL(), tagID)
+		if m[2] >= 0 && strings.Contains(contentHTML[start:nameStart], fmt.Sprintf("/news/tag/%d\"", tagID)) {
 			continue
 		}
 		b.WriteString(contentHTML[last:start])
-		b.WriteString(link)
+		fmt.Fprintf(&b, `<a href="%s" target="_blank" rel="noopener">%s</a>`, escapeHTMLAttr(href), html.EscapeString(name))
 		last = end
 	}
 	if last == 0 {
@@ -312,6 +264,25 @@ func publishSiteLinkOpeningSeriesTag(contentHTML, blocksJSON string, tags []food
 	}
 	b.WriteString(contentHTML[last:])
 	return b.String()
+}
+
+// siteSeriesTagResolver 按系列名查 CMS 新闻标签（tag_type_id=6，规范化等值），同名只查一次。
+// 查询失败或没有同名标签都返回 0。
+func siteSeriesTagResolver(ctx context.Context, ft foodTalksAPI) func(string) int64 {
+	cache := map[string]int64{}
+	return func(name string) int64 {
+		if id, ok := cache[name]; ok {
+			return id
+		}
+		var id int64
+		if tags, err := ft.ListTagsByType(ctx, foodTalksTagTypeNews, name); err != nil {
+			log.Printf("publish: 查询系列标签 %q 失败：%v", name, err)
+		} else {
+			id = matchFoodTalksSourceID(tags, name)
+		}
+		cache[name] = id
+		return id
+	}
 }
 
 // ---- 新闻标签解析（tag_type_id=6，只解析不创建） ----

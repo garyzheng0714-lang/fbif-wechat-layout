@@ -2042,10 +2042,14 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 	// 仅 Mote/莫特文，把正文里的公众号文章链改成已发布站内稿；找不到保留原链。
 	// 在公司链接之后、目录之前，锚点仍基于最终正文。
 	enriched = p.rewriteMoteSeriesLinks(ctx, job, enriched)
-	// 开头「这是我 XX 系列（的）第 N 篇」定系列名，同名声明段（含文末重复）都加标签链。
-	// 复用同一次真实 tag 解析；库里没有就不加链，也不创建新 tag。
+	// 段首「这是我 XX系列（的）第 N 篇」声明（开头、文末都算）把系列名链到同名标签页；
+	// 库里没有就不加链，也不创建新 tag。
 	newsTags := p.siteNewsTagsFor(ctx, job)
-	enriched = publishSiteLinkOpeningSeriesTag(enriched, job.BlocksJSON, newsTags)
+	if p.foodTalks != nil {
+		if ft, ftErr := p.foodTalks(); ftErr == nil {
+			enriched = publishSiteLinkSeriesTags(enriched, siteSeriesTagResolver(ctx, ft))
+		}
+	}
 	// 目录（2026-08-17 用户裁定：所有文章一视同仁，不分原创/转载——此前只给原创/Mote
 	// 是误解，历史转载没目录多为人工漏掉）：字数与标题数达标即注入 h2 锚点并写 toc
 	// 字段；锚点由内容哈希派生，重复组装字节一致。阈值见 publishSiteTocForContent。
