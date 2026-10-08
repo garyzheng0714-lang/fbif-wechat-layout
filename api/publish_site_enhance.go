@@ -233,8 +233,11 @@ func isSeriesNameRune(r rune) bool {
 
 // 系列声明段：段首「这是我 / 这篇是 / 本文为 … XX系列（的）第 N 篇」，后面可接其他话。
 // 开头和文末的声明都算（63149，2026-10-08）；正文句子中途提到的「XX系列第N篇」不算。
-// 系列名可能已链到公众号合集或旧链接（组 1 整个 <a>、组 2 其中的名字），也可能是纯文本（组 3）。
-var publishSiteSeriesDeclarationRe = regexp.MustCompile(`(?is)<p\b[^>]*>\s*(?:这篇[，,]?是|这是|本文为|本文是)我?的?[“「"]?(?:(<a\b[^>]*>\s*([\p{Han}A-Za-z0-9·]{1,10}系列)\s*</a>)|([\p{Han}A-Za-z0-9·]{1,10}系列))[”」"]?的?第\s*[0-9零〇一二三四五六七八九十百千两]+\s*篇`)
+// 系列名三种写法：已链到公众号合集或旧链接（组 1 整个 <a>、组 2 其中的名字）、纯文本（组 3）、
+// 引号只包住前半截的「“男人味”系列」（组 4，查标签时去掉引号）。
+var publishSiteSeriesDeclarationRe = regexp.MustCompile(`(?is)<p\b[^>]*>\s*(?:这篇[，,]?是|这是|本文为|本文是)我?的?[“「"]?(?:(<a\b[^>]*>\s*([\p{Han}A-Za-z0-9·]{1,10}系列)\s*</a>)|([\p{Han}A-Za-z0-9·]{1,10}系列)|([“「"][\p{Han}A-Za-z0-9·]{1,10}[”」"]系列))[”」"]?的?第\s*[0-9零〇一二三四五六七八九十百千两]+\s*篇`)
+
+var publishSiteSeriesQuoteStripper = strings.NewReplacer("“", "", "”", "", "「", "", "」", "", `"`, "")
 
 // publishSiteLinkSeriesTags 把每个系列声明段里的系列名链到同名 FoodTalks 标签页。
 // tagIDFor 返回 0（标签库没有）时不加链、不创建；已链到同一标签的保持原样。
@@ -242,21 +245,27 @@ func publishSiteLinkSeriesTags(contentHTML string, tagIDFor func(name string) in
 	var b strings.Builder
 	last := 0
 	for _, m := range publishSiteSeriesDeclarationRe.FindAllStringSubmatchIndex(contentHTML, -1) {
-		start, end, nameStart, nameEnd := m[6], m[7], m[6], m[7]
-		if m[2] >= 0 {
-			start, end, nameStart, nameEnd = m[2], m[3], m[4], m[5]
+		start, end := m[6], m[7]
+		text := ""
+		switch {
+		case m[2] >= 0:
+			start, end, text = m[2], m[3], contentHTML[m[4]:m[5]]
+		case m[8] >= 0:
+			start, end = m[8], m[9]
 		}
-		name := contentHTML[nameStart:nameEnd]
-		tagID := tagIDFor(name)
+		if text == "" {
+			text = contentHTML[start:end]
+		}
+		tagID := tagIDFor(publishSiteSeriesQuoteStripper.Replace(text))
 		if tagID == 0 {
 			continue
 		}
 		href := fmt.Sprintf("%s/news/tag/%d", siteFrontURL(), tagID)
-		if m[2] >= 0 && strings.Contains(contentHTML[start:nameStart], fmt.Sprintf("/news/tag/%d\"", tagID)) {
+		if m[2] >= 0 && strings.Contains(contentHTML[m[2]:m[4]], fmt.Sprintf("/news/tag/%d\"", tagID)) {
 			continue
 		}
 		b.WriteString(contentHTML[last:start])
-		fmt.Fprintf(&b, `<a href="%s" target="_blank" rel="noopener">%s</a>`, escapeHTMLAttr(href), html.EscapeString(name))
+		fmt.Fprintf(&b, `<a href="%s" target="_blank" rel="noopener">%s</a>`, escapeHTMLAttr(href), text)
 		last = end
 	}
 	if last == 0 {

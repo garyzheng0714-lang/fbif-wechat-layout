@@ -641,7 +641,7 @@ func TestBuildSiteNewsInjectsTocForOriginalLongArticle(t *testing.T) {
 // 标签库没有同名标签不加链；已链到同一标签的不动。
 func TestPublishSiteLinkSeriesTagsRealForms(t *testing.T) {
 	t.Setenv("FOODTALKS_FRONT_URL", "https://www.foodtalks.cn")
-	ids := map[string]int64{"茶叶系列": 114000, "豆腐系列": 114002, "北海道伴手礼系列": 114003}
+	ids := map[string]int64{"茶叶系列": 114000, "豆腐系列": 114002, "北海道伴手礼系列": 114003, "男人味系列": 114013}
 	resolve := func(name string) int64 { return ids[name] }
 	link := func(name string) string {
 		return fmt.Sprintf(`<a href="https://www.foodtalks.cn/news/tag/%d" target="_blank" rel="noopener">%s</a>`, ids[name], name)
@@ -655,6 +655,7 @@ func TestPublishSiteLinkSeriesTagsRealForms(t *testing.T) {
 		{`<p>本文为“北海道伴手礼系列”的第一篇，之后我们将分享白色恋人。</p>`, `<p>本文为“` + link("北海道伴手礼系列") + `”的第一篇，之后我们将分享白色恋人。</p>`},
 		{`<p>这是茶叶系列第7篇。前6篇写了立顿。</p>`, `<p>这是` + link("茶叶系列") + `第7篇。前6篇写了立顿。</p>`},
 		{`<p style="text-align: justify;">这是我` + album + `的第38篇。</p>`, `<p style="text-align: justify;">这是我` + link("茶叶系列") + `的第38篇。</p>`},
+		{`<p>这是我“男人味”系列的第2篇。第1篇写的男前豆腐。</p>`, `<p>这是我<a href="https://www.foodtalks.cn/news/tag/114013" target="_blank" rel="noopener">“男人味”系列</a>的第2篇。第1篇写的男前豆腐。</p>`},
 	}
 	for _, c := range linked {
 		if got := publishSiteLinkSeriesTags(c.in, resolve); got != c.want {
@@ -667,7 +668,6 @@ func TestPublishSiteLinkSeriesTagsRealForms(t *testing.T) {
 		`<p>请期待我的豆腐系列的第6篇，韩国希杰。</p>`,
 		`<p>豆腐系列第9篇，我会写她的故事。</p>`,
 		`<p>这是我咖啡系列第1篇。</p>`,                 // 标签库没有「咖啡系列」
-		`<p>这是我“男人味”系列的第2篇。</p>`,             // 引号把系列名拆开，不认
 		`<p>这是我` + link("茶叶系列") + `第8篇。</p>`, // 已链到同一标签
 	}
 	for _, in := range unchanged {
