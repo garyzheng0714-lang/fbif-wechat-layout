@@ -279,6 +279,9 @@ func publishSiteNewsTagID(tags []foodTalksNewsTag, name string) int64 {
 	return 0
 }
 
+// publishSiteLinkOpeningSeriesTag 由开头首个正文段确定系列名；该名字的每个「这是我 XX 系列
+// （的）第 N 篇」独立声明段都链到标签页——Mote 文末常重复一次同一声明并链公众号合集
+// （63149 T9 茶，2026-10-08 用户反馈），也要换成标签链。散落在正文句子里的系列名不加链。
 func publishSiteLinkOpeningSeriesTag(contentHTML, blocksJSON string, tags []foodTalksNewsTag) string {
 	name := publishSiteOpeningSeriesName(blocksJSON)
 	if name == "" {
@@ -288,20 +291,27 @@ func publishSiteLinkOpeningSeriesTag(contentHTML, blocksJSON string, tags []food
 	if tagID == 0 {
 		return contentHTML
 	}
-	match := publishSiteOpeningSeriesParagraphRe.FindStringSubmatchIndex(contentHTML)
-	if match == nil {
-		return contentHTML
-	}
-	// 替换区间：既有 <a> 整体（组 1，名字在组 2），或纯文本名字（组 3）。
-	start, end, nameStart, nameEnd := match[6], match[7], match[6], match[7]
-	if match[2] >= 0 {
-		start, end, nameStart, nameEnd = match[2], match[3], match[4], match[5]
-	}
-	if contentHTML[nameStart:nameEnd] != name {
-		return contentHTML
-	}
 	link := fmt.Sprintf(`<a href="%s/news/tag/%d" target="_blank" rel="noopener">%s</a>`, escapeHTMLAttr(siteFrontURL()), tagID, html.EscapeString(name))
-	return contentHTML[:start] + link + contentHTML[end:]
+	var b strings.Builder
+	last := 0
+	for _, match := range publishSiteOpeningSeriesParagraphRe.FindAllStringSubmatchIndex(contentHTML, -1) {
+		// 替换区间：既有 <a> 整体（组 1，名字在组 2），或纯文本名字（组 3）。
+		start, end, nameStart, nameEnd := match[6], match[7], match[6], match[7]
+		if match[2] >= 0 {
+			start, end, nameStart, nameEnd = match[2], match[3], match[4], match[5]
+		}
+		if contentHTML[nameStart:nameEnd] != name {
+			continue
+		}
+		b.WriteString(contentHTML[last:start])
+		b.WriteString(link)
+		last = end
+	}
+	if last == 0 {
+		return contentHTML
+	}
+	b.WriteString(contentHTML[last:])
+	return b.String()
 }
 
 // ---- 新闻标签解析（tag_type_id=6，只解析不创建） ----

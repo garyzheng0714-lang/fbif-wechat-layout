@@ -378,6 +378,21 @@ func TestBuildSiteNewsLinksOnlyOpeningSeriesTag(t *testing.T) {
 	if strings.Count(news.Content, "appmsgalbum") != 1 {
 		t.Fatalf("只替换开头声明段的链接，后文合集链保持不动：%s", news.Content)
 	}
+
+	// 63149 T9 茶（2026-10-08 用户反馈）：文末重复同一声明并链公众号合集，也要换成标签链；
+	// 正文句子里的合集链仍不动。
+	closing := linked
+	closing.ContentHTML = linked.ContentHTML + `<p style="text-align: justify;">这是我<a href="` + albumHref + `" target="_blank" rel="noopener">茶叶系列</a>的第37篇。</p>`
+	news, err = p.buildSiteNews(context.Background(), closing, foodTalksPublishStatusDraft)
+	if err != nil {
+		t.Fatalf("buildSiteNews closing declaration: %v", err)
+	}
+	if strings.Count(news.Content, want) != 2 {
+		t.Fatalf("开头与文末两处系列声明都应链到 tag：%s", news.Content)
+	}
+	if strings.Count(news.Content, "appmsgalbum") != 1 {
+		t.Fatalf("非声明段的合集链保持不动：%s", news.Content)
+	}
 }
 
 func TestSiteNewsTagsResolvesAITagsForAllArticles(t *testing.T) {

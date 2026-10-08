@@ -728,6 +728,26 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"result": res})
 	})
 
+	// 已发布稿的「这是我 XX 系列第 N 篇」声明段改链到 FoodTalks 标签页；?dry_run=1 只报告。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/repair-series-tag-link", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		res, err := p.repairPublishedSeriesTagLink(r.Context(), id, r.URL.Query().Get("dry_run") == "1")
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "result": res})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"result": res})
+	})
+
 	mux.HandleFunc("POST /api/publish/jobs/{id}/ack-cms-published", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {
 			return

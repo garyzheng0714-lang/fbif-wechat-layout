@@ -2042,7 +2042,7 @@ func (p *publishPipeline) buildSiteNews(ctx context.Context, job publishJob, pub
 	// 仅 Mote/莫特文，把正文里的公众号文章链改成已发布站内稿；找不到保留原链。
 	// 在公司链接之后、目录之前，锚点仍基于最终正文。
 	enriched = p.rewriteMoteSeriesLinks(ctx, job, enriched)
-	// 开头「这是我 XX 系列（的）第 N 篇」只给该声明段的系列名加标签链。
+	// 开头「这是我 XX 系列（的）第 N 篇」定系列名，同名声明段（含文末重复）都加标签链。
 	// 复用同一次真实 tag 解析；库里没有就不加链，也不创建新 tag。
 	newsTags := p.siteNewsTagsFor(ctx, job)
 	enriched = publishSiteLinkOpeningSeriesTag(enriched, job.BlocksJSON, newsTags)
