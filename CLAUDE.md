@@ -76,7 +76,7 @@
 - 30：`.github/workflows/p0-monitoring-contract.yml`。
 - 31：`e2e-preview-speed/e2e-feishu-import-progress/preview-dom/preview-image-loader/feishu-doc-ready/import-progress`、`api/feishu_export_jobs_test.go`。
 - 33：`api/publish_http_test.go` 中 `TestPublishOfficialSyncFetchesFromURL` 及三个 reject 测试。
-- 34：`api/feishu_review_card_test.go`；35：`api/publish_risk_layers_test.go`。
+- 34：`api/feishu_review_card_test.go`、`api/feishu_review_card_icons_test.go`（聚合卡单一左边线、按钮 Lucide 图标、封面裁切不露方形补边）；35：`api/publish_risk_layers_test.go`。
 - 38：`foodtalks-site-behavior`、`api/{wechat_trailer,yunsuo,publish_trailer_repair}_test.go`；39：`tests/image-width.test.mjs`、`api/publish_site_enhance_test.go`。
 - 40：`tests/{foodtalks-site-docx,foodtalks-site-behavior,heading-detect,site-interview}.test.mjs`、`api/publish_site_enhance_test.go`（declared-source/provenance/render-source 用例）、`api/wechat_blocks_test.go`（meta 三值）、`api/publish_original_url.go`、`api/publish_tikhub_worklist.go`。
 - 41：`api/publish_company_links_test.go`、`api/company_match_smoke_test.go`（2026-08-17 生产检索快照）。

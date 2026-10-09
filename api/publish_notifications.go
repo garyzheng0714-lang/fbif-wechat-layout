@@ -271,7 +271,7 @@ func (p *publishPipeline) sendTerminalCardNotification(ctx context.Context, job 
 // message_id、或更新接口暂时不可用时，兼容发送一张新终态卡，再降级文本。
 // 调用方必须持有 reviewCardUpdateMu。
 func (p *publishPipeline) sendTerminalCardNotificationUnlocked(ctx context.Context, job publishJob, card map[string]any, fallbackText string) error {
-	if batchCard, err := p.buildReviewBatchCard(job.ID); err == nil {
+	if batchCard, err := p.buildReviewBatchCard(ctx, job.ID); err == nil {
 		card = batchCard
 	}
 	if p != nil && p.deliverySettings != nil {
@@ -374,7 +374,7 @@ func (p *publishPipeline) sendReviewPendingNotificationUnlocked(ctx context.Cont
 	// 同题防重提醒（best effort）：发卡/刷卡前查一次 CMS，命中即在卡上标红。
 	job = p.refreshSiteDuplicateFlag(ctx, job)
 	card := buildReviewPendingCard(job, strings.TrimSpace(job.ReviewCoverImgKey))
-	if batchCard, batchErr := p.buildReviewBatchCard(job.ID); batchErr == nil {
+	if batchCard, batchErr := p.buildReviewBatchCard(ctx, job.ID); batchErr == nil {
 		card = batchCard
 	}
 	if p != nil && p.deliverySettings != nil {
@@ -479,7 +479,7 @@ func (p *publishPipeline) sendConfiguredReviewCardToTargets(ctx context.Context,
 	return nil
 }
 
-func (p *publishPipeline) buildReviewBatchCard(jobID int64) (map[string]any, error) {
+func (p *publishPipeline) buildReviewBatchCard(ctx context.Context, jobID int64) (map[string]any, error) {
 	job, err := p.store.byID(jobID)
 	if err != nil {
 		return nil, err
@@ -488,7 +488,7 @@ func (p *publishPipeline) buildReviewBatchCard(jobID int64) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
-	return buildReviewBatchCard(jobs), nil
+	return buildReviewBatchCardWithIcons(jobs, p.reviewCardIconsForJob(ctx, job)), nil
 }
 
 func (p *publishPipeline) reviewCardBatch(anchor publishJob) ([]publishJob, error) {

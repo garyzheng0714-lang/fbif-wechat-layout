@@ -339,10 +339,6 @@ func (n *feishuNotifier) tenantAccessToken(ctx context.Context) (string, error) 
 // 素材并返回 img_key（卡片 img 元素只认 img_key，不认外链 URL）。下载与上传都设
 // 上限与超时；任何失败由调用方降级为「卡片不带图」，绝不阻塞流水线。
 func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (string, error) {
-	token, err := n.tenantAccessToken(ctx)
-	if err != nil {
-		return "", err
-	}
 	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, imgURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("feishu: 构造封面下载请求: %w", err)
@@ -363,13 +359,22 @@ func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (s
 	if err != nil {
 		return "", fmt.Errorf("生成方形封面失败: %w", err)
 	}
+	return n.uploadImageBytes(ctx, "cover.png", imgBytes)
+}
 
+// uploadImageBytes 把一张图片上传到飞书消息图片素材，返回卡片 img/custom_icon 可用的
+// img_key。img_key 与上传它的应用绑定，换应用发卡必须由该应用重新上传。
+func (n *feishuNotifier) uploadImageBytes(ctx context.Context, filename string, imgBytes []byte) (string, error) {
+	token, err := n.tenantAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	if err := mw.WriteField("image_type", "message"); err != nil {
 		return "", fmt.Errorf("feishu: 构造上传表单: %w", err)
 	}
-	fw, err := mw.CreateFormFile("image", "cover.png")
+	fw, err := mw.CreateFormFile("image", filename)
 	if err != nil {
 		return "", fmt.Errorf("feishu: 构造上传表单: %w", err)
 	}

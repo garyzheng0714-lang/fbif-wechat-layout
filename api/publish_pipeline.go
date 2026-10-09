@@ -169,6 +169,8 @@ type publishPipeline struct {
 	// 网站生命周期与外部分发各有持久 outbox，但它们更新的是同一张飞书卡。
 	// 单进程部署下统一串行发送，并在拿锁后重读任务，避免旧快照最后覆盖新状态。
 	reviewCardUpdateMu sync.Mutex
+	// 审核聚合卡按钮图标的 img_key，按审核应用缓存（见 feishu_review_card_icons.go）。
+	reviewCardIconCache reviewCardIconCache
 	// 来源出处按名称检索（type=10）的进程内短缓存。测试可预置 sourceTags。
 	sourceTagsMu     sync.Mutex
 	sourceTags       []foodTalksTag
