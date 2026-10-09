@@ -149,8 +149,8 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   assert.match(workflow, /uses: actions\/setup-go@v6/);
   assert.match(workflow, /cache-dependency-path: api\/go\.sum/,
     'Go 模块位于 api/，缓存不得再去仓库根目录找 go.sum');
-  assert.match(workflow, /go-version: '1\.26\.6'/,
-    '必须锁定已修复当前标准库漏洞的 Go patch 版本（2026-08-14 GO-2026-6218 等 5 个 stdlib 漏洞 Fixed in 1.26.6）');
+  assert.match(workflow, /go-version: '1\.26\.9'/,
+    '必须锁定已修复当前标准库漏洞的 Go patch 版本（2026-10-09 GO-2026-6603…6617 等 net/http、mime/multipart、crypto/tls 漏洞 Fixed in 1.26.9）');
   assert.match(workflow, /permissions:\s*\n\s*contents: read/,
     'deploy workflow 必须使用最小 GitHub token 权限');
   assert.match(workflow, /remote_transaction rollback/);
