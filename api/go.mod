@@ -1,12 +1,12 @@
 module fbif-wechat-layout/api
 
-go 1.26.6
+go 1.26.9
 
-require golang.org/x/net v0.55.0
+require golang.org/x/net v0.60.0
 
 require golang.org/x/image v0.45.0
 
-require golang.org/x/crypto v0.53.0
+require golang.org/x/crypto v0.57.0
 
 require (
 	github.com/gogo/protobuf v1.3.2 // indirect

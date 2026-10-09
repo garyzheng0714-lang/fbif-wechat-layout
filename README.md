@@ -1,7 +1,7 @@
 # fbif-wechat-layout
 
 ![类型](https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-%E5%86%85%E5%AE%B9%E6%8E%92%E7%89%88%E4%B8%8E%E5%8F%91%E5%B8%83-2563eb)
-![Go](https://img.shields.io/badge/Go-1.26.6-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26.9-00ADD8?logo=go&logoColor=white)
 ![前端](https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-Vanilla%20JS-f7df1e?logo=javascript&logoColor=111827)
 ![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%94%9F%E4%BA%A7%E4%BD%BF%E7%94%A8%E4%B8%AD-16a34a)
 ![README](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-brightgreen)
@@ -336,7 +336,7 @@ go test ./...
 
 合并进 `main` 前，PR 必须过 `.github/workflows/p0-monitoring-contract.yml`（无路径过滤）。推送到 `main` 只触发 `.github/workflows/deploy.yml` 发版，不再重跑考试、不装浏览器：
 
-1. 使用已修复已知标准库漏洞的 Go 1.26.6 构建 `api/fbif-api`，并写入 `public/version.json`。
+1. 使用已修复已知标准库漏洞的 Go 1.26.9 构建 `api/fbif-api`，并写入 `public/version.json`。
 2. 把 `public/`、API、render service、Caddy、systemd 单元、env schema 与候选 env 同步进隔离 release；候选 API env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
 3. 在任何 live 切换前验证三类 env、Caddy、systemd 单元和当前服务；然后事务式切换 API、renderer、静态资源、单元、Caddy 与配置 schema。
 4. 验证公网 commit SHA、健康、鉴权和 `/api/publish/readiness`；readiness 同时锁定配置版本、两个生成注册表哈希、JSON store、独立服务令牌、HTTP 审核关闭、可用审核权限来源、FoodTalks 目标、分类、渲染、飞书与 MiMo 配置（`enrich_mode=mimo`）。
