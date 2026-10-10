@@ -34,6 +34,7 @@ const (
 	reviewIconPublish    = "send"           // 发布 / 强制发布 / 重新发布
 	reviewIconDistribute = "share-2"        // 同步分发至其他平台
 	reviewIconAttention  = "circle-alert"   // 检查未完成
+	reviewIconHeader     = "network"        // 卡片头部：一篇文章分发到多个平台（浅蓝，用户 2026-10-10 选定）
 )
 
 // reviewCardIcons 「图标名-配色」→ 当前审核应用上传所得 img_key。

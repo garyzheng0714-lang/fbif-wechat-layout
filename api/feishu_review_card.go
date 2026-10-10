@@ -66,14 +66,22 @@ func buildReviewBatchCardWithIcons(jobs []publishJob, icons reviewCardIcons) map
 		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
-			"template": "blue",
-			"title":    feishuPlainText("FoodTalks 内容审核"),
+			// 浅蓝头部（用户 2026-10-10 先试绿色呼应微信，后在 6 种颜色的真机对比里选了浅蓝 wathet）。
+			"template": "wathet",
+			// 标题说清这张卡是什么：FBIF 公众号文章自动同步到网站、头条号等多个平台（用户 2026-10-10
+			// 先嫌「FoodTalks 内容审核」「要突出自动化」，又嫌「FoodTalks 自动发布」不够准确，自定此名）。
+			"title":    feishuPlainText(reviewBatchCardTitle),
 			"subtitle": feishuPlainText(reviewBatchSubtitle(jobs, pending, published)),
 		},
 		"body": map[string]any{
 			"direction": "vertical", "padding": "12px 12px 16px 12px",
 			"vertical_spacing": "8px", "elements": elements,
 		},
+	}
+	// 头部图标：Lucide network（一分多，对应「多平台自动同步」），浅蓝与头部标题同色。图标没上传
+	// 成功时不带图标，卡片照常发。
+	if key := icons[reviewIconHeader+"-wathet"]; key != "" {
+		card["header"].(map[string]any)["icon"] = map[string]any{"tag": "custom_icon", "img_key": key}
 	}
 	applyReviewCardIcons(card, icons)
 	return card
@@ -165,7 +173,7 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 	}
 	return map[string]any{
 		// 每篇一个白底细外框块（2026-10-10 用户：「把这个灰色的背景，换成类似于这种的外框线」
-		// 「线还可以再淡一点」，选 grey-50）。飞书只有交互容器能画外框，它必须带点击行为：点块里
+		// 「线还可以再淡一点」先选 grey-50，后定 grey-100）。飞书只有交互容器能画外框，它必须带点击行为：点块里
 		// 空白处打开网站文章，与标题链接同一处；块内按钮优先响应自己的交互。
 		"tag": "interactive_container", "width": "fill",
 		"has_border": true, "border_color": reviewBatchBorderColor,
@@ -194,10 +202,12 @@ func reviewBatchBlockURL(job publishJob, siteURL string) string {
 	return reviewCardSafeURL(siteFrontURL())
 }
 
+const reviewBatchCardTitle = "FBIF文章多平台自动同步"
+
 // 微调用的尺寸（2026-10-10 真机实测后定）。电脑上右栏四行高度之和 ≈ 封面边长（约 110px）。
 // 同心圆角：封面圆角 = 外框圆角 − 内边距，两条弧线共用圆心，间距处处均匀（用户 2026-10-10）。
 const (
-	reviewBatchBorderColor   = "grey-50"
+	reviewBatchBorderColor   = "grey-100"
 	reviewBatchBlockRadius   = 16
 	reviewBatchBlockPadding  = 10
 	reviewBatchCoverRadius   = reviewBatchBlockRadius - reviewBatchBlockPadding

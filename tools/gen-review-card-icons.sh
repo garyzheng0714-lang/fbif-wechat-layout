@@ -18,13 +18,14 @@ SRC="$(mktemp -d)"
 trap 'rm -rf "$SRC"' EXIT
 
 # 配色：default 普通按钮（中灰，深色模式下仍可见）、danger 红色描边按钮、
-# inverse 蓝底主按钮上的白色、disabled 不可点按钮。
+# inverse 蓝底主按钮上的白色、disabled 不可点按钮、wathet 浅蓝卡片头部（与飞书 wathet 头部标题同色）。
 color_of() {
   case "$1" in
     default) echo "#646A73" ;;
     danger) echo "#F54A45" ;;
     inverse) echo "#FFFFFF" ;;
     disabled) echo "#BBBFC4" ;;
+    wathet) echo "#0F7FA8" ;;
     *) echo "unknown variant $1" >&2; exit 1 ;;
   esac
 }
@@ -38,6 +39,7 @@ ICONS=(
   send:inverse
   share-2:inverse
   circle-alert:disabled
+  network:wathet
 )
 
 mkdir -p "$OUT"

@@ -170,8 +170,8 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 
 	body := cardJSON(t, buildReviewBatchCard([]publishJob{published, pending}))
 	for _, want := range []string{
-		"FoodTalks 内容审核", "8月20日 · 2篇文章 · 待审核1篇 · 已发布1篇",
-		`"scale_type":"fit_horizontal"`, `"border_color":"grey-50"`, "#117", "#118",
+		"FBIF文章多平台自动同步", "8月20日 · 2篇文章 · 待审核1篇 · 已发布1篇",
+		`"scale_type":"fit_horizontal"`, `"border_color":"grey-100"`, "#117", "#118",
 		`\u003ctext_tag color='orange'\u003e待审核\u003c/text_tag\u003e`, `\u003ctext_tag color='green'\u003e已发布\u003c/text_tag\u003e`,
 		`\u003ctext_tag color='blue'\u003e能量饮料\u003c/text_tag\u003e \u003ctext_tag color='blue'\u003e女性消费`,
 		`"content":"公众号原文"`, `"action":"approve"`, `"action":"unpublish"`,
@@ -185,7 +185,7 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	}
 	// 2026-10-10 定稿：每篇一个白底细外框块（grey-50 线，不再灰底），篇间靠间距不画线；
 	// 按钮一律最小号、按内容宽度，不撑满。
-	for _, unwanted := range []string{`"background_style":"grey-50"`, `"grey-100"`, `"tag":"hr"`, `\u003ctext_tag color='neutral'\u003e转载`} {
+	for _, unwanted := range []string{`"background_style":"grey-50"`, `"background_style":"grey-100"`, `"tag":"hr"`, `\u003ctext_tag color='neutral'\u003e转载`} {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("聚合卡不应再出现 %s: %s", unwanted, body)
 		}
@@ -213,7 +213,14 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	job.RiskItems = []publishRiskItem{{Category: "factual", Reason: "已确认的事实错误", Certainty: publishRiskCertaintyConfirmed}}
 	card := buildReviewBatchCard([]publishJob{job})
 	if _, hasIcon := card["header"].(map[string]any)["icon"]; hasIcon {
-		t.Fatalf("头部图标会把标题推离正文左边线: %#v", card["header"])
+		t.Fatalf("没有图标 img_key 时头部不带图标: %#v", card["header"])
+	}
+	withIcons := buildReviewBatchCardWithIcons([]publishJob{job}, reviewCardTestIconKeys(t))
+	if icon, _ := withIcons["header"].(map[string]any)["icon"].(map[string]any); icon["tag"] != "custom_icon" || icon["img_key"] != "img_network-wathet" {
+		t.Fatalf("头部图标应为浅蓝 network（用户 2026-10-10 选定）: %#v", withIcons["header"])
+	}
+	if card["header"].(map[string]any)["template"] != "wathet" {
+		t.Fatalf("头部用浅蓝 wathet: %#v", card["header"])
 	}
 	elements := card["body"].(map[string]any)["elements"].([]any)
 	article := elements[0].(map[string]any)
