@@ -120,7 +120,7 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 //	标题行    ［状态］ + 链到网站的粗体标题（1 行）
 //	摘要行    灰色摘要（1 行）
 //	信息行    转载 · #任务号 + 蓝色标签（1 行，标签最多 3 个）
-//	按钮行    发布 · 公众号原文 · 下线 · 外部分发 · 重新同步（最右）· 重新同步结果（1 行）
+//	按钮行    发布 · 公众号原文 · 下线 · 外部分发 · 重新同步至网站（最右）· 重新同步结果（1 行）
 //
 // 无封面的旧稿只有右栏。
 func reviewBatchArticleBlock(job publishJob) map[string]any {
@@ -345,7 +345,7 @@ func reviewBatchRiskSection(jobs []publishJob) map[string]any {
 }
 
 // reviewBatchButtonRow 一行最小号按钮（2026-10-10 用户定）：推进类主操作（发布 / 重新发布）
-// → 公众号原文 → 下线 → 外部分发 → 重新同步（最右）。网站文章由标题链接打开，不另设按钮。
+// → 公众号原文 → 下线 → 外部分发 → 重新同步至网站（最右）。网站文章由标题链接打开，不另设按钮。
 // 重新同步结果跟在按钮后面（它就是「重新同步」的结果），不单占一行，右栏高度才固定。
 // 只表示状态、点不了的按钮（不可下线、发布中、已驳回等）不出，状态标签已经说明。
 func reviewBatchButtonRow(job publishJob) map[string]any {
@@ -502,8 +502,8 @@ func reviewCardSourceResyncButton(job publishJob) map[string]any {
 		job.FoodTalksNewsID <= 0 || strings.TrimSpace(job.SourceURL) == "" {
 		return nil
 	}
-	// 按钮叫「重新同步」（用户 2026-10-10），确认弹窗仍写明「重新同步至网站」。
-	button := reviewBatchButton("重新同步", "default", reviewIconResync)
+	// 按钮叫「重新同步至网站」（用户 2026-10-10 先改短为「重新同步」，又改回完整名）。
+	button := reviewBatchButton("重新同步至网站", "default", reviewIconResync)
 	// 同步进行中或待核对时不出按钮，按钮行下方的同步状态行已说明。
 	if publishSourceResyncProcessing(job.SourceResyncState) || job.SourceResyncState == publishSourceResyncReconciliationRequired {
 		return nil

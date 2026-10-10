@@ -105,9 +105,9 @@ func TestPublishedReviewCardShowsSourceResyncButtonInActionRow(t *testing.T) {
 			t.Fatalf("已发布卡片缺少 %q: %s", want, body)
 		}
 	}
-	// 下线窗口已过：不再出置灰的「不可下线」；按钮为公众号原文 → 重新同步（最右）。
+	// 下线窗口已过：不再出置灰的「不可下线」；按钮为公众号原文 → 重新同步至网站（最右）。
 	sourceAt := strings.Index(body, `"content":"公众号原文"`)
-	resyncAt := strings.Index(body, `"content":"重新同步"`)
+	resyncAt := strings.Index(body, `"content":"重新同步至网站"`)
 	if sourceAt < 0 || resyncAt < sourceAt || strings.Contains(body, "不可下线") || strings.Contains(body, `"content":"网站"`) {
 		t.Fatalf("按钮应为公众号原文、重新同步，不出不可下线和网站: %s", body)
 	}
@@ -126,7 +126,7 @@ func TestPublishedReviewCardShowsSourceResyncResultBelowButton(t *testing.T) {
 	job.SourceResyncCompletedAt = "2026-09-01T06:30:00Z"
 	// 同步结果跟在按钮行末尾（它就是「重新同步」的结果），不单占一行，右栏高度才固定。
 	body := cardJSON(t, buildReviewBatchCard([]publishJob{job}))
-	buttonAt := strings.Index(body, `"content":"重新同步"`)
+	buttonAt := strings.Index(body, `"content":"重新同步至网站"`)
 	successAt := strings.Index(body, "同步成功")
 	if buttonAt < 0 || successAt < buttonAt || !strings.Contains(body, "color='green'") {
 		t.Fatalf("同步成功提示应以绿色跟在按钮后面: %s", body)
@@ -135,7 +135,7 @@ func TestPublishedReviewCardShowsSourceResyncResultBelowButton(t *testing.T) {
 	job.SourceResyncState = publishSourceResyncFailed
 	job.SourceResyncError = "公众号正文抓取失败"
 	body = cardJSON(t, buildReviewBatchCard([]publishJob{job}))
-	buttonAt = strings.Index(body, `"content":"重新同步"`)
+	buttonAt = strings.Index(body, `"content":"重新同步至网站"`)
 	failureAt := strings.Index(body, "同步失败")
 	if buttonAt < 0 || failureAt < buttonAt || !strings.Contains(body, "color='red'") ||
 		!strings.Contains(body, job.SourceResyncError) {
@@ -351,7 +351,7 @@ func TestReviewBatchCardAllowsResyncAfterDistribution(t *testing.T) {
 	var buttons []map[string]any
 	reviewCardButtons(buildReviewBatchCard([]publishJob{job}), &buttons)
 	for _, button := range buttons {
-		if button["text"].(map[string]any)["content"] != "重新同步" {
+		if button["text"].(map[string]any)["content"] != "重新同步至网站" {
 			continue
 		}
 		if button["disabled"] == true || !strings.Contains(fmt.Sprint(button["behaviors"]), feishuCardActionResyncSource) {
@@ -419,8 +419,8 @@ func TestReviewBatchCardButtonOrderAndSubtitle(t *testing.T) {
 	for _, button := range publishedButtons {
 		publishedOrder = append(publishedOrder, fmt.Sprint(button["text"].(map[string]any)["content"]))
 	}
-	if strings.Join(publishedOrder, " ") != "公众号原文 下线 重新同步" {
-		t.Fatalf("已发布稿按钮应为公众号原文、下线、重新同步（最右），实际 %v", publishedOrder)
+	if strings.Join(publishedOrder, " ") != "公众号原文 下线 重新同步至网站" {
+		t.Fatalf("已发布稿按钮应为公众号原文、下线、重新同步至网站（最右），实际 %v", publishedOrder)
 	}
 	if !strings.Contains(body, "8月20日 · 已发布1篇") {
 		t.Fatalf("全批已发布时副标题应为「已发布N篇」: %s", body)
