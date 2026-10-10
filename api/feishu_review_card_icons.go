@@ -27,16 +27,15 @@ const reviewCardIconField = "_review_icon"
 
 // Lucide 图标名（与 cardicons/<名>-<配色>.png 对应）。
 const (
-	reviewIconExternalLink = "external-link" // 公众号原文 / 原网页
-	reviewIconPreview      = "eye"           // 审核预览
-	reviewIconResync       = "refresh-cw"    // 重新同步至网站
-	reviewIconUnpublish    = "eye-off"       // 下线
-	reviewIconPublish      = "send"          // 发布 / 强制发布 / 重新发布
-	reviewIconDistribute   = "share-2"       // 同步分发至其他平台
-	reviewIconBusy         = "loader-circle" // 发布中 / 下线中 / 正在重新同步
-	reviewIconLocked       = "lock"          // 不可下线
-	reviewIconRejected     = "circle-x"      // 已驳回
-	reviewIconAttention    = "circle-alert"  // 待人工处理 / 检查未完成 / 待核对
+	reviewIconSource     = "external-link" // 公众号 / 原网页
+	reviewIconSite       = "globe"         // 网站
+	reviewIconPreview    = "eye"           // 预览
+	reviewIconResync     = "refresh-cw"    // 重新同步至网站
+	reviewIconUnpublish  = "eye-off"       // 下线
+	reviewIconPublish    = "send"          // 发布 / 强制发布 / 重新发布
+	reviewIconDistribute = "share-2"       // 同步分发至其他平台
+	reviewIconLocked     = "lock"          // 已分发、不能再覆盖网站的「重新同步至网站」
+	reviewIconAttention  = "circle-alert"  // 检查未完成
 )
 
 // reviewCardIcons 「图标名-配色」→ 当前审核应用上传所得 img_key。

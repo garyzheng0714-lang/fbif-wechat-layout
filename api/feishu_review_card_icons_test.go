@@ -3,11 +3,13 @@ package main
 // feishu_review_card_icons_test.go — 审核聚合卡按钮图标与缩略图裁切守护。
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/color"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -95,7 +97,9 @@ func TestReviewBatchCardEveryButtonHasLucideIcon(t *testing.T) {
 	}
 	var buttons []map[string]any
 	reviewCardButtons(card, &buttons)
-	if len(buttons) < len(jobs) {
+	// 只表示状态的按钮已去掉（2026-10-10），这里覆盖发布、强制发布、检查未完成、下线、
+	// 重新同步（含已分发置灰）、重新发布这几类可见按钮。
+	if len(buttons) < 6 {
 		t.Fatalf("按钮数异常：%d", len(buttons))
 	}
 	for _, button := range buttons {
@@ -118,18 +122,29 @@ func TestReviewBatchCardIconColorFollowsButton(t *testing.T) {
 	pending := reviewCardTestJob(publishStageAwaitingReview)
 	pending.RiskLevel = publishRiskPass
 	body := cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{pending}, icons))
-	for _, want := range []string{"img_send-inverse", "img_external-link-default"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("待审核卡应有 %s: %s", want, body)
-		}
+	if !strings.Contains(body, "img_send-inverse") {
+		t.Fatalf("蓝底「发布」的图标应为白色: %s", body)
 	}
 	pending.RiskLevel = publishRiskBlock
 	if body := cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{pending}, icons)); !strings.Contains(body, "img_send-danger") {
 		t.Fatalf("强制发布是红色按钮，图标应为红色: %s", body)
 	}
-	rejected := reviewCardTestJob(publishStageRejected)
-	if body := cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{rejected}, icons)); !strings.Contains(body, "img_circle-x-disabled") {
-		t.Fatalf("已驳回是不可点按钮，图标应为浅灰: %s", body)
+	pending.RiskLevel = ""
+	if body := cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{pending}, icons)); !strings.Contains(body, "img_circle-alert-disabled") {
+		t.Fatalf("「检查未完成」是不可点按钮，图标应为浅灰: %s", body)
+	}
+	published := reviewCardTestJob(publishStagePublished)
+	published.FoodTalksNewsID = 7318
+	published.PublicationAction = publishPublicationActionPublish
+	published.PublishedAt = time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	published.UnpublishPolicySet = true
+	published.UnpublishWindowHours = 8
+	published.UnpublishWindowUntil = time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	body = cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{published}, icons))
+	for _, want := range []string{"img_refresh-cw-default", "img_eye-off-danger"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("已发布卡应有 %s（普通按钮中灰、下线红色）: %s", want, body)
+		}
 	}
 }
 
@@ -178,22 +193,77 @@ func TestReviewCardIconCacheUploadsOncePerApp(t *testing.T) {
 	}
 }
 
-// TestReviewBatchCoverCropNeverShowsSquarePadding 上传给飞书的封面是补成正方形的
-// 512×512（squareFeishuCoverPNG 上下浅灰补边）。缩略图裁切比例必须不窄于公众号封面
-// 的 2.35:1，否则会把补边裁进来，图片上下各露一条灰边。
-func TestReviewBatchCoverCropNeverShowsSquarePadding(t *testing.T) {
-	body := cardJSON(t, buildReviewBatchCard([]publishJob{reviewCardTestJob(publishStagePublished)}))
-	start := strings.Index(body, `"size":"`)
-	if start < 0 {
-		t.Fatalf("缩略图缺少裁切尺寸: %s", body)
+// TestReviewBatchCoverPrefersUnpaddedThumb 封面是 88×88 方图，优先用 16:9 无补边图
+// （ReviewThumbImgKey）居中裁成正方形。还没有这张图的旧稿退回补成正方形的 ReviewCoverImgKey：
+// 方图进方框不裁切，照片完整可见（只是上下带浅灰补边）。
+func TestReviewBatchCoverPrefersUnpaddedThumb(t *testing.T) {
+	job := reviewCardTestJob(publishStagePublished)
+	if cover := reviewBatchCover(job); cover["img_key"] != job.ReviewCoverImgKey || cover["size"] != reviewBatchCoverSize {
+		t.Fatalf("无小图时整张显示方形封面: %#v", cover)
 	}
-	size := body[start+len(`"size":"`):]
-	size = size[:strings.Index(size, `"`)]
-	var width, height int
-	if _, err := fmt.Sscanf(size, "%dpx %dpx", &width, &height); err != nil || height == 0 {
-		t.Fatalf("无法解析缩略图尺寸 %q: %v", size, err)
+	job.ReviewThumbImgKey = "img_v3_thumb"
+	if cover := reviewBatchCover(job); cover["img_key"] != "img_v3_thumb" || cover["scale_type"] != "crop_center" || cover["size"] != reviewBatchCoverSize {
+		t.Fatalf("有 16:9 小图时用小图裁成方形: %#v", cover)
 	}
-	if ratio := float64(width) / float64(height); ratio < 2.35 {
-		t.Fatalf("缩略图 %s 比例 %s 窄于 2.35:1，会露出正方形补边", size, strconv.FormatFloat(ratio, 'f', 2, 64))
+	job.ReviewThumbImgKey, job.ReviewCoverImgKey = "", ""
+	if cover := reviewBatchCover(job); cover != nil {
+		t.Fatalf("没有任何封面时不出图: %#v", cover)
+	}
+}
+
+// TestThumbFeishuCoverIsSixteenByNine 小图居中裁成 16:9、480×270，横图竖图都一样。
+func TestThumbFeishuCoverIsSixteenByNine(t *testing.T) {
+	for _, size := range [][2]int{{874, 372}, {600, 900}, {1280, 720}} {
+		src := testCoverPNG(t, size[0], size[1], color.RGBA{R: 30, G: 120, B: 200, A: 255})
+		out, err := thumbFeishuCoverJPEG(src)
+		if err != nil {
+			t.Fatalf("%v 生成小图失败: %v", size, err)
+		}
+		img, format, err := image.Decode(bytes.NewReader(out))
+		if err != nil || format != "jpeg" || img.Bounds().Dx() != feishuThumbWidth || img.Bounds().Dy() != feishuThumbHeight {
+			t.Fatalf("%v 小图应为 %dx%d JPEG，实际 %v %v %v", size, feishuThumbWidth, feishuThumbHeight, format, img.Bounds(), err)
+		}
+	}
+}
+
+// TestPrepareReviewThumbsUploadsOnceAndBacksOff 建聚合卡前给缺小图的稿子补传并落库；
+// 已有小图、没有封面的跳过；上传失败的稿子短时间内不重试，卡片照常发出。
+func TestPrepareReviewThumbsUploadsOnceAndBacksOff(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.pipeline.submit(testPublishSourceURL)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	job, err = env.store.update(job.ID, func(current *publishJob) { current.CoverURL = "https://img.example.com/cover.jpg" })
+	if err != nil {
+		t.Fatalf("set cover: %v", err)
+	}
+	var calls int
+	fail := true
+	env.pipeline.reviewThumbUploader = func(ctx context.Context, job publishJob) (string, error) {
+		calls++
+		if fail {
+			return "", fmt.Errorf("飞书图片接口不可用")
+		}
+		return "img_v3_thumb", nil
+	}
+	got := env.pipeline.prepareReviewThumbs(context.Background(), []publishJob{job})
+	if calls != 1 || got[0].ReviewThumbImgKey != "" {
+		t.Fatalf("上传失败时不落 key，calls=%d key=%q", calls, got[0].ReviewThumbImgKey)
+	}
+	fail = false
+	env.pipeline.prepareReviewThumbs(context.Background(), []publishJob{job})
+	if calls != 1 {
+		t.Fatalf("失败后 %s 内不应重试，calls=%d", reviewThumbRetryAfter, calls)
+	}
+	env.pipeline.reviewThumbFailedAt = nil
+	got = env.pipeline.prepareReviewThumbs(context.Background(), []publishJob{job})
+	stored, _ := env.store.byID(job.ID)
+	if calls != 2 || got[0].ReviewThumbImgKey != "img_v3_thumb" || stored.ReviewThumbImgKey != "img_v3_thumb" {
+		t.Fatalf("应上传并落库小图，calls=%d got=%q stored=%q", calls, got[0].ReviewThumbImgKey, stored.ReviewThumbImgKey)
+	}
+	env.pipeline.prepareReviewThumbs(context.Background(), got)
+	if calls != 2 {
+		t.Fatalf("已有小图不应重传，calls=%d", calls)
 	}
 }

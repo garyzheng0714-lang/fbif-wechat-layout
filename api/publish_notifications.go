@@ -488,7 +488,77 @@ func (p *publishPipeline) buildReviewBatchCard(ctx context.Context, jobID int64)
 	if err != nil {
 		return nil, err
 	}
+	jobs = p.prepareReviewThumbs(ctx, jobs)
 	return buildReviewBatchCardWithIcons(jobs, p.reviewCardIconsForJob(ctx, job)), nil
+}
+
+const reviewThumbRetryAfter = 30 * time.Minute
+
+// prepareReviewThumbs 给这批里还没有 16:9 封面小图的稿子补传（ReviewThumbImgKey，用各稿
+// 自己的审核应用，img_key 与上传应用绑定）。失败只记日志、同一稿 30 分钟内不再重试，
+// 聚合卡退回补成正方形的 ReviewCoverImgKey——小图永远不阻塞发卡。
+func (p *publishPipeline) prepareReviewThumbs(ctx context.Context, jobs []publishJob) []publishJob {
+	upload := p.reviewThumbUploader
+	if upload == nil {
+		if p.deliverySettings == nil {
+			return jobs
+		}
+		upload = p.uploadReviewThumbForJob
+	}
+	out := append([]publishJob(nil), jobs...)
+	for i, job := range out {
+		if strings.TrimSpace(job.ReviewThumbImgKey) != "" || strings.TrimSpace(job.CoverURL) == "" || p.reviewThumbRecentlyFailed(job.ID) {
+			continue
+		}
+		key, err := upload(ctx, job)
+		if err != nil {
+			p.markReviewThumbFailed(job.ID)
+			log.Printf("publish: WARN 任务 #%d 审核卡封面小图上传失败（本卡退回方形封面）: %v", job.ID, err)
+			continue
+		}
+		updated, err := p.store.update(job.ID, func(current *publishJob) {
+			current.ReviewThumbImgKey = key
+		})
+		if err != nil {
+			log.Printf("publish: WARN 任务 #%d 保存审核卡封面小图失败: %v", job.ID, err)
+			continue
+		}
+		out[i] = updated
+	}
+	return out
+}
+
+func (p *publishPipeline) uploadReviewThumbForJob(ctx context.Context, job publishJob) (string, error) {
+	settings, apps, err := p.reviewDeliveryForJob(job)
+	if err != nil {
+		return "", err
+	}
+	if len(settings.ChatIDs) == 0 {
+		return "", errors.New("没有配置审核群")
+	}
+	notifier, err := p.configuredReviewNotifier(settings, apps, settings.ChatIDs[0])
+	if err != nil {
+		return "", err
+	}
+	uploadCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return notifier.uploadThumbByURL(uploadCtx, job.CoverURL)
+}
+
+func (p *publishPipeline) reviewThumbRecentlyFailed(jobID int64) bool {
+	p.reviewThumbMu.Lock()
+	defer p.reviewThumbMu.Unlock()
+	failed, ok := p.reviewThumbFailedAt[jobID]
+	return ok && time.Since(failed) < reviewThumbRetryAfter
+}
+
+func (p *publishPipeline) markReviewThumbFailed(jobID int64) {
+	p.reviewThumbMu.Lock()
+	defer p.reviewThumbMu.Unlock()
+	if p.reviewThumbFailedAt == nil {
+		p.reviewThumbFailedAt = map[int64]time.Time{}
+	}
+	p.reviewThumbFailedAt[jobID] = time.Now()
 }
 
 func (p *publishPipeline) reviewCardBatch(anchor publishJob) ([]publishJob, error) {

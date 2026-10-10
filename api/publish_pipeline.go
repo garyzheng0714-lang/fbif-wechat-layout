@@ -171,6 +171,11 @@ type publishPipeline struct {
 	reviewCardUpdateMu sync.Mutex
 	// 审核聚合卡按钮图标的 img_key，按审核应用缓存（见 feishu_review_card_icons.go）。
 	reviewCardIconCache reviewCardIconCache
+	// 审核聚合卡 16:9 封面小图：上传失败的任务短时间内不重试（见 prepareReviewThumbs）。
+	// reviewThumbUploader 仅测试注入；为空时用任务自己的审核应用上传。
+	reviewThumbMu       sync.Mutex
+	reviewThumbFailedAt map[int64]time.Time
+	reviewThumbUploader func(ctx context.Context, job publishJob) (string, error)
 	// 来源出处按名称检索（type=10）的进程内短缓存。测试可预置 sourceTags。
 	sourceTagsMu     sync.Mutex
 	sourceTags       []foodTalksTag

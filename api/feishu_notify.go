@@ -339,27 +339,48 @@ func (n *feishuNotifier) tenantAccessToken(ctx context.Context) (string, error) 
 // 素材并返回 img_key（卡片 img 元素只认 img_key，不认外链 URL）。下载与上传都设
 // 上限与超时；任何失败由调用方降级为「卡片不带图」，绝不阻塞流水线。
 func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (string, error) {
-	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, imgURL, nil)
+	imgBytes, err := n.downloadCoverImage(ctx, imgURL)
 	if err != nil {
-		return "", fmt.Errorf("feishu: 构造封面下载请求: %w", err)
-	}
-	dlResp, err := n.httpClient.Do(dlReq)
-	if err != nil {
-		return "", fmt.Errorf("封面图下载失败: %w", err)
-	}
-	defer dlResp.Body.Close()
-	if dlResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("封面图下载失败（HTTP %d）", dlResp.StatusCode)
-	}
-	imgBytes, err := readBoundedBody(dlResp.Body, 10<<20)
-	if err != nil {
-		return "", fmt.Errorf("读封面图失败或超过 10 MB: %w", err)
+		return "", err
 	}
 	imgBytes, err = squareFeishuCoverPNG(imgBytes)
 	if err != nil {
 		return "", fmt.Errorf("生成方形封面失败: %w", err)
 	}
 	return n.uploadImageBytes(ctx, "cover.png", imgBytes)
+}
+
+// uploadThumbByURL 下载封面并上传审核聚合卡用的 16:9 小图（thumbFeishuCoverJPEG）。
+func (n *feishuNotifier) uploadThumbByURL(ctx context.Context, imgURL string) (string, error) {
+	imgBytes, err := n.downloadCoverImage(ctx, imgURL)
+	if err != nil {
+		return "", err
+	}
+	imgBytes, err = thumbFeishuCoverJPEG(imgBytes)
+	if err != nil {
+		return "", err
+	}
+	return n.uploadImageBytes(ctx, "thumb.jpg", imgBytes)
+}
+
+func (n *feishuNotifier) downloadCoverImage(ctx context.Context, imgURL string) ([]byte, error) {
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, imgURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("feishu: 构造封面下载请求: %w", err)
+	}
+	dlResp, err := n.httpClient.Do(dlReq)
+	if err != nil {
+		return nil, fmt.Errorf("封面图下载失败: %w", err)
+	}
+	defer dlResp.Body.Close()
+	if dlResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("封面图下载失败（HTTP %d）", dlResp.StatusCode)
+	}
+	imgBytes, err := readBoundedBody(dlResp.Body, 10<<20)
+	if err != nil {
+		return nil, fmt.Errorf("读封面图失败或超过 10 MB: %w", err)
+	}
+	return imgBytes, nil
 }
 
 // uploadImageBytes 把一张图片上传到飞书消息图片素材，返回卡片 img/custom_icon 可用的
