@@ -231,8 +231,9 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	}
 	text := textColumn["elements"].([]any)
 	head := fmt.Sprint(text[0].(map[string]any)["content"])
-	if !strings.HasPrefix(head, "<text_tag color='green'>已发布</text_tag> **") || !strings.Contains(head, "首年销量破亿") {
-		t.Fatalf("第一行是状态标签加粗体标题: %q", head)
+	if !strings.HasPrefix(head, "<text_tag color='green'>已发布</text_tag> **[") || !strings.Contains(head, "首年销量破亿") ||
+		!strings.Contains(head, "("+job.ArticleURL+")") {
+		t.Fatalf("第一行是状态标签加链到网站文章的粗体标题: %q", head)
 	}
 	if meta := fmt.Sprint(text[2].(map[string]any)["content"]); !strings.Contains(meta, "原创") || !strings.Contains(meta, "#72") || !strings.Contains(meta, "能量饮料") {
 		t.Fatalf("第三行是「原创/转载 · #任务号」加标签: %q", meta)

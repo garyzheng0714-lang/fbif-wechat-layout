@@ -110,20 +110,25 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 }
 
 // reviewBatchArticleBlock 一篇文章（2026-10-10 用户在十多种真机方案里定下「S2」：「这个
-// 感觉对了」）。结构照用户 cardkit 技能里从生产卡片提炼的「资讯列表」样板：
+// 感觉对了」，并定「优先保证电脑端的体验」）。结构照用户 cardkit 技能里从生产卡片提炼的「资讯列表」样板：
 //
 //   - 每篇一个浅灰块（只此一层，不嵌套），篇与篇之间靠间距分开，不画分隔线。
 //   - 左栏占宽度 1/4：公众号编辑自己选的 1:1 方形封面（ReviewThumbImgKey，见
 //     prepareReviewThumbs），fit_horizontal 铺满栏宽、不裁切，随卡片宽度自适应。
-//   - 右栏占 3/4：「［状态］**标题**」→ 灰色摘要 → 「转载 · #任务号」+ 蓝色标签 → 一排
+//   - 右栏占 3/4：「［状态］**标题**」（标题链到网站）→ 灰色摘要 → 「转载 · #任务号」+ 蓝色标签 → 一排
 //     最小号按钮（先操作、后查看：发布 / 重新同步至网站 / 下线 → 预览或网站 → 公众号）
 //     → 重新同步结果 → 外部分发按钮。
 //
 // 无封面的旧稿只有右栏。
 func reviewBatchArticleBlock(job publishJob) map[string]any {
 	status, color := reviewBatchStatus(job)
+	title := "**" + reviewCardSafeOrDash(job.Title, 200) + "**"
+	if _, target := reviewBatchSiteLink(job); target != "" {
+		// 标题链到网站（已发布开正式页，其余开审核预览；用户 2026-10-10）。
+		title = fmt.Sprintf("**[%s](%s)**", reviewCardSafeOrDash(job.Title, 200), target)
+	}
 	text := []any{map[string]any{"tag": "markdown",
-		"content": fmt.Sprintf("<text_tag color='%s'>%s</text_tag> **%s**", color, status, reviewCardSafeOrDash(job.Title, 200))}}
+		"content": fmt.Sprintf("<text_tag color='%s'>%s</text_tag> %s", color, status, title)}}
 	if summary := reviewCardSafeText(job.Summary, 180); summary != "" {
 		text = append(text, map[string]any{"tag": "markdown", "text_size": "notation",
 			"content": "<font color='grey'>" + summary + "</font>"})
