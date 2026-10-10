@@ -61,3 +61,4 @@ sips -s format png -z 48 48 "$SRC/wechat.ico" --out "$OUT/wechat-favicon.png" >/
 sips -s format png -z 48 48 "$SRC/foodtalks.ico" --out "$OUT/foodtalks-favicon.png" >/dev/null
 echo "$OUT/wechat-favicon.png"
 echo "$OUT/foodtalks-favicon.png"
+

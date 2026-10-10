@@ -116,7 +116,7 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 //   - 左栏占宽度 1/4：公众号编辑自己选的 1:1 方形封面（ReviewThumbImgKey，见
 //     prepareReviewThumbs），fit_horizontal 铺满栏宽、不裁切，随卡片宽度自适应。
 //   - 右栏占 3/4：「［状态］**标题**」（标题链到网站）→ 灰色摘要 → 「转载 · #任务号」+ 蓝色标签 → 一排
-//     最小号按钮（先操作、后查看：发布 / 重新同步至网站 / 下线 → 预览或网站 → 公众号）
+//     最小号按钮（先操作、后查看：发布 / 重新同步 / 下线 → 预览或网站 → 公众号）
 //     → 重新同步结果 → 外部分发按钮。
 //
 // 无封面的旧稿只有右栏。
@@ -127,19 +127,21 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		// 标题链到网站（已发布开正式页，其余开审核预览；用户 2026-10-10）。
 		title = fmt.Sprintf("**[%s](%s)**", reviewCardSafeOrDash(job.Title, 200), target)
 	}
-	text := []any{map[string]any{"tag": "markdown",
+	top := []any{map[string]any{"tag": "markdown",
 		"content": fmt.Sprintf("<text_tag color='%s'>%s</text_tag> %s", color, status, title)}}
 	if summary := reviewCardSafeText(job.Summary, 180); summary != "" {
-		text = append(text, map[string]any{"tag": "markdown", "text_size": "notation",
+		top = append(top, map[string]any{"tag": "markdown", "text_size": "notation",
 			"content": "<font color='grey'>" + summary + "</font>"})
 	}
-	text = append(text, map[string]any{"tag": "markdown", "text_size": "notation", "content": reviewBatchMeta(job)})
-	if buttons := reviewBatchButtonRow(job); buttons != nil {
-		buttons["margin"] = "4px 0px 0px 0px"
-		text = append(text, buttons)
-	}
+	top = append(top, map[string]any{"tag": "markdown", "text_size": "notation", "content": reviewBatchMeta(job)})
+	// 重新同步结果放在小字区另起一行（用户 2026-10-10），不夹在按钮下面。
 	if status := reviewCardSourceResyncStatus(job); status != nil {
-		text = append(text, status)
+		top = append(top, status)
+	}
+	cover := reviewBatchCover(job)
+	text := top
+	if buttons := reviewBatchButtonRow(job); buttons != nil {
+		text = append(text, buttons)
 	}
 	if job.Stage == publishStagePublished {
 		provenance, _, _ := publishExternalDistributionProvenance(job)
@@ -147,22 +149,26 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 			text = append(text, reviewCardExternalDistributionElementsStyled(job, true, true)...)
 		}
 	}
+	// 两栏都贴底：按钮行底边永远等于封面底边（用户 2026-10-10：「这一排的按钮，看看能否强制性
+	// 跟图片底部对齐」）。飞书卡片没有「上下撑开」排版，顶部只能让矮的一栏略低于高的一栏。
 	textColumn := map[string]any{
-		"tag": "column", "width": "weighted", "weight": 3, "padding": "8px 8px 8px 0px",
-		"direction": "vertical", "vertical_align": "top", "vertical_spacing": "4px", "elements": text,
+		"tag": "column", "width": "weighted", "weight": 3,
+		"direction": "vertical", "vertical_align": "bottom", "vertical_spacing": "4px", "elements": text,
 	}
 	columns := []any{textColumn}
-	if cover := reviewBatchCover(job); cover != nil {
+	if cover != nil {
 		columns = []any{map[string]any{
-			"tag": "column", "width": "weighted", "weight": 1, "padding": "8px 0px 8px 8px",
-			"vertical_align": "top", "elements": []any{cover},
+			"tag": "column", "width": "weighted", "weight": 1, "vertical_align": "bottom", "elements": []any{cover},
 		}, textColumn}
-	} else {
-		textColumn["padding"] = "8px 8px 8px 8px"
 	}
 	return map[string]any{
-		"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px",
-		"background_style": "grey-50", "columns": columns,
+		"tag": "column_set", "flex_mode": "none", "background_style": "grey-50",
+		"columns": []any{map[string]any{
+			"tag": "column", "width": "weighted", "weight": 1, "padding": "8px 8px 8px 8px",
+			"elements": []any{map[string]any{
+				"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px", "columns": columns,
+			}},
+		}},
 	}
 }
 
@@ -331,7 +337,7 @@ func reviewBatchRiskSection(jobs []publishJob) map[string]any {
 	}
 }
 
-// reviewBatchButtonRow 最小号按钮分两组：操作（发布 / 重新发布 → 重新同步至网站 → 下线）
+// reviewBatchButtonRow 最小号按钮分两组：操作（发布 / 重新发布 → 重新同步 → 下线）
 // 在前，查看（预览或网站 → 公众号）在后。电脑上两组同一行；手机放不下时整组换行，成为
 // 「操作一行、查看一行」，不会把某一枚按钮单独挤到下一行（2026-10-10 用户手机截图）。
 // 只表示状态、点不了的按钮（不可下线、发布中、已驳回等）不出，状态标签已经说明。
@@ -461,7 +467,8 @@ func reviewCardSourceResyncButton(job publishJob) map[string]any {
 		job.FoodTalksNewsID <= 0 || strings.TrimSpace(job.SourceURL) == "" {
 		return nil
 	}
-	button := reviewBatchButton("重新同步至网站", "default", reviewIconResync)
+	// 按钮叫「重新同步」（用户 2026-10-10），确认弹窗仍写明「重新同步至网站」。
+	button := reviewBatchButton("重新同步", "default", reviewIconResync)
 	if strings.TrimSpace(job.ExternalDistributionState) != "" {
 		button["disabled"] = true
 		button["disabled_tips"] = feishuPlainText("已分发到其他平台，为避免各平台版本不一致，不能再覆盖网站文章")

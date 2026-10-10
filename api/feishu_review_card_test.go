@@ -125,21 +125,23 @@ func TestPublishedReviewCardShowsSourceResyncResultBelowButton(t *testing.T) {
 	job.PublicationAction = publishPublicationActionPublish
 	job.SourceResyncState = publishSourceResyncSucceeded
 	job.SourceResyncCompletedAt = "2026-09-01T06:30:00Z"
+	// 同步结果在小字区另起一行（「转载 · #编号」下面、按钮上面；用户 2026-10-10）。
 	body := cardJSON(t, buildReviewBatchCard([]publishJob{job}))
-	buttonAt := strings.Index(body, "重新同步至网站")
+	metaAt := strings.Index(body, "#72")
 	successAt := strings.Index(body, "同步成功")
-	if buttonAt < 0 || successAt < buttonAt || !strings.Contains(body, "color='green'") {
-		t.Fatalf("同步成功提示应以绿色显示在按钮下方: %s", body)
+	buttonAt := strings.Index(body, `"content":"重新同步"`)
+	if metaAt < 0 || successAt < metaAt || buttonAt < successAt || !strings.Contains(body, "color='green'") {
+		t.Fatalf("同步成功提示应以绿色显示在小字区、按钮上方: %s", body)
 	}
 
 	job.SourceResyncState = publishSourceResyncFailed
 	job.SourceResyncError = "公众号正文抓取失败"
 	body = cardJSON(t, buildReviewBatchCard([]publishJob{job}))
-	buttonAt = strings.Index(body, "重新同步至网站")
+	buttonAt = strings.Index(body, `"content":"重新同步"`)
 	failureAt := strings.Index(body, "同步失败")
-	if buttonAt < 0 || failureAt < buttonAt || !strings.Contains(body, "color='red'") ||
+	if buttonAt < 0 || failureAt < 0 || buttonAt < failureAt || !strings.Contains(body, "color='red'") ||
 		!strings.Contains(body, job.SourceResyncError) {
-		t.Fatalf("同步失败提示应以红色显示在按钮下方并给出原因: %s", body)
+		t.Fatalf("同步失败提示应以红色显示在小字区、按钮上方并给出原因: %s", body)
 	}
 }
 
@@ -217,9 +219,13 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	}
 	elements := card["body"].(map[string]any)["elements"].([]any)
 	article := elements[0].(map[string]any)
-	columns := article["columns"].([]any)
-	if article["background_style"] != "grey-50" || article["flex_mode"] != "none" || len(columns) != 2 {
-		t.Fatalf("每篇是一个浅灰块，左图右文: %#v", article)
+	if article["background_style"] != "grey-50" {
+		t.Fatalf("每篇是一个浅灰块: %#v", article)
+	}
+	inner := article["columns"].([]any)[0].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	columns := inner["columns"].([]any)
+	if inner["flex_mode"] != "none" || len(columns) != 2 {
+		t.Fatalf("块内左图右文: %#v", inner)
 	}
 	coverColumn, textColumn := columns[0].(map[string]any), columns[1].(map[string]any)
 	if coverColumn["width"] != "weighted" || coverColumn["weight"] != 1 || textColumn["width"] != "weighted" || textColumn["weight"] != 3 {
@@ -260,8 +266,29 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	// 无封面旧稿只有文字栏。
 	job.ReviewCoverImgKey = ""
 	noCover := buildReviewBatchCard([]publishJob{job})["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)
-	if cols := noCover["columns"].([]any); len(cols) != 1 || strings.Contains(cardJSON(t, noCover), `"tag":"img"`) {
+	noCoverInner := noCover["columns"].([]any)[0].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	if cols := noCoverInner["columns"].([]any); len(cols) != 1 || strings.Contains(cardJSON(t, noCover), `"tag":"img"`) {
 		t.Fatalf("无封面时只有文字栏: %#v", noCover)
+	}
+}
+
+// TestReviewBatchButtonsSitOnCoverBottom 按钮行底边对齐封面底边（用户 2026-10-10）：
+// 封面栏和文字栏都贴底，按钮是文字栏最后一行（原创稿的外部分发按钮除外）。
+func TestReviewBatchButtonsSitOnCoverBottom(t *testing.T) {
+	job := reviewCardTestJob(publishStagePublished)
+	job.FoodTalksNewsID = 7318
+	job.PublicationAction = publishPublicationActionPublish
+	job.SourceURL = "https://mp.weixin.qq.com/s/abc"
+	block := buildReviewBatchCard([]publishJob{job})["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	inner := block["columns"].([]any)[0].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	for _, col := range inner["columns"].([]any) {
+		if col.(map[string]any)["vertical_align"] != "bottom" {
+			t.Fatalf("封面栏和文字栏都要贴底: %#v", col)
+		}
+	}
+	text := inner["columns"].([]any)[1].(map[string]any)["elements"].([]any)
+	if last := cardJSON(t, text[len(text)-1].(map[string]any)); !strings.Contains(last, `"tag":"button"`) {
+		t.Fatalf("按钮应是文字栏最后一行: %s", last)
 	}
 }
 
@@ -327,7 +354,7 @@ func TestReviewBatchCardLocksResyncAfterDistribution(t *testing.T) {
 	var buttons []map[string]any
 	reviewCardButtons(buildReviewBatchCardWithIcons([]publishJob{job}, reviewCardTestIconKeys(t)), &buttons)
 	for _, button := range buttons {
-		if button["text"].(map[string]any)["content"] != "重新同步至网站" {
+		if button["text"].(map[string]any)["content"] != "重新同步" {
 			continue
 		}
 		if button["disabled"] != true || button["behaviors"] != nil || button["disabled_tips"] == nil ||
@@ -451,8 +478,8 @@ func TestReviewBatchButtonsWrapAsGroups(t *testing.T) {
 		}
 		return strings.Join(out, " ")
 	}
-	if got := labels(groups[0]); got != "重新同步至网站 下线" {
-		t.Fatalf("操作组应为重新同步至网站、下线，实际 %q", got)
+	if got := labels(groups[0]); got != "重新同步 下线" {
+		t.Fatalf("操作组应为重新同步、下线，实际 %q", got)
 	}
 	if got := labels(groups[1]); got != "网站 公众号" {
 		t.Fatalf("查看组应为网站、公众号，实际 %q", got)
