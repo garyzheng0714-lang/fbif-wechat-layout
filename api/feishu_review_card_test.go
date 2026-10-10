@@ -171,7 +171,7 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	body := cardJSON(t, buildReviewBatchCard([]publishJob{published, pending}))
 	for _, want := range []string{
 		"FoodTalks 内容审核", "8月20日 · 2篇文章 · 待审核1篇 · 已发布1篇",
-		`"size":"` + reviewBatchCoverSize + `"`, `"background_style":"grey-50"`, "#117", "#118",
+		`"scale_type":"fit_horizontal"`, `"background_style":"grey-50"`, "#117", "#118",
 		`\u003ctext_tag color='orange'\u003e待审核\u003c/text_tag\u003e`, `\u003ctext_tag color='green'\u003e已发布\u003c/text_tag\u003e`,
 		`\u003ctext_tag color='blue'\u003e能量饮料\u003c/text_tag\u003e \u003ctext_tag color='blue'\u003e女性消费`,
 		`"content":"公众号原文"`, `"action":"approve"`, `"action":"unpublish"`,
@@ -222,15 +222,16 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	}
 	inner := article["columns"].([]any)[0].(map[string]any)["elements"].([]any)[0].(map[string]any)
 	columns := inner["columns"].([]any)
-	if len(columns) != 2 || inner["flex_mode"] != "stretch" {
-		t.Fatalf("块内左图右文，手机窄屏堆叠: %#v", inner)
+	if len(columns) != 2 || inner["flex_mode"] != "none" {
+		t.Fatalf("块内左图右文，手机上也不堆叠（图片按比例缩）: %#v", inner)
 	}
 	coverColumn, textColumn := columns[0].(map[string]any), columns[1].(map[string]any)
-	if coverColumn["width"] != reviewBatchCoverWidth || coverColumn["vertical_align"] != "top" || textColumn["vertical_align"] != "top" {
-		t.Fatalf("封面栏固定宽，两栏贴顶: %#v | %#v", coverColumn, textColumn)
+	if coverColumn["weight"] != reviewBatchCoverWeight || textColumn["weight"] != reviewBatchTextWeight ||
+		coverColumn["vertical_align"] != "top" || textColumn["vertical_align"] != "top" {
+		t.Fatalf("图文按比例分宽、两栏贴顶: %#v | %#v", coverColumn, textColumn)
 	}
-	if cover := coverColumn["elements"].([]any)[0].(map[string]any); cover["size"] != reviewBatchCoverSize {
-		t.Fatalf("封面固定边长: %#v", cover)
+	if cover := coverColumn["elements"].([]any)[0].(map[string]any); cover["scale_type"] != "fit_horizontal" || cover["size"] != nil {
+		t.Fatalf("封面铺满封面栏、随栏宽缩放: %#v", cover)
 	}
 	rows := textColumn["elements"].([]any)
 	if len(rows) != 4 {
@@ -340,29 +341,28 @@ func TestReviewBatchCardHidesDistributionNotices(t *testing.T) {
 	}
 }
 
-// TestReviewBatchCardLocksResyncAfterDistribution 已分发的稿子服务端不许覆盖；聚合卡
-// 不再显示分发提示，所以按钮不能凭空消失，要置灰并说明原因。
-func TestReviewBatchCardLocksResyncAfterDistribution(t *testing.T) {
+// TestReviewBatchCardAllowsResyncAfterDistribution 已外部分发的稿子照样能重新同步到网站：重新
+// 同步只影响 FoodTalks 网站稿，外部平台对不上就对不上（2026-10-10 用户裁定，取消原先的限制）。
+func TestReviewBatchCardAllowsResyncAfterDistribution(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
 	job.FoodTalksNewsID = 7318
 	job.PublicationAction = publishPublicationActionPublish
 	job.ExternalDistributionState = publishExternalDistributionSucceeded
 	var buttons []map[string]any
-	reviewCardButtons(buildReviewBatchCardWithIcons([]publishJob{job}, reviewCardTestIconKeys(t)), &buttons)
+	reviewCardButtons(buildReviewBatchCard([]publishJob{job}), &buttons)
 	for _, button := range buttons {
 		if button["text"].(map[string]any)["content"] != "重新同步" {
 			continue
 		}
-		if button["disabled"] != true || button["behaviors"] != nil || button["disabled_tips"] == nil ||
-			button["icon"].(map[string]any)["img_key"] != "img_lock-disabled" {
-			t.Fatalf("已分发稿的重新同步按钮应置灰加锁并说明原因: %#v", button)
+		if button["disabled"] == true || !strings.Contains(fmt.Sprint(button["behaviors"]), feishuCardActionResyncSource) {
+			t.Fatalf("已分发稿的重新同步按钮应可点: %#v", button)
 		}
-		if err := sourceResyncEligibility(job); err == nil || !strings.Contains(err.Error(), "外部平台分发") {
-			t.Fatalf("服务端仍须以「已发起外部平台分发」拒绝覆盖，实际 %v", err)
+		if err := sourceResyncEligibility(job); err != nil && strings.Contains(err.Error(), "外部平台") {
+			t.Fatalf("服务端不得再以外部分发为由拒绝重新同步: %v", err)
 		}
 		return
 	}
-	t.Fatalf("已分发稿也要显示（置灰的）重新同步按钮: %#v", buttons)
+	t.Fatalf("已分发稿也要有重新同步按钮: %#v", buttons)
 }
 
 // reviewCardActionButtons 只取状态操作按钮，不含图片下方打开链接的查看按钮。

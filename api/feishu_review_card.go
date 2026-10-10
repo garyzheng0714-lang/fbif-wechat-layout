@@ -113,7 +113,7 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 // 保证电脑端的体验」「每个应该是独立的块，这样才好微调」）。结构照用户 cardkit 技能里从
 // 生产卡片提炼的「资讯列表」样板，每篇一个浅灰块，左封面右文字。
 //
-// 右栏每一块都是固定的一行，超长以「…」截断，所以右栏高度固定；封面是同样高度的方图，
+// 右栏每一块都是固定的一行，超长以「…」截断，所以右栏高度固定；封面是电脑上同样高度的方图，
 // 两栏都贴顶，于是标题顶边对齐封面顶边、按钮行底边对齐封面底边（用户：「这一排的按钮，
 // 看看能否强制性跟图片底部对齐」）。各块之间的距离都是下面的具名常量，按真机微调：
 //
@@ -153,13 +153,13 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		text = append(text, buttons)
 	}
 	textColumn := map[string]any{
-		"tag": "column", "width": "weighted", "weight": 1,
+		"tag": "column", "width": "weighted", "weight": reviewBatchTextWeight,
 		"direction": "vertical", "vertical_align": "top", "vertical_spacing": "0px", "elements": text,
 	}
 	columns := []any{textColumn}
 	if cover := reviewBatchCover(job); cover != nil {
 		columns = []any{map[string]any{
-			"tag": "column", "width": reviewBatchCoverWidth, "vertical_align": "top", "elements": []any{cover},
+			"tag": "column", "width": "weighted", "weight": reviewBatchCoverWeight, "vertical_align": "top", "elements": []any{cover},
 		}, textColumn}
 	}
 	return map[string]any{
@@ -167,28 +167,29 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		"columns": []any{map[string]any{
 			"tag": "column", "width": "weighted", "weight": 1, "padding": reviewBatchBlockPadding,
 			"elements": []any{map[string]any{
-				// stretch = 飞书「窄屏自适应·堆叠」：电脑上左图右文不变，手机屏窄时上下堆叠成「图在上、
-				// 文字整行在下」，文字不再被固定宽的封面挤成窄条（2026-10-10 用户手机截图：「手机端，
-				// 真的有点丑了」「卡片工具里有一个手机端的设置选项，就是可以设置为堆叠」）。
-				"tag": "column_set", "flex_mode": "stretch", "horizontal_spacing": "12px", "columns": columns,
+				// 不堆叠，图文按 1:4 分宽：电脑上封面约 110px、与右栏四行等高；手机上封面随之缩到约
+				// 55px 跟文字并排，文字不再被固定宽的封面挤成窄条。图片组件没有窄屏规则，只能让它跟着
+				// 栏宽走（2026-10-10 用户在「堆叠 + 108 小图 / 堆叠 + 铺满裁扁 / 不堆叠按比例缩」三种
+				// 真机对比里选了按比例缩）。
+				"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px", "columns": columns,
 			}},
 		}},
 	}
 }
 
-// 微调用的尺寸（2026-10-10 真机实测后定）。右栏四行高度之和 = 封面边长。
+// 微调用的尺寸（2026-10-10 真机实测后定）。电脑上右栏四行高度之和 ≈ 封面边长（约 110px）。
 const (
 	reviewBatchBlockPadding  = "10px 10px 10px 10px"
-	reviewBatchCoverWidth    = "108px"
-	reviewBatchCoverSize     = "108px 108px"
+	reviewBatchCoverWeight   = 1
+	reviewBatchTextWeight    = 4
 	reviewBatchSummaryMargin = "4px 0px 0px 0px"
 	reviewBatchMetaMargin    = "6px 0px 0px 0px"
 	reviewBatchButtonMargin  = "10px 0px 0px 0px"
 )
 
-// reviewBatchCover 固定边长的方形封面（reviewBatchCoverSize）。优先用审核卡专门上传的方图
-// （ReviewThumbImgKey：公众号编辑选的 1:1 封面，没有时由横版封面居中裁出），方图进方框不裁切；
-// 还没有方图的旧稿退回 ReviewCoverImgKey——那张是补成正方形的横版封面（上下浅灰补边）。
+// reviewBatchCover 方形封面，fit_horizontal 铺满封面栏宽度（电脑约 110px、手机约 55px）。优先用
+// 审核卡专门上传的方图（ReviewThumbImgKey：公众号编辑选的 1:1 封面，没有时由横版封面居中裁出），
+// 不裁切；还没有方图的旧稿退回 ReviewCoverImgKey——那张是补成正方形的横版封面（上下浅灰补边）。
 func reviewBatchCover(job publishJob) map[string]any {
 	key := strings.TrimSpace(job.ReviewThumbImgKey)
 	if key == "" {
@@ -199,7 +200,7 @@ func reviewBatchCover(job publishJob) map[string]any {
 	}
 	return map[string]any{
 		"tag": "img", "img_key": key, "alt": feishuPlainText("文章封面图"), "preview": true,
-		"scale_type": "crop_center", "size": reviewBatchCoverSize, "corner_radius": "6px",
+		"scale_type": "fit_horizontal", "corner_radius": "6px",
 	}
 }
 
@@ -494,9 +495,8 @@ func reviewBatchAwaitingActionButton(job publishJob) (map[string]any, bool) {
 	return button, true
 }
 
-// reviewCardSourceResyncButton 已发起外部分发的稿子服务端不许再覆盖（sourceResyncEligibility：
-// 防多平台版本分叉）。按钮不藏，置灰加锁并在悬停说明原因——聚合卡已不显示分发提示，
-// 按钮凭空消失会让人不知道为什么（用户 2026-10-09：「这个为什么没有重新同步至网站」）。
+// reviewCardSourceResyncButton 已发布的流水线稿可以重新同步到网站（含已外部分发的，2026-10-10
+// 用户裁定）；后台人工发布稿、缺资讯 ID 或原文链接的不出按钮；同步进行中或待核对时也不出。
 func reviewCardSourceResyncButton(job publishJob) map[string]any {
 	if job.Stage != publishStagePublished || job.PublicationAction == publishPublicationActionManualCMS ||
 		job.FoodTalksNewsID <= 0 || strings.TrimSpace(job.SourceURL) == "" {
@@ -504,11 +504,6 @@ func reviewCardSourceResyncButton(job publishJob) map[string]any {
 	}
 	// 按钮叫「重新同步」（用户 2026-10-10），确认弹窗仍写明「重新同步至网站」。
 	button := reviewBatchButton("重新同步", "default", reviewIconResync)
-	if strings.TrimSpace(job.ExternalDistributionState) != "" {
-		button["disabled"] = true
-		button["disabled_tips"] = feishuPlainText("已分发到其他平台，为避免各平台版本不一致，不能再覆盖网站文章")
-		return withReviewIcon(button, reviewIconLocked)
-	}
 	// 同步进行中或待核对时不出按钮，按钮行下方的同步状态行已说明。
 	if publishSourceResyncProcessing(job.SourceResyncState) || job.SourceResyncState == publishSourceResyncReconciliationRequired {
 		return nil

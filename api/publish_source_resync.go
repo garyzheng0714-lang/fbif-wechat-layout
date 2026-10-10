@@ -97,9 +97,8 @@ func sourceResyncEligibility(job publishJob) error {
 	if publishSourceResyncBlocksOtherActions(job) {
 		return errors.New("这篇文章正在重新同步，或上次结果待人工核对")
 	}
-	if strings.TrimSpace(job.ExternalDistributionState) != "" {
-		return errors.New("这篇文章已发起外部平台分发，为避免多平台版本分叉，不能再直接覆盖")
-	}
+	// 已外部分发的稿子照样可以重新同步：重新同步只影响 FoodTalks 网站稿，与头条号、百家号等
+	// 外部平台各自独立，对不上就对不上（2026-10-10 用户裁定，取消原先「已分发不许覆盖」的限制）。
 	if !validPersistedPublishApproval(job) {
 		return errors.New("文章缺少与当前内容版本匹配的审核通过记录")
 	}

@@ -33,7 +33,6 @@ const (
 	reviewIconUnpublish  = "eye-off"        // 下线
 	reviewIconPublish    = "send"           // 发布 / 强制发布 / 重新发布
 	reviewIconDistribute = "share-2"        // 同步分发至其他平台
-	reviewIconLocked     = "lock"           // 已分发、不能再覆盖网站的「重新同步至网站」
 	reviewIconAttention  = "circle-alert"   // 检查未完成
 )
 

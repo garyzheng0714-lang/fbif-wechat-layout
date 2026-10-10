@@ -37,7 +37,6 @@ ICONS=(
   send:danger
   send:inverse
   share-2:inverse
-  lock:disabled
   circle-alert:disabled
 )
 
