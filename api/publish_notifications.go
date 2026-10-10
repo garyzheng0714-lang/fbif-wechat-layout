@@ -507,7 +507,8 @@ func (p *publishPipeline) prepareReviewThumbs(ctx context.Context, jobs []publis
 	}
 	out := append([]publishJob(nil), jobs...)
 	for i, job := range out {
-		if strings.TrimSpace(job.ReviewThumbImgKey) != "" || strings.TrimSpace(job.CoverURL) == "" || p.reviewThumbRecentlyFailed(job.ID) {
+		if strings.TrimSpace(job.ReviewThumbImgKey) != "" || p.reviewThumbRecentlyFailed(job.ID) ||
+			(strings.TrimSpace(job.CoverURL) == "" && !isSafeWeChatArticleURL(job.SourceURL)) {
 			continue
 		}
 		key, err := upload(ctx, job)
@@ -540,9 +541,33 @@ func (p *publishPipeline) uploadReviewThumbForJob(ctx context.Context, job publi
 	if err != nil {
 		return "", err
 	}
-	uploadCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	uploadCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	return notifier.uploadThumbByURL(uploadCtx, job.CoverURL)
+	coverURL := reviewSquareCoverURL(uploadCtx, job, fetchArticleHTML)
+	if coverURL == "" {
+		return "", errors.New("没有可用的封面图")
+	}
+	return notifier.uploadThumbByURL(uploadCtx, coverURL)
+}
+
+// reviewSquareCoverURL 审核卡方形封面的来源：优先公众号编辑为列表「次条」位选的 1:1 封面
+// （原文页的 cdn_url_1_1，构图由编辑定，不用我们裁；2026-10-10 用户看过真机「这个感觉
+// 对了」）；原文页取不到时退回横版封面（随后居中裁成方图）。公众号旧链接存的是 http，
+// 而 http 只回「未知错误」页（2026-10-10 实测），统一按 https 取。
+func reviewSquareCoverURL(ctx context.Context, job publishJob, fetchHTML func(context.Context, string) (string, string, error)) string {
+	if sourceURL := strings.TrimSpace(job.SourceURL); isSafeWeChatArticleURL(sourceURL) {
+		if strings.HasPrefix(sourceURL, "http://") {
+			sourceURL = "https://" + strings.TrimPrefix(sourceURL, "http://")
+		}
+		if raw, _, err := fetchHTML(ctx, sourceURL); err == nil {
+			if square := extractWechatSquareCover(raw); square != "" {
+				return square
+			}
+		} else {
+			log.Printf("publish: 任务 #%d 读原文页取方形封面失败，退回横版封面: %v", job.ID, err)
+		}
+	}
+	return strings.TrimSpace(job.CoverURL)
 }
 
 func (p *publishPipeline) reviewThumbRecentlyFailed(jobID int64) bool {

@@ -122,8 +122,10 @@ func TestReviewBatchCardIconColorFollowsButton(t *testing.T) {
 	pending := reviewCardTestJob(publishStageAwaitingReview)
 	pending.RiskLevel = publishRiskPass
 	body := cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{pending}, icons))
-	if !strings.Contains(body, "img_send-inverse") {
-		t.Fatalf("蓝底「发布」的图标应为白色: %s", body)
+	for _, want := range []string{"img_send-inverse", "img_foodtalks-favicon", "img_wechat-favicon"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("待审核卡应有 %s（蓝底「发布」白色图标，预览、公众号用两个网站的网站图标）: %s", want, body)
+		}
 	}
 	pending.RiskLevel = publishRiskBlock
 	if body := cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{pending}, icons)); !strings.Contains(body, "img_send-danger") {
@@ -193,17 +195,16 @@ func TestReviewCardIconCacheUploadsOncePerApp(t *testing.T) {
 	}
 }
 
-// TestReviewBatchCoverPrefersUnpaddedThumb 封面是 88×88 方图，优先用 16:9 无补边图
-// （ReviewThumbImgKey）居中裁成正方形。还没有这张图的旧稿退回补成正方形的 ReviewCoverImgKey：
-// 方图进方框不裁切，照片完整可见（只是上下带浅灰补边）。
-func TestReviewBatchCoverPrefersUnpaddedThumb(t *testing.T) {
+// TestReviewBatchCoverPrefersSquareThumb 封面优先用审核卡专门上传的方图（ReviewThumbImgKey），
+// 没有时退回补成正方形的 ReviewCoverImgKey；两者都是方图，fit_horizontal 铺满左栏宽度、不裁切。
+func TestReviewBatchCoverPrefersSquareThumb(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
-	if cover := reviewBatchCover(job); cover["img_key"] != job.ReviewCoverImgKey || cover["size"] != reviewBatchCoverSize {
-		t.Fatalf("无小图时整张显示方形封面: %#v", cover)
+	if cover := reviewBatchCover(job); cover["img_key"] != job.ReviewCoverImgKey || cover["scale_type"] != "fit_horizontal" || cover["size"] != nil {
+		t.Fatalf("无方图时整张显示补成方形的封面: %#v", cover)
 	}
-	job.ReviewThumbImgKey = "img_v3_thumb"
-	if cover := reviewBatchCover(job); cover["img_key"] != "img_v3_thumb" || cover["scale_type"] != "crop_center" || cover["size"] != reviewBatchCoverSize {
-		t.Fatalf("有 16:9 小图时用小图裁成方形: %#v", cover)
+	job.ReviewThumbImgKey = "img_v3_square"
+	if cover := reviewBatchCover(job); cover["img_key"] != "img_v3_square" || cover["scale_type"] != "fit_horizontal" {
+		t.Fatalf("有方图时用方图: %#v", cover)
 	}
 	job.ReviewThumbImgKey, job.ReviewCoverImgKey = "", ""
 	if cover := reviewBatchCover(job); cover != nil {
@@ -211,18 +212,51 @@ func TestReviewBatchCoverPrefersUnpaddedThumb(t *testing.T) {
 	}
 }
 
-// TestThumbFeishuCoverIsSixteenByNine 小图居中裁成 16:9、480×270，横图竖图都一样。
-func TestThumbFeishuCoverIsSixteenByNine(t *testing.T) {
-	for _, size := range [][2]int{{874, 372}, {600, 900}, {1280, 720}} {
+// TestThumbFeishuCoverIsSquare 方图居中裁成正方形、480×480，横图竖图都一样；本身是方图的
+// （公众号编辑选的 1:1 封面）只缩放不裁。
+func TestThumbFeishuCoverIsSquare(t *testing.T) {
+	for _, size := range [][2]int{{874, 372}, {600, 900}, {720, 720}} {
 		src := testCoverPNG(t, size[0], size[1], color.RGBA{R: 30, G: 120, B: 200, A: 255})
 		out, err := thumbFeishuCoverJPEG(src)
 		if err != nil {
-			t.Fatalf("%v 生成小图失败: %v", size, err)
+			t.Fatalf("%v 生成方图失败: %v", size, err)
 		}
 		img, format, err := image.Decode(bytes.NewReader(out))
-		if err != nil || format != "jpeg" || img.Bounds().Dx() != feishuThumbWidth || img.Bounds().Dy() != feishuThumbHeight {
-			t.Fatalf("%v 小图应为 %dx%d JPEG，实际 %v %v %v", size, feishuThumbWidth, feishuThumbHeight, format, img.Bounds(), err)
+		if err != nil || format != "jpeg" || img.Bounds().Dx() != feishuThumbSize || img.Bounds().Dy() != feishuThumbSize {
+			t.Fatalf("%v 方图应为 %d² JPEG，实际 %v %v %v", size, feishuThumbSize, format, img.Bounds(), err)
 		}
+	}
+}
+
+// TestReviewSquareCoverPrefersEditorChoice 方图来源优先是公众号原文页的 cdn_url_1_1（编辑选的
+// 1:1 封面）；http 旧链接按 https 取（http 只回「未知错误」页）；取不到退回横版封面。
+func TestReviewSquareCoverPrefersEditorChoice(t *testing.T) {
+	job := reviewCardTestJob(publishStagePublished)
+	job.SourceURL = "http://mp.weixin.qq.com/s?__biz=MzA5&mid=1&idx=1&sn=abc"
+	job.CoverURL = "https://oss.example.com/wide.jpg"
+	var fetched string
+	page := `var msg_cdn_url = "https://mmbiz.qpic.cn/wide/0?wx_fmt=jpeg";
+var cdn_url_1_1 = "https://mmbiz.qpic.cn/sz_mmbiz_jpg/square/0?wx_fmt=jpeg";`
+	got := reviewSquareCoverURL(context.Background(), job, func(_ context.Context, raw string) (string, string, error) {
+		fetched = raw
+		return page, raw, nil
+	})
+	if got != "https://mmbiz.qpic.cn/sz_mmbiz_jpg/square/0?wx_fmt=jpeg" || !strings.HasPrefix(fetched, "https://mp.weixin.qq.com/") {
+		t.Fatalf("应按 https 取原文页并用编辑选的方图，fetched=%q got=%q", fetched, got)
+	}
+	got = reviewSquareCoverURL(context.Background(), job, func(context.Context, string) (string, string, error) {
+		return "", "", fmt.Errorf("环境异常")
+	})
+	if got != job.CoverURL {
+		t.Fatalf("取不到原文页时退回横版封面，实际 %q", got)
+	}
+	job.SourceURL = "https://www.example.com/news/1"
+	got = reviewSquareCoverURL(context.Background(), job, func(context.Context, string) (string, string, error) {
+		t.Fatalf("非公众号来源不应去抓页面")
+		return "", "", nil
+	})
+	if got != job.CoverURL {
+		t.Fatalf("非公众号来源直接用横版封面，实际 %q", got)
 	}
 }
 

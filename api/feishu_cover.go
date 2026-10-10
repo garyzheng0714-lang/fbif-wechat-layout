@@ -18,14 +18,11 @@ const feishuCoverSquareSize = 512
 
 var feishuCoverBackground = color.RGBA{R: 0xF7, G: 0xF8, B: 0xFA, A: 0xFF}
 
-const (
-	feishuThumbWidth  = 960
-	feishuThumbHeight = 540
-)
+const feishuThumbSize = 480
 
-// thumbFeishuCoverJPEG 审核聚合卡的封面图：居中裁成 16:9、缩到 960×540，不补边。电脑上
-// 显示约 200×113，手机上铺满整行（约 310pt，三倍屏需 ~930px）。公众号头条封面是 2.35:1，
-// 左右各裁去约 12%。
+// thumbFeishuCoverJPEG 审核聚合卡的方形封面：居中裁成正方形、缩到 480×480 JPEG，不补边。
+// 来源优先是公众号编辑自己选的 1:1 封面（cdn_url_1_1，本身就是方图，只缩放不裁），
+// 拿不到才用 2.35:1 横版封面居中裁。卡片上随列宽显示（电脑约 130px、手机约 70px）。
 func thumbFeishuCoverJPEG(src []byte) ([]byte, error) {
 	config, _, err := image.DecodeConfig(bytes.NewReader(src))
 	if err != nil {
@@ -39,23 +36,16 @@ func thumbFeishuCoverJPEG(src []byte) ([]byte, error) {
 		return nil, fmt.Errorf("解码封面图失败: %w", err)
 	}
 	bounds := img.Bounds()
-	width, height := bounds.Dx(), bounds.Dy()
-	crop := bounds
-	if int64(width)*feishuThumbHeight > int64(height)*feishuThumbWidth {
-		cropWidth := max(1, int(int64(height)*feishuThumbWidth/feishuThumbHeight))
-		left := bounds.Min.X + (width-cropWidth)/2
-		crop = image.Rect(left, bounds.Min.Y, left+cropWidth, bounds.Max.Y)
-	} else {
-		cropHeight := max(1, int(int64(width)*feishuThumbHeight/feishuThumbWidth))
-		top := bounds.Min.Y + (height-cropHeight)/2
-		crop = image.Rect(bounds.Min.X, top, bounds.Max.X, top+cropHeight)
-	}
-	canvas := image.NewRGBA(image.Rect(0, 0, feishuThumbWidth, feishuThumbHeight))
+	side := min(bounds.Dx(), bounds.Dy())
+	left := bounds.Min.X + (bounds.Dx()-side)/2
+	top := bounds.Min.Y + (bounds.Dy()-side)/2
+	crop := image.Rect(left, top, left+side, top+side)
+	canvas := image.NewRGBA(image.Rect(0, 0, feishuThumbSize, feishuThumbSize))
 	stddraw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.White), image.Point{}, stddraw.Src)
 	xdraw.CatmullRom.Scale(canvas, canvas.Bounds(), img, crop, xdraw.Over, nil)
 	var out bytes.Buffer
 	if err := jpeg.Encode(&out, canvas, &jpeg.Options{Quality: 88}); err != nil {
-		return nil, fmt.Errorf("生成封面小图失败: %w", err)
+		return nil, fmt.Errorf("生成方形封面失败: %w", err)
 	}
 	return out.Bytes(), nil
 }

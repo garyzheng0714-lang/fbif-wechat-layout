@@ -717,6 +717,7 @@ func looksLikeWeChatBlock(s string) bool {
 
 var (
 	reMsgCdnURL      = regexp.MustCompile(`var\s+msg_cdn_url\s*=\s*["']((?:[^"'\\]|\\.)*)["']`)
+	reCdnURL11       = regexp.MustCompile(`var\s+cdn_url_1_1\s*=\s*["']((?:[^"'\\]|\\.)*)["']`)
 	reMsgTitle       = regexp.MustCompile(`var\s+msg_title\s*=\s*["']((?:[^"'\\]|\\.)*)["']`)
 	reTitleTag       = regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
 	reImgDataSrc     = regexp.MustCompile(`(?is)<img\b[^>]+(?:data-src|data-original|data-url|src)\s*=\s*["']([^"']+)["']`)
@@ -889,6 +890,15 @@ func addWeChatMetaFallbackParams(rawURL string) string {
 	u.RawQuery = q.Encode()
 	u.Fragment = ""
 	return u.String()
+}
+
+// extractWechatSquareCover 公众号编辑为「次条」列表位选的 1:1 封面（页面 JS 变量
+// cdn_url_1_1）。没有时返回空串，调用方退回横版封面。
+func extractWechatSquareCover(raw string) string {
+	if m := reCdnURL11.FindStringSubmatch(raw); len(m) > 1 {
+		return normalizeArticleImageURL(m[1])
+	}
+	return ""
 }
 
 // extractArticleCover accepts the common shapes seen in WeChat and generic

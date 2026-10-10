@@ -221,9 +221,9 @@ type publishJob struct {
 	// 才能在审核通过后仍然展示封面——卡片回调必须同步返回新卡，不能在那里
 	// 现走一次图片上传。旧任务没有这个值时终态卡自动退化为无封面单列。
 	ReviewCoverImgKey string `json:"review_cover_img_key,omitempty"`
-	// ReviewThumbImgKey 审核聚合卡的 16:9 无补边封面小图（thumbFeishuCoverJPEG）。
-	// ReviewCoverImgKey 是补成正方形的大图，在聚合卡的小缩略图位只能裁成扁条。
-	// 由建聚合卡前的 prepareReviewThumbs 按需补传，失败时聚合卡退回 ReviewCoverImgKey。
+	// ReviewThumbImgKey 审核聚合卡的方形封面（公众号编辑选的 1:1 封面，没有时由横版封面
+	// 居中裁出，thumbFeishuCoverJPEG）。由建聚合卡前的 prepareReviewThumbs 按需补传，
+	// 失败时聚合卡退回 ReviewCoverImgKey（补成正方形的横版封面）。
 	ReviewThumbImgKey string `json:"review_thumb_img_key,omitempty"`
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`

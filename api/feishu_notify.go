@@ -350,7 +350,7 @@ func (n *feishuNotifier) uploadImageByURL(ctx context.Context, imgURL string) (s
 	return n.uploadImageBytes(ctx, "cover.png", imgBytes)
 }
 
-// uploadThumbByURL 下载封面并上传审核聚合卡用的 16:9 小图（thumbFeishuCoverJPEG）。
+// uploadThumbByURL 下载封面并上传审核聚合卡用的方形封面（thumbFeishuCoverJPEG）。
 func (n *feishuNotifier) uploadThumbByURL(ctx context.Context, imgURL string) (string, error) {
 	imgBytes, err := n.downloadCoverImage(ctx, imgURL)
 	if err != nil {
