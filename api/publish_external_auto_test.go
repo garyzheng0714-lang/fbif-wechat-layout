@@ -404,3 +404,91 @@ func TestExternalAutoBackfillHTTP(t *testing.T) {
 		t.Fatalf("since 非法应 400，实际 %d", rec.Code)
 	}
 }
+
+func TestExternalDistributionLateRefreshResolvesTimedOutAndRetried(t *testing.T) {
+	setTestYunsuoAutoConfig(t)
+	env := newPublishTestEnv(t)
+	clock := newCSTClock("2026-10-12 10:00")
+	env.pipeline.now = func() time.Time { return clock.now }
+	fake := &fakeYunsuoAPI{statuses: []yunsuoAccountStatus{
+		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+	}}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	requested := clock.now.Add(-20 * time.Minute).UTC().Format(time.RFC3339)
+	timedOut := createPublishedDistributionJobWithKey(t, env, "site:late-timeout", "FBIF食品饮料创新")
+	timedOut, _ = env.store.update(timedOut.ID, func(current *publishJob) {
+		current.ExternalDistributionState = publishExternalDistributionReconciliationRequired
+		current.ExternalDistributionContentPK = "pk-timeout"
+		current.ExternalDistributionRequestedAt = requested
+		current.ExternalDistributionError = "云梭在轮询时限内未返回全部终态；系统不会重复发布，请人工核对"
+		current.ExternalDistributionTargets = []publishExternalDistributionTarget{{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetPending}}
+	})
+	noPK := createPublishedDistributionJobWithKey(t, env, "site:late-nopk", "FBIF食品饮料创新")
+	env.store.update(noPK.ID, func(current *publishJob) {
+		current.ExternalDistributionState = publishExternalDistributionFailed
+		current.ExternalDistributionRequestedAt = requested
+	})
+
+	// 云梭仍在排队：留在对账，只记查询时间；30 分钟内不重复查。
+	env.pipeline.refreshExternalDistributionResults()
+	got, _ := env.store.byID(timedOut.ID)
+	if fake.statusCalls != 1 || got.ExternalDistributionState != publishExternalDistributionReconciliationRequired || got.ExternalDistributionLastPolledAt == "" {
+		t.Fatalf("排队中应只记查询：calls=%d state=%q polled=%q", fake.statusCalls, got.ExternalDistributionState, got.ExternalDistributionLastPolledAt)
+	}
+	clock.set("2026-10-12 10:20")
+	env.pipeline.refreshExternalDistributionResults()
+	if fake.statusCalls != 1 {
+		t.Fatalf("30 分钟内不应重复补查，calls=%d", fake.statusCalls)
+	}
+
+	// 云梭发布完成：补成成功并刷卡；全程只查询、从不重推。
+	fake.statuses[0] = yunsuoAccountStatus{Status: 1, Remark: "OK", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}}
+	clock.set("2026-10-12 10:40")
+	env.pipeline.refreshExternalDistributionResults()
+	got, _ = env.store.byID(timedOut.ID)
+	if got.ExternalDistributionState != publishExternalDistributionSucceeded || got.ExternalDistributionError != "" ||
+		got.ExternalDistributionTargets[0].State != publishExternalTargetSucceeded {
+		t.Fatalf("云梭迟到的成功应补回：state=%q err=%q targets=%+v", got.ExternalDistributionState, got.ExternalDistributionError, got.ExternalDistributionTargets)
+	}
+	if fake.pushCalls != 0 || fake.statusCalls != 2 {
+		t.Fatalf("补查只能查询：push=%d status=%d", fake.pushCalls, fake.statusCalls)
+	}
+	if gotNoPK, _ := env.store.byID(noPK.ID); gotNoPK.ExternalDistributionState != publishExternalDistributionFailed || gotNoPK.ExternalDistributionLastPolledAt != "" {
+		t.Fatalf("没有单号的失败不得补查")
+	}
+}
+
+func TestExternalDistributionLateRefreshPicksUpProviderRetry(t *testing.T) {
+	setTestYunsuoAutoConfig(t)
+	env := newPublishTestEnv(t)
+	clock := newCSTClock("2026-10-12 10:00")
+	env.pipeline.now = func() time.Time { return clock.now }
+	// 首次头条报异常、百家号登录失效；云梭自动重试后头条成功、百家号仍失败。
+	fake := &fakeYunsuoAPI{statuses: []yunsuoAccountStatus{
+		{Status: 1, Remark: "OK", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+		{Status: 2, Remark: "账号多次登录失败,等待用户更新账号", AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+	}}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	env.store.update(job.ID, func(current *publishJob) {
+		current.ExternalDistributionState = publishExternalDistributionFailed
+		current.ExternalDistributionContentPK = "pk-retry"
+		current.ExternalDistributionRequestedAt = clock.now.Add(-50 * 24 * time.Hour).UTC().Format(time.RFC3339)
+		current.ExternalDistributionTargets = []publishExternalDistributionTarget{
+			{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetFailed},
+			{AccountID: testYunsuoBaijiaID, Name: "百家号", State: publishExternalTargetFailed},
+		}
+	})
+	env.pipeline.refreshExternalDistributionResults()
+	if fake.statusCalls != 0 {
+		t.Fatalf("超过 45 天的外发不再补查")
+	}
+	env.store.update(job.ID, func(current *publishJob) {
+		current.ExternalDistributionRequestedAt = clock.now.Add(-50 * time.Hour).UTC().Format(time.RFC3339)
+	})
+	env.pipeline.refreshExternalDistributionResults()
+	got, _ := env.store.byID(job.ID)
+	if got.ExternalDistributionState != publishExternalDistributionPartialFailed || fake.pushCalls != 0 {
+		t.Fatalf("头条重试成功应改为部分失败（百家号仍失败）：state=%q push=%d", got.ExternalDistributionState, fake.pushCalls)
+	}
+}

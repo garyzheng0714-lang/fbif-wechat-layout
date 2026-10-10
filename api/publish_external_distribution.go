@@ -989,3 +989,100 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 		}, true
 	}
 }
+
+const (
+	publishExternalLateRefreshEvery  = 30 * time.Minute
+	publishExternalLateRefreshWithin = 45 * 24 * time.Hour
+)
+
+// publishExternalDistributionNeedsLateRefresh 已拿到 content_pk、但本地结论还没落定的外发：
+// 15 分钟轮询超时转对账的（云梭仍在排队），以及云梭标「异常、自动重试」的失败/部分失败。
+// 有单号只查询（红线 37），所以补查绝不会造成重复稿。
+func publishExternalDistributionNeedsLateRefresh(job publishJob, now time.Time) bool {
+	if strings.TrimSpace(job.ExternalDistributionContentPK) == "" {
+		return false
+	}
+	switch job.ExternalDistributionState {
+	case publishExternalDistributionReconciliationRequired, publishExternalDistributionFailed, publishExternalDistributionPartialFailed:
+	default:
+		return false
+	}
+	requestedAt, err := time.Parse(time.RFC3339, job.ExternalDistributionRequestedAt)
+	if err != nil || now.Sub(requestedAt) > publishExternalLateRefreshWithin {
+		return false
+	}
+	if lastPolled, err := time.Parse(time.RFC3339, job.ExternalDistributionLastPolledAt); err == nil &&
+		now.Sub(lastPolled) < publishExternalLateRefreshEvery {
+		return false
+	}
+	return true
+}
+
+// refreshExternalDistributionResults 云梭发布慢于轮询时限、或失败后自动重试成功时，
+// 把云梭的最终结果补回任务和审核卡。状态没变只记查询时间，不刷卡。
+func (p *publishPipeline) refreshExternalDistributionResults() {
+	if p == nil || p.store == nil || publishWorkersPaused() {
+		return
+	}
+	jobs, err := p.store.all()
+	if err != nil {
+		log.Printf("publish: 外发结果补查读取任务失败：%v", err)
+		return
+	}
+	now := pipelineNow(p)
+	var client yunsuoAPI
+	for _, job := range jobs {
+		if !publishExternalDistributionNeedsLateRefresh(job, now) {
+			continue
+		}
+		if client == nil {
+			factory := p.yunsuo
+			if factory == nil {
+				factory = func() (yunsuoAPI, error) { return newYunsuoClientFromEnv() }
+			}
+			if client, err = factory(); err != nil {
+				log.Printf("publish: 外发结果补查无法创建云梭客户端：%v", err)
+				return
+			}
+		}
+		statuses, statusErr := client.Status(context.Background(), job.ExternalDistributionContentPK)
+		stamp := now.Format(time.RFC3339)
+		if statusErr != nil {
+			log.Printf("publish: 外发结果补查失败（任务 #%d）：%v", job.ID, statusErr)
+			p.store.updateIf(job.ID, func(current publishJob) bool {
+				return current.ExternalDistributionState == job.ExternalDistributionState &&
+					current.ExternalDistributionContentPK == job.ExternalDistributionContentPK
+			}, func(current *publishJob) { current.ExternalDistributionLastPolledAt = stamp })
+			continue
+		}
+		merged := mergeExternalDistributionStatuses(job.ExternalDistributionTargets, statuses, stamp)
+		state, terminal := classifyExternalDistributionTargets(merged)
+		if !terminal {
+			// 云梭仍在排队：留在原状态（对账/失败），只更新各账号最新说明。
+			state = job.ExternalDistributionState
+		}
+		changed := state != job.ExternalDistributionState
+		updated, swapped, updateErr := p.store.updateIf(job.ID, func(current publishJob) bool {
+			return current.ExternalDistributionState == job.ExternalDistributionState &&
+				current.ExternalDistributionContentPK == job.ExternalDistributionContentPK
+		}, func(current *publishJob) {
+			current.ExternalDistributionTargets = merged
+			current.ExternalDistributionLastPolledAt = stamp
+			current.ExternalDistributionPollAttempts++
+			if changed {
+				current.ExternalDistributionState = state
+				current.ExternalDistributionError = ""
+				current.ExternalDistributionCompletedAt = stamp
+				enqueueExternalDistributionCardUpdate(current)
+			}
+		})
+		if updateErr != nil {
+			log.Printf("publish: 外发结果补查落盘失败（任务 #%d）：%v", job.ID, updateErr)
+			continue
+		}
+		if swapped && changed {
+			log.Printf("publish: 外发结果补查更新（任务 #%d）：%s → %s", job.ID, job.ExternalDistributionState, state)
+			p.scheduleExternalDistributionCardUpdate(updated.ID)
+		}
+	}
+}
