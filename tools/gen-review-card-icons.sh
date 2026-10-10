@@ -29,8 +29,6 @@ color_of() {
 # 输出文件名 = <lucide 图标名>-<配色>.png，与 feishu_review_card_icons.go 中的登记一致。
 ICONS=(
   external-link:default
-  globe:default
-  eye:default
   refresh-cw:default
   eye-off:danger
   send:danger

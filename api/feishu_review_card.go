@@ -116,16 +116,16 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 	return created.In(time.FixedZone("CST", 8*3600)).Format("1月2日")
 }
 
-// reviewBatchArticleBlock 一篇文章（2026-10-10 用户在 9 种真机方案里选定「左侧小方图」，
-// 并要求图片下方加两个小按钮填空）：
+// reviewBatchArticleBlock 一篇文章（2026-10-10 用户在真机方案对比里先后选定「左侧小方图」
+// 与「按钮同一底线」，并强调「极其讨厌对不齐」）。两行共用同一组列宽（88px | 文字），
+// 电脑和手机都不堆叠：
 //
-//   - 左列（88px，电脑和手机都不堆叠）：方形封面，下面两枚与图同宽的最小号查看按钮——
-//     「公众号」开原文，「网站」开网站文章（未发布时叫「预览」，开审核预览）。用户在图下放
-//     按钮 / 来源时间 / 状态标签 / 竖图四种真机方案对比后选定按钮，并要求用最小号。
-//   - 右列：标题 → 摘要 → 「［状态］转载 · #任务号」→ 蓝色标签 → 状态操作按钮 →
-//     重新同步结果 → 外部分发按钮。右列各行共用一条左边线。
+//   - 上行：方形封面 | 标题 → 摘要 → 「［状态］转载 · #任务号」→ 蓝色标签。
+//   - 下行：「公众号」按钮（与图同宽）| 状态操作按钮 → 重新同步结果 → 外部分发按钮。
+//     两侧按钮同号、同一底线；左边对齐图片，右边对齐标题。网站文章 / 审核预览由标题链接
+//     打开，不再另设按钮。
 //
-// 无封面的旧稿只有右列，两枚查看按钮并入操作按钮行。
+// 无封面的旧稿只有文字列，「公众号」并入操作按钮行。
 func reviewBatchArticleBlock(job publishJob) map[string]any {
 	text := []any{map[string]any{"tag": "markdown", "content": reviewBatchTitle(job)}}
 	if summary := reviewCardSafeText(job.Summary, 180); summary != "" {
@@ -137,46 +137,60 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 	if tags := reviewBatchTagPills(job.Tags); tags != "" {
 		text = append(text, map[string]any{"tag": "markdown", "text_size": "notation", "content": tags})
 	}
-	views := reviewBatchViewButtons(job)
+	source := reviewBatchSourceButton(job)
 	cover := reviewBatchCover(job)
 	var extra []map[string]any
-	if cover == nil {
-		extra = views
+	if cover == nil && source != nil {
+		extra = append(extra, source)
 	}
+	actions := []any{}
 	if buttons := reviewBatchButtonRow(job, extra...); buttons != nil {
-		text = append(text, buttons)
+		actions = append(actions, buttons)
 	}
 	if status := reviewCardSourceResyncStatus(job); status != nil {
-		text = append(text, status)
+		actions = append(actions, status)
 	}
 	if job.Stage == publishStagePublished {
 		provenance, _, _ := publishExternalDistributionProvenance(job)
 		if strings.TrimSpace(job.ExternalDistributionState) != "" || provenance == publishExternalProvenanceOriginal {
-			text = append(text, reviewCardExternalDistributionElementsStyled(job, true, true)...)
+			actions = append(actions, reviewCardExternalDistributionElementsStyled(job, true, true)...)
 		}
 	}
-	textColumn := map[string]any{
-		"tag": "column", "width": "weighted", "weight": 1,
-		"direction": "vertical", "vertical_align": "top", "vertical_spacing": "6px", "elements": text,
-	}
 	if cover == nil {
-		return map[string]any{"tag": "column_set", "flex_mode": "none", "columns": []any{textColumn}}
+		return reviewBatchStack(append(text, actions...)...)
 	}
-	side := []any{cover}
-	for _, view := range views {
-		// 最小号（用户 2026-10-10：「放按钮吧，不过要用最小号的按钮」），不压过封面。
-		view["width"], view["size"] = "fill", "tiny"
-		side = append(side, view)
+	sourceCell := []any{}
+	if source != nil {
+		source["width"] = "fill"
+		sourceCell = append(sourceCell, source)
 	}
+	rows := []any{reviewBatchGridRow([]any{cover}, text)}
+	if len(sourceCell) > 0 || len(actions) > 0 {
+		rows = append(rows, reviewBatchGridRow(sourceCell, actions))
+	}
+	return reviewBatchStack(rows...)
+}
+
+// reviewBatchGridRow 一行两格：左格 88px、右格占满，两行用同一组列宽才能上下对齐。
+func reviewBatchGridRow(left, right []any) map[string]any {
 	return map[string]any{
 		"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px",
 		"columns": []any{
-			map[string]any{
-				"tag": "column", "width": reviewBatchSideWidth,
-				"direction": "vertical", "vertical_align": "top", "vertical_spacing": "6px", "elements": side,
-			},
-			textColumn,
+			map[string]any{"tag": "column", "width": reviewBatchSideWidth, "vertical_align": "top",
+				"direction": "vertical", "vertical_spacing": "6px", "elements": left},
+			map[string]any{"tag": "column", "width": "weighted", "weight": 1, "vertical_align": "top",
+				"direction": "vertical", "vertical_spacing": "6px", "elements": right},
 		},
+	}
+}
+
+func reviewBatchStack(elements ...any) map[string]any {
+	return map[string]any{
+		"tag": "column_set", "flex_mode": "none",
+		"columns": []any{map[string]any{
+			"tag": "column", "width": "weighted", "weight": 1,
+			"direction": "vertical", "vertical_spacing": "10px", "elements": elements,
+		}},
 	}
 }
 
@@ -230,26 +244,14 @@ func reviewBatchMeta(job publishJob) string {
 		color, status, provenanceText, job.ID)
 }
 
-// reviewBatchViewButtons 图片下方的两枚查看按钮：来源原文与网站。名字说清去哪——
-// 「查看原文」分不清网站还是公众号（用户 2026-10-09）：公众号链接叫「公众号」，其他网页
-// 叫「原网页」；网站文章已发布叫「网站」，未发布开审核预览叫「预览」。缺来源链接只出一枚。
-func reviewBatchViewButtons(job publishJob) []map[string]any {
-	views := make([]map[string]any, 0, 2)
-	if label, target := reviewBatchSourceLink(job); target != "" {
-		views = append(views, reviewBatchLinkButton(label, reviewIconSource, target))
+// reviewBatchSourceButton 打开来源原文。名字说清去哪——「查看原文」分不清网站还是公众号
+// （用户 2026-10-09）：公众号链接叫「公众号」，其他网页叫「原网页」；缺来源链接不出。
+func reviewBatchSourceButton(job publishJob) map[string]any {
+	label, target := reviewBatchSourceLink(job)
+	if target == "" {
+		return nil
 	}
-	if label, target := reviewBatchSiteLink(job); target != "" {
-		icon := reviewIconSite
-		if label == "预览" {
-			icon = reviewIconPreview
-		}
-		views = append(views, reviewBatchLinkButton(label, icon, target))
-	}
-	return views
-}
-
-func reviewBatchLinkButton(label, icon, target string) map[string]any {
-	button := reviewBatchButton(label, "default", icon)
+	button := reviewBatchButton(label, "default", reviewIconSource)
 	button["behaviors"] = []any{map[string]any{"type": "open_url", "default_url": target, "pc_url": "", "ios_url": "", "android_url": ""}}
 	return button
 }
@@ -266,7 +268,7 @@ func reviewBatchSourceLink(job publishJob) (string, string) {
 	return "原网页", sourceURL
 }
 
-// reviewBatchSiteLink 已发布开网站正式页（「网站」），其余开审核预览（「预览」）。
+// reviewBatchSiteLink 标题链接：已发布开网站正式页，其余开审核预览。
 func reviewBatchSiteLink(job publishJob) (string, string) {
 	if job.Stage == publishStagePublished {
 		if articleURL := reviewCardSafeURL(job.ArticleURL); articleURL != "" {

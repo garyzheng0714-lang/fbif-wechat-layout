@@ -174,7 +174,7 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 		`"scale_type":"crop_center"`, `"size":"88px 88px"`, "#117", "#118",
 		`\u003ctext_tag color='orange'\u003e待审核\u003c/text_tag\u003e`, `\u003ctext_tag color='green'\u003e已发布\u003c/text_tag\u003e`,
 		`\u003ctext_tag color='blue'\u003e能量饮料\u003c/text_tag\u003e \u003ctext_tag color='blue'\u003e女性消费`,
-		`"content":"公众号"`, `"content":"网站"`, `"content":"预览"`, `"action":"approve"`, `"action":"unpublish"`,
+		`"content":"公众号"`, `"action":"approve"`, `"action":"unpublish"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("聚合卡缺少 %q: %s", want, body)
@@ -184,14 +184,14 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 		t.Fatalf("同批文章必须共用一张卡: %s", body)
 	}
 	// 2026-10-09 重做：白底列表，篇间细线；不再灰块套灰块、来源/任务号胶囊（只留状态
-	// 标签与蓝色文章标签）、撑满整卡的按钮（操作按钮自然宽，主操作 150px，只有图下查看按钮与 88px 图同宽）。
+	// 标签与蓝色文章标签）、撑满整卡的按钮（操作按钮自然宽，主操作 150px，只有图下「公众号」与 88px 图同宽）。
 	for _, unwanted := range []string{`"grey-50"`, `"grey-100"`, `\u003ctext_tag color='green'\u003e#`, `\u003ctext_tag color='neutral'\u003e转载`} {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("聚合卡不应再出现 %s: %s", unwanted, body)
 		}
 	}
-	if strings.Count(body, `"width":"fill"`) != 4 {
-		t.Fatalf("只有图片下方的两枚查看按钮与图同宽（两篇共 4 枚）: %s", body)
+	if strings.Count(body, `"width":"fill"`) != 2 || strings.Contains(body, `"content":"网站"`) || strings.Contains(body, `"content":"预览"`) {
+		t.Fatalf("只有图下「公众号」与图同宽（两篇共 2 枚），网站 / 预览由标题链接打开: %s", body)
 	}
 	if strings.Count(body, `"tag":"hr"`) != 2 {
 		t.Fatalf("两篇文章之间、文章与风险核查之间各一条细线: %s", body)
@@ -204,10 +204,10 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	}
 }
 
-// TestReviewBatchCardKeepsOneLeftEdge 用户「极其极其讨厌对不齐」（2026-10-09）：头部不带
-// 图标，正文 markdown 不带前缀 icon，折叠条箭头跟在标题后。2026-10-10 用户在 9 种真机方案
-// 里选定「左侧小方图」并要求图下加两个小按钮：每篇左列 88px 是方形封面加两枚同宽查看按钮，
-// 右列是标题、摘要、状态行、标签和操作按钮，电脑和手机都不堆叠。
+// TestReviewBatchCardKeepsOneLeftEdge 用户「极其极其讨厌对不齐」（2026-10-09/10）：头部
+// 不带图标，正文 markdown 不带前缀 icon，折叠条箭头跟在标题后。每篇两行共用同一组列宽
+// （88px | 文字）：上行封面 | 标题、摘要、状态行、标签；下行「公众号」| 操作按钮——两侧
+// 按钮同号、同一底线，左对齐图片、右对齐标题。电脑和手机都不堆叠。
 func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
 	job.FoodTalksNewsID = 7318
@@ -218,32 +218,53 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 		t.Fatalf("头部图标会把标题推离正文左边线: %#v", card["header"])
 	}
 	elements := card["body"].(map[string]any)["elements"].([]any)
-	article := elements[0].(map[string]any)
-	columns := article["columns"].([]any)
-	if article["flex_mode"] != "none" || len(columns) != 2 {
-		t.Fatalf("每篇是不堆叠的「图片列 | 文字列」: %#v", article)
+	rows := elements[0].(map[string]any)["columns"].([]any)[0].(map[string]any)["elements"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("每篇是上下两行网格: %#v", rows)
 	}
-	side, textColumn := columns[0].(map[string]any), columns[1].(map[string]any)
-	sideElements := side["elements"].([]any)
-	if side["width"] != reviewBatchSideWidth || len(sideElements) != 3 || sideElements[0].(map[string]any)["tag"] != "img" {
-		t.Fatalf("左列是封面加两枚查看按钮: %#v", side)
-	}
-	for i, label := range []string{"公众号", "网站"} {
-		button := sideElements[i+1].(map[string]any)
-		if button["text"].(map[string]any)["content"] != label || button["width"] != "fill" || button["size"] != "tiny" {
-			t.Fatalf("图下第 %d 枚按钮应为与图同宽的最小号「%s」: %#v", i+1, label, button)
+	grid := func(row any) (map[string]any, map[string]any) {
+		set := row.(map[string]any)
+		cols := set["columns"].([]any)
+		if set["flex_mode"] != "none" || len(cols) != 2 {
+			t.Fatalf("每行是不堆叠的两格: %#v", set)
 		}
+		left, right := cols[0].(map[string]any), cols[1].(map[string]any)
+		if left["width"] != reviewBatchSideWidth || right["width"] != "weighted" {
+			t.Fatalf("两行必须共用同一组列宽: %#v | %#v", left, right)
+		}
+		return left, right
 	}
-	textBody := cardJSON(t, textColumn)
-	for _, want := range []string{"首年销量破亿", "能量饮料", "重新同步至网站"} {
+	coverCell, textCell := grid(rows[0])
+	sourceCell, actionCell := grid(rows[1])
+	if body := cardJSON(t, coverCell); !strings.Contains(body, `"tag":"img"`) || strings.Contains(body, `"tag":"button"`) {
+		t.Fatalf("上行左格只放封面: %s", body)
+	}
+	textBody := cardJSON(t, textCell)
+	for _, want := range []string{"首年销量破亿", "已发布", "能量饮料"} {
 		if !strings.Contains(textBody, want) {
-			t.Fatalf("右列缺少 %q: %s", want, textBody)
+			t.Fatalf("上行右格缺少 %q: %s", want, textBody)
 		}
 	}
-	if strings.Contains(textBody, `"tag":"img"`) || strings.Contains(textBody, `"content":"公众号"`) {
-		t.Fatalf("右列不放图片和查看按钮: %s", textBody)
+	if strings.Contains(textBody, `"tag":"button"`) {
+		t.Fatalf("上行右格不放按钮: %s", textBody)
 	}
-	for _, element := range textColumn["elements"].([]any) {
+	source := sourceCell["elements"].([]any)
+	if len(source) != 1 || source[0].(map[string]any)["text"].(map[string]any)["content"] != "公众号" || source[0].(map[string]any)["width"] != "fill" {
+		t.Fatalf("下行左格是与图同宽的「公众号」: %#v", sourceCell)
+	}
+	actionBody := cardJSON(t, actionCell)
+	if !strings.Contains(actionBody, "重新同步至网站") {
+		t.Fatalf("下行右格是操作按钮: %s", actionBody)
+	}
+	sourceSize := source[0].(map[string]any)["size"]
+	var actionButtons []map[string]any
+	reviewCardButtons(actionCell, &actionButtons)
+	for _, button := range actionButtons {
+		if button["size"] != sourceSize {
+			t.Fatalf("同一行按钮同号才能同一底线: %v vs %#v", sourceSize, button)
+		}
+	}
+	for _, element := range textCell["elements"].([]any) {
 		if element.(map[string]any)["tag"] == "markdown" {
 			if _, hasIcon := element.(map[string]any)["icon"]; hasIcon {
 				t.Fatalf("正文行不得带前缀图标: %#v", element)
@@ -255,42 +276,31 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 		t.Fatalf("折叠条图标只能跟在标题文字后面: %#v", risk)
 	}
 
-	// 无封面旧稿只有文字列，两枚查看按钮并入操作按钮行。
+	// 无封面旧稿只有文字列，「公众号」并入操作按钮行。
 	job.ReviewCoverImgKey = ""
 	noCover := buildReviewBatchCard([]publishJob{job})["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)
 	if cols := noCover["columns"].([]any); len(cols) != 1 || !strings.Contains(cardJSON(t, cols[0].(map[string]any)), `"content":"公众号"`) {
-		t.Fatalf("无封面时查看按钮并入文字列: %#v", noCover)
+		t.Fatalf("无封面时公众号并入按钮行: %#v", noCover)
 	}
 }
 
-// TestReviewBatchViewButtonsSayWhereTheyGo「查看原文」分不清网站还是公众号（用户
-// 2026-10-09）。图下两枚按钮名字说清去哪：公众号链接叫「公众号」，其他网页叫「原网页」，
-// 缺来源链接就不出；网站文章已发布叫「网站」，未发布开审核预览叫「预览」。
-func TestReviewBatchViewButtonsSayWhereTheyGo(t *testing.T) {
-	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
-	labels := func(job publishJob) []string {
-		out := []string{}
-		for _, button := range reviewBatchViewButtons(job) {
-			out = append(out, fmt.Sprint(button["text"].(map[string]any)["content"]))
-		}
-		return out
-	}
+// TestReviewBatchSourceButtonSaysWhichOriginal「查看原文」分不清网站还是公众号（用户
+// 2026-10-09）：公众号链接叫「公众号」，其他网页叫「原网页」，缺来源链接不出按钮。
+func TestReviewBatchSourceButtonSaysWhichOriginal(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
-	for _, tc := range []struct {
-		sourceURL string
-		want      string
-	}{
-		{"https://mp.weixin.qq.com/s/abc", "公众号 网站"},
-		{"https://www.example.com/news/1", "原网页 网站"},
-		{"", "网站"},
+	for _, tc := range []struct{ sourceURL, want string }{
+		{"https://mp.weixin.qq.com/s/abc", "公众号"},
+		{"https://www.example.com/news/1", "原网页"},
+		{"", ""},
 	} {
 		job.SourceURL = tc.sourceURL
-		if got := strings.Join(labels(job), " "); got != tc.want {
-			t.Fatalf("来源 %q 的查看按钮应为 %q，实际 %q", tc.sourceURL, tc.want, got)
+		got := ""
+		if button := reviewBatchSourceButton(job); button != nil {
+			got = fmt.Sprint(button["text"].(map[string]any)["content"])
 		}
-	}
-	if got := strings.Join(labels(reviewCardTestJob(publishStageAwaitingReview)), " "); got != "公众号 预览" {
-		t.Fatalf("待审核稿应为「公众号 预览」，实际 %q", got)
+		if got != tc.want {
+			t.Fatalf("来源 %q 的按钮应叫 %q，实际 %q", tc.sourceURL, tc.want, got)
+		}
 	}
 	if body := cardJSON(t, buildReviewBatchCard([]publishJob{reviewCardTestJob(publishStagePublished)})); strings.Contains(body, "查看原文") {
 		t.Fatalf("聚合卡不应再出现有歧义的「查看原文」: %s", body)

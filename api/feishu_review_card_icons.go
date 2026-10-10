@@ -28,8 +28,6 @@ const reviewCardIconField = "_review_icon"
 // Lucide 图标名（与 cardicons/<名>-<配色>.png 对应）。
 const (
 	reviewIconSource     = "external-link" // 公众号 / 原网页
-	reviewIconSite       = "globe"         // 网站
-	reviewIconPreview    = "eye"           // 预览
 	reviewIconResync     = "refresh-cw"    // 重新同步至网站
 	reviewIconUnpublish  = "eye-off"       // 下线
 	reviewIconPublish    = "send"          // 发布 / 强制发布 / 重新发布
