@@ -553,6 +553,10 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		if derr != nil {
 			log.Printf("handleFetchArticle failed for %s: direct=%v", req.URL, derr)
 		}
+		if errors.Is(derr, errArticlePageTooLarge) {
+			writeError(w, 502, derr.Error())
+			return
+		}
 		writeError(w, 502, "文章抓取失败，请稍后重试（公众号可能临时限流）")
 	}
 }
@@ -582,15 +586,20 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 			time.Sleep(wait)
 		}
 		bodyBytes, finalURL, ferr := fetchRawHTML(url)
+		if errors.Is(ferr, errArticlePageTooLarge) {
+			// 页面大小不会因重试改变，直接如实报告，别伪装成限流。
+			return "", nil, "", "", "", "", "", "", ferr
+		}
 		if ferr != nil {
 			transportErr = ferr
 			log.Printf("fetchDirectBlocks attempt %d/%d transport error: %v", i+1, len(backoffs), ferr)
 			continue
 		}
-		t, bs, _ := extractArticleBlocksWithOptions(string(bodyBytes), opts)
+		raw := string(bodyBytes)
+		t, bs, _ := extractArticleBlocksWithOptions(raw, opts)
 		if len(bs) > 0 {
-			nickname, by, msgSourceURL := extractWechatArticleMeta(string(bodyBytes))
-			return t, bs, nickname, by, articleSourceURL(url, finalURL, string(bodyBytes)), msgSourceURL, extractArticleCover(string(bodyBytes)), extractArticleDigest(string(bodyBytes)), nil
+			nickname, by, msgSourceURL := extractWechatArticleMeta(raw)
+			return t, bs, nickname, by, articleSourceURL(url, finalURL, raw), msgSourceURL, extractArticleCover(raw), extractArticleDigest(raw), nil
 		}
 		// 传输成功但无内容：可能是反爬中间页，重试一次可能拿到真正文。
 		transportErr = nil
@@ -642,6 +651,12 @@ func behaviorParamInt(params map[string]any, key string, fallback int) int {
 
 var articleFetchHTTPClient = newOutboundHTTPClient(20*time.Second, publicWebURLPolicy)
 
+// 公众号文章页光内联脚本就约 4.8 MB（2026-10-10 实测），正文稍长整页就过 5 MB
+// （hAjWhCtac9CLCgpeLx84-g 冰雪时光对话稿 5.9 MB）。正文抓取与「更多文章」元数据共用此上限。
+const maxArticlePageBytes = 16 << 20
+
+var errArticlePageTooLarge = fmt.Errorf("文章抓取失败：页面超过 %d MB", maxArticlePageBytes>>20)
+
 const (
 	desktopArticleUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	wechatArticleUserAgent  = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.49"
@@ -685,9 +700,9 @@ func fetchRawHTML(url string) ([]byte, string, error) {
 	if resp.StatusCode != 200 {
 		return nil, resp.Request.URL.String(), fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	body, err := readBoundedBody(resp.Body, 5*1024*1024)
+	body, err := readBoundedBody(resp.Body, maxArticlePageBytes)
 	if errors.Is(err, errOutboundResponseTooLarge) {
-		return nil, resp.Request.URL.String(), fmt.Errorf("article response exceeds 5 MB")
+		return nil, resp.Request.URL.String(), errArticlePageTooLarge
 	}
 	return body, resp.Request.URL.String(), err
 }
@@ -809,9 +824,9 @@ func fetchArticleHTML(ctx context.Context, rawURL string) (string, string, error
 	if resp.StatusCode != 200 {
 		return "", resp.Request.URL.String(), fmt.Errorf("upstream HTTP %d", resp.StatusCode)
 	}
-	body, err := readBoundedBody(resp.Body, 8*1024*1024)
+	body, err := readBoundedBody(resp.Body, maxArticlePageBytes)
 	if errors.Is(err, errOutboundResponseTooLarge) {
-		return "", resp.Request.URL.String(), fmt.Errorf("article response exceeds 8 MB")
+		return "", resp.Request.URL.String(), errArticlePageTooLarge
 	}
 	if err != nil {
 		return "", resp.Request.URL.String(), fmt.Errorf("read body: %w", err)
