@@ -126,9 +126,10 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 func reviewBatchArticleBlock(job publishJob) map[string]any {
 	status, color := reviewBatchStatus(job)
 	title := "**" + reviewCardSafeOrDash(job.Title, 200) + "**"
-	if _, target := reviewBatchSiteLink(job); target != "" {
+	_, siteURL := reviewBatchSiteLink(job)
+	if siteURL != "" {
 		// 标题链到网站（已发布开正式页，其余开审核预览；用户 2026-10-10）。
-		title = fmt.Sprintf("**[%s](%s)**", reviewCardSafeOrDash(job.Title, 200), target)
+		title = fmt.Sprintf("**[%s](%s)**", reviewCardSafeOrDash(job.Title, 200), siteURL)
 	}
 	titleRow := map[string]any{
 		"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "6px",
@@ -163,23 +164,43 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		}, textColumn}
 	}
 	return map[string]any{
-		"tag": "column_set", "flex_mode": "none", "background_style": "grey-50",
-		"columns": []any{map[string]any{
-			"tag": "column", "width": "weighted", "weight": 1, "padding": reviewBatchBlockPadding,
-			"elements": []any{map[string]any{
-				// 不堆叠，图文按 1:4 分宽：电脑上封面约 110px、与右栏四行等高；手机上封面随之缩到约
-				// 55px 跟文字并排，文字不再被固定宽的封面挤成窄条。图片组件没有窄屏规则，只能让它跟着
-				// 栏宽走（2026-10-10 用户在「堆叠 + 108 小图 / 堆叠 + 铺满裁扁 / 不堆叠按比例缩」三种
-				// 真机对比里选了按比例缩）。
-				"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px", "columns": columns,
-			}},
+		// 每篇一个白底细外框块（2026-10-10 用户：「把这个灰色的背景，换成类似于这种的外框线」
+		// 「线还可以再淡一点」，选 grey-50）。飞书只有交互容器能画外框，它必须带点击行为：点块里
+		// 空白处打开网站文章，与标题链接同一处；块内按钮优先响应自己的交互。
+		"tag": "interactive_container", "width": "fill",
+		"has_border": true, "border_color": reviewBatchBorderColor,
+		"corner_radius": fmt.Sprintf("%dpx", reviewBatchBlockRadius),
+		"padding":       fmt.Sprintf("%[1]dpx %[1]dpx %[1]dpx %[1]dpx", reviewBatchBlockPadding),
+		"behaviors":     []any{map[string]any{"type": "open_url", "default_url": reviewBatchBlockURL(job, siteURL), "pc_url": "", "ios_url": "", "android_url": ""}},
+		"elements": []any{map[string]any{
+			// 不堆叠，图文按 1:4 分宽：电脑上封面约 110px、与右栏四行等高；手机上封面随之缩到约
+			// 55px 跟文字并排，文字不再被固定宽的封面挤成窄条。图片组件没有窄屏规则，只能让它跟着
+			// 栏宽走（2026-10-10 用户在「堆叠 + 108 小图 / 堆叠 + 铺满裁扁 / 不堆叠按比例缩」三种
+			// 真机对比里选了按比例缩）。
+			"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px", "columns": columns,
 		}},
 	}
 }
 
+// reviewBatchBlockURL 点块里空白处打开的地址：网站文章 / 审核预览，取不到时退回来源原文，再退回
+// FoodTalks 首页（交互容器必须带一个有效跳转）。
+func reviewBatchBlockURL(job publishJob, siteURL string) string {
+	if siteURL != "" {
+		return siteURL
+	}
+	if _, source := reviewBatchSourceLink(job); source != "" {
+		return source
+	}
+	return reviewCardSafeURL(siteFrontURL())
+}
+
 // 微调用的尺寸（2026-10-10 真机实测后定）。电脑上右栏四行高度之和 ≈ 封面边长（约 110px）。
+// 同心圆角：封面圆角 = 外框圆角 − 内边距，两条弧线共用圆心，间距处处均匀（用户 2026-10-10）。
 const (
-	reviewBatchBlockPadding  = "10px 10px 10px 10px"
+	reviewBatchBorderColor   = "grey-50"
+	reviewBatchBlockRadius   = 16
+	reviewBatchBlockPadding  = 10
+	reviewBatchCoverRadius   = reviewBatchBlockRadius - reviewBatchBlockPadding
 	reviewBatchCoverWeight   = 1
 	reviewBatchTextWeight    = 4
 	reviewBatchSummaryMargin = "4px 0px 0px 0px"
@@ -200,7 +221,7 @@ func reviewBatchCover(job publishJob) map[string]any {
 	}
 	return map[string]any{
 		"tag": "img", "img_key": key, "alt": feishuPlainText("文章封面图"), "preview": true,
-		"scale_type": "fit_horizontal", "corner_radius": "6px",
+		"scale_type": "fit_horizontal", "corner_radius": fmt.Sprintf("%dpx", reviewBatchCoverRadius),
 	}
 }
 

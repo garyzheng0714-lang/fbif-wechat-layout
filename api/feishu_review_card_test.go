@@ -171,7 +171,7 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	body := cardJSON(t, buildReviewBatchCard([]publishJob{published, pending}))
 	for _, want := range []string{
 		"FoodTalks 内容审核", "8月20日 · 2篇文章 · 待审核1篇 · 已发布1篇",
-		`"scale_type":"fit_horizontal"`, `"background_style":"grey-50"`, "#117", "#118",
+		`"scale_type":"fit_horizontal"`, `"border_color":"grey-50"`, "#117", "#118",
 		`\u003ctext_tag color='orange'\u003e待审核\u003c/text_tag\u003e`, `\u003ctext_tag color='green'\u003e已发布\u003c/text_tag\u003e`,
 		`\u003ctext_tag color='blue'\u003e能量饮料\u003c/text_tag\u003e \u003ctext_tag color='blue'\u003e女性消费`,
 		`"content":"公众号原文"`, `"action":"approve"`, `"action":"unpublish"`,
@@ -183,15 +183,15 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 	if strings.Count(body, `"schema":"2.0"`) != 1 {
 		t.Fatalf("同批文章必须共用一张卡: %s", body)
 	}
-	// 2026-10-10 定稿 S2：每篇一个浅灰块（只此一层，不再灰块套灰块），篇间靠间距不画线；
+	// 2026-10-10 定稿：每篇一个白底细外框块（grey-50 线，不再灰底），篇间靠间距不画线；
 	// 按钮一律最小号、按内容宽度，不撑满。
-	for _, unwanted := range []string{`"grey-100"`, `"tag":"hr"`, `"width":"fill"`, `\u003ctext_tag color='neutral'\u003e转载`} {
+	for _, unwanted := range []string{`"background_style":"grey-50"`, `"grey-100"`, `"tag":"hr"`, `\u003ctext_tag color='neutral'\u003e转载`} {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("聚合卡不应再出现 %s: %s", unwanted, body)
 		}
 	}
-	if strings.Count(body, `"background_style":"grey-50"`) != 2 {
-		t.Fatalf("两篇各一个浅灰块: %s", body)
+	if strings.Count(body, `"tag":"interactive_container"`) != 2 {
+		t.Fatalf("两篇各一个外框块: %s", body)
 	}
 	if strings.Count(body, `"tag":"collapsible_panel"`) != 1 ||
 		strings.Count(body, "风险核查（1篇有提示）") != 1 ||
@@ -217,10 +217,14 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	}
 	elements := card["body"].(map[string]any)["elements"].([]any)
 	article := elements[0].(map[string]any)
-	if article["background_style"] != "grey-50" {
-		t.Fatalf("每篇是一个浅灰块: %#v", article)
+	if article["tag"] != "interactive_container" || article["has_border"] != true || article["border_color"] != reviewBatchBorderColor ||
+		article["corner_radius"] != fmt.Sprintf("%dpx", reviewBatchBlockRadius) || article["background_style"] != nil {
+		t.Fatalf("每篇是一个白底细外框块: %#v", article)
 	}
-	inner := article["columns"].([]any)[0].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	if !strings.Contains(fmt.Sprint(article["behaviors"]), job.ArticleURL) {
+		t.Fatalf("点块里空白处打开网站文章: %#v", article["behaviors"])
+	}
+	inner := article["elements"].([]any)[0].(map[string]any)
 	columns := inner["columns"].([]any)
 	if len(columns) != 2 || inner["flex_mode"] != "none" {
 		t.Fatalf("块内左图右文，手机上也不堆叠（图片按比例缩）: %#v", inner)
@@ -269,9 +273,24 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	// 无封面旧稿只有文字栏。
 	job.ReviewCoverImgKey = ""
 	noCover := buildReviewBatchCard([]publishJob{job})["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)
-	noCoverInner := noCover["columns"].([]any)[0].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	noCoverInner := noCover["elements"].([]any)[0].(map[string]any)
 	if cols := noCoverInner["columns"].([]any); len(cols) != 1 || strings.Contains(cardJSON(t, noCover), `"tag":"img"`) {
 		t.Fatalf("无封面时只有文字栏: %#v", noCover)
+	}
+}
+
+// TestReviewBatchCoverRadiusIsConcentric 同心圆角（用户 2026-10-10）：封面圆角 = 外框圆角 − 内边距，
+// 两条弧线共用圆心，间距处处均匀。
+func TestReviewBatchCoverRadiusIsConcentric(t *testing.T) {
+	job := reviewCardTestJob(publishStagePublished)
+	block := reviewBatchArticleBlock(job)
+	wantPadding := fmt.Sprintf("%[1]dpx %[1]dpx %[1]dpx %[1]dpx", reviewBatchBlockPadding)
+	if block["padding"] != wantPadding || block["corner_radius"] != fmt.Sprintf("%dpx", reviewBatchBlockRadius) {
+		t.Fatalf("外框圆角与内边距应取常量: %#v", block)
+	}
+	cover := reviewBatchCover(job)
+	if cover["corner_radius"] != fmt.Sprintf("%dpx", reviewBatchBlockRadius-reviewBatchBlockPadding) {
+		t.Fatalf("封面圆角应为外框圆角减内边距: %#v", cover)
 	}
 }
 
@@ -285,7 +304,7 @@ func TestReviewBatchRightColumnHasFixedHeight(t *testing.T) {
 	job.SourceResyncCompletedAt = "2026-09-01T06:30:00Z"
 	t.Setenv(yunsuoTargetAccountsEnv, `[{"account_id":"a1","name":"头条号"}]`)
 	block := buildReviewBatchCard([]publishJob{job})["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)
-	inner := block["columns"].([]any)[0].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	inner := block["elements"].([]any)[0].(map[string]any)
 	rows := inner["columns"].([]any)[1].(map[string]any)["elements"].([]any)
 	if len(rows) != 4 {
 		t.Fatalf("有同步结果、可外部分发时右栏仍只有四行: %s", cardJSON(t, inner))
