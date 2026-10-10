@@ -119,9 +119,9 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 // reviewBatchArticleBlock 一篇文章（2026-10-10 用户在 9 种真机方案里选定「左侧小方图」，
 // 并要求图片下方加两个小按钮填空）：
 //
-//   - 左列（88px，电脑和手机都不堆叠）：方形封面，下面两枚与图同宽的查看按钮——
-//     「公众号」开原文，「网站」开网站文章（未发布时叫「预览」，开审核预览）。左列总高
-//     约 164pt，与右列文字常见高度（146–164pt）齐平，图片下方不再空一截。
+//   - 左列（88px，电脑和手机都不堆叠）：方形封面，下面两枚与图同宽的最小号查看按钮——
+//     「公众号」开原文，「网站」开网站文章（未发布时叫「预览」，开审核预览）。用户在图下放
+//     按钮 / 来源时间 / 状态标签 / 竖图四种真机方案对比后选定按钮，并要求用最小号。
 //   - 右列：标题 → 摘要 → 「［状态］转载 · #任务号」→ 蓝色标签 → 状态操作按钮 →
 //     重新同步结果 → 外部分发按钮。右列各行共用一条左边线。
 //
@@ -164,7 +164,8 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 	}
 	side := []any{cover}
 	for _, view := range views {
-		view["width"] = "fill"
+		// 最小号（用户 2026-10-10：「放按钮吧，不过要用最小号的按钮」），不压过封面。
+		view["width"], view["size"] = "fill", "tiny"
 		side = append(side, view)
 	}
 	return map[string]any{
@@ -172,7 +173,7 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		"columns": []any{
 			map[string]any{
 				"tag": "column", "width": reviewBatchSideWidth,
-				"direction": "vertical", "vertical_align": "top", "vertical_spacing": "8px", "elements": side,
+				"direction": "vertical", "vertical_align": "top", "vertical_spacing": "6px", "elements": side,
 			},
 			textColumn,
 		},

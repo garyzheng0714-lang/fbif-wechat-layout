@@ -230,8 +230,8 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	}
 	for i, label := range []string{"公众号", "网站"} {
 		button := sideElements[i+1].(map[string]any)
-		if button["text"].(map[string]any)["content"] != label || button["width"] != "fill" {
-			t.Fatalf("图下第 %d 枚按钮应为与图同宽的「%s」: %#v", i+1, label, button)
+		if button["text"].(map[string]any)["content"] != label || button["width"] != "fill" || button["size"] != "tiny" {
+			t.Fatalf("图下第 %d 枚按钮应为与图同宽的最小号「%s」: %#v", i+1, label, button)
 		}
 	}
 	textBody := cardJSON(t, textColumn)
