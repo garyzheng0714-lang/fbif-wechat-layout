@@ -167,7 +167,10 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		"columns": []any{map[string]any{
 			"tag": "column", "width": "weighted", "weight": 1, "padding": reviewBatchBlockPadding,
 			"elements": []any{map[string]any{
-				"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px", "columns": columns,
+				// stretch = 飞书「窄屏自适应·堆叠」：电脑上左图右文不变，手机屏窄时上下堆叠成「图在上、
+				// 文字整行在下」，文字不再被固定宽的封面挤成窄条（2026-10-10 用户手机截图：「手机端，
+				// 真的有点丑了」「卡片工具里有一个手机端的设置选项，就是可以设置为堆叠」）。
+				"tag": "column_set", "flex_mode": "stretch", "horizontal_spacing": "12px", "columns": columns,
 			}},
 		}},
 	}

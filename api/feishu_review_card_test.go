@@ -222,8 +222,8 @@ func TestReviewBatchCardKeepsOneLeftEdge(t *testing.T) {
 	}
 	inner := article["columns"].([]any)[0].(map[string]any)["elements"].([]any)[0].(map[string]any)
 	columns := inner["columns"].([]any)
-	if len(columns) != 2 {
-		t.Fatalf("块内左图右文: %#v", inner)
+	if len(columns) != 2 || inner["flex_mode"] != "stretch" {
+		t.Fatalf("块内左图右文，手机窄屏堆叠: %#v", inner)
 	}
 	coverColumn, textColumn := columns[0].(map[string]any), columns[1].(map[string]any)
 	if coverColumn["width"] != reviewBatchCoverWidth || coverColumn["vertical_align"] != "top" || textColumn["vertical_align"] != "top" {
