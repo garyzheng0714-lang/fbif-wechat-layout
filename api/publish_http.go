@@ -858,6 +858,40 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "retried": true})
 	})
 
+	// 存量原创补发到 auto 账号（2026-10-10 用户裁定）：只记待办，由自动外发按补发配额
+	// 逐日推送；dry_run 只列名单。since 为 RFC3339，按公开时间筛选。
+	mux.HandleFunc("POST /api/publish/external-distribution/auto-backfill", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		var body struct {
+			Since  string `json:"since"`
+			DryRun bool   `json:"dry_run"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "请求体必须是 JSON：{\"since\":\"2026-09-01T00:00:00+08:00\",\"dry_run\":true}")
+			return
+		}
+		since, err := time.Parse(time.RFC3339, strings.TrimSpace(body.Since))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "since 必须是 RFC3339 时间")
+			return
+		}
+		if !body.DryRun && !requireDeploymentWritesActive(w) {
+			return
+		}
+		jobs, err := p.markExternalAutoBackfill(since, body.DryRun)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		items := make([]map[string]any, 0, len(jobs))
+		for _, job := range jobs {
+			items = append(items, map[string]any{"id": job.ID, "title": job.Title, "published_at": job.PublishedAt})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"dry_run": body.DryRun, "count": len(items), "jobs": items})
+	})
+
 	// 用当前 prompt 重跑风险检查（只对待审核任务）。card-refresh 只换样式、用的还是
 	// 旧结论；prompt 改版后想让新检查能力作用在存量文章上，只能走这里真调一次模型。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/risk-recheck", func(w http.ResponseWriter, r *http.Request) {

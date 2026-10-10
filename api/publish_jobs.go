@@ -146,6 +146,10 @@ type publishJob struct {
 	ExternalDistributionCompletedAt    string                              `json:"external_distribution_completed_at,omitempty"`
 	ExternalDistributionPollAttempts   int                                 `json:"external_distribution_poll_attempts,omitempty"`
 	ExternalDistributionLastPolledAt   string                              `json:"external_distribution_last_polled_at,omitempty"`
+	// 自动外发待办（2026-10-10 用户裁定：原创公开后自动同步头条号）。publish=新公开稿，
+	// backfill=管理员补发的存量稿；由 runExternalAutoDistribution 按每日配额消化后清空。
+	ExternalDistributionAutoPending string `json:"external_distribution_auto_pending,omitempty"`
+	ExternalDistributionAutoError   string `json:"external_distribution_auto_error,omitempty"`
 	// 分发结果单独更新同一张审核卡，不占用网站发布的单槽 notification outbox。
 	ExternalDistributionCardState     string `json:"external_distribution_card_state,omitempty"`
 	ExternalDistributionCardSeq       int64  `json:"external_distribution_card_seq,omitempty"`

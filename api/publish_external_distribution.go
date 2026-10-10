@@ -274,7 +274,7 @@ func externalDistributionApprovalOK(job publishJob) bool {
 // 人工在 CMS 改过之后那些库存不得再发出去。
 func (p *publishPipeline) publishedNewsSnapshotForDistribution(ctx context.Context, job publishJob) (publishJob, error) {
 	if job.FoodTalksNewsID <= 0 {
-		return job, errors.New("任务还没有对应的网站文章，不能同步外部平台")
+		return job, externalDistributionIneligible(errors.New("任务还没有对应的网站文章，不能同步外部平台"))
 	}
 	if p == nil || p.foodTalks == nil {
 		return job, errors.New("无法读取网站已发布文章，不能同步外部平台")
@@ -291,15 +291,19 @@ func (p *publishPipeline) publishedNewsSnapshotForDistribution(ctx context.Conte
 		return job, fmt.Errorf("读取网站已发布文章失败，未分发: %w", err)
 	}
 	if news.ID != job.FoodTalksNewsID {
-		return job, fmt.Errorf("网站返回的文章不是本任务对应的已发布稿（期望 #%d，实际 #%d）", job.FoodTalksNewsID, news.ID)
+		return job, externalDistributionIneligible(fmt.Errorf("网站返回的文章不是本任务对应的已发布稿（期望 #%d，实际 #%d）", job.FoodTalksNewsID, news.ID))
 	}
 	if news.PublishStatus != foodTalksPublishStatusPublished {
-		return job, errors.New("网站上这篇还不是已发布状态，不能同步外部平台")
+		return job, externalDistributionIneligible(errors.New("网站上这篇还不是已发布状态，不能同步外部平台"))
 	}
 	if news.SourceType == 1 {
-		return job, errors.New("转载文章仅发布至 FoodTalks，不允许同步头条号、百家号等外部平台")
+		return job, externalDistributionIneligible(errors.New("转载文章仅发布至 FoodTalks，不允许同步头条号、百家号等外部平台"))
 	}
-	return overlayPublishJobWithPublishedNews(job, news)
+	overlaid, err := overlayPublishJobWithPublishedNews(job, news)
+	if err != nil {
+		return job, externalDistributionIneligible(err)
+	}
+	return overlaid, nil
 }
 
 func overlayPublishJobWithPublishedNews(job publishJob, news foodTalksNewsDetail) (publishJob, error) {
@@ -336,19 +340,83 @@ func overlayPublishJobWithPublishedNews(job publishJob, news foodTalksNewsDetail
 	return out, nil
 }
 
+// externalDistributionQueueMode 区分三种发起方：审核卡人工按钮、管理员对账后重发、
+// 原创公开后的系统自动外发。三者共用同一套 payload 冻结与 intent 状态机。
+type externalDistributionQueueMode int
+
+const (
+	externalQueueCard externalDistributionQueueMode = iota
+	externalQueueReplaceReconcile
+	externalQueueAuto
+)
+
+// externalDistributionIneligibleError 表示这篇文章按规则就不该外发（未公开、转载、
+// 缺审核、网站稿不可用等），重试也不会变；与读网站失败这类暂时错误区分开，
+// 自动外发据此决定是放弃还是下一轮再试。Error() 保持原文案。
+type externalDistributionIneligibleError struct{ err error }
+
+func (e *externalDistributionIneligibleError) Error() string { return e.err.Error() }
+func (e *externalDistributionIneligibleError) Unwrap() error { return e.err }
+
+func externalDistributionIneligible(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &externalDistributionIneligibleError{err: err}
+}
+
+func isExternalDistributionIneligible(err error) bool {
+	var target *externalDistributionIneligibleError
+	return errors.As(err, &target)
+}
+
 // requestExternalDistribution 只受理一次人工动作：先构造并持久化精确 payload 快照，
 // 再把实际 HTTP 交给 worker。卡片回调因此能在 3 秒内返回，不等待云梭。
 func (p *publishPipeline) requestExternalDistribution(jobID int64, actor, expectedVersion string) (publishJob, error) {
-	return p.queueExternalDistribution(jobID, actor, expectedVersion, false)
+	return p.queueExternalDistribution(jobID, actor, expectedVersion, externalQueueCard)
 }
 
 // replaceExternalDistributionAfterReconcile 管理员在确认上一份云梭稿作废后，
 // 用当前代码重建 payload 再推一次。不接受飞书卡片 callback。
 func (p *publishPipeline) replaceExternalDistributionAfterReconcile(jobID int64, actor string) (publishJob, error) {
-	return p.queueExternalDistribution(jobID, actor, "", true)
+	return p.queueExternalDistribution(jobID, actor, "", externalQueueReplaceReconcile)
 }
 
-func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expectedVersion string, replaceReconcile bool) (publishJob, error) {
+// queueAutoExternalDistribution 系统按配置把从未外发过的原创稿推给 auto 账号。
+// 只接受从未提交过的任务，失败过的稿不自动重试，避免重复稿。
+func (p *publishPipeline) queueAutoExternalDistribution(jobID int64, actor string) (publishJob, error) {
+	return p.queueExternalDistribution(jobID, actor, "", externalQueueAuto)
+}
+
+// externalDistributionTargetsFor 选择本次外发账号：自动外发只发 auto 账号；安全重试
+// 沿用上次的账号（仍须在当前配置内），不因重试把一次只发头条的稿扩到其他平台。
+func externalDistributionTargetsFor(job publishJob, cfg yunsuoConfig, mode externalDistributionQueueMode) ([]yunsuoAccountTarget, error) {
+	if mode == externalQueueAuto {
+		targets := cfg.autoTargets()
+		if len(targets) == 0 {
+			return nil, externalDistributionIneligible(errors.New("没有配置自动外发账号"))
+		}
+		return targets, nil
+	}
+	if publishExternalDistributionCanSafeRetry(job) && len(job.ExternalDistributionTargets) > 0 {
+		configured := map[string]yunsuoAccountTarget{}
+		for _, target := range cfg.Targets {
+			configured[target.ID] = target
+		}
+		var previous []yunsuoAccountTarget
+		for _, target := range job.ExternalDistributionTargets {
+			if current, ok := configured[strings.TrimSpace(target.AccountID)]; ok {
+				previous = append(previous, current)
+			}
+		}
+		if len(previous) > 0 {
+			return previous, nil
+		}
+	}
+	return cfg.Targets, nil
+}
+
+func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expectedVersion string, mode externalDistributionQueueMode) (publishJob, error) {
 	if publishWorkersPaused() {
 		job, _ := p.store.byID(jobID)
 		return job, errPublishWorkersPaused
@@ -357,39 +425,51 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	if err != nil {
 		return publishJob{}, err
 	}
-	if replaceReconcile {
+	replaceReconcile := mode == externalQueueReplaceReconcile
+	switch {
+	case replaceReconcile:
 		if !publishExternalDistributionCanReplaceReconcile(job) {
 			return job, fmt.Errorf("只有对账中的已发布任务才能由管理员重发外部分发，当前为 %s/%s", job.Stage, job.ExternalDistributionState)
 		}
-	} else if strings.TrimSpace(job.ExternalDistributionState) != "" && !publishExternalDistributionCanSafeRetry(job) {
-		return job, errors.New("这篇文章已经提交过外部分发，系统不会重复发布")
+	case mode == externalQueueAuto:
+		if strings.TrimSpace(job.ExternalDistributionState) != "" {
+			return job, externalDistributionIneligible(errors.New("这篇文章已经提交过外部分发，系统不会重复发布"))
+		}
+	default:
+		if strings.TrimSpace(job.ExternalDistributionState) != "" && !publishExternalDistributionCanSafeRetry(job) {
+			return job, errors.New("这篇文章已经提交过外部分发，系统不会重复发布")
+		}
 	}
 	if strings.TrimSpace(actor) == "" {
 		return job, errors.New("外部分发必须由审核人从飞书卡片确认原创后发起")
 	}
-	if !replaceReconcile && !externalDistributionVersionMatches(expectedVersion, job) {
+	if mode == externalQueueCard && !externalDistributionVersionMatches(expectedVersion, job) {
 		return job, errors.New("分发卡片已过期，请使用最新卡片")
 	}
 	if job.Stage != publishStagePublished {
-		return job, fmt.Errorf("只有已在 FoodTalks 发布的文章才能同步外部平台，当前阶段为 %s", job.Stage)
+		return job, externalDistributionIneligible(fmt.Errorf("只有已在 FoodTalks 发布的文章才能同步外部平台，当前阶段为 %s", job.Stage))
 	}
 	if !externalDistributionApprovalOK(job) {
-		return job, errors.New("文章缺少与当前内容版本匹配的审核通过记录，不能同步外部平台")
+		return job, externalDistributionIneligible(errors.New("文章缺少与当前内容版本匹配的审核通过记录，不能同步外部平台"))
 	}
 	snapshot, err := p.publishedNewsSnapshotForDistribution(context.Background(), job)
 	if err != nil {
 		return job, err
 	}
 	if err := externalDistributionEligibility(snapshot); err != nil {
-		return job, err
+		return job, externalDistributionIneligible(err)
 	}
 	cfg, err := loadYunsuoConfig()
 	if err != nil {
 		return job, err
 	}
-	payload, err := buildYunsuoPushPayload(snapshot, cfg.Targets, cfg.Categories)
+	chosen, err := externalDistributionTargetsFor(job, cfg, mode)
 	if err != nil {
 		return job, err
+	}
+	payload, err := buildYunsuoPushPayload(snapshot, chosen, cfg.Categories)
+	if err != nil {
+		return job, externalDistributionIneligible(err)
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -398,19 +478,26 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	payloadDigest := sha256.Sum256(payloadJSON)
 	requestedAt := pipelineNow(p).Format(time.RFC3339)
 	_, attributionSource, attributionEvidence := publishExternalDistributionProvenance(job)
-	targets := make([]publishExternalDistributionTarget, 0, len(cfg.Targets))
-	for _, target := range cfg.Targets {
+	targets := make([]publishExternalDistributionTarget, 0, len(chosen))
+	for _, target := range chosen {
 		targets = append(targets, publishExternalDistributionTarget{
 			AccountID: target.ID, Name: target.Name, State: publishExternalTargetQueued,
 		})
+	}
+	attributionPrefix := "original_human_confirmed: "
+	if mode == externalQueueAuto {
+		attributionPrefix = "original_auto_confirmed: "
 	}
 	updated, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
 		if current.Stage != publishStagePublished || !externalDistributionApprovalOK(current) ||
 			current.FoodTalksNewsID != job.FoodTalksNewsID || current.FoodTalksNewsID <= 0 {
 			return false
 		}
-		if replaceReconcile {
+		switch mode {
+		case externalQueueReplaceReconcile:
 			return publishExternalDistributionCanReplaceReconcile(current)
+		case externalQueueAuto:
+			return strings.TrimSpace(current.ExternalDistributionState) == ""
 		}
 		return (strings.TrimSpace(current.ExternalDistributionState) == "" || publishExternalDistributionCanSafeRetry(current)) &&
 			externalDistributionVersionMatches(expectedVersion, current)
@@ -424,7 +511,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		if current.ExternalDistributionContentVersion == 0 {
 			current.ExternalDistributionContentVersion = current.ContentVersion
 		}
-		current.ExternalDistributionAttribution = "original_human_confirmed: " + attributionEvidence
+		current.ExternalDistributionAttribution = attributionPrefix + attributionEvidence
 		current.ExternalDistributionSource = attributionSource
 		current.ExternalDistributionPayloadJSON = string(payloadJSON)
 		current.ExternalDistributionPayloadHash = fmt.Sprintf("sha256:%x", payloadDigest[:])
@@ -435,12 +522,18 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		current.ExternalDistributionCompletedAt = ""
 		current.ExternalDistributionPollAttempts = 0
 		current.ExternalDistributionLastPolledAt = ""
+		// 无论谁先发起，提交过一次就不再需要自动外发待办。
+		current.ExternalDistributionAutoPending = ""
+		current.ExternalDistributionAutoError = ""
 		enqueueExternalDistributionCardUpdate(current)
 	})
 	if err != nil {
 		return job, err
 	}
 	if !swapped {
+		if mode == externalQueueAuto {
+			return updated, externalDistributionIneligible(errors.New("文章状态已变化或已提交过外部分发，自动外发跳过"))
+		}
 		return updated, errors.New("文章状态、内容版本或分发目标已变化，请使用最新卡片")
 	}
 	// 先让同一张卡进入“正在同步”状态，再启动外调；两个 outbox 的发送入口会

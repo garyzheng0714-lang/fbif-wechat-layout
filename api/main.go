@@ -148,6 +148,7 @@ func main() {
 	} else {
 		publishPipe.recoverJobs()
 		publishPipe.startCMSPublicationSync()
+		publishPipe.startExternalAutoDistribution()
 	}
 	registerPublishRoutes(mux, publishPipe, authService)
 	// 飞书回调传输层必须显式互斥；缺失/非法配置安全回落 websocket 行为，公网

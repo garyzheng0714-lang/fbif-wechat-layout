@@ -29,9 +29,12 @@ const (
 
 // yunsuoAccountTarget 是一个已在云梭绑定的发布账号。ID 发给 API，
 // Name 只用于飞书卡片和任务留痕，避免将平台字面量写入中立流程。
+// Auto=true 的账号在原创稿公开后自动外发（见 publish_external_auto.go）；
+// 其余账号只能由审核卡按钮人工发起。
 type yunsuoAccountTarget struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	Auto bool   `json:"auto,omitempty"`
 }
 
 type yunsuoConfig struct {
@@ -102,6 +105,17 @@ func loadYunsuoConfig() (yunsuoConfig, error) {
 		return yunsuoConfig{}, fmt.Errorf("%s 至少需要 5 个不同分类", yunsuoCategoriesEnv)
 	}
 	return cfg, nil
+}
+
+// autoTargets 原创稿公开后自动外发的账号子集；为空表示不自动外发。
+func (c yunsuoConfig) autoTargets() []yunsuoAccountTarget {
+	var out []yunsuoAccountTarget
+	for _, target := range c.Targets {
+		if target.Auto {
+			out = append(out, target)
+		}
+	}
+	return out
 }
 
 func validYunsuoAccountID(value string) bool {

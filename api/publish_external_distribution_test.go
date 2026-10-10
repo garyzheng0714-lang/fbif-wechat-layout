@@ -65,7 +65,12 @@ func seedLivePublishedNews(t *testing.T, env *publishTestEnv, news foodTalksNews
 
 func createPublishedDistributionJob(t *testing.T, env *publishTestEnv, sourceName string) publishJob {
 	t.Helper()
-	job, _, err := env.store.create("site:distribution-test", testPublishSourceURL)
+	return createPublishedDistributionJobWithKey(t, env, "site:distribution-test", sourceName)
+}
+
+func createPublishedDistributionJobWithKey(t *testing.T, env *publishTestEnv, sourceKey, sourceName string) publishJob {
+	t.Helper()
+	job, _, err := env.store.create(sourceKey, testPublishSourceURL)
 	if err != nil {
 		t.Fatal(err)
 	}

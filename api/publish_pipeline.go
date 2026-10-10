@@ -169,6 +169,8 @@ type publishPipeline struct {
 	// 网站生命周期与外部分发各有持久 outbox，但它们更新的是同一张飞书卡。
 	// 单进程部署下统一串行发送，并在拿锁后重读任务，避免旧快照最后覆盖新状态。
 	reviewCardUpdateMu sync.Mutex
+	// 自动外发每轮扫描串行，避免两轮并发各自数配额、同一天超发。
+	externalAutoMu sync.Mutex
 	// 审核聚合卡按钮图标的 img_key，按审核应用缓存（见 feishu_review_card_icons.go）。
 	reviewCardIconCache reviewCardIconCache
 	// 审核聚合卡 16:9 封面小图：上传失败的任务短时间内不重试（见 prepareReviewThumbs）。
@@ -203,8 +205,8 @@ type publishPipeline struct {
 	foodTalks func() (foodTalksAPI, error)
 	// foodTalksAuth 汇总所有现建客户端的鉴权结论；nil 时监控不报凭证信号（测试装配）。
 	foodTalksAuth *foodTalksAuthHealth
-	// yunsuo 是原创文章外部分发客户端。它只在 FoodTalks 已发布卡片被人工点击后使用，
-	// 与网站主状态机正交；测试可注入 fake，绝不在流水线自动审核路径调用。
+	// yunsuo 是原创文章外部分发客户端。由已发布卡片人工点击，或原创稿公开后按
+	// auto 账号自动外发（publish_external_auto.go）；与网站主状态机正交，测试可注入 fake。
 	yunsuo func() (yunsuoAPI, error)
 	// 云梭没有回调，content_pk 落盘后以安全查询轮询最终结果。
 	externalDistributionPollInterval time.Duration
@@ -1259,6 +1261,7 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		j.PublishedAt = publishedAt.Format(time.RFC3339)
 		j.UnpublishWindowUntil = publishWindowUntil(publishedAt, j.UnpublishWindowHours)
 		enqueuePublishNotification(j, publishNotificationPublished)
+		markExternalAutoDistributionPending(j)
 	})
 	if err != nil || !swapped {
 		if latest, loadErr := p.store.byID(job.ID); loadErr == nil && latest.Stage == publishStagePublished {
@@ -1276,6 +1279,7 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 	}
 	p.schedulePublishNotification(job.ID)
 	p.recordPublishedRepost(ctx, updated)
+	p.kickExternalAutoDistribution()
 	return nil
 }
 
@@ -1671,6 +1675,7 @@ func (p *publishPipeline) reconcilePublicize(jobID int64, confirmPublished, conf
 			j.ArticleURL = siteFrontURL() + "/news/" + strconv.FormatInt(j.FoodTalksNewsID, 10)
 			j.Stage = publishStagePublished
 			enqueuePublishNotification(j, publishNotificationPublished)
+			markExternalAutoDistributionPending(j)
 			return
 		}
 		j.Stage = publishStagePublicizing
@@ -1686,6 +1691,7 @@ func (p *publishPipeline) reconcilePublicize(jobID int64, confirmPublished, conf
 	}
 	if confirmPublished {
 		p.schedulePublishNotification(job.ID)
+		p.kickExternalAutoDistribution()
 		return job, nil
 	}
 	p.spawn(func() { p.runJob(jobID) })
