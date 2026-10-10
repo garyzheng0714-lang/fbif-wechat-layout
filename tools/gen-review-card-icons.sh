@@ -5,8 +5,8 @@
 # 飞书卡片按钮不能直接用 SVG，也不会给自定义图标着色：每个图标按它所在按钮的文字颜色
 # 预先出一张 PNG，运行时由各审核应用自行上传拿 img_key（img_key 与上传应用绑定）。
 #
-# 「公众号」「网站 / 预览」按钮用两个网站自己的网站图标（2026-10-10 用户要求），品牌色、
-# 不随按钮配色变化：wechat-favicon.png、foodtalks-favicon.png，脚本末尾一并重新抓取。
+# 「公众号原文」按钮用微信公众平台自己的网站图标（2026-10-10 用户要求），品牌色、不随按钮
+# 配色变化：wechat-favicon.png，脚本末尾一并重新抓取。
 #
 # 用法：tools/gen-review-card-icons.sh   依赖 curl、rsvg-convert（brew install librsvg）、sips（macOS）
 set -euo pipefail
@@ -54,11 +54,8 @@ for entry in "${ICONS[@]}"; do
   echo "$OUT/$name-$variant.png"
 done
 
-# 网站图标：mp.weixin.qq.com 首页声明的 shortcut icon，www.foodtalks.cn 的 /favicon.ico。
+# 网站图标：mp.weixin.qq.com 首页声明的 shortcut icon。
 curl -fsS -o "$SRC/wechat.ico" "https://res.wx.qq.com/a/wx_fed/assets/res/NTI4MWU5.ico"
-curl -fsS -o "$SRC/foodtalks.ico" "https://www.foodtalks.cn/favicon.ico"
 sips -s format png -z 48 48 "$SRC/wechat.ico" --out "$OUT/wechat-favicon.png" >/dev/null
-sips -s format png -z 48 48 "$SRC/foodtalks.ico" --out "$OUT/foodtalks-favicon.png" >/dev/null
 echo "$OUT/wechat-favicon.png"
-echo "$OUT/foodtalks-favicon.png"
 

@@ -122,9 +122,9 @@ func TestReviewBatchCardIconColorFollowsButton(t *testing.T) {
 	pending := reviewCardTestJob(publishStageAwaitingReview)
 	pending.RiskLevel = publishRiskPass
 	body := cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{pending}, icons))
-	for _, want := range []string{"img_send-inverse", "img_foodtalks-favicon", "img_wechat-favicon"} {
+	for _, want := range []string{"img_send-inverse", "img_wechat-favicon"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("待审核卡应有 %s（蓝底「发布」白色图标，预览、公众号用两个网站的网站图标）: %s", want, body)
+			t.Fatalf("待审核卡应有 %s（蓝底「发布」白色图标，公众号原文用微信网站图标）: %s", want, body)
 		}
 	}
 	pending.RiskLevel = publishRiskBlock
@@ -195,15 +195,16 @@ func TestReviewCardIconCacheUploadsOncePerApp(t *testing.T) {
 	}
 }
 
-// TestReviewBatchCoverPrefersSquareThumb 封面优先用审核卡专门上传的方图（ReviewThumbImgKey），
-// 没有时退回补成正方形的 ReviewCoverImgKey；两者都是方图，fit_horizontal 铺满左栏宽度、不裁切。
+// TestReviewBatchCoverPrefersSquareThumb 封面是固定边长的方图（reviewBatchCoverSize）：优先用
+// 审核卡专门上传的方图（ReviewThumbImgKey），没有时退回补成正方形的 ReviewCoverImgKey；两者都是
+// 方图，进方框不裁切。
 func TestReviewBatchCoverPrefersSquareThumb(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
-	if cover := reviewBatchCover(job); cover["img_key"] != job.ReviewCoverImgKey || cover["scale_type"] != "fit_horizontal" || cover["size"] != nil {
-		t.Fatalf("无方图时整张显示补成方形的封面: %#v", cover)
+	if cover := reviewBatchCover(job); cover["img_key"] != job.ReviewCoverImgKey || cover["size"] != reviewBatchCoverSize {
+		t.Fatalf("无方图时显示补成方形的封面: %#v", cover)
 	}
 	job.ReviewThumbImgKey = "img_v3_square"
-	if cover := reviewBatchCover(job); cover["img_key"] != "img_v3_square" || cover["scale_type"] != "fit_horizontal" {
+	if cover := reviewBatchCover(job); cover["img_key"] != "img_v3_square" || cover["size"] != reviewBatchCoverSize {
 		t.Fatalf("有方图时用方图: %#v", cover)
 	}
 	job.ReviewThumbImgKey, job.ReviewCoverImgKey = "", ""
