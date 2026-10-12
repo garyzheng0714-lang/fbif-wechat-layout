@@ -3,15 +3,20 @@ package main
 // feishu_review_card_distribution.go — 审核卡底部的「分发到其他平台」区。
 //
 // 2026-10-12 用户裁定：「分发区域可以做成一个专门的区域，不用事先隐藏起来……相当于加一个分割线，
-// 底部去排版分发的内容。每个分发平台对应一张卡片」；超限时「能否直接在卡片里改好？不过这里一定
-// 要做好引导，提示清楚要把什么改成什么」。
+// 底部去排版分发的内容」；同日补充：「整个卡片应该分两个区域」「上半部分这三个是不变的」「一般只有
+// 一篇是原创……得用一个单独的区域呈现出来；当然也可以用容器循环组件」「同一篇文章可能会同时发到
+// 百家号、头条号、大鱼号、知乎等五六家平台……做一个循环容器组件」。
 //
-// 只有原创文章有这一区。每个平台一个细外框块：图标、名字、靠右的状态（或同步按钮）；下面一行是
-// 文章链接或原因。待修改的平台（publish_external_drafts.go）块里直接是表单：哪一项超了多少、
-// 现在是什么，输入框里预填建议改成的内容，封面从正文大图里点选；保存后服务端重查，通过即推。
-// 卡片里做不了的（上传封面）给侧边栏链接（publish_external_edit.go）。
+// 版式（照 Square「Channels」、Shopify「Sales channels」的渠道列表）：每篇原创一个与上半部分文章块
+// 同款的细外框块（同色、同圆角、同内边距）；块里先是这篇的小封面与「#编号 标题」（卡里只有这一篇时
+// 不重复），下面每个平台一行：图标、名字、文章链接（平台标题与本文不同就写平台标题）、靠右的纯色
+// 状态字或「同步至X」按钮；失败原因在下一行灰字。平台多了只是行多，不换版式。
 //
-// 飞书限制：form 只能放在卡片根上，所以有表单的平台块整个包在根级 form 里；字段名带文章编号与
+// 待修改的平台（publish_external_drafts.go）在它那一行下面直接展开表单：哪一项超了多少、现在是什么，
+// 输入框里预填建议，封面从正文大图里点选；保存后服务端重查，通过即推。卡片里做不了的上传：话题发图
+// 开通后让人把图发到这张卡的话题里（publish_review_thread.go），没开通时给侧边栏链接。
+//
+// 飞书限制：form 只能放在卡片根上，所以有表单的文章块整个包在根级 form 里；字段名带文章编号与
 // 平台位置，回调只带平台位置（slot），不带账号 id（红线 37）。
 
 import (
@@ -23,13 +28,19 @@ import (
 const (
 	feishuCardActionDistributeFix = "distribute_fix"
 
-	reviewCardPlatformRadius  = 12
-	reviewCardPlatformPadding = "10px 12px 10px 12px"
+	// 平台行之间、表头与平台行之间的间距；文章块外框沿用上半部分文章块的样式。
+	reviewCardPlatformSpacing = "12px"
+	reviewCardGroupCoverSize  = 36
 )
 
-// reviewCardDistributionElements 根级元素：分割线、区标题，再是每篇文章的平台块。
-// heading=true 时每篇先写「#编号 标题」（聚合卡里有多篇时）。
-func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate bool, icons reviewCardIcons) []any {
+// reviewCardDistributionOptions 分发区的渲染开关。
+type reviewCardDistributionOptions struct {
+	// ThreadImages 审核应用已能收到审核群消息：封面可以直接发到卡片话题里。
+	ThreadImages bool
+}
+
+// reviewCardDistributionElements 根级元素：分割线、区标题，再是每篇原创一块。
+func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate bool, icons reviewCardIcons, opts reviewCardDistributionOptions) []any {
 	cfg, cfgErr := loadYunsuoConfig()
 	var targets []yunsuoAccountTarget
 	if cfgErr == nil {
@@ -38,7 +49,7 @@ func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate boo
 	heading := aggregate && len(jobs) > 1
 	var body []any
 	for _, job := range jobs {
-		body = append(body, reviewCardDistributionGroup(job, targets, allowStart, aggregate, heading, icons)...)
+		body = append(body, reviewCardDistributionGroup(job, targets, allowStart, aggregate, heading, icons, opts)...)
 	}
 	if len(body) == 0 {
 		return nil
@@ -51,10 +62,10 @@ func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate boo
 
 // reviewCardExternalDistributionElements 单篇卡（降级路径）的分发区，与聚合卡同一写法。
 func reviewCardExternalDistributionElements(job publishJob, allowStart bool) []any {
-	return reviewCardDistributionElements([]publishJob{job}, allowStart, false, nil)
+	return reviewCardDistributionElements([]publishJob{job}, allowStart, false, nil, reviewCardDistributionOptions{})
 }
 
-func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, allowStart, aggregate, heading bool, icons reviewCardIcons) []any {
+func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, allowStart, aggregate, heading bool, icons reviewCardIcons, opts reviewCardDistributionOptions) []any {
 	started := externalDistributionStarted(job)
 	switch {
 	case job.Stage == publishStagePublished:
@@ -85,36 +96,79 @@ func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, 
 		return nil
 	}
 	canStart := allowStart && original
-	var blocks []any
+	var rows []any
+	fixing := false
 	seen := map[string]bool{}
 	for slot, target := range targets {
 		seen[strings.TrimSpace(target.ID)] = true
 		if _, ok := externalLaneFor(job, target.ID); !ok && !original {
 			continue
 		}
-		blocks = append(blocks, reviewCardPlatformBlock(job, target, slot, canStart, icons))
+		row, rowFixing := reviewCardPlatformRow(job, target, slot, canStart, icons, opts)
+		rows = append(rows, row)
+		fixing = fixing || rowFixing
 	}
 	for _, lane := range job.ExternalDistributionLanes {
 		if seen[strings.TrimSpace(lane.AccountID)] {
 			continue
 		}
 		// 配置里已去掉的账号：只展示结果，不给操作。
-		blocks = append(blocks, reviewCardPlatformBlock(job, yunsuoAccountTarget{ID: lane.AccountID, Name: lane.Name}, -1, false, icons))
+		row, _ := reviewCardPlatformRow(job, yunsuoAccountTarget{ID: lane.AccountID, Name: lane.Name}, -1, false, icons, opts)
+		rows = append(rows, row)
 	}
-	if len(blocks) == 0 {
+	if len(rows) == 0 {
 		return nil
 	}
 	if heading {
-		blocks = append([]any{map[string]any{
-			"tag": "markdown", "margin": "4px 0px 0px 0px",
-			"content": fmt.Sprintf("#%d %s", job.ID, reviewCardSafeOrDash(job.Title, 80)),
-		}}, blocks...)
+		rows = append([]any{reviewCardDistributionHeader(job)}, rows...)
 	}
-	return blocks
+	link := firstNonEmpty(externalDistributionSidebarLink(job.ID), externalEditSiteURL(job), reviewCardSafeURL(siteFrontURL()))
+	box := map[string]any{
+		// 与上半部分文章块同一外框。飞书只有交互容器能画外框，它必须带点击行为：点块里空白处打开
+		// 侧边栏里这篇的分发页；块内链接、输入框与按钮优先响应自己的交互。
+		"tag": "interactive_container", "width": "fill",
+		"has_border": true, "border_color": reviewBatchBorderColor,
+		"corner_radius":    fmt.Sprintf("%dpx", reviewBatchBlockRadius),
+		"padding":          fmt.Sprintf("%[1]dpx %[1]dpx %[1]dpx %[1]dpx", reviewBatchBlockPadding),
+		"vertical_spacing": reviewCardPlatformSpacing,
+		"behaviors":        []any{map[string]any{"type": "open_url", "default_url": link, "pc_url": "", "ios_url": "", "android_url": ""}},
+		"elements":         rows,
+	}
+	if !fixing {
+		return []any{box}
+	}
+	return []any{map[string]any{
+		"tag": "form", "name": fmt.Sprintf("fix_%d", job.ID),
+		"elements": []any{box},
+	}}
 }
 
-// reviewCardPlatformBlock 一个平台一块。待修改且能从这张卡改的，返回包着它的根级 form。
-func reviewCardPlatformBlock(job publishJob, target yunsuoAccountTarget, slot int, canStart bool, icons reviewCardIcons) map[string]any {
+// reviewCardDistributionHeader 文章块表头：小封面 + 「#编号 标题」，与上半部分同一张封面。
+func reviewCardDistributionHeader(job publishJob) map[string]any {
+	title := map[string]any{"tag": "div", "text": map[string]any{
+		"tag": "lark_md", "lines": 2,
+		"content": fmt.Sprintf("**#%d %s**", job.ID, reviewCardSafeOrDash(job.Title, 120)),
+	}}
+	columns := []any{}
+	if key := strings.TrimSpace(job.ReviewCoverImgKey); key != "" {
+		columns = append(columns, map[string]any{
+			"tag": "column", "width": "auto", "vertical_align": "center",
+			"elements": []any{map[string]any{
+				"tag": "img", "img_key": key, "alt": feishuPlainText("封面"), "preview": false,
+				"scale_type": "crop_center", "size": fmt.Sprintf("%[1]dpx %[1]dpx", reviewCardGroupCoverSize),
+				"corner_radius": fmt.Sprintf("%dpx", reviewBatchCoverRadius),
+			}},
+		})
+	}
+	columns = append(columns, map[string]any{
+		"tag": "column", "width": "weighted", "weight": 1, "vertical_align": "center", "elements": []any{title},
+	})
+	return map[string]any{"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "10px", "columns": columns}
+}
+
+// reviewCardPlatformRow 一个平台一行（一个竖排分栏，行内间距比平台之间小）。待修改且能从这张卡
+// 改的，下面接着放表单字段，返回 fixing=true，由文章块包进根级 form。
+func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int, canStart bool, icons reviewCardIcons, opts reviewCardDistributionOptions) (map[string]any, bool) {
 	profile := yunsuoProfileForTarget(target)
 	name := reviewCardSafeText(firstNonEmpty(target.Name, profile.Name), 20)
 	if name == "" {
@@ -136,6 +190,10 @@ func reviewCardPlatformBlock(job publishJob, target yunsuoAccountTarget, slot in
 			"content": "<font color='" + state.Tone + "'>" + state.Status + "</font>",
 		}
 	}
+	label := "**" + name + "**"
+	if link := reviewCardPlatformArticleLink(job, state); link != "" {
+		label += "　" + link
+	}
 	var columns []any
 	if key := icons[profile.Icon]; key != "" {
 		columns = append(columns, map[string]any{
@@ -150,53 +208,46 @@ func reviewCardPlatformBlock(job publishJob, target yunsuoAccountTarget, slot in
 	columns = append(columns,
 		map[string]any{
 			"tag": "column", "width": "weighted", "weight": 1, "vertical_align": "center",
-			"elements": []any{map[string]any{"tag": "markdown", "content": "**" + name + "**"}},
+			"elements": []any{map[string]any{"tag": "markdown", "content": label}},
 		},
 		map[string]any{"tag": "column", "width": "auto", "vertical_align": "center", "elements": []any{right}},
 	)
 	elements := []any{map[string]any{
 		"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "8px", "columns": columns,
 	}}
-	if line := reviewCardPlatformSecondLine(job, state, fixing, buttoned, editLink); line != "" {
+	if line := reviewCardPlatformReason(state, fixing, buttoned, editLink); line != "" {
 		elements = append(elements, map[string]any{"tag": "markdown", "text_size": "notation", "content": line})
 	}
 	if fixing {
 		draft, _ := externalDraftFor(job, target.ID)
-		elements = append(elements, reviewCardFixFields(job, draft, profile, name, slot, editLink)...)
-	}
-	link := firstNonEmpty(state.URL, editLink, externalEditSiteURL(job), reviewCardSafeURL(siteFrontURL()))
-	box := map[string]any{
-		// 飞书只有交互容器能画外框，它必须带点击行为：点块里空白处打开平台上的文章，还没有文章时
-		// 打开侧边栏改稿页；块内输入框与按钮优先响应自己的交互（与文章块同一写法）。
-		"tag": "interactive_container", "width": "fill",
-		"has_border": true, "border_color": reviewBatchBorderColor,
-		"corner_radius": fmt.Sprintf("%dpx", reviewCardPlatformRadius),
-		"padding":       reviewCardPlatformPadding, "vertical_spacing": "6px",
-		"behaviors": []any{map[string]any{"type": "open_url", "default_url": link, "pc_url": "", "ios_url": "", "android_url": ""}},
-		"elements":  elements,
-	}
-	if !fixing {
-		return box
+		elements = append(elements, reviewCardFixFields(job, draft, profile, name, slot, editLink, opts)...)
 	}
 	return map[string]any{
-		"tag": "form", "name": fmt.Sprintf("fix_%d_%d", job.ID, slot),
-		"elements": []any{box},
-	}
+		"tag": "column_set", "flex_mode": "none",
+		"columns": []any{map[string]any{
+			"tag": "column", "width": "weighted", "weight": 1, "direction": "vertical",
+			"vertical_spacing": "6px", "elements": elements,
+		}},
+	}, fixing
 }
 
-// reviewCardPlatformSecondLine 名字下面一行：已发布给文章链接（平台改过标题就写平台上的标题），
-// 失败/待核对写原因，待修改但卡片里改不了的指去侧边栏。右侧是重新同步按钮时状态字不显示，
-// 失败就写在这一行开头，免得只看到一句灰字原因。
-func reviewCardPlatformSecondLine(job publishJob, state externalPlatformState, fixing, buttoned bool, editLink string) string {
-	if state.URL != "" {
-		label := "查看文章"
-		if state.Title != "" && normalizeSiteTitle(state.Title) != normalizeSiteTitle(job.Title) {
-			label = reviewCardSafeText(state.Title, 40)
-		}
-		return "[" + label + "](" + state.URL + ")"
+// reviewCardPlatformArticleLink 名字后面的文章链接：平台改过标题就写平台上的标题，否则「查看文章」。
+func reviewCardPlatformArticleLink(job publishJob, state externalPlatformState) string {
+	if state.URL == "" {
+		return ""
 	}
-	if fixing {
-		return "" // 表单里逐项写清楚
+	label := "查看文章"
+	if state.Title != "" && normalizeSiteTitle(state.Title) != normalizeSiteTitle(job.Title) {
+		label = reviewCardSafeText(state.Title, 40)
+	}
+	return "[" + label + "](" + state.URL + ")"
+}
+
+// reviewCardPlatformReason 名字下面一行：失败/待核对写原因，待修改但卡片里改不了的指去侧边栏。
+// 右侧是重新同步按钮时状态字不显示，失败就写在这一行开头，免得只看到一句灰字原因。
+func reviewCardPlatformReason(state externalPlatformState, fixing, buttoned bool, editLink string) string {
+	if state.URL != "" || fixing {
+		return "" // 有文章链接就不再写原因；表单里逐项写清楚
 	}
 	reason := reviewCardSafeText(state.Reason, 80)
 	if reason == "" {
@@ -234,7 +285,7 @@ func reviewCardPlatformSyncButton(job publishJob, slot int, name string, state e
 }
 
 // reviewCardFixFields 待修改平台的表单：逐项写「哪里超了：要求，现状」，再给改的地方。
-func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yunsuoPlatformProfile, name string, slot int, editLink string) []any {
+func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yunsuoPlatformProfile, name string, slot int, editLink string, opts reviewCardDistributionOptions) []any {
 	var out []any
 	note := func(content string) {
 		out = append(out, map[string]any{"tag": "markdown", "text_size": "notation", "content": content})
@@ -268,15 +319,20 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 			}
 			options = append(options, map[string]any{"img_key": candidate.ImgKey, "value": reviewCardCoverValue(candidate.URL)})
 		}
+		// 卡片里没有上传控件：话题发图开通了就请人把图发到这张卡的话题里（不用再开排版工具），
+		// 否则给侧边栏上传链接。
 		upload := ""
-		if editLink != "" {
+		switch {
+		case opts.ThreadImages:
+			upload = "把新封面图发到这张卡的话题里"
+		case editLink != "":
 			upload = "[上传一张](" + editLink + ")"
 		}
 		switch {
 		case len(options) > 0:
 			text := "<font color='grey'>从正文里选一张作封面</font>"
 			if upload != "" {
-				text += "，或" + upload
+				text += "<font color='grey'>，或</font>" + upload
 			}
 			note(text)
 			out = append(out, map[string]any{
@@ -285,7 +341,7 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 				"style": "laser", "can_preview": false, "required": false, "options": options,
 			})
 		case upload != "":
-			note("<font color='grey'>正文里没有够大的图，</font>" + upload)
+			note("<font color='grey'>正文里没有够大的图，请</font>" + upload)
 		}
 	}
 	buttons := []map[string]any{{

@@ -188,20 +188,25 @@ func (n *feishuNotifier) sendMessageWithID(ctx context.Context, msgType, content
 	return strings.TrimSpace(env.Data.MessageID), nil
 }
 
-// replyCardWithID 以卡片回复一条消息（inThread 时开话题），返回新消息的 message_id。
-// 外发待修改提醒回复在审核卡下面，不在群里另起一条。
-func (n *feishuNotifier) replyCardWithID(ctx context.Context, parentID string, card map[string]any, inThread bool) (string, error) {
+// replyPostWithID 以富文本（post）回复：话题里 @ 人用普通消息，卡片里的 @ 不一定提醒得到
+// （2026-10-12 用户：「在卡片里@人可能收不到」）。post 是 {"zh_cn":{"content":[[…]]}}。
+func (n *feishuNotifier) replyPostWithID(ctx context.Context, parentID string, post map[string]any, inThread bool) (string, error) {
+	content, err := json.Marshal(post)
+	if err != nil {
+		return "", fmt.Errorf("feishu: 序列化回复消息: %w", err)
+	}
+	return n.replyMessageWithID(ctx, parentID, "post", string(content), inThread)
+}
+
+// replyMessageWithID 回复一条消息；inThread=true 时回复进它的话题。
+func (n *feishuNotifier) replyMessageWithID(ctx context.Context, parentID, msgType, content string, inThread bool) (string, error) {
 	parentID = strings.TrimSpace(parentID)
 	if !feishuMessageIDSafe(parentID) {
 		return "", errors.New("feishu: 回复的 message_id 无效")
 	}
-	content, err := json.Marshal(card)
-	if err != nil {
-		return "", fmt.Errorf("feishu: 序列化回复卡片: %w", err)
-	}
 	body, err := json.Marshal(map[string]any{
-		"content":         string(content),
-		"msg_type":        "interactive",
+		"content":         content,
+		"msg_type":        msgType,
 		"reply_in_thread": inThread,
 	})
 	if err != nil {
@@ -440,6 +445,42 @@ func (n *feishuNotifier) downloadCoverImage(ctx context.Context, imgURL string) 
 		return nil, fmt.Errorf("读封面图失败或超过 10 MB: %w", err)
 	}
 	return imgBytes, nil
+}
+
+// downloadMessageImage 取用户发在群里的图片（消息资源接口，需「获取与上传图片或文件资源」权限）。
+func (n *feishuNotifier) downloadMessageImage(ctx context.Context, messageID, imageKey string) ([]byte, error) {
+	messageID, imageKey = strings.TrimSpace(messageID), strings.TrimSpace(imageKey)
+	if !feishuMessageIDSafe(messageID) || imageKey == "" || strings.ContainsAny(imageKey, "/?#% ") {
+		return nil, errors.New("feishu: 图片消息参数无效")
+	}
+	token, err := n.tenantAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		n.baseURL+"/open-apis/im/v1/messages/"+url.PathEscape(messageID)+"/resources/"+url.PathEscape(imageKey)+"?type=image", nil)
+	if err != nil {
+		return nil, fmt.Errorf("feishu: 构造图片下载请求: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("飞书图片下载接口不可达: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := readBoundedBody(resp.Body, maxExternalCoverUploadBytes)
+	if err != nil {
+		return nil, fmt.Errorf("读图片失败或超过 10 MB: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK || strings.HasPrefix(strings.TrimSpace(resp.Header.Get("Content-Type")), "application/json") {
+		var env struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		_ = json.Unmarshal(data, &env)
+		return nil, fmt.Errorf("飞书图片下载失败（HTTP %d code=%d %s）", resp.StatusCode, env.Code, env.Msg)
+	}
+	return data, nil
 }
 
 // uploadImageBytes 把一张图片上传到飞书消息图片素材，返回卡片 img/custom_icon 可用的

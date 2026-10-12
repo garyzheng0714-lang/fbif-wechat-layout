@@ -195,13 +195,14 @@ func externalDistributionQuotaUsed(t *testing.T, env *publishTestEnv, accountID 
 }
 
 type sentReminder struct {
-	chatID, existing string
-	card             string
+	chatID, kind string
+	post         string
 }
 
-// TestExternalReminderMentionsOwnersInThread 待修改时在审核卡下回复一条提醒并 @ 分发负责人
-// （2026-10-12 用户裁定：@ 固定负责人）；问题变了原位更新、不再 @；改好后原位改成「已改好」；
-// 改好后又出问题才开新一轮、重新 @。
+// TestExternalReminderMentionsOwnersInThread 待修改时在审核卡的话题里发一条普通消息并 @ 分发负责人
+// （2026-10-12 用户：「不应该直接在卡片里@人，因为在卡片里@人可能收不到。它应该在这个卡片消息的
+// 话题下创建一个对话，@对应的人，告诉他下一步要做什么」「给他选项」）：开场逐项写哪里不合要求、能怎么
+// 改、改完点哪里；改好后同一话题里说一句「都改好了」，不再 @；同一轮不重复发；没设负责人不发。
 func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	setTestYunsuoConfig(t)
 	// 不配应用凭证：审核卡 outbox 在本地就失败，不会打到真飞书；提醒走注入的发送器。
@@ -218,11 +219,8 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sent []sentReminder
-	env.pipeline.externalReminderSender = func(_ context.Context, job publishJob, chatID, existing string, card map[string]any) (string, error) {
-		sent = append(sent, sentReminder{chatID: chatID, existing: existing, card: panelJSON(t, card)})
-		if existing != "" {
-			return existing, nil
-		}
+	env.pipeline.externalReminderSender = func(_ context.Context, job publishJob, chatID, kind string, post map[string]any) (string, error) {
+		sent = append(sent, sentReminder{chatID: chatID, kind: kind, post: panelJSON(t, post)})
 		return fmt.Sprintf("om_reminder_%d", len(sent)), nil
 	}
 	fake := newBothAccountsYunsuo()
@@ -238,32 +236,42 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(mustJob(t, env, job.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if len(sent) != 1 || sent[0].existing != "" || sent[0].chatID != "oc_review" {
-		t.Fatalf("应在审核群回复一条新提醒：%+v", sent)
+	if len(sent) != 1 || sent[0].kind != externalReminderKindOpen || sent[0].chatID != "oc_review" {
+		t.Fatalf("应在审核卡话题里发一条开场：%+v", sent)
 	}
-	for _, want := range []string{"<at id=ou_owner_1></at>", fmt.Sprintf("**#%d ", job.ID), "同步到其他平台前要改：",
-		fmt.Sprintf("- 头条号标题超出 %d 字（最多 20 字，现在 %d 字）", runeLen(testLongToutiaoTitle)-20, runeLen(testLongToutiaoTitle)),
-		"在审核卡的「分发到其他平台」里改，改好自动同步。", "[在侧边栏改](https://applink.feishu.cn/client/web_url/open?mode=sidebar-semi"} {
-		if !strings.Contains(sent[0].card, want) {
-			t.Fatalf("提醒缺少 %q: %s", want, sent[0].card)
+	over := runeLen(testLongToutiaoTitle) - 20
+	for _, want := range []string{`{"tag":"at","user_id":"ou_owner_1"}`, fmt.Sprintf("#%d《%s》同步到头条号前，还差 1 处要改：", job.ID, testLongToutiaoTitle),
+		fmt.Sprintf(`"style":["bold"],"tag":"text","text":"1. 标题超了 %d 字（头条号最多 20 字）"`, over),
+		"卡片里已填好建议「", "可以直接用，也可以改成自己的", "改好后点上面卡片里的「保存并同步至头条号」，就会同步。"} {
+		if !strings.Contains(sent[0].post, want) {
+			t.Fatalf("开场缺少 %q: %s", want, sent[0].post)
 		}
 	}
 	got := mustJob(t, env, job.ID)
 	if r := got.ExternalDistributionReminder; r.State != "" || r.MessageIDs["oc_review"] != "om_reminder_1" || r.Want != publishExternalReminderOpen {
-		t.Fatalf("发完应记下消息 id：%+v", r)
+		t.Fatalf("发完应记下开场消息 id：%+v", r)
+	}
+	// 同一轮再调度不重复发。
+	env.pipeline.dispatchExternalReminder(job.ID)
+	if len(sent) != 1 {
+		t.Fatalf("同一轮不重复发：%+v", sent)
 	}
 
-	// 改好：同一条提醒原位改成「已改好」，不新发、不再 @。
+	// 改好：同一话题里说一句都改好了，不再 @。
 	fixed := "老茶铺把茶做成零食，年营收过亿"
 	if _, err := env.pipeline.submitExternalDraftEdit(job.ID, 0, externalDraftEdit{Title: &fixed}, "ou_owner_1"); err != nil {
 		t.Fatal(err)
 	}
 	last := sent[len(sent)-1]
-	if last.existing != "om_reminder_1" || !strings.Contains(last.card, "已改好，正在同步到其他平台。") || strings.Contains(last.card, "<at id=") {
-		t.Fatalf("改好后应原位更新提醒：%+v", sent)
+	if len(sent) != 2 || last.kind != externalReminderKindClose || !strings.Contains(last.post, "都改好了，正在同步至头条号。") || strings.Contains(last.post, `"tag":"at"`) {
+		t.Fatalf("改好后应收尾一句且不 @：%+v", sent)
 	}
-	if r := mustJob(t, env, job.ID).ExternalDistributionReminder; r.State != "" || r.Want != publishExternalReminderResolved {
-		t.Fatalf("提醒应结束：%+v", r)
+	if r := mustJob(t, env, job.ID).ExternalDistributionReminder; r.State != "" || r.Want != publishExternalReminderResolved || r.ClosedIDs["oc_review"] != "om_reminder_2" {
+		t.Fatalf("提醒应结束并记下收尾：%+v", r)
+	}
+	env.pipeline.dispatchExternalReminder(job.ID)
+	if len(sent) != 2 {
+		t.Fatalf("收尾不重复发：%+v", sent)
 	}
 
 	// 没设负责人：不发提醒，也不算错误。
@@ -287,7 +295,37 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	}
 }
 
-// TestExternalReminderFailureCountsInMonitoring 提醒发不出去：按通知退避重试，超过次数进死信并计入监控。
+// TestExternalReminderCoverOptions 封面太小时给的做法：话题发图开通了就请人直接发图到话题里，
+// 没开通时给侧边栏上传链接——不给点了没反应的选项。
+func TestExternalReminderCoverOptions(t *testing.T) {
+	setTestYunsuoConfig(t)
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
+	cfg, err := loadYunsuoConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := publishJob{ID: 196, Title: "把茶做成零食", ExternalDistributionDrafts: []publishExternalDraft{{
+		AccountID: testYunsuoToutiaoID,
+		Issues:    []publishExternalIssue{{Field: publishExternalIssueCover, Width: 300, Height: 200, MinWidth: 452, MinHeight: 352}},
+	}, {
+		AccountID: testYunsuoBaijiaID,
+		Issues:    []publishExternalIssue{{Field: publishExternalIssueTitle, Current: "一个很长的标题", Length: 45, Min: 15, Max: 40}},
+	}}}
+	owners := []publishDistributionOwner{{OpenID: "ou_a"}}
+	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, false))
+	for _, want := range []string{"同步到头条号、百家号前，还差 2 处要改：", "1. 头条号封面太小（头条号至少 452×352，现在 300×200）",
+		"在卡片里点选一张正文大图，或者", `"tag":"a","text":"上传一张"`, "2. 百家号标题超了 5 字（百家号最多 40 字）",
+		"在卡片输入框里改到 40 字以内", "「保存并同步至头条号」「保存并同步至百家号」"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("开场缺少 %q: %s", want, plain)
+		}
+	}
+	threaded := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, true))
+	if !strings.Contains(threaded, "把新封面图直接发到这个话题里") || strings.Contains(threaded, "上传一张") || !strings.Contains(threaded, "发到话题里的封面会自动换上。") {
+		t.Fatalf("话题发图开通后应请人直接发图: %s", threaded)
+	}
+}
+
 func TestExternalReminderFailureCountsInMonitoring(t *testing.T) {
 	job := publishJob{ExternalDistributionReminder: publishExternalReminder{State: publishExternalCardDeadLetter, Error: "飞书回复消息失败"}}
 	var status publishMonitoringStatus

@@ -373,9 +373,10 @@ func distributionSectionJSON(t *testing.T, card map[string]any) string {
 }
 
 // TestReviewCardDistributionSectionShowsPlatformBlocks 分发区常显在卡片最底下（2026-10-12 用户裁定：
-// 「分发区域可以做成一个专门的区域，不用事先隐藏起来……加一个分割线，底部去排版分发的内容。每个分发
-// 平台对应一张卡片」）：每个平台一个细外框块，名字 + 靠右状态，下一行链接或原因；每个平台自己的按钮，
-// 只带平台位置不带账号 id；转载稿聚合卡没有这一区。
+// 「分发区域可以做成一个专门的区域，不用事先隐藏起来……加一个分割线，底部去排版分发的内容」；同日
+// 「一般只有一篇是原创……得用一个单独的区域呈现出来」「同一篇文章可能会同时发到……五六家平台……做一个
+// 循环容器组件」）：每篇原创一个与文章块同款的细外框块，块里每个平台一行——名字、文章链接、靠右状态，
+// 下一行原因；每个平台自己的按钮，只带平台位置不带账号 id；转载稿聚合卡没有这一区。
 func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	setTestYunsuoConfig(t)
 	job := reviewCardTestJob(publishStagePublished)
@@ -388,8 +389,11 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	if body == "" || strings.Contains(cardJSON(t, card), "多平台分发") {
 		t.Fatalf("原创已发布稿应有常显的分发区: %s", cardJSON(t, card))
 	}
-	if strings.Count(body, `"has_border":true`) != 2 || !strings.Contains(body, `"content":"同步至头条号"`) || !strings.Contains(body, `"content":"同步至百家号"`) {
-		t.Fatalf("未分发时每个平台一块、各自一枚按钮: %s", body)
+	if strings.Count(body, `"has_border":true`) != 1 || !strings.Contains(body, `"content":"同步至头条号"`) || !strings.Contains(body, `"content":"同步至百家号"`) {
+		t.Fatalf("未分发时一篇一个外框块，块里每个平台一行、各自一枚按钮: %s", body)
+	}
+	if !strings.Contains(body, `"corner_radius":"16px"`) || !strings.Contains(body, `"border_color":"grey-100"`) {
+		t.Fatalf("分发块应与上半部分文章块同款外框: %s", body)
 	}
 	if !strings.Contains(body, `"slot":0`) || !strings.Contains(body, `"slot":1`) ||
 		strings.Contains(cardJSON(t, card), testYunsuoToutiaoID) || strings.Contains(cardJSON(t, card), testYunsuoBaijiaID) {
@@ -415,7 +419,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
 	for _, want := range []string{"<font color='green'>已发布</font>", "[这个女性能量饮料，靠青汁粉走红了](https://www.toutiao.com/article/7560000000000000000/)",
-		`"default_url":"https://www.toutiao.com/article/7560000000000000000/"`, "<font color='red'>失败</font>",
+		"**头条号**　[", "<font color='red'>失败</font>",
 		"<font color='grey'>账号登录失效，在云梭插件更新登录后云梭会自动重试</font>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("分发区缺少 %q: %s", want, body)
@@ -431,12 +435,18 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	if !strings.Contains(body, "[查看文章](https://www.toutiao.com/article/7560000000000000000/)") || strings.Contains(body, job.Title) {
 		t.Fatalf("同标题时不重复标题: %s", body)
 	}
-	// 多篇：每篇先写「#编号 标题」。
+	// 多篇：每篇原创各一块，块头是这篇的小封面与「#编号 标题」；转载稿不占块。
 	second := reviewCardTestJob(publishStagePublished)
 	second.ID, second.Title = 73, "第二篇原创文章"
-	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job, second}))
-	if !strings.Contains(body, `"content":"#72 `) || !strings.Contains(body, `"content":"#73 第二篇原创文章"`) {
-		t.Fatalf("多篇时每篇应有编号标题: %s", body)
+	third := reviewCardTestJob(publishStagePublished)
+	third.ID, third.Author, third.SourceName = 74, "某外部作者", "第一财经"
+	third.BlocksJSON = `[{"k":"p","t":"本文转载自第一财经"}]`
+	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job, second, third}))
+	if !strings.Contains(body, `"content":"**#72 `) || !strings.Contains(body, `"content":"**#73 第二篇原创文章**"`) || strings.Contains(body, "#74") {
+		t.Fatalf("多篇时每篇原创应有编号标题，转载稿不出现: %s", body)
+	}
+	if strings.Count(body, `"has_border":true`) != 2 || !strings.Contains(body, `"img_key":"img_v3_cover_key"`) || !strings.Contains(body, `"size":"36px 36px"`) {
+		t.Fatalf("两篇原创各一块，块头带同一张封面: %s", body)
 	}
 
 	// 百家号受理前失败：可安全重推，只重推它。
@@ -514,8 +524,8 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 			form = node
 		}
 	}
-	if form == nil || form["name"] != "fix_72_0" {
-		t.Fatalf("待修改的头条号应是根级表单 fix_72_0: %s", cardJSON(t, card))
+	if form == nil || form["name"] != "fix_72" {
+		t.Fatalf("有待修改平台的文章块应包在根级表单 fix_72 里: %s", cardJSON(t, card))
 	}
 	body := panelJSON(t, form)
 	for _, want := range []string{
@@ -534,6 +544,14 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	}
 	if strings.Contains(body, "img_other") || strings.Contains(cardJSON(t, card), testYunsuoToutiaoID) {
 		t.Fatalf("别的应用传的图不能用，卡片里不得有账号 id: %s", body)
+	}
+	if !strings.Contains(body, "[上传一张](") {
+		t.Fatalf("话题发图没开通时给侧边栏上传链接: %s", body)
+	}
+	// 话题发图开通后：不再让人打开排版工具上传，请人把图发到这张卡的话题里。
+	threaded := cardJSON(t, buildReviewBatchCardWith([]publishJob{job}, nil, reviewCardDistributionOptions{ThreadImages: true}))
+	if !strings.Contains(threaded, "把新封面图发到这张卡的话题里") || strings.Contains(threaded, "[上传一张](") {
+		t.Fatalf("话题发图开通后应请人把图发到话题里: %s", threaded)
 	}
 	// 百家号没问题：仍是普通的同步按钮。
 	if section := distributionSectionJSON(t, card); !strings.Contains(section, `"content":"同步至百家号"`) {

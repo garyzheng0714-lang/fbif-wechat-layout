@@ -14,7 +14,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -442,8 +441,7 @@ func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, 
 	if err != nil {
 		return publishJob{}, publishExternalCoverCandidate{}, errors.New("只支持 JPG、PNG 图片")
 	}
-	mime := map[string]string{"jpeg": "image/jpeg", "png": "image/png"}[format]
-	if mime == "" {
+	if format != "jpeg" && format != "png" {
 		return publishJob{}, publishExternalCoverCandidate{}, errors.New("只支持 JPG、PNG 图片")
 	}
 	if config.Width < profile.CoverMinWidth || config.Height < profile.CoverMinHeight {
@@ -456,24 +454,10 @@ func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, 
 	if err := externalDistributionEligibility(job); err != nil {
 		return job, publishExternalCoverCandidate{}, err
 	}
-	digest := sha256.Sum256(data)
-	name := fmt.Sprintf("distribution-cover-%d-%x.%s", jobID, digest[:8], map[string]string{"jpeg": "jpg", "png": "png"}[format])
-	var stored string
-	if p.externalCoverStore != nil {
-		stored, err = p.externalCoverStore(ctx, name, data)
-	} else {
-		var results map[string]string
-		results, err = ossUploadByBase64Images(ctx, map[string]string{name: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)})
-		stored = results[name]
-	}
+	candidate, err := p.storeExternalCoverBytes(ctx, jobID, data, format, config.Width, config.Height, actor)
 	if err != nil {
-		return job, publishExternalCoverCandidate{}, fmt.Errorf("图片转存失败：%w", err)
+		return job, publishExternalCoverCandidate{}, err
 	}
-	stored = publicYunsuoMediaURL(strings.TrimSpace(stored))
-	if stored == "" {
-		return job, publishExternalCoverCandidate{}, errors.New("图片转存失败，请重试")
-	}
-	candidate := publishExternalCoverCandidate{URL: stored, Width: config.Width, Height: config.Height, UploadedBy: actor}
 	// 只加进可选封面，不当场推送：页面里还可能有没保存的标题改动，等人点「保存并同步」一起提交。
 	updated, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
 		if externalDistributionEligibility(current) != nil {

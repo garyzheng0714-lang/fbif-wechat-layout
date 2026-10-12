@@ -3,12 +3,15 @@ package main
 // publish_external_reminders.go — 外发待修改的提醒与后台准备。
 //
 // 2026-10-12 用户裁定：超限时「在群里 @ 对应的人」，@ 的是后台「发布链路」里设的固定分发
-// 负责人；改在审核卡里（或侧边栏页面）完成，提醒只指过去。红线 36：审核群只发卡片——提醒
-// 也是卡片，回复在这篇文章的审核卡下面（话题），不单独在群里刷屏。
+// 负责人；改在审核卡里完成。同日补充：「不应该直接在卡片里@人，因为在卡片里@人可能收不到。
+// 它应该在这个卡片消息的话题下创建一个对话，@对应的人，告诉他下一步要做什么」「自动化不要让人
+// 过多思考，简单直接地告诉他要干什么……给他选项」。所以提醒是审核卡话题里的普通富文本消息
+// （post，@ 才提醒得到），不是卡片，也不在群里单独刷屏（红线 36 只管运维播报）。
 //
-// 一轮提醒：有平台待修改 → 回复一条带 @ 的提醒卡；问题有变化原位更新（不再 @）；全部改好
-// → 原位改成「已改好」。改好后又出新问题才开新一轮、重新 @。持久 outbox：发送失败按通知
-// 退避重试，超过次数进死信（监控计数，红线 30）。
+// 一轮对话：有平台待修改 → 话题里发一条开场（@ 负责人，逐项写哪里不合要求、可以怎么改、改完
+// 点哪里）；全部改好 → 同一话题里说一句「都改好了，正在同步」。中途进度看卡片，不在话题里刷屏。
+// 改好后又出新问题才开新一轮、重新 @。持久 outbox：发送失败按通知退避重试，超过次数进死信
+// （监控计数，红线 30）。
 
 import (
 	"context"
@@ -31,7 +34,8 @@ type publishExternalReminder struct {
 	Round      int               `json:"round,omitempty"`
 	Want       string            `json:"want,omitempty"` // open：还有平台要改；resolved：都改好了
 	Signature  string            `json:"signature,omitempty"`
-	MessageIDs map[string]string `json:"message_ids,omitempty"` // 审核群 → 这一轮提醒的 message_id
+	MessageIDs map[string]string `json:"message_ids,omitempty"` // 审核群 → 这一轮开场消息的 message_id
+	ClosedIDs  map[string]string `json:"closed_ids,omitempty"`  // 审核群 → 这一轮「都改好了」的 message_id
 	State      string            `json:"state,omitempty"`       // pending / sending / dead_letter
 	Attempts   int               `json:"attempts,omitempty"`
 	Error      string            `json:"error,omitempty"`
@@ -119,7 +123,7 @@ func noteExternalReminderProgress(job *publishJob) {
 			if r.Want == publishExternalReminderResolved || len(r.MessageIDs) > 0 || r.Round == 0 {
 				// 上一轮已经改好（或第一次）：开新一轮，新回复里重新 @。
 				r.Round++
-				r.MessageIDs = nil
+				r.MessageIDs, r.ClosedIDs = nil, nil
 				r.SentAt, r.Skipped = "", ""
 			}
 			r.Want = publishExternalReminderOpen
@@ -164,13 +168,14 @@ func (p *publishPipeline) dispatchExternalReminderLocked(jobID int64) func() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	sent, skipped, sendErr := p.sendExternalReminder(ctx, claimed)
+	result, sendErr := p.sendExternalReminder(ctx, claimed)
+	skipped := result.skipped
 	claimedReminder := claimed.ExternalDistributionReminder
 	failed, restored, persistErr := p.store.updateIf(jobID, func(current publishJob) bool {
 		return current.ExternalDistributionReminder.Round == claimedReminder.Round
 	}, func(current *publishJob) {
 		r := &current.ExternalDistributionReminder
-		for chatID, messageID := range sent {
+		for chatID, messageID := range result.opened {
 			if r.MessageIDs == nil {
 				r.MessageIDs = map[string]string{}
 			}
@@ -178,6 +183,12 @@ func (p *publishPipeline) dispatchExternalReminderLocked(jobID int64) func() {
 				r.SentAt = pipelineNow(p).Format(time.RFC3339)
 			}
 			r.MessageIDs[chatID] = messageID
+		}
+		for chatID, messageID := range result.closed {
+			if r.ClosedIDs == nil {
+				r.ClosedIDs = map[string]string{}
+			}
+			r.ClosedIDs[chatID] = messageID
 		}
 		if r.Seq != claimedReminder.Seq || r.State != publishExternalCardSending {
 			// 发送期间又有新变化：保持 pending，交给已安排的下一次发送。
@@ -218,51 +229,72 @@ func (p *publishPipeline) dispatchExternalReminderLocked(jobID int64) func() {
 	return nil
 }
 
-// sendExternalReminder 往这篇文章的每个审核群发（或原位更新）提醒。返回本次拿到的
-// message_id；部分群失败时也返回已成功的，下次重试只更新它们、不重复 @。
-func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJob) (map[string]string, string, error) {
+type externalReminderSendResult struct {
+	opened, closed map[string]string // 审核群 → 本次发出的开场 / 收尾消息 id
+	skipped        string
+}
+
+const (
+	externalReminderKindOpen  = "open"
+	externalReminderKindClose = "close"
+)
+
+// sendExternalReminder 往这篇文章的每个审核群话题里发开场或收尾。每个群每轮各只发一次：
+// 部分群失败时已成功的记下来，重试只补没发成的，不重复 @。
+func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJob) (externalReminderSendResult, error) {
 	r := job.ExternalDistributionReminder
-	sent := map[string]string{}
-	if r.Want == publishExternalReminderResolved && len(r.MessageIDs) == 0 {
-		return sent, "", nil // 还没提醒过就改好了，不必再说
-	}
+	result := externalReminderSendResult{opened: map[string]string{}, closed: map[string]string{}}
 	if r.Want != publishExternalReminderOpen && r.Want != publishExternalReminderResolved {
-		return sent, "", nil
+		return result, nil
+	}
+	if r.Want == publishExternalReminderResolved && len(r.MessageIDs) == 0 {
+		return result, nil // 还没提醒过就改好了，不必再说
 	}
 	cfg, err := loadYunsuoConfig()
 	if err != nil {
-		return sent, "", err
+		return result, err
 	}
 	settings, err := p.externalReminderTargets(job)
 	if err != nil {
-		return sent, "", err
+		return result, err
 	}
 	owners := p.externalDistributionOwners(settings.AppProfileID)
-	if r.Want == publishExternalReminderOpen && len(r.MessageIDs) == 0 && len(owners) == 0 {
-		return sent, "没有设置分发负责人，未发提醒", nil
-	}
-	card := buildExternalReminderCard(job, cfg, owners)
+	threadImages := p.reviewThreadImagesReady(settings.AppProfileID)
 	var failures []string
 	for _, chatID := range settings.ChatIDs {
 		chatID = strings.TrimSpace(chatID)
 		if chatID == "" {
 			continue
 		}
-		existing := strings.TrimSpace(r.MessageIDs[chatID])
-		if existing == "" && r.Want == publishExternalReminderResolved {
+		var kind string
+		var post map[string]any
+		switch {
+		case r.Want == publishExternalReminderOpen && r.MessageIDs[chatID] == "":
+			if len(owners) == 0 {
+				result.skipped = "没有设置分发负责人，未发提醒"
+				continue
+			}
+			kind, post = externalReminderKindOpen, buildExternalReminderOpening(job, cfg, owners, threadImages)
+		case r.Want == publishExternalReminderResolved && r.MessageIDs[chatID] != "" && r.ClosedIDs[chatID] == "":
+			kind, post = externalReminderKindClose, buildExternalReminderClosing(job, cfg)
+		default:
 			continue
 		}
-		messageID, err := p.sendExternalReminderToChat(ctx, job, chatID, existing, card)
+		messageID, err := p.sendExternalReminderToChat(ctx, job, chatID, kind, post)
 		if err != nil {
 			failures = append(failures, chatID+"："+err.Error())
 			continue
 		}
-		sent[chatID] = messageID
+		if kind == externalReminderKindOpen {
+			result.opened[chatID] = messageID
+		} else {
+			result.closed[chatID] = messageID
+		}
 	}
 	if len(failures) > 0 {
-		return sent, "", errors.New("发送外发提醒失败：" + strings.Join(failures, "；"))
+		return result, errors.New("发送外发提醒失败：" + strings.Join(failures, "；"))
 	}
-	return sent, "", nil
+	return result, nil
 }
 
 // externalReminderTargets 提醒发到哪个应用、哪些群：跟这篇审核卡走（卡发在哪就回复在哪）。
@@ -274,9 +306,9 @@ func (p *publishPipeline) externalReminderTargets(job publishJob) (publishDelive
 	return settings, err
 }
 
-func (p *publishPipeline) sendExternalReminderToChat(ctx context.Context, job publishJob, chatID, existing string, card map[string]any) (string, error) {
+func (p *publishPipeline) sendExternalReminderToChat(ctx context.Context, job publishJob, chatID, kind string, post map[string]any) (string, error) {
 	if p.externalReminderSender != nil {
-		return p.externalReminderSender(ctx, job, chatID, existing, card)
+		return p.externalReminderSender(ctx, job, chatID, kind, post)
 	}
 	settings, apps, err := p.reviewDeliveryForJob(job)
 	if err != nil {
@@ -286,24 +318,31 @@ func (p *publishPipeline) sendExternalReminderToChat(ctx context.Context, job pu
 	if err != nil {
 		return "", err
 	}
-	if existing != "" {
-		return existing, notifier.updateCard(ctx, existing, card)
-	}
-	parent := reviewCardMessageID(job, chatID)
+	parent := p.reviewCardMessageIDForChat(job, chatID)
 	if parent == "" {
-		if batch, err := p.reviewCardBatch(job); err == nil {
-			for _, candidate := range batch {
-				if parent = reviewCardMessageID(candidate, chatID); parent != "" {
-					break
-				}
+		// 这个群里找不到审核卡（极旧的稿）：直接发到群里。
+		content, err := json.Marshal(post)
+		if err != nil {
+			return "", err
+		}
+		return notifier.sendMessageWithID(ctx, "post", string(content))
+	}
+	return notifier.replyPostWithID(ctx, parent, post, true)
+}
+
+// reviewCardMessageIDForChat 这篇文章在这个群里的审核卡（聚合卡里任一篇的都算同一张）。
+func (p *publishPipeline) reviewCardMessageIDForChat(job publishJob, chatID string) string {
+	if parent := reviewCardMessageID(job, chatID); parent != "" {
+		return parent
+	}
+	if batch, err := p.reviewCardBatch(job); err == nil {
+		for _, candidate := range batch {
+			if parent := reviewCardMessageID(candidate, chatID); parent != "" {
+				return parent
 			}
 		}
 	}
-	if parent == "" {
-		// 这个群里找不到审核卡（极旧的稿）：直接发到群里。
-		return notifier.sendCardWithID(ctx, card)
-	}
-	return notifier.replyCardWithID(ctx, parent, card, true)
+	return ""
 }
 
 // externalDistributionOwners 分发负责人：open_id 按审核应用区分，换了应用就 @ 不到原来的人。
@@ -321,48 +360,124 @@ func (p *publishPipeline) externalDistributionOwners(appProfileID string) []publ
 	return settings.DistributionOwners
 }
 
-// buildExternalReminderCard 提醒卡：@ 负责人，逐个平台写清要改什么，指回审核卡。
-func buildExternalReminderCard(job publishJob, cfg yunsuoConfig, owners []publishDistributionOwner) map[string]any {
-	title := fmt.Sprintf("**#%d %s**", job.ID, reviewCardSafeOrDash(job.Title, 80))
+// 富文本（post）的几种元素。
+func postText(text string, bold bool) map[string]any {
+	el := map[string]any{"tag": "text", "text": text}
+	if bold {
+		el["style"] = []string{"bold"}
+	}
+	return el
+}
+
+func postLink(text, href string) map[string]any {
+	return map[string]any{"tag": "a", "text": text, "href": href}
+}
+
+func postAt(openID string) map[string]any {
+	return map[string]any{"tag": "at", "user_id": openID}
+}
+
+func postMessage(lines [][]any) map[string]any {
+	return map[string]any{"zh_cn": map[string]any{"title": "", "content": lines}}
+}
+
+// externalReminderPlatformNames 待修改的平台名，按配置顺序。
+func externalReminderPlatformNames(cfg yunsuoConfig, drafts []publishExternalDraft) []string {
+	names := make([]string, 0, len(drafts))
+	for _, draft := range drafts {
+		if slot := externalTargetSlot(cfg, draft.AccountID); slot >= 0 {
+			names = append(names, yunsuoProfileForTarget(cfg.Targets[slot]).Name)
+		}
+	}
+	return names
+}
+
+// buildExternalReminderOpening 话题开场：@ 负责人，一句话说清哪篇、要同步到哪、差几处；
+// 每处一行粗体写不合要求的地方，下一行给能选的做法；最后一行说改完点哪里。
+func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []publishDistributionOwner, threadImages bool) map[string]any {
+	drafts := externalPendingFixes(job, cfg)
+	names := externalReminderPlatformNames(cfg, drafts)
+	total := 0
+	for _, draft := range drafts {
+		total += len(draft.Issues)
+	}
+	var head []any
+	for _, owner := range owners {
+		if id := strings.TrimSpace(owner.OpenID); id != "" {
+			head = append(head, postAt(id), postText(" ", false))
+		}
+	}
+	head = append(head, postText(fmt.Sprintf("#%d《%s》同步到%s前，还差 %d 处要改：",
+		job.ID, reviewCardSafeOrDash(job.Title, 80), strings.Join(names, "、"), total), false))
+	lines := [][]any{head}
 	link := externalDistributionSidebarLink(job.ID)
-	var elements []any
-	if job.ExternalDistributionReminder.Want == publishExternalReminderResolved {
-		elements = append(elements, map[string]any{
-			"tag": "markdown", "content": fmt.Sprintf("%s\n已改好，正在同步到其他平台。", title),
-		})
-	} else {
-		var mentions []string
-		for _, owner := range owners {
-			if id := strings.TrimSpace(owner.OpenID); id != "" {
-				mentions = append(mentions, "<at id="+id+"></at>")
+	multi := len(drafts) > 1
+	n := 0
+	for i, draft := range drafts {
+		name := names[i]
+		prefix := ""
+		if multi {
+			prefix = name
+		}
+		for _, issue := range draft.Issues {
+			n++
+			var problem string
+			var options []any
+			switch issue.Field {
+			case publishExternalIssueTitle, publishExternalIssueSummary:
+				what := "标题"
+				suggested := draft.SuggestedTitle
+				if issue.Field == publishExternalIssueSummary {
+					what, suggested = "摘要", draft.SuggestedSummary
+				}
+				problem = fmt.Sprintf("%d. %s%s超了 %d 字（%s最多 %d 字）", n, prefix, what, issue.Length-issue.Max, name, issue.Max)
+				if suggested != "" {
+					options = append(options, postText(fmt.Sprintf("卡片里已填好建议「%s」，可以直接用，也可以改成自己的", reviewCardSafeText(suggested, 120)), false))
+				} else {
+					options = append(options, postText(fmt.Sprintf("在卡片输入框里改到 %d 字以内", issue.Max), false))
+				}
+			case publishExternalIssueCover:
+				if issue.Missing {
+					problem = fmt.Sprintf("%d. %s没有可用的封面（%s至少 %d×%d）", n, prefix, name, issue.MinWidth, issue.MinHeight)
+				} else {
+					problem = fmt.Sprintf("%d. %s封面太小（%s至少 %d×%d，现在 %d×%d）", n, prefix, name, issue.MinWidth, issue.MinHeight, issue.Width, issue.Height)
+				}
+				options = append(options, postText("在卡片里点选一张正文大图，或者", false))
+				switch {
+				case threadImages:
+					options = append(options, postText("把新封面图直接发到这个话题里", false))
+				case link != "":
+					options = append(options, postLink("上传一张", link))
+				default:
+					options = append(options, postText("请运营在云梭后台换封面", false))
+				}
+			default:
+				continue
 			}
+			lines = append(lines, []any{postText(problem, true)}, options)
 		}
-		lines := []string{}
-		if len(mentions) > 0 {
-			lines = append(lines, strings.Join(mentions, " "))
-		}
-		lines = append(lines, title, "同步到其他平台前要改：")
-		names := map[string]string{}
-		for _, target := range cfg.Targets {
-			names[target.ID] = yunsuoProfileForTarget(target).Name
-		}
-		for _, draft := range externalPendingFixes(job, cfg) {
-			for _, issue := range draft.Issues {
-				lines = append(lines, "- "+names[draft.AccountID]+externalIssueDetail(issue))
-			}
-		}
-		guide := "在审核卡的「分发到其他平台」里改，改好自动同步。"
-		if link != "" {
-			guide += fmt.Sprintf("也可以[在侧边栏改](%s)。", link)
-		}
-		lines = append(lines, guide)
-		elements = append(elements, map[string]any{"tag": "markdown", "content": strings.Join(lines, "\n")})
 	}
-	return map[string]any{
-		"schema": "2.0",
-		"config": map[string]any{"update_multi": true, "width_mode": "fill"},
-		"body":   map[string]any{"elements": elements},
+	finish := "改好后点上面卡片里的「保存并同步至" + strings.Join(names, "」「保存并同步至") + "」，就会同步。"
+	if threadImages {
+		finish += "发到话题里的封面会自动换上。"
 	}
+	lines = append(lines, []any{postText(finish, false)})
+	return postMessage(lines)
+}
+
+// buildExternalReminderClosing 收尾：都改好了，正在同步（不再 @）。
+func buildExternalReminderClosing(job publishJob, cfg yunsuoConfig) map[string]any {
+	var names []string
+	for _, target := range cfg.Targets {
+		if draft, ok := externalDraftFor(job, target.ID); ok && draft.EditedAt != "" {
+			names = append(names, yunsuoProfileForTarget(target).Name)
+		}
+	}
+	text := "都改好了，正在同步到其他平台。"
+	if len(names) > 0 {
+		text = "都改好了，正在同步至" + strings.Join(names, "、") + "。"
+	}
+	return postMessage([][]any{{postText(text, false)}})
 }
 
 // prepareExternalDraftAssets 待修改的平台：用 AI 缩写出更好的建议标题/摘要（不可用就保留

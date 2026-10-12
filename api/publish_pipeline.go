@@ -174,9 +174,12 @@ type publishPipeline struct {
 	// 外发待修改提醒串行发送：同一轮提醒不会因并发重复回复、重复 @。
 	externalReminderMu sync.Mutex
 	// 以下三个仅测试注入：提醒发送、AI 缩写建议、封面候选图上传（默认走审核应用与 MiMo）。
-	externalReminderSender func(ctx context.Context, job publishJob, chatID, existingMessageID string, card map[string]any) (string, error)
-	externalSuggest        func(ctx context.Context, kind, current string, min, max int) (string, error)
-	externalCoverUploader  func(ctx context.Context, job publishJob, imgURL string) (string, string, error)
+	externalReminderSender func(ctx context.Context, job publishJob, chatID, kind string, post map[string]any) (string, error)
+	// 话题发图换封面（publish_review_thread.go）的测试注入：取图与在话题里回复。
+	reviewThreadImageFetcher func(ctx context.Context, chatID, messageID, imageKey string) ([]byte, error)
+	reviewThreadReplier      func(ctx context.Context, chatID, parentID string, post map[string]any) error
+	externalSuggest          func(ctx context.Context, kind, current string, min, max int) (string, error)
+	externalCoverUploader    func(ctx context.Context, job publishJob, imgURL string) (string, string, error)
 	// distributionOwnerLister 仅测试注入：读取审核群成员（默认用审核应用调飞书）。
 	distributionOwnerLister func(ctx context.Context, appProfileID, chatID string) ([]publishDistributionOwner, error)
 	// externalCoverStore 仅测试注入：侧边栏上传的封面转存（默认 OSS）。
