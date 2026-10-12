@@ -107,6 +107,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 	if len(authServices) > 0 {
 		auth = authServices[0]
 	}
+	registerPublishDistributionOwnerRoutes(mux, p, auth)
+	registerExternalDistributionEditRoutes(mux, p, auth)
 	mux.HandleFunc("POST /api/publish/monitor-alert", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishServiceToken(w, r) {
 			return

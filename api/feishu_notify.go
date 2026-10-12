@@ -188,6 +188,65 @@ func (n *feishuNotifier) sendMessageWithID(ctx context.Context, msgType, content
 	return strings.TrimSpace(env.Data.MessageID), nil
 }
 
+// replyCardWithID 以卡片回复一条消息（inThread 时开话题），返回新消息的 message_id。
+// 外发待修改提醒回复在审核卡下面，不在群里另起一条。
+func (n *feishuNotifier) replyCardWithID(ctx context.Context, parentID string, card map[string]any, inThread bool) (string, error) {
+	parentID = strings.TrimSpace(parentID)
+	if !feishuMessageIDSafe(parentID) {
+		return "", errors.New("feishu: 回复的 message_id 无效")
+	}
+	content, err := json.Marshal(card)
+	if err != nil {
+		return "", fmt.Errorf("feishu: 序列化回复卡片: %w", err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"content":         string(content),
+		"msg_type":        "interactive",
+		"reply_in_thread": inThread,
+	})
+	if err != nil {
+		return "", fmt.Errorf("feishu: 序列化回复请求体: %w", err)
+	}
+	token, err := n.tenantAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		n.baseURL+"/open-apis/im/v1/messages/"+url.PathEscape(parentID)+"/reply", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("feishu: 构造回复请求: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("飞书回复消息接口不可达: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return "", fmt.Errorf("飞书回复消息响应读取失败或超过 1 MB: %w", err)
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			MessageID string `json:"message_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return "", fmt.Errorf("飞书回复消息响应异常（HTTP %d）: %w", resp.StatusCode, err)
+	}
+	if env.Code != 0 {
+		return "", fmt.Errorf("飞书回复消息失败 code=%d msg=%s", env.Code, env.Msg)
+	}
+	messageID := strings.TrimSpace(env.Data.MessageID)
+	if !feishuMessageIDSafe(messageID) {
+		return "", errors.New("feishu: 回复响应缺少有效 message_id")
+	}
+	return messageID, nil
+}
+
 // updateCard 原位更新当前应用发送的交互卡。飞书卡片使用 PATCH，而不是普通
 // 文本消息的 PUT；content 仍是卡片 JSON 序列化后的字符串。
 func (n *feishuNotifier) updateCard(ctx context.Context, messageID string, card map[string]any) error {

@@ -18,13 +18,19 @@ type yunsuoPlatformProfile struct {
 	NativeCaption bool
 	// 封面下限，读得到图片尺寸时才拦；0 表示平台没有已知下限。
 	CoverMinWidth, CoverMinHeight int
+	// 云梭按平台在三档标题里挑一档（yunsuoTitleShort/Medium/Long）；人改过的平台标题原样
+	// 写进这一档。TitleMax 是推送前检查用的字数上限，0 表示按这一档的上限。
+	TitleField string
+	TitleMax   int
+	// 摘要字数上限，推送前检查用；0 表示平台没有已知上限，不查。
+	SummaryMax int
 	// 平台每天的文章上限，自动外发按账号各自计数（人工按钮发的也计入）。
 	DailyLimit int
 	// 文章链接所在域名：人工登记已发链接时只认这些域名。
 	URLHosts []string
 	// 推送成功后怎么找文章链接（publish_external_links.go）；空表示不自动找。
 	LinkLookup string
-	// 审核卡多平台分发行前的平台图标（api/cardicons/<Icon>.png，平台自己的网站图标）。
+	// 审核卡分发区平台块里的平台图标（api/cardicons/<Icon>.png，平台自己的网站图标）。
 	Icon string
 }
 
@@ -38,6 +44,8 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		HeadingOpen: `<h1 class="pgc-h-forward-slash">`, HeadingClose: "</h1>",
 		NativeCaption: true,
 		CoverMinWidth: 452, CoverMinHeight: 352,
+		// #196 实测头条号拿的是短标题（被截成 20 字），不是平台自己的 30 字。
+		TitleField: yunsuoTitleShort, TitleMax: 20,
 		DailyLimit: 5,
 		URLHosts:   []string{"toutiao.com", "www.toutiao.com", "m.toutiao.com"},
 		LinkLookup: externalLinkLookupToutiao,
@@ -49,9 +57,11 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		Key: "baijiahao", Name: "百家号",
 		HeadingOpen: `<h1 class="pgc-h-forward-slash">`, HeadingClose: "</h1>",
 		NativeCaption: true,
-		DailyLimit:    yunsuoDefaultDailyLimit,
-		URLHosts:      []string{"baijiahao.baidu.com", "mbd.baidu.com"},
-		Icon:          "platform-baijiahao",
+		// 还没有一篇推成功过，用的哪一档标题未知，先按云梭通用标题（≤40 字）查。
+		TitleField: yunsuoTitleMedium,
+		DailyLimit: yunsuoDefaultDailyLimit,
+		URLHosts:   []string{"baijiahao.baidu.com", "mbd.baidu.com"},
+		Icon:       "platform-baijiahao",
 	},
 }
 
@@ -60,7 +70,36 @@ var yunsuoGenericProfile = yunsuoPlatformProfile{
 	Key: "generic", Name: "外部平台",
 	HeadingOpen: `<h1 class="pgc-h-forward-slash">`, HeadingClose: "</h1>",
 	NativeCaption: true,
+	TitleField:    yunsuoTitleMedium,
 	DailyLimit:    yunsuoDefaultDailyLimit,
+}
+
+// 云梭的三档标题与各自的字数范围（云梭 API 文档：short_title 8–20、title 15–40、
+// long_title 20–60）。
+const (
+	yunsuoTitleShort  = "short"
+	yunsuoTitleMedium = "title"
+	yunsuoTitleLong   = "long"
+)
+
+func yunsuoTitleFieldRange(field string) (int, int) {
+	switch field {
+	case yunsuoTitleShort:
+		return 8, 20
+	case yunsuoTitleLong:
+		return 20, 60
+	default:
+		return 15, 40
+	}
+}
+
+// titleLimits 这个平台标题的字数范围：下限是云梭这一档的下限，上限取平台规则与这一档上限中较小的。
+func (p yunsuoPlatformProfile) titleLimits() (int, int) {
+	min, max := yunsuoTitleFieldRange(p.TitleField)
+	if p.TitleMax > 0 && p.TitleMax < max {
+		max = p.TitleMax
+	}
+	return min, max
 }
 
 func yunsuoProfileForTarget(target yunsuoAccountTarget) yunsuoPlatformProfile {

@@ -52,7 +52,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **上游只交链接**：`site-sync` 与 `official-sync` 只接收链接、规则包和分类证据；正文、标题、来源、作者或封面一旦出现就显式 400。详细字段、状态码与幂等见 [发布接入契约](docs/publish-intake-contract.md)。
 - **审核卡与风险分层**：待审、已发布、已驳回、异常卡都保留封面、标题、标签、摘要和预览/原文入口。只有显式 `confirmed` 的实质性问题进首屏，其余待核提示收进完整报告；审核群只发卡片。`card-refresh` 可原位重建历史卡；任务已经使用 `ReviewCardMsgIDs` 多群映射时，切群后新群没有自己的 message id 就发新卡。只带 legacy `ReviewCardMsgID` 的旧任务仍可能回退更新旧群，是待修兼容风险。
 - **FoodTalks 内容组装**：原创与转载分别走独立分类配置；所有文章的 AI 标签都在 `tag_type_id=6` 中按规范化名称等值解析、从不新建；Mote 文章再优先加 Mote/系列标签，最多 3 个，只有 Mote 新系列（段首「这是我XX系列的第N篇」）会自动建系列标签。系列声明段与链到公众号合集的「XX系列」链到系列标签页；Mote 正文里的公众号文章链换成站内已发布稿，找不到才留公众号链。进 FoodTalks 和云梭的正文都切除微信导流尾；正文非空白字符 ≥3000 且 h2+h3 ≥5 时在发布组装层写确定性目录。
-- **外部分发是正交子状态机**：FoodTalks 继续接收原创与转载；只有已审核、已在 FoodTalks 公开且确认为自有原创的任务，才能经云梭分发。每个平台账号单独推送、单独记状态（`external_distribution_lanes`），一个平台失败不挡其他平台；版式分通用层与平台层（`yunsuo_platform_profiles.go`）。`YUNSUO_TARGET_ACCOUNTS_JSON` 里标 `"auto":true` 的账号（目前是头条号、百家号）在原创公开后自动推送，名额按平台各算（头条号每天最多 5 篇）；卡片上的「多平台分发」折叠区列出各平台状态与文章链接，按钮推还没推过的或受理前失败的平台。存量原创用 `auto-backfill` 补发，每个平台每天最多 3 篇、白天间隔 1 小时；已有记录的平台（含人工登记的已发稿）不再推。头条号文章链接在推送成功后经头条搜索 + TikHub 核对回填。未拿到 `content_pk` 的不确定结果只进人工对账，不盲重发。
+- **外部分发是正交子状态机**：FoodTalks 继续接收原创与转载；只有已审核、已在 FoodTalks 公开且确认为自有原创的任务，才能经云梭分发。每个平台账号单独推送、单独记状态（`external_distribution_lanes`），一个平台失败不挡其他平台；版式分通用层与平台层（`yunsuo_platform_profiles.go`）。`YUNSUO_TARGET_ACCOUNTS_JSON` 里标 `"auto":true` 的账号（目前是头条号、百家号）在原创公开后自动推送，名额按平台各算（头条号每天最多 5 篇）；审核卡最底下常显「分发到其他平台」区，每个平台一块，写状态与文章链接，按钮只推这一个平台（还没推过或受理前失败的）。推送前按平台查标题/摘要字数与封面尺寸，不过就记为「待修改」（不推、不占名额），在这个平台的块里直接改（预填建议、点选正文大图），或从链接在飞书侧边栏打开 `/distribute.html` 上传封面；同时在审核卡下的话题里 @ 管理后台设置的分发负责人。存量原创用 `auto-backfill` 补发，每个平台每天最多 3 篇、白天间隔 1 小时；已有记录的平台（含人工登记的已发稿）不再推。头条号文章链接在推送成功后经头条搜索 + TikHub 核对回填。未拿到 `content_pk` 的不确定结果只进人工对账，不盲重发。
 - **手工发布优先且同题防重**：运营在 CMS 手工发布/编辑的稿件不用流水线库存覆盖。待审卡会 best effort 标红同题已发布稿；首次审核公开的 `stagePublicize` 在写入公开意图前再硬检，命中或 CMS 查询失败都 fail closed。
 - **环境状态不写死在文档**：代码同时支持 `test|production`，当前生产实例实际指向必须现场核验 `/api/publish/readiness` 与对应 URL，不从 README 或旧日志推断。
 - **已知未闭环（不可发布）**：至少包括图宽 preset 迁移与离线 fallback 仍是旧口径、同题硬闸未覆盖 `stageRepublish`、网站页脚交互未复用 `mountBlockPanel` + Sortable、ADR 中立层仍保留 FBIF 专用兼容字面量、legacy 审核卡切群可能更新旧群、群成员审核的运行时与 env schema 要求未收敛，以及导入框快捷键会同时复制旧预览并提交新内容。完整验收阻断见 [FoodTalks URL 导入验收基准](docs/agents/foodtalks-url-import-acceptance.md)；这些问题要另做功能修复与真实验收，不能靠文档宣称完成。
@@ -236,6 +236,7 @@ curl http://127.0.0.1:9000/api/health
 | `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员/超级管理员登录，或部署专用 `PUBLISH_ADMIN_SERVICE_TOKEN` |
 | `GET` | `/api/publish/readiness` | 部署/运维只读验收：生成物存在/一致性、存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员角色或部署专用服务令牌，且只返回布尔/模式信息 |
 | `GET` / `PUT` | `/api/publish/delivery-settings` | 读取/更新审核卡的飞书应用与目标群；管理员权限，写入还需飞书登录与当前群可见性 |
+| `GET` / `PUT` | `/api/publish/delivery-settings/distribution-owners` | 分发负责人：GET 返回已选的人与审核群成员候选（换了推送应用会标 `stale`）；PUT `{open_ids}` 只收审核群成员，最多 10 人。外发前检查不过时在审核卡下的话题里 @ 他们 |
 | `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员/超级管理员登录，或部署专用服务令牌 |
 | `POST` | `/api/publish/jobs/{id}/review` | HTTP 审核默认关闭；仅显式开启、管理员鉴权且固定审核人位于飞书白名单时可用。approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |
@@ -255,6 +256,8 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/jobs/{id}/retry-external-distribution` | 管理员确认对账中的旧云梭稿作废后，只为对账中的平台按当前网站稿重新推送 |
 | `POST` | `/api/publish/external-distribution/auto-backfill` | 把 `since`（RFC3339）之后公开、还有 auto 账号没有记录的原创记为补发待办，按各平台补发配额逐日推送；`dry_run:true` 只列名单 |
 | `POST` | `/api/publish/jobs/{id}/external-distribution/manual` | 管理员登记某平台人工已发（`account_id` + 平台域名 `url`，或 `lookup:true` 自动找头条号），或给已发布的平台补链接；登记后自动外发不再推这个平台；`dry_run:true` 只报告 |
+| `GET` / `PUT` | `/api/publish/jobs/{id}/external-distribution/draft?t=` | 外发改稿页（`/distribute.html`，审核卡链接在飞书侧边栏打开）：GET 返回每个平台的状态、字数上限、建议与可选封面；PUT `{slot, title?, summary?, cover_url?}` 只改这个平台推出去的版本，服务端重查，通过即推。需飞书登录 + 这篇的签名 `t`，或规则管理员 |
+| `POST` | `/api/publish/jobs/{id}/external-distribution/cover?t=` | 改稿页上传封面（multipart `slot` + `file`，JPG/PNG ≤10MB，须达到平台封面下限），只多一张可选图，保存时才推 |
 | `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 

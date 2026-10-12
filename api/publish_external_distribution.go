@@ -233,6 +233,7 @@ func publishExternalDistributionCardVersion(job publishJob) string {
 		MaterialHash  string   `json:"material_hash"`
 		State         string   `json:"state"`
 		Lanes         []string `json:"lanes,omitempty"`
+		Drafts        []string `json:"drafts,omitempty"`
 		Targets       []string `json:"targets"`
 	}{
 		ID: job.ID, Stage: job.Stage, ContentHash: job.ContentHash,
@@ -240,6 +241,7 @@ func publishExternalDistributionCardVersion(job publishJob) string {
 		ApprovedRisk: job.ApprovedRiskVersion, Provenance: provenance, Source: source,
 		MaterialHash: fmt.Sprintf("sha256:%x", materialDigest[:]),
 		State:        externalDistributionSummaryState(job), Lanes: externalDistributionLaneSignature(job),
+		Drafts:  externalDistributionDraftSignature(job),
 		Targets: targetIDs,
 	})
 	digest := sha256.Sum256(payload)
@@ -389,6 +391,10 @@ func externalDistributionIneligible(err error) error {
 // 修正后可从卡片重推）；不是整篇不能外发，自动外发不据此清待办。
 var errExternalLanesNotQueued = errors.New("各平台都未能生成外发内容")
 
+// errExternalLanesNeedFix 这次选中的平台都卡在推送前检查（标题、摘要超限或封面太小），
+// 已记成待修改，等人在卡片或侧边栏里改；自动外发不据此清待办。
+var errExternalLanesNeedFix = errors.New("要先改好标题、摘要或封面才能同步")
+
 func isExternalDistributionIneligible(err error) bool {
 	var target *externalDistributionIneligibleError
 	return errors.As(err, &target)
@@ -509,11 +515,28 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	if mode == externalQueueAuto {
 		attribution = "original_auto_confirmed: " + attributionEvidence
 	}
-	// 每个平台各自按自己的规则生成 payload；某个平台生成不了（如封面不够头条下限）只记
-	// 这个平台受理前失败，其他平台照推。
+	// 每个平台先按自己的规则做推送前检查（标题、摘要字数与封面尺寸）：有问题的平台不推、
+	// 不占名额，记成待修改等人改；其余平台各自生成 payload，生成不了的只记这个平台受理前
+	// 失败，其他平台照推。
 	lanes := make([]publishExternalLane, 0, len(chosen))
-	var queuedAccounts, failures []string
+	var queuedAccounts, failures, fixNames []string
+	type preflightResult struct {
+		target     yunsuoAccountTarget
+		issues     []publishExternalIssue
+		candidates []publishExternalCoverCandidate
+	}
+	var checked []preflightResult
+	draftEditedAt := map[string]string{}
+	material := externalDraftMaterial(job)
 	for _, target := range chosen {
+		draft, _ := externalDraftFor(job, target.ID)
+		draftEditedAt[target.ID] = draft.EditedAt
+		issues, candidates := externalPreflight(snapshot, target, draft)
+		checked = append(checked, preflightResult{target: target, issues: issues, candidates: candidates})
+		if len(issues) > 0 {
+			fixNames = append(fixNames, target.Name+"："+externalIssueSummaryText(issues))
+			continue
+		}
 		lane := publishExternalLane{
 			AccountID: target.ID, Name: target.Name, State: publishExternalDistributionQueued,
 			RequestedBy: strings.TrimSpace(actor), RequestedAt: requestedAt,
@@ -523,7 +546,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		if lane.ContentVersion == 0 {
 			lane.ContentVersion = job.ContentVersion
 		}
-		payload, buildErr := buildYunsuoPushPayload(snapshot, []yunsuoAccountTarget{target}, cfg.Categories)
+		payload, buildErr := buildYunsuoPushPayloadWithDraft(snapshot, []yunsuoAccountTarget{target}, cfg.Categories, draft)
 		var payloadJSON []byte
 		if buildErr == nil {
 			payloadJSON, buildErr = json.Marshal(payload)
@@ -536,7 +559,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			failures = append(failures, target.Name+"："+lane.Error)
 		} else {
 			digest := sha256.Sum256(payloadJSON)
-			lane.Title = payload.Title
+			lane.Title = payload.titleField(yunsuoProfileForTarget(target).TitleField)
 			lane.PayloadJSON = string(payloadJSON)
 			lane.PayloadHash = fmt.Sprintf("sha256:%x", digest[:])
 			queuedAccounts = append(queuedAccounts, target.ID)
@@ -556,6 +579,12 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 				return false
 			}
 		}
+		// 检查期间有人改了这个平台的标题/摘要/封面：按旧值生成的结果作废，下一轮按新值重来。
+		for accountID, editedAt := range draftEditedAt {
+			if draft, _ := externalDraftFor(current, accountID); draft.EditedAt != editedAt {
+				return false
+			}
+		}
 		return true
 	}, func(current *publishJob) {
 		for _, lane := range lanes {
@@ -565,6 +594,12 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 				current.ExternalDistributionLanes = append(current.ExternalDistributionLanes, lane)
 			}
 		}
+		for _, result := range checked {
+			if _, exists := externalDraftFor(*current, result.target.ID); exists || len(result.issues) > 0 {
+				recordExternalPreflight(current, result.target, result.issues, result.candidates, material, requestedAt)
+			}
+		}
+		noteExternalReminderProgress(current)
 		// auto 账号都有 lane 了，自动外发待办就清掉；还有平台等配额的留着。
 		if len(externalDistributionMissingAutoTargets(*current, cfg)) == 0 {
 			current.ExternalDistributionAutoPending = ""
@@ -584,12 +619,19 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	// 先让同一张卡进入“正在同步”状态，再启动外调；两个 outbox 的发送入口会
 	// 串行并重读最新任务，即使 worker 更快完成也不会让旧卡覆盖终态。
 	p.scheduleExternalDistributionCardUpdate(updated.ID)
+	p.scheduleExternalReminder(updated.ID)
+	if len(fixNames) > 0 {
+		p.spawnExternalWork(func() { p.prepareExternalDraftAssets(jobID) })
+	}
 	for _, accountID := range queuedAccounts {
 		accountID := accountID
 		p.spawnExternalWork(func() { p.runExternalLane(jobID, accountID) })
 	}
 	if len(queuedAccounts) == 0 {
-		return updated, fmt.Errorf("%w：%s", errExternalLanesNotQueued, strings.Join(failures, "；"))
+		if len(fixNames) > 0 && len(failures) == 0 {
+			return updated, fmt.Errorf("%w（%s）", errExternalLanesNeedFix, strings.Join(fixNames, "；"))
+		}
+		return updated, fmt.Errorf("%w：%s", errExternalLanesNotQueued, strings.Join(append(failures, fixNames...), "；"))
 	}
 	return updated, nil
 }
@@ -973,6 +1015,7 @@ func (p *publishPipeline) dispatchExternalDistributionCardUpdate(jobID int64) {
 
 func (p *publishPipeline) recoverExternalDistribution(job publishJob) {
 	p.recoverSourceResync(job)
+	p.recoverExternalReminder(job)
 	if job.ExternalDistributionCardState == publishExternalCardSending {
 		reset, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 			return current.ExternalDistributionCardState == publishExternalCardSending

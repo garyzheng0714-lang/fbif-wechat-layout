@@ -37,8 +37,12 @@ type publishDeliverySettings struct {
 	AppProfileID  string   `json:"app_profile_id"`
 	ChatIDs       []string `json:"chat_ids"`
 	AutoPublish   bool     `json:"auto_publish,omitempty"`
-	UpdatedBy     string   `json:"updated_by,omitempty"`
-	UpdatedAt     string   `json:"updated_at,omitempty"`
+	// 分发负责人：外发待修改时在审核卡下 @ 的人。open_id 按应用区分，只对
+	// DistributionOwnersApp 这个审核应用有效（publish_distribution_owners.go）。
+	DistributionOwners    []publishDistributionOwner `json:"distribution_owners,omitempty"`
+	DistributionOwnersApp string                     `json:"distribution_owners_app,omitempty"`
+	UpdatedBy             string                     `json:"updated_by,omitempty"`
+	UpdatedAt             string                     `json:"updated_at,omitempty"`
 }
 
 type publishDeliverySelectionRequest struct {
@@ -109,6 +113,11 @@ func normalizePublishDeliverySettings(settings publishDeliverySettings) (publish
 		return publishDeliverySettings{}, err
 	}
 	settings.ChatIDs = ids
+	settings.DistributionOwners = normalizePublishDistributionOwners(settings.DistributionOwners)
+	settings.DistributionOwnersApp = strings.TrimSpace(settings.DistributionOwnersApp)
+	if len(settings.DistributionOwners) == 0 {
+		settings.DistributionOwnersApp = ""
+	}
 	settings.UpdatedBy = strings.TrimSpace(settings.UpdatedBy)
 	settings.UpdatedAt = strings.TrimSpace(settings.UpdatedAt)
 	return settings, nil
@@ -303,7 +312,8 @@ func publishDeliverySettingsView(settings publishDeliverySettings, apps []feishu
 			"updated_by":     settings.UpdatedBy,
 			"updated_at":     settings.UpdatedAt,
 		},
-		"apps": views,
+		"distribution_owners": publishDistributionOwnersView(settings),
+		"apps":                views,
 	}
 }
 
@@ -535,12 +545,18 @@ func publishDeliverySelectionFromRequest(body publishDeliverySelectionRequest, c
 	if err := validatePublishDeliveryChatSelection(chatIDs, chats); err != nil {
 		return publishDeliverySettings{}, err
 	}
-	return publishDeliverySettings{
+	settings := publishDeliverySettings{
 		SchemaVersion: publishDeliverySchema,
 		AppProfileID:  appID,
 		ChatIDs:       chatIDs,
 		AutoPublish:   body.AutoPublish,
 		UpdatedBy:     strings.TrimSpace(actor),
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
-	}, nil
+	}
+	// 分发负责人的 open_id 只在原应用下有效：换了审核应用就要重新选。
+	if current.DistributionOwnersApp == appID {
+		settings.DistributionOwners = current.DistributionOwners
+		settings.DistributionOwnersApp = current.DistributionOwnersApp
+	}
+	return settings, nil
 }

@@ -43,15 +43,24 @@ type yunsuoRendered struct {
 }
 
 func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profile yunsuoPlatformProfile) (yunsuoRendered, error) {
+	return renderYunsuoDistributionWithCover(blocksJSON, imageMapJSON, publisher, profile, "")
+}
+
+// decodeYunsuoDistributionContent 外发用的正文块：先切掉公众号导流尾。
+func decodeYunsuoDistributionContent(blocksJSON, imageMapJSON string) ([]yunsuoBlock, map[string]string, error) {
 	strippedJSON, err := stripWechatTrailerBlocksJSON(blocksJSON)
 	if err != nil {
-		return yunsuoRendered{}, err
+		return nil, nil, err
 	}
-	decoded, imageMap, err := decodeYunsuoContent(strippedJSON, imageMapJSON)
+	return decodeYunsuoContent(strippedJSON, imageMapJSON)
+}
+
+func renderYunsuoDistributionWithCover(blocksJSON, imageMapJSON, publisher string, profile yunsuoPlatformProfile, cover string) (yunsuoRendered, error) {
+	decoded, imageMap, err := decodeYunsuoDistributionContent(blocksJSON, imageMapJSON)
 	if err != nil {
 		return yunsuoRendered{}, err
 	}
-	dist := prepareYunsuoDistributionBlocks(decoded, imageMap, profile)
+	dist := prepareYunsuoDistributionBlocksWithCover(decoded, imageMap, profile, cover)
 	blocks := dist.Blocks
 	var out strings.Builder
 	hasStatement := false
@@ -156,6 +165,12 @@ func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profil
 // buildYunsuoPushPayload 组装一次不可变的推送快照。外发按平台分开推（每条 lane 一个
 // 账号），版式与封面下限按这个账号的平台规则；多个账号时用通用规则。
 func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categories []string) (yunsuoPushPayload, error) {
+	return buildYunsuoPushPayloadWithDraft(job, targets, categories, publishExternalDraft{})
+}
+
+// buildYunsuoPushPayloadWithDraft draft 是人给这个平台改过的标题、摘要、封面（只对这个平台生效，
+// 公众号与网站不动）；空字段用文章原值。
+func buildYunsuoPushPayloadWithDraft(job publishJob, targets []yunsuoAccountTarget, categories []string, draft publishExternalDraft) (yunsuoPushPayload, error) {
 	blocks, imageMap, err := decodeYunsuoContent(job.BlocksJSON, job.ImageMap)
 	if err != nil {
 		return yunsuoPushPayload{}, err
@@ -164,7 +179,8 @@ func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categ
 	if len(targets) == 1 {
 		profile = yunsuoProfileForTarget(targets[0])
 	}
-	rendered, err := renderYunsuoDistribution(job.BlocksJSON, job.ImageMap, job.SourceName, profile)
+	coverOverride := publicYunsuoMediaURL(strings.TrimSpace(draft.CoverURL))
+	rendered, err := renderYunsuoDistributionWithCover(job.BlocksJSON, job.ImageMap, job.SourceName, profile, coverOverride)
 	if err != nil {
 		return yunsuoPushPayload{}, err
 	}
@@ -177,10 +193,17 @@ func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categ
 		return yunsuoPushPayload{}, errors.New("云梭分发缺少标题")
 	}
 	description := compactYunsuoText(job.Summary)
+	if summary := compactYunsuoText(draft.Summary); summary != "" {
+		description = summary
+	}
 	if description == "" {
 		description = yunsuoBlocksPlainText(blocks)
 	}
 	description = truncateYunsuoRunes(description, 200)
+	if profile.SummaryMax > 0 && len([]rune(description)) > profile.SummaryMax {
+		// 推送前检查已拦下人写的超长摘要；走到这里的只会是用正文补的摘要，在标点处截短。
+		description = truncateYunsuoTitle(description, 1, profile.SummaryMax)
+	}
 
 	// 云梭会把 cover 插到正文顶部：用正文第一张图（已从正文拿掉），
 	// 不再另传公众号封面，免得同一张图出现两次。正文没图或第一张图太小才退回原封面。
@@ -218,7 +241,11 @@ func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categ
 	if supplement == "" {
 		supplement = compactYunsuoText(job.SourceName)
 	}
-	return yunsuoPushPayload{
+	override := compactYunsuoText(draft.Title)
+	if override != "" {
+		title = override
+	}
+	payload := yunsuoPushPayload{
 		Type:        0,
 		ShortTitle:  yunsuoTitleVariant(title, supplement, 8, 20),
 		Title:       yunsuoTitleVariant(title, supplement, 21, 40),
@@ -229,7 +256,37 @@ func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categ
 		Categories:  strings.Join(categories, ","),
 		Cover:       cover,
 		HTML:        bodyHTML,
-	}, nil
+	}
+	if override != "" {
+		// 人给这个平台改的标题原样写进平台用的那一档，不补字、不截断。
+		if min, max := yunsuoTitleFieldRange(profile.TitleField); len([]rune(override)) >= min && len([]rune(override)) <= max {
+			payload.setTitleField(profile.TitleField, override)
+		}
+	}
+	return payload, nil
+}
+
+func (p *yunsuoPushPayload) setTitleField(field, value string) {
+	switch field {
+	case yunsuoTitleShort:
+		p.ShortTitle = value
+	case yunsuoTitleLong:
+		p.LongTitle = value
+	default:
+		p.Title = value
+	}
+}
+
+// titleField 平台实际用的那一档标题（卡片显示用）。
+func (p yunsuoPushPayload) titleField(field string) string {
+	switch field {
+	case yunsuoTitleShort:
+		return p.ShortTitle
+	case yunsuoTitleLong:
+		return p.LongTitle
+	default:
+		return p.Title
+	}
 }
 
 func decodeYunsuoContent(blocksJSON, imageMapJSON string) ([]yunsuoBlock, map[string]string, error) {

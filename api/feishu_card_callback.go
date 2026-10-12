@@ -75,7 +75,8 @@ type feishuCardCallbackPayload struct {
 			OpenID string `json:"open_id"`
 		} `json:"operator"`
 		Action struct {
-			Value json.RawMessage `json:"value"`
+			Value     json.RawMessage `json:"value"`
+			FormValue map[string]any  `json:"form_value"`
 		} `json:"action"`
 		Context struct {
 			OpenChatID string `json:"open_chat_id"`
@@ -250,17 +251,17 @@ func feishuReviewerAuthConfigured() bool {
 
 // handleReviewCardAction Webhook 模式薄壳：事件字段 → 共用业务段 → 3 秒内只回 {toast}。
 func (p *publishPipeline) handleReviewCardAction(r *http.Request, payload feishuCardCallbackPayload) map[string]any {
-	out := p.reviewCardActionWithinSLA(r.Context(), payload.Event.Operator.OpenID, payload.Event.Context.OpenChatID, payload.Event.Action.Value)
+	out := p.reviewCardActionWithinSLA(r.Context(), payload.Event.Operator.OpenID, payload.Event.Context.OpenChatID, payload.Event.Action.Value, payload.Event.Action.FormValue)
 	return feishuCardToast(out.toastType, out.toastContent, nil)
 }
 
 // reviewCardActionWithinSLA 保证飞书 3 秒窗口内必有 toast。
 // 连点会串行写整份任务库；超过 SLA 仍把审核做完，只是先告诉飞书「正在处理」。
-func (p *publishPipeline) reviewCardActionWithinSLA(parent context.Context, openID, chatID string, rawValue json.RawMessage) reviewCardOutcome {
+func (p *publishPipeline) reviewCardActionWithinSLA(parent context.Context, openID, chatID string, rawValue json.RawMessage, formValue map[string]any) reviewCardOutcome {
 	ctx := context.WithoutCancel(parent)
 	done := make(chan reviewCardOutcome, 1)
 	go func() {
-		done <- p.reviewCardAction(ctx, openID, chatID, rawValue)
+		done <- p.reviewCardActionWithForm(ctx, openID, chatID, rawValue, formValue)
 	}()
 	timer := time.NewTimer(feishuCardActionSLA)
 	defer timer.Stop()
@@ -283,6 +284,7 @@ type reviewCardOutcome struct {
 type reviewCardActionValue struct {
 	Action              string `json:"action"`
 	JobID               any    `json:"job_id"`
+	Slot                any    `json:"slot"` // 外发平台位置（配置里第几个账号）；不带账号 id（红线 37）
 	ReviewVersion       string `json:"review_version"`
 	LifecycleVersion    string `json:"lifecycle_version"`
 	DistributionVersion string `json:"distribution_version"`
@@ -292,7 +294,12 @@ type reviewCardActionValue struct {
 // reviewCardAction 卡片按钮动作的业务核心（两模式共用唯一入口）：解析 value
 // （action + job_id，兼容数字/字符串）→ 读取最新任务状态 → 业务态校验 → review 核心
 // → 发布中/终态卡。审核语义与权限红线只在 publishPipeline.review 定义一次，此处不复制。
-func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage) (out reviewCardOutcome) {
+func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage) reviewCardOutcome {
+	return p.reviewCardActionWithForm(ctx, operatorOpenID, actionChatID, rawValue, nil)
+}
+
+// reviewCardActionWithForm formValue 是表单提交按钮带上来的字段（外发改稿用），其余按钮为 nil。
+func (p *publishPipeline) reviewCardActionWithForm(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage, formValue map[string]any) (out reviewCardOutcome) {
 	value, jobID, parseErr := parseReviewCardActionValue(rawValue)
 	if parseErr != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: parseErr.Error()}
@@ -313,7 +320,9 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 	case feishuCardActionResyncSource:
 		return p.handleSourceResyncCardAction(job, operatorOpenID, value.SourceResyncVersion)
 	case feishuCardActionDistributeExternal:
-		return p.handleExternalDistributionCardAction(job, operatorOpenID, value.DistributionVersion)
+		return p.handleExternalDistributionCardAction(job, operatorOpenID, value.DistributionVersion, value.Slot)
+	case feishuCardActionDistributeFix:
+		return p.handleExternalDistributionFixAction(job, operatorOpenID, value, formValue)
 	case feishuCardActionUnpublish, feishuCardActionRepublish:
 		return p.handleLifecycleCardAction(job, operatorOpenID, value.Action, value.LifecycleVersion)
 	default:
@@ -339,23 +348,52 @@ func reviewCardActionSupported(action string) bool {
 	switch action {
 	case feishuCardActionApprove, feishuCardActionForceApprove, feishuCardActionReject,
 		feishuCardActionUnpublish, feishuCardActionRepublish,
-		feishuCardActionDistributeExternal, feishuCardActionResyncSource:
+		feishuCardActionDistributeExternal, feishuCardActionDistributeFix, feishuCardActionResyncSource:
 		return true
 	default:
 		return false
 	}
 }
 
-func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, actor, version string) reviewCardOutcome {
-	if outcome, handled := externalDistributionCardStateOutcome(job); handled {
+func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, actor, version string, rawSlot any) reviewCardOutcome {
+	// 新卡每个平台一枚按钮，带平台位置，只推这一个平台；旧卡的按钮不带，推这篇所有能推的平台。
+	var only map[string]bool
+	var target yunsuoAccountTarget
+	if rawSlot != nil {
+		cfg, err := loadYunsuoConfig()
+		if err != nil {
+			return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
+		}
+		slot, valid := coerceFeishuSlot(rawSlot)
+		picked, ok := externalTargetBySlot(cfg, slot)
+		if !valid || !ok {
+			return reviewCardOutcome{toastType: "error", toastContent: "分发平台配置已变化，请使用最新卡片"}
+		}
+		target = picked
+		only = map[string]bool{strings.TrimSpace(target.ID): true}
+	}
+	stateOutcome := func(current publishJob) (reviewCardOutcome, bool) {
+		if only == nil {
+			return externalDistributionCardStateOutcome(current)
+		}
+		if lane, ok := externalLaneFor(current, target.ID); ok && !externalLaneCanSafeRetry(lane) {
+			state := externalPlatformStatus(current, target)
+			return reviewCardOutcome{toastType: "info", toastContent: yunsuoProfileForTarget(target).Name + state.Status + "，不会重复推送"}, true
+		}
+		return reviewCardOutcome{}, false
+	}
+	if outcome, handled := stateOutcome(job); handled {
 		return outcome
 	}
 	if !externalDistributionVersionMatches(version, job) {
 		return reviewCardOutcome{toastType: "error", toastContent: "分发卡片已过期，请使用最新卡片"}
 	}
-	if _, err := p.requestExternalDistribution(job.ID, actor, version); err != nil {
+	if _, err := p.queueExternalDistribution(job.ID, actor, version, externalQueueCard, only); err != nil {
+		if errors.Is(err, errExternalLanesNeedFix) {
+			return reviewCardOutcome{toastType: "info", toastContent: "要先改好再同步，卡片里已列出要改的地方"}
+		}
 		if latest, loadErr := p.store.byID(job.ID); loadErr == nil {
-			if outcome, handled := externalDistributionCardStateOutcome(latest); handled {
+			if outcome, handled := stateOutcome(latest); handled {
 				return outcome
 			}
 		}
@@ -559,6 +597,105 @@ func coerceFeishuJobID(v any) int64 {
 		return id
 	default:
 		return 0
+	}
+}
+
+// coerceFeishuSlot 平台位置：数字或数字字符串，非负。
+func coerceFeishuSlot(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n >= 0 && n == float64(int(n)) {
+			return int(n), true
+		}
+	case string:
+		if slot, err := strconv.Atoi(strings.TrimSpace(n)); err == nil && slot >= 0 {
+			return slot, true
+		}
+	case json.Number:
+		if slot, err := strconv.Atoi(n.String()); err == nil && slot >= 0 {
+			return slot, true
+		}
+	}
+	return 0, false
+}
+
+// handleExternalDistributionFixAction 卡片里「保存并同步至X」：读这一篇、这个平台的表单字段，
+// 交给与侧边栏同一个修改入口（submitExternalDraftEdit）。卡片只回 toast，新卡由 outbox 原位更新。
+func (p *publishPipeline) handleExternalDistributionFixAction(job publishJob, actor string, value reviewCardActionValue, formValue map[string]any) reviewCardOutcome {
+	if !externalDistributionVersionMatches(value.DistributionVersion, job) {
+		return reviewCardOutcome{toastType: "error", toastContent: "卡片内容已更新，请在最新卡片上修改"}
+	}
+	slot, ok := coerceFeishuSlot(value.Slot)
+	if !ok {
+		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位平台"}
+	}
+	cfg, err := loadYunsuoConfig()
+	if err != nil {
+		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
+	}
+	target, ok := externalTargetBySlot(cfg, slot)
+	if !ok {
+		return reviewCardOutcome{toastType: "error", toastContent: "分发平台配置已变化，请使用最新卡片"}
+	}
+	draft, _ := externalDraftFor(job, target.ID)
+	fields := externalIssueFields(draft.Issues)
+	var edit externalDraftEdit
+	if _, ok := fields[publishExternalIssueTitle]; ok {
+		if text, present := feishuFormText(formValue, reviewCardFixFieldName("t", job.ID, slot)); present {
+			edit.Title = &text
+		}
+	}
+	if _, ok := fields[publishExternalIssueSummary]; ok {
+		if text, present := feishuFormText(formValue, reviewCardFixFieldName("s", job.ID, slot)); present {
+			edit.Summary = &text
+		}
+	}
+	if _, ok := fields[publishExternalIssueCover]; ok {
+		if picked, present := feishuFormText(formValue, reviewCardFixFieldName("c", job.ID, slot)); present && picked != "" {
+			for _, candidate := range draft.Candidates {
+				if reviewCardCoverValue(candidate.URL) == picked {
+					url := candidate.URL
+					edit.CoverURL = &url
+					break
+				}
+			}
+			if edit.CoverURL == nil {
+				return reviewCardOutcome{toastType: "error", toastContent: "这张图已不在可选范围，请在最新卡片上重新选"}
+			}
+		}
+	}
+	if edit.Title == nil && edit.Summary == nil && edit.CoverURL == nil {
+		return reviewCardOutcome{toastType: "error", toastContent: "没有收到修改内容"}
+	}
+	updated, err := p.submitExternalDraftEdit(job.ID, slot, edit, actor)
+	if err != nil {
+		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
+	}
+	name := yunsuoProfileForTarget(target).Name
+	if draft, _ := externalDraftFor(updated, target.ID); len(draft.Issues) > 0 {
+		return reviewCardOutcome{toastType: "info", toastContent: "已保存，" + name + "还要改：" + externalIssueSummaryText(draft.Issues)}
+	}
+	return reviewCardOutcome{toastType: "success", toastContent: "已保存，正在同步至" + name}
+}
+
+// feishuFormText 表单字段的文本值（单选图片也是字符串；多选取第一个）。present=false 表示没有这个字段。
+func feishuFormText(form map[string]any, name string) (string, bool) {
+	raw, ok := form[name]
+	if !ok || raw == nil {
+		return "", false
+	}
+	switch value := raw.(type) {
+	case string:
+		return value, true
+	case []any:
+		if len(value) > 0 {
+			if text, ok := value[0].(string); ok {
+				return text, true
+			}
+		}
+		return "", true
+	default:
+		return fmt.Sprint(value), true
 	}
 }
 

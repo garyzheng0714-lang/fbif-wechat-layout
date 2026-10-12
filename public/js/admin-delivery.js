@@ -69,6 +69,16 @@ function sameSettings(left, right) {
     && a.chat_ids.every(id => b.chat_ids.includes(id));
 }
 
+function ownerIDs(list) {
+  return [...new Set((Array.isArray(list) ? list : [])
+    .map(owner => String(owner?.open_id || owner || '').trim())
+    .filter(Boolean))];
+}
+
+function sameIDs(left, right) {
+  return left.length === right.length && left.every(id => right.includes(id));
+}
+
 function renderIssue(problem, { retry = true } = {}) {
   if (!problem) return '';
   return `<div class="admin-delivery-issue" role="alert" data-delivery-issue="${esc(problem.kind)}">
@@ -93,6 +103,12 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
   let chats = [];
   let settings = normalizeSettings();
   let savedSettings = normalizeSettings();
+  // 分发负责人：外发待修改时在审核卡下 @ 的人，只能从审核群成员里选（服务端校验）。
+  let ownersIssue = null;
+  let ownerCandidates = [];
+  let ownersStale = false;
+  let owners = [];
+  let savedOwners = [];
 
   function reset() {
     generation += 1;
@@ -107,6 +123,15 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     chats = [];
     settings = normalizeSettings();
     savedSettings = normalizeSettings();
+    ownersIssue = null;
+    ownerCandidates = [];
+    ownersStale = false;
+    owners = [];
+    savedOwners = [];
+  }
+
+  function ownersDirty() {
+    return !ownersIssue && !sameIDs(owners, savedOwners);
   }
 
   function selectedVisibleChatIDs() {
@@ -124,7 +149,7 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     const appAvailable = apps.some(app => String(app.id || '').trim() === settings.app_profile_id);
     const reuseSavedChats = !!chatsIssue && chatsUnchangedAndKnown();
     const selectedChats = reuseSavedChats ? savedSettings.chat_ids : selectedVisibleChatIDs();
-    const dirty = !sameSettings(settings, savedSettings);
+    const dirty = !sameSettings(settings, savedSettings) || ownersDirty();
     const chatsBlockSave = !!chatsIssue && !reuseSavedChats;
     let message = notice;
     if (saving) message = '正在保存发布链路…';
@@ -236,6 +261,44 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     </li>`;
   }
 
+  function renderOwnersStep(globalNetworkIssue) {
+    const selected = new Set(owners);
+    let content = '';
+    if (globalNetworkIssue) {
+      content = '<div class="admin-delivery-empty"><strong>等待发布服务恢复</strong><p>连接恢复并重新读取后，这里会显示审核群成员。</p></div>';
+    } else if (loading && !ownerCandidates.length) {
+      content = '<div class="admin-delivery-empty" role="status"><strong>正在读取审核群成员…</strong></div>';
+    } else if (ownersIssue) {
+      content = renderIssue(ownersIssue);
+    } else if (!ownerCandidates.length) {
+      content = '<div class="admin-delivery-empty"><strong>审核群里还没有成员</strong><p>保存审核群后重新读取。</p></div>';
+    } else {
+      const rows = ownerCandidates.map(member => {
+        const id = String(member.open_id || '').trim();
+        return `<label class="admin-delivery-chat">
+          <input type="checkbox" data-delivery-owner="${esc(id)}" ${selected.has(id) ? 'checked' : ''} ${loading || saving ? 'disabled' : ''}>
+          <span class="admin-delivery-chat-copy"><span>${esc(member.name || '未命名成员')}</span></span>
+        </label>`;
+      }).join('');
+      const stale = ownersStale
+        ? '<p class="admin-delivery-owner-stale" role="status">换了推送应用，原来选的人收不到提醒，请重新选择。</p>'
+        : '';
+      content = `${stale}<fieldset class="admin-delivery-chat-list"><legend class="admin-sr-only">分发负责人（可多选）</legend>${rows}</fieldset>`;
+    }
+    return `<li class="admin-delivery-step">
+      <span class="admin-delivery-step-index" aria-hidden="true">4</span>
+      <div class="admin-delivery-step-content">
+        <div class="admin-delivery-step-heading">
+          <div>
+            <h4>分发负责人</h4>
+            <p>原创文章同步到头条号等平台前，标题、摘要或封面不合平台要求时，在审核卡下 @ 这些人去改。</p>
+          </div>
+        </div>
+        ${content}
+      </div>
+    </li>`;
+  }
+
   function render() {
     const globalNetworkIssue = settingsIssue?.kind === 'network' && chatsIssue?.kind === 'network'
       ? settingsIssue
@@ -250,6 +313,7 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
         ${renderAppStep(globalNetworkIssue)}
         ${renderChatStep(globalNetworkIssue)}
         ${renderAutoPublishStep()}
+        ${renderOwnersStep(globalNetworkIssue)}
       </ol>
       ${saveIssue ? renderIssue(saveIssue, { retry: false }) : ''}
     </section>`;
@@ -275,9 +339,11 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     saveIssue = null;
     notice = '';
     rerender?.();
-    const [deliveryResult, chatsResult] = await Promise.allSettled([
+    ownersIssue = null;
+    const [deliveryResult, chatsResult, ownersResult] = await Promise.allSettled([
       readEndpoint('/api/publish/delivery-settings', '读取推送应用失败'),
       readEndpoint('/api/feishu/chats', '读取飞书群列表失败'),
+      readEndpoint('/api/publish/delivery-settings/distribution-owners', '读取审核群成员失败'),
     ]);
     if (token !== generation) return;
     if (deliveryResult.status === 'fulfilled') {
@@ -294,6 +360,16 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     } else {
       chatsIssue = deliveryFailureIssue(chatsResult.reason, '读取飞书群列表失败');
     }
+    if (ownersResult.status === 'fulfilled') {
+      const payload = ownersResult.value || {};
+      ownerCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+      ownersStale = payload.stale === true;
+      savedOwners = ownersStale ? [] : ownerIDs(payload.owners);
+      owners = [...savedOwners];
+    } else {
+      // 成员读不到不挡其他设置的保存；这一步单独显示原因。
+      ownersIssue = deliveryFailureIssue(ownersResult.reason, '读取审核群成员失败');
+    }
     loading = false;
     rerender?.();
   }
@@ -308,16 +384,31 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     onMessage?.('正在保存发布链路…');
     rerender?.();
     try {
-      const response = await request('/api/publish/delivery-settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
-      });
-      if (token !== generation) return;
-      if (!response.ok) throw await deliveryResponseIssue(response, '保存发布链路失败');
-      const payload = await response.json();
-      settings = normalizeSettings(payload.settings || settings);
-      savedSettings = normalizeSettings(settings);
+      if (!sameSettings(settings, savedSettings)) {
+        const response = await request('/api/publish/delivery-settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings),
+        });
+        if (token !== generation) return;
+        if (!response.ok) throw await deliveryResponseIssue(response, '保存发布链路失败');
+        const payload = await response.json();
+        settings = normalizeSettings(payload.settings || settings);
+        savedSettings = normalizeSettings(settings);
+      }
+      if (ownersDirty()) {
+        const response = await request('/api/publish/delivery-settings/distribution-owners', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ open_ids: owners }),
+        });
+        if (token !== generation) return;
+        if (!response.ok) throw await deliveryResponseIssue(response, '保存分发负责人失败');
+        const payload = await response.json();
+        savedOwners = ownerIDs(payload.distribution_owners?.owners);
+        owners = [...savedOwners];
+        ownersStale = false;
+      }
       notice = '发布链路已保存；新任务会按当前应用、审核群和发布方式执行';
       onMessage?.(notice);
     } catch (error) {
@@ -347,6 +438,14 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
         .map(item => item.dataset.deliveryChat)
         .filter(Boolean);
       settings = normalizeSettings({ ...settings, chat_ids: selected });
+      notice = '';
+      saveIssue = null;
+      rerender?.();
+    }));
+    overlay.querySelectorAll('[data-delivery-owner]').forEach(input => input.addEventListener('change', () => {
+      owners = [...overlay.querySelectorAll('[data-delivery-owner]:checked')]
+        .map(item => item.dataset.deliveryOwner)
+        .filter(Boolean);
       notice = '';
       saveIssue = null;
       rerender?.();

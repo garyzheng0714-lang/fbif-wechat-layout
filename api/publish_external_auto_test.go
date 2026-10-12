@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -438,8 +439,8 @@ func TestExternalDistributionCardPushesRetryAndMissingSeparately(t *testing.T) {
 	}
 }
 
-// TestExternalDistributionLanesFailIndependently 一个平台的版式规则不满足（封面不够头条号
-// 452x352）只让这个平台受理前失败，其他平台照推；失败平台留可安全重推的状态。
+// TestExternalDistributionLanesFailIndependently 一个平台的推送前检查不过（封面不够头条号
+// 452x352）只让这个平台停下来等人改：不推、不建 lane、不占名额；其他平台照推。
 func TestExternalDistributionLanesFailIndependently(t *testing.T) {
 	setTestYunsuoConfig(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
@@ -455,25 +456,28 @@ func TestExternalDistributionLanesFailIndependently(t *testing.T) {
 		t.Fatalf("只应推百家号：%v", fake.pushed)
 	}
 	got := mustJob(t, env, job.ID)
-	toutiao := mustLane(t, got, testYunsuoToutiaoID)
-	if !externalLaneCanSafeRetry(toutiao) || !strings.Contains(toutiao.Error, "封面图尺寸过小") || !strings.Contains(toutiao.Error, "头条号") {
-		t.Fatalf("头条号应受理前失败并说明原因：%+v", toutiao)
+	if _, ok := externalLaneFor(got, testYunsuoToutiaoID); ok {
+		t.Fatalf("头条号检查不过，不得建 lane（不占名额、不算推过）：%+v", got.ExternalDistributionLanes)
+	}
+	draft, _ := externalDraftFor(got, testYunsuoToutiaoID)
+	cover := externalIssueFields(draft.Issues)[publishExternalIssueCover]
+	if cover.Width != 300 || cover.Height != 200 || cover.MinWidth != 452 || cover.MinHeight != 352 {
+		t.Fatalf("头条号应记下封面问题与现状：%+v", draft)
 	}
 	if lane := mustLane(t, got, testYunsuoBaijiaID); lane.State != publishExternalDistributionSucceeded {
 		t.Fatalf("百家号应照常成功：%+v", lane)
 	}
-	body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(got), "多平台分发"))
-	if !strings.Contains(body, "封面图太小（300×200，要求至少 452×352），换封面后重新同步") || !strings.Contains(body, "重新同步至头条号？") {
-		t.Fatalf("卡片应说明头条号失败原因并只给头条号重推: %s", body)
+	body := distributionSectionJSON(t, buildReviewDoneCard(got))
+	if !strings.Contains(body, "<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200") || !strings.Contains(body, "保存并同步至头条号") {
+		t.Fatalf("卡片应在头条号块里写清封面问题并给修改表单: %s", body)
 	}
 
-	// 所有平台都生成不了：整体报错，不落任何推送。
-	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
+	// 所有平台都要改：整体报「要先改好」，不落任何推送。
 	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoToutiaoID+`","name":"头条号"}]`)
 	other := createPublishedDistributionJobWithKey(t, env, "site:all-fail", "FBIF食品饮料创新")
 	fake.pushed = nil
-	if _, err := env.pipeline.requestExternalDistribution(other.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(other)); err == nil {
-		t.Fatalf("没有任何平台能推时应报错")
+	if _, err := env.pipeline.requestExternalDistribution(other.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(other)); !errors.Is(err, errExternalLanesNeedFix) {
+		t.Fatalf("没有任何平台能推时应报要先改好：%v", err)
 	}
 	if len(fake.pushed) != 0 {
 		t.Fatalf("不得推送：%v", fake.pushed)
@@ -675,8 +679,8 @@ func TestExternalAutoSupplementAddsOnlyMissingAccount(t *testing.T) {
 	if lane := mustLane(t, mustJob(t, env, toutiaoFailed.ID), testYunsuoToutiaoID); lane.ContentPK != "pk-failed" || lane.State != publishExternalDistributionFailed {
 		t.Fatalf("头条号受理后失败的单号不得被覆盖：%+v", lane)
 	}
-	body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(mustJob(t, env, toutiaoDone.ID)), "多平台分发"))
-	if !strings.Contains(body, "多平台分发（头条号已发布 · 百家号已发布）") {
+	body := distributionSectionJSON(t, buildReviewDoneCard(mustJob(t, env, toutiaoDone.ID)))
+	if strings.Count(body, "<font color='green'>已发布</font>") != 2 {
 		t.Fatalf("单篇卡应把两个平台都列为已发布: %s", body)
 	}
 	for _, id := range []int64{bothDone.ID, baijiaRetrying.ID} {
@@ -726,7 +730,7 @@ func TestExternalAutoSupplementSafeRetryStaysOnCard(t *testing.T) {
 	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.ContentPK != "pk-toutiao" || lane.PayloadHash != "sha256:first-round" {
 		t.Fatalf("头条号 lane 不得改动：%+v", lane)
 	}
-	if body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(got), "多平台分发")); !strings.Contains(body, "多平台分发（头条号已发布 · 百家号已发布）") {
+	if body := distributionSectionJSON(t, buildReviewDoneCard(got)); strings.Count(body, "<font color='green'>已发布</font>") != 2 {
 		t.Fatalf("重试成功后卡片应两个平台都已发布: %s", body)
 	}
 }

@@ -17,7 +17,7 @@ fbifmp-layout.foodtalks.cn {
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	@fbifAppShell path / /index.html /app.html /login.html /auth-callback.html /version.json
+	@fbifAppShell path / /index.html /app.html /login.html /auth-callback.html /distribute.html /version.json
 	header @fbifAppShell Cache-Control "no-cache"
 
 	@fbifVersionedAssets {

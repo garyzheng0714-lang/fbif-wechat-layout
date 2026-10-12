@@ -72,7 +72,11 @@ func maybeStartFeishuWS(p *publishPipeline) {
 func feishuWSCardActionHandler(p *publishPipeline) func(ctx context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
 	return func(ctx context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
 		openID, chatID, rawValue := feishuWSEventParams(event)
-		out := p.reviewCardActionWithinSLA(ctx, openID, chatID, rawValue)
+		var formValue map[string]any
+		if event != nil && event.Event != nil && event.Event.Action != nil {
+			formValue = event.Event.Action.FormValue
+		}
+		out := p.reviewCardActionWithinSLA(ctx, openID, chatID, rawValue, formValue)
 		log.Printf("publish: 飞书长连接收到卡片动作 operator=%s → %s（%s）", openID, out.toastType, out.toastContent)
 		resp := &callback.CardActionTriggerResponse{
 			Toast: &callback.Toast{Type: out.toastType, Content: out.toastContent},

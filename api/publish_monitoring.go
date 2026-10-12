@@ -136,13 +136,18 @@ func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob
 func updatePublishMonitoringNotifications(status *publishMonitoringStatus, job publishJob, age int64) {
 	pending := boolInt(job.NotificationState == publishNotificationStatePending || job.NotificationState == publishNotificationStateSending)
 	pending += boolInt(job.ExternalDistributionCardState == publishExternalCardPending || job.ExternalDistributionCardState == publishExternalCardSending)
+	// 外发待修改提醒（回复在审核卡下、@ 分发负责人）同样是持久通知。
+	reminder := job.ExternalDistributionReminder
+	pending += boolInt(reminder.State == publishExternalCardPending || reminder.State == publishExternalCardSending)
 	status.NotificationPending += pending
 	if pending > 0 && age > status.OldestNotificationAgeSeconds {
 		status.OldestNotificationAgeSeconds = age
 	}
-	status.NotificationErrors += boolInt(job.NotificationError != "") + boolInt(job.ExternalDistributionCardError != "")
+	status.NotificationErrors += boolInt(job.NotificationError != "") + boolInt(job.ExternalDistributionCardError != "") +
+		boolInt(reminder.Error != "")
 	status.NotificationDeadLetters += boolInt(job.NotificationState == publishNotificationStateDeadLetter) +
-		boolInt(job.ExternalDistributionCardState == publishExternalCardDeadLetter)
+		boolInt(job.ExternalDistributionCardState == publishExternalCardDeadLetter) +
+		boolInt(reminder.State == publishExternalCardDeadLetter)
 	if job.Stage == publishStageAwaitingReview && job.NotificationKind == "" && job.NotificationSentAt == "" {
 		status.ReviewCardsMissing++
 	}

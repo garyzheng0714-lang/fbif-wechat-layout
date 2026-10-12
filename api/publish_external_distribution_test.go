@@ -78,7 +78,7 @@ func createPublishedDistributionJobWithKey(t *testing.T, env *publishTestEnv, so
 	}
 	job, err = env.store.update(job.ID, func(current *publishJob) {
 		current.Stage = publishStagePublished
-		current.Title = "一款中国食品品牌如何用产品创新打开新的消费市场"
+		current.Title = "中国食品品牌如何用产品创新打开新市场"
 		current.SourceName = sourceName
 		current.FoodTalksNewsID = testDistributionNewsID
 		current.BlocksJSON = `[{"k":"p","text":"这是一篇用于验证外部分发流程的原创文章正文。"},{"k":"img","src":"https://mmbiz.qpic.cn/a.jpg"}]`
@@ -128,7 +128,7 @@ func TestExternalDistributionUsesLivePublishedNewsNotJobSnapshot(t *testing.T) {
 	}
 	seedLivePublishedNews(t, env, foodTalksNewsDetail{
 		ID:            testDistributionNewsID,
-		Title:         "把茶做成零食，这家166年老茶铺只开6家店，年营收1.4亿",
+		Title:         "把茶做成零食，这家老茶铺年营收1.4亿",
 		CoverImg:      "https://cdn.example.com/a.jpg",
 		Content:       `<p>这是网站上最新已发布的正确正文。</p><p><img src="https://cdn.example.com/a.jpg" alt=""></p>`,
 		Summary:       "祇园辻利把茶做成零食。",
@@ -214,7 +214,7 @@ func TestExternalDistributionManualCMSUsesLiveNewsWithoutPipelineApprove(t *test
 	}
 	seedLivePublishedNews(t, env, foodTalksNewsDetail{
 		ID:            testDistributionNewsID,
-		Title:         "把茶做成零食，这家166年老茶铺只开6家店，年营收1.4亿",
+		Title:         "把茶做成零食，这家老茶铺年营收1.4亿",
 		CoverImg:      "https://cdn.example.com/a.jpg",
 		Content:       `<p>后台公开后的最新正文。</p><p><img src="https://cdn.example.com/a.jpg" alt=""></p>`,
 		Summary:       "祇园辻利把茶做成零食。",
@@ -253,7 +253,7 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "同步至头条号、百家号") || !strings.Contains(card, feishuCardActionDistributeExternal) {
+	if !strings.Contains(card, "同步至头条号") || !strings.Contains(card, "同步至百家号") || !strings.Contains(card, feishuCardActionDistributeExternal) {
 		t.Fatalf("已发布原创卡应显示固定目标的一键分发按钮：%s", card)
 	}
 	value, _ := json.Marshal(map[string]any{
@@ -373,7 +373,7 @@ func TestExternalDistributionSafeFailureRendersRetryButton(t *testing.T) {
 		testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionFailed),
 		testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed))
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "重新同步至头条号、百家号") || !strings.Contains(card, "不会重复发布") {
+	if !strings.Contains(card, "重新同步至头条号") || !strings.Contains(card, "重新同步至百家号") || !strings.Contains(card, "不会重复发布") {
 		t.Fatalf("明确未受理的失败必须提供安全重试入口：%s", card)
 	}
 }

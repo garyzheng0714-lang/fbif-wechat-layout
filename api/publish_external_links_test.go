@@ -185,7 +185,7 @@ func TestExternalDistributionLinksBackfillWithBackoff(t *testing.T) {
 	if baijia := mustLane(t, got, testYunsuoBaijiaID); baijia.URLAttempts != 0 {
 		t.Fatalf("百家号不自动找：%+v", baijia)
 	}
-	body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(got), "多平台分发"))
+	body := distributionSectionJSON(t, buildReviewDoneCard(got))
 	if !strings.Contains(body, "(https://www.toutiao.com/article/7695597761408631323/)") {
 		t.Fatalf("卡片里头条号标题应链到文章: %s", body)
 	}
@@ -270,8 +270,8 @@ func TestExternalDistributionManualRegistration(t *testing.T) {
 		t.Fatalf("头条号人工已发，不得再推：%v", fake.pushed)
 	}
 	got := mustJob(t, env, job.ID)
-	body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(got), "多平台分发"))
-	if !strings.Contains(body, "<font color='green'>人工已发</font>") || !strings.Contains(body, "多平台分发（头条号已发布 · 百家号已发布）") {
+	body := distributionSectionJSON(t, buildReviewDoneCard(got))
+	if !strings.Contains(body, "<font color='green'>人工已发</font>") || !strings.Contains(body, "<font color='green'>已发布</font>") {
 		t.Fatalf("卡片应显示头条号人工已发、两个平台都已同步: %s", body)
 	}
 

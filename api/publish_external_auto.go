@@ -207,6 +207,10 @@ func (p *publishPipeline) runExternalAutoDistribution() {
 		}
 		only := map[string]bool{}
 		for _, target := range missing {
+			// 卡在推送前检查、文章也没变的平台等人改，不必每轮去网站取稿重查。
+			if externalDraftBlocked(job, target.ID) {
+				continue
+			}
 			if quota.allows(kind, target.ID, now) {
 				only[target.ID] = true
 			}
@@ -219,7 +223,7 @@ func (p *publishPipeline) runExternalAutoDistribution() {
 			actor = publishExternalAutoBackfillActor
 		}
 		updated, queueErr := p.queueAutoExternalDistribution(job.ID, actor, only)
-		if queueErr == nil || errors.Is(queueErr, errExternalLanesNotQueued) {
+		if queueErr == nil || errors.Is(queueErr, errExternalLanesNotQueued) || errors.Is(queueErr, errExternalLanesNeedFix) {
 			for id := range only {
 				if lane, ok := externalLaneFor(updated, id); ok && !externalLaneCanSafeRetry(lane) {
 					quota.record(kind, id, now)
@@ -229,6 +233,9 @@ func (p *publishPipeline) runExternalAutoDistribution() {
 		switch {
 		case queueErr == nil:
 			log.Printf("publish: 自动外发已提交（任务 #%d，%s）", job.ID, kind)
+		case errors.Is(queueErr, errExternalLanesNeedFix):
+			// 有平台要先改标题、摘要或封面：已记待修改并提醒负责人，待办留着，改好再推。
+			log.Printf("publish: 自动外发等待修改（任务 #%d）：%v", job.ID, queueErr)
 		case errors.Is(queueErr, errExternalLanesNotQueued):
 			// 各平台的 payload 都没生成出来，已记为受理前失败（卡片可修正后重推）；
 			// 还在等配额的平台留着待办。

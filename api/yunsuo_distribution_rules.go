@@ -67,10 +67,78 @@ func yunsuoBlockText(block yunsuoBlock) string {
 // prepareYunsuoDistributionBlocks 按多平台规则整理正文块，顺序固定：
 // 拆署名 → 去名片 → 取封面（封面下限按平台）。
 func prepareYunsuoDistributionBlocks(blocks []yunsuoBlock, imageMap map[string]string, profile yunsuoPlatformProfile) yunsuoDistribution {
+	return prepareYunsuoDistributionBlocksWithCover(blocks, imageMap, profile, "")
+}
+
+// prepareYunsuoDistributionBlocksWithCover cover 是人给这个平台换的封面（publish_external_drafts.go）：
+// 换成正文里的某张图时，那张图连同图注从正文拿掉（云梭会把封面插到正文顶部）；换成上传的图时
+// 正文不动。没换封面照旧取正文第一张图。
+func prepareYunsuoDistributionBlocksWithCover(blocks []yunsuoBlock, imageMap map[string]string, profile yunsuoPlatformProfile, cover string) yunsuoDistribution {
 	blocks, author := splitYunsuoBylines(blocks)
 	blocks = dropYunsuoNameCards(blocks, imageMap)
+	if cover = strings.TrimSpace(cover); cover != "" {
+		return yunsuoDistribution{Blocks: takeYunsuoChosenImage(blocks, imageMap, cover), Lead: cover, Author: author}
+	}
 	blocks, lead := takeYunsuoLeadImage(blocks, imageMap, profile)
 	return yunsuoDistribution{Blocks: blocks, Lead: lead, Author: author}
+}
+
+// takeYunsuoChosenImage 把选作封面的那张正文图（连同图注）从正文拿掉；不在正文里就原样返回。
+func takeYunsuoChosenImage(blocks []yunsuoBlock, imageMap map[string]string, cover string) []yunsuoBlock {
+	for i, block := range blocks {
+		if yunsuoBlockKind(block) != "img" || publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap)) != cover {
+			continue
+		}
+		end := i + 1
+		for end < len(blocks) && yunsuoBlockKind(blocks[end]) == "cap" {
+			end++
+		}
+		out := make([]yunsuoBlock, 0, len(blocks)-(end-i))
+		out = append(out, blocks[:i]...)
+		return append(out, blocks[end:]...)
+	}
+	return blocks
+}
+
+// yunsuoCoverCandidates 正文里够得上平台封面下限的图（去掉名片后，按正文顺序），给人挑封面用。
+// 只看前 scan 张图、最多取 limit 张，读不到尺寸的不算。
+func yunsuoCoverCandidates(blocks []yunsuoBlock, imageMap map[string]string, profile yunsuoPlatformProfile, scan, limit int) []publishExternalCoverCandidate {
+	var out []publishExternalCoverCandidate
+	for _, image := range yunsuoBodyImages(blocks, imageMap, scan) {
+		if len(out) >= limit {
+			break
+		}
+		if image.Width >= profile.CoverMinWidth && image.Height >= profile.CoverMinHeight {
+			out = append(out, image)
+		}
+	}
+	return out
+}
+
+// yunsuoBodyImages 正文前 scan 张图（去掉作者名片、去重）及其尺寸；读不到尺寸的不要。
+func yunsuoBodyImages(blocks []yunsuoBlock, imageMap map[string]string, scan int) []publishExternalCoverCandidate {
+	blocks, _ = splitYunsuoBylines(blocks)
+	blocks = dropYunsuoNameCards(blocks, imageMap)
+	var out []publishExternalCoverCandidate
+	seen := map[string]bool{}
+	for _, block := range blocks {
+		if scan <= 0 {
+			break
+		}
+		if yunsuoBlockKind(block) != "img" {
+			continue
+		}
+		src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap))
+		if src == "" || seen[src] {
+			continue
+		}
+		seen[src] = true
+		scan--
+		if width, height, ok := yunsuoImageSize(src); ok {
+			out = append(out, publishExternalCoverCandidate{URL: src, Width: width, Height: height})
+		}
+	}
+	return out
 }
 
 // splitYunsuoBylines 网站把署名并成「作者：Sage，编辑：Bobo。」，外发按原文分行。

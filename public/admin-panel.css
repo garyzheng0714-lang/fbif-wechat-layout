@@ -371,6 +371,12 @@ body.admin-panel-open { overflow: hidden; }
   color: var(--fs-text-3, #6F757D);
   font-size: 11px;
 }
+.admin-delivery-owner-stale {
+  margin: 0 0 8px;
+  color: var(--fs-warning, #FF8800);
+  font-size: 12px;
+  line-height: 1.55;
+}
 .admin-delivery-empty {
   display: grid;
   gap: 3px;

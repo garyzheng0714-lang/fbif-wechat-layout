@@ -130,6 +130,10 @@ type publishJob struct {
 	// （2026-10-12 用户裁定：各平台分开发布）：每个账号一条 lane，各自冻结 payload、
 	// 落 intent、推送、轮询、对账，互不牵连（publish_external_lanes.go）。
 	ExternalDistributionLanes []publishExternalLane `json:"external_distribution_lanes,omitempty"`
+	// 推送前检查的待修改项与人给各平台改过的标题/摘要/封面（publish_external_drafts.go），
+	// 以及有平台待修改时在审核卡话题里 @ 分发负责人的提醒（publish_external_reminders.go）。
+	ExternalDistributionDrafts   []publishExternalDraft  `json:"external_distribution_drafts,omitempty"`
+	ExternalDistributionReminder publishExternalReminder `json:"external_distribution_reminder,omitzero"`
 	// 以下是按平台拆开之前的单轮字段，只在读盘时迁成 lanes，迁完清空、不再写回。
 	LegacyExternalState          string                              `json:"external_distribution_state,omitempty"`
 	LegacyExternalTargets        []publishExternalDistributionTarget `json:"external_distribution_targets,omitempty"`
