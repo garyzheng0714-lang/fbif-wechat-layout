@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -308,5 +309,24 @@ func TestFeishuNotifierDisabledWhenEnvMissing(t *testing.T) {
 	}
 	if err := n.send(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "230002") {
 		t.Fatalf("code!=0 应报错并携带 code，实际 %v", err)
+	}
+}
+
+// TestFeishuNotifierUpdateCardExpired 飞书 230031：消息过了 14 天可更新期限，调用方据此不再重试。
+func TestFeishuNotifierUpdateCardExpired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal" {
+			fmt.Fprint(w, `{"code":0,"msg":"ok","tenant_access_token":"tok","expire":7200}`)
+			return
+		}
+		fmt.Fprint(w, `{"code":230031,"msg":"Message has expired when updating message"}`)
+	}))
+	defer srv.Close()
+	n := &feishuNotifier{baseURL: srv.URL, appID: "cli_test", appSecret: "secret_test",
+		receiveID: "oc_test_chat", receiveType: feishuReceiveIDTypeChat, httpClient: srv.Client()}
+	err := n.updateCard(context.Background(), "om_old", map[string]any{"schema": "2.0"})
+	if !errors.Is(err, errFeishuMessageExpired) || !strings.Contains(err.Error(), "code=230031") {
+		t.Fatalf("应识别为过期：%v", err)
 	}
 }

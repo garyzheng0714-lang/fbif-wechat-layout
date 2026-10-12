@@ -37,6 +37,9 @@ const (
 	publishExternalCardPending    = "pending"
 	publishExternalCardSending    = "sending"
 	publishExternalCardDeadLetter = "dead_letter"
+	// publishExternalCardExpired 审核卡已过飞书 14 天可更新期限（补发九月旧稿时常见）：
+	// 状态照常记在各平台 lane 上，只是不再同步到那张卡；不重试、不进死信告警。
+	publishExternalCardExpired = "expired"
 
 	publishExternalCardMaxAttempts = 10
 
@@ -937,6 +940,16 @@ func (p *publishPipeline) finishExternalLanePolling(jobID int64, lane publishExt
 	}
 }
 
+// migrateExpiredExternalCard 读盘时把「卡片已过期」进的死信改记为 expired（幂等）：
+// 改这个之前，过期卡会重试 10 次后进死信告警。
+func migrateExpiredExternalCard(j *publishJob) {
+	if j != nil && j.ExternalDistributionCardState == publishExternalCardDeadLetter &&
+		strings.Contains(j.ExternalDistributionCardError, fmt.Sprintf("code=%d", feishuCodeMessageExpired)) {
+		j.ExternalDistributionCardState = publishExternalCardExpired
+		j.ExternalDistributionCardError = ""
+	}
+}
+
 func enqueueExternalDistributionCardUpdate(job *publishJob) {
 	job.ExternalDistributionCardSeq++
 	job.ExternalDistributionCardState = publishExternalCardPending
@@ -972,6 +985,18 @@ func (p *publishPipeline) dispatchExternalDistributionCardUpdate(jobID int64) {
 		})
 		if ackErr != nil {
 			log.Printf("publish: ack external distribution card for job %d failed: %v", jobID, ackErr)
+		}
+		return
+	}
+	if errors.Is(err, errFeishuMessageExpired) {
+		if _, _, persistErr := p.store.updateIf(jobID, func(current publishJob) bool {
+			return current.ExternalDistributionCardSeq == claimed.ExternalDistributionCardSeq &&
+				current.ExternalDistributionCardState == publishExternalCardSending
+		}, func(current *publishJob) {
+			current.ExternalDistributionCardState = publishExternalCardExpired
+			current.ExternalDistributionCardError = ""
+		}); persistErr != nil {
+			log.Printf("publish: record expired external distribution card for job %d failed: %v", jobID, persistErr)
 		}
 		return
 	}

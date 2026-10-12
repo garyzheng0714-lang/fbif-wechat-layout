@@ -28,6 +28,11 @@ import (
 
 const defaultFeishuBaseURL = "https://open.feishu.cn"
 
+// feishuCodeMessageExpired 飞书只允许更新 14 天内发出的消息；过期后这张卡永远改不了，重试无用。
+const feishuCodeMessageExpired = 230031
+
+var errFeishuMessageExpired = errors.New("飞书消息已超过 14 天可更新期限")
+
 const publishMonitorFeishuUserIDEnv = "PUBLISH_MONITOR_FEISHU_USER_ID"
 
 const (
@@ -293,6 +298,9 @@ func (n *feishuNotifier) updateCard(ctx context.Context, messageID string, card 
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
 		return fmt.Errorf("飞书更新卡片响应异常（HTTP %d）: %w", resp.StatusCode, err)
+	}
+	if env.Code == feishuCodeMessageExpired {
+		return fmt.Errorf("飞书更新卡片失败 code=%d msg=%s: %w", env.Code, env.Msg, errFeishuMessageExpired)
 	}
 	if env.Code != 0 {
 		return fmt.Errorf("飞书更新卡片失败 code=%d msg=%s", env.Code, env.Msg)

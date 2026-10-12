@@ -298,6 +298,7 @@ func (s *publishJobStore) readLocked() (publishJobDocument, error) {
 			doc.NextID = doc.Jobs[i].ID + 1
 		}
 		migrateLegacyExternalDistribution(&doc.Jobs[i])
+		migrateExpiredExternalCard(&doc.Jobs[i])
 	}
 	return doc, nil
 }

@@ -286,6 +286,8 @@ func (p *publishPipeline) sendTerminalCardNotificationUnlocked(ctx context.Conte
 	if messageID := strings.TrimSpace(job.ReviewCardMsgID); messageID != "" && p.updateCard != nil {
 		if err := p.updateCard(ctx, messageID, card); err == nil {
 			return nil
+		} else if errors.Is(err, errFeishuMessageExpired) {
+			return err // 过期的卡不再补发新卡，免得旧稿在群里刷屏
 		} else {
 			log.Printf("publish: 原位更新审核卡失败，兼容发送新终态卡: %v", err)
 		}
@@ -439,6 +441,7 @@ func (p *publishPipeline) sendConfiguredReviewCardToTargets(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	var expired error
 	for _, chatID := range settings.ChatIDs {
 		chatID = strings.TrimSpace(chatID)
 		if chatID == "" {
@@ -453,7 +456,11 @@ func (p *publishPipeline) sendConfiguredReviewCardToTargets(ctx context.Context,
 			}
 		}
 		if messageID != "" {
-			if err := p.updateConfiguredReviewCard(ctx, job, chatID, messageID, card); err != nil {
+			if err := p.updateConfiguredReviewCard(ctx, job, chatID, messageID, card); errors.Is(err, errFeishuMessageExpired) {
+				// 这个群的卡过了飞书可更新期限：不挡其他群，最后如实返回。
+				expired = fmt.Errorf("更新审核群 %s 的卡片失败：%w", chatID, err)
+				continue
+			} else if err != nil {
 				return fmt.Errorf("更新审核群 %s 的卡片失败：%w", chatID, err)
 			}
 		} else {
@@ -476,7 +483,7 @@ func (p *publishPipeline) sendConfiguredReviewCardToTargets(ctx context.Context,
 			}
 		}
 	}
-	return nil
+	return expired
 }
 
 func (p *publishPipeline) buildReviewBatchCard(ctx context.Context, jobID int64) (map[string]any, error) {

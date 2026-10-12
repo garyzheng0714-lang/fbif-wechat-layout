@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -584,5 +585,49 @@ func TestRetryExternalDistributionHTTPRequiresAdminAndRebuilds(t *testing.T) {
 	}
 	if _, ok := externalLaneFor(got, testYunsuoBaijiaID); ok {
 		t.Fatalf("管理员对账重发只推对账中的平台，不得顺带推别的平台：%+v", got.ExternalDistributionLanes)
+	}
+}
+
+// TestExternalCardExpiredIsTerminal 补发九月旧稿时，原审核卡已过飞书 14 天可更新期限（230031）：
+// 不重试 10 次进死信告警，也不在群里补发新卡；记为 expired，状态照常在 lane 上。
+func TestExternalCardExpiredIsTerminal(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	job, _ = env.store.update(job.ID, func(current *publishJob) {
+		current.ReviewCardMsgID = "om_old_card"
+		current.ExternalDistributionLanes = []publishExternalLane{testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded)}
+		enqueueExternalDistributionCardUpdate(current)
+	})
+	calls, newCards, retried := 0, 0, false
+	env.pipeline.updateCard = func(context.Context, string, map[string]any) error {
+		calls++
+		return fmt.Errorf("飞书更新卡片失败 code=230031 msg=Message has expired: %w", errFeishuMessageExpired)
+	}
+	env.pipeline.notifyCard = func(context.Context, map[string]any) error { newCards++; return nil }
+	env.pipeline.retryNotification = func(time.Duration, func()) { retried = true }
+
+	env.pipeline.dispatchExternalDistributionCardUpdate(job.ID)
+	got := mustJob(t, env, job.ID)
+	if got.ExternalDistributionCardState != publishExternalCardExpired || got.ExternalDistributionCardError != "" || calls != 1 || newCards != 0 || retried {
+		t.Fatalf("过期卡应一次就停：state=%q err=%q calls=%d new=%d retried=%v", got.ExternalDistributionCardState, got.ExternalDistributionCardError, calls, newCards, retried)
+	}
+	var status publishMonitoringStatus
+	updatePublishMonitoringNotifications(&status, got, 60)
+	if status.NotificationDeadLetters != 0 || status.NotificationErrors != 0 || status.NotificationPending != 0 {
+		t.Fatalf("过期卡不算告警：%+v", status)
+	}
+
+	// 改之前进了死信的旧数据：读盘即改记 expired；别的死信不动。
+	old := publishJob{ExternalDistributionCardState: publishExternalCardDeadLetter,
+		ExternalDistributionCardError: "更新审核群 oc_x 的卡片失败：飞书更新卡片失败 code=230031 msg=Message has expired when updating message, ext="}
+	migrateExpiredExternalCard(&old)
+	if old.ExternalDistributionCardState != publishExternalCardExpired || old.ExternalDistributionCardError != "" {
+		t.Fatalf("过期死信应迁为 expired：%+v", old)
+	}
+	other := publishJob{ExternalDistributionCardState: publishExternalCardDeadLetter, ExternalDistributionCardError: "飞书更新卡片接口不可达"}
+	migrateExpiredExternalCard(&other)
+	if other.ExternalDistributionCardState != publishExternalCardDeadLetter {
+		t.Fatalf("别的死信不动：%+v", other)
 	}
 }
