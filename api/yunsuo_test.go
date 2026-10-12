@@ -190,12 +190,16 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, wanted := range []string{"<h2>章节 &lt;一&gt;</h2>", "https://cdn.example/image.jpg", "<ol>", "<table", "https://cdn.example/poster.jpg"} {
+	for _, wanted := range []string{`<h1 class="pgc-h-forward-slash">章节 &lt;一&gt;</h1>`, "<ol>", "<table", "https://cdn.example/poster.jpg"} {
 		if !strings.Contains(rendered, wanted) {
 			t.Fatalf("中性 HTML 缺少 %q：%s", wanted, rendered)
 		}
 	}
-	if strings.Contains(strings.ToLower(rendered), "javascript:") || strings.Contains(rendered, "<script>") || strings.Contains(rendered, "FoodTalks") {
+	if strings.Contains(rendered, "https://cdn.example/image.jpg") {
+		t.Fatalf("正文第一张图做封面，不得再留在正文里：%s", rendered)
+	}
+	if strings.Contains(strings.ToLower(rendered), "javascript:") || strings.Contains(rendered, "<a ") ||
+		strings.Contains(rendered, "<script>") || strings.Contains(rendered, "FoodTalks") {
 		t.Fatalf("中性 HTML 不得包含活性链接、脚本或网站耦合：%s", rendered)
 	}
 
@@ -236,6 +240,112 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 	if strings.TrimSpace(html) == "" {
 		t.Fatalf("推送缺少 html：%s", encoded)
 	}
+}
+
+// 2026-10-12 用户逐条指出头条号外发稿的问题，金标准是人工发在头条号的 16 篇稿。
+// 这里用网站已发布稿的实际形态（#193 署名合并、#260 Mote 名片在参考来源上方）回归。
+func TestYunsuoDistributionFollowsManualToutiaoLayout(t *testing.T) {
+	stubYunsuoImageSize(t, nil)
+	blocks := `[
+		{"k":"txt","text":"作者：Sage，编辑：Bobo。"},
+		{"k":"txt","blankBefore":true,"text":"一个人，可以在同一赛道成功2次吗？"},
+		{"k":"img","blankBefore":true,"src":"https://cdn.example/lead.jpg"},
+		{"k":"cap","text":"蛋白棒RXBAR和David"},
+		{"k":"cap","text":"图片来源：RXBAR、David"},
+		{"k":"txt","blankBefore":true,"runs":[{"type":"txt","text":"例如我们曾介绍过的Poppi等。https://mp.weixin.qq.com/s/M_dPjnJED8Xx4JJw_3lQ6g同样是主打干净的产品，"},{"type":"txt","text":"RXBAR却没选这条路。","bold":true}]},
+		{"k":"h","level":2,"text":"第一次创业，他把蛋白棒做简单"},
+		{"k":"txt","runs":[{"type":"txt","text":"这是我"},{"type":"link","text":"茶叶系列","href":"https://www.foodtalks.cn/news/tag/114000"},{"type":"txt","text":"的第38篇。"}]},
+		{"k":"img","src":"https://cdn.example/photo.png"},
+		{"k":"cap","text":"Peter Rahal"},
+		{"k":"cap","text":"图片来源：Forbes"},
+		{"k":"h","level":3,"text":"1、包装更新"},
+		{"k":"img","src":"https://cdn.example/wide-but-captioned.png"},
+		{"k":"cap","text":"三得利伊右卫门绿茶全家福"},
+		{"k":"txt","text":"下一篇，我继续写中国茶叶品牌。"},
+		{"k":"img","blankBefore":true,"src":"https://cdn.example/mote-card.png"},
+		{"k":"txt","blankBefore":true,"text":"参考来源："},
+		{"k":"txt","text":"[1] The RXBAR Story"},
+		{"k":"img","blankBefore":true,"src":"https://cdn.example/sage-card.png"}
+	]`
+	imageMap := `{"https://cdn.example/lead.jpg":"https://cdn.example/lead.jpg","https://cdn.example/photo.png":"https://cdn.example/photo.png",
+		"https://cdn.example/wide-but-captioned.png":"https://cdn.example/wide-but-captioned.png",
+		"https://cdn.example/mote-card.png":"https://cdn.example/mote-card.png","https://cdn.example/sage-card.png":"https://cdn.example/sage-card.png",
+		"https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`
+	payload, err := buildYunsuoPushPayload(publishJob{
+		Title:      "估值超151亿元！蛋白棒赛道创业，他连赢了两次",
+		SourceName: "FBIF食品饮料创新",
+		Summary:    "竞业协议到期后，明星创业者重走“老路”。",
+		CoverURL:   "https://cdn.example/wechat-cover.jpg",
+		BlocksJSON: blocks,
+		ImageMap:   imageMap,
+	}, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := payload.HTML
+	if payload.Cover != "https://cdn.example/lead.jpg" || strings.Contains(html, "lead.jpg") || strings.Contains(html, "蛋白棒RXBAR和David") {
+		t.Fatalf("封面应取正文第一张图并连图注一起从正文拿掉，cover=%q html=%s", payload.Cover, html)
+	}
+	if strings.Contains(html, "wechat-cover.jpg") {
+		t.Fatalf("不得再另传公众号封面：%s", html)
+	}
+	for _, want := range []string{
+		"<p>作者：Sage</p><p>编辑：Bobo</p><p>一个人",
+		`<div class="pgc-img"><img src="https://cdn.example/photo.png" alt=""><p class="pgc-img-caption">Peter Rahal；图片来源：Forbes</p></div>`,
+		`<h1 class="pgc-h-forward-slash">第一次创业，他把蛋白棒做简单</h1>`,
+		"<p><strong>1、包装更新</strong></p>",
+		"<p>这是我茶叶系列的第38篇。</p>",
+		"例如我们曾介绍过的Poppi等。同样是主打干净的产品，<strong>RXBAR却没选这条路。</strong>",
+		"wide-but-captioned.png",
+		"<p>参考来源：</p><p>[1] The RXBAR Story</p><p>本文为FBIF食品饮料创新原创，作者：Sage，转载请联系授权。</p>",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("外发正文缺少 %q\n%s", want, html)
+		}
+	}
+	for _, banned := range []string{"作者：Sage，编辑：Bobo", "Bobo。", "<p><br></p>", "<a ", "mp.weixin.qq.com", "<h2", "<small>", "mote-card.png", "sage-card.png"} {
+		if strings.Contains(html, banned) {
+			t.Errorf("外发正文不得出现 %q\n%s", banned, html)
+		}
+	}
+}
+
+func TestYunsuoDistributionDropsTrailingNameCardWithoutReferences(t *testing.T) {
+	stubYunsuoImageSize(t, map[string][2]int{
+		"https://cdn.example/card.png":  {970, 283},
+		"https://cdn.example/photo.png": {1080, 922},
+	})
+	render := func(last string) string {
+		blocks := `[
+			{"k":"txt","text":"作者：Mote莫特"},
+			{"k":"img","src":"https://cdn.example/lead.png"},
+			{"k":"txt","text":"正文第一段。"},
+			{"k":"img","src":"` + last + `"}
+		]`
+		imageMap := `{"https://cdn.example/lead.png":"https://cdn.example/lead.png","` + last + `":"` + last + `"}`
+		html, err := renderYunsuoHTML(blocks, imageMap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return html
+	}
+	if html := render("https://cdn.example/card.png"); strings.Contains(html, "card.png") ||
+		!strings.HasSuffix(html, "<p>本文为FBIF食品饮料创新原创，作者：Mote莫特，转载请联系授权。</p>") {
+		t.Fatalf("文末无图注的宽条名片应去掉，声明署名取作者：%s", html)
+	}
+	if html := render("https://cdn.example/photo.png"); !strings.Contains(html, "photo.png") {
+		t.Fatalf("文末普通配图不得误删：%s", html)
+	}
+}
+
+func stubYunsuoImageSize(t *testing.T, sizes map[string][2]int) {
+	t.Helper()
+	previous := yunsuoImageSize
+	yunsuoImageSize = func(src string) (int, int, bool) {
+		size, ok := sizes[src]
+		return size[0], size[1], ok
+	}
+	t.Cleanup(func() { yunsuoImageSize = previous })
 }
 
 func TestYunsuoShortTitleBreaksAtPunctuation(t *testing.T) {
@@ -312,8 +422,8 @@ func TestYunsuoHTMLDropsUnmirroredAndNonPublicURLs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rendered, "https://cdn.example/cover.jpg") {
-		t.Fatalf("已镜像且符合公网策略的图片应保留：%s", rendered)
+	if strings.Contains(rendered, "https://cdn.example/cover.jpg") {
+		t.Fatalf("唯一合规的图是正文第一张，应拿去做封面而不留在正文：%s", rendered)
 	}
 	if strings.Contains(rendered, "unmirrored.example") {
 		t.Fatalf("未镜像媒体不得进入云梭 HTML：%s", rendered)
@@ -353,7 +463,7 @@ func TestYunsuoRenderStripsWechatTrailerBeforePush(t *testing.T) {
 		{"k":"img","src":"https://origin.example/card.jpg"},
 		{"k":"txt","text":"预览时标签不可点"}
 	]`
-	imageMap := `{"https://origin.example/card.jpg":"https://cdn.example/card.jpg"}`
+	imageMap := `{"https://origin.example/card.jpg":"https://cdn.example/card.jpg","https://cdn.example/cover.jpg":"https://cdn.example/cover.jpg"}`
 	rendered, err := renderYunsuoHTML(blocks, imageMap)
 	if err != nil {
 		t.Fatal(err)
@@ -382,6 +492,10 @@ func TestYunsuoRenderStripsWechatTrailerBeforePush(t *testing.T) {
 	}
 	if leak := publishHTMLWechatTrailerLeak(payload.HTML); leak != "" {
 		t.Fatalf("冻结 payload 仍含导流尾 %s", leak)
+	}
+	// 正文没有配图时退回原封面；不得把导流尾里的名片图拿来当封面。
+	if payload.Cover != "https://cdn.example/cover.jpg" {
+		t.Fatalf("正文无图时应用原封面，实际 %q", payload.Cover)
 	}
 }
 

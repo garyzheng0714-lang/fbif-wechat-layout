@@ -31,47 +31,72 @@ type yunsuoInline struct {
 // renderYunsuoHTML 从中立 Block[] 直接生成外部平台可移植 HTML。
 // 它不读 FoodTalks ContentHTML，也不引用任何网站渲染器或页脚。
 // 进云梭前先切公众号导流尾：外发与网站同一口径，不看是不是原创。
+// 版式按多平台规则（yunsuo_distribution_rules.go），封面图不在返回的正文里。
 func renderYunsuoHTML(blocksJSON, imageMapJSON string) (string, error) {
+	rendered, err := renderYunsuoDistribution(blocksJSON, imageMapJSON, "")
+	return rendered.HTML, err
+}
+
+type yunsuoRendered struct {
+	HTML string
+	Lead string
+}
+
+func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string) (yunsuoRendered, error) {
 	strippedJSON, err := stripWechatTrailerBlocksJSON(blocksJSON)
 	if err != nil {
-		return "", err
+		return yunsuoRendered{}, err
 	}
-	blocks, imageMap, err := decodeYunsuoContent(strippedJSON, imageMapJSON)
+	decoded, imageMap, err := decodeYunsuoContent(strippedJSON, imageMapJSON)
 	if err != nil {
-		return "", err
+		return yunsuoRendered{}, err
 	}
+	dist := prepareYunsuoDistributionBlocks(decoded, imageMap)
+	blocks := dist.Blocks
 	var out strings.Builder
+	hasStatement := false
+	// 段间不插空行：人工稿没有空段，平台自带段距（BlankBefore 只是公众号的留白）。
 	for i := 0; i < len(blocks); i++ {
 		block := blocks[i]
-		if block.BlankBefore && out.Len() > 0 {
-			out.WriteString("<p><br></p>")
+		if strings.Contains(yunsuoBlockText(block), "转载请联系授权") {
+			hasStatement = true
 		}
-		switch strings.ToLower(strings.TrimSpace(block.K)) {
+		switch yunsuoBlockKind(block) {
 		case "h":
-			level := block.Level
-			if level < 2 || level > 4 {
-				level = 2
+			text := escapeYunsuoText(strings.TrimSpace(stripYunsuoBareURLs(yunsuoBlockText(block))))
+			if text == "" {
+				continue
 			}
-			content := renderYunsuoInline(block.Text, block.Runs)
-			if content != "" {
-				fmt.Fprintf(&out, "<h%d>%s</h%d>", level, content, level)
+			// 头条正文只认 h1 作小标题（h2 会被压成普通段落），人工稿就是这个 class；
+			// 网站的标题2（「1、」「（一）」）在人工稿里是加粗段落。
+			if block.Level <= 2 {
+				out.WriteString(`<h1 class="pgc-h-forward-slash">` + text + "</h1>")
+			} else {
+				out.WriteString("<p><strong>" + text + "</strong></p>")
 			}
-		case "p", "txt":
+		case "txt":
 			writeYunsuoTextElement(&out, "p", block.Text, block.Runs)
 		case "cap":
-			content := renderYunsuoInline(block.Text, block.Runs)
-			if content != "" {
-				out.WriteString("<p><small>")
-				out.WriteString(content)
-				out.WriteString("</small></p>")
-			}
-		case "bq", "blockquote":
+			// 前面没有图的说明文字（图被丢掉或排在图前）按普通段落保留。
+			writeYunsuoTextElement(&out, "p", block.Text, block.Runs)
+		case "bq":
 			writeYunsuoTextElement(&out, "blockquote", block.Text, block.Runs)
-		case "img", "image":
-			if src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap)); src != "" {
-				out.WriteString("<p><img src=\"")
-				out.WriteString(stdhtml.EscapeString(src))
-				out.WriteString("\" alt=\"\"></p>")
+		case "img":
+			end := i + 1
+			for end < len(blocks) && yunsuoBlockKind(blocks[end]) == "cap" {
+				end++
+			}
+			captions := blocks[i+1 : end]
+			i = end - 1
+			src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap))
+			if src == "" {
+				continue
+			}
+			img := `<img src="` + stdhtml.EscapeString(src) + `" alt="">`
+			if caption := yunsuoCaption(captions); caption != "" {
+				out.WriteString(`<div class="pgc-img">` + img + `<p class="pgc-img-caption">` + escapeYunsuoText(caption) + "</p></div>")
+			} else {
+				out.WriteString("<p>" + img + "</p>")
 			}
 		case "video":
 			src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap))
@@ -102,7 +127,7 @@ func renderYunsuoHTML(blocksJSON, imageMapJSON string) (string, error) {
 			out.WriteByte('<')
 			out.WriteString(tag)
 			out.WriteByte('>')
-			for i < len(blocks) && strings.EqualFold(strings.TrimSpace(blocks[i].K), "li") && blocks[i].Ordered == ordered {
+			for i < len(blocks) && yunsuoBlockKind(blocks[i]) == "li" && blocks[i].Ordered == ordered {
 				writeYunsuoListItem(&out, blocks[i].Text, blocks[i].Runs)
 				i++
 			}
@@ -117,11 +142,13 @@ func renderYunsuoHTML(blocksJSON, imageMapJSON string) (string, error) {
 			writeYunsuoTextElement(&out, "p", block.Text, block.Runs)
 		}
 	}
-	result := strings.TrimSpace(out.String())
-	if result == "" {
-		return "", errors.New("云梭分发正文为空")
+	if strings.TrimSpace(out.String()) == "" {
+		return yunsuoRendered{}, errors.New("云梭分发正文为空")
 	}
-	return result, nil
+	if !hasStatement {
+		out.WriteString("<p>" + escapeYunsuoText(yunsuoStatement(publisher, dist.Author)) + "</p>")
+	}
+	return yunsuoRendered{HTML: strings.TrimSpace(out.String()), Lead: dist.Lead}, nil
 }
 
 // buildYunsuoPushPayload 组装一次不可变的推送快照。targets 可传全量，
@@ -131,10 +158,11 @@ func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categ
 	if err != nil {
 		return yunsuoPushPayload{}, err
 	}
-	bodyHTML, err := renderYunsuoHTML(job.BlocksJSON, job.ImageMap)
+	rendered, err := renderYunsuoDistribution(job.BlocksJSON, job.ImageMap, job.SourceName)
 	if err != nil {
 		return yunsuoPushPayload{}, err
 	}
+	bodyHTML := rendered.HTML
 	if leak := publishHTMLWechatTrailerLeak(bodyHTML); leak != "" {
 		return yunsuoPushPayload{}, fmt.Errorf("云梭正文仍含公众号导流尾（%s），禁止外发", leak)
 	}
@@ -148,9 +176,11 @@ func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categ
 	}
 	description = truncateYunsuoRunes(description, 200)
 
-	cover := publicYunsuoMediaURL(mapYunsuoMedia(job.CoverURL, imageMap))
+	// 云梭会把 cover 插到正文顶部：用正文第一张图（已从正文拿掉），
+	// 不再另传公众号封面，免得同一张图出现两次。正文没图才退回原封面。
+	cover := rendered.Lead
 	if cover == "" {
-		cover = firstYunsuoImage(blocks, imageMap)
+		cover = publicYunsuoMediaURL(mapYunsuoMedia(job.CoverURL, imageMap))
 	}
 	if cover == "" {
 		return yunsuoPushPayload{}, errors.New("云梭分发缺少公开可访问的封面")
@@ -212,23 +242,20 @@ func decodeYunsuoContent(blocksJSON, imageMapJSON string) ([]yunsuoBlock, map[st
 	return blocks, imageMap, nil
 }
 
+// renderYunsuoInline 只保留文字与加粗。外部平台正文不带链接：人工稿一个链接都没有，
+// 站外链接（含裸露的网址）会被判导流限流；链接只留锚文字。
 func renderYunsuoInline(text string, runs []Run) string {
 	if len(runs) == 0 {
-		return escapeYunsuoText(text)
+		return escapeYunsuoText(stripYunsuoBareURLs(text))
 	}
 	var out strings.Builder
 	for _, run := range runs {
-		content := escapeYunsuoText(run.Text)
+		content := escapeYunsuoText(stripYunsuoBareURLs(run.Text))
 		if content == "" {
 			continue
 		}
 		if run.Bold {
 			content = "<strong>" + content + "</strong>"
-		}
-		if strings.EqualFold(run.Type, "link") {
-			if href := safeYunsuoLink(run.Href); href != "" {
-				content = "<a href=\"" + stdhtml.EscapeString(href) + "\">" + content + "</a>"
-			}
 		}
 		out.WriteString(content)
 	}
@@ -381,37 +408,6 @@ func publicYunsuoMediaURL(raw string) string {
 		return ""
 	}
 	return parsed.String()
-}
-
-func safeYunsuoLink(raw string) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.User != nil {
-		return ""
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "http", "https":
-		if publicWebURLPolicy(parsed) != nil {
-			return ""
-		}
-	case "mailto":
-		if parsed.Opaque == "" && parsed.Path == "" {
-			return ""
-		}
-	default:
-		return ""
-	}
-	return parsed.String()
-}
-
-func firstYunsuoImage(blocks []yunsuoBlock, imageMap map[string]string) string {
-	for _, block := range blocks {
-		if strings.EqualFold(strings.TrimSpace(block.K), "img") || strings.EqualFold(strings.TrimSpace(block.K), "image") {
-			if src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap)); src != "" {
-				return src
-			}
-		}
-	}
-	return ""
 }
 
 func yunsuoBlocksPlainText(blocks []yunsuoBlock) string {
