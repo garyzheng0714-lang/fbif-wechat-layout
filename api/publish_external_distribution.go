@@ -64,6 +64,57 @@ type publishExternalDistributionTarget struct {
 	UpdatedAt        string `json:"updated_at,omitempty"`
 }
 
+// publishExternalDistributionRound 一轮已结束的外发（只存全部成功的轮次）。
+type publishExternalDistributionRound struct {
+	State       string                              `json:"state"`
+	Targets     []publishExternalDistributionTarget `json:"targets"`
+	RequestedBy string                              `json:"requested_by,omitempty"`
+	RequestedAt string                              `json:"requested_at,omitempty"`
+	CompletedAt string                              `json:"completed_at,omitempty"`
+	ContentPK   string                              `json:"content_pk,omitempty"`
+	PayloadHash string                              `json:"payload_hash,omitempty"`
+}
+
+// externalDistributionCoveredAccounts 推过的账号（存档轮次 + 当前轮，不论结果）。
+// 失败的账号也算：云梭对受理后的失败会自己重试，再推一次就会重复。
+func externalDistributionCoveredAccounts(job publishJob) map[string]bool {
+	covered := map[string]bool{}
+	for _, round := range job.ExternalDistributionHistory {
+		for _, target := range round.Targets {
+			covered[strings.TrimSpace(target.AccountID)] = true
+		}
+	}
+	for _, target := range job.ExternalDistributionTargets {
+		covered[strings.TrimSpace(target.AccountID)] = true
+	}
+	return covered
+}
+
+// externalDistributionMissingAutoTargets 还没推过的 auto 账号。
+func externalDistributionMissingAutoTargets(job publishJob, cfg yunsuoConfig) []yunsuoAccountTarget {
+	covered := externalDistributionCoveredAccounts(job)
+	var missing []yunsuoAccountTarget
+	for _, target := range cfg.autoTargets() {
+		if !covered[strings.TrimSpace(target.ID)] {
+			missing = append(missing, target)
+		}
+	}
+	return missing
+}
+
+// externalDistributionAutoQueueable 自动外发能否开新一轮：从没外发过；或上一轮全部成功、
+// 又有没推过的 auto 账号（只补这些账号，已发的平台不会再推）。
+func externalDistributionAutoQueueable(job publishJob, cfg yunsuoConfig) bool {
+	switch strings.TrimSpace(job.ExternalDistributionState) {
+	case "":
+		return true
+	case publishExternalDistributionSucceeded:
+		return len(externalDistributionMissingAutoTargets(job, cfg)) > 0
+	default:
+		return false
+	}
+}
+
 func publishExternalDistributionProcessing(state string) bool {
 	switch strings.TrimSpace(state) {
 	case publishExternalDistributionQueued, publishExternalDistributionPushing, publishExternalDistributionPolling:
@@ -392,9 +443,12 @@ func (p *publishPipeline) queueAutoExternalDistribution(jobID int64, actor strin
 // 沿用上次的账号（仍须在当前配置内），不因重试把一次只发头条的稿扩到其他平台。
 func externalDistributionTargetsFor(job publishJob, cfg yunsuoConfig, mode externalDistributionQueueMode) ([]yunsuoAccountTarget, error) {
 	if mode == externalQueueAuto {
-		targets := cfg.autoTargets()
-		if len(targets) == 0 {
+		if len(cfg.autoTargets()) == 0 {
 			return nil, externalDistributionIneligible(errors.New("没有配置自动外发账号"))
+		}
+		targets := externalDistributionMissingAutoTargets(job, cfg)
+		if len(targets) == 0 {
+			return nil, externalDistributionIneligible(errors.New("自动外发账号都已推过，不会重复发布"))
 		}
 		return targets, nil
 	}
@@ -432,7 +486,11 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			return job, fmt.Errorf("只有对账中的已发布任务才能由管理员重发外部分发，当前为 %s/%s", job.Stage, job.ExternalDistributionState)
 		}
 	case mode == externalQueueAuto:
-		if strings.TrimSpace(job.ExternalDistributionState) != "" {
+		cfg, err := loadYunsuoConfig()
+		if err != nil {
+			return job, err
+		}
+		if !externalDistributionAutoQueueable(job, cfg) {
 			return job, externalDistributionIneligible(errors.New("这篇文章已经提交过外部分发，系统不会重复发布"))
 		}
 	default:
@@ -497,11 +555,31 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		case externalQueueReplaceReconcile:
 			return publishExternalDistributionCanReplaceReconcile(current)
 		case externalQueueAuto:
-			return strings.TrimSpace(current.ExternalDistributionState) == ""
+			if !externalDistributionAutoQueueable(current, cfg) {
+				return false
+			}
+			covered := externalDistributionCoveredAccounts(current)
+			for _, target := range chosen {
+				if covered[strings.TrimSpace(target.ID)] {
+					return false
+				}
+			}
+			return true
 		}
 		return (strings.TrimSpace(current.ExternalDistributionState) == "" || publishExternalDistributionCanSafeRetry(current)) &&
 			externalDistributionVersionMatches(expectedVersion, current)
 	}, func(current *publishJob) {
+		if current.ExternalDistributionState == publishExternalDistributionSucceeded {
+			current.ExternalDistributionHistory = append(current.ExternalDistributionHistory, publishExternalDistributionRound{
+				State:       current.ExternalDistributionState,
+				Targets:     append([]publishExternalDistributionTarget(nil), current.ExternalDistributionTargets...),
+				RequestedBy: current.ExternalDistributionRequestedBy,
+				RequestedAt: current.ExternalDistributionRequestedAt,
+				CompletedAt: current.ExternalDistributionCompletedAt,
+				ContentPK:   current.ExternalDistributionContentPK,
+				PayloadHash: current.ExternalDistributionPayloadHash,
+			})
+		}
 		current.ExternalDistributionState = publishExternalDistributionQueued
 		current.ExternalDistributionTargets = append([]publishExternalDistributionTarget(nil), targets...)
 		current.ExternalDistributionRequestedBy = strings.TrimSpace(actor)

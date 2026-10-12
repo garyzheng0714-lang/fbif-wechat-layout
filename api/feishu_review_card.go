@@ -967,14 +967,26 @@ func reviewCardExternalDistributionElementsBuild(job publishJob, allowStart, com
 		}
 	}
 
+	targetName := func(target publishExternalDistributionTarget) string {
+		if name := reviewCardSafeText(target.Name, 40); name != "" {
+			return name
+		}
+		return "未命名平台"
+	}
+	// 之前轮次已成功的平台（补发新账号时上一轮存档），各状态下都照列为已同步。
+	var prior []string
+	for _, round := range job.ExternalDistributionHistory {
+		for _, target := range round.Targets {
+			if target.State == publishExternalTargetSucceeded {
+				prior = append(prior, targetName(target))
+			}
+		}
+	}
 	targetNames := make([]string, 0, len(job.ExternalDistributionTargets))
-	succeeded := make([]string, 0, len(job.ExternalDistributionTargets))
+	succeeded := append(make([]string, 0, len(prior)+len(job.ExternalDistributionTargets)), prior...)
 	failed := make([]string, 0, len(job.ExternalDistributionTargets))
 	for _, target := range job.ExternalDistributionTargets {
-		name := reviewCardSafeText(target.Name, 40)
-		if name == "" {
-			name = "未命名平台"
-		}
+		name := targetName(target)
 		targetNames = append(targetNames, name)
 		switch target.State {
 		case publishExternalTargetSucceeded:
@@ -992,9 +1004,13 @@ func reviewCardExternalDistributionElementsBuild(job publishJob, allowStart, com
 		allNames = "已配置平台"
 	}
 	content := "**其他平台分发**\n"
+	priorLine := ""
+	if len(prior) > 0 {
+		priorLine = "<font color='green'>已同步：" + strings.Join(prior, "、") + "。</font>\n"
+	}
 	switch state {
 	case publishExternalDistributionQueued, publishExternalDistributionPushing, publishExternalDistributionPolling:
-		content += "<font color='grey'>正在同步至 " + allNames + "，完成后本卡会自动更新。</font>"
+		content += priorLine + "<font color='grey'>正在同步至 " + allNames + "，完成后本卡会自动更新。</font>"
 	case publishExternalDistributionSucceeded:
 		content += "<font color='green'>已同步：" + strings.Join(succeeded, "、") + "。</font>"
 	case publishExternalDistributionPartialFailed, publishExternalDistributionFailed:
@@ -1008,7 +1024,7 @@ func reviewCardExternalDistributionElementsBuild(job publishJob, allowStart, com
 			content += "<font color='red'>未完成：" + strings.Join(failed, "、") + "。请在云梭后台处理。</font>"
 		}
 	case publishExternalDistributionReconciliationRequired:
-		content += "<font color='orange'>提交结果暂时无法确认。系统不会重复发布，请先到云梭后台核对。</font>"
+		content += priorLine + "<font color='orange'>提交结果暂时无法确认。系统不会重复发布，请先到云梭后台核对。</font>"
 	default:
 		content += "<font color='grey'>状态待确认，请在云梭后台核对。</font>"
 	}

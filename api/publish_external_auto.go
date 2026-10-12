@@ -3,6 +3,7 @@ package main
 // publish_external_auto.go — 原创稿公开后自动外发（2026-10-10 用户裁定：原创自动同步头条号）。
 //
 // 只对 YUNSUO_TARGET_ACCOUNTS_JSON 里标 "auto":true 的账号生效；其余账号仍只走审核卡按钮。
+// 后加的 auto 账号（2026-10-12 百家号恢复）经补发单开一轮，只推上一轮全部成功、还没推过的账号。
 // 任务落为已发布的同一次写入里记下待办（external_distribution_auto_pending），再由
 // runExternalAutoDistribution 消化：进程在两步之间重启也不会漏发，每 10 分钟兜底扫一次。
 //
@@ -90,35 +91,42 @@ func externalAutoQuotaFor(jobs []publishJob, autoTargets []yunsuoAccountTarget, 
 	}
 	today := now.In(publishExternalAutoZone).Format("2006-01-02")
 	var quota externalAutoQuota
-	for _, job := range jobs {
-		// 云梭受理前就失败的不占平台名额。
-		if job.ExternalDistributionState == "" || publishExternalDistributionCanSafeRetry(job) {
-			continue
-		}
-		requestedAt, err := time.Parse(time.RFC3339, job.ExternalDistributionRequestedAt)
+	count := func(targets []publishExternalDistributionTarget, requestedBy, requestedAtRaw string) {
+		requestedAt, err := time.Parse(time.RFC3339, requestedAtRaw)
 		if err != nil {
-			continue
+			return
 		}
 		hitsAuto := false
-		for _, target := range job.ExternalDistributionTargets {
+		for _, target := range targets {
 			if autoIDs[strings.TrimSpace(target.AccountID)] {
 				hitsAuto = true
 				break
 			}
 		}
 		if !hitsAuto {
-			continue
+			return
 		}
 		if requestedAt.After(quota.last) {
 			quota.last = requestedAt
 		}
 		if requestedAt.In(publishExternalAutoZone).Format("2006-01-02") != today {
-			continue
+			return
 		}
 		quota.today++
-		if job.ExternalDistributionRequestedBy == publishExternalAutoBackfillActor {
+		if requestedBy == publishExternalAutoBackfillActor {
 			quota.backfill++
 		}
+	}
+	for _, job := range jobs {
+		// 补发轮次存档后仍占当天名额。
+		for _, round := range job.ExternalDistributionHistory {
+			count(round.Targets, round.RequestedBy, round.RequestedAt)
+		}
+		// 云梭受理前就失败的不占平台名额。
+		if job.ExternalDistributionState == "" || publishExternalDistributionCanSafeRetry(job) {
+			continue
+		}
+		count(job.ExternalDistributionTargets, job.ExternalDistributionRequestedBy, job.ExternalDistributionRequestedAt)
 	}
 	return quota
 }
@@ -198,8 +206,11 @@ func (p *publishPipeline) runExternalAutoDistribution() {
 	quota := externalAutoQuotaFor(jobs, autoTargets, now)
 	for _, job := range pending {
 		kind := job.ExternalDistributionAutoPending
-		if strings.TrimSpace(job.ExternalDistributionState) != "" {
-			p.finishExternalAutoPending(job.ID, "")
+		if !externalDistributionAutoQueueable(job, cfg) {
+			// 上一轮还在推：等它结束再看要不要补别的账号；其余（已全推过、失败待处理）清掉待办。
+			if !publishExternalDistributionProcessing(job.ExternalDistributionState) {
+				p.finishExternalAutoPending(job.ID, "")
+			}
 			continue
 		}
 		if !quota.allows(kind, now) {
@@ -247,11 +258,12 @@ func (p *publishPipeline) noteExternalAutoError(jobID int64, reason string) {
 	}
 }
 
-// externalAutoBackfillCandidate 存量补发只收：已发布、从未外发、没有待办、按外发口径
-// 是原创且有审核记录、公开时间不早于 since。网站稿状态在真正推送前还会再核一次。
-func externalAutoBackfillCandidate(job publishJob, since time.Time) bool {
-	if job.Stage != publishStagePublished || strings.TrimSpace(job.ExternalDistributionState) != "" ||
-		job.ExternalDistributionAutoPending != "" {
+// externalAutoBackfillCandidate 存量补发只收：已发布、没有待办、还有 auto 账号没推过
+// （从未外发，或上一轮全部成功后新加了 auto 账号）、按外发口径是原创且有审核记录、
+// 公开时间不早于 since。网站稿状态在真正推送前还会再核一次。
+func externalAutoBackfillCandidate(job publishJob, cfg yunsuoConfig, since time.Time) bool {
+	if job.Stage != publishStagePublished || job.ExternalDistributionAutoPending != "" ||
+		!externalDistributionAutoQueueable(job, cfg) {
 		return false
 	}
 	publishedAt, err := time.Parse(time.RFC3339, job.PublishedAt)
@@ -261,7 +273,7 @@ func externalAutoBackfillCandidate(job publishJob, since time.Time) bool {
 	return externalDistributionEligibility(job) == nil
 }
 
-// markExternalAutoBackfill 管理员补发：把 since 之后公开、从未外发的原创稿记为补发待办，
+// markExternalAutoBackfill 管理员补发：把 since 之后公开、还有 auto 账号没推过的原创稿记为补发待办，
 // 由 runExternalAutoDistribution 按补发配额逐日推送。dryRun 只返回名单。
 func (p *publishPipeline) markExternalAutoBackfill(since time.Time, dryRun bool) ([]publishJob, error) {
 	cfg, err := loadYunsuoConfig()
@@ -277,7 +289,7 @@ func (p *publishPipeline) markExternalAutoBackfill(since time.Time, dryRun bool)
 	}
 	var marked []publishJob
 	for _, job := range jobs {
-		if !externalAutoBackfillCandidate(job, since) {
+		if !externalAutoBackfillCandidate(job, cfg, since) {
 			continue
 		}
 		if dryRun {
@@ -285,7 +297,7 @@ func (p *publishPipeline) markExternalAutoBackfill(since time.Time, dryRun bool)
 			continue
 		}
 		updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
-			return externalAutoBackfillCandidate(current, since)
+			return externalAutoBackfillCandidate(current, cfg, since)
 		}, func(current *publishJob) {
 			current.ExternalDistributionAutoPending = publishExternalAutoKindBackfill
 			current.ExternalDistributionAutoError = ""

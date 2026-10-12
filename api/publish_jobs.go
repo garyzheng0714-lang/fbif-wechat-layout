@@ -146,6 +146,9 @@ type publishJob struct {
 	ExternalDistributionCompletedAt    string                              `json:"external_distribution_completed_at,omitempty"`
 	ExternalDistributionPollAttempts   int                                 `json:"external_distribution_poll_attempts,omitempty"`
 	ExternalDistributionLastPolledAt   string                              `json:"external_distribution_last_polled_at,omitempty"`
+	// 之前各轮外发的存档：上一轮全部成功后，新加的 auto 账号单开一轮补发（2026-10-12
+	// 百家号恢复后补发已发头条的稿），上一轮原样挪到这里，当前轮字段只管新账号。
+	ExternalDistributionHistory []publishExternalDistributionRound `json:"external_distribution_history,omitempty"`
 	// 自动外发待办（2026-10-10 用户裁定：原创公开后自动同步头条号）。publish=新公开稿，
 	// backfill=管理员补发的存量稿；由 runExternalAutoDistribution 按每日配额消化后清空。
 	ExternalDistributionAutoPending string `json:"external_distribution_auto_pending,omitempty"`
