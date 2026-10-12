@@ -105,9 +105,11 @@ func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob
 	if publishMonitoringProcessingStage(job.Stage) {
 		processingAge = age
 	}
-	if publishExternalDistributionProcessing(job.ExternalDistributionState) {
-		externalAge := publishMonitoringAge(now, publishExternalDistributionStartedAt(job))
-		if externalAge > processingAge {
+	for _, lane := range job.ExternalDistributionLanes {
+		if !publishExternalDistributionProcessing(lane.State) {
+			continue
+		}
+		if externalAge := publishMonitoringAge(now, publishExternalLaneStartedAt(lane)); externalAge > processingAge {
 			processingAge = externalAge
 		}
 	}
@@ -155,8 +157,10 @@ func boolInt(value bool) int {
 
 func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publishJob, now time.Time) {
 	jobFailed := job.Stage == publishStageFailed
-	externalFailed := job.ExternalDistributionState == publishExternalDistributionFailed ||
-		job.ExternalDistributionState == publishExternalDistributionPartialFailed
+	externalFailed := false
+	for _, lane := range job.ExternalDistributionLanes {
+		externalFailed = externalFailed || lane.State == publishExternalDistributionFailed
+	}
 	resyncFailed := job.SourceResyncState == publishSourceResyncFailed
 	status.Failed += boolInt(jobFailed) + boolInt(externalFailed) + boolInt(resyncFailed)
 	// 主发布仍停在 failed 就尚未闭环，不得因超过近期窗口而停止告警。
@@ -174,7 +178,10 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 
 func updatePublishMonitoringReconciliation(status *publishMonitoringStatus, job publishJob, now time.Time, age int64) {
 	stageRequired := publishMonitoringReconciliationStage(job.Stage)
-	externalRequired := job.ExternalDistributionState == publishExternalDistributionReconciliationRequired
+	externalRequired := false
+	for _, lane := range job.ExternalDistributionLanes {
+		externalRequired = externalRequired || lane.State == publishExternalDistributionReconciliationRequired
+	}
 	resyncRequired := job.SourceResyncState == publishSourceResyncReconciliationRequired
 	status.ReconciliationRequired += boolInt(stageRequired) + boolInt(externalRequired) + boolInt(resyncRequired)
 	if stageRequired && age > status.OldestReconciliationAgeSeconds {
@@ -258,11 +265,11 @@ func appendPublishMonitoringSignals(status *publishMonitoringStatus, signals []p
 	}
 }
 
-func publishExternalDistributionStartedAt(job publishJob) string {
-	if value := strings.TrimSpace(job.ExternalDistributionIntentAt); value != "" {
+func publishExternalLaneStartedAt(lane publishExternalLane) string {
+	if value := strings.TrimSpace(lane.IntentAt); value != "" {
 		return value
 	}
-	return strings.TrimSpace(job.ExternalDistributionRequestedAt)
+	return strings.TrimSpace(lane.RequestedAt)
 }
 
 func publishSourceResyncStartedAt(job publishJob) string {

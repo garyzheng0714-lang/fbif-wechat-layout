@@ -18,6 +18,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +59,9 @@ func buildReviewBatchCardWithIcons(jobs []publishJob, icons reviewCardIcons) map
 			published++
 		}
 		elements = append(elements, reviewBatchArticleBlock(job))
+	}
+	if distribution := reviewCardDistributionPanel(jobs, true, true); distribution != nil {
+		elements = append(elements, distribution)
 	}
 	if risk := reviewBatchRiskSection(jobs); risk != nil {
 		elements = append(elements, risk)
@@ -391,7 +395,6 @@ func reviewBatchButtonRow(job publishJob) map[string]any {
 	if action != nil && !leading {
 		buttons = append(buttons, action)
 	}
-	buttons = append(buttons, reviewBatchDistributeButtons(job)...)
 	if resync := reviewCardSourceResyncButton(job); resync != nil {
 		buttons = append(buttons, resync)
 	}
@@ -410,40 +413,6 @@ func reviewBatchButtonRow(job publishJob) map[string]any {
 		return nil
 	}
 	return map[string]any{"tag": "column_set", "flex_mode": "flow", "horizontal_spacing": "8px", "columns": columns}
-}
-
-// reviewBatchDistributeButtons 原创已发布稿的「同步分发至其他平台」等外部分发按钮，并入操作组
-// （聚合卡只留按钮、不显示分发文字，见 reviewCardExternalDistributionElementsStyled）。
-func reviewBatchDistributeButtons(job publishJob) []map[string]any {
-	if job.Stage != publishStagePublished {
-		return nil
-	}
-	provenance, _, _ := publishExternalDistributionProvenance(job)
-	if strings.TrimSpace(job.ExternalDistributionState) == "" && provenance != publishExternalProvenanceOriginal {
-		return nil
-	}
-	var buttons []map[string]any
-	for _, element := range reviewCardExternalDistributionElementsStyled(job, true, true) {
-		reviewBatchCollectButtons(element, &buttons)
-	}
-	return buttons
-}
-
-func reviewBatchCollectButtons(node any, out *[]map[string]any) {
-	switch value := node.(type) {
-	case map[string]any:
-		if value["tag"] == "button" {
-			*out = append(*out, value)
-			return
-		}
-		for _, child := range value {
-			reviewBatchCollectButtons(child, out)
-		}
-	case []any:
-		for _, child := range value {
-			reviewBatchCollectButtons(child, out)
-		}
-	}
 }
 
 func reviewBatchButton(label, buttonType, icon string) map[string]any {
@@ -874,180 +843,307 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 	}
 }
 
-// reviewCardExternalDistributionElements 把外部分发作为已发布卡上的独立区块：
-// 原创且尚未分发时是一枚明确的人工按钮；转载只解释“仅自有站”，不提供死按钮；
-// 一旦开始则只呈现持久状态。目标当前固定，不用多选，减少误漏发。
+// reviewCardExternalDistributionElements 单篇卡（降级路径）的多平台分发区，与聚合卡同一个折叠区。
 func reviewCardExternalDistributionElements(job publishJob, allowStart bool) []any {
-	return reviewCardExternalDistributionElementsStyled(job, allowStart, false)
+	if panel := reviewCardDistributionPanel([]publishJob{job}, allowStart, false); panel != nil {
+		return []any{panel}
+	}
+	return nil
 }
 
-// reviewCardExternalDistributionElementsStyled compact=true 用于聚合卡：按钮与文章
-// 按钮行同一外形（小号、自然宽度），不另起一枚撑满整卡的大按钮；且只留按钮（发起
-// 分发、可安全重试时的重新分发），不显示任何分发文字提示——已同步、进行中、失败、
-// 待核对、发起前说明都不出现（用户 2026-10-09：「只去掉……类似于这种分发提示，因为
-// 我们的分发流程还没做太好」）。目标平台仍写在按钮的确认弹窗里。
-func reviewCardExternalDistributionElementsStyled(job publishJob, allowStart, compact bool) []any {
-	elements := reviewCardExternalDistributionElementsBuild(job, allowStart, compact)
-	if !compact {
-		return elements
+// reviewCardDistributionPanel 多平台分发折叠区（2026-10-12 用户裁定：「按钮可能太多……应该要把
+// 这些按钮折叠起来……点上去展开一个列表，显示它的标题那些东西」；同日看预览后「不够清晰」：
+// 篇与篇之间加分隔线，状态用彩色标签，失败原因说人话，按钮写明推哪个平台）。收起时标题按平台
+// 汇总；展开后每篇一节，各平台一行：平台名、状态标签、文章链接或原因。能发起或可安全重推时，
+// 按钮放在这一节里，文章按钮行不再放分发按钮。转载稿只在单篇卡里说明「仅发 FoodTalks」，
+// 聚合卡（aggregate）不出。
+func reviewCardDistributionPanel(jobs []publishJob, allowStart, aggregate bool) map[string]any {
+	cfg, cfgErr := loadYunsuoConfig()
+	var targets []yunsuoAccountTarget
+	if cfgErr == nil {
+		targets = cfg.Targets
 	}
-	buttons := make([]any, 0, len(elements))
-	for _, element := range elements {
-		if element.(map[string]any)["tag"] != "markdown" {
-			buttons = append(buttons, element)
+	multi := len(jobs) > 1
+	var elements []any
+	var stats []reviewCardPlatformStat
+	busy := false
+	for _, job := range jobs {
+		section, rows := reviewCardDistributionSection(job, targets, allowStart, aggregate, multi)
+		if len(section) == 0 {
+			continue
+		}
+		if len(elements) > 0 {
+			elements = append(elements, map[string]any{"tag": "hr", "margin": "4px 0px 4px 0px"})
+		}
+		elements = append(elements, section...)
+		for _, row := range rows {
+			busy = busy || row.busy
+			stats = reviewCardAddPlatformStat(stats, row)
 		}
 	}
-	return buttons
+	if len(elements) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"tag": "collapsible_panel", "expanded": false,
+		"header": map[string]any{
+			"title":               feishuPlainText(reviewCardDistributionTitle(stats, busy, multi)),
+			"width":               "auto_when_fold",
+			"icon":                map[string]any{"tag": "standard_icon", "token": "down-small-ccm_outlined", "color": "grey"},
+			"icon_position":       "follow_text",
+			"icon_expanded_angle": -180,
+		},
+		"vertical_spacing": "8px",
+		"elements":         elements,
+	}
 }
 
-func reviewCardExternalDistributionElementsBuild(job publishJob, allowStart, compact bool) []any {
-	buttonRow := func(button map[string]any) map[string]any {
-		if compact {
-			button["size"], button["width"] = "tiny", "default"
-			return reviewBatchInlineButtons(withReviewIcon(button, reviewIconDistribute))
-		}
-		return feishuButtonRow(button)
-	}
-	state := strings.TrimSpace(job.ExternalDistributionState)
-	provenance, _, provenanceEvidence := publishExternalDistributionProvenance(job)
-	if state == "" {
-		if provenance != publishExternalProvenanceOriginal {
-			if !allowStart {
-				return nil
-			}
-			message := "转载文章仅发布至 FoodTalks，不同步外部平台。"
-			if provenance == publishExternalProvenanceUnverified {
-				message = "原创状态未完成核验，暂不开放外部分发（" + provenanceEvidence + "）。"
-			}
-			return []any{map[string]any{
-				"tag":       "markdown",
-				"text_size": "notation",
-				"content":   "<font color='grey'>" + reviewCardSafeText(message, 180) + "</font>",
-			}}
-		}
-		if !allowStart {
-			return nil
-		}
-		cfg, err := loadYunsuoConfig()
-		if err != nil || len(cfg.Targets) == 0 {
-			// readiness 会阻止缺配置版本上线；历史卡刷新时宁可不渲染一个必失败按钮。
-			return nil
-		}
-		names := make([]string, 0, len(cfg.Targets))
-		for _, target := range cfg.Targets {
-			if name := strings.TrimSpace(target.Name); name != "" {
-				names = append(names, name)
-			}
-		}
-		label := strings.Join(names, "、")
-		if label == "" {
-			label = "已配置平台"
-		}
-		value := map[string]any{
-			"action":               feishuCardActionDistributeExternal,
-			"job_id":               job.ID,
-			"distribution_version": publishExternalDistributionCardVersion(job),
-		}
-		button := map[string]any{
-			"tag": "button", "text": feishuPlainText("同步分发至其他平台"),
-			"type": "primary_filled", "size": "medium", "width": "fill",
-			"confirm": map[string]any{
-				"title": feishuPlainText("同步分发至" + label + "？"),
-				"text":  feishuPlainText("请确认本文为原创文章。外部发布独立于 FoodTalks；下线本站文章不会自动下线外部平台。确认后将立即提交发布。"),
-			},
-			"behaviors": []any{map[string]any{"type": "callback", "value": value}},
-		}
-		return []any{
-			map[string]any{
-				"tag":       "markdown",
-				"text_size": "notation",
-				"content":   "<font color='grey'>未发现转载声明；请确认原创后同步至 " + reviewCardSafeText(label, 120) + "。</font>",
-			},
-			buttonRow(button),
-		}
-	}
+// reviewCardPlatformStat 折叠标题里一个平台的汇总：几篇里已发布几篇。
+type reviewCardPlatformStat struct {
+	name          string
+	settled, rows int
+	label         string // 只有一篇时直接写这个平台的状态
+	busy          bool
+}
 
-	targetName := func(target publishExternalDistributionTarget) string {
-		if name := reviewCardSafeText(target.Name, 40); name != "" {
-			return name
-		}
-		return "未命名平台"
-	}
-	// 之前轮次已成功的平台（补发新账号时上一轮存档），各状态下都照列为已同步。
-	var prior []string
-	for _, round := range job.ExternalDistributionHistory {
-		for _, target := range round.Targets {
-			if target.State == publishExternalTargetSucceeded {
-				prior = append(prior, targetName(target))
-			}
+func reviewCardAddPlatformStat(stats []reviewCardPlatformStat, row reviewCardPlatformStat) []reviewCardPlatformStat {
+	for i := range stats {
+		if stats[i].name == row.name {
+			stats[i].settled += row.settled
+			stats[i].rows += row.rows
+			return stats
 		}
 	}
-	targetNames := make([]string, 0, len(job.ExternalDistributionTargets))
-	succeeded := append(make([]string, 0, len(prior)+len(job.ExternalDistributionTargets)), prior...)
-	failed := make([]string, 0, len(job.ExternalDistributionTargets))
-	for _, target := range job.ExternalDistributionTargets {
-		name := targetName(target)
-		targetNames = append(targetNames, name)
-		switch target.State {
-		case publishExternalTargetSucceeded:
-			succeeded = append(succeeded, name)
-		case publishExternalTargetFailed, publishExternalTargetUnsupported:
-			detail := reviewCardSafeText(target.Remark, 60)
-			if detail != "" {
-				name += "（" + detail + "）"
-			}
-			failed = append(failed, name)
-		}
+	return append(stats, row)
+}
+
+// reviewCardDistributionTitle 收起时也能看懂：一篇写各平台状态（「头条号已发布 · 百家号未同步」），
+// 多篇写各平台已发布篇数（「头条号 2/3 · 百家号 0/3」）。
+func reviewCardDistributionTitle(stats []reviewCardPlatformStat, busy, multi bool) string {
+	if busy {
+		return "多平台分发（同步中）"
 	}
-	allNames := strings.Join(targetNames, "、")
-	if allNames == "" {
-		allNames = "已配置平台"
-	}
-	content := "**其他平台分发**\n"
-	priorLine := ""
-	if len(prior) > 0 {
-		priorLine = "<font color='green'>已同步：" + strings.Join(prior, "、") + "。</font>\n"
-	}
-	switch state {
-	case publishExternalDistributionQueued, publishExternalDistributionPushing, publishExternalDistributionPolling:
-		content += priorLine + "<font color='grey'>正在同步至 " + allNames + "，完成后本卡会自动更新。</font>"
-	case publishExternalDistributionSucceeded:
-		content += "<font color='green'>已同步：" + strings.Join(succeeded, "、") + "。</font>"
-	case publishExternalDistributionPartialFailed, publishExternalDistributionFailed:
-		if len(succeeded) > 0 {
-			content += "<font color='green'>已同步：" + strings.Join(succeeded, "、") + "。</font>\n"
-		}
-		if publishExternalDistributionCanSafeRetry(job) {
-			content += "<font color='red'>上次请求在云梭受理前失败：" + strings.Join(failed, "、") + "。</font>\n"
-			content += "<font color='grey'>修正配置后可安全重试，不会重复发布。</font>"
+	parts := make([]string, 0, len(stats))
+	for _, stat := range stats {
+		if multi {
+			parts = append(parts, fmt.Sprintf("%s %d/%d", stat.name, stat.settled, stat.rows))
 		} else {
-			content += "<font color='red'>未完成：" + strings.Join(failed, "、") + "。请在云梭后台处理。</font>"
+			parts = append(parts, stat.name+stat.label)
 		}
-	case publishExternalDistributionReconciliationRequired:
-		content += priorLine + "<font color='orange'>提交结果暂时无法确认。系统不会重复发布，请先到云梭后台核对。</font>"
-	default:
-		content += "<font color='grey'>状态待确认，请在云梭后台核对。</font>"
 	}
-	elements := []any{map[string]any{
-		"tag": "markdown", "text_size": "notation", "content": content,
-	}}
-	if allowStart && provenance == publishExternalProvenanceOriginal && publishExternalDistributionCanSafeRetry(job) {
-		retryValue := map[string]any{
+	if len(parts) == 0 {
+		return "多平台分发"
+	}
+	return "多平台分发（" + strings.Join(parts, " · ") + "）"
+}
+
+// reviewCardDistributionSection 一篇文章的各平台行与按钮；rows 计入折叠标题的汇总。
+// multi 时折叠区里有多篇，每节先列「#编号 标题」（与风险核查区同一写法）。
+func reviewCardDistributionSection(job publishJob, targets []yunsuoAccountTarget, allowStart, aggregate, multi bool) ([]any, []reviewCardPlatformStat) {
+	started := externalDistributionStarted(job)
+	switch {
+	case job.Stage == publishStagePublished:
+	case job.Stage == publishStageOffline && started:
+		// 外部平台与 FoodTalks 生命周期彼此独立：下线前发起的分发仍保留结果，但不再提供新入口。
+		allowStart = false
+	default:
+		return nil, nil
+	}
+	provenance, _, provenanceEvidence := publishExternalDistributionProvenance(job)
+	original := provenance == publishExternalProvenanceOriginal
+	if !started && !original {
+		if !allowStart || aggregate {
+			return nil, nil
+		}
+		message := "转载文章仅发布至 FoodTalks，不同步外部平台。"
+		if provenance == publishExternalProvenanceUnverified {
+			message = "原创状态未完成核验，暂不开放外部分发（" + provenanceEvidence + "）。"
+		}
+		return []any{map[string]any{
+			"tag": "markdown", "text_size": "notation",
+			"content": "<font color='grey'>" + reviewCardSafeText(message, 180) + "</font>",
+		}}, nil
+	}
+	if !started && (!allowStart || len(targets) == 0) {
+		// 没开始分发、又不能从这张卡发起（进度卡、缺配置）：不渲染一个必失败的入口。
+		return nil, nil
+	}
+	var lines []string
+	var rows []reviewCardPlatformStat
+	busy := false
+	add := func(name string, lane *publishExternalLane) {
+		line, label := reviewCardDistributionRow(name, lane, job.Title)
+		lines = append(lines, line)
+		row := reviewCardPlatformStat{name: reviewCardSafeOrDash(name, 20), rows: 1, label: label}
+		if lane != nil {
+			row.settled = boolInt(externalLaneSettled(*lane))
+			row.busy = publishExternalDistributionProcessing(lane.State)
+		}
+		busy = busy || row.busy
+		rows = append(rows, row)
+	}
+	seen := map[string]bool{}
+	for _, target := range targets {
+		seen[strings.TrimSpace(target.ID)] = true
+		if lane, ok := externalLaneFor(job, target.ID); ok {
+			add(target.Name, &lane)
+		} else if original {
+			add(target.Name, nil)
+		}
+	}
+	for _, lane := range job.ExternalDistributionLanes {
+		if seen[strings.TrimSpace(lane.AccountID)] {
+			continue
+		}
+		lane := lane
+		add(lane.Name, &lane)
+	}
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	content := strings.Join(lines, "\n")
+	if multi {
+		content = fmt.Sprintf("**#%d %s**\n", job.ID, reviewCardSafeOrDash(job.Title, 80)) + content
+	}
+	elements := []any{map[string]any{"tag": "markdown", "content": content}}
+	if button := reviewCardDistributionButton(job, allowStart && original && !busy); button != nil {
+		elements = append(elements, reviewBatchInlineButtons(withReviewIcon(button, reviewIconDistribute)))
+	}
+	return elements, rows
+}
+
+// reviewCardDistributionRow 一个平台一行：平台名、状态标签、文章链接或原因。平台上的标题与
+// 本文相同时不重复（链接文字用「查看文章」），平台改过/截过标题才写出来。label 是折叠标题
+// 里一篇时用的状态词。
+func reviewCardDistributionRow(name string, lane *publishExternalLane, articleTitle string) (string, string) {
+	name = reviewCardSafeText(name, 20)
+	if name == "" {
+		name = "未命名平台"
+	}
+	tag := func(color, text string) string {
+		return "**" + name + "**　<text_tag color='" + color + "'>" + text + "</text_tag>"
+	}
+	if lane == nil {
+		return tag("neutral", "未同步"), "未同步"
+	}
+	var row, label, reason string
+	switch {
+	case lane.State == publishExternalLaneManual:
+		row, label = tag("green", "人工已发"), "已发布"
+	case lane.State == publishExternalDistributionSucceeded:
+		row, label = tag("green", "已发布"), "已发布"
+	case publishExternalDistributionProcessing(lane.State):
+		row, label = tag("blue", "同步中"), "同步中"
+	case lane.State == publishExternalDistributionReconciliationRequired:
+		row, label = tag("orange", "待核对"), "待核对"
+		reason = "结果未确认，请先到云梭后台核对；系统不会重复推送"
+	case externalLaneCanSafeRetry(*lane):
+		row, label = tag("red", "未提交"), "未提交"
+		reason = externalLaneFailureReason(*lane)
+	default:
+		row, label = tag("red", "失败"), "失败"
+		reason = firstNonEmpty(externalLaneFailureReason(*lane), "请在云梭后台处理")
+	}
+	title := ""
+	if platformTitle := strings.TrimSpace(lane.Title); platformTitle != "" && normalizeSiteTitle(platformTitle) != normalizeSiteTitle(articleTitle) {
+		title = reviewCardSafeText(platformTitle, 60)
+	}
+	if url := reviewCardSafeURL(lane.URL); url != "" {
+		row += "　[" + firstNonEmpty(title, "查看文章") + "](" + url + ")"
+	} else if title != "" && reason == "" {
+		row += "　" + title
+	}
+	if reason = reviewCardSafeText(reason, 80); reason != "" {
+		row += "　<font color='grey'>" + reason + "</font>"
+	}
+	return row, label
+}
+
+var (
+	externalReasonSizeRe    = regexp.MustCompile(`(\d+)\s*[x×*]\s*(\d+)`)
+	externalReasonWrapperRe = regexp.MustCompile(`^(?:发布任务执行失败|上传图片失败)[（(](.+)[）)]$`)
+)
+
+// externalLaneFailureReason 把云梭/平台回执和本地拦截原因说成人话，并告诉下一步怎么办。
+// 云梭已受理（有单号）的失败只能在云梭处理；受理前失败的改好后点重新同步。
+func externalLaneFailureReason(lane publishExternalLane) string {
+	raw := strings.TrimSpace(firstNonEmpty(lane.Remark, lane.Error))
+	accepted := strings.TrimSpace(lane.ContentPK) != ""
+	switch {
+	case raw == "":
+		return ""
+	case strings.Contains(raw, "封面图尺寸过小"):
+		sizes := externalReasonSizeRe.FindAllStringSubmatch(raw, -1)
+		reason := "封面图太小"
+		if len(sizes) >= 2 {
+			reason += fmt.Sprintf("（%s×%s，要求至少 %s×%s）", sizes[0][1], sizes[0][2], sizes[1][1], sizes[1][2])
+		} else if len(sizes) == 1 {
+			reason += fmt.Sprintf("（%s×%s）", sizes[0][1], sizes[0][2])
+		}
+		if accepted {
+			return reason + "，需在云梭后台换封面重发"
+		}
+		return reason + "，换封面后重新同步"
+	case strings.Contains(raw, "登录失败") || strings.Contains(raw, "更新账号") ||
+		strings.Contains(raw, "登录失效") || strings.Contains(raw, "授权过期") || strings.Contains(raw, "未登录"):
+		if accepted {
+			return "账号登录失效，在云梭插件更新登录后云梭会自动重试"
+		}
+		return "账号登录失效，在云梭插件更新登录后重新同步"
+	}
+	for {
+		match := externalReasonWrapperRe.FindStringSubmatch(raw)
+		if match == nil {
+			return raw
+		}
+		raw = strings.TrimSpace(match[1])
+	}
+}
+
+// reviewCardDistributionButton 这篇还有能推的平台（没推过的，或受理前失败可安全重推的）时
+// 给一枚按钮，按钮上写明推哪些平台；callback 不带账号，推哪些平台由服务端按同一口径决定。
+func reviewCardDistributionButton(job publishJob, allowed bool) map[string]any {
+	if !allowed {
+		return nil
+	}
+	cfg, err := loadYunsuoConfig()
+	if err != nil {
+		return nil
+	}
+	chosen := externalDistributionTargetsFor(job, cfg, externalQueueCard, nil)
+	if len(chosen) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(chosen))
+	retryOnly := true
+	for _, target := range chosen {
+		if name := strings.TrimSpace(target.Name); name != "" {
+			names = append(names, name)
+		}
+		if lane, ok := externalLaneFor(job, target.ID); !ok || !externalLaneCanSafeRetry(lane) {
+			retryOnly = false
+		}
+	}
+	label := reviewCardSafeText(strings.Join(names, "、"), 40)
+	if label == "" {
+		label = "其他平台"
+	}
+	text := "同步至" + label
+	confirm := "请确认本文为原创文章。外部发布独立于 FoodTalks；下线本站文章不会自动下线外部平台。确认后将立即提交发布。"
+	if retryOnly {
+		text = "重新同步至" + label
+		confirm = "上次请求已确认未被云梭受理，不会重复发布。本次会重新提交；请同时确认本文为原创文章。"
+	}
+	return map[string]any{
+		"tag": "button", "text": feishuPlainText(text), "type": "primary_filled",
+		"size": "tiny", "width": "default",
+		"confirm": map[string]any{"title": feishuPlainText(text + "？"), "text": feishuPlainText(confirm)},
+		"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{
 			"action":               feishuCardActionDistributeExternal,
 			"job_id":               job.ID,
 			"distribution_version": publishExternalDistributionCardVersion(job),
-		}
-		elements = append(elements, buttonRow(map[string]any{
-			"tag": "button", "text": feishuPlainText("重新同步分发"),
-			"type": "primary_filled", "size": "medium", "width": "fill",
-			"confirm": map[string]any{
-				"title": feishuPlainText("重新同步至" + allNames + "？"),
-				"text":  feishuPlainText("上次请求已确认未被云梭受理。本次会重新提交；请同时确认本文为原创文章。"),
-			},
-			"behaviors": []any{map[string]any{"type": "callback", "value": retryValue}},
-		}))
+		}}},
 	}
-	return elements
 }
 
 // buildReviewIssueCard 是发布窗口的异常终态：仍更新原审核卡，不另起一张通知卡。

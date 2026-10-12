@@ -126,29 +126,29 @@ type publishJob struct {
 	PublicationAction   string `json:"publication_action,omitempty"` // publish / unpublish / republish / manual_cms
 	PublicationActor    string `json:"publication_actor,omitempty"`
 	PublicationActionAt string `json:"publication_action_at,omitempty"`
-	// 外部分发是 FoodTalks 主发布状态机之外的正交子流程。FoodTalks 允许转载；
-	// 云梭目标只允许原创，并且只能在 FoodTalks 已审核公开后由卡片人工触发。
-	// 目标账号必须在受理动作时快照，避免运行期配置变化把同一次意图发往别处。
-	ExternalDistributionState          string                              `json:"external_distribution_state,omitempty"`
-	ExternalDistributionTargets        []publishExternalDistributionTarget `json:"external_distribution_targets,omitempty"`
-	ExternalDistributionRequestedBy    string                              `json:"external_distribution_requested_by,omitempty"`
-	ExternalDistributionRequestedAt    string                              `json:"external_distribution_requested_at,omitempty"`
-	ExternalDistributionContentHash    string                              `json:"external_distribution_content_hash,omitempty"`
-	ExternalDistributionContentVersion int64                               `json:"external_distribution_content_version,omitempty"`
-	ExternalDistributionAttribution    string                              `json:"external_distribution_attribution,omitempty"`
-	ExternalDistributionSource         string                              `json:"external_distribution_source,omitempty"`
-	ExternalDistributionPayloadJSON    string                              `json:"external_distribution_payload_json,omitempty"`
-	ExternalDistributionPayloadHash    string                              `json:"external_distribution_payload_hash,omitempty"`
-	ExternalDistributionIntentKey      string                              `json:"external_distribution_intent_key,omitempty"`
-	ExternalDistributionIntentAt       string                              `json:"external_distribution_intent_at,omitempty"`
-	ExternalDistributionContentPK      string                              `json:"external_distribution_content_pk,omitempty"`
-	ExternalDistributionError          string                              `json:"external_distribution_error,omitempty"`
-	ExternalDistributionCompletedAt    string                              `json:"external_distribution_completed_at,omitempty"`
-	ExternalDistributionPollAttempts   int                                 `json:"external_distribution_poll_attempts,omitempty"`
-	ExternalDistributionLastPolledAt   string                              `json:"external_distribution_last_polled_at,omitempty"`
-	// 之前各轮外发的存档：上一轮全部成功后，新加的 auto 账号单开一轮补发（2026-10-12
-	// 百家号恢复后补发已发头条的稿），上一轮原样挪到这里，当前轮字段只管新账号。
-	ExternalDistributionHistory []publishExternalDistributionRound `json:"external_distribution_history,omitempty"`
+	// 外部分发是 FoodTalks 主发布状态机之外的正交子流程，只发原创。按平台账号分道
+	// （2026-10-12 用户裁定：各平台分开发布）：每个账号一条 lane，各自冻结 payload、
+	// 落 intent、推送、轮询、对账，互不牵连（publish_external_lanes.go）。
+	ExternalDistributionLanes []publishExternalLane `json:"external_distribution_lanes,omitempty"`
+	// 以下是按平台拆开之前的单轮字段，只在读盘时迁成 lanes，迁完清空、不再写回。
+	LegacyExternalState          string                              `json:"external_distribution_state,omitempty"`
+	LegacyExternalTargets        []publishExternalDistributionTarget `json:"external_distribution_targets,omitempty"`
+	LegacyExternalRequestedBy    string                              `json:"external_distribution_requested_by,omitempty"`
+	LegacyExternalRequestedAt    string                              `json:"external_distribution_requested_at,omitempty"`
+	LegacyExternalContentHash    string                              `json:"external_distribution_content_hash,omitempty"`
+	LegacyExternalContentVersion int64                               `json:"external_distribution_content_version,omitempty"`
+	LegacyExternalAttribution    string                              `json:"external_distribution_attribution,omitempty"`
+	LegacyExternalSource         string                              `json:"external_distribution_source,omitempty"`
+	LegacyExternalPayloadJSON    string                              `json:"external_distribution_payload_json,omitempty"`
+	LegacyExternalPayloadHash    string                              `json:"external_distribution_payload_hash,omitempty"`
+	LegacyExternalIntentKey      string                              `json:"external_distribution_intent_key,omitempty"`
+	LegacyExternalIntentAt       string                              `json:"external_distribution_intent_at,omitempty"`
+	LegacyExternalContentPK      string                              `json:"external_distribution_content_pk,omitempty"`
+	LegacyExternalError          string                              `json:"external_distribution_error,omitempty"`
+	LegacyExternalCompletedAt    string                              `json:"external_distribution_completed_at,omitempty"`
+	LegacyExternalPollAttempts   int                                 `json:"external_distribution_poll_attempts,omitempty"`
+	LegacyExternalLastPolledAt   string                              `json:"external_distribution_last_polled_at,omitempty"`
+	LegacyExternalHistory        []publishExternalDistributionRound  `json:"external_distribution_history,omitempty"`
 	// 自动外发待办（2026-10-10 用户裁定：原创公开后自动同步头条号）。publish=新公开稿，
 	// backfill=管理员补发的存量稿；由 runExternalAutoDistribution 按每日配额消化后清空。
 	ExternalDistributionAutoPending string `json:"external_distribution_auto_pending,omitempty"`
@@ -289,10 +289,11 @@ func (s *publishJobStore) readLocked() (publishJobDocument, error) {
 	if doc.NextID < 1 {
 		doc.NextID = 1
 	}
-	for _, j := range doc.Jobs {
-		if j.ID >= doc.NextID {
-			doc.NextID = j.ID + 1
+	for i := range doc.Jobs {
+		if doc.Jobs[i].ID >= doc.NextID {
+			doc.NextID = doc.Jobs[i].ID + 1
 		}
+		migrateLegacyExternalDistribution(&doc.Jobs[i])
 	}
 	return doc, nil
 }
@@ -485,7 +486,10 @@ func (s *publishJobStore) list(limit int) ([]publishJob, error) {
 		j.BlocksJSON = ""
 		j.ContentHTML = ""
 		j.ImageMap = ""
-		j.ExternalDistributionPayloadJSON = ""
+		j.ExternalDistributionLanes = append([]publishExternalLane(nil), j.ExternalDistributionLanes...)
+		for k := range j.ExternalDistributionLanes {
+			j.ExternalDistributionLanes[k].PayloadJSON = ""
+		}
 		j.RiskRaw = ""
 		out = append(out, j)
 	}

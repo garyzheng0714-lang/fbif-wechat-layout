@@ -346,24 +346,124 @@ func TestReviewBatchSourceButtonSaysWhichOriginal(t *testing.T) {
 	}
 }
 
-// TestReviewBatchCardHidesDistributionNotices 聚合卡不显示任何外部分发文字提示（用户
-// 2026-10-09：「只去掉……类似于这种分发提示，因为我们的分发流程还没做太好」）：已同步、
-// 失败原因等都不出现；可安全重试时仍留「重新同步分发」按钮。
-func TestReviewBatchCardHidesDistributionNotices(t *testing.T) {
+// panelJSON 折叠区序列化后把 json 转义的 < > & 还原，断言可以直接写 text_tag 标记。
+func panelJSON(t *testing.T, panel map[string]any) string {
+	t.Helper()
+	return strings.NewReplacer(`\u003c`, "<", `\u003e`, ">", `\u0026`, "&").Replace(cardJSON(t, panel))
+}
+
+// reviewCardFindPanel 取卡片里标题以 prefix 开头的折叠面板。
+func reviewCardFindPanel(card map[string]any, prefix string) map[string]any {
+	var found map[string]any
+	var walk func(any)
+	walk = func(node any) {
+		switch value := node.(type) {
+		case map[string]any:
+			if value["tag"] == "collapsible_panel" && found == nil {
+				header, _ := value["header"].(map[string]any)
+				title, _ := header["title"].(map[string]any)
+				if content, _ := title["content"].(string); strings.HasPrefix(content, prefix) {
+					found = value
+					return
+				}
+			}
+			for _, child := range value {
+				walk(child)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+			}
+		}
+	}
+	walk(card)
+	return found
+}
+
+// TestReviewCardDistributionPanelFoldsPlatforms 多平台分发收进一个折叠区（2026-10-12 用户裁定：
+// 「按钮可能太多……应该要把这些按钮折叠起来……点上去展开一个列表，显示它的标题那些东西」）：
+// 折叠标题带汇总；展开后各平台一行，状态 + 平台上的标题链接；分发按钮只在折叠区里，
+// 文章按钮行不再放；转载稿聚合卡不出折叠区。
+func TestReviewCardDistributionPanelFoldsPlatforms(t *testing.T) {
+	setTestYunsuoConfig(t)
 	job := reviewCardTestJob(publishStagePublished)
-	job.ExternalDistributionState = publishExternalDistributionSucceeded
-	job.ExternalDistributionTargets = []publishExternalDistributionTarget{{Name: "头条号", State: publishExternalTargetSucceeded}}
-	if body := cardJSON(t, buildReviewBatchCard([]publishJob{job})); strings.Contains(body, "其他平台分发") || strings.Contains(body, "已同步") {
-		t.Fatalf("分发成功不应在聚合卡出现提示: %s", body)
+	job.FoodTalksNewsID = 7318
+	job.PublicationAction = publishPublicationActionPublish
+
+	// 还没分发：两个平台都「未同步」，按钮在折叠区里。
+	card := buildReviewBatchCard([]publishJob{job})
+	panel := reviewCardFindPanel(card, "多平台分发")
+	if panel == nil || panel["expanded"] != false {
+		t.Fatalf("原创已发布稿应有收起的多平台分发折叠区: %s", cardJSON(t, card))
 	}
-	job.ExternalDistributionState = publishExternalDistributionFailed
-	job.ExternalDistributionTargets = []publishExternalDistributionTarget{{Name: "头条号", State: publishExternalTargetFailed, Remark: "授权过期"}}
-	if body := cardJSON(t, buildReviewBatchCard([]publishJob{job})); strings.Contains(body, "其他平台分发") || strings.Contains(body, "授权过期") {
-		t.Fatalf("分发失败也不在聚合卡出现文字提示: %s", body)
+	body := panelJSON(t, panel)
+	if !strings.Contains(body, "多平台分发（头条号未同步 · 百家号未同步）") || strings.Count(body, ">未同步</text_tag>") != 2 || !strings.Contains(body, `"content":"同步至头条号、百家号"`) {
+		t.Fatalf("未分发时应列出两个平台并给分发按钮: %s", body)
 	}
-	// 单篇卡（降级路径）仍保留完整分发状态，不受聚合卡取舍影响。
-	if body := cardJSON(t, buildReviewDoneCard(job)); !strings.Contains(body, "其他平台分发") {
-		t.Fatalf("单篇卡仍应显示分发状态: %s", body)
+	var outside []map[string]any
+	reviewCardButtons(map[string]any{"elements": card["body"].(map[string]any)["elements"].([]any)[0]}, &outside)
+	for _, button := range outside {
+		if strings.Contains(fmt.Sprint(button["text"]), "分发") {
+			t.Fatalf("文章按钮行不应再放分发按钮: %#v", button)
+		}
+	}
+
+	// 头条号已发、查到链接；百家号云梭受理后失败。
+	toutiao := testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded)
+	toutiao.Title, toutiao.URL = "这个女性能量饮料，靠青汁粉走红了", "https://www.toutiao.com/article/7560000000000000000/"
+	baijia := testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed)
+	baijia.ContentPK, baijia.Remark = "pk-1", "授权过期"
+	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
+	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job}), "多平台分发"))
+	for _, want := range []string{"多平台分发（头条号已发布 · 百家号失败）", "<text_tag color='green'>已发布</text_tag>", "[这个女性能量饮料，靠青汁粉走红了](https://www.toutiao.com/article/7560000000000000000/)", "<text_tag color='red'>失败</text_tag>", "账号登录失效，在云梭插件更新登录后云梭会自动重试"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("折叠区缺少 %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, feishuCardActionDistributeExternal) {
+		t.Fatalf("云梭已受理的失败不得给重推按钮: %s", body)
+	}
+	// 平台标题与本文相同：不重复整篇标题，链接文字用「查看文章」。
+	toutiao.Title = job.Title
+	baijia.Title = job.Title
+	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
+	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job}), "多平台分发"))
+	if !strings.Contains(body, "[查看文章](https://www.toutiao.com/article/7560000000000000000/)") || strings.Contains(body, job.Title) {
+		t.Fatalf("同标题时不应重复标题: %s", body)
+	}
+	// 多篇：每节先写「#编号 标题」，与风险核查区一致。
+	second := reviewCardTestJob(publishStagePublished)
+	second.ID, second.Title = 73, "第二篇原创文章"
+	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job, second}), "多平台分发"))
+	if !strings.Contains(body, "**#72 ") || !strings.Contains(body, "**#73 第二篇原创文章**") || !strings.Contains(body, "多平台分发（头条号 1/2 · 百家号 0/2）") || strings.Count(body, `"tag":"hr"`) != 1 {
+		t.Fatalf("多篇时每节应有编号标题、汇总按平台行数: %s", body)
+	}
+
+	// 百家号受理前失败：可安全重推，只重推它。
+	baijia = testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed)
+	baijia.Error = "封面图尺寸过小"
+	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
+	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job}), "多平台分发"))
+	if !strings.Contains(body, "未提交") || !strings.Contains(body, "封面图太小，换封面后重新同步") || !strings.Contains(body, `"content":"重新同步至百家号"`) || !strings.Contains(body, "重新同步至百家号？") {
+		t.Fatalf("受理前失败应给只推百家号的重试按钮: %s", body)
+	}
+
+	// 同步中：折叠标题直接说「同步中」，不给按钮。
+	job.ExternalDistributionLanes = []publishExternalLane{toutiao, testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionPolling)}
+	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job}), "多平台分发"))
+	if !strings.Contains(body, "多平台分发（同步中）") || strings.Contains(body, feishuCardActionDistributeExternal) {
+		t.Fatalf("同步中不给按钮: %s", body)
+	}
+
+	// 转载稿：聚合卡不出折叠区；单篇卡留一句说明。
+	repost := reviewCardTestJob(publishStagePublished)
+	repost.Author, repost.SourceName = "某外部作者", "第一财经"
+	repost.BlocksJSON = `[{"k":"p","t":"本文转载自第一财经"}]`
+	if panel := reviewCardFindPanel(buildReviewBatchCard([]publishJob{repost}), "多平台分发"); panel != nil {
+		t.Fatalf("转载稿聚合卡不应出现分发折叠区: %s", cardJSON(t, panel))
+	}
+	if body := cardJSON(t, buildReviewDoneCard(repost)); !strings.Contains(body, "仅发布至 FoodTalks") {
+		t.Fatalf("单篇卡应说明转载稿不外发: %s", body)
 	}
 }
 
@@ -373,7 +473,7 @@ func TestReviewBatchCardAllowsResyncAfterDistribution(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
 	job.FoodTalksNewsID = 7318
 	job.PublicationAction = publishPublicationActionPublish
-	job.ExternalDistributionState = publishExternalDistributionSucceeded
+	job.ExternalDistributionLanes = []publishExternalLane{testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded)}
 	var buttons []map[string]any
 	reviewCardButtons(buildReviewBatchCard([]publishJob{job}), &buttons)
 	for _, button := range buttons {

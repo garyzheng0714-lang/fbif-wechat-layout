@@ -892,6 +892,37 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"dry_run": body.DryRun, "count": len(items), "jobs": items})
 	})
 
+	// 某平台人工已发 / 补文章链接（2026-10-12）：登记成「人工已发」后自动外发不再推这个平台
+	// （8 月头条号是人工发的，补百家号前先登记）。url 只认平台域名；不给 url 时 lookup=true
+	// 按平台规则自动找（目前只有头条号），找不到不写；dry_run 只报告。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/external-distribution/manual", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		var body externalManualRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "请求体必须是 JSON：{\"account_id\":\"…\",\"url\":\"https://…\"}，或 {\"account_id\":\"…\",\"lookup\":true,\"dry_run\":true}")
+			return
+		}
+		if !body.DryRun && !requireDeploymentWritesActive(w) {
+			return
+		}
+		res, err := p.registerExternalDistributionManual(r.Context(), id, body)
+		if err != nil {
+			status := http.StatusConflict
+			if errors.Is(err, errExternalArticleNotFound) {
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, map[string]any{"error": err.Error(), "result": res})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"result": res})
+	})
+
 	// 用当前 prompt 重跑风险检查（只对待审核任务）。card-refresh 只换样式、用的还是
 	// 旧结论；prompt 改版后想让新检查能力作用在存量文章上，只能走这里真调一次模型。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/risk-recheck", func(w http.ResponseWriter, r *http.Request) {

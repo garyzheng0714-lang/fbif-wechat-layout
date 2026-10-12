@@ -130,10 +130,12 @@ func TestPublishMonitoringUsesExternalIntentAgeAcrossPollUpdates(t *testing.T) {
 	startedAt := time.Now().UTC().Add(-11 * time.Minute).Truncate(time.Second)
 	if _, err := store.update(job.ID, func(current *publishJob) {
 		current.Stage = publishStagePublished
-		current.ExternalDistributionState = publishExternalDistributionPolling
-		current.ExternalDistributionRequestedAt = startedAt.Add(-time.Minute).Format(time.RFC3339)
-		current.ExternalDistributionIntentAt = startedAt.Format(time.RFC3339)
-		current.ExternalDistributionLastPolledAt = time.Now().UTC().Format(time.RFC3339)
+		current.ExternalDistributionLanes = []publishExternalLane{{
+			AccountID: "acct-1", Name: "头条号", State: publishExternalDistributionPolling, ContentPK: "pk",
+			RequestedAt:  startedAt.Add(-time.Minute).Format(time.RFC3339),
+			IntentAt:     startedAt.Format(time.RFC3339),
+			LastPolledAt: time.Now().UTC().Format(time.RFC3339),
+		}}
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +333,12 @@ func TestPublishMonitoringPublishedOldSubflowFailuresRemainMetricOnly(t *testing
 				if state == "source_resync" {
 					current.SourceResyncState = publishSourceResyncFailed
 				} else {
-					current.ExternalDistributionState = state
+					// 汇总为部分失败：一个平台成功、一个受理后失败。
+					current.ExternalDistributionLanes = []publishExternalLane{{AccountID: "acct-1", State: publishExternalDistributionFailed, ContentPK: "pk"}}
+					if state == publishExternalDistributionPartialFailed {
+						current.ExternalDistributionLanes = append(current.ExternalDistributionLanes,
+							publishExternalLane{AccountID: "acct-2", State: publishExternalDistributionSucceeded, ContentPK: "pk"})
+					}
 				}
 			})
 			if err != nil {

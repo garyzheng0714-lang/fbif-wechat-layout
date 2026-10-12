@@ -3,15 +3,14 @@ package main
 // publish_external_auto.go — 原创稿公开后自动外发（2026-10-10 用户裁定：原创自动同步头条号）。
 //
 // 只对 YUNSUO_TARGET_ACCOUNTS_JSON 里标 "auto":true 的账号生效；其余账号仍只走审核卡按钮。
-// 后加的 auto 账号（2026-10-12 百家号恢复）经补发单开一轮，只推上一轮全部成功、还没推过的账号。
-// 任务落为已发布的同一次写入里记下待办（external_distribution_auto_pending），再由
-// runExternalAutoDistribution 消化：进程在两步之间重启也不会漏发，每 10 分钟兜底扫一次。
+// 各平台分开推（publish_external_lanes.go）：只推这篇还没推过的 auto 账号，推过的账号
+// 不论结果都不自动再推。任务落为已发布的同一次写入里记下待办（external_distribution_auto_pending），
+// 再由 runExternalAutoDistribution 消化：进程在两步之间重启也不会漏发，每 10 分钟兜底扫一次。
 //
-// 头条号文章每天约 5 篇上限，超出会被平台拒绝，还会挤掉当天新稿，所以按配额推：
-//   - 新公开稿（publish）优先，所有提交给 auto 账号的外发每天（北京时间）合计不超过
-//     publishExternalAutoDailyLimit，人工按钮发的也计入；
-//   - 存量补发（backfill）每天最多 publishExternalAutoBackfillDailyLimit 篇，只在白天推，
-//     与上一次外发至少隔 publishExternalAutoBackfillSpacing，避免集中刷屏被风控。
+// 平台有每天的文章上限（头条号约 5 篇），超出会被拒绝，还会挤掉当天新稿，所以按账号各自配额推：
+//   - 新公开稿（publish）优先，每个账号每天（北京时间）不超过平台上限，人工按钮发的也计入；
+//   - 存量补发（backfill）每个账号每天最多 publishExternalAutoBackfillDailyLimit 篇，只在白天推，
+//     与这个账号上一次外发至少隔 publishExternalAutoBackfillSpacing，避免集中刷屏被风控。
 
 import (
 	"errors"
@@ -28,7 +27,6 @@ const (
 	publishExternalAutoKindPublish  = "publish"
 	publishExternalAutoKindBackfill = "backfill"
 
-	publishExternalAutoDailyLimit         = 5
 	publishExternalAutoBackfillDailyLimit = 3
 	publishExternalAutoBackfillSpacing    = time.Hour
 	publishExternalAutoBackfillStartHour  = 9
@@ -39,9 +37,10 @@ const (
 var publishExternalAutoZone = time.FixedZone("CST", 8*3600)
 
 // markExternalAutoDistributionPending 在任务落为已发布的同一次写入里调用：配置了 auto
-// 账号、从未外发过、按外发口径是原创，才记待办。转载与待核原创一律不记。
+// 账号、从未外发过、按外发口径是原创，才记待办。转载与待核原创一律不记；外发过的稿
+// 重新发布也不记，后加的 auto 账号只经管理员补发。
 func markExternalAutoDistributionPending(j *publishJob) {
-	if j == nil || strings.TrimSpace(j.ExternalDistributionState) != "" || j.ExternalDistributionAutoPending != "" {
+	if j == nil || externalDistributionStarted(*j) || j.ExternalDistributionAutoPending != "" {
 		return
 	}
 	cfg, err := loadYunsuoConfig()
@@ -63,7 +62,7 @@ func (p *publishPipeline) kickExternalAutoDistribution() {
 }
 
 // startExternalAutoDistribution 兜底循环：配额次日恢复、补发按间隔放行、读网站失败后的
-// 重试都靠它；顺带补查云梭迟到的外发结果。独立 goroutine，不占发布 worker。
+// 重试都靠它；顺带补查云梭迟到的外发结果和各平台文章链接。独立 goroutine，不占发布 worker。
 func (p *publishPipeline) startExternalAutoDistribution() {
 	if p == nil {
 		return
@@ -72,88 +71,82 @@ func (p *publishPipeline) startExternalAutoDistribution() {
 		for {
 			p.runExternalAutoDistribution()
 			p.refreshExternalDistributionResults()
+			p.refreshExternalDistributionLinks()
 			time.Sleep(publishExternalAutoSweepInterval)
 		}
 	}()
 }
 
-// externalAutoQuota 今天（北京时间）已提交给 auto 账号的外发数，以及最近一次提交时间。
+// externalAutoQuota 各 auto 账号今天（北京时间）已提交的外发数、补发数与最近一次提交时间。
 type externalAutoQuota struct {
-	today    int
-	backfill int
-	last     time.Time
+	limits   map[string]int
+	today    map[string]int
+	backfill map[string]int
+	last     map[string]time.Time
 }
 
 func externalAutoQuotaFor(jobs []publishJob, autoTargets []yunsuoAccountTarget, now time.Time) externalAutoQuota {
-	autoIDs := map[string]bool{}
+	quota := externalAutoQuota{
+		limits: map[string]int{}, today: map[string]int{}, backfill: map[string]int{}, last: map[string]time.Time{},
+	}
 	for _, target := range autoTargets {
-		autoIDs[target.ID] = true
+		quota.limits[strings.TrimSpace(target.ID)] = yunsuoProfileForTarget(target).dailyLimit()
 	}
 	today := now.In(publishExternalAutoZone).Format("2006-01-02")
-	var quota externalAutoQuota
-	count := func(targets []publishExternalDistributionTarget, requestedBy, requestedAtRaw string) {
-		requestedAt, err := time.Parse(time.RFC3339, requestedAtRaw)
-		if err != nil {
-			return
-		}
-		hitsAuto := false
-		for _, target := range targets {
-			if autoIDs[strings.TrimSpace(target.AccountID)] {
-				hitsAuto = true
-				break
+	for _, job := range jobs {
+		for _, lane := range job.ExternalDistributionLanes {
+			id := strings.TrimSpace(lane.AccountID)
+			if _, auto := quota.limits[id]; !auto {
+				continue
+			}
+			// 人工登记的已发稿、云梭受理前就失败的不占平台名额。
+			if lane.State == publishExternalLaneManual || externalLaneCanSafeRetry(lane) {
+				continue
+			}
+			requestedAt, err := time.Parse(time.RFC3339, lane.RequestedAt)
+			if err != nil {
+				continue
+			}
+			if requestedAt.After(quota.last[id]) {
+				quota.last[id] = requestedAt
+			}
+			if requestedAt.In(publishExternalAutoZone).Format("2006-01-02") != today {
+				continue
+			}
+			quota.today[id]++
+			if lane.RequestedBy == publishExternalAutoBackfillActor {
+				quota.backfill[id]++
 			}
 		}
-		if !hitsAuto {
-			return
-		}
-		if requestedAt.After(quota.last) {
-			quota.last = requestedAt
-		}
-		if requestedAt.In(publishExternalAutoZone).Format("2006-01-02") != today {
-			return
-		}
-		quota.today++
-		if requestedBy == publishExternalAutoBackfillActor {
-			quota.backfill++
-		}
-	}
-	for _, job := range jobs {
-		// 补发轮次存档后仍占当天名额。
-		for _, round := range job.ExternalDistributionHistory {
-			count(round.Targets, round.RequestedBy, round.RequestedAt)
-		}
-		// 云梭受理前就失败的不占平台名额。
-		if job.ExternalDistributionState == "" || publishExternalDistributionCanSafeRetry(job) {
-			continue
-		}
-		count(job.ExternalDistributionTargets, job.ExternalDistributionRequestedBy, job.ExternalDistributionRequestedAt)
 	}
 	return quota
 }
 
-func (q externalAutoQuota) allows(kind string, now time.Time) bool {
-	if q.today >= publishExternalAutoDailyLimit {
+func (q externalAutoQuota) allows(kind, accountID string, now time.Time) bool {
+	limit, auto := q.limits[accountID]
+	if !auto || q.today[accountID] >= limit {
 		return false
 	}
 	if kind != publishExternalAutoKindBackfill {
 		return true
 	}
-	if q.backfill >= publishExternalAutoBackfillDailyLimit {
+	if q.backfill[accountID] >= publishExternalAutoBackfillDailyLimit {
 		return false
 	}
 	hour := now.In(publishExternalAutoZone).Hour()
 	if hour < publishExternalAutoBackfillStartHour || hour >= publishExternalAutoBackfillEndHour {
 		return false
 	}
-	return q.last.IsZero() || now.Sub(q.last) >= publishExternalAutoBackfillSpacing
+	last := q.last[accountID]
+	return last.IsZero() || now.Sub(last) >= publishExternalAutoBackfillSpacing
 }
 
-func (q *externalAutoQuota) record(kind string, now time.Time) {
-	q.today++
+func (q *externalAutoQuota) record(kind, accountID string, now time.Time) {
+	q.today[accountID]++
 	if kind == publishExternalAutoKindBackfill {
-		q.backfill++
+		q.backfill[accountID]++
 	}
-	q.last = now
+	q.last[accountID] = now
 }
 
 // runExternalAutoDistribution 按配额把待办推给 auto 账号。规则上不能外发的（转载、
@@ -206,25 +199,40 @@ func (p *publishPipeline) runExternalAutoDistribution() {
 	quota := externalAutoQuotaFor(jobs, autoTargets, now)
 	for _, job := range pending {
 		kind := job.ExternalDistributionAutoPending
-		if !externalDistributionAutoQueueable(job, cfg) {
-			// 上一轮还在推：等它结束再看要不要补别的账号；其余（已全推过、失败待处理）清掉待办。
-			if !publishExternalDistributionProcessing(job.ExternalDistributionState) {
-				p.finishExternalAutoPending(job.ID, "")
-			}
+		missing := externalDistributionMissingAutoTargets(job, cfg)
+		if len(missing) == 0 {
+			// auto 账号都推过了（人工按钮或别的入口先推的），待办作废。
+			p.finishExternalAutoPending(job.ID, "")
 			continue
 		}
-		if !quota.allows(kind, now) {
+		only := map[string]bool{}
+		for _, target := range missing {
+			if quota.allows(kind, target.ID, now) {
+				only[target.ID] = true
+			}
+		}
+		if len(only) == 0 {
 			continue
 		}
 		actor := publishExternalAutoActor
 		if kind == publishExternalAutoKindBackfill {
 			actor = publishExternalAutoBackfillActor
 		}
-		_, queueErr := p.queueAutoExternalDistribution(job.ID, actor)
+		updated, queueErr := p.queueAutoExternalDistribution(job.ID, actor, only)
+		if queueErr == nil || errors.Is(queueErr, errExternalLanesNotQueued) {
+			for id := range only {
+				if lane, ok := externalLaneFor(updated, id); ok && !externalLaneCanSafeRetry(lane) {
+					quota.record(kind, id, now)
+				}
+			}
+		}
 		switch {
 		case queueErr == nil:
-			quota.record(kind, now)
 			log.Printf("publish: 自动外发已提交（任务 #%d，%s）", job.ID, kind)
+		case errors.Is(queueErr, errExternalLanesNotQueued):
+			// 各平台的 payload 都没生成出来，已记为受理前失败（卡片可修正后重推）；
+			// 还在等配额的平台留着待办。
+			log.Printf("publish: 自动外发未推出（任务 #%d）：%v", job.ID, queueErr)
 		case errors.Is(queueErr, errPublishWorkersPaused):
 			return
 		case isExternalDistributionIneligible(queueErr):
@@ -259,11 +267,11 @@ func (p *publishPipeline) noteExternalAutoError(jobID int64, reason string) {
 }
 
 // externalAutoBackfillCandidate 存量补发只收：已发布、没有待办、还有 auto 账号没推过
-// （从未外发，或上一轮全部成功后新加了 auto 账号）、按外发口径是原创且有审核记录、
-// 公开时间不早于 since。网站稿状态在真正推送前还会再核一次。
+// （推过的账号不论结果都不补；人工发过的平台先登记为 manual 就不会再推）、按外发口径
+// 是原创且有审核记录、公开时间不早于 since。网站稿状态在真正推送前还会再核一次。
 func externalAutoBackfillCandidate(job publishJob, cfg yunsuoConfig, since time.Time) bool {
 	if job.Stage != publishStagePublished || job.ExternalDistributionAutoPending != "" ||
-		!externalDistributionAutoQueueable(job, cfg) {
+		len(externalDistributionMissingAutoTargets(job, cfg)) == 0 {
 		return false
 	}
 	publishedAt, err := time.Parse(time.RFC3339, job.PublishedAt)

@@ -19,6 +19,7 @@ type fakeYunsuoAPI struct {
 	pushCalls   int
 	statusCalls int
 	payload     yunsuoPushPayload
+	pushed      [][]string // 每次推送带的账号，按顺序
 	contentPK   string
 	pushErr     error
 	statusErr   error
@@ -28,6 +29,7 @@ type fakeYunsuoAPI struct {
 func (f *fakeYunsuoAPI) Push(_ context.Context, payload yunsuoPushPayload) (string, error) {
 	f.pushCalls++
 	f.payload = payload
+	f.pushed = append(f.pushed, append([]string(nil), payload.AccountIDs...))
 	return f.contentPK, f.pushErr
 }
 
@@ -145,8 +147,8 @@ func TestExternalDistributionUsesLivePublishedNewsNotJobSnapshot(t *testing.T) {
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
 		t.Fatalf("应用最新已发布稿分发：%v", err)
 	}
-	if fake.pushCalls != 1 {
-		t.Fatalf("应只推一次，实际 %d", fake.pushCalls)
+	if fake.pushCalls != 2 {
+		t.Fatalf("两个平台各推一次，实际 %d", fake.pushCalls)
 	}
 	if !strings.Contains(fake.payload.HTML, "最新已发布的正确正文") {
 		t.Fatalf("外发必须用网站最新已发布正文：%s", fake.payload.HTML)
@@ -251,7 +253,7 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "同步分发至其他平台") || !strings.Contains(card, "头条号") || !strings.Contains(card, "百家号") {
+	if !strings.Contains(card, "同步至头条号、百家号") || !strings.Contains(card, feishuCardActionDistributeExternal) {
 		t.Fatalf("已发布原创卡应显示固定目标的一键分发按钮：%s", card)
 	}
 	value, _ := json.Marshal(map[string]any{
@@ -266,15 +268,19 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ExternalDistributionState != publishExternalDistributionSucceeded ||
-		got.ExternalDistributionContentPK != "content-pk-1" || fake.pushCalls != 1 || fake.statusCalls != 1 {
-		t.Fatalf("原创分发未闭环：state=%q pk=%q push=%d status=%d job=%+v",
-			got.ExternalDistributionState, got.ExternalDistributionContentPK, fake.pushCalls, fake.statusCalls, got)
+	for _, id := range []string{testYunsuoToutiaoID, testYunsuoBaijiaID} {
+		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionSucceeded || lane.ContentPK != "content-pk-1" {
+			t.Fatalf("原创分发未闭环：%+v", lane)
+		}
 	}
-	if len(fake.payload.AccountIDs) != 2 || strings.Contains(fake.payload.HTML, "FoodTalks") {
-		t.Fatalf("云梭应收到两个固定目标和渠道中性 HTML：%+v", fake.payload)
+	// 各平台分开推：每个平台一次 push、一次查询，payload 只带本平台账号。
+	if fake.pushCalls != 2 || fake.statusCalls != 2 {
+		t.Fatalf("两个平台应各推一次、各查一次：push=%d status=%d", fake.pushCalls, fake.statusCalls)
 	}
-	if repeated := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", value); repeated.toastType != "info" || fake.pushCalls != 1 {
+	if len(fake.payload.AccountIDs) != 1 || strings.Contains(fake.payload.HTML, "FoodTalks") {
+		t.Fatalf("每次推送只带一个账号，正文渠道中性：%+v", fake.payload)
+	}
+	if repeated := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", value); repeated.toastType != "info" || fake.pushCalls != 2 {
 		t.Fatalf("重复点击不得再次 push：out=%+v push=%d", repeated, fake.pushCalls)
 	}
 }
@@ -287,7 +293,7 @@ func TestExternalDistributionRejectsRepostInCardAndServer(t *testing.T) {
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if strings.Contains(card, "同步分发至其他平台") || !strings.Contains(card, "转载文章仅发布至 FoodTalks") {
+	if strings.Contains(card, feishuCardActionDistributeExternal) || !strings.Contains(card, "转载文章仅发布至 FoodTalks") {
 		t.Fatalf("转载卡必须隐藏按钮并解释规则：%s", card)
 	}
 	_, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job))
@@ -311,7 +317,7 @@ func TestExternalDistributionFailsClosedOnExplicitAttribution(t *testing.T) {
 		PublishStatus: foodTalksPublishStatusPublished,
 	})
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if strings.Contains(card, "同步分发至其他平台") || !strings.Contains(card, "转载文章仅发布至 FoodTalks") {
+	if strings.Contains(card, feishuCardActionDistributeExternal) || !strings.Contains(card, "转载文章仅发布至 FoodTalks") {
 		t.Fatalf("自有号正文存在外部出处时必须隐藏按钮：%s", card)
 	}
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err == nil || !strings.Contains(err.Error(), "转载文章") {
@@ -327,7 +333,7 @@ func TestExternalDistributionFailsClosedOnExplicitAttribution(t *testing.T) {
 		Summary: job.Summary, SourceName: "FBIF食品饮料创新",
 		PublishStatus: foodTalksPublishStatusPublished,
 	})
-	if card = cardJSON(t, buildReviewDoneCard(job)); strings.Contains(card, "同步分发至其他平台") {
+	if card = cardJSON(t, buildReviewDoneCard(job)); strings.Contains(card, feishuCardActionDistributeExternal) {
 		t.Fatalf("授权转载同样不得开放外部分发：%s", card)
 	}
 }
@@ -351,7 +357,7 @@ func TestExternalDistributionOwnAccountDoesNotWaitForArk(t *testing.T) {
 		current.ApprovedRiskVersion = publishReviewCardVersion(*current)
 	})
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "同步分发至其他平台") {
+	if !strings.Contains(card, feishuCardActionDistributeExternal) {
 		t.Fatalf("自有号原创不得因火山检查未完成而隐藏外发按钮：%s", card)
 	}
 	if strings.Contains(card, "原创状态未完成核验") {
@@ -363,16 +369,11 @@ func TestExternalDistributionSafeFailureRendersRetryButton(t *testing.T) {
 	setTestYunsuoConfig(t)
 	env := newPublishTestEnv(t)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
-	job, _ = env.store.update(job.ID, func(current *publishJob) {
-		current.ExternalDistributionState = publishExternalDistributionFailed
-		current.ExternalDistributionTargets = []publishExternalDistributionTarget{
-			{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetFailed},
-			{AccountID: testYunsuoBaijiaID, Name: "百家号", State: publishExternalTargetFailed},
-		}
-		current.ExternalDistributionContentPK = ""
-	})
+	job = setTestLanes(t, env, job.ID,
+		testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionFailed),
+		testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed))
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "重新同步分发") || !strings.Contains(card, "不会重复发布") {
+	if !strings.Contains(card, "重新同步至头条号、百家号") || !strings.Contains(card, "不会重复发布") {
 		t.Fatalf("明确未受理的失败必须提供安全重试入口：%s", card)
 	}
 }
@@ -390,8 +391,8 @@ func TestExternalDistributionRejectedStatusStopsPolling(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := env.store.byID(job.ID)
-	if got.ExternalDistributionState != publishExternalDistributionReconciliationRequired || fake.statusCalls != 1 {
-		t.Fatalf("明确拒绝的状态查询应立即转人工核对：state=%q calls=%d", got.ExternalDistributionState, fake.statusCalls)
+	if externalDistributionSummaryState(got) != publishExternalDistributionReconciliationRequired || fake.statusCalls != 2 {
+		t.Fatalf("明确拒绝的状态查询应立即转人工核对：lanes=%+v calls=%d", got.ExternalDistributionLanes, fake.statusCalls)
 	}
 }
 
@@ -406,11 +407,11 @@ func TestExternalDistributionUncertainPushNeverRepeats(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := env.store.byID(job.ID)
-	if got.ExternalDistributionState != publishExternalDistributionReconciliationRequired || fake.pushCalls != 1 {
-		t.Fatalf("不确定结果必须进入人工核对：state=%q push=%d", got.ExternalDistributionState, fake.pushCalls)
+	if externalDistributionSummaryState(got) != publishExternalDistributionReconciliationRequired || fake.pushCalls != 2 {
+		t.Fatalf("不确定结果必须进入人工核对：lanes=%+v push=%d", got.ExternalDistributionLanes, fake.pushCalls)
 	}
 	env.pipeline.recoverExternalDistribution(got)
-	if fake.pushCalls != 1 {
+	if fake.pushCalls != 2 {
 		t.Fatalf("恢复扫描不得重放不确定 push，实际 %d 次", fake.pushCalls)
 	}
 }
@@ -421,10 +422,9 @@ func TestReviewCardOutboxesSerializeAndLatestLifecycleWins(t *testing.T) {
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
 	job, _ = env.store.update(job.ID, func(current *publishJob) {
 		current.ReviewCardMsgID = "om_review_card"
-		current.ExternalDistributionState = publishExternalDistributionSucceeded
-		current.ExternalDistributionTargets = []publishExternalDistributionTarget{
-			{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetSucceeded},
-			{AccountID: testYunsuoBaijiaID, Name: "百家号", State: publishExternalTargetSucceeded},
+		current.ExternalDistributionLanes = []publishExternalLane{
+			testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded),
+			testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionSucceeded),
 		}
 		current.ExternalDistributionCardSeq = 1
 		current.ExternalDistributionCardState = publishExternalCardPending
@@ -466,7 +466,7 @@ func TestReviewCardOutboxesSerializeAndLatestLifecycleWins(t *testing.T) {
 	if err := <-lifecycleDone; err != nil {
 		t.Fatal(err)
 	}
-	if len(cards) != 2 || !strings.Contains(cards[1], "已下线") || strings.Contains(cards[1], "同步分发至其他平台") {
+	if len(cards) != 2 || !strings.Contains(cards[1], "已下线") || strings.Contains(cards[1], feishuCardActionDistributeExternal) {
 		t.Fatalf("最后写入的卡必须反映最新 offline 生命周期：%v", cards)
 	}
 }
@@ -475,17 +475,16 @@ func TestReplaceExternalDistributionAfterReconcileRebuildsContentHTML(t *testing
 	setTestYunsuoConfig(t)
 	env := newPublishTestEnv(t)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
-	job, err := env.store.update(job.ID, func(current *publishJob) {
-		current.ExternalDistributionState = publishExternalDistributionReconciliationRequired
-		current.ExternalDistributionContentPK = "old-wrong-field-pk"
-		current.ExternalDistributionPayloadJSON = `{"type":0,"html":"<p>wrong-field</p>"}`
-		current.ExternalDistributionError = "云梭在轮询时限内未返回全部终态"
-	})
-	if err != nil {
-		t.Fatal(err)
+	stale := func(id, name string) publishExternalLane {
+		lane := testLane(id, name, publishExternalDistributionReconciliationRequired)
+		lane.ContentPK = "old-wrong-field-pk"
+		lane.PayloadJSON = `{"type":0,"html":"<p>wrong-field</p>"}`
+		lane.Error = "云梭在轮询时限内未返回终态"
+		return lane
 	}
+	job = setTestLanes(t, env, job.ID, stale(testYunsuoToutiaoID, "头条号"), stale(testYunsuoBaijiaID, "百家号"))
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if strings.Contains(card, "重新同步分发") {
+	if strings.Contains(card, feishuCardActionDistributeExternal) {
 		t.Fatalf("对账中的任务不得出现卡片安全重试按钮：%s", card)
 	}
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err == nil {
@@ -504,16 +503,20 @@ func TestReplaceExternalDistributionAfterReconcileRebuildsContentHTML(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queued.ExternalDistributionState != publishExternalDistributionQueued {
-		t.Fatalf("管理员重发应先落盘 queued 再异步推送，实际 %q", queued.ExternalDistributionState)
+	if lane := mustLane(t, queued, testYunsuoToutiaoID); lane.State != publishExternalDistributionQueued {
+		t.Fatalf("管理员重发应先落盘 queued 再异步推送，实际 %q", lane.State)
 	}
 	got, err := env.store.byID(job.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ExternalDistributionState != publishExternalDistributionSucceeded ||
-		got.ExternalDistributionContentPK != "content-pk-replaced" || fake.pushCalls != 1 {
-		t.Fatalf("管理员重发应对账闭环：state=%q pk=%q push=%d", got.ExternalDistributionState, got.ExternalDistributionContentPK, fake.pushCalls)
+	for _, id := range []string{testYunsuoToutiaoID, testYunsuoBaijiaID} {
+		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionSucceeded || lane.ContentPK != "content-pk-replaced" {
+			t.Fatalf("管理员重发应对账闭环：%+v", lane)
+		}
+	}
+	if fake.pushCalls != 2 {
+		t.Fatalf("对账中的两个平台各重推一次，实际 %d", fake.pushCalls)
 	}
 	encoded, err := json.Marshal(fake.payload)
 	if err != nil {
@@ -538,13 +541,9 @@ func TestReplaceExternalDistributionRejectedWhenSucceeded(t *testing.T) {
 	setTestYunsuoConfig(t)
 	env := newPublishTestEnv(t)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
-	job, err := env.store.update(job.ID, func(current *publishJob) {
-		current.ExternalDistributionState = publishExternalDistributionSucceeded
-		current.ExternalDistributionContentPK = "already-published-pk"
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	succeeded := testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded)
+	succeeded.ContentPK = "already-published-pk"
+	job = setTestLanes(t, env, job.ID, succeeded)
 	fake := &fakeYunsuoAPI{contentPK: "must-not-be-used"}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	if _, err := env.pipeline.replaceExternalDistributionAfterReconcile(job.ID, publishExternalAdminRetryActor); err == nil || fake.pushCalls != 0 {
@@ -560,12 +559,9 @@ func TestRetryExternalDistributionHTTPRequiresAdminAndRebuilds(t *testing.T) {
 		t.Fatalf("无管理员令牌应 401，实际 %d", rec.Code)
 	}
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
-	if _, err := env.store.update(job.ID, func(current *publishJob) {
-		current.ExternalDistributionState = publishExternalDistributionReconciliationRequired
-		current.ExternalDistributionContentPK = "old-wrong-field-pk"
-	}); err != nil {
-		t.Fatal(err)
-	}
+	stale := testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionReconciliationRequired)
+	stale.ContentPK = "old-wrong-field-pk"
+	setTestLanes(t, env, job.ID, stale)
 	fake := &fakeYunsuoAPI{
 		contentPK: "content-pk-http-retry",
 		statuses: []yunsuoAccountStatus{
@@ -582,8 +578,11 @@ func TestRetryExternalDistributionHTTPRequiresAdminAndRebuilds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ExternalDistributionState != publishExternalDistributionSucceeded ||
-		got.ExternalDistributionContentPK != "content-pk-http-retry" || fake.pushCalls != 1 {
-		t.Fatalf("HTTP 重发未闭环：state=%q pk=%q push=%d", got.ExternalDistributionState, got.ExternalDistributionContentPK, fake.pushCalls)
+	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.State != publishExternalDistributionSucceeded ||
+		lane.ContentPK != "content-pk-http-retry" || fake.pushCalls != 1 {
+		t.Fatalf("HTTP 重发未闭环：%+v push=%d", lane, fake.pushCalls)
+	}
+	if _, ok := externalLaneFor(got, testYunsuoBaijiaID); ok {
+		t.Fatalf("管理员对账重发只推对账中的平台，不得顺带推别的平台：%+v", got.ExternalDistributionLanes)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
-// yunsuo_distribution_rules.go — 多平台分发（头条号/百家号，经云梭）的版式规则。
+// yunsuo_distribution_rules.go — 多平台分发（头条号/百家号，经云梭）的通用版式规则；
+// 各平台不同的参数在 yunsuo_platform_profiles.go。
 //
 // 与 FoodTalks 网站规则物理隔离：外发正文虽取自网站已发布稿（保留编辑在 CMS 的手改），
 // 但网站专用的版式在这里改回平台口径。2026-10-12 用户裁定，金标准是 2026-03～08 人工
@@ -11,7 +12,7 @@ package main
 //   - 小标题用平台标题样式，段间不插空行，正文不带任何链接；
 //   - 不放作者名片/二维码：平台会提示「图片含二维码」并限制推荐；
 //   - 封面取正文第一张图，并从正文里拿掉：云梭会把 cover 插到正文顶部，
-//     再留一张就重复了。第一张图不到头条封面下限（452×352）时留在正文，退回公众号封面。
+//     再留一张就重复了。第一张图不到平台封面下限（头条 452×352）时留在正文，退回公众号封面。
 
 import (
 	"bytes"
@@ -29,10 +30,6 @@ const (
 	// 作者名片是宽条图（生产实测 970×283、1080×304，宽高比 3.4～3.6）。
 	yunsuoNameCardMinAspect = 2.5
 	yunsuoBylineScanBlocks  = 6
-	// 头条号封面下限：2026-10-11 #183 云梭回执「封面图尺寸过小780x332,平台要求不得小于452x352」，
-	// 受理后失败只能人工处理，所以推之前就要挑够大的封面。
-	yunsuoCoverMinWidth  = 452
-	yunsuoCoverMinHeight = 352
 )
 
 var (
@@ -68,11 +65,11 @@ func yunsuoBlockText(block yunsuoBlock) string {
 }
 
 // prepareYunsuoDistributionBlocks 按多平台规则整理正文块，顺序固定：
-// 拆署名 → 去名片 → 取封面。
-func prepareYunsuoDistributionBlocks(blocks []yunsuoBlock, imageMap map[string]string) yunsuoDistribution {
+// 拆署名 → 去名片 → 取封面（封面下限按平台）。
+func prepareYunsuoDistributionBlocks(blocks []yunsuoBlock, imageMap map[string]string, profile yunsuoPlatformProfile) yunsuoDistribution {
 	blocks, author := splitYunsuoBylines(blocks)
 	blocks = dropYunsuoNameCards(blocks, imageMap)
-	blocks, lead := takeYunsuoLeadImage(blocks, imageMap)
+	blocks, lead := takeYunsuoLeadImage(blocks, imageMap, profile)
 	return yunsuoDistribution{Blocks: blocks, Lead: lead, Author: author}
 }
 
@@ -197,8 +194,8 @@ func yunsuoUncaptionedImage(blocks []yunsuoBlock, i int) bool {
 }
 
 // takeYunsuoLeadImage 正文第一张可外发的图做封面，连同它的图注从正文拿掉。
-// 这张图不够封面下限就原样留在正文，封面交给调用方退回公众号封面（不挪后面的图，免得打乱顺序）。
-func takeYunsuoLeadImage(blocks []yunsuoBlock, imageMap map[string]string) ([]yunsuoBlock, string) {
+// 这张图不够平台封面下限就原样留在正文，封面交给调用方退回公众号封面（不挪后面的图，免得打乱顺序）。
+func takeYunsuoLeadImage(blocks []yunsuoBlock, imageMap map[string]string, profile yunsuoPlatformProfile) ([]yunsuoBlock, string) {
 	for i, block := range blocks {
 		if yunsuoBlockKind(block) != "img" {
 			continue
@@ -207,7 +204,7 @@ func takeYunsuoLeadImage(blocks []yunsuoBlock, imageMap map[string]string) ([]yu
 		if src == "" {
 			continue
 		}
-		if _, _, small := yunsuoCoverTooSmall(src); small {
+		if _, _, small := profile.coverTooSmall(src); small {
 			return blocks, ""
 		}
 		end := i + 1
@@ -250,12 +247,6 @@ func yunsuoStatement(publisher, author string) string {
 		return "本文为" + publisher + "原创，作者：" + author + "，转载请联系授权。"
 	}
 	return "本文为" + publisher + "原创，转载请联系授权。"
-}
-
-// yunsuoCoverTooSmall 读得到尺寸且小于头条封面下限；读不到不拦，交给平台判断。
-func yunsuoCoverTooSmall(src string) (int, int, bool) {
-	width, height, ok := yunsuoImageSize(src)
-	return width, height, ok && (width < yunsuoCoverMinWidth || height < yunsuoCoverMinHeight)
 }
 
 func fetchYunsuoImageSize(src string) (int, int, bool) {

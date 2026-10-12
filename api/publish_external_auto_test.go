@@ -89,15 +89,15 @@ func TestExternalAutoDistributionAfterAutoPublishPushesOnlyAutoTargets(t *testin
 	if len(fake.payload.AccountIDs) != 1 || fake.payload.AccountIDs[0] != testYunsuoToutiaoID {
 		t.Fatalf("自动外发只发 auto 账号（头条号），实际 %v", fake.payload.AccountIDs)
 	}
-	if got.ExternalDistributionRequestedBy != publishExternalAutoActor ||
-		!strings.HasPrefix(got.ExternalDistributionAttribution, "original_auto_confirmed: ") {
-		t.Fatalf("应留下系统自动外发留痕：by=%q attribution=%q", got.ExternalDistributionRequestedBy, got.ExternalDistributionAttribution)
+	lane := mustLane(t, got, testYunsuoToutiaoID)
+	if lane.RequestedBy != publishExternalAutoActor || !strings.HasPrefix(lane.Attribution, "original_auto_confirmed: ") {
+		t.Fatalf("应留下系统自动外发留痕：%+v", lane)
 	}
-	if got.ExternalDistributionState != publishExternalDistributionSucceeded || got.ExternalDistributionAutoPending != "" {
-		t.Fatalf("应外发成功并清掉待办：state=%q pending=%q", got.ExternalDistributionState, got.ExternalDistributionAutoPending)
+	if lane.State != publishExternalDistributionSucceeded || got.ExternalDistributionAutoPending != "" {
+		t.Fatalf("应外发成功并清掉待办：lane=%+v pending=%q", lane, got.ExternalDistributionAutoPending)
 	}
-	if len(got.ExternalDistributionTargets) != 1 || got.ExternalDistributionTargets[0].Name != "头条号" {
-		t.Fatalf("任务只应记录头条号目标：%+v", got.ExternalDistributionTargets)
+	if len(got.ExternalDistributionLanes) != 1 {
+		t.Fatalf("任务只应有头条号一条 lane：%+v", got.ExternalDistributionLanes)
 	}
 }
 
@@ -120,8 +120,8 @@ func TestExternalAutoDistributionSkipsRepost(t *testing.T) {
 	if got.Stage != publishStagePublished {
 		t.Fatalf("转载稿仍应在网站公开，实际 %s", got.Stage)
 	}
-	if fake.pushCalls != 0 || got.ExternalDistributionAutoPending != "" || got.ExternalDistributionState != "" {
-		t.Fatalf("转载稿不得自动外发：push=%d pending=%q state=%q", fake.pushCalls, got.ExternalDistributionAutoPending, got.ExternalDistributionState)
+	if fake.pushCalls != 0 || got.ExternalDistributionAutoPending != "" || len(got.ExternalDistributionLanes) != 0 {
+		t.Fatalf("转载稿不得自动外发：push=%d pending=%q lanes=%+v", fake.pushCalls, got.ExternalDistributionAutoPending, got.ExternalDistributionLanes)
 	}
 }
 
@@ -138,79 +138,115 @@ func TestExternalAutoDistributionNeedsAutoAccount(t *testing.T) {
 		t.Fatalf("有 auto 账号的原创稿应记待办，实际 %q", job.ExternalDistributionAutoPending)
 	}
 	distributed := publishJob{Stage: publishStagePublished, SourceName: "FBIF食品饮料创新", BlocksJSON: testPublishBlocksJSON,
-		ExternalDistributionState: publishExternalDistributionSucceeded}
+		ExternalDistributionLanes: []publishExternalLane{testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded)}}
 	markExternalAutoDistributionPending(&distributed)
 	if distributed.ExternalDistributionAutoPending != "" {
 		t.Fatalf("已外发过的稿不得再记待办")
 	}
 }
 
+// sentLane 某时刻（北京时间）由 by 推给 accountID 的一条已受理 lane。
+func sentLane(t *testing.T, at, by, accountID string) publishExternalLane {
+	t.Helper()
+	requested, err := time.ParseInLocation("2006-01-02 15:04", at, publishExternalAutoZone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lane := testLane(accountID, "", publishExternalDistributionSucceeded)
+	lane.ContentPK = "pk"
+	lane.RequestedAt = requested.UTC().Format(time.RFC3339)
+	lane.RequestedBy = by
+	return lane
+}
+
+func jobsWithLanes(lanes ...publishExternalLane) []publishJob {
+	jobs := make([]publishJob, 0, len(lanes))
+	for _, lane := range lanes {
+		jobs = append(jobs, publishJob{ExternalDistributionLanes: []publishExternalLane{lane}})
+	}
+	return jobs
+}
+
+// TestExternalAutoQuotaRules 名额按平台各算各的：每天上限取平台规则（头条号 5 篇），补发
+// 每天 ≤3 篇、9–20 点、同一平台间隔 ≥1 小时；头条号满了不挡百家号。
 func TestExternalAutoQuotaRules(t *testing.T) {
-	auto := []yunsuoAccountTarget{{ID: testYunsuoToutiaoID, Name: "头条号", Auto: true}}
+	auto := []yunsuoAccountTarget{{ID: testYunsuoToutiaoID, Name: "头条号", Auto: true}, {ID: testYunsuoBaijiaID, Name: "百家号", Auto: true}}
 	clock := newCSTClock("2026-10-12 10:00")
-	sent := func(at, by string, accountID string) publishJob {
-		requested, err := time.ParseInLocation("2006-01-02 15:04", at, publishExternalAutoZone)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return publishJob{
-			ExternalDistributionState:       publishExternalDistributionSucceeded,
-			ExternalDistributionContentPK:   "pk",
-			ExternalDistributionRequestedAt: requested.UTC().Format(time.RFC3339),
-			ExternalDistributionRequestedBy: by,
-			ExternalDistributionTargets:     []publishExternalDistributionTarget{{AccountID: accountID}},
-		}
+	toutiaoLimit := yunsuoPlatformProfiles["toutiao"].DailyLimit
+	if toutiaoLimit != 5 {
+		t.Fatalf("头条号文章日上限应为 5，实际 %d", toutiaoLimit)
 	}
 
 	quota := externalAutoQuotaFor(nil, auto, clock.now)
-	if !quota.allows(publishExternalAutoKindPublish, clock.now) || !quota.allows(publishExternalAutoKindBackfill, clock.now) {
+	if !quota.allows(publishExternalAutoKindPublish, testYunsuoToutiaoID, clock.now) || !quota.allows(publishExternalAutoKindBackfill, testYunsuoBaijiaID, clock.now) {
 		t.Fatalf("空配额应放行")
 	}
-	// 昨天的、只发百家号的、受理前失败的都不占今天头条名额。
-	preFail := sent("2026-10-12 09:00", "ou_x", testYunsuoToutiaoID)
-	preFail.ExternalDistributionState = publishExternalDistributionFailed
-	preFail.ExternalDistributionContentPK = ""
-	quota = externalAutoQuotaFor([]publishJob{
-		sent("2026-10-11 23:30", publishExternalAutoActor, testYunsuoToutiaoID),
-		sent("2026-10-12 08:00", "ou_x", testYunsuoBaijiaID),
-		preFail,
-	}, auto, clock.now)
-	if quota.today != 0 {
-		t.Fatalf("不应计入今天的头条名额，today=%d", quota.today)
+	if quota.allows(publishExternalAutoKindPublish, "not-auto", clock.now) {
+		t.Fatalf("非 auto 账号不得自动推")
+	}
+	// 昨天的、人工登记的、受理前失败的都不占今天头条名额；百家号的只占百家号的。
+	preFail := sentLane(t, "2026-10-12 09:00", "ou_x", testYunsuoToutiaoID)
+	preFail.State, preFail.ContentPK = publishExternalDistributionFailed, ""
+	manual := sentLane(t, "2026-10-12 09:10", "ou_x", testYunsuoToutiaoID)
+	manual.State, manual.ContentPK = publishExternalLaneManual, ""
+	quota = externalAutoQuotaFor(jobsWithLanes(
+		sentLane(t, "2026-10-11 23:30", publishExternalAutoActor, testYunsuoToutiaoID),
+		sentLane(t, "2026-10-12 08:00", "ou_x", testYunsuoBaijiaID),
+		preFail, manual,
+	), auto, clock.now)
+	if quota.today[testYunsuoToutiaoID] != 0 || quota.today[testYunsuoBaijiaID] != 1 {
+		t.Fatalf("今天名额按平台各算：%+v", quota.today)
 	}
 
-	// 人工按钮发的也计入；满 5 篇后新稿也停。
-	var five []publishJob
-	for i := 0; i < publishExternalAutoDailyLimit; i++ {
-		five = append(five, sent("2026-10-12 08:0"+fmt.Sprint(i), "ou_reviewer", testYunsuoToutiaoID))
+	// 人工按钮发的也计入；头条号满 5 篇后头条停，百家号照推。
+	var five []publishExternalLane
+	for i := 0; i < toutiaoLimit; i++ {
+		five = append(five, sentLane(t, "2026-10-12 08:0"+fmt.Sprint(i), "ou_reviewer", testYunsuoToutiaoID))
 	}
-	quota = externalAutoQuotaFor(five, auto, clock.now)
-	if quota.allows(publishExternalAutoKindPublish, clock.now) {
-		t.Fatalf("当天已满 %d 篇应停", publishExternalAutoDailyLimit)
+	quota = externalAutoQuotaFor(jobsWithLanes(five...), auto, clock.now)
+	if quota.allows(publishExternalAutoKindPublish, testYunsuoToutiaoID, clock.now) {
+		t.Fatalf("头条号当天已满 %d 篇应停", toutiaoLimit)
+	}
+	if !quota.allows(publishExternalAutoKindPublish, testYunsuoBaijiaID, clock.now) {
+		t.Fatalf("头条号满了不得挡百家号")
 	}
 
-	// 补发：40 分钟前刚推过 → 等满 1 小时；夜里不推；当天补发满 3 篇停。
-	quota = externalAutoQuotaFor([]publishJob{sent("2026-10-12 09:20", publishExternalAutoActor, testYunsuoToutiaoID)}, auto, clock.now)
-	if quota.allows(publishExternalAutoKindBackfill, clock.now) {
+	// 补发：40 分钟前刚推过头条 → 头条等满 1 小时，百家号不受影响；夜里不推；当天补发满 3 篇停。
+	quota = externalAutoQuotaFor(jobsWithLanes(sentLane(t, "2026-10-12 09:20", publishExternalAutoActor, testYunsuoToutiaoID)), auto, clock.now)
+	if quota.allows(publishExternalAutoKindBackfill, testYunsuoToutiaoID, clock.now) {
 		t.Fatalf("补发与上一篇间隔不足 1 小时应等待")
 	}
-	if !quota.allows(publishExternalAutoKindPublish, clock.now) {
+	if !quota.allows(publishExternalAutoKindBackfill, testYunsuoBaijiaID, clock.now) {
+		t.Fatalf("间隔按平台算，头条刚推过不挡百家号补发")
+	}
+	if !quota.allows(publishExternalAutoKindPublish, testYunsuoToutiaoID, clock.now) {
 		t.Fatalf("新公开稿不受补发间隔限制")
 	}
 	night := newCSTClock("2026-10-12 21:30")
-	if externalAutoQuotaFor(nil, auto, night.now).allows(publishExternalAutoKindBackfill, night.now) {
+	if externalAutoQuotaFor(nil, auto, night.now).allows(publishExternalAutoKindBackfill, testYunsuoToutiaoID, night.now) {
 		t.Fatalf("补发只在白天推")
 	}
-	var threeBackfill []publishJob
+	var threeBackfill []publishExternalLane
 	for _, at := range []string{"2026-10-12 06:00", "2026-10-12 07:00", "2026-10-12 08:00"} {
-		threeBackfill = append(threeBackfill, sent(at, publishExternalAutoBackfillActor, testYunsuoToutiaoID))
+		threeBackfill = append(threeBackfill, sentLane(t, at, publishExternalAutoBackfillActor, testYunsuoToutiaoID))
 	}
-	quota = externalAutoQuotaFor(threeBackfill, auto, clock.now)
-	if quota.allows(publishExternalAutoKindBackfill, clock.now) {
+	quota = externalAutoQuotaFor(jobsWithLanes(threeBackfill...), auto, clock.now)
+	if quota.allows(publishExternalAutoKindBackfill, testYunsuoToutiaoID, clock.now) {
 		t.Fatalf("当天补发满 %d 篇应停", publishExternalAutoBackfillDailyLimit)
 	}
-	if !quota.allows(publishExternalAutoKindPublish, clock.now) {
+	if !quota.allows(publishExternalAutoKindPublish, testYunsuoToutiaoID, clock.now) {
 		t.Fatalf("补发配额用完不影响新稿")
+	}
+	// 同一篇的两个平台各占各的名额。
+	quota = externalAutoQuotaFor([]publishJob{{ExternalDistributionLanes: []publishExternalLane{
+		sentLane(t, "2026-10-12 09:00", publishExternalAutoActor, testYunsuoToutiaoID),
+		sentLane(t, "2026-10-12 09:40", publishExternalAutoBackfillActor, testYunsuoBaijiaID),
+	}}}, auto, clock.now)
+	if quota.today[testYunsuoToutiaoID] != 1 || quota.today[testYunsuoBaijiaID] != 1 || quota.backfill[testYunsuoBaijiaID] != 1 {
+		t.Fatalf("同篇两平台应各计一次：today=%+v backfill=%+v", quota.today, quota.backfill)
+	}
+	if quota.allows(publishExternalAutoKindBackfill, testYunsuoBaijiaID, clock.now) || !quota.allows(publishExternalAutoKindBackfill, testYunsuoToutiaoID, clock.now) {
+		t.Fatalf("百家号 20 分钟前刚补过应等，头条号 1 小时前推过可补")
 	}
 }
 
@@ -271,9 +307,9 @@ func TestExternalAutoBackfillPacesAcrossHoursAndDays(t *testing.T) {
 	}
 	for i, id := range ids {
 		got, _ := env.store.byID(id)
-		if got.ExternalDistributionState != publishExternalDistributionSucceeded || got.ExternalDistributionAutoPending != "" ||
-			got.ExternalDistributionRequestedBy != publishExternalAutoBackfillActor {
-			t.Fatalf("第 %d 篇补发未闭环：state=%q pending=%q by=%q", i, got.ExternalDistributionState, got.ExternalDistributionAutoPending, got.ExternalDistributionRequestedBy)
+		lane := mustLane(t, got, testYunsuoToutiaoID)
+		if lane.State != publishExternalDistributionSucceeded || got.ExternalDistributionAutoPending != "" || lane.RequestedBy != publishExternalAutoBackfillActor {
+			t.Fatalf("第 %d 篇补发未闭环：lane=%+v pending=%q", i, lane, got.ExternalDistributionAutoPending)
 		}
 	}
 	if again, err := env.pipeline.markExternalAutoBackfill(since, false); err != nil || len(again) != 0 {
@@ -296,11 +332,11 @@ func TestExternalAutoDistributionNewPublishBeatsBackfill(t *testing.T) {
 	env.pipeline.runExternalAutoDistribution()
 	gotFresh, _ := env.store.byID(fresh.ID)
 	gotOld, _ := env.store.byID(old.ID)
-	if gotFresh.ExternalDistributionState == "" {
+	if len(gotFresh.ExternalDistributionLanes) == 0 {
 		t.Fatalf("新公开稿应优先外发")
 	}
-	if gotOld.ExternalDistributionState != "" || gotOld.ExternalDistributionAutoPending != publishExternalAutoKindBackfill {
-		t.Fatalf("刚推过新稿，补发应等满间隔：state=%q pending=%q", gotOld.ExternalDistributionState, gotOld.ExternalDistributionAutoPending)
+	if len(gotOld.ExternalDistributionLanes) != 0 || gotOld.ExternalDistributionAutoPending != publishExternalAutoKindBackfill {
+		t.Fatalf("刚推过新稿，补发应等满间隔：lanes=%+v pending=%q", gotOld.ExternalDistributionLanes, gotOld.ExternalDistributionAutoPending)
 	}
 }
 
@@ -320,8 +356,8 @@ func TestExternalAutoDistributionIneligibleClearsPending(t *testing.T) {
 
 	env.pipeline.runExternalAutoDistribution()
 	got, _ := env.store.byID(job.ID)
-	if fake.pushCalls != 0 || got.ExternalDistributionState != "" {
-		t.Fatalf("网站标为转载的稿不得外发：push=%d state=%q", fake.pushCalls, got.ExternalDistributionState)
+	if fake.pushCalls != 0 || len(got.ExternalDistributionLanes) != 0 {
+		t.Fatalf("网站标为转载的稿不得外发：push=%d lanes=%+v", fake.pushCalls, got.ExternalDistributionLanes)
 	}
 	if got.ExternalDistributionAutoPending != "" || !strings.Contains(got.ExternalDistributionAutoError, "转载") {
 		t.Fatalf("应清掉待办并留原因：pending=%q err=%q", got.ExternalDistributionAutoPending, got.ExternalDistributionAutoError)
@@ -362,28 +398,95 @@ func TestExternalAutoDistributionTurnedOffDropsPending(t *testing.T) {
 	}
 }
 
-func TestExternalDistributionSafeRetryKeepsPreviousTargets(t *testing.T) {
+// TestExternalDistributionCardPushesRetryAndMissingSeparately 卡片按钮推「受理前失败的」和
+// 「还没推过的」平台，每个平台单独一次推送；已受理的平台不碰。
+func TestExternalDistributionCardPushesRetryAndMissingSeparately(t *testing.T) {
 	setTestYunsuoAutoConfig(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
 	env := newPublishTestEnv(t)
-	fake := newToutiaoOnlyYunsuo()
+	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
-	job, err := env.store.update(job.ID, func(current *publishJob) {
-		current.ExternalDistributionState = publishExternalDistributionFailed
-		current.ExternalDistributionTargets = []publishExternalDistributionTarget{
-			{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetFailed},
-		}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	job = setTestLanes(t, env, job.ID, testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionFailed))
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
 		t.Fatalf("受理前失败应可安全重试：%v", err)
 	}
-	if len(fake.payload.AccountIDs) != 1 || fake.payload.AccountIDs[0] != testYunsuoToutiaoID {
-		t.Fatalf("重试应沿用上次的账号，不得扩到其他平台：%v", fake.payload.AccountIDs)
+	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoToutiaoID}, {testYunsuoBaijiaID}}) {
+		t.Fatalf("应按平台各推一次（头条重试 + 百家号首推）：%v", fake.pushed)
 	}
+	got, _ := env.store.byID(job.ID)
+	for _, id := range []string{testYunsuoToutiaoID, testYunsuoBaijiaID} {
+		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionSucceeded || lane.RequestedBy != "ou_reviewer_1" {
+			t.Fatalf("两个平台都应由审核人推送成功：%+v", lane)
+		}
+	}
+
+	// 头条号已受理（有单号）但失败：卡片不再给它重推，只剩没推过的平台。
+	second := createPublishedDistributionJobWithKey(t, env, "site:accepted-failed", "FBIF食品饮料创新")
+	accepted := testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionFailed)
+	accepted.ContentPK = "pk-accepted"
+	second = setTestLanes(t, env, second.ID, accepted)
+	fake.pushed = nil
+	if _, err := env.pipeline.requestExternalDistribution(second.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(second)); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoBaijiaID}}) {
+		t.Fatalf("已受理的头条号不得重推：%v", fake.pushed)
+	}
+	if lane := mustLane(t, mustJob(t, env, second.ID), testYunsuoToutiaoID); lane.ContentPK != "pk-accepted" || lane.State != publishExternalDistributionFailed {
+		t.Fatalf("头条号 lane 不得被改：%+v", lane)
+	}
+}
+
+// TestExternalDistributionLanesFailIndependently 一个平台的版式规则不满足（封面不够头条号
+// 452x352）只让这个平台受理前失败，其他平台照推；失败平台留可安全重推的状态。
+func TestExternalDistributionLanesFailIndependently(t *testing.T) {
+	setTestYunsuoConfig(t)
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
+	env := newPublishTestEnv(t)
+	fake := newBothAccountsYunsuo()
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+		t.Fatalf("百家号能推，整体请求不应失败：%v", err)
+	}
+	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoBaijiaID}}) {
+		t.Fatalf("只应推百家号：%v", fake.pushed)
+	}
+	got := mustJob(t, env, job.ID)
+	toutiao := mustLane(t, got, testYunsuoToutiaoID)
+	if !externalLaneCanSafeRetry(toutiao) || !strings.Contains(toutiao.Error, "封面图尺寸过小") || !strings.Contains(toutiao.Error, "头条号") {
+		t.Fatalf("头条号应受理前失败并说明原因：%+v", toutiao)
+	}
+	if lane := mustLane(t, got, testYunsuoBaijiaID); lane.State != publishExternalDistributionSucceeded {
+		t.Fatalf("百家号应照常成功：%+v", lane)
+	}
+	body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(got), "多平台分发"))
+	if !strings.Contains(body, "封面图太小（300×200，要求至少 452×352），换封面后重新同步") || !strings.Contains(body, "重新同步至头条号？") {
+		t.Fatalf("卡片应说明头条号失败原因并只给头条号重推: %s", body)
+	}
+
+	// 所有平台都生成不了：整体报错，不落任何推送。
+	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
+	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoToutiaoID+`","name":"头条号"}]`)
+	other := createPublishedDistributionJobWithKey(t, env, "site:all-fail", "FBIF食品饮料创新")
+	fake.pushed = nil
+	if _, err := env.pipeline.requestExternalDistribution(other.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(other)); err == nil {
+		t.Fatalf("没有任何平台能推时应报错")
+	}
+	if len(fake.pushed) != 0 {
+		t.Fatalf("不得推送：%v", fake.pushed)
+	}
+}
+
+func mustJob(t *testing.T, env *publishTestEnv, id int64) publishJob {
+	t.Helper()
+	job, err := env.store.byID(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return job
 }
 
 func TestExternalAutoBackfillHTTP(t *testing.T) {
@@ -416,24 +519,20 @@ func TestExternalDistributionLateRefreshResolvesTimedOutAndRetried(t *testing.T)
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	requested := clock.now.Add(-20 * time.Minute).UTC().Format(time.RFC3339)
 	timedOut := createPublishedDistributionJobWithKey(t, env, "site:late-timeout", "FBIF食品饮料创新")
-	timedOut, _ = env.store.update(timedOut.ID, func(current *publishJob) {
-		current.ExternalDistributionState = publishExternalDistributionReconciliationRequired
-		current.ExternalDistributionContentPK = "pk-timeout"
-		current.ExternalDistributionRequestedAt = requested
-		current.ExternalDistributionError = "云梭在轮询时限内未返回全部终态；系统不会重复发布，请人工核对"
-		current.ExternalDistributionTargets = []publishExternalDistributionTarget{{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetPending}}
-	})
+	lane := testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionReconciliationRequired)
+	lane.ContentPK, lane.RequestedAt = "pk-timeout", requested
+	lane.Error = "云梭在轮询时限内未返回终态；系统不会重复发布，请人工核对"
+	setTestLanes(t, env, timedOut.ID, lane)
 	noPK := createPublishedDistributionJobWithKey(t, env, "site:late-nopk", "FBIF食品饮料创新")
-	env.store.update(noPK.ID, func(current *publishJob) {
-		current.ExternalDistributionState = publishExternalDistributionFailed
-		current.ExternalDistributionRequestedAt = requested
-	})
+	failedNoPK := testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionFailed)
+	failedNoPK.RequestedAt = requested
+	setTestLanes(t, env, noPK.ID, failedNoPK)
 
 	// 云梭仍在排队：留在对账，只记查询时间；30 分钟内不重复查。
 	env.pipeline.refreshExternalDistributionResults()
-	got, _ := env.store.byID(timedOut.ID)
-	if fake.statusCalls != 1 || got.ExternalDistributionState != publishExternalDistributionReconciliationRequired || got.ExternalDistributionLastPolledAt == "" {
-		t.Fatalf("排队中应只记查询：calls=%d state=%q polled=%q", fake.statusCalls, got.ExternalDistributionState, got.ExternalDistributionLastPolledAt)
+	got := mustLane(t, mustJob(t, env, timedOut.ID), testYunsuoToutiaoID)
+	if fake.statusCalls != 1 || got.State != publishExternalDistributionReconciliationRequired || got.LastPolledAt == "" {
+		t.Fatalf("排队中应只记查询：calls=%d lane=%+v", fake.statusCalls, got)
 	}
 	clock.set("2026-10-12 10:20")
 	env.pipeline.refreshExternalDistributionResults()
@@ -445,16 +544,16 @@ func TestExternalDistributionLateRefreshResolvesTimedOutAndRetried(t *testing.T)
 	fake.statuses[0] = yunsuoAccountStatus{Status: 1, Remark: "OK", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}}
 	clock.set("2026-10-12 10:40")
 	env.pipeline.refreshExternalDistributionResults()
-	got, _ = env.store.byID(timedOut.ID)
-	if got.ExternalDistributionState != publishExternalDistributionSucceeded || got.ExternalDistributionError != "" ||
-		got.ExternalDistributionTargets[0].State != publishExternalTargetSucceeded {
-		t.Fatalf("云梭迟到的成功应补回：state=%q err=%q targets=%+v", got.ExternalDistributionState, got.ExternalDistributionError, got.ExternalDistributionTargets)
+	gotJob := mustJob(t, env, timedOut.ID)
+	got = mustLane(t, gotJob, testYunsuoToutiaoID)
+	if got.State != publishExternalDistributionSucceeded || got.Error != "" || got.CompletedAt == "" {
+		t.Fatalf("云梭迟到的成功应补回：lane=%+v", got)
 	}
 	if fake.pushCalls != 0 || fake.statusCalls != 2 {
 		t.Fatalf("补查只能查询：push=%d status=%d", fake.pushCalls, fake.statusCalls)
 	}
-	if gotNoPK, _ := env.store.byID(noPK.ID); gotNoPK.ExternalDistributionState != publishExternalDistributionFailed || gotNoPK.ExternalDistributionLastPolledAt != "" {
-		t.Fatalf("没有单号的失败不得补查")
+	if l := mustLane(t, mustJob(t, env, noPK.ID), testYunsuoToutiaoID); l.State != publishExternalDistributionFailed || l.LastPolledAt != "" {
+		t.Fatalf("没有单号的失败不得补查：%+v", l)
 	}
 }
 
@@ -470,26 +569,30 @@ func TestExternalDistributionLateRefreshPicksUpProviderRetry(t *testing.T) {
 	}}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
-	env.store.update(job.ID, func(current *publishJob) {
-		current.ExternalDistributionState = publishExternalDistributionFailed
-		current.ExternalDistributionContentPK = "pk-retry"
-		current.ExternalDistributionRequestedAt = clock.now.Add(-50 * 24 * time.Hour).UTC().Format(time.RFC3339)
-		current.ExternalDistributionTargets = []publishExternalDistributionTarget{
-			{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetFailed},
-			{AccountID: testYunsuoBaijiaID, Name: "百家号", State: publishExternalTargetFailed},
-		}
-	})
+	failed := func(id, name, requestedAt string) publishExternalLane {
+		lane := testLane(id, name, publishExternalDistributionFailed)
+		lane.ContentPK, lane.RequestedAt = "pk-retry", requestedAt
+		return lane
+	}
+	old := clock.now.Add(-50 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	setTestLanes(t, env, job.ID, failed(testYunsuoToutiaoID, "头条号", old), failed(testYunsuoBaijiaID, "百家号", old))
 	env.pipeline.refreshExternalDistributionResults()
 	if fake.statusCalls != 0 {
 		t.Fatalf("超过 45 天的外发不再补查")
 	}
-	env.store.update(job.ID, func(current *publishJob) {
-		current.ExternalDistributionRequestedAt = clock.now.Add(-50 * time.Hour).UTC().Format(time.RFC3339)
-	})
+	recent := clock.now.Add(-50 * time.Hour).UTC().Format(time.RFC3339)
+	setTestLanes(t, env, job.ID, failed(testYunsuoToutiaoID, "头条号", recent), failed(testYunsuoBaijiaID, "百家号", recent))
 	env.pipeline.refreshExternalDistributionResults()
-	got, _ := env.store.byID(job.ID)
-	if got.ExternalDistributionState != publishExternalDistributionPartialFailed || fake.pushCalls != 0 {
-		t.Fatalf("头条重试成功应改为部分失败（百家号仍失败）：state=%q push=%d", got.ExternalDistributionState, fake.pushCalls)
+	got := mustJob(t, env, job.ID)
+	if mustLane(t, got, testYunsuoToutiaoID).State != publishExternalDistributionSucceeded ||
+		mustLane(t, got, testYunsuoBaijiaID).State != publishExternalDistributionFailed || fake.pushCalls != 0 {
+		t.Fatalf("头条重试成功、百家号仍失败：lanes=%+v push=%d", got.ExternalDistributionLanes, fake.pushCalls)
+	}
+	if externalDistributionSummaryState(got) != publishExternalDistributionPartialFailed {
+		t.Fatalf("汇总应为部分失败：%q", externalDistributionSummaryState(got))
+	}
+	if fake.statusCalls != 1 {
+		t.Fatalf("迁移来的共用单号同一轮只查一次：%d", fake.statusCalls)
 	}
 }
 
@@ -510,25 +613,16 @@ func newBothAccountsYunsuo() *fakeYunsuoAPI {
 	}
 }
 
-func setDistributionRound(t *testing.T, env *publishTestEnv, jobID int64, state, pk string, targets ...publishExternalDistributionTarget) publishJob {
-	t.Helper()
-	job, err := env.store.update(jobID, func(current *publishJob) {
-		current.ExternalDistributionState = state
-		current.ExternalDistributionContentPK = pk
-		current.ExternalDistributionTargets = targets
-		current.ExternalDistributionRequestedBy = publishExternalAutoActor
-		current.ExternalDistributionRequestedAt = "2026-10-10T01:00:00Z"
-		current.ExternalDistributionCompletedAt = "2026-10-10T01:05:00Z"
-		current.ExternalDistributionPayloadHash = "sha256:first-round"
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return job
+func doneLane(id, name, state, pk string) publishExternalLane {
+	lane := testLane(id, name, state)
+	lane.ContentPK = pk
+	lane.PayloadHash = "sha256:first-round"
+	lane.CompletedAt = "2026-10-10T01:05:00Z"
+	return lane
 }
 
-// TestExternalAutoSupplementAddsOnlyMissingAccount 头条号已全部成功的稿，新加 auto 的百家号
-// 单开一轮只推百家号；上一轮原样存档，卡片两边都列为已同步，补完不再进补发名单。
+// TestExternalAutoSupplementAddsOnlyMissingAccount 新加 auto 的百家号只补推百家号：头条号
+// 不论成败（有单号的失败由云梭自己重试）都不碰；两个平台都有记录的不再进补发名单。
 func TestExternalAutoSupplementAddsOnlyMissingAccount(t *testing.T) {
 	setTestYunsuoBothAutoConfig(t)
 	env := newPublishTestEnv(t)
@@ -538,65 +632,61 @@ func TestExternalAutoSupplementAddsOnlyMissingAccount(t *testing.T) {
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 
 	toutiaoDone := createPublishedDistributionJobWithKey(t, env, "site:toutiao-done", "FBIF食品饮料创新")
-	setDistributionRound(t, env, toutiaoDone.ID, publishExternalDistributionSucceeded, "pk-toutiao",
-		publishExternalDistributionTarget{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetSucceeded})
+	setTestLanes(t, env, toutiaoDone.ID, doneLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded, "pk-toutiao"))
 	bothDone := createPublishedDistributionJobWithKey(t, env, "site:both-done", "FBIF食品饮料创新")
-	setDistributionRound(t, env, bothDone.ID, publishExternalDistributionSucceeded, "pk-both",
-		publishExternalDistributionTarget{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetSucceeded},
-		publishExternalDistributionTarget{AccountID: testYunsuoBaijiaID, Name: "百家号", State: publishExternalTargetSucceeded})
+	setTestLanes(t, env, bothDone.ID,
+		doneLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded, "pk-both"),
+		doneLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionSucceeded, "pk-both"))
 	// 百家号受理后失败、云梭自己会重试：不得再推一次。
 	baijiaRetrying := createPublishedDistributionJobWithKey(t, env, "site:baijia-retrying", "FBIF食品饮料创新")
-	setDistributionRound(t, env, baijiaRetrying.ID, publishExternalDistributionPartialFailed, "pk-retrying",
-		publishExternalDistributionTarget{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetSucceeded},
-		publishExternalDistributionTarget{AccountID: testYunsuoBaijiaID, Name: "百家号", State: publishExternalTargetFailed})
-	// 头条号受理后失败、百家号没推过：当前轮还要补查迟到结果，不得被补发轮覆盖。
+	setTestLanes(t, env, baijiaRetrying.ID,
+		doneLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded, "pk-retrying"),
+		doneLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed, "pk-retrying"))
+	// 头条号受理后失败、百家号没推过：各平台分开后，百家号照补，头条号单号原样留着补查。
 	toutiaoFailed := createPublishedDistributionJobWithKey(t, env, "site:toutiao-failed", "FBIF食品饮料创新")
-	setDistributionRound(t, env, toutiaoFailed.ID, publishExternalDistributionFailed, "pk-failed",
-		publishExternalDistributionTarget{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetFailed})
+	setTestLanes(t, env, toutiaoFailed.ID, doneLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionFailed, "pk-failed"))
 	since := time.Date(2026, 8, 1, 0, 0, 0, 0, publishExternalAutoZone)
 
 	preview, err := env.pipeline.markExternalAutoBackfill(since, true)
-	if err != nil || len(preview) != 1 || preview[0].ID != toutiaoDone.ID {
-		t.Fatalf("只应补「头条已成功、百家号没推过」的稿：n=%d err=%v", len(preview), err)
+	if err != nil || len(preview) != 2 {
+		t.Fatalf("只应补百家号没推过的 2 篇：n=%d err=%v", len(preview), err)
 	}
 	if _, err := env.pipeline.markExternalAutoBackfill(since, false); err != nil {
 		t.Fatal(err)
 	}
-	if fake.pushCalls != 1 {
-		t.Fatalf("应补推 1 次，实际 %d", fake.pushCalls)
+	clock.set("2026-10-12 11:00")
+	env.pipeline.runExternalAutoDistribution()
+	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoBaijiaID}, {testYunsuoBaijiaID}}) {
+		t.Fatalf("补发只推百家号、间隔 1 小时各 1 篇，头条号不得重发：%v", fake.pushed)
 	}
-	if len(fake.payload.AccountIDs) != 1 || fake.payload.AccountIDs[0] != testYunsuoBaijiaID {
-		t.Fatalf("补发只推百家号，头条号不得重发：%v", fake.payload.AccountIDs)
-	}
-	got, _ := env.store.byID(toutiaoDone.ID)
-	if got.ExternalDistributionState != publishExternalDistributionSucceeded || got.ExternalDistributionRequestedBy != publishExternalAutoBackfillActor ||
-		len(got.ExternalDistributionTargets) != 1 || got.ExternalDistributionTargets[0].AccountID != testYunsuoBaijiaID {
-		t.Fatalf("当前轮应只管百家号且成功：state=%q by=%q targets=%+v", got.ExternalDistributionState, got.ExternalDistributionRequestedBy, got.ExternalDistributionTargets)
-	}
-	if len(got.ExternalDistributionHistory) != 1 {
-		t.Fatalf("上一轮应存档 1 条，实际 %+v", got.ExternalDistributionHistory)
-	}
-	prev := got.ExternalDistributionHistory[0]
-	if prev.ContentPK != "pk-toutiao" || prev.PayloadHash != "sha256:first-round" || prev.RequestedBy != publishExternalAutoActor ||
-		len(prev.Targets) != 1 || prev.Targets[0].AccountID != testYunsuoToutiaoID || prev.Targets[0].State != publishExternalTargetSucceeded {
-		t.Fatalf("存档应保留上一轮原样：%+v", prev)
-	}
-	if body := cardJSON(t, buildReviewDoneCard(got)); !strings.Contains(body, "已同步：头条号、百家号") {
-		t.Fatalf("单篇卡应把两轮成功的平台都列为已同步: %s", body)
-	}
-	for _, id := range []int64{bothDone.ID, baijiaRetrying.ID, toutiaoFailed.ID} {
-		other, _ := env.store.byID(id)
-		if len(other.ExternalDistributionHistory) != 0 || other.ExternalDistributionAutoPending != "" {
-			t.Fatalf("任务 #%d 不应补发：history=%d pending=%q", id, len(other.ExternalDistributionHistory), other.ExternalDistributionAutoPending)
+	for _, id := range []int64{toutiaoDone.ID, toutiaoFailed.ID} {
+		got := mustJob(t, env, id)
+		if lane := mustLane(t, got, testYunsuoBaijiaID); lane.State != publishExternalDistributionSucceeded || lane.RequestedBy != publishExternalAutoBackfillActor {
+			t.Fatalf("任务 #%d 百家号应补发成功：%+v", id, lane)
+		}
+		if got.ExternalDistributionAutoPending != "" {
+			t.Fatalf("任务 #%d 补完应清待办", id)
 		}
 	}
-	for _, id := range []int64{baijiaRetrying.ID, toutiaoFailed.ID} {
-		if _, err := env.pipeline.queueAutoExternalDistribution(id, publishExternalAutoActor); !isExternalDistributionIneligible(err) || fake.pushCalls != 1 {
-			t.Fatalf("任务 #%d 上一轮没全部成功，直接提交也应被拒：err=%v push=%d", id, err, fake.pushCalls)
-		}
+	if lane := mustLane(t, mustJob(t, env, toutiaoDone.ID), testYunsuoToutiaoID); lane.ContentPK != "pk-toutiao" || lane.PayloadHash != "sha256:first-round" ||
+		lane.RequestedBy != publishExternalAutoActor || lane.State != publishExternalDistributionSucceeded {
+		t.Fatalf("头条号 lane 应原样保留：%+v", lane)
 	}
-	if kept, _ := env.store.byID(toutiaoFailed.ID); kept.ExternalDistributionContentPK != "pk-failed" {
-		t.Fatalf("失败轮的云梭 id 不得被覆盖：%q", kept.ExternalDistributionContentPK)
+	if lane := mustLane(t, mustJob(t, env, toutiaoFailed.ID), testYunsuoToutiaoID); lane.ContentPK != "pk-failed" || lane.State != publishExternalDistributionFailed {
+		t.Fatalf("头条号受理后失败的单号不得被覆盖：%+v", lane)
+	}
+	body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(mustJob(t, env, toutiaoDone.ID)), "多平台分发"))
+	if !strings.Contains(body, "多平台分发（头条号已发布 · 百家号已发布）") {
+		t.Fatalf("单篇卡应把两个平台都列为已发布: %s", body)
+	}
+	for _, id := range []int64{bothDone.ID, baijiaRetrying.ID} {
+		other := mustJob(t, env, id)
+		if other.ExternalDistributionAutoPending != "" || len(other.ExternalDistributionLanes) != 2 {
+			t.Fatalf("任务 #%d 不应补发：lanes=%+v pending=%q", id, other.ExternalDistributionLanes, other.ExternalDistributionAutoPending)
+		}
+		if _, err := env.pipeline.queueAutoExternalDistribution(id, publishExternalAutoActor, nil); !isExternalDistributionIneligible(err) || fake.pushCalls != 2 {
+			t.Fatalf("任务 #%d 两个平台都有记录，直接提交也应被拒：err=%v push=%d", id, err, fake.pushCalls)
+		}
 	}
 
 	clock.set("2026-10-12 12:00")
@@ -604,77 +694,39 @@ func TestExternalAutoSupplementAddsOnlyMissingAccount(t *testing.T) {
 		t.Fatalf("两个平台都推过后不得再补：n=%d err=%v", len(again), err)
 	}
 	env.pipeline.runExternalAutoDistribution()
-	if fake.pushCalls != 1 {
+	if fake.pushCalls != 2 {
 		t.Fatalf("不应再有推送，实际 %d", fake.pushCalls)
 	}
 }
 
-// TestExternalAutoSupplementQuotaCountsArchivedRounds 存档轮次照样占当天名额。
-func TestExternalAutoSupplementQuotaCountsArchivedRounds(t *testing.T) {
-	auto := []yunsuoAccountTarget{
-		{ID: testYunsuoToutiaoID, Name: "头条号", Auto: true},
-		{ID: testYunsuoBaijiaID, Name: "百家号", Auto: true},
-	}
-	now := newCSTClock("2026-10-12 14:30").now
-	job := publishJob{
-		ExternalDistributionState:       publishExternalDistributionSucceeded,
-		ExternalDistributionContentPK:   "pk-2",
-		ExternalDistributionRequestedBy: publishExternalAutoBackfillActor,
-		ExternalDistributionRequestedAt: "2026-10-12T06:00:00Z", // 14:00 CST
-		ExternalDistributionTargets:     []publishExternalDistributionTarget{{AccountID: testYunsuoBaijiaID}},
-		ExternalDistributionHistory: []publishExternalDistributionRound{{
-			State: publishExternalDistributionSucceeded, RequestedBy: publishExternalAutoActor,
-			RequestedAt: "2026-10-12T01:00:00Z", // 09:00 CST
-			Targets:     []publishExternalDistributionTarget{{AccountID: testYunsuoToutiaoID}},
-		}},
-	}
-	quota := externalAutoQuotaFor([]publishJob{job}, auto, now)
-	if quota.today != 2 || quota.backfill != 1 {
-		t.Fatalf("两轮都应计入今天：today=%d backfill=%d", quota.today, quota.backfill)
-	}
-	if quota.allows(publishExternalAutoKindBackfill, now) {
-		t.Fatalf("半小时前刚补过，补发应等待")
-	}
-}
-
-// TestExternalAutoSupplementSafeRetryKeepsHistory 补发轮在云梭受理前失败：审核卡重试只推
-// 这一轮的账号，存档的头条号轮次不动。
-func TestExternalAutoSupplementSafeRetryKeepsHistory(t *testing.T) {
+// TestExternalAutoSupplementSafeRetryStaysOnCard 补发的百家号在云梭受理前失败：自动外发
+// 不接手（防止反复失败刷名额），只走审核卡重试，且只推百家号；头条号 lane 不动。
+func TestExternalAutoSupplementSafeRetryStaysOnCard(t *testing.T) {
 	setTestYunsuoBothAutoConfig(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
 	env := newPublishTestEnv(t)
 	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
-	job, err := env.store.update(job.ID, func(current *publishJob) {
-		current.ExternalDistributionHistory = []publishExternalDistributionRound{{
-			State: publishExternalDistributionSucceeded, ContentPK: "pk-toutiao",
-			Targets: []publishExternalDistributionTarget{{AccountID: testYunsuoToutiaoID, Name: "头条号", State: publishExternalTargetSucceeded}},
-		}}
-		current.ExternalDistributionState = publishExternalDistributionFailed
-		current.ExternalDistributionTargets = []publishExternalDistributionTarget{
-			{AccountID: testYunsuoBaijiaID, Name: "百家号", State: publishExternalTargetFailed},
-		}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	job = setTestLanes(t, env, job.ID,
+		doneLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded, "pk-toutiao"),
+		testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed))
 	markAutoPending(t, env, job.ID, publishExternalAutoKindBackfill)
 	env.pipeline.runExternalAutoDistribution()
-	if got, _ := env.store.byID(job.ID); fake.pushCalls != 0 || got.ExternalDistributionAutoPending != "" {
-		t.Fatalf("受理前失败的补发轮只走卡片重试，自动外发不接手：push=%d pending=%q", fake.pushCalls, got.ExternalDistributionAutoPending)
+	if got := mustJob(t, env, job.ID); fake.pushCalls != 0 || got.ExternalDistributionAutoPending != "" {
+		t.Fatalf("受理前失败只走卡片重试，自动外发不接手：push=%d pending=%q", fake.pushCalls, got.ExternalDistributionAutoPending)
 	}
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
 		t.Fatalf("受理前失败应可安全重试：%v", err)
 	}
-	if len(fake.payload.AccountIDs) != 1 || fake.payload.AccountIDs[0] != testYunsuoBaijiaID {
-		t.Fatalf("重试只推百家号：%v", fake.payload.AccountIDs)
+	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoBaijiaID}}) {
+		t.Fatalf("重试只推百家号：%v", fake.pushed)
 	}
-	got, _ := env.store.byID(job.ID)
-	if len(got.ExternalDistributionHistory) != 1 || got.ExternalDistributionHistory[0].ContentPK != "pk-toutiao" {
-		t.Fatalf("存档的头条号轮次不得改动：%+v", got.ExternalDistributionHistory)
+	got := mustJob(t, env, job.ID)
+	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.ContentPK != "pk-toutiao" || lane.PayloadHash != "sha256:first-round" {
+		t.Fatalf("头条号 lane 不得改动：%+v", lane)
 	}
-	if body := cardJSON(t, buildReviewDoneCard(got)); !strings.Contains(body, "已同步：头条号、百家号") {
-		t.Fatalf("重试成功后卡片应列出两个平台: %s", body)
+	if body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(got), "多平台分发")); !strings.Contains(body, "多平台分发（头条号已发布 · 百家号已发布）") {
+		t.Fatalf("重试成功后卡片应两个平台都已发布: %s", body)
 	}
 }

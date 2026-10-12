@@ -35,6 +35,8 @@ type yunsuoAccountTarget struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Auto bool   `json:"auto,omitempty"`
+	// Platform 选平台规则（yunsuo_platform_profiles.go）；不填按账号名认头条号/百家号。
+	Platform string `json:"platform,omitempty"`
 }
 
 type yunsuoConfig struct {
@@ -84,8 +86,14 @@ func loadYunsuoConfig() (yunsuoConfig, error) {
 	for i := range targets {
 		targets[i].ID = strings.TrimSpace(targets[i].ID)
 		targets[i].Name = strings.TrimSpace(targets[i].Name)
+		targets[i].Platform = strings.ToLower(strings.TrimSpace(targets[i].Platform))
 		if targets[i].ID == "" || targets[i].Name == "" {
 			return yunsuoConfig{}, fmt.Errorf("%s 第 %d 项必须同时包含 id 和 name", yunsuoTargetAccountsEnv, i+1)
+		}
+		if targets[i].Platform != "" {
+			if _, ok := yunsuoPlatformProfiles[targets[i].Platform]; !ok {
+				return yunsuoConfig{}, fmt.Errorf("%s 第 %d 项 platform 未知：%s", yunsuoTargetAccountsEnv, i+1, targets[i].Platform)
+			}
 		}
 		if !validYunsuoAccountID(targets[i].ID) {
 			return yunsuoConfig{}, fmt.Errorf("%s 第 %d 项 id 必须是云梭返回的 36 位 UUID 账号 key", yunsuoTargetAccountsEnv, i+1)
@@ -116,6 +124,17 @@ func (c yunsuoConfig) autoTargets() []yunsuoAccountTarget {
 		}
 	}
 	return out
+}
+
+// target 按账号 id 取已配置的外发账号。
+func (c yunsuoConfig) target(accountID string) (yunsuoAccountTarget, bool) {
+	accountID = strings.TrimSpace(accountID)
+	for _, target := range c.Targets {
+		if accountID != "" && target.ID == accountID {
+			return target, true
+		}
+	}
+	return yunsuoAccountTarget{}, false
 }
 
 func validYunsuoAccountID(value string) bool {

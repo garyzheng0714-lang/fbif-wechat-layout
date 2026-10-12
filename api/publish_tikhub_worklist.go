@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -110,16 +112,26 @@ func tikhubPOST(ctx context.Context, path string, payload any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return tikhubRequest(ctx, http.MethodPost, path, bytes.NewReader(raw))
+}
+
+func tikhubGET(ctx context.Context, path string, query url.Values) (any, error) {
+	return tikhubRequest(ctx, http.MethodGet, path+"?"+query.Encode(), nil)
+}
+
+func tikhubRequest(ctx context.Context, method, path string, reqBody io.Reader) (any, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, tikhubRequestTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, tikhubAPIBase()+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(reqCtx, method, tikhubAPIBase()+path, reqBody)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; FBIF-layout/1.0)")
 	req.Header.Set("Authorization", "Bearer "+tikhubAPIKey())
