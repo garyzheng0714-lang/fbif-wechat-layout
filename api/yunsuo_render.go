@@ -177,13 +177,17 @@ func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categ
 	description = truncateYunsuoRunes(description, 200)
 
 	// 云梭会把 cover 插到正文顶部：用正文第一张图（已从正文拿掉），
-	// 不再另传公众号封面，免得同一张图出现两次。正文没图才退回原封面。
+	// 不再另传公众号封面，免得同一张图出现两次。正文没图或第一张图太小才退回原封面。
 	cover := rendered.Lead
 	if cover == "" {
 		cover = publicYunsuoMediaURL(mapYunsuoMedia(job.CoverURL, imageMap))
 	}
 	if cover == "" {
 		return yunsuoPushPayload{}, errors.New("云梭分发缺少公开可访问的封面")
+	}
+	if width, height, small := yunsuoCoverTooSmall(cover); small {
+		return yunsuoPushPayload{}, fmt.Errorf("云梭分发封面图尺寸过小（%dx%d），头条号要求不小于 %dx%d，请换封面后再同步",
+			width, height, yunsuoCoverMinWidth, yunsuoCoverMinHeight)
 	}
 
 	accountIDs := make([]string, 0, len(targets))

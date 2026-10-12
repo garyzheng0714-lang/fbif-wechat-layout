@@ -66,7 +66,7 @@
 40. **网站转载署名与出处（2026-08-17 运营反馈批次，62813 实证）**：① 出处判定 AI 优先，`publishDeclaredSource` 确定性兜底——头部前 12 个文本块与尾部 35% 区域的「来源/出处｜：X」「本文来自/为 X」声明抽机构名，非自家即转载，防天下网商类误判原创进独家专栏。② 头部前 5 元素与尾部区域的裸署名行（来源/作者/编辑/文…，冒号或竖线分隔）：开头已有网站署名则删除文末公众号口径来源/作者（2026-08-18，避免与开头重复）；否则降级 `footer-note` 14px 灰斜体。署名前缀同时进 `caption_lead_regex` 防误升 h2。③ 同文本 ≤16 字无序号标题全篇出现 ≥2 次判账号装饰行整体删除（天下网商×3 案例，成品口径）。④ 转载声明《标题》超链接优先公众号「阅读原文」地址（`OriginalSourceURL`，fetch 阶段抓 `msg_source_url`）；自家号转发且阅读原文为空时先查 Feed 订阅列表，未订该号再 TikHub 广域搜（搜一搜），标题+出处都对上才用；禁红狐/按号拉列表；核验不过则不链，禁止回退自家转载页。外号原文或自家原创仍用提交链接。⑤ 访谈（规范(6)，62807 实证）：判据=两个及以上「角色：」前缀各现 ≥3 次；**提问方** FoodTalks 蓝+粗、回答方默认色+粗——提问方按 书名号>问号率（差≥0.25）>首现 确定性打分，不再按「书名号才上蓝」；提问方前缀独立成段时与下段提问内容合并（提问方+提问内容间不空行）。
 41. **公司库自动关联（2026-08-17 用户裁定，规范 step2-(5)）**：候选=AI 标签内容词；`GET /company/companies/search`（前台公开接口，字段 id/cnName/shortCnName/urlCode；文档的 `/company/admin/companies/page` 对服务账号 Access denied 勿用）检索后与全称/官方简称表**规范化等值**匹配，多条优先 cnName 含「中国」，仍歧义放弃。正文首次出现处注入 `mc-company-link`（形态对齐小工具箱成品 48190：data-id/name/code、新窗口；href=`/company/<urlCode>`，数字 id 打不开公司页），标题/图注/既有链接内禁注入，每公司限 1 处、每篇 ≤3 家；`relatedCompanyIds` 同步写 id。检索失败只降级不 fail。禁部分包含匹配、禁自建公司。
 42. **Mote 系列链接改站内（2026-08-24 用户裁定，金标准 62285 Tazo→/news/62236）**：仅作者是 Mote/莫特的网站发布组装。正文里指向 `mp.weixin.qq.com` 文章的超链接，换成已发布 FoodTalks `/news/{id}`（前台域名走 `FOODTALKS_FRONT_URL`）；锚文字与 `target`/`rel` 不动。先用任务库 `source_key`/`aliases`/`source_url` 对已发布单，找不到再取公众号标题并 `SearchNewsByTitle` 等值匹配；只认已发布、不是本稿：同题唯一直接用；网站重复稿（同题多篇）或编辑往标题里加了字（公众号标题是站内标题的子序列，如 Tea Forté）时，取发布时间离公众号发文最近且 7 天内的一篇，不知道发文时间就放弃。标题与发文时间先直连取，读不到再走 TikHub `wechat_mp/v2/fetch_article_detail`（0.01$/次，进程内按链接缓存）——不带 chksm 的 `__biz/mid/idx/sn` 长链微信只回验证页（2026-10-08 实测，63149）。找不到或查询失败保留原链，不 fail job。存量 Mote 稿（含编辑手工稿，按网站作者或任务库判定 Mote）同样用 `repair-links` 修。禁改 JS 渲染器；交互复制仍可保留公众号链。
-43. **多平台分发版式（2026-10-12 用户裁定，金标准=头条号「FBIF食品饮料创新」2026-03～08 人工稿 16 篇）**：云梭外发是独立渠道规则（`api/yunsuo_distribution_rules.go`），不沿用网站样式：署名按原文分行、不补句号；文末「本文为{来源}原创，作者：X，转载请联系授权。」；图注用平台原生 `pgc-img-caption`，说明与图片来源以「；」并成一条（≤50 字）；标题1→`h1.pgc-h-forward-slash`，标题2→加粗段；段间无空行，正文无链接、无裸网址；去作者名片（参考来源上方/之后的无图注图，无参考来源时文末无图注宽条图）；封面=正文第一张图并从正文拿掉（云梭会把 cover 插到正文顶部）；短标题在标点处断开。
+43. **多平台分发版式（2026-10-12 用户裁定，金标准=头条号「FBIF食品饮料创新」2026-03～08 人工稿 16 篇）**：云梭外发是独立渠道规则（`api/yunsuo_distribution_rules.go`），不沿用网站样式：署名按原文分行、不补句号；文末「本文为{来源}原创，作者：X，转载请联系授权。」；图注用平台原生 `pgc-img-caption`，说明与图片来源以「；」并成一条（≤50 字）；标题1→`h1.pgc-h-forward-slash`，标题2→加粗段；段间无空行，正文无链接、无裸网址；去作者名片（参考来源上方/之后的无图注图，无参考来源时文末无图注宽条图）；封面=正文第一张图并从正文拿掉（云梭会把 cover 插到正文顶部）；第一张图不到头条封面下限 452×352 时留在正文、退回公众号封面，仍不够则不推并记原因（#183 受理后失败只能人工处理）；短标题在标点处断开。
 
 ## 守护索引
 
@@ -82,7 +82,7 @@
 - 40：`tests/{foodtalks-site-docx,foodtalks-site-behavior,heading-detect,site-interview}.test.mjs`、`api/publish_site_enhance_test.go`（declared-source/provenance/render-source 用例）、`api/wechat_blocks_test.go`（meta 三值）、`api/publish_original_url.go`、`api/publish_tikhub_worklist.go`。
 - 41：`api/publish_company_links_test.go`、`api/company_match_smoke_test.go`（2026-08-17 生产检索快照）。
 - 42：`api/publish_mote_series_links_test.go`；39/42 存量修复与 TikHub 取标题：`api/publish_series_tag_repair_test.go`。
-- 43：`api/yunsuo_test.go`（`TestYunsuoDistribution*`、`TestYunsuoShortTitleBreaksAtPunctuation`）。
+- 43：`api/yunsuo_test.go`（`TestYunsuoDistribution*`、`TestYunsuoShortTitleBreaksAtPunctuation`、`TestYunsuoCoverRespectsToutiaoMinimum`）。
 
 ## 运行/规则卫生
 

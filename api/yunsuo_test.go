@@ -338,6 +338,61 @@ func TestYunsuoDistributionDropsTrailingNameCardWithoutReferences(t *testing.T) 
 	}
 }
 
+func init() {
+	// 测试默认读不到图片尺寸（不出网）；要尺寸的用例用 stubYunsuoImageSize 显式给。
+	yunsuoImageSize = func(string) (int, int, bool) { return 0, 0, false }
+}
+
+// TestYunsuoCoverRespectsToutiaoMinimum 2026-10-11 #183 头条号回执「封面图尺寸过小780x332，
+// 平台要求不得小于452x352」，受理后失败只能人工处理：推之前就挑够大的封面。
+func TestYunsuoCoverRespectsToutiaoMinimum(t *testing.T) {
+	blocks := `[
+		{"k":"txt","text":"正文第一段，交代这篇文章要讲的品牌故事。"},
+		{"k":"img","src":"https://cdn.example/lead.png"},
+		{"k":"txt","text":"正文第二段。"}
+	]`
+	job := publishJob{
+		Title:      "一款中国食品品牌如何用产品创新打开新的消费市场",
+		SourceName: "FBIF食品饮料创新",
+		Summary:    "食品品牌通过产品创新打开新的消费市场。",
+		Tags:       []string{"食品", "创新"},
+		BlocksJSON: blocks,
+		ImageMap:   `{"https://cdn.example/lead.png":"https://cdn.example/lead.png","https://cdn.example/wx-cover.jpg":"https://cdn.example/wx-cover.jpg"}`,
+		CoverURL:   "https://cdn.example/wx-cover.jpg",
+	}
+	targets := []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}
+	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
+
+	// #220 实测：正文第一张图 437×336 → 留在正文，封面退回公众号封面。
+	stubYunsuoImageSize(t, map[string][2]int{
+		"https://cdn.example/lead.png":     {437, 336},
+		"https://cdn.example/wx-cover.jpg": {1200, 510},
+	})
+	payload, err := buildYunsuoPushPayload(job, targets, categories)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Cover != "https://cdn.example/wx-cover.jpg" || !strings.Contains(payload.HTML, "lead.png") {
+		t.Fatalf("第一张图太小应留在正文、封面用公众号封面：cover=%q html=%s", payload.Cover, payload.HTML)
+	}
+
+	// 够大就照旧取第一张图做封面并从正文拿掉。
+	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example/lead.png": {1080, 720}})
+	if payload, err = buildYunsuoPushPayload(job, targets, categories); err != nil ||
+		payload.Cover != "https://cdn.example/lead.png" || strings.Contains(payload.HTML, "lead.png") {
+		t.Fatalf("第一张图够大应做封面：cover=%q err=%v", payload.Cover, err)
+	}
+
+	// 两张都太小（#183 公众号封面 780×332）：推了也会被平台拒，直接不推并说明原因。
+	stubYunsuoImageSize(t, map[string][2]int{
+		"https://cdn.example/lead.png":     {437, 336},
+		"https://cdn.example/wx-cover.jpg": {780, 332},
+	})
+	if _, err = buildYunsuoPushPayload(job, targets, categories); err == nil || !strings.Contains(err.Error(), "780x332") {
+		t.Fatalf("封面不够头条下限应拒绝推送并给出尺寸，实际 err=%v", err)
+	}
+}
+
 func stubYunsuoImageSize(t *testing.T, sizes map[string][2]int) {
 	t.Helper()
 	previous := yunsuoImageSize
