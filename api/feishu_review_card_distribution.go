@@ -33,14 +33,8 @@ const (
 	reviewCardGroupCoverSize  = 36
 )
 
-// reviewCardDistributionOptions 分发区的渲染开关。
-type reviewCardDistributionOptions struct {
-	// ThreadImages 审核应用已能收到审核群消息：封面可以直接发到卡片话题里。
-	ThreadImages bool
-}
-
 // reviewCardDistributionElements 根级元素：分割线、区标题，再是每篇原创一块。
-func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate bool, icons reviewCardIcons, opts reviewCardDistributionOptions) []any {
+func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate bool, icons reviewCardIcons) []any {
 	cfg, cfgErr := loadYunsuoConfig()
 	var targets []yunsuoAccountTarget
 	if cfgErr == nil {
@@ -49,7 +43,7 @@ func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate boo
 	heading := aggregate && len(jobs) > 1
 	var body []any
 	for _, job := range jobs {
-		body = append(body, reviewCardDistributionGroup(job, targets, allowStart, aggregate, heading, icons, opts)...)
+		body = append(body, reviewCardDistributionGroup(job, targets, allowStart, aggregate, heading, icons)...)
 	}
 	if len(body) == 0 {
 		return nil
@@ -62,10 +56,10 @@ func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate boo
 
 // reviewCardExternalDistributionElements 单篇卡（降级路径）的分发区，与聚合卡同一写法。
 func reviewCardExternalDistributionElements(job publishJob, allowStart bool) []any {
-	return reviewCardDistributionElements([]publishJob{job}, allowStart, false, nil, reviewCardDistributionOptions{})
+	return reviewCardDistributionElements([]publishJob{job}, allowStart, false, nil)
 }
 
-func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, allowStart, aggregate, heading bool, icons reviewCardIcons, opts reviewCardDistributionOptions) []any {
+func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, allowStart, aggregate, heading bool, icons reviewCardIcons) []any {
 	started := externalDistributionStarted(job)
 	switch {
 	case job.Stage == publishStagePublished:
@@ -104,7 +98,7 @@ func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, 
 		if _, ok := externalLaneFor(job, target.ID); !ok && !original {
 			continue
 		}
-		row, rowFixing := reviewCardPlatformRow(job, target, slot, canStart, icons, opts)
+		row, rowFixing := reviewCardPlatformRow(job, target, slot, canStart, icons)
 		rows = append(rows, row)
 		fixing = fixing || rowFixing
 	}
@@ -113,7 +107,7 @@ func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, 
 			continue
 		}
 		// 配置里已去掉的账号：只展示结果，不给操作。
-		row, _ := reviewCardPlatformRow(job, yunsuoAccountTarget{ID: lane.AccountID, Name: lane.Name}, -1, false, icons, opts)
+		row, _ := reviewCardPlatformRow(job, yunsuoAccountTarget{ID: lane.AccountID, Name: lane.Name}, -1, false, icons)
 		rows = append(rows, row)
 	}
 	if len(rows) == 0 {
@@ -168,7 +162,7 @@ func reviewCardDistributionHeader(job publishJob) map[string]any {
 
 // reviewCardPlatformRow 一个平台一行（一个竖排分栏，行内间距比平台之间小）。待修改且能从这张卡
 // 改的，下面接着放表单字段，返回 fixing=true，由文章块包进根级 form。
-func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int, canStart bool, icons reviewCardIcons, opts reviewCardDistributionOptions) (map[string]any, bool) {
+func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int, canStart bool, icons reviewCardIcons) (map[string]any, bool) {
 	profile := yunsuoProfileForTarget(target)
 	name := reviewCardSafeText(firstNonEmpty(target.Name, profile.Name), 20)
 	if name == "" {
@@ -220,7 +214,7 @@ func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int,
 	}
 	if fixing {
 		draft, _ := externalDraftFor(job, target.ID)
-		elements = append(elements, reviewCardFixFields(job, draft, profile, name, slot, editLink, opts)...)
+		elements = append(elements, reviewCardFixFields(job, draft, profile, name, slot, editLink)...)
 	}
 	return map[string]any{
 		"tag": "column_set", "flex_mode": "none",
@@ -285,7 +279,7 @@ func reviewCardPlatformSyncButton(job publishJob, slot int, name string, state e
 }
 
 // reviewCardFixFields 待修改平台的表单：逐项写「哪里超了：要求，现状」，再给改的地方。
-func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yunsuoPlatformProfile, name string, slot int, editLink string, opts reviewCardDistributionOptions) []any {
+func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yunsuoPlatformProfile, name string, slot int, editLink string) []any {
 	var out []any
 	note := func(content string) {
 		out = append(out, map[string]any{"tag": "markdown", "text_size": "notation", "content": content})
@@ -319,13 +313,9 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 			}
 			options = append(options, map[string]any{"img_key": candidate.ImgKey, "value": reviewCardCoverValue(candidate.URL)})
 		}
-		// 卡片里没有上传控件：话题发图开通了就请人把图发到这张卡的话题里（不用再开排版工具），
-		// 否则给侧边栏上传链接。
+		// 卡片里没有上传控件：给侧边栏改稿页的链接，在那里点选、拖入或粘贴图片上传。
 		upload := ""
-		switch {
-		case opts.ThreadImages:
-			upload = "把新封面图发到这张卡的话题里"
-		case editLink != "":
+		if editLink != "" {
 			upload = "[上传一张](" + editLink + ")"
 		}
 		switch {

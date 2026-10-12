@@ -259,7 +259,6 @@ func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJ
 		return result, err
 	}
 	owners := p.externalDistributionOwners(settings.AppProfileID)
-	threadImages := p.reviewThreadImagesReady(settings.AppProfileID)
 	var failures []string
 	for _, chatID := range settings.ChatIDs {
 		chatID = strings.TrimSpace(chatID)
@@ -274,7 +273,7 @@ func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJ
 				result.skipped = "没有设置分发负责人，未发提醒"
 				continue
 			}
-			kind, post = externalReminderKindOpen, buildExternalReminderOpening(job, cfg, owners, threadImages)
+			kind, post = externalReminderKindOpen, buildExternalReminderOpening(job, cfg, owners)
 		case r.Want == publishExternalReminderResolved && r.MessageIDs[chatID] != "" && r.ClosedIDs[chatID] == "":
 			kind, post = externalReminderKindClose, buildExternalReminderClosing(job, cfg)
 		default:
@@ -394,7 +393,7 @@ func externalReminderPlatformNames(cfg yunsuoConfig, drafts []publishExternalDra
 
 // buildExternalReminderOpening 话题开场：@ 负责人，一句话说清哪篇、要同步到哪、差几处；
 // 每处一行粗体写不合要求的地方，下一行给能选的做法；最后一行说改完点哪里。
-func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []publishDistributionOwner, threadImages bool) map[string]any {
+func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []publishDistributionOwner) map[string]any {
 	drafts := externalPendingFixes(job, cfg)
 	names := externalReminderPlatformNames(cfg, drafts)
 	total := 0
@@ -442,14 +441,11 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 				} else {
 					problem = fmt.Sprintf("%d. %s封面太小（%s至少 %d×%d，现在 %d×%d）", n, prefix, name, issue.MinWidth, issue.MinHeight, issue.Width, issue.Height)
 				}
-				options = append(options, postText("在卡片里点选一张正文大图，或者", false))
-				switch {
-				case threadImages:
-					options = append(options, postText("把新封面图直接发到这个话题里", false))
-				case link != "":
-					options = append(options, postLink("上传一张", link))
-				default:
-					options = append(options, postText("请运营在云梭后台换封面", false))
+				// 上传在侧边栏改稿页：点选、拖入或粘贴图片，传上去就换上（2026-10-12 用户裁定）。
+				if link != "" {
+					options = append(options, postText("在卡片里点选一张正文大图，或者", false), postLink("上传一张", link), postText("（传上去就换上）", false))
+				} else {
+					options = append(options, postText("在卡片里点选一张正文大图", false))
 				}
 			default:
 				continue
@@ -458,9 +454,6 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 		}
 	}
 	finish := "改好后点上面卡片里的「保存并同步至" + strings.Join(names, "」「保存并同步至") + "」，就会同步。"
-	if threadImages {
-		finish += "发到话题里的封面会自动换上。"
-	}
 	lines = append(lines, []any{postText(finish, false)})
 	return postMessage(lines)
 }

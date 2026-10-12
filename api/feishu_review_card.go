@@ -49,10 +49,6 @@ func buildReviewBatchCard(jobs []publishJob) map[string]any {
 // buildReviewBatchCardWithIcons icons 为当前审核应用的按钮图标 img_key；缺图标的按钮
 // 照常无图标（见 feishu_review_card_icons.go）。
 func buildReviewBatchCardWithIcons(jobs []publishJob, icons reviewCardIcons) map[string]any {
-	return buildReviewBatchCardWith(jobs, icons, reviewCardDistributionOptions{})
-}
-
-func buildReviewBatchCardWith(jobs []publishJob, icons reviewCardIcons, opts reviewCardDistributionOptions) map[string]any {
 	elements := make([]any, 0, len(jobs)+1)
 	pending, published := 0, 0
 	for _, job := range jobs {
@@ -68,7 +64,7 @@ func buildReviewBatchCardWith(jobs []publishJob, icons reviewCardIcons, opts rev
 		elements = append(elements, risk)
 	}
 	// 分发区在最底下，分割线隔开、常显（2026-10-12 用户裁定，见 feishu_review_card_distribution.go）。
-	elements = append(elements, reviewCardDistributionElements(jobs, true, true, icons, opts)...)
+	elements = append(elements, reviewCardDistributionElements(jobs, true, true, icons)...)
 	card := map[string]any{
 		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},

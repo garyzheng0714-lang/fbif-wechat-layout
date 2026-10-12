@@ -312,17 +312,16 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 		Issues:    []publishExternalIssue{{Field: publishExternalIssueTitle, Current: "一个很长的标题", Length: 45, Min: 15, Max: 40}},
 	}}}
 	owners := []publishDistributionOwner{{OpenID: "ou_a"}}
-	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, false))
+	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners))
 	for _, want := range []string{"同步到头条号、百家号前，还差 2 处要改：", "1. 头条号封面太小（头条号至少 452×352，现在 300×200）",
-		"在卡片里点选一张正文大图，或者", `"tag":"a","text":"上传一张"`, "2. 百家号标题超了 5 字（百家号最多 40 字）",
+		"在卡片里点选一张正文大图，或者", `"tag":"a","text":"上传一张"`, "（传上去就换上）", "2. 百家号标题超了 5 字（百家号最多 40 字）",
 		"在卡片输入框里改到 40 字以内", "「保存并同步至头条号」「保存并同步至百家号」"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("开场缺少 %q: %s", want, plain)
 		}
 	}
-	threaded := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, true))
-	if !strings.Contains(threaded, "把新封面图直接发到这个话题里") || strings.Contains(threaded, "上传一张") || !strings.Contains(threaded, "发到话题里的封面会自动换上。") {
-		t.Fatalf("话题发图开通后应请人直接发图: %s", threaded)
+	if strings.Contains(plain, "话题里") {
+		t.Fatalf("不再请人把图发到话题里: %s", plain)
 	}
 }
 
@@ -434,11 +433,15 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 		t.Fatalf("超限标题应拒绝：%d %s", rec.Code, rec.Body.String())
 	}
 
-	// 上传封面：太小的拒绝；够大的转存后作为头条号封面，问题清空即推。
-	upload := func(data []byte) *httptest.ResponseRecorder {
+	// 上传封面：太小的拒绝；够大的转存后就是头条号封面，问题清空即推（2026-10-12 用户：「传上去之后
+	// 直接绑定、自动同步过去了」）。
+	upload := func(data []byte, fields ...string) *httptest.ResponseRecorder {
 		var body bytes.Buffer
 		form := multipart.NewWriter(&body)
 		_ = form.WriteField("slot", "0")
+		for i := 0; i+1 < len(fields); i += 2 {
+			_ = form.WriteField(fields[i], fields[i+1])
+		}
 		part, _ := form.CreateFormFile("file", "cover.png")
 		_, _ = part.Write(data)
 		_ = form.Close()
@@ -456,13 +459,7 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &uploaded)
 	if rec.Code != http.StatusOK || len(stored) != 1 || uploaded.Uploaded.Width != 900 || !strings.HasPrefix(uploaded.Uploaded.URL, "https://cdn.example.com/uploaded/distribution-cover-") {
-		t.Fatalf("够大的图应转存并作为可选封面：%d %s", rec.Code, rec.Body.String())
-	}
-	if fake.pushCalls != 1 {
-		t.Fatalf("上传只加可选封面，点保存才推：%d", fake.pushCalls)
-	}
-	if rec := put(`{"slot":0,"cover_url":"` + uploaded.Uploaded.URL + `"}`); rec.Code != http.StatusOK {
-		t.Fatalf("选上传的图作封面应成功：%d %s", rec.Code, rec.Body.String())
+		t.Fatalf("够大的图应转存：%d %s", rec.Code, rec.Body.String())
 	}
 	if fake.pushCalls != 2 || fake.payload.Cover != uploaded.Uploaded.URL {
 		t.Fatalf("封面改好后应推头条号并用上传的图：calls=%d payload=%+v", fake.pushCalls, fake.payload)
@@ -472,9 +469,113 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	if !strings.HasPrefix(draft.EditedBy, "王编辑（ou_editor）") || len(draft.Issues) != 0 {
 		t.Fatalf("应记下谁改的：%+v", draft)
 	}
-	// 推过以后不能再改。
+	// 推过以后不能再改，也不能再传。
 	if rec := put(`{"slot":0,"title":"再改一次"}`); rec.Code != http.StatusConflict {
 		t.Fatalf("已推的平台不能再改：%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := upload(testPNG(t, 900, 600)); rec.Code != http.StatusConflict || len(stored) != 1 {
+		t.Fatalf("已推的平台不能再传封面：%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestExternalSidebarUploadCarriesTypedTitle 标题和封面都要改：页面里改好的标题随图一起提交，传上去
+// 就推；标题还超着就只换封面，等人改完标题再点保存。
+func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
+	setTestYunsuoConfig(t)
+	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
+	env := newPublishTestEnv(t)
+	fake := newBothAccountsYunsuo()
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
+		return "https://cdn.example.com/uploaded/" + name, nil
+	}
+	mux, service := newDistributionEditMux(t, env)
+	editor := mustSessionForUser(t, service, authUser{ID: "feishu:ou_editor", Name: "王编辑", AuthMode: authModeFeishu, Status: authUserActive, FeishuOpenID: "ou_editor"})
+	upload := func(job publishJob, data []byte, title string) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		form := multipart.NewWriter(&body)
+		_ = form.WriteField("slot", "0")
+		_ = form.WriteField("title", title)
+		part, _ := form.CreateFormFile("file", "cover.png")
+		_, _ = part.Write(data)
+		_ = form.Close()
+		target := fmt.Sprintf("/api/publish/jobs/%d/external-distribution/cover?t=%s", job.ID, externalDistributionEditSig(job.ID))
+		return doEditReq(mux, http.MethodPost, target, editor, body.Bytes(), form.FormDataContentType())
+	}
+
+	job := createLongTitleDistributionJob(t, env, "site:upload-title")
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+		t.Fatal(err)
+	}
+	// 标题仍超：封面换上，标题问题留着，不推。
+	if rec := upload(job, testPNG(t, 900, 600), testLongToutiaoTitle+"再长一点"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || fake.pushCalls != 1 {
+		t.Fatalf("标题没改好时只换封面：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
+	}
+	draft := mustDraft(t, mustJob(t, env, job.ID), testYunsuoToutiaoID)
+	if _, cover := externalIssueFields(draft.Issues)[publishExternalIssueCover]; cover || !strings.HasPrefix(draft.CoverURL, "https://cdn.example.com/uploaded/") {
+		t.Fatalf("封面应已换上：%+v", draft)
+	}
+	if _, title := externalIssueFields(draft.Issues)[publishExternalIssueTitle]; !title {
+		t.Fatalf("标题问题还在：%+v", draft)
+	}
+	// 再传一张，带上改好的标题：一起提交，马上推。
+	fixed := "老茶铺把茶做成零食，年营收过亿"
+	if rec := upload(job, testPNG(t, 1200, 800), fixed); rec.Code != http.StatusOK || fake.pushCalls != 2 {
+		t.Fatalf("标题改好、封面传上就推：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
+	}
+	if fake.payload.ShortTitle != fixed || !strings.HasPrefix(fake.payload.Cover, "https://cdn.example.com/uploaded/") {
+		t.Fatalf("推出去的是改好的标题和刚传的图：%+v", fake.payload)
+	}
+}
+
+// TestExternalCoverAutoUpscalesNearMiss 原封面只差一点（#183：780×332，头条号要 452×352）：
+// 自动放大一份换上直接推，不记待修改、不 @ 人；差太多（300×200）的仍等人换。
+func TestExternalCoverAutoUpscalesNearMiss(t *testing.T) {
+	setTestYunsuoConfig(t)
+	sizes := map[string][2]int{"https://cdn.example.com/a.jpg": {780, 332}}
+	stubYunsuoImageSize(t, sizes)
+	original := externalCoverFetch
+	t.Cleanup(func() { externalCoverFetch = original })
+	var fetched []string
+	externalCoverFetch = func(_ context.Context, src string) ([]byte, error) {
+		fetched = append(fetched, src)
+		return testPNG(t, sizes[src][0], sizes[src][1]), nil
+	}
+	env := newPublishTestEnv(t)
+	fake := newBothAccountsYunsuo()
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	var stored [][]byte
+	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
+		stored = append(stored, body)
+		return "https://cdn.example.com/uploaded/" + name, nil
+	}
+	job := createPublishedDistributionJobWithKey(t, env, "site:near-miss", "FBIF食品饮料创新")
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+		t.Fatalf("放大后两个平台都能推：%v", err)
+	}
+	if len(fetched) == 0 || fetched[0] != "https://cdn.example.com/a.jpg" || len(stored) == 0 {
+		t.Fatalf("应取原封面放大并转存：fetched=%v stored=%d", fetched, len(stored))
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(stored[0]))
+	if err != nil || format != "jpeg" || config.Width < 452 || config.Height < 352 || config.Height != 352 {
+		t.Fatalf("放大到刚好够下限：%v %s %+v", err, format, config)
+	}
+	got := mustJob(t, env, job.ID)
+	toutiao := mustLane(t, got, testYunsuoToutiaoID)
+	if toutiao.State == "" || externalJobNeedsFix(got) || !strings.Contains(toutiao.PayloadJSON, "https://cdn.example.com/uploaded/distribution-cover-") {
+		t.Fatalf("头条号应直接用放大后的封面推：%+v", toutiao)
+	}
+	draft := mustDraft(t, got, testYunsuoToutiaoID)
+	if !strings.HasPrefix(draft.CoverURL, "https://cdn.example.com/uploaded/") || len(draft.Issues) != 0 || draft.EditedBy != "" {
+		t.Fatalf("自动换上的封面不算人改：%+v", draft)
+	}
+
+	// 差太多的不放大，照旧待修改。
+	if factor := externalCoverUpscaleFactor(300, 200, 452, 352); factor != 0 {
+		t.Fatalf("300×200 要放大 %.2f 倍，太糊，不自动放大", factor)
+	}
+	if factor := externalCoverUpscaleFactor(780, 332, 452, 352); factor < 1.05 || factor > 1.07 {
+		t.Fatalf("780×332 只需放大约 1.06 倍：%.3f", factor)
 	}
 }
 

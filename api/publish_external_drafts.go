@@ -81,8 +81,6 @@ type publishExternalCoverCandidate struct {
 	ImgKey     string `json:"img_key,omitempty"`
 	ImgApp     string `json:"img_app,omitempty"`
 	UploadedBy string `json:"uploaded_by,omitempty"`
-	// MessageID 话题里发来这张图的消息（飞书重投同一事件时不重复处理）。
-	MessageID string `json:"message_id,omitempty"`
 }
 
 func externalDraftIndex(job publishJob, accountID string) int {

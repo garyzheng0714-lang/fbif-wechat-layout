@@ -496,14 +496,7 @@ func (p *publishPipeline) buildReviewBatchCard(ctx context.Context, jobID int64)
 		return nil, err
 	}
 	jobs = p.prepareReviewThumbs(ctx, jobs)
-	app := strings.TrimSpace(job.ReviewDeliveryAppID)
-	if app == "" {
-		if settings, _, err := p.reviewDeliveryForJob(job); err == nil {
-			app = settings.AppProfileID
-		}
-	}
-	opts := reviewCardDistributionOptions{ThreadImages: p.reviewThreadImagesReady(app)}
-	return buildReviewBatchCardWith(jobs, p.reviewCardIconsForJob(ctx, job), opts), nil
+	return buildReviewBatchCardWithIcons(jobs, p.reviewCardIconsForJob(ctx, job)), nil
 }
 
 const reviewThumbRetryAfter = 30 * time.Minute

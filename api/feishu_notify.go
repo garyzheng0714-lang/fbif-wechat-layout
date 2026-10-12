@@ -455,42 +455,6 @@ func (n *feishuNotifier) downloadCoverImage(ctx context.Context, imgURL string) 
 	return imgBytes, nil
 }
 
-// downloadMessageImage 取用户发在群里的图片（消息资源接口，需「获取与上传图片或文件资源」权限）。
-func (n *feishuNotifier) downloadMessageImage(ctx context.Context, messageID, imageKey string) ([]byte, error) {
-	messageID, imageKey = strings.TrimSpace(messageID), strings.TrimSpace(imageKey)
-	if !feishuMessageIDSafe(messageID) || imageKey == "" || strings.ContainsAny(imageKey, "/?#% ") {
-		return nil, errors.New("feishu: 图片消息参数无效")
-	}
-	token, err := n.tenantAccessToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		n.baseURL+"/open-apis/im/v1/messages/"+url.PathEscape(messageID)+"/resources/"+url.PathEscape(imageKey)+"?type=image", nil)
-	if err != nil {
-		return nil, fmt.Errorf("feishu: 构造图片下载请求: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := n.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("飞书图片下载接口不可达: %w", err)
-	}
-	defer resp.Body.Close()
-	data, err := readBoundedBody(resp.Body, maxExternalCoverUploadBytes)
-	if err != nil {
-		return nil, fmt.Errorf("读图片失败或超过 10 MB: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK || strings.HasPrefix(strings.TrimSpace(resp.Header.Get("Content-Type")), "application/json") {
-		var env struct {
-			Code int    `json:"code"`
-			Msg  string `json:"msg"`
-		}
-		_ = json.Unmarshal(data, &env)
-		return nil, fmt.Errorf("飞书图片下载失败（HTTP %d code=%d %s）", resp.StatusCode, env.Code, env.Msg)
-	}
-	return data, nil
-}
-
 // uploadImageBytes 把一张图片上传到飞书消息图片素材，返回卡片 img/custom_icon 可用的
 // img_key。img_key 与上传它的应用绑定，换应用发卡必须由该应用重新上传。
 func (n *feishuNotifier) uploadImageBytes(ctx context.Context, filename string, imgBytes []byte) (string, error) {

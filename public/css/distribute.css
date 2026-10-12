@@ -162,18 +162,27 @@ button, input, textarea { font: inherit; color: inherit; }
 .dist-cover.is-small img { opacity: 0.6; }
 .dist-cover.is-small .dist-cover-size { color: var(--fs-danger); }
 
+/* 上传格：点选、拖入、粘贴都行。拖入时靠边框与底色响应（DESIGN.md 动效约定）。 */
 .dist-cover-upload {
   display: grid;
-  place-items: center;
+  place-content: center;
+  justify-items: center;
+  gap: 2px;
   aspect-ratio: 16 / 9;
   border: 1px dashed var(--fs-border-control);
   border-radius: var(--fs-r-m);
   color: var(--fs-text-2);
   font-size: 12px;
-  transition: border-color var(--fs-t-fast) var(--fs-ease-out), color var(--fs-t-fast) var(--fs-ease-out);
+  text-align: center;
+  transition: border-color var(--fs-t-fast) var(--fs-ease-out), color var(--fs-t-fast) var(--fs-ease-out), background-color var(--fs-t-fast) var(--fs-ease-out);
 }
+.dist-upload-hint { color: var(--fs-text-3); font-size: 11px; line-height: 1.4; }
 .dist-cover-upload:hover,
-.dist-cover-upload:focus-within { border-color: var(--fs-brand); color: var(--fs-brand); }
+.dist-cover-upload:focus-within,
+.dist-cover-upload.is-dragover { border-color: var(--fs-brand); color: var(--fs-brand); }
+.dist-cover-upload.is-dragover { background: var(--fs-brand-soft); }
+.dist-cover-upload.is-busy { cursor: progress; color: var(--fs-text-3); border-color: var(--fs-border-control); }
+.dist-cover-upload.is-busy input { cursor: progress; }
 .dist-cover-upload input {
   position: absolute;
   inset: 0;

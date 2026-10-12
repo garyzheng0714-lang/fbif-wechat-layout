@@ -521,6 +521,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		target     yunsuoAccountTarget
 		issues     []publishExternalIssue
 		candidates []publishExternalCoverCandidate
+		autoCover  string // 自动放大后换上的封面（publish_external_cover.go）
 	}
 	var checked []preflightResult
 	draftEditedAt := map[string]string{}
@@ -529,7 +530,18 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		draft, _ := externalDraftFor(job, target.ID)
 		draftEditedAt[target.ID] = draft.EditedAt
 		issues, candidates := externalPreflight(snapshot, target, draft)
-		checked = append(checked, preflightResult{target: target, issues: issues, candidates: candidates})
+		autoCover := ""
+		if issue, ok := externalIssueFields(issues)[publishExternalIssueCover]; ok {
+			// 原封面只差一点：放大一份换上再查一遍，不用人管。
+			if cover, fixed := p.autoUpscaleExternalCover(job.ID, draft, issue); fixed {
+				draft.Candidates = addExternalCoverCandidates(draft.Candidates, []publishExternalCoverCandidate{cover})
+				draft.CoverURL = cover.URL
+				issues, candidates = externalPreflight(snapshot, target, draft)
+				candidates = addExternalCoverCandidates(candidates, []publishExternalCoverCandidate{cover})
+				autoCover = cover.URL
+			}
+		}
+		checked = append(checked, preflightResult{target: target, issues: issues, candidates: candidates, autoCover: autoCover})
 		if len(issues) > 0 {
 			fixNames = append(fixNames, target.Name+"："+externalIssueSummaryText(issues))
 			continue
@@ -592,8 +604,13 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			}
 		}
 		for _, result := range checked {
-			if _, exists := externalDraftFor(*current, result.target.ID); exists || len(result.issues) > 0 {
+			if _, exists := externalDraftFor(*current, result.target.ID); exists || len(result.issues) > 0 || result.autoCover != "" {
 				recordExternalPreflight(current, result.target, result.issues, result.candidates, material, requestedAt)
+			}
+			if result.autoCover != "" {
+				draft, _ := externalDraftFor(*current, result.target.ID)
+				draft.CoverURL = result.autoCover
+				setExternalDraft(current, draft)
 			}
 		}
 		noteExternalReminderProgress(current)

@@ -408,11 +408,23 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 			writeError(w, http.StatusBadRequest, "图片不能超过 10 MB")
 			return
 		}
+		// 页面里已经改好的标题、摘要随图一起提交（没改或不合要求的不传）。
+		var text externalDraftEdit
+		if values, ok := r.MultipartForm.Value["title"]; ok && len(values) > 0 {
+			text.Title = &values[0]
+		}
+		if values, ok := r.MultipartForm.Value["summary"]; ok && len(values) > 0 {
+			text.Summary = &values[0]
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		updated, uploaded, err := p.uploadExternalCover(ctx, jobID, slot, data, actor)
+		updated, uploaded, err := p.uploadExternalCover(ctx, jobID, slot, data, text, actor)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			status := http.StatusBadRequest
+			if errors.Is(err, errExternalDraftNothingToEdit) {
+				status = http.StatusConflict
+			}
+			writeError(w, status, err.Error())
 			return
 		}
 		cfg, err := loadYunsuoConfig()
@@ -426,8 +438,10 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 	})
 }
 
-// uploadExternalCover 侧边栏上传封面：校验格式与平台尺寸下限，转存 OSS，作为这个平台的封面。
-func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, slot int, data []byte, actor string) (publishJob, publishExternalCoverCandidate, error) {
+// uploadExternalCover 侧边栏上传封面：校验格式与平台尺寸下限，转存 OSS，传上去就换成这个平台的
+// 封面（2026-10-12 用户：「传上去之后直接绑定、自动同步过去了」），与页面里改好的标题、摘要走同一个
+// 修改入口，问题都清了就推；标题、摘要没过就只换封面，人在页面里接着改。
+func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, slot int, data []byte, text externalDraftEdit, actor string) (publishJob, publishExternalCoverCandidate, error) {
 	cfg, err := loadYunsuoConfig()
 	if err != nil {
 		return publishJob{}, publishExternalCoverCandidate{}, err
@@ -454,30 +468,23 @@ func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, 
 	if err := externalDistributionEligibility(job); err != nil {
 		return job, publishExternalCoverCandidate{}, err
 	}
+	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneCanSafeRetry(lane) {
+		return job, publishExternalCoverCandidate{}, errExternalDraftNothingToEdit
+	}
 	candidate, err := p.storeExternalCoverBytes(ctx, jobID, data, format, config.Width, config.Height, actor)
 	if err != nil {
 		return job, publishExternalCoverCandidate{}, err
 	}
-	// 只加进可选封面，不当场推送：页面里还可能有没保存的标题改动，等人点「保存并同步」一起提交。
-	updated, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
-		if externalDistributionEligibility(current) != nil {
-			return false
-		}
-		lane, pushed := externalLaneFor(current, target.ID)
-		return !pushed || externalLaneCanSafeRetry(lane)
-	}, func(current *publishJob) {
-		draft, _ := externalDraftFor(*current, target.ID)
-		draft.Candidates = addExternalCoverCandidates(draft.Candidates, []publishExternalCoverCandidate{candidate})
-		setExternalDraft(current, draft)
-		enqueueExternalDistributionCardUpdate(current)
-	})
-	if err != nil {
-		return updated, candidate, err
+	coverOnly := func() externalDraftEdit {
+		url := candidate.URL
+		return externalDraftEdit{CoverURL: &url, Candidates: []publishExternalCoverCandidate{candidate}}
 	}
-	if !swapped {
-		return updated, candidate, errExternalDraftNothingToEdit
+	edit := coverOnly()
+	edit.Title, edit.Summary = text.Title, text.Summary
+	updated, err := p.submitExternalDraftEdit(jobID, slot, edit, actor)
+	if err != nil && (text.Title != nil || text.Summary != nil) &&
+		!errors.Is(err, errExternalDraftNothingToEdit) && !errors.Is(err, errPublishWorkersPaused) {
+		updated, err = p.submitExternalDraftEdit(jobID, slot, coverOnly(), actor)
 	}
-	p.scheduleExternalDistributionCardUpdate(jobID)
-	p.spawnExternalWork(func() { p.prepareExternalDraftAssets(jobID) })
-	return updated, candidate, nil
+	return updated, candidate, err
 }

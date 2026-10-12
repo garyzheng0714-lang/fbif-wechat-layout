@@ -22,7 +22,6 @@ import (
 
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
-	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 )
 
@@ -42,8 +41,7 @@ func maybeStartFeishuWS(p *publishPipeline) {
 	}
 	// 长连接模式无需 verification token / encrypt key（SDK 建连鉴权），两参传空。
 	handler := dispatcher.NewEventDispatcher("", "").
-		OnP2CardActionTrigger(feishuWSCardActionHandler(p)).
-		OnP2MessageReceiveV1(feishuWSMessageHandler(p, feishuWSAppProfileID()))
+		OnP2CardActionTrigger(feishuWSCardActionHandler(p))
 	cli := larkws.NewClient(appID, appSecret,
 		larkws.WithEventHandler(handler),
 		larkws.WithAutoReconnect(true),
@@ -67,44 +65,6 @@ func maybeStartFeishuWS(p *publishPipeline) {
 			log.Printf("publish: 飞书长连接启动失败：%v", err)
 		}
 	}()
-}
-
-// feishuWSMessageHandler im.message.receive_v1：审核群话题里发来的封面图（publish_review_thread.go）。
-// 事件要尽快回 ack，处理放到后台。
-func feishuWSMessageHandler(p *publishPipeline, appProfileID string) func(context.Context, *larkim.P2MessageReceiveV1) error {
-	return func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
-		if event == nil || event.Event == nil || event.Event.Message == nil {
-			return nil
-		}
-		msg := reviewThreadMessageFromEvent(event.Event)
-		p.spawnExternalWork(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), reviewThreadWorkTimeout)
-			defer cancel()
-			p.handleReviewThreadMessage(ctx, appProfileID, msg)
-		})
-		return nil
-	}
-}
-
-func reviewThreadMessageFromEvent(data *larkim.P2MessageReceiveV1Data) reviewThreadMessage {
-	str := func(v *string) string {
-		if v == nil {
-			return ""
-		}
-		return strings.TrimSpace(*v)
-	}
-	m := data.Message
-	msg := reviewThreadMessage{
-		MessageID: str(m.MessageId), ChatID: str(m.ChatId), RootID: str(m.RootId), ParentID: str(m.ParentId),
-		MessageType: str(m.MessageType), Content: str(m.Content),
-	}
-	if data.Sender != nil {
-		msg.SenderType = str(data.Sender.SenderType)
-		if data.Sender.SenderId != nil {
-			msg.SenderOpenID = str(data.Sender.SenderId.OpenId)
-		}
-	}
-	return msg
 }
 
 // feishuWSCardActionHandler card.action.trigger 事件 → 共用业务段 → SDK 响应

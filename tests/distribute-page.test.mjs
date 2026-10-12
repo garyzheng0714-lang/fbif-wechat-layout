@@ -105,3 +105,89 @@ test('改稿页：没有签名链接时说清楚从哪打开', async () => {
   await page.load();
   assert.match(root.textContent, /请从审核卡里的链接打开/);
 });
+
+function fileEvent(window, type, field, files) {
+  const event = new window.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, field, { value: { files, types: ['Files'], dropEffect: 'none' } });
+  return event;
+}
+
+function uploadPage(onUpload) {
+  const { document, window } = parseHTML('<p id="article"></p><div id="root"></div>');
+  globalThis.Event = window.Event;
+  const root = document.querySelector('#root');
+  const calls = [];
+  const request = async (path, init = {}) => {
+    calls.push({ path, method: init.method || 'GET', body: init.body });
+    if (path.includes('/cover')) return onUpload(init.body);
+    return Response.json(platformsView());
+  };
+  const page = createDistributePage({ root, articleEl: document.querySelector('#article'), search: '?job=196&t=sig', request, schedule: () => {} });
+  return { document, window, root, calls, page };
+}
+
+const pngFile = (name = 'cover.png') => new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' });
+
+test('改稿页：上传格可点选、拖入、粘贴；传上去就换上，改好的标题一起提交', async () => {
+  const uploads = [];
+  const { document, window, root, page } = uploadPage(form => {
+    uploads.push(form);
+    const view = platformsView();
+    view.platforms[0] = { ...view.platforms[0], status: '排队中', tone: 'blue', editable: false, needs_fix: false };
+    return Response.json(view);
+  });
+  await page.load();
+  const tile = root.querySelector('[data-slot="0"] .dist-cover-upload');
+  assert.match(tile.textContent, /上传图片/);
+  assert.match(tile.textContent, /可拖入或粘贴/);
+
+  // 先用建议标题（合乎要求），再粘贴一张图：标题随图一起提交。
+  root.querySelector('[data-slot="0"] [data-use="title"]').click();
+  root.querySelector('[data-slot="0"] [name="title"]').focus();
+  document.dispatchEvent(fileEvent(window, 'paste', 'clipboardData', [pngFile('pasted.png')]));
+  await waitFor(() => uploads.length === 1);
+  assert.equal(uploads[0].get('slot'), '0');
+  assert.equal(uploads[0].get('title'), '老茶铺把茶做成零食，年营收过亿');
+  assert.equal(uploads[0].get('file').name, 'pasted.png');
+  await waitFor(() => /排队中/.test(root.querySelector('[data-slot="0"] .dist-status').textContent));
+  assert.equal(root.querySelector('[data-slot="0"] form'), null, '传上去就同步，不用再点保存');
+});
+
+test('改稿页：拖入图片传给落点所在的平台；标题还超着就只带图', async () => {
+  const uploads = [];
+  const { document, window, root, page } = uploadPage(form => {
+    uploads.push(form);
+    const view = platformsView({ cover_issue: '', cover: { url: 'https://cdn.example.com/up.jpg', width: 900, height: 600 }, reason: '标题超出 10 字' });
+    return Response.json(view);
+  });
+  await page.load();
+  const covers = root.querySelector('[data-slot="0"] .dist-covers');
+  covers.dispatchEvent(fileEvent(window, 'dragover', 'dataTransfer', []));
+  assert.ok(root.querySelector('[data-slot="0"] .dist-cover-upload').classList.contains('is-dragover'), '拖到上方时上传格高亮');
+  const drop = fileEvent(window, 'drop', 'dataTransfer', [pngFile('dropped.png')]);
+  covers.dispatchEvent(drop);
+  assert.ok(drop.defaultPrevented, '不让浏览器把图片打开');
+  await waitFor(() => uploads.length === 1);
+  assert.equal(uploads[0].get('file').name, 'dropped.png');
+  assert.equal(uploads[0].get('title'), null, '超限的标题不带');
+  await waitFor(() => /封面已换上，还要改：标题超出 10 字/.test(root.querySelector('[data-slot="0"] .dist-result')?.textContent || ''));
+  assert.equal(root.querySelector('[data-slot="0"] [name="title"]').value, longTitle, '没提交的标题留在输入框里');
+  void document;
+});
+
+test('改稿页：传不上去的原因写在封面下面；不是 JPG/PNG 不发请求', async () => {
+  const { document, window, root, calls, page } = uploadPage(() => Response.json({ error: '这张图 400×300，头条号封面至少 452×352' }, { status: 400 }));
+  await page.load();
+  document.dispatchEvent(fileEvent(window, 'paste', 'clipboardData', [new File(['gif'], 'a.gif', { type: 'image/gif' })]));
+  await waitFor(() => /只支持 JPG、PNG 图片/.test(root.querySelector('[data-slot="0"] [role="alert"]')?.textContent || ''));
+  assert.equal(calls.filter(call => call.path.includes('/cover')).length, 0);
+  const input = root.querySelector('[data-slot="0"] [data-upload]');
+  Object.defineProperty(input, 'files', { value: [pngFile()] });
+  input.dispatchEvent(new window.Event('change'));
+  await waitFor(() => /头条号封面至少 452×352/.test(root.querySelector('[data-slot="0"] [role="alert"]')?.textContent || ''));
+  // 粘贴文字不拦：照常进输入框。
+  const textPaste = new window.Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(textPaste, 'clipboardData', { value: { files: [] } });
+  document.dispatchEvent(textPaste);
+  assert.equal(textPaste.defaultPrevented, false);
+});

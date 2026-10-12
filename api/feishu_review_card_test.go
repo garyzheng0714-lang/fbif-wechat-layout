@@ -545,13 +545,9 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	if strings.Contains(body, "img_other") || strings.Contains(cardJSON(t, card), testYunsuoToutiaoID) {
 		t.Fatalf("别的应用传的图不能用，卡片里不得有账号 id: %s", body)
 	}
-	if !strings.Contains(body, "[上传一张](") {
-		t.Fatalf("话题发图没开通时给侧边栏上传链接: %s", body)
-	}
-	// 话题发图开通后：不再让人打开排版工具上传，请人把图发到这张卡的话题里。
-	threaded := cardJSON(t, buildReviewBatchCardWith([]publishJob{job}, nil, reviewCardDistributionOptions{ThreadImages: true}))
-	if !strings.Contains(threaded, "把新封面图发到这张卡的话题里") || strings.Contains(threaded, "[上传一张](") {
-		t.Fatalf("话题发图开通后应请人把图发到话题里: %s", threaded)
+	// 选一张封面，或在侧边栏上传（2026-10-12 用户：「就是“选一张封面”或者“上传”」）。
+	if !strings.Contains(body, "从正文里选一张作封面</font><font color='grey'>，或</font>[上传一张](") || strings.Contains(body, "话题") {
+		t.Fatalf("封面应是选一张或上传一张: %s", body)
 	}
 	// 百家号没问题：仍是普通的同步按钮。
 	if section := distributionSectionJSON(t, card); !strings.Contains(section, `"content":"同步至百家号"`) {

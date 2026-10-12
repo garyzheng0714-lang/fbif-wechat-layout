@@ -41,11 +41,8 @@ type publishDeliverySettings struct {
 	// DistributionOwnersApp 这个审核应用有效（publish_distribution_owners.go）。
 	DistributionOwners    []publishDistributionOwner `json:"distribution_owners,omitempty"`
 	DistributionOwnersApp string                     `json:"distribution_owners_app,omitempty"`
-	// ThreadMessagesApp 已从这个审核应用收到过审核群的消息事件：飞书后台开了「接收消息」与
-	// 群消息权限，话题里发图换封面才可用（publish_review_thread.go）。
-	ThreadMessagesApp string `json:"thread_messages_app,omitempty"`
-	UpdatedBy         string `json:"updated_by,omitempty"`
-	UpdatedAt         string `json:"updated_at,omitempty"`
+	UpdatedBy             string                     `json:"updated_by,omitempty"`
+	UpdatedAt             string                     `json:"updated_at,omitempty"`
 }
 
 type publishDeliverySelectionRequest struct {
@@ -121,7 +118,6 @@ func normalizePublishDeliverySettings(settings publishDeliverySettings) (publish
 	if len(settings.DistributionOwners) == 0 {
 		settings.DistributionOwnersApp = ""
 	}
-	settings.ThreadMessagesApp = strings.TrimSpace(settings.ThreadMessagesApp)
 	settings.UpdatedBy = strings.TrimSpace(settings.UpdatedBy)
 	settings.UpdatedAt = strings.TrimSpace(settings.UpdatedAt)
 	return settings, nil
@@ -207,32 +203,12 @@ func legacyPublishReviewChatIDs() []string {
 }
 
 func (s *publishDeliverySettingsStore) write(settings publishDeliverySettings) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.writeLocked(settings)
-}
-
-// markThreadMessages 记下已从这个应用收到审核群消息事件（同一应用只写一次）。
-func (s *publishDeliverySettingsStore) markThreadMessages(appProfileID string) error {
-	appProfileID = strings.TrimSpace(appProfileID)
-	if s == nil || appProfileID == "" {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	settings, err := s.readLocked()
-	if err != nil || settings.ThreadMessagesApp == appProfileID {
-		return err
-	}
-	settings.ThreadMessagesApp = appProfileID
-	return s.writeLocked(settings)
-}
-
-func (s *publishDeliverySettingsStore) writeLocked(settings publishDeliverySettings) error {
 	settings, err := normalizePublishDeliverySettings(settings)
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if strings.TrimSpace(s.path) == "" {
 		return errors.New("发布通知配置路径为空")
 	}
@@ -578,7 +554,6 @@ func publishDeliverySelectionFromRequest(body publishDeliverySelectionRequest, c
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
 	}
 	// 分发负责人的 open_id 只在原应用下有效：换了审核应用就要重新选。
-	settings.ThreadMessagesApp = current.ThreadMessagesApp
 	if current.DistributionOwnersApp == appID {
 		settings.DistributionOwners = current.DistributionOwners
 		settings.DistributionOwnersApp = current.DistributionOwnersApp

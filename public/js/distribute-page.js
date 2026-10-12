@@ -3,10 +3,13 @@
 // 2026-10-12 用户裁定：卡片里改不了的（上传封面）做一个页面，从审核卡链接在飞书侧边栏打开，
 // 改完状态同步回卡片。每个平台一节：状态；还能改的给标题、摘要、封面，字数实时计数，超了标红，
 // 有建议就给「用这个」；「保存并同步」交给服务端同一个修改入口（与卡片表单共用规则）。
-// 上传封面只是多一张可选的图，点保存才推送。
+// 上传封面：点选、拖入或粘贴图片都行，传上去就换成这个平台的封面，页面里已改好的标题、摘要
+// 一起提交，问题都清了就同步（同日用户：「传上去之后直接绑定、自动同步过去了」「我可以粘贴、
+// 上传文件或者拖动文件进去」）。
 import { authFetch, ensureAuthenticatedSession } from './auth-session.js';
 
 const TONES = new Set(['green', 'blue', 'orange', 'red', 'grey']);
+const UPLOAD_TYPES = new Set(['image/jpeg', 'image/png']);
 const POLL_MS = 4000;
 const POLL_LIMIT = 45; // 约 3 分钟后不再自动刷新
 
@@ -36,7 +39,7 @@ function statusMarkup(platform) {
   return `<span class="dist-status is-${tone}">${esc(platform.status)}</span>`;
 }
 
-function coverChoices(platform, selected) {
+function coverChoices(platform) {
   const choices = [];
   const seen = new Set();
   if (platform.cover?.url) {
@@ -49,7 +52,6 @@ function coverChoices(platform, selected) {
       choices.push(candidate);
     }
   }
-  if (selected && !seen.has(selected.url)) choices.push(selected);
   return choices;
 }
 
@@ -95,7 +97,7 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
     </div>`;
   }
   const selectedURL = draft.coverURL ?? platform.cover?.url ?? '';
-  const choices = coverChoices(platform, draft.uploaded);
+  const choices = coverChoices(platform);
   let coverOK = !platform.cover_issue || selectedURL !== platform.cover?.url;
   const tiles = choices.map(image => {
     const small = coverTooSmall(platform, image);
@@ -109,7 +111,10 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
       <span class="dist-cover-size">${label ? `${label} · ` : ''}${esc(size)}</span>
     </button>`;
   }).join('');
-  const coverHint = coverOK ? '' : `<p class="dist-hint">${platform.cover?.url ? '现在的封面太小' : '还没有封面'}，选一张大图或上传</p>`;
+  // 上传失败的原因写在封面下面（图太小、格式不对、没传上去）。
+  const coverHint = draft.coverError
+    ? `<p class="dist-hint" role="alert">${esc(draft.coverError)}</p>`
+    : coverOK ? '' : `<p class="dist-hint">${platform.cover?.url ? '现在的封面太小' : '还没有封面'}，选一张大图或上传</p>`;
   const requirement = platform.cover_min_width ? `至少 ${platform.cover_min_width}×${platform.cover_min_height}` : '';
   return `<section class="dist-platform" data-slot="${slot}">
     ${head}${reasonLine}
@@ -125,9 +130,10 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
         <div class="dist-field-label"><span id="cover-label-${slot}">封面</span><span class="dist-count${coverOK ? '' : ' is-over'}">${esc(requirement)}</span></div>
         <div class="dist-covers" role="radiogroup" aria-labelledby="cover-label-${slot}">
           ${tiles}
-          <label class="dist-cover dist-cover-upload">
-            <input type="file" accept="image/jpeg,image/png" data-upload>
-            <span>上传图片</span>
+          <label class="dist-cover dist-cover-upload${draft.uploading ? ' is-busy' : ''}">
+            <input type="file" accept="image/jpeg,image/png" data-upload${draft.uploading ? ' disabled' : ''}>
+            <span class="dist-upload-label">${draft.uploading ? '正在上传…' : '上传图片'}</span>
+            <span class="dist-upload-hint"${draft.uploading ? ' hidden' : ''}>可拖入或粘贴</span>
           </label>
         </div>
         ${coverHint}
@@ -149,7 +155,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
   const query = token ? `?t=${encodeURIComponent(token)}` : '';
   let view = null;
   let polls = 0;
-  const drafts = new Map(); // slot → { title, summary, coverURL, uploaded, result }
+  const drafts = new Map(); // slot → { title, summary, coverURL, uploading, coverError, result }
 
   function draftFor(slot) {
     if (!drafts.has(slot)) drafts.set(slot, {});
@@ -274,35 +280,122 @@ export function createDistributePage({ root, articleEl, search, request = authFe
     }
   }
 
-  async function upload(platform, section, file) {
+  // typedText 页面里改过、且合乎要求的标题/摘要，随图一起提交；没改或不合要求的不带。
+  function typedText(platform, section) {
+    const out = {};
+    for (const field of ['title', 'summary']) {
+      const input = section.querySelector(`[name="${field}"]`);
+      if (!input || input.value === (platform[field] ?? '')) continue;
+      const max = field === 'title' ? platform.title_max : platform.summary_max;
+      const min = field === 'title' ? platform.title_min : 0;
+      if (!counterState(input.value, max, min).invalid) out[field] = input.value;
+    }
+    return out;
+  }
+
+  async function upload(platform, file) {
+    const section = sectionOf(platform.slot);
+    if (!section || !file) return;
     const draft = draftFor(platform.slot);
+    if (draft.uploading) return;
     draft.title = section.querySelector('[name="title"]').value;
     const summaryInput = section.querySelector('[name="summary"]');
     if (summaryInput) draft.summary = summaryInput.value;
-    const tile = section.querySelector('.dist-cover-upload span');
-    tile.textContent = '正在上传…';
+    if (!UPLOAD_TYPES.has(file.type)) {
+      draft.coverError = '只支持 JPG、PNG 图片';
+      render();
+      return;
+    }
+    const text = typedText(platform, section);
     const form = new FormData();
     form.append('slot', String(platform.slot));
+    for (const [field, value] of Object.entries(text)) form.append(field, value);
     form.append('file', file);
+    draft.uploading = true;
+    draft.coverError = '';
+    draft.result = '';
+    render();
     try {
       const response = await request(`${base}cover${query}`, { method: 'POST', body: form });
+      draft.uploading = false;
       if (!response.ok) {
-        draft.result = await errorText(response);
+        draft.coverError = await errorText(response);
         render();
-        sectionOf(platform.slot)?.querySelector('.dist-result')?.classList.add('is-error');
         return;
       }
-      const payload = await response.json();
-      view = payload;
-      draft.uploaded = { ...payload.uploaded, uploaded: true };
-      draft.coverURL = payload.uploaded?.url;
-      draft.result = '';
+      view = await response.json();
+      // 一起提交的字段以服务端为准；没带上的（还不合要求）留着人接着改。
+      const next = (view.platforms || []).find(item => item.slot === platform.slot);
+      const kept = {};
+      if (!('title' in text) && draft.title !== next?.title) kept.title = draft.title;
+      if (!('summary' in text) && draft.summary !== undefined && draft.summary !== next?.summary) kept.summary = draft.summary;
+      drafts.set(platform.slot, kept);
+      kept.result = next?.needs_fix
+        ? `封面已换上，还要改：${next.reason || ''}`
+        : next?.editable ? '封面已换上，正在排队同步' : `封面已换上，${next?.status || '正在同步'}`;
+      polls = 0;
       render();
+      maybePoll();
     } catch {
-      draft.result = '连不上服务，图片没有上传';
+      draft.uploading = false;
+      draft.coverError = '连不上服务，图片没有上传';
       render();
     }
   }
+
+  // 粘贴、拖入的图交给哪个平台：只有一个能改的就是它；否则是刚操作过的那个，再否则第一个缺封面的。
+  let activeSlot = null;
+  function uploadTarget(fromNode) {
+    const editable = (view?.platforms || []).filter(platform => platform.editable);
+    const section = fromNode?.closest?.('.dist-platform');
+    const slot = section ? Number(section.dataset.slot) : activeSlot;
+    return editable.find(platform => platform.slot === slot)
+      || (editable.length === 1 ? editable[0] : editable.find(platform => platform.cover_issue))
+      || null;
+  }
+
+  function imageFile(list) {
+    return Array.from(list || []).find(file => String(file.type || '').startsWith('image/')) || null;
+  }
+
+  function hasFiles(event) {
+    return Array.from(event.dataTransfer?.types || []).includes('Files');
+  }
+
+  function setDragging(slot) {
+    root.querySelectorAll('.dist-platform').forEach(section => {
+      section.querySelector('.dist-cover-upload')?.classList.toggle('is-dragover', slot != null && Number(section.dataset.slot) === slot);
+    });
+  }
+
+  // 整页接住拖入的文件：落在哪个平台就传给哪个，不让浏览器把图片打开、离开这一页。
+  const doc = root.ownerDocument;
+  doc?.addEventListener('dragover', event => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    const target = uploadTarget(event.target);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = target ? 'copy' : 'none';
+    setDragging(target ? target.slot : null);
+  });
+  doc?.addEventListener('dragleave', event => {
+    if (!event.relatedTarget) setDragging(null);
+  });
+  doc?.addEventListener('drop', event => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    setDragging(null);
+    const target = uploadTarget(event.target);
+    const file = imageFile(event.dataTransfer?.files);
+    if (target && file) upload(target, file);
+  });
+  doc?.addEventListener('paste', event => {
+    const file = imageFile(event.clipboardData?.files);
+    if (!file) return; // 粘贴文字照常进输入框
+    const target = uploadTarget(doc.activeElement);
+    if (!target) return;
+    event.preventDefault();
+    upload(target, file);
+  });
 
   function bind() {
     for (const platform of view.platforms || []) {
@@ -328,12 +421,15 @@ export function createDistributePage({ root, articleEl, search, request = authFe
         const summaryInput = section.querySelector('[name="summary"]');
         if (summaryInput) draft.summary = summaryInput.value;
         draft.coverURL = button.dataset.cover;
+        draft.coverError = '';
         render();
       }));
       section.querySelector('[data-upload]')?.addEventListener('change', event => {
         const file = event.target.files?.[0];
-        if (file) upload(platform, section, file);
+        if (file) upload(platform, file);
       });
+      section.addEventListener('focusin', () => { activeSlot = platform.slot; });
+      section.addEventListener('pointerdown', () => { activeSlot = platform.slot; });
       section.querySelector('.dist-form')?.addEventListener('submit', event => {
         event.preventDefault();
         save(platform, section);
