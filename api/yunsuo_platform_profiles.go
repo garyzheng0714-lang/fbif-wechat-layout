@@ -24,6 +24,8 @@ type yunsuoPlatformProfile struct {
 	URLHosts []string
 	// 推送成功后怎么找文章链接（publish_external_links.go）；空表示不自动找。
 	LinkLookup string
+	// 审核卡多平台分发行前的平台图标（api/cardicons/<Icon>.png，平台自己的网站图标）。
+	Icon string
 }
 
 const yunsuoDefaultDailyLimit = 5
@@ -39,6 +41,7 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		DailyLimit: 5,
 		URLHosts:   []string{"toutiao.com", "www.toutiao.com", "m.toutiao.com"},
 		LinkLookup: externalLinkLookupToutiao,
+		Icon:       "platform-toutiao",
 	},
 	// 百家号：还没有人工样稿可比对，版式暂与头条号相同、不设封面下限；拿到样稿后
 	// 只改这里。百度搜索有验证码，文章链接不自动找，由管理员登记。
@@ -48,6 +51,7 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		NativeCaption: true,
 		DailyLimit:    yunsuoDefaultDailyLimit,
 		URLHosts:      []string{"baijiahao.baidu.com", "mbd.baidu.com"},
+		Icon:          "platform-baijiahao",
 	},
 }
 

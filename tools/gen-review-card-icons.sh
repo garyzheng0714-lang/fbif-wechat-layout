@@ -37,7 +37,7 @@ ICONS=(
   eye-off:danger
   send:danger
   send:inverse
-  share-2:inverse
+  share-2:default
   circle-alert:disabled
   network:wathet
 )
@@ -54,6 +54,15 @@ for entry in "${ICONS[@]}"; do
   rsvg-convert -w 48 -h 48 -o "$OUT/$name-$variant.png" "$SRC/$name-$variant.svg"
   echo "$OUT/$name-$variant.png"
 done
+
+# 多平台分发行前的平台图标（2026-10-12）：各平台自己的网站图标，品牌色、不随按钮配色变化。
+# 头条号 favicon 是 256px，缩到 48；百家号 favicon 最大只有 32px，原样用（卡里显示 16px）。
+curl -fsS -o "$SRC/toutiao.ico" "https://www.toutiao.com/favicon.ico"
+sips -s format png -z 48 48 "$SRC/toutiao.ico" --out "$OUT/platform-toutiao.png" >/dev/null
+echo "$OUT/platform-toutiao.png"
+curl -fsSL -o "$SRC/baijiahao.ico" "https://baijiahao.baidu.com/favicon.ico"
+sips -s format png "$SRC/baijiahao.ico" --out "$OUT/platform-baijiahao.png" >/dev/null
+echo "$OUT/platform-baijiahao.png"
 
 # 网站图标：mp.weixin.qq.com 首页声明的 shortcut icon。
 curl -fsS -o "$SRC/wechat.ico" "https://res.wx.qq.com/a/wx_fed/assets/res/NTI4MWU5.ico"

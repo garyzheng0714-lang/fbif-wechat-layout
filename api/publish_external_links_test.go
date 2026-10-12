@@ -271,7 +271,7 @@ func TestExternalDistributionManualRegistration(t *testing.T) {
 	}
 	got := mustJob(t, env, job.ID)
 	body := panelJSON(t, reviewCardFindPanel(buildReviewDoneCard(got), "多平台分发"))
-	if !strings.Contains(body, ">人工已发</text_tag>") || !strings.Contains(body, "多平台分发（头条号已发布 · 百家号已发布）") {
+	if !strings.Contains(body, "<font color='green'>人工已发</font>") || !strings.Contains(body, "多平台分发（头条号已发布 · 百家号已发布）") {
 		t.Fatalf("卡片应显示头条号人工已发、两个平台都已同步: %s", body)
 	}
 

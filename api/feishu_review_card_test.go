@@ -352,6 +352,33 @@ func panelJSON(t *testing.T, panel map[string]any) string {
 	return strings.NewReplacer(`\u003c`, "<", `\u003e`, ">", `\u0026`, "&").Replace(cardJSON(t, panel))
 }
 
+// reviewCardTitleRowHasButton 折叠区里有一行：左栏是以 titlePrefix 开头的组标题，右栏是 label 按钮。
+func reviewCardTitleRowHasButton(panel map[string]any, titlePrefix, label string) bool {
+	found := false
+	var walk func(any)
+	walk = func(node any) {
+		switch value := node.(type) {
+		case map[string]any:
+			if columns, ok := value["columns"].([]any); ok && len(columns) == 2 {
+				left := fmt.Sprint(columns[0])
+				right, _ := columns[1].(map[string]any)
+				if strings.Contains(left, titlePrefix) && strings.Contains(fmt.Sprint(right["elements"]), label) {
+					found = true
+				}
+			}
+			for _, child := range value {
+				walk(child)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+			}
+		}
+	}
+	walk(panel)
+	return found
+}
+
 // reviewCardFindPanel 取卡片里标题以 prefix 开头的折叠面板。
 func reviewCardFindPanel(card map[string]any, prefix string) map[string]any {
 	var found map[string]any
@@ -397,8 +424,15 @@ func TestReviewCardDistributionPanelFoldsPlatforms(t *testing.T) {
 		t.Fatalf("原创已发布稿应有收起的多平台分发折叠区: %s", cardJSON(t, card))
 	}
 	body := panelJSON(t, panel)
-	if !strings.Contains(body, "多平台分发（头条号未同步 · 百家号未同步）") || strings.Count(body, ">未同步</text_tag>") != 2 || !strings.Contains(body, `"content":"同步至头条号、百家号"`) {
+	if !strings.Contains(body, "多平台分发（头条号未同步 · 百家号未同步）") || strings.Count(body, "<font color='grey'>未同步</font>") != 2 || !strings.Contains(body, `"content":"同步至头条号、百家号"`) {
 		t.Fatalf("未分发时应列出两个平台并给分发按钮: %s", body)
+	}
+	// 版式照渠道列表先例：状态是靠右的彩色文字，不用胶囊标签、不用分隔线；按钮在组标题右侧。
+	if strings.Contains(body, "text_tag") || strings.Contains(body, `"tag":"hr"`) || strings.Count(body, `"text_align":"right"`) != 2 {
+		t.Fatalf("状态应为靠右文字，不用胶囊和分隔线: %s", body)
+	}
+	if !reviewCardTitleRowHasButton(panel, "**#72 ", "同步至头条号、百家号") {
+		t.Fatalf("分发按钮应在「#72 标题」同一行右侧: %s", body)
 	}
 	var outside []map[string]any
 	reviewCardButtons(map[string]any{"elements": card["body"].(map[string]any)["elements"].([]any)[0]}, &outside)
@@ -415,7 +449,7 @@ func TestReviewCardDistributionPanelFoldsPlatforms(t *testing.T) {
 	baijia.ContentPK, baijia.Remark = "pk-1", "授权过期"
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job}), "多平台分发"))
-	for _, want := range []string{"多平台分发（头条号已发布 · 百家号失败）", "<text_tag color='green'>已发布</text_tag>", "[这个女性能量饮料，靠青汁粉走红了](https://www.toutiao.com/article/7560000000000000000/)", "<text_tag color='red'>失败</text_tag>", "账号登录失效，在云梭插件更新登录后云梭会自动重试"} {
+	for _, want := range []string{"多平台分发（头条号已发布 · 百家号失败）", "<font color='green'>已发布</font>", "头条号　[这个女性能量饮料，靠青汁粉走红了](https://www.toutiao.com/article/7560000000000000000/)", "<font color='red'>失败</font>", "<font color='grey'>账号登录失效，在云梭插件更新登录后云梭会自动重试</font>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("折叠区缺少 %q: %s", want, body)
 		}
@@ -428,14 +462,14 @@ func TestReviewCardDistributionPanelFoldsPlatforms(t *testing.T) {
 	baijia.Title = job.Title
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job}), "多平台分发"))
-	if !strings.Contains(body, "[查看文章](https://www.toutiao.com/article/7560000000000000000/)") || strings.Contains(body, job.Title) {
-		t.Fatalf("同标题时不应重复标题: %s", body)
+	if !strings.Contains(body, "头条号　[查看文章](https://www.toutiao.com/article/7560000000000000000/)") || strings.Count(body, job.Title) != 1 {
+		t.Fatalf("同标题时平台行不应重复标题（只在组标题出现一次）: %s", body)
 	}
 	// 多篇：每节先写「#编号 标题」，与风险核查区一致。
 	second := reviewCardTestJob(publishStagePublished)
 	second.ID, second.Title = 73, "第二篇原创文章"
 	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job, second}), "多平台分发"))
-	if !strings.Contains(body, "**#72 ") || !strings.Contains(body, "**#73 第二篇原创文章**") || !strings.Contains(body, "多平台分发（头条号 1/2 · 百家号 0/2）") || strings.Count(body, `"tag":"hr"`) != 1 {
+	if !strings.Contains(body, "**#72 ") || !strings.Contains(body, "**#73 第二篇原创文章**") || !strings.Contains(body, "多平台分发（头条号 1/2 · 百家号 0/2）") {
 		t.Fatalf("多篇时每节应有编号标题、汇总按平台行数: %s", body)
 	}
 
@@ -444,7 +478,7 @@ func TestReviewCardDistributionPanelFoldsPlatforms(t *testing.T) {
 	baijia.Error = "封面图尺寸过小"
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job}), "多平台分发"))
-	if !strings.Contains(body, "未提交") || !strings.Contains(body, "封面图太小，换封面后重新同步") || !strings.Contains(body, `"content":"重新同步至百家号"`) || !strings.Contains(body, "重新同步至百家号？") {
+	if !strings.Contains(body, "<font color='grey'>封面图太小，换封面后重新同步</font>") || !strings.Contains(body, `"content":"重新同步至百家号"`) || !strings.Contains(body, "重新同步至百家号？") {
 		t.Fatalf("受理前失败应给只推百家号的重试按钮: %s", body)
 	}
 
@@ -464,6 +498,22 @@ func TestReviewCardDistributionPanelFoldsPlatforms(t *testing.T) {
 	}
 	if body := cardJSON(t, buildReviewDoneCard(repost)); !strings.Contains(body, "仅发布至 FoodTalks") {
 		t.Fatalf("单篇卡应说明转载稿不外发: %s", body)
+	}
+
+	// 有图标时平台行前是平台自己的网站图标，按钮带分享图标；单篇卡不走图标替换，绝不能留内部标记。
+	job.ExternalDistributionLanes = []publishExternalLane{toutiao}
+	icons := reviewCardIcons{"platform-toutiao": "img_toutiao", "platform-baijiahao": "img_baijia", "share-2-default": "img_share"}
+	body = panelJSON(t, reviewCardFindPanel(buildReviewBatchCardWithIcons([]publishJob{job}, icons), "多平台分发"))
+	for _, want := range []string{`"img_key":"img_toutiao"`, `"img_key":"img_baijia"`, `"img_key":"img_share"`, `"size":"16px 16px"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("缺少 %s: %s", want, body)
+		}
+	}
+	if body := cardJSON(t, buildReviewDoneCard(job)); strings.Contains(body, reviewCardIconField) || !strings.Contains(body, "同步至百家号") {
+		t.Fatalf("单篇卡应有分发按钮且不得残留图标标记: %s", body)
+	}
+	if body := panelJSON(t, reviewCardFindPanel(buildReviewBatchCard([]publishJob{job}), "多平台分发")); strings.Contains(body, `"tag":"img"`) || strings.Contains(body, reviewCardIconField) {
+		t.Fatalf("没有图标时不放空图、不留标记: %s", body)
 	}
 }
 
