@@ -238,6 +238,33 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 	}
 }
 
+func TestYunsuoShortTitleBreaksAtPunctuation(t *testing.T) {
+	// 2026-10-12 头条号后台实拍：short_title 硬截 20 字，标题停在半个词上。
+	cases := []struct{ title, want string }{
+		{"三得利卖出100亿瓶绿茶，背后藏着一家236年的老茶铺", "三得利卖出100亿瓶绿茶"},
+		{"估值超151亿元！蛋白棒赛道创业，他连赢了两次", "估值超151亿元！蛋白棒赛道创业"},
+		{"英国销售额第一的蛋白棒，亿滋CEO夸它“比美国所有蛋白棒都好吃”", "英国销售额第一的蛋白棒"},
+		{"元气森林推出天真白日梦气泡水；古茗上线HPP瓶装冷萃茶 | 创新周报", "元气森林推出天真白日梦气泡水"},
+		{"这家300年日本老茶铺，为何成了全球最难抢的抹茶品牌？", "这家300年日本老茶铺"},
+		{"把茶做成零食，这家老茶铺只开6家店", "把茶做成零食，这家老茶铺只开6家店"},
+		// 断点在引号里会留下半边引号，宁可硬截。
+		{"新品“轻负担零添加高蛋白，好喝不胖还便宜”", "新品“轻负担零添加高蛋白，好喝不胖还便宜"},
+		// 唯一的断点前不足 8 字：硬截。
+		{"蛋白棒，亿滋首席执行官称赞这是全英国最好吃的蛋白棒", "蛋白棒，亿滋首席执行官称赞这是全英国最好"},
+	}
+	for _, tc := range cases {
+		got := yunsuoTitleVariant(tc.title, "", 8, 20)
+		if got != tc.want {
+			t.Errorf("short_title(%q) = %q，想要 %q", tc.title, got, tc.want)
+		}
+	}
+	long := yunsuoTitleVariant("三得利卖出100亿瓶绿茶，背后藏着一家236年的老茶铺",
+		"三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年、年收60亿日元的老茶铺。", 41, 60)
+	if want := "三得利卖出100亿瓶绿茶，背后藏着一家236年的老茶铺｜三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年"; long != want {
+		t.Errorf("long_title = %q，想要 %q", long, want)
+	}
+}
+
 func TestYunsuoKeywordsRespectDocumentedLimit(t *testing.T) {
 	keywords := yunsuoKeywords([]string{strings.Repeat("食品创新", 100), "饮料", "消费"})
 	if got := len([]rune(keywords)); got > 255 {

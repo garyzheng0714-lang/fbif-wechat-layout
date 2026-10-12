@@ -460,7 +460,42 @@ func yunsuoTitleVariant(base, supplement string, minRunes, maxRunes int) string 
 	for len([]rune(candidate)) < minRunes {
 		candidate += "行业观察"
 	}
-	return truncateYunsuoRunes(candidate, maxRunes)
+	return truncateYunsuoTitle(candidate, minRunes, maxRunes)
+}
+
+// truncateYunsuoTitle 超长时在标点处断开，不截在半个词上。2026-10-12：头条号用的是
+// short_title（≤20 字），硬截出了「三得利卖出100亿瓶绿茶，背后藏着一家2」。
+// 取不短于 minRunes、引号括号配平的最长断点；找不到才硬截。
+func truncateYunsuoTitle(value string, minRunes, maxRunes int) string {
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	for cut := maxRunes; cut >= minRunes && cut > 0; cut-- {
+		// 句末标点留在标题里；逗号、分号、竖线、空格等停顿处断开时丢掉。
+		if !strings.ContainsRune("！!？?。", runes[cut-1]) && !yunsuoTitlePause(runes[cut]) {
+			continue
+		}
+		head := strings.TrimRightFunc(string(runes[:cut]), yunsuoTitlePause)
+		if len([]rune(head)) >= minRunes && yunsuoTitleBalanced(head) {
+			return head
+		}
+	}
+	return string(runes[:maxRunes])
+}
+
+func yunsuoTitlePause(r rune) bool {
+	return unicode.IsSpace(r) || strings.ContainsRune("，,；;：:、｜|", r)
+}
+
+func yunsuoTitleBalanced(value string) bool {
+	for _, pair := range []string{"“”", "‘’", "《》", "（）", "()", "【】", "「」"} {
+		open, close := []rune(pair)[0], []rune(pair)[1]
+		if strings.Count(value, string(open)) != strings.Count(value, string(close)) {
+			return false
+		}
+	}
+	return strings.Count(value, "\"")%2 == 0
 }
 
 func yunsuoKeywords(tags []string) string {
