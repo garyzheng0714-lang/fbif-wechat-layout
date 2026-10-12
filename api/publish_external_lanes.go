@@ -97,15 +97,6 @@ func externalDistributionAnyProcessing(job publishJob) bool {
 	return false
 }
 
-func externalDistributionHasSafeRetry(job publishJob) bool {
-	for _, lane := range job.ExternalDistributionLanes {
-		if externalLaneCanSafeRetry(lane) {
-			return true
-		}
-	}
-	return false
-}
-
 // externalDistributionCoveredAccounts 有 lane 的账号（不论结果）。失败的也算：云梭对受理后
 // 的失败会自己重试，再推一次就会重复。账号为空的 lane（迁移时缺账号的旧数据）视为覆盖全部。
 func externalDistributionCoveredAccounts(job publishJob) (map[string]bool, bool) {

@@ -366,6 +366,7 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
       ownersStale = payload.stale === true;
       savedOwners = ownersStale ? [] : ownerIDs(payload.owners);
       owners = [...savedOwners];
+      if (payload.candidates_error) ownersIssue = issue('server', '读取审核群成员失败', String(payload.candidates_error));
     } else {
       // 成员读不到不挡其他设置的保存；这一步单独显示原因。
       ownersIssue = deliveryFailureIssue(ownersResult.reason, '读取审核群成员失败');

@@ -483,4 +483,13 @@ func TestDistributionOwnersFromReviewChatMembers(t *testing.T) {
 	if err != nil || len(kept.DistributionOwners) != 1 {
 		t.Fatalf("同应用改群应保留负责人：%+v %v", kept, err)
 	}
+	// 读不到群成员（飞书暂时不通、还没配应用）不算接口失败：后台照常打开，原因单独给出。
+	env.pipeline.distributionOwnerLister = func(context.Context, string, string) ([]publishDistributionOwner, error) {
+		return nil, errors.New("飞书暂时不可用")
+	}
+	rec = doPublishReq(mux, http.MethodGet, path, "", true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"candidates_error":"飞书暂时不可用"`) ||
+		!strings.Contains(rec.Body.String(), `"candidates":[]`) || !strings.Contains(rec.Body.String(), `"open_id":"ou_a"`) {
+		t.Fatalf("读不到成员应 200 并带原因、保留已选的人：%d %s", rec.Code, rec.Body.String())
+	}
 }

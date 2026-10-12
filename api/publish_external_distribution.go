@@ -87,12 +87,6 @@ func publishExternalDistributionProcessing(state string) bool {
 
 const publishExternalAdminRetryActor = "system:admin_retry"
 
-// publishExternalDistributionCanSafeRetry 有平台在云梭受理前就失败（没拿到 content_pk），
-// 修正后可安全重推这些平台。拿到单号的平台失败不走这里，避免重复稿。
-func publishExternalDistributionCanSafeRetry(job publishJob) bool {
-	return externalDistributionHasSafeRetry(job)
-}
-
 // 管理员重发只允许已发布任务里对账中的平台：云梭已给单号或结果不明，本地确认上一份
 // payload 字段错误、必须换正确正文再 POST 一次。飞书卡片不得走这条路。
 func publishExternalDistributionCanReplaceReconcile(job publishJob) bool {
@@ -634,18 +628,6 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		return updated, fmt.Errorf("%w：%s", errExternalLanesNotQueued, strings.Join(append(failures, fixNames...), "；"))
 	}
 	return updated, nil
-}
-
-// runExternalDistribution 推进这篇稿所有 lane（恢复与测试用）。
-func (p *publishPipeline) runExternalDistribution(jobID int64) {
-	job, err := p.store.byID(jobID)
-	if err != nil {
-		log.Printf("publish: load external distribution job %d failed: %v", jobID, err)
-		return
-	}
-	for _, lane := range job.ExternalDistributionLanes {
-		p.runExternalLane(jobID, lane.AccountID)
-	}
 }
 
 func (p *publishPipeline) runExternalLane(jobID int64, accountID string) {

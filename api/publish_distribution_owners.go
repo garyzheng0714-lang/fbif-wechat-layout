@@ -162,12 +162,18 @@ func registerPublishDistributionOwnerRoutes(mux *http.ServeMux, p *publishPipeli
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
 		candidates, settings, err := p.publishDistributionOwnerCandidates(ctx)
-		if err != nil {
+		if err != nil && p.deliverySettings == nil {
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
 		}
+		// 读不到群成员（还没配推送应用、飞书暂时不通）不算接口失败：已选的人照样返回，
+		// 原因放在 candidates_error，后台在这一步里单独说明，不影响其他设置。
 		view := publishDistributionOwnersView(settings)
 		view["candidates"] = candidates
+		if err != nil {
+			view["candidates"] = []publishDistributionOwner{}
+			view["candidates_error"] = err.Error()
+		}
 		writeJSON(w, http.StatusOK, view)
 	})
 

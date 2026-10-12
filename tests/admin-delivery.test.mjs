@@ -253,7 +253,8 @@ test('发布链路：成员读不到时不挡其他设置保存', async () => {
       return Response.json({ settings: { app_profile_id: 'review-app', chat_ids: ['oc_review'] }, apps: [{ id: 'review-app', name: '内容审核应用' }] });
     }
     if (path === '/api/feishu/chats') return Response.json({ chats: [{ chat_id: 'oc_review', name: '内容审核群' }] });
-    return Response.json({ error: '读取群成员失败 code=99991672' }, { status: 503 });
+    // 服务端读不到群成员时照常 200，把原因放在 candidates_error（不让后台出现失败请求）。
+    return Response.json({ owners: [], stale: false, candidates: [], candidates_error: '读取群成员失败 code=99991672' });
   };
   let controller;
   const rerender = () => {
@@ -263,5 +264,6 @@ test('发布链路：成员读不到时不挡其他设置保存', async () => {
   controller = createAdminDeliveryController({ getOverlay: () => overlay, rerender, request });
   rerender();
   await waitFor(() => overlay.textContent.includes('读取审核群成员失败'));
+  assert.match(overlay.textContent, /code=99991672/);
   assert.equal(controller.footerState().message, '当前发布链路已保存');
 });
