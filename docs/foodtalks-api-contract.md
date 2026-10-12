@@ -126,6 +126,8 @@ POST publishStatus=0（草稿进站，外界不可见）
 1. 发出或刷新待审核卡前 best effort 查询；命中时持久化 `site_duplicate_news_id` 并在卡片标红。查询失败只记 WARN，不阻断卡片。
 2. 首次审核公开的 `stagePublicize` 在公开 intent 落盘前重新查询；命中或查询失败都 fail closed。此时尚未进入 FoodTalks 外调窗口，恢复后可以安全重试。
 
+后台手工发布对账（`syncManualCMSPublications`）也走这个接口：北京时间 8:30–18:00 每 2 分钟、其余每 30 分钟一轮，每篇未发布稿查一次。2026-10-12 网站侧反馈分页查询过多（当时 39 篇 7–9 月积压稿每轮各查一次，约 1,170 次/小时），之后只对账 7 天内建单或发过审核卡的稿；更老的稿在后台手工发布后用 `POST /api/publish/jobs/{id}/ack-cms-published` 补记。
+
 边界：这道硬闸目前只覆盖首次 `stagePublicize`，`stageRepublish` 尚未接入；不能把当前能力描述成“每次重新公开都防重”。运营在 CMS 手工发布或编辑过的稿件始终优先，批量修复不得用流水线库存覆盖。
 
 ## 11. 未决问题（转给网站后端 / Phase 0）

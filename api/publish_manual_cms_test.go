@@ -225,6 +225,64 @@ func TestSyncManualCMSPublicationsLeavesDraftJobsAlone(t *testing.T) {
 	}
 }
 
+func TestSyncManualCMSPublicationsSkipsStaleJobs(t *testing.T) {
+	// 2026-10-12 网站侧反馈分页查询过多：39 篇待审稿（多为 7、8 月积压）每 2 分钟
+	// 各调一次标题检索。超过 7 天没建单也没发卡的稿不再定时对账。
+	env := newPublishTestEnv(t)
+	now := time.Now().UTC()
+	stale := seedManualCMSJob(t, env, publishStageAwaitingReview, 63101, "七月积压待审稿")
+	resent := seedManualCMSJob(t, env, publishStageAwaitingReview, 63102, "重新同步后刚发卡")
+	fresh := seedManualCMSJob(t, env, publishStageAwaitingReview, 63103, "今天刚建的待审稿")
+	for _, tc := range []struct {
+		id         int64
+		createdAt  time.Time
+		cardSentAt time.Time
+	}{
+		{stale.ID, now.Add(-80 * 24 * time.Hour), now.Add(-79 * 24 * time.Hour)},
+		{resent.ID, now.Add(-80 * 24 * time.Hour), now.Add(-time.Hour)},
+	} {
+		if _, err := env.store.update(tc.id, func(j *publishJob) {
+			j.CreatedAt = tc.createdAt.Format(time.RFC3339)
+			j.NotificationSentAt = tc.cardSentAt.Format(time.RFC3339)
+		}); err != nil {
+			t.Fatalf("backdate #%d: %v", tc.id, err)
+		}
+	}
+	env.ft.mu.Lock()
+	env.ft.searchRecords = []foodTalksNewsListItem{
+		{ID: 63101, Title: stale.Title, PublishStatus: foodTalksPublishStatusPublished},
+		{ID: 63102, Title: resent.Title, PublishStatus: foodTalksPublishStatusPublished},
+		{ID: 63103, Title: fresh.Title, PublishStatus: foodTalksPublishStatusPublished},
+	}
+	env.ft.mu.Unlock()
+
+	env.pipeline.syncManualCMSPublications(context.Background())
+
+	env.ft.mu.Lock()
+	calls := env.ft.searchCalls
+	env.ft.mu.Unlock()
+	// 刚发卡与新建各查一次，再加两次改卡前的复核。
+	if calls != 4 {
+		t.Fatalf("应只检索两篇近期稿（各对账+复核共 4 次），实际 %d 次", calls)
+	}
+	for _, want := range []struct {
+		id    int64
+		stage string
+	}{
+		{stale.ID, publishStageAwaitingReview},
+		{resent.ID, publishStagePublished},
+		{fresh.ID, publishStagePublished},
+	} {
+		got, err := env.store.byID(want.id)
+		if err != nil {
+			t.Fatalf("reload #%d: %v", want.id, err)
+		}
+		if got.Stage != want.stage {
+			t.Fatalf("#%d 应为 %s，实际 %s", want.id, want.stage, got.Stage)
+		}
+	}
+}
+
 func TestCMSPublicationSyncWaitFollowsTidalHours(t *testing.T) {
 	cst := time.FixedZone("CST", 8*3600)
 	cases := []struct {

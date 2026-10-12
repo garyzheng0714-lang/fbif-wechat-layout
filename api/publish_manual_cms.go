@@ -20,6 +20,10 @@ const (
 	cmsSyncBusyEndHour     = 18
 	cmsSyncBusyInterval    = 2 * time.Minute
 	cmsSyncQuietInterval   = 30 * time.Minute
+	// 定时对账只看最近有动静的稿：生产上 24 次后台手工发布全在建单/发卡后 51 小时内，
+	// 而 7、8 月积压的待审稿每 2 分钟各调一次网站标题检索（/news/admin/news/page），
+	// 2026-10-12 网站侧反馈分页查询过多。更老的稿手工发布后用 ack-cms-published 补记。
+	cmsSyncLookback = 7 * 24 * time.Hour
 )
 
 func foodTalksAlreadyPublishedDraftError(err error) bool {
@@ -208,6 +212,7 @@ func cmsPublicationNextWindow(t time.Time) time.Duration {
 
 // startCMSPublicationSync 后台把草稿公开后，群卡不会自己变。北京时间 8:30–18:00
 // 每 2 分钟对账一次，其余时间每 30 分钟；临近时段切换时提前醒来，避免睡过上班点。
+// 只对账最近 cmsSyncLookback 内建单或发过卡的稿。
 func (p *publishPipeline) startCMSPublicationSync() {
 	if p == nil {
 		return
@@ -218,6 +223,23 @@ func (p *publishPipeline) startCMSPublicationSync() {
 			time.Sleep(p.cmsPublicationSyncInterval())
 		}
 	})
+}
+
+// cmsPublicationSyncRecent 建单或最近一次发卡不早于 since。重新同步会重发审核卡，
+// 稿子随之回到对账范围。时间读不出来时照旧对账，宁多查不漏改卡。
+func cmsPublicationSyncRecent(job publishJob, since time.Time) bool {
+	parsed := false
+	for _, stamp := range []string{job.CreatedAt, job.NotificationSentAt} {
+		at, err := time.Parse(time.RFC3339, stamp)
+		if err != nil {
+			continue
+		}
+		parsed = true
+		if !at.Before(since) {
+			return true
+		}
+	}
+	return !parsed
 }
 
 func (p *publishPipeline) syncManualCMSPublications(ctx context.Context) {
@@ -232,8 +254,10 @@ func (p *publishPipeline) syncManualCMSPublications(ctx context.Context) {
 		log.Printf("publish: 读取后台发布对账任务失败：%v", err)
 		return
 	}
+	since := pipelineNow(p).Add(-cmsSyncLookback)
 	for _, job := range jobs {
-		if job.Stage == publishStagePublished || !publishJobCanAckManualCMS(job) {
+		if job.Stage == publishStagePublished || !publishJobCanAckManualCMS(job) ||
+			!cmsPublicationSyncRecent(job, since) {
 			continue
 		}
 		if _, published, checkErr := p.findOwnPublishedCMSNews(ctx, job); checkErr != nil {
