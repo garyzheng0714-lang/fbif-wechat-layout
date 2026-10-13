@@ -131,7 +131,7 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 //	标题行    ［状态］ + 链到网站的粗体标题（1 行）
 //	摘要行    灰色摘要（1 行）
 //	信息行    转载 · #任务号 + 蓝色标签（1 行，标签最多 3 个）
-//	按钮行    发布 · 原文 · 下线 · 重新同步至FoodTalks（1 行）
+//	按钮行    发布 · 原文 · 重新同步至FoodTalks · 下线（1 行）
 //
 // 重新同步的结果在两栏下面单独一行，横跨整个文章块（2026-10-13 用户：「单独一行，覆盖整个卡片
 // 宽度的一行，不是图片下的一行、也不是按钮下的一行」）。无封面的旧稿只有右栏。
@@ -387,7 +387,8 @@ func reviewBatchRiskSection(jobs []publishJob) map[string]any {
 }
 
 // reviewBatchButtonRow 一行最小号按钮（2026-10-10 用户定）：推进类主操作（发布 / 重新发布）
-// → 原文 → 下线 → 重新同步至FoodTalks（最右）。网站文章由标题链接打开，不另设按钮。
+// → 原文 → 重新同步至FoodTalks → 下线（最右，2026-10-13 用户：「把下线放在三个按钮的最右边」）。
+// 网站文章由标题链接打开，不另设按钮。
 // 重新同步结果不在这一行，在文章块底部单独一行（见 reviewBatchArticleBlock）。
 // 只表示状态、点不了的按钮（不可下线、发布中、已驳回等）不出，状态标签已经说明。
 func reviewBatchButtonRow(job publishJob) map[string]any {
@@ -399,11 +400,11 @@ func reviewBatchButtonRow(job publishJob) map[string]any {
 	if source := reviewBatchSourceButton(job); source != nil {
 		buttons = append(buttons, source)
 	}
-	if action != nil && !leading {
-		buttons = append(buttons, action)
-	}
 	if resync := reviewCardSourceResyncButton(job); resync != nil {
 		buttons = append(buttons, resync)
+	}
+	if action != nil && !leading {
+		buttons = append(buttons, action)
 	}
 	columns := make([]any, 0, len(buttons))
 	for _, button := range buttons {

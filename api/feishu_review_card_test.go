@@ -620,8 +620,8 @@ func reviewCardActionButtons(card map[string]any) []map[string]any {
 	return out
 }
 
-// TestReviewBatchCardButtonOrderAndSubtitle 待审核：发布 → 原文；已发布：原文 → 下线 →
-// 重新同步至FoodTalks（最右）。全批同一状态时副标题只说一次数；无封面旧稿只剩文字栏。
+// TestReviewBatchCardButtonOrderAndSubtitle 待审核：发布 → 原文；已发布：原文 →
+// 重新同步至FoodTalks → 下线（最右）。全批同一状态时副标题只说一次数；无封面旧稿只剩文字栏。
 func TestReviewBatchCardButtonOrderAndSubtitle(t *testing.T) {
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	now := time.Now().UTC()
@@ -662,8 +662,8 @@ func TestReviewBatchCardButtonOrderAndSubtitle(t *testing.T) {
 	for _, button := range publishedButtons {
 		publishedOrder = append(publishedOrder, fmt.Sprint(button["text"].(map[string]any)["content"]))
 	}
-	if strings.Join(publishedOrder, " ") != "原文 下线 重新同步至FoodTalks" {
-		t.Fatalf("已发布稿按钮应为原文、下线、重新同步至FoodTalks（最右），实际 %v", publishedOrder)
+	if strings.Join(publishedOrder, " ") != "原文 重新同步至FoodTalks 下线" {
+		t.Fatalf("已发布稿按钮应为原文、重新同步至FoodTalks、下线（最右），实际 %v", publishedOrder)
 	}
 	if !strings.Contains(body, "8月20日 · 已发布1篇") {
 		t.Fatalf("全批已发布时副标题应为「已发布N篇」: %s", body)
