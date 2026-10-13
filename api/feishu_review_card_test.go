@@ -377,8 +377,9 @@ func distributionSectionJSON(t *testing.T, card map[string]any) string {
 	for i, element := range elements {
 		node, _ := element.(map[string]any)
 		if node["tag"] == "markdown" && node["content"] == "**分发到其他平台**" {
-			if i == 0 || elements[i-1].(map[string]any)["tag"] != "hr" {
-				t.Fatalf("分发区前应有分割线: %s", cardJSON(t, card))
+			// 2026-10-13 用户：「这根线可以不要」——区标题上方不再有分割线。
+			if i > 0 && elements[i-1].(map[string]any)["tag"] == "hr" {
+				t.Fatalf("分发区前不应再有分割线: %s", cardJSON(t, card))
 			}
 			return panelJSON(t, map[string]any{"elements": elements[i+1:]})
 		}

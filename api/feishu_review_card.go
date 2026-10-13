@@ -63,7 +63,7 @@ func buildReviewBatchCardWithIcons(jobs []publishJob, icons reviewCardIcons) map
 	if risk := reviewBatchRiskSection(jobs); risk != nil {
 		elements = append(elements, risk)
 	}
-	// 分发区在最底下，分割线隔开、常显（2026-10-12 用户裁定，见 feishu_review_card_distribution.go）。
+	// 分发区在最底下、常显，区标题上方不画分割线（2026-10-12/13 用户裁定，见 feishu_review_card_distribution.go）。
 	elements = append(elements, reviewCardDistributionElements(jobs, true, true, icons)...)
 	card := map[string]any{
 		"schema": "2.0",

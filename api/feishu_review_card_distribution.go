@@ -3,7 +3,7 @@ package main
 // feishu_review_card_distribution.go — 审核卡底部的「分发到其他平台」区。
 //
 // 2026-10-12 用户裁定：「分发区域可以做成一个专门的区域，不用事先隐藏起来……相当于加一个分割线，
-// 底部去排版分发的内容」；同日补充：「整个卡片应该分两个区域」「上半部分这三个是不变的」「一般只有
+// 底部去排版分发的内容」（2026-10-13 又说「这根线可以不要」：分割线去掉，只留区标题和间距）；同日补充：「整个卡片应该分两个区域」「上半部分这三个是不变的」「一般只有
 // 一篇是原创……得用一个单独的区域呈现出来；当然也可以用容器循环组件」「同一篇文章可能会同时发到
 // 百家号、头条号、大鱼号、知乎等五六家平台……做一个循环容器组件」。
 //
@@ -31,9 +31,12 @@ const (
 	// 平台行之间、表头与平台行之间的间距；文章块外框沿用上半部分文章块的样式。
 	reviewCardPlatformSpacing = "12px"
 	reviewCardGroupCoverSize  = 36
+	// 区标题与上方文章块/风险区之间：卡片根间距 8px 再加 8px，作为两个区的分隔。
+	reviewCardDistributionHeadingMargin = "8px 0px 0px 0px"
 )
 
-// reviewCardDistributionElements 根级元素：分割线、区标题，再是每篇原创一块。
+// reviewCardDistributionElements 根级元素：区标题，再是每篇原创一块。区标题上方不画分割线，
+// 只多留一段间距（2026-10-13 用户：「这根线可以不要」）。
 func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate bool, icons reviewCardIcons) []any {
 	cfg, cfgErr := loadYunsuoConfig()
 	var targets []yunsuoAccountTarget
@@ -49,8 +52,7 @@ func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate boo
 		return nil
 	}
 	return append([]any{
-		map[string]any{"tag": "hr", "margin": "4px 0px 0px 0px"},
-		map[string]any{"tag": "markdown", "content": "**分发到其他平台**"},
+		map[string]any{"tag": "markdown", "content": "**分发到其他平台**", "margin": reviewCardDistributionHeadingMargin},
 	}, body...)
 }
 
