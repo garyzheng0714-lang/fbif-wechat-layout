@@ -1154,7 +1154,7 @@ func inferCompatibleCaptionBindings(
 		}
 		// A source line is a natural terminal for a caption group. This keeps
 		// the following body from inheriting caption state.
-		if first.ImageSourceLine {
+		if endsCaptionGroup(first) {
 			continue
 		}
 
@@ -1173,12 +1173,19 @@ func inferCompatibleCaptionBindings(
 				Proof:     CaptionProofLegacyAssociation,
 				Reason:    compatibleCaptionReason(candidate, true),
 			}
-			if candidate.ImageSourceLine {
+			if endsCaptionGroup(candidate) {
 				break
 			}
 		}
 	}
 	return bindings
+}
+
+// endsCaptionGroup: a source line closes the caption group. 「图为…」 is a
+// description that also signals a caption, but the source line may still
+// follow it (#178: 图为…效果图 → 图片来源：…).
+func endsCaptionGroup(obs ObservedBlock) bool {
+	return obs.ImageSourceLine && !strings.HasPrefix(strings.TrimLeft(strings.TrimSpace(obs.Text), "（([【 "), "图为")
 }
 
 func isCompatibleCaptionTextCandidate(obs ObservedBlock, profile articleProfile) bool {

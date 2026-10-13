@@ -1557,6 +1557,26 @@ func TestImageSourceLeadVariantsStayCaptionAfterContentImage(t *testing.T) {
 	}
 }
 
+// #178（2026-09-09 发布）：「图为…」是图片说明，不是来源行，不能在它这里收尾，
+// 否则后面的「图片来源」落进正文。
+func TestImageDescriptionLeadKeepsFollowingSourceInCaption(t *testing.T) {
+	html := jsContentWrap(
+		`<p>超市内部采用宽通道、柔光氛围灯、分区场景化陈列的设计理念，将品牌内核贯穿全场，动线清晰流畅。</p>` +
+			`<p><img data-src="https://mmbiz.qpic.cn/sz_mmbiz_jpg/store.jpg" data-w="1080" data-h="720" data-ratio="0.667"></p>` +
+			`<section style="text-align: center;"><span style="font-size: 12px;color: rgb(136, 136, 136);">图为Green&amp;Health钱湾店效果图</span></section>` +
+			`<section style="text-align: center;"><section style="text-align: center;"><span style="font-size: 12px;color: rgb(136, 136, 136);">图片来源：Green&amp;Health</span></section></section>` +
+			`<p>根据体验场景，门店“切割”为精品生鲜市集区、全球甄选好物区、自有品牌体验区，最终促成购买。</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	for _, needle := range []string{"图为Green&Health钱湾店效果图", "图片来源：Green&Health"} {
+		if b := findBlockByText(blocks, needle); b == nil || b.K != "cap" {
+			t.Fatalf("%q 必须是图注，got %v; kinds=%v", needle, b, findKinds(blocks))
+		}
+	}
+	if b := findBlockByText(blocks, "根据体验场景"); b == nil || b.K != "txt" {
+		t.Fatalf("图注后的正文必须回到正文，got %v; kinds=%v", b, findKinds(blocks))
+	}
+}
+
 func TestFullSentenceAfterMarkerIsNotHeadingByItself(t *testing.T) {
 	html := jsContentWrap(
 		`<p>前一段正文。</p>` +
