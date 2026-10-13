@@ -30,6 +30,9 @@ type yunsuoPlatformProfile struct {
 	URLHosts []string
 	// 推送成功后怎么找文章链接（publish_external_links.go）；空表示不自动找。
 	LinkLookup string
+	// 平台后台的内容管理页：已发布但还没拿到文章链接时，卡片与侧边栏给这个链接看发布情况
+	// （2026-10-13 用户：「百家号的已发布，我没看到任何的链接。我也查看不了发布情况」）。
+	ManageURL string
 	// 审核卡分发区平台块里的平台图标（api/cardicons/<Icon>.png，平台自己的网站图标）。
 	Icon string
 }
@@ -50,6 +53,7 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		DailyLimit: 5,
 		URLHosts:   []string{"toutiao.com", "www.toutiao.com", "m.toutiao.com"},
 		LinkLookup: externalLinkLookupToutiao,
+		ManageURL:  "https://mp.toutiao.com/profile_v4/manage/content/all",
 		Icon:       "platform-toutiao",
 	},
 	// 百家号：还没有人工样稿可比对，版式暂与头条号相同、不设封面下限；拿到样稿后
@@ -62,6 +66,7 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		TitleField: yunsuoTitleMedium,
 		DailyLimit: yunsuoDefaultDailyLimit,
 		URLHosts:   []string{"baijiahao.baidu.com", "mbd.baidu.com"},
+		ManageURL:  "https://baijiahao.baidu.com/builder/rc/content",
 		Icon:       "platform-baijiahao",
 	},
 }

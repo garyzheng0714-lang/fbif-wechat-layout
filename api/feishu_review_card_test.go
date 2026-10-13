@@ -435,6 +435,15 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	if !strings.Contains(body, "[查看文章](https://www.toutiao.com/article/7560000000000000000/)") || strings.Contains(body, job.Title) {
 		t.Fatalf("同标题时不重复标题: %s", body)
 	}
+	// 百家号已发布但还没拿到文章链接（不自动找）：给百家号后台看发布情况（2026-10-13 用户：「百家号的
+	// 已发布，我没看到任何的链接。我也查看不了发布情况」）。头条号有链接就不给后台。
+	baijia = testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionSucceeded)
+	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
+	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
+	if !strings.Contains(body, "**百家号**　[去百家号后台查看](https://baijiahao.baidu.com/builder/rc/content)") ||
+		strings.Contains(body, "去头条号后台查看") {
+		t.Fatalf("已发布没链接的平台应给后台链接，有链接的不给: %s", body)
+	}
 	// 多篇：每篇原创各一块，块头是这篇的小封面与「#编号 标题」；转载稿不占块。
 	second := reviewCardTestJob(publishStagePublished)
 	second.ID, second.Title = 73, "第二篇原创文章"

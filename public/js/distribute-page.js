@@ -71,6 +71,8 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
     const lines = [];
     if (platform.url) lines.push(`<a href="${esc(platform.url)}" target="_blank" rel="noopener">${esc(ownTitle || '查看文章')}</a>`);
     else if (ownTitle) lines.push(`<span>${esc(ownTitle)}</span>`);
+    // 已发布但还没拿到文章链接：去平台后台看发布情况。
+    if (!platform.url && platform.manage_url) lines.push(`<a href="${esc(platform.manage_url)}" target="_blank" rel="noopener">去${esc(platform.name)}后台查看</a>`);
     if (platform.reason) lines.push(`<span>${esc(platform.reason)}</span>`);
     return `<section class="dist-platform" data-slot="${platform.slot}">${head}${lines.length ? `<p class="dist-meta">${lines.join('')}</p>` : ''}</section>`;
   }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { charCount, counterState, createDistributePage } from '../public/js/distribute-page.js';
+import { charCount, counterState, createDistributePage, renderPlatform } from '../public/js/distribute-page.js';
 
 async function waitFor(predicate, timeout = 1000) {
   const started = Date.now();
@@ -93,6 +93,14 @@ test('改稿页：写清超了多少、给建议，选大图作封面后保存�
   const put = calls.find(call => call.method === 'PUT');
   assert.deepEqual(JSON.parse(put.body), { slot: 0, title: '老茶铺把茶做成零食，年营收过亿', cover_url: 'https://cdn.example.com/big.jpg' });
   await waitFor(() => /同步中/.test(root.querySelector('[data-slot="0"] .dist-status').textContent));
+});
+
+test('改稿页：已发布但还没拿到文章链接，给平台后台看发布情况', () => {
+  const manage = 'https://baijiahao.baidu.com/builder/rc/content';
+  const html = renderPlatform({ slot: 1, name: '百家号', status: '已发布', tone: 'green', editable: false, manage_url: manage }, {}, longTitle);
+  assert.match(html, new RegExp(`<a href="${manage}" target="_blank" rel="noopener">去百家号后台查看</a>`));
+  const linked = renderPlatform({ slot: 1, name: '百家号', status: '已发布', tone: 'green', editable: false, url: 'https://baijiahao.baidu.com/s?id=1', manage_url: manage }, {}, longTitle);
+  assert.doesNotMatch(linked, /后台查看/, '有文章链接就不再给后台');
 });
 
 test('改稿页：没有签名链接时说清楚从哪打开', async () => {

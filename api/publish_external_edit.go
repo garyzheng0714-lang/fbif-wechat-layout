@@ -69,13 +69,15 @@ func externalDistributionSidebarLink(jobID int64) string {
 
 // externalPlatformStatus 一个平台现在的状态（卡片与侧边栏共用）。tone：green/blue/orange/red/grey。
 type externalPlatformState struct {
-	Status   string
-	Tone     string
-	Reason   string
-	URL      string
-	Title    string // 平台上的标题（推送时冻结）
-	Editable bool   // 还能改标题/摘要/封面（没推过，或受理前失败）
-	NeedsFix bool
+	Status string
+	Tone   string
+	Reason string
+	URL    string
+	// ManageURL 已发布但还没有文章链接：平台后台内容管理页。
+	ManageURL string
+	Title     string // 平台上的标题（推送时冻结）
+	Editable  bool   // 还能改标题/摘要/封面（没推过，或受理前失败）
+	NeedsFix  bool
 }
 
 func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) externalPlatformState {
@@ -86,6 +88,9 @@ func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) external
 			state.Status, state.Tone = "人工已发", "green"
 		case lane.State == publishExternalDistributionSucceeded:
 			state.Status, state.Tone = "已发布", "green"
+			if state.URL == "" {
+				state.ManageURL = yunsuoProfileForTarget(target).ManageURL
+			}
 		case publishExternalDistributionProcessing(lane.State):
 			state.Status, state.Tone = "同步中", "blue"
 		case lane.State == publishExternalDistributionReconciliationRequired:
@@ -116,15 +121,17 @@ type externalEditImage struct {
 }
 
 type externalEditPlatform struct {
-	Slot     int    `json:"slot"`
-	Name     string `json:"name"`
-	Status   string `json:"status"`
-	Tone     string `json:"tone"`
-	Reason   string `json:"reason,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Editable bool   `json:"editable"`
-	NeedsFix bool   `json:"needs_fix"`
-	Auto     bool   `json:"auto"`
+	Slot   int    `json:"slot"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Tone   string `json:"tone"`
+	Reason string `json:"reason,omitempty"`
+	URL    string `json:"url,omitempty"`
+	// ManageURL 已发布但还没有文章链接：去平台后台看发布情况。
+	ManageURL string `json:"manage_url,omitempty"`
+	Editable  bool   `json:"editable"`
+	NeedsFix  bool   `json:"needs_fix"`
+	Auto      bool   `json:"auto"`
 
 	Title          string `json:"title"`
 	TitleMin       int    `json:"title_min"`
@@ -164,7 +171,7 @@ func externalEditView(job publishJob, cfg yunsuoConfig) map[string]any {
 		min, max := profile.titleLimits()
 		view := externalEditPlatform{
 			Slot: slot, Name: profile.Name, Status: state.Status, Tone: state.Tone, Reason: state.Reason,
-			URL: state.URL, Editable: state.Editable, NeedsFix: state.NeedsFix, Auto: target.Auto,
+			URL: state.URL, ManageURL: state.ManageURL, Editable: state.Editable, NeedsFix: state.NeedsFix, Auto: target.Auto,
 			Title: externalEffectiveTitle(job, draft), TitleMin: min, TitleMax: max,
 			Summary: externalEffectiveSummary(job, draft), SummaryMax: profile.SummaryMax,
 			CoverMinWidth: profile.CoverMinWidth, CoverMinHeight: profile.CoverMinHeight,

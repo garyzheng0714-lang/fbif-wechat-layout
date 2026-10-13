@@ -185,7 +185,7 @@ func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int,
 		}
 	}
 	label := "**" + name + "**"
-	if link := reviewCardPlatformArticleLink(job, state); link != "" {
+	if link := reviewCardPlatformArticleLink(job, state, name); link != "" {
 		label += "　" + link
 	}
 	var columns []any
@@ -226,8 +226,12 @@ func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int,
 }
 
 // reviewCardPlatformArticleLink 名字后面的文章链接：平台改过标题就写平台上的标题，否则「查看文章」。
-func reviewCardPlatformArticleLink(job publishJob, state externalPlatformState) string {
+// 已发布但还没拿到文章链接（百家号不自动找）就给平台后台，在那里看发布情况。
+func reviewCardPlatformArticleLink(job publishJob, state externalPlatformState, name string) string {
 	if state.URL == "" {
+		if state.ManageURL != "" {
+			return "[去" + name + "后台查看](" + state.ManageURL + ")"
+		}
 		return ""
 	}
 	label := "查看文章"
