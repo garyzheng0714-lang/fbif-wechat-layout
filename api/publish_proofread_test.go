@@ -391,3 +391,33 @@ func TestProofreadReminderEndpoint(t *testing.T) {
 		t.Fatalf("同一组错误再调用也不重复 @：%d sent=%d", rec.Code, len(*sent))
 	}
 }
+
+// TestProofreadSmallEditMatchesProductionDryRun 2026-10-13 生产 dry_run 的 22 处复核结果：改一两个字的
+// 真错保留；整块换内容（模型在猜原本该写什么）、跨行的排版残留都不提醒。
+func TestProofreadSmallEditMatchesProductionDryRun(t *testing.T) {
+	keep := [][2]string{
+		{"农业水产省", "农林水产省"}, {"黄黄精粉", "黄精粉"}, {"也会公司创造", "也会为公司创造"}, {"Tiktok", "TikTok"},
+		{"2018年的北京冬奥会", "2022年的北京冬奥会"}, {"看看是市面上", "看看市面上"}, {"断长出", "不断长出"},
+		{"Vogue Bussiness", "Vogue Business"}, {"腌采", "腌菜"}, {"层不出穷", "层出不穷"}, {"它莫小仙供了", "莫小仙提供了"},
+		{"全家“⼀⽇五餐”的全时段⽤餐概念", "全家“一日五餐”的全时段用餐概念"}, {"是品牌是抱着", "是品牌抱着"},
+		{"食德乐", "食得乐"}, {"发展美国第一豆类品牌", "发展为美国第一豆类品牌"}, {"馋烤肉烤肉小蛋糕", "馋烤肉小蛋糕"}, {"他们", "它们"},
+	}
+	for _, pair := range keep {
+		if !proofreadSmallEdit(pair[0], pair[1]) {
+			t.Errorf("「%s」→「%s」是小改动，应提醒", pair[0], pair[1])
+		}
+	}
+	drop := [][2]string{
+		{"伊利伊刻活泉现泡茶", "彩虹糖"}, {"深海海水", "深层地下水"}, {"近500亿元", "约46亿元"}, {"史上过期最快海报", "史上最快过期海报"},
+	}
+	for _, pair := range drop {
+		if proofreadSmallEdit(pair[0], pair[1]) {
+			t.Errorf("「%s」→「%s」是在猜原本该写什么，不应提醒", pair[0], pair[1])
+		}
+	}
+	findings, err := parsePublishProofread(`{"items":[{"index":1,"definite":true,"wrong":"提示：\n提示：","correct":"提示："}]}`,
+		[]publishRiskItem{{Evidence: "提示：\n提示：本文产品案例为概念作品"}}, "提示：\n提示：本文产品案例为概念作品")
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("跨行的排版残留不提醒：%+v %v", findings, err)
+	}
+}

@@ -405,7 +405,8 @@ func aiVerifyProofread(ctx context.Context, job publishJob, candidates []publish
 	return bodyText, text, err
 }
 
-// parsePublishProofread 只收 definite=true、wrong 逐字在正文和原句里、correct 与 wrong 不同且不只差标点的条目。
+// parsePublishProofread 只收 definite=true、wrong 逐字在正文和原句里、correct 与 wrong 不同且不只差标点、
+// 而且是小改动的条目（proofreadSmallEdit）。
 func parsePublishProofread(text string, candidates []publishRiskItem, sourceText string) ([]publishProofreadFinding, error) {
 	cleaned := stripMarkdownFence(text)
 	if start, end := strings.Index(cleaned, "{"), strings.LastIndex(cleaned, "}"); start >= 0 && end > start {
@@ -435,6 +436,8 @@ func parsePublishProofread(text string, candidates []publishRiskItem, sourceText
 		switch {
 		case wrong == "" || correct == "" || wrong == correct,
 			runeLen(wrong) > 30 || runeLen(correct) > 40,
+			strings.ContainsAny(wrong, "\n\r"),
+			!proofreadSmallEdit(wrong, correct),
 			!strings.Contains(haystack, riskEvidenceNormalize(wrong)),
 			!strings.Contains(riskEvidenceNormalize(evidence), riskEvidenceNormalize(wrong)),
 			proofreadOnlyPunctuation(wrong, correct),
@@ -448,6 +451,41 @@ func parsePublishProofread(text string, candidates []publishRiskItem, sourceText
 		}
 	}
 	return findings, nil
+}
+
+// proofreadSmallEdit 改动够小：编辑距离不超过 2，或不超过原片段长度的三分之一。
+//
+// 生产 dry_run（2026-10-13，43 篇历史稿）实测：真错别字、漏字、叠字、名称写错都是改一两个字
+// （「腌采→腌菜」「层不出穷→层出不穷」「农业水产省→农林水产省」）；整块换掉的都是模型在猜原本该写
+// 什么（「伊利伊刻活泉现泡茶→彩虹糖」「深海海水→深层地下水」「近500亿元→约46亿元」），达不到
+// 「99% 确定」，不提醒。
+func proofreadSmallEdit(wrong, correct string) bool {
+	limit := runeLen(wrong) / 3
+	if limit < 2 {
+		limit = 2
+	}
+	return proofreadEditDistance([]rune(wrong), []rune(correct)) <= limit
+}
+
+// proofreadEditDistance 按字计的编辑距离（插入、删除、替换各算 1）。
+func proofreadEditDistance(a, b []rune) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 // proofreadOnlyPunctuation 两边去掉标点与空白后一样：只是标点问题，不提醒。
