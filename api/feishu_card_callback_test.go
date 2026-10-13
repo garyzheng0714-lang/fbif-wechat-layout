@@ -585,7 +585,7 @@ func TestReviewPendingCardContract(t *testing.T) {
 		// 预览键 open_url 指向带 HMAC 签名的预览链接（域名走 WECHAT_UPLOAD_ORIGIN）。
 		"https://preview.test/preview/publish/7?t=" + publishPreviewSig(7),
 		// 原文与预览都降为主内容里的文字链接。
-		"公众号原文", job.SourceURL,
+		"[原文](", job.SourceURL,
 		// M5 AI 预填参数 + 优化说明段。
 		"Mote莫特", "沃集鲜", "沃尔玛", "药食同源", "AI 摘要一段。",
 		"排版说明", "1. **封面**：选第一张图。",
@@ -704,7 +704,7 @@ func TestReviewCardEscapesExternalMarkdownFields(t *testing.T) {
 			t.Fatalf("外部文本不得注入 Feishu markdown %q：%s", banned, card)
 		}
 	}
-	for _, fixed := range []string{"公众号原文", job.SourceURL, "预览效果", "通过并发布"} {
+	for _, fixed := range []string{"[原文](", job.SourceURL, "预览效果", "通过并发布"} {
 		if !strings.Contains(card, fixed) {
 			t.Fatalf("安全转义不得破坏代码生成的固定内容 %q：%s", fixed, card)
 		}

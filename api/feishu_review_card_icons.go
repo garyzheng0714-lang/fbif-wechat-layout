@@ -27,9 +27,9 @@ const reviewCardIconField = "_review_icon"
 
 // Lucide 图标名（与 cardicons/<名>-<配色>.png 对应）。
 const (
-	reviewIconWechat     = "wechat-favicon" // 公众号原文（mp.weixin.qq.com 网站图标）
+	reviewIconWechat     = "wechat-favicon" // 原文（mp.weixin.qq.com 网站图标）
 	reviewIconSource     = "external-link"  // 原网页
-	reviewIconResync     = "refresh-cw"     // 重新同步
+	reviewIconResync     = "refresh-cw"     // 重新同步至FoodTalks
 	reviewIconUnpublish  = "eye-off"        // 下线
 	reviewIconPublish    = "send"           // 发布 / 强制发布 / 重新发布
 	reviewIconDistribute = "share-2"        // 同步分发至其他平台

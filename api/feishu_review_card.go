@@ -131,9 +131,10 @@ func reviewBatchDateLabel(jobs []publishJob) string {
 //	标题行    ［状态］ + 链到网站的粗体标题（1 行）
 //	摘要行    灰色摘要（1 行）
 //	信息行    转载 · #任务号 + 蓝色标签（1 行，标签最多 3 个）
-//	按钮行    发布 · 公众号原文 · 下线 · 外部分发 · 重新同步至网站（最右）· 重新同步结果（1 行）
+//	按钮行    发布 · 原文 · 下线 · 重新同步至FoodTalks（1 行）
 //
-// 无封面的旧稿只有右栏。
+// 重新同步的结果在两栏下面单独一行，横跨整个文章块（2026-10-13 用户：「单独一行，覆盖整个卡片
+// 宽度的一行，不是图片下的一行、也不是按钮下的一行」）。无封面的旧稿只有右栏。
 func reviewBatchArticleBlock(job publishJob) map[string]any {
 	status, color := reviewBatchStatus(job)
 	title := "**" + reviewCardSafeOrDash(job.Title, 200) + "**"
@@ -174,6 +175,17 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 			"tag": "column", "width": "weighted", "weight": reviewBatchCoverWeight, "vertical_align": "top", "elements": []any{cover},
 		}, textColumn}
 	}
+	elements := []any{map[string]any{
+		// 不堆叠，图文按 1:4 分宽：电脑上封面约 110px、与右栏四行等高；手机上封面随之缩到约
+		// 55px 跟文字并排，文字不再被固定宽的封面挤成窄条。图片组件没有窄屏规则，只能让它跟着
+		// 栏宽走（2026-10-10 用户在「堆叠 + 108 小图 / 堆叠 + 铺满裁扁 / 不堆叠按比例缩」三种
+		// 真机对比里选了按比例缩）。
+		"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px", "columns": columns,
+	}}
+	if resync := reviewCardSourceResyncStatus(job); resync != nil {
+		resync["margin"] = reviewBatchResyncStatusMargin
+		elements = append(elements, resync)
+	}
 	return map[string]any{
 		// 每篇一个白底细外框块（2026-10-10 用户：「把这个灰色的背景，换成类似于这种的外框线」
 		// 「线还可以再淡一点」先选 grey-50，后定 grey-100）。飞书只有交互容器能画外框，它必须带点击行为：点块里
@@ -183,13 +195,7 @@ func reviewBatchArticleBlock(job publishJob) map[string]any {
 		"corner_radius": fmt.Sprintf("%dpx", reviewBatchBlockRadius),
 		"padding":       fmt.Sprintf("%[1]dpx %[1]dpx %[1]dpx %[1]dpx", reviewBatchBlockPadding),
 		"behaviors":     []any{map[string]any{"type": "open_url", "default_url": reviewBatchBlockURL(job, siteURL), "pc_url": "", "ios_url": "", "android_url": ""}},
-		"elements": []any{map[string]any{
-			// 不堆叠，图文按 1:4 分宽：电脑上封面约 110px、与右栏四行等高；手机上封面随之缩到约
-			// 55px 跟文字并排，文字不再被固定宽的封面挤成窄条。图片组件没有窄屏规则，只能让它跟着
-			// 栏宽走（2026-10-10 用户在「堆叠 + 108 小图 / 堆叠 + 铺满裁扁 / 不堆叠按比例缩」三种
-			// 真机对比里选了按比例缩）。
-			"tag": "column_set", "flex_mode": "none", "horizontal_spacing": "12px", "columns": columns,
-		}},
+		"elements":      elements,
 	}
 }
 
@@ -219,6 +225,8 @@ const (
 	reviewBatchSummaryMargin = "4px 0px 0px 0px"
 	reviewBatchMetaMargin    = "6px 0px 0px 0px"
 	reviewBatchButtonMargin  = "10px 0px 0px 0px"
+	// 重新同步结果：两栏下面单独一行，与封面/按钮底边隔开。
+	reviewBatchResyncStatusMargin = "8px 0px 0px 0px"
 )
 
 // reviewBatchCover 方形封面，fit_horizontal 铺满封面栏宽度（电脑约 110px、手机约 55px）。优先用
@@ -256,15 +264,15 @@ func reviewBatchMeta(job publishJob) string {
 	return meta
 }
 
-// reviewBatchSourceButton 打开来源原文。公众号链接叫「公众号原文」（用户 2026-10-10；「查看原文」
-// 分不清网站还是公众号），图标用微信公众平台的网站图标；其他网页叫「原网页」；缺来源链接不出。
+// reviewBatchSourceButton 打开来源原文。公众号链接叫「原文」（2026-10-13 用户：「公众号原文」在按钮里
+// 被截成「公众号…」，改成「原文」），图标用微信公众平台的网站图标；其他网页叫「原网页」；缺来源链接不出。
 func reviewBatchSourceButton(job publishJob) map[string]any {
 	label, target := reviewBatchSourceLink(job)
 	if target == "" {
 		return nil
 	}
 	icon := reviewIconSource
-	if label == "公众号原文" {
+	if label == "原文" {
 		icon = reviewIconWechat
 	}
 	button := reviewBatchButton(label, "default", icon)
@@ -272,14 +280,14 @@ func reviewBatchSourceButton(job publishJob) map[string]any {
 	return button
 }
 
-// reviewBatchSourceLink 来源原文：公众号链接叫「公众号原文」，其他网页叫「原网页」；缺来源链接不出。
+// reviewBatchSourceLink 来源原文：公众号链接叫「原文」，其他网页叫「原网页」；缺来源链接不出。
 func reviewBatchSourceLink(job publishJob) (string, string) {
 	sourceURL := reviewCardSafeURL(job.SourceURL)
 	if sourceURL == "" {
 		return "", ""
 	}
 	if parsed, err := url.Parse(sourceURL); err == nil && strings.EqualFold(parsed.Hostname(), "mp.weixin.qq.com") {
-		return "公众号原文", sourceURL
+		return "原文", sourceURL
 	}
 	return "原网页", sourceURL
 }
@@ -379,8 +387,8 @@ func reviewBatchRiskSection(jobs []publishJob) map[string]any {
 }
 
 // reviewBatchButtonRow 一行最小号按钮（2026-10-10 用户定）：推进类主操作（发布 / 重新发布）
-// → 公众号原文 → 下线 → 外部分发 → 重新同步至网站（最右）。网站文章由标题链接打开，不另设按钮。
-// 重新同步结果跟在按钮后面（它就是「重新同步」的结果），不单占一行，右栏高度才固定。
+// → 原文 → 下线 → 重新同步至FoodTalks（最右）。网站文章由标题链接打开，不另设按钮。
+// 重新同步结果不在这一行，在文章块底部单独一行（见 reviewBatchArticleBlock）。
 // 只表示状态、点不了的按钮（不可下线、发布中、已驳回等）不出，状态标签已经说明。
 func reviewBatchButtonRow(job publishJob) map[string]any {
 	action, leading := reviewBatchActionButton(job)
@@ -397,15 +405,10 @@ func reviewBatchButtonRow(job publishJob) map[string]any {
 	if resync := reviewCardSourceResyncButton(job); resync != nil {
 		buttons = append(buttons, resync)
 	}
-	columns := make([]any, 0, len(buttons)+1)
+	columns := make([]any, 0, len(buttons))
 	for _, button := range buttons {
 		columns = append(columns, map[string]any{
 			"tag": "column", "width": "auto", "vertical_align": "center", "elements": []any{button},
-		})
-	}
-	if status := reviewCardSourceResyncStatus(job); status != nil {
-		columns = append(columns, map[string]any{
-			"tag": "column", "width": "auto", "vertical_align": "center", "elements": []any{status},
 		})
 	}
 	if len(columns) == 0 {
@@ -494,21 +497,22 @@ func reviewBatchAwaitingActionButton(job publishJob) (map[string]any, bool) {
 	return button, true
 }
 
-// reviewCardSourceResyncButton 已发布的流水线稿可以重新同步到网站（含已外部分发的，2026-10-10
+// reviewCardSourceResyncButton 已发布的流水线稿可以重新同步到 FoodTalks（含已外部分发的，2026-10-10
 // 用户裁定）；后台人工发布稿、缺资讯 ID 或原文链接的不出按钮；同步进行中或待核对时也不出。
 func reviewCardSourceResyncButton(job publishJob) map[string]any {
 	if job.Stage != publishStagePublished || job.PublicationAction == publishPublicationActionManualCMS ||
 		job.FoodTalksNewsID <= 0 || strings.TrimSpace(job.SourceURL) == "" {
 		return nil
 	}
-	// 按钮叫「重新同步至网站」（用户 2026-10-10 先改短为「重新同步」，又改回完整名）。
-	button := reviewBatchButton("重新同步至网站", "default", reviewIconResync)
+	// 按钮叫「重新同步至FoodTalks」（用户 2026-10-10 先改短为「重新同步」，又改回完整名「重新同步至网站」；
+	// 2026-10-13 改成「重新同步至FoodTalks」）。
+	button := reviewBatchButton("重新同步至FoodTalks", "default", reviewIconResync)
 	// 同步进行中或待核对时不出按钮，按钮行下方的同步状态行已说明。
 	if publishSourceResyncProcessing(job.SourceResyncState) || job.SourceResyncState == publishSourceResyncReconciliationRequired {
 		return nil
 	}
 	button["confirm"] = map[string]any{
-		"title": feishuPlainText("重新同步至网站？"),
+		"title": feishuPlainText("重新同步至FoodTalks？"),
 		"text":  feishuPlainText("将重新抓取公众号最新正文，按当前 FoodTalks 规则排版，并覆盖原文章；不会新建文章。若检测到后台人工修改，系统会停止覆盖。"),
 	}
 	button["behaviors"] = []any{map[string]any{"type": "callback", "value": map[string]any{
@@ -1002,7 +1006,7 @@ func reviewCardHeroBlock(job publishJob, coverImgKey string) map[string]any {
 func reviewCardArticleLinks(job publishJob) string {
 	links := []string{fmt.Sprintf("[预览效果](%s)", reviewCardSafeURL(publishPreviewURL(job.ID)))}
 	if sourceURL := reviewCardSafeURL(job.SourceURL); sourceURL != "" {
-		links = append(links, fmt.Sprintf("[公众号原文](%s)", sourceURL))
+		links = append(links, fmt.Sprintf("[原文](%s)", sourceURL))
 	}
 	return strings.Join(links, "　·　")
 }

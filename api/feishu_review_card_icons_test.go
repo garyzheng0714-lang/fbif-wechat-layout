@@ -124,7 +124,7 @@ func TestReviewBatchCardIconColorFollowsButton(t *testing.T) {
 	body := cardJSON(t, buildReviewBatchCardWithIcons([]publishJob{pending}, icons))
 	for _, want := range []string{"img_send-inverse", "img_wechat-favicon"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("待审核卡应有 %s（蓝底「发布」白色图标，公众号原文用微信网站图标）: %s", want, body)
+			t.Fatalf("待审核卡应有 %s（蓝底「发布」白色图标，原文用微信网站图标）: %s", want, body)
 		}
 	}
 	pending.RiskLevel = publishRiskBlock

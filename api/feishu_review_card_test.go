@@ -105,11 +105,11 @@ func TestPublishedReviewCardShowsSourceResyncButtonInActionRow(t *testing.T) {
 			t.Fatalf("已发布卡片缺少 %q: %s", want, body)
 		}
 	}
-	// 下线窗口已过：不再出置灰的「不可下线」；按钮为公众号原文 → 重新同步至网站（最右）。
-	sourceAt := strings.Index(body, `"content":"公众号原文"`)
-	resyncAt := strings.Index(body, `"content":"重新同步至网站"`)
+	// 下线窗口已过：不再出置灰的「不可下线」；按钮为原文 → 重新同步至FoodTalks（最右）。
+	sourceAt := strings.Index(body, `"content":"原文"`)
+	resyncAt := strings.Index(body, `"content":"重新同步至FoodTalks"`)
 	if sourceAt < 0 || resyncAt < sourceAt || strings.Contains(body, "不可下线") || strings.Contains(body, `"content":"网站"`) {
-		t.Fatalf("按钮应为公众号原文、重新同步，不出不可下线和网站: %s", body)
+		t.Fatalf("按钮应为原文、重新同步至FoodTalks，不出不可下线和网站: %s", body)
 	}
 
 	job.PublicationAction = publishPublicationActionManualCMS
@@ -124,18 +124,18 @@ func TestPublishedReviewCardShowsSourceResyncResultBelowButton(t *testing.T) {
 	job.PublicationAction = publishPublicationActionPublish
 	job.SourceResyncState = publishSourceResyncSucceeded
 	job.SourceResyncCompletedAt = "2026-09-01T06:30:00Z"
-	// 同步结果跟在按钮行末尾（它就是「重新同步」的结果），不单占一行，右栏高度才固定。
+	// 同步结果在文章块底部单独一行（在按钮之后），见 TestReviewBatchRightColumnHasFixedHeight。
 	body := cardJSON(t, buildReviewBatchCard([]publishJob{job}))
-	buttonAt := strings.Index(body, `"content":"重新同步至网站"`)
+	buttonAt := strings.Index(body, `"content":"重新同步至FoodTalks"`)
 	successAt := strings.Index(body, "同步成功")
 	if buttonAt < 0 || successAt < buttonAt || !strings.Contains(body, "color='green'") {
-		t.Fatalf("同步成功提示应以绿色跟在按钮后面: %s", body)
+		t.Fatalf("同步成功提示应以绿色排在按钮之后: %s", body)
 	}
 
 	job.SourceResyncState = publishSourceResyncFailed
 	job.SourceResyncError = "公众号正文抓取失败"
 	body = cardJSON(t, buildReviewBatchCard([]publishJob{job}))
-	buttonAt = strings.Index(body, `"content":"重新同步至网站"`)
+	buttonAt = strings.Index(body, `"content":"重新同步至FoodTalks"`)
 	failureAt := strings.Index(body, "同步失败")
 	if buttonAt < 0 || failureAt < buttonAt || !strings.Contains(body, "color='red'") ||
 		!strings.Contains(body, job.SourceResyncError) {
@@ -174,7 +174,7 @@ func TestReviewBatchCardKeepsOneResponsiveCardAndPerArticleActions(t *testing.T)
 		`"scale_type":"fit_horizontal"`, `"border_color":"grey-100"`, "#117", "#118",
 		`\u003ctext_tag color='orange'\u003e待审核\u003c/text_tag\u003e`, `\u003ctext_tag color='green'\u003e已发布\u003c/text_tag\u003e`,
 		`\u003ctext_tag color='blue'\u003e能量饮料\u003c/text_tag\u003e \u003ctext_tag color='blue'\u003e女性消费`,
-		`"content":"公众号原文"`, `"action":"approve"`, `"action":"unpublish"`,
+		`"content":"原文"`, `"action":"approve"`, `"action":"unpublish"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("聚合卡缺少 %q: %s", want, body)
@@ -301,8 +301,9 @@ func TestReviewBatchCoverRadiusIsConcentric(t *testing.T) {
 	}
 }
 
-// TestReviewBatchRightColumnHasFixedHeight 右栏高度固定才能上下都对齐封面：会变的内容不另起
-// 一行——重新同步结果跟在按钮后面，原创稿的外部分发按钮并入操作组。
+// TestReviewBatchRightColumnHasFixedHeight 右栏高度固定才能上下都对齐封面：右栏只有四行。重新同步
+// 结果在两栏下面单独一行、横跨整个文章块（2026-10-13 用户：「单独一行，覆盖整个卡片宽度的一行，
+// 不是图片下的一行、也不是按钮下的一行」）。
 func TestReviewBatchRightColumnHasFixedHeight(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
 	job.FoodTalksNewsID = 7318
@@ -316,18 +317,31 @@ func TestReviewBatchRightColumnHasFixedHeight(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("有同步结果、可外部分发时右栏仍只有四行: %s", cardJSON(t, inner))
 	}
-	if last := cardJSON(t, rows[3].(map[string]any)); !strings.Contains(last, "同步成功") {
-		t.Fatalf("同步结果应在按钮行里: %s", last)
+	if strings.Contains(cardJSON(t, inner), "同步成功") {
+		t.Fatalf("同步结果不在两栏里（不在图片下、也不在按钮下）: %s", cardJSON(t, inner))
+	}
+	children := block["elements"].([]any)
+	if len(children) != 2 {
+		t.Fatalf("文章块应为两栏 + 同步结果一行: %s", cardJSON(t, block))
+	}
+	status := children[1].(map[string]any)
+	if status["tag"] != "markdown" || !strings.Contains(fmt.Sprint(status["content"]), "同步成功") || status["margin"] != reviewBatchResyncStatusMargin {
+		t.Fatalf("同步结果应是文章块里横跨整宽的单独一行: %#v", status)
+	}
+	job.SourceResyncState = ""
+	plain := buildReviewBatchCard([]publishJob{job})["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	if len(plain["elements"].([]any)) != 1 {
+		t.Fatalf("没同步过就没有这一行: %s", cardJSON(t, plain))
 	}
 }
 
 // TestReviewBatchSourceButtonSaysWhichOriginal 只留一个查看按钮（用户 2026-10-10：「网站这个
-// 按钮去掉，保留微信的，改成公众号原文」）：公众号链接叫「公众号原文」并用微信网站图标，其他网页
-// 叫「原网页」，缺来源链接不出；网站文章由标题链接打开。
+// 按钮去掉，保留微信的，改成公众号原文」；2026-10-13 再改短为「原文」）：公众号链接叫「原文」并用
+// 微信网站图标，其他网页叫「原网页」，缺来源链接不出；网站文章由标题链接打开。
 func TestReviewBatchSourceButtonSaysWhichOriginal(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
 	for _, tc := range []struct{ sourceURL, want string }{
-		{"https://mp.weixin.qq.com/s/abc", "公众号原文/wechat-favicon"},
+		{"https://mp.weixin.qq.com/s/abc", "原文/wechat-favicon"},
 		{"https://www.example.com/news/1", "原网页/external-link"},
 		{"", ""},
 	} {
@@ -580,7 +594,7 @@ func TestReviewBatchCardAllowsResyncAfterDistribution(t *testing.T) {
 	var buttons []map[string]any
 	reviewCardButtons(buildReviewBatchCard([]publishJob{job}), &buttons)
 	for _, button := range buttons {
-		if button["text"].(map[string]any)["content"] != "重新同步至网站" {
+		if button["text"].(map[string]any)["content"] != "重新同步至FoodTalks" {
 			continue
 		}
 		if button["disabled"] == true || !strings.Contains(fmt.Sprint(button["behaviors"]), feishuCardActionResyncSource) {
@@ -606,8 +620,8 @@ func reviewCardActionButtons(card map[string]any) []map[string]any {
 	return out
 }
 
-// TestReviewBatchCardButtonOrderAndSubtitle 按钮先操作、后查看：发布 → 预览 → 公众号；
-// 重新同步至网站 → 下线 → 网站 → 公众号。全批同一状态时副标题只说一次数；无封面旧稿只剩文字栏。
+// TestReviewBatchCardButtonOrderAndSubtitle 待审核：发布 → 原文；已发布：原文 → 下线 →
+// 重新同步至FoodTalks（最右）。全批同一状态时副标题只说一次数；无封面旧稿只剩文字栏。
 func TestReviewBatchCardButtonOrderAndSubtitle(t *testing.T) {
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-preview-secret")
 	now := time.Now().UTC()
@@ -624,8 +638,8 @@ func TestReviewBatchCardButtonOrderAndSubtitle(t *testing.T) {
 	for _, button := range all {
 		order = append(order, fmt.Sprint(button["text"].(map[string]any)["content"]))
 	}
-	if strings.Join(order, " ") != "发布 公众号原文" || all[0]["type"] != "primary_filled" {
-		t.Fatalf("待审核稿按钮应为发布、公众号原文，实际 %v", order)
+	if strings.Join(order, " ") != "发布 原文" || all[0]["type"] != "primary_filled" {
+		t.Fatalf("待审核稿按钮应为发布、原文，实际 %v", order)
 	}
 	buttons := reviewCardActionButtons(buildReviewBatchCard([]publishJob{pending}))
 	if len(buttons) != 1 {
@@ -648,8 +662,8 @@ func TestReviewBatchCardButtonOrderAndSubtitle(t *testing.T) {
 	for _, button := range publishedButtons {
 		publishedOrder = append(publishedOrder, fmt.Sprint(button["text"].(map[string]any)["content"]))
 	}
-	if strings.Join(publishedOrder, " ") != "公众号原文 下线 重新同步至网站" {
-		t.Fatalf("已发布稿按钮应为公众号原文、下线、重新同步至网站（最右），实际 %v", publishedOrder)
+	if strings.Join(publishedOrder, " ") != "原文 下线 重新同步至FoodTalks" {
+		t.Fatalf("已发布稿按钮应为原文、下线、重新同步至FoodTalks（最右），实际 %v", publishedOrder)
 	}
 	if !strings.Contains(body, "8月20日 · 已发布1篇") {
 		t.Fatalf("全批已发布时副标题应为「已发布N篇」: %s", body)
