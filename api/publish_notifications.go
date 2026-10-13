@@ -110,6 +110,10 @@ func (p *publishPipeline) dispatchPublishNotification(jobID int64) {
 		if ackErr != nil {
 			log.Printf("publish: ack job %d notification failed（启动恢复会重发）: %v", jobID, ackErr)
 		}
+		if claimed.ProofreadReminder.State == publishExternalCardPending {
+			// 校对提醒回复在审核卡话题下：等卡片发出才发得了。
+			p.scheduleProofreadReminder(jobID)
+		}
 		return
 	}
 
@@ -835,12 +839,16 @@ func (p *publishPipeline) recheckPublishRisk(ctx context.Context, jobID int64) (
 		j.RiskHeadline = result.Headline
 		j.RiskNotes = result.Notes
 		j.RiskRaw = result.Raw
+		notePublishProofread(j)
 	})
 	if err != nil {
 		return job, err
 	}
 	if !swapped {
 		return job, errors.New("任务在重跑期间已被审核或内容已变化，结论未写入")
+	}
+	if updated.ProofreadReminder.State == publishExternalCardPending {
+		p.scheduleProofreadReminder(updated.ID)
 	}
 	return updated, p.sendReviewPendingNotification(ctx, updated)
 }

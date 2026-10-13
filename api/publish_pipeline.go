@@ -173,6 +173,11 @@ type publishPipeline struct {
 	externalAutoMu sync.Mutex
 	// 外发待修改提醒串行发送：同一轮提醒不会因并发重复回复、重复 @。
 	externalReminderMu sync.Mutex
+	// 校对提醒串行复核与发送（publish_proofread.go）。
+	proofreadReminderMu sync.Mutex
+	// 以下两个仅测试注入：校对提醒的发送与复核（默认走审核应用与 MiMo Pro）。
+	proofreadReminderSender func(ctx context.Context, job publishJob, chatID string, post map[string]any) (string, error)
+	proofreadVerify         func(ctx context.Context, job publishJob, candidates []publishRiskItem) (string, string, error)
 	// 以下三个仅测试注入：提醒发送、AI 缩写建议、封面候选图上传（默认走审核应用与 MiMo）。
 	externalReminderSender func(ctx context.Context, job publishJob, chatID, kind string, post map[string]any) (string, error)
 	externalSuggest        func(ctx context.Context, kind, current string, min, max int) (string, error)
@@ -1002,6 +1007,7 @@ func (p *publishPipeline) stageAssessRisk(ctx context.Context, job publishJob) e
 	if job.Stage == publishStageAssessingReview {
 		nextStage = publishStageAwaitingReview
 	}
+	proofread := false
 	updated, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == job.Stage && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
 	}, func(j *publishJob) {
@@ -1010,6 +1016,7 @@ func (p *publishPipeline) stageAssessRisk(ctx context.Context, job publishJob) e
 		j.RiskHeadline = result.Headline
 		j.RiskNotes = result.Notes
 		j.RiskRaw = result.Raw
+		proofread = notePublishProofread(j)
 		j.Stage = nextStage
 		j.FailedStage = ""
 		j.Error = ""
@@ -1019,6 +1026,10 @@ func (p *publishPipeline) stageAssessRisk(ctx context.Context, job publishJob) e
 	})
 	if err == nil && !swapped {
 		return errPublishContentSuperseded
+	}
+	if err == nil && proofread {
+		// 审核卡还没发时先挂着，卡片发出后（dispatchPublishNotification）再复核、再提醒。
+		p.scheduleProofreadReminder(updated.ID)
 	}
 	if err == nil && nextStage == publishStageAwaitingReview {
 		// 历史卡没有 risk 字段，也没有可更新的 message_id；补检后发一张新卡取代旧卡。
@@ -1514,6 +1525,7 @@ func (p *publishPipeline) recoverJobs() {
 	for _, job := range jobs {
 		p.recoverPublishNotification(job)
 		p.recoverExternalDistribution(job)
+		p.recoverProofreadReminder(job)
 		switch job.Stage {
 		case publishStageCreated, publishStageFetching, publishStageRendering,
 			publishStageMirroring, publishStageEnriching, publishStageAssessing, publishStageAssessingReview:

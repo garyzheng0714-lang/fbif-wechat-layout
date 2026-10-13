@@ -120,6 +120,8 @@ func applyPublishContentSeed(job *publishJob, seed publishContentSeed) {
 	job.RiskHeadline = ""
 	job.RiskNotes = ""
 	job.RiskRaw = ""
+	// 风险结论清空了，挂着的校对复核也作废（已提醒过的那组错误留着，同样的错不再 @）。
+	notePublishProofread(job)
 	job.ContentFrozenVersion = 0
 	job.ContentFrozenAt = ""
 	clearPendingPublishContent(job)

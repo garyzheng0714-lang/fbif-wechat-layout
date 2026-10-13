@@ -79,6 +79,34 @@ function sameIDs(left, right) {
   return left.length === right.length && left.every(id => right.includes(id));
 }
 
+// 两类负责人都从审核群成员里选（服务端校验），在审核卡的话题里 @ 他们。成员目录一次读取，两步共用。
+const OWNER_ROLES = [
+  {
+    key: 'distribution',
+    index: 4,
+    title: '分发负责人',
+    note: '原创文章同步到头条号等平台前，标题、摘要或封面不合平台要求时，在审核卡下 @ 这些人去改。',
+    endpoint: '/api/publish/delivery-settings/distribution-owners',
+    read: payload => ({ owners: payload.owners, stale: payload.stale }),
+    saved: payload => payload.distribution_owners?.owners,
+    saveFailure: '保存分发负责人失败',
+  },
+  {
+    key: 'proofread',
+    index: 5,
+    title: '校对负责人',
+    note: '风险检查发现确定无疑的错别字、名称或数字错误时，在审核卡下 @ 这些人核对；不影响同步和发布。',
+    endpoint: '/api/publish/delivery-settings/proofread-owners',
+    read: payload => ({ owners: payload.proofread?.owners, stale: payload.proofread?.stale }),
+    saved: payload => payload.proofread_owners?.owners,
+    saveFailure: '保存校对负责人失败',
+  },
+];
+
+function emptyOwnerState() {
+  return Object.fromEntries(OWNER_ROLES.map(role => [role.key, []]));
+}
+
 function renderIssue(problem, { retry = true } = {}) {
   if (!problem) return '';
   return `<div class="admin-delivery-issue" role="alert" data-delivery-issue="${esc(problem.kind)}">
@@ -103,12 +131,12 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
   let chats = [];
   let settings = normalizeSettings();
   let savedSettings = normalizeSettings();
-  // 分发负责人：外发待修改时在审核卡下 @ 的人，只能从审核群成员里选（服务端校验）。
+  // 分发、校对负责人（OWNER_ROLES）：按类分别记已选与已保存的 open_id。
   let ownersIssue = null;
   let ownerCandidates = [];
-  let ownersStale = false;
-  let owners = [];
-  let savedOwners = [];
+  let ownersStale = {};
+  let owners = emptyOwnerState();
+  let savedOwners = emptyOwnerState();
 
   function reset() {
     generation += 1;
@@ -125,13 +153,17 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     savedSettings = normalizeSettings();
     ownersIssue = null;
     ownerCandidates = [];
-    ownersStale = false;
-    owners = [];
-    savedOwners = [];
+    ownersStale = {};
+    owners = emptyOwnerState();
+    savedOwners = emptyOwnerState();
+  }
+
+  function roleDirty(role) {
+    return !ownersIssue && !sameIDs(owners[role.key], savedOwners[role.key]);
   }
 
   function ownersDirty() {
-    return !ownersIssue && !sameIDs(owners, savedOwners);
+    return OWNER_ROLES.some(roleDirty);
   }
 
   function selectedVisibleChatIDs() {
@@ -261,8 +293,8 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     </li>`;
   }
 
-  function renderOwnersStep(globalNetworkIssue) {
-    const selected = new Set(owners);
+  function renderOwnersStep(role, globalNetworkIssue) {
+    const selected = new Set(owners[role.key]);
     let content = '';
     if (globalNetworkIssue) {
       content = '<div class="admin-delivery-empty"><strong>等待发布服务恢复</strong><p>连接恢复并重新读取后，这里会显示审核群成员。</p></div>';
@@ -276,22 +308,22 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
       const rows = ownerCandidates.map(member => {
         const id = String(member.open_id || '').trim();
         return `<label class="admin-delivery-chat">
-          <input type="checkbox" data-delivery-owner="${esc(id)}" ${selected.has(id) ? 'checked' : ''} ${loading || saving ? 'disabled' : ''}>
+          <input type="checkbox" data-delivery-owner="${esc(id)}" data-owner-role="${role.key}" ${selected.has(id) ? 'checked' : ''} ${loading || saving ? 'disabled' : ''}>
           <span class="admin-delivery-chat-copy"><span>${esc(member.name || '未命名成员')}</span></span>
         </label>`;
       }).join('');
-      const stale = ownersStale
+      const stale = ownersStale[role.key]
         ? '<p class="admin-delivery-owner-stale" role="status">换了推送应用，原来选的人收不到提醒，请重新选择。</p>'
         : '';
-      content = `${stale}<fieldset class="admin-delivery-chat-list"><legend class="admin-sr-only">分发负责人（可多选）</legend>${rows}</fieldset>`;
+      content = `${stale}<fieldset class="admin-delivery-chat-list"><legend class="admin-sr-only">${role.title}（可多选）</legend>${rows}</fieldset>`;
     }
     return `<li class="admin-delivery-step">
-      <span class="admin-delivery-step-index" aria-hidden="true">4</span>
+      <span class="admin-delivery-step-index" aria-hidden="true">${role.index}</span>
       <div class="admin-delivery-step-content">
         <div class="admin-delivery-step-heading">
           <div>
-            <h4>分发负责人</h4>
-            <p>原创文章同步到头条号等平台前，标题、摘要或封面不合平台要求时，在审核卡下 @ 这些人去改。</p>
+            <h4>${role.title}</h4>
+            <p>${role.note}</p>
           </div>
         </div>
         ${content}
@@ -313,7 +345,7 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
         ${renderAppStep(globalNetworkIssue)}
         ${renderChatStep(globalNetworkIssue)}
         ${renderAutoPublishStep()}
-        ${renderOwnersStep(globalNetworkIssue)}
+        ${OWNER_ROLES.map(role => renderOwnersStep(role, globalNetworkIssue)).join('')}
       </ol>
       ${saveIssue ? renderIssue(saveIssue, { retry: false }) : ''}
     </section>`;
@@ -363,9 +395,12 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
     if (ownersResult.status === 'fulfilled') {
       const payload = ownersResult.value || {};
       ownerCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-      ownersStale = payload.stale === true;
-      savedOwners = ownersStale ? [] : ownerIDs(payload.owners);
-      owners = [...savedOwners];
+      for (const role of OWNER_ROLES) {
+        const current = role.read(payload);
+        ownersStale[role.key] = current.stale === true;
+        savedOwners[role.key] = ownersStale[role.key] ? [] : ownerIDs(current.owners);
+        owners[role.key] = [...savedOwners[role.key]];
+      }
       if (payload.candidates_error) ownersIssue = issue('server', '读取审核群成员失败', String(payload.candidates_error));
     } else {
       // 成员读不到不挡其他设置的保存；这一步单独显示原因。
@@ -397,18 +432,19 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
         settings = normalizeSettings(payload.settings || settings);
         savedSettings = normalizeSettings(settings);
       }
-      if (ownersDirty()) {
-        const response = await request('/api/publish/delivery-settings/distribution-owners', {
+      for (const role of OWNER_ROLES) {
+        if (!roleDirty(role)) continue;
+        const response = await request(role.endpoint, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ open_ids: owners }),
+          body: JSON.stringify({ open_ids: owners[role.key] }),
         });
         if (token !== generation) return;
-        if (!response.ok) throw await deliveryResponseIssue(response, '保存分发负责人失败');
+        if (!response.ok) throw await deliveryResponseIssue(response, role.saveFailure);
         const payload = await response.json();
-        savedOwners = ownerIDs(payload.distribution_owners?.owners);
-        owners = [...savedOwners];
-        ownersStale = false;
+        savedOwners[role.key] = ownerIDs(role.saved(payload));
+        owners[role.key] = [...savedOwners[role.key]];
+        ownersStale[role.key] = false;
       }
       notice = '发布链路已保存；新任务会按当前应用、审核群和发布方式执行';
       onMessage?.(notice);
@@ -444,7 +480,8 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
       rerender?.();
     }));
     overlay.querySelectorAll('[data-delivery-owner]').forEach(input => input.addEventListener('change', () => {
-      owners = [...overlay.querySelectorAll('[data-delivery-owner]:checked')]
+      const role = input.dataset.ownerRole;
+      owners[role] = [...overlay.querySelectorAll(`[data-owner-role="${role}"]:checked`)]
         .map(item => item.dataset.deliveryOwner)
         .filter(Boolean);
       notice = '';

@@ -1,10 +1,11 @@
 package main
 
-// publish_distribution_owners.go — 分发负责人（2026-10-12 用户裁定：@ 固定负责人）。
+// publish_distribution_owners.go — 分发负责人与校对负责人（2026-10-12 用户裁定：@ 固定负责人；
+// 2026-10-13 校对提醒「@对应的人」）。
 //
-// 外发平台的标题、摘要或封面不合要求时，系统在审核卡下回复一条提醒并 @ 这些人
-// （publish_external_reminders.go）。人只能从审核群成员里选：成员目录由审核应用实时读取，
-// 存的是这个应用下的 open_id，换审核应用后要重新选。
+// 外发平台的标题、摘要或封面不合要求时，系统在审核卡下回复一条提醒并 @ 分发负责人
+// （publish_external_reminders.go）；风险检查发现确定无疑的错误时 @ 校对负责人（publish_proofread.go）。
+// 人只能从审核群成员里选：成员目录由审核应用实时读取，存的是这个应用下的 open_id，换审核应用后要重新选。
 
 import (
 	"context"
@@ -19,6 +20,27 @@ import (
 )
 
 const maxPublishDistributionOwners = 10
+
+const (
+	publishOwnerRoleDistribution = "distribution"
+	publishOwnerRoleProofread    = "proofread"
+)
+
+// publishOwnersFor 某类负责人与他们的 open_id 所属的审核应用。
+func publishOwnersFor(settings publishDeliverySettings, role string) ([]publishDistributionOwner, string) {
+	if role == publishOwnerRoleProofread {
+		return settings.ProofreadOwners, settings.ProofreadOwnersApp
+	}
+	return settings.DistributionOwners, settings.DistributionOwnersApp
+}
+
+func setPublishOwners(settings *publishDeliverySettings, role string, owners []publishDistributionOwner, app string) {
+	if role == publishOwnerRoleProofread {
+		settings.ProofreadOwners, settings.ProofreadOwnersApp = owners, app
+		return
+	}
+	settings.DistributionOwners, settings.DistributionOwnersApp = owners, app
+}
 
 type publishDistributionOwner struct {
 	OpenID string `json:"open_id"`
@@ -40,14 +62,18 @@ func normalizePublishDistributionOwners(owners []publishDistributionOwner) []pub
 }
 
 func publishDistributionOwnersView(settings publishDeliverySettings) map[string]any {
-	owners := settings.DistributionOwners
+	return publishOwnersView(settings, publishOwnerRoleDistribution)
+}
+
+func publishOwnersView(settings publishDeliverySettings, role string) map[string]any {
+	owners, app := publishOwnersFor(settings, role)
 	if owners == nil {
 		owners = []publishDistributionOwner{}
 	}
 	return map[string]any{
 		"owners": owners,
 		// 换了审核应用后原来的 open_id @ 不到人：后台提示重新选。
-		"stale": len(owners) > 0 && settings.DistributionOwnersApp != settings.AppProfileID,
+		"stale": len(owners) > 0 && app != settings.AppProfileID,
 	}
 }
 
@@ -168,7 +194,9 @@ func registerPublishDistributionOwnerRoutes(mux *http.ServeMux, p *publishPipeli
 		}
 		// 读不到群成员（还没配推送应用、飞书暂时不通）不算接口失败：已选的人照样返回，
 		// 原因放在 candidates_error，后台在这一步里单独说明，不影响其他设置。
+		// 两类负责人从同一份审核群成员里选：一次读成员，校对负责人放在 proofread 里。
 		view := publishDistributionOwnersView(settings)
+		view["proofread"] = publishOwnersView(settings, publishOwnerRoleProofread)
 		view["candidates"] = candidates
 		if err != nil {
 			view["candidates"] = []publishDistributionOwner{}
@@ -177,7 +205,13 @@ func registerPublishDistributionOwnerRoutes(mux *http.ServeMux, p *publishPipeli
 		writeJSON(w, http.StatusOK, view)
 	})
 
-	mux.HandleFunc("PUT /api/publish/delivery-settings/distribution-owners", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT /api/publish/delivery-settings/distribution-owners", putPublishOwners(p, auth, publishOwnerRoleDistribution, "分发负责人"))
+	mux.HandleFunc("PUT /api/publish/delivery-settings/proofread-owners", putPublishOwners(p, auth, publishOwnerRoleProofread, "校对负责人"))
+}
+
+// putPublishOwners 保存某类负责人：只收审核群成员的 open_id，服务端按当前成员目录校验。
+func putPublishOwners(p *publishPipeline, auth *authService, role, label string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {
 			return
 		}
@@ -192,7 +226,7 @@ func registerPublishDistributionOwnerRoutes(mux *http.ServeMux, p *publishPipeli
 			return
 		}
 		if len(body.OpenIDs) > maxPublishDistributionOwners {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("最多选 %d 位分发负责人", maxPublishDistributionOwners))
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("最多选 %d 位%s", maxPublishDistributionOwners, label))
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -224,8 +258,7 @@ func registerPublishDistributionOwnerRoutes(mux *http.ServeMux, p *publishPipeli
 			writeError(w, http.StatusConflict, "审核应用刚刚变了，请刷新后重新选择")
 			return
 		}
-		current.DistributionOwners = owners
-		current.DistributionOwnersApp = current.AppProfileID
+		setPublishOwners(&current, role, owners, current.AppProfileID)
 		current.UpdatedBy = publishDeliveryActor(r, auth)
 		current.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if err := p.deliverySettings.write(current); err != nil {
@@ -234,5 +267,5 @@ func registerPublishDistributionOwnerRoutes(mux *http.ServeMux, p *publishPipeli
 		}
 		written, _ := p.deliverySettings.read()
 		writeJSON(w, http.StatusOK, publishDeliverySettingsView(written, apps))
-	})
+	}
 }

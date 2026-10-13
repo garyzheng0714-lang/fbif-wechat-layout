@@ -41,8 +41,11 @@ type publishDeliverySettings struct {
 	// DistributionOwnersApp 这个审核应用有效（publish_distribution_owners.go）。
 	DistributionOwners    []publishDistributionOwner `json:"distribution_owners,omitempty"`
 	DistributionOwnersApp string                     `json:"distribution_owners_app,omitempty"`
-	UpdatedBy             string                     `json:"updated_by,omitempty"`
-	UpdatedAt             string                     `json:"updated_at,omitempty"`
+	// 校对负责人：风险检查发现确定无疑的错误时在审核卡下 @ 的人（publish_proofread.go），同样按应用区分。
+	ProofreadOwners    []publishDistributionOwner `json:"proofread_owners,omitempty"`
+	ProofreadOwnersApp string                     `json:"proofread_owners_app,omitempty"`
+	UpdatedBy          string                     `json:"updated_by,omitempty"`
+	UpdatedAt          string                     `json:"updated_at,omitempty"`
 }
 
 type publishDeliverySelectionRequest struct {
@@ -117,6 +120,11 @@ func normalizePublishDeliverySettings(settings publishDeliverySettings) (publish
 	settings.DistributionOwnersApp = strings.TrimSpace(settings.DistributionOwnersApp)
 	if len(settings.DistributionOwners) == 0 {
 		settings.DistributionOwnersApp = ""
+	}
+	settings.ProofreadOwners = normalizePublishDistributionOwners(settings.ProofreadOwners)
+	settings.ProofreadOwnersApp = strings.TrimSpace(settings.ProofreadOwnersApp)
+	if len(settings.ProofreadOwners) == 0 {
+		settings.ProofreadOwnersApp = ""
 	}
 	settings.UpdatedBy = strings.TrimSpace(settings.UpdatedBy)
 	settings.UpdatedAt = strings.TrimSpace(settings.UpdatedAt)
@@ -313,6 +321,7 @@ func publishDeliverySettingsView(settings publishDeliverySettings, apps []feishu
 			"updated_at":     settings.UpdatedAt,
 		},
 		"distribution_owners": publishDistributionOwnersView(settings),
+		"proofread_owners":    publishOwnersView(settings, publishOwnerRoleProofread),
 		"apps":                views,
 	}
 }
@@ -553,10 +562,14 @@ func publishDeliverySelectionFromRequest(body publishDeliverySelectionRequest, c
 		UpdatedBy:     strings.TrimSpace(actor),
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
 	}
-	// 分发负责人的 open_id 只在原应用下有效：换了审核应用就要重新选。
+	// 分发、校对负责人的 open_id 只在原应用下有效：换了审核应用就要重新选。
 	if current.DistributionOwnersApp == appID {
 		settings.DistributionOwners = current.DistributionOwners
 		settings.DistributionOwnersApp = current.DistributionOwnersApp
+	}
+	if current.ProofreadOwnersApp == appID {
+		settings.ProofreadOwners = current.ProofreadOwners
+		settings.ProofreadOwnersApp = current.ProofreadOwnersApp
 	}
 	return settings, nil
 }

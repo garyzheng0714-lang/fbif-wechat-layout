@@ -134,6 +134,8 @@ type publishJob struct {
 	// 以及有平台待修改时在审核卡话题里 @ 分发负责人的提醒（publish_external_reminders.go）。
 	ExternalDistributionDrafts   []publishExternalDraft  `json:"external_distribution_drafts,omitempty"`
 	ExternalDistributionReminder publishExternalReminder `json:"external_distribution_reminder,omitzero"`
+	// 风险检查里确定无疑的错误：复核后在审核卡话题里 @ 校对负责人（publish_proofread.go），不挡同步。
+	ProofreadReminder publishProofreadReminder `json:"proofread_reminder,omitzero"`
 	// 以下是按平台拆开之前的单轮字段，只在读盘时迁成 lanes，迁完清空、不再写回。
 	LegacyExternalState          string                              `json:"external_distribution_state,omitempty"`
 	LegacyExternalTargets        []publishExternalDistributionTarget `json:"external_distribution_targets,omitempty"`

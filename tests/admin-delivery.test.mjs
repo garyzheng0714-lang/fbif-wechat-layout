@@ -187,7 +187,8 @@ test('发布链路：服务离线时不把未知状态误写成尚未配置', as
   await waitFor(() => controller.footerState().message.includes('发布服务不可达'));
 
   assert.equal(overlay.querySelectorAll('[data-delivery-issue="network"]').length, 1);
-  assert.equal(overlay.textContent.match(/等待发布服务恢复/g)?.length, 3);
+  // 推送应用、审核群、分发负责人、校对负责人四步各说一次。
+  assert.equal(overlay.textContent.match(/等待发布服务恢复/g)?.length, 4);
   assert.doesNotMatch(overlay.textContent, /尚未配置推送应用|Failed to fetch/);
   assert.equal(controller.footerState().disabled, true);
 });
@@ -227,11 +228,11 @@ test('发布链路：分发负责人从审核群成员里选，单独保存', as
   };
   controller = createAdminDeliveryController({ getOverlay: () => overlay, rerender, request });
   rerender();
-  await waitFor(() => overlay.querySelector('[data-delivery-owner="ou_a"]'));
+  await waitFor(() => overlay.querySelector('[data-owner-role="distribution"][data-delivery-owner="ou_a"]'));
   assert.match(overlay.textContent, /分发负责人/);
   assert.equal(controller.footerState().dirty, false);
 
-  const owner = overlay.querySelector('[data-delivery-owner="ou_a"]');
+  const owner = overlay.querySelector('[data-owner-role="distribution"][data-delivery-owner="ou_a"]');
   owner.setAttribute('checked', '');
   owner.dispatchEvent(new window.Event('change'));
   assert.equal(controller.footerState().dirty, true);
@@ -242,6 +243,59 @@ test('发布链路：分发负责人从审核群成员里选，单独保存', as
   const puts = calls.filter(call => call.method === 'PUT');
   assert.deepEqual(puts.map(call => call.path), ['/api/publish/delivery-settings/distribution-owners'], '只改负责人时不重写其他设置');
   assert.deepEqual(JSON.parse(puts[0].body), { open_ids: ['ou_a'] });
+  assert.equal(controller.footerState().dirty, false);
+});
+
+test('发布链路：校对负责人与分发负责人分开选、分开保存', async () => {
+  const { document, window } = parseHTML('<div id="overlay"></div>');
+  const overlay = document.querySelector('#overlay');
+  const calls = [];
+  let proofread = [{ open_id: 'ou_b', name: '李编辑' }];
+  const settings = { app_profile_id: 'review-app', chat_ids: ['oc_review'], auto_publish: false };
+  const request = async (path, init = {}) => {
+    calls.push({ path, method: init.method || 'GET', body: init.body || '' });
+    if (path === '/api/publish/delivery-settings') {
+      return Response.json({ settings, apps: [{ id: 'review-app', name: '内容审核应用' }] });
+    }
+    if (path === '/api/feishu/chats') {
+      return Response.json({ chats: [{ chat_id: 'oc_review', name: '内容审核群' }] });
+    }
+    if (path === '/api/publish/delivery-settings/proofread-owners' && init.method === 'PUT') {
+      const ids = JSON.parse(init.body).open_ids;
+      proofread = ids.map(id => ({ open_id: id, name: id === 'ou_a' ? '王编辑' : '李编辑' }));
+      return Response.json({ settings, proofread_owners: { owners: proofread, stale: false } });
+    }
+    if (path === '/api/publish/delivery-settings/distribution-owners') {
+      return Response.json({
+        owners: [], stale: false, proofread: { owners: proofread, stale: false },
+        candidates: [{ open_id: 'ou_a', name: '王编辑' }, { open_id: 'ou_b', name: '李编辑' }],
+      });
+    }
+    return Response.json({ error: 'not found' }, { status: 404 });
+  };
+  let controller;
+  const rerender = () => {
+    const footer = controller.footerState();
+    overlay.innerHTML = `${controller.render()}<button type="button" data-delivery-action="save" ${footer.disabled ? 'disabled' : ''}>${footer.label}</button>`;
+    controller.bind();
+  };
+  controller = createAdminDeliveryController({ getOverlay: () => overlay, rerender, request });
+  rerender();
+  await waitFor(() => overlay.querySelector('[data-owner-role="proofread"][data-delivery-owner="ou_a"]'));
+  assert.match(overlay.textContent, /校对负责人/);
+  assert.equal(overlay.querySelector('[data-owner-role="proofread"][data-delivery-owner="ou_b"]').hasAttribute('checked'), true, '已选的校对负责人勾上');
+  assert.equal(overlay.querySelector('[data-owner-role="distribution"][data-delivery-owner="ou_b"]').hasAttribute('checked'), false, '分发负责人不跟着勾');
+
+  const owner = overlay.querySelector('[data-owner-role="proofread"][data-delivery-owner="ou_a"]');
+  owner.setAttribute('checked', '');
+  owner.dispatchEvent(new window.Event('change'));
+  assert.equal(controller.footerState().dirty, true);
+
+  overlay.querySelector('[data-delivery-action="save"]').click();
+  await waitFor(() => controller.footerState().message.includes('已保存'));
+  const puts = calls.filter(call => call.method === 'PUT');
+  assert.deepEqual(puts.map(call => call.path), ['/api/publish/delivery-settings/proofread-owners'], '只改校对负责人时只保存这一项');
+  assert.deepEqual(JSON.parse(puts[0].body).open_ids.sort(), ['ou_a', 'ou_b']);
   assert.equal(controller.footerState().dirty, false);
 });
 
