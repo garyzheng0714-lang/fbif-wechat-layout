@@ -207,8 +207,8 @@ func (p *publishPipeline) runExternalAutoDistribution() {
 		}
 		only := map[string]bool{}
 		for _, target := range missing {
-			// 卡在推送前检查、文章也没变的平台等人改，不必每轮去网站取稿重查。
-			if externalDraftBlocked(job, target.ID) {
+			// 卡在推送前检查、文章和平台规则都没变的平台等人改，不必每轮去网站取稿重查。
+			if externalDraftBlocked(job, target) {
 				continue
 			}
 			if quota.allows(kind, target.ID, now) {

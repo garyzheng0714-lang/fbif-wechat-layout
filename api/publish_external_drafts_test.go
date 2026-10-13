@@ -17,9 +17,9 @@ import (
 	"time"
 )
 
-const testLongToutiaoTitle = "这家老字号把茶做成零食，166年老店只开6家，年营收1.4亿"
+const testLongToutiaoTitle = "这家166年的京都老字号把抹茶做成零食，只开6家店，年营收就做到了1.4亿"
 
-// createLongTitleDistributionJob 一篇已发布原创，标题超过头条号 20 字（网站最新稿同标题）。
+// createLongTitleDistributionJob 一篇已发布原创，标题超过头条号 30 字（网站最新稿同标题）。
 func createLongTitleDistributionJob(t *testing.T, env *publishTestEnv, key string) publishJob {
 	t.Helper()
 	job := createPublishedDistributionJobWithKey(t, env, key, "FBIF食品饮料创新")
@@ -74,7 +74,7 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	got := mustJob(t, env, job.ID)
 	draft, _ := externalDraftFor(got, testYunsuoToutiaoID)
 	title := externalIssueFields(draft.Issues)[publishExternalIssueTitle]
-	if title.Max != 20 || title.Length != runeLen(testLongToutiaoTitle) || title.Current != testLongToutiaoTitle {
+	if title.Max != 30 || title.Length != runeLen(testLongToutiaoTitle) || title.Current != testLongToutiaoTitle {
 		t.Fatalf("应记下标题问题与现状：%+v", draft)
 	}
 	if draft.SuggestedTitle != "老茶铺把茶做成零食，年营收1.4亿" || draft.SuggestedBy != "ai" || draft.PreparedFor != draft.CheckedAt {
@@ -85,10 +85,10 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	}
 
 	// 超出上限的修改当场拒绝，并说清还要删几个字。
-	tooLong := "老茶铺把茶做成零食，年营收一点四亿元人民币啊"
+	tooLong := "老茶铺把茶做成零食和甜品，只开六家店，年营收就做到了一点四亿元人民币啊"
 	out := env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, 0),
 		map[string]any{fmt.Sprintf("t_%d_0", got.ID): tooLong})
-	if out.toastType != "error" || !strings.Contains(out.toastContent, fmt.Sprintf("头条号标题最多 20 字，现在 %d 字，还要删 %d 字", runeLen(tooLong), runeLen(tooLong)-20)) {
+	if out.toastType != "error" || !strings.Contains(out.toastContent, fmt.Sprintf("头条号标题最多 30 字，现在 %d 字，还要删 %d 字", runeLen(tooLong), runeLen(tooLong)-30)) {
 		t.Fatalf("超限修改应拒绝并说明：%+v", out)
 	}
 
@@ -144,7 +144,7 @@ func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
 		t.Fatalf("待修改不得推送：%v", fake.pushed)
 	}
 	got := mustJob(t, env, job.ID)
-	if got.ExternalDistributionAutoPending == "" || !externalDraftBlocked(got, testYunsuoToutiaoID) {
+	if got.ExternalDistributionAutoPending == "" || !externalDraftBlocked(got, yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}) {
 		t.Fatalf("待办应保留、头条号应记为待修改：pending=%q drafts=%+v", got.ExternalDistributionAutoPending, got.ExternalDistributionDrafts)
 	}
 	checkedAt := mustDraft(t, got, testYunsuoToutiaoID).CheckedAt
@@ -161,11 +161,61 @@ func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
 	if _, err := env.pipeline.submitExternalDraftEdit(job.ID, 0, externalDraftEdit{Title: &fixed}, "ou_editor"); err != nil {
 		t.Fatal(err)
 	}
-	if fake.pushCalls != 1 || fake.payload.ShortTitle != fixed {
+	if fake.pushCalls != 1 || fake.payload.Title != fixed {
 		t.Fatalf("改好后应按自动外发推出：calls=%d payload=%+v", fake.pushCalls, fake.payload)
 	}
 	if lane := mustLane(t, mustJob(t, env, job.ID), testYunsuoToutiaoID); lane.RequestedBy != publishExternalAutoActor {
 		t.Fatalf("auto 账号仍记系统发起：%+v", lane)
+	}
+}
+
+// TestExternalAutoRechecksDraftWhenPlatformLimitChanges #280（2026-10-13）：头条号标题上限按 20 字
+// 记成待修改，用户裁定上限是 30 字。文章没变也要按新规则重查一次，过了就推，标题走云梭「标题」档原文。
+func TestExternalAutoRechecksDraftWhenPlatformLimitChanges(t *testing.T) {
+	setTestYunsuoAutoConfig(t)
+	stubYunsuoImageSize(t, map[string][2]int{})
+	env := newPublishTestEnv(t)
+	fake := newToutiaoOnlyYunsuo()
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	clock := newCSTClock("2026-10-13 09:00")
+	env.pipeline.now = func() time.Time { return clock.now }
+	title := "西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了"
+	job := createPublishedDistributionJobWithKey(t, env, "site:limit-change", "FBIF食品饮料创新")
+	job, err := env.store.update(job.ID, func(current *publishJob) {
+		current.Title = title
+		current.ApprovedRiskVersion = publishReviewCardVersion(*current)
+		current.ExternalDistributionAutoPending = publishExternalAutoKindPublish
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedLivePublishedNews(t, env, foodTalksNewsDetail{
+		ID: testDistributionNewsID, Title: title, CoverImg: job.CoverURL,
+		Content: testDistributionLiveHTML, Summary: job.Summary, SourceName: "FBIF食品饮料创新",
+		PublishStatus: foodTalksPublishStatusPublished,
+	})
+	if _, err := env.store.update(job.ID, func(current *publishJob) {
+		setExternalDraft(current, publishExternalDraft{
+			AccountID: testYunsuoToutiaoID, CheckedMaterial: externalDraftMaterial(*current),
+			Issues: []publishExternalIssue{{Field: publishExternalIssueTitle, Current: title, Length: runeLen(title), Min: 8, Max: 20}},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	toutiao := yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}
+	if externalDraftBlocked(mustJob(t, env, job.ID), toutiao) {
+		t.Fatalf("按旧上限记的待修改不应继续挡住")
+	}
+	env.pipeline.runExternalAutoDistribution()
+	if fake.pushCalls != 1 || fake.payload.Title != title {
+		t.Fatalf("26 字标题在 30 字上限内，应重查后推出原标题：calls=%d payload=%+v", fake.pushCalls, fake.payload)
+	}
+	got := mustJob(t, env, job.ID)
+	if externalJobNeedsFix(got) {
+		t.Fatalf("重查通过后不应再待修改：%+v", got.ExternalDistributionDrafts)
+	}
+	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.Title != title {
+		t.Fatalf("头条号记下的标题应是推出去的原标题：%+v", lane)
 	}
 }
 
@@ -239,9 +289,9 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	if len(sent) != 1 || sent[0].kind != externalReminderKindOpen || sent[0].chatID != "oc_review" {
 		t.Fatalf("应在审核卡话题里发一条开场：%+v", sent)
 	}
-	over := runeLen(testLongToutiaoTitle) - 20
+	over := runeLen(testLongToutiaoTitle) - 30
 	for _, want := range []string{`{"tag":"at","user_id":"ou_owner_1"}`, fmt.Sprintf("#%d《%s》同步到头条号前，还差 1 处要改：", job.ID, testLongToutiaoTitle),
-		fmt.Sprintf(`"style":["bold"],"tag":"text","text":"1. 标题超了 %d 字（头条号最多 20 字）"`, over),
+		fmt.Sprintf(`"style":["bold"],"tag":"text","text":"1. 标题超了 %d 字（头条号最多 30 字）"`, over),
 		"卡片里已填好建议「", "可以直接用，也可以改成自己的", "改好后点上面卡片里的「保存并同步至头条号」，就会同步。"} {
 		if !strings.Contains(sent[0].post, want) {
 			t.Fatalf("开场缺少 %q: %s", want, sent[0].post)
@@ -414,7 +464,7 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 		t.Fatalf("应列出两个平台：%s", rec.Body.String())
 	}
 	toutiao, baijia := view.Platforms[0], view.Platforms[1]
-	if toutiao.Status != "待修改" || !toutiao.Editable || !toutiao.TitleIssue || toutiao.TitleMax != 20 || toutiao.CoverIssue == "" ||
+	if toutiao.Status != "待修改" || !toutiao.Editable || !toutiao.TitleIssue || toutiao.TitleMax != 30 || toutiao.CoverIssue == "" ||
 		toutiao.CoverMinWidth != 452 || toutiao.Title != testLongToutiaoTitle {
 		t.Fatalf("头条号应待修改并给出上限：%+v", toutiao)
 	}
@@ -429,7 +479,7 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	if rec := put(`{"slot":0,"title":"老茶铺把茶做成零食，年营收过亿"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || fake.pushCalls != 1 {
 		t.Fatalf("改完标题封面仍要改：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
 	}
-	if rec := put(`{"slot":0,"title":"这个标题足足有二十五个字远远超过头条号上限"}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "头条号标题最多 20 字") {
+	if rec := put(`{"slot":0,"title":"这个标题足足有三十多个字，远远超过了头条号三十个字的标题上限啊"}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "头条号标题最多 30 字") {
 		t.Fatalf("超限标题应拒绝：%d %s", rec.Code, rec.Body.String())
 	}
 

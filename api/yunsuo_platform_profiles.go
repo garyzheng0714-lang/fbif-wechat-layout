@@ -44,8 +44,9 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		HeadingOpen: `<h1 class="pgc-h-forward-slash">`, HeadingClose: "</h1>",
 		NativeCaption: true,
 		CoverMinWidth: 452, CoverMinHeight: 352,
-		// #196 实测头条号拿的是短标题（被截成 20 字），不是平台自己的 30 字。
-		TitleField: yunsuoTitleShort, TitleMax: 20,
+		// 标题最多 30 字，标点与空格都算（2026-10-13 用户裁定）。云梭给头条号用的是「标题」档：
+		// 线上 7 篇头条稿标题都是 title 原文（#196 27 字、#260 32 字），不是 8–20 字的短标题。
+		TitleField: yunsuoTitleMedium, TitleMax: 30,
 		DailyLimit: 5,
 		URLHosts:   []string{"toutiao.com", "www.toutiao.com", "m.toutiao.com"},
 		LinkLookup: externalLinkLookupToutiao,
@@ -75,7 +76,7 @@ var yunsuoGenericProfile = yunsuoPlatformProfile{
 }
 
 // 云梭的三档标题与各自的字数范围（云梭 API 文档：short_title 8–20、title 15–40、
-// long_title 20–60）。
+// long_title 20–60；短标题只给「标题最大长度不足 20 字」的平台用）。
 const (
 	yunsuoTitleShort  = "short"
 	yunsuoTitleMedium = "title"

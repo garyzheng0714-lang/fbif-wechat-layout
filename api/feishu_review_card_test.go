@@ -504,11 +504,11 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	job.FoodTalksNewsID = 7318
 	job.PublicationAction = publishPublicationActionPublish
 	job.ReviewDeliveryAppID = "review-app"
-	long := "这是一条明显超过头条号二十个字上限的文章标题需要缩短"
+	long := "这是一条明显超过了头条号三十个字上限的文章标题，需要编辑缩短以后再同步"
 	job.ExternalDistributionDrafts = []publishExternalDraft{{
 		AccountID: testYunsuoToutiaoID,
 		Issues: []publishExternalIssue{
-			{Field: publishExternalIssueTitle, Current: long, Length: runeLen(long), Min: 8, Max: 20},
+			{Field: publishExternalIssueTitle, Current: long, Length: runeLen(long), Min: 15, Max: 30},
 			{Field: publishExternalIssueCover, Current: "https://cdn.example.com/small.jpg", Width: 300, Height: 200, MinWidth: 452, MinHeight: 352},
 		},
 		SuggestedTitle: "头条号标题缩短后的建议", SuggestedBy: "ai",
@@ -530,9 +530,9 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	body := panelJSON(t, form)
 	for _, want := range []string{
 		"<font color='orange'>待修改</font>",
-		fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：头条号最多 20 字，现在 %d 字", runeLen(long)-20, runeLen(long)),
+		fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：头条号最多 30 字，现在 %d 字", runeLen(long)-30, runeLen(long)),
 		"现在：" + long,
-		`"name":"t_72_0"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":20`, `"content":"改成"`,
+		`"name":"t_72_0"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":30`, `"content":"改成"`,
 		"<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200",
 		`"tag":"select_img"`, `"name":"c_72_0"`, `"img_key":"img_big"`, `"value":"` + reviewCardCoverValue("https://cdn.example.com/big.jpg") + `"`,
 		`"content":"保存并同步至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"slot":0`,

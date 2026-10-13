@@ -1013,9 +1013,31 @@ func buildArticleProfile(observed []ObservedBlock) articleProfile {
 		if previous := previousMeaningfulIndex(observed, i); previous >= 0 && observed[previous].RawKind == "media" {
 			continue
 		}
+		// Neither may the rest of a centered, muted run hanging off a media
+		// item (#280: three caption-styled lines translating a screenshot ended
+		// in "！" and taught the caption style as body, so every later caption
+		// became body text).
+		if inCaptionStyledRunAfterMedia(observed, i) {
+			continue
+		}
 		profile.bodyVisuals[visualSignatureForObservation(obs)] = true
 	}
 	return profile
+}
+
+// inCaptionStyledRunAfterMedia: observed[i] and every text between it and the
+// media item before it are centered and muted/small, i.e. a caption block.
+func inCaptionStyledRunAfterMedia(observed []ObservedBlock, i int) bool {
+	for k := i; k >= 0; k = previousMeaningfulIndex(observed, k) {
+		obs := observed[k]
+		if obs.RawKind == "media" {
+			return k != i
+		}
+		if obs.RawKind != "text" || !obs.Centered || !obs.MutedOrSmallStyle {
+			return false
+		}
+	}
+	return false
 }
 
 func visualSignatureForObservation(obs ObservedBlock) textVisualSignature {

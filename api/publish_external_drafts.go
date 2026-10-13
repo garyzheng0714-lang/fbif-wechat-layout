@@ -116,10 +116,32 @@ func externalDraftMaterial(job publishJob) string {
 	return fmt.Sprintf("sha256:%x", digest[:12])
 }
 
-// externalDraftBlocked 这个平台卡在待修改、文章也没变：等人改，不必再去网站取稿重查。
-func externalDraftBlocked(job publishJob, accountID string) bool {
-	draft, ok := externalDraftFor(job, accountID)
-	return ok && len(draft.Issues) > 0 && draft.CheckedMaterial == externalDraftMaterial(job)
+// externalDraftBlocked 这个平台卡在待修改、文章和平台规则都没变：等人改，不必再去网站取稿重查。
+// 平台上限改过（如 2026-10-13 头条号标题 20→30 字）就重查一次，过了照常推。
+func externalDraftBlocked(job publishJob, target yunsuoAccountTarget) bool {
+	draft, ok := externalDraftFor(job, target.ID)
+	if !ok || len(draft.Issues) == 0 || draft.CheckedMaterial != externalDraftMaterial(job) {
+		return false
+	}
+	profile := yunsuoProfileForTarget(target)
+	titleMin, titleMax := profile.titleLimits()
+	for _, issue := range draft.Issues {
+		switch issue.Field {
+		case publishExternalIssueTitle:
+			if issue.Min != titleMin || issue.Max != titleMax {
+				return false
+			}
+		case publishExternalIssueSummary:
+			if issue.Max != profile.SummaryMax {
+				return false
+			}
+		case publishExternalIssueCover:
+			if issue.MinWidth != profile.CoverMinWidth || issue.MinHeight != profile.CoverMinHeight {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // externalJobNeedsFix 有平台待修改（还没推、卡在推送前检查）。

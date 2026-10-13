@@ -449,6 +449,70 @@ func TestImageCaptionGroupKeepsImageSourceAsCaption(t *testing.T) {
 	}
 }
 
+// #280（2026-10-13）：截图下三行译文与图注同款（居中 12px 灰），其中两行以「！」结尾，
+// 曾被学成正文样式，导致全文「图片→说明→图片来源」都落成正文。
+func TestReported280CaptionStyledQuotesDoNotTeachBodyStyle(t *testing.T) {
+	body := func(text string) string {
+		return `<section style="text-align: left;margin-bottom: 20px;line-height: 1.75;"><span leaf=""><span textstyle="" style="font-size: 15px;color: rgb(84, 69, 69);">` + text + `</span></span></section>`
+	}
+	caption := func(text string) string {
+		return `<section style="text-align: center;margin-top: 0;margin-bottom: 0;line-height: 1.75;"><span leaf=""><span textstyle="" style="font-size: 12px;color: rgb(136, 136, 136);">` + text + `</span></span></section>`
+	}
+	img := func(name string) string {
+		return `<section style="line-height: 0;font-size: 0;text-align: center;" nodeleaf=""><img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/` + name + `.png" data-w="1080" data-ratio="0.75" /></section>`
+	}
+	html := jsContentWrap(
+		body("就像鱼香肉丝里没有鱼、蟹棒里没有蟹一样，“西柚汁”也可以不用西柚了。") +
+			img("a") + caption("不使用西柚的西柚味100%果汁") + caption("图片来源：可果美") +
+			body("近日，日本企业可果美的Beyond系列就推出了一款“不使用西柚的西柚味100%果汁”，开发这款产品的直接原因，是受西柚供应不稳定的影响。") +
+			body("比如X上一位网友就发帖表示，这款产品居然连西柚那一点点苦味都还原了，并且还让他纳闷苦味到底来自哪里。") +
+			img("b") + caption("真的！是西柚味！明明没有使用西柚！") + caption("口中残留的味道也是西柚味——！！！") +
+			caption("这种谜一般的还原度也太高了！清晰度简直像8K一样！") +
+			body("除了“西柚汁”，可果美Beyond系列此前还推出了一款“不使用橙子的橙味100%果汁”，同样以黄胡萝卜为主要原料调配而成。") +
+			img("c") + caption("不使用橙子的橙味100%果汁") + caption("图片来源：可果美") +
+			body("跟“西柚汁”一样，“橙汁”同样以黄胡萝卜为主要原料，同时使用苹果、菠萝、柠檬、芒果等水果调配。"))
+	_, blocks, _ := extractArticleBlocks(html)
+
+	textOf := func(b Block) string {
+		text := b.Text
+		for _, r := range b.Runs {
+			text += r.Text
+		}
+		return text
+	}
+	for _, want := range []string{"不使用西柚的西柚味100%果汁", "不使用橙子的橙味100%果汁", "真的！是西柚味！明明没有使用西柚！", "这种谜一般的还原度也太高了！清晰度简直像8K一样！"} {
+		var got *Block
+		for i := range blocks {
+			if textOf(blocks[i]) == want {
+				got = &blocks[i]
+			}
+		}
+		if got == nil || got.K != "cap" {
+			t.Fatalf("%q 必须是图注，got %v; kinds=%v", want, got, findKinds(blocks))
+		}
+	}
+	sources := 0
+	for i, b := range blocks {
+		text := textOf(b)
+		if !strings.HasPrefix(text, "图片来源") {
+			continue
+		}
+		sources++
+		if b.K != "cap" {
+			t.Fatalf("第 %d 块图片来源必须是图注，got %v; kinds=%v", i, b, findKinds(blocks))
+		}
+	}
+	if sources != 2 {
+		t.Fatalf("应有 2 处图片来源，got %d; kinds=%v", sources, findKinds(blocks))
+	}
+	for _, needle := range []string{"就像鱼香肉丝", "近日，日本企业可果美", "比如X上一位网友", "除了“西柚汁”", "跟“西柚汁”一样"} {
+		b := findBlockByText(blocks, needle)
+		if b == nil || b.K != "txt" {
+			t.Fatalf("%q 必须是正文，got %v; kinds=%v", needle, b, findKinds(blocks))
+		}
+	}
+}
+
 func TestLegacyMultiBlockCaptionDoesNotDefineBodyTypography(t *testing.T) {
 	first := "新品包装组合展示"
 	second := strings.Repeat("说明", 50)
