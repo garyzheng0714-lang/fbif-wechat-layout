@@ -177,3 +177,74 @@ func TestPickMoteSeriesNews(t *testing.T) {
 		t.Errorf("最长分句：got %q", got)
 	}
 }
+
+// TestRepairNewsLinksRepostNoticeOriginalTitle 2026-10-14：已发布转载稿的声明还是 FBIF 改过的标题、没链接。
+// 找到核验过的原文后只换这一句（链到原文、用原文真标题）；编辑已改过这句、自家原创、找不到原文都不动；
+// dry_run 只查不记，正式修复把原文记进任务库。
+func TestRepairNewsLinksRepostNoticeOriginalTitle(t *testing.T) {
+	env := newPublishTestEnv(t)
+	job, _, err := env.store.createSeeded("site:retitled", "https://mp.weixin.qq.com/s/fbif-repost", func(j *publishJob) {
+		j.Stage = publishStagePublished
+		j.Title = "3年开出300家门店，社区烘焙第一品牌是怎么跑出来的"
+		j.SourceName = "FBIF食品饮料创新"
+		j.AISource = "窄播"
+		j.FoodTalksNewsID = 63177
+		j.BlocksJSON = `[{"k":"txt","runs":[{"type":"txt","text":"正文"}]}]`
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const originalURL = "https://mp.weixin.qq.com/s?__biz=MzkxMzMwNTkxOA==&mid=2247504481&idx=1&sn=f328"
+	lookups := 0
+	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit { return feedOriginalArticleHit{} }
+	lookupWechatOriginalArticle = func(context.Context, string, string, []string) repostOriginalArticle {
+		lookups++
+		return repostOriginalArticle{URL: originalURL, Title: "社区烘焙第一品牌，是怎么跑出来的｜对话"}
+	}
+	t.Cleanup(func() {
+		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
+		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
+	})
+	other := `<p>正文里<a href="https://mp.weixin.qq.com/s/other">别的链接</a>不动。</p>`
+	notice := `<p style="text-align: justify;"><em><span style="font-size: 14px; color: #7f7f7f;">*本文为窄播原创《3年开出300家门店，社区烘焙第一品牌是怎么跑出来的》，不代表FoodTalks立场，转载请联系出处。</span></em></p>`
+	stub := &seriesRepairStub{live: foodTalksNewsDetail{ID: 63177, Title: job.Title, Author: "FBIF", Content: other + notice,
+		PublishStatus: foodTalksPublishStatusPublished, Language: "ZH"}}
+	p := env.pipeline
+	p.foodTalks = func() (foodTalksAPI, error) { return stub, nil }
+
+	res, err := p.repairNewsLinks(context.Background(), 63177, true)
+	if err != nil || !res.Changed || res.RepostNoticeTitle != "社区烘焙第一品牌，是怎么跑出来的｜对话" || len(stub.puts) != 0 {
+		t.Fatalf("dry_run 应报告要换的原文标题且不写：%+v err=%v puts=%d", res, err, len(stub.puts))
+	}
+	if got := mustJob(t, env, job.ID); got.OriginalSourceURL != "" {
+		t.Fatalf("dry_run 不得把原文记进任务库：%+v", got.OriginalSourceURL)
+	}
+	if _, err := p.repairNewsLinks(context.Background(), 63177, false); err != nil || len(stub.puts) != 1 {
+		t.Fatalf("应写回一次：err=%v puts=%d", err, len(stub.puts))
+	}
+	want := other + `<p style="text-align: justify;"><em><span style="font-size: 14px; color: #7f7f7f;">*本文为窄播原创` +
+		`<a href="https://mp.weixin.qq.com/s?__biz=MzkxMzMwNTkxOA==&amp;mid=2247504481&amp;idx=1&amp;sn=f328" target="_blank" rel="noopener">` +
+		`《社区烘焙第一品牌，是怎么跑出来的｜对话》</a>，不代表FoodTalks立场，转载请联系出处。</span></em></p>`
+	if stub.puts[0].Content != want {
+		t.Fatalf("只换声明这一句：\n got %s\nwant %s", stub.puts[0].Content, want)
+	}
+	if got := mustJob(t, env, job.ID); got.OriginalSourceURL != originalURL || publishOriginalTitleForRender(got) == "" {
+		t.Fatalf("正式修复应把原文记进任务库：%+v", got)
+	}
+
+	// 已修好的：幂等不写、不再查。
+	stub.live.Content = stub.puts[0].Content
+	if res, _ := p.repairNewsLinks(context.Background(), 63177, false); res.Changed || len(stub.puts) != 1 || lookups != 2 {
+		t.Fatalf("已修好的稿不得再写或再查：%+v puts=%d lookups=%d", res, len(stub.puts), lookups)
+	}
+	// 编辑已把声明改成别的标题：不动。
+	stub.live.Content = strings.Replace(notice, "《3年开出300家门店，社区烘焙第一品牌是怎么跑出来的》", "《编辑自己写的标题》", 1)
+	if res, _ := p.repairNewsLinks(context.Background(), 63177, false); res.Changed || len(stub.puts) != 1 {
+		t.Fatalf("编辑改过的声明不得覆盖：%+v", res)
+	}
+	// 自家原创声明：不动。
+	stub.live.Content = strings.Replace(notice, "*本文为窄播原创", "*本文为FBIF食品饮料创新（ID：FoodInnovation）原创", 1)
+	if res, _ := p.repairNewsLinks(context.Background(), 63177, false); res.Changed || len(stub.puts) != 1 {
+		t.Fatalf("自家原创声明不得改：%+v", res)
+	}
+}

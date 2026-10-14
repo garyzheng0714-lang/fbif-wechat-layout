@@ -1,21 +1,28 @@
 package main
 
 // publish_series_tag_repair.go — 已发布网站稿补链接（2026-10-08 用户反馈 63149）。按资讯 id
-// 直接改网站现稿，流水线稿和编辑手工稿都适用，只动两类链接，其余正文与字段按 CMS 现稿原样写回：
+// 直接改网站现稿，流水线稿和编辑手工稿都适用，只动三类链接，其余正文与字段按 CMS 现稿原样写回：
 //   - 系列声明段的系列名 → 同名标签页（publishSiteLinkSeriesTags）；
-//   - Mote 文章里的公众号文章链 → 已发布的站内 /news/{id}，找不到保留原链（rewriteMoteSeriesLinks）。
+//   - Mote 文章里的公众号文章链 → 已发布的站内 /news/{id}，找不到保留原链（rewriteMoteSeriesLinks）；
+//   - 流水线转载稿的转载声明《本稿标题》→ 链到核验过的原文、换成原文真标题（repairRepostNoticeTitle，2026-10-14）。
 
 import (
 	"context"
 	"fmt"
+	"html"
+	"regexp"
 )
 
 type newsLinkRepairResult struct {
-	FoodTalksNewsID int64 `json:"foodtalks_news_id"`
-	Mote            bool  `json:"mote"`
-	Changed         bool  `json:"changed"`
-	DryRun          bool  `json:"dry_run"`
+	FoodTalksNewsID   int64  `json:"foodtalks_news_id"`
+	Mote              bool   `json:"mote"`
+	Changed           bool   `json:"changed"`
+	DryRun            bool   `json:"dry_run"`
+	RepostNoticeTitle string `json:"repost_notice_title,omitempty"`
 }
+
+// repostNoticeTitleRe 网站转载声明「*本文为{来源}原创《标题》」，《》可能已包在链接里。
+var repostNoticeTitleRe = regexp.MustCompile(`(\*本文为([^<《*]{1,60}?)原创)(?:<a\b[^>]*>)?《([^》<]{1,200})》(?:</a>)?`)
 
 func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dryRun bool) (newsLinkRepairResult, error) {
 	res := newsLinkRepairResult{FoodTalksNewsID: newsID, DryRun: dryRun}
@@ -39,6 +46,7 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 	if res.Mote = publishSiteIsMoteArticle(job); res.Mote {
 		content = p.rewriteMoteSeriesLinks(ctx, job, content)
 	}
+	content, res.RepostNoticeTitle = p.repairRepostNoticeTitle(ctx, job, content, dryRun)
 	if content == live.Content {
 		return res, nil
 	}
@@ -67,4 +75,32 @@ func (p *publishPipeline) newsLinkRepairJob(newsID int64, live foodTalksNewsDeta
 		}
 	}
 	return publishJob{FoodTalksNewsID: newsID, Author: live.Author}
+}
+
+// repairRepostNoticeTitle 流水线转载稿的转载声明还是本稿（FBIF 改过的）标题时，换成核验过的原文真标题
+// 并链到原文；编辑已改过这句、找不到原文、自家原创都不动。dry_run 只查不记。
+func (p *publishPipeline) repairRepostNoticeTitle(ctx context.Context, job publishJob, content string, dryRun bool) (string, string) {
+	if job.ID <= 0 {
+		return content, "" // 编辑手工稿没有任务库记录，不知道本稿标题与正文
+	}
+	if publishJobNeedsOriginalURLSearch(job) {
+		if dryRun {
+			_, source := publishArticleProvenance(job)
+			found := resolveRepostOriginal(ctx, job.Title, source, job.SourceURL, publishJobBodyParagraphs(job.BlocksJSON))
+			job.OriginalSourceURL, job.OriginalSourceTitle, job.OriginalSourceTitleURL = found.URL, found.Title, found.URL
+		} else {
+			p.ensureRepostOriginalURL(ctx, &job)
+		}
+	}
+	title := publishOriginalTitleForRender(job)
+	m := repostNoticeTitleRe.FindStringSubmatchIndex(content)
+	if title == "" || m == nil || publishExternalSourceIsOwn(html.UnescapeString(content[m[4]:m[5]]), siteOwnAccounts()) {
+		return content, ""
+	}
+	if normalizeOriginalTitle(html.UnescapeString(content[m[6]:m[7]])) != normalizeOriginalTitle(job.Title) {
+		return content, ""
+	}
+	notice := content[m[2]:m[3]] + `<a href="` + html.EscapeString(job.OriginalSourceURL) + `" target="_blank" rel="noopener">《` +
+		html.EscapeString(title) + `》</a>`
+	return content[:m[0]] + notice + content[m[1]:], title
 }
