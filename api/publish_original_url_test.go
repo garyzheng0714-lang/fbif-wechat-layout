@@ -56,7 +56,7 @@ func TestResolveRepostOriginalURLPrefersFeedLookup(t *testing.T) {
 	}
 	// Feed 按标题对上的原文，真标题可能多几个字（#114 原文《笑死！假瑞幸败诉…》）：抓原文页取真标题。
 	fetchOriginalArticlePage = func(raw string) ([]byte, string, error) {
-		return []byte(`<meta property="og:title" content="笑死！餐饮零食化，火了猪油渣">`), raw, nil
+		return []byte(`<meta property="og:title" content="笑死！餐饮零食化，火了猪油渣"><p>惊蛰研究所</p>`), raw, nil
 	}
 	got := resolveRepostOriginal(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所",
 		"https://mp.weixin.qq.com/s/fbif-repost", nil)
@@ -65,7 +65,7 @@ func TestResolveRepostOriginalURLPrefersFeedLookup(t *testing.T) {
 	}
 	// 标题只差标点空格：不算改过，不填。
 	fetchOriginalArticlePage = func(raw string) ([]byte, string, error) {
-		return []byte(`<meta property="og:title" content="餐饮零食化 火了猪油渣！">`), raw, nil
+		return []byte(`<meta property="og:title" content="餐饮零食化 火了猪油渣！"><p>惊蛰研究所</p>`), raw, nil
 	}
 	if got := resolveRepostOriginal(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所",
 		"https://mp.weixin.qq.com/s/fbif-repost", nil); got.Title != "" {
@@ -185,5 +185,41 @@ func TestPublishJobIsOwnAccountRepost(t *testing.T) {
 	}
 	if publishJobIsOwnAccountRepost(external) {
 		t.Fatal("外号原文不是自家转载")
+	}
+}
+
+// TestRepostOriginalForReadMoreTakesRealTitle 自家号转载、阅读原文已指向原号文章：不再检索，
+// 抓阅读原文页取真标题（页面里要有来源号名）；外号自己的稿、页面对不上来源号、已记过的都不动。
+func TestRepostOriginalForReadMoreTakesRealTitle(t *testing.T) {
+	const readMore = "https://mp.weixin.qq.com/s?__biz=MzI0NDQ4NzU0Mw==&mid=2247570609&idx=1&sn=a7c7"
+	job := publishJob{ID: 1, Title: "老年软餐市场正在打开，有品牌年增速30%", SourceName: "FBIF食品饮料创新", AISource: "AgeClub",
+		SourceURL: "https://mp.weixin.qq.com/s/fbif-repost", OriginalSourceURL: readMore}
+	fetches := 0
+	page := `<meta property="og:title" content="增速30%，年销千万！老年软餐提速"><strong class="profile_nickname">AgeClub</strong>`
+	fetchOriginalArticlePage = func(raw string) ([]byte, string, error) { fetches++; return []byte(page), raw, nil }
+	lookupWechatOriginalArticle = func(context.Context, string, string, []string) repostOriginalArticle {
+		t.Fatal("已有阅读原文不得再检索")
+		return repostOriginalArticle{}
+	}
+	t.Cleanup(func() {
+		fetchOriginalArticlePage = fetchRawHTML
+		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
+	})
+	got, changed := repostOriginalFor(context.Background(), job)
+	if !changed || got.OriginalSourceURL != readMore || publishOriginalTitleForRender(got) != "增速30%，年销千万！老年软餐提速" {
+		t.Fatalf("应取阅读原文页的真标题：%+v changed=%v", got, changed)
+	}
+	if _, changed := repostOriginalFor(context.Background(), got); changed || fetches != 1 {
+		t.Fatalf("已记过标题不得再抓：changed=%v fetches=%d", changed, fetches)
+	}
+	page = `<meta property="og:title" content="别的号的文章">`
+	if _, changed := repostOriginalFor(context.Background(), job); changed {
+		t.Fatal("页面里没有来源号名不得采用")
+	}
+	other := job
+	other.SourceName, other.AISource = "AgeClub", ""
+	fetches = 0
+	if _, changed := repostOriginalFor(context.Background(), other); changed || fetches != 0 {
+		t.Fatalf("外号自己的稿不得抓阅读原文改标题：changed=%v fetches=%d", changed, fetches)
 	}
 }

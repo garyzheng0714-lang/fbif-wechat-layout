@@ -83,14 +83,10 @@ func (p *publishPipeline) repairRepostNoticeTitle(ctx context.Context, job publi
 	if job.ID <= 0 {
 		return content, "" // 编辑手工稿没有任务库记录，不知道本稿标题与正文
 	}
-	if publishJobNeedsOriginalURLSearch(job) {
-		if dryRun {
-			_, source := publishArticleProvenance(job)
-			found := resolveRepostOriginal(ctx, job.Title, source, job.SourceURL, publishJobBodyParagraphs(job.BlocksJSON))
-			job.OriginalSourceURL, job.OriginalSourceTitle, job.OriginalSourceTitleURL = found.URL, found.Title, found.URL
-		} else {
-			p.ensureRepostOriginalURL(ctx, &job)
-		}
+	if dryRun {
+		job, _ = repostOriginalFor(ctx, job)
+	} else {
+		p.ensureRepostOriginalURL(ctx, &job)
 	}
 	title := publishOriginalTitleForRender(job)
 	m := repostNoticeTitleRe.FindStringSubmatchIndex(content)

@@ -260,29 +260,55 @@ func publishJobNeedsOriginalURLSearch(job publishJob) bool {
 }
 
 func (p *publishPipeline) ensureRepostOriginalURL(ctx context.Context, job *publishJob) {
-	if p == nil || job == nil || !publishJobNeedsOriginalURLSearch(*job) {
+	if p == nil || job == nil {
 		return
 	}
-	_, source := publishArticleProvenance(*job)
-	found := resolveRepostOriginal(ctx, job.Title, source, job.SourceURL, publishJobBodyParagraphs(job.BlocksJSON))
-	if !isHTTPURL(found.URL) {
+	next, changed := repostOriginalFor(ctx, *job)
+	if !changed {
 		return
 	}
 	setOriginal := func(j *publishJob) {
-		j.OriginalSourceURL = found.URL
-		if title := strings.TrimSpace(found.Title); title != "" {
-			j.OriginalSourceTitle, j.OriginalSourceTitleURL = title, found.URL
-		}
+		j.OriginalSourceURL = next.OriginalSourceURL
+		j.OriginalSourceTitle, j.OriginalSourceTitleURL = next.OriginalSourceTitle, next.OriginalSourceTitleURL
 	}
 	setOriginal(job)
 	if p.store == nil || job.ID <= 0 {
 		return
 	}
 	if _, _, err := p.store.updateIf(job.ID, func(current publishJob) bool {
-		return !isHTTPURL(current.OriginalSourceURL)
+		return !isHTTPURL(current.OriginalSourceURL) ||
+			canonicalOriginalURLKey(current.OriginalSourceURL) == canonicalOriginalURLKey(next.OriginalSourceURL)
 	}, setOriginal); err != nil {
 		log.Printf("publish: 写入原文链接失败（任务 #%d）：%v", job.ID, err)
 	}
+}
+
+// repostOriginalFor 算出自家号转载稿该记的原文链接与真标题（不落库）。没有阅读原文就检索核验；
+// 已有阅读原文且是公众号文章、还没记过它的标题，就抓页取真标题（FBIF 转载常改标题）。
+func repostOriginalFor(ctx context.Context, job publishJob) (publishJob, bool) {
+	_, source := publishArticleProvenance(job)
+	if publishJobNeedsOriginalURLSearch(job) {
+		found := resolveRepostOriginal(ctx, job.Title, source, job.SourceURL, publishJobBodyParagraphs(job.BlocksJSON))
+		if !isHTTPURL(found.URL) {
+			return job, false
+		}
+		job.OriginalSourceURL = found.URL
+		if title := strings.TrimSpace(found.Title); title != "" {
+			job.OriginalSourceTitle, job.OriginalSourceTitleURL = title, found.URL
+		}
+		return job, true
+	}
+	url := strings.TrimSpace(job.OriginalSourceURL)
+	if !publishJobIsOwnAccountRepost(job) ||
+		canonicalOriginalURLKey(job.OriginalSourceTitleURL) == canonicalOriginalURLKey(url) {
+		return job, false
+	}
+	title := wechatOriginalPageTitle(url, job.Title, source)
+	if title == "" {
+		return job, false
+	}
+	job.OriginalSourceTitle, job.OriginalSourceTitleURL = title, url
+	return job, true
 }
 
 // publishOriginalTitleForRender 转载声明《》里用的原文真标题：只在它属于当前原文链接时才用
@@ -310,7 +336,7 @@ func resolveRepostOriginal(ctx context.Context, title, sourceName, excludeURL st
 	excludeKey := canonicalOriginalURLKey(excludeURL)
 	feed := lookupFeedOriginalArticleDetail(ctx, title, sourceName)
 	if isHTTPURL(feed.URL) && canonicalOriginalURLKey(feed.URL) != excludeKey {
-		return repostOriginalArticle{URL: feed.URL, Title: wechatOriginalPageTitle(feed.URL, title)}
+		return repostOriginalArticle{URL: feed.URL, Title: wechatOriginalPageTitle(feed.URL, title, sourceName)}
 	}
 	// Feed 订了这个号也照样搜一搜：Feed 只按标题对，FBIF 改过标题的转载在 Feed 里永远对不上
 	// （2026-10-14 #255 财经杂志、#274 窄播都已订阅却 not_found）。
@@ -319,17 +345,19 @@ func resolveRepostOriginal(ctx context.Context, title, sourceName, excludeURL st
 		return found
 	}
 	found := resolveRepostOriginalURLFromSearch(ctx, title, sourceName, excludeURL)
-	return repostOriginalArticle{URL: found, Title: wechatOriginalPageTitle(found, title)}
+	return repostOriginalArticle{URL: found, Title: wechatOriginalPageTitle(found, title, sourceName)}
 }
 
-// wechatOriginalPageTitle Feed / 网页检索按标题找到的公众号原文，标题仍可能被 FBIF 改过几个字
-// （#114 原文《笑死！假瑞幸败诉…》）：抓原文页取真标题；与本稿只差标点空格、或抓不到时不填。
-func wechatOriginalPageTitle(rawURL, ourTitle string) string {
-	if !isWechatArticleURL(rawURL) {
+// wechatOriginalPageTitle Feed / 网页检索 / 阅读原文给出的公众号原文，标题仍可能被 FBIF 改过
+// （#114 原文《笑死！假瑞幸败诉…》）：抓原文页取真标题。页面里没有来源号名、与本稿只差标点空格、
+// 或抓不到时不填。
+func wechatOriginalPageTitle(rawURL, ourTitle, sourceName string) string {
+	if !isWechatArticleURL(rawURL) || strings.TrimSpace(sourceName) == "" {
 		return ""
 	}
 	page, _, err := fetchOriginalArticlePage(rawURL)
-	if err != nil || len(page) == 0 {
+	if err != nil || len(page) == 0 ||
+		!strings.Contains(normalizeOriginalTitle(string(page)), normalizeOriginalTitle(sourceName)) {
 		return ""
 	}
 	title := originalArticlePageTitle(string(page), "")
