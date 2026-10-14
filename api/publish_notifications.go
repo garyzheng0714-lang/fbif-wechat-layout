@@ -34,6 +34,9 @@ const (
 	publishNotificationStatePending    = "pending"
 	publishNotificationStateSending    = "sending"
 	publishNotificationStateDeadLetter = "dead_letter"
+	// publishNotificationStateExpired 审核卡已过飞书 14 天可更新期限（230031）：这张卡永远改不了，
+	// 不重试、不进死信、不补发新卡（旧稿补同步等后续动作的状态只在任务上）。
+	publishNotificationStateExpired = "expired"
 
 	publishNotificationMaxAttempts = 10
 	publishNotificationMaxDelay    = 30 * time.Minute
@@ -113,6 +116,20 @@ func (p *publishPipeline) dispatchPublishNotification(jobID int64) {
 		if claimed.ProofreadReminder.State == publishExternalCardPending {
 			// 校对提醒回复在审核卡话题下：等卡片发出才发得了。
 			p.scheduleProofreadReminder(jobID)
+		}
+		return
+	}
+
+	if errors.Is(sendErr, errFeishuMessageExpired) {
+		if _, _, persistErr := p.store.updateIf(jobID, func(current publishJob) bool {
+			return current.NotificationSeq == claimed.NotificationSeq &&
+				current.NotificationKind == claimed.NotificationKind &&
+				current.NotificationState == publishNotificationStateSending
+		}, func(j *publishJob) {
+			j.NotificationState = publishNotificationStateExpired
+			j.NotificationError = ""
+		}); persistErr != nil {
+			log.Printf("publish: record expired review card notification for job %d failed: %v", jobID, persistErr)
 		}
 		return
 	}
@@ -748,12 +765,22 @@ func (p *publishPipeline) recallReviewCards(ctx context.Context, job publishJob)
 	}
 }
 
+// migrateExpiredPublishNotification 读盘时把「卡片已过期」进的死信改记为 expired（幂等）：
+// 改这个之前，过期卡会重试 10 次后进死信告警（2026-10-14 生产 30 条，全是 230031）。
+func migrateExpiredPublishNotification(j *publishJob) {
+	if j != nil && j.NotificationState == publishNotificationStateDeadLetter &&
+		strings.Contains(j.NotificationError, fmt.Sprintf("code=%d", feishuCodeMessageExpired)) {
+		j.NotificationState = publishNotificationStateExpired
+		j.NotificationError = ""
+	}
+}
+
 // recoverPublishNotification 将崩溃遗留 sending 重新置 pending，再调度 drain。
 func (p *publishPipeline) recoverPublishNotification(job publishJob) {
 	if job.NotificationKind == "" {
 		return
 	}
-	if job.NotificationState == publishNotificationStateDeadLetter {
+	if job.NotificationState == publishNotificationStateDeadLetter || job.NotificationState == publishNotificationStateExpired {
 		return
 	}
 	if job.NotificationState != publishNotificationStatePending {

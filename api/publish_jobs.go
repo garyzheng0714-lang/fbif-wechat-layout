@@ -301,6 +301,7 @@ func (s *publishJobStore) readLocked() (publishJobDocument, error) {
 		}
 		migrateLegacyExternalDistribution(&doc.Jobs[i])
 		migrateExpiredExternalCard(&doc.Jobs[i])
+		migrateExpiredPublishNotification(&doc.Jobs[i])
 	}
 	return doc, nil
 }

@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPublishedSourceResyncUpdatesSameFoodTalksArticle(t *testing.T) {
@@ -270,5 +273,110 @@ func TestFoodTalksNewsRelationIDsUsesRelatedNewsID(t *testing.T) {
 	got := foodTalksDetailNewsRelationIDs(live.NewsRelation)
 	if len(got) != 2 || got[0] != 43102 || got[1] != 42674 {
 		t.Fatalf("应只保留真实相关文章 id、丢弃自引用：%v", got)
+	}
+}
+
+// TestSourceResyncAdminEndpoint 卡片过了 14 天点不了的旧稿，管理员用接口补同步：与卡片同一条路径，
+// 只认管理员；dry_run 只报告不动稿；不能同步的稿（未发布等）如实拒绝。
+func TestSourceResyncAdminEndpoint(t *testing.T) {
+	env, published := publishedSourceResyncTestJob(t)
+	seedSourceResyncLiveNews(t, env, published, "")
+	latestBlocks := `[{"k":"p","text":"本文为某媒体原创，作者：张三，转载请联系出处。"}]`
+	env.pipeline.fetch = func(context.Context, string) (publishFetchedArticle, error) {
+		return publishFetchedArticle{Title: published.Title, SourceName: published.SourceName, Byline: published.Author, CanonicalURL: published.SourceURL, BlocksJSON: latestBlocks}, nil
+	}
+	env.pipeline.render = func(context.Context, string, string, string, bool) (publishRenderResult, error) {
+		return successfulPublishRenderResult(`<section><p>本文为某媒体原创，作者：张三，转载请联系出处。</p><p>刚刚更新</p></section>`, testPublishResolvedRule()), nil
+	}
+	mux := newPublishTestMux(t, env)
+	target := fmt.Sprintf("/api/publish/jobs/%d/source-resync", published.ID)
+	_, beforeUpdate := env.ft.counts()
+
+	if rec := doPublishReq(mux, http.MethodPost, target, "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("无管理员令牌必须 401：%d %s", rec.Code, rec.Body.String())
+	}
+	dry := doPublishReq(mux, http.MethodPost, target+"?dry_run=1", "", true)
+	if dry.Code != http.StatusOK || !strings.Contains(dry.Body.String(), `"eligible":true`) {
+		t.Fatalf("dry_run 应报告可同步：%d %s", dry.Code, dry.Body.String())
+	}
+	if got := mustJob(t, env, published.ID); got.SourceResyncState != "" || got.ContentVersion != published.ContentVersion {
+		t.Fatalf("dry_run 不得动稿：%+v", got)
+	}
+	if _, afterDry := env.ft.counts(); afterDry != beforeUpdate {
+		t.Fatalf("dry_run 不得 PUT FoodTalks")
+	}
+
+	rec := doPublishReq(mux, http.MethodPost, target, "", true)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("补同步应受理：%d %s", rec.Code, rec.Body.String())
+	}
+	updated := mustJob(t, env, published.ID)
+	assertSourceResyncResult(t, published, updated, latestBlocks)
+	assertSingleFoodTalksUpdate(t, env.ft, beforeUpdate, published.FoodTalksNewsID)
+	if updated.SourceResyncRequestedBy == "" {
+		t.Fatalf("补同步必须记发起人：%+v", updated)
+	}
+
+	pending, _, err := env.store.createSeeded("site:awaiting-review", "https://mp.weixin.qq.com/s/awaiting-review", func(j *publishJob) {
+		j.Stage = publishStageAwaitingReview
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingTarget := fmt.Sprintf("/api/publish/jobs/%d/source-resync", pending.ID)
+	if dry := doPublishReq(mux, http.MethodPost, pendingTarget+"?dry_run=1", "", true); !strings.Contains(dry.Body.String(), `"eligible":false`) ||
+		!strings.Contains(dry.Body.String(), "只有已在 FoodTalks 发布的文章") {
+		t.Fatalf("未发布稿 dry_run 应说明不能同步：%s", dry.Body.String())
+	}
+	if rec := doPublishReq(mux, http.MethodPost, pendingTarget, "", true); rec.Code != http.StatusConflict {
+		t.Fatalf("未发布稿补同步必须拒绝：%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPublishNotificationExpiredCardIsTerminal 审核卡过了飞书 14 天可更新期限（230031）：
+// 生命周期通知一次就停，记 expired，不重试、不补发新卡、不算监控告警；启动恢复也不重排；
+// 改之前进了死信的旧数据读盘即迁为 expired（2026-10-14 生产 30 条）。
+func TestPublishNotificationExpiredCardIsTerminal(t *testing.T) {
+	env, published := publishedSourceResyncTestJob(t)
+	job, _ := env.store.update(published.ID, func(current *publishJob) {
+		current.ReviewCardMsgID = "om_old_card"
+		enqueuePublishNotification(current, publishNotificationSourceResyncSucceeded)
+	})
+	calls, newCards, retried, texts := 0, 0, false, 0
+	env.pipeline.updateCard = func(context.Context, string, map[string]any) error {
+		calls++
+		return fmt.Errorf("飞书更新卡片失败 code=230031 msg=Message has expired: %w", errFeishuMessageExpired)
+	}
+	env.pipeline.notifyCard = func(context.Context, map[string]any) error { newCards++; return nil }
+	env.pipeline.notify = func(context.Context, string) error { texts++; return nil }
+	env.pipeline.retryNotification = func(time.Duration, func()) { retried = true }
+
+	env.pipeline.dispatchPublishNotification(job.ID)
+	got := mustJob(t, env, job.ID)
+	if got.NotificationState != publishNotificationStateExpired || got.NotificationError != "" ||
+		calls != 1 || newCards != 0 || texts != 0 || retried {
+		t.Fatalf("过期卡应一次就停：state=%q err=%q calls=%d new=%d text=%d retried=%v",
+			got.NotificationState, got.NotificationError, calls, newCards, texts, retried)
+	}
+	var status publishMonitoringStatus
+	updatePublishMonitoringNotifications(&status, got, 60)
+	if status.NotificationDeadLetters != 0 || status.NotificationErrors != 0 || status.NotificationPending != 0 {
+		t.Fatalf("过期卡不算告警：%+v", status)
+	}
+	env.pipeline.recoverPublishNotification(got)
+	if calls != 1 || mustJob(t, env, job.ID).NotificationState != publishNotificationStateExpired {
+		t.Fatalf("启动恢复不得重排过期通知：calls=%d", calls)
+	}
+
+	old := publishJob{NotificationKind: publishNotificationPublished, NotificationState: publishNotificationStateDeadLetter,
+		NotificationError: "更新审核群 oc_x 的卡片失败：飞书更新卡片失败 code=230031 msg=Message has expired when updating message, ext="}
+	migrateExpiredPublishNotification(&old)
+	if old.NotificationState != publishNotificationStateExpired || old.NotificationError != "" {
+		t.Fatalf("过期死信应迁为 expired：%+v", old)
+	}
+	other := publishJob{NotificationKind: publishNotificationPublished, NotificationState: publishNotificationStateDeadLetter, NotificationError: "飞书更新卡片接口不可达"}
+	migrateExpiredPublishNotification(&other)
+	if other.NotificationState != publishNotificationStateDeadLetter {
+		t.Fatalf("别的死信不动：%+v", other)
 	}
 }

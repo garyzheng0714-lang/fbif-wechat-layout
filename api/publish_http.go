@@ -731,6 +731,41 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"result": res})
 	})
 
+	// 已发布稿按公众号原文重排并覆盖同一篇 FoodTalks 稿，与卡片「重新同步至FoodTalks」同一条路径
+	// （FoodTalks 后台有人改过正文就停）；给卡片已过 14 天点不了的旧稿用。?dry_run=1 只报告能不能同步。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/source-resync", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		job, err := p.store.byID(id)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if r.URL.Query().Get("dry_run") == "1" {
+			res := map[string]any{"job": newPublishSyncJobSummary(job), "source_resync_state": job.SourceResyncState, "eligible": true, "dry_run": true}
+			if err := sourceResyncEligibility(job); err != nil {
+				res["eligible"], res["reason"] = false, err.Error()
+			}
+			writeJSON(w, http.StatusOK, res)
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		job, err = p.requestSourceResync(id, publishAdminActor(r, auth), publishSourceResyncCardVersion(job))
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"job": newPublishSyncJobSummary(job),
+			"source_resync_state": job.SourceResyncState, "source_resync_error": job.SourceResyncError})
+	})
+
 	// 网站稿（按资讯 id，流水线稿与编辑手工稿都行）补链接：系列声明段→同名标签页，Mote 的公众号文章链→站内稿；?dry_run=1 只报告。
 	mux.HandleFunc("POST /api/publish/news/{id}/repair-links", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {
