@@ -167,9 +167,21 @@ func boolInt(value bool) int {
 
 func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publishJob, now time.Time) {
 	jobFailed := job.Stage == publishStageFailed
-	externalFailed := false
+	// 第三方平台的失败按 lane 失败那一刻算近期：云梭迟到结果每 30 分钟补查一次、会刷新 job.UpdatedAt，
+	// 用它算就会把几周前的失败当新失败一直告警（2026-10-14 #153/#260/#183）。
+	externalFailed, externalFailedAt := false, time.Time{}
 	for _, lane := range job.ExternalDistributionLanes {
-		externalFailed = externalFailed || lane.State == publishExternalDistributionFailed
+		if lane.State != publishExternalDistributionFailed {
+			continue
+		}
+		externalFailed = true
+		if at, err := time.Parse(time.RFC3339, lane.CompletedAt); err == nil && at.After(externalFailedAt) {
+			externalFailedAt = at
+		}
+	}
+	externalFailedWhen := job.UpdatedAt
+	if !externalFailedAt.IsZero() {
+		externalFailedWhen = externalFailedAt.Format(time.RFC3339Nano)
 	}
 	resyncFailed := job.SourceResyncState == publishSourceResyncFailed
 	status.Failed += boolInt(jobFailed) + boolInt(externalFailed) + boolInt(resyncFailed)
@@ -178,7 +190,7 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 	if jobFailed && publishMonitoringIsRecent(now, job.UpdatedAt) {
 		status.FailedRecent++
 	}
-	if externalFailed && publishMonitoringIsRecent(now, job.UpdatedAt) {
+	if externalFailed && publishMonitoringIsRecent(now, externalFailedWhen) {
 		status.FailedRecent++
 	}
 	if resyncFailed && publishMonitoringIsRecent(now, firstNonEmpty(job.SourceResyncCompletedAt, job.UpdatedAt)) {

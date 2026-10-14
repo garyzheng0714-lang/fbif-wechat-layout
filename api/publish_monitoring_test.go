@@ -356,6 +356,40 @@ func TestPublishMonitoringPublishedOldSubflowFailuresRemainMetricOnly(t *testing
 	}
 }
 
+// TestPublishMonitoringExternalFailureRecencyUsesLaneFailureTime 云梭迟到结果补查会刷新 job.UpdatedAt；
+// 第三方平台失败是否「近期」按 lane 失败时间算，几周前的失败不能因为补查一直告警。
+func TestPublishMonitoringExternalFailureRecencyUsesLaneFailureTime(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+	job, _, err := store.create("site:https://mp.weixin.qq.com/s/old-lane", "https://mp.weixin.qq.com/s/old-lane")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedAt := time.Date(2026, 9, 3, 1, 38, 0, 0, time.UTC)
+	job, err = store.update(job.ID, func(current *publishJob) {
+		current.Stage = publishStagePublished
+		current.ExternalDistributionLanes = []publishExternalLane{
+			{AccountID: "acct-1", State: publishExternalDistributionSucceeded, ContentPK: "pk", CompletedAt: failedAt.Format(time.RFC3339)},
+			{AccountID: "acct-2", State: publishExternalDistributionFailed, ContentPK: "pk", CompletedAt: failedAt.Format(time.RFC3339)},
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339, job.UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	polled := currentPublishMonitoring(store, false, updatedAt.Add(time.Minute))
+	if !polled.Ready || polled.Failed != 1 || polled.FailedRecent != 0 {
+		t.Fatalf("几周前的第三方失败被补查刷新了任务时间，不得算近期告警 = %+v", polled)
+	}
+	fresh := currentPublishMonitoring(store, false, failedAt.Add(time.Hour))
+	if fresh.Ready || fresh.FailedRecent != 1 || !publishMonitoringHasIssue(fresh, "failed_jobs_recent:") {
+		t.Fatalf("刚失败的第三方平台仍须近期告警 = %+v", fresh)
+	}
+}
+
 func TestPublishMonitoringIncludesSourceResyncSubstate(t *testing.T) {
 	t.Setenv(deploymentWritesPausedEnv, "0")
 	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
