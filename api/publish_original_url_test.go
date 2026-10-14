@@ -44,21 +44,18 @@ func TestResolveRepostOriginalURLPrefersFeedLookup(t *testing.T) {
 		fetchOriginalArticlePage = fetchRawHTML
 	})
 	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
-		return feedOriginalArticleHit{
-			URL:         "http://mp.weixin.qq.com/s?__biz=MzkzNzI3NTc1Mg&mid=1&idx=1&sn=abc",
-			KnownSource: true,
-		}
+		return feedOriginalArticleHit{URL: "http://mp.weixin.qq.com/s?__biz=MzkzNzI3NTc1Mg&mid=1&idx=1&sn=abc"}
 	}
-	lookupWechatOriginalArticle = func(context.Context, string, string) string {
+	lookupWechatOriginalArticle = func(context.Context, string, string, []string) repostOriginalArticle {
 		t.Fatal("Feed 已命中时不应再查 TikHub")
-		return ""
+		return repostOriginalArticle{}
 	}
 	searchOriginalArticleURLs = func(context.Context, string, string) []string {
 		t.Fatal("Feed 已命中时不应再去网页检索")
 		return nil
 	}
-	got := resolveRepostOriginalURL(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所",
-		"https://mp.weixin.qq.com/s/fbif-repost")
+	got := resolveRepostOriginal(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所",
+		"https://mp.weixin.qq.com/s/fbif-repost", nil).URL
 	if !strings.Contains(got, "__biz=MzkzNzI3NTc1Mg") {
 		t.Fatalf("应采用 Feed 返回的原号链接：%q", got)
 	}
@@ -98,7 +95,7 @@ func TestResolveRepostOriginalURLUsesVerifiedCandidate(t *testing.T) {
 	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
 		return feedOriginalArticleHit{}
 	}
-	lookupWechatOriginalArticle = func(context.Context, string, string) string { return "" }
+	lookupWechatOriginalArticle = func(context.Context, string, string, []string) repostOriginalArticle { return repostOriginalArticle{} }
 	t.Cleanup(func() {
 		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
 		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
@@ -118,8 +115,8 @@ func TestResolveRepostOriginalURLUsesVerifiedCandidate(t *testing.T) {
 		}
 		return []byte(`<meta property="og:title" content="餐饮零食化，火了猪油渣"><p>惊蛰研究所</p>`), raw, nil
 	}
-	got := resolveRepostOriginalURL(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所",
-		"https://mp.weixin.qq.com/s/fbif-repost")
+	got := resolveRepostOriginal(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所",
+		"https://mp.weixin.qq.com/s/fbif-repost", nil).URL
 	if got != "https://www.tmtpost.com/8103277.html" {
 		t.Fatalf("应采用核验通过的原文：%q", got)
 	}
@@ -129,7 +126,7 @@ func TestResolveRepostOriginalURLRejectsUnverifiedCandidate(t *testing.T) {
 	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
 		return feedOriginalArticleHit{}
 	}
-	lookupWechatOriginalArticle = func(context.Context, string, string) string { return "" }
+	lookupWechatOriginalArticle = func(context.Context, string, string, []string) repostOriginalArticle { return repostOriginalArticle{} }
 	t.Cleanup(func() {
 		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
 		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
@@ -142,7 +139,7 @@ func TestResolveRepostOriginalURLRejectsUnverifiedCandidate(t *testing.T) {
 	fetchOriginalArticlePage = func(raw string) ([]byte, string, error) {
 		return []byte(`<title>无关文章</title><p>别的媒体</p>`), raw, nil
 	}
-	if got := resolveRepostOriginalURL(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所", ""); got != "" {
+	if got := resolveRepostOriginal(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所", "", nil).URL; got != "" {
 		t.Fatalf("核验不过应空着：%q", got)
 	}
 }

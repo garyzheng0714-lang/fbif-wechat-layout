@@ -63,6 +63,25 @@ func normalizeSitePublishRulePackID(raw string) (string, error) {
 	return id, nil
 }
 
+type publishOriginalTitleContextKey struct{}
+
+// publishRenderContext 渲染请求的上下文：规则包 + 转载声明用的原文真标题（没有则沿用本稿标题）。
+func publishRenderContext(ctx context.Context, rulePackID string, job publishJob) context.Context {
+	ctx = withPublishRulePackID(ctx, rulePackID)
+	if title := publishOriginalTitleForRender(job); title != "" {
+		ctx = context.WithValue(ctx, publishOriginalTitleContextKey{}, title)
+	}
+	return ctx
+}
+
+func publishOriginalTitleFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	title, _ := ctx.Value(publishOriginalTitleContextKey{}).(string)
+	return strings.TrimSpace(title)
+}
+
 func withPublishRulePackID(ctx context.Context, rulePackID string) context.Context {
 	return context.WithValue(ctx, publishRulePackContextKey{}, rulePackID)
 }
@@ -455,14 +474,18 @@ func renderSiteHTMLForPack(ctx context.Context, rulePackID, title, source, block
 	if token == "" {
 		return publishRenderResult{}, errors.New("RENDER_TOKEN 未配置：无法调用渲染服务")
 	}
-	payload, err := json.Marshal(map[string]any{
+	request := map[string]any{
 		"title":    title,
 		"source":   source,
 		"blocks":   json.RawMessage(blocksJSON),
 		"isRepost": isRepost,
 		"packId":   rulePackID,
 		"ruleMode": "latest",
-	})
+	}
+	if originalTitle := publishOriginalTitleFromContext(ctx); originalTitle != "" {
+		request["originalTitle"] = originalTitle
+	}
+	payload, err := json.Marshal(request)
 	if err != nil {
 		return publishRenderResult{}, fmt.Errorf("序列化渲染请求失败: %w", err)
 	}
@@ -824,7 +847,7 @@ func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error
 	// 网站排版一律按转载切尾，与编辑器 URL 导入一致。publishSiteIsRepost 只决定
 	// CMS 来源类型（原创/转载）和提示文案，不得再关掉切尾。
 	p.ensureRepostOriginalURL(ctx, &job)
-	result, err := p.render(withPublishRulePackID(ctx, rulePackID), job.Title, publishRenderSourceURL(job), job.BlocksJSON, true)
+	result, err := p.render(publishRenderContext(ctx, rulePackID, job), job.Title, publishRenderSourceURL(job), job.BlocksJSON, true)
 	if err != nil {
 		return err
 	}

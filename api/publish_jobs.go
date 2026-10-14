@@ -67,6 +67,10 @@ type publishJob struct {
 	SourceAliases     []string `json:"source_aliases,omitempty"`      // 抓取后解出的同文规范身份（短链↔长链去重）
 	SourceURL         string   `json:"source_url"`                    // 用户提交的原始公众号文章链接
 	OriginalSourceURL string   `json:"original_source_url,omitempty"` // 公众号「阅读原文」指向的原文地址（转载稿声明链接优先用它）
+	// OriginalSourceTitle 抓回原文核验过正文后记下的原文真标题，转载声明《》里用；
+	// OriginalSourceTitleURL 是它所属的原文链接，与 OriginalSourceURL 对不上就作废（见 publishOriginalTitleForRender）。
+	OriginalSourceTitle    string `json:"original_source_title,omitempty"`
+	OriginalSourceTitleURL string `json:"original_source_title_url,omitempty"`
 	// SourceCoverURL / SourceDigest 公众号原封面（转存前原址）与摘要。网站封面、摘要与
 	// 公众号保持一致（2026-10-07 用户裁定）；AI 只在缺值时兜底。
 	SourceCoverURL    string `json:"source_cover_url,omitempty"`

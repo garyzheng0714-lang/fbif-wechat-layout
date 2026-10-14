@@ -960,6 +960,27 @@ func TestRenderSiteHTMLReusesProxyCore(t *testing.T) {
 	if gotBody["ruleMode"] != "latest" || gotBody["ruleSnapshot"] != nil {
 		t.Fatalf("自动发布必须现场读取最新规则，不能携带旧快照：%v", gotBody)
 	}
+	if _, ok := gotBody["originalTitle"]; ok {
+		t.Fatalf("没有原文真标题时不得带 originalTitle：%v", gotBody)
+	}
+	// 找到改过标题的原文后，转载声明要用原文真标题：只在它属于当前原文链接时才带。
+	job := publishJob{OriginalSourceURL: "https://mp.weixin.qq.com/s?__biz=Mzk&mid=1&idx=1&sn=a",
+		OriginalSourceTitle: "社区烘焙第一品牌，是怎么跑出来的｜对话", OriginalSourceTitleURL: "https://mp.weixin.qq.com/s?__biz=Mzk&mid=1&idx=1&sn=a"}
+	gotBody = nil
+	if _, err := renderSiteHTML(publishRenderContext(context.Background(), sitePublishRulePackID, job), "3年开出300家门店", "src", "[]", true); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["originalTitle"] != "社区烘焙第一品牌，是怎么跑出来的｜对话" {
+		t.Fatalf("应带原文真标题：%v", gotBody["originalTitle"])
+	}
+	job.OriginalSourceURL = "https://other.example.com/article"
+	gotBody = nil
+	if _, err := renderSiteHTML(publishRenderContext(context.Background(), sitePublishRulePackID, job), "3年开出300家门店", "src", "[]", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := gotBody["originalTitle"]; ok {
+		t.Fatalf("原文链接已换，旧的原文标题必须作废：%v", gotBody["originalTitle"])
+	}
 	// 缺 RENDER_TOKEN 必须 fail loud，不得无鉴权裸调。
 	t.Setenv("RENDER_TOKEN", "")
 	if _, err := renderSiteHTML(context.Background(), "标题", "src", "[]", true); err == nil {

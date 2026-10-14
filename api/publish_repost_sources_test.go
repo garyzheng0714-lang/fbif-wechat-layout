@@ -87,22 +87,29 @@ func TestRecordPublishedRepostSubscribesAfterFive(t *testing.T) {
 	}
 }
 
-func TestResolveRepostOriginalURLSkipsWechatLookupWhenFeedHasSource(t *testing.T) {
+// TestResolveRepostOriginalSearchesWechatEvenWhenFeedHasSource Feed 只按标题对，订了这个号也对不上
+// FBIF 改过标题的转载（2026-10-14 #255 财经杂志、#274 窄播）：Feed 没命中就照样搜一搜，并把正文带过去核验。
+func TestResolveRepostOriginalSearchesWechatEvenWhenFeedHasSource(t *testing.T) {
 	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit {
-		return feedOriginalArticleHit{KnownSource: true}
+		return feedOriginalArticleHit{}
 	}
-	lookupWechatOriginalArticle = func(context.Context, string, string) string {
-		t.Fatal("订阅源已有这个公众号时不应再走付费接口")
-		return ""
+	var gotBody []string
+	lookupWechatOriginalArticle = func(_ context.Context, _, _ string, body []string) repostOriginalArticle {
+		gotBody = body
+		return repostOriginalArticle{URL: "https://mp.weixin.qq.com/s?__biz=MzkxMzMwNTkxOA==&mid=1&idx=1&sn=a", Title: "社区烘焙第一品牌，是怎么跑出来的｜对话"}
 	}
-	searchOriginalArticleURLs = func(context.Context, string, string) []string { return nil }
+	searchOriginalArticleURLs = func(context.Context, string, string) []string {
+		t.Fatal("搜一搜已命中时不应再去网页检索")
+		return nil
+	}
 	t.Cleanup(func() {
 		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
 		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
 		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
 	})
-	if got := resolveRepostOriginalURL(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所", ""); got != "" {
-		t.Fatalf("订阅源没有这篇、也没网页候选时应空着：%q", got)
+	got := resolveRepostOriginal(context.Background(), "3年开出300家门店，社区烘焙第一品牌是怎么跑出来的", "窄播", "", []string{"正文第一段"})
+	if got.Title != "社区烘焙第一品牌，是怎么跑出来的｜对话" || len(gotBody) != 1 {
+		t.Fatalf("Feed 没命中应搜一搜并带回原文标题：%+v body=%v", got, gotBody)
 	}
 }
 

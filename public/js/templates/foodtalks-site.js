@@ -1216,6 +1216,8 @@ export default {
     const behaved = markInterviewSpeakerPrefixes(applyFoodTalksBehavior(normalized, config, {
       isRepost: !!(opts && opts.isRepost),
       title,
+      // 转载声明《》里的标题：服务端找到改过标题的原文时带回原文真标题，否则用本稿标题。
+      tipTitle: String(data.original_title || '').trim() || title,
       sourceUrl: pickSiteTipSourceUrl(data, elems),
     }));
     // URL Blocks 已由服务端完成媒体绑定、正文屏障和字数限制，cap/txt 是最终角色。

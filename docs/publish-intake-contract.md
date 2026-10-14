@@ -39,7 +39,7 @@ X-Publish-Sync-Token: <本服务的 PUBLISH_SYNC_SERVICE_TOKEN>
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `url` | ✅ | 原文链接。排版服务从这里现抓。**只接受 `mp.weixin.qq.com`**，见下方 §3.1。 |
-| `content_source_url` / `original_source_url` | 可选 | 公众号「阅读原文」（官方字段名 `content_source_url`）。**不是正文**，只补转载声明出处。须是 http(s)。网页抓到的阅读原文优先；网页为空时用这个。自家号转发且两边都空时，服务端先问 Feed `/api/internal/original-article`，未订该号再 TikHub 广域搜；都失败则转载声明不链回自家页。 |
+| `content_source_url` / `original_source_url` | 可选 | 公众号「阅读原文」（官方字段名 `content_source_url`）。**不是正文**，只补转载声明出处。须是 http(s)。网页抓到的阅读原文优先；网页为空时用这个。自家号转发且两边都空时，服务端先问 Feed `/api/internal/original-article`，没命中再 TikHub 广域搜（改过标题的按正文核验，并用原文真标题写转载声明）；都失败则转载声明不链回自家页。 |
 | `content_kind` | 机器提交必填 | 必须是 `"article"`。 |
 | `classification` | 机器提交必填 | 必须是 `"ordinary_confirmed"`。 |
 | `classifier_version` | 机器提交必填 | 你的分类器版本号，用于事后追溯是哪一版判的。格式 `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`。 |

@@ -26,6 +26,7 @@ const (
 	tikhubLookupTimeout  = 70 * time.Second
 	tikhubRequestTimeout = 30 * time.Second
 	tikhubSearchMaxPages = 2
+	repostBodyMaxFetches = 4
 	tikhubSuccessCode    = 200
 )
 
@@ -47,11 +48,14 @@ func tikhubAPIKey() string {
 	return strings.TrimSpace(os.Getenv("TIKHUB_API_KEY"))
 }
 
-func defaultLookupWechatOriginalArticle(ctx context.Context, title, sourceName string) string {
+// defaultLookupWechatOriginalArticle 先按本稿标题、再按正文第一句搜一搜。标题和作者都对上直接用；
+// FBIF 转载常改标题（2026-10-14：#255/#274/#275/#277 编辑都在 FoodTalks 后台手改成原标题），
+// 所以作者对上、标题不同的候选要抓回原文逐段比对正文，对上才用，并带回原文真标题。
+func defaultLookupWechatOriginalArticle(ctx context.Context, title, sourceName string, body []string) repostOriginalArticle {
 	title = strings.TrimSpace(title)
 	sourceName = strings.TrimSpace(sourceName)
 	if title == "" || sourceName == "" || tikhubAPIKey() == "" {
-		return ""
+		return repostOriginalArticle{}
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -59,19 +63,34 @@ func defaultLookupWechatOriginalArticle(ctx context.Context, title, sourceName s
 	wantTitle := normalizeOriginalTitle(title)
 	wantSource := normalizeFoodTalksSourceName(sourceName)
 	if wantTitle == "" || wantSource == "" {
-		return ""
+		return repostOriginalArticle{}
 	}
 	budget, cancel := context.WithTimeout(ctx, tikhubLookupTimeout)
 	defer cancel()
-	return lookupTikhubArticleSearch(budget, title, wantTitle, wantSource)
+	probes := repostBodyProbes(body)
+	checked := map[string]bool{}
+	pick := func(items []wechatWorkItem) repostOriginalArticle {
+		if found := pickWechatWorkURL(items, wantTitle, wantSource); found != "" {
+			return repostOriginalArticle{URL: found}
+		}
+		return verifyRetitledWechatOriginal(budget, items, sourceName, probes, checked)
+	}
+	if found := lookupTikhubArticleSearch(budget, title, pick); found.URL != "" {
+		return found
+	}
+	// 标题搜不到时按正文第一句再搜一次（#275 标题搜不出原文，正文第一句能）；只在能比对正文时才搜。
+	if lead := repostBodyLeadSentence(body); lead != "" && len(probes) >= repostBodyMinProbes {
+		return lookupTikhubArticleSearch(budget, lead, pick)
+	}
+	return repostOriginalArticle{}
 }
 
-func lookupTikhubArticleSearch(ctx context.Context, keyword, wantTitle, wantSource string) string {
+func lookupTikhubArticleSearch(ctx context.Context, keyword string, pick func([]wechatWorkItem) repostOriginalArticle) repostOriginalArticle {
 	cursor := ""
 	seenCursor := map[string]bool{}
 	for page := 0; page < tikhubSearchMaxPages; page++ {
 		if err := ctx.Err(); err != nil {
-			return ""
+			return repostOriginalArticle{}
 		}
 		payload := map[string]any{
 			"keyword":       keyword,
@@ -86,19 +105,56 @@ func lookupTikhubArticleSearch(ctx context.Context, keyword, wantTitle, wantSour
 		data, err := tikhubPOST(ctx, tikhubSearchPath, payload)
 		if err != nil {
 			log.Printf("publish: TikHub 搜文章失败：%v", err)
-			return ""
+			return repostOriginalArticle{}
 		}
-		if found := pickWechatWorkURL(collectWechatWorkItems(data), wantTitle, wantSource); found != "" {
+		if found := pick(collectWechatWorkItems(data)); found.URL != "" {
 			return found
 		}
 		next := tikhubString(data, "cursor")
 		if next == "" || seenCursor[next] || !tikhubFlag(data, "continue_flag", "continueFlag") {
-			return ""
+			return repostOriginalArticle{}
 		}
 		seenCursor[next] = true
 		cursor = next
 	}
-	return ""
+	return repostOriginalArticle{}
+}
+
+// verifyRetitledWechatOriginal 作者是来源号、标题与本稿不同的候选：抓回原文，正文探针过半对上
+// （同一个号常有好几篇相关稿，只看作者会错配）、页面里有来源号名才用。每次查找最多抓 repostBodyMaxFetches 篇。
+func verifyRetitledWechatOriginal(ctx context.Context, items []wechatWorkItem, sourceName string, probes []string, checked map[string]bool) repostOriginalArticle {
+	if len(probes) < repostBodyMinProbes {
+		return repostOriginalArticle{}
+	}
+	wantSource := normalizeFoodTalksSourceName(sourceName)
+	for _, item := range items {
+		if normalizeFoodTalksSourceName(item.Author) != wantSource {
+			continue
+		}
+		articleURL, ok := normalizeWechatWorkURL(item.URL)
+		if !ok {
+			continue
+		}
+		key := canonicalOriginalURLKey(articleURL)
+		if checked[key] {
+			continue
+		}
+		if len(checked) >= repostBodyMaxFetches || ctx.Err() != nil {
+			return repostOriginalArticle{}
+		}
+		checked[key] = true
+		page, _, err := fetchOriginalArticlePage(articleURL)
+		if err != nil || len(page) == 0 {
+			continue
+		}
+		raw := string(page)
+		if !repostBodyMatches(raw, probes) ||
+			!strings.Contains(normalizeOriginalTitle(raw), normalizeOriginalTitle(sourceName)) {
+			continue
+		}
+		return repostOriginalArticle{URL: articleURL, Title: originalArticlePageTitle(raw, item.Title)}
+	}
+	return repostOriginalArticle{}
 }
 
 type wechatWorkItem struct {
@@ -340,6 +396,10 @@ func normalizeWechatWorkURL(raw string) (string, bool) {
 	cleaned, _, _ = strings.Cut(cleaned, "#")
 	if !isWechatArticleURL(cleaned) {
 		return "", false
+	}
+	// 搜一搜给的是 http 链接；FoodTalks 页面里一律链 https（微信本来就会跳过去）。
+	if rest, ok := strings.CutPrefix(cleaned, "http://mp.weixin.qq.com/"); ok {
+		cleaned = "https://mp.weixin.qq.com/" + rest
 	}
 	if _, err := normalizeSiteSourceKey(cleaned); err != nil {
 		return "", false

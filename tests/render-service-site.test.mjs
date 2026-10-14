@@ -196,6 +196,16 @@ test('ft-default：自家稿 isRepost=false 仍切除微信导流尾', async () 
     '进网站一律切尾，与 CMS 原创/转载无关');
 });
 
+// 2026-10-14：FBIF 转载常改标题，编辑会在 FoodTalks 后台把转载声明《》改回原文标题（#255/#274/#275/#277）。
+// 服务端抓回原文核验过正文后带 originalTitle，声明里用它；正文标题不变。
+test('ft-default：转载声明《》优先用服务端带来的原文真标题', async () => {
+  const plain = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default' });
+  assert.match(plain.html, /《雀巢收购植物基品牌》/, '没有原文标题时沿用本稿标题');
+  const retitled = await renderArticle({ ...SAMPLE_ARTICLE, packId: 'ft-default', originalTitle: '雀巢宣布收购某植物基品牌｜对话' });
+  assert.match(retitled.html, /《雀巢宣布收购某植物基品牌｜对话》/, '声明里用原文真标题');
+  assert.doesNotMatch(retitled.html, /《雀巢收购植物基品牌》/, '不得再用 FBIF 改过的标题');
+});
+
 test('ft-default exact：只使用调用方固定的规则快照并回传可复现证据', async () => {
   const snapshot = {
     account_id: 'ft-default',

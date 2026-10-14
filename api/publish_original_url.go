@@ -25,8 +25,112 @@ const (
 )
 
 type feedOriginalArticleHit struct {
-	URL         string
-	KnownSource bool
+	URL string
+}
+
+// repostOriginalArticle 找到的转载原文。Title 只在抓回原文核验过正文时才填（原文真标题），
+// 空则转载声明沿用本稿标题。
+type repostOriginalArticle struct {
+	URL   string
+	Title string
+}
+
+const (
+	repostBodyProbeRunes = 24
+	repostBodyProbeSkip  = 4 // 跳过段首几个字：转载时常在段首加「导语：」之类
+	repostBodyMinProbes  = 3
+	repostBodyMaxProbes  = 8
+	repostBodyLeadRunes  = 28
+)
+
+var (
+	repostBodyCreditLineRe = regexp.MustCompile(`^(?:作者|编辑|来源|出处|撰文|文|图|翻译|编译|采访|统筹|审校|责编|主编|美编|本文)[：:|｜\s]`)
+	repostBodySentenceEnd  = regexp.MustCompile(`[。！？!?]`)
+	wechatMsgTitleRe       = regexp.MustCompile(`var msg_title = '([^']+)'`)
+)
+
+// publishJobBodyParagraphs 本稿正文段落（图注、图片、表格除外），供找原文时比对正文。
+func publishJobBodyParagraphs(blocksJSON string) []string {
+	var blocks []Block
+	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err != nil {
+		return nil
+	}
+	var out []string
+	for _, block := range blocks {
+		if block.K == "cap" || block.K == "img" || block.K == "video" || block.K == "table" {
+			continue
+		}
+		if text := publishExternalDistributionBlockText(block); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+// repostBodyProbes 从正文前几段够长的段落各截一段做逐字探针（只留字母数字，忽略标点空格）；署名行不算。
+func repostBodyProbes(paras []string) []string {
+	var probes []string
+	for _, para := range paras {
+		para = strings.TrimSpace(para)
+		if repostBodyCreditLineRe.MatchString(para) {
+			continue
+		}
+		runes := []rune(normalizeOriginalTitle(para))
+		if len(runes) < repostBodyProbeSkip+repostBodyProbeRunes+4 {
+			continue
+		}
+		probes = append(probes, string(runes[repostBodyProbeSkip:repostBodyProbeSkip+repostBodyProbeRunes]))
+		if len(probes) == repostBodyMaxProbes {
+			break
+		}
+	}
+	return probes
+}
+
+// repostBodyMatches 候选页正文命中至少六成探针才算同一篇。
+func repostBodyMatches(rawHTML string, probes []string) bool {
+	if len(probes) < repostBodyMinProbes {
+		return false
+	}
+	text := normalizeOriginalTitle(html.UnescapeString(htmlTagRe.ReplaceAllString(rawHTML, "")))
+	hits := 0
+	for _, probe := range probes {
+		if strings.Contains(text, probe) {
+			hits++
+		}
+	}
+	return hits*5 >= len(probes)*3
+}
+
+// repostBodyLeadSentence 正文第一句（截到 repostBodyLeadRunes 字），标题搜不到原文时拿它再搜。
+func repostBodyLeadSentence(paras []string) string {
+	for _, para := range paras {
+		para = strings.TrimSpace(para)
+		if repostBodyCreditLineRe.MatchString(para) || len([]rune(normalizeOriginalTitle(para))) < 20 {
+			continue
+		}
+		if loc := repostBodySentenceEnd.FindStringIndex(para); loc != nil {
+			para = para[:loc[0]]
+		}
+		if runes := []rune(para); len(runes) > repostBodyLeadRunes {
+			para = string(runes[:repostBodyLeadRunes])
+		}
+		return strings.TrimSpace(para)
+	}
+	return ""
+}
+
+// originalArticlePageTitle 原文页的真标题：og:title，其次公众号页的 msg_title，最后用搜索结果标题。
+func originalArticlePageTitle(rawHTML, fallback string) string {
+	if title := strings.TrimSpace(extractMeta(rawHTML, "og:title")); title != "" {
+		return title
+	}
+	if m := wechatMsgTitleRe.FindStringSubmatch(rawHTML); len(m) > 1 {
+		if title := strings.TrimSpace(html.UnescapeString(m[1])); title != "" {
+			return title
+		}
+	}
+	return stripSearchHighlight(fallback)
 }
 
 var (
@@ -95,9 +199,7 @@ func defaultLookupFeedOriginalArticleDetail(ctx context.Context, title, sourceNa
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return feedOriginalArticleHit{}
 	}
-	hit := feedOriginalArticleHit{
-		KnownSource: strings.TrimSpace(body.SourceID) != "" || body.Status == "found",
-	}
+	hit := feedOriginalArticleHit{}
 	if body.Status == "found" {
 		if cleaned, ok := sanitizeOriginalURLCandidate(body.URL); ok {
 			hit.URL = cleaned
@@ -162,44 +264,61 @@ func (p *publishPipeline) ensureRepostOriginalURL(ctx context.Context, job *publ
 		return
 	}
 	_, source := publishArticleProvenance(*job)
-	found := resolveRepostOriginalURL(ctx, job.Title, source, job.SourceURL)
-	if !isHTTPURL(found) {
+	found := resolveRepostOriginal(ctx, job.Title, source, job.SourceURL, publishJobBodyParagraphs(job.BlocksJSON))
+	if !isHTTPURL(found.URL) {
 		return
 	}
-	job.OriginalSourceURL = found
+	setOriginal := func(j *publishJob) {
+		j.OriginalSourceURL = found.URL
+		if title := strings.TrimSpace(found.Title); title != "" {
+			j.OriginalSourceTitle, j.OriginalSourceTitleURL = title, found.URL
+		}
+	}
+	setOriginal(job)
 	if p.store == nil || job.ID <= 0 {
 		return
 	}
 	if _, _, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return !isHTTPURL(current.OriginalSourceURL)
-	}, func(current *publishJob) {
-		current.OriginalSourceURL = found
-	}); err != nil {
+	}, setOriginal); err != nil {
 		log.Printf("publish: 写入原文链接失败（任务 #%d）：%v", job.ID, err)
 	}
 }
 
-// resolveRepostOriginalURL 检索并核验转载稿的真正原文。excludeURL 是自家转载页，必须排除。
-func resolveRepostOriginalURL(ctx context.Context, title, sourceName, excludeURL string) string {
+// publishOriginalTitleForRender 转载声明《》里用的原文真标题：只在它属于当前原文链接时才用
+// （链接后来被阅读原文或人工改掉，旧标题就作废），否则沿用本稿标题。
+func publishOriginalTitleForRender(job publishJob) string {
+	title := strings.TrimSpace(job.OriginalSourceTitle)
+	if title == "" || !isHTTPURL(job.OriginalSourceURL) ||
+		canonicalOriginalURLKey(job.OriginalSourceTitleURL) != canonicalOriginalURLKey(job.OriginalSourceURL) {
+		return ""
+	}
+	return title
+}
+
+// resolveRepostOriginal 检索并核验转载稿的真正原文。excludeURL 是自家转载页，必须排除；
+// body 是本稿正文段落，用来核验改过标题的原文。
+func resolveRepostOriginal(ctx context.Context, title, sourceName, excludeURL string, body []string) repostOriginalArticle {
 	title = strings.TrimSpace(title)
 	sourceName = strings.TrimSpace(sourceName)
 	if title == "" || sourceName == "" {
-		return ""
+		return repostOriginalArticle{}
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	excludeKey := canonicalOriginalURLKey(excludeURL)
 	feed := lookupFeedOriginalArticleDetail(ctx, title, sourceName)
-	if isHTTPURL(feed.URL) && canonicalOriginalURLKey(feed.URL) != canonicalOriginalURLKey(excludeURL) {
-		return feed.URL
+	if isHTTPURL(feed.URL) && canonicalOriginalURLKey(feed.URL) != excludeKey {
+		return repostOriginalArticle{URL: feed.URL}
 	}
-	if !feed.KnownSource {
-		if found := lookupWechatOriginalArticle(ctx, title, sourceName); isHTTPURL(found) &&
-			canonicalOriginalURLKey(found) != canonicalOriginalURLKey(excludeURL) {
-			return found
-		}
+	// Feed 订了这个号也照样搜一搜：Feed 只按标题对，FBIF 改过标题的转载在 Feed 里永远对不上
+	// （2026-10-14 #255 财经杂志、#274 窄播都已订阅却 not_found）。
+	if found := lookupWechatOriginalArticle(ctx, title, sourceName, body); isHTTPURL(found.URL) &&
+		canonicalOriginalURLKey(found.URL) != excludeKey {
+		return found
 	}
-	return resolveRepostOriginalURLFromSearch(ctx, title, sourceName, excludeURL)
+	return repostOriginalArticle{URL: resolveRepostOriginalURLFromSearch(ctx, title, sourceName, excludeURL)}
 }
 
 func resolveRepostOriginalURLFromSearch(ctx context.Context, title, sourceName, excludeURL string) string {

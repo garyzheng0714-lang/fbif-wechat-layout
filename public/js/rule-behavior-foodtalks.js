@@ -571,7 +571,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   // 公众号转载文切掉原提示页脚时需要补；网站 beta 左栏开启「提示声明」时也应生成。
   if ((trimmed.cutWechatTip || shouldGenerateSiteTip(config)) && !out.some(e => e && e.k === 'tip')) {
     // 来源从【原始 elems】提取（切尾前），因为「来源：XX」行常紧邻被切的导流段。
-    out.push(buildSiteFooterTipElem(opts.title, {
+    out.push(buildSiteFooterTipElem(opts.tipTitle || opts.title, {
       source: opts.isRepost ? extractRepostSource(elems, behavior) : '',
       sourceUrl: opts.sourceUrl || '',
       behavior,

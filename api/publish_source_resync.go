@@ -237,7 +237,7 @@ func (p *publishPipeline) prepareSourceResync(ctx context.Context, job publishJo
 	candidate.BlocksJSON = strings.TrimSpace(blocksJSON)
 	candidate.OriginalSourceURL = preferOriginalSourceURL(originalSourceURL, job.OriginalSourceURL)
 	p.ensureRepostOriginalURL(ctx, &candidate)
-	result, err := p.render(withPublishRulePackID(ctx, rulePackID), candidate.Title, publishRenderSourceURL(candidate), candidate.BlocksJSON, true)
+	result, err := p.render(publishRenderContext(ctx, rulePackID, candidate), candidate.Title, publishRenderSourceURL(candidate), candidate.BlocksJSON, true)
 	if err != nil {
 		return job, foodTalksNews{}, err
 	}
@@ -388,6 +388,8 @@ func (p *publishPipeline) finishSourceResync(job, candidate publishJob, news foo
 			current.SourceResyncRequestedAt == job.SourceResyncRequestedAt && current.SourceResyncIntentKey == intentKey
 	}, func(current *publishJob) {
 		current.OriginalSourceURL = candidate.OriginalSourceURL
+		current.OriginalSourceTitle = candidate.OriginalSourceTitle
+		current.OriginalSourceTitleURL = candidate.OriginalSourceTitleURL
 		current.BlocksJSON = candidate.BlocksJSON
 		current.ContentHTML = candidate.ContentHTML
 		current.ImageMap = candidate.ImageMap
