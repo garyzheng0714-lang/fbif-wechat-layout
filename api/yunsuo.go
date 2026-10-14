@@ -195,6 +195,13 @@ type yunsuoPushPayload struct {
 	HTML string `json:"html"`
 }
 
+// 云梭 /distribution/status 的 status（官方文档 https://www.yunsuofabu.com/products.html）：
+// 0 待发布；1 成功；2 异常、指数退避自动重试；3 平台不支持该内容类型；4 触发验证码、需养号、自动重试。
+const (
+	yunsuoStatusPending = 0
+	yunsuoStatusCaptcha = 4
+)
+
 type yunsuoAccountStatus struct {
 	PK            string              `json:"pk,omitempty"`
 	PlatformName  string              `json:"platform_name,omitempty"`

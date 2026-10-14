@@ -698,4 +698,13 @@ func TestExternalQueuedAtYunsuoShowsQueuedNotReconcile(t *testing.T) {
 			t.Fatalf("%s 按钮提示应是待核对：%+v", name, outcome)
 		}
 	}
+
+	// 云梭 status=4 触发验证码：要人去养号，不能说排队中。
+	captcha := still(func(l *publishExternalLane) { l.RawStatus = yunsuoStatusCaptcha; l.Remark = "触发验证码" })
+	if state := externalPlatformStatus(captcha, targets[0]); state.Status != "要养号" || !strings.Contains(state.Reason, "养号") {
+		t.Fatalf("status=4 应提示养号：%+v", state)
+	}
+	if outcome, _ := externalDistributionCardStateOutcome(captcha); outcome.toastType != "error" {
+		t.Fatalf("status=4 按钮提示不能说排队：%+v", outcome)
+	}
 }

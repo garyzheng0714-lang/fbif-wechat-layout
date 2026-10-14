@@ -93,6 +93,9 @@ func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) external
 			}
 		case publishExternalDistributionProcessing(lane.State):
 			state.Status, state.Tone = "同步中", "blue"
+		case externalLaneNeedsNurturing(lane):
+			state.Status, state.Tone = "要养号", "orange"
+			state.Reason = "平台弹了验证码，请在云梭插件里养号；养好后云梭自动重试，系统不会重复推送"
 		case externalLaneQueuedAtProvider(lane, time.Now()):
 			state.Status, state.Tone = "排队中", "grey"
 			state.Reason = "云梭已收下（" + formatReviewCardTime(lane.RequestedAt) + " 推送），还在排队等发布；每 30 分钟自动查一次，发出后自动更新"

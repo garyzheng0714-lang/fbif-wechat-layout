@@ -1120,7 +1120,7 @@ const (
 // publishExternalPollTimeoutReason 15 分钟轮询到点、云梭仍未给终态时记在 lane.Error。
 const publishExternalPollTimeoutReason = "云梭在轮询时限内未返回终态；系统不会重复发布，请人工核对"
 
-// externalLaneQueuedAtProvider 云梭已受理、回执还是「等待发布」这类非终态，只是 15 分钟
+// externalLaneQueuedAtProvider 云梭已受理、回执还是 status=0「待发布」，只是 15 分钟
 // 轮询到点转了对账：补查仍每 30 分钟进行，卡片按「排队中」说，不让人去云梭后台核对
 // （2026-10-14 用户问 #282「这个待核对是什么意思」）。查询被拒、没拿到回执、超过 45 天
 // 补查期的仍是待核对。
@@ -1130,12 +1130,18 @@ func externalLaneQueuedAtProvider(lane publishExternalLane, now time.Time) bool 
 		strings.TrimSpace(lane.ProviderUpdatedAt) == "" {
 		return false
 	}
-	switch lane.RawStatus {
-	case 1, 2, 3:
+	if lane.RawStatus != yunsuoStatusPending {
 		return false
 	}
 	requestedAt, err := time.Parse(time.RFC3339, lane.RequestedAt)
 	return err == nil && now.Sub(requestedAt) <= publishExternalLateRefreshWithin
+}
+
+// externalLaneNeedsNurturing 云梭回执 status=4：平台弹了验证码，要有人在云梭插件里养号，
+// 养好后云梭自动重试。光等不会发出去，卡片不能说「排队中」。
+func externalLaneNeedsNurturing(lane publishExternalLane) bool {
+	return lane.State == publishExternalDistributionReconciliationRequired &&
+		strings.TrimSpace(lane.ContentPK) != "" && lane.RawStatus == yunsuoStatusCaptcha
 }
 
 // externalDistributionAllQueued 待核对的平台全是云梭排队中。
