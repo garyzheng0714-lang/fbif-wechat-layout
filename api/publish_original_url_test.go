@@ -54,10 +54,22 @@ func TestResolveRepostOriginalURLPrefersFeedLookup(t *testing.T) {
 		t.Fatal("Feed 已命中时不应再去网页检索")
 		return nil
 	}
+	// Feed 按标题对上的原文，真标题可能多几个字（#114 原文《笑死！假瑞幸败诉…》）：抓原文页取真标题。
+	fetchOriginalArticlePage = func(raw string) ([]byte, string, error) {
+		return []byte(`<meta property="og:title" content="笑死！餐饮零食化，火了猪油渣">`), raw, nil
+	}
 	got := resolveRepostOriginal(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所",
-		"https://mp.weixin.qq.com/s/fbif-repost", nil).URL
-	if !strings.Contains(got, "__biz=MzkzNzI3NTc1Mg") {
-		t.Fatalf("应采用 Feed 返回的原号链接：%q", got)
+		"https://mp.weixin.qq.com/s/fbif-repost", nil)
+	if !strings.Contains(got.URL, "__biz=MzkzNzI3NTc1Mg") || got.Title != "笑死！餐饮零食化，火了猪油渣" {
+		t.Fatalf("应采用 Feed 返回的原号链接并带回原文真标题：%+v", got)
+	}
+	// 标题只差标点空格：不算改过，不填。
+	fetchOriginalArticlePage = func(raw string) ([]byte, string, error) {
+		return []byte(`<meta property="og:title" content="餐饮零食化 火了猪油渣！">`), raw, nil
+	}
+	if got := resolveRepostOriginal(context.Background(), "餐饮零食化，火了猪油渣", "惊蛰研究所",
+		"https://mp.weixin.qq.com/s/fbif-repost", nil); got.Title != "" {
+		t.Fatalf("只差标点不算改过标题：%+v", got)
 	}
 }
 

@@ -310,7 +310,7 @@ func resolveRepostOriginal(ctx context.Context, title, sourceName, excludeURL st
 	excludeKey := canonicalOriginalURLKey(excludeURL)
 	feed := lookupFeedOriginalArticleDetail(ctx, title, sourceName)
 	if isHTTPURL(feed.URL) && canonicalOriginalURLKey(feed.URL) != excludeKey {
-		return repostOriginalArticle{URL: feed.URL}
+		return repostOriginalArticle{URL: feed.URL, Title: wechatOriginalPageTitle(feed.URL, title)}
 	}
 	// Feed 订了这个号也照样搜一搜：Feed 只按标题对，FBIF 改过标题的转载在 Feed 里永远对不上
 	// （2026-10-14 #255 财经杂志、#274 窄播都已订阅却 not_found）。
@@ -318,7 +318,25 @@ func resolveRepostOriginal(ctx context.Context, title, sourceName, excludeURL st
 		canonicalOriginalURLKey(found.URL) != excludeKey {
 		return found
 	}
-	return repostOriginalArticle{URL: resolveRepostOriginalURLFromSearch(ctx, title, sourceName, excludeURL)}
+	found := resolveRepostOriginalURLFromSearch(ctx, title, sourceName, excludeURL)
+	return repostOriginalArticle{URL: found, Title: wechatOriginalPageTitle(found, title)}
+}
+
+// wechatOriginalPageTitle Feed / 网页检索按标题找到的公众号原文，标题仍可能被 FBIF 改过几个字
+// （#114 原文《笑死！假瑞幸败诉…》）：抓原文页取真标题；与本稿只差标点空格、或抓不到时不填。
+func wechatOriginalPageTitle(rawURL, ourTitle string) string {
+	if !isWechatArticleURL(rawURL) {
+		return ""
+	}
+	page, _, err := fetchOriginalArticlePage(rawURL)
+	if err != nil || len(page) == 0 {
+		return ""
+	}
+	title := originalArticlePageTitle(string(page), "")
+	if title == "" || normalizeOriginalTitle(title) == normalizeOriginalTitle(ourTitle) {
+		return ""
+	}
+	return title
 }
 
 func resolveRepostOriginalURLFromSearch(ctx context.Context, title, sourceName, excludeURL string) string {
