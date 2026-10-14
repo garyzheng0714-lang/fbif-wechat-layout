@@ -294,9 +294,17 @@ export function extractRepostSource(elems, behavior = {}) {
     if (!e || e.k !== 'p') continue;
     const text = runsToText(e.runs).trim();
     const m = text.match(sourceRe);
-    if (m) return m[1].replace(/[（(]\s*ID[：:].*$/i, '').trim();
+    if (!m) continue;
+    const name = m[1].replace(/[（(]\s*ID[：:].*$/i, '').trim();
+    // 「来源：英敏特报告《跨界饮料 – 中国》」是数据出处，不是转载来源机构。
+    if (isDataCitationSource(name)) continue;
+    return name;
   }
   return '';
+}
+
+function isDataCitationSource(name) {
+  return name.length > 30 || /[《》]|报告|数据|图表|调研|统计/.test(name);
 }
 
 // 合成网站口径开头作者行：FoodTalks 编辑会把公众号正文【尾部】的「来源：X」「作者：Y，
@@ -318,16 +326,39 @@ export function buildAuthorLineFromSource(elems, behavior = {}) {
     if (!authorSeg && /^作者[：:]/.test(text)) authorSeg = text.replace(/[。\s]*$/, '');
   }
   if (!source && !authorSeg) return '';
-  // 转载来源作者行句式（红线下放：{source} 占位，缺省降级同值 const）。
+  if (source) return repostAuthorLine(source, authorSeg, behavior);
+  return /[。.]$/.test(authorSeg) ? authorSeg : authorSeg + '。';
+}
+
+// 转载稿开头署名：「本文为{来源}原创，{作者：Y，编辑：Z}，转载请联系出处。」
+// （红线下放：{source} 占位，缺省降级同值 const）。
+function repostAuthorLine(source, authorSeg, behavior = {}) {
   const prefixTpl = behaviorTemplate(behavior, 'author_line_repost_prefix', '本文为{source}原创');
   const suffixTpl = behaviorTemplate(behavior, 'author_line_repost_suffix', '，转载请联系出处。');
-  const parts = [];
-  if (source) parts.push(prefixTpl.replace('{source}', source));
-  if (authorSeg) parts.push(authorSeg);
-  let line = parts.join('，');
-  if (source) line += suffixTpl;
-  else if (!/[。.]$/.test(line)) line += '。';
-  return line;
+  const seg = String(authorSeg || '').replace(/[，,。.\s]*$/, '');
+  return prefixTpl.replace('{source}', source) + (seg ? '，' + seg : '') + suffixTpl;
+}
+
+// 署名后紧跟的「编辑/翻译/编译/采访：…」并进署名（编辑手改的 #126/#127/#257/#277 口径）。
+// 已是「…，转载请联系出处。」的转载署名插在尾句前，否则接在末尾并以句号收。
+const CREDIT_LINE_RE = /^(编辑|编审|责编|主编|美编|翻译|编译|采访|统筹|审校)[：:]/;
+
+function absorbCreditLines(out, idx, behavior = {}) {
+  const suffix = behaviorTemplate(behavior, 'author_line_repost_suffix', '，转载请联系出处。');
+  let text = out[idx].text;
+  for (let n = 0; n < 3; n++) {
+    const next = out[idx + 1];
+    if (!next || next.k !== 'p') break;
+    const credit = runsToText(next.runs).trim().replace(/[，,。.\s]*$/, '');
+    if (!CREDIT_LINE_RE.test(credit)) break;
+    if (text.endsWith(suffix)) {
+      text = text.slice(0, -suffix.length) + '，' + credit + suffix;
+    } else {
+      text = text.replace(/[，,。\s]*$/, '') + '，' + credit + '。';
+    }
+    out.splice(idx + 1, 1); // 移除被并入的段（out 是新数组，不改输入）
+  }
+  out[idx] = { k: 'author', text };
 }
 
 function isEmptyP(e) {
@@ -384,27 +415,30 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     const isAuthorLine = authorRe.test(text) ||
       /^\s*本文(系|为).{0,40}(原创|首发|授权)/.test(text);
     if (isAuthorLine) {
-      let merged = text;
-      const nextIdx = firstIdx + 1;
-      if (out[nextIdx] && out[nextIdx].k === 'p') {
-        const nextText = runsToText(out[nextIdx].runs).trim();
-        if (/^(编辑|编审|责编|主编|美编)[：:]/.test(nextText)) {
-          merged = merged.replace(/[，,。\s]*$/, '') + '，' + nextText;
-          if (!/[。.]$/.test(merged)) merged += '。';
-          out.splice(nextIdx, 1);  // 移除被并入的编辑段（out 是新数组，不改输入）
-        }
-      }
-      out[firstIdx] = { k: 'author', text: merged };
+      out[firstIdx] = { k: 'author', text };
+      absorbCreditLines(out, firstIdx, behavior);
     }
   }
 
-  // 阶段 1.5：开头无作者行但正文（含尾部）有「来源：X」「作者：Y」→ 合成开头作者行。
-  // 仅外部转载触发；扫【原始 elems】（来源/作者常在被切的尾部）。自家稿开头通常已有作者行。
+  // 阶段 1.5：转载稿开头署名带上来源（与文末转载声明同一来源，扫【原始 elems】，
+  // 来源行常在被切的尾部）。自家稿没有外部来源，保持「作者：X」。
+  //   - 开头只有「作者：Y」→「本文为X原创，作者：Y，转载请联系出处。」（近一月自动发布的
+  //     转载稿 32 篇开头只有作者行，24 篇被编辑在 FoodTalks 后台手改成这样，2026-10-14 核对）
+  //   - 开头没有作者行 → 用正文里的「来源：X」「作者：Y」合成
   if (opts.isRepost) {
     const headIsAuthor = firstIdx >= 0 && out[firstIdx] && out[firstIdx].k === 'author';
-    if (!headIsAuthor) {
+    if (headIsAuthor) {
+      const source = extractRepostSource(elems, behavior);
+      const head = out[firstIdx].text;
+      if (source && !isOwnAccountName(source) && authorRe.test(head)) {
+        out[firstIdx] = { k: 'author', text: repostAuthorLine(source, head, behavior) };
+      }
+    } else {
       const synthesized = buildAuthorLineFromSource(elems, behavior);
-      if (synthesized) out.unshift({ k: 'author', text: synthesized });
+      if (synthesized) {
+        out.unshift({ k: 'author', text: synthesized });
+        absorbCreditLines(out, 0, behavior);
+      }
     }
   }
 

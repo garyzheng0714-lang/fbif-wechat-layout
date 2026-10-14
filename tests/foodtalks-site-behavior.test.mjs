@@ -69,6 +69,9 @@ function cap(text) {
 }
 
 const REPOST = { isRepost: true };
+function textOf(e) {
+  return e ? (e.runs || []).map(r => r.text).join('') + (e.text || '') : '';
+}
 
 // 复刻 news/62285 真实抓取尾部：参考来源 → 公众号"提示："页脚 → 二维码 →
 // 更多文章 → 1000个案例 → 预览时标签不可点。网站渠道应从公众号"提示："起全切，
@@ -381,12 +384,44 @@ test('作者合成：仅有来源、无独立作者段时合成「本文为X原�
     '开头已有署名则文末来源行应删除');
 });
 
-test('作者合成：开头已有作者行时不重复合成', () => {
+test('作者合成：开头已有作者行时只补来源，不重复合成', () => {
   const elems = [p('作者：张三'), p('来源：某媒体'), p('作者：李四')];
   const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true });
   assert.equal(out[0].k, 'author');
-  assert.equal(out[0].text, '作者：张三');
+  assert.equal(out[0].text, '本文为某媒体原创，作者：张三，转载请联系出处。');
   assert.ok(!out.slice(1).some(e => e.k === 'author'), '不应额外合成作者行');
+});
+
+// 2026-10-14 核对近一月 FoodTalks 自动发布：转载稿开头只有「作者：…」的 32 篇里，
+// 24 篇被编辑在后台手改成「本文为{来源}原创，作者：…，转载请联系出处。」。以下逐字取自编辑终稿。
+test('转载署名：开头只有作者行时补上来源（编辑终稿口径）', () => {
+  const cases = [
+    [[p('作者：国君，编辑：子琪。'), p('正文。'), p('来源：咖门（ID：kamen）')],
+      '本文为咖门原创，作者：国君，编辑：子琪，转载请联系出处。'],
+    [[p('作者：Chloe Sorvino'), p('翻译：Lemin'), p('正文。'), p('来源：福布斯')],
+      '本文为福布斯原创，作者：Chloe Sorvino，翻译：Lemin，转载请联系出处。'],
+    [[p('作者：常韵'), p('采访：常韵、Sophia'), p('正文。'), p('来源：TopDigital')],
+      '本文为TopDigital原创，作者：常韵，采访：常韵、Sophia，转载请联系出处。'],
+    [[p('编译：李言'), p('正文。'), p('来源：联商网')],
+      '本文为联商网原创，编译：李言，转载请联系出处。'],
+  ];
+  for (const [elems, want] of cases) {
+    const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true });
+    assert.equal(out[0].k, 'author');
+    assert.equal(out[0].text, want);
+    assert.equal(out.filter(e => e.k === 'author').length, 1, '只一行署名');
+    assert.equal(textOf(out[1]), '正文。', '翻译/编译/采访行并进署名，不再单独成段');
+  }
+});
+
+test('转载署名：自家稿与数据出处不补来源', () => {
+  const own = applyFoodTalksBehavior([p('作者：Pride'), p('编辑：Bobo'), p('正文。')], DEFAULT_CONFIG, { isRepost: true });
+  assert.equal(own[0].text, '作者：Pride，编辑：Bobo。', 'FBIF 原创保持作者行');
+  const fbif = applyFoodTalksBehavior([p('作者：Pride'), p('正文。'), p('来源：FBIF食品饮料创新')], DEFAULT_CONFIG, { isRepost: true });
+  assert.equal(fbif[0].text, '作者：Pride', '来源是自家号不补');
+  const data = [p('作者：Pride'), p('正文。'), p('来源：英敏特报告《跨界饮料 – 中国 – 2025年》')];
+  assert.equal(extractRepostSource(data), '', '数据出处不是转载来源');
+  assert.equal(applyFoodTalksBehavior(data, DEFAULT_CONFIG, { isRepost: true })[0].text, '作者：Pride');
 });
 
 test('开头已有网站署名时删除文末公众号口径来源/作者（数英 DIGITALING 实证）', () => {
