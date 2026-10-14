@@ -93,6 +93,9 @@ func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) external
 			}
 		case publishExternalDistributionProcessing(lane.State):
 			state.Status, state.Tone = "同步中", "blue"
+		case externalLaneQueuedAtProvider(lane, time.Now()):
+			state.Status, state.Tone = "排队中", "grey"
+			state.Reason = "云梭已收下（" + formatReviewCardTime(lane.RequestedAt) + " 推送），还在排队等发布；每 30 分钟自动查一次，发出后自动更新"
 		case lane.State == publishExternalDistributionReconciliationRequired:
 			state.Status, state.Tone = "待核对", "orange"
 			state.Reason = "结果未确认，请先到云梭后台核对；系统不会重复推送"

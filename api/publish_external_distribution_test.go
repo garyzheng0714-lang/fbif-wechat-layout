@@ -631,3 +631,71 @@ func TestExternalCardExpiredIsTerminal(t *testing.T) {
 		t.Fatalf("别的死信不动：%+v", other)
 	}
 }
+
+// TestExternalQueuedAtYunsuoShowsQueuedNotReconcile 2026-10-14 #282：云梭已收下、回执一直是「等待发布」，
+// 15 分钟轮询到点转了对账。卡片和侧边栏说「排队中」、每 30 分钟自动查，不叫人去云梭后台核对；
+// 查询被拒、没拿到回执、没有单号、过了 45 天补查期的仍是待核对。
+func TestExternalQueuedAtYunsuoShowsQueuedNotReconcile(t *testing.T) {
+	setTestYunsuoConfig(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	fake := &fakeYunsuoAPI{contentPK: "pk-queued", statuses: []yunsuoAccountStatus{
+		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+	}}
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	env.pipeline.externalDistributionPollTimeout = time.Nanosecond
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+		t.Fatal(err)
+	}
+	got := mustJob(t, env, job.ID)
+	targets := []yunsuoAccountTarget{{ID: testYunsuoToutiaoID, Name: "头条号"}, {ID: testYunsuoBaijiaID, Name: "百家号"}}
+	for _, target := range targets {
+		lane := mustLane(t, got, target.ID)
+		if lane.State != publishExternalDistributionReconciliationRequired || lane.Remark != "等待发布" {
+			t.Fatalf("轮询到点应转对账并留下云梭回执：%+v", lane)
+		}
+		state := externalPlatformStatus(got, target)
+		if state.Status != "排队中" || !strings.Contains(state.Reason, "云梭已收下") ||
+			!strings.Contains(state.Reason, "每 30 分钟自动查一次") || strings.Contains(state.Reason, "云梭后台核对") {
+			t.Fatalf("%s 云梭排队中应说排队中、自动查：%+v", target.Name, state)
+		}
+	}
+	card := cardJSON(t, buildReviewDoneCard(got))
+	if !strings.Contains(card, "排队中") || strings.Contains(card, "待核对") || strings.Contains(card, feishuCardActionDistributeExternal) {
+		t.Fatalf("卡片应显示排队中、无同步按钮：%s", card)
+	}
+	if outcome, handled := externalDistributionCardStateOutcome(got); !handled || outcome.toastType != "info" || !strings.Contains(outcome.toastContent, "排队") {
+		t.Fatalf("全部排队中时按钮提示应说排队：%+v", outcome)
+	}
+	if fake.pushCalls != 2 {
+		t.Fatalf("每个平台只推一次，实际 %d", fake.pushCalls)
+	}
+
+	still := func(edit func(*publishExternalLane)) publishJob {
+		j := got
+		j.ExternalDistributionLanes = append([]publishExternalLane(nil), got.ExternalDistributionLanes...)
+		for i := range j.ExternalDistributionLanes {
+			edit(&j.ExternalDistributionLanes[i])
+		}
+		return j
+	}
+	for name, j := range map[string]publishJob{
+		"查询被拒": still(func(l *publishExternalLane) {
+			l.Error = "云梭状态查询被明确拒绝，请人工核对：content_pk 不存在"
+		}),
+		"没拿到回执": still(func(l *publishExternalLane) { l.ProviderUpdatedAt = "" }),
+		"没有单号":  still(func(l *publishExternalLane) { l.ContentPK = "" }),
+		"过了补查期": still(func(l *publishExternalLane) {
+			l.RequestedAt = time.Now().Add(-46 * 24 * time.Hour).UTC().Format(time.RFC3339)
+		}),
+		"云梭回执已失败": still(func(l *publishExternalLane) { l.RawStatus = 2 }),
+	} {
+		if state := externalPlatformStatus(j, targets[0]); state.Status != "待核对" || !strings.Contains(state.Reason, "云梭后台核对") {
+			t.Fatalf("%s 仍应待核对：%+v", name, state)
+		}
+		if outcome, _ := externalDistributionCardStateOutcome(j); outcome.toastType != "error" {
+			t.Fatalf("%s 按钮提示应是待核对：%+v", name, outcome)
+		}
+	}
+}

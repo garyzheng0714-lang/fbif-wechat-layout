@@ -863,7 +863,7 @@ func (p *publishPipeline) pollExternalLaneWithClient(job publishJob, lane publis
 	}
 	if !nowTime.Before(startedAt.Add(timeout)) {
 		p.finishExternalLanePolling(job.ID, lane, publishExternalDistributionReconciliationRequired, nil,
-			"云梭在轮询时限内未返回终态；系统不会重复发布，请人工核对")
+			publishExternalPollTimeoutReason)
 		return
 	}
 	// 每次只占用 worker 做一次查询，延时器到点后再入队；多篇文章同时分发不会
@@ -1093,6 +1093,11 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 			toastType: "info", toastContent: "文章已同步至其他平台，无需重复操作",
 		}, true
 	case publishExternalDistributionReconciliationRequired:
+		if externalDistributionAllQueued(job, time.Now()) {
+			return reviewCardOutcome{
+				toastType: "info", toastContent: "云梭还在排队发布，发出后卡片自动更新，不会重复发布",
+			}, true
+		}
 		return reviewCardOutcome{
 			toastType: "error", toastContent: "外部分发结果待核对，系统不会重复发布",
 		}, true
@@ -1111,6 +1116,42 @@ const (
 	publishExternalLateRefreshEvery  = 30 * time.Minute
 	publishExternalLateRefreshWithin = 45 * 24 * time.Hour
 )
+
+// publishExternalPollTimeoutReason 15 分钟轮询到点、云梭仍未给终态时记在 lane.Error。
+const publishExternalPollTimeoutReason = "云梭在轮询时限内未返回终态；系统不会重复发布，请人工核对"
+
+// externalLaneQueuedAtProvider 云梭已受理、回执还是「等待发布」这类非终态，只是 15 分钟
+// 轮询到点转了对账：补查仍每 30 分钟进行，卡片按「排队中」说，不让人去云梭后台核对
+// （2026-10-14 用户问 #282「这个待核对是什么意思」）。查询被拒、没拿到回执、超过 45 天
+// 补查期的仍是待核对。
+func externalLaneQueuedAtProvider(lane publishExternalLane, now time.Time) bool {
+	if lane.State != publishExternalDistributionReconciliationRequired ||
+		strings.TrimSpace(lane.ContentPK) == "" || lane.Error != publishExternalPollTimeoutReason ||
+		strings.TrimSpace(lane.ProviderUpdatedAt) == "" {
+		return false
+	}
+	switch lane.RawStatus {
+	case 1, 2, 3:
+		return false
+	}
+	requestedAt, err := time.Parse(time.RFC3339, lane.RequestedAt)
+	return err == nil && now.Sub(requestedAt) <= publishExternalLateRefreshWithin
+}
+
+// externalDistributionAllQueued 待核对的平台全是云梭排队中。
+func externalDistributionAllQueued(job publishJob, now time.Time) bool {
+	queued := false
+	for _, lane := range job.ExternalDistributionLanes {
+		if lane.State != publishExternalDistributionReconciliationRequired {
+			continue
+		}
+		if !externalLaneQueuedAtProvider(lane, now) {
+			return false
+		}
+		queued = true
+	}
+	return queued
+}
 
 // publishExternalLaneNeedsLateRefresh 已拿到 content_pk、但本地结论还没落定的平台：
 // 15 分钟轮询超时转对账的（云梭仍在排队），以及云梭标「异常、自动重试」的失败。
