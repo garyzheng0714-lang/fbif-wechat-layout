@@ -503,11 +503,18 @@ func (s *authService) refreshFeishuTokenLocked(ctx context.Context, userID strin
 		if token.RefreshExpiresIn > 0 {
 			expiresAt = now.Add(token.RefreshExpiresIn)
 		}
-		if _, err := s.users.RotateFeishuRefreshToken(userID, refreshSeal, now, expiresAt); err != nil {
+		_, rotated, err := s.users.RotateFeishuRefreshToken(userID, usedSeal, refreshSeal, now, expiresAt)
+		if err != nil {
 			return "", err
 		}
 		if token.AccessToken == "" || token.ExpiresIn <= 0 {
 			return "", errors.New("feishu refresh response is incomplete")
+		}
+		if !rotated {
+			// 刷新期间重新登录过：库里已是更新的授权，不覆盖；这次换到的
+			// access_token 照样有效，只给本次请求用、不进缓存。
+			log.Printf("auth: 飞书授权刷新期间已更新，保留较新的授权 user=%s", userID)
+			return token.AccessToken, nil
 		}
 		s.accessCache[userID] = cachedUserAccessToken{
 			Token:     token.AccessToken,

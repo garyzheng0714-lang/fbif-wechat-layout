@@ -312,12 +312,37 @@ func (s *authUserStore) UpdateFeishuTokens(id, refreshSeal string, lastLoginAt t
 }
 
 // RotateFeishuRefreshToken 原子替换轮换后的 refresh_token，记下轮换时间与
-// 飞书给的到期时间，并清除「需重新授权」标记。
-func (s *authUserStore) RotateFeishuRefreshToken(id, refreshSeal string, refreshedAt, expiresAt time.Time) (authUser, error) {
+// 飞书给的到期时间，并清除「需重新授权」标记。只在库里仍是这次刷新用掉的那份
+// 令牌（usedSeal）时才写：刷新期间这个人重新登录过、或别的进程已换上更新的
+// 授权，就不拿旧授权链的结果覆盖它，返回 false。
+func (s *authUserStore) RotateFeishuRefreshToken(id, usedSeal, refreshSeal string, refreshedAt, expiresAt time.Time) (authUser, bool, error) {
 	if refreshSeal == "" {
-		return authUser{}, errors.New("refresh token seal is required")
+		return authUser{}, false, errors.New("refresh token seal is required")
 	}
-	return s.updateFeishuTokens(id, refreshSeal, time.Time{}, refreshedAt, expiresAt)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadLocked()
+	if err != nil {
+		return authUser{}, false, err
+	}
+	for idx := range doc.Users {
+		if doc.Users[idx].ID != id {
+			continue
+		}
+		if doc.Users[idx].FeishuRefreshTokenSeal != usedSeal {
+			return doc.Users[idx], false, nil
+		}
+		doc.Users[idx].FeishuRefreshTokenSeal = refreshSeal
+		doc.Users[idx].FeishuReauthRequired = false
+		doc.Users[idx].FeishuTokenRefreshedAt = refreshedAt.UTC()
+		doc.Users[idx].FeishuRefreshExpiresAt = expiresAt.UTC()
+		doc.Users[idx].UpdatedAt = time.Now().UTC()
+		if err := s.saveLocked(doc); err != nil {
+			return authUser{}, false, err
+		}
+		return doc.Users[idx], true, nil
+	}
+	return authUser{}, false, errors.New("auth user not found")
 }
 
 func (s *authUserStore) updateFeishuTokens(id, refreshSeal string, lastLoginAt, refreshedAt, expiresAt time.Time) (authUser, error) {

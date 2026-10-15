@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -135,8 +136,9 @@ func TestFeishuRefreshRetriesWhenTokenWasRotatedConcurrently(t *testing.T) {
 			if err != nil {
 				return feishuUserToken{}, err
 			}
-			if _, err := service.users.RotateFeishuRefreshToken("feishu:ou_race", seal, service.now(), time.Time{}); err != nil {
-				return feishuUserToken{}, err
+			current := mustGetUser(t, service, "feishu:ou_race")
+			if _, ok, err := service.users.RotateFeishuRefreshToken("feishu:ou_race", current.FeishuRefreshTokenSeal, seal, service.now(), time.Time{}); err != nil || !ok {
+				return feishuUserToken{}, fmt.Errorf("rotate elsewhere ok=%v err=%v", ok, err)
 			}
 			return feishuUserToken{}, &feishuOAuthError{Code: 20073, OAuthError: "invalid_grant"}
 		}
@@ -162,6 +164,37 @@ func TestFeishuRefreshRetriesWhenTokenWasRotatedConcurrently(t *testing.T) {
 	}
 	if !stored.FeishuTokenRefreshedAt.Equal(now) || !stored.FeishuRefreshExpiresAt.Equal(now.Add(7*24*time.Hour)) {
 		t.Fatalf("refreshed=%v expires=%v", stored.FeishuTokenRefreshedAt, stored.FeishuRefreshExpiresAt)
+	}
+}
+
+func TestFeishuRefreshKeepsNewerLoginGrant(t *testing.T) {
+	var service *authService
+	provider := &scriptedRefreshProvider{}
+	provider.refresh = func(int, string) (feishuUserToken, error) {
+		// 飞书已经用掉 rt-old，响应回来之前这个人重新登录、写进了新授权。
+		seal, err := service.sealRefreshToken("rt-from-relogin")
+		if err != nil {
+			return feishuUserToken{}, err
+		}
+		if _, err := service.users.UpdateFeishuTokens("feishu:ou_relogin", seal, service.now()); err != nil {
+			return feishuUserToken{}, err
+		}
+		return feishuUserToken{AccessToken: "u-old-chain", RefreshToken: "rt-old-chain-next", ExpiresIn: 2 * time.Hour, RefreshExpiresIn: 7 * 24 * time.Hour}, nil
+	}
+	service, now := keepAliveTestService(t, provider)
+	user := seedFeishuUser(t, service, authUser{ID: "feishu:ou_relogin", FeishuOpenID: "ou_relogin", LastSeenAt: now}, "rt-old")
+
+	token, err := service.userAccessToken(context.Background(), user)
+	if err != nil || token != "u-old-chain" {
+		t.Fatalf("token=%q err=%v, want this refresh's access token", token, err)
+	}
+	stored := mustGetUser(t, service, user.ID)
+	plain, err := service.openRefreshToken(stored.FeishuRefreshTokenSeal)
+	if err != nil || plain != "rt-from-relogin" {
+		t.Fatalf("stored refresh token=%q err=%v, the newer login grant must survive", plain, err)
+	}
+	if _, cached := service.accessCache[user.ID]; cached {
+		t.Fatal("old-chain access token must not be cached over the newer login")
 	}
 }
 
