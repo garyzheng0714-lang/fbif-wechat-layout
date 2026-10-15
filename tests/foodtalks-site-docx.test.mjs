@@ -1170,3 +1170,21 @@ test('行首阿拉伯序号保留半角点，句中/年份仍转换（2026-09-29
   assert.match(html, /2024。这一年/, '四位年份不算序号');
   assert.match(html, /1\.5倍/, '小数不动');
 });
+
+test("词中撇号统一成英文 '（2026-10-15 tea'stone 茶馆稿：原文 ' 与 ’ 混用）", () => {
+  const txt = (runs) => ({ k: 'txt', runs });
+  const t = (text, bold = false) => ({ type: 'txt', text, bold });
+  const result = template.processBlocks({
+    title: '撇号样例',
+    blocks: [
+      txt([t('但这个少数就包含了'), t("tea'stone", true), t('。')]),
+      txt([t('把中国文化融进现代产品，tea’stone是做得最好的。')]),
+      txt([t('他说‘美’是关键。')]),
+    ],
+  }, { config: { muted_color: '#888888' } });
+  const html = result.lines.join('\n');
+  assert.ok(html.includes("<strong>tea'stone</strong>"), "原文英文 ' 原样保留");
+  assert.ok(html.includes("，tea'stone是做得最好的"), '原文 U+2019 词中撇号改成英文');
+  assert.ok(html.includes('‘美’'), '中文单引号对不动');
+  assert.ok(!html.includes('tea’stone'));
+});

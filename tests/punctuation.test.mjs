@@ -162,10 +162,22 @@ test("quotes: apostrophe in English-only paragraph left alone", () => {
   assert.equal(convertText("it's a test"), "it's a test");
 });
 
-test("quotes: Chinese paragraph with English it's keeps apostrophe as right single", () => {
+test("quotes: Chinese paragraph with English it's keeps ASCII apostrophe", () => {
   const input = "他说 it's not true 但其实是真的";
   const out = convertText(input);
-  assert.ok(out.includes("it’s"));
+  assert.equal(out, "他说 it's not true 但其实是真的");
+});
+
+test("quotes: brand apostrophe tea'stone stays ASCII and does not break quote pairing", () => {
+  // 2026-10-15 用户反馈：飞书文档 tea'stone 排版后变成 tea’stone（中文引号）。
+  assert.equal(
+    convertText('我写茶叶系列以来，很少喝到让我"念念不忘"的茶，但这个少数就包含了tea\'stone。'),
+    '我写茶叶系列以来，很少喝到让我“念念不忘”的茶，但这个少数就包含了tea\'stone。',
+  );
+  assert.equal(
+    convertText("“大消费时代下，美就是流量。”——tea’stone创始人李姝，'美'是关键"),
+    "“大消费时代下，美就是流量。”——tea'stone创始人李姝，‘美’是关键",
+  );
 });
 
 test('quotes: opening quote after Chinese comma', () => {
@@ -229,10 +241,11 @@ test('curly: all-right single quotes inside double get re-paired', () => {
   assert.ok(!out.includes('\u2019\u2019'));
 });
 
-test("curly: mid-word U+2019 kept as apostrophe, not a closing quote", () => {
+test("curly: mid-word U+2019 becomes ASCII apostrophe, not a closing quote", () => {
   const input = '他说 it\u2019s not true 但其实是真的';
   const out = convertText(input);
-  assert.ok(out.includes('it\u2019s'));
+  assert.ok(out.includes("it's"));
+  assert.ok(!out.includes('\u2019'));
 });
 
 test('curly: screenshot line — 汤用豆腐/煎用豆腐 no same-direction pairs remain', () => {

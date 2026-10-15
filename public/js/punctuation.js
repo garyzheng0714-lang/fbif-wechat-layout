@@ -21,8 +21,10 @@
 //      (surrounding punctuation, whitespace) is never used to guess. Pre-existing
 //      curly quotes are normalized to ASCII first, then re-emitted by the same
 //      rule — Word / WPS frequently stores every quote as the same direction,
-//      so trusting the input direction is unsafe. Mid-word `'` / `'` is
-//      preserved as an apostrophe without flipping state.
+//      so trusting the input direction is unsafe. A mid-word apostrophe
+//      (`tea'stone`, `it’s`) is emitted as ASCII `'` without flipping state:
+//      U+2019 renders full-width in CJK fonts and reads as a Chinese closing
+//      quote (2026-10-15 user report: `tea'stone` → `tea’stone`).
 //   4. Alternation state resets on paragraph breaks (two or more consecutive
 //      newlines) so an unclosed quote in one paragraph does not corrupt the next.
 //   5. Fenced/inline code, URLs, emails, and HTML tags are masked before conversion
@@ -359,7 +361,7 @@ function convertEllipsisAndDash(text) {
 // WPS outputs with uniformly-wrong direction still get paired correctly.
 //
 // Mid-word `'` (including U+2019 normalized from Word's auto-apostrophe) is
-// preserved as U+2019 and does NOT flip alternation state.
+// emitted as ASCII `'` and does NOT flip alternation state.
 
 function convertQuotes(text) {
   const normalized = text
@@ -374,13 +376,13 @@ function convertQuotes(text) {
     const ch = chars[i];
 
     if (ch === '"' || ch === "'") {
-      // Mid-word apostrophe: `it's`, `don't`, `O'Brien`. Emit U+2019 without
-      // touching alternation state — it is not a quote.
+      // Mid-word apostrophe: `it's`, `don't`, `tea'stone`. Emit ASCII `'`
+      // without touching alternation state — it is not a quote.
       if (ch === "'") {
         const prev = neighborArr(chars, i, -1);
         const next = neighborArr(chars, i, +1);
         if (isWordChar(prev) && isWordChar(next)) {
-          out.push('\u2019');
+          out.push("'");
           continue;
         }
       }

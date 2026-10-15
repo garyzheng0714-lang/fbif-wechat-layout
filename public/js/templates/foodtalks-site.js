@@ -157,9 +157,14 @@ function normalizeChinesePunctuation(text, leading = '') {
     return isCjk(prev) || isCjk(next);
   };
   return chars.map((ch, i) => {
-    if (!touchesChinese(i)) return ch;
     const prev = findTextChar(i, -1);
     const next = findTextChar(i, +1);
+    // 词中撇号（`tea’stone`、`Peet’s`）统一成英文 `'`：中文字体里 U+2019 是全角，
+    // 读起来像中文引号（2026-10-15 用户反馈；与 punctuation.js 规则 3 同口径）。
+    if ((ch === '’' || ch === '‘') && /[A-Za-z0-9_]/.test(prev) && /[A-Za-z0-9_]/.test(next)) {
+      return "'";
+    }
+    if (!touchesChinese(i)) return ch;
     if (ch === ',') return '，';
     if (ch === ':') return '：';
     if (ch === ';') return '；';
