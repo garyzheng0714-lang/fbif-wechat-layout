@@ -85,6 +85,9 @@ type feishuUserToken struct {
 	AccessToken  string
 	RefreshToken string
 	ExpiresIn    time.Duration
+	// RefreshExpiresIn 是飞书本次下发的 refresh_token 寿命（目前约 7 天、
+	// 非固定值，以响应为准）；0 表示响应没给。
+	RefreshExpiresIn time.Duration
 }
 
 type feishuUserProfile struct {
@@ -223,6 +226,14 @@ func (p *httpFeishuProvider) doJSONMode(ctx context.Context, method, endpoint, a
 		if tolerantStatus && json.Unmarshal(responseBody, target) == nil {
 			return nil
 		}
+		// 只带飞书业务码，不带 msg/正文：日志里能分清是哪类拒绝（2026-10-15
+		// 导入失败只剩 "status 400"，查不出是授权过期还是导出被拒）。
+		var envelope struct {
+			Code int `json:"code"`
+		}
+		if json.Unmarshal(responseBody, &envelope) == nil && envelope.Code != 0 {
+			return fmt.Errorf("feishu API status %d (code=%d)", resp.StatusCode, envelope.Code)
+		}
 		return fmt.Errorf("feishu API status %d", resp.StatusCode)
 	}
 	if err := json.Unmarshal(responseBody, target); err != nil {
@@ -242,9 +253,31 @@ type feishuTokenResponse struct {
 	RefreshTokenExpiresIn int64  `json:"refresh_token_expires_in"`
 }
 
+// feishuOAuthError 是飞书令牌接口的业务拒绝，只保留错误码与 OAuth error 名，
+// 不带令牌或 Secret。
+type feishuOAuthError struct {
+	Code       int
+	OAuthError string
+}
+
+func (e *feishuOAuthError) Error() string {
+	return fmt.Sprintf("feishu OAuth rejected the request: code=%d error=%s", e.Code, e.OAuthError)
+}
+
+// reauthRequired 报告这次拒绝是否意味着用户必须重新授权：refresh_token 无效、
+// 过期、被撤销、已被用过，或与当前应用不匹配。20050/20072 等服务端故障返回
+// false，只能稍后重试，不得因此把用户打成「需重新登录」。
+func (e *feishuOAuthError) reauthRequired() bool {
+	switch e.Code {
+	case 20024, 20026, 20037, 20064, 20073:
+		return true
+	}
+	return e.Code == 0 && e.OAuthError == "invalid_grant"
+}
+
 func normalizeFeishuTokenResponse(resp feishuTokenResponse) (feishuUserToken, error) {
 	if resp.Code != 0 || resp.Error != "" {
-		return feishuUserToken{}, errors.New("feishu OAuth rejected the request")
+		return feishuUserToken{}, &feishuOAuthError{Code: resp.Code, OAuthError: resp.Error}
 	}
 	if resp.AccessToken == "" || resp.ExpiresIn <= 0 {
 		return feishuUserToken{}, errors.New("feishu OAuth response is incomplete")
@@ -253,9 +286,10 @@ func normalizeFeishuTokenResponse(resp feishuTokenResponse) (feishuUserToken, er
 		return feishuUserToken{}, errors.New("feishu OAuth response has no refresh_token; offline_access must be granted")
 	}
 	return feishuUserToken{
-		AccessToken:  resp.AccessToken,
-		RefreshToken: resp.RefreshToken,
-		ExpiresIn:    time.Duration(resp.ExpiresIn) * time.Second,
+		AccessToken:      resp.AccessToken,
+		RefreshToken:     resp.RefreshToken,
+		ExpiresIn:        time.Duration(resp.ExpiresIn) * time.Second,
+		RefreshExpiresIn: time.Duration(resp.RefreshTokenExpiresIn) * time.Second,
 	}, nil
 }
 
@@ -276,12 +310,14 @@ func (p *httpFeishuProvider) ExchangeCode(ctx context.Context, code, redirectURI
 
 func (p *httpFeishuProvider) RefreshUserToken(ctx context.Context, refreshToken string) (feishuUserToken, error) {
 	var response feishuTokenResponse
-	err := p.doJSON(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/authen/v2/oauth/token", "", map[string]string{
+	// 飞书把 refresh_token 过期/撤销放在 HTTP 400 的 {code,error} 里，必须读出
+	// 业务码才能区分「要重新授权」与「飞书临时故障」。
+	err := p.doJSONMode(ctx, http.MethodPost, p.apiBaseURL+"/open-apis/authen/v2/oauth/token", "", map[string]string{
 		"grant_type":    "refresh_token",
 		"client_id":     p.appID,
 		"client_secret": p.appSecret,
 		"refresh_token": refreshToken,
-	}, &response)
+	}, &response, true)
 	if err != nil {
 		return feishuUserToken{}, err
 	}

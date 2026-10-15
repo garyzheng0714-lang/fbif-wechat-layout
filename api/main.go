@@ -93,6 +93,8 @@ func main() {
 		log.Fatalf("登录服务启动失败：%v", err)
 	}
 	registerAuthRoutes(mux, authService)
+	// 部署候选暂停态下不轮换：refresh_token 只能用一次，新旧进程同时轮换会互相作废。
+	authService.startFeishuTokenKeepAlive(publishWorkersPaused)
 	registerFeishuDocumentRoutes(mux, authService)
 	registerFeishuChatRoutes(mux, authService)
 

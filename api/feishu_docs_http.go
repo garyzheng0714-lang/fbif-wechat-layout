@@ -49,6 +49,9 @@ func feishuExportErrorResponse(err error) (int, string, string) {
 		return http.StatusUnauthorized, "authentication_required", "请先登录"
 	case errors.Is(err, errFeishuLoginRequired):
 		return http.StatusForbidden, "feishu_login_required", "飞书云文档功能需要使用飞书登录"
+	case errors.Is(err, errFeishuReauthRequired):
+		// 2026-10-15：refresh_token 失效曾被兜底成「服务暂不可用」，用户无从下手。
+		return http.StatusForbidden, "feishu_reauth_required", "飞书授权已失效，请重新用飞书登录一次"
 	case errors.Is(err, errFeishuExportTimeout):
 		return http.StatusGatewayTimeout, "feishu_export_timeout", "飞书生成 Word 超时，请稍后重试"
 	case errors.Is(err, context.DeadlineExceeded):
@@ -141,6 +144,8 @@ func feishuExportErrorLabel(err error) string {
 		return "authentication_required"
 	case errors.Is(err, errFeishuLoginRequired):
 		return "feishu_login_required"
+	case errors.Is(err, errFeishuReauthRequired):
+		return "feishu_reauth_required"
 	case errors.Is(err, errFeishuExportTimeout):
 		return "export_timeout"
 	case errors.As(err, &taskErr):

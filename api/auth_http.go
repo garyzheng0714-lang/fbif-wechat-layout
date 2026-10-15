@@ -223,6 +223,7 @@ func (s *authService) handleFeishuCallback(w http.ResponseWriter, r *http.Reques
 		redirectFeishuLoginError(w, r, "feishu_login_failed")
 		return
 	}
+	now := s.now()
 	user := authUser{
 		ID:                     userID,
 		Name:                   profile.Name,
@@ -233,7 +234,12 @@ func (s *authService) handleFeishuCallback(w http.ResponseWriter, r *http.Reques
 		FeishuOpenID:           profile.OpenID,
 		FeishuUnionID:          profile.UnionID,
 		FeishuRefreshTokenSeal: refreshSeal,
-		LastLoginAt:            s.now(),
+		FeishuTokenRefreshedAt: now,
+		LastLoginAt:            now,
+		LastSeenAt:             now,
+	}
+	if token.RefreshExpiresIn > 0 {
+		user.FeishuRefreshExpiresAt = now.Add(token.RefreshExpiresIn)
 	}
 	if _, isSuperAdmin := s.config.SuperAdminIDs[profile.OpenID]; isSuperAdmin {
 		user.Role = authRoleSuperAdmin
@@ -342,6 +348,10 @@ func (s *authService) handleCurrentUser(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeAuthError(w, http.StatusUnauthorized, "authentication_required", "请先登录")
 		return
+	}
+	// 会话 30 天滑动续期；同时记下最近使用时间，飞书授权保活只覆盖 30 天内用过的人。
+	if err := s.users.TouchLastSeen(user.ID, s.now(), authLastSeenWriteInterval); err != nil {
+		log.Printf("auth: 记录最近使用时间失败 user=%s: %v", user.ID, err)
 	}
 	sessionToken, err := s.issueSession(user)
 	if err != nil {
