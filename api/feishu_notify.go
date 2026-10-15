@@ -38,6 +38,7 @@ const publishMonitorFeishuUserIDEnv = "PUBLISH_MONITOR_FEISHU_USER_ID"
 const (
 	feishuReceiveIDTypeChat = "chat_id"
 	feishuReceiveIDTypeUser = "user_id"
+	feishuReceiveIDTypeOpen = "open_id"
 )
 
 type feishuNotifier struct {
@@ -99,6 +100,16 @@ func newFeishuNotifierForProfile(profile feishuNotificationApp, chatID string) *
 	}
 }
 
+// newFeishuNotifierForOpenID 用审核应用私信某个人（open_id 属于这个应用）：手改周报用。
+func newFeishuNotifierForOpenID(profile feishuNotificationApp, openID string) *feishuNotifier {
+	notifier := newFeishuNotifierForProfile(profile, openID)
+	if notifier == nil || !safePublishDeliveryID(openID) {
+		return nil
+	}
+	notifier.receiveType = feishuReceiveIDTypeOpen
+	return notifier
+}
+
 // send 向构造时选定的群或私聊收件人发一条文本。
 func (n *feishuNotifier) send(ctx context.Context, text string) error {
 	content, err := json.Marshal(map[string]string{"text": text})
@@ -141,23 +152,45 @@ func (n *feishuNotifier) sendMessage(ctx context.Context, msgType, content strin
 // sendMessageWithID 发送消息并读取响应里的 data.message_id。文本通知不需要
 // 使用该 ID，但审核卡必须保存它以便后续 PATCH 原卡。
 func (n *feishuNotifier) sendMessageWithID(ctx context.Context, msgType, content string) (string, error) {
+	return n.sendMessageWithUUID(ctx, msgType, content, "")
+}
+
+// feishuSendUncertainError 请求可能已经到了飞书、却不知道发没发出去（连接中断、响应读不了）。
+// 只包一层类型，报错文字不变；重发前要靠 uuid 去重，超过飞书去重期就不能再盲发。
+type feishuSendUncertainError struct{ err error }
+
+func (e *feishuSendUncertainError) Error() string { return e.err.Error() }
+func (e *feishuSendUncertainError) Unwrap() error { return e.err }
+
+func feishuSendUncertain(err error) bool {
+	var uncertain *feishuSendUncertainError
+	return errors.As(err, &uncertain)
+}
+
+// sendMessageWithUUID 同 sendMessageWithID，带飞书去重键 uuid：同一 uuid 一小时内至多成功发出一条，
+// 结果不确定时重发不会让人收到两条（手改周报用）。uuid 为空即不去重。
+func (n *feishuNotifier) sendMessageWithUUID(ctx context.Context, msgType, content, uuid string) (string, error) {
 	receiveIDType := strings.TrimSpace(n.receiveType)
 	receiveID := strings.TrimSpace(n.receiveID)
 	if receiveID == "" {
 		return "", errors.New("feishu: 缺少消息收件人")
 	}
-	if receiveIDType != feishuReceiveIDTypeChat && receiveIDType != feishuReceiveIDTypeUser {
+	if receiveIDType != feishuReceiveIDTypeChat && receiveIDType != feishuReceiveIDTypeUser && receiveIDType != feishuReceiveIDTypeOpen {
 		return "", errors.New("feishu: 不支持的消息收件人类型")
 	}
 	token, err := n.tenantAccessToken(ctx)
 	if err != nil {
 		return "", err
 	}
-	body, err := json.Marshal(map[string]string{
+	payload := map[string]string{
 		"receive_id": receiveID,
 		"msg_type":   msgType,
 		"content":    content,
-	})
+	}
+	if uuid = strings.TrimSpace(uuid); uuid != "" {
+		payload["uuid"] = uuid
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("feishu: 序列化请求体: %w", err)
 	}
@@ -170,12 +203,12 @@ func (n *feishuNotifier) sendMessageWithID(ctx context.Context, msgType, content
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := n.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("飞书接口不可达: %w", err)
+		return "", &feishuSendUncertainError{fmt.Errorf("飞书接口不可达: %w", err)}
 	}
 	defer resp.Body.Close()
 	respBody, err := readBoundedBody(resp.Body, 1<<20)
 	if err != nil {
-		return "", fmt.Errorf("飞书发消息响应读取失败或超过 1 MB: %w", err)
+		return "", &feishuSendUncertainError{fmt.Errorf("飞书发消息响应读取失败或超过 1 MB: %w", err)}
 	}
 	var env struct {
 		Code int    `json:"code"`
@@ -185,7 +218,7 @@ func (n *feishuNotifier) sendMessageWithID(ctx context.Context, msgType, content
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return "", fmt.Errorf("飞书发消息响应异常（HTTP %d）: %w", resp.StatusCode, err)
+		return "", &feishuSendUncertainError{fmt.Errorf("飞书发消息响应异常（HTTP %d）: %w", resp.StatusCode, err)}
 	}
 	if env.Code != 0 {
 		return "", fmt.Errorf("飞书发消息失败 code=%d msg=%s", env.Code, env.Msg)

@@ -272,7 +272,11 @@ type publishPipeline struct {
 	externalSpawn func(func())
 	// retryNotification 失败通知的延迟重试调度；测试可注入捕获回调。
 	retryNotification func(time.Duration, func())
-	now               func() time.Time
+	// 每周手改清单（publish_edit_report_delivery.go）：投递记录、串行锁与私信发送（测试注入）。
+	editReports      *publishEditReportStore
+	editReportMu     sync.Mutex
+	editReportSender func(ctx context.Context, openID string, post map[string]any) (string, error)
+	now              func() time.Time
 }
 
 // enableBoundedWorkers 把所有发布任务和通知发送收敛到固定数量的 worker。

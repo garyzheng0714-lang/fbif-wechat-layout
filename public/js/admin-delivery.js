@@ -79,7 +79,8 @@ function sameIDs(left, right) {
   return left.length === right.length && left.every(id => right.includes(id));
 }
 
-// 两类负责人都从审核群成员里选（服务端校验），在审核卡的话题里 @ 他们。成员目录一次读取，两步共用。
+// 几类负责人都从审核群成员里选（服务端校验）：分发、校对负责人在审核卡的话题里被 @，
+// 手改周报接收人每周一收到私信。成员目录一次读取，几步共用。
 const OWNER_ROLES = [
   {
     key: 'distribution',
@@ -100,6 +101,16 @@ const OWNER_ROLES = [
     read: payload => ({ owners: payload.proofread?.owners, stale: payload.proofread?.stale }),
     saved: payload => payload.proofread_owners?.owners,
     saveFailure: '保存校对负责人失败',
+  },
+  {
+    key: 'edit_report',
+    index: 6,
+    title: '手改周报接收人',
+    note: '每周一上午，把上周编辑在 FoodTalks 后台手改了 3 篇以上的同类问题私信发给这些人，不发审核群。',
+    endpoint: '/api/publish/delivery-settings/edit-report-owners',
+    read: payload => ({ owners: payload.edit_report?.owners, stale: payload.edit_report?.stale }),
+    saved: payload => payload.edit_report_owners?.owners,
+    saveFailure: '保存手改周报接收人失败',
   },
 ];
 
@@ -131,7 +142,7 @@ export function createAdminDeliveryController({ getOverlay, rerender, onMessage,
   let chats = [];
   let settings = normalizeSettings();
   let savedSettings = normalizeSettings();
-  // 分发、校对负责人（OWNER_ROLES）：按类分别记已选与已保存的 open_id。
+  // 分发、校对负责人与手改周报接收人（OWNER_ROLES）：按类分别记已选与已保存的 open_id。
   let ownersIssue = null;
   let ownerCandidates = [];
   let ownersStale = {};

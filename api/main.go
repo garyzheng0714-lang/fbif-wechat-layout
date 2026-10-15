@@ -134,6 +134,7 @@ func main() {
 	publishStore := newPublishJobStore(publishPath)
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
 	publishPipe.deliverySettings = newPublishDeliverySettingsStore(publishDeliverySettingsPath(*rulesPath))
+	publishPipe.editReports = newPublishEditReportStore(publishEditReportPath(publishDeliverySettingsPath(*rulesPath)))
 	publishPipe.publicDir = publicDir
 	publishPipe.enableBoundedWorkers(4, 128)
 	if !feishuReviewerAllowlistConfigured() {
@@ -151,6 +152,7 @@ func main() {
 		publishPipe.recoverJobs()
 		publishPipe.startCMSPublicationSync()
 		publishPipe.startExternalAutoDistribution()
+		publishPipe.startPublishEditReport()
 	}
 	registerPublishRoutes(mux, publishPipe, authService)
 	// 飞书回调传输层必须显式互斥；缺失/非法配置安全回落 websocket 行为，公网

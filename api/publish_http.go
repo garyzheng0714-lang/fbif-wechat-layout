@@ -109,6 +109,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 	}
 	registerPublishDistributionOwnerRoutes(mux, p, auth)
 	registerPublishProofreadRoutes(mux, p, auth)
+	registerPublishEditReportRoutes(mux, p, auth)
 	registerExternalDistributionEditRoutes(mux, p, auth)
 	mux.HandleFunc("POST /api/publish/monitor-alert", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishServiceToken(w, r) {
@@ -139,7 +140,9 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
 		}
-		writeJSON(w, http.StatusOK, currentPublishMonitoring(p.store, p.foodTalksAuth.invalid(), time.Now()))
+		status := currentPublishMonitoring(p.store, p.foodTalksAuth.invalid(), time.Now())
+		p.applyPublishEditReportMonitoring(&status)
+		writeJSON(w, http.StatusOK, status)
 	})
 
 	mux.HandleFunc("GET /api/publish/readiness", func(w http.ResponseWriter, r *http.Request) {
