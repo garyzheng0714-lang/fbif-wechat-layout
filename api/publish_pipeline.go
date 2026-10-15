@@ -199,8 +199,10 @@ type publishPipeline struct {
 	proofreadVerify         func(ctx context.Context, job publishJob, candidates []publishRiskItem) (string, string, error)
 	// 以下三个仅测试注入：提醒发送、AI 缩写建议、封面候选图上传（默认走审核应用与 MiMo）。
 	externalReminderSender func(ctx context.Context, job publishJob, chatID, kind string, post map[string]any) (string, error)
-	externalSuggest        func(ctx context.Context, kind, current string, min, max int) (string, error)
-	externalCoverUploader  func(ctx context.Context, job publishJob, imgURL string) (string, string, error)
+	// reviewCardSentAt 审核卡的发送时间（外发提醒判断卡片还能不能改）；测试注入，生产读飞书。
+	reviewCardSentAt      func(ctx context.Context, job publishJob, chatID, messageID string) (time.Time, error)
+	externalSuggest       func(ctx context.Context, kind, current string, min, max int) (string, error)
+	externalCoverUploader func(ctx context.Context, job publishJob, imgURL string) (string, string, error)
 	// distributionOwnerLister 仅测试注入：读取审核群成员（默认用审核应用调飞书）。
 	distributionOwnerLister func(ctx context.Context, appProfileID, chatID string) ([]publishDistributionOwner, error)
 	// externalCoverStore 仅测试注入：侧边栏上传的封面转存（默认 OSS）。

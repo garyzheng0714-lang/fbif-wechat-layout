@@ -9,7 +9,7 @@ package main
 // （post，@ 才提醒得到），不是卡片，也不在群里单独刷屏（红线 36 只管运维播报）。
 //
 // 一轮对话：有平台待修改 → 话题里发一条开场（@ 负责人，逐项写哪里不合要求、可以怎么改、改完
-// 点哪里）；全部改好 → 同一话题里说一句「都改好了，正在同步」。中途进度看卡片，不在话题里刷屏。
+// 点哪里；审核卡快过或已过飞书 14 天修改期限时，卡片上的改稿按钮已不在，改指向侧边栏改稿页，#233）；全部改好 → 同一话题里说一句「都改好了，正在同步」。中途进度看卡片，不在话题里刷屏。
 // 改好后又出新问题才开新一轮、重新 @。持久 outbox：发送失败按通知退避重试，超过次数进死信
 // （监控计数，红线 30）。
 
@@ -27,6 +27,10 @@ import (
 const (
 	publishExternalReminderOpen     = "open"
 	publishExternalReminderResolved = "resolved"
+	// publishReviewCardEditableFor 飞书只让更新 14 天内发出的消息；留一天给人去改。
+	publishReviewCardEditableFor = 13 * 24 * time.Hour
+	// publishReviewCardAgeLookup 读卡片发送时间最多等这么久，别把提醒本身的发送时间耗光。
+	publishReviewCardAgeLookup = 5 * time.Second
 )
 
 // publishExternalReminder 一篇文章外发待修改的提醒（按审核群各一条回复）。
@@ -273,7 +277,13 @@ func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJ
 				result.skipped = "没有设置分发负责人，未发提醒"
 				continue
 			}
-			kind, post = externalReminderKindOpen, buildExternalReminderOpening(job, cfg, owners)
+			inCard := p.externalReminderCardEditable(ctx, job, chatID)
+			if !inCard && externalDistributionSidebarLink(job.ID) == "" {
+				// 卡片里改不了、又给不出改稿页：发了也没法照做，不如不发。
+				result.skipped = "审核卡里改不了，也没有改稿页链接，未发提醒"
+				continue
+			}
+			kind, post = externalReminderKindOpen, buildExternalReminderOpening(job, cfg, owners, inCard)
 		case r.Want == publishExternalReminderResolved && r.MessageIDs[chatID] != "" && r.ClosedIDs[chatID] == "":
 			kind, post = externalReminderKindClose, buildExternalReminderClosing(job, cfg)
 		default:
@@ -327,6 +337,41 @@ func (p *publishPipeline) sendExternalReminderToChat(ctx context.Context, job pu
 		return notifier.sendMessageWithID(ctx, "post", string(content))
 	}
 	return notifier.replyPostWithID(ctx, parent, post, true)
+}
+
+// externalReminderCardEditable 这个群里的审核卡还能在卡片里改。#233：补发九月旧稿时卡片早已过期，
+// 卡上没有改稿按钮，提醒却叫人去点。读不到发送时间时按改不了处理——改稿页卡片新旧都能用。
+func (p *publishPipeline) externalReminderCardEditable(ctx context.Context, job publishJob, chatID string) bool {
+	if job.NotificationState == publishNotificationStateExpired || job.ExternalDistributionCardState == publishExternalCardExpired {
+		return false
+	}
+	parent := p.reviewCardMessageIDForChat(job, chatID)
+	if parent == "" {
+		return false
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, publishReviewCardAgeLookup)
+	defer cancel()
+	sentAt, err := p.reviewCardSentTime(lookupCtx, job, chatID, parent)
+	if err != nil {
+		log.Printf("publish: 读 #%d 审核卡发送时间失败，提醒改指向改稿页：%v", job.ID, err)
+		return false
+	}
+	return pipelineNow(p).Sub(sentAt) < publishReviewCardEditableFor
+}
+
+func (p *publishPipeline) reviewCardSentTime(ctx context.Context, job publishJob, chatID, messageID string) (time.Time, error) {
+	if p.reviewCardSentAt != nil {
+		return p.reviewCardSentAt(ctx, job, chatID, messageID)
+	}
+	settings, apps, err := p.reviewDeliveryForJob(job)
+	if err != nil {
+		return time.Time{}, err
+	}
+	notifier, err := p.configuredReviewNotifier(settings, apps, chatID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return notifier.messageCreateTime(ctx, messageID)
 }
 
 // reviewCardMessageIDForChat 这篇文章在这个群里的审核卡（聚合卡里任一篇的都算同一张）。
@@ -393,7 +438,8 @@ func externalReminderPlatformNames(cfg yunsuoConfig, drafts []publishExternalDra
 
 // buildExternalReminderOpening 话题开场：@ 负责人，一句话说清哪篇、要同步到哪、差几处；
 // 每处一行粗体写不合要求的地方，下一行给能选的做法；最后一行说改完点哪里。
-func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []publishDistributionOwner) map[string]any {
+// inCard=false（审核卡改不了）时每一步都在改稿页里做，最后一行给改稿页链接。
+func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []publishDistributionOwner, inCard bool) map[string]any {
 	drafts := externalPendingFixes(job, cfg)
 	names := externalReminderPlatformNames(cfg, drafts)
 	total := 0
@@ -410,6 +456,10 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 		job.ID, reviewCardSafeOrDash(job.Title, 80), strings.Join(names, "、"), total), false))
 	lines := [][]any{head}
 	link := externalDistributionSidebarLink(job.ID)
+	place := "卡片"
+	if !inCard {
+		place = "改稿页"
+	}
 	multi := len(drafts) > 1
 	n := 0
 	for i, draft := range drafts {
@@ -431,9 +481,11 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 				}
 				problem = fmt.Sprintf("%d. %s%s超了 %d 字（%s最多 %d 字）", n, prefix, what, issue.Length-issue.Max, name, issue.Max)
 				if suggested != "" {
-					options = append(options, postText(fmt.Sprintf("卡片里已填好建议「%s」，可以直接用，也可以改成自己的", reviewCardSafeText(suggested, 120)), false))
-				} else {
+					options = append(options, postText(fmt.Sprintf("%s里已填好建议「%s」，可以直接用，也可以改成自己的", place, reviewCardSafeText(suggested, 120)), false))
+				} else if inCard {
 					options = append(options, postText(fmt.Sprintf("在卡片输入框里改到 %d 字以内", issue.Max), false))
+				} else {
+					options = append(options, postText(fmt.Sprintf("在改稿页里改到 %d 字以内", issue.Max), false))
 				}
 			case publishExternalIssueCover:
 				if issue.Missing {
@@ -442,7 +494,9 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 					problem = fmt.Sprintf("%d. %s封面太小（%s至少 %d×%d，现在 %d×%d）", n, prefix, name, issue.MinWidth, issue.MinHeight, issue.Width, issue.Height)
 				}
 				// 上传在侧边栏改稿页：点选、拖入或粘贴图片，传上去就换上（2026-10-12 用户裁定）。
-				if link != "" {
+				if !inCard {
+					options = append(options, postText("在改稿页里点选一张正文大图，或者上传一张（传上去就换上）", false))
+				} else if link != "" {
 					options = append(options, postText("在卡片里点选一张正文大图，或者", false), postLink("上传一张", link), postText("（传上去就换上）", false))
 				} else {
 					options = append(options, postText("在卡片里点选一张正文大图", false))
@@ -453,8 +507,14 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 			lines = append(lines, []any{postText(problem, true)}, options)
 		}
 	}
-	finish := "改好后点上面卡片里的「保存并同步至" + strings.Join(names, "」「保存并同步至") + "」，就会同步。"
-	lines = append(lines, []any{postText(finish, false)})
+	buttons := "「保存并同步至" + strings.Join(names, "」「保存并同步至") + "」"
+	if inCard {
+		lines = append(lines, []any{postText("改好后点上面卡片里的"+buttons+"，就会同步。", false)})
+	} else {
+		// 卡片过期、群里没有卡、读不到卡片时间都走这里，只说去哪改，不猜原因。
+		lines = append(lines, []any{postText("请", false), postLink("打开改稿页", link),
+			postText("，改好后点"+buttons+"，就会同步。", false)})
+	}
 	return postMessage(lines)
 }
 

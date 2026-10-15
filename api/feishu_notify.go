@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -339,6 +340,57 @@ func (n *feishuNotifier) updateCard(ctx context.Context, messageID string, card 
 		return fmt.Errorf("飞书更新卡片失败 code=%d msg=%s", env.Code, env.Msg)
 	}
 	return nil
+}
+
+// messageCreateTime 读一条消息的发送时间（GET /im/v1/messages/{id}）。飞书只让更新 14 天内发出的消息，
+// 外发提醒据此判断审核卡上的改稿按钮还在不在。
+func (n *feishuNotifier) messageCreateTime(ctx context.Context, messageID string) (time.Time, error) {
+	messageID = strings.TrimSpace(messageID)
+	if !feishuMessageIDSafe(messageID) {
+		return time.Time{}, errors.New("feishu: message_id 无效")
+	}
+	token, err := n.tenantAccessToken(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		n.baseURL+"/open-apis/im/v1/messages/"+url.PathEscape(messageID), nil)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("feishu: 构造读消息请求: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("飞书读消息接口不可达: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := readBoundedBody(resp.Body, 1<<20)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("飞书读消息响应读取失败: %w", err)
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Items []struct {
+				CreateTime string `json:"create_time"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return time.Time{}, fmt.Errorf("飞书读消息响应异常（HTTP %d）: %w", resp.StatusCode, err)
+	}
+	if env.Code != 0 {
+		return time.Time{}, fmt.Errorf("飞书读消息失败 code=%d msg=%s", env.Code, env.Msg)
+	}
+	if len(env.Data.Items) == 0 {
+		return time.Time{}, errors.New("飞书读消息没有返回这条消息")
+	}
+	ms, err := strconv.ParseInt(strings.TrimSpace(env.Data.Items[0].CreateTime), 10, 64)
+	if err != nil || ms <= 0 {
+		return time.Time{}, errors.New("飞书读消息没有返回发送时间")
+	}
+	return time.UnixMilli(ms).UTC(), nil
 }
 
 // recallMessage 撤回机器人自己发出的消息（DELETE /im/v1/messages/{id}）。

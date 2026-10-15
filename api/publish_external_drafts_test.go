@@ -273,6 +273,13 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 		sent = append(sent, sentReminder{chatID: chatID, kind: kind, post: panelJSON(t, post)})
 		return fmt.Sprintf("om_reminder_%d", len(sent)), nil
 	}
+	cardSentAt := map[string]time.Time{"om_review_card": pipelineNow(env.pipeline).Add(-time.Hour)}
+	env.pipeline.reviewCardSentAt = func(_ context.Context, _ publishJob, _ string, messageID string) (time.Time, error) {
+		if at, ok := cardSentAt[messageID]; ok {
+			return at, nil
+		}
+		return time.Time{}, errors.New("没有这条消息")
+	}
 	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	job := createLongTitleDistributionJob(t, env, "site:reminder")
@@ -362,7 +369,7 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 		Issues:    []publishExternalIssue{{Field: publishExternalIssueTitle, Current: "一个很长的标题", Length: 45, Min: 15, Max: 40}},
 	}}}
 	owners := []publishDistributionOwner{{OpenID: "ou_a"}}
-	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners))
+	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, true))
 	for _, want := range []string{"同步到头条号、百家号前，还差 2 处要改：", "1. 头条号封面太小（头条号至少 452×352，现在 300×200）",
 		"在卡片里点选一张正文大图，或者", `"tag":"a","text":"上传一张"`, "（传上去就换上）", "2. 百家号标题超了 5 字（百家号最多 40 字）",
 		"在卡片输入框里改到 40 字以内", "「保存并同步至头条号」「保存并同步至百家号」"} {
@@ -372,6 +379,102 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 	}
 	if strings.Contains(plain, "话题里") {
 		t.Fatalf("不再请人把图发到话题里: %s", plain)
+	}
+}
+
+// TestExternalReminderExpiredCardPointsToSidebar 审核卡快过或已过飞书 14 天修改期限时，卡上已没有改稿按钮
+// （#233：补发九月旧稿，提醒却叫人去点卡片里的「保存并同步至头条号」），每一步都改到侧边栏改稿页里做；
+// 连改稿页链接都给不出就不发。
+func TestExternalReminderExpiredCardPointsToSidebar(t *testing.T) {
+	setTestYunsuoConfig(t)
+	t.Setenv(publishNotificationAppsEnv, "")
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
+	stubYunsuoImageSize(t, map[string][2]int{})
+	env := newPublishTestEnv(t)
+	env.pipeline.deliverySettings = newPublishDeliverySettingsStore(filepath.Join(t.TempDir(), "delivery.json"))
+	if err := env.pipeline.deliverySettings.write(publishDeliverySettings{
+		AppProfileID: "review-app", ChatIDs: []string{"oc_review"},
+		DistributionOwners:    []publishDistributionOwner{{OpenID: "ou_owner_1", Name: "王编辑"}},
+		DistributionOwnersApp: "review-app",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var sent []sentReminder
+	env.pipeline.externalReminderSender = func(_ context.Context, job publishJob, chatID, kind string, post map[string]any) (string, error) {
+		sent = append(sent, sentReminder{chatID: chatID, kind: kind, post: panelJSON(t, post)})
+		return fmt.Sprintf("om_reminder_%d", len(sent)), nil
+	}
+	cardAge := 13*24*time.Hour + time.Hour
+	var cardErr error
+	env.pipeline.reviewCardSentAt = func(context.Context, publishJob, string, string) (time.Time, error) {
+		return pipelineNow(env.pipeline).Add(-cardAge), cardErr
+	}
+	fake := newBothAccountsYunsuo()
+	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	request := func(key string) publishJob {
+		t.Helper()
+		job := createLongTitleDistributionJob(t, env, key)
+		if _, err := env.store.update(job.ID, func(current *publishJob) {
+			current.ReviewDeliveryAppID = "review-app"
+			current.ReviewDeliveryChatIDs = []string{"oc_review"}
+			current.ReviewCardMsgIDs = map[string]string{"oc_review": "om_old_card"}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(mustJob(t, env, job.ID))); err != nil &&
+			!errors.Is(err, errExternalLanesNeedFix) {
+			t.Fatal(err)
+		}
+		return mustJob(t, env, job.ID)
+	}
+
+	job := request("site:reminder-expired")
+	if len(sent) != 1 || sent[0].kind != externalReminderKindOpen {
+		t.Fatalf("卡片过期也要提醒：%+v", sent)
+	}
+	link := externalDistributionSidebarLink(job.ID)
+	for _, want := range []string{`{"tag":"at","user_id":"ou_owner_1"}`, "改稿页里已填好建议「", `[{"tag":"text","text":"请"},`,
+		`"href":"` + link + `","tag":"a","text":"打开改稿页"`, "，改好后点「保存并同步至头条号」，就会同步。"} {
+		if !strings.Contains(sent[0].post, want) {
+			t.Fatalf("过期卡提醒缺少 %q: %s", want, sent[0].post)
+		}
+	}
+	if strings.Contains(sent[0].post, "卡片里") || strings.Contains(sent[0].post, "上面卡片") {
+		t.Fatalf("过期卡提醒不能再叫人去卡片里改: %s", sent[0].post)
+	}
+
+	// 读不到发送时间（飞书接口失败或慢）：改稿页卡片新旧都能用，按改不了处理；最多等 5 秒，
+	// 不占用提醒本身的发送时间。
+	cardAge, cardErr = time.Hour, errors.New("飞书读消息失败")
+	env.pipeline.reviewCardSentAt = func(ctx context.Context, _ publishJob, _ string, _ string) (time.Time, error) {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > publishReviewCardAgeLookup {
+			t.Errorf("读卡片时间要有 5 秒以内的单独时限：%v %v", deadline, ok)
+		}
+		return pipelineNow(env.pipeline).Add(-cardAge), cardErr
+	}
+	request("site:reminder-unknown-age")
+	if len(sent) != 2 || !strings.Contains(sent[1].post, "打开改稿页") || strings.Contains(sent[1].post, "上面卡片") {
+		t.Fatalf("读不到卡片时间时指向改稿页：%+v", sent)
+	}
+
+	// 已知卡片过期（更新时飞书回过 230031）：不必再问飞书。
+	cardErr = nil
+	expired := createLongTitleDistributionJob(t, env, "site:reminder-known-expired")
+	if _, err := env.store.update(expired.ID, func(current *publishJob) {
+		current.NotificationState = publishNotificationStateExpired
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if editable := env.pipeline.externalReminderCardEditable(context.Background(), mustJob(t, env, expired.ID), "oc_review"); editable {
+		t.Fatal("已记过期的卡不能再按可改处理")
+	}
+
+	// 没有改稿页链接（缺签名密钥）：卡片里改不了又给不出去处，不发。
+	t.Setenv("AUTH_SESSION_SECRET", "")
+	cardAge = 20 * 24 * time.Hour
+	noLink := request("site:reminder-no-link")
+	if r := noLink.ExternalDistributionReminder; len(sent) != 2 || r.State != "" || r.Error != "" || !strings.Contains(r.Skipped, "改稿页") {
+		t.Fatalf("给不出改稿页就不发：sent=%d reminder=%+v", len(sent), r)
 	}
 }
 
@@ -680,5 +783,31 @@ func TestDistributionOwnersFromReviewChatMembers(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"candidates_error":"飞书暂时不可用"`) ||
 		!strings.Contains(rec.Body.String(), `"candidates":[]`) || !strings.Contains(rec.Body.String(), `"open_id":"ou_a"`) {
 		t.Fatalf("读不到成员应 200 并带原因、保留已选的人：%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestFeishuMessageCreateTime 读审核卡发送时间（毫秒时间戳）；读不到就报错，由提醒改指向改稿页。
+func TestFeishuMessageCreateTime(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			fmt.Fprint(w, `{"code":0,"msg":"ok","tenant_access_token":"tok","expire":7200}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/open-apis/im/v1/messages/om_card":
+			fmt.Fprint(w, `{"code":0,"msg":"ok","data":{"items":[{"message_id":"om_card","create_time":"1759395600000"}]}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/open-apis/im/v1/messages/om_gone":
+			fmt.Fprint(w, `{"code":230011,"msg":"message recalled"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	notifier := newFeishuNotifierForOpenID(feishuNotificationApp{ID: "review-app", AppID: "cli", AppSecret: "secret"}, "ou_gary")
+	notifier.baseURL = srv.URL
+	at, err := notifier.messageCreateTime(context.Background(), "om_card")
+	if err != nil || !at.Equal(time.UnixMilli(1759395600000)) {
+		t.Fatalf("应读出发送时间：%v %v", at, err)
+	}
+	if _, err := notifier.messageCreateTime(context.Background(), "om_gone"); err == nil || !strings.Contains(err.Error(), "230011") {
+		t.Fatalf("飞书报错要带出来：%v", err)
 	}
 }
