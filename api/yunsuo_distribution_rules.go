@@ -33,7 +33,8 @@ const (
 )
 
 var (
-	yunsuoBylineSegment   = regexp.MustCompile(`^(来源|出处|出品|作者|撰文|撰稿|文|编辑|责编|责任编辑)\s*[：:]\s*(\S.*)$`)
+	// FoodTalks 署名会并入「编译/翻译/采访」等人员（rule-behavior-foodtalks.js CREDIT_LINE_RE），这里同样拆行。
+	yunsuoBylineSegment   = regexp.MustCompile(`^(来源|出处|出品|作者|撰文|撰稿|文|编辑|责编|责任编辑|编审|主编|美编|翻译|编译|采访|统筹|审校)\s*[：:]\s*(\S.*)$`)
 	yunsuoReferenceHeader = regexp.MustCompile(`^(参考来源|参考资料|参考文献|参考链接|资料来源)\s*[：:]?$`)
 	yunsuoBareURL         = regexp.MustCompile(`https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+`)
 )

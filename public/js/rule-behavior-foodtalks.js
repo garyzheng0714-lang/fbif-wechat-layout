@@ -101,6 +101,9 @@ const EXTERNAL_MEDIA_TRAILER_MARKERS = [
   /内容交流\s*[\/／]\s*采访\s*[\/／]\s*转载/,
   /品牌几何资讯矩阵/,
   /商务合作\s*[|｜]\s*(?:电话|微信)/,
+  // 来源号文末关注引导，其后是账号口号（#128「本文经授权转载自Vista看天下，点击下方按钮立刻关注。」
+  // 「不苛求正确，只好好说话。」，编辑在 FoodTalks 后台两行都删了）。
+  /(?:点击|点)(?:下方|上方|蓝字|名片|卡片)[^，。！!]{0,12}关注/,
 ];
 
 const EXTERNAL_MEDIA_TAIL_CONFIRM_RE =
@@ -201,25 +204,31 @@ function stripWechatTrailer(elems, markers, signatures, externalMarkers, refHead
   const trailerMarkers = markers || WECHAT_TRAILER_MARKERS;
   const tipSignatures = signatures || WECHAT_TIP_SIGNATURES;
   const mediaMarkers = externalMarkers || EXTERNAL_MEDIA_TRAILER_MARKERS;
-  for (let i = 0; i < elems.length; i++) {
+  const textAt = i => {
     const e = elems[i];
     // 导流标记可能落在正文段(p)或图注(cap，如 "/ 更多文章 /")里，两者都要检查；
     // 图(img)无文本，跳过其文本判定但不阻断扫描。
-    const text = (e.k === 'p' || e.k === 'h' || e.k === 'cap') ? elemText(e) : '';
-    // 「提示：」可能被抓成标题或图注；以文案和后续尾注确认切点。
-    if (/^\s*提示[：:]/.test(text) &&
-        tipSignatures.some(re => re.test(collectFollowingText(elems, i)))) {
+    return (e.k === 'p' || e.k === 'h' || e.k === 'cap') ? elemText(e) : '';
+  };
+  // 「提示：」可能被抓成标题或图注；以文案和后续尾注确认是公众号页脚。
+  const isWechatTip = (i, text) => /^\s*提示[：:]/.test(text) &&
+    tipSignatures.some(re => re.test(collectFollowingText(elems, i)));
+  // 切点之后仍有公众号「提示：」页脚（#128：来源号关注引导在 FBIF 页脚之前）→ 照样补网站声明。
+  const tipCutAfter = from => {
+    for (let j = from; j < elems.length; j++) if (isWechatTip(j, textAt(j))) return true;
+    return false;
+  };
+  for (let i = 0; i < elems.length; i++) {
+    const text = textAt(i);
+    if (isWechatTip(i, text)) {
       if (hasRefSectionAfter(elems, i, refHeaderRe)) continue;
       return { elems: elems.slice(0, i), cutWechatTip: true };
     }
-    // 其余导流标记：命中即从此切除（不补页脚——这类切点不代表原文有转载声明）
-    if (text && trailerMarkers.some(re => re.test(text))) {
+    // 其余导流标记：命中即从此切除；只有切掉的部分里有公众号「提示：」页脚才补网站声明。
+    if ((text && trailerMarkers.some(re => re.test(text))) ||
+        isExternalMediaTrailer(elems, i, text, mediaMarkers)) {
       if (hasRefSectionAfter(elems, i, refHeaderRe)) continue;
-      return { elems: elems.slice(0, i), cutWechatTip: false };
-    }
-    if (isExternalMediaTrailer(elems, i, text, mediaMarkers)) {
-      if (hasRefSectionAfter(elems, i, refHeaderRe)) continue;
-      return { elems: elems.slice(0, i), cutWechatTip: false };
+      return { elems: elems.slice(0, i), cutWechatTip: tipCutAfter(i + 1) };
     }
   }
   return { elems, cutWechatTip: false };
@@ -342,21 +351,37 @@ function repostAuthorLine(source, authorSeg, behavior = {}) {
 // 署名后紧跟的「编辑/翻译/编译/采访：…」并进署名（编辑手改的 #126/#127/#257/#277 口径）。
 // 已是「…，转载请联系出处。」的转载署名插在尾句前，否则接在末尾并以句号收。
 const CREDIT_LINE_RE = /^(编辑|编审|责编|主编|美编|翻译|编译|采访|统筹|审校)[：:]/;
+// 开头「来源：联商网」已写进「本文为联商网原创」，夹在署名和「编译：李言」之间时跳过
+// （#162/#187，编辑手改成「本文为联商网原创，编译：李言，转载请联系出处。」）。
+// 该行本身由阶段 4.5 删掉。
+const HEAD_SOURCE_LINE_RE = /^(?:来源|出处)\s*[：:｜|]\s*\S/;
+
+// 头尾裸署名行（与 api/rule_defaults.go tail_credit_regex 同值，规则缺省时兜底）。
+// 两个角色可用「/」并列：「新视觉/创意：BOEN」（规则正则校验不允许带分支的重复组）。
+const TAIL_CREDIT_ROLES = '来源|出处|作者|编辑|编审|责编|主编|总编辑|新媒体编辑|中文编辑|英文来源|美编|视觉|新视觉|创意|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|审核|选题|翻译|编译|采访|文';
+const TAIL_CREDIT_REGEX_DEFAULT =
+  `^(?:${TAIL_CREDIT_ROLES})(?:\\s*[/／、]\\s*(?:${TAIL_CREDIT_ROLES}))?\\s*[：:｜|]\\s*\\S`;
+const TRANSLATOR_CREDIT_RE = /^(?:翻译|编译)\s*[：:｜|]\s*\S/;
+
+function appendCreditToAuthorLine(text, credit, behavior = {}) {
+  const suffix = behaviorTemplate(behavior, 'author_line_repost_suffix', '，转载请联系出处。');
+  if (text.includes(credit)) return text;
+  if (text.endsWith(suffix)) return text.slice(0, -suffix.length) + '，' + credit + suffix;
+  return text.replace(/[，,。\s]*$/, '') + '，' + credit + '。';
+}
 
 function absorbCreditLines(out, idx, behavior = {}) {
-  const suffix = behaviorTemplate(behavior, 'author_line_repost_suffix', '，转载请联系出处。');
   let text = out[idx].text;
+  let at = idx + 1;
+  const skipped = out[at] && out[at].k === 'p' ? runsToText(out[at].runs).trim() : '';
+  if (skipped && skipped.length <= 40 && HEAD_SOURCE_LINE_RE.test(skipped)) at++;
   for (let n = 0; n < 3; n++) {
-    const next = out[idx + 1];
+    const next = out[at];
     if (!next || next.k !== 'p') break;
     const credit = runsToText(next.runs).trim().replace(/[，,。.\s]*$/, '');
     if (!CREDIT_LINE_RE.test(credit)) break;
-    if (text.endsWith(suffix)) {
-      text = text.slice(0, -suffix.length) + '，' + credit + suffix;
-    } else {
-      text = text.replace(/[，,。\s]*$/, '') + '，' + credit + '。';
-    }
-    out.splice(idx + 1, 1); // 移除被并入的段（out 是新数组，不改输入）
+    text = appendCreditToAuthorLine(text, credit, behavior);
+    out.splice(at, 1); // 移除被并入的段（out 是新数组，不改输入）
   }
   out[idx] = { k: 'author', text };
 }
@@ -549,9 +574,10 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   // 开头已有署名 → 文末这两行删掉，避免和开头重复（2026-08-18 数英稿）。
   // 开头没有署名 → 仍降级 14px 灰斜体，避免掉进正文变黑粗。
   // 只动头部前几个元素与尾部区域，正文中段「来源：某数据库」不动。
-  const tailCreditRe = behaviorRegex(behavior, 'tail_credit_regex',
-    '^(?:来源|出处|作者|编辑|编审|责编|主编|美编|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|选题|文)\\s*[：:｜|]\\s*\\S');
-  const hasOpeningAuthor = out.some(e => e && e.k === 'author');
+  // 文末「翻译/编译：X」并进开头署名，其余人员行（新媒体编辑、视觉、总编辑、审核、采访…）
+  // 删掉——2026-10-15 对照编辑手改：#126/#127 把译者挪进开头，#97/#99/#139/#142/#143 直接删。
+  const tailCreditRe = behaviorRegex(behavior, 'tail_credit_regex', TAIL_CREDIT_REGEX_DEFAULT);
+  const authorIdx = out.findIndex(e => e && e.k === 'author');
   for (let i = out.length - 1; i >= 0; i--) {
     const e = out[i];
     if (!e || e.k !== 'p' || e.tocEntry) continue;
@@ -560,9 +586,17 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     if (!text || text.length > 60) continue;
     tailCreditRe.lastIndex = 0;
     if (!tailCreditRe.test(text)) continue;
-    if (hasOpeningAuthor) out.splice(i, 1);
-    else out[i] = { k: 'footer-note', lines: [text] };
+    if (authorIdx < 0) {
+      out[i] = { k: 'footer-note', lines: [text] };
+      continue;
+    }
+    if (i > authorIdx && TRANSLATOR_CREDIT_RE.test(text)) {
+      const credit = text.replace(/[，,。.\s]*$/, '');
+      out[authorIdx] = { ...out[authorIdx], text: appendCreditToAuthorLine(out[authorIdx].text, credit, behavior) };
+    }
+    out.splice(i, 1);
   }
+  const hasOpeningAuthor = authorIdx >= 0;
   if (hasOpeningAuthor) {
     while (out.length && isEmptyP(out[out.length - 1])) out.pop();
   }

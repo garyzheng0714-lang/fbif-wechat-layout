@@ -442,6 +442,76 @@ test('开头已有网站署名时删除文末公众号口径来源/作者（数�
   assert.doesNotMatch(rest, /作者：Weavy/, '文末作者行应删除');
 });
 
+// 2026-10-15 对照 FoodTalks 线上终稿：编辑把文末译者挪进开头署名（#126/#127），其余人员行
+// 直接删（#97 新媒体编辑/视觉、#99 新视觉/创意、#139 总编辑、#142 采访、#143 审核）。
+const bodyFill = n => Array.from({ length: n }, (_, i) => p('正文段落 ' + i + '。'));
+const restText = out => out.map(e => {
+  if (e.k === 'footer-note') return (e.lines || []).join('\n');
+  return (e.runs || []).map(r => r.text).join('') + (e.text || '');
+}).join('\n');
+
+test('文末人员行：译者并进开头署名，其余删掉（编辑终稿口径）', () => {
+  const cases = [
+    [[p('作者：Chloe Sorvino'), ...bodyFill(10), p('翻译：Lemin'), p('来源：福布斯')],
+      '本文为福布斯原创，作者：Chloe Sorvino，翻译：Lemin，转载请联系出处。'],
+    [[...bodyFill(10), p('编译：李言'), p('来源：联商网')],
+      '本文为联商网原创，编译：李言，转载请联系出处。'],
+    [[p('作者：黄茗婷'), ...bodyFill(10), p('新媒体编辑：乔悦'), p('视觉：顾芗'), p('来源：盐财经')],
+      '本文为盐财经原创，作者：黄茗婷，转载请联系出处。'],
+    [[p('作者：斯小乐'), ...bodyFill(10), p('新视觉/创意：BOEN'), p('来源：风味星球')],
+      '本文为风味星球原创，作者：斯小乐，转载请联系出处。'],
+    [[p('作者：Hanna Zhou'), ...bodyFill(10), p('总编辑：范怿'), p('审核：kiki'), p('采访：Ruonan，阿拜'), p('来源：胖鲸头条')],
+      '本文为胖鲸头条原创，作者：Hanna Zhou，转载请联系出处。'],
+  ];
+  for (const [elems, want] of cases) {
+    const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true, title: 'T' });
+    assert.equal(out[0].k, 'author');
+    assert.equal(out[0].text, want);
+    const rest = restText(out.slice(1));
+    assert.doesNotMatch(rest, /翻译：|编译：|新媒体编辑|视觉：|创意：|总编辑|审核：|采访：/, '文末人员行不再单独出现');
+    assert.match(rest, /正文段落 9。/, '正文保留');
+  }
+});
+
+test('文末人员行：开头没有署名时降级为灰色小字', () => {
+  const elems = [...bodyFill(10), p('英文来源：Rabobank'), p('中文编辑：Riri')];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: false, title: 'T' });
+  const notes = out.filter(e => e.k === 'footer-note').map(e => e.lines.join(''));
+  assert.deepEqual(notes, ['英文来源：Rabobank', '中文编辑：Riri']);
+});
+
+test('开头署名：「来源」行夹在署名与「编译」之间时编译仍并入（#162 联商网）', () => {
+  const elems = [p('来源：联商网'), p('编译：李言'), img('a.png'), cap('图片来源：dpa/Marcel Kusch'), ...bodyFill(6)];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true, title: 'T' });
+  assert.equal(out[0].k, 'author');
+  assert.equal(out[0].text, '本文为联商网原创，编译：李言，转载请联系出处。');
+  const rest = restText(out.slice(1));
+  assert.doesNotMatch(rest, /来源：联商网|编译：李言/);
+});
+
+test('来源号文末关注引导与口号切掉（#128 Vista看天下）', () => {
+  const elems = [
+    p('点击上方蓝字关注我们'),
+    ...bodyFill(12),
+    p('谁能用产品接住这份情绪，谁就能切出一块新大陆。'),
+    p('本文经授权转载自Vista看天下，点击下方按钮立刻关注。'),
+    p('不苛求正确，只好好说话。'),
+    p('来源：Vista看天下'),
+    p('提示：'),
+    p('* 本文为转载文章，欢迎转发朋友圈；'),
+    p('* 转载请在后台回复“转载”了解规则；'),
+  ];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true, title: 'T' });
+  const joined = restText(out);
+  assert.match(joined, /切出一块新大陆/, '正文结尾保留');
+  assert.doesNotMatch(joined, /点击下方按钮立刻关注/);
+  assert.doesNotMatch(joined, /不苛求正确/, '关注引导后的账号口号一并切掉');
+  assert.match(joined, /正文段落 11。/, '开头的关注引导不触发切尾，正文完整');
+  const tip = out.find(e => e.k === 'tip');
+  assert.ok(tip, '切掉的部分里有公众号「提示：」页脚，仍补 FoodTalks 转载声明');
+  assert.match(tip.rest_runs.map(r => r.text).join(''), /本文为Vista看天下原创《T》/);
+});
+
 test('作者合成：非 isRepost 不合成', () => {
   const elems = [p('正文。'), p('来源：X'), p('作者：Y')];
   const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: false });

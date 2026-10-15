@@ -568,3 +568,18 @@ func TestParseYunsuoStatusesAcceptsAPICreatedTypeString(t *testing.T) {
 		t.Fatalf("状态解析不符合预期：%#v", got)
 	}
 }
+
+// FoodTalks 署名会把「编译/翻译/采访」并进来，外发同样按原文分行。
+func TestYunsuoBylineSplitsTranslatorCredits(t *testing.T) {
+	lines, author, ok := parseYunsuoByline("作者：Chloe Sorvino，翻译：Lemin。")
+	if !ok || author != "Chloe Sorvino" || strings.Join(lines, "|") != "作者：Chloe Sorvino|翻译：Lemin" {
+		t.Fatalf("lines=%v author=%q ok=%v", lines, author, ok)
+	}
+	lines, _, ok = parseYunsuoByline("编译：李言")
+	if !ok || strings.Join(lines, "|") != "编译：李言" {
+		t.Fatalf("lines=%v ok=%v", lines, ok)
+	}
+	if _, _, ok := parseYunsuoByline("作者是谁，这很重要。"); ok {
+		t.Fatal("正文句不能当署名拆")
+	}
+}

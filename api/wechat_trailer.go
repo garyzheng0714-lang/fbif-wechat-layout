@@ -59,6 +59,8 @@ var (
 		regexp.MustCompile(`内容交流\s*[\/／]\s*采访\s*[\/／]\s*转载`),
 		regexp.MustCompile(`品牌几何资讯矩阵`),
 		regexp.MustCompile(`商务合作\s*[|｜]\s*(?:电话|微信)`),
+		// 来源号文末关注引导，其后是账号口号（#128 Vista看天下）。
+		regexp.MustCompile(`(?:点击|点)(?:下方|上方|蓝字|名片|卡片)[^，。！!]{0,12}关注`),
 	}
 	wechatExternalTailConfirmRe = regexp.MustCompile(`(?:来源[：:]|作者[：:]|版权声明|红餐网已同步入驻|内容交流\s*[\/／]\s*采访\s*[\/／]\s*转载|品牌几何资讯矩阵|商务合作\s*[|｜]\s*(?:电话|微信))`)
 )

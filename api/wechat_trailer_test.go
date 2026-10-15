@@ -120,3 +120,24 @@ func TestStripWechatTrailerBlocksCutsMoreArticlesAndExternalTail(t *testing.T) {
 		t.Fatalf("正文应保留：%s", joined)
 	}
 }
+
+// #128 Vista看天下：文末「点击下方按钮立刻关注」与其后的账号口号是来源号尾巴；
+// 开头的「点击上方蓝字关注」不靠近文末，不能当切点。
+func TestStripWechatTrailerBlocksCutsSourceFollowPrompt(t *testing.T) {
+	blocks := []Block{{K: "txt", Text: "点击上方蓝字关注我们"}}
+	for i := 0; i < 12; i++ {
+		blocks = append(blocks, Block{K: "txt", Text: "正文段落。"})
+	}
+	blocks = append(blocks,
+		Block{K: "txt", Text: "谁就能在无糖红海之外，切出一块新大陆。"},
+		Block{K: "txt", Text: "本文经授权转载自Vista看天下，点击下方按钮立刻关注。"},
+		Block{K: "txt", Text: "不苛求正确，只好好说话。"},
+	)
+	got := stripWechatTrailerBlocks(blocks)
+	if len(got) != len(blocks)-2 {
+		t.Fatalf("应切在关注引导处，保留 %d 块，实际 %d 块", len(blocks)-2, len(got))
+	}
+	if wechatTrailerBlockText(got[0]) != "点击上方蓝字关注我们" || wechatTrailerBlockText(got[len(got)-1]) != "谁就能在无糖红海之外，切出一块新大陆。" {
+		t.Fatalf("开头与正文结尾应保留：%+v", got)
+	}
+}

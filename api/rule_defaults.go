@@ -197,7 +197,11 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 //	  portrait_min_px=300/qr_max_natural_px=300——此前只改了代码默认没升版，生产 preset 仍旧值）；
 //	② caption_lead_regex 补署名类前缀（作者/编辑…），转载稿尾部加粗署名行不再误升 h2；
 //	③ 新增 tail_credit_regex：尾部裸「来源：/作者：」行降级 14px 灰斜体小字，不再黑粗。
-const currentBuiltinRuleVersion = 19
+//
+// v19→v20（2026-10-15）：tail_credit_regex 补齐编辑在 FoodTalks 后台手删/手挪的文末人员行
+// （新媒体编辑/视觉/新视觉/创意/总编辑/审核/翻译/编译/采访/英文来源/中文编辑，两个角色可用「/」并列）；
+// 仅覆盖 ft-default-v1。
+const currentBuiltinRuleVersion = 20
 const defaultBuiltinRuleVersion = 16
 const fbifBuiltinRuleVersion = 18
 const ftSeriesSiteBuiltinRuleVersion = 16
@@ -440,7 +444,7 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 			"footer_note_regex":  map[string]any{"type": "string", "default": `^(?:本文(?:未标注来源|作者\s*[：:]|图片来源)|图片均来自|[*＊]\s*注[：:])`},
 			// 尾部裸署名行（「来源：xxx」「作者：xxx，编辑：yyy」）：开头已有署名则删除，否则 14px 灰斜体
 			//（2026-08-17 运营反馈：此前掉进正文段呈黑色粗体）。仅文章尾部区域触发。
-			"tail_credit_regex":   map[string]any{"type": "string", "default": `^(?:来源|出处|作者|编辑|编审|责编|主编|美编|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|选题|文)\s*[：:｜|]\s*\S`},
+			"tail_credit_regex":   map[string]any{"type": "string", "default": `^(?:来源|出处|作者|编辑|编审|责编|主编|总编辑|新媒体编辑|中文编辑|英文来源|美编|视觉|新视觉|创意|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|审核|选题|翻译|编译|采访|文)(?:\s*[/／、]\s*(?:来源|出处|作者|编辑|编审|责编|主编|总编辑|新媒体编辑|中文编辑|英文来源|美编|视觉|新视觉|创意|出品|策划|监制|撰文|撰稿|排版|设计|校对|审校|审核|选题|翻译|编译|采访|文))?\s*[：:｜|]\s*\S`},
 			"repost_source_regex": map[string]any{"type": "string", "default": `^来源[：:]\s*(.+)$`},
 			// 商务合作导联行（62139/62303 成品：14px 斜体、文本 #7f7f7f、链接保留）——2026-06-11 反馈问题九。
 			"biz_coop_line_regex": map[string]any{"type": "string", "default": `^\s*(?:商务合作对接请点击|如有合作意向)`},
