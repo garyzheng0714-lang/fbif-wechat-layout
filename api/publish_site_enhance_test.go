@@ -131,6 +131,24 @@ func TestPublishSiteTocSkipsArabicSecondaryHeadings(t *testing.T) {
 	}
 }
 
+// #151（2026-10-15）：「引子」后面直接是 1、…5、，渲染器把这组序号句提成一级 h2；
+// 前面没有上级章节标题，目录照收（编辑在 FoodTalks 上也排成一级）。
+func TestPublishSiteTocKeepsNumberedHeadingsWithoutParent(t *testing.T) {
+	content := `<h2 style="text-align: justify;">引子</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">1、不要低估大单品的生命力</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">2、为什么旺仔牛奶可以考虑做低温</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">3、旺旺为什么要找一家乳企合作</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">结语</h2>` + siteTocLongPara
+	_, toc := publishSiteTocForContent(content, false)
+	var entries []publishSiteTocEntry
+	if err := json.Unmarshal([]byte(toc), &entries); err != nil {
+		t.Fatalf("toc 不是合法 JSON：%v（%q）", err, toc)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("引子后的序号句是一级，目录应收 5 条，实际 %s", toc)
+	}
+}
+
 // 63116 小罐茶（2026-09-29 用户裁定）：Mote 文章二级标题也进目录（level=2），
 // 挂在所属一级标题之后；非 Mote 文章同一正文仍只收一级。
 func TestBuildSiteNewsTocIncludesSecondaryForMote(t *testing.T) {

@@ -50,7 +50,7 @@ function behParamBool(config, key, fallback) {
 // 标题识别（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）抽到无依赖
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
-const { promoteHeuristicHeadings, hasExplicitDocxHeadings } = headingModule;
+const { promoteHeuristicHeadings, hasExplicitDocxHeadings, SECONDARY_NUMBER_RE } = headingModule;
 const interviewModule = await import('../site-interview.js' + assetQuery);
 const { markInterviewSpeakerPrefixes } = interviewModule;
 const { applySeriesContactLayout } = await import('../site-contact-layout.js' + assetQuery);
@@ -419,13 +419,13 @@ function normalizeSubheadingParens(text) {
 
 // 公众号→网站规范（飞书《FoodTalks 网站排版规范》step2 修改标题格式）：
 //   一级 = 标题1：中文序号「一、二、三」或无序号章节句 → h2，进目录
-//   二级 = 标题2：「1、2、3」或「（一）（二）」→ h3，不进目录、段前段后不空行
+//   二级 = 标题2：「1、2、3」「a、b」或「（一）（二）」→ h3，不进目录、段前段后不空行
+//   （前面没有上级章节标题时整组提成一级，见 heading-detect.js liftOrphanSubheadings）
 function isSiteSecondaryHeadingText(text) {
   const t = String(text || '').trim();
   if (!t) return false;
   if (/^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]/.test(t)) return true;
-  if (/^\d+\s*[.、．]\s*\S/.test(t)) return true;
-  return false;
+  return SECONDARY_NUMBER_RE.test(t);
 }
 
 function resolveSiteHeadingLevel(text, explicitLevel) {
@@ -699,7 +699,7 @@ function render(elems, config = {}) {
       const headingText = runsToPlain(e.runs);
       // 一级标题前 1 个空行；二级标题（标题2：1、2、3 / (一)…）紧贴上文
       // （规范：段前、段后均不空行；62303 后台源码 h3 前无空行）。
-      const lv = resolveSiteHeadingLevel(headingText, e.level);
+      const lv = e.topLevel ? 2 : resolveSiteHeadingLevel(headingText, e.level);
       const prev = elems[i - 1];
       const last = lines[lines.length - 1];
       if (isSeriesSiteConfig(config) && prev && (prev.k === 'img' || prev.k === 'video' || prev.k === 'cap') &&

@@ -967,6 +967,61 @@ func TestWechatVisualHeadingContinuationStartingWithConjunctionNeedsNoComma(t *t
 	}
 }
 
+// #128/#146/#147（2026-10-15）：左对齐标题同样会拆成上下两个 section（上一行
+// margin-bottom:0），编辑都手工合成一行。行尾已有标点、以「的」收尾的直接接上，
+// 三行以上整句接上，其余两行补逗号；对齐方式不同的两行不合并。
+func TestWechatLeftAlignedHeadingLinesAreJoined(t *testing.T) {
+	line := func(text, marginBottom string) string {
+		return `<section style="text-align: left;margin-bottom: ` + marginBottom + `;line-height: 1.75;">` +
+			`<span leaf=""><span style="font-size: 18px;font-weight: bold;" textstyle="">` + text + `</span></span></section>`
+	}
+	body := `<p>这是足够长的正文内容，用来建立正常正文流并结束标题分组。</p>`
+	html := jsContentWrap(
+		line("嘴上要健康，", "0") + line("手却伸向全糖", "20px") + body +
+			line("逃不出的", "0") + line("“周末限定款”？", "20px") + body +
+			line("进入中国近30年", "0") + line("从合资扩张到股权变局", "20px") + body +
+			line("品牌资产：用口号", "0") + line("背书、故事和视觉建立", "0") + line("高端化认知", "20px") + body +
+			line("一切业务", "0") + line("都在向合伙人收敛", "20px") + body +
+			line("左边一行", "0") +
+			`<section style="text-align: center;margin-bottom: 20px;"><span style="font-size: 18px;font-weight: bold;">居中一行</span></section>` + body)
+	_, blocks, _ := extractArticleBlocks(html)
+	var headings []string
+	for _, block := range blocks {
+		if block.K == "h" {
+			headings = append(headings, block.Text)
+		}
+	}
+	want := []string{
+		"嘴上要健康，手却伸向全糖",
+		"逃不出的“周末限定款”？",
+		"进入中国近30年，从合资扩张到股权变局",
+		"品牌资产：用口号背书、故事和视觉建立高端化认知",
+		"一切业务都在向合伙人收敛",
+		"左边一行",
+		"居中一行",
+	}
+	if strings.Join(headings, "|") != strings.Join(want, "|") {
+		t.Fatalf("headings = %q, want %q", headings, want)
+	}
+}
+
+func TestSiteSecondaryHeadingTextSkipsDecimals(t *testing.T) {
+	for text, want := range map[string]bool{
+		"1、第一大难点：生产成本":          true,
+		"2. 名字好记":               true,
+		"1）不追求拓展品类":             true,
+		"（一）背景":                 true,
+		"1.8万家店，CU靠什么让消费者反复进店？": false,
+		"3.9元的成本藏在哪里？":          false,
+		"a、站在同一起跑线上":            false,
+		"一、创业者杜国楹":              false,
+	} {
+		if got := isSiteSecondaryHeadingText(text); got != want {
+			t.Errorf("isSiteSecondaryHeadingText(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
 func TestAdjacentExplicitHeadingsAreNeverJoined(t *testing.T) {
 	html := jsContentWrap(`<h2 style="margin-bottom:0">一级标题</h2><h3>二级标题</h3><p>正文内容。</p>`)
 	_, blocks, _ := extractArticleBlocks(html)

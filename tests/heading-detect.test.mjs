@@ -5,6 +5,7 @@ import {
   isBoldHeading,
   promoteHeuristicHeadings,
   hasExplicitDocxHeadings,
+  liftOrphanSubheadings,
 } from '../public/js/heading-detect.js';
 
 // 测试数据取自金标准 docs/agents/baselines/62285-foodtalks-backend.html（Teavana）
@@ -103,12 +104,14 @@ test('网站渠道 arabicAsSubheading：加粗「2、难点」升二级标题，
   const t = '2、第二大难点：改变消费者固有认知';
   assert.equal(isBoldHeading([{ type: 'txt', text: t, bold: true }]), false);
   assert.equal(isBoldHeading([{ type: 'txt', text: t, bold: true }], { arabicAsSubheading: true }), true);
+  // 62873：挂在「三大难题」下面（前面没有上级章节标题的序号句另见 liftOrphanSubheadings）。
   const out = promoteHeuristicHeadings(
-    [{ k: 'p', runs: [{ type: 'txt', text: t, bold: true }] }],
+    [boldP('创业三大“地狱级”难题，如何层层破解？'), plainP('品牌在起步阶段就直面三大难题。'),
+      { k: 'p', runs: [{ type: 'txt', text: t, bold: true }] }],
     { arabicAsSubheading: true },
   );
-  assert.equal(out[0].k, 'h');
-  assert.equal(out[0].level, 3);
+  assert.equal(out[2].k, 'h');
+  assert.equal(out[2].level, 3);
 });
 
 for (const label of ['健康意识觉醒：', '女性经济崛起：', '代际变迁：', '经济下行：']) {
@@ -208,4 +211,127 @@ test('isBoldHeading 拒绝署名行（作者/编辑/出品等前缀，2026-08-17
   for (const t of ['作者：小食代，编辑：Bobo', '编辑：张洁', '出品：天下网商', '策划：某某团队', '撰文：叶晨']) {
     assert.equal(isBoldHeading([{ type: 'txt', text: t, bold: true }]), false, t);
   }
+});
+
+// ---- 引语、口语感叹、设问不是标题（2026-10-15，编辑在 #115/#128/#131/#146/#157/#121 都改回了正文） ----
+
+const SITE = { arabicAsSubheading: true };
+const bold = text => [{ type: 'txt', text, bold: true }];
+
+test('isBoldHeading 拒绝整句引语与转述（#115 网友评论、#161、#202）', () => {
+  for (const t of [
+    '“研发灵感来自一个想感受一下东北人吃绿化带的上海人。。。”',
+    '“适合写不出稿子的时候来一块”',
+    '“从未想过对夹子音免疫的我，会栽在一块臭夹子蛋糕手里！”',
+    '“一路走来挺不容易，”她补充道，“这是一段漫长的旅程。”',
+    '他后来说：“失败让我从营销主义者，变成了彻头彻尾的产品主义者！”',
+    '因此，他明确表示：「PB对我们来讲是个好事，不是坏事。」',
+  ]) {
+    assert.equal(isBoldHeading(bold(t), SITE), false, t);
+  }
+});
+
+test('isBoldHeading 拒绝口语感叹（#131）', () => {
+  for (const t of [
+    '是猫咪救了瑞幸！这应该写入《盘点那些猫咪救场的神级场面》！',
+    '不装垃圾，也可以套头上啊，一样拉风！',
+    '瑞幸赶紧澄清，垃圾袋一款是一包，是真实可用的塑料袋哦！',
+  ]) {
+    assert.equal(isBoldHeading(bold(t), SITE), false, t);
+  }
+});
+
+test('isBoldHeading 不误伤带引号、感叹号的真标题', () => {
+  for (const t of [
+    '“罪恶饮料”，让全球年轻人上头',
+    '文案出圈密码是 “活人感”',
+    '8G冲浪实锤！玩梗玩到出神入化',
+    '“茶叶版星巴克”梦碎：379家店，全部关门',
+    '1、资产沉淀：“他们做世界杯，蒙牛做足球”',
+    '逃不出的“周末限定款”？',
+    '为什么是人？为什么是现在？',
+  ]) {
+    assert.equal(isBoldHeading(bold(t), SITE), true, t);
+  }
+});
+
+test('promoteHeuristicHeadings：冒号引出的加粗问句是正文（#146、#249），引出的短语仍是标题（#187）', () => {
+  const out = promoteHeuristicHeadings([
+    plainP('只有一句口号，还不足以让消费者相信，还需要继续回答一个问题：'),
+    boldP('为什么你能比榴莲鲜果还好吃？'),
+    plainP('以下是听证会的记录稿（经联商翻译中心编译）：'),
+    boldP('从区域折扣店到全国主流超市'),
+    plainP('但理想之路并不轻松，品牌在起步阶段就直面三大难题：'),
+    boldP('1、第一大难点：生产成本远高于行业竞品'),
+  ], SITE);
+  assert.deepEqual(out.map(e => e.k), ['p', 'p', 'p', 'h', 'p', 'h']);
+});
+
+test('promoteHeuristicHeadings：两个加粗问句紧挨着是设问（#121），单独一个问句仍是标题（#109）', () => {
+  const pair = promoteHeuristicHeadings([
+    plainP('同样在7月，百事也在中国推出益生元可乐。'),
+    boldP('益生元气泡水市场究竟有什么样的吸引力？巨头在抢什么？'),
+    boldP('这些产品竞争力如何？以及中国益生元气泡水，究竟能做成多大的生意？'),
+    plainP('我们会在文章中逐步探讨。'),
+  ], SITE);
+  assert.deepEqual(pair.map(e => e.k), ['p', 'p', 'p', 'p']);
+  const single = promoteHeuristicHeadings([
+    plainP('山姆恰恰是把最重要的笔墨，留给了这些看似不会被记住的小事里。'),
+    boldP('为什么是人？为什么是现在？'),
+    plainP('我决定带着这两个问题重新看这两支片子。'),
+  ], SITE);
+  assert.deepEqual(single.map(e => e.k), ['p', 'h', 'p']);
+});
+
+// ---- 二级序号前面没有上级章节标题时整组提成一级（#151、#121），有上级仍按第 39 条排二级 ----
+
+const h = (level, text) => ({ k: 'h', level, runs: [{ type: 'txt', text }] });
+const levels = elems => elems.map(e => `${e.level}${e.topLevel ? '*' : ''}`).join(' ');
+
+test('liftOrphanSubheadings：「引子」后的 1、…5、整组提成一级（#151）', () => {
+  const out = liftOrphanSubheadings([
+    h(2, '引子'), h(3, '1、不要低估大单品的生命力'), h(3, '2、为什么旺仔牛奶可以考虑做低温'), h(2, '结语'),
+  ]);
+  assert.equal(levels(out), '2 2* 2* 2');
+});
+
+test('liftOrphanSubheadings：开篇就是 1、2、3，下面的 a、b 排二级（#121）', () => {
+  const out = liftOrphanSubheadings([
+    h(3, '1、poppi年销50亿，短短6年，美国益生元气泡水经历了什么？'),
+    h(3, '3、各大益生元气泡水产品，竞争力究竟如何？'),
+    h(2, 'a、站在同一起跑线上，但是竞争优势并不相同'),
+    h(2, 'b、各大益生元气泡水产品的竞争优势分析与判断'),
+    h(3, '4、益生元气泡水在中国，究竟能做成多大的生意？'),
+    h(2, '总结'),
+  ]);
+  assert.equal(levels(out), '2* 2* 3 3 2* 2');
+});
+
+test('liftOrphanSubheadings：有上级章节标题的序号句仍是二级（每周新品合集、62873）', () => {
+  assert.equal(levels(liftOrphanSubheadings([
+    h(2, '本周创新看点'), h(3, '1、山姆上新满记甜品「芋泥乳酪双皮奶」'), h(3, '2、元气森林×上海力波推出联名限定0糖啤酒'),
+  ])), '2 3 3');
+  assert.equal(levels(liftOrphanSubheadings([
+    h(2, '创业三大“地狱级”难题，如何层层破解？'), h(3, '1、第一大难点：生产成本远高于行业竞品'),
+    h(3, '2、第二大难点：改变消费者固有认知'), h(2, '重资产打造硬核供应链，建立品牌护城河'),
+  ])), '2 3 3 2');
+});
+
+test('liftOrphanSubheadings：挂在序号句下面的 ①② 排二级（#229），不在序号句下面的 a. 不动（#259）', () => {
+  assert.equal(levels(liftOrphanSubheadings([
+    h(3, '1、为什么东方树叶应该做强做大无糖绿茶？'), h(3, '2、为什么抹茶是很好的选择？'),
+    h(2, '①、东方树叶围绕绿茶有什么选择？'), h(3, '3、东方树叶可能会以什么方式做抹茶？'),
+  ])), '2* 2* 3 2*');
+  assert.equal(levels(liftOrphanSubheadings([
+    h(2, '品牌如何得以长盛不衰'), h(2, 'a. 一以贯之的产品策略'), h(2, '物美价廉'),
+  ])), '2 2 2');
+});
+
+test('小数不是序号：「1.8万家店」「3.9元」不排二级（#199、#218）', () => {
+  const out = promoteHeuristicHeadings([
+    boldP('1.8万家店，CU靠什么让消费者反复进店？'), plainP('正文。'),
+    boldP('3.9元的成本藏在哪里？'), plainP('正文。'),
+    boldP('1）不追求拓展品类'),
+  ], SITE);
+  assert.deepEqual(out.filter(e => e.k === 'h').map(e => `${e.level}${e.topLevel ? '*' : ''}`), ['2', '2', '3']);
 });

@@ -81,6 +81,7 @@ func publishSiteTocForContent(contentHTML string, withSecondary bool) (string, s
 	entries := make([]publishSiteTocEntry, 0, len(matches))
 	prev := 0
 	anchorN := 0
+	hasParent := false
 	for _, m := range matches {
 		tag := strings.ToLower(contentHTML[m[2]:m[3]])
 		attrRaw := ""
@@ -90,9 +91,17 @@ func publishSiteTocForContent(contentHTML string, withSecondary bool) (string, s
 		inner := contentHTML[m[6]:m[7]]
 		title := strings.TrimSpace(html.UnescapeString(publishSiteTagStripRe.ReplaceAllString(inner, "")))
 		level := 1
-		if tag == "h3" || isSiteSecondaryHeadingText(title) {
-			// 二级标题即使被渲成 h2 也按二级处理（62873「2、第二大难点」）。
+		numbered := isSiteSecondaryHeadingText(title)
+		switch {
+		case tag == "h3":
 			level = 2
+		case numbered && hasParent:
+			// 二级标题即使被渲成 h2 也按二级处理（62873「三大难题」下的「2、第二大难点」）。
+			// 前面没有上级章节标题的序号句是渲染器有意提成的一级（#151「引子」后的 1、…5、），
+			// 与 heading-detect.js liftOrphanSubheadings 同一口径。
+			level = 2
+		case !numbered:
+			hasParent = !isSiteIntroHeadingText(title)
 		}
 		if level == 2 && !withSecondary {
 			continue

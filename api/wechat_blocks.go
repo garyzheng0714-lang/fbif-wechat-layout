@@ -1386,14 +1386,17 @@ func mergeVisualHeadingContinuations(decisions []RoleDecision, observed []Observ
 	out := make([]RoleDecision, 0, len(decisions))
 	for i := 0; i < len(decisions); i++ {
 		merged := decisions[i]
+		lines := []string{merged.Block.Text}
 		last := i
 		for last+1 < len(decisions) &&
 			canMergeVisualHeadingContinuation(merged, decisions[last+1], observed, decisions[last].Index) {
-			next := decisions[last+1]
-			merged.Block.Text = joinVisualHeadingLines(merged.Block.Text, next.Block.Text)
+			lines = append(lines, decisions[last+1].Block.Text)
+			last++
+		}
+		if len(lines) > 1 {
+			merged.Block.Text = joinVisualHeadingLines(lines)
 			merged.Block.Runs = nil
 			merged.Reason = "visual-heading-lines"
-			last++
 		}
 		out = append(out, merged)
 		i = last
@@ -1411,7 +1414,9 @@ func canMergeVisualHeadingContinuation(current, next RoleDecision, observed []Ob
 	}
 	curObs := observed[currentObservedIndex]
 	nextObs := observed[next.Index]
-	if !curObs.ContinuesVisualHeading || !curObs.Centered || !nextObs.Centered ||
+	// 左对齐的两行标题同样会拆成两个 section（#128「嘴上要健康，/手却伸向全糖」、
+	// #146、#169，编辑都手工合成一行）；只要求两行对齐方式一致。
+	if !curObs.ContinuesVisualHeading || curObs.Centered != nextObs.Centered ||
 		!curObs.HeadingFontSize || !nextObs.HeadingFontSize ||
 		!curObs.AllBold || !nextObs.AllBold {
 		return false
@@ -1428,20 +1433,30 @@ func mergeableVisualHeadingDecision(decision RoleDecision) bool {
 		(decision.Reason == "visual-heading" || decision.Reason == "visual-heading-lines")
 }
 
-func joinVisualHeadingLines(first, second string) string {
-	first = strings.TrimSpace(first)
-	second = strings.TrimSpace(second)
-	if first == "" {
-		return second
+// joinVisualHeadingLines 把一个标题的几行接回一行。两行时多是两个短语，补逗号
+// （「六线并进，一个标准仓的收支账」「进入中国近30年，从合资扩张到股权变局」）；作者
+// 已在行尾写了标点（#169「AI先改写的不是效率，」）、第一行以「的」收尾（#128「逃不出的
+// “周末限定款”？」）、第二行以「与/和/都」接续（「一切业务都在向合伙人收敛」）的直接接上。
+// 三行及以上是按宽度折的行，整句直接接上（#146「品牌资产：用口号背书、故事和视觉建立
+// 高端化认知」）。编辑手工合并过的 #128、#146、#169 除「找到榴芒一刻真正的价值」外都是这个口径。
+func joinVisualHeadingLines(lines []string) string {
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line = strings.TrimSpace(line); line != "" {
+			parts = append(parts, line)
+		}
 	}
-	if second == "" {
-		return first
+	if len(parts) != 2 {
+		return strings.Join(parts, "")
 	}
-	if strings.HasPrefix(second, "与") || strings.HasPrefix(second, "和") ||
-		strings.HasPrefix(second, "及") || strings.HasPrefix(second, "暨") ||
-		strings.HasPrefix(second, "以及") || strings.HasPrefix(second, "或") ||
-		hasHeadingJoinPunctuation(first) {
+	first, second := parts[0], parts[1]
+	if hasHeadingJoinPunctuation(first) || strings.HasSuffix(first, "的") || strings.HasSuffix(first, "之") {
 		return first + second
+	}
+	for _, prefix := range []string{"与", "和", "及", "暨", "以及", "或", "都"} {
+		if strings.HasPrefix(second, prefix) {
+			return first + second
+		}
 	}
 	return first + "，" + second
 }
@@ -1726,9 +1741,11 @@ func headingLevelFromTag(tag string) int {
 }
 
 // isSiteSecondaryHeadingText 判定网站二级标题：括号序号「（一）」或阿拉伯数字
-// 「1、」「2.」后跟正文。一级是「一、二、三」或无序号章节句，不在此列。
+// 「1、」「2.」「1）」后跟正文。一级是「一、二、三」或无序号章节句，不在此列。
+// 「1.8万家店」「3.9元」是小数不是序号（#199、#218 曾被排成二级标题）。
+// 与 public/js/heading-detect.js 的 SECONDARY_NUMBER_RE 同一口径。
 var siteParenHeadingRe = regexp.MustCompile(`^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]`)
-var siteArabicHeadingRe = regexp.MustCompile(`^\d+\s*[.、．]\s*\S`)
+var siteArabicHeadingRe = regexp.MustCompile(`^\d+\s*(?:[、)）]\s*\S|[.．]\s*[^\d\s])`)
 
 func isSiteSecondaryHeadingText(text string) bool {
 	t := strings.TrimSpace(text)
@@ -1736,6 +1753,15 @@ func isSiteSecondaryHeadingText(text string) bool {
 		return false
 	}
 	return siteParenHeadingRe.MatchString(t) || siteArabicHeadingRe.MatchString(t)
+}
+
+// isSiteIntroHeadingText：「引子/前言」这类开场标题不是下文序号句的上级章节
+// （与 public/js/heading-detect.js isIntroHeadingText 同一口径）。
+var siteIntroHeadingRe = regexp.MustCompile(`^(?:引子|引言|前言|导语|导读|序言|楔子|开篇|写在前面(?:的话)?)$`)
+var siteIntroHeadingStripRe = regexp.MustCompile(`[\s:：。．.、]`)
+
+func isSiteIntroHeadingText(text string) bool {
+	return siteIntroHeadingRe.MatchString(siteIntroHeadingStripRe.ReplaceAllString(text, ""))
 }
 
 // hasMutedOrSmallStyle only records visual facts. It is used after a
