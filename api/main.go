@@ -14,6 +14,7 @@ import (
 	"log"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,6 +32,7 @@ import (
 )
 
 func main() {
+	host := flag.String("host", "127.0.0.1", "API server listen address; production stays on loopback behind Caddy")
 	port := flag.Int("port", 9000, "API server port")
 	_ = flag.String("db", "", "legacy ignored SQLite database path")
 	rulesPath := flag.String("rules", os.Getenv("RULES_STORE_PATH"), "rule preset JSON store path")
@@ -201,7 +203,7 @@ func main() {
 	// because those imports do not carry ?v=<commit>.
 	mux.Handle("/", cacheStatic(fs))
 
-	addr := fmt.Sprintf(":%d", *port)
+	addr := net.JoinHostPort(*host, strconv.Itoa(*port))
 	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
 	srv := newHTTPServer(addr, withSecurityHeaders(mux))
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
