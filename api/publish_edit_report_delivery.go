@@ -10,7 +10,8 @@ package main
 // 失败每 30 分钟重试，最多 8 次（约 4 小时，当天就收尾）后记死信；换周时上一周还没发成的也收尾成死信。
 // 死信在监控里给 7 天 warning（周报不是发布链路，不算 P0）。
 // 没设接收人只记不发、也不读 FoodTalks；之后设了人，当周照样补发。
-// 只读 FoodTalks（每篇一次 GET，一周几十次），不改任何稿件。
+// 只读 FoodTalks（每篇一次 GET，一周几十次），不改任何稿件。有手改的篇再用现在的规则重排一次（本地渲染服务，
+// 不调付费接口）：现在已能自动排出编辑改的样子的那类手改不再列，只在私信末尾提一句。
 
 import (
 	"context"
@@ -264,19 +265,54 @@ func (p *publishPipeline) buildPublishEditReport(ctx context.Context, start, end
 			continue
 		}
 		report.Compared++
-		report.Articles = append(report.Articles, publishEditReportArticle{
+		article := publishEditReportArticle{
 			JobID:   job.ID,
 			NewsID:  job.FoodTalksNewsID,
 			Title:   firstNonEmpty(strings.TrimSpace(live.Title), job.Title),
 			URL:     fmt.Sprintf("%s/news/%d", siteFrontURL(), job.FoodTalksNewsID),
 			Changes: compareEditReport(job.ContentHTML, live.Content),
-		})
+		}
+		if len(article.Changes) > 0 {
+			if fresh, err := p.rerenderPublishEditReport(ctx, job); err != nil {
+				if ctx.Err() != nil {
+					return report, ctx.Err()
+				}
+				article.Recheck = editReportClip(err.Error(), 200)
+			} else {
+				article.Changes, article.Fixed = splitEditReportFixed(article.Changes, compareEditReport(fresh, live.Content))
+			}
+		}
+		report.Articles = append(report.Articles, article)
 	}
 	if report.Compared == 0 && report.Unreadable > 0 {
 		return report, fmt.Errorf("%d 篇都读不到 FoodTalks 上的正文", report.Unreadable)
 	}
 	summarizePublishEditReport(&report)
 	return report, nil
+}
+
+// rerenderPublishEditReport 用现在的规则把这篇的原文块重排一次，图片换成发布时已转存的地址，好和 FoodTalks 现稿比。
+// 只算不写：不落库、不传图，也不补查原文链接（那一步可能调付费的 TikHub），用任务里已记的出处与原文标题。
+func (p *publishPipeline) rerenderPublishEditReport(ctx context.Context, job publishJob) (string, error) {
+	if p.render == nil {
+		return "", errors.New("渲染服务未配置")
+	}
+	if strings.TrimSpace(job.BlocksJSON) == "" {
+		return "", errors.New("任务没存原文块，没法用现在的规则重排")
+	}
+	rulePackID, err := publishRulePackIDForJob(job)
+	if err != nil {
+		return "", err
+	}
+	result, err := p.render(publishRenderContext(ctx, rulePackID, job), job.Title, publishRenderSourceURL(job), job.BlocksJSON, true)
+	if err != nil {
+		return "", fmt.Errorf("用现在的规则重排失败: %w", err)
+	}
+	imageMap := map[string]string{}
+	if strings.TrimSpace(job.ImageMap) != "" {
+		_ = json.Unmarshal([]byte(job.ImageMap), &imageMap)
+	}
+	return rewriteImgSrcs(result.HTML, imageMap), nil
 }
 
 // publishEditReportTarget 一次读出的投递目标：接收人与发私信用的审核应用来自同一份配置，

@@ -713,3 +713,102 @@ func TestEditReportRetiresLeftoverWeeks(t *testing.T) {
 		t.Fatalf("两年前的周不发：%d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestEditReportSkipsEditsCurrentRulesAlreadyMake 用现在的规则重排后已和编辑终稿一样的那类手改不再列：
+// 10/12 那周的开头署名 3 篇是 10/14 改规则前发的，重排就是编辑改的样子，不该再报。
+// 重排失败、没存原文块、重排整篇对不上时照列；重排只算不写，不动任务。
+func TestEditReportSkipsEditsCurrentRulesAlreadyMake(t *testing.T) {
+	env := newEditReportTestEnv(t, publishDistributionOwner{OpenID: "ou_gary"})
+	ours := editReportArticle()
+	fixedByline := mustReplace(t, ours, "作者：余梦莹", "本文为投资界原创，作者：余梦莹，转载请联系出处。")
+	// 图片在原文块里是公众号地址，重排后要按发布时的转存表换回 OSS 地址才对得上。
+	fromWechat := strings.ReplaceAll(fixedByline, "https://oss.example.com/wechat-layout/91222e0fda98.png", "https://mmbiz.qpic.cn/mmbiz_png/abc/640")
+	renders := map[string]string{
+		"a": fromWechat,
+		"b": fixedByline,
+		"c": "<p>渲染出来整篇对不上</p>",
+	}
+	var rendered []string
+	env.pipeline.render = func(ctx context.Context, title, source, blocksJSON string, isRepost bool) (publishRenderResult, error) {
+		key := strings.TrimPrefix(blocksJSON, `"`)
+		key = strings.TrimSuffix(key, `"`)
+		rendered = append(rendered, key)
+		if html, ok := renders[key]; ok {
+			return publishRenderResult{HTML: html}, nil
+		}
+		return publishRenderResult{}, errors.New("render-service 不可达")
+	}
+	jobs, err := env.store.all()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range jobs {
+		key := strings.TrimPrefix(job.SourceKey, "site:edit-report:")
+		if _, err := env.store.update(job.ID, func(j *publishJob) {
+			j.BlocksJSON = `"` + key + `"`
+			if key == "a" {
+				j.ImageMap = `{"https://mmbiz.qpic.cn/mmbiz_png/abc/640":"https://oss.example.com/wechat-layout/91222e0fda98.png"}`
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start, end := publishEditReportWeekFromParamMust(t, "2026-10-05")
+	report, err := env.pipeline.buildPublishEditReport(context.Background(), start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a、b 重排后开头署名已是编辑改的样子；c 重排整篇对不上，照列；d 没手改不重排。
+	if len(rendered) != 3 {
+		t.Fatalf("只重排有手改的 3 篇：%v", rendered)
+	}
+	if report.Edited != 3 || len(report.Listed) != 0 {
+		t.Fatalf("3 篇都手改过，但只剩 1 篇规则还排不出来，不该列：%+v", report)
+	}
+	if len(report.Fixed) != 1 || report.Fixed[0].Key != editReportByline || report.Fixed[0].Articles != 2 {
+		t.Fatalf("开头署名 2 篇算规则已改好：%+v", report.Fixed)
+	}
+	byKey := map[string]publishEditReportArticle{}
+	for _, a := range report.Articles {
+		byKey[strings.TrimPrefix(a.Title, "稿件")] = a
+	}
+	if a := byKey["a"]; len(a.Changes) != 0 || len(a.Fixed) != 1 {
+		t.Fatalf("a 的署名手改现在自动就有：%+v", a)
+	}
+	if c := byKey["c"]; len(c.Changes) != 1 || c.Changes[0].Category != editReportByline || len(c.Fixed) != 0 {
+		t.Fatalf("重排整篇对不上不算改好，照列：%+v", c)
+	}
+	body, _ := json.Marshal(buildPublishEditReportPost(report))
+	if !strings.Contains(string(body), "另有开头署名（2 篇）的手改，用现在的规则重排已经和编辑改的一样") ||
+		strings.Contains(string(body), "1. 开头署名") {
+		t.Fatalf("私信只提一句规则已改好：%s", body)
+	}
+
+	// 重排失败或没存原文块：照列，写明没核对的原因。
+	renders = map[string]string{}
+	report, err = env.pipeline.buildPublishEditReport(context.Background(), start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Listed) != 1 || report.Listed[0].Articles != 3 || len(report.Fixed) != 0 {
+		t.Fatalf("重排失败照列：%+v", report)
+	}
+	if !strings.Contains(report.Articles[0].Recheck, "重排失败") {
+		t.Fatalf("要写明没核对的原因：%+v", report.Articles[0])
+	}
+	for _, job := range jobs {
+		got, err := env.store.byID(job.ID)
+		if err != nil || got.ContentHTML != ours {
+			t.Fatalf("重排只算不写：#%d %q", job.ID, got.ContentHTML)
+		}
+	}
+}
+
+func publishEditReportWeekFromParamMust(t *testing.T, week string) (time.Time, time.Time) {
+	t.Helper()
+	start, end, err := publishEditReportWeekFromParam(week)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return start, end
+}

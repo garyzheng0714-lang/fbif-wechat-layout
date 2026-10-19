@@ -9,7 +9,7 @@ package main
 // 每类附几个这篇自己的真实例子。投递、调度与接口在 publish_edit_report_delivery.go。
 //
 // 只比文字与结构：组装层给正文加的公司链接、系列链接、目录锚点只动标签不动字，不会被当成手改；
-// 编辑重新上传的同一张图（文件名前 12 位相同）也不算换图。
+// 编辑重新上传的同一张图（文件名前 12 位相同）也不算换图。规则后来改好了的手改见 splitEditReportFixed。
 
 import (
 	"fmt"
@@ -881,13 +881,46 @@ func editReportSnippet(a, b string) (string, string) {
 	return cut(ra), cut(rb)
 }
 
-// publishEditReportArticle 一篇的比对结果。
+// splitEditReportFixed 把一篇的手改分成「现在的规则还排不出来的」和「规则后来改好了的」。
+// fresh 是用现在的规则重排这篇、再和 FoodTalks 现稿比出的差异：某一类在 fresh 里已经没有，
+// 说明现在自动排出来就是编辑改的样子，这类手改不再列（2026-10-19：10/12 那周的开头署名 3 篇
+// 都是 10/14 改规则前发的）。例子仍用当初的手改（那才是编辑真改过的），不用 fresh 的。
+// 重排结果整篇对不上（fresh 只有「整篇重新排过」而当初没有）多半是重排本身出了问题，全部照列。
+func splitEditReportFixed(changes, fresh []editReportChange) (kept, fixed []editReportChange) {
+	remaining := map[string]bool{}
+	for _, c := range fresh {
+		remaining[c.Category] = true
+	}
+	if remaining[editReportRewritten] && len(fresh) == 1 {
+		rewritten := false
+		for _, c := range changes {
+			rewritten = rewritten || c.Category == editReportRewritten
+		}
+		if !rewritten {
+			return changes, nil
+		}
+	}
+	for _, c := range changes {
+		// 当初整篇重排过：重排后还有任何差异就照列。
+		if remaining[c.Category] || (c.Category == editReportRewritten && len(fresh) > 0) {
+			kept = append(kept, c)
+		} else {
+			fixed = append(fixed, c)
+		}
+	}
+	return kept, fixed
+}
+
+// publishEditReportArticle 一篇的比对结果。Fixed 是用现在的规则重排后已和编辑终稿一样的手改，不进清单。
 type publishEditReportArticle struct {
 	JobID   int64              `json:"job_id"`
 	NewsID  int64              `json:"news_id"`
 	Title   string             `json:"title"`
 	URL     string             `json:"url"`
 	Changes []editReportChange `json:"changes,omitempty"`
+	Fixed   []editReportChange `json:"fixed_by_rules,omitempty"`
+	// Recheck 没能用现在的规则重排核对的原因（没存原文块、渲染失败）；这时手改照列。
+	Recheck string `json:"recheck_skipped,omitempty"`
 }
 
 type publishEditReportExample struct {
@@ -905,29 +938,43 @@ type publishEditReportCategory struct {
 	Examples []publishEditReportExample `json:"examples"`
 }
 
-// publishEditReport 一周的清单。Categories 是全部类别（含不到 3 篇的），Listed 是要发出去的。
+// publishEditReport 一周的清单。Categories 是全部类别（含不到 3 篇的），Listed 是要发出去的；
+// Fixed 是现在的规则已能自动排出来的那些类（不管几篇都不列，只在私信里提一句）。
 type publishEditReport struct {
 	WeekStart  string                      `json:"week_start"` // 周一，北京时间 YYYY-MM-DD
 	WeekEnd    string                      `json:"week_end"`   // 周日
 	Compared   int                         `json:"compared"`   // 比对了几篇
-	Edited     int                         `json:"edited"`     // 其中编辑手改过的
+	Edited     int                         `json:"edited"`     // 其中编辑手改过的（含规则后来改好了的）
 	Unreadable int                         `json:"unreadable"` // 读不到 FoodTalks 正文的
 	Categories []publishEditReportCategory `json:"categories"`
 	Listed     []publishEditReportCategory `json:"listed"`
+	Fixed      []publishEditReportCategory `json:"fixed_by_rules,omitempty"`
 	Articles   []publishEditReportArticle  `json:"articles,omitempty"`
 }
 
 // summarizePublishEditReport 按类数篇数（一篇同类多处只算一篇），每类按稿件编号取前几个例子。
 func summarizePublishEditReport(report *publishEditReport) {
-	byKey := map[string]*publishEditReportCategory{}
 	report.Edited = 0
 	for _, article := range report.Articles {
-		if len(article.Changes) == 0 {
-			continue
+		if len(article.Changes) > 0 || len(article.Fixed) > 0 {
+			report.Edited++
 		}
-		report.Edited++
+	}
+	report.Categories = groupEditReportCategories(report.Articles, func(a publishEditReportArticle) []editReportChange { return a.Changes })
+	report.Fixed = groupEditReportCategories(report.Articles, func(a publishEditReportArticle) []editReportChange { return a.Fixed })
+	report.Listed = nil
+	for _, cat := range report.Categories {
+		if cat.Articles >= publishEditReportMinArticles {
+			report.Listed = append(report.Listed, cat)
+		}
+	}
+}
+
+func groupEditReportCategories(articles []publishEditReportArticle, pick func(publishEditReportArticle) []editReportChange) []publishEditReportCategory {
+	byKey := map[string]*publishEditReportCategory{}
+	for _, article := range articles {
 		seen := map[string]bool{}
-		for _, change := range article.Changes {
+		for _, change := range pick(article) {
 			if seen[change.Category] {
 				continue
 			}
@@ -950,22 +997,17 @@ func summarizePublishEditReport(report *publishEditReport) {
 	for i, key := range publishEditReportCategoryOrder {
 		order[key] = i
 	}
-	report.Categories = report.Categories[:0]
+	out := make([]publishEditReportCategory, 0, len(byKey))
 	for _, cat := range byKey {
-		report.Categories = append(report.Categories, *cat)
+		out = append(out, *cat)
 	}
-	sort.SliceStable(report.Categories, func(i, j int) bool {
-		if report.Categories[i].Articles != report.Categories[j].Articles {
-			return report.Categories[i].Articles > report.Categories[j].Articles
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Articles != out[j].Articles {
+			return out[i].Articles > out[j].Articles
 		}
-		return order[report.Categories[i].Key] < order[report.Categories[j].Key]
+		return order[out[i].Key] < order[out[j].Key]
 	})
-	report.Listed = nil
-	for _, cat := range report.Categories {
-		if cat.Articles >= publishEditReportMinArticles {
-			report.Listed = append(report.Listed, cat)
-		}
-	}
+	return out
 }
 
 // buildPublishEditReportPost 私信正文（飞书富文本）：一句总数，再逐类列篇数与例子。
@@ -1015,6 +1057,13 @@ func buildPublishEditReportPost(report publishEditReport) map[string]any {
 	}
 	if len(report.Listed) > 0 {
 		lines = append(lines, []any{postText(fmt.Sprintf("只改了 1–%d 篇的零星情况不列。", publishEditReportMinArticles-1), false)})
+	}
+	if len(report.Fixed) > 0 {
+		names := make([]string, len(report.Fixed))
+		for i, cat := range report.Fixed {
+			names[i] = fmt.Sprintf("%s（%d 篇）", cat.Label, cat.Articles)
+		}
+		lines = append(lines, []any{postText("另有"+strings.Join(names, "、")+"的手改，用现在的规则重排已经和编辑改的一样（规则后来改好了），不用处理。", false)})
 	}
 	post := postMessage(lines)
 	post["zh_cn"].(map[string]any)["title"] = title
