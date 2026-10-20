@@ -94,58 +94,33 @@ func TestPublishSiteTocSkipsShortAndAnchored(t *testing.T) {
 	}
 }
 
-func TestPublishSiteTocSkipsArabicSecondaryHeadings(t *testing.T) {
-	// 62873：一级章节句是 h2，夹在中间的「2、第二大难点」即使误渲成 h2 也不进目录。
+// 目录层级照正文标签：h2 一级、h3 二级，不按标题文字另判（#292：正文把「3. 108种茶」渲成 h2，
+// 目录另有一套序号判断，两处一起错）。层级只由渲染器定一次，目录与正文不会对不上。
+func TestPublishSiteTocLevelsFollowBodyTags(t *testing.T) {
 	content := `<p style="text-align: justify;">开头</p>` +
-		`<h2 style="text-align: justify;">全行业卷价格，它为什么卷不动了</h2>` + siteTocLongPara +
-		`<h2 style="text-align: justify;">创业三大“地狱级”难题</h2>` + siteTocLongPara +
-		`<h2 style="text-align: justify;">2、第二大难点：改变消费场景</h2>` + siteTocLongPara +
-		`<h2 style="text-align: justify;">3、第三大难点：头部商超进场</h2>` + siteTocLongPara +
-		`<h2 style="text-align: justify;">重资产打造硬核供应链</h2>` + siteTocLongPara +
-		`<h2 style="text-align: justify;">结语</h2>` + siteTocLongPara
-	got, toc := publishSiteTocForContent(content, false)
-	if toc == "" {
-		t.Fatalf("一级标题足够时应生成目录")
-	}
-	var entries []publishSiteTocEntry
-	if err := json.Unmarshal([]byte(toc), &entries); err != nil {
-		t.Fatalf("toc 不是合法 JSON：%v", err)
-	}
-	if len(entries) != 4 {
-		t.Fatalf("目录应只收 4 条一级标题，实际 %s", toc)
-	}
-	for _, e := range entries {
-		if strings.Contains(e.Title, "难点") {
-			t.Fatalf("二级「难点」不得进目录：%q", e.Title)
-		}
-	}
-	if strings.Contains(got, `id="`) && strings.Contains(got, "第二大难点") {
-		// 二级标题原 h2 不得被打上一级锚点
-		h2 := got[strings.Index(got, "第二大难点")-80:]
-		if strings.Contains(h2[:120], `id="mctoc_`) {
-			t.Fatalf("二级标题不应打 mctoc 锚点：%s", h2[:160])
-		}
-	}
-	if !strings.Contains(got, `<h2 id="`) {
-		t.Fatalf("一级标题仍应打锚点")
-	}
-}
-
-// #151（2026-10-15）：「引子」后面直接是 1、…5、，渲染器把这组序号句提成一级 h2；
-// 前面没有上级章节标题，目录照收（编辑在 FoodTalks 上也排成一级）。
-func TestPublishSiteTocKeepsNumberedHeadingsWithoutParent(t *testing.T) {
-	content := `<h2 style="text-align: justify;">引子</h2>` + siteTocLongPara +
+		`<h2 style="text-align: justify;">三、 被tea'stone的茶惊艳到</h2>` + siteTocLongPara +
+		`<h3 style="text-align: justify;">2. 在家泡，比不过门店</h3>` + siteTocLongPara +
+		`<h3 style="text-align: justify;">3. 108种茶，太多了</h3>` + siteTocLongPara +
 		`<h2 style="text-align: justify;">1、不要低估大单品的生命力</h2>` + siteTocLongPara +
-		`<h2 style="text-align: justify;">2、为什么旺仔牛奶可以考虑做低温</h2>` + siteTocLongPara +
-		`<h2 style="text-align: justify;">3、旺旺为什么要找一家乳企合作</h2>` + siteTocLongPara +
-		`<h2 style="text-align: justify;">结语</h2>` + siteTocLongPara
-	_, toc := publishSiteTocForContent(content, false)
-	var entries []publishSiteTocEntry
-	if err := json.Unmarshal([]byte(toc), &entries); err != nil {
-		t.Fatalf("toc 不是合法 JSON：%v（%q）", err, toc)
+		`<h2 style="text-align: justify;">四、 门店本身就是艺术品</h2>` + siteTocLongPara
+	levels := func(withSecondary bool) string {
+		t.Helper()
+		_, toc := publishSiteTocForContent(content, withSecondary)
+		var entries []publishSiteTocEntry
+		if err := json.Unmarshal([]byte(toc), &entries); err != nil {
+			t.Fatalf("toc 不是合法 JSON：%v（%q）", err, toc)
+		}
+		var got []string
+		for _, e := range entries {
+			got = append(got, fmt.Sprintf("%d:%s", e.Level, e.Title))
+		}
+		return strings.Join(got, "|")
 	}
-	if len(entries) != 5 {
-		t.Fatalf("引子后的序号句是一级，目录应收 5 条，实际 %s", toc)
+	if got, want := levels(true), "1:三、 被tea'stone的茶惊艳到|2:2. 在家泡，比不过门店|2:3. 108种茶，太多了|1:1、不要低估大单品的生命力|1:四、 门店本身就是艺术品"; got != want {
+		t.Fatalf("Mote 目录层级应照正文 h2/h3：\n got %s\nwant %s", got, want)
+	}
+	if got, want := levels(false), "1:三、 被tea'stone的茶惊艳到|1:1、不要低估大单品的生命力|1:四、 门店本身就是艺术品"; got != want {
+		t.Fatalf("非 Mote 目录只收正文 h2：\n got %s\nwant %s", got, want)
 	}
 }
 

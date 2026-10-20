@@ -335,3 +335,16 @@ test('小数不是序号：「1.8万家店」「3.9元」不排二级（#199、#
   ], SITE);
   assert.deepEqual(out.filter(e => e.k === 'h').map(e => `${e.level}${e.topLevel ? '*' : ''}`), ['2', '2', '3']);
 });
+
+test('点后空一格再跟数字是序号，不是小数：「3. 108种茶」排二级（#292）', () => {
+  const out = promoteHeuristicHeadings([
+    boldP('三、 被tea\'stone的茶惊艳到'), plainP('正文。'),
+    boldP('2. 在家泡，比不过门店'), plainP('正文。'),
+    boldP('3. 108种茶，太多了'), plainP('正文。'),
+    boldP('4. 零售的茶叶包装、产品没跟上'),
+  ], SITE);
+  assert.equal(levels(out.filter(e => e.k === 'h')), '2 3 3 3');
+  assert.equal(levels(liftOrphanSubheadings([
+    h(3, '1、先说结论'), h(2, 'a. 3种口味'), h(3, '2、再说原因'),
+  ])), '2* 3 2*');
+});

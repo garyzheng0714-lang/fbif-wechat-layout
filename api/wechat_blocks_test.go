@@ -1013,6 +1013,7 @@ func TestSiteSecondaryHeadingTextSkipsDecimals(t *testing.T) {
 		"（一）背景":                 true,
 		"1.8万家店，CU靠什么让消费者反复进店？": false,
 		"3.9元的成本藏在哪里？":          false,
+		"3. 108种茶，太多了":          true,
 		"a、站在同一起跑线上":            false,
 		"一、创业者杜国楹":              false,
 	} {
