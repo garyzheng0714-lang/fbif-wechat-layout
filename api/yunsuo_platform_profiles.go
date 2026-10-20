@@ -36,6 +36,8 @@ type yunsuoPlatformProfile struct {
 	URLHosts []string
 	// 推送成功后怎么找文章链接（publish_external_links.go）；空表示不自动找。
 	LinkLookup string
+	// 拿到链接后怎么取平台上的正文做保真核对（publish_external_fidelity.go）；空表示不取。
+	ContentFetch string
 	// 平台后台的内容管理页：已发布但还没拿到文章链接时，卡片与侧边栏给这个链接看发布情况
 	// （2026-10-13 用户：「百家号的已发布，我没看到任何的链接。我也查看不了发布情况」）。
 	ManageURL string
@@ -54,13 +56,14 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		// 编辑手发的 #287（32 个字符）、#292（35）、#289（42，按此数法正好 30）头条都收了。
 		// 云梭给头条号用的是「标题」档：线上头条稿标题都是 title 原文（#196、#260），不是短标题。
 		TitleField: yunsuoTitleMedium, TitleMax: 30, TitleHalfWidthASCII: true,
-		DailyLimit: 5,
-		URLHosts:   []string{"toutiao.com", "www.toutiao.com", "m.toutiao.com"},
-		LinkLookup: externalLinkLookupToutiao,
-		ManageURL:  "https://mp.toutiao.com/profile_v4/manage/content/all",
-		Icon:       "platform-toutiao",
+		DailyLimit:   5,
+		URLHosts:     []string{"toutiao.com", "www.toutiao.com", "m.toutiao.com"},
+		LinkLookup:   externalLinkLookupToutiao,
+		ContentFetch: externalFidelityFetchToutiao,
+		ManageURL:    "https://mp.toutiao.com/profile_v4/manage/content/all",
+		Icon:         "platform-toutiao",
 	},
-	// 百家号：不设封面下限。百度搜索有验证码，文章链接不自动找，由管理员登记。
+	// 百家号：不设封面下限。百度搜索有验证码，文章链接不自动找、线上正文不取，由管理员登记。
 	"baijiahao": {
 		Key: "baijiahao", Name: "百家号",
 		CoverPrepended: true,

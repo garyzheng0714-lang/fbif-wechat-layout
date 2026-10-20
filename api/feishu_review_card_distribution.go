@@ -243,9 +243,13 @@ func reviewCardPlatformArticleLink(job publishJob, state externalPlatformState, 
 	return "[" + label + "](" + state.URL + ")"
 }
 
-// reviewCardPlatformReason 名字下面一行：失败/待核对写原因，待修改但卡片里改不了的指去侧边栏。
+// reviewCardPlatformReason 名字下面一行：失败/待核对写原因，待修改但卡片里改不了的指去侧边栏；
+// 已发布的写平台上正文与推出去的对不上的地方（外发保真核对）。
 // 右侧是重新同步按钮时状态字不显示，失败就写在这一行开头，免得只看到一句灰字原因。
 func reviewCardPlatformReason(state externalPlatformState, fixing, buttoned bool, editLink string) string {
+	if fidelity := reviewCardSafeText(state.Fidelity, 80); fidelity != "" {
+		return "<font color='grey'>" + fidelity + "</font>"
+	}
 	if state.URL != "" || fixing {
 		return "" // 有文章链接就不再写原因；表单里逐项写清楚
 	}

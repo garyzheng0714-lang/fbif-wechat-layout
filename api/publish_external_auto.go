@@ -62,7 +62,8 @@ func (p *publishPipeline) kickExternalAutoDistribution() {
 }
 
 // startExternalAutoDistribution 兜底循环：配额次日恢复、补发按间隔放行、读网站失败后的
-// 重试都靠它；顺带补查云梭迟到的外发结果和各平台文章链接。独立 goroutine，不占发布 worker。
+// 重试都靠它；顺带补查云梭迟到的外发结果和各平台文章链接，拿到链接的核对线上正文。
+// 独立 goroutine，不占发布 worker。
 func (p *publishPipeline) startExternalAutoDistribution() {
 	if p == nil {
 		return
@@ -72,6 +73,7 @@ func (p *publishPipeline) startExternalAutoDistribution() {
 			p.runExternalAutoDistribution()
 			p.refreshExternalDistributionResults()
 			p.refreshExternalDistributionLinks()
+			p.refreshExternalDistributionFidelity()
 			time.Sleep(publishExternalAutoSweepInterval)
 		}
 	}()

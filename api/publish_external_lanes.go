@@ -54,6 +54,8 @@ type publishExternalLane struct {
 	URL          string `json:"url,omitempty"`
 	URLCheckedAt string `json:"url_checked_at,omitempty"`
 	URLAttempts  int    `json:"url_attempts,omitempty"`
+	// 拿到链接后取一次平台上的正文，与 PayloadJSON 比结构（publish_external_fidelity.go）。
+	Fidelity publishExternalFidelity `json:"fidelity,omitzero"`
 }
 
 func externalLaneIndex(job publishJob, accountID string) int {

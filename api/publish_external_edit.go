@@ -78,6 +78,8 @@ type externalPlatformState struct {
 	Title     string // 平台上的标题（推送时冻结）
 	Editable  bool   // 还能改标题/摘要/封面（没推过，或受理前失败）
 	NeedsFix  bool
+	// Fidelity 已发布的平台上正文与推出去的对不上（外发保真核对），如「平台上小标题少了 1 处」。
+	Fidelity string
 }
 
 func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) externalPlatformState {
@@ -88,6 +90,7 @@ func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) external
 			state.Status, state.Tone = "人工已发", "green"
 		case lane.State == publishExternalDistributionSucceeded:
 			state.Status, state.Tone = "已发布", "green"
+			state.Fidelity = externalLaneFidelityNote(lane)
 			if state.URL == "" {
 				state.ManageURL = yunsuoProfileForTarget(target).ManageURL
 			}
@@ -180,7 +183,7 @@ func externalEditView(job publishJob, cfg yunsuoConfig) map[string]any {
 		min, max := profile.titleLimits()
 		_, fieldMax := yunsuoTitleFieldRange(profile.TitleField)
 		view := externalEditPlatform{
-			Slot: slot, Name: profile.Name, Status: state.Status, Tone: state.Tone, Reason: state.Reason,
+			Slot: slot, Name: profile.Name, Status: state.Status, Tone: state.Tone, Reason: firstNonEmpty(state.Reason, state.Fidelity),
 			URL: state.URL, ManageURL: state.ManageURL, Editable: state.Editable, NeedsFix: state.NeedsFix, Auto: target.Auto,
 			Title: externalEffectiveTitle(job, draft), TitleMin: min, TitleMax: max,
 			TitleHalfWidth: profile.TitleHalfWidthASCII, TitleFieldMax: fieldMax,

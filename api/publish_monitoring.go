@@ -39,6 +39,8 @@ type publishMonitoringStatus struct {
 	OldestReconciliationAgeSeconds int64    `json:"oldest_reconciliation_age_seconds"`
 	ContentConflicts               int      `json:"content_conflicts"`
 	FoodTalksCredentialInvalid     bool     `json:"foodtalks_credential_invalid"`
+	ExternalFidelityMismatches     int      `json:"external_fidelity_mismatches"`
+	ExternalFidelityUnavailable    int      `json:"external_fidelity_unavailable"`
 	Issues                         []string `json:"issues,omitempty"`
 	Warnings                       []string `json:"warnings,omitempty"`
 	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
@@ -92,6 +94,9 @@ func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, no
 		updatePublishMonitoringNotifications(&status, job, age)
 		updatePublishMonitoringFailures(&status, job, now)
 		updatePublishMonitoringReconciliation(&status, job, now, age)
+		mismatched, unavailable := externalFidelityMonitoring(job, now)
+		status.ExternalFidelityMismatches += mismatched
+		status.ExternalFidelityUnavailable += unavailable
 		if job.ContentConflict {
 			status.ContentConflicts++
 		}
@@ -251,6 +256,9 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		{status.ReconciliationRequired > 0 && status.OldestReconciliationAgeSeconds > int64(publishReconciliationCriticalAfter/time.Second), fmt.Sprintf("reconciliation_stale:%ds", status.OldestReconciliationAgeSeconds), publishMonitoringAlert},
 		{status.ContentConflicts > 0, fmt.Sprintf("content_conflicts:%d", status.ContentConflicts), publishMonitoringIssue | publishMonitoringAlert},
 		{status.FoodTalksCredentialInvalid, "foodtalks_credential_invalid", publishMonitoringIssue | publishMonitoringAlert},
+		// 云梭改了正文的处理方式，或核对本身取不到线上正文：要有人看，但不是 P0、不挡 ready。
+		{status.ExternalFidelityMismatches > 0, fmt.Sprintf("external_fidelity_mismatch:%d", status.ExternalFidelityMismatches), publishMonitoringWarning},
+		{status.ExternalFidelityUnavailable > 0, fmt.Sprintf("external_fidelity_unavailable:%d", status.ExternalFidelityUnavailable), publishMonitoringWarning},
 	}
 	appendPublishMonitoringSignals(status, signals)
 	sort.Strings(status.Issues)
