@@ -5,7 +5,7 @@ package main
 //     h2+h3 合计 ≥5 时，正文一级 h2 注入 mctoc_* 锚点 id，CMS payload 的 toc 字段写
 //     [{id,level:1,title}] JSON——FoodTalks 前台 toc-menu 只认这个字段，API 直发的
 //     文章后台不会自己生成（渲染器侧 mctoc 仍保持关闭，锚点在发布组装层注入，
-//     保证 render output_hash 可复现）。二级标题（（一）/ 1、2、3）不进 toc；
+//     保证 render output_hash 可复现）。二级标题（正文 h3）不进 toc；
 //     Mote 文章例外，二级以 level=2 进 toc（2026-09-29 用户裁定）。
 //  2. 标签：所有文章解析 AI 预填标签；Mote 文章优先挂「Mote莫特」+ 正文声明的
 //     内容系列标签（如「这是我茶叶系列的第29篇」→「茶叶系列」）。标签只在
@@ -33,9 +33,11 @@ import (
 // 触发口径对齐网站排版规范（2026-08-17，飞书《FoodTalks 网站排版规范（新）》step2-3）：
 // 「文章字数超 3000 且一二级标题 5 个及以上」→ 正文纯文本 ≥ 3000 字 且 h2+h3 合计 ≥ 5。
 // 旧口径只数 h2 且要 >5，运营反馈原创长文经常不出目录。目录条目默认只收一级 h2
-// （62765 金标准；2026-08-24：「（一）」与「1、2、3」是二级，不进目录）。
+// （62765 金标准；2026-08-24：「（一）」与「1、2、3」是二级 h3，不进目录）。
 // Mote 文章例外（2026-09-29 用户裁定，63116 小罐茶）：二级标题也进目录，level=2，
 // FoodTalks 前台 toc-menu 按 .level-2 缩进小圆点显示。
+// 层级照正文标签（h2 一级、h3 二级），不按标题文字另判：哪句是几级只由渲染器
+// （heading-detect.js）定一次，目录和正文不会对不上（#292）。
 const publishSiteTocMinHeadings = 5 // 一二级标题（h2+h3）合计 ≥ 5
 const publishSiteTocMinChars = 3000 // 正文纯文本（剥标签）字符数下限
 
@@ -51,8 +53,7 @@ type publishSiteTocEntry struct {
 // publishSiteTocForContent 给正文标题注入确定性锚点并生成 toc JSON。
 // 锚点 id 由正文内容哈希派生：同一份正文重复组装（staging→publicize→repair）产出
 // 字节一致的 content 与 toc，PUT 全量覆盖语义下不会来回抖动。
-// withSecondary=false 只收一级（h2 且非「1、」「（一）」开头）；true 时二级（h3，或误渲成
-// h2 的二级序号句）也以 level=2 进目录。
+// withSecondary=false 只收 h2；true 时 h3 也以 level=2 进目录。
 // 不满足条件（字数 < 3000、h2+h3 < 5、无 h2、或标题已带 id）时原文返回、toc 为空串。
 func publishSiteTocForContent(contentHTML string, withSecondary bool) (string, string) {
 	matches := publishSiteHeadingRe.FindAllStringSubmatchIndex(contentHTML, -1)
@@ -81,7 +82,6 @@ func publishSiteTocForContent(contentHTML string, withSecondary bool) (string, s
 	entries := make([]publishSiteTocEntry, 0, len(matches))
 	prev := 0
 	anchorN := 0
-	hasParent := false
 	for _, m := range matches {
 		tag := strings.ToLower(contentHTML[m[2]:m[3]])
 		attrRaw := ""
@@ -91,20 +91,11 @@ func publishSiteTocForContent(contentHTML string, withSecondary bool) (string, s
 		inner := contentHTML[m[6]:m[7]]
 		title := strings.TrimSpace(html.UnescapeString(publishSiteTagStripRe.ReplaceAllString(inner, "")))
 		level := 1
-		numbered := isSiteSecondaryHeadingText(title)
-		switch {
-		case tag == "h3":
+		if tag == "h3" {
+			if !withSecondary {
+				continue
+			}
 			level = 2
-		case numbered && hasParent:
-			// 二级标题即使被渲成 h2 也按二级处理（62873「三大难题」下的「2、第二大难点」）。
-			// 前面没有上级章节标题的序号句是渲染器有意提成的一级（#151「引子」后的 1、…5、），
-			// 与 heading-detect.js liftOrphanSubheadings 同一口径。
-			level = 2
-		case !numbered:
-			hasParent = !isSiteIntroHeadingText(title)
-		}
-		if level == 2 && !withSecondary {
-			continue
 		}
 		if strings.Contains(attrRaw, "id=") || title == "" {
 			// 已有锚点或空标题：保守起见整篇放弃注入，避免半套目录

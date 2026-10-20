@@ -1742,26 +1742,19 @@ func headingLevelFromTag(tag string) int {
 
 // isSiteSecondaryHeadingText 判定网站二级标题：括号序号「（一）」或阿拉伯数字
 // 「1、」「2.」「1）」后跟正文。一级是「一、二、三」或无序号章节句，不在此列。
-// 「1.8万家店」「3.9元」是小数不是序号（#199、#218 曾被排成二级标题）。
-// 与 public/js/heading-detect.js 的 SECONDARY_NUMBER_RE 同一口径。
+// 「.」后紧挨数字是小数点（「1.8万家店」「3.9元」，#199、#218），隔了空格就是序号
+// （「3. 108种茶」，#292）。与 public/js/heading-detect.js 同一口径。
 var siteParenHeadingRe = regexp.MustCompile(`^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]`)
-var siteArabicHeadingRe = regexp.MustCompile(`^\d+\s*(?:[、)）]\s*\S|[.．]\s*[^\d\s])`)
+var siteArabicHeadingRe = regexp.MustCompile(`^\d+\s*[、.．)）]\s*\S`)
+var siteDecimalRe = regexp.MustCompile(`^\d+\s*[.．]\d`)
 
 func isSiteSecondaryHeadingText(text string) bool {
 	t := strings.TrimSpace(text)
 	if t == "" {
 		return false
 	}
-	return siteParenHeadingRe.MatchString(t) || siteArabicHeadingRe.MatchString(t)
-}
-
-// isSiteIntroHeadingText：「引子/前言」这类开场标题不是下文序号句的上级章节
-// （与 public/js/heading-detect.js isIntroHeadingText 同一口径）。
-var siteIntroHeadingRe = regexp.MustCompile(`^(?:引子|引言|前言|导语|导读|序言|楔子|开篇|写在前面(?:的话)?)$`)
-var siteIntroHeadingStripRe = regexp.MustCompile(`[\s:：。．.、]`)
-
-func isSiteIntroHeadingText(text string) bool {
-	return siteIntroHeadingRe.MatchString(siteIntroHeadingStripRe.ReplaceAllString(text, ""))
+	return siteParenHeadingRe.MatchString(t) ||
+		siteArabicHeadingRe.MatchString(t) && !siteDecimalRe.MatchString(t)
 }
 
 // hasMutedOrSmallStyle only records visual facts. It is used after a

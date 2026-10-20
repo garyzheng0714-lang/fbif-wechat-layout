@@ -14,12 +14,14 @@ const TITLE_KEYWORDS = [
 // 补署名类前缀（作者/编辑/编审/责编/主编/美编/出品/策划/撰文/撰稿/排版/设计/校对/审校/选题）。
 const CAPTION_LEAD_RE = /^(图|图注|图片|上图|下图|表|资料来源|数据来源|图片来源|来源|制图|截图|拍摄|摄影|注|作者|编辑|编审|责编|主编|美编|出品|策划|撰文|撰稿|排版|设计|校对|审校|选题|Source|Photo|Image|Credit)\s*[：:]/i;
 const DECORATIVE_LINE_RE = /^[\s\-_=—–━·•*]+$/;
-// 二级序号：「1、」「2.」「1）」后跟正文。「1.8万家店」「3.9元」是小数不是序号
-// （#199、#218 曾被排成二级标题）。与 api/wechat_blocks.go 的 siteArabicHeadingRe 同一口径。
-export const SECONDARY_NUMBER_RE = /^\d+\s*(?:[、)）]\s*\S|[.．]\s*[^\d\s])/;
+// 序号后的定界符：「、」「）」「.」，后面跟正文。「.」后紧挨数字是小数点（「1.8万家店」「3.9元」，
+// #199、#218），隔了空格就是序号（「3. 108种茶」，#292）。与 api/wechat_blocks.go 同一口径。
+const MARKER_TAIL = String.raw`\s*(?:[、)）]|[.．](?!\d))\s*\S`;
+// 二级序号：「1、」「2.」「1）」。
+const SECONDARY_NUMBER_RE = new RegExp(String.raw`^\d+` + MARKER_TAIL);
 const PAREN_NUMBER_RE = /^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]/;
 // 再下一层的子序号：「a、」「b.」「①」。只有挂在「1、2、3」下面时才是二级（#121、#229）。
-const SUB_NUMBER_RE = /^(?:[A-Za-z]\s*(?:[、)）]\s*\S|[.．]\s*[^\d\s])|[\u2460-\u2473])/;
+const SUB_NUMBER_RE = new RegExp(String.raw`^(?:[A-Za-z]` + MARKER_TAIL + String.raw`|[\u2460-\u2473])`);
 
 // 引语与口语感叹不是章节标题（2026-10-15，编辑在 #115/#128/#131/#157 都改回了正文）：
 //   - 整句被引号括起来（网友评论、宣传语、受访者原话）；
@@ -179,6 +181,12 @@ function numberKind(t) {
   if (SECONDARY_NUMBER_RE.test(t)) return 'arabic';
   if (SUB_NUMBER_RE.test(t)) return 'sub';
   return '';
+}
+
+// 网站标题2 的序号：「1、2、3」「（一）」。
+export function isSecondaryNumberedText(text) {
+  const kind = numberKind(String(text || '').trim());
+  return kind === 'paren' || kind === 'arabic';
 }
 
 export function liftOrphanSubheadings(elems) {

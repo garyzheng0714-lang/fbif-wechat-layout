@@ -50,7 +50,7 @@ function behParamBool(config, key, fallback) {
 // 标题识别（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）抽到无依赖
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
-const { promoteHeuristicHeadings, hasExplicitDocxHeadings, SECONDARY_NUMBER_RE } = headingModule;
+const { promoteHeuristicHeadings, hasExplicitDocxHeadings, isSecondaryNumberedText } = headingModule;
 const interviewModule = await import('../site-interview.js' + assetQuery);
 const { markInterviewSpeakerPrefixes } = interviewModule;
 const { applySeriesContactLayout } = await import('../site-contact-layout.js' + assetQuery);
@@ -426,17 +426,10 @@ function normalizeSubheadingParens(text) {
 //   一级 = 标题1：中文序号「一、二、三」或无序号章节句 → h2，进目录
 //   二级 = 标题2：「1、2、3」「a、b」或「（一）（二）」→ h3，不进目录、段前段后不空行
 //   （前面没有上级章节标题时整组提成一级，见 heading-detect.js liftOrphanSubheadings）
-function isSiteSecondaryHeadingText(text) {
-  const t = String(text || '').trim();
-  if (!t) return false;
-  if (/^[（(]\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[)）]/.test(t)) return true;
-  return SECONDARY_NUMBER_RE.test(t);
-}
-
 function resolveSiteHeadingLevel(text, explicitLevel) {
   const n = Number(explicitLevel);
   if (n >= 4) return 4;
-  if (n === 3 || isSiteSecondaryHeadingText(text)) return 3;
+  if (n === 3 || isSecondaryNumberedText(text)) return 3;
   return 2;
 }
 
