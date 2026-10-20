@@ -19,6 +19,11 @@ import (
 
 const testLongToutiaoTitle = "这家166年的京都老字号把抹茶做成零食，只开6家店，年营收就做到了1.4亿"
 
+// toutiaoTitleLength 头条号的数法（英文字母、数字两个算一个字）：testLongToutiaoTitle 37 个字符算 33 字。
+func toutiaoTitleLength(title string) int {
+	return yunsuoProfileForTarget(yunsuoAccountTarget{Name: "头条号"}).titleLength(title)
+}
+
 // createLongTitleDistributionJob 一篇已发布原创，标题超过头条号 30 字（网站最新稿同标题）。
 func createLongTitleDistributionJob(t *testing.T, env *publishTestEnv, key string) publishJob {
 	t.Helper()
@@ -74,7 +79,7 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	got := mustJob(t, env, job.ID)
 	draft, _ := externalDraftFor(got, testYunsuoToutiaoID)
 	title := externalIssueFields(draft.Issues)[publishExternalIssueTitle]
-	if title.Max != 30 || title.Length != runeLen(testLongToutiaoTitle) || title.Current != testLongToutiaoTitle {
+	if title.Max != 30 || title.Length != toutiaoTitleLength(testLongToutiaoTitle) || title.Current != testLongToutiaoTitle {
 		t.Fatalf("应记下标题问题与现状：%+v", draft)
 	}
 	if draft.SuggestedTitle != "老茶铺把茶做成零食，年营收1.4亿" || draft.SuggestedBy != "ai" || draft.PreparedFor != draft.CheckedAt {
@@ -296,9 +301,9 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	if len(sent) != 1 || sent[0].kind != externalReminderKindOpen || sent[0].chatID != "oc_review" {
 		t.Fatalf("应在审核卡话题里发一条开场：%+v", sent)
 	}
-	over := runeLen(testLongToutiaoTitle) - 30
+	over := toutiaoTitleLength(testLongToutiaoTitle) - 30
 	for _, want := range []string{`{"tag":"at","user_id":"ou_owner_1"}`, fmt.Sprintf("#%d《%s》同步到头条号前，还差 1 处要改：", job.ID, testLongToutiaoTitle),
-		fmt.Sprintf(`"style":["bold"],"tag":"text","text":"1. 标题超了 %d 字（头条号最多 30 字）"`, over),
+		fmt.Sprintf(`"style":["bold"],"tag":"text","text":"1. 标题超了 %d 字（头条号最多 30 字，英文字母、数字两个算一个字）"`, over),
 		"卡片里已填好建议「", "可以直接用，也可以改成自己的", "改好后点上面卡片里的「保存并同步至头条号」，就会同步。"} {
 		if !strings.Contains(sent[0].post, want) {
 			t.Fatalf("开场缺少 %q: %s", want, sent[0].post)

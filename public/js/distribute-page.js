@@ -21,17 +21,28 @@ function esc(value) {
     .replace(/"/g, '&quot;');
 }
 
-// charCount 与服务端同口径：按字符（rune）数，合并空白。
-export function charCount(value) {
-  return Array.from(String(value || '').replace(/\s+/g, ' ').trim()).length;
+// charCount 与服务端同口径：合并空白后按字符（rune）数；halfWidth（头条号标题）时英文字母、
+// 数字等半角字符两个算一个字（api/yunsuo_platform_profiles.go titleLength）。
+export function charCount(value, halfWidth = false) {
+  const chars = Array.from(String(value || '').replace(/\s+/g, ' ').trim());
+  if (!halfWidth) return chars.length;
+  const ascii = chars.filter(ch => ch.codePointAt(0) < 0x80).length;
+  return chars.length - ascii + Math.floor(ascii / 2);
 }
 
-export function counterState(value, max, min = 0) {
-  const length = charCount(value);
+// counterState fieldMax 是云梭这一档按字符数的上限（头条号 40），先于平台上限查。
+export function counterState(value, max, min = 0, { halfWidth = false, fieldMax = 0 } = {}) {
+  const chars = charCount(value);
+  const length = charCount(value, halfWidth);
+  if (fieldMax > 0 && chars > fieldMax) return { length, over: chars - fieldMax, text: `超出 ${chars - fieldMax} 个字符（最多 ${fieldMax} 个字符）`, invalid: true };
   if (max > 0 && length > max) return { length, over: length - max, text: `超出 ${length - max} 字`, invalid: true };
-  if (min > 0 && length > 0 && length < min) return { length, over: 0, text: `至少 ${min} 字`, invalid: true };
-  if (length === 0) return { length, over: 0, text: '不能为空', invalid: true };
+  if (min > 0 && chars > 0 && chars < min) return { length, over: 0, text: `至少 ${min} 字`, invalid: true };
+  if (chars === 0) return { length, over: 0, text: '不能为空', invalid: true };
   return { length, over: 0, text: '', invalid: false };
+}
+
+function titleCounter(platform) {
+  return { halfWidth: Boolean(platform.title_half_width), fieldMax: platform.title_field_max || 0 };
 }
 
 function statusMarkup(platform) {
@@ -80,7 +91,7 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
   const reasonLine = platform.reason && !platform.needs_fix ? `<p class="dist-meta"><span>${esc(platform.reason)}</span></p>` : '';
   const slot = platform.slot;
   const title = draft.title ?? platform.title;
-  const titleState = counterState(title, platform.title_max, platform.title_min);
+  const titleState = counterState(title, platform.title_max, platform.title_min, titleCounter(platform));
   const titleSuggest = platform.title_suggested && platform.title_suggested !== title
     ? `<div class="dist-suggest"><span class="dist-suggest-text">建议：${esc(platform.title_suggested)}</span><button type="button" class="dist-link" data-use="title">用这个</button></div>`
     : '';
@@ -225,7 +236,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
     const input = section.querySelector(`[name="${field}"]`);
     const max = field === 'title' ? platform.title_max : platform.summary_max;
     const min = field === 'title' ? platform.title_min : 0;
-    const state = counterState(input.value, max, min);
+    const state = counterState(input.value, max, min, field === 'title' ? titleCounter(platform) : {});
     const count = section.querySelector(`[data-count="${field}"]`);
     count.textContent = `${state.length} / ${max}`;
     count.classList.toggle('is-over', state.invalid);
@@ -290,7 +301,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
       if (!input || input.value === (platform[field] ?? '')) continue;
       const max = field === 'title' ? platform.title_max : platform.summary_max;
       const min = field === 'title' ? platform.title_min : 0;
-      if (!counterState(input.value, max, min).invalid) out[field] = input.value;
+      if (!counterState(input.value, max, min, field === 'title' ? titleCounter(platform) : {}).invalid) out[field] = input.value;
     }
     return out;
   }

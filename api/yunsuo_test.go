@@ -190,13 +190,10 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, wanted := range []string{`<h1 class="pgc-h-forward-slash">章节 &lt;一&gt;</h1>`, "<ol>", "<table", "https://cdn.example/poster.jpg"} {
+	for _, wanted := range []string{"<h2>章节 &lt;一&gt;</h2>", "<ol>", "<table", "https://cdn.example/poster.jpg", "https://cdn.example/image.jpg"} {
 		if !strings.Contains(rendered, wanted) {
 			t.Fatalf("中性 HTML 缺少 %q：%s", wanted, rendered)
 		}
-	}
-	if strings.Contains(rendered, "https://cdn.example/image.jpg") {
-		t.Fatalf("正文第一张图做封面，不得再留在正文里：%s", rendered)
 	}
 	if strings.Contains(strings.ToLower(rendered), "javascript:") || strings.Contains(rendered, "<a ") ||
 		strings.Contains(rendered, "<script>") || strings.Contains(rendered, "FoodTalks") {
@@ -219,7 +216,7 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 		t.Fatal(err)
 	}
 	shortLen, titleLen, longLen := len([]rune(payload.ShortTitle)), len([]rune(payload.Title)), len([]rune(payload.LongTitle))
-	if shortLen < 8 || shortLen > 20 || titleLen < 21 || titleLen > 40 || longLen < 41 || longLen > 60 {
+	if shortLen < 8 || shortLen > 20 || titleLen < 15 || titleLen > 40 || longLen < 20 || longLen > 60 {
 		t.Fatalf("云梭标题长度越界：short=%d title=%d long=%d", shortLen, titleLen, longLen)
 	}
 	if payload.Cover != "https://cdn.example/image.jpg" || len(payload.AccountIDs) != 2 || payload.Type != 0 {
@@ -242,9 +239,11 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 	}
 }
 
-// 2026-10-12 用户逐条指出头条号外发稿的问题，金标准是人工发在头条号的 16 篇稿。
-// 这里用网站已发布稿的实际形态（#193 署名合并、#260 Mote 名片在参考来源上方）回归。
-func TestYunsuoDistributionFollowsManualToutiaoLayout(t *testing.T) {
+// 外发版式的金标准是编辑手发在头条号、百家号上的稿（2026-10-20 用户：「按照人工稿改，这应该是
+// 你的标准」；对照 10-15 起的 #286 #287 #289 #290 #292 #299 与 8 月老稿）。正文进云梭后会被它
+// 重写一遍（2026-10-20 实测 14 篇头条稿：h1/strong/pgc-img-caption 丢，h2/h3 变加粗段，
+// <p><small> 变平台图注），所以这里写的是云梭吃得进去的写法。
+func TestYunsuoDistributionFollowsManualLayout(t *testing.T) {
 	stubYunsuoImageSize(t, nil)
 	blocks := `[
 		{"k":"txt","text":"作者：Sage，编辑：Bobo。"},
@@ -253,14 +252,19 @@ func TestYunsuoDistributionFollowsManualToutiaoLayout(t *testing.T) {
 		{"k":"cap","text":"蛋白棒RXBAR和David"},
 		{"k":"cap","text":"图片来源：RXBAR、David"},
 		{"k":"txt","blankBefore":true,"runs":[{"type":"txt","text":"例如我们曾介绍过的Poppi等。https://mp.weixin.qq.com/s/M_dPjnJED8Xx4JJw_3lQ6g同样是主打干净的产品，"},{"type":"txt","text":"RXBAR却没选这条路。","bold":true}]},
+		{"k":"txt","runs":[{"type":"txt","text":"整段加粗的导语。","bold":true}]},
 		{"k":"h","level":2,"text":"第一次创业，他把蛋白棒做简单"},
 		{"k":"txt","runs":[{"type":"txt","text":"这是我"},{"type":"link","text":"茶叶系列","href":"https://www.foodtalks.cn/news/tag/114000"},{"type":"txt","text":"的第38篇。"}]},
 		{"k":"img","src":"https://cdn.example/photo.png"},
-		{"k":"cap","text":"Peter Rahal"},
+		{"k":"cap","text":"Peter Rahal在2024年推出蛋白质品牌David，主打每根28克蛋白质、只有150卡路里的蛋白棒"},
 		{"k":"cap","text":"图片来源：Forbes"},
 		{"k":"h","level":3,"text":"1、包装更新"},
 		{"k":"img","src":"https://cdn.example/wide-but-captioned.png"},
 		{"k":"cap","text":"三得利伊右卫门绿茶全家福"},
+		{"k":"img","src":"https://cdn.example/photo.png"},
+		{"k":"cap","text":"真的！是西柚味！"},
+		{"k":"cap","text":"图片来源：X@木本牙狼"},
+		{"k":"h","level":2,"text":"结语"},
 		{"k":"txt","text":"下一篇，我继续写中国茶叶品牌。"},
 		{"k":"img","blankBefore":true,"src":"https://cdn.example/mote-card.png"},
 		{"k":"txt","blankBefore":true,"text":"参考来源："},
@@ -271,42 +275,195 @@ func TestYunsuoDistributionFollowsManualToutiaoLayout(t *testing.T) {
 		"https://cdn.example/wide-but-captioned.png":"https://cdn.example/wide-but-captioned.png",
 		"https://cdn.example/mote-card.png":"https://cdn.example/mote-card.png","https://cdn.example/sage-card.png":"https://cdn.example/sage-card.png",
 		"https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`
-	payload, err := buildYunsuoPushPayload(publishJob{
+	job := publishJob{
 		Title:      "估值超151亿元！蛋白棒赛道创业，他连赢了两次",
 		SourceName: "FBIF食品饮料创新",
 		Summary:    "竞业协议到期后，明星创业者重走“老路”。",
 		CoverURL:   "https://cdn.example/wechat-cover.jpg",
 		BlocksJSON: blocks,
 		ImageMap:   imageMap,
-	}, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
+	}
+	for _, target := range []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}, {ID: "a-2", Name: "百家号"}} {
+		payload, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{target}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		html := payload.HTML
+		for _, want := range []string{
+			// 开头不放署名，作者、编辑写进文末声明。
+			"<p>一个人，可以在同一赛道成功2次吗？</p>",
+			// 首图留在原位、带图注；说明与图片来源用「；」并成一条，不截短。
+			`<p><img src="https://cdn.example/lead.jpg" alt=""></p><p><small>蛋白棒RXBAR和David；图片来源：RXBAR、David</small></p>`,
+			"<p><small>Peter Rahal在2024年推出蛋白质品牌David，主打每根28克蛋白质、只有150卡路里的蛋白棒；图片来源：Forbes</small></p>",
+			// 标题1 编「一、二、」（结语也编），标题2 与整段加粗都写成云梭会留成加粗段的 h3。
+			"<h2>一、第一次创业，他把蛋白棒做简单</h2>",
+			"<h3>1、包装更新</h3>",
+			"<h2>二、结语</h2>",
+			"<p><small>真的！是西柚味！图片来源：X@木本牙狼</small></p>",
+			"<h3>整段加粗的导语。</h3>",
+			"<p>这是我茶叶系列的第38篇。</p>",
+			"例如我们曾介绍过的Poppi等。同样是主打干净的产品，<strong>RXBAR却没选这条路。</strong>",
+			"wide-but-captioned.png",
+			"<p>参考来源：</p><p>[1] The RXBAR Story</p><p>本文为FBIF食品饮料创新原创，作者：Sage，编辑：Bobo，转载请联系授权。</p>",
+		} {
+			if !strings.Contains(html, want) {
+				t.Errorf("%s 外发正文缺少 %q\n%s", target.Name, want, html)
+			}
+		}
+		for _, banned := range []string{"作者：Sage</p>", "<p><br></p>", "<a ", "mp.weixin.qq.com", "<h1", "pgc-", "mote-card.png", "sage-card.png"} {
+			if strings.Contains(html, banned) {
+				t.Errorf("%s 外发正文不得出现 %q\n%s", target.Name, banned, html)
+			}
+		}
+		// 封面用公众号封面（与 FoodTalks 一致）：头条正文开头不是图，百家号即使会把封面插到
+		// 正文最前面，也不能把文中的首图挪上去。
+		if payload.Cover != "https://cdn.example/wechat-cover.jpg" || strings.Contains(html, "wechat-cover.jpg") {
+			t.Errorf("%s 封面应是公众号封面且不进正文：cover=%q", target.Name, payload.Cover)
+		}
+	}
+}
+
+// 编译稿的「英文来源」「中文编辑」在正文最后（#289），人工稿把它们写进文末声明。
+func TestYunsuoDistributionMovesTailCreditsIntoStatement(t *testing.T) {
+	stubYunsuoImageSize(t, nil)
+	blocks := `[
+		{"k":"txt","text":"当地时间10月14日，Whole Foods Market发布2027年八大食品趋势。"},
+		{"k":"txt","text":"Lentiful杯装即食扁豆餐以扁豆为主要原料。"},
+		{"k":"txt","text":"英文来源：Whole Foods Market"},
+		{"k":"txt","text":"中文编辑：kiki"}
+	]`
+	html, err := renderYunsuoHTML(blocks, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	html := payload.HTML
-	if payload.Cover != "https://cdn.example/lead.jpg" || strings.Contains(html, "lead.jpg") || strings.Contains(html, "蛋白棒RXBAR和David") {
-		t.Fatalf("封面应取正文第一张图并连图注一起从正文拿掉，cover=%q html=%s", payload.Cover, html)
+	want := "<p>Lentiful杯装即食扁豆餐以扁豆为主要原料。</p><p>本文为FBIF食品饮料创新原创，英文来源：Whole Foods Market，中文编辑：kiki，转载请联系授权。</p>"
+	if !strings.HasSuffix(html, want) {
+		t.Fatalf("文末署名应并进声明：%s", html)
 	}
-	if strings.Contains(html, "wechat-cover.jpg") {
-		t.Fatalf("不得再另传公众号封面：%s", html)
+	// 没有署名就只写原创声明（#287）。
+	html, err = renderYunsuoHTML(`[{"k":"txt","text":"十项趋势并不是一张需要同时完成的清单。"}]`, `{}`)
+	if err != nil || !strings.HasSuffix(html, "<p>本文为FBIF食品饮料创新原创，转载请联系授权。</p>") {
+		t.Fatalf("无署名稿的声明不对：%s %v", html, err)
 	}
-	for _, want := range []string{
-		"<p>作者：Sage</p><p>编辑：Bobo</p><p>一个人",
-		`<div class="pgc-img"><img src="https://cdn.example/photo.png" alt=""><p class="pgc-img-caption">Peter Rahal；图片来源：Forbes</p></div>`,
-		`<h1 class="pgc-h-forward-slash">第一次创业，他把蛋白棒做简单</h1>`,
-		"<p><strong>1、包装更新</strong></p>",
-		"<p>这是我茶叶系列的第38篇。</p>",
-		"例如我们曾介绍过的Poppi等。同样是主打干净的产品，<strong>RXBAR却没选这条路。</strong>",
-		"wide-but-captioned.png",
-		"<p>参考来源：</p><p>[1] The RXBAR Story</p><p>本文为FBIF食品饮料创新原创，作者：Sage，转载请联系授权。</p>",
+}
+
+// 小标题序号：人工稿两篇以上的标题1 都编「一、二、」；原文已经编了号（#292）、或只有一个标题
+// （#290）就不动；参考来源不算章节。
+func TestYunsuoDistributionNumbersSectionHeadings(t *testing.T) {
+	render := func(blocks string) string {
+		t.Helper()
+		html, err := renderYunsuoHTML(blocks, `{}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return html
+	}
+	if html := render(`[{"k":"h","level":2,"text":"趋势一 营养设计"},{"k":"txt","text":"正文。"},{"k":"h","level":2,"text":"趋势二 精准蛋白"},{"k":"h","level":2,"text":"参考来源："},{"k":"txt","text":"[1] Innova"}]`); !strings.Contains(html, "<h2>一、趋势一 营养设计</h2>") ||
+		!strings.Contains(html, "<h2>二、趋势二 精准蛋白</h2>") || !strings.Contains(html, "<h2>参考来源：</h2>") {
+		t.Fatalf("两个以上标题1 应编号、参考来源不编：%s", html)
+	}
+	if html := render(`[{"k":"h","level":2,"text":"一、 一群做设计的人，“起义”做茶"},{"k":"h","level":2,"text":"被tea'stone的茶惊艳到"},{"k":"h","level":3,"text":"1. 山河瓶"}]`); !strings.Contains(html, "<h2>一、 一群做设计的人，“起义”做茶</h2>") ||
+		!strings.Contains(html, "<h2>被tea&#39;stone的茶惊艳到</h2>") || !strings.Contains(html, "<h3>1. 山河瓶</h3>") {
+		t.Fatalf("原文已编号的不再编：%s", html)
+	}
+	if html := render(`[{"k":"h","level":2,"text":"炸薯片，还能把油换成水？"},{"k":"txt","text":"正文。"}]`); !strings.Contains(html, "<h2>炸薯片，还能把油换成水？</h2>") {
+		t.Fatalf("只有一个标题不编号：%s", html)
+	}
+	if html := render(`[{"k":"h","level":2,"text":"3.9元的瓶装茶"},{"k":"h","level":2,"text":"便利店的新货架"}]`); !strings.Contains(html, "<h2>一、3.9元的瓶装茶</h2>") {
+		t.Fatalf("小数开头不算已编号：%s", html)
+	}
+}
+
+// 封面：云梭在百家号上总会把 cover 插到正文最前面（#95 8 月稿、#282），在头条号上用公众号封面时
+// 不插（10-10～10-12 #165 #175 #180 #193 #196 #260 六篇）。百家号的文章若以图开头，就用这张图
+// 当封面并从正文拿掉，插回来正好是原位；头条号正文一律不动。
+func TestYunsuoCoverFollowsHowEachPlatformPlacesIt(t *testing.T) {
+	stubYunsuoImageSize(t, nil)
+	blocks := `[
+		{"k":"txt","text":"作者：Mote莫特"},
+		{"k":"img","src":"https://cdn.example/lead.jpg"},
+		{"k":"cap","text":"tea'stone深圳万象前海店"},
+		{"k":"txt","text":"这是我茶叶系列的第39篇。"}
+	]`
+	job := publishJob{
+		Title:      "最美的中国茶馆tea'stone，8年开了18家店：我的2周体验和观察",
+		SourceName: "FBIF食品饮料创新",
+		CoverURL:   "https://cdn.example/wechat-cover.jpg",
+		BlocksJSON: blocks,
+		ImageMap:   `{"https://cdn.example/lead.jpg":"https://cdn.example/lead.jpg","https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`,
+	}
+	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
+	toutiao, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, categories)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toutiao.Cover != "https://cdn.example/wechat-cover.jpg" ||
+		!strings.HasPrefix(toutiao.HTML, `<p><img src="https://cdn.example/lead.jpg" alt=""></p><p><small>tea&#39;stone深圳万象前海店</small></p>`) {
+		t.Fatalf("头条号：封面用公众号封面，首图留在原位：cover=%q html=%s", toutiao.Cover, toutiao.HTML)
+	}
+	baijia, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-2", Name: "百家号"}}, categories)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baijia.Cover != "https://cdn.example/lead.jpg" || strings.Contains(baijia.HTML, "lead.jpg") ||
+		!strings.HasPrefix(baijia.HTML, "<p>tea&#39;stone深圳万象前海店</p><p>这是我茶叶系列的第39篇。</p>") {
+		t.Fatalf("百家号：开头的图做封面（云梭会插回最前面），图注留在原处：cover=%q html=%s", baijia.Cover, baijia.HTML)
+	}
+}
+
+// 标题用原文：云梭三档（short 8–20、title 15–40、long 20–60）放得下就原样写，放不下才补或截。
+// 头条号用 title 档，百家号用 long 档（线上百家号标题都是「原标题｜摘要」，#165 #175 #180）。
+func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
+	stubYunsuoImageSize(t, nil)
+	job := publishJob{
+		SourceName: "FBIF食品饮料创新",
+		Summary:    "饮品越来越像甜品，背后的原料也有了更多值得探索的使用方式。",
+		CoverURL:   "https://cdn.example/wechat-cover.jpg",
+		BlocksJSON: `[{"k":"txt","text":"不管吃的喝的，现在都能喝了。"}]`,
+		ImageMap:   `{"https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`,
+	}
+	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
+	job.Title = "西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了" // 26 字
+	payload, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, categories)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Title != job.Title || payload.LongTitle != job.Title {
+		t.Fatalf("放得下的档位应原样用原标题：title=%q long=%q", payload.Title, payload.LongTitle)
+	}
+	job.Title = "巧克力也想成新茶饮的“心头好”" // 15 字：title 档原样，long 档不足 20 字才补
+	if payload, err = buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, categories); err != nil ||
+		payload.Title != job.Title || !strings.HasPrefix(payload.LongTitle, job.Title+"｜") {
+		t.Fatalf("15 字标题：title=%q long=%q err=%v", payload.Title, payload.LongTitle, err)
+	}
+	if yunsuoProfileForTarget(yunsuoAccountTarget{Name: "百家号"}).TitleField != yunsuoTitleLong ||
+		yunsuoProfileForTarget(yunsuoAccountTarget{Name: "头条号"}).TitleField != yunsuoTitleMedium {
+		t.Fatal("头条号用 title 档、百家号用 long 档")
+	}
+}
+
+// 头条号标题字数：英文字母、数字算半个字。编辑手发的 #287（32 字）、#292（35 字）、#289（42 字）
+// 头条都收了；按每个字符算 1 会把它们误拦成待修改。云梭 title 档本身最多 40 字，超了照样要改。
+func TestToutiaoTitleCountsASCIIAsHalf(t *testing.T) {
+	profile := yunsuoProfileForTarget(yunsuoAccountTarget{Name: "头条号"})
+	for _, title := range []string{
+		"Innova揭晓2027全球食品饮料十大趋势，穿越二十年创新周期",
+		"最美的中国茶馆tea'stone，8年开了18家店：我的2周体验和观察",
 	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("外发正文缺少 %q\n%s", want, html)
+		if issues := externalTextIssues(publishJob{Title: title}, profile, publishExternalDraft{}); len(issues) != 0 {
+			t.Errorf("头条号收过的标题不应拦：%q %+v", title, issues)
 		}
 	}
-	for _, banned := range []string{"作者：Sage，编辑：Bobo", "Bobo。", "<p><br></p>", "<a ", "mp.weixin.qq.com", "<h2", "<small>", "mote-card.png", "sage-card.png"} {
-		if strings.Contains(html, banned) {
-			t.Errorf("外发正文不得出现 %q\n%s", banned, html)
-		}
+	issues := externalTextIssues(publishJob{Title: "Whole Foods Market发布2027年8大食品趋势！苦味升级、豆类热潮…"}, profile, publishExternalDraft{})
+	if len(issues) != 1 || issues[0].Length != 42 || issues[0].Max != 40 {
+		t.Fatalf("超过云梭 title 档 40 字应拦：%+v", issues)
+	}
+	issues = externalTextIssues(publishJob{Title: "这个标题全是汉字一共三十一个字远远超过了头条号的标题字数上限啊"}, profile, publishExternalDraft{})
+	if len(issues) != 1 || issues[0].Length != 31 || issues[0].Max != 30 {
+		t.Fatalf("31 个汉字应超头条 30 字：%+v", issues)
+	}
+	if got := profile.titleLength("Whole Foods Market发布2027年8大食品趋势！苦味升级、豆类热潮…"); got != 30 {
+		t.Fatalf("头条字数 = %d，想要 30", got)
 	}
 }
 
@@ -344,7 +501,7 @@ func init() {
 }
 
 // TestYunsuoCoverRespectsToutiaoMinimum 2026-10-11 #183 头条号回执「封面图尺寸过小780x332，
-// 平台要求不得小于452x352」，受理后失败只能人工处理：推之前就挑够大的封面。
+// 平台要求不得小于452x352」，受理后失败只能人工处理：推之前就查封面尺寸。
 func TestYunsuoCoverRespectsToutiaoMinimum(t *testing.T) {
 	blocks := `[
 		{"k":"txt","text":"正文第一段，交代这篇文章要讲的品牌故事。"},
@@ -363,9 +520,8 @@ func TestYunsuoCoverRespectsToutiaoMinimum(t *testing.T) {
 	targets := []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}
 	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
 
-	// #220 实测：正文第一张图 437×336 → 留在正文，封面退回公众号封面。
 	stubYunsuoImageSize(t, map[string][2]int{
-		"https://cdn.example/lead.png":     {437, 336},
+		"https://cdn.example/lead.png":     {1080, 720},
 		"https://cdn.example/wx-cover.jpg": {1200, 510},
 	})
 	payload, err := buildYunsuoPushPayload(job, targets, categories)
@@ -373,23 +529,24 @@ func TestYunsuoCoverRespectsToutiaoMinimum(t *testing.T) {
 		t.Fatal(err)
 	}
 	if payload.Cover != "https://cdn.example/wx-cover.jpg" || !strings.Contains(payload.HTML, "lead.png") {
-		t.Fatalf("第一张图太小应留在正文、封面用公众号封面：cover=%q html=%s", payload.Cover, payload.HTML)
+		t.Fatalf("封面用公众号封面，正文图留在原位：cover=%q html=%s", payload.Cover, payload.HTML)
 	}
 
-	// 够大就照旧取第一张图做封面并从正文拿掉。
-	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example/lead.png": {1080, 720}})
-	if payload, err = buildYunsuoPushPayload(job, targets, categories); err != nil ||
-		payload.Cover != "https://cdn.example/lead.png" || strings.Contains(payload.HTML, "lead.png") {
-		t.Fatalf("第一张图够大应做封面：cover=%q err=%v", payload.Cover, err)
-	}
-
-	// 两张都太小（#183 公众号封面 780×332）：推了也会被平台拒，直接不推并说明原因。
+	// 公众号封面太小（#183 780×332）：推了也会被平台拒，直接不推并说明原因。
 	stubYunsuoImageSize(t, map[string][2]int{
-		"https://cdn.example/lead.png":     {437, 336},
+		"https://cdn.example/lead.png":     {1080, 720},
 		"https://cdn.example/wx-cover.jpg": {780, 332},
 	})
 	if _, err = buildYunsuoPushPayload(job, targets, categories); err == nil || !strings.Contains(err.Error(), "780x332") {
 		t.Fatalf("封面不够头条下限应拒绝推送并给出尺寸，实际 err=%v", err)
+	}
+
+	// 没有公众号封面才用正文第一张够大的图，正文照旧不动。
+	job.CoverURL = ""
+	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example/lead.png": {1080, 720}})
+	if payload, err = buildYunsuoPushPayload(job, targets, categories); err != nil ||
+		payload.Cover != "https://cdn.example/lead.png" || !strings.Contains(payload.HTML, "lead.png") {
+		t.Fatalf("没有公众号封面时用正文第一张图：cover=%q err=%v", payload.Cover, err)
 	}
 }
 
@@ -418,14 +575,15 @@ func TestYunsuoShortTitleBreaksAtPunctuation(t *testing.T) {
 		{"蛋白棒，亿滋首席执行官称赞这是全英国最好吃的蛋白棒", "蛋白棒，亿滋首席执行官称赞这是全英国最好"},
 	}
 	for _, tc := range cases {
-		got := yunsuoTitleVariant(tc.title, "", 8, 20)
+		got := yunsuoTitleVariant(tc.title, "", yunsuoTitleShort)
 		if got != tc.want {
 			t.Errorf("short_title(%q) = %q，想要 %q", tc.title, got, tc.want)
 		}
 	}
-	long := yunsuoTitleVariant("三得利卖出100亿瓶绿茶，背后藏着一家236年的老茶铺",
-		"三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年、年收60亿日元的老茶铺。", 41, 60)
-	if want := "三得利卖出100亿瓶绿茶，背后藏着一家236年的老茶铺｜三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年"; long != want {
+	long := yunsuoTitleVariant("三得利",
+		"三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年、年收60亿日元的老茶铺。三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年。", yunsuoTitleLong)
+	// 补上摘要超过 60 字：在标点处截短。
+	if want := "三得利｜三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年、年收60亿日元的老茶铺。三得利伊右卫门绿茶"; long != want {
 		t.Errorf("long_title = %q，想要 %q", long, want)
 	}
 }
@@ -477,8 +635,8 @@ func TestYunsuoHTMLDropsUnmirroredAndNonPublicURLs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(rendered, "https://cdn.example/cover.jpg") {
-		t.Fatalf("唯一合规的图是正文第一张，应拿去做封面而不留在正文：%s", rendered)
+	if !strings.Contains(rendered, "https://cdn.example/cover.jpg") {
+		t.Fatalf("唯一合规的图应留在正文：%s", rendered)
 	}
 	if strings.Contains(rendered, "unmirrored.example") {
 		t.Fatalf("未镜像媒体不得进入云梭 HTML：%s", rendered)
@@ -569,17 +727,20 @@ func TestParseYunsuoStatusesAcceptsAPICreatedTypeString(t *testing.T) {
 	}
 }
 
-// FoodTalks 署名会把「编译/翻译/采访」并进来，外发同样按原文分行。
+// FoodTalks 署名会把「编译/翻译/采访」并进来，外发按原文逐项拆出来写进文末声明。
 func TestYunsuoBylineSplitsTranslatorCredits(t *testing.T) {
-	lines, author, ok := parseYunsuoByline("作者：Chloe Sorvino，翻译：Lemin。")
-	if !ok || author != "Chloe Sorvino" || strings.Join(lines, "|") != "作者：Chloe Sorvino|翻译：Lemin" {
-		t.Fatalf("lines=%v author=%q ok=%v", lines, author, ok)
+	credits, ok := parseYunsuoByline("作者：Chloe Sorvino，翻译：Lemin。")
+	if !ok || strings.Join(credits, "|") != "作者：Chloe Sorvino|翻译：Lemin" {
+		t.Fatalf("credits=%v ok=%v", credits, ok)
 	}
-	lines, _, ok = parseYunsuoByline("编译：李言")
-	if !ok || strings.Join(lines, "|") != "编译：李言" {
-		t.Fatalf("lines=%v ok=%v", lines, ok)
+	credits, ok = parseYunsuoByline("英文来源：Whole Foods Market")
+	if !ok || strings.Join(credits, "|") != "英文来源：Whole Foods Market" {
+		t.Fatalf("credits=%v ok=%v", credits, ok)
 	}
-	if _, _, ok := parseYunsuoByline("作者是谁，这很重要。"); ok {
+	if _, ok := parseYunsuoByline("作者是谁，这很重要。"); ok {
 		t.Fatal("正文句不能当署名拆")
+	}
+	if _, ok := parseYunsuoByline("来源：艾媒咨询《2025新式茶饮报告》"); ok {
+		t.Fatal("数据出处「来源：」不是署名")
 	}
 }

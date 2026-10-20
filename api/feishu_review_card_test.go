@@ -554,9 +554,10 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	body := panelJSON(t, form)
 	for _, want := range []string{
 		"<font color='orange'>待修改</font>",
-		fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：头条号最多 30 字，现在 %d 字", runeLen(long)-30, runeLen(long)),
+		fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：头条号最多 30 字（英文字母、数字两个算一个字），现在 %d 字", runeLen(long)-30, runeLen(long)),
 		"现在：" + long,
-		`"name":"t_72_0"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":30`, `"content":"改成"`,
+		// 输入框按字符数限长，放宽到云梭 title 档的 40 个字符；按头条数法超没超由服务端判。
+		`"name":"t_72_0"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":40`, `"placeholder":{"content":"30 字以内"`, `"content":"改成"`,
 		"<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200",
 		`"tag":"select_img"`, `"name":"c_72_0"`, `"img_key":"img_big"`, `"value":"` + reviewCardCoverValue("https://cdn.example.com/big.jpg") + `"`,
 		`"content":"保存并同步至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"slot":0`,

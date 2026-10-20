@@ -31,19 +31,21 @@ type yunsuoInline struct {
 // renderYunsuoHTML 从中立 Block[] 直接生成外部平台可移植 HTML。
 // 它不读 FoodTalks ContentHTML，也不引用任何网站渲染器或页脚。
 // 进云梭前先切公众号导流尾：外发与网站同一口径，不看是不是原创。
-// 版式按多平台规则（yunsuo_distribution_rules.go），封面图不在返回的正文里。
+// 版式按多平台规则（yunsuo_distribution_rules.go）。
+//
+// 写法只用云梭吃得进去的（2026-10-20 拿 14 篇头条稿的 payload 与线上正文逐块比出来的）：
+// 云梭把正文重新解析再生成平台格式，h2/h3 → 加粗段，<p><img></p> 后跟 <p><small> → 平台
+// 原生图注，链接只剩字、空段丢掉；h1、<strong>、平台原生的 pgc-img-caption 进去就丢（10-12
+// 改成头条原生写法后小标题与图注都没了）。所以小标题与整段加粗都写成 h2/h3，图注写成
+// <p><small>；段内局部加粗照写 <strong>，云梭目前不留。
 func renderYunsuoHTML(blocksJSON, imageMapJSON string) (string, error) {
-	rendered, err := renderYunsuoDistribution(blocksJSON, imageMapJSON, "", yunsuoGenericProfile)
+	rendered, err := renderYunsuoDistribution(blocksJSON, imageMapJSON, "", yunsuoGenericProfile, "", "")
 	return rendered.HTML, err
 }
 
 type yunsuoRendered struct {
-	HTML string
-	Lead string
-}
-
-func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profile yunsuoPlatformProfile) (yunsuoRendered, error) {
-	return renderYunsuoDistributionWithCover(blocksJSON, imageMapJSON, publisher, profile, "")
+	HTML  string
+	Cover string
 }
 
 // decodeYunsuoDistributionContent 外发用的正文块：先切掉公众号导流尾。
@@ -55,12 +57,13 @@ func decodeYunsuoDistributionContent(blocksJSON, imageMapJSON string) ([]yunsuoB
 	return decodeYunsuoContent(strippedJSON, imageMapJSON)
 }
 
-func renderYunsuoDistributionWithCover(blocksJSON, imageMapJSON, publisher string, profile yunsuoPlatformProfile, cover string) (yunsuoRendered, error) {
+// renderYunsuoDistribution wechatCover 是公众号封面（已映射），chosen 是人给这个平台换的封面。
+func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profile yunsuoPlatformProfile, wechatCover, chosen string) (yunsuoRendered, error) {
 	decoded, imageMap, err := decodeYunsuoDistributionContent(blocksJSON, imageMapJSON)
 	if err != nil {
 		return yunsuoRendered{}, err
 	}
-	dist := prepareYunsuoDistributionBlocksWithCover(decoded, imageMap, profile, cover)
+	dist := prepareYunsuoDistribution(decoded, imageMap, profile, wechatCover, chosen)
 	blocks := dist.Blocks
 	var out strings.Builder
 	hasStatement := false
@@ -76,14 +79,17 @@ func renderYunsuoDistributionWithCover(blocksJSON, imageMapJSON, publisher strin
 			if text == "" {
 				continue
 			}
-			// 标题1 用平台的小标题写法（头条只认 h1.pgc-h-forward-slash）；
-			// 网站的标题2（「1、」「（一）」）在人工稿里是加粗段落。
 			if block.Level <= 2 {
-				out.WriteString(profile.HeadingOpen + text + profile.HeadingClose)
+				out.WriteString("<h2>" + text + "</h2>")
 			} else {
-				out.WriteString("<p><strong>" + text + "</strong></p>")
+				out.WriteString("<h3>" + text + "</h3>")
 			}
 		case "txt":
+			// 整段加粗：云梭只把 h2/h3 留成加粗段，<strong> 会丢。
+			if yunsuoWholeBold(block) {
+				out.WriteString("<h3>" + escapeYunsuoText(strings.TrimSpace(stripYunsuoBareURLs(yunsuoBlockText(block)))) + "</h3>")
+				continue
+			}
 			writeYunsuoTextElement(&out, "p", block.Text, block.Runs)
 		case "cap":
 			// 前面没有图的说明文字（图被丢掉或排在图前）按普通段落保留。
@@ -101,13 +107,9 @@ func renderYunsuoDistributionWithCover(blocksJSON, imageMapJSON, publisher strin
 			if src == "" {
 				continue
 			}
-			img := `<img src="` + stdhtml.EscapeString(src) + `" alt="">`
-			if caption := yunsuoCaption(captions); caption != "" && profile.NativeCaption {
-				out.WriteString(`<div class="pgc-img">` + img + `<p class="pgc-img-caption">` + escapeYunsuoText(caption) + "</p></div>")
-			} else if caption != "" {
-				out.WriteString("<p>" + img + "</p><p>" + escapeYunsuoText(caption) + "</p>")
-			} else {
-				out.WriteString("<p>" + img + "</p>")
+			out.WriteString(`<p><img src="` + stdhtml.EscapeString(src) + `" alt=""></p>`)
+			if caption := yunsuoCaption(captions); caption != "" {
+				out.WriteString("<p><small>" + escapeYunsuoText(caption) + "</small></p>")
 			}
 		case "video":
 			src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap))
@@ -157,13 +159,28 @@ func renderYunsuoDistributionWithCover(blocksJSON, imageMapJSON, publisher strin
 		return yunsuoRendered{}, errors.New("云梭分发正文为空")
 	}
 	if !hasStatement {
-		out.WriteString("<p>" + escapeYunsuoText(yunsuoStatement(publisher, dist.Author)) + "</p>")
+		out.WriteString("<p>" + escapeYunsuoText(yunsuoStatement(publisher, dist.Credits)) + "</p>")
 	}
-	return yunsuoRendered{HTML: strings.TrimSpace(out.String()), Lead: dist.Lead}, nil
+	return yunsuoRendered{HTML: strings.TrimSpace(out.String()), Cover: dist.Cover}, nil
+}
+
+// yunsuoWholeBold 整段（有字的部分）都是加粗。
+func yunsuoWholeBold(block yunsuoBlock) bool {
+	bold := false
+	for _, run := range block.Runs {
+		if strings.TrimSpace(run.Text) == "" {
+			continue
+		}
+		if !run.Bold {
+			return false
+		}
+		bold = true
+	}
+	return bold
 }
 
 // buildYunsuoPushPayload 组装一次不可变的推送快照。外发按平台分开推（每条 lane 一个
-// 账号），版式与封面下限按这个账号的平台规则；多个账号时用通用规则。
+// 账号），封面与标题按这个账号的平台规则；多个账号时用通用规则。
 func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categories []string) (yunsuoPushPayload, error) {
 	return buildYunsuoPushPayloadWithDraft(job, targets, categories, publishExternalDraft{})
 }
@@ -180,7 +197,7 @@ func buildYunsuoPushPayloadWithDraft(job publishJob, targets []yunsuoAccountTarg
 		profile = yunsuoProfileForTarget(targets[0])
 	}
 	coverOverride := publicYunsuoMediaURL(strings.TrimSpace(draft.CoverURL))
-	rendered, err := renderYunsuoDistributionWithCover(job.BlocksJSON, job.ImageMap, job.SourceName, profile, coverOverride)
+	rendered, err := renderYunsuoDistribution(job.BlocksJSON, job.ImageMap, job.SourceName, profile, yunsuoWechatCover(job, imageMap), coverOverride)
 	if err != nil {
 		return yunsuoPushPayload{}, err
 	}
@@ -205,12 +222,7 @@ func buildYunsuoPushPayloadWithDraft(job publishJob, targets []yunsuoAccountTarg
 		description = truncateYunsuoTitle(description, 1, profile.SummaryMax)
 	}
 
-	// 云梭会把 cover 插到正文顶部：用正文第一张图（已从正文拿掉），
-	// 不再另传公众号封面，免得同一张图出现两次。正文没图或第一张图太小才退回原封面。
-	cover := rendered.Lead
-	if cover == "" {
-		cover = publicYunsuoMediaURL(mapYunsuoMedia(job.CoverURL, imageMap))
-	}
+	cover := rendered.Cover
 	if cover == "" {
 		return yunsuoPushPayload{}, errors.New("云梭分发缺少公开可访问的封面")
 	}
@@ -246,10 +258,12 @@ func buildYunsuoPushPayloadWithDraft(job publishJob, targets []yunsuoAccountTarg
 		title = override
 	}
 	payload := yunsuoPushPayload{
-		Type:        0,
-		ShortTitle:  yunsuoTitleVariant(title, supplement, 8, 20),
-		Title:       yunsuoTitleVariant(title, supplement, 21, 40),
-		LongTitle:   yunsuoTitleVariant(title, supplement, 41, 60),
+		Type: 0,
+		// 三档都按云梭文档的字数范围：放得下就是原标题，不足才补、超了才截（平台用的那一档
+		// 超了推送前检查已拦下）。
+		ShortTitle:  yunsuoTitleVariant(title, supplement, yunsuoTitleShort),
+		Title:       yunsuoTitleVariant(title, supplement, yunsuoTitleMedium),
+		LongTitle:   yunsuoTitleVariant(title, supplement, yunsuoTitleLong),
 		AccountIDs:  accountIDs,
 		Keywords:    yunsuoKeywords(job.Tags),
 		Description: description,
@@ -505,7 +519,8 @@ func yunsuoInlinePlainText(text string, runs []Run) string {
 	return compactYunsuoText(out.String())
 }
 
-func yunsuoTitleVariant(base, supplement string, minRunes, maxRunes int) string {
+func yunsuoTitleVariant(base, supplement, field string) string {
+	minRunes, maxRunes := yunsuoTitleFieldRange(field)
 	base = compactYunsuoText(base)
 	supplement = compactYunsuoText(supplement)
 	candidate := base

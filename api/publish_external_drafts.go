@@ -117,18 +117,18 @@ func externalDraftMaterial(job publishJob) string {
 }
 
 // externalDraftBlocked 这个平台卡在待修改、文章和平台规则都没变：等人改，不必再去网站取稿重查。
-// 平台上限改过（如 2026-10-13 头条号标题 20→30 字）就重查一次，过了照常推。
+// 平台规则改过（如 2026-10-13 头条号标题 20→30 字、10-20 英文数字算半个字）就重查一次，过了照常推：
+// 标题按记下的那一句用现在的规则重算，结果不一样就是规则变了。
 func externalDraftBlocked(job publishJob, target yunsuoAccountTarget) bool {
 	draft, ok := externalDraftFor(job, target.ID)
 	if !ok || len(draft.Issues) == 0 || draft.CheckedMaterial != externalDraftMaterial(job) {
 		return false
 	}
 	profile := yunsuoProfileForTarget(target)
-	titleMin, titleMax := profile.titleLimits()
 	for _, issue := range draft.Issues {
 		switch issue.Field {
 		case publishExternalIssueTitle:
-			if issue.Min != titleMin || issue.Max != titleMax {
+			if length, max, over := profile.titleOver(issue.Current); !over || length != issue.Length || max != issue.Max {
 				return false
 			}
 		case publishExternalIssueSummary:
@@ -177,9 +177,9 @@ func externalEffectiveSummary(job publishJob, draft publishExternalDraft) string
 func externalTextIssues(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft) []publishExternalIssue {
 	var issues []publishExternalIssue
 	title := externalEffectiveTitle(job, draft)
-	min, max := profile.titleLimits()
-	if runeLen(title) > max {
-		issues = append(issues, publishExternalIssue{Field: publishExternalIssueTitle, Current: title, Length: runeLen(title), Min: min, Max: max})
+	min, _ := profile.titleLimits()
+	if length, max, over := profile.titleOver(title); over {
+		issues = append(issues, publishExternalIssue{Field: publishExternalIssueTitle, Current: title, Length: length, Min: min, Max: max})
 	}
 	if profile.SummaryMax > 0 {
 		if summary := externalEffectiveSummary(job, draft); runeLen(summary) > profile.SummaryMax {
@@ -189,8 +189,8 @@ func externalTextIssues(job publishJob, profile yunsuoPlatformProfile, draft pub
 	return issues
 }
 
-// externalCoverIssue 封面检查：人换过封面就查那张；否则与推送同口径——正文第一张图够大就用它，
-// 不够退回公众号封面。读不到尺寸的不拦（交给平台判断）。
+// externalCoverIssue 封面检查：人换过封面就查那张；否则与推送同口径（chooseYunsuoCover：公众号封面，
+// 会插封面的平台以图开头时用开头那张，没有公众号封面才用正文第一张够大的图）。读不到尺寸的不拦。
 func externalCoverIssue(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft, blocks []yunsuoBlock, imageMap map[string]string) *publishExternalIssue {
 	if profile.CoverMinWidth <= 0 && profile.CoverMinHeight <= 0 {
 		return nil
@@ -211,15 +211,12 @@ func externalCoverIssue(job publishJob, profile yunsuoPlatformProfile, draft pub
 		}
 		return tooSmall(chosen)
 	}
-	if dist := prepareYunsuoDistributionBlocks(blocks, imageMap, profile); dist.Lead != "" {
-		return nil
-	}
-	fallback := publicYunsuoMediaURL(mapYunsuoMedia(job.CoverURL, imageMap))
-	if fallback == "" {
+	cover := prepareYunsuoDistribution(blocks, imageMap, profile, yunsuoWechatCover(job, imageMap), "").Cover
+	if cover == "" {
 		return &publishExternalIssue{Field: publishExternalIssueCover, Missing: true,
 			MinWidth: profile.CoverMinWidth, MinHeight: profile.CoverMinHeight}
 	}
-	return tooSmall(fallback)
+	return tooSmall(cover)
 }
 
 // externalPreflight 推送前按这个平台的规则检查（会读图片尺寸，只在后台调用）。返回问题、
@@ -362,12 +359,13 @@ func applyExternalDraftEdit(job publishJob, target yunsuoAccountTarget, edit ext
 	draft, _ := externalDraftFor(job, target.ID)
 	if edit.Title != nil {
 		title := compactYunsuoText(*edit.Title)
-		min, max := profile.titleLimits()
+		min, _ := profile.titleLimits()
+		length, max, over := profile.titleOver(title)
 		switch n := runeLen(title); {
 		case title == "":
 			return draft, fmt.Errorf("%s标题不能为空", profile.Name)
-		case n > max:
-			return draft, fmt.Errorf("%s标题最多 %d 字，现在 %d 字，还要删 %d 字", profile.Name, max, n, n-max)
+		case over:
+			return draft, fmt.Errorf("%s标题最多 %d 字，现在 %d 字，还要删 %d 字", profile.Name, max, length, length-max)
 		case n < min:
 			return draft, fmt.Errorf("%s标题至少 %d 字，现在 %d 字", profile.Name, min, n)
 		}

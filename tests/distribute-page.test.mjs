@@ -42,6 +42,17 @@ test('改稿页：字数与服务端同口径（按字符、合并空白）', ()
   assert.equal(counterState('刚好合适的一句标题', 20, 8).invalid, false);
 });
 
+// 头条号标题英文字母、数字两个算一个字（与 api/yunsuo_platform_profiles.go titleLength 同口径），
+// 按字符数还不能超过云梭 title 档的 40 个字符。
+test('改稿页：头条号标题英文数字算半个字', () => {
+  const toutiao = { halfWidth: true, fieldMax: 40 };
+  const tt289 = 'Whole Foods Market发布2027年8大食品趋势！苦味升级、豆类热潮…';
+  assert.equal(charCount('Innova揭晓2027全球食品饮料十大趋势，穿越二十年创新周期', true), 27);
+  assert.equal(counterState('Innova揭晓2027全球食品饮料十大趋势，穿越二十年创新周期', 30, 15, toutiao).invalid, false);
+  assert.equal(charCount(tt289, true), 30);
+  assert.deepEqual(counterState(tt289, 30, 15, toutiao), { length: 30, over: 2, text: '超出 2 个字符（最多 40 个字符）', invalid: true });
+});
+
 test('改稿页：写清超了多少、给建议，选大图作封面后保存并同步', async () => {
   const { document, window } = parseHTML('<p id="article"></p><div id="root"></div>');
   globalThis.Event = window.Event;

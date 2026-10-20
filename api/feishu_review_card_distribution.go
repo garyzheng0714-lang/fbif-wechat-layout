@@ -292,18 +292,24 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 	}
 	fields := externalIssueFields(draft.Issues)
 	if issue, ok := fields[publishExternalIssueTitle]; ok {
-		note(fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：%s最多 %d 字，现在 %d 字",
-			issue.Length-issue.Max, name, issue.Max, issue.Length))
+		how := ""
+		if note := profile.titleCountNote(); note != "" {
+			how = "（" + note + "）"
+		}
+		note(fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：%s最多 %d 字%s，现在 %d 字",
+			issue.Length-issue.Max, name, issue.Max, how, issue.Length))
 		note("<font color='grey'>现在：" + reviewCardSafeText(issue.Current, 120) + "</font>")
+		// 输入框按字符数限长：英文数字算半个字的平台放宽到云梭这一档的上限，超没超由服务端按平台数法判。
+		_, inputMax := yunsuoTitleFieldRange(profile.TitleField)
 		out = append(out, reviewCardFixInput(reviewCardFixFieldName("t", job.ID, slot), "改成",
-			firstNonEmpty(draft.SuggestedTitle, issue.Current), issue.Max, false))
+			firstNonEmpty(draft.SuggestedTitle, issue.Current), issue.Max, max(issue.Max, inputMax), false))
 	}
 	if issue, ok := fields[publishExternalIssueSummary]; ok {
 		note(fmt.Sprintf("<font color='orange'>摘要超出 %d 字</font>：%s最多 %d 字，现在 %d 字",
 			issue.Length-issue.Max, name, issue.Max, issue.Length))
 		note("<font color='grey'>现在：" + reviewCardSafeText(issue.Current, 200) + "</font>")
 		out = append(out, reviewCardFixInput(reviewCardFixFieldName("s", job.ID, slot), "改成",
-			firstNonEmpty(draft.SuggestedSummary, issue.Current), issue.Max, true))
+			firstNonEmpty(draft.SuggestedSummary, issue.Current), issue.Max, issue.Max, true))
 	}
 	if issue, ok := fields[publishExternalIssueCover]; ok {
 		if issue.Missing {
@@ -362,14 +368,14 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 	return append(out, row)
 }
 
-func reviewCardFixInput(name, label, value string, max int, multiline bool) map[string]any {
+func reviewCardFixInput(name, label, value string, max, inputMax int, multiline bool) map[string]any {
 	input := map[string]any{
 		"tag": "input", "name": name, "width": "fill", "required": false,
 		"label":          feishuPlainText(label),
 		"label_position": "left",
 		"default_value":  value,
 		"placeholder":    feishuPlainText(fmt.Sprintf("%d 字以内", max)),
-		"max_length":     max,
+		"max_length":     inputMax,
 	}
 	if multiline {
 		input["input_type"] = "multiline_text"

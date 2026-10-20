@@ -464,6 +464,10 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 	n := 0
 	for i, draft := range drafts {
 		name := names[i]
+		profile := yunsuoGenericProfile
+		if slot := externalTargetSlot(cfg, draft.AccountID); slot >= 0 {
+			profile = yunsuoProfileForTarget(cfg.Targets[slot])
+		}
 		prefix := ""
 		if multi {
 			prefix = name
@@ -476,10 +480,14 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 			case publishExternalIssueTitle, publishExternalIssueSummary:
 				what := "标题"
 				suggested := draft.SuggestedTitle
+				how := profile.titleCountNote()
 				if issue.Field == publishExternalIssueSummary {
-					what, suggested = "摘要", draft.SuggestedSummary
+					what, suggested, how = "摘要", draft.SuggestedSummary, ""
 				}
-				problem = fmt.Sprintf("%d. %s%s超了 %d 字（%s最多 %d 字）", n, prefix, what, issue.Length-issue.Max, name, issue.Max)
+				if how != "" {
+					how = "，" + how
+				}
+				problem = fmt.Sprintf("%d. %s%s超了 %d 字（%s最多 %d 字%s）", n, prefix, what, issue.Length-issue.Max, name, issue.Max, how)
 				if suggested != "" {
 					options = append(options, postText(fmt.Sprintf("%s里已填好建议「%s」，可以直接用，也可以改成自己的", place, reviewCardSafeText(suggested, 120)), false))
 				} else if inCard {

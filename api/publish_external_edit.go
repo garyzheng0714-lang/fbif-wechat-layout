@@ -139,9 +139,12 @@ type externalEditPlatform struct {
 	NeedsFix  bool   `json:"needs_fix"`
 	Auto      bool   `json:"auto"`
 
-	Title          string `json:"title"`
-	TitleMin       int    `json:"title_min"`
-	TitleMax       int    `json:"title_max"`
+	Title    string `json:"title"`
+	TitleMin int    `json:"title_min"`
+	TitleMax int    `json:"title_max"`
+	// 头条号英文字母、数字两个算一个字（与服务端 titleLength 同口径）；按字符数还要不超过云梭这一档上限。
+	TitleHalfWidth bool   `json:"title_half_width,omitempty"`
+	TitleFieldMax  int    `json:"title_field_max,omitempty"`
 	TitleSuggested string `json:"title_suggested,omitempty"`
 	TitleIssue     bool   `json:"title_issue"`
 
@@ -175,10 +178,12 @@ func externalEditView(job publishJob, cfg yunsuoConfig) map[string]any {
 		draft, _ := externalDraftFor(job, target.ID)
 		state := externalPlatformStatus(job, target)
 		min, max := profile.titleLimits()
+		_, fieldMax := yunsuoTitleFieldRange(profile.TitleField)
 		view := externalEditPlatform{
 			Slot: slot, Name: profile.Name, Status: state.Status, Tone: state.Tone, Reason: state.Reason,
 			URL: state.URL, ManageURL: state.ManageURL, Editable: state.Editable, NeedsFix: state.NeedsFix, Auto: target.Auto,
 			Title: externalEffectiveTitle(job, draft), TitleMin: min, TitleMax: max,
+			TitleHalfWidth: profile.TitleHalfWidthASCII, TitleFieldMax: fieldMax,
 			Summary: externalEffectiveSummary(job, draft), SummaryMax: profile.SummaryMax,
 			CoverMinWidth: profile.CoverMinWidth, CoverMinHeight: profile.CoverMinHeight,
 			EditedBy: draft.EditedBy, EditedAt: draft.EditedAt, Candidates: []externalEditImage{},
@@ -249,12 +254,9 @@ func externalEditSiteURL(job publishJob) string {
 	return siteURL
 }
 
-// externalCurrentCover 没换过封面时推送会用哪张：与推送同一套规则（正文第一张够大的图，否则公众号封面）。
+// externalCurrentCover 没换过封面时推送会用哪张：与推送同一套规则（chooseYunsuoCover）。
 func externalCurrentCover(job publishJob, profile yunsuoPlatformProfile, blocks []yunsuoBlock, imageMap map[string]string, bodyImages []publishExternalCoverCandidate) *externalEditImage {
-	src := prepareYunsuoDistributionBlocks(blocks, imageMap, profile).Lead
-	if src == "" {
-		src = publicYunsuoMediaURL(mapYunsuoMedia(job.CoverURL, imageMap))
-	}
+	src := prepareYunsuoDistribution(blocks, imageMap, profile, yunsuoWechatCover(job, imageMap), "").Cover
 	if src == "" {
 		return nil
 	}
