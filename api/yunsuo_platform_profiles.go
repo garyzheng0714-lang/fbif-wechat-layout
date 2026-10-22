@@ -101,6 +101,20 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 	},
 }
 
+// baijiahaoEditorMarkup 自己的分发服务经百家号编辑器的 setContent 写入（2026-10-20/22 实测）：
+// h1–h3 都存成 h3（百家号只有一级小标题），strong 留得住，图注写进 div.pgc-img 里的
+// p.pgc-img-caption，由分发服务挪进编辑器自己的图注格。
+var baijiahaoEditorMarkup = distributionMarkup{
+	Heading:  func(text string) string { return "<h3>" + text + "</h3>" },
+	BoldLine: func(text string) string { return "<p><strong>" + text + "</strong></p>" },
+	Image: func(src, caption string) string {
+		if caption == "" {
+			return `<p><img src="` + src + `" alt=""></p>`
+		}
+		return `<div class="pgc-img"><img src="` + src + `" alt=""><p class="pgc-img-caption">` + caption + `</p></div>`
+	},
+}
+
 // yunsuoGenericProfile 认不出平台的账号：通用版式，不设封面下限。
 var yunsuoGenericProfile = yunsuoPlatformProfile{
 	Key: "generic", Name: "外部平台",
