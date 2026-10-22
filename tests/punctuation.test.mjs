@@ -102,6 +102,17 @@ test('convert: keep Co., Ltd. commas and periods inside clearly-Chinese paragrap
   assert.ok(out.includes('质量非常棒，'), 'Chinese comma converted');
 });
 
+test('convert: English abbreviation periods stay halfwidth before Chinese (2026-10-23 #289 `Salt Co。和`)', () => {
+  assert.equal(
+    convertText('Jacobsen Salt Co.和Counter Culture Coffee等品牌正在推动产地故事的普及，而Row 7 Seed Co.的罐装农产品则着重展示产地。'),
+    'Jacobsen Salt Co.和Counter Culture Coffee等品牌正在推动产地故事的普及，而Row 7 Seed Co.的罐装农产品则着重展示产地。',
+  );
+  assert.equal(convertText('Apple Inc.发布新品，Nestlé S.A.旗下品牌跟进，U.S.市场反应平平。'), 'Apple Inc.发布新品，Nestlé S.A.旗下品牌跟进，U.S.市场反应平平。');
+  assert.equal(convertText('联合利华与达能等.还有一些小品牌'), '联合利华与达能等。还有一些小品牌');
+  assert.equal(convertText('这个品牌叫Oatly.它来自瑞典。'), '这个品牌叫Oatly。它来自瑞典。', '普通英文词后的点仍是句末');
+  assert.equal(convertText('它卖到了Taco.然后扩张'), '它卖到了Taco。然后扩张', '词尾恰好是 co 不算缩写');
+});
+
 test('convert: preserve URLs untouched', () => {
   const out = convertText('参考 https://example.com/a.b?c=1 的说明。');
   assert.ok(out.includes('https://example.com/a.b?c=1'));

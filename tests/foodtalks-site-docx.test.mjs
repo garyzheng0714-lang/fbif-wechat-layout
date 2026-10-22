@@ -1171,6 +1171,27 @@ test('行首阿拉伯序号保留半角点，句中/年份仍转换（2026-09-29
   assert.match(html, /1\.5倍/, '小数不动');
 });
 
+test('英文缩写的点保留半角（2026-10-23 #289 `Salt Co。和` 回归）', () => {
+  const txt = (runs) => ({ k: 'txt', runs });
+  const t = (text, bold = false) => ({ type: 'txt', text, bold });
+  const result = template.processBlocks({
+    title: '缩写标点样例',
+    blocks: [
+      txt([t('Jacobsen Salt Co.和Counter Culture Coffee等品牌正在推动产地故事的普及，而Row 7 Seed Co.的罐装农产品则着重展示产地。')]),
+      txt([t('Apple Inc. 发布新品，Nestlé S.A.旗下品牌跟进，'), t('U.S', true), t('.市场反应平平。')]),
+      txt([t('这个品牌叫Oatly.它来自瑞典，它卖到了Taco.然后扩张。')]),
+    ],
+  }, { config: { muted_color: '#888888' } });
+  const html = result.lines.join('\n');
+  assert.match(html, /Salt Co\.和Counter/);
+  assert.match(html, /Seed Co\.的罐装/);
+  assert.match(html, /Apple Inc\. 发布/);
+  assert.match(html, /S\.A\.旗下/);
+  assert.match(html, /<strong>U\.S<\/strong>\.市场/, '缩写跨 run 时按段内前文判断');
+  assert.match(html, /Oatly。它来自瑞典/, '普通英文词后的点仍是句末');
+  assert.match(html, /Taco。然后/, '词尾恰好是 co 不算缩写');
+});
+
 test("词中撇号统一成英文 '（2026-10-15 tea'stone 茶馆稿：原文 ' 与 ’ 混用）", () => {
   const txt = (runs) => ({ k: 'txt', runs });
   const t = (text, bold = false) => ({ type: 'txt', text, bold });
