@@ -80,3 +80,20 @@ func TestFetchDirectBlocksOversizePageFailsOnceWithAccurateMessage(t *testing.T)
 		t.Fatalf("status=%d body=%s, want accurate oversize message", rec.Code, rec.Body.String())
 	}
 }
+
+// 2026-10-22 和讯 news.hexun.com/2026-10-21/225151606.html：腾讯云 EdgeOne 反爬只回一段
+// 写 cookie 再刷新的脚本，没有正文；旧提示让编辑以为是「公众号限流」，连点了 5 次。
+func TestFetchArticleNonWeChatPageWithoutBodyTellsEditorToImportViaFeishuDoc(t *testing.T) {
+	rt := &articlePageRoundTripper{body: []byte(`<script>document.cookie="__tst_status=2790889800#;";document.cookie="EO_Bot_Ssid=1915551744;";setTimeout("location.href=location.href",1200);</script>`)}
+	prev := articleFetchHTTPClient
+	articleFetchHTTPClient = &http.Client{Transport: rt}
+	t.Cleanup(func() { articleFetchHTTPClient = prev })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/fetch-article", strings.NewReader(`{"url":"https://news.hexun.com/2026-10-21/225151606.html"}`))
+	handleFetchArticleWithStore(nil)(rec, req)
+	body := rec.Body.String()
+	if rec.Code != 502 || strings.Contains(body, "公众号") || !strings.Contains(body, "飞书云文档") {
+		t.Fatalf("status=%d body=%s, want non-WeChat message pointing to the Feishu doc import", rec.Code, body)
+	}
+}
