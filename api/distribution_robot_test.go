@@ -68,13 +68,18 @@ func TestDistributionRobotClientMapsResponses(t *testing.T) {
 	}
 	saved := `{"status":"saved","article_id":"1879718514554909812","draft_url":"https://baijiahao.baidu.com/builder/rc/edit?type=news&article_id=1879718514554909812",` +
 		`"expected":{"headings":3,"bold":9,"images":9,"captions":["图注"]},"read_back":{"title":"t","headings":3,"bold":9,"images":9,"captions":1,"cover_uploaded":true},` +
-		`"match":true,"mismatches":[],"read_back_error":null,"replayed":false,"attempts":1}`
+		`"match":true,"mismatches":[],"read_back_error":null,"replayed":false,"attempts":1,` +
+		`"assists":[{"step":"cover.open","goal":"打开换封面的弹窗","wanted":["选择封面","更换"],"picked":"替换封面","reason":"设置封面那一行的按钮"}]}`
 	request := robotDraftRequest{IdempotencyKey: "job-282.baijiahao", Title: "标题", HTML: "<p>正文</p>", CoverURL: "https://cdn.example.com/a.jpg"}
 
 	current = reply{http.StatusOK, saved}
 	record, err := client.SaveDraft(context.Background(), "baijiahao", request)
 	if err != nil || record.ArticleID != "1879718514554909812" || record.ReadBack == nil || record.ReadBack.Captions != 1 || record.Match == nil || !*record.Match {
 		t.Fatalf("成功响应应解成完整记录：%+v %v", record, err)
+	}
+	if len(record.Assists) != 1 || record.Assists[0].Step != "cover.open" || record.Assists[0].Picked != "替换封面" ||
+		strings.Join(record.Assists[0].Wanted, "/") != "选择封面/更换" {
+		t.Fatalf("模型兜底的记录应解出来：%+v", record.Assists)
 	}
 	last := seen[len(seen)-1]
 	if last.Method != http.MethodPost || last.URL.Path != "/v1/platforms/baijiahao/drafts" || last.Header.Get("Authorization") != "Bearer "+testRobotToken {

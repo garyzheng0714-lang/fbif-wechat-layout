@@ -232,15 +232,20 @@ func applyRobotLaneResult(l *publishExternalLane, result robotLaneResult, profil
 	} else if result.Record.DraftURL != "" {
 		log.Printf("publish: 分发工具返回的草稿地址不在%s域名内，不写进卡片：%v", profile.Name, err)
 	}
-	l.Fidelity = robotDraftFidelity(result.Record, now)
+	l.Fidelity = robotDraftFidelity(result.Record, profile.Name, now)
 }
 
 // robotDraftFidelity 分发服务存完草稿当场重新打开读回，与送去的正文逐项比；这就是这条 lane 的保真核对。
 // 读回失败的分发服务不会再读，按取满次数记，monitoring 报「取不到」。
-func robotDraftFidelity(record robotDraftRecord, now string) publishExternalFidelity {
+// 有哪步改点了模型挑的元素，也写进 Note（读回失败时一样写），卡片上那行灰字提醒去改分发服务的找法。
+func robotDraftFidelity(record robotDraftRecord, platform, now string) publishExternalFidelity {
 	check := publishExternalFidelity{
 		Attempts: 1, LastTriedAt: now,
 		Expected: externalFidelityShape{Headings: record.Expected.Headings, Images: record.Expected.Images, CaptionedImages: len(record.Expected.Captions)},
+	}
+	notes := []string{}
+	if assisted := robotDraftAssistNote(record.Assists, platform); assisted != "" {
+		notes = append(notes, assisted)
 	}
 	readBackError := ""
 	if record.ReadBackError != nil {
@@ -252,17 +257,42 @@ func robotDraftFidelity(record robotDraftRecord, now string) publishExternalFide
 		if readBackError != "" {
 			check.Error = "读回草稿失败：" + safeYunsuoMessage(readBackError)
 		}
+		check.Note = strings.Join(notes, "；")
 		return check
 	}
 	check.CheckedAt = now
 	check.Online = externalFidelityShape{Headings: record.ReadBack.Headings, Images: record.ReadBack.Images, CaptionedImages: record.ReadBack.Captions}
 	if len(record.Mismatches) > 0 || (record.Match != nil && !*record.Match) {
-		check.Note = "草稿读回对不上"
+		mismatch := "草稿读回对不上"
 		if len(record.Mismatches) > 0 {
-			check.Note += "：" + strings.Join(record.Mismatches, "；")
+			mismatch += "：" + strings.Join(record.Mismatches, "；")
 		}
+		notes = append(notes, mismatch)
 	}
+	check.Note = strings.Join(notes, "；")
 	return check
+}
+
+// robotDraftAssistNote 「百家号改版：找不到「更换」，模型改点了「替换封面」」，几步就几句。
+func robotDraftAssistNote(assists []robotDraftAssist, platform string) string {
+	steps := []string{}
+	for _, a := range assists {
+		wanted := []string{}
+		for _, w := range a.Wanted {
+			if w = strings.TrimSpace(w); w != "" {
+				wanted = append(wanted, "「"+w+"」")
+			}
+		}
+		picked := strings.TrimSpace(a.Picked)
+		if len(wanted) == 0 || picked == "" {
+			continue
+		}
+		steps = append(steps, "找不到"+strings.Join(wanted, "或")+"，模型改点了「"+picked+"」")
+	}
+	if len(steps) == 0 {
+		return ""
+	}
+	return safeYunsuoMessage(platform + "改版：" + strings.Join(steps, "；"))
 }
 
 // robotLaneAwaitingResult 结果不明、还在补查期内的分发服务 lane（只查不提交，可以每轮都查）。
@@ -349,9 +379,7 @@ func robotPlatformState(lane publishExternalLane, profile yunsuoPlatformProfile)
 		if state.DraftURL == "" {
 			state.ManageURL = profile.ManageURL
 		}
-		if lane.Fidelity.CheckedAt != "" {
-			state.Fidelity = lane.Fidelity.Note
-		}
+		state.Fidelity = lane.Fidelity.Note
 	case publishExternalDistributionProcessing(lane.State):
 		state.Status, state.Tone = "存草稿中", "blue"
 	case lane.State == publishExternalDistributionReconciliationRequired:

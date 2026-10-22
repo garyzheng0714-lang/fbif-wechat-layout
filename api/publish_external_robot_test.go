@@ -403,7 +403,7 @@ func TestRobotLaneCardWording(t *testing.T) {
 	saved.Fidelity = robotDraftFidelity(robotDraftRecord{
 		Expected: robotDraftExpected{Headings: 3}, ReadBack: &robotDraftReadBack{Headings: 2},
 		Mismatches: []string{"小标题：送去 3 处，读回 2 处"},
-	}, "2026-10-22T02:00:00Z")
+	}, "百家号", "2026-10-22T02:00:00Z")
 	body = section(saved)
 	for _, want := range []string{"<font color='green'>草稿已存（未发布）</font>", "[去百家号草稿箱查看](" + testRobotDraftURL(testRobotArticleID) + ")",
 		"<font color='grey'>草稿读回对不上：小标题：送去 3 处，读回 2 处</font>"} {
@@ -443,19 +443,61 @@ func TestRobotDraftFidelityFromReadBack(t *testing.T) {
 		Expected: robotDraftExpected{Headings: 3, Images: 2, Captions: []string{"a", "b"}},
 		ReadBack: &robotDraftReadBack{Headings: 3, Images: 2, Captions: 1}, Match: &match,
 		Mismatches: []string{"图注：送去 2 条，读回 1 条", "封面不是上传的那张"},
-	}, now)
+	}, "百家号", now)
 	if mismatch.CheckedAt != now || mismatch.Note != "草稿读回对不上：图注：送去 2 条，读回 1 条；封面不是上传的那张" ||
 		mismatch.Expected.CaptionedImages != 2 || mismatch.Online.CaptionedImages != 1 {
 		t.Fatalf("对不上应逐条写进 Note：%+v", mismatch)
 	}
 	readBackError := "编辑页没打开"
-	failed := robotDraftFidelity(robotDraftRecord{ReadBackError: &readBackError}, now)
+	failed := robotDraftFidelity(robotDraftRecord{ReadBackError: &readBackError}, "百家号", now)
 	if failed.CheckedAt != "" || failed.Attempts != externalFidelityMaxAttempts || failed.Error != "读回草稿失败：编辑页没打开" {
 		t.Fatalf("读回失败按取满次数记：%+v", failed)
 	}
 	job := publishJob{ExternalDistributionLanes: []publishExternalLane{{Fidelity: mismatch}, {Fidelity: failed}}}
 	if mismatched, unavailable := externalFidelityMonitoring(job, time.Now()); mismatched != 1 || unavailable != 1 {
 		t.Fatalf("monitoring 应各报一条：mismatched=%d unavailable=%d", mismatched, unavailable)
+	}
+}
+
+// TestRobotDraftFidelityNotesModelAssists 分发服务找不到按钮、改点了模型挑的元素（百家号改版）：
+// 卡片百家号那行灰字写出来，与读回对不上用「；」接；读回失败时也写。
+func TestRobotDraftFidelityNotesModelAssists(t *testing.T) {
+	setTestRobotOnlyConfig(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	coverOpen := robotDraftAssist{Step: "cover.open", Wanted: []string{"选择封面", "更换"}, Picked: "替换封面"}
+	save := robotDraftAssist{Step: "saveDraft", Wanted: []string{"存草稿"}, Picked: "保存"}
+	match, mismatch := true, false
+	readBack := &robotDraftReadBack{Headings: 1}
+
+	for _, tc := range []struct {
+		name   string
+		record robotDraftRecord
+		want   string
+	}{
+		{"读回对得上", robotDraftRecord{ReadBack: readBack, Match: &match, Assists: []robotDraftAssist{coverOpen, save}},
+			"百家号改版：找不到「选择封面」或「更换」，模型改点了「替换封面」；找不到「存草稿」，模型改点了「保存」"},
+		{"读回也对不上", robotDraftRecord{ReadBack: readBack, Match: &mismatch, Mismatches: []string{"封面不是送去的那张"}, Assists: []robotDraftAssist{coverOpen}},
+			"百家号改版：找不到「选择封面」或「更换」，模型改点了「替换封面」；草稿读回对不上：封面不是送去的那张"},
+		{"没用模型", robotDraftRecord{ReadBack: readBack, Match: &match}, ""},
+	} {
+		if got := robotDraftFidelity(tc.record, "百家号", now); got.Note != tc.want || got.CheckedAt != now {
+			t.Fatalf("%s：Note=%q，应为 %q", tc.name, got.Note, tc.want)
+		}
+	}
+
+	readBackError := "编辑页没打开"
+	unread := robotDraftFidelity(robotDraftRecord{ReadBackError: &readBackError, Assists: []robotDraftAssist{save}}, "百家号", now)
+	if unread.CheckedAt != "" || unread.Note != "百家号改版：找不到「存草稿」，模型改点了「保存」" {
+		t.Fatalf("读回失败也写模型改点了什么：%+v", unread)
+	}
+	job := reviewCardTestJob(publishStagePublished)
+	job.FoodTalksNewsID = 7318
+	job.PublicationAction = publishPublicationActionPublish
+	lane := testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionDraftSaved)
+	lane.Driver, lane.ContentPK, lane.DraftURL, lane.Fidelity = externalDriverRobot, testRobotArticleID, testRobotDraftURL(testRobotArticleID), unread
+	job.ExternalDistributionLanes = []publishExternalLane{lane}
+	if body := distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job})); !strings.Contains(body, "<font color='grey'>百家号改版：找不到「存草稿」，模型改点了「保存」</font>") {
+		t.Fatalf("卡片百家号那行应写出模型改点了什么: %s", body)
 	}
 }
 

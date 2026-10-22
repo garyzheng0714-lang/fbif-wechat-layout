@@ -76,8 +76,17 @@ type robotDraftRecord struct {
 	Mismatches    []string            `json:"mismatches"`
 	ReadBackError *string             `json:"read_back_error"`
 	Error         *string             `json:"error"`
+	Assists       []robotDraftAssist  `json:"assists"`
 	Replayed      bool                `json:"replayed"`
 	Attempts      int                 `json:"attempts"`
+}
+
+// robotDraftAssist 写死的找法没找到按钮、改点了模型挑的元素的一步（平台改版的信号）。
+// Wanted 是原来找的字，Picked 是模型挑的元素上的字；都来自平台页面，展示前要清洗。
+type robotDraftAssist struct {
+	Step   string   `json:"step"`
+	Wanted []string `json:"wanted"`
+	Picked string   `json:"picked"`
 }
 
 const (
