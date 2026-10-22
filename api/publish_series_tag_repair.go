@@ -1,16 +1,18 @@
 package main
 
 // publish_series_tag_repair.go — 已发布网站稿补链接（2026-10-08 用户反馈 63149）。按资讯 id
-// 直接改网站现稿，流水线稿和编辑手工稿都适用，只动三类链接，其余正文与字段按 CMS 现稿原样写回：
+// 直接改网站现稿，流水线稿和编辑手工稿都适用，只动下面几处，其余正文与字段按 CMS 现稿原样写回：
 //   - 系列声明段的系列名 → 同名标签页（publishSiteLinkSeriesTags）；
 //   - Mote 文章里的公众号文章链 → 已发布的站内 /news/{id}，找不到保留原链（rewriteMoteSeriesLinks）；
-//   - 流水线转载稿的转载声明《本稿标题》→ 链到核验过的原文、换成原文真标题（repairRepostNoticeTitle，2026-10-14）。
+//   - 流水线转载稿的转载声明《本稿标题》→ 链到核验过的原文、换成原文真标题（repairRepostNoticeTitle，2026-10-14）；
+//   - 旧排版改成「。」的英文缩写点（`Salt Co。和`）改回半角（repairAbbreviationPeriods，2026-10-23）。
 
 import (
 	"context"
 	"fmt"
 	"html"
 	"regexp"
+	"strings"
 )
 
 type newsLinkRepairResult struct {
@@ -19,6 +21,24 @@ type newsLinkRepairResult struct {
 	Changed           bool   `json:"changed"`
 	DryRun            bool   `json:"dry_run"`
 	RepostNoticeTitle string `json:"repost_notice_title,omitempty"`
+	// AbbreviationPeriods 改回半角的英文缩写点数。
+	AbbreviationPeriods int `json:"abbreviation_periods,omitempty"`
+}
+
+// siteAbbreviationWords 与 public/js/punctuation.js 规则 2d 同一张表（TestSiteAbbreviationWordsMatchRenderer 核对）。
+var siteAbbreviationWords = []string{"Co", "Corp", "Inc", "Ltd", "Ltda", "Bros", "Mfg", "Intl", "Pty",
+	"Mr", "Mrs", "Ms", "Dr", "Prof", "Jr", "Sr", "St", "Mt", "vs", "etc", "approx"}
+
+var siteAbbreviationPeriodRe = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9.])((?:` + strings.Join(siteAbbreviationWords, "|") +
+	`)|(?:[A-Za-z]\.)+[A-Za-z])。`)
+
+// repairAbbreviationPeriods 2026-10-23 前的排版把英文缩写后的点当句末改成了「。」，改回半角。
+func repairAbbreviationPeriods(content string) (string, int) {
+	n := len(siteAbbreviationPeriodRe.FindAllStringIndex(content, -1))
+	if n == 0 {
+		return content, 0
+	}
+	return siteAbbreviationPeriodRe.ReplaceAllString(content, "${1}${2}."), n
 }
 
 // repostNoticeTitleRe 网站转载声明「*本文为{来源}原创《标题》」，《》可能已包在链接里。
@@ -47,6 +67,7 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 		content = p.rewriteMoteSeriesLinks(ctx, job, content)
 	}
 	content, res.RepostNoticeTitle = p.repairRepostNoticeTitle(ctx, job, content, dryRun)
+	content, res.AbbreviationPeriods = repairAbbreviationPeriods(content)
 	if content == live.Content {
 		return res, nil
 	}

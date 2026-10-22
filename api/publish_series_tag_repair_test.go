@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -246,5 +248,34 @@ func TestRepairNewsLinksRepostNoticeOriginalTitle(t *testing.T) {
 	stub.live.Content = strings.Replace(notice, "*本文为窄播原创", "*本文为FBIF食品饮料创新（ID：FoodInnovation）原创", 1)
 	if res, _ := p.repairNewsLinks(context.Background(), 63177, false); res.Changed || len(stub.puts) != 1 {
 		t.Fatalf("自家原创声明不得改：%+v", res)
+	}
+}
+
+// 2026-10-23 #289：旧排版把「Salt Co.和」改成「Salt Co。和」。存量稿只把缩写后的「。」改回半角，句末不动。
+func TestRepairNewsLinksAbbreviationPeriods(t *testing.T) {
+	stub := &seriesRepairStub{live: foodTalksNewsDetail{ID: 63225, Author: "FBIF", PublishStatus: foodTalksPublishStatusPublished,
+		Content: `<p>Jacobsen Salt Co。和Counter Culture Coffee等品牌，而Row 7 Seed Co。的罐装农产品；现制茶 vs。 包装茶，U.S。，并联系Bobo。</p>`}}
+	p := &publishPipeline{now: time.Now, foodTalks: func() (foodTalksAPI, error) { return stub, nil }}
+	res, err := p.repairNewsLinks(context.Background(), 63225, false)
+	if err != nil || !res.Changed || res.AbbreviationPeriods != 4 || len(stub.puts) != 1 {
+		t.Fatalf("应改回 4 处并写回一次：res=%+v err=%v puts=%d", res, err, len(stub.puts))
+	}
+	want := `<p>Jacobsen Salt Co.和Counter Culture Coffee等品牌，而Row 7 Seed Co.的罐装农产品；现制茶 vs. 包装茶，U.S.，并联系Bobo。</p>`
+	if got := stub.puts[0].Content; got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestSiteAbbreviationWordsMatchRenderer(t *testing.T) {
+	js, err := os.ReadFile("../public/js/punctuation.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`ABBREVIATION_TAIL_RE = /\(\?:\^\|\[\^A-Za-z0-9\.\]\)\(\?:\(\?:([A-Za-z|]+)\)`).FindSubmatch(js)
+	if m == nil {
+		t.Fatal("punctuation.js 里找不到 ABBREVIATION_TAIL_RE 的缩写表")
+	}
+	if got, want := strings.Join(siteAbbreviationWords, "|"), string(m[1]); got != want {
+		t.Fatalf("存量修复的缩写表要和排版的一样：\n Go %s\n JS %s", got, want)
 	}
 }

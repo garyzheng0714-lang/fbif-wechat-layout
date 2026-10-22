@@ -12,7 +12,7 @@
 
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, parseMdRuns, parseMdFrontmatter } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, endsWithEnglishAbbreviation } = engineModule;
 // 等价于: import { applyFoodTalksBehavior, FBIF_FOOTER_HTML } from '../rule-behavior-foodtalks.js'
 // 用动态 import 是为了配合浏览器端的 cache-busting assetQuery
 const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery);
@@ -176,9 +176,12 @@ function normalizeChinesePunctuation(text, leading = '') {
       if ((isDigit(prev) && isDigit(next)) || (isAsciiLetter(prev) && isAsciiLetter(next))) {
         return ch;
       }
-      if (!isDigit(chars[i + 1]) && LEADING_ORDINAL_TAIL_RE.test(leading + chars.slice(0, i).join(''))) {
+      const before = leading + chars.slice(0, i).join('');
+      if (!isDigit(chars[i + 1]) && LEADING_ORDINAL_TAIL_RE.test(before)) {
         return ch;
       }
+      // 英文缩写的点（`Salt Co.和`、`U.S.市场`）不是句末（2026-10-23 #289；与 punctuation.js 规则 2d 同表）。
+      if (endsWithEnglishAbbreviation(before)) return ch;
       return '。';
     }
     return ch;

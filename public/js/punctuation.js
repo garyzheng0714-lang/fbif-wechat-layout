@@ -15,6 +15,8 @@
 //      it is a list/heading marker, not a sentence end (`1. “洗茶”` must not
 //      become `1。 “洗茶”`). Only 1–3 digits at line start: mid-sentence
 //      `达到100.下一步` and a 4-digit year `2024.` still convert.
+//   2d. An English abbreviation keeps its period even when Chinese follows
+//      with no space (`Salt Co.和`, `U.S.市场`); see ABBREVIATION_TAIL_RE.
 //   3. Double and single quotes strictly alternate open → close → open → ...
 //      per type, independently. The emitted direction depends only on the
 //      direction of the previous same-type quote in the paragraph; context
@@ -232,12 +234,21 @@ function convertBasicPunct(text, protectedIndexes = new Set()) {
           (i + 1 >= text.length || /\s/.test(text[i + 1]))) {
         out += ch; continue;
       }
+      if (ch === '.' && endsWithEnglishAbbreviation(text.slice(0, i))) { out += ch; continue; }
       out += full;
     } else {
       out += ch;
     }
   }
   return out;
+}
+
+// Rule 2d (2026-10-23: #289 shipped `Salt Co。和`). `before` is the text up to
+// the `.`. Exported so the FoodTalks renderer applies the same list.
+const ABBREVIATION_TAIL_RE = /(?:^|[^A-Za-z0-9.])(?:(?:Co|Corp|Inc|Ltd|Ltda|Bros|Mfg|Intl|Pty|Mr|Mrs|Ms|Dr|Prof|Jr|Sr|St|Mt|vs|etc|approx)|(?:[A-Za-z]\.)+[A-Za-z])$/i;
+
+export function endsWithEnglishAbbreviation(before) {
+  return ABBREVIATION_TAIL_RE.test(before);
 }
 
 // Rule 2c: index of the `.` in each line-start ordinal. `(?!\d)` leaves
