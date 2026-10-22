@@ -1,10 +1,12 @@
 package main
 
-// publish_external_distribution.go — 已审核原创文章经云梭分发到外部平台。
+// publish_external_distribution.go — 已审核原创文章分发到外部平台：头条号经云梭，百家号经自己的
+// 分发服务（publish_external_robot.go，2026-10-22 起，只存草稿）。
 //
 // 这是 publishJob 上的正交子状态机，不改变 FoodTalks 的 Stage：自有站允许原创和
-// 转载，外部平台只允许原创。云梭 push 没有幂等键，所以精确 payload 与 intent 必须
-// 先落盘；push 结果不确定时只能人工对账。拿到 content_pk 后只做安全的状态查询。
+// 转载，外部平台只允许原创。两种送稿方式都先把精确 payload 与 intent 落盘再外调。
+// 云梭 push 没有幂等键，push 结果不确定时只能人工对账，拿到 content_pk 后只做安全的
+// 状态查询；分发服务有幂等键，结果不确定时按同一个键查。
 
 import (
 	"context"
@@ -555,11 +557,8 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		if lane.ContentVersion == 0 {
 			lane.ContentVersion = job.ContentVersion
 		}
-		payload, buildErr := buildYunsuoPushPayloadWithDraft(snapshot, []yunsuoAccountTarget{target}, cfg.Categories, draft)
-		var payloadJSON []byte
-		if buildErr == nil {
-			payloadJSON, buildErr = json.Marshal(payload)
-		}
+		lane.Driver = yunsuoProfileForTarget(target).Driver
+		payloadJSON, platformTitle, buildErr := buildExternalLanePayload(snapshot, target, cfg.Categories, draft)
 		if buildErr != nil {
 			lane.State = publishExternalDistributionFailed
 			lane.Error = truncateRunes(strings.Join(strings.Fields(buildErr.Error()), " "), 500)
@@ -568,7 +567,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			failures = append(failures, target.Name+"："+lane.Error)
 		} else {
 			digest := sha256.Sum256(payloadJSON)
-			lane.Title = payload.titleField(yunsuoProfileForTarget(target).TitleField)
+			lane.Title = platformTitle
 			lane.PayloadJSON = string(payloadJSON)
 			lane.PayloadHash = fmt.Sprintf("sha256:%x", digest[:])
 			queuedAccounts = append(queuedAccounts, target.ID)
@@ -663,10 +662,12 @@ func (p *publishPipeline) runExternalLane(jobID int64, accountID string) {
 	if !ok {
 		return
 	}
-	switch lane.State {
-	case publishExternalDistributionQueued:
+	switch {
+	case lane.State == publishExternalDistributionQueued && lane.Driver == externalDriverRobot:
+		p.pushRobotLane(job, lane)
+	case lane.State == publishExternalDistributionQueued:
 		p.pushExternalLane(job, lane)
-	case publishExternalDistributionPolling:
+	case lane.State == publishExternalDistributionPolling && lane.Driver == externalDriverYunsuo:
 		if strings.TrimSpace(lane.ContentPK) != "" {
 			p.pollExternalLane(job, lane)
 		}
@@ -707,20 +708,8 @@ func (p *publishPipeline) pushExternalLane(job publishJob, lane publishExternalL
 		p.failExternalLaneBeforePush(job.ID, lane.AccountID, err.Error())
 		return
 	}
-	intentAt := pipelineNow(p).Format(time.RFC3339)
 	intentKey := fmt.Sprintf("yunsuo-push:%d:%s:%s", job.ID, lane.AccountID, strings.TrimPrefix(lane.PayloadHash, "sha256:"))
-	_, swapped, err := p.updateExternalLane(job.ID, lane.AccountID, func(current publishExternalLane) bool {
-		return current.State == publishExternalDistributionQueued && current.IntentKey == "" &&
-			current.PayloadHash == lane.PayloadHash
-	}, func(_ *publishJob, current *publishExternalLane) {
-		current.State = publishExternalDistributionPushing
-		current.IntentKey = intentKey
-		current.IntentAt = intentAt
-	})
-	if err != nil || !swapped {
-		if err != nil {
-			log.Printf("publish: persist yunsuo intent for job %d/%s failed: %v", job.ID, lane.AccountID, err)
-		}
+	if !p.claimExternalLanePush(job.ID, lane, intentKey) {
 		return
 	}
 	contentPK, pushErr := client.Push(context.Background(), payload)
@@ -753,6 +742,23 @@ func (p *publishPipeline) pushExternalLane(job publishJob, lane publishExternalL
 	if current, ok := externalLaneFor(polling, lane.AccountID); ok {
 		p.pollExternalLaneWithClient(polling, current, client)
 	}
+}
+
+// claimExternalLanePush 外调前落 intent：queued → pushing。抢不到（已被别的 worker 推、内容已换）就不外调。
+func (p *publishPipeline) claimExternalLanePush(jobID int64, lane publishExternalLane, intentKey string) bool {
+	intentAt := pipelineNow(p).Format(time.RFC3339)
+	_, swapped, err := p.updateExternalLane(jobID, lane.AccountID, func(current publishExternalLane) bool {
+		return current.State == publishExternalDistributionQueued && current.IntentKey == "" &&
+			current.PayloadHash == lane.PayloadHash
+	}, func(_ *publishJob, current *publishExternalLane) {
+		current.State = publishExternalDistributionPushing
+		current.IntentKey = intentKey
+		current.IntentAt = intentAt
+	})
+	if err != nil {
+		log.Printf("publish: persist external push intent for job %d/%s failed: %v", jobID, lane.AccountID, err)
+	}
+	return err == nil && swapped
 }
 
 func (p *publishPipeline) failExternalLaneBeforePush(jobID int64, accountID, reason string) {
@@ -1059,6 +1065,10 @@ func (p *publishPipeline) recoverExternalDistribution(job publishJob) {
 		case publishExternalDistributionQueued:
 			p.spawnExternalWork(func() { p.runExternalLane(job.ID, lane.AccountID) })
 		case publishExternalDistributionPushing:
+			if lane.Driver == externalDriverRobot {
+				p.recoverRobotLane(job, lane)
+				continue
+			}
 			// intent 已落盘，但进程可能在 POST 前后任一点退出；结果不可判定，禁止重放。
 			p.finishExternalLanePushFailure(job.ID, lane.AccountID, lane.IntentKey, publishExternalDistributionReconciliationRequired,
 				"进程在云梭推送窗口中断，系统不会重复发布，请人工核对")
@@ -1102,9 +1112,14 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 			toastType: "error", toastContent: "外部分发结果待核对，系统不会重复发布",
 		}, true
 	case publishExternalDistributionFailed, publishExternalDistributionPartialFailed:
-		return reviewCardOutcome{
-			toastType: "error", toastContent: "外部分发有平台未完成，请查看卡片并到云梭后台处理",
-		}, true
+		content := "外部分发有平台未完成，请查看卡片"
+		for _, lane := range job.ExternalDistributionLanes {
+			if lane.Driver == externalDriverYunsuo && lane.State == publishExternalDistributionFailed {
+				content = "外部分发有平台未完成，请查看卡片并到云梭后台处理"
+				break
+			}
+		}
+		return reviewCardOutcome{toastType: "error", toastContent: content}, true
 	default:
 		return reviewCardOutcome{
 			toastType: "error", toastContent: "外部分发状态异常，请到管理后台核对",
@@ -1163,7 +1178,7 @@ func externalDistributionAllQueued(job publishJob, now time.Time) bool {
 // 15 分钟轮询超时转对账的（云梭仍在排队），以及云梭标「异常、自动重试」的失败。
 // 有单号只查询（红线 37），所以补查绝不会造成重复稿。
 func publishExternalLaneNeedsLateRefresh(lane publishExternalLane, now time.Time) bool {
-	if strings.TrimSpace(lane.ContentPK) == "" {
+	if lane.Driver != externalDriverYunsuo || strings.TrimSpace(lane.ContentPK) == "" {
 		return false
 	}
 	switch lane.State {
@@ -1184,7 +1199,7 @@ func publishExternalLaneNeedsLateRefresh(lane publishExternalLane, now time.Time
 
 // refreshExternalDistributionResults 云梭发布慢于轮询时限、或失败后自动重试成功时，
 // 把各平台的最终结果补回任务和审核卡。状态没变只记查询时间，不刷卡。迁移来的旧稿
-// 几个平台共用一个 content_pk，同一轮只查一次。
+// 几个平台共用一个 content_pk，同一轮只查一次。经分发服务的结果不明的 lane 每轮按幂等键查一次。
 func (p *publishPipeline) refreshExternalDistributionResults() {
 	if p == nil || p.store == nil || publishWorkersPaused() {
 		return
@@ -1197,6 +1212,8 @@ func (p *publishPipeline) refreshExternalDistributionResults() {
 	now := pipelineNow(p)
 	stamp := now.Format(time.RFC3339)
 	var client yunsuoAPI
+	var robot distributionRobotAPI
+	robotUnavailable, yunsuoUnavailable := false, false
 	type statusResult struct {
 		statuses []yunsuoAccountStatus
 		err      error
@@ -1204,13 +1221,26 @@ func (p *publishPipeline) refreshExternalDistributionResults() {
 	cache := map[string]statusResult{}
 	for _, job := range jobs {
 		for _, lane := range job.ExternalDistributionLanes {
-			if !publishExternalLaneNeedsLateRefresh(lane, now) {
+			if robotLaneAwaitingResult(lane, now) && !robotUnavailable {
+				if robot == nil {
+					if robot, err = p.robotClient(); err != nil {
+						log.Printf("publish: 外发结果补查无法创建分发工具客户端：%v", err)
+						robotUnavailable = true
+						continue
+					}
+				}
+				p.resolveRobotLaneWithClient(job.ID, lane, robot)
+				continue
+			}
+			if yunsuoUnavailable || !publishExternalLaneNeedsLateRefresh(lane, now) {
 				continue
 			}
 			if client == nil {
 				if client, err = p.yunsuoClient(); err != nil {
+					// 云梭配置坏了不挡经分发服务的 lane。
 					log.Printf("publish: 外发结果补查无法创建云梭客户端：%v", err)
-					return
+					yunsuoUnavailable = true
+					continue
 				}
 			}
 			result, ok := cache[lane.ContentPK]

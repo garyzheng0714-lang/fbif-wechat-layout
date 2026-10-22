@@ -70,6 +70,11 @@ function coverTooSmall(platform, image) {
   return !!(image.width && image.height && (image.width < platform.cover_min_width || image.height < platform.cover_min_height));
 }
 
+// actionText 提交按钮「保存并……」：服务端按平台的送稿方式给（同步至头条号 / 存草稿至百家号）。
+function actionText(platform) {
+  return `保存并${platform.action || `同步至${platform.name}`}`;
+}
+
 function sameTitle(a, b) {
   return String(a || '').replace(/\s+/g, '') === String(b || '').replace(/\s+/g, '');
 }
@@ -82,8 +87,9 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
     const lines = [];
     if (platform.url) lines.push(`<a href="${esc(platform.url)}" target="_blank" rel="noopener">${esc(ownTitle || '查看文章')}</a>`);
     else if (ownTitle) lines.push(`<span>${esc(ownTitle)}</span>`);
-    // 已发布但还没拿到文章链接：去平台后台看发布情况。
-    if (!platform.url && platform.manage_url) lines.push(`<a href="${esc(platform.manage_url)}" target="_blank" rel="noopener">去${esc(platform.name)}后台查看</a>`);
+    // 只存了草稿：去草稿编辑页看；已发布但还没拿到文章链接：去平台后台看发布情况。
+    if (!platform.url && platform.draft_url) lines.push(`<a href="${esc(platform.draft_url)}" target="_blank" rel="noopener">去${esc(platform.name)}草稿箱查看</a>`);
+    else if (!platform.url && platform.manage_url) lines.push(`<a href="${esc(platform.manage_url)}" target="_blank" rel="noopener">去${esc(platform.name)}后台查看</a>`);
     if (platform.reason) lines.push(`<span>${esc(platform.reason)}</span>`);
     return `<section class="dist-platform" data-slot="${platform.slot}">${head}${lines.length ? `<p class="dist-meta">${lines.join('')}</p>` : ''}</section>`;
   }
@@ -151,7 +157,7 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
         </div>
         ${coverHint}
       </div>
-      <button type="submit" class="dist-primary">保存并同步至${esc(platform.name)}</button>
+      <button type="submit" class="dist-primary">${esc(actionText(platform))}</button>
       <p class="dist-result" role="status"${draft.result ? '' : ' hidden'}>${esc(draft.result || '')}</p>
     </form>
   </section>`;
@@ -202,7 +208,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
   }
 
   function maybePoll() {
-    const busy = (view?.platforms || []).some(platform => platform.status === '同步中' || platform.status === '排队中');
+    const busy = (view?.platforms || []).some(platform => ['同步中', '存草稿中', '排队中'].includes(platform.status));
     if (!busy || polls >= POLL_LIMIT) return;
     polls += 1;
     schedule(() => load({ quiet: true }), POLL_MS);
@@ -272,7 +278,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
         result.hidden = false;
         result.classList.add('is-error');
         button.disabled = false;
-        button.textContent = `保存并同步至${platform.name}`;
+        button.textContent = actionText(platform);
         return;
       }
       view = await response.json();
@@ -289,7 +295,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
       result.hidden = false;
       result.classList.add('is-error');
       button.disabled = false;
-      button.textContent = `保存并同步至${platform.name}`;
+      button.textContent = actionText(platform);
     }
   }
 

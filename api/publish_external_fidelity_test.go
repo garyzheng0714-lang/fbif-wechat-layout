@@ -99,9 +99,10 @@ func TestExternalFidelityComparesPayloadWithPlatformPage(t *testing.T) {
 			t.Errorf("%s：应为 %q，得到 %q", tc.name, tc.note, got)
 		}
 	}
-	// 云梭会把封面插到正文最前面的平台（百家号），开头多一张图是应有的样子。
-	baijia := externalFidelityExpected(payloadHTML, yunsuoPlatformProfiles["baijiahao"])
-	if note := externalFidelityCompare(baijia, externalFidelityShapeOf(fidelityToutiaoCover+fidelityToutiaoPage(nil))); note != "" {
+	// 云梭会把封面插到正文最前面的平台（百家号经云梭时就是），开头多一张图是应有的样子。
+	prepended := yunsuoPlatformProfiles["toutiao"]
+	prepended.CoverPrepended = true
+	if note := externalFidelityCompare(externalFidelityExpected(payloadHTML, prepended), externalFidelityShapeOf(fidelityToutiaoCover+fidelityToutiaoPage(nil))); note != "" {
 		t.Fatalf("会插封面的平台，开头的封面不算对不上：%q", note)
 	}
 }

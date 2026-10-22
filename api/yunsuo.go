@@ -27,8 +27,9 @@ const (
 	yunsuoMaxResponse    = 1 << 20
 )
 
-// yunsuoAccountTarget 是一个已在云梭绑定的发布账号。ID 发给 API，
-// Name 只用于飞书卡片和任务留痕，避免将平台字面量写入中立流程。
+// yunsuoAccountTarget 是一个外发账号。经云梭的平台 ID 发给云梭 API；经自己分发服务的平台
+// （百家号，2026-10-22 起）沿用原来的云梭账号 ID 当 lane 的账号键，旧稿已有的云梭 lane 因此
+// 不会再推一次。Name 只用于飞书卡片和任务留痕，避免将平台字面量写入中立流程。
 // Auto=true 的账号在原创稿公开后自动外发（见 publish_external_auto.go）；
 // 其余账号只能由审核卡按钮人工发起。
 type yunsuoAccountTarget struct {
@@ -109,8 +110,11 @@ func loadYunsuoConfig() (yunsuoConfig, error) {
 	cfg.Targets = targets
 
 	cfg.Categories = splitYunsuoList(os.Getenv(yunsuoCategoriesEnv))
-	if len(cfg.Categories) < 5 {
-		return yunsuoConfig{}, fmt.Errorf("%s 至少需要 5 个不同分类", yunsuoCategoriesEnv)
+	// 分类只有云梭要，经分发服务的平台不用。
+	for _, target := range targets {
+		if yunsuoProfileForTarget(target).Driver == externalDriverYunsuo && len(cfg.Categories) < 5 {
+			return yunsuoConfig{}, fmt.Errorf("%s 至少需要 5 个不同分类", yunsuoCategoriesEnv)
+		}
 	}
 	return cfg, nil
 }

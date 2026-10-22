@@ -854,8 +854,12 @@ var (
 
 // externalLaneFailureReason 把云梭/平台回执和本地拦截原因说成人话，并告诉下一步怎么办。
 // 云梭已受理（有单号）的失败只能在云梭处理；受理前失败的改好后点重新同步。
+// 经分发服务的失败原因落盘时就写成了人话（publish_external_robot.go），原样用。
 func externalLaneFailureReason(lane publishExternalLane) string {
 	raw := strings.TrimSpace(firstNonEmpty(lane.Remark, lane.Error))
+	if lane.Driver == externalDriverRobot {
+		return raw
+	}
 	accepted := strings.TrimSpace(lane.ContentPK) != ""
 	switch {
 	case raw == "":

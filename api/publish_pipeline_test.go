@@ -322,6 +322,9 @@ func successfulPublishRenderResult(html string, rule publishResolvedRule) publis
 func newPublishTestEnv(t *testing.T) *publishTestEnv {
 	t.Helper()
 	t.Setenv(runtimeConfigSchemaEnv, runtimeConfigSchemaVersion)
+	// 本机若开着到分发服务的通道，测试也不能连过去。
+	t.Setenv(distributionAPIURLEnv, "")
+	t.Setenv(distributionAPITokenEnv, "")
 	env := &publishTestEnv{
 		store: newPublishJobStore(filepath.Join(t.TempDir(), "publish-jobs.json")),
 		ft:    newFTStub(t),

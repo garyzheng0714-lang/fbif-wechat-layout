@@ -404,7 +404,8 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	if body == "" || strings.Contains(cardJSON(t, card), "多平台分发") {
 		t.Fatalf("原创已发布稿应有常显的分发区: %s", cardJSON(t, card))
 	}
-	if strings.Count(body, `"has_border":true`) != 1 || !strings.Contains(body, `"content":"同步至头条号"`) || !strings.Contains(body, `"content":"同步至百家号"`) {
+	// 百家号经自己的分发服务只存草稿（2026-10-22 用户裁定），按钮照实说。
+	if strings.Count(body, `"has_border":true`) != 1 || !strings.Contains(body, `"content":"同步至头条号"`) || !strings.Contains(body, `"content":"存草稿至百家号"`) {
 		t.Fatalf("未分发时一篇一个外框块，块里每个平台一行、各自一枚按钮: %s", body)
 	}
 	if !strings.Contains(body, `"corner_radius":"16px"`) || !strings.Contains(body, `"border_color":"grey-100"`) {
@@ -415,7 +416,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 		t.Fatalf("按钮只带平台位置，卡片里不得出现账号 id: %s", body)
 	}
 	elements := card["body"].(map[string]any)["elements"].([]any)
-	if last := cardJSON(t, elements[len(elements)-1].(map[string]any)); !strings.Contains(last, "同步至百家号") {
+	if last := cardJSON(t, elements[len(elements)-1].(map[string]any)); !strings.Contains(last, "存草稿至百家号") {
 		t.Fatalf("分发区应在卡片最底下: %s", last)
 	}
 	var outside []map[string]any
@@ -426,7 +427,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 		}
 	}
 
-	// 头条号已发、查到链接；百家号云梭受理后失败。
+	// 头条号已发、查到链接；百家号（改走分发服务之前的云梭 lane，没有 driver）云梭受理后失败。
 	toutiao := testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded)
 	toutiao.Title, toutiao.URL = "这个女性能量饮料，靠青汁粉走红了", "https://www.toutiao.com/article/7560000000000000000/"
 	baijia := testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed)
@@ -473,13 +474,13 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 		t.Fatalf("两篇原创各一块，块头带同一张封面: %s", body)
 	}
 
-	// 百家号受理前失败：可安全重推，只重推它。
+	// 百家号（旧的云梭 lane）受理前失败：可安全重推，只重推它；再推走的是现在的分发服务、存草稿。
 	baijia = testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed)
 	baijia.Error = "封面图尺寸过小"
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
-	if !strings.Contains(body, "<font color='grey'>封面图太小，换封面后重新同步</font>") || !strings.Contains(body, `"content":"重新同步至百家号"`) ||
-		!strings.Contains(body, "重新同步至百家号？") || strings.Contains(body, `"content":"同步至头条号"`) {
+	if !strings.Contains(body, "<font color='grey'>封面图太小，换封面后重新同步</font>") || !strings.Contains(body, `"content":"重新存草稿至百家号"`) ||
+		!strings.Contains(body, "重新存草稿至百家号？") || strings.Contains(body, `"content":"同步至头条号"`) {
 		t.Fatalf("受理前失败应给只推百家号的重试按钮: %s", body)
 	}
 
@@ -510,7 +511,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 			t.Fatalf("缺少 %s: %s", want, body)
 		}
 	}
-	if body := cardJSON(t, buildReviewDoneCard(job)); strings.Contains(body, reviewCardIconField) || !strings.Contains(body, "同步至百家号") {
+	if body := cardJSON(t, buildReviewDoneCard(job)); strings.Contains(body, reviewCardIconField) || !strings.Contains(body, "存草稿至百家号") {
 		t.Fatalf("单篇卡应有分发按钮且不得残留图标标记: %s", body)
 	}
 	if body := distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job})); strings.Contains(body, `"tag":"img"`) || strings.Contains(body, reviewCardIconField) {
@@ -574,9 +575,9 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	if !strings.Contains(body, "从正文里选一张作封面</font><font color='grey'>，或</font>[上传一张](") || strings.Contains(body, "话题") {
 		t.Fatalf("封面应是选一张或上传一张: %s", body)
 	}
-	// 百家号没问题：仍是普通的同步按钮。
-	if section := distributionSectionJSON(t, card); !strings.Contains(section, `"content":"同步至百家号"`) {
-		t.Fatalf("百家号应照常给同步按钮: %s", section)
+	// 百家号没问题：仍是普通的存草稿按钮。
+	if section := distributionSectionJSON(t, card); !strings.Contains(section, `"content":"存草稿至百家号"`) {
+		t.Fatalf("百家号应照常给存草稿按钮: %s", section)
 	}
 	// 下线后不再给改稿表单，只说要改什么。
 	job.Stage = publishStageOffline

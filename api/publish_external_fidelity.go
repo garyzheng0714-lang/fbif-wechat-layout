@@ -11,7 +11,8 @@ package main
 //
 // 只核一次，结果记在 lane 上，不重复取；这是外发流程本身对自家文章的一次读取，不是健康
 // 探针（红线 30）。头条号用 m.toutiao.com 的文章接口，免费、不走 TikHub；百家号有验证码，
-// 不取、不绕。
+// 不取、不绕——百家号经自己的分发服务存草稿，分发服务存完当场读回核对，结果直接记进同一个
+// Fidelity（publish_external_robot.go），这里不取。
 
 import (
 	"context"
@@ -314,7 +315,7 @@ func externalFidelityCompare(expected, online externalFidelityShape) string {
 // externalLaneNeedsFidelity 系统推送成功、有文章链接和冻结的 payload、平台能取正文、还没核过、
 // 没取满次数，且距上次失败已过重试间隔。
 func externalLaneNeedsFidelity(lane publishExternalLane, profile yunsuoPlatformProfile, now time.Time) bool {
-	if lane.State != publishExternalDistributionSucceeded || strings.TrimSpace(lane.URL) == "" ||
+	if lane.Driver != externalDriverYunsuo || lane.State != publishExternalDistributionSucceeded || strings.TrimSpace(lane.URL) == "" ||
 		strings.TrimSpace(lane.PayloadJSON) == "" || profile.ContentFetch == "" {
 		return false
 	}
@@ -333,7 +334,7 @@ func externalLaneNeedsFidelity(lane publishExternalLane, profile yunsuoPlatformP
 	return true
 }
 
-// externalLaneFidelityNote 卡片与侧边栏的一句：平台上对不上的地方。
+// externalLaneFidelityNote 卡片与侧边栏的一句：平台上对不上的地方（经分发服务的草稿见 robotPlatformState）。
 func externalLaneFidelityNote(lane publishExternalLane) string {
 	if lane.State != publishExternalDistributionSucceeded || lane.Fidelity.CheckedAt == "" {
 		return ""
@@ -373,9 +374,8 @@ func (p *publishPipeline) refreshExternalDistributionFidelity() {
 				continue
 			}
 			budget--
-			var payload yunsuoPushPayload
 			var online string
-			fetchErr := json.Unmarshal([]byte(lane.PayloadJSON), &payload)
+			payloadHTML, fetchErr := externalLaneFrozenHTML(lane)
 			if fetchErr == nil {
 				online, fetchErr = fetchExternalArticleContent(context.Background(), profile, lane.URL)
 			}
@@ -386,7 +386,7 @@ func (p *publishPipeline) refreshExternalDistributionFidelity() {
 				result.Error = fetchErr.Error()
 			} else {
 				result.CheckedAt, result.Error = stamp, ""
-				result.Expected = externalFidelityExpected(payload.HTML, profile)
+				result.Expected = externalFidelityExpected(payloadHTML, profile)
 				result.Online = externalFidelityShapeOf(online)
 				result.Note = externalFidelityCompare(result.Expected, result.Online)
 			}

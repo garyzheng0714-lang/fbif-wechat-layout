@@ -6,8 +6,8 @@ package main
 // 一次推送带上所有账号、共用一个状态：一个平台失败会拖住另一个，人工发过头条的稿也没法
 // 只补百家号。现在每个账号一条 lane，各自冻结 payload 与 intent、各自拿 content_pk、
 // 各自轮询与对账。红线 37 的安全规则逐条落在 lane 上：没拿到 content_pk 的不确定结果
-// 只人工对账；有单号只查询；只有明确受理前失败的 lane 可以重推；推过的账号（不论结果）
-// 不会被自动外发再推。
+// 只人工对账（经分发服务的按幂等键查，publish_external_robot.go）；有单号只查询；只有明确
+// 受理前失败的 lane 可以重推；推过的账号（不论结果）不会被自动外发再推。
 
 import (
 	"crypto/sha256"
@@ -23,7 +23,10 @@ const publishExternalLaneManual = "manual"
 type publishExternalLane struct {
 	AccountID string `json:"account_id"`
 	Name      string `json:"name"`
-	// queued / pushing / polling / succeeded / failed / reconciliation_required / manual
+	// Driver 建 lane 时这个平台的送稿方式；空是云梭（含改这个字段之前的所有 lane）。
+	Driver externalDriver `json:"driver,omitempty"`
+	// queued / pushing / polling / succeeded / failed / reconciliation_required / manual；
+	// 经分发服务的不轮询，多一个终态 draft_saved。
 	State          string `json:"state"`
 	RequestedBy    string `json:"requested_by,omitempty"`
 	RequestedAt    string `json:"requested_at,omitempty"`
@@ -32,11 +35,13 @@ type publishExternalLane struct {
 	Attribution    string `json:"attribution,omitempty"`
 	Source         string `json:"source,omitempty"`
 	// Title 推到这个平台的标题（云梭按平台字数在三个长度里挑，这里记中间档），卡片列表显示。
-	Title        string `json:"title,omitempty"`
-	PayloadJSON  string `json:"payload_json,omitempty"`
-	PayloadHash  string `json:"payload_hash,omitempty"`
-	IntentKey    string `json:"intent_key,omitempty"`
-	IntentAt     string `json:"intent_at,omitempty"`
+	Title       string `json:"title,omitempty"`
+	PayloadJSON string `json:"payload_json,omitempty"`
+	PayloadHash string `json:"payload_hash,omitempty"`
+	// IntentKey 外调前落盘；经分发服务的就是发给它的幂等键。
+	IntentKey string `json:"intent_key,omitempty"`
+	IntentAt  string `json:"intent_at,omitempty"`
+	// ContentPK 云梭的单号；经分发服务的是平台上的草稿编号。
 	ContentPK    string `json:"content_pk,omitempty"`
 	Error        string `json:"error,omitempty"`
 	CompletedAt  string `json:"completed_at,omitempty"`
@@ -51,7 +56,9 @@ type publishExternalLane struct {
 	FailedCount       int    `json:"failed_count,omitempty"`
 	ProviderUpdatedAt string `json:"provider_updated_at,omitempty"`
 	// 文章在平台上的链接（云梭不回链接，成功后另行查找或人工登记）。
-	URL          string `json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
+	// DraftURL 平台上这篇草稿的编辑页（分发服务存好草稿后给的）。
+	DraftURL     string `json:"draft_url,omitempty"`
 	URLCheckedAt string `json:"url_checked_at,omitempty"`
 	URLAttempts  int    `json:"url_attempts,omitempty"`
 	// 拿到链接后取一次平台上的正文，与 PayloadJSON 比结构（publish_external_fidelity.go）。
@@ -134,7 +141,7 @@ func externalDistributionMissingAutoTargets(job publishJob, cfg yunsuoConfig) []
 }
 
 // externalDistributionSummaryState 各 lane 汇总成一个状态，给卡片版本、回调提示与旧口径用：
-// 有在推的 → polling；全部在平台上 → succeeded；有待核对 → reconciliation_required；
+// 有在推的 → polling；全部在平台上或已存草稿 → succeeded；有待核对 → reconciliation_required；
 // 有失败：有平台已成功 → partial_failed，否则 failed。
 func externalDistributionSummaryState(job publishJob) string {
 	lanes := job.ExternalDistributionLanes
@@ -146,7 +153,7 @@ func externalDistributionSummaryState(job publishJob) string {
 		switch {
 		case publishExternalDistributionProcessing(lane.State):
 			return publishExternalDistributionPolling
-		case externalLaneSettled(lane):
+		case externalLaneSettled(lane) || lane.State == publishExternalDistributionDraftSaved:
 			settled++
 		case lane.State == publishExternalDistributionReconciliationRequired:
 			reconcile++

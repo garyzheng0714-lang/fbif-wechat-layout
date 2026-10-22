@@ -349,13 +349,29 @@ type externalDraftEdit struct {
 
 var errExternalDraftNothingToEdit = errors.New("这个平台已经推送，内容不能再改；如需改动请到云梭后台处理")
 
+// externalDraftLockedError 经分发服务的平台提交过就不能再改：话不提云梭，errors.Is 仍认作 errExternalDraftNothingToEdit。
+type externalDraftLockedError struct{ message string }
+
+func (e *externalDraftLockedError) Error() string { return e.message }
+func (e *externalDraftLockedError) Is(target error) bool {
+	return target == errExternalDraftNothingToEdit
+}
+
+// externalDraftLocked 这个平台已经提交过、内容不能再改时报的错。
+func externalDraftLocked(profile yunsuoPlatformProfile) error {
+	if profile.Driver == externalDriverRobot {
+		return &externalDraftLockedError{"这个平台已经提交给分发工具，内容不能再改；草稿存好后请到" + profile.Name + "草稿箱里改"}
+	}
+	return errExternalDraftNothingToEdit
+}
+
 // applyExternalDraftEdit 校验并写入修改，当场重算标题、摘要与封面问题（不读网络：封面只认
 // 候选里记过尺寸的图）。返回修改后的 draft。
 func applyExternalDraftEdit(job publishJob, target yunsuoAccountTarget, edit externalDraftEdit, actor string, now time.Time) (publishExternalDraft, error) {
-	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneCanSafeRetry(lane) {
-		return publishExternalDraft{}, errExternalDraftNothingToEdit
-	}
 	profile := yunsuoProfileForTarget(target)
+	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneCanSafeRetry(lane) {
+		return publishExternalDraft{}, externalDraftLocked(profile)
+	}
 	draft, _ := externalDraftFor(job, target.ID)
 	if edit.Title != nil {
 		title := compactYunsuoText(*edit.Title)

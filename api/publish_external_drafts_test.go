@@ -65,6 +65,7 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	env := newPublishTestEnv(t)
 	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	robot := useFakeRobot(env)
 	env.pipeline.externalSuggest = func(_ context.Context, kind, current string, min, max int) (string, error) {
 		return "老茶铺把茶做成零食，年营收1.4亿", nil
 	}
@@ -73,8 +74,9 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
 		t.Fatalf("百家号能推，整体请求不应失败：%v", err)
 	}
-	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoBaijiaID}}) {
-		t.Fatalf("头条号标题超限应先不推：%v", fake.pushed)
+	// 百家号标题上限 64 字，原样存草稿。
+	if len(fake.pushed) != 0 || len(robot.saves) != 1 || robot.saves[0].Title != testLongToutiaoTitle {
+		t.Fatalf("头条号标题超限应先不推：%v robot=%+v", fake.pushed, robot.saves)
 	}
 	got := mustJob(t, env, job.ID)
 	draft, _ := externalDraftFor(got, testYunsuoToutiaoID)
@@ -103,8 +105,8 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	if out.toastType != "success" || out.toastContent != "已保存，正在同步至头条号" {
 		t.Fatalf("改好后应受理：%+v", out)
 	}
-	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoBaijiaID}, {testYunsuoToutiaoID}}) {
-		t.Fatalf("改好后只推头条号：%v", fake.pushed)
+	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoToutiaoID}}) || len(robot.saves) != 1 {
+		t.Fatalf("改好后只推头条号：%v robot=%d", fake.pushed, len(robot.saves))
 	}
 	if fake.payload.ShortTitle != fixed {
 		t.Fatalf("头条号拿短标题，必须是人改的那一句：%+v", fake.payload)
@@ -123,7 +125,7 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	// 推过以后表单失效：旧卡再提交不会重推。
 	out = env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, 0),
 		map[string]any{fmt.Sprintf("t_%d_0", got.ID): "再改一次标题也不会重推"})
-	if out.toastType == "success" || fake.pushCalls != 2 {
+	if out.toastType == "success" || fake.pushCalls != 1 {
 		t.Fatalf("已推的平台不得再改再推：%+v pushes=%d", out, fake.pushCalls)
 	}
 }
@@ -377,7 +379,7 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, true))
 	for _, want := range []string{"同步到头条号、百家号前，还差 2 处要改：", "1. 头条号封面太小（头条号至少 452×352，现在 300×200）",
 		"在卡片里点选一张正文大图，或者", `"tag":"a","text":"上传一张"`, "（传上去就换上）", "2. 百家号标题超了 5 字（百家号最多 40 字）",
-		"在卡片输入框里改到 40 字以内", "「保存并同步至头条号」「保存并同步至百家号」"} {
+		"在卡片输入框里改到 40 字以内", "「保存并同步至头条号」「保存并存草稿至百家号」"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("开场缺少 %q: %s", want, plain)
 		}
@@ -535,6 +537,7 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	env := newPublishTestEnv(t)
 	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	useFakeRobot(env)
 	var stored [][]byte
 	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
 		stored = append(stored, body)
@@ -576,15 +579,18 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 		toutiao.CoverMinWidth != 452 || toutiao.Title != testLongToutiaoTitle {
 		t.Fatalf("头条号应待修改并给出上限：%+v", toutiao)
 	}
-	if baijia.Status != "已发布" || baijia.Editable {
-		t.Fatalf("百家号已推，不能再改：%+v", baijia)
+	if baijia.Status != "草稿已存（未发布）" || baijia.Editable || baijia.DraftURL != testRobotDraftURL(testRobotArticleID) || baijia.Action != "存草稿至百家号" {
+		t.Fatalf("百家号已存草稿，不能再改：%+v", baijia)
+	}
+	if toutiao.Action != "同步至头条号" {
+		t.Fatalf("头条号按钮后半句照旧：%+v", toutiao)
 	}
 
 	// 只改标题：封面问题还在，仍待修改、不推。
 	put := func(body string) *httptest.ResponseRecorder {
 		return doEditReq(mux, http.MethodPut, base+"draft"+signed, editor, []byte(body), "application/json")
 	}
-	if rec := put(`{"slot":0,"title":"老茶铺把茶做成零食，年营收过亿"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || fake.pushCalls != 1 {
+	if rec := put(`{"slot":0,"title":"老茶铺把茶做成零食，年营收过亿"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || fake.pushCalls != 0 {
 		t.Fatalf("改完标题封面仍要改：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
 	}
 	if rec := put(`{"slot":0,"title":"这个标题足足有三十多个字，远远超过了头条号三十个字的标题上限啊"}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "头条号标题最多 30 字") {
@@ -619,7 +625,7 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	if rec.Code != http.StatusOK || len(stored) != 1 || uploaded.Uploaded.Width != 900 || !strings.HasPrefix(uploaded.Uploaded.URL, "https://cdn.example.com/uploaded/distribution-cover-") {
 		t.Fatalf("够大的图应转存：%d %s", rec.Code, rec.Body.String())
 	}
-	if fake.pushCalls != 2 || fake.payload.Cover != uploaded.Uploaded.URL {
+	if fake.pushCalls != 1 || fake.payload.Cover != uploaded.Uploaded.URL {
 		t.Fatalf("封面改好后应推头条号并用上传的图：calls=%d payload=%+v", fake.pushCalls, fake.payload)
 	}
 	got := mustJob(t, env, job.ID)
@@ -644,6 +650,7 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 	env := newPublishTestEnv(t)
 	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	useFakeRobot(env)
 	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
 		return "https://cdn.example.com/uploaded/" + name, nil
 	}
@@ -666,7 +673,7 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 标题仍超：封面换上，标题问题留着，不推。
-	if rec := upload(job, testPNG(t, 900, 600), testLongToutiaoTitle+"再长一点"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || fake.pushCalls != 1 {
+	if rec := upload(job, testPNG(t, 900, 600), testLongToutiaoTitle+"再长一点"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || fake.pushCalls != 0 {
 		t.Fatalf("标题没改好时只换封面：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
 	}
 	draft := mustDraft(t, mustJob(t, env, job.ID), testYunsuoToutiaoID)
@@ -678,7 +685,7 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 	}
 	// 再传一张，带上改好的标题：一起提交，马上推。
 	fixed := "老茶铺把茶做成零食，年营收过亿"
-	if rec := upload(job, testPNG(t, 1200, 800), fixed); rec.Code != http.StatusOK || fake.pushCalls != 2 {
+	if rec := upload(job, testPNG(t, 1200, 800), fixed); rec.Code != http.StatusOK || fake.pushCalls != 1 {
 		t.Fatalf("标题改好、封面传上就推：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
 	}
 	if fake.payload.ShortTitle != fixed || !strings.HasPrefix(fake.payload.Cover, "https://cdn.example.com/uploaded/") {

@@ -7,24 +7,37 @@ package main
 // 往下每个平台再有自己的一套。这里只写各平台与通用不同的参数；封面、配额、链接核对都按
 // 账号所属平台取。加平台只加一份 profile，不改通用层。
 //
-// 正文 HTML 各平台同一份：推给云梭的正文会被它重写成各平台自己的格式，平台原生写法
-// （头条的 h1.pgc-h-forward-slash、pgc-img-caption）进去就丢（2026-10-20 实测），所以
-// 这里没有任何 HTML 参数，正文只按云梭吃得进去的写法渲染一次（yunsuo_render.go）。
+// 每个平台还定了稿子经谁送进平台（Driver）：头条号经云梭；百家号经自己的分发服务
+// （FBIF-多平台分发工具，2026-10-22 用户裁定，目前只存草稿、不发布）。正文标签写法跟着送稿的
+// 方式走（Markup）：经云梭的只用它吃得进去的写法，平台原生写法进去就丢（2026-10-20 实测）；
+// 自己的分发服务用编辑器自己的写入接口，平台原生写法留得住（yunsuo_render.go）。
 
 import "strings"
+
+// externalDriver 稿子经谁送进平台。空是云梭：改这个字段之前建的 lane 都没有 driver，一律按云梭续查。
+type externalDriver string
+
+const (
+	externalDriverYunsuo externalDriver = ""
+	externalDriverRobot  externalDriver = "robot"
+)
 
 type yunsuoPlatformProfile struct {
 	Key  string
 	Name string
-	// 云梭会把 cover 插到这个平台正文的最前面（百家号：#95 8 月稿、#282 都是）。这样的平台，
+	// Driver 稿子经谁送进这个平台；建 lane 时抄到 lane 上，之后推送、查询、展示都看 lane 的。
+	Driver externalDriver
+	// 云梭会把 cover 插到这个平台正文的最前面（百家号经云梭时：#95 8 月稿、#282 都是）。这样的平台，
 	// 文章以图开头就用这张图当封面并从正文拿掉，插回来正好在原位。头条号用公众号封面时不插
 	// （10-10～10-12 #165 #175 #180 #193 #196 #260），正文不动。
 	CoverPrepended bool
 	// 封面下限，读得到图片尺寸时才拦；0 表示平台没有已知下限。
 	CoverMinWidth, CoverMinHeight int
-	// 云梭按平台在三档标题里挑一档（yunsuoTitleShort/Medium/Long）；人改过的平台标题原样
-	// 写进这一档。TitleMax 是推送前检查用的字数上限，0 表示按这一档的上限。
+	// 经云梭的平台：云梭在三档标题里挑一档（yunsuoTitleShort/Medium/Long），人改过的平台标题原样
+	// 写进这一档；TitleMax 是推送前检查用的字数上限，0 表示按这一档的上限。
+	// 不经云梭的平台没有档位（TitleField 为空），标题原样送，TitleMin–TitleMax 就是字数范围。
 	TitleField string
+	TitleMin   int
 	TitleMax   int
 	// 标题里的英文字母、数字、半角符号两个算一个字（头条号）。
 	TitleHalfWidthASCII bool
@@ -43,6 +56,15 @@ type yunsuoPlatformProfile struct {
 	ManageURL string
 	// 审核卡分发区平台块里的平台图标（api/cardicons/<Icon>.png，平台自己的网站图标）。
 	Icon string
+	// 正文标签写法；空表示云梭的写法（yunsuoMarkup）。
+	Markup *distributionMarkup
+}
+
+func (p yunsuoPlatformProfile) markup() distributionMarkup {
+	if p.Markup != nil {
+		return *p.Markup
+	}
+	return yunsuoMarkup
 }
 
 const yunsuoDefaultDailyLimit = 5
@@ -63,13 +85,15 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 		ManageURL:    "https://mp.toutiao.com/profile_v4/manage/content/all",
 		Icon:         "platform-toutiao",
 	},
-	// 百家号：不设封面下限。百度搜索有验证码，文章链接不自动找、线上正文不取，由管理员登记。
+	// 百家号：经自己的分发服务存草稿（不发布，2026-10-22 用户裁定），封面由分发服务在编辑器的封面
+	// 弹窗里上传、不进正文，标题原样送（百家号 2–64 字）。不设封面下限。百度搜索有验证码，文章链接
+	// 不自动找、线上正文不取：分发服务存完草稿当场读回核对。
 	"baijiahao": {
 		Key: "baijiahao", Name: "百家号",
-		CoverPrepended: true,
-		// 云梭给百家号用的是长标题档：线上百家号稿标题都是 long_title（#165 #175 #180 都是
-		// 补成「原标题｜摘要」的那一档）。
-		TitleField: yunsuoTitleLong,
+		Driver:     externalDriverRobot,
+		Markup:     &baijiahaoEditorMarkup,
+		TitleMin:   2,
+		TitleMax:   64,
 		DailyLimit: yunsuoDefaultDailyLimit,
 		URLHosts:   []string{"baijiahao.baidu.com", "mbd.baidu.com"},
 		ManageURL:  "https://baijiahao.baidu.com/builder/rc/content",
@@ -103,9 +127,17 @@ func yunsuoTitleFieldRange(field string) (int, int) {
 	}
 }
 
-// titleLimits 这个平台标题的字数范围：下限是云梭这一档的下限，上限取平台规则与这一档上限中较小的。
+// titleCharRange 标题按字符数的硬范围：经云梭的是云梭这一档的范围，否则是平台自己的范围。
+func (p yunsuoPlatformProfile) titleCharRange() (int, int) {
+	if p.TitleField == "" {
+		return p.TitleMin, p.TitleMax
+	}
+	return yunsuoTitleFieldRange(p.TitleField)
+}
+
+// titleLimits 这个平台标题的字数范围：下限是 titleCharRange 的下限，上限取平台规则与它的上限中较小的。
 func (p yunsuoPlatformProfile) titleLimits() (int, int) {
-	min, max := yunsuoTitleFieldRange(p.TitleField)
+	min, max := p.titleCharRange()
 	if p.TitleMax > 0 && p.TitleMax < max {
 		max = p.TitleMax
 	}
@@ -136,10 +168,10 @@ func (p yunsuoPlatformProfile) titleCountNote() string {
 	return ""
 }
 
-// titleOver 标题推得出去吗：先看云梭这一档按字符算的上限，再看平台自己的上限（按平台的数法）。
+// titleOver 标题推得出去吗：先看按字符算的硬上限，再看平台自己的上限（按平台的数法）。
 // 超了返回超的那条上限与按它数出的长度。
 func (p yunsuoPlatformProfile) titleOver(title string) (length, max int, over bool) {
-	_, fieldMax := yunsuoTitleFieldRange(p.TitleField)
+	_, fieldMax := p.titleCharRange()
 	if n := runeLen(title); n > fieldMax {
 		return n, fieldMax, true
 	}
@@ -163,6 +195,16 @@ func yunsuoProfileForTarget(target yunsuoAccountTarget) yunsuoPlatformProfile {
 	}
 	return yunsuoGenericProfile
 }
+
+// syncVerb 卡片、侧边栏与提醒里「送去这个平台」怎么说：云梭直接发布；自己的分发服务目前只存草稿。
+func (p yunsuoPlatformProfile) syncVerb() string {
+	if p.Driver == externalDriverRobot {
+		return "存草稿"
+	}
+	return "同步"
+}
+
+func (p yunsuoPlatformProfile) syncAction(name string) string { return p.syncVerb() + "至" + name }
 
 func (p yunsuoPlatformProfile) dailyLimit() int {
 	if p.DailyLimit > 0 {

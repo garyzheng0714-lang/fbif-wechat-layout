@@ -462,12 +462,14 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 	}
 	multi := len(drafts) > 1
 	n := 0
+	buttons := ""
 	for i, draft := range drafts {
 		name := names[i]
 		profile := yunsuoGenericProfile
 		if slot := externalTargetSlot(cfg, draft.AccountID); slot >= 0 {
 			profile = yunsuoProfileForTarget(cfg.Targets[slot])
 		}
+		buttons += "「保存并" + profile.syncAction(name) + "」"
 		prefix := ""
 		if multi {
 			prefix = name
@@ -515,7 +517,6 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 			lines = append(lines, []any{postText(problem, true)}, options)
 		}
 	}
-	buttons := "「保存并同步至" + strings.Join(names, "」「保存并同步至") + "」"
 	if inCard {
 		lines = append(lines, []any{postText("改好后点上面卡片里的"+buttons+"，就会同步。", false)})
 	} else {
@@ -528,15 +529,16 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 
 // buildExternalReminderClosing 收尾：都改好了，正在同步（不再 @）。
 func buildExternalReminderClosing(job publishJob, cfg yunsuoConfig) map[string]any {
-	var names []string
+	var actions []string
 	for _, target := range cfg.Targets {
 		if draft, ok := externalDraftFor(job, target.ID); ok && draft.EditedAt != "" {
-			names = append(names, yunsuoProfileForTarget(target).Name)
+			profile := yunsuoProfileForTarget(target)
+			actions = append(actions, profile.syncAction(profile.Name))
 		}
 	}
 	text := "都改好了，正在同步到其他平台。"
-	if len(names) > 0 {
-		text = "都改好了，正在同步至" + strings.Join(names, "、") + "。"
+	if len(actions) > 0 {
+		text = "都改好了，正在" + strings.Join(actions, "、") + "。"
 	}
 	return postMessage([][]any{{postText(text, false)}})
 }

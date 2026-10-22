@@ -244,6 +244,8 @@ type publishPipeline struct {
 	// yunsuo 是原创文章外部分发客户端。由已发布卡片人工点击，或原创稿公开后按
 	// auto 账号自动外发（publish_external_auto.go）；与网站主状态机正交，测试可注入 fake。
 	yunsuo func() (yunsuoAPI, error)
+	// distributionRobot 自己的分发服务客户端（百家号存草稿，publish_external_robot.go）；测试可注入 fake。
+	distributionRobot func() (distributionRobotAPI, error)
 	// 云梭没有回调，content_pk 落盘后以安全查询轮询最终结果。
 	externalDistributionPollInterval time.Duration
 	externalDistributionPollTimeout  time.Duration
@@ -333,6 +335,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		assessRisk:                       aiAssessPublishRisk,
 		foodTalksAuth:                    &foodTalksAuthHealth{},
 		yunsuo:                           func() (yunsuoAPI, error) { return newYunsuoClientFromEnv() },
+		distributionRobot:                newDistributionRobotClientFromEnv,
 		subscribeFeedWechatArticle:       defaultSubscribeFeedWechatArticle,
 		externalDistributionPollInterval: 5 * time.Second,
 		externalDistributionPollTimeout:  15 * time.Minute,

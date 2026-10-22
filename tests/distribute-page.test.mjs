@@ -114,6 +114,22 @@ test('改稿页：已发布但还没拿到文章链接，给平台后台看发�
   assert.doesNotMatch(linked, /后台查看/, '有文章链接就不再给后台');
 });
 
+// 2026-10-22 用户裁定：百家号经自己的分发服务只存草稿。按钮后半句由服务端给，存好的给草稿编辑页。
+test('改稿页：只存了草稿的平台给草稿箱链接，按钮照实说存草稿', () => {
+  const draftURL = 'https://baijiahao.baidu.com/builder/rc/edit?type=news&amp;article_id=1846000000000000001';
+  const saved = renderPlatform({
+    slot: 1, name: '百家号', status: '草稿已存（未发布）', tone: 'green', editable: false,
+    draft_url: 'https://baijiahao.baidu.com/builder/rc/edit?type=news&article_id=1846000000000000001',
+    manage_url: 'https://baijiahao.baidu.com/builder/rc/content', action: '存草稿至百家号',
+  }, {}, longTitle);
+  assert.ok(saved.includes(`<a href="${draftURL}" target="_blank" rel="noopener">去百家号草稿箱查看</a>`), saved);
+  assert.doesNotMatch(saved, /后台查看/, '有草稿地址就不再给后台');
+  const editing = renderPlatform({ ...platformsView().platforms[0], slot: 1, name: '百家号', action: '存草稿至百家号' }, {}, longTitle);
+  assert.match(editing, /<button type="submit" class="dist-primary">保存并存草稿至百家号<\/button>/);
+  const legacy = renderPlatform(platformsView().platforms[0], {}, longTitle);
+  assert.match(legacy, /<button type="submit" class="dist-primary">保存并同步至头条号<\/button>/, '没给 action 时照旧');
+});
+
 test('改稿页：没有签名链接时说清楚从哪打开', async () => {
   const { document } = parseHTML('<div id="root"></div>');
   const root = document.querySelector('#root');

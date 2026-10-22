@@ -75,11 +75,15 @@ type externalPlatformState struct {
 	URL    string
 	// ManageURL 已发布但还没有文章链接：平台后台内容管理页。
 	ManageURL string
-	Title     string // 平台上的标题（推送时冻结）
-	Editable  bool   // 还能改标题/摘要/封面（没推过，或受理前失败）
-	NeedsFix  bool
+	// DraftURL 只存了草稿（分发服务）：平台上这篇草稿的编辑页。
+	DraftURL string
+	Title    string // 平台上的标题（推送时冻结）
+	Editable bool   // 还能改标题/摘要/封面（没推过，或受理前失败）
+	NeedsFix bool
 	// Fidelity 已发布的平台上正文与推出去的对不上（外发保真核对），如「平台上小标题少了 1 处」。
 	Fidelity string
+	// FailedLabel 失败且能重推时原因前那句（「上次同步失败」「上次存草稿失败」），按上次的送稿方式说。
+	FailedLabel string
 }
 
 func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) externalPlatformState {
@@ -88,6 +92,8 @@ func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) external
 		switch {
 		case lane.State == publishExternalLaneManual:
 			state.Status, state.Tone = "人工已发", "green"
+		case lane.Driver == externalDriverRobot:
+			return robotPlatformState(lane, yunsuoProfileForTarget(target))
 		case lane.State == publishExternalDistributionSucceeded:
 			state.Status, state.Tone = "已发布", "green"
 			state.Fidelity = externalLaneFidelityNote(lane)
@@ -106,7 +112,7 @@ func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) external
 			state.Status, state.Tone = "待核对", "orange"
 			state.Reason = "结果未确认，请先到云梭后台核对；系统不会重复推送"
 		default:
-			state.Status, state.Tone = "失败", "red"
+			state.Status, state.Tone, state.FailedLabel = "失败", "red", "上次同步失败"
 			state.Reason = firstNonEmpty(externalLaneFailureReason(lane), "请在云梭后台处理")
 			state.Editable = externalLaneCanSafeRetry(lane)
 		}
@@ -138,14 +144,18 @@ type externalEditPlatform struct {
 	URL    string `json:"url,omitempty"`
 	// ManageURL 已发布但还没有文章链接：去平台后台看发布情况。
 	ManageURL string `json:"manage_url,omitempty"`
-	Editable  bool   `json:"editable"`
-	NeedsFix  bool   `json:"needs_fix"`
-	Auto      bool   `json:"auto"`
+	// DraftURL 只存了草稿：平台上这篇草稿的编辑页。
+	DraftURL string `json:"draft_url,omitempty"`
+	// Action 提交按钮上「保存并……」后半句：「同步至头条号」「存草稿至百家号」。
+	Action   string `json:"action"`
+	Editable bool   `json:"editable"`
+	NeedsFix bool   `json:"needs_fix"`
+	Auto     bool   `json:"auto"`
 
 	Title    string `json:"title"`
 	TitleMin int    `json:"title_min"`
 	TitleMax int    `json:"title_max"`
-	// 头条号英文字母、数字两个算一个字（与服务端 titleLength 同口径）；按字符数还要不超过云梭这一档上限。
+	// 头条号英文字母、数字两个算一个字（与服务端 titleLength 同口径）；按字符数还要不超过 titleCharRange 的上限。
 	TitleHalfWidth bool   `json:"title_half_width,omitempty"`
 	TitleFieldMax  int    `json:"title_field_max,omitempty"`
 	TitleSuggested string `json:"title_suggested,omitempty"`
@@ -181,10 +191,11 @@ func externalEditView(job publishJob, cfg yunsuoConfig) map[string]any {
 		draft, _ := externalDraftFor(job, target.ID)
 		state := externalPlatformStatus(job, target)
 		min, max := profile.titleLimits()
-		_, fieldMax := yunsuoTitleFieldRange(profile.TitleField)
+		_, fieldMax := profile.titleCharRange()
 		view := externalEditPlatform{
 			Slot: slot, Name: profile.Name, Status: state.Status, Tone: state.Tone, Reason: firstNonEmpty(state.Reason, state.Fidelity),
-			URL: state.URL, ManageURL: state.ManageURL, Editable: state.Editable, NeedsFix: state.NeedsFix, Auto: target.Auto,
+			URL: state.URL, ManageURL: state.ManageURL, DraftURL: state.DraftURL, Action: profile.syncAction(profile.Name),
+			Editable: state.Editable, NeedsFix: state.NeedsFix, Auto: target.Auto,
 			Title: externalEffectiveTitle(job, draft), TitleMin: min, TitleMax: max,
 			TitleHalfWidth: profile.TitleHalfWidthASCII, TitleFieldMax: fieldMax,
 			Summary: externalEffectiveSummary(job, draft), SummaryMax: profile.SummaryMax,
@@ -193,6 +204,7 @@ func externalEditView(job publishJob, cfg yunsuoConfig) map[string]any {
 		}
 		if strings.TrimSpace(target.Name) != "" && target.Name != profile.Name {
 			view.Name = target.Name
+			view.Action = profile.syncAction(target.Name)
 		}
 		if !state.Editable && state.Title != "" {
 			view.Title = state.Title
@@ -487,7 +499,7 @@ func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, 
 		return job, publishExternalCoverCandidate{}, err
 	}
 	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneCanSafeRetry(lane) {
-		return job, publishExternalCoverCandidate{}, errExternalDraftNothingToEdit
+		return job, publishExternalCoverCandidate{}, externalDraftLocked(profile)
 	}
 	candidate, err := p.storeExternalCoverBytes(ctx, jobID, data, format, config.Width, config.Height, actor)
 	if err != nil {

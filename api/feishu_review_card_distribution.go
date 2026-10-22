@@ -177,7 +177,7 @@ func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int,
 
 	var right map[string]any
 	if actionable && state.Editable && !state.NeedsFix {
-		right = reviewCardPlatformSyncButton(job, slot, name, state)
+		right = reviewCardPlatformSyncButton(job, slot, name, state, profile)
 	}
 	buttoned := right != nil
 	if right == nil {
@@ -228,9 +228,12 @@ func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int,
 }
 
 // reviewCardPlatformArticleLink 名字后面的文章链接：平台改过标题就写平台上的标题，否则「查看文章」。
-// 已发布但还没拿到文章链接（百家号不自动找）就给平台后台，在那里看发布情况。
+// 只存了草稿的给草稿编辑页；已发布但还没拿到文章链接（不自动找链接的平台）就给平台后台，在那里看发布情况。
 func reviewCardPlatformArticleLink(job publishJob, state externalPlatformState, name string) string {
 	if state.URL == "" {
+		if state.DraftURL != "" {
+			return "[去" + name + "草稿箱查看](" + state.DraftURL + ")"
+		}
 		if state.ManageURL != "" {
 			return "[去" + name + "后台查看](" + state.ManageURL + ")"
 		}
@@ -261,19 +264,26 @@ func reviewCardPlatformReason(state externalPlatformState, fixing, buttoned bool
 		return "<font color='grey'>" + reason + "</font>　[去修改](" + editLink + ")"
 	}
 	if buttoned && state.Tone == "red" {
-		return "<font color='red'>上次同步失败</font>　<font color='grey'>" + reason + "</font>"
+		return "<font color='red'>" + firstNonEmpty(state.FailedLabel, "上次同步失败") + "</font>　<font color='grey'>" + reason + "</font>"
 	}
 	return "<font color='grey'>" + reason + "</font>"
 }
 
 // reviewCardPlatformSyncButton 没推过、或受理前失败可安全重推的平台：按钮推这一个平台。
-func reviewCardPlatformSyncButton(job publishJob, slot int, name string, state externalPlatformState) map[string]any {
+// 经分发服务的平台目前只存草稿（2026-10-22 用户裁定），按钮与确认框都照实说。
+func reviewCardPlatformSyncButton(job publishJob, slot int, name string, state externalPlatformState, profile yunsuoPlatformProfile) map[string]any {
 	retry := state.Status == "失败"
-	text := "同步至" + name
+	text := profile.syncAction(name)
 	confirm := "请确认本文为原创文章。外部发布独立于 FoodTalks；下线本站文章不会自动下线外部平台。确认后将立即提交发布。"
+	if profile.Driver == externalDriverRobot {
+		confirm = "将由分发工具在" + name + "存一篇草稿，不会发布；请到" + name + "草稿箱确认版式。请确认本文为原创文章。"
+	}
 	if retry {
-		text = "重新同步至" + name
+		text = "重新" + text
 		confirm = "上次请求已确认未被云梭受理，不会重复发布。本次会重新提交；请同时确认本文为原创文章。"
+		if profile.Driver == externalDriverRobot {
+			confirm = "上次没有送到" + name + "，这次由分发工具重新提交到" + name + "草稿箱，不会重复存稿，也不会发布。请同时确认本文为原创文章。"
+		}
 	}
 	return map[string]any{
 		"tag": "button", "text": feishuPlainText(text), "type": "default",
@@ -303,8 +313,8 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 		note(fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：%s最多 %d 字%s，现在 %d 字",
 			issue.Length-issue.Max, name, issue.Max, how, issue.Length))
 		note("<font color='grey'>现在：" + reviewCardSafeText(issue.Current, 120) + "</font>")
-		// 输入框按字符数限长：英文数字算半个字的平台放宽到云梭这一档的上限，超没超由服务端按平台数法判。
-		_, inputMax := yunsuoTitleFieldRange(profile.TitleField)
+		// 输入框按字符数限长：英文数字算半个字的平台放宽到按字符数的硬上限，超没超由服务端按平台数法判。
+		_, inputMax := profile.titleCharRange()
 		out = append(out, reviewCardFixInput(reviewCardFixFieldName("t", job.ID, slot), "改成",
 			firstNonEmpty(draft.SuggestedTitle, issue.Current), issue.Max, max(issue.Max, inputMax), false))
 	}
@@ -351,7 +361,7 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 		}
 	}
 	buttons := []map[string]any{{
-		"tag": "button", "text": feishuPlainText("保存并同步至" + name), "type": "primary_filled",
+		"tag": "button", "text": feishuPlainText("保存并" + profile.syncAction(name)), "type": "primary_filled",
 		"size": "small", "width": "default",
 		"name": reviewCardFixFieldName("submit", job.ID, slot), "form_action_type": "submit",
 		"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{

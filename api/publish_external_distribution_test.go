@@ -145,11 +145,16 @@ func TestExternalDistributionUsesLivePublishedNewsNotJobSnapshot(t *testing.T) {
 		},
 	}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	robot := useFakeRobot(env)
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
 		t.Fatalf("应用最新已发布稿分发：%v", err)
 	}
-	if fake.pushCalls != 2 {
-		t.Fatalf("两个平台各推一次，实际 %d", fake.pushCalls)
+	// 头条号经云梭、百家号经分发服务，各推一次。
+	if fake.pushCalls != 1 || len(robot.saves) != 1 {
+		t.Fatalf("两个平台各推一次，实际云梭 %d、分发服务 %d", fake.pushCalls, len(robot.saves))
+	}
+	if draft := robot.saves[0]; !strings.Contains(draft.HTML, "最新已发布的正确正文") || strings.Contains(draft.HTML, "历史错误正文") || draft.Title != "把茶做成零食，这家老茶铺年营收1.4亿" {
+		t.Fatalf("百家号草稿也必须用网站最新已发布稿：%+v", draft)
 	}
 	if !strings.Contains(fake.payload.HTML, "最新已发布的正确正文") {
 		t.Fatalf("外发必须用网站最新已发布正文：%s", fake.payload.HTML)
@@ -252,9 +257,10 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 		},
 	}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	robot := useFakeRobot(env)
 
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "同步至头条号") || !strings.Contains(card, "同步至百家号") || !strings.Contains(card, feishuCardActionDistributeExternal) {
+	if !strings.Contains(card, "同步至头条号") || !strings.Contains(card, "存草稿至百家号") || !strings.Contains(card, feishuCardActionDistributeExternal) {
 		t.Fatalf("已发布原创卡应显示固定目标的一键分发按钮：%s", card)
 	}
 	value, _ := json.Marshal(map[string]any{
@@ -269,20 +275,21 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{testYunsuoToutiaoID, testYunsuoBaijiaID} {
-		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionSucceeded || lane.ContentPK != "content-pk-1" {
-			t.Fatalf("原创分发未闭环：%+v", lane)
-		}
+	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.State != publishExternalDistributionSucceeded || lane.ContentPK != "content-pk-1" {
+		t.Fatalf("原创分发未闭环：%+v", lane)
 	}
-	// 各平台分开推：每个平台一次 push、一次查询，payload 只带本平台账号。
-	if fake.pushCalls != 2 || fake.statusCalls != 2 {
-		t.Fatalf("两个平台应各推一次、各查一次：push=%d status=%d", fake.pushCalls, fake.statusCalls)
+	if lane := mustLane(t, got, testYunsuoBaijiaID); lane.State != publishExternalDistributionDraftSaved || lane.ContentPK != testRobotArticleID {
+		t.Fatalf("百家号应存好草稿：%+v", lane)
 	}
-	if len(fake.payload.AccountIDs) != 1 || strings.Contains(fake.payload.HTML, "FoodTalks") {
+	// 各平台分开推：头条号一次 push、一次查询，payload 只带本平台账号；百家号一次存草稿。
+	if fake.pushCalls != 1 || fake.statusCalls != 1 || len(robot.saves) != 1 {
+		t.Fatalf("两个平台应各推一次：push=%d status=%d robot=%d", fake.pushCalls, fake.statusCalls, len(robot.saves))
+	}
+	if len(fake.payload.AccountIDs) != 1 || strings.Contains(fake.payload.HTML, "FoodTalks") || strings.Contains(robot.saves[0].HTML, "FoodTalks") {
 		t.Fatalf("每次推送只带一个账号，正文渠道中性：%+v", fake.payload)
 	}
-	if repeated := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", value); repeated.toastType != "info" || fake.pushCalls != 2 {
-		t.Fatalf("重复点击不得再次 push：out=%+v push=%d", repeated, fake.pushCalls)
+	if repeated := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", value); repeated.toastType != "info" || fake.pushCalls != 1 || len(robot.saves) != 1 {
+		t.Fatalf("重复点击不得再次 push：out=%+v push=%d robot=%d", repeated, fake.pushCalls, len(robot.saves))
 	}
 }
 
@@ -370,11 +377,12 @@ func TestExternalDistributionSafeFailureRendersRetryButton(t *testing.T) {
 	setTestYunsuoConfig(t)
 	env := newPublishTestEnv(t)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
-	job = setTestLanes(t, env, job.ID,
-		testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionFailed),
-		testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed))
+	baijia := testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed)
+	baijia.Driver = externalDriverRobot
+	job = setTestLanes(t, env, job.ID, testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionFailed), baijia)
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "重新同步至头条号") || !strings.Contains(card, "重新同步至百家号") || !strings.Contains(card, "不会重复发布") {
+	if !strings.Contains(card, "重新同步至头条号") || !strings.Contains(card, "重新存草稿至百家号") || !strings.Contains(card, "不会重复发布") ||
+		!strings.Contains(card, "不会重复存稿") {
 		t.Fatalf("明确未受理的失败必须提供安全重试入口：%s", card)
 	}
 }
@@ -388,11 +396,15 @@ func TestExternalDistributionRejectedStatusStopsPolling(t *testing.T) {
 		statusErr: &yunsuoRejectedError{Operation: "状态查询", Code: -1, Message: "content_pk 不存在"},
 	}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	useFakeRobot(env)
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := env.store.byID(job.ID)
-	if externalDistributionSummaryState(got) != publishExternalDistributionReconciliationRequired || fake.statusCalls != 2 {
+	// 只有经云梭的头条号会查云梭状态；百家号经分发服务照常存好草稿。
+	if externalDistributionSummaryState(got) != publishExternalDistributionReconciliationRequired || fake.statusCalls != 1 ||
+		mustLane(t, got, testYunsuoToutiaoID).State != publishExternalDistributionReconciliationRequired ||
+		mustLane(t, got, testYunsuoBaijiaID).State != publishExternalDistributionDraftSaved {
 		t.Fatalf("明确拒绝的状态查询应立即转人工核对：lanes=%+v calls=%d", got.ExternalDistributionLanes, fake.statusCalls)
 	}
 }
@@ -403,17 +415,21 @@ func TestExternalDistributionUncertainPushNeverRepeats(t *testing.T) {
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
 	fake := &fakeYunsuoAPI{pushErr: &yunsuoUncertainError{Operation: "推送", Cause: errors.New("response lost")}}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	robot := useFakeRobot(env)
+	robot.saveErr = &robotUncertainError{Cause: "网络请求失败或超时"}
+	robot.getRecord = robotDraftRecord{Status: robotDraftPending}
 
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := env.store.byID(job.ID)
-	if externalDistributionSummaryState(got) != publishExternalDistributionReconciliationRequired || fake.pushCalls != 2 {
-		t.Fatalf("不确定结果必须进入人工核对：lanes=%+v push=%d", got.ExternalDistributionLanes, fake.pushCalls)
+	if externalDistributionSummaryState(got) != publishExternalDistributionReconciliationRequired || fake.pushCalls != 1 || len(robot.saves) != 1 {
+		t.Fatalf("不确定结果必须进入人工核对：lanes=%+v push=%d robot=%d", got.ExternalDistributionLanes, fake.pushCalls, len(robot.saves))
 	}
 	env.pipeline.recoverExternalDistribution(got)
-	if fake.pushCalls != 2 {
-		t.Fatalf("恢复扫描不得重放不确定 push，实际 %d 次", fake.pushCalls)
+	env.pipeline.refreshExternalDistributionResults()
+	if fake.pushCalls != 1 || len(robot.saves) != 1 {
+		t.Fatalf("恢复扫描不得重放不确定 push，实际云梭 %d、分发服务 %d 次", fake.pushCalls, len(robot.saves))
 	}
 }
 
@@ -500,6 +516,7 @@ func TestReplaceExternalDistributionAfterReconcileRebuildsContentHTML(t *testing
 		},
 	}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	robot := useFakeRobot(env)
 	queued, err := env.pipeline.replaceExternalDistributionAfterReconcile(job.ID, publishExternalAdminRetryActor)
 	if err != nil {
 		t.Fatal(err)
@@ -511,13 +528,15 @@ func TestReplaceExternalDistributionAfterReconcileRebuildsContentHTML(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{testYunsuoToutiaoID, testYunsuoBaijiaID} {
-		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionSucceeded || lane.ContentPK != "content-pk-replaced" {
-			t.Fatalf("管理员重发应对账闭环：%+v", lane)
-		}
+	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.State != publishExternalDistributionSucceeded || lane.ContentPK != "content-pk-replaced" {
+		t.Fatalf("管理员重发应对账闭环：%+v", lane)
 	}
-	if fake.pushCalls != 2 {
-		t.Fatalf("对账中的两个平台各重推一次，实际 %d", fake.pushCalls)
+	// 旧的云梭百家号 lane 对账后重发，走的是现在的分发服务。
+	if lane := mustLane(t, got, testYunsuoBaijiaID); lane.Driver != externalDriverRobot || lane.State != publishExternalDistributionDraftSaved {
+		t.Fatalf("百家号重发应经分发服务存草稿：%+v", lane)
+	}
+	if fake.pushCalls != 1 || len(robot.saves) != 1 || strings.Contains(robot.saves[0].HTML, "wrong-field") {
+		t.Fatalf("对账中的两个平台各重推一次，实际云梭 %d、分发服务 %d", fake.pushCalls, len(robot.saves))
 	}
 	encoded, err := json.Marshal(fake.payload)
 	if err != nil {
@@ -634,14 +653,15 @@ func TestExternalCardExpiredIsTerminal(t *testing.T) {
 
 // TestExternalQueuedAtYunsuoShowsQueuedNotReconcile 2026-10-14 #282：云梭已收下、回执一直是「等待发布」，
 // 15 分钟轮询到点转了对账。卡片和侧边栏说「排队中」、每 30 分钟自动查，不叫人去云梭后台核对；
-// 查询被拒、没拿到回执、没有单号、过了 45 天补查期的仍是待核对。
+// 查询被拒、没拿到回执、没有单号、过了 45 天补查期的仍是待核对。只配经云梭的头条号（百家号
+// 2026-10-22 起经自己的分发服务，没有云梭排队这回事）。
 func TestExternalQueuedAtYunsuoShowsQueuedNotReconcile(t *testing.T) {
 	setTestYunsuoConfig(t)
+	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoToutiaoID+`","name":"头条号"}]`)
 	env := newPublishTestEnv(t)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
 	fake := &fakeYunsuoAPI{contentPK: "pk-queued", statuses: []yunsuoAccountStatus{
 		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
-		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
 	}}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	env.pipeline.externalDistributionPollTimeout = time.Nanosecond
@@ -649,7 +669,7 @@ func TestExternalQueuedAtYunsuoShowsQueuedNotReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := mustJob(t, env, job.ID)
-	targets := []yunsuoAccountTarget{{ID: testYunsuoToutiaoID, Name: "头条号"}, {ID: testYunsuoBaijiaID, Name: "百家号"}}
+	targets := []yunsuoAccountTarget{{ID: testYunsuoToutiaoID, Name: "头条号"}}
 	for _, target := range targets {
 		lane := mustLane(t, got, target.ID)
 		if lane.State != publishExternalDistributionReconciliationRequired || lane.Remark != "等待发布" {
@@ -668,7 +688,7 @@ func TestExternalQueuedAtYunsuoShowsQueuedNotReconcile(t *testing.T) {
 	if outcome, handled := externalDistributionCardStateOutcome(got); !handled || outcome.toastType != "info" || !strings.Contains(outcome.toastContent, "排队") {
 		t.Fatalf("全部排队中时按钮提示应说排队：%+v", outcome)
 	}
-	if fake.pushCalls != 2 {
+	if fake.pushCalls != 1 {
 		t.Fatalf("每个平台只推一次，实际 %d", fake.pushCalls)
 	}
 

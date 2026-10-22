@@ -60,6 +60,8 @@
         "YUNSUO_API_KEY": { "required": true, "secret": true },
         "YUNSUO_TARGET_ACCOUNTS_JSON": { "required": true, "secret": false },
         "YUNSUO_CATEGORIES": { "required": true, "secret": false },
+        "DISTRIBUTION_API_URL": { "required": false, "secret": false },
+        "DISTRIBUTION_API_TOKEN": { "required": false, "secret": true },
         "FEISHU_APP_ID": { "required": true, "secret": false },
         "FEISHU_APP_SECRET": { "required": true, "secret": true },
         "FEISHU_NOTIFICATION_APPS_JSON": { "required": false, "secret": true },

@@ -220,6 +220,7 @@ func TestExternalDistributionManualRegistration(t *testing.T) {
 	env.pipeline.now = func() time.Time { return clock.now }
 	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	robot := useFakeRobot(env)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
 	path := fmt.Sprintf("/api/publish/jobs/%d/external-distribution/manual", job.ID)
 
@@ -266,22 +267,32 @@ func TestExternalDistributionManualRegistration(t *testing.T) {
 	if marked, err := env.pipeline.markExternalAutoBackfill(time.Date(2026, 8, 1, 0, 0, 0, 0, publishExternalAutoZone), false); err != nil || len(marked) != 1 {
 		t.Fatalf("应只为百家号补发：n=%d err=%v", len(marked), err)
 	}
-	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoBaijiaID}}) {
-		t.Fatalf("头条号人工已发，不得再推：%v", fake.pushed)
+	if len(fake.pushed) != 0 || fmt.Sprint(robot.platforms) != "[baijiahao]" {
+		t.Fatalf("头条号人工已发，不得再推：%v robot=%v", fake.pushed, robot.platforms)
 	}
 	got := mustJob(t, env, job.ID)
 	body := distributionSectionJSON(t, buildReviewDoneCard(got))
-	if !strings.Contains(body, "<font color='green'>人工已发</font>") || !strings.Contains(body, "<font color='green'>已发布</font>") {
-		t.Fatalf("卡片应显示头条号人工已发、两个平台都已同步: %s", body)
+	if !strings.Contains(body, "<font color='green'>人工已发</font>") || !strings.Contains(body, "<font color='green'>草稿已存（未发布）</font>") {
+		t.Fatalf("卡片应显示头条号人工已发、百家号草稿已存: %s", body)
+	}
+
+	// 百家号的草稿由人在后台发出去后，登记成人工已发并补上文章链接；草稿编号留着。
+	rec = doPublishReq(mux, http.MethodPost, path, `{"account_id":"`+testYunsuoBaijiaID+`","url":"https://baijiahao.baidu.com/s?id=1846000000000000000"}`, true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"action":"register_manual"`) {
+		t.Fatalf("存了草稿的百家号应登记为人工已发：%d %s", rec.Code, rec.Body.String())
+	}
+	if baijia := mustLane(t, mustJob(t, env, job.ID), testYunsuoBaijiaID); baijia.State != publishExternalLaneManual ||
+		baijia.URL != "https://baijiahao.baidu.com/s?id=1846000000000000000" || baijia.ContentPK != testRobotArticleID {
+		t.Fatalf("登记后应是人工已发、带链接：%+v", baijia)
 	}
 
 	// 已发布的平台只补链接，不改状态。
-	rec = doPublishReq(mux, http.MethodPost, path, `{"account_id":"`+testYunsuoBaijiaID+`","url":"https://baijiahao.baidu.com/s?id=1846000000000000000"}`, true)
+	rec = doPublishReq(mux, http.MethodPost, path, `{"account_id":"`+testYunsuoBaijiaID+`","url":"https://baijiahao.baidu.com/s?id=1846000000000000009"}`, true)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"action":"set_link"`) {
 		t.Fatalf("应只补百家号链接：%d %s", rec.Code, rec.Body.String())
 	}
-	if baijia := mustLane(t, mustJob(t, env, job.ID), testYunsuoBaijiaID); baijia.State != publishExternalDistributionSucceeded ||
-		baijia.URL != "https://baijiahao.baidu.com/s?id=1846000000000000000" || baijia.RequestedBy != publishExternalAutoBackfillActor {
+	if baijia := mustLane(t, mustJob(t, env, job.ID), testYunsuoBaijiaID); baijia.State != publishExternalLaneManual ||
+		baijia.URL != "https://baijiahao.baidu.com/s?id=1846000000000000009" || baijia.RequestedBy != publishExternalManualActor {
 		t.Fatalf("补链接不得改状态和留痕：%+v", baijia)
 	}
 	if rec := doPublishReq(mux, http.MethodPost, path, `{"account_id":"`+testYunsuoBaijiaID+`"}`, true); rec.Code != http.StatusConflict {
