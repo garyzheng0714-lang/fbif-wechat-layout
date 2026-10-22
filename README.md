@@ -288,6 +288,7 @@ curl http://127.0.0.1:9000/api/health
 | `PUBLISH_SYNC_SERVICE_TOKEN` | `FoodTalks_Feed` 与 `fbif-wechat-article` 调用发布提交、紧凑状态和监控端点的独立服务令牌；不能访问完整任务、审核、重试、对账或规则管理接口 |
 | `FOODTALKS_FEED_BASE_URL` | 向 Feed 查转载原文；缺省 `https://feed.foodtalks.cn`；鉴权共用上面的同步令牌 |
 | `TIKHUB_API_KEY` / `TIKHUB_API_BASE_URL` | 可选，按次计费（0.01$/次）。Feed 未订该公众号、自家号转发又没填「阅读原文」时，用 TikHub 广域搜（搜一搜）按标题+出处补微信链接；Mote 正文的公众号长链微信只回验证页时，用文章详情接口取标题与发文时间，换成站内稿；国内默认 `https://api.tikhub.dev`。失败只降级 |
+| `JINA_OUTBOUND_PROXY` | 可选，免费。非公众号网页直抓拿不到正文（站点反爬，如和讯的腾讯云 EdgeOne）时，`/api/fetch-article` 改用 Jina Reader 免费档取 Markdown 正文（图片留在原位）；国内直连 r.jina.ai 被墙，填 socks5 出站代理（与 Feed 同一出口）。公众号链接不走 Jina。都失败才提示编辑走飞书云文档 |
 | `REDFOX_API_KEY` / `REDFOX_API_BASE_URL` | 旧红狐兼容键；本服务不再读取，只为旧 `publish.env` 过渡保留 |
 | `PUBLISH_HTTP_REVIEW_ENABLED` / `PUBLISH_HTTP_REVIEWER_OPEN_ID` | HTTP 审核应保持默认关闭；仅应急启用时，固定审核人仍必须命中 `FEISHU_REVIEWER_OPEN_IDS` |
 | `FEISHU_REVIEWER_ALLOW_CHAT_MEMBERS` | 群成员审核模式（2026-08-06 用户裁定）：开启后，来自 `FEISHU_REVIEW_CHAT_ID` 审核群内的卡片操作即有审核权限（依据：只有群成员能点到群消息里的按钮，事件 `open_chat_id` 由飞书服务端注入）；卡片被转发到其他会话后群 id 不同，一律拒绝。白名单继续兼容 |

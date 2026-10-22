@@ -39,6 +39,7 @@
         "FOODTALKS_FEED_BASE_URL": { "required": false, "secret": false },
         "TIKHUB_API_KEY": { "required": false, "secret": true },
         "TIKHUB_API_BASE_URL": { "required": false, "secret": false },
+        "JINA_OUTBOUND_PROXY": { "required": false, "secret": true },
         "REDFOX_API_KEY": { "required": false, "secret": true },
         "REDFOX_API_BASE_URL": { "required": false, "secret": false },
         "PUBLISH_HTTP_REVIEW_ENABLED": { "required": false, "secret": false },

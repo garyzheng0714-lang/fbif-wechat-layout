@@ -104,7 +104,7 @@ func main() {
 	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
 	mux.HandleFunc("POST /api/wechat-upload", handleImageUpload) // legacy alias
 
-	// Article fetch (URL repost via x-reader)
+	// Article fetch (direct; non-WeChat pages without a body fall back to Jina Reader)
 	mux.HandleFunc("POST /api/fetch-article", handleFetchArticleWithStore(ruleStore))
 
 	// Article meta fetch (lightweight: title + cover image for "更多文章" cards)
@@ -516,7 +516,7 @@ func uploadProxyOrigin(r *http.Request) string {
 	return proto + "://" + host
 }
 
-// ---- Article Fetch (URL repost via x-reader) ----
+// ---- Article Fetch (direct; non-WeChat fallback via Jina Reader) ----
 
 func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -563,6 +563,12 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 			return
 		}
 		if !isSafeWeChatArticleURL(req.URL) {
+			jinaTitle, content, jerr := fetchArticleMarkdownViaJina(r.Context(), req.URL)
+			if jerr == nil {
+				writeJSON(w, 200, map[string]interface{}{"title": jinaTitle, "content": content, "source": req.URL})
+				return
+			}
+			log.Printf("handleFetchArticle jina fallback failed for %s: %v", req.URL, jerr)
 			writeError(w, 502, "文章抓取失败：这个网页没给出正文（网站可能开了反爬验证）。请在浏览器打开原文，把正文复制到飞书云文档，再点「@ 飞书云文档」导入")
 			return
 		}
@@ -615,7 +621,7 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 		log.Printf("fetchDirectBlocks attempt %d/%d: empty content (possible anti-scrape page)", i+1, len(backoffs))
 	}
 	// 全部尝试都没拿到内容：最后一次是传输失败则返回该 err；否则（拿到页面但空）
-	// 返回空 blocks 无 err，让调用方决定是否走 x-reader。
+	// 返回空 blocks 无 err，让调用方决定是否走 Jina Reader（仅非公众号）。
 	return "", nil, "", "", "", "", "", "", transportErr
 }
 

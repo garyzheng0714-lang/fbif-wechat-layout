@@ -1112,7 +1112,8 @@ export function initApp(initialTemplate) {
   // URL-import structured-blocks entry point. Used when the server responds
   // to /api/fetch-article with {title, blocks} (preferred path — preserves
   // visual signals). Falls back to _handleFile with a synthetic .md File
-  // when the server returns {title, content} (x-reader fallback).
+  // when the server returns {title, content} (Jina Reader fallback for
+  // non-WeChat pages whose direct fetch has no body).
   window._handleBlocks = async (data, opts) => {
     // 新输入是文章级意图边界：解析、旧文章上传、更多文章、复制、重试等
     // 所有在途回写都必须同时失效，不能只挡解析结果。
