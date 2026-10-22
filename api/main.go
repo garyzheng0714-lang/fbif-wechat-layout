@@ -557,11 +557,13 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		}
 		// Do not hand attacker-controlled URLs to an external reader process:
 		// its redirect/DNS behavior cannot share the Go transport's SSRF guard.
-		if derr != nil {
-			log.Printf("handleFetchArticle failed for %s: direct=%v", req.URL, derr)
-		}
+		log.Printf("handleFetchArticle failed for %s: direct=%v blocks=%d", req.URL, derr, len(blocks))
 		if errors.Is(derr, errArticlePageTooLarge) {
 			writeError(w, 502, derr.Error())
+			return
+		}
+		if !isSafeWeChatArticleURL(req.URL) {
+			writeError(w, 502, "文章抓取失败：这个网页没给出正文（网站可能开了反爬验证）。请在浏览器打开原文，把正文复制到飞书云文档，再点「@ 飞书云文档」导入")
 			return
 		}
 		writeError(w, 502, "文章抓取失败，请稍后重试（公众号可能临时限流）")
