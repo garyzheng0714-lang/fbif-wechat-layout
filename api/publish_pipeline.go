@@ -2021,7 +2021,7 @@ func officialPlainTextBlocks(content string) []Block {
 			}
 			continue
 		}
-		block := Block{K: "p", BlankBefore: pendingBlank}
+		block := Block{K: "txt", BlankBefore: pendingBlank}
 		if regexp.MustCompile(`(?i)</?[a-z][^>]*>`).MatchString(line) {
 			block.Runs = officialInlineRuns(line)
 			if !hasContent(block.Runs) {

@@ -544,15 +544,8 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		accountID := firstNonEmpty(req.AccountID, req.Account)
 		title, blocks, sourceName, byline, _, originalSourceURL, _, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
 		if derr == nil && len(blocks) > 0 {
-			writeJSON(w, 200, map[string]interface{}{
-				"title":       title,
-				"blocks":      blocks,
-				"source":      req.URL,
-				"source_name": sourceName,
-				"byline":      byline,
-				// 转载文章「阅读原文」指向的原文地址；转载声明《标题》超链接优先用它
-				"original_source_url": originalSourceURL,
-			})
+			writeJSON(w, 200, articleBlocksResponse{Title: title, Blocks: blocks, Source: req.URL,
+				SourceName: sourceName, Byline: byline, OriginalSourceURL: originalSourceURL})
 			return
 		}
 		// Do not hand attacker-controlled URLs to an external reader process:

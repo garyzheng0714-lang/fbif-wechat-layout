@@ -23,6 +23,8 @@
 - [微信公众号标题识别规范](../openspec/specs/wechat-heading-detection/spec.md)
 - [微信公众号 URL 块分类规范](../openspec/specs/wechat-url-block-classification/spec.md)
 - [微信草稿存活复制规范](../openspec/specs/wechat-draft-survival-copy/spec.md)
+- [正文块格式](article-blocks.md)（[JSON Schema](article-blocks.schema.json)）：公众号、FoodTalks、第三方平台共用的中间格式；由 `api/article_blocks.go` 生成，别手改。
+- 平台说明书 [头条号](platforms/toutiao.md)、[百家号](platforms/baijiahao.md)：每种块在这个平台写成什么、通用规则改写前后、标题封面限制；由测试按现在的代码生成。百家号编辑器里怎么点见分发服务仓库的 `docs/platforms/baijiahao.md`。
 
 ### FoodTalks
 

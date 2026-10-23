@@ -10,24 +10,6 @@ import (
 	"unicode"
 )
 
-type yunsuoBlock struct {
-	K           string            `json:"k"`
-	Level       int               `json:"level,omitempty"`
-	Text        string            `json:"text,omitempty"`
-	Runs        []Run             `json:"runs,omitempty"`
-	Src         string            `json:"src,omitempty"`
-	Poster      string            `json:"poster,omitempty"`
-	Ordered     bool              `json:"ordered,omitempty"`
-	Rows        [][]TableCell     `json:"rows,omitempty"`
-	Items       []json.RawMessage `json:"items,omitempty"`
-	BlankBefore bool              `json:"blankBefore,omitempty"`
-}
-
-type yunsuoInline struct {
-	Text string `json:"text,omitempty"`
-	Runs []Run  `json:"runs,omitempty"`
-}
-
 // renderYunsuoHTML 从中立 Block[] 直接生成外部平台可移植 HTML。
 // 它不读 FoodTalks ContentHTML，也不引用任何网站渲染器或页脚。
 // 外发前先切公众号导流尾：外发与网站同一口径，不看是不是原创。
@@ -67,7 +49,7 @@ type yunsuoRendered struct {
 }
 
 // decodeYunsuoDistributionContent 外发用的正文块：先切掉公众号导流尾。
-func decodeYunsuoDistributionContent(blocksJSON, imageMapJSON string) ([]yunsuoBlock, map[string]string, error) {
+func decodeYunsuoDistributionContent(blocksJSON, imageMapJSON string) ([]Block, map[string]string, error) {
 	strippedJSON, err := stripWechatTrailerBlocksJSON(blocksJSON)
 	if err != nil {
 		return nil, nil, err
@@ -82,8 +64,18 @@ func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profil
 		return yunsuoRendered{}, err
 	}
 	dist := prepareYunsuoDistribution(decoded, imageMap, profile, wechatCover, chosen)
-	blocks := dist.Blocks
-	markup := profile.markup()
+	body, hasStatement := writeYunsuoBlocks(dist.Blocks, imageMap, profile.markup())
+	if strings.TrimSpace(body) == "" {
+		return yunsuoRendered{}, errors.New("外发正文为空")
+	}
+	if !hasStatement {
+		body += "<p>" + escapeYunsuoText(yunsuoStatement(publisher, dist.Credits)) + "</p>"
+	}
+	return yunsuoRendered{HTML: strings.TrimSpace(body), Cover: dist.Cover}, nil
+}
+
+// writeYunsuoBlocks 把整理好的块按平台的写法写成正文 HTML；hasStatement 是正文里已经有转载声明。
+func writeYunsuoBlocks(blocks []Block, imageMap map[string]string, markup distributionMarkup) (string, bool) {
 	var out strings.Builder
 	hasStatement := false
 	// 段间不插空行：人工稿没有空段，平台自带段距（BlankBefore 只是公众号的留白）。
@@ -92,7 +84,7 @@ func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profil
 		if strings.Contains(yunsuoBlockText(block), "转载请联系授权") {
 			hasStatement = true
 		}
-		switch yunsuoBlockKind(block) {
+		switch canonicalBlockKind(block.K) {
 		case "h":
 			text := escapeYunsuoText(strings.TrimSpace(stripYunsuoBareURLs(yunsuoBlockText(block))))
 			if text == "" {
@@ -116,7 +108,7 @@ func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profil
 			writeYunsuoTextElement(&out, "blockquote", block.Text, block.Runs)
 		case "img":
 			end := i + 1
-			for end < len(blocks) && yunsuoBlockKind(blocks[end]) == "cap" {
+			for end < len(blocks) && canonicalBlockKind(blocks[end].K) == "cap" {
 				end++
 			}
 			captions := blocks[i+1 : end]
@@ -147,40 +139,23 @@ func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profil
 		case "table":
 			writeYunsuoTable(&out, block.Rows)
 		case "li":
-			ordered := block.Ordered
-			tag := "ul"
-			if ordered {
-				tag = "ol"
-			}
-			out.WriteByte('<')
-			out.WriteString(tag)
-			out.WriteByte('>')
-			for i < len(blocks) && yunsuoBlockKind(blocks[i]) == "li" && blocks[i].Ordered == ordered {
+			out.WriteString("<ul>")
+			for i < len(blocks) && canonicalBlockKind(blocks[i].K) == "li" {
 				writeYunsuoListItem(&out, blocks[i].Text, blocks[i].Runs)
 				i++
 			}
 			i--
-			out.WriteString("</")
-			out.WriteString(tag)
-			out.WriteByte('>')
-		case "list":
-			writeYunsuoList(&out, block)
+			out.WriteString("</ul>")
 		default:
 			// 对未来新增的纯文本 block 做无样式降级，不吞正文。
 			writeYunsuoTextElement(&out, "p", block.Text, block.Runs)
 		}
 	}
-	if strings.TrimSpace(out.String()) == "" {
-		return yunsuoRendered{}, errors.New("外发正文为空")
-	}
-	if !hasStatement {
-		out.WriteString("<p>" + escapeYunsuoText(yunsuoStatement(publisher, dist.Credits)) + "</p>")
-	}
-	return yunsuoRendered{HTML: strings.TrimSpace(out.String()), Cover: dist.Cover}, nil
+	return out.String(), hasStatement
 }
 
 // yunsuoWholeBold 整段（有字的部分）都是加粗。
-func yunsuoWholeBold(block yunsuoBlock) bool {
+func yunsuoWholeBold(block Block) bool {
 	bold := false
 	for _, run := range block.Runs {
 		if strings.TrimSpace(run.Text) == "" {
@@ -292,7 +267,7 @@ func buildYunsuoPushPayloadWithDraft(job publishJob, targets []yunsuoAccountTarg
 
 // renderExternalBody 推给这个平台的正文与封面：各平台同一套规则，写法按 profile.markup()；
 // draft 里人给这个平台换的封面优先。还返回解出的正文块（补摘要用）。
-func renderExternalBody(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft) ([]yunsuoBlock, yunsuoRendered, error) {
+func renderExternalBody(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft) ([]Block, yunsuoRendered, error) {
 	blocks, imageMap, err := decodeYunsuoContent(job.BlocksJSON, job.ImageMap)
 	if err != nil {
 		return nil, yunsuoRendered{}, err
@@ -325,11 +300,11 @@ func (p yunsuoPushPayload) titleField(field string) string {
 	}
 }
 
-func decodeYunsuoContent(blocksJSON, imageMapJSON string) ([]yunsuoBlock, map[string]string, error) {
+func decodeYunsuoContent(blocksJSON, imageMapJSON string) ([]Block, map[string]string, error) {
 	if strings.TrimSpace(blocksJSON) == "" {
 		return nil, nil, errors.New("外发缺少中立 BlocksJSON")
 	}
-	var blocks []yunsuoBlock
+	var blocks []Block
 	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err != nil {
 		return nil, nil, errors.New("外发的 BlocksJSON 格式无效")
 	}
@@ -413,40 +388,6 @@ func writeYunsuoTable(out *strings.Builder, rows [][]TableCell) {
 	out.WriteString("</tbody></table>")
 }
 
-func writeYunsuoList(out *strings.Builder, block yunsuoBlock) {
-	tag := "ul"
-	if block.Ordered {
-		tag = "ol"
-	}
-	items := make([]yunsuoInline, 0, len(block.Items)+1)
-	for _, raw := range block.Items {
-		var text string
-		if json.Unmarshal(raw, &text) == nil {
-			items = append(items, yunsuoInline{Text: text})
-			continue
-		}
-		var item yunsuoInline
-		if json.Unmarshal(raw, &item) == nil {
-			items = append(items, item)
-		}
-	}
-	if len(items) == 0 && (strings.TrimSpace(block.Text) != "" || len(block.Runs) > 0) {
-		items = append(items, yunsuoInline{Text: block.Text, Runs: block.Runs})
-	}
-	if len(items) == 0 {
-		return
-	}
-	out.WriteByte('<')
-	out.WriteString(tag)
-	out.WriteByte('>')
-	for _, item := range items {
-		writeYunsuoListItem(out, item.Text, item.Runs)
-	}
-	out.WriteString("</")
-	out.WriteString(tag)
-	out.WriteByte('>')
-}
-
 func writeYunsuoListItem(out *strings.Builder, text string, runs []Run) {
 	content := renderYunsuoInline(text, runs)
 	if content == "" {
@@ -513,7 +454,7 @@ func publicYunsuoMediaURL(raw string) string {
 	return parsed.String()
 }
 
-func yunsuoBlocksPlainText(blocks []yunsuoBlock) string {
+func yunsuoBlocksPlainText(blocks []Block) string {
 	parts := make([]string, 0, len(blocks))
 	for _, block := range blocks {
 		if text := yunsuoInlinePlainText(block.Text, block.Runs); text != "" {

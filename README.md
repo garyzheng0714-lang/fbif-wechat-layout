@@ -123,7 +123,8 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 │   └── version.json                # 部署版本信息
 ├── api/
 │   ├── main.go                     # API + 静态文件服务 + 渠道路由
-│   ├── html2md.go                  # HTML 转 Markdown 辅助
+│   ├── article_html.go             # 取正文 HTML 与 meta
+│   ├── article_blocks.go           # 正文块格式（说明书 docs/article-blocks.md 由它生成）
 │   ├── account_catalog.go          # 账号目录（accountCatalog()，registry.js 的 -emit-registry 源）
 │   ├── rule_defaults.go            # 各账号 / preset 服务端默认成对登记（红线#2/#22）
 │   ├── rule_presets.go             # 规则预设存储与后台 API

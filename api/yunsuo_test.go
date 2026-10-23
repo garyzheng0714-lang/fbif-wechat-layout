@@ -181,7 +181,8 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 		{"k":"h","level":2,"text":"章节 <一>"},
 		{"k":"p","runs":[{"type":"txt","text":"正文 & ","bold":true},{"type":"link","text":"不安全链接","href":"javascript:alert(1)"}]},
 		{"k":"img","src":"https://origin.example/image.jpg"},
-		{"k":"list","ordered":true,"items":["第一项",{"runs":[{"type":"link","text":"第二项","href":"https://example.com/?a=1&b=2"}]}]},
+		{"k":"li","runs":[{"type":"txt","text":"第一项"}]},
+		{"k":"li","runs":[{"type":"link","text":"第二项","href":"https://example.com/?a=1&b=2"}]},
 		{"k":"table","rows":[[{"header":true,"runs":[{"type":"txt","text":"表头"}]}],[{"runs":[{"type":"txt","text":"<script>"}]}]]},
 		{"k":"video","src":"https://cdn.example/video.mp4","poster":"https://origin.example/poster.jpg"}
 	]`
@@ -190,7 +191,7 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, wanted := range []string{"<h2>章节 &lt;一&gt;</h2>", "<ol>", "<table", "https://cdn.example/poster.jpg", "https://cdn.example/image.jpg"} {
+	for _, wanted := range []string{"<h2>章节 &lt;一&gt;</h2>", "<ul><li>第一项</li><li>第二项</li></ul>", "<table", "https://cdn.example/poster.jpg", "https://cdn.example/image.jpg"} {
 		if !strings.Contains(rendered, wanted) {
 			t.Fatalf("中性 HTML 缺少 %q：%s", wanted, rendered)
 		}

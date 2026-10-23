@@ -47,32 +47,19 @@ var (
 var yunsuoImageSize = fetchYunsuoImageSize
 
 type yunsuoDistribution struct {
-	Blocks  []yunsuoBlock
+	Blocks  []Block
 	Cover   string   // 推给云梭的封面（已映射的公网地址）
 	Credits []string // 署名（「作者：Sage」「编辑：Bobo」），写进文末声明
 }
 
-func yunsuoBlockKind(block yunsuoBlock) string {
-	switch kind := strings.ToLower(strings.TrimSpace(block.K)); kind {
-	case "image":
-		return "img"
-	case "p":
-		return "txt"
-	case "blockquote":
-		return "bq"
-	default:
-		return kind
-	}
-}
-
-func yunsuoBlockText(block yunsuoBlock) string {
+func yunsuoBlockText(block Block) string {
 	return yunsuoInlinePlainText(block.Text, block.Runs)
 }
 
 // prepareYunsuoDistribution 按多平台规则整理正文块，顺序固定：
 // 去名片 → 署名挪进声明 → 小标题编号 → 定封面。wechatCover 是公众号封面（已映射），
 // chosen 是人给这个平台换的封面（publish_external_drafts.go），空表示没换。
-func prepareYunsuoDistribution(blocks []yunsuoBlock, imageMap map[string]string, profile yunsuoPlatformProfile, wechatCover, chosen string) yunsuoDistribution {
+func prepareYunsuoDistribution(blocks []Block, imageMap map[string]string, profile yunsuoPlatformProfile, wechatCover, chosen string) yunsuoDistribution {
 	blocks = dropYunsuoNameCards(blocks, imageMap)
 	blocks, credits := takeYunsuoCredits(blocks)
 	blocks = numberYunsuoSections(blocks)
@@ -88,8 +75,8 @@ func yunsuoWechatCover(job publishJob, imageMap map[string]string) string {
 // chooseYunsuoCover 定封面，并按云梭在这个平台怎么放封面决定正文要不要让出那张图：
 // 会把封面插到正文最前面的平台，封面若是正文里的图就从正文拿掉，否则同一张图出现两次；
 // 不插的平台正文不动。顺序：人换的封面 → （会插的平台）开头那张图 → 公众号封面 → 正文第一张够大的图。
-func chooseYunsuoCover(blocks []yunsuoBlock, imageMap map[string]string, profile yunsuoPlatformProfile, wechatCover, chosen string) ([]yunsuoBlock, string) {
-	take := func(src string) []yunsuoBlock {
+func chooseYunsuoCover(blocks []Block, imageMap map[string]string, profile yunsuoPlatformProfile, wechatCover, chosen string) ([]Block, string) {
+	take := func(src string) []Block {
 		if !profile.CoverPrepended {
 			return blocks
 		}
@@ -99,7 +86,7 @@ func chooseYunsuoCover(blocks []yunsuoBlock, imageMap map[string]string, profile
 		return take(chosen), chosen
 	}
 	if profile.CoverPrepended {
-		if i := firstYunsuoContentBlock(blocks); i >= 0 && yunsuoBlockKind(blocks[i]) == "img" {
+		if i := firstYunsuoContentBlock(blocks); i >= 0 && canonicalBlockKind(blocks[i].K) == "img" {
 			if src := publicYunsuoMediaURL(mapYunsuoMedia(blocks[i].Src, imageMap)); src != "" {
 				if _, _, small := profile.coverTooSmall(src); !small {
 					return take(src), src
@@ -111,7 +98,7 @@ func chooseYunsuoCover(blocks []yunsuoBlock, imageMap map[string]string, profile
 		return blocks, wechatCover
 	}
 	for _, block := range blocks {
-		if yunsuoBlockKind(block) != "img" {
+		if canonicalBlockKind(block.K) != "img" {
 			continue
 		}
 		if src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap)); src != "" {
@@ -125,18 +112,18 @@ func chooseYunsuoCover(blocks []yunsuoBlock, imageMap map[string]string, profile
 
 // takeYunsuoImage 把做了封面的那张正文图从正文拿掉。图在正文开头时图注留着（封面插回来，
 // 图注正好在它下面）；在正文中间时连图注一起拿掉。不在正文里就原样返回。
-func takeYunsuoImage(blocks []yunsuoBlock, imageMap map[string]string, src string) []yunsuoBlock {
+func takeYunsuoImage(blocks []Block, imageMap map[string]string, src string) []Block {
 	for i, block := range blocks {
-		if yunsuoBlockKind(block) != "img" || publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap)) != src {
+		if canonicalBlockKind(block.K) != "img" || publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap)) != src {
 			continue
 		}
 		end := i + 1
 		if i != firstYunsuoContentBlock(blocks) {
-			for end < len(blocks) && yunsuoBlockKind(blocks[end]) == "cap" {
+			for end < len(blocks) && canonicalBlockKind(blocks[end].K) == "cap" {
 				end++
 			}
 		}
-		out := make([]yunsuoBlock, 0, len(blocks)-(end-i))
+		out := make([]Block, 0, len(blocks)-(end-i))
 		out = append(out, blocks[:i]...)
 		return append(out, blocks[end:]...)
 	}
@@ -144,7 +131,7 @@ func takeYunsuoImage(blocks []yunsuoBlock, imageMap map[string]string, src strin
 }
 
 // firstYunsuoContentBlock 第一块有内容的块（跳过空段）。
-func firstYunsuoContentBlock(blocks []yunsuoBlock) int {
+func firstYunsuoContentBlock(blocks []Block) int {
 	for i := range blocks {
 		if yunsuoBlockHasContent(blocks[i]) {
 			return i
@@ -153,13 +140,13 @@ func firstYunsuoContentBlock(blocks []yunsuoBlock) int {
 	return -1
 }
 
-func yunsuoBlockHasContent(block yunsuoBlock) bool {
-	return yunsuoBlockKind(block) == "img" || yunsuoBlockText(block) != "" || len(block.Rows) > 0 || len(block.Items) > 0
+func yunsuoBlockHasContent(block Block) bool {
+	return canonicalBlockKind(block.K) == "img" || yunsuoBlockText(block) != "" || len(block.Rows) > 0
 }
 
 // yunsuoCoverCandidates 正文里够得上平台封面下限的图（去掉名片后，按正文顺序），给人挑封面用。
 // 只看前 scan 张图、最多取 limit 张，读不到尺寸的不算。
-func yunsuoCoverCandidates(blocks []yunsuoBlock, imageMap map[string]string, profile yunsuoPlatformProfile, scan, limit int) []publishExternalCoverCandidate {
+func yunsuoCoverCandidates(blocks []Block, imageMap map[string]string, profile yunsuoPlatformProfile, scan, limit int) []publishExternalCoverCandidate {
 	var out []publishExternalCoverCandidate
 	for _, image := range yunsuoBodyImages(blocks, imageMap, scan) {
 		if len(out) >= limit {
@@ -173,7 +160,7 @@ func yunsuoCoverCandidates(blocks []yunsuoBlock, imageMap map[string]string, pro
 }
 
 // yunsuoBodyImages 正文前 scan 张图（去掉作者名片、去重）及其尺寸；读不到尺寸的不要。
-func yunsuoBodyImages(blocks []yunsuoBlock, imageMap map[string]string, scan int) []publishExternalCoverCandidate {
+func yunsuoBodyImages(blocks []Block, imageMap map[string]string, scan int) []publishExternalCoverCandidate {
 	blocks = dropYunsuoNameCards(blocks, imageMap)
 	var out []publishExternalCoverCandidate
 	seen := map[string]bool{}
@@ -181,7 +168,7 @@ func yunsuoBodyImages(blocks []yunsuoBlock, imageMap map[string]string, scan int
 		if scan <= 0 {
 			break
 		}
-		if yunsuoBlockKind(block) != "img" {
+		if canonicalBlockKind(block.K) != "img" {
 			continue
 		}
 		src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap))
@@ -200,7 +187,7 @@ func yunsuoBodyImages(blocks []yunsuoBlock, imageMap map[string]string, scan int
 // takeYunsuoCredits 把署名行从正文拿出来，按原文顺序返回（写进文末声明）。署名在两处：开头几块
 // （网站并成「作者：Sage，编辑：Bobo。」），以及正文最后（编译稿的「英文来源：」「中文编辑：」，#289）。
 // 整段每一节都是署名才算，正文里的「作者：」不动。
-func takeYunsuoCredits(blocks []yunsuoBlock) ([]yunsuoBlock, []string) {
+func takeYunsuoCredits(blocks []Block) ([]Block, []string) {
 	drop := map[int][]string{}
 	seen := 0
 	for i, block := range blocks {
@@ -216,7 +203,7 @@ func takeYunsuoCredits(blocks []yunsuoBlock) ([]yunsuoBlock, []string) {
 		}
 	}
 	for i := len(blocks) - 1; i >= 0; i-- {
-		if !yunsuoBlockHasContent(blocks[i]) || yunsuoBlockKind(blocks[i]) == "img" {
+		if !yunsuoBlockHasContent(blocks[i]) || canonicalBlockKind(blocks[i].K) == "img" {
 			continue
 		}
 		credits, ok := yunsuoCreditBlock(blocks[i])
@@ -229,7 +216,7 @@ func takeYunsuoCredits(blocks []yunsuoBlock) ([]yunsuoBlock, []string) {
 		return blocks, nil
 	}
 	var credits []string
-	out := make([]yunsuoBlock, 0, len(blocks)-len(drop))
+	out := make([]Block, 0, len(blocks)-len(drop))
 	for i, block := range blocks {
 		if found, ok := drop[i]; ok {
 			credits = append(credits, found...)
@@ -240,8 +227,8 @@ func takeYunsuoCredits(blocks []yunsuoBlock) ([]yunsuoBlock, []string) {
 	return out, credits
 }
 
-func yunsuoCreditBlock(block yunsuoBlock) ([]string, bool) {
-	if yunsuoBlockKind(block) != "txt" {
+func yunsuoCreditBlock(block Block) ([]string, bool) {
+	if canonicalBlockKind(block.K) != "txt" {
 		return nil, false
 	}
 	return parseYunsuoByline(yunsuoBlockText(block))
@@ -273,10 +260,10 @@ var (
 
 // numberYunsuoSections 两个以上的标题1 编「一、二、」（人工稿口径，「结语」也编）：进了平台
 // 标题1 与标题2 都是加粗段，不编号就分不出层级。原文已有编号的、参考来源不动。
-func numberYunsuoSections(blocks []yunsuoBlock) []yunsuoBlock {
+func numberYunsuoSections(blocks []Block) []Block {
 	var sections []int
 	for i, block := range blocks {
-		if yunsuoBlockKind(block) != "h" || block.Level > 2 {
+		if canonicalBlockKind(block.K) != "h" || block.Level > 2 {
 			continue
 		}
 		text := yunsuoBlockText(block)
@@ -291,7 +278,7 @@ func numberYunsuoSections(blocks []yunsuoBlock) []yunsuoBlock {
 	if len(sections) < 2 {
 		return blocks
 	}
-	out := append([]yunsuoBlock(nil), blocks...)
+	out := append([]Block(nil), blocks...)
 	for n, i := range sections {
 		out[i].Text = yunsuoChineseNumber(n+1) + "、" + yunsuoBlockText(out[i])
 		out[i].Runs = nil
@@ -315,10 +302,10 @@ func yunsuoChineseNumber(n int) string {
 // dropYunsuoNameCards 去掉作者名片（带个人微信二维码的宽条图）。生产上名片只出现在两处：
 // Mote 稿紧贴「参考来源」上方，其他作者在参考来源之后；文中同样宽但带图注的配图不动。
 // 没有参考来源时，只认文末无图注且宽高比够宽的图。
-func dropYunsuoNameCards(blocks []yunsuoBlock, imageMap map[string]string) []yunsuoBlock {
+func dropYunsuoNameCards(blocks []Block, imageMap map[string]string) []Block {
 	refs := -1
 	for i, block := range blocks {
-		if kind := yunsuoBlockKind(block); (kind == "txt" || kind == "h") && yunsuoReferenceHeader.MatchString(yunsuoBlockText(block)) {
+		if kind := canonicalBlockKind(block.K); (kind == "txt" || kind == "h") && yunsuoReferenceHeader.MatchString(yunsuoBlockText(block)) {
 			refs = i
 			break
 		}
@@ -326,7 +313,7 @@ func dropYunsuoNameCards(blocks []yunsuoBlock, imageMap map[string]string) []yun
 	drop := map[int]bool{}
 	if refs >= 0 {
 		for i := refs + 1; i < len(blocks); i++ {
-			if yunsuoBlockKind(blocks[i]) == "img" {
+			if canonicalBlockKind(blocks[i].K) == "img" {
 				drop[i] = true
 			}
 		}
@@ -346,7 +333,7 @@ func dropYunsuoNameCards(blocks []yunsuoBlock, imageMap map[string]string) []yun
 	if len(drop) == 0 {
 		return blocks
 	}
-	out := make([]yunsuoBlock, 0, len(blocks))
+	out := make([]Block, 0, len(blocks))
 	for i, block := range blocks {
 		if !drop[i] {
 			out = append(out, block)
@@ -356,7 +343,7 @@ func dropYunsuoNameCards(blocks []yunsuoBlock, imageMap map[string]string) []yun
 }
 
 // previousYunsuoContentBlock 返回 before 之前最近一块有内容的块（跳过空段）。
-func previousYunsuoContentBlock(blocks []yunsuoBlock, before int) int {
+func previousYunsuoContentBlock(blocks []Block, before int) int {
 	for i := before - 1; i >= 0; i-- {
 		if yunsuoBlockHasContent(blocks[i]) {
 			return i
@@ -365,16 +352,16 @@ func previousYunsuoContentBlock(blocks []yunsuoBlock, before int) int {
 	return -1
 }
 
-func yunsuoUncaptionedImage(blocks []yunsuoBlock, i int) bool {
-	if yunsuoBlockKind(blocks[i]) != "img" {
+func yunsuoUncaptionedImage(blocks []Block, i int) bool {
+	if canonicalBlockKind(blocks[i].K) != "img" {
 		return false
 	}
-	return i+1 >= len(blocks) || yunsuoBlockKind(blocks[i+1]) != "cap"
+	return i+1 >= len(blocks) || canonicalBlockKind(blocks[i+1].K) != "cap"
 }
 
 // yunsuoCaption 说明与图片来源并成一条（人工稿口径「说明；图片来源：X」，前一句以感叹号、问号
 // 收尾就不再加分号），不截短：编辑手发的头条图注有 55 字的（#280）。
-func yunsuoCaption(blocks []yunsuoBlock) string {
+func yunsuoCaption(blocks []Block) string {
 	caption := ""
 	for _, block := range blocks {
 		text := strings.TrimRight(strings.TrimSpace(stripYunsuoBareURLs(yunsuoBlockText(block))), "；;。")

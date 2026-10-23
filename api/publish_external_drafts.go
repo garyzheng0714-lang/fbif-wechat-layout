@@ -191,7 +191,7 @@ func externalTextIssues(job publishJob, profile yunsuoPlatformProfile, draft pub
 
 // externalCoverIssue 封面检查：人换过封面就查那张；否则与推送同口径（chooseYunsuoCover：公众号封面，
 // 会插封面的平台以图开头时用开头那张，没有公众号封面才用正文第一张够大的图）。读不到尺寸的不拦。
-func externalCoverIssue(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft, blocks []yunsuoBlock, imageMap map[string]string) *publishExternalIssue {
+func externalCoverIssue(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft, blocks []Block, imageMap map[string]string) *publishExternalIssue {
 	if profile.CoverMinWidth <= 0 && profile.CoverMinHeight <= 0 {
 		return nil
 	}

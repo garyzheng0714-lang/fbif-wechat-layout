@@ -1,0 +1,290 @@
+{
+  "$defs": {
+    "block": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "正文段落。所有字都加粗的段落是「整段加粗」，各渠道按加粗段写，不当小标题",
+          "properties": {
+            "blankBefore": {
+              "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
+              "type": "boolean"
+            },
+            "compact": {
+              "description": "只在浏览器粘贴纯文本时出现：每行一段，段间不留公众号段距（除非 blankBefore）",
+              "type": "boolean"
+            },
+            "k": {
+              "const": "txt",
+              "description": "段落"
+            },
+            "runs": {
+              "description": "行内片段，按顺序拼起来就是这一段；加粗、链接都在片段上",
+              "items": {
+                "$ref": "#/$defs/run"
+              },
+              "type": "array"
+            },
+            "text": {
+              "description": "纯文字。小标题、图注只用它；段落一般用 runs，没有 runs 时才看它",
+              "type": "string"
+            }
+          },
+          "required": [
+            "k"
+          ],
+          "title": "段落",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "文中的小标题，级别看 level。文章标题不在块里，在块外面的 title",
+          "properties": {
+            "blankBefore": {
+              "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
+              "type": "boolean"
+            },
+            "k": {
+              "const": "h",
+              "description": "小标题"
+            },
+            "level": {
+              "description": "小标题级别。2 是标题1（一级），3 是标题2（二级，含「（一）」「1、」这类序号句），4 是更低一级；0 是原文没写标题标签、按字号颜色认出来的，由各渠道按一级处理或自己定级",
+              "type": "integer"
+            },
+            "text": {
+              "description": "纯文字。小标题、图注只用它；段落一般用 runs，没有 runs 时才看它",
+              "type": "string"
+            }
+          },
+          "required": [
+            "k"
+          ],
+          "title": "小标题",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "一张图。紧跟在它后面的 cap 是这张图的说明",
+          "properties": {
+            "blankBefore": {
+              "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
+              "type": "boolean"
+            },
+            "dataH": {
+              "description": "图片原始高度（像素，字符串），原文写了才有",
+              "type": "string"
+            },
+            "dataRatio": {
+              "description": "图片高宽比（字符串），原文写了才有",
+              "type": "string"
+            },
+            "dataW": {
+              "description": "图片原始宽度（像素，字符串），原文写了才有",
+              "type": "string"
+            },
+            "k": {
+              "const": "img",
+              "description": "图片"
+            },
+            "src": {
+              "description": "图片或视频的原地址（公众号图床等），排版时换成转存后的地址",
+              "type": "string"
+            }
+          },
+          "required": [
+            "k"
+          ],
+          "title": "图片",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "图片下面的说明文字，或「图片来源：」「图源：」这类出处行，紧跟在 img 后面，可以连着好几条。两种不另设字段，靠文字开头区分。前面没有图时按普通段落",
+          "properties": {
+            "blankBefore": {
+              "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
+              "type": "boolean"
+            },
+            "k": {
+              "const": "cap",
+              "description": "图注"
+            },
+            "text": {
+              "description": "纯文字。小标题、图注只用它；段落一般用 runs，没有 runs 时才看它",
+              "type": "string"
+            }
+          },
+          "required": [
+            "k"
+          ],
+          "title": "图注",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "原文的引用块（blockquote）",
+          "properties": {
+            "blankBefore": {
+              "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
+              "type": "boolean"
+            },
+            "k": {
+              "const": "bq",
+              "description": "引用"
+            },
+            "runs": {
+              "description": "行内片段，按顺序拼起来就是这一段；加粗、链接都在片段上",
+              "items": {
+                "$ref": "#/$defs/run"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "k"
+          ],
+          "title": "引用",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "列表里的一项，连着的几项是同一个列表。原文是有序还是无序列表不区分",
+          "properties": {
+            "blankBefore": {
+              "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
+              "type": "boolean"
+            },
+            "k": {
+              "const": "li",
+              "description": "列表项"
+            },
+            "runs": {
+              "description": "行内片段，按顺序拼起来就是这一段；加粗、链接都在片段上",
+              "items": {
+                "$ref": "#/$defs/run"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "k"
+          ],
+          "title": "列表项",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "一张表格，保留行列和表头格",
+          "properties": {
+            "blankBefore": {
+              "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
+              "type": "boolean"
+            },
+            "k": {
+              "const": "table",
+              "description": "表格"
+            },
+            "rows": {
+              "description": "表格的行，每行是一串单元格",
+              "items": {
+                "items": {
+                  "$ref": "#/$defs/tableCell"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "k"
+          ],
+          "title": "表格",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "一段视频。拿不到视频地址时各渠道用封面图代替",
+          "properties": {
+            "blankBefore": {
+              "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
+              "type": "boolean"
+            },
+            "k": {
+              "const": "video",
+              "description": "视频"
+            },
+            "poster": {
+              "description": "视频封面图地址",
+              "type": "string"
+            },
+            "src": {
+              "description": "图片或视频的原地址（公众号图床等），排版时换成转存后的地址",
+              "type": "string"
+            }
+          },
+          "required": [
+            "k"
+          ],
+          "title": "视频",
+          "type": "object"
+        }
+      ]
+    },
+    "run": {
+      "additionalProperties": false,
+      "properties": {
+        "bold": {
+          "description": "加粗。一段里所有有字的片段都加粗，这段就是「整段加粗」",
+          "type": "boolean"
+        },
+        "href": {
+          "description": "链接地址，只有 link 才有",
+          "type": "string"
+        },
+        "text": {
+          "description": "这一片的文字",
+          "type": "string"
+        },
+        "type": {
+          "description": "txt 是普通文字，link 是链接",
+          "enum": [
+            "txt",
+            "link"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "tableCell": {
+      "additionalProperties": false,
+      "properties": {
+        "header": {
+          "description": "表头格（原文 th 或表头行）",
+          "type": "boolean"
+        },
+        "runs": {
+          "description": "单元格里的文字片段",
+          "items": {
+            "$ref": "#/$defs/run"
+          },
+          "type": "array"
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  "$id": "article-blocks.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "由 api/article_blocks.go 生成，别手改；说明见 article-blocks.md。",
+  "items": {
+    "$ref": "#/$defs/block"
+  },
+  "title": "文章正文块",
+  "type": "array"
+}

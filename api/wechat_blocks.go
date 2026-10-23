@@ -9,41 +9,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Block is the frontend-facing unit emitted by extractArticleBlocks.
-// Shape matches the `elems` array produced by classifyMd in fbif.js so the
-// renderer can consume them without translation.
-type Block struct {
-	K           string        `json:"k"`
-	Level       int           `json:"level,omitempty"`
-	Text        string        `json:"text,omitempty"`
-	Runs        []Run         `json:"runs,omitempty"`
-	Src         string        `json:"src,omitempty"`
-	DataW       string        `json:"dataW,omitempty"`
-	DataH       string        `json:"dataH,omitempty"`
-	DataRatio   string        `json:"dataRatio,omitempty"`
-	Ordered     bool          `json:"ordered,omitempty"`
-	Rows        [][]TableCell `json:"rows,omitempty"`        // K=="table": 二维行/列，保住表格结构
-	Poster      string        `json:"poster,omitempty"`      // K=="video": 视频封面 poster
-	BlankBefore bool          `json:"blankBefore,omitempty"` // 原文在该块前有显式空段（<p><br></p> 等）
-}
-
-// TableCell is one cell of a K=="table" block. Header marks heading-row /
-// <th> cells so renderers apply the header style. Matches the neutral table
-// elem the DOCX path produces ({runs, header}) so both import paths feed the
-// same renderTable on each side.
-type TableCell struct {
-	Runs   []Run `json:"runs,omitempty"`
-	Header bool  `json:"header,omitempty"`
-}
-
-// Run is an inline fragment. Type ∈ {"txt", "link"}.
-type Run struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-	Bold bool   `json:"bold,omitempty"`
-	Href string `json:"href,omitempty"`
-}
-
 // computedStyle carries the CSS signals needed for classification as they
 // inherit down the DOM tree. Every block is classified against a resolved
 // snapshot of its ancestor chain's styles plus its own overrides.
@@ -195,10 +160,10 @@ func extractWechatArticleMeta(rawHTML string) (nickname, byline, sourceURL strin
 	return nickname, byline, sourceURL
 }
 
-// extractArticleBlocks walks WeChat article HTML into a sequence of Blocks.
-// Unlike extractArticle (html2md.go), it preserves the visual signals
-// (font-size, color, align, bold) needed to distinguish heading vs pullquote
-// vs caption vs body — classification that Markdown can no longer represent.
+// extractArticleBlocks walks WeChat article HTML into a sequence of Blocks
+// (article_blocks.go). It reads the visual signals (font-size, color, align,
+// bold) to tell heading, pullquote, caption and body apart, which Markdown
+// cannot represent.
 func extractArticleBlocks(rawHTML string) (title string, blocks []Block, author string) {
 	return extractArticleBlocksWithOptions(rawHTML, defaultArticleBlockOptions())
 }

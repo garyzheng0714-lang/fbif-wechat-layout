@@ -270,7 +270,7 @@ func externalEditSiteURL(job publishJob) string {
 }
 
 // externalCurrentCover 没换过封面时推送会用哪张：与推送同一套规则（chooseYunsuoCover）。
-func externalCurrentCover(job publishJob, profile yunsuoPlatformProfile, blocks []yunsuoBlock, imageMap map[string]string, bodyImages []publishExternalCoverCandidate) *externalEditImage {
+func externalCurrentCover(job publishJob, profile yunsuoPlatformProfile, blocks []Block, imageMap map[string]string, bodyImages []publishExternalCoverCandidate) *externalEditImage {
 	src := prepareYunsuoDistribution(blocks, imageMap, profile, yunsuoWechatCover(job, imageMap), "").Cover
 	if src == "" {
 		return nil
