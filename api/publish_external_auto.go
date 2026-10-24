@@ -90,7 +90,7 @@ func externalAutoQuotaFor(jobs []publishJob, autoTargets []externalAccount, now 
 		limits: map[string]int{}, today: map[string]int{}, backfill: map[string]int{}, last: map[string]time.Time{},
 	}
 	for _, target := range autoTargets {
-		quota.limits[strings.TrimSpace(target.ID)] = yunsuoProfileForTarget(target).dailyLimit()
+		quota.limits[strings.TrimSpace(target.ID)] = platformForAccount(target).dailyLimit()
 	}
 	today := now.In(publishExternalAutoZone).Format("2006-01-02")
 	for _, job := range jobs {

@@ -21,7 +21,7 @@ const testLongToutiaoTitle = "这家166年的京都老字号把抹茶做成零�
 
 // toutiaoTitleLength 头条号的数法（英文字母、数字两个算一个字）：testLongToutiaoTitle 37 个字符算 33 字。
 func toutiaoTitleLength(title string) int {
-	return yunsuoProfileForTarget(externalAccount{Name: "头条号"}).titleLength(title)
+	return platformByKey("toutiao").titleLength(title)
 }
 
 // createLongTitleDistributionJob 一篇已发布原创，标题超过头条号 30 字（网站最新稿同标题）。
@@ -61,7 +61,7 @@ func fixActionValue(t *testing.T, job publishJob, account string) json.RawMessag
 func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	setTestDistributionAccounts(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
-	stubYunsuoImageSize(t, map[string][2]int{})
+	stubDistributionImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
 	robot := useFakeRobot(env)
 	env.pipeline.externalSuggest = func(_ context.Context, kind, current string, min, max int) (string, error) {
@@ -132,7 +132,7 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 // 改好后挂回自动外发并推出。
 func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
 	setTestAutoAccounts(t)
-	stubYunsuoImageSize(t, map[string][2]int{})
+	stubDistributionImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
 	robot := useFakeRobot(env)
 	clock := newCSTClock("2026-10-12 10:00")
@@ -148,7 +148,7 @@ func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
 		t.Fatalf("待修改不得推送：%v", robot.platforms)
 	}
 	got := mustJob(t, env, job.ID)
-	if got.ExternalDistributionAutoPending == "" || !externalDraftBlocked(got, externalAccount{ID: testToutiaoAccountID, Name: "头条号"}) {
+	if got.ExternalDistributionAutoPending == "" || !externalDraftBlocked(got, externalAccount{ID: testToutiaoAccountID, Platform: "toutiao", Name: "头条号"}) {
 		t.Fatalf("待办应保留、头条号应记为待修改：pending=%q drafts=%+v", got.ExternalDistributionAutoPending, got.ExternalDistributionDrafts)
 	}
 	checkedAt := mustDraft(t, got, testToutiaoAccountID).CheckedAt
@@ -177,7 +177,7 @@ func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
 // 记成待修改，用户裁定上限是 30 字。文章没变也要按新规则重查一次，过了就推，标题原样。
 func TestExternalAutoRechecksDraftWhenPlatformLimitChanges(t *testing.T) {
 	setTestAutoAccounts(t)
-	stubYunsuoImageSize(t, map[string][2]int{})
+	stubDistributionImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
 	robot := useFakeRobot(env)
 	clock := newCSTClock("2026-10-13 09:00")
@@ -205,7 +205,7 @@ func TestExternalAutoRechecksDraftWhenPlatformLimitChanges(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	toutiao := externalAccount{ID: testToutiaoAccountID, Name: "头条号"}
+	toutiao := externalAccount{ID: testToutiaoAccountID, Platform: "toutiao", Name: "头条号"}
 	if externalDraftBlocked(mustJob(t, env, job.ID), toutiao) {
 		t.Fatalf("按旧上限记的待修改不应继续挡住")
 	}
@@ -261,7 +261,7 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	// 不配应用凭证：审核卡 outbox 在本地就失败，不会打到真飞书；提醒走注入的发送器。
 	t.Setenv(publishNotificationAppsEnv, "")
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
-	stubYunsuoImageSize(t, map[string][2]int{})
+	stubDistributionImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
 	env.pipeline.deliverySettings = newPublishDeliverySettingsStore(filepath.Join(t.TempDir(), "delivery.json"))
 	if err := env.pipeline.deliverySettings.write(publishDeliverySettings{
@@ -390,7 +390,7 @@ func TestExternalReminderExpiredCardPointsToSidebar(t *testing.T) {
 	setTestDistributionAccounts(t)
 	t.Setenv(publishNotificationAppsEnv, "")
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
-	stubYunsuoImageSize(t, map[string][2]int{})
+	stubDistributionImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
 	env.pipeline.deliverySettings = newPublishDeliverySettingsStore(filepath.Join(t.TempDir(), "delivery.json"))
 	if err := env.pipeline.deliverySettings.write(publishDeliverySettings{
@@ -525,7 +525,7 @@ func testPNG(t *testing.T, width, height int) []byte {
 // 的签名链接（或是规则管理员）；改标题、上传封面都走同一个修改入口，改好即推。
 func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	setTestDistributionAccounts(t)
-	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
+	stubDistributionImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
 	env := newPublishTestEnv(t)
 	robot := useFakeRobot(env)
 	var stored [][]byte
@@ -636,7 +636,7 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 // 就推；标题还超着就只换封面，等人改完标题再点保存。
 func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 	setTestDistributionAccounts(t)
-	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
+	stubDistributionImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
 	env := newPublishTestEnv(t)
 	robot := useFakeRobot(env)
 	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
@@ -686,7 +686,7 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 func TestExternalCoverAutoUpscalesNearMiss(t *testing.T) {
 	setTestDistributionAccounts(t)
 	sizes := map[string][2]int{"https://cdn.example.com/a.jpg": {780, 332}}
-	stubYunsuoImageSize(t, sizes)
+	stubDistributionImageSize(t, sizes)
 	original := externalCoverFetch
 	t.Cleanup(func() { externalCoverFetch = original })
 	var fetched []string

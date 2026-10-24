@@ -27,22 +27,28 @@ import (
 // 人去平台把草稿发出去后，用人工登记接口记成人工已发。
 const publishExternalDistributionDraftSaved = "draft_saved"
 
-// robotDraftPayload 冻结在 lane 上的草稿内容（PayloadJSON）。Platform 是分发服务里的平台 id。
+// robotDraftPayload 冻结在 lane 上的草稿内容（PayloadJSON）。Platform 是分发服务里的平台 id，
+// Blocks 是外发通用版正文块（distribution_blocks.go），分发服务按平台写成编辑器的标签。
+// HTML 只在 2026-10-24 之前冻结的旧 lane 上有（那时排版工具自己写好网页代码）：只按原来的幂等键查，不再提交。
 type robotDraftPayload struct {
-	Platform string `json:"platform"`
-	Title    string `json:"title"`
-	HTML     string `json:"html"`
-	CoverURL string `json:"cover_url"`
+	Platform string  `json:"platform"`
+	Title    string  `json:"title"`
+	Blocks   []Block `json:"blocks,omitempty"`
+	HTML     string  `json:"html,omitempty"`
+	CoverURL string  `json:"cover_url"`
 }
 
-// buildRobotDraftPayload 通用正文规则与导流尾拦截，写法按平台；标题原样（人给这个平台改过的优先），
-// 封面单独上传、不进正文。
-func buildRobotDraftPayload(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft) (robotDraftPayload, error) {
-	_, rendered, err := renderExternalBody(job, profile, draft)
+// buildRobotDraftPayload 通用正文规则与导流尾拦截；标题原样（人给这个平台改过的优先），封面单独上传、不进正文。
+// 平台限制还没从分发服务拿到的不推：没检查过不算通过。
+func buildRobotDraftPayload(job publishJob, profile distributionPlatform, draft publishExternalDraft) (robotDraftPayload, error) {
+	if !profile.Known {
+		return robotDraftPayload{}, errors.New(profile.unknownNote())
+	}
+	content, err := buildDistributionContent(job, profile, draft)
 	if err != nil {
 		return robotDraftPayload{}, err
 	}
-	if leak := publishHTMLWechatTrailerLeak(rendered.HTML); leak != "" {
+	if leak := publishHTMLWechatTrailerLeak(distributionBlocksText(content.Blocks)); leak != "" {
 		return robotDraftPayload{}, fmt.Errorf("%s草稿正文仍含公众号导流尾（%s），禁止外发", profile.Name, leak)
 	}
 	title := externalEffectiveTitle(job, draft)
@@ -53,19 +59,19 @@ func buildRobotDraftPayload(job publishJob, profile yunsuoPlatformProfile, draft
 		}
 		return robotDraftPayload{}, fmt.Errorf("%s标题要 %d–%d 字%s，现在 %d 字", profile.Name, min, max, note, profile.titleLength(title))
 	}
-	if rendered.Cover == "" {
+	if content.Cover == "" {
 		return robotDraftPayload{}, fmt.Errorf("%s草稿缺少公开可访问的封面", profile.Name)
 	}
-	if width, height, small := profile.coverTooSmall(rendered.Cover); small {
+	if width, height, small := profile.coverTooSmall(content.Cover); small {
 		return robotDraftPayload{}, fmt.Errorf("%s封面图尺寸过小（%dx%d），要求不小于 %dx%d，请换封面后再存草稿",
 			profile.Name, width, height, profile.CoverMinWidth, profile.CoverMinHeight)
 	}
-	return robotDraftPayload{Platform: profile.Key, Title: title, HTML: rendered.HTML, CoverURL: rendered.Cover}, nil
+	return robotDraftPayload{Platform: profile.Key, Title: title, Blocks: content.Blocks, CoverURL: content.Cover}, nil
 }
 
 // buildExternalLanePayload 冻结这条 lane 的草稿内容：返回 JSON 与存到平台上的标题。
 func buildExternalLanePayload(job publishJob, target externalAccount, draft publishExternalDraft) ([]byte, string, error) {
-	payload, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(target), draft)
+	payload, err := buildRobotDraftPayload(job, platformForAccount(target), draft)
 	if err != nil {
 		return nil, "", err
 	}
@@ -91,6 +97,24 @@ func robotIdempotencyKey(jobID int64, accountID, payloadHash string) string {
 	return string(key)
 }
 
+// robotResendFrozenLane 管理员重发交过分发服务的待核对 lane：同一份冻结内容、同一个幂等键再交一次，
+// 分发服务先去草稿箱对账（剩一篇就认它，全删了才重存）。按现在的代码重建会换键，人删到只剩一篇时就会多存一篇。
+func robotResendFrozenLane(jobID int64, old publishExternalLane, actor, requestedAt string) (publishExternalLane, error) {
+	var payload robotDraftPayload
+	if err := json.Unmarshal([]byte(old.PayloadJSON), &payload); err != nil || len(payload.Blocks) == 0 ||
+		robotIdempotencyKey(jobID, old.AccountID, old.PayloadHash) != old.IntentKey {
+		// 2026-10-24 前按旧格式交的：分发服务已不收旧格式，没法按原来的键再问，也不能换键重存。
+		return old, errors.New("上次是按旧格式交给分发服务的，没法按原来的幂等键再核对；请到" + old.Name + "草稿箱核对后人工处理")
+	}
+	lane := old
+	lane.State = publishExternalDistributionQueued
+	lane.RequestedBy, lane.RequestedAt = strings.TrimSpace(actor), requestedAt
+	lane.IntentKey, lane.IntentAt = "", ""
+	lane.Error, lane.Remark, lane.CompletedAt = "", "", ""
+	lane.PollAttempts, lane.LastPolledAt = 0, ""
+	return lane, nil
+}
+
 func (p *publishPipeline) robotClient() (distributionRobotAPI, error) {
 	if p.distributionRobot != nil {
 		return p.distributionRobot()
@@ -98,18 +122,20 @@ func (p *publishPipeline) robotClient() (distributionRobotAPI, error) {
 	return newDistributionRobotClientFromEnv()
 }
 
-// robotPayloadProfile 冻结内容里记的平台；认不出（配置改过）就用通用规则，只影响提示里的平台名。
-func robotPayloadProfile(payload robotDraftPayload) yunsuoPlatformProfile {
-	if profile, ok := yunsuoPlatformProfiles[payload.Platform]; ok {
-		return profile
-	}
-	return yunsuoGenericProfile
+// robotPayloadProfile 冻结内容里记的平台；平台限制没拿到时名字退回平台编号，只影响提示里的平台名。
+func robotPayloadProfile(payload robotDraftPayload) distributionPlatform {
+	return platformByKey(payload.Platform)
 }
 
 func (p *publishPipeline) pushRobotLane(job publishJob, lane publishExternalLane) {
 	var payload robotDraftPayload
 	if err := json.Unmarshal([]byte(lane.PayloadJSON), &payload); err != nil || strings.TrimSpace(payload.Platform) == "" {
 		p.failExternalLaneBeforePush(job.ID, lane.AccountID, "已保存的草稿内容无法解析，未提交")
+		return
+	}
+	if len(payload.Blocks) == 0 {
+		// 2026-10-24 之前冻结的旧格式（排版工具写好的网页代码），分发服务已不收；还没提交过，重新存一次就按新格式冻结。
+		p.failExternalLaneBeforePush(job.ID, lane.AccountID, "草稿内容是旧格式，未提交；请重新"+robotPayloadProfile(payload).syncAction(lane.Name))
 		return
 	}
 	client, err := p.robotClient()
@@ -122,7 +148,7 @@ func (p *publishPipeline) pushRobotLane(job publishJob, lane publishExternalLane
 		return
 	}
 	record, saveErr := client.SaveDraft(context.Background(), payload.Platform, robotDraftRequest{
-		IdempotencyKey: intentKey, Account: lane.AccountID, Title: payload.Title, HTML: payload.HTML, CoverURL: payload.CoverURL,
+		IdempotencyKey: intentKey, Account: lane.AccountID, Title: payload.Title, Blocks: payload.Blocks, CoverURL: payload.CoverURL,
 	})
 	profile := robotPayloadProfile(payload)
 	result := robotLaneResultOf(record, saveErr, profile)
@@ -157,7 +183,7 @@ type robotLaneResult struct {
 	Uncertain bool
 }
 
-func robotLaneResultOf(record robotDraftRecord, err error, profile yunsuoPlatformProfile) robotLaneResult {
+func robotLaneResultOf(record robotDraftRecord, err error, profile distributionPlatform) robotLaneResult {
 	var rejected *robotRejectedError
 	var reconcile *robotReconcileError
 	switch {
@@ -187,7 +213,7 @@ func robotRecordError(record robotDraftRecord, fallback string) string {
 	return fallback
 }
 
-func robotRejectedReason(err *robotRejectedError, profile yunsuoPlatformProfile) string {
+func robotRejectedReason(err *robotRejectedError, profile distributionPlatform) string {
 	switch {
 	case err.Code == "login_required":
 		return "服务器上的" + profile.Name + "没登录，请在分发工具的远程画面里登录后重新存草稿"
@@ -199,7 +225,7 @@ func robotRejectedReason(err *robotRejectedError, profile yunsuoPlatformProfile)
 }
 
 // applyRobotLaneResult 锁内把定了的结果写进 lane；State 为空不调用。
-func applyRobotLaneResult(l *publishExternalLane, result robotLaneResult, profile yunsuoPlatformProfile, now string) {
+func applyRobotLaneResult(l *publishExternalLane, result robotLaneResult, profile distributionPlatform, now string) {
 	l.State = result.State
 	l.Error = truncateRunes(strings.Join(strings.Fields(result.Reason), " "), 500)
 	l.Remark = l.Error
@@ -211,6 +237,9 @@ func applyRobotLaneResult(l *publishExternalLane, result robotLaneResult, profil
 	l.DraftURL = ""
 	if draftURL, err := validateExternalArticleURL(result.Record.DraftURL, profile); err == nil {
 		l.DraftURL = draftURL
+	} else if !profile.Known && strings.HasPrefix(result.Record.DraftURL, "https://") {
+		// 平台限制没拿到（不知道域名）也留着：地址是自己的分发服务给的，丢了人就找不到这篇草稿。
+		l.DraftURL = strings.TrimSpace(result.Record.DraftURL)
 	} else if result.Record.DraftURL != "" {
 		log.Printf("publish: 分发工具返回的草稿地址不在%s域名内，不写进卡片：%v", profile.Name, err)
 	}
@@ -355,7 +384,7 @@ func (p *publishPipeline) recoverRobotLane(job publishJob, lane publishExternalL
 }
 
 // robotPlatformState 经分发服务的平台现在的状态（卡片与侧边栏）。
-func robotPlatformState(lane publishExternalLane, profile yunsuoPlatformProfile) externalPlatformState {
+func robotPlatformState(lane publishExternalLane, profile distributionPlatform) externalPlatformState {
 	state := externalPlatformState{URL: reviewCardSafeURL(lane.URL), Title: strings.TrimSpace(lane.Title)}
 	switch {
 	case lane.State == publishExternalDistributionDraftSaved:

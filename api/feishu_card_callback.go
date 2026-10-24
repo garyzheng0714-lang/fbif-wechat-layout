@@ -406,7 +406,7 @@ func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, a
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
 	if only != nil {
-		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在" + yunsuoProfileForTarget(target).syncAction(target.label())}
+		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在" + platformForAccount(target).syncAction(target.label())}
 	}
 	return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在同步分发"}
 }
@@ -661,7 +661,7 @@ func (p *publishPipeline) handleExternalDistributionFixAction(job publishJob, ac
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	profile := yunsuoProfileForTarget(target)
+	profile := platformForAccount(target)
 	if draft, _ := externalDraftFor(updated, target.ID); len(draft.Issues) > 0 {
 		return reviewCardOutcome{toastType: "info", toastContent: "已保存，" + target.label() + "还要改：" + externalIssueSummaryText(draft.Issues)}
 	}

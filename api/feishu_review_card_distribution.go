@@ -162,7 +162,7 @@ func reviewCardDistributionHeader(job publishJob) map[string]any {
 // reviewCardPlatformRow 一个平台一行（一个竖排分栏，行内间距比平台之间小）。待修改且能从这张卡
 // 改的，下面接着放表单字段，返回 fixing=true，由文章块包进根级 form。
 func reviewCardPlatformRow(job publishJob, target externalAccount, configured, canStart bool, icons reviewCardIcons) (map[string]any, bool) {
-	profile := yunsuoProfileForTarget(target)
+	profile := platformForAccount(target)
 	name := reviewCardSafeText(target.label(), 20)
 	if name == "" {
 		name = "未命名平台"
@@ -188,7 +188,7 @@ func reviewCardPlatformRow(job publishJob, target externalAccount, configured, c
 		label += "　" + link
 	}
 	var columns []any
-	if key := icons[profile.Icon]; key != "" {
+	if key := icons[profile.Icon()]; key != "" {
 		columns = append(columns, map[string]any{
 			"tag": "column", "width": "auto", "vertical_align": "center",
 			"elements": []any{map[string]any{
@@ -272,7 +272,7 @@ func reviewCardPlatformReason(state externalPlatformState, fixing, buttoned bool
 
 // reviewCardPlatformSyncButton 没推过、或失败可以重存的平台：按钮只推这一个平台。
 // 目前只存草稿（2026-10-22 用户裁定），按钮与确认框都照实说。
-func reviewCardPlatformSyncButton(job publishJob, accountID, name string, state externalPlatformState, profile yunsuoPlatformProfile) map[string]any {
+func reviewCardPlatformSyncButton(job publishJob, accountID, name string, state externalPlatformState, profile distributionPlatform) map[string]any {
 	text := profile.syncAction(name)
 	confirm := "将由分发工具在" + name + "存一篇草稿，不会发布；请到" + name + "草稿箱确认版式。请确认本文为原创文章。"
 	if state.Status == "失败" {
@@ -293,7 +293,7 @@ func reviewCardPlatformSyncButton(job publishJob, accountID, name string, state 
 }
 
 // reviewCardFixFields 待修改平台的表单：逐项写「哪里超了：要求，现状」，再给改的地方。
-func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yunsuoPlatformProfile, name, accountID, editLink string) []any {
+func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile distributionPlatform, name, accountID, editLink string) []any {
 	var out []any
 	note := func(content string) {
 		out = append(out, map[string]any{"tag": "markdown", "text_size": "notation", "content": content})

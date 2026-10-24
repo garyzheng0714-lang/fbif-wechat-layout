@@ -93,13 +93,13 @@ func externalPlatformStatus(job publishJob, target externalAccount) externalPlat
 		case lane.State == publishExternalLaneManual:
 			state.Status, state.Tone = "人工已发", "green"
 		case lane.Driver == externalDriverRobot:
-			return robotPlatformState(lane, yunsuoProfileForTarget(target))
+			return robotPlatformState(lane, platformForAccount(target))
 		// 以下是云梭（2026-10-24 下线）留下的旧 lane，只显示；失败的可以重新存草稿。
 		case lane.State == publishExternalDistributionSucceeded:
 			state.Status, state.Tone = "已发布", "green"
 			state.Fidelity = externalLaneFidelityNote(lane)
 			if state.URL == "" {
-				state.ManageURL = yunsuoProfileForTarget(target).ManageURL
+				state.ManageURL = platformForAccount(target).ManageURL
 			}
 		case lane.State == publishExternalDistributionReconciliationRequired:
 			state.Status, state.Tone = "待核对", "orange"
@@ -173,15 +173,15 @@ type externalEditPlatform struct {
 // externalEditView 侧边栏数据：每个平台的状态、现在推出去会用的标题/摘要/封面、上限与建议、
 // 可选封面。会读正文图片尺寸（只在请求里算，不写库）。
 func externalEditView(job publishJob, cfg externalTargets) map[string]any {
-	blocks, imageMap, decodeErr := decodeYunsuoDistributionContent(job.BlocksJSON, job.ImageMap)
+	blocks, imageMap, decodeErr := decodeDistributionSource(job.BlocksJSON, job.ImageMap)
 	var bodyImages []publishExternalCoverCandidate
 	if decodeErr == nil {
-		bodyImages = yunsuoBodyImages(blocks, imageMap, publishExternalCoverScan)
+		bodyImages = distributionBodyImages(blocks, imageMap, publishExternalCoverScan)
 	}
 	targets := cfg.forJob(job)
 	platforms := make([]externalEditPlatform, 0, len(targets))
 	for _, target := range targets {
-		profile := yunsuoProfileForTarget(target)
+		profile := platformForAccount(target)
 		draft, _ := externalDraftFor(job, target.ID)
 		state := externalPlatformStatus(job, target)
 		min, max := profile.titleLimits()
@@ -258,9 +258,9 @@ func externalEditSiteURL(job publishJob) string {
 	return siteURL
 }
 
-// externalCurrentCover 没换过封面时推送会用哪张：与推送同一套规则（chooseYunsuoCover）。
-func externalCurrentCover(job publishJob, profile yunsuoPlatformProfile, blocks []Block, imageMap map[string]string, bodyImages []publishExternalCoverCandidate) *externalEditImage {
-	src := prepareYunsuoDistribution(blocks, imageMap, profile, yunsuoWechatCover(job, imageMap), "").Cover
+// externalCurrentCover 没换过封面时推送会用哪张：与推送同一套规则（chooseDistributionCover）。
+func externalCurrentCover(job publishJob, profile distributionPlatform, blocks []Block, imageMap map[string]string, bodyImages []publishExternalCoverCandidate) *externalEditImage {
+	src := prepareDistribution(blocks, imageMap, profile, wechatCoverURL(job, imageMap), "").Cover
 	if src == "" {
 		return nil
 	}
@@ -271,7 +271,7 @@ func externalCurrentCover(job publishJob, profile yunsuoPlatformProfile, blocks 
 			return cover
 		}
 	}
-	if width, height, ok := yunsuoImageSize(src); ok {
+	if width, height, ok := distributionImageSize(src); ok {
 		cover.Width, cover.Height = width, height
 	}
 	return cover
@@ -373,8 +373,8 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 				writeError(w, http.StatusNotFound, "文章不存在")
 				return
 			}
-			if blocks, imageMap, err := decodeYunsuoDistributionContent(job.BlocksJSON, job.ImageMap); err == nil {
-				for _, image := range yunsuoBodyImages(blocks, imageMap, publishExternalCoverScan) {
+			if blocks, imageMap, err := decodeDistributionSource(job.BlocksJSON, job.ImageMap); err == nil {
+				for _, image := range distributionBodyImages(blocks, imageMap, publishExternalCoverScan) {
 					if image.URL == strings.TrimSpace(*body.CoverURL) {
 						edit.Candidates = append(edit.Candidates, image)
 					}
@@ -473,7 +473,7 @@ func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, 
 	if !ok {
 		return publishJob{}, publishExternalCoverCandidate{}, errors.New("分发平台配置已变化，请刷新")
 	}
-	profile := yunsuoProfileForTarget(target)
+	profile := platformForAccount(target)
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return publishJob{}, publishExternalCoverCandidate{}, errors.New("只支持 JPG、PNG 图片")

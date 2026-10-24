@@ -246,7 +246,7 @@ func externalDistributionEligibility(job publishJob) error {
 	}
 	provenance, _, evidence := publishExternalDistributionProvenance(job)
 	if provenance == publishExternalProvenanceRepost {
-		return errors.New("转载文章仅发布至 FoodTalks，不允许同步头条号、百家号等外部平台")
+		return errors.New("转载文章只发 FoodTalks，不同步到第三方平台")
 	}
 	if provenance != publishExternalProvenanceOriginal {
 		return fmt.Errorf("文章原创状态未完成核验，暂不允许同步外部平台：%s", evidence)
@@ -295,7 +295,7 @@ func (p *publishPipeline) publishedNewsSnapshotForDistribution(ctx context.Conte
 		return job, externalDistributionIneligible(errors.New("网站上这篇还不是已发布状态，不能同步外部平台"))
 	}
 	if news.SourceType == 1 {
-		return job, externalDistributionIneligible(errors.New("转载文章仅发布至 FoodTalks，不允许同步头条号、百家号等外部平台"))
+		return job, externalDistributionIneligible(errors.New("转载文章只发 FoodTalks，不同步到第三方平台"))
 	}
 	overlaid, err := overlayPublishJobWithPublishedNews(job, news)
 	if err != nil {
@@ -333,7 +333,7 @@ func overlayPublishJobWithPublishedNews(job publishJob, news foodTalksNewsDetail
 		out.SourceName = source
 	}
 	out.BlocksJSON = string(blocksJSON)
-	out.ImageMap = yunsuoPublicIdentityImageMap(out.BlocksJSON, out.CoverURL)
+	out.ImageMap = publicIdentityImageMap(out.BlocksJSON, out.CoverURL)
 	out.ContentHTML = news.Content
 	return out, nil
 }
@@ -382,8 +382,9 @@ func (p *publishPipeline) requestExternalDistribution(jobID int64, actor, expect
 	return p.queueExternalDistribution(jobID, actor, expectedVersion, externalQueueCard, nil)
 }
 
-// replaceExternalDistributionAfterReconcile 管理员在平台草稿箱核对、删掉多出来的稿之后，
-// 用当前代码重建待核对平台的 payload 再存一次。不接受飞书卡片 callback。
+// replaceExternalDistributionAfterReconcile 管理员在平台草稿箱核对、删掉多出来的稿之后再存一次：
+// 交过分发服务的按原来的冻结内容和幂等键再交（robotResendFrozenLane），云梭旧 lane 用当前代码重建。
+// 不接受飞书卡片 callback。
 func (p *publishPipeline) replaceExternalDistributionAfterReconcile(jobID int64, actor string) (publishJob, error) {
 	return p.queueExternalDistribution(jobID, actor, "", externalQueueReplaceReconcile, nil)
 }
@@ -508,6 +509,17 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	draftEditedAt := map[string]string{}
 	material := externalDraftMaterial(job)
 	for _, target := range chosen {
+		if old, ok := externalLaneFor(job, target.ID); ok && mode == externalQueueReplaceReconcile &&
+			old.Driver == externalDriverRobot && strings.TrimSpace(old.IntentKey) != "" {
+			lane, resendErr := robotResendFrozenLane(job.ID, old, actor, requestedAt)
+			if resendErr != nil {
+				failures = append(failures, target.label()+"："+resendErr.Error())
+				continue
+			}
+			queuedAccounts = append(queuedAccounts, target.ID)
+			lanes = append(lanes, lane)
+			continue
+		}
 		draft, _ := externalDraftFor(job, target.ID)
 		draftEditedAt[target.ID] = draft.EditedAt
 		issues, candidates := externalPreflight(snapshot, target, draft)

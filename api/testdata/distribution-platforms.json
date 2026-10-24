@@ -1,0 +1,57 @@
+{
+  "platforms": [
+    {
+      "id": "baijiahao",
+      "name": "百家号",
+      "carrier": "article",
+      "title": {
+        "min": 2,
+        "max": 64,
+        "count": "chars"
+      },
+      "cover": {
+        "min_width": 0,
+        "min_height": 0,
+        "max_bytes": 5242880
+      },
+      "daily_limit": 5,
+      "hosts": [
+        "baijiahao.baidu.com",
+        "mbd.baidu.com"
+      ],
+      "manage_url": "https://baijiahao.baidu.com/builder/rc/content"
+    },
+    {
+      "id": "toutiao",
+      "name": "头条号",
+      "carrier": "article",
+      "title": {
+        "min": 2,
+        "max": 30,
+        "count": "ascii_half"
+      },
+      "cover": {
+        "min_width": 452,
+        "min_height": 352,
+        "max_bytes": 20971520
+      },
+      "daily_limit": 5,
+      "hosts": [
+        "toutiao.com",
+        "www.toutiao.com",
+        "m.toutiao.com"
+      ],
+      "manage_url": "https://mp.toutiao.com/profile_v4/manage/content/all"
+    },
+    {
+      "id": "douyin",
+      "name": "抖音",
+      "carrier": "post",
+      "title": {
+        "min": 1,
+        "max": 20,
+        "count": "chars"
+      }
+    }
+  ]
+}

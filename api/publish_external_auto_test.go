@@ -156,9 +156,9 @@ func jobsWithLanes(lanes ...publishExternalLane) []publishJob {
 // TestExternalAutoQuotaRules 名额按平台各算各的：每天上限取平台规则（头条号 5 篇），补发
 // 每天 ≤3 篇、9–20 点、同一平台间隔 ≥1 小时；头条号满了不挡百家号。
 func TestExternalAutoQuotaRules(t *testing.T) {
-	auto := []externalAccount{{ID: testToutiaoAccountID, Name: "头条号", Auto: true}, {ID: testBaijiaAccountID, Name: "百家号", Auto: true}}
+	auto := []externalAccount{{ID: testToutiaoAccountID, Platform: "toutiao", Name: "头条号", Auto: true}, {ID: testBaijiaAccountID, Platform: "baijiahao", Name: "百家号", Auto: true}}
 	clock := newCSTClock("2026-10-12 10:00")
-	toutiaoLimit := yunsuoPlatformProfiles["toutiao"].DailyLimit
+	toutiaoLimit := testPlatform(t, "toutiao").DailyLimit
 	if toutiaoLimit != 5 {
 		t.Fatalf("头条号文章日上限应为 5，实际 %d", toutiaoLimit)
 	}
@@ -424,7 +424,7 @@ func TestExternalDistributionCardPushesRetryAndMissingSeparately(t *testing.T) {
 func TestExternalDistributionLanesFailIndependently(t *testing.T) {
 	setTestDistributionAccounts(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
-	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
+	stubDistributionImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
 	env := newPublishTestEnv(t)
 	robot := useFakeRobot(env)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")

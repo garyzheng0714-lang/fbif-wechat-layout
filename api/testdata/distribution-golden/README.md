@@ -1,17 +1,28 @@
-# 多平台分发样稿考卷
+# 多平台分发样稿考卷（前一半）
 
-编辑手发在头条号、百家号上的真稿，是外发版式的标准答案（红线 43）。每篇稿两类文件：
+编辑手发在头条号、百家号上的真稿，是外发版式的标准答案（红线 43）。考卷分两半：
 
-- `<编号>.json`：这篇在 FoodTalks 的已发布正文（外发的输入）、正文里每张图的尺寸、各平台编辑手发的正文（只留标签结构和文字）。
-- `<编号>.<平台>.txt`：用现在的规则组装出来的内容，和编辑稿还差哪几处。
+- 前一半在这里（`api/distribution_golden_test.go` 的 `TestDistributionBlocksGolden`）：拿 FoodTalks 已发布正文，用现在的通用规则（`api/distribution_rules.go`）走一遍真实外发组装，写出交给分发服务的标题、封面与外发通用版正文块。
+- 后一半在分发服务（FBIF-多平台分发工具 `test/golden/`）：拿同一份块按各平台写法写成标签，和编辑稿按读者看到的样子逐块比。
 
-`cd api && go test -run TestDistributionGolden .` 把每篇样稿在每个平台上都考一遍。差别一变测试就失败，并列出新出现的差别和消失的差别。看过确认后重写记录：
+这里每篇稿两个文件：
+
+- `<编号>.json`：这篇在 FoodTalks 的已发布正文（外发的输入）、正文里每张图的尺寸。
+- `<编号>.blocks.json`：用现在的规则写出的标题、封面、正文块；分发服务 `test/golden/` 里有一份一样的。
+
+`cd api && go test -run TestDistributionBlocksGolden .` 块一变就失败，并列出多了、少了哪几块。看过确认后重写，再拷到分发服务跑后一半：
 
 ```bash
-cd api && GOLDEN_UPDATE=1 go test -run TestDistributionGolden .
+cd api && GOLDEN_UPDATE=1 go test -run TestDistributionBlocksGolden .
+cp testdata/distribution-golden/*.blocks.json <分发工具仓库>/test/golden/
+cd <分发工具仓库> && npm test
 ```
 
-可以确认的情况有两种：差别变少了，或者新的差别是编辑稿那处的个例。
+两边是否一致（块和测试用的平台限制 `testdata/distribution-platforms.json`）：
+
+```bash
+cd api && DISTRIBUTION_REPO=<分发工具仓库> go test -run TestDistributionFixturesMatchService .
+```
 
 ## 加样稿
 
@@ -19,14 +30,14 @@ cd api && GOLDEN_UPDATE=1 go test -run TestDistributionGolden .
 
 1. 在 A 机跑 `tools/distribution-golden/fetch_sources.py <编号…>`，在 `/tmp/golden/` 下得到 `ft-<编号>.json`（FoodTalks 正文）和 `tt-<编号>.json`（头条号正文）。
 2. 把 `tools/distribution-golden/fetch_baijiahao.mjs` 拷进 B 机容器 `fbif-distribution-browser` 的 `/app/`，跑 `node /app/fetch_baijiahao.mjs '{"<编号>":"<标题>"}'`，得到 `/tmp/bjh.json`。跑完用 `docker exec -u 0` 删掉拷进去的脚本。
-3. 把这几个文件拷到本机同一个目录，然后生成样稿。这一步要联网量图片尺寸：
+3. 把这几个文件拷到本机同一个目录，然后生成样稿。这一步要联网量图片尺寸，FoodTalks 正文写进这里的 `<编号>.json`，编辑稿写进分发服务的 `test/golden/<编号>.<平台>.json`：
 
    ```bash
-   cd api && GOLDEN_BUILD_RAW=<目录> go test -run TestDistributionGoldenBuild .
+   cd api && GOLDEN_BUILD_RAW=<目录> DISTRIBUTION_REPO=<分发工具仓库> go test -run TestDistributionGoldenBuild .
    ```
 
-4. 用 `GOLDEN_UPDATE=1` 生成差别记录，逐条看过再提交。
+4. 用 `GOLDEN_UPDATE=1` 生成 `<编号>.blocks.json`，拷到分发服务，在那边用 `GOLDEN_UPDATE=1 npm test` 生成差别记录，逐条看过再提交两边。
 
 ## 加平台
 
-先在 `yunsuo_platform_profiles.go` 加好这个平台的 profile。跑 `cd api && SPEC_UPDATE=1 go test -run TestDistributionPlatformSpec .` 生成它的平台说明书 `docs/platforms/<Key>.md`，看一遍每种块写成什么对不对。然后在样稿 json 的 `platforms` 里加上编辑在这个平台手发的正文，key 用 profile 的 `Key`。抓取脚本照头条号、百家号的写法再写一个。
+平台在分发服务加（`service/platforms/` 一份配置，见它的 `test/golden/README.md`），这边不用改代码：排版工具经 `GET /v1/platforms` 取限制。分发服务改了平台文件，跑它的 `npm run gen:docs` 会同时重写 `test/fixtures/platforms.json`，拷到这边的 `api/testdata/distribution-platforms.json`。

@@ -6,8 +6,8 @@ package main
 // 应该支持在群里 @ 对应的人，提醒去更换标题和封面图」「摘要字数超限也是同理」「能否直接在
 // 卡片里改好？不过这里一定要做好引导，提示清楚要把什么改成什么」。
 //
-// 草稿存进平台后系统不再改它，所以检查放在存草稿前：每个平台按自己的规则
-// （yunsuo_platform_profiles.go）查标题、摘要字数与封面尺寸，有问题这个平台先不推、不占
+// 草稿存进平台后系统不再改它，所以检查放在存草稿前：每个平台按分发服务给的限制
+// （distribution_platforms.go）查标题、摘要字数与封面尺寸，有问题这个平台先不推、不占
 // 名额，记成「待修改」；审核卡（feishu_review_card_distribution.go）在这个平台的块里直接给出
 // 现在是什么、要求多少、建议改成什么，并 @ 分发负责人（publish_external_reminders.go）。
 // 改的只是这个平台推出去的版本，公众号和网站上的文章不动。改好后马上重新检查，通过即推
@@ -124,7 +124,7 @@ func externalDraftBlocked(job publishJob, target externalAccount) bool {
 	if !ok || len(draft.Issues) == 0 || draft.CheckedMaterial != externalDraftMaterial(job) {
 		return false
 	}
-	profile := yunsuoProfileForTarget(target)
+	profile := platformForAccount(target)
 	for _, issue := range draft.Issues {
 		switch issue.Field {
 		case publishExternalIssueTitle:
@@ -160,21 +160,21 @@ func runeLen(value string) int { return len([]rune(value)) }
 
 // externalEffectiveTitle 推给这个平台的标题（人改过的优先）。
 func externalEffectiveTitle(job publishJob, draft publishExternalDraft) string {
-	if title := compactYunsuoText(draft.Title); title != "" {
+	if title := compactSpaces(draft.Title); title != "" {
 		return title
 	}
-	return compactYunsuoText(job.Title)
+	return compactSpaces(job.Title)
 }
 
 func externalEffectiveSummary(job publishJob, draft publishExternalDraft) string {
-	if summary := compactYunsuoText(draft.Summary); summary != "" {
+	if summary := compactSpaces(draft.Summary); summary != "" {
 		return summary
 	}
-	return compactYunsuoText(job.Summary)
+	return compactSpaces(job.Summary)
 }
 
 // externalTextIssues 标题、摘要的字数检查（纯计算，卡片回调里也能当场重算）。
-func externalTextIssues(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft) []publishExternalIssue {
+func externalTextIssues(job publishJob, profile distributionPlatform, draft publishExternalDraft) []publishExternalIssue {
 	var issues []publishExternalIssue
 	title := externalEffectiveTitle(job, draft)
 	min, _ := profile.titleLimits()
@@ -189,21 +189,21 @@ func externalTextIssues(job publishJob, profile yunsuoPlatformProfile, draft pub
 	return issues
 }
 
-// externalCoverIssue 封面检查：人换过封面就查那张；否则与推送同口径（chooseYunsuoCover：公众号封面，
+// externalCoverIssue 封面检查：人换过封面就查那张；否则与推送同口径（chooseDistributionCover：公众号封面，
 // 会插封面的平台以图开头时用开头那张，没有公众号封面才用正文第一张够大的图）。读不到尺寸的不拦。
-func externalCoverIssue(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft, blocks []Block, imageMap map[string]string) *publishExternalIssue {
+func externalCoverIssue(job publishJob, profile distributionPlatform, draft publishExternalDraft, blocks []Block, imageMap map[string]string) *publishExternalIssue {
 	if profile.CoverMinWidth <= 0 && profile.CoverMinHeight <= 0 {
 		return nil
 	}
 	tooSmall := func(src string) *publishExternalIssue {
-		width, height, ok := yunsuoImageSize(src)
+		width, height, ok := distributionImageSize(src)
 		if !ok || (width >= profile.CoverMinWidth && height >= profile.CoverMinHeight) {
 			return nil
 		}
 		return &publishExternalIssue{Field: publishExternalIssueCover, Current: src, Width: width, Height: height,
 			MinWidth: profile.CoverMinWidth, MinHeight: profile.CoverMinHeight}
 	}
-	if chosen := publicYunsuoMediaURL(strings.TrimSpace(draft.CoverURL)); chosen != "" {
+	if chosen := publicMediaURL(strings.TrimSpace(draft.CoverURL)); chosen != "" {
 		for _, candidate := range draft.Candidates {
 			if candidate.URL == chosen && candidate.Width >= profile.CoverMinWidth && candidate.Height >= profile.CoverMinHeight {
 				return nil
@@ -211,7 +211,7 @@ func externalCoverIssue(job publishJob, profile yunsuoPlatformProfile, draft pub
 		}
 		return tooSmall(chosen)
 	}
-	cover := prepareYunsuoDistribution(blocks, imageMap, profile, yunsuoWechatCover(job, imageMap), "").Cover
+	cover := prepareDistribution(blocks, imageMap, profile, wechatCoverURL(job, imageMap), "").Cover
 	if cover == "" {
 		return &publishExternalIssue{Field: publishExternalIssueCover, Missing: true,
 			MinWidth: profile.CoverMinWidth, MinHeight: profile.CoverMinHeight}
@@ -222,9 +222,9 @@ func externalCoverIssue(job publishJob, profile yunsuoPlatformProfile, draft pub
 // externalPreflight 推送前按这个平台的规则检查（会读图片尺寸，只在后台调用）。返回问题、
 // 以及有封面问题时可换的封面（正文里够大的图 + 之前上传过的图）。
 func externalPreflight(job publishJob, target externalAccount, draft publishExternalDraft) ([]publishExternalIssue, []publishExternalCoverCandidate) {
-	profile := yunsuoProfileForTarget(target)
+	profile := platformForAccount(target)
 	issues := externalTextIssues(job, profile, draft)
-	blocks, imageMap, err := decodeYunsuoDistributionContent(job.BlocksJSON, job.ImageMap)
+	blocks, imageMap, err := decodeDistributionSource(job.BlocksJSON, job.ImageMap)
 	if err != nil {
 		// 正文都解不开，交给构造 payload 那一步报错（受理前失败），这里不另记。
 		return issues, nil
@@ -234,7 +234,7 @@ func externalPreflight(job publishJob, target externalAccount, draft publishExte
 		return issues, draft.Candidates
 	}
 	issues = append(issues, *cover)
-	candidates := yunsuoCoverCandidates(blocks, imageMap, profile, publishExternalCoverScan, publishExternalCoverCandidates)
+	candidates := distributionCoverCandidates(blocks, imageMap, profile, publishExternalCoverScan, publishExternalCoverCandidates)
 	return issues, mergeExternalCoverCandidates(candidates, draft.Candidates)
 }
 
@@ -293,17 +293,17 @@ func addExternalCoverCandidates(current, added []publishExternalCoverCandidate) 
 }
 
 // externalFallbackSuggestions 建议值的保底：在标点处截到平台上限。AI 缩写好了再换（publish_external_reminders.go）。
-func externalFallbackSuggestions(draft *publishExternalDraft, profile yunsuoPlatformProfile) {
+func externalFallbackSuggestions(draft *publishExternalDraft, profile distributionPlatform) {
 	for _, issue := range draft.Issues {
 		switch issue.Field {
 		case publishExternalIssueTitle:
 			if draft.SuggestedTitle == "" || runeLen(draft.SuggestedTitle) > issue.Max {
-				draft.SuggestedTitle = truncateYunsuoTitle(issue.Current, issue.Min, issue.Max)
+				draft.SuggestedTitle = truncateTitleAtPause(issue.Current, issue.Min, issue.Max)
 				draft.SuggestedBy = "cut"
 			}
 		case publishExternalIssueSummary:
 			if draft.SuggestedSummary == "" || runeLen(draft.SuggestedSummary) > issue.Max {
-				draft.SuggestedSummary = truncateYunsuoTitle(issue.Current, 1, issue.Max)
+				draft.SuggestedSummary = truncateTitleAtPause(issue.Current, 1, issue.Max)
 				draft.SuggestedBy = "cut"
 			}
 		}
@@ -325,7 +325,7 @@ func recordExternalPreflight(job *publishJob, target externalAccount, issues []p
 	if len(issues) == 0 {
 		draft.SuggestedTitle, draft.SuggestedSummary, draft.SuggestedBy = "", "", ""
 	} else {
-		externalFallbackSuggestions(&draft, yunsuoProfileForTarget(target))
+		externalFallbackSuggestions(&draft, platformForAccount(target))
 	}
 	setExternalDraft(job, draft)
 }
@@ -358,20 +358,20 @@ func (e *externalDraftLockedError) Is(target error) bool {
 }
 
 // externalDraftLocked 这个平台已经提交过、内容不能再改时报的错。
-func externalDraftLocked(profile yunsuoPlatformProfile) error {
+func externalDraftLocked(profile distributionPlatform) error {
 	return &externalDraftLockedError{"这个平台已经提交给分发工具，内容不能再改；草稿存好后请到" + profile.Name + "草稿箱里改"}
 }
 
 // applyExternalDraftEdit 校验并写入修改，当场重算标题、摘要与封面问题（不读网络：封面只认
 // 候选里记过尺寸的图）。返回修改后的 draft。
 func applyExternalDraftEdit(job publishJob, target externalAccount, edit externalDraftEdit, actor string, now time.Time) (publishExternalDraft, error) {
-	profile := yunsuoProfileForTarget(target)
+	profile := platformForAccount(target)
 	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneCanSafeRetry(lane) {
 		return publishExternalDraft{}, externalDraftLocked(profile)
 	}
 	draft, _ := externalDraftFor(job, target.ID)
 	if edit.Title != nil {
-		title := compactYunsuoText(*edit.Title)
+		title := compactSpaces(*edit.Title)
 		min, _ := profile.titleLimits()
 		length, max, over := profile.titleOver(title)
 		switch n := runeLen(title); {
@@ -382,18 +382,18 @@ func applyExternalDraftEdit(job publishJob, target externalAccount, edit externa
 		case n < min:
 			return draft, fmt.Errorf("%s标题至少 %d 字，现在 %d 字", profile.Name, min, n)
 		}
-		if title == compactYunsuoText(job.Title) {
+		if title == compactSpaces(job.Title) {
 			title = ""
 		}
 		draft.Title = title
 	}
 	if edit.Summary != nil {
-		summary := compactYunsuoText(*edit.Summary)
+		summary := compactSpaces(*edit.Summary)
 		if profile.SummaryMax > 0 && runeLen(summary) > profile.SummaryMax {
 			n := runeLen(summary)
 			return draft, fmt.Errorf("%s摘要最多 %d 字，现在 %d 字，还要删 %d 字", profile.Name, profile.SummaryMax, n, n-profile.SummaryMax)
 		}
-		if summary == compactYunsuoText(job.Summary) {
+		if summary == compactSpaces(job.Summary) {
 			summary = ""
 		}
 		draft.Summary = summary

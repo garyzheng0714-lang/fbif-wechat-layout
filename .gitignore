@@ -21,10 +21,10 @@ docs/*
 !docs/worklogs/**
 # 外部 API 实测契约是流水线代码的依据，必须随仓库走（openspec design.md 引用它）
 !docs/foodtalks-api-contract.md
-# 块格式说明书与平台说明书由测试从代码生成、测试也拿它们比对，必须入库
+# 块格式说明书与外发通用版正文块说明由测试从代码生成、测试也拿它们比对，必须入库（平台说明书只在分发服务）
 !docs/article-blocks.md
 !docs/article-blocks.schema.json
-!docs/platforms/
+!docs/distribution-blocks.md
 
 # Local debug captures and test artifacts (never commit)
 .playwright-mcp/

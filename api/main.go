@@ -136,7 +136,7 @@ func main() {
 	publishStore := newPublishJobStore(publishPath)
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
 	// 外发账号（多维表格「平台账号」）经分发服务读，存一份在任务库旁边；任务恢复与 worker 起来前先备好。
-	startExternalAccountDirectory(externalAccountsPath(publishPath))
+	startDistributionDirectory(publishPath)
 	publishPipe.deliverySettings = newPublishDeliverySettingsStore(publishDeliverySettingsPath(*rulesPath))
 	publishPipe.editReports = newPublishEditReportStore(publishEditReportPath(publishDeliverySettingsPath(*rulesPath)))
 	publishPipe.publicDir = publicDir

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -70,7 +71,7 @@ func TestDistributionRobotClientMapsResponses(t *testing.T) {
 		`"expected":{"headings":3,"bold":9,"images":9,"captions":["图注"]},"read_back":{"title":"t","headings":3,"bold":9,"images":9,"captions":1,"cover_uploaded":true},` +
 		`"match":true,"mismatches":[],"read_back_error":null,"replayed":false,"attempts":1,` +
 		`"assists":[{"step":"cover.open","goal":"打开换封面的弹窗","wanted":["选择封面","更换"],"picked":"替换封面","reason":"设置封面那一行的按钮"}]}`
-	request := robotDraftRequest{IdempotencyKey: "job-282.baijiahao", Title: "标题", HTML: "<p>正文</p>", CoverURL: "https://cdn.example.com/a.jpg"}
+	request := robotDraftRequest{IdempotencyKey: "job-282.baijiahao", Title: "标题", Blocks: []Block{{K: "txt", Runs: []Run{{Type: "txt", Text: "正文"}}}}, CoverURL: "https://cdn.example.com/a.jpg"}
 
 	current = reply{http.StatusOK, saved}
 	record, err := client.SaveDraft(context.Background(), "baijiahao", request)
@@ -86,8 +87,9 @@ func TestDistributionRobotClientMapsResponses(t *testing.T) {
 		t.Fatalf("请求不对：%s %s auth=%q", last.Method, last.URL.Path, last.Header.Get("Authorization"))
 	}
 	var sent robotDraftRequest
-	if err := json.Unmarshal([]byte(bodies[len(bodies)-1]), &sent); err != nil || sent != request {
-		t.Fatalf("请求体应是契约里的四个字段：%s", bodies[len(bodies)-1])
+	if err := json.Unmarshal([]byte(bodies[len(bodies)-1]), &sent); err != nil || !reflect.DeepEqual(sent, request) ||
+		bodies[len(bodies)-1] != `{"idempotency_key":"job-282.baijiahao","account":"","title":"标题","blocks":[{"k":"txt","runs":[{"type":"txt","text":"正文"}]}],"cover_url":"https://cdn.example.com/a.jpg"}` {
+		t.Fatalf("请求体应是契约里的四个字段，正文是外发通用版正文块：%s", bodies[len(bodies)-1])
 	}
 
 	var rejected *robotRejectedError

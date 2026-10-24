@@ -57,11 +57,11 @@ func loadDistributionRobotConfig() (distributionRobotConfig, error) {
 
 // robotDraftRequest 写草稿的请求体（POST /v1/platforms/{platform}/drafts）。
 type robotDraftRequest struct {
-	IdempotencyKey string `json:"idempotency_key"`
-	Account        string `json:"account"` // 多维表格「平台账号」的 record_id
-	Title          string `json:"title"`
-	HTML           string `json:"html"`
-	CoverURL       string `json:"cover_url"`
+	IdempotencyKey string  `json:"idempotency_key"`
+	Account        string  `json:"account"` // 多维表格「平台账号」的 record_id
+	Title          string  `json:"title"`
+	Blocks         []Block `json:"blocks"` // 外发通用版正文块（distribution_blocks.go），分发服务按平台写成标签
+	CoverURL       string  `json:"cover_url"`
 }
 
 // robotDraftRecord 分发服务对一个幂等键的记录（写草稿的 200 响应与 GET 同一份）。
@@ -221,6 +221,24 @@ func (c *distributionRobotClient) Accounts(ctx context.Context) ([]externalAccou
 		return nil, errors.New("分发服务返回的账号无法解析")
 	}
 	return body.Accounts, nil
+}
+
+func (c *distributionRobotClient) Platforms(ctx context.Context) ([]distributionPlatformInfo, error) {
+	status, raw, err := c.do(ctx, http.MethodGet, "/v1/platforms", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		_, message := c.parseError(status, raw)
+		return nil, fmt.Errorf("分发服务读平台限制失败（HTTP %d）：%s", status, message)
+	}
+	var body struct {
+		Platforms []distributionPlatformInfo `json:"platforms"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, errors.New("分发服务返回的平台限制无法解析")
+	}
+	return body.Platforms, nil
 }
 
 func (c *distributionRobotClient) Draft(ctx context.Context, platform, key string) (robotDraftRecord, error) {

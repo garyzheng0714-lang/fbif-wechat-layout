@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -92,7 +93,7 @@ func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 			t.Errorf("提交前 lane 上应已冻结草稿内容：%v", err)
 		}
 		if lane.State != publishExternalDistributionPushing || lane.Driver != externalDriverRobot || lane.IntentKey != req.IdempotencyKey ||
-			lane.IntentAt == "" || frozen.Platform != "baijiahao" || frozen.Title != req.Title || frozen.HTML != req.HTML || frozen.CoverURL != req.CoverURL {
+			lane.IntentAt == "" || frozen.Platform != "baijiahao" || frozen.Title != req.Title || !reflect.DeepEqual(frozen.Blocks, req.Blocks) || frozen.CoverURL != req.CoverURL {
 			t.Errorf("提交前必须先落 intent：lane=%+v frozen=%+v req=%+v", lane, frozen, req)
 		}
 	}
@@ -111,7 +112,7 @@ func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 		t.Fatalf("幂等键只用分发服务认的字符：%q", req.IdempotencyKey)
 	}
 	// 标题原样（不补「｜摘要」），封面是公众号封面、单独上传。
-	if req.Title != job.Title || req.CoverURL != job.CoverURL || !strings.Contains(req.HTML, "这是一篇用于验证外部分发流程的原创文章正文。") {
+	if req.Title != job.Title || req.CoverURL != job.CoverURL || !strings.Contains(distributionOutline(req.Blocks), "这是一篇用于验证外部分发流程的原创文章正文。") {
 		t.Fatalf("草稿内容不对：%+v", req)
 	}
 	got := mustJob(t, env, job.ID)
@@ -272,7 +273,7 @@ func TestRobotLaneRestartRecoveryChecksByKey(t *testing.T) {
 		fmt.Sprint(robot.gets) != "[baijiahao/"+interrupted.IntentKey+"]" {
 		t.Fatalf("恢复应转待核对并按同一个键查：%+v gets=%v", lane, robot.gets)
 	}
-	if state := externalPlatformStatus(mustJob(t, env, job.ID), externalAccount{ID: testBaijiaAccountID, Name: "百家号"}); state.Status != "待核对" || strings.Contains(state.Reason, "云梭") {
+	if state := externalPlatformStatus(mustJob(t, env, job.ID), externalAccount{ID: testBaijiaAccountID, Platform: "baijiahao", Name: "百家号"}); state.Status != "待核对" || strings.Contains(state.Reason, "云梭") {
 		t.Fatalf("待核对的说法不提云梭：%+v", state)
 	}
 
@@ -452,5 +453,28 @@ func TestRobotLaneStopsBeforeSubmitWhenUnconfigured(t *testing.T) {
 	lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID)
 	if lane.State != publishExternalDistributionFailed || !strings.Contains(lane.Error, "缺少 "+distributionAPIURLEnv) || lane.IntentKey != "" || !externalLaneCanSafeRetry(lane) {
 		t.Fatalf("没配分发服务应在提交前失败、可重新存：%+v", lane)
+	}
+}
+
+// TestRobotLaneOldFormatPayloadFailsBeforeSubmit 2026-10-24 之前冻结、还没提交过的旧格式（排版工具写好的网页代码）：
+// 分发服务已不收，提交前就失败、不落 intent，可重新存草稿（按新格式重新冻结）；分发服务一次都不叫。
+func TestRobotLaneOldFormatPayloadFailsBeforeSubmit(t *testing.T) {
+	setTestDistributionAccounts(t)
+	env := newPublishTestEnv(t)
+	robot := useFakeRobot(env)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	old := publishExternalLane{AccountID: testBaijiaAccountID, Name: "百家号", Driver: externalDriverRobot, State: publishExternalDistributionQueued,
+		PayloadJSON: `{"platform":"baijiahao","title":"旧稿","html":"<p>正文</p>","cover_url":"https://cdn.example/a.jpg"}`, PayloadHash: "sha256:old"}
+	job, err := env.store.update(job.ID, func(current *publishJob) { current.ExternalDistributionLanes = []publishExternalLane{old} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.pipeline.pushRobotLane(job, old)
+	lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID)
+	if lane.State != publishExternalDistributionFailed || lane.Error != "草稿内容是旧格式，未提交；请重新存草稿至百家号" || lane.IntentKey != "" || !externalLaneCanSafeRetry(lane) {
+		t.Fatalf("旧格式应在提交前失败、可重新存：%+v", lane)
+	}
+	if len(robot.saves) != 0 {
+		t.Fatalf("旧格式不该送去分发服务：%+v", robot.saves)
 	}
 }

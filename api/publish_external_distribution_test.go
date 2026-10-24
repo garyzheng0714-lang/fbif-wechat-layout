@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -129,7 +130,7 @@ func TestExternalDistributionUsesLivePublishedNewsNotJobSnapshot(t *testing.T) {
 		t.Fatalf("两个平台各存一次草稿：%v", robot.platforms)
 	}
 	for i, draft := range robot.saves {
-		if !strings.Contains(draft.HTML, "最新已发布的正确正文") || strings.Contains(draft.HTML, "历史错误正文") || draft.Title != "把茶做成零食，这家老茶铺年营收1.4亿" {
+		if !strings.Contains(distributionOutline(draft.Blocks), "最新已发布的正确正文") || strings.Contains(distributionOutline(draft.Blocks), "历史错误正文") || draft.Title != "把茶做成零食，这家老茶铺年营收1.4亿" {
 			t.Fatalf("%s草稿必须用网站最新已发布稿，不得发任务里的历史错误稿：%+v", robot.platforms[i], draft)
 		}
 	}
@@ -202,8 +203,8 @@ func TestExternalDistributionManualCMSUsesLiveNewsWithoutPipelineApprove(t *test
 		t.Fatalf("两个平台各存一次草稿：%v", robot.platforms)
 	}
 	for _, draft := range robot.saves {
-		if !strings.Contains(draft.HTML, "后台公开后的最新正文") || strings.Contains(draft.HTML, "流水线进站时的旧稿") {
-			t.Fatalf("人工后台公开后必须发最新网站稿：%s", draft.HTML)
+		if !strings.Contains(distributionOutline(draft.Blocks), "后台公开后的最新正文") || strings.Contains(distributionOutline(draft.Blocks), "流水线进站时的旧稿") {
+			t.Fatalf("人工后台公开后必须发最新网站稿：%s", distributionOutline(draft.Blocks))
 		}
 	}
 }
@@ -241,8 +242,8 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 		t.Fatalf("两个平台应各存一次：%v", robot.platforms)
 	}
 	for _, draft := range robot.saves {
-		if strings.Contains(draft.HTML, "FoodTalks") {
-			t.Fatalf("正文渠道中性：%s", draft.HTML)
+		if strings.Contains(distributionOutline(draft.Blocks), "FoodTalks") {
+			t.Fatalf("正文渠道中性：%s", distributionOutline(draft.Blocks))
 		}
 	}
 	if repeated := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", value); repeated.toastType != "info" || len(robot.saves) != 2 {
@@ -423,16 +424,20 @@ func TestReviewCardOutboxesSerializeAndLatestLifecycleWins(t *testing.T) {
 	}
 }
 
-// TestReplaceExternalDistributionAfterReconcileRebuildsDraft 待核对的平台（云梭旧 lane、分发服务说草稿箱要人删的）：
-// 卡片不给按钮、卡片路径也拒；管理员核对后重发，用网站现在的正文各存一次草稿。
-func TestReplaceExternalDistributionAfterReconcileRebuildsDraft(t *testing.T) {
+// TestReplaceExternalDistributionAfterReconcile 待核对的平台：卡片不给按钮、卡片路径也拒；管理员核对后重发。
+// 交过分发服务的按原来的冻结内容和幂等键再交（分发服务先去草稿箱对账，剩一篇就认它）；换键会在人删到只剩一篇时多存一篇。
+// 云梭旧 lane 没交过分发服务，用 FoodTalks 现在的正文重建。
+func TestReplaceExternalDistributionAfterReconcile(t *testing.T) {
 	setTestDistributionAccounts(t)
 	env := newPublishTestEnv(t)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	frozen := robotDraftPayload{Platform: "baijiahao", Title: "上次冻结的标题", CoverURL: "https://cdn.example.com/a.jpg",
+		Blocks: []Block{{K: "txt", Runs: []Run{{Type: "txt", Text: "上次冻结的正文"}}}}}
+	frozenJSON, _ := json.Marshal(frozen)
 	baijia := testLane(testBaijiaAccountID, "百家号", publishExternalDistributionReconciliationRequired)
-	baijia.Driver, baijia.IntentKey = externalDriverRobot, "job-1.recTestBaijia001.old"
-	baijia.PayloadJSON = `{"platform":"baijiahao","title":"旧标题","html":"<p>wrong-field</p>","cover_url":"https://cdn.example.com/a.jpg"}`
-	baijia.PayloadHash, baijia.Error = "sha256:old", "草稿箱里这次新建的同名草稿有 2 篇，请删到只剩一篇"
+	baijia.Driver, baijia.PayloadJSON, baijia.PayloadHash = externalDriverRobot, string(frozenJSON), "sha256:frozen"
+	baijia.IntentKey = robotIdempotencyKey(job.ID, testBaijiaAccountID, baijia.PayloadHash)
+	baijia.Error = "草稿箱里这次新建的同名草稿有 2 篇，请删到只剩一篇"
 	job = setTestLanes(t, env, job.ID, yunsuoLegacyLane(testToutiaoAccountID, "头条号", publishExternalDistributionReconciliationRequired), baijia)
 	card := cardJSON(t, buildReviewDoneCard(job))
 	if strings.Contains(card, feishuCardActionDistributeExternal) {
@@ -457,12 +462,40 @@ func TestReplaceExternalDistributionAfterReconcileRebuildsDraft(t *testing.T) {
 		}
 	}
 	if len(robot.saves) != 2 {
-		t.Fatalf("待核对的两个平台各存一次，实际 %d", len(robot.saves))
+		t.Fatalf("待核对的两个平台各交一次，实际 %d", len(robot.saves))
 	}
-	for _, draft := range robot.saves {
-		if strings.Contains(draft.HTML, "wrong-field") || !strings.Contains(draft.HTML, "这是一篇用于验证外部分发流程的原创文章正文。") {
-			t.Fatalf("不得把上一份 payload 再发出去：%s", draft.HTML)
+	for i, draft := range robot.saves {
+		switch robot.platforms[i] {
+		case "baijiahao":
+			if draft.IdempotencyKey != baijia.IntentKey || draft.Title != frozen.Title || !reflect.DeepEqual(draft.Blocks, frozen.Blocks) {
+				t.Fatalf("交过分发服务的要按原来的键和冻结内容再交：%+v", draft)
+			}
+		default:
+			if !strings.Contains(distributionOutline(draft.Blocks), "这是一篇用于验证外部分发流程的原创文章正文。") {
+				t.Fatalf("云梭旧 lane 应按现在的正文重建：%s", distributionOutline(draft.Blocks))
+			}
 		}
+	}
+}
+
+// TestReplaceExternalDistributionRefusesOldFormatRobotLane 10-24 前按旧格式（网页代码）交给分发服务的：
+// 分发服务已不收旧格式，没法按原来的键再问；也不换键重存，免得多存一篇。
+func TestReplaceExternalDistributionRefusesOldFormatRobotLane(t *testing.T) {
+	setTestDistributionAccounts(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	baijia := testLane(testBaijiaAccountID, "百家号", publishExternalDistributionReconciliationRequired)
+	baijia.Driver, baijia.PayloadHash = externalDriverRobot, "sha256:old"
+	baijia.PayloadJSON = `{"platform":"baijiahao","title":"旧标题","html":"<p>旧格式</p>","cover_url":"https://cdn.example.com/a.jpg"}`
+	baijia.IntentKey = robotIdempotencyKey(job.ID, testBaijiaAccountID, baijia.PayloadHash)
+	job = setTestLanes(t, env, job.ID, baijia)
+	robot := useFakeRobot(env)
+	_, err := env.pipeline.replaceExternalDistributionAfterReconcile(job.ID, publishExternalAdminRetryActor)
+	if err == nil || !strings.Contains(err.Error(), "旧格式") || len(robot.saves) != 0 {
+		t.Fatalf("旧格式的待核对 lane 不得换键重存：err=%v saves=%d", err, len(robot.saves))
+	}
+	if lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID); lane.State != publishExternalDistributionReconciliationRequired || lane.IntentKey != baijia.IntentKey {
+		t.Fatalf("lane 应原样留在待核对：%+v", lane)
 	}
 }
 
@@ -560,7 +593,7 @@ func TestYunsuoLegacyLanesOnlyDisplay(t *testing.T) {
 	job = setTestLanes(t, env, job.ID, yunsuoLegacyLane(testToutiaoAccountID, "头条号", publishExternalDistributionSucceeded), failed)
 
 	toutiao := externalPlatformStatus(job, externalAccount{ID: testToutiaoAccountID, Platform: "toutiao", Name: "头条号"})
-	if toutiao.Status != "已发布" || toutiao.ManageURL != yunsuoPlatformProfiles["toutiao"].ManageURL || toutiao.Editable {
+	if toutiao.Status != "已发布" || toutiao.ManageURL != testPlatform(t, "toutiao").ManageURL || toutiao.Editable {
 		t.Fatalf("云梭发出去的照旧是已发布、给平台后台：%+v", toutiao)
 	}
 	baijia := externalPlatformStatus(job, externalAccount{ID: testBaijiaAccountID, Platform: "baijiahao", Name: "百家号"})

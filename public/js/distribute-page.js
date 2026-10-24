@@ -21,8 +21,8 @@ function esc(value) {
     .replace(/"/g, '&quot;');
 }
 
-// charCount 与服务端同口径：合并空白后按字符（rune）数；halfWidth（头条号标题）时英文字母、
-// 数字等半角字符两个算一个字（api/yunsuo_platform_profiles.go titleLength）。
+// charCount 与服务端同口径：合并空白后按字符（rune）数；halfWidth（分发服务给的标题数法是 ascii_half，
+// 服务端经 title_half_width 带来）时英文字母、数字等半角字符两个算一个字（api/distribution_platforms.go titleLength）。
 export function charCount(value, halfWidth = false) {
   const chars = Array.from(String(value || '').replace(/\s+/g, ' ').trim());
   if (!halfWidth) return chars.length;

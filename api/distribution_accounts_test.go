@@ -14,12 +14,12 @@ func setTestExternalAccounts(t *testing.T, accounts ...externalAccount) {
 	t.Helper()
 	d := externalAccounts
 	d.mu.Lock()
-	prevAccounts, prevLoaded, prevErr := d.accounts, d.loaded, d.lastErr
-	d.accounts, d.loaded, d.lastErr = accounts, true, ""
+	prevAccounts, prevLoaded, prevErr := d.items, d.loaded, d.lastErr
+	d.items, d.loaded, d.lastErr = accounts, true, ""
 	d.mu.Unlock()
 	t.Cleanup(func() {
 		d.mu.Lock()
-		d.accounts, d.loaded, d.lastErr = prevAccounts, prevLoaded, prevErr
+		d.items, d.loaded, d.lastErr = prevAccounts, prevLoaded, prevErr
 		d.mu.Unlock()
 	})
 }
@@ -28,12 +28,12 @@ func setTestExternalAccounts(t *testing.T, accounts ...externalAccount) {
 func testArticleAccount(id, platform string, auto bool) externalAccount {
 	return externalAccount{
 		ID: id, Platform: platform, Carrier: externalCarrierArticle, Status: externalAccountLive,
-		Name: yunsuoPlatformProfiles[platform].Name + " · FBIF", Source: "FBIF食品饮料创新", Auto: auto,
+		Name: platformByKey(platform).Name + " · FBIF", Source: "FBIF食品饮料创新", Auto: auto,
 	}
 }
 
 // TestExternalTargetsComeFromAccountTable 2026-10-24 分发框架：账号只在多维表格「平台账号」里。
-// 只挑在用、载体是文章、排版工具认得这个平台的号；每篇只发「来源公众号」是它的号；同一平台不止一个号时用账号名区分。
+// 只挑在用、载体是文章的号；每篇只发「来源公众号」是它的号；同一平台不止一个号时用账号名区分。
 func TestExternalTargetsComeFromAccountTable(t *testing.T) {
 	trial := testArticleAccount("recTrial", "toutiao", false)
 	trial.Status, trial.Name = "测试", "头条号 · 黑桃游戏"
@@ -76,7 +76,7 @@ func TestExternalAccountDirectoryKeepsLastGoodCopy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), externalAccountsFile)
 	fetched := []externalAccount{testArticleAccount("recToutiao", "toutiao", false)}
 	var fetchErr error
-	d := &externalAccountDirectory{path: path, fetch: func(context.Context) ([]externalAccount, error) { return fetched, fetchErr }}
+	d := newTestAccountCache(path, func(context.Context) ([]externalAccount, error) { return fetched, fetchErr })
 	if _, err := d.snapshot(); err == nil {
 		t.Fatal("从没读到过账号时应报错")
 	}
@@ -93,7 +93,7 @@ func TestExternalAccountDirectoryKeepsLastGoodCopy(t *testing.T) {
 	if _, refreshedAt, lastErr := d.status(); refreshedAt.IsZero() || lastErr == "" {
 		t.Fatalf("readiness 要看得到上次读到的时间与这次的错：%v %q", refreshedAt, lastErr)
 	}
-	restarted := &externalAccountDirectory{path: path}
+	restarted := newTestAccountCache(path, nil)
 	if err := restarted.loadFile(); err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +108,26 @@ func TestExternalAccountDirectoryKeepsLastGoodCopy(t *testing.T) {
 	if raw, _ := os.ReadFile(path); !strings.Contains(string(raw), "recToutiao") {
 		t.Fatalf("不收的那份不写盘：%s", raw)
 	}
+
+	// 回了 200 却没有 accounts 这一项（或是 null）：不当「一个号都没有」，内存和本地那份都不动。
+	fetched = nil
+	if err := d.refresh(context.Background()); err == nil {
+		t.Fatal("缺账号这一项要报错")
+	}
+	if accounts, err := d.snapshot(); err != nil || len(accounts) != 1 {
+		t.Fatalf("缺这一项时接着用上次的：%v %v", accounts, err)
+	}
+	if raw, _ := os.ReadFile(path); !strings.Contains(string(raw), "recToutiao") {
+		t.Fatalf("缺这一项的那份不写盘：%s", raw)
+	}
+	// 明确给了空数组才算没有号。
+	fetched = []externalAccount{}
+	if err := d.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if accounts, _ := d.snapshot(); len(accounts) != 0 {
+		t.Fatalf("空数组就是一个号都没有：%v", accounts)
+	}
 }
 
 // TestExternalAccountDirectoryPrimesBeforeWorkers 启动时先拿到一份账号：有本地那份就直接用，没有就当场取一次。
@@ -121,20 +141,24 @@ func TestExternalAccountDirectoryPrimesBeforeWorkers(t *testing.T) {
 	}
 
 	fetchErr = errors.New("连不上")
-	d := &externalAccountDirectory{path: path, fetch: fetch}
+	d := newTestAccountCache(path, fetch)
 	d.prime()
 	if _, err := d.snapshot(); fetches != 1 || err == nil {
 		t.Fatalf("没有本地那份就当场取一次，取不到就没有账号：%d %v", fetches, err)
 	}
 	fetchErr = nil
-	d = &externalAccountDirectory{path: path, fetch: fetch}
+	d = newTestAccountCache(path, fetch)
 	d.prime()
 	if got, err := d.snapshot(); fetches != 2 || err != nil || len(got) != 1 || got[0].ID != "recToutiao" {
 		t.Fatalf("当场取到就能用：%d %v %v", fetches, got, err)
 	}
-	d = &externalAccountDirectory{path: path, fetch: fetch}
+	d = newTestAccountCache(path, fetch)
 	d.prime()
 	if got, err := d.snapshot(); fetches != 2 || err != nil || len(got) != 1 {
 		t.Fatalf("有本地那份就不等分发服务：%d %v %v", fetches, got, err)
 	}
+}
+
+func newTestAccountCache(path string, fetch func(context.Context) ([]externalAccount, error)) *distributionCache[externalAccount] {
+	return &distributionCache[externalAccount]{what: externalAccounts.what, key: externalAccounts.key, validate: validateExternalAccounts, path: path, fetch: fetch}
 }

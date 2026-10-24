@@ -142,7 +142,7 @@ func (p *publishPipeline) storeExternalCoverBytes(ctx context.Context, jobID int
 	if err != nil {
 		return publishExternalCoverCandidate{}, fmt.Errorf("图片转存失败：%w", err)
 	}
-	stored = publicYunsuoMediaURL(strings.TrimSpace(stored))
+	stored = publicMediaURL(strings.TrimSpace(stored))
 	if stored == "" {
 		return publishExternalCoverCandidate{}, errors.New("图片转存失败，请重试")
 	}

@@ -42,7 +42,7 @@ test('改稿页：字数与服务端同口径（按字符、合并空白）', ()
   assert.equal(counterState('刚好合适的一句标题', 20, 8).invalid, false);
 });
 
-// 头条号标题英文字母、数字两个算一个字（与 api/yunsuo_platform_profiles.go titleLength 同口径）：
+// 头条号标题英文字母、数字两个算一个字（与 api/distribution_platforms.go titleLength、分发服务 service/limits.mjs 同口径）：
 // #289 编辑手发的 42 个字符按此数法正好 30 字，头条收了。
 test('改稿页：头条号标题英文数字算半个字', () => {
   const toutiao = { halfWidth: true };

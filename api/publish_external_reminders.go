@@ -465,9 +465,9 @@ func buildExternalReminderOpening(job publishJob, cfg externalTargets, owners []
 	buttons := ""
 	for i, draft := range drafts {
 		name := names[i]
-		profile := yunsuoGenericProfile
+		profile := platformByKey("")
 		if target, ok := cfg.target(draft.AccountID); ok {
-			profile = yunsuoProfileForTarget(target)
+			profile = platformForAccount(target)
 		}
 		buttons += "「保存并" + profile.syncAction(name) + "」"
 		prefix := ""
@@ -532,7 +532,7 @@ func buildExternalReminderClosing(job publishJob, cfg externalTargets) map[strin
 	var actions []string
 	for _, target := range cfg.forJob(job) {
 		if draft, ok := externalDraftFor(job, target.ID); ok && draft.EditedAt != "" {
-			actions = append(actions, yunsuoProfileForTarget(target).syncAction(target.label()))
+			actions = append(actions, platformForAccount(target).syncAction(target.label()))
 		}
 	}
 	text := "都改好了，正在同步到其他平台。"
@@ -569,7 +569,7 @@ func (p *publishPipeline) prepareExternalDraftAssets(jobID int64) {
 		if !ok {
 			continue
 		}
-		profile := yunsuoProfileForTarget(target)
+		profile := platformForAccount(target)
 		out := prepared{checkedAt: draft.CheckedAt, keys: map[string]string{}, keyApps: map[string]string{}}
 		for _, issue := range draft.Issues {
 			switch issue.Field {
@@ -655,7 +655,7 @@ func (p *publishPipeline) suggestExternalText(ctx context.Context, kind, current
 func validExternalSuggestion(text string, min, max int) (string, error) {
 	text = strings.TrimSpace(strings.Split(strings.TrimSpace(text), "\n")[0])
 	text = strings.Trim(text, "\"“”'‘’「」")
-	text = compactYunsuoText(text)
+	text = compactSpaces(text)
 	switch n := runeLen(text); {
 	case text == "":
 		return "", errors.New("AI 没有给出结果")

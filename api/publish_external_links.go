@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	externalLinkLookupToutiao = "toutiao_search"
+	// toutiaoPlatformKey 分发服务里头条号的平台编号，只用来在 lookupExternalArticle 里选找链接的办法。
+	toutiaoPlatformKey = "toutiao"
 
 	defaultToutiaoSearchEndpoint = "https://so.toutiao.com/search"
 	tikhubToutiaoArticlePath     = "/api/v1/toutiao/app/get_article_info"
@@ -50,10 +51,11 @@ type externalArticleRef struct {
 // lookupToutiaoArticle 测试可替换；生产走头条搜索 + TikHub 核对。
 var lookupToutiaoArticle = defaultLookupToutiaoArticle
 
-// lookupExternalArticle 按平台规则找文章；平台不支持自动找时报错。
-func lookupExternalArticle(ctx context.Context, profile yunsuoPlatformProfile, title string, from, to time.Time) (externalArticleRef, error) {
-	switch profile.LinkLookup {
-	case externalLinkLookupToutiao:
+// lookupExternalArticle 人工登记已发时按标题找文章链接；平台不支持自动找时报错。
+// 遗留（分发框架第 4 步后）：按平台编号写在排版工具里，因为要用 A 机上的 TikHub 密钥；以后挪进分发服务的平台文件。
+func lookupExternalArticle(ctx context.Context, profile distributionPlatform, title string, from, to time.Time) (externalArticleRef, error) {
+	switch profile.Key {
+	case toutiaoPlatformKey:
 		return lookupToutiaoArticle(ctx, title, from, to)
 	default:
 		return externalArticleRef{}, fmt.Errorf("%s暂不支持自动查找文章链接，请直接提供链接", profile.Name)
@@ -233,8 +235,9 @@ type externalManualResult struct {
 	DryRun    bool                `json:"dry_run"`
 }
 
-// validateExternalArticleURL 只认 https 和平台规则里登记的域名，防止把任意网址写进审核卡。
-func validateExternalArticleURL(raw string, profile yunsuoPlatformProfile) (string, error) {
+// validateExternalArticleURL 只认 https 和平台登记的域名（含子域名，如头条号草稿在 mp.toutiao.com），
+// 防止把任意网址写进审核卡。
+func validateExternalArticleURL(raw string, profile distributionPlatform) (string, error) {
 	raw = strings.TrimSpace(raw)
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
@@ -245,7 +248,7 @@ func validateExternalArticleURL(raw string, profile yunsuoPlatformProfile) (stri
 	}
 	host := strings.ToLower(parsed.Hostname())
 	for _, allowed := range profile.URLHosts {
-		if host == allowed {
+		if host == allowed || strings.HasSuffix(host, "."+allowed) {
 			parsed.Fragment = ""
 			return parsed.String(), nil
 		}
@@ -265,7 +268,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	if !ok {
 		return result, errors.New("account_id 不是已配置的外发账号")
 	}
-	profile := yunsuoProfileForTarget(target)
+	profile := platformForAccount(target)
 	result.Platform = target.label()
 	job, err := p.store.byID(jobID)
 	if err != nil {

@@ -13,14 +13,15 @@ import (
 	"time"
 )
 
-// 外发账号只在多维表格「平台账号」里（2026-10-24 分发框架，docs/adr/2026-10-24-distribution-framework.md）。
-// 排版工具不直接读表（两个系统只走 HTTP、不共享存储），经分发服务的 GET /v1/accounts 读，存一份在
-// 数据目录 distribution-accounts.json：分发服务连不上时接着用这份，卡片、改稿页照常显示，推送在提交前失败。
-// 每个号的编号是表的 record_id，lane、改稿记录、卡片按钮、发给分发服务的 account 都用它。
+// 外发账号只在多维表格「平台账号」里，平台限制只在分发服务的平台文件里（2026-10-24 分发框架，
+// docs/adr/2026-10-24-distribution-framework.md）。排版工具不直接读表（两个系统只走 HTTP、不共享存储），
+// 经分发服务的 GET /v1/accounts、GET /v1/platforms 读，各存一份在数据目录：分发服务连不上时接着用这份，
+// 卡片、改稿页照常显示，推送在提交前失败。每个号的编号是表的 record_id，lane、改稿记录、卡片按钮、
+// 发给分发服务的 account 都用它。
 
 const (
-	externalAccountsFile         = "distribution-accounts.json"
-	externalAccountsRefreshEvery = 5 * time.Minute
+	externalAccountsFile     = "distribution-accounts.json"
+	distributionRefreshEvery = 5 * time.Minute
 
 	// 表里「在用」的号才会被自动挑上；「测试」号只在指定时用（分发服务那边同一口径）。
 	externalAccountLive    = "在用"
@@ -29,7 +30,7 @@ const (
 
 type externalAccount struct {
 	ID       string `json:"id"`
-	Platform string `json:"platform"` // 分发服务的平台 id，选 yunsuo_platform_profiles.go 里的平台规则
+	Platform string `json:"platform"` // 分发服务的平台 id，平台限制见 distribution_platforms.go
 	Carrier  string `json:"carrier"`  // article 文章、post 贴图
 	Name     string `json:"name"`
 	Status   string `json:"status"`
@@ -39,66 +40,77 @@ type externalAccount struct {
 	Auto       bool   `json:"auto,omitempty"`
 	// Label 卡片、改稿页、提醒里叫它什么：平台名；同一平台不止一个号时用表里的账号名。不落盘，读出时算。
 	Label string `json:"-"`
+	// platform 取账号目录时一并记下的平台限制，一次操作里卡片、检查、推送都用这一份。不落盘。
+	platform distributionPlatform
 }
 
 // label 卡片、改稿页、提醒里的叫法。
 func (a externalAccount) label() string {
-	return firstNonEmpty(strings.TrimSpace(a.Label), yunsuoProfileForTarget(a).Name, strings.TrimSpace(a.Name))
+	return firstNonEmpty(strings.TrimSpace(a.Label), platformForAccount(a).Name, strings.TrimSpace(a.Name))
 }
 
-type externalAccountDirectory struct {
+// distributionCache 从分发服务取来的一份清单（账号、平台限制）：先读本地那份，之后定时向分发服务取；
+// 网络上取到的、本地读出的都先校验，不对就不要，接着用上一份。
+type distributionCache[T any] struct {
 	mu          sync.RWMutex
+	what        string // 日志与报错里叫它什么
+	key         string // 本地文件里放清单的键
 	path        string
-	accounts    []externalAccount
+	items       []T
 	loaded      bool
 	refreshedAt time.Time
 	lastErr     string
-	fetch       func(context.Context) ([]externalAccount, error)
+	fetch       func(context.Context) ([]T, error)
+	validate    func([]T) error
 }
 
-var externalAccounts = &externalAccountDirectory{}
-
-type externalAccountsFileDoc struct {
-	RefreshedAt string            `json:"refreshed_at"`
-	Accounts    []externalAccount `json:"accounts"`
+var externalAccounts = &distributionCache[externalAccount]{
+	what: "外发账号（多维表格「平台账号」）", key: "accounts", validate: validateExternalAccounts,
 }
 
-// startExternalAccountDirectory 先读本地那份（没有就当场向分发服务取一次），趁任务恢复、后台 worker、HTTP 都还没起来
-// 就把账号备好，之后每 5 分钟取一次。候选部署暂停态也照常取：只写这份缓存，不碰任务。
-func startExternalAccountDirectory(path string) {
-	d := externalAccounts
-	d.mu.Lock()
-	d.path = path
-	d.fetch = fetchDistributionAccounts
-	d.mu.Unlock()
-	d.prime()
+// startDistributionDirectory 先读本地那两份（没有就当场向分发服务取一次），趁任务恢复、后台 worker、HTTP 都还没起来
+// 就把账号与平台限制备好，之后每 5 分钟取一次。候选部署暂停态也照常取：只写这两份缓存，不碰任务。
+func startDistributionDirectory(jobsPath string) {
+	dir := filepath.Dir(jobsPath)
+	externalAccounts.setSource(filepath.Join(dir, externalAccountsFile), fetchDistributionAccounts)
+	distributionPlatforms.setSource(filepath.Join(dir, platformsFile), fetchDistributionPlatforms)
+	externalAccounts.prime()
+	distributionPlatforms.prime()
 	go func() {
 		for {
-			if err := d.refresh(context.Background()); err != nil {
-				log.Printf("publish: 向分发服务取外发账号失败，接着用上次的：%v", err)
+			time.Sleep(distributionRefreshEvery)
+			for _, refresh := range []func(context.Context) error{externalAccounts.refresh, distributionPlatforms.refresh} {
+				if err := refresh(context.Background()); err != nil {
+					log.Printf("publish: 向分发服务取数失败，接着用上次的：%v", err)
+				}
 			}
-			time.Sleep(externalAccountsRefreshEvery)
 		}
 	}()
 }
 
-// prime 启动时：先读本地那份，没有就当场向分发服务取一次（最多 10 秒）。
-func (d *externalAccountDirectory) prime() {
+func (d *distributionCache[T]) setSource(path string, fetch func(context.Context) ([]T, error)) {
+	d.mu.Lock()
+	d.path, d.fetch = path, fetch
+	d.mu.Unlock()
+}
+
+// prime 启动时：先读本地那份，没有或读坏了就当场向分发服务取一次（最多 10 秒）。
+func (d *distributionCache[T]) prime() {
 	if err := d.loadFile(); err != nil {
-		log.Printf("publish: 读不到本地的外发账号（%s）：%v", d.path, err)
+		log.Printf("publish: 读不到本地的%s（%s）：%v", d.what, d.path, err)
 	}
 	if _, err := d.snapshot(); err != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := d.refresh(ctx); err != nil {
-			log.Printf("publish: 启动时向分发服务取外发账号失败：%v", err)
+			log.Printf("publish: 启动时向分发服务取%s失败：%v", d.what, err)
 		}
 		cancel()
 	}
 }
 
-func (d *externalAccountDirectory) loadFile() error {
+func (d *distributionCache[T]) loadFile() error {
 	d.mu.RLock()
-	path := d.path
+	path, key := d.path, d.key
 	d.mu.RUnlock()
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -107,28 +119,37 @@ func (d *externalAccountDirectory) loadFile() error {
 	if err != nil {
 		return err
 	}
-	var doc externalAccountsFileDoc
+	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return err
 	}
+	var items []T
+	if err := json.Unmarshal(doc[key], &items); err != nil {
+		return err
+	}
+	if err := d.accept(items); err != nil {
+		return err
+	}
+	var refreshedAt string
+	_ = json.Unmarshal(doc["refreshed_at"], &refreshedAt)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.accounts = doc.Accounts
+	d.items = items
 	d.loaded = true
-	d.refreshedAt, _ = time.Parse(time.RFC3339, doc.RefreshedAt)
+	d.refreshedAt, _ = time.Parse(time.RFC3339, refreshedAt)
 	return nil
 }
 
-func (d *externalAccountDirectory) refresh(ctx context.Context) error {
+func (d *distributionCache[T]) refresh(ctx context.Context) error {
 	d.mu.RLock()
-	fetch, path := d.fetch, d.path
+	fetch, path, key := d.fetch, d.path, d.key
 	d.mu.RUnlock()
 	if fetch == nil {
-		return errors.New("没有取账号的方法")
+		return fmt.Errorf("没有取%s的方法", d.what)
 	}
-	accounts, err := fetch(ctx)
+	items, err := fetch(ctx)
 	if err == nil {
-		err = validateExternalAccounts(accounts)
+		err = d.accept(items)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -138,13 +159,40 @@ func (d *externalAccountDirectory) refresh(ctx context.Context) error {
 	}
 	now := time.Now().UTC()
 	if path != "" {
-		doc, _ := json.MarshalIndent(externalAccountsFileDoc{RefreshedAt: now.Format(time.RFC3339), Accounts: accounts}, "", "  ")
-		if writeErr := writeExternalAccountsFile(path, append(doc, '\n')); writeErr != nil {
-			log.Printf("publish: 外发账号写不进本地（%s）：%v", path, writeErr)
+		doc, _ := json.MarshalIndent(map[string]any{"refreshed_at": now.Format(time.RFC3339), key: items}, "", "  ")
+		if writeErr := writeDistributionCacheFile(path, append(doc, '\n')); writeErr != nil {
+			log.Printf("publish: %s写不进本地（%s）：%v", d.what, path, writeErr)
 		}
 	}
-	d.accounts, d.loaded, d.refreshedAt, d.lastErr = accounts, true, now, ""
+	d.items, d.loaded, d.refreshedAt, d.lastErr = items, true, now, ""
 	return nil
+}
+
+// accept 网络上取到的、本地文件里读出的都过一遍：缺这一项或给了 null 不当「一个都没有」，整份不要、接着用上一份；
+// 明确给了空数组才算没有。
+func (d *distributionCache[T]) accept(items []T) error {
+	if items == nil {
+		return fmt.Errorf("分发服务给的%s缺「%s」这一项", d.what, d.key)
+	}
+	return d.validate(items)
+}
+
+func (d *distributionCache[T]) snapshot() ([]T, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if !d.loaded {
+		if d.lastErr != "" {
+			return nil, fmt.Errorf("还没读到%s：%s", d.what, d.lastErr)
+		}
+		return nil, fmt.Errorf("还没读到%s", d.what)
+	}
+	return append([]T(nil), d.items...), nil
+}
+
+func (d *distributionCache[T]) status() (count int, refreshedAt time.Time, lastErr string) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return len(d.items), d.refreshedAt, d.lastErr
 }
 
 func validateExternalAccounts(accounts []externalAccount) error {
@@ -174,25 +222,7 @@ func validExternalAccountID(id string) bool {
 	return true
 }
 
-func (d *externalAccountDirectory) snapshot() ([]externalAccount, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if !d.loaded {
-		if d.lastErr != "" {
-			return nil, fmt.Errorf("还没读到外发账号（多维表格「平台账号」）：%s", d.lastErr)
-		}
-		return nil, errors.New("还没读到外发账号（多维表格「平台账号」）")
-	}
-	return append([]externalAccount(nil), d.accounts...), nil
-}
-
-func (d *externalAccountDirectory) status() (count int, refreshedAt time.Time, lastErr string) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return len(d.accounts), d.refreshedAt, d.lastErr
-}
-
-// externalTargets 排版工具会往哪些号发文章：表里在用、载体是文章、排版工具认得这个平台的号，按表里的顺序。
+// externalTargets 排版工具会往哪些号发文章：表里在用、载体是文章的号，按表里的顺序。
 type externalTargets struct {
 	Targets []externalAccount
 }
@@ -202,25 +232,24 @@ func loadExternalTargets() (externalTargets, error) {
 	if err != nil {
 		return externalTargets{}, err
 	}
-	return externalTargetsFrom(accounts), nil
+	return externalTargetsFrom(accounts, distributionPlatformsByKey()), nil
 }
 
-func externalTargetsFrom(accounts []externalAccount) externalTargets {
+// externalTargetsFrom 平台限制没拿到的号照样列出（卡片照常显示、旧 lane 照常认），推送前检查时才拦下。
+func externalTargetsFrom(accounts []externalAccount, platforms map[string]distributionPlatform) externalTargets {
 	var out externalTargets
 	perPlatform := map[string]int{}
 	for _, account := range accounts {
 		if account.Carrier != externalCarrierArticle || account.Status != externalAccountLive {
 			continue
 		}
-		if _, ok := yunsuoPlatformProfiles[account.Platform]; !ok {
-			continue
-		}
+		account.platform = platforms[account.Platform]
 		out.Targets = append(out.Targets, account)
 		perPlatform[account.Platform]++
 	}
 	for i := range out.Targets {
 		target := &out.Targets[i]
-		target.Label = yunsuoProfileForTarget(*target).Name
+		target.Label = platformForAccount(*target).Name
 		if perPlatform[target.Platform] > 1 && strings.TrimSpace(target.Name) != "" {
 			target.Label = strings.TrimSpace(target.Name)
 		}
@@ -283,15 +312,21 @@ func fetchDistributionAccounts(ctx context.Context) ([]externalAccount, error) {
 	return newDistributionRobotClient(cfg).Accounts(ctx)
 }
 
-func externalAccountsPath(jobsPath string) string {
-	return filepath.Join(filepath.Dir(jobsPath), externalAccountsFile)
+func fetchDistributionPlatforms(ctx context.Context) ([]distributionPlatformInfo, error) {
+	cfg, err := loadDistributionRobotConfig()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return newDistributionRobotClient(cfg).Platforms(ctx)
 }
 
-func writeExternalAccountsFile(path string, body []byte) error {
+func writeDistributionCacheFile(path string, body []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".distribution-accounts-*.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return err
 	}

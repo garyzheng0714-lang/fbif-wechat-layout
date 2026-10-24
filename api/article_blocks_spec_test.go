@@ -155,7 +155,7 @@ func checkGeneratedSpecFile(t *testing.T, path, want string) {
 	}
 	got, err := os.ReadFile(path)
 	if err != nil || string(got) != want {
-		t.Errorf("%s 和代码对不上（%v）：改完代码跑 cd api && SPEC_UPDATE=1 go test -run 'TestArticleBlockSpec|TestDistributionPlatformSpec' . 重新生成", path, err)
+		t.Errorf("%s 和代码对不上（%v）：改完代码跑 cd api && SPEC_UPDATE=1 go test -run 'TestArticleBlockSpec|TestDistributionRulesDoc' . 重新生成", path, err)
 	}
 }
 
@@ -181,7 +181,7 @@ func renderArticleBlocksDoc() string {
 	var b strings.Builder
 	b.WriteString("# 文章正文块（格式说明书）\n\n")
 	b.WriteString("> 由 `api/article_blocks.go` 生成，别手改。改了块的定义跑 `cd api && SPEC_UPDATE=1 go test -run TestArticleBlockSpec .`。程序校验用同目录的 `article-blocks.schema.json`。\n\n")
-	b.WriteString("一篇文章抽出来是一串块，从上到下就是读者看到的顺序。公众号网址、供应商网页、FoodTalks 已发布稿都抽成这样的块，公众号、FoodTalks、头条号、百家号的排版都读它；浏览器里粘贴纯文本也产出同样的块。Word、Markdown 在浏览器里各自分类，不经块。每个平台把每种块写成什么样，见 `docs/platforms/`。\n\n")
+	b.WriteString("一篇文章抽出来是一串块，从上到下就是读者看到的顺序。公众号网址、供应商网页、FoodTalks 已发布稿都抽成这样的块，公众号、FoodTalks、头条号、百家号的排版都读它；浏览器里粘贴纯文本也产出同样的块。Word、Markdown 在浏览器里各自分类，不经块。外发第三方平台时先整理成外发通用版正文块（[distribution-blocks.md](distribution-blocks.md)），每种块在各平台写成什么标签见分发服务的 `docs/platforms/`。\n\n")
 	b.WriteString("## 块的种类\n\n| k | 叫法 | 是什么 | 用到的字段 |\n| --- | --- | --- | --- |\n")
 	for _, kind := range articleBlockKinds {
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", kind.K, kind.Name, kind.Meaning, "`"+strings.Join(kind.Fields, "` `")+"`")
