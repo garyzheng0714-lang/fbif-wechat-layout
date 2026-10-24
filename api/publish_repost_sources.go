@@ -31,7 +31,7 @@ const (
 
 // errFeedSubscribeAccepted Feed 回 202：今天看啥收下了、还没确认关注，号也还没进 Feed；
 // 不算失败，下次重启或这个号再转一篇时照样再提交，确认了才回 200。
-var errFeedSubscribeAccepted = errors.New("Feed 已受理")
+var errFeedSubscribeAccepted = errors.New("已向 Feed 提交")
 
 type publishRepostArticle struct {
 	Title string `json:"title,omitempty"`
