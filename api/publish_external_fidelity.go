@@ -348,7 +348,7 @@ func (p *publishPipeline) refreshExternalDistributionFidelity() {
 	if p == nil || p.store == nil || publishWorkersPaused() {
 		return
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return
 	}

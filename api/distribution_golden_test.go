@@ -154,8 +154,8 @@ func distributionGoldenOutput(sample distributionGoldenSample, profile yunsuoPla
 		payload, err := buildRobotDraftPayload(job, profile, publishExternalDraft{})
 		return payload.Title, payload.HTML, notes, err
 	}
-	target := yunsuoAccountTarget{ID: "golden", Name: profile.Name, Platform: profile.Key}
-	payload, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{target}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
+	target := externalAccount{ID: "golden", Name: profile.Name, Platform: profile.Key}
+	payload, err := buildYunsuoPushPayload(job, []externalAccount{target}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
 	return payload.titleField(profile.TitleField), payload.HTML, notes, err
 }
 

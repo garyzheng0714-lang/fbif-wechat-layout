@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 const (
@@ -38,11 +39,15 @@ type publishReadinessStatus struct {
 		CategoriesExplicit    bool   `json:"categories_explicit"`
 		Categories            bool   `json:"categories_valid"`
 	} `json:"foodtalks"`
-	Yunsuo struct {
-		Configured  bool     `json:"configured"`
-		TargetCount int      `json:"target_count"`
-		TargetNames []string `json:"target_names,omitempty"`
-	} `json:"yunsuo"`
+	// Distribution 分发服务（多平台分发工具）：接口配好就算 configured；账号是它从多维表格「平台账号」读来的，
+	// 读不到只影响第三方平台，不挡上线（排版工具不实时依赖分发服务）。
+	Distribution struct {
+		Configured   bool     `json:"configured"`
+		AccountCount int      `json:"account_count"`
+		TargetNames  []string `json:"target_names,omitempty"`
+		RefreshedAt  string   `json:"accounts_refreshed_at,omitempty"`
+		AccountsErr  string   `json:"accounts_error,omitempty"`
+	} `json:"distribution"`
 	Render struct {
 		Configured bool `json:"configured"`
 	} `json:"render"`
@@ -167,11 +172,16 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.FoodTalks.Categories = out.FoodTalks.CategoriesExplicit && categoryErr == nil
 	out.FoodTalks.Configured = configuredHTTPBaseURL(baseURL) && strings.TrimSpace(os.Getenv(foodTalksTokenEnv)) != "" &&
 		out.FoodTalks.FrontExplicit && out.FoodTalks.AdminExplicit && out.FoodTalks.Categories && out.FoodTalks.TargetMatchesExpected
-	if cfg, err := loadYunsuoConfig(); err == nil && len(cfg.Targets) > 0 {
-		out.Yunsuo.Configured = true
-		out.Yunsuo.TargetCount = len(cfg.Targets)
+	_, robotErr := loadDistributionRobotConfig()
+	out.Distribution.Configured = robotErr == nil
+	count, refreshedAt, accountsErr := externalAccounts.status()
+	out.Distribution.AccountCount, out.Distribution.AccountsErr = count, accountsErr
+	if !refreshedAt.IsZero() {
+		out.Distribution.RefreshedAt = refreshedAt.Format(time.RFC3339)
+	}
+	if cfg, err := loadExternalTargets(); err == nil {
 		for _, target := range cfg.Targets {
-			out.Yunsuo.TargetNames = append(out.Yunsuo.TargetNames, target.Name)
+			out.Distribution.TargetNames = append(out.Distribution.TargetNames, target.Name)
 		}
 	}
 	out.Render.Configured = configuredHTTPBaseURL(os.Getenv("RENDER_SERVICE_URL")) && renderToken() != ""
@@ -207,7 +217,7 @@ func currentPublishReadiness(p *publishPipeline) publishReadinessStatus {
 	out.AIModels.Flash = aiModel(aiTierFlash)
 	out.Ready = out.ConfigSchema.Matches && out.ServiceAuth.Configured && out.ImageUpload.Configured && !out.HTTPReviewEnabled &&
 		out.GeneratedFiles.ready() &&
-		out.StoreValid && out.FoodTalks.Configured && out.Yunsuo.Configured && out.Feishu.ReviewerAllowlistConfigured &&
+		out.StoreValid && out.FoodTalks.Configured && out.Distribution.Configured && out.Feishu.ReviewerAllowlistConfigured &&
 		out.FoodTalks.Categories && out.Render.Configured && out.Feishu.NotifyConfigured &&
 		out.Feishu.MonitorNotifyConfigured && out.Feishu.CallbackModeExplicit && out.Feishu.CallbackConfigured &&
 		out.EnrichMode == "mimo"

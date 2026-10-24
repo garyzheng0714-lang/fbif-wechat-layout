@@ -14,14 +14,14 @@ import (
 func setTestYunsuoAutoConfig(t *testing.T) {
 	t.Helper()
 	setTestYunsuoConfig(t)
-	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoToutiaoID+`","name":"头条号","auto":true},{"id":"`+testYunsuoBaijiaID+`","name":"百家号"}]`)
+	setTestExternalAccounts(t, testArticleAccount(testYunsuoToutiaoID, "toutiao", true), testArticleAccount(testYunsuoBaijiaID, "baijiahao", false))
 }
 
 func newToutiaoOnlyYunsuo() *fakeYunsuoAPI {
 	return &fakeYunsuoAPI{
 		contentPK: "content-pk-auto",
 		statuses: []yunsuoAccountStatus{
-			{Status: 1, Remark: "OK", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+			{Status: 1, Remark: "OK", AccountPool: yunsuoAccountPool{ID: testYunsuoToutiaoID, Name: "头条号"}},
 		},
 	}
 }
@@ -172,7 +172,7 @@ func jobsWithLanes(lanes ...publishExternalLane) []publishJob {
 // TestExternalAutoQuotaRules 名额按平台各算各的：每天上限取平台规则（头条号 5 篇），补发
 // 每天 ≤3 篇、9–20 点、同一平台间隔 ≥1 小时；头条号满了不挡百家号。
 func TestExternalAutoQuotaRules(t *testing.T) {
-	auto := []yunsuoAccountTarget{{ID: testYunsuoToutiaoID, Name: "头条号", Auto: true}, {ID: testYunsuoBaijiaID, Name: "百家号", Auto: true}}
+	auto := []externalAccount{{ID: testYunsuoToutiaoID, Name: "头条号", Auto: true}, {ID: testYunsuoBaijiaID, Name: "百家号", Auto: true}}
 	clock := newCSTClock("2026-10-12 10:00")
 	toutiaoLimit := yunsuoPlatformProfiles["toutiao"].DailyLimit
 	if toutiaoLimit != 5 {
@@ -478,7 +478,7 @@ func TestExternalDistributionLanesFailIndependently(t *testing.T) {
 	}
 
 	// 所有平台都要改：整体报「要先改好」，不落任何推送。
-	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoToutiaoID+`","name":"头条号"}]`)
+	setTestExternalAccounts(t, testArticleAccount(testYunsuoToutiaoID, "toutiao", false))
 	other := createPublishedDistributionJobWithKey(t, env, "site:all-fail", "FBIF食品饮料创新")
 	fake.pushed = nil
 	if _, err := env.pipeline.requestExternalDistribution(other.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(other)); !errors.Is(err, errExternalLanesNeedFix) {
@@ -523,7 +523,7 @@ func TestExternalDistributionLateRefreshResolvesTimedOutAndRetried(t *testing.T)
 	clock := newCSTClock("2026-10-12 10:00")
 	env.pipeline.now = func() time.Time { return clock.now }
 	fake := &fakeYunsuoAPI{statuses: []yunsuoAccountStatus{
-		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountPool{ID: testYunsuoToutiaoID, Name: "头条号"}},
 	}}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	requested := clock.now.Add(-20 * time.Minute).UTC().Format(time.RFC3339)
@@ -550,7 +550,7 @@ func TestExternalDistributionLateRefreshResolvesTimedOutAndRetried(t *testing.T)
 	}
 
 	// 云梭发布完成：补成成功并刷卡；全程只查询、从不重推。
-	fake.statuses[0] = yunsuoAccountStatus{Status: 1, Remark: "OK", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}}
+	fake.statuses[0] = yunsuoAccountStatus{Status: 1, Remark: "OK", AccountPool: yunsuoAccountPool{ID: testYunsuoToutiaoID, Name: "头条号"}}
 	clock.set("2026-10-12 10:40")
 	env.pipeline.refreshExternalDistributionResults()
 	gotJob := mustJob(t, env, timedOut.ID)
@@ -573,8 +573,8 @@ func TestExternalDistributionLateRefreshPicksUpProviderRetry(t *testing.T) {
 	env.pipeline.now = func() time.Time { return clock.now }
 	// 首次头条报异常、百家号登录失效；云梭自动重试后头条成功、百家号仍失败。
 	fake := &fakeYunsuoAPI{statuses: []yunsuoAccountStatus{
-		{Status: 1, Remark: "OK", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
-		{Status: 2, Remark: "账号多次登录失败,等待用户更新账号", AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+		{Status: 1, Remark: "OK", AccountPool: yunsuoAccountPool{ID: testYunsuoToutiaoID, Name: "头条号"}},
+		{Status: 2, Remark: "账号多次登录失败,等待用户更新账号", AccountPool: yunsuoAccountPool{ID: testYunsuoBaijiaID, Name: "百家号"}},
 	}}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
@@ -609,15 +609,15 @@ func TestExternalDistributionLateRefreshPicksUpProviderRetry(t *testing.T) {
 func setTestYunsuoBothAutoConfig(t *testing.T) {
 	t.Helper()
 	setTestYunsuoConfig(t)
-	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoToutiaoID+`","name":"头条号","auto":true},{"id":"`+testYunsuoBaijiaID+`","name":"百家号","auto":true}]`)
+	setTestExternalAccounts(t, testArticleAccount(testYunsuoToutiaoID, "toutiao", true), testArticleAccount(testYunsuoBaijiaID, "baijiahao", true))
 }
 
 func newBothAccountsYunsuo() *fakeYunsuoAPI {
 	return &fakeYunsuoAPI{
 		contentPK: "content-pk-both",
 		statuses: []yunsuoAccountStatus{
-			{Status: 1, Remark: "OK", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
-			{Status: 1, Remark: "OK", AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+			{Status: 1, Remark: "OK", AccountPool: yunsuoAccountPool{ID: testYunsuoToutiaoID, Name: "头条号"}},
+			{Status: 1, Remark: "OK", AccountPool: yunsuoAccountPool{ID: testYunsuoBaijiaID, Name: "百家号"}},
 		},
 	}
 }

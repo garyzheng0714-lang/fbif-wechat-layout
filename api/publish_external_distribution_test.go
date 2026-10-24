@@ -55,8 +55,8 @@ func setTestYunsuoConfig(t *testing.T) {
 	t.Setenv(yunsuoBaseURLEnv, "https://www.yunsuofabu.com/v1")
 	t.Setenv(yunsuoUserCodeEnv, "test-user")
 	t.Setenv(yunsuoAPIKeyEnv, "test-api-key")
-	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoToutiaoID+`","name":"头条号"},{"id":"`+testYunsuoBaijiaID+`","name":"百家号"}]`)
 	t.Setenv(yunsuoCategoriesEnv, "美食,饮食文化,财经,消费,公司")
+	setTestExternalAccounts(t, testArticleAccount(testYunsuoToutiaoID, "toutiao", false), testArticleAccount(testYunsuoBaijiaID, "baijiahao", false))
 }
 
 const (
@@ -502,8 +502,8 @@ func TestReplaceExternalDistributionAfterReconcileRebuildsContentHTML(t *testing
 	fake := &fakeYunsuoAPI{
 		contentPK: "content-pk-replaced",
 		statuses: []yunsuoAccountStatus{
-			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
-			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+			{Status: 1, AccountPool: yunsuoAccountPool{ID: testYunsuoToutiaoID, Name: "头条号"}},
+			{Status: 1, AccountPool: yunsuoAccountPool{ID: testYunsuoBaijiaID, Name: "百家号"}},
 		},
 	}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
@@ -577,8 +577,8 @@ func TestRetryExternalDistributionHTTPRequiresAdminAndRebuilds(t *testing.T) {
 	fake := &fakeYunsuoAPI{
 		contentPK: "content-pk-http-retry",
 		statuses: []yunsuoAccountStatus{
-			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
-			{Status: 1, AccountPool: yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}},
+			{Status: 1, AccountPool: yunsuoAccountPool{ID: testYunsuoToutiaoID, Name: "头条号"}},
+			{Status: 1, AccountPool: yunsuoAccountPool{ID: testYunsuoBaijiaID, Name: "百家号"}},
 		},
 	}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
@@ -650,11 +650,11 @@ func TestExternalCardExpiredIsTerminal(t *testing.T) {
 func TestExternalQueuedAtYunsuoShowsQueuedNotReconcile(t *testing.T) {
 	useLegacyYunsuoToutiao(t)
 	setTestYunsuoConfig(t)
-	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoToutiaoID+`","name":"头条号"}]`)
+	setTestExternalAccounts(t, testArticleAccount(testYunsuoToutiaoID, "toutiao", false))
 	env := newPublishTestEnv(t)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
 	fake := &fakeYunsuoAPI{contentPK: "pk-queued", statuses: []yunsuoAccountStatus{
-		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountTarget{ID: testYunsuoToutiaoID, Name: "头条号"}},
+		{Status: 0, Remark: "等待发布", AccountPool: yunsuoAccountPool{ID: testYunsuoToutiaoID, Name: "头条号"}},
 	}}
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	env.pipeline.externalDistributionPollTimeout = time.Nanosecond
@@ -662,7 +662,7 @@ func TestExternalQueuedAtYunsuoShowsQueuedNotReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := mustJob(t, env, job.ID)
-	targets := []yunsuoAccountTarget{{ID: testYunsuoToutiaoID, Name: "头条号"}}
+	targets := []externalAccount{{ID: testYunsuoToutiaoID, Name: "头条号"}}
 	for _, target := range targets {
 		lane := mustLane(t, got, target.ID)
 		if lane.State != publishExternalDistributionReconciliationRequired || lane.Remark != "等待发布" {

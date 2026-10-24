@@ -119,7 +119,7 @@ func externalDraftMaterial(job publishJob) string {
 // externalDraftBlocked 这个平台卡在待修改、文章和平台规则都没变：等人改，不必再去网站取稿重查。
 // 平台规则改过（如 2026-10-13 头条号标题 20→30 字、10-20 英文数字算半个字）就重查一次，过了照常推：
 // 标题按记下的那一句用现在的规则重算，结果不一样就是规则变了。
-func externalDraftBlocked(job publishJob, target yunsuoAccountTarget) bool {
+func externalDraftBlocked(job publishJob, target externalAccount) bool {
 	draft, ok := externalDraftFor(job, target.ID)
 	if !ok || len(draft.Issues) == 0 || draft.CheckedMaterial != externalDraftMaterial(job) {
 		return false
@@ -221,7 +221,7 @@ func externalCoverIssue(job publishJob, profile yunsuoPlatformProfile, draft pub
 
 // externalPreflight 推送前按这个平台的规则检查（会读图片尺寸，只在后台调用）。返回问题、
 // 以及有封面问题时可换的封面（正文里够大的图 + 之前上传过的图）。
-func externalPreflight(job publishJob, target yunsuoAccountTarget, draft publishExternalDraft) ([]publishExternalIssue, []publishExternalCoverCandidate) {
+func externalPreflight(job publishJob, target externalAccount, draft publishExternalDraft) ([]publishExternalIssue, []publishExternalCoverCandidate) {
 	profile := yunsuoProfileForTarget(target)
 	issues := externalTextIssues(job, profile, draft)
 	blocks, imageMap, err := decodeYunsuoDistributionContent(job.BlocksJSON, job.ImageMap)
@@ -312,7 +312,7 @@ func externalFallbackSuggestions(draft *publishExternalDraft, profile yunsuoPlat
 }
 
 // recordExternalPreflight 把一次推送前检查的结果写进 draft（锁内调用）。
-func recordExternalPreflight(job *publishJob, target yunsuoAccountTarget, issues []publishExternalIssue, candidates []publishExternalCoverCandidate, material, now string) {
+func recordExternalPreflight(job *publishJob, target externalAccount, issues []publishExternalIssue, candidates []publishExternalCoverCandidate, material, now string) {
 	draft, _ := externalDraftFor(*job, target.ID)
 	if draft.CheckedMaterial != material {
 		// 文章改过：旧建议是按旧标题/摘要写的，作废重来。
@@ -367,7 +367,7 @@ func externalDraftLocked(profile yunsuoPlatformProfile) error {
 
 // applyExternalDraftEdit 校验并写入修改，当场重算标题、摘要与封面问题（不读网络：封面只认
 // 候选里记过尺寸的图）。返回修改后的 draft。
-func applyExternalDraftEdit(job publishJob, target yunsuoAccountTarget, edit externalDraftEdit, actor string, now time.Time) (publishExternalDraft, error) {
+func applyExternalDraftEdit(job publishJob, target externalAccount, edit externalDraftEdit, actor string, now time.Time) (publishExternalDraft, error) {
 	profile := yunsuoProfileForTarget(target)
 	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneCanSafeRetry(lane) {
 		return publishExternalDraft{}, externalDraftLocked(profile)
@@ -431,35 +431,22 @@ func applyExternalDraftEdit(job publishJob, target yunsuoAccountTarget, edit ext
 	return draft, nil
 }
 
-// externalTargetsByProfile 卡片按钮只带平台位置（配置里的第几个账号），不带账号 id（红线 37）。
-func externalTargetBySlot(cfg yunsuoConfig, slot int) (yunsuoAccountTarget, bool) {
-	if slot < 0 || slot >= len(cfg.Targets) {
-		return yunsuoAccountTarget{}, false
-	}
-	return cfg.Targets[slot], true
-}
-
-func externalTargetSlot(cfg yunsuoConfig, accountID string) int {
-	for i, target := range cfg.Targets {
-		if strings.TrimSpace(target.ID) == strings.TrimSpace(accountID) {
-			return i
-		}
-	}
-	return -1
-}
-
 // submitExternalDraftEdit 卡片表单与侧边栏共用的唯一修改入口：锁内校验并写入，问题都清了就
 // 立即安排推送——auto 账号挂回自动外发待办（按配额推），其余账号直接按卡片发起推送。
-func (p *publishPipeline) submitExternalDraftEdit(jobID int64, slot int, edit externalDraftEdit, actor string) (publishJob, error) {
+func (p *publishPipeline) submitExternalDraftEdit(jobID int64, accountID string, edit externalDraftEdit, actor string) (publishJob, error) {
 	if publishWorkersPaused() {
 		job, _ := p.store.byID(jobID)
 		return job, errPublishWorkersPaused
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return publishJob{}, err
 	}
-	target, ok := externalTargetBySlot(cfg, slot)
+	job, err := p.store.byID(jobID)
+	if err != nil {
+		return publishJob{}, err
+	}
+	target, ok := cfg.jobTarget(job, accountID)
 	if !ok {
 		return publishJob{}, errors.New("分发平台配置已变化，请使用最新卡片")
 	}

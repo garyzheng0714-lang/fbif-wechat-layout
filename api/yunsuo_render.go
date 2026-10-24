@@ -171,13 +171,13 @@ func yunsuoWholeBold(block Block) bool {
 
 // buildYunsuoPushPayload 组装一次不可变的推送快照。外发按平台分开推（每条 lane 一个
 // 账号），封面与标题按这个账号的平台规则；多个账号时用通用规则。
-func buildYunsuoPushPayload(job publishJob, targets []yunsuoAccountTarget, categories []string) (yunsuoPushPayload, error) {
+func buildYunsuoPushPayload(job publishJob, targets []externalAccount, categories []string) (yunsuoPushPayload, error) {
 	return buildYunsuoPushPayloadWithDraft(job, targets, categories, publishExternalDraft{})
 }
 
 // buildYunsuoPushPayloadWithDraft draft 是人给这个平台改过的标题、摘要、封面（只对这个平台生效，
 // 公众号与网站不动）；空字段用文章原值。
-func buildYunsuoPushPayloadWithDraft(job publishJob, targets []yunsuoAccountTarget, categories []string, draft publishExternalDraft) (yunsuoPushPayload, error) {
+func buildYunsuoPushPayloadWithDraft(job publishJob, targets []externalAccount, categories []string, draft publishExternalDraft) (yunsuoPushPayload, error) {
 	profile := yunsuoGenericProfile
 	if len(targets) == 1 {
 		profile = yunsuoProfileForTarget(targets[0])

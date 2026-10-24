@@ -18,7 +18,7 @@ function platformsView(overrides = {}) {
     job: { id: 196, title: longTitle, site_url: 'https://www.foodtalks.cn/news/63200' },
     platforms: [
       {
-        slot: 0, name: '头条号', status: '待修改', tone: 'orange', editable: true, needs_fix: true,
+        account: 'recToutiao', name: '头条号', status: '待修改', tone: 'orange', editable: true, needs_fix: true,
         title: longTitle, title_min: 8, title_max: 20, title_suggested: '老茶铺把茶做成零食，年营收过亿', title_issue: true,
         summary: '祇园辻利把茶做成零食。', summary_max: 0,
         cover: { url: 'https://cdn.example.com/small.jpg', width: 300, height: 200 },
@@ -27,7 +27,7 @@ function platformsView(overrides = {}) {
         ...overrides,
       },
       {
-        slot: 1, name: '百家号', status: '已发布', tone: 'green', editable: false, needs_fix: false,
+        account: 'recBaijia', name: '百家号', status: '已发布', tone: 'green', editable: false, needs_fix: false,
         url: 'https://baijiahao.baidu.com/s?id=1', title: '', candidates: [],
       },
     ],
@@ -73,7 +73,7 @@ test('改稿页：写清超了多少、给建议，选大图作封面后保存�
 
   assert.equal(calls[0].path, '/api/publish/jobs/196/external-distribution/draft?t=sig');
   assert.match(document.querySelector('#article').innerHTML, /#196 这家老字号/);
-  const toutiao = root.querySelector('[data-slot="0"]');
+  const toutiao = root.querySelector('[data-account="recToutiao"]');
   assert.match(toutiao.querySelector('.dist-status').textContent, /待修改/);
   const count = toutiao.querySelector('[data-count="title"]');
   assert.equal(count.textContent, `${Array.from(longTitle).length} / 20`);
@@ -84,33 +84,33 @@ test('改稿页：写清超了多少、给建议，选大图作封面后保存�
   const small = toutiao.querySelector('[data-cover="https://cdn.example.com/small.jpg"]');
   assert.ok(small.disabled, '太小的图不能选');
   assert.equal(small.getAttribute('aria-checked'), 'false', '太小的现封面不画成选中');
-  assert.match(root.querySelector('[data-slot="1"]').innerHTML, /查看文章/);
-  assert.equal(root.querySelector('[data-slot="1"] form'), null, '已发布的平台不能再改');
+  assert.match(root.querySelector('[data-account="recBaijia"]').innerHTML, /查看文章/);
+  assert.equal(root.querySelector('[data-account="recBaijia"] form'), null, '已发布的平台不能再改');
 
   // 超限时点保存：不发请求，焦点回到标题。
-  root.querySelector('[data-slot="0"] form').dispatchEvent(new window.Event('submit', { cancelable: true }));
+  root.querySelector('[data-account="recToutiao"] form').dispatchEvent(new window.Event('submit', { cancelable: true }));
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(calls.filter(call => call.method === 'PUT').length, 0);
 
-  root.querySelector('[data-slot="0"] [data-use="title"]').click();
-  assert.equal(root.querySelector('[data-slot="0"] [name="title"]').value, '老茶铺把茶做成零食，年营收过亿');
-  assert.ok(!root.querySelector('[data-slot="0"] [data-count="title"]').classList.contains('is-over'));
-  root.querySelector('[data-slot="0"] [data-cover="https://cdn.example.com/big.jpg"]').click();
-  assert.equal(root.querySelector('[data-slot="0"] [data-cover="https://cdn.example.com/big.jpg"]').getAttribute('aria-checked'), 'true');
-  assert.doesNotMatch(root.querySelector('[data-slot="0"]').textContent, /封面太小/, '选了大图后不再提示');
+  root.querySelector('[data-account="recToutiao"] [data-use="title"]').click();
+  assert.equal(root.querySelector('[data-account="recToutiao"] [name="title"]').value, '老茶铺把茶做成零食，年营收过亿');
+  assert.ok(!root.querySelector('[data-account="recToutiao"] [data-count="title"]').classList.contains('is-over'));
+  root.querySelector('[data-account="recToutiao"] [data-cover="https://cdn.example.com/big.jpg"]').click();
+  assert.equal(root.querySelector('[data-account="recToutiao"] [data-cover="https://cdn.example.com/big.jpg"]').getAttribute('aria-checked'), 'true');
+  assert.doesNotMatch(root.querySelector('[data-account="recToutiao"]').textContent, /封面太小/, '选了大图后不再提示');
 
-  root.querySelector('[data-slot="0"] form').dispatchEvent(new window.Event('submit', { cancelable: true }));
+  root.querySelector('[data-account="recToutiao"] form').dispatchEvent(new window.Event('submit', { cancelable: true }));
   await waitFor(() => calls.some(call => call.method === 'PUT'));
   const put = calls.find(call => call.method === 'PUT');
-  assert.deepEqual(JSON.parse(put.body), { slot: 0, title: '老茶铺把茶做成零食，年营收过亿', cover_url: 'https://cdn.example.com/big.jpg' });
-  await waitFor(() => /同步中/.test(root.querySelector('[data-slot="0"] .dist-status').textContent));
+  assert.deepEqual(JSON.parse(put.body), { account: 'recToutiao', title: '老茶铺把茶做成零食，年营收过亿', cover_url: 'https://cdn.example.com/big.jpg' });
+  await waitFor(() => /同步中/.test(root.querySelector('[data-account="recToutiao"] .dist-status').textContent));
 });
 
 test('改稿页：已发布但还没拿到文章链接，给平台后台看发布情况', () => {
   const manage = 'https://baijiahao.baidu.com/builder/rc/content';
-  const html = renderPlatform({ slot: 1, name: '百家号', status: '已发布', tone: 'green', editable: false, manage_url: manage }, {}, longTitle);
+  const html = renderPlatform({ account: 'recBaijia', name: '百家号', status: '已发布', tone: 'green', editable: false, manage_url: manage }, {}, longTitle);
   assert.match(html, new RegExp(`<a href="${manage}" target="_blank" rel="noopener">去百家号后台查看</a>`));
-  const linked = renderPlatform({ slot: 1, name: '百家号', status: '已发布', tone: 'green', editable: false, url: 'https://baijiahao.baidu.com/s?id=1', manage_url: manage }, {}, longTitle);
+  const linked = renderPlatform({ account: 'recBaijia', name: '百家号', status: '已发布', tone: 'green', editable: false, url: 'https://baijiahao.baidu.com/s?id=1', manage_url: manage }, {}, longTitle);
   assert.doesNotMatch(linked, /后台查看/, '有文章链接就不再给后台');
 });
 
@@ -118,13 +118,13 @@ test('改稿页：已发布但还没拿到文章链接，给平台后台看发�
 test('改稿页：只存了草稿的平台给草稿箱链接，按钮照实说存草稿', () => {
   const draftURL = 'https://baijiahao.baidu.com/builder/rc/edit?type=news&amp;article_id=1846000000000000001';
   const saved = renderPlatform({
-    slot: 1, name: '百家号', status: '草稿已存（未发布）', tone: 'green', editable: false,
+    account: 'recBaijia', name: '百家号', status: '草稿已存（未发布）', tone: 'green', editable: false,
     draft_url: 'https://baijiahao.baidu.com/builder/rc/edit?type=news&article_id=1846000000000000001',
     manage_url: 'https://baijiahao.baidu.com/builder/rc/content', action: '存草稿至百家号',
   }, {}, longTitle);
   assert.ok(saved.includes(`<a href="${draftURL}" target="_blank" rel="noopener">去百家号草稿箱查看</a>`), saved);
   assert.doesNotMatch(saved, /后台查看/, '有草稿地址就不再给后台');
-  const editing = renderPlatform({ ...platformsView().platforms[0], slot: 1, name: '百家号', action: '存草稿至百家号' }, {}, longTitle);
+  const editing = renderPlatform({ ...platformsView().platforms[0], account: 'recBaijia', name: '百家号', action: '存草稿至百家号' }, {}, longTitle);
   assert.match(editing, /<button type="submit" class="dist-primary">保存并存草稿至百家号<\/button>/);
   const legacy = renderPlatform(platformsView().platforms[0], {}, longTitle);
   assert.match(legacy, /<button type="submit" class="dist-primary">保存并同步至头条号<\/button>/, '没给 action 时照旧');
@@ -172,20 +172,20 @@ test('改稿页：上传格可点选、拖入、粘贴；传上去就换上，�
     return Response.json(view);
   });
   await page.load();
-  const tile = root.querySelector('[data-slot="0"] .dist-cover-upload');
+  const tile = root.querySelector('[data-account="recToutiao"] .dist-cover-upload');
   assert.match(tile.textContent, /上传图片/);
   assert.match(tile.textContent, /可拖入或粘贴/);
 
   // 先用建议标题（合乎要求），再粘贴一张图：标题随图一起提交。
-  root.querySelector('[data-slot="0"] [data-use="title"]').click();
-  root.querySelector('[data-slot="0"] [name="title"]').focus();
+  root.querySelector('[data-account="recToutiao"] [data-use="title"]').click();
+  root.querySelector('[data-account="recToutiao"] [name="title"]').focus();
   document.dispatchEvent(fileEvent(window, 'paste', 'clipboardData', [pngFile('pasted.png')]));
   await waitFor(() => uploads.length === 1);
-  assert.equal(uploads[0].get('slot'), '0');
+  assert.equal(uploads[0].get('account'), 'recToutiao');
   assert.equal(uploads[0].get('title'), '老茶铺把茶做成零食，年营收过亿');
   assert.equal(uploads[0].get('file').name, 'pasted.png');
-  await waitFor(() => /排队中/.test(root.querySelector('[data-slot="0"] .dist-status').textContent));
-  assert.equal(root.querySelector('[data-slot="0"] form'), null, '传上去就同步，不用再点保存');
+  await waitFor(() => /排队中/.test(root.querySelector('[data-account="recToutiao"] .dist-status').textContent));
+  assert.equal(root.querySelector('[data-account="recToutiao"] form'), null, '传上去就同步，不用再点保存');
 });
 
 test('改稿页：拖入图片传给落点所在的平台；标题还超着就只带图', async () => {
@@ -196,17 +196,17 @@ test('改稿页：拖入图片传给落点所在的平台；标题还超着就�
     return Response.json(view);
   });
   await page.load();
-  const covers = root.querySelector('[data-slot="0"] .dist-covers');
+  const covers = root.querySelector('[data-account="recToutiao"] .dist-covers');
   covers.dispatchEvent(fileEvent(window, 'dragover', 'dataTransfer', []));
-  assert.ok(root.querySelector('[data-slot="0"] .dist-cover-upload').classList.contains('is-dragover'), '拖到上方时上传格高亮');
+  assert.ok(root.querySelector('[data-account="recToutiao"] .dist-cover-upload').classList.contains('is-dragover'), '拖到上方时上传格高亮');
   const drop = fileEvent(window, 'drop', 'dataTransfer', [pngFile('dropped.png')]);
   covers.dispatchEvent(drop);
   assert.ok(drop.defaultPrevented, '不让浏览器把图片打开');
   await waitFor(() => uploads.length === 1);
   assert.equal(uploads[0].get('file').name, 'dropped.png');
   assert.equal(uploads[0].get('title'), null, '超限的标题不带');
-  await waitFor(() => /封面已换上，还要改：标题超出 10 字/.test(root.querySelector('[data-slot="0"] .dist-result')?.textContent || ''));
-  assert.equal(root.querySelector('[data-slot="0"] [name="title"]').value, longTitle, '没提交的标题留在输入框里');
+  await waitFor(() => /封面已换上，还要改：标题超出 10 字/.test(root.querySelector('[data-account="recToutiao"] .dist-result')?.textContent || ''));
+  assert.equal(root.querySelector('[data-account="recToutiao"] [name="title"]').value, longTitle, '没提交的标题留在输入框里');
   void document;
 });
 
@@ -214,12 +214,12 @@ test('改稿页：传不上去的原因写在封面下面；不是 JPG/PNG 不�
   const { document, window, root, calls, page } = uploadPage(() => Response.json({ error: '这张图 400×300，头条号封面至少 452×352' }, { status: 400 }));
   await page.load();
   document.dispatchEvent(fileEvent(window, 'paste', 'clipboardData', [new File(['gif'], 'a.gif', { type: 'image/gif' })]));
-  await waitFor(() => /只支持 JPG、PNG 图片/.test(root.querySelector('[data-slot="0"] [role="alert"]')?.textContent || ''));
+  await waitFor(() => /只支持 JPG、PNG 图片/.test(root.querySelector('[data-account="recToutiao"] [role="alert"]')?.textContent || ''));
   assert.equal(calls.filter(call => call.path.includes('/cover')).length, 0);
-  const input = root.querySelector('[data-slot="0"] [data-upload]');
+  const input = root.querySelector('[data-account="recToutiao"] [data-upload]');
   Object.defineProperty(input, 'files', { value: [pngFile()] });
   input.dispatchEvent(new window.Event('change'));
-  await waitFor(() => /头条号封面至少 452×352/.test(root.querySelector('[data-slot="0"] [role="alert"]')?.textContent || ''));
+  await waitFor(() => /头条号封面至少 452×352/.test(root.querySelector('[data-account="recToutiao"] [role="alert"]')?.textContent || ''));
   // 粘贴文字不拦：照常进输入框。
   const textPaste = new window.Event('paste', { bubbles: true, cancelable: true });
   Object.defineProperty(textPaste, 'clipboardData', { value: { files: [] } });

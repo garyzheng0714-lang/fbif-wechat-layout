@@ -215,8 +215,8 @@ func publishExternalDistributionCardVersion(job publishJob) string {
 	}{job.Title, job.Summary, job.Tags, job.CoverURL, job.ImageMap})
 	materialDigest := sha256.Sum256(material)
 	targetIDs := []string{}
-	if cfg, err := loadYunsuoConfig(); err == nil {
-		for _, target := range cfg.Targets {
+	if cfg, err := loadExternalTargets(); err == nil {
+		for _, target := range cfg.forJob(job) {
 			targetIDs = append(targetIDs, strings.TrimSpace(target.ID))
 		}
 	}
@@ -252,6 +252,15 @@ func externalDistributionVersionMatches(expected string, job publishJob) bool {
 	want := publishExternalDistributionCardVersion(job)
 	return expected != "" && len(expected) == len(want) &&
 		subtle.ConstantTimeCompare([]byte(expected), []byte(want)) == 1
+}
+
+// externalDistributionNoTargets 这篇一个能发的号都没有：先说本来就不能外发的原因（如转载），再说表里没配。
+func externalDistributionNoTargets(job publishJob) error {
+	if err := externalDistributionEligibility(job); err != nil {
+		return externalDistributionIneligible(err)
+	}
+	return externalDistributionIneligible(fmt.Errorf("多维表格「平台账号」里没有发「%s」文章的在用号",
+		firstNonEmpty(strings.TrimSpace(job.SourceName), "这个公众号")))
 }
 
 func externalDistributionEligibility(job publishJob) error {
@@ -417,21 +426,20 @@ func (p *publishPipeline) queueAutoExternalDistribution(jobID int64, actor strin
 	return p.queueExternalDistribution(jobID, actor, "", externalQueueAuto, only)
 }
 
-// externalDistributionTargetsFor 选本次要推的账号，每个账号一条 lane（按配置顺序）：
+// externalDistributionTargetsFor 选本次要推的账号，每个账号一条 lane（只在「来源公众号」是这篇的号里选，按表里的顺序）：
 //   - 卡片：还没推过的账号 + 受理前失败、可安全重推的账号（重推只推原账号，不扩到别的平台）；
 //   - 自动：还没推过的 auto 账号（only 限定当天还有配额的）；
 //   - 管理员对账重发：对账中的账号。
-func externalDistributionTargetsFor(job publishJob, cfg yunsuoConfig, mode externalDistributionQueueMode, only map[string]bool) []yunsuoAccountTarget {
-	candidates := cfg.Targets
-	if mode == externalQueueAuto {
-		candidates = cfg.autoTargets()
-	}
-	var chosen []yunsuoAccountTarget
-	for _, target := range candidates {
+func externalDistributionTargetsFor(job publishJob, cfg externalTargets, mode externalDistributionQueueMode, only map[string]bool) []externalAccount {
+	var chosen []externalAccount
+	for _, target := range cfg.forJob(job) {
+		if mode == externalQueueAuto && !target.Auto {
+			continue
+		}
 		if only != nil && !only[strings.TrimSpace(target.ID)] {
 			continue
 		}
-		if externalDistributionLaneEligible(job, target.ID, mode) {
+		if externalDistributionLaneEligible(job, target, cfg, mode) {
 			chosen = append(chosen, target)
 		}
 	}
@@ -439,8 +447,11 @@ func externalDistributionTargetsFor(job publishJob, cfg yunsuoConfig, mode exter
 }
 
 // externalDistributionLaneEligible 这个账号此刻能不能按 mode 开推（入队前与锁内各判一次）。
-func externalDistributionLaneEligible(job publishJob, accountID string, mode externalDistributionQueueMode) bool {
-	lane, exists := externalLaneFor(job, accountID)
+func externalDistributionLaneEligible(job publishJob, target externalAccount, cfg externalTargets, mode externalDistributionQueueMode) bool {
+	if externalUnadoptedLaneCovers(job, target, cfg) {
+		return false
+	}
+	lane, exists := externalLaneFor(job, target.ID)
 	if !exists {
 		_, coversAll := externalDistributionCoveredAccounts(job)
 		return mode != externalQueueReplaceReconcile && !coversAll
@@ -464,7 +475,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	if err != nil {
 		return publishJob{}, err
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return job, err
 	}
@@ -481,6 +492,9 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			return job, externalDistributionIneligible(errors.New("这篇文章已经提交过外部分发，系统不会重复发布"))
 		}
 	default:
+		if len(cfg.forJob(job)) == 0 {
+			return job, externalDistributionNoTargets(job)
+		}
 		if len(externalDistributionTargetsFor(job, cfg, mode, nil)) == 0 {
 			return job, errors.New("这篇文章已经提交过外部分发，系统不会重复发布")
 		}
@@ -520,7 +534,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	lanes := make([]publishExternalLane, 0, len(chosen))
 	var queuedAccounts, failures, fixNames []string
 	type preflightResult struct {
-		target     yunsuoAccountTarget
+		target     externalAccount
 		issues     []publishExternalIssue
 		candidates []publishExternalCoverCandidate
 		autoCover  string // 自动放大后换上的封面（publish_external_cover.go）
@@ -545,11 +559,11 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		}
 		checked = append(checked, preflightResult{target: target, issues: issues, candidates: candidates, autoCover: autoCover})
 		if len(issues) > 0 {
-			fixNames = append(fixNames, target.Name+"："+externalIssueSummaryText(issues))
+			fixNames = append(fixNames, target.label()+"："+externalIssueSummaryText(issues))
 			continue
 		}
 		lane := publishExternalLane{
-			AccountID: target.ID, Name: target.Name, State: publishExternalDistributionQueued,
+			AccountID: target.ID, Name: target.label(), State: publishExternalDistributionQueued,
 			RequestedBy: strings.TrimSpace(actor), RequestedAt: requestedAt,
 			ContentHash: job.ContentHash, ContentVersion: job.ContentFrozenVersion,
 			Attribution: attribution, Source: attributionSource,
@@ -558,13 +572,13 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			lane.ContentVersion = job.ContentVersion
 		}
 		lane.Driver = yunsuoProfileForTarget(target).Driver
-		payloadJSON, platformTitle, buildErr := buildExternalLanePayload(snapshot, target, cfg.Categories, draft)
+		payloadJSON, platformTitle, buildErr := buildExternalLanePayload(snapshot, target, yunsuoCategories(), draft)
 		if buildErr != nil {
 			lane.State = publishExternalDistributionFailed
 			lane.Error = truncateRunes(strings.Join(strings.Fields(buildErr.Error()), " "), 500)
 			lane.Remark = lane.Error
 			lane.CompletedAt = requestedAt
-			failures = append(failures, target.Name+"："+lane.Error)
+			failures = append(failures, target.label()+"："+lane.Error)
 		} else {
 			digest := sha256.Sum256(payloadJSON)
 			lane.Title = platformTitle
@@ -583,7 +597,8 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			return false
 		}
 		for _, lane := range lanes {
-			if !externalDistributionLaneEligible(current, lane.AccountID, mode) {
+			target, ok := cfg.target(lane.AccountID)
+			if !ok || !externalDistributionLaneEligible(current, target, cfg, mode) {
 				return false
 			}
 		}
@@ -699,7 +714,7 @@ func (p *publishPipeline) pushExternalLane(job publishJob, lane publishExternalL
 		return
 	}
 	// 冻结的 payload 只能发往这条 lane 的账号：带了别的账号就是串了，宁可不推。
-	if len(payload.AccountIDs) != 1 || strings.TrimSpace(payload.AccountIDs[0]) != strings.TrimSpace(lane.AccountID) {
+	if len(payload.AccountIDs) != 1 || strings.TrimSpace(payload.AccountIDs[0]) != lane.yunsuoAccountID() {
 		p.failExternalLaneBeforePush(job.ID, lane.AccountID, "已保存的云梭分发内容与本平台账号不符，未推送")
 		return
 	}
@@ -891,7 +906,7 @@ func externalLaneProviderStatus(lane publishExternalLane, statuses []yunsuoAccou
 		if strings.TrimSpace(status.AccountPool.ID) != "" {
 			withIDs = true
 		}
-		if strings.TrimSpace(status.AccountPool.ID) == strings.TrimSpace(lane.AccountID) {
+		if strings.TrimSpace(status.AccountPool.ID) == lane.yunsuoAccountID() {
 			return status, true
 		}
 	}
@@ -1094,7 +1109,7 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 			toastType: "info", toastContent: "文章正在同步分发，请勿重复操作",
 		}, true
 	}
-	if cfg, err := loadYunsuoConfig(); err == nil && len(externalDistributionTargetsFor(job, cfg, externalQueueCard, nil)) > 0 {
+	if cfg, err := loadExternalTargets(); err == nil && len(externalDistributionTargetsFor(job, cfg, externalQueueCard, nil)) > 0 {
 		return reviewCardOutcome{}, false
 	}
 	switch externalDistributionSummaryState(job) {

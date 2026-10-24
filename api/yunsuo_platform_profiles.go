@@ -215,7 +215,7 @@ func (p yunsuoPlatformProfile) titleOver(title string) (length, max int, over bo
 	return length, max, length > max
 }
 
-func yunsuoProfileForTarget(target yunsuoAccountTarget) yunsuoPlatformProfile {
+func yunsuoProfileForTarget(target externalAccount) yunsuoPlatformProfile {
 	key := strings.ToLower(strings.TrimSpace(target.Platform))
 	if key == "" {
 		switch name := target.Name; {

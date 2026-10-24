@@ -37,8 +37,7 @@ func (c distributionRobotConfig) String() string {
 	return fmt.Sprintf("{BaseURL:%q Token:[REDACTED]}", c.BaseURL)
 }
 
-// loadDistributionRobotConfig 不是必配项：缺了只让经分发服务的平台在推送前失败，不影响 readiness。
-// 错误信息只说缺哪个变量，绝不回显 token。
+// loadDistributionRobotConfig 外发账号与存草稿都经它；错误信息只说缺哪个变量，绝不回显 token。
 func loadDistributionRobotConfig() (distributionRobotConfig, error) {
 	cfg := distributionRobotConfig{
 		BaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv(distributionAPIURLEnv)), "/"),
@@ -59,6 +58,7 @@ func loadDistributionRobotConfig() (distributionRobotConfig, error) {
 // robotDraftRequest 写草稿的请求体（POST /v1/platforms/{platform}/drafts）。
 type robotDraftRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
+	Account        string `json:"account"` // 多维表格「平台账号」的 record_id
 	Title          string `json:"title"`
 	HTML           string `json:"html"`
 	CoverURL       string `json:"cover_url"`
@@ -202,6 +202,25 @@ func (c *distributionRobotClient) SaveDraft(ctx context.Context, platform string
 	default:
 		return robotDraftRecord{}, &robotUncertainError{Cause: fmt.Sprintf("HTTP %d %s：%s", status, code, message)}
 	}
+}
+
+// Accounts 多维表格「平台账号」里的号（分发服务 GET /v1/accounts）。
+func (c *distributionRobotClient) Accounts(ctx context.Context) ([]externalAccount, error) {
+	status, raw, err := c.do(ctx, http.MethodGet, "/v1/accounts", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		_, message := c.parseError(status, raw)
+		return nil, fmt.Errorf("分发服务读账号失败（HTTP %d）：%s", status, message)
+	}
+	var body struct {
+		Accounts []externalAccount `json:"accounts"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, errors.New("分发服务返回的账号无法解析")
+	}
+	return body.Accounts, nil
 }
 
 func (c *distributionRobotClient) Draft(ctx context.Context, platform, key string) (robotDraftRecord, error) {

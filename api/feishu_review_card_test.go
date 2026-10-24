@@ -20,7 +20,7 @@ func reviewCardTestJob(stage string) publishJob {
 	return publishJob{
 		ID: 72, Stage: stage,
 		Title:      "首年销量破亿，冲进沃尔玛前五！这个女性能量饮料，靠青汁粉走红了",
-		SourceName: "轻食online", Author: "FBIF食品饮料创新",
+		SourceName: "FBIF食品饮料创新", Author: "FBIF食品饮料创新",
 		Summary:           "靠青汁粉走红的女性能量饮料，凭什么首年销售额破亿冲进沃尔玛前五？",
 		Tags:              []string{"能量饮料", "女性消费"},
 		SourceURL:         "https://mp.weixin.qq.com/s?__biz=MzA5&mid=1&idx=1&sn=abc",
@@ -310,7 +310,7 @@ func TestReviewBatchRightColumnHasFixedHeight(t *testing.T) {
 	job.PublicationAction = publishPublicationActionPublish
 	job.SourceResyncState = publishSourceResyncSucceeded
 	job.SourceResyncCompletedAt = "2026-09-01T06:30:00Z"
-	t.Setenv(yunsuoTargetAccountsEnv, `[{"account_id":"a1","name":"头条号"}]`)
+	setTestExternalAccounts(t, testArticleAccount("a1", "toutiao", false))
 	block := buildReviewBatchCard([]publishJob{job})["body"].(map[string]any)["elements"].([]any)[0].(map[string]any)
 	inner := block["elements"].([]any)[0].(map[string]any)
 	rows := inner["columns"].([]any)[1].(map[string]any)["elements"].([]any)
@@ -411,9 +411,9 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	if !strings.Contains(body, `"corner_radius":"16px"`) || !strings.Contains(body, `"border_color":"grey-100"`) {
 		t.Fatalf("分发块应与上半部分文章块同款外框: %s", body)
 	}
-	if !strings.Contains(body, `"slot":0`) || !strings.Contains(body, `"slot":1`) ||
-		strings.Contains(cardJSON(t, card), testYunsuoToutiaoID) || strings.Contains(cardJSON(t, card), testYunsuoBaijiaID) {
-		t.Fatalf("按钮只带平台位置，卡片里不得出现账号 id: %s", body)
+	if !strings.Contains(body, `"account":"`+testYunsuoToutiaoID+`"`) || !strings.Contains(body, `"account":"`+testYunsuoBaijiaID+`"`) ||
+		strings.Contains(body, `"slot"`) {
+		t.Fatalf("按钮带多维表格「平台账号」的编号，不再按位置认号: %s", body)
 	}
 	elements := card["body"].(map[string]any)["elements"].([]any)
 	if last := cardJSON(t, elements[len(elements)-1].(map[string]any)); !strings.Contains(last, "存草稿至百家号") {
@@ -558,18 +558,18 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 		fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：头条号最多 30 字（英文字母、数字两个算一个字），现在 %d 字", runeLen(long)-30, runeLen(long)),
 		"现在：" + long,
 		// 输入框按字符数限长：全是英文数字时可到 60 个字符；按头条数法超没超由服务端判。
-		`"name":"t_72_0"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":60`, `"placeholder":{"content":"30 字以内"`, `"content":"改成"`,
+		`"name":"t_72_` + testYunsuoToutiaoID + `"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":60`, `"placeholder":{"content":"30 字以内"`, `"content":"改成"`,
 		"<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200",
-		`"tag":"select_img"`, `"name":"c_72_0"`, `"img_key":"img_big"`, `"value":"` + reviewCardCoverValue("https://cdn.example.com/big.jpg") + `"`,
-		`"content":"保存并存草稿至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"slot":0`,
+		`"tag":"select_img"`, `"name":"c_72_` + testYunsuoToutiaoID + `"`, `"img_key":"img_big"`, `"value":"` + reviewCardCoverValue("https://cdn.example.com/big.jpg") + `"`,
+		`"content":"保存并存草稿至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"account":"` + testYunsuoToutiaoID + `"`,
 		"在侧边栏修改", "applink.feishu.cn/client/web_url/open?mode=sidebar-semi",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("表单缺少 %q: %s", want, body)
 		}
 	}
-	if strings.Contains(body, "img_other") || strings.Contains(cardJSON(t, card), testYunsuoToutiaoID) {
-		t.Fatalf("别的应用传的图不能用，卡片里不得有账号 id: %s", body)
+	if strings.Contains(body, "img_other") {
+		t.Fatalf("别的应用传的图不能用: %s", body)
 	}
 	// 选一张封面，或在侧边栏上传（2026-10-12 用户：「就是“选一张封面”或者“上传”」）。
 	if !strings.Contains(body, "从正文里选一张作封面</font><font color='grey'>，或</font>[上传一张](") || strings.Contains(body, "话题") {

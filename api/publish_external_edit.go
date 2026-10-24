@@ -86,7 +86,7 @@ type externalPlatformState struct {
 	FailedLabel string
 }
 
-func externalPlatformStatus(job publishJob, target yunsuoAccountTarget) externalPlatformState {
+func externalPlatformStatus(job publishJob, target externalAccount) externalPlatformState {
 	if lane, ok := externalLaneFor(job, target.ID); ok {
 		state := externalPlatformState{URL: reviewCardSafeURL(lane.URL), Title: strings.TrimSpace(lane.Title)}
 		switch {
@@ -136,12 +136,13 @@ type externalEditImage struct {
 }
 
 type externalEditPlatform struct {
-	Slot   int    `json:"slot"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Tone   string `json:"tone"`
-	Reason string `json:"reason,omitempty"`
-	URL    string `json:"url,omitempty"`
+	// Account 多维表格「平台账号」的 record_id：页面提交改稿、上传封面时带回来。
+	Account string `json:"account"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Tone    string `json:"tone"`
+	Reason  string `json:"reason,omitempty"`
+	URL     string `json:"url,omitempty"`
 	// ManageURL 已发布但还没有文章链接：去平台后台看发布情况。
 	ManageURL string `json:"manage_url,omitempty"`
 	// DraftURL 只存了草稿：平台上这篇草稿的编辑页。
@@ -179,32 +180,29 @@ type externalEditPlatform struct {
 
 // externalEditView 侧边栏数据：每个平台的状态、现在推出去会用的标题/摘要/封面、上限与建议、
 // 可选封面。会读正文图片尺寸（只在请求里算，不写库）。
-func externalEditView(job publishJob, cfg yunsuoConfig) map[string]any {
+func externalEditView(job publishJob, cfg externalTargets) map[string]any {
 	blocks, imageMap, decodeErr := decodeYunsuoDistributionContent(job.BlocksJSON, job.ImageMap)
 	var bodyImages []publishExternalCoverCandidate
 	if decodeErr == nil {
 		bodyImages = yunsuoBodyImages(blocks, imageMap, publishExternalCoverScan)
 	}
-	platforms := make([]externalEditPlatform, 0, len(cfg.Targets))
-	for slot, target := range cfg.Targets {
+	targets := cfg.forJob(job)
+	platforms := make([]externalEditPlatform, 0, len(targets))
+	for _, target := range targets {
 		profile := yunsuoProfileForTarget(target)
 		draft, _ := externalDraftFor(job, target.ID)
 		state := externalPlatformStatus(job, target)
 		min, max := profile.titleLimits()
 		_, fieldMax := profile.titleCharRange()
 		view := externalEditPlatform{
-			Slot: slot, Name: profile.Name, Status: state.Status, Tone: state.Tone, Reason: firstNonEmpty(state.Reason, state.Fidelity),
-			URL: state.URL, ManageURL: state.ManageURL, DraftURL: state.DraftURL, Action: profile.syncAction(profile.Name),
+			Account: target.ID, Name: target.label(), Status: state.Status, Tone: state.Tone, Reason: firstNonEmpty(state.Reason, state.Fidelity),
+			URL: state.URL, ManageURL: state.ManageURL, DraftURL: state.DraftURL, Action: profile.syncAction(target.label()),
 			Editable: state.Editable, NeedsFix: state.NeedsFix, Auto: target.Auto,
 			Title: externalEffectiveTitle(job, draft), TitleMin: min, TitleMax: max,
 			TitleHalfWidth: profile.TitleHalfWidthASCII, TitleFieldMax: fieldMax,
 			Summary: externalEffectiveSummary(job, draft), SummaryMax: profile.SummaryMax,
 			CoverMinWidth: profile.CoverMinWidth, CoverMinHeight: profile.CoverMinHeight,
 			EditedBy: draft.EditedBy, EditedAt: draft.EditedAt, Candidates: []externalEditImage{},
-		}
-		if strings.TrimSpace(target.Name) != "" && target.Name != profile.Name {
-			view.Name = target.Name
-			view.Action = profile.syncAction(target.Name)
 		}
 		if !state.Editable && state.Title != "" {
 			view.Title = state.Title
@@ -338,7 +336,7 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 			writeError(w, http.StatusNotFound, "文章不存在")
 			return
 		}
-		cfg, err := loadYunsuoConfig()
+		cfg, err := loadExternalTargets()
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
@@ -363,7 +361,7 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 			return
 		}
 		var body struct {
-			Slot     *int    `json:"slot"`
+			Account  string  `json:"account"`
 			Title    *string `json:"title"`
 			Summary  *string `json:"summary"`
 			CoverURL *string `json:"cover_url"`
@@ -372,7 +370,7 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 			writeError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		if body.Slot == nil {
+		if strings.TrimSpace(body.Account) == "" {
 			writeError(w, http.StatusBadRequest, "缺少平台")
 			return
 		}
@@ -392,12 +390,12 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 				}
 			}
 		}
-		updated, err := p.submitExternalDraftEdit(jobID, *body.Slot, edit, actor)
+		updated, err := p.submitExternalDraftEdit(jobID, strings.TrimSpace(body.Account), edit, actor)
 		if err != nil {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		cfg, err := loadYunsuoConfig()
+		cfg, err := loadExternalTargets()
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
@@ -422,8 +420,8 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 			writeError(w, http.StatusBadRequest, "图片不能超过 10 MB")
 			return
 		}
-		slot, err := strconv.Atoi(strings.TrimSpace(r.FormValue("slot")))
-		if err != nil {
+		account := strings.TrimSpace(r.FormValue("account"))
+		if account == "" {
 			writeError(w, http.StatusBadRequest, "缺少平台")
 			return
 		}
@@ -448,7 +446,7 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		updated, uploaded, err := p.uploadExternalCover(ctx, jobID, slot, data, text, actor)
+		updated, uploaded, err := p.uploadExternalCover(ctx, jobID, account, data, text, actor)
 		if err != nil {
 			status := http.StatusBadRequest
 			if errors.Is(err, errExternalDraftNothingToEdit) {
@@ -457,7 +455,7 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 			writeError(w, status, err.Error())
 			return
 		}
-		cfg, err := loadYunsuoConfig()
+		cfg, err := loadExternalTargets()
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
@@ -471,12 +469,16 @@ func registerExternalDistributionEditRoutes(mux *http.ServeMux, p *publishPipeli
 // uploadExternalCover 侧边栏上传封面：校验格式与平台尺寸下限，转存 OSS，传上去就换成这个平台的
 // 封面（2026-10-12 用户：「传上去之后直接绑定、自动同步过去了」），与页面里改好的标题、摘要走同一个
 // 修改入口，问题都清了就推；标题、摘要没过就只换封面，人在页面里接着改。
-func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, slot int, data []byte, text externalDraftEdit, actor string) (publishJob, publishExternalCoverCandidate, error) {
-	cfg, err := loadYunsuoConfig()
+func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, accountID string, data []byte, text externalDraftEdit, actor string) (publishJob, publishExternalCoverCandidate, error) {
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return publishJob{}, publishExternalCoverCandidate{}, err
 	}
-	target, ok := externalTargetBySlot(cfg, slot)
+	job, err := p.store.byID(jobID)
+	if err != nil {
+		return publishJob{}, publishExternalCoverCandidate{}, err
+	}
+	target, ok := cfg.jobTarget(job, accountID)
 	if !ok {
 		return publishJob{}, publishExternalCoverCandidate{}, errors.New("分发平台配置已变化，请刷新")
 	}
@@ -489,11 +491,7 @@ func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, 
 		return publishJob{}, publishExternalCoverCandidate{}, errors.New("只支持 JPG、PNG 图片")
 	}
 	if config.Width < profile.CoverMinWidth || config.Height < profile.CoverMinHeight {
-		return publishJob{}, publishExternalCoverCandidate{}, fmt.Errorf("这张图 %d×%d，%s封面至少 %d×%d", config.Width, config.Height, profile.Name, profile.CoverMinWidth, profile.CoverMinHeight)
-	}
-	job, err := p.store.byID(jobID)
-	if err != nil {
-		return publishJob{}, publishExternalCoverCandidate{}, err
+		return publishJob{}, publishExternalCoverCandidate{}, fmt.Errorf("这张图 %d×%d，%s封面至少 %d×%d", config.Width, config.Height, target.label(), profile.CoverMinWidth, profile.CoverMinHeight)
 	}
 	if err := externalDistributionEligibility(job); err != nil {
 		return job, publishExternalCoverCandidate{}, err
@@ -511,10 +509,10 @@ func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, 
 	}
 	edit := coverOnly()
 	edit.Title, edit.Summary = text.Title, text.Summary
-	updated, err := p.submitExternalDraftEdit(jobID, slot, edit, actor)
+	updated, err := p.submitExternalDraftEdit(jobID, accountID, edit, actor)
 	if err != nil && (text.Title != nil || text.Summary != nil) &&
 		!errors.Is(err, errExternalDraftNothingToEdit) && !errors.Is(err, errPublishWorkersPaused) {
-		updated, err = p.submitExternalDraftEdit(jobID, slot, coverOnly(), actor)
+		updated, err = p.submitExternalDraftEdit(jobID, accountID, coverOnly(), actor)
 	}
 	return updated, candidate, err
 }

@@ -2,7 +2,7 @@ package main
 
 // publish_external_auto.go — 原创稿公开后自动外发（2026-10-10 用户裁定：原创自动同步头条号）。
 //
-// 只对 YUNSUO_TARGET_ACCOUNTS_JSON 里标 "auto":true 的账号生效；其余账号仍只走审核卡按钮。
+// 只对多维表格「平台账号」里勾了「自动外发」的号生效；其余账号仍只走审核卡按钮。
 // 各平台分开推（publish_external_lanes.go）：只推这篇还没推过的 auto 账号，推过的账号
 // 不论结果都不自动再推。任务落为已发布的同一次写入里记下待办（external_distribution_auto_pending），
 // 再由 runExternalAutoDistribution 消化：进程在两步之间重启也不会漏发，每 10 分钟兜底扫一次。
@@ -43,7 +43,7 @@ func markExternalAutoDistributionPending(j *publishJob) {
 	if j == nil || externalDistributionStarted(*j) || j.ExternalDistributionAutoPending != "" {
 		return
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil || len(cfg.autoTargets()) == 0 {
 		return
 	}
@@ -87,7 +87,7 @@ type externalAutoQuota struct {
 	last     map[string]time.Time
 }
 
-func externalAutoQuotaFor(jobs []publishJob, autoTargets []yunsuoAccountTarget, now time.Time) externalAutoQuota {
+func externalAutoQuotaFor(jobs []publishJob, autoTargets []externalAccount, now time.Time) externalAutoQuota {
 	quota := externalAutoQuota{
 		limits: map[string]int{}, today: map[string]int{}, backfill: map[string]int{}, last: map[string]time.Time{},
 	}
@@ -173,9 +173,9 @@ func (p *publishPipeline) runExternalAutoDistribution() {
 	if len(pending) == 0 {
 		return
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
-		log.Printf("publish: 自动外发暂停，云梭配置不可用：%v", err)
+		log.Printf("publish: 自动外发暂停，外发账号读不到：%v", err)
 		return
 	}
 	autoTargets := cfg.autoTargets()
@@ -278,7 +278,7 @@ func (p *publishPipeline) noteExternalAutoError(jobID int64, reason string) {
 // externalAutoBackfillCandidate 存量补发只收：已发布、没有待办、还有 auto 账号没推过
 // （推过的账号不论结果都不补；人工发过的平台先登记为 manual 就不会再推）、按外发口径
 // 是原创且有审核记录、公开时间不早于 since。网站稿状态在真正推送前还会再核一次。
-func externalAutoBackfillCandidate(job publishJob, cfg yunsuoConfig, since time.Time) bool {
+func externalAutoBackfillCandidate(job publishJob, cfg externalTargets, since time.Time) bool {
 	if job.Stage != publishStagePublished || job.ExternalDistributionAutoPending != "" ||
 		len(externalDistributionMissingAutoTargets(job, cfg)) == 0 {
 		return false
@@ -293,12 +293,12 @@ func externalAutoBackfillCandidate(job publishJob, cfg yunsuoConfig, since time.
 // markExternalAutoBackfill 管理员补发：把 since 之后公开、还有 auto 账号没推过的原创稿记为补发待办，
 // 由 runExternalAutoDistribution 按补发配额逐日推送。dryRun 只返回名单。
 func (p *publishPipeline) markExternalAutoBackfill(since time.Time, dryRun bool) ([]publishJob, error) {
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return nil, err
 	}
 	if len(cfg.autoTargets()) == 0 {
-		return nil, errors.New("没有配置自动外发账号（YUNSUO_TARGET_ACCOUNTS_JSON 里标 \"auto\":true）")
+		return nil, errors.New("没有勾了「自动外发」的号（多维表格「平台账号」）")
 	}
 	jobs, err := p.store.all()
 	if err != nil {

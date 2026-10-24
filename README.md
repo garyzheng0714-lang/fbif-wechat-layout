@@ -52,7 +52,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **上游只交链接**：`site-sync` 与 `official-sync` 只接收链接、规则包和分类证据；正文、标题、来源、作者或封面一旦出现就显式 400。详细字段、状态码与幂等见 [发布接入契约](docs/publish-intake-contract.md)。
 - **审核卡与风险分层**：待审、已发布、已驳回、异常卡都保留封面、标题、标签、摘要和预览/原文入口。只有显式 `confirmed` 的实质性问题进首屏，其余待核提示收进完整报告；审核群只发卡片。`card-refresh` 可原位重建历史卡；任务已经使用 `ReviewCardMsgIDs` 多群映射时，切群后新群没有自己的 message id 就发新卡。只带 legacy `ReviewCardMsgID` 的旧任务仍可能回退更新旧群，是待修兼容风险。
 - **FoodTalks 内容组装**：原创与转载分别走独立分类配置；所有文章的 AI 标签都在 `tag_type_id=6` 中按规范化名称等值解析、从不新建；Mote 文章再优先加 Mote/系列标签，最多 3 个，只有 Mote 新系列（段首「这是我XX系列的第N篇」）会自动建系列标签。系列声明段与链到公众号合集的「XX系列」链到系列标签页；Mote 正文里的公众号文章链换成站内已发布稿，找不到才留公众号链。进 FoodTalks 和云梭的正文都切除微信导流尾；正文非空白字符 ≥3000 且 h2+h3 ≥5 时在发布组装层写确定性目录。
-- **外部分发是正交子状态机**：FoodTalks 继续接收原创与转载；只有已审核、已在 FoodTalks 公开且确认为自有原创的任务，才能分发：头条号经云梭，百家号经自己的分发服务（FBIF-多平台分发工具，`DISTRIBUTION_API_URL`）只存草稿、不发布（2026-10-22）。每个平台账号单独推送、单独记状态（`external_distribution_lanes`），一个平台失败不挡其他平台；版式分通用层与平台层（`yunsuo_platform_profiles.go`）。`YUNSUO_TARGET_ACCOUNTS_JSON` 里标 `"auto":true` 的账号（目前是头条号、百家号）在原创公开后自动推送，名额按平台各算（头条号每天最多 5 篇）；审核卡最底下常显「分发到其他平台」区，每篇原创一个细框块，块内每个平台一行，写状态与文章链接，按钮只推这一个平台（还没推过或受理前失败的）。推送前按平台查标题/摘要字数与封面尺寸，不过就记为「待修改」（不推、不占名额），在这个平台的行里直接改（预填建议、点选正文大图），或从链接在飞书侧边栏打开 `/distribute.html` 上传封面（点选、拖入或粘贴，传上去就换上，没有别的问题即同步）；原封面只差一点（放大 ≤1.5 倍即达标）时自动放大转存，不用人换；同时以普通消息在审核卡的话题里 @ 管理后台设置的分发负责人，写清要改什么、有哪几种改法。存量原创用 `auto-backfill` 补发，每个平台每天最多 3 篇、白天间隔 1 小时；已有记录的平台（含人工登记的已发稿）不再推。头条号文章链接在推送成功后经头条搜索 + TikHub 核对回填；回填后免费取一次头条线上正文，与推出去的正文比小标题、图片、图注、文末声明与开头封面（外发保真核对），对不上就在卡片这个平台的行里写一句灰字，monitoring 给 warning（百家号有验证码，不取；它由分发服务存完草稿当场读回核对）。未拿到 `content_pk` 的不确定结果只进人工对账，不盲重发；百家号按同一个幂等键向分发服务查，系统自己不再提交。
+- **外部分发是正交子状态机**：FoodTalks 继续接收原创与转载；只有已审核、已在 FoodTalks 公开且确认为自有原创的任务，才能分发：头条号、百家号都经自己的分发服务（FBIF-多平台分发工具，`DISTRIBUTION_API_URL`）只存草稿、不发布（百家号 2026-10-22，头条号 2026-10-24）。发哪几个号看多维表格「平台账号」：分发服务 `GET /v1/accounts` 读表，本服务缓存在任务库旁的 `distribution-accounts.json`，每篇只发「来源公众号」是它的在用文章号。每个平台账号单独推送、单独记状态（`external_distribution_lanes`），一个平台失败不挡其他平台；版式分通用层与平台层（`yunsuo_platform_profiles.go`）。表里勾了「自动外发」的号（2026-10-14 起都没勾）在原创公开后自动推送，名额按平台各算（头条号每天最多 5 篇）；审核卡最底下常显「分发到其他平台」区，每篇原创一个细框块，块内每个平台一行，写状态与文章链接，按钮只推这一个平台（还没推过或受理前失败的）。推送前按平台查标题/摘要字数与封面尺寸，不过就记为「待修改」（不推、不占名额），在这个平台的行里直接改（预填建议、点选正文大图），或从链接在飞书侧边栏打开 `/distribute.html` 上传封面（点选、拖入或粘贴，传上去就换上，没有别的问题即同步）；原封面只差一点（放大 ≤1.5 倍即达标）时自动放大转存，不用人换；同时以普通消息在审核卡的话题里 @ 管理后台设置的分发负责人，写清要改什么、有哪几种改法。存量原创用 `auto-backfill` 补发，每个平台每天最多 3 篇、白天间隔 1 小时；已有记录的平台（含人工登记的已发稿）不再推。头条号文章链接在推送成功后经头条搜索 + TikHub 核对回填；回填后免费取一次头条线上正文，与推出去的正文比小标题、图片、图注、文末声明与开头封面（外发保真核对），对不上就在卡片这个平台的行里写一句灰字，monitoring 给 warning（百家号有验证码，不取；它由分发服务存完草稿当场读回核对）。未拿到 `content_pk` 的旧云梭稿只进人工对账，不盲重发；经分发服务的按同一个幂等键向它查，系统自己不再提交。
 - **手工发布优先且同题防重**：运营在 CMS 手工发布/编辑的稿件不用流水线库存覆盖。待审卡会 best effort 标红同题已发布稿；首次审核公开的 `stagePublicize` 在写入公开意图前再硬检，命中或 CMS 查询失败都 fail closed。
 - **环境状态不写死在文档**：代码同时支持 `test|production`，当前生产实例实际指向必须现场核验 `/api/publish/readiness` 与对应 URL，不从 README 或旧日志推断。
 - **已知未闭环（不可发布）**：至少包括图宽 preset 迁移与离线 fallback 仍是旧口径、同题硬闸未覆盖 `stageRepublish`、网站页脚交互未复用 `mountBlockPanel` + Sortable、ADR 中立层仍保留 FBIF 专用兼容字面量、legacy 审核卡切群可能更新旧群、群成员审核的运行时与 env schema 要求未收敛，以及导入框快捷键会同时复制旧预览并提交新内容。完整验收阻断见 [FoodTalks URL 导入验收基准](docs/agents/foodtalks-url-import-acceptance.md)；这些问题要另做功能修复与真实验收，不能靠文档宣称完成。
@@ -260,8 +260,8 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/jobs/{id}/retry-external-distribution` | 管理员确认对账中的旧云梭稿作废后，只为对账中的平台按当前网站稿重新推送 |
 | `POST` | `/api/publish/external-distribution/auto-backfill` | 把 `since`（RFC3339）之后公开、还有 auto 账号没有记录的原创记为补发待办，按各平台补发配额逐日推送；`dry_run:true` 只列名单 |
 | `POST` | `/api/publish/jobs/{id}/external-distribution/manual` | 管理员登记某平台人工已发（`account_id` + 平台域名 `url`，或 `lookup:true` 自动找头条号），或给已发布的平台补链接；登记后自动外发不再推这个平台；`dry_run:true` 只报告 |
-| `GET` / `PUT` | `/api/publish/jobs/{id}/external-distribution/draft?t=` | 外发改稿页（`/distribute.html`，审核卡链接在飞书侧边栏打开）：GET 返回每个平台的状态、字数上限、建议与可选封面；PUT `{slot, title?, summary?, cover_url?}` 只改这个平台推出去的版本，服务端重查，通过即推。需飞书登录 + 这篇的签名 `t`，或规则管理员 |
-| `POST` | `/api/publish/jobs/{id}/external-distribution/cover?t=` | 改稿页上传封面（multipart `slot` + `file`，可带页面里已改好的 `title`/`summary`；JPG/PNG ≤10MB，须达到平台封面下限）：转存后即换成这个平台的封面，问题都清了就推 |
+| `GET` / `PUT` | `/api/publish/jobs/{id}/external-distribution/draft?t=` | 外发改稿页（`/distribute.html`，审核卡链接在飞书侧边栏打开）：GET 返回每个平台的状态、字数上限、建议与可选封面；PUT `{account, title?, summary?, cover_url?}`（`account` 是「平台账号」的 record_id） 只改这个平台推出去的版本，服务端重查，通过即推。需飞书登录 + 这篇的签名 `t`，或规则管理员 |
+| `POST` | `/api/publish/jobs/{id}/external-distribution/cover?t=` | 改稿页上传封面（multipart `account` + `file`，可带页面里已改好的 `title`/`summary`；JPG/PNG ≤10MB，须达到平台封面下限）：转存后即换成这个平台的封面，问题都清了就推 |
 | `POST` | `/api/feishu/card-callback` | 仅 `FEISHU_CALLBACK_MODE=webhook` 时开放；长连接模式返回 404 |
 | `GET` | `/preview/publish/{id}?t=...` | HMAC 签名的审核预览入口；优先现铸 FoodTalks 官方预览 token，失败时回落本地审核页 |
 
@@ -309,8 +309,8 @@ curl http://127.0.0.1:9000/api/health
 | `MIMO_PRO_MODEL` / `MIMO_FLASH_MODEL` | 档位模型名，留空即 `mimo-v2.6-pro` / `mimo-v2.6-flash`。分工（2026-10-07 用户裁定）：看图（预填选封面）与翻译等批量任务用 Flash，风险检查等高价值任务用 Pro |
 | `ARK_*` | 旧豆包/DeepSeek 配置，已不读取，仅为旧 `publish.env` 兼容保留 |
 | `SITE_OWN_ACCOUNTS` | 自有账号清单，用于代码侧确定原创 / 转载；留空使用内置清单 |
-| `YUNSUO_BASE_URL` / `YUNSUO_USER_CODE` / `YUNSUO_API_KEY` | 云梭 API、用户码与凭证；只用于已审核自有原创的外部分发 |
-| `YUNSUO_TARGET_ACCOUNTS_JSON` / `YUNSUO_CATEGORIES` | 服务端固定的目标账号和分类；卡片 callback 不接受任意 `account_id`；账号加 `"auto":true` 即原创公开后自动外发；可选 `"platform":"toutiao"`/`"baijiahao"` 指定平台规则（不填按名字认） |
+| `DISTRIBUTION_API_URL` / `DISTRIBUTION_API_TOKEN` | 自己的分发服务（B 机，经 SSH 通道在 A 本机访问）：外发账号从它读，头条号、百家号经它存草稿 |
+| `YUNSUO_BASE_URL` / `YUNSUO_USER_CODE` / `YUNSUO_API_KEY` / `YUNSUO_CATEGORIES` | 云梭（2026-10-24 起不再送稿），只剩旧云梭 lane 补查用，可不填；`YUNSUO_TARGET_ACCOUNTS_JSON` 已不读取 |
 | `LAYOUT_MONITOR_URL` / `FEED_MONITOR_URL` / `OFFICIAL_MONITOR_URL` | 旧 watchdog 迁移后的兼容键；本服务不读取、不使用它们发探针，只为旧 `publish.env` 过渡保留 |
 
 环境变量的完整机器可读合同在 `deploy/config/env-schema.json`，三份无密钥示例分别对应流水线 API env、服务器 `publish.env` 和 renderer env。部署会在改写 live 路径前检查未知键、重复键、必填空值和 schema 版本；验证器只输出变量名，不输出值。

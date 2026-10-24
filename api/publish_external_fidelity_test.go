@@ -40,7 +40,7 @@ func fidelityTestPayloadHTML(t *testing.T) string {
 		ImageMap: `{"https://cdn.example/photo.png":"https://cdn.example/photo.png","https://cdn.example/plain.png":"https://cdn.example/plain.png",
 			"https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`,
 	}
-	payload, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
+	payload, err := buildYunsuoPushPayload(job, []externalAccount{{ID: "a-1", Name: "头条号"}}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
 	if err != nil {
 		t.Fatal(err)
 	}

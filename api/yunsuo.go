@@ -17,49 +17,36 @@ import (
 )
 
 const (
-	yunsuoBaseURLEnv        = "YUNSUO_BASE_URL"
-	yunsuoUserCodeEnv       = "YUNSUO_USER_CODE"
-	yunsuoAPIKeyEnv         = "YUNSUO_API_KEY"
-	yunsuoTargetAccountsEnv = "YUNSUO_TARGET_ACCOUNTS_JSON"
-	yunsuoCategoriesEnv     = "YUNSUO_CATEGORIES"
+	yunsuoBaseURLEnv    = "YUNSUO_BASE_URL"
+	yunsuoUserCodeEnv   = "YUNSUO_USER_CODE"
+	yunsuoAPIKeyEnv     = "YUNSUO_API_KEY"
+	yunsuoCategoriesEnv = "YUNSUO_CATEGORIES"
 
 	defaultYunsuoBaseURL = "https://www.yunsuofabu.com/v1"
 	yunsuoMaxResponse    = 1 << 20
 )
 
-// yunsuoAccountTarget 是一个外发账号。经云梭的平台 ID 发给云梭 API；经自己分发服务的平台
-// （百家号，2026-10-22 起）沿用原来的云梭账号 ID 当 lane 的账号键，旧稿已有的云梭 lane 因此
-// 不会再推一次。Name 只用于飞书卡片和任务留痕，避免将平台字面量写入中立流程。
-// Auto=true 的账号在原创稿公开后自动外发（见 publish_external_auto.go）；
-// 其余账号只能由审核卡按钮人工发起。
-type yunsuoAccountTarget struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Auto bool   `json:"auto,omitempty"`
-	// Platform 选平台规则（yunsuo_platform_profiles.go）；不填按账号名认头条号/百家号。
-	Platform string `json:"platform,omitempty"`
-}
-
+// yunsuoConfig 只剩旧云梭 lane 补查结果用的密钥：2026-10-24 起没有平台再经云梭送稿，外发账号改从
+// 多维表格「平台账号」读（distribution_accounts.go）。没配密钥只让旧 lane 查不了，不挡别的。
 type yunsuoConfig struct {
-	BaseURL    string                `json:"base_url"`
-	UserCode   string                `json:"user_code"`
-	APIKey     string                `json:"-"`
-	Targets    []yunsuoAccountTarget `json:"targets"`
-	Categories []string              `json:"categories"`
+	BaseURL    string   `json:"base_url"`
+	UserCode   string   `json:"user_code"`
+	APIKey     string   `json:"-"`
+	Categories []string `json:"categories"`
 }
 
 func (c yunsuoConfig) String() string {
-	return fmt.Sprintf("{BaseURL:%q UserCode:%q APIKey:[REDACTED] Targets:%d Categories:%d}",
-		c.BaseURL, c.UserCode, len(c.Targets), len(c.Categories))
+	return fmt.Sprintf("{BaseURL:%q UserCode:%q APIKey:[REDACTED] Categories:%d}",
+		c.BaseURL, c.UserCode, len(c.Categories))
 }
 
-// loadYunsuoConfig 是 readiness、卡片和 API 客户端共用的唯一配置入口。
-// 错误信息只说缺少的变量或结构问题，绝不回显 API key。
+// loadYunsuoConfig 错误信息只说缺少的变量，绝不回显 API key。
 func loadYunsuoConfig() (yunsuoConfig, error) {
 	cfg := yunsuoConfig{
-		BaseURL:  strings.TrimSpace(os.Getenv(yunsuoBaseURLEnv)),
-		UserCode: strings.TrimSpace(os.Getenv(yunsuoUserCodeEnv)),
-		APIKey:   strings.TrimSpace(os.Getenv(yunsuoAPIKeyEnv)),
+		BaseURL:    strings.TrimSpace(os.Getenv(yunsuoBaseURLEnv)),
+		UserCode:   strings.TrimSpace(os.Getenv(yunsuoUserCodeEnv)),
+		APIKey:     strings.TrimSpace(os.Getenv(yunsuoAPIKeyEnv)),
+		Categories: splitYunsuoList(os.Getenv(yunsuoCategoriesEnv)),
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = defaultYunsuoBaseURL
@@ -74,91 +61,12 @@ func loadYunsuoConfig() (yunsuoConfig, error) {
 	if cfg.APIKey == "" {
 		return yunsuoConfig{}, fmt.Errorf("云梭发布未配置：缺少 %s", yunsuoAPIKeyEnv)
 	}
-
-	var targets []yunsuoAccountTarget
-	rawTargets := strings.TrimSpace(os.Getenv(yunsuoTargetAccountsEnv))
-	if rawTargets == "" {
-		return yunsuoConfig{}, fmt.Errorf("云梭发布未配置：缺少 %s", yunsuoTargetAccountsEnv)
-	}
-	if err := json.Unmarshal([]byte(rawTargets), &targets); err != nil {
-		return yunsuoConfig{}, fmt.Errorf("%s 必须是 [{\"id\":\"...\",\"name\":\"...\"}]", yunsuoTargetAccountsEnv)
-	}
-	seenTargetIDs := map[string]bool{}
-	for i := range targets {
-		targets[i].ID = strings.TrimSpace(targets[i].ID)
-		targets[i].Name = strings.TrimSpace(targets[i].Name)
-		targets[i].Platform = strings.ToLower(strings.TrimSpace(targets[i].Platform))
-		if targets[i].ID == "" || targets[i].Name == "" {
-			return yunsuoConfig{}, fmt.Errorf("%s 第 %d 项必须同时包含 id 和 name", yunsuoTargetAccountsEnv, i+1)
-		}
-		if targets[i].Platform != "" {
-			if _, ok := yunsuoPlatformProfiles[targets[i].Platform]; !ok {
-				return yunsuoConfig{}, fmt.Errorf("%s 第 %d 项 platform 未知：%s", yunsuoTargetAccountsEnv, i+1, targets[i].Platform)
-			}
-		}
-		if !validYunsuoAccountID(targets[i].ID) {
-			return yunsuoConfig{}, fmt.Errorf("%s 第 %d 项 id 必须是云梭返回的 36 位 UUID 账号 key", yunsuoTargetAccountsEnv, i+1)
-		}
-		if seenTargetIDs[targets[i].ID] {
-			return yunsuoConfig{}, fmt.Errorf("%s 存在重复账号 id", yunsuoTargetAccountsEnv)
-		}
-		seenTargetIDs[targets[i].ID] = true
-	}
-	if len(targets) == 0 {
-		return yunsuoConfig{}, fmt.Errorf("%s 至少需要一个账号", yunsuoTargetAccountsEnv)
-	}
-	cfg.Targets = targets
-
-	cfg.Categories = splitYunsuoList(os.Getenv(yunsuoCategoriesEnv))
-	// 分类只有云梭要，经分发服务的平台不用。
-	for _, target := range targets {
-		if yunsuoProfileForTarget(target).Driver == externalDriverYunsuo && len(cfg.Categories) < 5 {
-			return yunsuoConfig{}, fmt.Errorf("%s 至少需要 5 个不同分类", yunsuoCategoriesEnv)
-		}
-	}
 	return cfg, nil
 }
 
-// autoTargets 原创稿公开后自动外发的账号子集；为空表示不自动外发。
-func (c yunsuoConfig) autoTargets() []yunsuoAccountTarget {
-	var out []yunsuoAccountTarget
-	for _, target := range c.Targets {
-		if target.Auto {
-			out = append(out, target)
-		}
-	}
-	return out
-}
-
-// target 按账号 id 取已配置的外发账号。
-func (c yunsuoConfig) target(accountID string) (yunsuoAccountTarget, bool) {
-	accountID = strings.TrimSpace(accountID)
-	for _, target := range c.Targets {
-		if accountID != "" && target.ID == accountID {
-			return target, true
-		}
-	}
-	return yunsuoAccountTarget{}, false
-}
-
-func validYunsuoAccountID(value string) bool {
-	value = strings.TrimSpace(value)
-	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
-		return false
-	}
-	nonZero := false
-	for index, r := range value {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			continue
-		}
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
-			return false
-		}
-		if r != '0' {
-			nonZero = true
-		}
-	}
-	return nonZero
+// yunsuoCategories 经云梭送稿要带的分类（只剩测试里的旧云梭写法用）。
+func yunsuoCategories() []string {
+	return splitYunsuoList(os.Getenv(yunsuoCategoriesEnv))
 }
 
 func splitYunsuoList(raw string) []string {
@@ -207,15 +115,21 @@ const (
 )
 
 type yunsuoAccountStatus struct {
-	PK            string              `json:"pk,omitempty"`
-	PlatformName  string              `json:"platform_name,omitempty"`
-	PublishTime   string              `json:"publish_time,omitempty"`
-	Status        int                 `json:"status"`
-	Remark        string              `json:"remark,omitempty"`
-	NextRetryTime string              `json:"next_retry_time,omitempty"`
-	FailedCount   int                 `json:"failed_count,omitempty"`
-	CreatedType   string              `json:"created_type,omitempty"`
-	AccountPool   yunsuoAccountTarget `json:"accountPool"`
+	PK            string            `json:"pk,omitempty"`
+	PlatformName  string            `json:"platform_name,omitempty"`
+	PublishTime   string            `json:"publish_time,omitempty"`
+	Status        int               `json:"status"`
+	Remark        string            `json:"remark,omitempty"`
+	NextRetryTime string            `json:"next_retry_time,omitempty"`
+	FailedCount   int               `json:"failed_count,omitempty"`
+	CreatedType   string            `json:"created_type,omitempty"`
+	AccountPool   yunsuoAccountPool `json:"accountPool"`
+}
+
+// yunsuoAccountPool 云梭回执里的账号（云梭自己的账号 id）。
+type yunsuoAccountPool struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type yunsuoAPI interface {
@@ -520,7 +434,7 @@ func parseYunsuoStatuses(raw json.RawMessage) ([]yunsuoAccountStatus, error) {
 			NextRetryTime: strings.TrimSpace(row.NextRetryTime),
 			FailedCount:   row.FailedCount,
 			CreatedType:   strings.TrimSpace(row.CreatedType),
-			AccountPool:   yunsuoAccountTarget{ID: accountID, Name: accountName},
+			AccountPool:   yunsuoAccountPool{ID: accountID, Name: accountName},
 		})
 	}
 	return out, nil

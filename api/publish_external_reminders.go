@@ -86,10 +86,10 @@ func externalIssueSummaryText(issues []publishExternalIssue) string {
 	return strings.Join(parts, "、")
 }
 
-// externalPendingFixes 还没推、卡在推送前检查的平台（按配置顺序）。
-func externalPendingFixes(job publishJob, cfg yunsuoConfig) []publishExternalDraft {
+// externalPendingFixes 还没推、卡在推送前检查的平台（按表里的顺序）。
+func externalPendingFixes(job publishJob, cfg externalTargets) []publishExternalDraft {
 	var out []publishExternalDraft
-	for _, target := range cfg.Targets {
+	for _, target := range cfg.forJob(job) {
 		draft, ok := externalDraftFor(job, target.ID)
 		if !ok || len(draft.Issues) == 0 {
 			continue
@@ -254,7 +254,7 @@ func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJ
 	if r.Want == publishExternalReminderResolved && len(r.MessageIDs) == 0 {
 		return result, nil // 还没提醒过就改好了，不必再说
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return result, err
 	}
@@ -425,12 +425,12 @@ func postMessage(lines [][]any) map[string]any {
 	return map[string]any{"zh_cn": map[string]any{"title": "", "content": lines}}
 }
 
-// externalReminderPlatformNames 待修改的平台名，按配置顺序。
-func externalReminderPlatformNames(cfg yunsuoConfig, drafts []publishExternalDraft) []string {
+// externalReminderPlatformNames 待修改的平台名，按表里的顺序。
+func externalReminderPlatformNames(cfg externalTargets, drafts []publishExternalDraft) []string {
 	names := make([]string, 0, len(drafts))
 	for _, draft := range drafts {
-		if slot := externalTargetSlot(cfg, draft.AccountID); slot >= 0 {
-			names = append(names, yunsuoProfileForTarget(cfg.Targets[slot]).Name)
+		if target, ok := cfg.target(draft.AccountID); ok {
+			names = append(names, target.label())
 		}
 	}
 	return names
@@ -439,7 +439,7 @@ func externalReminderPlatformNames(cfg yunsuoConfig, drafts []publishExternalDra
 // buildExternalReminderOpening 话题开场：@ 负责人，一句话说清哪篇、要同步到哪、差几处；
 // 每处一行粗体写不合要求的地方，下一行给能选的做法；最后一行说改完点哪里。
 // inCard=false（审核卡改不了）时每一步都在改稿页里做，最后一行给改稿页链接。
-func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []publishDistributionOwner, inCard bool) map[string]any {
+func buildExternalReminderOpening(job publishJob, cfg externalTargets, owners []publishDistributionOwner, inCard bool) map[string]any {
 	drafts := externalPendingFixes(job, cfg)
 	names := externalReminderPlatformNames(cfg, drafts)
 	total := 0
@@ -466,8 +466,8 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 	for i, draft := range drafts {
 		name := names[i]
 		profile := yunsuoGenericProfile
-		if slot := externalTargetSlot(cfg, draft.AccountID); slot >= 0 {
-			profile = yunsuoProfileForTarget(cfg.Targets[slot])
+		if target, ok := cfg.target(draft.AccountID); ok {
+			profile = yunsuoProfileForTarget(target)
 		}
 		buttons += "「保存并" + profile.syncAction(name) + "」"
 		prefix := ""
@@ -528,12 +528,11 @@ func buildExternalReminderOpening(job publishJob, cfg yunsuoConfig, owners []pub
 }
 
 // buildExternalReminderClosing 收尾：都改好了，正在同步（不再 @）。
-func buildExternalReminderClosing(job publishJob, cfg yunsuoConfig) map[string]any {
+func buildExternalReminderClosing(job publishJob, cfg externalTargets) map[string]any {
 	var actions []string
-	for _, target := range cfg.Targets {
+	for _, target := range cfg.forJob(job) {
 		if draft, ok := externalDraftFor(job, target.ID); ok && draft.EditedAt != "" {
-			profile := yunsuoProfileForTarget(target)
-			actions = append(actions, profile.syncAction(profile.Name))
+			actions = append(actions, yunsuoProfileForTarget(target).syncAction(target.label()))
 		}
 	}
 	text := "都改好了，正在同步到其他平台。"
@@ -550,7 +549,7 @@ func (p *publishPipeline) prepareExternalDraftAssets(jobID int64) {
 	if err != nil {
 		return
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return
 	}
@@ -566,11 +565,11 @@ func (p *publishPipeline) prepareExternalDraftAssets(jobID int64) {
 		if draft.PreparedFor == draft.CheckedAt {
 			continue
 		}
-		slot := externalTargetSlot(cfg, draft.AccountID)
-		if slot < 0 {
+		target, ok := cfg.target(draft.AccountID)
+		if !ok {
 			continue
 		}
-		profile := yunsuoProfileForTarget(cfg.Targets[slot])
+		profile := yunsuoProfileForTarget(target)
 		out := prepared{checkedAt: draft.CheckedAt, keys: map[string]string{}, keyApps: map[string]string{}}
 		for _, issue := range draft.Issues {
 			switch issue.Field {

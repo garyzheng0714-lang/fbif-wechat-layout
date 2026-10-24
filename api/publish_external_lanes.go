@@ -22,7 +22,9 @@ const publishExternalLaneManual = "manual"
 
 type publishExternalLane struct {
 	AccountID string `json:"account_id"`
-	Name      string `json:"name"`
+	// YunsuoAccountID 2026-10-24 改挂到「平台账号」record_id 前的云梭账号编号：云梭回执按它对。
+	YunsuoAccountID string `json:"yunsuo_account_id,omitempty"`
+	Name            string `json:"name"`
 	// Driver 建 lane 时这个平台的送稿方式；空是云梭（含改这个字段之前的所有 lane）。
 	Driver externalDriver `json:"driver,omitempty"`
 	// queued / pushing / polling / succeeded / failed / reconciliation_required / manual；
@@ -75,6 +77,11 @@ func externalLaneIndex(job publishJob, accountID string) int {
 	return -1
 }
 
+// yunsuoAccountID 云梭认的账号编号：改挂过的用改挂前那个。
+func (l publishExternalLane) yunsuoAccountID() string {
+	return strings.TrimSpace(firstNonEmpty(l.YunsuoAccountID, l.AccountID))
+}
+
 func externalLaneFor(job publishJob, accountID string) (publishExternalLane, bool) {
 	if i := externalLaneIndex(job, accountID); i >= 0 {
 		return job.ExternalDistributionLanes[i], true
@@ -121,12 +128,12 @@ func externalDistributionCoveredAccounts(job publishJob) (map[string]bool, bool)
 }
 
 // externalDistributionMissingTargets 给定账号里还没有 lane 的。
-func externalDistributionMissingTargets(job publishJob, targets []yunsuoAccountTarget) []yunsuoAccountTarget {
+func externalDistributionMissingTargets(job publishJob, targets []externalAccount) []externalAccount {
 	covered, all := externalDistributionCoveredAccounts(job)
 	if all {
 		return nil
 	}
-	var missing []yunsuoAccountTarget
+	var missing []externalAccount
 	for _, target := range targets {
 		if !covered[strings.TrimSpace(target.ID)] {
 			missing = append(missing, target)
@@ -135,9 +142,15 @@ func externalDistributionMissingTargets(job publishJob, targets []yunsuoAccountT
 	return missing
 }
 
-// externalDistributionMissingAutoTargets 还没推过的 auto 账号。
-func externalDistributionMissingAutoTargets(job publishJob, cfg yunsuoConfig) []yunsuoAccountTarget {
-	return externalDistributionMissingTargets(job, cfg.autoTargets())
+// externalDistributionMissingAutoTargets 这篇能发的号里还没推过的 auto 账号。
+func externalDistributionMissingAutoTargets(job publishJob, cfg externalTargets) []externalAccount {
+	var auto []externalAccount
+	for _, target := range cfg.forJob(job) {
+		if target.Auto {
+			auto = append(auto, target)
+		}
+	}
+	return externalDistributionMissingTargets(job, auto)
 }
 
 // externalDistributionSummaryState 各 lane 汇总成一个状态，给卡片版本、回调提示与旧口径用：

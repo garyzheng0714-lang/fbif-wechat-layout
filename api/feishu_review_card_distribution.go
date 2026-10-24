@@ -17,7 +17,8 @@ package main
 // 开通后让人把图发到这张卡的话题里（publish_review_thread.go），没开通时给侧边栏链接。
 //
 // 飞书限制：form 只能放在卡片根上，所以有表单的文章块整个包在根级 form 里；字段名带文章编号与
-// 平台位置，回调只带平台位置（slot），不带账号 id（红线 37）。
+// 账号编号（多维表格「平台账号」的 record_id）。回调带的账号编号只用来在服务端这篇能发的号里挑一个，
+// 不在里面的一律拒（2026-10-24 分发框架）。
 
 import (
 	"crypto/sha256"
@@ -38,15 +39,11 @@ const (
 // reviewCardDistributionElements 根级元素：区标题，再是每篇原创一块。区标题上方不画分割线，
 // 只多留一段间距（2026-10-13 用户：「这根线可以不要」）。
 func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate bool, icons reviewCardIcons) []any {
-	cfg, cfgErr := loadYunsuoConfig()
-	var targets []yunsuoAccountTarget
-	if cfgErr == nil {
-		targets = cfg.Targets
-	}
+	cfg, _ := loadExternalTargets()
 	heading := aggregate && len(jobs) > 1
 	var body []any
 	for _, job := range jobs {
-		body = append(body, reviewCardDistributionGroup(job, targets, allowStart, aggregate, heading, icons)...)
+		body = append(body, reviewCardDistributionGroup(job, cfg.forJob(job), allowStart, aggregate, heading, icons)...)
 	}
 	if len(body) == 0 {
 		return nil
@@ -61,7 +58,7 @@ func reviewCardExternalDistributionElements(job publishJob, allowStart bool) []a
 	return reviewCardDistributionElements([]publishJob{job}, allowStart, false, nil)
 }
 
-func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, allowStart, aggregate, heading bool, icons reviewCardIcons) []any {
+func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allowStart, aggregate, heading bool, icons reviewCardIcons) []any {
 	started := externalDistributionStarted(job)
 	switch {
 	case job.Stage == publishStagePublished:
@@ -95,12 +92,12 @@ func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, 
 	var rows []any
 	fixing := false
 	seen := map[string]bool{}
-	for slot, target := range targets {
+	for _, target := range targets {
 		seen[strings.TrimSpace(target.ID)] = true
 		if _, ok := externalLaneFor(job, target.ID); !ok && !original {
 			continue
 		}
-		row, rowFixing := reviewCardPlatformRow(job, target, slot, canStart, icons)
+		row, rowFixing := reviewCardPlatformRow(job, target, true, canStart, icons)
 		rows = append(rows, row)
 		fixing = fixing || rowFixing
 	}
@@ -108,8 +105,8 @@ func reviewCardDistributionGroup(job publishJob, targets []yunsuoAccountTarget, 
 		if seen[strings.TrimSpace(lane.AccountID)] {
 			continue
 		}
-		// 配置里已去掉的账号：只展示结果，不给操作。
-		row, _ := reviewCardPlatformRow(job, yunsuoAccountTarget{ID: lane.AccountID, Name: lane.Name}, -1, false, icons)
+		// 表里已停用（或不再发这个公众号）的号：只展示结果，不给操作。
+		row, _ := reviewCardPlatformRow(job, externalAccount{ID: lane.AccountID, Name: lane.Name, Label: lane.Name}, false, false, icons)
 		rows = append(rows, row)
 	}
 	if len(rows) == 0 {
@@ -164,20 +161,20 @@ func reviewCardDistributionHeader(job publishJob) map[string]any {
 
 // reviewCardPlatformRow 一个平台一行（一个竖排分栏，行内间距比平台之间小）。待修改且能从这张卡
 // 改的，下面接着放表单字段，返回 fixing=true，由文章块包进根级 form。
-func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int, canStart bool, icons reviewCardIcons) (map[string]any, bool) {
+func reviewCardPlatformRow(job publishJob, target externalAccount, configured, canStart bool, icons reviewCardIcons) (map[string]any, bool) {
 	profile := yunsuoProfileForTarget(target)
-	name := reviewCardSafeText(firstNonEmpty(target.Name, profile.Name), 20)
+	name := reviewCardSafeText(target.label(), 20)
 	if name == "" {
 		name = "未命名平台"
 	}
 	state := externalPlatformStatus(job, target)
-	actionable := canStart && slot >= 0
+	actionable := canStart && configured
 	fixing := actionable && state.NeedsFix
 	editLink := externalDistributionSidebarLink(job.ID)
 
 	var right map[string]any
 	if actionable && state.Editable && !state.NeedsFix {
-		right = reviewCardPlatformSyncButton(job, slot, name, state, profile)
+		right = reviewCardPlatformSyncButton(job, target.ID, name, state, profile)
 	}
 	buttoned := right != nil
 	if right == nil {
@@ -216,7 +213,7 @@ func reviewCardPlatformRow(job publishJob, target yunsuoAccountTarget, slot int,
 	}
 	if fixing {
 		draft, _ := externalDraftFor(job, target.ID)
-		elements = append(elements, reviewCardFixFields(job, draft, profile, name, slot, editLink)...)
+		elements = append(elements, reviewCardFixFields(job, draft, profile, name, target.ID, editLink)...)
 	}
 	return map[string]any{
 		"tag": "column_set", "flex_mode": "none",
@@ -271,7 +268,7 @@ func reviewCardPlatformReason(state externalPlatformState, fixing, buttoned bool
 
 // reviewCardPlatformSyncButton 没推过、或受理前失败可安全重推的平台：按钮推这一个平台。
 // 经分发服务的平台目前只存草稿（2026-10-22 用户裁定），按钮与确认框都照实说。
-func reviewCardPlatformSyncButton(job publishJob, slot int, name string, state externalPlatformState, profile yunsuoPlatformProfile) map[string]any {
+func reviewCardPlatformSyncButton(job publishJob, accountID, name string, state externalPlatformState, profile yunsuoPlatformProfile) map[string]any {
 	retry := state.Status == "失败"
 	text := profile.syncAction(name)
 	confirm := "请确认本文为原创文章。外部发布独立于 FoodTalks；下线本站文章不会自动下线外部平台。确认后将立即提交发布。"
@@ -292,14 +289,14 @@ func reviewCardPlatformSyncButton(job publishJob, slot int, name string, state e
 		"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{
 			"action":               feishuCardActionDistributeExternal,
 			"job_id":               job.ID,
-			"slot":                 slot,
+			"account":              accountID,
 			"distribution_version": publishExternalDistributionCardVersion(job),
 		}}},
 	}
 }
 
 // reviewCardFixFields 待修改平台的表单：逐项写「哪里超了：要求，现状」，再给改的地方。
-func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yunsuoPlatformProfile, name string, slot int, editLink string) []any {
+func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yunsuoPlatformProfile, name, accountID, editLink string) []any {
 	var out []any
 	note := func(content string) {
 		out = append(out, map[string]any{"tag": "markdown", "text_size": "notation", "content": content})
@@ -315,14 +312,14 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 		note("<font color='grey'>现在：" + reviewCardSafeText(issue.Current, 120) + "</font>")
 		// 输入框按字符数限长：英文数字算半个字的平台放宽到按字符数的硬上限，超没超由服务端按平台数法判。
 		_, inputMax := profile.titleCharRange()
-		out = append(out, reviewCardFixInput(reviewCardFixFieldName("t", job.ID, slot), "改成",
+		out = append(out, reviewCardFixInput(reviewCardFixFieldName("t", job.ID, accountID), "改成",
 			firstNonEmpty(draft.SuggestedTitle, issue.Current), issue.Max, max(issue.Max, inputMax), false))
 	}
 	if issue, ok := fields[publishExternalIssueSummary]; ok {
 		note(fmt.Sprintf("<font color='orange'>摘要超出 %d 字</font>：%s最多 %d 字，现在 %d 字",
 			issue.Length-issue.Max, name, issue.Max, issue.Length))
 		note("<font color='grey'>现在：" + reviewCardSafeText(issue.Current, 200) + "</font>")
-		out = append(out, reviewCardFixInput(reviewCardFixFieldName("s", job.ID, slot), "改成",
+		out = append(out, reviewCardFixInput(reviewCardFixFieldName("s", job.ID, accountID), "改成",
 			firstNonEmpty(draft.SuggestedSummary, issue.Current), issue.Max, issue.Max, true))
 	}
 	if issue, ok := fields[publishExternalIssueCover]; ok {
@@ -352,7 +349,7 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 			}
 			note(text)
 			out = append(out, map[string]any{
-				"tag": "select_img", "name": reviewCardFixFieldName("c", job.ID, slot),
+				"tag": "select_img", "name": reviewCardFixFieldName("c", job.ID, accountID),
 				"multi_select": false, "layout": "trisect", "aspect_ratio": "16:9",
 				"style": "laser", "can_preview": false, "required": false, "options": options,
 			})
@@ -363,11 +360,11 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 	buttons := []map[string]any{{
 		"tag": "button", "text": feishuPlainText("保存并" + profile.syncAction(name)), "type": "primary_filled",
 		"size": "small", "width": "default",
-		"name": reviewCardFixFieldName("submit", job.ID, slot), "form_action_type": "submit",
+		"name": reviewCardFixFieldName("submit", job.ID, accountID), "form_action_type": "submit",
 		"behaviors": []any{map[string]any{"type": "callback", "value": map[string]any{
 			"action":               feishuCardActionDistributeFix,
 			"job_id":               job.ID,
-			"slot":                 slot,
+			"account":              accountID,
 			"distribution_version": publishExternalDistributionCardVersion(job),
 		}}},
 	}}
@@ -401,8 +398,8 @@ func reviewCardFixInput(name, label, value string, max, inputMax int, multiline 
 }
 
 // reviewCardFixFieldName 表单字段名在整张卡里唯一（聚合卡里可能有几篇、几个平台同时待修改）。
-func reviewCardFixFieldName(kind string, jobID int64, slot int) string {
-	return fmt.Sprintf("%s_%d_%d", kind, jobID, slot)
+func reviewCardFixFieldName(kind string, jobID int64, accountID string) string {
+	return fmt.Sprintf("%s_%d_%s", kind, jobID, accountID)
 }
 
 // reviewCardCoverValue 封面选项的值：图片地址的短摘要（回调里再按候选列表换回地址）。

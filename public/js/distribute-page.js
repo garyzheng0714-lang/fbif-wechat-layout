@@ -91,11 +91,11 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
     if (!platform.url && platform.draft_url) lines.push(`<a href="${esc(platform.draft_url)}" target="_blank" rel="noopener">去${esc(platform.name)}草稿箱查看</a>`);
     else if (!platform.url && platform.manage_url) lines.push(`<a href="${esc(platform.manage_url)}" target="_blank" rel="noopener">去${esc(platform.name)}后台查看</a>`);
     if (platform.reason) lines.push(`<span>${esc(platform.reason)}</span>`);
-    return `<section class="dist-platform" data-slot="${platform.slot}">${head}${lines.length ? `<p class="dist-meta">${lines.join('')}</p>` : ''}</section>`;
+    return `<section class="dist-platform" data-account="${esc(platform.account)}">${head}${lines.length ? `<p class="dist-meta">${lines.join('')}</p>` : ''}</section>`;
   }
   // 能改但不是待修改（没推过、受理前失败）：失败原因写在名字下面。
   const reasonLine = platform.reason && !platform.needs_fix ? `<p class="dist-meta"><span>${esc(platform.reason)}</span></p>` : '';
-  const slot = platform.slot;
+  const key = esc(platform.account);
   const title = draft.title ?? platform.title;
   const titleState = counterState(title, platform.title_max, platform.title_min, titleCounter(platform));
   const titleSuggest = platform.title_suggested && platform.title_suggested !== title
@@ -109,8 +109,8 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
       ? `<div class="dist-suggest"><span class="dist-suggest-text">建议：${esc(platform.summary_suggested)}</span><button type="button" class="dist-link" data-use="summary">用这个</button></div>`
       : '';
     summaryField = `<div class="dist-field">
-      <div class="dist-field-label"><label for="summary-${slot}">摘要</label><span class="dist-count${summaryState.invalid ? ' is-over' : ''}" data-count="summary">${summaryState.length} / ${platform.summary_max}</span></div>
-      <textarea id="summary-${slot}" name="summary" rows="3" aria-invalid="${summaryState.invalid}">${esc(summary)}</textarea>
+      <div class="dist-field-label"><label for="summary-${key}">摘要</label><span class="dist-count${summaryState.invalid ? ' is-over' : ''}" data-count="summary">${summaryState.length} / ${platform.summary_max}</span></div>
+      <textarea id="summary-${key}" name="summary" rows="3" aria-invalid="${summaryState.invalid}">${esc(summary)}</textarea>
       <p class="dist-hint" data-hint="summary"${summaryState.invalid ? '' : ' hidden'}>${esc(summaryState.text)}</p>
       ${summarySuggest}
     </div>`;
@@ -135,19 +135,19 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
     ? `<p class="dist-hint" role="alert">${esc(draft.coverError)}</p>`
     : coverOK ? '' : `<p class="dist-hint">${platform.cover?.url ? '现在的封面太小' : '还没有封面'}，选一张大图或上传</p>`;
   const requirement = platform.cover_min_width ? `至少 ${platform.cover_min_width}×${platform.cover_min_height}` : '';
-  return `<section class="dist-platform" data-slot="${slot}">
+  return `<section class="dist-platform" data-account="${key}">
     ${head}${reasonLine}
     <form class="dist-form" novalidate>
       <div class="dist-field">
-        <div class="dist-field-label"><label for="title-${slot}">标题</label><span class="dist-count${titleState.invalid ? ' is-over' : ''}" data-count="title">${titleState.length} / ${platform.title_max}</span></div>
-        <textarea id="title-${slot}" name="title" rows="2" aria-invalid="${titleState.invalid}">${esc(title)}</textarea>
+        <div class="dist-field-label"><label for="title-${key}">标题</label><span class="dist-count${titleState.invalid ? ' is-over' : ''}" data-count="title">${titleState.length} / ${platform.title_max}</span></div>
+        <textarea id="title-${key}" name="title" rows="2" aria-invalid="${titleState.invalid}">${esc(title)}</textarea>
         <p class="dist-hint" data-hint="title"${titleState.invalid ? '' : ' hidden'}>${esc(titleState.text)}</p>
         ${titleSuggest}
       </div>
       ${summaryField}
       <div class="dist-field">
-        <div class="dist-field-label"><span id="cover-label-${slot}">封面</span><span class="dist-count${coverOK ? '' : ' is-over'}">${esc(requirement)}</span></div>
-        <div class="dist-covers" role="radiogroup" aria-labelledby="cover-label-${slot}">
+        <div class="dist-field-label"><span id="cover-label-${key}">封面</span><span class="dist-count${coverOK ? '' : ' is-over'}">${esc(requirement)}</span></div>
+        <div class="dist-covers" role="radiogroup" aria-labelledby="cover-label-${key}">
           ${tiles}
           <label class="dist-cover dist-cover-upload${draft.uploading ? ' is-busy' : ''}">
             <input type="file" accept="image/jpeg,image/png" data-upload${draft.uploading ? ' disabled' : ''}>
@@ -174,11 +174,11 @@ export function createDistributePage({ root, articleEl, search, request = authFe
   const query = token ? `?t=${encodeURIComponent(token)}` : '';
   let view = null;
   let polls = 0;
-  const drafts = new Map(); // slot → { title, summary, coverURL, uploading, coverError, result }
+  const drafts = new Map(); // 账号编号 → { title, summary, coverURL, uploading, coverError, result }
 
-  function draftFor(slot) {
-    if (!drafts.has(slot)) drafts.set(slot, {});
-    return drafts.get(slot);
+  function draftFor(account) {
+    if (!drafts.has(account)) drafts.set(account, {});
+    return drafts.get(account);
   }
 
   function showState(message) {
@@ -195,7 +195,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
     }
     const platforms = Array.isArray(view.platforms) ? view.platforms : [];
     root.innerHTML = platforms.length
-      ? platforms.map(platform => renderPlatform(platform, draftFor(platform.slot), view.job?.title)).join('')
+      ? platforms.map(platform => renderPlatform(platform, draftFor(platform.account), view.job?.title)).join('')
       : '<p class="dist-state">没有配置分发平台</p>';
     bind();
   }
@@ -234,8 +234,8 @@ export function createDistributePage({ root, articleEl, search, request = authFe
     }
   }
 
-  function sectionOf(slot) {
-    return root.querySelector(`.dist-platform[data-slot="${slot}"]`);
+  function sectionOf(account) {
+    return root.querySelector(`.dist-platform[data-account="${account}"]`);
   }
 
   function refreshCounter(section, platform, field) {
@@ -254,7 +254,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
   }
 
   async function save(platform, section) {
-    const draft = draftFor(platform.slot);
+    const draft = draftFor(platform.account);
     const titleState = refreshCounter(section, platform, 'title');
     const summaryInput = section.querySelector('[name="summary"]');
     const summaryState = summaryInput ? refreshCounter(section, platform, 'summary') : { invalid: false };
@@ -263,7 +263,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
       section.querySelector('[aria-invalid="true"]')?.focus();
       return;
     }
-    const body = { slot: platform.slot, title: section.querySelector('[name="title"]').value };
+    const body = { account: platform.account, title: section.querySelector('[name="title"]').value };
     if (summaryInput) body.summary = summaryInput.value;
     if (draft.coverURL && draft.coverURL !== platform.cover?.url) body.cover_url = draft.coverURL;
     const button = section.querySelector('.dist-primary');
@@ -282,9 +282,9 @@ export function createDistributePage({ root, articleEl, search, request = authFe
         return;
       }
       view = await response.json();
-      drafts.delete(platform.slot);
-      const next = (view.platforms || []).find(item => item.slot === platform.slot);
-      draftFor(platform.slot).result = next?.needs_fix
+      drafts.delete(platform.account);
+      const next = (view.platforms || []).find(item => item.account === platform.account);
+      draftFor(platform.account).result = next?.needs_fix
         ? `已保存，还要改：${next.reason || ''}`
         : next?.editable ? '已保存，正在排队同步' : `已保存，${next?.status || '正在同步'}`;
       polls = 0;
@@ -313,9 +313,9 @@ export function createDistributePage({ root, articleEl, search, request = authFe
   }
 
   async function upload(platform, file) {
-    const section = sectionOf(platform.slot);
+    const section = sectionOf(platform.account);
     if (!section || !file) return;
-    const draft = draftFor(platform.slot);
+    const draft = draftFor(platform.account);
     if (draft.uploading) return;
     draft.title = section.querySelector('[name="title"]').value;
     const summaryInput = section.querySelector('[name="summary"]');
@@ -327,7 +327,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
     }
     const text = typedText(platform, section);
     const form = new FormData();
-    form.append('slot', String(platform.slot));
+    form.append('account', platform.account);
     for (const [field, value] of Object.entries(text)) form.append(field, value);
     form.append('file', file);
     draft.uploading = true;
@@ -344,11 +344,11 @@ export function createDistributePage({ root, articleEl, search, request = authFe
       }
       view = await response.json();
       // 一起提交的字段以服务端为准；没带上的（还不合要求）留着人接着改。
-      const next = (view.platforms || []).find(item => item.slot === platform.slot);
+      const next = (view.platforms || []).find(item => item.account === platform.account);
       const kept = {};
       if (!('title' in text) && draft.title !== next?.title) kept.title = draft.title;
       if (!('summary' in text) && draft.summary !== undefined && draft.summary !== next?.summary) kept.summary = draft.summary;
-      drafts.set(platform.slot, kept);
+      drafts.set(platform.account, kept);
       kept.result = next?.needs_fix
         ? `封面已换上，还要改：${next.reason || ''}`
         : next?.editable ? '封面已换上，正在排队同步' : `封面已换上，${next?.status || '正在同步'}`;
@@ -363,12 +363,12 @@ export function createDistributePage({ root, articleEl, search, request = authFe
   }
 
   // 粘贴、拖入的图交给哪个平台：只有一个能改的就是它；否则是刚操作过的那个，再否则第一个缺封面的。
-  let activeSlot = null;
+  let activeAccount = null;
   function uploadTarget(fromNode) {
     const editable = (view?.platforms || []).filter(platform => platform.editable);
     const section = fromNode?.closest?.('.dist-platform');
-    const slot = section ? Number(section.dataset.slot) : activeSlot;
-    return editable.find(platform => platform.slot === slot)
+    const account = section ? section.dataset.account : activeAccount;
+    return editable.find(platform => platform.account === account)
       || (editable.length === 1 ? editable[0] : editable.find(platform => platform.cover_issue))
       || null;
   }
@@ -381,9 +381,9 @@ export function createDistributePage({ root, articleEl, search, request = authFe
     return Array.from(event.dataTransfer?.types || []).includes('Files');
   }
 
-  function setDragging(slot) {
+  function setDragging(account) {
     root.querySelectorAll('.dist-platform').forEach(section => {
-      section.querySelector('.dist-cover-upload')?.classList.toggle('is-dragover', slot != null && Number(section.dataset.slot) === slot);
+      section.querySelector('.dist-cover-upload')?.classList.toggle('is-dragover', account != null && section.dataset.account === account);
     });
   }
 
@@ -394,7 +394,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
     event.preventDefault();
     const target = uploadTarget(event.target);
     if (event.dataTransfer) event.dataTransfer.dropEffect = target ? 'copy' : 'none';
-    setDragging(target ? target.slot : null);
+    setDragging(target ? target.account : null);
   });
   doc?.addEventListener('dragleave', event => {
     if (!event.relatedTarget) setDragging(null);
@@ -419,9 +419,9 @@ export function createDistributePage({ root, articleEl, search, request = authFe
   function bind() {
     for (const platform of view.platforms || []) {
       if (!platform.editable) continue;
-      const section = sectionOf(platform.slot);
+      const section = sectionOf(platform.account);
       if (!section) continue;
-      const draft = draftFor(platform.slot);
+      const draft = draftFor(platform.account);
       for (const field of ['title', 'summary']) {
         const input = section.querySelector(`[name="${field}"]`);
         input?.addEventListener('input', () => {
@@ -433,7 +433,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
         const field = button.dataset.use;
         draft[field] = field === 'title' ? platform.title_suggested : platform.summary_suggested;
         render();
-        sectionOf(platform.slot)?.querySelector(`[name="${field}"]`)?.focus();
+        sectionOf(platform.account)?.querySelector(`[name="${field}"]`)?.focus();
       }));
       section.querySelectorAll('[data-cover]').forEach(button => button.addEventListener('click', () => {
         draft.title = section.querySelector('[name="title"]').value;
@@ -447,8 +447,8 @@ export function createDistributePage({ root, articleEl, search, request = authFe
         const file = event.target.files?.[0];
         if (file) upload(platform, file);
       });
-      section.addEventListener('focusin', () => { activeSlot = platform.slot; });
-      section.addEventListener('pointerdown', () => { activeSlot = platform.slot; });
+      section.addEventListener('focusin', () => { activeAccount = platform.account; });
+      section.addEventListener('pointerdown', () => { activeAccount = platform.account; });
       section.querySelector('.dist-form')?.addEventListener('submit', event => {
         event.preventDefault();
         save(platform, section);

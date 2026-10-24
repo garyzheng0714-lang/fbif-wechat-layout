@@ -282,9 +282,12 @@ type reviewCardOutcome struct {
 }
 
 type reviewCardActionValue struct {
-	Action              string `json:"action"`
-	JobID               any    `json:"job_id"`
-	Slot                any    `json:"slot"` // 外发平台位置（配置里第几个账号）；不带账号 id（红线 37）
+	Action string `json:"action"`
+	JobID  any    `json:"job_id"`
+	// Account 外发按钮推哪个号（多维表格「平台账号」的 record_id），服务端只在这篇能发的号里认；
+	// Slot 是 2026-10-24 前的卡按位置认号，位置会随表里加号、停号错开，一律请人用最新卡片。
+	Account             string `json:"account"`
+	Slot                any    `json:"slot"`
 	ReviewVersion       string `json:"review_version"`
 	LifecycleVersion    string `json:"lifecycle_version"`
 	DistributionVersion string `json:"distribution_version"`
@@ -320,7 +323,7 @@ func (p *publishPipeline) reviewCardActionWithForm(ctx context.Context, operator
 	case feishuCardActionResyncSource:
 		return p.handleSourceResyncCardAction(job, operatorOpenID, value.SourceResyncVersion)
 	case feishuCardActionDistributeExternal:
-		return p.handleExternalDistributionCardAction(job, operatorOpenID, value.DistributionVersion, value.Slot)
+		return p.handleExternalDistributionCardAction(job, operatorOpenID, value)
 	case feishuCardActionDistributeFix:
 		return p.handleExternalDistributionFixAction(job, operatorOpenID, value, formValue)
 	case feishuCardActionUnpublish, feishuCardActionRepublish:
@@ -355,22 +358,25 @@ func reviewCardActionSupported(action string) bool {
 	}
 }
 
-func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, actor, version string, rawSlot any) reviewCardOutcome {
-	// 新卡每个平台一枚按钮，带平台位置，只推这一个平台；旧卡的按钮不带，推这篇所有能推的平台。
+func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, actor string, value reviewCardActionValue) reviewCardOutcome {
+	// 新卡每个平台一枚按钮，带账号编号，只推这一个号；更早的卡按钮什么都不带，推这篇所有能推的号。
+	version := value.DistributionVersion
 	var only map[string]bool
-	var target yunsuoAccountTarget
-	if rawSlot != nil {
-		cfg, err := loadYunsuoConfig()
+	var target externalAccount
+	if value.Slot != nil && strings.TrimSpace(value.Account) == "" {
+		return reviewCardOutcome{toastType: "error", toastContent: "分发平台配置已变化，请使用最新卡片"}
+	}
+	if account := strings.TrimSpace(value.Account); account != "" {
+		cfg, err := loadExternalTargets()
 		if err != nil {
 			return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 		}
-		slot, valid := coerceFeishuSlot(rawSlot)
-		picked, ok := externalTargetBySlot(cfg, slot)
-		if !valid || !ok {
+		picked, ok := cfg.jobTarget(job, account)
+		if !ok {
 			return reviewCardOutcome{toastType: "error", toastContent: "分发平台配置已变化，请使用最新卡片"}
 		}
 		target = picked
-		only = map[string]bool{strings.TrimSpace(target.ID): true}
+		only = map[string]bool{target.ID: true}
 	}
 	stateOutcome := func(current publishJob) (reviewCardOutcome, bool) {
 		if only == nil {
@@ -378,7 +384,7 @@ func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, a
 		}
 		if lane, ok := externalLaneFor(current, target.ID); ok && !externalLaneCanSafeRetry(lane) {
 			state := externalPlatformStatus(current, target)
-			return reviewCardOutcome{toastType: "info", toastContent: yunsuoProfileForTarget(target).Name + state.Status + "，不会重复推送"}, true
+			return reviewCardOutcome{toastType: "info", toastContent: target.label() + state.Status + "，不会重复推送"}, true
 		}
 		return reviewCardOutcome{}, false
 	}
@@ -400,7 +406,7 @@ func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, a
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
 	if profile := yunsuoProfileForTarget(target); only != nil && profile.Driver == externalDriverRobot {
-		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在" + profile.syncAction(profile.Name)}
+		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在" + profile.syncAction(target.label())}
 	}
 	return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在同步分发"}
 }
@@ -603,40 +609,21 @@ func coerceFeishuJobID(v any) int64 {
 	}
 }
 
-// coerceFeishuSlot 平台位置：数字或数字字符串，非负。
-func coerceFeishuSlot(v any) (int, bool) {
-	switch n := v.(type) {
-	case float64:
-		if n >= 0 && n == float64(int(n)) {
-			return int(n), true
-		}
-	case string:
-		if slot, err := strconv.Atoi(strings.TrimSpace(n)); err == nil && slot >= 0 {
-			return slot, true
-		}
-	case json.Number:
-		if slot, err := strconv.Atoi(n.String()); err == nil && slot >= 0 {
-			return slot, true
-		}
-	}
-	return 0, false
-}
-
 // handleExternalDistributionFixAction 卡片里「保存并同步至X」：读这一篇、这个平台的表单字段，
 // 交给与侧边栏同一个修改入口（submitExternalDraftEdit）。卡片只回 toast，新卡由 outbox 原位更新。
 func (p *publishPipeline) handleExternalDistributionFixAction(job publishJob, actor string, value reviewCardActionValue, formValue map[string]any) reviewCardOutcome {
 	if !externalDistributionVersionMatches(value.DistributionVersion, job) {
 		return reviewCardOutcome{toastType: "error", toastContent: "卡片内容已更新，请在最新卡片上修改"}
 	}
-	slot, ok := coerceFeishuSlot(value.Slot)
-	if !ok {
-		return reviewCardOutcome{toastType: "error", toastContent: "按钮数据不完整，无法定位平台"}
+	account := strings.TrimSpace(value.Account)
+	if account == "" {
+		return reviewCardOutcome{toastType: "error", toastContent: "分发平台配置已变化，请在最新卡片上修改"}
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	target, ok := externalTargetBySlot(cfg, slot)
+	target, ok := cfg.jobTarget(job, account)
 	if !ok {
 		return reviewCardOutcome{toastType: "error", toastContent: "分发平台配置已变化，请使用最新卡片"}
 	}
@@ -644,17 +631,17 @@ func (p *publishPipeline) handleExternalDistributionFixAction(job publishJob, ac
 	fields := externalIssueFields(draft.Issues)
 	var edit externalDraftEdit
 	if _, ok := fields[publishExternalIssueTitle]; ok {
-		if text, present := feishuFormText(formValue, reviewCardFixFieldName("t", job.ID, slot)); present {
+		if text, present := feishuFormText(formValue, reviewCardFixFieldName("t", job.ID, target.ID)); present {
 			edit.Title = &text
 		}
 	}
 	if _, ok := fields[publishExternalIssueSummary]; ok {
-		if text, present := feishuFormText(formValue, reviewCardFixFieldName("s", job.ID, slot)); present {
+		if text, present := feishuFormText(formValue, reviewCardFixFieldName("s", job.ID, target.ID)); present {
 			edit.Summary = &text
 		}
 	}
 	if _, ok := fields[publishExternalIssueCover]; ok {
-		if picked, present := feishuFormText(formValue, reviewCardFixFieldName("c", job.ID, slot)); present && picked != "" {
+		if picked, present := feishuFormText(formValue, reviewCardFixFieldName("c", job.ID, target.ID)); present && picked != "" {
 			for _, candidate := range draft.Candidates {
 				if reviewCardCoverValue(candidate.URL) == picked {
 					url := candidate.URL
@@ -670,15 +657,15 @@ func (p *publishPipeline) handleExternalDistributionFixAction(job publishJob, ac
 	if edit.Title == nil && edit.Summary == nil && edit.CoverURL == nil {
 		return reviewCardOutcome{toastType: "error", toastContent: "没有收到修改内容"}
 	}
-	updated, err := p.submitExternalDraftEdit(job.ID, slot, edit, actor)
+	updated, err := p.submitExternalDraftEdit(job.ID, target.ID, edit, actor)
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
 	profile := yunsuoProfileForTarget(target)
 	if draft, _ := externalDraftFor(updated, target.ID); len(draft.Issues) > 0 {
-		return reviewCardOutcome{toastType: "info", toastContent: "已保存，" + profile.Name + "还要改：" + externalIssueSummaryText(draft.Issues)}
+		return reviewCardOutcome{toastType: "info", toastContent: "已保存，" + target.label() + "还要改：" + externalIssueSummaryText(draft.Issues)}
 	}
-	return reviewCardOutcome{toastType: "success", toastContent: "已保存，正在" + profile.syncAction(profile.Name)}
+	return reviewCardOutcome{toastType: "success", toastContent: "已保存，正在" + profile.syncAction(target.label())}
 }
 
 // feishuFormText 表单字段的文本值（单选图片也是字符串；多选取第一个）。present=false 表示没有这个字段。

@@ -135,6 +135,8 @@ func main() {
 	defer publishLock.Close()
 	publishStore := newPublishJobStore(publishPath)
 	publishPipe := newPublishPipeline(publishStore, ruleStore)
+	// 外发账号（多维表格「平台账号」）经分发服务读，存一份在任务库旁边；每份启用前先把旧记录改挂过来。
+	startExternalAccountDirectory(externalAccountsPath(publishPath), publishPipe.adoptExternalAccountIDs)
 	publishPipe.deliverySettings = newPublishDeliverySettingsStore(publishDeliverySettingsPath(*rulesPath))
 	publishPipe.editReports = newPublishEditReportStore(publishEditReportPath(publishDeliverySettingsPath(*rulesPath)))
 	publishPipe.publicDir = publicDir

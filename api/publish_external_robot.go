@@ -65,7 +65,7 @@ func buildRobotDraftPayload(job publishJob, profile yunsuoPlatformProfile, draft
 }
 
 // buildExternalLanePayload 按平台的送稿方式冻结这条 lane 的内容：返回 JSON 与推到平台上的标题。
-func buildExternalLanePayload(job publishJob, target yunsuoAccountTarget, categories []string, draft publishExternalDraft) ([]byte, string, error) {
+func buildExternalLanePayload(job publishJob, target externalAccount, categories []string, draft publishExternalDraft) ([]byte, string, error) {
 	profile := yunsuoProfileForTarget(target)
 	if profile.Driver == externalDriverRobot {
 		payload, err := buildRobotDraftPayload(job, profile, draft)
@@ -75,7 +75,7 @@ func buildExternalLanePayload(job publishJob, target yunsuoAccountTarget, catego
 		encoded, err := json.Marshal(payload)
 		return encoded, payload.Title, err
 	}
-	payload, err := buildYunsuoPushPayloadWithDraft(job, []yunsuoAccountTarget{target}, categories, draft)
+	payload, err := buildYunsuoPushPayloadWithDraft(job, []externalAccount{target}, categories, draft)
 	if err != nil {
 		return nil, "", err
 	}
@@ -144,7 +144,7 @@ func (p *publishPipeline) pushRobotLane(job publishJob, lane publishExternalLane
 		return
 	}
 	record, saveErr := client.SaveDraft(context.Background(), payload.Platform, robotDraftRequest{
-		IdempotencyKey: intentKey, Title: payload.Title, HTML: payload.HTML, CoverURL: payload.CoverURL,
+		IdempotencyKey: intentKey, Account: lane.AccountID, Title: payload.Title, HTML: payload.HTML, CoverURL: payload.CoverURL,
 	})
 	profile := robotPayloadProfile(payload)
 	result := robotLaneResultOf(record, saveErr, profile)

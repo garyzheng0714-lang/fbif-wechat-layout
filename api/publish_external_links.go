@@ -244,7 +244,7 @@ func (p *publishPipeline) refreshExternalDistributionLinks() {
 	if p == nil || p.store == nil || publishWorkersPaused() {
 		return
 	}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return
 	}
@@ -344,7 +344,7 @@ func validateExternalArticleURL(raw string, profile yunsuoPlatformProfile) (stri
 // 或给已发布的平台补链接。正在同步的平台不能改。
 func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context, jobID int64, req externalManualRequest) (externalManualResult, error) {
 	result := externalManualResult{JobID: jobID, AccountID: strings.TrimSpace(req.AccountID), DryRun: req.DryRun}
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		return result, err
 	}
@@ -353,7 +353,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 		return result, errors.New("account_id 不是已配置的外发账号")
 	}
 	profile := yunsuoProfileForTarget(target)
-	result.Platform = target.Name
+	result.Platform = target.label()
 	job, err := p.store.byID(jobID)
 	if err != nil {
 		return result, err
@@ -364,7 +364,10 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	}
 	existing, exists := externalLaneFor(job, target.ID)
 	if exists && publishExternalDistributionProcessing(existing.State) {
-		return result, fmt.Errorf("%s正在同步，等结果出来再登记", target.Name)
+		return result, fmt.Errorf("%s正在同步，等结果出来再登记", target.label())
+	}
+	if externalUnadoptedLaneCovers(job, target, cfg) {
+		return result, fmt.Errorf("这篇在%s还有没改挂到「平台账号」的旧记录，改挂后再登记", target.label())
 	}
 	articleURL, title := "", strings.TrimSpace(req.Title)
 	switch {
@@ -387,7 +390,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	}
 	settled := exists && externalLaneSettled(existing)
 	if settled && articleURL == "" {
-		return result, fmt.Errorf("%s已是发布状态，补链接时必须提供 url 或 lookup", target.Name)
+		return result, fmt.Errorf("%s已是发布状态，补链接时必须提供 url 或 lookup", target.label())
 	}
 	result.Action = "register_manual"
 	if settled {
@@ -410,7 +413,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	if req.DryRun {
 		preview := existing
 		if !exists {
-			preview = publishExternalLane{AccountID: target.ID, Name: target.Name}
+			preview = publishExternalLane{AccountID: target.ID, Name: target.label()}
 		}
 		apply(&preview)
 		result.Lane = preview
@@ -418,14 +421,14 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	}
 	updated, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
 		lane, ok := externalLaneFor(current, target.ID)
-		if ok != exists {
+		if ok != exists || externalUnadoptedLaneCovers(current, target, cfg) {
 			return false
 		}
 		return !ok || (lane.State == existing.State && lane.ContentPK == existing.ContentPK)
 	}, func(current *publishJob) {
 		i := externalLaneIndex(*current, target.ID)
 		if i < 0 {
-			current.ExternalDistributionLanes = append(current.ExternalDistributionLanes, publishExternalLane{AccountID: target.ID, Name: target.Name})
+			current.ExternalDistributionLanes = append(current.ExternalDistributionLanes, publishExternalLane{AccountID: target.ID, Name: target.label()})
 			i = len(current.ExternalDistributionLanes) - 1
 		}
 		apply(&current.ExternalDistributionLanes[i])
@@ -439,7 +442,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 		return result, err
 	}
 	if !swapped {
-		return result, fmt.Errorf("%s的状态刚刚变化，请重新读取后再登记", target.Name)
+		return result, fmt.Errorf("%s的状态刚刚变化，请重新读取后再登记", target.label())
 	}
 	result.Lane, _ = externalLaneFor(updated, target.ID)
 	result.Lane.PayloadJSON = ""

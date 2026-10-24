@@ -33,10 +33,9 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	t.Setenv("FOODTALKS_CATEGORY_IDS", "52,58")
 	t.Setenv("FOODTALKS_EXPECTED_TARGET", "test")
 	t.Setenv("YUNSUO_BASE_URL", "https://www.yunsuofabu.com/v1")
-	t.Setenv("YUNSUO_USER_CODE", "test-user")
-	t.Setenv("YUNSUO_API_KEY", "secret-yunsuo-key")
-	t.Setenv("YUNSUO_TARGET_ACCOUNTS_JSON", `[{"id":"11111111-1111-4111-8111-111111111111","name":"头条号"},{"id":"22222222-2222-4222-8222-222222222222","name":"百家号"}]`)
-	t.Setenv("YUNSUO_CATEGORIES", "美食,饮食文化,财经,消费,公司")
+	t.Setenv("DISTRIBUTION_API_URL", "http://127.0.0.1:18095")
+	t.Setenv("DISTRIBUTION_API_TOKEN", "secret-distribution-token")
+	setTestExternalAccounts(t, testArticleAccount("recToutiao", "toutiao", false), testArticleAccount("recBaijia", "baijiahao", false))
 	t.Setenv("PUBLISH_HTTP_REVIEW_ENABLED", "")
 
 	mux := newPublishTestMux(t, env)
@@ -45,7 +44,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 		t.Fatalf("readiness 应 200，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
 	for _, secret := range []string{
-		"secret-render-token", "secret-feishu-app", "oc_secret_chat", "secret-monitor-user", "ou_secret_reviewer", "secret-mimo-key", "secret-yunsuo-key", "test-token",
+		"secret-render-token", "secret-feishu-app", "oc_secret_chat", "secret-monitor-user", "ou_secret_reviewer", "secret-mimo-key", "secret-distribution-token", "test-token",
 	} {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Fatalf("readiness 不得泄露配置值 %q：%s", secret, rec.Body.String())
@@ -58,7 +57,7 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	if !got.Ready || !got.ConfigSchema.Matches || got.ConfigSchema.Expected != runtimeConfigSchemaVersion ||
 		got.ConfigSchema.Actual != runtimeConfigSchemaVersion || !got.WorkersPaused ||
 		!got.ServiceAuth.Configured || !got.ImageUpload.Configured || got.HTTPReviewEnabled || got.FoodTalks.Target != "test" ||
-		!got.FoodTalks.TargetMatchesExpected || !got.Yunsuo.Configured || got.Yunsuo.TargetCount != 2 || got.EnrichMode != "mimo" {
+		!got.FoodTalks.TargetMatchesExpected || !got.Distribution.Configured || got.Distribution.AccountCount != 2 || len(got.Distribution.TargetNames) != 2 || got.EnrichMode != "mimo" {
 		t.Fatalf("readiness 核心状态错误：%+v", got)
 	}
 	if !got.GeneratedFiles.ready() {

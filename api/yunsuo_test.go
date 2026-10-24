@@ -13,14 +13,13 @@ func TestLoadYunsuoConfigAndRedactSecret(t *testing.T) {
 	t.Setenv(yunsuoBaseURLEnv, "")
 	t.Setenv(yunsuoUserCodeEnv, "user")
 	t.Setenv(yunsuoAPIKeyEnv, "never-print-this-key")
-	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"11111111-1111-4111-8111-111111111111","name":"头条号"},{"id":"22222222-2222-4222-8222-222222222222","name":"百家号"}]`)
 	t.Setenv(yunsuoCategoriesEnv, "美食,饮食文化,财经,消费,公司")
 
 	cfg, err := loadYunsuoConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BaseURL != defaultYunsuoBaseURL || len(cfg.Targets) != 2 || len(cfg.Categories) != 5 {
+	if cfg.BaseURL != defaultYunsuoBaseURL || len(cfg.Categories) != 5 {
 		t.Fatalf("配置解析不符合预期：%v", cfg)
 	}
 	encoded, err := json.Marshal(cfg)
@@ -36,8 +35,6 @@ func TestLoadYunsuoConfigRejectsPlainHTTPPublicBaseURL(t *testing.T) {
 	setRequired := func() {
 		t.Setenv(yunsuoUserCodeEnv, "user")
 		t.Setenv(yunsuoAPIKeyEnv, "secret")
-		t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"11111111-1111-4111-8111-111111111111","name":"头条号"}]`)
-		t.Setenv(yunsuoCategoriesEnv, "美食,饮食文化,财经,消费,公司")
 	}
 	setRequired()
 	t.Setenv(yunsuoBaseURLEnv, "http://example.com/v1")
@@ -211,7 +208,7 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 		CoverURL:   "https://origin.example/image.jpg",
 	}
 	payload, err := buildYunsuoPushPayload(job,
-		[]yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}, {ID: "a-2", Name: "百家号"}},
+		[]externalAccount{{ID: "a-1", Name: "头条号"}, {ID: "a-2", Name: "百家号"}},
 		[]string{"美食", "饮食文化", "财经", "消费", "公司"})
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +289,7 @@ func TestEditorDraftsUseEachPlatformsMarkup(t *testing.T) {
 	stubYunsuoImageSize(t, nil)
 	job := manualLayoutTestJob()
 	for _, c := range []struct{ name, key, heading string }{{"百家号", "baijiahao", "h3"}, {"头条号", "toutiao", "h1"}} {
-		profile := yunsuoProfileForTarget(yunsuoAccountTarget{ID: "a-1", Name: c.name})
+		profile := yunsuoProfileForTarget(externalAccount{ID: "a-1", Name: c.name})
 		payload, err := buildRobotDraftPayload(job, profile, publishExternalDraft{})
 		if err != nil {
 			t.Fatal(err)
@@ -397,7 +394,7 @@ func TestYunsuoCoverFollowsHowEachPlatformPlacesIt(t *testing.T) {
 		ImageMap:   `{"https://cdn.example/lead.jpg":"https://cdn.example/lead.jpg","https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`,
 	}
 	for _, name := range []string{"头条号", "百家号"} {
-		payload, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(yunsuoAccountTarget{ID: "a-1", Name: name}), publishExternalDraft{})
+		payload, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(externalAccount{ID: "a-1", Name: name}), publishExternalDraft{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -430,13 +427,13 @@ func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
 		ImageMap:   `{"https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`,
 	}
 	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
-	job.Title = "西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了"                   // 26 字
-	legacy := []yunsuoAccountTarget{{ID: "a-9", Name: "云梭旧号"}} // 认不出平台的号：通用版式，经云梭
+	job.Title = "西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了"               // 26 字
+	legacy := []externalAccount{{ID: "a-9", Name: "云梭旧号"}} // 认不出平台的号：通用版式，经云梭
 	payload, err := buildYunsuoPushPayload(job, legacy, categories)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if toutiao, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(yunsuoAccountTarget{Name: "头条号"}), publishExternalDraft{}); err != nil || toutiao.Title != job.Title {
+	if toutiao, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(externalAccount{Name: "头条号"}), publishExternalDraft{}); err != nil || toutiao.Title != job.Title {
 		t.Fatalf("头条号标题原样送：%+v %v", toutiao, err)
 	}
 	if payload.Title != job.Title || payload.LongTitle != job.Title {
@@ -447,7 +444,7 @@ func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
 		payload.Title != job.Title || !strings.HasPrefix(payload.LongTitle, job.Title+"｜") {
 		t.Fatalf("15 字标题：title=%q long=%q err=%v", payload.Title, payload.LongTitle, err)
 	}
-	baijia := yunsuoProfileForTarget(yunsuoAccountTarget{Name: "百家号"})
+	baijia := yunsuoProfileForTarget(externalAccount{Name: "百家号"})
 	if payload, err := buildRobotDraftPayload(job, baijia, publishExternalDraft{}); err != nil || payload.Title != job.Title {
 		t.Fatalf("百家号标题原样送：%+v %v", payload, err)
 	}
@@ -460,7 +457,7 @@ func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
 // 头条号标题字数：英文字母、数字算半个字，2–30 字（与分发服务同一数法）。编辑手发的 #287（32 个字符）、
 // #292（35）、#289（42）头条都收了；按每个字符算 1 会把它们误拦成待修改。
 func TestToutiaoTitleCountsASCIIAsHalf(t *testing.T) {
-	profile := yunsuoProfileForTarget(yunsuoAccountTarget{Name: "头条号"})
+	profile := yunsuoProfileForTarget(externalAccount{Name: "头条号"})
 	for _, title := range []string{
 		"Innova揭晓2027全球食品饮料十大趋势，穿越二十年创新周期",
 		"最美的中国茶馆tea'stone，8年开了18家店：我的2周体验和观察",
@@ -535,7 +532,7 @@ func TestYunsuoCoverRespectsToutiaoMinimum(t *testing.T) {
 		ImageMap:   `{"https://cdn.example/lead.png":"https://cdn.example/lead.png","https://cdn.example/wx-cover.jpg":"https://cdn.example/wx-cover.jpg"}`,
 		CoverURL:   "https://cdn.example/wx-cover.jpg",
 	}
-	targets := []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}
+	targets := []externalAccount{{ID: "a-1", Name: "头条号"}}
 	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
 
 	stubYunsuoImageSize(t, map[string][2]int{
@@ -673,7 +670,7 @@ func TestYunsuoHTMLDropsUnmirroredAndNonPublicURLs(t *testing.T) {
 		CoverURL:   "https://cdn.example/cover.jpg", // 已是 ImageMap value，允许。
 	}
 	payload, err := buildYunsuoPushPayload(job,
-		[]yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}},
+		[]externalAccount{{ID: "a-1", Name: "头条号"}},
 		[]string{"美食", "饮食文化", "财经", "消费", "公司"})
 	if err != nil {
 		t.Fatal(err)
@@ -716,7 +713,7 @@ func TestYunsuoRenderStripsWechatTrailerBeforePush(t *testing.T) {
 		CoverURL:   "https://cdn.example/cover.jpg",
 		BlocksJSON: blocks,
 		ImageMap:   imageMap,
-	}, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}, {ID: "a-2", Name: "百家号"}},
+	}, []externalAccount{{ID: "a-1", Name: "头条号"}, {ID: "a-2", Name: "百家号"}},
 		[]string{"美食", "饮食文化", "财经", "消费", "公司"})
 	if err != nil {
 		t.Fatal(err)

@@ -71,7 +71,7 @@ func testRobotSavedRecord(id string) robotDraftRecord {
 func setTestRobotOnlyConfig(t *testing.T) {
 	t.Helper()
 	setTestYunsuoConfig(t)
-	t.Setenv(yunsuoTargetAccountsEnv, `[{"id":"`+testYunsuoBaijiaID+`","name":"百家号"}]`)
+	setTestExternalAccounts(t, testArticleAccount(testYunsuoBaijiaID, "baijiahao", false))
 	t.Setenv(yunsuoCategoriesEnv, "")
 }
 
@@ -110,6 +110,9 @@ func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 		t.Fatalf("头条号、百家号都经分发服务各存一次：yunsuo=%v robot=%v", yunsuo.pushed, robot.platforms)
 	}
 	req := robot.saves[1]
+	if robot.saves[0].Account != testYunsuoToutiaoID || req.Account != testYunsuoBaijiaID {
+		t.Fatalf("存草稿要带上「平台账号」的编号，分发服务才知道存进哪个号：%q %q", robot.saves[0].Account, req.Account)
+	}
 	if !robotKeyPattern.MatchString(req.IdempotencyKey) || !strings.HasPrefix(req.IdempotencyKey, fmt.Sprintf("job-%d.", job.ID)) {
 		t.Fatalf("幂等键只用分发服务认的字符：%q", req.IdempotencyKey)
 	}
@@ -139,19 +142,19 @@ func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 	if status.Processing != 0 || status.Failed != 0 || status.ReconciliationRequired != 0 || status.ExternalFidelityMismatches != 0 || status.ExternalFidelityUnavailable != 0 {
 		t.Fatalf("存好的草稿是终态，不算处理中或失败：%+v", status)
 	}
-	if out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, got, nil)); len(robot.saves) != 2 || yunsuo.pushCalls != 0 || out.toastContent != "草稿都已存好，无需重复操作" {
+	if out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, got, "")); len(robot.saves) != 2 || yunsuo.pushCalls != 0 || out.toastContent != "草稿都已存好，无需重复操作" {
 		t.Fatalf("存好草稿后再点不得再提交：out=%+v saves=%d", out, len(robot.saves))
 	}
 }
 
-func mustDistributeValue(t *testing.T, job publishJob, slot *int) json.RawMessage {
+func mustDistributeValue(t *testing.T, job publishJob, account string) json.RawMessage {
 	t.Helper()
 	value := map[string]any{
 		"action": feishuCardActionDistributeExternal, "job_id": job.ID,
 		"distribution_version": publishExternalDistributionCardVersion(job),
 	}
-	if slot != nil {
-		value["slot"] = *slot
+	if account != "" {
+		value["account"] = account
 	}
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -242,8 +245,7 @@ func TestRobotLaneRetryReusesKeyAndSucceeds(t *testing.T) {
 	}
 	failed := mustJob(t, env, job.ID)
 	robot.saveErr = nil
-	slot := 0
-	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, failed, &slot))
+	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, failed, testYunsuoBaijiaID))
 	if out.toastType != "success" || out.toastContent != "已受理，正在存草稿至百家号" {
 		t.Fatalf("重新存草稿应受理：%+v", out)
 	}
@@ -276,7 +278,7 @@ func TestRobotLaneRestartRecoveryChecksByKey(t *testing.T) {
 		fmt.Sprint(robot.gets) != "[baijiahao/"+interrupted.IntentKey+"]" {
 		t.Fatalf("恢复应转待核对并按同一个键查：%+v gets=%v", lane, robot.gets)
 	}
-	if state := externalPlatformStatus(mustJob(t, env, job.ID), yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}); state.Status != "待核对" || strings.Contains(state.Reason, "云梭") {
+	if state := externalPlatformStatus(mustJob(t, env, job.ID), externalAccount{ID: testYunsuoBaijiaID, Name: "百家号"}); state.Status != "待核对" || strings.Contains(state.Reason, "云梭") {
 		t.Fatalf("待核对的说法不提云梭：%+v", state)
 	}
 
@@ -331,7 +333,7 @@ func TestLegacyBaijiahaoYunsuoLanesStayOnYunsuo(t *testing.T) {
 	legacy.IntentKey = "legacy-intent"
 	legacy.RequestedAt = time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
 	job = setTestLanes(t, env, job.ID, legacy)
-	target := yunsuoAccountTarget{ID: testYunsuoBaijiaID, Name: "百家号"}
+	target := externalAccount{ID: testYunsuoBaijiaID, Name: "百家号"}
 	if state := externalPlatformStatus(job, target); state.Status != "待核对" || !strings.Contains(state.Reason, "云梭后台") {
 		t.Fatalf("旧的云梭百家号 lane 照旧按云梭说：%+v", state)
 	}
@@ -424,7 +426,7 @@ func TestRobotLaneCardWording(t *testing.T) {
 	}
 
 	// 侧边栏同一套说法：按钮后半句、草稿地址。
-	cfg, err := loadYunsuoConfig()
+	cfg, err := loadExternalTargets()
 	if err != nil {
 		t.Fatalf("只有经分发服务的平台时不要求云梭分类：%v", err)
 	}
