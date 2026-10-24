@@ -393,7 +393,7 @@ func distributionSectionJSON(t *testing.T, card map[string]any) string {
 // 循环容器组件」）：每篇原创一个与文章块同款的细外框块，块里每个平台一行——名字、文章链接、靠右状态，
 // 下一行原因；每个平台自己的按钮，只带平台位置不带账号 id；转载稿聚合卡没有这一区。
 func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	job := reviewCardTestJob(publishStagePublished)
 	job.FoodTalksNewsID = 7318
 	job.PublicationAction = publishPublicationActionPublish
@@ -411,7 +411,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	if !strings.Contains(body, `"corner_radius":"16px"`) || !strings.Contains(body, `"border_color":"grey-100"`) {
 		t.Fatalf("分发块应与上半部分文章块同款外框: %s", body)
 	}
-	if !strings.Contains(body, `"account":"`+testYunsuoToutiaoID+`"`) || !strings.Contains(body, `"account":"`+testYunsuoBaijiaID+`"`) ||
+	if !strings.Contains(body, `"account":"`+testToutiaoAccountID+`"`) || !strings.Contains(body, `"account":"`+testBaijiaAccountID+`"`) ||
 		strings.Contains(body, `"slot"`) {
 		t.Fatalf("按钮带多维表格「平台账号」的编号，不再按位置认号: %s", body)
 	}
@@ -427,22 +427,22 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 		}
 	}
 
-	// 头条号已发、查到链接；百家号（改走分发服务之前的云梭 lane，没有 driver）云梭受理后失败。
-	toutiao := testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded)
+	// 云梭（2026-10-24 下线）留下的旧 lane：头条号已发、有链接；百家号失败的可重新存草稿。
+	toutiao := testLane(testToutiaoAccountID, "头条号", publishExternalDistributionSucceeded)
 	toutiao.Title, toutiao.URL = "这个女性能量饮料，靠青汁粉走红了", "https://www.toutiao.com/article/7560000000000000000/"
-	baijia := testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed)
+	baijia := testLane(testBaijiaAccountID, "百家号", publishExternalDistributionFailed)
 	baijia.ContentPK, baijia.Remark = "pk-1", "授权过期"
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
 	for _, want := range []string{"<font color='green'>已发布</font>", "[这个女性能量饮料，靠青汁粉走红了](https://www.toutiao.com/article/7560000000000000000/)",
-		"**头条号**　[", "<font color='red'>失败</font>",
-		"<font color='grey'>账号登录失效，在云梭插件更新登录后云梭会自动重试</font>"} {
+		"**头条号**　[", `"content":"<font color='red'>上次同步失败</font>"`, `"content":"重新存草稿至百家号"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("分发区缺少 %q: %s", want, body)
 		}
 	}
-	if strings.Contains(body, feishuCardActionDistributeExternal) {
-		t.Fatalf("云梭已受理的失败不得给重推按钮: %s", body)
+	// 旧通道的失败原因（授权过期、登录失效）对重新存草稿没用，不写。
+	if strings.Contains(body, "云梭") || strings.Contains(body, "授权过期") {
+		t.Fatalf("卡片不提云梭、不写旧通道的失败原因: %s", body)
 	}
 	// 平台标题与本文相同：链接文字用「查看文章」。
 	toutiao.Title = job.Title
@@ -453,7 +453,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	}
 	// 百家号已发布但还没拿到文章链接（不自动找）：给百家号后台看发布情况（2026-10-13 用户：「百家号的
 	// 已发布，我没看到任何的链接。我也查看不了发布情况」）。头条号有链接就不给后台。
-	baijia = testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionSucceeded)
+	baijia = testLane(testBaijiaAccountID, "百家号", publishExternalDistributionSucceeded)
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
 	if !strings.Contains(body, "**百家号**　[去百家号后台查看](https://baijiahao.baidu.com/builder/rc/content)") ||
@@ -474,21 +474,23 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 		t.Fatalf("两篇原创各一块，块头带同一张封面: %s", body)
 	}
 
-	// 百家号（旧的云梭 lane）受理前失败：可安全重推，只重推它；再推走的是现在的分发服务、存草稿。
-	baijia = testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionFailed)
+	// 百家号失败：可重新存草稿，只存它。
+	baijia = testLane(testBaijiaAccountID, "百家号", publishExternalDistributionFailed)
 	baijia.Error = "封面图尺寸过小"
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
-	if !strings.Contains(body, "<font color='grey'>封面图太小，换封面后重新同步</font>") || !strings.Contains(body, `"content":"重新存草稿至百家号"`) ||
+	if !strings.Contains(body, "<font color='red'>上次同步失败</font>　<font color='grey'>封面图太小</font>") || !strings.Contains(body, `"content":"重新存草稿至百家号"`) ||
 		!strings.Contains(body, "重新存草稿至百家号？") || strings.Contains(body, `"content":"同步至头条号"`) {
-		t.Fatalf("受理前失败应给只推百家号的重试按钮: %s", body)
+		t.Fatalf("失败应给只存百家号的重试按钮: %s", body)
 	}
 
-	// 同步中：不给按钮。
-	job.ExternalDistributionLanes = []publishExternalLane{toutiao, testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionPolling)}
+	// 存草稿中：不给按钮。
+	saving := testLane(testBaijiaAccountID, "百家号", publishExternalDistributionPushing)
+	saving.Driver = externalDriverRobot
+	job.ExternalDistributionLanes = []publishExternalLane{toutiao, saving}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
-	if !strings.Contains(body, "<font color='blue'>同步中</font>") || strings.Contains(body, feishuCardActionDistributeExternal) {
-		t.Fatalf("同步中不给按钮: %s", body)
+	if !strings.Contains(body, "<font color='blue'>存草稿中</font>") || strings.Contains(body, feishuCardActionDistributeExternal) {
+		t.Fatalf("存草稿中不给按钮: %s", body)
 	}
 
 	// 转载稿：聚合卡没有这一区；单篇卡留一句说明。
@@ -523,7 +525,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 // 改好？不过这里一定要做好引导，提示清楚要把什么改成什么」）：写清超了多少、要求与现状，输入框预填
 // 建议，封面从正文大图里点选；表单在卡片根上，字段名唯一，回调只带平台位置。
 func TestReviewCardDistributionFixForm(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
 	job := reviewCardTestJob(publishStagePublished)
 	job.FoodTalksNewsID = 7318
@@ -531,7 +533,7 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	job.ReviewDeliveryAppID = "review-app"
 	long := "这是一条明显超过了头条号三十个字上限的文章标题，需要编辑缩短以后再同步"
 	job.ExternalDistributionDrafts = []publishExternalDraft{{
-		AccountID: testYunsuoToutiaoID,
+		AccountID: testToutiaoAccountID,
 		Issues: []publishExternalIssue{
 			{Field: publishExternalIssueTitle, Current: long, Length: runeLen(long), Min: 15, Max: 30},
 			{Field: publishExternalIssueCover, Current: "https://cdn.example.com/small.jpg", Width: 300, Height: 200, MinWidth: 452, MinHeight: 352},
@@ -558,10 +560,10 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 		fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：头条号最多 30 字（英文字母、数字两个算一个字），现在 %d 字", runeLen(long)-30, runeLen(long)),
 		"现在：" + long,
 		// 输入框按字符数限长：全是英文数字时可到 60 个字符；按头条数法超没超由服务端判。
-		`"name":"t_72_` + testYunsuoToutiaoID + `"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":60`, `"placeholder":{"content":"30 字以内"`, `"content":"改成"`,
+		`"name":"t_72_` + testToutiaoAccountID + `"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":60`, `"placeholder":{"content":"30 字以内"`, `"content":"改成"`,
 		"<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200",
-		`"tag":"select_img"`, `"name":"c_72_` + testYunsuoToutiaoID + `"`, `"img_key":"img_big"`, `"value":"` + reviewCardCoverValue("https://cdn.example.com/big.jpg") + `"`,
-		`"content":"保存并存草稿至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"account":"` + testYunsuoToutiaoID + `"`,
+		`"tag":"select_img"`, `"name":"c_72_` + testToutiaoAccountID + `"`, `"img_key":"img_big"`, `"value":"` + reviewCardCoverValue("https://cdn.example.com/big.jpg") + `"`,
+		`"content":"保存并存草稿至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"account":"` + testToutiaoAccountID + `"`,
 		"在侧边栏修改", "applink.feishu.cn/client/web_url/open?mode=sidebar-semi",
 	} {
 		if !strings.Contains(body, want) {
@@ -581,7 +583,7 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	}
 	// 下线后不再给改稿表单，只说要改什么。
 	job.Stage = publishStageOffline
-	job.ExternalDistributionLanes = []publishExternalLane{testLane(testYunsuoBaijiaID, "百家号", publishExternalDistributionSucceeded)}
+	job.ExternalDistributionLanes = []publishExternalLane{testLane(testBaijiaAccountID, "百家号", publishExternalDistributionSucceeded)}
 	if body := cardJSON(t, buildReviewDoneCard(job)); strings.Contains(body, `"tag":"form"`) || !strings.Contains(body, "待修改") {
 		t.Fatalf("下线后不得给改稿表单: %s", body)
 	}
@@ -593,7 +595,7 @@ func TestReviewBatchCardAllowsResyncAfterDistribution(t *testing.T) {
 	job := reviewCardTestJob(publishStagePublished)
 	job.FoodTalksNewsID = 7318
 	job.PublicationAction = publishPublicationActionPublish
-	job.ExternalDistributionLanes = []publishExternalLane{testLane(testYunsuoToutiaoID, "头条号", publishExternalDistributionSucceeded)}
+	job.ExternalDistributionLanes = []publishExternalLane{testLane(testToutiaoAccountID, "头条号", publishExternalDistributionSucceeded)}
 	var buttons []map[string]any
 	reviewCardButtons(buildReviewBatchCard([]publishJob{job}), &buttons)
 	for _, button := range buttons {

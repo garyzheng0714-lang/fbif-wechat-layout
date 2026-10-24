@@ -1,6 +1,6 @@
 package main
 
-// yunsuo_distribution_rules.go — 多平台分发（头条号经云梭、百家号经自己的分发服务）的通用版式规则；
+// yunsuo_distribution_rules.go — 多平台分发（头条号、百家号都经自己的分发服务存草稿）的通用版式规则；
 // 各平台不同的参数与正文写法在 yunsuo_platform_profiles.go。
 //
 // 与 FoodTalks 网站规则物理隔离：外发正文虽取自网站已发布稿（保留编辑在 CMS 的手改），
@@ -12,8 +12,7 @@ package main
 //   - 首图留在原位带图注，说明与「图片来源」用「；」并成一条、不截短；
 //   - 段间不插空行，正文不带任何链接；
 //   - 不放作者名片/二维码：平台会提示「图片含二维码」并限制推荐；
-//   - 封面用公众号封面（与 FoodTalks 一致）；云梭会把封面插到正文最前面的平台（CoverPrepended，
-//     百家号经云梭时是），文章以图开头就用这张图当封面并从正文拿掉，插回来正好在原位。
+//   - 封面用公众号封面（与 FoodTalks 一致），由分发服务在封面弹窗单独上传，正文不动。
 
 import (
 	"bytes"
@@ -48,7 +47,7 @@ var yunsuoImageSize = fetchYunsuoImageSize
 
 type yunsuoDistribution struct {
 	Blocks  []Block
-	Cover   string   // 推给云梭的封面（已映射的公网地址）
+	Cover   string   // 外发的封面（已映射的公网地址）
 	Credits []string // 署名（「作者：Sage」「编辑：Bobo」），写进文末声明
 }
 
@@ -63,7 +62,7 @@ func prepareYunsuoDistribution(blocks []Block, imageMap map[string]string, profi
 	blocks = dropYunsuoNameCards(blocks, imageMap)
 	blocks, credits := takeYunsuoCredits(blocks)
 	blocks = numberYunsuoSections(blocks)
-	blocks, cover := chooseYunsuoCover(blocks, imageMap, profile, strings.TrimSpace(wechatCover), strings.TrimSpace(chosen))
+	cover := chooseYunsuoCover(blocks, imageMap, profile, strings.TrimSpace(wechatCover), strings.TrimSpace(chosen))
 	return yunsuoDistribution{Blocks: blocks, Cover: cover, Credits: credits}
 }
 
@@ -72,30 +71,13 @@ func yunsuoWechatCover(job publishJob, imageMap map[string]string) string {
 	return publicYunsuoMediaURL(mapYunsuoMedia(job.CoverURL, imageMap))
 }
 
-// chooseYunsuoCover 定封面，并按云梭在这个平台怎么放封面决定正文要不要让出那张图：
-// 会把封面插到正文最前面的平台，封面若是正文里的图就从正文拿掉，否则同一张图出现两次；
-// 不插的平台正文不动。顺序：人换的封面 → （会插的平台）开头那张图 → 公众号封面 → 正文第一张够大的图。
-func chooseYunsuoCover(blocks []Block, imageMap map[string]string, profile yunsuoPlatformProfile, wechatCover, chosen string) ([]Block, string) {
-	take := func(src string) []Block {
-		if !profile.CoverPrepended {
-			return blocks
-		}
-		return takeYunsuoImage(blocks, imageMap, src)
-	}
+// chooseYunsuoCover 定封面，正文不动：人换的封面 → 公众号封面 → 正文第一张够大的图。
+func chooseYunsuoCover(blocks []Block, imageMap map[string]string, profile yunsuoPlatformProfile, wechatCover, chosen string) string {
 	if chosen != "" {
-		return take(chosen), chosen
-	}
-	if profile.CoverPrepended {
-		if i := firstYunsuoContentBlock(blocks); i >= 0 && canonicalBlockKind(blocks[i].K) == "img" {
-			if src := publicYunsuoMediaURL(mapYunsuoMedia(blocks[i].Src, imageMap)); src != "" {
-				if _, _, small := profile.coverTooSmall(src); !small {
-					return take(src), src
-				}
-			}
-		}
+		return chosen
 	}
 	if wechatCover != "" {
-		return blocks, wechatCover
+		return wechatCover
 	}
 	for _, block := range blocks {
 		if canonicalBlockKind(block.K) != "img" {
@@ -103,41 +85,11 @@ func chooseYunsuoCover(blocks []Block, imageMap map[string]string, profile yunsu
 		}
 		if src := publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap)); src != "" {
 			if _, _, small := profile.coverTooSmall(src); !small {
-				return take(src), src
+				return src
 			}
 		}
 	}
-	return blocks, ""
-}
-
-// takeYunsuoImage 把做了封面的那张正文图从正文拿掉。图在正文开头时图注留着（封面插回来，
-// 图注正好在它下面）；在正文中间时连图注一起拿掉。不在正文里就原样返回。
-func takeYunsuoImage(blocks []Block, imageMap map[string]string, src string) []Block {
-	for i, block := range blocks {
-		if canonicalBlockKind(block.K) != "img" || publicYunsuoMediaURL(mapYunsuoMedia(block.Src, imageMap)) != src {
-			continue
-		}
-		end := i + 1
-		if i != firstYunsuoContentBlock(blocks) {
-			for end < len(blocks) && canonicalBlockKind(blocks[end].K) == "cap" {
-				end++
-			}
-		}
-		out := make([]Block, 0, len(blocks)-(end-i))
-		out = append(out, blocks[:i]...)
-		return append(out, blocks[end:]...)
-	}
-	return blocks
-}
-
-// firstYunsuoContentBlock 第一块有内容的块（跳过空段）。
-func firstYunsuoContentBlock(blocks []Block) int {
-	for i := range blocks {
-		if yunsuoBlockHasContent(blocks[i]) {
-			return i
-		}
-	}
-	return -1
+	return ""
 }
 
 func yunsuoBlockHasContent(block Block) bool {

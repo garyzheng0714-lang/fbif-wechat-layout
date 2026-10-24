@@ -42,18 +42,19 @@ test('改稿页：字数与服务端同口径（按字符、合并空白）', ()
   assert.equal(counterState('刚好合适的一句标题', 20, 8).invalid, false);
 });
 
-// 头条号标题英文字母、数字两个算一个字（与 api/yunsuo_platform_profiles.go titleLength 同口径），
-// 按字符数还不能超过云梭 title 档的 40 个字符。
+// 头条号标题英文字母、数字两个算一个字（与 api/yunsuo_platform_profiles.go titleLength 同口径）：
+// #289 编辑手发的 42 个字符按此数法正好 30 字，头条收了。
 test('改稿页：头条号标题英文数字算半个字', () => {
-  const toutiao = { halfWidth: true, fieldMax: 40 };
+  const toutiao = { halfWidth: true };
   const tt289 = 'Whole Foods Market发布2027年8大食品趋势！苦味升级、豆类热潮…';
   assert.equal(charCount('Innova揭晓2027全球食品饮料十大趋势，穿越二十年创新周期', true), 27);
   assert.equal(counterState('Innova揭晓2027全球食品饮料十大趋势，穿越二十年创新周期', 30, 15, toutiao).invalid, false);
   assert.equal(charCount(tt289, true), 30);
-  assert.deepEqual(counterState(tt289, 30, 15, toutiao), { length: 30, over: 2, text: '超出 2 个字符（最多 40 个字符）', invalid: true });
+  assert.equal(counterState(tt289, 30, 15, toutiao).invalid, false);
+  assert.deepEqual(counterState(tt289 + '好', 30, 15, toutiao), { length: 31, over: 1, text: '超出 1 字', invalid: true });
 });
 
-test('改稿页：写清超了多少、给建议，选大图作封面后保存并同步', async () => {
+test('改稿页：写清超了多少、给建议，选大图作封面后保存并存草稿', async () => {
   const { document, window } = parseHTML('<p id="article"></p><div id="root"></div>');
   globalThis.Event = window.Event;
   const root = document.querySelector('#root');
@@ -63,7 +64,7 @@ test('改稿页：写清超了多少、给建议，选大图作封面后保存�
     calls.push({ path, method: init.method || 'GET', body: init.body });
     if (init.method === 'PUT') {
       current = platformsView();
-      current.platforms[0] = { ...current.platforms[0], status: '同步中', tone: 'blue', editable: false, needs_fix: false, title: '老茶铺把茶做成零食，年营收过亿' };
+      current.platforms[0] = { ...current.platforms[0], status: '存草稿中', tone: 'blue', editable: false, needs_fix: false, title: '老茶铺把茶做成零食，年营收过亿' };
       return Response.json(current);
     }
     return Response.json(current);
@@ -103,7 +104,7 @@ test('改稿页：写清超了多少、给建议，选大图作封面后保存�
   await waitFor(() => calls.some(call => call.method === 'PUT'));
   const put = calls.find(call => call.method === 'PUT');
   assert.deepEqual(JSON.parse(put.body), { account: 'recToutiao', title: '老茶铺把茶做成零食，年营收过亿', cover_url: 'https://cdn.example.com/big.jpg' });
-  await waitFor(() => /同步中/.test(root.querySelector('[data-account="recToutiao"] .dist-status').textContent));
+  await waitFor(() => /存草稿中/.test(root.querySelector('[data-account="recToutiao"] .dist-status').textContent));
 });
 
 test('改稿页：已发布但还没拿到文章链接，给平台后台看发布情况', () => {
@@ -127,7 +128,7 @@ test('改稿页：只存了草稿的平台给草稿箱链接，按钮照实说�
   const editing = renderPlatform({ ...platformsView().platforms[0], account: 'recBaijia', name: '百家号', action: '存草稿至百家号' }, {}, longTitle);
   assert.match(editing, /<button type="submit" class="dist-primary">保存并存草稿至百家号<\/button>/);
   const legacy = renderPlatform(platformsView().platforms[0], {}, longTitle);
-  assert.match(legacy, /<button type="submit" class="dist-primary">保存并同步至头条号<\/button>/, '没给 action 时照旧');
+  assert.match(legacy, /<button type="submit" class="dist-primary">保存并存草稿至头条号<\/button>/, '没给 action 时也说存草稿');
 });
 
 test('改稿页：没有签名链接时说清楚从哪打开', async () => {

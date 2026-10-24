@@ -3,8 +3,7 @@ package main
 // publish_external_robot.go — 经自己的分发服务（distribution_robot.go）送稿的 lane：百家号、头条号（2026-10-24 起）。
 //
 // 2026-10-22 用户裁定：审核卡「同步至百家号」改走自己的机器人，先只存草稿、不发布，用户看过
-// 线上效果再加发布。与云梭 lane 共用 queued / pushing / failed / reconciliation_required，多一个
-// 终态 draft_saved：
+// 线上效果再加发布。状态 queued / pushing / failed / reconciliation_required，终态 draft_saved：
 //
 //	queued → pushing（提交前先落 intent，IntentKey 就是发给分发服务的幂等键）
 //	  → draft_saved：草稿存好，ContentPK=草稿编号、DraftURL，分发服务当场读回的核对写进 Fidelity；
@@ -36,7 +35,7 @@ type robotDraftPayload struct {
 	CoverURL string `json:"cover_url"`
 }
 
-// buildRobotDraftPayload 与云梭同一套正文规则与导流尾拦截；标题原样（人给这个平台改过的优先），
+// buildRobotDraftPayload 通用正文规则与导流尾拦截，写法按平台；标题原样（人给这个平台改过的优先），
 // 封面单独上传、不进正文。
 func buildRobotDraftPayload(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft) (robotDraftPayload, error) {
 	_, rendered, err := renderExternalBody(job, profile, draft)
@@ -64,35 +63,14 @@ func buildRobotDraftPayload(job publishJob, profile yunsuoPlatformProfile, draft
 	return robotDraftPayload{Platform: profile.Key, Title: title, HTML: rendered.HTML, CoverURL: rendered.Cover}, nil
 }
 
-// buildExternalLanePayload 按平台的送稿方式冻结这条 lane 的内容：返回 JSON 与推到平台上的标题。
-func buildExternalLanePayload(job publishJob, target externalAccount, categories []string, draft publishExternalDraft) ([]byte, string, error) {
-	profile := yunsuoProfileForTarget(target)
-	if profile.Driver == externalDriverRobot {
-		payload, err := buildRobotDraftPayload(job, profile, draft)
-		if err != nil {
-			return nil, "", err
-		}
-		encoded, err := json.Marshal(payload)
-		return encoded, payload.Title, err
-	}
-	payload, err := buildYunsuoPushPayloadWithDraft(job, []externalAccount{target}, categories, draft)
+// buildExternalLanePayload 冻结这条 lane 的草稿内容：返回 JSON 与存到平台上的标题。
+func buildExternalLanePayload(job publishJob, target externalAccount, draft publishExternalDraft) ([]byte, string, error) {
+	payload, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(target), draft)
 	if err != nil {
 		return nil, "", err
 	}
 	encoded, err := json.Marshal(payload)
-	return encoded, payload.titleField(profile.TitleField), err
-}
-
-// externalLaneFrozenHTML 冻结在 lane 上的正文，按这条 lane 的送稿方式解。
-func externalLaneFrozenHTML(lane publishExternalLane) (string, error) {
-	if lane.Driver == externalDriverRobot {
-		var payload robotDraftPayload
-		err := json.Unmarshal([]byte(lane.PayloadJSON), &payload)
-		return payload.HTML, err
-	}
-	var payload yunsuoPushPayload
-	err := json.Unmarshal([]byte(lane.PayloadJSON), &payload)
-	return payload.HTML, err
+	return encoded, payload.Title, err
 }
 
 // robotIdempotencyKey 同一份冻结内容同一个键：卡片重试、管理员重发、进程重启后再提交，分发服务都只认
@@ -204,7 +182,7 @@ func robotLaneResultOf(record robotDraftRecord, err error, profile yunsuoPlatfor
 
 func robotRecordError(record robotDraftRecord, fallback string) string {
 	if record.Error != nil && strings.TrimSpace(*record.Error) != "" {
-		return safeYunsuoMessage(*record.Error)
+		return safeDistributionMessage(*record.Error)
 	}
 	return fallback
 }
@@ -259,7 +237,7 @@ func robotDraftFidelity(record robotDraftRecord, platform, now string) publishEx
 		check.Attempts = externalFidelityMaxAttempts
 		check.Error = "分发工具没有读回这篇草稿"
 		if readBackError != "" {
-			check.Error = "读回草稿失败：" + safeYunsuoMessage(readBackError)
+			check.Error = "读回草稿失败：" + safeDistributionMessage(readBackError)
 		}
 		check.Note = strings.Join(notes, "；")
 		return check
@@ -296,8 +274,11 @@ func robotDraftAssistNote(assists []robotDraftAssist, platform string) string {
 	if len(steps) == 0 {
 		return ""
 	}
-	return safeYunsuoMessage(platform + "改版：" + strings.Join(steps, "；"))
+	return safeDistributionMessage(platform + "改版：" + strings.Join(steps, "；"))
 }
+
+// robotResolveWithin 结果不明的 lane 推送后多久内还按幂等键去查。
+const robotResolveWithin = 45 * 24 * time.Hour
 
 // robotLaneAwaitingResult 结果不明、还在补查期内的分发服务 lane（只查不提交，可以每轮都查）。
 func robotLaneAwaitingResult(lane publishExternalLane, now time.Time) bool {
@@ -306,7 +287,7 @@ func robotLaneAwaitingResult(lane publishExternalLane, now time.Time) bool {
 		return false
 	}
 	requestedAt, err := time.Parse(time.RFC3339, lane.RequestedAt)
-	return err == nil && now.Sub(requestedAt) <= publishExternalLateRefreshWithin
+	return err == nil && now.Sub(requestedAt) <= robotResolveWithin
 }
 
 // resolveRobotLane 按同一个幂等键问分发服务这条 lane 的结果。
@@ -373,7 +354,7 @@ func (p *publishPipeline) recoverRobotLane(job publishJob, lane publishExternalL
 	p.spawnExternalWork(func() { p.resolveRobotLane(job.ID, lane.AccountID) })
 }
 
-// robotPlatformState 经分发服务的平台现在的状态（卡片与侧边栏）；不出现云梭的排队、养号这些说法。
+// robotPlatformState 经分发服务的平台现在的状态（卡片与侧边栏）。
 func robotPlatformState(lane publishExternalLane, profile yunsuoPlatformProfile) externalPlatformState {
 	state := externalPlatformState{URL: reviewCardSafeURL(lane.URL), Title: strings.TrimSpace(lane.Title)}
 	switch {

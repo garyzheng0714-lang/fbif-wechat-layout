@@ -120,7 +120,7 @@ func TestPublishMonitoringSeparatesBusyDegradedAndUnhealthy(t *testing.T) {
 	}
 }
 
-func TestPublishMonitoringUsesExternalIntentAgeAcrossPollUpdates(t *testing.T) {
+func TestPublishMonitoringUsesExternalIntentAgeAcrossResultChecks(t *testing.T) {
 	t.Setenv(deploymentWritesPausedEnv, "0")
 	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
 	job, _, err := store.create("site:https://mp.weixin.qq.com/s/external-slow", "https://mp.weixin.qq.com/s/external-slow")
@@ -131,7 +131,7 @@ func TestPublishMonitoringUsesExternalIntentAgeAcrossPollUpdates(t *testing.T) {
 	if _, err := store.update(job.ID, func(current *publishJob) {
 		current.Stage = publishStagePublished
 		current.ExternalDistributionLanes = []publishExternalLane{{
-			AccountID: "acct-1", Name: "头条号", State: publishExternalDistributionPolling, ContentPK: "pk",
+			AccountID: "acct-1", Name: "头条号", Driver: externalDriverRobot, State: publishExternalDistributionPushing,
 			RequestedAt:  startedAt.Add(-time.Minute).Format(time.RFC3339),
 			IntentAt:     startedAt.Format(time.RFC3339),
 			LastPolledAt: time.Now().UTC().Format(time.RFC3339),
@@ -142,7 +142,7 @@ func TestPublishMonitoringUsesExternalIntentAgeAcrossPollUpdates(t *testing.T) {
 	status := currentPublishMonitoring(store, false, time.Now().UTC())
 	if status.OldestProcessingAgeSeconds < 10*60 ||
 		!publishMonitoringHasIssue(publishMonitoringStatus{Issues: status.Warnings}, "processing_slow:") {
-		t.Fatalf("轮询更新 UpdatedAt 后仍应按外部分发 intent 计龄：%+v", status)
+		t.Fatalf("查结果更新 UpdatedAt 后仍应按外部分发 intent 计龄：%+v", status)
 	}
 }
 
@@ -356,7 +356,7 @@ func TestPublishMonitoringPublishedOldSubflowFailuresRemainMetricOnly(t *testing
 	}
 }
 
-// TestPublishMonitoringExternalFailureRecencyUsesLaneFailureTime 云梭迟到结果补查会刷新 job.UpdatedAt；
+// TestPublishMonitoringExternalFailureRecencyUsesLaneFailureTime 查结果、改卡都会刷新 job.UpdatedAt；
 // 第三方平台失败是否「近期」按 lane 失败时间算，几周前的失败不能因为补查一直告警。
 func TestPublishMonitoringExternalFailureRecencyUsesLaneFailureTime(t *testing.T) {
 	t.Setenv(deploymentWritesPausedEnv, "0")

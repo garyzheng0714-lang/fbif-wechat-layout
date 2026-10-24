@@ -59,12 +59,10 @@ func fixActionValue(t *testing.T, job publishJob, account string) json.RawMessag
 // 应该支持在群里 @ 对应的人，提醒去更换标题」「能否直接在卡片里改好」）：头条号先不推、记下问题与
 // 建议，百家号照推；卡片表单提交改好的标题后马上推，推出去的头条号标题就是人改的那一句。
 func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
 	stubYunsuoImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
-	fake := newBothAccountsYunsuo()
-	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	robot := useFakeRobot(env)
 	env.pipeline.externalSuggest = func(_ context.Context, kind, current string, min, max int) (string, error) {
 		return "老茶铺把茶做成零食，年营收1.4亿", nil
@@ -79,7 +77,7 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 		t.Fatalf("头条号标题超限应先不存：robot=%v %+v", robot.platforms, robot.saves)
 	}
 	got := mustJob(t, env, job.ID)
-	draft, _ := externalDraftFor(got, testYunsuoToutiaoID)
+	draft, _ := externalDraftFor(got, testToutiaoAccountID)
 	title := externalIssueFields(draft.Issues)[publishExternalIssueTitle]
 	if title.Max != 30 || title.Length != toutiaoTitleLength(testLongToutiaoTitle) || title.Current != testLongToutiaoTitle {
 		t.Fatalf("应记下标题问题与现状：%+v", draft)
@@ -93,15 +91,15 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 
 	// 超出上限的修改当场拒绝，并说清还要删几个字。
 	tooLong := "老茶铺把茶做成零食和甜品，只开六家店，年营收就做到了一点四亿元人民币啊"
-	out := env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, testYunsuoToutiaoID),
-		map[string]any{reviewCardFixFieldName("t", got.ID, testYunsuoToutiaoID): tooLong})
+	out := env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, testToutiaoAccountID),
+		map[string]any{reviewCardFixFieldName("t", got.ID, testToutiaoAccountID): tooLong})
 	if out.toastType != "error" || !strings.Contains(out.toastContent, fmt.Sprintf("头条号标题最多 30 字，现在 %d 字，还要删 %d 字", runeLen(tooLong), runeLen(tooLong)-30)) {
 		t.Fatalf("超限修改应拒绝并说明：%+v", out)
 	}
 
 	fixed := "老茶铺把茶做成零食，年营收过亿"
-	out = env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, testYunsuoToutiaoID),
-		map[string]any{reviewCardFixFieldName("t", got.ID, testYunsuoToutiaoID): fixed})
+	out = env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, testToutiaoAccountID),
+		map[string]any{reviewCardFixFieldName("t", got.ID, testToutiaoAccountID): fixed})
 	if out.toastType != "success" || out.toastContent != "已保存，正在存草稿至头条号" {
 		t.Fatalf("改好后应受理：%+v", out)
 	}
@@ -112,33 +110,31 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 		t.Fatalf("头条号草稿标题必须是人改的那一句：%+v", robot.saves[1])
 	}
 	got = mustJob(t, env, job.ID)
-	lane := mustLane(t, got, testYunsuoToutiaoID)
+	lane := mustLane(t, got, testToutiaoAccountID)
 	if lane.Title != fixed || lane.RequestedBy != "ou_reviewer_1" {
 		t.Fatalf("lane 应记平台标题与操作人：%+v", lane)
 	}
-	if draft, _ := externalDraftFor(got, testYunsuoToutiaoID); len(draft.Issues) != 0 || draft.Title != fixed || draft.EditedBy != "ou_reviewer_1" {
+	if draft, _ := externalDraftFor(got, testToutiaoAccountID); len(draft.Issues) != 0 || draft.Title != fixed || draft.EditedBy != "ou_reviewer_1" {
 		t.Fatalf("draft 应记下修改且没有待改项：%+v", draft)
 	}
 	if externalJobNeedsFix(got) {
 		t.Fatalf("推出去后不再待修改")
 	}
 	// 推过以后表单失效：旧卡再提交不会重推。
-	out = env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, testYunsuoToutiaoID),
-		map[string]any{reviewCardFixFieldName("t", got.ID, testYunsuoToutiaoID): "再改一次标题也不会重推"})
-	if out.toastType == "success" || len(robot.saves) != 2 || fake.pushCalls != 0 {
-		t.Fatalf("已存的平台不得再改再存，云梭一次都不调：%+v robot=%v yunsuo=%d", out, robot.platforms, fake.pushCalls)
+	out = env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, testToutiaoAccountID),
+		map[string]any{reviewCardFixFieldName("t", got.ID, testToutiaoAccountID): "再改一次标题也不会重推"})
+	if out.toastType == "success" || len(robot.saves) != 2 {
+		t.Fatalf("已存的平台不得再改再存：%+v robot=%v", out, robot.platforms)
 	}
 }
 
 // TestExternalAutoSkipsPlatformWaitingForFix auto 账号卡在待修改：自动外发不反复去网站取稿、不占名额；
 // 改好后挂回自动外发并推出。
 func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
-	useLegacyYunsuoToutiao(t)
-	setTestYunsuoAutoConfig(t)
+	setTestAutoAccounts(t)
 	stubYunsuoImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
-	fake := newToutiaoOnlyYunsuo()
-	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	robot := useFakeRobot(env)
 	clock := newCSTClock("2026-10-12 10:00")
 	env.pipeline.now = func() time.Time { return clock.now }
 	job := createLongTitleDistributionJob(t, env, "site:auto-long-title")
@@ -148,44 +144,42 @@ func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
 		t.Fatal(err)
 	}
 	env.pipeline.runExternalAutoDistribution()
-	if fake.pushCalls != 0 {
-		t.Fatalf("待修改不得推送：%v", fake.pushed)
+	if len(robot.saves) != 0 {
+		t.Fatalf("待修改不得推送：%v", robot.platforms)
 	}
 	got := mustJob(t, env, job.ID)
-	if got.ExternalDistributionAutoPending == "" || !externalDraftBlocked(got, externalAccount{ID: testYunsuoToutiaoID, Name: "头条号"}) {
+	if got.ExternalDistributionAutoPending == "" || !externalDraftBlocked(got, externalAccount{ID: testToutiaoAccountID, Name: "头条号"}) {
 		t.Fatalf("待办应保留、头条号应记为待修改：pending=%q drafts=%+v", got.ExternalDistributionAutoPending, got.ExternalDistributionDrafts)
 	}
-	checkedAt := mustDraft(t, got, testYunsuoToutiaoID).CheckedAt
+	checkedAt := mustDraft(t, got, testToutiaoAccountID).CheckedAt
 	clock.set("2026-10-12 10:30")
 	env.pipeline.runExternalAutoDistribution()
-	if again := mustDraft(t, mustJob(t, env, job.ID), testYunsuoToutiaoID); again.CheckedAt != checkedAt || fake.pushCalls != 0 {
+	if again := mustDraft(t, mustJob(t, env, job.ID), testToutiaoAccountID); again.CheckedAt != checkedAt || len(robot.saves) != 0 {
 		t.Fatalf("文章没变时不重查、不推：%+v", again)
 	}
-	if used := externalDistributionQuotaUsed(t, env, testYunsuoToutiaoID); used != 0 {
+	if used := externalDistributionQuotaUsed(t, env, testToutiaoAccountID); used != 0 {
 		t.Fatalf("待修改不占名额，实际 %d", used)
 	}
 
 	fixed := "老茶铺把茶做成零食，年营收过亿"
-	if _, err := env.pipeline.submitExternalDraftEdit(job.ID, testYunsuoToutiaoID, externalDraftEdit{Title: &fixed}, "ou_editor"); err != nil {
+	if _, err := env.pipeline.submitExternalDraftEdit(job.ID, testToutiaoAccountID, externalDraftEdit{Title: &fixed}, "ou_editor"); err != nil {
 		t.Fatal(err)
 	}
-	if fake.pushCalls != 1 || fake.payload.Title != fixed {
-		t.Fatalf("改好后应按自动外发推出：calls=%d payload=%+v", fake.pushCalls, fake.payload)
+	if len(robot.saves) != 1 || robot.saves[0].Title != fixed {
+		t.Fatalf("改好后应按自动外发存草稿：%+v", robot.saves)
 	}
-	if lane := mustLane(t, mustJob(t, env, job.ID), testYunsuoToutiaoID); lane.RequestedBy != publishExternalAutoActor {
+	if lane := mustLane(t, mustJob(t, env, job.ID), testToutiaoAccountID); lane.RequestedBy != publishExternalAutoActor {
 		t.Fatalf("auto 账号仍记系统发起：%+v", lane)
 	}
 }
 
 // TestExternalAutoRechecksDraftWhenPlatformLimitChanges #280（2026-10-13）：头条号标题上限按 20 字
-// 记成待修改，用户裁定上限是 30 字。文章没变也要按新规则重查一次，过了就推，标题走云梭「标题」档原文。
+// 记成待修改，用户裁定上限是 30 字。文章没变也要按新规则重查一次，过了就推，标题原样。
 func TestExternalAutoRechecksDraftWhenPlatformLimitChanges(t *testing.T) {
-	useLegacyYunsuoToutiao(t)
-	setTestYunsuoAutoConfig(t)
+	setTestAutoAccounts(t)
 	stubYunsuoImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
-	fake := newToutiaoOnlyYunsuo()
-	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	robot := useFakeRobot(env)
 	clock := newCSTClock("2026-10-13 09:00")
 	env.pipeline.now = func() time.Time { return clock.now }
 	title := "西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了"
@@ -205,25 +199,25 @@ func TestExternalAutoRechecksDraftWhenPlatformLimitChanges(t *testing.T) {
 	})
 	if _, err := env.store.update(job.ID, func(current *publishJob) {
 		setExternalDraft(current, publishExternalDraft{
-			AccountID: testYunsuoToutiaoID, CheckedMaterial: externalDraftMaterial(*current),
+			AccountID: testToutiaoAccountID, CheckedMaterial: externalDraftMaterial(*current),
 			Issues: []publishExternalIssue{{Field: publishExternalIssueTitle, Current: title, Length: runeLen(title), Min: 8, Max: 20}},
 		})
 	}); err != nil {
 		t.Fatal(err)
 	}
-	toutiao := externalAccount{ID: testYunsuoToutiaoID, Name: "头条号"}
+	toutiao := externalAccount{ID: testToutiaoAccountID, Name: "头条号"}
 	if externalDraftBlocked(mustJob(t, env, job.ID), toutiao) {
 		t.Fatalf("按旧上限记的待修改不应继续挡住")
 	}
 	env.pipeline.runExternalAutoDistribution()
-	if fake.pushCalls != 1 || fake.payload.Title != title {
-		t.Fatalf("26 字标题在 30 字上限内，应重查后推出原标题：calls=%d payload=%+v", fake.pushCalls, fake.payload)
+	if len(robot.saves) != 1 || robot.saves[0].Title != title {
+		t.Fatalf("26 字标题在 30 字上限内，应重查后存原标题：%+v", robot.saves)
 	}
 	got := mustJob(t, env, job.ID)
 	if externalJobNeedsFix(got) {
 		t.Fatalf("重查通过后不应再待修改：%+v", got.ExternalDistributionDrafts)
 	}
-	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.Title != title {
+	if lane := mustLane(t, got, testToutiaoAccountID); lane.Title != title {
 		t.Fatalf("头条号记下的标题应是推出去的原标题：%+v", lane)
 	}
 }
@@ -263,7 +257,7 @@ type sentReminder struct {
 // 话题下创建一个对话，@对应的人，告诉他下一步要做什么」「给他选项」）：开场逐项写哪里不合要求、能怎么
 // 改、改完点哪里；改好后同一话题里说一句「都改好了」，不再 @；同一轮不重复发；没设负责人不发。
 func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	// 不配应用凭证：审核卡 outbox 在本地就失败，不会打到真飞书；提醒走注入的发送器。
 	t.Setenv(publishNotificationAppsEnv, "")
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
@@ -289,8 +283,6 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 		}
 		return time.Time{}, errors.New("没有这条消息")
 	}
-	fake := newBothAccountsYunsuo()
-	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	job := createLongTitleDistributionJob(t, env, "site:reminder")
 	if _, err := env.store.update(job.ID, func(current *publishJob) {
 		current.ReviewDeliveryAppID = "review-app"
@@ -325,7 +317,7 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 
 	// 改好：同一话题里说一句都改好了，不再 @。
 	fixed := "老茶铺把茶做成零食，年营收过亿"
-	if _, err := env.pipeline.submitExternalDraftEdit(job.ID, testYunsuoToutiaoID, externalDraftEdit{Title: &fixed}, "ou_owner_1"); err != nil {
+	if _, err := env.pipeline.submitExternalDraftEdit(job.ID, testToutiaoAccountID, externalDraftEdit{Title: &fixed}, "ou_owner_1"); err != nil {
 		t.Fatal(err)
 	}
 	last := sent[len(sent)-1]
@@ -364,17 +356,17 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 // TestExternalReminderCoverOptions 封面太小时给的做法：话题发图开通了就请人直接发图到话题里，
 // 没开通时给侧边栏上传链接——不给点了没反应的选项。
 func TestExternalReminderCoverOptions(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
 	cfg, err := loadExternalTargets()
 	if err != nil {
 		t.Fatal(err)
 	}
 	job := publishJob{ID: 196, Title: "把茶做成零食", SourceName: "FBIF食品饮料创新", ExternalDistributionDrafts: []publishExternalDraft{{
-		AccountID: testYunsuoToutiaoID,
+		AccountID: testToutiaoAccountID,
 		Issues:    []publishExternalIssue{{Field: publishExternalIssueCover, Width: 300, Height: 200, MinWidth: 452, MinHeight: 352}},
 	}, {
-		AccountID: testYunsuoBaijiaID,
+		AccountID: testBaijiaAccountID,
 		Issues:    []publishExternalIssue{{Field: publishExternalIssueTitle, Current: "一个很长的标题", Length: 45, Min: 15, Max: 40}},
 	}}}
 	owners := []publishDistributionOwner{{OpenID: "ou_a"}}
@@ -395,7 +387,7 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 // （#233：补发九月旧稿，提醒却叫人去点卡片里的「保存并存草稿至头条号」），每一步都改到侧边栏改稿页里做；
 // 连改稿页链接都给不出就不发。
 func TestExternalReminderExpiredCardPointsToSidebar(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	t.Setenv(publishNotificationAppsEnv, "")
 	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
 	stubYunsuoImageSize(t, map[string][2]int{})
@@ -418,8 +410,6 @@ func TestExternalReminderExpiredCardPointsToSidebar(t *testing.T) {
 	env.pipeline.reviewCardSentAt = func(context.Context, publishJob, string, string) (time.Time, error) {
 		return pipelineNow(env.pipeline).Add(-cardAge), cardErr
 	}
-	fake := newBothAccountsYunsuo()
-	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	request := func(key string) publishJob {
 		t.Helper()
 		job := createLongTitleDistributionJob(t, env, key)
@@ -534,11 +524,9 @@ func testPNG(t *testing.T, width, height int) []byte {
 // 打开，是侧边栏……就可以上传图片，或者改东西……修改后状态再同步回卡片」）：必须飞书登录且持有这篇
 // 的签名链接（或是规则管理员）；改标题、上传封面都走同一个修改入口，改好即推。
 func TestExternalDistributionSidebarEditAPI(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
 	env := newPublishTestEnv(t)
-	fake := newBothAccountsYunsuo()
-	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	robot := useFakeRobot(env)
 	var stored [][]byte
 	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
@@ -592,10 +580,10 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	put := func(body string) *httptest.ResponseRecorder {
 		return doEditReq(mux, http.MethodPut, base+"draft"+signed, editor, []byte(body), "application/json")
 	}
-	if rec := put(`{"account":"` + testYunsuoToutiaoID + `","title":"老茶铺把茶做成零食，年营收过亿"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || len(robot.saves) != 1 {
+	if rec := put(`{"account":"` + testToutiaoAccountID + `","title":"老茶铺把茶做成零食，年营收过亿"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || len(robot.saves) != 1 {
 		t.Fatalf("改完标题封面仍要改：%d %s robot=%v", rec.Code, rec.Body.String(), robot.platforms)
 	}
-	if rec := put(`{"account":"` + testYunsuoToutiaoID + `","title":"这个标题足足有三十多个字，远远超过了头条号三十个字的标题上限啊"}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "头条号标题最多 30 字") {
+	if rec := put(`{"account":"` + testToutiaoAccountID + `","title":"这个标题足足有三十多个字，远远超过了头条号三十个字的标题上限啊"}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "头条号标题最多 30 字") {
 		t.Fatalf("超限标题应拒绝：%d %s", rec.Code, rec.Body.String())
 	}
 
@@ -604,7 +592,7 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	upload := func(data []byte, fields ...string) *httptest.ResponseRecorder {
 		var body bytes.Buffer
 		form := multipart.NewWriter(&body)
-		_ = form.WriteField("account", testYunsuoToutiaoID)
+		_ = form.WriteField("account", testToutiaoAccountID)
 		for i := 0; i+1 < len(fields); i += 2 {
 			_ = form.WriteField(fields[i], fields[i+1])
 		}
@@ -627,16 +615,16 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	if rec.Code != http.StatusOK || len(stored) != 1 || uploaded.Uploaded.Width != 900 || !strings.HasPrefix(uploaded.Uploaded.URL, "https://cdn.example.com/uploaded/distribution-cover-") {
 		t.Fatalf("够大的图应转存：%d %s", rec.Code, rec.Body.String())
 	}
-	if fmt.Sprint(robot.platforms) != "[baijiahao toutiao]" || robot.saves[1].CoverURL != uploaded.Uploaded.URL || fake.pushCalls != 0 {
-		t.Fatalf("封面改好后应存头条号草稿并用上传的图：robot=%v saves=%+v yunsuo=%d", robot.platforms, robot.saves, fake.pushCalls)
+	if fmt.Sprint(robot.platforms) != "[baijiahao toutiao]" || robot.saves[1].CoverURL != uploaded.Uploaded.URL {
+		t.Fatalf("封面改好后应存头条号草稿并用上传的图：robot=%v saves=%+v", robot.platforms, robot.saves)
 	}
 	got := mustJob(t, env, job.ID)
-	draft := mustDraft(t, got, testYunsuoToutiaoID)
+	draft := mustDraft(t, got, testToutiaoAccountID)
 	if !strings.HasPrefix(draft.EditedBy, "王编辑（ou_editor）") || len(draft.Issues) != 0 {
 		t.Fatalf("应记下谁改的：%+v", draft)
 	}
 	// 推过以后不能再改，也不能再传。
-	if rec := put(`{"account":"` + testYunsuoToutiaoID + `","title":"再改一次"}`); rec.Code != http.StatusConflict {
+	if rec := put(`{"account":"` + testToutiaoAccountID + `","title":"再改一次"}`); rec.Code != http.StatusConflict {
 		t.Fatalf("已推的平台不能再改：%d %s", rec.Code, rec.Body.String())
 	}
 	if rec := upload(testPNG(t, 900, 600)); rec.Code != http.StatusConflict || len(stored) != 1 {
@@ -647,11 +635,9 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 // TestExternalSidebarUploadCarriesTypedTitle 标题和封面都要改：页面里改好的标题随图一起提交，传上去
 // 就推；标题还超着就只换封面，等人改完标题再点保存。
 func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example.com/a.jpg": {300, 200}})
 	env := newPublishTestEnv(t)
-	fake := newBothAccountsYunsuo()
-	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
 	robot := useFakeRobot(env)
 	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
 		return "https://cdn.example.com/uploaded/" + name, nil
@@ -661,7 +647,7 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 	upload := func(job publishJob, data []byte, title string) *httptest.ResponseRecorder {
 		var body bytes.Buffer
 		form := multipart.NewWriter(&body)
-		_ = form.WriteField("account", testYunsuoToutiaoID)
+		_ = form.WriteField("account", testToutiaoAccountID)
 		_ = form.WriteField("title", title)
 		part, _ := form.CreateFormFile("file", "cover.png")
 		_, _ = part.Write(data)
@@ -676,9 +662,9 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 	}
 	// 标题仍超：封面换上，标题问题留着，不推。
 	if rec := upload(job, testPNG(t, 900, 600), testLongToutiaoTitle+"再长一点"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || len(robot.saves) != 1 {
-		t.Fatalf("标题没改好时只换封面：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
+		t.Fatalf("标题没改好时只换封面：%d %s saves=%d", rec.Code, rec.Body.String(), len(robot.saves))
 	}
-	draft := mustDraft(t, mustJob(t, env, job.ID), testYunsuoToutiaoID)
+	draft := mustDraft(t, mustJob(t, env, job.ID), testToutiaoAccountID)
 	if _, cover := externalIssueFields(draft.Issues)[publishExternalIssueCover]; cover || !strings.HasPrefix(draft.CoverURL, "https://cdn.example.com/uploaded/") {
 		t.Fatalf("封面应已换上：%+v", draft)
 	}
@@ -690,15 +676,15 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 	if rec := upload(job, testPNG(t, 1200, 800), fixed); rec.Code != http.StatusOK || len(robot.saves) != 2 {
 		t.Fatalf("标题改好、封面传上就存草稿：%d %s robot=%v", rec.Code, rec.Body.String(), robot.platforms)
 	}
-	if saved := robot.saves[1]; saved.Title != fixed || !strings.HasPrefix(saved.CoverURL, "https://cdn.example.com/uploaded/") || fake.pushCalls != 0 {
-		t.Fatalf("存进头条号的是改好的标题和刚传的图，云梭一次都不调：%+v yunsuo=%d", saved, fake.pushCalls)
+	if saved := robot.saves[1]; saved.Title != fixed || !strings.HasPrefix(saved.CoverURL, "https://cdn.example.com/uploaded/") {
+		t.Fatalf("存进头条号的是改好的标题和刚传的图：%+v", saved)
 	}
 }
 
 // TestExternalCoverAutoUpscalesNearMiss 原封面只差一点（#183：780×332，头条号要 452×352）：
 // 自动放大一份换上直接推，不记待修改、不 @ 人；差太多（300×200）的仍等人换。
 func TestExternalCoverAutoUpscalesNearMiss(t *testing.T) {
-	setTestYunsuoConfig(t)
+	setTestDistributionAccounts(t)
 	sizes := map[string][2]int{"https://cdn.example.com/a.jpg": {780, 332}}
 	stubYunsuoImageSize(t, sizes)
 	original := externalCoverFetch
@@ -709,8 +695,7 @@ func TestExternalCoverAutoUpscalesNearMiss(t *testing.T) {
 		return testPNG(t, sizes[src][0], sizes[src][1]), nil
 	}
 	env := newPublishTestEnv(t)
-	fake := newBothAccountsYunsuo()
-	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
+	useFakeRobot(env)
 	var stored [][]byte
 	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
 		stored = append(stored, body)
@@ -728,11 +713,11 @@ func TestExternalCoverAutoUpscalesNearMiss(t *testing.T) {
 		t.Fatalf("放大到刚好够下限：%v %s %+v", err, format, config)
 	}
 	got := mustJob(t, env, job.ID)
-	toutiao := mustLane(t, got, testYunsuoToutiaoID)
+	toutiao := mustLane(t, got, testToutiaoAccountID)
 	if toutiao.State == "" || externalJobNeedsFix(got) || !strings.Contains(toutiao.PayloadJSON, "https://cdn.example.com/uploaded/distribution-cover-") {
 		t.Fatalf("头条号应直接用放大后的封面推：%+v", toutiao)
 	}
-	draft := mustDraft(t, got, testYunsuoToutiaoID)
+	draft := mustDraft(t, got, testToutiaoAccountID)
 	if !strings.HasPrefix(draft.CoverURL, "https://cdn.example.com/uploaded/") || len(draft.Issues) != 0 || draft.EditedBy != "" {
 		t.Fatalf("自动换上的封面不算人改：%+v", draft)
 	}

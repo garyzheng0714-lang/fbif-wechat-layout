@@ -254,33 +254,30 @@ func reviewCardPlatformReason(state externalPlatformState, fixing, buttoned bool
 		return "" // 有文章链接就不再写原因；表单里逐项写清楚
 	}
 	reason := reviewCardSafeText(state.Reason, 80)
+	if buttoned && state.Tone == "red" {
+		failed := "<font color='red'>" + firstNonEmpty(state.FailedLabel, "上次同步失败") + "</font>"
+		if reason == "" {
+			return failed
+		}
+		return failed + "　<font color='grey'>" + reason + "</font>"
+	}
 	if reason == "" {
 		return ""
 	}
 	if state.NeedsFix && editLink != "" {
 		return "<font color='grey'>" + reason + "</font>　[去修改](" + editLink + ")"
 	}
-	if buttoned && state.Tone == "red" {
-		return "<font color='red'>" + firstNonEmpty(state.FailedLabel, "上次同步失败") + "</font>　<font color='grey'>" + reason + "</font>"
-	}
 	return "<font color='grey'>" + reason + "</font>"
 }
 
-// reviewCardPlatformSyncButton 没推过、或受理前失败可安全重推的平台：按钮推这一个平台。
-// 经分发服务的平台目前只存草稿（2026-10-22 用户裁定），按钮与确认框都照实说。
+// reviewCardPlatformSyncButton 没推过、或失败可以重存的平台：按钮只推这一个平台。
+// 目前只存草稿（2026-10-22 用户裁定），按钮与确认框都照实说。
 func reviewCardPlatformSyncButton(job publishJob, accountID, name string, state externalPlatformState, profile yunsuoPlatformProfile) map[string]any {
-	retry := state.Status == "失败"
 	text := profile.syncAction(name)
-	confirm := "请确认本文为原创文章。外部发布独立于 FoodTalks；下线本站文章不会自动下线外部平台。确认后将立即提交发布。"
-	if profile.Driver == externalDriverRobot {
-		confirm = "将由分发工具在" + name + "存一篇草稿，不会发布；请到" + name + "草稿箱确认版式。请确认本文为原创文章。"
-	}
-	if retry {
+	confirm := "将由分发工具在" + name + "存一篇草稿，不会发布；请到" + name + "草稿箱确认版式。请确认本文为原创文章。"
+	if state.Status == "失败" {
 		text = "重新" + text
-		confirm = "上次请求已确认未被云梭受理，不会重复发布。本次会重新提交；请同时确认本文为原创文章。"
-		if profile.Driver == externalDriverRobot {
-			confirm = "上次没有送到" + name + "，这次由分发工具重新提交到" + name + "草稿箱，不会重复存稿，也不会发布。请同时确认本文为原创文章。"
-		}
+		confirm = "上次没有送到" + name + "，这次由分发工具重新提交到" + name + "草稿箱，不会重复存稿，也不会发布。请同时确认本文为原创文章。"
 	}
 	return map[string]any{
 		"tag": "button", "text": feishuPlainText(text), "type": "default",
@@ -310,10 +307,8 @@ func reviewCardFixFields(job publishJob, draft publishExternalDraft, profile yun
 		note(fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：%s最多 %d 字%s，现在 %d 字",
 			issue.Length-issue.Max, name, issue.Max, how, issue.Length))
 		note("<font color='grey'>现在：" + reviewCardSafeText(issue.Current, 120) + "</font>")
-		// 输入框按字符数限长：英文数字算半个字的平台放宽到按字符数的硬上限，超没超由服务端按平台数法判。
-		_, inputMax := profile.titleCharRange()
 		out = append(out, reviewCardFixInput(reviewCardFixFieldName("t", job.ID, accountID), "改成",
-			firstNonEmpty(draft.SuggestedTitle, issue.Current), issue.Max, max(issue.Max, inputMax), false))
+			firstNonEmpty(draft.SuggestedTitle, issue.Current), issue.Max, max(issue.Max, profile.titleInputMax()), false))
 	}
 	if issue, ok := fields[publishExternalIssueSummary]; ok {
 		note(fmt.Sprintf("<font color='orange'>摘要超出 %d 字</font>：%s最多 %d 字，现在 %d 字",

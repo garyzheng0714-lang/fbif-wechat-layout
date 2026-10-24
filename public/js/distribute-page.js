@@ -30,11 +30,9 @@ export function charCount(value, halfWidth = false) {
   return chars.length - ascii + Math.floor(ascii / 2);
 }
 
-// counterState fieldMax 是云梭这一档按字符数的上限（头条号 40），先于平台上限查。
-export function counterState(value, max, min = 0, { halfWidth = false, fieldMax = 0 } = {}) {
+export function counterState(value, max, min = 0, { halfWidth = false } = {}) {
   const chars = charCount(value);
   const length = charCount(value, halfWidth);
-  if (fieldMax > 0 && chars > fieldMax) return { length, over: chars - fieldMax, text: `超出 ${chars - fieldMax} 个字符（最多 ${fieldMax} 个字符）`, invalid: true };
   if (max > 0 && length > max) return { length, over: length - max, text: `超出 ${length - max} 字`, invalid: true };
   if (min > 0 && chars > 0 && chars < min) return { length, over: 0, text: `至少 ${min} 字`, invalid: true };
   if (chars === 0) return { length, over: 0, text: '不能为空', invalid: true };
@@ -42,7 +40,7 @@ export function counterState(value, max, min = 0, { halfWidth = false, fieldMax 
 }
 
 function titleCounter(platform) {
-  return { halfWidth: Boolean(platform.title_half_width), fieldMax: platform.title_field_max || 0 };
+  return { halfWidth: Boolean(platform.title_half_width) };
 }
 
 function statusMarkup(platform) {
@@ -70,9 +68,9 @@ function coverTooSmall(platform, image) {
   return !!(image.width && image.height && (image.width < platform.cover_min_width || image.height < platform.cover_min_height));
 }
 
-// actionText 提交按钮「保存并……」：服务端按平台的送稿方式给（同步至头条号 / 存草稿至百家号）。
+// actionText 提交按钮「保存并……」：服务端给（存草稿至头条号）。
 function actionText(platform) {
-  return `保存并${platform.action || `同步至${platform.name}`}`;
+  return `保存并${platform.action || `存草稿至${platform.name}`}`;
 }
 
 function sameTitle(a, b) {
@@ -208,7 +206,7 @@ export function createDistributePage({ root, articleEl, search, request = authFe
   }
 
   function maybePoll() {
-    const busy = (view?.platforms || []).some(platform => ['同步中', '存草稿中', '排队中'].includes(platform.status));
+    const busy = (view?.platforms || []).some(platform => ['存草稿中', '排队中'].includes(platform.status));
     if (!busy || polls >= POLL_LIMIT) return;
     polls += 1;
     schedule(() => load({ quiet: true }), POLL_MS);

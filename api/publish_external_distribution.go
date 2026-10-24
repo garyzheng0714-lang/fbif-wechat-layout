@@ -1,12 +1,11 @@
 package main
 
-// publish_external_distribution.go — 已审核原创文章分发到外部平台：百家号、头条号都经自己的分发服务
-// （publish_external_robot.go，百家号 2026-10-22、头条号 2026-10-24 起，只存草稿）；云梭只续查切换前的旧 lane。
+// publish_external_distribution.go — 已审核原创文章分发到第三方平台：百家号、头条号都经自己的分发服务
+// 存草稿（publish_external_robot.go）。云梭 2026-10-24 下线，它留下的旧 lane 只显示。
 //
 // 这是 publishJob 上的正交子状态机，不改变 FoodTalks 的 Stage：自有站允许原创和
-// 转载，外部平台只允许原创。两种送稿方式都先把精确 payload 与 intent 落盘再外调。
-// 云梭 push 没有幂等键，push 结果不确定时只能人工对账，拿到 content_pk 后只做安全的
-// 状态查询；分发服务有幂等键，结果不确定时按同一个键查。
+// 转载，外部平台只允许原创。先把精确 payload 与 intent 落盘再外调；分发服务有幂等键，
+// 结果不确定时按同一个键查。
 
 import (
 	"context"
@@ -24,17 +23,11 @@ import (
 const (
 	publishExternalDistributionQueued                 = "queued"
 	publishExternalDistributionPushing                = "pushing"
-	publishExternalDistributionPolling                = "polling"
+	publishExternalDistributionPolling                = "polling" // 只有云梭旧 lane 有，读盘即转待核对
 	publishExternalDistributionSucceeded              = "succeeded"
 	publishExternalDistributionPartialFailed          = "partial_failed"
 	publishExternalDistributionFailed                 = "failed"
 	publishExternalDistributionReconciliationRequired = "reconciliation_required"
-
-	publishExternalTargetQueued      = "queued"
-	publishExternalTargetPending     = "pending"
-	publishExternalTargetSucceeded   = "succeeded"
-	publishExternalTargetFailed      = "failed"
-	publishExternalTargetUnsupported = "unsupported"
 
 	publishExternalCardPending    = "pending"
 	publishExternalCardSending    = "sending"
@@ -56,31 +49,6 @@ var (
 	publishExternalAuthorizedRepost  = regexp.MustCompile(`(?i)(?:本文)?(?:经|获).{1,50}(?:授权)?转载|reprinted\s+with\s+permission|originally\s+published\s+by|^source\s*[:：]`)
 )
 
-// publishExternalDistributionTarget 按平台拆开之前一轮里各账号的回执，只在迁移旧数据时读。
-type publishExternalDistributionTarget struct {
-	AccountID        string `json:"account_id"`
-	Name             string `json:"name"`
-	State            string `json:"state"`
-	ProviderRecordID string `json:"provider_record_id,omitempty"`
-	PlatformName     string `json:"platform_name,omitempty"`
-	PublishTime      string `json:"publish_time,omitempty"`
-	RawStatus        int    `json:"raw_status,omitempty"`
-	Remark           string `json:"remark,omitempty"`
-	FailedCount      int    `json:"failed_count,omitempty"`
-	UpdatedAt        string `json:"updated_at,omitempty"`
-}
-
-// publishExternalDistributionRound 按平台拆开之前的补发存档，只在迁移旧数据时读。
-type publishExternalDistributionRound struct {
-	State       string                              `json:"state"`
-	Targets     []publishExternalDistributionTarget `json:"targets"`
-	RequestedBy string                              `json:"requested_by,omitempty"`
-	RequestedAt string                              `json:"requested_at,omitempty"`
-	CompletedAt string                              `json:"completed_at,omitempty"`
-	ContentPK   string                              `json:"content_pk,omitempty"`
-	PayloadHash string                              `json:"payload_hash,omitempty"`
-}
-
 func publishExternalDistributionProcessing(state string) bool {
 	switch strings.TrimSpace(state) {
 	case publishExternalDistributionQueued, publishExternalDistributionPushing, publishExternalDistributionPolling:
@@ -92,8 +60,8 @@ func publishExternalDistributionProcessing(state string) bool {
 
 const publishExternalAdminRetryActor = "system:admin_retry"
 
-// 管理员重发只允许已发布任务里对账中的平台：云梭已给单号或结果不明，本地确认上一份
-// payload 字段错误、必须换正确正文再 POST 一次。飞书卡片不得走这条路。
+// 管理员重发只允许已发布任务里待核对的平台：人在平台草稿箱里核对、删掉多出来的稿之后，
+// 用当前正文再存一次。飞书卡片不得走这条路。
 func publishExternalDistributionCanReplaceReconcile(job publishJob) bool {
 	if job.Stage != publishStagePublished {
 		return false
@@ -409,13 +377,13 @@ func isExternalDistributionIneligible(err error) bool {
 }
 
 // requestExternalDistribution 只受理一次人工动作：先按平台各自构造并持久化精确 payload
-// 快照，再把实际 HTTP 交给 worker。卡片回调因此能在 3 秒内返回，不等待云梭。
+// 快照，再把实际 HTTP 交给 worker。卡片回调因此能在 3 秒内返回，不等分发服务。
 func (p *publishPipeline) requestExternalDistribution(jobID int64, actor, expectedVersion string) (publishJob, error) {
 	return p.queueExternalDistribution(jobID, actor, expectedVersion, externalQueueCard, nil)
 }
 
-// replaceExternalDistributionAfterReconcile 管理员在确认上一份云梭稿作废后，
-// 用当前代码重建对账中平台的 payload 再推一次。不接受飞书卡片 callback。
+// replaceExternalDistributionAfterReconcile 管理员在平台草稿箱核对、删掉多出来的稿之后，
+// 用当前代码重建待核对平台的 payload 再存一次。不接受飞书卡片 callback。
 func (p *publishPipeline) replaceExternalDistributionAfterReconcile(jobID int64, actor string) (publishJob, error) {
 	return p.queueExternalDistribution(jobID, actor, "", externalQueueReplaceReconcile, nil)
 }
@@ -448,9 +416,6 @@ func externalDistributionTargetsFor(job publishJob, cfg externalTargets, mode ex
 
 // externalDistributionLaneEligible 这个账号此刻能不能按 mode 开推（入队前与锁内各判一次）。
 func externalDistributionLaneEligible(job publishJob, target externalAccount, cfg externalTargets, mode externalDistributionQueueMode) bool {
-	if externalUnadoptedLaneCovers(job, target, cfg) {
-		return false
-	}
 	lane, exists := externalLaneFor(job, target.ID)
 	if !exists {
 		_, coversAll := externalDistributionCoveredAccounts(job)
@@ -571,8 +536,8 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		if lane.ContentVersion == 0 {
 			lane.ContentVersion = job.ContentVersion
 		}
-		lane.Driver = yunsuoProfileForTarget(target).Driver
-		payloadJSON, platformTitle, buildErr := buildExternalLanePayload(snapshot, target, yunsuoCategories(), draft)
+		lane.Driver = externalDriverRobot
+		payloadJSON, platformTitle, buildErr := buildExternalLanePayload(snapshot, target, draft)
 		if buildErr != nil {
 			lane.State = publishExternalDistributionFailed
 			lane.Error = truncateRunes(strings.Join(strings.Fields(buildErr.Error()), " "), 500)
@@ -677,15 +642,8 @@ func (p *publishPipeline) runExternalLane(jobID int64, accountID string) {
 	if !ok {
 		return
 	}
-	switch {
-	case lane.State == publishExternalDistributionQueued && lane.Driver == externalDriverRobot:
+	if lane.State == publishExternalDistributionQueued && lane.Driver == externalDriverRobot {
 		p.pushRobotLane(job, lane)
-	case lane.State == publishExternalDistributionQueued:
-		p.pushExternalLane(job, lane)
-	case lane.State == publishExternalDistributionPolling && lane.Driver == externalDriverYunsuo:
-		if strings.TrimSpace(lane.ContentPK) != "" {
-			p.pollExternalLane(job, lane)
-		}
 	}
 }
 
@@ -698,65 +656,6 @@ func (p *publishPipeline) updateExternalLane(jobID int64, accountID string, cond
 		i := externalLaneIndex(*current, accountID)
 		mutate(current, &current.ExternalDistributionLanes[i])
 	})
-}
-
-func (p *publishPipeline) yunsuoClient() (yunsuoAPI, error) {
-	if p.yunsuo != nil {
-		return p.yunsuo()
-	}
-	return newYunsuoClientFromEnv()
-}
-
-func (p *publishPipeline) pushExternalLane(job publishJob, lane publishExternalLane) {
-	var payload yunsuoPushPayload
-	if err := json.Unmarshal([]byte(lane.PayloadJSON), &payload); err != nil {
-		p.failExternalLaneBeforePush(job.ID, lane.AccountID, "已保存的云梭分发内容无法解析："+err.Error())
-		return
-	}
-	// 冻结的 payload 只能发往这条 lane 的账号：带了别的账号就是串了，宁可不推。
-	if len(payload.AccountIDs) != 1 || strings.TrimSpace(payload.AccountIDs[0]) != lane.yunsuoAccountID() {
-		p.failExternalLaneBeforePush(job.ID, lane.AccountID, "已保存的云梭分发内容与本平台账号不符，未推送")
-		return
-	}
-	client, err := p.yunsuoClient()
-	if err != nil {
-		p.failExternalLaneBeforePush(job.ID, lane.AccountID, err.Error())
-		return
-	}
-	intentKey := fmt.Sprintf("yunsuo-push:%d:%s:%s", job.ID, lane.AccountID, strings.TrimPrefix(lane.PayloadHash, "sha256:"))
-	if !p.claimExternalLanePush(job.ID, lane, intentKey) {
-		return
-	}
-	contentPK, pushErr := client.Push(context.Background(), payload)
-	if pushErr != nil {
-		if isYunsuoRejectedError(pushErr) {
-			p.finishExternalLanePushFailure(job.ID, lane.AccountID, intentKey, publishExternalDistributionFailed, pushErr.Error())
-			return
-		}
-		// 未分类错误也按不确定处理：进入 push 外调窗口后宁可人工核对，绝不重复 POST。
-		p.finishExternalLanePushFailure(job.ID, lane.AccountID, intentKey, publishExternalDistributionReconciliationRequired, pushErr.Error())
-		return
-	}
-	contentPK = strings.TrimSpace(contentPK)
-	if contentPK == "" {
-		p.finishExternalLanePushFailure(job.ID, lane.AccountID, intentKey, publishExternalDistributionReconciliationRequired, "云梭已响应但缺少 content_pk")
-		return
-	}
-	polling, persisted, persistErr := p.updateExternalLane(job.ID, lane.AccountID, func(current publishExternalLane) bool {
-		return current.State == publishExternalDistributionPushing && current.IntentKey == intentKey
-	}, func(_ *publishJob, current *publishExternalLane) {
-		current.State = publishExternalDistributionPolling
-		current.ContentPK = contentPK
-		current.Error = ""
-	})
-	if persistErr != nil || !persisted {
-		// 远端已经接受而 content_pk 未可靠落盘；保留 pushing intent，启动恢复会转人工核对。
-		log.Printf("publish: yunsuo accepted job %d/%s but content_pk persistence failed: %v", job.ID, lane.AccountID, persistErr)
-		return
-	}
-	if current, ok := externalLaneFor(polling, lane.AccountID); ok {
-		p.pollExternalLaneWithClient(polling, current, client)
-	}
 }
 
 // claimExternalLanePush 外调前落 intent：queued → pushing。抢不到（已被别的 worker 推、内容已换）就不外调。
@@ -806,171 +705,7 @@ func (p *publishPipeline) finishExternalLanePushFailure(jobID int64, accountID, 
 		enqueueExternalDistributionCardUpdate(job)
 	})
 	if err != nil {
-		log.Printf("publish: record yunsuo push result for job %d/%s failed: %v", jobID, accountID, err)
-		return
-	}
-	if swapped {
-		p.scheduleExternalDistributionCardUpdate(jobID)
-	}
-}
-
-func (p *publishPipeline) pollExternalLane(job publishJob, lane publishExternalLane) {
-	client, err := p.yunsuoClient()
-	if err != nil {
-		p.finishExternalLanePolling(job.ID, lane, publishExternalDistributionReconciliationRequired, nil,
-			"无法恢复云梭状态查询："+err.Error())
-		return
-	}
-	p.pollExternalLaneWithClient(job, lane, client)
-}
-
-func (p *publishPipeline) pollExternalLaneWithClient(job publishJob, lane publishExternalLane, client yunsuoAPI) {
-	interval := p.externalDistributionPollInterval
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	timeout := p.externalDistributionPollTimeout
-	if timeout <= 0 {
-		timeout = 15 * time.Minute
-	}
-	startedAt, err := time.Parse(time.RFC3339, lane.IntentAt)
-	if err != nil {
-		startedAt, err = time.Parse(time.RFC3339, lane.RequestedAt)
-	}
-	if err != nil {
-		startedAt = time.Now().UTC()
-	}
-	statuses, statusErr := client.Status(context.Background(), lane.ContentPK)
-	nowTime := pipelineNow(p)
-	now := nowTime.Format(time.RFC3339)
-	if statusErr != nil && isYunsuoRejectedError(statusErr) {
-		p.finishExternalLanePolling(job.ID, lane, publishExternalDistributionReconciliationRequired, nil,
-			"云梭状态查询被明确拒绝，请人工核对："+statusErr.Error())
-		return
-	}
-	if statusErr == nil {
-		next, terminal := applyExternalLaneStatuses(lane, statuses, now)
-		if terminal {
-			p.finishExternalLanePolling(job.ID, lane, next.State, &next, "")
-			return
-		}
-		updated, swapped, updateErr := p.updateExternalLane(job.ID, lane.AccountID, func(current publishExternalLane) bool {
-			return current.State == publishExternalDistributionPolling && current.ContentPK == lane.ContentPK
-		}, func(_ *publishJob, current *publishExternalLane) {
-			copyExternalLaneProvider(current, next)
-			current.PollAttempts++
-			current.LastPolledAt = now
-			current.Error = ""
-		})
-		if updateErr != nil || !swapped {
-			return
-		}
-		job = updated
-	} else {
-		updated, swapped, updateErr := p.updateExternalLane(job.ID, lane.AccountID, func(current publishExternalLane) bool {
-			return current.State == publishExternalDistributionPolling && current.ContentPK == lane.ContentPK
-		}, func(_ *publishJob, current *publishExternalLane) {
-			current.PollAttempts++
-			current.LastPolledAt = now
-			current.Error = truncateRunes(strings.Join(strings.Fields(statusErr.Error()), " "), 500)
-		})
-		if updateErr != nil || !swapped {
-			return
-		}
-		job = updated
-	}
-	if current, ok := externalLaneFor(job, lane.AccountID); ok {
-		lane = current
-	}
-	if !nowTime.Before(startedAt.Add(timeout)) {
-		p.finishExternalLanePolling(job.ID, lane, publishExternalDistributionReconciliationRequired, nil,
-			publishExternalPollTimeoutReason)
-		return
-	}
-	// 每次只占用 worker 做一次查询，延时器到点后再入队；多篇文章同时分发不会
-	// 长时间占满四个发布 worker。状态已落盘，进程重启由 recoverJobs 继续查询。
-	accountID := lane.AccountID
-	next := func() { p.spawnExternalWork(func() { p.runExternalLane(job.ID, accountID) }) }
-	if p.retryNotification != nil {
-		p.retryNotification(interval, next)
-		return
-	}
-	time.AfterFunc(interval, next)
-}
-
-// externalLaneProviderStatus 在云梭回执里找这条 lane 的账号：按账号 key，回执没带 key
-// 时按账号名；只有一条且都没带账号的，就是这个账号（每条 lane 只推一个账号）。
-func externalLaneProviderStatus(lane publishExternalLane, statuses []yunsuoAccountStatus) (yunsuoAccountStatus, bool) {
-	withIDs := false
-	for _, status := range statuses {
-		if strings.TrimSpace(status.AccountPool.ID) != "" {
-			withIDs = true
-		}
-		if strings.TrimSpace(status.AccountPool.ID) == lane.yunsuoAccountID() {
-			return status, true
-		}
-	}
-	for _, status := range statuses {
-		if strings.TrimSpace(status.AccountPool.ID) == "" && strings.TrimSpace(status.AccountPool.Name) == strings.TrimSpace(lane.Name) {
-			return status, true
-		}
-	}
-	if !withIDs && len(statuses) == 1 {
-		return statuses[0], true
-	}
-	return yunsuoAccountStatus{}, false
-}
-
-// applyExternalLaneStatuses 把云梭回执写进 lane 的副本；terminal 表示这个账号已有终态
-// （1 成功；2 失败、云梭会自动重试；3 平台不支持）。未知状态绝不能当成功。
-func applyExternalLaneStatuses(lane publishExternalLane, statuses []yunsuoAccountStatus, now string) (publishExternalLane, bool) {
-	status, ok := externalLaneProviderStatus(lane, statuses)
-	if !ok {
-		return lane, false
-	}
-	lane.ProviderRecordID = strings.TrimSpace(status.PK)
-	lane.PlatformName = strings.TrimSpace(status.PlatformName)
-	lane.PublishTime = strings.TrimSpace(status.PublishTime)
-	lane.RawStatus = status.Status
-	lane.Remark = truncateRunes(strings.Join(strings.Fields(status.Remark), " "), 300)
-	lane.FailedCount = status.FailedCount
-	lane.ProviderUpdatedAt = now
-	switch status.Status {
-	case 1:
-		lane.State = publishExternalDistributionSucceeded
-		return lane, true
-	case 2, 3:
-		lane.State = publishExternalDistributionFailed
-		return lane, true
-	default:
-		return lane, false
-	}
-}
-
-func copyExternalLaneProvider(dst *publishExternalLane, src publishExternalLane) {
-	dst.ProviderRecordID = src.ProviderRecordID
-	dst.PlatformName = src.PlatformName
-	dst.PublishTime = src.PublishTime
-	dst.RawStatus = src.RawStatus
-	dst.Remark = src.Remark
-	dst.FailedCount = src.FailedCount
-	dst.ProviderUpdatedAt = src.ProviderUpdatedAt
-}
-
-func (p *publishPipeline) finishExternalLanePolling(jobID int64, lane publishExternalLane, state string, provider *publishExternalLane, reason string) {
-	_, swapped, err := p.updateExternalLane(jobID, lane.AccountID, func(current publishExternalLane) bool {
-		return current.State == publishExternalDistributionPolling && current.ContentPK == lane.ContentPK
-	}, func(job *publishJob, current *publishExternalLane) {
-		current.State = state
-		if provider != nil {
-			copyExternalLaneProvider(current, *provider)
-		}
-		current.Error = truncateRunes(strings.Join(strings.Fields(reason), " "), 500)
-		current.CompletedAt = pipelineNow(p).Format(time.RFC3339)
-		enqueueExternalDistributionCardUpdate(job)
-	})
-	if err != nil {
-		log.Printf("publish: record yunsuo status for job %d/%s failed: %v", jobID, lane.AccountID, err)
+		log.Printf("publish: record external push result for job %d/%s failed: %v", jobID, accountID, err)
 		return
 	}
 	if swapped {
@@ -1076,24 +811,14 @@ func (p *publishPipeline) recoverExternalDistribution(job publishJob) {
 
 	for _, lane := range job.ExternalDistributionLanes {
 		lane := lane
+		if lane.Driver != externalDriverRobot {
+			continue
+		}
 		switch lane.State {
 		case publishExternalDistributionQueued:
 			p.spawnExternalWork(func() { p.runExternalLane(job.ID, lane.AccountID) })
 		case publishExternalDistributionPushing:
-			if lane.Driver == externalDriverRobot {
-				p.recoverRobotLane(job, lane)
-				continue
-			}
-			// intent 已落盘，但进程可能在 POST 前后任一点退出；结果不可判定，禁止重放。
-			p.finishExternalLanePushFailure(job.ID, lane.AccountID, lane.IntentKey, publishExternalDistributionReconciliationRequired,
-				"进程在云梭推送窗口中断，系统不会重复发布，请人工核对")
-		case publishExternalDistributionPolling:
-			if strings.TrimSpace(lane.ContentPK) == "" {
-				p.finishExternalLanePolling(job.ID, lane, publishExternalDistributionReconciliationRequired, nil,
-					"云梭轮询状态缺少 content_pk，系统不会重复发布，请人工核对")
-				continue
-			}
-			p.spawnExternalWork(func() { p.runExternalLane(job.ID, lane.AccountID) })
+			p.recoverRobotLane(job, lane)
 		}
 	}
 }
@@ -1120,23 +845,11 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 		}
 		return reviewCardOutcome{toastType: "info", toastContent: text}, true
 	case publishExternalDistributionReconciliationRequired:
-		if externalDistributionAllQueued(job, time.Now()) {
-			return reviewCardOutcome{
-				toastType: "info", toastContent: "云梭还在排队发布，发出后卡片自动更新，不会重复发布",
-			}, true
-		}
 		return reviewCardOutcome{
-			toastType: "error", toastContent: "外部分发结果待核对，系统不会重复发布",
+			toastType: "error", toastContent: "外部分发结果待核对，系统不会重复存稿",
 		}, true
 	case publishExternalDistributionFailed, publishExternalDistributionPartialFailed:
-		content := "外部分发有平台未完成，请查看卡片"
-		for _, lane := range job.ExternalDistributionLanes {
-			if lane.Driver == externalDriverYunsuo && lane.State == publishExternalDistributionFailed {
-				content = "外部分发有平台未完成，请查看卡片并到云梭后台处理"
-				break
-			}
-		}
-		return reviewCardOutcome{toastType: "error", toastContent: content}, true
+		return reviewCardOutcome{toastType: "error", toastContent: "外部分发有平台未完成，请查看卡片"}, true
 	default:
 		return reviewCardOutcome{
 			toastType: "error", toastContent: "外部分发状态异常，请到管理后台核对",
@@ -1144,39 +857,6 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 	}
 }
 
-const (
-	publishExternalLateRefreshEvery  = 30 * time.Minute
-	publishExternalLateRefreshWithin = 45 * 24 * time.Hour
-)
-
-// publishExternalPollTimeoutReason 15 分钟轮询到点、云梭仍未给终态时记在 lane.Error。
-const publishExternalPollTimeoutReason = "云梭在轮询时限内未返回终态；系统不会重复发布，请人工核对"
-
-// externalLaneQueuedAtProvider 云梭已受理、回执还是 status=0「待发布」，只是 15 分钟
-// 轮询到点转了对账：补查仍每 30 分钟进行，卡片按「排队中」说，不让人去云梭后台核对
-// （2026-10-14 用户问 #282「这个待核对是什么意思」）。查询被拒、没拿到回执、超过 45 天
-// 补查期的仍是待核对。
-func externalLaneQueuedAtProvider(lane publishExternalLane, now time.Time) bool {
-	if lane.State != publishExternalDistributionReconciliationRequired ||
-		strings.TrimSpace(lane.ContentPK) == "" || lane.Error != publishExternalPollTimeoutReason ||
-		strings.TrimSpace(lane.ProviderUpdatedAt) == "" {
-		return false
-	}
-	if lane.RawStatus != yunsuoStatusPending {
-		return false
-	}
-	requestedAt, err := time.Parse(time.RFC3339, lane.RequestedAt)
-	return err == nil && now.Sub(requestedAt) <= publishExternalLateRefreshWithin
-}
-
-// externalLaneNeedsNurturing 云梭回执 status=4：平台弹了验证码，要有人在云梭插件里养号，
-// 养好后云梭自动重试。光等不会发出去，卡片不能说「排队中」。
-func externalLaneNeedsNurturing(lane publishExternalLane) bool {
-	return lane.State == publishExternalDistributionReconciliationRequired &&
-		strings.TrimSpace(lane.ContentPK) != "" && lane.RawStatus == yunsuoStatusCaptcha
-}
-
-// externalDistributionAllQueued 待核对的平台全是云梭排队中。
 // externalDistributionAllDraftSaved 每个平台都只存了草稿（自己的分发服务不发布）。
 func externalDistributionAllDraftSaved(job publishJob) bool {
 	for _, lane := range job.ExternalDistributionLanes {
@@ -1187,46 +867,7 @@ func externalDistributionAllDraftSaved(job publishJob) bool {
 	return len(job.ExternalDistributionLanes) > 0
 }
 
-func externalDistributionAllQueued(job publishJob, now time.Time) bool {
-	queued := false
-	for _, lane := range job.ExternalDistributionLanes {
-		if lane.State != publishExternalDistributionReconciliationRequired {
-			continue
-		}
-		if !externalLaneQueuedAtProvider(lane, now) {
-			return false
-		}
-		queued = true
-	}
-	return queued
-}
-
-// publishExternalLaneNeedsLateRefresh 已拿到 content_pk、但本地结论还没落定的平台：
-// 15 分钟轮询超时转对账的（云梭仍在排队），以及云梭标「异常、自动重试」的失败。
-// 有单号只查询（红线 37），所以补查绝不会造成重复稿。
-func publishExternalLaneNeedsLateRefresh(lane publishExternalLane, now time.Time) bool {
-	if lane.Driver != externalDriverYunsuo || strings.TrimSpace(lane.ContentPK) == "" {
-		return false
-	}
-	switch lane.State {
-	case publishExternalDistributionReconciliationRequired, publishExternalDistributionFailed:
-	default:
-		return false
-	}
-	requestedAt, err := time.Parse(time.RFC3339, lane.RequestedAt)
-	if err != nil || now.Sub(requestedAt) > publishExternalLateRefreshWithin {
-		return false
-	}
-	if lastPolled, err := time.Parse(time.RFC3339, lane.LastPolledAt); err == nil &&
-		now.Sub(lastPolled) < publishExternalLateRefreshEvery {
-		return false
-	}
-	return true
-}
-
-// refreshExternalDistributionResults 云梭发布慢于轮询时限、或失败后自动重试成功时，
-// 把各平台的最终结果补回任务和审核卡。状态没变只记查询时间，不刷卡。迁移来的旧稿
-// 几个平台共用一个 content_pk，同一轮只查一次。经分发服务的结果不明的 lane 每轮按幂等键查一次。
+// refreshExternalDistributionResults 经分发服务、结果不明的 lane 每轮按幂等键查一次，把结果补回任务和审核卡。
 func (p *publishPipeline) refreshExternalDistributionResults() {
 	if p == nil || p.store == nil || publishWorkersPaused() {
 		return
@@ -1237,79 +878,19 @@ func (p *publishPipeline) refreshExternalDistributionResults() {
 		return
 	}
 	now := pipelineNow(p)
-	stamp := now.Format(time.RFC3339)
-	var client yunsuoAPI
 	var robot distributionRobotAPI
-	robotUnavailable, yunsuoUnavailable := false, false
-	type statusResult struct {
-		statuses []yunsuoAccountStatus
-		err      error
-	}
-	cache := map[string]statusResult{}
 	for _, job := range jobs {
 		for _, lane := range job.ExternalDistributionLanes {
-			if robotLaneAwaitingResult(lane, now) && !robotUnavailable {
-				if robot == nil {
-					if robot, err = p.robotClient(); err != nil {
-						log.Printf("publish: 外发结果补查无法创建分发工具客户端：%v", err)
-						robotUnavailable = true
-						continue
-					}
-				}
-				p.resolveRobotLaneWithClient(job.ID, lane, robot)
+			if !robotLaneAwaitingResult(lane, now) {
 				continue
 			}
-			if yunsuoUnavailable || !publishExternalLaneNeedsLateRefresh(lane, now) {
-				continue
-			}
-			if client == nil {
-				if client, err = p.yunsuoClient(); err != nil {
-					// 云梭配置坏了不挡经分发服务的 lane。
-					log.Printf("publish: 外发结果补查无法创建云梭客户端：%v", err)
-					yunsuoUnavailable = true
-					continue
+			if robot == nil {
+				if robot, err = p.robotClient(); err != nil {
+					log.Printf("publish: 外发结果补查无法创建分发工具客户端：%v", err)
+					return
 				}
 			}
-			result, ok := cache[lane.ContentPK]
-			if !ok {
-				result.statuses, result.err = client.Status(context.Background(), lane.ContentPK)
-				cache[lane.ContentPK] = result
-			}
-			unchanged := func(current publishExternalLane) bool {
-				return current.State == lane.State && current.ContentPK == lane.ContentPK
-			}
-			if result.err != nil {
-				log.Printf("publish: 外发结果补查失败（任务 #%d %s）：%v", job.ID, lane.Name, result.err)
-				p.updateExternalLane(job.ID, lane.AccountID, unchanged, func(_ *publishJob, current *publishExternalLane) {
-					current.LastPolledAt = stamp
-				})
-				continue
-			}
-			next, terminal := applyExternalLaneStatuses(lane, result.statuses, stamp)
-			state := lane.State
-			if terminal {
-				state = next.State
-			}
-			changed := state != lane.State
-			_, swapped, updateErr := p.updateExternalLane(job.ID, lane.AccountID, unchanged, func(current *publishJob, l *publishExternalLane) {
-				copyExternalLaneProvider(l, next)
-				l.LastPolledAt = stamp
-				l.PollAttempts++
-				if changed {
-					l.State = state
-					l.Error = ""
-					l.CompletedAt = stamp
-					enqueueExternalDistributionCardUpdate(current)
-				}
-			})
-			if updateErr != nil {
-				log.Printf("publish: 外发结果补查落盘失败（任务 #%d %s）：%v", job.ID, lane.Name, updateErr)
-				continue
-			}
-			if swapped && changed {
-				log.Printf("publish: 外发结果补查更新（任务 #%d %s）：%s → %s", job.ID, lane.Name, lane.State, state)
-				p.scheduleExternalDistributionCardUpdate(job.ID)
-			}
+			p.resolveRobotLaneWithClient(job.ID, lane, robot)
 		}
 	}
 }

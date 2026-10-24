@@ -241,17 +241,12 @@ type publishPipeline struct {
 	foodTalks func() (foodTalksAPI, error)
 	// foodTalksAuth 汇总所有现建客户端的鉴权结论；nil 时监控不报凭证信号（测试装配）。
 	foodTalksAuth *foodTalksAuthHealth
-	// yunsuo 是原创文章外部分发客户端。由已发布卡片人工点击，或原创稿公开后按
-	// auto 账号自动外发（publish_external_auto.go）；与网站主状态机正交，测试可注入 fake。
-	yunsuo func() (yunsuoAPI, error)
-	// distributionRobot 自己的分发服务客户端（百家号存草稿，publish_external_robot.go）；测试可注入 fake。
-	distributionRobot func() (distributionRobotAPI, error)
-	// 云梭没有回调，content_pk 落盘后以安全查询轮询最终结果。
-	externalDistributionPollInterval time.Duration
-	externalDistributionPollTimeout  time.Duration
-	cmsSyncInterval                  time.Duration
-	repostSources                    *publishRepostSourceStore
-	subscribeFeedWechatArticle       func(ctx context.Context, sourceName, articleURL string) error
+	// distributionRobot 自己的分发服务客户端：原创文章存草稿到第三方平台（publish_external_robot.go），
+	// 由已发布卡片人工点击，或原创稿公开后按 auto 账号自动外发；与网站主状态机正交，测试可注入 fake。
+	distributionRobot          func() (distributionRobotAPI, error)
+	cmsSyncInterval            time.Duration
+	repostSources              *publishRepostSourceStore
+	subscribeFeedWechatArticle func(ctx context.Context, sourceName, articleURL string) error
 	// notify 人审群通知；nil 或返回错误都不阻断流水线——人可以查任务列表，通知只是加速器
 	notify func(ctx context.Context, text string) error
 	// monitorNotify P0 监控私聊；与审核群物理分开，缺配置时监控 relay 必须失败，
@@ -271,8 +266,8 @@ type publishPipeline struct {
 	coverImgKey func(ctx context.Context, imgURL string) (string, error)
 	// spawn 异步推进入口（生产 go routine；测试注入同步执行保证确定性）
 	spawn func(func())
-	// externalSpawn 将云梭的慢 HTTP 与 FoodTalks 主发布 worker 物理隔离；否则四个
-	// 30 秒请求就能占满主池，使审核发布和卡片通知一起饥饿。
+	// externalSpawn 将分发服务的慢 HTTP（存草稿要在服务器浏览器里填稿）与 FoodTalks 主发布 worker 物理隔离；
+	// 否则几个慢请求就能占满主池，使审核发布和卡片通知一起饥饿。
 	externalSpawn func(func())
 	// retryNotification 失败通知的延迟重试调度；测试可注入捕获回调。
 	retryNotification func(time.Duration, func())
@@ -298,7 +293,7 @@ func (p *publishPipeline) enableBoundedWorkers(workerCount, queueCapacity int) {
 	}
 	p.externalSpawn = func(f func()) {
 		if !externalPool.submit(f) {
-			log.Printf("publish: external worker pool 已停止，拒绝新的云梭任务")
+			log.Printf("publish: external worker pool 已停止，拒绝新的外发任务")
 		}
 	}
 }
@@ -327,22 +322,19 @@ func (p *publishPipeline) spawnExternalWork(f func()) {
 // newPublishPipeline 生产装配：全部依赖用进程内复用的默认实现。
 func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publishPipeline {
 	p := &publishPipeline{
-		store:                            store,
-		rules:                            rules,
-		render:                           renderSiteHTML,
-		ossUpload:                        ossUploadByURLs,
-		enrich:                           aiEnrichArticle,
-		assessRisk:                       aiAssessPublishRisk,
-		foodTalksAuth:                    &foodTalksAuthHealth{},
-		yunsuo:                           func() (yunsuoAPI, error) { return newYunsuoClientFromEnv() },
-		distributionRobot:                newDistributionRobotClientFromEnv,
-		subscribeFeedWechatArticle:       defaultSubscribeFeedWechatArticle,
-		externalDistributionPollInterval: 5 * time.Second,
-		externalDistributionPollTimeout:  15 * time.Minute,
-		spawn:                            func(f func()) { go f() },
-		externalSpawn:                    func(f func()) { go f() },
-		retryNotification:                func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
-		now:                              time.Now,
+		store:                      store,
+		rules:                      rules,
+		render:                     renderSiteHTML,
+		ossUpload:                  ossUploadByURLs,
+		enrich:                     aiEnrichArticle,
+		assessRisk:                 aiAssessPublishRisk,
+		foodTalksAuth:              &foodTalksAuthHealth{},
+		distributionRobot:          newDistributionRobotClientFromEnv,
+		subscribeFeedWechatArticle: defaultSubscribeFeedWechatArticle,
+		spawn:                      func(f func()) { go f() },
+		externalSpawn:              func(f func()) { go f() },
+		retryNotification:          func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
+		now:                        time.Now,
 	}
 	p.foodTalks = func() (foodTalksAPI, error) {
 		c, err := newFoodTalksClientFromEnv()
@@ -2329,7 +2321,7 @@ func publishSiteIsRepost(sourceName, blocksJSON string) bool {
 }
 
 // publishArticleProvenance 是所有渠道共用的文章来源真相：只负责回答“是否原创、
-// 来源是谁”，不掺任何渠道发布策略。FoodTalks 可接收两类文章；云梭等外部渠道
+// 来源是谁”，不掺任何渠道发布策略。FoodTalks 可接收两类文章；第三方平台
 // 在自己的资格函数中只接受 original=true，避免把平台名写进中立能力层。
 func publishArticleProvenance(job publishJob) (original bool, source string) {
 	own := siteOwnAccounts()

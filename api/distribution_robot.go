@@ -281,7 +281,7 @@ func (c *distributionRobotClient) parseError(status int, raw []byte) (string, st
 	if c.token != "" {
 		message = strings.ReplaceAll(message, c.token, "[REDACTED]")
 	}
-	return strings.TrimSpace(envelope.Error.Code), safeYunsuoMessage(message)
+	return strings.TrimSpace(envelope.Error.Code), safeDistributionMessage(message)
 }
 
 func parseRobotDraftRecord(raw []byte) (robotDraftRecord, error) {
@@ -293,4 +293,17 @@ func parseRobotDraftRecord(raw []byte) (robotDraftRecord, error) {
 	record.ArticleID = strings.TrimSpace(record.ArticleID)
 	record.DraftURL = strings.TrimSpace(record.DraftURL)
 	return record, nil
+}
+
+// safeDistributionMessage 分发服务给的原因压成一行、最多 240 字，写进卡片与日志。
+func safeDistributionMessage(message string) string {
+	message = strings.Join(strings.Fields(message), " ")
+	if message == "" {
+		return "服务端未返回原因"
+	}
+	runes := []rune(message)
+	if len(runes) > 240 {
+		message = string(runes[:240]) + "…"
+	}
+	return message
 }

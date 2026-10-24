@@ -405,8 +405,8 @@ func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, a
 		}
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	if profile := yunsuoProfileForTarget(target); only != nil && profile.Driver == externalDriverRobot {
-		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在" + profile.syncAction(target.label())}
+	if only != nil {
+		return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在" + yunsuoProfileForTarget(target).syncAction(target.label())}
 	}
 	return reviewCardOutcome{toastType: "success", toastContent: "已受理，正在同步分发"}
 }

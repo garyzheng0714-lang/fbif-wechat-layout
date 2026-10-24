@@ -101,11 +101,7 @@ func renderDistributionPlatformSpec(p yunsuoPlatformProfile) (string, error) {
 	b.WriteString("> 由 `api/yunsuo_platform_profiles.go` 和外发排版代码生成，别手改：改了规则跑 `cd api && SPEC_UPDATE=1 go test -run TestDistributionPlatformSpec .`。块是什么见 `docs/article-blocks.md`，各平台共用的规则在 `api/yunsuo_distribution_rules.go`。\n\n")
 
 	b.WriteString("## 稿子怎么送进平台\n\n")
-	if p.Driver == externalDriverRobot {
-		fmt.Fprintf(&b, "经自己的分发服务（FBIF-多平台分发工具，在 B 机），只存草稿、不发布。编辑器每一步怎么点、找不到按钮时模型兜底的边界，见分发工具的 `docs/platforms/%s.md`。存完草稿当场读回核对标题、小标题、加粗、图片、图注、封面。\n\n", p.Key)
-	} else {
-		b.WriteString("经云梭。云梭拿我们托管的登录态往平台网页编辑器里填稿，留下什么由它的填法决定，我们控制不了编辑器，只能挑它留得住的写法（见「正文怎么写」）。云梭没有修改、撤回接口，推出去的只能在云梭控制台处理。\n\n")
-	}
+	fmt.Fprintf(&b, "经自己的分发服务（FBIF-多平台分发工具，在 B 机），只存草稿、不发布。编辑器每一步怎么点、找不到按钮时模型兜底的边界，见分发工具的 `docs/platforms/%s.md`。存完草稿当场读回核对标题、小标题、加粗、图片、图注、封面。\n\n", p.Key)
 
 	b.WriteString("## 稿子要求\n\n| 项 | 要求 |\n| --- | --- |\n")
 	fmt.Fprintf(&b, "| 标题 | %s |\n", distributionSpecTitle(p))
@@ -117,15 +113,14 @@ func renderDistributionPlatformSpec(p yunsuoPlatformProfile) (string, error) {
 	fmt.Fprintf(&b, "| 封面 | %s |\n", distributionSpecCover(p))
 	fmt.Fprintf(&b, "| 每天上限 | %d 篇（按账号计数，人工按钮发的也算） |\n", p.DailyLimit)
 	fmt.Fprintf(&b, "| 文章链接 | 只认 `%s`；%s |\n", strings.Join(p.URLHosts, "` `"), distributionSpecLinkLookup(p))
-	fmt.Fprintf(&b, "| 线上正文核对 | %s |\n", distributionSpecFidelity(p))
+	b.WriteString("| 核对 | 分发服务存完草稿当场读回，对不上的逐条记下、在审核卡上写灰字 |\n")
 	if p.ManageURL != "" {
 		fmt.Fprintf(&b, "| 后台内容管理页 | %s |\n", p.ManageURL)
 	}
 
 	b.WriteString("\n## 正文怎么写\n\n每种块写成什么（块的意思见 `docs/article-blocks.md`）。段与段之间不插空行，平台自带段距。\n\n| 原文 | 写成 |\n| --- | --- |\n")
-	markup := p.markup()
 	for _, row := range distributionSpecMarkupRows {
-		html, _ := writeYunsuoBlocks(row.Blocks, distributionSpecMirrored, markup)
+		html, _ := writeYunsuoBlocks(row.Blocks, distributionSpecMirrored, p.Markup)
 		fmt.Fprintf(&b, "| %s | `%s` |\n", row.Name, strings.ReplaceAll(html, "|", "\\|"))
 	}
 
@@ -163,23 +158,11 @@ func distributionSpecTitle(p yunsuoPlatformProfile) string {
 	if n := p.titleCountNote(); n != "" {
 		note = "，" + n
 	}
-	if p.TitleField == "" {
-		return fmt.Sprintf("原样送，%d–%d 字%s；超了记为待修改，在卡片或侧边栏改", min, max, note)
-	}
-	fieldMin, fieldMax := yunsuoTitleFieldRange(p.TitleField)
-	return fmt.Sprintf("放进云梭「%s」档（%d–%d 个字符），平台最多 %d 字%s；原标题放得下就原样送，不够长补「｜摘要」；超了记为待修改，在卡片或侧边栏改", p.TitleField, fieldMin, fieldMax, max, note)
+	return fmt.Sprintf("原样送，%d–%d 字%s；超了记为待修改，在卡片或侧边栏改", min, max, note)
 }
 
 func distributionSpecCover(p yunsuoPlatformProfile) string {
-	var out string
-	switch {
-	case p.Driver == externalDriverRobot:
-		out = "用公众号封面（和 FoodTalks 一样），分发服务在编辑器的封面弹窗里单独上传，不进正文"
-	case p.CoverPrepended:
-		out = "云梭会把封面插到正文最前面：文章以图开头就用这张图当封面并从正文拿掉，插回来正好在原位；不然用公众号封面"
-	default:
-		out = "用公众号封面（和 FoodTalks 一样），云梭不把它插进正文，正文不动"
-	}
+	out := "用公众号封面（和 FoodTalks 一样），分发服务在编辑器的封面弹窗里单独上传，不进正文"
 	if p.CoverMinWidth > 0 {
 		out += fmt.Sprintf("。最小 %d×%d；差一点（放大到 %.1f 倍以内能达标）自动放大一份转存，差得多记为待修改，在卡片里选正文大图或在侧边栏上传", p.CoverMinWidth, p.CoverMinHeight, externalCoverUpscaleMax)
 	} else {
@@ -191,21 +174,11 @@ func distributionSpecCover(p yunsuoPlatformProfile) string {
 func distributionSpecLinkLookup(p yunsuoPlatformProfile) string {
 	switch p.LinkLookup {
 	case externalLinkLookupToutiao:
-		return "推完经头条搜索加 TikHub 核对（作者是自家号、标题对上、发文时间在推送之后）自动回填"
+		return "草稿发出去后人工登记；登记时可让系统经头条搜索加 TikHub 找（作者是自家号、标题对上、发文时间在存稿之后）"
 	case "":
-		return "不自动找，人工登记"
+		return "草稿发出去后人工登记"
 	}
 	return p.LinkLookup
-}
-
-func distributionSpecFidelity(p yunsuoPlatformProfile) string {
-	switch {
-	case p.ContentFetch == externalFidelityFetchToutiao:
-		return "拿到文章链接后免费取一次线上正文，和推出去的比小标题、图片、图注、文末声明，对不上在审核卡上写灰字"
-	case p.Driver == externalDriverRobot:
-		return "平台搜索有验证码，不取线上正文；分发服务存完草稿当场读回核对"
-	}
-	return "不取"
 }
 
 // distributionSpecReaderLine 一块在读者眼里是什么。

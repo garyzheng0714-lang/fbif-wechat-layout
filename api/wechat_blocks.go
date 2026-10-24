@@ -1670,7 +1670,7 @@ func blockFromRoleDecision(obs ObservedBlock, role string) Block {
 		b.Level = headingLevelFromTag(obs.Tag)
 		if isSiteSecondaryHeadingText(obs.Text) {
 			// 网站二级标题（（一）/ 1、2、3）固定 level=3。公众号渲染器不读 Level，
-			// 网站/云梭按 h3 输出，避免被收成一级目录。
+			// 网站按 h3 输出（第三方平台按加粗段），避免被收成一级目录。
 			b.Level = 3
 		}
 		b.Text = obs.Text

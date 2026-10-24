@@ -32,7 +32,6 @@ func TestPublishReadinessReportsBooleanStateWithoutSecrets(t *testing.T) {
 	t.Setenv("FOODTALKS_ADMIN_ARTICLE_URL", "https://admin-we-test.foodtalks.cn/#/")
 	t.Setenv("FOODTALKS_CATEGORY_IDS", "52,58")
 	t.Setenv("FOODTALKS_EXPECTED_TARGET", "test")
-	t.Setenv("YUNSUO_BASE_URL", "https://www.yunsuofabu.com/v1")
 	t.Setenv("DISTRIBUTION_API_URL", "http://127.0.0.1:18095")
 	t.Setenv("DISTRIBUTION_API_TOKEN", "secret-distribution-token")
 	setTestExternalAccounts(t, testArticleAccount("recToutiao", "toutiao", false), testArticleAccount("recBaijia", "baijiahao", false))

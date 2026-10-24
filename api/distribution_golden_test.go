@@ -134,8 +134,8 @@ func distributionGoldenReport(t *testing.T, sample distributionGoldenSample, key
 	return out.String()
 }
 
-// distributionGoldenOutput 走真实外发组装：先用 FoodTalks 已发布正文盖到任务上，再按这个平台的送稿方式
-// 出标题与正文。封面不到平台下限时系统会停下等人换封面（或自动放大），正文不受影响，这里按换好算。
+// distributionGoldenOutput 走真实外发组装：先用 FoodTalks 已发布正文盖到任务上，再按这个平台的写法
+// 出标题与正文（交给分发服务的那一份）。封面不到平台下限时系统会停下等人换封面（或自动放大），正文不受影响，这里按换好算。
 func distributionGoldenOutput(sample distributionGoldenSample, profile yunsuoPlatformProfile, sizes map[string][2]int) (string, string, []string, error) {
 	job, err := overlayPublishJobWithPublishedNews(publishJob{ID: sample.Job, FoodTalksNewsID: sample.News.ID}, sample.News)
 	if err != nil {
@@ -150,22 +150,17 @@ func distributionGoldenOutput(sample distributionGoldenSample, profile yunsuoPla
 		notes = append(notes, fmt.Sprintf("封面 %d×%d 不到%s下限 %d×%d，按换好封面算", width, height, profile.Name, profile.CoverMinWidth, profile.CoverMinHeight))
 		sizes[rendered.Cover] = [2]int{profile.CoverMinWidth, profile.CoverMinHeight}
 	}
-	if profile.Driver == externalDriverRobot {
-		payload, err := buildRobotDraftPayload(job, profile, publishExternalDraft{})
-		return payload.Title, payload.HTML, notes, err
-	}
-	target := externalAccount{ID: "golden", Name: profile.Name, Platform: profile.Key}
-	payload, err := buildYunsuoPushPayload(job, []externalAccount{target}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
-	return payload.titleField(profile.TitleField), payload.HTML, notes, err
+	payload, err := buildRobotDraftPayload(job, profile, publishExternalDraft{})
+	return payload.Title, payload.HTML, notes, err
 }
 
 var distributionGoldenHeadingTag = regexp.MustCompile(`^<(h[1-6])\b`)
 
 // distributionReaderView 读者在这个平台上看到的样子：小标题、加粗段、段落、图片、图注、表格。
-// 我们的加粗行若写成标题标签（头条号经云梭写 h3，到平台上是加粗段），这个标签算加粗段。
+// 平台写法若把加粗行写成标题标签（到平台上是加粗段），这个标签算加粗段。
 func distributionReaderView(src string, profile yunsuoPlatformProfile) []distributionGoldenBlock {
 	boldTag := ""
-	if m := distributionGoldenHeadingTag.FindStringSubmatch(profile.markup().BoldLine("x")); m != nil {
+	if m := distributionGoldenHeadingTag.FindStringSubmatch(profile.Markup.BoldLine("x")); m != nil {
 		boldTag = m[1]
 	}
 	nodes, err := html.ParseFragment(strings.NewReader(src), &html.Node{Type: html.ElementNode, Data: "body", DataAtom: atom.Body})

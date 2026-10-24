@@ -1,18 +1,16 @@
 package main
 
 // 外部平台上的文章链接（2026-10-12 用户裁定：分发区里「显示它的标题那些东西」）。
-// 云梭的推送与状态回执都不带文章链接，只能事后找：
-//   - 头条号：头条搜索按标题拿候选（文章 id 高 32 位是发文时间，先按推送时间筛），再用
+// 系统只存草稿，平台上的文章是人发的：由管理员登记成「人工已发」lane（2026-03～08 头条号也是人工发的），
+// 自动外发不会再推。登记时不给链接可以按标题找：
+//   - 头条号：头条搜索按标题拿候选（文章 id 高 32 位是发文时间，先按时间筛），再用
 //     TikHub 读文章详情，作者是自家号、标题对得上才认；
-//   - 百家号：百度搜索有验证码，不绕过，暂不自动找。
-// 找不到只降级：卡片照样显示状态和推送标题，不影响任何发布状态。人工发过的平台
-// （2026-03～08 头条号是人工发的）由管理员登记成「人工已发」lane，自动外发不会再推。
+//   - 百家号：百度搜索有验证码，不绕过，不自动找。
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -28,12 +26,9 @@ const (
 	tikhubToutiaoArticlePath     = "/api/v1/toutiao/app/get_article_info"
 	toutiaoSearchMaxBytes        = 4 << 20
 	externalLinkMaxCandidates    = 5
-	externalLinkMaxAttempts      = 6
-	externalLinkLookupWithin     = 7 * 24 * time.Hour
-	externalLinkMaxPerSweep      = 3
-	// 系统推送的稿：平台发文时间只会在推送之后；留 10 分钟容差。
+	// 存过草稿的平台：文章只会在存草稿之后发出去；留 10 分钟容差。
 	externalLinkPushedSlack = 10 * time.Minute
-	// 人工登记时按网站发布时间前后找（人工稿可能早发几天，也可能晚很久）。
+	// 没经系统的按网站发布时间前后找（人工稿可能早发几天，也可能晚很久）。
 	externalLinkManualBefore = 3 * 24 * time.Hour
 	externalLinkManualAfter  = 60 * 24 * time.Hour
 
@@ -42,9 +37,6 @@ const (
 
 // toutiaoSearchEndpoint 测试可替换成本地桩。
 var toutiaoSearchEndpoint = defaultToutiaoSearchEndpoint
-
-// externalLinkBackoff 第 n 次查找距上次（或推送成功）至少隔多久；平台收录要时间。
-var externalLinkBackoff = []time.Duration{20 * time.Minute, time.Hour, 3 * time.Hour, 6 * time.Hour, 12 * time.Hour, 24 * time.Hour}
 
 var errExternalArticleNotFound = errors.New("没有找到作者与标题都对得上的文章")
 
@@ -208,25 +200,7 @@ func externalTitlesMatch(want, got string) bool {
 	return len([]rune(shorter)) >= 12 && (strings.Contains(a, b) || strings.Contains(b, a))
 }
 
-// externalLaneNeedsLink 系统推送成功、还没有链接、平台支持自动找、没超次数和时限，且
-// 距上次查找已过退避间隔。
-func externalLaneNeedsLink(lane publishExternalLane, profile yunsuoPlatformProfile, now time.Time) bool {
-	if lane.State != publishExternalDistributionSucceeded || strings.TrimSpace(lane.URL) != "" ||
-		profile.LinkLookup == "" || lane.URLAttempts >= externalLinkMaxAttempts {
-		return false
-	}
-	completedAt, err := time.Parse(time.RFC3339, lane.CompletedAt)
-	if err != nil || now.Sub(completedAt) > externalLinkLookupWithin {
-		return false
-	}
-	last := completedAt
-	if checked, err := time.Parse(time.RFC3339, lane.URLCheckedAt); err == nil && checked.After(last) {
-		last = checked
-	}
-	return now.Sub(last) >= externalLinkBackoff[min(lane.URLAttempts, len(externalLinkBackoff)-1)]
-}
-
-// externalLaneLookupWindow 系统推送的按推送时间往后找，否则按网站发布时间前后找。
+// externalLaneLookupWindow 系统存过草稿（或云梭推过）的按那时往后找，否则按网站发布时间前后找。
 func externalLaneLookupWindow(job publishJob, lane publishExternalLane, now time.Time) (time.Time, time.Time) {
 	if requested, err := time.Parse(time.RFC3339, lane.RequestedAt); err == nil && lane.State != publishExternalLaneManual && lane.ContentPK != "" {
 		return requested.Add(-externalLinkPushedSlack), now
@@ -236,67 +210,6 @@ func externalLaneLookupWindow(job publishJob, lane publishExternalLane, now time
 		base = published
 	}
 	return base.Add(-externalLinkManualBefore), base.Add(externalLinkManualAfter)
-}
-
-// refreshExternalDistributionLinks 兜底循环里给推送成功的平台补文章链接；每轮最多查
-// 几篇，TikHub 按次计费。找到就刷卡。
-func (p *publishPipeline) refreshExternalDistributionLinks() {
-	if p == nil || p.store == nil || publishWorkersPaused() {
-		return
-	}
-	cfg, err := loadExternalTargets()
-	if err != nil {
-		return
-	}
-	jobs, err := p.store.all()
-	if err != nil {
-		log.Printf("publish: 外发链接补查读取任务失败：%v", err)
-		return
-	}
-	now := pipelineNow(p)
-	stamp := now.Format(time.RFC3339)
-	budget := externalLinkMaxPerSweep
-	for _, job := range jobs {
-		for _, lane := range job.ExternalDistributionLanes {
-			if budget <= 0 {
-				return
-			}
-			target, ok := cfg.target(lane.AccountID)
-			if !ok {
-				continue
-			}
-			profile := yunsuoProfileForTarget(target)
-			if !externalLaneNeedsLink(lane, profile, now) {
-				continue
-			}
-			budget--
-			from, to := externalLaneLookupWindow(job, lane, now)
-			ref, lookupErr := lookupExternalArticle(context.Background(), profile, firstNonEmpty(lane.Title, job.Title), from, to)
-			found := lookupErr == nil && strings.TrimSpace(ref.URL) != ""
-			_, swapped, updateErr := p.updateExternalLane(job.ID, lane.AccountID, func(current publishExternalLane) bool {
-				return current.State == lane.State && strings.TrimSpace(current.URL) == ""
-			}, func(current *publishJob, l *publishExternalLane) {
-				l.URLAttempts++
-				l.URLCheckedAt = stamp
-				if found {
-					l.URL = ref.URL
-					if strings.TrimSpace(ref.Title) != "" {
-						l.Title = ref.Title
-					}
-					enqueueExternalDistributionCardUpdate(current)
-				}
-			})
-			switch {
-			case updateErr != nil:
-				log.Printf("publish: 外发链接补查落盘失败（任务 #%d %s）：%v", job.ID, lane.Name, updateErr)
-			case !found:
-				log.Printf("publish: 外发链接补查未找到（任务 #%d %s，第 %d 次）：%v", job.ID, lane.Name, lane.URLAttempts+1, lookupErr)
-			case swapped:
-				log.Printf("publish: 外发链接补查找到（任务 #%d %s）：%s", job.ID, lane.Name, ref.URL)
-				p.scheduleExternalDistributionCardUpdate(job.ID)
-			}
-		}
-	}
 }
 
 // externalManualRequest 管理员登记某平台「人工已发」或补文章链接。
@@ -366,9 +279,6 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	if exists && publishExternalDistributionProcessing(existing.State) {
 		return result, fmt.Errorf("%s正在同步，等结果出来再登记", target.label())
 	}
-	if externalUnadoptedLaneCovers(job, target, cfg) {
-		return result, fmt.Errorf("这篇在%s还有没改挂到「平台账号」的旧记录，改挂后再登记", target.label())
-	}
 	articleURL, title := "", strings.TrimSpace(req.Title)
 	switch {
 	case strings.TrimSpace(req.URL) != "":
@@ -376,11 +286,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 			return result, err
 		}
 	case req.Lookup:
-		lane := existing
-		if !exists {
-			lane = publishExternalLane{State: publishExternalLaneManual}
-		}
-		from, to := externalLaneLookupWindow(job, lane, pipelineNow(p))
+		from, to := externalLaneLookupWindow(job, existing, pipelineNow(p))
 		ref, err := lookupExternalArticle(ctx, profile, firstNonEmpty(title, existing.Title, job.Title), from, to)
 		if err != nil {
 			return result, err
@@ -404,7 +310,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 			lane.Error = ""
 		}
 		if articleURL != "" {
-			lane.URL, lane.URLCheckedAt = articleURL, stamp
+			lane.URL = articleURL
 		}
 		if title != "" {
 			lane.Title = title
@@ -421,7 +327,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	}
 	updated, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
 		lane, ok := externalLaneFor(current, target.ID)
-		if ok != exists || externalUnadoptedLaneCovers(current, target, cfg) {
+		if ok != exists {
 			return false
 		}
 		return !ok || (lane.State == existing.State && lane.ContentPK == existing.ContentPK)

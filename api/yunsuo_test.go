@@ -1,179 +1,22 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-func TestLoadYunsuoConfigAndRedactSecret(t *testing.T) {
-	t.Setenv(yunsuoBaseURLEnv, "")
-	t.Setenv(yunsuoUserCodeEnv, "user")
-	t.Setenv(yunsuoAPIKeyEnv, "never-print-this-key")
-	t.Setenv(yunsuoCategoriesEnv, "美食,饮食文化,财经,消费,公司")
-
-	cfg, err := loadYunsuoConfig()
+// renderDistributionHTML 各平台一样的规则用头条号的写法跑一遍（标题1→h1，标题2 与整段加粗→加粗段）。
+func renderDistributionHTML(t *testing.T, blocks, imageMap string) string {
+	t.Helper()
+	rendered, err := renderYunsuoDistribution(blocks, imageMap, "", yunsuoPlatformProfiles["toutiao"], "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BaseURL != defaultYunsuoBaseURL || len(cfg.Categories) != 5 {
-		t.Fatalf("配置解析不符合预期：%v", cfg)
-	}
-	encoded, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), cfg.APIKey) || strings.Contains(cfg.String(), cfg.APIKey) {
-		t.Fatalf("配置不得回显 API key：json=%s string=%s", encoded, cfg.String())
-	}
+	return rendered.HTML
 }
 
-func TestLoadYunsuoConfigRejectsPlainHTTPPublicBaseURL(t *testing.T) {
-	setRequired := func() {
-		t.Setenv(yunsuoUserCodeEnv, "user")
-		t.Setenv(yunsuoAPIKeyEnv, "secret")
-	}
-	setRequired()
-	t.Setenv(yunsuoBaseURLEnv, "http://example.com/v1")
-	if _, err := loadYunsuoConfig(); err == nil {
-		t.Fatal("公网云梭地址不得使用明文 HTTP")
-	}
-
-	// 本地临时服务用于单测/开发，按共用 configuredHTTPBaseURL
-	// 口径保留 HTTP 回环例外。
-	t.Setenv(yunsuoBaseURLEnv, "http://127.0.0.1:19090/v1")
-	if _, err := loadYunsuoConfig(); err != nil {
-		t.Fatalf("本机回环 HTTP 应允许：%v", err)
-	}
-}
-
-func TestYunsuoSignatureUsesDocumentedOrder(t *testing.T) {
-	const expected = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
-	if got := yunsuoSignature("a", "b", "c"); got != expected {
-		t.Fatalf("SHA512(API_KEY+Nonce+USER_CODE) = %s", got)
-	}
-}
-
-func TestYunsuoClientPushStatusAndErrorClasses(t *testing.T) {
-	const apiKey = "private-key"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Nonce") != "fixed-nonce" || r.Header.Get("User-Code") != "user" {
-			t.Errorf("认证头缺失：%v", r.Header)
-		}
-		if r.Header.Get("Signature") != yunsuoSignature(apiKey, "fixed-nonce", "user") {
-			t.Errorf("签名不符合文档顺序")
-		}
-		switch r.URL.Path {
-		case "/v1/distribution/push":
-			_, _ = w.Write([]byte(`{"code":1,"msg":"ok","data":{"content_pk":"content-1"}}`))
-		case "/v1/distribution/status":
-			_, _ = w.Write([]byte(`{"code":1,"msg":"ok","data":[{"pk":"record-1","platform_name":"今日头条","publish_time":"2026-08-11 15:30:00","status":1,"remark":"ok","accountPool":{"id":"a-1","name":"头条号"}}]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	client := newYunsuoClient(yunsuoConfig{BaseURL: server.URL + "/v1", UserCode: "user", APIKey: apiKey})
-	client.nonce = func() (string, error) { return "fixed-nonce", nil }
-	contentPK, err := client.Push(context.Background(), yunsuoPushPayload{Type: 0, Title: "title"})
-	if err != nil || contentPK != "content-1" {
-		t.Fatalf("Push = %q, %v", contentPK, err)
-	}
-	statuses, err := client.Status(context.Background(), contentPK)
-	if err != nil || len(statuses) != 1 || statuses[0].AccountPool.ID != "a-1" || statuses[0].Status != 1 ||
-		statuses[0].PK != "record-1" || statuses[0].PlatformName != "今日头条" || statuses[0].PublishTime != "2026-08-11 15:30:00" {
-		t.Fatalf("Status = %#v, %v", statuses, err)
-	}
-
-	rejectedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"code":-1,"msg":"bad private-key","data":null}`))
-	}))
-	defer rejectedServer.Close()
-	rejectedClient := newYunsuoClient(yunsuoConfig{BaseURL: rejectedServer.URL, UserCode: "user", APIKey: apiKey})
-	rejectedClient.nonce = func() (string, error) { return "fixed-nonce", nil }
-	_, err = rejectedClient.Push(context.Background(), yunsuoPushPayload{})
-	if !isYunsuoUncertainError(err) || isYunsuoRejectedError(err) || strings.Contains(err.Error(), apiKey) {
-		t.Fatalf("Push 负码不能证明未受理，必须标记不确定且脱敏：%v", err)
-	}
-
-	serverError := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"code":-1,"msg":"temporary failure","data":null}`))
-	}))
-	defer serverError.Close()
-	serverErrorClient := newYunsuoClient(yunsuoConfig{BaseURL: serverError.URL, UserCode: "user", APIKey: apiKey})
-	serverErrorClient.nonce = func() (string, error) { return "fixed-nonce", nil }
-	_, err = serverErrorClient.Push(context.Background(), yunsuoPushPayload{})
-	if !isYunsuoUncertainError(err) || isYunsuoRejectedError(err) {
-		t.Fatalf("HTTP 5xx 即使携带负业务码也必须标记结果不确定：%v", err)
-	}
-
-	for name, body := range map[string]string{
-		"missing":  `{"msg":"ok","data":{"content_pk":"possibly-created"}}`,
-		"zero":     `{"code":0,"msg":"unknown","data":{"content_pk":"possibly-created"}}`,
-		"negative": `{"code":-1,"msg":"service error","data":{"content_pk":"possibly-created"}}`,
-	} {
-		t.Run("unknown-code-"+name, func(t *testing.T) {
-			unknownCodeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(body))
-			}))
-			defer unknownCodeServer.Close()
-			unknownCodeClient := newYunsuoClient(yunsuoConfig{BaseURL: unknownCodeServer.URL, UserCode: "user", APIKey: apiKey})
-			unknownCodeClient.nonce = func() (string, error) { return "fixed-nonce", nil }
-			contentPK, unknownErr := unknownCodeClient.Push(context.Background(), yunsuoPushPayload{})
-			if unknownErr != nil || contentPK != "possibly-created" {
-				t.Fatalf("响应只要含 content_pk 就必须优先进入对账：pk=%q err=%v", contentPK, unknownErr)
-			}
-		})
-	}
-
-	topLevelPKServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"code":-1,"msg":"conflict","content_pk":"top-level-created","data":null}`))
-	}))
-	defer topLevelPKServer.Close()
-	topLevelPKClient := newYunsuoClient(yunsuoConfig{BaseURL: topLevelPKServer.URL, UserCode: "user", APIKey: apiKey})
-	topLevelPKClient.nonce = func() (string, error) { return "fixed-nonce", nil }
-	contentPK, err = topLevelPKClient.Push(context.Background(), yunsuoPushPayload{})
-	if err != nil || contentPK != "top-level-created" {
-		t.Fatalf("4xx 负码若带顶层 content_pk 也必须继续对账：pk=%q err=%v", contentPK, err)
-	}
-
-	uncertainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"code":1,"msg":"ok","data":{}}`))
-	}))
-	defer uncertainServer.Close()
-	uncertainClient := newYunsuoClient(yunsuoConfig{BaseURL: uncertainServer.URL, UserCode: "user", APIKey: apiKey})
-	uncertainClient.nonce = func() (string, error) { return "fixed-nonce", nil }
-	_, err = uncertainClient.Push(context.Background(), yunsuoPushPayload{})
-	if !isYunsuoUncertainError(err) || isYunsuoRejectedError(err) {
-		t.Fatalf("成功响应缺 content_pk 必须标记结果不确定：%v", err)
-	}
-}
-
-func TestYunsuoClientDoesNotForwardSignedHeadersAcrossRedirect(t *testing.T) {
-	received := false
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		received = true
-	}))
-	defer target.Close()
-	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
-	}))
-	defer redirector.Close()
-	client := newYunsuoClient(yunsuoConfig{BaseURL: redirector.URL, UserCode: "user", APIKey: "secret"})
-	client.nonce = func() (string, error) { return "fixed-nonce", nil }
-	_, err := client.Push(context.Background(), yunsuoPushPayload{})
-	if received || !isYunsuoUncertainError(err) {
-		t.Fatalf("签名请求不得跟随 redirect：received=%v err=%v", received, err)
-	}
-}
-
-func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
+func TestDistributionHTMLEscapesAndDropsLinks(t *testing.T) {
 	blocks := `[
 		{"k":"h","level":2,"text":"章节 <一>"},
 		{"k":"p","runs":[{"type":"txt","text":"正文 & ","bold":true},{"type":"link","text":"不安全链接","href":"javascript:alert(1)"}]},
@@ -184,56 +27,30 @@ func TestRenderAndBuildYunsuoPayloadStayChannelNeutral(t *testing.T) {
 		{"k":"video","src":"https://cdn.example/video.mp4","poster":"https://origin.example/poster.jpg"}
 	]`
 	imageMap := `{"https://origin.example/image.jpg":"https://cdn.example/image.jpg","https://origin.example/poster.jpg":"https://cdn.example/poster.jpg"}`
-	rendered, err := renderYunsuoHTML(blocks, imageMap)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, wanted := range []string{"<h2>章节 &lt;一&gt;</h2>", "<ul><li>第一项</li><li>第二项</li></ul>", "<table", "https://cdn.example/poster.jpg", "https://cdn.example/image.jpg"} {
+	rendered := renderDistributionHTML(t, blocks, imageMap)
+	for _, wanted := range []string{"<h1>章节 &lt;一&gt;</h1>", "<ul><li>第一项</li><li>第二项</li></ul>", "<table", "https://cdn.example/poster.jpg", "https://cdn.example/image.jpg"} {
 		if !strings.Contains(rendered, wanted) {
-			t.Fatalf("中性 HTML 缺少 %q：%s", wanted, rendered)
+			t.Fatalf("外发正文缺少 %q：%s", wanted, rendered)
 		}
 	}
 	if strings.Contains(strings.ToLower(rendered), "javascript:") || strings.Contains(rendered, "<a ") ||
 		strings.Contains(rendered, "<script>") || strings.Contains(rendered, "FoodTalks") {
-		t.Fatalf("中性 HTML 不得包含活性链接、脚本或网站耦合：%s", rendered)
+		t.Fatalf("外发正文不得包含链接、脚本或 FoodTalks 的东西：%s", rendered)
 	}
 
 	job := publishJob{
 		Title:      "新品趋势",
 		SourceName: "FBIF食品饮料创新",
-		Summary:    "这是一段用于补全云梭长标题的真实文章摘要。",
-		Tags:       []string{"饮料", "新品"},
 		BlocksJSON: blocks,
 		ImageMap:   imageMap,
 		CoverURL:   "https://origin.example/image.jpg",
 	}
-	payload, err := buildYunsuoPushPayload(job,
-		[]externalAccount{{ID: "a-1", Name: "头条号"}, {ID: "a-2", Name: "百家号"}},
-		[]string{"美食", "饮食文化", "财经", "消费", "公司"})
+	payload, err := buildRobotDraftPayload(job, yunsuoPlatformProfiles["toutiao"], publishExternalDraft{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	shortLen, titleLen, longLen := len([]rune(payload.ShortTitle)), len([]rune(payload.Title)), len([]rune(payload.LongTitle))
-	if shortLen < 8 || shortLen > 20 || titleLen < 15 || titleLen > 40 || longLen < 20 || longLen > 60 {
-		t.Fatalf("云梭标题长度越界：short=%d title=%d long=%d", shortLen, titleLen, longLen)
-	}
-	if payload.Cover != "https://cdn.example/image.jpg" || len(payload.AccountIDs) != 2 || payload.Type != 0 {
-		t.Fatalf("推送快照不符合预期：%#v", payload)
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wire map[string]any
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := wire["content_html"]; ok {
-		t.Fatalf("推送必须用官方字段 html，不得再发 content_html：%s", encoded)
-	}
-	html, _ := wire["html"].(string)
-	if strings.TrimSpace(html) == "" {
-		t.Fatalf("推送缺少 html：%s", encoded)
+	if payload.CoverURL != "https://cdn.example/image.jpg" || payload.Title != job.Title || strings.Contains(payload.HTML, "javascript:") {
+		t.Fatalf("草稿内容不符合预期：%#v", payload)
 	}
 }
 
@@ -333,18 +150,14 @@ func TestYunsuoDistributionMovesTailCreditsIntoStatement(t *testing.T) {
 		{"k":"txt","text":"英文来源：Whole Foods Market"},
 		{"k":"txt","text":"中文编辑：kiki"}
 	]`
-	html, err := renderYunsuoHTML(blocks, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	html := renderDistributionHTML(t, blocks, `{}`)
 	want := "<p>Lentiful杯装即食扁豆餐以扁豆为主要原料。</p><p>本文为FBIF食品饮料创新原创，英文来源：Whole Foods Market，中文编辑：kiki，转载请联系授权。</p>"
 	if !strings.HasSuffix(html, want) {
 		t.Fatalf("文末署名应并进声明：%s", html)
 	}
 	// 没有署名就只写原创声明（#287）。
-	html, err = renderYunsuoHTML(`[{"k":"txt","text":"十项趋势并不是一张需要同时完成的清单。"}]`, `{}`)
-	if err != nil || !strings.HasSuffix(html, "<p>本文为FBIF食品饮料创新原创，转载请联系授权。</p>") {
-		t.Fatalf("无署名稿的声明不对：%s %v", html, err)
+	if html = renderDistributionHTML(t, `[{"k":"txt","text":"十项趋势并不是一张需要同时完成的清单。"}]`, `{}`); !strings.HasSuffix(html, "<p>本文为FBIF食品饮料创新原创，转载请联系授权。</p>") {
+		t.Fatalf("无署名稿的声明不对：%s", html)
 	}
 }
 
@@ -353,31 +166,25 @@ func TestYunsuoDistributionMovesTailCreditsIntoStatement(t *testing.T) {
 func TestYunsuoDistributionNumbersSectionHeadings(t *testing.T) {
 	render := func(blocks string) string {
 		t.Helper()
-		html, err := renderYunsuoHTML(blocks, `{}`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return html
+		return renderDistributionHTML(t, blocks, `{}`)
 	}
-	if html := render(`[{"k":"h","level":2,"text":"趋势一 营养设计"},{"k":"txt","text":"正文。"},{"k":"h","level":2,"text":"趋势二 精准蛋白"},{"k":"h","level":2,"text":"参考来源："},{"k":"txt","text":"[1] Innova"}]`); !strings.Contains(html, "<h2>一、趋势一 营养设计</h2>") ||
-		!strings.Contains(html, "<h2>二、趋势二 精准蛋白</h2>") || !strings.Contains(html, "<h2>参考来源：</h2>") {
+	if html := render(`[{"k":"h","level":2,"text":"趋势一 营养设计"},{"k":"txt","text":"正文。"},{"k":"h","level":2,"text":"趋势二 精准蛋白"},{"k":"h","level":2,"text":"参考来源："},{"k":"txt","text":"[1] Innova"}]`); !strings.Contains(html, "<h1>一、趋势一 营养设计</h1>") ||
+		!strings.Contains(html, "<h1>二、趋势二 精准蛋白</h1>") || !strings.Contains(html, "<h1>参考来源：</h1>") {
 		t.Fatalf("两个以上标题1 应编号、参考来源不编：%s", html)
 	}
-	if html := render(`[{"k":"h","level":2,"text":"一、 一群做设计的人，“起义”做茶"},{"k":"h","level":2,"text":"被tea'stone的茶惊艳到"},{"k":"h","level":3,"text":"1. 山河瓶"}]`); !strings.Contains(html, "<h2>一、 一群做设计的人，“起义”做茶</h2>") ||
-		!strings.Contains(html, "<h2>被tea&#39;stone的茶惊艳到</h2>") || !strings.Contains(html, "<h3>1. 山河瓶</h3>") {
+	if html := render(`[{"k":"h","level":2,"text":"一、 一群做设计的人，“起义”做茶"},{"k":"h","level":2,"text":"被tea'stone的茶惊艳到"},{"k":"h","level":3,"text":"1. 山河瓶"}]`); !strings.Contains(html, "<h1>一、 一群做设计的人，“起义”做茶</h1>") ||
+		!strings.Contains(html, "<h1>被tea&#39;stone的茶惊艳到</h1>") || !strings.Contains(html, "<p><strong>1. 山河瓶</strong></p>") {
 		t.Fatalf("原文已编号的不再编：%s", html)
 	}
-	if html := render(`[{"k":"h","level":2,"text":"炸薯片，还能把油换成水？"},{"k":"txt","text":"正文。"}]`); !strings.Contains(html, "<h2>炸薯片，还能把油换成水？</h2>") {
+	if html := render(`[{"k":"h","level":2,"text":"炸薯片，还能把油换成水？"},{"k":"txt","text":"正文。"}]`); !strings.Contains(html, "<h1>炸薯片，还能把油换成水？</h1>") {
 		t.Fatalf("只有一个标题不编号：%s", html)
 	}
-	if html := render(`[{"k":"h","level":2,"text":"3.9元的瓶装茶"},{"k":"h","level":2,"text":"便利店的新货架"}]`); !strings.Contains(html, "<h2>一、3.9元的瓶装茶</h2>") {
+	if html := render(`[{"k":"h","level":2,"text":"3.9元的瓶装茶"},{"k":"h","level":2,"text":"便利店的新货架"}]`); !strings.Contains(html, "<h1>一、3.9元的瓶装茶</h1>") {
 		t.Fatalf("小数开头不算已编号：%s", html)
 	}
 }
 
 // 封面：百家号、头条号都经自己的分发服务，封面在编辑器的封面弹窗里单独上传、不进正文，首图留在原位。
-// 云梭在百家号上曾把 cover 插到正文最前面（#95 8 月稿、#282）：会插封面的平台（CoverPrepended，现在没有
-// 平台开）文章若以图开头，就用这张图当封面并从正文拿掉，插回来正好是原位。
 func TestYunsuoCoverFollowsHowEachPlatformPlacesIt(t *testing.T) {
 	stubYunsuoImageSize(t, nil)
 	blocks := `[
@@ -403,20 +210,9 @@ func TestYunsuoCoverFollowsHowEachPlatformPlacesIt(t *testing.T) {
 			t.Fatalf("%s：封面用公众号封面、单独上传，首图留在原位：cover=%q html=%s", name, payload.CoverURL, payload.HTML)
 		}
 	}
-	prepended := yunsuoPlatformProfiles["toutiao"]
-	prepended.CoverPrepended = true
-	_, rendered, err := renderExternalBody(job, prepended, publishExternalDraft{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rendered.Cover != "https://cdn.example/lead.jpg" || strings.Contains(rendered.HTML, "lead.jpg") ||
-		!strings.HasPrefix(rendered.HTML, "<p>tea&#39;stone深圳万象前海店</p><p>这是我茶叶系列的第39篇。</p>") {
-		t.Fatalf("会插封面的平台：开头的图做封面（云梭会插回最前面），图注留在原处：cover=%q html=%s", rendered.Cover, rendered.HTML)
-	}
 }
 
 // 标题用原文：经分发服务的平台标题原样送（百家号 2–64 字、头条号 2–30 字），不补「｜摘要」。
-// 云梭三档（short 8–20、title 15–40、long 20–60）只留给切换前的旧 lane：放得下就原样写，放不下才补或截。
 func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
 	stubYunsuoImageSize(t, nil)
 	job := publishJob{
@@ -426,27 +222,15 @@ func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
 		BlocksJSON: `[{"k":"txt","text":"不管吃的喝的，现在都能喝了。"}]`,
 		ImageMap:   `{"https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`,
 	}
-	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
-	job.Title = "西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了"               // 26 字
-	legacy := []externalAccount{{ID: "a-9", Name: "云梭旧号"}} // 认不出平台的号：通用版式，经云梭
-	payload, err := buildYunsuoPushPayload(job, legacy, categories)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if toutiao, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(externalAccount{Name: "头条号"}), publishExternalDraft{}); err != nil || toutiao.Title != job.Title {
-		t.Fatalf("头条号标题原样送：%+v %v", toutiao, err)
-	}
-	if payload.Title != job.Title || payload.LongTitle != job.Title {
-		t.Fatalf("放得下的档位应原样用原标题：title=%q long=%q", payload.Title, payload.LongTitle)
-	}
-	job.Title = "巧克力也想成新茶饮的“心头好”" // 15 字：title 档原样，long 档不足 20 字才补
-	if payload, err = buildYunsuoPushPayload(job, legacy, categories); err != nil ||
-		payload.Title != job.Title || !strings.HasPrefix(payload.LongTitle, job.Title+"｜") {
-		t.Fatalf("15 字标题：title=%q long=%q err=%v", payload.Title, payload.LongTitle, err)
-	}
+	toutiao := yunsuoProfileForTarget(externalAccount{Name: "头条号"})
 	baijia := yunsuoProfileForTarget(externalAccount{Name: "百家号"})
-	if payload, err := buildRobotDraftPayload(job, baijia, publishExternalDraft{}); err != nil || payload.Title != job.Title {
-		t.Fatalf("百家号标题原样送：%+v %v", payload, err)
+	for _, title := range []string{"西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了", "巧克力也想成新茶饮的“心头好”"} {
+		job.Title = title
+		for _, profile := range []yunsuoPlatformProfile{toutiao, baijia} {
+			if payload, err := buildRobotDraftPayload(job, profile, publishExternalDraft{}); err != nil || payload.Title != title {
+				t.Fatalf("%s标题原样送：%+v %v", profile.Name, payload, err)
+			}
+		}
 	}
 	job.Title = "茶"
 	if _, err := buildRobotDraftPayload(job, baijia, publishExternalDraft{}); err == nil || !strings.Contains(err.Error(), "百家号标题要 2–64 字，现在 1 字") {
@@ -495,11 +279,7 @@ func TestYunsuoDistributionDropsTrailingNameCardWithoutReferences(t *testing.T) 
 			{"k":"img","src":"` + last + `"}
 		]`
 		imageMap := `{"https://cdn.example/lead.png":"https://cdn.example/lead.png","` + last + `":"` + last + `"}`
-		html, err := renderYunsuoHTML(blocks, imageMap)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return html
+		return renderDistributionHTML(t, blocks, imageMap)
 	}
 	if html := render("https://cdn.example/card.png"); strings.Contains(html, "card.png") ||
 		!strings.HasSuffix(html, "<p>本文为FBIF食品饮料创新原创，作者：Mote莫特，转载请联系授权。</p>") {
@@ -516,7 +296,7 @@ func init() {
 }
 
 // TestYunsuoCoverRespectsToutiaoMinimum 2026-10-11 #183 头条号回执「封面图尺寸过小780x332，
-// 平台要求不得小于452x352」，受理后失败只能人工处理：推之前就查封面尺寸。
+// 平台要求不得小于452x352」：存草稿之前就查封面尺寸。
 func TestYunsuoCoverRespectsToutiaoMinimum(t *testing.T) {
 	blocks := `[
 		{"k":"txt","text":"正文第一段，交代这篇文章要讲的品牌故事。"},
@@ -532,36 +312,35 @@ func TestYunsuoCoverRespectsToutiaoMinimum(t *testing.T) {
 		ImageMap:   `{"https://cdn.example/lead.png":"https://cdn.example/lead.png","https://cdn.example/wx-cover.jpg":"https://cdn.example/wx-cover.jpg"}`,
 		CoverURL:   "https://cdn.example/wx-cover.jpg",
 	}
-	targets := []externalAccount{{ID: "a-1", Name: "头条号"}}
-	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
+	toutiao := yunsuoPlatformProfiles["toutiao"]
 
 	stubYunsuoImageSize(t, map[string][2]int{
 		"https://cdn.example/lead.png":     {1080, 720},
 		"https://cdn.example/wx-cover.jpg": {1200, 510},
 	})
-	payload, err := buildYunsuoPushPayload(job, targets, categories)
+	payload, err := buildRobotDraftPayload(job, toutiao, publishExternalDraft{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if payload.Cover != "https://cdn.example/wx-cover.jpg" || !strings.Contains(payload.HTML, "lead.png") {
-		t.Fatalf("封面用公众号封面，正文图留在原位：cover=%q html=%s", payload.Cover, payload.HTML)
+	if payload.CoverURL != "https://cdn.example/wx-cover.jpg" || !strings.Contains(payload.HTML, "lead.png") {
+		t.Fatalf("封面用公众号封面，正文图留在原位：cover=%q html=%s", payload.CoverURL, payload.HTML)
 	}
 
-	// 公众号封面太小（#183 780×332）：推了也会被平台拒，直接不推并说明原因。
+	// 公众号封面太小（#183 780×332）：存了也会被平台拒，直接不存并说明原因。
 	stubYunsuoImageSize(t, map[string][2]int{
 		"https://cdn.example/lead.png":     {1080, 720},
 		"https://cdn.example/wx-cover.jpg": {780, 332},
 	})
-	if _, err = buildYunsuoPushPayload(job, targets, categories); err == nil || !strings.Contains(err.Error(), "780x332") {
-		t.Fatalf("封面不够头条下限应拒绝推送并给出尺寸，实际 err=%v", err)
+	if _, err = buildRobotDraftPayload(job, toutiao, publishExternalDraft{}); err == nil || !strings.Contains(err.Error(), "780x332") {
+		t.Fatalf("封面不够头条下限应拒绝存草稿并给出尺寸，实际 err=%v", err)
 	}
 
 	// 没有公众号封面才用正文第一张够大的图，正文照旧不动。
 	job.CoverURL = ""
 	stubYunsuoImageSize(t, map[string][2]int{"https://cdn.example/lead.png": {1080, 720}})
-	if payload, err = buildYunsuoPushPayload(job, targets, categories); err != nil ||
-		payload.Cover != "https://cdn.example/lead.png" || !strings.Contains(payload.HTML, "lead.png") {
-		t.Fatalf("没有公众号封面时用正文第一张图：cover=%q err=%v", payload.Cover, err)
+	if payload, err = buildRobotDraftPayload(job, toutiao, publishExternalDraft{}); err != nil ||
+		payload.CoverURL != "https://cdn.example/lead.png" || !strings.Contains(payload.HTML, "lead.png") {
+		t.Fatalf("没有公众号封面时用正文第一张图：cover=%q err=%v", payload.CoverURL, err)
 	}
 }
 
@@ -575,8 +354,8 @@ func stubYunsuoImageSize(t *testing.T, sizes map[string][2]int) {
 	t.Cleanup(func() { yunsuoImageSize = previous })
 }
 
+// 卡片、改稿页给的缩短建议在标点处断开（2026-10-12 头条号后台实拍：硬截 20 字，标题停在半个词上）。
 func TestYunsuoShortTitleBreaksAtPunctuation(t *testing.T) {
-	// 2026-10-12 头条号后台实拍：short_title 硬截 20 字，标题停在半个词上。
 	cases := []struct{ title, want string }{
 		{"三得利卖出100亿瓶绿茶，背后藏着一家236年的老茶铺", "三得利卖出100亿瓶绿茶"},
 		{"估值超151亿元！蛋白棒赛道创业，他连赢了两次", "估值超151亿元！蛋白棒赛道创业"},
@@ -590,26 +369,11 @@ func TestYunsuoShortTitleBreaksAtPunctuation(t *testing.T) {
 		{"蛋白棒，亿滋首席执行官称赞这是全英国最好吃的蛋白棒", "蛋白棒，亿滋首席执行官称赞这是全英国最好"},
 	}
 	for _, tc := range cases {
-		got := yunsuoTitleVariant(tc.title, "", yunsuoTitleShort)
-		if got != tc.want {
-			t.Errorf("short_title(%q) = %q，想要 %q", tc.title, got, tc.want)
+		if got := truncateYunsuoTitle(tc.title, 8, 20); got != tc.want {
+			t.Errorf("缩短(%q) = %q，想要 %q", tc.title, got, tc.want)
 		}
 	}
-	long := yunsuoTitleVariant("三得利",
-		"三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年、年收60亿日元的老茶铺。三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年。", yunsuoTitleLong)
-	// 补上摘要超过 60 字：在标点处截短。
-	if want := "三得利｜三得利伊右卫门绿茶，卖出100亿瓶，背后藏着一家236年、年收60亿日元的老茶铺。三得利伊右卫门绿茶"; long != want {
-		t.Errorf("long_title = %q，想要 %q", long, want)
-	}
 }
-
-func TestYunsuoKeywordsRespectDocumentedLimit(t *testing.T) {
-	keywords := yunsuoKeywords([]string{strings.Repeat("食品创新", 100), "饮料", "消费"})
-	if got := len([]rune(keywords)); got > 255 {
-		t.Fatalf("keywords 长度=%d，超过云梭 255 字上限", got)
-	}
-}
-
 func TestYunsuoHTMLDropsUnmirroredAndNonPublicURLs(t *testing.T) {
 	unsafeURLs := []string{
 		"http://localhost/image.jpg",
@@ -632,8 +396,7 @@ func TestYunsuoHTMLDropsUnmirroredAndNonPublicURLs(t *testing.T) {
 			map[string]any{"k": "p", "runs": []map[string]any{{"type": "link", "text": "不安全链接", "href": unsafeURL}}},
 		)
 	}
-	// 没出现在 ImageMap key/value 中的公网图同样必须丢弃，防止绕过
-	// mirroring 后由云梭代替我们回源。
+	// 没出现在 ImageMap key/value 中的公网图同样必须丢弃：只送转存过的图，不让分发服务替我们回源。
 	blocks = append(blocks,
 		map[string]any{"k": "img", "src": "https://unmirrored.example/image.jpg"},
 		map[string]any{"k": "img", "src": "https://origin.example/cover.jpg"},
@@ -646,19 +409,16 @@ func TestYunsuoHTMLDropsUnmirroredAndNonPublicURLs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rendered, err := renderYunsuoHTML(string(blocksJSON), string(imageMapJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	rendered := renderDistributionHTML(t, string(blocksJSON), string(imageMapJSON))
 	if !strings.Contains(rendered, "https://cdn.example/cover.jpg") {
 		t.Fatalf("唯一合规的图应留在正文：%s", rendered)
 	}
 	if strings.Contains(rendered, "unmirrored.example") {
-		t.Fatalf("未镜像媒体不得进入云梭 HTML：%s", rendered)
+		t.Fatalf("未转存的图不得进入外发正文：%s", rendered)
 	}
 	for _, unsafeURL := range unsafeURLs {
 		if strings.Contains(rendered, unsafeURL) {
-			t.Fatalf("非公网 URL 不得进入云梭 HTML：%s", unsafeURL)
+			t.Fatalf("非公网 URL 不得进入外发正文：%s", unsafeURL)
 		}
 	}
 
@@ -669,18 +429,16 @@ func TestYunsuoHTMLDropsUnmirroredAndNonPublicURLs(t *testing.T) {
 		ImageMap:   string(imageMapJSON),
 		CoverURL:   "https://cdn.example/cover.jpg", // 已是 ImageMap value，允许。
 	}
-	payload, err := buildYunsuoPushPayload(job,
-		[]externalAccount{{ID: "a-1", Name: "头条号"}},
-		[]string{"美食", "饮食文化", "财经", "消费", "公司"})
+	payload, err := buildRobotDraftPayload(job, yunsuoPlatformProfiles["toutiao"], publishExternalDraft{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if payload.Cover != "https://cdn.example/cover.jpg" || payload.HTML != rendered {
-		t.Fatalf("推送快照应只使用已镜像的公网媒体：cover=%q html=%s", payload.Cover, payload.HTML)
+	if payload.CoverURL != "https://cdn.example/cover.jpg" || payload.HTML != rendered {
+		t.Fatalf("草稿只用转存过的公网图：cover=%q html=%s", payload.CoverURL, payload.HTML)
 	}
 }
 
-func TestYunsuoRenderStripsWechatTrailerBeforePush(t *testing.T) {
+func TestDistributionRenderStripsWechatTrailer(t *testing.T) {
 	blocks := `[
 		{"k":"txt","runs":[{"type":"txt","text":"把家乡一度被低估的食物卖到英国第一。"}]},
 		{"k":"txt","text":"参考来源："},
@@ -692,53 +450,34 @@ func TestYunsuoRenderStripsWechatTrailerBeforePush(t *testing.T) {
 		{"k":"txt","text":"预览时标签不可点"}
 	]`
 	imageMap := `{"https://origin.example/card.jpg":"https://cdn.example/card.jpg","https://cdn.example/cover.jpg":"https://cdn.example/cover.jpg"}`
-	rendered, err := renderYunsuoHTML(blocks, imageMap)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rendered := renderDistributionHTML(t, blocks, imageMap)
 	if !strings.Contains(rendered, "英国第一") || !strings.Contains(rendered, "参考来源") {
 		t.Fatalf("正文应保留：%s", rendered)
 	}
 	if leak := publishHTMLWechatTrailerLeak(rendered); leak != "" {
-		t.Fatalf("云梭 HTML 仍含导流尾 %s：%s", leak, rendered)
+		t.Fatalf("外发正文仍含导流尾 %s：%s", leak, rendered)
 	}
 	if strings.Contains(rendered, "cdn.example/card.jpg") {
 		t.Fatalf("作者名片图应随导流尾切除：%s", rendered)
 	}
 
-	payload, err := buildYunsuoPushPayload(publishJob{
+	payload, err := buildRobotDraftPayload(publishJob{
 		Title:      "印尼博士创业，把家乡穷人食物卖成英国第一品牌",
 		SourceName: "FBIF食品饮料创新",
 		Summary:    "Better Nature 把天贝卖到英国品类第一。",
 		CoverURL:   "https://cdn.example/cover.jpg",
 		BlocksJSON: blocks,
 		ImageMap:   imageMap,
-	}, []externalAccount{{ID: "a-1", Name: "头条号"}, {ID: "a-2", Name: "百家号"}},
-		[]string{"美食", "饮食文化", "财经", "消费", "公司"})
+	}, yunsuoPlatformProfiles["baijiahao"], publishExternalDraft{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if leak := publishHTMLWechatTrailerLeak(payload.HTML); leak != "" {
-		t.Fatalf("冻结 payload 仍含导流尾 %s", leak)
+		t.Fatalf("冻结的草稿仍含导流尾 %s", leak)
 	}
-	// 正文没有配图时退回原封面；不得把导流尾里的名片图拿来当封面。
-	if payload.Cover != "https://cdn.example/cover.jpg" {
-		t.Fatalf("正文无图时应用原封面，实际 %q", payload.Cover)
-	}
-}
-
-func TestParseYunsuoStatusesAcceptsAPICreatedTypeString(t *testing.T) {
-	raw := json.RawMessage(`[
-		{"status":0,"remark":"等待发布","failed_count":0,"created_type":"api","accountPool":{"pk":"11111111-1111-4111-8111-111111111111","name":"头条号","platform_name":"头条号"}},
-		{"status":0,"remark":"等待发布","failed_count":0,"created_type":"api","accountPool":{"pk":"22222222-2222-4222-8222-222222222222","name":"百家号","platform_name":"百家号"}}
-	]`)
-	got, err := parseYunsuoStatuses(raw)
-	if err != nil {
-		t.Fatalf("真实云梭状态（created_type 为字符串）必须能解析：%v", err)
-	}
-	if len(got) != 2 || got[0].Status != 0 || got[0].AccountPool.ID != "11111111-1111-4111-8111-111111111111" ||
-		got[0].CreatedType != "api" || got[1].AccountPool.Name != "百家号" {
-		t.Fatalf("状态解析不符合预期：%#v", got)
+	// 用公众号封面；不得把导流尾里的名片图拿来当封面。
+	if payload.CoverURL != "https://cdn.example/cover.jpg" {
+		t.Fatalf("应用公众号封面，实际 %q", payload.CoverURL)
 	}
 }
 

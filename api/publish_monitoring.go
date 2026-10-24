@@ -172,7 +172,7 @@ func boolInt(value bool) int {
 
 func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publishJob, now time.Time) {
 	jobFailed := job.Stage == publishStageFailed
-	// 第三方平台的失败按 lane 失败那一刻算近期：云梭迟到结果每 30 分钟补查一次、会刷新 job.UpdatedAt，
+	// 第三方平台的失败按 lane 失败那一刻算近期：补查、刷卡都会刷新 job.UpdatedAt，
 	// 用它算就会把几周前的失败当新失败一直告警（2026-10-14 #153/#260/#183）。
 	externalFailed, externalFailedAt := false, time.Time{}
 	for _, lane := range job.ExternalDistributionLanes {
@@ -256,7 +256,7 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		{status.ReconciliationRequired > 0 && status.OldestReconciliationAgeSeconds > int64(publishReconciliationCriticalAfter/time.Second), fmt.Sprintf("reconciliation_stale:%ds", status.OldestReconciliationAgeSeconds), publishMonitoringAlert},
 		{status.ContentConflicts > 0, fmt.Sprintf("content_conflicts:%d", status.ContentConflicts), publishMonitoringIssue | publishMonitoringAlert},
 		{status.FoodTalksCredentialInvalid, "foodtalks_credential_invalid", publishMonitoringIssue | publishMonitoringAlert},
-		// 云梭改了正文的处理方式，或核对本身取不到线上正文：要有人看，但不是 P0、不挡 ready。
+		// 草稿读回对不上（平台编辑器改了），或分发服务没读回：要有人看，但不是 P0、不挡 ready。
 		{status.ExternalFidelityMismatches > 0, fmt.Sprintf("external_fidelity_mismatch:%d", status.ExternalFidelityMismatches), publishMonitoringWarning},
 		{status.ExternalFidelityUnavailable > 0, fmt.Sprintf("external_fidelity_unavailable:%d", status.ExternalFidelityUnavailable), publishMonitoringWarning},
 	}

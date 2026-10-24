@@ -110,8 +110,7 @@ func TestExternalAccountDirectoryKeepsLastGoodCopy(t *testing.T) {
 	}
 }
 
-// TestExternalAccountDirectoryPrimesBeforeWorkers 启动时先拿到一份账号（本地那份，没有就当场取一次）交给改挂，
-// 都拿不到就不改挂（没改挂的旧 lane 在，那个平台先不推）。
+// TestExternalAccountDirectoryPrimesBeforeWorkers 启动时先拿到一份账号：有本地那份就直接用，没有就当场取一次。
 func TestExternalAccountDirectoryPrimesBeforeWorkers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), externalAccountsFile)
 	fetches := 0
@@ -120,21 +119,22 @@ func TestExternalAccountDirectoryPrimesBeforeWorkers(t *testing.T) {
 		fetches++
 		return []externalAccount{testArticleAccount("recToutiao", "toutiao", false)}, fetchErr
 	}
-	var adopted [][]externalAccount
-	adopt := func(accounts []externalAccount) error { adopted = append(adopted, accounts); return nil }
 
 	fetchErr = errors.New("连不上")
-	(&externalAccountDirectory{path: path, fetch: fetch}).prime(adopt)
-	if fetches != 1 || len(adopted) != 0 {
-		t.Fatalf("没有本地那份就当场取一次，取不到不改挂：%d %v", fetches, adopted)
+	d := &externalAccountDirectory{path: path, fetch: fetch}
+	d.prime()
+	if _, err := d.snapshot(); fetches != 1 || err == nil {
+		t.Fatalf("没有本地那份就当场取一次，取不到就没有账号：%d %v", fetches, err)
 	}
 	fetchErr = nil
-	(&externalAccountDirectory{path: path, fetch: fetch}).prime(adopt)
-	if fetches != 2 || len(adopted) != 1 || adopted[0][0].ID != "recToutiao" {
-		t.Fatalf("当场取到的交给改挂：%d %v", fetches, adopted)
+	d = &externalAccountDirectory{path: path, fetch: fetch}
+	d.prime()
+	if got, err := d.snapshot(); fetches != 2 || err != nil || len(got) != 1 || got[0].ID != "recToutiao" {
+		t.Fatalf("当场取到就能用：%d %v %v", fetches, got, err)
 	}
-	(&externalAccountDirectory{path: path, fetch: fetch}).prime(adopt)
-	if fetches != 2 || len(adopted) != 2 {
-		t.Fatalf("有本地那份就不等分发服务：%d %v", fetches, adopted)
+	d = &externalAccountDirectory{path: path, fetch: fetch}
+	d.prime()
+	if got, err := d.snapshot(); fetches != 2 || err != nil || len(got) != 1 {
+		t.Fatalf("有本地那份就不等分发服务：%d %v %v", fetches, got, err)
 	}
 }

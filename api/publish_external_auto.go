@@ -62,7 +62,7 @@ func (p *publishPipeline) kickExternalAutoDistribution() {
 }
 
 // startExternalAutoDistribution 兜底循环：配额次日恢复、补发按间隔放行、读网站失败后的
-// 重试都靠它；顺带补查云梭迟到的外发结果和各平台文章链接，拿到链接的核对线上正文。
+// 重试都靠它；顺带按幂等键向分发服务补查结果不明的草稿。
 // 独立 goroutine，不占发布 worker。
 func (p *publishPipeline) startExternalAutoDistribution() {
 	if p == nil {
@@ -72,8 +72,6 @@ func (p *publishPipeline) startExternalAutoDistribution() {
 		for {
 			p.runExternalAutoDistribution()
 			p.refreshExternalDistributionResults()
-			p.refreshExternalDistributionLinks()
-			p.refreshExternalDistributionFidelity()
 			time.Sleep(publishExternalAutoSweepInterval)
 		}
 	}()
@@ -101,7 +99,7 @@ func externalAutoQuotaFor(jobs []publishJob, autoTargets []externalAccount, now 
 			if _, auto := quota.limits[id]; !auto {
 				continue
 			}
-			// 人工登记的已发稿、云梭受理前就失败的不占平台名额。
+			// 人工登记的已发稿、没存成的不占平台名额。
 			if lane.State == publishExternalLaneManual || externalLaneCanSafeRetry(lane) {
 				continue
 			}

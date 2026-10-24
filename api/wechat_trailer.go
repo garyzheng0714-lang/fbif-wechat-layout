@@ -8,7 +8,7 @@ import (
 )
 
 // publishHTMLWechatTrailerLeak 发布前最后一道切尾闸门。编辑器预览、自动发布和
-// 云梭外发一旦再分叉，含这些公众号导流标记的 HTML 不得出门。不用「加入微信群 /
+// 第三方平台外发一旦再分叉，含这些公众号导流标记的 HTML 不得出门。不用「加入微信群 /
 // 关注公众号 / 点击获取更多」——那些是网站页脚合法文案。
 var publishWechatTrailerLeakPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`欢迎转发朋友圈`),
@@ -29,7 +29,7 @@ func publishHTMLWechatTrailerLeak(html string) string {
 }
 
 // Go 侧切尾与 public/js/rule-behavior-foodtalks.js 的 stripWechatTrailer 对齐：
-// 命中最早导流标记即切掉其后全部块。云梭从 BlocksJSON 直渲，不走网站渲染器，
+// 命中最早导流标记即切掉其后全部块。外发从 BlocksJSON 直渲，不走网站渲染器，
 // 必须在这里切，不能再靠 isRepost。
 var (
 	wechatTrailerTipLineRe = regexp.MustCompile(`^\s*提示[：:]\s*$`)

@@ -6,7 +6,7 @@ package main
 // 应该支持在群里 @ 对应的人，提醒去更换标题和封面图」「摘要字数超限也是同理」「能否直接在
 // 卡片里改好？不过这里一定要做好引导，提示清楚要把什么改成什么」。
 //
-// 云梭受理后就改不了（没有改稿接口），所以检查放在推送前：每个平台按自己的规则
+// 草稿存进平台后系统不再改它，所以检查放在存草稿前：每个平台按自己的规则
 // （yunsuo_platform_profiles.go）查标题、摘要字数与封面尺寸，有问题这个平台先不推、不占
 // 名额，记成「待修改」；审核卡（feishu_review_card_distribution.go）在这个平台的块里直接给出
 // 现在是什么、要求多少、建议改成什么，并 @ 分发负责人（publish_external_reminders.go）。
@@ -347,9 +347,9 @@ type externalDraftEdit struct {
 	Candidates []publishExternalCoverCandidate
 }
 
-var errExternalDraftNothingToEdit = errors.New("这个平台已经推送，内容不能再改；如需改动请到云梭后台处理")
+var errExternalDraftNothingToEdit = errors.New("这个平台已经提交给分发工具，内容不能再改")
 
-// externalDraftLockedError 经分发服务的平台提交过就不能再改：话不提云梭，errors.Is 仍认作 errExternalDraftNothingToEdit。
+// externalDraftLockedError 带上平台名的「不能再改」，errors.Is 仍认作 errExternalDraftNothingToEdit。
 type externalDraftLockedError struct{ message string }
 
 func (e *externalDraftLockedError) Error() string { return e.message }
@@ -359,10 +359,7 @@ func (e *externalDraftLockedError) Is(target error) bool {
 
 // externalDraftLocked 这个平台已经提交过、内容不能再改时报的错。
 func externalDraftLocked(profile yunsuoPlatformProfile) error {
-	if profile.Driver == externalDriverRobot {
-		return &externalDraftLockedError{"这个平台已经提交给分发工具，内容不能再改；草稿存好后请到" + profile.Name + "草稿箱里改"}
-	}
-	return errExternalDraftNothingToEdit
+	return &externalDraftLockedError{"这个平台已经提交给分发工具，内容不能再改；草稿存好后请到" + profile.Name + "草稿箱里改"}
 }
 
 // applyExternalDraftEdit 校验并写入修改，当场重算标题、摘要与封面问题（不读网络：封面只认

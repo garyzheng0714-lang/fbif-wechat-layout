@@ -94,26 +94,19 @@ func externalPlatformStatus(job publishJob, target externalAccount) externalPlat
 			state.Status, state.Tone = "人工已发", "green"
 		case lane.Driver == externalDriverRobot:
 			return robotPlatformState(lane, yunsuoProfileForTarget(target))
+		// 以下是云梭（2026-10-24 下线）留下的旧 lane，只显示；失败的可以重新存草稿。
 		case lane.State == publishExternalDistributionSucceeded:
 			state.Status, state.Tone = "已发布", "green"
 			state.Fidelity = externalLaneFidelityNote(lane)
 			if state.URL == "" {
 				state.ManageURL = yunsuoProfileForTarget(target).ManageURL
 			}
-		case publishExternalDistributionProcessing(lane.State):
-			state.Status, state.Tone = "同步中", "blue"
-		case externalLaneNeedsNurturing(lane):
-			state.Status, state.Tone = "要养号", "orange"
-			state.Reason = "平台弹了验证码，请在云梭插件里养号；养好后云梭自动重试，系统不会重复推送"
-		case externalLaneQueuedAtProvider(lane, time.Now()):
-			state.Status, state.Tone = "排队中", "grey"
-			state.Reason = "云梭已收下（" + formatReviewCardTime(lane.RequestedAt) + " 推送），还在排队等发布；每 30 分钟自动查一次，发出后自动更新"
 		case lane.State == publishExternalDistributionReconciliationRequired:
 			state.Status, state.Tone = "待核对", "orange"
-			state.Reason = "结果未确认，请先到云梭后台核对；系统不会重复推送"
+			state.Reason = externalLegacyUnresolved
 		default:
 			state.Status, state.Tone, state.FailedLabel = "失败", "red", "上次同步失败"
-			state.Reason = firstNonEmpty(externalLaneFailureReason(lane), "请在云梭后台处理")
+			state.Reason = externalLaneFailureReason(lane)
 			state.Editable = externalLaneCanSafeRetry(lane)
 		}
 		return state
@@ -156,9 +149,8 @@ type externalEditPlatform struct {
 	Title    string `json:"title"`
 	TitleMin int    `json:"title_min"`
 	TitleMax int    `json:"title_max"`
-	// 头条号英文字母、数字两个算一个字（与服务端 titleLength 同口径）；按字符数还要不超过 titleCharRange 的上限。
+	// 头条号英文字母、数字两个算一个字（与服务端 titleLength 同口径）。
 	TitleHalfWidth bool   `json:"title_half_width,omitempty"`
-	TitleFieldMax  int    `json:"title_field_max,omitempty"`
 	TitleSuggested string `json:"title_suggested,omitempty"`
 	TitleIssue     bool   `json:"title_issue"`
 
@@ -193,14 +185,13 @@ func externalEditView(job publishJob, cfg externalTargets) map[string]any {
 		draft, _ := externalDraftFor(job, target.ID)
 		state := externalPlatformStatus(job, target)
 		min, max := profile.titleLimits()
-		_, fieldMax := profile.titleCharRange()
 		view := externalEditPlatform{
 			Account: target.ID, Name: target.label(), Status: state.Status, Tone: state.Tone, Reason: firstNonEmpty(state.Reason, state.Fidelity),
 			URL: state.URL, ManageURL: state.ManageURL, DraftURL: state.DraftURL, Action: profile.syncAction(target.label()),
 			Editable: state.Editable, NeedsFix: state.NeedsFix, Auto: target.Auto,
 			Title: externalEffectiveTitle(job, draft), TitleMin: min, TitleMax: max,
-			TitleHalfWidth: profile.TitleHalfWidthASCII, TitleFieldMax: fieldMax,
-			Summary: externalEffectiveSummary(job, draft), SummaryMax: profile.SummaryMax,
+			TitleHalfWidth: profile.TitleHalfWidthASCII,
+			Summary:        externalEffectiveSummary(job, draft), SummaryMax: profile.SummaryMax,
 			CoverMinWidth: profile.CoverMinWidth, CoverMinHeight: profile.CoverMinHeight,
 			EditedBy: draft.EditedBy, EditedAt: draft.EditedAt, Candidates: []externalEditImage{},
 		}

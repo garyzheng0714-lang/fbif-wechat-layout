@@ -878,7 +878,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, report)
 	})
 
-	// 对账中的外发：管理员确认旧云梭稿作废后，用当前 payload 再推一次。
+	// 待核对的外发：管理员在平台草稿箱核对、删掉多出来的稿之后，用当前正文再存一次。
 	// 飞书卡片没有这个按钮，避免误点造成重复稿。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/retry-external-distribution", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {

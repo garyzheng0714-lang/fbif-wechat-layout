@@ -132,7 +132,7 @@ type publishJob struct {
 	PublicationActionAt string `json:"publication_action_at,omitempty"`
 	// 外部分发是 FoodTalks 主发布状态机之外的正交子流程，只发原创。按平台账号分道
 	// （2026-10-12 用户裁定：各平台分开发布）：每个账号一条 lane，各自冻结 payload、
-	// 落 intent、推送、轮询、对账，互不牵连（publish_external_lanes.go）。
+	// 落 intent、存草稿、对账，互不牵连（publish_external_lanes.go）。
 	ExternalDistributionLanes []publishExternalLane `json:"external_distribution_lanes,omitempty"`
 	// 推送前检查的待修改项与人给各平台改过的标题/摘要/封面（publish_external_drafts.go），
 	// 以及有平台待修改时在审核卡话题里 @ 分发负责人的提醒（publish_external_reminders.go）。
@@ -140,25 +140,6 @@ type publishJob struct {
 	ExternalDistributionReminder publishExternalReminder `json:"external_distribution_reminder,omitzero"`
 	// 风险检查里确定无疑的错误：复核后在审核卡话题里 @ 校对负责人（publish_proofread.go），不挡同步。
 	ProofreadReminder publishProofreadReminder `json:"proofread_reminder,omitzero"`
-	// 以下是按平台拆开之前的单轮字段，只在读盘时迁成 lanes，迁完清空、不再写回。
-	LegacyExternalState          string                              `json:"external_distribution_state,omitempty"`
-	LegacyExternalTargets        []publishExternalDistributionTarget `json:"external_distribution_targets,omitempty"`
-	LegacyExternalRequestedBy    string                              `json:"external_distribution_requested_by,omitempty"`
-	LegacyExternalRequestedAt    string                              `json:"external_distribution_requested_at,omitempty"`
-	LegacyExternalContentHash    string                              `json:"external_distribution_content_hash,omitempty"`
-	LegacyExternalContentVersion int64                               `json:"external_distribution_content_version,omitempty"`
-	LegacyExternalAttribution    string                              `json:"external_distribution_attribution,omitempty"`
-	LegacyExternalSource         string                              `json:"external_distribution_source,omitempty"`
-	LegacyExternalPayloadJSON    string                              `json:"external_distribution_payload_json,omitempty"`
-	LegacyExternalPayloadHash    string                              `json:"external_distribution_payload_hash,omitempty"`
-	LegacyExternalIntentKey      string                              `json:"external_distribution_intent_key,omitempty"`
-	LegacyExternalIntentAt       string                              `json:"external_distribution_intent_at,omitempty"`
-	LegacyExternalContentPK      string                              `json:"external_distribution_content_pk,omitempty"`
-	LegacyExternalError          string                              `json:"external_distribution_error,omitempty"`
-	LegacyExternalCompletedAt    string                              `json:"external_distribution_completed_at,omitempty"`
-	LegacyExternalPollAttempts   int                                 `json:"external_distribution_poll_attempts,omitempty"`
-	LegacyExternalLastPolledAt   string                              `json:"external_distribution_last_polled_at,omitempty"`
-	LegacyExternalHistory        []publishExternalDistributionRound  `json:"external_distribution_history,omitempty"`
 	// 自动外发待办（2026-10-10 用户裁定：原创公开后自动同步头条号）。publish=新公开稿，
 	// backfill=管理员补发的存量稿；由 runExternalAutoDistribution 按每日配额消化后清空。
 	ExternalDistributionAutoPending string `json:"external_distribution_auto_pending,omitempty"`
@@ -303,7 +284,7 @@ func (s *publishJobStore) readLocked() (publishJobDocument, error) {
 		if doc.Jobs[i].ID >= doc.NextID {
 			doc.NextID = doc.Jobs[i].ID + 1
 		}
-		migrateLegacyExternalDistribution(&doc.Jobs[i])
+		retireYunsuoLanes(&doc.Jobs[i])
 		migrateExpiredExternalCard(&doc.Jobs[i])
 		migrateExpiredPublishNotification(&doc.Jobs[i])
 	}

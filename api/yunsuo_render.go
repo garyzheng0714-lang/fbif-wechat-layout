@@ -10,37 +10,14 @@ import (
 	"unicode"
 )
 
-// renderYunsuoHTML 从中立 Block[] 直接生成外部平台可移植 HTML。
-// 它不读 FoodTalks ContentHTML，也不引用任何网站渲染器或页脚。
-// 外发前先切公众号导流尾：外发与网站同一口径，不看是不是原创。
-// 版式按多平台规则（yunsuo_distribution_rules.go），标签写法按平台 profile 的 markup。
-func renderYunsuoHTML(blocksJSON, imageMapJSON string) (string, error) {
-	rendered, err := renderYunsuoDistribution(blocksJSON, imageMapJSON, "", yunsuoGenericProfile, "", "")
-	return rendered.HTML, err
-}
-
 // distributionMarkup 正文里小标题（标题1）、加粗行（标题2 与整段加粗）、图与图注怎么写。
-// 写法看稿子经谁填进平台编辑器，只用填得进去还留得住的标签；参数都已转义。
+// 写法看平台编辑器，只用填得进去还留得住的标签；参数都已转义。
+// 外发正文从中立 Block[] 直接生成，不读 FoodTalks ContentHTML，也不引用任何网站渲染器或页脚；
+// 先切公众号导流尾（与网站同一口径，不看是不是原创），版式按多平台规则（yunsuo_distribution_rules.go）。
 type distributionMarkup struct {
 	Heading  func(text string) string
 	BoldLine func(text string) string
 	Image    func(src, caption string) string
-}
-
-// yunsuoMarkup 云梭吃得进去的写法（2026-10-20 拿 14 篇头条稿的 payload 与线上正文逐块比出来的）：
-// 云梭把正文重新解析再生成平台格式，h2/h3 → 加粗段，<p><img></p> 后跟 <p><small> → 平台
-// 原生图注，链接只剩字、空段丢掉；h1、<strong>、平台原生的 pgc-img-caption 进去就丢（10-12
-// 改成头条原生写法后小标题与图注都没了）。段内局部加粗照写 <strong>，云梭目前不留。
-var yunsuoMarkup = distributionMarkup{
-	Heading:  func(text string) string { return "<h2>" + text + "</h2>" },
-	BoldLine: func(text string) string { return "<h3>" + text + "</h3>" },
-	Image: func(src, caption string) string {
-		out := `<p><img src="` + src + `" alt=""></p>`
-		if caption != "" {
-			out += "<p><small>" + caption + "</small></p>"
-		}
-		return out
-	},
 }
 
 type yunsuoRendered struct {
@@ -63,8 +40,11 @@ func renderYunsuoDistribution(blocksJSON, imageMapJSON, publisher string, profil
 	if err != nil {
 		return yunsuoRendered{}, err
 	}
+	if profile.Markup.Heading == nil || profile.Markup.BoldLine == nil || profile.Markup.Image == nil {
+		return yunsuoRendered{}, fmt.Errorf("%s没有正文写法，不能生成外发正文", profile.Name)
+	}
 	dist := prepareYunsuoDistribution(decoded, imageMap, profile, wechatCover, chosen)
-	body, hasStatement := writeYunsuoBlocks(dist.Blocks, imageMap, profile.markup())
+	body, hasStatement := writeYunsuoBlocks(dist.Blocks, imageMap, profile.Markup)
 	if strings.TrimSpace(body) == "" {
 		return yunsuoRendered{}, errors.New("外发正文为空")
 	}
@@ -169,103 +149,7 @@ func yunsuoWholeBold(block Block) bool {
 	return bold
 }
 
-// buildYunsuoPushPayload 组装一次不可变的推送快照。外发按平台分开推（每条 lane 一个
-// 账号），封面与标题按这个账号的平台规则；多个账号时用通用规则。
-func buildYunsuoPushPayload(job publishJob, targets []externalAccount, categories []string) (yunsuoPushPayload, error) {
-	return buildYunsuoPushPayloadWithDraft(job, targets, categories, publishExternalDraft{})
-}
-
-// buildYunsuoPushPayloadWithDraft draft 是人给这个平台改过的标题、摘要、封面（只对这个平台生效，
-// 公众号与网站不动）；空字段用文章原值。
-func buildYunsuoPushPayloadWithDraft(job publishJob, targets []externalAccount, categories []string, draft publishExternalDraft) (yunsuoPushPayload, error) {
-	profile := yunsuoGenericProfile
-	if len(targets) == 1 {
-		profile = yunsuoProfileForTarget(targets[0])
-	}
-	blocks, rendered, err := renderExternalBody(job, profile, draft)
-	if err != nil {
-		return yunsuoPushPayload{}, err
-	}
-	bodyHTML := rendered.HTML
-	if leak := publishHTMLWechatTrailerLeak(bodyHTML); leak != "" {
-		return yunsuoPushPayload{}, fmt.Errorf("云梭正文仍含公众号导流尾（%s），禁止外发", leak)
-	}
-	title := compactYunsuoText(job.Title)
-	if title == "" {
-		return yunsuoPushPayload{}, errors.New("云梭分发缺少标题")
-	}
-	description := compactYunsuoText(job.Summary)
-	if summary := compactYunsuoText(draft.Summary); summary != "" {
-		description = summary
-	}
-	if description == "" {
-		description = yunsuoBlocksPlainText(blocks)
-	}
-	description = truncateYunsuoRunes(description, 200)
-	if profile.SummaryMax > 0 && len([]rune(description)) > profile.SummaryMax {
-		// 推送前检查已拦下人写的超长摘要；走到这里的只会是用正文补的摘要，在标点处截短。
-		description = truncateYunsuoTitle(description, 1, profile.SummaryMax)
-	}
-
-	cover := rendered.Cover
-	if cover == "" {
-		return yunsuoPushPayload{}, errors.New("云梭分发缺少公开可访问的封面")
-	}
-	if width, height, small := profile.coverTooSmall(cover); small {
-		return yunsuoPushPayload{}, fmt.Errorf("云梭分发封面图尺寸过小（%dx%d），%s要求不小于 %dx%d，请换封面后再同步",
-			width, height, profile.Name, profile.CoverMinWidth, profile.CoverMinHeight)
-	}
-
-	accountIDs := make([]string, 0, len(targets))
-	seenAccounts := map[string]bool{}
-	for _, target := range targets {
-		id := strings.TrimSpace(target.ID)
-		if id == "" || seenAccounts[id] {
-			continue
-		}
-		seenAccounts[id] = true
-		accountIDs = append(accountIDs, id)
-	}
-	if len(accountIDs) == 0 {
-		return yunsuoPushPayload{}, errors.New("云梭分发没有目标账号")
-	}
-	categories = uniqueYunsuoValues(categories)
-	if len(categories) < 5 {
-		return yunsuoPushPayload{}, errors.New("云梭分发至少需要 5 个不同分类")
-	}
-
-	supplement := description
-	if supplement == "" {
-		supplement = compactYunsuoText(job.SourceName)
-	}
-	override := compactYunsuoText(draft.Title)
-	if override != "" {
-		title = override
-	}
-	payload := yunsuoPushPayload{
-		Type: 0,
-		// 三档都按云梭文档的字数范围：放得下就是原标题，不足才补、超了才截（平台用的那一档
-		// 超了推送前检查已拦下）。
-		ShortTitle:  yunsuoTitleVariant(title, supplement, yunsuoTitleShort),
-		Title:       yunsuoTitleVariant(title, supplement, yunsuoTitleMedium),
-		LongTitle:   yunsuoTitleVariant(title, supplement, yunsuoTitleLong),
-		AccountIDs:  accountIDs,
-		Keywords:    yunsuoKeywords(job.Tags),
-		Description: description,
-		Categories:  strings.Join(categories, ","),
-		Cover:       cover,
-		HTML:        bodyHTML,
-	}
-	if override != "" {
-		// 人给这个平台改的标题原样写进平台用的那一档，不补字、不截断。
-		if min, max := yunsuoTitleFieldRange(profile.TitleField); len([]rune(override)) >= min && len([]rune(override)) <= max {
-			payload.setTitleField(profile.TitleField, override)
-		}
-	}
-	return payload, nil
-}
-
-// renderExternalBody 推给这个平台的正文与封面：各平台同一套规则，写法按 profile.markup()；
+// renderExternalBody 推给这个平台的正文与封面：各平台同一套规则，写法按 profile.Markup；
 // draft 里人给这个平台换的封面优先。还返回解出的正文块（补摘要用）。
 func renderExternalBody(job publishJob, profile yunsuoPlatformProfile, draft publishExternalDraft) ([]Block, yunsuoRendered, error) {
 	blocks, imageMap, err := decodeYunsuoContent(job.BlocksJSON, job.ImageMap)
@@ -275,29 +159,6 @@ func renderExternalBody(job publishJob, profile yunsuoPlatformProfile, draft pub
 	coverOverride := publicYunsuoMediaURL(strings.TrimSpace(draft.CoverURL))
 	rendered, err := renderYunsuoDistribution(job.BlocksJSON, job.ImageMap, job.SourceName, profile, yunsuoWechatCover(job, imageMap), coverOverride)
 	return blocks, rendered, err
-}
-
-func (p *yunsuoPushPayload) setTitleField(field, value string) {
-	switch field {
-	case yunsuoTitleShort:
-		p.ShortTitle = value
-	case yunsuoTitleLong:
-		p.LongTitle = value
-	default:
-		p.Title = value
-	}
-}
-
-// titleField 平台实际用的那一档标题（卡片显示用）。
-func (p yunsuoPushPayload) titleField(field string) string {
-	switch field {
-	case yunsuoTitleShort:
-		return p.ShortTitle
-	case yunsuoTitleLong:
-		return p.LongTitle
-	default:
-		return p.Title
-	}
 }
 
 func decodeYunsuoContent(blocksJSON, imageMapJSON string) ([]Block, map[string]string, error) {
@@ -436,7 +297,7 @@ func mapYunsuoMedia(raw string, imageMap map[string]string) string {
 	}
 	// mirroring 阶段会把原图 URL 映射到 OSS；CoverURL 在之后可能已经
 	// 直接是某个 value，所以同时允许已镜像值。任何既不是 key 也不是
-	// value 的媒体都丢弃：把原文中未镜像 URL 交给云梭回源，会形成
+	// value 的媒体都丢弃：把原文中未镜像 URL 交给分发服务回源，会形成
 	// 不受我们出站策略约束的二次 SSRF。
 	for _, mapped := range imageMap {
 		if raw == strings.TrimSpace(mapped) {
@@ -454,23 +315,6 @@ func publicYunsuoMediaURL(raw string) string {
 	return parsed.String()
 }
 
-func yunsuoBlocksPlainText(blocks []Block) string {
-	parts := make([]string, 0, len(blocks))
-	for _, block := range blocks {
-		if text := yunsuoInlinePlainText(block.Text, block.Runs); text != "" {
-			parts = append(parts, text)
-		}
-		for _, row := range block.Rows {
-			for _, cell := range row {
-				if text := yunsuoInlinePlainText("", cell.Runs); text != "" {
-					parts = append(parts, text)
-				}
-			}
-		}
-	}
-	return truncateYunsuoRunes(compactYunsuoText(strings.Join(parts, " ")), 200)
-}
-
 func yunsuoInlinePlainText(text string, runs []Run) string {
 	if len(runs) == 0 {
 		return compactYunsuoText(text)
@@ -480,28 +324,6 @@ func yunsuoInlinePlainText(text string, runs []Run) string {
 		out.WriteString(run.Text)
 	}
 	return compactYunsuoText(out.String())
-}
-
-func yunsuoTitleVariant(base, supplement, field string) string {
-	minRunes, maxRunes := yunsuoTitleFieldRange(field)
-	base = compactYunsuoText(base)
-	supplement = compactYunsuoText(supplement)
-	candidate := base
-	for _, addition := range []string{supplement, "FBIF食品饮料创新行业观察与趋势资讯"} {
-		if len([]rune(candidate)) >= minRunes || addition == "" {
-			break
-		}
-		if candidate != "" {
-			candidate += "｜"
-		}
-		candidate += addition
-	}
-	// 极短标题在上述语义补足后理论上已足够；仍不足时循环补入
-	// 中性的“行业观察”，保证契约字符数而不伪造具体信息。
-	for len([]rune(candidate)) < minRunes {
-		candidate += "行业观察"
-	}
-	return truncateYunsuoTitle(candidate, minRunes, maxRunes)
 }
 
 // truncateYunsuoTitle 超长时在标点处断开，不截在半个词上。2026-10-12：头条号用的是
@@ -539,53 +361,6 @@ func yunsuoTitleBalanced(value string) bool {
 	return strings.Count(value, "\"")%2 == 0
 }
 
-func yunsuoKeywords(tags []string) string {
-	values := uniqueYunsuoValues(tags)
-	for _, fallback := range []string{"食品饮料", "行业资讯", "品牌", "消费", "创新"} {
-		if len(values) >= 5 {
-			break
-		}
-		if !containsYunsuoValue(values, fallback) {
-			values = append(values, fallback)
-		}
-	}
-	return truncateYunsuoRunes(strings.Join(values, ","), 255)
-}
-
-func uniqueYunsuoValues(values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := map[string]bool{}
-	for _, value := range values {
-		value = compactYunsuoText(strings.Trim(value, ",，、;；"))
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
-}
-
-func containsYunsuoValue(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
-}
-
 func compactYunsuoText(value string) string {
 	return strings.Join(strings.FieldsFunc(value, unicode.IsSpace), " ")
-}
-
-func truncateYunsuoRunes(value string, maxRunes int) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) <= maxRunes {
-		return value
-	}
-	return string(runes[:maxRunes])
 }

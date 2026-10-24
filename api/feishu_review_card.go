@@ -848,23 +848,18 @@ func buildReviewDoneCard(job publishJob) map[string]any {
 }
 
 var (
-	externalReasonSizeRe    = regexp.MustCompile(`(\d+)\s*[x×*]\s*(\d+)`)
-	externalReasonWrapperRe = regexp.MustCompile(`^(?:发布任务执行失败|上传图片失败)[（(](.+)[）)]$`)
+	externalReasonSizeRe = regexp.MustCompile(`(\d+)\s*[x×*]\s*(\d+)`)
 )
 
-// externalLaneFailureReason 把云梭/平台回执和本地拦截原因说成人话，并告诉下一步怎么办。
-// 云梭已受理（有单号）的失败只能在云梭处理；受理前失败的改好后点重新同步。
-// 经分发服务的失败原因落盘时就写成了人话（publish_external_robot.go），原样用。
+// externalLaneFailureReason 失败原因的人话。经分发服务的落盘时就写成了人话（publish_external_robot.go），
+// 原样用。云梭（2026-10-24 下线）旧 lane 的回执说的是旧通道为什么没发出去（登录失效、超时），重新存草稿
+// 走的是分发服务，这些话只会误导，不写；只留重存时照样要改的封面尺寸。
 func externalLaneFailureReason(lane publishExternalLane) string {
 	raw := strings.TrimSpace(firstNonEmpty(lane.Remark, lane.Error))
 	if lane.Driver == externalDriverRobot {
 		return raw
 	}
-	accepted := strings.TrimSpace(lane.ContentPK) != ""
-	switch {
-	case raw == "":
-		return ""
-	case strings.Contains(raw, "封面图尺寸过小"):
+	if strings.Contains(raw, "封面图尺寸过小") {
 		sizes := externalReasonSizeRe.FindAllStringSubmatch(raw, -1)
 		reason := "封面图太小"
 		if len(sizes) >= 2 {
@@ -872,24 +867,9 @@ func externalLaneFailureReason(lane publishExternalLane) string {
 		} else if len(sizes) == 1 {
 			reason += fmt.Sprintf("（%s×%s）", sizes[0][1], sizes[0][2])
 		}
-		if accepted {
-			return reason + "，需在云梭后台换封面重发"
-		}
-		return reason + "，换封面后重新同步"
-	case strings.Contains(raw, "登录失败") || strings.Contains(raw, "更新账号") ||
-		strings.Contains(raw, "登录失效") || strings.Contains(raw, "授权过期") || strings.Contains(raw, "未登录"):
-		if accepted {
-			return "账号登录失效，在云梭插件更新登录后云梭会自动重试"
-		}
-		return "账号登录失效，在云梭插件更新登录后重新同步"
+		return reason
 	}
-	for {
-		match := externalReasonWrapperRe.FindStringSubmatch(raw)
-		if match == nil {
-			return raw
-		}
-		raw = strings.TrimSpace(match[1])
-	}
+	return ""
 }
 
 // buildReviewIssueCard 是发布窗口的异常终态：仍更新原审核卡，不另起一张通知卡。

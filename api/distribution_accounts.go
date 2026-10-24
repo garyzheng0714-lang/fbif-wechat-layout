@@ -64,15 +64,14 @@ type externalAccountsFileDoc struct {
 }
 
 // startExternalAccountDirectory 先读本地那份（没有就当场向分发服务取一次），趁任务恢复、后台 worker、HTTP 都还没起来
-// 交给 adopt 把旧记录改挂过来（publish_external_accounts_migration.go），之后每 5 分钟取一次。
-// 候选部署暂停态也照常取：只写这份缓存，不碰任务（adopt 自己在暂停态不改）。
-func startExternalAccountDirectory(path string, adopt func([]externalAccount) error) {
+// 就把账号备好，之后每 5 分钟取一次。候选部署暂停态也照常取：只写这份缓存，不碰任务。
+func startExternalAccountDirectory(path string) {
 	d := externalAccounts
 	d.mu.Lock()
 	d.path = path
 	d.fetch = fetchDistributionAccounts
 	d.mu.Unlock()
-	d.prime(adopt)
+	d.prime()
 	go func() {
 		for {
 			if err := d.refresh(context.Background()); err != nil {
@@ -83,8 +82,8 @@ func startExternalAccountDirectory(path string, adopt func([]externalAccount) er
 	}()
 }
 
-// prime 启动时：先读本地那份，没有就当场向分发服务取一次（最多 10 秒），读到了交给 adopt。
-func (d *externalAccountDirectory) prime(adopt func([]externalAccount) error) {
+// prime 启动时：先读本地那份，没有就当场向分发服务取一次（最多 10 秒）。
+func (d *externalAccountDirectory) prime() {
 	if err := d.loadFile(); err != nil {
 		log.Printf("publish: 读不到本地的外发账号（%s）：%v", d.path, err)
 	}
@@ -94,11 +93,6 @@ func (d *externalAccountDirectory) prime(adopt func([]externalAccount) error) {
 			log.Printf("publish: 启动时向分发服务取外发账号失败：%v", err)
 		}
 		cancel()
-	}
-	if accounts, err := d.snapshot(); err == nil && adopt != nil {
-		if err := adopt(accounts); err != nil {
-			log.Printf("publish: 外发旧记录改挂失败，这些稿在对应平台上先不推，下次启动再改：%v", err)
-		}
 	}
 }
 
