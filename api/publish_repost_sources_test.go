@@ -2,6 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -84,6 +89,90 @@ func TestRecordPublishedRepostSubscribesAfterFive(t *testing.T) {
 	src, ok, err := env.pipeline.repostSources.byKey("惊蛰研究所")
 	if err != nil || !ok || src.SubscribeState != repostSubscribeSuccess {
 		t.Fatalf("订阅状态应成功：ok=%v state=%q err=%v", ok, src.SubscribeState, err)
+	}
+}
+
+// TestRepostSubscribeSendsHTTPSToFeed 阅读原文记下的是 http:// 链接，Feed 只收 https://mp.weixin.qq.com，
+// 2026-10-19 起联商网、咖门、中国企业家杂志每次都 400「source_name and wechat article url are required」。
+func TestRepostSubscribeSendsHTTPSToFeed(t *testing.T) {
+	t.Setenv("PUBLISH_SYNC_SERVICE_TOKEN", "sync-secret")
+	var got map[string]string
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != feedOriginalArticleSubscribePath || r.Header.Get("X-Publish-Sync-Token") != "sync-secret" {
+			t.Fatalf("path=%s token=%q", r.URL.Path, r.Header.Get("X-Publish-Sync-Token"))
+		}
+		got = nil
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/json")
+		// 照 Feed 的校验：要 source_name，链接必须 https 且是 mp.weixin.qq.com。
+		u, err := url.Parse(got["url"])
+		if err != nil || u.Scheme != "https" || u.Hostname() != "mp.weixin.qq.com" || strings.TrimSpace(got["source_name"]) == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"source_name and wechat article url are required"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"subscribed","source_name":"联商网"}`))
+	}))
+	t.Cleanup(feed.Close)
+	t.Setenv("FOODTALKS_FEED_BASE_URL", feed.URL)
+
+	env := newPublishTestEnv(t)
+	t.Setenv("SITE_OWN_ACCOUNTS", "FBIF食品饮料创新")
+	env.pipeline.repostSources = newPublishRepostSourceStore(filepath.Join(t.TempDir(), "repost.json"))
+	env.pipeline.subscribeFeedWechatArticle = defaultSubscribeFeedWechatArticle
+	for i := 1; i <= repostSubscribeThreshold; i++ {
+		env.pipeline.recordPublishedRepost(context.Background(), publishJob{
+			ID:                int64(i),
+			Title:             "标题",
+			SourceName:        "FBIF食品饮料创新",
+			BlocksJSON:        `[{"k":"txt","text":"来源：联商网"}]`,
+			OriginalSourceURL: "http://mp.weixin.qq.com/s?__biz=MjM5ODM1MzM3NA==&mid=" + itoaRepost(i) + "&idx=1&sn=sn" + itoaRepost(i) + "&chksm=y#rd",
+		})
+	}
+	want := "https://mp.weixin.qq.com/s?__biz=MjM5ODM1MzM3NA==&mid=5&idx=1&sn=sn5&chksm=y"
+	if got["source_name"] != "联商网" || got["url"] != want {
+		t.Fatalf("发给 Feed 的应是 https 链接：%v", got)
+	}
+	src, _, _ := env.pipeline.repostSources.byKey("联商网")
+	if src.SubscribeState != repostSubscribeSuccess || src.LastSubscribeURL != want {
+		t.Fatalf("订阅应成功并记下 https 链接：state=%q url=%q err=%q", src.SubscribeState, src.LastSubscribeURL, src.SubscribeError)
+	}
+}
+
+// TestRepostSubscribeAcceptedIsNotFailure Feed 回 202（今天看啥还没确认）不算失败，下回照样再提交，回 200 才算订上。
+func TestRepostSubscribeAcceptedIsNotFailure(t *testing.T) {
+	t.Setenv("PUBLISH_SYNC_SERVICE_TOKEN", "sync-secret")
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"accepted","message":"订阅已提交，等待今天看啥确认"}`))
+	}))
+	t.Cleanup(feed.Close)
+	t.Setenv("FOODTALKS_FEED_BASE_URL", feed.URL)
+	err := defaultSubscribeFeedWechatArticle(context.Background(), "咖门", "https://mp.weixin.qq.com/s?__biz=a&mid=1&idx=1")
+	if !errors.Is(err, errFeedSubscribeAccepted) {
+		t.Fatalf("202 应认作已受理：%v", err)
+	}
+
+	env := newPublishTestEnv(t)
+	env.pipeline.repostSources = newPublishRepostSourceStore(filepath.Join(t.TempDir(), "repost.json"))
+	for i := 1; i <= repostSubscribeThreshold; i++ {
+		if _, _, err := env.pipeline.repostSources.record("咖门", "https://mp.weixin.qq.com/s?__biz=a&mid="+itoaRepost(i)+"&idx=1", "标题", int64(i), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply := err
+	env.pipeline.subscribeFeedWechatArticle = func(context.Context, string, string) error { return reply }
+	env.pipeline.completeRepostSourceSubscribe("咖门")
+	src, _, _ := env.pipeline.repostSources.byKey("咖门")
+	if src.SubscribeState != repostSubscribeAccepted || !src.readyToSubscribe() {
+		t.Fatalf("已受理应记 accepted 且下回再提交：state=%q ready=%v", src.SubscribeState, src.readyToSubscribe())
+	}
+	reply = nil
+	env.pipeline.completeRepostSourceSubscribe("咖门")
+	src, _, _ = env.pipeline.repostSources.byKey("咖门")
+	if src.SubscribeState != repostSubscribeSuccess || src.readyToSubscribe() {
+		t.Fatalf("确认后应记成功、不再提交：state=%q", src.SubscribeState)
 	}
 }
 

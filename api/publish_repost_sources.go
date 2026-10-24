@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -23,9 +24,14 @@ const (
 	repostSubscribeIdle              = ""
 	repostSubscribePending           = "pending"
 	repostSubscribeSubscribing       = "subscribing"
+	repostSubscribeAccepted          = "accepted"
 	repostSubscribeSuccess           = "success"
 	repostSubscribeFailed            = "failed"
 )
+
+// errFeedSubscribeAccepted Feed 回 202：今天看啥收下了、还没确认关注，号也还没进 Feed；
+// 不算失败，下次重启或这个号再转一篇时照样再提交，确认了才回 200。
+var errFeedSubscribeAccepted = errors.New("Feed 已受理")
 
 type publishRepostArticle struct {
 	Title string `json:"title,omitempty"`
@@ -196,13 +202,15 @@ func (src publishRepostSource) readyToSubscribe() bool {
 	return strings.TrimSpace(src.subscribeURL()) != ""
 }
 
+// subscribeURL 给 Feed 的那篇链接。阅读原文记下的多是 http://，Feed 只收 https://mp.weixin.qq.com
+// （2026-10-19 起联商网、咖门、中国企业家杂志因此天天 400），送出前统一升成 https。
 func (src publishRepostSource) subscribeURL() string {
-	if u := strings.TrimSpace(src.LastSubscribeURL); isWechatArticleURL(u) {
+	if u, ok := normalizeWechatWorkURL(src.LastSubscribeURL); ok {
 		return u
 	}
 	for i := len(src.Articles) - 1; i >= 0; i-- {
-		if isWechatArticleURL(src.Articles[i].URL) {
-			return src.Articles[i].URL
+		if u, ok := normalizeWechatWorkURL(src.Articles[i].URL); ok {
+			return u
 		}
 	}
 	return ""
@@ -298,6 +306,9 @@ func defaultSubscribeFeedWechatArticle(ctx context.Context, sourceName, articleU
 	}
 	_ = json.Unmarshal(body, &failure)
 	detail := firstNonEmpty(strings.TrimSpace(failure.Message), strings.TrimSpace(failure.Error))
+	if resp.StatusCode == http.StatusAccepted {
+		return fmt.Errorf("%w：%s", errFeedSubscribeAccepted, firstNonEmpty(detail, "等今天看啥确认"))
+	}
 	if detail != "" {
 		return fmt.Errorf("订阅失败（HTTP %d）：%s", resp.StatusCode, detail)
 	}
@@ -358,9 +369,14 @@ func (p *publishPipeline) completeRepostSourceSubscribe(sourceName string) {
 	state := repostSubscribeSuccess
 	errText := ""
 	if subscribeErr != nil {
-		state = repostSubscribeFailed
 		errText = truncateRunes(strings.Join(strings.Fields(subscribeErr.Error()), " "), 300)
-		log.Printf("publish: 转载满 %d 次后订阅 Feed 失败（%s）：%s", repostSubscribeThreshold, src.Name, errText)
+		if errors.Is(subscribeErr, errFeedSubscribeAccepted) {
+			state = repostSubscribeAccepted
+			log.Printf("publish: 转载满 %d 次，已向 Feed 提交订阅（%s），等今天看啥确认：%s", repostSubscribeThreshold, src.Name, errText)
+		} else {
+			state = repostSubscribeFailed
+			log.Printf("publish: 转载满 %d 次后订阅 Feed 失败（%s）：%s", repostSubscribeThreshold, src.Name, errText)
+		}
 	}
 	if err := p.repostSources.markSubscribe(src.Name, state, articleURL, errText, pipelineNow(p)); err != nil {
 		log.Printf("publish: 回写转载公众号订阅状态失败（%s）：%v", src.Name, err)
