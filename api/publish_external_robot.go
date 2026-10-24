@@ -1,6 +1,6 @@
 package main
 
-// publish_external_robot.go — 经自己的分发服务（distribution_robot.go）送稿的 lane，目前只有百家号。
+// publish_external_robot.go — 经自己的分发服务（distribution_robot.go）送稿的 lane：百家号、头条号（2026-10-24 起）。
 //
 // 2026-10-22 用户裁定：审核卡「同步至百家号」改走自己的机器人，先只存草稿、不发布，用户看过
 // 线上效果再加发布。与云梭 lane 共用 queued / pushing / failed / reconciliation_required，多一个
@@ -47,8 +47,12 @@ func buildRobotDraftPayload(job publishJob, profile yunsuoPlatformProfile, draft
 		return robotDraftPayload{}, fmt.Errorf("%s草稿正文仍含公众号导流尾（%s），禁止外发", profile.Name, leak)
 	}
 	title := externalEffectiveTitle(job, draft)
-	if min, max := profile.titleCharRange(); runeLen(title) < min || runeLen(title) > max {
-		return robotDraftPayload{}, fmt.Errorf("%s标题要 %d–%d 字，现在 %d 字", profile.Name, min, max, runeLen(title))
+	if min, max := profile.titleLimits(); profile.titleLength(title) < min || profile.titleLength(title) > max {
+		note := profile.titleCountNote()
+		if note != "" {
+			note = "（" + note + "）"
+		}
+		return robotDraftPayload{}, fmt.Errorf("%s标题要 %d–%d 字%s，现在 %d 字", profile.Name, min, max, note, profile.titleLength(title))
 	}
 	if rendered.Cover == "" {
 		return robotDraftPayload{}, fmt.Errorf("%s草稿缺少公开可访问的封面", profile.Name)

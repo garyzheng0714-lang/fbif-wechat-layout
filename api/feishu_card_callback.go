@@ -674,11 +674,11 @@ func (p *publishPipeline) handleExternalDistributionFixAction(job publishJob, ac
 	if err != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: err.Error()}
 	}
-	name := yunsuoProfileForTarget(target).Name
+	profile := yunsuoProfileForTarget(target)
 	if draft, _ := externalDraftFor(updated, target.ID); len(draft.Issues) > 0 {
-		return reviewCardOutcome{toastType: "info", toastContent: "已保存，" + name + "还要改：" + externalIssueSummaryText(draft.Issues)}
+		return reviewCardOutcome{toastType: "info", toastContent: "已保存，" + profile.Name + "还要改：" + externalIssueSummaryText(draft.Issues)}
 	}
-	return reviewCardOutcome{toastType: "success", toastContent: "已保存，正在同步至" + name}
+	return reviewCardOutcome{toastType: "success", toastContent: "已保存，正在" + profile.syncAction(profile.Name)}
 }
 
 // feishuFormText 表单字段的文本值（单选图片也是字符串；多选取第一个）。present=false 表示没有这个字段。

@@ -404,8 +404,8 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	if body == "" || strings.Contains(cardJSON(t, card), "多平台分发") {
 		t.Fatalf("原创已发布稿应有常显的分发区: %s", cardJSON(t, card))
 	}
-	// 百家号经自己的分发服务只存草稿（2026-10-22 用户裁定），按钮照实说。
-	if strings.Count(body, `"has_border":true`) != 1 || !strings.Contains(body, `"content":"同步至头条号"`) || !strings.Contains(body, `"content":"存草稿至百家号"`) {
+	// 两个平台都经自己的分发服务只存草稿（百家号 2026-10-22、头条号 2026-10-24），按钮照实说。
+	if strings.Count(body, `"has_border":true`) != 1 || !strings.Contains(body, `"content":"存草稿至头条号"`) || !strings.Contains(body, `"content":"存草稿至百家号"`) {
 		t.Fatalf("未分发时一篇一个外框块，块里每个平台一行、各自一枚按钮: %s", body)
 	}
 	if !strings.Contains(body, `"corner_radius":"16px"`) || !strings.Contains(body, `"border_color":"grey-100"`) {
@@ -422,7 +422,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	var outside []map[string]any
 	reviewCardButtons(map[string]any{"elements": elements[0]}, &outside)
 	for _, button := range outside {
-		if strings.Contains(fmt.Sprint(button["text"]), "同步至头条号") {
+		if strings.Contains(fmt.Sprint(button["text"]), "存草稿至头条号") {
 			t.Fatalf("文章按钮行不应放分发按钮: %#v", button)
 		}
 	}
@@ -557,11 +557,11 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 		"<font color='orange'>待修改</font>",
 		fmt.Sprintf("<font color='orange'>标题超出 %d 字</font>：头条号最多 30 字（英文字母、数字两个算一个字），现在 %d 字", runeLen(long)-30, runeLen(long)),
 		"现在：" + long,
-		// 输入框按字符数限长，放宽到云梭 title 档的 40 个字符；按头条数法超没超由服务端判。
-		`"name":"t_72_0"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":40`, `"placeholder":{"content":"30 字以内"`, `"content":"改成"`,
+		// 输入框按字符数限长：全是英文数字时可到 60 个字符；按头条数法超没超由服务端判。
+		`"name":"t_72_0"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":60`, `"placeholder":{"content":"30 字以内"`, `"content":"改成"`,
 		"<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200",
 		`"tag":"select_img"`, `"name":"c_72_0"`, `"img_key":"img_big"`, `"value":"` + reviewCardCoverValue("https://cdn.example.com/big.jpg") + `"`,
-		`"content":"保存并同步至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"slot":0`,
+		`"content":"保存并存草稿至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"slot":0`,
 		"在侧边栏修改", "applink.feishu.cn/client/web_url/open?mode=sidebar-semi",
 	} {
 		if !strings.Contains(body, want) {

@@ -7,10 +7,10 @@ package main
 // 往下每个平台再有自己的一套。这里只写各平台与通用不同的参数；封面、配额、链接核对都按
 // 账号所属平台取。加平台只加一份 profile，不改通用层。
 //
-// 每个平台还定了稿子经谁送进平台（Driver）：头条号经云梭；百家号经自己的分发服务
-// （FBIF-多平台分发工具，2026-10-22 用户裁定，目前只存草稿、不发布）。正文标签写法跟着送稿的
-// 方式走（Markup）：经云梭的只用它吃得进去的写法，平台原生写法进去就丢（2026-10-20 实测）；
-// 自己的分发服务用编辑器自己的写入接口，平台原生写法留得住（yunsuo_render.go）。
+// 每个平台还定了稿子经谁送进平台（Driver）：百家号、头条号都经自己的分发服务（FBIF-多平台分发工具，
+// 百家号 2026-10-22、头条号 2026-10-24 切过来，只存草稿、不发布），云梭不再接新稿（2026-10-23 用户：
+// 「我做这个的目的是要替换掉云梭啊」）；云梭的写法只留给切换前建的旧 lane 续查。正文标签写法跟着送稿的
+// 方式走（Markup）：自己的分发服务用编辑器自己的写入通道，平台原生写法留得住（yunsuo_render.go）。
 
 import "strings"
 
@@ -70,14 +70,17 @@ func (p yunsuoPlatformProfile) markup() distributionMarkup {
 const yunsuoDefaultDailyLimit = 5
 
 var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
-	// 头条号：封面下限来自 2026-10-11 #183 平台回执；每天约 5 篇上限。
+	// 头条号：经自己的分发服务存草稿（不发布，2026-10-24 从云梭切过来），封面由分发服务在封面弹窗里
+	// 上传、不进正文。封面下限来自 2026-10-11 #183 平台回执；每天约 5 篇上限。
+	// 文章链接与线上正文核对只对切换前经云梭发出去的旧 lane（存草稿的 lane 没有线上文章）。
 	"toutiao": {
 		Key: "toutiao", Name: "头条号",
+		Driver:        externalDriverRobot,
+		Markup:        &toutiaoEditorMarkup,
 		CoverMinWidth: 452, CoverMinHeight: 352,
-		// 标题最多 30 字，标点与空格都算（2026-10-13 用户裁定），英文字母与数字两个算一个字：
+		// 标题 2–30 字，标点与空格都算（2026-10-13 用户裁定），英文字母与数字两个算一个字：
 		// 编辑手发的 #287（32 个字符）、#292（35）、#289（42，按此数法正好 30）头条都收了。
-		// 云梭给头条号用的是「标题」档：线上头条稿标题都是 title 原文（#196、#260），不是短标题。
-		TitleField: yunsuoTitleMedium, TitleMax: 30, TitleHalfWidthASCII: true,
+		TitleMin: 2, TitleMax: 30, TitleHalfWidthASCII: true,
 		DailyLimit:   5,
 		URLHosts:     []string{"toutiao.com", "www.toutiao.com", "m.toutiao.com"},
 		LinkLookup:   externalLinkLookupToutiao,
@@ -106,13 +109,27 @@ var yunsuoPlatformProfiles = map[string]yunsuoPlatformProfile{
 // p.pgc-img-caption，由分发服务挪进编辑器自己的图注格。
 var baijiahaoEditorMarkup = distributionMarkup{
 	Heading:  func(text string) string { return "<h3>" + text + "</h3>" },
-	BoldLine: func(text string) string { return "<p><strong>" + text + "</strong></p>" },
-	Image: func(src, caption string) string {
-		if caption == "" {
-			return `<p><img src="` + src + `" alt=""></p>`
-		}
-		return `<div class="pgc-img"><img src="` + src + `" alt=""><p class="pgc-img-caption">` + caption + `</p></div>`
-	},
+	BoldLine: pgcBoldLine,
+	Image:    pgcImage,
+}
+
+// toutiaoEditorMarkup 自己的分发服务经头条编辑器的粘贴通道整篇写入：照编辑手发的 #286–#299，
+// 大标题 h1、整段加粗 strong、图注写进 div.pgc-img 里的 p.pgc-img-caption（头条自己的写法，
+// 2026-10-23 个人测试号上小标题、加粗、图、图注都读回对上）。
+var toutiaoEditorMarkup = distributionMarkup{
+	Heading:  func(text string) string { return "<h1>" + text + "</h1>" },
+	BoldLine: pgcBoldLine,
+	Image:    pgcImage,
+}
+
+// 百家号、头条号编辑器共用的写法（两家都是字节系 pgc 编辑器的图注结构）。
+func pgcBoldLine(text string) string { return "<p><strong>" + text + "</strong></p>" }
+
+func pgcImage(src, caption string) string {
+	if caption == "" {
+		return `<p><img src="` + src + `" alt=""></p>`
+	}
+	return `<div class="pgc-img"><img src="` + src + `" alt=""><p class="pgc-img-caption">` + caption + `</p></div>`
 }
 
 // yunsuoGenericProfile 认不出平台的账号：通用版式，不设封面下限。
@@ -141,9 +158,13 @@ func yunsuoTitleFieldRange(field string) (int, int) {
 	}
 }
 
-// titleCharRange 标题按字符数的硬范围：经云梭的是云梭这一档的范围，否则是平台自己的范围。
+// titleCharRange 标题按字符数的硬范围：经云梭的是云梭这一档的范围，否则是平台自己的范围；
+// 英文字母、数字两个算一个字的平台（头条号），全是半角时字符数可到上限的两倍。
 func (p yunsuoPlatformProfile) titleCharRange() (int, int) {
 	if p.TitleField == "" {
+		if p.TitleHalfWidthASCII {
+			return p.TitleMin, 2 * p.TitleMax
+		}
 		return p.TitleMin, p.TitleMax
 	}
 	return yunsuoTitleFieldRange(p.TitleField)

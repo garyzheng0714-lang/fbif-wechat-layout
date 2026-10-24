@@ -75,8 +75,8 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 		t.Fatalf("百家号能推，整体请求不应失败：%v", err)
 	}
 	// 百家号标题上限 64 字，原样存草稿。
-	if len(fake.pushed) != 0 || len(robot.saves) != 1 || robot.saves[0].Title != testLongToutiaoTitle {
-		t.Fatalf("头条号标题超限应先不推：%v robot=%+v", fake.pushed, robot.saves)
+	if fmt.Sprint(robot.platforms) != "[baijiahao]" || robot.saves[0].Title != testLongToutiaoTitle {
+		t.Fatalf("头条号标题超限应先不存：robot=%v %+v", robot.platforms, robot.saves)
 	}
 	got := mustJob(t, env, job.ID)
 	draft, _ := externalDraftFor(got, testYunsuoToutiaoID)
@@ -102,14 +102,14 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	fixed := "老茶铺把茶做成零食，年营收过亿"
 	out = env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, 0),
 		map[string]any{fmt.Sprintf("t_%d_0", got.ID): fixed})
-	if out.toastType != "success" || out.toastContent != "已保存，正在同步至头条号" {
+	if out.toastType != "success" || out.toastContent != "已保存，正在存草稿至头条号" {
 		t.Fatalf("改好后应受理：%+v", out)
 	}
-	if fmt.Sprint(fake.pushed) != fmt.Sprint([][]string{{testYunsuoToutiaoID}}) || len(robot.saves) != 1 {
-		t.Fatalf("改好后只推头条号：%v robot=%d", fake.pushed, len(robot.saves))
+	if fmt.Sprint(robot.platforms) != "[baijiahao toutiao]" {
+		t.Fatalf("改好后只存头条号：robot=%v", robot.platforms)
 	}
-	if fake.payload.ShortTitle != fixed {
-		t.Fatalf("头条号拿短标题，必须是人改的那一句：%+v", fake.payload)
+	if robot.saves[1].Title != fixed {
+		t.Fatalf("头条号草稿标题必须是人改的那一句：%+v", robot.saves[1])
 	}
 	got = mustJob(t, env, job.ID)
 	lane := mustLane(t, got, testYunsuoToutiaoID)
@@ -125,14 +125,15 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	// 推过以后表单失效：旧卡再提交不会重推。
 	out = env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, 0),
 		map[string]any{fmt.Sprintf("t_%d_0", got.ID): "再改一次标题也不会重推"})
-	if out.toastType == "success" || fake.pushCalls != 1 {
-		t.Fatalf("已推的平台不得再改再推：%+v pushes=%d", out, fake.pushCalls)
+	if out.toastType == "success" || len(robot.saves) != 2 || fake.pushCalls != 0 {
+		t.Fatalf("已存的平台不得再改再存，云梭一次都不调：%+v robot=%v yunsuo=%d", out, robot.platforms, fake.pushCalls)
 	}
 }
 
 // TestExternalAutoSkipsPlatformWaitingForFix auto 账号卡在待修改：自动外发不反复去网站取稿、不占名额；
 // 改好后挂回自动外发并推出。
 func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
+	useLegacyYunsuoToutiao(t)
 	setTestYunsuoAutoConfig(t)
 	stubYunsuoImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
@@ -179,6 +180,7 @@ func TestExternalAutoSkipsPlatformWaitingForFix(t *testing.T) {
 // TestExternalAutoRechecksDraftWhenPlatformLimitChanges #280（2026-10-13）：头条号标题上限按 20 字
 // 记成待修改，用户裁定上限是 30 字。文章没变也要按新规则重查一次，过了就推，标题走云梭「标题」档原文。
 func TestExternalAutoRechecksDraftWhenPlatformLimitChanges(t *testing.T) {
+	useLegacyYunsuoToutiao(t)
 	setTestYunsuoAutoConfig(t)
 	stubYunsuoImageSize(t, map[string][2]int{})
 	env := newPublishTestEnv(t)
@@ -306,7 +308,7 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	over := toutiaoTitleLength(testLongToutiaoTitle) - 30
 	for _, want := range []string{`{"tag":"at","user_id":"ou_owner_1"}`, fmt.Sprintf("#%d《%s》同步到头条号前，还差 1 处要改：", job.ID, testLongToutiaoTitle),
 		fmt.Sprintf(`"style":["bold"],"tag":"text","text":"1. 标题超了 %d 字（头条号最多 30 字，英文字母、数字两个算一个字）"`, over),
-		"卡片里已填好建议「", "可以直接用，也可以改成自己的", "改好后点上面卡片里的「保存并同步至头条号」，就会同步。"} {
+		"卡片里已填好建议「", "可以直接用，也可以改成自己的", "改好后点上面卡片里的「保存并存草稿至头条号」，就会同步。"} {
 		if !strings.Contains(sent[0].post, want) {
 			t.Fatalf("开场缺少 %q: %s", want, sent[0].post)
 		}
@@ -327,7 +329,7 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := sent[len(sent)-1]
-	if len(sent) != 2 || last.kind != externalReminderKindClose || !strings.Contains(last.post, "都改好了，正在同步至头条号。") || strings.Contains(last.post, `"tag":"at"`) {
+	if len(sent) != 2 || last.kind != externalReminderKindClose || !strings.Contains(last.post, "都改好了，正在存草稿至头条号。") || strings.Contains(last.post, `"tag":"at"`) {
 		t.Fatalf("改好后应收尾一句且不 @：%+v", sent)
 	}
 	if r := mustJob(t, env, job.ID).ExternalDistributionReminder; r.State != "" || r.Want != publishExternalReminderResolved || r.ClosedIDs["oc_review"] != "om_reminder_2" {
@@ -379,7 +381,7 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, true))
 	for _, want := range []string{"同步到头条号、百家号前，还差 2 处要改：", "1. 头条号封面太小（头条号至少 452×352，现在 300×200）",
 		"在卡片里点选一张正文大图，或者", `"tag":"a","text":"上传一张"`, "（传上去就换上）", "2. 百家号标题超了 5 字（百家号最多 40 字）",
-		"在卡片输入框里改到 40 字以内", "「保存并同步至头条号」「保存并存草稿至百家号」"} {
+		"在卡片输入框里改到 40 字以内", "「保存并存草稿至头条号」「保存并存草稿至百家号」"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("开场缺少 %q: %s", want, plain)
 		}
@@ -390,7 +392,7 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 }
 
 // TestExternalReminderExpiredCardPointsToSidebar 审核卡快过或已过飞书 14 天修改期限时，卡上已没有改稿按钮
-// （#233：补发九月旧稿，提醒却叫人去点卡片里的「保存并同步至头条号」），每一步都改到侧边栏改稿页里做；
+// （#233：补发九月旧稿，提醒却叫人去点卡片里的「保存并存草稿至头条号」），每一步都改到侧边栏改稿页里做；
 // 连改稿页链接都给不出就不发。
 func TestExternalReminderExpiredCardPointsToSidebar(t *testing.T) {
 	setTestYunsuoConfig(t)
@@ -441,7 +443,7 @@ func TestExternalReminderExpiredCardPointsToSidebar(t *testing.T) {
 	}
 	link := externalDistributionSidebarLink(job.ID)
 	for _, want := range []string{`{"tag":"at","user_id":"ou_owner_1"}`, "改稿页里已填好建议「", `[{"tag":"text","text":"请"},`,
-		`"href":"` + link + `","tag":"a","text":"打开改稿页"`, "，改好后点「保存并同步至头条号」，就会同步。"} {
+		`"href":"` + link + `","tag":"a","text":"打开改稿页"`, "，改好后点「保存并存草稿至头条号」，就会同步。"} {
 		if !strings.Contains(sent[0].post, want) {
 			t.Fatalf("过期卡提醒缺少 %q: %s", want, sent[0].post)
 		}
@@ -537,7 +539,7 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	env := newPublishTestEnv(t)
 	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
-	useFakeRobot(env)
+	robot := useFakeRobot(env)
 	var stored [][]byte
 	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
 		stored = append(stored, body)
@@ -582,16 +584,16 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	if baijia.Status != "草稿已存（未发布）" || baijia.Editable || baijia.DraftURL != testRobotDraftURL(testRobotArticleID) || baijia.Action != "存草稿至百家号" {
 		t.Fatalf("百家号已存草稿，不能再改：%+v", baijia)
 	}
-	if toutiao.Action != "同步至头条号" {
-		t.Fatalf("头条号按钮后半句照旧：%+v", toutiao)
+	if toutiao.Action != "存草稿至头条号" {
+		t.Fatalf("头条号按钮写存草稿：%+v", toutiao)
 	}
 
 	// 只改标题：封面问题还在，仍待修改、不推。
 	put := func(body string) *httptest.ResponseRecorder {
 		return doEditReq(mux, http.MethodPut, base+"draft"+signed, editor, []byte(body), "application/json")
 	}
-	if rec := put(`{"slot":0,"title":"老茶铺把茶做成零食，年营收过亿"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || fake.pushCalls != 0 {
-		t.Fatalf("改完标题封面仍要改：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
+	if rec := put(`{"slot":0,"title":"老茶铺把茶做成零食，年营收过亿"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || len(robot.saves) != 1 {
+		t.Fatalf("改完标题封面仍要改：%d %s robot=%v", rec.Code, rec.Body.String(), robot.platforms)
 	}
 	if rec := put(`{"slot":0,"title":"这个标题足足有三十多个字，远远超过了头条号三十个字的标题上限啊"}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "头条号标题最多 30 字") {
 		t.Fatalf("超限标题应拒绝：%d %s", rec.Code, rec.Body.String())
@@ -625,8 +627,8 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 	if rec.Code != http.StatusOK || len(stored) != 1 || uploaded.Uploaded.Width != 900 || !strings.HasPrefix(uploaded.Uploaded.URL, "https://cdn.example.com/uploaded/distribution-cover-") {
 		t.Fatalf("够大的图应转存：%d %s", rec.Code, rec.Body.String())
 	}
-	if fake.pushCalls != 1 || fake.payload.Cover != uploaded.Uploaded.URL {
-		t.Fatalf("封面改好后应推头条号并用上传的图：calls=%d payload=%+v", fake.pushCalls, fake.payload)
+	if fmt.Sprint(robot.platforms) != "[baijiahao toutiao]" || robot.saves[1].CoverURL != uploaded.Uploaded.URL || fake.pushCalls != 0 {
+		t.Fatalf("封面改好后应存头条号草稿并用上传的图：robot=%v saves=%+v yunsuo=%d", robot.platforms, robot.saves, fake.pushCalls)
 	}
 	got := mustJob(t, env, job.ID)
 	draft := mustDraft(t, got, testYunsuoToutiaoID)
@@ -650,7 +652,7 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 	env := newPublishTestEnv(t)
 	fake := newBothAccountsYunsuo()
 	env.pipeline.yunsuo = func() (yunsuoAPI, error) { return fake, nil }
-	useFakeRobot(env)
+	robot := useFakeRobot(env)
 	env.pipeline.externalCoverStore = func(_ context.Context, name string, body []byte) (string, error) {
 		return "https://cdn.example.com/uploaded/" + name, nil
 	}
@@ -673,7 +675,7 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 标题仍超：封面换上，标题问题留着，不推。
-	if rec := upload(job, testPNG(t, 900, 600), testLongToutiaoTitle+"再长一点"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || fake.pushCalls != 0 {
+	if rec := upload(job, testPNG(t, 900, 600), testLongToutiaoTitle+"再长一点"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"待修改"`) || len(robot.saves) != 1 {
 		t.Fatalf("标题没改好时只换封面：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
 	}
 	draft := mustDraft(t, mustJob(t, env, job.ID), testYunsuoToutiaoID)
@@ -685,11 +687,11 @@ func TestExternalSidebarUploadCarriesTypedTitle(t *testing.T) {
 	}
 	// 再传一张，带上改好的标题：一起提交，马上推。
 	fixed := "老茶铺把茶做成零食，年营收过亿"
-	if rec := upload(job, testPNG(t, 1200, 800), fixed); rec.Code != http.StatusOK || fake.pushCalls != 1 {
-		t.Fatalf("标题改好、封面传上就推：%d %s pushes=%d", rec.Code, rec.Body.String(), fake.pushCalls)
+	if rec := upload(job, testPNG(t, 1200, 800), fixed); rec.Code != http.StatusOK || len(robot.saves) != 2 {
+		t.Fatalf("标题改好、封面传上就存草稿：%d %s robot=%v", rec.Code, rec.Body.String(), robot.platforms)
 	}
-	if fake.payload.ShortTitle != fixed || !strings.HasPrefix(fake.payload.Cover, "https://cdn.example.com/uploaded/") {
-		t.Fatalf("推出去的是改好的标题和刚传的图：%+v", fake.payload)
+	if saved := robot.saves[1]; saved.Title != fixed || !strings.HasPrefix(saved.CoverURL, "https://cdn.example.com/uploaded/") || fake.pushCalls != 0 {
+		t.Fatalf("存进头条号的是改好的标题和刚传的图，云梭一次都不调：%+v yunsuo=%d", saved, fake.pushCalls)
 	}
 }
 

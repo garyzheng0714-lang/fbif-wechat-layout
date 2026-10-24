@@ -284,93 +284,46 @@ func manualLayoutTestJob() publishJob {
 }
 
 // 外发版式的金标准是编辑手发在头条号、百家号上的稿（2026-10-20 用户：「按照人工稿改，这应该是
-// 你的标准」；对照 10-15 起的 #286 #287 #289 #290 #292 #299 与 8 月老稿）。正文进云梭后会被它
-// 重写一遍（2026-10-20 实测 14 篇头条稿：h1/strong/pgc-img-caption 丢，h2/h3 变加粗段，
-// <p><small> 变平台图注），所以这里写的是云梭吃得进去的写法。百家号 2026-10-22 起经自己的分发服务，
-// 见 TestBaijiahaoDraftUsesEditorMarkup。
-func TestYunsuoDistributionFollowsManualLayout(t *testing.T) {
+// 你的标准」；对照 10-15 起的 #286 #287 #289 #290 #292 #299 与 8 月老稿）。两个平台都经自己的分发服务
+// 写进编辑器（百家号 2026-10-22、头条号 2026-10-24），正文规则同一套（开头不放署名、编号、去名片、
+// 无链接、文末声明），写法各用编辑器留得住的：标题1 百家号是 h3（只有一级小标题）、头条号是 h1，
+// 标题2 与整段加粗是加粗段，图注在 div.pgc-img 里；首图留在原位，封面是公众号封面、单独上传不进正文，标题原样。
+func TestEditorDraftsUseEachPlatformsMarkup(t *testing.T) {
 	stubYunsuoImageSize(t, nil)
 	job := manualLayoutTestJob()
-	for _, target := range []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}} {
-		payload, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{target}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
+	for _, c := range []struct{ name, key, heading string }{{"百家号", "baijiahao", "h3"}, {"头条号", "toutiao", "h1"}} {
+		profile := yunsuoProfileForTarget(yunsuoAccountTarget{ID: "a-1", Name: c.name})
+		payload, err := buildRobotDraftPayload(job, profile, publishExternalDraft{})
 		if err != nil {
 			t.Fatal(err)
 		}
+		h := func(text string) string { return "<" + c.heading + ">" + text + "</" + c.heading + ">" }
 		html := payload.HTML
 		for _, want := range []string{
-			// 开头不放署名，作者、编辑写进文末声明。
 			"<p>一个人，可以在同一赛道成功2次吗？</p>",
-			// 首图留在原位、带图注；说明与图片来源用「；」并成一条，不截短。
-			`<p><img src="https://cdn.example/lead.jpg" alt=""></p><p><small>蛋白棒RXBAR和David；图片来源：RXBAR、David</small></p>`,
-			"<p><small>Peter Rahal在2024年推出蛋白质品牌David，主打每根28克蛋白质、只有150卡路里的蛋白棒；图片来源：Forbes</small></p>",
-			// 标题1 编「一、二、」（结语也编），标题2 与整段加粗都写成云梭会留成加粗段的 h3。
-			"<h2>一、第一次创业，他把蛋白棒做简单</h2>",
-			"<h3>1、包装更新</h3>",
-			"<h2>二、结语</h2>",
-			"<p><small>真的！是西柚味！图片来源：X@木本牙狼</small></p>",
-			"<h3>整段加粗的导语。</h3>",
+			`<div class="pgc-img"><img src="https://cdn.example/lead.jpg" alt=""><p class="pgc-img-caption">蛋白棒RXBAR和David；图片来源：RXBAR、David</p></div>`,
+			`<p class="pgc-img-caption">Peter Rahal在2024年推出蛋白质品牌David，主打每根28克蛋白质、只有150卡路里的蛋白棒；图片来源：Forbes</p></div>`,
+			h("一、第一次创业，他把蛋白棒做简单"),
+			"<p><strong>1、包装更新</strong></p>",
+			h("二、结语"),
+			"<p><strong>整段加粗的导语。</strong></p>",
 			"<p>这是我茶叶系列的第38篇。</p>",
 			"例如我们曾介绍过的Poppi等。同样是主打干净的产品，<strong>RXBAR却没选这条路。</strong>",
 			"wide-but-captioned.png",
 			"<p>参考来源：</p><p>[1] The RXBAR Story</p><p>本文为FBIF食品饮料创新原创，作者：Sage，编辑：Bobo，转载请联系授权。</p>",
 		} {
 			if !strings.Contains(html, want) {
-				t.Errorf("%s 外发正文缺少 %q\n%s", target.Name, want, html)
+				t.Errorf("%s草稿正文缺少 %q\n%s", c.name, want, html)
 			}
 		}
-		for _, banned := range []string{"作者：Sage</p>", "<p><br></p>", "<a ", "mp.weixin.qq.com", "<h1", "pgc-", "mote-card.png", "sage-card.png"} {
+		for _, banned := range []string{"作者：Sage</p>", "<p><br></p>", "<a ", "mp.weixin.qq.com", "<h2", "<small>", "mote-card.png", "sage-card.png", "wechat-cover.jpg"} {
 			if strings.Contains(html, banned) {
-				t.Errorf("%s 外发正文不得出现 %q\n%s", target.Name, banned, html)
+				t.Errorf("%s草稿正文不得出现 %q\n%s", c.name, banned, html)
 			}
 		}
-		// 封面用公众号封面（与 FoodTalks 一致）：头条正文开头不是图，不把文中的首图挪上去。
-		if payload.Cover != "https://cdn.example/wechat-cover.jpg" || strings.Contains(html, "wechat-cover.jpg") {
-			t.Errorf("%s 封面应是公众号封面且不进正文：cover=%q", target.Name, payload.Cover)
+		if payload.Platform != c.key || payload.CoverURL != "https://cdn.example/wechat-cover.jpg" || payload.Title != job.Title {
+			t.Fatalf("%s封面用公众号封面、标题原样：%+v", c.name, payload)
 		}
-	}
-}
-
-// TestBaijiahaoDraftUsesEditorMarkup 百家号经自己的分发服务写进编辑器（2026-10-22 用户裁定）：正文规则与
-// 云梭同一套（开头不放署名、编号、去名片、无链接、文末声明），写法换成编辑器留得住的——标题1 是 h3
-// （百家号只有一级小标题），标题2 与整段加粗是加粗段，图注在 div.pgc-img 里；首图留在原位，封面是
-// 公众号封面、单独上传不进正文，标题原样。
-func TestBaijiahaoDraftUsesEditorMarkup(t *testing.T) {
-	stubYunsuoImageSize(t, nil)
-	job := manualLayoutTestJob()
-	profile := yunsuoProfileForTarget(yunsuoAccountTarget{ID: "a-2", Name: "百家号"})
-	payload, err := buildRobotDraftPayload(job, profile, publishExternalDraft{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := payload.HTML
-	for _, want := range []string{
-		"<p>一个人，可以在同一赛道成功2次吗？</p>",
-		`<div class="pgc-img"><img src="https://cdn.example/lead.jpg" alt=""><p class="pgc-img-caption">蛋白棒RXBAR和David；图片来源：RXBAR、David</p></div>`,
-		`<p class="pgc-img-caption">Peter Rahal在2024年推出蛋白质品牌David，主打每根28克蛋白质、只有150卡路里的蛋白棒；图片来源：Forbes</p></div>`,
-		"<h3>一、第一次创业，他把蛋白棒做简单</h3>",
-		"<p><strong>1、包装更新</strong></p>",
-		"<h3>二、结语</h3>",
-		"<p><strong>整段加粗的导语。</strong></p>",
-		"<p>这是我茶叶系列的第38篇。</p>",
-		"例如我们曾介绍过的Poppi等。同样是主打干净的产品，<strong>RXBAR却没选这条路。</strong>",
-		"<p>参考来源：</p><p>[1] The RXBAR Story</p><p>本文为FBIF食品饮料创新原创，作者：Sage，编辑：Bobo，转载请联系授权。</p>",
-	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("百家号草稿正文缺少 %q\n%s", want, html)
-		}
-	}
-	for _, banned := range []string{"作者：Sage</p>", "<p><br></p>", "<a ", "mp.weixin.qq.com", "<h1", "<h2", "<small>", "mote-card.png", "sage-card.png", "wechat-cover.jpg"} {
-		if strings.Contains(html, banned) {
-			t.Errorf("百家号草稿正文不得出现 %q\n%s", banned, html)
-		}
-	}
-	if payload.Platform != "baijiahao" || payload.CoverURL != "https://cdn.example/wechat-cover.jpg" || payload.Title != job.Title {
-		t.Fatalf("封面用公众号封面、标题原样：%+v", payload)
-	}
-	// 头条号同一篇照旧是云梭写法，不受影响。
-	toutiao, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, []string{"美食", "饮食文化", "财经", "消费", "公司"})
-	if err != nil || strings.Contains(toutiao.HTML, "pgc-") || !strings.Contains(toutiao.HTML, "<h2>一、第一次创业，他把蛋白棒做简单</h2>") {
-		t.Fatalf("头条号仍是云梭写法：%v\n%s", err, toutiao.HTML)
 	}
 }
 
@@ -425,10 +378,9 @@ func TestYunsuoDistributionNumbersSectionHeadings(t *testing.T) {
 	}
 }
 
-// 封面：云梭在百家号上总会把 cover 插到正文最前面（#95 8 月稿、#282），在头条号上用公众号封面时
-// 不插（10-10～10-12 #165 #175 #180 #193 #196 #260 六篇）。会插封面的平台（CoverPrepended）文章若以图
-// 开头，就用这张图当封面并从正文拿掉，插回来正好是原位；头条号正文一律不动。百家号 2026-10-22 起经
-// 自己的分发服务、封面单独上传不进正文，首图留在原位。
+// 封面：百家号、头条号都经自己的分发服务，封面在编辑器的封面弹窗里单独上传、不进正文，首图留在原位。
+// 云梭在百家号上曾把 cover 插到正文最前面（#95 8 月稿、#282）：会插封面的平台（CoverPrepended，现在没有
+// 平台开）文章若以图开头，就用这张图当封面并从正文拿掉，插回来正好是原位。
 func TestYunsuoCoverFollowsHowEachPlatformPlacesIt(t *testing.T) {
 	stubYunsuoImageSize(t, nil)
 	blocks := `[
@@ -444,14 +396,15 @@ func TestYunsuoCoverFollowsHowEachPlatformPlacesIt(t *testing.T) {
 		BlocksJSON: blocks,
 		ImageMap:   `{"https://cdn.example/lead.jpg":"https://cdn.example/lead.jpg","https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`,
 	}
-	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
-	toutiao, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, categories)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if toutiao.Cover != "https://cdn.example/wechat-cover.jpg" ||
-		!strings.HasPrefix(toutiao.HTML, `<p><img src="https://cdn.example/lead.jpg" alt=""></p><p><small>tea&#39;stone深圳万象前海店</small></p>`) {
-		t.Fatalf("头条号：封面用公众号封面，首图留在原位：cover=%q html=%s", toutiao.Cover, toutiao.HTML)
+	for _, name := range []string{"头条号", "百家号"} {
+		payload, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(yunsuoAccountTarget{ID: "a-1", Name: name}), publishExternalDraft{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if payload.CoverURL != "https://cdn.example/wechat-cover.jpg" ||
+			!strings.HasPrefix(payload.HTML, `<div class="pgc-img"><img src="https://cdn.example/lead.jpg" alt=""><p class="pgc-img-caption">tea&#39;stone深圳万象前海店</p></div>`) {
+			t.Fatalf("%s：封面用公众号封面、单独上传，首图留在原位：cover=%q html=%s", name, payload.CoverURL, payload.HTML)
+		}
 	}
 	prepended := yunsuoPlatformProfiles["toutiao"]
 	prepended.CoverPrepended = true
@@ -463,18 +416,10 @@ func TestYunsuoCoverFollowsHowEachPlatformPlacesIt(t *testing.T) {
 		!strings.HasPrefix(rendered.HTML, "<p>tea&#39;stone深圳万象前海店</p><p>这是我茶叶系列的第39篇。</p>") {
 		t.Fatalf("会插封面的平台：开头的图做封面（云梭会插回最前面），图注留在原处：cover=%q html=%s", rendered.Cover, rendered.HTML)
 	}
-	baijia, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(yunsuoAccountTarget{ID: "a-2", Name: "百家号"}), publishExternalDraft{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if baijia.CoverURL != "https://cdn.example/wechat-cover.jpg" ||
-		!strings.HasPrefix(baijia.HTML, `<div class="pgc-img"><img src="https://cdn.example/lead.jpg" alt=""><p class="pgc-img-caption">tea&#39;stone深圳万象前海店</p></div>`) {
-		t.Fatalf("百家号：封面用公众号封面、单独上传，首图留在原位：cover=%q html=%s", baijia.CoverURL, baijia.HTML)
-	}
 }
 
-// 标题用原文：云梭三档（short 8–20、title 15–40、long 20–60）放得下就原样写，放不下才补或截。
-// 头条号用 title 档；百家号 2026-10-22 起经自己的分发服务，标题原样送（百家号 2–64 字），不再补「｜摘要」。
+// 标题用原文：经分发服务的平台标题原样送（百家号 2–64 字、头条号 2–30 字），不补「｜摘要」。
+// 云梭三档（short 8–20、title 15–40、long 20–60）只留给切换前的旧 lane：放得下就原样写，放不下才补或截。
 func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
 	stubYunsuoImageSize(t, nil)
 	job := publishJob{
@@ -485,21 +430,22 @@ func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
 		ImageMap:   `{"https://cdn.example/wechat-cover.jpg":"https://cdn.example/wechat-cover.jpg"}`,
 	}
 	categories := []string{"美食", "饮食文化", "财经", "消费", "公司"}
-	job.Title = "西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了" // 26 字
-	payload, err := buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, categories)
+	job.Title = "西柚汁原料价格翻倍，可果美开始用胡萝卜做“西柚汁”了"                   // 26 字
+	legacy := []yunsuoAccountTarget{{ID: "a-9", Name: "云梭旧号"}} // 认不出平台的号：通用版式，经云梭
+	payload, err := buildYunsuoPushPayload(job, legacy, categories)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if toutiao, err := buildRobotDraftPayload(job, yunsuoProfileForTarget(yunsuoAccountTarget{Name: "头条号"}), publishExternalDraft{}); err != nil || toutiao.Title != job.Title {
+		t.Fatalf("头条号标题原样送：%+v %v", toutiao, err)
 	}
 	if payload.Title != job.Title || payload.LongTitle != job.Title {
 		t.Fatalf("放得下的档位应原样用原标题：title=%q long=%q", payload.Title, payload.LongTitle)
 	}
 	job.Title = "巧克力也想成新茶饮的“心头好”" // 15 字：title 档原样，long 档不足 20 字才补
-	if payload, err = buildYunsuoPushPayload(job, []yunsuoAccountTarget{{ID: "a-1", Name: "头条号"}}, categories); err != nil ||
+	if payload, err = buildYunsuoPushPayload(job, legacy, categories); err != nil ||
 		payload.Title != job.Title || !strings.HasPrefix(payload.LongTitle, job.Title+"｜") {
 		t.Fatalf("15 字标题：title=%q long=%q err=%v", payload.Title, payload.LongTitle, err)
-	}
-	if yunsuoProfileForTarget(yunsuoAccountTarget{Name: "头条号"}).TitleField != yunsuoTitleMedium {
-		t.Fatal("头条号用 title 档")
 	}
 	baijia := yunsuoProfileForTarget(yunsuoAccountTarget{Name: "百家号"})
 	if payload, err := buildRobotDraftPayload(job, baijia, publishExternalDraft{}); err != nil || payload.Title != job.Title {
@@ -511,28 +457,31 @@ func TestYunsuoTitleFieldsKeepOriginalTitle(t *testing.T) {
 	}
 }
 
-// 头条号标题字数：英文字母、数字算半个字。编辑手发的 #287（32 字）、#292（35 字）、#289（42 字）
-// 头条都收了；按每个字符算 1 会把它们误拦成待修改。云梭 title 档本身最多 40 字，超了照样要改。
+// 头条号标题字数：英文字母、数字算半个字，2–30 字（与分发服务同一数法）。编辑手发的 #287（32 个字符）、
+// #292（35）、#289（42）头条都收了；按每个字符算 1 会把它们误拦成待修改。
 func TestToutiaoTitleCountsASCIIAsHalf(t *testing.T) {
 	profile := yunsuoProfileForTarget(yunsuoAccountTarget{Name: "头条号"})
 	for _, title := range []string{
 		"Innova揭晓2027全球食品饮料十大趋势，穿越二十年创新周期",
 		"最美的中国茶馆tea'stone，8年开了18家店：我的2周体验和观察",
+		"Whole Foods Market发布2027年8大食品趋势！苦味升级、豆类热潮…",
 	} {
 		if issues := externalTextIssues(publishJob{Title: title}, profile, publishExternalDraft{}); len(issues) != 0 {
 			t.Errorf("头条号收过的标题不应拦：%q %+v", title, issues)
 		}
 	}
-	issues := externalTextIssues(publishJob{Title: "Whole Foods Market发布2027年8大食品趋势！苦味升级、豆类热潮…"}, profile, publishExternalDraft{})
-	if len(issues) != 1 || issues[0].Length != 42 || issues[0].Max != 40 {
-		t.Fatalf("超过云梭 title 档 40 字应拦：%+v", issues)
-	}
-	issues = externalTextIssues(publishJob{Title: "这个标题全是汉字一共三十一个字远远超过了头条号的标题字数上限啊"}, profile, publishExternalDraft{})
+	issues := externalTextIssues(publishJob{Title: "这个标题全是汉字一共三十一个字远远超过了头条号的标题字数上限啊"}, profile, publishExternalDraft{})
 	if len(issues) != 1 || issues[0].Length != 31 || issues[0].Max != 30 {
 		t.Fatalf("31 个汉字应超头条 30 字：%+v", issues)
 	}
 	if got := profile.titleLength("Whole Foods Market发布2027年8大食品趋势！苦味升级、豆类热潮…"); got != 30 {
 		t.Fatalf("头条字数 = %d，想要 30", got)
+	}
+	stubYunsuoImageSize(t, nil)
+	job := manualLayoutTestJob()
+	job.Title = "这个标题全是汉字一共三十一个字远远超过了头条号的标题字数上限啊"
+	if _, err := buildRobotDraftPayload(job, profile, publishExternalDraft{}); err == nil || !strings.Contains(err.Error(), "头条号标题要 2–30 字（英文字母、数字两个算一个字），现在 31 字") {
+		t.Fatalf("存草稿前按头条的数法拦：%v", err)
 	}
 }
 

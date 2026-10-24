@@ -78,8 +78,8 @@ func setTestRobotOnlyConfig(t *testing.T) {
 var robotKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
 // TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved 2026-10-22 用户裁定：百家号改走自己的
-// 分发服务、只存草稿。提交前 lane 已落 pushing + 冻结内容 + 幂等键；存好后记 draft_saved、草稿编号、
-// 草稿地址与当场读回的核对；头条号照旧经云梭，各推各的。
+// 分发服务、只存草稿（头条号 2026-10-24 也切过来）。提交前 lane 已落 pushing + 冻结内容 + 幂等键；存好后
+// 记 draft_saved、草稿编号、草稿地址与当场读回的核对；两个平台各存各的，云梭一次都不调。
 func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 	setTestYunsuoConfig(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
@@ -89,6 +89,9 @@ func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 	robot := useFakeRobot(env)
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
 	robot.duringSave = func(req robotDraftRequest) {
+		if len(robot.platforms) == 0 || robot.platforms[len(robot.platforms)-1] != "baijiahao" {
+			return
+		}
 		lane := mustLane(t, mustJob(t, env, job.ID), testYunsuoBaijiaID)
 		var frozen robotDraftPayload
 		if err := json.Unmarshal([]byte(lane.PayloadJSON), &frozen); err != nil {
@@ -103,10 +106,10 @@ func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(yunsuo.pushed) != fmt.Sprint([][]string{{testYunsuoToutiaoID}}) || fmt.Sprint(robot.platforms) != "[baijiahao]" {
-		t.Fatalf("头条号经云梭、百家号经分发服务各一次：yunsuo=%v robot=%v", yunsuo.pushed, robot.platforms)
+	if len(yunsuo.pushed) != 0 || fmt.Sprint(robot.platforms) != "[toutiao baijiahao]" {
+		t.Fatalf("头条号、百家号都经分发服务各存一次：yunsuo=%v robot=%v", yunsuo.pushed, robot.platforms)
 	}
-	req := robot.saves[0]
+	req := robot.saves[1]
 	if !robotKeyPattern.MatchString(req.IdempotencyKey) || !strings.HasPrefix(req.IdempotencyKey, fmt.Sprintf("job-%d.", job.ID)) {
 		t.Fatalf("幂等键只用分发服务认的字符：%q", req.IdempotencyKey)
 	}
@@ -115,8 +118,8 @@ func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 		t.Fatalf("草稿内容不对：%+v", req)
 	}
 	got := mustJob(t, env, job.ID)
-	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.Driver != externalDriverYunsuo || lane.State != publishExternalDistributionSucceeded {
-		t.Fatalf("头条号仍经云梭发布：%+v", lane)
+	if lane := mustLane(t, got, testYunsuoToutiaoID); lane.Driver != externalDriverRobot || lane.State != publishExternalDistributionDraftSaved {
+		t.Fatalf("头条号也经分发服务存草稿：%+v", lane)
 	}
 	lane := mustLane(t, got, testYunsuoBaijiaID)
 	if lane.State != publishExternalDistributionDraftSaved || lane.ContentPK != testRobotArticleID || lane.DraftURL != testRobotDraftURL(testRobotArticleID) ||
@@ -136,7 +139,7 @@ func TestRobotLaneFreezesDraftBeforeSavingThenLandsDraftSaved(t *testing.T) {
 	if status.Processing != 0 || status.Failed != 0 || status.ReconciliationRequired != 0 || status.ExternalFidelityMismatches != 0 || status.ExternalFidelityUnavailable != 0 {
 		t.Fatalf("存好的草稿是终态，不算处理中或失败：%+v", status)
 	}
-	if out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, got, nil)); len(robot.saves) != 1 || yunsuo.pushCalls != 1 {
+	if out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, got, nil)); len(robot.saves) != 2 || yunsuo.pushCalls != 0 || out.toastContent != "草稿都已存好，无需重复操作" {
 		t.Fatalf("存好草稿后再点不得再提交：out=%+v saves=%d", out, len(robot.saves))
 	}
 }

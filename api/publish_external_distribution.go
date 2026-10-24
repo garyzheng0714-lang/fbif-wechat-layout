@@ -1,7 +1,7 @@
 package main
 
-// publish_external_distribution.go — 已审核原创文章分发到外部平台：头条号经云梭，百家号经自己的
-// 分发服务（publish_external_robot.go，2026-10-22 起，只存草稿）。
+// publish_external_distribution.go — 已审核原创文章分发到外部平台：百家号、头条号都经自己的分发服务
+// （publish_external_robot.go，百家号 2026-10-22、头条号 2026-10-24 起，只存草稿）；云梭只续查切换前的旧 lane。
 //
 // 这是 publishJob 上的正交子状态机，不改变 FoodTalks 的 Stage：自有站允许原创和
 // 转载，外部平台只允许原创。两种送稿方式都先把精确 payload 与 intent 落盘再外调。
@@ -1099,9 +1099,11 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 	}
 	switch externalDistributionSummaryState(job) {
 	case publishExternalDistributionSucceeded:
-		return reviewCardOutcome{
-			toastType: "info", toastContent: "文章已同步至其他平台，无需重复操作",
-		}, true
+		text := "文章已同步至其他平台，无需重复操作"
+		if externalDistributionAllDraftSaved(job) {
+			text = "草稿都已存好，无需重复操作"
+		}
+		return reviewCardOutcome{toastType: "info", toastContent: text}, true
 	case publishExternalDistributionReconciliationRequired:
 		if externalDistributionAllQueued(job, time.Now()) {
 			return reviewCardOutcome{
@@ -1160,6 +1162,16 @@ func externalLaneNeedsNurturing(lane publishExternalLane) bool {
 }
 
 // externalDistributionAllQueued 待核对的平台全是云梭排队中。
+// externalDistributionAllDraftSaved 每个平台都只存了草稿（自己的分发服务不发布）。
+func externalDistributionAllDraftSaved(job publishJob) bool {
+	for _, lane := range job.ExternalDistributionLanes {
+		if lane.State != publishExternalDistributionDraftSaved {
+			return false
+		}
+	}
+	return len(job.ExternalDistributionLanes) > 0
+}
+
 func externalDistributionAllQueued(job publishJob, now time.Time) bool {
 	queued := false
 	for _, lane := range job.ExternalDistributionLanes {
