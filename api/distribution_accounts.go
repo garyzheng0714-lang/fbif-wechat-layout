@@ -14,10 +14,10 @@ import (
 )
 
 // 外发账号只在多维表格「平台账号」里，平台限制只在分发服务的平台文件里（2026-10-24 分发框架，
-// docs/adr/2026-10-24-distribution-framework.md）。排版工具不直接读表（两个系统只走 HTTP、不共享存储），
-// 经分发服务的 GET /v1/accounts、GET /v1/platforms 读，各存一份在数据目录：分发服务连不上时接着用这份，
-// 卡片、改稿页照常显示，推送在提交前失败。每个号的编号是表的 record_id，lane、改稿记录、卡片按钮、
-// 发给分发服务的 account 都用它。
+// docs/adr/2026-10-24-distribution-framework.md）。排版工具不直接读表（只走 HTTP、不共享存储）：
+// 账号经 FBIF 中台的配置包读（hub_bundle.go，2026-10-25 起），平台限制经分发服务的 GET /v1/platforms 读，
+// 各存一份在数据目录：连不上时接着用这份，卡片、改稿页照常显示，推送在提交前失败。每个号的编号是表的
+// record_id，lane、改稿记录、卡片按钮、发给分发服务的 account 都用它。
 
 const (
 	externalAccountsFile     = "distribution-accounts.json"
@@ -68,24 +68,25 @@ var externalAccounts = &distributionCache[externalAccount]{
 	what: "外发账号（多维表格「平台账号」）", key: "accounts", validate: validateExternalAccounts,
 }
 
-// startDistributionDirectory 先读本地那两份（没有就当场向分发服务取一次），趁任务恢复、后台 worker、HTTP 都还没起来
-// 就把账号与平台限制备好，之后每 5 分钟取一次。候选部署暂停态也照常取：只写这两份缓存，不碰任务。
+// startDistributionDirectory 先读本地那两份（没有就当场取一次），趁任务恢复、后台 worker、HTTP 都还没起来
+// 就把账号与平台限制备好，之后账号每分钟问一次中台（没变回 304），平台限制每 5 分钟问一次分发服务。
+// 候选部署暂停态也照常取：只写这两份缓存，不碰任务。
 func startDistributionDirectory(jobsPath string) {
 	dir := filepath.Dir(jobsPath)
-	externalAccounts.setSource(filepath.Join(dir, externalAccountsFile), fetchDistributionAccounts)
+	externalAccounts.setSource(filepath.Join(dir, externalAccountsFile), fetchExternalAccounts)
 	distributionPlatforms.setSource(filepath.Join(dir, platformsFile), fetchDistributionPlatforms)
 	externalAccounts.prime()
 	distributionPlatforms.prime()
-	go func() {
+	refreshEvery := func(every time.Duration, what string, refresh func(context.Context) error) {
 		for {
-			time.Sleep(distributionRefreshEvery)
-			for _, refresh := range []func(context.Context) error{externalAccounts.refresh, distributionPlatforms.refresh} {
-				if err := refresh(context.Background()); err != nil {
-					log.Printf("publish: 向分发服务取数失败，接着用上次的：%v", err)
-				}
+			time.Sleep(every)
+			if err := refresh(context.Background()); err != nil {
+				log.Printf("publish: 取%s失败，接着用上次的：%v", what, err)
 			}
 		}
-	}()
+	}
+	go refreshEvery(hubRefreshEvery, externalAccounts.what, externalAccounts.refresh)
+	go refreshEvery(distributionRefreshEvery, distributionPlatforms.what, distributionPlatforms.refresh)
 }
 
 func (d *distributionCache[T]) setSource(path string, fetch func(context.Context) ([]T, error)) {
@@ -94,7 +95,7 @@ func (d *distributionCache[T]) setSource(path string, fetch func(context.Context
 	d.mu.Unlock()
 }
 
-// prime 启动时：先读本地那份，没有或读坏了就当场向分发服务取一次（最多 10 秒）。
+// prime 启动时：先读本地那份，没有或读坏了就当场取一次（最多 10 秒）。
 func (d *distributionCache[T]) prime() {
 	if err := d.loadFile(); err != nil {
 		log.Printf("publish: 读不到本地的%s（%s）：%v", d.what, d.path, err)
@@ -102,7 +103,7 @@ func (d *distributionCache[T]) prime() {
 	if _, err := d.snapshot(); err != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := d.refresh(ctx); err != nil {
-			log.Printf("publish: 启动时向分发服务取%s失败：%v", d.what, err)
+			log.Printf("publish: 启动时取%s失败：%v", d.what, err)
 		}
 		cancel()
 	}
@@ -172,7 +173,7 @@ func (d *distributionCache[T]) refresh(ctx context.Context) error {
 // 明确给了空数组才算没有。
 func (d *distributionCache[T]) accept(items []T) error {
 	if items == nil {
-		return fmt.Errorf("分发服务给的%s缺「%s」这一项", d.what, d.key)
+		return fmt.Errorf("取到的%s缺「%s」这一项", d.what, d.key)
 	}
 	return d.validate(items)
 }
@@ -199,17 +200,17 @@ func validateExternalAccounts(accounts []externalAccount) error {
 	seen := map[string]bool{}
 	for i, account := range accounts {
 		if !validExternalAccountID(account.ID) || strings.TrimSpace(account.Platform) == "" {
-			return fmt.Errorf("分发服务返回的第 %d 个账号缺编号或平台", i+1)
+			return fmt.Errorf("取到的第 %d 个账号缺编号或平台", i+1)
 		}
 		if seen[account.ID] {
-			return fmt.Errorf("分发服务返回了重复的账号编号 %s", account.ID)
+			return fmt.Errorf("取到了重复的账号编号 %s", account.ID)
 		}
 		seen[account.ID] = true
 	}
 	return nil
 }
 
-// validExternalAccountID 与分发服务的账号编号同一口径（表的 record_id；没配表时是平台 id）。
+// validExternalAccountID 账号编号是表的 record_id。
 func validExternalAccountID(id string) bool {
 	if id == "" || len(id) > 64 {
 		return false
@@ -300,16 +301,6 @@ func (c externalTargets) autoTargets() []externalAccount {
 		}
 	}
 	return out
-}
-
-func fetchDistributionAccounts(ctx context.Context) ([]externalAccount, error) {
-	cfg, err := loadDistributionRobotConfig()
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	return newDistributionRobotClient(cfg).Accounts(ctx)
 }
 
 func fetchDistributionPlatforms(ctx context.Context) ([]distributionPlatformInfo, error) {
