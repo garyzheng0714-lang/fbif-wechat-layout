@@ -68,7 +68,7 @@
         "FEISHU_VERIFICATION_TOKEN": { "required": false, "secret": true },
         "FEISHU_REVIEWER_OPEN_IDS": { "required": true, "secret": false },
         "FEISHU_REVIEWER_ALLOW_CHAT_MEMBERS": { "required": false, "secret": false },
-        "MIMO_API_KEY": { "required": true, "secret": true },
+        "MIMO_API_KEY": { "required": false, "secret": true },
         "MIMO_BASE_URL": { "required": false, "secret": false },
         "MIMO_PRO_MODEL": { "required": false, "secret": false },
         "MIMO_FLASH_MODEL": { "required": false, "secret": false },

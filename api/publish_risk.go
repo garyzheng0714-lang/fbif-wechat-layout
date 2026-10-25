@@ -170,8 +170,8 @@ func buildRiskUserInput(job publishJob, now time.Time) (bodyText, userText strin
 // 高价值把关（2026-10-07 用户裁定 Pro 承担高价值任务）。返回的 Raw 仅在解析失败时供
 // fallback 留痕，成功结果不保存整段模型响应。
 func aiAssessPublishRisk(ctx context.Context, job publishJob) (publishRiskAssessment, error) {
-	if !aiConfigured() {
-		return publishRiskAssessment{}, errAIKeyMissing
+	if _, _, err := aiCredential(ctx); err != nil {
+		return publishRiskAssessment{}, err
 	}
 	bodyText, userText := buildRiskUserInput(job, time.Now())
 	text, err := aiResponsesCall(ctx, aiModel(aiTierPro), publishRiskSystemPrompt(),

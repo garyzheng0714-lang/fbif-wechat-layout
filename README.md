@@ -305,12 +305,12 @@ curl http://127.0.0.1:9000/api/health
 | `FEISHU_CALLBACK_MODE` | 必须显式为 `websocket` 或 `webhook`；推荐生产使用 `websocket`，此时公网 Webhook 固定返回 404；缺失/非法时 readiness 失败 |
 | `FEISHU_VERIFICATION_TOKEN` | Webhook 回调来源校验；长连接模式不使用 |
 | `FEISHU_REVIEWER_OPEN_IDS` | 可执行审核的飞书 `open_id` 白名单，逗号分隔。运行时允许“空白名单 + 群成员模式 + 当前审核群”授权卡片操作，HTTP 审核仍必须命中白名单；但当前 env schema 把该变量列为 required，空值会在部署预检直接失败。因此生产配置仍须非空，schema 与运行时授权口径尚待收敛 |
-| `MIMO_API_KEY` / `MIMO_BASE_URL` | AI 元数据预填（看图选封面）与发布风险检查，走 Xiaomi MiMo Responses 接口；缺 Key 时 readiness 报 `enrich_mode=fallback`，预填走规则兜底、风险结论 fail-safe 降级为 `warning` |
+| `MIMO_API_KEY` / `MIMO_BASE_URL` | AI 元数据预填（看图选封面）与发布风险检查，走 Xiaomi MiMo Responses 接口。生产留空：配了 `HUB_BUNDLE_URL` 就只用中台密钥端点发的 `xiaomi-mimo`（`api/hub_secrets.go`，只放内存、只发往它绑定的地址加 `/v1`、不跟跳转，中台连不上最多沿用 1 小时），这两个变量不再读；没接中台的本机开发才填。拿不到密钥时 readiness 报 `enrich_mode=fallback`，预填走规则兜底、风险结论 fail-safe 降级为 `warning` |
 | `MIMO_PRO_MODEL` / `MIMO_FLASH_MODEL` | 档位模型名，留空即 `mimo-v2.6-pro` / `mimo-v2.6-flash`。分工（2026-10-07 用户裁定）：看图（预填选封面）与翻译等批量任务用 Flash，风险检查等高价值任务用 Pro |
 | `ARK_*` | 旧豆包/DeepSeek 配置，已不读取，仅为旧 `publish.env` 兼容保留 |
 | `SITE_OWN_ACCOUNTS` | 自有账号清单，用于代码侧确定原创 / 转载；留空使用内置清单 |
-| `DISTRIBUTION_API_URL` / `DISTRIBUTION_API_TOKEN` | 自己的分发服务（B 机，经 SSH 通道在 A 本机访问）：平台限制从它读，头条号、百家号经它存草稿 |
-| `HUB_BUNDLE_URL` / `HUB_KEY` | FBIF 中台（B 机上的 One-Api 第二实例，经 SSH 通道在 A 本机 `127.0.0.1:13199` 访问，One-Api `docs/hub/`）：外发账号从它的配置包读；钥匙只授 `config.bundle.layout` |
+| `DISTRIBUTION_API_URL` / `DISTRIBUTION_API_TOKEN` | 自己的分发服务（内部工具服务器，经 SSH 通道在主力服务器本机访问）：平台限制从它读，头条号、百家号经它存草稿 |
+| `HUB_BUNDLE_URL` / `HUB_KEY` | FBIF 中台（内部工具服务器上的 One-Api 第二实例，经 SSH 通道在主力服务器本机 `127.0.0.1:13199` 访问，One-Api `docs/hub/`）：外发账号从它的配置包读，MiMo 密钥从它的密钥端点取；钥匙授 `config.bundle.layout`、`config.secrets.layout` |
 | `LAYOUT_MONITOR_URL` / `FEED_MONITOR_URL` / `OFFICIAL_MONITOR_URL` | 旧 watchdog 迁移后的兼容键；本服务不读取、不使用它们发探针，只为旧 `publish.env` 过渡保留 |
 
 环境变量的完整机器可读合同在 `deploy/config/env-schema.json`，三份无密钥示例分别对应流水线 API env、服务器 `publish.env` 和 renderer env。部署会在改写 live 路径前检查未知键、重复键、必填空值和 schema 版本；验证器只输出变量名，不输出值。

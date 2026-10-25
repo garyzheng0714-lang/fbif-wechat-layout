@@ -2,7 +2,7 @@ package main
 
 // hub_bundle.go — 从 FBIF 中台读排版工具的配置包（GET /api/config/bundle/layout，One-Api 仓库 src/hub.ts）。
 //
-// 中台在内部工具服务器上，A 机经 SSH 通道在本机 127.0.0.1:13199 访问它（One-Api docs/hub/tools/tunnel-up.sh）。
+// 中台在内部工具服务器上，主力服务器经 SSH 通道在本机 127.0.0.1:13199 访问它（One-Api docs/hub/tools/tunnel-up.sh）。
 // 包里只有「平台账号」的几列，登录账号、密码不在包里。每 60 秒带上一版的 ETag 问一次，没变中台回 304；
 // 取到的账号照旧过 distributionCache 的校验、写进 distribution-accounts.json，中台连不上就用那一份。
 

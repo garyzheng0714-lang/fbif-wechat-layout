@@ -47,7 +47,8 @@ var errAIKeyMissing = errors.New(mimoAPIKeyEnv + " 未配置")
 
 // aiHTTPClient 多模态推理慢（要看图、要思考长文）：2026-07-10 评测实测 120s 会让
 // 40% 的长文超时，放宽到 300s——调用方都在异步阶段，慢无妨；测试桩即回不受影响。
-var aiHTTPClient = &http.Client{Timeout: 300 * time.Second}
+// 不跟跳转：密钥只发往它绑定的地址（hub_secrets.go）。
+var aiHTTPClient = &http.Client{Timeout: 300 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 
 // aiRetryDelays 429（限流，账号级 100 RPM）与 500/503（服务端过载）按 MiMo 错误码
 // 文档做指数退避；其余错误（400/401/402/403/404/421）重试无意义，直接返回。
@@ -55,7 +56,31 @@ var aiRetryDelays = []time.Duration{2 * time.Second, 6 * time.Second}
 
 func aiAPIKey() string { return strings.TrimSpace(os.Getenv(mimoAPIKeyEnv)) }
 
-func aiConfigured() bool { return aiAPIKey() != "" }
+// aiCredential 这次调用用的密钥和接口根地址：接了中台只用中台发的（hub_secrets.go），没接读 env。
+func aiCredential(ctx context.Context) (key, baseURL string, err error) {
+	hub, on, err := hubSecrets()
+	if on {
+		if err != nil {
+			return "", "", err
+		}
+		cred := hub.Credential(ctx)
+		if cred == nil {
+			return "", "", errHubMimoMissing
+		}
+		return cred.key, cred.origin + "/v1", nil
+	}
+	if key = aiAPIKey(); key == "" {
+		return "", "", errAIKeyMissing
+	}
+	return key, aiBaseURL(), nil
+}
+
+func aiConfigured() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, _, err := aiCredential(ctx)
+	return err == nil
+}
 
 func aiModel(tier aiTier) string {
 	envKey, fallback := mimoProModelEnv, defaultMimoProModel
@@ -99,9 +124,9 @@ func aiRetryable(err error) bool {
 // aiResponsesCall Responses API 调用内核：payload 组装、HTTP、输出文本提取。
 // userContent 允许含 input_image（多模态）。
 func aiResponsesCall(ctx context.Context, model, systemPrompt string, userContent []map[string]any) (string, error) {
-	apiKey := aiAPIKey()
-	if apiKey == "" {
-		return "", errAIKeyMissing
+	apiKey, baseURL, err := aiCredential(ctx)
+	if err != nil {
+		return "", err
 	}
 	payload, err := json.Marshal(map[string]any{
 		"model": model,
@@ -114,7 +139,7 @@ func aiResponsesCall(ctx context.Context, model, systemPrompt string, userConten
 		return "", fmt.Errorf("序列化 MiMo 请求失败: %w", err)
 	}
 	for attempt := 0; ; attempt++ {
-		text, err := aiResponsesOnce(ctx, apiKey, payload)
+		text, err := aiResponsesOnce(ctx, apiKey, baseURL, payload)
 		if err == nil || !aiRetryable(err) || attempt >= len(aiRetryDelays) {
 			return text, err
 		}
@@ -126,8 +151,8 @@ func aiResponsesCall(ctx context.Context, model, systemPrompt string, userConten
 	}
 }
 
-func aiResponsesOnce(ctx context.Context, apiKey string, payload []byte) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, aiBaseURL()+mimoResponsesPath, bytes.NewReader(payload))
+func aiResponsesOnce(ctx context.Context, apiKey, baseURL string, payload []byte) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+mimoResponsesPath, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("构造 MiMo 请求失败: %w", err)
 	}

@@ -56,8 +56,8 @@ const enrichMaxTags = 3
 // 正文 + 候选图 input_image），要求严格 JSON 输出并容错解析。失败返回 error，由
 // stageEnrich 统一走规则兜底——本函数自身不兜底，职责单一。
 func aiEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, error) {
-	if !aiConfigured() {
-		return publishEnrichment{}, errAIKeyMissing
+	if _, _, err := aiCredential(ctx); err != nil {
+		return publishEnrichment{}, err
 	}
 	var images []string
 	if strings.TrimSpace(job.SourceCoverURL) == "" {
