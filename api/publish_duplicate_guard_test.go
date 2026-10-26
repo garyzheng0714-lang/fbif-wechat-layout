@@ -75,10 +75,29 @@ func TestReviewPendingCardShowsDuplicateWarning(t *testing.T) {
 	if !strings.Contains(card, "同题防重") || !strings.Contains(card, "62773") || !strings.Contains(card, "手工发布优先") {
 		t.Fatalf("卡片应标红同题提醒：%s", card[:400])
 	}
+	if !strings.Contains(card, "待审核·重复发布") {
+		t.Fatalf("同题命中时头部状态应写「待审核·重复发布」：%s", card[:400])
+	}
 	job.SiteDuplicateNewsID = 0
 	raw, _ = json.Marshal(buildReviewPendingCard(job, ""))
-	if strings.Contains(string(raw), "同题防重") {
+	if strings.Contains(string(raw), "同题防重") || strings.Contains(string(raw), "重复发布") {
 		t.Fatalf("无重复时不得出现提醒")
+	}
+}
+
+// 聚合卡每篇标题前的状态标签：同题命中写「待审核·重复发布」（2026-10-26 用户裁定）。
+func TestReviewBatchCardMarksDuplicatePending(t *testing.T) {
+	dup := reviewCardTestJob(publishStageAwaitingReview)
+	dup.ID = 315
+	dup.SiteDuplicateNewsID = 63282
+	clean := reviewCardTestJob(publishStageAwaitingReview)
+	clean.ID = 316
+	body := cardJSON(t, buildReviewBatchCard([]publishJob{dup, clean}))
+	tag := func(text string) string {
+		return `\u003ctext_tag color='orange'\u003e` + text + `\u003c/text_tag\u003e`
+	}
+	if strings.Count(body, tag("待审核·重复发布")) != 1 || strings.Count(body, tag("待审核")) != 1 {
+		t.Fatalf("应只有同题那篇标「待审核·重复发布」、另一篇仍是「待审核」: %s", body)
 	}
 }
 

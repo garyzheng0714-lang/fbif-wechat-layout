@@ -319,7 +319,7 @@ func reviewBatchTagPills(tags []string) string {
 func reviewBatchStatus(job publishJob) (string, string) {
 	switch job.Stage {
 	case publishStageAwaitingReview:
-		return "待审核", "orange"
+		return reviewPendingStatusText(job), "orange"
 	case publishStagePublicizing, publishStagePublicizingUpdating:
 		return "发布中", "blue"
 	case publishStagePublished:
@@ -623,7 +623,7 @@ func buildReviewPendingCard(job publishJob, coverImgKey string) map[string]any {
 	elements = append(elements, buttons)
 	headerTemplate := "blue"
 	headerTagColor := "yellow"
-	headerTagText := "待审核"
+	headerTagText := reviewPendingStatusText(job)
 	if job.RiskLevel == publishRiskBlock {
 		headerTemplate = "red"
 		headerTagColor = "red"
@@ -1076,13 +1076,15 @@ func reviewCardSafeURL(raw string) string {
 	).Replace(safe)
 }
 
-// reviewCardRiskHeadlineBlock 审核卡首屏唯一的检查结论（2026-08-08 用户裁定）。
-//
-// 首屏只放**已证实的实质性问题**：一句话结论（≤100 字）+ 至多 3 条逐条指认。
-// 转载授权、证明不了的存疑项、排版说明这些每篇都长一个样的内容全部沉到折叠的
-// 完整检查报告里——审核人扫一眼就要下判断，重复内容占满首屏等于什么都没说。
-// 没有已证实问题时这里只剩一行小字，明确区分「干净」与「有几条待核」，
-// 绝不因为模型没标 certainty 就谎称检查通过。
+// reviewPendingStatusText 待审核状态字：站上已有同名已发布稿时写明「重复发布」
+// （2026-10-26 用户裁定），审核人在标题行就能看到，不用翻到风险核查。
+func reviewPendingStatusText(job publishJob) string {
+	if job.SiteDuplicateNewsID > 0 {
+		return "待审核·重复发布"
+	}
+	return "待审核"
+}
+
 // reviewCardDuplicateBlock 同题防重提醒（2026-08-14 用户裁定：手工发布优先）。
 // 站上已有同名已发布稿时标红——审核人此时点「通过」，发布阶段也会被硬闸拦下，
 // 这里提前把原因摆在眼前，别让人白点一次。
@@ -1099,6 +1101,13 @@ func reviewCardDuplicateBlock(job publishJob) map[string]any {
 	}
 }
 
+// reviewCardRiskHeadlineBlock 审核卡首屏唯一的检查结论（2026-08-08 用户裁定）。
+//
+// 首屏只放**已证实的实质性问题**：一句话结论（≤100 字）+ 至多 3 条逐条指认。
+// 转载授权、证明不了的存疑项、排版说明这些每篇都长一个样的内容全部沉到折叠的
+// 完整检查报告里——审核人扫一眼就要下判断，重复内容占满首屏等于什么都没说。
+// 没有已证实问题时这里只剩一行小字，明确区分「干净」与「有几条待核」，
+// 绝不因为模型没标 certainty 就谎称检查通过。
 func reviewCardRiskHeadlineBlock(job publishJob) map[string]any {
 	if strings.TrimSpace(job.RiskLevel) == "" && strings.TrimSpace(job.RiskHeadline) == "" {
 		return nil
