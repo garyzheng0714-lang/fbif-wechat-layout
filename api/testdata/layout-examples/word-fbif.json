@@ -1,0 +1,32 @@
+{
+  "account": {
+    "id": "fbif",
+    "name": "FBIF食品饮料创新",
+    "paste_into": "微信公众号后台编辑器"
+  },
+  "title": "（占位）例子标题",
+  "summary": "",
+  "html": "<section><p>（占位：排版程序上线后用真回答重新生成，见 api/layout_api_doc_test.go 的 TestLayoutAPIExamplesRegenerate）</p></section>",
+  "repost": false,
+  "footer": true,
+  "input": {
+    "kind": "word",
+    "file_name": "稿子.docx"
+  },
+  "images": [],
+  "stats": {
+    "images": 0,
+    "images_mirrored": 0,
+    "headings": 0,
+    "html_bytes": 155
+  },
+  "rule": {
+    "preset_id": "（占位）",
+    "revision": 0,
+    "config_hash": "（占位）"
+  },
+  "build": "（占位）",
+  "output_hash": "sha256:8f7a23b6259e4df25274bbeea6179393665f22fdd1cb68e4aea5edb008b72754",
+  "warnings": [],
+  "request_id": "lr_Q2xhdWRlRXhh"
+}

@@ -247,6 +247,10 @@ jobs:
             --header 'Content-Type: application/json' --data '{}' \
             "${SITE_ORIGIN}/api/feishu/card-callback")
           [ "$feishu_status" = "404" ]
+          # 排版接口的说明书和 OpenAPI 不用钥匙：验收新版 Go 路由经 Caddy 通到公网（排版程序 19098 的健康在事务里查过）。
+          layout_openapi_json=$(curl --silent --show-error --fail --retry 3 --retry-delay 1 --retry-all-errors \
+            "${SITE_ORIGIN}/api/layout/v1/openapi.json")
+          echo "$layout_openapi_json" | jq -e '.openapi == "3.1.0" and (.paths | has("/api/layout/v1/render"))' >/dev/null
 
           # 管理员 readiness 要的服务令牌只在服务器的中台文件里：经 SSH 让事务脚本在本机读令牌、
           # 调 127.0.0.1:9001，标准输出只有响应 JSON。

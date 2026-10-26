@@ -497,12 +497,149 @@ async function buildFooterWithMoreArticles(baseFooterHtml, opts = {}) {
   // v2 双预设已按 presetId 分原创/转载，跳过旧锚点替换（codex review #4，互斥）。isV2 由调用方局部传入。
   const base = opts.isV2 ? baseFooterHtml : applyRepostTransform(baseFooterHtml, isRepost);
   const transformed = normalizeWechatRichHtml(base);
-  const cards = loadMoreArticlesCards();
+  // opts.cards：接口排版传空列表（卡片要编辑挑、要画布合成）；网页一律读本篇存的卡片。
+  const ownCards = !Array.isArray(opts.cards);
+  const cards = ownCards ? loadMoreArticlesCards() : opts.cards;
   const cardsForFooter = opts.copySafe
     ? await Promise.all(cards.map(copySafeMoreArticleCardForFooter))
     : await Promise.all(cards.map(async c => ({ ...c, final_url: await compositePreviewDataUrl(c) })));
-  if (opts.copySafe && (!opts.canCommitCards || opts.canCommitCards())) saveMoreArticlesCards(cards);
+  if (ownCards && opts.copySafe && (!opts.canCommitCards || opts.canCommitCards())) saveMoreArticlesCards(cards);
   return normalizeWechatRichHtml(mergeMoreArticlesIntoFooter(transformed, cardsForFooter));
+}
+
+function currentRuntimeConfig() {
+  const cfg = (window._activeConfig && window._activeConfig.config) || _activeConfig || {};
+  return cfg && cfg.config && cfg.config.modules ? cfg.config : cfg;
+}
+
+function hasManagedBottomBlocksFooter() {
+  const cfg = currentRuntimeConfig();
+  const bb = cfg && cfg.modules && cfg.modules.bottom_blocks;
+  return !!(bb && typeof bb === 'object' && bb.enabled !== false);
+}
+
+// footerChecked：页面隐藏的 #footerEnabled 勾选框（syncWorkflowControls 按规则 footer_enabled 设）。
+function footerEnabledFor(footerVisibilityOverride, footerChecked) {
+  const override = normalizeFooterVisibilityOverride(footerVisibilityOverride);
+  if (override && visibilityOverrideHides(override.enabled)) return false;
+  if (override && visibilityOverrideShows(override.enabled)) return true;
+  return hasManagedBottomBlocksFooter() || !!footerChecked;
+}
+
+function renderArticleInputWith(template, input) {
+  if (!input) throw new Error('没有可渲染的文章输入');
+  const isRepost = !!input.isRepost;
+  if (input.kind === 'docx') {
+    return template.processDocx({
+      ...input.payload,
+      isRepost,
+      config: _activeConfig,
+      articleArtifactOverride: input.articleArtifactOverride,
+      articleFooterProfileOverride: input.articleFooterProfileOverride,
+    });
+  }
+  if (input.kind === 'md') {
+    if (typeof template.processMd !== 'function') throw new Error('此模板不支持该文件格式');
+    return template.processMd(input.payload, {
+      isRepost,
+      config: _activeConfig,
+      articleArtifactOverride: input.articleArtifactOverride,
+      articleFooterProfileOverride: input.articleFooterProfileOverride,
+    });
+  }
+  if (input.kind === 'blocks') {
+    if (typeof template.processBlocks !== 'function') throw new Error('当前模板不支持 blocks 路径');
+    return template.processBlocks(input.payload, {
+      isRepost,
+      config: _activeConfig,
+      articleArtifactOverride: input.articleArtifactOverride,
+      articleFooterProfileOverride: input.articleFooterProfileOverride,
+    });
+  }
+  throw new Error('未知文章输入类型');
+}
+
+function copyBodyHasMeaningfulContent(html) {
+  const source = String(html || '').trim();
+  if (!source) return false;
+  if (/<img\b[^>]*\bsrc\s*=\s*(["'])[^"']+\1/i.test(source) || /<table\b/i.test(source)) return true;
+  const visibleText = source
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&(nbsp|ensp|emsp|#160|#xa0);/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return visibleText.length > 0;
+}
+
+// 复制层内联：主题 CSS 写进 style 属性（公众号、FoodTalks 后台都不认 class），再按渠道归一化。
+function inlineCopyHtml(sourceArtifact, themeCSS, config) {
+  return normalizeRich(processForCopy(
+    sourceArtifact,
+    themeCSS,
+    config,
+    { preserveClasses: isWebsiteTemplate() },
+  ));
+}
+
+// 公众号 ProseMirror 在粘贴 HTML 末尾若是 <img>/<section> 而无段落节点，
+// 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次
+// 都要手动删的"二维码图下方空行"。在这里附一个零高度 <p>，让编辑器认
+// 为尾部已有可定位段，不再追加可见空段。
+function withPasteTail(html) {
+  if (isWebsiteTemplate()) return html;
+  return html + '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
+}
+
+// 接口排版（render-service/layout.mjs）：与网页「导入 → 预览 → 点复制」同一条链，函数都是网页在用的那几个——
+// 模板排正文、loadBaseFooterHtml 出底部、站内图转成图片数据、复制层内联。网页才有的不做：预览、本篇手改、
+// 转存图床（Go 做）、更多文章（cards 恒为空；要藏掉整块由调用方传 footerVisibilityOverride）。
+// 会改 _activeTemplate/_isRepost 这两个模块级状态，只给 Node 里逐篇串行调用。
+export async function layoutArticleForCopy(template, input, {
+  autofillAuthorCard = false,
+  footerVisibilityOverride,
+  footerChecked = false,
+} = {}) {
+  _activeTemplate = template;
+  const isRepost = !!input.isRepost;
+  _isRepost = isRepost;
+  const bodyOnly = !!input.bodyOnly;
+  const result = await renderArticleInputWith(template, input);
+  const articleMeta = result.articleMeta || {};
+  const visibility = bodyOnly ? undefined : normalizeFooterVisibilityOverride(footerVisibilityOverride);
+  let footerCopy = '';
+  if (!bodyOnly) {
+    const bottomBlocksOverride = autofillAuthorCard
+      ? resolveAuthorCardOverrideForArticle(result).override
+      : readCurrentBottomBlocksOverrideForArticle().override;
+    const { html: baseFooterHtml, isV2 } = await loadBaseFooterHtml({
+      isRepost,
+      bottomBlocksOverride,
+      articleMeta,
+      footerVisibilityOverride: visibility,
+    });
+    footerCopy = await buildFooterWithMoreArticles(baseFooterHtml, { isRepost, isV2, copySafe: true, cards: [] });
+  }
+  // showPreview 先归一成预览层、再归一一次成复制层，这里照样两次。
+  const articleCopy = normalizeRich(normalizeRich(result.lines.join('\n')));
+  footerCopy = bodyOnly ? '' : normalizeRich(footerCopy);
+  const materialized = await materializeLazyImages(articleCopy, footerCopy);
+  const footer = !bodyOnly && footerEnabledFor(visibility, footerChecked);
+  const sourceArtifact = materialized.articleCopy + '\n' + (footer ? materialized.footerCopy : '');
+  const config = (window._activeConfig && window._activeConfig.config) || {};
+  const html = withPasteTail(inlineCopyHtml(sourceArtifact, await _themeCSSReady, config));
+  return {
+    html,
+    title: result.title || input.title || '',
+    footer,
+    isRepost,
+    articleMeta,
+    imageCount: result.imgN || 0,
+    headingCount: result.headingN || 0,
+    hasBody: copyBodyHasMeaningfulContent(materialized.articleCopy),
+    unreadableImages: materialized.failedSrcs || [],
+  };
 }
 
 // ---- App Initialization ----
@@ -672,39 +809,24 @@ export function initApp(initialTemplate) {
     return template.formats.some(fmt => f.name.toLowerCase().endsWith(fmt));
   }
 
-  function currentRuntimeConfig() {
-    const cfg = (window._activeConfig && window._activeConfig.config) || _activeConfig || {};
-    return cfg && cfg.config && cfg.config.modules ? cfg.config : cfg;
-  }
-
-  function hasManagedBottomBlocksFooter() {
-    const cfg = currentRuntimeConfig();
-    const bb = cfg && cfg.modules && cfg.modules.bottom_blocks;
-    return !!(bb && typeof bb === 'object' && bb.enabled !== false);
+  function footerCheckboxChecked() {
+    const footerEl = document.getElementById('footerEnabled');
+    return !!(footerEl && footerEl.checked);
   }
 
   function isFooterEnabledForCurrentArticle() {
     if (_articleBodyOnly) return false;
-    const footerVisibilityOverride = normalizeFooterVisibilityOverride(
+    return footerEnabledFor(
       _articleSession && Object.prototype.hasOwnProperty.call(_articleSession, 'footerVisibilityOverride')
         ? _articleSession.footerVisibilityOverride
-        : window._footerVisibilityOverride
+        : window._footerVisibilityOverride,
+      footerCheckboxChecked(),
     );
-    if (footerVisibilityOverride && visibilityOverrideHides(footerVisibilityOverride.enabled)) return false;
-    if (footerVisibilityOverride && visibilityOverrideShows(footerVisibilityOverride.enabled)) return true;
-    const footerEl = document.getElementById('footerEnabled');
-    return hasManagedBottomBlocksFooter() || !!(footerEl && footerEl.checked);
   }
 
   function isFooterEnabledForSession(session) {
     if (!session || session.bodyOnly) return false;
-    const footerVisibilityOverride = normalizeFooterVisibilityOverride(
-      session.footerVisibilityOverride
-    );
-    if (footerVisibilityOverride && visibilityOverrideHides(footerVisibilityOverride.enabled)) return false;
-    if (footerVisibilityOverride && visibilityOverrideShows(footerVisibilityOverride.enabled)) return true;
-    const footerEl = document.getElementById('footerEnabled');
-    return hasManagedBottomBlocksFooter() || !!(footerEl && footerEl.checked);
+    return footerEnabledFor(session.footerVisibilityOverride, footerCheckboxChecked());
   }
 
   function renderPreviewFooter(contentArea, footerHtml) {
@@ -762,36 +884,7 @@ export function initApp(initialTemplate) {
   }
 
   async function renderArticleInput(input) {
-    if (!input) throw new Error('没有可渲染的文章输入');
-    const isRepost = !!input.isRepost;
-    if (input.kind === 'docx') {
-      return template.processDocx({
-        ...input.payload,
-        isRepost,
-        config: _activeConfig,
-        articleArtifactOverride: input.articleArtifactOverride,
-        articleFooterProfileOverride: input.articleFooterProfileOverride,
-      });
-    }
-    if (input.kind === 'md') {
-      if (typeof template.processMd !== 'function') throw new Error('此模板不支持该文件格式');
-      return await template.processMd(input.payload, {
-        isRepost,
-        config: _activeConfig,
-        articleArtifactOverride: input.articleArtifactOverride,
-        articleFooterProfileOverride: input.articleFooterProfileOverride,
-      });
-    }
-    if (input.kind === 'blocks') {
-      if (typeof template.processBlocks !== 'function') throw new Error('当前模板不支持 blocks 路径');
-      return await template.processBlocks(input.payload, {
-        isRepost,
-        config: _activeConfig,
-        articleArtifactOverride: input.articleArtifactOverride,
-        articleFooterProfileOverride: input.articleFooterProfileOverride,
-      });
-    }
-    throw new Error('未知文章输入类型');
+    return renderArticleInputWith(template, input);
   }
 
   function formatRenderStats(result, elapsed) {
@@ -2246,20 +2339,6 @@ export function initApp(initialTemplate) {
   window.getConvLog = function() { return JSON.parse(JSON.stringify(_convLog)); };
 
   // ---- Copy (with CSS inlining) ----
-  function copyBodyHasMeaningfulContent(html) {
-    const source = String(html || '').trim();
-    if (!source) return false;
-    if (/<img\b[^>]*\bsrc\s*=\s*(["'])[^"']+\1/i.test(source) || /<table\b/i.test(source)) return true;
-    const visibleText = source
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&(nbsp|ensp|emsp|#160|#xa0);/gi, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return visibleText.length > 0;
-  }
-
   function copyButtonLabel(btn) {
     if (!btn) return '复制全文';
     const label = typeof btn.querySelector === 'function' ? btn.querySelector('[data-copy-label]') : null;
@@ -2323,19 +2402,12 @@ export function initApp(initialTemplate) {
     const config = (window._activeConfig && window._activeConfig.config) || {};
     const themeCSS = await _themeCSSReady;
     if (signal?.aborted) throw signal.reason || new DOMException('The operation was aborted', 'AbortError');
-    let html = normalizeRich(processForCopy(
-      sourceArtifact,
-      themeCSS,
-      config,
-      { preserveClasses: isWebsiteTemplate() },
-    ));
+    let html = inlineCopyHtml(sourceArtifact, themeCSS, config);
     const unsafeCopyRefs = findUnsafeCopyImageRefs(html, requiresWechatTransfer);
     if (unsafeCopyRefs.length > 0) {
       throw new Error(`仍有 ${unsafeCopyRefs.length} 张图片未准备为可复制版本，已保留当前预览，请重试`);
     }
-    if (!isWebsiteTemplate()) {
-      html += '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
-    }
+    html = withPasteTail(html);
     return {
       html,
       sourceHash: copyArtifactFingerprint(sourceArtifact),
@@ -2478,10 +2550,7 @@ export function initApp(initialTemplate) {
       html = processForCopy(html, themeCSS, config, { preserveClasses: isWebsiteTemplate() });
       html = normalizeRich(html);
 
-      // 公众号 ProseMirror 在粘贴 HTML 末尾若是 <img>/<section> 而无段落节点，
-      // 会自动追加一个标准高度的 <p><br></p> 作为光标占位段——这就是用户每次
-      // 都要手动删的"二维码图下方空行"。在这里附一个零高度 <p>，让编辑器认
-      // 为尾部已有可定位段，不再追加可见空段。
+      // 零高度光标段：见 withPasteTail。
       if (!isWebsiteTemplate()) {
         html += '<p style="margin:0;padding:0;line-height:0;font-size:0;min-height:0;height:0;"><br/></p>';
       }
@@ -2598,12 +2667,7 @@ export function initApp(initialTemplate) {
       return false;
     }
 
-    const html = normalizeRich(processForCopy(
-      sourceArtifact,
-      themeCSS,
-      config,
-      { preserveClasses: isWebsiteTemplate() },
-    ));
+    const html = inlineCopyHtml(sourceArtifact, themeCSS, config);
     const ok = await copyPlainTextToClipboard(html);
     if (copyAction.stale()) return false;
     _lastCopiedHtml = ok ? html : '';

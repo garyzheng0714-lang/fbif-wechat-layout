@@ -47,7 +47,8 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **微信草稿存活保护**：公众号复制层对更多文章卡片、微信图床属性、位图占位和异步回写做 T0 安全约束，防止内容粘贴后在“保存草稿”阶段被微信清洗掉。
 - **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
 - **飞书云文档导入走异步作业**：导出、剥图与图片镜像在服务端作业里完成，前端用 long-poll 拿真实阶段进度；正文图一次性批量镜像到 OSS。预览在离屏 staging 备齐并解码后整帧提交，导入期间旧文章保持可见。真实 10MB 级多图文档的生产耗时仍是未排期验收项，触发条件是下一次生产多图导入验收。
-- **程序化渲染**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 复用交互式编辑器的同一套解析、规则与渲染实现，支持 `fbif` 和 `ft-default`。
+- **排版接口**：`/api/layout/v1/*` 给公司内部系统和同事用，交链接、飞书文档、Word、HTML、Markdown 或文字加一个账号（5 个都行），拿回与网页点「复制」逐字一样的成品 HTML；每家一把 `flk_` 钥匙，名单在 FBIF 中台。只排版、不建发布单。说明书见 [docs/layout-api.md](docs/layout-api.md)，维护见 [docs/layout-api-maintenance.md](docs/layout-api-maintenance.md)。
+- **程序化渲染（旧）**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 给 Feed 用，支持 `fbif`、`ft-default`、`ft-series`，字节不动。
 - **受控发布流水线**：提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`。默认只有飞书卡片或管理员审核的 `approve` 能翻公开；管理后台「发布链路」打开自动发布后，新同步且风险为 `pass|warning` 的稿会由系统持久化 approve 后直接上线，群卡和下线按钮仍保留。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
 - **上游只交链接**：`site-sync` 与 `official-sync` 只接收链接、规则包和分类证据；正文、标题、来源、作者或封面一旦出现就显式 400。详细字段、状态码与幂等见 [发布接入契约](docs/publish-intake-contract.md)。
 - **审核卡与风险分层**：待审、已发布、已驳回、异常卡都保留封面、标题、标签、摘要和预览/原文入口。只有显式 `confirmed` 的实质性问题进首屏，其余待核提示收进完整报告；审核群只发卡片。`card-refresh` 可原位重建历史卡；任务已经使用 `ReviewCardMsgIDs` 多群映射时，切群后新群没有自己的 message id 就发新卡。只带 legacy `ReviewCardMsgID` 的旧任务仍可能回退更新旧群，是待修兼容风险。
@@ -229,6 +230,7 @@ curl http://127.0.0.1:9000/api/health
 | `DELETE` | `/api/rules/admin/presets/{id}` | 删除规则预设，需已登录且角色为管理员/超级管理员 |
 | `GET` | `/api/rules/admin/access-users` | 超级管理员读取已登录账号列表与后台角色 |
 | `PUT` | `/api/rules/admin/access-users/{id}` | 超级管理员授权/收回管理员角色；超级管理员只能通过 `RULE_SUPER_ADMIN_OPEN_IDS` 配置 |
+| `POST` | `/api/layout/v1/render` | 排版接口：交一篇、拿成品 HTML（或 202 + `poll_url`），需 `Authorization: Bearer flk_…`；`GET /api/layout/v1/operations/{id}` 取 202 的那篇；`GET /api/layout/v1/docs`、`/openapi.json` 是说明书，不用钥匙 |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
 | `POST` | `/api/publish/site-sync` | **只接收文章链接**：`url` + 可选 `rule_pack_id` + 分类证据。可选 `content_source_url` 只补「阅读原文」出处。带 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400（见下方红线）。机器调用需 `X-Publish-Sync-Token` 与普通图文正向分类证据、有效 classifier version |
@@ -284,7 +286,8 @@ curl http://127.0.0.1:9000/api/health
 | `FEISHU_LOGIN_SCOPES` / `AUTH_PASSWORD_USERS_B64` | 可选登录 scope 覆盖与本地密码账号种子；scope 必须保留 `offline_access`，账号种子只放秘密配置 |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
 | `RENDER_TOKEN` / `RENDER_SERVICE_URL` | 程序化排版 API 鉴权与 Node 渲染服务地址 |
-| `RENDER_PORT` / `RULES_API_ORIGIN` / `ASSET_ORIGIN` / `RENDER_BUILD_SHA` | renderer 的端口、规则 API、素材域名和可追溯构建 SHA；生产由流水线生成 `render-service.env` |
+| `RENDER_PORT` / `RULES_API_ORIGIN` / `ASSET_ORIGIN` / `RENDER_BUILD_SHA` | renderer 的端口、规则 API、素材域名和可追溯构建 SHA；生产由流水线生成 `render-service.env`（排版接口的 `fbif-render-layout` 读同一份，端口由单元固定 `LAYOUT_PORT=19098`） |
+| `LAYOUT_RENDER_URL` / `LAYOUT_IMAGE_HOSTS` | 可选。排版接口的排版程序地址（默认 `http://127.0.0.1:19098`）与成品里可原样留的 FBIF 自己图床（默认两个 OSS 桶加 `static.foodtalks.cn`） |
 | `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
 | `PUBLISH_SYNC_SERVICE_TOKEN` | `FoodTalks_Feed` 与 `fbif-wechat-article` 调用发布提交、紧凑状态和监控端点的独立服务令牌；不能访问完整任务、审核、重试、对账或规则管理接口 |
 | `FOODTALKS_FEED_BASE_URL` | 向 Feed 查转载原文；缺省 `https://feed.foodtalks.cn`；鉴权共用上面的同步令牌 |

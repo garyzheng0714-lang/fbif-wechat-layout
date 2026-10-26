@@ -21,6 +21,8 @@
         "WECHAT_UPLOAD_ENDPOINT": { "required": true, "secret": false },
         "RENDER_TOKEN": { "required": true, "secret": true },
         "RENDER_SERVICE_URL": { "required": true, "secret": false },
+        "LAYOUT_RENDER_URL": { "required": false, "secret": false },
+        "LAYOUT_IMAGE_HOSTS": { "required": false, "secret": false },
         "DEPLOYMENT_WRITES_PAUSED": { "required": true, "secret": false },
         "LIBREOFFICE_URL": { "required": false, "secret": false },
         "LIBREOFFICE_TOKEN": { "required": false, "secret": true },

@@ -171,11 +171,11 @@ test('engine.js: bottom_blocks 启用时不再被旧 footer_enabled 隐藏', asy
     'utf8'
   );
   assert.match(engine, /function\s+hasManagedBottomBlocksFooter/, 'engine 应识别托管底部区块');
-  assert.match(engine, /normalizeFooterVisibilityOverride\([\s\S]{0,220}_articleSession\.footerVisibilityOverride/, '统一 footer 开关必须读取当前文章的显隐覆盖');
-  assert.match(engine, /visibilityOverrideHides\(footerVisibilityOverride\.enabled\)[\s\S]{0,80}return false/, '本文隐藏底部区域时必须优先于 bottom_blocks 默认显示');
+  assert.match(engine, /footerEnabledFor\([\s\S]{0,220}_articleSession\.footerVisibilityOverride/, '统一 footer 开关必须读取当前文章的显隐覆盖');
+  assert.match(engine, /visibilityOverrideHides\(override\.enabled\)\) return false/, '本文隐藏底部区域时必须优先于 bottom_blocks 默认显示');
   assert.match(
     engine,
-    /return hasManagedBottomBlocksFooter\(\) \|\| !!\(footerEl && footerEl\.checked\)/,
+    /return hasManagedBottomBlocksFooter\(\) \|\| !!footerChecked/,
     'bottom_blocks 启用时应强制显示页脚区块'
   );
   assert.ok((engine.match(/isFooterEnabledForCurrentArticle\(\)/g) || []).length >= 3, '预览更新/更多文章/复制路径都要用统一 footer 开关');
@@ -250,11 +250,11 @@ test('site.html: 注入 engine 的 config 并入扁平参数（loadConfig）', a
   assert.match(src, /function\s+syncEngineConfig/, 'site.html 应有 syncEngineConfig');
   const fn = src.match(/function\s+syncEngineConfig[\s\S]+?\n\}/);
   assert.ok(fn, '找不到 syncEngineConfig 函数体');
-  assert.match(fn[0], /\.\.\.\s*flat\b|\.\.\.\s*loadConfig\(\)/, 'syncEngineConfig 必须 spread loadConfig() 的扁平字段');
-  assert.match(fn[0], /serverBehavior\s*=\s*\(window\._activeConfig\s*&&\s*window\._activeConfig\.behavior\)\s*\|\|\s*\{\}/,
-    'site.html 必须从 channel-aware applyActiveRuleConfig 取网站原始 behavior');
-  assert.match(fn[0], /behavior:\s*serverBehavior/,
-    'site.html 必须把 lists 与顶层正则原样传给 foodtalks-site 渲染器');
+  const shared = await readFile(new URL('../public/js/engine-config.js', import.meta.url), 'utf8');
+  assert.match(fn[0], /siteEngineConfig\(\{[\s\S]{0,40}flat:\s*loadConfig\(\)/, 'syncEngineConfig 必须把 loadConfig() 的扁平字段交给 siteEngineConfig');
+  assert.match(shared, /\.\.\.flat,\s*behavior:\s*behavior \|\| \{\}/, 'siteEngineConfig 必须 spread 扁平字段并带上 behavior');
+  assert.match(fn[0], /behavior:\s*\(window\._activeConfig\s*&&\s*window\._activeConfig\.behavior\)\s*\|\|\s*\{\}/,
+    'site.html 必须从 channel-aware applyActiveRuleConfig 取网站原始 behavior，把 lists 与顶层正则原样传给 foodtalks-site 渲染器');
   assert.match(fn[0], /setActiveConfig/, 'syncEngineConfig 必须调 setActiveConfig');
 });
 
@@ -337,11 +337,11 @@ test('site.html: 页脚侧栏从服务端 segment_order/presets 动态渲染并�
   assert.doesNotMatch(src, /<button type="button" class="ft-footer-preset" data-preset="fbif-original">FBIF原创<\/button>/, '不应在 HTML 静态写死预设按钮');
 });
 
-test('site.html: 本篇底部区域开关必须同步到正文流 tip', async () => {
+test('engine-config.js（site.html 调）: 本篇底部区域开关必须同步到正文流 tip', async () => {
   // WHY：网站 tip 在 foodtalks-site.js 里走正文流，不在底部 HTML 拼接里。
   // 如果前台只关 footer.enabled，tip 会继续显示，违背所见即所得。
   const src = await readFile(
-    new URL('../public/site.html', import.meta.url),
+    new URL('../public/js/engine-config.js', import.meta.url),
     'utf8'
   );
   assert.match(src, /const\s+effectiveFooterSegments\s*=\s*footerEnabled\s*\?\s*footerActiveSegments\s*:\s*disabledFooterSegments\(footerActiveSegments,\s*footerOrder\)/, '关闭底部区域时必须生成全 false 的本篇片段状态');
@@ -354,11 +354,11 @@ test('site.html: 本篇底部区域开关必须同步到正文流 tip', async ()
   assert.match(src, /active_segments:\s*effectiveFooterSegments/, '旧 active_segments 兼容字段也应同步本篇状态');
 });
 
-test('site.html: 关闭底部区域时即使 preset 缺 tip 也要关闭正文流 tip', async () => {
+test('engine-config.js（site.html 调）: 关闭底部区域时即使 preset 缺 tip 也要关闭正文流 tip', async () => {
   // WHY：FoodTalks tip 是正文流元素；active segments 缺 tip 时模板默认会继续输出。
   // 父级关闭必须显式补 tip:0，不能只把已有 segment 置 0。
   const src = await readFile(
-    new URL('../public/site.html', import.meta.url),
+    new URL('../public/js/engine-config.js', import.meta.url),
     'utf8'
   );
   assert.match(src, /function\s+disabledFooterSegments\(segments,\s*order\s*=\s*\[\]\)/, 'disabledFooterSegments 应接收 footer order');
@@ -366,11 +366,11 @@ test('site.html: 关闭底部区域时即使 preset 缺 tip 也要关闭正文�
   assert.match(src, /disabledFooterSegments\(footerActiveSegments,\s*footerOrder\)/, '关闭底部区域时必须按当前页脚顺序生成全 false 状态');
 });
 
-test('site.html: bottom_blocks 自有块不被旧 fbif_footer 片段缺省误关', async () => {
+test('engine-config.js（site.html 调）: bottom_blocks 自有块不被旧 fbif_footer 片段缺省误关', async () => {
   // WHY：bottom_blocks 是新主合同；fbif_footer 只是兼容回退。
   // 后台新增的 bottom_blocks-only 区块不应因为旧 preset 没同名 segment 而被映射成 false。
   const src = await readFile(
-    new URL('../public/site.html', import.meta.url),
+    new URL('../public/js/engine-config.js', import.meta.url),
     'utf8'
   );
   assert.match(src, /function\s+footerSegmentEnabledForBlock\(id,\s*block,\s*effectiveSegments,\s*footerEnabled\)/, 'bottom_blocks 显隐应通过专门桥接函数判定');
@@ -429,7 +429,9 @@ test('site.html: /ft 底部图片替换通过中性 asset-picker 写入 bottom b
   assert.match(src, /function\s+footerSegmentAssetToken/, '页脚图片块应从 html_lines 动态检测 asset token');
   assert.match(src, /\{\{asset(?:#|:)[^}]+\}\}/, '动态检测应覆盖 asset#id 和 asset:usage 两类 token');
   assert.match(src, /footerSegmentFields/, '前台应维护本篇 footer field overrides');
-  assert.match(src, /fields:\s*footerSegmentFields\[id\]/, 'syncEngineConfig 合成 _bottomBlocksOverride 时必须把 fields 合入 block override');
+  const shared = await readFile(new URL('../public/js/engine-config.js', import.meta.url), 'utf8');
+  assert.match(src, /segmentFields:\s*footerSegmentFields/, 'syncEngineConfig 必须把本篇 footer fields 交给 siteEngineConfig');
+  assert.match(shared, /fields:\s*segmentFields\[id\]/, 'siteEngineConfig 合成 _bottomBlocksOverride 时必须把 fields 合入 block override');
   assert.match(src, /saveFooterPanelState\(\{[\s\S]{0,220}fields:\s*footerSegmentFields/, '持久化应保存本篇 fields');
   assert.match(src, /sameFooterHtmlLines/, '选回规则默认素材时应识别为同默认，避免落无意义 field diff');
   assert.match(src, /delete\s+footerSegmentFields\[key\][\s\S]{0,160}else[\s\S]{0,120}footerSegmentFields\[key\]/, '选回默认应删除 field，只有非默认替换才写入 fields');

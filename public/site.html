@@ -413,6 +413,7 @@ mountAccountMenu({
 });
 
 const ruleModule = await import('/js/rule-presets.js?v=' + assetVersion);
+const { siteEngineConfig, ruleModulesOf } = await import('/js/engine-config.js?v=' + assetVersion);
 const {
   loadActiveRulePreset,
   loadLocalRuleConfig,
@@ -480,13 +481,9 @@ function loadConfig() {
 }
 
 // 从服务端激活规则取页脚库【内容】（segments html_lines / presets / segment_order）。
-// 绕过 normalizeRuleConfig——它只重建已知 module（theme/supporting/...），会丢弃结构化的
-// fbif_footer。无服务端内容时返回空对象，由 buildFooterHtml 降级到 footer-segments-defaults。
+// 无服务端内容时返回空对象，由 buildFooterHtml 降级到 footer-segments-defaults。
 function serverRuleModules() {
-  const ac = window._activeConfig || {};
-  let cfg = (ac.preset && (ac.preset.raw_config || ac.preset.config)) || ac.config || {};
-  if (cfg && cfg.config && cfg.config.modules) cfg = cfg.config; // 兼容 schema_version 2 嵌套
-  return (cfg && cfg.modules && typeof cfg.modules === 'object') ? cfg.modules : {};
+  return ruleModulesOf(window._activeConfig);
 }
 
 function serverFooterLibrary() {
@@ -756,87 +753,21 @@ function readFooterState() {
   return state;
 }
 
-function disabledFooterSegments(segments, order = []) {
-  const next = {};
-  for (const key of ['tip', ...order, ...Object.keys(segments || {})]) {
-    if (key) next[key] = 0;
-  }
-  return next;
-}
-
-function footerSegmentEnabledForBlock(id, block, effectiveSegments, footerEnabled) {
-  if (!footerEnabled) return false;
-  if (effectiveSegments && Object.prototype.hasOwnProperty.call(effectiveSegments, id)) {
-    return !!effectiveSegments[id];
-  }
-  return !(block && block.enabled === false);
-}
-
-// 把当前规则（扁平参数 + 行为 + 模块开关）注入排版引擎的渲染配置。
-// 命门：扁平参数（muted_color 等）必须并进去，否则网站模板读不到，
-// 后台改颜色不生效（见 specs/2026-05-28-unified-rule-engine-design.md §3）。
+// 把当前规则注入排版引擎的渲染配置；怎么拼在 engine-config.js（接口排版也用它）。
 function syncEngineConfig(triggerRerender) {
   if (!window._engineApi || !window._engineApi.setActiveConfig) return { status: 'unavailable' };
-  const flat = loadConfig();
   const prev = (window._engineApi.getActiveConfig && window._engineApi.getActiveConfig()) || {};
-  const prevModules = prev.modules || {};
-  const serverBehavior = (window._activeConfig && window._activeConfig.behavior) || {};
-  // 页脚库【内容】（segments html_lines / presets / segment_order）以服务端 /api/rules
-  // 为准——直接从 raw _activeConfig.config 取，绕过 normalizeRuleConfig（它只认已知
-  // module、会丢弃结构化的 fbif_footer）。服务端无内容时由 buildFooterHtml 降级默认。
+  // 页脚库【内容】以服务端 /api/rules 为准（readFooterState 里取 raw 模块）；服务端无内容时由 buildFooterHtml 降级默认。
   const footerState = readFooterState();
-  const serverFooter = footerState.footerLib;
-  const footerEnabled = footerState.enabled;
-  const footerActiveSegments = footerState.segments;
-  const footerOrder = footerState.order;
-  const effectiveFooterSegments = footerEnabled ? footerActiveSegments : disabledFooterSegments(footerActiveSegments, footerOrder);
-  const serverAssets = serverAssetLibrary();
-  const serverBottomBlocks = serverRuleModules().bottom_blocks;
-  const baseFooterForRender = Array.isArray(footerOrder) && footerOrder.length
-    ? { ...serverFooter, segment_order: footerOrder.filter(k => k !== 'tip') }
-    : serverFooter;
-  const footerForRender = applyFooterArticleOverrides(baseFooterForRender);
-  // 统一区块模型：面板内部状态已收敛为 bottom_blocks override（开关/排序/逐块启用）。
-  // 逐块 enabled = !!active_segments[id]（缺失视为关），与旧 buildFooterHtml 的 `if(!seg[key])continue` 一致。
-  let bottomBlocksOverride;
-  if (serverBottomBlocks && typeof serverBottomBlocks === 'object') {
-    // v2：order 在 active preset 内（复用 block-merge 的 pickActivePreset 选预设）。
-    const bbActive = pickActivePreset(serverBottomBlocks);
-    const bbOrder = Array.isArray(bbActive.order) ? bbActive.order : [];
-    const bbBlocks = bbActive && typeof bbActive.blocks === 'object' ? bbActive.blocks : {};
-    const overrides = {};
-    for (const id of bbOrder) {
-      if (id === 'tip') continue;
-      overrides[id] = { enabled: footerSegmentEnabledForBlock(id, bbBlocks[id], effectiveFooterSegments, footerEnabled) };
-      if (footerSegmentFields[id] && Object.keys(footerSegmentFields[id]).length) {
-        overrides[id] = { ...overrides[id], fields: footerSegmentFields[id] };
-      }
-    }
-    bottomBlocksOverride = { enabled: footerEnabled, overrides };
-    if (Array.isArray(footerOrder) && footerOrder.length) {
-      bottomBlocksOverride.order = footerOrder.filter(k => k !== 'tip');
-    }
-  }
-  const cfg = {
-    ...flat,
-    behavior: serverBehavior,
-    _bottomBlocksOverride: bottomBlocksOverride,
-    modules: {
-      ...prevModules,
-      fbif_footer: {
-        ...footerForRender,
-        enabled: footerEnabled,
-        active_preset_id: '__article_override__',
-        presets: [{ id: '__article_override__', name: '本篇', segments: effectiveFooterSegments }],
-        active_segments: effectiveFooterSegments,
-      },
-      asset_library: serverAssets,
-      ...(serverBottomBlocks && typeof serverBottomBlocks === 'object' ? { bottom_blocks: serverBottomBlocks } : {}),
-      // 网站渠道 h2 默认不输出 mctoc 锚点 id —— FoodTalks 后台生成目录时会自己加
-      // （用户 2026-05-30 确认），基石 news/62285 的 h2 也不带 id。默认关，避免与后台冲突。
-      mctoc: prevModules.mctoc || { enabled: false },
-    },
-  };
+  const cfg = siteEngineConfig({
+    flat: loadConfig(),
+    prevModules: prev.modules || {},
+    behavior: (window._activeConfig && window._activeConfig.behavior) || {},
+    modules: serverRuleModules(),
+    footerState,
+    segmentFields: footerSegmentFields,
+    applyArticleOverrides: applyFooterArticleOverrides,
+  });
   window._engineApi.setActiveConfig(cfg);
   return requestRulePreviewSync(window._engineApi, triggerRerender);
 }

@@ -40,7 +40,17 @@ func main() {
 	emitRegistry := flag.Bool("emit-registry", false, "print generated public/js/rule-packs/registry.js from accountCatalog and exit")
 	emitBlocks := flag.Bool("emit-blocks", false, "print generated public/js/blocks/block-registry.gen.js from blockTypeCatalog and exit")
 	cmsResyncDay := flag.String("cms-resync-day", "", "one-off: re-PUT published FoodTalks homepage/source fields for this CST day (YYYY-MM-DD) and exit")
+	newLayoutKeyFlag := flag.Bool("new-layout-key", false, "发一把排版接口钥匙：打印钥匙（只这一次）和填进中台「接口调用方」表的指纹，然后退出")
 	flag.Parse()
+
+	if *newLayoutKeyFlag {
+		text, err := runNewLayoutKey()
+		if err != nil {
+			log.Fatalf("发排版接口钥匙失败：%v", err)
+		}
+		fmt.Print(text)
+		return
+	}
 
 	// codegen：从账号单一真相源生成 registry.js（`npm run gen:registry`）。
 	if *emitRegistry {
@@ -124,6 +134,8 @@ func main() {
 
 	// 程序化排版 API（/api/render 代理 + /api/html-to-blocks，Bearer RENDER_TOKEN）
 	registerRenderRoutes(mux)
+	// 排版接口 v1（/api/layout/v1/*，flk_ 钥匙，名单在中台配置包 api_callers）：只排版，不建发布单。
+	registerLayoutAPIRoutes(mux, newLayoutAPIFromEnv(ruleStore, authService))
 
 	// 发布流水线（公众号 → FoodTalks 网站）：JSON 任务存储 + 状态机 + 人审端点。
 	// 机器提交使用最小权限同步凭证；人工管理使用登录会话角色，生产 HTTP 审核默认关闭。

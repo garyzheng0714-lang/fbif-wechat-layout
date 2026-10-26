@@ -273,6 +273,7 @@ if (ownEditorPath) {
 window._activeRulePack = activeRulePack;
 let currentTemplateId = activeRulePack.templateId;
 const ruleModule = await import('/js/rule-presets.js?v=' + assetVersion);
+const { mpEngineConfig } = await import('/js/engine-config.js?v=' + assetVersion);
 const {
   loadActiveRulePreset,
   loadLocalRuleConfig,
@@ -350,12 +351,10 @@ function syncEngineConfig(triggerRerender) {
   if (!window._engineApi || !window._engineApi.setActiveConfig) return { status: 'unavailable' };
   // 本篇底部区块覆盖（公众号 fbif.js 读 window._bottomBlocksOverride；面板写 bb.override::<acct>）。
   try { window._bottomBlocksOverride = JSON.parse(localStorage.getItem('bb.override::' + activeRulePack.id) || 'null') || undefined; } catch { window._bottomBlocksOverride = undefined; }
-  const flat = loadConfig();
-  const serverBehavior = (window._activeConfig && window._activeConfig.behavior) || {};
-  window._engineApi.setActiveConfig({
-    ...flat,
-    behavior: serverBehavior,
-  });
+  window._engineApi.setActiveConfig(mpEngineConfig({
+    flat: loadConfig(),
+    behavior: (window._activeConfig && window._activeConfig.behavior) || {},
+  }));
   return requestRulePreviewSync(window._engineApi, triggerRerender);
 }
 

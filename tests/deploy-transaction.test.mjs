@@ -542,3 +542,49 @@ test('readiness action prints only the response JSON and never exposes the hub t
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// 排版接口的排版程序（fbif-render-layout，19098）：和 fbif-render 同一份代码，单独一个进程。
+test('layout renderer unit is installed, health-checked, rolled back and snapshotted like fbif-render', async () => {
+  const script = await projectFile('deploy/scripts/deploy-transaction.sh');
+  assert.match(script, /^RENDER_LAYOUT_SERVICE_TARGET=\/etc\/systemd\/system\/fbif-render-layout\.service$/m);
+  const validate = shellFunction(script, 'validate_release');
+  assert.match(validate, /"\$RELEASE_DIR\/render\/layout-server\.mjs"/, '候选里必须有排版程序入口');
+  assert.match(validate, /"\$RELEASE_DIR\/systemd\/fbif-render-layout\.service"/);
+  assert.match(validate, /systemd-analyze verify[^]*fbif-render-layout\.service"/);
+  assert.doesNotMatch(validate, /is-active --quiet fbif-render-layout/, '第一次部署时还没有这个单元，部署前不能要求它在跑');
+
+  const activate = shellFunction(script, 'activate_release');
+  const installAt = activate.indexOf('install_file render_layout_service "$RELEASE_DIR/systemd/fbif-render-layout.service" "$RENDER_LAYOUT_SERVICE_TARGET" 0644');
+  const reloadAt = activate.indexOf('systemctl daemon-reload');
+  const hubAt = activate.indexOf('require_hub_env fbif-render-layout "$HUB_RENDER_ENV"');
+  const enableAt = activate.indexOf('systemctl enable fbif-render-layout');
+  const restartAt = activate.indexOf('systemctl restart fbif-render-layout');
+  const healthAt = activate.indexOf('wait_runtime_config_ok http://127.0.0.1:19098/healthz config_schema_version');
+  const apiRestartAt = activate.indexOf('systemctl restart fbif-api');
+  assert.ok(installAt > 0 && installAt < reloadAt && reloadAt < hubAt && hubAt < enableAt && enableAt < restartAt &&
+    restartAt < healthAt && healthAt < apiRestartAt,
+    '装单元 → daemon-reload → 核对读中台文件 → enable → 重启 → 健康检查，都在 API 重启之前（在回滚窗口里）');
+  assert.match(activate, /FragmentPath --value fbif-render-layout\)" == "\$RENDER_LAYOUT_SERVICE_TARGET"/);
+
+  const rollback = shellFunction(script, 'rollback_impl');
+  const disableAt = rollback.indexOf('systemctl disable --now fbif-render-layout');
+  const restoreAt = rollback.indexOf('restore_path render_layout_service "$RENDER_LAYOUT_SERVICE_TARGET"');
+  assert.ok(disableAt > 0 && disableAt < restoreAt, '这次才第一次装上的单元：回滚先停掉、取消开机启动，再删文件');
+  assert.match(rollback, /marker render_layout_service\.activated\)" && ! -e "\$\(marker render_layout_service\.had\)/);
+  assert.match(rollback, /wait_http_ok http:\/\/127\.0\.0\.1:19098\/healthz 20/);
+
+  assert.match(shellFunction(script, 'finalize_release'),
+    /cp -a --reflink=auto -- "\$RENDER_LAYOUT_SERVICE_TARGET" "\$history_pending\/systemd\/fbif-render-layout\.service"/,
+    '历史快照必须保留 systemd 单元');
+
+  const unit = await projectFile('deploy/systemd/fbif-render-layout.service');
+  const render = await projectFile('deploy/systemd/fbif-render.service');
+  assert.match(unit, /^PartOf=fbif-render\.service$/m, '中台换 RENDER_TOKEN 只重启 fbif-render，这里要跟着重启');
+  assert.match(unit, /^ExecStart=\/usr\/bin\/node \/var\/www\/render-service\/layout-server\.mjs$/m);
+  assert.match(unit, /^Environment=LAYOUT_PORT=19098$/m);
+  const envFiles = [...unit.matchAll(/^EnvironmentFile=(.+)$/gm)].map(m => m[1]);
+  assert.deepEqual(envFiles, ['/var/www/render-service.env', '/etc/fbif-hub/env/render.env'], '中台文件最后读、同名为准');
+  for (const line of ['DynamicUser=yes', 'MemoryMax=512M', 'ProtectSystem=strict', 'NoNewPrivileges=yes', 'Environment=FBIF_CONFIG_SCHEMA_VERSION=1']) {
+    assert.ok(unit.includes(line + '\n') && render.includes(line + '\n'), `${line} 与 fbif-render 一致`);
+  }
+});

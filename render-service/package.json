@@ -4,6 +4,8 @@
   "type": "module",
   "description": "Headless 渲染服务：复用生产渲染器，Block[] → 微信内联样式 HTML（含 bottom_blocks 页脚）",
   "dependencies": {
+    "@xmldom/xmldom": "^0.9.12",
+    "jszip": "^3.10.1",
     "linkedom": "^0.18.12"
   }
 }

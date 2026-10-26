@@ -40,6 +40,9 @@ API_READINESS_URL=http://127.0.0.1:9001/api/publish/readiness
 CADDY_TARGET=/etc/caddy/sites/fbifmp-layout.caddy
 API_SERVICE_TARGET=/etc/systemd/system/fbif-api.service
 RENDER_SERVICE_TARGET=/etc/systemd/system/fbif-render.service
+# 排版接口（/api/layout/v1）的排版程序：同一份 render-service 代码的另一个进程（layout-server.mjs，19098），
+# PartOf=fbif-render，跟着它重启。第一次部署时还没有这个单元，所以部署前不要求它在跑。
+RENDER_LAYOUT_SERVICE_TARGET=/etc/systemd/system/fbif-render-layout.service
 CONFIG_SCHEMA_TARGET=/etc/fbif-layout/env-schema.json
 # 监控 watchdog 已于 2026-08-06 迁往监控端 FoodTalks_Feed（服务名 fbif-link-watchdog）。
 # 本项目只提供被探的健康端点 GET /api/publish/monitoring，不再安装、验收或回滚任何探针
@@ -132,10 +135,12 @@ validate_release() {
     "$RELEASE_DIR/api.env" \
     "$RELEASE_DIR/render.env" \
     "$RELEASE_DIR/render/server.mjs" \
+    "$RELEASE_DIR/render/layout-server.mjs" \
     "$RELEASE_DIR/render/node_modules" \
     "$RELEASE_DIR/caddy/fbifmp-layout.caddy" \
     "$RELEASE_DIR/systemd/fbif-api.service" \
     "$RELEASE_DIR/systemd/fbif-render.service" \
+    "$RELEASE_DIR/systemd/fbif-render-layout.service" \
     "$RELEASE_DIR/config/env-schema.json" \
     "$RELEASE_DIR/config/api.env.example" \
     "$RELEASE_DIR/config/publish.env.example" \
@@ -161,7 +166,8 @@ validate_release() {
   caddy validate --adapter caddyfile --config "$RELEASE_DIR/caddy/fbifmp-layout.caddy" >/dev/null
   systemd-analyze verify \
     "$RELEASE_DIR/systemd/fbif-api.service" \
-    "$RELEASE_DIR/systemd/fbif-render.service"
+    "$RELEASE_DIR/systemd/fbif-render.service" \
+    "$RELEASE_DIR/systemd/fbif-render-layout.service"
   # 中台下发的变量不在 api.env、render.env 里：校验时把中台文件叠在后面，和服务实际读到的一样。
   require_hub_env fbif-api "$HUB_LAYOUT_ENV"
   require_hub_env fbif-render "$HUB_RENDER_ENV"
@@ -266,8 +272,13 @@ rollback_impl() {
   local failed=0
 
   # 监控已迁往监控端，回滚不恢复 watchdog（见 cleanup_legacy_watchdog）。
+  # 这次部署才第一次装上排版程序单元：回滚前先停掉、取消开机启动，再删单元文件。
+  if [[ -e "$(marker render_layout_service.activated)" && ! -e "$(marker render_layout_service.had)" ]]; then
+    systemctl disable --now fbif-render-layout >/dev/null 2>&1 || failed=1
+  fi
   restore_path api_service "$API_SERVICE_TARGET" || failed=1
   restore_path render_service "$RENDER_SERVICE_TARGET" || failed=1
+  restore_path render_layout_service "$RENDER_LAYOUT_SERVICE_TARGET" || failed=1
   restore_path render_env "$RENDER_ENV_TARGET" || failed=1
   restore_path config_schema "$CONFIG_SCHEMA_TARGET" || failed=1
   restore_path public "$PUBLIC_TARGET" || failed=1
@@ -281,9 +292,15 @@ rollback_impl() {
   # 首次部署原本没有 vhost 时，restore_path 会删掉失败候选而不恢复任何文件。
   caddy validate --config /etc/caddy/Caddyfile >/dev/null || failed=1
   systemctl restart fbif-render || failed=1
+  if [[ -e "$RENDER_LAYOUT_SERVICE_TARGET" ]]; then
+    systemctl restart fbif-render-layout || failed=1
+  fi
   systemctl restart fbif-api || failed=1
   systemctl reload caddy || failed=1
   wait_http_ok http://127.0.0.1:19096/healthz 20 || failed=1
+  if [[ -e "$RENDER_LAYOUT_SERVICE_TARGET" ]]; then
+    wait_http_ok http://127.0.0.1:19098/healthz 20 || failed=1
+  fi
   wait_http_ok http://127.0.0.1:9001/api/health 20 || failed=1
 
   if [[ $failed -ne 0 ]]; then
@@ -352,6 +369,7 @@ activate_release() {
 
   install_file api_service "$RELEASE_DIR/systemd/fbif-api.service" "$API_SERVICE_TARGET" 0644
   install_file render_service "$RELEASE_DIR/systemd/fbif-render.service" "$RENDER_SERVICE_TARGET" 0644
+  install_file render_layout_service "$RELEASE_DIR/systemd/fbif-render-layout.service" "$RENDER_LAYOUT_SERVICE_TARGET" 0644
   install_file render_env "$RELEASE_DIR/render.env" "$RENDER_ENV_TARGET" 0600
   install_file config_schema "$RELEASE_DIR/config/env-schema.json" "$CONFIG_SCHEMA_TARGET" 0644
   install_file api "$RELEASE_DIR/api/fbif-api" "$API_TARGET" 0755
@@ -365,8 +383,14 @@ activate_release() {
     die "fbif-api is not using the versioned unit"
   [[ "$(systemctl show --property=FragmentPath --value fbif-render)" == "$RENDER_SERVICE_TARGET" ]] ||
     die "fbif-render is not using the versioned unit"
+  [[ "$(systemctl show --property=FragmentPath --value fbif-render-layout)" == "$RENDER_LAYOUT_SERVICE_TARGET" ]] ||
+    die "fbif-render-layout is not using the versioned unit"
+  require_hub_env fbif-render-layout "$HUB_RENDER_ENV"
   systemctl restart fbif-render
   wait_runtime_config_ok http://127.0.0.1:19096/healthz config_schema_version
+  systemctl enable fbif-render-layout >/dev/null
+  systemctl restart fbif-render-layout
+  wait_runtime_config_ok http://127.0.0.1:19098/healthz config_schema_version
   systemctl restart fbif-api
   wait_runtime_config_ok http://127.0.0.1:9001/api/health config_schema_version
   systemctl reload caddy
@@ -427,6 +451,7 @@ finalize_release() {
     cp -a --reflink=auto -- "$CONFIG_SCHEMA_TARGET" "$history_pending/config/env-schema.json"
     cp -a --reflink=auto -- "$API_SERVICE_TARGET" "$history_pending/systemd/fbif-api.service"
     cp -a --reflink=auto -- "$RENDER_SERVICE_TARGET" "$history_pending/systemd/fbif-render.service"
+    cp -a --reflink=auto -- "$RENDER_LAYOUT_SERVICE_TARGET" "$history_pending/systemd/fbif-render-layout.service"
     printf 'deploy_id=%s\nfinalized_at=%s\n' "$DEPLOY_ID" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
       > "$history_pending/release.meta"
 
