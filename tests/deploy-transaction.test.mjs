@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, readdir } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
@@ -10,6 +12,26 @@ const root = new URL('../', import.meta.url);
 
 async function projectFile(path) {
   return readFile(new URL(path, root), 'utf8');
+}
+
+// deploy.yml 里「Deploy transactionally」这一步的 run 脚本，去掉 YAML 缩进。
+async function deployRunScript() {
+  const workflow = await projectFile('.github/workflows/deploy.yml');
+  const deployStepAt = workflow.indexOf('      - name: Deploy transactionally');
+  const runMarker = '        run: |\n';
+  const runAt = workflow.indexOf(runMarker, deployStepAt);
+  return workflow.slice(runAt + runMarker.length)
+    .split('\n')
+    .map(line => line.startsWith('          ') ? line.slice(10) : line)
+    .join('\n');
+}
+
+// 从 shell 脚本里切出一个顶格定义的函数，拿去单独跑。
+function shellFunction(script, name) {
+  const start = script.indexOf(`\n${name}() {\n`);
+  assert.ok(start >= 0, `缺少函数 ${name}()`);
+  const end = script.indexOf('\n}\n', start + 1);
+  return script.slice(start + 1, end + 2);
 }
 
 test('deploy transaction shell is syntactically valid and restores every live surface', async () => {
@@ -91,22 +113,16 @@ test('deploy transaction shell is syntactically valid and restores every live su
 
 test('workflow preflights before staging, never rsyncs directly into live, and keeps external checks inside rollback window', async () => {
   const workflow = await projectFile('.github/workflows/deploy.yml');
-  const deployStepAt = workflow.indexOf('      - name: Deploy transactionally');
-  const runMarker = '        run: |\n';
-  const runAt = workflow.indexOf(runMarker, deployStepAt);
-  const runScript = workflow.slice(runAt + runMarker.length)
-    .split('\n')
-    .map(line => line.startsWith('          ') ? line.slice(10) : line)
-    .join('\n');
+  const runScript = await deployRunScript();
   await execFileAsync('bash', ['-n', '-c', runScript]);
-  const requiredAt = workflow.indexOf('for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH PUBLISH_ADMIN_SERVICE_TOKEN RULE_SUPER_ADMIN_OPEN_IDS RENDER_TOKEN');
+  const requiredAt = workflow.indexOf('for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH RULE_SUPER_ADMIN_OPEN_IDS AUTH_SESSION_SECRET');
   const sshTimeoutAt = workflow.indexOf('ConnectTimeout 15');
   const firstSSHAt = workflow.indexOf('ssh -i ~/.ssh/deploy_key');
   const firstRsyncAt = workflow.indexOf('rsync -avz');
   const activateAt = workflow.indexOf('remote_transaction activate');
   const finalizeAt = workflow.indexOf('remote_transaction finalize');
   const versionCheckAt = workflow.indexOf("'.commit == $sha and .build == $sha'");
-  const readinessAt = workflow.indexOf('/api/publish/readiness');
+  const readinessAt = workflow.indexOf('readiness_json=$(remote_transaction readiness)');
   const imageUploadAt = workflow.indexOf("image_upload_json=$(curl");
   const acceptAt = workflow.indexOf('release_accepted=1');
   const unpauseAt = workflow.indexOf('remote_transaction unpause');
@@ -203,9 +219,70 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     '/api/publish/jobs',
     '/api/feishu/card-callback',
     '/api/oss-upload',
-    '/api/publish/readiness',
+    'readiness_json=$(remote_transaction readiness)',
+    'unpaused_readiness=$(remote_transaction readiness)',
   ]) {
     assert.ok(workflow.includes(contract), `缺少部署验收：${contract}`);
+  }
+});
+
+// FBIF 中台统一管共用密钥（2026-10-26）：这 10 个变量（渲染服务 1 个）由中台本机代理写进
+// /etc/fbif-hub/env/layout.env、render.env，systemd drop-in 让服务最后读、同名为准。CI 再从
+// GitHub Secrets 写一份，中台换值后 GitHub 那份就过期了，所以 CI 既不持有也不写它们。
+const HUB_LAYOUT_VARIABLES = [
+  'CLOUDCONVERT_API_KEY', 'FEISHU_LOGIN_APP_SECRET', 'PUBLISH_ADMIN_SERVICE_TOKEN', 'RENDER_TOKEN',
+  'DISTRIBUTION_API_TOKEN', 'FEISHU_APP_SECRET', 'FOODTALKS_TOKEN', 'HUB_KEY',
+  'PUBLISH_SYNC_SERVICE_TOKEN', 'TIKHUB_API_KEY',
+];
+
+test('deploy workflow neither holds nor writes hub-managed variables; readiness goes through the server', async () => {
+  const workflow = await projectFile('.github/workflows/deploy.yml');
+  const runScript = await deployRunScript();
+  for (const name of HUB_LAYOUT_VARIABLES) {
+    assert.doesNotMatch(workflow, new RegExp(`secrets\\.${name}\\b`), `${name} 由中台下发，CI 不得再从 GitHub Secrets 取`);
+    assert.doesNotMatch(workflow, new RegExp(`\\b${name}=%s`), `${name} 不得再写进 api.env / render.env`);
+  }
+  const required = runScript.match(/^for required in (.+); do$/m);
+  assert.ok(required, '必须保留 secret preflight');
+  for (const name of HUB_LAYOUT_VARIABLES) {
+    assert.ok(!required[1].split(' ').includes(name), `${name} 不得再是必需的 GitHub Secret`);
+  }
+  for (const name of ['RULE_SUPER_ADMIN_OPEN_IDS', 'AUTH_SESSION_SECRET', 'AUTH_PASSWORD_USERS_B64', 'FEISHU_LOGIN_APP_ID']) {
+    assert.ok(required[1].split(' ').includes(name), `${name} 不归中台，仍由 CI 必需`);
+  }
+  assert.match(workflow, /LIBREOFFICE_TOKEN: \$\{\{ secrets\.LIBREOFFICE_TOKEN \}\}/);
+  assert.doesNotMatch(workflow, /X-Publish-Admin-Token/,
+    '管理员服务令牌只在服务器的中台文件里，CI 不得再从公网带令牌调 readiness');
+  assert.doesNotMatch(workflow, /\$\{SITE_ORIGIN\}\/api\/publish\/readiness/);
+  assert.equal(runScript.match(/\$\(remote_transaction readiness\)/g)?.length, 2,
+    '暂停态和解暂停后的两次 readiness 都经事务脚本在服务器本机取');
+});
+
+test('a failure inside $(...) during verification rolls back exactly once', async () => {
+  // set -E 让 ERR trap 也在命令替换的子 shell 里触发；子 shell 若也回滚并删 staging，主 shell 再回滚
+  // 就找不到事务脚本、误报 ROLLBACK FAILED。readiness 改成 $(remote_transaction readiness) 后这条路必走。
+  const runScript = await deployRunScript();
+  const directory = await mkdtemp(join(tmpdir(), 'fbif-deploy-trap-'));
+  const callLog = join(directory, 'calls.log');
+  const harness = [
+    'set -Eeuo pipefail',
+    'remote_transaction() { echo "remote_transaction $1" >> "$CALL_LOG"; [ "$1" != readiness ]; }',
+    'cleanup_staging() { echo cleanup_staging >> "$CALL_LOG"; }',
+    'DEPLOY_ID=test-deploy',
+    'RELEASE_DIR=/var/www/.fbif-layout-releases/test-deploy',
+    'transaction_started=1',
+    'release_accepted=0',
+    shellFunction(runScript, 'on_deploy_error'),
+    "trap 'on_deploy_error $?' ERR",
+    'readiness_json=$(remote_transaction readiness)',
+    'echo "unreachable $readiness_json"',
+  ].join('\n');
+  try {
+    await assert.rejects(execFileAsync('bash', ['-c', harness], { env: { ...process.env, CALL_LOG: callLog } }));
+    const calls = (await readFile(callLog, 'utf8')).trim().split('\n');
+    assert.deepEqual(calls, ['remote_transaction readiness', 'remote_transaction rollback', 'cleanup_staging']);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -317,4 +394,151 @@ test('deploy removes the review-chat broadcast timer and never restores it', asy
 
   await assert.rejects(projectFile('deploy/systemd/fbif-monitoring-report.timer'),
     '播报 unit 文件必须已从仓库删除');
+});
+
+// 事务脚本要 root 才跑，这里把中台相关的函数切出来单独跑；stat、systemctl、curl 用假的，
+// 只验逻辑：中台文件的检查、readiness 只吐响应 JSON、令牌不进命令行和输出。
+async function hubHarness() {
+  const script = await projectFile('deploy/scripts/deploy-transaction.sh');
+  const directory = await mkdtemp(join(tmpdir(), 'fbif-hub-env-'));
+  const bin = join(directory, 'bin');
+  await mkdir(bin);
+  const stubs = {
+    stat: 'printf "%s\\n" "$FAKE_STAT"',
+    systemctl: 'printf "%s\\n" "$FAKE_ENV_FILES"',
+    curl: [
+      'for arg in "$@"; do printf "%s\\n" "$arg"; done > "$CURL_ARGV_LOG"',
+      'cat > "$CURL_STDIN_LOG"',
+      'printf "%s" "$FAKE_READINESS"',
+    ].join('\n'),
+  };
+  for (const [name, body] of Object.entries(stubs)) {
+    await writeFile(join(bin, name), `#!/bin/sh\n${body}\n`, 'utf8');
+    await chmod(join(bin, name), 0o755);
+  }
+  const readinessURL = script.match(/^API_READINESS_URL=(.+)$/m)?.[1];
+  const layoutEnv = join(directory, 'layout.env');
+  const run = (body, env = {}) => execFileAsync('bash', ['-c', [
+    'set -Eeuo pipefail',
+    shellFunction(script, 'die'),
+    shellFunction(script, 'hub_env_value'),
+    shellFunction(script, 'require_hub_env'),
+    shellFunction(script, 'publish_readiness'),
+    `HUB_LAYOUT_ENV='${layoutEnv}'`,
+    `API_READINESS_URL='${readinessURL}'`,
+    body,
+  ].join('\n')], {
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      FAKE_STAT: '0 600',
+      FAKE_ENV_FILES: `/var/www/api/publish.env (ignore_errors=no)\n/var/www/api/.env (ignore_errors=no)\n${layoutEnv} (ignore_errors=no)`,
+      CURL_ARGV_LOG: join(directory, 'curl-argv.log'),
+      CURL_STDIN_LOG: join(directory, 'curl-stdin.log'),
+      ...env,
+    },
+  });
+  return { script, directory, layoutEnv, readinessURL, run };
+}
+
+test('hub env files are checked before any env validation and overlaid like systemd', async () => {
+  const script = await projectFile('deploy/scripts/deploy-transaction.sh');
+  const envTargetAt = script.indexOf('ENV_TARGET=$API_DIR/.env');
+  assert.ok(envTargetAt > 0);
+  const header = script.slice(envTargetAt, script.indexOf('\nmarker() {'));
+  assert.match(header, /^HUB_LAYOUT_ENV=\/etc\/fbif-hub\/env\/layout\.env$/m, '中台文件路径定义在顶部，和 ENV_TARGET 放一起');
+  assert.match(header, /^HUB_RENDER_ENV=\/etc\/fbif-hub\/env\/render\.env$/m);
+
+  const validate = shellFunction(script, 'validate_release');
+  const layoutCheckAt = validate.indexOf('require_hub_env fbif-api "$HUB_LAYOUT_ENV"');
+  const renderCheckAt = validate.indexOf('require_hub_env fbif-render "$HUB_RENDER_ENV"');
+  const firstValidateAt = validate.indexOf('python3 "$RELEASE_DIR/validate-env.py"');
+  assert.ok(layoutCheckAt > 0 && renderCheckAt > 0 && layoutCheckAt < firstValidateAt && renderCheckAt < firstValidateAt,
+    '中台文件缺失、权限不对必须在校验 env 之前给出中文报错');
+  assert.match(validate, /validate-env\.py" --overlay "\$HUB_LAYOUT_ENV" \\\n\s+"\$RELEASE_DIR\/config\/env-schema\.json" api_managed "\$RELEASE_DIR\/api\.env"/);
+  assert.match(validate, /validate-env\.py" --overlay "\$HUB_LAYOUT_ENV" \\\n\s+"\$RELEASE_DIR\/config\/env-schema\.json" api_publish \/var\/www\/api\/publish\.env/);
+  assert.match(validate, /validate-env\.py" --overlay "\$HUB_RENDER_ENV" \\\n\s+"\$RELEASE_DIR\/config\/env-schema\.json" render "\$RELEASE_DIR\/render\.env"/);
+  assert.match(validate, /hub_env_value "\$HUB_LAYOUT_ENV" RENDER_TOKEN\)" == "\$\(hub_env_value "\$HUB_RENDER_ENV" RENDER_TOKEN/,
+    'API 与渲染服务各读一份中台文件，RENDER_TOKEN 必须一致');
+  const tokenReads = [...script.matchAll(/hub_env_value "\$(\w+)"/g)].map(match => match[1]);
+  assert.ok(tokenReads.length >= 3 && tokenReads.every(name => name === 'HUB_LAYOUT_ENV' || name === 'HUB_RENDER_ENV'),
+    '令牌只从中台文件读，不从 .env / render-service.env 读');
+  assert.doesNotMatch(script, /(?:grep|sed|cut|awk)[^\n]*_(?:TOKEN|SECRET|KEY)\b/,
+    '事务脚本不得用文本工具从 env 文件里抠密钥值');
+  assert.match(script, /^  readiness\)\n    publish_readiness\n    ;;$/m);
+});
+
+test('require_hub_env fails in Chinese when the hub file is missing, not root 0600, or not read last', async () => {
+  const { directory, layoutEnv, run } = await hubHarness();
+  const check = `require_hub_env fbif-api "$HUB_LAYOUT_ENV"`;
+  try {
+    await assert.rejects(run(check), error => {
+      assert.match(error.stderr, /缺中台文件 .*layout\.env：它由 FBIF 中台的本机代理（hub-agent）写/);
+      return true;
+    });
+
+    await writeFile(layoutEnv, 'PUBLISH_ADMIN_SERVICE_TOKEN=x\n', 'utf8');
+    for (const fakeStat of ['1000 600', '0 644', '0 640']) {
+      await assert.rejects(run(check, { FAKE_STAT: fakeStat }), error => {
+        assert.match(error.stderr, /必须归 root、权限 600/);
+        assert.match(error.stderr, /中台代理写/);
+        return true;
+      });
+    }
+
+    await assert.rejects(run(check, {
+      FAKE_ENV_FILES: `${layoutEnv} (ignore_errors=no)\n/var/www/api/publish.env (ignore_errors=no)`,
+    }), error => {
+      assert.match(error.stderr, /最后读的不是中台文件/);
+      assert.match(error.stderr, /zz-fbif-hub\.conf/);
+      return true;
+    });
+    await assert.rejects(run(check, { FAKE_ENV_FILES: '/var/www/api/.env (ignore_errors=no)' }));
+
+    const linked = join(directory, 'linked.env');
+    await symlink(layoutEnv, linked);
+    await assert.rejects(run(`require_hub_env fbif-api '${linked}'`), /缺中台文件/,
+      '中台代理是改名落盘的普通文件，软链接不认');
+
+    await run(check);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('readiness action prints only the response JSON and never exposes the hub token', async () => {
+  const { directory, layoutEnv, readinessURL, run } = await hubHarness();
+  const token = 'hub-admin-token-must-stay-secret';
+  const readiness = '{"ready":true,"workers_paused":true}';
+  try {
+    assert.equal(readinessURL, 'http://127.0.0.1:9001/api/publish/readiness', 'readiness 只在服务器本机取');
+    await writeFile(layoutEnv, [
+      '# 由 FBIF 中台本机代理写，别手改',
+      'PUBLISH_ADMIN_SERVICE_TOKEN=stale-earlier-line',
+      'RENDER_TOKEN=render-token',
+      `PUBLISH_ADMIN_SERVICE_TOKEN=${token}`,
+      '',
+    ].join('\n'), 'utf8');
+    const result = await run('publish_readiness', { FAKE_READINESS: readiness });
+    assert.equal(result.stdout, readiness, '标准输出只能是响应 JSON，jq 才拿得到纯 JSON');
+    assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
+
+    const argv = await readFile(join(directory, 'curl-argv.log'), 'utf8');
+    assert.doesNotMatch(argv, new RegExp(token), '令牌不得出现在 curl 命令行（ps 看得到）');
+    assert.ok(argv.split('\n').includes(readinessURL));
+    assert.ok(argv.split('\n').includes('--fail'), 'readiness 非 2xx 必须让部署失败');
+    const headers = await readFile(join(directory, 'curl-stdin.log'), 'utf8');
+    assert.equal(headers, `X-Publish-Admin-Token: ${token}\n`, '令牌经标准输入当请求头，同名取最后一行（和 systemd 一样）');
+
+    await writeFile(layoutEnv, 'RENDER_TOKEN=render-token\n', 'utf8');
+    await rm(join(directory, 'curl-argv.log'));
+    await assert.rejects(run('publish_readiness', { FAKE_READINESS: readiness }), error => {
+      assert.equal(error.stdout, '');
+      assert.match(error.stderr, /里没有 PUBLISH_ADMIN_SERVICE_TOKEN/);
+      return true;
+    });
+    await assert.rejects(readFile(join(directory, 'curl-argv.log'), 'utf8'), '缺令牌时不得发请求');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

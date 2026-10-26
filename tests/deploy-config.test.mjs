@@ -14,26 +14,100 @@ async function text(path) {
   return readFile(new URL(path, root), 'utf8');
 }
 
-test('versioned env schema validates every checked-in example without exposing values', async () => {
-  const schemaURL = new URL('../deploy/config/env-schema.json', import.meta.url);
-  const validatorURL = new URL('../deploy/scripts/validate-env.py', import.meta.url);
-  const schema = JSON.parse(await readFile(schemaURL, 'utf8'));
-  assert.equal(schema.schema_version, 1);
+const validatorPath = fileURLToPath(new URL('../deploy/scripts/validate-env.py', import.meta.url));
+const schemaPath = fileURLToPath(new URL('../deploy/config/env-schema.json', import.meta.url));
+const configPath = filename => fileURLToPath(new URL(`../deploy/config/${filename}`, import.meta.url));
 
-  for (const [group, filename] of [
-    ['api_managed', 'api.env.example'],
-    ['api_publish', 'publish.env.example'],
-    ['render', 'render.env.example'],
+function envNames(source) {
+  return source.split('\n').map(line => line.match(/^([A-Z][A-Z0-9_]*)=/)?.[1]).filter(Boolean);
+}
+
+test('versioned env schema validates every checked-in example without exposing values', async () => {
+  const schema = JSON.parse(await readFile(schemaPath, 'utf8'));
+  assert.equal(schema.schema_version, 1);
+  const p0 = await text('.github/workflows/p0-monitoring-contract.yml');
+
+  // 中台下发的变量只在中台文件里：示例和服务器 preflight 一样，叠上中台文件的示例再校验。
+  for (const [group, filename, overlay] of [
+    ['api_managed', 'api.env.example', 'hub-layout.env.example'],
+    ['api_publish', 'publish.env.example', 'hub-layout.env.example'],
+    ['render', 'render.env.example', 'hub-render.env.example'],
   ]) {
     const result = await execFileAsync('python3', [
-      fileURLToPath(validatorURL),
-      fileURLToPath(schemaURL),
-      group,
-      fileURLToPath(new URL(`../deploy/config/${filename}`, import.meta.url)),
+      validatorPath, '--overlay', configPath(overlay), schemaPath, group, configPath(filename),
     ]);
     assert.match(result.stdout, new RegExp(`env validation ok \\[${group}\\]`));
-    assert.doesNotMatch(result.stdout, /set-in-secret-store|token|password/i,
+    assert.doesNotMatch(result.stdout, /set-in-secret-store|set-by-fbif-hub|password/i,
       'validator 输出不得包含环境变量值');
+    assert.ok(p0.includes(
+      `validate-env.py --overlay deploy/config/${overlay} deploy/config/env-schema.json ${group} deploy/config/${filename}`,
+    ), `P0 必须叠上 ${overlay} 校验 ${filename}`);
+  }
+});
+
+// FBIF 中台统一管共用密钥（2026-10-26）：一个变量只有一个出处。中台下发的 10 个（渲染服务 1 个）
+// 只出现在中台文件的示例里，CI 生成的 api.env / render.env 和手工 publish.env 都不再写。
+test('hub-managed variables live only in the hub file examples', async () => {
+  const hubLayout = envNames(await text('deploy/config/hub-layout.env.example'));
+  assert.deepEqual([...hubLayout].sort(), [
+    'CLOUDCONVERT_API_KEY', 'DISTRIBUTION_API_TOKEN', 'FEISHU_APP_SECRET', 'FEISHU_LOGIN_APP_SECRET',
+    'FOODTALKS_TOKEN', 'HUB_KEY', 'PUBLISH_ADMIN_SERVICE_TOKEN', 'PUBLISH_SYNC_SERVICE_TOKEN',
+    'RENDER_TOKEN', 'TIKHUB_API_KEY',
+  ]);
+  assert.deepEqual(envNames(await text('deploy/config/hub-render.env.example')), ['RENDER_TOKEN']);
+  for (const filename of ['api.env.example', 'publish.env.example']) {
+    const names = envNames(await text(`deploy/config/${filename}`));
+    assert.deepEqual(names.filter(name => hubLayout.includes(name)), [], `${filename} 不得再写中台下发的变量`);
+  }
+  assert.ok(!envNames(await text('deploy/config/render.env.example')).includes('RENDER_TOKEN'));
+  for (const filename of ['hub-layout.env.example', 'hub-render.env.example']) {
+    const source = await text(`deploy/config/${filename}`);
+    assert.match(source, /hubctl put <编号>/);
+    assert.match(source, /FBIF-One-Api 的 docs\/hub\/公共变量和密钥\.md/);
+  }
+});
+
+test('env validator overlays later files like systemd for required and version checks only', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'fbif-env-overlay-'));
+  const secret = 'overlay-secret-must-not-appear';
+  const write = async (name, source) => {
+    const path = join(directory, name);
+    await writeFile(path, source, 'utf8');
+    return path;
+  };
+  const validate = (file, ...overlays) => execFileAsync('python3', [
+    validatorPath, ...overlays.flatMap(overlay => ['--overlay', overlay]), schemaPath, 'render', file,
+  ]);
+  const rejectsWith = (promise, pattern) => assert.rejects(promise, error => {
+    assert.match(error.stderr, pattern);
+    assert.doesNotMatch(error.stdout + error.stderr, new RegExp(secret), '错误路径不得打印密钥值');
+    return true;
+  });
+  try {
+    const renderEnv = configPath('render.env.example');
+    // 中台文件：头部注释、同名多行（取最后一行）、别的组的变量都是正常的。
+    const hub = await write('render-hub.env', `# 由 FBIF 中台本机代理写\nRENDER_TOKEN=stale\nRENDER_TOKEN=${secret}\nFOODTALKS_TOKEN=${secret}\n`);
+    const ok = await validate(renderEnv, hub);
+    assert.match(ok.stdout, /env validation ok \[render\]: 7 variables, overlay .*render-hub\.env: 2 variables/);
+    assert.doesNotMatch(ok.stdout, new RegExp(secret));
+
+    await rejectsWith(validate(renderEnv), /missing or empty required variables: RENDER_TOKEN/);
+    await rejectsWith(validate(renderEnv, join(directory, 'missing.env')), /overlay file not found: .*missing\.env/);
+
+    // 后读的同名为准：叠加文件把值清空、把版本改掉，都按合并后的值判。
+    const blank = await write('blank.env', 'RENDER_TOKEN=\n');
+    await rejectsWith(validate(renderEnv, hub, blank), /missing or empty required variables: RENDER_TOKEN/);
+    await validate(renderEnv, blank, hub);
+    const stale = await write('stale-version.env', 'FBIF_CONFIG_SCHEMA_VERSION=2\n');
+    await rejectsWith(validate(renderEnv, hub, stale), /config schema version mismatch: FBIF_CONFIG_SCHEMA_VERSION/);
+
+    // 未知变量、重复变量仍只查主文件，叠加文件救不了主文件的错。
+    const base = await readFile(renderEnv, 'utf8');
+    await rejectsWith(validate(await write('dup.env', `${base}NODE_ENV=production\n`), hub), /duplicate variable: NODE_ENV/);
+    await rejectsWith(validate(await write('unknown.env', `${base}FOODTALKS_TOKEN=${secret}\n`), hub), /unknown variables: FOODTALKS_TOKEN/);
+    await rejectsWith(validate(renderEnv, await write('broken.env', `not a line ${secret}\n`)), /overlay .*broken\.env: line 1: expected NAME=value/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

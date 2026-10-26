@@ -58,9 +58,10 @@ jobs:
           shellcheck deploy/scripts/*.sh
           bash -n deploy/scripts/deploy-transaction.sh
           python3 -m py_compile deploy/scripts/validate-env.py
-          python3 deploy/scripts/validate-env.py deploy/config/env-schema.json api_managed deploy/config/api.env.example
-          python3 deploy/scripts/validate-env.py deploy/config/env-schema.json api_publish deploy/config/publish.env.example
-          python3 deploy/scripts/validate-env.py deploy/config/env-schema.json render deploy/config/render.env.example
+          # 中台下发的变量只在中台文件里，示例同样叠上中台文件的示例再校验（和服务器上 preflight 一样）。
+          python3 deploy/scripts/validate-env.py --overlay deploy/config/hub-layout.env.example deploy/config/env-schema.json api_managed deploy/config/api.env.example
+          python3 deploy/scripts/validate-env.py --overlay deploy/config/hub-layout.env.example deploy/config/env-schema.json api_publish deploy/config/publish.env.example
+          python3 deploy/scripts/validate-env.py --overlay deploy/config/hub-render.env.example deploy/config/env-schema.json render deploy/config/render.env.example
 
   frontend-contracts:
     runs-on: ubuntu-latest

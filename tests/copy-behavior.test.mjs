@@ -837,10 +837,11 @@ test('footer original and repost notices come from behavior rules', async () => 
 
 test('deploy writes role-based rule admin credentials to production env', async () => {
   const workflow = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /PUBLISH_ADMIN_SERVICE_TOKEN:\s*\$\{\{ secrets\.PUBLISH_ADMIN_SERVICE_TOKEN \}\}/);
   assert.match(workflow, /RULE_SUPER_ADMIN_OPEN_IDS:\s*\$\{\{ secrets\.RULE_SUPER_ADMIN_OPEN_IDS \}\}/);
-  assert.match(workflow, /PUBLISH_ADMIN_SERVICE_TOKEN GitHub secret is required|PUBLISH_ADMIN_SERVICE_TOKEN/);
-  assert.match(workflow, /PUBLISH_ADMIN_SERVICE_TOKEN=%s\\n/);
   assert.match(workflow, /RULE_SUPER_ADMIN_OPEN_IDS=%s\\n/);
+  // 管理员服务令牌 2026-10-26 起由 FBIF 中台下发到服务器的 /etc/fbif-hub/env/layout.env，
+  // CI 不再持有、也不写进 .env（见 tests/deploy-transaction.test.mjs）。
+  assert.doesNotMatch(workflow, /secrets\.PUBLISH_ADMIN_SERVICE_TOKEN/);
+  assert.doesNotMatch(workflow, /PUBLISH_ADMIN_SERVICE_TOKEN=%s/);
   assert.doesNotMatch(workflow, /ADMIN_PASSWORD/);
 });

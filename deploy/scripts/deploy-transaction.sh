@@ -30,6 +30,13 @@ API_TARGET=$API_DIR/fbif-api
 ENV_TARGET=$API_DIR/.env
 RENDER_TARGET=/var/www/render-service
 RENDER_ENV_TARGET=/var/www/render-service.env
+# FBIF 中台下发的变量（2026-10-26 起）：本机代理（hub-agent）把它们整份写成下面两个文件
+# （root:root 0600），systemd drop-in zz-fbif-hub.conf 让服务最后读、同名为准。CI 和 publish.env
+# 不再放这些值；本脚本只读不写。换值在内部工具服务器上 hubctl put <编号>，
+# 见 FBIF-One-Api 的 docs/hub/公共变量和密钥.md。
+HUB_LAYOUT_ENV=/etc/fbif-hub/env/layout.env
+HUB_RENDER_ENV=/etc/fbif-hub/env/render.env
+API_READINESS_URL=http://127.0.0.1:9001/api/publish/readiness
 CADDY_TARGET=/etc/caddy/sites/fbifmp-layout.caddy
 API_SERVICE_TARGET=/etc/systemd/system/fbif-api.service
 RENDER_SERVICE_TARGET=/etc/systemd/system/fbif-render.service
@@ -79,6 +86,44 @@ wait_runtime_config_ok() {
   return 1
 }
 
+# hub_env_value 从中台文件取一个变量的值（同名取最后一行，和 systemd 一样）。中台写的值不带
+# 引号、没有空白。值只经标准输出交给调用方的 $(...)，调用方不得打印、不得放进命令行参数。
+hub_env_value() {
+  local file=$1 name=$2 line value=''
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$name="* ]]; then
+      value=${line#"$name="}
+    fi
+  done <"$file"
+  printf '%s' "$value"
+}
+
+# require_hub_env 确认服务要读的中台文件在、归 root、权限 600，而且是这个服务最后读的
+# EnvironmentFile（drop-in 没装或没 daemon-reload 时，服务会悄悄拿不到中台的值）。
+require_hub_env() {
+  local unit=$1 file=$2 owner_mode last_env
+  [[ -f "$file" && ! -L "$file" ]] ||
+    die "缺中台文件 $file：它由 FBIF 中台的本机代理（hub-agent）写，先在中台给 $unit 配好变量、等代理写出来再部署"
+  owner_mode=$(stat -c '%u %a' -- "$file")
+  [[ "$owner_mode" == "0 600" ]] ||
+    die "中台文件 $file 必须归 root、权限 600（现在 uid 和权限是 $owner_mode）；它由中台代理写，别手改，查 hub-agent"
+  last_env=$(systemctl show --property=EnvironmentFiles --value "$unit" | tail -n 1)
+  [[ "$last_env" == "$file (ignore_errors="* ]] ||
+    die "$unit 最后读的不是中台文件 $file：检查 /etc/systemd/system/$unit.service.d/zz-fbif-hub.conf，改完 systemctl daemon-reload"
+}
+
+# publish_readiness 在服务器本机取管理员 readiness，把响应 JSON 原样写到标准输出，部署工作流经
+# SSH 拿去做 jq 断言。管理员服务令牌由中台下发、CI 不再持有：从中台文件读进变量，经标准输入交给
+# curl 当请求头（printf 是内建命令，令牌不进任何进程的命令行），不打印；标准输出只有响应体。
+publish_readiness() {
+  local token
+  require_hub_env fbif-api "$HUB_LAYOUT_ENV"
+  token=$(hub_env_value "$HUB_LAYOUT_ENV" PUBLISH_ADMIN_SERVICE_TOKEN)
+  [[ -n "$token" ]] || die "中台文件 $HUB_LAYOUT_ENV 里没有 PUBLISH_ADMIN_SERVICE_TOKEN"
+  printf 'X-Publish-Admin-Token: %s\n' "$token" |
+    curl --silent --show-error --fail --max-time 15 --header @- "$API_READINESS_URL"
+}
+
 validate_release() {
   local required
   for required in \
@@ -102,7 +147,7 @@ validate_release() {
 
   local command_name
   for command_name in caddy curl install mv cp rm sed systemctl systemd-analyze python3 realpath \
-    chown chmod date find sort grep; do
+    chown chmod date find sort grep stat tail; do
     command -v "$command_name" >/dev/null || die "missing remote command: $command_name"
   done
 
@@ -117,9 +162,18 @@ validate_release() {
   systemd-analyze verify \
     "$RELEASE_DIR/systemd/fbif-api.service" \
     "$RELEASE_DIR/systemd/fbif-render.service"
-  python3 "$RELEASE_DIR/validate-env.py" "$RELEASE_DIR/config/env-schema.json" api_managed "$RELEASE_DIR/api.env"
-  python3 "$RELEASE_DIR/validate-env.py" "$RELEASE_DIR/config/env-schema.json" api_publish /var/www/api/publish.env
-  python3 "$RELEASE_DIR/validate-env.py" "$RELEASE_DIR/config/env-schema.json" render "$RELEASE_DIR/render.env"
+  # 中台下发的变量不在 api.env、render.env 里：校验时把中台文件叠在后面，和服务实际读到的一样。
+  require_hub_env fbif-api "$HUB_LAYOUT_ENV"
+  require_hub_env fbif-render "$HUB_RENDER_ENV"
+  # 以前 CI 用同一个 Secret 写两边的 RENDER_TOKEN；现在两边各读一份中台文件，对不上每次渲染都 401。
+  [[ "$(hub_env_value "$HUB_LAYOUT_ENV" RENDER_TOKEN)" == "$(hub_env_value "$HUB_RENDER_ENV" RENDER_TOKEN)" ]] ||
+    die "中台文件 $HUB_LAYOUT_ENV 与 $HUB_RENDER_ENV 的 RENDER_TOKEN 不一致：API 调渲染服务会 401，先在中台对齐"
+  python3 "$RELEASE_DIR/validate-env.py" --overlay "$HUB_LAYOUT_ENV" \
+    "$RELEASE_DIR/config/env-schema.json" api_managed "$RELEASE_DIR/api.env"
+  python3 "$RELEASE_DIR/validate-env.py" --overlay "$HUB_LAYOUT_ENV" \
+    "$RELEASE_DIR/config/env-schema.json" api_publish /var/www/api/publish.env
+  python3 "$RELEASE_DIR/validate-env.py" --overlay "$HUB_RENDER_ENV" \
+    "$RELEASE_DIR/config/env-schema.json" render "$RELEASE_DIR/render.env"
   grep -qx 'ENV=production' "$RELEASE_DIR/api.env" ||
     die "staged API env must declare ENV=production"
   grep -qx 'DEPLOYMENT_WRITES_PAUSED=1' "$RELEASE_DIR/api.env" ||
@@ -409,6 +463,9 @@ case "$ACTION" in
   unpause)
     unpause_release
     ;;
+  readiness)
+    publish_readiness
+    ;;
   prepare-monitoring)
     cleanup_legacy_watchdog
     cleanup_group_broadcast
@@ -422,6 +479,6 @@ case "$ACTION" in
     finalize_release
     ;;
   *)
-    die "usage: $0 {preflight|activate|prepare-monitoring|unpause|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
+    die "usage: $0 {preflight|activate|readiness|prepare-monitoring|unpause|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
     ;;
 esac

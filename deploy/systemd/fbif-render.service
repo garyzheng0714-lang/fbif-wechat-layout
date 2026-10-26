@@ -9,6 +9,7 @@ DynamicUser=yes
 WorkingDirectory=/var/www/render-service
 Environment=FBIF_CONFIG_SCHEMA_VERSION=1
 EnvironmentFile=/var/www/render-service.env
+# 服务器上另有 drop-in zz-fbif-hub.conf（不在仓库）：最后读 FBIF 中台下发的 /etc/fbif-hub/env/render.env（RENDER_TOKEN）。
 ExecStart=/usr/bin/node /var/www/render-service/server.mjs
 Restart=on-failure
 RestartSec=3s

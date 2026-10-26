@@ -12,6 +12,7 @@ Environment=FBIF_CONFIG_SCHEMA_VERSION=1
 EnvironmentFile=/var/www/api/publish.env
 # 部署托管配置最后加载，覆盖旧 publish.env 里可能残留的空上传地址。
 EnvironmentFile=/var/www/api/.env
+# 服务器上另有 drop-in zz-fbif-hub.conf（不在仓库）：最后读 FBIF 中台下发的 /etc/fbif-hub/env/layout.env，同名以它为准。
 ExecStart=/var/www/api/fbif-api -port 9001 -public /var/www/wechat-layout
 Restart=on-failure
 RestartSec=3s

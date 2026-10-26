@@ -19,13 +19,15 @@ PC_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHT
 MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
 
-def load_env(path="/var/www/api/publish.env"):
+# 和 fbif-api 一样先读 publish.env，再叠上 FBIF 中台下发的密钥文件（FOODTALKS_TOKEN 在后者），同名以后读的为准。
+def load_env(paths=("/var/www/api/publish.env", "/etc/fbif-hub/env/layout.env")):
     env = {}
-    for line in open(path):
-        line = line.strip()
-        if "=" in line and not line.startswith("#"):
-            key, value = line.split("=", 1)
-            env[key] = value.strip().strip('"').strip("'")
+    for path in paths:
+        for line in open(path):
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                env[key] = value.strip().strip('"').strip("'")
     return env
 
 

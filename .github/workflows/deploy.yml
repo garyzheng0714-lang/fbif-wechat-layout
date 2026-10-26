@@ -57,19 +57,18 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           LIBREOFFICE_URL: ${{ secrets.LIBREOFFICE_URL }}
           LIBREOFFICE_TOKEN: ${{ secrets.LIBREOFFICE_TOKEN }}
-          CLOUDCONVERT_API_KEY: ${{ secrets.CLOUDCONVERT_API_KEY }}
-          PUBLISH_ADMIN_SERVICE_TOKEN: ${{ secrets.PUBLISH_ADMIN_SERVICE_TOKEN }}
           RULE_SUPER_ADMIN_OPEN_IDS: ${{ secrets.RULE_SUPER_ADMIN_OPEN_IDS }}
-          RENDER_TOKEN: ${{ secrets.RENDER_TOKEN }}
           AUTH_SESSION_SECRET: ${{ secrets.AUTH_SESSION_SECRET }}
           AUTH_PASSWORD_USERS_B64: ${{ secrets.AUTH_PASSWORD_USERS_B64 }}
           FEISHU_LOGIN_APP_ID: ${{ secrets.FEISHU_LOGIN_APP_ID }}
-          FEISHU_LOGIN_APP_SECRET: ${{ secrets.FEISHU_LOGIN_APP_SECRET }}
         run: |
           set -Eeuo pipefail
 
           # 所有必需配置必须在任何远端 live 写入前 fail loud。只打印变量名，绝不打印值。
-          for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH PUBLISH_ADMIN_SERVICE_TOKEN RULE_SUPER_ADMIN_OPEN_IDS RENDER_TOKEN AUTH_SESSION_SECRET AUTH_PASSWORD_USERS_B64 FEISHU_LOGIN_APP_ID FEISHU_LOGIN_APP_SECRET; do
+          # CLOUDCONVERT_API_KEY、FEISHU_LOGIN_APP_SECRET、PUBLISH_ADMIN_SERVICE_TOKEN、RENDER_TOKEN
+          # 由 FBIF 中台下发到服务器的 /etc/fbif-hub/env/layout.env、render.env，CI 不持有也不写；
+          # 事务脚本 preflight 时查中台文件。
+          for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH RULE_SUPER_ADMIN_OPEN_IDS AUTH_SESSION_SECRET AUTH_PASSWORD_USERS_B64 FEISHU_LOGIN_APP_ID; do
             if [ -z "${!required:-}" ]; then
               echo "Missing required deployment secret: ${required}" >&2
               exit 1
@@ -127,6 +126,11 @@ jobs:
           on_deploy_error() {
             local rc=${1:-$?}
             local rollback_failed=0
+            # set -E 让 ERR trap 在 $(...) 里也触发。子 shell 只带着退出码出去，回滚只由主 shell 做
+            # 一次；否则子 shell 先回滚并删掉 staging，主 shell 再回滚找不到事务脚本、误报 ROLLBACK FAILED。
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+              exit "$rc"
+            fi
             trap - ERR HUP INT TERM
             if [ "$release_accepted" -eq 1 ]; then
               echo "Release already accepted; refusing automatic rollback after workers may have resumed." >&2
@@ -198,11 +202,13 @@ jobs:
           ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
             "cd '$RELEASE_DIR/render' && npm ci --omit=dev --no-audit --no-fund"
 
-          # publish.env 是手工维护的独立 EnvironmentFile，不在这里覆盖。
-          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nCLOUDCONVERT_API_KEY=%s\nPUBLISH_ADMIN_SERVICE_TOKEN=%s\nRULE_SUPER_ADMIN_OPEN_IDS=%s\nAUTH_SESSION_SECRET=%s\nAUTH_USERS_PATH=/var/www/api/data/auth-users.json\nAUTH_PASSWORD_USERS_B64=%s\nFEISHU_LOGIN_APP_ID=%s\nFEISHU_LOGIN_APP_SECRET=%s\nFEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/callback\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_TOKEN=%s\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$CLOUDCONVERT_API_KEY" "$PUBLISH_ADMIN_SERVICE_TOKEN" "$RULE_SUPER_ADMIN_OPEN_IDS" "$AUTH_SESSION_SECRET" "$AUTH_PASSWORD_USERS_B64" "$FEISHU_LOGIN_APP_ID" "$FEISHU_LOGIN_APP_SECRET" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "$RENDER_TOKEN" "http://127.0.0.1:19096" | base64 -w 0)
+          # publish.env 是手工维护的独立 EnvironmentFile，不在这里覆盖。中台下发的变量（上面 4 个和
+          # publish.env 里原来的 6 个）只在中台文件里，systemd drop-in 让服务最后读它、同名为准。
+          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nRULE_SUPER_ADMIN_OPEN_IDS=%s\nAUTH_SESSION_SECRET=%s\nAUTH_USERS_PATH=/var/www/api/data/auth-users.json\nAUTH_PASSWORD_USERS_B64=%s\nFEISHU_LOGIN_APP_ID=%s\nFEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/callback\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$RULE_SUPER_ADMIN_OPEN_IDS" "$AUTH_SESSION_SECRET" "$AUTH_PASSWORD_USERS_B64" "$FEISHU_LOGIN_APP_ID" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "http://127.0.0.1:19096" | base64 -w 0)
           printf -v env_stage_command 'umask 077; base64 -d > %q' "$RELEASE_DIR/api.env"
           printf '%s' "$ENV_CONTENT" | ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "$env_stage_command"
-          RENDER_ENV_CONTENT=$(printf 'FBIF_CONFIG_SCHEMA_VERSION=1\nNODE_ENV=production\nRENDER_PORT=19096\nRENDER_TOKEN=%s\nPUBLIC_DIR=%s\nRULES_API_ORIGIN=http://127.0.0.1:9001\nASSET_ORIGIN=%s\nRENDER_BUILD_SHA=%s\n' "$RENDER_TOKEN" "${DEPLOY_PATH}" "$SITE_ORIGIN" "$GITHUB_SHA" | base64 -w 0)
+          # 渲染服务的 RENDER_TOKEN 由中台下发到 /etc/fbif-hub/env/render.env，这里不写。
+          RENDER_ENV_CONTENT=$(printf 'FBIF_CONFIG_SCHEMA_VERSION=1\nNODE_ENV=production\nRENDER_PORT=19096\nPUBLIC_DIR=%s\nRULES_API_ORIGIN=http://127.0.0.1:9001\nASSET_ORIGIN=%s\nRENDER_BUILD_SHA=%s\n' "${DEPLOY_PATH}" "$SITE_ORIGIN" "$GITHUB_SHA" | base64 -w 0)
           printf -v render_env_stage_command 'umask 077; base64 -d > %q' "$RELEASE_DIR/render.env"
           printf '%s' "$RENDER_ENV_CONTENT" | ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "$render_env_stage_command"
 
@@ -242,9 +248,9 @@ jobs:
             "${SITE_ORIGIN}/api/feishu/card-callback")
           [ "$feishu_status" = "404" ]
 
-          readiness_json=$(curl --silent --show-error --fail \
-            --header "X-Publish-Admin-Token: ${PUBLISH_ADMIN_SERVICE_TOKEN}" \
-            "${SITE_ORIGIN}/api/publish/readiness")
+          # 管理员 readiness 要的服务令牌只在服务器的中台文件里：经 SSH 让事务脚本在本机读令牌、
+          # 调 127.0.0.1:9001，标准输出只有响应 JSON。
+          readiness_json=$(remote_transaction readiness)
           echo "$readiness_json" | jq -e '
             .ready == true and
             .config_schema.expected == "1" and
@@ -289,9 +295,7 @@ jobs:
           unpaused_health=$(curl --silent --show-error --fail --retry 12 --retry-delay 2 --retry-all-errors \
             "${SITE_ORIGIN}/api/health")
           echo "$unpaused_health" | jq -e '.status == "ok"' >/dev/null
-          unpaused_readiness=$(curl --silent --show-error --fail \
-            --header "X-Publish-Admin-Token: ${PUBLISH_ADMIN_SERVICE_TOKEN}" \
-            "${SITE_ORIGIN}/api/publish/readiness")
+          unpaused_readiness=$(remote_transaction readiness)
           echo "$unpaused_readiness" | jq -e '
             .ready == true and
             .config_schema.matches == true and

@@ -313,9 +313,11 @@ curl http://127.0.0.1:9000/api/health
 | `HUB_BUNDLE_URL` / `HUB_KEY` | FBIF 中台（内部工具服务器上的 One-Api 第二实例，经 SSH 通道在主力服务器本机 `127.0.0.1:13199` 访问，One-Api `docs/hub/`）：外发账号从它的配置包读，MiMo 密钥从它的密钥端点取；钥匙授 `config.bundle.layout`、`config.secrets.layout` |
 | `LAYOUT_MONITOR_URL` / `FEED_MONITOR_URL` / `OFFICIAL_MONITOR_URL` | 旧 watchdog 迁移后的兼容键；本服务不读取、不使用它们发探针，只为旧 `publish.env` 过渡保留 |
 
-环境变量的完整机器可读合同在 `deploy/config/env-schema.json`，三份无密钥示例分别对应流水线 API env、服务器 `publish.env` 和 renderer env。部署会在改写 live 路径前检查未知键、重复键、必填空值和 schema 版本；验证器只输出变量名，不输出值。
+FBIF 中台下发（2026-10-26 起）：`CLOUDCONVERT_API_KEY`、`FEISHU_LOGIN_APP_SECRET`、`PUBLISH_ADMIN_SERVICE_TOKEN`、`RENDER_TOKEN`、`DISTRIBUTION_API_TOKEN`、`FEISHU_APP_SECRET`、`FOODTALKS_TOKEN`、`HUB_KEY`、`PUBLISH_SYNC_SERVICE_TOKEN`、`TIKHUB_API_KEY` 这 10 个由中台本机代理写进 `/etc/fbif-hub/env/layout.env`，渲染服务的 `RENDER_TOKEN` 写进 `/etc/fbif-hub/env/render.env`（都是 root 0600）；systemd drop-in `zz-fbif-hub.conf` 让服务最后读它、同名为准。它们不写在 CI 和 `publish.env` 里；换值在内部工具服务器上 `hubctl put <编号>`，详见 FBIF-One-Api 的 `docs/hub/公共变量和密钥.md`。
 
-部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_KNOWN_HOSTS`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`PUBLISH_ADMIN_SERVICE_TOKEN`、`RULE_SUPER_ADMIN_OPEN_IDS` 等 GitHub Secrets。`SERVER_KNOWN_HOSTS` 必须通过可信渠道取得并人工核验服务器公钥，内容采用 OpenSSH `known_hosts` 格式；工作流不会再用 `ssh-keyscan` 临时信任首次看到的主机。生产 `/var/www/api/publish.env` 还必须显式设置 `FEISHU_CALLBACK_MODE=websocket`（如确需 Webhook 才改为 `webhook`）。网页规则后台不再使用共享密码；不要把飞书、发布服务令牌、LibreOffice、CloudConvert 或服务器密钥提交到仓库。
+环境变量的完整机器可读合同在 `deploy/config/env-schema.json`，无密钥示例分别对应流水线 API env、服务器 `publish.env`、renderer env 和两份中台文件（`hub-layout.env.example`、`hub-render.env.example`）。部署会在改写 live 路径前确认中台文件在、归 root、权限 600、是服务最后读的那份，两边 `RENDER_TOKEN` 一致；校验时把中台文件叠在后面（同名以它为准）查必填空值和 schema 版本，未知键、重复键只查主文件；验证器只输出变量名，不输出值。
+
+部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_KNOWN_HOSTS`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`RULE_SUPER_ADMIN_OPEN_IDS` 等 GitHub Secrets。`SERVER_KNOWN_HOSTS` 必须通过可信渠道取得并人工核验服务器公钥，内容采用 OpenSSH `known_hosts` 格式；工作流不会再用 `ssh-keyscan` 临时信任首次看到的主机。生产 `/var/www/api/publish.env` 还必须显式设置 `FEISHU_CALLBACK_MODE=websocket`（如确需 Webhook 才改为 `webhook`）。网页规则后台不再使用共享密码；不要把飞书、发布服务令牌、LibreOffice、CloudConvert 或服务器密钥提交到仓库。
 
 发布任务当前采用 JSON 文件 + 进程内互斥锁，部署约束是同一 `PUBLISH_JOBS_PATH` 只能由一个 API 进程写入；如扩为多实例，必须先迁移到带唯一约束和事务的共享数据库，不能让多个进程直接共写该文件。
 
@@ -349,7 +351,7 @@ go test ./...
 1. 使用已修复已知标准库漏洞的 Go 1.26.10 构建 `api/fbif-api`，并写入 `public/version.json`。
 2. 把 `public/`、API、render service、Caddy、systemd 单元、env schema 与候选 env 同步进隔离 release；候选 API env 强制 `DEPLOYMENT_WRITES_PAUSED=1`，不会消费任务或接收写操作。
 3. 在任何 live 切换前验证三类 env、Caddy、systemd 单元和当前服务；然后事务式切换 API、renderer、静态资源、单元、Caddy 与配置 schema。
-4. 验证公网 commit SHA、健康、鉴权和 `/api/publish/readiness`；readiness 同时锁定配置版本、两个生成注册表哈希、JSON store、独立服务令牌、HTTP 审核关闭、可用审核权限来源、FoodTalks 目标、分类、渲染、飞书与 MiMo 配置（`enrich_mode=mimo`）。
+4. 验证公网 commit SHA、健康、鉴权和 `/api/publish/readiness`（readiness 经 SSH 由事务脚本在服务器本机取，管理员令牌从中台文件读，CI 不持有）；readiness 同时锁定配置版本、两个生成注册表哈希、JSON store、独立服务令牌、HTTP 审核关闭、可用审核权限来源、FoodTalks 目标、分类、渲染、飞书与 MiMo 配置（`enrich_mode=mimo`）。
 5. 写暂停窗口内执行 `prepare-monitoring`：幂等摘除历史 `fbif-monitor-watchdog` 与审核群 08:30 监控播报单元，不安装、启用或验收外检 timer。任何可回滚验收失败都恢复上一 release，但回滚也不恢复这两类已退役单元。
 6. 验收后先关闭自动回滚，再解除 worker 暂停。此时外部副作用可能恢复，失败只允许向前修复；跨系统外检由 `FoodTalks_Feed` 的 `fbif-link-watchdog` 负责。
 7. `finalize` 将已验收产物保留到 `/var/www/.fbif-layout-history/<deploy-id>/`，最多 5 份；快照包含 API、renderer、public、Caddy、systemd 和 env schema，明确不含 `.env`、`publish.env` 或 `render-service.env`。快照成功后才删除短期事务备份。
@@ -361,7 +363,7 @@ go test ./...
 1. 在 GitHub Secret `RULE_SUPER_ADMIN_OPEN_IDS` 中维护超级管理员飞书 `open_id`；人员变更只更新秘密配置，不把真实身份值写入文档。
 2. 超级管理员登录后打开“规则后台 → 权限管理”，把已经登录过的账号切换为“管理员”。
 3. 规则后台所有网页请求复用登录会话；旧的密码接口不再提供后台权限。
-4. 部署/运维脚本使用独立的 `PUBLISH_ADMIN_SERVICE_TOKEN`，它与网页角色权限分离。
+4. 部署/运维脚本使用独立的 `PUBLISH_ADMIN_SERVICE_TOKEN`（中台下发），它与网页角色权限分离。
 
 ## 维护说明
 
