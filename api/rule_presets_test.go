@@ -70,8 +70,8 @@ func TestRulePresetStorePersistsActivePreset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if len(doc.Presets) != 6 {
-		t.Fatalf("expected five account defaults + custom preset, got %d", len(doc.Presets))
+	if len(doc.Presets) != 7 {
+		t.Fatalf("expected six account defaults + custom preset, got %d", len(doc.Presets))
 	}
 
 	if _, err := store.setActive("campaign"); err != nil {
@@ -522,10 +522,10 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 		t.Fatalf("list default store: %v", err)
 	}
 
-	// 5 个账号，顺序由 accountCatalog（单一真相源）派生，与前端账号菜单一致：
-	// fbif, foodtalks-series, wowfood, ft-default, ft-series。
-	if len(doc.Accounts) != 5 {
-		t.Fatalf("accounts = %d, want 5: %#v", len(doc.Accounts), doc.Accounts)
+	// 6 个账号，顺序由 accountCatalog（单一真相源）派生，与前端账号菜单一致：
+	// fbif, foodtalks-series, wowfood, ft-default, ft-series, foodtalks-mp。
+	if len(doc.Accounts) != 6 {
+		t.Fatalf("accounts = %d, want 6: %#v", len(doc.Accounts), doc.Accounts)
 	}
 	wantOrder := []struct{ id, name string }{
 		{"fbif", "FBIF食品饮料创新"},
@@ -533,6 +533,7 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 		{"wowfood", "WowFood爆品超市"},
 		{"ft-default", "网站默认"},
 		{"ft-series", "网站·什么是系列"},
+		{"foodtalks-mp", "FoodTalks食品资讯"},
 	}
 	for i, want := range wantOrder {
 		if doc.Accounts[i].ID != want.id {
@@ -855,9 +856,9 @@ func TestRulePresetPublicCatalogOmitsRuleBodies(t *testing.T) {
 	if _, ok := payload.Presets[0]["behavior"]; ok {
 		t.Fatalf("catalog must not expose behavior code body: %#v", payload.Presets[0])
 	}
-	// Now 5 accounts: fbif, wowfood, foodtalks-series, ft-default, ft-series (FoodTalks website)
-	if len(payload.Accounts) != 5 {
-		t.Fatalf("catalog accounts = %d, want 5", len(payload.Accounts))
+	// 6 accounts: fbif, foodtalks-series, wowfood, ft-default, ft-series (FoodTalks website), foodtalks-mp
+	if len(payload.Accounts) != 6 {
+		t.Fatalf("catalog accounts = %d, want 6", len(payload.Accounts))
 	}
 	for _, binding := range payload.Accounts {
 		if binding.ActiveRevision <= 0 {
@@ -983,7 +984,7 @@ func TestRulePresetStoreMigratesLegacyV1FileToV2OnWriteKeepingLegacyFacade(t *te
 	if doc.ActiveID != "campaign" {
 		t.Fatalf("legacy facade active_id = %q, want campaign", doc.ActiveID)
 	}
-	if len(doc.Presets) != 6 {
+	if len(doc.Presets) != 7 {
 		t.Fatalf("legacy facade presets = %d, want account defaults + campaign", len(doc.Presets))
 	}
 	active, err = reloaded.active()
@@ -1069,9 +1070,9 @@ func TestRulePresetHandlersKeepLegacyResponseShapeOnV2Store(t *testing.T) {
 		t.Fatalf("admin list missing presets")
 	}
 	accounts, ok := docPayload["accounts"].([]any)
-	// Now 5 accounts: fbif, wowfood, foodtalks-series, ft-default, ft-series (FoodTalks website)
-	if !ok || len(accounts) != 5 {
-		t.Fatalf("admin list accounts = %#v, want four account bindings", docPayload["accounts"])
+	// 6 accounts: fbif, foodtalks-series, wowfood, ft-default, ft-series (FoodTalks website), foodtalks-mp
+	if !ok || len(accounts) != 6 {
+		t.Fatalf("admin list accounts = %#v, want six account bindings", docPayload["accounts"])
 	}
 	if _, ok := docPayload["rules"]; ok {
 		t.Fatalf("admin list leaked v2 rules")

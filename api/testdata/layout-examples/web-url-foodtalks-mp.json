@@ -1,0 +1,33 @@
+{
+  "account": {
+    "id": "foodtalks-mp",
+    "name": "FoodTalks食品资讯",
+    "paste_into": "微信公众号后台编辑器"
+  },
+  "title": "（占位）正式开工！中国最北山姆会员店来了",
+  "summary": "",
+  "html": "<section style=\"margin: 0 8px 20px; text-align: left; line-height: 1.75;\"><span style=\"font-size: 15px; line-height: 1.75; color: #544545;\">（占位）上线后换成真实排过的回答。</span></section>",
+  "repost": true,
+  "footer": true,
+  "input": {
+    "kind": "web_url",
+    "url": "https://www.foodtalks.cn/news/63234",
+    "source_name": "职业零售网"
+  },
+  "images": [],
+  "stats": {
+    "images": 0,
+    "images_mirrored": 0,
+    "headings": 0,
+    "html_bytes": 0
+  },
+  "rule": {
+    "preset_id": "foodtalks-mp-default",
+    "revision": 1,
+    "config_hash": ""
+  },
+  "build": "",
+  "output_hash": "",
+  "warnings": [],
+  "request_id": "lr_Q2xhdWRlRXhh"
+}

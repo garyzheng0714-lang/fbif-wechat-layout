@@ -19,7 +19,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 排版工具进入方式：
 
 - 打开 `/` 会**无条件重定向到 `/mp/fbif`**（FBIF 公众号编辑器），不再有渠道选择门户。
-- 公众号渠道走 `/mp/<packId>`（由 `public/app.html` 服务）：FBIF、WowFood爆品超市、FoodTalks什么是系列。
+- 公众号渠道走 `/mp/<packId>`（由 `public/app.html` 服务）：FBIF、WowFood爆品超市、FoodTalks什么是系列、FoodTalks食品资讯。
 - 网站渠道走 `/ft/<packId>`（由 `public/site.html` 服务）：FoodTalks 网站默认包 `ft-default`，进入路径 `/ft/ft-default`，独立页面、无胶囊、无"更多文章"、输出 inline-style HTML 给 FoodTalks 网站后台粘贴。
 - 账号切换统一走**左栏导入卡第一行的单层账号菜单**（`public/js/account-menu.js` 的 `mountAccountMenu`，挂载点 `#acctMenu`），渠道只是菜单内分组；同模板账号原地切换，跨模板 / 跨渠道账号整页 reload。顶栏只保留当前页面动作。
 - 老 URL（`/app.html`、`/mp`）仍可用，作为公众号工具的过渡 alias。
@@ -47,7 +47,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **微信草稿存活保护**：公众号复制层对更多文章卡片、微信图床属性、位图占位和异步回写做 T0 安全约束，防止内容粘贴后在“保存草稿”阶段被微信清洗掉。
 - **FoodTalks CMS 存活保护**：网站表格同时输出 HTML 属性、内容层和 inline style，保证 TinyMCE 清洗样式后仍保留边框、对齐、表头和 Word 图片尺寸。
 - **飞书云文档导入走异步作业**：导出、剥图与图片镜像在服务端作业里完成，前端用 long-poll 拿真实阶段进度；正文图一次性批量镜像到 OSS。预览在离屏 staging 备齐并解码后整帧提交，导入期间旧文章保持可见。真实 10MB 级多图文档的生产耗时仍是未排期验收项，触发条件是下一次生产多图导入验收。
-- **排版接口**：`/api/layout/v1/*` 给公司内部系统和同事用，交链接、飞书文档、Word、HTML、Markdown 或文字加一个账号（5 个都行），拿回与网页点「复制」逐字一样的成品 HTML；每家一把 `flk_` 钥匙，名单在 FBIF 中台。只排版、不建发布单。说明书见 [docs/layout-api.md](docs/layout-api.md)，维护见 [docs/layout-api-maintenance.md](docs/layout-api-maintenance.md)。
+- **排版接口**：`/api/layout/v1/*` 给公司内部系统和同事用，交链接、飞书文档、Word、HTML、Markdown 或文字加一个账号（6 个都行），拿回与网页点「复制」逐字一样的成品 HTML；每家一把 `flk_` 钥匙，名单在 FBIF 中台。只排版、不建发布单。说明书见 [docs/layout-api.md](docs/layout-api.md)，维护见 [docs/layout-api-maintenance.md](docs/layout-api-maintenance.md)。
 - **程序化渲染（旧）**：Bearer 鉴权的 `/api/render` 和 `/api/html-to-blocks` 给 Feed 用，支持 `fbif`、`ft-default`、`ft-series`，字节不动。
 - **受控发布流水线**：提交公众号文章 URL 后，系统依次抓取、渲染、转存图片、AI 预填与风险检查、写入 FoodTalks 隐藏草稿，并停在 `awaiting_review`。默认只有飞书卡片或管理员审核的 `approve` 能翻公开；管理后台「发布链路」打开自动发布后，新同步且风险为 `pass|warning` 的稿会由系统持久化 approve 后直接上线，群卡和下线按钮仍保留。审核请求只持久化 `publicizing` 决策并立即返回，FoodTalks 请求由可恢复后台 worker 执行。
 - **上游只交链接**：`site-sync` 与 `official-sync` 只接收链接、规则包和分类证据；正文、标题、来源、作者或封面一旦出现就显式 400。详细字段、状态码与幂等见 [发布接入契约](docs/publish-intake-contract.md)。
@@ -73,7 +73,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - “更多文章”URL 粘贴支持移动端 input-only 行为；输入合法微信文章链接后会自动抓取，重复输入同一链接不闪烁状态。
 - 支持旧版 `.doc` 经 LibreOffice 服务或 CloudConvert 转换为 `.docx` 后继续解析。
 - 编辑器一次只处理一篇文章；支持品牌页脚开关和“更多文章”组合页脚。
-- 支持多账号规则绑定，当前 5 个账号：`FBIF食品饮料创新`、`WowFood爆品超市`（公众号，复用 fbif 模板）、`FoodTalks什么是系列`（公众号，独立 foodtalks-series 模板）、`网站默认 ft-default`与`网站·什么是系列 ft-series`（网站渠道，foodtalks-site 模板），各有独立服务端默认规则绑定；规则库 schema v4 为每条规则保存受限 `baseline_id`，并为账号绑定保存单调修订号。自建规则必须显式选择继承基线，不再默认串到 FBIF；规则配置可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数，并保存渠道独立的 `behavior`，本地设置仅作离线降级。
+- 支持多账号规则绑定，当前 6 个账号：`FBIF食品饮料创新`、`WowFood爆品超市`（公众号，复用 fbif 模板）、`FoodTalks什么是系列`（公众号，独立 foodtalks-series 模板）、`FoodTalks食品资讯 foodtalks-mp`（公众号，与什么是系列共用 foodtalks-series 模板，规则里 `site_article_layout` 打开：贴 FoodTalks 文章链接 `foodtalks.cn/news/<id>` 经管理接口取正文，开头署名挪到文末、网站文末换成本号页脚，饼干序号图与页脚图在 `public/assets/foodtalks-mp/`）、`网站默认 ft-default`与`网站·什么是系列 ft-series`（网站渠道，foodtalks-site 模板），各有独立服务端默认规则绑定；规则库 schema v4 为每条规则保存受限 `baseline_id`，并为账号绑定保存单调修订号。自建规则必须显式选择继承基线，不再默认串到 FBIF；规则配置可按模块组织 `theme`、`supporting`、`more_articles`、`workflow` 等参数，并保存渠道独立的 `behavior`，本地设置仅作离线降级。
 - 原创 DOCX 以首个 `作者：` 行作为正文起点；该行之前的编辑前置材料不进入编辑器预览。
 - DOCX 连续正文段落会保留紧凑排版；只有原文空段分隔的位置才恢复标准段后间距。
 - URL 导入会识别文章级 `来源 / 出处 / 出品`、`作者 / 撰文 / 撰稿 / 文`、`编辑 / 责编`，分隔符支持 `：`、`:`、`/`、`|`、`｜`。转载稿把这些信息移到正文开头，原创稿仍放在正文末尾、标准 FBIF `提示：` 页脚前；两者都只渲染一次，来源、作者、编辑依次独立成行（有值才显示）。正文有显式来源时优先使用；没有时以微信抓取结构里的 `source_name`（公众号名称）补 `来源：`，不会把结构化 `byline` 擅自补成作者。署名行使用公众号蓝色、`1.75` 行高和正常字形，不斜体，连续署名行之间不额外空行。
@@ -221,7 +221,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/auth/password/login` | 可选的本地密码账号登录；账号只从受保护的 Base64 配置同步 |
 | `POST` | `/auth/feishu/logout` | 使当前会话失效并清除会话 cookie |
 | `GET` | `/api/me` | 读取当前登录用户、登录方式、角色与飞书能力 |
-| `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/ft-default/ft-series`）当前规则；未传 `account` 时默认读取 FBIF |
+| `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/foodtalks-mp/ft-default/ft-series`）当前规则；未传 `account` 时默认读取 FBIF |
 | `GET` | `/api/rules/presets` | 读取可供编辑器使用的规则预设目录 |
 | `POST` | `/api/rules/admin/login` | 已退役的共享密码入口，固定返回 `410 Gone`；后台只认登录会话和角色 |
 | `GET` | `/api/rules/admin/presets` | 列出规则预设，需已登录且角色为管理员/超级管理员 |

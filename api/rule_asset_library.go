@@ -59,6 +59,7 @@ func defaultAssetLibraryModule() map[string]any {
 	}
 	assets = append(assets, defaultSeriesAssetLibraryAssets()...)
 	assets = append(assets, defaultFtSeriesSiteCoopAssets()...)
+	assets = append(assets, defaultFoodTalksMpAssetLibraryAssets()...)
 	return map[string]any{
 		"schema_version": 1,
 		"assets":         assets,

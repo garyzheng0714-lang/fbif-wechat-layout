@@ -53,6 +53,7 @@ curl -sS --max-time 130 \
 | `wowfood` | WowFood爆品超市 | 公众号 | 微信公众号后台编辑器 |
 | `ft-default` | FoodTalks默认 | FoodTalks | FoodTalks 后台编辑器 |
 | `ft-series` | FoodTalks·什么是系列 | FoodTalks | FoodTalks 后台编辑器 |
+| `foodtalks-mp` | FoodTalks食品资讯 | 公众号 | 微信公众号后台编辑器 |
 
 ## 能交什么
 
@@ -61,7 +62,7 @@ curl -sS --max-time 130 \
 | 种类（`input.kind`） | 怎么交 | 等于网页上的 | 不填 `repost` 时按 | 说明 |
 | --- | --- | --- | --- | --- |
 | `wechat_url` 公众号文章链接 | `url` | 粘贴公众号链接 | 转载 | mp.weixin.qq.com/s 开头的文章链接 |
-| `web_url` 普通网页链接 | `url` | 粘贴网页链接 | 转载 | 直接抓不到正文时改用阅读模式（返回里带提醒 reader_fallback） |
+| `web_url` 普通网页链接 | `url` | 粘贴网页链接 | 转载 | 直接抓不到正文时改用阅读模式（返回里带提醒 reader_fallback）；FoodTalks 文章链接（foodtalks.cn/news/编号）直接取 FoodTalks 后台存的正文，读不到回 fetch_failed |
 | `feishu_doc` 飞书云文档链接 | `url` | 粘贴飞书链接 | 原创 | docx、知识库文档链接；文档要先加「排版工具」应用，见「飞书文档」 |
 | `word` Word（.docx、.doc） | `file` | 上传 Word | 原创 | multipart/form-data 上传；文档里的图片会转存到 FBIF 的 OSS |
 | `html` 文章 HTML | `html` | （网页上没有这一项，按抓到的网页正文排） | 原创 | 图片写公开的 https 绝对地址 |
@@ -109,7 +110,7 @@ curl -sS --max-time 130 \
 
 ### 普通网页链接（`web_url`）
 
-直接抓不到正文时改用阅读模式（返回里带提醒 reader_fallback）。
+直接抓不到正文时改用阅读模式（返回里带提醒 reader_fallback）；FoodTalks 文章链接（foodtalks.cn/news/编号）直接取 FoodTalks 后台存的正文，读不到回 fetch_failed。
 
 ```bash
 curl -sS --max-time 130 \
@@ -459,7 +460,7 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
 
 ## 回答长什么样
 
-下面是真实排过的回答（`html` 只列开头）。
+下面的例子还是占位（字段齐全、内容是假的），排版程序上线后会换成真实排过的回答。
 
 ### 公众号链接排成 FoodTalks 稿
 
@@ -774,6 +775,44 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
   },
   "build": "2451ccbff24977285196252cda39f2bb6b027b92",
   "output_hash": "sha256:0886034c9eac1dc59b57811d4239e5a95ce034503bd179ee91fb0b475833d6ad",
+  "warnings": [],
+  "request_id": "lr_Q2xhdWRlRXhh"
+}
+```
+
+### FoodTalks 文章链接排成「FoodTalks食品资讯」公众号稿
+
+```json
+{
+  "account": {
+    "id": "foodtalks-mp",
+    "name": "FoodTalks食品资讯",
+    "paste_into": "微信公众号后台编辑器"
+  },
+  "title": "（占位）正式开工！中国最北山姆会员店来了",
+  "summary": "",
+  "html": "<section style=\"margin: 0 8px 20px; text-align: left; line-height: 1.75;\"><span style=\"font-size: 15px; line-height: 1.75; color: #544545;\">（占位）上线后换成真实排过的回答。</span></section>",
+  "repost": true,
+  "footer": true,
+  "input": {
+    "kind": "web_url",
+    "url": "https://www.foodtalks.cn/news/63234",
+    "source_name": "职业零售网"
+  },
+  "images": [],
+  "stats": {
+    "images": 0,
+    "images_mirrored": 0,
+    "headings": 0,
+    "html_bytes": 0
+  },
+  "rule": {
+    "preset_id": "foodtalks-mp-default",
+    "revision": 1,
+    "config_hash": ""
+  },
+  "build": "",
+  "output_hash": "",
   "warnings": [],
   "request_id": "lr_Q2xhdWRlRXhh"
 }

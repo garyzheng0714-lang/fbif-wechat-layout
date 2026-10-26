@@ -1,5 +1,5 @@
 // 排版接口与网页编辑器逐字一样：拿网页编辑器真抓的复制结果（tests/fixtures/layout-parity，抓法见
-// tools/layout-parity/README.md）当标准答案，5 个账号 × 5 种输入，接口的排版程序（render-service/layout.mjs）
+// tools/layout-parity/README.md）当标准答案，6 个账号 × 5 种输入，接口的排版程序（render-service/layout.mjs）
 // 排出来必须逐字相同。只允许两处不同，样稿里已经抹平：图片地址统一写成 IMG（网页转 data/OSS、接口由 Go 转存）；
 // 公众号的「更多文章」在网页上用本篇显隐开关关掉后再抓（接口不出这一块）。
 //
@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.join(ROOT, 'tests/fixtures');
 const PARITY = path.join(FIXTURES, 'layout-parity');
-const ACCOUNTS = ['fbif', 'foodtalks-series', 'wowfood', 'ft-default', 'ft-series'];
+const ACCOUNTS = ['fbif', 'foodtalks-series', 'wowfood', 'ft-default', 'ft-series', 'foodtalks-mp'];
 const ARTICLE_URL = 'https://mp.weixin.qq.com/s/US1JYCoxRt-3WRgchINBDQ';
 const PASTED_TEXT = '雀巢宣布收购某植物基品牌\n交易金额未披露，预计明年完成交割。\n双方表示将继续保留原品牌团队。';
 

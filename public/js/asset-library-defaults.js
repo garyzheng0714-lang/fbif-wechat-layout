@@ -60,6 +60,26 @@ const SERIES_CARD_ASSETS = SERIES_CARDS.map(name => asset(
   ['什么是系列', '名片', name]
 ));
 
+// 「FoodTalks食品资讯」公众号（scope=foodtalks-mp）：饼干序号图、Bobo 名片、食品资讯群码，
+// 外加什么是系列那 18 张品类群码（换群时可选）。与 api/rule_foodtalks_mp.go 一致。
+const FT_MP_SCOPE = 'foodtalks-mp';
+const FT_MP_ASSETS = [
+  ...Array.from({ length: 11 }, (_, i) => {
+    const n = String(i + 1).padStart(2, '0');
+    return asset(`ft_mp_section_${n}`, 'custom', `FoodTalks食品资讯序号图 ${n}`, `/assets/foodtalks-mp/sections/${n}.png`, FT_MP_SCOPE, ['FoodTalks食品资讯', '序号图']);
+  }),
+  asset('ft_mp_bobo_card', 'avatar', 'Bobo 名片（新媒体总监）', '/assets/foodtalks-mp/bobo-card.webp', FT_MP_SCOPE, ['FoodTalks食品资讯', '名片']),
+  asset('ft_mp_group_assistant', 'qr_group', '食品资讯群二维码（线上助手）', '/assets/foodtalks-mp/group-news.webp', FT_MP_SCOPE, ['FoodTalks食品资讯', '群二维码']),
+  ...SERIES_GROUPS.map(([slug, label]) => asset(
+    `ft_mp_group_${slug.replace(/[^a-z0-9]+/g, '_')}`,
+    'custom',
+    `${label}群二维码`,
+    `/assets/foodtalks-series/groups/${slug}.png`,
+    FT_MP_SCOPE,
+    ['FoodTalks食品资讯', '群二维码', label]
+  )),
+];
+
 export const ASSET_LIBRARY_DEFAULT = {
   schema_version: 1,
   assets: [
@@ -115,5 +135,6 @@ export const ASSET_LIBRARY_DEFAULT = {
     ...SERIES_SECTION_ASSETS,
     ...SERIES_GROUP_ASSETS,
     ...SERIES_CARD_ASSETS,
+    ...FT_MP_ASSETS,
   ],
 };

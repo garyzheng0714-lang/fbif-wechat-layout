@@ -80,6 +80,29 @@ export const SERIES_TEMPLATES = Object.freeze({
   biz_coop_replacement: '如有合作意向，请移至“{contact_section}”获取联系方式',
 });
 
+// ── 「FoodTalks食品资讯」公众号排 FoodTalks 网站稿（behavior.params.site_article_layout=true 才用，
+// 2026-10-27；见 rule-behavior-foodtalks-series.js adaptSiteArticle）。须与 api/rule_defaults.go
+// defaultFoodTalksMpRuleBehavior() 一致。
+export const SITE_ARTICLE_REGEX = Object.freeze({
+  // 署名行（网站开头的 作者：/编辑：…，编辑手排时逐行挪到文末）
+  credit_line_regex: '^(本文来源|来源|出处|出品|作者|撰文|撰稿|文|编辑|责编|责任编辑|微信编辑|新媒体编辑|编者|审核|审校|复核|校对|翻译|编译|采访|设计|视觉|整理|统筹|策划)\\s*[：:｜|]\\s*\\S',
+  // 网站转载稿开头一句「本文为X原创，作者：Y，转载请联系出处。」
+  site_byline_regex: '^本文为(.{1,40}?)原创',
+  // 网站文末起点：提示 / 投稿 / 加群 / 关注公众号 / FoodTalks 标语
+  site_footer_start_regex: '^(提示\\s*[：:]\\s*$|[*＊]\\s*资讯投稿与商务合作|加入微信群\\s*$|关注公众号\\s*$|点击获取更多全球食品资讯)',
+  // 网站文末声明「*本文为X（ID：…）原创《原文标题》，不代表FoodTalks立场…」
+  site_tip_source_regex: '^[*＊]?\\s*本文为(.{1,40}?)原创(?:《(.{1,120}?)》)?',
+  // 自家来源 = FoodTalks 原创
+  own_source_regex: '(?i)^foodtalks',
+});
+
+export const SITE_ARTICLE_TEMPLATES = Object.freeze({
+  source_credit: '来源：{source}{source_id}',
+  repost_tip: '*本文为{source}原创{author}，转载请联系出处。{original_title}',
+  original_tip: '*本文为FoodTalks原创，转载请底部留言。',
+  contact_tip: '*FoodTalks资讯投稿与商务合作，请联系Bobo。',
+});
+
 // 图注关键词（紧跟图片、或含来源前缀的短段 → 12px 灰居中图注）。
 export const SERIES_CAPTION_KEYWORDS = Object.freeze([
   '图片来源', '资料来源', '数据来源', '图源', '来源',

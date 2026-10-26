@@ -556,6 +556,16 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		// classification is deterministic, not inferred from a lossy MD
 		// intermediate. See wechat_blocks.go.
 		accountID := firstNonEmpty(req.AccountID, req.Account)
+		// FoodTalks 网站文章走管理接口取正文（网站是前端渲染，抓网页拿不到），见 foodtalks_news_import.go。
+		if news, handled, ferr := foodTalksNewsArticleBlocks(r.Context(), req.URL, articleBlockOptionsForAccount(store, accountID)); handled {
+			if ferr != nil || len(news.Blocks) == 0 {
+				log.Printf("handleFetchArticle foodtalks news failed for %s: err=%v blocks=%d", req.URL, ferr, len(news.Blocks))
+				writeError(w, 502, "FoodTalks 文章读取失败，请稍后重试")
+				return
+			}
+			writeJSON(w, 200, news)
+			return
+		}
 		title, blocks, sourceName, byline, _, originalSourceURL, _, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
 		if derr == nil && len(blocks) > 0 {
 			writeJSON(w, 200, articleBlocksResponse{Title: title, Blocks: blocks, Source: req.URL,

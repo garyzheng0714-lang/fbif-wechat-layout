@@ -72,6 +72,19 @@ export const RULE_PACKS = Object.freeze({
     location: '',
     channel: 'ft',
   }),
+  // FoodTalks食品资讯公众号：排 FoodTalks 网站稿（《FoodTalks公众号排版规范（新）》，2026-10-27）；复用 foodtalks-series 渲染器，页脚走 bottom_blocks。
+  'foodtalks-mp': Object.freeze({
+    id: 'foodtalks-mp',
+    templateId: 'foodtalks-series',
+    defaultPresetId: 'foodtalks-mp-default',
+    accountName: 'FoodTalks食品资讯',
+    previewAccountName: 'FoodTalks食品资讯',
+    behaviorAccountName: 'FoodTalks食品资讯',
+    avatarUrl: '/foodtalks-logo.svg',
+    footerUrl: '',
+    location: '上海',
+    channel: 'mp',
+  }),
 });
 
 export function listRulePacks() {

@@ -67,7 +67,7 @@ var layoutInputSpecs = []layoutInputSpec{
 	{layoutInputWechatURL, "公众号文章链接", "url", layoutCarrierBlocks, "粘贴公众号链接", "转载",
 		"mp.weixin.qq.com/s 开头的文章链接"},
 	{layoutInputWebURL, "普通网页链接", "url", layoutCarrierBlocks, "粘贴网页链接", "转载",
-		"直接抓不到正文时改用阅读模式（返回里带提醒 reader_fallback）"},
+		"直接抓不到正文时改用阅读模式（返回里带提醒 reader_fallback）；FoodTalks 文章链接（foodtalks.cn/news/编号）直接取 FoodTalks 后台存的正文，读不到回 fetch_failed"},
 	{layoutInputFeishuDoc, "飞书云文档链接", "url", layoutCarrierDocx, "粘贴飞书链接", "原创",
 		"docx、知识库文档链接；文档要先加「" + layoutFeishuAppName + "」应用，见「飞书文档」"},
 	{layoutInputWord, "Word（.docx、.doc）", "file", layoutCarrierDocx, "上传 Word", "原创",
@@ -377,10 +377,14 @@ type layoutFetchedArticle struct {
 	OriginalSourceURL string
 }
 
-// articleLayoutFetcher 生产用：直抓（最多 3 次）+ Jina 阅读模式，与网页导入链接一致。
+// articleLayoutFetcher 生产用：直抓（最多 3 次）+ Jina 阅读模式，与网页导入链接一致；
+// FoodTalks 文章链接和网页一样走管理接口取正文（foodtalks_news_import.go）。
 type articleLayoutFetcher struct{}
 
-func (articleLayoutFetcher) FetchArticle(_ context.Context, url string, opts articleBlockOptions) (layoutFetchedArticle, error) {
+func (articleLayoutFetcher) FetchArticle(ctx context.Context, url string, opts articleBlockOptions) (layoutFetchedArticle, error) {
+	if news, handled, err := foodTalksNewsArticleBlocks(ctx, url, opts); handled {
+		return layoutFetchedArticle{Title: news.Title, Blocks: news.Blocks, SourceName: news.SourceName, Byline: news.Byline}, err
+	}
 	title, blocks, sourceName, byline, _, originalSourceURL, _, _, err := fetchDirectBlocksWithOptions(url, opts)
 	return layoutFetchedArticle{Title: title, Blocks: blocks, SourceName: sourceName, Byline: byline, OriginalSourceURL: originalSourceURL}, err
 }
@@ -468,6 +472,13 @@ func (a *layoutAPI) prepareURL(ctx context.Context, req layoutRequest, view layo
 			return layoutPrepared{}, layoutErr(layoutErrFetchFailed).withCause(err)
 		}
 		return layoutPrepared{}, layoutErr(layoutErrWechatVerifyPage)
+	}
+	// FoodTalks 文章和网页导入一样只走管理接口：读不到就报错，不退到阅读模式（前端渲染的页面读出来是导航和页脚）。
+	if _, ok := foodTalksNewsIDFromURL(req.URL); ok {
+		if err == nil {
+			err = errors.New("FoodTalks 文章没有正文")
+		}
+		return layoutPrepared{}, layoutErr(layoutErrFetchFailed).withCause(err)
 	}
 	// 不把调用方的网址交给外部阅读服务以外的进程；Jina 走自己的出口代理，和网页一致。
 	title, markdown, jerr := a.fetcher.FetchReader(ctx, req.URL)

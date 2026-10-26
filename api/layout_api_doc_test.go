@@ -131,7 +131,8 @@ func TestLayoutAPIExamplesExist(t *testing.T) {
 		if _, err := layoutExampleForDoc(example); err != nil {
 			t.Errorf("%v\n生成方法：排版程序（LAYOUT_RENDER_URL）上线后，用一把在用的钥匙跑 "+
 				"cd api && LAYOUT_EXAMPLES_BASE=https://fbifmp-layout.foodtalks.cn LAYOUT_EXAMPLES_KEY=flk_… "+
-				"LAYOUT_EXAMPLES_WECHAT_URL=<一篇公众号文章> LAYOUT_EXAMPLES_DOCX=<一个 .docx> go test -run TestLayoutAPIExamplesRegenerate . ，"+
+				"LAYOUT_EXAMPLES_WECHAT_URL=<一篇公众号文章> LAYOUT_EXAMPLES_WEB_URL=<一篇 FoodTalks 文章> LAYOUT_EXAMPLES_DOCX=<一个 .docx> go test -run TestLayoutAPIExamplesRegenerate . "+
+				"（只重排一个加 LAYOUT_EXAMPLES_ONLY=<文件名>，不用给别的例子的链接和文件），"+
 				"再 SPEC_UPDATE=1 go test -run TestLayoutAPIDocIsGenerated . 重新生成说明书", err)
 		}
 	}
@@ -158,8 +159,12 @@ func TestLayoutAPIExamplesRegenerate(t *testing.T) {
 	if base == "" || key == "" {
 		t.Skip("没给 LAYOUT_EXAMPLES_BASE、LAYOUT_EXAMPLES_KEY，不重新生成例子")
 	}
+	only := os.Getenv("LAYOUT_EXAMPLES_ONLY")
 	client := &http.Client{Timeout: layoutClientTimeout}
 	for _, example := range layoutAPIExamples {
+		if only != "" && example.File != only {
+			continue
+		}
 		body, contentType, err := layoutExampleRequest(example)
 		if err != nil {
 			t.Fatalf("%s：%v", example.File, err)
@@ -215,10 +220,11 @@ const layoutExampleSampleTitle = "植物基饮料的下一个十年"
 
 func layoutExampleRequest(example layoutAPIExample) (io.Reader, string, error) {
 	switch example.Kind {
-	case layoutInputWechatURL:
-		url := os.Getenv("LAYOUT_EXAMPLES_WECHAT_URL")
+	case layoutInputWechatURL, layoutInputWebURL:
+		env := map[layoutInputKind]string{layoutInputWechatURL: "LAYOUT_EXAMPLES_WECHAT_URL", layoutInputWebURL: "LAYOUT_EXAMPLES_WEB_URL"}[example.Kind]
+		url := os.Getenv(env)
 		if url == "" {
-			return nil, "", fmt.Errorf("要 LAYOUT_EXAMPLES_WECHAT_URL")
+			return nil, "", fmt.Errorf("要 %s", env)
 		}
 		raw, _ := json.Marshal(map[string]any{"account": example.Account, "url": url})
 		return bytes.NewReader(raw), "application/json", nil

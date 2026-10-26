@@ -286,6 +286,18 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 			}},
 			UpdatedAt: now,
 		},
+		foodTalksMpDefaultRulePresetID: {
+			ID:          foodTalksMpDefaultRulePresetID,
+			Name:        "FoodTalks食品资讯默认规则",
+			Description: "FoodTalks食品资讯公众号排 FoodTalks 网站稿（饼干序号图标题/文末署名与提示/Bobo 名片与加群页脚）",
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultFoodTalksMpRuleConfig(),
+				Behavior:  defaultFoodTalksMpRuleBehavior(),
+				CreatedAt: now,
+			}},
+			UpdatedAt: now,
+		},
 		wowFoodDefaultRulePresetID: {
 			ID:          wowFoodDefaultRulePresetID,
 			Name:        "WowFood爆品超市默认规则",

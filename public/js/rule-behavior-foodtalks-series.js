@@ -18,6 +18,8 @@ import {
   SERIES_CAPTION_KEYWORDS,
   SERIES_MATERIALS_DEFAULT,
   SERIES_TEMPLATES,
+  SITE_ARTICLE_REGEX,
+  SITE_ARTICLE_TEMPLATES,
 } from './foodtalks-series-defaults.js';
 
 // ── 规则读取助手：共享实现收敛到 rule-behavior-utils.js（架构体检 S6，勿再本地复制）──
@@ -29,6 +31,18 @@ import {
 export const compileSeriesRegex = compileBehaviorRegex;
 // 从 config 取单条正则（behavior.params.<key>.default），非法/缺省降级 fallback 字符串。
 const seriesRegex = behaviorRegex;
+
+// boolean 型 behavior 参数（规则后台存 true/'true'）。
+function behParamOn(config, key) {
+  const p = config && config.behavior && config.behavior.params && config.behavior.params[key];
+  return !!p && (p.default === true || p.default === 'true');
+}
+
+// 账号排的是 FoodTalks 网站稿（「FoodTalks食品资讯」公众号，2026-10-27）：小标题按块级别定级、
+// 网站署名与文末挪成公众号的写法（adaptSiteArticle）。什么是系列不开，输出不变。
+export function isSiteArticleLayout(config) {
+  return behParamOn(config, 'site_article_layout');
+}
 
 // 半角括号转中文括号（规范《二·五·二级标题》：需注意调整为中文括号）。
 function normalizeParens(text) {
@@ -82,6 +96,7 @@ export function classifySeries(neutralElems, config = {}) {
   const tipItemRe = seriesRegex(config, 'tip_item_regex', SERIES_REGEX.tip_item_regex);
   const footerNoteRe = seriesRegex(config, 'footer_note_regex', SERIES_REGEX.footer_note_regex);
   const capKeywords = behList(config, 'image_caption_keywords', SERIES_CAPTION_KEYWORDS);
+  const levelsFromBlocks = isSiteArticleLayout(config);
 
   const isHeadingLike = (e) => e && (e.k === 'h' || e.k === 'txt');
 
@@ -162,6 +177,35 @@ export function classifySeries(neutralElems, config = {}) {
       continue;
     }
 
+    // 网站稿的小标题照块级别（网站标题1 → 序号图一级标题，标题2 → 二级，更低 → 正文加粗）；
+    // 连着的两个标题1 是一个标题分两行（63234「山姆2026 / 一边狂开，一边圈地」），共用一张序号图。
+    if (levelsFromBlocks && e.k === 'h' && Number(e.level) >= 2) {
+      refMode = false;
+      const level = Number(e.level);
+      if (refSecRe.test(plain)) {
+        refMode = true;
+        out.push({ k: 'ref-title', text: plain.replace(/\s*[：:]?\s*$/, '：') });
+        continue;
+      }
+      if (level === 2) {
+        const lines = [plain.replace(level1Re, '').trim()];
+        while (i + 1 < elems.length && elems[i + 1] && elems[i + 1].k === 'h' && Number(elems[i + 1].level) === 2) {
+          i++;
+          lines.push(elemText(elems[i]).trim().replace(level1Re, '').trim());
+        }
+        sectionIndex++;
+        out.push({ k: 'h1', index: sectionIndex, text: lines.join(' '), lines, full: plain });
+        refMode = refSecRe.test(lines[0]);
+        continue;
+      }
+      if (level === 3) {
+        out.push({ k: 'h2', text: normalizeParens(plain) });
+        continue;
+      }
+      out.push({ k: 'h3', runs: [{ type: 'txt', text: plain }] });
+      continue;
+    }
+
     // 标题分级
     if (isHeadingLike(e)) {
       if (level1Re.test(plain)) {
@@ -181,7 +225,9 @@ export function classifySeries(neutralElems, config = {}) {
       // 仍进入参考模式，保证其后 [n] 条目渲成 15px 灰色（红线：参考来源识别要稳）。
       if (refSecRe.test(plain)) {
         refMode = true;
-        out.push({ k: 'h3', runs: [{ type: 'txt', text: plain.replace(/\s*[：:]\s*$/, ''), bold: true }] });
+        // 网站稿的「参考来源：」与条目同为灰字（规范《参考来源》）。
+        if (levelsFromBlocks) out.push({ k: 'ref-title', text: plain.replace(/\s*[：:]?\s*$/, '：') });
+        else out.push({ k: 'h3', runs: [{ type: 'txt', text: plain.replace(/\s*[：:]\s*$/, ''), bold: true }] });
         continue;
       }
       // 其余：DOCX 标题样式段（k:'h'，如阿拉伯数字小标题「2、个性与定制化」，标了标题样式
@@ -235,7 +281,7 @@ export function classifySeries(neutralElems, config = {}) {
 
     // 普通正文（runs 缺失时从 text 兜底合成，防止 text-only 元素被静默吞字）；
     // 透传 docxMeta 供连续紧凑段距判定（红线#18）。
-    out.push({ k: 'p', runs: (Array.isArray(e.runs) && e.runs.length) ? e.runs : [{ type: 'txt', text: plain }], ...carryDocxMeta(e) });
+    out.push({ k: 'p', runs: (Array.isArray(e.runs) && e.runs.length) ? e.runs : [{ type: 'txt', text: plain }], ...carryDocxMeta(e), ...(e.bullet ? { bullet: true } : {}) });
   }
 
   applyContactCentering(out, config);
@@ -295,6 +341,134 @@ function applyContactCentering(out, config) {
       e.center = true; // 姓名/职位/备注等联系信息延续行
     }
   }
+}
+
+// ── FoodTalks 网站稿 → 「FoodTalks食品资讯」公众号（site_article_layout，2026-10-27）──
+// 依据《FoodTalks公众号排版规范（新）》与 2026-10 编辑手排的 9 篇（两者不一致处按成品）：
+//   - 网站开头署名（「本文为X原创，作者：Y，转载请联系出处。」或「作者：/编辑：」行）挪到文末，
+//     与「来源：X（ID：…）」一起逐行深蓝斜体；
+//   - 网站文末从「提示：」起（投稿、加群、关注公众号）整段换成公众号的提示：
+//     「*本文为X原创，作者：Y，转载请联系出处。原文标题：《…》」+ 投稿行；FoodTalks 原创写「转载请底部留言」。
+//     名片、关注公众号、加群在底部区块（bottom_blocks）。
+//   - 图注「来源：」写成「图片来源：」、去掉句末句号；英文稿正文 14px；
+//   - 非公众号文章的链接（网站自动加的公司库/系列标签链接等）一律去掉，只留文字（规范「非本公众号链接全部清除」）。
+// 识别正则与文案读 behavior（规则后台可改），缺省降级 SITE_ARTICLE_* 常量。
+
+function splitCreditLine(text) {
+  return String(text || '')
+    .split(/[，,；;]\s*(?=[^\s，,；;：:]{1,6}\s*[：:])/)
+    .map(s => s.trim().replace(/[。.]+$/, '').trim())
+    .filter(Boolean);
+}
+
+function parseSourceName(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/^(.+?)\s*[（(]\s*ID\s*[：:]\s*([^）)]+?)\s*[）)]\s*$/i);
+  return m ? { name: m[1].trim(), id: m[2].trim() } : { name: s, id: '' };
+}
+
+function fillTemplate(tpl, vars) {
+  return String(tpl || '').replace(/\{(\w+)\}/g, (all, key) => (key in vars ? vars[key] : all)).trim();
+}
+
+const WECHAT_ARTICLE_HREF = /^https?:\/\/mp\.weixin\.qq\.com\//i;
+
+function keepWechatLinksOnly(runs) {
+  return (runs || []).map(r => (r && r.type === 'link' && !WECHAT_ARTICLE_HREF.test(r.href || ''))
+    ? { type: 'txt', text: r.text || '', ...(r.bold ? { bold: true } : {}) }
+    : r);
+}
+
+function normalizeSiteCaption(text) {
+  return String(text || '').trim().replace(/^来源\s*[：:]/, '图片来源：').replace(/。$/, '');
+}
+
+// neutral：processBlocks 产出的中性 elem；meta：{ title, sourceName }（抓取接口的 title / source_name）。
+// 返回 { body, tail, english }：body 交 classifySeries，tail 是排好的文末系列 elem。
+export function adaptSiteArticle(neutral, config = {}, meta = {}) {
+  const elems = (Array.isArray(neutral) ? neutral : []).filter(Boolean);
+  const creditRe = seriesRegex(config, 'credit_line_regex', SITE_ARTICLE_REGEX.credit_line_regex);
+  const bylineRe = seriesRegex(config, 'site_byline_regex', SITE_ARTICLE_REGEX.site_byline_regex);
+  const footerRe = seriesRegex(config, 'site_footer_start_regex', SITE_ARTICLE_REGEX.site_footer_start_regex);
+  const tipSourceRe = seriesRegex(config, 'site_tip_source_regex', SITE_ARTICLE_REGEX.site_tip_source_regex);
+  const ownRe = seriesRegex(config, 'own_source_regex', SITE_ARTICLE_REGEX.own_source_regex);
+  const isText = (e) => e && (e.k === 'txt' || e.k === 'h');
+
+  let source = '';
+  let originalTitle = '';
+  const headCredits = [];
+
+  // 开头署名：只看最前面几段，遇正文即停。
+  let start = 0;
+  while (start < elems.length && start < 3 && isText(elems[start])) {
+    const text = elemText(elems[start]).trim();
+    const byline = text.match(bylineRe);
+    if (byline) {
+      source = source || byline[1].trim();
+      const rest = text.slice(byline[0].length).replace(/^[，,、\s]+/, '').replace(/[，,]?\s*转载请联系出处[。.]?\s*$/, '');
+      headCredits.push(...splitCreditLine(rest));
+    } else if (creditRe.test(text)) {
+      headCredits.push(...splitCreditLine(text));
+    } else {
+      break;
+    }
+    start++;
+  }
+
+  // 网站文末（提示 / 投稿 / 加群 / 关注公众号）：只在后半篇找，避免误切正文。
+  let end = elems.length;
+  for (let i = Math.max(start, Math.floor(elems.length * 0.4)); i < elems.length; i++) {
+    if (isText(elems[i]) && footerRe.test(elemText(elems[i]).trim())) { end = i; break; }
+  }
+  for (let i = end; i < elems.length; i++) {
+    const m = isText(elems[i]) && elemText(elems[i]).trim().match(tipSourceRe);
+    if (!m) continue;
+    source = m[1].trim() || source;
+    originalTitle = (m[2] || '').trim();
+    break;
+  }
+
+  // 正文末尾紧挨着网站文末的署名行（编辑/审核…）也并进文末署名。
+  const tailCredits = [];
+  while (end > start && isText(elems[end - 1]) && creditRe.test(elemText(elems[end - 1]).trim())) {
+    tailCredits.unshift(...splitCreditLine(elemText(elems[end - 1]).trim()));
+    end--;
+  }
+
+  if (!source && meta.sourceName) source = String(meta.sourceName).trim();
+  const src = parseSourceName(source);
+  const original = !src.name || ownRe.test(src.name);
+  const credits = [...headCredits, ...tailCredits];
+  if (!original && !credits.some(c => /^来源\s*[：:]/.test(c))) {
+    credits.unshift(fillTemplate(behTemplate(config, 'source_credit', SITE_ARTICLE_TEMPLATES.source_credit), {
+      source: src.name, source_id: src.id ? `（ID：${src.id}）` : '',
+    }));
+  }
+
+  const author = credits.map(c => c.match(/^作者\s*[：:]\s*(.+)$/)).find(Boolean);
+  const tipLine = original
+    ? behTemplate(config, 'original_tip', SITE_ARTICLE_TEMPLATES.original_tip)
+    : fillTemplate(behTemplate(config, 'repost_tip', SITE_ARTICLE_TEMPLATES.repost_tip), {
+      source: src.name,
+      author: author ? `，作者：${author[1].trim()}` : '',
+      original_title: originalTitle ? `原文标题：《${originalTitle}》` : '',
+    });
+  const tail = [
+    ...credits.map(text => ({ k: 'credit', text })),
+    { k: 'tip-title', text: '提示：', italic: true },
+    { k: 'tip-item', text: tipLine },
+  ];
+  const contact = behTemplate(config, 'contact_tip', SITE_ARTICLE_TEMPLATES.contact_tip);
+  if (contact) tail.push({ k: 'tip-item', text: contact });
+
+  const body = elems.slice(start, end).map(e => {
+    if (e.k === 'cap') return { ...e, text: normalizeSiteCaption(e.text) };
+    return Array.isArray(e.runs) ? { ...e, runs: keepWechatLinksOnly(e.runs) } : e;
+  });
+  const plain = body.filter(isText).map(elemText).join('');
+  const latin = (plain.match(/[A-Za-z]/g) || []).length;
+  const han = (plain.match(/[一-鿿]/g) || []).length;
+  return { body, tail, english: plain.length > 0 && latin > han * 3 };
 }
 
 // ── 尾部素材读取 / 合成 ──

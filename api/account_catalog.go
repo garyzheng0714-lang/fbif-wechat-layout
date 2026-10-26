@@ -106,6 +106,19 @@ func accountCatalog() []accountMeta {
 			DefaultPresetID:     foodTalksSeriesSiteDefaultRulePresetID, // "ft-series-v1"
 			Note:                "网站渠道「什么是系列」：复用 foodtalks-site 渲染器，颜色#333333/#7f7f7f/#01396a + 商务合作版块差异走 config。放 ft-default 之后保证 ft 渠道默认仍是 ft-default（红线#21）。",
 		},
+		{
+			ID:                  foodTalksMpRuleAccountID, // "foodtalks-mp"
+			Channel:             "mp",
+			TemplateID:          "foodtalks-series", // 与什么是系列共用 FoodTalks 公众号渲染器，差异（排网站稿、序号图、页脚）全走账号规则
+			AccountName:         "FoodTalks食品资讯",
+			PreviewAccountName:  "FoodTalks食品资讯",
+			BehaviorAccountName: "FoodTalks食品资讯",
+			AvatarURL:           "/foodtalks-logo.svg",
+			FooterURL:           "",
+			Location:            "上海",
+			DefaultPresetID:     foodTalksMpDefaultRulePresetID, // "foodtalks-mp-default"
+			Note:                "FoodTalks食品资讯公众号：排 FoodTalks 网站稿（《FoodTalks公众号排版规范（新）》，2026-10-27）；复用 foodtalks-series 渲染器，页脚走 bottom_blocks。",
+		},
 	}
 }
 

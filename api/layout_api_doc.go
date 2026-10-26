@@ -42,6 +42,7 @@ var layoutAPIExamples = []layoutAPIExample{
 	{"markdown-ft-series", layoutInputMarkdown, "ft-series", "Markdown 排成 FoodTalks「什么是系列」稿"},
 	{"text-foodtalks-series", layoutInputText, "foodtalks-series", "纯文本排成「FoodTalks什么是系列」公众号稿"},
 	{"html-wowfood", layoutInputHTML, "wowfood", "HTML 排成「WowFood爆品超市」公众号稿"},
+	{"web-url-foodtalks-mp", layoutInputWebURL, "foodtalks-mp", "FoodTalks 文章链接排成「FoodTalks食品资讯」公众号稿"},
 }
 
 // layoutInputExample 每种输入一个能直接跑的请求（说明书「每种输入怎么交」）。

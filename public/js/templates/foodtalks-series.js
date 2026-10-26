@@ -1,4 +1,6 @@
-// FoodTalks「什么是」系列公众号排版模板 — 输出内联样式 HTML，给微信公众号后台粘贴用。
+// FoodTalks 公众号排版模板 — 输出内联样式 HTML，给微信公众号后台粘贴用。
+// 「FoodTalks什么是系列」与「FoodTalks食品资讯」两个账号共用；后者排 FoodTalks 网站稿
+// （behavior.params.site_article_layout，差异全走账号 config/behavior，见 adaptSiteArticle）。
 //
 // 与 FBIF（fbif.js / wx-theme.css）和 FoodTalks 网站（foodtalks-site.js）物理隔离（红线 #19）：
 // 本模板不 import 那两侧，也不复用 wx-* class；全部内联样式，颜色/字号读 config（缺省降级
@@ -11,7 +13,7 @@ const engineModule = await import('../engine.js' + assetQuery);
 const { esc, escAttr, parseMdRuns, parseMdFrontmatter, convertRuns, looksLikeGifSource } = engineModule;
 const behaviorModule = await import('../rule-behavior-foodtalks-series.js' + assetQuery);
 const {
-  classifySeries, extractSeriesAuthorName, sectionImageUrl,
+  classifySeries, extractSeriesAuthorName, sectionImageUrl, isSiteArticleLayout, adaptSiteArticle,
 } = behaviorModule;
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
@@ -25,6 +27,20 @@ const blockRenderModule = await import('../blocks/block-render.js' + assetQuery)
 const { renderBottomBlocksHtml } = blockRenderModule;
 const assetLibModule = await import('../asset-library.js' + assetQuery);
 const { resolveAssetRefs } = assetLibModule;
+const engineConfigModule = await import('../engine-config.js' + assetQuery);
+const { ruleModulesOf } = engineConfigModule;
+
+function activeRuleModules() {
+  return ruleModulesOf(typeof window !== 'undefined' ? window._activeConfig : null);
+}
+
+// engine 给公众号模板的 config 只有扁平参数 + 行为；序号图素材（ft_series_materials）与底部区块
+// 一样读当前账号规则里的 modules，否则账号自己的序号图会落回什么是系列的默认图。
+function withRuleModules(config) {
+  if (config && config.modules) return config;
+  const modules = activeRuleModules();
+  return Object.keys(modules).length ? { ...config, modules } : config;
+}
 
 // ── config 读取（优先扁平 config 键，缺省降级系列常量）──
 function cfgNum(config, key, fallback) {
@@ -140,7 +156,7 @@ function seriesBlockRenderers(sp, assetLibrary, scope) {
       const color = /^#[0-9a-fA-F]{6}$/.test(String(f.text_color || '')) ? f.text_color : sp.text;
       const style =
         `color:${color};font-size:${size}px;font-family:${sp.font};line-height:${sp.lh};` +
-        `font-style:${f.italic ? 'italic' : 'normal'};font-weight:normal;text-decoration:${f.underline ? 'underline' : 'none'};` +
+        `font-style:${f.italic ? 'italic' : 'normal'};font-weight:${f.bold ? 'bold' : 'normal'};text-decoration:${f.underline ? 'underline' : 'none'};` +
         (bg ? `background-color:${bg};` : '');
       const align = alignOr(f.align);
       return lines.map(line => `<p style="margin:0 8px;padding:0;text-align:${align};"><span style="${style}">${esc(line)}</span></p>`).join('\n');
@@ -274,6 +290,8 @@ function gapAfter(e, next) {
   if (e.k === 'toc-item' && next.k === 'toc-item') return false;
   if (e.k === 'footer-note' && next.k === 'footer-note') return false; // 文末署名 / 图源说明紧贴
   if (e.k === 'tip-title') return false;                      // 「提示：」紧贴首条声明
+  if (e.k === 'credit' && next.k === 'credit') return false;   // 文末署名逐行紧贴（网站稿）
+  if (e.k === 'ref-title') return false;                      // 「参考来源：」紧贴首条
   if (e.k === 'tip-item' && next.k === 'tip-item') return false;
   if (isCompactDocxPair(e, next)) return false;               // 连续紧凑正文（红线#18）
   return true;
@@ -295,8 +313,10 @@ function render(elems, config = {}) {
         // 序号图（前空行由上一块 gap 提供；序号图与文字间不空行）+ 居中标题文字（后空行）
         const imgUrl = sectionImageUrl(config, e.index);
         if (imgUrl) lines.push(imageSection(imgUrl, false, sp, { alt: e.text }));
+        // 网站稿连着的两个标题1 = 一个标题分两行（共用一张序号图）。
+        const titleLines = Array.isArray(e.lines) && e.lines.length > 1 ? e.lines : [e.text];
         lines.push(section(
-          span(e.text, { size: sp.h1Size, color: sp.heading, bold: true, sp }),
+          titleLines.map(t => span(t, { size: sp.h1Size, color: sp.heading, bold: true, sp })).join('<br>'),
           { align: 'center', gap, sp }));
         break;
       }
@@ -363,9 +383,20 @@ function render(elems, config = {}) {
           { align: 'left', gap, sp }));
         break;
       case 'tip-title':
-        // 文末「提示：」标签：15px 深蓝粗体左对齐。
+        // 文末「提示：」标签：15px 深蓝粗体左对齐（网站稿成品另加斜体）。
         lines.push(section(
-          span(e.text || '提示：', { size: sp.bodySize, color: sp.heading, bold: true, sp }),
+          span(e.text || '提示：', { size: sp.bodySize, color: sp.heading, bold: true, italic: !!e.italic, sp }),
+          { align: 'left', gap, sp }));
+        break;
+      case 'credit':
+        // 网站稿文末署名（来源/作者/编辑…）：15px 深蓝斜体，逐行。
+        lines.push(section(
+          span(e.text, { size: sp.bodySize, color: sp.heading, italic: true, sp }),
+          { align: 'left', gap, sp }));
+        break;
+      case 'ref-title':
+        lines.push(section(
+          span(e.text, { size: sp.bodySize, color: sp.muted, sp }),
           { align: 'left', gap, sp }));
         break;
       case 'tip-item':
@@ -383,7 +414,7 @@ function render(elems, config = {}) {
       case 'p':
       default:
         lines.push(section(
-          renderRuns(e.runs, { size: sp.bodySize, color: sp.text, sp }) || '<br>',
+          renderRuns(e.bullet ? [{ type: 'txt', text: '• ' }, ...(e.runs || [])] : e.runs, { size: sp.bodySize, color: sp.text, sp }) || '<br>',
           { align: e.center ? 'center' : 'left', gap, sp }));
         break;
     }
@@ -421,13 +452,14 @@ export default {
   description: '按 FoodTalks「什么是」系列规范：序号图标题、深蓝主色、目录、推荐阅读、参考来源、尾部名片',
   formats: ['.docx', '.doc', '.md', '.txt'],
 
-  processDocx({ paragraphs, imgCache, config = {} }) {
+  processDocx({ paragraphs, imgCache, config: rawConfig = {} }) {
+    const config = withRuleModules(rawConfig);
     const { elems, imgN, headingN, authorName } = processDocxInternal(paragraphs, imgCache, config);
     return { lines: render(elems, config), imgN, headingN, authorName };
   },
 
   async processMd(text, opts = {}) {
-    const config = (opts && opts.config) || {};
+    const config = withRuleModules((opts && opts.config) || {});
     const fm = parseMdFrontmatter(text);
     const body = (fm && fm.content) || text;
     // 最小 MD 支持：按段落转 runs，交给同一分类/渲染（标题靠正文编号正则识别）。
@@ -444,7 +476,8 @@ export default {
   },
 
   processBlocks(data, opts = {}) {
-    const config = (opts && opts.config) || {};
+    const config = withRuleModules((opts && opts.config) || {});
+    const siteLayout = isSiteArticleLayout(config);
     // URL 导入：把结构化块转成中性 elem（与 fbif 同口径），再走系列分类。
     const neutral = ((data && data.blocks) || []).map(b => {
       if (!b || !b.k) return null;
@@ -454,12 +487,25 @@ export default {
         k: 'table',
         rows: (b.rows || []).map(row => (row || []).map(c => ({ runs: convertRuns(c.runs || []), header: !!c.header }))),
       };
-      if (b.k === 'h') return { k: 'h', text: b.text || '', runs: [{ type: 'txt', text: b.text || '' }] };
+      if (b.k === 'h') return { k: 'h', text: b.text || '', level: b.level, runs: [{ type: 'txt', text: b.text || '' }] };
+      if (siteLayout && b.k === 'li') return { k: 'txt', runs: convertRuns(b.runs || []), bullet: true };
       return { k: 'txt', runs: convertRuns(b.runs || []) };
     }).filter(Boolean);
-    const elems = classifySeries(neutral, config);
+    let body = neutral;
+    let tail = [];
+    let renderConfig = config;
+    if (siteLayout) {
+      const adapted = adaptSiteArticle(neutral, config, { title: data && data.title, sourceName: data && data.source_name });
+      body = adapted.body;
+      tail = adapted.tail;
+      if (adapted.english) {
+        const param = config.behavior && config.behavior.params && config.behavior.params.english_font_size;
+        renderConfig = { ...config, font_size: cfgNum({ v: param && param.default }, 'v', 14) };
+      }
+    }
+    const elems = classifySeries(body, config).concat(tail);
     return {
-      lines: render(elems, config),
+      lines: render(elems, renderConfig),
       imgN: elems.filter(e => e.k === 'img').length,
       headingN: elems.filter(e => e.k === 'h1' || e.k === 'h2' || e.k === 'h3').length,
       authorName: extractSeriesAuthorName(elems),
@@ -472,9 +518,7 @@ export default {
   // （系列 footerUrl='' → 空）。红线#19：seriesBlockRenderers 只在系列侧定义，engine 经此回调拿结果。
   renderBottomFooter(opts) {
     const ac = (typeof window !== 'undefined' && window._activeConfig) || {};
-    let cfg = (ac.preset && (ac.preset.raw_config || ac.preset.config)) || ac.config || {};
-    if (cfg && cfg.config && cfg.config.modules) cfg = cfg.config;
-    const mods = (cfg && cfg.modules && typeof cfg.modules === 'object') ? cfg.modules : {};
+    const mods = activeRuleModules();
     const bb = mods.bottom_blocks;
     if (!bb || typeof bb !== 'object' || bb.enabled === false) return null;
     const scope = (typeof window !== 'undefined' && window._activeRulePack && window._activeRulePack.id) || 'foodtalks-series';
