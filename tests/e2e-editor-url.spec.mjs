@@ -27,3 +27,15 @@ test('公众号和网站入口地址栏不带构建号，旧收藏打开后也�
   await expect(page.locator('.app-layout')).toBeVisible();
   expect(page.url()).toBe(`${BASE}/ft/ft-default`);
 });
+
+test('公众号入口打开网站账号，跳到网站排版页', async ({ page }) => {
+  await login(page);
+
+  await page.goto(`${BASE}/mp/ft-default`, { waitUntil: 'networkidle' });
+  await expect(page.locator('#siteArticleTitleInput')).toBeAttached();
+  expect(page.url()).toBe(`${BASE}/ft/ft-default`);
+
+  await page.goto(`${BASE}/mp?account=ft-series`, { waitUntil: 'networkidle' });
+  await expect(page.locator('#siteArticleTitleInput')).toBeAttached();
+  expect(page.url()).toBe(`${BASE}/ft/ft-series`);
+});

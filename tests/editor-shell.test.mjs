@@ -7,6 +7,7 @@ import {
   bindUrlImportShortcuts,
   createUrlImportHandler,
   foodTalksFetchErrorMessage,
+  foreignChannelEditorPath,
   hasExplicitRepostDisclosure,
   resolveInitialRulePackID,
 } from '../public/js/editor-shell.js';
@@ -387,6 +388,15 @@ test('resolveInitialRulePackID falls back by channel for website shell', () => {
   });
 
   assert.equal(id, 'ft-default');
+});
+
+test('foreignChannelEditorPath sends an account opened in the other channel to its own editor', () => {
+  const website = rulePackModule.getRulePack('ft-default');
+  const seriesWechat = rulePackModule.getRulePack('foodtalks-series');
+
+  assert.equal(foreignChannelEditorPath(website, 'mp', rulePackUrlModule), '/ft/ft-default');
+  assert.equal(foreignChannelEditorPath(seriesWechat, 'mp', rulePackUrlModule), '');
+  assert.equal(foreignChannelEditorPath(website, 'ft', rulePackUrlModule), '');
 });
 
 test('createUrlImportHandler passes source URL with structured blocks', async () => {
