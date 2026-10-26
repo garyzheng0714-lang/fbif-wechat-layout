@@ -35,7 +35,7 @@ type layoutRenderRequestJSON struct {
 	HTML        string `json:"html,omitempty" doc:"文章 HTML，整页或正文片段都行。图片要写公开的 https 绝对地址"`
 	Markdown    string `json:"markdown,omitempty" doc:"Markdown 正文，按网页上传 .md 文件的规则排"`
 	Text        string `json:"text,omitempty" doc:"纯文本，按网页上粘贴文字的规则排"`
-	Title       string `json:"title,omitempty" doc:"标题。不填就用原文的（网页标题、Word 文件名、飞书文档名）"`
+	Title       string `json:"title,omitempty" doc:"标题。不填就用原文的（网页标题、Word 文件名、飞书文档名）；粘贴的 HTML、Markdown、文字没有单独的标题，不填就是空串"`
 	Repost      *bool  `json:"repost,omitempty" doc:"true 按转载排，false 按原创排；不填按网页上同样操作的默认（见「能交什么」）。转载和原创的署名、页脚不一样"`
 	WaitSeconds *int   `json:"wait_seconds,omitempty" doc:"POST 最多等几秒，0 到 100，默认 90。到点没排完回 202，再按 poll_url 取"`
 }
@@ -43,7 +43,7 @@ type layoutRenderRequestJSON struct {
 // layoutResultJSON 排好了的 200。POST 直接回的和 GET poll_url 取到的逐字节一样。
 type layoutResultJSON struct {
 	Account    layoutAccountJSON   `json:"account" doc:"按哪个账号排的"`
-	Title      string              `json:"title" doc:"文章标题。html 里不含标题，贴进后台时单独填"`
+	Title      string              `json:"title" doc:"文章标题，贴进后台时单独填。链接、Word、飞书文档的标题不在 html 里；粘贴的内容原样排，开头写的标题行会留在 html 里"`
 	Summary    string              `json:"summary" doc:"摘要。FoodTalks 账号从原文开头的短导语取（取到时这段导语已从 html 里拿掉，和网页版一样）；没有就是空串"`
 	HTML       string              `json:"html" doc:"成品：正文加页脚，样式全部写在标签上。粘进 account.paste_into 说的后台"`
 	Repost     bool                `json:"repost" doc:"实际按转载（true）还是原创（false）排的"`

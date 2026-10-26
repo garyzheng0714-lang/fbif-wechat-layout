@@ -340,7 +340,7 @@ func renderLayoutAPIDoc() (string, error) {
 	w("### 排好了（200）\n\n")
 	writeLayoutFieldTable(&b, reflect.TypeOf(layoutResultJSON{}), false)
 	w("\n- 同一个请求先回 202、再用 `poll_url` 取到的 200，和直接回的 200 逐字节一样。\n")
-	w("- `html` 不含标题；贴进后台时标题单独填 `title`。\n")
+	w("- 链接、Word、飞书文档的标题不在 `html` 里，贴进后台时标题单独填 `title`。粘贴的 HTML、Markdown、文字原样排（和网页版一样），开头写的「# 标题」或第一行会留在 `html` 里当正文；不想要就别写进正文，改用 `title` 传。\n")
 	w("- `output_hash` 只看 `html`：两次排出来一模一样，它就一样。\n\n")
 	w("### 还在排（202）\n\n")
 	writeLayoutFieldTable(&b, reflect.TypeOf(layoutPendingJSON{}), false)

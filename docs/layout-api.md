@@ -83,7 +83,7 @@ curl -sS --max-time 130 \
 | `html` | 文字 | 四选一 | 文章 HTML，整页或正文片段都行。图片要写公开的 https 绝对地址 |
 | `markdown` | 文字 | 四选一 | Markdown 正文，按网页上传 .md 文件的规则排 |
 | `text` | 文字 | 四选一 | 纯文本，按网页上粘贴文字的规则排 |
-| `title` | 文字 | 可不填 | 标题。不填就用原文的（网页标题、Word 文件名、飞书文档名） |
+| `title` | 文字 | 可不填 | 标题。不填就用原文的（网页标题、Word 文件名、飞书文档名）；粘贴的 HTML、Markdown、文字没有单独的标题，不填就是空串 |
 | `repost` | true/false | 可不填 | true 按转载排，false 按原创排；不填按网页上同样操作的默认（见「能交什么」）。转载和原创的署名、页脚不一样 |
 | `wait_seconds` | 整数 | 可不填 | POST 最多等几秒，0 到 100，默认 90。到点没排完回 202，再按 poll_url 取 |
 
@@ -252,7 +252,7 @@ def layout(payload, file_path=None):
 | `account.id` | 文字 | 账号 id |
 | `account.name` | 文字 | 账号名 |
 | `account.paste_into` | 文字 | 成品粘进哪个后台 |
-| `title` | 文字 | 文章标题。html 里不含标题，贴进后台时单独填 |
+| `title` | 文字 | 文章标题，贴进后台时单独填。链接、Word、飞书文档的标题不在 html 里；粘贴的内容原样排，开头写的标题行会留在 html 里 |
 | `summary` | 文字 | 摘要。FoodTalks 账号从原文开头的短导语取（取到时这段导语已从 html 里拿掉，和网页版一样）；没有就是空串 |
 | `html` | 文字 | 成品：正文加页脚，样式全部写在标签上。粘进 account.paste_into 说的后台 |
 | `repost` | true/false | 实际按转载（true）还是原创（false）排的 |
@@ -282,7 +282,7 @@ def layout(payload, file_path=None):
 | `request_id` | 文字 | 提交这篇时那次请求的编号，找人排查时报这个 |
 
 - 同一个请求先回 202、再用 `poll_url` 取到的 200，和直接回的 200 逐字节一样。
-- `html` 不含标题；贴进后台时标题单独填 `title`。
+- 链接、Word、飞书文档的标题不在 `html` 里，贴进后台时标题单独填 `title`。粘贴的 HTML、Markdown、文字原样排（和网页版一样），开头写的「# 标题」或第一行会留在 `html` 里当正文；不想要就别写进正文，改用 `title` 传。
 - `output_hash` 只看 `html`：两次排出来一模一样，它就一样。
 
 ### 还在排（202）
@@ -459,7 +459,7 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
 
 ## 回答长什么样
 
-下面的例子还是占位（字段齐全、内容是假的），排版程序上线后会换成真实排过的回答。
+下面是真实排过的回答（`html` 只列开头）。
 
 ### 公众号链接排成 FoodTalks 稿
 
@@ -470,30 +470,103 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
     "name": "FoodTalks默认",
     "paste_into": "FoodTalks 后台编辑器"
   },
-  "title": "（占位）例子标题",
+  "title": "英国茶叶50年老大，靠猩猩出圈、凭金字塔茶包封神，最后输给了自己",
   "summary": "",
-  "html": "<section><p>（占位：排版程序上线后用真回答重新生成，见 api/layout_api_doc_test.go 的 TestLayoutAPIExamplesRegenerate）</p></section>",
+  "html": "<p style=\"text-align: justify;\"><em><span style=\"font-size: 14px; color: #888888;\">作者：Mote莫特</span></em></p>\n<p style=\"text-align: justify;\"><br></p>\n<figure class=\"image\"><img style=\"display: block; margin-left: auto; margin-right: auto; m…（共 48723 字节，这里只列开头）",
   "repost": true,
   "footer": true,
   "input": {
     "kind": "wechat_url",
-    "url": "https://mp.weixin.qq.com/s/文章编号",
-    "source_name": "来源公众号"
+    "url": "https://mp.weixin.qq.com/s/US1JYCoxRt-3WRgchINBDQ",
+    "source_name": "FBIF食品饮料创新"
   },
-  "images": [],
+  "images": [
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/0049bb8c7b5b.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/425eb4455999.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/aff1cccbfbf3.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/3ef8434f7479.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/aec60e8d4fbb.jpg",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/3e540ebafb1b.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/c4096aa74e15.jpg",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/aa6c001facc8.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/4d6efc400a50.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/c9e0a28cb7e9.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/bdb93caf060d.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/2484913349cd.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/03a2e12eecfd.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/af604f92bd8a.webp",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/07079a66940e.webp",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/image/news/6e309987660da9af009b89be08c4aa74ed78.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/image/post/b5b448f324a538209eb53379bef8dea9a7bf.jpg",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/uploads/images/202007/e155b7852c10a72f7b73157fdf9c4bf0.png",
+      "host": "fbif"
+    }
+  ],
   "stats": {
-    "images": 0,
-    "images_mirrored": 0,
-    "headings": 0,
-    "html_bytes": 155
+    "images": 19,
+    "images_mirrored": 15,
+    "headings": 12,
+    "html_bytes": 48723
   },
   "rule": {
-    "preset_id": "（占位）",
-    "revision": 0,
-    "config_hash": "（占位）"
+    "preset_id": "ft-default-v1",
+    "revision": 2,
+    "config_hash": "sha256:155abe619eedca92c23362f98d1c2bc5ba7fda33634624c29f01c714ce6ed833"
   },
-  "build": "（占位）",
-  "output_hash": "sha256:8f7a23b6259e4df25274bbeea6179393665f22fdd1cb68e4aea5edb008b72754",
+  "build": "2451ccbff24977285196252cda39f2bb6b027b92",
+  "output_hash": "sha256:165ce317d7d1eecdf494c942fe81c78c1bcf0a5a8f96c72c195815b59db18279",
   "warnings": [],
   "request_id": "lr_Q2xhdWRlRXhh"
 }
@@ -508,29 +581,74 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
     "name": "FBIF食品饮料创新",
     "paste_into": "微信公众号后台编辑器"
   },
-  "title": "（占位）例子标题",
+  "title": "立顿金字塔茶包",
   "summary": "",
-  "html": "<section><p>（占位：排版程序上线后用真回答重新生成，见 api/layout_api_doc_test.go 的 TestLayoutAPIExamplesRegenerate）</p></section>",
+  "html": "<section style=\"text-align: left; margin-top: 0; margin-bottom: 20px; margin-left: 8px; margin-right: 8px; line-height: 1.75;\"><span leaf=\"\" style=\"color: #0070C0; font-size: 15px; font-style: normal; font-family: mp-quote, 'PingFang SC', s…（共 101271 字节，这里只列开头）",
   "repost": false,
   "footer": true,
   "input": {
     "kind": "word",
-    "file_name": "稿子.docx"
+    "file_name": "立顿金字塔茶包.docx"
   },
-  "images": [],
+  "images": [
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/577510c7a4df.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/cc05eaee1578.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/831dfb6cc6e7.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/72724fdf64ab.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/83f3b045a16a.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/396229beb416.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/3a381768780f.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/80438d1ab232.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/8c2914f8daf5.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-feishu-base.oss-cn-shanghai.aliyuncs.com/fbif-attachment-to-url/2026/05/tblMQeXvSGd7Hebf_-CkOuPdpNzb-_3u9Rxc5KA_1778028720411/img_v3_0211e_8b79127d-72a5-4011-9f01-fe3b30c7548g_1778028720565.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/07079a66940e.webp",
+      "host": "fbif"
+    }
+  ],
   "stats": {
-    "images": 0,
-    "images_mirrored": 0,
-    "headings": 0,
-    "html_bytes": 155
+    "images": 9,
+    "images_mirrored": 11,
+    "headings": 7,
+    "html_bytes": 101271
   },
   "rule": {
-    "preset_id": "（占位）",
-    "revision": 0,
-    "config_hash": "（占位）"
+    "preset_id": "default",
+    "revision": 4,
+    "config_hash": "sha256:6f94165f9a01fd95a629e23a0eb2ec6843dbceba5855fcce8c2db0cdd49babb2"
   },
-  "build": "（占位）",
-  "output_hash": "sha256:8f7a23b6259e4df25274bbeea6179393665f22fdd1cb68e4aea5edb008b72754",
+  "build": "2451ccbff24977285196252cda39f2bb6b027b92",
+  "output_hash": "sha256:16613c5f94f7aa0618bb9b32e3254a34b4667a65bbdf67e76960c1e4bc552956",
   "warnings": [],
   "request_id": "lr_Q2xhdWRlRXhh"
 }
@@ -545,28 +663,45 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
     "name": "FoodTalks·什么是系列",
     "paste_into": "FoodTalks 后台编辑器"
   },
-  "title": "（占位）例子标题",
+  "title": "植物基饮料的下一个十年",
   "summary": "",
-  "html": "<section><p>（占位：排版程序上线后用真回答重新生成，见 api/layout_api_doc_test.go 的 TestLayoutAPIExamplesRegenerate）</p></section>",
+  "html": "<p><em><span style=\"font-size: 14px; color: #7F7F7F;\">作者：李四</span></em></p>\n<p><br></p>\n<p>这是一段<strong>加粗的开头</strong>，后面跟着普通文字。</p>\n<p><br></p>\n<h2>市场有多大</h2>\n<p>2025 年植物基饮料零售额同比增长 12%。</p>\n<p><br></p>\n<p>- 燕麦奶：份额第一</p>\n<p><br></p>\n<p>- 豆奶：…（共 5617 字节，这里只列开头）",
   "repost": false,
   "footer": true,
   "input": {
     "kind": "markdown"
   },
-  "images": [],
+  "images": [
+    {
+      "src": "https://static.foodtalks.cn/image/post/2d8a590984ffacfb87b448bb7f31441add1c.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/image/news/4ae6499ea33bf7bf68435dad193e9c01002c.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/image/post/c6ce3f375f1399792325ccd09105b8c52986.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/uploads/images/202007/e155b7852c10a72f7b73157fdf9c4bf0.png",
+      "host": "fbif"
+    }
+  ],
   "stats": {
     "images": 0,
     "images_mirrored": 0,
-    "headings": 0,
-    "html_bytes": 155
+    "headings": 1,
+    "html_bytes": 5617
   },
   "rule": {
-    "preset_id": "（占位）",
-    "revision": 0,
-    "config_hash": "（占位）"
+    "preset_id": "ft-series-v1",
+    "revision": 2,
+    "config_hash": "sha256:ef2cd372a9509c710876ebea12bcbfd7fcdfa356879e7bffed6fb74ba24c51d4"
   },
-  "build": "（占位）",
-  "output_hash": "sha256:8f7a23b6259e4df25274bbeea6179393665f22fdd1cb68e4aea5edb008b72754",
+  "build": "2451ccbff24977285196252cda39f2bb6b027b92",
+  "output_hash": "sha256:6437dc4dcdde3debff56891b8d601de2cc2415a41ceac4fd6f1f9cfbba67b84b",
   "warnings": [],
   "request_id": "lr_Q2xhdWRlRXhh"
 }
@@ -581,11 +716,11 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
     "name": "FoodTalks什么是系列",
     "paste_into": "微信公众号后台编辑器"
   },
-  "title": "（占位）例子标题",
+  "title": "植物基饮料的下一个十年",
   "summary": "",
-  "html": "<section><p>（占位：排版程序上线后用真回答重新生成，见 api/layout_api_doc_test.go 的 TestLayoutAPIExamplesRegenerate）</p></section>",
+  "html": "<section style=\"margin: 0 8px 20px; text-align: left; line-height: 1.75;\"><span style=\"font-size: 15px; line-height: 1.75; color: #544545; font-family: mp-quote, 'PingFang SC', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue',…（共 858 字节，这里只列开头）",
   "repost": false,
-  "footer": true,
+  "footer": false,
   "input": {
     "kind": "text"
   },
@@ -594,15 +729,15 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
     "images": 0,
     "images_mirrored": 0,
     "headings": 0,
-    "html_bytes": 155
+    "html_bytes": 858
   },
   "rule": {
-    "preset_id": "（占位）",
-    "revision": 0,
-    "config_hash": "（占位）"
+    "preset_id": "foodtalks-series-default",
+    "revision": 2,
+    "config_hash": "sha256:a5ff410fc398e02a3bf665d6dd7c4d1ae1fc5c4f833350f86ad3a903d8f8181b"
   },
-  "build": "（占位）",
-  "output_hash": "sha256:8f7a23b6259e4df25274bbeea6179393665f22fdd1cb68e4aea5edb008b72754",
+  "build": "2451ccbff24977285196252cda39f2bb6b027b92",
+  "output_hash": "sha256:bfe4acb14750effcc6b0b59b1175e4bf116635cc1275d61772c90bd47c7ae0fe",
   "warnings": [],
   "request_id": "lr_Q2xhdWRlRXhh"
 }
@@ -617,11 +752,11 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
     "name": "WowFood爆品超市",
     "paste_into": "微信公众号后台编辑器"
   },
-  "title": "（占位）例子标题",
+  "title": "植物基饮料的下一个十年",
   "summary": "",
-  "html": "<section><p>（占位：排版程序上线后用真回答重新生成，见 api/layout_api_doc_test.go 的 TestLayoutAPIExamplesRegenerate）</p></section>",
+  "html": "<section style=\"text-align: left; margin-top: 0; margin-bottom: 20px; margin-left: 8px; margin-right: 8px; line-height: 1.75;\"><span leaf=\"\" style=\"color: rgba(0,0,0,0.9); font-size: 17px; font-family: mp-quote, 'PingFang SC', system-ui, -a…（共 1823 字节，这里只列开头）",
   "repost": false,
-  "footer": true,
+  "footer": false,
   "input": {
     "kind": "html"
   },
@@ -629,16 +764,16 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
   "stats": {
     "images": 0,
     "images_mirrored": 0,
-    "headings": 0,
-    "html_bytes": 155
+    "headings": 1,
+    "html_bytes": 1823
   },
   "rule": {
-    "preset_id": "（占位）",
-    "revision": 0,
-    "config_hash": "（占位）"
+    "preset_id": "wowfood-default",
+    "revision": 2,
+    "config_hash": "sha256:ac03f07ebed17cad610bed945d755651d4dae19b35082467aa2cfa6295e5560e"
   },
-  "build": "（占位）",
-  "output_hash": "sha256:8f7a23b6259e4df25274bbeea6179393665f22fdd1cb68e4aea5edb008b72754",
+  "build": "2451ccbff24977285196252cda39f2bb6b027b92",
+  "output_hash": "sha256:0886034c9eac1dc59b57811d4239e5a95ce034503bd179ee91fb0b475833d6ad",
   "warnings": [],
   "request_id": "lr_Q2xhdWRlRXhh"
 }

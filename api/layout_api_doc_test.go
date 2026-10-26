@@ -204,11 +204,14 @@ func TestLayoutAPIExamplesRegenerate(t *testing.T) {
 }
 
 // layoutExampleSamples 重新生成例子时交的内容（链接和 Word 由环境变量给）。
+// 粘贴的内容原样排，标题行会留在正文里，所以标题走 title、正文里不写（说明书也这么教）。
 var layoutExampleSamples = map[layoutInputKind]string{
-	layoutInputMarkdown: "# 植物基饮料的下一个十年\n\n作者：李四\n\n这是一段**加粗的开头**，后面跟着普通文字。\n\n## 市场有多大\n\n2025 年植物基饮料零售额同比增长 12%。\n\n- 燕麦奶：份额第一\n- 豆奶：老牌品类\n",
-	layoutInputText:     "植物基饮料的下一个十年\n\n这是第一段正文，讲市场有多大。\n\n这是第二段正文，讲品牌怎么做。",
-	layoutInputHTML:     "<h1>植物基饮料的下一个十年</h1><p>这是第一段正文，讲市场有多大。</p><h2>品牌怎么做</h2><p>先做口味，再做渠道。</p>",
+	layoutInputMarkdown: "作者：李四\n\n这是一段**加粗的开头**，后面跟着普通文字。\n\n## 市场有多大\n\n2025 年植物基饮料零售额同比增长 12%。\n\n- 燕麦奶：份额第一\n- 豆奶：老牌品类\n",
+	layoutInputText:     "这是第一段正文，讲市场有多大。\n\n这是第二段正文，讲品牌怎么做。",
+	layoutInputHTML:     "<p>这是第一段正文，讲市场有多大。</p><h2>品牌怎么做</h2><p>先做口味，再做渠道。</p>",
 }
+
+const layoutExampleSampleTitle = "植物基饮料的下一个十年"
 
 func layoutExampleRequest(example layoutAPIExample) (io.Reader, string, error) {
 	switch example.Kind {
@@ -238,7 +241,7 @@ func layoutExampleRequest(example layoutAPIExample) (io.Reader, string, error) {
 		return nil, "", fmt.Errorf("没有 %s 的样稿", example.Kind)
 	}
 	field := layoutInputSpecFor(example.Kind).Field
-	raw, _ := json.Marshal(map[string]any{"account": example.Account, field: sample})
+	raw, _ := json.Marshal(map[string]any{"account": example.Account, "title": layoutExampleSampleTitle, field: sample})
 	return bytes.NewReader(raw), "application/json", nil
 }
 
@@ -251,6 +254,8 @@ func TestLayoutAPIExamplesCoverEveryAccount(t *testing.T) {
 	want := catalogOrderIDs()
 	sort.Strings(want)
 	if strings.Join(accounts, ",") != strings.Join(want, ",") {
-		t.Fatalf("每个账号一个例子：%v %v", accounts, want)
+		t.Fatalf("说明书每个账号一个例子：有 %v，账号表里是 %v。新加的账号在 layoutAPIExamples 加一行，"+
+			"上线前先放占位回答（title 写「（占位）…」，说明书会注明例子还是占位），上线后按 TestLayoutAPIExamplesExist 的方法换成真回答；"+
+			"再在 tests/layout-parity.test.mjs 的 ACCOUNTS 里加上它，按 tools/layout-parity/README.md 抓网页样稿", accounts, want)
 	}
 }
