@@ -460,7 +460,7 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
 
 ## 回答长什么样
 
-下面的例子还是占位（字段齐全、内容是假的），排版程序上线后会换成真实排过的回答。
+下面是真实排过的回答（`html` 只列开头）。
 
 ### 公众号链接排成 FoodTalks 稿
 
@@ -789,9 +789,9 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
     "name": "FoodTalks食品资讯",
     "paste_into": "微信公众号后台编辑器"
   },
-  "title": "（占位）正式开工！中国最北山姆会员店来了",
+  "title": "正式开工！中国最北山姆会员店来了",
   "summary": "",
-  "html": "<section style=\"margin: 0 8px 20px; text-align: left; line-height: 1.75;\"><span style=\"font-size: 15px; line-height: 1.75; color: #544545;\">（占位）上线后换成真实排过的回答。</span></section>",
+  "html": "<section style=\"margin: 0 0 0px; line-height: 0; font-size: 0; text-align: center;\"><img src=\"https://static.foodtalks.cn/admin/images/third_part/4ea851b32f135626032b9e78ca21d6f6.png\" referrerpolicy=\"no-referrer\" alt=\"\" style=\"width: 100%; …（共 22704 字节，这里只列开头）",
   "repost": true,
   "footer": true,
   "input": {
@@ -799,20 +799,61 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
     "url": "https://www.foodtalks.cn/news/63234",
     "source_name": "职业零售网"
   },
-  "images": [],
+  "images": [
+    {
+      "src": "https://static.foodtalks.cn/admin/images/third_part/4ea851b32f135626032b9e78ca21d6f6.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/88c2bf52363a.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/admin/images/third_part/29cd14a905dafa70e1670ca070061f5b.jpg",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/admin/images/third_part/984d8d55eacd6413d22627d50712d6d2.jpg",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/bdcd1325b87b.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/admin/images/third_part/dd2f0540ba4bbba90149991745072e27.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://static.foodtalks.cn/admin/images/third_part/2e488914cd46061350200cff8398285a.jpg",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/2038a07ee0ac.png",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/07079a66940e.webp",
+      "host": "fbif"
+    },
+    {
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/d5ec80f5ba41.webp",
+      "host": "fbif"
+    }
+  ],
   "stats": {
-    "images": 0,
-    "images_mirrored": 0,
-    "headings": 0,
-    "html_bytes": 0
+    "images": 5,
+    "images_mirrored": 5,
+    "headings": 3,
+    "html_bytes": 22704
   },
   "rule": {
     "preset_id": "foodtalks-mp-default",
     "revision": 1,
-    "config_hash": ""
+    "config_hash": "sha256:8383df3f6b85191efce967433fdfa693189a3c4beac0e074b376ea4b8a8465de"
   },
-  "build": "",
-  "output_hash": "",
+  "build": "562292fbdd1babb90a4fd9f2fa4d5644a2536efa",
+  "output_hash": "sha256:db17c34d9a9ffcbc267ca69fd421822694f69b64bb9edfa23755e077950547e4",
   "warnings": [],
   "request_id": "lr_Q2xhdWRlRXhh"
 }
