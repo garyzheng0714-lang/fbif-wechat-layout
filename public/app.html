@@ -245,6 +245,7 @@ const {
   bindRailDivider,
   bindUrlImportShortcuts,
   createUrlImportHandler,
+  foreignChannelEditorPath,
   pasteTargetsForChannel,
   resolveInitialRulePackID,
   wrapBackFeedback,
@@ -264,6 +265,11 @@ function initialRulePackID() {
 }
 
 let activeRulePack = rulePackModule.getRulePack(initialRulePackID());
+const ownEditorPath = foreignChannelEditorPath(activeRulePack, 'mp', rulePackUrlModule);
+if (ownEditorPath) {
+  location.replace(ownEditorPath);
+  await new Promise(() => {});
+}
 window._activeRulePack = activeRulePack;
 let currentTemplateId = activeRulePack.templateId;
 const ruleModule = await import('/js/rule-presets.js?v=' + assetVersion);

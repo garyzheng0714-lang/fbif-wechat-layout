@@ -37,6 +37,13 @@ export function resolveInitialRulePackID({
   });
 }
 
+// 账号不属于本页渠道时（如 /mp/ft-default）返回它自己的编辑器地址：公众号页挂网站
+// 账号没有网站样式、顶部信息和提示声明，看起来就是网站排版失效。
+export function foreignChannelEditorPath(pack, pageChannel, rulePackUrlModule) {
+  if (pack.channel === pageChannel) return '';
+  return rulePackUrlModule.buildPath(pack.channel, pack.id);
+}
+
 function defaultFetchErrorMessage(err) {
   return '提取失败: ' + ((err && err.message) || '抓取失败');
 }
