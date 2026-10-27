@@ -44,7 +44,7 @@
 - 第 2 步删云梭已做（2026-10-24）：云梭客户端、推送、轮询、45 天补查、头条链接自动回填与线上正文核对、lane 上的云梭字段、卡片里的云梭说法、`YUNSUO_*` 配置全删；云梭留下的旧 lane 只显示（见红线 37「云梭旧 lane」）。
 - 第 3 步格式器已搬（2026-10-24）：排版工具只出外发通用版正文块（`api/distribution_blocks.go`，块与通用规则改写前后见 `docs/distribution-blocks.md`），分发服务按平台文件的 `markup` 写成标签，写草稿接口收 `blocks`；平台限制（标题字数与数法、封面下限、每天上限、文章域名、后台地址）只在分发服务的平台文件，经 `GET /v1/platforms` 取、缓存在 `distribution-platforms.json`（`api/distribution_platforms.go`，与账号同一套缓存：校验不过整份不要、留最后一份、5 分钟刷新）；从没拿到限制的平台卡片照常显示、推送在提交前失败；冻结成旧格式（网页代码）还没提交的 lane 提交前失败、提示重新存草稿。`yunsuo_*` 已改名 `distribution_*`；排版工具这边外发代码里不许出现平台名（`TestDistributionCodeNamesNoPlatform`；例外 `publish_external_links.go` 的头条号文章链接查找，要 A 机的 TikHub 密钥，以后搬）。
 - 第 5 步接口说明书已生成（2026-10-27）：分发服务的接口说明书只有它仓库的 `docs/api.md` 一份，由 `npm run gen:docs` 从路由表、错误表、字段表生成，对不上它那边测试就失败；每个错误响应都带 `outcome`（`rejected` 没动手、`uncertain` 说不准、`human` 停下等人）。排版工具存一份它生成的接口契约 `api/testdata/distribution-api.json`（每个错误码的状态与 outcome、每个接口会回哪些码），`TestDistributionRobotClientMapsResponses` 照它把写草稿可能回的每个码过一遍，`DISTRIBUTION_REPO=… go test -run TestDistributionFixturesMatchService` 核对两边一样。
-- 第 6 步贴图线改归贴图发布项目（2026-10-27 用户裁定，见上「两条线」）：排版工具、Feed 都不改；排版工具这边贴图号照旧过滤掉（`externalTargetsFrom`），`NotifyChat` 留给文章线。剩下的在贴图发布项目做：测试号上只填好不发已核对（2026-10-27，`sticker sync-check`：10-26 已发布的展商贴图「致美斋」填到抖音测试号 Ecoooo，登录的号、标题、描述、6 张图的宽高与顺序、可见范围全部对上，抖音自带检测「作品未见异常」，模型没出手，没发布） → 用户点头后开同步开关 → 抖音真发前问用户。
+- 第 6 步贴图线改归贴图发布项目（2026-10-27 用户裁定，见上「两条线」）：排版工具、Feed 都不改；排版工具这边贴图号照旧过滤掉（`externalTargetsFrom`），`NotifyChat` 留给文章线。剩下的在贴图发布项目做：测试号上只填好不发已核对（2026-10-27，`sticker sync-check`：10-26 已发布的展商贴图「致美斋」填到抖音测试号 Ecoooo，登录的号、标题、描述、6 张图的宽高与顺序、可见范围全部对上，抖音自带检测「作品未见异常」，模型没出手，没发布；同日小红书发图文笔记在分发服务接上，两个正式号「FBIF食品创新展」——抖音 `reczz28SHSPC8iVR`、小红书 `reczz28SHshDcMT2`——用同一条「致美斋」只填不发，都全部对上） → 用户点头后开同步开关 → 抖音、小红书真发前问用户。
 
 ## 三系统边界（2026-08-06 用户裁定）
 

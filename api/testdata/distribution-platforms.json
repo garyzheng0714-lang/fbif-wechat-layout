@@ -52,6 +52,16 @@
         "max": 20,
         "count": "chars"
       }
+    },
+    {
+      "id": "xiaohongshu",
+      "name": "小红书",
+      "carrier": "post",
+      "title": {
+        "min": 1,
+        "max": 20,
+        "count": "ascii_half"
+      }
     }
   ]
 }
