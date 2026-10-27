@@ -119,6 +119,19 @@ func accountCatalog() []accountMeta {
 			DefaultPresetID:     foodTalksMpDefaultRulePresetID, // "foodtalks-mp-default"
 			Note:                "FoodTalks食品资讯公众号：排 FoodTalks 网站稿（《FoodTalks公众号排版规范（新）》，2026-10-27）；复用 foodtalks-series 渲染器，页脚走 bottom_blocks。",
 		},
+		{
+			ID:                  wechatPlainRuleAccountID, // "wechat-plain"
+			Channel:             "mp",
+			TemplateID:          "wechat-plain", // 独立渲染器：只出微信编辑器原生的 <p>，不带任何视觉样式
+			AccountName:         "格式清理",
+			PreviewAccountName:  "格式清理",
+			BehaviorAccountName: "格式清理",
+			AvatarURL:           "/fbif-avatar.webp",
+			FooterURL:           "",
+			Location:            "上海",
+			DefaultPresetID:     wechatPlainDefaultRulePresetID, // "wechat-plain-default"
+			Note:                "格式清理（2026-10-27）：粘贴的文字排成微信编辑器原生段落，空行写成 <p><br></p>，无样式、无页脚，适合任何文章或贴图文字框。",
+		},
 	}
 }
 

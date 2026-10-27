@@ -475,6 +475,16 @@ input[type="file"] { display: none; }
   min-height: 140px;
 }
 
+/* 「格式清理」（templates/wechat-plain.js）只出无样式的 <p>/<table>：预览照微信编辑器默认正文显示。
+   挂在预览容器的 data-template 上，复制产物里没有这个属性，所以不会被带进公众号。 */
+#contentArea[data-template="wechat-plain"] {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 17px; line-height: 1.6; letter-spacing: 0.034em; color: rgba(0,0,0,0.9);
+}
+#contentArea[data-template="wechat-plain"] p { margin: 0; }
+#contentArea[data-template="wechat-plain"] table { border-collapse: collapse; width: 100%; }
+#contentArea[data-template="wechat-plain"] td { border: 1px solid #DDDDDD; padding: 5px 10px; vertical-align: top; }
+
 /* WeChat footer — sticky bottom */
 .wx-footer {
   position: sticky; bottom: 0; z-index: 10;

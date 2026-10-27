@@ -298,6 +298,18 @@ func defaultRuleDefinitions(now string) map[string]ruleDefinition {
 			}},
 			UpdatedAt: now,
 		},
+		wechatPlainDefaultRulePresetID: {
+			ID:          wechatPlainDefaultRulePresetID,
+			Name:        "格式清理默认规则",
+			Description: "粘贴的文字排成微信编辑器原生段落（无样式、无页脚、无更多文章）",
+			Versions: []rulePresetVersion{{
+				Version:   1,
+				Config:    defaultWechatPlainRuleConfig(),
+				Behavior:  defaultWechatPlainRuleBehavior(),
+				CreatedAt: now,
+			}},
+			UpdatedAt: now,
+		},
 		wowFoodDefaultRulePresetID: {
 			ID:          wowFoodDefaultRulePresetID,
 			Name:        "WowFood爆品超市默认规则",
@@ -345,6 +357,33 @@ func defaultWowFoodRuleConfig() map[string]any {
 // 若 WowFood 需独立尾部文案/正则，可在此覆盖差异项或在规则后台配置。
 func defaultWowFoodRuleBehavior() map[string]any {
 	return defaultRuleBehavior()
+}
+
+// defaultWechatPlainRuleConfig「格式清理」（2026-10-27 用户裁定）：wechat-plain 渲染器不读任何视觉参数，
+// 扁平键只为过规则校验与后台展示；底部一律显式关掉（页脚、更多文章、底部区块、作者默认），
+// 结构化模块只留这两个关掉的，不带 FBIF 的素材库。
+func defaultWechatPlainRuleConfig() map[string]any {
+	cfg := defaultRuleConfig()
+	cfg["footer_enabled"] = false
+	cfg["more_articles_enabled"] = false
+	cfg["more_articles_default_cards"] = []any{}
+	cfg["modules"] = map[string]any{
+		"bottom_blocks":           map[string]any{"schema_version": 2, "enabled": false, "presets": []any{}},
+		"article_footer_defaults": disabledArticleFooterDefaultsModule(),
+	}
+	return cfg
+}
+
+// defaultWechatPlainRuleBehavior 不认署名、不触发 Mote 署名图：渲染器只按段落原样输出。
+func defaultWechatPlainRuleBehavior() map[string]any {
+	return map[string]any{
+		"schema_version":   float64(1),
+		"params":           map[string]any{},
+		"conditions":       []any{},
+		"actions":          []any{},
+		"templates":        map[string]any{},
+		"output_contracts": map[string]any{},
+	}
 }
 
 // defaultFoodTalksSiteRuleConfig 返回 FoodTalks 网站排版的默认参数配置。

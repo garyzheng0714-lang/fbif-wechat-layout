@@ -85,6 +85,19 @@ export const RULE_PACKS = Object.freeze({
     location: '上海',
     channel: 'mp',
   }),
+  // 格式清理（2026-10-27）：粘贴的文字排成微信编辑器原生段落，空行写成 <p><br></p>，无样式、无页脚，适合任何文章或贴图文字框。
+  'wechat-plain': Object.freeze({
+    id: 'wechat-plain',
+    templateId: 'wechat-plain',
+    defaultPresetId: 'wechat-plain-default',
+    accountName: '格式清理',
+    previewAccountName: '格式清理',
+    behaviorAccountName: '格式清理',
+    avatarUrl: '/fbif-avatar.webp',
+    footerUrl: '',
+    location: '上海',
+    channel: 'mp',
+  }),
 });
 
 export function listRulePacks() {
