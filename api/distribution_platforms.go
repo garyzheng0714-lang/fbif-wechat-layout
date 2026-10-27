@@ -65,7 +65,7 @@ func validateDistributionPlatforms(items []distributionPlatformInfo) error {
 		}
 		seen[p.ID] = true
 		if p.Carrier != externalCarrierArticle {
-			continue // 贴图平台等贴图线接上再用
+			continue // 贴图平台不归排版工具：贴图线在贴图发布项目（2026-10-27）
 		}
 		if p.Title.Min < 1 || p.Title.Max < p.Title.Min {
 			return fmt.Errorf("%s（%s）标题字数范围不对：%d–%d", where, p.ID, p.Title.Min, p.Title.Max)

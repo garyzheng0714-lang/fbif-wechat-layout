@@ -34,7 +34,8 @@ type externalAccount struct {
 	Carrier  string `json:"carrier"`  // article 文章、post 贴图
 	Name     string `json:"name"`
 	Status   string `json:"status"`
-	// Source 这个号发哪个公众号的稿；NotifyChat 这类稿的卡片发到哪个群（贴图线接上后用）；Auto 表里「自动外发」。
+	// Source 这个号发哪个公众号的稿；NotifyChat 这类稿的卡片发到哪个群（还没用上）；Auto 表里「自动外发」。
+	// 贴图号（carrier=post）排版工具一律不用：贴图线归贴图发布项目（2026-10-27）。
 	Source     string `json:"source"`
 	NotifyChat string `json:"notify_chat,omitempty"`
 	Auto       bool   `json:"auto,omitempty"`
