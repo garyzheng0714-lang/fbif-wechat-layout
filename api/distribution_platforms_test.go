@@ -230,6 +230,11 @@ func TestDistributionFixturesMatchService(t *testing.T) {
 	if string(ours) != string(theirs) {
 		t.Errorf("testdata/%s 和分发服务的 test/fixtures/platforms.json 不一样：在分发工具跑 npm run gen:docs 再拷过来", platformsFile)
 	}
+	ours, _ = os.ReadFile(filepath.Join("testdata", distributionAPIFile))
+	theirs, err = os.ReadFile(filepath.Join(repo, "test", "fixtures", "api.json"))
+	if err != nil || string(ours) != string(theirs) {
+		t.Errorf("testdata/%s 和分发服务的 test/fixtures/api.json 不一样：在分发工具跑 npm run gen:docs 再拷过来：%v", distributionAPIFile, err)
+	}
 	paths, _ := filepath.Glob(filepath.Join(distributionGoldenDir, "*.blocks.json"))
 	if len(paths) == 0 {
 		t.Fatal("没有考卷前一半的正文块")

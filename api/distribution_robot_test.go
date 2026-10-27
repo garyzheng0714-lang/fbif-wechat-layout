@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -43,7 +45,7 @@ func TestDistributionRobotConfigIsOptionalAndRedacted(t *testing.T) {
 	}
 }
 
-// TestDistributionRobotClientMapsResponses 分发服务每种回答映射成哪类错误（契约见分发工具 README「接口」）：
+// TestDistributionRobotClientMapsResponses 分发服务每种回答映射成哪类错误（契约见分发服务 docs/api.md，每个错误码的状态和 outcome 照 testdata/distribution-api.json）：
 // 点存草稿之前被拒的是 rejected（没建稿、可再存）；草稿箱要人删的是 reconcile；平台出错、超时、
 // 成功响应不完整的是 uncertain（按同一个键查）。
 func TestDistributionRobotClientMapsResponses(t *testing.T) {
@@ -92,37 +94,52 @@ func TestDistributionRobotClientMapsResponses(t *testing.T) {
 		t.Fatalf("请求体应是契约里的四个字段，正文是外发通用版正文块：%s", bodies[len(bodies)-1])
 	}
 
+	// 写草稿可能回的每个错误码，照分发服务给的接口契约（状态、outcome）一个个过：没动手的拒、等人的对账、说不准的按同一个键查。
 	var rejected *robotRejectedError
 	var reconcile *robotReconcileError
 	var uncertain *robotUncertainError
+	contract := loadDistributionAPIContract(t)
+	codes := contract.routeErrors(http.MethodPost, "/v1/platforms/{platform}/drafts")
+	if len(codes) < 10 {
+		t.Fatalf("接口契约里写草稿的错误码太少，testdata/%s 不对：%v", distributionAPIFile, codes)
+	}
+	for _, code := range codes {
+		spec := contract.Errors[code]
+		current = reply{spec.Status, `{"error":{"code":"` + code + `","message":"说明","outcome":"` + spec.Outcome + `"}}`}
+		_, err := client.SaveDraft(context.Background(), "baijiahao", request)
+		ok := false
+		switch spec.Outcome {
+		case robotOutcomeRejected:
+			ok = errors.As(err, &rejected) && rejected.Status == spec.Status && rejected.Code == code
+		case robotOutcomeHuman:
+			ok = errors.As(err, &reconcile) && reconcile.Message == "说明"
+		case robotOutcomeUncertain:
+			ok = errors.As(err, &uncertain)
+		default:
+			t.Fatalf("契约里 %s 的 outcome %q 不认得：分发服务加了新的 outcome，这里要先接上", code, spec.Outcome)
+		}
+		if !ok {
+			t.Errorf("%d %s（%s）映射不对：%T %v", spec.Status, code, spec.Outcome, err, err)
+		}
+	}
 	for _, tc := range []struct {
 		name  string
 		reply reply
-		check func(error) bool
 	}{
-		{"400 参数", reply{400, errorBody("invalid_request", "标题要 2–64 字")}, func(err error) bool { return errors.As(err, &rejected) && rejected.Status == 400 }},
-		{"401 token", reply{401, errorBody("unauthorized", "token 不对")}, func(err error) bool { return errors.As(err, &rejected) && rejected.Status == 401 }},
-		{"409 键已用于别的内容", reply{409, errorBody("idempotency_key_reused", "这个键已用来存过别的内容")}, func(err error) bool { return errors.As(err, &rejected) }},
-		{"409 要人对账", reply{409, errorBody("needs_reconcile", "同名草稿多于一篇")}, func(err error) bool {
-			return errors.As(err, &reconcile) && reconcile.Message == "同名草稿多于一篇"
-		}},
-		{"422 封面", reply{422, errorBody("cover_unavailable", "封面下不下来")}, func(err error) bool { return errors.As(err, &rejected) && rejected.Code == "cover_unavailable" }},
-		{"503 没登录", reply{503, errorBody("login_required", "服务器浏览器没登录百家号")}, func(err error) bool { return errors.As(err, &rejected) && rejected.Code == "login_required" }},
-		{"503 别的", reply{503, errorBody("busy", "忙")}, func(err error) bool { return errors.As(err, &uncertain) }},
-		{"502 平台出错", reply{502, errorBody("platform_error", "平台页面出错")}, func(err error) bool { return errors.As(err, &uncertain) }},
-		{"500", reply{500, "oops"}, func(err error) bool { return errors.As(err, &uncertain) }},
-		{"200 但还没存好", reply{200, `{"status":"saving"}`}, func(err error) bool { return errors.As(err, &uncertain) }},
-		{"200 但不是 JSON", reply{200, "<html>"}, func(err error) bool { return errors.As(err, &uncertain) }},
-		{"200 已存但没编号", reply{200, `{"status":"saved","article_id":""}`}, func(err error) bool { return errors.As(err, &uncertain) }},
+		{"没带 outcome（不是分发服务回的）", reply{400, errorBody("invalid_request", "x")}},
+		{"500 不是 JSON", reply{500, "oops"}},
+		{"200 但还没存好", reply{200, `{"status":"saving"}`}},
+		{"200 但不是 JSON", reply{200, "<html>"}},
+		{"200 已存但没编号", reply{200, `{"status":"saved","article_id":""}`}},
 	} {
 		current = tc.reply
-		if _, err := client.SaveDraft(context.Background(), "baijiahao", request); !tc.check(err) {
-			t.Errorf("%s：映射不对：%T %v", tc.name, err, err)
+		if _, err := client.SaveDraft(context.Background(), "baijiahao", request); !errors.As(err, &uncertain) {
+			t.Errorf("%s：应按说不准、用同一个键查：%T %v", tc.name, err, err)
 		}
 	}
 
 	// 出错说明里带了 token 也不回显。
-	current = reply{400, errorBody("invalid_request", "bad token "+testRobotToken)}
+	current = reply{400, `{"error":{"code":"invalid_request","message":"bad token ` + testRobotToken + `","outcome":"rejected"}}`}
 	if _, err := client.SaveDraft(context.Background(), "baijiahao", request); err == nil || strings.Contains(err.Error(), testRobotToken) {
 		t.Fatalf("错误信息不得带 token：%v", err)
 	}
@@ -165,4 +182,42 @@ func TestDistributionRobotClientDoesNotFollowRedirects(t *testing.T) {
 	if _, err := client.Draft(context.Background(), "baijiahao", "k"); !errors.As(err, &uncertain) || leaked {
 		t.Fatalf("跳转不得跟随：err=%v leaked=%v", err, leaked)
 	}
+}
+
+const distributionAPIFile = "distribution-api.json"
+
+// distributionAPIContract 分发服务的接口契约（它那边 npm run gen:docs 生成 test/fixtures/api.json，拷一份在 testdata）。
+type distributionAPIContract struct {
+	Outcomes []string `json:"outcomes"`
+	Errors   map[string]struct {
+		Status  int    `json:"status"`
+		Outcome string `json:"outcome"`
+	} `json:"errors"`
+	Routes []struct {
+		Method string   `json:"method"`
+		Path   string   `json:"path"`
+		Errors []string `json:"errors"`
+	} `json:"routes"`
+}
+
+func loadDistributionAPIContract(t *testing.T) distributionAPIContract {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", distributionAPIFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c distributionAPIContract
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func (c distributionAPIContract) routeErrors(method, path string) []string {
+	for _, r := range c.Routes {
+		if r.Method == method && r.Path == path {
+			return r.Errors
+		}
+	}
+	return nil
 }

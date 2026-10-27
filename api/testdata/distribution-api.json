@@ -1,0 +1,304 @@
+{
+  "outcomes": [
+    "rejected",
+    "uncertain",
+    "human"
+  ],
+  "errors": {
+    "invalid_request": {
+      "status": 400,
+      "outcome": "rejected"
+    },
+    "account_required": {
+      "status": 400,
+      "outcome": "rejected"
+    },
+    "unauthorized": {
+      "status": 401,
+      "outcome": "rejected"
+    },
+    "not_found": {
+      "status": 404,
+      "outcome": "rejected"
+    },
+    "unknown_account": {
+      "status": 404,
+      "outcome": "rejected"
+    },
+    "unknown_platform": {
+      "status": 404,
+      "outcome": "rejected"
+    },
+    "busy": {
+      "status": 409,
+      "outcome": "rejected"
+    },
+    "draft_changed": {
+      "status": 409,
+      "outcome": "rejected"
+    },
+    "idempotency_key_reused": {
+      "status": 409,
+      "outcome": "rejected"
+    },
+    "needs_human": {
+      "status": 409,
+      "outcome": "human"
+    },
+    "needs_reconcile": {
+      "status": 409,
+      "outcome": "human"
+    },
+    "not_saved": {
+      "status": 409,
+      "outcome": "rejected"
+    },
+    "wrong_account": {
+      "status": 409,
+      "outcome": "rejected"
+    },
+    "wrong_state": {
+      "status": 409,
+      "outcome": "rejected"
+    },
+    "too_large": {
+      "status": 413,
+      "outcome": "rejected"
+    },
+    "cover_unavailable": {
+      "status": 422,
+      "outcome": "rejected"
+    },
+    "cover_too_large": {
+      "status": 422,
+      "outcome": "rejected"
+    },
+    "cover_too_small": {
+      "status": 422,
+      "outcome": "rejected"
+    },
+    "image_unavailable": {
+      "status": 422,
+      "outcome": "rejected"
+    },
+    "image_too_large": {
+      "status": 422,
+      "outcome": "rejected"
+    },
+    "platform_rejected": {
+      "status": 422,
+      "outcome": "rejected"
+    },
+    "internal_error": {
+      "status": 500,
+      "outcome": "uncertain"
+    },
+    "not_supported": {
+      "status": 501,
+      "outcome": "rejected"
+    },
+    "button_not_found": {
+      "status": 502,
+      "outcome": "rejected"
+    },
+    "fill_mismatch": {
+      "status": 502,
+      "outcome": "rejected"
+    },
+    "platform_error": {
+      "status": 502,
+      "outcome": "uncertain"
+    },
+    "accounts_unavailable": {
+      "status": 503,
+      "outcome": "rejected"
+    },
+    "login_required": {
+      "status": 503,
+      "outcome": "rejected"
+    }
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "errors": [
+        "not_found",
+        "internal_error"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/platforms",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "internal_error"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/accounts/{account}/login",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "internal_error",
+        "unknown_account",
+        "accounts_unavailable"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/accounts/{account}/login",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "internal_error",
+        "unknown_account",
+        "accounts_unavailable"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/platforms/{platform}/drafts",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "invalid_request",
+        "too_large",
+        "internal_error",
+        "unknown_platform",
+        "account_required",
+        "unknown_account",
+        "accounts_unavailable",
+        "idempotency_key_reused",
+        "needs_reconcile",
+        "cover_unavailable",
+        "cover_too_large",
+        "cover_too_small",
+        "login_required",
+        "platform_error"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/platforms/{platform}/drafts/{key}",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "internal_error",
+        "unknown_platform"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/platforms/{platform}/drafts/{key}/check",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "internal_error",
+        "unknown_platform",
+        "not_saved",
+        "busy",
+        "login_required",
+        "platform_error"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/platforms/{platform}/drafts/{key}/publish",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "invalid_request",
+        "too_large",
+        "internal_error",
+        "unknown_platform",
+        "not_saved",
+        "busy",
+        "wrong_state",
+        "draft_changed",
+        "needs_human",
+        "not_supported",
+        "button_not_found",
+        "login_required",
+        "platform_error"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/platforms/{platform}/drafts/{key}/unpublish",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "invalid_request",
+        "too_large",
+        "internal_error",
+        "unknown_platform",
+        "not_saved",
+        "busy",
+        "wrong_state",
+        "draft_changed",
+        "needs_human",
+        "not_supported",
+        "button_not_found",
+        "login_required",
+        "platform_error"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/platforms/{platform}/drafts/{key}/delete",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "invalid_request",
+        "too_large",
+        "internal_error",
+        "unknown_platform",
+        "not_saved",
+        "busy",
+        "wrong_state",
+        "draft_changed",
+        "needs_human",
+        "not_supported",
+        "button_not_found",
+        "login_required",
+        "platform_error"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/platforms/{platform}/posts",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "invalid_request",
+        "too_large",
+        "internal_error",
+        "unknown_platform",
+        "unknown_account",
+        "accounts_unavailable",
+        "idempotency_key_reused",
+        "needs_reconcile",
+        "wrong_account",
+        "image_unavailable",
+        "image_too_large",
+        "fill_mismatch",
+        "platform_rejected",
+        "login_required",
+        "platform_error"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/platforms/{platform}/posts/{key}",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "internal_error",
+        "unknown_platform"
+      ]
+    }
+  ]
+}

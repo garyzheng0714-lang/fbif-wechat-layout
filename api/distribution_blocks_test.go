@@ -157,7 +157,7 @@ func TestDistributionBlocksFollowManualDrafts(t *testing.T) {
 	}
 }
 
-// TestDistributionBlocksFollowContract 交给分发服务的块只有约定的几种、只带约定的字段（分发服务 README「正文块」，
+// TestDistributionBlocksFollowContract 交给分发服务的块只有约定的几种、只带约定的字段（分发服务 docs/api.md「正文块」，
 // 它收到多一个字段就 400）：样稿里 6 篇真稿和手发稿拼的那篇都查一遍。
 func TestDistributionBlocksFollowContract(t *testing.T) {
 	stubDistributionImageSize(t, nil)
