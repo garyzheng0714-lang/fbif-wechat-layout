@@ -652,9 +652,6 @@ export function initApp(initialTemplate) {
     const fileHint = document.getElementById('fileHint');
     if (fileHint) fileHint.textContent = 'Word / MD / TXT';
     fileInputEl.accept = nextTemplate.formats.join(',');
-    // 预览按模板挂外观（app.css 的 #contentArea[data-template=…]）；复制只取排版产物字符串，不带这个属性。
-    const contentArea = document.getElementById('contentArea');
-    if (contentArea && contentArea.dataset) contentArea.dataset.template = nextTemplate.id;
   }
   const fileInputEl = document.getElementById('fileInput');
   applyTemplateShell(template);

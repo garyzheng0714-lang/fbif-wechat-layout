@@ -28,8 +28,6 @@ const wowFoodRuleAccountID = "wowfood"                        // = registry pack
 const wowFoodDefaultRulePresetID = "wowfood-default"          // WowFood爆品超市 独立 preset
 const foodTalksMpRuleAccountID = "foodtalks-mp"               // 「FoodTalks食品资讯」公众号 = registry pack.id
 const foodTalksMpDefaultRulePresetID = "foodtalks-mp-default"
-const wechatPlainRuleAccountID = "wechat-plain" // 「格式清理」= registry pack.id
-const wechatPlainDefaultRulePresetID = "wechat-plain-default"
 const maxRulePresetVersions = 20
 const currentRuleStoreSchemaVersion = 4
 const maxRuleConflictPaths = 20

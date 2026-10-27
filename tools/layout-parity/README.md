@@ -1,6 +1,6 @@
 # 排版接口与网页逐字一样：样稿怎么抓
 
-`tests/layout-parity.test.mjs` 拿网页编辑器真抓的复制结果当标准答案，核对排版接口（`render-service/layout.mjs`）7 个账号 × 5 种输入逐字一样。样稿在 `tests/fixtures/layout-parity/`：
+`tests/layout-parity.test.mjs` 拿网页编辑器真抓的复制结果当标准答案，核对排版接口（`render-service/layout.mjs`）6 个账号 × 5 种输入逐字一样。样稿在 `tests/fixtures/layout-parity/`：
 
 | 文件 | 是什么 |
 | --- | --- |

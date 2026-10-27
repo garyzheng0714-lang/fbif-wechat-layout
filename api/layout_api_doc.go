@@ -43,7 +43,6 @@ var layoutAPIExamples = []layoutAPIExample{
 	{"text-foodtalks-series", layoutInputText, "foodtalks-series", "纯文本排成「FoodTalks什么是系列」公众号稿"},
 	{"html-wowfood", layoutInputHTML, "wowfood", "HTML 排成「WowFood爆品超市」公众号稿"},
 	{"web-url-foodtalks-mp", layoutInputWebURL, "foodtalks-mp", "FoodTalks 文章链接排成「FoodTalks食品资讯」公众号稿"},
-	{"text-wechat-plain", layoutInputText, "wechat-plain", "纯文本排成「格式清理」的微信编辑器原生段落"},
 }
 
 // layoutInputExample 每种输入一个能直接跑的请求（说明书「每种输入怎么交」）。

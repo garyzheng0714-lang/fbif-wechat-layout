@@ -54,7 +54,6 @@ curl -sS --max-time 130 \
 | `ft-default` | FoodTalks默认 | FoodTalks | FoodTalks 后台编辑器 |
 | `ft-series` | FoodTalks·什么是系列 | FoodTalks | FoodTalks 后台编辑器 |
 | `foodtalks-mp` | FoodTalks食品资讯 | 公众号 | 微信公众号后台编辑器 |
-| `wechat-plain` | 格式清理 | 公众号 | 微信公众号后台编辑器 |
 
 ## 能交什么
 
@@ -461,7 +460,7 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
 
 ## 回答长什么样
 
-下面的例子还是占位（字段齐全、内容是假的），排版程序上线后会换成真实排过的回答。
+下面是真实排过的回答（`html` 只列开头）。
 
 ### 公众号链接排成 FoodTalks 稿
 
@@ -855,42 +854,6 @@ curl -sS --max-time 40 -H "Authorization: Bearer $FLK" \
   },
   "build": "562292fbdd1babb90a4fd9f2fa4d5644a2536efa",
   "output_hash": "sha256:db17c34d9a9ffcbc267ca69fd421822694f69b64bb9edfa23755e077950547e4",
-  "warnings": [],
-  "request_id": "lr_Q2xhdWRlRXhh"
-}
-```
-
-### 纯文本排成「格式清理」的微信编辑器原生段落
-
-```json
-{
-  "account": {
-    "id": "wechat-plain",
-    "name": "格式清理",
-    "paste_into": "微信公众号后台编辑器"
-  },
-  "title": "（占位）植物基饮料的下一个十年",
-  "summary": "",
-  "html": "<p>（占位）上线后换成真实排过的回答。</p>",
-  "repost": false,
-  "footer": false,
-  "input": {
-    "kind": "text"
-  },
-  "images": [],
-  "stats": {
-    "images": 0,
-    "images_mirrored": 0,
-    "headings": 0,
-    "html_bytes": 0
-  },
-  "rule": {
-    "preset_id": "wechat-plain-default",
-    "revision": 1,
-    "config_hash": ""
-  },
-  "build": "",
-  "output_hash": "",
   "warnings": [],
   "request_id": "lr_Q2xhdWRlRXhh"
 }
