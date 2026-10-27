@@ -827,11 +827,11 @@ function wrapEngineFunctions() {
 }
 
 // ---- URL repost ----
-const importClipboardText = (text) => {
+const importClipboardText = (text, { links = [] } = {}) => {
   window._currentArticleUrl = '';
   const run = () => {
     if (!window._handleText) return false;
-    window._handleText(text, { source: 'clipboard' });
+    window._handleText(text, { source: 'clipboard', links });
     return true;
   };
   if (run()) return;

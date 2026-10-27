@@ -1196,13 +1196,13 @@ export function initApp(initialTemplate) {
     return true;
   }
 
-  window._handleText = (text, opts = {}) => {
+  window._handleText = (text, { links, ...opts } = {}) => {
     const raw = String(text || '');
     const body = normalizeClipboardTextForMarkdown(raw);
     if (!body) return;
     clearUploadVisual();
     if (!hasImageLikeLink(body)) {
-      window._handleBlocks(buildClipboardArticleBlocks(raw), { ...opts, isRepost: false, bodyOnly: true });
+      window._handleBlocks(buildClipboardArticleBlocks(raw, { links }), { ...opts, isRepost: false, bodyOnly: true });
       return;
     }
     const file = new File([body], 'clipboard.md', { type: 'text/markdown' });

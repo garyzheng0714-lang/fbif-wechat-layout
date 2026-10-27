@@ -464,3 +464,30 @@ test('a paragraph outside any list carries no marker', () => {
   assert.equal(para.isList, false);
   assert.equal(para.listMarker, '');
 });
+
+test('buildClipboardArticleBlocks 按锚文字把粘贴时记下的链接挂回去；找不到的跳过，不挡后面的', () => {
+  const article = buildClipboardArticleBlocks('欢迎报名，报名截止前报名。\n\n第二段看官网。', {
+    links: [
+      { text: '已删掉的字', href: 'https://a.example/x' },
+      { text: '报名', href: 'https://mp.weixin.qq.com/s/one' },
+      { text: '报名', href: 'https://mp.weixin.qq.com/s/two' },
+      { text: '官网', href: 'https://www.foodtalks.cn/' },
+      { text: '不是网址', href: 'javascript:alert(1)' },
+    ],
+  });
+  assert.deepEqual(article.blocks.map(block => block.runs), [
+    [
+      { type: 'txt', text: '欢迎' },
+      { type: 'link', text: '报名', href: 'https://mp.weixin.qq.com/s/one' },
+      { type: 'txt', text: '，' },
+      { type: 'link', text: '报名', href: 'https://mp.weixin.qq.com/s/two' },
+      { type: 'txt', text: '截止前报名。' },
+    ],
+    [
+      { type: 'txt', text: '第二段看' },
+      { type: 'link', text: '官网', href: 'https://www.foodtalks.cn/' },
+      { type: 'txt', text: '。' },
+    ],
+  ]);
+  assert.deepEqual(buildClipboardArticleBlocks('欢迎报名。').blocks[0].runs, [{ type: 'txt', text: '欢迎报名。' }]);
+});

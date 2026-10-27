@@ -140,3 +140,20 @@ test('贴图模板与其他渲染器物理隔离：只 import engine 与中性�
   const imports = [...source.matchAll(/import\(\s*'([^']+)'/g)].map(m => m[1]);
   assert.deepEqual(imports, ['../engine.js', '../docx-article-model.js']);
 });
+
+// 2026-10-27 用户在贴图编辑器里试：链到公众号文章的 <a> 粘进去变成文章链接，链到普通网页的只剩字。
+test('粘贴带链接：链到公众号文章的留成 <a>，普通网页只留字；纯文本不带链接', () => {
+  const text = '来f展，2027年4月21-23日在杭州。\n\n欢迎免费报名观展！更多看官网。';
+  const links = [
+    { text: '免费报名观展', href: 'https://mp.weixin.qq.com/s/1DgVTUgu0K-_h1gS0BnKWg' },
+    { text: '官网', href: 'https://www.foodtalks.cn/' },
+  ];
+  const out = sticker.processBlocks(buildClipboardArticleBlocks(text, { links })).clipboard;
+  assert.equal(out.html, '<p>来f展，2027年4月21-23日在杭州。<br><br>欢迎<a href="https://mp.weixin.qq.com/s/1DgVTUgu0K-_h1gS0BnKWg">免费报名观展</a>！更多看官网。</p>');
+  assert.equal(out.text, text);
+});
+
+test('Markdown 里链到公众号文章的也留成 <a>', async () => {
+  const out = (await sticker.processMd('看[这篇](https://mp.weixin.qq.com/s/abc)和[那个](https://example.com)。')).clipboard;
+  assert.equal(out.html, '<p>看<a href="https://mp.weixin.qq.com/s/abc">这篇</a>和那个。</p>');
+});

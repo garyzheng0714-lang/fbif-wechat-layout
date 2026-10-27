@@ -729,7 +729,34 @@ export function looksLikeArticleClipboardText(text) {
   return lines.slice(1, 5).some(line => /^(作者|撰文|撰稿|文)[：:/|｜]\s*\S+/.test(line));
 }
 
-export function buildClipboardArticleBlocks(text) {
+// 链接按顺序认：每条从上一条之后找锚文字，找不到（被删了、改了字）就跳过这条，不挡后面的。
+function linkRuns(lines, links) {
+  const anchors = (links || [])
+    .map(link => ({ text: normalizePlainTextLine(link && link.text), href: String(link && link.href || '') }))
+    .filter(anchor => anchor.text && /^https?:\/\//i.test(anchor.href));
+  let next = 0;
+  return lines.map((line, i) => {
+    const runs = [];
+    let pos = 0;
+    while (next < anchors.length) {
+      const anchor = anchors[next];
+      const at = line.indexOf(anchor.text, pos);
+      if (at < 0) {
+        if (lines.slice(i + 1).some(later => later.includes(anchor.text))) break;
+        next += 1;
+        continue;
+      }
+      if (at > pos) runs.push({ type: 'txt', text: line.slice(pos, at) });
+      runs.push({ type: 'link', text: anchor.text, href: anchor.href });
+      pos = at + anchor.text.length;
+      next += 1;
+    }
+    if (pos < line.length) runs.push({ type: 'txt', text: line.slice(pos) });
+    return runs;
+  });
+}
+
+export function buildClipboardArticleBlocks(text, { links = [] } = {}) {
   const rawLines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
   const firstContentIndex = rawLines.findIndex(line => String(line || '').trim());
   if (firstContentIndex < 0) return { title: '', blocks: [], source: 'clipboard-text', bodyOnly: true };
@@ -756,6 +783,10 @@ export function buildClipboardArticleBlocks(text) {
     blankBefore = false;
   }
 
+  if (links && links.length) {
+    const runs = linkRuns(blocks.map(block => block.runs[0].text), links);
+    blocks.forEach((block, i) => { block.runs = runs[i]; });
+  }
   return { title: '', displayName: '剪贴板正文', blocks, source: 'clipboard-text', bodyOnly: true };
 }
 

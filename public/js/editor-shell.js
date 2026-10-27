@@ -362,6 +362,31 @@ export function createUrlImportHandler({
   return fetchArticleFromUrl;
 }
 
+// 剪贴板 text/html 里的超链接（锚文字 + 地址，按出现顺序）。导入框只收纯文字，链接靠这份清单随正文交给
+// 引擎，在 buildClipboardArticleBlocks 里按锚文字挂回去；只认 http(s)。
+const HTML_ANCHOR_RE = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi;
+const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+function decodeHtmlText(text) {
+  return String(text || '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, name) => {
+    if (name[0] === '#') {
+      const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : all;
+    }
+    return HTML_ENTITIES[name.toLowerCase()] ?? all;
+  });
+}
+
+export function extractClipboardLinks(html) {
+  const links = [];
+  for (const m of String(html || '').matchAll(HTML_ANCHOR_RE)) {
+    const href = decodeHtmlText(m[1] ?? m[2] ?? m[3] ?? '').trim();
+    const text = decodeHtmlText(m[4].replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+    if (text && /^https?:\/\//i.test(href)) links.push({ text, href });
+  }
+  return links;
+}
+
 export function bindUrlImportShortcuts({
   documentRef = globalThis.document,
   fetchArticle,
@@ -374,6 +399,14 @@ export function bindUrlImportShortcuts({
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
   let pasteFallbackTimer = null;
+  // 框里正文带的链接（粘贴时从 text/html 记下）；整框换掉或清空就重记，追加粘贴接在后面。
+  let pastedLinks = [];
+
+  function clipboardLinks(clipboardData) {
+    if (!clipboardData || typeof clipboardData.getData !== 'function') return [];
+    const html = clipboardData.getData('text/html');
+    return /<a\b/i.test(html || '') ? extractClipboardLinks(html) : [];
+  }
 
   function submitImportValue(value) {
     const text = String(value || '').trim();
@@ -386,7 +419,7 @@ export function bindUrlImportShortcuts({
       return true;
     }
     if (typeof importText === 'function') {
-      importText(text);
+      importText(text, { links: pastedLinks });
       return true;
     }
     return false;
@@ -441,16 +474,21 @@ export function bindUrlImportShortcuts({
     if (ae && ae.classList && ignoreClassNames.some(name => ae.classList.contains(name))) return;
     const tag = ae && ae.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    const text = (event.clipboardData || globalThis.window.clipboardData).getData('text').trim();
+    const clipboardData = event.clipboardData || globalThis.window.clipboardData;
+    const text = clipboardData.getData('text').trim();
     if (!text || !shouldSubmitValue(text)) return;
     event.preventDefault();
+    pastedLinks = clipboardLinks(clipboardData);
     urlInput.value = text;
     urlInput.focus();
     submitImportValue(text);
   });
   if (!urlInput) return;
   urlInput.addEventListener('input', event => {
-    if (!(urlInput.value || '').trim() && typeof onInputCleared === 'function') onInputCleared();
+    if (!(urlInput.value || '').trim()) {
+      pastedLinks = [];
+      if (typeof onInputCleared === 'function') onInputCleared();
+    }
     if (event && event.inputType === 'insertFromPaste') {
       clearTimeout(pasteFallbackTimer);
       pasteFallbackTimer = null;
@@ -458,11 +496,12 @@ export function bindUrlImportShortcuts({
     }
   });
   urlInput.addEventListener('paste', event => {
-    const pasted = (event && (event.clipboardData || globalThis.window?.clipboardData))
-      ? (event.clipboardData || globalThis.window.clipboardData).getData('text')
-      : '';
+    const clipboardData = event && (event.clipboardData || globalThis.window?.clipboardData);
+    const pasted = clipboardData ? clipboardData.getData('text') : '';
     if (pasted) {
       const next = valueAfterPaste(urlInput, pasted);
+      const links = clipboardLinks(clipboardData);
+      pastedLinks = next.trim() === pasted.trim() ? links : pastedLinks.concat(links);
       event?.preventDefault?.();
       submitImportValue(next);
       return;

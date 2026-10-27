@@ -3,42 +3,78 @@
 // 所以这里从解析出的原文块直接排成几行字，不经文章预览、不读文章规则，文章规则怎么改都不会串进来。
 //
 // 行（lines）：string[]，'' 是空行。原文空行（blankBefore、Markdown 空行或分隔线、Word 空段）出一个空行；
-// 连着的行只换行；开头结尾不出空行，也不连出两个空行。加粗、链接、颜色只留字；图片、视频丢掉，
+// 连着的行只换行；开头结尾不出空行，也不连出两个空行。加粗、颜色只留字；链接只留链到公众号文章的
+// （贴图编辑器只认这种，粘进去变成文章链接；别的网址它只留字），其余只留字；图片、视频丢掉，
 // 夹在两段字中间时当空行。没有标题、署名、目录、页脚、更多文章、底部区块。标点照公众号口径转换。
 // 预览与复制是同一个 <p>…</p>；预览外观在 app.css 的 #contentArea[data-template="sticker"]，不进剪贴板。
 // 与其他渲染器物理隔离（红线 #19）：只 import engine 导出与中性的 docx-article-model。
 
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, parseMdRuns, parseMdFrontmatter, convertRuns, convertText } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, convertRuns, convertText } = engineModule;
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
 
-const BLANK = '';
+// 一行 = { text, html }；null 是空行。text 进 text/plain，html 进预览与 text/html。
+const BLANK = null;
 
 function cleanLine(text) {
   return String(text || '').replace(/\u00A0/g, ' ').trim();
 }
 
+function textLine(text) {
+  const clean = cleanLine(text);
+  return clean ? { text: clean, html: esc(clean) } : BLANK;
+}
+
 function textLines(text) {
-  return String(text || '').split(/\r?\n/).map(cleanLine);
+  return String(text || '').split(/\r?\n/).map(textLine);
 }
 
-function runsText(runs) {
-  return (runs || []).map(run => {
-    if (!run) return '';
-    if (run.type === 'br') return '\n';
-    return run.type === 'txt' || run.type === 'link' ? String(run.text || '') : '';
-  }).join('');
+const WECHAT_ARTICLE_HOST = 'mp.weixin.qq.com';
+
+function articleHref(href) {
+  try {
+    const url = new URL(String(href || ''));
+    return /^https?:$/.test(url.protocol) && url.hostname === WECHAT_ARTICLE_HOST ? url.href : '';
+  } catch {
+    return '';
+  }
 }
 
-function runsLines(elem) {
-  const runs = Array.isArray(elem.runs) ? elem.runs : [{ type: 'txt', text: elem.text || '' }];
-  const lines = textLines(runsText(runs));
+// 段内的字按换行切成行，每行是几段字（链到公众号文章的带 href）；行首尾的空白去掉。
+function runsLines(runs) {
+  const rows = [[]];
+  for (const run of runs || []) {
+    if (!run) continue;
+    if (run.type === 'br') { rows.push([]); continue; }
+    if (run.type !== 'txt' && run.type !== 'link') continue;
+    const href = run.type === 'link' ? articleHref(run.href) : '';
+    String(run.text || '').replace(/\u00A0/g, ' ').split(/\r?\n/).forEach((part, i) => {
+      if (i) rows.push([]);
+      if (part) rows[rows.length - 1].push({ text: part, href });
+    });
+  }
+  return rows.map(pieces => {
+    const kept = pieces.slice();
+    while (kept.length && !(kept[0].text = kept[0].text.trimStart())) kept.shift();
+    while (kept.length && !(kept[kept.length - 1].text = kept[kept.length - 1].text.trimEnd())) kept.pop();
+    if (!kept.length) return BLANK;
+    return {
+      text: kept.map(piece => piece.text).join(''),
+      html: kept.map(piece => piece.href
+        ? '<a href="' + escAttr(piece.href) + '">' + esc(piece.text) + '</a>'
+        : esc(piece.text)).join(''),
+    };
+  });
+}
+
+function blockLines(elem) {
+  const lines = runsLines(Array.isArray(elem.runs) ? elem.runs : [{ type: 'txt', text: elem.text || '' }]);
   const marker = cleanLine(elem.listMarker);
-  if (marker) {
-    const first = lines.findIndex(Boolean);
-    if (first >= 0) lines[first] = marker + ' ' + lines[first];
+  const first = lines.findIndex(Boolean);
+  if (marker && first >= 0) {
+    lines[first] = { text: marker + ' ' + lines[first].text, html: esc(marker) + ' ' + lines[first].html };
   }
   return lines;
 }
@@ -48,21 +84,21 @@ function plainLines(elem) {
 }
 
 function tableLines(elem) {
-  return (elem.rows || []).map(row => (Array.isArray(row) ? row : [])
-    .map(cell => textLines(runsText(cell && cell.runs)).filter(Boolean).join(' '))
+  return (elem.rows || []).map(row => textLine((Array.isArray(row) ? row : [])
+    .map(cell => runsLines(cell && cell.runs).filter(Boolean).map(line => line.text).join(' '))
     .filter(Boolean)
-    .join(' '));
+    .join(' ')));
 }
 
 const separator = () => [BLANK];
 
 // 块种类 → 几行字。旧写法 p/image/blockquote 同新写法；不认识的块当空行。
 const LINES_BY_KIND = {
-  txt: runsLines,
-  p: runsLines,
-  li: runsLines,
-  bq: runsLines,
-  blockquote: runsLines,
+  txt: blockLines,
+  p: blockLines,
+  li: blockLines,
+  bq: blockLines,
+  blockquote: blockLines,
   h: plainLines,
   cap: plainLines,
   table: tableLines,
@@ -89,14 +125,14 @@ function stickerLines(elems) {
 
 function result(elems) {
   const lines = stickerLines(elems);
-  const html = '<p>' + lines.map(esc).join('<br>') + '</p>';
+  const html = '<p>' + lines.map(line => line ? line.html : '').join('<br>') + '</p>';
   return {
     lines: [html],
     imgN: 0,
     headingN: 0,
     title: '',
     articleMeta: {},
-    clipboard: { html, text: lines.join('\n') },
+    clipboard: { html, text: lines.map(line => line ? line.text : '').join('\n') },
   };
 }
 

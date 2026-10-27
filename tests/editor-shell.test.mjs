@@ -6,6 +6,7 @@ import {
   bindRailDivider,
   bindUrlImportShortcuts,
   createUrlImportHandler,
+  extractClipboardLinks,
   foodTalksFetchErrorMessage,
   foreignChannelEditorPath,
   hasExplicitRepostDisclosure,
@@ -274,7 +275,7 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   );
   assert.match(
     engine,
-    /if \(!hasImageLikeLink\(body\)\) \{[\s\S]{0,140}_handleBlocks\(buildClipboardArticleBlocks\(raw\), \{ \.\.\.opts, isRepost: false, bodyOnly: true \}\);[\s\S]{0,40}return;/,
+    /if \(!hasImageLikeLink\(body\)\) \{[\s\S]{0,140}_handleBlocks\(buildClipboardArticleBlocks\(raw, \{ links \}\), \{ \.\.\.opts, isRepost: false, bodyOnly: true \}\);[\s\S]{0,40}return;/,
     '无图片的剪贴板正文应进入公众号正文排版，但不应生成完整公众号头尾'
   );
   assert.doesNotMatch(
@@ -349,7 +350,7 @@ test('公众号上传摘要收进文件卡片，网站页保留旧统计行', as
   );
   assert.match(
     app,
-    /const importClipboardText = \(text\) => \{\s*window\._currentArticleUrl = '';\s*const run = \(\) => \{\s*if \(!window\._handleText\) return false;/,
+    /const importClipboardText = \(text, \{ links = \[\] \} = \{\}\) => \{\s*window\._currentArticleUrl = '';\s*const run = \(\) => \{\s*if \(!window\._handleText\) return false;/,
     '公众号页粘贴正文时应清空上一条 URL 导入状态，引擎未就绪时排队重试'
   );
   assert.match(
@@ -788,7 +789,7 @@ test('bindUrlImportShortcuts 在页面上粘贴正文，直接排版并回填导
 function mountImportShortcuts({ initialValue = '', shouldSubmitValue } = {}) {
   const documentHandlers = {};
   const inputHandlers = {};
-  const calls = { fetched: 0, imported: [], tried: [] };
+  const calls = { fetched: 0, imported: [], importOpts: [], tried: [] };
   const urlInput = {
     value: initialValue,
     tagName: 'TEXTAREA',
@@ -809,7 +810,7 @@ function mountImportShortcuts({ initialValue = '', shouldSubmitValue } = {}) {
   bindUrlImportShortcuts({
     documentRef,
     fetchArticle: () => { calls.fetched += 1; },
-    importText: text => { calls.imported.push(text); },
+    importText: (text, opts) => { calls.imported.push(text); calls.importOpts.push(opts); },
     tryImportValue: value => {
       if (!/feishu\.cn\/(docx|wiki)\//.test(value)) return false;
       calls.tried.push(value);
@@ -1063,4 +1064,43 @@ test('extractSiteSummary：作者/编辑开头不是摘要，且不得从正文�
 
   assert.equal(extractSiteSummary(blocks, { consume: true }), '');
   assert.deepEqual(blocks, before, '作者行、编辑行和首段正文都必须保留');
+});
+
+test('extractClipboardLinks 从剪贴板 HTML 取锚文字与地址，只认 http(s)', () => {
+  assert.deepEqual(extractClipboardLinks(
+    '<p>欢迎<a href="https://mp.weixin.qq.com/s/abc?x=1&amp;y=2" target="_blank"><span>免费</span>报名观展</a>！' +
+    '<a href=\'mailto:a@b.c\'>邮件</a><a href="https://x.test/"></a></p>'
+  ), [{ text: '免费报名观展', href: 'https://mp.weixin.qq.com/s/abc?x=1&y=2' }]);
+  assert.deepEqual(extractClipboardLinks('纯文字'), []);
+});
+
+function clipboard({ text, html = '' }) {
+  return { getData: type => (type === 'text/html' ? html : text) };
+}
+
+test('输入框粘贴带链接的正文：链接随正文交给排版；追加粘贴接上，清空后不再带旧链接', () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts();
+  urlInput.selectionStart = 0;
+  urlInput.selectionEnd = 0;
+  inputHandlers.paste({
+    clipboardData: clipboard({ text: '欢迎报名观展！', html: '<p>欢迎<a href="https://mp.weixin.qq.com/s/a">报名观展</a>！</p>' }),
+    preventDefault() {},
+  });
+  urlInput.selectionStart = urlInput.value.length;
+  urlInput.selectionEnd = urlInput.value.length;
+  inputHandlers.paste({
+    clipboardData: clipboard({ text: '\n看官网。', html: '<p>看<a href="https://www.foodtalks.cn/">官网</a>。</p>' }),
+    preventDefault() {},
+  });
+  urlInput.value = '';
+  inputHandlers.input({});
+  urlInput.selectionStart = 0;
+  urlInput.selectionEnd = 0;
+  inputHandlers.paste({ clipboardData: clipboard({ text: '没有链接。' }), preventDefault() {} });
+
+  assert.deepEqual(calls.importOpts.map(opts => opts.links), [
+    [{ text: '报名观展', href: 'https://mp.weixin.qq.com/s/a' }],
+    [{ text: '报名观展', href: 'https://mp.weixin.qq.com/s/a' }, { text: '官网', href: 'https://www.foodtalks.cn/' }],
+    [],
+  ]);
 });

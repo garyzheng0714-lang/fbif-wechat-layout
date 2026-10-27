@@ -482,6 +482,7 @@ input[type="file"] { display: none; }
   font-size: 17px; line-height: 1.75; color: rgba(0,0,0,0.9); text-align: left;
 }
 #contentArea[data-template="sticker"] p { margin: 0; }
+#contentArea[data-template="sticker"] a { color: #576b95; text-decoration: none; }
 
 /* WeChat footer — sticky bottom */
 .wx-footer {
