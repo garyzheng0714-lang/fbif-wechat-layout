@@ -174,6 +174,7 @@ test('copyContent writes clipboard before pending more-articles preparation reso
     },
     _plainTextCopy: null,
     _copyArtifactUnavailableReason: '',
+    _articleSession: null,
     getPlainTextCopyValue: () => '',
     copyPlainTextToClipboard: async () => false,
     PLAIN_TEXT_RULE_LABEL: 'plain',
@@ -245,6 +246,7 @@ function copyDepsWithPendingImages({ articleCopy, unsafeRefs, uploadPromise, btn
     },
     _plainTextCopy: null,
     _copyArtifactUnavailableReason: '',
+    _articleSession: null,
     getPlainTextCopyValue: () => '',
     copyPlainTextToClipboard: async () => false,
     PLAIN_TEXT_RULE_LABEL: 'plain',
@@ -406,6 +408,7 @@ test('footer-only copy artifact is rejected before clipboard write', async () =>
     document: { getElementById: id => id === 'copyBtn' ? button : { textContent: '预览仍有页脚' } },
     window: {},
     _copyArtifactUnavailableReason: '',
+    _articleSession: null,
     _plainTextCopy: null,
     _articleBodyOnly: false,
     prepareMoreArticlesForCopy() {},
@@ -748,6 +751,107 @@ test('pure text copy bypasses article HTML and footer pipeline', async () => {
     plainIndex < articleIndex,
     '纯文字复制必须先返回，避免触发公众号 HTML、页脚和更多文章复制链路'
   );
+});
+
+// 贴图载体：模板自己给剪贴板内容（templates/sticker.js 的 result.clipboard），复制原样写入，不走文章复制链。
+function templateClipboardCopyDeps(session, overrides = {}) {
+  const writes = [];
+  const touched = [];
+  const classes = new Set();
+  const button = {
+    textContent: '复制全文',
+    classList: {
+      add(name) { classes.add(name); },
+      remove(name) { classes.delete(name); },
+      toggle(name, force) { if (force) classes.add(name); else classes.delete(name); },
+    },
+    style: {},
+  };
+  const article = name => () => { touched.push(name); return name === 'copyBodyHasMeaningfulContent'; };
+  const deps = {
+    ...copyButtonFeedbackDeps,
+    copyActionGate: { invalidate() {}, capture: () => ({ stale: () => false }) },
+    window: { _activeRuleState: 'resolved' },
+    document: {
+      getElementById(id) {
+        if (id === 'copyBtn') return button;
+        if (id === 'contentArea') return { textContent: '预览文字' };
+        return null;
+      },
+    },
+    _copyArtifactUnavailableReason: '',
+    _articleSession: session,
+    _plainTextCopy: null,
+    _lastCopiedHtml: '',
+    _activeTemplate: { id: 'sticker' },
+    logConv() {},
+    showError(message) { deps.shownError = message; },
+    async copyByClipboardApi(html, text) { writes.push({ html, text }); return true; },
+    async copyByClipboardEvent(html, text) { writes.push({ html, text, fallback: true }); return true; },
+    processForCopy: article('processForCopy'),
+    normalizeRich: article('normalizeRich'),
+    prepareMoreArticlesForCopy: article('prepareMoreArticlesForCopy'),
+    isFooterEnabledForCurrentArticle: article('isFooterEnabledForCurrentArticle'),
+    copyBodyHasMeaningfulContent: article('copyBodyHasMeaningfulContent'),
+    ...overrides,
+  };
+  return { deps, writes, touched, button, classes };
+}
+
+async function copyWithTemplateClipboard(engine, harness) {
+  const copyExpr = extractAssignedFunctionExpression(engine, 'window.copyContent =');
+  const helper = 'async ' + extractFunction(engine, 'copyTemplateClipboard');
+  const copyContent = new Function('deps', `with (deps) { ${helper}; return (${copyExpr}); }`)(harness.deps);
+  return copyContent();
+}
+
+test('贴图复制原样写模板给的 <p>…<br>…</p> 与纯文本，不内联、不归一化、不加光标段', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const clipboard = {
+    html: '<p>“这是啥？”<br><br>“马冬莓。”</p>',
+    text: '“这是啥？”\n\n“马冬莓。”',
+  };
+  const harness = templateClipboardCopyDeps({ clipboard });
+
+  assert.equal(await copyWithTemplateClipboard(engine, harness), true);
+  assert.deepEqual(harness.writes, [clipboard], '剪贴板 text/html 与 text/plain 就是模板给的那份');
+  assert.deepEqual(harness.touched, [], '文章复制链一步都不走');
+  assert.equal(harness.button.textContent, '\u2713 已复制');
+  assert.equal(harness.classes.has('copied'), true);
+  assert.equal(harness.deps._lastCopiedHtml, clipboard.html);
+});
+
+test('贴图复制同样受规则未就绪与降级恢复两道门；没有字就不写剪贴板', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const clipboard = { html: '<p>甲</p>', text: '甲' };
+
+  const unresolved = templateClipboardCopyDeps({ clipboard });
+  unresolved.deps.window._activeRuleState = 'loading';
+  assert.equal(await copyWithTemplateClipboard(engine, unresolved), false);
+  assert.deepEqual(unresolved.writes, []);
+  assert.equal(unresolved.button.textContent, '规则未就绪');
+
+  const degraded = templateClipboardCopyDeps({ clipboard }, { _copyArtifactUnavailableReason: '文章内容过大，仅恢复了预览。请重新导入后再复制。' });
+  assert.equal(await copyWithTemplateClipboard(engine, degraded), false);
+  assert.deepEqual(degraded.writes, []);
+
+  const empty = templateClipboardCopyDeps({ clipboard: { html: '<p></p>', text: '' } });
+  assert.equal(await copyWithTemplateClipboard(engine, empty), false);
+  assert.deepEqual(empty.writes, []);
+  assert.match(empty.deps.shownError, /正文为空/);
+  assert.equal(empty.button.textContent, '请重新导入');
+});
+
+test('剪贴板写失败时贴图复制报失败、不显示已复制', async () => {
+  const engine = await readFile(new URL('../public/js/engine.js', import.meta.url), 'utf8');
+  const harness = templateClipboardCopyDeps({ clipboard: { html: '<p>甲</p>', text: '甲' } }, {
+    async copyByClipboardApi() { throw new Error('denied'); },
+    async copyByClipboardEvent() { return false; },
+  });
+  assert.equal(await copyWithTemplateClipboard(engine, harness), false);
+  assert.equal(harness.button.textContent, '复制失败');
+  assert.equal(harness.classes.has('copied'), false);
+  assert.equal(harness.deps._lastCopiedHtml, '');
 });
 
 test('新文章导入原子作废上一篇的更多文章预热 job（防跨文章卡片污染）', async () => {

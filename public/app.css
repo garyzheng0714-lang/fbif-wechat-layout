@@ -475,6 +475,14 @@ input[type="file"] { display: none; }
   min-height: 140px;
 }
 
+/* 贴图载体（templates/sticker.js）只出一个无样式的 <p>，行间是 <br>：预览照公众号贴图文字的默认正文显示。
+   挂在预览容器的 data-template 上，复制产物里没有这个属性，所以不会被带进公众号。 */
+#contentArea[data-template="sticker"] {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 17px; line-height: 1.75; color: rgba(0,0,0,0.9); text-align: left;
+}
+#contentArea[data-template="sticker"] p { margin: 0; }
+
 /* WeChat footer — sticky bottom */
 .wx-footer {
   position: sticky; bottom: 0; z-index: 10;

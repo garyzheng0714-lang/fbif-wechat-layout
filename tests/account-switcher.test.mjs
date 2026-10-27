@@ -193,6 +193,7 @@ test('跨模板 A→B 快速切换时，后返的 A 模板不得覆盖 B', async
     applyRulePackChrome() {},
     accountMenu: { setActive() {} },
     syncEngineConfig() {},
+    carrier: { templateFor: id => id }, // 文章载体：账号的模板就是实际装的模板
     initApp() {},
     wrapEngineFunctions() {},
     importTemplateModule(templateID) {
@@ -268,6 +269,7 @@ test('账号切换是事务：模板加载失败后回滚原账号并可重试',
     applyAccountCapabilityUI: async () => {},
     accountMenu: { setActive(id) { menu.push(id); } },
     syncEngineConfig() {},
+    carrier: { templateFor: id => id }, // 文章载体：账号的模板就是实际装的模板
     initApp() {}, wrapEngineFunctions() {},
     async importTemplateModule(templateID) {
       attempts++;
@@ -461,6 +463,7 @@ test('模板已进入引擎后才报错，账号事务仍必须回滚原模板',
     persistAccountSelection() {}, applyRulePackChrome() {},
     applyAccountCapabilityUI: async () => {}, accountMenu: { setActive() {} },
     syncEngineConfig() {}, initApp() {}, wrapEngineFunctions() {},
+    carrier: { templateFor: id => id }, // 文章载体：账号的模板就是实际装的模板
     async importTemplateModule(templateID) { return { default: { id: templateID } }; },
     ruleSelector: {
       getSource: () => 'server', setSource() {},
@@ -598,6 +601,7 @@ test('A→B pending→C 失败：C 必须回滚已提交 A，B 后返不得制�
     applyRulePackChrome() {}, applyAccountCapabilityUI: async () => {},
     accountMenu: { setActive(id) { menu.push(id); } },
     syncEngineConfig() {}, initApp() {}, wrapEngineFunctions() {},
+    carrier: { templateFor: id => id }, // 文章载体：账号的模板就是实际装的模板
     importTemplateModule(templateID) {
       if (templateID === 'foodtalks-series') return delayedB.promise;
       return Promise.resolve({ default: { id: templateID } });
@@ -691,6 +695,7 @@ test('失败回滚模板后返时已有更新切换，旧回滚不得覆盖新�
     },
     persistAccountSelection() {}, applyRulePackChrome() {}, applyAccountCapabilityUI: async () => {},
     accountMenu: { setActive() {} }, syncEngineConfig() {}, initApp() {}, wrapEngineFunctions() {},
+    carrier: { templateFor: id => id }, // 文章载体：账号的模板就是实际装的模板
     importTemplateModule(templateID) {
       if (templateID !== 'fbif') return Promise.resolve({ default: { id: templateID } });
       const task = deferred();

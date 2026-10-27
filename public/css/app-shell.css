@@ -650,6 +650,54 @@ body.is-resizing-rail .rail { transition: none; }
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* 载体胶囊（文章 / 贴图）：只决定这一篇排成什么载体，不是第二层账号菜单，
+   所以靠右单放、做成分段开关；选中项是升起的白底片，不只靠颜色区分。 */
+.carrier-switch {
+  flex: 0 0 auto;
+  margin-left: auto;
+  box-sizing: border-box;
+  height: 26px;
+  padding: 2px;
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: var(--fs-r-full);
+  background: var(--fs-bg-sunken);
+}
+.carrier-switch:empty { display: none; }
+.carrier-option {
+  min-width: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--fs-r-full);
+  background: transparent;
+  color: var(--fs-text-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--fs-t-fast) var(--fs-ease-out),
+    color var(--fs-t-fast) var(--fs-ease-out),
+    box-shadow var(--fs-t-fast) var(--fs-ease-out);
+}
+.carrier-option:hover {
+  background: var(--fs-bg-hover);
+  color: var(--fs-text-1);
+}
+.carrier-option:active { background: var(--fs-bg-press); }
+.carrier-option[aria-checked="true"] {
+  background: var(--fs-bg-card);
+  color: var(--fs-text-1);
+  box-shadow: var(--fs-sh-s1);
+  cursor: default;
+}
+.carrier-option:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
+}
 /* 两个次要入口常驻浅灰底：它们要看起来可点，但主路径是粘贴即排版，不做视觉主角。 */
 .import-action-button {
   flex: 0 0 auto;
@@ -1249,6 +1297,7 @@ body.article-text-preview .phone-frame {
   .copy-split-toggle { width: 44px; }
   .global-channel-bar .btn,
   .import-account-target .acct-trigger,
+  .carrier-switch,
   .rail-foot .user-identity-trigger,
   .import-card .btn-sm,
   .empty-action .btn-sm { height: 44px; }

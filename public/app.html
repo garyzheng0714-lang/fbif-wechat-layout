@@ -48,6 +48,7 @@
               <div class="import-destination">
                 <span class="import-destination-label">排版到</span>
                 <div class="acct-menu import-account-target" id="acctMenu" aria-label="选择排版公众号"></div>
+                <div class="carrier-switch" id="carrierSwitch"></div>
               </div>
               <div class="import-composer-input" data-url-focus-target>
                 <textarea class="field url-input-inline import-textarea" id="urlInput" rows="5" spellcheck="false" aria-label="粘贴文章链接、正文或 Markdown，或搜索飞书文档" placeholder="粘贴公众号文章 / 飞书文档链接，或正文"></textarea>
@@ -238,6 +239,7 @@ window._pushLog = function(level, msg, detail) {
 const rulePackModule = await import('/js/rule-packs/registry.js?v=' + assetVersion);
 const rulePackUrlModule = await import('/js/rule-packs/url.js?v=' + assetVersion);
 const { mountAccountMenu } = await import('/js/account-menu.js?v=' + assetVersion);
+const { createCarrier } = await import('/js/carrier.js?v=' + assetVersion);
 const editorShell = await import('/js/editor-shell.js?v=' + assetVersion);
 const { requestRulePreviewSync, rulePreviewCommitted } = await import('/js/rule-preview-sync.js?v=' + assetVersion);
 const { mountBlockPanel } = await import('/js/blocks/block-panel.js?v=' + assetVersion);
@@ -406,6 +408,11 @@ const accountMenu = mountAccountMenu({
   container: document.getElementById('acctMenu'),
   activeId: activeRulePack.id,
   onSwitch: (id) => { switchAccount(id).catch(err => console.warn('[account] switch failed', err)); },
+});
+// 载体胶囊（文章 / 贴图）：决定 loadTemplate 实际装哪个模板；切换按缓存原文重排。
+const carrier = createCarrier({
+  storage: window.localStorage,
+  onChange: ({ stale }) => loadTemplate(activeRulePack.templateId, { rerender: true, stale }),
 });
 
 // #moreArticlesEmbed 的稳定引用：缓存一次，之后即使被 block-panel 的 innerHTML='' 摘下 DOM，
@@ -729,9 +736,13 @@ function importTemplateModule(templateId) {
   return import('/js/templates/' + templateId + '.js?v=' + assetVersion);
 }
 
+// templateId 是账号的模板；实际装哪个由载体定（贴图载体固定装 sticker）。
 async function loadTemplate(templateId, options = {}) {
-  const mod = await importTemplateModule(templateId);
+  const effectiveTemplateId = carrier.templateFor(templateId);
+  const mod = await importTemplateModule(effectiveTemplateId);
   if (options.stale && options.stale()) return false;
+  // 加载期间载体又切了：按最新的载体重来，不把旧载体的模板写进引擎。
+  if (carrier.templateFor(templateId) !== effectiveTemplateId) return loadTemplate(templateId, options);
   syncEngineConfig(false);
   if (window._engineApi && typeof window._engineApi.switchTemplate === 'function') {
     const switching = window._engineApi.switchTemplate(mod.default, { rerender: options.rerender === true });
@@ -749,6 +760,7 @@ async function loadTemplate(templateId, options = {}) {
 }
 
 await loadTemplate(currentTemplateId);
+carrier.mount(document.getElementById('carrierSwitch'));
 // 底部能力 UI（含 mountBlockPanel）只由 hydrateActiveRulePreset 在 /api/rules/active
 // 返回、window._activeConfig 就绪后单次触发（见 hydrate 内 applyAccountCapabilityUI）。
 // 此处不再抢跑——抢跑时 _activeConfig 未就绪会判空隐藏面板，并与 hydrate 重复挂载。

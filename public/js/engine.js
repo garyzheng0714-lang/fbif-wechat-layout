@@ -652,6 +652,9 @@ export function initApp(initialTemplate) {
     const fileHint = document.getElementById('fileHint');
     if (fileHint) fileHint.textContent = 'Word / MD / TXT';
     fileInputEl.accept = nextTemplate.formats.join(',');
+    // 预览外观按模板挂在预览容器上（app.css 的 #contentArea[data-template=…]）；复制只取排版产物，不带这个属性。
+    const contentArea = document.getElementById('contentArea');
+    if (contentArea && contentArea.dataset) contentArea.dataset.template = nextTemplate.id;
   }
   const fileInputEl = document.getElementById('fileInput');
   applyTemplateShell(template);
@@ -901,7 +904,8 @@ export function initApp(initialTemplate) {
     const commitGate = options.commitGate || null;
     if (commitGate && commitGate.stale()) return null;
     if (options.resetArticleArtifacts) resetMoreArticlesForNewArticle();
-    const bodyOnly = !!input.bodyOnly;
+    // 模板声明 bodyOnly（贴图）时只排正文；input.bodyOnly 是这次输入自己的（粘贴纯文本），切回文章模板照旧。
+    const bodyOnly = !!input.bodyOnly || !!template.bodyOnly;
     const articleHtml = result.lines.join('\n');
     const articleMeta = result.articleMeta || {};
     const footerVisibilityOverride = bodyOnly
@@ -969,6 +973,9 @@ export function initApp(initialTemplate) {
       bottomBlocksAccountId: bottomBlocksState.accountId,
       sourceIsDocx: !!input.sourceIsDocx,
       bodyOnly,
+      // 模板自己给剪贴板内容（贴图）时，复制原样写它，不走文章复制链。
+      clipboard: result.clipboard || null,
+      templateId: template.id,
     };
   }
 
@@ -2425,6 +2432,48 @@ export function initApp(initialTemplate) {
     return prepared;
   }
 
+  // 模板自己给的剪贴板内容（贴图）：原样写 text/html 与 text/plain，不内联主题、不归一化、不加光标段。
+  async function copyTemplateClipboard(payload, btn, copyAction) {
+    const html = String(payload.html || '');
+    const text = String(payload.text || '');
+    if (!text.trim()) {
+      _lastCopiedHtml = '';
+      logConv('error', '复制已阻止：正文为空');
+      showError('当前正文为空，请重新导入后再复制。');
+      setCopyButtonLabel(btn, '请重新导入');
+      setCopyButtonCopied(btn, false);
+      btn.style.background = '';
+      return false;
+    }
+    let ok = false;
+    let method = '';
+    try {
+      ok = await copyByClipboardApi(html, text);
+      if (ok) method = 'ClipboardAPI';
+    } catch {}
+    if (copyAction.stale()) return false;
+    if (!ok) {
+      try {
+        ok = await copyByClipboardEvent(html, text);
+        if (ok) method = 'ClipboardEvent';
+      } catch {}
+    }
+    if (copyAction.stale()) return false;
+    _lastCopiedHtml = ok ? html : '';
+    window._copyImageWarning = 0;
+    logConv(ok ? 'info' : 'error', ok ? '复制完成' : '复制失败', {
+      method,
+      htmlSize: (html.length / 1024).toFixed(1) + 'KB',
+      textChars: text.length,
+      channel: (_activeTemplate && _activeTemplate.id) || 'unknown',
+    });
+    setCopyButtonLabel(btn, ok ? '\u2713 已复制' : '复制失败');
+    setCopyButtonCopied(btn, ok);
+    setCopyButtonWarning(btn, false);
+    btn.style.background = '';
+    return ok;
+  }
+
   window.copyContent = async function() {
     copyActionGate.invalidate();
     const copyAction = copyActionGate.capture();
@@ -2451,6 +2500,9 @@ export function initApp(initialTemplate) {
       btn.style.background = '';
       return false;
     }
+
+    const templateClipboard = _articleSession && _articleSession.clipboard;
+    if (templateClipboard) return copyTemplateClipboard(templateClipboard, btn, copyAction);
 
     if (_plainTextCopy !== null) {
       const text = getPlainTextCopyValue();
@@ -2951,6 +3003,10 @@ export function initApp(initialTemplate) {
       dispatchArticleEvent('fbif:article-restored', { snapshot: snap });
     }
     if (_copyArtifactUnavailableReason) showError(_copyArtifactUnavailableReason);
+    // 草稿是别的模板排的（例如另一个标签页把载体切成了贴图）：按现在的模板从原文重排，预览、复制与载体一致。
+    if (_articleSession && _articleSession.templateId && _articleSession.templateId !== template.id) {
+      Promise.resolve(_engineRerender()).catch(err => console.error('[engine] restore rerender failed:', err));
+    }
     return true;
   };
 }
