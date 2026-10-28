@@ -590,6 +590,7 @@ test('restoreSessionSnapshot behavior rewrites legacy unsafe footer_copy to a co
     // 直接返回 false 表示没有可复用的预备内容，走常规重绘。
     adoptPreviewContent: () => false,
     isFooterEnabledForCurrentArticle: () => true,
+    writeImportLinks() {},
   };
 
   const restoreSessionSnapshot = new Function('deps', `with (deps) { return (${restoreExpr}); }`)(deps);

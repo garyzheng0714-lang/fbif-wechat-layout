@@ -553,6 +553,36 @@ body.is-resizing-rail .rail { transition: none; }
   font-weight: 400;
   opacity: 1;
 }
+/* 框里有链接时（import-links.js）：框的字透明，看到的是框后面垫着的同排版的字，链接蓝色下划线。
+   输入区自成一层，垫层 z-index:-1 才落在框下、卡片白底上。 */
+.import-composer-input {
+  position: relative;
+  z-index: 0;
+}
+.import-textarea-links {
+  position: absolute;
+  z-index: -1;
+  overflow: hidden;
+  border-style: solid;
+  border-color: transparent;
+  color: var(--fs-text-1);
+  pointer-events: none;
+}
+.import-composer-input:not(.has-links) .import-textarea-links {
+  display: none;
+}
+.import-card .import-composer-input.has-links .import-textarea {
+  color: transparent;
+  caret-color: var(--fs-text-1);
+}
+.import-card .import-composer-input.has-links .import-textarea::selection {
+  background: color-mix(in srgb, var(--fs-brand) 22%, transparent);
+}
+.import-textarea-link {
+  color: var(--fs-brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .import-composer-addon {
   min-width: 0;
   min-height: 30px;

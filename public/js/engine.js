@@ -30,6 +30,7 @@ const punctuationModule = await import('./punctuation.js' + assetQuery);
 export const { convertRuns, convertText, endsWithEnglishAbbreviation } = punctuationModule;
 
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
+import { readImportLinks, writeImportLinks } from './clipboard-links.js';
 import { createCopySession } from './copy-session.js';
 import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
 import { normalizeWechatRichHtml } from './wechat-normalize.js';
@@ -2884,6 +2885,7 @@ export function initApp(initialTemplate) {
         stats_text: (document.getElementById('statsBar') || {}).textContent || '',
         preview_scroll_top: (document.getElementById('previewScroll') || {}).scrollTop || 0,
         import_input_value: importInput ? importInput.value : '',
+        import_input_links: readImportLinks(importInput),
       },
     };
   };
@@ -2994,7 +2996,10 @@ export function initApp(initialTemplate) {
     const previewScroll = document.getElementById('previewScroll');
     if (previewScroll) previewScroll.scrollTop = dom.preview_scroll_top || 0;
     const importInput = document.getElementById('urlInput');
-    if (importInput) importInput.value = restoredImportInputValue(dom, cs);
+    if (importInput) {
+      importInput.value = restoredImportInputValue(dom, cs);
+      writeImportLinks(importInput, dom.import_input_links);
+    }
     if (dom.plain_text_preview) {
       dispatchArticleEvent('fbif:plain-text-ready', { text: _plainTextCopy || '', rule: PLAIN_TEXT_RULE_LABEL });
     } else if (dom.article_text_preview) {

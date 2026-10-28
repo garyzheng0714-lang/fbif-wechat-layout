@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
+import { extractClipboardLinks } from '../public/js/clipboard-links.js';
 import {
   bindRailDivider,
   bindUrlImportShortcuts,
   createUrlImportHandler,
-  extractClipboardLinks,
   foodTalksFetchErrorMessage,
   foreignChannelEditorPath,
   hasExplicitRepostDisclosure,
@@ -793,6 +793,7 @@ function mountImportShortcuts({ initialValue = '', shouldSubmitValue } = {}) {
   const urlInput = {
     value: initialValue,
     tagName: 'TEXTAREA',
+    dataset: {},
     classList: { contains: () => false },
     focus() {},
     addEventListener(type, handler) { inputHandlers[type] = handler; },

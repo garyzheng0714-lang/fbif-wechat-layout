@@ -148,6 +148,24 @@ test('贴图下的草稿刷新后恢复成贴图预览，复制照样是贴图�
   assert.deepEqual(await copy(after), { html: STICKER_HTML, text: SAMPLE });
 });
 
+test('导入框里粘进来的链接随草稿保存：刷新后框里的字和链接都回来', async () => {
+  const links = [{ text: '马冬莓', href: 'https://mp.weixin.qq.com/s/abc' }];
+  const before = openPage();
+  engine.initApp(fbif);
+  await pasteArticle(before);
+  const input = before.document.getElementById('urlInput');
+  input.value = SAMPLE;
+  input.dataset.links = JSON.stringify(links);
+  const snapshot = JSON.parse(JSON.stringify(before.window._captureSessionSnapshot()));
+
+  const after = openPage();
+  engine.initApp(fbif);
+  assert.equal(after.window._restoreSessionSnapshot(snapshot), true);
+  const restored = after.document.getElementById('urlInput');
+  assert.equal(restored.value, SAMPLE);
+  assert.deepEqual(JSON.parse(restored.dataset.links), links);
+});
+
 test('文章草稿在贴图载体下恢复：按贴图从原文重排，不留文章预览', async () => {
   const before = openPage();
   engine.initApp(fbif);

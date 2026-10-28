@@ -2,6 +2,7 @@
 // Keeps page scripts focused on channel-specific wiring while common URL import,
 // rule-pack path resolution, and copy feedback live behind one interface.
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { extractClipboardLinks, readImportLinks, writeImportLinks } from './clipboard-links.js';
 
 export const DEFAULT_ACCOUNT_STORAGE_KEY = 'active_rule_pack';
 
@@ -362,31 +363,6 @@ export function createUrlImportHandler({
   return fetchArticleFromUrl;
 }
 
-// 剪贴板 text/html 里的超链接（锚文字 + 地址，按出现顺序）。导入框只收纯文字，链接靠这份清单随正文交给
-// 引擎，在 buildClipboardArticleBlocks 里按锚文字挂回去；只认 http(s)。
-const HTML_ANCHOR_RE = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi;
-const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-
-function decodeHtmlText(text) {
-  return String(text || '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, name) => {
-    if (name[0] === '#') {
-      const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : all;
-    }
-    return HTML_ENTITIES[name.toLowerCase()] ?? all;
-  });
-}
-
-export function extractClipboardLinks(html) {
-  const links = [];
-  for (const m of String(html || '').matchAll(HTML_ANCHOR_RE)) {
-    const href = decodeHtmlText(m[1] ?? m[2] ?? m[3] ?? '').trim();
-    const text = decodeHtmlText(m[4].replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
-    if (text && /^https?:\/\//i.test(href)) links.push({ text, href });
-  }
-  return links;
-}
-
 export function bindUrlImportShortcuts({
   documentRef = globalThis.document,
   fetchArticle,
@@ -399,8 +375,6 @@ export function bindUrlImportShortcuts({
 } = {}) {
   const urlInput = documentRef.getElementById('urlInput');
   let pasteFallbackTimer = null;
-  // 框里正文带的链接（粘贴时从 text/html 记下）；整框换掉或清空就重记，追加粘贴接在后面。
-  let pastedLinks = [];
 
   function clipboardLinks(clipboardData) {
     if (!clipboardData || typeof clipboardData.getData !== 'function') return [];
@@ -419,7 +393,7 @@ export function bindUrlImportShortcuts({
       return true;
     }
     if (typeof importText === 'function') {
-      importText(text, { links: pastedLinks });
+      importText(text, { links: readImportLinks(urlInput) });
       return true;
     }
     return false;
@@ -478,7 +452,7 @@ export function bindUrlImportShortcuts({
     const text = clipboardData.getData('text').trim();
     if (!text || !shouldSubmitValue(text)) return;
     event.preventDefault();
-    pastedLinks = clipboardLinks(clipboardData);
+    writeImportLinks(urlInput, clipboardLinks(clipboardData));
     urlInput.value = text;
     urlInput.focus();
     submitImportValue(text);
@@ -486,7 +460,7 @@ export function bindUrlImportShortcuts({
   if (!urlInput) return;
   urlInput.addEventListener('input', event => {
     if (!(urlInput.value || '').trim()) {
-      pastedLinks = [];
+      writeImportLinks(urlInput, []);
       if (typeof onInputCleared === 'function') onInputCleared();
     }
     if (event && event.inputType === 'insertFromPaste') {
@@ -500,8 +474,9 @@ export function bindUrlImportShortcuts({
     const pasted = clipboardData ? clipboardData.getData('text') : '';
     if (pasted) {
       const next = valueAfterPaste(urlInput, pasted);
+      // 框里的链接：整框换掉就重记，追加粘贴接在后面。
       const links = clipboardLinks(clipboardData);
-      pastedLinks = next.trim() === pasted.trim() ? links : pastedLinks.concat(links);
+      writeImportLinks(urlInput, next.trim() === pasted.trim() ? links : readImportLinks(urlInput).concat(links));
       event?.preventDefault?.();
       submitImportValue(next);
       return;

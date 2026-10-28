@@ -865,6 +865,9 @@ bindUrlImportShortcuts({
   tryImportValue: value => feishuDocImport?.importValue?.(value) === true,
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
+// 框里粘进来的链接画成蓝色下划线；只在公众号编辑器挂，FoodTalks 编辑器排版时不带粘贴的链接。
+const { mountImportLinks } = await import('/js/import-links.js?v=' + assetVersion);
+mountImportLinks(document.getElementById('urlInput'));
 
 const {
   mountFeishuDocumentImport,

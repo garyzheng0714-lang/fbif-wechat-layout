@@ -3,6 +3,7 @@
 
 import { convertRuns, convertText } from './punctuation.js';
 import { createListMarkers, NO_LIST_MARKER } from './docx-list-markers.js';
+import { linkRanges } from './clipboard-links.js';
 
 const EXT_TO_MIME = {
   gif: 'image/gif',
@@ -729,27 +730,20 @@ export function looksLikeArticleClipboardText(text) {
   return lines.slice(1, 5).some(line => /^(作者|撰文|撰稿|文)[：:/|｜]\s*\S+/.test(line));
 }
 
-// 链接按顺序认：每条从上一条之后找锚文字，找不到（被删了、改了字）就跳过这条，不挡后面的。
+// 锚文字与正文同样转标点、理空格后再认（认法在 clipboard-links.js，与框里画蓝字同一个）。
 function linkRuns(lines, links) {
-  const anchors = (links || [])
-    .map(link => ({ text: normalizePlainTextLine(link && link.text), href: String(link && link.href || '') }))
-    .filter(anchor => anchor.text && /^https?:\/\//i.test(anchor.href));
-  let next = 0;
+  const anchors = (links || []).map(link => ({
+    text: normalizePlainTextLine(link && link.text),
+    href: String(link && link.href || ''),
+  }));
+  const ranges = linkRanges(lines, anchors);
   return lines.map((line, i) => {
     const runs = [];
     let pos = 0;
-    while (next < anchors.length) {
-      const anchor = anchors[next];
-      const at = line.indexOf(anchor.text, pos);
-      if (at < 0) {
-        if (lines.slice(i + 1).some(later => later.includes(anchor.text))) break;
-        next += 1;
-        continue;
-      }
-      if (at > pos) runs.push({ type: 'txt', text: line.slice(pos, at) });
-      runs.push({ type: 'link', text: anchor.text, href: anchor.href });
-      pos = at + anchor.text.length;
-      next += 1;
+    for (const { start, end, href } of ranges[i]) {
+      if (start > pos) runs.push({ type: 'txt', text: line.slice(pos, start) });
+      runs.push({ type: 'link', text: line.slice(start, end), href });
+      pos = end;
     }
     if (pos < line.length) runs.push({ type: 'txt', text: line.slice(pos) });
     return runs;
