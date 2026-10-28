@@ -9,7 +9,9 @@ if (pc) {
   let wasVisible = pc.style.display !== 'none';
   const obs = new MutationObserver(() => {
     const visible = pc.style.display !== 'none';
-    if (visible && !wasVisible && window.gsap && !reduced()) {
+    // 打开页面时恢复上次的稿子不算新文章出现：页面还没露出来，不放渐入。
+    const booting = document.body.classList.contains('boot-pending');
+    if (visible && !wasVisible && !booting && window.gsap && !reduced()) {
       gFrom(pc, { y: 12, opacity: 0, duration: 0.34, ease: 'power3.out' });
       const wf = document.getElementById('wxFooter');
       if (wf && wf.style.display !== 'none') gFrom(wf, { y: 18, opacity: 0, duration: 0.32, delay: 0.08, ease: 'power3.out' });

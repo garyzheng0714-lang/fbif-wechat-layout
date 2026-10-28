@@ -1,5 +1,15 @@
-body.auth-pending > :not(script) {
+body.auth-pending > :not(script),
+body.boot-pending > :not(script) {
   visibility: hidden;
+}
+
+/* 编辑器启动完才摘掉 boot-pending；启动卡住或中途出错时，登录确认后最多 5 秒也露出页面，不一直白屏。 */
+body.boot-pending:not(.auth-pending) > :not(script) {
+  animation: boot-pending-timeout 0s 5s forwards;
+}
+
+@keyframes boot-pending-timeout {
+  to { visibility: visible; }
 }
 
 body.auth-unavailable > :not(script) {
