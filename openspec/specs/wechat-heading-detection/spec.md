@@ -48,7 +48,12 @@
 #### Scenario: 修改后回归全部历史病样
 
 - **WHEN** 修改任一标题或图注判据
-- **THEN** 必须跑通全部历史病样，并通过 `go test ./...` 与 `npm test`
+- **THEN** 必须跑通标题考卷（`api/testdata/heading-exam`，用户提过、编辑手改过小标题的真文章原文 + 答案），并通过 `go test ./...` 与 `npm test`
+
+#### Scenario: 先收进考卷再修（2026-10-28）
+
+- **WHEN** 用户或编辑指出一篇的小标题认错了
+- **THEN** 先按 `tools/heading-exam/README.md` 把这篇收进考卷、写好答案，再改规则；考卷里哪篇的差别变多，不得直接重写记录
 
 ### Requirement: 一个标题折成几行时合回一行（2026-10-15）
 

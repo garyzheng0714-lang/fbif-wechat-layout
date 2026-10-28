@@ -1,0 +1,689 @@
+{
+  "title": "半年营收9.62亿元，对话友宝在线崔艳：无人零售门槛正被AI改写",
+  "source_name": "",
+  "byline": "容奇",
+  "blocks": [
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "来源：浪潮新消费"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "作者：容奇"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "无人零售的下一程，是让更多普通的角落，都长出值得做的生意。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/sz_mmbiz_png/6JHhlvvjTRGee2pFauOyK6Vq6mkkfPiaCsoWrersibYJUiaYpEy1Epc2xM5LvUzUdrsLRfmY12Ec2dztMMPBqScBiaKrzPLiaEch1q5oSpXribft4/640?wx_fmt=png&from=appmsg",
+      "dataW": "865",
+      "dataRatio": "0.7572254335260116"
+    },
+    {
+      "k": "cap",
+      "text": "图片来源：友宝"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "过去两年，消费零售最激烈的争夺，发生在「离消费者最近」的地方："
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "即时零售把履约压进三十分钟，量贩零食和折扣店开进社区，所有玩家都在用更低的成本，往消费者身边多挪一步。在近场之争里，颗粒度最细的业态是无人零售：一台机器就是一家微型门店，可以开进任何有人停留的角落。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "但它过去有一道解不开的题：运营成本高，只有少数好点位算得过账，行业二十年没真正做大。",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "变化发生在AI进入运营层之后：选品、补货、调度、运维交给智能体，低销点位开始跑通，「离消费者最近」第一次可以被规模化地组织。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "友宝在线（2429.HK）刚发布的半年报，给我们看到这个行业新的可能："
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "截至6月30日，公司点位总数80,965个，其中合伙人模式点位62,484个，半年增长23.3%，占比升至77.2%，合伙人点位销售额占无人零售业务比例达69.1%；"
+        },
+        {
+          "type": "txt",
+          "text": "无人零售业务收入9.62亿元，同比增长11.7%，该分部毛利率由47.2%提升至51.0%。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/sz_mmbiz_png/TicFPvrciaDuRdCgIG6adDYibdXhibpdLicbKIDvrenOoVq92dbIvYNkM9qGL7mgSHwwOCOteJNL2wz86M4BsFEcAexvicHGv5GOfLNQOYXEdo0HU/640?wx_fmt=png&from=appmsg",
+      "dataW": "1080",
+      "dataRatio": "0.4009259259259259"
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/mmbiz_png/TicFPvrciaDuS7YFz69K6VySAkYgAPSySv2DibFKBZjSInAu1KQE0ajoybEQXavgybr45ia8ew5lc1smREnTwYpyjxqA5GicQia7XPNHRODHNZfwM/640?wx_fmt=png&from=appmsg",
+      "dataW": "1080",
+      "dataRatio": "0.4305555555555556"
+    },
+    {
+      "k": "cap",
+      "text": "图片来源：友宝"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "早在6月30日，它宣布合伙人模式是「唯一且坚定走下去的路」，创始人王滨首次以主席致辞把路径概括为智能化、平台化、多元化，核心是把运营能力开放成平台。用友宝董秘崔艳的话说，友宝已经「从挑场景、挑对象，走到了全场景、全对象」：办公室行政、门店老板，都能经营好一台机器。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "当零售进入密度与效率之争，友宝未来将从抢占少数好点位，到组织大多数普通点位。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "围绕AI如何降低点位门槛，合伙人模式为何在此时成立，以及密度、数据与利润之间如何形成循环，浪潮新消费最近深度对话了友宝在线董秘崔艳，通过这场变革，希望给到行业不一样的价值启发！ "
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "text": "AI先改写的不是效率，是行业的天花板"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "浪潮新消费："
+        },
+        {
+          "type": "txt",
+          "text": "无人零售今年又热了起来，你怎么看这个行业当下的变化？",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "崔艳：无人零售是个比较宽泛的概念，业内一般把它等同于自动售货机。这个领域相对成熟，竞争也一直很激烈。但AI出现之后，我们观察到行业可能出现重大变化。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "最直观的变化是点位门槛。过去业内一般只关注月销量2,000元以上的点位，更低销量的点位基本算不过来账。但随着AI对选品、补货、调度、运维各个环节的改造，我们在月销量500元的点位上已经跑出了商业价值。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/sz_mmbiz_png/6JHhlvvjTRGYCr1t357dQ84ZlswAzB2HuRMq6VVr0xMKIHSxfo71sTZxulTrdwITdXEDWV3qWibSltyupCiaG1hECtkKGo0T0ZWdA0UFLWL1E/640?wx_fmt=png&from=appmsg",
+      "dataW": "835",
+      "dataRatio": "0.7856287425149701"
+    },
+    {
+      "k": "cap",
+      "text": "图片来源：友宝"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "门槛降低意味着可开发的点位数量大幅增加，这可能带来行业增长空间的一次重估。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "近期无人零售再次受到关注，一部分原因是具身智能带动的机器人商店——机器人咖啡店、机器人便利店等形态。我们虽然以售货机为主，但对新业态一直保持关注：过去在现制咖啡机、现制橙汁机、无人超市上都做过探索。机器人商店目前还处在早期，我们和其中一些团队也在接触。"
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "text": "等了七年的合伙人模式，为什么现在全面推开"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "浪潮新消费："
+        },
+        {
+          "type": "txt",
+          "text": "友宝为什么要重点发展合伙人模式？上半年无人零售业务增长较快，主要原因是什么？",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "崔艳：其实友宝从2019年就开始探索合伙人模式，但当时全方位推广的条件还不成熟，一直到2025年底，我们才确定全面推进。2026年上半年的效果不错，合伙人愿意加入友宝，主要有三点："
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "第一，合伙人把点位交给友宝运营，多数点位的销售额能够得到提升，",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "分得的利润也比自己运营时更划算，这是模式能被快速接受的基础。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "第二，分工清晰。",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "合伙人不用再管补货、选品、维修这些繁琐环节，可以专注于点位开拓和客户维护，双方各做各擅长的事。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "第三，信任问题。",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "我们把数据上链，不可篡改，合伙人不用担心数据的真实性。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "半年报只是推广初期的成果。目前一部分合伙人还处在观察和试点阶段，先拿出少量点位交给我们运营；也有一些合伙人已经把全部点位交给我们。我们相信随着运营效果被持续验证，信任会快速增强，后面更值得期待。 "
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "text": "月均销售额下降，为什么反而是个好信号"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "浪潮新消费："
+        },
+        {
+          "type": "txt",
+          "text": "上半年亏损加大，背后的主要原因是什么？合伙人模式下，友宝未来的利润来自哪里？",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "崔艳：半年报已经披露，亏损加大主要是汇兑亏损、金融资产计提，以及其他业务的亏损有所增加。无人零售业务本身收入在增长，该业务的亏损基本持平。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "至于未来的利润来源，售货机这个行业的运营效率和点位密度高度相关——"
+        },
+        {
+          "type": "txt",
+          "text": "密度提高，单点的运营、物流、补货成本就会被摊薄。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/sz_mmbiz_png/6JHhlvvjTRFjlaxz6UPLbmRet11CdJ4EOa24KdGxwdEDp5PzEYZ1R2Hasjyn3dpZRs9n0pibePHDSw3ibicHnFRyfsTQKYwPKHibZuL2BXiaP08s/640?wx_fmt=png&from=appmsg",
+      "dataW": "925",
+      "dataRatio": "0.7178378378378378"
+    },
+    {
+      "k": "cap",
+      "text": "图片来源：友宝"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "点位密度提升带来规模效应；网络越密、设备越多，沉淀的交易与运营数据越丰富；数据进一步驱动智能体把选品、补货、调度、运维做得更精细；效率提升又支撑网络继续加密。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "后续随着密度继续提升，友宝的智能驱动精细化运营和供应链能力会更有竞争力，这是我们的利润来源。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "浪潮新消费："
+        },
+        {
+          "type": "txt",
+          "text": "直营模式的机器月均销售额比较稳定，为什么合伙人模式下降较多？",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "崔艳：两个数字要一起看。上半年合伙人模式的智能售货机月均商品总额是2,527元，同比下降18.0%；同期直营模式的智能售货机是3,313元，下降1.5%。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "差距主要来自结构。上半年合伙人模式的智能售货机净增了11,797台，其中超过一半是月销量偏低的点位",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "——办公室、小工厂这类场景，它们把平均值拉下来了。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "这其实反过来印证了两件事：一是我们的运营能力已经能覆盖高、中、低全部销量的场景，办公室、小工厂原来不是友宝的重点，现在已是重点布局方向之一；"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "二是合伙人的开放对象是多元的，办公室行政、KTV、台球室、健身房的老板都可以成为我们的合伙人，品牌商也在我们争取的范围内。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "我们已经从过去的挑场景、挑对象，走到了现在的全场景、全对象",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "——只要能增加服务密度、提高整体销售额，对友宝就是有价值的。 "
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "text": "研发费用不高，智能体为什么反而跑得快?"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "浪潮新消费："
+        },
+        {
+          "type": "txt",
+          "text": "你们在6月30日发布了三大智能体，具体提升了哪些运营能力？",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "崔艳：GPT出现之后，我们一直在想AI会给友宝、给这个行业带来什么。友宝对技术始终抱有最大的期待——2011年我们是国内第一家实现售货机规模化联网的公司，数据驱动一直是我们的理念。DeepSeek出现之后，我们的AI应用明显加速，去年数字员工已经上线。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "今年上半年，我们此前积累的47个垂类小模型，成功收敛为一套智能体体系：",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "郑和、达伽马、库克三大核心智能体分别负责协作、供应链与运维，另有辅助智能体覆盖业务全链路。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "合伙人入驻、动态选品、库存调度、线路优化、故障预判这些日常决策，已经由这套系统初步接管。人机协同的比例大约是80%、15%与5%——八成常规补货和标准选品由系统直接下发，一成五需要人工确认，其余留给人工决策。日均Token消耗从2025年的0.32亿升到33.7亿。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "浪潮新消费："
+        },
+        {
+          "type": "txt",
+          "text": "研发费用不高，是不是意味着AI投入不足？",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "崔艳：这里有个误解。首先我们不做大模型开发，也不做互联网公司那种超前技术研究，我们做的是专属智能体研发，研发支出本来就不会很高。智能体开发的核心，是我们积累的海量运营数据，以及对线下运营细节的理解。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "另外，我们本来就积累了近50个小模型，并不是从零开始；AI Coding大幅提高了开发效率，国内Token的价格优势也是重要原因。"
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "text": "一切业务都在向合伙人收敛"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "浪潮新消费："
+        },
+        {
+          "type": "txt",
+          "text": "当下友宝在线在批发业务和广告业务上的下滑，分别是什么原因？",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "崔艳：我们此前做批发业务，更像是一个合伙人入口——目的是和还不是友宝合伙人的售货机运营商建立联系，逐步建立信任，最终转化为合伙人。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "现在我们已经和业内大部分售货机运营商建立了渠道联系，部分批发客户也已经转成合伙人。批发业务的必要性下降，我们就主动收缩了。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "广告业务的下降主要与我们的广告客户政策有关。广告与无人零售是共生业务，两块可以合起来看。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "浪潮新消费："
+        },
+        {
+          "type": "txt",
+          "text": "友唱歌咏亭目前是什么情况？",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "崔艳：友唱采用模块化组装，可移动、可复用，对场地要求低，设备配备AI智能影音游戏、智能中控系统和智能自动售货机。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "截至6月30日，已有875台友唱AI智能歌咏亭投入运营。这个业务同样采用合伙人模式，并且优先向现有优秀的点位合伙人开放，目前效果不错。"
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "text": "结语"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "从6月30日的战略发布会，到8月28日的这份半年报，友宝把「智能化、平台化、多元化」从九个字写成了可以核验的路径：智能化驱动履约效率，平台化把运营能力开放给合伙人，多元化不断丰富合伙人的业务形态。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "半年报里的62484个合伙人点位、77.2%占比，是这条路径上的第一个路标。按崔艳的说法，这还只是推广初期的成果：信任仍在建立，密度仍在提升，智能体的效率才刚开始释放。"
+        },
+        {
+          "type": "txt",
+          "text": "换句话说，支撑这门生意下半场的三个变量，眼下都还在早期。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "对行业来说，这份半年报的意义更在报表之外：当一台机器能养活自己，零售的毛细血管就能伸进更多角落。"
+        },
+        {
+          "type": "txt",
+          "text": "无人零售的下一程，是让更多普通的角落，都长出值得做的生意。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "免责声明：本文为采访整理，涉及行业趋势、公司战略及未来发展的表述均为受访者观点，基于当前经营假设，存在重大不确定性，不构成盈利预告或投资建议。文中未经审计的运营数据，以公司正式披露为准。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "提示：",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "* 本文为转载文章。原文标题：《合伙人点位占比升至77.2%，，对话友宝在线崔艳：无人零售门槛正被AI改写》"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/mmbiz_jpg/6JHhlvvjTRF26JPcQjrBQ5K2RPkOf3aczBXx0kCMqyvKGC4Fn9NBdhn9jZdnnVJ988Xd3kZbkIjItDrEPO8TL4O0PAAmeHPDgPicpp7gLZHQ/640?wx_fmt=other&from=appmsg",
+      "dataW": "970",
+      "dataRatio": "0.29175257731958765"
+    },
+    {
+      "k": "cap",
+      "text": "/ 更多文章 /"
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/sz_mmbiz_png/6JHhlvvjTRHAcKkdF8vS3ickQu59kuaSEoa4P3iagTEEnQCp8h7IMDqcbOqforRMCJjew1FaOOm0EPm7CM3MklAYBThSAIAOf7h0dPN2HCo6Q/640?wx_fmt=png&from=appmsg",
+      "dataW": "1000",
+      "dataRatio": "0.3"
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/sz_mmbiz_png/6JHhlvvjTRFJxdcHOGyGgATr1S22ibcRhgTuTLLelkX7OrJyGFA78ULz4uVab7ibyhtrDHAvZX226sSwQYibILLMia1yzicdOtjXGsZhppdnjMLQ/640?wx_fmt=png&from=appmsg",
+      "dataW": "1000",
+      "dataRatio": "0.3"
+    },
+    {
+      "k": "img",
+      "src": "https://mmbiz.qpic.cn/mmbiz_png/6JHhlvvjTRHN1EeLjXiaQ1C06HWMcBYMkdC6ecEDsgR5fsL6zLfv7j9QVwkx7olYZQ43gAkqXJVbJib8lU2xrShdGGichYQ8tx71Cn0f5n4NT4/640?wx_fmt=png&from=appmsg",
+      "dataW": "1000",
+      "dataRatio": "0.3"
+    }
+  ]
+}
