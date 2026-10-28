@@ -4,7 +4,7 @@ const NAMED = {
   ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’', mdash: '—', ndash: '–', hellip: '…', middot: '·',
 };
 
-function decode(text) {
+export function decode(text) {
   return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, e) => {
     if (e[0] === '#') return String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1)));
     return NAMED[e.toLowerCase()] ?? all;

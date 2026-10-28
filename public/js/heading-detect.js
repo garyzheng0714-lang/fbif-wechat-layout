@@ -31,6 +31,10 @@ const SUB_NUMBER_RE = new RegExp(String.raw`^(?:[A-Za-z]` + MARKER_TAIL + String
 //   - 带语气词的口语（「也可以套头上啊，一样拉风！」「是真实可用的塑料袋哦！」）。
 // 「“罪恶饮料”，让全球年轻人上头」「文案出圈密码是 “活人感”」「8G冲浪实锤！玩梗玩到出神入化」
 // 这类真标题不受影响：前两个不是整句引语，后一个不以感叹号收尾。
+// 叫读者点「在看/点赞/分享」的导流话术不是标题（灵兽「喜欢文章点击"在看、点赞、分享"」整行加粗）。
+// 网站把它当来源号文末导流切掉（rule-behavior-foodtalks.js 用的就是这一条）；没切的渠道也不升标题。
+export const LIKE_PROMPT_RE = /(?:点击|点个|点亮|点一下)[^，。！!]{0,6}在看|(?:点赞|分享)[、，\s]*在看|在看[、，\s]*(?:点赞|分享)/;
+
 const EXCLAIM_SENTENCES_RE = /[！!？?。][^！!？?。]+[！!]+$/;
 const MODAL_PARTICLE_RE = /[啊呀啦哦嘛呗咯喔哟][，,！!～~…]/;
 
@@ -99,6 +103,7 @@ export function isBoldHeading(runs, opts) {
   if (/^(?:最后|那么|所以|因此|总之|说到底)[，,].*[：:]$/.test(plain)) return false;
   if (captionRe.test(plain)) return false;
   if (isQuoteOrExclamationLine(plain)) return false;
+  if (LIKE_PROMPT_RE.test(plain)) return false;
   return true;
 }
 
@@ -120,8 +125,9 @@ export function hasExplicitDocxHeadings(elems) {
 // 是标题），带序号的也不受影响。
 export function promoteHeuristicHeadings(elems, opts) {
   const list = elems || [];
+  const para = paragraphKind(opts);
   const promoted = list.map((e, i) => {
-    if (!e || e.k !== 'p') return e;
+    if (!e || e.k !== para) return e;
     if (e.skipHeadingPromote) return e;
     const plain = elemPlain(e);
     const level = detectHeadingLevel(plain, opts);
@@ -144,10 +150,15 @@ function isNumberedLine(t) {
     /^[一二三四五六七八九十]+\s*[、：．:\s]/.test(t);
 }
 
-function neighborText(list, i, step) {
+// 网站的正文段是 k:'p'，FoodTalks食品资讯（系列模板）是 k:'txt'。
+function paragraphKind(opts) {
+  return (opts && opts.paragraphKind) || 'p';
+}
+
+function neighborText(list, i, step, opts) {
   for (let j = i + step; j >= 0 && j < list.length; j += step) {
     const e = list[j];
-    if (!e || e.k !== 'p') return null;
+    if (!e || e.k !== paragraphKind(opts)) return null;
     const t = elemPlain(e).trim();
     if (t) return { e, t };
   }
@@ -157,10 +168,10 @@ function neighborText(list, i, step) {
 function isBodyContextLine(list, i, plain, opts) {
   const t = plain.trim();
   if (isNumberedLine(t) || !/[？?]$/.test(t)) return false;
-  const prev = neighborText(list, i, -1);
+  const prev = neighborText(list, i, -1, opts);
   if (prev && /[：:]$/.test(prev.t)) return true;
   const isBoldQuestion = n => n && /[？?]$/.test(n.t) && !isNumberedLine(n.t) && isBoldHeading(n.e.runs, opts);
-  return isBoldQuestion(prev) || isBoldQuestion(neighborText(list, i, 1));
+  return isBoldQuestion(prev) || isBoldQuestion(neighborText(list, i, 1, opts));
 }
 
 // 二级序号（1、2、3 /（一））前面没有上级章节标题时，它们自己就是一级（2026-10-15）：
@@ -212,4 +223,51 @@ export function liftOrphanSubheadings(elems) {
     liftedKind = kind;
     return { ...e, level: 2, topLevel: true };
   });
+}
+
+// 网站标题级别：标题1 → 2；标题2（1、2、3 /（一））→ 3；块自带 4 级及以下保留。
+export function resolveSiteHeadingLevel(text, explicitLevel) {
+  const n = Number(explicitLevel);
+  if (n >= 4) return 4;
+  if (n === 3 || isSecondaryNumberedText(text)) return 3;
+  return 2;
+}
+
+// 原文单独一行的章节号（「01」「1」「PART 2」）：抓取把它和下一行标题认成两个小标题
+// （api/wechat_blocks.go sectionNumberTitle）。FoodTalks 不要这行号，FoodTalks食品资讯由序号图编号。
+const SECTION_NUMBER_RE = /^(?:part\s*\.?\s*)?(?:0?\d{1,2}|[一二三四五六七八九十]{1,3})$/i;
+
+function headingPlain(e) {
+  return (elemPlain(e) || String(e.text || '')).trim();
+}
+
+function isSectionNumberHeading(e, next) {
+  return !!e && e.k === 'h' && !!next && next.k === 'h' && SECTION_NUMBER_RE.test(headingPlain(e));
+}
+
+// 同一文本的短标题在全文出现 ≥2 次 → 全部删除。公众号原文常在每个章节前放居中/加粗的
+// 账号名装饰行（如「天下网商」×3），视觉信号与标题无异，会被误升 h2（2026-08-17 运营反馈；
+// news/62813 编辑删了）。真实文章标题不会整篇重复。带中文/数字序号的标题即使重复也保留。
+function dropRepeatedDecorHeadings(elems) {
+  const counts = new Map();
+  for (const e of elems) {
+    if (!e || e.k !== 'h') continue;
+    const t = headingPlain(e);
+    if (t) counts.set(t, (counts.get(t) || 0) + 1);
+  }
+  return elems.filter(e => {
+    if (!e || e.k !== 'h') return true;
+    const t = headingPlain(e);
+    if (!t || t.length > 16) return true;
+    if (/^[一二三四五六七八九十\d]+\s*[、．.：:]/.test(t)) return true;
+    if (/^[（(]\s*(?:[一二三四五六七八九十]+|\d+)\s*[)）]/.test(t)) return true;
+    return (counts.get(t) || 0) < 2;
+  });
+}
+
+// FoodTalks 网站与 FoodTalks食品资讯 共用的小标题判定（2026-10-28：两边各判各的，同一行在网站是标题、
+// 在食品资讯是加粗正文，用户反复提）。各自的署名、尾巴处理完之后调一次；样子各渲染器自己定。
+export function decideSiteHeadings(elems, opts) {
+  const list = (elems || []).filter((e, i, all) => !isSectionNumberHeading(e, all[i + 1]));
+  return dropRepeatedDecorHeadings(promoteHeuristicHeadings(list, opts));
 }

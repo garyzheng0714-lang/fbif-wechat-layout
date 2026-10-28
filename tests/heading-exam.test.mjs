@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { outlineFromHTML } from '../tools/heading-exam/outline.mjs';
+import { decode, outlineFromHTML } from '../tools/heading-exam/outline.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXAM = path.join(ROOT, 'api/testdata/heading-exam');
@@ -22,14 +22,38 @@ const engine = await loadLayoutEngine({
 
 const keys = (await readdir(EXAM)).filter(f => f.endsWith('.blocks.json')).map(f => f.slice(0, -'.blocks.json'.length)).sort();
 
-async function siteOutline(key) {
+async function layout(key, account) {
   const a = JSON.parse(await readFile(path.join(EXAM, `${key}.blocks.json`), 'utf8'));
   const meta = { title: a.title, source: '', source_name: a.source_name || '' };
   const out = await engine.layout({
-    account: 'ft-default', title: '', repost: null,
+    account, title: '', repost: null,
     input: { kind: 'blocks', ...meta, byline: a.byline || '', blocks: a.blocks, fetch_meta: meta },
   });
-  return outlineFromHTML(out.html);
+  return out.html;
+}
+
+const siteOutline = async key => outlineFromHTML(await layout(key, 'ft-default'));
+
+// FoodTalks食品资讯的标题1 是序号图 + 标题，序号图的 alt 就是标题（正文里紧挨着的两个标题1 合成一个、空格接起来）。
+async function mpTitles(key) {
+  return [...(await layout(key, 'foodtalks-mp')).matchAll(/<img\b[^>]*\balt="([^"]+)"/g)].map(m => decode(m[1]));
+}
+
+// 网站稿里的标题1（h2），去掉「一、」编号；中间没有字也没有图的两个 h2 合成一个，和 FoodTalks食品资讯一样。
+async function siteTitlesAsMp(key) {
+  const html = await layout(key, 'ft-default');
+  const out = [];
+  let prevEnd = -1;
+  for (const m of html.matchAll(/<(h[2-4])\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const text = decode(m[2].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim().replace(/^[一二三四五六七八九十]+\s*[、.．]\s*/, '');
+    const between = prevEnd < 0 ? null : html.slice(prevEnd, m.index);
+    const adjacent = between !== null && !/<img\b/i.test(between) && !decode(between.replace(/<[^>]+>/g, '')).trim();
+    if (m[1].toLowerCase() !== 'h2' || !text) { prevEnd = -1; continue; }
+    if (adjacent) out[out.length - 1] += ' ' + text;
+    else out.push(text);
+    prevEnd = m.index + m[0].length;
+  }
+  return out;
 }
 
 // 按顺序对齐两份清单：同一行算对上；同一句只是级别不同算「级别不同」；其余分成编辑有我们没有、我们有编辑没有。
@@ -76,6 +100,12 @@ for (const key of keys) {
     const recorded = await readFile(gapPath, 'utf8').catch(() => null);
     assert.ok(recorded !== null, `没有 ${key}.gap.txt：GOLDEN_UPDATE=1 node --test tests/heading-exam.test.mjs 生成后看过再提交`);
     assert.equal(encoded, recorded, `${key} 网站上的小标题和答案的差别变了。看过确认后用 GOLDEN_UPDATE=1 node --test tests/heading-exam.test.mjs 重写`);
+  });
+}
+
+for (const key of keys) {
+  test(`标题考卷 ${key}：FoodTalks食品资讯的大标题和网站的标题1 一样`, async () => {
+    assert.deepEqual(await mpTitles(key), await siteTitlesAsMp(key));
   });
 }
 

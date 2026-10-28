@@ -20,6 +20,7 @@ import {
   FOOTER_PRESETS_DEFAULT,
 } from './footer-segments-defaults.js';
 import { resolveAssetRefs } from './asset-library.js';
+import { LIKE_PROMPT_RE } from './heading-detect.js';
 import { filterSafeFooterHTMLLines } from './footer-html-policy.js';
 
 // ── 规则读取助手：共享实现收敛到 rule-behavior-utils.js（架构体检 S6，勿再本地复制）──
@@ -105,7 +106,7 @@ const EXTERNAL_MEDIA_TRAILER_MARKERS = [
   // 「不苛求正确，只好好说话。」，编辑在 FoodTalks 后台两行都删了）。
   /(?:点击|点)(?:下方|上方|蓝字|名片|卡片)[^，。！!]{0,12}关注/,
   // 「喜欢文章点击"在看、点赞、分享"」「点个在看」「分享、点赞、在看」（灵兽，整行加粗曾被升成小标题）。
-  /(?:点击|点个|点亮|点一下)[^，。！!]{0,6}在看|(?:点赞|分享)[、，\s]*在看|在看[、，\s]*(?:点赞|分享)/,
+  LIKE_PROMPT_RE,
 ];
 
 const EXTERNAL_MEDIA_TAIL_CONFIRM_RE =

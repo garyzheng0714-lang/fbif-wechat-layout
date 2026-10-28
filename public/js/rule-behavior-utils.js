@@ -290,11 +290,17 @@ export function elemText(e) {
   if (Array.isArray(e.runs)) return runsToText(e.runs);
   return typeof e.text === 'string' ? e.text : '';
 }
-// 原文单独一行的章节号（「01」「1」「PART 2」）：抓取把它和下一行标题认成两个小标题
-// （api/wechat_blocks.go sectionNumberTitle）。FoodTalks 网站去掉号，FoodTalks食品资讯换成序号图。
-const SECTION_NUMBER_RE = /^(?:part\s*\.?\s*)?(?:0?\d{1,2}|[一二三四五六七八九十]{1,3})$/i;
-export function isSectionNumberHeading(e, next) {
-  return !!e && e.k === 'h' && !!next && next.k === 'h' && SECTION_NUMBER_RE.test(elemText(e).trim());
+// 小标题判定参数（heading-detect.js decideSiteHeadings），网站与 FoodTalks食品资讯 从各自规则读。
+export function headingOptsFromConfig(config) {
+  let captionLeadRe;
+  const src = behParamStr(config, 'caption_lead_regex', '');
+  if (src) { try { captionLeadRe = compileBehaviorRegex(src); } catch (e) { /* 非法降级 */ } }
+  return {
+    titleKeywords: behList(config, 'title_keywords', undefined),
+    captionLeadRe,
+    // 公众号→网站规范：一级=标题1（一、 / 章节句），二级=标题2（1、2、3），不进目录。
+    arabicAsSubheading: true,
+  };
 }
 export function stripSectionPrefix(text) {
   return String(text || '').replace(/^\s*(?:[一二三四五六七八九十]+|[0-9]+)\s*[、.．]\s*/, '').trim();

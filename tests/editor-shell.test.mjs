@@ -1042,6 +1042,17 @@ test('extractSiteSummary：开头直接是标题 → 空串', async () => {
   assert.equal(extractSiteSummary([{ k: 'h', text: '一、第一章' }, { k: 'txt', runs: [{ type: 'txt', text: '短句' }] }]), '');
 });
 
+test('extractSiteSummary：开头是整行加粗的小标题（#146「项目背景」）→ 空串，留在正文当标题', async () => {
+  const { extractSiteSummary } = await import('../public/js/editor-shell.js');
+  const blocks = [
+    { k: 'txt', runs: [{ type: 'txt', text: '项目背景', bold: true }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '很多食品品牌都会遇到一个很现实的问题。' }] },
+  ];
+  const before = structuredClone(blocks);
+  assert.equal(extractSiteSummary(blocks, { consume: true }), '');
+  assert.deepEqual(blocks, before);
+});
+
 test('extractSiteSummary consume：命中段从 blocks 原地移除（62139：摘要句不进正文）', async () => {
   const { extractSiteSummary } = await import('../public/js/editor-shell.js');
   const blocks = [

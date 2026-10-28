@@ -50,6 +50,12 @@ test('isBoldHeading 拒绝非加粗段（普通正文）', () => {
   assert.equal(isBoldHeading([{ type: 'txt', text: '这是我茶叶系列的第12篇。' }]), false);
 });
 
+test('isBoldHeading 拒绝叫读者点在看、点赞的导流话术（灵兽）', () => {
+  for (const t of ['喜欢文章点击"在看、点赞、分享"', '点个在看', '分享、点赞、在看']) {
+    assert.equal(isBoldHeading([{ type: 'txt', text: t, bold: true }]), false, t);
+  }
+});
+
 test('isBoldHeading 拒绝加粗但以句号结尾的强调正文（MATCH 真实样本）', () => {
   // "如今的增长，多亏了17年前，MATCH主动将品牌的目标人群…" 整段加粗、45字、以句号结尾 → 不是标题
   const t = '如今的增长，多亏了17年前，MATCH主动将品牌的目标人群，从“年轻人”收窄至“高中生”。';

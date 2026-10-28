@@ -170,7 +170,7 @@ test('网页里 engine 只给通用扁平参数 + 行为：序号图、标题 18
 
 // 2026-10-28 用户贴灵兽 https://mp.weixin.qq.com/s/frys28EF1-FyWlzNOrsj_A：原文章节是单独一行的大号「1」
 // 下面一行加粗标题，抓取出来是 h「1」+ 加粗段；排出来成了两行灰色加粗正文。应是饼干序号图 + 深蓝标题。
-test('贴公众号链接：没级别的小标题按标题1 排，单独一行的章节号「1」不单独成标题', () => {
+test('贴公众号链接：小标题和 FoodTalks 网站同一套判定，单独一行的章节号「1」不单独成标题', () => {
   const bold = (text) => ({ k: 'txt', runs: [{ type: 'txt', text, bold: true }] });
   const txt = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });
   const out = template.processBlocks({
@@ -181,6 +181,7 @@ test('贴公众号链接：没级别的小标题按标题1 排，单独一行的
       { k: 'h', text: '五个绕不过去的坎' }, txt('第一个坎。'),
       { k: 'h', text: '（一）供应链', level: 3 }, txt('二级标题下的正文。'),
       bold('加粗强调句'), txt('普通正文。'),
+      bold('“新鲜零食不是噱头，是真实需求。”'), txt('受访者这样说。'),
     ],
   }, { config });
   const text = readerLines(out.lines);
@@ -194,7 +195,8 @@ test('贴公众号链接：没级别的小标题按标题1 排，单独一行的
   ]);
   assert.ok(!text.includes('1') && !text.includes('02'), '原文序号由序号图给，不再单独成行');
   assert.match(html, /font-size: 18px; line-height: 1\.75; color: #02396b;[^"]*font-weight: bold;">割裂的新鲜零食赛道</);
-  assert.match(html, /font-size: 15px; line-height: 1\.75; color: #544545;[^"]*font-weight: bold;">加粗强调句</, '加粗句仍是加粗正文');
+  assert.match(html, /alt="加粗强调句"/, '独占一行的加粗短句和网站一样升成标题1');
+  assert.match(html, /font-size: 15px; line-height: 1\.75; color: #544545;[^"]*font-weight: bold;">“新鲜零食不是噱头，是真实需求。”</, '整句引语和网站一样仍是加粗正文');
 });
 
 test('什么是系列不受影响：同一份块不挪署名、不加提示、标题不按块级别、图片满列', () => {

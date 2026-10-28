@@ -2,6 +2,7 @@
 // Keeps page scripts focused on channel-specific wiring while common URL import,
 // rule-pack path resolution, and copy feedback live behind one interface.
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { isBoldHeading } from './heading-detect.js';
 import { extractClipboardLinks, readImportLinks, writeImportLinks } from './clipboard-links.js';
 
 export const DEFAULT_ACCOUNT_STORAGE_KEY = 'active_rule_pack';
@@ -66,6 +67,7 @@ function isSingleHttpUrl(text) {
 // 头图/图注，取第一个非空文本段；短（≤ maxLen 字）才用作摘要，长段（如上海艾录文
 // 90 字导语，62303 摘要为编辑手写）返回空串 → 摘要框保持占位由编辑自填。
 // opts.consume=true 时命中段从 blocks 原地移除（对齐 62139：摘要句不进正文流）。
+// 开头是网站会升成小标题的整行加粗短句（#146「项目背景」）时，同开头直接是标题，不填摘要。
 export function extractSiteSummary(blocks, opts = {}) {
   const maxLen = Number(opts.maxLen) > 0 ? Number(opts.maxLen) : 50;
   const metadataLineRe = /^(?:作者|编辑|编审|责编|主编|美编|撰文|撰稿|来源|出处|出品|Author)\s*[：:]|^本文(?:系|为).{0,60}(?:原创|首发|授权)/i;
@@ -82,6 +84,7 @@ export function extractSiteSummary(blocks, opts = {}) {
     // 作者/编辑/来源一旦出现在正文开头，说明这篇文章没有可安全自动消费的摘要。
     // 不能继续向后猜首段，更不能把署名当摘要从 blocks 原地删除。
     if (metadataLineRe.test(text)) return '';
+    if (Array.isArray(b.runs) && isBoldHeading(b.runs, { arabicAsSubheading: true })) return '';
     if (text.length > maxLen) return '';
     if (opts.consume) blocks.splice(i, 1);
     return text;

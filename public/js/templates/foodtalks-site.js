@@ -21,7 +21,7 @@ const { applyFoodTalksBehavior, buildFooterHtml, compileSiteRegex, pickSiteTipSo
 // ── 规则读取助手（红线下放：优先服务端 config / config.behavior，缺省/非法降级 const）──
 // behOf/behTemplate/behParamStr/behList 共享实现收敛到 rule-behavior-utils.js（架构体检 S6）。
 const behaviorUtilsModule = await import('../rule-behavior-utils.js' + assetQuery);
-const { behOf, behTemplate, behParamStr, behList, isSectionNumberHeading } = behaviorUtilsModule;
+const { behOf, behTemplate, behParamStr, behList, headingOptsFromConfig } = behaviorUtilsModule;
 function cfgNum(config, key, fallback) {
   const n = Number(config && config[key]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -50,7 +50,7 @@ function behParamBool(config, key, fallback) {
 // 标题识别（detectHeadingLevel / isBoldHeading / promoteHeuristicHeadings）抽到无依赖
 // 的 heading-detect.js，便于真实单元测试（见 tests/heading-detect.test.mjs）。
 const headingModule = await import('../heading-detect.js' + assetQuery);
-const { promoteHeuristicHeadings, hasExplicitDocxHeadings, isSecondaryNumberedText } = headingModule;
+const { decideSiteHeadings, resolveSiteHeadingLevel, hasExplicitDocxHeadings, isSecondaryNumberedText } = headingModule;
 const interviewModule = await import('../site-interview.js' + assetQuery);
 const { markInterviewSpeakerPrefixes } = interviewModule;
 const { applySeriesContactLayout } = await import('../site-contact-layout.js' + assetQuery);
@@ -106,20 +106,6 @@ function buildCaptionOpts(config) {
   return {
     keywords: behList(config, 'image_caption_keywords', IMAGE_CAPTION_KEYWORDS),
     prefixRe,
-  };
-}
-
-// 从 config 解析标题识别规则（关键词列表 + 图注排除正则），传给 heading-detect.js。
-// 缺省项为 null/undefined，heading-detect 内部各自降级到其代码内 const。
-function buildHeadingOpts(config) {
-  let captionLeadRe;
-  const src = behParamStr(config, 'caption_lead_regex', '');
-  if (src) { try { captionLeadRe = compileSiteRegex(src); } catch (e) { /* 非法降级 */ } }
-  return {
-    titleKeywords: behList(config, 'title_keywords', undefined),
-    captionLeadRe,
-    // 公众号→网站规范：一级=标题1（一、 / 章节句），二级=标题2（1、2、3），不进目录。
-    arabicAsSubheading: true,
   };
 }
 
@@ -429,13 +415,6 @@ function normalizeSubheadingParens(text) {
 //   一级 = 标题1：中文序号「一、二、三」或无序号章节句 → h2，进目录
 //   二级 = 标题2：「1、2、3」「a、b」或「（一）（二）」→ h3，不进目录、段前段后不空行
 //   （前面没有上级章节标题时整组提成一级，见 heading-detect.js liftOrphanSubheadings）
-function resolveSiteHeadingLevel(text, explicitLevel) {
-  const n = Number(explicitLevel);
-  if (n >= 4) return 4;
-  if (n === 3 || isSecondaryNumberedText(text)) return 3;
-  return 2;
-}
-
 function renderHeading(level, text, config = {}) {
   // 基石 news/62285 的标题是 <h2 style="text-align: justify;">…</h2>；id="mctoc_xxx" 是
   // FoodTalks 后台生成目录时自动注入的锚点，默认不输出（用户 2026-05-30 确认），仅在
@@ -1077,30 +1056,6 @@ async function classifyMd(text) {
   return { elems, imgN, title: (fm.frontmatter && fm.frontmatter.title) || '' };
 }
 
-// dropRepeatedDecorHeadings：同一文本的短标题在全文出现 ≥2 次 → 全部删除。
-// 公众号原文常在每个章节前放居中/加粗的账号名装饰行（如「天下网商」×3），视觉信号
-// 与标题无异，会被误升 h2（2026-08-17 运营反馈「标题识别不准」的实锤案例；线上成品
-// news/62813 的编辑处理是删除）。真实文章标题不会整篇重复，重复即装饰水印。
-// 带中文/数字序号的标题（一、/（一）/1.）即使重复也保留，绝不误删真标题。
-function dropRepeatedDecorHeadings(elems) {
-  const list = Array.isArray(elems) ? elems : [];
-  const counts = new Map();
-  const headingText = (e) => runsToPlain(e.runs || []).trim();
-  for (const e of list) {
-    if (!e || e.k !== 'h') continue;
-    const t = headingText(e);
-    if (t) counts.set(t, (counts.get(t) || 0) + 1);
-  }
-  return list.filter(e => {
-    if (!e || e.k !== 'h') return true;
-    const t = headingText(e);
-    if (!t || t.length > 16) return true;
-    if (/^[一二三四五六七八九十\d]+\s*[、．.：:]/.test(t)) return true;
-    if (/^[（(]\s*(?:[一二三四五六七八九十]+|\d+)\s*[)）]/.test(t)) return true;
-    return (counts.get(t) || 0) < 2;
-  });
-}
-
 // ---- Blocks 分类（从后端 /api/fetch-article 来的结构化块） ----
 
 // 服务端 /api/fetch-article 返回的 block 字段契约见 api/wechat_blocks.go：
@@ -1111,11 +1066,8 @@ function classifyBlocks(data) {
   const elems = [];
   let imgN = 0;
   const meta = b => (b && b.blankBefore ? { blankBefore: true } : {});
-  const blocks = (data && data.blocks) || [];
-  for (let i = 0; i < blocks.length; i++) {
-    const b = blocks[i];
+  for (const b of (data && data.blocks) || []) {
     if (!b || !b.k) continue;
-    if (isSectionNumberHeading(b, blocks[i + 1])) continue;
     if (b.k === 'img') {
       // 自适应宽度（adaptiveImageWidth）按 height/width 比例缩窄竖长图。URL 导入此前
       // 只传 dataW、height=0，导致自适应完全不生效（恒返回 600）。这里补出 height：
@@ -1186,8 +1138,8 @@ export default {
     const behaved = markInterviewSpeakerPrefixes(applyFoodTalksBehavior(normalized, config, { isRepost }));
     // 先做标题升级，render 与 headingN 都基于升级后的 elems —— 否则加粗段升级的
     // h2 不计入侧栏「标题」统计，会显示 0 误导用户（实际已正确输出）。
-    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
-    const finalElems = dropRepeatedDecorHeadings(markSeriesAboutLogoImages(promoted, config));
+    const promoted = promoteImageCaptions(decideSiteHeadings(behaved, headingOptsFromConfig(config)), buildCaptionOpts(config));
+    const finalElems = markSeriesAboutLogoImages(promoted, config);
     return {
       lines: render(finalElems, config),
       imgN,
@@ -1201,8 +1153,8 @@ export default {
     const { elems, imgN, title } = await classifyMd(text);
     const normalized = applySeriesContactLayout(markTocEntries(normalizeWhatIsSeriesElems(elems, config)), config);
     const behaved = markInterviewSpeakerPrefixes(applyFoodTalksBehavior(normalized, config, { isRepost: !!(opts && opts.isRepost), title }));
-    const promoted = promoteImageCaptions(promoteHeuristicHeadings(behaved, buildHeadingOpts(config)), buildCaptionOpts(config));
-    const finalElems = dropRepeatedDecorHeadings(markSeriesAboutLogoImages(promoted, config));
+    const promoted = promoteImageCaptions(decideSiteHeadings(behaved, headingOptsFromConfig(config)), buildCaptionOpts(config));
+    const finalElems = markSeriesAboutLogoImages(promoted, config);
     return {
       lines: render(finalElems, config),
       imgN,
@@ -1226,8 +1178,8 @@ export default {
       sourceName: data.source_name,
     }));
     // URL Blocks 已由服务端完成媒体绑定、正文屏障和字数限制，cap/txt 是最终角色。
-    const promoted = promoteHeuristicHeadings(behaved, buildHeadingOpts(config));
-    const finalElems = dropRepeatedDecorHeadings(markSeriesAboutLogoImages(promoted, config));
+    const promoted = decideSiteHeadings(behaved, headingOptsFromConfig(config));
+    const finalElems = markSeriesAboutLogoImages(promoted, config);
     return {
       lines: render(finalElems, config),
       imgN,

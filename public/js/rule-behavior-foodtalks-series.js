@@ -24,8 +24,9 @@ import {
 
 // ── 规则读取助手：共享实现收敛到 rule-behavior-utils.js（架构体检 S6，勿再本地复制）──
 import {
-  behList, behTemplate, compileBehaviorRegex, behaviorRegex, elemText, isSectionNumberHeading,
+  behList, behTemplate, compileBehaviorRegex, behaviorRegex, elemText, headingOptsFromConfig,
 } from './rule-behavior-utils.js';
+import { decideSiteHeadings, resolveSiteHeadingLevel } from './heading-detect.js';
 
 // 兼容导出：foodtalks-series-defaults.js 等外部消费方仍以 compileSeriesRegex 命名引用。
 export const compileSeriesRegex = compileBehaviorRegex;
@@ -461,27 +462,16 @@ export function adaptSiteArticle(neutral, config = {}, meta = {}) {
   const contact = behTemplate(config, 'contact_tip', SITE_ARTICLE_TEMPLATES.contact_tip);
   if (contact) tail.push({ k: 'tip-item', text: contact });
 
-  const body = foldUnleveledHeadings(elems.slice(start, end).map(e => {
+  // 哪行是小标题、几级，和 FoodTalks 网站同一套判定（decideSiteHeadings）；标题1 由序号图编号。
+  const body = decideSiteHeadings(elems.slice(start, end).map(e => {
     if (e.k === 'cap') return { ...e, text: normalizeSiteCaption(e.text) };
+    if (e.k === 'h') return { ...e, level: resolveSiteHeadingLevel(elemText(e), e.level) };
     return Array.isArray(e.runs) ? { ...e, runs: keepWechatLinksOnly(e.runs) } : e;
-  }));
+  }), { ...headingOptsFromConfig(config), paragraphKind: 'txt' });
   const plain = body.filter(isText).map(elemText).join('');
   const latin = (plain.match(/[A-Za-z]/g) || []).length;
   const han = (plain.match(/[一-鿿]/g) || []).length;
   return { body, tail, english: plain.length > 0 && latin > han * 3 };
-}
-
-// 公众号原文的小标题是抓取按字号、颜色认出来的，没写级别（level 0），按标题1 排（饼干序号图）。
-// 原文单独一行的章节号（「1」「01」）不单独成标题，序号由序号图给。
-function foldUnleveledHeadings(elems) {
-  const out = [];
-  elems.forEach((e, i) => {
-    if (isSectionNumberHeading(e, elems[i + 1])) return;
-    if (!e || e.k !== 'h' || Number(e.level) >= 2) { out.push(e); return; }
-    const text = elemText(e).trim();
-    out.push({ k: 'h', level: 2, text, runs: [{ type: 'txt', text }] });
-  });
-  return out;
 }
 
 // ── 尾部素材读取 / 合成 ──
