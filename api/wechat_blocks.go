@@ -294,7 +294,7 @@ func mediaSourceForNode(n *html.Node) (kind, src string) {
 		if src == "" {
 			src = getAttr(n, "src")
 		}
-		if src == "" || strings.Contains(src, "data:image") {
+		if src == "" || strings.Contains(src, "data:image") || isDecorativeImage(n) {
 			return "", ""
 		}
 		return "img", src
@@ -315,6 +315,35 @@ func mediaSourceForNode(n *html.Node) (kind, src string) {
 		}
 	}
 	return "", ""
+}
+
+// 原文里显示得很小的图是排版装饰（引号、细竖线、小图标），不是配图，整张不要：
+// 零售商业财经开头的引号显示 20px、署名旁竖线 1px，按配图排会被放大成 600 宽的大灰引号、
+// 400 宽的大黑块（2026-10-28）。原文配图显示宽实测都在几百像素，二维码也 ≥150。
+const decorativeImageMaxWidth = 60
+
+func isDecorativeImage(n *html.Node) bool {
+	if w := imageDisplayWidth(n); w > 0 {
+		return w <= decorativeImageMaxWidth
+	}
+	w := parsePositiveFloat(getAttr(n, "data-w"))
+	return w > 0 && w <= decorativeImageMaxWidth
+}
+
+// imageDisplayWidth 取原文写死的显示宽（style 的 width:Npx，其次 width 属性），百分比/auto 不算。
+func imageDisplayWidth(n *html.Node) float64 {
+	for _, decl := range strings.Split(getAttr(n, "style"), ";") {
+		kv := strings.SplitN(decl, ":", 2)
+		if len(kv) != 2 || !strings.EqualFold(strings.TrimSpace(kv[0]), "width") {
+			continue
+		}
+		val := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(kv[1]), "!important"))
+		if px, ok := strings.CutSuffix(strings.TrimSpace(val), "px"); ok {
+			return parsePositiveFloat(px)
+		}
+		return 0
+	}
+	return parsePositiveFloat(getAttr(n, "width"))
 }
 
 func appendUniqueInt(values []int, value int) []int {

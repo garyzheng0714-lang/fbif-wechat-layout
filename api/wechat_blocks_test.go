@@ -2002,3 +2002,30 @@ func TestWechatTagsPreviewToastIsNotBody(t *testing.T) {
 		t.Fatalf("正文丢了：%v", findKinds(blocks))
 	}
 }
+
+// 零售商业财经《麦德龙启动B2B2C战略》：开头引号显示 20px、署名旁竖线 1px（原图 3×120），
+// 按配图排会被网站放大成大灰引号和 400 宽的大黑块。原文显示得很小的图整张不要，也不把段落拆开。
+func TestWechatTinyDecorativeImagesAreDropped(t *testing.T) {
+	page := `<html><body><div class="rich_media_content" id="js_content">
+<p><img data-src="https://mmbiz.qpic.cn/hero/640" data-w="1080" data-ratio="0.66" style="width: 100%;"></p>
+<section><img data-src="https://mmbiz.qpic.cn/quote-open/640" data-w="63" data-ratio="0.76" style="max-width: 100%;width: 20px !important;height: auto !important;"></section>
+<p>物美收购五年，麦德龙用B端能力赌C端未来。</p>
+<section><img data-src="https://mmbiz.qpic.cn/bar/640" data-w="3" data-ratio="40" width="1" style="width: 0.998264px !important;"></section>
+<p>作者：柴元锦</p>
+<p>前半句<img data-src="https://mmbiz.qpic.cn/icon/640" data-w="54" data-ratio="2">后半句</p>
+<p><img data-src="https://mmbiz.qpic.cn/qr/640" data-w="258" data-ratio="1" style="width: 150px;"></p>
+</div></body></html>`
+	_, blocks, _ := extractArticleBlocks(page)
+	var srcs []string
+	for _, b := range blocks {
+		if b.K == "img" {
+			srcs = append(srcs, b.Src)
+		}
+	}
+	if len(srcs) != 2 || !strings.Contains(srcs[0], "/hero/") || !strings.Contains(srcs[1], "/qr/") {
+		t.Fatalf("只该留头图和二维码，得到 %v", srcs)
+	}
+	if findBlockByText(blocks, "前半句后半句") == nil {
+		t.Fatalf("小图标把段落拆开了：%v", findKinds(blocks))
+	}
+}
