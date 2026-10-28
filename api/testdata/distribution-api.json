@@ -116,6 +116,10 @@
     "login_required": {
       "status": 503,
       "outcome": "rejected"
+    },
+    "verify_required": {
+      "status": 503,
+      "outcome": "rejected"
     }
   },
   "routes": [
@@ -286,6 +290,7 @@
         "image_too_large",
         "fill_mismatch",
         "platform_rejected",
+        "verify_required",
         "login_required",
         "platform_error"
       ]
