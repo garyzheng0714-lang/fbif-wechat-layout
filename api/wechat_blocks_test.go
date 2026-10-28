@@ -2029,3 +2029,36 @@ func TestWechatTinyDecorativeImagesAreDropped(t *testing.T) {
 		t.Fatalf("小图标把段落拆开了：%v", findKinds(blocks))
 	}
 }
+
+// 零售圈《山姆悄悄布局了四家"县级"店》：135 编辑器把 14px 白字「01」叠在小底图上，下一行 17px 加粗标题；
+// 灵兽是大字「2」接加粗标题。两行都认成小标题、章节号单独一块（FBIF 照原样排，FoodTalks 去掉号）；
+// 后面不跟标题的数字照旧是正文。
+func TestWechatSectionNumberLineMarksNextLineAsTitle(t *testing.T) {
+	page := `<html><body><div class="rich_media_content" id="js_content">
+<p>不止山姆。盒马、奥乐齐、7-ELEVEN、麦德龙等国内外零售品牌，正在以不同业态、不同节奏向县级市场渗透。</p>
+<section data-role="title"><section style="background-image: url(&quot;https://mmbiz.qpic.cn/badge/640&quot;);width: 40px;height: 40px;display: inline-block;"><section style="font-size: 14px;line-height: 40px;color: rgb(255, 255, 255);"><p><span leaf="">01</span></p></section></section>
+<section style="text-align: center;"><span leaf="" style="font-size: 15px;"><span textstyle="" style="font-size: 17px;font-weight: bold;">山姆布局四个县级市门店背后</span></span></section></section>
+<p>山姆的县级市布局，不是仓促跟风，而是一场持续数年、循序渐进的市场测试。</p>
+<p><span style="font-size: 24px;font-weight: bold;">2</span></p>
+<p><strong>资本对新鲜零食为什么犹豫？</strong></p>
+<p>资本之所以犹豫，是因为新鲜零食的门槛远比想象中高。</p>
+<p>3</p>
+<p>这一段只是跟在数字后面的普通正文，并不是标题，所以数字也要留着。</p>
+</div></body></html>`
+	_, blocks, _ := extractArticleBlocks(page)
+	var got []string
+	for _, b := range blocks {
+		got = append(got, b.K+":"+strings.TrimSpace(b.Text+textFromRuns(b.Runs)))
+	}
+	want := []string{
+		"txt:不止山姆。盒马、奥乐齐、7-ELEVEN、麦德龙等国内外零售品牌，正在以不同业态、不同节奏向县级市场渗透。",
+		"h:01", "h:山姆布局四个县级市门店背后",
+		"txt:山姆的县级市布局，不是仓促跟风，而是一场持续数年、循序渐进的市场测试。",
+		"h:2", "h:资本对新鲜零食为什么犹豫？",
+		"txt:资本之所以犹豫，是因为新鲜零食的门槛远比想象中高。",
+		"txt:3", "txt:这一段只是跟在数字后面的普通正文，并不是标题，所以数字也要留着。",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("章节号与标题认法不对：\n%s", strings.Join(got, "\n"))
+	}
+}

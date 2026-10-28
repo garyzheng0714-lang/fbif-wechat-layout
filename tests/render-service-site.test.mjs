@@ -155,6 +155,26 @@ test('ft-default：保留标题层级、正文富文本，并绑定图片与图�
   assert.equal(structuredResult.headingN, 3);
 });
 
+test('ft-default：原文单独一行的章节号「01」不进网站，下一行照常是小标题', async () => {
+  const { html, headingN } = await renderArticle({
+    packId: 'ft-default',
+    title: '山姆悄悄布局了四家县级店',
+    source: '零售圈',
+    blocks: [
+      { k: 'txt', runs: [{ type: 'txt', text: '不止山姆。盒马、奥乐齐、7-ELEVEN、麦德龙正在向县级市场渗透。' }] },
+      { k: 'h', text: '01' },
+      { k: 'h', text: '山姆布局四个县级市门店背后' },
+      { k: 'txt', runs: [{ type: 'txt', text: '山姆的县级市布局，不是仓促跟风。' }] },
+      { k: 'h', text: '2025' },
+      { k: 'txt', runs: [{ type: 'txt', text: '后面不是标题的数字标题照旧。' }] },
+    ],
+  });
+  assert.doesNotMatch(html, />01</);
+  assert.match(html, /<h2 style="text-align: justify;">山姆布局四个县级市门店背后<\/h2>/);
+  assert.match(html, />2025</);
+  assert.equal(headingN, 2);
+});
+
 test('ft-default：headless 保留网站 behavior 的顶层正则与 lists，不走公众号 normalizer', async () => {
   const custom = await renderArticle({
     title: '网站原始 behavior',

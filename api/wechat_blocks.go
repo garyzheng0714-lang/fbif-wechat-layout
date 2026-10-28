@@ -1304,7 +1304,13 @@ func captionProofReason(proof CaptionProof) string {
 
 func resolveRoleDecisions(observed []ObservedBlock, profile articleProfile, captions map[int]CaptionBinding) []RoleDecision {
 	sectionTitles := map[int]bool{}
+	sectionNumbers := map[int]bool{}
 	for i, obs := range observed {
+		if title := sectionNumberTitle(observed, i); title >= 0 {
+			sectionNumbers[i] = true
+			sectionTitles[title] = true
+			continue
+		}
 		if obs.RawKind != "media" || !isDecorativeMarkerCandidate(obs) {
 			continue
 		}
@@ -1342,6 +1348,10 @@ func resolveRoleDecisions(observed []ObservedBlock, profile articleProfile, capt
 			role = "txt"
 			group = "RefGroup"
 			reason = "ref-section"
+		} else if sectionNumbers[obs.Index] {
+			role = "h"
+			group = "SectionNumber"
+			reason = "section-number"
 		} else if sectionTitles[obs.Index] {
 			role = "h"
 			group = "SectionHeaderGroup"
@@ -1586,6 +1596,24 @@ func collectSectionHeaderGroup(observed []ObservedBlock, profile articleProfile,
 		next = following
 	}
 	return nil
+}
+
+// 标题模板常把章节号单独排一行、下一行才是标题：135 编辑器把 14px 白字「01」叠在小底图上、
+// 标题 17px 加粗（零售圈《山姆悄悄布局了四家"县级"店》），灵兽是大字「1」接加粗标题。
+// 两行都认成小标题、各占一块（章节号块只有号）：FBIF 照原样排成紧挨的两行，
+// FoodTalks、第三方平台去掉号，FoodTalks食品资讯换成饼干序号图（isSectionNumberHeading）。
+var sectionNumberLineRe = regexp.MustCompile(`(?i)^(?:part\s*\.?\s*)?(?:0?\d{1,2}|[一二三四五六七八九十]{1,3})$`)
+
+func sectionNumberTitle(observed []ObservedBlock, i int) int {
+	if observed[i].RawKind != "text" || !sectionNumberLineRe.MatchString(observed[i].Text) {
+		return -1
+	}
+	next := nextMeaningfulIndex(observed, i)
+	if next < 0 || !isSectionHeaderCandidate(observed[next]) || !hasSectionHeaderSignal(observed[next]) ||
+		sectionNumberLineRe.MatchString(observed[next].Text) {
+		return -1
+	}
+	return next
 }
 
 func isSectionHeaderCandidate(obs ObservedBlock) bool {

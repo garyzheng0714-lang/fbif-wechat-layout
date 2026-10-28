@@ -21,7 +21,7 @@ const { applyFoodTalksBehavior, buildFooterHtml, compileSiteRegex, pickSiteTipSo
 // ── 规则读取助手（红线下放：优先服务端 config / config.behavior，缺省/非法降级 const）──
 // behOf/behTemplate/behParamStr/behList 共享实现收敛到 rule-behavior-utils.js（架构体检 S6）。
 const behaviorUtilsModule = await import('../rule-behavior-utils.js' + assetQuery);
-const { behOf, behTemplate, behParamStr, behList } = behaviorUtilsModule;
+const { behOf, behTemplate, behParamStr, behList, isSectionNumberHeading } = behaviorUtilsModule;
 function cfgNum(config, key, fallback) {
   const n = Number(config && config[key]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -1111,8 +1111,11 @@ function classifyBlocks(data) {
   const elems = [];
   let imgN = 0;
   const meta = b => (b && b.blankBefore ? { blankBefore: true } : {});
-  for (const b of (data && data.blocks) || []) {
+  const blocks = (data && data.blocks) || [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
     if (!b || !b.k) continue;
+    if (isSectionNumberHeading(b, blocks[i + 1])) continue;
     if (b.k === 'img') {
       // 自适应宽度（adaptiveImageWidth）按 height/width 比例缩窄竖长图。URL 导入此前
       // 只传 dataW、height=0，导致自适应完全不生效（恒返回 600）。这里补出 height：

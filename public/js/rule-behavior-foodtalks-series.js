@@ -24,7 +24,7 @@ import {
 
 // ── 规则读取助手：共享实现收敛到 rule-behavior-utils.js（架构体检 S6，勿再本地复制）──
 import {
-  behList, behTemplate, compileBehaviorRegex, behaviorRegex, elemText,
+  behList, behTemplate, compileBehaviorRegex, behaviorRegex, elemText, isSectionNumberHeading,
 } from './rule-behavior-utils.js';
 
 // 兼容导出：foodtalks-series-defaults.js 等外部消费方仍以 compileSeriesRegex 命名引用。
@@ -472,21 +472,15 @@ export function adaptSiteArticle(neutral, config = {}, meta = {}) {
 }
 
 // 公众号原文的小标题是抓取按字号、颜色认出来的，没写级别（level 0），按标题1 排（饼干序号图）。
-// 单独一行的「1」「01」「PART 2」是原文的章节序号，和下面一行标题合成一个标题1，序号由序号图给。
-const SECTION_NUMBER_RE = /^(?:part\s*\.?\s*)?(?:0?\d{1,2}|[一二三四五六七八九十]{1,3})$/i;
-
+// 原文单独一行的章节号（「1」「01」）不单独成标题，序号由序号图给。
 function foldUnleveledHeadings(elems) {
   const out = [];
-  for (let i = 0; i < elems.length; i++) {
-    const e = elems[i];
-    if (!e || e.k !== 'h' || Number(e.level) >= 2) { out.push(e); continue; }
-    const next = elems[i + 1];
-    const titled = SECTION_NUMBER_RE.test(elemText(e).trim()) && next &&
-      ((next.k === 'h' && !(Number(next.level) >= 3)) || (next.k === 'txt' && isBoldLine(next.runs)));
-    const text = elemText(titled ? next : e).trim();
+  elems.forEach((e, i) => {
+    if (isSectionNumberHeading(e, elems[i + 1])) return;
+    if (!e || e.k !== 'h' || Number(e.level) >= 2) { out.push(e); return; }
+    const text = elemText(e).trim();
     out.push({ k: 'h', level: 2, text, runs: [{ type: 'txt', text }] });
-    if (titled) i++;
-  }
+  });
   return out;
 }
 
