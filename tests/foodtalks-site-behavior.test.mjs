@@ -539,6 +539,17 @@ test('来源号文末关注引导与口号切掉（#128 Vista看天下）', () =
   assert.match(tip.rest_runs.map(r => r.text).join(''), /本文为Vista看天下原创《T》/);
 });
 
+test('文末「点击在看、点赞」引导切掉，不被升成小标题（灵兽）', () => {
+  const elems = [
+    ...bodyFill(12),
+    p('这些都在提醒后面想入局的后来者，得谨慎一点。'),
+    { k: 'p', runs: [{ type: 'txt', text: '喜欢文章点击"在看、点赞、分享"', bold: true }] },
+  ];
+  const joined = restText(applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true, title: 'T' }));
+  assert.match(joined, /得谨慎一点/, '正文结尾保留');
+  assert.doesNotMatch(joined, /在看/);
+});
+
 test('作者合成：非 isRepost 不合成', () => {
   const elems = [p('正文。'), p('来源：X'), p('作者：Y')];
   const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: false });

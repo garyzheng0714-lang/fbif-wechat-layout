@@ -141,3 +141,19 @@ func TestStripWechatTrailerBlocksCutsSourceFollowPrompt(t *testing.T) {
 		t.Fatalf("开头与正文结尾应保留：%+v", got)
 	}
 }
+
+// 灵兽：文末「喜欢文章点击"在看、点赞、分享"」是来源号尾巴；正文里提到「点赞」不切。
+func TestStripWechatTrailerBlocksCutsLikePrompt(t *testing.T) {
+	var blocks []Block
+	for i := 0; i < 12; i++ {
+		blocks = append(blocks, Block{K: "txt", Text: "正文段落，读者纷纷点赞。"})
+	}
+	blocks = append(blocks,
+		Block{K: "txt", Text: "这些都在提醒后面想入局的后来者，得谨慎一点。"},
+		Block{K: "txt", Runs: []Run{{Type: "txt", Text: `喜欢文章点击"在看、点赞、分享"`, Bold: true}}},
+	)
+	got := stripWechatTrailerBlocks(blocks)
+	if len(got) != len(blocks)-1 || wechatTrailerBlockText(got[len(got)-1]) != "这些都在提醒后面想入局的后来者，得谨慎一点。" {
+		t.Fatalf("应只切掉文末的在看引导：%+v", got)
+	}
+}
