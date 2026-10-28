@@ -461,14 +461,33 @@ export function adaptSiteArticle(neutral, config = {}, meta = {}) {
   const contact = behTemplate(config, 'contact_tip', SITE_ARTICLE_TEMPLATES.contact_tip);
   if (contact) tail.push({ k: 'tip-item', text: contact });
 
-  const body = elems.slice(start, end).map(e => {
+  const body = foldUnleveledHeadings(elems.slice(start, end).map(e => {
     if (e.k === 'cap') return { ...e, text: normalizeSiteCaption(e.text) };
     return Array.isArray(e.runs) ? { ...e, runs: keepWechatLinksOnly(e.runs) } : e;
-  });
+  }));
   const plain = body.filter(isText).map(elemText).join('');
   const latin = (plain.match(/[A-Za-z]/g) || []).length;
   const han = (plain.match(/[一-鿿]/g) || []).length;
   return { body, tail, english: plain.length > 0 && latin > han * 3 };
+}
+
+// 公众号原文的小标题是抓取按字号、颜色认出来的，没写级别（level 0），按标题1 排（饼干序号图）。
+// 单独一行的「1」「01」「PART 2」是原文的章节序号，和下面一行标题合成一个标题1，序号由序号图给。
+const SECTION_NUMBER_RE = /^(?:part\s*\.?\s*)?(?:0?\d{1,2}|[一二三四五六七八九十]{1,3})$/i;
+
+function foldUnleveledHeadings(elems) {
+  const out = [];
+  for (let i = 0; i < elems.length; i++) {
+    const e = elems[i];
+    if (!e || e.k !== 'h' || Number(e.level) >= 2) { out.push(e); continue; }
+    const next = elems[i + 1];
+    const titled = SECTION_NUMBER_RE.test(elemText(e).trim()) && next &&
+      ((next.k === 'h' && !(Number(next.level) >= 3)) || (next.k === 'txt' && isBoldLine(next.runs)));
+    const text = elemText(titled ? next : e).trim();
+    out.push({ k: 'h', level: 2, text, runs: [{ type: 'txt', text }] });
+    if (titled) i++;
+  }
+  return out;
 }
 
 // ── 尾部素材读取 / 合成 ──

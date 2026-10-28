@@ -152,22 +152,57 @@ test('网站自动加的公司库链接去掉只留字，公众号文章链接�
   assert.match(html, /<a href="https:\/\/mp\.weixin\.qq\.com\/s\/abc"/, '公众号文章链接保留');
 });
 
-test('网页里 engine 只给扁平参数 + 行为：序号图照样用本账号规则里的饼干图（不落回什么是系列）', () => {
+test('网页里 engine 只给通用扁平参数 + 行为：序号图、标题 18px、图片边距照样用本账号规则（不落回什么是系列）', () => {
   globalThis.window._activeConfig = { config: rules.config, behavior: rules.behavior };
   try {
-    const out = template.processBlocks(sample('63234'), { config: { h1_font_size: '18', behavior: rules.behavior } });
+    const out = template.processBlocks(sample('63234'), { config: { font_size: '15', behavior: rules.behavior } });
     const html = out.lines.join('\n');
     assert.ok(html.includes('/assets/foodtalks-mp/sections/01.png'));
     assert.ok(!html.includes('/assets/foodtalks-series/sections/'));
+    assert.match(html, /font-size: 18px;[^"]*font-weight: bold;">黑龙江首家山姆</, '标题 18px（曾按什么是系列排成 20px）');
+    assert.doesNotMatch(html, /font-size: 20px/);
+    assert.match(html, /<section style="margin: 0 8px 20px; text-align: center; line-height: 0; font-size: 0;"><img/, '图片与正文同为两端 8px');
+    assert.doesNotMatch(html, /<section style="margin: 0 0 \d+px; text-align: center; line-height: 0; font-size: 0;"><img/);
   } finally {
     globalThis.window._activeConfig = undefined;
   }
 });
 
-test('什么是系列不受影响：同一份块不挪署名、不加提示、标题不按块级别', () => {
+// 2026-10-28 用户贴灵兽 https://mp.weixin.qq.com/s/frys28EF1-FyWlzNOrsj_A：原文章节是单独一行的大号「1」
+// 下面一行加粗标题，抓取出来是 h「1」+ 加粗段；排出来成了两行灰色加粗正文。应是饼干序号图 + 深蓝标题。
+test('贴公众号链接：没级别的小标题按标题1 排，单独一行的「1」并进下一行标题', () => {
+  const bold = (text) => ({ k: 'txt', runs: [{ type: 'txt', text, bold: true }] });
+  const txt = (text) => ({ k: 'txt', runs: [{ type: 'txt', text }] });
+  const out = template.processBlocks({
+    title: '警惕新鲜零食', source_name: '灵兽', blocks: [
+      txt('排队的顾客多，证明了新鲜零食的吸引力。'),
+      { k: 'h', text: '1' }, bold('割裂的新鲜零食赛道'), txt('上海闵行万象城B1层。'),
+      { k: 'h', text: '2' }, bold('资本对新鲜零食为什么犹豫？金粒门为什么先拿到了融资？'), txt('资本之所以犹豫。'),
+      { k: 'h', text: '五个绕不过去的坎' }, txt('第一个坎。'),
+      { k: 'h', text: '（一）供应链', level: 3 }, txt('二级标题下的正文。'),
+      bold('加粗强调句'), txt('普通正文。'),
+    ],
+  }, { config });
+  const text = readerLines(out.lines);
+  const html = out.lines.join('\n');
+  assert.deepEqual(text.slice(0, 11), [
+    '排队的顾客多，证明了新鲜零食的吸引力。',
+    '[图 01.png]', '割裂的新鲜零食赛道', '上海闵行万象城B1层。',
+    '[图 02.png]', '资本对新鲜零食为什么犹豫？金粒门为什么先拿到了融资？', '资本之所以犹豫。',
+    '[图 03.png]', '五个绕不过去的坎', '第一个坎。',
+    '（一）供应链',
+  ]);
+  assert.ok(!text.includes('1') && !text.includes('2'), '原文序号由序号图给，不再单独成行');
+  assert.match(html, /font-size: 18px; line-height: 1\.75; color: #02396b;[^"]*font-weight: bold;">割裂的新鲜零食赛道</);
+  assert.match(html, /font-size: 15px; line-height: 1\.75; color: #544545;[^"]*font-weight: bold;">加粗强调句</, '不跟在序号后面的加粗句仍是加粗正文');
+});
+
+test('什么是系列不受影响：同一份块不挪署名、不加提示、标题不按块级别、图片满列', () => {
   const series = { behavior: {} };
-  const text = readerLines(layout('63234', series).lines);
+  const out = layout('63234', series);
+  const text = readerLines(out.lines);
   assert.equal(text[0], '本文为职业零售网原创，作者：零售哥，转载请联系出处。');
   assert.ok(!text.includes('来源：职业零售网'));
   assert.ok(!text.some(t => t.includes(' / ')), '不合并两行标题');
+  assert.match(out.lines.join('\n'), /<section style="margin: 0 0 20px; text-align: center; line-height: 0; font-size: 0;"><img/);
 });

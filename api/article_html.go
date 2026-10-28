@@ -92,16 +92,16 @@ func extractJsContent(rawHTML string) string {
 	// Simpler fallback
 	re2 := regexp.MustCompile(`(?is)<div[^>]+id="js_content"[^>]*>(.*?)$`)
 	if m := re2.FindStringSubmatch(rawHTML); len(m) > 1 {
-		// Try to find a reasonable end point
+		// Cut at the earliest WeChat page element after the article body. 2026-10 起正文后先是
+		// 「预览时标签不可点」提示（js_tags_preview_toast），不切掉它会混进正文末尾。
 		content := m[1]
-		// Cut at common WeChat footer patterns
-		for _, marker := range []string{"<div class=\"rich_media_tool\"", "<div id=\"js_pc_qr_code\"", "<div class=\"qr_code_pc\"", "<!-- 文章底部 -->"} {
-			if idx := strings.Index(content, marker); idx > 0 {
-				content = content[:idx]
-				break
+		end := len(content)
+		for _, marker := range []string{"<div class=\"rich_media_tool\"", "<div id=\"js_pc_qr_code\"", "<div class=\"qr_code_pc\"", "<!-- 文章底部 -->", "<div id=\"js_tags_preview_toast\"", "<div id=\"content_bottom_area\""} {
+			if idx := strings.Index(content, marker); idx > 0 && idx < end {
+				end = idx
 			}
 		}
-		return content
+		return content[:end]
 	}
 	return ""
 }

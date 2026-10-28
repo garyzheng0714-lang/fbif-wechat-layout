@@ -123,6 +123,7 @@
   "h1_font_size": "18",
   "h2_font_size": "16",
   "heading_color": "#02396b",
+  "image_margin_x": "8",
   "link_color": "#02396b",
   "modules": {
    "article_footer_defaults": {

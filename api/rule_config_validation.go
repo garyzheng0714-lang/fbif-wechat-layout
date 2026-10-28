@@ -47,6 +47,7 @@ var ruleNumberFields = map[string]ruleNumberField{
 	"h1_font_size":   {min: 14, max: 32},
 	"h2_font_size":   {min: 12, max: 24},
 	"toc_title_size": {min: 12, max: 24},
+	"image_margin_x": {min: 0, max: 28}, // 系列模板图片两端缩进（FoodTalks食品资讯与正文同为 8）
 }
 
 var ruleColorFields = map[string]bool{

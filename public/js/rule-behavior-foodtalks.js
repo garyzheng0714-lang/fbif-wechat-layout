@@ -320,7 +320,8 @@ function isDataCitationSource(name) {
 // 编审：Z」重写成统一格式放到文章【开头】（基石 62245/62246/62238 即如此）。当公众号
 // 开头没有作者行、但正文里能提取到来源/作者时，据此合成一行，渲染成 14px 灰斜体署名。
 // 格式：「本文为{来源}原创，{作者：Y，编审：Z}，转载请联系出处。」缺项自动省略。
-export function buildAuthorLineFromSource(elems, behavior = {}) {
+// fallbackSource：正文里没有「来源：X」时用的来源（转载稿的公众号名）。
+export function buildAuthorLineFromSource(elems, behavior = {}, fallbackSource = '') {
   if (!Array.isArray(elems)) return '';
   const sourceRe = behaviorRegex(behavior, 'repost_source_regex', '^来源[：:]\\s*(.+)$');
   let source = '', authorSeg = '';
@@ -334,6 +335,7 @@ export function buildAuthorLineFromSource(elems, behavior = {}) {
     // 作者整行（含其后「编审/编辑/主编/美编：…」），原样保留
     if (!authorSeg && /^作者[：:]/.test(text)) authorSeg = text.replace(/[。\s]*$/, '');
   }
+  if (!source) source = String(fallbackSource || '').trim();
   if (!source && !authorSeg) return '';
   if (source) return repostAuthorLine(source, authorSeg, behavior);
   return /[。.]$/.test(authorSeg) ? authorSeg : authorSeg + '。';
@@ -384,6 +386,21 @@ function absorbCreditLines(out, idx, behavior = {}) {
     out.splice(at, 1); // 移除被并入的段（out 是新数组，不改输入）
   }
   out[idx] = { k: 'author', text };
+}
+
+// 开头的来源出品行（「@零售商业财经 原创出品」）已写进「本文为X原创」，删掉免得重复。
+// 只认紧挨署名前后几段、整行就是「@来源 原创/出品/首发」的。
+function dropSourceCreditLine(out, authorIdx, source) {
+  const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const lineRe = new RegExp(`^[@＠]?${escaped}(?:独家)?(?:原创)?(?:出品|首发|原创)$`);
+  const from = Math.max(0, authorIdx - 3);
+  const to = Math.min(out.length, authorIdx + 4);
+  for (let i = from; i < to; i++) {
+    if (i === authorIdx || !out[i] || out[i].k !== 'p') continue;
+    if (!lineRe.test(runsToText(out[i].runs).replace(/\s+/g, ''))) continue;
+    out.splice(i, 1);
+    return;
+  }
 }
 
 function isEmptyP(e) {
@@ -450,19 +467,24 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   //   - 开头只有「作者：Y」→「本文为X原创，作者：Y，转载请联系出处。」（近一月自动发布的
   //     转载稿 32 篇开头只有作者行，24 篇被编辑在 FoodTalks 后台手改成这样，2026-10-14 核对）
   //   - 开头没有作者行 → 用正文里的「来源：X」「作者：Y」合成
+  // 正文没写「来源：X」时来源用公众号名（opts.sourceName，抓取接口的 source_name），自家号除外。
+  const accountSource = String(opts.sourceName || '').trim();
+  const fallbackSource = accountSource && !isOwnAccountName(accountSource) ? accountSource : '';
+  const repostSource = extractRepostSource(elems, behavior) || fallbackSource;
   if (opts.isRepost) {
     const headIsAuthor = firstIdx >= 0 && out[firstIdx] && out[firstIdx].k === 'author';
     if (headIsAuthor) {
-      const source = extractRepostSource(elems, behavior);
       const head = out[firstIdx].text;
-      if (source && !isOwnAccountName(source) && authorRe.test(head)) {
-        out[firstIdx] = { k: 'author', text: repostAuthorLine(source, head, behavior) };
+      if (repostSource && !isOwnAccountName(repostSource) && authorRe.test(head)) {
+        out[firstIdx] = { k: 'author', text: repostAuthorLine(repostSource, head, behavior) };
+        dropSourceCreditLine(out, firstIdx, repostSource);
       }
     } else {
-      const synthesized = buildAuthorLineFromSource(elems, behavior);
+      const synthesized = buildAuthorLineFromSource(elems, behavior, fallbackSource);
       if (synthesized) {
         out.unshift({ k: 'author', text: synthesized });
         absorbCreditLines(out, 0, behavior);
+        if (repostSource) dropSourceCreditLine(out, 0, repostSource);
       }
     }
   }
@@ -606,7 +628,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   if ((trimmed.cutWechatTip || shouldGenerateSiteTip(config)) && !out.some(e => e && e.k === 'tip')) {
     // 来源从【原始 elems】提取（切尾前），因为「来源：XX」行常紧邻被切的导流段。
     out.push(buildSiteFooterTipElem(opts.tipTitle || opts.title, {
-      source: opts.isRepost ? extractRepostSource(elems, behavior) : '',
+      source: opts.isRepost ? repostSource : '',
       sourceUrl: opts.sourceUrl || '',
       behavior,
     }));

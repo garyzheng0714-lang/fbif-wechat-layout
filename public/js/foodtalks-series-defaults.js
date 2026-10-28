@@ -31,6 +31,7 @@ export const SERIES_SIZES = Object.freeze({
 export const SERIES_LAYOUT = Object.freeze({
   line_height: 1.75,
   margin_x: 8,    // 两端缩进 8（规范《二·全文设置》）
+  image_margin_x: 0, // 图片两端缩进：什么是系列满列；规则 image_margin_x 可改（FoodTalks食品资讯与正文同为 8）
   gap: 20,        // 标题前后 / 块间空行
   font_stack: "mp-quote, 'PingFang SC', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif",
 });

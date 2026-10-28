@@ -1981,4 +1981,24 @@ var msg_source_url = 'https://mp.weixin.qq.com/s/original-article';</script></ht
 	if _, _, got := extractWechatArticleMeta(`<script>var msg_source_url = 'javascript:alert(1)';</script>`); got != "" {
 		t.Fatalf("非 http(s) 的 msg_source_url 应被丢弃：%q", got)
 	}
+	// 页面里 & 写成 JS 转义 \x26amp;（2026-10-28 零售商业财经页面），要还原成 &。
+	_, _, sourceURL = extractWechatArticleMeta(`<script>var msg_source_url = 'https://mp.weixin.qq.com/mp/profile_ext?action=home\x26amp;__biz=Mzg2ODg4ODU5MA==\x26amp;scene=1#wechat_redirect';</script>`)
+	if sourceURL != "https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=Mzg2ODg4ODU5MA==&scene=1#wechat_redirect" {
+		t.Fatalf("阅读原文链接里的 \\x26amp; 应还原成 &：%q", sourceURL)
+	}
+}
+
+// 2026-10 起公众号正文后面先是「预览时标签不可点」提示，不能混进正文末尾。
+func TestWechatTagsPreviewToastIsNotBody(t *testing.T) {
+	page := `<html><body><div class="rich_media_content" id="js_content"><p>正文最后一段。</p></div>
+<script>var first_sceen__time = 1;</script></div>
+<div id="js_tags_preview_toast" class="article-tag__error-tips" style="display: none;">预览时标签不可点</div>
+<div id="content_bottom_area"></div></body></html>`
+	_, blocks, _ := extractArticleBlocks(page)
+	if findBlockByText(blocks, "预览时标签不可点") != nil {
+		t.Fatalf("页面提示混进正文：%v", findKinds(blocks))
+	}
+	if findBlockByText(blocks, "正文最后一段") == nil {
+		t.Fatalf("正文丢了：%v", findKinds(blocks))
+	}
 }

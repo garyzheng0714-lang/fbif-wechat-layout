@@ -28,18 +28,21 @@ const { renderBottomBlocksHtml } = blockRenderModule;
 const assetLibModule = await import('../asset-library.js' + assetQuery);
 const { resolveAssetRefs } = assetLibModule;
 const engineConfigModule = await import('../engine-config.js' + assetQuery);
-const { ruleModulesOf } = engineConfigModule;
+const { ruleConfigOf, ruleModulesOf } = engineConfigModule;
 
 function activeRuleModules() {
   return ruleModulesOf(typeof window !== 'undefined' ? window._activeConfig : null);
 }
 
-// engine 给公众号模板的 config 只有扁平参数 + 行为；序号图素材（ft_series_materials）与底部区块
-// 一样读当前账号规则里的 modules，否则账号自己的序号图会落回什么是系列的默认图。
-function withRuleModules(config) {
+// engine 给公众号模板的 config 只有通用扁平参数 + 行为；本模板专属参数（h1_font_size、footer_note_*、
+// image_margin_x…）与序号图素材、底部区块一样读当前账号规则原样的 config，否则账号自己的值会落回
+// 什么是系列的默认（FoodTalks食品资讯的标题 18px 曾排成 20px）。
+function withRuleConfig(config) {
   if (config && config.modules) return config;
-  const modules = activeRuleModules();
-  return Object.keys(modules).length ? { ...config, modules } : config;
+  const { modules, ...own } = ruleConfigOf(typeof window !== 'undefined' ? window._activeConfig : null);
+  const merged = { ...own, ...config };
+  if (modules && typeof modules === 'object' && Object.keys(modules).length) merged.modules = modules;
+  return merged;
 }
 
 // ── config 读取（优先扁平 config 键，缺省降级系列常量）──
@@ -80,6 +83,7 @@ function styleProps(config) {
     noteColor: cfgColor(config, 'footer_note_color', SERIES_COLORS.footer_note_color),
     lh: SERIES_LAYOUT.line_height,
     marginX: SERIES_LAYOUT.margin_x,
+    imageMarginX: cfgNum(config, 'image_margin_x', SERIES_LAYOUT.image_margin_x),
     gap: SERIES_LAYOUT.gap,
     font: SERIES_LAYOUT.font_stack,
   };
@@ -100,7 +104,8 @@ function imageSection(src, gap, sp, { alt = '', width = '100%' } = {}) {
   const isGif = looksLikeGifSource(url);
   const rpol = HTTP_RE.test(url) ? ' referrerpolicy="no-referrer"' : '';
   const gifAttr = isGif ? ' data-type="gif"' : '';
-  const style = `margin: 0 0 ${gap ? sp.gap : 0}px; text-align: center; line-height: 0; font-size: 0;`;
+  const marginX = sp.imageMarginX ? `${sp.imageMarginX}px` : '0';
+  const style = `margin: 0 ${marginX} ${gap ? sp.gap : 0}px; text-align: center; line-height: 0; font-size: 0;`;
   return (
     `<section style="${style}">` +
     `<img src="${escAttr(url)}"${gifAttr}${rpol} alt="${escAttr(alt)}" ` +
@@ -453,13 +458,13 @@ export default {
   formats: ['.docx', '.doc', '.md', '.txt'],
 
   processDocx({ paragraphs, imgCache, config: rawConfig = {} }) {
-    const config = withRuleModules(rawConfig);
+    const config = withRuleConfig(rawConfig);
     const { elems, imgN, headingN, authorName } = processDocxInternal(paragraphs, imgCache, config);
     return { lines: render(elems, config), imgN, headingN, authorName };
   },
 
   async processMd(text, opts = {}) {
-    const config = withRuleModules((opts && opts.config) || {});
+    const config = withRuleConfig((opts && opts.config) || {});
     const fm = parseMdFrontmatter(text);
     const body = (fm && fm.content) || text;
     // 最小 MD 支持：按段落转 runs，交给同一分类/渲染（标题靠正文编号正则识别）。
@@ -476,7 +481,7 @@ export default {
   },
 
   processBlocks(data, opts = {}) {
-    const config = withRuleModules((opts && opts.config) || {});
+    const config = withRuleConfig((opts && opts.config) || {});
     const siteLayout = isSiteArticleLayout(config);
     // URL 导入：把结构化块转成中性 elem（与 fbif 同口径），再走系列分类。
     const neutral = ((data && data.blocks) || []).map(b => {

@@ -152,7 +152,8 @@ func extractWechatArticleMeta(rawHTML string) (nickname, byline, sourceURL strin
 		}
 	}
 	if m := wxSourceURLRe.FindStringSubmatch(rawHTML); len(m) > 1 {
-		u := strings.TrimSpace(html.UnescapeString(m[1]))
+		// 页面里写的是 JS 字符串，& 转成了 \x26amp;，先还原 JS 转义再还原实体。
+		u := strings.TrimSpace(html.UnescapeString(unescapeJSString(m[1])))
 		if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
 			sourceURL = u
 		}

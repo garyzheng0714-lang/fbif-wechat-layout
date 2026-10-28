@@ -11,13 +11,18 @@ export function mpEngineConfig({ flat, behavior }) {
   };
 }
 
-// 服务端激活规则里的原始模块（页脚库、素材库、底部区块）。
-// 绕过 normalizeRuleConfig——它只重建已知 module（theme/supporting/...），会丢弃结构化的 fbif_footer。
-export function ruleModulesOf(activeConfig) {
+// 服务端激活规则的原始 config：含 normalizeRuleConfig 不认的账号专属参数（系列模板的 h1_font_size 等）
+// 与结构化模块（页脚库、素材库、底部区块）。normalizeRuleConfig 只重建通用字段，这些会被丢掉。
+export function ruleConfigOf(activeConfig) {
   const ac = activeConfig || {};
   let cfg = (ac.preset && (ac.preset.raw_config || ac.preset.config)) || ac.config || {};
   if (cfg && cfg.config && cfg.config.modules) cfg = cfg.config; // 兼容 schema_version 2 嵌套
-  return (cfg && cfg.modules && typeof cfg.modules === 'object') ? cfg.modules : {};
+  return (cfg && typeof cfg === 'object') ? cfg : {};
+}
+
+export function ruleModulesOf(activeConfig) {
+  const cfg = ruleConfigOf(activeConfig);
+  return (cfg.modules && typeof cfg.modules === 'object') ? cfg.modules : {};
 }
 
 function disabledFooterSegments(segments, order = []) {

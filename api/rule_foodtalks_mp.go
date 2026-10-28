@@ -11,6 +11,8 @@ import (
 //   - 一级标题：饼干序号图（1820×220，/assets/foodtalks-mp/sections/）+ 18px 深蓝粗体居中；
 //   - 排网站稿（behavior.params.site_article_layout）：署名挪到文末深蓝斜体，网站文末换成公众号提示；
 //   - 「本文图片来源」等说明 15px #888 斜体；
+//   - 图片两端缩进与正文同为 8px（什么是系列图片满列）；
+//   - 贴公众号链接时，抓取按字号认出的小标题（没级别）按一级排，单独一行的「1」「01」序号并进下一行标题；
 //   - 页脚：Bobo 名片 →「关注公众号」（名片卡后台手插）→「加入微信群」+ 食品资讯群码 → Lemon 说明。
 // 前端降级常量：foodtalks-series-defaults.js SITE_ARTICLE_*、asset-library-defaults.js。
 
@@ -21,6 +23,7 @@ func defaultFoodTalksMpRuleConfig() map[string]any {
 	cfg["h1_font_size"] = "18"
 	cfg["footer_note_color"] = "#888888"
 	cfg["footer_note_font_size"] = "15"
+	cfg["image_margin_x"] = "8" // 图片与正文同一两端边距（编辑手排的已发稿都对齐，2026-10-28 用户：「图片页边距没有统一」）
 	mods := cfg["modules"].(map[string]any)
 	sections := map[string]any{}
 	for i := 1; i <= foodTalksMpSectionCount; i++ {

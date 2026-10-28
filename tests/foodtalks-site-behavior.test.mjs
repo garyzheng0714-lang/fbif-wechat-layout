@@ -414,6 +414,33 @@ test('转载署名：开头只有作者行时补上来源（编辑终稿口径�
   }
 });
 
+// 2026-10-28 用户用零售商业财经 https://mp.weixin.qq.com/s/y9m1xFDGK2Dycv5w-GJOPQ 排网站默认：
+// 正文没有「来源：X」行，开头只有「作者：柴元锦」「@零售商业财经 原创出品」，文末声明却写成了 FBIF。
+test('转载署名：正文没写来源时用公众号名，开头与文末声明都是它', () => {
+  const elems = [p('作者：柴元锦 '), p('@零售商业财经  原创出品'), p('正文。')];
+  const out = applyFoodTalksBehavior(elems, TIP_ENABLED_CONFIG, { isRepost: true, title: '麦德龙启动B2B2C战略', sourceName: '零售商业财经' });
+  assert.equal(out[0].k, 'author');
+  assert.equal(out[0].text, '本文为零售商业财经原创，作者：柴元锦，转载请联系出处。');
+  assert.equal(textOf(out[1]), '正文。', '「@零售商业财经 原创出品」已写进署名，删掉');
+  const tip = out.find(e => e.k === 'tip');
+  const tipText = tip.rest_runs.map(r => r.text).join('');
+  assert.match(tipText, /^\*本文为零售商业财经原创《麦德龙启动B2B2C战略》/);
+  assert.doesNotMatch(tipText, /FBIF/);
+
+  const noAuthor = applyFoodTalksBehavior([p('正文。')], DEFAULT_CONFIG, { isRepost: true, sourceName: '灵兽' });
+  assert.equal(noAuthor[0].text, '本文为灵兽原创，转载请联系出处。', '开头没有作者行也照模板补一行');
+
+  const declared = applyFoodTalksBehavior([p('作者：张三'), p('正文。'), p('来源：咖门')], DEFAULT_CONFIG, { isRepost: true, sourceName: '某转发号' });
+  assert.equal(declared[0].text, '本文为咖门原创，作者：张三，转载请联系出处。', '正文写了来源以正文为准');
+
+  const own = applyFoodTalksBehavior([p('作者：Pride'), p('正文。')], TIP_ENABLED_CONFIG, { isRepost: true, title: 'T', sourceName: 'FBIF食品饮料创新' });
+  assert.equal(own[0].text, '作者：Pride', '自家号不补来源');
+  assert.match(own.find(e => e.k === 'tip').rest_runs.map(r => r.text).join(''), /FBIF食品饮料创新（ID：FoodInnovation）原创/);
+
+  const body = applyFoodTalksBehavior([p('作者：柴元锦'), p('正文。'), p('零售商业财经原创出品的报告显示……')], DEFAULT_CONFIG, { isRepost: true, sourceName: '零售商业财经' });
+  assert.equal(textOf(body[2]), '零售商业财经原创出品的报告显示……', '整行不只是出品声明的不删');
+});
+
 test('转载署名：自家稿与数据出处不补来源', () => {
   const own = applyFoodTalksBehavior([p('作者：Pride'), p('编辑：Bobo'), p('正文。')], DEFAULT_CONFIG, { isRepost: true });
   assert.equal(own[0].text, '作者：Pride，编辑：Bobo。', 'FBIF 原创保持作者行');
