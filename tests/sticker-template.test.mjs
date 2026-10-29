@@ -41,16 +41,26 @@ test('预览与复制是同一块：结果只有一行 HTML，就是剪贴板那
   assert.equal(sticker.bodyOnly, true);
 });
 
-test('连着的行只换行，不加空行', () => {
-  const out = pasted('甲。\n乙。\n丙。');
-  assert.equal(out.html, '<p>甲。<br>乙。<br>丙。</p>');
-  assert.equal(out.text, '甲。\n乙。\n丙。');
+// 2026-10-29 老板：「相当于贴图默认要确保它要有一行空白」「这些分段都要默认加一个空白行」——
+// 飞书、多维表格、Word 里复制的字每段只隔一个换行（段距不进纯文字），原先排出来挤成一团。
+const NO_BLANK_SAMPLE = [
+  '什么是真正的 Wasabi？先别说芥末！🌿',
+  '上课了！📚 先做道选择题。',
+  '吃日料刺身的时候，碟子边上那一小撮绿色的酱，是什么？',
+  'B. 山葵 🟢',
+  '本山葵展位：1D 馆 138（1 楼）',
+];
+
+test('原文段间没有空行：贴图照样每段空一行', () => {
+  const out = pasted(NO_BLANK_SAMPLE.join('\n'));
+  assert.equal(out.html, shape(NO_BLANK_SAMPLE.flatMap((line, i) => (i ? ['', line] : [line]))));
+  assert.equal(out.text, NO_BLANK_SAMPLE.join('\n\n'));
 });
 
-test('几个空行、只有空格的行、Windows 换行、首尾空行：都收成一个空行，开头结尾不出空行', () => {
+test('几个空行、只有空格的行、Windows 换行、首尾空行：段间都是一个空行，开头结尾不出空行', () => {
   const out = pasted('\r\n\r\n  甲。  \r\n\r\n\r\n   \r\n　　\r\n \r\n乙。\r\n丙。\r\n\r\n\r\n');
-  assert.equal(out.html, '<p>甲。<br><br>乙。<br>丙。</p>');
-  assert.equal(out.text, '甲。\n\n乙。\n丙。');
+  assert.equal(out.html, '<p>甲。<br><br>乙。<br><br>丙。</p>');
+  assert.equal(out.text, '甲。\n\n乙。\n\n丙。');
 });
 
 test('尖括号与 & 转义，不当标签', () => {
@@ -59,7 +69,7 @@ test('尖括号与 & 转义，不当标签', () => {
   assert.equal(out.text, 'a < b & c > d');
 });
 
-test('Markdown：# 标题、加粗、链接只留字；空行与分隔线出一个空行；整行图片丢掉、夹在中间当空行', async () => {
+test('Markdown：# 标题、加粗、链接只留字；每行之间一个空行，分隔线不多出；整行图片丢掉', async () => {
   const markdown = [
     '---',
     'title: 不进正文',
@@ -79,7 +89,7 @@ test('Markdown：# 标题、加粗、链接只留字；空行与分隔线出一�
     '',
   ].join('\n');
   const { clipboard } = await sticker.processMd(markdown);
-  const lines = ['大标题', '', '第一段有加粗和链接。', '第二段。', '', '引用一句', '• 列表一项', '', '图后一段。'];
+  const lines = ['大标题', '', '第一段有加粗和链接。', '', '第二段。', '', '引用一句', '', '• 列表一项', '', '图后一段。'];
   assert.equal(clipboard.html, shape(lines));
   assert.equal(clipboard.text, lines.join('\n'));
 });
@@ -106,7 +116,7 @@ test('AI 答复点复制（Markdown）与选中复制（纯文字里没有圆点
     '好的，这里有几个带超链接的示例：\n\nAnthropic 官网\nClaude 文档\n维基百科\n\n如果你想要的是某个具体主题的链接，告诉我，我可以帮你搜索。',
     extractClipboardListItems(AI_REPLY_HTML),
   );
-  const lines = ['好的，这里有几个带超链接的示例：', '', '• Anthropic 官网', '• Claude 文档', '• 维基百科', '', '如果你想要的是某个具体主题的链接，告诉我，我可以帮你搜索。'];
+  const lines = ['好的，这里有几个带超链接的示例：', '', '• Anthropic 官网', '', '• Claude 文档', '', '• 维基百科', '', '如果你想要的是某个具体主题的链接，告诉我，我可以帮你搜索。'];
   for (const text of [copyButton, selected]) {
     const out = pasted(text, links);
     assert.equal(out.html, shape(lines));
@@ -126,7 +136,7 @@ test('贴图下框里画蓝的字，就是贴图排出来带链接的字：普�
   assert.deepEqual(shown, linked);
 });
 
-test('链接抓回的块：小标题、列表、引用、图注、表格行都是字；图片视频丢掉；原文空段照出', () => {
+test('链接抓回的块：小标题、列表、引用、图注、表格行都是字；图片视频丢掉；块间一个空行，表格各行只换行', () => {
   const blocks = [
     { k: 'img', src: 'https://mmbiz.qpic.cn/demo/head.jpg' },
     { k: 'h', level: 2, text: '一、市场', blankBefore: true },
@@ -144,12 +154,12 @@ test('链接抓回的块：小标题、列表、引用、图注、表格行都�
     { k: 'img', src: 'https://mmbiz.qpic.cn/demo/tail.jpg' },
   ];
   const { clipboard } = sticker.processBlocks({ title: '标题不进正文', blocks });
-  const lines = ['一、市场', '开头，重点链接字', '', '第一项', '第二项', '引用的话', '', '图片来源：网络', '', '品类 份额', '燕麦奶 40%'];
+  const lines = ['一、市场', '', '开头，重点链接字', '', '第一项', '', '第二项', '', '引用的话', '', '图片来源：网络', '', '品类 份额', '燕麦奶 40%'];
   assert.equal(clipboard.html, shape(lines));
   assert.equal(clipboard.text, lines.join('\n'));
 });
 
-test('Word：空段即空行，列表带编号，前面的作者行、参考来源都当正文', () => {
+test('Word：段间一个空行（连着的空段不多出），软换行只换行，列表带编号，前面的作者行、参考来源都当正文', () => {
   const para = (text, extra = {}) => ({ text, runs: [{ type: 'txt', text }], ...extra });
   const empty = { text: '', runs: [], isEmpty: true };
   const paragraphs = [
@@ -167,7 +177,7 @@ test('Word：空段即空行，列表带编号，前面的作者行、参考来�
     empty,
   ];
   const { clipboard } = sticker.processDocx({ paragraphs, imgCache: {} });
-  const lines = ['作者：小编', '第一段。', '', '第二段。', '软换行前', '软换行后', '小标题', '1. 第一项', '参考来源：', '[1] 某报告'];
+  const lines = ['作者：小编', '', '第一段。', '', '第二段。', '', '软换行前', '软换行后', '', '小标题', '', '1. 第一项', '', '参考来源：', '', '[1] 某报告'];
   assert.equal(clipboard.html, shape(lines));
   assert.equal(clipboard.text, lines.join('\n'));
 });

@@ -2,10 +2,11 @@
 // 公众号贴图编辑器丢掉段距和空块，只认一个段落里的换行：粘进去要的是 <p>甲<br><br>乙</p>（空行 = 连着两个 <br>）。
 // 所以这里从解析出的原文块直接排成几行字，不经文章预览、不读文章规则，文章规则怎么改都不会串进来。
 //
-// 行（lines）：string[]，'' 是空行。原文空行（blankBefore、Markdown 空行或分隔线、Word 空段）出一个空行；
-// 连着的行只换行；开头结尾不出空行，也不连出两个空行。加粗、颜色只留字；链接只留链到公众号文章的
-// （贴图编辑器只认这种，粘进去变成文章链接；别的网址它只留字），其余只留字；图片、视频丢掉，
-// 夹在两段字中间时当空行。没有标题、署名、目录、页脚、更多文章、底部区块。标点照公众号口径转换。
+// 行（lines）：string[]，'' 是空行。段与段之间一律空一行，原文有没有空行都一样（2026-10-29 老板：「贴图默认
+// 要确保它要有一行空白」；飞书、Word 复制的纯文字段间只有一个换行）；段内换行（Word 软换行、<br>）与表格各行
+// 只换行；开头结尾不出空行，也不连出两个空行。加粗、颜色只留字；链接只留链到公众号文章的（贴图编辑器只认这种，
+// 粘进去变成文章链接；别的网址它只留字），其余只留字；图片、视频丢掉。没有标题、署名、目录、页脚、更多文章、
+// 底部区块。标点照公众号口径转换。
 // 预览与复制是同一个 <p>…</p>；预览外观在 app.css 的 #contentArea[data-template="sticker"]，不进剪贴板。
 // 与其他渲染器物理隔离（红线 #19）：只 import engine 导出与中性的 docx-article-model。
 
@@ -109,10 +110,9 @@ const LINES_BY_KIND = {
 
 function stickerLines(elems) {
   const lines = [];
-  let blank = false;
   for (const elem of elems || []) {
     if (!elem) continue;
-    blank = blank || !!elem.blankBefore;
+    let blank = true;
     for (const line of (LINES_BY_KIND[elem.k] || separator)(elem)) {
       if (!line) { blank = true; continue; }
       if (blank && lines.length) lines.push(BLANK);
@@ -150,21 +150,15 @@ function elemsFromBlocks(blocks) {
 const MD_IMAGE_LINE = /^!\[[^\]]*\]\([^)]*\)$/;
 const MD_INLINE_IMAGE = /!\[[^\]]*\]\([^)]*\)/g;
 
-// Markdown 一行一行排：空行与分隔线是原文空行，整行图片丢掉，# 标题、> 引用去掉记号，- 列表换成「•」。
+// Markdown 一行一段：空行与分隔线跳过，整行图片丢掉，# 标题、> 引用去掉记号，- 列表换成「•」。
 function elemsFromMarkdown(text) {
   const { content } = parseMdFrontmatter(String(text || '').replace(/\r\n?/g, '\n'));
   const elems = [];
-  let blankBefore = false;
   for (const raw of content.split('\n')) {
     const line = raw.trim();
-    if (!line || /^([-*_]\s*){3,}$/.test(line)) { blankBefore = true; continue; }
-    if (MD_IMAGE_LINE.test(line)) {
-      elems.push({ k: 'img', blankBefore });
-    } else {
-      const body = markdownLineBody(line).replace(MD_INLINE_IMAGE, '');
-      elems.push({ k: 'txt', runs: parseMdRuns(body), blankBefore });
-    }
-    blankBefore = false;
+    if (!line || /^([-*_]\s*){3,}$/.test(line) || MD_IMAGE_LINE.test(line)) continue;
+    const body = markdownLineBody(line).replace(MD_INLINE_IMAGE, '');
+    elems.push({ k: 'txt', runs: parseMdRuns(body) });
   }
   return elems;
 }
@@ -182,7 +176,7 @@ function elemsFromDocx(paragraphs, imgCache) {
 export default {
   id: 'sticker',
   name: '贴图',
-  description: '排成公众号贴图文字：一段字，空行照原文',
+  description: '排成公众号贴图文字：一段字，段间空一行',
   formats: ['.docx', '.doc', '.md', '.txt'],
   // 载体能力：只排正文（engine 不出标题、页脚、更多文章、底部区块），复制交 result.clipboard。
   bodyOnly: true,
