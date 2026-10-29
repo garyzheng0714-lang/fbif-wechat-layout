@@ -1,0 +1,588 @@
+{
+  "job": 317,
+  "title": "把醋做成泡沫，把酱油做成脆片？调味料还能这么玩",
+  "cover": {
+    "url": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/d2b706f13ecd.jpg",
+    "width": 778,
+    "height": 332
+  },
+  "blocks": [
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "酱油竟然也能做成脆片？"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "土耳其调味料品牌Chef Seasons将陈酿酱油与海盐结合，制成了薄薄的酥脆碎片。它不用你倒进锅里，也不必蘸取，只要像撒盐一样撒在菜品上，就能为食物增添咸鲜风味和一层脆感。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/0aa195dd17c3.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons陈酿酱油片；图片来源：SIAL"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "但这还不是Chef Seasons最有意思的尝试。它此前已经把醋做成了可以直接撒用的脆片，甚至将酱汁装进类似洗手液的按压瓶中，让酱汁在使用时呈现为一团轻盈的“云”状泡沫。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/ef07a392935e.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons云朵调味料系列；图片来源：Chef Seasons Ins（有裁切）"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "把液体调味料变成脆片、泡沫，听起来像是为了制造新鲜感而做的实验。但对Chef Seasons的创始人Burak Hucuptan来说，让常见的调味料变得与众不同，恰恰是品牌打开市场的一种方式：“我们必须做出一些不同的东西。光是带着Kekik去敲门，是打不开市场大门的。”[1]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "Kekik是土耳其语中对牛至、百里香等香草类香料的常见称呼，在土耳其饮食中十分普遍。对一家调味料企业而言，只是把这些常见香料做得更香，显然不足以形成足够的差异。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2009年，Hucuptan在土耳其创立Chef Seasons。如今，品牌产品已出口至34个国家，土耳其国内有超过3000家餐厅使用其调味料，产品组合则已超过3500种。[2]"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/3ae7c6f850fc.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons陈酿酱油片；图片来源：Chef Seasons Linkedin"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "从普通香料到酱油脆片、醋脆片和调味料泡沫，这家风味公司，究竟是如何一步步把熟悉的调味料，变成不一样的产品？"
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "level": 2,
+      "text": "一、酱油不只负责咸鲜，还能给菜加点脆"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "你是否还记得“撒盐哥”？"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2017年，土耳其一个牛排店的创始人因为一段戏剧性的“手肘滑落式撒盐”的动作视频在社交媒体上爆红，因而被称为“撒盐哥Salt Bae（Salt是盐，Bae为亲昵称呼）”。Chef Seasons也为撒盐哥定制过盐，团队根据客户的要求调整了盐的加工方式。Hucuptan透露，这款特殊盐的售价达到每吨约2.2万至2.3万欧元。[1]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "这个产品告诉我们，哪怕是盐这种最基础的调味料，也能因IP的加持和工艺的变化，变成了一款附加值更高的产品。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/e9ac88b3f6c4.png"
+    },
+    {
+      "k": "cap",
+      "text": "撒盐哥的盐；图片来源：Antonie Robertson"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "如果说这款产品还是Chef Seasons根据客户的需求，努力做出差异性，那Chef Seasons的其他产品则更能体现它们的创新基因。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "例如，你不仅可以撒盐，也可以撒“醋”，撒“酱油”。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "Chef Seasons推出的Aged Soy Flakes，可以叫做“陈酿酱油片”。它将陈酿酱油与海盐结合，制成结晶状的薄片。与液态酱油不同，这款产品不需要倒入锅中，也不必用于蘸取，它可以直接撒在寿司、肉类、海鲜或蔬菜上，作为菜品最后的调味点缀。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/b2189696f18d.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons陈酿酱油片；图片来源：SIAL Paris"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "它带来的变化不只在外形。按照品牌的介绍，入口时，人们会先感受到轻微的酥脆感；随着薄片逐渐溶解，酱油发酵带来的咸鲜风味才进一步释放。也就是说，原本主要通过液体传递的酱油咸香风味，如今多了一层可以被咀嚼、缓慢释放的口感和风味。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2026年，这款产品获得了SIAL Innovation巴黎食品展咸味食品创新奖项，评审关注的正是它将传统液态酱油转化为结晶固体的做法。[3]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "如果说把酱油做成脆片，改变的是咸鲜味的呈现方式，那么香醋片（Balsamic Flakes）则把同样的思路用在了醋上，让碎片同时拥有咸味和酸味。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/0fb0d18d6932.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons陈酿酱油片；图片来源：Chef Seasons Ins"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "这款产品以盐晶体为基础，再浸入香醋中形成风味，而不是在成品上简单添加香醋香精。按照官方的介绍，这款香醋片保留了意大利传统香醋标志性的酸甜风味，可以撒在沙拉、烤蔬菜和肉类上，为食物增加一层甜酸交织的味道。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2025年，Chef Seasons的香醋片入选了德国科隆食品展的年度创新产品名单，同样成为获得行业认证的创新产品。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "不管是酱油到香醋，Chef Seasons不是简单地把液体变成固体，而是尝试让调味料给最终的菜品加分，通过与众不同的形式，搭配固定菜肴，给上桌前的“最后一撒”带来一点新变化。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/2ca9f33e723b.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons香醋片；图片来源：Chef Seasons Ins"
+    },
+    {
+      "k": "h",
+      "level": 2,
+      "text": "二、按一下，酱汁变成一团“云”？"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "如果说脆片是把液体“收干”成固体，那么Chef Seasons的下一个尝试“烹饪云朵（Culinary Clouds）”走的则是完全相反的方向，把液体“撑开”，让调味料变成云朵一样的泡沫形态。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/2710f402c71f.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons云朵调味料（左）；图片来源：Chef Seasons Ins（有裁切）"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "据Chef Seasons介绍，烹饪云朵将会以液体形态装瓶，在使用的当下被转化为轻盈、有体积感的泡沫形态，不需要特殊厨房设备，只需使用产品配备的挤压瓶就能挤出云朵状调料。它并不会把酱汁稀释成寡淡的泡沫，而是在极轻的结构里保住极浓的风味。[4]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "Chef Seasons创新与业务发展经理Ebru Yakın以香醋云（Balsamic Cloud）为例介绍了这系列产品，泡沫在口中迅速塌陷，醋的甜酸风味迅速散开，但这类云朵调味料几乎没有重量。这种轻盈结构和浓郁风味的反差，是烹饪云朵产品逻辑的核心。[4]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "烹饪云朵的产品线不仅有醋，还有酱油云（Soy Cloud）、青酱云（Pesto Cloud）、松露云（Truffle Cloud）和凯撒云（Caesar Cloud）等产品。此外，品牌还推出了Beverage Clouds和Bar Clouds系列，面向饮料及调酒领域。[4]"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/754dbe9373e9.png"
+    },
+    {
+      "k": "cap",
+      "text": "烹饪云朵；图片来源：Chef Seasons"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "要理解Chef Seasons为什么持续推出形态不同于传统调味料的产品，可以从创始人Burak Hucuptan的经历开始说起。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "Hucuptan 并非传统意义上从食品科学实验室走出来的创业者。他接受过纺织工程教育，后来在企业中积累了销售、品牌管理等方面的经验。在创立Chef Seasons之前，他还曾在土耳其农业销售合作社联盟的TARİŞ工作。据土耳其媒体报道，他早期关注过健康生活趋势，并开始思考消费者熟悉的食品还有哪些改进空间。[1]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "当时，精制盐已经是厨房里的常见产品，而天然海盐提供了一个差异化的切入点。Hucuptan随后在土耳其第三大城市伊兹密尔创业，从天然盐类产品开始推广品牌。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "在2025年接受餐饮媒体Horeca Mailing采访时，Hucuptan回顾了公司早期的发展。他提到，品牌最初以Gizzia为名推出天然海盐、喜马拉雅盐等产品，后来通过研磨器包装、香辛料组合和产品内容上的创新，再从盐类产品扩展到香料混合物、酱料和定制化配方等业务。[5]"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/f981dbdb5c96.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons的调料产品；图片来源：Chef Seasons"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "他谈到Chef Seasons与其他调味料品牌不同的市场判断：“为了让看似普通的产品变得与众不同，我们首先研究消费者的习惯和市场空白。盐是厨房中最常见、却通常不会被特别思考的产品。我们不再只把盐视为一种配料，而是把它当作一种风味体验。”[1]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "这意味着，创新不一定要从一种全新的原料开始。对于已经成熟的品类，消费者如何使用产品、产品能否更方便、能否提供不同的口感和体验，同样可能成为研发的起点。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "而在早期发展过程中，Hucuptan也逐渐认识到，单纯提供常见的香料并不足以打开国际市场。他在采访中谈到，企业需要做出不同的产品，才能在竞争中建立辨识度。[1]于是，后期Chef Seasons开始打造有足够差异化的产品，无论是陈酿酱油片、香醋片，还是将于近期推出的烹饪云朵。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/a690106c7aa6.png"
+    },
+    {
+      "k": "cap",
+      "text": "Chef Seasons的调料产品；图片来源：Chef Seasons"
+    },
+    {
+      "k": "h",
+      "level": 2,
+      "text": "三、给食客换调料体验，不止它们做过"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "事实上，将调味料变一种形态，并不是Chef Seasons独有的尝试。日本也有食品企业在探索类似方向，只是它们的出发点各不相同。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "日本调味料企业Fundodai（フンドーダイ）于2025年4月正式发售了Foam和Leaf两个系列的调味料。酱油和味噌作为被使用了一千多年的调味料，其“液态”和“糊状”的默认形态并不是必然的，改变形态，就可能创造出新的使用场景。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "Foam是包括透明酱油慕斯和甜口酱油慕斯，企业用专利技术注入一氧化二氮将透明酱油和九州甘口酱油转化为细腻稳定的泡沫，甚至在常温下也能维持一段时间的形态，挤压瓶身即可覆盖在料理上。Leaf则把酱油和味噌做成约0.2毫米厚的薄片，这款调料不使用化学添加剂，可根据料理需要裁剪、铺放、卷起或叠加，包裹饭团或点缀寿司。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/de4eb9d7d76c.png"
+    },
+    {
+      "k": "cap",
+      "text": "Fundodai的新形态产品；图片来源：フンドーダイ"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "另一家日本老铺田丸屋本店在2018年推出了颗粒状山葵调味品“山葵爆珠（わさビーズ）”。他看上去像绿色鲑鱼籽，咬破的瞬间，山葵油风味随之释放。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "这个产品的开发动机非常具体，山葵的辛辣成分是挥发性的，如果把山葵直接加入料理，整道菜都会变成山葵味。因此，田丸屋本店选择把山葵的味道“关”进胶囊里，就能让食客咬到山葵爆珠那一瞬间感受到山葵风味，而不是让山葵主导整个料理。[6]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "在这款产品上市前，田丸屋的传统主力产品山葵渍（腌山葵）销售长期低迷，消费者年龄也逐渐增长，年轻用户严重不足。因此，田丸屋也希望从“山葵渍制造商”转向更全面的山葵专业品牌，让年轻消费者也愿意接触山葵。据《日本食糧新聞》报道，这款产品上市后订单远超预期，2021年其累计销量已经超过34万个。[6]"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/c3245cdba7f4.png"
+    },
+    {
+      "k": "cap",
+      "text": "山葵爆珠；图片来源：マカロ二"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2019年，日本食品企业ブルボン推出了薄片工坊（Slice Kitchen）系列，包括金枪鱼蛋黄酱风味薄片和罗勒蛋黄酱风味薄片。这两款产品同样把原本以酱料形式出现的食品做成片状，可以直接放在面包、饭团等食物上。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "据ブルボン介绍，这款薄片的创意来自一位需要每天为孩子准备便当的员工。她发现，如果提前在三明治中加入蛋黄酱，面包到了中午可能会因为水分渗出而变得湿软，但单独准备小包装蛋黄酱也不一定方便。研发团队由此想到，能否借助此前制作片状生巧克力的成型技术，将蛋黄酱风味做成薄片，直接放入三明治或饭团中。[7]"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/c4b86cad2280.png"
+    },
+    {
+      "k": "cap",
+      "text": "金枪鱼蛋黄酱味薄片；图片来源：ブルボン"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "知名品牌龟甲万也曾推出过香脆酱油片，将固态酥脆颗粒与蒜、洋葱、芝麻结合，把酱油从液体调料变成了可以咀嚼的拌饭配料。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "相对于传统、常见的常规配料，形态创新的调味料相对没有那么“普适”，大多只适合特定的料理使用。但它们的存在却让长期以来把创新集中在风味本身的调味料有了另一种可能性，味道依旧是核心，但味道如何发散到食客的口中却可以被调料的形态重新设计。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "当酱油不再需要倒，醋不再需要淋，山葵不再需要搅开……新的调味料也会让食客更加好奇。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "参考来源："
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[1]ELİF ERGU DEMİRAL，Ege'nin tuzunu dünyaya satıyor，2021年9月17日，Gazete Oksijen"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[2]Elif Akin Yuksel，Chef Seasons is now on Migros shelves！，2025年7月7日，HORECA Supply/"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[3]SIAL INNOVATION 2026 AWARDS: SHAPING THE FUTURE OF FOOD"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[4]Chef Seasons, SIAL Paris 2026'da üç yeni ürün tanıttı，2026年9月18日，Kadin Burada"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[5]Tuz Satışından Gurme Lezzetlere Dönüşüm Yolculuğu，2025年3月27日，Horeca Mailing"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[6]伏見学，販売数は34万個超え！　静岡名物「わさび漬け」の老舗メーカーが、ヒット商品「わさビーズ」を開発できた理由，2021年8月20日，IT Media"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[7]ブルボン、簡単便利に使えるスライス状の新感覚食材“スライスキッチン”シリーズを3月1日（金）に新発売！～ 忙しい皆様の毎日をもっと豊かに ～，2019年2月12日，株式会社ブルボン"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "本文为FBIF食品饮料创新原创，作者：Sage，编辑：Bobo，转载请联系授权。"
+        }
+      ]
+    }
+  ]
+}

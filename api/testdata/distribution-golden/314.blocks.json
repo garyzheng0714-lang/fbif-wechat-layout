@@ -1,0 +1,639 @@
+{
+  "job": 314,
+  "title": "你“配”吃多少巧克力？吉百利这块巧克力已经在包装上给你分好了",
+  "cover": {
+    "url": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/2b47ad6289bf.jpg",
+    "width": 1280,
+    "height": 545
+  },
+  "blocks": [
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "巧克力，常常出现在分享的场景中。但在“谈糖色变”的今天，怎样让消费者在日常生活中依然愿意主动与亲朋好友分享一块巧克力？"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "英国糖果企业吉百利（Cadbury）想到了一个绝佳的创意。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2025年1月，吉百利与创意机构VCCP合作，推出“Made to Share”营销活动。该营销活动中，吉百利一口气推出12款限定包装。包装正面，吉百利用白色线条将一板巧克力分成大小不等的几份，并用文案标明每份该归谁。分配原则也很简单——日常生活中贡献越多的人，就值得多吃一点，比如“做饭的人”“记得每个人生日的人”。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/fd175a82dc38.png"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "消费者显然对这一玩法颇感兴趣。"
+        },
+        {
+          "type": "txt",
+          "text": "据吉百利分享，该限量款推出后一年内售出了1650万块，吉百利牛奶巧克力系列的整体销售额也较活动前增加了11.5%。",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "[1]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "今年1月，“Made to Share”系列再次上线，并新增12款限定包装。据吉百利官方分享，这次回归后上线几周时间内，该系列就售出超300万块，并且预计2026年该限量版巧克力的销量将超1200万块。[2]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "比销量更重要的，是其自带的话题性引发的广泛传播。比如在TikTok的#CadburyMadeToShare话题下，有不少用户拉上自己的家人或朋友，按照包装上的角色拍摄“生活小剧场”：谁做饭、谁洗碗、谁只负责吃，对号入座后，再看看各自能分到多少巧克力。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/909dc3cb4dd6.png"
+    },
+    {
+      "k": "cap",
+      "text": "网友拍摄的“生活小剧场”；图片来源：TikTok"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "一块普通的巧克力，仅仅是在包装上做了一个“分区”，就被吉百利改造成了一块让人有分享欲望的“社交货币”。"
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "level": 2,
+      "text": "一、一块巧克力，谁该吃哪块被分得明明白白"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "一块普通的吉百利牛奶巧克力长这样："
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/8b87d19b0e95.png"
+    },
+    {
+      "k": "cap",
+      "text": "图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "经典的排块形式，一板普通规格款被划分成36只方形小块。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "吉百利在包装上“分区”的创意，正是抓住了这一形态下巧克力适合被掰成小块分享的特点。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "于是，2025年1月上线的12款包装，都根据生活中的不同场景，提前设计好了巧克力的“分配规则”。"
+        },
+        {
+          "type": "txt",
+          "text": "仔细读包装上的文案，既幽默，又像在你的生活中装了监控般真实。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "比如，一个视频平台的会员账号经常由好几个人共用，在这个场景下，吉百利“奖励”订阅会员的人把巧克力的一大块都掰走，跟着“蹭”账号的3个人，只能分到一小条了。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/bc4428460585.png"
+    },
+    {
+      "k": "cap",
+      "text": "从大到小分别为：订阅会员的人、观看者2、观看者3、观看者4；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "再比如家庭购物场景下，去购物的那个人可以吃到最大的巧克力，把沉甸甸的购物袋拎回家的人可以分到一块中等大小的，而什么也没干回到家还第一个翻袋子找零食的人，“惩罚”他吃最小的那块。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/d3bd24763fac.png"
+    },
+    {
+      "k": "cap",
+      "text": "从大到小依次为：去超市采购的、把沉重的购物袋拎回家的、回家第一个翻袋子找吃的；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "还有更真实的：睡在一张床上的两个人，谁醒来没被子盖，可以掰走一大块巧克力作为“补偿”，醒来时把被子全卷走的人只能吃剩下的那一小块。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/81e76dbb5568.png"
+    },
+    {
+      "k": "cap",
+      "text": "从大到小为：醒来没被子盖的、醒来时把被子全卷走的；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "12款限定包装上的文案贵在真实。VCCP的创意人员Tom Lee透露，这12版看似简单的文案，创作过程其实一点也不轻松，因为它们要在“具体”与“普适”之间找到平衡点，为此VCCP创作了至少100个版本，才筛选出了其中的12个真实、能够引起共鸣的。[3]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "真实性的优势，如该营销活动名称“Made to Share”暗示的那样，使得消费者更容易感到设定场景与自己的关联，从而激发其分享欲。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "在社交平台上，可以看到很多用户拍摄视频，借这块巧克力的包装，展示自己与亲朋好友在各种生活场景中的角色。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "如这位TikTok用户分享的视频中演绎的那样，三人课题小组中总有一个负责做PPT、一个负责演示，还有一个负责在演示结束时向台下说“谢谢”。在视频中，三人扮演了自己的角色后，依次对着镜头亮出包装上属于自己的那份巧克力——谁撑起了整个小组，谁只撑到了结束，一眼就看明白了。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/62fab70b736e.png"
+    },
+    {
+      "k": "cap",
+      "text": "从上到下分别为：做PPT的、结束时说“谢谢”的、做演讲的；图片来源：TikTok@Kelly截图"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "最终，“Made to Share”系列在发售一年时间里便售出1650万块。今年1月该系列回归并推出12款新款包装，吉百利又给出了年售1200万块的预测。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "一块普通的排块式巧克力，或许还缺少一个不得不分享的理由，而当包装本身变成一场需要好友配合的“角色扮演游戏”，“分享”这一动作便变得顺理成章。",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "level": 2,
+      "text": "二、把“白色框框”玩成品牌资产"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "或许是第一轮营销的出圈效果，第二年“Made to Share”回归时，吉百利将包装上分割巧克力的白色框框演变为一个视觉符号，迁移到了包装之外更多营销场景中。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "先是户外广告。2026年上线的多组文案组合，被吉百利直接从巧克力包装上“挪”到了对应场景的摄影画面上。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "比如这个，一起外出旅行的三人组，画面定格在登机那一刻的背影，并被吉百利分配上了三种角色：坐飞机时靠窗的、坐在中间的和座位靠近过道的。其中，自然是被挤在中间、“牺牲”最大的那位分配到了更大的“巧克力”。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/109004324a8f.png"
+    },
+    {
+      "k": "cap",
+      "text": "从左到右依次为：坐飞机时靠窗的、坐在中间的和座位靠近过道的；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "值得一提的是，从网友分享的照片来看，该户外广告恰好被吉百利投放到了机场内航班信息显示屏的旁边。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/0e6f83e599e1.png"
+    },
+    {
+      "k": "cap",
+      "text": "吉百利的户外广告在机场；图片来源：MarComm News"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "吉百利还把足球场改造成了一块“广告牌”。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2026年2月，吉百利与英格兰低级别联赛足球俱乐部Cray Wanderers达成合作，将一组与足球场景有关的文案直接印在了训练球场草坪上，左边是“将球踢过横梁的人”，右边则是“把球捡回来的人”。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/06529af32b01.png"
+    },
+    {
+      "k": "cap",
+      "text": "左：将球踢过横梁的人；右：把球捡回来的人；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "自然是默默捡球的“老实人”分到了更大一块“巧克力”。足球解说员Ian Wright评论：“草根足球里的每一位奉献者，只要他们想吃，就值得拿走整块巧克力中最大的一份。”"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "即使离开了巧克力包装，“谁该多分一块”的话题依然能延伸成好友之间的互动游戏。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "今年8月，吉百利将“Made to Share”营销活动带到了南非，并上线了一个名为Slab Settler的线上互动工具，通过该工具，消费者可以为自己的朋友圈定制一块虚拟巧克力。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "这一工具的玩法非常简单：选定一个分享场景，填入最多三位好友的名字，再回答几个与朋友间分工有关的小问题——谁总负责开车？谁总是迟到？系统就会根据回答，将一块虚拟巧克力分成大小不同的几份，并标上每个人的名字，生成可以分享的结果。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/b639f41d8984.png"
+    },
+    {
+      "k": "cap",
+      "text": "Slab Settler；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "虽然每人分到的巧克力不能真的掰下来吃掉，但“谁该多吃一点”已足够让朋友们聊上几句。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "从包装、户外广告到线上互动，吉百利让这个用于分配角色的白色框框有了更多用法，其内在逻辑却始终相通：给人们一个与好友分享、打趣和互动的理由。",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "分享的可以是一块巧克力，也可以是一张让大家忍不住对号入座的图片。"
+        }
+      ]
+    },
+    {
+      "k": "h",
+      "level": 2,
+      "text": "三、怎样让“分享”变得更有趣？"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "回顾吉百利此前的营销，它的确没少琢磨一件事：如何让分享巧克力这件事变得更有趣？"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2018年情人节，吉百利在印度推出了一款叫Heart Pop的巧克力。这款排块式巧克力的中央，设计了一颗可以单独取下的巧克力爱心。消费者只要轻轻一掰，就能把“心”送给伴侣。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/a7745d1f100a.png"
+    },
+    {
+      "k": "cap",
+      "text": "Pop Heart；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "虽然这种方式略显“土味”，但的确能够增强消费者在情人节分享巧克力的动力和仪式感。最终，"
+        },
+        {
+          "type": "txt",
+          "text": "据营销研究平台WARC的数据显示，这轮营销活动中共卖出了超100万份Heart Pop巧克力。",
+          "bold": true
+        },
+        {
+          "type": "txt",
+          "text": "[4]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2022年，Heart Pop的这颗爱心又升级成了粉红色的草莓味白巧克力，并且吉百利还给它配上了“秘密情话”的玩法：消费者扫描包装二维码，就能编写专属留言；收件人通过AR体验，可以在吉百利的广告牌、报纸广告等画面上看到只有自己才能解锁的告白。这使得巧克力真正成了两个人之间的“传声筒”。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/012ac9908637.png"
+    },
+    {
+      "k": "cap",
+      "text": "升级后的粉色爱心；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "2021年复活节前，吉百利将一款寻找彩蛋的游戏搬到了谷歌地图上。消费者可以借助街景，将一枚虚拟彩蛋藏在与好友之间有纪念意义或共同记忆的地方，并写下线索，邀请好友来找。如果提前购买了对应的巧克力蛋，对方找到虚拟彩蛋后，一盒实体巧克力蛋礼物便会寄到好友家中。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/3c94507338d4.png"
+    },
+    {
+      "k": "cap",
+      "text": "与谷歌地图街景合作开发的寻找彩蛋游戏；图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "在难以见面的居家期间，这让人们多了一种与好友保持联系的方式：不能见面，那就隔着屏幕玩一场只有彼此才懂的寻宝游戏。据项目团队分享，2021年活动吸引了超过226万次网站访问，用户藏下了超过80.9万枚虚拟彩蛋，并购买了约1.45万枚实体巧克力蛋。[5]"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/9ccefb1ba2d1.png"
+    },
+    {
+      "k": "cap",
+      "text": "图片来源：吉百利"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "到了2022年圣诞季，吉百利又让送礼多了一层悬念：礼物收到了，却不知道是谁送的。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "这次，吉百利将英国公交站、火车站等地的数百张海报变成了“神秘圣诞老人邮局”。路人扫描海报上的二维码，就有机会免费向亲友匿名寄送一份巧克力。一张出现在等车、赶路途中的广告海报，就这样成了给某个人制造惊喜的入口。"
+        }
+      ]
+    },
+    {
+      "k": "img",
+      "src": "https://fbif-gary-img-hz.oss-cn-hangzhou.aliyuncs.com/wechat-layout/1fdd226ceef2.png"
+    },
+    {
+      "k": "cap",
+      "text": "图片来源：TikTok@ Fionaberginx截图"
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "这种玩法随后持续开展。英国广告从业者协会IPA2024年估算，自2022年底推出这一海报互动形式以来，活动已吸引约340万人参与，带来约8000万英镑的增量收入，吉百利的圣诞销售额也增长了43%。[6]"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "上述创意，大多围绕节日送礼展开：为伴侣送出一颗爱心，让亲友找到一枚彩蛋，或给某人寄去一份匿名惊喜。而“Made to Share”又向日常生活更近了一步——不必等到情人节或圣诞节，一起做饭、追剧、出门旅行，都可以成为分享巧克力的理由。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "与此同时，吉百利慷慨、友善的品牌性格，也在这些小互动中逐渐变得具体。对于常被用来表达心意、传递情绪的巧克力而言，这或许能让消费者在挑选巧克力时，多想起吉百利一次。"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "参考来源："
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[1] Made to Share，The One Club for Creativity，2025 The One Show案例库"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[2] Made to Share - Photography，The One Club for Creativity，2026 The One Show案例库"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[3]Abbey Bamford，Cadbury's 'Made to Share' campaign redefines generosity in the sweetest way，Creative Boom，2025年2月4日"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[4]Cadbury Dairy Milk Silk: Making more than 1 million “hearts pop out” on Valentine's Day，WARC，2019年10月3日"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[5]VCCP London and the VCCP CX team，Cadbury Worldwide Hide: Inspiring the ritual of hiding eggs and connecting people with Google Maps Platform，Google Maps Platform，2021年5月13日"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "[6]How Cadbury won Christmas，IPA（英国广告从业者协会），2024年效果奖案例库"
+        }
+      ]
+    },
+    {
+      "k": "txt",
+      "runs": [
+        {
+          "type": "txt",
+          "text": "本文为FBIF食品饮料创新原创，作者：Pride，编辑：Bobo，转载请联系授权。"
+        }
+      ]
+    }
+  ]
+}

@@ -28,9 +28,9 @@ cd api && DISTRIBUTION_REPO=<分发工具仓库> go test -run TestDistributionFi
 
 只收编辑在平台上手发的稿，不收系统推的。
 
-1. 在 A 机跑 `tools/distribution-golden/fetch_sources.py <编号…>`，在 `/tmp/golden/` 下得到 `ft-<编号>.json`（FoodTalks 正文）和 `tt-<编号>.json`（头条号正文）。
-2. 把 `tools/distribution-golden/fetch_baijiahao.mjs` 拷进 B 机容器 `fbif-distribution-browser` 的 `/app/`，跑 `node /app/fetch_baijiahao.mjs '{"<编号>":"<标题>"}'`，得到 `/tmp/bjh.json`。跑完用 `docker exec -u 0` 删掉拷进去的脚本。
-3. 把这几个文件拷到本机同一个目录，然后生成样稿。这一步要联网量图片尺寸，FoodTalks 正文写进这里的 `<编号>.json`，编辑稿写进分发服务的 `test/golden/<编号>.<平台>.json`：
+1. 在 A 机跑 `sudo python3 tools/distribution-golden/fetch_sources.py <编号…>`，在 `/tmp/golden/` 下得到 `ft-<编号>.json`（FoodTalks 正文）。
+2. 把这些 `ft-*.json` 放进 B 机一个目录（容器里的 `node` 用户要能写），用分发服务的镜像另起一个用完即删的容器跑 `tools/distribution-golden/fetch_platforms.mjs <起始日期>`（命令在脚本开头）：它不登录、不碰分发服务的浏览器，翻 FBIF 头条号、百家号从那天起发的每一篇，按正文对上编号（编辑常改标题），在同一目录写出 `tt-<编号>.json`、`bjh.json`，和列出每一篇标题、封面、对上哪个编号的 `posts.json`。没对上的是不经排版工具的稿（老稿补发等），不收。
+3. 只留要收的编号（系统会外发的原创、编辑在平台上手发的），把这几个文件拷到本机同一个目录，然后生成样稿。这一步要联网量图片尺寸，FoodTalks 正文写进这里的 `<编号>.json`，编辑稿写进分发服务的 `test/golden/<编号>.<平台>.json`：
 
    ```bash
    cd api && GOLDEN_BUILD_RAW=<目录> DISTRIBUTION_REPO=<分发工具仓库> go test -run TestDistributionGoldenBuild .
