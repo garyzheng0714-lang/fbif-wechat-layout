@@ -13,14 +13,15 @@ const MIRRORED_STYLES = [
   'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
 ];
 
-// 框里的字 → 一段段字，链接那段带 href。
-export function linkSegments(text, links) {
+// 框里的字 → 一段段字，链接那段带 href。keepsLink 是当前排法留不留这条链接（贴图只留公众号文章链接），
+// 不留的画成普通字；先按全部链接认锚文字再筛，筛掉的不让后面同字的链接提前认上。
+export function linkSegments(text, links, keepsLink = () => true) {
   const lines = String(text || '').split('\n');
   const ranges = linkRanges(lines, links);
   const segments = [];
   lines.forEach((line, i) => {
     let pos = 0;
-    for (const { start, end, href } of ranges[i]) {
+    for (const { start, end, href } of ranges[i].filter(range => keepsLink(range.href))) {
       if (start > pos) segments.push({ text: line.slice(pos, start) });
       segments.push({ text: line.slice(start, end), href });
       pos = end;
@@ -31,10 +32,11 @@ export function linkSegments(text, links) {
   return segments;
 }
 
-export function mountImportLinks(input) {
+// 返回 { refresh }：换了排法（keepsLink 的答案变了）时重画。
+export function mountImportLinks(input, { keepsLink } = {}) {
   const doc = input && input.ownerDocument;
   const box = input && input.parentElement;
-  if (!doc || !box) return;
+  if (!doc || !box) return { refresh() {} };
   const mirror = doc.createElement('div');
   mirror.className = 'import-textarea-links';
   mirror.setAttribute('aria-hidden', 'true');
@@ -42,7 +44,7 @@ export function mountImportLinks(input) {
 
   function render() {
     const links = readImportLinks(input);
-    const segments = links.length ? linkSegments(input.value, links) : [];
+    const segments = links.length ? linkSegments(input.value, links, keepsLink) : [];
     const hasLinks = segments.some(segment => segment.href);
     box.classList.toggle('has-links', hasLinks);
     if (!hasLinks) {
@@ -83,4 +85,5 @@ export function mountImportLinks(input) {
   new doc.defaultView.MutationObserver(render).observe(input, { attributes: true, attributeFilter: ['data-links'] });
   new doc.defaultView.ResizeObserver(render).observe(input);
   render();
+  return { refresh: render };
 }

@@ -10,13 +10,13 @@ const assetQuery = new URL(import.meta.url).search;
 // re-exports below, so one dynamic import here fixes the whole chain.
 const parserModule = await import('./parser.js' + assetQuery);
 const {
-  esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown,
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownLineBody, normalizeClipboardTextForMarkdown,
   hasImageLikeLink, formatPlainTextForCopy, looksLikeArticleClipboardText,
   buildClipboardArticleBlocks, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 } = parserModule;
 export {
-  esc, escAttr, parseMdRuns, parseMdFrontmatter, normalizeClipboardTextForMarkdown,
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownLineBody, normalizeClipboardTextForMarkdown,
   hasImageLikeLink, formatPlainTextForCopy, looksLikeArticleClipboardText,
   buildClipboardArticleBlocks, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr

@@ -400,11 +400,17 @@ const accountMenu = mountAccountMenu({
   activeId: activeRulePack.id,
   onSwitch: (id) => { switchAccount(id).catch(err => console.warn('[account] switch failed', err)); },
 });
-// 载体胶囊（文章 / 贴图）：决定 loadTemplate 实际装哪个模板；切换按缓存原文重排。
+// 载体胶囊（文章 / 贴图）：决定 loadTemplate 实际装哪个模板；切换按缓存原文重排，框里的蓝字跟着换。
 const carrier = createCarrier({
   storage: window.localStorage,
-  onChange: ({ stale }) => loadTemplate(activeRulePack.templateId, { rerender: true, stale }),
+  onChange: async ({ stale }) => {
+    const applied = await loadTemplate(activeRulePack.templateId, { rerender: true, stale });
+    importLinks.refresh();
+    return applied;
+  },
 });
+// 引擎里实际装着的模板（贴图载体时是 sticker）。
+let activeTemplate = null;
 
 // #moreArticlesEmbed 的稳定引用：缓存一次，之后即使被 block-panel 的 innerHTML='' 摘下 DOM，
 // 元素对象仍存活，可再 append 复位（不能用 getElementById——detached 时找不到）。
@@ -734,6 +740,7 @@ async function loadTemplate(templateId, options = {}) {
   if (options.stale && options.stale()) return false;
   // 加载期间载体又切了：按最新的载体重来，不把旧载体的模板写进引擎。
   if (carrier.templateFor(templateId) !== effectiveTemplateId) return loadTemplate(templateId, options);
+  activeTemplate = mod.default;
   syncEngineConfig(false);
   if (window._engineApi && typeof window._engineApi.switchTemplate === 'function') {
     const switching = window._engineApi.switchTemplate(mod.default, { rerender: options.rerender === true });
@@ -866,8 +873,11 @@ bindUrlImportShortcuts({
   ignoreClassNames: ['ma-url'], focusTargetSelector: '[data-url-focus-target]',
 });
 // 框里粘进来的链接画成蓝色下划线；只在公众号编辑器挂，FoodTalks 编辑器排版时不带粘贴的链接。
+// 只画当前模板会留下的链接（贴图只留公众号文章链接）。
 const { mountImportLinks } = await import('/js/import-links.js?v=' + assetVersion);
-mountImportLinks(document.getElementById('urlInput'));
+const importLinks = mountImportLinks(document.getElementById('urlInput'), {
+  keepsLink: href => !activeTemplate.keepsLink || activeTemplate.keepsLink(href),
+});
 
 const {
   mountFeishuDocumentImport,

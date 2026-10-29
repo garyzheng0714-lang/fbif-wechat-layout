@@ -3,7 +3,7 @@
 // rule-pack path resolution, and copy feedback live behind one interface.
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { isBoldHeading } from './heading-detect.js';
-import { extractClipboardLinks, readImportLinks, writeImportLinks } from './clipboard-links.js';
+import { extractClipboardLinks, extractClipboardListItems, readImportLinks, withListMarkers, writeImportLinks } from './clipboard-links.js';
 
 export const DEFAULT_ACCOUNT_STORAGE_KEY = 'active_rule_pack';
 
@@ -385,6 +385,13 @@ export function bindUrlImportShortcuts({
     return /<a\b/i.test(html || '') ? extractClipboardLinks(html) : [];
   }
 
+  // 纯文字里补回列表的圆点、序号（浏览器只把它们留在 text/html 的 <li> 里）。
+  function clipboardText(clipboardData) {
+    const text = clipboardData.getData('text');
+    const html = clipboardData.getData('text/html');
+    return text && /<li\b/i.test(html || '') ? withListMarkers(text, extractClipboardListItems(html)) : text;
+  }
+
   function submitImportValue(value) {
     const text = String(value || '').trim();
     if (!text) return false;
@@ -452,7 +459,7 @@ export function bindUrlImportShortcuts({
     const tag = ae && ae.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     const clipboardData = event.clipboardData || globalThis.window.clipboardData;
-    const text = clipboardData.getData('text').trim();
+    const text = clipboardText(clipboardData).trim();
     if (!text || !shouldSubmitValue(text)) return;
     event.preventDefault();
     writeImportLinks(urlInput, clipboardLinks(clipboardData));
@@ -474,7 +481,7 @@ export function bindUrlImportShortcuts({
   });
   urlInput.addEventListener('paste', event => {
     const clipboardData = event && (event.clipboardData || globalThis.window?.clipboardData);
-    const pasted = clipboardData ? clipboardData.getData('text') : '';
+    const pasted = clipboardData ? clipboardText(clipboardData) : '';
     if (pasted) {
       const next = valueAfterPaste(urlInput, pasted);
       // 框里的链接：整框换掉就重记，追加粘贴接在后面。

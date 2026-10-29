@@ -11,7 +11,7 @@
 
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, parseMdRuns, parseMdFrontmatter, convertRuns, convertText } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownLineBody, convertRuns, convertText } = engineModule;
 const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
 
@@ -150,7 +150,7 @@ function elemsFromBlocks(blocks) {
 const MD_IMAGE_LINE = /^!\[[^\]]*\]\([^)]*\)$/;
 const MD_INLINE_IMAGE = /!\[[^\]]*\]\([^)]*\)/g;
 
-// Markdown 一行一行排：空行与分隔线是原文空行，整行图片丢掉，# 标题、> 引用、- 列表去掉标记只留字。
+// Markdown 一行一行排：空行与分隔线是原文空行，整行图片丢掉，# 标题、> 引用去掉记号，- 列表换成「•」。
 function elemsFromMarkdown(text) {
   const { content } = parseMdFrontmatter(String(text || '').replace(/\r\n?/g, '\n'));
   const elems = [];
@@ -161,7 +161,7 @@ function elemsFromMarkdown(text) {
     if (MD_IMAGE_LINE.test(line)) {
       elems.push({ k: 'img', blankBefore });
     } else {
-      const body = line.replace(/^#{1,6}\s+/, '').replace(/^>\s?/, '').replace(/^[-*+]\s+/, '').replace(MD_INLINE_IMAGE, '');
+      const body = markdownLineBody(line).replace(MD_INLINE_IMAGE, '');
       elems.push({ k: 'txt', runs: parseMdRuns(body), blankBefore });
     }
     blankBefore = false;
@@ -186,6 +186,8 @@ export default {
   formats: ['.docx', '.doc', '.md', '.txt'],
   // 载体能力：只排正文（engine 不出标题、页脚、更多文章、底部区块），复制交 result.clipboard。
   bodyOnly: true,
+  // 导入框只把这里留下的链接画蓝（import-links.js）。
+  keepsLink: href => !!articleHref(href),
 
   processDocx({ paragraphs, imgCache }) {
     return result(elemsFromDocx(paragraphs, imgCache));

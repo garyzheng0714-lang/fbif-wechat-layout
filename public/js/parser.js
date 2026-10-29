@@ -730,23 +730,53 @@ export function looksLikeArticleClipboardText(text) {
   return lines.slice(1, 5).some(line => /^(作者|撰文|撰稿|文)[：:/|｜]\s*\S+/.test(line));
 }
 
+// 行首的 Markdown 记号：标题、引用去掉；无序列表换成与 Word 列表同一个「•」；「1.」本来就是字，留着。
+export function markdownLineBody(line) {
+  return String(line || '').trim()
+    .replace(/^>\s?/, '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^[-*+]\s+/, '• ');
+}
+
+const MD_INLINE_RE = /\*\*[^*]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)/;
+
+// 粘贴的文字常是 AI 答复点「复制」得到的 Markdown：记号按 Markdown 认，不原样排出来；
+// 没有行内记号的行照纯文字转标点（网址在链接里，不会被转成全角括号）。
+function clipboardLineRuns(raw) {
+  const body = markdownLineBody(raw);
+  if (!MD_INLINE_RE.test(body)) {
+    const text = normalizePlainTextLine(body);
+    return text ? [{ type: 'txt', text }] : [];
+  }
+  return parseMdRuns(body).map(run => (run.type === 'txt' ? { ...run, text: tidyPlainTextChineseSpacing(run.text) } : run));
+}
+
 // 锚文字与正文同样转标点、理空格后再认（认法在 clipboard-links.js，与框里画蓝字同一个）。
-function linkRuns(lines, links) {
+// 链接只挂在普通字上，Markdown 已写成链接的那段原样留着。
+function linkRuns(blocks, links) {
   const anchors = (links || []).map(link => ({
     text: normalizePlainTextLine(link && link.text),
     href: String(link && link.href || ''),
   }));
-  const ranges = linkRanges(lines, anchors);
-  return lines.map((line, i) => {
+  const ranges = linkRanges(blocks.map(block => block.runs.map(run => run.text).join('')), anchors);
+  blocks.forEach((block, i) => {
     const runs = [];
-    let pos = 0;
-    for (const { start, end, href } of ranges[i]) {
-      if (start > pos) runs.push({ type: 'txt', text: line.slice(pos, start) });
-      runs.push({ type: 'link', text: line.slice(start, end), href });
-      pos = end;
+    let start = 0;
+    for (const run of block.runs) {
+      const end = start + run.text.length;
+      let pos = start;
+      for (const range of run.type === 'txt' ? ranges[i] : []) {
+        const from = Math.max(range.start, pos);
+        const to = Math.min(range.end, end);
+        if (from >= to) continue;
+        if (from > pos) runs.push({ ...run, text: run.text.slice(pos - start, from - start) });
+        runs.push({ ...run, type: 'link', text: run.text.slice(from - start, to - start), href: range.href });
+        pos = to;
+      }
+      if (pos < end) runs.push({ ...run, text: run.text.slice(pos - start) });
+      start = end;
     }
-    if (pos < line.length) runs.push({ type: 'txt', text: line.slice(pos) });
-    return runs;
+    block.runs = runs;
   });
 }
 
@@ -765,22 +795,14 @@ export function buildClipboardArticleBlocks(text, { links = [] } = {}) {
       if (sawContent) blankBefore = true;
       continue;
     }
-    const line = normalizePlainTextLine(raw);
-    if (!line) continue;
-    blocks.push({
-      k: 'txt',
-      runs: [{ type: 'txt', text: line }],
-      blankBefore,
-      compact: true,
-    });
+    const runs = clipboardLineRuns(raw);
+    if (!runs.length) continue;
+    blocks.push({ k: 'txt', runs, blankBefore, compact: true });
     sawContent = true;
     blankBefore = false;
   }
 
-  if (links && links.length) {
-    const runs = linkRuns(blocks.map(block => block.runs[0].text), links);
-    blocks.forEach((block, i) => { block.runs = runs[i]; });
-  }
+  if (links && links.length) linkRuns(blocks, links);
   return { title: '', displayName: '剪贴板正文', blocks, source: 'clipboard-text', bodyOnly: true };
 }
 
