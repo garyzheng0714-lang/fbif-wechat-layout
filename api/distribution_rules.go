@@ -311,21 +311,27 @@ func uncaptionedImage(blocks []Block, i int) bool {
 	return i+1 >= len(blocks) || canonicalBlockKind(blocks[i+1].K) != "cap"
 }
 
-// mergedCaption 说明与图片来源并成一条（人工稿口径「说明；图片来源：X」，前一句以感叹号、问号
-// 收尾就不再加分号），不截短：编辑手发的头条图注有 55 字的（#280）。
+// mergedCaption 说明与图片来源并成一条（人工稿口径「说明；图片来源：X」），不截短：编辑手发的
+// 头条图注有 55 字的（#280）。前一句以句号、感叹号、问号收尾（后面可跟引号）就留着它、不再加分号
+// （#321「…的年份。」、#323「…碳酸水。感觉十分满足。“图片来源」）。
 func mergedCaption(blocks []Block) string {
 	caption := ""
 	for _, block := range blocks {
-		text := strings.TrimRight(strings.TrimSpace(stripBareURLs(blockPlainText(block))), "；;。")
+		text := strings.TrimRight(strings.TrimSpace(stripBareURLs(blockPlainText(block))), "；;")
 		if text == "" {
 			continue
 		}
-		if last, _ := utf8.DecodeLastRuneInString(caption); caption != "" && !strings.ContainsRune("！？!?…", last) {
+		if caption != "" && !sentenceEnded(caption) {
 			caption += "；"
 		}
 		caption += text
 	}
 	return caption
+}
+
+func sentenceEnded(text string) bool {
+	last, _ := utf8.DecodeLastRuneInString(strings.TrimRight(text, "”“’」』\""))
+	return strings.ContainsRune("。！？!?…", last)
 }
 
 func stripBareURLs(text string) string {
