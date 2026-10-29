@@ -440,6 +440,7 @@ func defaultFoodTalksSiteRuleBehavior() map[string]any {
 		// 网站句式模板（红线下放：规则后台可配；客户端读 templates.<key>，缺省降级同值 const）。
 		"templates": map[string]any{
 			"site_tip_prefix_fbif":      "*本文为FBIF食品饮料创新（ID：FoodInnovation）原创",
+			"site_tip_prefix_repost":    "*本文为转载文章",
 			"site_tip_suffix":           "，不代表FoodTalks立场，转载请联系出处。",
 			"author_line_repost_prefix": "本文为{source}原创",
 			"author_line_repost_suffix": "，转载请联系出处。",

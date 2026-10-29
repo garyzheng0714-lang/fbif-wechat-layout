@@ -270,12 +270,15 @@ export function buildSiteFooterTipElem(title, opts = {}) {
   const behavior = opts.behavior || {};
   // 来源机构：转载文章用提取到的原始来源（如「食品内参」），FBIF 原创 / 无来源
   // 用默认全称。基石实测：转载文提示声明为「*本文为{来源}原创…」。
+  // repost 且说不出来源（自家号明写「本文为转载文章」的稿子，#294）→「*本文为转载文章」。
   const source = String(opts.source || '').trim();
   const fbifSourceRe = behaviorRegex(behavior, 'fbif_source_pattern', '(?i)FBIF|食品饮料创新|FoodInnovation');
   const isFbif = !source || fbifSourceRe.test(source);
-  const prefix = isFbif
-    ? behaviorTemplate(behavior, 'site_tip_prefix_fbif', '*本文为FBIF食品饮料创新（ID：FoodInnovation）原创')
-    : `*本文为${source}原创`;
+  const prefix = !isFbif
+    ? `*本文为${source}原创`
+    : opts.repost
+      ? behaviorTemplate(behavior, 'site_tip_prefix_repost', '*本文为转载文章')
+      : behaviorTemplate(behavior, 'site_tip_prefix_fbif', '*本文为FBIF食品饮料创新（ID：FoodInnovation）原创');
   const suffix = behaviorTemplate(behavior, 'site_tip_suffix', '，不代表FoodTalks立场，转载请联系出处。');
   const runs = [{ type: 'txt', text: prefix }];
   if (t) {
@@ -313,6 +316,29 @@ export function extractRepostSource(elems, behavior = {}) {
     return name;
   }
   return '';
+}
+
+// 正文明写「本文为转载文章」（公众号「提示：」页脚那句，可带「，原文标题为《…》」），
+// 与 api/publish_pipeline.go 的 explicitSiteRepostDisclosure 同值。
+const REPOST_DISCLOSURE_RE = /^本文为转载文章(?:[，,：:].*)?[。.!！]?$/;
+
+function hasRepostDisclosure(elems) {
+  return elems.some(e => e && (e.k === 'p' || e.k === 'h') &&
+    REPOST_DISCLOSURE_RE.test(runsToText(e.runs).replace(/[*＊\s]/g, '')));
+}
+
+// 文末声明说谁的。发布流程交来后台的判定（opts.provenance，和 CMS 原创/转载同一个函数，
+// 认 AI 抽的出处和「本文转载自X」等写法）就照它；网页排版没有判定时自己看：外部来源 → 转载，
+// 没有外部来源但明写「本文为转载文章」→ 转载、不点名。转载时正文「来源：X」优先，和开头署名同一来源。
+function siteTipProvenance(elems, opts, repostSource) {
+  const external = repostSource && !isOwnAccountName(repostSource) ? repostSource : '';
+  const decided = opts.provenance;
+  if (decided && typeof decided.original === 'boolean') {
+    if (decided.original) return { repost: false, source: '' };
+    return { repost: true, source: external || String(decided.source || '').trim() };
+  }
+  if (!opts.isRepost) return { repost: false, source: '' };
+  return { repost: !!external || hasRepostDisclosure(elems), source: external };
 }
 
 function isDataCitationSource(name) {
@@ -631,7 +657,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   if ((trimmed.cutWechatTip || shouldGenerateSiteTip(config)) && !out.some(e => e && e.k === 'tip')) {
     // 来源从【原始 elems】提取（切尾前），因为「来源：XX」行常紧邻被切的导流段。
     out.push(buildSiteFooterTipElem(opts.tipTitle || opts.title, {
-      source: opts.isRepost ? repostSource : '',
+      ...siteTipProvenance(elems, opts, repostSource),
       sourceUrl: opts.sourceUrl || '',
       behavior,
     }));

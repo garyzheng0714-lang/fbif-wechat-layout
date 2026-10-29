@@ -304,15 +304,16 @@ export function absolutizeAssetURLs(html, origin = ASSET_ORIGIN) {
   return html.replace(/src="\/(?!\/)/g, 'src="' + origin + '/');
 }
 
-// renderArticle({packId, title, source, blocks, isRepost, withFooter, originalTitle}) → { html, imgN, headingN }
+// renderArticle({packId, title, source, blocks, isRepost, withFooter, originalTitle, provenance}) → { html, imgN, headingN }
 // blocks 契约 = api/wechat_blocks.go 的 Block JSON（/api/fetch-article、/api/html-to-blocks 的输出）。
 // packId（默认 fbif）：按 CHANNELS 表选渲染器与渠道参数；未知 packId 显式 400。
 // withFooter（默认开）：按生产规则 bottom_blocks 渲染整段页脚——与网页版人工排版同一数据源、
 // 同一渲染器（公众号转载走 repost 预设：提示声明 + Bobo 名片等）。
 // originalTitle：服务端抓回原文核验过正文后的原文真标题，FoodTalks 转载声明《》里用它（没有则用 title）。
+// provenance：发布流程的原创/转载判定 {original, source}，FoodTalks 文末声明照它写（和 CMS 来源类型同一个判定）。
 export async function renderArticle({
   packId = 'fbif', title, source, blocks, isRepost = true, withFooter = true,
-  ruleMode = 'latest', ruleSnapshot, originalTitle,
+  ruleMode = 'latest', ruleSnapshot, originalTitle, provenance,
 } = {}) {
   const channel = CHANNELS[packId];
   if (!channel) {
@@ -335,7 +336,7 @@ export async function renderArticle({
   const processOpts = { isRepost: isRepost !== false };
   if (channel.configViaOpts) processOpts.config = config;
   const result = template.processBlocks(
-    { title: title || '', source: source || '', blocks, original_title: originalTitle || '' },
+    { title: title || '', source: source || '', blocks, original_title: originalTitle || '', provenance },
     processOpts,
   );
   let html = result.lines.join('\n');

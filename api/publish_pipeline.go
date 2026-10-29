@@ -64,10 +64,24 @@ func normalizeSitePublishRulePackID(raw string) (string, error) {
 }
 
 type publishOriginalTitleContextKey struct{}
+type publishRenderProvenanceContextKey struct{}
 
-// publishRenderContext 渲染请求的上下文：规则包 + 转载声明用的原文真标题（没有则沿用本稿标题）。
+// publishRenderProvenance 网站文末声明说谁的，和 CMS 原创/转载同一个判定（publishArticleProvenance）。
+// 转载但来源是自家号（自家号发的稿子明写「本文为转载文章」、说不出原作者，#294）时不给来源，
+// 排版写「本文为转载文章」。
+type publishRenderProvenance struct {
+	Original bool   `json:"original"`
+	Source   string `json:"source,omitempty"`
+}
+
+// publishRenderContext 渲染请求的上下文：规则包 + 原创/转载判定 + 转载声明用的原文真标题（没有则沿用本稿标题）。
 func publishRenderContext(ctx context.Context, rulePackID string, job publishJob) context.Context {
 	ctx = withPublishRulePackID(ctx, rulePackID)
+	original, source := publishArticleProvenance(job)
+	if original || siteOwnAccounts()[source] {
+		source = ""
+	}
+	ctx = context.WithValue(ctx, publishRenderProvenanceContextKey{}, publishRenderProvenance{Original: original, Source: source})
 	if title := publishOriginalTitleForRender(job); title != "" {
 		ctx = context.WithValue(ctx, publishOriginalTitleContextKey{}, title)
 	}
@@ -485,6 +499,9 @@ func renderSiteHTMLForPack(ctx context.Context, rulePackID, title, source, block
 	}
 	if originalTitle := publishOriginalTitleFromContext(ctx); originalTitle != "" {
 		request["originalTitle"] = originalTitle
+	}
+	if provenance, ok := ctx.Value(publishRenderProvenanceContextKey{}).(publishRenderProvenance); ok {
+		request["provenance"] = provenance
 	}
 	payload, err := json.Marshal(request)
 	if err != nil {

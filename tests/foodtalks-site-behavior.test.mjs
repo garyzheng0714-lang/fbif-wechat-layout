@@ -441,6 +441,32 @@ test('转载署名：正文没写来源时用公众号名，开头与文末声�
   assert.equal(textOf(body[2]), '零售商业财经原创出品的报告显示……', '整行不只是出品声明的不删');
 });
 
+// 2026-10-30 #294：FBIF 号发的合作稿，公众号文末「* 本文为转载文章。」，没写原作者；
+// 网站文末却写成了「本文为FBIF食品饮料创新…原创」（用户：「以微信公众号文章为准」）。
+test('文末声明：自家号明写「本文为转载文章」、说不出来源时写转载，不写 FBIF 原创', () => {
+  const tail = [p('提示：'), p('* 本文为转载文章。'), p('* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）')];
+  const out = applyFoodTalksBehavior([p('正文。'), ...tail], DEFAULT_CONFIG, { isRepost: true, title: 'T', sourceName: 'FBIF食品饮料创新' });
+  const tipText = out.find(e => e.k === 'tip').rest_runs.map(r => r.text).join('');
+  assert.equal(tipText, '*本文为转载文章《T》，不代表FoodTalks立场，转载请联系出处。');
+
+  const own = applyFoodTalksBehavior([p('正文。'), p('提示：'), p('* 本文为FBIF原创，欢迎转发朋友圈；')], DEFAULT_CONFIG, { isRepost: true, title: 'T', sourceName: 'FBIF食品饮料创新' });
+  assert.match(own.find(e => e.k === 'tip').rest_runs.map(r => r.text).join(''), /^\*本文为FBIF食品饮料创新（ID：FoodInnovation）原创《T》/, '自家原创照旧');
+});
+
+// 发布流程交来后台的判定（和 CMS 原创/转载同一个函数，认 AI 抽的出处和「本文转载自X」等写法），
+// 文末声明照它写：#19/#102/#119/#309/#311 正文只有「本文经授权转自《晚点LatePost》」这类写法，原先都写成了 FBIF 原创。
+test('文末声明：照发布流程交来的原创/转载判定写', () => {
+  const tail = [p('提示：'), p('* 本文为转载文章。'), p('* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）')];
+  const tipOf = (elems, provenance) => applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true, title: 'T', provenance })
+    .find(e => e.k === 'tip').rest_runs.map(r => r.text).join('');
+  const head = p('本文经授权转自《晚点LatePost》（ID：postlate）；作者：董慧，编辑：黄俊杰。');
+  assert.match(tipOf([head, p('正文。'), ...tail], { original: false, source: '晚点LatePost' }), /^\*本文为晚点LatePost原创《T》/);
+  assert.match(tipOf([p('正文。'), ...tail], { original: false, source: '' }), /^\*本文为转载文章《T》/);
+  assert.match(tipOf([p('正文。'), p('来源：咖门（ID：kamen）'), ...tail], { original: false, source: '咖门饮品' }), /^\*本文为咖门原创《T》/,
+    '正文写了「来源：X」以正文为准，和开头署名同一来源');
+  assert.match(tipOf([p('正文。'), p('提示：'), p('* 本文为FBIF原创，欢迎转发朋友圈；')], { original: true }), /^\*本文为FBIF食品饮料创新（ID：FoodInnovation）原创《T》/);
+});
+
 test('转载署名：自家稿与数据出处不补来源', () => {
   const own = applyFoodTalksBehavior([p('作者：Pride'), p('编辑：Bobo'), p('正文。')], DEFAULT_CONFIG, { isRepost: true });
   assert.equal(own[0].text, '作者：Pride，编辑：Bobo。', 'FBIF 原创保持作者行');

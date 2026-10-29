@@ -226,6 +226,23 @@ test('ft-default：转载声明《》优先用服务端带来的原文真标题'
   assert.doesNotMatch(retitled.html, /《雀巢收购植物基品牌》/, '不得再用 FBIF 改过的标题');
 });
 
+// 2026-10-30 #294：FBIF 号发的合作稿，公众号文末「* 本文为转载文章。」；网站文末原先写成 FBIF 原创。
+// 发布流程交来原创/转载判定，文末声明照它写。
+test('ft-default：文末声明照发布流程交来的原创/转载判定', async () => {
+  const blocks = [
+    { k: 'txt', runs: [{ type: 'txt', text: '正文。' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '提示：' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '* 本文为转载文章。' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）' }] },
+  ];
+  const base = { title: '第五届母婴营养研讨会', source: '', packId: 'ft-default', isRepost: true, blocks };
+  const unnamed = await renderArticle({ ...base, provenance: { original: false } });
+  assert.match(unnamed.html, /本文为转载文章《第五届母婴营养研讨会》/);
+  assert.doesNotMatch(unnamed.html, /FoodInnovation）原创/);
+  const named = await renderArticle({ ...base, provenance: { original: false, source: '晚点LatePost' } });
+  assert.match(named.html, /本文为晚点LatePost原创《第五届母婴营养研讨会》/);
+});
+
 test('ft-default exact：只使用调用方固定的规则快照并回传可复现证据', async () => {
   const snapshot = {
     account_id: 'ft-default',

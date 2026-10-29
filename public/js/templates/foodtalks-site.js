@@ -1176,6 +1176,7 @@ export default {
       tipTitle: String(data.original_title || '').trim() || title,
       sourceUrl: pickSiteTipSourceUrl(data, elems),
       sourceName: data.source_name,
+      provenance: data.provenance,
     }));
     // URL Blocks 已由服务端完成媒体绑定、正文屏障和字数限制，cap/txt 是最终角色。
     const promoted = decideSiteHeadings(behaved, headingOptsFromConfig(config));

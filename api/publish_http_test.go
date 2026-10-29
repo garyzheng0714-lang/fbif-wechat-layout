@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -980,6 +981,27 @@ func TestRenderSiteHTMLReusesProxyCore(t *testing.T) {
 	}
 	if _, ok := gotBody["originalTitle"]; ok {
 		t.Fatalf("原文链接已换，旧的原文标题必须作废：%v", gotBody["originalTitle"])
+	}
+	// 文末声明和 CMS 原创/转载同一个判定（#294：自家号明写「本文为转载文章」，网站原先写成 FBIF 原创）。
+	for _, tc := range []struct {
+		name string
+		job  publishJob
+		want map[string]any
+	}{
+		{"自家号明写转载、说不出来源", publishJob{SourceName: "FBIF食品饮料创新", BlocksJSON: `[{"k":"txt","text":"提示："},{"k":"txt","text":"* 本文为转载文章。"}]`},
+			map[string]any{"original": false}},
+		{"AI 抽到外部出处", publishJob{SourceName: "FBIF食品饮料创新", AISource: "晚点LatePost", BlocksJSON: `[{"k":"txt","text":"正文"}]`},
+			map[string]any{"original": false, "source": "晚点LatePost"}},
+		{"自家原创", publishJob{SourceName: "FBIF食品饮料创新", BlocksJSON: `[{"k":"txt","text":"正文"}]`},
+			map[string]any{"original": true}},
+	} {
+		gotBody = nil
+		if _, err := renderSiteHTML(publishRenderContext(context.Background(), sitePublishRulePackID, tc.job), "T", "src", tc.job.BlocksJSON, true); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(gotBody["provenance"], tc.want) {
+			t.Fatalf("%s：provenance=%v，期望 %v", tc.name, gotBody["provenance"], tc.want)
+		}
 	}
 	// 缺 RENDER_TOKEN 必须 fail loud，不得无鉴权裸调。
 	t.Setenv("RENDER_TOKEN", "")
