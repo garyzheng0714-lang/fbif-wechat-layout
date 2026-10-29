@@ -1090,6 +1090,22 @@ function clipboard({ text, html = '' }) {
   return { getData: type => (type === 'text/html' ? html : text) };
 }
 
+test('选中复制网页列表：纯文字里没有的圆点、序号从 text/html 的 <li> 补回框里，已带记号的不重复补', () => {
+  const { inputHandlers, urlInput, calls } = mountImportShortcuts();
+  urlInput.selectionStart = 0;
+  urlInput.selectionEnd = 0;
+  inputHandlers.paste({
+    clipboardData: clipboard({
+      text: '示例：\n\nAnthropic 官网\n• Claude 文档\n\n步骤\n打开\n粘贴',
+      html: '<meta charset="utf-8"><p>示例：</p><ul><li><a href="https://www.anthropic.com">Anthropic 官网</a></li>' +
+        '<li><p>Claude&nbsp;文档</p></li></ul><p>步骤</p><ol start="3"><li>打开<ul><li>二级</li></ul></li><li>粘贴</li></ol>',
+    }),
+    preventDefault() {},
+  });
+  assert.equal(urlInput.value, '示例：\n\n• Anthropic 官网\n• Claude 文档\n\n步骤\n3. 打开\n4. 粘贴');
+  assert.deepEqual(calls.imported, [urlInput.value]);
+});
+
 test('输入框粘贴带链接的正文：链接随正文交给排版；追加粘贴接上，清空后不再带旧链接', () => {
   const { inputHandlers, urlInput, calls } = mountImportShortcuts();
   urlInput.selectionStart = 0;

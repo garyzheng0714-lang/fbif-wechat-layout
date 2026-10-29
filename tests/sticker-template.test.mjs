@@ -15,9 +15,11 @@ await loadLayoutEngine({
 const mod = p => import(pathToFileURL(path.join(DEFAULT_PUBLIC_DIR, 'js', p)).href);
 const sticker = (await mod('templates/sticker.js')).default;
 const { buildClipboardArticleBlocks } = await mod('engine.js');
+const { extractClipboardLinks, extractClipboardListItems, withListMarkers } = await mod('clipboard-links.js');
+const { linkSegments } = await mod('import-links.js');
 
-function pasted(text) {
-  return sticker.processBlocks(buildClipboardArticleBlocks(text)).clipboard;
+function pasted(text, links) {
+  return sticker.processBlocks(buildClipboardArticleBlocks(text, { links })).clipboard;
 }
 
 function shape(lines) {
@@ -77,9 +79,51 @@ test('Markdown：# 标题、加粗、链接只留字；空行与分隔线出一�
     '',
   ].join('\n');
   const { clipboard } = await sticker.processMd(markdown);
-  const lines = ['大标题', '', '第一段有加粗和链接。', '第二段。', '', '引用一句', '列表一项', '', '图后一段。'];
+  const lines = ['大标题', '', '第一段有加粗和链接。', '第二段。', '', '引用一句', '• 列表一项', '', '图后一段。'];
   assert.equal(clipboard.html, shape(lines));
   assert.equal(clipboard.text, lines.join('\n'));
+});
+
+// 2026-10-29 用户：AI 答复点复制按钮粘进来是 Markdown 符号，选中复制又丢了圆点，两种都「很奇怪」。
+const AI_REPLY_HTML = '<meta charset="utf-8"><p>好的，这里有几个带超链接的示例：</p><ul>' +
+  '<li><a href="https://www.anthropic.com">Anthropic 官网</a></li>' +
+  '<li><a href="https://docs.claude.com">Claude 文档</a></li>' +
+  '<li><a href="https://zh.wikipedia.org">维基百科</a></li>' +
+  '</ul><p>如果你想要的是某个具体主题的链接，告诉我，我可以帮你搜索。</p>';
+
+test('AI 答复点复制（Markdown）与选中复制（纯文字里没有圆点）排出来一样：列表带「•」，不出 Markdown 符号', () => {
+  const links = extractClipboardLinks(AI_REPLY_HTML);
+  const copyButton = [
+    '好的，这里有几个带超链接的示例：',
+    '',
+    '- [Anthropic 官网](https://www.anthropic.com)',
+    '- [Claude 文档](https://docs.claude.com)',
+    '- [维基百科](https://zh.wikipedia.org)',
+    '',
+    '如果你想要的是某个具体主题的链接，告诉我，我可以帮你搜索。',
+  ].join('\n');
+  const selected = withListMarkers(
+    '好的，这里有几个带超链接的示例：\n\nAnthropic 官网\nClaude 文档\n维基百科\n\n如果你想要的是某个具体主题的链接，告诉我，我可以帮你搜索。',
+    extractClipboardListItems(AI_REPLY_HTML),
+  );
+  const lines = ['好的，这里有几个带超链接的示例：', '', '• Anthropic 官网', '• Claude 文档', '• 维基百科', '', '如果你想要的是某个具体主题的链接，告诉我，我可以帮你搜索。'];
+  for (const text of [copyButton, selected]) {
+    const out = pasted(text, links);
+    assert.equal(out.html, shape(lines));
+    assert.equal(out.text, lines.join('\n'));
+  }
+});
+
+test('贴图下框里画蓝的字，就是贴图排出来带链接的字：普通网址不画蓝', () => {
+  const text = '欢迎免费报名观展！\n看官网了解更多。';
+  const links = [
+    { text: '免费报名观展', href: 'https://mp.weixin.qq.com/s/1DgVTUgu0K-_h1gS0BnKWg' },
+    { text: '官网', href: 'https://www.foodtalks.cn/' },
+  ];
+  const shown = linkSegments(text, links, sticker.keepsLink).filter(segment => segment.href).map(segment => segment.text);
+  const linked = [...pasted(text, links).html.matchAll(/<a [^>]*>([^<]*)<\/a>/g)].map(m => m[1]);
+  assert.deepEqual(shown, ['免费报名观展']);
+  assert.deepEqual(shown, linked);
 });
 
 test('链接抓回的块：小标题、列表、引用、图注、表格行都是字；图片视频丢掉；原文空段照出', () => {

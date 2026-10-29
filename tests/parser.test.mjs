@@ -465,6 +465,21 @@ test('a paragraph outside any list carries no marker', () => {
   assert.equal(para.listMarker, '');
 });
 
+test('buildClipboardArticleBlocks 认 Markdown：链接、加粗成 run，标题与引用记号去掉，无序列表换成「•」，网址不转全角', () => {
+  const article = buildClipboardArticleBlocks(
+    '## 小标题\n> 引用一句\n- 看[官网](https://www.foodtalks.cn/news/1)。\n这是**重点**，(括号)照常转。\n**加粗**后面看报名。',
+    { links: [{ text: '报名', href: 'https://mp.weixin.qq.com/s/one' }] },
+  );
+  const view = run => [run.type, run.text, run.href || '', !!run.bold];
+  assert.deepEqual(article.blocks.map(block => block.runs.map(view)), [
+    [['txt', '小标题', '', false]],
+    [['txt', '引用一句', '', false]],
+    [['txt', '• 看', '', false], ['link', '官网', 'https://www.foodtalks.cn/news/1', false], ['txt', '。', '', false]],
+    [['txt', '这是', '', false], ['txt', '重点', '', true], ['txt', '，（括号）照常转。', '', false]],
+    [['txt', '加粗', '', true], ['txt', '后面看', '', false], ['link', '报名', 'https://mp.weixin.qq.com/s/one', false], ['txt', '。', '', false]],
+  ]);
+});
+
 test('buildClipboardArticleBlocks 按锚文字把粘贴时记下的链接挂回去；找不到的跳过，不挡后面的', () => {
   const article = buildClipboardArticleBlocks('欢迎报名，报名截止前报名。\n\n第二段看官网。', {
     links: [

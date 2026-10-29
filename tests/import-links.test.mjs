@@ -14,15 +14,16 @@ const LINKS = [
   { text: '官网', href: 'https://www.foodtalks.cn/' },
 ];
 
-function page() {
+function page(options) {
   const { document, window } = parseHTML('<!doctype html><html><body><div class="import-composer-input"><textarea id="urlInput"></textarea></div></body></html>');
   window.getComputedStyle = () => ({ paddingRight: '14px', borderLeftWidth: '0px', borderRightWidth: '0px' });
   window.ResizeObserver = class { observe() {} };
   const input = document.getElementById('urlInput');
-  mountImportLinks(input);
+  const overlay = mountImportLinks(input, options);
   const box = input.parentElement;
   return {
     input,
+    refresh: () => overlay.refresh(),
     hasLinks: () => box.classList.contains('has-links'),
     shownLinks: () => [...box.querySelectorAll('.import-textarea-link')].map(span => span.textContent),
     shownText: () => box.querySelector('.import-textarea-links').textContent.replace(/​$/, ''),
@@ -74,6 +75,19 @@ test('改了锚文字的那条不再是链接；一个链接都不剩就不垫',
   view.input.value = '整框被别处换掉了';
   assert.equal(view.hasLinks(), false);
   assert.equal(view.shownText(), '');
+});
+
+test('排法只留一部分链接（贴图只留公众号文章链接）：框里只画留下的；换了排法刷新后跟着变', async () => {
+  let keepAll = false;
+  const view = page({ keepsLink: href => keepAll || href.startsWith('https://mp.weixin.qq.com/') });
+  view.input.value = TEXT;
+  writeImportLinks(view.input, LINKS);
+  await tick();
+  assert.deepEqual(view.shownLinks(), ['免费报名观展']);
+  assert.equal(view.shownText(), TEXT);
+  keepAll = true;
+  view.refresh();
+  assert.deepEqual(view.shownLinks(), ['免费报名观展', '官网']);
 });
 
 test('没有链接时框照常显示，不垫', () => {
