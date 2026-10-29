@@ -2307,6 +2307,17 @@ func publishDeclaredSource(blocksJSON string) string {
 	return ""
 }
 
+// siteRepostDisclosure 这一行就是「本文为转载文章」声明（去掉星号和空白后整行比）。
+func siteRepostDisclosure(text string) bool {
+	text = strings.Map(func(r rune) rune {
+		if r == '*' || r == '＊' || r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, text)
+	return explicitSiteRepostDisclosure.MatchString(text)
+}
+
 // publishSiteIsRepost 只回答 CMS 来源类型：正文明确转载声明优先；否则自家公众号
 // 按原创，其余公众号按转载。它不决定是否切除微信导流尾——进网站一律切尾。
 func publishSiteIsRepost(sourceName, blocksJSON string) bool {
@@ -2323,13 +2334,7 @@ func publishSiteIsRepost(sourceName, blocksJSON string) bool {
 				}
 				text = b.String()
 			}
-			text = strings.Map(func(r rune) rune {
-				if r == '*' || r == '＊' || r == ' ' || r == '\t' || r == '\r' || r == '\n' {
-					return -1
-				}
-				return r
-			}, text)
-			if explicitSiteRepostDisclosure.MatchString(text) {
+			if siteRepostDisclosure(text) {
 				return true
 			}
 		}

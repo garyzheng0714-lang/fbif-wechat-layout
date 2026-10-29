@@ -215,7 +215,7 @@ function stripWechatTrailer(elems, markers, signatures, externalMarkers, refHead
   };
   // 「提示：」可能被抓成标题或图注；以文案和后续尾注确认是公众号页脚。
   const isWechatTip = (i, text) => /^\s*提示[：:]/.test(text) &&
-    tipSignatures.some(re => re.test(collectFollowingText(elems, i)));
+    (tipSignatures.some(re => re.test(collectFollowingText(elems, i))) || repostTipFollows(elems, i));
   // 切点之后仍有公众号「提示：」页脚（#128：来源号关注引导在 FBIF 页脚之前）→ 照样补网站声明。
   const tipCutAfter = from => {
     for (let j = from; j < elems.length; j++) if (isWechatTip(j, textAt(j))) return true;
@@ -322,9 +322,20 @@ export function extractRepostSource(elems, behavior = {}) {
 // 与 api/publish_pipeline.go 的 explicitSiteRepostDisclosure 同值。
 const REPOST_DISCLOSURE_RE = /^本文为转载文章(?:[，,：:].*)?[。.!！]?$/;
 
+function isRepostDisclosure(e) {
+  return !!e && (e.k === 'p' || e.k === 'h' || e.k === 'cap') &&
+    REPOST_DISCLOSURE_RE.test(elemText(e).replace(/[*＊\s]/g, ''));
+}
+
 function hasRepostDisclosure(elems) {
-  return elems.some(e => e && (e.k === 'p' || e.k === 'h') &&
-    REPOST_DISCLOSURE_RE.test(runsToText(e.runs).replace(/[*＊\s]/g, '')));
+  return elems.some(isRepostDisclosure);
+}
+
+// 「提示：」后几行里有一整行「本文为转载文章…」：FBIF 转载稿的公众号页脚。只认联系 Bobo 那行认不全，
+// #294 重新同步时重抓回来这行没了，「提示：」原样留在了网站上（2026-10-30）。
+function repostTipFollows(elems, i) {
+  for (let j = i + 1; j < elems.length && j < i + 5; j++) if (isRepostDisclosure(elems[j])) return true;
+  return false;
 }
 
 // 文末声明说谁的。发布流程交来后台的判定（opts.provenance，和 CMS 原创/转载同一个函数，

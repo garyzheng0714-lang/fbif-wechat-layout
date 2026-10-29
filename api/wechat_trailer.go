@@ -102,6 +102,17 @@ func wechatTrailerCollectFollowing(blocks []Block, i int) string {
 	return b.String()
 }
 
+// wechatTrailerRepostTipFollows「提示：」后几行里有一整行「本文为转载文章…」：FBIF 转载稿的公众号页脚。
+// 只认联系 Bobo 那行认不全，#294 重新同步时重抓回来这行没了（2026-10-30）。
+func wechatTrailerRepostTipFollows(blocks []Block, i int) bool {
+	for j := i + 1; j < len(blocks) && j < i+5; j++ {
+		if wechatTrailerIsTextKind(blocks[j].K) && siteRepostDisclosure(wechatTrailerBlockText(blocks[j])) {
+			return true
+		}
+	}
+	return false
+}
+
 func wechatTrailerHasRefAfter(blocks []Block, i int) bool {
 	for j := i + 1; j < len(blocks); j++ {
 		k := strings.ToLower(strings.TrimSpace(blocks[j].K))
@@ -158,7 +169,7 @@ func stripWechatTrailerBlocks(blocks []Block) []Block {
 		}
 		text := wechatTrailerBlockText(block)
 		if wechatTrailerTipLineRe.MatchString(text) &&
-			anyWechatTrailerRegexp(wechatTrailerCollectFollowing(blocks, i), wechatTrailerTipSigs) {
+			(anyWechatTrailerRegexp(wechatTrailerCollectFollowing(blocks, i), wechatTrailerTipSigs) || wechatTrailerRepostTipFollows(blocks, i)) {
 			if wechatTrailerHasRefAfter(blocks, i) {
 				continue
 			}

@@ -32,6 +32,22 @@ func TestStripWechatTrailerBlocksCutsFBIFTipFooter(t *testing.T) {
 	}
 }
 
+// #294 重新同步（2026-10-30）：重抓回来的尾巴少了联系 Bobo 那行，只剩「本文为转载文章」也要认出是公众号页脚。
+func TestStripWechatTrailerBlocksCutsRepostTipWithoutContactLine(t *testing.T) {
+	blocks := []Block{
+		{K: "txt", Text: "正文。"},
+		{K: "txt", Text: "参考来源："},
+		{K: "txt", Text: "[1] 某规划纲要"},
+		{K: "txt", Text: "提示："},
+		{K: "txt", Text: "* 本文为转载文章。"},
+		{K: "txt", Text: "/ 更多文章 /"},
+		{K: "img", Src: "https://mmbiz.qpic.cn/a.png"},
+	}
+	if got := stripWechatTrailerBlocks(blocks); len(got) != 3 {
+		t.Fatalf("应切在「提示：」之前，实际 %d 块", len(got))
+	}
+}
+
 func TestStripWechatTrailerBlocksSkipsMarkerBeforeReferences(t *testing.T) {
 	blocks := []Block{
 		{K: "p", Text: "正文联系方式。"},

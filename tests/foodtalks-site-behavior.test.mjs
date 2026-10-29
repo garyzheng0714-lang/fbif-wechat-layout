@@ -453,6 +453,16 @@ test('文末声明：自家号明写「本文为转载文章」、说不出来�
   assert.match(own.find(e => e.k === 'tip').rest_runs.map(r => r.text).join(''), /^\*本文为FBIF食品饮料创新（ID：FoodInnovation）原创《T》/, '自家原创照旧');
 });
 
+// 同日 #294 重新同步：重抓回来的尾巴少了联系 Bobo 那行，「提示：」认不出是公众号页脚，原样留在网站上。
+test('切尾：「提示：」后紧跟「本文为转载文章」也认作公众号页脚', () => {
+  const elems = [p('正文。'), p('参考来源：'), p('[1] 某规划纲要'), p('提示：'), p('* 本文为转载文章。'), p('/ 更多文章 /'), img('https://mmbiz.qpic.cn/a.png')];
+  const out = applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true, title: 'T', provenance: { original: false } });
+  const texts = out.map(textOf);
+  assert.ok(!texts.includes('提示：') && !texts.includes('* 本文为转载文章。'), '公众号「提示：」页脚切掉');
+  assert.equal(out.filter(e => e.k === 'tip').length, 1);
+  assert.equal(out.find(e => e.k === 'tip').rest_runs.map(r => r.text).join(''), '*本文为转载文章《T》，不代表FoodTalks立场，转载请联系出处。');
+});
+
 // 发布流程交来后台的判定（和 CMS 原创/转载同一个函数，认 AI 抽的出处和「本文转载自X」等写法），
 // 文末声明照它写：#19/#102/#119/#309/#311 正文只有「本文经授权转自《晚点LatePost》」这类写法，原先都写成了 FBIF 原创。
 test('文末声明：照发布流程交来的原创/转载判定写', () => {
