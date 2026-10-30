@@ -30,7 +30,7 @@ import (
 )
 
 // 一篇最多提醒几处：确定的错误本来就少，超过说明复核在凑数。
-const publishProofreadMaxFindings = 5
+const publishProofreadMaxFindings = 10
 
 // publishProofreadFinding 一处确定的错误：正文里的 Wrong 应改为 Correct；Evidence 是所在原句。
 type publishProofreadFinding struct {

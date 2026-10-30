@@ -222,3 +222,45 @@ func TestPublishRiskPromptCoversTaxonomyAndGuardrails(t *testing.T) {
 		}
 	}
 }
+
+// 已证实问题最多 10 条（2026-10-30 用户裁定）：首屏仍只放前 3 条，其余必须列在完整检查报告里。
+// 原先首屏写「另有 N 条，见下方完整检查报告」，报告里却只列待核提示，第 4 条起卡上哪里都看不到。
+func TestConfirmedRiskBeyondFirstScreenListedInReport(t *testing.T) {
+	var items []publishRiskItem
+	for i := 1; i <= 5; i++ {
+		items = append(items, publishRiskItem{
+			Category: publishRiskCategoryNaming, Level: publishRiskWarning,
+			Certainty: publishRiskCertaintyConfirmed,
+			Evidence:  fmt.Sprintf("第%d处原句", i), Reason: fmt.Sprintf("第%d处写错了", i),
+		})
+	}
+	items = append(items, publishRiskItem{
+		Category: publishRiskCategoryDataSource, Level: publishRiskWarning,
+		Certainty: publishRiskCertaintyUnverified, Evidence: "市场规模达 3000 亿元", Reason: "请核对口径",
+	})
+	job := riskLayersJob(publishRiskWarning, items...)
+	job.RiskHeadline = "正文有 5 处名称写错。"
+
+	head := cardText(reviewCardRiskHeadlineBlock(job))
+	if !strings.Contains(head, "第3处原句") || strings.Contains(head, "第4处原句") {
+		t.Fatalf("首屏只放前 3 条：%s", head)
+	}
+	if !strings.Contains(head, "另有 2 条已证实问题") {
+		t.Fatalf("首屏要说还有几条：%s", head)
+	}
+	report := cardText(reviewCardRiskDetailBlock(job))
+	for _, want := range []string{"第4处原句", "第5处原句", "其余已证实问题", "请核对口径"} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("完整检查报告缺 %q：%s", want, report)
+		}
+	}
+	if strings.Contains(report, "第1处原句") {
+		t.Fatalf("首屏已列的不在报告里重复：%s", report)
+	}
+	if title := reviewCardDetailsPanelTitle(job); title != "点此查看完整检查报告（另有 2 条已证实问题、1 条待核提示）" {
+		t.Fatalf("折叠条标题：%s", title)
+	}
+	if !strings.Contains(publishRiskSystemPrompt(), "`certainty=confirmed` 最多 10 条") {
+		t.Fatal("风险 prompt 应允许最多 10 条已证实问题")
+	}
+}

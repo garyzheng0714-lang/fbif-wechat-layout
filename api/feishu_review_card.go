@@ -1162,10 +1162,7 @@ func reviewCardRiskHeadlineBlock(job publishJob) map[string]any {
 //     此时条目改用无序列表，让「概括 + 几条明细」的从属关系一眼可见。
 //   - **不重复折叠条已经说的话**：「另有 N 条待核提示」由折叠条标题承担，这里不再说。
 func reviewCardConfirmedRiskBlock(confirmed []publishRiskItem, headline string) map[string]any {
-	limit := len(confirmed)
-	if limit > 3 {
-		limit = 3
-	}
+	limit := min(len(confirmed), reviewCardConfirmedFirstScreen)
 	// 首行把「需要确认」和一句话总括合成一句（用户 2026-08-08 手写的格式）：
 	// 单条时下面那条本身就是结论，重复一遍等于复读，只留标签词。
 	lead := "**需要确认**"
@@ -1201,6 +1198,9 @@ func reviewCardConfirmedRiskBlock(confirmed []publishRiskItem, headline string) 
 		}},
 	}
 }
+
+// reviewCardConfirmedFirstScreen 首屏逐条指认的已证实问题条数（红线 35）；其余列在完整检查报告里。
+const reviewCardConfirmedFirstScreen = 3
 
 // reviewCardRiskItemList 风险条目 → 飞书官方无序列表（首屏红块与折叠报告共用一份，
 // 语法只维护一处）。
@@ -1260,9 +1260,16 @@ func reviewCardDetailsPanel(job publishJob) map[string]any {
 
 // reviewCardDetailsPanelTitle 折叠条自己说清里面有多少东西，否则审核人无从判断值不值得展开。
 func reviewCardDetailsPanelTitle(job publishJob) string {
-	_, deferred := splitPublishRiskItems(job.RiskItems)
+	confirmed, deferred := splitPublishRiskItems(job.RiskItems)
+	var parts []string
+	if rest := len(confirmed) - reviewCardConfirmedFirstScreen; rest > 0 {
+		parts = append(parts, fmt.Sprintf("另有 %d 条已证实问题", rest))
+	}
 	if len(deferred) > 0 {
-		return fmt.Sprintf("点此查看完整检查报告（%d 条待核提示）", len(deferred))
+		parts = append(parts, fmt.Sprintf("%d 条待核提示", len(deferred)))
+	}
+	if len(parts) > 0 {
+		return "点此查看完整检查报告（" + strings.Join(parts, "、") + "）"
 	}
 	return "点此查看完整检查报告"
 }
@@ -1390,10 +1397,10 @@ func reviewCardAINoteLabel(item string) (string, string) {
 	return "", item
 }
 
-// reviewCardRiskDetailBlock 折叠区里的完整检查报告。已证实的实质性问题已在首屏
-// 逐条指认过，这里只承载「证明不了、但请你留意」的那一层：存疑项、转载授权说明、
-// 检查异常。模型输出按纯文本收敛后再拼 markdown，避免正文片段注入标签/链接；
-// 卡片最多展示 6 条，完整结果仍在任务详情。
+// reviewCardRiskDetailBlock 折叠区里的完整检查报告。已证实的实质性问题前 3 条已在首屏
+// 逐条指认过，其余的列在这里（2026-10-30：已证实问题最多 10 条，原先第 4 条起卡上看不到），
+// 再接「证明不了、但请你留意」的那一层：存疑项、转载授权说明、检查异常。模型输出按纯文本
+// 收敛后再拼 markdown，避免正文片段注入标签/链接；待核提示最多展示 6 条，完整结果仍在任务详情。
 func reviewCardRiskDetailBlock(job publishJob) map[string]any {
 	if strings.TrimSpace(job.RiskLevel) == "" {
 		return nil
@@ -1406,8 +1413,16 @@ func reviewCardRiskDetailBlock(job publishJob) map[string]any {
 	if job.RiskLevel == publishRiskBlock {
 		content.WriteString(" · 禁止一键发布")
 	}
-	if len(confirmed) > 0 {
+	rest := confirmed[min(len(confirmed), reviewCardConfirmedFirstScreen):]
+	switch {
+	case len(rest) > 0:
+		content.WriteString(fmt.Sprintf(" · <font color='grey'>前 %d 条已证实问题见上方</font>", reviewCardConfirmedFirstScreen))
+	case len(confirmed) > 0:
 		content.WriteString(fmt.Sprintf(" · <font color='grey'>%d 条已证实问题见上方</font>", len(confirmed)))
+	}
+	if len(rest) > 0 {
+		content.WriteString("\n\n<font color='grey'>其余已证实问题：</font>\n\n")
+		content.WriteString(reviewCardRiskItemList(rest, 120, 100))
 	}
 	if len(deferred) == 0 {
 		content.WriteString("\n\n<font color='grey'>没有其他待核提示。</font>")
