@@ -173,7 +173,7 @@ func reviewCardPlatformRow(job publishJob, target externalAccount, configured, c
 	editLink := externalDistributionSidebarLink(job.ID)
 
 	var right map[string]any
-	if actionable && state.Editable && !state.NeedsFix {
+	if actionable && state.Syncable && !state.NeedsFix {
 		right = reviewCardPlatformSyncButton(job, target.ID, name, state, profile)
 	}
 	buttoned := right != nil
@@ -225,7 +225,7 @@ func reviewCardPlatformRow(job publishJob, target externalAccount, configured, c
 }
 
 // reviewCardPlatformArticleLink 名字后面的文章链接：平台改过标题就写平台上的标题，否则「查看文章」。
-// 只存了草稿的给草稿编辑页；已发布但还没拿到文章链接（不自动找链接的平台）就给平台后台，在那里看发布情况。
+// 停在草稿的给草稿编辑页；没有文章链接、要人去平台后台看的给平台后台。
 func reviewCardPlatformArticleLink(job publishJob, state externalPlatformState, name string) string {
 	if state.URL == "" {
 		if state.DraftURL != "" {
@@ -270,14 +270,14 @@ func reviewCardPlatformReason(state externalPlatformState, fixing, buttoned bool
 	return "<font color='grey'>" + reason + "</font>"
 }
 
-// reviewCardPlatformSyncButton 没推过、或失败可以重存的平台：按钮只推这一个平台。
-// 目前只存草稿（2026-10-22 用户裁定），按钮与确认框都照实说。
+// reviewCardPlatformSyncButton 没推过、或失败可以重推的平台：按钮只推这一个平台。点了就存草稿并公开发布
+// （2026-10-30 用户：原创文章发出来就自动同步），确认框照实说。
 func reviewCardPlatformSyncButton(job publishJob, accountID, name string, state externalPlatformState, profile distributionPlatform) map[string]any {
 	text := profile.syncAction(name)
-	confirm := "将由分发工具在" + name + "存一篇草稿，不会发布；请到" + name + "草稿箱确认版式。请确认本文为原创文章。"
+	confirm := "将由分发工具把本文公开发布到" + name + "。请确认本文为原创文章。"
 	if state.Status == "失败" {
 		text = "重新" + text
-		confirm = "上次没有送到" + name + "，这次由分发工具重新提交到" + name + "草稿箱，不会重复存稿，也不会发布。请同时确认本文为原创文章。"
+		confirm = "上次没有发到" + name + "，这次由分发工具重新同步、公开发布到" + name + "，不会重复存稿。请同时确认本文为原创文章。"
 	}
 	return map[string]any{
 		"tag": "button", "text": feishuPlainText(text), "type": "default",

@@ -166,6 +166,107 @@ func TestDistributionRobotClientMapsResponses(t *testing.T) {
 	}
 }
 
+// TestDistributionRobotClientPublish 发布（2026-10-30 起草稿存好就调）：POST …/drafts/{key}/publish，请求体只有 actor；
+// 200、202（还在点）都解成记录；发布可能回的每个错误码照接口契约映射，错误里带的记录（分发服务记下的那次发布）留在错误上。
+func TestDistributionRobotClientPublish(t *testing.T) {
+	type reply struct {
+		status int
+		body   string
+	}
+	var current reply
+	var seen []*http.Request
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		seen = append(seen, r)
+		bodies = append(bodies, string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(current.status)
+		_, _ = io.WriteString(w, current.body)
+	}))
+	defer server.Close()
+	client := newDistributionRobotClient(distributionRobotConfig{BaseURL: server.URL, Token: testRobotToken})
+	const key = "job-282.recTestBaijia001.abc"
+	const articleURL = "https://baijiahao.baidu.com/s?id=1879718514554909812"
+
+	current = reply{http.StatusOK, `{"status":"saved","article_id":"1879718514554909812","draft_url":"https://baijiahao.baidu.com/builder/rc/edit?type=news&article_id=1879718514554909812",` +
+		`"state":{"value":"published","raw":"已发布","reason":"","url":"` + articleURL + `"},"article_url":"` + articleURL + `",` +
+		`"revision":{"hash":"sha256:abc","title":"标题","chars":1200,"images":3},` +
+		`"action":{"id":"act-1","kind":"publish","status":"done","outcome":"by_us","actor":"ou_reviewer_1","evidence":"文章列表里已发布","error":""}}`}
+	record, err := client.Publish(context.Background(), "baijiahao", key, "ou_reviewer_1")
+	if err != nil || record.State == nil || record.State.Value != robotStatePublished || record.ArticleURL != articleURL ||
+		record.Action == nil || record.Action.ID != "act-1" || record.Action.Status != robotActionDone || record.Action.Kind != robotActionPublish ||
+		record.Revision == nil || record.Revision.Hash != "sha256:abc" {
+		t.Fatalf("发布成功应解出平台现状、文章链接与这次发布：%+v %v", record, err)
+	}
+	last := seen[len(seen)-1]
+	if last.Method != http.MethodPost || last.URL.Path != "/v1/platforms/baijiahao/drafts/"+key+"/publish" ||
+		last.Header.Get("Authorization") != "Bearer "+testRobotToken || bodies[len(bodies)-1] != `{"actor":"ou_reviewer_1"}` {
+		t.Fatalf("发布请求不对：%s %s auth=%q body=%s", last.Method, last.URL.Path, last.Header.Get("Authorization"), bodies[len(bodies)-1])
+	}
+
+	current = reply{http.StatusAccepted, `{"status":"saved","article_id":"1879718514554909812","action":{"id":"act-2","kind":"publish","status":"doing"}}`}
+	if record, err := client.Publish(context.Background(), "baijiahao", key, "system:auto_distribute"); err != nil || record.Action == nil || record.Action.Status != robotActionDoing {
+		t.Fatalf("202 是还在点，照样解成记录：%+v %v", record, err)
+	}
+
+	var rejected *robotRejectedError
+	var reconcile *robotReconcileError
+	var uncertain *robotUncertainError
+	contract := loadDistributionAPIContract(t)
+	codes := contract.routeErrors(http.MethodPost, "/v1/platforms/{platform}/drafts/{key}/publish")
+	if len(codes) < 10 {
+		t.Fatalf("接口契约里发布的错误码太少，testdata/%s 不对：%v", distributionAPIFile, codes)
+	}
+	kept := `"record":{"status":"saved","article_id":"1","action":{"id":"act-9","kind":"publish","status":"unknown"}}`
+	for _, code := range codes {
+		spec := contract.Errors[code]
+		current = reply{spec.Status, `{"error":{"code":"` + code + `","message":"说明","outcome":"` + spec.Outcome + `"},` + kept + `}`}
+		_, err := client.Publish(context.Background(), "baijiahao", key, "ou_reviewer_1")
+		var record *robotDraftRecord
+		switch spec.Outcome {
+		case robotOutcomeRejected:
+			if errors.As(err, &rejected) && rejected.Status == spec.Status && rejected.Code == code {
+				record = rejected.Record
+			}
+		case robotOutcomeHuman:
+			if errors.As(err, &reconcile) && reconcile.Code == code && reconcile.Message == "说明" {
+				record = reconcile.Record
+			}
+		case robotOutcomeUncertain:
+			if errors.As(err, &uncertain) {
+				record = uncertain.Record
+			}
+		default:
+			t.Fatalf("契约里 %s 的 outcome %q 不认得：分发服务加了新的 outcome，这里要先接上", code, spec.Outcome)
+		}
+		if record == nil || record.Action == nil || record.Action.ID != "act-9" || record.Action.Status != robotActionUnknown {
+			t.Errorf("%d %s（%s）映射不对或丢了记录：%T %v", spec.Status, code, spec.Outcome, err, err)
+		}
+	}
+	current = reply{409, `{"error":{"code":"busy","message":"这篇正在做别的","outcome":"rejected"}}`}
+	if _, err := client.Publish(context.Background(), "baijiahao", key, "ou_reviewer_1"); !errors.As(err, &rejected) || rejected.Record != nil {
+		t.Fatalf("没带记录的错误，Record 为空：%T %v", err, err)
+	}
+	for _, tc := range []struct {
+		name  string
+		reply reply
+	}{
+		{"500 不是 JSON", reply{500, "oops"}},
+		{"200 但不是 JSON", reply{200, "<html>"}},
+		{"没带 outcome（不是分发服务回的）", reply{409, `{"error":{"code":"busy","message":"x"}}`}},
+	} {
+		current = tc.reply
+		if _, err := client.Publish(context.Background(), "baijiahao", key, "ou_reviewer_1"); !errors.As(err, &uncertain) {
+			t.Errorf("%s：应按说不准、用同一个键查：%T %v", tc.name, err, err)
+		}
+	}
+	server.Close()
+	if _, err := client.Publish(context.Background(), "baijiahao", key, "ou_reviewer_1"); !errors.As(err, &uncertain) || strings.Contains(err.Error(), testRobotToken) {
+		t.Fatalf("连不上应是 uncertain：%v", err)
+	}
+}
+
 // TestDistributionRobotClientDoesNotFollowRedirects 跳转不跟，免得把 token 带去别处。
 func TestDistributionRobotClientDoesNotFollowRedirects(t *testing.T) {
 	leaked := false

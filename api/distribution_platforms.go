@@ -208,10 +208,8 @@ func (p distributionPlatform) titleOver(title string) (length, max int, over boo
 	return length, max, p.Known && length > max
 }
 
-// syncVerb 卡片、侧边栏与提醒里「送去这个平台」怎么说：自己的分发服务目前只存草稿。
-func (p distributionPlatform) syncVerb() string { return "存草稿" }
-
-func (p distributionPlatform) syncAction(name string) string { return p.syncVerb() + "至" + name }
+// syncAction 卡片、侧边栏与提醒里「送去这个平台」怎么说：存草稿再公开发布，统称同步（2026-10-30 起）。
+func (p distributionPlatform) syncAction(name string) string { return "同步至" + name }
 
 func (p distributionPlatform) dailyLimit() int { return p.DailyLimit }
 

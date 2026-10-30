@@ -511,3 +511,53 @@ func TestPublishMonitorAlertNeverFallsBackToReviewGroup(t *testing.T) {
 		t.Fatalf("私聊未配置时必须失败且不得回退审核群：status=%d group_messages=%d body=%s", rec.Code, groupMessages, rec.Body.String())
 	}
 }
+
+// TestPublishMonitoringExternalPublishingAndReviewing 2026-10-30 起第三方平台存完草稿就发布：发布中算处理中，
+// 过 30 分钟告警；平台审核中要等平台，不算处理中，24 小时内不报，过了只提醒；平台没通过和失败一样算失败。
+func TestPublishMonitoringExternalPublishingAndReviewing(t *testing.T) {
+	t.Setenv(deploymentWritesPausedEnv, "0")
+	enteredAt := time.Date(2026, 10, 30, 2, 0, 0, 0, time.UTC)
+	status := func(t *testing.T, state string, after time.Duration) publishMonitoringStatus {
+		t.Helper()
+		store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))
+		job, _, err := store.create("site:https://mp.weixin.qq.com/s/external-"+state, "https://mp.weixin.qq.com/s/external-"+state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.update(job.ID, func(current *publishJob) {
+			current.Stage = publishStagePublished
+			current.ExternalDistributionLanes = []publishExternalLane{{
+				AccountID: "acct-1", Name: "百家号", Driver: externalDriverRobot, State: state, ContentPK: "pk",
+				IntentAt: enteredAt.Add(-5 * time.Minute).Format(time.RFC3339), CompletedAt: enteredAt.Format(time.RFC3339),
+			}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return currentPublishMonitoring(store, false, enteredAt.Add(after))
+	}
+	has := func(issues []string, prefix string) bool {
+		return publishMonitoringHasIssue(publishMonitoringStatus{Issues: issues}, prefix)
+	}
+
+	reviewing := status(t, publishExternalDistributionReviewing, 23*time.Hour)
+	if reviewing.Processing != 0 || reviewing.OldestProcessingAgeSeconds != 0 || reviewing.OldestExternalReviewingAgeSeconds != 23*3600 ||
+		has(reviewing.Warnings, "external_reviewing_slow:") || len(reviewing.AlertIssues) != 0 || reviewing.Failed != 0 {
+		t.Fatalf("审核中 24 小时内不算处理中、不报：%+v", reviewing)
+	}
+	slow := status(t, publishExternalDistributionReviewing, 25*time.Hour)
+	if !has(slow.Warnings, "external_reviewing_slow:") || len(slow.AlertIssues) != 0 {
+		t.Fatalf("审核中过 24 小时只提醒、不告警：%+v", slow)
+	}
+	publishing := status(t, publishExternalDistributionPublishing, 20*time.Minute)
+	if publishing.Processing != 1 || publishing.OldestExternalPublishingAgeSeconds != 20*60 || has(publishing.AlertIssues, "external_publishing_stale:") {
+		t.Fatalf("发布中算处理中，30 分钟内不告警：%+v", publishing)
+	}
+	stale := status(t, publishExternalDistributionPublishing, 31*time.Minute)
+	if !has(stale.AlertIssues, "external_publishing_stale:") {
+		t.Fatalf("发布中过 30 分钟告警：%+v", stale)
+	}
+	rejected := status(t, publishExternalDistributionRejected, time.Hour)
+	if rejected.Failed != 1 || rejected.FailedRecent != 1 || rejected.Processing != 0 {
+		t.Fatalf("平台没通过和失败一样算：%+v", rejected)
+	}
+}

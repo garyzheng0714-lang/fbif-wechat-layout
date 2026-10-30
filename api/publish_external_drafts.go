@@ -347,7 +347,7 @@ type externalDraftEdit struct {
 	Candidates []publishExternalCoverCandidate
 }
 
-var errExternalDraftNothingToEdit = errors.New("这个平台已经提交给分发工具，内容不能再改")
+var errExternalDraftNothingToEdit = errors.New("这个平台已经交给分发工具，内容不能再改")
 
 // externalDraftLockedError 带上平台名的「不能再改」，errors.Is 仍认作 errExternalDraftNothingToEdit。
 type externalDraftLockedError struct{ message string }
@@ -357,16 +357,16 @@ func (e *externalDraftLockedError) Is(target error) bool {
 	return target == errExternalDraftNothingToEdit
 }
 
-// externalDraftLocked 这个平台已经提交过、内容不能再改时报的错。
+// externalDraftLocked 这个平台已经交出去、内容不能再改时报的错。
 func externalDraftLocked(profile distributionPlatform) error {
-	return &externalDraftLockedError{"这个平台已经提交给分发工具，内容不能再改；草稿存好后请到" + profile.Name + "草稿箱里改"}
+	return &externalDraftLockedError{"这个平台已经交给分发工具，内容不能再改；要改请到" + profile.Name + "后台改"}
 }
 
 // applyExternalDraftEdit 校验并写入修改，当场重算标题、摘要与封面问题（不读网络：封面只认
 // 候选里记过尺寸的图）。返回修改后的 draft。
 func applyExternalDraftEdit(job publishJob, target externalAccount, edit externalDraftEdit, actor string, now time.Time) (publishExternalDraft, error) {
 	profile := platformForAccount(target)
-	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneCanSafeRetry(lane) {
+	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneEditable(lane) {
 		return publishExternalDraft{}, externalDraftLocked(profile)
 	}
 	draft, _ := externalDraftFor(job, target.ID)

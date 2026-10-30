@@ -100,7 +100,7 @@ func TestExternalPreflightHoldsLongTitleUntilFixedInCard(t *testing.T) {
 	fixed := "老茶铺把茶做成零食，年营收过亿"
 	out = env.pipeline.reviewCardActionWithForm(context.Background(), "ou_reviewer_1", "", fixActionValue(t, got, testToutiaoAccountID),
 		map[string]any{reviewCardFixFieldName("t", got.ID, testToutiaoAccountID): fixed})
-	if out.toastType != "success" || out.toastContent != "已保存，正在存草稿至头条号" {
+	if out.toastType != "success" || out.toastContent != "已保存，正在同步至头条号" {
 		t.Fatalf("改好后应受理：%+v", out)
 	}
 	if fmt.Sprint(robot.platforms) != "[baijiahao toutiao]" {
@@ -300,7 +300,7 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	over := toutiaoTitleLength(testLongToutiaoTitle) - 30
 	for _, want := range []string{`{"tag":"at","user_id":"ou_owner_1"}`, fmt.Sprintf("#%d《%s》同步到头条号前，还差 1 处要改：", job.ID, testLongToutiaoTitle),
 		fmt.Sprintf(`"style":["bold"],"tag":"text","text":"1. 标题超了 %d 字（头条号最多 30 字，英文字母、数字两个算一个字）"`, over),
-		"卡片里已填好建议「", "可以直接用，也可以改成自己的", "改好后点上面卡片里的「保存并存草稿至头条号」，就会同步。"} {
+		"卡片里已填好建议「", "可以直接用，也可以改成自己的", "改好后点上面卡片里的「保存并同步至头条号」，就会同步。"} {
 		if !strings.Contains(sent[0].post, want) {
 			t.Fatalf("开场缺少 %q: %s", want, sent[0].post)
 		}
@@ -321,7 +321,7 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := sent[len(sent)-1]
-	if len(sent) != 2 || last.kind != externalReminderKindClose || !strings.Contains(last.post, "都改好了，正在存草稿至头条号。") || strings.Contains(last.post, `"tag":"at"`) {
+	if len(sent) != 2 || last.kind != externalReminderKindClose || !strings.Contains(last.post, "都改好了，正在同步至头条号。") || strings.Contains(last.post, `"tag":"at"`) {
 		t.Fatalf("改好后应收尾一句且不 @：%+v", sent)
 	}
 	if r := mustJob(t, env, job.ID).ExternalDistributionReminder; r.State != "" || r.Want != publishExternalReminderResolved || r.ClosedIDs["oc_review"] != "om_reminder_2" {
@@ -373,7 +373,7 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, true))
 	for _, want := range []string{"同步到头条号、百家号前，还差 2 处要改：", "1. 头条号封面太小（头条号至少 452×352，现在 300×200）",
 		"在卡片里点选一张正文大图，或者", `"tag":"a","text":"上传一张"`, "（传上去就换上）", "2. 百家号标题超了 5 字（百家号最多 40 字）",
-		"在卡片输入框里改到 40 字以内", "「保存并存草稿至头条号」「保存并存草稿至百家号」"} {
+		"在卡片输入框里改到 40 字以内", "「保存并同步至头条号」「保存并同步至百家号」"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("开场缺少 %q: %s", want, plain)
 		}
@@ -433,7 +433,7 @@ func TestExternalReminderExpiredCardPointsToSidebar(t *testing.T) {
 	}
 	link := externalDistributionSidebarLink(job.ID)
 	for _, want := range []string{`{"tag":"at","user_id":"ou_owner_1"}`, "改稿页里已填好建议「", `[{"tag":"text","text":"请"},`,
-		`"href":"` + link + `","tag":"a","text":"打开改稿页"`, "，改好后点「保存并存草稿至头条号」，就会同步。"} {
+		`"href":"` + link + `","tag":"a","text":"打开改稿页"`, "，改好后点「保存并同步至头条号」，就会同步。"} {
 		if !strings.Contains(sent[0].post, want) {
 			t.Fatalf("过期卡提醒缺少 %q: %s", want, sent[0].post)
 		}
@@ -569,11 +569,11 @@ func TestExternalDistributionSidebarEditAPI(t *testing.T) {
 		toutiao.CoverMinWidth != 452 || toutiao.Title != testLongToutiaoTitle {
 		t.Fatalf("头条号应待修改并给出上限：%+v", toutiao)
 	}
-	if baijia.Status != "草稿已存（未发布）" || baijia.Editable || baijia.DraftURL != testRobotDraftURL(testRobotArticleID) || baijia.Action != "存草稿至百家号" {
-		t.Fatalf("百家号已存草稿，不能再改：%+v", baijia)
+	if baijia.Status != "已发布" || baijia.Editable || baijia.URL != testRobotArticleURL("baijiahao", testRobotArticleID) || baijia.Action != "同步至百家号" {
+		t.Fatalf("百家号已发布，不能再改：%+v", baijia)
 	}
-	if toutiao.Action != "存草稿至头条号" {
-		t.Fatalf("头条号按钮写存草稿：%+v", toutiao)
+	if toutiao.Action != "同步至头条号" {
+		t.Fatalf("头条号按钮写同步：%+v", toutiao)
 	}
 
 	// 只改标题：封面问题还在，仍待修改、不推。

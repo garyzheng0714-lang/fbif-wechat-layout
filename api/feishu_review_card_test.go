@@ -404,8 +404,8 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	if body == "" || strings.Contains(cardJSON(t, card), "多平台分发") {
 		t.Fatalf("原创已发布稿应有常显的分发区: %s", cardJSON(t, card))
 	}
-	// 两个平台都经自己的分发服务只存草稿（百家号 2026-10-22、头条号 2026-10-24），按钮照实说。
-	if strings.Count(body, `"has_border":true`) != 1 || !strings.Contains(body, `"content":"存草稿至头条号"`) || !strings.Contains(body, `"content":"存草稿至百家号"`) {
+	// 两个平台都经自己的分发服务存草稿再公开发布（2026-10-30 起），按钮统称「同步」。
+	if strings.Count(body, `"has_border":true`) != 1 || !strings.Contains(body, `"content":"同步至头条号"`) || !strings.Contains(body, `"content":"同步至百家号"`) {
 		t.Fatalf("未分发时一篇一个外框块，块里每个平台一行、各自一枚按钮: %s", body)
 	}
 	if !strings.Contains(body, `"corner_radius":"16px"`) || !strings.Contains(body, `"border_color":"grey-100"`) {
@@ -416,18 +416,18 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 		t.Fatalf("按钮带多维表格「平台账号」的编号，不再按位置认号: %s", body)
 	}
 	elements := card["body"].(map[string]any)["elements"].([]any)
-	if last := cardJSON(t, elements[len(elements)-1].(map[string]any)); !strings.Contains(last, "存草稿至百家号") {
+	if last := cardJSON(t, elements[len(elements)-1].(map[string]any)); !strings.Contains(last, "同步至百家号") {
 		t.Fatalf("分发区应在卡片最底下: %s", last)
 	}
 	var outside []map[string]any
 	reviewCardButtons(map[string]any{"elements": elements[0]}, &outside)
 	for _, button := range outside {
-		if strings.Contains(fmt.Sprint(button["text"]), "存草稿至头条号") {
+		if strings.Contains(fmt.Sprint(button["text"]), "同步至头条号") {
 			t.Fatalf("文章按钮行不应放分发按钮: %#v", button)
 		}
 	}
 
-	// 云梭（2026-10-24 下线）留下的旧 lane：头条号已发、有链接；百家号失败的可重新存草稿。
+	// 云梭（2026-10-24 下线）留下的旧 lane：头条号已发、有链接；百家号失败的可重新同步。
 	toutiao := testLane(testToutiaoAccountID, "头条号", publishExternalDistributionSucceeded)
 	toutiao.Title, toutiao.URL = "这个女性能量饮料，靠青汁粉走红了", "https://www.toutiao.com/article/7560000000000000000/"
 	baijia := testLane(testBaijiaAccountID, "百家号", publishExternalDistributionFailed)
@@ -435,12 +435,12 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
 	for _, want := range []string{"<font color='green'>已发布</font>", "[这个女性能量饮料，靠青汁粉走红了](https://www.toutiao.com/article/7560000000000000000/)",
-		"**头条号**　[", `"content":"<font color='red'>上次同步失败</font>"`, `"content":"重新存草稿至百家号"`} {
+		"**头条号**　[", `"content":"<font color='red'>上次同步失败</font>"`, `"content":"重新同步至百家号"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("分发区缺少 %q: %s", want, body)
 		}
 	}
-	// 旧通道的失败原因（授权过期、登录失效）对重新存草稿没用，不写。
+	// 旧通道的失败原因（授权过期、登录失效）对重新同步没用，不写。
 	if strings.Contains(body, "云梭") || strings.Contains(body, "授权过期") {
 		t.Fatalf("卡片不提云梭、不写旧通道的失败原因: %s", body)
 	}
@@ -474,23 +474,23 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 		t.Fatalf("两篇原创各一块，块头带同一张封面: %s", body)
 	}
 
-	// 百家号失败：可重新存草稿，只存它。
+	// 百家号失败：可重新同步，只同步它。
 	baijia = testLane(testBaijiaAccountID, "百家号", publishExternalDistributionFailed)
 	baijia.Error = "封面图尺寸过小"
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, baijia}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
-	if !strings.Contains(body, "<font color='red'>上次同步失败</font>　<font color='grey'>封面图太小</font>") || !strings.Contains(body, `"content":"重新存草稿至百家号"`) ||
-		!strings.Contains(body, "重新存草稿至百家号？") || strings.Contains(body, `"content":"同步至头条号"`) {
-		t.Fatalf("失败应给只存百家号的重试按钮: %s", body)
+	if !strings.Contains(body, "<font color='red'>上次同步失败</font>　<font color='grey'>封面图太小</font>") || !strings.Contains(body, `"content":"重新同步至百家号"`) ||
+		!strings.Contains(body, "重新同步至百家号？") || strings.Contains(body, `"content":"同步至头条号"`) {
+		t.Fatalf("失败应给只同步百家号的重试按钮: %s", body)
 	}
 
-	// 存草稿中：不给按钮。
+	// 同步中：不给按钮。
 	saving := testLane(testBaijiaAccountID, "百家号", publishExternalDistributionPushing)
 	saving.Driver = externalDriverRobot
 	job.ExternalDistributionLanes = []publishExternalLane{toutiao, saving}
 	body = distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job}))
-	if !strings.Contains(body, "<font color='blue'>存草稿中</font>") || strings.Contains(body, feishuCardActionDistributeExternal) {
-		t.Fatalf("存草稿中不给按钮: %s", body)
+	if !strings.Contains(body, "<font color='blue'>同步中</font>") || strings.Contains(body, feishuCardActionDistributeExternal) {
+		t.Fatalf("同步中不给按钮: %s", body)
 	}
 
 	// 转载稿：聚合卡没有这一区；单篇卡留一句说明。
@@ -513,7 +513,7 @@ func TestReviewCardDistributionSectionShowsPlatformBlocks(t *testing.T) {
 			t.Fatalf("缺少 %s: %s", want, body)
 		}
 	}
-	if body := cardJSON(t, buildReviewDoneCard(job)); strings.Contains(body, reviewCardIconField) || !strings.Contains(body, "存草稿至百家号") {
+	if body := cardJSON(t, buildReviewDoneCard(job)); strings.Contains(body, reviewCardIconField) || !strings.Contains(body, "同步至百家号") {
 		t.Fatalf("单篇卡应有分发按钮且不得残留图标标记: %s", body)
 	}
 	if body := distributionSectionJSON(t, buildReviewBatchCard([]publishJob{job})); strings.Contains(body, `"tag":"img"`) || strings.Contains(body, reviewCardIconField) {
@@ -563,7 +563,7 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 		`"name":"t_72_` + testToutiaoAccountID + `"`, `"default_value":"头条号标题缩短后的建议"`, `"max_length":60`, `"placeholder":{"content":"30 字以内"`, `"content":"改成"`,
 		"<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200",
 		`"tag":"select_img"`, `"name":"c_72_` + testToutiaoAccountID + `"`, `"img_key":"img_big"`, `"value":"` + reviewCardCoverValue("https://cdn.example.com/big.jpg") + `"`,
-		`"content":"保存并存草稿至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"account":"` + testToutiaoAccountID + `"`,
+		`"content":"保存并同步至头条号"`, `"form_action_type":"submit"`, `"action":"` + feishuCardActionDistributeFix + `"`, `"account":"` + testToutiaoAccountID + `"`,
 		"在侧边栏修改", "applink.feishu.cn/client/web_url/open?mode=sidebar-semi",
 	} {
 		if !strings.Contains(body, want) {
@@ -577,9 +577,9 @@ func TestReviewCardDistributionFixForm(t *testing.T) {
 	if !strings.Contains(body, "从正文里选一张作封面</font><font color='grey'>，或</font>[上传一张](") || strings.Contains(body, "话题") {
 		t.Fatalf("封面应是选一张或上传一张: %s", body)
 	}
-	// 百家号没问题：仍是普通的存草稿按钮。
-	if section := distributionSectionJSON(t, card); !strings.Contains(section, `"content":"存草稿至百家号"`) {
-		t.Fatalf("百家号应照常给存草稿按钮: %s", section)
+	// 百家号没问题：仍是普通的同步按钮。
+	if section := distributionSectionJSON(t, card); !strings.Contains(section, `"content":"同步至百家号"`) {
+		t.Fatalf("百家号应照常给同步按钮: %s", section)
 	}
 	// 下线后不再给改稿表单，只说要改什么。
 	job.Stage = publishStageOffline

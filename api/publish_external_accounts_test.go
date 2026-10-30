@@ -39,7 +39,7 @@ func TestExternalCardButtonPicksAccountFromJobTargets(t *testing.T) {
 	if len(robot.saves) != 0 {
 		t.Fatalf("被拒的按钮不得存稿：%v", robot.platforms)
 	}
-	if out := click(map[string]any{"account": testBaijiaAccountID}); out.toastType != "success" || out.toastContent != "已受理，正在存草稿至百家号" {
+	if out := click(map[string]any{"account": testBaijiaAccountID}); out.toastType != "success" || out.toastContent != "已受理，正在同步至百家号" {
 		t.Fatalf("这篇能发的号应受理：%+v", out)
 	}
 	if len(robot.saves) != 1 || robot.saves[0].Account != testBaijiaAccountID {

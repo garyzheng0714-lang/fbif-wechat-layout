@@ -68,9 +68,9 @@ function coverTooSmall(platform, image) {
   return !!(image.width && image.height && (image.width < platform.cover_min_width || image.height < platform.cover_min_height));
 }
 
-// actionText 提交按钮「保存并……」：服务端给（存草稿至头条号）。
+// actionText 提交按钮「保存并……」：服务端给（同步至头条号：存草稿再公开发布）。
 function actionText(platform) {
-  return `保存并${platform.action || `存草稿至${platform.name}`}`;
+  return `保存并${platform.action || `同步至${platform.name}`}`;
 }
 
 function sameTitle(a, b) {
@@ -85,7 +85,7 @@ export function renderPlatform(platform, draft = {}, articleTitle = '') {
     const lines = [];
     if (platform.url) lines.push(`<a href="${esc(platform.url)}" target="_blank" rel="noopener">${esc(ownTitle || '查看文章')}</a>`);
     else if (ownTitle) lines.push(`<span>${esc(ownTitle)}</span>`);
-    // 只存了草稿：去草稿编辑页看；已发布但还没拿到文章链接：去平台后台看发布情况。
+    // 停在草稿（读回对不上没发）：去草稿编辑页看；没有文章链接、要去平台后台看的：给平台后台。
     if (!platform.url && platform.draft_url) lines.push(`<a href="${esc(platform.draft_url)}" target="_blank" rel="noopener">去${esc(platform.name)}草稿箱查看</a>`);
     else if (!platform.url && platform.manage_url) lines.push(`<a href="${esc(platform.manage_url)}" target="_blank" rel="noopener">去${esc(platform.name)}后台查看</a>`);
     if (platform.reason) lines.push(`<span>${esc(platform.reason)}</span>`);
@@ -205,8 +205,9 @@ export function createDistributePage({ root, articleEl, search, request = authFe
     return payload.error || `服务返回 ${response.status}，请稍后再试`;
   }
 
+  // maybePoll 同步、发布、平台审核还没出结果时隔一会儿再取，文章链接一出来就显示（最多 POLL_LIMIT 次）。
   function maybePoll() {
-    const busy = (view?.platforms || []).some(platform => ['存草稿中', '排队中'].includes(platform.status));
+    const busy = (view?.platforms || []).some(platform => ['排队中', '同步中', '发布中', '平台审核中'].includes(platform.status));
     if (!busy || polls >= POLL_LIMIT) return;
     polls += 1;
     schedule(() => load({ quiet: true }), POLL_MS);

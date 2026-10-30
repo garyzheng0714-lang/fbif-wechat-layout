@@ -14,35 +14,42 @@ const (
 	publishNotificationCriticalAfter   = 10 * time.Minute
 	publishReconciliationCriticalAfter = 30 * time.Minute
 	publishRecentFailureWindow         = 24 * time.Hour
+	// 第三方平台发布中：分发服务点发布、再查几分钟才定，过 30 分钟还没定才告警。
+	publishExternalPublishingCriticalAfter = 30 * time.Minute
+	// 第三方平台审核中：要等平台，多久说不准；过 24 小时提醒一次，不算处理中、不告警。
+	publishExternalReviewingWarningAfter = 24 * time.Hour
 )
 
 type publishMonitoringStatus struct {
-	Ready                          bool     `json:"ready"`
-	CheckedAt                      string   `json:"checked_at"`
-	StoreValid                     bool     `json:"store_valid"`
-	WorkersPaused                  bool     `json:"workers_paused"`
-	Health                         string   `json:"health"`
-	Busy                           bool     `json:"busy"`
-	Processing                     int      `json:"processing"`
-	OldestProcessingAgeSeconds     int64    `json:"oldest_processing_age_seconds"`
-	Queued                         int      `json:"queued"`
-	OldestQueueAgeSeconds          int64    `json:"oldest_queue_age_seconds"`
-	NotificationPending            int      `json:"notification_pending"`
-	OldestNotificationAgeSeconds   int64    `json:"oldest_notification_age_seconds"`
-	NotificationErrors             int      `json:"notification_errors"`
-	NotificationDeadLetters        int      `json:"notification_dead_letters"`
-	ReviewCardsMissing             int      `json:"review_cards_missing"`
-	DuplicateSourceKeys            int      `json:"duplicate_source_keys"`
-	Failed                         int      `json:"failed"`
-	FailedRecent                   int      `json:"failed_recent"`
-	ReconciliationRequired         int      `json:"reconciliation_required"`
-	OldestReconciliationAgeSeconds int64    `json:"oldest_reconciliation_age_seconds"`
-	ContentConflicts               int      `json:"content_conflicts"`
-	FoodTalksCredentialInvalid     bool     `json:"foodtalks_credential_invalid"`
-	ExternalFidelityMismatches     int      `json:"external_fidelity_mismatches"`
-	ExternalFidelityUnavailable    int      `json:"external_fidelity_unavailable"`
-	Issues                         []string `json:"issues,omitempty"`
-	Warnings                       []string `json:"warnings,omitempty"`
+	Ready                      bool   `json:"ready"`
+	CheckedAt                  string `json:"checked_at"`
+	StoreValid                 bool   `json:"store_valid"`
+	WorkersPaused              bool   `json:"workers_paused"`
+	Health                     string `json:"health"`
+	Busy                       bool   `json:"busy"`
+	Processing                 int    `json:"processing"`
+	OldestProcessingAgeSeconds int64  `json:"oldest_processing_age_seconds"`
+	// 第三方平台发布中、审核中的最久一条（只看分发服务的 lane，不进 oldest_processing_age_seconds）。
+	OldestExternalPublishingAgeSeconds int64    `json:"oldest_external_publishing_age_seconds"`
+	OldestExternalReviewingAgeSeconds  int64    `json:"oldest_external_reviewing_age_seconds"`
+	Queued                             int      `json:"queued"`
+	OldestQueueAgeSeconds              int64    `json:"oldest_queue_age_seconds"`
+	NotificationPending                int      `json:"notification_pending"`
+	OldestNotificationAgeSeconds       int64    `json:"oldest_notification_age_seconds"`
+	NotificationErrors                 int      `json:"notification_errors"`
+	NotificationDeadLetters            int      `json:"notification_dead_letters"`
+	ReviewCardsMissing                 int      `json:"review_cards_missing"`
+	DuplicateSourceKeys                int      `json:"duplicate_source_keys"`
+	Failed                             int      `json:"failed"`
+	FailedRecent                       int      `json:"failed_recent"`
+	ReconciliationRequired             int      `json:"reconciliation_required"`
+	OldestReconciliationAgeSeconds     int64    `json:"oldest_reconciliation_age_seconds"`
+	ContentConflicts                   int      `json:"content_conflicts"`
+	FoodTalksCredentialInvalid         bool     `json:"foodtalks_credential_invalid"`
+	ExternalFidelityMismatches         int      `json:"external_fidelity_mismatches"`
+	ExternalFidelityUnavailable        int      `json:"external_fidelity_unavailable"`
+	Issues                             []string `json:"issues,omitempty"`
+	Warnings                           []string `json:"warnings,omitempty"`
 	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
 	// 把 issues 当 P0，于是正常处理中的稿也会被喊成事故。
 	AlertIssues []string `json:"alert_issues"`
@@ -110,12 +117,22 @@ func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob
 	if publishMonitoringProcessingStage(job.Stage) {
 		processingAge = age
 	}
+	publishing := false
 	for _, lane := range job.ExternalDistributionLanes {
-		if !publishExternalDistributionProcessing(lane.State) {
-			continue
-		}
-		if externalAge := publishMonitoringAge(now, publishExternalLaneStartedAt(lane)); externalAge > processingAge {
-			processingAge = externalAge
+		switch {
+		case lane.State == publishExternalDistributionPublishing:
+			publishing = true
+			if age := publishMonitoringAge(now, publishExternalLaneEnteredAt(lane)); age > status.OldestExternalPublishingAgeSeconds {
+				status.OldestExternalPublishingAgeSeconds = age
+			}
+		case lane.State == publishExternalDistributionReviewing:
+			if age := publishMonitoringAge(now, publishExternalLaneEnteredAt(lane)); age > status.OldestExternalReviewingAgeSeconds {
+				status.OldestExternalReviewingAgeSeconds = age
+			}
+		case publishExternalDistributionProcessing(lane.State):
+			if externalAge := publishMonitoringAge(now, publishExternalLaneStartedAt(lane)); externalAge > processingAge {
+				processingAge = externalAge
+			}
 		}
 	}
 	if publishSourceResyncProcessing(job.SourceResyncState) {
@@ -124,7 +141,7 @@ func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob
 			processingAge = resyncAge
 		}
 	}
-	if processingAge >= 0 {
+	if processingAge >= 0 || publishing {
 		status.Processing++
 		if processingAge > status.OldestProcessingAgeSeconds {
 			status.OldestProcessingAgeSeconds = processingAge
@@ -176,7 +193,7 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 	// 用它算就会把几周前的失败当新失败一直告警（2026-10-14 #153/#260/#183）。
 	externalFailed, externalFailedAt := false, time.Time{}
 	for _, lane := range job.ExternalDistributionLanes {
-		if lane.State != publishExternalDistributionFailed {
+		if lane.State != publishExternalDistributionFailed && lane.State != publishExternalDistributionRejected {
 			continue
 		}
 		externalFailed = true
@@ -244,6 +261,8 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		{status.NotificationPending > 0, fmt.Sprintf("review_notification_pending:%d", status.NotificationPending), publishMonitoringIssue},
 		{status.OldestProcessingAgeSeconds > int64(publishProcessingWarningAfter/time.Second), fmt.Sprintf("processing_slow:%ds", status.OldestProcessingAgeSeconds), publishMonitoringWarning},
 		{status.OldestProcessingAgeSeconds > int64(publishProcessingCriticalAfter/time.Second), fmt.Sprintf("processing_stale:%ds", status.OldestProcessingAgeSeconds), publishMonitoringAlert},
+		{status.OldestExternalPublishingAgeSeconds > int64(publishExternalPublishingCriticalAfter/time.Second), fmt.Sprintf("external_publishing_stale:%ds", status.OldestExternalPublishingAgeSeconds), publishMonitoringAlert},
+		{status.OldestExternalReviewingAgeSeconds > int64(publishExternalReviewingWarningAfter/time.Second), fmt.Sprintf("external_reviewing_slow:%ds", status.OldestExternalReviewingAgeSeconds), publishMonitoringWarning},
 		{status.OldestQueueAgeSeconds > int64(publishQueueCriticalAfter/time.Second), fmt.Sprintf("queue_stale:%ds", status.OldestQueueAgeSeconds), publishMonitoringAlert},
 		{status.OldestNotificationAgeSeconds > int64(publishNotificationCriticalAfter/time.Second), fmt.Sprintf("notification_outbox_stale:%ds", status.OldestNotificationAgeSeconds), publishMonitoringIssue | publishMonitoringAlert},
 		{status.NotificationErrors > 0, fmt.Sprintf("notification_errors:%d", status.NotificationErrors), publishMonitoringIssue | publishMonitoringWarning},
@@ -293,6 +312,11 @@ func appendPublishMonitoringSignals(status *publishMonitoringStatus, signals []p
 			status.AlertIssues = append(status.AlertIssues, signal.message)
 		}
 	}
+}
+
+// publishExternalLaneEnteredAt lane 进入现在这个状态的时间（发布中、审核中按它算多久了）。
+func publishExternalLaneEnteredAt(lane publishExternalLane) string {
+	return firstNonEmpty(strings.TrimSpace(lane.CompletedAt), publishExternalLaneStartedAt(lane))
 }
 
 func publishExternalLaneStartedAt(lane publishExternalLane) string {

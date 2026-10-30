@@ -1,7 +1,7 @@
 package main
 
 // publish_external_distribution.go — 已审核原创文章分发到第三方平台：百家号、头条号都经自己的分发服务
-// 存草稿（publish_external_robot.go）。云梭 2026-10-24 下线，它留下的旧 lane 只显示。
+// 存草稿再发布（publish_external_robot.go）。云梭 2026-10-24 下线，它留下的旧 lane 只显示。
 //
 // 这是 publishJob 上的正交子状态机，不改变 FoodTalks 的 Stage：自有站允许原创和
 // 转载，外部平台只允许原创。先把精确 payload 与 intent 落盘再外调；分发服务有幂等键，
@@ -23,8 +23,11 @@ import (
 const (
 	publishExternalDistributionQueued                 = "queued"
 	publishExternalDistributionPushing                = "pushing"
-	publishExternalDistributionPolling                = "polling" // 只有云梭旧 lane 有，读盘即转待核对
-	publishExternalDistributionSucceeded              = "succeeded"
+	publishExternalDistributionPolling                = "polling"    // 只有云梭旧 lane 有，读盘即转待核对
+	publishExternalDistributionPublishing             = "publishing" // 草稿存好了，分发服务在点发布
+	publishExternalDistributionReviewing              = "reviewing"  // 点完了，平台在审核（含定时待发），分发服务接着查
+	publishExternalDistributionSucceeded              = "succeeded"  // 已发布，lane.URL 是文章链接
+	publishExternalDistributionRejected               = "rejected"   // 平台审核没通过：终态，不再自动发
 	publishExternalDistributionPartialFailed          = "partial_failed"
 	publishExternalDistributionFailed                 = "failed"
 	publishExternalDistributionReconciliationRequired = "reconciliation_required"
@@ -49,9 +52,11 @@ var (
 	publishExternalAuthorizedRepost  = regexp.MustCompile(`(?i)(?:本文)?(?:经|获).{1,50}(?:授权)?转载|reprinted\s+with\s+permission|originally\s+published\s+by|^source\s*[:：]`)
 )
 
+// publishExternalDistributionProcessing 系统正在送稿、点发布的 lane（平台审核中不算：那是在等平台）。
 func publishExternalDistributionProcessing(state string) bool {
 	switch strings.TrimSpace(state) {
-	case publishExternalDistributionQueued, publishExternalDistributionPushing, publishExternalDistributionPolling:
+	case publishExternalDistributionQueued, publishExternalDistributionPushing, publishExternalDistributionPolling,
+		publishExternalDistributionPublishing:
 		return true
 	default:
 		return false
@@ -396,7 +401,7 @@ func (p *publishPipeline) queueAutoExternalDistribution(jobID int64, actor strin
 }
 
 // externalDistributionTargetsFor 选本次要推的账号，每个账号一条 lane（只在「来源公众号」是这篇的号里选，按表里的顺序）：
-//   - 卡片：还没推过的账号 + 受理前失败、可安全重推的账号（重推只推原账号，不扩到别的平台）；
+//   - 卡片：还没推过的账号 + 失败、可安全重推的账号（重推只推原账号，不扩到别的平台）；
 //   - 自动：还没推过的 auto 账号（only 限定当天还有配额的）；
 //   - 管理员对账重发：对账中的账号。
 func externalDistributionTargetsFor(job publishJob, cfg externalTargets, mode externalDistributionQueueMode, only map[string]bool) []externalAccount {
@@ -509,8 +514,9 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	draftEditedAt := map[string]string{}
 	material := externalDraftMaterial(job)
 	for _, target := range chosen {
-		if old, ok := externalLaneFor(job, target.ID); ok && mode == externalQueueReplaceReconcile &&
-			old.Driver == externalDriverRobot && strings.TrimSpace(old.IntentKey) != "" {
+		// 交过分发服务的按原来的冻结内容和幂等键再交：管理员重发待核对的，卡片重试草稿已存好、发布没成的。
+		if old, ok := externalLaneFor(job, target.ID); ok && old.Driver == externalDriverRobot && strings.TrimSpace(old.IntentKey) != "" &&
+			(mode == externalQueueReplaceReconcile || (mode == externalQueueCard && externalLaneDraftSaved(old))) {
 			lane, resendErr := robotResendFrozenLane(job.ID, old, actor, requestedAt)
 			if resendErr != nil {
 				failures = append(failures, target.label()+"："+resendErr.Error())
@@ -831,6 +837,9 @@ func (p *publishPipeline) recoverExternalDistribution(job publishJob) {
 			p.spawnExternalWork(func() { p.runExternalLane(job.ID, lane.AccountID) })
 		case publishExternalDistributionPushing:
 			p.recoverRobotLane(job, lane)
+		case publishExternalDistributionPublishing, publishExternalDistributionReviewing:
+			// 发布中退出的：分发服务那边没有这次发布就调一次，有就接着跟；审核中的接着跟。
+			p.spawnExternalWork(func() { p.followRobotLaneNow(job.ID, lane.AccountID) })
 		}
 	}
 }
@@ -850,15 +859,17 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 		return reviewCardOutcome{}, false
 	}
 	switch externalDistributionSummaryState(job) {
+	case publishExternalDistributionPolling:
+		return reviewCardOutcome{toastType: "info", toastContent: "平台正在审核，结果出来会更新卡片"}, true
 	case publishExternalDistributionSucceeded:
 		text := "文章已同步至其他平台，无需重复操作"
-		if externalDistributionAllDraftSaved(job) {
-			text = "草稿都已存好，无需重复操作"
+		if externalDistributionAnyHeld(job) {
+			text = "有平台停在草稿、没有发布，请看卡片"
 		}
 		return reviewCardOutcome{toastType: "info", toastContent: text}, true
 	case publishExternalDistributionReconciliationRequired:
 		return reviewCardOutcome{
-			toastType: "error", toastContent: "外部分发结果待核对，系统不会重复存稿",
+			toastType: "error", toastContent: "外部分发结果待核对，系统不会重复同步",
 		}, true
 	case publishExternalDistributionFailed, publishExternalDistributionPartialFailed:
 		return reviewCardOutcome{toastType: "error", toastContent: "外部分发有平台未完成，请查看卡片"}, true
@@ -869,17 +880,18 @@ func externalDistributionCardStateOutcome(job publishJob) (reviewCardOutcome, bo
 	}
 }
 
-// externalDistributionAllDraftSaved 每个平台都只存了草稿（自己的分发服务不发布）。
-func externalDistributionAllDraftSaved(job publishJob) bool {
+// externalDistributionAnyHeld 有平台停在草稿、没发（读回与原文对不上，或 2026-10-30 之前只存草稿）。
+func externalDistributionAnyHeld(job publishJob) bool {
 	for _, lane := range job.ExternalDistributionLanes {
-		if lane.State != publishExternalDistributionDraftSaved {
-			return false
+		if lane.State == publishExternalDistributionDraftSaved {
+			return true
 		}
 	}
-	return len(job.ExternalDistributionLanes) > 0
+	return false
 }
 
-// refreshExternalDistributionResults 经分发服务、结果不明的 lane 每轮按幂等键查一次，把结果补回任务和审核卡。
+// refreshExternalDistributionResults 经分发服务、存草稿结果不明的 lane 每轮按幂等键查一次，把结果补回任务和审核卡
+// （查到存好了照样转发布中再发）。发布中、审核中的由 followRobotLanes 每分钟跟。
 func (p *publishPipeline) refreshExternalDistributionResults() {
 	if p == nil || p.store == nil || publishWorkersPaused() {
 		return

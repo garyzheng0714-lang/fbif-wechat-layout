@@ -32,6 +32,8 @@ const (
 	publishExternalAutoBackfillStartHour  = 9
 	publishExternalAutoBackfillEndHour    = 20
 	publishExternalAutoSweepInterval      = 10 * time.Minute
+	// publishExternalFollowInterval 发布中、平台审核中的 lane 多久 GET 一次：链接一出来，卡片一两分钟内就有。
+	publishExternalFollowInterval = time.Minute
 )
 
 var publishExternalAutoZone = time.FixedZone("CST", 8*3600)
@@ -62,7 +64,8 @@ func (p *publishPipeline) kickExternalAutoDistribution() {
 }
 
 // startExternalAutoDistribution 兜底循环：配额次日恢复、补发按间隔放行、读网站失败后的
-// 重试都靠它；顺带按幂等键向分发服务补查结果不明的草稿。
+// 重试都靠它；顺带按幂等键向分发服务补查结果不明的草稿。另一个循环每分钟跟一次发布中、
+// 平台审核中的 lane（只读分发服务的记录），把文章链接带回卡片。
 // 独立 goroutine，不占发布 worker。
 func (p *publishPipeline) startExternalAutoDistribution() {
 	if p == nil {
@@ -73,6 +76,12 @@ func (p *publishPipeline) startExternalAutoDistribution() {
 			p.runExternalAutoDistribution()
 			p.refreshExternalDistributionResults()
 			time.Sleep(publishExternalAutoSweepInterval)
+		}
+	}()
+	go func() {
+		for {
+			p.followRobotLanes()
+			time.Sleep(publishExternalFollowInterval)
 		}
 	}()
 }
@@ -99,7 +108,7 @@ func externalAutoQuotaFor(jobs []publishJob, autoTargets []externalAccount, now 
 			if _, auto := quota.limits[id]; !auto {
 				continue
 			}
-			// 人工登记的已发稿、没存成的不占平台名额。
+			// 人工登记的已发稿、没发出去的（失败）不占平台名额。
 			if lane.State == publishExternalLaneManual || externalLaneCanSafeRetry(lane) {
 				continue
 			}

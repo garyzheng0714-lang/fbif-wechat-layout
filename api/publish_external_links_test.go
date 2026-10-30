@@ -180,7 +180,11 @@ func TestExternalDistributionManualRegistration(t *testing.T) {
 		t.Fatalf("应登记为人工已发：%+v", lane)
 	}
 
-	// 补发只推百家号；人工登记的不占头条名额，也不会被推。
+	// 补发只推百家号；人工登记的不占头条名额，也不会被推。百家号读回与原文对不上，停在草稿、没发。
+	mismatched := testRobotSavedRecord(testRobotArticleID)
+	match := false
+	mismatched.Match = &match
+	robot.saveRecord = &mismatched
 	if marked, err := env.pipeline.markExternalAutoBackfill(time.Date(2026, 8, 1, 0, 0, 0, 0, publishExternalAutoZone), false); err != nil || len(marked) != 1 {
 		t.Fatalf("应只为百家号补发：n=%d err=%v", len(marked), err)
 	}
@@ -189,11 +193,11 @@ func TestExternalDistributionManualRegistration(t *testing.T) {
 	}
 	got := mustJob(t, env, job.ID)
 	body := distributionSectionJSON(t, buildReviewDoneCard(got))
-	if !strings.Contains(body, "<font color='green'>人工已发</font>") || !strings.Contains(body, "<font color='green'>草稿已存（未发布）</font>") {
-		t.Fatalf("卡片应显示头条号人工已发、百家号草稿已存: %s", body)
+	if !strings.Contains(body, "<font color='green'>人工已发</font>") || !strings.Contains(body, "<font color='orange'>未发布</font>") || len(robot.publishes) != 0 {
+		t.Fatalf("卡片应显示头条号人工已发、百家号停在草稿: %s", body)
 	}
 
-	// 百家号的草稿由人在后台发出去后，登记成人工已发并补上文章链接；草稿编号留着。
+	// 百家号停在草稿的那篇由人在后台改好发出去后，登记成人工已发并补上文章链接；草稿编号留着。
 	rec = doPublishReq(mux, http.MethodPost, path, `{"account_id":"`+testBaijiaAccountID+`","url":"https://baijiahao.baidu.com/s?id=1846000000000000000"}`, true)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"action":"register_manual"`) {
 		t.Fatalf("存了草稿的百家号应登记为人工已发：%d %s", rec.Code, rec.Body.String())

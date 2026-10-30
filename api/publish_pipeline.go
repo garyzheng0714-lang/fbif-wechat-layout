@@ -194,6 +194,8 @@ type publishPipeline struct {
 	externalAutoMu sync.Mutex
 	// 外发待修改提醒串行发送：同一轮提醒不会因并发重复回复、重复 @。
 	externalReminderMu sync.Mutex
+	// robotPublishing 正在调分发服务发布的 lane（「任务号/账号」）：同一条同一时间只调一次，跟进循环跳过它。
+	robotPublishing sync.Map
 	// 校对提醒串行复核与发送（publish_proofread.go）。
 	proofreadReminderMu sync.Mutex
 	// 以下两个仅测试注入：校对提醒的发送与复核（默认走审核应用与 MiMo Pro）。

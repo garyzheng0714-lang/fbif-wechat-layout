@@ -217,7 +217,7 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 	robot := useFakeRobot(env)
 
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "存草稿至头条号") || !strings.Contains(card, "存草稿至百家号") || !strings.Contains(card, feishuCardActionDistributeExternal) {
+	if !strings.Contains(card, "同步至头条号") || !strings.Contains(card, "同步至百家号") || !strings.Contains(card, feishuCardActionDistributeExternal) {
 		t.Fatalf("已发布原创卡应显示固定目标的一键分发按钮：%s", card)
 	}
 	value, _ := json.Marshal(map[string]any{
@@ -233,8 +233,8 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{testToutiaoAccountID, testBaijiaAccountID} {
-		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionDraftSaved || lane.Driver != externalDriverRobot || lane.ContentPK != testRobotArticleID {
-			t.Fatalf("两个平台都应存好草稿：%+v", lane)
+		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionSucceeded || lane.Driver != externalDriverRobot || lane.ContentPK != testRobotArticleID || lane.URL == "" {
+			t.Fatalf("两个平台都应存好草稿、发出去、记下链接：%+v", lane)
 		}
 	}
 	// 各平台分开存：每个平台一次，正文渠道中性。
@@ -246,8 +246,8 @@ func TestExternalDistributionCardAndWorkerPublishOriginalOnly(t *testing.T) {
 			t.Fatalf("正文渠道中性：%s", distributionOutline(draft.Blocks))
 		}
 	}
-	if repeated := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", value); repeated.toastType != "info" || len(robot.saves) != 2 {
-		t.Fatalf("重复点击不得再次存草稿：out=%+v robot=%v", repeated, robot.platforms)
+	if repeated := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", value); repeated.toastType != "info" || len(robot.saves) != 2 || len(robot.publishes) != 2 {
+		t.Fatalf("重复点击不得再次存草稿、发布：out=%+v robot=%v %v", repeated, robot.platforms, robot.publishes)
 	}
 }
 
@@ -336,12 +336,12 @@ func TestExternalDistributionSafeFailureRendersRetryButton(t *testing.T) {
 	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
 	baijia := testLane(testBaijiaAccountID, "百家号", publishExternalDistributionFailed)
 	baijia.Driver = externalDriverRobot
-	// 头条号是云梭留下的失败旧 lane（云梭收下了、没发出去）：也能重新存草稿。
+	// 头条号是云梭留下的失败旧 lane（云梭收下了、没发出去）：也能重新同步。
 	job = setTestLanes(t, env, job.ID, yunsuoLegacyLane(testToutiaoAccountID, "头条号", publishExternalDistributionFailed), baijia)
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "重新存草稿至头条号") || !strings.Contains(card, "重新存草稿至百家号") || !strings.Contains(card, "不会重复存稿") ||
+	if !strings.Contains(card, "重新同步至头条号") || !strings.Contains(card, "重新同步至百家号") || !strings.Contains(card, "不会重复存稿") ||
 		strings.Contains(card, "云梭") {
-		t.Fatalf("失败的平台都给重新存草稿入口、不提云梭：%s", card)
+		t.Fatalf("失败的平台都给重新同步入口、不提云梭：%s", card)
 	}
 }
 
@@ -453,12 +453,12 @@ func TestReplaceExternalDistributionAfterReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if lane := mustLane(t, queued, testToutiaoAccountID); lane.State != publishExternalDistributionQueued || lane.Driver != externalDriverRobot {
-		t.Fatalf("管理员重发应先落盘 queued 再异步存草稿：%+v", lane)
+		t.Fatalf("管理员重发应先落盘 queued 再异步同步：%+v", lane)
 	}
 	got := mustJob(t, env, job.ID)
 	for _, id := range []string{testToutiaoAccountID, testBaijiaAccountID} {
-		if lane := mustLane(t, got, id); lane.Driver != externalDriverRobot || lane.State != publishExternalDistributionDraftSaved || lane.RequestedBy != publishExternalAdminRetryActor {
-			t.Fatalf("重发应经分发服务存好草稿：%+v", lane)
+		if lane := mustLane(t, got, id); lane.Driver != externalDriverRobot || lane.State != publishExternalDistributionSucceeded || lane.RequestedBy != publishExternalAdminRetryActor {
+			t.Fatalf("重发应经分发服务存好草稿、发出去：%+v", lane)
 		}
 	}
 	if len(robot.saves) != 2 {
@@ -527,7 +527,7 @@ func TestRetryExternalDistributionHTTPRequiresAdminAndRebuilds(t *testing.T) {
 		t.Fatalf("待核对的已发布任务应可管理员重发，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
 	got := mustJob(t, env, job.ID)
-	if lane := mustLane(t, got, testToutiaoAccountID); lane.State != publishExternalDistributionDraftSaved || lane.ContentPK != testRobotArticleID || len(robot.saves) != 1 {
+	if lane := mustLane(t, got, testToutiaoAccountID); lane.State != publishExternalDistributionSucceeded || lane.ContentPK != testRobotArticleID || len(robot.saves) != 1 || len(robot.publishes) != 1 {
 		t.Fatalf("HTTP 重发未闭环：%+v saves=%d", lane, len(robot.saves))
 	}
 	if _, ok := externalLaneFor(got, testBaijiaAccountID); ok {
@@ -580,7 +580,7 @@ func TestExternalCardExpiredIsTerminal(t *testing.T) {
 }
 
 // TestYunsuoLegacyLanesOnlyDisplay 云梭 2026-10-24 下线：它留下的 lane 只显示。已发布的照旧是已发布、给平台后台；
-// 失败的给「重新存草稿」，点了换成一条经分发服务的 lane；没走完的读盘即转待核对，重启也不会再推。
+// 失败的给「重新同步」，点了换成一条经分发服务的 lane；没走完的读盘即转待核对，重启也不会再推。
 // 卡片与侧边栏不提云梭。
 func TestYunsuoLegacyLanesOnlyDisplay(t *testing.T) {
 	setTestDistributionAccounts(t)
@@ -598,19 +598,19 @@ func TestYunsuoLegacyLanesOnlyDisplay(t *testing.T) {
 	}
 	baijia := externalPlatformStatus(job, externalAccount{ID: testBaijiaAccountID, Platform: "baijiahao", Name: "百家号"})
 	if baijia.Status != "失败" || !baijia.Editable || baijia.Reason != "封面图太小（780×332，要求至少 452×352）" {
-		t.Fatalf("云梭没发出去的可以重新存草稿：%+v", baijia)
+		t.Fatalf("云梭没发出去的可以重新同步：%+v", baijia)
 	}
 	card := cardJSON(t, buildReviewDoneCard(job))
-	if !strings.Contains(card, "重新存草稿至百家号") || strings.Contains(card, "重新存草稿至头条号") || strings.Contains(card, "云梭") {
-		t.Fatalf("只有失败的给重新存草稿、不提云梭：%s", card)
+	if !strings.Contains(card, "重新同步至百家号") || strings.Contains(card, "重新同步至头条号") || strings.Contains(card, "云梭") {
+		t.Fatalf("只有失败的给重新同步、不提云梭：%s", card)
 	}
 	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, job, testBaijiaAccountID))
 	if out.toastType != "success" || len(robot.saves) != 1 || robot.platforms[0] != "baijiahao" {
-		t.Fatalf("点重新存草稿应只给百家号存一篇：%+v platforms=%v", out, robot.platforms)
+		t.Fatalf("点重新同步应只给百家号存一篇：%+v platforms=%v", out, robot.platforms)
 	}
 	got := mustJob(t, env, job.ID)
-	if lane := mustLane(t, got, testBaijiaAccountID); lane.Driver != externalDriverRobot || lane.State != publishExternalDistributionDraftSaved {
-		t.Fatalf("重存后换成经分发服务的 lane：%+v", lane)
+	if lane := mustLane(t, got, testBaijiaAccountID); lane.Driver != externalDriverRobot || lane.State != publishExternalDistributionSucceeded {
+		t.Fatalf("重新同步后换成经分发服务的 lane：%+v", lane)
 	}
 	if lane := mustLane(t, got, testToutiaoAccountID); lane.State != publishExternalDistributionSucceeded || lane.Driver != "" {
 		t.Fatalf("已发布的旧 lane 不动：%+v", lane)

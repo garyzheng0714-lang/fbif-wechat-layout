@@ -73,16 +73,19 @@ type externalPlatformState struct {
 	Tone   string
 	Reason string
 	URL    string
-	// ManageURL 已发布但还没有文章链接：平台后台内容管理页。
+	// ManageURL 没有文章链接、要去平台后台看的（已发布没拿到链接、没通过、待核对）：平台后台内容管理页。
 	ManageURL string
-	// DraftURL 只存了草稿（分发服务）：平台上这篇草稿的编辑页。
+	// DraftURL 停在草稿的（读回对不上没发、发布没成）：平台上这篇草稿的编辑页。
 	DraftURL string
 	Title    string // 平台上的标题（推送时冻结）
-	Editable bool   // 还能改标题/摘要/封面（没推过，或受理前失败）
+	// Syncable 卡片上给「同步至X」「重新同步至X」按钮：没推过，或失败了能重推。
+	Syncable bool
+	// Editable 还能改标题/摘要/封面：没推过，或失败了、草稿也还没存进平台。
+	Editable bool
 	NeedsFix bool
-	// Fidelity 已发布的平台上正文与推出去的对不上（外发保真核对），如「平台上小标题少了 1 处」。
+	// Fidelity 分发服务那边要人留意的（模型兜底改点了别的按钮，或旧稿读回对不上）。
 	Fidelity string
-	// FailedLabel 失败且能重推时原因前那句（「上次同步失败」「上次存草稿失败」），按上次的送稿方式说。
+	// FailedLabel 失败且能重推时原因前那句（「上次同步失败」）。
 	FailedLabel string
 }
 
@@ -94,7 +97,7 @@ func externalPlatformStatus(job publishJob, target externalAccount) externalPlat
 			state.Status, state.Tone = "人工已发", "green"
 		case lane.Driver == externalDriverRobot:
 			return robotPlatformState(lane, platformForAccount(target))
-		// 以下是云梭（2026-10-24 下线）留下的旧 lane，只显示；失败的可以重新存草稿。
+		// 以下是云梭（2026-10-24 下线）留下的旧 lane，只显示；失败的可以重新同步。
 		case lane.State == publishExternalDistributionSucceeded:
 			state.Status, state.Tone = "已发布", "green"
 			state.Fidelity = externalLaneFidelityNote(lane)
@@ -107,11 +110,12 @@ func externalPlatformStatus(job publishJob, target externalAccount) externalPlat
 		default:
 			state.Status, state.Tone, state.FailedLabel = "失败", "red", "上次同步失败"
 			state.Reason = externalLaneFailureReason(lane)
-			state.Editable = externalLaneCanSafeRetry(lane)
+			state.Syncable = externalLaneCanSafeRetry(lane)
+			state.Editable = state.Syncable
 		}
 		return state
 	}
-	state := externalPlatformState{Status: "未同步", Tone: "grey", Editable: true}
+	state := externalPlatformState{Status: "未同步", Tone: "grey", Syncable: true, Editable: true}
 	if draft, ok := externalDraftFor(job, target.ID); ok && len(draft.Issues) > 0 {
 		state.Status, state.Tone, state.NeedsFix = "待修改", "orange", true
 		state.Reason = externalIssueSummaryText(draft.Issues)
@@ -138,9 +142,9 @@ type externalEditPlatform struct {
 	URL     string `json:"url,omitempty"`
 	// ManageURL 已发布但还没有文章链接：去平台后台看发布情况。
 	ManageURL string `json:"manage_url,omitempty"`
-	// DraftURL 只存了草稿：平台上这篇草稿的编辑页。
+	// DraftURL 停在草稿的：平台上这篇草稿的编辑页。
 	DraftURL string `json:"draft_url,omitempty"`
-	// Action 提交按钮上「保存并……」后半句：「同步至头条号」「存草稿至百家号」。
+	// Action 提交按钮上「保存并……」后半句：「同步至头条号」。
 	Action   string `json:"action"`
 	Editable bool   `json:"editable"`
 	NeedsFix bool   `json:"needs_fix"`
@@ -487,7 +491,7 @@ func (p *publishPipeline) uploadExternalCover(ctx context.Context, jobID int64, 
 	if err := externalDistributionEligibility(job); err != nil {
 		return job, publishExternalCoverCandidate{}, err
 	}
-	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneCanSafeRetry(lane) {
+	if lane, pushed := externalLaneFor(job, target.ID); pushed && !externalLaneEditable(lane) {
 		return job, publishExternalCoverCandidate{}, externalDraftLocked(profile)
 	}
 	candidate, err := p.storeExternalCoverBytes(ctx, jobID, data, format, config.Width, config.Height, actor)

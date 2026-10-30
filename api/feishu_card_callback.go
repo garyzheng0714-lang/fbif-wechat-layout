@@ -384,7 +384,7 @@ func (p *publishPipeline) handleExternalDistributionCardAction(job publishJob, a
 		}
 		if lane, ok := externalLaneFor(current, target.ID); ok && !externalLaneCanSafeRetry(lane) {
 			state := externalPlatformStatus(current, target)
-			return reviewCardOutcome{toastType: "info", toastContent: target.label() + state.Status + "，不会重复推送"}, true
+			return reviewCardOutcome{toastType: "info", toastContent: target.label() + state.Status + "，不会重复同步"}, true
 		}
 		return reviewCardOutcome{}, false
 	}

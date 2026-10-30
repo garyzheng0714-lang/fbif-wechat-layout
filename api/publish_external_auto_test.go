@@ -73,15 +73,15 @@ func TestExternalAutoDistributionAfterAutoPublishPushesOnlyAutoTargets(t *testin
 	if got.Stage != publishStagePublished {
 		t.Fatalf("应先自动公开，实际 %s error=%q", got.Stage, got.Error)
 	}
-	if len(robot.saves) != 1 || robot.saves[0].Account != testToutiaoAccountID {
-		t.Fatalf("原创公开后只给 auto 账号（头条号）自动存一次草稿，实际 %+v", robot.saves)
+	if len(robot.saves) != 1 || robot.saves[0].Account != testToutiaoAccountID || len(robot.publishes) != 1 {
+		t.Fatalf("原创公开后只给 auto 账号（头条号）自动同步一次，实际 saves=%+v publishes=%v", robot.saves, robot.publishes)
 	}
 	lane := mustLane(t, got, testToutiaoAccountID)
 	if lane.RequestedBy != publishExternalAutoActor || !strings.HasPrefix(lane.Attribution, "original_auto_confirmed: ") {
 		t.Fatalf("应留下系统自动外发留痕：%+v", lane)
 	}
-	if lane.State != publishExternalDistributionDraftSaved || got.ExternalDistributionAutoPending != "" {
-		t.Fatalf("应存好草稿并清掉待办：lane=%+v pending=%q", lane, got.ExternalDistributionAutoPending)
+	if lane.State != publishExternalDistributionSucceeded || lane.URL != testRobotArticleURL("toutiao", testRobotArticleID) || got.ExternalDistributionAutoPending != "" {
+		t.Fatalf("应发出去、记下文章链接并清掉待办：lane=%+v pending=%q", lane, got.ExternalDistributionAutoPending)
 	}
 	if len(got.ExternalDistributionLanes) != 1 {
 		t.Fatalf("任务只应有头条号一条 lane：%+v", got.ExternalDistributionLanes)
@@ -293,7 +293,7 @@ func TestExternalAutoBackfillPacesAcrossHoursAndDays(t *testing.T) {
 	for i, id := range ids {
 		got, _ := env.store.byID(id)
 		lane := mustLane(t, got, testToutiaoAccountID)
-		if lane.State != publishExternalDistributionDraftSaved || got.ExternalDistributionAutoPending != "" || lane.RequestedBy != publishExternalAutoBackfillActor {
+		if lane.State != publishExternalDistributionSucceeded || got.ExternalDistributionAutoPending != "" || lane.RequestedBy != publishExternalAutoBackfillActor {
 			t.Fatalf("第 %d 篇补发未闭环：lane=%+v pending=%q", i, lane, got.ExternalDistributionAutoPending)
 		}
 	}
@@ -379,8 +379,8 @@ func TestExternalAutoDistributionTurnedOffDropsPending(t *testing.T) {
 	}
 }
 
-// TestExternalDistributionCardPushesRetryAndMissingSeparately 卡片按钮存「失败的」和「还没存过的」平台，
-// 每个平台单独存一次；已存好草稿的平台不碰。
+// TestExternalDistributionCardPushesRetryAndMissingSeparately 卡片按钮同步「失败的」和「还没同步过的」平台，
+// 每个平台单独同步一次；已发布、停在草稿的平台不碰。
 func TestExternalDistributionCardPushesRetryAndMissingSeparately(t *testing.T) {
 	setTestAutoAccounts(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
@@ -391,19 +391,19 @@ func TestExternalDistributionCardPushesRetryAndMissingSeparately(t *testing.T) {
 	failed.Driver = externalDriverRobot
 	job = setTestLanes(t, env, job.ID, failed)
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
-		t.Fatalf("失败的平台应可重新存：%v", err)
+		t.Fatalf("失败的平台应可重新同步：%v", err)
 	}
-	if fmt.Sprint(robot.platforms) != "[toutiao baijiahao]" {
-		t.Fatalf("应按平台各存一次（头条重存 + 百家号首存）：%v", robot.platforms)
+	if fmt.Sprint(robot.platforms) != "[toutiao baijiahao]" || len(robot.publishes) != 2 {
+		t.Fatalf("应按平台各同步一次（头条重新同步 + 百家号首次）：%v %v", robot.platforms, robot.publishes)
 	}
 	got, _ := env.store.byID(job.ID)
 	for _, id := range []string{testToutiaoAccountID, testBaijiaAccountID} {
-		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionDraftSaved || lane.Driver != externalDriverRobot || lane.RequestedBy != "ou_reviewer_1" {
-			t.Fatalf("两个平台都应由审核人存好草稿：%+v", lane)
+		if lane := mustLane(t, got, id); lane.State != publishExternalDistributionSucceeded || lane.Driver != externalDriverRobot || lane.RequestedBy != "ou_reviewer_1" {
+			t.Fatalf("两个平台都应由审核人同步、发出去：%+v", lane)
 		}
 	}
 
-	// 头条号已存好草稿：卡片不再给它存，只剩没存过的平台。
+	// 头条号停在草稿（2026-10-30 之前只存草稿）：卡片不再给它同步，只剩没同步过的平台。
 	second := createPublishedDistributionJobWithKey(t, env, "site:already-saved", "FBIF食品饮料创新")
 	saved := testLane(testToutiaoAccountID, "头条号", publishExternalDistributionDraftSaved)
 	saved.Driver, saved.ContentPK = externalDriverRobot, "draft-saved-before"
@@ -412,7 +412,7 @@ func TestExternalDistributionCardPushesRetryAndMissingSeparately(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(robot.saves) != 3 || robot.platforms[2] != "baijiahao" {
-		t.Fatalf("已存好的头条号不得再存，只存百家号：%v", robot.platforms)
+		t.Fatalf("停在草稿的头条号不得再存、再发，只同步百家号：%v", robot.platforms)
 	}
 	if lane := mustLane(t, mustJob(t, env, second.ID), testToutiaoAccountID); lane.ContentPK != "draft-saved-before" || lane.State != publishExternalDistributionDraftSaved {
 		t.Fatalf("头条号 lane 不得被改：%+v", lane)
@@ -443,11 +443,11 @@ func TestExternalDistributionLanesFailIndependently(t *testing.T) {
 	if cover.Width != 300 || cover.Height != 200 || cover.MinWidth != 452 || cover.MinHeight != 352 {
 		t.Fatalf("头条号应记下封面问题与现状：%+v", draft)
 	}
-	if lane := mustLane(t, got, testBaijiaAccountID); lane.State != publishExternalDistributionDraftSaved {
-		t.Fatalf("百家号应照常存好草稿：%+v", lane)
+	if lane := mustLane(t, got, testBaijiaAccountID); lane.State != publishExternalDistributionSucceeded {
+		t.Fatalf("百家号应照常同步：%+v", lane)
 	}
 	body := distributionSectionJSON(t, buildReviewDoneCard(got))
-	if !strings.Contains(body, "<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200") || !strings.Contains(body, "保存并存草稿至头条号") {
+	if !strings.Contains(body, "<font color='orange'>封面太小</font>：头条号封面至少 452×352，现在 300×200") || !strings.Contains(body, "保存并同步至头条号") {
 		t.Fatalf("卡片应在头条号块里写清封面问题并给修改表单: %s", body)
 	}
 
@@ -519,7 +519,7 @@ func TestExternalAutoSupplementAddsOnlyMissingAccount(t *testing.T) {
 	setTestLanes(t, env, bothDone.ID,
 		doneLane(testToutiaoAccountID, "头条号", publishExternalDistributionSucceeded, "pk-both"),
 		doneLane(testBaijiaAccountID, "百家号", publishExternalDistributionSucceeded, "pk-both"))
-	// 百家号有失败记录：自动外发不再推，只能从卡片人工重存。
+	// 百家号有失败记录：自动外发不再推，只能从卡片人工重新同步。
 	baijiaRetrying := createPublishedDistributionJobWithKey(t, env, "site:baijia-retrying", "FBIF食品饮料创新")
 	setTestLanes(t, env, baijiaRetrying.ID,
 		doneLane(testToutiaoAccountID, "头条号", publishExternalDistributionSucceeded, "pk-retrying"),
@@ -543,7 +543,7 @@ func TestExternalAutoSupplementAddsOnlyMissingAccount(t *testing.T) {
 	}
 	for _, id := range []int64{toutiaoDone.ID, toutiaoFailed.ID} {
 		got := mustJob(t, env, id)
-		if lane := mustLane(t, got, testBaijiaAccountID); lane.State != publishExternalDistributionDraftSaved || lane.RequestedBy != publishExternalAutoBackfillActor {
+		if lane := mustLane(t, got, testBaijiaAccountID); lane.State != publishExternalDistributionSucceeded || lane.RequestedBy != publishExternalAutoBackfillActor {
 			t.Fatalf("任务 #%d 百家号应补发成功：%+v", id, lane)
 		}
 		if got.ExternalDistributionAutoPending != "" {
@@ -558,8 +558,8 @@ func TestExternalAutoSupplementAddsOnlyMissingAccount(t *testing.T) {
 		t.Fatalf("头条号失败的旧记录不得被覆盖：%+v", lane)
 	}
 	body := distributionSectionJSON(t, buildReviewDoneCard(mustJob(t, env, toutiaoDone.ID)))
-	if strings.Count(body, "<font color='green'>已发布</font>") != 1 || !strings.Contains(body, "<font color='green'>草稿已存（未发布）</font>") {
-		t.Fatalf("单篇卡应把头条号列为已发布、百家号草稿已存: %s", body)
+	if strings.Count(body, "<font color='green'>已发布</font>") != 2 {
+		t.Fatalf("单篇卡应把头条号、补发的百家号都列为已发布: %s", body)
 	}
 	for _, id := range []int64{bothDone.ID, baijiaRetrying.ID} {
 		other := mustJob(t, env, id)
@@ -581,8 +581,8 @@ func TestExternalAutoSupplementAddsOnlyMissingAccount(t *testing.T) {
 	}
 }
 
-// TestExternalAutoSupplementSafeRetryStaysOnCard 补发的百家号没存成：自动外发不接手（防止反复失败
-// 刷名额），只走审核卡重存，且只存百家号；头条号 lane 不动。
+// TestExternalAutoSupplementSafeRetryStaysOnCard 补发的百家号没同步成：自动外发不接手（防止反复失败
+// 刷名额），只走审核卡重新同步，且只同步百家号；头条号 lane 不动。
 func TestExternalAutoSupplementSafeRetryStaysOnCard(t *testing.T) {
 	setTestBothAutoAccounts(t)
 	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
@@ -595,20 +595,19 @@ func TestExternalAutoSupplementSafeRetryStaysOnCard(t *testing.T) {
 	markAutoPending(t, env, job.ID, publishExternalAutoKindBackfill)
 	env.pipeline.runExternalAutoDistribution()
 	if got := mustJob(t, env, job.ID); len(robot.saves) != 0 || got.ExternalDistributionAutoPending != "" {
-		t.Fatalf("失败只走卡片重存，自动外发不接手：saves=%d pending=%q", len(robot.saves), got.ExternalDistributionAutoPending)
+		t.Fatalf("失败只走卡片重新同步，自动外发不接手：saves=%d pending=%q", len(robot.saves), got.ExternalDistributionAutoPending)
 	}
 	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
-		t.Fatalf("失败的平台应可重新存：%v", err)
+		t.Fatalf("失败的平台应可重新同步：%v", err)
 	}
-	if len(robot.saves) != 1 {
-		t.Fatalf("重存只存百家号：%v", robot.platforms)
+	if len(robot.saves) != 1 || len(robot.publishes) != 1 {
+		t.Fatalf("重新同步只同步百家号：%v %v", robot.platforms, robot.publishes)
 	}
 	got := mustJob(t, env, job.ID)
 	if lane := mustLane(t, got, testToutiaoAccountID); lane.ContentPK != "pk-toutiao" || lane.PayloadHash != "sha256:first-round" {
 		t.Fatalf("头条号 lane 不得改动：%+v", lane)
 	}
-	if body := distributionSectionJSON(t, buildReviewDoneCard(got)); strings.Count(body, "<font color='green'>已发布</font>") != 1 ||
-		!strings.Contains(body, "<font color='green'>草稿已存（未发布）</font>") {
-		t.Fatalf("重试成功后卡片应头条号已发布、百家号草稿已存: %s", body)
+	if body := distributionSectionJSON(t, buildReviewDoneCard(got)); strings.Count(body, "<font color='green'>已发布</font>") != 2 {
+		t.Fatalf("重试成功后卡片应两个平台都已发布: %s", body)
 	}
 }

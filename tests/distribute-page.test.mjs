@@ -54,7 +54,7 @@ test('改稿页：头条号标题英文数字算半个字', () => {
   assert.deepEqual(counterState(tt289 + '好', 30, 15, toutiao), { length: 31, over: 1, text: '超出 1 字', invalid: true });
 });
 
-test('改稿页：写清超了多少、给建议，选大图作封面后保存并存草稿', async () => {
+test('改稿页：写清超了多少、给建议，选大图作封面后保存并同步', async () => {
   const { document, window } = parseHTML('<p id="article"></p><div id="root"></div>');
   globalThis.Event = window.Event;
   const root = document.querySelector('#root');
@@ -64,7 +64,7 @@ test('改稿页：写清超了多少、给建议，选大图作封面后保存�
     calls.push({ path, method: init.method || 'GET', body: init.body });
     if (init.method === 'PUT') {
       current = platformsView();
-      current.platforms[0] = { ...current.platforms[0], status: '存草稿中', tone: 'blue', editable: false, needs_fix: false, title: '老茶铺把茶做成零食，年营收过亿' };
+      current.platforms[0] = { ...current.platforms[0], status: '同步中', tone: 'blue', editable: false, needs_fix: false, title: '老茶铺把茶做成零食，年营收过亿' };
       return Response.json(current);
     }
     return Response.json(current);
@@ -104,7 +104,7 @@ test('改稿页：写清超了多少、给建议，选大图作封面后保存�
   await waitFor(() => calls.some(call => call.method === 'PUT'));
   const put = calls.find(call => call.method === 'PUT');
   assert.deepEqual(JSON.parse(put.body), { account: 'recToutiao', title: '老茶铺把茶做成零食，年营收过亿', cover_url: 'https://cdn.example.com/big.jpg' });
-  await waitFor(() => /存草稿中/.test(root.querySelector('[data-account="recToutiao"] .dist-status').textContent));
+  await waitFor(() => /同步中/.test(root.querySelector('[data-account="recToutiao"] .dist-status').textContent));
 });
 
 test('改稿页：已发布但还没拿到文章链接，给平台后台看发布情况', () => {
@@ -115,20 +115,42 @@ test('改稿页：已发布但还没拿到文章链接，给平台后台看发�
   assert.doesNotMatch(linked, /后台查看/, '有文章链接就不再给后台');
 });
 
-// 2026-10-22 用户裁定：百家号经自己的分发服务只存草稿。按钮后半句由服务端给，存好的给草稿编辑页。
-test('改稿页：只存了草稿的平台给草稿箱链接，按钮照实说存草稿', () => {
+// 2026-10-30 用户：「我们的原创文章发出来就自动同步……自动同步之后，把文档链接返回到卡片上」。按钮后半句由服务端给
+// （同步至X：存草稿再公开发布）；读回对不上停在草稿（未发布）的给草稿编辑页。
+test('改稿页：停在草稿的平台给草稿箱链接，按钮说同步', () => {
   const draftURL = 'https://baijiahao.baidu.com/builder/rc/edit?type=news&amp;article_id=1846000000000000001';
-  const saved = renderPlatform({
-    account: 'recBaijia', name: '百家号', status: '草稿已存（未发布）', tone: 'green', editable: false,
-    draft_url: 'https://baijiahao.baidu.com/builder/rc/edit?type=news&article_id=1846000000000000001',
-    manage_url: 'https://baijiahao.baidu.com/builder/rc/content', action: '存草稿至百家号',
+  const held = renderPlatform({
+    account: 'recBaijia', name: '百家号', status: '未发布', tone: 'orange', editable: false,
+    reason: '草稿与原文对不上，没有发布：小标题：送去 2 处，读回 1 处',
+    draft_url: 'https://baijiahao.baidu.com/builder/rc/edit?type=news&article_id=1846000000000000001', action: '同步至百家号',
   }, {}, longTitle);
-  assert.ok(saved.includes(`<a href="${draftURL}" target="_blank" rel="noopener">去百家号草稿箱查看</a>`), saved);
-  assert.doesNotMatch(saved, /后台查看/, '有草稿地址就不再给后台');
-  const editing = renderPlatform({ ...platformsView().platforms[0], account: 'recBaijia', name: '百家号', action: '存草稿至百家号' }, {}, longTitle);
-  assert.match(editing, /<button type="submit" class="dist-primary">保存并存草稿至百家号<\/button>/);
+  assert.ok(held.includes(`<a href="${draftURL}" target="_blank" rel="noopener">去百家号草稿箱查看</a>`), held);
+  assert.match(held, /草稿与原文对不上，没有发布/);
+  assert.doesNotMatch(held, /后台查看/, '有草稿地址就不再给后台');
+  const editing = renderPlatform({ ...platformsView().platforms[0], account: 'recBaijia', name: '百家号', action: '同步至百家号' }, {}, longTitle);
+  assert.match(editing, /<button type="submit" class="dist-primary">保存并同步至百家号<\/button>/);
   const legacy = renderPlatform(platformsView().platforms[0], {}, longTitle);
-  assert.match(legacy, /<button type="submit" class="dist-primary">保存并存草稿至头条号<\/button>/, '没给 action 时也说存草稿');
+  assert.match(legacy, /<button type="submit" class="dist-primary">保存并同步至头条号<\/button>/, '没给 action 时也说同步');
+});
+
+// 发布中、平台审核中还没出结果：隔一会儿再取，文章链接一出来就显示；有了结果就不再取。
+test('改稿页：同步、发布、审核中自动再取，出结果就停', async () => {
+  const { document } = parseHTML('<p id="article"></p><div id="root"></div>');
+  const statuses = ['发布中', '平台审核中', '已发布'];
+  let served = 0;
+  const request = async () => {
+    const view = platformsView();
+    view.platforms[1] = { ...view.platforms[1], status: statuses[Math.min(served, statuses.length - 1)], editable: false };
+    served += 1;
+    return Response.json(view);
+  };
+  const pending = [];
+  const page = createDistributePage({ root: document.querySelector('#root'), articleEl: document.querySelector('#article'), search: '?job=196&t=sig', request, schedule: fn => pending.push(fn) });
+  await page.load();
+  while (pending.length) {
+    await pending.shift()();
+  }
+  assert.equal(served, 3, '发布中、审核中各再取一次，已发布就停');
 });
 
 test('改稿页：没有签名链接时说清楚从哪打开', async () => {
