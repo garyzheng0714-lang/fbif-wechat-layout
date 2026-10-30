@@ -205,6 +205,8 @@ type publishPipeline struct {
 	reviewCardSentAt      func(ctx context.Context, job publishJob, chatID, messageID string) (time.Time, error)
 	externalSuggest       func(ctx context.Context, kind, current string, min, max int) (string, error)
 	externalCoverUploader func(ctx context.Context, job publishJob, imgURL string) (string, string, error)
+	// proofreadMemberLister 仅测试注入：审核群成员连同飞书资料里的笔名（默认用审核应用调飞书）。
+	proofreadMemberLister func(ctx context.Context, appProfileID, chatID string) ([]proofreadMember, error)
 	// distributionOwnerLister 仅测试注入：读取审核群成员（默认用审核应用调飞书）。
 	distributionOwnerLister func(ctx context.Context, appProfileID, chatID string) ([]publishDistributionOwner, error)
 	// externalCoverStore 仅测试注入：侧边栏上传的封面转存（默认 OSS）。

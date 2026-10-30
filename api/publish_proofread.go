@@ -289,11 +289,14 @@ func (p *publishPipeline) runProofreadReminder(ctx context.Context, claimed publ
 	if err != nil {
 		return round, nil, "", err
 	}
-	owners := p.publishProofreadOwners(settings.AppProfileID)
+	owners, missing, err := p.proofreadRecipients(ctx, claimed, settings)
+	if err != nil {
+		return round, nil, "", err
+	}
 	if len(owners) == 0 {
 		return round, nil, "没有设置校对负责人，未发提醒", nil
 	}
-	post := buildProofreadReminder(claimed, owners)
+	post := buildProofreadReminder(claimed, owners, missing)
 	opened := map[string]string{}
 	var failures []string
 	for _, chatID := range settings.ChatIDs {
@@ -344,9 +347,9 @@ func (p *publishPipeline) publishProofreadOwners(appProfileID string) []publishD
 	return settings.ProofreadOwners
 }
 
-// buildProofreadReminder 话题里的一条：@ 负责人，哪篇、几处；每处一行粗体「X」应为「Y」，下一行原句；
-// 最后一句说不影响同步、请核对。
-func buildProofreadReminder(job publishJob, owners []publishDistributionOwner) map[string]any {
+// buildProofreadReminder 话题里的一条：@ 作者编辑或校对负责人，哪篇、几处；每处一行粗体「X」应为「Y」，下一行原句；
+// 原创稿署名没对上群里的人时说一句没找到谁；最后一句说不影响同步、请核对。
+func buildProofreadReminder(job publishJob, owners []publishDistributionOwner, missing []string) map[string]any {
 	findings := job.ProofreadReminder.Findings
 	var head []any
 	for _, owner := range owners {
@@ -363,6 +366,10 @@ func buildProofreadReminder(job publishJob, owners []publishDistributionOwner) m
 		if evidence := proofreadPlain(finding.Evidence, 80); evidence != "" {
 			lines = append(lines, []any{postText("原句："+evidence, false)})
 		}
+	}
+	if len(missing) > 0 {
+		lines = append(lines, []any{postText(fmt.Sprintf("没在审核群里找到署名里的「%s」：请把作者拉进群，并在飞书资料里填上笔名。",
+			strings.Join(missing, "」「")), false)})
 	}
 	lines = append(lines, []any{postText("不影响同步和发布，确认后改正即可。", false)})
 	return postMessage(lines)

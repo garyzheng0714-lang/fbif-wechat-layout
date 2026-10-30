@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -419,5 +420,137 @@ func TestProofreadSmallEditMatchesProductionDryRun(t *testing.T) {
 		[]publishRiskItem{{Evidence: "提示：\n提示：本文产品案例为概念作品"}}, "提示：\n提示：本文产品案例为概念作品")
 	if err != nil || len(findings) != 0 {
 		t.Fatalf("跨行的排版残留不提醒：%+v %v", findings, err)
+	}
+}
+
+// testProofreadMembers 审核群：真名来自群成员接口，笔名来自各人的飞书资料（英文名或别名）。
+func testProofreadMembers(env *publishTestEnv, members ...proofreadMember) {
+	env.pipeline.proofreadMemberLister = func(context.Context, string, string) ([]proofreadMember, error) {
+		return members, nil
+	}
+}
+
+func setProofreadByline(t *testing.T, env *publishTestEnv, jobID int64, sourceName, byline string) {
+	t.Helper()
+	if _, err := env.store.update(jobID, func(current *publishJob) {
+		current.SourceName = sourceName
+		current.BlocksJSON = `[{"k":"txt","text":"` + byline + `"},{"k":"txt","text":"` + testProofreadBody + `"}]`
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 2026-10-30 用户裁定：「这篇文章如果是我们的原创文章（作者是编辑的，或者说是我们自己的），有错误的地方你就
+// 直接在底下@他，别@我」。原创稿按署名的笔名对上群里的人去 @，不 @ 校对负责人；对不上照旧 @ 校对负责人。
+func TestProofreadReminderMentionsOriginalAuthorsByPenName(t *testing.T) {
+	members := []proofreadMember{
+		{OpenID: "ou_sage", Names: []string{"冷思真", "Sage"}},
+		{OpenID: "ou_bobo", Names: []string{"朱未", "Bobo"}},
+		{OpenID: "ou_mote", Names: []string{"陈实", "Mote"}},
+		{OpenID: "ou_designer", Names: []string{"胖兔"}},
+		{OpenID: "ou_proof", Names: []string{"郑梽煌"}},
+	}
+	cases := []struct {
+		name, source, byline string
+		want, notWant        []string
+	}{
+		{"原创稿 @ 作者和编辑", "FBIF食品饮料创新", "作者：Sage，编辑：Bobo，设计：胖兔",
+			[]string{`"user_id":"ou_sage"`, `"user_id":"ou_bobo"`},
+			[]string{`"user_id":"ou_proof"`, `"user_id":"ou_designer"`, "没在审核群里找到"}},
+		{"署名英文名连着中文名、资料只写了英文", "FBIF食品饮料创新", "作者：Mote莫特",
+			[]string{`"user_id":"ou_mote"`}, []string{`"user_id":"ou_proof"`}},
+		{"原创稿署名对不上群里的人：照旧 @ 校对负责人并说没找到谁", "FBIF食品饮料创新", "作者：Nova",
+			[]string{`"user_id":"ou_proof"`, "没在审核群里找到署名里的「Nova」"}, []string{`"user_id":"ou_sage"`}},
+		{"转载稿：照旧 @ 校对负责人，不提署名", "观潮新消费", "作者：Sage，编辑：Bobo",
+			[]string{`"user_id":"ou_proof"`}, []string{`"user_id":"ou_sage"`, "没在审核群里找到"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newPublishTestEnv(t)
+			setTestProofreadOwners(t, env, publishDistributionOwner{OpenID: "ou_proof", Name: "郑梽煌"})
+			testProofreadMembers(env, members...)
+			stubProofreadVerify(t, env, testProofreadDefinite)
+			sent := captureProofreadReminders(t, env)
+			job := seedProofreadJob(t, env, publishStagePublished, true)
+			setProofreadByline(t, env, job.ID, tc.source, tc.byline)
+
+			env.pipeline.dispatchProofreadReminder(job.ID)
+			if len(*sent) != 1 {
+				t.Fatalf("应发一条提醒：%+v", *sent)
+			}
+			post := (*sent)[0].post
+			for _, want := range tc.want {
+				if !strings.Contains(post, want) {
+					t.Fatalf("提醒缺少 %q：%s", want, post)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(post, notWant) {
+					t.Fatalf("提醒不该有 %q：%s", notWant, post)
+				}
+			}
+		})
+	}
+}
+
+// 群成员读不到时不 @ 错人：这一轮记失败、退避重试（与发送失败同一条路）。
+func TestProofreadReminderRetriesWhenMembersUnavailable(t *testing.T) {
+	env := newPublishTestEnv(t)
+	setTestProofreadOwners(t, env, publishDistributionOwner{OpenID: "ou_proof", Name: "郑梽煌"})
+	env.pipeline.proofreadMemberLister = func(context.Context, string, string) ([]proofreadMember, error) {
+		return nil, errors.New("飞书群成员接口不可达")
+	}
+	stubProofreadVerify(t, env, testProofreadDefinite)
+	sent := captureProofreadReminders(t, env)
+	job := seedProofreadJob(t, env, publishStagePublished, true)
+	setProofreadByline(t, env, job.ID, "FBIF食品饮料创新", "作者：Sage")
+
+	env.pipeline.dispatchProofreadReminder(job.ID)
+	if len(*sent) != 0 {
+		t.Fatalf("读不到群成员时不该发：%+v", *sent)
+	}
+	if r := mustJob(t, env, job.ID).ProofreadReminder; r.Sent != "" || !strings.Contains(r.Error, "飞书群成员接口不可达") {
+		t.Fatalf("应记失败等重试：%+v", r)
+	}
+}
+
+// 同一个笔名对上不止一个人就当没找到：宁可 @ 校对负责人，也不 @ 错人。
+func TestMatchProofreadMembersRefusesAmbiguousPenName(t *testing.T) {
+	members := []proofreadMember{
+		{OpenID: "ou_a", Names: []string{"杜青", "Kiki"}},
+		{OpenID: "ou_b", Names: []string{"李琪", "kiki"}},
+		{OpenID: "ou_c", Names: []string{"甘甜", "Riri"}},
+	}
+	matched, missing := matchProofreadMembers([]string{"kiki", "Riri"}, members)
+	if len(matched) != 1 || matched[0].OpenID != "ou_c" || len(missing) != 1 || missing[0] != "kiki" {
+		t.Fatalf("matched=%+v missing=%v", matched, missing)
+	}
+}
+
+// 笔名在飞书资料的英文名或别名里；审核应用没开通读通讯录时报错（调用方只用真名、照旧 @ 校对负责人）。
+func TestFeishuUserProfileNamesReadsEnNameAndNickname(t *testing.T) {
+	denied := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			fmt.Fprint(w, `{"code":0,"msg":"ok","tenant_access_token":"tok","expire":7200}`)
+		case denied:
+			fmt.Fprint(w, `{"code":99991672,"msg":"Access denied. One of the following scopes is required: [contact:contact.base:readonly]"}`)
+		case r.URL.Path == "/open-apis/contact/v3/users/ou_mote" && r.URL.Query().Get("user_id_type") == "open_id":
+			fmt.Fprint(w, `{"code":0,"data":{"user":{"name":"陈实","en_name":"Mote","nickname":"Mote莫特"}}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	n := &feishuNotifier{baseURL: srv.URL, appID: "cli_test", appSecret: "secret_test", httpClient: srv.Client()}
+	names, err := n.userProfileNames(context.Background(), "ou_mote")
+	if err != nil || strings.Join(names, ",") != "Mote,Mote莫特" {
+		t.Fatalf("names=%v err=%v", names, err)
+	}
+	denied = true
+	if _, err := n.userProfileNames(context.Background(), "ou_mote"); err == nil || !strings.Contains(err.Error(), "99991672") {
+		t.Fatalf("没权限应报错：%v", err)
 	}
 }
