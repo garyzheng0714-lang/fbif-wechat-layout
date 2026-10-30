@@ -188,8 +188,8 @@ func (p *publishPipeline) proofreadReviewMembers(ctx context.Context, job publis
 	return out, nil
 }
 
-// readProofreadMembers 审核应用读群成员和各人的飞书资料。资料读不到（应用没开通读通讯录）只用真名，
-// 笔名对不上就照旧 @ 校对负责人，不挡提醒。
+// readProofreadMembers 审核应用读群成员和各人的飞书资料（笔名在别名里）。谁的资料读不到（不在通讯录权限范围，
+// 如生产群里的「用户633772」）就只用他的真名，别人照读；笔名对不上就照旧 @ 校对负责人，不挡提醒。
 func (p *publishPipeline) readProofreadMembers(ctx context.Context, job publishJob, chatID string) ([]proofreadMember, error) {
 	settings, apps, err := p.reviewDeliveryForJob(job)
 	if err != nil {
@@ -204,20 +204,13 @@ func (p *publishPipeline) readProofreadMembers(ctx context.Context, job publishJ
 		return nil, err
 	}
 	out := make([]proofreadMember, 0, len(list))
-	var profileErr error
 	for _, member := range list {
 		names := []string{member.Name}
-		if profileErr == nil {
-			extra, err := notifier.userProfileNames(ctx, member.OpenID)
-			if err != nil {
-				profileErr = err
-			}
-			names = append(names, extra...)
+		extra, err := notifier.userProfileNames(ctx, member.OpenID)
+		if err != nil {
+			log.Printf("校对提醒：读不到审核群成员 %s 的飞书资料，只用真名：%v", member.Name, err)
 		}
-		out = append(out, proofreadMember{OpenID: member.OpenID, Names: names})
-	}
-	if profileErr != nil {
-		log.Printf("校对提醒：读不到审核群成员的飞书资料，笔名对不上时照旧 @ 校对负责人：%v", profileErr)
+		out = append(out, proofreadMember{OpenID: member.OpenID, Names: append(names, extra...)})
 	}
 	return out, nil
 }

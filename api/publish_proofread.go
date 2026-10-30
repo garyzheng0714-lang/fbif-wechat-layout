@@ -509,7 +509,7 @@ func proofreadOnlyPunctuation(wrong, correct string) bool {
 }
 
 // registerPublishProofreadRoutes 运维入口：对一篇稿按当前风险结论复核并提醒（管理员或服务令牌）。
-// ?dry_run=1 只复核、返回候选与确定的错误，不写库、不发；否则重新复核并发到审核卡话题（同一组错误
+// ?dry_run=1 只复核、返回候选、确定的错误与会 @ 谁，不写库、不发；否则重新复核并发到审核卡话题（同一组错误
 // 已经提醒过的不再发）。只在风险检查写入时自动触发，存量稿不会自己补发，需要时走这里。
 func registerPublishProofreadRoutes(mux *http.ServeMux, p *publishPipeline, auth *authService) {
 	mux.HandleFunc("POST /api/publish/jobs/{id}/proofread-reminder", func(w http.ResponseWriter, r *http.Request) {
@@ -538,9 +538,20 @@ func registerPublishProofreadRoutes(mux *http.ServeMux, p *publishPipeline, auth
 				writeError(w, http.StatusBadGateway, err.Error())
 				return
 			}
+			settings, err := p.externalReminderTargets(job)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+			mentions, missing, err := p.proofreadRecipients(ctx, job, settings)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"job_id": job.ID, "dry_run": true,
 				"candidates": publishProofreadCandidates(job.RiskItems), "findings": findings,
+				"bylines": proofreadBylineNames(job), "mentions": mentions, "missing_bylines": missing,
 			})
 			return
 		}

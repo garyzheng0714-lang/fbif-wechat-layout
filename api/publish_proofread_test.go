@@ -381,6 +381,9 @@ func TestProofreadReminderEndpoint(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"findings":[{"wrong":"农业水产省","correct":"农林水产省"`) || len(*sent) != 0 {
 		t.Fatalf("dry_run 只返回复核结果：%d %s sent=%d", rec.Code, rec.Body.String(), len(*sent))
 	}
+	if !strings.Contains(rec.Body.String(), `"mentions":[{"open_id":"ou_proof"`) {
+		t.Fatalf("dry_run 要说清会 @ 谁：%s", rec.Body.String())
+	}
 	if r := mustJob(t, env, job.ID).ProofreadReminder; r.Checked != "" || len(r.Findings) != 0 {
 		t.Fatalf("dry_run 不写库：%+v", r)
 	}
