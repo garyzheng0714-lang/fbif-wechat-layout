@@ -30,11 +30,8 @@ import (
 	"unicode"
 )
 
-// 输入裁剪（控 token 成本，够模型判断即可）：正文纯文本最多 6000 字、候选图最多前 8 张。
-const (
-	aiEnrichMaxBodyRunes = 6000
-	aiEnrichMaxImages    = 8
-)
+// 候选图最多前 8 张。正文一律全文送（2026-10-30 用户裁定：原先只送前 6000 字）。
+const aiEnrichMaxImages = 8
 
 // system prompt 见 editorial_norms.go（M7：从编辑部历史文章倒推的规范 + 词表组装，
 // 语言强制约束「请用简体中文回复」已写在 norms_prompt.md 里）。
@@ -63,7 +60,7 @@ func aiEnrichArticle(ctx context.Context, job publishJob) (publishEnrichment, er
 	if strings.TrimSpace(job.SourceCoverURL) == "" {
 		images = enrichCandidateImages(job) // 有公众号原封面时封面已定，不再花多模态 token 选图
 	}
-	bodyText := truncateRunes(htmlToPlainText(job.ContentHTML), aiEnrichMaxBodyRunes)
+	bodyText := htmlToPlainText(job.ContentHTML)
 	evidence := job.Title + "\n" + bodyText
 
 	userText := "文章标题：" + job.Title + "\n\n正文（纯文本）：\n" + bodyText

@@ -149,8 +149,8 @@ func TestEvidenceGroundingToleratesHarmlessRewrites(t *testing.T) {
 	}
 }
 
-// 喂给模型的输入必须带三样东西，缺一个都对应一类已知误报/漏报。
-func TestBuildRiskUserInputCarriesDateTruncationAndFence(t *testing.T) {
+// 喂给模型的输入必须带日期、分隔标记和全文，缺一个都对应一类已知误报/漏报。
+func TestBuildRiskUserInputCarriesDateFullBodyAndFence(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	short := publishJob{Title: "标题", ContentHTML: "<p>短正文</p>"}
 	body, msg := buildRiskUserInput(short, now)
@@ -160,19 +160,18 @@ func TestBuildRiskUserInputCarriesDateTruncationAndFence(t *testing.T) {
 	if !strings.Contains(msg, "<正文开始>") || !strings.Contains(msg, "<正文结束>") {
 		t.Fatalf("正文必须有分隔标记（注入防线）：%s", msg)
 	}
-	if strings.Contains(msg, "已截断") {
-		t.Fatal("正文没超长时不该说被截断")
-	}
 	if body != "短正文" {
 		t.Fatalf("返回的正文应是模型实际看到的那份，实际 %q", body)
 	}
 
-	long := publishJob{Title: "标题", ContentHTML: "<p>" + strings.Repeat("正", publishRiskMaxBodyRunes+500) + "</p>"}
+	// 线上最长稿 3.8 万字（#321 世界茶叶简史）；原先只送前 8000 字，后半篇的错从没查过。
+	tail := "文末这句里有错别字腌采"
+	long := publishJob{Title: "标题", ContentHTML: "<p>" + strings.Repeat("正", 40000) + "</p><p>" + tail + "</p>"}
 	longBody, longMsg := buildRiskUserInput(long, now)
-	if !strings.Contains(longMsg, "已截断") {
-		t.Fatal("超长正文必须显式告知截断，否则模型会把断句报成录入事故、并对未见内容说未发现")
+	if !strings.Contains(longBody, tail) || !strings.Contains(longMsg, tail) {
+		t.Fatal("长稿必须全文送给模型，最后一段也要在")
 	}
-	if n := len([]rune(longBody)); n != publishRiskMaxBodyRunes {
-		t.Fatalf("正文应被截到 %d 字，实际 %d", publishRiskMaxBodyRunes, n)
+	if strings.Contains(longMsg, "截断") {
+		t.Fatalf("正文不截断，不该提截断：%s", longMsg[:200])
 	}
 }

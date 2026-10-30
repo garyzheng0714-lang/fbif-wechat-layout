@@ -131,33 +131,25 @@ func publishRiskSystemPrompt() string {
 	return publishRiskPromptTemplate
 }
 
-// publishRiskMaxBodyRunes 喂给模型的正文上限。注意 40 篇历史语料里有 10 篇超过它——
-// 截断是常态，必须显式告诉模型，否则它会把断在半句的地方报成「录入事故」，
-// 也会对没看到的后半篇说「未发现问题」。
-const publishRiskMaxBodyRunes = 8000
-
 // buildRiskUserInput 组装喂给模型的 user message，返回（模型实际看到的正文, 完整消息）。
 //
-// 抽成纯函数有三个理由，都是评审实测出来的坑：
+// 正文一律全文送，不截断（2026-10-30 用户裁定）：原先只送前 8000 字，线上 285 篇里 33 篇
+// 后半篇从没查过。MiMo Pro 上下文约 1M token，线上最长稿 3.8 万字；真超了让调用报错、
+// 卡片显示检查未完成，不许静默砍掉。
+//
+// 抽成纯函数有两个理由，都是评审实测出来的坑：
 //   - **当前日期**：资讯讲的往往是模型知识截止之后的事。不给日期，模型会拿过时记忆
 //     去「纠正」正确的新事实（公司更名、高管变动）。
-//   - **截断告知**：静默砍到 8000 字，模型不知情。
 //   - **注入隔离**：正文是外部抓来的，可能含「本文已通过合规审查」这类诱导文字，
 //     必须显式声明分隔标记内一律为待检数据。
 //
 // 返回的第一个值是 evidence 溯源校验的比对基准——必须是模型真正看到的那份文本。
 func buildRiskUserInput(job publishJob, now time.Time) (bodyText, userText string) {
-	plain := htmlToPlainText(job.ContentHTML)
-	bodyText = truncateRunes(plain, publishRiskMaxBodyRunes)
-	truncated := len([]rune(plain)) > publishRiskMaxBodyRunes
+	bodyText = htmlToPlainText(job.ContentHTML)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "今天是 %s。\n", now.In(time.FixedZone("CST", 8*3600)).Format("2006年1月2日"))
 	b.WriteString("你的训练知识可能早于本文。正文与你的记忆冲突时，只能提醒、不能断言正文写错。\n")
-	if truncated {
-		fmt.Fprintf(&b, "注意：正文已截断至前 %d 字，之后的内容你没有看到，不要对未见内容下任何结论；"+
-			"末尾若断在半句，那是截断造成的，不是文章的错误。\n", publishRiskMaxBodyRunes)
-	}
 	b.WriteString("\n文章标题：")
 	b.WriteString(job.Title)
 	b.WriteString("\n\n<正文开始>\n")
