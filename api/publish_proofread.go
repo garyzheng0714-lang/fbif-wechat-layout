@@ -398,7 +398,7 @@ func aiVerifyProofread(ctx context.Context, job publishJob, candidates []publish
 	b.WriteString("\n\n初检列出的疑似错误：\n")
 	for i, item := range candidates {
 		fmt.Fprintf(&b, "%d. 原句：%s\n   初检说明：%s\n", i+1,
-			proofreadPlain(item.Evidence, 200), proofreadPlain(item.Reason, 300))
+			strings.Join(strings.Fields(item.Evidence), " "), strings.Join(strings.Fields(item.Reason), " "))
 	}
 	text, err := aiResponsesCall(ctx, aiModel(aiTierPro), publishProofreadPrompt,
 		[]map[string]any{{"type": "input_text", "text": b.String()}})
