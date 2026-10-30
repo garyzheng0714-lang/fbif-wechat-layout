@@ -379,13 +379,20 @@ func safeActionText(text string) string {
 	return safeDistributionMessage(text)
 }
 
-// robotDraftMismatched 分发服务存完当场读回、与送去的正文对不上：这篇不发。
+// robotDraftMismatched 分发服务存完当场读回、全对上才发：对不上的不发，读回本身失败（没核对过）的也不发。
 func robotDraftMismatched(record robotDraftRecord) bool {
-	return len(record.Mismatches) > 0 || (record.Match != nil && !*record.Match)
+	return len(record.Mismatches) > 0 || record.Match == nil || !*record.Match
 }
 
-// robotDraftHeldReason 读回对不上、没发时卡片上那句。
+// robotDraftHeldReason 读回对不上或没读成、没发时卡片上那句。
 func robotDraftHeldReason(record robotDraftRecord) string {
+	if record.Match == nil && len(record.Mismatches) == 0 {
+		reason := "草稿存好后没读回来核对，没有发布"
+		if record.ReadBackError != nil && strings.TrimSpace(*record.ReadBackError) != "" {
+			reason += "：" + safeDistributionMessage(*record.ReadBackError)
+		}
+		return reason
+	}
 	reason := "草稿与原文对不上，没有发布"
 	if len(record.Mismatches) > 0 {
 		reason += "：" + strings.Join(record.Mismatches, "；")

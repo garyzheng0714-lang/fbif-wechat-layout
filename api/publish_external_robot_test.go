@@ -335,6 +335,31 @@ func TestRobotLaneHoldsDraftThatDoesNotMatch(t *testing.T) {
 	}
 }
 
+// TestRobotLaneHoldsDraftNotReadBack 存好了、但读回本身失败（没核对过）：照样不发，卡片写没读回来。
+func TestRobotLaneHoldsDraftNotReadBack(t *testing.T) {
+	setTestRobotOnlyConfig(t)
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	env := newPublishTestEnv(t)
+	robot := useFakeRobot(env)
+	unread := testRobotSavedRecord(testRobotArticleID)
+	readBackError := "打开草稿超时"
+	unread.Match, unread.ReadBack, unread.ReadBackError = nil, nil, &readBackError
+	robot.saveRecord = &unread
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+		t.Fatal(err)
+	}
+	got := mustJob(t, env, job.ID)
+	lane := mustLane(t, got, testBaijiaAccountID)
+	if lane.State != publishExternalDistributionDraftSaved || lane.Error != "草稿存好后没读回来核对，没有发布：打开草稿超时" || len(robot.publishes) != 0 {
+		t.Fatalf("没读回的草稿不发、停在草稿：%+v publishes=%v", lane, robot.publishes)
+	}
+	env.pipeline.followRobotLanes()
+	if len(robot.publishes) != 0 {
+		t.Fatalf("跟进也不发：%v", robot.publishes)
+	}
+}
+
 // TestRobotOldDraftSavedLaneNeverPublished 2026-10-30 之前只存草稿的 lane：不补发。重启、跟进、补查、自动外发、
 // 卡片都不碰它；卡片写「未发布」、给草稿链接。
 func TestRobotOldDraftSavedLaneNeverPublished(t *testing.T) {
