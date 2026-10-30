@@ -477,6 +477,30 @@ test('文末声明：照发布流程交来的原创/转载判定写', () => {
   assert.match(tipOf([p('正文。'), p('提示：'), p('* 本文为FBIF原创，欢迎转发朋友圈；')], { original: true }), /^\*本文为FBIF食品饮料创新（ID：FoodInnovation）原创《T》/);
 });
 
+// 用户 2026-10-30：「网站排版只认得「来源：某某」这一种写法」——开头署名和文末声明照同一个判定写。
+test('开头署名：照后台的原创/转载判定补来源，开头已写明出处的不补', () => {
+  const tail = [p('提示：'), p('* 本文为转载文章。'), p('* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）')];
+  const run = (elems, opts) => applyFoodTalksBehavior(elems, DEFAULT_CONFIG, { isRepost: true, title: 'T', ...opts });
+  const tipText = out => out.find(e => e.k === 'tip').rest_runs.map(r => r.text).join('');
+
+  const named = run([p('作者：董慧'), p('正文。'), ...tail], { provenance: { original: false, source: '晚点LatePost' } });
+  assert.equal(named[0].text, '本文为晚点LatePost原创，作者：董慧，转载请联系出处。');
+  assert.match(tipText(named), /^\*本文为晚点LatePost原创《T》/, '开头和文末同一来源');
+
+  const synthesized = run([p('正文。'), p('作者：董慧'), ...tail], { provenance: { original: false, source: '晚点LatePost' } });
+  assert.equal(synthesized[0].text, '本文为晚点LatePost原创，作者：董慧，转载请联系出处。', '开头没署名时照判定合成');
+
+  // #309：编辑把「本文转载自公众号新周刊」原样留在开头。
+  const declared = run([p('本文转载自公众号新周刊（ID：new-weekly）'), p('作者：hh'), p('编辑：陆一鸣'), p('正文。'), ...tail],
+    { provenance: { original: false, source: '新周刊' } });
+  assert.deepEqual(declared.slice(0, 2).map(textOf), ['作者：hh。', '本文转载自公众号新周刊（ID：new-weekly）'], '开头已写明出处，不再补「本文为新周刊原创」');
+  assert.match(tipText(declared), /^\*本文为新周刊原创《T》/);
+
+  const toggled = run([p('作者：董慧'), p('正文。'), ...tail], { isRepost: false, provenance: { original: false, source: '晚点LatePost' } });
+  assert.equal(toggled[0].text, '作者：董慧', '编辑在网页上点了「原创」');
+  assert.match(tipText(toggled), /^\*本文为FBIF食品饮料创新（ID：FoodInnovation）原创《T》/);
+});
+
 test('转载署名：自家稿与数据出处不补来源', () => {
   const own = applyFoodTalksBehavior([p('作者：Pride'), p('编辑：Bobo'), p('正文。')], DEFAULT_CONFIG, { isRepost: true });
   assert.equal(own[0].text, '作者：Pride，编辑：Bobo。', 'FBIF 原创保持作者行');

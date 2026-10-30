@@ -36,8 +36,13 @@ func TestLayoutWechatURLBecomesBlocksCarrier(t *testing.T) {
 		in.Byline != "作者甲" || in.Title != "原文标题" {
 		t.Fatalf("公众号链接交块：%+v", in)
 	}
+	provenance := in.FetchMeta.Provenance
+	in.FetchMeta.Provenance = nil
 	if in.FetchMeta != (layoutFetchMeta{Title: "原文标题", Source: url, SourceName: "来源号", Byline: "作者甲", OriginalSourceURL: "https://example.com/original"}) {
 		t.Fatalf("fetch-article 的块外字段原样带上：%+v", in.FetchMeta)
+	}
+	if provenance == nil || *provenance != (articleProvenance{Original: false, Source: "来源号"}) {
+		t.Fatalf("和发布流程同一个原创/转载判定：%+v", provenance)
 	}
 	if result.Input != (layoutInputJSON{Kind: "wechat_url", URL: url, SourceName: "来源号"}) {
 		t.Fatalf("回给调用方的输入：%+v", result.Input)

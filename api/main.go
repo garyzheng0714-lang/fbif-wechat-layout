@@ -563,13 +563,15 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 				writeError(w, 502, "FoodTalks 文章读取失败，请稍后重试")
 				return
 			}
+			news.Provenance = articleBlocksProvenance(news.SourceName, news.Blocks)
 			writeJSON(w, 200, news)
 			return
 		}
 		title, blocks, sourceName, byline, _, originalSourceURL, _, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
 		if derr == nil && len(blocks) > 0 {
 			writeJSON(w, 200, articleBlocksResponse{Title: title, Blocks: blocks, Source: req.URL,
-				SourceName: sourceName, Byline: byline, OriginalSourceURL: originalSourceURL})
+				SourceName: sourceName, Byline: byline, OriginalSourceURL: originalSourceURL,
+				Provenance: articleBlocksProvenance(sourceName, blocks)})
 			return
 		}
 		// Do not hand attacker-controlled URLs to an external reader process:

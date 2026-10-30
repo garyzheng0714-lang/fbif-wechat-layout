@@ -102,3 +102,23 @@ test('排版接口：同时来的几篇排队一篇一篇排，互不串账号',
   assert.equal(normalizeImageSources(mp.html), await readFile(path.join(PARITY, 'fbif--text.html'), 'utf8'));
   assert.equal(normalizeImageSources(site.html), await readFile(path.join(PARITY, 'ft-default--text.html'), 'utf8'));
 });
+
+// Go 交来的 fetch_meta.provenance（和发布流程同一个原创/转载判定）照样写进网站开头署名和文末声明。
+test('排版接口：抓取带来的原创/转载判定写进网站开头署名和文末声明', async () => {
+  const blocks = [
+    { k: 'txt', runs: [{ type: 'txt', text: '作者：董慧' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '正文第一段。' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '提示：' }] },
+    { k: 'txt', runs: [{ type: 'txt', text: '* 本文为转载文章。' }] },
+  ];
+  const input = provenance => ({
+    kind: 'blocks', title: '标题', source: ARTICLE_URL, source_name: 'FBIF食品饮料创新', blocks,
+    fetch_meta: { title: '标题', source: ARTICLE_URL, source_name: 'FBIF食品饮料创新', provenance },
+  });
+  const named = await engine.layout({ account: 'ft-default', title: '', repost: null, input: input({ original: false, source: '晚点LatePost' }) });
+  assert.match(named.html, /本文为晚点LatePost原创，作者：董慧，转载请联系出处。/);
+  assert.match(named.html, /\*本文为晚点LatePost原创/);
+  const own = await engine.layout({ account: 'ft-default', title: '', repost: null, input: input({ original: true }) });
+  assert.doesNotMatch(own.html, /晚点LatePost|本文为转载文章/);
+  assert.match(own.html, /\*本文为FBIF食品饮料创新（ID：FoodInnovation）原创/);
+});

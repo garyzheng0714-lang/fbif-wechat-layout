@@ -51,7 +51,7 @@ func TestArticleBlockSpec(t *testing.T) {
 			t.Errorf("Block 的字段 %s 没有哪种块用到：在 articleBlockKinds 里写明哪种块用它", name)
 		}
 	}
-	for _, typ := range []reflect.Type{reflect.TypeOf(Block{}), reflect.TypeOf(Run{}), reflect.TypeOf(TableCell{}), reflect.TypeOf(articleBlocksResponse{})} {
+	for _, typ := range []reflect.Type{reflect.TypeOf(Block{}), reflect.TypeOf(Run{}), reflect.TypeOf(TableCell{}), reflect.TypeOf(articleBlocksResponse{}), reflect.TypeOf(articleProvenance{})} {
 		for name, field := range articleBlockJSONFields(typ) {
 			if field.Tag.Get("doc") == "" {
 				t.Errorf("%s.%s（%s）没写 doc 标签", typ.Name(), field.Name, name)
@@ -173,6 +173,8 @@ func goTypeLabel(typ reflect.Type) string {
 		return "行列表（每行是单元格列表）"
 	case reflect.TypeOf([]Block{}):
 		return "块列表"
+	case reflect.TypeOf(&articleProvenance{}):
+		return "来源判定（见下）"
 	}
 	return typ.String()
 }
@@ -195,6 +197,8 @@ func renderArticleBlocksDoc() string {
 	writeFieldTable(&b, reflect.TypeOf(TableCell{}))
 	b.WriteString("\n## 块外面的字段\n\n抓取接口 `POST /api/fetch-article` 抓到正文时返回：\n\n")
 	writeFieldTable(&b, reflect.TypeOf(articleBlocksResponse{}))
+	b.WriteString("\n### 来源判定（provenance）\n\n")
+	writeFieldTable(&b, reflect.TypeOf(articleProvenance{}))
 	b.WriteString("\n## 旧写法\n\n2026-07 以前的稿子里块种类有旧写法，读的时候换成现在的，新代码不许再产出：\n\n")
 	legacy := make([]string, 0, len(articleBlockLegacyKinds))
 	for old := range articleBlockLegacyKinds {

@@ -483,6 +483,7 @@ test('createUrlImportHandler lets the website channel classify an owned WeChat s
         source_name: 'FBIF食品饮料创新',
         byline: 'Sage',
         blocks: [{ k: 'txt', runs: [{ type: 'txt', text: '作者：Sage' }] }],
+        provenance: { original: true },
       }),
     }),
     getAccountID: () => 'ft-default',
@@ -497,6 +498,7 @@ test('createUrlImportHandler lets the website channel classify an owned WeChat s
   assert.equal(calls[0].payload.source_name, 'FBIF食品饮料创新');
   assert.equal(calls[0].payload.sourceName, undefined, '结构化渲染载荷必须保留 API 的 source_name 字段契约');
   assert.equal(calls[0].payload.byline, 'Sage');
+  assert.deepEqual(calls[0].payload.provenance, { original: true }, '后台的原创/转载判定交给排版');
   assert.deepEqual(calls[1].meta, {
     isRepost: false,
     sourceName: 'FBIF食品饮料创新',

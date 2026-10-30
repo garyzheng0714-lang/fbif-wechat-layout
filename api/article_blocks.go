@@ -43,12 +43,21 @@ var articleRunTypes = []string{"txt", "link"}
 
 // articleBlocksResponse 抓取接口 POST /api/fetch-article 抓到正文时的返回：块和块外面的几样。
 type articleBlocksResponse struct {
-	Title             string  `json:"title" doc:"文章标题"`
-	Blocks            []Block `json:"blocks" doc:"正文块，从上到下就是读者看到的顺序"`
-	Source            string  `json:"source" doc:"抓取的网址"`
-	SourceName        string  `json:"source_name" doc:"来源公众号或网站的名字"`
-	Byline            string  `json:"byline" doc:"页面上写的作者（公众号作者栏）。只作参考，不补成正文署名"`
-	OriginalSourceURL string  `json:"original_source_url" doc:"公众号「阅读原文」的地址；转载稿的转载声明优先链到它"`
+	Title             string             `json:"title" doc:"文章标题"`
+	Blocks            []Block            `json:"blocks" doc:"正文块，从上到下就是读者看到的顺序"`
+	Source            string             `json:"source" doc:"抓取的网址"`
+	SourceName        string             `json:"source_name" doc:"来源公众号或网站的名字"`
+	Byline            string             `json:"byline" doc:"页面上写的作者（公众号作者栏）。只作参考，不补成正文署名"`
+	OriginalSourceURL string             `json:"original_source_url" doc:"公众号「阅读原文」的地址；转载稿的转载声明优先链到它"`
+	Provenance        *articleProvenance `json:"provenance,omitempty" doc:"原创还是转载、转载自谁：和发布流程定 FoodTalks 来源类型同一个判定，网站开头署名和文末声明照它写"`
+}
+
+// articleProvenance 文章是谁的：和 CMS 原创/转载同一个判定（publishArticleProvenance）。
+// 转载但来源是自家号（自家号发的稿子明写「本文为转载文章」、说不出原作者，#294）时不给来源，
+// 网站写「本文为转载文章」。
+type articleProvenance struct {
+	Original bool   `json:"original" doc:"是不是自家原创"`
+	Source   string `json:"source,omitempty" doc:"转载自谁；原创或说不出原作者时不给"`
 }
 
 type articleBlockKind struct {

@@ -244,10 +244,85 @@ func TestRepairNewsLinksRepostNoticeOriginalTitle(t *testing.T) {
 	if res, _ := p.repairNewsLinks(context.Background(), 63177, false); res.Changed || len(stub.puts) != 1 {
 		t.Fatalf("编辑改过的声明不得覆盖：%+v", res)
 	}
-	// 自家原创声明：不动。
+	// 判定是转载（窄播）却写成 FBIF 原创：先改回窄播，再换原文标题。
 	stub.live.Content = strings.Replace(notice, "*本文为窄播原创", "*本文为FBIF食品饮料创新（ID：FoodInnovation）原创", 1)
-	if res, _ := p.repairNewsLinks(context.Background(), 63177, false); res.Changed || len(stub.puts) != 1 {
-		t.Fatalf("自家原创声明不得改：%+v", res)
+	if res, _ := p.repairNewsLinks(context.Background(), 63177, false); res.RepostNoticeSource != "*本文为窄播原创" ||
+		len(stub.puts) != 2 || stub.puts[1].Content != strings.TrimPrefix(want, other) {
+		t.Fatalf("写成 FBIF 原创的转载稿应改回窄播：%+v", res)
+	}
+}
+
+// 2026-10-30 #309：AI 没抽到出处、正文开头写「本文转载自公众号新周刊」，网站文末却写成 FBIF 原创；编辑在网站上
+// 改过错字，整篇重新同步会被拦。只换文末声明的开头，别处（编辑改的字）原样写回；判定是原创、编辑手工稿、
+// 声明不止一处都不动；说不出原作者的转载写「本文为转载文章」。
+func TestRepairNewsLinksRepostNoticeSource(t *testing.T) {
+	env := newPublishTestEnv(t)
+	lookupFeedOriginalArticleDetail = func(context.Context, string, string) feedOriginalArticleHit { return feedOriginalArticleHit{} }
+	lookupWechatOriginalArticle = func(context.Context, string, string, []string) repostOriginalArticle { return repostOriginalArticle{} }
+	searchOriginalArticleURLs = func(context.Context, string, string) []string { return nil }
+	t.Cleanup(func() {
+		lookupFeedOriginalArticleDetail = defaultLookupFeedOriginalArticleDetail
+		lookupWechatOriginalArticle = defaultLookupWechatOriginalArticle
+		searchOriginalArticleURLs = defaultSearchOriginalArticleURLs
+	})
+	seed := func(key string, newsID int64, blocks string) {
+		t.Helper()
+		if _, _, err := env.store.createSeeded(key, "https://mp.weixin.qq.com/s/"+key, func(j *publishJob) {
+			j.Stage = publishStagePublished
+			j.Title = "19.9元复刻餐厅招牌菜，预制菜进入打工人餐桌"
+			j.SourceName = "FBIF食品饮料创新"
+			j.FoodTalksNewsID = newsID
+			j.BlocksJSON = blocks
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("site:309", 63280, `[{"k":"txt","runs":[{"type":"txt","text":"本文转载自公众号新周刊（ID：new-weekly）"}]},{"k":"txt","runs":[{"type":"txt","text":"正文"}]}]`)
+	seed("site:own", 63281, `[{"k":"txt","runs":[{"type":"txt","text":"正文"}]}]`)
+	seed("site:unnamed", 63282, `[{"k":"txt","runs":[{"type":"txt","text":"正文"}]},{"k":"txt","runs":[{"type":"txt","text":"*本文为转载文章。"}]}]`)
+	notice := func(prefix string) string {
+		return `<p><em><span style="font-size: 14px; color: #7f7f7f;">` + prefix +
+			`《19.9元复刻餐厅招牌菜，预制菜进入打工人餐桌》，不代表FoodTalks立场，转载请联系出处。</span></em></p>`
+	}
+	body := `<p>图片来源：盒马</p>`
+	stub := &seriesRepairStub{}
+	p := env.pipeline
+	p.foodTalks = func() (foodTalksAPI, error) { return stub, nil }
+	run := func(newsID int64, content string, dryRun bool) newsLinkRepairResult {
+		t.Helper()
+		stub.live = foodTalksNewsDetail{ID: newsID, Author: "FBIF", Content: content, PublishStatus: foodTalksPublishStatusPublished, Language: "ZH"}
+		res, err := p.repairNewsLinks(context.Background(), newsID, dryRun)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	live := body + notice(ownRepostNoticePrefix)
+	if res := run(63280, live, true); !res.Changed || res.RepostNoticeSource != "*本文为新周刊原创" || len(stub.puts) != 0 {
+		t.Fatalf("dry_run 报告要改成新周刊、不写：%+v puts=%d", res, len(stub.puts))
+	}
+	if res := run(63280, live, false); !res.Changed || len(stub.puts) != 1 || stub.puts[0].Content != body+notice("*本文为新周刊原创") {
+		t.Fatalf("只换声明开头：%+v\n got %s", res, stub.puts[0].Content)
+	}
+	if res := run(63280, stub.puts[0].Content, false); res.Changed || len(stub.puts) != 1 {
+		t.Fatalf("已改好的不再写：%+v", res)
+	}
+	if res := run(63282, live, false); res.RepostNoticeSource != "*本文为转载文章" || stub.puts[1].Content != body+notice("*本文为转载文章") {
+		t.Fatalf("说不出原作者写「本文为转载文章」：%+v", res)
+	}
+	for _, c := range []struct {
+		name    string
+		newsID  int64
+		content string
+	}{
+		{"判定是自家原创", 63281, live},
+		{"编辑手工稿（任务库里没有）", 63999, live},
+		{"声明不止一处", 63280, live + notice(ownRepostNoticePrefix)},
+	} {
+		if res := run(c.newsID, c.content, false); res.Changed || len(stub.puts) != 2 {
+			t.Fatalf("%s 不得改：%+v", c.name, res)
+		}
 	}
 }
 

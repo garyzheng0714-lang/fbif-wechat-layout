@@ -338,18 +338,37 @@ function repostTipFollows(elems, i) {
   return false;
 }
 
-// 文末声明说谁的。发布流程交来后台的判定（opts.provenance，和 CMS 原创/转载同一个函数，
-// 认 AI 抽的出处和「本文转载自X」等写法）就照它；网页排版没有判定时自己看：外部来源 → 转载，
-// 没有外部来源但明写「本文为转载文章」→ 转载、不点名。转载时正文「来源：X」优先，和开头署名同一来源。
-function siteTipProvenance(elems, opts, repostSource) {
+// 这篇是谁的：开头署名和文末声明都照它写。编辑在网页上点了「原创」就是原创；后台交来判定
+// （opts.provenance：发布流程、网页导入、排版接口都带，和 CMS 原创/转载同一个函数，认 AI 抽的出处、
+// 「本文转载自X」「本文来源于X」等写法）就照它；没有判定时（Word、粘贴）自己看：正文「来源：X」或
+// 非自家公众号名 → 转载；明写「本文为转载文章」→ 转载、不点名。转载时正文「来源：X」优先（编辑手改的口径）。
+function siteProvenance(elems, opts, behavior) {
+  if (!opts.isRepost) return { repost: false, source: '' };
+  const accountSource = String(opts.sourceName || '').trim();
+  const repostSource = extractRepostSource(elems, behavior) || accountSource;
   const external = repostSource && !isOwnAccountName(repostSource) ? repostSource : '';
   const decided = opts.provenance;
   if (decided && typeof decided.original === 'boolean') {
     if (decided.original) return { repost: false, source: '' };
-    return { repost: true, source: external || String(decided.source || '').trim() };
+    const source = external || String(decided.source || '').trim();
+    return { repost: true, source: isOwnAccountName(source) ? '' : source };
   }
-  if (!opts.isRepost) return { repost: false, source: '' };
   return { repost: !!external || hasRepostDisclosure(elems), source: external };
+}
+
+// 开头已写明转载自谁（「本文转载自公众号新周刊」「本文来源于界面新闻」「文章授权转载自每日人物」，
+// #19/#102/#119/#309/#311 编辑都原样留着）：开头不再补「本文为X原创」，免得来源说两遍。
+const HEAD_REPOST_NOTE_RE = /^(?:本文|文章)[^，,。；;]{0,8}?(?:转自|转载自|转载于|来源于|来自|首发于)/;
+
+function openingDeclaresSource(out) {
+  let seen = 0;
+  for (const e of out) {
+    const text = !e ? '' : e.k === 'author' ? String(e.text || '').trim() : e.k === 'p' ? runsToText(e.runs).trim() : '';
+    if (!text) continue;
+    if (HEAD_REPOST_NOTE_RE.test(text)) return true;
+    if (++seen >= 3) return false;
+  }
+  return false;
 }
 
 function isDataCitationSource(name) {
@@ -364,21 +383,37 @@ function isDataCitationSource(name) {
 export function buildAuthorLineFromSource(elems, behavior = {}, fallbackSource = '') {
   if (!Array.isArray(elems)) return '';
   const sourceRe = behaviorRegex(behavior, 'repost_source_regex', '^来源[：:]\\s*(.+)$');
-  let source = '', authorSeg = '';
+  let source = '';
   for (const e of elems) {
     if (!e || e.k !== 'p') continue;
-    const text = runsToText(e.runs).replace(/[​-‏⁠﻿]/g, '').trim();
-    let m;
-    if (!source && (m = text.match(sourceRe))) {
+    const m = cleanLineText(e).match(sourceRe);
+    if (m) {
       source = m[1].replace(/[（(]\s*ID[：:].*$/i, '').trim();
+      break;
     }
-    // 作者整行（含其后「编审/编辑/主编/美编：…」），原样保留
-    if (!authorSeg && /^作者[：:]/.test(text)) authorSeg = text.replace(/[。\s]*$/, '');
   }
-  if (!source) source = String(fallbackSource || '').trim();
-  if (!source && !authorSeg) return '';
+  return openingAuthorLine(elems, source || String(fallbackSource || '').trim(), behavior);
+}
+
+// 开头署名：有来源写「本文为{来源}原创，{作者：Y，编审：Z}，转载请联系出处。」，没有来源只写作者整行。
+function openingAuthorLine(elems, source, behavior = {}) {
+  let authorSeg = '';
+  for (const e of elems) {
+    if (!e || e.k !== 'p') continue;
+    const text = cleanLineText(e);
+    // 作者整行（含其后「编审/编辑/主编/美编：…」），原样保留
+    if (/^作者[：:]/.test(text)) {
+      authorSeg = text.replace(/[。\s]*$/, '');
+      break;
+    }
+  }
   if (source) return repostAuthorLine(source, authorSeg, behavior);
+  if (!authorSeg) return '';
   return /[。.]$/.test(authorSeg) ? authorSeg : authorSeg + '。';
+}
+
+function cleanLineText(e) {
+  return runsToText(e.runs).replace(/[\u200b-\u200f\u2060\ufeff]/g, '').trim();
 }
 
 // 转载稿开头署名：「本文为{来源}原创，{作者：Y，编辑：Z}，转载请联系出处。」
@@ -502,29 +537,28 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
     }
   }
 
-  // 阶段 1.5：转载稿开头署名带上来源（与文末转载声明同一来源，扫【原始 elems】，
+  // 阶段 1.5：转载稿开头署名带上来源（与文末声明同一个判定 siteProvenance，扫【原始 elems】，
   // 来源行常在被切的尾部）。自家稿没有外部来源，保持「作者：X」。
   //   - 开头只有「作者：Y」→「本文为X原创，作者：Y，转载请联系出处。」（近一月自动发布的
   //     转载稿 32 篇开头只有作者行，24 篇被编辑在 FoodTalks 后台手改成这样，2026-10-14 核对）
   //   - 开头没有作者行 → 用正文里的「来源：X」「作者：Y」合成
-  // 正文没写「来源：X」时来源用公众号名（opts.sourceName，抓取接口的 source_name），自家号除外。
-  const accountSource = String(opts.sourceName || '').trim();
-  const fallbackSource = accountSource && !isOwnAccountName(accountSource) ? accountSource : '';
-  const repostSource = extractRepostSource(elems, behavior) || fallbackSource;
+  //   - 开头已写「本文转载自X」之类 → 不补来源
+  const provenance = siteProvenance(elems, opts, behavior);
+  const headSource = openingDeclaresSource(out) ? '' : provenance.source;
   if (opts.isRepost) {
     const headIsAuthor = firstIdx >= 0 && out[firstIdx] && out[firstIdx].k === 'author';
     if (headIsAuthor) {
       const head = out[firstIdx].text;
-      if (repostSource && !isOwnAccountName(repostSource) && authorRe.test(head)) {
-        out[firstIdx] = { k: 'author', text: repostAuthorLine(repostSource, head, behavior) };
-        dropSourceCreditLine(out, firstIdx, repostSource);
+      if (headSource && authorRe.test(head)) {
+        out[firstIdx] = { k: 'author', text: repostAuthorLine(headSource, head, behavior) };
+        dropSourceCreditLine(out, firstIdx, headSource);
       }
     } else {
-      const synthesized = buildAuthorLineFromSource(elems, behavior, fallbackSource);
+      const synthesized = openingAuthorLine(elems, headSource, behavior);
       if (synthesized) {
         out.unshift({ k: 'author', text: synthesized });
         absorbCreditLines(out, 0, behavior);
-        if (repostSource) dropSourceCreditLine(out, 0, repostSource);
+        if (headSource) dropSourceCreditLine(out, 0, headSource);
       }
     }
   }
@@ -668,7 +702,7 @@ export function applyFoodTalksBehavior(elems, config = {}, opts = {}) {
   if ((trimmed.cutWechatTip || shouldGenerateSiteTip(config)) && !out.some(e => e && e.k === 'tip')) {
     // 来源从【原始 elems】提取（切尾前），因为「来源：XX」行常紧邻被切的导流段。
     out.push(buildSiteFooterTipElem(opts.tipTitle || opts.title, {
-      ...siteTipProvenance(elems, opts, repostSource),
+      ...provenance,
       sourceUrl: opts.sourceUrl || '',
       behavior,
     }));

@@ -100,11 +100,12 @@ type layoutNodeRequest struct {
 
 // layoutFetchMeta /api/fetch-article 回给网页的块外字段，原样带给排版程序，它用网页同一个函数判原创/转载。
 type layoutFetchMeta struct {
-	Title             string `json:"title,omitempty"`
-	Source            string `json:"source,omitempty"`
-	SourceName        string `json:"source_name,omitempty"`
-	Byline            string `json:"byline,omitempty"`
-	OriginalSourceURL string `json:"original_source_url,omitempty"`
+	Title             string             `json:"title,omitempty"`
+	Source            string             `json:"source,omitempty"`
+	SourceName        string             `json:"source_name,omitempty"`
+	Byline            string             `json:"byline,omitempty"`
+	OriginalSourceURL string             `json:"original_source_url,omitempty"`
+	Provenance        *articleProvenance `json:"provenance,omitempty"`
 }
 
 // layoutNodeInput 载体。字段一律都写出来（没有就是空），排版程序按 kind 读。
@@ -463,7 +464,8 @@ func (a *layoutAPI) prepareURL(ctx context.Context, req layoutRequest, view layo
 		input.Title, input.Source, input.SourceName, input.Byline = article.Title, req.URL, article.SourceName, article.Byline
 		input.Blocks = article.Blocks
 		input.FetchMeta = layoutFetchMeta{Title: article.Title, Source: req.URL, SourceName: article.SourceName,
-			Byline: article.Byline, OriginalSourceURL: article.OriginalSourceURL}
+			Byline: article.Byline, OriginalSourceURL: article.OriginalSourceURL,
+			Provenance: articleBlocksProvenance(article.SourceName, article.Blocks)}
 		view.SourceName = article.SourceName
 		return layoutPrepared{Input: input, View: view}, nil
 	}

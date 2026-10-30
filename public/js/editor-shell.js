@@ -316,6 +316,8 @@ export function createUrlImportHandler({
         // source_name 作为“正文无显式来源”时的公众号名称兜底。
         if (sourceName) articlePayload.source_name = sourceName;
         if (byline) articlePayload.byline = byline;
+        // 后台的原创/转载判定（和发布流程同一个函数），网站开头署名和文末声明照它写。
+        if (payload.provenance && typeof payload.provenance === 'object') articlePayload.provenance = payload.provenance;
         handleBlocks(articlePayload, { isRepost, source: 'url-import' });
         if (stale()) return false;
         handedOffToRenderer = true;

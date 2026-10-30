@@ -191,6 +191,8 @@ export async function loadLayoutEngine({ publicDir, fetchRules, origin, build = 
       if (hasText(carrier.source)) data.source = carrier.source;
       if (hasText(carrier.source_name)) data.source_name = carrier.source_name.trim();
       if (hasText(carrier.byline)) data.byline = carrier.byline.trim();
+      const provenance = carrier.fetch_meta && carrier.fetch_meta.provenance;
+      if (provenance && typeof provenance === 'object') data.provenance = provenance;
       const isRepost = repost == null ? linkImport : !!repost;
       return { input: { kind: 'blocks', payload: data, isRepost, title: data.title, bodyOnly: false }, summary };
     }

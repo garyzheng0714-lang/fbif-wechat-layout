@@ -81,6 +81,9 @@ func TestFetchArticleReadsFoodTalksNewsThroughAdminAPI(t *testing.T) {
 	if got.Title != news.Title || got.SourceName != "懂经" || got.Byline != "叶宇" || len(got.Blocks) < 20 {
 		t.Fatalf("title=%q source=%q byline=%q blocks=%d", got.Title, got.SourceName, got.Byline, len(got.Blocks))
 	}
+	if got.Provenance == nil || *got.Provenance != (articleProvenance{Original: false, Source: "懂经"}) {
+		t.Fatalf("和发布流程同一个原创/转载判定：%+v", got.Provenance)
+	}
 }
 
 func TestFetchArticleFoodTalksNewsFailureIsLoud(t *testing.T) {

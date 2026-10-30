@@ -5,7 +5,9 @@ package main
 //   - 系列声明段的系列名 → 同名标签页（publishSiteLinkSeriesTags）；
 //   - Mote 文章里的公众号文章链 → 已发布的站内 /news/{id}，找不到保留原链（rewriteMoteSeriesLinks）；
 //   - 流水线转载稿的转载声明《本稿标题》→ 链到核验过的原文、换成原文真标题（repairRepostNoticeTitle，2026-10-14）；
-//   - 旧排版改成「。」的英文缩写点（`Salt Co。和`）改回半角（repairAbbreviationPeriods，2026-10-23）。
+//   - 旧排版改成「。」的英文缩写点（`Salt Co。和`）改回半角（repairAbbreviationPeriods，2026-10-23）；
+//   - 流水线转载稿文末写成了「本文为FBIF…原创」→ 照发布流程的判定改成原作者或「本文为转载文章」
+//    （repairRepostNoticeSource，2026-10-30 #309：编辑在网站上改过错字，整篇重新同步会被拦）。
 
 import (
 	"context"
@@ -21,6 +23,8 @@ type newsLinkRepairResult struct {
 	Changed           bool   `json:"changed"`
 	DryRun            bool   `json:"dry_run"`
 	RepostNoticeTitle string `json:"repost_notice_title,omitempty"`
+	// RepostNoticeSource 文末声明改成的开头（「*本文为新周刊原创」）。
+	RepostNoticeSource string `json:"repost_notice_source,omitempty"`
 	// AbbreviationPeriods 改回半角的英文缩写点数。
 	AbbreviationPeriods int `json:"abbreviation_periods,omitempty"`
 }
@@ -66,6 +70,7 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 	if res.Mote = publishSiteIsMoteArticle(job); res.Mote {
 		content = p.rewriteMoteSeriesLinks(ctx, job, content)
 	}
+	content, res.RepostNoticeSource = repairRepostNoticeSource(job, content)
 	content, res.RepostNoticeTitle = p.repairRepostNoticeTitle(ctx, job, content, dryRun)
 	content, res.AbbreviationPeriods = repairAbbreviationPeriods(content)
 	if content == live.Content {
@@ -96,6 +101,29 @@ func (p *publishPipeline) newsLinkRepairJob(newsID int64, live foodTalksNewsDeta
 		}
 	}
 	return publishJob{FoodTalksNewsID: newsID, Author: live.Author}
+}
+
+// ownRepostNoticeRe 网站文末声明写成 FBIF 原创（后面跟《标题》或包着标题的链接）。
+const ownRepostNoticePrefix = "*本文为FBIF食品饮料创新（ID：FoodInnovation）原创"
+
+var ownRepostNoticeRe = regexp.MustCompile(regexp.QuoteMeta(ownRepostNoticePrefix) + `(?:<a\b|《)`)
+
+// repairRepostNoticeSource 流水线稿按发布流程的判定（articleProvenanceFor）是转载、文末却写成 FBIF 原创时，
+// 只换这句的开头；判定是原创、编辑手工稿、声明不止一处都不动。
+func repairRepostNoticeSource(job publishJob, content string) (string, string) {
+	if job.ID <= 0 {
+		return content, ""
+	}
+	provenance := articleProvenanceFor(job)
+	m := ownRepostNoticeRe.FindAllStringIndex(content, -1)
+	if provenance.Original || len(m) != 1 {
+		return content, ""
+	}
+	prefix := "*本文为转载文章"
+	if provenance.Source != "" {
+		prefix = "*本文为" + html.EscapeString(provenance.Source) + "原创"
+	}
+	return content[:m[0][0]] + prefix + content[m[0][0]+len(ownRepostNoticePrefix):], prefix
 }
 
 // repairRepostNoticeTitle 流水线转载稿的转载声明还是本稿（FBIF 改过的）标题时，换成核验过的原文真标题
