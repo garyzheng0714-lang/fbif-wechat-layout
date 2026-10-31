@@ -30,8 +30,7 @@ import (
 	"unicode"
 )
 
-// 候选图最多前 8 张。正文一律全文送（2026-10-30 用户裁定：原先只送前 6000 字）。
-const aiEnrichMaxImages = 8
+// 正文、候选图一律全送（2026-10-30 用户裁定：原先正文只送前 6000 字；2026-10-31 候选图原先只送前 8 张，按「没经同意不许加上限」去掉）。
 
 // system prompt 见 editorial_norms.go（M7：从编辑部历史文章倒推的规范 + 词表组装，
 // 语言强制约束「请用简体中文回复」已写在 norms_prompt.md 里）。
@@ -201,8 +200,7 @@ func fallbackEnrichment(job publishJob, cause error) publishEnrichment {
 }
 
 // enrichCandidateImages 封面候选 = 当前封面（公众号原封面或正文首图，已 OSS 化）+
-// 原文自带的正文图（mirroring 后已是 OSS URL），跳过 data: 内联图，最多 8 张（多模态
-// 每张图都是真金白银的 token）。网站页脚的名片/二维码/logo 来自规则素材而非原文，
+// 原文自带的正文图（mirroring 后已是 OSS URL），跳过 data: 内联图，全给（模型收不下就报错走规则兜底，不悄悄少给）。网站页脚的名片/二维码/logo 来自规则素材而非原文，
 // 一律不进候选（#263 页脚名片被选成封面的根因之一）。
 func enrichCandidateImages(job publishJob) []string {
 	article := publishArticleImageSet(job)
@@ -211,7 +209,7 @@ func enrichCandidateImages(job publishJob) []string {
 	seen := map[string]bool{}
 	add := func(src string) {
 		src = strings.TrimSpace(src)
-		if src == "" || strings.HasPrefix(src, "data:") || seen[src] || len(out) >= aiEnrichMaxImages {
+		if src == "" || strings.HasPrefix(src, "data:") || seen[src] {
 			return
 		}
 		seen[src] = true

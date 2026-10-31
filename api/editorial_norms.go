@@ -25,10 +25,6 @@ var editorialNormsPromptTemplate string
 //go:embed editorial/tag_vocab.json
 var editorialTagVocabRaw []byte
 
-// editorialVocabPromptTopN 注入 prompt 的词表条数：词表按频次降序，前 300 覆盖
-// 绝大多数常用标签；再长徒增 token，长尾靠「主角品牌可直接用」规则兜住。
-const editorialVocabPromptTopN = 300
-
 type editorialTag struct {
 	TagID   int64  `json:"tag_id"`
 	TagName string `json:"tag_name"`
@@ -41,7 +37,7 @@ var (
 	editorialPromptStr string
 )
 
-// editorialInit 解析词表并把 {{VOCAB}} 占位替换成前 N 个标签名（顿号分隔）。
+// editorialInit 解析词表并把 {{VOCAB}} 占位替换成全部标签名（顿号分隔，按频次降序；2026-10-31 起不再只给前 300 个）。
 // 词表是 go:embed 编译期资产，解析失败属构建级错误：留空词表照常出 prompt，
 // 但打 log 显式暴露（规则十二：不静默）。
 func editorialInit() {
@@ -49,7 +45,7 @@ func editorialInit() {
 		log.Printf("editorial: WARN 标签词表解析失败（prompt 将不含词表）: %v", err)
 		editorialTags = nil
 	}
-	names := make([]string, 0, editorialVocabPromptTopN)
+	names := make([]string, 0, len(editorialTags))
 	for _, t := range editorialTags {
 		name := strings.TrimSpace(t.TagName)
 		// 栏目/活动标签（FBIF2026会后报告、Wow食品创新奖…）由编辑手工体系管理，
@@ -58,9 +54,6 @@ func editorialInit() {
 			continue
 		}
 		names = append(names, name)
-		if len(names) >= editorialVocabPromptTopN {
-			break
-		}
 	}
 	editorialPromptStr = strings.ReplaceAll(editorialNormsPromptTemplate, "{{VOCAB}}", strings.Join(names, "、"))
 }
