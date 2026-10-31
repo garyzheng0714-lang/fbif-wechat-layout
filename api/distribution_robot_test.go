@@ -218,7 +218,7 @@ func TestDistributionRobotClientPublish(t *testing.T) {
 	if len(codes) < 10 {
 		t.Fatalf("接口契约里发布的错误码太少，testdata/%s 不对：%v", distributionAPIFile, codes)
 	}
-	kept := `"record":{"status":"saved","article_id":"1","action":{"id":"act-9","kind":"publish","status":"unknown"}}`
+	kept := `"record":{"status":"saved","article_id":"1","action":{"id":"act-9","kind":"publish","status":"doing"}}`
 	for _, code := range codes {
 		spec := contract.Errors[code]
 		current = reply{spec.Status, `{"error":{"code":"` + code + `","message":"说明","outcome":"` + spec.Outcome + `"},` + kept + `}`}
@@ -240,7 +240,7 @@ func TestDistributionRobotClientPublish(t *testing.T) {
 		default:
 			t.Fatalf("契约里 %s 的 outcome %q 不认得：分发服务加了新的 outcome，这里要先接上", code, spec.Outcome)
 		}
-		if record == nil || record.Action == nil || record.Action.ID != "act-9" || record.Action.Status != robotActionUnknown {
+		if record == nil || record.Action == nil || record.Action.ID != "act-9" || record.Action.Status != robotActionDoing {
 			t.Errorf("%d %s（%s）映射不对或丢了记录：%T %v", spec.Status, code, spec.Outcome, err, err)
 		}
 	}

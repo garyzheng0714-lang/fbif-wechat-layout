@@ -144,7 +144,6 @@ const (
 	robotActionDoing   = "doing"
 	robotActionDone    = "done"
 	robotActionFailed  = "failed"
-	robotActionUnknown = "unknown"
 )
 
 // 平台上这篇现在的样子（state.value）里排版工具要分开处理的几种。
@@ -200,8 +199,8 @@ func (e *robotRejectedError) Error() string {
 	return fmt.Sprintf("分发工具没动手（HTTP %d %s）：%s", e.Status, e.Code, e.Message)
 }
 
-// robotReconcileError 要人去平台后台看：存草稿点了没拿到编号、草稿箱里也没对清（这次新建的同名草稿
-// 不止一篇），或上次发布点下去后没看清做成没有（needs_human）。
+// robotReconcileError 要人去平台后台看：存草稿点了没拿到编号，草稿箱里这次新建的同名草稿不止一篇，
+// 分发服务分不清哪篇是这次的（needs_reconcile）。点了发布没看清的，分发服务自己接着查到结果，不再交给人。
 type robotReconcileError struct {
 	Code    string
 	Message string

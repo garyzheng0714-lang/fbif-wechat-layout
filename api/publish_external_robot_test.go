@@ -457,8 +457,7 @@ func TestRobotPublishOutcomes(t *testing.T) {
 		{name: "平台上是别的样子", record: onPlatform("withdrawn", "已撤回", ""), state: publishExternalDistributionReconciliationRequired, reason: "百家号上这篇现在是「已撤回」", status: "待核对"},
 		{name: "平台上查不到样子", record: onPlatform("", "", ""), state: publishExternalDistributionReconciliationRequired, reason: "分发工具没查到百家号上这篇现在的样子", status: "待核对"},
 		{name: "明确没发出去", record: acting(robotActionFailed, "发布按钮是灰的"), state: publishExternalDistributionFailed, reason: "分发工具没发出去：发布按钮是灰的；可以重新同步", status: "失败", retry: true},
-		{name: "点了没看清", record: acting(robotActionUnknown, ""), state: publishExternalDistributionReconciliationRequired, reason: "点了发布没看清发没发出去", status: "待核对"},
-		{name: "要人核对（409 needs_human）", err: &robotReconcileError{Code: "needs_human", Message: "上次点了发布没看清，请到后台看一眼"}, state: publishExternalDistributionReconciliationRequired, reason: "上次点了发布没看清", status: "待核对"},
+		{name: "要人核对（outcome human）", err: &robotReconcileError{Code: "needs_reconcile", Message: "草稿箱里有 2 篇这次新建的同名稿"}, state: publishExternalDistributionReconciliationRequired, reason: "草稿箱里有 2 篇这次新建的同名稿", status: "待核对"},
 		{name: "草稿被人改过", err: rejected(409, "draft_changed", "草稿被人改过"), state: publishExternalDistributionReconciliationRequired, reason: "分发工具没发布：草稿被人改过；请到百家号后台核对", status: "待核对"},
 		{name: "已不是草稿", err: rejected(409, "wrong_state", "这篇现在是已撤回"), state: publishExternalDistributionReconciliationRequired, reason: "请到百家号后台核对", status: "待核对"},
 		{name: "服务器没登录", err: rejected(503, "login_required", "没登录"), state: publishExternalDistributionFailed, reason: "远程画面里登录后重新同步", status: "失败", retry: true},
@@ -804,9 +803,9 @@ func TestRobotLaneCardWording(t *testing.T) {
 	noButton(body)
 
 	reconcile := testRobotLaneIn(job.ID, publishExternalDistributionReconciliationRequired)
-	reconcile.Error = "点了发布没看清发没发出去，请到百家号后台看一眼"
+	reconcile.Error = "分发工具没发布：草稿被人改过；请到百家号后台核对"
 	body = section(reconcile)
-	contains(body, "<font color='orange'>待核对</font>", "<font color='grey'>点了发布没看清发没发出去，请到百家号后台看一眼</font>", "[去百家号后台查看](")
+	contains(body, "<font color='orange'>待核对</font>", "<font color='grey'>分发工具没发布：草稿被人改过；请到百家号后台核对</font>", "[去百家号后台查看](")
 	noButton(body)
 
 	held := testRobotLaneIn(job.ID, publishExternalDistributionDraftSaved)

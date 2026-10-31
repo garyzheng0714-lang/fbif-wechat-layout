@@ -41,10 +41,6 @@
       "status": 409,
       "outcome": "rejected"
     },
-    "needs_human": {
-      "status": 409,
-      "outcome": "human"
-    },
     "needs_reconcile": {
       "status": 409,
       "outcome": "human"
@@ -83,6 +79,10 @@
     },
     "image_too_large": {
       "status": 422,
+      "outcome": "rejected"
+    },
+    "not_published": {
+      "status": 502,
       "outcome": "rejected"
     },
     "platform_rejected": {
@@ -222,7 +222,6 @@
         "busy",
         "wrong_state",
         "draft_changed",
-        "needs_human",
         "not_supported",
         "button_not_found",
         "login_required",
@@ -243,7 +242,6 @@
         "busy",
         "wrong_state",
         "draft_changed",
-        "needs_human",
         "not_supported",
         "button_not_found",
         "login_required",
@@ -264,7 +262,6 @@
         "busy",
         "wrong_state",
         "draft_changed",
-        "needs_human",
         "not_supported",
         "button_not_found",
         "login_required",
@@ -289,6 +286,7 @@
         "image_unavailable",
         "image_too_large",
         "fill_mismatch",
+        "not_published",
         "platform_rejected",
         "verify_required",
         "login_required",

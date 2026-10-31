@@ -249,7 +249,7 @@ func robotPublishResultOf(lane publishExternalLane, record robotDraftRecord, err
 		var uncertain *robotUncertainError
 		switch {
 		case errors.As(err, &reconcile):
-			// needs_human：上次点下去没看清，分发服务不再点，要人去后台看。
+			// 分发服务说要人看（outcome human）。
 			return robotLaneResult{State: publishExternalDistributionReconciliationRequired, Reason: reconcile.Message, ActionID: robotRecordActionID(reconcile.Record)}
 		case errors.As(err, &rejected):
 			switch rejected.Code {
@@ -289,12 +289,6 @@ func robotPublishResultOf(lane publishExternalLane, record robotDraftRecord, err
 			Reason:   "分发工具没发出去：" + firstNonEmpty(safeActionText(action.Error), "没说原因") + "；可以重新同步",
 			ActionID: action.ID,
 		}
-	case robotActionUnknown:
-		return robotLaneResult{
-			State:    publishExternalDistributionReconciliationRequired,
-			Reason:   firstNonEmpty(safeActionText(action.Error), "点了发布没看清发没发出去，请到"+profile.Name+"后台看一眼"),
-			ActionID: action.ID,
-		}
 	case robotActionDone:
 		return robotPlatformResultOf(record, profile, action.ID)
 	default:
@@ -306,13 +300,12 @@ func robotPublishResultOf(lane publishExternalLane, record robotDraftRecord, err
 	}
 }
 
-// robotActionCurrent 记录里最近一次按的是这次的发布：上次那次（同一个编号）的失败、没看清不算，这次还没发。
+// robotActionCurrent 记录里最近一次按的是这次的发布：上次那次（同一个编号）的失败不算，这次还没发。
 func robotActionCurrent(lane publishExternalLane, action *robotDraftAction) bool {
 	if action == nil || action.Kind != robotActionPublish {
 		return false
 	}
-	stale := action.ID != "" && action.ID == lane.ActionID &&
-		(action.Status == robotActionFailed || action.Status == robotActionUnknown)
+	stale := action.ID != "" && action.ID == lane.ActionID && action.Status == robotActionFailed
 	return !stale
 }
 
