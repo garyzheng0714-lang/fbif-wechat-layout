@@ -8,7 +8,8 @@ package main
 // （cd api && go run . -new-layout-key），交给调用方后就不再出现。
 //
 // 内存里按指纹查，常量时间比较；status「在用」才放行，其余一律 key_disabled。配置包取不到时留最后一份，
-// 但离上次和中台核对成功超过 10 分钟就全部 503 auth_unavailable：宁可拒、不放（停用要及时生效）。
+// 但名单内容离来源上次同步成功超过 10 分钟就全部 503 auth_unavailable：宁可拒、不放（停用要及时生效）。
+// 中台回 304 不算核验过，镜像停了中台也照样回 304（hub_bundle.go 的 sourceCheckedAt）。
 // 开机还没核对成功过、或配置包里还没有这个条目（中台还没加表），同样 auth_unavailable。
 // 旧的 RENDER_TOKEN 只开旧路由（/api/render、/api/html-to-blocks），这里的钥匙只开 /api/layout/v1/*。
 
@@ -58,7 +59,8 @@ type layoutCallerEntry struct {
 	digest [sha256.Size]byte
 }
 
-// layoutCallerSource 取调用方名单。maxAge 内和中台核对过就直接给那一份，不再问；present=false 表示配置包里没有这个条目。
+// layoutCallerSource 取调用方名单。maxAge 内问到过中台就直接给那一份，不再问；present=false 表示配置包里没有这个条目。
+// checkedAt 是名单内容最近一次被来源同步确认的时刻，不是上次问到中台的时刻。
 type layoutCallerSource interface {
 	LayoutCallers(ctx context.Context, maxAge time.Duration) (rows []layoutCallerRow, present bool, checkedAt time.Time, err error)
 }
@@ -71,7 +73,7 @@ type layoutCallerDirectory struct {
 	mu        sync.RWMutex
 	entries   []layoutCallerEntry
 	have      bool      // 至少拿到过一份
-	checkedAt time.Time // 上次和中台核对成功
+	checkedAt time.Time // 名单内容最近一次被来源同步确认
 	note      string    // 最近一次没核对成的原因，只进日志
 }
 
@@ -163,7 +165,7 @@ func (d *layoutCallerDirectory) refresh(ctx context.Context, maxAge time.Duratio
 	d.note = ""
 	d.mu.Unlock()
 	if changed || recovered {
-		log.Printf("layout-api: 调用方名单 %d 家（中台核对于 %s）", len(entries), checkedAt.Format(time.RFC3339))
+		log.Printf("layout-api: 调用方名单 %d 家（来源确认于 %s）", len(entries), checkedAt.Format(time.RFC3339))
 		for _, problem := range problems {
 			log.Printf("layout-api: 调用方名单：%s", problem)
 		}

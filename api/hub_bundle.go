@@ -14,8 +14,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,10 +39,13 @@ type hubBundleClient struct {
 	mu       sync.Mutex
 	etag     string
 	accounts []externalAccount
-	// 接口调用方：callersPresent=false 表示配置包里还没有这一项；okAt 上次和中台核对成功（200 或 304）。
+	// 接口调用方：callersPresent=false 表示配置包里还没有这一项。
+	// askedAt 上次问到中台（200 或 304），只管多久再问；checkedAt 这份内容最近一次被来源同步确认，认调用方看它。
+	// 分开是因为中台镜像停了也照样回 304，「中台还在」不等于「名单还新」。
 	callers        []layoutCallerRow
 	callersPresent bool
-	okAt           time.Time
+	askedAt        time.Time
+	checkedAt      time.Time
 }
 
 func (c *hubBundleClient) String() string {
@@ -91,21 +96,46 @@ func (c *hubBundleClient) Accounts(ctx context.Context) ([]externalAccount, erro
 	return accounts, nil
 }
 
-// LayoutCallers 配置包里的接口调用方。maxAge 内和中台核对过就直接给上一份，不再问。
+// LayoutCallers 配置包里的接口调用方和它的内容核验时间。maxAge 内问到过中台就直接给上一份，不再问。
 func (c *hubBundleClient) LayoutCallers(ctx context.Context, maxAge time.Duration) ([]layoutCallerRow, bool, time.Time, error) {
 	c.mu.Lock()
-	fresh := !c.okAt.IsZero() && time.Since(c.okAt) < maxAge
-	rows, present, okAt := append([]layoutCallerRow(nil), c.callers...), c.callersPresent, c.okAt
+	fresh := !c.askedAt.IsZero() && time.Since(c.askedAt) < maxAge
+	rows, present, checkedAt := append([]layoutCallerRow(nil), c.callers...), c.callersPresent, c.checkedAt
 	c.mu.Unlock()
 	if fresh {
-		return rows, present, okAt, nil
+		return rows, present, checkedAt, nil
 	}
 	if _, _, err := c.fetch(ctx); err != nil {
 		return nil, false, time.Time{}, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]layoutCallerRow(nil), c.callers...), c.callersPresent, c.okAt, nil
+	return append([]layoutCallerRow(nil), c.callers...), c.callersPresent, c.checkedAt, nil
+}
+
+// answered 中台回了话：记下问到的时间，再按回应头续内容核验时间（只往后走）。调用方持锁。
+func (c *hubBundleClient) answered(header http.Header, sentAt time.Time) {
+	c.askedAt = time.Now()
+	if at, ok := sourceCheckedAt(header, sentAt); ok && at.After(c.checkedAt) {
+		c.checkedAt = at
+	}
+}
+
+// sourceCheckedAt 这份内容最近一次被来源同步确认的时刻。中台给的是秒数（X-Hub-Source-Age）不是时刻，
+// 从本机发请求的时刻往回减，两台机器的钟差不进来，算出来只会偏旧。读不懂就不续。
+// 不带秒数的老中台：说了校验不过（X-Hub-Stale）不续，否则按发请求的时刻算，和以前一样。
+func sourceCheckedAt(header http.Header, sentAt time.Time) (time.Time, bool) {
+	if values := header.Values("X-Hub-Source-Age"); len(values) > 0 {
+		seconds, err := strconv.ParseInt(values[0], 10, 64)
+		if err != nil || seconds < 0 || seconds > math.MaxInt64/int64(time.Second) {
+			return time.Time{}, false
+		}
+		return sentAt.Add(-time.Duration(seconds) * time.Second), true
+	}
+	if header.Get("X-Hub-Stale") != "" {
+		return time.Time{}, false
+	}
+	return sentAt, true
 }
 
 // fetch 问一次中台。accountsPresent=false 是包里缺平台账号这一项：这时不记 ETag，下次照样拿全量。
@@ -120,6 +150,7 @@ func (c *hubBundleClient) fetch(ctx context.Context) (accounts []externalAccount
 		req.Header.Set("If-None-Match", c.etag)
 	}
 	c.mu.Unlock()
+	sentAt := time.Now()
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, false, fmt.Errorf("连不上中台：%w", err)
@@ -135,7 +166,7 @@ func (c *hubBundleClient) fetch(ctx context.Context) (accounts []externalAccount
 	if resp.StatusCode == http.StatusNotModified {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		c.okAt = time.Now()
+		c.answered(resp.Header, sentAt)
 		return append([]externalAccount(nil), c.accounts...), true, nil
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -157,7 +188,8 @@ func (c *hubBundleClient) fetch(ctx context.Context) (accounts []externalAccount
 		return nil, false, errors.New("中台配置包无法解析")
 	}
 	c.mu.Lock()
-	c.callers, c.callersPresent, c.okAt = body.Items.APICallers, body.Items.APICallers != nil, time.Now()
+	c.callers, c.callersPresent = body.Items.APICallers, body.Items.APICallers != nil
+	c.answered(resp.Header, sentAt)
 	c.mu.Unlock()
 	if body.Items.PlatformAccounts == nil {
 		return nil, false, nil
