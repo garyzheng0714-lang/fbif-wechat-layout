@@ -15,8 +15,9 @@ import (
 )
 
 // 自家号转发外部公众号：先查 Feed 订阅源，没有再走 TikHub 广域搜。
-// 查到原文只记账，不立刻订阅；同一公众号累计转发满 3 篇且有微信链接，才向 Feed 订阅（2026-11-01 用户：「5 次有点严格，3 次吧」）。
-// 启动恢复会把已满阈值、还没订上的号都排进订阅，所以改阈值后已满的号重启即补订。
+// 查到原文只记账，不立刻订阅；同一公众号累计转发满 3 篇且有微信链接，才向 Feed 订阅（2026-11-01 用户：「5 次有点严格，3 次吧」），
+// 并请 Feed 顺手开快速订阅（2026-11-02 用户：「满三次自动快速订阅」）。
+// 启动恢复会把已满阈值、还没订上或快速订阅还没开成的号都排进订阅，所以改阈值、改规则后已满的号重启即补。
 
 const (
 	repostSubscribeThreshold         = 3
@@ -29,6 +30,10 @@ const (
 	repostSubscribeSuccess           = "success"
 	repostSubscribeFailed            = "failed"
 )
+
+// errFeedFastPending Feed 回 200 订上了，但快速订阅没开成（今天看啥积分不够、核对没过，或 Feed 没回结果）；
+// 订阅记成功、快速订阅记失败，下次重启或这个号再转一篇时再交（已开的 Feed 不再扣分）。
+var errFeedFastPending = errors.New("已订阅，快速订阅没开成")
 
 // errFeedSubscribeAccepted Feed 回 202：今天看啥收下了、还没确认关注，号也还没进 Feed；
 // 不算失败，下次重启或这个号再转一篇时照样再提交，确认了才回 200。
@@ -46,6 +51,7 @@ type publishRepostSource struct {
 	Key              string                 `json:"key"`
 	Articles         []publishRepostArticle `json:"articles"`
 	SubscribeState   string                 `json:"subscribe_state,omitempty"`
+	FastState        string                 `json:"fast_state,omitempty"`
 	SubscribeError   string                 `json:"subscribe_error,omitempty"`
 	SubscribeAt      string                 `json:"subscribe_at,omitempty"`
 	LastSubscribeURL string                 `json:"last_subscribe_url,omitempty"`
@@ -127,7 +133,8 @@ func (s *publishRepostSourceStore) record(name, articleURL, title string, jobID 
 	return src, true, nil
 }
 
-func (s *publishRepostSourceStore) markSubscribe(key, state, articleURL, errText string, at time.Time) error {
+// markSubscribe 记订阅状态；fastState 为空表示快速订阅状态不变。
+func (s *publishRepostSourceStore) markSubscribe(key, state, fastState, articleURL, errText string, at time.Time) error {
 	key = normalizeFoodTalksSourceName(key)
 	if s == nil || key == "" {
 		return nil
@@ -143,6 +150,9 @@ func (s *publishRepostSourceStore) markSubscribe(key, state, articleURL, errText
 			continue
 		}
 		doc.Sources[i].SubscribeState = state
+		if fastState != "" {
+			doc.Sources[i].FastState = fastState
+		}
 		doc.Sources[i].SubscribeError = strings.TrimSpace(errText)
 		if strings.TrimSpace(articleURL) != "" {
 			doc.Sources[i].LastSubscribeURL = articleURL
@@ -201,7 +211,10 @@ func (src publishRepostSource) stuckSubscribing() bool {
 }
 
 func (src publishRepostSource) readyToSubscribe() bool {
-	if src.SubscribeState == repostSubscribeSuccess || src.SubscribeState == repostSubscribeSubscribing {
+	if src.SubscribeState == repostSubscribeSubscribing {
+		return false
+	}
+	if src.SubscribeState == repostSubscribeSuccess && src.FastState == repostSubscribeSuccess {
 		return false
 	}
 	if len(src.Articles) < repostSubscribeThreshold {
@@ -277,9 +290,10 @@ func defaultSubscribeFeedWechatArticle(ctx context.Context, sourceName, articleU
 	if base == "" {
 		base = defaultFoodTalksFeedBase
 	}
-	payload, err := json.Marshal(map[string]string{
+	payload, err := json.Marshal(map[string]any{
 		"source_name": strings.TrimSpace(sourceName),
 		"url":         strings.TrimSpace(articleURL),
+		"fast":        true,
 	})
 	if err != nil {
 		return err
@@ -305,14 +319,19 @@ func defaultSubscribeFeedWechatArticle(ctx context.Context, sourceName, articleU
 	if readErr != nil {
 		return fmt.Errorf("订阅响应读取失败: %w", readErr)
 	}
-	if resp.StatusCode == http.StatusOK {
-		return nil
-	}
 	var failure struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+		Error     string `json:"error"`
+		Message   string `json:"message"`
+		Fast      bool   `json:"fast"`
+		FastError string `json:"fast_error"`
 	}
 	_ = json.Unmarshal(body, &failure)
+	if resp.StatusCode == http.StatusOK {
+		if failure.Fast {
+			return nil
+		}
+		return fmt.Errorf("%w：%s", errFeedFastPending, firstNonEmpty(strings.TrimSpace(failure.FastError), "Feed 没回快速订阅结果"))
+	}
 	detail := firstNonEmpty(strings.TrimSpace(failure.Message), strings.TrimSpace(failure.Error))
 	if resp.StatusCode == http.StatusAccepted {
 		return fmt.Errorf("%w：%s", errFeedSubscribeAccepted, firstNonEmpty(detail, "等今天看啥确认"))
@@ -364,7 +383,7 @@ func (p *publishPipeline) completeRepostSourceSubscribe(sourceName string) {
 	if articleURL == "" {
 		return
 	}
-	if err := p.repostSources.markSubscribe(src.Name, repostSubscribeSubscribing, articleURL, "", pipelineNow(p)); err != nil {
+	if err := p.repostSources.markSubscribe(src.Name, repostSubscribeSubscribing, "", articleURL, "", pipelineNow(p)); err != nil {
 		log.Printf("publish: 标记转载公众号订阅中失败（%s）：%v", src.Name, err)
 		return
 	}
@@ -375,18 +394,26 @@ func (p *publishPipeline) completeRepostSourceSubscribe(sourceName string) {
 		subscribeErr = p.subscribeFeedWechatArticle(context.Background(), src.Name, articleURL)
 	}
 	state := repostSubscribeSuccess
+	fastState := repostSubscribeSuccess
 	errText := ""
 	if subscribeErr != nil {
 		errText = truncateRunes(strings.Join(strings.Fields(subscribeErr.Error()), " "), 300)
-		if errors.Is(subscribeErr, errFeedSubscribeAccepted) {
+		fastState = repostSubscribeFailed
+		if errors.Is(subscribeErr, errFeedFastPending) {
+			log.Printf("publish: 转载满 %d 次，已订阅 Feed（%s），快速订阅没开成：%s", repostSubscribeThreshold, src.Name, errText)
+		} else if errors.Is(subscribeErr, errFeedSubscribeAccepted) {
 			state = repostSubscribeAccepted
 			log.Printf("publish: 转载满 %d 次，已向 Feed 提交订阅（%s），等今天看啥确认：%s", repostSubscribeThreshold, src.Name, errText)
 		} else {
 			state = repostSubscribeFailed
 			log.Printf("publish: 转载满 %d 次后订阅 Feed 失败（%s）：%s", repostSubscribeThreshold, src.Name, errText)
 		}
+		if src.SubscribeState == repostSubscribeSuccess {
+			// 早先已订上、这回只为补开快速订阅：订阅照旧记成功，只记快速订阅没开成。
+			state = repostSubscribeSuccess
+		}
 	}
-	if err := p.repostSources.markSubscribe(src.Name, state, articleURL, errText, pipelineNow(p)); err != nil {
+	if err := p.repostSources.markSubscribe(src.Name, state, fastState, articleURL, errText, pipelineNow(p)); err != nil {
 		log.Printf("publish: 回写转载公众号订阅状态失败（%s）：%v", src.Name, err)
 	}
 }
@@ -397,7 +424,7 @@ func (p *publishPipeline) recoverRepostSourceSubscribe() {
 	}
 	for _, src := range p.repostSources.pendingSubscribe() {
 		if src.SubscribeState == repostSubscribeSubscribing {
-			_ = p.repostSources.markSubscribe(src.Name, repostSubscribePending, src.subscribeURL(), "", pipelineNow(p))
+			_ = p.repostSources.markSubscribe(src.Name, repostSubscribePending, "", src.subscribeURL(), "", pipelineNow(p))
 		}
 		p.scheduleRepostSourceSubscribe(src.Name)
 	}

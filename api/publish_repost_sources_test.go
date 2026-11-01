@@ -92,9 +92,9 @@ func TestRecordPublishedRepostSubscribesAfterThree(t *testing.T) {
 	}
 }
 
-// TestRecoverRepostSubscribeCatchesUpSourcesAlreadyOverThreshold 阈值从 5 降到 3（2026-11-01）时，
-// 已转满 3 篇的号没有新转载就不会触发；启动恢复要把已满、还没订上的（含停在 subscribing 的）都补订，
-// 已订上的、没满的不碰。
+// TestRecoverRepostSubscribeCatchesUpSourcesAlreadyOverThreshold 阈值从 5 降到 3（2026-11-01）、
+// 满 3 次要开快速订阅（2026-11-02）时，已转满的号没有新转载就不会触发；启动恢复要把已满、还没订上的
+// （含停在 subscribing 的）和订上了但快速订阅没开成的都补交，订阅与快速订阅都成了的、没满的不碰。
 func TestRecoverRepostSubscribeCatchesUpSourcesAlreadyOverThreshold(t *testing.T) {
 	env := newPublishTestEnv(t)
 	store := newPublishRepostSourceStore(filepath.Join(t.TempDir(), "repost.json"))
@@ -112,21 +112,23 @@ func TestRecoverRepostSubscribeCatchesUpSourcesAlreadyOverThreshold(t *testing.T
 	add("盐财经", 2)
 	add("咖门", 5)
 	add("龙商网超市周刊", 3)
-	_ = store.markSubscribe("咖门", repostSubscribeSuccess, "", "", now)
-	_ = store.markSubscribe("龙商网超市周刊", repostSubscribeSubscribing, "", "", now)
+	add("联商网", 7)
+	_ = store.markSubscribe("咖门", repostSubscribeSuccess, repostSubscribeSuccess, "", "", now)
+	_ = store.markSubscribe("联商网", repostSubscribeSuccess, "", "", "", now)
+	_ = store.markSubscribe("龙商网超市周刊", repostSubscribeSubscribing, "", "", "", now)
 	var subscribed []string
 	env.pipeline.subscribeFeedWechatArticle = func(_ context.Context, sourceName, _ string) error {
 		subscribed = append(subscribed, sourceName)
 		return nil
 	}
 	env.pipeline.recoverRepostSourceSubscribe()
-	if strings.Join(subscribed, ",") != "投资界,全球烘焙指南,龙商网超市周刊" {
-		t.Fatalf("应只补订已满 3 篇且没订上的号：%v", subscribed)
+	if strings.Join(subscribed, ",") != "投资界,全球烘焙指南,龙商网超市周刊,联商网" {
+		t.Fatalf("应补订已满 3 篇且没订上、或快速订阅没开的号：%v", subscribed)
 	}
-	for _, name := range []string{"投资界", "全球烘焙指南", "龙商网超市周刊", "咖门"} {
+	for _, name := range []string{"投资界", "全球烘焙指南", "龙商网超市周刊", "咖门", "联商网"} {
 		src, _, _ := store.byKey(name)
-		if src.SubscribeState != repostSubscribeSuccess {
-			t.Fatalf("%s 应订上：state=%q", name, src.SubscribeState)
+		if src.SubscribeState != repostSubscribeSuccess || src.FastState != repostSubscribeSuccess {
+			t.Fatalf("%s 应订上并开快速订阅：state=%q fast=%q", name, src.SubscribeState, src.FastState)
 		}
 	}
 	if src, _, _ := store.byKey("盐财经"); src.SubscribeState != repostSubscribeIdle {
@@ -144,7 +146,17 @@ func TestRepostSubscribeSendsHTTPSToFeed(t *testing.T) {
 			t.Fatalf("path=%s token=%q", r.URL.Path, r.Header.Get("X-Publish-Sync-Token"))
 		}
 		got = nil
-		_ = json.NewDecoder(r.Body).Decode(&got)
+		var raw map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		if raw["fast"] != true {
+			t.Fatalf("订阅要带 fast=true 请 Feed 开快速订阅：%v", raw)
+		}
+		got = map[string]string{}
+		for k, v := range raw {
+			if str, ok := v.(string); ok {
+				got[k] = str
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		// 照 Feed 的校验：要 source_name，链接必须 https 且是 mp.weixin.qq.com。
 		u, err := url.Parse(got["url"])
@@ -153,7 +165,7 @@ func TestRepostSubscribeSendsHTTPSToFeed(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":"source_name and wechat article url are required"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"status":"subscribed","source_name":"联商网"}`))
+		_, _ = w.Write([]byte(`{"status":"subscribed","source_name":"联商网","fast":true}`))
 	}))
 	t.Cleanup(feed.Close)
 	t.Setenv("FOODTALKS_FEED_BASE_URL", feed.URL)
@@ -179,6 +191,47 @@ func TestRepostSubscribeSendsHTTPSToFeed(t *testing.T) {
 	src, _, _ := env.pipeline.repostSources.byKey("联商网")
 	if src.SubscribeState != repostSubscribeSuccess || src.LastSubscribeURL != want {
 		t.Fatalf("订阅应成功并记下 https 链接：state=%q url=%q err=%q", src.SubscribeState, src.LastSubscribeURL, src.SubscribeError)
+	}
+}
+
+// TestRepostSubscribeFastPendingKeepsSubscribedAndRetries Feed 订上了但快速订阅没开成（积分不够等）：
+// 订阅记成功、快速订阅记失败，下回再交；早先已订上的号补开失败也不把订阅改成失败。
+func TestRepostSubscribeFastPendingKeepsSubscribedAndRetries(t *testing.T) {
+	t.Setenv("PUBLISH_SYNC_SERVICE_TOKEN", "sync-secret")
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"subscribed","source_name":"投资界","fast":false,"fast_error":"供应商没有开通极速订阅：积分不足"}`))
+	}))
+	t.Cleanup(feed.Close)
+	t.Setenv("FOODTALKS_FEED_BASE_URL", feed.URL)
+	err := defaultSubscribeFeedWechatArticle(context.Background(), "投资界", "https://mp.weixin.qq.com/s?__biz=a&mid=1&idx=1")
+	if !errors.Is(err, errFeedFastPending) || !strings.Contains(err.Error(), "积分不足") {
+		t.Fatalf("200 但没开成快速订阅应认作 fast pending：%v", err)
+	}
+
+	env := newPublishTestEnv(t)
+	env.pipeline.repostSources = newPublishRepostSourceStore(filepath.Join(t.TempDir(), "repost.json"))
+	for i := 1; i <= repostSubscribeThreshold; i++ {
+		if _, _, err := env.pipeline.repostSources.record("投资界", "https://mp.weixin.qq.com/s?__biz=a&mid="+itoaRepost(i)+"&idx=1", "标题", int64(i), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply := err
+	env.pipeline.subscribeFeedWechatArticle = func(context.Context, string, string) error { return reply }
+	env.pipeline.completeRepostSourceSubscribe("投资界")
+	src, _, _ := env.pipeline.repostSources.byKey("投资界")
+	if src.SubscribeState != repostSubscribeSuccess || src.FastState != repostSubscribeFailed || !src.readyToSubscribe() {
+		t.Fatalf("应记订阅成功、快速订阅失败并下回再交：state=%q fast=%q", src.SubscribeState, src.FastState)
+	}
+	reply = errors.New("订阅接口不可达")
+	env.pipeline.completeRepostSourceSubscribe("投资界")
+	if src, _, _ = env.pipeline.repostSources.byKey("投资界"); src.SubscribeState != repostSubscribeSuccess {
+		t.Fatalf("早先已订上，补开失败不应把订阅改成失败：state=%q", src.SubscribeState)
+	}
+	reply = nil
+	env.pipeline.completeRepostSourceSubscribe("投资界")
+	if src, _, _ = env.pipeline.repostSources.byKey("投资界"); src.FastState != repostSubscribeSuccess || src.readyToSubscribe() {
+		t.Fatalf("开成后不再交：fast=%q", src.FastState)
 	}
 }
 
