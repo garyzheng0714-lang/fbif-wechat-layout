@@ -15,10 +15,11 @@ import (
 )
 
 // 自家号转发外部公众号：先查 Feed 订阅源，没有再走 TikHub 广域搜。
-// 查到原文只记账，不立刻订阅；同一公众号累计转发满 5 篇且有微信链接，才向 Feed 订阅。
+// 查到原文只记账，不立刻订阅；同一公众号累计转发满 3 篇且有微信链接，才向 Feed 订阅（2026-11-01 用户：「5 次有点严格，3 次吧」）。
+// 启动恢复会把已满阈值、还没订上的号都排进订阅，所以改阈值后已满的号重启即补订。
 
 const (
-	repostSubscribeThreshold         = 5
+	repostSubscribeThreshold         = 3
 	feedOriginalArticleSubscribePath = "/api/internal/original-article/subscribe"
 	feedOriginalArticleSubscribeTO   = 8 * time.Second
 	repostSubscribeIdle              = ""
@@ -185,11 +186,18 @@ func (s *publishRepostSourceStore) pendingSubscribe() []publishRepostSource {
 	}
 	var out []publishRepostSource
 	for _, src := range doc.Sources {
-		if src.readyToSubscribe() {
+		if src.readyToSubscribe() || src.stuckSubscribing() {
 			out = append(out, src)
 		}
 	}
 	return out
+}
+
+// stuckSubscribing 订阅请求发出后进程退出，状态停在 subscribing；只在启动恢复时捞回来重交（Feed 订阅幂等）。
+func (src publishRepostSource) stuckSubscribing() bool {
+	return src.SubscribeState == repostSubscribeSubscribing &&
+		len(src.Articles) >= repostSubscribeThreshold &&
+		strings.TrimSpace(src.subscribeURL()) != ""
 }
 
 func (src publishRepostSource) readyToSubscribe() bool {

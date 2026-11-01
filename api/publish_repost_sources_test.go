@@ -33,15 +33,15 @@ func TestRepostSourceStoreCountsDistinctArticles(t *testing.T) {
 		t.Fatalf("second add: added=%v n=%d err=%v", added, len(second.Articles), err)
 	}
 	if second.readyToSubscribe() {
-		t.Fatal("未满 5 次不得订阅")
+		t.Fatal("未满 3 次不得订阅")
 	}
 }
 
-func TestRepostSourceReadyAfterFiveArticles(t *testing.T) {
+func TestRepostSourceReadyAfterThreeArticles(t *testing.T) {
 	store := newPublishRepostSourceStore(filepath.Join(t.TempDir(), "repost.json"))
 	now := time.Now()
 	var src publishRepostSource
-	for i := 1; i <= 5; i++ {
+	for i := 1; i <= repostSubscribeThreshold; i++ {
 		var err error
 		src, _, err = store.record("惊蛰研究所",
 			"https://mp.weixin.qq.com/s?__biz=aaa&mid="+itoaRepost(i)+"&idx=1",
@@ -51,11 +51,11 @@ func TestRepostSourceReadyAfterFiveArticles(t *testing.T) {
 		}
 	}
 	if !src.readyToSubscribe() {
-		t.Fatalf("满 5 次应可订阅：n=%d", len(src.Articles))
+		t.Fatalf("满 3 次应可订阅：n=%d", len(src.Articles))
 	}
 }
 
-func TestRecordPublishedRepostSubscribesAfterFive(t *testing.T) {
+func TestRecordPublishedRepostSubscribesAfterThree(t *testing.T) {
 	env := newPublishTestEnv(t)
 	t.Setenv("SITE_OWN_ACCOUNTS", "FBIF食品饮料创新")
 	env.pipeline.repostSources = newPublishRepostSourceStore(filepath.Join(t.TempDir(), "repost.json"))
@@ -64,7 +64,7 @@ func TestRecordPublishedRepostSubscribesAfterFive(t *testing.T) {
 		subscribed = append(subscribed, sourceName+"|"+articleURL)
 		return nil
 	}
-	for i := 1; i <= 4; i++ {
+	for i := 1; i < repostSubscribeThreshold; i++ {
 		env.pipeline.recordPublishedRepost(context.Background(), publishJob{
 			ID:                int64(i),
 			Title:             "标题",
@@ -77,18 +77,60 @@ func TestRecordPublishedRepostSubscribesAfterFive(t *testing.T) {
 		}
 	}
 	env.pipeline.recordPublishedRepost(context.Background(), publishJob{
-		ID:                5,
+		ID:                int64(repostSubscribeThreshold),
 		Title:             "标题",
 		SourceName:        "FBIF食品饮料创新",
 		BlocksJSON:        `[{"k":"txt","text":"来源：惊蛰研究所"}]`,
-		OriginalSourceURL: "https://mp.weixin.qq.com/s?__biz=aaa&mid=5&idx=1",
+		OriginalSourceURL: "https://mp.weixin.qq.com/s?__biz=aaa&mid=" + itoaRepost(repostSubscribeThreshold) + "&idx=1",
 	})
 	if len(subscribed) != 1 || !strings.Contains(subscribed[0], "惊蛰研究所") {
-		t.Fatalf("满 5 次应订阅一次：%v", subscribed)
+		t.Fatalf("满 3 次应订阅一次：%v", subscribed)
 	}
 	src, ok, err := env.pipeline.repostSources.byKey("惊蛰研究所")
 	if err != nil || !ok || src.SubscribeState != repostSubscribeSuccess {
 		t.Fatalf("订阅状态应成功：ok=%v state=%q err=%v", ok, src.SubscribeState, err)
+	}
+}
+
+// TestRecoverRepostSubscribeCatchesUpSourcesAlreadyOverThreshold 阈值从 5 降到 3（2026-11-01）时，
+// 已转满 3 篇的号没有新转载就不会触发；启动恢复要把已满、还没订上的（含停在 subscribing 的）都补订，
+// 已订上的、没满的不碰。
+func TestRecoverRepostSubscribeCatchesUpSourcesAlreadyOverThreshold(t *testing.T) {
+	env := newPublishTestEnv(t)
+	store := newPublishRepostSourceStore(filepath.Join(t.TempDir(), "repost.json"))
+	env.pipeline.repostSources = store
+	now := time.Now()
+	add := func(name string, n int) {
+		for i := 1; i <= n; i++ {
+			if _, _, err := store.record(name, "https://mp.weixin.qq.com/s?__biz="+name+"&mid="+itoaRepost(i)+"&idx=1", "标题", 0, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	add("投资界", 3)
+	add("全球烘焙指南", 4)
+	add("盐财经", 2)
+	add("咖门", 5)
+	add("龙商网超市周刊", 3)
+	_ = store.markSubscribe("咖门", repostSubscribeSuccess, "", "", now)
+	_ = store.markSubscribe("龙商网超市周刊", repostSubscribeSubscribing, "", "", now)
+	var subscribed []string
+	env.pipeline.subscribeFeedWechatArticle = func(_ context.Context, sourceName, _ string) error {
+		subscribed = append(subscribed, sourceName)
+		return nil
+	}
+	env.pipeline.recoverRepostSourceSubscribe()
+	if strings.Join(subscribed, ",") != "投资界,全球烘焙指南,龙商网超市周刊" {
+		t.Fatalf("应只补订已满 3 篇且没订上的号：%v", subscribed)
+	}
+	for _, name := range []string{"投资界", "全球烘焙指南", "龙商网超市周刊", "咖门"} {
+		src, _, _ := store.byKey(name)
+		if src.SubscribeState != repostSubscribeSuccess {
+			t.Fatalf("%s 应订上：state=%q", name, src.SubscribeState)
+		}
+	}
+	if src, _, _ := store.byKey("盐财经"); src.SubscribeState != repostSubscribeIdle {
+		t.Fatalf("没满 3 篇不应订阅：state=%q", src.SubscribeState)
 	}
 }
 
@@ -129,7 +171,8 @@ func TestRepostSubscribeSendsHTTPSToFeed(t *testing.T) {
 			OriginalSourceURL: "http://mp.weixin.qq.com/s?__biz=MjM5ODM1MzM3NA==&mid=" + itoaRepost(i) + "&idx=1&sn=sn" + itoaRepost(i) + "&chksm=y#rd",
 		})
 	}
-	want := "https://mp.weixin.qq.com/s?__biz=MjM5ODM1MzM3NA==&mid=5&idx=1&sn=sn5&chksm=y"
+	n := itoaRepost(repostSubscribeThreshold)
+	want := "https://mp.weixin.qq.com/s?__biz=MjM5ODM1MzM3NA==&mid=" + n + "&idx=1&sn=sn" + n + "&chksm=y"
 	if got["source_name"] != "联商网" || got["url"] != want {
 		t.Fatalf("发给 Feed 的应是 https 链接：%v", got)
 	}
