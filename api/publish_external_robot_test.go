@@ -496,7 +496,8 @@ func TestRobotPublishOutcomes(t *testing.T) {
 				t.Fatalf("卡片不再说存草稿: %s", card)
 			}
 
-			// 之后的跟进、重启恢复、兜底补查：发布中的只查（分发服务那边已有这次发布，正在做），定了的不再碰。
+			// 之后的跟进、重启恢复、兜底补查：发布中的只查（分发服务那边已有这次发布，正在做），发布做成了却待核对的
+			// 跟进时也只查，定了的不再碰。
 			robot.getRecord = *acting(robotActionDoing, "")
 			if tc.state == publishExternalDistributionReviewing {
 				robot.getRecord = *tc.record
@@ -504,6 +505,8 @@ func TestRobotPublishOutcomes(t *testing.T) {
 			gets := 0
 			if robotLaneFollowed(lane) {
 				gets = 2
+			} else if robotLanePublishedUnsettled(lane, time.Now()) {
+				gets = 1
 			}
 			env.pipeline.followRobotLanes()
 			env.pipeline.recoverExternalDistribution(mustJob(t, env, job.ID))
@@ -733,6 +736,48 @@ func TestRobotLaneRestartRecoveryChecksByKey(t *testing.T) {
 	env.pipeline.followRobotLanes()
 	if len(robot.gets) != 2 || len(robot.publishes) != 1 {
 		t.Fatalf("定了的 lane 不再查：gets=%v publishes=%v", robot.gets, robot.publishes)
+	}
+}
+
+// TestRobotPublishedUnsettledLaneHeals 发布做成了、链接排版工具不认（百家号列表给的是 http）转了待核对：每分钟跟进时
+// 照样按同一个键 GET，分发服务改成 https 就转已发布、记下链接；别的发布动作、还没改好的都不动，也绝不再发。
+func TestRobotPublishedUnsettledLaneHeals(t *testing.T) {
+	setTestRobotOnlyConfig(t)
+	env := newPublishTestEnv(t)
+	robot := useFakeRobot(env)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	stuck := testRobotLaneIn(job.ID, publishExternalDistributionReconciliationRequired)
+	stuck.ActionID = "act-1"
+	stuck.RequestedAt = time.Now().UTC().Format(time.RFC3339)
+	plain := "http://baijiahao.baidu.com/s?id=" + testRobotArticleID
+	stuck.Error = robotPlatformResultOf(testRobotPublishRecord(testRobotArticleID, robotStatePublished, plain), robotPayloadProfile(robotDraftPayload{Platform: "baijiahao"}), "act-1").Reason
+	job = setTestLanes(t, env, job.ID, stuck)
+
+	robot.getRecord = testRobotPublishRecord(testRobotArticleID, robotStatePublished, plain)
+	env.pipeline.followRobotLanes()
+	if lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID); lane.State != publishExternalDistributionReconciliationRequired || lane.Error != stuck.Error {
+		t.Fatalf("还没改好的不动：%+v", lane)
+	}
+	other := testRobotPublishRecord(testRobotArticleID, robotStatePublished, testRobotArticleURL("baijiahao", testRobotArticleID))
+	other.Action.ID = "act-2"
+	robot.getRecord = other
+	env.pipeline.followRobotLanes()
+	if lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID); lane.State != publishExternalDistributionReconciliationRequired {
+		t.Fatalf("不是这条 lane 记的那次发布不认：%+v", lane)
+	}
+
+	robot.getRecord = testRobotPublishRecord(testRobotArticleID, robotStatePublished, testRobotArticleURL("baijiahao", testRobotArticleID))
+	env.pipeline.followRobotLanes()
+	lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID)
+	if lane.State != publishExternalDistributionSucceeded || lane.URL != testRobotArticleURL("baijiahao", testRobotArticleID) || lane.Error != "" {
+		t.Fatalf("分发服务改好链接应转已发布：%+v", lane)
+	}
+	if len(robot.gets) != 3 || len(robot.publishes) != 0 || len(robot.saves) != 0 {
+		t.Fatalf("只读不发：gets=%v publishes=%v saves=%d", robot.gets, robot.publishes, len(robot.saves))
+	}
+	env.pipeline.followRobotLanes()
+	if len(robot.gets) != 3 {
+		t.Fatalf("定了的 lane 不再查：gets=%v", robot.gets)
 	}
 }
 

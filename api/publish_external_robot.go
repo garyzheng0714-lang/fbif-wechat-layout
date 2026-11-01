@@ -653,7 +653,34 @@ func robotLaneFollowed(lane publishExternalLane) bool {
 		(lane.State == publishExternalDistributionPublishing || lane.State == publishExternalDistributionReviewing)
 }
 
-// followRobotLanes 发布中、平台审核中的 lane 各 GET 一次（只读分发服务的记录，不碰平台）。
+// robotLanePublishedUnsettled 发布做成了、平台上的结果排版工具却认不了（没拿到链接、链接不对、平台上是别的样子）
+// 的待核对 lane：分发服务会接着查、改，每分钟照样按同一个键 GET 一次，这次发布的结论变了就改过来，只读、不再发
+// （2026-11-01 百家号第一次真发，列表给的链接是 http，卡片卡在待核对，分发服务改成 https 后没人再去问）。
+func robotLanePublishedUnsettled(lane publishExternalLane, now time.Time) bool {
+	if lane.Driver != externalDriverRobot || lane.State != publishExternalDistributionReconciliationRequired ||
+		strings.TrimSpace(lane.IntentKey) == "" || strings.TrimSpace(lane.ContentPK) == "" || strings.TrimSpace(lane.ActionID) == "" {
+		return false
+	}
+	requestedAt, err := time.Parse(time.RFC3339, lane.RequestedAt)
+	return err == nil && now.Sub(requestedAt) <= robotResolveWithin
+}
+
+// recheckRobotPublishedLane 只认这条 lane 记的那次发布、而且做成了：按平台现状重新下结论。
+func (p *publishPipeline) recheckRobotPublishedLane(jobID int64, lane publishExternalLane, client distributionRobotAPI) {
+	payload, profile, ok := robotLanePayload(lane)
+	if !ok {
+		return
+	}
+	record, err := client.Draft(context.Background(), payload.Platform, lane.IntentKey)
+	if err != nil || record.Action == nil || record.Action.ID != lane.ActionID || record.Action.Status != robotActionDone {
+		return
+	}
+	if result := robotPlatformResultOf(record, profile, lane.ActionID); result.State != "" {
+		p.applyRobotFollowResult(jobID, lane, result, profile)
+	}
+}
+
+// followRobotLanes 发布中、平台审核中的 lane，和发布做成了却待核对的 lane，各 GET 一次（只读分发服务的记录，不碰平台）。
 func (p *publishPipeline) followRobotLanes() {
 	if p == nil || p.store == nil || publishWorkersPaused() {
 		return
@@ -663,10 +690,12 @@ func (p *publishPipeline) followRobotLanes() {
 		log.Printf("publish: 跟进外发发布读取任务失败：%v", err)
 		return
 	}
+	now := pipelineNow(p)
 	var client distributionRobotAPI
 	for _, job := range jobs {
 		for _, lane := range job.ExternalDistributionLanes {
-			if !robotLaneFollowed(lane) {
+			followed, unsettled := robotLaneFollowed(lane), robotLanePublishedUnsettled(lane, now)
+			if !followed && !unsettled {
 				continue
 			}
 			if client == nil {
@@ -675,7 +704,11 @@ func (p *publishPipeline) followRobotLanes() {
 					return
 				}
 			}
-			p.followRobotLane(job.ID, lane, client)
+			if followed {
+				p.followRobotLane(job.ID, lane, client)
+			} else {
+				p.recheckRobotPublishedLane(job.ID, lane, client)
+			}
 		}
 	}
 }
