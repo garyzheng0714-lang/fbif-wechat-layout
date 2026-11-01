@@ -59,6 +59,7 @@ func TestPublishEndpointsRequireAdminRole(t *testing.T) {
 		{http.MethodGet, "/api/publish/readiness", ""},
 		{http.MethodGet, "/api/publish/jobs", ""},
 		{http.MethodGet, "/api/publish/jobs/1", ""},
+		{http.MethodGet, "/api/publish/failed-jobs", ""},
 		{http.MethodPost, "/api/publish/jobs/1/retry", ""},
 		{http.MethodPost, "/api/publish/jobs/1/rerender-latest", ""},
 		{http.MethodPost, "/api/publish/jobs/1/restage-current", ""},

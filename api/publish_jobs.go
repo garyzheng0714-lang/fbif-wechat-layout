@@ -94,6 +94,12 @@ type publishJob struct {
 	RenderOutputHash  string `json:"render_output_hash,omitempty"`
 	CoverURL          string `json:"cover_url,omitempty"`
 	ImageMap          string `json:"image_map,omitempty"` // {原图url: OSS url}，转存幂等锚点
+	// MirrorAttempts 本轮搬图已自动重试几次：微信图偶尔打不开，搬图失败先隔一会儿自己再试
+	//（publishMirrorRetryDelays），用完才落 failed。进入搬图、搬图成功、人工重试都清零。
+	MirrorAttempts int `json:"mirror_attempts,omitempty"`
+	// FailedBefore 这篇落过 failed（由 updateIf 统一记，进出 failed 都会补上）。失败过的稿
+	// 重试成功后不自动公开，停在待审核等人确认（publishAutoPublishEligible）。
+	FailedBefore bool `json:"failed_before,omitempty"`
 	// 内容版本契约：权威顺序 official_api > supplier > web_fetch。高权威
 	// 内容晚到时先持久化；可逆阶段重跑草稿，已进入不确定/公开窗口则只留冲突证据。
 	ContentSource        string `json:"content_source,omitempty"`
@@ -512,7 +518,11 @@ func (s *publishJobStore) updateIf(id int64, predicate func(publishJob) bool, mu
 		if !predicate(doc.Jobs[i]) {
 			return doc.Jobs[i], false, nil
 		}
+		wasFailed := doc.Jobs[i].Stage == publishStageFailed
 		mutate(&doc.Jobs[i])
+		if wasFailed || doc.Jobs[i].Stage == publishStageFailed {
+			doc.Jobs[i].FailedBefore = true
+		}
 		doc.Jobs[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if err := s.writeLocked(doc); err != nil {
 			return publishJob{}, false, err

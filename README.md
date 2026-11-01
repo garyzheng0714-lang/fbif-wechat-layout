@@ -243,6 +243,7 @@ curl http://127.0.0.1:9000/api/health
 | `GET` / `PUT` | `/api/publish/delivery-settings` | 读取/更新审核卡的飞书应用与目标群；管理员权限，写入还需飞书登录与当前群可见性 |
 | `GET` / `PUT` | `/api/publish/delivery-settings/distribution-owners` | 分发负责人：GET 返回已选的人与审核群成员候选（换了推送应用会标 `stale`）；PUT `{open_ids}` 只收审核群成员，最多 10 人。外发前检查不过时以普通消息在审核卡的话题里 @ 他们 |
 | `PUT` | `/api/publish/delivery-settings/proofread-owners` | 校对负责人：选法同上（已选的人在上面 GET 的 `proofread` 里）。风险检查里确定无疑的错误经复核后，在审核卡的话题里 @ 他们，不挡同步 |
+| `GET` | `/api/publish/failed-jobs` | 列出所有停在 failed 的发布任务（带能否重试 `retryable`、能否放弃 `abandonable`），管理后台「失败任务」用；需管理员登录或部署专用服务令牌 |
 | `GET` | `/api/publish/jobs/{id}` | 查询发布任务详情，需管理员/超级管理员登录，或部署专用服务令牌 |
 | `POST` | `/api/publish/jobs/{id}/review` | HTTP 审核默认关闭；仅显式开启、管理员鉴权且固定审核人位于飞书白名单时可用。approve 原子写入 `publicizing` 后立即返回，后台异步翻公开 |
 | `POST` | `/api/publish/jobs/{id}/retry` | 从失败阶段续跑任务 |

@@ -489,6 +489,29 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 	})
 
+	// 管理后台「失败任务」：列出所有停在 failed 的任务，供网页上点重试 / 放弃。
+	mux.HandleFunc("GET /api/publish/failed-jobs", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		jobs, err := p.store.all()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		out := []publishFailedJobSummary{}
+		for i := len(jobs) - 1; i >= 0; i-- {
+			if jobs[i].Stage != publishStageFailed {
+				continue
+			}
+			out = append(out, publishFailedJobSummary{
+				publishSyncJobSummary: newPublishSyncJobSummary(jobs[i]),
+				Abandonable:           publishJobAbandonable(jobs[i]),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"jobs": out})
+	})
+
 	mux.HandleFunc("GET /api/publish/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !requirePublishAdmin(w, r, auth) {
 			return
@@ -1093,6 +1116,11 @@ type publishSyncJobSummary struct {
 	RetryBlockReason     string   `json:"retry_block_reason,omitempty"`
 	ReconcileRequired    bool     `json:"reconcile_required"`
 	AvailableActions     []string `json:"available_actions"`
+}
+
+type publishFailedJobSummary struct {
+	publishSyncJobSummary
+	Abandonable bool `json:"abandonable"`
 }
 
 func newPublishSyncJobSummary(job publishJob) publishSyncJobSummary {

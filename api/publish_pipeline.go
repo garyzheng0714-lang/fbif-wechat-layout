@@ -277,6 +277,9 @@ type publishPipeline struct {
 	externalSpawn func(func())
 	// retryNotification 失败通知的延迟重试调度；测试可注入捕获回调。
 	retryNotification func(time.Duration, func())
+	// retryStageLater 搬图失败后隔一会儿自己再试的调度（生产 time.AfterFunc）；nil 时不自动重试、
+	// 直接落 failed。进程重启丢了计时器也不要紧：recoverJobs 会把 mirroring 的任务当场续跑。
+	retryStageLater func(time.Duration, func())
 	// 每周手改清单（publish_edit_report_delivery.go）：投递记录、串行锁与私信发送（测试注入）。
 	editReports      *publishEditReportStore
 	editReportMu     sync.Mutex
@@ -340,6 +343,7 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		spawn:                      func(f func()) { go f() },
 		externalSpawn:              func(f func()) { go f() },
 		retryNotification:          func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
+		retryStageLater:            func(delay time.Duration, f func()) { time.AfterFunc(delay, f) },
 		now:                        time.Now,
 	}
 	p.foodTalks = func() (foodTalksAPI, error) {
@@ -716,7 +720,16 @@ func (p *publishPipeline) runJob(jobID int64) {
 				p.schedulePublishNotification(failed.ID)
 				return
 			}
-			failed, err := p.store.setFailed(jobID, job.Stage, stageErr.Error())
+			failMsg := stageErr.Error()
+			if job.Stage == publishStageMirroring && errors.Is(stageErr, errPublishMirrorTransient) {
+				if p.scheduleMirrorRetry(job, stageErr) {
+					return
+				}
+				if job.MirrorAttempts >= len(publishMirrorRetryDelays) {
+					failMsg = fmt.Sprintf("已自动重试 %d 次仍没成功：%s", len(publishMirrorRetryDelays), failMsg)
+				}
+			}
+			failed, err := p.store.setFailed(jobID, job.Stage, failMsg)
 			if err != nil {
 				log.Printf("publish: record job %d failure failed: %v", jobID, err)
 			}
@@ -878,6 +891,7 @@ func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error
 		j.RendererBuildSHA = result.RendererBuildSHA
 		j.RenderOutputHash = result.OutputHash
 		j.Stage = publishStageMirroring
+		j.MirrorAttempts = 0
 		j.FailedStage = ""
 		j.Error = ""
 	})
@@ -932,7 +946,7 @@ func (p *publishPipeline) stageMirror(ctx context.Context, job publishJob) error
 	for attempt := 0; len(pending) > 0 && attempt < 2; attempt++ {
 		results, err := p.ossUpload(ctx, pending)
 		if err != nil {
-			return fmt.Errorf("图片批量转存失败: %w", err)
+			return publishMirrorTransient("图片批量转存失败: %w", err)
 		}
 		var missing []string
 		for _, src := range pending {
@@ -956,19 +970,20 @@ func (p *publishPipeline) stageMirror(ctx context.Context, job publishJob) error
 		pending = missing
 	}
 	if len(pending) > 0 {
-		return fmt.Errorf("以下图片重试后仍转存失败，不允许外链图裸奔进站：%s", strings.Join(pending, "、"))
+		return publishMirrorTransient("以下图片重试后仍转存失败，不允许外链图裸奔进站：%s", strings.Join(pending, "、"))
 	}
 
 	finalHTML := rewriteImgSrcs(job.ContentHTML, imageMap)
 	ossCover := imageMap[cover]
 	if ossCover == "" {
-		return fmt.Errorf("封面图转存结果缺失（%s）", cover)
+		return publishMirrorTransient("封面图转存结果缺失（%s）", cover)
 	}
 	_, swapped, err := p.store.updateIf(job.ID, func(current publishJob) bool {
 		return current.Stage == publishStageMirroring && current.ContentVersion == job.ContentVersion && current.PendingContentHash == ""
 	}, func(j *publishJob) {
 		j.ContentHTML = finalHTML
 		j.CoverURL = ossCover
+		j.MirrorAttempts = 0
 		j.Stage = publishStageEnriching
 		j.FailedStage = ""
 		j.Error = ""
@@ -1130,7 +1145,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 			return current.Stage == publishStageStaging && current.ContentVersion == job.ContentVersion &&
 				current.ContentFrozenVersion == job.ContentVersion
 		}, func(j *publishJob) {
-			j.AutoPublishEligible = publishFirstReviewEntry(j)
+			j.AutoPublishEligible = publishAutoPublishEligible(j, pipelineNow(p))
 			j.Stage = publishStageAwaitingReview
 			j.StagingTarget = stagedTarget
 			j.ContentHTML = job.ContentHTML
@@ -1206,7 +1221,7 @@ func (p *publishPipeline) stageStage(ctx context.Context, job publishJob) error 
 	}, func(j *publishJob) {
 		j.FoodTalksNewsID = newsID
 		j.StagingTarget = createdTarget
-		j.AutoPublishEligible = publishFirstReviewEntry(j)
+		j.AutoPublishEligible = publishAutoPublishEligible(j, pipelineNow(p))
 		j.Stage = publishStageAwaitingReview
 		j.FailedStage = ""
 		j.Error = ""
@@ -1529,6 +1544,7 @@ func (p *publishPipeline) retry(jobID int64) (publishJob, error) {
 		j.Stage = target
 		j.FailedStage = ""
 		j.Error = ""
+		j.MirrorAttempts = 0
 	})
 	if err != nil {
 		return publishJob{}, err

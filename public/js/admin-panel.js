@@ -31,6 +31,7 @@ import { bindRovingTabs, createAdminDialogA11y } from './admin-dialog-a11y.js';
 import { bindAdminWorkbenchShell, ensureAdminWorkbench, patchAdminWorkbenchFooter, syncAdminWorkbenchNav } from './admin-workbench.js';
 import { RULE_PACKS } from './rule-packs/registry.js';
 import { createAdminDeliveryController } from './admin-delivery.js';
+import { createAdminFailedJobsController } from './admin-failed-jobs.js';
 import { createAdminAccessController, renderRuleAdminAccessDenied, renderRuleAdminAccessLoading } from './admin-access.js';
 export { uniqueClientRuleID } from './admin-rule-state.js';
 const ADMIN_ACCESS_HINT = '仅限已登录的超级管理员、管理员或已授权账号';
@@ -86,6 +87,7 @@ export function initAdminPanel(options = {}) {
   let busyOperation = null, pendingOperationNotice = '';
   const operationGate = createAdminOperationGate(currentAccountID, () => overlay);
   const deliveryController = createAdminDeliveryController({ getOverlay: () => overlay, rerender: () => renderMain(), onMessage: text => { status = text || ''; const el = overlay && overlay.querySelector('.admin-foot .admin-status'); if (el) el.textContent = status; } });
+  const failedJobsController = createAdminFailedJobsController({ getOverlay: () => overlay, rerender: () => renderMain(), onMessage: text => { status = text || ''; const el = overlay && overlay.querySelector('.admin-foot .admin-status'); if (el) el.textContent = status; } });
   const accessController = createAdminAccessController({
     getOverlay: () => overlay,
     getAuthUser: () => currentAuthUser,
@@ -110,6 +112,7 @@ export function initAdminPanel(options = {}) {
     if (dc > 0 && !window.confirm('有 ' + dc + ' 项未保存改动，关闭后不会应用到账号。确定关闭吗？')) return;
     operationGate.invalidate(); busy = false; busyOperation = null;
     deliveryController.reset();
+    failedJobsController.reset();
     accessController.reset();
     window.clearTimeout(jsonSyncTimer);
     overlay.remove();
@@ -121,6 +124,7 @@ export function initAdminPanel(options = {}) {
     if (overlay) return;
     operationGate.invalidate();
     deliveryController.reset();
+    failedJobsController.reset();
     if (pendingOperationNotice) status = pendingOperationNotice;
     const opener = document.activeElement;
     overlay = document.createElement('div');
@@ -317,7 +321,7 @@ export function initAdminPanel(options = {}) {
   }
 
   function adminContextSubtitle() {
-    const viewLabels = { assignments: '账号绑定', rules: '规则编辑', assets: '素材库', delivery: '发布链路', access: '权限管理' };
+    const viewLabels = { assignments: '账号绑定', rules: '规则编辑', assets: '素材库', delivery: '发布链路', 'failed-jobs': '失败任务', access: '权限管理' };
     return `${currentAccountName()} · ${viewLabels[activeView] || '规则管理'}`;
   }
 
@@ -361,6 +365,7 @@ export function initAdminPanel(options = {}) {
         <button type="button" data-view="rules" class="${activeView === 'rules' ? 'active' : ''}"${activeView === 'rules' ? ' aria-current="page"' : ''}>规则</button>
         <button type="button" data-view="assets" class="${activeView === 'assets' ? 'active' : ''}"${activeView === 'assets' ? ' aria-current="page"' : ''}>素材库</button>
         <button type="button" data-view="delivery" class="${activeView === 'delivery' ? 'active' : ''}"${activeView === 'delivery' ? ' aria-current="page"' : ''}>发布链路</button>
+        <button type="button" data-view="failed-jobs" class="${activeView === 'failed-jobs' ? 'active' : ''}"${activeView === 'failed-jobs' ? ' aria-current="page"' : ''}>失败任务</button>
         ${accessController.canManage() ? `<button type="button" data-view="access" class="${activeView === 'access' ? 'active' : ''}"${activeView === 'access' ? ' aria-current="page"' : ''}>权限管理</button>` : ''}
       </nav>`;
   }
@@ -514,6 +519,7 @@ export function initAdminPanel(options = {}) {
       : activeView === 'assets'
       ? renderAssetsLibraryView()
       : activeView === 'delivery' ? deliveryController.render()
+      : activeView === 'failed-jobs' ? failedJobsController.render()
       : activeView === 'access' && accessController.canManage() ? accessController.render()
       : renderRulesEditor(optionsHTML);
     const changes = dirtyCount();
@@ -686,6 +692,7 @@ export function initAdminPanel(options = {}) {
     });
     bindPrimarySave();
     if (activeView === 'delivery') { deliveryController.bind(); return; }
+    if (activeView === 'failed-jobs') { failedJobsController.bind(); return; }
     if (activeView === 'assets') { bindAssetLibraryEditor(); return; }
     if (activeView !== 'rules') return;
     bindMoreArticlesRuleEditor();

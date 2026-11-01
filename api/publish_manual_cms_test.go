@@ -364,3 +364,23 @@ func TestSyncManualCMSPublicationsStopsRoundOnUnauthorized(t *testing.T) {
 		}
 	}
 }
+
+// TestCMSPublicationSyncDoesNotHoldWorkerPool 对账死循环不进 worker 池：否则部署重启时池子
+// 永远等不完，每次都干等满 30 秒才退出，端口已关的这段时间请求全是 502（2026-11-01）。
+func TestCMSPublicationSyncDoesNotHoldWorkerPool(t *testing.T) {
+	p := &publishPipeline{cmsSyncInterval: time.Hour}
+	p.enableBoundedWorkers(1, 1)
+	p.startCMSPublicationSync()
+	ran := make(chan struct{})
+	p.spawn(func() { close(ran) })
+	select {
+	case <-ran:
+	case <-time.After(time.Second):
+		t.Fatalf("对账循环占住了唯一的 worker，别的任务排不上")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := p.shutdownWorkers(ctx); err != nil {
+		t.Fatalf("对账循环在跑时 worker 池应能马上停下：%v", err)
+	}
+}

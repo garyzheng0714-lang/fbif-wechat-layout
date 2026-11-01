@@ -213,16 +213,20 @@ func cmsPublicationNextWindow(t time.Time) time.Duration {
 // startCMSPublicationSync 后台把草稿公开后，群卡不会自己变。北京时间 8:30–18:00
 // 每 2 分钟对账一次，其余时间每 30 分钟；临近时段切换时提前醒来，避免睡过上班点。
 // 只对账最近 cmsSyncLookback 内建单或发过卡的稿。
+//
+// 这个死循环自己起 goroutine，不进发布 worker 池：放进池里会一直占一个 worker，
+// 退出时池子永远等不到它结束，每次部署重启都干等满 30 秒才退出（exit 1），
+// 这 30 秒端口已关，监控探针和 Feed 回调全是 502（2026-11-01 查实）。
 func (p *publishPipeline) startCMSPublicationSync() {
 	if p == nil {
 		return
 	}
-	p.spawn(func() {
+	go func() {
 		for {
 			p.syncManualCMSPublications(context.Background())
 			time.Sleep(p.cmsPublicationSyncInterval())
 		}
-	})
+	}()
 }
 
 // cmsPublicationSyncRecent 建单或最近一次发卡不早于 since。重新同步会重发审核卡，

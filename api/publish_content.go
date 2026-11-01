@@ -163,9 +163,7 @@ func (p *publishPipeline) abandonFailedJob(jobID int64, reason string) (publishJ
 	if reason == "" {
 		reason = "无法继续处理，已结案"
 	}
-	job, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
-		return current.Stage == publishStageFailed && !publishContentHasUncertainIntent(current)
-	}, func(j *publishJob) {
+	job, swapped, err := p.store.updateIf(jobID, publishJobAbandonable, func(j *publishJob) {
 		j.Stage = publishStageAbandoned
 		j.FailedStage = ""
 		j.Error = reason
@@ -178,9 +176,16 @@ func (p *publishPipeline) abandonFailedJob(jobID int64, reason string) (publishJ
 		if job.ID == 0 {
 			return job, fmt.Errorf("发布任务 #%d 不存在", jobID)
 		}
-		return job, fmt.Errorf("任务当前阶段（%s）无法结案：仅无未确认外调的失败任务可结案", job.Stage)
+		return job, fmt.Errorf("任务当前阶段（%s）无法结案：仅还没上过站、无未确认外调的失败任务可结案", job.Stage)
 	}
 	return job, nil
+}
+
+// publishJobAbandonable 失败单能否结案：没有结果说不准的外调，也不是下线/重新发布失败——
+// 那两种文章已上过 FoodTalks，结案会丢掉卡片上的下线入口，要先在卡片或后台处理。
+func publishJobAbandonable(job publishJob) bool {
+	return job.Stage == publishStageFailed && !publishContentHasUncertainIntent(job) &&
+		job.FailedStage != publishStageUnpublishing && job.FailedStage != publishStageRepublishing
 }
 
 func (p *publishPipeline) detachForeignStagingAnchor(jobID int64, current publishJob) (publishJob, error) {
