@@ -22,7 +22,9 @@ import (
 const (
 	repostSubscribeThreshold         = 3
 	feedOriginalArticleSubscribePath = "/api/internal/original-article/subscribe"
-	feedOriginalArticleSubscribeTO   = 8 * time.Second
+	// Feed 订上后还要查、开、再查今天看啥的快速订阅，一次要十几秒（2026-11-02 8 秒超时把全球烘焙指南打断在核对那一步）；
+	// 后台异步跑，放到 50 秒，仍短于网关默认的 60 秒。
+	feedOriginalArticleSubscribeTO   = 50 * time.Second
 	repostSubscribeIdle              = ""
 	repostSubscribePending           = "pending"
 	repostSubscribeSubscribing       = "subscribing"
