@@ -300,10 +300,14 @@ test('P0 quality gate runs before every deploy, on Chrome only with a cached bro
     '分支保护依赖这个 job 名，不得改名');
   assert.match(workflow, /gofmt -l/);
   assert.match(workflow, /go vet \.\/\.\.\./);
-  assert.match(workflow, /staticcheck@2026\.1/);
+  // staticcheck 用官方预编译包并校验 sha256，不在现场编译。
+  assert.match(workflow, /go-tools\/releases\/download\/2026\.1\/staticcheck_linux_amd64\.tar\.gz/);
+  assert.match(workflow, /sha256sum -c/);
+  assert.match(workflow, /staticcheck \.\/\.\.\./);
   assert.match(workflow, /govulncheck@v1\.6\.0/);
   assert.match(workflow, /actual \+ 0 < 73/);
-  assert.match(workflow, /go test -race/);
+  // 覆盖率门槛直接用 race 那一遍的结果，同一套测试不重复跑。
+  assert.match(workflow, /go test -race \.\/\.\.\. -coverprofile=coverage\.out/);
   assert.match(workflow, /shellcheck deploy\/scripts\/\*\.sh/);
   assert.match(workflow, /npm run lint:js/);
   assert.match(workflow, /npm run test:coverage/);

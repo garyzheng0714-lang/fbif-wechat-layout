@@ -10,9 +10,10 @@ on:
 permissions:
   contents: read
 
+# 同一个 PR 连推只跑最新一次；main 上每个提交都要完整跑完，不取消。
 concurrency:
   group: p0-monitoring-layout-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # 外检看门狗已于 2026-08-06 迁往监控端 FoodTalks_Feed（fbif-link-watchdog），
@@ -36,7 +37,17 @@ jobs:
 
       # No path filter: every change must re-prove the idempotent intake,
       # review-card outbox, monitoring invariants and alert relay.
-      - name: Go fmt, vet, staticcheck, test, race and vulns
+      # staticcheck 用官方预编译包（校验 sha256），不在现场编译。
+      - name: Install staticcheck 2026.1
+        run: |
+          curl -fsSL -o /tmp/staticcheck.tar.gz \
+            https://github.com/dominikh/go-tools/releases/download/2026.1/staticcheck_linux_amd64.tar.gz
+          echo "9242b4bf5b9f5481fd720ec6d1018b38fbffe0e2730e498923c6e8053e8576be  /tmp/staticcheck.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/staticcheck.tar.gz -C /tmp
+          echo /tmp/staticcheck >> "$GITHUB_PATH"
+
+      # 覆盖率直接从 race 那一遍取：同一套测试只跑一遍，race 与覆盖率门槛都不降。
+      - name: Go fmt, vet, staticcheck, race test with coverage, vulns
         working-directory: api
         run: |
           unformatted=$(gofmt -l .)
@@ -46,11 +57,11 @@ jobs:
             exit 1
           fi
           go vet ./...
-          go run honnef.co/go/tools/cmd/staticcheck@2026.1 ./...
-          go test ./... -coverprofile=coverage.out
+          staticcheck ./...
+          go test -race ./... -coverprofile=coverage.out
           coverage=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+          echo "Go coverage: ${coverage}%"
           awk -v actual="$coverage" 'BEGIN { if (actual + 0 < 73) exit 1 }'
-          go test -race ./...
           go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
       - name: Shell, Python and env schema
@@ -87,6 +98,11 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      # 门禁里的 webServer 用 go run 起 API：先装好带缓存的 Go，免得每次现场下载工具链、从零编译。
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
       - name: Cache Playwright Chromium
         uses: actions/cache@v4
         with:
