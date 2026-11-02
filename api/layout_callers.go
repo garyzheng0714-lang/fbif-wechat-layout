@@ -7,20 +7,18 @@ package main
 // sha256 指纹（32 字节随机钥匙算出来的，倒推不回钥匙），钥匙本身只在发钥匙那一刻打印一次
 // （cd api && go run . -new-layout-key），交给调用方后就不再出现。
 //
-// 内存里按指纹查，常量时间比较；status「在用」才放行，其余一律 key_disabled。配置包取不到时留最后一份，
-// 但名单内容离来源上次同步成功超过 10 分钟就全部 503 auth_unavailable：宁可拒、不放（停用要及时生效）。
-// 中台回 304 不算核验过，镜像停了中台也照样回 304（hub_bundle.go 的 sourceCheckedAt）。
-// 开机还没核对成功过、或配置包里还没有这个条目（中台还没加表），同样 auth_unavailable。
+// 内存里按指纹查，常量时间比较；status「在用」才放行，其余一律 key_disabled。名单内容离来源上次确认超过
+// 10 分钟就全部 503 auth_unavailable：宁可拒、不放（停用要及时生效）。新到什么时候由 hub_bundle.go 按中台给的
+// 来源年龄和长等待请求挂没挂着算（LayoutCallers），中台回 304 不等于名单还新。
+// 开机还没拿到过配置包、或配置包里还没有这个条目（中台还没加表），同样 auth_unavailable。
 // 旧的 RENDER_TOKEN 只开旧路由（/api/render、/api/html-to-blocks），这里的钥匙只开 /api/layout/v1/*。
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -29,12 +27,10 @@ import (
 )
 
 const (
-	layoutKeyPrefix          = "flk_"
-	layoutKeyRandomBytes     = 32
-	layoutCallerActive       = "在用"
-	layoutCallersMaxStale    = 10 * time.Minute
-	layoutCallersCheckEvery  = 20 * time.Second
-	layoutCallersRefreshTime = 15 * time.Second
+	layoutKeyPrefix       = "flk_"
+	layoutKeyRandomBytes  = 32
+	layoutCallerActive    = "在用"
+	layoutCallersMaxStale = 10 * time.Minute
 )
 
 // layoutCallerRow 配置包 items.api_callers 的一行（中台「接口调用方」表）。
@@ -59,22 +55,28 @@ type layoutCallerEntry struct {
 	digest [sha256.Size]byte
 }
 
-// layoutCallerSource 取调用方名单。maxAge 内问到过中台就直接给那一份，不再问；present=false 表示配置包里没有这个条目。
-// checkedAt 是名单内容最近一次被来源同步确认的时刻，不是上次问到中台的时刻。
-type layoutCallerSource interface {
-	LayoutCallers(ctx context.Context, maxAge time.Duration) (rows []layoutCallerRow, present bool, checkedAt time.Time, err error)
+// layoutCallerSnapshot 配置包里最近一份接口调用方名单。
+type layoutCallerSnapshot struct {
+	Rows       []layoutCallerRow
+	Present    bool      // 配置包里有「接口调用方」这一项
+	Generation uint64    // 每换一版配置包加一；0 是开机还没拿到过
+	CheckedAt  time.Time // 名单内容新到什么时候
 }
 
-// layoutCallerDirectory 内存里的调用方名单。
+// layoutCallerSource 现读调用方名单，不走网络（配置包由 hub_bundle.go 的长等待循环一直挂着拿）。
+type layoutCallerSource interface {
+	LayoutCallers(now time.Time) layoutCallerSnapshot
+}
+
+// layoutCallerDirectory 解析好的调用方名单，配置包换了版本才重新解析。
 type layoutCallerDirectory struct {
 	source layoutCallerSource
 	now    func() time.Time
 
-	mu        sync.RWMutex
-	entries   []layoutCallerEntry
-	have      bool      // 至少拿到过一份
-	checkedAt time.Time // 名单内容最近一次被来源同步确认
-	note      string    // 最近一次没核对成的原因，只进日志
+	mu         sync.Mutex
+	generation uint64
+	entries    []layoutCallerEntry
+	stale      bool // 上一次认钥匙时名单已太旧：变了才记日志
 }
 
 func newLayoutCallerDirectory(source layoutCallerSource, now func() time.Time) *layoutCallerDirectory {
@@ -145,72 +147,52 @@ func parseLayoutCallerRows(rows []layoutCallerRow) ([]layoutCallerEntry, []strin
 	return entries, problems
 }
 
-// refresh 和中台核对一次（maxAge 内核对过就用那一份）。拿不到就留着上一份，由 authenticate 按核对时间决定放不放。
-func (d *layoutCallerDirectory) refresh(ctx context.Context, maxAge time.Duration) error {
-	if d.source == nil {
-		return d.recordProblem(errors.New("没有接中台配置包"))
-	}
-	rows, present, checkedAt, err := d.source.LayoutCallers(ctx, maxAge)
-	if err != nil {
-		return d.recordProblem(fmt.Errorf("读不到中台配置包：%w", err))
-	}
-	if !present {
-		return d.recordProblem(errors.New("中台配置包里还没有「接口调用方」（api_callers）这一项"))
-	}
-	entries, problems := parseLayoutCallerRows(rows)
+// entriesOf 配置包换了版本才重新解析名单，并把名单的问题记进日志。
+func (d *layoutCallerDirectory) entriesOf(snap layoutCallerSnapshot) []layoutCallerEntry {
 	d.mu.Lock()
-	changed := !d.have || len(entries) != len(d.entries)
-	d.entries, d.have, d.checkedAt = entries, true, checkedAt
-	recovered := d.note != ""
-	d.note = ""
-	d.mu.Unlock()
-	if changed || recovered {
-		log.Printf("layout-api: 调用方名单 %d 家（来源确认于 %s）", len(entries), checkedAt.Format(time.RFC3339))
-		for _, problem := range problems {
-			log.Printf("layout-api: 调用方名单：%s", problem)
-		}
+	defer d.mu.Unlock()
+	if snap.Generation == d.generation {
+		return d.entries
 	}
-	return nil
+	entries, problems := parseLayoutCallerRows(snap.Rows)
+	d.generation, d.entries = snap.Generation, entries
+	if !snap.Present {
+		log.Printf("layout-api: 中台配置包里还没有「接口调用方」（api_callers）这一项，排版接口一律 auth_unavailable")
+		return entries
+	}
+	log.Printf("layout-api: 调用方名单 %d 家", len(entries))
+	for _, problem := range problems {
+		log.Printf("layout-api: 调用方名单：%s", problem)
+	}
+	return entries
 }
 
-func (d *layoutCallerDirectory) recordProblem(err error) error {
+// noteStale 名单是不是正因太旧拒钥匙：变了才记日志。
+func (d *layoutCallerDirectory) noteStale(stale bool, checkedAt time.Time) {
 	d.mu.Lock()
-	changed := d.note != err.Error()
-	d.note = err.Error()
-	d.mu.Unlock()
-	if changed {
-		log.Printf("layout-api: 调用方名单没核对成：%v", err)
+	defer d.mu.Unlock()
+	if stale != d.stale {
+		if stale {
+			log.Printf("layout-api: 调用方名单离来源上次确认（%s）超过 10 分钟，排版接口一律 auth_unavailable", checkedAt.Format(time.RFC3339))
+		} else {
+			log.Printf("layout-api: 调用方名单又和来源对上了，排版接口照常认钥匙")
+		}
 	}
-	return err
+	d.stale = stale
 }
 
-// start 开机先核对一次，之后每 20 秒看一眼：配置包已有别处（外发账号）每分钟在取，一分钟内取过就直接用那一份。
-func (d *layoutCallerDirectory) start() {
-	go func() {
-		check := func() {
-			ctx, cancel := context.WithTimeout(context.Background(), layoutCallersRefreshTime)
-			defer cancel()
-			_ = d.refresh(ctx, hubRefreshEvery)
-		}
-		check()
-		ticker := time.NewTicker(layoutCallersCheckEvery)
-		defer ticker.Stop()
-		for range ticker.C {
-			check()
-		}
-	}()
-}
-
-// authenticate 认钥匙。核对过期、从没拿到过名单都按 auth_unavailable；不认识的钥匙 unauthorized；不在用 key_disabled。
+// authenticate 认钥匙。名单太旧、从没拿到过、包里没有这一项都按 auth_unavailable；不认识的钥匙 unauthorized；不在用 key_disabled。
 func (d *layoutCallerDirectory) authenticate(key string) (layoutCaller, *layoutError) {
 	key = strings.TrimSpace(key)
-	d.mu.RLock()
-	have, checkedAt, entries := d.have, d.checkedAt, d.entries
-	d.mu.RUnlock()
-	if !have {
+	now := d.now()
+	snap := d.source.LayoutCallers(now)
+	entries := d.entriesOf(snap)
+	if snap.Generation == 0 || !snap.Present {
 		return layoutCaller{}, layoutErr(layoutErrAuthUnavailable)
 	}
-	if d.now().Sub(checkedAt) > layoutCallersMaxStale {
+	stale := now.Sub(snap.CheckedAt) > layoutCallersMaxStale
+	d.noteStale(stale, snap.CheckedAt)
+	if stale {
 		return layoutCaller{}, layoutErr(layoutErrAuthUnavailable)
 	}
 	if !layoutKeyShapeOK(key) {
@@ -234,14 +216,15 @@ func (d *layoutCallerDirectory) authenticate(key string) (layoutCaller, *layoutE
 }
 
 // hubLayoutCallerSource 用排版工具已有的中台配置包客户端取名单（和外发账号同一个客户端、同一个 ETag）。
+// 没接中台就一直是「还没拿到」。
 type hubLayoutCallerSource struct{}
 
-func (hubLayoutCallerSource) LayoutCallers(ctx context.Context, maxAge time.Duration) ([]layoutCallerRow, bool, time.Time, error) {
+func (hubLayoutCallerSource) LayoutCallers(now time.Time) layoutCallerSnapshot {
 	client, err := layoutHubClient()
 	if err != nil {
-		return nil, false, time.Time{}, err
+		return layoutCallerSnapshot{}
 	}
-	return client.LayoutCallers(ctx, maxAge)
+	return client.LayoutCallers(now)
 }
 
 // runNewLayoutKey 给 -new-layout-key 用：打印一把新钥匙和它的指纹，钥匙只出现这一次。

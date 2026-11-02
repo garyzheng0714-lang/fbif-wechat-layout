@@ -15,13 +15,12 @@ import (
 
 // 外发账号只在多维表格「平台账号」里，平台限制只在分发服务的平台文件里（2026-10-24 分发框架，
 // docs/adr/2026-10-24-distribution-framework.md）。排版工具不直接读表（只走 HTTP、不共享存储）：
-// 账号经 FBIF 中台的配置包读（hub_bundle.go，2026-10-25 起），平台限制经分发服务的 GET /v1/platforms 读，
-// 各存一份在数据目录：连不上时接着用这份，卡片、改稿页照常显示，推送在提交前失败。每个号的编号是表的
-// record_id，lane、改稿记录、卡片按钮、发给分发服务的 account 都用它。
+// 账号经 FBIF 中台的配置包读（hub_bundle.go，2026-10-25 起；中台换了版本才送来），平台限制经分发服务的
+// GET /v1/platforms 读（distribution_platforms.go），各存一份在数据目录：连不上时接着用这份，卡片、改稿页
+// 照常显示，推送在提交前失败。每个号的编号是表的 record_id，lane、改稿记录、卡片按钮、发给分发服务的 account 都用它。
 
 const (
-	externalAccountsFile     = "distribution-accounts.json"
-	distributionRefreshEvery = 5 * time.Minute
+	externalAccountsFile = "distribution-accounts.json"
 
 	// 表里「在用」的号才会被自动挑上；「测试」号只在指定时用（分发服务那边同一口径）。
 	externalAccountLive    = "在用"
@@ -50,7 +49,7 @@ func (a externalAccount) label() string {
 	return firstNonEmpty(strings.TrimSpace(a.Label), platformForAccount(a).Name, strings.TrimSpace(a.Name))
 }
 
-// distributionCache 从分发服务取来的一份清单（账号、平台限制）：先读本地那份，之后定时向分发服务取；
+// distributionCache 一份清单（账号、平台限制）：先读本地那份，之后换上中台送来的（账号）或向分发服务取的（平台限制）；
 // 网络上取到的、本地读出的都先校验，不对就不要，接着用上一份。
 type distributionCache[T any] struct {
 	mu          sync.RWMutex
@@ -60,6 +59,7 @@ type distributionCache[T any] struct {
 	items       []T
 	loaded      bool
 	refreshedAt time.Time
+	triedAt     time.Time // 上一次向来源取的时刻（成没成都算）
 	lastErr     string
 	fetch       func(context.Context) ([]T, error)
 	validate    func([]T) error
@@ -69,25 +69,34 @@ var externalAccounts = &distributionCache[externalAccount]{
 	what: "外发账号（多维表格「平台账号」）", key: "accounts", validate: validateExternalAccounts,
 }
 
-// startDistributionDirectory 先读本地那两份（没有就当场取一次），趁任务恢复、后台 worker、HTTP 都还没起来
-// 就把账号与平台限制备好，之后账号每分钟问一次中台（没变回 304），平台限制每 5 分钟问一次分发服务。
+// startDistributionDirectory 先读本地那两份，趁任务恢复、后台 worker、HTTP 都还没起来就把账号与平台限制备好，
+// 再起配置包的长等待循环：配置包换了版本就换上账号、取一次平台限制。没有本地账号时最多等中台 10 秒。
 // 候选部署暂停态也照常取：只写这两份缓存，不碰任务。
 func startDistributionDirectory(jobsPath string) {
 	dir := filepath.Dir(jobsPath)
-	externalAccounts.setSource(filepath.Join(dir, externalAccountsFile), fetchExternalAccounts)
+	externalAccounts.setSource(filepath.Join(dir, externalAccountsFile), nil)
 	distributionPlatforms.setSource(filepath.Join(dir, platformsFile), fetchDistributionPlatforms)
 	externalAccounts.prime()
-	distributionPlatforms.prime()
-	refreshEvery := func(every time.Duration, what string, refresh func(context.Context) error) {
-		for {
-			time.Sleep(every)
-			if err := refresh(context.Background()); err != nil {
-				log.Printf("publish: 取%s失败，接着用上次的：%v", what, err)
-			}
+	go watchDistributionPlatforms(!distributionPlatforms.prime())
+	hub, err := layoutHubClient()
+	if err != nil {
+		log.Printf("publish: 不读中台配置包，外发账号只用本地那份：%v", err)
+		return
+	}
+	hub.onChange = func(accounts []externalAccount, first bool) {
+		if err := externalAccounts.store(accounts); err != nil {
+			log.Printf("publish: 中台送来的%s不收，接着用上次的：%v", externalAccounts.what, err)
+		}
+		if !first {
+			kickDistributionPlatforms()
 		}
 	}
-	go refreshEvery(hubRefreshEvery, externalAccounts.what, externalAccounts.refresh)
-	go refreshEvery(distributionRefreshEvery, distributionPlatforms.what, distributionPlatforms.refresh)
+	hub.feed.start(hub.poll)
+	if _, err := externalAccounts.snapshot(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		hub.feed.waitReady(ctx)
+		cancel()
+	}
 }
 
 func (d *distributionCache[T]) setSource(path string, fetch func(context.Context) ([]T, error)) {
@@ -96,18 +105,20 @@ func (d *distributionCache[T]) setSource(path string, fetch func(context.Context
 	d.mu.Unlock()
 }
 
-// prime 启动时：先读本地那份，没有或读坏了就当场取一次（最多 10 秒）。
-func (d *distributionCache[T]) prime() {
+// prime 启动时：先读本地那份；没有或读坏了、又有取的方法，就当场取一次（最多 10 秒）。回当场取过没有。
+func (d *distributionCache[T]) prime() bool {
 	if err := d.loadFile(); err != nil {
 		log.Printf("publish: 读不到本地的%s（%s）：%v", d.what, d.path, err)
 	}
-	if _, err := d.snapshot(); err != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := d.refresh(ctx); err != nil {
-			log.Printf("publish: 启动时取%s失败：%v", d.what, err)
-		}
-		cancel()
+	if _, err := d.snapshot(); err == nil || d.fetch == nil {
+		return false
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := d.refresh(ctx); err != nil {
+		log.Printf("publish: 启动时取%s失败：%v", d.what, err)
+	}
+	return true
 }
 
 func (d *distributionCache[T]) loadFile() error {
@@ -143,16 +154,26 @@ func (d *distributionCache[T]) loadFile() error {
 }
 
 func (d *distributionCache[T]) refresh(ctx context.Context) error {
-	d.mu.RLock()
-	fetch, path, key := d.fetch, d.path, d.key
-	d.mu.RUnlock()
+	d.mu.Lock()
+	fetch := d.fetch
+	d.triedAt = time.Now()
+	d.mu.Unlock()
 	if fetch == nil {
 		return fmt.Errorf("没有取%s的方法", d.what)
 	}
 	items, err := fetch(ctx)
-	if err == nil {
-		err = d.accept(items)
+	if err != nil {
+		d.mu.Lock()
+		d.lastErr = err.Error()
+		d.mu.Unlock()
+		return err
 	}
+	return d.store(items)
+}
+
+// store 换上一份新取到的：校验过了才写本地文件、换进内存。
+func (d *distributionCache[T]) store(items []T) error {
+	err := d.accept(items)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err != nil {
@@ -160,10 +181,10 @@ func (d *distributionCache[T]) refresh(ctx context.Context) error {
 		return err
 	}
 	now := time.Now().UTC()
-	if path != "" {
-		doc, _ := json.MarshalIndent(map[string]any{"refreshed_at": now.Format(time.RFC3339), key: items}, "", "  ")
-		if writeErr := writeDistributionCacheFile(path, append(doc, '\n')); writeErr != nil {
-			log.Printf("publish: %s写不进本地（%s）：%v", d.what, path, writeErr)
+	if d.path != "" {
+		doc, _ := json.MarshalIndent(map[string]any{"refreshed_at": now.Format(time.RFC3339), d.key: items}, "", "  ")
+		if writeErr := writeDistributionCacheFile(d.path, append(doc, '\n')); writeErr != nil {
+			log.Printf("publish: %s写不进本地（%s）：%v", d.what, d.path, writeErr)
 		}
 	}
 	d.items, d.loaded, d.refreshedAt, d.lastErr = items, true, now, ""
@@ -189,6 +210,13 @@ func (d *distributionCache[T]) snapshot() ([]T, error) {
 		return nil, fmt.Errorf("还没读到%s", d.what)
 	}
 	return append([]T(nil), d.items...), nil
+}
+
+// idleFor 离上一次向来源取已过了 d 这么久（从没取过也算）。
+func (d *distributionCache[T]) idleFor(wait time.Duration) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return time.Since(d.triedAt) >= wait
 }
 
 func (d *distributionCache[T]) status() (count int, refreshedAt time.Time, lastErr string) {

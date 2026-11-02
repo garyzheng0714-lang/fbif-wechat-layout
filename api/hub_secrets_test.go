@@ -12,11 +12,12 @@ import (
 	"time"
 )
 
-// fakeHubSecrets 假中台密钥端点：answer 决定这次回什么，receipts 记回执。
+// fakeHubSecrets 假中台密钥端点：answer 决定这次回什么，receipts 记回执，prefer 记每次的 Prefer 头。
 type fakeHubSecrets struct {
 	mu       sync.Mutex
 	answer   func(http.ResponseWriter)
 	asked    int
+	prefer   []string
 	receipts []string
 }
 
@@ -30,6 +31,7 @@ func (f *fakeHubSecrets) server(t *testing.T, key string) *httptest.Server {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/config/secrets/layout":
 			f.asked++
+			f.prefer = append(f.prefer, r.Header.Get("Prefer"))
 			f.answer(w)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/config/secrets/layout/receipts":
 			var body struct{ Code, Version string }
@@ -48,34 +50,33 @@ func mimoAnswer(value, version string) func(http.ResponseWriter) {
 	}
 }
 
-// TestHubSecretsAdoptOnceAndThrottle 取到就用、每个版本只回执一次；一分钟内不再问中台；换了版本就换上并再回执。
-func TestHubSecretsAdoptOnceAndThrottle(t *testing.T) {
+// TestHubSecretsAdoptOnceAndReceipt 取到就用、每个版本只回执一次；换了版本就换上并再回执；每次都请中台挂着等。
+func TestHubSecretsAdoptOnceAndReceipt(t *testing.T) {
 	const key = "pqk_layout-test"
 	fake := &fakeHubSecrets{answer: mimoAnswer("sk-one", "0123456789abcdef")}
 	server := fake.server(t, key)
 	defer server.Close()
-	clock := time.Date(2026, 10, 25, 18, 0, 0, 0, time.UTC)
 	client := newHubSecretsClient(server.URL+"/api/config/bundle/layout", key)
-	client.now = func() time.Time { return clock }
+	ask := func() hubOutcome { return client.feed.round(context.Background(), client.poll) }
 
+	if got := ask(); got != hubAnswered {
+		t.Fatalf("旧中台回了话，60 秒后再问：%v", got)
+	}
 	cred := client.Credential(context.Background())
 	if cred == nil || cred.key != "sk-one" || cred.origin != "https://api.xiaomimimo.com" {
 		t.Fatalf("取到中台发的密钥和地址：%+v", cred)
 	}
-	clock = clock.Add(30 * time.Second)
-	client.Credential(context.Background())
-	clock = clock.Add(31 * time.Second)
-	client.Credential(context.Background())
-	if fake.asked != 2 {
-		t.Fatalf("一分钟内只问一次中台，实际问了 %d 次", fake.asked)
-	}
+	ask()
 	fake.answer = mimoAnswer("sk-two", "fedcba9876543210")
-	clock = clock.Add(time.Minute)
+	ask()
 	if cred := client.Credential(context.Background()); cred == nil || cred.key != "sk-two" {
 		t.Fatalf("换了版本要换上：%+v", cred)
 	}
 	if got := strings.Join(fake.receipts, ","); got != "xiaomi-mimo@0123456789abcdef,xiaomi-mimo@fedcba9876543210" {
 		t.Fatalf("每个版本回执一次：%s", got)
+	}
+	if got := strings.Join(fake.prefer, ","); got != "wait=10800,wait=10800,wait=10800" {
+		t.Fatalf("每次都请中台挂着等：%s", got)
 	}
 	if strings.Contains(fmt.Sprint(client), key) {
 		t.Fatal("打印客户端不能带出钥匙")
@@ -87,12 +88,16 @@ func TestHubSecretsRefusalAndGrace(t *testing.T) {
 	const key = "pqk_layout-test"
 	fake := &fakeHubSecrets{answer: mimoAnswer("sk-one", "0123456789abcdef")}
 	server := fake.server(t, key)
-	clock := time.Date(2026, 10, 25, 18, 0, 0, 0, time.UTC)
+	clock := newLayoutTestClock()
 	client := newHubSecretsClient(server.URL+"/api/config/bundle/layout", key)
-	client.now = func() time.Time { return clock }
-	tick := func() *mimoCredential { clock = clock.Add(time.Minute); return client.Credential(context.Background()) }
+	client.feed.now = clock.Now
+	tick := func() *mimoCredential {
+		clock.Add(time.Minute)
+		client.feed.round(context.Background(), client.poll)
+		return client.Credential(context.Background())
+	}
 
-	if client.Credential(context.Background()) == nil {
+	if tick() == nil {
 		t.Fatal("先取到")
 	}
 	fake.answer = func(w http.ResponseWriter) {
@@ -125,9 +130,48 @@ func TestHubSecretsRefusalAndGrace(t *testing.T) {
 			t.Fatalf("连不上时 1 小时内沿用（第 %d 分钟就丢了）", i+1)
 		}
 	}
-	clock = clock.Add(2 * time.Minute)
+	clock.Add(2 * time.Minute)
 	if client.Credential(context.Background()) != nil {
 		t.Fatal("连不上超过 1 小时要作废")
+	}
+}
+
+// TestHubSecretsGraceCountsFromDisconnect 中台挂着等时：请求挂着多久密钥都算新；断开后再沿用 1 小时（约定第 6 条）。
+func TestHubSecretsGraceCountsFromDisconnect(t *testing.T) {
+	const key = "pqk_layout-test"
+	script, server := newHubScript(t, key)
+	clock := newLayoutTestClock()
+	client := newHubSecretsClient(server.URL+"/api/config/bundle/layout", key)
+	client.feed.now = clock.Now
+	script.answers <- func(w http.ResponseWriter) {
+		w.Header().Set("Preference-Applied", "wait=10800")
+		w.Header().Set("ETag", `"secrets-1"`)
+		mimoAnswer("sk-one", "0123456789abcdef")(w)
+	}
+	if got := client.feed.round(context.Background(), client.poll); got != hubWaiting {
+		t.Fatalf("中台照办了等待，马上再问：%v", got)
+	}
+	<-script.seen
+	done := make(chan hubOutcome, 1)
+	go func() { done <- client.feed.round(context.Background(), client.poll) }()
+	if header := <-script.seen; header.Get("If-None-Match") != `"secrets-1"` {
+		t.Fatalf("挂着的请求带上一版 ETag：%q", header.Get("If-None-Match"))
+	}
+	clock.Add(2 * time.Hour)
+	if client.Credential(context.Background()) == nil {
+		t.Fatal("请求挂着，2 小时后密钥照样能用")
+	}
+	script.answers <- hubDrop
+	if got := <-done; got != hubFailed {
+		t.Fatalf("断开算没问成：%v", got)
+	}
+	clock.Add(59 * time.Minute)
+	if client.Credential(context.Background()) == nil {
+		t.Fatal("断开不到 1 小时接着用")
+	}
+	clock.Add(2 * time.Minute)
+	if client.Credential(context.Background()) != nil {
+		t.Fatal("断开超过 1 小时要作废")
 	}
 }
 

@@ -1,15 +1,19 @@
 package main
 
 // distribution_platforms.go — 各第三方平台的限制，只在分发服务的平台文件里（分发框架边界 2，
-// docs/adr/2026-10-24-distribution-framework.md）：排版工具经 GET /v1/platforms 取，和账号同一轮每 5 分钟
-// 刷新，最后一次成功的存数据目录 distribution-platforms.json（distribution_accounts.go 的 distributionCache）。
+// docs/adr/2026-10-24-distribution-framework.md）：排版工具经 GET /v1/platforms 取，最后一次成功的存数据目录
+// distribution-platforms.json（distribution_accounts.go 的 distributionCache）。平台文件只在分发服务发版时变，
+// 所以只在启动时、中台配置包换了版本时（加号、换号）、用到时一份都没有时取，兜底 6 小时一次。
 // 这里只按取到的数推送前检查、在卡片和改稿页提示、给自动外发分名额、核对文章链接域名；正文写成什么标签由分发服务定。
 // 分发服务连不上就接着用上一份；从没取到过某个平台时卡片照常显示，推送在提交前失败（没检查过的不算通过）。
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // externalDriver lane 上记的送稿方式：robot 是自己的分发服务；空是 2026-10-24 下线的云梭留下的旧 lane，只显示。
@@ -24,6 +28,10 @@ const (
 	// ascii_half 英文字母、数字、半角符号和空格两个算一个，其余一个。
 	titleCountChars     = "chars"
 	titleCountASCIIHalf = "ascii_half"
+
+	distributionPlatformsFallback = 6 * time.Hour
+	// distributionPlatformsRetry 一份都没有时，用到就取，但两次之间至少隔这么久（分发服务连不上时不追着问）。
+	distributionPlatformsRetry = 5 * time.Minute
 )
 
 // distributionPlatformInfo 分发服务 GET /v1/platforms 给的一个平台（原样存进本地文件）。
@@ -88,8 +96,37 @@ func validateDistributionPlatforms(items []distributionPlatformInfo) error {
 	return nil
 }
 
-var distributionPlatforms = &distributionCache[distributionPlatformInfo]{
-	what: "平台限制", key: "platforms", validate: validateDistributionPlatforms,
+var (
+	distributionPlatforms = &distributionCache[distributionPlatformInfo]{
+		what: "平台限制", key: "platforms", validate: validateDistributionPlatforms,
+	}
+	distributionPlatformsKick = make(chan struct{}, 1)
+)
+
+// kickDistributionPlatforms 请取平台限制的循环取一次；已经在排队就不重复排。
+func kickDistributionPlatforms() {
+	select {
+	case distributionPlatformsKick <- struct{}{}:
+	default:
+	}
+}
+
+// watchDistributionPlatforms 取平台限制的循环：有人请（kickDistributionPlatforms）就取，兜底 6 小时一次。
+func watchDistributionPlatforms(now bool) {
+	for {
+		if !now {
+			select {
+			case <-distributionPlatformsKick:
+			case <-time.After(distributionPlatformsFallback):
+			}
+		}
+		now = false
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := distributionPlatforms.refresh(ctx); err != nil {
+			log.Printf("publish: 取%s失败，接着用上次的：%v", distributionPlatforms.what, err)
+		}
+		cancel()
+	}
 }
 
 // distributionPlatform 一个平台的限制，推送前检查、卡片、改稿页、提醒、配额、链接登记都用它。
@@ -123,9 +160,12 @@ func (i distributionPlatformInfo) platform() distributionPlatform {
 	}
 }
 
-// distributionPlatformsByKey 一份平台限制快照，按平台编号查。读不到时是空的（都算没拿到）。
+// distributionPlatformsByKey 一份平台限制快照，按平台编号查。读不到时是空的（都算没拿到），并请循环去取。
 func distributionPlatformsByKey() map[string]distributionPlatform {
-	items, _ := distributionPlatforms.snapshot()
+	items, err := distributionPlatforms.snapshot()
+	if err != nil && distributionPlatforms.idleFor(distributionPlatformsRetry) {
+		kickDistributionPlatforms()
+	}
 	out := make(map[string]distributionPlatform, len(items))
 	for _, item := range items {
 		if item.Carrier == externalCarrierArticle {

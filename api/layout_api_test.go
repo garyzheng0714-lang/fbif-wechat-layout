@@ -42,23 +42,32 @@ func (c *layoutTestClock) Add(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
+// fakeLayoutCallerSource 假配置包：frozen 为零时名单一直是新的（长等待请求挂着），否则新到 frozen。
 type fakeLayoutCallerSource struct {
-	mu      sync.Mutex
-	clock   *layoutTestClock
-	rows    []layoutCallerRow
-	present bool
-	err     error
-	calls   int
+	mu         sync.Mutex
+	clock      *layoutTestClock
+	rows       []layoutCallerRow
+	present    bool
+	generation uint64
+	frozen     time.Time
 }
 
-func (s *fakeLayoutCallerSource) LayoutCallers(_ context.Context, _ time.Duration) ([]layoutCallerRow, bool, time.Time, error) {
+func (s *fakeLayoutCallerSource) LayoutCallers(now time.Time) layoutCallerSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls++
-	if s.err != nil {
-		return nil, false, time.Time{}, s.err
+	checkedAt := now
+	if !s.frozen.IsZero() {
+		checkedAt = s.frozen
 	}
-	return append([]layoutCallerRow(nil), s.rows...), s.present, s.clock.Now(), nil
+	return layoutCallerSnapshot{Rows: append([]layoutCallerRow(nil), s.rows...), Present: s.present, Generation: s.generation, CheckedAt: checkedAt}
+}
+
+// set 中台送来新的一版。
+func (s *fakeLayoutCallerSource) set(present bool, rows []layoutCallerRow) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.present, s.rows = present, rows
+	s.generation++
 }
 
 type fakeLayoutNode struct {
@@ -213,15 +222,13 @@ func newLayoutTestEnv(t *testing.T) *layoutTestEnv {
 	otherKey, otherFP := mustLayoutKey(t)
 	disabledKey, disabledFP := mustLayoutKey(t)
 	env.keys = layoutTestKeys{active: activeKey, other: otherKey, disabled: disabledKey}
-	env.source = &fakeLayoutCallerSource{clock: env.clock, present: true, rows: []layoutCallerRow{
+	env.source = &fakeLayoutCallerSource{clock: env.clock}
+	env.source.set(true, []layoutCallerRow{
 		{Code: "c1", Name: "资讯订阅", Owner: "张三", Status: layoutCallerActive, KeySHA256: activeFP},
 		{Code: "c2", Name: "小助手", Owner: "李四", Status: layoutCallerActive, KeySHA256: strings.ToUpper(otherFP)},
 		{Code: "c3", Name: "旧系统", Owner: "王五", Status: "停用", KeySHA256: disabledFP},
-	}}
+	})
 	env.callers = newLayoutCallerDirectory(env.source, env.clock.Now)
-	if err := env.callers.refresh(context.Background(), 0); err != nil {
-		t.Fatal(err)
-	}
 	env.api = newLayoutAPI(layoutAPIDeps{
 		callers: env.callers,
 		fetcher: env.fetcher,
@@ -352,14 +359,11 @@ func TestLayoutAuthStaleDirectoryFailsClosed(t *testing.T) {
 	decodeLayoutResultBody(t, env.postJSON(env.keys.active, body))
 	waitLayoutIdle(t, env.api, "c1")
 
-	// 中台连不上：留着最后一份，10 分钟内照常放行。
+	// 中台连不上：名单停在断开那一刻，10 分钟内照常放行。
 	env.source.mu.Lock()
-	env.source.err = fmt.Errorf("连不上中台")
+	env.source.frozen = env.clock.Now()
 	env.source.mu.Unlock()
 	env.clock.Add(9 * time.Minute)
-	if err := env.callers.refresh(context.Background(), 0); err == nil {
-		t.Fatal("中台连不上要报错")
-	}
 	decodeLayoutResultBody(t, env.postJSON(env.keys.active, body))
 	waitLayoutIdle(t, env.api, "c1")
 
@@ -373,45 +377,31 @@ func TestLayoutAuthStaleDirectoryFailsClosed(t *testing.T) {
 
 	// 中台恢复后马上放行。
 	env.source.mu.Lock()
-	env.source.err = nil
+	env.source.frozen = time.Time{}
 	env.source.mu.Unlock()
-	if err := env.callers.refresh(context.Background(), 0); err != nil {
-		t.Fatal(err)
-	}
 	decodeLayoutResultBody(t, env.postJSON(env.keys.active, body))
 }
 
 func TestLayoutAuthUnavailableWithoutCallerEntry(t *testing.T) {
 	clock := newLayoutTestClock()
 	key, fingerprint := mustLayoutKey(t)
-	source := &fakeLayoutCallerSource{clock: clock, present: false}
+	source := &fakeLayoutCallerSource{clock: clock}
 	directory := newLayoutCallerDirectory(source, clock.Now)
+	if _, lerr := directory.authenticate(key); lerr == nil || lerr.Code != layoutErrAuthUnavailable {
+		t.Fatalf("开机还没拿到配置包要 auth_unavailable：%v", lerr)
+	}
 	var logs bytes.Buffer
 	log.SetOutput(&logs)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-	if err := directory.refresh(context.Background(), 0); err == nil {
-		t.Fatal("配置包里没有 api_callers 要报错")
+	source.set(false, nil)
+	if _, lerr := directory.authenticate(key); lerr == nil || lerr.Code != layoutErrAuthUnavailable {
+		t.Fatalf("没条目一律 auth_unavailable：%v", lerr)
 	}
 	if !strings.Contains(logs.String(), "api_callers") {
 		t.Fatalf("没条目要打日志：%q", logs.String())
 	}
-	if _, lerr := directory.authenticate(key); lerr == nil || lerr.Code != layoutErrAuthUnavailable {
-		t.Fatalf("没条目一律 auth_unavailable：%v", lerr)
-	}
-	// 从没核对成功过（中台连不上）也一样。
-	never := newLayoutCallerDirectory(&fakeLayoutCallerSource{clock: clock, err: fmt.Errorf("x")}, clock.Now)
-	_ = never.refresh(context.Background(), 0)
-	if _, lerr := never.authenticate(key); lerr == nil || lerr.Code != layoutErrAuthUnavailable {
-		t.Fatalf("开机还没核对成功过要 auth_unavailable：%v", lerr)
-	}
 	// 中台加了表以后就能用。
-	source.mu.Lock()
-	source.present = true
-	source.rows = []layoutCallerRow{{Code: "c1", Status: layoutCallerActive, KeySHA256: fingerprint}}
-	source.mu.Unlock()
-	if err := directory.refresh(context.Background(), 0); err != nil {
-		t.Fatal(err)
-	}
+	source.set(true, []layoutCallerRow{{Code: "c1", Status: layoutCallerActive, KeySHA256: fingerprint}})
 	if caller, lerr := directory.authenticate(key); lerr != nil || caller.Code != "c1" {
 		t.Fatalf("加表后认得：%+v %v", caller, lerr)
 	}
@@ -430,13 +420,12 @@ func TestLayoutCallerRowsRejectDuplicates(t *testing.T) {
 		t.Fatalf("重复、缺编号、指纹不对都要跳过：%v %+v", problems, entries)
 	}
 	clock := newLayoutTestClock()
-	directory := newLayoutCallerDirectory(&fakeLayoutCallerSource{clock: clock, present: true, rows: []layoutCallerRow{
+	source := &fakeLayoutCallerSource{clock: clock}
+	source.set(true, []layoutCallerRow{
 		{Code: "a", Status: layoutCallerActive, KeySHA256: fingerprint},
 		{Code: "b", Status: layoutCallerActive, KeySHA256: fingerprint},
-	}}, clock.Now)
-	if err := directory.refresh(context.Background(), 0); err != nil {
-		t.Fatal(err)
-	}
+	})
+	directory := newLayoutCallerDirectory(source, clock.Now)
 	if _, lerr := directory.authenticate(key); lerr == nil || lerr.Code != layoutErrKeyDisabled {
 		t.Fatalf("两行同一把钥匙分不清是谁，都不认：%v", lerr)
 	}
@@ -618,9 +607,6 @@ func TestLayoutOperationExpiresAfterTTL(t *testing.T) {
 	waitLayoutIdle(t, env.api, "c1")
 	decodeLayoutResultBody(t, env.poll(env.keys.active, pending.Operation.PollURL, 0))
 	env.clock.Add(layoutResultTTL)
-	if err := env.callers.refresh(context.Background(), 0); err != nil {
-		t.Fatal(err)
-	}
 	expectLayoutError(t, env.poll(env.keys.active, pending.Operation.PollURL, 0), http.StatusNotFound, layoutErrOperationExpired)
 	// 别家钥匙拿过期编号也只说找不到。
 	expectLayoutError(t, env.poll(env.keys.other, pending.Operation.PollURL, 0), http.StatusNotFound, layoutErrOperationNotFound)

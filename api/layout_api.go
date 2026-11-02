@@ -189,10 +189,8 @@ type layoutAPI struct {
 
 // newLayoutAPIFromEnv 生产装配：钥匙读中台配置包，抓取、Word、飞书、图片都用网页版已在用的那套函数。
 func newLayoutAPIFromEnv(rules *rulePresetStore, auth *authService) *layoutAPI {
-	callers := newLayoutCallerDirectory(hubLayoutCallerSource{}, time.Now)
-	callers.start()
 	api := newLayoutAPI(layoutAPIDeps{
-		callers: callers,
+		callers: newLayoutCallerDirectory(hubLayoutCallerSource{}, time.Now),
 		rules:   rules,
 		fetcher: articleLayoutFetcher{},
 		feishu:  newLayoutFeishuFromEnv(auth),
