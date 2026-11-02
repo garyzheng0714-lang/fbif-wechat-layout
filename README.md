@@ -381,7 +381,7 @@ go test ./...
 - 默认“更多文章”列表由规则配置驱动：`public/js/rule-presets.js` 负责 JSON 读写，`public/js/more-articles-config.js` 负责卡片归一化，`public/js/more-articles-rule-editor.js` 负责规则后台卡片编辑器，`public/js/more-articles.js` 在新文章导入时按当前规则生成默认卡片。
 - “更多文章”选图链路由 `api/main.go` 的 `/api/fetch-article-meta` 返回 `image_urls`，`public/js/more-articles.js` 持久化到卡片状态，`public/js/more-articles-ui.js` 合并为选图候选并处理 URL 输入自动抓取。候选顺序为自定义封面、抓取头图、当前卡片正文媒体图、主文章图片兜底；旧卡片缺少 `image_urls` 时，点击替换会按卡片链接补抓一次。
 - DOCX 作者规则集中在 `public/js/templates/fbif.js`：首个 `作者：` 行之前内容默认隐藏；`Mote莫特` / `Mote 莫特` 会触发参考来源上方的固定署名图片。
-- DOCX 段距规则也在 `public/js/templates/fbif.js`：连续非空正文段落在 Word 段距较小时保持紧凑；如果中间出现空段，则下一段前恢复标准 `wx-gap`。
+- DOCX 段距规则（红线 18）：整篇靠空行还是靠段距分段只在 `public/js/paragraph-breaks.js` 判定，`templates/fbif.js` 与 `templates/foodtalks-series.js` 各自的 `isCompactDocxPair` 照它排。用空行分段的稿连续正文在 Word 段距较小时保持紧凑，中间出现空段则下一段前恢复标准 `wx-gap`；靠段距分段的稿每段都留 `wx-gap`。
 - URL 导入结构化块由 `api/wechat_blocks.go` 输出，`public/js/editor-shell.js` 必须把 API 的 `source_name` 原字段名传给 `public/js/templates/fbif.js`。图片说明组必须保留为 `cap`；文章级署名别名和分隔符按“功能”一节归一，显式来源优先，缺失时才用公众号名称兜底；来源、作者、编辑在转载正文开头、原创标准页脚前只渲染一次。正文尾段即使没有后续正文块，也必须带 `wx-gap`，给标准 `提示：` 页脚留出段落间距。
 - 排版契约需要测试保护：`api/wechat_blocks_test.go` 覆盖连续图注和图片来源，`tests/editor-shell.test.mjs` 锁定 `source_name` 传递，`tests/fbif-template.test.mjs` 覆盖图注样式、署名别名与分隔符、公众号名称兜底、作者来源去重、转载文首/原创页脚位置和 DOCX 连续段落紧凑规则。
 - FoodTalks 编辑部元数据口径见 [`docs/editorial-norms-foodtalks.md`](docs/editorial-norms-foodtalks.md)；API 环境差异、可见性状态与未解限制见 [`docs/foodtalks-api-contract.md`](docs/foodtalks-api-contract.md)。

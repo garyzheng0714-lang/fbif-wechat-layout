@@ -11,7 +11,7 @@
               "type": "boolean"
             },
             "compact": {
-              "description": "只在浏览器粘贴纯文本时出现：每行一段，段间不留公众号段距（除非 blankBefore）",
+              "description": "只在浏览器粘贴纯文本时出现：每行一段，段间不留公众号段距（除非 blankBefore）；整篇长段之间基本不空行（飞书、Word 复制）时每段都不排紧",
               "type": "boolean"
             },
             "k": {

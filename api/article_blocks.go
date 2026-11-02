@@ -24,7 +24,7 @@ type Block struct {
 	Rows        [][]TableCell `json:"rows,omitempty" doc:"表格的行，每行是一串单元格"`
 	Poster      string        `json:"poster,omitempty" doc:"视频封面图地址"`
 	BlankBefore bool          `json:"blankBefore,omitempty" doc:"原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管"`
-	Compact     bool          `json:"compact,omitempty" doc:"只在浏览器粘贴纯文本时出现：每行一段，段间不留公众号段距（除非 blankBefore）"`
+	Compact     bool          `json:"compact,omitempty" doc:"只在浏览器粘贴纯文本时出现：每行一段，段间不留公众号段距（除非 blankBefore）；整篇长段之间基本不空行（飞书、Word 复制）时每段都不排紧"`
 }
 
 type TableCell struct {
