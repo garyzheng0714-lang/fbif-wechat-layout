@@ -4,6 +4,7 @@
 import { convertRuns, convertText } from './punctuation.js';
 import { createListMarkers, NO_LIST_MARKER } from './docx-list-markers.js';
 import { linkRanges } from './clipboard-links.js';
+import { separatesWithBlankLines } from './paragraph-breaks.js';
 
 const EXT_TO_MIME = {
   gif: 'image/gif',
@@ -739,6 +740,8 @@ export function markdownLineBody(line) {
 }
 
 const MD_INLINE_RE = /\*\*[^*]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)/;
+// 标题、列表行不算正文段，不拿来判断这篇靠什么分段。
+const CLIPBOARD_NON_BODY_LINE_RE = /^(#{1,6}\s|[-*+•·]\s|\d{1,3}[.、)）]\s?)/;
 
 // 粘贴的文字常是 AI 答复点「复制」得到的 Markdown：记号按 Markdown 认，不原样排出来；
 // 没有行内记号的行照纯文字转标点（网址在链接里，不会被转成全角括号）。
@@ -786,6 +789,7 @@ export function buildClipboardArticleBlocks(text, { links = [] } = {}) {
   if (firstContentIndex < 0) return { title: '', blocks: [], source: 'clipboard-text', bodyOnly: true };
 
   const blocks = [];
+  const lines = [];
   let sawContent = false;
   let blankBefore = false;
 
@@ -798,9 +802,12 @@ export function buildClipboardArticleBlocks(text, { links = [] } = {}) {
     const runs = clipboardLineRuns(raw);
     if (!runs.length) continue;
     blocks.push({ k: 'txt', runs, blankBefore, compact: true });
+    lines.push({ text: raw, blankBefore, body: !CLIPBOARD_NON_BODY_LINE_RE.test(raw) });
     sawContent = true;
     blankBefore = false;
   }
+  // 飞书、Word 复制出来的纯文字段间只有一个换行：靠段距分段，每段都留空（红线#18）。
+  if (!separatesWithBlankLines(lines)) for (const block of blocks) block.compact = false;
 
   if (links && links.length) linkRuns(blocks, links);
   return { title: '', displayName: '剪贴板正文', blocks, source: 'clipboard-text', bodyOnly: true };

@@ -434,6 +434,21 @@ test('docx consecutive body paragraphs stay compact until a blank paragraph sepa
   assert.equal(classesByText['这是我茶叶系列第9篇。下一篇我写美国最大的本土茶叶品牌Bigelow Tea。'], 'wx-p wx-gap');
 });
 
+test('docx 靠段距分段（段与段之间不空行）：每段都留段后距（2026-11-02 EZ 豆腐稿）', () => {
+  const html = renderDocx([
+    docxBody('作者：EZ'),
+    docxBody('在中国，如果一款豆腐卖不好，可能是因为名字起得不好或者包装设计不够诱人。顾客站在一排排豆制品前，分不清哪块该买。'),
+    docxBody('FBIF的莫特在《中国豆腐的下一个10年》里提到过一位新朋友EZ，说他分享了爱沙尼亚Deary的豆腐棒。'),
+    docxBody('莫特那篇里，我最认同讲人话这一条：少写内酯豆腐，多写汤用豆腐。在中国，这可能就是改个名字的事。'),
+    docxBody('10月中旬，我在巴黎西雅展（SIAL Paris，全球最大的食品展）待了五天。每天走一万五千多步。'),
+  ]);
+  const classes = [...html.matchAll(/<section class="([^"]+)">([\s\S]*?)<\/section>/g)]
+    .filter((m) => !/作者/.test(m[2]))
+    .map((m) => m[1]);
+
+  assert.deepEqual(classes, ['wx-p wx-gap', 'wx-p wx-gap', 'wx-p wx-gap', 'wx-p wx-gap']);
+});
+
 test('original author color matches RGB 57,111,188', async () => {
   const css = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
   assert.match(css, /\.wx-ta-author\s*\{\s*color:\s*#396FBC;\s*font-style:\s*normal;\s*\}/);

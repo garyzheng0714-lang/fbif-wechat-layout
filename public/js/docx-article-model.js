@@ -23,6 +23,7 @@
 //     保守的 [n] 口径识别，「引言/标题」不跳过/不删（避免内容丢失），正文起点纯由作者行决定。
 
 import { looksLikeGifSource } from './image-utils.mjs';
+import { separatesWithBlankLines } from './paragraph-breaks.js';
 
 // 模块内温和兜底默认值（与公众号现有写死值逐字一致；正常路径由 opts 注入覆盖）。
 const DEFAULT_AUTHOR_LINE = /^作者[：:]\s*(.+)$/;
@@ -38,7 +39,8 @@ const DEFAULT_FRONT_MATTER_SCAN_LIMIT = 25;
 // 入集会带来正文中段误重开窗口的风险，且对救活前置作者行无贡献。
 const DEFAULT_FRONT_MATTER_MARKER = /^(正文|标题|封面|推荐语|校对)[：:]?$/;
 
-// 平铺 docx 元数据：#18 空段语义 / 公众号成对紧凑间距(isCompactDocxPair) 的全部输入。
+// 平铺 docx 元数据：#18 空段语义 / 公众号成对紧凑间距(isCompactDocxPair) 的输入（另有整篇的
+// blankLineBreaks，分类完才算得出，见 classifyDocxArticle 末尾）。
 // 共享模块原样透传，渲染器各自决定是否消费（公众号消费、网站当前不消费）。
 function docxMeta(pd) {
   return {
@@ -278,6 +280,14 @@ export function classifyDocxArticle(paragraphs, imgCache, opts = {}) {
     }
     elems.push({ k: 'txt', runs: pd.runs, ...takeDocxMeta(pd) });
   }
+
+  // 整篇靠什么分段（红线#18）：靠段距分段的稿，渲染器不再把小段距的连续几段排紧。
+  const blankLineBreaks = separatesWithBlankLines(elems.map(e => ({
+    text: (e.runs || []).map(r => (r && r.text) || '').join(''),
+    blankBefore: e.blankBefore,
+    body: e.k === 'txt' && !e.isList,
+  })));
+  for (const e of elems) if (e.fromDocx) e.blankLineBreaks = blankLineBreaks;
 
   return { elems, author, imgN };
 }

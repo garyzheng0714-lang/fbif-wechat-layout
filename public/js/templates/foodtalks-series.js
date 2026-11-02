@@ -276,6 +276,8 @@ function isCompactDocxPair(a, b) {
   if (!a.fromDocx || !b.fromDocx || b.blankBefore) return false;
   if (a.isList && b.isList) return true;
   if (sameDocxStyle(a, b) && (a.contextualSpacing || b.contextualSpacing)) return true;
+  // 靠段距分段的稿（段与段之间不空行）每段都留空，小段距不算一组。
+  if (a.blankLineBreaks === false) return false;
   const after = Number(a.spacing && a.spacing.after);
   const before = Number(b.spacing && b.spacing.before);
   return Number.isFinite(after) && after <= 160 &&

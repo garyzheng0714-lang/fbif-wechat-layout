@@ -183,6 +183,17 @@ test('空段语义：空段只把 blankBefore 标到紧随其后的第一个 ele
   assert.equal(body[2].blankBefore, false, 'blankBefore 即取即清，不蔓延');
 });
 
+test('整篇靠什么分段：长段之间过半空了一行算用空行分段，基本不空行算靠段距分段', () => {
+  const long = (n) => txt(`第${n}段，长段落正文要写够三十个字才算数，短行连着多是有意排紧的一组。`);
+  const blank = () => para({ isEmpty: true });
+  const flag = (paras) => [...new Set(classifyDocxArticle(paras, {}, {}).elems.filter(e => e.fromDocx).map(e => e.blankLineBreaks))];
+
+  assert.deepEqual(flag([txt('作者：张三'), long(1), blank(), long(2), blank(), long(3), long(4)]), [true]);
+  assert.deepEqual(flag([txt('作者：张三'), long(1), long(2), long(3), blank(), long(4)]), [false]);
+  // 只有短行连着（网址、目录）不算证据，照原来按用空行分段。
+  assert.deepEqual(flag([txt('作者：张三'), long(1), txt('www.a.com'), txt('www.b.com')]), [true]);
+});
+
 test('空段语义：参考来源段头也保留 blankBefore，供行为插入块迁移', () => {
   const { elems } = classifyDocxArticle(
     [txt('作者：张三'), txt('正文。'), para({ isEmpty: true }), txt('参考来源'), txt('[1] source')],

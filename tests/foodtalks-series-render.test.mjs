@@ -44,6 +44,18 @@ test('render: 连续正文无空段→紧凑(0)，原文有空段→恢复 gap(2
   assert.equal(marginBottomOf(html, '乙段落文本'), 20, '乙→丙 间有空段 → 恢复 20px gap');
 });
 
+test('render: 靠段距分段的稿（长段之间不空行）每段都留 gap（红线#18，2026-11-02）', () => {
+  const body = (text) => p(text, { spacing: { before: 120, after: 120 } });
+  const html = render([
+    imgP('h.png', '96%', 1.6),
+    body('甲段落文本，安姆科是全球包装行业的领导者之一，在四十多个国家设有工厂。'),
+    body('乙段落文本，膨化食品包装要防潮防氧，还要在货架上醒目，对材料要求很高。'),
+    body('丙段落文本，柔印加挤复一体化方案把两道工序并成一道，生产效率翻倍。'),
+  ], { 'h.png': 'blob:h' });
+  assert.equal(marginBottomOf(html, '甲段落文本'), 20);
+  assert.equal(marginBottomOf(html, '乙段落文本'), 20);
+});
+
 test('render: 信息表首行=标题+空 → 跨列深蓝横幅 + colgroup 左窄右宽（width 属性存活微信）', () => {
   const rows = [
     [{ runs: [{ type: 'txt', text: '安姆科挤出复合工艺' }] }, { runs: [] }],

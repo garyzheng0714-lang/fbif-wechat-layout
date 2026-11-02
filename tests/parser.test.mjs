@@ -147,6 +147,16 @@ test('buildClipboardArticleBlocks treats all pasted article lines as body text',
   assert.equal(article.blocks.every(block => block.compact === true), true);
 });
 
+test('buildClipboardArticleBlocks：飞书、Word 复制的纯文字段间只有一个换行，每段都不排紧', () => {
+  const paras = [
+    '在中国，如果一款豆腐卖不好，可能是因为名字起得不好或者包装设计不够诱人。',
+    '展会里也差不多。豆腐、豆制品和广义上的植物基展商没有专区，分散在各个馆。',
+    '麻烦在于，豆腐该回到哪个品类？买手要先相信趋势，再决定要不要尝一口。',
+  ];
+  assert.equal(buildClipboardArticleBlocks(paras.join('\n')).blocks.every(block => block.compact === false), true);
+  assert.equal(buildClipboardArticleBlocks(paras.join('\n\n')).blocks.every(block => block.compact === true), true);
+});
+
 test('hasImageLikeLink detects image-bearing text', () => {
   assert.equal(hasImageLikeLink('![图](https://example.com/a.jpg)'), true);
   assert.equal(hasImageLikeLink('<img src="https://example.com/a.png">'), true);

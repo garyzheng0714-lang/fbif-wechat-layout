@@ -81,6 +81,7 @@ function carryDocxMeta(e) {
     blankBefore: e.blankBefore, fromDocx: e.fromDocx,
     styleId: e.styleId, styleName: e.styleName,
     contextualSpacing: e.contextualSpacing, spacing: e.spacing, isList: e.isList,
+    blankLineBreaks: e.blankLineBreaks,
   };
 }
 
