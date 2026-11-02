@@ -4,8 +4,9 @@ package main
 // 有变化中台才回话（2026-11-03 和中台定的约定，One-Api 仓库 .local/poll-audit-20261103/contract.md）。
 //
 // 每次请求带 Prefer: wait=10800 和上一次 200 的 ETag。中台照办了等待，回包就带 Preference-Applied，
-// 收到就马上再问，请求一直挂在中台上，内容一变中台立刻回 200。长等待是唯一的路：回包不带 Preference-Applied
-// 是意外，和网络错、超时、5xx 一样退避，1 秒起翻倍到 5 分钟（±20%）；401/403/404 隔 5 分钟。
+// 收到就马上再问，请求一直挂在中台上，内容一变中台立刻回 200；带的 ETag 不是最新（或没带）中台马上回 200 新内容，
+// 也马上再问。长等待是唯一的路：其余不挂着等的回包是意外，和网络错、超时、5xx 一样退避，
+// 1 秒起翻倍到 5 分钟（±20%）；401/403/404 隔 5 分钟。
 // 开机和断开后的那一次不带 If-None-Match：中台马上回 200，断开期间错过的变化当场补上，新鲜度也当场续上。
 
 import (
@@ -34,7 +35,7 @@ const (
 type hubOutcome int
 
 const (
-	hubWaiting  hubOutcome = iota // 回了话，中台照办了等待：马上再问，下一个请求挂在中台上
+	hubWaiting  hubOutcome = iota // 回了话，中台照办了等待或马上给了新内容：马上再问，下一个请求挂在中台上
 	hubAnswered                   // 回了话，中台却没挂着等（意外）：算连着中台，按出错退避
 	hubDenied                     // 401/403/404：5 分钟后再问
 	hubFailed                     // 网络错、超时、5xx、回包读不懂：退避
@@ -55,9 +56,13 @@ func hubNextWait(outcome hubOutcome, failures int, elapsed time.Duration, spread
 	return time.Duration(float64(backoff) * spread)
 }
 
-// hubReplied 中台回了 200 或 304：照办了等待（Preference-Applied）就马上再问。
+// hubReplied 中台回了 200 或 304：照办了等待（Preference-Applied），或带的 ETag 不是最新、中台马上给了新内容，
+// 就马上再问（下一次带上新 ETag，中台会挂着）；不然是意外。
 func hubReplied(resp *http.Response) hubOutcome {
 	if resp.Header.Get("Preference-Applied") != "" {
+		return hubWaiting
+	}
+	if resp.StatusCode == http.StatusOK && resp.Request != nil && resp.Header.Get("ETag") != resp.Request.Header.Get("If-None-Match") {
 		return hubWaiting
 	}
 	return hubAnswered

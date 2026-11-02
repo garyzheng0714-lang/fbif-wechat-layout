@@ -60,7 +60,7 @@ func TestHubSecretsAdoptOnceAndReceipt(t *testing.T) {
 	ask := func() hubOutcome { return client.feed.round(context.Background(), client.poll) }
 
 	if got := ask(); got != hubAnswered {
-		t.Fatalf("没挂着等的回包照样换上密钥，按出错退避再问：%v", got)
+		t.Fatalf("不带 ETag、没挂着等的回包照样换上密钥，按出错退避再问（不会一秒一次空转）：%v", got)
 	}
 	cred := client.Credential(context.Background())
 	if cred == nil || cred.key != "sk-one" || cred.origin != "https://api.xiaomimimo.com" {

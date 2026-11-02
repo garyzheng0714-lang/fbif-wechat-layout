@@ -83,7 +83,7 @@ func TestHubBundleFeedAsksWithETagAndWait(t *testing.T) {
 		{hubAnswerBody(http.StatusOK, `{"version":3,"items":{"platform_accounts":[
 			{"code":"recToutiao","platform_code":"toutiao","carrier":"article","display_name":"头条号 · FBIF","status":"在用","source_wechat_account":"FBIF食品饮料创新","notify_chat":"oc_1","auto_distribute":false},
 			{"code":"recDouyin","platform_code":"douyin","carrier":"post","display_name":"抖音 · 测试","status":"测试","source_wechat_account":"FBIF食品创新展","notify_chat":"oc_2","auto_distribute":true}]},"warnings":[]}`,
-			"ETag", `"layout-v3"`), hubAnswered},
+			"ETag", `"layout-v3"`), hubWaiting},
 		{hubAnswer(http.StatusNotModified), hubAnswered},
 		{hubAnswerBody(http.StatusUnauthorized, `{"error":"request_error","message":"缺少或无效的 API key"}`), hubDenied},
 		{hubAnswerBody(http.StatusOK, `{"version":4,"items":{}}`, "ETag", `"layout-v4"`, "Preference-Applied", "wait=10800"), hubWaiting},
@@ -168,7 +168,7 @@ func TestSourceCheckedAt(t *testing.T) {
 	}
 }
 
-// TestHubBundleUnheldRepliesRenewOnlyWhenSourceSynced 中台回了话却没挂着等（意外）：一直回 304 不等于名单还新，
+// TestHubBundleUnheldRepliesRenewOnlyWhenSourceSynced 中台回了话却没挂着等（304 不带 Preference-Applied 是意外）：一直回 304 不等于名单还新，
 // 来源同步停了，核验时间就停在那里，过了 10 分钟排版接口拒掉所有钥匙；来源恢复同步就续上。
 func TestHubBundleUnheldRepliesRenewOnlyWhenSourceSynced(t *testing.T) {
 	key, fingerprint := mustLayoutKey(t)
@@ -177,23 +177,23 @@ func TestHubBundleUnheldRepliesRenewOnlyWhenSourceSynced(t *testing.T) {
 	client := newHubBundleClient(server.URL, "pqk_test")
 	client.feed.now = clock.Now
 	directory := newLayoutCallerDirectory(client, clock.Now)
-	ask := func(answer func(http.ResponseWriter)) {
+	ask := func(answer func(http.ResponseWriter), want hubOutcome) {
 		t.Helper()
 		script.answers <- answer
-		if got := client.feed.round(context.Background(), client.poll); got != hubAnswered {
-			t.Fatalf("没挂着等的回包算回了话，按出错退避再问：%v", got)
+		if got := client.feed.round(context.Background(), client.poll); got != want {
+			t.Fatalf("第一次马上给新内容就再问，之后没挂着等的 304 按出错退避：%v，要 %v", got, want)
 		}
 		<-script.seen
 	}
 
 	ask(hubAnswerBody(http.StatusOK, fmt.Sprintf(`{"version":7,"items":{"platform_accounts":[],"api_callers":[{"code":"recCaller","status":"在用","key_sha256":%q}]}}`, fingerprint),
-		"ETag", `"layout-v7"`, "X-Hub-Source-Age", "30"))
+		"ETag", `"layout-v7"`, "X-Hub-Source-Age", "30"), hubWaiting)
 	first := clock.Now().Add(-30 * time.Second)
 	if snap := client.LayoutCallers(clock.Now()); !snap.CheckedAt.Equal(first) || snap.Generation != 1 || !snap.Present || len(snap.Rows) != 1 {
 		t.Fatalf("200 按来源年龄算核验时间：%+v", snap)
 	}
 	clock.Add(time.Minute)
-	ask(hubAnswer(http.StatusNotModified, "X-Hub-Source-Age", "660"))
+	ask(hubAnswer(http.StatusNotModified, "X-Hub-Source-Age", "660"), hubAnswered)
 	if snap := client.LayoutCallers(clock.Now()); !snap.CheckedAt.Equal(first) {
 		t.Fatalf("304 但来源 11 分钟没同步，核验时间不动：%v", snap.CheckedAt)
 	}
@@ -201,13 +201,13 @@ func TestHubBundleUnheldRepliesRenewOnlyWhenSourceSynced(t *testing.T) {
 	if _, e := directory.authenticate(key); e == nil || e.Code != layoutErrAuthUnavailable {
 		t.Fatalf("名单内容超过 10 分钟没核验，中台照常回 304 也不放：%v", e)
 	}
-	ask(hubAnswer(http.StatusNotModified, "X-Hub-Source-Age", "5"))
+	ask(hubAnswer(http.StatusNotModified, "X-Hub-Source-Age", "5"), hubAnswered)
 	synced := clock.Now().Add(-5 * time.Second)
 	if caller, e := directory.authenticate(key); e != nil || caller.Code != "recCaller" {
 		t.Fatalf("来源同步恢复后照常认：%v %v", caller, e)
 	}
 	clock.Add(time.Minute)
-	ask(hubAnswer(http.StatusNotModified, "X-Hub-Stale", "validation"))
+	ask(hubAnswer(http.StatusNotModified, "X-Hub-Stale", "validation"), hubAnswered)
 	if snap := client.LayoutCallers(clock.Now()); !snap.CheckedAt.Equal(synced) {
 		t.Fatalf("没有年龄、中台说校验不过，不续：%v", snap.CheckedAt)
 	}
