@@ -168,9 +168,9 @@ func TestSourceCheckedAt(t *testing.T) {
 	}
 }
 
-// TestHubBundleOldHubRenewsOnlyWhenSourceSynced 中台还是旧版（不挂着等）：一直回 304 不等于名单还新，
+// TestHubBundleUnheldRepliesRenewOnlyWhenSourceSynced 中台回了话却没挂着等（意外）：一直回 304 不等于名单还新，
 // 来源同步停了，核验时间就停在那里，过了 10 分钟排版接口拒掉所有钥匙；来源恢复同步就续上。
-func TestHubBundleOldHubRenewsOnlyWhenSourceSynced(t *testing.T) {
+func TestHubBundleUnheldRepliesRenewOnlyWhenSourceSynced(t *testing.T) {
 	key, fingerprint := mustLayoutKey(t)
 	script, server := newHubScript(t, "pqk_test")
 	clock := newLayoutTestClock()
@@ -181,7 +181,7 @@ func TestHubBundleOldHubRenewsOnlyWhenSourceSynced(t *testing.T) {
 		t.Helper()
 		script.answers <- answer
 		if got := client.feed.round(context.Background(), client.poll); got != hubAnswered {
-			t.Fatalf("旧中台回了话，60 秒后再问：%v", got)
+			t.Fatalf("没挂着等的回包算回了话，按出错退避再问：%v", got)
 		}
 		<-script.seen
 	}

@@ -4,8 +4,8 @@ package main
 // 有变化中台才回话（2026-11-03 和中台定的约定，One-Api 仓库 .local/poll-audit-20261103/contract.md）。
 //
 // 每次请求带 Prefer: wait=10800 和上一次 200 的 ETag。中台照办了等待，回包就带 Preference-Applied，
-// 收到就马上再问，请求一直挂在中台上，内容一变中台立刻回 200；中台还是旧版（回包不带）时 60 秒问一次。
-// 网络错、超时、5xx 退避，1 秒起翻倍到 5 分钟（±20%）；401/403/404 隔 5 分钟。
+// 收到就马上再问，请求一直挂在中台上，内容一变中台立刻回 200。长等待是唯一的路：回包不带 Preference-Applied
+// 是意外，和网络错、超时、5xx 一样退避，1 秒起翻倍到 5 分钟（±20%）；401/403/404 隔 5 分钟。
 // 开机和断开后的那一次不带 If-None-Match：中台马上回 200，断开期间错过的变化当场补上，新鲜度也当场续上。
 
 import (
@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/rand/v2"
 	"net/http"
 	"sync"
@@ -22,7 +23,6 @@ import (
 const (
 	hubWaitSeconds = 10800
 	hubHTTPTimeout = hubWaitSeconds*time.Second + time.Minute
-	hubLegacyEvery = time.Minute
 	hubDeniedEvery = 5 * time.Minute
 	hubBackoffMax  = 5 * time.Minute
 	// hubMinGap 中台一秒内就回了话（连着几次改表、通道时断时续）也隔满一秒再问，不空转。
@@ -35,18 +35,16 @@ type hubOutcome int
 
 const (
 	hubWaiting  hubOutcome = iota // 回了话，中台照办了等待：马上再问，下一个请求挂在中台上
-	hubAnswered                   // 回了话，中台还是旧版：60 秒后再问
+	hubAnswered                   // 回了话，中台却没挂着等（意外）：算连着中台，按出错退避
 	hubDenied                     // 401/403/404：5 分钟后再问
 	hubFailed                     // 网络错、超时、5xx、回包读不懂：退避
 )
 
-// hubNextWait 这一轮之后隔多久再问。failures 是连着失败了几次，spread 是 0.8–1.2 的抖动。
+// hubNextWait 这一轮之后隔多久再问。failures 是连着几轮没挂着等（出错或意外回包），spread 是 0.8–1.2 的抖动。
 func hubNextWait(outcome hubOutcome, failures int, elapsed time.Duration, spread float64) time.Duration {
 	switch outcome {
 	case hubWaiting:
 		return max(hubMinGap-elapsed, 0)
-	case hubAnswered:
-		return hubLegacyEvery
 	case hubDenied:
 		return hubDeniedEvery
 	}
@@ -168,15 +166,19 @@ func (f *hubFeed) liveAt(now time.Time) time.Time {
 // start 一直问下去。
 func (f *hubFeed) start(poll func(context.Context) hubOutcome) {
 	go func() {
-		failures := 0
+		failures, unheld := 0, false
 		for {
 			started := time.Now()
 			outcome := f.round(context.Background(), poll)
-			if outcome == hubFailed {
+			if outcome == hubFailed || outcome == hubAnswered {
 				failures++
 			} else {
 				failures = 0
 			}
+			if outcome == hubAnswered && !unheld {
+				log.Printf("publish: 中台回了话却没挂着等（回包没带 Preference-Applied），按出错退避再问：%s", f.url)
+			}
+			unheld = outcome == hubAnswered
 			time.Sleep(hubNextWait(outcome, failures, time.Since(started), 0.8+0.4*rand.Float64()))
 		}
 	}()

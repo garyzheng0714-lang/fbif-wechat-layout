@@ -39,7 +39,7 @@ Node 不是另写一套排版，是**把网页编辑器的代码原样跑一遍*
 
 ## 钥匙
 
-- 名单在 FBIF 中台「接口调用方」表（code、name、owner、status、key_sha256），进排版工具的配置包 `GET /api/config/bundle/layout`（`api/hub_bundle.go`，和外发账号同一个客户端、同一个 ETag；长等待请求一直挂在中台上，表一改中台马上回话，中台还没升级时 60 秒问一次）。表里只有指纹。
+- 名单在 FBIF 中台「接口调用方」表（code、name、owner、status、key_sha256），进排版工具的配置包 `GET /api/config/bundle/layout`（`api/hub_bundle.go`，和外发账号同一个客户端、同一个 ETag；长等待请求一直挂在中台上，表一改中台马上回话）。表里只有指纹。
 - 发钥匙：`cd api && go run . -new-layout-key`，钥匙只打印这一次交给调用方，指纹填进表、状态「在用」。停用改状态（永不删行），一分钟内生效。
 - 只放行「在用」；配置包里没有 `api_callers` 这一项、或名单内容离来源上次确认超过 10 分钟，所有钥匙一律 503 `auth_unavailable`（宁可拒、不放）。新到什么时候：中台回包的来源年龄是 0、长等待请求正挂着，就是现在；挂着的请求断了，新到断开那一刻；其余是收到回包的时刻减来源年龄（`api/hub_bundle.go` 的 `LayoutCallers`）。
 - 自测钥匙（表里 `layout-selftest`）在维护者本机 `~/.config/fbif-layout/selftest.key`（600），线上验收用它，别贴进聊天和仓库。

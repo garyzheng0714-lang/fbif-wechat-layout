@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// TestHubNextWait 中台照办了等待马上再问（一秒内回的也隔满一秒）；旧中台 60 秒；拒了 5 分钟；出错 1 秒起翻倍，最长 5 分钟再加抖动。
+// TestHubNextWait 中台照办了等待马上再问（一秒内回的也隔满一秒）；拒了 5 分钟；出错和没挂着等的回包 1 秒起翻倍，最长 5 分钟再加抖动。
 func TestHubNextWait(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -17,7 +17,8 @@ func TestHubNextWait(t *testing.T) {
 	}{
 		{"挂了很久才回", hubWaiting, 0, 3 * time.Hour, 1, 0},
 		{"马上就回", hubWaiting, 0, 200 * time.Millisecond, 1, 800 * time.Millisecond},
-		{"旧中台", hubAnswered, 0, 0, 1, time.Minute},
+		{"回了话却没挂着等", hubAnswered, 1, 0, 1, time.Second},
+		{"一直没挂着等到顶", hubAnswered, 12, 0, 1, 5 * time.Minute},
 		{"钥匙被拒", hubDenied, 0, 0, 1, 5 * time.Minute},
 		{"第一次出错", hubFailed, 1, 0, 1, time.Second},
 		{"第三次出错", hubFailed, 3, 0, 1, 4 * time.Second},
