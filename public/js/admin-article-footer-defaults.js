@@ -19,6 +19,7 @@ export function defaultArticleFooterDefaultsData() {
       match: { author_alias_group: 'mote' },
       block_visibility: { byline: false, more_articles: true },
       artifact_visibility: { mote_ref_author_card: false },
+      subheading_size: '16',
     }],
   };
 }
@@ -201,6 +202,10 @@ export function bindArticleFooterDefaultsEditor({
           <span>作者匹配</span>
           <input type="text" data-afd-aliases value="${escapeAttr(aliasText(normalized, groupID))}" placeholder="用逗号分隔；支持短别名包含匹配">
         </label>
+        <label class="admin-afd-field">
+          <span>二级标题字号</span>
+          <input type="number" min="12" max="32" step="1" data-afd-subheading-size value="${escapeAttr(profile.subheading_size || '')}" aria-label="二级标题字号">
+        </label>
         <p class="admin-afd-hint">作者命中任一名称时，默认应用下面的底部模块显隐；前台仍可按单篇临时开启或隐藏。</p>
         <div class="admin-afd-blocks">
           ${blocks.map(([id, block]) => `
@@ -243,6 +248,14 @@ export function bindArticleFooterDefaultsEditor({
     if (aliases) aliases.addEventListener('input', () => {
       update((next, _profile, aliasGroup) => {
         next.author_aliases[aliasGroup] = parseAliases(aliases.value);
+      });
+    });
+    const subheadingSize = mount.querySelector('[data-afd-subheading-size]');
+    if (subheadingSize) subheadingSize.addEventListener('input', () => {
+      update((_next, profile) => {
+        const value = subheadingSize.value.trim();
+        if (value) profile.subheading_size = value;
+        else delete profile.subheading_size;
       });
     });
     mount.querySelectorAll('[data-afd-block]').forEach(input => {

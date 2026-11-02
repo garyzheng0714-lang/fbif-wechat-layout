@@ -1001,7 +1001,8 @@ func validateFtSeriesMaterialsModule(raw any) error {
 //	  profiles:[{
 //	    id,name, match:{author_alias_group},
 //	    block_visibility:{block_id:bool},
-//	    artifact_visibility?:{artifact_id:bool}
+//	    artifact_visibility?:{artifact_id:bool},
+//	    subheading_size?:"16"（二级标题字号，只填数字）
 //	  }]
 //	}
 //
@@ -1081,7 +1082,7 @@ func validateArticleFooterDefaultsModule(raw any) error {
 		if !ok {
 			return fmt.Errorf("article_footer_defaults profiles[%d] must be an object", i)
 		}
-		allowedProfile := map[string]bool{"id": true, "name": true, "match": true, "block_visibility": true, "artifact_visibility": true}
+		allowedProfile := map[string]bool{"id": true, "name": true, "match": true, "block_visibility": true, "artifact_visibility": true, "subheading_size": true}
 		for k := range profile {
 			if !allowedProfile[k] {
 				return fmt.Errorf("article_footer_defaults profiles[%d] has unknown field: %s", i, k)
@@ -1135,6 +1136,12 @@ func validateArticleFooterDefaultsModule(raw any) error {
 			}
 			if _, ok := rawEnabled.(bool); !ok {
 				return fmt.Errorf("article_footer_defaults profiles[%d].block_visibility.%s must be boolean", i, blockID)
+			}
+		}
+		if rawSize, ok := profile["subheading_size"]; ok {
+			n, err := ruleValueAsFloat(rawSize)
+			if err != nil || n < 12 || n > 32 {
+				return fmt.Errorf("article_footer_defaults profiles[%d].subheading_size must be a number between 12 and 32", i)
 			}
 		}
 		if rawArtifactVisibility, ok := profile["artifact_visibility"]; ok {

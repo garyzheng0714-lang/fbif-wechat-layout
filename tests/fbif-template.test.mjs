@@ -822,3 +822,78 @@ test('a bullet list item renders its bullet, an ordinary paragraph does not', ()
   assert.match(html, /class="wx-t" style="color: #3370ff;">•\u00A0<\/span>/);
   assert.equal((html.match(/•/g) || []).length, 1);
 });
+
+// Mote 二级标题 16px（2026-11-02 用户裁定，只给 Mote；样稿《中国茶叶的下一个10年》）：
+// 挂在「一、」下的「1. 2. 3.」是二级，与网站同一套判定；作者方案没设字号的作者不变。
+function withMoteSubheadingRule(fn) {
+  const previousActiveConfig = globalThis.window._activeConfig;
+  globalThis.window._activeConfig = {
+    config: {
+      modules: {
+        article_footer_defaults: {
+          schema_version: 1,
+          enabled: true,
+          author_aliases: { mote: ['mote', '莫特'] },
+          profiles: [{
+            id: 'mote_author',
+            name: 'Mote 作者默认',
+            match: { author_alias_group: 'mote' },
+            block_visibility: {},
+            subheading_size: '16',
+          }],
+        },
+      },
+    },
+  };
+  try { return fn(); } finally { globalThis.window._activeConfig = previousActiveConfig; }
+}
+
+function headingSizes(html) {
+  return [...html.matchAll(/<span textstyle="" class="wx-th"( style="font-size: (\d+)px;")?>([^<]+)<\/span>/g)]
+    .map(m => [m[3], m[2] ? Number(m[2]) : 0]);
+}
+
+const teaParagraphs = author => [
+  p('作者：' + author),
+  p('开头一段'),
+  h('一、 中国茶业的痛点'),
+  h('1. 假如可乐像茶叶一样卖'),
+  p('这个故事是我编的。'),
+  h('2. 茶“贵”伤农'),
+  p('正文'),
+  h('二、 品牌化'),
+  h('1. 取个好名字'),
+  p('正文'),
+  h('三、 结尾'),
+  p('正文'),
+];
+
+test('Mote 二级标题（「一、」下的「1. 2.」）排 16px，一级标题照旧', () => withMoteSubheadingRule(async () => {
+  const html = template.processDocx({ paragraphs: teaParagraphs('Mote莫特'), imgCache: {}, isRepost: false }).lines.join('\n');
+  assert.deepEqual(headingSizes(html), [
+    ['一、 中国茶业的痛点', 0],
+    ['1. 假如可乐像茶叶一样卖', 16],
+    ['2. 茶“贵”伤农', 16],
+    ['二、 品牌化', 0],
+    ['1. 取个好名字', 16],
+    ['三、 结尾', 0],
+  ]);
+  const themeCSS = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
+  const copyHtml = processForCopy(html, themeCSS, DEFAULT_RULE_CONFIG);
+  assert.match(copyHtml, /font-size: 16px;[^"]*">1\. 假如可乐像茶叶一样卖/);
+  assert.match(copyHtml, /font-size: 18px;[^"]*">一、 中国茶业的痛点/);
+}));
+
+test('Mote 二级标题字号只给 Mote：别的作者、前面没有「一、」的序号标题都不变', () => withMoteSubheadingRule(() => {
+  const other = template.processDocx({ paragraphs: teaParagraphs('张三'), imgCache: {}, isRepost: false }).lines.join('\n');
+  assert.equal(headingSizes(other).length, 6);
+  assert.ok(headingSizes(other).every(([, size]) => size === 0));
+
+  const orphan = template.processDocx({
+    paragraphs: [p('作者：Mote莫特'), p('开头'), h('1. 取个好名字'), p('正文'), h('2. 讲人话'), p('正文')],
+    imgCache: {},
+    isRepost: false,
+  }).lines.join('\n');
+  assert.equal(headingSizes(orphan).length, 2);
+  assert.ok(headingSizes(orphan).every(([, size]) => size === 0));
+}));

@@ -57,7 +57,14 @@ function normalizeProfile(profile) {
     name: cleanId(profile.name),
     blockVisibility: isObj(profile.block_visibility) ? profile.block_visibility : {},
     artifactVisibility: cleanArticleArtifactVisibility(profile.artifact_visibility),
+    subheadingSize: cleanSubheadingSize(profile.subheading_size),
   };
+}
+
+// 作者方案里的二级标题字号（只给 Mote 设，2026-11-02）：只认 12–32 的数字，其余当没设。
+function cleanSubheadingSize(value) {
+  const n = Number(String(value ?? '').trim());
+  return String(value ?? '').trim() && Number.isFinite(n) && n >= 12 && n <= 32 ? n : 0;
 }
 
 function rawProfiles(footerDefaults) {

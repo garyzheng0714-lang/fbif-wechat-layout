@@ -15,7 +15,7 @@ const docxModelModule = await import('../docx-article-model.js' + assetQuery);
 const { classifyDocxArticle } = docxModelModule;
 // 标题启发式纯函数（网站渲染器也用，红线#19 中性共享模块，不跨渲染器 import）。
 const headingDetectModule = await import('../heading-detect.js' + assetQuery);
-const { detectHeadingLevel, isBoldHeading, hasExplicitDocxHeadings } = headingDetectModule;
+const { detectHeadingLevel, isBoldHeading, hasExplicitDocxHeadings, headingLevels } = headingDetectModule;
 const tableModule = await import('./shared/table-renderer.js' + assetQuery);
 const { renderTable: renderSharedTable } = tableModule;
 // 底部追加式区块（统一模型）：中性编排器 + 公众号渲染器（红线 #19：不 import 网站渲染器）。
@@ -520,11 +520,20 @@ function prepareRenderState(elems, author, source, opts) {
     artifactDefaults,
     opts?.articleArtifactOverride,
   );
+  const behaved = applyBehaviorToElems(elems, context, behavior, { articleArtifactOverride });
   return {
     behavior,
     context,
-    elems: applyBehaviorToElems(elems, context, behavior, { articleArtifactOverride }),
+    elems: markSubheadings(behaved, selection.profile && selection.profile.subheadingSize),
   };
+}
+
+// 作者方案设了二级标题字号（只有 Mote，2026-11-02）：二级标题带上字号，渲染时写进行内样式，
+// 复制进公众号后台也是这个字号。哪行算二级与网站同一套判定（heading-detect.js headingLevels）。
+function markSubheadings(elems, size) {
+  if (!size) return elems;
+  const levels = headingLevels(elems);
+  return elems.map((e, i) => levels[i] === 3 ? { ...e, subheadingSize: size } : e);
 }
 
 function renderTopAttributionLines(author, source, opts, context, behavior) {
@@ -562,7 +571,9 @@ function renderTableElement(elem, spaceAfter) {
 function renderElement(elem, spaceAfter, context, behavior) {
   switch (elem.k) {
     case 'h':
-      return sec(leafWrap('<span textstyle="" class="wx-th">' + esc(localizePunct(elem.text)) + '</span>'), spaceAfter);
+      return sec(leafWrap('<span textstyle="" class="wx-th"' +
+        (elem.subheadingSize ? ' style="font-size: ' + elem.subheadingSize + 'px;"' : '') + '>' +
+        esc(localizePunct(elem.text)) + '</span>'), spaceAfter);
     case 'img':
       return renderImageElement(elem, spaceAfter);
     case 'cap':

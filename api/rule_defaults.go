@@ -87,6 +87,8 @@ func defaultArticleFooterDefaultsModule() map[string]any {
 				"artifact_visibility": map[string]any{
 					"mote_ref_author_card": true,
 				},
+				// 二级标题（挂在「一、」下的「1. 2. 3.」）16px（2026-11-02 用户裁定，只给 Mote）。
+				"subheading_size": "16",
 			},
 		},
 	}
@@ -188,6 +190,7 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // fbif v16→v17（2026-06-30）：Mote 作者默认隐藏参考文献前署名图，仍允许前台按单篇开启。
 // fbif v17→v18（2026-07-05）：用户裁定 Mote 作者默认【显示】Bobo 名片（byline）与参考文献前
 // 署名图（mote_ref_author_card），推翻 v16/v17 的默认隐藏；单篇仍可按需关闭。
+// fbif v18→v19（2026-11-02）：Mote 作者默认加二级标题字号 16px（subheading_size），只给 Mote。
 // v17→v18（2026-07-26）：ft-default 网站页脚默认开启（fbif_footer + 由它派生的
 // bottom_blocks）。旧默认 enabled=false 让页脚只能靠前台 localStorage override 打开，
 // 新环境静默丢页脚；仅覆盖 ft-default-v1。
@@ -203,7 +206,7 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 仅覆盖 ft-default-v1。
 const currentBuiltinRuleVersion = 20
 const defaultBuiltinRuleVersion = 16
-const fbifBuiltinRuleVersion = 18
+const fbifBuiltinRuleVersion = 19
 const ftSeriesSiteBuiltinRuleVersion = 16
 
 func builtinVersionForDefaultRule(id string) int {

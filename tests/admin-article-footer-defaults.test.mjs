@@ -29,6 +29,7 @@ test('文章默认方案新建规则按账号 seed：只有 FBIF 默认启用 Mo
   assert.equal(fbif.enabled, true);
   assert.deepEqual(fbif.profiles[0].block_visibility, { byline: false, more_articles: true });
   assert.deepEqual(fbif.profiles[0].artifact_visibility, { mote_ref_author_card: false });
+  assert.equal(fbif.profiles[0].subheading_size, '16');
 
   for (const account of ['wowfood', 'foodtalks-series', 'ft-default', 'ft-series']) {
     const seeded = articleFooterDefaultsSeedForAccount(account);

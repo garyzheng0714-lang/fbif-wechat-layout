@@ -233,6 +233,16 @@ export function resolveSiteHeadingLevel(text, explicitLevel) {
   return 2;
 }
 
+// 每个小标题是一级还是二级，与网站同一套判定（resolveSiteHeadingLevel + liftOrphanSubheadings）：
+// 挂在「一、」这类上级标题下的「1. 2. 3.」「（一）」是二级；前面没有上级的那组序号就是一级。
+// 公众号 Mote 二级标题字号用它认（2026-11-02）。返回与 elems 等长的数组，非标题为 0。
+export function headingLevels(elems) {
+  const leveled = (elems || []).map(e => (e && e.k === 'h')
+    ? { ...e, level: resolveSiteHeadingLevel(headingPlain(e), e.level) }
+    : e);
+  return liftOrphanSubheadings(leveled).map(e => (e && e.k === 'h') ? (e.topLevel ? 2 : e.level) : 0);
+}
+
 // 原文单独一行的章节号（「01」「1」「PART 2」）：抓取把它和下一行标题认成两个小标题
 // （api/wechat_blocks.go sectionNumberTitle）。FoodTalks 不要这行号，FoodTalks食品资讯由序号图编号。
 const SECTION_NUMBER_RE = /^(?:part\s*\.?\s*)?(?:0?\d{1,2}|[一二三四五六七八九十]{1,3})$/i;

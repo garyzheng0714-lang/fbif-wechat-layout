@@ -634,6 +634,20 @@ func TestDefaultRuleStoreIncludesAccountBindings(t *testing.T) {
 	if blockVisibility["byline"] != true {
 		t.Fatalf("mote block default = %#v, want byline true", blockVisibility)
 	}
+	// 用户裁定（2026-11-02）：Mote 二级标题 16px，只给 Mote。
+	if moteProfile["subheading_size"] != "16" {
+		t.Fatalf("mote subheading_size = %#v, want \"16\"", moteProfile["subheading_size"])
+	}
+	if err := validateArticleFooterDefaultsModule(aft); err != nil {
+		t.Fatalf("fbif default article_footer_defaults invalid: %v", err)
+	}
+	for _, bad := range []any{"40", "abc", "8"} {
+		mod := cloneJSONMap(t, aft)
+		mod["profiles"].([]any)[0].(map[string]any)["subheading_size"] = bad
+		if err := validateArticleFooterDefaultsModule(mod); err == nil {
+			t.Fatalf("subheading_size %#v should be rejected", bad)
+		}
+	}
 	for _, id := range []string{"ft-default-v1", "ft-series-v1", "foodtalks-series-default"} {
 		cfg := presetByID(id).Config
 		mods, _ := cfg["modules"].(map[string]any)
@@ -1591,4 +1605,17 @@ func TestRulePresetStoreDeleteFallsBackToAccountDefault(t *testing.T) {
 			}
 		})
 	}
+}
+
+func cloneJSONMap(t *testing.T, in map[string]any) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

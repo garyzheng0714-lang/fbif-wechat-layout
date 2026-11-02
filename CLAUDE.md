@@ -81,7 +81,7 @@
 10. **表单**：尺寸只填数字，不带 px/em；颜色用 color picker。
 11. **无 phone-frame**：文章直接在白底流动。
 12. **原创 DOCX 起点**：首个 `作者：` 行是正文起点，之前编辑材料默认隐藏。
-13. **Mote 署名**：默认 `behavior` 中 `Mote莫特/Mote 莫特` 触发参考来源上方固定署名图；公众号原创作者行 `#396FBC`、不斜体。
+13. **Mote 署名**：默认 `behavior` 中 `Mote莫特/Mote 莫特` 触发参考来源上方固定署名图；公众号原创作者行 `#396FBC`、不斜体。Mote 二级标题 16px（2026-11-02 用户裁定：「二级目录可以设置为16号字号」「序号1开始的」「只是mote」）：挂在「一、」下的「1. 2. 3.」「（一）」是二级，与网站同一套判定（`heading-detect.js` `headingLevels`），前面没有「一、」的那组序号仍是一级；字号挂在规则「文章默认方案 → Mote 作者默认」的「二级标题字号」（`subheading_size`），别的作者没设就不变，写进标题行内样式、复制进公众号后台照样 16px。
 14. **更多文章可选**：`enabled=false` 不渲染；`default_cards` 是新稿默认，单稿可换/删/排/裁。
 15. **更多文章选图**：`fetch-article-meta` 返回 `image_urls`；依次选卡片封面、抓取头图、该卡正文媒体，主稿图仅兜底；旧卡缺媒体按链接补抓。
 16. **图片说明不可拆**：`图片→图注→图片来源` 连续归图注；`图片来源/图源` 不得进正文或文章级来源。
@@ -121,6 +121,7 @@
 ## 守护索引
 
 - 2/32：`top-toolbar/account-switcher/auth-shell/import-progress-component/e2e-progress-component/editor-shell/e2e-paste-autoformat`；粘贴文字认 Markdown `tests/parser.test.mjs`（`buildClipboardArticleBlocks 认 Markdown`），补回列表记号 `tests/editor-shell.test.mjs`（`选中复制网页列表`）。
+- 13：Mote 二级标题 16px `tests/fbif-template.test.mjs`（`Mote 二级标题…`）、`api/rule_presets_test.go`（`subheading_size`）。
 - 9/23/25：`copy-behavior/uploader/wechat-draft-survival/copy-session/active-rule-selector`。
 - 19–24：`site-footer-parity/series-blocks-fidelity/foodtalks-site-config-flow/table-renderer-shared/foodtalks-site-docx`。
 - 26：`api/publish_duplicate_guard_test.go`、`api/publish_auto_publish_test.go`、`api/publish_mirror_retry_test.go`（搬图自动重试、失败过或超 24 小时不自动发布、失败任务列表）、`tests/admin-failed-jobs.test.mjs`；27/36：`tests/deploy-transaction.test.mjs`。
