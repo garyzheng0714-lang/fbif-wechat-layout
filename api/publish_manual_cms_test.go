@@ -303,10 +303,10 @@ func TestCMSPublicationSyncWaitFollowsTidalHours(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := cmsPublicationBusyHours(tc.now); got != tc.busy {
+			if got := defaultJobIntervals.cmsPeakWindow.contains(tc.now); got != tc.busy {
 				t.Fatalf("busy=%v, want %v", got, tc.busy)
 			}
-			if got := cmsPublicationSyncWait(tc.now); got != tc.want {
+			if got := defaultJobIntervals.cmsWait(tc.now); got != tc.want {
 				t.Fatalf("wait=%s, want %s", got, tc.want)
 			}
 		})

@@ -7,7 +7,7 @@ package main
 // 发之前先落「第几次」，每人发之前先落「什么时候开始发的」，发出后落回执，并带飞书去重键 uuid。
 // 飞书 uuid 只在一小时内去重：某人发出去却没拿到结果（连接中断、进程退出），50 分钟内带同一个 uuid 重发，
 // 过了就不再自动发，直接记死信等人确认（宁可漏一条周报，不让人收到两条）。
-// 失败每 30 分钟重试，最多 8 次（约 4 小时，当天就收尾）后记死信；换周时上一周还没发成的也收尾成死信。
+// 失败下一轮重试（EDIT_REPORT_CHECK_SECONDS，默认 30 分钟），最多 8 次（约 4 小时，当天就收尾）后记死信；换周时上一周还没发成的也收尾成死信。
 // 死信在监控里给 7 天 warning（周报不是发布链路，不算 P0）。
 // 没设接收人只记不发、也不读 FoodTalks；之后设了人，当周照样补发。
 // 只读 FoodTalks（每篇一次 GET，一周几十次），不改任何稿件。有手改的篇再用现在的规则重排一次（本地渲染服务，
@@ -33,7 +33,6 @@ const (
 	publishEditReportFile        = "publish-edit-report.json"
 	publishEditReportSendHour    = 10
 	publishEditReportMaxAttempts = 8
-	publishEditReportSweep       = 30 * time.Minute
 	publishEditReportKeepRecords = 104 // 两年；一条只有几百字节
 	// 飞书 uuid 去重期是一小时，留 10 分钟余量：没拿到结果的那次之后 50 分钟内才能带同一个 uuid 重发。
 	publishEditReportDedupWindow = 50 * time.Minute
@@ -598,7 +597,7 @@ func publishEditReportDelivered(rec publishEditReportRecord, owners []publishDis
 	return delivered > 0
 }
 
-// startPublishEditReport 独立后台循环，每 30 分钟看一次是否该发、要不要重试。
+// startPublishEditReport 独立后台循环，每 EDIT_REPORT_CHECK_SECONDS（默认 30 分钟）看一次是否该发、要不要重试。
 func (p *publishPipeline) startPublishEditReport() {
 	if p == nil || p.editReports == nil {
 		return
@@ -608,7 +607,7 @@ func (p *publishPipeline) startPublishEditReport() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			p.runScheduledPublishEditReport(ctx)
 			cancel()
-			time.Sleep(publishEditReportSweep)
+			time.Sleep(intervals.editReportCheck)
 		}
 	}()
 }

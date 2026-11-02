@@ -14,17 +14,10 @@ import (
 	"time"
 )
 
-const (
-	cmsSyncBusyStartHour   = 8
-	cmsSyncBusyStartMinute = 30
-	cmsSyncBusyEndHour     = 18
-	cmsSyncBusyInterval    = 2 * time.Minute
-	cmsSyncQuietInterval   = 30 * time.Minute
-	// 定时对账只看最近有动静的稿：生产上 24 次后台手工发布全在建单/发卡后 51 小时内，
-	// 而 7、8 月积压的待审稿每 2 分钟各调一次网站标题检索（/news/admin/news/page），
-	// 2026-10-12 网站侧反馈分页查询过多。更老的稿手工发布后用 ack-cms-published 补记。
-	cmsSyncLookback = 7 * 24 * time.Hour
-)
+// 定时对账只看最近有动静的稿：生产上 24 次后台手工发布全在建单/发卡后 51 小时内，
+// 而 7、8 月积压的待审稿每 2 分钟各调一次网站标题检索（/news/admin/news/page），
+// 2026-10-12 网站侧反馈分页查询过多。更老的稿手工发布后用 ack-cms-published 补记。
+const cmsSyncLookback = 7 * 24 * time.Hour
 
 func foodTalksAlreadyPublishedDraftError(err error) bool {
 	if err == nil {
@@ -168,51 +161,12 @@ func (p *publishPipeline) cmsPublicationSyncInterval() time.Duration {
 	if p != nil && p.cmsSyncInterval > 0 {
 		return p.cmsSyncInterval
 	}
-	return cmsPublicationSyncWait(pipelineNow(p))
+	return intervals.cmsWait(pipelineNow(p))
 }
 
-func cmsPublicationCST(now time.Time) time.Time {
-	return now.In(time.FixedZone("CST", 8*3600))
-}
-
-func cmsPublicationBusyHours(now time.Time) bool {
-	t := cmsPublicationCST(now)
-	minutes := t.Hour()*60 + t.Minute()
-	start := cmsSyncBusyStartHour*60 + cmsSyncBusyStartMinute
-	end := cmsSyncBusyEndHour * 60
-	return minutes >= start && minutes < end
-}
-
-func cmsPublicationSyncWait(now time.Time) time.Duration {
-	t := cmsPublicationCST(now)
-	interval := cmsSyncQuietInterval
-	if cmsPublicationBusyHours(t) {
-		interval = cmsSyncBusyInterval
-	}
-	if until := cmsPublicationNextWindow(t); until > 0 && until < interval {
-		return until
-	}
-	return interval
-}
-
-func cmsPublicationNextWindow(t time.Time) time.Duration {
-	y, m, d := t.Date()
-	loc := t.Location()
-	start := time.Date(y, m, d, cmsSyncBusyStartHour, cmsSyncBusyStartMinute, 0, 0, loc)
-	end := time.Date(y, m, d, cmsSyncBusyEndHour, 0, 0, 0, loc)
-	switch {
-	case t.Before(start):
-		return start.Sub(t)
-	case t.Before(end):
-		return end.Sub(t)
-	default:
-		return start.Add(24 * time.Hour).Sub(t)
-	}
-}
-
-// startCMSPublicationSync 后台把草稿公开后，群卡不会自己变。北京时间 8:30–18:00
-// 每 2 分钟对账一次，其余时间每 30 分钟；临近时段切换时提前醒来，避免睡过上班点。
-// 只对账最近 cmsSyncLookback 内建单或发过卡的稿。
+// startCMSPublicationSync 后台把草稿公开后，群卡不会自己变。时段里（CMS_RECONCILE_PEAK_WINDOW，默认北京时间
+// 8:30–18:00）每 CMS_RECONCILE_PEAK_SECONDS 对账一次，其余时间每 CMS_RECONCILE_QUIET_SECONDS（默认 2、30 分钟）；
+// 临近时段切换时提前醒来，避免睡过上班点。只对账最近 cmsSyncLookback 内建单或发过卡的稿。
 //
 // 这个死循环自己起 goroutine，不进发布 worker 池：放进池里会一直占一个 worker，
 // 退出时池子永远等不到它结束，每次部署重启都干等满 30 秒才退出（exit 1），

@@ -72,6 +72,9 @@ func main() {
 			log.Fatalf("运行配置 schema 不匹配：%v", err)
 		}
 	}
+	loaded, intervalsLine := loadJobIntervals(os.Getenv)
+	intervals = loaded
+	log.Printf("schedule: %s", intervalsLine)
 
 	mux := http.NewServeMux()
 	publicDir := *publicFlag

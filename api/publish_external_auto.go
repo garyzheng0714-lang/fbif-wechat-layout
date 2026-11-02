@@ -5,7 +5,7 @@ package main
 // 只对多维表格「平台账号」里勾了「自动外发」的号生效；其余账号仍只走审核卡按钮。
 // 各平台分开推（publish_external_lanes.go）：只推这篇还没推过的 auto 账号，推过的账号
 // 不论结果都不自动再推。任务落为已发布的同一次写入里记下待办（external_distribution_auto_pending），
-// 再由 runExternalAutoDistribution 消化：进程在两步之间重启也不会漏发，每 10 分钟兜底扫一次。
+// 再由 runExternalAutoDistribution 消化：进程在两步之间重启也不会漏发，每 AUTO_DISTRIBUTE_SECONDS（默认 10 分钟）兜底扫一次。
 //
 // 平台有每天的文章上限（头条号约 5 篇），超出会被拒绝，还会挤掉当天新稿，所以按账号各自配额推：
 //   - 新公开稿（publish）优先，每个账号每天（北京时间）不超过平台上限，人工按钮发的也计入；
@@ -31,9 +31,6 @@ const (
 	publishExternalAutoBackfillSpacing    = time.Hour
 	publishExternalAutoBackfillStartHour  = 9
 	publishExternalAutoBackfillEndHour    = 20
-	publishExternalAutoSweepInterval      = 10 * time.Minute
-	// publishExternalFollowInterval 发布中、平台审核中的 lane 多久 GET 一次：链接一出来，卡片一两分钟内就有。
-	publishExternalFollowInterval = time.Minute
 )
 
 var publishExternalAutoZone = time.FixedZone("CST", 8*3600)
@@ -64,8 +61,8 @@ func (p *publishPipeline) kickExternalAutoDistribution() {
 }
 
 // startExternalAutoDistribution 兜底循环：配额次日恢复、补发按间隔放行、读网站失败后的
-// 重试都靠它；顺带按幂等键向分发服务补查结果不明的草稿。另一个循环每分钟跟一次发布中、
-// 平台审核中的 lane（只读分发服务的记录），把文章链接带回卡片。
+// 重试都靠它；顺带按幂等键向分发服务补查结果不明的草稿。另一个循环每 DISTRIBUTION_FOLLOW_SECONDS（默认 1 分钟，
+// 链接一出来卡片一两分钟内就有）跟一次发布中、平台审核中的 lane（只读分发服务的记录），把文章链接带回卡片。
 // 独立 goroutine，不占发布 worker。
 func (p *publishPipeline) startExternalAutoDistribution() {
 	if p == nil {
@@ -75,13 +72,13 @@ func (p *publishPipeline) startExternalAutoDistribution() {
 		for {
 			p.runExternalAutoDistribution()
 			p.refreshExternalDistributionResults()
-			time.Sleep(publishExternalAutoSweepInterval)
+			time.Sleep(intervals.autoDistribute)
 		}
 	}()
 	go func() {
 		for {
 			p.followRobotLanes()
-			time.Sleep(publishExternalFollowInterval)
+			time.Sleep(intervals.distributionFollow)
 		}
 	}()
 }

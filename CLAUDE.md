@@ -144,6 +144,7 @@
 
 ## 运行/规则卫生
 
+- 后台循环多久跑一次只在 FBIF 中台总账本「定时任务和回调」改（2026-11-03 用户定，One-Api `docs/hub/轮询和定时任务.md`）：中台下发进 `/etc/fbif-hub/env/layout.env`，启动时读（`api/job_intervals.go`，启动日志 `schedule:` 一行列出现在按多少跑）；代码里的值只是没下发时的默认，和表里一样；不许写死、不许在 `.env`、规则库、管理后台另设一处。本文件写的「每 2 分钟」「每分钟」这类都是默认值。新加循环先在表里登记一行，再照这个文件加一个变量。
 - 只有 `main` 一个分支（2026-10-08 用户裁定）：禁止建分支/PR 分支，改动本地跑完 Go/Node 全测后直接提交推 `main`（即触发 deploy）。未合并的旧工作已存为 tag `archive/codex-unify-punctuation`、`archive/su-design-migration`。
 - 运行见 [README](README.md)。生产缺 `RULE_SUPER_ADMIN_OPEN_IDS` 必须启动失败；推 `main` 触发 deploy；四个入口（`/`、index/app/version）须 `no-cache`；改权限后验 `/api/me`。
 - 只写当前行为；偏好标来源/日期/状态。`behavior` 仅限署名/来源、Mote 图、原创/转载页脚，禁任意 JS。

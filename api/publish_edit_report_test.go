@@ -351,7 +351,7 @@ func TestEditReportRetriesThenDeadLetters(t *testing.T) {
 		t.Fatalf("部分失败应记 failed 并保留已发的：%+v", rec)
 	}
 	for i := 0; i < publishEditReportMaxAttempts+2; i++ {
-		env.now = env.now.Add(publishEditReportSweep) // 飞书明确拒收的不受一小时去重期限制，照常试满 8 次
+		env.now = env.now.Add(30 * time.Minute) // 飞书明确拒收的不受一小时去重期限制，照常试满 8 次
 		env.pipeline.runScheduledPublishEditReport(context.Background())
 	}
 	if len(env.sent) != 1 {
@@ -603,12 +603,12 @@ func TestEditReportUnconfirmedSendStopsAfterDedupWindow(t *testing.T) {
 	if rec := editReportRecord(t, env); rec.State != publishEditReportStateFailed || rec.Unconfirmed["ou_gary"] == "" || calls != 1 {
 		t.Fatalf("没拿到结果先记下时间，下一轮再试：%+v calls=%d", rec, calls)
 	}
-	env.now = env.now.Add(publishEditReportSweep)
+	env.now = env.now.Add(30 * time.Minute)
 	env.pipeline.runScheduledPublishEditReport(context.Background())
 	if calls != 2 {
 		t.Fatalf("30 分钟后还在飞书去重期内，可以带同一个 uuid 重发：calls=%d", calls)
 	}
-	env.now = env.now.Add(publishEditReportSweep)
+	env.now = env.now.Add(30 * time.Minute)
 	env.pipeline.runScheduledPublishEditReport(context.Background())
 	rec := editReportRecord(t, env)
 	if calls != 2 || rec.State != publishEditReportStateDeadLetter || !strings.Contains(rec.Error, "郑梽煌") || !strings.Contains(rec.Error, "去重期") {

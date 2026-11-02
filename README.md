@@ -319,6 +319,20 @@ curl http://127.0.0.1:9000/api/health
 
 FBIF 中台下发（2026-10-26 起）：`CLOUDCONVERT_API_KEY`、`FEISHU_LOGIN_APP_SECRET`、`PUBLISH_ADMIN_SERVICE_TOKEN`、`RENDER_TOKEN`、`DISTRIBUTION_API_TOKEN`、`FEISHU_APP_SECRET`、`FOODTALKS_TOKEN`、`HUB_KEY`、`PUBLISH_SYNC_SERVICE_TOKEN`、`TIKHUB_API_KEY` 这 10 个由中台本机代理写进 `/etc/fbif-hub/env/layout.env`，渲染服务的 `RENDER_TOKEN` 写进 `/etc/fbif-hub/env/render.env`（都是 root 0600）；systemd drop-in `zz-fbif-hub.conf` 让服务最后读它、同名为准。它们不写在 CI 和 `publish.env` 里；换值在内部工具服务器上 `hubctl put <编号>`，详见 FBIF-One-Api 的 `docs/hub/公共变量和密钥.md`。
 
+后台循环的间隔也由中台下发进同一个文件（2026-11-03 起），值来自总账本「定时任务和回调」，人在表里改「多久一次」，本机代理在重启时段（03:00–05:00）重启本服务后生效；没下发、看不懂都用默认，启动日志 `schedule:` 一行写现在按多少跑（`api/job_intervals.go`）：
+
+| 变量 | 总账本那一行 | 默认 |
+| --- | --- | --- |
+| `CMS_RECONCILE_PEAK_WINDOW` / `CMS_RECONCILE_PEAK_SECONDS` | 后台发布对账（白天） | `08:30-18:00`（北京时间，可跨零点，结束可以是 `24:00`）/ `120` |
+| `CMS_RECONCILE_QUIET_SECONDS` | 后台发布对账（其余时间） | `1800` |
+| `AUTO_DISTRIBUTE_SECONDS` | 自动分发 | `600` |
+| `DISTRIBUTION_FOLLOW_SECONDS` | 分发进度跟进（没有在途的不问分发服务） | `60` |
+| `EDIT_REPORT_CHECK_SECONDS` | 编辑周报检查 | `1800` |
+| `PLATFORMS_FALLBACK_SECONDS` | 平台限制兜底 | `21600` |
+| `TOKEN_REFRESH_CHECK_SECONDS` | 飞书登录续期（满 3 天换一次不变） | `3600` |
+
+秒数在 60 到 2592000 之间。
+
 环境变量的完整机器可读合同在 `deploy/config/env-schema.json`，无密钥示例分别对应流水线 API env、服务器 `publish.env`、renderer env 和两份中台文件（`hub-layout.env.example`、`hub-render.env.example`）。部署会在改写 live 路径前确认中台文件在、归 root、权限 600、是服务最后读的那份，两边 `RENDER_TOKEN` 一致；校验时把中台文件叠在后面（同名以它为准）查必填空值和 schema 版本，未知键、重复键只查主文件；验证器只输出变量名，不输出值。
 
 部署工作流还会使用 `SERVER_SSH_KEY`、`SERVER_KNOWN_HOSTS`、`SERVER_HOST`、`SERVER_USER`、`DEPLOY_PATH`、`RULE_SUPER_ADMIN_OPEN_IDS` 等 GitHub Secrets。`SERVER_KNOWN_HOSTS` 必须通过可信渠道取得并人工核验服务器公钥，内容采用 OpenSSH `known_hosts` 格式；工作流不会再用 `ssh-keyscan` 临时信任首次看到的主机。生产 `/var/www/api/publish.env` 还必须显式设置 `FEISHU_CALLBACK_MODE=websocket`（如确需 Webhook 才改为 `webhook`）。网页规则后台不再使用共享密码；不要把飞书、发布服务令牌、LibreOffice、CloudConvert 或服务器密钥提交到仓库。

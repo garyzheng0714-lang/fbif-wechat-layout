@@ -3,7 +3,7 @@ package main
 // distribution_platforms.go — 各第三方平台的限制，只在分发服务的平台文件里（分发框架边界 2，
 // docs/adr/2026-10-24-distribution-framework.md）：排版工具经 GET /v1/platforms 取，最后一次成功的存数据目录
 // distribution-platforms.json（distribution_accounts.go 的 distributionCache）。平台文件只在分发服务发版时变，
-// 所以只在启动时、中台配置包换了版本时（加号、换号）、用到时一份都没有时取，兜底 6 小时一次。
+// 所以只在启动时、中台配置包换了版本时（加号、换号）、用到时一份都没有时取，兜底每 PLATFORMS_FALLBACK_SECONDS（默认 6 小时）一次。
 // 这里只按取到的数推送前检查、在卡片和改稿页提示、给自动外发分名额、核对文章链接域名；正文写成什么标签由分发服务定。
 // 分发服务连不上就接着用上一份；从没取到过某个平台时卡片照常显示，推送在提交前失败（没检查过的不算通过）。
 
@@ -29,7 +29,6 @@ const (
 	titleCountChars     = "chars"
 	titleCountASCIIHalf = "ascii_half"
 
-	distributionPlatformsFallback = 6 * time.Hour
 	// distributionPlatformsRetry 一份都没有时，用到就取，但两次之间至少隔这么久（分发服务连不上时不追着问）。
 	distributionPlatformsRetry = 5 * time.Minute
 )
@@ -111,13 +110,13 @@ func kickDistributionPlatforms() {
 	}
 }
 
-// watchDistributionPlatforms 取平台限制的循环：有人请（kickDistributionPlatforms）就取，兜底 6 小时一次。
+// watchDistributionPlatforms 取平台限制的循环：有人请（kickDistributionPlatforms）就取，兜底每 PLATFORMS_FALLBACK_SECONDS 一次。
 func watchDistributionPlatforms(now bool) {
 	for {
 		if !now {
 			select {
 			case <-distributionPlatformsKick:
-			case <-time.After(distributionPlatformsFallback):
+			case <-time.After(intervals.platformsFallback):
 			}
 		}
 		now = false

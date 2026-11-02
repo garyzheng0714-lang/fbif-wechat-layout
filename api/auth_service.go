@@ -543,10 +543,10 @@ func (s *authService) markFeishuReauthRequired(user authUser, usedSeal, reason s
 // 飞书 refresh_token 约 7 天、只能用一次；会话却是 30 天滑动续期。后台保活在
 // 会话有效期内（30 天内用过）定期替用户轮换，用户就不会因为一周没用飞书功能
 // 而被要求重新授权。连续 30 天没用则停止保活，令牌随之自然过期。
+// 每 TOKEN_REFRESH_CHECK_SECONDS（默认 1 小时）看一次谁到期。
 const (
-	feishuTokenKeepAliveInterval = time.Hour
-	feishuTokenRotateAfter       = 3 * 24 * time.Hour
-	authLastSeenWriteInterval    = time.Hour
+	feishuTokenRotateAfter    = 3 * 24 * time.Hour
+	authLastSeenWriteInterval = time.Hour
 )
 
 func (s *authService) feishuTokenRotationDue(user authUser, now time.Time) bool {
@@ -637,7 +637,7 @@ func (s *authService) startFeishuTokenKeepAlive(paused func() bool) {
 					log.Printf("auth: 飞书授权保活 轮换=%d 需重新登录=%d", rotated, reauth)
 				}
 			}
-			timer.Reset(feishuTokenKeepAliveInterval)
+			timer.Reset(intervals.tokenRefreshCheck)
 		}
 	}()
 }
