@@ -152,13 +152,11 @@ func TestSourceCheckedAt(t *testing.T) {
 		renew  bool
 	}{
 		{"有年龄就从收到回包的时刻往回减", header("X-Hub-Source-Age", "90"), receivedAt.Add(-90 * time.Second), true},
-		{"年龄和校验不过同时来，以年龄为准", header("X-Hub-Source-Age", "30", "X-Hub-Stale", "validation"), receivedAt.Add(-30 * time.Second), true},
 		{"年龄不是数", header("X-Hub-Source-Age", "abc"), time.Time{}, false},
 		{"年龄是负的", header("X-Hub-Source-Age", "-5"), time.Time{}, false},
 		{"年龄是空的", header("X-Hub-Source-Age", ""), time.Time{}, false},
 		{"年龄大到减不出来", header("X-Hub-Source-Age", "99999999999"), time.Time{}, false},
-		{"老中台说校验不过", header("X-Hub-Stale", "validation"), time.Time{}, false},
-		{"老中台什么都没说", header(), receivedAt, true},
+		{"没带年龄", header(), time.Time{}, false},
 	}
 	for _, c := range cases {
 		got, renew := sourceCheckedAt(c.header, receivedAt)
@@ -207,9 +205,9 @@ func TestHubBundleUnheldRepliesRenewOnlyWhenSourceSynced(t *testing.T) {
 		t.Fatalf("来源同步恢复后照常认：%v %v", caller, e)
 	}
 	clock.Add(time.Minute)
-	ask(hubAnswer(http.StatusNotModified, "X-Hub-Stale", "validation"), hubAnswered)
+	ask(hubAnswer(http.StatusNotModified), hubAnswered)
 	if snap := client.LayoutCallers(clock.Now()); !snap.CheckedAt.Equal(synced) {
-		t.Fatalf("没有年龄、中台说校验不过，不续：%v", snap.CheckedAt)
+		t.Fatalf("回包没带年龄，不续：%v", snap.CheckedAt)
 	}
 }
 

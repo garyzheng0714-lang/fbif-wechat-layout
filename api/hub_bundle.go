@@ -101,20 +101,13 @@ func (c *hubBundleClient) noteSource(header http.Header, receivedAt time.Time) {
 }
 
 // sourceCheckedAt 这份内容最近一次被来源同步确认的时刻。中台给的是秒数（X-Hub-Source-Age）不是时刻，
-// 从本机收到回包的时刻往回减，两台机器的钟差不进来。读不懂就不续。
-// 不带秒数的老中台：说了校验不过（X-Hub-Stale）不续，否则按收到回包的时刻算。
+// 从本机收到回包的时刻往回减，两台机器的钟差不进来。没带或读不懂就不续。
 func sourceCheckedAt(header http.Header, receivedAt time.Time) (time.Time, bool) {
-	if values := header.Values("X-Hub-Source-Age"); len(values) > 0 {
-		seconds, err := strconv.ParseInt(values[0], 10, 64)
-		if err != nil || seconds < 0 || seconds > math.MaxInt64/int64(time.Second) {
-			return time.Time{}, false
-		}
-		return receivedAt.Add(-time.Duration(seconds) * time.Second), true
-	}
-	if header.Get("X-Hub-Stale") != "" {
+	seconds, err := strconv.ParseInt(header.Get("X-Hub-Source-Age"), 10, 64)
+	if err != nil || seconds < 0 || seconds > math.MaxInt64/int64(time.Second) {
 		return time.Time{}, false
 	}
-	return receivedAt, true
+	return receivedAt.Add(-time.Duration(seconds) * time.Second), true
 }
 
 func (c *hubBundleClient) say(note string) {

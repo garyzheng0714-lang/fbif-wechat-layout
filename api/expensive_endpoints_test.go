@@ -118,6 +118,19 @@ func TestCloudConvertFallbackRequiresExplicitCredential(t *testing.T) {
 	}
 }
 
+// TestCloudConvertPollBacksOff 等 CloudConvert 转完越问越慢：从 1 秒起翻倍，到 8 秒封顶，之后一直 8 秒。
+func TestCloudConvertPollBacksOff(t *testing.T) {
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 8 * time.Second, 8 * time.Second}
+	for i, w := range want {
+		if got := cloudConvertPollDelay(i + 1); got != w {
+			t.Fatalf("第 %d 次问完隔 %v，要 %v", i+1, got, w)
+		}
+	}
+	if got := cloudConvertPollDelay(1000); got != 8*time.Second {
+		t.Fatalf("问了很多次也不超过 8 秒：%v", got)
+	}
+}
+
 func TestRequestCostGuardEnforcesRateAndConcurrency(t *testing.T) {
 	guard := newRequestCostGuard(1, time.Minute, 1)
 	now := time.Unix(100, 0)

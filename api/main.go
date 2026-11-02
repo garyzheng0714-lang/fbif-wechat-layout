@@ -1904,6 +1904,17 @@ func registerChannelRoutes(mux *http.ServeMux, publicDir string) {
 	mux.HandleFunc("GET /ft/{packId}", serveSite)
 }
 
+// cloudConvertPollDelay 第 attempt 次问 CloudConvert 还没转完，隔多久再问：1、2、4、8 秒，之后每 8 秒。
+// 转一份 .doc 通常几秒，用户开着页面在等，上限取 8 秒：比实际转完最多晚 8 秒拿到，120 秒里最多问十几次。
+func cloudConvertPollDelay(attempt int) time.Duration {
+	const first, most = time.Second, 8 * time.Second
+	delay := first
+	for i := 1; i < attempt && delay < most; i++ {
+		delay *= 2
+	}
+	return min(delay, most)
+}
+
 // cloudConvertDocToDocx drives a CloudConvert job: create → upload → poll → download.
 // Returns the converted .docx bytes.
 func cloudConvertDocToDocx(ctx context.Context, apiKey string, docBytes []byte, filename string) ([]byte, error) {
@@ -2002,7 +2013,7 @@ func cloudConvertDocToDocx(ctx context.Context, apiKey string, docBytes []byte, 
 	// 3) Poll job until finished, errored, or the request context expires.
 	var exportURL string
 pollLoop:
-	for {
+	for attempt := 1; ; attempt++ {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -2070,7 +2081,7 @@ pollLoop:
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(1 * time.Second):
+		case <-time.After(cloudConvertPollDelay(attempt)):
 		}
 	}
 	if exportURL == "" {

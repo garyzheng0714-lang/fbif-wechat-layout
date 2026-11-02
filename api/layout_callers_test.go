@@ -23,14 +23,14 @@ func TestHubBundleClientReadsLayoutCallers(t *testing.T) {
 		t.Fatalf("开机还没拿到：%+v", snap)
 	}
 	snap := ask(hubAnswerBody(http.StatusOK, `{"version":5,"items":{"platform_accounts":[],"api_callers":[
-		{"code":"recCaller","name":"选题助手","owner":"李四","status":"在用","key_sha256":"ab12"}]}}`, "ETag", `"layout-v5"`))
+		{"code":"recCaller","name":"选题助手","owner":"李四","status":"在用","key_sha256":"ab12"}]}}`, "ETag", `"layout-v5"`, "X-Hub-Source-Age", "0"))
 	if !snap.Present || len(snap.Rows) != 1 || snap.Rows[0].Code != "recCaller" || snap.Rows[0].KeySHA256 != "ab12" || snap.Generation != 1 || snap.CheckedAt.IsZero() {
 		t.Fatalf("第一次拿全量：%+v", snap)
 	}
-	if again := ask(hubAnswer(http.StatusNotModified)); !again.Present || len(again.Rows) != 1 || again.Generation != 1 || again.CheckedAt.Before(snap.CheckedAt) {
+	if again := ask(hubAnswer(http.StatusNotModified, "X-Hub-Source-Age", "0")); !again.Present || len(again.Rows) != 1 || again.Generation != 1 || again.CheckedAt.Before(snap.CheckedAt) {
 		t.Fatalf("304 沿用上一份：%+v", again)
 	}
-	missing := ask(hubAnswerBody(http.StatusOK, `{"version":6,"items":{"platform_accounts":[]}}`, "ETag", `"layout-v6"`))
+	missing := ask(hubAnswerBody(http.StatusOK, `{"version":6,"items":{"platform_accounts":[]}}`, "ETag", `"layout-v6"`, "X-Hub-Source-Age", "0"))
 	if missing.Present || len(missing.Rows) != 0 || missing.Generation != 2 {
 		t.Fatalf("包里没有接口调用方这一项要说没有：%+v", missing)
 	}
