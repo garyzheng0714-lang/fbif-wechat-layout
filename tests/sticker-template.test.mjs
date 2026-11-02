@@ -57,6 +57,34 @@ test('原文段间没有空行：贴图照样每段空一行', () => {
   assert.equal(out.text, NO_BLANK_SAMPLE.join('\n\n'));
 });
 
+// 2026-11-02 用户（Mote 展商贴图）：「时间和地点这2处不分行」——📅 日期、📍 地点两行连着，前后照常空一行。
+const EVENT_SAMPLE = [
+  '在哪里一次喝齐这一冰柜的颜色呢？',
+  '来f展（FBIF食品创新展）🎉',
+  '📅 2027年4月21-23日',
+  '📍 杭州国际博览中心一期（萧山区奔竞大道353号）',
+  '欢迎免费报名观展！',
+  '维果清展位：1D-62（1楼，绿的红的黄的，都给你冰好了！）',
+];
+const EVENT_LINES = [
+  EVENT_SAMPLE[0], '', EVENT_SAMPLE[1], '', EVENT_SAMPLE[2], EVENT_SAMPLE[3], '', EVENT_SAMPLE[4], '', EVENT_SAMPLE[5],
+];
+
+test('活动的时间、地点两行连着不空行：原文段间有没有空行都一样，前后照常空一行', () => {
+  for (const text of [EVENT_SAMPLE.join('\n'), EVENT_SAMPLE.join('\n\n')]) {
+    const out = pasted(text);
+    assert.equal(out.html, shape(EVENT_LINES));
+    assert.equal(out.text, EVENT_LINES.join('\n'));
+  }
+});
+
+test('时间、地点写成「时间：」「地点：」或列表，几种日历、时钟、图钉也一样连着', async () => {
+  assert.equal(pasted('来f展\n时间：4月21日\n地点：杭州\n欢迎').text, '来f展\n\n时间：4月21日\n地点：杭州\n\n欢迎');
+  assert.equal(pasted('🗓️ 4月21日\n⏰ 9:00-17:00\n📌 杭州').text, '🗓️ 4月21日\n⏰ 9:00-17:00\n📌 杭州');
+  const { clipboard } = await sticker.processMd('来f展\n\n- 日期：4月21日\n- 地址：杭州\n\n欢迎');
+  assert.equal(clipboard.text, '来f展\n\n• 日期：4月21日\n• 地址：杭州\n\n欢迎');
+});
+
 test('几个空行、只有空格的行、Windows 换行、首尾空行：段间都是一个空行，开头结尾不出空行', () => {
   const out = pasted('\r\n\r\n  甲。  \r\n\r\n\r\n   \r\n　　\r\n \r\n乙。\r\n丙。\r\n\r\n\r\n');
   assert.equal(out.html, '<p>甲。<br><br>乙。<br><br>丙。</p>');

@@ -4,9 +4,9 @@
 //
 // 行（lines）：string[]，'' 是空行。段与段之间一律空一行，原文有没有空行都一样（2026-10-29 老板：「贴图默认
 // 要确保它要有一行空白」；飞书、Word 复制的纯文字段间只有一个换行）；段内换行（Word 软换行、<br>）与表格各行
-// 只换行；开头结尾不出空行，也不连出两个空行。加粗、颜色只留字；链接只留链到公众号文章的（贴图编辑器只认这种，
-// 粘进去变成文章链接；别的网址它只留字），其余只留字；图片、视频丢掉。没有标题、署名、目录、页脚、更多文章、
-// 底部区块。标点照公众号口径转换。
+// 只换行；活动的时间、地点几行连着、不空行（EVENT_INFO_LINE）；开头结尾不出空行，也不连出两个空行。加粗、
+// 颜色只留字；链接只留链到公众号文章的（贴图编辑器只认这种，粘进去变成文章链接；别的网址它只留字），其余只留字；
+// 图片、视频丢掉。没有标题、署名、目录、页脚、更多文章、底部区块。标点照公众号口径转换。
 // 预览与复制是同一个 <p>…</p>；预览外观在 app.css 的 #contentArea[data-template="sticker"]，不进剪贴板。
 // 与其他渲染器物理隔离（红线 #19）：只 import engine 导出与中性的 docx-article-model。
 
@@ -93,6 +93,11 @@ function tableLines(elem) {
 
 const separator = () => [BLANK];
 
+// 活动的时间、地点行（2026-11-02 用户，Mote 展商贴图：「时间和地点这2处不分行」）：以日历、时钟、图钉开头
+// （📅📆🗓⏰⌚🕐–🕧📍📌），或写「时间：」「日期：」「地点：」「地址：」；连着的这几行之间不空行，前后照常空一行。
+const EVENT_INFO_LINE = /^(?:•\s*)?(?:[\u{1F4C5}\u{1F4C6}\u{1F5D3}\u{23F0}\u{231A}\u{1F550}-\u{1F567}\u{1F4CD}\u{1F4CC}]|(?:时间|日期|地点|地址)\s*[:：])/u;
+const isEventInfo = line => EVENT_INFO_LINE.test(line.text);
+
 // 块种类 → 几行字。旧写法 p/image/blockquote 同新写法；不认识的块当空行。
 const LINES_BY_KIND = {
   txt: blockLines,
@@ -115,7 +120,7 @@ function stickerLines(elems) {
     let blank = true;
     for (const line of (LINES_BY_KIND[elem.k] || separator)(elem)) {
       if (!line) { blank = true; continue; }
-      if (blank && lines.length) lines.push(BLANK);
+      if (blank && lines.length && !(isEventInfo(lines[lines.length - 1]) && isEventInfo(line))) lines.push(BLANK);
       blank = false;
       lines.push(line);
     }
