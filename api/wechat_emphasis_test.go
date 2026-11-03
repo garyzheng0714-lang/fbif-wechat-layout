@@ -88,6 +88,22 @@ func TestTeaHistoryKeepsInlineEmphasisAndTightLines(t *testing.T) {
 	}
 }
 
+func TestDecorativeWhiteIsNotKept(t *testing.T) {
+	html := jsContentWrap(`<p>` +
+		`<span style="font-size:15px;color:#544545">问</span>` +
+		`<span style="color:#ffffff;font-size:15px">：</span>` +
+		`<span style="font-size:15px;color:#544545">答</span>` +
+		`</p>`)
+	_, blocks, _ := extractArticleBlocks(html)
+	if len(blocks) != 1 {
+		t.Fatalf("应是一段，got %#v", blocks)
+	}
+	colon := runContaining(t, &blocks[0], "：")
+	if colon.Color != "" || colon.Text != "：" {
+		t.Fatalf("白字装饰应回到普通正文色，got %+v", colon)
+	}
+}
+
 func TestSoftBreakStaysInsideTheParagraph(t *testing.T) {
 	html := jsContentWrap(`<p><span style="font-size:15px;color:#544545">甲</span><br><span style="font-size:15px;color:#544545">乙</span></p>`)
 	_, blocks, _ := extractArticleBlocks(html)

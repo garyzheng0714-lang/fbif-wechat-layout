@@ -752,7 +752,9 @@ func (w *blockWalker) makeTextRun(cur *blockCtx, text string, style computedStyl
 		return run
 	}
 	if style.ColorSet {
-		run.Color = style.Color
+		if c := emphasisColor(style.Color); c != "" {
+			run.Color = c
+		}
 	}
 	if style.FontSizeSet && style.FontSize > 0 {
 		run.FontSize = int(style.FontSize + 0.5)
@@ -1682,13 +1684,28 @@ func emphasizeAgainstBody(blocks []Block) {
 			}
 		}
 	}
+	colorTotal := plainColor
+	for _, n := range colorVotes {
+		colorTotal += n
+	}
 	bodyColor := ""
-	if plainColor == 0 {
-		bodyColor = majorityString(colorVotes)
+	if colorTotal > 0 {
+		candidate := majorityString(colorVotes)
+		// 占全文过半的颜色是正文色。没写颜色的片段（含丢掉的白字）不因此把正文色留在每一段上。
+		if colorVotes[candidate]*2 > colorTotal {
+			bodyColor = candidate
+		}
+	}
+	sizeTotal := plainSize
+	for _, n := range sizeVotes {
+		sizeTotal += n
 	}
 	bodySize := 0
-	if plainSize == 0 {
-		bodySize = majorityInt(sizeVotes)
+	if sizeTotal > 0 {
+		candidate := majorityInt(sizeVotes)
+		if sizeVotes[candidate]*2 > sizeTotal {
+			bodySize = candidate
+		}
 	}
 	strip := func(runs []Run) {
 		for i := range runs {
@@ -1718,6 +1735,28 @@ func majorityString(votes map[string]int) string {
 		}
 	}
 	return best
+}
+
+// emphasisColor 丢掉贴在白底上读不清的浅色。公众号常用白字叠在色块上做装饰，
+// 色块本身不会进正文，白字若留下来，在网站和公众号复制层都会消失。
+func emphasisColor(hex string) string {
+	if len(hex) != 6 {
+		return ""
+	}
+	channels := [3]int64{}
+	for i := 0; i < 3; i++ {
+		n, err := strconv.ParseInt(hex[i*2:i*2+2], 16, 0)
+		if err != nil {
+			return ""
+		}
+		channels[i] = n
+	}
+	for _, n := range channels {
+		if n < 230 {
+			return hex
+		}
+	}
+	return ""
 }
 
 func majorityInt(votes map[int]int) int {
