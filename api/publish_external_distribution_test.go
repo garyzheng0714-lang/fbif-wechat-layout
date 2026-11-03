@@ -638,3 +638,24 @@ func TestYunsuoLegacyLanesOnlyDisplay(t *testing.T) {
 		t.Fatalf("云梭旧 lane 恢复时不推：%d", len(robot.saves))
 	}
 }
+
+// 2026-11-03 #338：头条号正在存草稿时管理员接着补百家号，卡片版本含头条号的进度、一直在变，被当成旧卡片拦下。
+// 卡片点的照旧核卡片版本；管理员替人点的没有卡片，不核。
+func TestAdminSyncIgnoresCardVersion(t *testing.T) {
+	setTestExternalAccounts(t, testArticleAccount(testToutiaoAccountID, "toutiao", false), testArticleAccount(testBaijiaAccountID, "baijiahao", false))
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	env := newPublishTestEnv(t)
+	robot := useFakeRobot(env)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	only := map[string]bool{testBaijiaAccountID: true}
+	if _, err := env.pipeline.queueExternalDistribution(job.ID, "ou_reviewer_1", "distribution-v1:旧卡", externalQueueCard, only); err == nil ||
+		!strings.Contains(err.Error(), "已过期") {
+		t.Fatalf("卡片上点的旧卡要拦：%v", err)
+	}
+	if _, err := env.pipeline.syncExternalAccountAsAdmin(job.ID, testBaijiaAccountID); err != nil {
+		t.Fatalf("管理员替人点不核卡片版本：%v", err)
+	}
+	if fmt.Sprint(robot.platforms) != "[baijiahao]" {
+		t.Fatalf("只推百家号：%v", robot.platforms)
+	}
+}

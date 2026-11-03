@@ -334,7 +334,8 @@ func (p *publishPipeline) requestExternalDistribution(jobID int64, actor, expect
 const publishExternalAdminSyncActor = "system:admin_sync"
 
 // syncExternalAccountAsAdmin 管理员替人点卡片上这个号的「同步至X」「重新同步至X」（2026-11-03）：运维和助手点不了
-// 飞书卡片。和卡片按钮同一段受理（卡片模式、只推这一个号、按现在的卡片版本），已在平台上、正在同步的不重复同步。
+// 飞书卡片。和卡片按钮同一段受理（卡片模式、只推这一个号），已在平台上、正在同步的不重复同步。不带卡片，所以不核卡片版本：
+// 卡片版本含别的号的进度，别的号正在发时它一直在变（2026-11-03 #338 头条号在存草稿，接着补百家号被当成旧卡片拦下）。
 func (p *publishPipeline) syncExternalAccountAsAdmin(jobID int64, accountID string) (publishJob, error) {
 	job, err := p.store.byID(jobID)
 	if err != nil {
@@ -351,7 +352,7 @@ func (p *publishPipeline) syncExternalAccountAsAdmin(jobID int64, accountID stri
 	if lane, ok := externalLaneFor(job, target.ID); ok && !externalLaneCanSafeRetry(lane) {
 		return job, fmt.Errorf("%s%s，不会重复同步", target.label(), externalPlatformStatus(job, target).Status)
 	}
-	return p.queueExternalDistribution(jobID, publishExternalAdminSyncActor, publishExternalDistributionCardVersion(job), externalQueueCard,
+	return p.queueExternalDistribution(jobID, publishExternalAdminSyncActor, "", externalQueueCard,
 		map[string]bool{target.ID: true})
 }
 
@@ -441,7 +442,9 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	if strings.TrimSpace(actor) == "" {
 		return job, errors.New("外部分发必须由审核人从飞书卡片确认原创后发起")
 	}
-	if mode == externalQueueCard && !externalDistributionVersionMatches(expectedVersion, job) {
+	// 从卡片点的要核对卡片版本（防点旧卡）；管理员替人点的没有卡片（syncExternalAccountAsAdmin），不核。
+	cardVersioned := mode == externalQueueCard && actor != publishExternalAdminSyncActor
+	if cardVersioned && !externalDistributionVersionMatches(expectedVersion, job) {
 		return job, errors.New("分发卡片已过期，请使用最新卡片")
 	}
 	if job.Stage != publishStagePublished {
@@ -555,7 +558,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			current.FoodTalksNewsID != job.FoodTalksNewsID || current.FoodTalksNewsID <= 0 {
 			return false
 		}
-		if mode == externalQueueCard && !externalDistributionVersionMatches(expectedVersion, current) {
+		if cardVersioned && !externalDistributionVersionMatches(expectedVersion, current) {
 			return false
 		}
 		for _, lane := range lanes {
