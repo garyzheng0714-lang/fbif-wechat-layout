@@ -1018,7 +1018,8 @@
           "type": "txt",
           "text": "* 转载请在后台回复“转载”了解规则；"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",

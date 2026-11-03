@@ -28,6 +28,10 @@
             "text": {
               "description": "纯文字。小标题、图注只用它；段落一般用 runs，没有 runs 时才看它",
               "type": "string"
+            },
+            "tightBefore": {
+              "description": "只在抓网页原文（公众号、FoodTalks 已发布稿）时出现：这段和上一段都是文字，原文上紧挨着（上一段段后距、这段段前距写明是 0，中间没空段），像一列短句。FoodTalks 两段之间不垫空段，公众号、头条号、百家号不管",
+              "type": "boolean"
             }
           },
           "required": [
@@ -139,6 +143,10 @@
                 "$ref": "#/$defs/run"
               },
               "type": "array"
+            },
+            "tightBefore": {
+              "description": "只在抓网页原文（公众号、FoodTalks 已发布稿）时出现：这段和上一段都是文字，原文上紧挨着（上一段段后距、这段段前距写明是 0，中间没空段），像一列短句。FoodTalks 两段之间不垫空段，公众号、头条号、百家号不管",
+              "type": "boolean"
             }
           },
           "required": [
@@ -165,6 +173,10 @@
                 "$ref": "#/$defs/run"
               },
               "type": "array"
+            },
+            "tightBefore": {
+              "description": "只在抓网页原文（公众号、FoodTalks 已发布稿）时出现：这段和上一段都是文字，原文上紧挨着（上一段段后距、这段段前距写明是 0，中间没空段），像一列短句。FoodTalks 两段之间不垫空段，公众号、头条号、百家号不管",
+              "type": "boolean"
             }
           },
           "required": [

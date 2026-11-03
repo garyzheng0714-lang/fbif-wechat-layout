@@ -1627,7 +1627,8 @@
           "type": "txt",
           "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "img",

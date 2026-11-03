@@ -86,7 +86,7 @@
 15. **更多文章选图**：`fetch-article-meta` 返回 `image_urls`；依次选卡片封面、抓取头图、该卡正文媒体，主稿图仅兜底；旧卡缺媒体按链接补抓。
 16. **图片说明不可拆**：`图片→图注→图片来源` 连续归图注；`图片来源/图源` 不得进正文或文章级来源。
 17. **URL 署名（2026-09-01 用户裁定）**：来源/出处/出品、作者/撰文/撰稿/文、编辑/责编兼容中英文冒号与 `/|｜`；转载稿归一后在正文开头只渲染一次，原创稿仍在“提示：”前只渲染一次；来源、作者、编辑依次独立成行（有值才显示）。正文来源优先，否则用 `source_name`；禁将 `byline` 补成作者。署名公众号蓝、1.75 行高、常规字形、连续行无额外空行；传递链保留 `source_name`。
-18. **DOCX 空段语义**：用空行分段的稿（长段之间过半空了一行，如莫特、「什么是」系列）连续正文按 Word 小段距紧凑，仅原文空段使下一段恢复 `wx-gap`；靠段距分段的稿（长段之间基本不空行，飞书、Word 里每段自带段距）每段都留 `wx-gap`，列表与 contextualSpacing 同样式仍紧凑（2026-11-02 EZ 豆腐稿飞书导入后段落挤成一团）。粘贴的纯文字同一判定，只在 `paragraph-breaks.js`。
+18. **DOCX 空段语义**：用空行分段的稿（长段之间过半空了一行，如莫特、「什么是」系列）连续正文按 Word 小段距紧凑，仅原文空段使下一段恢复 `wx-gap`；靠段距分段的稿（长段之间基本不空行，飞书、Word 里每段自带段距）每段都留 `wx-gap`，列表与 contextualSpacing 同样式仍紧凑（2026-11-02 EZ 豆腐稿飞书导入后段落挤成一团）。粘贴的纯文字同一判定，只在 `paragraph-breaks.js`。公众号原文里紧挨着的几段（一列短句、对仗句，原文写明段前段后距都是 0、中间没空段），FoodTalks 也排紧、不垫空段（2026-11-03 #338，用户：「原文行间距比较矮，FoodTalks同步时也保持一样的行间距」）：抓原文时记在块的 `tightBefore`（`api/wechat_spacing.go`），没写段距的 `<p>`、外层留白、空格段、并排两栏都不算紧贴；整篇长段之间也大多紧贴的一处都不认；公众号、头条号、百家号不读它。
 19. **渠道物理隔离**：FoodTalks 渲染器、behavior、页脚、署名与公众号分离，双方渲染器禁互相 import；网站署名 `#888`、14px、斜体；改网站时 `templates/fbif.js` 字节不动。
 20. **网站页脚**：完整输出 `tip/biz_coop/join_group/follow_account/logo/more_info`；主路径 `bottom_blocks.rich_html`，`fbif_footer+buildFooterHtml` 仅等字节回退。单稿只用 `site-footer-state.js` override；规则未就绪禁本地写；换图写 `overrides[seg].fields` 并保留 `{{asset#id}}`。
 21. **网站默认包**：`site.html` 用 `getRulePackByPath(location.pathname)`；任意 `/ft/<id>` fallback 到 `ft-default`（`foodtalks-site`），禁裸用 `parsed.packId` 回落公众号。
@@ -120,7 +120,7 @@
 
 ## 守护索引
 
-- 18：靠段距分段每段留空 `tests/{docx-article-model,fbif-template,foodtalks-series-render,parser}.test.mjs`（`整篇靠什么分段`、`docx 靠段距分段`、`靠段距分段的稿`、`飞书、Word 复制的纯文字`）。
+- 18：靠段距分段每段留空 `tests/{docx-article-model,fbif-template,foodtalks-series-render,parser}.test.mjs`（`整篇靠什么分段`、`docx 靠段距分段`、`靠段距分段的稿`、`飞书、Word 复制的纯文字`）。原文紧挨着的 FoodTalks 也排紧：`api/wechat_spacing_test.go`、`tests/render-service-site.test.mjs`（`原文紧挨着的一列短句照原文排紧`）。
 - 2/32：`top-toolbar/account-switcher/auth-shell/import-progress-component/e2e-progress-component/editor-shell/e2e-paste-autoformat`；粘贴文字认 Markdown `tests/parser.test.mjs`（`buildClipboardArticleBlocks 认 Markdown`），补回列表记号 `tests/editor-shell.test.mjs`（`选中复制网页列表`）。
 - 13：Mote 二级标题 16px `tests/fbif-template.test.mjs`（`Mote 二级标题…`）、`api/rule_presets_test.go`（`subheading_size`）。
 - 9/23/25：`copy-behavior/uploader/wechat-draft-survival/copy-session/active-rule-selector`。

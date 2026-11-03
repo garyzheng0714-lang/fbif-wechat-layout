@@ -410,17 +410,23 @@ type blockWalker struct {
 	blocks             []Block
 	observed           []ObservedBlock
 	pendingBlankBefore bool
-	captionIndex       *captionDOMIndex
+	// spaceSinceLast 上一块之后原文留没留出竖向间距（段距、空格段、分隔线），见 wechat_spacing.go。
+	spaceSinceLast bool
+	// sideBySide 正在几层左右并排的容器里（flex、grid、表格排布），里面的段不算上下紧贴。
+	sideBySide   int
+	captionIndex *captionDOMIndex
 }
 
 type blockCtx struct {
-	node      *html.Node
-	tag       string
-	classes   []string
-	style     computedStyle
-	runs      []Run
-	hadBreak  bool
-	hrefStack []string
+	node     *html.Node
+	tag      string
+	classes  []string
+	style    computedStyle
+	runs     []Run
+	hadBreak bool
+	// hadBlankText 只有不间断空格、全角空格的一段，公众号上是一个空行。
+	hadBlankText bool
+	hrefStack    []string
 	// computed style at each text node; WeChat commonly puts visual styling on
 	// an inner span rather than the enclosing block.
 	textStyles []computedStyle
@@ -449,6 +455,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			return
 		}
 		if cur.runs == nil && strings.TrimSpace(n.Data) == "" {
+			cur.hadBlankText = cur.hadBlankText || hasBlankLineText(n.Data)
 			return
 		}
 		cur.runs = append(cur.runs, w.makeTextRun(cur, n.Data, inherited))
@@ -527,11 +534,21 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 		nodeStyle := parseInlineStyle(getAttr(n, "style"))
 		merged := mergeStyle(inherited, nodeStyle)
 
+		if tag == "hr" || tag == "svg" {
+			w.spaceSinceLast = true
+		}
 		if isBlockTag(tag) {
 			if cur != nil && hasContent(cur.runs) {
 				w.emit(cur)
 				cur.runs = nil
 				cur.textStyles = nil
+			}
+			if boxLeavesSpace(n, tag, true) {
+				w.spaceSinceLast = true
+			}
+			sideBySide := laysOutSideBySide(n)
+			if sideBySide {
+				w.sideBySide++
 			}
 			child := &blockCtx{
 				node:    n,
@@ -544,10 +561,30 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			}
 			w.walkChildren(n, child, merged)
 			w.emit(child)
+			if sideBySide {
+				w.sideBySide--
+			}
+			if boxLeavesSpace(n, tag, false) {
+				w.spaceSinceLast = true
+			}
 			return
 		}
 
+		box := isBoxElement(n)
+		if box && boxLeavesSpace(n, tag, true) {
+			w.spaceSinceLast = true
+		}
+		sideBySide := box && laysOutSideBySide(n)
+		if sideBySide {
+			w.sideBySide++
+		}
 		w.walkChildren(n, cur, merged)
+		if sideBySide {
+			w.sideBySide--
+		}
+		if box && boxLeavesSpace(n, tag, false) {
+			w.spaceSinceLast = true
+		}
 		return
 	}
 
@@ -674,6 +711,9 @@ func (w *blockWalker) emit(cx *blockCtx) {
 	if !hasContent(runs) {
 		if cx.hadBreak && len(w.blocks) > 0 {
 			w.pendingBlankBefore = true
+		}
+		if cx.hadBreak || cx.hadBlankText {
+			w.spaceSinceLast = true
 		}
 		return
 	}
@@ -905,7 +945,10 @@ func (w *blockWalker) appendObservedBlock(b Block, obs ObservedBlock) {
 	if w.pendingBlankBefore && len(w.blocks) > 0 {
 		b.BlankBefore = true
 	}
+	b.TightBefore = !b.BlankBefore && !w.spaceSinceLast && w.sideBySide == 0 && len(w.blocks) > 0 &&
+		isTightTextKind(b.K) && isTightTextKind(w.blocks[len(w.blocks)-1].K)
 	w.pendingBlankBefore = false
+	w.spaceSinceLast = false
 	w.blocks = append(w.blocks, b)
 	obs.Index = len(w.observed)
 	obs.BaseBlock = b
@@ -1541,6 +1584,7 @@ func defaultRoleDecisionGroup(obs ObservedBlock, role string) string {
 }
 
 func blocksFromRoleDecisions(decisions []RoleDecision) []Block {
+	keepSourceTightness(decisions)
 	out := make([]Block, 0, len(decisions))
 	for _, d := range decisions {
 		out = append(out, d.Block)

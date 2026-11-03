@@ -25,6 +25,7 @@ type Block struct {
 	Poster      string        `json:"poster,omitempty" doc:"视频封面图地址"`
 	BlankBefore bool          `json:"blankBefore,omitempty" doc:"原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管"`
 	Compact     bool          `json:"compact,omitempty" doc:"只在浏览器粘贴纯文本时出现：每行一段，段间不留公众号段距（除非 blankBefore）；整篇长段之间基本不空行（飞书、Word 复制）时每段都不排紧"`
+	TightBefore bool          `json:"tightBefore,omitempty" doc:"只在抓网页原文（公众号、FoodTalks 已发布稿）时出现：这段和上一段都是文字，原文上紧挨着（上一段段后距、这段段前距写明是 0，中间没空段），像一列短句。FoodTalks 两段之间不垫空段，公众号、头条号、百家号不管"`
 }
 
 type TableCell struct {
@@ -69,7 +70,7 @@ type articleBlockKind struct {
 }
 
 var articleBlockKinds = []articleBlockKind{
-	{K: "txt", Name: "段落", Fields: []string{"runs", "text", "blankBefore", "compact"},
+	{K: "txt", Name: "段落", Fields: []string{"runs", "text", "blankBefore", "compact", "tightBefore"},
 		Meaning: "正文段落。所有字都加粗的段落是「整段加粗」，各渠道按加粗段写，不当小标题"},
 	{K: "h", Name: "小标题", Fields: []string{"text", "level", "blankBefore"},
 		Meaning: "文中的小标题，级别看 level。文章标题不在块里，在块外面的 title"},
@@ -77,9 +78,9 @@ var articleBlockKinds = []articleBlockKind{
 		Meaning: "一张图。紧跟在它后面的 cap 是这张图的说明"},
 	{K: "cap", Name: "图注", Fields: []string{"text", "blankBefore"},
 		Meaning: "图片下面的说明文字，或「图片来源：」「图源：」这类出处行，紧跟在 img 后面，可以连着好几条。两种不另设字段，靠文字开头区分。前面没有图时按普通段落"},
-	{K: "bq", Name: "引用", Fields: []string{"runs", "blankBefore"},
+	{K: "bq", Name: "引用", Fields: []string{"runs", "blankBefore", "tightBefore"},
 		Meaning: "原文的引用块（blockquote）"},
-	{K: "li", Name: "列表项", Fields: []string{"runs", "blankBefore"},
+	{K: "li", Name: "列表项", Fields: []string{"runs", "blankBefore", "tightBefore"},
 		Meaning: "列表里的一项，连着的几项是同一个列表。原文是有序还是无序列表不区分"},
 	{K: "table", Name: "表格", Fields: []string{"rows", "blankBefore"},
 		Meaning: "一张表格，保留行列和表头格"},

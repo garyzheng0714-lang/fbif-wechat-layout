@@ -797,7 +797,8 @@
           "type": "txt",
           "text": "作者：石榴"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -815,7 +816,8 @@
           "type": "txt",
           "text": "不苛求正确，只好好说话。"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -844,7 +846,8 @@
           "type": "txt",
           "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "img",

@@ -175,6 +175,31 @@ test('ft-default：原文单独一行的章节号「01」不进网站，下一�
   assert.equal(headingN, 2);
 });
 
+test('ft-default：原文紧挨着的一列短句照原文排紧，前后段落照旧空一行（#338）', async () => {
+  const line = (text, extra = {}) => ({ k: 'txt', runs: [{ type: 'txt', text }], ...extra });
+  const { html } = await renderArticle({
+    packId: 'ft-default',
+    title: '中国茶叶的下一个10年',
+    source: 'FBIF食品饮料创新',
+    blocks: [
+      line('那我心目中好的茶叶品牌，是什么样的？'),
+      line('1. 品牌名：好听、好记'),
+      line('2. 包装：设计好看、体验好', { tightBefore: true }),
+      line('3. 讲人话', { tightBefore: true }),
+      line('简单点，就是可口可乐怎么卖可乐、农夫山泉怎么卖水。', { blankBefore: true }),
+    ],
+  });
+  const blank = '<p style="text-align: justify;"><br></p>';
+  const para = text => `<p style="text-align: justify;">${text}</p>`;
+  assert.ok(html.includes([
+    para('那我心目中好的茶叶品牌，是什么样的？'), blank,
+    para('1. 品牌名：好听、好记'),
+    para('2. 包装：设计好看、体验好'),
+    para('3. 讲人话'), blank,
+    para('简单点，就是可口可乐怎么卖可乐、农夫山泉怎么卖水。'),
+  ].join('\n')), html);
+});
+
 test('ft-default：headless 保留网站 behavior 的顶层正则与 lists，不走公众号 normalizer', async () => {
   const custom = await renderArticle({
     title: '网站原始 behavior',

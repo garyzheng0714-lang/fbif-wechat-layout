@@ -310,7 +310,8 @@
      "type": "txt",
      "text": "》，不代表FoodTalks立场，转载请联系出处。"
     }
-   ]
+   ],
+   "tightBefore": true
   },
   {
    "k": "txt",
@@ -328,7 +329,8 @@
      "type": "txt",
      "text": "”，并联系Bobo。"
     }
-   ]
+   ],
+   "tightBefore": true
   },
   {
    "k": "img",

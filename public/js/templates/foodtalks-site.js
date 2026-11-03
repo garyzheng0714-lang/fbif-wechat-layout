@@ -872,8 +872,11 @@ function render(elems, config = {}) {
     // 目录条目之间不插空行（62303 成品：目录区条目紧密相连，仅区尾 1 空行）。
     const compactTocPair = e.tocEntry && next && next.tocEntry;
     const compactRelatedPair = e.relatedReading && next && next.relatedReading && !next.blankBefore;
+    // 公众号原文里紧挨着的两段（一列短句，原文写明不留段距，块上 tightBefore）照原文排紧（2026-11-03 #338）。
+    const tightSourcePair = next && next.k === 'p' && next.tightBefore;
     // 如果当前是独立链接 + 上一段也是独立链接，不插空行；联系信息块内部同理保持紧凑。
-    if (!(standalone && prevWasStandaloneLink) && !compactContactPair && !compactTocPair && !compactRelatedPair) {
+    if (!(standalone && prevWasStandaloneLink) && !compactContactPair && !compactTocPair && !compactRelatedPair &&
+        !tightSourcePair) {
       lines.push(BLANK_LINE);
     }
     prevWasStandaloneLink = standalone;
@@ -1065,7 +1068,10 @@ async function classifyMd(text) {
 function classifyBlocks(data) {
   const elems = [];
   let imgN = 0;
-  const meta = b => (b && b.blankBefore ? { blankBefore: true } : {});
+  const meta = b => ({
+    ...(b && b.blankBefore ? { blankBefore: true } : {}),
+    ...(b && b.tightBefore ? { tightBefore: true } : {}),
+  });
   for (const b of (data && data.blocks) || []) {
     if (!b || !b.k) continue;
     if (b.k === 'img') {

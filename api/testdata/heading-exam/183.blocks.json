@@ -182,7 +182,8 @@
           "type": "txt",
           "text": "它坚守了什么，拒绝了什么？"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -191,7 +192,8 @@
           "type": "txt",
           "text": "同行纷纷转型了，为什么它没有？"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -200,7 +202,8 @@
           "type": "txt",
           "text": "它凭什么成为日本最有代表性的高端茶叶品牌？"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2082,7 +2085,8 @@
           "type": "txt",
           "text": "[1] 一保堂茶舗の歴史と伝承についての調査——六代目渡边孝史氏、七代目正一氏を訪ねて，2024，同志社女子大学 総合文化研究所紀要 第41巻"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2091,7 +2095,8 @@
           "type": "txt",
           "text": "—六代目、七代目的直接采访，家族传承史、养子制度、五代目正夫的经历等核心事实来源"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2100,7 +2105,8 @@
           "type": "txt",
           "text": "[2] Ippodo Tea Company: A 300-year-old Business Navigates Today's World，2016，Cool Japan: Case Studies from Japan's Cultural and Creative Industries（BlueSky Publishing）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2109,7 +2115,8 @@
           "type": "txt",
           "text": "—鹿野研一的经营改革、出海策略、拒绝瓶装茶、嘉木喫茶室、纽约店等商业细节来源"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2118,7 +2125,8 @@
           "type": "txt",
           "text": "[3] 幾百年も永続し繁栄する京都の老舗17店舗に学ぶ～職業奉仕の実践～，2010，国際ロータリー第2580地区 地区職業奉仕委員会"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2127,7 +2135,8 @@
           "type": "txt",
           "text": "—五代目渡边正夫关于定价哲学和同行共荣的原话"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2136,7 +2145,8 @@
           "type": "txt",
           "text": "[4] 京都のつづく 第64回・第95回 一保堂茶舗，篠田英美"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2145,7 +2155,8 @@
           "type": "txt",
           "text": "—七代目渡边正一“没有家训就是家训”的原话，母亲渡边都手写茶铭细节"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2154,7 +2165,8 @@
           "type": "txt",
           "text": "[5] 明治天皇がもっとも頼りにした 山階宮晃親王，深澤光佐子，宮帯出版社"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2163,7 +2175,8 @@
           "type": "txt",
           "text": "[6] 山階宮についてのご紹介，山階鳥類研究所（yamashina.or.jp）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2172,7 +2185,8 @@
           "type": "txt",
           "text": "[7] 忘れられない味「一保堂茶舗」とは。人気・定番商品を一挙紹介，2023-04，阪急阪神百货 HANKYU FOOD"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2181,7 +2195,8 @@
           "type": "txt",
           "text": "[8] 一保堂茶舗，官方网站（ippodo-tea.co.jp）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2190,7 +2205,8 @@
           "type": "txt",
           "text": "[9] 一保堂茶舗，USA & Canada Online Shop（ippodotea.com）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2199,7 +2215,8 @@
           "type": "txt",
           "text": "[10] 一保堂茶舗，CICATA 设计案例页（cicata.jp）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2208,7 +2225,8 @@
           "type": "txt",
           "text": "[11] 一保堂茶舗，高島屋オンラインストア商品页"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2217,7 +2235,8 @@
           "type": "txt",
           "text": "[12] Ippodo: The House That Became Matcha's Bridge to the World，TeaLife / The Japanese Tea-pedia"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2226,7 +2245,8 @@
           "type": "txt",
           "text": "—新加坡消费者点名询问一保堂、“日本不缺为茶喝彩的人，一保堂真正把桥修了出来”等评价来源"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2235,7 +2255,8 @@
           "type": "txt",
           "text": "[13] Mehrotra et al。，Harvard Business School，日本上市家族企业继承与业绩研究"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2244,7 +2265,8 @@
           "type": "txt",
           "text": "—婿养子业绩优于亲生继承人和职业经理人的数据"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2253,7 +2275,8 @@
           "type": "txt",
           "text": "[14] 日本农林水产省，绿茶出口统计数据（2020-2025）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2281,7 +2304,8 @@
           "type": "txt",
           "text": "* 转载请在后台回复“转载”了解规则；"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "txt",
@@ -2290,7 +2314,8 @@
           "type": "txt",
           "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
         }
-      ]
+      ],
+      "tightBefore": true
     },
     {
       "k": "img",
