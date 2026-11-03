@@ -35,15 +35,83 @@ func TestOwnAccountArticleIsOriginalOnlyWhenDeclared(t *testing.T) {
 		{"#340 投稿，没声明原创", publishJob{SourceName: "FBIF食品饮料创新", AISource: "FBIF食品饮料创新", BlocksJSON: provenance340Blocks}, "转载", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if original, _ := publishArticleProvenance(c.job); original != c.review {
-				t.Errorf("网站与排版的判定 original=%v，应为 %v", original, c.review)
+			if original, _, evidence := publishArticleProvenance(c.job); original != c.review {
+				t.Errorf("判定 original=%v（%s），应为 %v", original, evidence, c.review)
 			}
-			if status, _, evidence := publishExternalDistributionProvenance(c.job); (status == publishExternalProvenanceOriginal) != c.review {
-				t.Errorf("外发判定 %s（%s），应为原创=%v", status, evidence, c.review)
+			published := c.job
+			published.Stage, published.PublicationAction, published.FoodTalksNewsID = publishStagePublished, publishPublicationActionManualCMS, 1
+			if err := externalDistributionEligibility(published); (err == nil) != c.review {
+				t.Errorf("外发资格 err=%v，应为能外发=%v", err, c.review)
 			}
 			if meta := reviewBatchMeta(c.job); !strings.Contains(meta, ">"+c.label+"<") {
 				t.Errorf("审核卡应标「%s」：%s", c.label, meta)
 			}
 		})
+	}
+}
+
+// 原创要有明说：公众号标了原创，或正文一行「本文为<自家>原创」；明写转载、别家出处、什么都没说的都是转载。
+func TestArticleProvenanceNeedsExplicitOriginalDeclaration(t *testing.T) {
+	t.Setenv(siteOwnAccountsEnv, "")
+	line := func(texts ...string) string {
+		var b strings.Builder
+		b.WriteString("[")
+		for i, text := range texts {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString(`{"k":"txt","runs":[{"type":"txt","text":"` + text + `"}]}`)
+		}
+		b.WriteString("]")
+		return b.String()
+	}
+	const own = "FBIF食品饮料创新"
+	for _, c := range []struct {
+		name     string
+		job      publishJob
+		original bool
+		source   string
+	}{
+		{"自家号、公众号标了原创、文末没写", publishJob{SourceName: own, SourceDeclaredOriginal: true, BlocksJSON: line("正文")}, true, own},
+		{"自家号、文末简写「本文为FBIF原创」", publishJob{SourceName: own, BlocksJSON: line("正文", "* 本文为FBIF原创，欢迎转发朋友圈；")}, true, own},
+		{"自家号、什么都没声明（投稿）", publishJob{SourceName: own, BlocksJSON: line("作者：EZ", "正文")}, false, own},
+		{"自家号标了原创、正文又明写转载", publishJob{SourceName: own, SourceDeclaredOriginal: true, AISource: "联商网", BlocksJSON: line("正文", "* 本文为转载文章。")}, false, "联商网"},
+		{"自家号、AI 抽到别家出处", publishJob{SourceName: own, AISource: "小食代", BlocksJSON: line("正文")}, false, "小食代"},
+		{"自家号、文末「本文为新零售原创」", publishJob{SourceName: own, BlocksJSON: line("正文", "本文为新零售原创，作者：张三")}, false, "新零售"},
+		{"别家公众号标了原创", publishJob{SourceName: "小食代", SourceDeclaredOriginal: true, BlocksJSON: line("正文")}, false, "小食代"},
+		{"正文里引文带「转载」二字不算声明", publishJob{SourceName: own, SourceDeclaredOriginal: true, BlocksJSON: line("[3] 某报道，经济日报（人民政协网转载）", "转载请在后台回复“转载”了解规则")}, true, own},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			original, source, evidence := publishArticleProvenance(c.job)
+			if original != c.original || source != c.source {
+				t.Fatalf("original=%v source=%q（%s），应为 original=%v source=%q", original, source, evidence, c.original, c.source)
+			}
+			if evidence == "" {
+				t.Fatal("要说凭什么这样判")
+			}
+		})
+	}
+}
+
+func TestWechatDeclaredOriginalReadsCopyrightStat(t *testing.T) {
+	for raw, want := range map[string]bool{
+		`<script>var _copyright_stat = "1";</script>`: true,
+		`<script>var _copyright_stat="1";</script>`:   true,
+		`<script>var _copyright_stat = "2";</script>`: false,
+		`<script>var _copyright_stat = "0";</script>`: false,
+		`<script>var ct = "1";</script>`:              false,
+	} {
+		if got := wechatDeclaredOriginal(raw); got != want {
+			t.Errorf("%s → %v，应为 %v", raw, got, want)
+		}
+	}
+	job := publishJob{SourceDeclaredOriginal: true}
+	applyWechatSourceMeta(&job, publishFetchedArticle{})
+	if job.SourceDeclaredOriginal {
+		t.Fatal("重新抓到的原文没标原创，要照新抓的记")
+	}
+	applyWechatSourceMeta(&job, publishFetchedArticle{DeclaredOriginal: true})
+	if !job.SourceDeclaredOriginal {
+		t.Fatal("抓到公众号标了原创要记下")
 	}
 }

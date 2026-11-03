@@ -65,6 +65,7 @@ func createPublishedDistributionJobWithKey(t *testing.T, env *publishTestEnv, so
 		current.Stage = publishStagePublished
 		current.Title = "中国食品品牌如何用产品创新打开新市场"
 		current.SourceName = sourceName
+		current.SourceDeclaredOriginal = true // 公众号上标了原创；只有自家号的才算 FBIF 原创
 		current.FoodTalksNewsID = testDistributionNewsID
 		current.BlocksJSON = `[{"k":"p","text":"这是一篇用于验证外部分发流程的原创文章正文。"},{"k":"img","src":"https://mmbiz.qpic.cn/a.jpg"}]`
 		current.ImageMap = `{"https://mmbiz.qpic.cn/a.jpg":"https://cdn.example.com/a.jpg"}`

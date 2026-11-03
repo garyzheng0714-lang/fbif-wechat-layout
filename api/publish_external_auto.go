@@ -46,7 +46,7 @@ func markExternalAutoDistributionPending(j *publishJob) {
 	if err != nil || len(cfg.autoTargets()) == 0 {
 		return
 	}
-	if provenance, _, _ := publishExternalDistributionProvenance(*j); provenance != publishExternalProvenanceOriginal {
+	if original, _, _ := publishArticleProvenance(*j); !original {
 		return
 	}
 	j.ExternalDistributionAutoPending = publishExternalAutoKindPublish

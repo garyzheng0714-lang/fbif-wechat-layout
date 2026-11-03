@@ -437,6 +437,7 @@ func setProofreadByline(t *testing.T, env *publishTestEnv, jobID int64, sourceNa
 	t.Helper()
 	if _, err := env.store.update(jobID, func(current *publishJob) {
 		current.SourceName = sourceName
+		current.SourceDeclaredOriginal = true // 公众号上标了原创；别家号的照样是转载
 		current.BlocksJSON = `[{"k":"txt","text":"` + byline + `"},{"k":"txt","text":"` + testProofreadBody + `"}]`
 	}); err != nil {
 		t.Fatal(err)

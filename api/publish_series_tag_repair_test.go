@@ -278,7 +278,7 @@ func TestRepairNewsLinksRepostNoticeSource(t *testing.T) {
 		}
 	}
 	seed("site:309", 63280, `[{"k":"txt","runs":[{"type":"txt","text":"本文转载自公众号新周刊（ID：new-weekly）"}]},{"k":"txt","runs":[{"type":"txt","text":"正文"}]}]`)
-	seed("site:own", 63281, `[{"k":"txt","runs":[{"type":"txt","text":"正文"}]}]`)
+	seed("site:own", 63281, `[{"k":"txt","runs":[{"type":"txt","text":"正文"}]},{"k":"txt","runs":[{"type":"txt","text":"* 本文为FBIF原创，欢迎转发朋友圈；"}]}]`)
 	seed("site:unnamed", 63282, `[{"k":"txt","runs":[{"type":"txt","text":"正文"}]},{"k":"txt","runs":[{"type":"txt","text":"*本文为转载文章。"}]}]`)
 	notice := func(prefix string) string {
 		return `<p><em><span style="font-size: 14px; color: #7f7f7f;">` + prefix +

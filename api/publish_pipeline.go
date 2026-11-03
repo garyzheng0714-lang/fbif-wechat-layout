@@ -451,24 +451,26 @@ type publishFetchedArticle struct {
 	BlocksJSON        string
 	CoverURL          string
 	Digest            string
+	DeclaredOriginal  bool // 公众号标了「原创」
 }
 
 func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (publishFetchedArticle, error) {
 	rulePackID := publishRulePackIDFromContext(ctx)
-	title, blocks, sourceName, byline, canonicalURL, originalSourceURL, coverURL, digest, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
+	direct, err := fetchDirectBlocksWithOptions(articleURL, articleBlockOptionsForAccount(rules, rulePackID))
 	if err != nil {
 		return publishFetchedArticle{}, fmt.Errorf("文章抓取失败: %w", err)
 	}
-	if len(blocks) == 0 {
+	if len(direct.Blocks) == 0 {
 		return publishFetchedArticle{}, errors.New("未能从文章解析出内容块（链接可能已过期或被限流，请稍后重试）")
 	}
-	raw, err := json.Marshal(blocks)
+	raw, err := json.Marshal(direct.Blocks)
 	if err != nil {
 		return publishFetchedArticle{}, fmt.Errorf("序列化内容块失败: %w", err)
 	}
 	return publishFetchedArticle{
-		Title: title, SourceName: sourceName, Byline: byline, CanonicalURL: canonicalURL,
-		OriginalSourceURL: originalSourceURL, BlocksJSON: string(raw), CoverURL: coverURL, Digest: digest,
+		Title: direct.Title, SourceName: direct.SourceName, Byline: direct.Byline, CanonicalURL: direct.CanonicalURL,
+		OriginalSourceURL: direct.OriginalSourceURL, BlocksJSON: string(raw), CoverURL: direct.CoverURL, Digest: direct.Digest,
+		DeclaredOriginal: direct.DeclaredOriginal,
 	}, nil
 }
 
@@ -809,6 +811,7 @@ func (p *publishPipeline) stageFetch(ctx context.Context, job publishJob) error 
 func applyWechatSourceMeta(job *publishJob, fetched publishFetchedArticle) {
 	job.SourceCoverURL = strings.TrimSpace(fetched.CoverURL)
 	job.SourceDigest = strings.TrimSpace(fetched.Digest)
+	job.SourceDeclaredOriginal = fetched.DeclaredOriginal
 }
 
 var publishRuleConfigHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -845,7 +848,7 @@ func validatePublishRenderResultForPack(result publishRenderResult, rulePackID s
 // （那是自家转载页，不是出处原文——2026-08-18 猪油渣稿）。外号原文或自家原创
 // 仍用提交链接。
 func publishRenderSourceURL(job publishJob) string {
-	original, _ := publishArticleProvenance(job)
+	original, _, _ := publishArticleProvenance(job)
 	if !original {
 		if u := strings.TrimSpace(job.OriginalSourceURL); isHTTPURL(u) {
 			return u
@@ -869,7 +872,7 @@ func (p *publishPipeline) stageRender(ctx context.Context, job publishJob) error
 	if err != nil {
 		return err
 	}
-	// 网站排版一律按转载切尾，与编辑器 URL 导入一致。publishSiteIsRepost 只决定
+	// 网站排版一律按转载切尾，与编辑器 URL 导入一致。publishArticleProvenance 只决定
 	// CMS 来源类型（原创/转载）和提示文案，不得再关掉切尾。
 	p.ensureRepostOriginalURL(ctx, &job)
 	result, err := p.render(publishRenderContext(ctx, rulePackID, job), job.Title, publishRenderSourceURL(job), job.BlocksJSON, true)
@@ -2271,6 +2274,8 @@ var publishDeclaredSourcePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^(?:来源|出处|文章来源|本文来源)\s*[：:｜|/]\s*(.+)$`),
 	regexp.MustCompile(`本文(?:来自|转自|转载自|经授权转载自|首发于)\s*(?:微信)?(?:公众号)?\s*[：:「"“]?\s*([^\s，。、；：:（()）「」"”]{2,30})`),
 	regexp.MustCompile(`^本文(?:系|为)\s*([^\s，。、；：:（()）「」"”]{2,30}?)\s*(?:原创|首发|授权)`),
+	regexp.MustCompile(`^(?:转载自|转自)\s*[：:｜|/]\s*(.+)$`),
+	regexp.MustCompile(`^本文(?:经|获)\s*(?:微信)?(?:公众号)?\s*[「"“]?\s*([^\s，。、；：:（()）「」"”]{2,30}?)\s*[」"”]?\s*授权转载`),
 }
 
 var publishDeclaredSourceIDSuffixRe = regexp.MustCompile(`[（(]\s*(?i:ID)[：:][^）)]*[）)]?\s*$`)
@@ -2328,62 +2333,70 @@ func siteRepostDisclosure(text string) bool {
 	return explicitSiteRepostDisclosure.MatchString(text)
 }
 
-// publishSiteIsRepost 只回答 CMS 来源类型：正文明确转载声明优先；否则自家公众号
-// 按原创，其余公众号按转载。它不决定是否切除微信导流尾——进网站一律切尾。
-func publishSiteIsRepost(sourceName, blocksJSON string) bool {
-	var blocks []Block
-	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err == nil {
-		for _, block := range blocks {
-			text := block.Text
-			if len(block.Runs) > 0 {
-				var b strings.Builder
-				for _, run := range block.Runs {
-					if run.Type != "img" && run.Type != "br" {
-						b.WriteString(run.Text)
-					}
-				}
-				text = b.String()
-			}
-			if siteRepostDisclosure(text) {
-				return true
-			}
+// publishArticleProvenance 所有渠道共用的「是不是 FBIF 原创、转载自谁、凭什么」：网站来源类型、排版开头署名与文末声明、
+// 审核卡上的原创/转载、外发第三方平台都只问它（2026-11-03 用户：「为什么我们的原创文章你标注成了转载？然后我们的转载你标注为原创？」）。
+//
+// 先看转载：明写「本文为转载文章」的、别家公众号的、出处是别家的（AI 读出的，或头尾声明「来源：X」「转载自：X」
+// 「本文经X授权转载」，publishDeclaredSource），压过原创声明。再看原创要有明说：自家公众号上标了「原创」
+// （SourceDeclaredOriginal），或正文里有一行「本文为<自家>原创」。自家号发了却什么都没声明的也是转载（#340 是读者投稿）——
+// 判成转载只是不外发，判成原创会把别人的稿子当 FBIF 原创发到第三方平台。
+// 只认整行的声明，不在正文里搜「转载」二字：#338 参考文献里一条「经济日报（人民政协网转载）」曾让原创判成转载、没外发。
+func publishArticleProvenance(job publishJob) (original bool, source, evidence string) {
+	own := siteOwnAccounts()
+	isOwn := func(name string) bool { return own[name] || publishExternalSourceIsOwn(name, own) }
+	name := strings.TrimSpace(job.SourceName)
+	aiSource := strings.TrimSpace(job.AISource)
+	// 转载自谁：AI 读出的出处、头尾声明的出处，先取别家的那个；都没有就是发这篇的公众号。
+	repostSource := name
+	for _, candidate := range []string{aiSource, publishDeclaredSource(job.BlocksJSON)} {
+		if candidate != "" && !isOwn(candidate) {
+			repostSource = candidate
+			break
 		}
 	}
-	return !siteOwnAccounts()[strings.TrimSpace(sourceName)]
-}
-
-// publishArticleProvenance 是所有渠道共用的文章来源真相：只负责回答“是否原创、
-// 来源是谁”，不掺任何渠道发布策略。FoodTalks 可接收两类文章；第三方平台
-// 在自己的资格函数中只接受 original=true，避免把平台名写进中立能力层。
-func publishArticleProvenance(job publishJob) (original bool, source string) {
-	own := siteOwnAccounts()
-	if src := strings.TrimSpace(job.AISource); src != "" && !own[src] {
-		return false, src
+	var blocks []Block
+	_ = json.Unmarshal([]byte(job.BlocksJSON), &blocks)
+	var ownOriginal string
+	for _, block := range blocks {
+		if block.K == "img" || block.K == "cap" || block.K == "video" || block.K == "table" {
+			continue
+		}
+		line := strings.TrimSpace(strings.Trim(publishExternalDistributionBlockText(block), "*＊ "))
+		if siteRepostDisclosure(line) {
+			return false, repostSource, "正文写着「" + line + "」"
+		}
+		if m := publishExternalOriginalLine.FindStringSubmatch(line); len(m) > 1 && ownOriginal == "" && isOwn(cleanPublishExternalSource(m[1])) {
+			ownOriginal = line
+		}
 	}
-	// AI 没抽到出处时用确定性声明抽取兜底（任务 #101 教训：自家号转发天下网商，
-	// AI 把机构名填进 author、AISource 为空 → 误判原创进独家专栏）。抽到自家名
-	//（如「本文为FBIF食品饮料创新原创」）时不在此返回，继续走自家清单原创判定。
-	if src := publishDeclaredSource(job.BlocksJSON); src != "" && !own[src] {
-		return false, src
+	switch {
+	case !isOwn(name):
+		if name == "" {
+			return false, repostSource, "不知道是哪个公众号发的"
+		}
+		return false, repostSource, "公众号「" + name + "」不是自家的"
+	case repostSource != name:
+		return false, repostSource, "出处是「" + repostSource + "」"
+	case job.SourceDeclaredOriginal:
+		return true, name, "公众号上标了原创"
+	case ownOriginal != "":
+		return true, name, "正文写着「" + ownOriginal + "」"
 	}
-	name := strings.TrimSpace(job.SourceName)
-	if publishSiteIsRepost(name, job.BlocksJSON) {
-		return false, name
-	}
-	return true, name
+	return false, name, "自家公众号发的，但公众号没标原创、正文也没写「本文为…原创」"
 }
 
 // articleProvenanceFor 交给排版的原创/转载判定；来源是自家号时不给来源。
 func articleProvenanceFor(job publishJob) articleProvenance {
-	original, source := publishArticleProvenance(job)
-	if original || siteOwnAccounts()[source] {
+	original, source, _ := publishArticleProvenance(job)
+	if original || publishExternalSourceIsOwn(source, siteOwnAccounts()) {
 		source = ""
 	}
 	return articleProvenance{Original: original, Source: source}
 }
 
 // articleBlocksProvenance 抓到的文章（网页导入、排版接口）用发布流程同一个判定；没有块不判。
-func articleBlocksProvenance(sourceName string, blocks []Block) *articleProvenance {
+// declaredOriginal 是公众号上标了「原创」。
+func articleBlocksProvenance(sourceName string, blocks []Block, declaredOriginal bool) *articleProvenance {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -2391,12 +2404,12 @@ func articleBlocksProvenance(sourceName string, blocks []Block) *articleProvenan
 	if err != nil {
 		return nil
 	}
-	provenance := articleProvenanceFor(publishJob{SourceName: sourceName, BlocksJSON: string(raw)})
+	provenance := articleProvenanceFor(publishJob{SourceName: sourceName, BlocksJSON: string(raw), SourceDeclaredOriginal: declaredOriginal})
 	return &provenance
 }
 
 func siteSourceFor(job publishJob) (int, string) {
-	original, source := publishArticleProvenance(job)
+	original, source, _ := publishArticleProvenance(job)
 	if !original {
 		return 1, source
 	}

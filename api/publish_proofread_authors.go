@@ -35,7 +35,7 @@ var proofreadNameSplit = regexp.MustCompile(`[、/／&＆;；\s]+`)
 // proofreadBylineNames 原创稿署名（开头几块与正文最后，同外发 takeCredits）里的作者与编辑，按原文顺序去重；
 // 转载稿、没有署名时为空。
 func proofreadBylineNames(job publishJob) []string {
-	if original, _ := publishArticleProvenance(job); !original {
+	if original, _, _ := publishArticleProvenance(job); !original {
 		return nil
 	}
 	var blocks []Block

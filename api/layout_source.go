@@ -376,6 +376,7 @@ type layoutFetchedArticle struct {
 	SourceName        string
 	Byline            string
 	OriginalSourceURL string
+	DeclaredOriginal  bool // 公众号标了「原创」
 }
 
 // articleLayoutFetcher 生产用：直抓（最多 3 次）+ Jina 阅读模式，与网页导入链接一致；
@@ -386,8 +387,9 @@ func (articleLayoutFetcher) FetchArticle(ctx context.Context, url string, opts a
 	if news, handled, err := foodTalksNewsArticleBlocks(ctx, url, opts); handled {
 		return layoutFetchedArticle{Title: news.Title, Blocks: news.Blocks, SourceName: news.SourceName, Byline: news.Byline}, err
 	}
-	title, blocks, sourceName, byline, _, originalSourceURL, _, _, err := fetchDirectBlocksWithOptions(url, opts)
-	return layoutFetchedArticle{Title: title, Blocks: blocks, SourceName: sourceName, Byline: byline, OriginalSourceURL: originalSourceURL}, err
+	direct, err := fetchDirectBlocksWithOptions(url, opts)
+	return layoutFetchedArticle{Title: direct.Title, Blocks: direct.Blocks, SourceName: direct.SourceName, Byline: direct.Byline,
+		OriginalSourceURL: direct.OriginalSourceURL, DeclaredOriginal: direct.DeclaredOriginal}, err
 }
 
 func (articleLayoutFetcher) FetchReader(ctx context.Context, url string) (string, string, error) {
@@ -465,7 +467,7 @@ func (a *layoutAPI) prepareURL(ctx context.Context, req layoutRequest, view layo
 		input.Blocks = article.Blocks
 		input.FetchMeta = layoutFetchMeta{Title: article.Title, Source: req.URL, SourceName: article.SourceName,
 			Byline: article.Byline, OriginalSourceURL: article.OriginalSourceURL,
-			Provenance: articleBlocksProvenance(article.SourceName, article.Blocks)}
+			Provenance: articleBlocksProvenance(article.SourceName, article.Blocks, article.DeclaredOriginal)}
 		view.SourceName = article.SourceName
 		return layoutPrepared{Input: input, View: view}, nil
 	}

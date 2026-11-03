@@ -68,17 +68,13 @@ func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allo
 	default:
 		return nil
 	}
-	provenance, _, evidence := publishExternalDistributionProvenance(job)
-	original := provenance == publishExternalProvenanceOriginal
+	original, _, evidence := publishArticleProvenance(job)
 	if !started && !original {
 		// 聚合卡里转载稿没有这一区；单篇卡说一句为什么不外发。
 		if !allowStart || aggregate {
 			return nil
 		}
-		message := "转载文章仅发布至 FoodTalks，不同步外部平台。"
-		if provenance == publishExternalProvenanceUnverified {
-			message = "原创状态未完成核验，暂不开放外部分发（" + evidence + "）。"
-		}
+		message := "转载文章仅发布至 FoodTalks，不同步外部平台（" + evidence + "）。"
 		return []any{map[string]any{
 			"tag": "markdown", "text_size": "notation",
 			"content": "<font color='grey'>" + reviewCardSafeText(message, 180) + "</font>",

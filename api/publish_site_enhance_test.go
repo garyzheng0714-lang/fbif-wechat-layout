@@ -508,7 +508,7 @@ func TestPublishArticleProvenanceDeclaredSourceFallback(t *testing.T) {
 		SourceName: "FBIF食品饮料创新",
 		BlocksJSON: `[{"k":"txt","text":"来源：天下网商（ID：txws2013）"},{"k":"txt","text":"正文"}]`,
 	}
-	original, source := publishArticleProvenance(job)
+	original, source, _ := publishArticleProvenance(job)
 	if original || source != "天下网商" {
 		t.Fatalf("声明出处兜底应判转载且来源=天下网商，实际 original=%v source=%q", original, source)
 	}
@@ -517,14 +517,14 @@ func TestPublishArticleProvenanceDeclaredSourceFallback(t *testing.T) {
 		SourceName: "FBIF食品饮料创新",
 		BlocksJSON: `[{"k":"txt","text":"本文为FBIF食品饮料创新原创，转载请联系授权。"},{"k":"txt","text":"正文"}]`,
 	}
-	original, source = publishArticleProvenance(own)
+	original, source, _ = publishArticleProvenance(own)
 	if !original || source != "FBIF食品饮料创新" {
 		t.Fatalf("自家原创声明不得误判转载，实际 original=%v source=%q", original, source)
 	}
 	// AISource 仍然最优先
 	ai := job
 	ai.AISource = "小食代"
-	if _, source := publishArticleProvenance(ai); source != "小食代" {
+	if _, source, _ := publishArticleProvenance(ai); source != "小食代" {
 		t.Fatalf("AISource 应优先于确定性抽取：%q", source)
 	}
 }
@@ -541,10 +541,11 @@ func TestPublishRenderSourceURLPrefersOriginalForRepost(t *testing.T) {
 	}
 	// 原创稿：即使有阅读原文链接也用提交链接（阅读原文可能是活动页）
 	original := publishJob{
-		SourceURL:         "https://mp.weixin.qq.com/s/fbif-own",
-		OriginalSourceURL: "https://mp.weixin.qq.com/s/event-page",
-		SourceName:        "FBIF食品饮料创新",
-		BlocksJSON:        `[{"k":"txt","text":"正文"}]`,
+		SourceURL:              "https://mp.weixin.qq.com/s/fbif-own",
+		OriginalSourceURL:      "https://mp.weixin.qq.com/s/event-page",
+		SourceName:             "FBIF食品饮料创新",
+		SourceDeclaredOriginal: true,
+		BlocksJSON:             `[{"k":"txt","text":"正文"}]`,
 	}
 	if got := publishRenderSourceURL(original); got != "https://mp.weixin.qq.com/s/fbif-own" {
 		t.Fatalf("原创稿应用提交链接：%q", got)
@@ -570,9 +571,10 @@ func TestBuildSiteNewsCategoryBySourceType(t *testing.T) {
 	t.Setenv("FOODTALKS_REPOST_CATEGORY_IDS", "")
 	p := &publishPipeline{now: time.Now}
 	base := publishJob{Title: "标题", ContentHTML: "<p>正文</p>", CreatedAt: "2026-08-14T00:00:00Z"}
-	// 原创（自有号）→ 独家专栏（沿用 FOODTALKS_CATEGORY_IDS 默认 52,58）
+	// 原创（自有号、公众号标了原创）→ 独家专栏（沿用 FOODTALKS_CATEGORY_IDS 默认 52,58）
 	orig := base
 	orig.SourceName = "FBIF食品饮料创新"
+	orig.SourceDeclaredOriginal = true
 	news, err := p.buildSiteNews(context.Background(), orig, foodTalksPublishStatusDraft)
 	if err != nil {
 		t.Fatal(err)

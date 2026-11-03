@@ -161,6 +161,15 @@ func extractWechatArticleMeta(rawHTML string) (nickname, byline, sourceURL strin
 	return nickname, byline, sourceURL
 }
 
+// wxCopyrightStatRe 公众号文章页的原创声明：var _copyright_stat = "1" 是标了「原创」，"2" 是转载，"0" 是没声明。
+var wxCopyrightStatRe = regexp.MustCompile(`var _copyright_stat\s*=\s*"(\d+)"`)
+
+// wechatDeclaredOriginal 这篇公众号文章标了「原创」（页面标题下那个「原创」）。
+func wechatDeclaredOriginal(rawHTML string) bool {
+	m := wxCopyrightStatRe.FindStringSubmatch(rawHTML)
+	return len(m) > 1 && m[1] == "1"
+}
+
 // extractArticleBlocks walks WeChat article HTML into a sequence of Blocks
 // (article_blocks.go). It reads the visual signals (font-size, color, align,
 // bold) to tell heading, pullquote, caption and body apart, which Markdown

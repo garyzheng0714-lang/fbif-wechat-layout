@@ -566,15 +566,16 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 				writeError(w, 502, "FoodTalks 文章读取失败，请稍后重试")
 				return
 			}
-			news.Provenance = articleBlocksProvenance(news.SourceName, news.Blocks)
+			news.Provenance = articleBlocksProvenance(news.SourceName, news.Blocks, false)
 			writeJSON(w, 200, news)
 			return
 		}
-		title, blocks, sourceName, byline, _, originalSourceURL, _, _, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
+		direct, derr := fetchDirectBlocksWithOptions(req.URL, articleBlockOptionsForAccount(store, accountID))
+		blocks := direct.Blocks
 		if derr == nil && len(blocks) > 0 {
-			writeJSON(w, 200, articleBlocksResponse{Title: title, Blocks: blocks, Source: req.URL,
-				SourceName: sourceName, Byline: byline, OriginalSourceURL: originalSourceURL,
-				Provenance: articleBlocksProvenance(sourceName, blocks)})
+			writeJSON(w, 200, articleBlocksResponse{Title: direct.Title, Blocks: blocks, Source: req.URL,
+				SourceName: direct.SourceName, Byline: direct.Byline, OriginalSourceURL: direct.OriginalSourceURL,
+				Provenance: articleBlocksProvenance(direct.SourceName, blocks, direct.DeclaredOriginal)})
 			return
 		}
 		// Do not hand attacker-controlled URLs to an external reader process:
@@ -613,7 +614,14 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 // byline=发布者填的结构化作者署名（meta author / var author，没署名就是空）。
 // 发布流水线 fetching 阶段消费；handler 行为不变。coverURL/digest 是公众号原封面
 // （msg_cdn_url / og:image）与摘要（msg_desc），网站发布直接沿用（2026-10-07 用户裁定）。
-func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title string, blocks []Block, sourceName, byline, canonicalURL, originalSourceURL, coverURL, digest string, err error) {
+// directArticle 直抓公众号文章页解出来的内容和页面信息。
+type directArticle struct {
+	Title, SourceName, Byline, CanonicalURL, OriginalSourceURL, CoverURL, Digest string
+	Blocks                                                                       []Block
+	DeclaredOriginal                                                             bool // 公众号标了「原创」
+}
+
+func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (directArticle, error) {
 	opts = normalizeArticleBlockOptions(opts)
 	// 3 attempts, exponential-ish backoff. WeChat 限流通常几百毫秒内恢复。
 	backoffs := []time.Duration{0, 600 * time.Millisecond, 1500 * time.Millisecond}
@@ -625,7 +633,7 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 		bodyBytes, finalURL, ferr := fetchRawHTML(url)
 		if errors.Is(ferr, errArticlePageTooLarge) {
 			// 页面大小不会因重试改变，直接如实报告，别伪装成限流。
-			return "", nil, "", "", "", "", "", "", ferr
+			return directArticle{}, ferr
 		}
 		if ferr != nil {
 			transportErr = ferr
@@ -636,7 +644,9 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 		t, bs, _ := extractArticleBlocksWithOptions(raw, opts)
 		if len(bs) > 0 {
 			nickname, by, msgSourceURL := extractWechatArticleMeta(raw)
-			return t, bs, nickname, by, articleSourceURL(url, finalURL, raw), msgSourceURL, extractArticleCover(raw), extractArticleDigest(raw), nil
+			return directArticle{Title: t, Blocks: bs, SourceName: nickname, Byline: by, CanonicalURL: articleSourceURL(url, finalURL, raw),
+				OriginalSourceURL: msgSourceURL, CoverURL: extractArticleCover(raw), Digest: extractArticleDigest(raw),
+				DeclaredOriginal: wechatDeclaredOriginal(raw)}, nil
 		}
 		// 传输成功但无内容：可能是反爬中间页，重试一次可能拿到真正文。
 		transportErr = nil
@@ -644,7 +654,7 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (title s
 	}
 	// 全部尝试都没拿到内容：最后一次是传输失败则返回该 err；否则（拿到页面但空）
 	// 返回空 blocks 无 err，让调用方决定是否走 Jina Reader（仅非公众号）。
-	return "", nil, "", "", "", "", "", "", transportErr
+	return directArticle{}, transportErr
 }
 
 func articleBlockOptionsForAccount(store *rulePresetStore, accountID string) articleBlockOptions {

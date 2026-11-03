@@ -41,17 +41,10 @@ const (
 	publishExternalCardExpired = "expired"
 
 	publishExternalCardMaxAttempts = 10
-
-	publishExternalProvenanceOriginal   = "original_confirmed"
-	publishExternalProvenanceRepost     = "repost"
-	publishExternalProvenanceUnverified = "unverified"
 )
 
-var (
-	publishExternalArticleSourceLine = regexp.MustCompile(`(?i)^(?:本文)?(?:转载自|转自|原文(?:来源|出处)|文章来源|来源|出处|来自(?:微信公众号)?)[：:\s]+(.{1,100})`)
-	publishExternalOriginalLine      = regexp.MustCompile(`(?i)^本文为(.{1,80}?)原创(?:[《，,。.!！]|$)`)
-	publishExternalAuthorizedRepost  = regexp.MustCompile(`(?i)(?:本文)?(?:经|获).{1,50}(?:授权)?转载|reprinted\s+with\s+permission|originally\s+published\s+by|^source\s*[:：]`)
-)
+// publishExternalOriginalLine 「本文为<谁>原创」那一行（publishArticleProvenance 只认<谁>是自家的）。
+var publishExternalOriginalLine = regexp.MustCompile(`(?i)^本文为(.{1,80}?)原创(?:[《，,。.!！]|$)`)
 
 // publishExternalDistributionProcessing 系统正在送稿、点发布的 lane（平台审核中不算：那是在等平台）。
 func publishExternalDistributionProcessing(state string) bool {
@@ -78,57 +71,6 @@ func publishExternalDistributionCanReplaceReconcile(job publishJob) bool {
 		}
 	}
 	return false
-}
-
-// publishExternalDistributionProvenance 外发只看账号与正文，不把火山检查当门槛。
-// 来源或作者命中自有号，且正文没有显式外部转载声明，即视为原创（2026-08-13 用户裁定）。
-func publishExternalDistributionProvenance(job publishJob) (status, source, evidence string) {
-	original, source := publishArticleProvenance(job)
-	own := siteOwnAccounts()
-	if !original {
-		if author := strings.TrimSpace(job.Author); publishExternalSourceIsOwn(author, own) {
-			source = author
-		} else {
-			return publishExternalProvenanceRepost, source, "文章来源已判定为转载"
-		}
-	}
-	var blocks []Block
-	if err := json.Unmarshal([]byte(job.BlocksJSON), &blocks); err == nil {
-		for _, block := range blocks {
-			if block.K == "cap" || block.K == "img" || block.K == "video" || block.K == "table" {
-				continue
-			}
-			line := publishExternalDistributionBlockText(block)
-			if line == "" {
-				continue
-			}
-			compact := strings.Map(func(r rune) rune {
-				if r == '*' || r == '＊' || r == '_' {
-					return -1
-				}
-				return r
-			}, line)
-			compact = strings.TrimSpace(compact)
-			if explicitSiteRepostDisclosure.MatchString(strings.ReplaceAll(compact, " ", "")) ||
-				strings.Contains(compact, "本文为转载") || publishExternalAuthorizedRepost.MatchString(compact) {
-				return publishExternalProvenanceRepost, source, compact
-			}
-			if match := publishExternalOriginalLine.FindStringSubmatch(compact); len(match) > 1 {
-				declaredOwner := cleanPublishExternalSource(match[1])
-				if publishExternalSourceIsOwn(declaredOwner, own) {
-					continue
-				}
-				return publishExternalProvenanceRepost, declaredOwner, compact
-			}
-			if match := publishExternalArticleSourceLine.FindStringSubmatch(compact); len(match) > 1 {
-				declaredSource := cleanPublishExternalSource(match[1])
-				if declaredSource != "" && !publishExternalSourceIsOwn(declaredSource, own) {
-					return publishExternalProvenanceRepost, declaredSource, compact
-				}
-			}
-		}
-	}
-	return publishExternalProvenanceOriginal, source, "自有账号且未发现转载出处；由操作人最终确认原创"
 }
 
 func publishExternalDistributionBlockText(block Block) string {
@@ -179,7 +121,11 @@ func publishExternalSourceIsOwn(value string, own map[string]bool) bool {
 // publishExternalDistributionCardVersion 把按钮绑定到网站终态、冻结正文、最终文章来源
 // 判定和当前服务端目标目录。调用方不能在 callback value 中任意塞 account_id。
 func publishExternalDistributionCardVersion(job publishJob) string {
-	provenance, source, _ := publishExternalDistributionProvenance(job)
+	original, source, _ := publishArticleProvenance(job)
+	provenance := "repost" // 卡片版本里沿用原来的两个值，判定没变的卡不因这次改名失效
+	if original {
+		provenance = "original_confirmed"
+	}
 	material, _ := json.Marshal(struct {
 		Title    string   `json:"title"`
 		Summary  string   `json:"summary"`
@@ -250,12 +196,8 @@ func externalDistributionEligibility(job publishJob) error {
 	if job.FoodTalksNewsID <= 0 {
 		return errors.New("任务还没有对应的网站文章，不能同步外部平台")
 	}
-	provenance, _, evidence := publishExternalDistributionProvenance(job)
-	if provenance == publishExternalProvenanceRepost {
-		return errors.New("转载文章只发 FoodTalks，不同步到第三方平台")
-	}
-	if provenance != publishExternalProvenanceOriginal {
-		return fmt.Errorf("文章原创状态未完成核验，暂不允许同步外部平台：%s", evidence)
+	if original, _, evidence := publishArticleProvenance(job); !original {
+		return fmt.Errorf("转载文章只发 FoodTalks，不同步到第三方平台（%s）", evidence)
 	}
 	if strings.TrimSpace(job.BlocksJSON) == "" {
 		return errors.New("文章缺少中立正文，不能生成外部分发内容")
@@ -519,7 +461,7 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		return job, externalDistributionIneligible(errors.New("这篇文章已经提交过外部分发，系统不会重复发布"))
 	}
 	requestedAt := pipelineNow(p).Format(time.RFC3339)
-	_, attributionSource, attributionEvidence := publishExternalDistributionProvenance(job)
+	_, attributionSource, attributionEvidence := publishArticleProvenance(job)
 	attribution := "original_human_confirmed: " + attributionEvidence
 	if mode == externalQueueAuto {
 		attribution = "original_auto_confirmed: " + attributionEvidence

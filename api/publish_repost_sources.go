@@ -348,7 +348,7 @@ func (p *publishPipeline) recordPublishedRepost(ctx context.Context, job publish
 	if p == nil || p.repostSources == nil || !publishJobIsOwnAccountRepost(job) {
 		return
 	}
-	_, sourceName := publishArticleProvenance(job)
+	_, sourceName, _ := publishArticleProvenance(job)
 	articleURL := strings.TrimSpace(job.OriginalSourceURL)
 	if !isWechatArticleURL(articleURL) {
 		return

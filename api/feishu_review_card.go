@@ -249,13 +249,9 @@ func reviewBatchCover(job publishJob) map[string]any {
 // reviewBatchMeta 「转载 · #任务号」灰字，后接蓝色文章标签（用户：「标签就用标签的样式」
 // 「标签不用黑色，用蓝色」）。
 func reviewBatchMeta(job publishJob) string {
-	provenance, _, _ := publishExternalDistributionProvenance(job)
 	meta := "<font color='grey'>转载</font>"
-	switch provenance {
-	case publishExternalProvenanceOriginal:
+	if original, _, _ := publishArticleProvenance(job); original {
 		meta = "<font color='grey'>原创</font>"
-	case publishExternalProvenanceUnverified:
-		meta = "<font color='orange'>原创待核</font>"
 	}
 	meta += fmt.Sprintf("<font color='grey'> · #%d</font>", job.ID)
 	if tags := reviewBatchTagPills(job.Tags); tags != "" {

@@ -47,11 +47,11 @@ func stubArticlePage(t *testing.T, scriptBytes int) *articlePageRoundTripper {
 // 旧 5 MB 上限三次重试全失败，却报「公众号可能临时限流」。
 func TestFetchDirectBlocksAcceptsWeChatPageOver5MB(t *testing.T) {
 	rt := stubArticlePage(t, 6<<20)
-	_, blocks, _, _, _, _, _, _, err := fetchDirectBlocksWithOptions("https://mp.weixin.qq.com/s/hAjWhCtac9CLCgpeLx84-g", defaultArticleBlockOptions())
+	direct, err := fetchDirectBlocksWithOptions("https://mp.weixin.qq.com/s/hAjWhCtac9CLCgpeLx84-g", defaultArticleBlockOptions())
 	if err != nil {
 		t.Fatalf("fetch 6 MB page: %v", err)
 	}
-	if len(blocks) == 0 {
+	if len(direct.Blocks) == 0 {
 		t.Fatal("blocks=0, want parsed article")
 	}
 	if got := rt.calls.Load(); got != 1 {
@@ -66,7 +66,7 @@ func TestFetchDirectBlocksAcceptsWeChatPageOver5MB(t *testing.T) {
 
 func TestFetchDirectBlocksOversizePageFailsOnceWithAccurateMessage(t *testing.T) {
 	rt := stubArticlePage(t, maxArticlePageBytes+1)
-	_, _, _, _, _, _, _, _, err := fetchDirectBlocksWithOptions("https://mp.weixin.qq.com/s/huge", defaultArticleBlockOptions())
+	_, err := fetchDirectBlocksWithOptions("https://mp.weixin.qq.com/s/huge", defaultArticleBlockOptions())
 	if !errors.Is(err, errArticlePageTooLarge) {
 		t.Fatalf("err=%v, want errArticlePageTooLarge", err)
 	}

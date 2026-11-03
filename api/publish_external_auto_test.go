@@ -52,7 +52,7 @@ func TestExternalAutoDistributionAfterAutoPublishPushesOnlyAutoTargets(t *testin
 	env.ft.forbidPublish = false
 	env.ft.mu.Unlock()
 	env.pipeline.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
-		return publishFetchedArticle{Title: "测试原创标题：一家食品品牌的产品创新", SourceName: "FBIF食品饮料创新", CanonicalURL: articleURL, BlocksJSON: testPublishBlocksJSON}, nil
+		return publishFetchedArticle{Title: "测试原创标题：一家食品品牌的产品创新", SourceName: "FBIF食品饮料创新", CanonicalURL: articleURL, BlocksJSON: testPublishBlocksJSON, DeclaredOriginal: true}, nil
 	}
 	// 草稿进站后的网站 id 固定为 7240（桩），预置成已公开的网站稿供外发读取。
 	seedLivePublishedNews(t, env, foodTalksNewsDetail{
@@ -113,7 +113,7 @@ func TestExternalAutoDistributionSkipsRepost(t *testing.T) {
 
 func TestExternalAutoDistributionNeedsAutoAccount(t *testing.T) {
 	setTestDistributionAccounts(t) // 两个账号都没标 auto
-	job := publishJob{Stage: publishStagePublished, SourceName: "FBIF食品饮料创新", BlocksJSON: testPublishBlocksJSON}
+	job := publishJob{Stage: publishStagePublished, SourceName: "FBIF食品饮料创新", SourceDeclaredOriginal: true, BlocksJSON: testPublishBlocksJSON}
 	markExternalAutoDistributionPending(&job)
 	if job.ExternalDistributionAutoPending != "" {
 		t.Fatalf("没有 auto 账号时不应记自动外发待办")
@@ -123,7 +123,7 @@ func TestExternalAutoDistributionNeedsAutoAccount(t *testing.T) {
 	if job.ExternalDistributionAutoPending != publishExternalAutoKindPublish {
 		t.Fatalf("有 auto 账号的原创稿应记待办，实际 %q", job.ExternalDistributionAutoPending)
 	}
-	distributed := publishJob{Stage: publishStagePublished, SourceName: "FBIF食品饮料创新", BlocksJSON: testPublishBlocksJSON,
+	distributed := publishJob{Stage: publishStagePublished, SourceName: "FBIF食品饮料创新", SourceDeclaredOriginal: true, BlocksJSON: testPublishBlocksJSON,
 		ExternalDistributionLanes: []publishExternalLane{testLane(testToutiaoAccountID, "头条号", publishExternalDistributionSucceeded)}}
 	markExternalAutoDistributionPending(&distributed)
 	if distributed.ExternalDistributionAutoPending != "" {

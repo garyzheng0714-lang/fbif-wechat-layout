@@ -20,7 +20,7 @@ func reviewCardTestJob(stage string) publishJob {
 	return publishJob{
 		ID: 72, Stage: stage,
 		Title:      "首年销量破亿，冲进沃尔玛前五！这个女性能量饮料，靠青汁粉走红了",
-		SourceName: "FBIF食品饮料创新", Author: "FBIF食品饮料创新",
+		SourceName: "FBIF食品饮料创新", Author: "FBIF食品饮料创新", SourceDeclaredOriginal: true,
 		Summary:           "靠青汁粉走红的女性能量饮料，凭什么首年销售额破亿冲进沃尔玛前五？",
 		Tags:              []string{"能量饮料", "女性消费"},
 		SourceURL:         "https://mp.weixin.qq.com/s?__biz=MzA5&mid=1&idx=1&sn=abc",

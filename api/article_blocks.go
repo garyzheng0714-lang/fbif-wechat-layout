@@ -52,7 +52,7 @@ type articleBlocksResponse struct {
 	Provenance        *articleProvenance `json:"provenance,omitempty" doc:"原创还是转载、转载自谁：和发布流程定 FoodTalks 来源类型同一个判定，网站开头署名和文末声明照它写"`
 }
 
-// articleProvenance 文章是谁的：和 CMS 原创/转载同一个判定（publishArticleProvenance）。
+// articleProvenance 文章是谁的：和 CMS 原创/转载、审核卡、外发同一个判定（publishArticleProvenance）。
 // 转载但来源是自家号（自家号发的稿子明写「本文为转载文章」、说不出原作者，#294）时不给来源，
 // 网站写「本文为转载文章」。
 type articleProvenance struct {

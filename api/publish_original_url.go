@@ -245,7 +245,7 @@ func preferOriginalSourceURL(fetched, existing string) string {
 
 // publishJobIsOwnAccountRepost 自家公众号转发外部稿。提交链接是自家转载页，不是原文。
 func publishJobIsOwnAccountRepost(job publishJob) bool {
-	original, _ := publishArticleProvenance(job)
+	original, _, _ := publishArticleProvenance(job)
 	if original {
 		return false
 	}
@@ -286,7 +286,7 @@ func (p *publishPipeline) ensureRepostOriginalURL(ctx context.Context, job *publ
 // repostOriginalFor 算出自家号转载稿该记的原文链接与真标题（不落库）。没有阅读原文就检索核验；
 // 已有阅读原文且是公众号文章、还没记过它的标题，就抓页取真标题（FBIF 转载常改标题）。
 func repostOriginalFor(ctx context.Context, job publishJob) (publishJob, bool) {
-	_, source := publishArticleProvenance(job)
+	_, source, _ := publishArticleProvenance(job)
 	if publishJobNeedsOriginalURLSearch(job) {
 		found := resolveRepostOriginal(ctx, job.Title, source, job.SourceURL, publishJobBodyParagraphs(job.BlocksJSON))
 		if !isHTTPURL(found.URL) {

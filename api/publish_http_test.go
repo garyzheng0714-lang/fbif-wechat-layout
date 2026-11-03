@@ -994,8 +994,10 @@ func TestRenderSiteHTMLReusesProxyCore(t *testing.T) {
 			map[string]any{"original": false}},
 		{"AI 抽到外部出处", publishJob{SourceName: "FBIF食品饮料创新", AISource: "晚点LatePost", BlocksJSON: `[{"k":"txt","text":"正文"}]`},
 			map[string]any{"original": false, "source": "晚点LatePost"}},
-		{"自家原创", publishJob{SourceName: "FBIF食品饮料创新", BlocksJSON: `[{"k":"txt","text":"正文"}]`},
+		{"自家号、公众号标了原创", publishJob{SourceName: "FBIF食品饮料创新", SourceDeclaredOriginal: true, BlocksJSON: `[{"k":"txt","text":"正文"}]`},
 			map[string]any{"original": true}},
+		{"自家号、什么都没声明（投稿）", publishJob{SourceName: "FBIF食品饮料创新", BlocksJSON: `[{"k":"txt","text":"正文"}]`},
+			map[string]any{"original": false}},
 	} {
 		gotBody = nil
 		if _, err := renderSiteHTML(publishRenderContext(context.Background(), sitePublishRulePackID, tc.job), "T", "src", tc.job.BlocksJSON, true); err != nil {

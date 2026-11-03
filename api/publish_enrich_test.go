@@ -164,22 +164,6 @@ func TestPublishEnrichingInjectsMetadata(t *testing.T) {
 	}
 }
 
-func TestPublishSiteIsRepostIsCMSProvenanceNotLayout(t *testing.T) {
-	t.Setenv(siteOwnAccountsEnv, "FBIF食品饮料创新,FoodTalks")
-	plain := `[{"k":"txt","runs":[{"type":"txt","text":"正文内容"}]}]`
-	disclosed := `[{"k":"txt","runs":[{"type":"txt","text":"* 本文为转载文章。"}]},{"k":"txt","runs":[{"type":"txt","text":"正文内容"}]}]`
-
-	if publishSiteIsRepost("FBIF食品饮料创新", plain) {
-		t.Fatal("自家公众号且无转载声明时 CMS 来源类型应为原创")
-	}
-	if !publishSiteIsRepost("外部食品媒体", plain) {
-		t.Fatal("外部公众号 CMS 来源类型应为转载")
-	}
-	if !publishSiteIsRepost("FBIF食品饮料创新", disclosed) {
-		t.Fatal("自家公众号正文明确声明转载时，CMS 来源类型必须为转载")
-	}
-}
-
 func TestPublishHTMLWechatTrailerLeakRejectsWechatChrome(t *testing.T) {
 	if got := publishHTMLWechatTrailerLeak(`<p>正文</p><p>*资讯投稿与商务合作，请联系Bobo。</p><p>加入微信群</p>`); got != "" {
 		t.Fatalf("网站页脚合法文案不应判泄漏：%s", got)
@@ -421,8 +405,9 @@ func TestBuildSiteNewsConsumesAIFields(t *testing.T) {
 	if news.Author != "" {
 		t.Fatalf("Author 为空不得回落 source_name（编辑部 132/163 作者为空），实际 %q", news.Author)
 	}
-	// 自家号 → 原创（source_type=0）。
+	// 自家号、公众号标了原创 → 原创（source_type=0）。
 	job.SourceName = "FBIF食品饮料创新"
+	job.SourceDeclaredOriginal = true
 	news, _ = p.buildSiteNews(context.Background(), job, foodTalksPublishStatusDraft)
 	if news.SourceType != 0 || news.SourceName != "FBIF食品饮料创新" {
 		t.Fatalf("自家号应判原创：type=%d name=%q", news.SourceType, news.SourceName)
