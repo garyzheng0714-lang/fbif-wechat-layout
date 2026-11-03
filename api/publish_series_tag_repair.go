@@ -7,7 +7,8 @@ package main
 //   - 流水线转载稿的转载声明《本稿标题》→ 链到核验过的原文、换成原文真标题（repairRepostNoticeTitle，2026-10-14）；
 //   - 旧排版改成「。」的英文缩写点（`Salt Co。和`）改回半角（repairAbbreviationPeriods，2026-10-23）；
 //   - 流水线转载稿文末写成了「本文为FBIF…原创」→ 照发布流程的判定改成原作者或「本文为转载文章」
-//    （repairRepostNoticeSource，2026-10-30 #309：编辑在网站上改过错字，整篇重新同步会被拦）。
+//    （repairRepostNoticeSource，2026-10-30 #309：编辑在网站上改过错字，整篇重新同步会被拦）；网站上标的还是原创的，
+//    来源类型、来源、分类也照发布流程改成转载（2026-11-03 #340：读者投稿被当原创，网站标着原创、挂在原创栏目）。
 
 import (
 	"context"
@@ -25,6 +26,8 @@ type newsLinkRepairResult struct {
 	RepostNoticeTitle string `json:"repost_notice_title,omitempty"`
 	// RepostNoticeSource 文末声明改成的开头（「*本文为新周刊原创」）。
 	RepostNoticeSource string `json:"repost_notice_source,omitempty"`
+	// SourceTypeRepost 网站上标的原创改成了转载（来源类型、来源、分类照发布流程的判定）。
+	SourceTypeRepost bool `json:"source_type_repost,omitempty"`
 	// AbbreviationPeriods 改回半角的英文缩写点数。
 	AbbreviationPeriods int `json:"abbreviation_periods,omitempty"`
 }
@@ -71,6 +74,7 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 		content = p.rewriteMoteSeriesLinks(ctx, job, content)
 	}
 	content, res.RepostNoticeSource = repairRepostNoticeSource(job, content)
+	res.SourceTypeRepost = res.RepostNoticeSource != "" && live.SourceType == 0
 	content, res.RepostNoticeTitle = p.repairRepostNoticeTitle(ctx, job, content, dryRun)
 	content, res.AbbreviationPeriods = repairAbbreviationPeriods(content)
 	if content == live.Content {
@@ -82,6 +86,17 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 	}
 	news := foodTalksNews{ID: newsID, Content: content, TOC: live.TOC}
 	preserveFoodTalksLiveMetadata(&news, live)
+	if res.SourceTypeRepost {
+		sourceType, sourceName := siteSourceFor(job)
+		news.SourceType = sourceType
+		if sourceName != "" && normalizeFoodTalksSourceName(sourceName) != normalizeFoodTalksSourceName(live.SourceName) {
+			news.SourceName, news.SourceID = sourceName, p.articleSourceID(ctx, sourceName)
+		}
+		var err error
+		if news.PrimaryCategoryID, news.CategoryIDs, err = siteCategoryIDsFor(sourceType); err != nil {
+			return res, err
+		}
+	}
 	if err := ft.UpdateNews(ctx, news); err != nil {
 		return res, fmt.Errorf("写回网站失败: %w", err)
 	}

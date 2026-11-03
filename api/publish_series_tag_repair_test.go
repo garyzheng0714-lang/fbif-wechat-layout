@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -304,6 +305,12 @@ func TestRepairNewsLinksRepostNoticeSource(t *testing.T) {
 	}
 	if res := run(63280, live, false); !res.Changed || len(stub.puts) != 1 || stub.puts[0].Content != body+notice("*本文为新周刊原创") {
 		t.Fatalf("只换声明开头：%+v\n got %s", res, stub.puts[0].Content)
+	}
+	// 2026-11-03 #340：网站上标着原创、挂在原创栏目的，来源类型、来源、分类一起改成转载。
+	repostPrimary, repostCategories, _ := siteCategoryIDsFor(1)
+	if put := stub.puts[0]; put.SourceType != 1 || put.SourceName != "新周刊" || put.PrimaryCategoryID != repostPrimary ||
+		fmt.Sprint(put.CategoryIDs) != fmt.Sprint(repostCategories) {
+		t.Fatalf("网站来源类型、来源、分类改成转载：type=%d name=%q cats=%d %v", put.SourceType, put.SourceName, put.PrimaryCategoryID, put.CategoryIDs)
 	}
 	if res := run(63280, stub.puts[0].Content, false); res.Changed || len(stub.puts) != 1 {
 		t.Fatalf("已改好的不再写：%+v", res)
