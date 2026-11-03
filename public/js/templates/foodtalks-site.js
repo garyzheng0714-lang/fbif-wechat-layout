@@ -375,12 +375,32 @@ function markTocEntries(elems) {
   return out;
 }
 
+function runEmphasisStyle(r) {
+  const parts = [];
+  const size = Number(r && r.fontSize);
+  if (Number.isFinite(size) && size > 0) parts.push('font-size: ' + size + 'px');
+  const color = String((r && r.color) || '').replace(/^#/, '');
+  if (/^[0-9a-fA-F]{6}$/.test(color)) parts.push('color: #' + color.toLowerCase());
+  if (!parts.length) return '';
+  return parts.join('; ') + ';';
+}
+
+function wrapRunEmphasis(html, r) {
+  if (!html) return html;
+  let s = html;
+  if (r && r.italic) s = '<em>' + s + '</em>';
+  const style = runEmphasisStyle(r);
+  if (style) s = '<span style="' + style + '">' + s + '</span>';
+  return s;
+}
+
 function renderRuns(runs, config = {}) {
   let leading = '';
   return (runs || []).filter(r => r.type !== 'img').map(r => {
     const before = leading;
     leading += r.text || '';
     if (r.type === 'txt') {
+      if (r.text === '\n') return '<br>';
       let s = esc(normalizeChinesePunctuation(r.text, before));
       if (r.bold || r.interviewSpeaker) s = '<strong>' + s + '</strong>';
       // 排版规范 (6)：提问方 FoodTalks 蓝并加粗，回答方默认颜色并加粗
@@ -389,13 +409,12 @@ function renderRuns(runs, config = {}) {
         const color = cfgColor(config, 'tip_title_color', '#01396a');
         s = `<span style="color: ${color};">${s}</span>`;
       }
-      if (r.italic) s = '<em>' + s + '</em>';
-      return s;
+      return wrapRunEmphasis(s, r);
     }
     if (r.type === 'link') {
       const h = r.href || '';
-      if (!/^https?:\/\//i.test(h)) return esc(r.text);
-      return '<a href="' + escAttr(h) + '" target="_blank" rel="noopener">' + esc(r.text) + '</a>';
+      if (!/^https?:\/\//i.test(h)) return wrapRunEmphasis(esc(r.text), r);
+      return wrapRunEmphasis('<a href="' + escAttr(h) + '" target="_blank" rel="noopener">' + esc(r.text) + '</a>', r);
     }
     return '';
   }).join('');

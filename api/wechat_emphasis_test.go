@@ -83,8 +83,8 @@ func TestTeaHistoryKeepsInlineEmphasisAndTightLines(t *testing.T) {
 		}
 	}
 	follow := findBlockByText(blocks, "这十个名字")
-	if follow == nil || !follow.TightBefore {
-		t.Fatalf("名单最后一行的下一段原文没有段距，got %#v", follow)
+	if follow == nil || follow.TightBefore {
+		t.Fatalf("名单最后一行自己有段后距，下一段应照常隔开，got %#v", follow)
 	}
 }
 
