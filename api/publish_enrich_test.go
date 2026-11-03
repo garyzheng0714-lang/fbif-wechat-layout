@@ -748,6 +748,60 @@ func TestAIResponsesRetriesRateLimit(t *testing.T) {
 	}
 }
 
+// TestAIRewriteCallTurnsThinkingOff 改写短文字走 Chat Completions、带 thinking.type=disabled（Responses 接口不认它，
+// 2026-11-03 #340 缩一条图注想了 80 秒），429 照样退避重试。
+func TestAIRewriteCallTurnsThinkingOff(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model    string              `json:"model"`
+			Messages []map[string]string `json:"messages"`
+			Thinking map[string]string   `json:"thinking"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("解析请求体失败: %v", err)
+		}
+		if r.URL.Path != mimoChatPath || body.Thinking["type"] != "disabled" || body.Model != "mimo-v2.6-flash" ||
+			len(body.Messages) != 2 || body.Messages[0]["role"] != "system" || body.Messages[0]["content"] != "sys" ||
+			body.Messages[1]["role"] != "user" || body.Messages[1]["content"] != "原文" {
+			t.Errorf("请求不对：path=%s body=%+v", r.URL.Path, body)
+		}
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":{"message":"rate limited"}}`)
+			return
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":" 缩好的 \n"}}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MIMO_API_KEY", "k")
+	t.Setenv("MIMO_BASE_URL", srv.URL)
+	t.Setenv("MIMO_FLASH_MODEL", "")
+	noAIRetryDelay(t)
+	text, err := aiRewriteCall(context.Background(), aiModel(aiTierFlash), "sys", "原文")
+	if err != nil || text != "缩好的" || calls != 2 {
+		t.Fatalf("应重试一次后拿到回答：text=%q err=%v calls=%d", text, err, calls)
+	}
+	for _, c := range []struct {
+		status int
+		body   string
+		want   string
+	}{
+		{http.StatusBadRequest, `{"error":{"message":"bad"}}`, "HTTP 400"},
+		{http.StatusOK, `{"choices":[]}`, "没有模型输出文本"},
+		{http.StatusOK, `{"error":{"message":"额度用完"}}`, "额度用完"},
+	} {
+		if _, err := aiExtractChatText([]byte(c.body), c.status); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("%d %s 应报含「%s」的错，实际 %v", c.status, c.body, c.want, err)
+		}
+	}
+}
+
 // TestAIModelTiers 默认档位与 env 覆盖。
 func TestAIModelTiers(t *testing.T) {
 	t.Setenv("MIMO_PRO_MODEL", "")

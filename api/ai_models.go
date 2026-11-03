@@ -7,6 +7,8 @@ package main
 //   - Flash（mimo-v2.6-flash）：看图（2026-10-07 实测 Pro 带图请求卡在服务端
 //     PROCESSING 后报 INTERNAL_ERROR，用户改定看图用 Flash），以及翻译等高频、批量任务。
 //
+// 缩写标题、摘要、图注这类改一小段字的，走 aiRewriteCall（关掉思考），别的走 aiResponsesCall。
+//
 // 新增 AI 调用必须先在这里选档（aiTierPro / aiTierVision / aiTierFlash），禁止在业务
 // 文件里写模型名字面量或另接一家供应商。
 
@@ -29,6 +31,7 @@ const (
 	mimoFlashModelEnv  = "MIMO_FLASH_MODEL"
 	defaultMimoBaseURL = "https://api.xiaomimimo.com/v1"
 	mimoResponsesPath  = "/responses"
+	mimoChatPath       = "/chat/completions"
 
 	defaultMimoProModel   = "mimo-v2.6-pro"
 	defaultMimoFlashModel = "mimo-v2.6-flash"
@@ -124,22 +127,39 @@ func aiRetryable(err error) bool {
 // aiResponsesCall Responses API 调用内核：payload 组装、HTTP、输出文本提取。
 // userContent 允许含 input_image（多模态）。
 func aiResponsesCall(ctx context.Context, model, systemPrompt string, userContent []map[string]any) (string, error) {
-	apiKey, baseURL, err := aiCredential(ctx)
-	if err != nil {
-		return "", err
-	}
-	payload, err := json.Marshal(map[string]any{
+	return aiCall(ctx, mimoResponsesPath, map[string]any{
 		"model": model,
 		"input": []any{
 			map[string]any{"role": "system", "content": []map[string]any{{"type": "input_text", "text": systemPrompt}}},
 			map[string]any{"role": "user", "content": userContent},
 		},
-	})
+	}, aiExtractOutputText)
+}
+
+// aiRewriteCall 改写一小段字（缩标题、摘要、图注），不让模型先思考。
+// MiMo V2.6 默认先思考再答，Responses 接口不认关思考的参数：2026-11-03 实测带上 thinking.type=disabled
+// 照样想 400–1800 个 token，缩一条图注 5–80 秒，#340 两条图注把 2 分钟耗光、都没缩成。
+// Chat Completions 认 thinking.type=disabled，同一条 1.6–7 秒、不思考。字数由调用方按平台数法核对，超了再缩。
+func aiRewriteCall(ctx context.Context, model, systemPrompt, text string) (string, error) {
+	return aiCall(ctx, mimoChatPath, map[string]any{
+		"model":    model,
+		"messages": []map[string]string{{"role": "system", "content": systemPrompt}, {"role": "user", "content": text}},
+		"thinking": map[string]string{"type": "disabled"},
+	}, aiExtractChatText)
+}
+
+// aiCall 发一次 MiMo 请求（429、500、503 按 aiRetryDelays 退避重试），extract 从响应里取出模型的回答。
+func aiCall(ctx context.Context, path string, body map[string]any, extract func([]byte, int) (string, error)) (string, error) {
+	apiKey, baseURL, err := aiCredential(ctx)
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return "", fmt.Errorf("序列化 MiMo 请求失败: %w", err)
 	}
 	for attempt := 0; ; attempt++ {
-		text, err := aiResponsesOnce(ctx, apiKey, baseURL, payload)
+		text, err := aiPostOnce(ctx, apiKey, baseURL+path, payload, extract)
 		if err == nil || !aiRetryable(err) || attempt >= len(aiRetryDelays) {
 			return text, err
 		}
@@ -151,8 +171,8 @@ func aiResponsesCall(ctx context.Context, model, systemPrompt string, userConten
 	}
 }
 
-func aiResponsesOnce(ctx context.Context, apiKey, baseURL string, payload []byte) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+mimoResponsesPath, bytes.NewReader(payload))
+func aiPostOnce(ctx context.Context, apiKey, url string, payload []byte, extract func([]byte, int) (string, error)) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("构造 MiMo 请求失败: %w", err)
 	}
@@ -167,7 +187,51 @@ func aiResponsesOnce(ctx context.Context, apiKey, baseURL string, payload []byte
 	if err != nil {
 		return "", fmt.Errorf("读 MiMo 响应失败: %w", err)
 	}
-	return aiExtractOutputText(respBody, resp.StatusCode)
+	return extract(respBody, resp.StatusCode)
+}
+
+// aiDecode 读 MiMo 响应：HTTP 出错、带 error 的报错，否则解进 out。
+func aiDecode(respBody []byte, statusCode int, out any) error {
+	var e struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &e); err != nil {
+		if statusCode != http.StatusOK {
+			return &aiStatusError{Status: statusCode}
+		}
+		return fmt.Errorf("MiMo 响应不是预期 JSON（HTTP %d）: %w", statusCode, err)
+	}
+	msg := ""
+	if e.Error != nil {
+		msg = e.Error.Message
+	}
+	if statusCode != http.StatusOK {
+		return &aiStatusError{Status: statusCode, Message: msg}
+	}
+	if msg != "" {
+		return fmt.Errorf("MiMo 调用失败: %s", msg)
+	}
+	return json.Unmarshal(respBody, out)
+}
+
+// aiExtractChatText Chat Completions 响应 → 模型输出文本（第一个回答的 content）。
+func aiExtractChatText(respBody []byte, statusCode int) (string, error) {
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := aiDecode(respBody, statusCode, &out); err != nil {
+		return "", err
+	}
+	if len(out.Choices) == 0 || strings.TrimSpace(out.Choices[0].Message.Content) == "" {
+		return "", errors.New("MiMo 响应没有模型输出文本")
+	}
+	return strings.TrimSpace(out.Choices[0].Message.Content), nil
 }
 
 // aiExtractOutputText Responses API 响应 → 模型输出文本：遍历 output[].content[] 拼接
@@ -182,25 +246,9 @@ func aiExtractOutputText(respBody []byte, statusCode int) (string, error) {
 				Text string `json:"text"`
 			} `json:"content"`
 		} `json:"output"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
 	}
-	if err := json.Unmarshal(respBody, &out); err != nil {
-		if statusCode != http.StatusOK {
-			return "", &aiStatusError{Status: statusCode}
-		}
-		return "", fmt.Errorf("MiMo 响应不是预期 JSON（HTTP %d）: %w", statusCode, err)
-	}
-	if statusCode != http.StatusOK {
-		msg := ""
-		if out.Error != nil {
-			msg = out.Error.Message
-		}
-		return "", &aiStatusError{Status: statusCode, Message: msg}
-	}
-	if out.Error != nil && out.Error.Message != "" {
-		return "", fmt.Errorf("MiMo 调用失败: %s", out.Error.Message)
+	if err := aiDecode(respBody, statusCode, &out); err != nil {
+		return "", err
 	}
 	var sb strings.Builder
 	for _, item := range out.Output {

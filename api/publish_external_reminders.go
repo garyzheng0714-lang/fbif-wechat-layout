@@ -645,7 +645,7 @@ func (p *publishPipeline) suggestExternalText(ctx context.Context, kind, current
 		floor = fmt.Sprintf("、不少于 %d 个字", min)
 	}
 	prompt := fmt.Sprintf(externalShortenPrompt, kind, max, floor, kind)
-	text, err := aiResponsesCall(ctx, aiModel(aiTierFlash), prompt, []map[string]any{{"type": "input_text", "text": current}})
+	text, err := aiRewriteCall(ctx, aiModel(aiTierFlash), prompt, current)
 	if err != nil {
 		return "", err
 	}

@@ -106,7 +106,7 @@ func (p *publishPipeline) askCaptionAI(ctx context.Context, desc string, max int
 		text, err = p.externalCaptionAI(ctx, desc, max, countNote+again)
 	} else {
 		prompt := fmt.Sprintf(externalCaptionPrompt, max, countNote, again)
-		text, err = aiResponsesCall(ctx, aiModel(aiTierFlash), prompt, []map[string]any{{"type": "input_text", "text": desc}})
+		text, err = aiRewriteCall(ctx, aiModel(aiTierFlash), prompt, desc)
 	}
 	if err != nil {
 		return "", err
