@@ -808,6 +808,11 @@ func robotPlatformState(lane publishExternalLane, profile distributionPlatform) 
 		state.Fidelity = lane.Fidelity.Note
 	case publishExternalDistributionProcessing(lane.State):
 		state.Status, state.Tone = "同步中", "blue"
+	case lane.State == publishExternalDistributionUnpublished:
+		// 文章已不公开：不给文章链接，要看去平台后台。
+		state.Status, state.Tone, state.URL = "已下线", "grey", ""
+		state.Reason = lane.Error
+		state.ManageURL = profile.ManageURL
 	case lane.State == publishExternalDistributionRejected:
 		state.Status, state.Tone = "未通过", "red"
 		state.Reason = firstNonEmpty(lane.Error, "平台没给原因")

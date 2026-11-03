@@ -949,6 +949,44 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "queued": true})
 	})
 
+	// 把发到某个号上的这篇下线（2026-11-03 #340 读者投稿被误判原创、自动发出去）：经分发服务下线，做成了卡片那一行
+	// 改「已下线」、灰字写 reason，不再自动发、不给重新同步。dry_run 只核对能不能下、不碰平台；分发服务还在做回 202，
+	// 过一会儿再调同一个接口。真下线是对外动作，先问过用户。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/external-distribution/unpublish", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		var body struct {
+			AccountID string `json:"account_id"`
+			Reason    string `json:"reason"`
+			DryRun    bool   `json:"dry_run"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil ||
+			strings.TrimSpace(body.AccountID) == "" || strings.TrimSpace(body.Reason) == "" {
+			writeError(w, http.StatusBadRequest, "请求体必须是 JSON：{\"account_id\":\"rec…\",\"reason\":\"为什么下线（写在卡片上）\",\"dry_run\":true}")
+			return
+		}
+		if !body.DryRun && !requireDeploymentWritesActive(w) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Minute)
+		defer cancel()
+		lane, err := p.unpublishExternalAccount(ctx, id, body.AccountID, strings.TrimSpace(body.Reason), publishExternalAdminUnpublishActor, body.DryRun)
+		summary := map[string]any{"account_id": lane.AccountID, "name": lane.Name, "state": lane.State, "url": lane.URL}
+		switch {
+		case errors.Is(err, errExternalUnpublishPending):
+			writeJSON(w, http.StatusAccepted, map[string]any{"error": err.Error(), "lane": summary})
+		case err != nil:
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "lane": summary})
+		default:
+			writeJSON(w, http.StatusOK, map[string]any{"dry_run": body.DryRun, "lane": summary})
+		}
+	})
+
 	// 存量原创补发到 auto 账号（2026-10-10 用户裁定）：只记待办，由自动外发按补发配额
 	// 逐日推送；dry_run 只列名单。since 为 RFC3339，按公开时间筛选。
 	mux.HandleFunc("POST /api/publish/external-distribution/auto-backfill", func(w http.ResponseWriter, r *http.Request) {

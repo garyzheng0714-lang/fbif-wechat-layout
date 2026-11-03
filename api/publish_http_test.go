@@ -70,6 +70,7 @@ func TestPublishEndpointsRequireAdminRole(t *testing.T) {
 		{http.MethodPost, "/api/publish/repair-wechat-trailer", ""},
 		{http.MethodPost, "/api/publish/jobs/1/retry-external-distribution", ""},
 		{http.MethodPost, "/api/publish/jobs/1/external-distribution/sync", `{"account_id":"recTestToutiao01"}`},
+		{http.MethodPost, "/api/publish/jobs/1/external-distribution/unpublish", `{"account_id":"recTestToutiao01","reason":"误发"}`},
 		{http.MethodPost, "/api/publish/jobs/1/ack-cms-published", ""},
 		{http.MethodPost, "/api/publish/jobs/1/source-resync", ""},
 		{http.MethodPost, "/api/publish/jobs/1/source-resync?dry_run=1", ""},

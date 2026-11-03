@@ -24,11 +24,12 @@ import (
 const (
 	publishExternalDistributionQueued                 = "queued"
 	publishExternalDistributionPushing                = "pushing"
-	publishExternalDistributionPolling                = "polling"    // 只有云梭旧 lane 有，读盘即转待核对
-	publishExternalDistributionPublishing             = "publishing" // 草稿存好了，分发服务在点发布
-	publishExternalDistributionReviewing              = "reviewing"  // 点完了，平台在审核（含定时待发），分发服务接着查
-	publishExternalDistributionSucceeded              = "succeeded"  // 已发布，lane.URL 是文章链接
-	publishExternalDistributionRejected               = "rejected"   // 平台审核没通过：终态，不再自动发
+	publishExternalDistributionPolling                = "polling"     // 只有云梭旧 lane 有，读盘即转待核对
+	publishExternalDistributionPublishing             = "publishing"  // 草稿存好了，分发服务在点发布
+	publishExternalDistributionReviewing              = "reviewing"   // 点完了，平台在审核（含定时待发），分发服务接着查
+	publishExternalDistributionSucceeded              = "succeeded"   // 已发布，lane.URL 是文章链接
+	publishExternalDistributionRejected               = "rejected"    // 平台审核没通过：终态，不再自动发
+	publishExternalDistributionUnpublished            = "unpublished" // 发出去后又从平台下线了（publish_external_unpublish.go）：终态，不再自动发、不给重新同步
 	publishExternalDistributionPartialFailed          = "partial_failed"
 	publishExternalDistributionFailed                 = "failed"
 	publishExternalDistributionReconciliationRequired = "reconciliation_required"

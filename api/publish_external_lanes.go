@@ -23,7 +23,7 @@ type publishExternalLane struct {
 	// Driver 送稿方式：robot 是自己的分发服务；空是云梭留下的旧 lane，只显示。
 	Driver externalDriver `json:"driver,omitempty"`
 	// 经分发服务的：queued → pushing → publishing → reviewing → succeeded，旁支 draft_saved（草稿与原文
-	// 对不上、没发）、rejected（平台没通过）、failed、reconciliation_required；人工登记的是 manual。
+	// 对不上、没发）、rejected（平台没通过）、failed、reconciliation_required，已发布的下线后是 unpublished；人工登记的是 manual。
 	// 云梭的旧 lane 只有 succeeded / failed / reconciliation_required。
 	State          string `json:"state"`
 	RequestedBy    string `json:"requested_by,omitempty"`
@@ -166,7 +166,7 @@ func externalDistributionSummaryState(job publishJob) string {
 		switch {
 		case publishExternalDistributionProcessing(lane.State) || lane.State == publishExternalDistributionReviewing:
 			return publishExternalDistributionPolling
-		case externalLaneSettled(lane) || lane.State == publishExternalDistributionDraftSaved:
+		case externalLaneSettled(lane) || lane.State == publishExternalDistributionDraftSaved || lane.State == publishExternalDistributionUnpublished:
 			settled++
 		case lane.State == publishExternalDistributionReconciliationRequired:
 			reconcile++

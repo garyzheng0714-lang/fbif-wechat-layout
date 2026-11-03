@@ -175,6 +175,8 @@ type distributionRobotAPI interface {
 	Draft(ctx context.Context, platform, key string) (robotDraftRecord, error)
 	// Publish 把这个键存好的草稿发出去；actor 记进分发服务的这次动作（飞书 open_id 或 system:…）。
 	Publish(ctx context.Context, platform, key, actor string) (robotDraftRecord, error)
+	// Unpublish 把这个键已发布的那篇下线（publish_external_unpublish.go）。
+	Unpublish(ctx context.Context, platform, key, actor string) (robotDraftRecord, error)
 }
 
 // 分发服务错误响应里的 outcome：这次有没有动手。
@@ -273,13 +275,22 @@ func (c *distributionRobotClient) SaveDraft(ctx context.Context, platform string
 // Publish 发布要点会生效的按钮：分发服务最多等 60 秒，做完回 200，还没做完回 202（action.status
 // 是 doing），之后 GET 看结果。点下去以后它绝不自动再点，所以说不准时再调也安全。
 func (c *distributionRobotClient) Publish(ctx context.Context, platform, key, actor string) (robotDraftRecord, error) {
+	return c.act(ctx, platform, key, "publish", actor)
+}
+
+// Unpublish 下线和发布一样：最多等 60 秒，做完回 200，还没做完回 202，再调同一个键只等正在做的那次。
+func (c *distributionRobotClient) Unpublish(ctx context.Context, platform, key, actor string) (robotDraftRecord, error) {
+	return c.act(ctx, platform, key, "unpublish", actor)
+}
+
+func (c *distributionRobotClient) act(ctx context.Context, platform, key, action, actor string) (robotDraftRecord, error) {
 	body, err := json.Marshal(struct {
 		Actor string `json:"actor"`
 	}{actor})
 	if err != nil {
 		return robotDraftRecord{}, &robotRejectedError{Message: "请求参数无法序列化"}
 	}
-	status, raw, err := c.do(ctx, http.MethodPost, "/v1/platforms/"+url.PathEscape(platform)+"/drafts/"+url.PathEscape(key)+"/publish", body)
+	status, raw, err := c.do(ctx, http.MethodPost, "/v1/platforms/"+url.PathEscape(platform)+"/drafts/"+url.PathEscape(key)+"/"+action, body)
 	if err != nil {
 		return robotDraftRecord{}, &robotUncertainError{Cause: err.Error()}
 	}

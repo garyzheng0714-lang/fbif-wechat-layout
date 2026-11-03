@@ -29,6 +29,10 @@ type fakeDistributionRobot struct {
 	duringSave    func(robotDraftRequest)
 	duringPublish func(key string)
 	records       map[string]robotDraftRecord
+
+	unpublishes     []string // 平台/键/actor
+	unpublishRecord *robotDraftRecord
+	unpublishErr    error
 }
 
 func (f *fakeDistributionRobot) SaveDraft(_ context.Context, platform string, req robotDraftRequest) (robotDraftRecord, error) {
@@ -80,6 +84,23 @@ func (f *fakeDistributionRobot) Publish(_ context.Context, platform, key, actor 
 	record.Action.ID = fmt.Sprintf("act-%d", len(f.publishes))
 	if f.publishRecord != nil {
 		record = *f.publishRecord
+	}
+	f.remember(key, record)
+	return record, nil
+}
+
+// Unpublish 默认当场下线：平台上仅我可见。
+func (f *fakeDistributionRobot) Unpublish(_ context.Context, platform, key, actor string) (robotDraftRecord, error) {
+	f.unpublishes = append(f.unpublishes, platform+"/"+key+"/"+actor)
+	if f.unpublishErr != nil {
+		return robotDraftRecord{}, f.unpublishErr
+	}
+	record := f.records[key]
+	if f.unpublishRecord != nil {
+		record = *f.unpublishRecord
+	} else {
+		record.State = &robotDraftState{Value: "hidden", Raw: "仅我可见"}
+		record.Action = &robotDraftAction{ID: fmt.Sprintf("unpub-%d", len(f.unpublishes)), Kind: robotActionUnpublish, Status: robotActionDone, Outcome: "by_us"}
 	}
 	f.remember(key, record)
 	return record, nil
