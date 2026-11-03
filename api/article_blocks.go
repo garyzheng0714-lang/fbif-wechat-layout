@@ -16,7 +16,7 @@ type Block struct {
 	K           string        `json:"k" doc:"块的种类，见「块的种类」"`
 	Level       int           `json:"level,omitempty" doc:"小标题级别。2 是标题1（一级），3 是标题2（二级，含「（一）」「1、」这类序号句），4 是更低一级；0 是原文没写标题标签、按字号颜色认出来的，由各渠道按一级处理或自己定级"`
 	Text        string        `json:"text,omitempty" doc:"纯文字。小标题、图注只用它；段落一般用 runs，没有 runs 时才看它"`
-	Runs        []Run         `json:"runs,omitempty" doc:"行内片段，按顺序拼起来就是这一段；加粗、链接都在片段上"`
+	Runs        []Run         `json:"runs,omitempty" doc:"行内片段，按顺序拼起来就是这一段；加粗、斜体、字色、字号、链接和段内换行都在片段上"`
 	Src         string        `json:"src,omitempty" doc:"图片或视频的原地址（公众号图床等），排版时换成转存后的地址"`
 	DataW       string        `json:"dataW,omitempty" doc:"图片原始宽度（像素，字符串），原文写了才有"`
 	DataH       string        `json:"dataH,omitempty" doc:"图片原始高度（像素，字符串），原文写了才有"`
@@ -34,10 +34,13 @@ type TableCell struct {
 }
 
 type Run struct {
-	Type string `json:"type" doc:"txt 是普通文字，link 是链接"`
-	Text string `json:"text,omitempty" doc:"这一片的文字"`
-	Bold bool   `json:"bold,omitempty" doc:"加粗。一段里所有有字的片段都加粗，这段就是「整段加粗」"`
-	Href string `json:"href,omitempty" doc:"链接地址，只有 link 才有"`
+	Type     string `json:"type" doc:"txt 是普通文字，link 是链接"`
+	Text     string `json:"text,omitempty" doc:"这一片的文字。单独一个换行是原文的段内换行，不另起一段"`
+	Bold     bool   `json:"bold,omitempty" doc:"加粗。一段里所有有字的片段都加粗，这段就是「整段加粗」"`
+	Italic   bool   `json:"italic,omitempty" doc:"斜体。作者把这一片设成斜体才有"`
+	Color    string `json:"color,omitempty" doc:"字色，6 位十六进制、不带 #。跟整篇正文一样，或原文没另设颜色时不写"`
+	FontSize int    `json:"fontSize,omitempty" doc:"字号，单位像素。跟整篇正文一样，或原文没另设字号时不写"`
+	Href     string `json:"href,omitempty" doc:"链接地址，只有 link 才有"`
 }
 
 var articleRunTypes = []string{"txt", "link"}

@@ -175,6 +175,32 @@ test('ft-default：原文单独一行的章节号「01」不进网站，下一�
   assert.equal(headingN, 2);
 });
 
+test('ft-default：公众号的灰斜体小字和段内换行写进 CMS 还能认的标签', async () => {
+  const { html } = await renderArticle({
+    packId: 'ft-default',
+    title: '世界茶叶简史',
+    source: 'FBIF食品饮料创新',
+    blocks: [
+      { k: 'txt', runs: [{ type: 'txt', text: '温馨提示：这篇简史不简，大约3.2万字。', italic: true, color: '8f959e', fontSize: 14 }] },
+      { k: 'txt', runs: [
+        { type: 'txt', text: '直白：“' },
+        { type: 'txt', text: '也就是谁白谁赢，谁的沫子先散谁输。', bold: true },
+        { type: 'txt', text: '”' },
+        { type: 'txt', text: '（杜长风教的小学生孙理说的，儿童演员陈尚均饰）', italic: true, color: '8f959e' },
+      ] },
+      { k: 'txt', runs: [
+        { type: 'txt', text: '甲' },
+        { type: 'txt', text: '\n' },
+        { type: 'txt', text: '乙' },
+      ] },
+    ],
+  });
+  assert.match(html, /<p style="text-align: justify;"><span style="font-size: 14px; color: #8f959e;"><em>温馨提示：这篇简史不简，大约3\.2万字。<\/em><\/span><\/p>/);
+  assert.match(html, /<strong>也就是谁白谁赢，谁的沫子先散谁输。<\/strong>”<span style="color: #8f959e;"><em>（杜长风教的小学生孙理说的，儿童演员陈尚均饰）<\/em><\/span>/);
+  assert.match(html, /<p style="text-align: justify;">甲<br>乙<\/p>/);
+  assert.doesNotMatch(html, /<p style="text-align: justify;">甲<\/p>\n<p style="text-align: justify;"><br><\/p>\n<p style="text-align: justify;">乙<\/p>/);
+});
+
 test('ft-default：原文紧挨着的一列短句照原文排紧，前后段落照旧空一行（#338）', async () => {
   const line = (text, extra = {}) => ({ k: 'txt', runs: [{ type: 'txt', text }], ...extra });
   const { html } = await renderArticle({
