@@ -8,7 +8,8 @@ package main
 //   - 旧排版改成「。」的英文缩写点（`Salt Co。和`）改回半角（repairAbbreviationPeriods，2026-10-23）；
 //   - 流水线转载稿文末写成了「本文为FBIF…原创」→ 照发布流程的判定改成原作者或「本文为转载文章」
 //    （repairRepostNoticeSource，2026-10-30 #309：编辑在网站上改过错字，整篇重新同步会被拦）；网站上标的还是原创的，
-//    来源类型、来源、分类也照发布流程改成转载（2026-11-03 #340：读者投稿被当原创，网站标着原创、挂在原创栏目）。
+//    来源类型、来源、分类也照发布流程改成转载（2026-11-03 #340：读者投稿被当原创，网站标着原创、挂在原创栏目）；
+//    反过来明说了 FBIF 原创、网站却标着转载的，来源类型、来源、分类改回原创（2026-11-03 #76/#89/#155）。
 
 import (
 	"context"
@@ -28,6 +29,8 @@ type newsLinkRepairResult struct {
 	RepostNoticeSource string `json:"repost_notice_source,omitempty"`
 	// SourceTypeRepost 网站上标的原创改成了转载（来源类型、来源、分类照发布流程的判定）。
 	SourceTypeRepost bool `json:"source_type_repost,omitempty"`
+	// SourceTypeOriginal 反过来：明说了 FBIF 原创、网站却标着转载的，改回原创。
+	SourceTypeOriginal bool `json:"source_type_original,omitempty"`
 	// AbbreviationPeriods 改回半角的英文缩写点数。
 	AbbreviationPeriods int `json:"abbreviation_periods,omitempty"`
 }
@@ -75,9 +78,10 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 	}
 	content, res.RepostNoticeSource = repairRepostNoticeSource(job, content)
 	res.SourceTypeRepost = res.RepostNoticeSource != "" && live.SourceType == 0
+	res.SourceTypeOriginal = siteMarkedRepostButDeclaredOriginal(job, live)
 	content, res.RepostNoticeTitle = p.repairRepostNoticeTitle(ctx, job, content, dryRun)
 	content, res.AbbreviationPeriods = repairAbbreviationPeriods(content)
-	if content == live.Content {
+	if content == live.Content && !res.SourceTypeOriginal {
 		return res, nil
 	}
 	res.Changed = true
@@ -86,7 +90,7 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 	}
 	news := foodTalksNews{ID: newsID, Content: content, TOC: live.TOC}
 	preserveFoodTalksLiveMetadata(&news, live)
-	if res.SourceTypeRepost {
+	if res.SourceTypeRepost || res.SourceTypeOriginal {
 		sourceType, sourceName := siteSourceFor(job)
 		news.SourceType = sourceType
 		if sourceName != "" && normalizeFoodTalksSourceName(sourceName) != normalizeFoodTalksSourceName(live.SourceName) {
@@ -101,6 +105,17 @@ func (p *publishPipeline) repairNewsLinks(ctx context.Context, newsID int64, dry
 		return res, fmt.Errorf("写回网站失败: %w", err)
 	}
 	return res, nil
+}
+
+// siteMarkedRepostButDeclaredOriginal 流水线稿判定是 FBIF 原创（公众号标了原创，或正文明写「本文为FBIF原创」），
+// 网站却标着转载（2026-11-03 #76/#89/#155：旧判定不认「本文为FBIF原创」里的「FBIF」是自家，来源类型写成了转载）。
+// 编辑手工稿没有任务库记录，不判。
+func siteMarkedRepostButDeclaredOriginal(job publishJob, live foodTalksNewsDetail) bool {
+	if job.ID <= 0 || live.SourceType == 0 {
+		return false
+	}
+	original, _, _ := publishArticleProvenance(job)
+	return original
 }
 
 // newsLinkRepairJob 流水线发过的稿用任务库里那单（作者、正文块、公众号身份都在）；编辑手工稿

@@ -331,6 +331,35 @@ func TestRepairNewsLinksRepostNoticeSource(t *testing.T) {
 			t.Fatalf("%s 不得改：%+v", c.name, res)
 		}
 	}
+
+	// 反过来（2026-11-03 #76/#89/#155）：明说了 FBIF 原创、网站却标着转载的，正文不动，来源类型、来源、分类改回原创。
+	runAs := func(newsID int64, sourceType int, sourceName string) newsLinkRepairResult {
+		t.Helper()
+		stub.live = foodTalksNewsDetail{ID: newsID, Author: "FBIF", Content: live, PublishStatus: foodTalksPublishStatusPublished,
+			Language: "ZH", SourceType: sourceType, SourceName: sourceName}
+		res, err := p.repairNewsLinks(context.Background(), newsID, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := runAs(63281, 1, "FBIF")
+	originalPrimary, originalCategories, _ := siteCategoryIDsFor(0)
+	if put := stub.puts[len(stub.puts)-1]; !res.Changed || !res.SourceTypeOriginal || len(stub.puts) != 3 || put.Content != live ||
+		put.SourceType != 0 || put.SourceName != "FBIF食品饮料创新" || put.PrimaryCategoryID != originalPrimary ||
+		fmt.Sprint(put.CategoryIDs) != fmt.Sprint(originalCategories) {
+		t.Fatalf("自家原创标成转载要改回原创：%+v put=%+v", res, put)
+	}
+	for _, c := range []struct {
+		name   string
+		newsID int64
+	}{{"判定是转载", 63282}, {"编辑手工稿（任务库里没有）", 63999}} {
+		before := len(stub.puts)
+		res := runAs(c.newsID, 1, "FBIF")
+		if res.SourceTypeOriginal || (len(stub.puts) > before && stub.puts[len(stub.puts)-1].SourceType != 1) {
+			t.Fatalf("%s 不得改成原创：%+v", c.name, res)
+		}
+	}
 }
 
 // 2026-10-23 #289：旧排版把「Salt Co.和」改成「Salt Co。和」。存量稿只把缩写后的「。」改回半角，句末不动。
