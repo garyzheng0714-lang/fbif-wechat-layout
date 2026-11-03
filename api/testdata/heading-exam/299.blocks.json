@@ -8,7 +8,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "作者：Pride"
+          "text": "作者：Pride",
+          "color": "396fbc"
         }
       ]
     },
@@ -17,7 +18,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "编辑：Bobo"
+          "text": "编辑：Bobo",
+          "color": "396fbc"
         }
       ],
       "tightBefore": true
@@ -458,7 +460,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "参考来源："
+          "text": "参考来源：",
+          "color": "888888"
         }
       ]
     },
@@ -467,7 +470,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[1]伊藤園、粉末茶を「1プッシュで1杯」に　新商品「ぷしゅぷしゅボトル」でマイボトル需要取り込む，2026.10，食品產業新聞社"
+          "text": "[1]伊藤園、粉末茶を「1プッシュで1杯」に　新商品「ぷしゅぷしゅボトル」でマイボトル需要取り込む，2026.10，食品產業新聞社",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -487,7 +491,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为FBIF原创，欢迎转发朋友圈；"
+          "text": "* 本文为FBIF原创，欢迎转发朋友圈；",
+          "color": "888888"
         }
       ]
     },
@@ -496,7 +501,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 转载请在后台回复“转载”了解规则；"
+          "text": "* 转载请在后台回复“转载”了解规则；",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -506,7 +512,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）",
+          "color": "888888"
         }
       ],
       "tightBefore": true

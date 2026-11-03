@@ -8,7 +8,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "来源：那个NG（ID：huxiu4youth）"
+          "text": "来源：那个NG（ID：huxiu4youth）",
+          "color": "0070c0"
         }
       ]
     },
@@ -17,7 +18,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "出品：虎嗅青年文化组"
+          "text": "出品：虎嗅青年文化组",
+          "color": "0070c0"
         }
       ],
       "tightBefore": true
@@ -593,7 +595,8 @@
         {
           "type": "txt",
           "text": "提示：",
-          "bold": true
+          "bold": true,
+          "fontSize": 17
         }
       ]
     },
@@ -602,7 +605,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为转载文章。"
+          "text": "* 本文为转载文章。",
+          "color": "888888"
         }
       ]
     },
@@ -611,7 +615,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）",
+          "color": "888888"
         }
       ],
       "tightBefore": true

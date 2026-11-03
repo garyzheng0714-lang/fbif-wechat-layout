@@ -19,7 +19,7 @@
               "description": "段落"
             },
             "runs": {
-              "description": "行内片段，按顺序拼起来就是这一段；加粗、链接都在片段上",
+              "description": "行内片段，按顺序拼起来就是这一段；加粗、斜体、字色、字号、链接和段内换行都在片段上",
               "items": {
                 "$ref": "#/$defs/run"
               },
@@ -138,7 +138,7 @@
               "description": "引用"
             },
             "runs": {
-              "description": "行内片段，按顺序拼起来就是这一段；加粗、链接都在片段上",
+              "description": "行内片段，按顺序拼起来就是这一段；加粗、斜体、字色、字号、链接和段内换行都在片段上",
               "items": {
                 "$ref": "#/$defs/run"
               },
@@ -168,7 +168,7 @@
               "description": "列表项"
             },
             "runs": {
-              "description": "行内片段，按顺序拼起来就是这一段；加粗、链接都在片段上",
+              "description": "行内片段，按顺序拼起来就是这一段；加粗、斜体、字色、字号、链接和段内换行都在片段上",
               "items": {
                 "$ref": "#/$defs/run"
               },
@@ -250,12 +250,24 @@
           "description": "加粗。一段里所有有字的片段都加粗，这段就是「整段加粗」",
           "type": "boolean"
         },
+        "color": {
+          "description": "字色，6 位十六进制、不带 #。跟整篇正文一样，或原文没另设颜色时不写",
+          "type": "string"
+        },
+        "fontSize": {
+          "description": "字号，单位像素。跟整篇正文一样，或原文没另设字号时不写",
+          "type": "integer"
+        },
         "href": {
           "description": "链接地址，只有 link 才有",
           "type": "string"
         },
+        "italic": {
+          "description": "斜体。作者把这一片设成斜体才有",
+          "type": "boolean"
+        },
         "text": {
-          "description": "这一片的文字",
+          "description": "这一片的文字。单独一个换行是原文的段内换行，不另起一段",
           "type": "string"
         },
         "type": {

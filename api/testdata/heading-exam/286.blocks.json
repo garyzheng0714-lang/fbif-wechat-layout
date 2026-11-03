@@ -8,7 +8,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "作者：Riri"
+          "text": "作者：Riri",
+          "color": "396fbc"
         }
       ]
     },
@@ -179,7 +180,8 @@
         {
           "type": "txt",
           "text": "1、小小嫩豆腐，为“吃不完的豆腐”破局",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -321,7 +323,8 @@
         {
           "type": "txt",
           "text": "2、山涧柴火豆腐，打破“古法不可量产”定论",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -531,7 +534,8 @@
         {
           "type": "txt",
           "text": "1、从上游抓起，联合种植锁定高品质大豆",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -632,7 +636,8 @@
         {
           "type": "txt",
           "text": "2、搭建柔性产线，对抗传统行业惯性",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -742,7 +747,8 @@
         {
           "type": "txt",
           "text": "3、持续打造“全国好吃豆腐地图”",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -997,7 +1003,8 @@
         {
           "type": "txt",
           "text": "提示：",
-          "bold": true
+          "bold": true,
+          "fontSize": 17
         }
       ],
       "blankBefore": true
@@ -1007,7 +1014,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为FBIF原创，欢迎转发朋友圈；"
+          "text": "* 本文为FBIF原创，欢迎转发朋友圈；",
+          "color": "888888"
         }
       ]
     },
@@ -1016,7 +1024,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 转载请在后台回复“转载”了解规则；"
+          "text": "* 转载请在后台回复“转载”了解规则；",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -1027,7 +1036,8 @@
         {
           "type": "txt",
           "text": "/ 更多文章 /",
-          "bold": true
+          "bold": true,
+          "fontSize": 17
         }
       ]
     },

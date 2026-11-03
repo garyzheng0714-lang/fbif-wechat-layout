@@ -8,7 +8,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "作者：Sage"
+          "text": "作者：Sage",
+          "color": "0070c0"
         }
       ]
     },
@@ -17,7 +18,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "编辑：Bobo"
+          "text": "编辑：Bobo",
+          "color": "0070c0"
         }
       ],
       "tightBefore": true
@@ -242,7 +244,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "参考来源："
+          "text": "参考来源：",
+          "color": "888888"
         }
       ]
     },
@@ -251,7 +254,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[1]Heisser Dampf statt Fett:Zeen Tech denkt Frittieren neu，Impuls"
+          "text": "[1]Heisser Dampf statt Fett:Zeen Tech denkt Frittieren neu，Impuls",
+          "color": "888888"
         }
       ]
     },
@@ -260,7 +264,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[2]SIAL INNOVATION 2026 AWARDS: SHAPING THE FUTURE OF FOOD"
+          "text": "[2]SIAL INNOVATION 2026 AWARDS: SHAPING THE FUTURE OF FOOD",
+          "color": "888888"
         }
       ]
     },
@@ -269,7 +274,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[3]Nükt Linkedin"
+          "text": "[3]Nükt Linkedin",
+          "color": "888888"
         }
       ]
     },
@@ -290,7 +296,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为FBIF原创，欢迎转发朋友圈；"
+          "text": "* 本文为FBIF原创，欢迎转发朋友圈；",
+          "color": "888888"
         }
       ]
     },
@@ -299,7 +306,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 转载请在后台回复“转载”了解规则；"
+          "text": "* 转载请在后台回复“转载”了解规则；",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -309,7 +317,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）",
+          "color": "888888"
         }
       ],
       "tightBefore": true

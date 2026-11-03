@@ -20,6 +20,7 @@ type computedStyle struct {
 	Align          string
 	FontWeightBold bool
 	BoldTag        bool
+	Italic         bool
 }
 
 const (
@@ -502,8 +503,10 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			return
 		case "br":
 			if cur != nil {
+				// 不给换行补 textStyles。字号判定在两边长度不一致时保持保守，
+				// 段尾一个装饰性 <br> 不能把后面的正文升成小标题。
 				cur.hadBreak = true
-				cur.runs = append(cur.runs, Run{Type: "txt", Text: " "})
+				cur.runs = append(cur.runs, Run{Type: "br"})
 			}
 			return
 		case "img":
@@ -561,6 +564,11 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			boldStyle.FontWeightBold = true
 			boldStyle.BoldTag = true
 			w.walkChildren(n, cur, boldStyle)
+			return
+		case "em", "i":
+			italicStyle := inherited
+			italicStyle.Italic = true
+			w.walkChildren(n, cur, italicStyle)
 			return
 		}
 
@@ -716,6 +724,13 @@ func (w *blockWalker) collectCellRuns(n *html.Node, cur *blockCtx, inherited com
 				w.collectCellRuns(c, cur, boldStyle)
 			}
 			return
+		case "em", "i":
+			italicStyle := inherited
+			italicStyle.Italic = true
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				w.collectCellRuns(c, cur, italicStyle)
+			}
+			return
 		}
 		nodeStyle := parseInlineStyle(getAttr(n, "style"))
 		merged := mergeStyle(inherited, nodeStyle)
@@ -730,11 +745,21 @@ func (w *blockWalker) collectCellRuns(n *html.Node, cur *blockCtx, inherited com
 }
 
 func (w *blockWalker) makeTextRun(cur *blockCtx, text string, style computedStyle) Run {
-	bold := style.FontWeightBold
+	run := Run{Type: "txt", Text: text, Bold: style.FontWeightBold, Italic: style.Italic}
 	if len(cur.hrefStack) > 0 {
-		return Run{Type: "link", Text: text, Href: cur.hrefStack[len(cur.hrefStack)-1], Bold: bold}
+		run.Type = "link"
+		run.Href = cur.hrefStack[len(cur.hrefStack)-1]
+		return run
 	}
-	return Run{Type: "txt", Text: text, Bold: bold}
+	if style.ColorSet {
+		if c := emphasisColor(style.Color); c != "" {
+			run.Color = c
+		}
+	}
+	if style.FontSizeSet && style.FontSize > 0 {
+		run.FontSize = int(style.FontSize + 0.5)
+	}
+	return run
 }
 
 // ---- Classification ----
@@ -1622,7 +1647,126 @@ func blocksFromRoleDecisions(decisions []RoleDecision) []Block {
 	for _, d := range decisions {
 		out = append(out, d.Block)
 	}
+	emphasizeAgainstBody(out)
 	return out
+}
+
+// emphasizeAgainstBody 丢掉跟整篇正文一样的字色和字号。
+// 公众号编辑器给每一片都写上正文色和正文字号。这些如果都留着，网站会把每一段都套上字色，盖住网站自己的正文色。
+// 只有跟正文不一样的颜色和字号才留下来。原文没写颜色或字号时，写了的那一片就是强调，整篇留着。
+func emphasizeAgainstBody(blocks []Block) {
+	colorVotes := map[string]int{}
+	sizeVotes := map[int]int{}
+	plainColor, plainSize := 0, 0
+	tally := func(runs []Run) {
+		for _, r := range runs {
+			n := utf8.RuneCountInString(strings.TrimSpace(r.Text))
+			if n == 0 {
+				continue
+			}
+			if r.Color == "" {
+				plainColor += n
+			} else {
+				colorVotes[r.Color] += n
+			}
+			if r.FontSize == 0 {
+				plainSize += n
+			} else {
+				sizeVotes[r.FontSize] += n
+			}
+		}
+	}
+	for i := range blocks {
+		tally(blocks[i].Runs)
+		for _, row := range blocks[i].Rows {
+			for _, cell := range row {
+				tally(cell.Runs)
+			}
+		}
+	}
+	colorTotal := plainColor
+	for _, n := range colorVotes {
+		colorTotal += n
+	}
+	bodyColor := ""
+	if colorTotal > 0 {
+		candidate := majorityString(colorVotes)
+		// 占全文过半的颜色是正文色。没写颜色的片段（含丢掉的白字）不因此把正文色留在每一段上。
+		if colorVotes[candidate]*2 > colorTotal {
+			bodyColor = candidate
+		}
+	}
+	sizeTotal := plainSize
+	for _, n := range sizeVotes {
+		sizeTotal += n
+	}
+	bodySize := 0
+	if sizeTotal > 0 {
+		candidate := majorityInt(sizeVotes)
+		if sizeVotes[candidate]*2 > sizeTotal {
+			bodySize = candidate
+		}
+	}
+	strip := func(runs []Run) {
+		for i := range runs {
+			if bodyColor != "" && runs[i].Color == bodyColor {
+				runs[i].Color = ""
+			}
+			if bodySize > 0 && runs[i].FontSize == bodySize {
+				runs[i].FontSize = 0
+			}
+		}
+	}
+	for i := range blocks {
+		strip(blocks[i].Runs)
+		for ri := range blocks[i].Rows {
+			for ci := range blocks[i].Rows[ri] {
+				strip(blocks[i].Rows[ri][ci].Runs)
+			}
+		}
+	}
+}
+
+func majorityString(votes map[string]int) string {
+	best, n := "", 0
+	for k, v := range votes {
+		if v > n || (v == n && (best == "" || k < best)) {
+			best, n = k, v
+		}
+	}
+	return best
+}
+
+// emphasisColor 丢掉贴在白底上读不清的浅色。公众号常用白字叠在色块上做装饰，
+// 色块本身不会进正文，白字若留下来，在网站和公众号复制层都会消失。
+func emphasisColor(hex string) string {
+	if len(hex) != 6 {
+		return ""
+	}
+	channels := [3]int64{}
+	for i := 0; i < 3; i++ {
+		n, err := strconv.ParseInt(hex[i*2:i*2+2], 16, 0)
+		if err != nil {
+			return ""
+		}
+		channels[i] = n
+	}
+	for _, n := range channels {
+		if n < 230 {
+			return hex
+		}
+	}
+	return ""
+}
+
+func majorityInt(votes map[int]int) int {
+	best, n := 0, 0
+	for k, v := range votes {
+		if v > n || (v == n && (best == 0 || k < best)) {
+			best, n = k, v
+		}
+	}
+	return best
 }
 
 func firstBodyFlowIndex(profile articleProfile) int {
@@ -1925,6 +2069,7 @@ type parsedStyle struct {
 	computedStyle
 	fontWeightSet  bool
 	fontWeightBold bool
+	italicSet      bool
 }
 
 // parseInlineStyle walks `a: b; c: d` declarations. Splitting on `;` up
@@ -1992,6 +2137,19 @@ func parseInlineStyle(style string) parsedStyle {
 				out.fontWeightSet = true
 				out.fontWeightBold = false
 			}
+		case "font-style":
+			fields := strings.Fields(val)
+			if len(fields) == 0 {
+				continue
+			}
+			switch strings.ToLower(fields[0]) {
+			case "italic", "oblique":
+				out.italicSet = true
+				out.Italic = true
+			case "normal":
+				out.italicSet = true
+				out.Italic = false
+			}
 		}
 	}
 	return out
@@ -2012,6 +2170,9 @@ func mergeStyle(parent computedStyle, child parsedStyle) computedStyle {
 	}
 	if child.fontWeightSet {
 		out.FontWeightBold = child.fontWeightBold
+	}
+	if child.italicSet {
+		out.Italic = child.Italic
 	}
 	return out
 }
@@ -2145,21 +2306,35 @@ func collapseWhitespace(s string) string {
 	return reWhitespace.ReplaceAllString(s, " ")
 }
 
+func sameRunFace(a, b Run) bool {
+	return a.Type == b.Type && a.Bold == b.Bold && a.Italic == b.Italic && a.Color == b.Color && a.FontSize == b.FontSize && a.Href == b.Href
+}
+
 func normalizeRuns(runs []Run) []Run {
 	if len(runs) == 0 {
 		return runs
 	}
 	out := make([]Run, 0, len(runs))
 	for _, r := range runs {
+		if r.Type == "br" {
+			out = append(out, Run{Type: "txt", Text: "\n"})
+			continue
+		}
 		r.Text = collapseWhitespace(r.Text)
 		if r.Text == "" {
 			continue
 		}
-		if n := len(out); n > 0 && out[n-1].Type == r.Type && out[n-1].Bold == r.Bold && out[n-1].Href == r.Href {
+		if n := len(out); n > 0 && out[n-1].Text != "\n" && sameRunFace(out[n-1], r) {
 			out[n-1].Text += r.Text
 			continue
 		}
 		out = append(out, r)
+	}
+	for len(out) > 0 && out[0].Text == "\n" {
+		out = out[1:]
+	}
+	for len(out) > 0 && out[len(out)-1].Text == "\n" {
+		out = out[:len(out)-1]
 	}
 	return out
 }

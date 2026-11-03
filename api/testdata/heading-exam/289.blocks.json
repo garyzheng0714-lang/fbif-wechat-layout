@@ -96,7 +96,8 @@
         {
           "type": "txt",
           "text": "1、Principe帕尔玛火腿片",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -125,7 +126,8 @@
         {
           "type": "txt",
           "text": "2、DAMYA有机特级初榨橄榄油",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -195,7 +197,8 @@
         {
           "type": "txt",
           "text": "1、Purely Elizabeth香草碧根果燕麦片（含胶原蛋白）",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -224,7 +227,8 @@
         {
           "type": "txt",
           "text": "2、Kuli Kuli海藻螺旋藻软糖",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -285,7 +289,8 @@
         {
           "type": "txt",
           "text": "1、Kimono Mom's拌饭料",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -314,7 +319,8 @@
         {
           "type": "txt",
           "text": "2、KiuKiu黑芝麻麻薯煎饼和华夫饼预拌粉",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -375,7 +381,8 @@
         {
           "type": "txt",
           "text": "1、Saffron Road Cross Roads柠檬味噌鸡肉意面",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -413,7 +420,8 @@
         {
           "type": "txt",
           "text": "2、Van Leeuwen芒果糯米冰淇淋",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -474,7 +482,8 @@
         {
           "type": "txt",
           "text": "1、Vandy原味薯片",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -503,7 +512,8 @@
         {
           "type": "txt",
           "text": "2、Spindrift即饮冰茶(Non-UPF Verified)",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -564,7 +574,8 @@
         {
           "type": "txt",
           "text": "1、alter eco焦糖黑巧克力",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -593,7 +604,8 @@
         {
           "type": "txt",
           "text": "2、The Pathfinder Hemp and Root无酒精烈酒",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -663,7 +675,8 @@
         {
           "type": "txt",
           "text": "1、Wasted Pasta意大利面",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -692,7 +705,8 @@
         {
           "type": "txt",
           "text": "2、Graza旗下Frizzle高温烹饪油",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -753,7 +767,8 @@
         {
           "type": "txt",
           "text": "1、Loopini蛋白质冷冻披萨",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -782,7 +797,8 @@
         {
           "type": "txt",
           "text": "2、Lentiful即食扁豆餐",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -810,7 +826,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "英文来源：Whole Foods Market"
+          "text": "英文来源：Whole Foods Market",
+          "color": "0070c0"
         }
       ]
     },
@@ -819,7 +836,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "中文编辑：kiki"
+          "text": "中文编辑：kiki",
+          "color": "0070c0"
         }
       ],
       "tightBefore": true
@@ -830,7 +848,8 @@
         {
           "type": "txt",
           "text": "提示：",
-          "bold": true
+          "bold": true,
+          "fontSize": 17
         }
       ],
       "blankBefore": true
@@ -840,7 +859,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为FBIF原创，欢迎转发朋友圈；"
+          "text": "* 本文为FBIF原创，欢迎转发朋友圈；",
+          "color": "888888"
         }
       ]
     },
@@ -849,7 +869,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 转载请在后台回复“转载”了解规则；"
+          "text": "* 转载请在后台回复“转载”了解规则；",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -859,7 +880,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）",
+          "color": "888888"
         }
       ],
       "tightBefore": true

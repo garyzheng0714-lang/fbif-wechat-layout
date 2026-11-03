@@ -8,7 +8,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "作者：Mote莫特"
+          "text": "作者：Mote莫特",
+          "color": "396fbc"
         }
       ]
     },
@@ -1455,7 +1456,7 @@
       "runs": [
         {
           "type": "txt",
-          "text": "一个栏目叫“茶的生活方式”，40多篇，全是一保堂员工写的，每篇配专门画的手绘插画，每期围绕一个具体场景。比如“创业公司推荐喝什么茶”，有人推荐玉露，说玉露本身就是19世纪的一个大胆创意；有人推荐煎茶，早上泡浓一点提神开工；有人推荐茎玉露，下午续力。同一个问题，三种答案。 "
+          "text": "一个栏目叫“茶的生活方式”，40多篇，全是一保堂员工写的，每篇配专门画的手绘插画，每期围绕一个具体场景。比如“创业公司推荐喝什么茶”，有人推荐玉露，说玉露本身就是19世纪的一个大胆创意；有人推荐煎茶，早上泡浓一点提神开工；有人推荐茎玉露，下午续力。同一个问题，三种答案。"
         }
       ]
     },
@@ -1464,7 +1465,7 @@
       "runs": [
         {
           "type": "txt",
-          "text": "其他主题也一样：送祖父母什么茶？午餐配什么茶？送那个特别的人什么茶？每个员工的答案都不一样。 "
+          "text": "其他主题也一样：送祖父母什么茶？午餐配什么茶？送那个特别的人什么茶？每个员工的答案都不一样。"
         }
       ]
     },
@@ -2074,7 +2075,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "参考来源："
+          "text": "参考来源：",
+          "color": "888888"
         }
       ]
     },
@@ -2083,7 +2085,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[1] 一保堂茶舗の歴史と伝承についての調査——六代目渡边孝史氏、七代目正一氏を訪ねて，2024，同志社女子大学 総合文化研究所紀要 第41巻"
+          "text": "[1] 一保堂茶舗の歴史と伝承についての調査——六代目渡边孝史氏、七代目正一氏を訪ねて，2024，同志社女子大学 総合文化研究所紀要 第41巻",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2093,7 +2096,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "—六代目、七代目的直接采访，家族传承史、养子制度、五代目正夫的经历等核心事实来源"
+          "text": "—六代目、七代目的直接采访，家族传承史、养子制度、五代目正夫的经历等核心事实来源",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2103,7 +2107,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[2] Ippodo Tea Company: A 300-year-old Business Navigates Today's World，2016，Cool Japan: Case Studies from Japan's Cultural and Creative Industries（BlueSky Publishing）"
+          "text": "[2] Ippodo Tea Company: A 300-year-old Business Navigates Today's World，2016，Cool Japan: Case Studies from Japan's Cultural and Creative Industries（BlueSky Publishing）",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2113,7 +2118,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "—鹿野研一的经营改革、出海策略、拒绝瓶装茶、嘉木喫茶室、纽约店等商业细节来源"
+          "text": "—鹿野研一的经营改革、出海策略、拒绝瓶装茶、嘉木喫茶室、纽约店等商业细节来源",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2123,7 +2129,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[3] 幾百年も永続し繁栄する京都の老舗17店舗に学ぶ～職業奉仕の実践～，2010，国際ロータリー第2580地区 地区職業奉仕委員会"
+          "text": "[3] 幾百年も永続し繁栄する京都の老舗17店舗に学ぶ～職業奉仕の実践～，2010，国際ロータリー第2580地区 地区職業奉仕委員会",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2133,7 +2140,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "—五代目渡边正夫关于定价哲学和同行共荣的原话"
+          "text": "—五代目渡边正夫关于定价哲学和同行共荣的原话",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2143,7 +2151,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[4] 京都のつづく 第64回・第95回 一保堂茶舗，篠田英美"
+          "text": "[4] 京都のつづく 第64回・第95回 一保堂茶舗，篠田英美",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2153,7 +2162,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "—七代目渡边正一“没有家训就是家训”的原话，母亲渡边都手写茶铭细节"
+          "text": "—七代目渡边正一“没有家训就是家训”的原话，母亲渡边都手写茶铭细节",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2163,7 +2173,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[5] 明治天皇がもっとも頼りにした 山階宮晃親王，深澤光佐子，宮帯出版社"
+          "text": "[5] 明治天皇がもっとも頼りにした 山階宮晃親王，深澤光佐子，宮帯出版社",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2173,7 +2184,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[6] 山階宮についてのご紹介，山階鳥類研究所（yamashina.or.jp）"
+          "text": "[6] 山階宮についてのご紹介，山階鳥類研究所（yamashina.or.jp）",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2183,7 +2195,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[7] 忘れられない味「一保堂茶舗」とは。人気・定番商品を一挙紹介，2023-04，阪急阪神百货 HANKYU FOOD"
+          "text": "[7] 忘れられない味「一保堂茶舗」とは。人気・定番商品を一挙紹介，2023-04，阪急阪神百货 HANKYU FOOD",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2193,7 +2206,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[8] 一保堂茶舗，官方网站（ippodo-tea.co.jp）"
+          "text": "[8] 一保堂茶舗，官方网站（ippodo-tea.co.jp）",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2203,7 +2217,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[9] 一保堂茶舗，USA & Canada Online Shop（ippodotea.com）"
+          "text": "[9] 一保堂茶舗，USA & Canada Online Shop（ippodotea.com）",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2213,7 +2228,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[10] 一保堂茶舗，CICATA 设计案例页（cicata.jp）"
+          "text": "[10] 一保堂茶舗，CICATA 设计案例页（cicata.jp）",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2223,7 +2239,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[11] 一保堂茶舗，高島屋オンラインストア商品页"
+          "text": "[11] 一保堂茶舗，高島屋オンラインストア商品页",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2233,7 +2250,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[12] Ippodo: The House That Became Matcha's Bridge to the World，TeaLife / The Japanese Tea-pedia"
+          "text": "[12] Ippodo: The House That Became Matcha's Bridge to the World，TeaLife / The Japanese Tea-pedia",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2243,7 +2261,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "—新加坡消费者点名询问一保堂、“日本不缺为茶喝彩的人，一保堂真正把桥修了出来”等评价来源"
+          "text": "—新加坡消费者点名询问一保堂、“日本不缺为茶喝彩的人，一保堂真正把桥修了出来”等评价来源",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2253,7 +2272,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[13] Mehrotra et al。，Harvard Business School，日本上市家族企业继承与业绩研究"
+          "text": "[13] Mehrotra et al。，Harvard Business School，日本上市家族企业继承与业绩研究",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2263,7 +2283,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "—婿养子业绩优于亲生继承人和职业经理人的数据"
+          "text": "—婿养子业绩优于亲生继承人和职业经理人的数据",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2273,7 +2294,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "[14] 日本农林水产省，绿茶出口统计数据（2020-2025）"
+          "text": "[14] 日本农林水产省，绿茶出口统计数据（2020-2025）",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2284,7 +2306,8 @@
         {
           "type": "txt",
           "text": "提示：",
-          "bold": true
+          "bold": true,
+          "fontSize": 17
         }
       ]
     },
@@ -2293,7 +2316,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为FBIF原创，欢迎转发朋友圈；"
+          "text": "* 本文为FBIF原创，欢迎转发朋友圈；",
+          "color": "888888"
         }
       ]
     },
@@ -2302,7 +2326,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 转载请在后台回复“转载”了解规则；"
+          "text": "* 转载请在后台回复“转载”了解规则；",
+          "color": "888888"
         }
       ],
       "tightBefore": true
@@ -2312,7 +2337,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）",
+          "color": "888888"
         }
       ],
       "tightBefore": true

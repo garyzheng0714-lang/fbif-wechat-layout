@@ -6,7 +6,10 @@
    "runs": [
     {
      "type": "txt",
-     "text": "本文为懂经原创，作者：叶宇，转载请联系出处。"
+     "text": "本文为懂经原创，作者：叶宇，转载请联系出处。",
+     "italic": true,
+     "color": "888888",
+     "fontSize": 14
     }
    ]
   },
@@ -311,7 +314,10 @@
     {
      "type": "txt",
      "text": "提示：",
-     "bold": true
+     "bold": true,
+     "italic": true,
+     "color": "01396a",
+     "fontSize": 14
     }
    ],
    "blankBefore": true
@@ -321,16 +327,23 @@
    "runs": [
     {
      "type": "txt",
-     "text": "*本文为懂经原创"
+     "text": "*本文为懂经原创",
+     "italic": true,
+     "color": "7f7f7f",
+     "fontSize": 14
     },
     {
      "type": "link",
      "text": "《金粒门上海首店太火爆暂停营业，新鲜零食想在上海走长远，没那么简单》",
+     "italic": true,
      "href": "https://mp.weixin.qq.com/s/25Ub9FoSklOcXCw23fykCg"
     },
     {
      "type": "txt",
-     "text": "，不代表FoodTalks立场，转载请联系出处。"
+     "text": "，不代表FoodTalks立场，转载请联系出处。",
+     "italic": true,
+     "color": "7f7f7f",
+     "fontSize": 14
     }
    ],
    "tightBefore": true
@@ -340,16 +353,23 @@
    "runs": [
     {
      "type": "txt",
-     "text": "*资讯投稿与商务合作，请查看“"
+     "text": "*资讯投稿与商务合作，请查看“",
+     "italic": true,
+     "color": "7f7f7f",
+     "fontSize": 14
     },
     {
      "type": "link",
      "text": "FoodTalks商务合作方案",
+     "italic": true,
      "href": "https://www.foodtalks.cn/news/30752"
     },
     {
      "type": "txt",
-     "text": "”，并联系Bobo。"
+     "text": "”，并联系Bobo。",
+     "italic": true,
+     "color": "7f7f7f",
+     "fontSize": 14
     }
    ],
    "tightBefore": true
@@ -375,7 +395,10 @@
    "runs": [
     {
      "type": "txt",
-     "text": "*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。"
+     "text": "*如遇二维码失效无法加群，请联系工作人员Lemon（微信号：FBIF_Lemon）。",
+     "italic": true,
+     "color": "7f7f7f",
+     "fontSize": 14
     }
    ]
   },
@@ -401,7 +424,9 @@
    "runs": [
     {
      "type": "txt",
-     "text": "点击获取更多"
+     "text": "点击获取更多",
+     "color": "333333",
+     "fontSize": 16
     },
     {
      "type": "link",

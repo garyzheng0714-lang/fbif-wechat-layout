@@ -726,7 +726,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "来源：Gooods好味司（ID：Gooods_haoweisi） "
+          "text": "来源：Gooods好味司（ID：Gooods_haoweisi） ",
+          "color": "0070c0"
         }
       ]
     },
@@ -735,7 +736,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "作者：徐子"
+          "text": "作者：徐子",
+          "color": "0070c0"
         }
       ],
       "tightBefore": true
@@ -746,7 +748,8 @@
         {
           "type": "txt",
           "text": "提示：",
-          "bold": true
+          "bold": true,
+          "fontSize": 17
         }
       ]
     },
@@ -755,7 +758,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为转载文章。原文标题：《阿华田牵手了新希望，旺旺为什么不能找一个\"新希望\"？》"
+          "text": "* 本文为转载文章。原文标题：《阿华田牵手了新希望，旺旺为什么不能找一个\"新希望\"？》",
+          "color": "888888"
         }
       ]
     },
@@ -764,7 +768,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）",
+          "color": "888888"
         }
       ],
       "tightBefore": true

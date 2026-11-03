@@ -786,7 +786,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "来源：Vista看天下（ID：vistaweek）"
+          "text": "来源：Vista看天下（ID：vistaweek）",
+          "color": "0070c0"
         }
       ]
     },
@@ -795,7 +796,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "作者：石榴"
+          "text": "作者：石榴",
+          "color": "0070c0"
         }
       ],
       "tightBefore": true
@@ -825,7 +827,8 @@
         {
           "type": "txt",
           "text": "提示：",
-          "bold": true
+          "bold": true,
+          "fontSize": 17
         }
       ],
       "blankBefore": true
@@ -835,7 +838,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为转载文章，原标题：《“看一眼都罪恶感爆棚”，但新晋热量炸弹饮料还是被自律人买疯了》。"
+          "text": "* 本文为转载文章，原标题：《“看一眼都罪恶感爆棚”，但新晋热量炸弹饮料还是被自律人买疯了》。",
+          "color": "888888"
         }
       ]
     },
@@ -844,7 +848,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）",
+          "color": "888888"
         }
       ],
       "tightBefore": true

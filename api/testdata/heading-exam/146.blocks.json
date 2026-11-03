@@ -671,7 +671,8 @@
         {
           "type": "txt",
           "text": "1、用核心背书建立信任",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -725,7 +726,8 @@
         {
           "type": "txt",
           "text": "2、用真实故事增强说服力",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ],
       "blankBefore": true
@@ -846,7 +848,8 @@
         {
           "type": "txt",
           "text": "3、用视觉系统呈现高品质感",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -1181,7 +1184,8 @@
         {
           "type": "txt",
           "text": "4、把品牌表达落到销售现场",
-          "bold": true
+          "bold": true,
+          "fontSize": 16
         }
       ]
     },
@@ -1506,7 +1510,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "*部分图片为设计稿，信息以实际落地为准"
+          "text": "*部分图片为设计稿，信息以实际落地为准",
+          "color": "888888"
         }
       ]
     },
@@ -1588,7 +1593,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "本文未标注图片来源：小马宋"
+          "text": "本文未标注图片来源：小马宋",
+          "color": "888888"
         }
       ]
     },
@@ -1597,7 +1603,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "来源：小马宋（ID：xiaomasong999）"
+          "text": "来源：小马宋（ID：xiaomasong999）",
+          "color": "0070c0"
         }
       ]
     },
@@ -1607,7 +1614,8 @@
         {
           "type": "txt",
           "text": "提示：",
-          "bold": true
+          "bold": true,
+          "fontSize": 17
         }
       ]
     },
@@ -1616,7 +1624,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* 本文为转载文章。"
+          "text": "* 本文为转载文章。",
+          "color": "888888"
         }
       ]
     },
@@ -1625,7 +1634,8 @@
       "runs": [
         {
           "type": "txt",
-          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）"
+          "text": "* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）",
+          "color": "888888"
         }
       ],
       "tightBefore": true
