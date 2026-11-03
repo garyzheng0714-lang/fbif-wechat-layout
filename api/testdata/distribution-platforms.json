@@ -14,6 +14,10 @@
         "min_height": 0,
         "max_bytes": 5242880
       },
+      "caption": {
+        "max": 0,
+        "count": "chars"
+      },
       "daily_limit": 5,
       "hosts": [
         "baijiahao.baidu.com",
@@ -34,6 +38,10 @@
         "min_width": 452,
         "min_height": 352,
         "max_bytes": 20971520
+      },
+      "caption": {
+        "max": 50,
+        "count": "bytes_half"
       },
       "daily_limit": 5,
       "hosts": [

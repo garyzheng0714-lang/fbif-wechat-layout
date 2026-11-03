@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // externalDriver lane 上记的送稿方式：robot 是自己的分发服务；空是 2026-10-24 下线的云梭留下的旧 lane，只显示。
@@ -24,10 +25,12 @@ const (
 
 	platformsFile = "distribution-platforms.json"
 
-	// 标题数法（分发服务 service/limits.mjs 的 TITLE_COUNTS）：chars 每个字符算一个；
-	// ascii_half 英文字母、数字、半角符号和空格两个算一个，其余一个。
+	// 数法（分发服务 service/limits.mjs 的 COUNTS，distributionTextLength 照同一张表数）：chars 每个字符算一个；
+	// ascii_half 英文字母、数字、半角符号和空格两个算一个，其余一个；bytes_half 空白不算，编号 0–255 的字符算半个，
+	// @、# 和其余字符算一个，剩半个算一个（头条编辑器数图注的法子）。
 	titleCountChars     = "chars"
 	titleCountASCIIHalf = "ascii_half"
+	countBytesHalf      = "bytes_half"
 
 	// distributionPlatformsRetry 一份都没有时，用到就取，但两次之间至少隔这么久（分发服务连不上时不追着问）。
 	distributionPlatformsRetry = 5 * time.Minute
@@ -40,6 +43,7 @@ type distributionPlatformInfo struct {
 	Carrier    string                `json:"carrier"`
 	Title      distributionTitleRule `json:"title"`
 	Cover      distributionCoverRule `json:"cover"`
+	Caption    distributionTextRule  `json:"caption"`
 	DailyLimit int                   `json:"daily_limit"`
 	Hosts      []string              `json:"hosts"`
 	ManageURL  string                `json:"manage_url"`
@@ -47,6 +51,12 @@ type distributionPlatformInfo struct {
 
 type distributionTitleRule struct {
 	Min   int    `json:"min"`
+	Max   int    `json:"max"`
+	Count string `json:"count"`
+}
+
+// distributionTextRule 图注每条最多几个字、怎么数；Max 是 0 表示平台不限。
+type distributionTextRule struct {
 	Max   int    `json:"max"`
 	Count string `json:"count"`
 }
@@ -79,6 +89,9 @@ func validateDistributionPlatforms(items []distributionPlatformInfo) error {
 		}
 		if p.Title.Count != titleCountChars && p.Title.Count != titleCountASCIIHalf {
 			return fmt.Errorf("%s（%s）标题数法「%s」排版工具不认得", where, p.ID, p.Title.Count)
+		}
+		if p.Caption.Max < 0 || p.Caption.Max > 0 && !distributionCountKnown(p.Caption.Count) {
+			return fmt.Errorf("%s（%s）图注上限 %d、数法「%s」排版工具不认得", where, p.ID, p.Caption.Max, p.Caption.Count)
 		}
 		if p.Cover.MinWidth < 0 || p.Cover.MinHeight < 0 || p.DailyLimit < 0 {
 			return fmt.Errorf("%s（%s）封面下限或每天上限是负数", where, p.ID)
@@ -140,6 +153,9 @@ type distributionPlatform struct {
 	TitleMin, TitleMax int
 	// 标题里的英文字母、数字、半角符号两个算一个字（title.count 是 ascii_half）。
 	TitleHalfWidthASCII bool
+	// 图注每条最多几个字（按 CaptionCount 的数法）；0 表示平台不限。超了推之前缩写（publish_external_captions.go）。
+	CaptionMax   int
+	CaptionCount string
 	// 摘要字数上限：分发服务现在不收摘要、也不给上限，所以是 0（不查）；哪天平台要摘要，接口加上再填。
 	SummaryMax int
 	// 平台每天的文章上限，自动外发按账号各自计数（人工按钮发的也计入）；0 表示不自动发。
@@ -155,6 +171,7 @@ func (i distributionPlatformInfo) platform() distributionPlatform {
 		Key: i.ID, Name: strings.TrimSpace(i.Name), Known: true,
 		CoverMinWidth: i.Cover.MinWidth, CoverMinHeight: i.Cover.MinHeight,
 		TitleMin: i.Title.Min, TitleMax: i.Title.Max, TitleHalfWidthASCII: i.Title.Count == titleCountASCIIHalf,
+		CaptionMax: i.Caption.Max, CaptionCount: i.Caption.Count,
 		DailyLimit: i.DailyLimit, URLHosts: append([]string(nil), i.Hosts...), ManageURL: i.ManageURL,
 	}
 }
@@ -218,19 +235,81 @@ func (p distributionPlatform) titleInputMax() int {
 
 // titleLength 按这个平台的数法数标题字数（与分发服务 titleLength 同一口径）。
 func (p distributionPlatform) titleLength(title string) int {
-	if !p.TitleHalfWidthASCII {
-		return runeLen(title)
+	if p.TitleHalfWidthASCII {
+		return distributionTextLength(titleCountASCIIHalf, title)
 	}
-	wide, ascii := 0, 0
-	for _, r := range title {
-		if r < 0x80 {
-			ascii++
-		} else {
-			wide++
-		}
-	}
-	return wide + ascii/2
+	return runeLen(title)
 }
+
+// captionLength 按这个平台数图注的法子数（与分发服务 captionsOver 同一口径）。
+func (p distributionPlatform) captionLength(caption string) int {
+	return distributionTextLength(p.CaptionCount, caption)
+}
+
+// captionFits 这条图注没超这个平台的上限（平台不限就都算没超）。
+func (p distributionPlatform) captionFits(caption string) bool {
+	return p.CaptionMax <= 0 || p.captionLength(caption) <= p.CaptionMax
+}
+
+// captionCountNote 跟 AI 说这个平台的图注怎么数字。
+func (p distributionPlatform) captionCountNote() string {
+	switch p.CaptionCount {
+	case countBytesHalf:
+		return "汉字和中文标点一个算一个字，英文字母和数字两个算一个字，空格不算"
+	case titleCountASCIIHalf:
+		return "汉字和中文标点一个算一个字，英文字母、数字和空格两个算一个字"
+	}
+	return "汉字、字母、标点都算一个字"
+}
+
+func distributionCountKnown(count string) bool {
+	return count == titleCountChars || count == titleCountASCIIHalf || count == countBytesHalf
+}
+
+// distributionTextLength 按分发服务给的数法数字（service/limits.mjs 的 textLength，两边同一口径）。
+// bytes_half 照头条编辑器的脚本：去掉空白、&nbsp;、\u0002、\u200b，@ # 和编号 255 以上的字符各两份，
+// 其余一份，按 UTF-16 数（表情两个码元算四份），最后除以二往上取整。
+func distributionTextLength(count, text string) int {
+	switch count {
+	case titleCountASCIIHalf:
+		wide, ascii := 0, 0
+		for _, r := range text {
+			if r < 0x80 {
+				ascii++
+			} else {
+				wide++
+			}
+		}
+		return wide + ascii/2
+	case countBytesHalf:
+		text = strings.Map(func(r rune) rune {
+			// JavaScript 的 \s：Go 的 unicode.IsSpace 多认了 U+0085、少认了 U+FEFF。
+			if (unicode.IsSpace(r) && r != 0x85) || r == 0xfeff || r == 0x2 || r == 0x200b {
+				return -1
+			}
+			return r
+		}, text)
+		text = nbspPattern.ReplaceAllString(text, "")
+		units := 0
+		for _, r := range text {
+			switch {
+			case r == '@' || r == '#':
+				units += 2
+			case r <= 0xff:
+				units++
+			case r > 0xffff:
+				units += 4
+			default:
+				units += 2
+			}
+		}
+		return (units + 1) / 2
+	default:
+		return runeLen(text)
+	}
+}
+
+var nbspPattern = regexp.MustCompile(`(?i)(&nbsp;)+`)
 
 // titleCountNote 平台数法与按字符数不同时，提示里补一句怎么数；一样就是空串。
 func (p distributionPlatform) titleCountNote() string {

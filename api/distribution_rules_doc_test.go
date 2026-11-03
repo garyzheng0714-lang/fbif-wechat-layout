@@ -47,7 +47,7 @@ var distributionDocRules = []struct {
 		[]Block{specTxt("作者：Sage"), specTxt("编辑：Bobo"), specTxt("正文第一段。")}},
 	{"小标题编号", "两个以上的标题1 编「一、二、」（结语也编）；原文已经编了号、以及参考来源，不动。",
 		[]Block{{K: "h", Level: 2, Text: "市场变了"}, specTxt("正文。"), {K: "h", Level: 2, Text: "新品牌冒头"}, specTxt("正文。")}},
-	{"图注与图片来源并成一条", "图下面的说明和「图片来源」用「；」并成一条（前一句以！？收尾就不加），不截短；首图留在原位带图注。",
+	{"图注与图片来源并成一条", "图下面的说明和「图片来源」用「；」并成一条（前一句以！？收尾就不加），不截短；首图留在原位带图注。平台图注有字数上限的（`GET /v1/platforms` 的 `caption`），超了推之前只给那个平台缩写（AI 缩说明、「图片来源」原样留着，不成就在标点处截）。",
 		[]Block{{K: "img", Src: distributionDocImage}, {K: "cap", Text: "▲ 苦味气泡水"}, {K: "cap", Text: "图片来源：品牌官网"}, specTxt("正文。")}},
 	{"正文不带链接", "链接只留字，裸网址删掉。",
 		[]Block{{K: "txt", Runs: []Run{{Type: "txt", Text: "详见"}, {Type: "link", Text: "品牌官网", Href: "https://example.com/news"}, {Type: "txt", Text: "，或访问https://example.com/news。"}}}}},

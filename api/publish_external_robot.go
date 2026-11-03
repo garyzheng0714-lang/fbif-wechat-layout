@@ -69,6 +69,10 @@ func buildRobotDraftPayload(job publishJob, profile distributionPlatform, draft 
 		}
 		return robotDraftPayload{}, fmt.Errorf("%s标题要 %d–%d 字%s，现在 %d 字", profile.Name, min, max, note, profile.titleLength(title))
 	}
+	if over := captionsOverLimit(profile, content.Blocks); len(over) > 0 {
+		return robotDraftPayload{}, fmt.Errorf("%s图注最多 %d 字，有 %d 条超了（第一条 %d 字：%s）", profile.Name, profile.CaptionMax, len(over),
+			profile.captionLength(over[0]), truncateRunes(over[0], 30))
+	}
 	if content.Cover == "" {
 		return robotDraftPayload{}, fmt.Errorf("%s草稿缺少公开可访问的封面", profile.Name)
 	}
@@ -105,6 +109,16 @@ func robotIdempotencyKey(jobID int64, accountID, payloadHash string) string {
 		key = key[:128]
 	}
 	return string(key)
+}
+
+// robotFrozenCaptionsOver 冻结的内容里有图注超了这个平台现在的上限：草稿存是存上了，发布时平台会拦
+// （2026-11-03 #340 头条号），同一个键再交也发不出去，卡片重试要按现在的内容重建、换键另存一篇。
+func robotFrozenCaptionsOver(lane publishExternalLane, profile distributionPlatform) bool {
+	var payload robotDraftPayload
+	if json.Unmarshal([]byte(lane.PayloadJSON), &payload) != nil {
+		return false
+	}
+	return len(captionsOverLimit(profile, payload.Blocks)) > 0
 }
 
 // robotResendFrozenLane 同一份冻结内容、同一个幂等键再交一次：管理员重发交过分发服务的待核对 lane（分发

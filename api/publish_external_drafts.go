@@ -57,6 +57,9 @@ type publishExternalDraft struct {
 	PreparedFor string `json:"prepared_for,omitempty"`
 	// 可换的封面：正文里够大的图，加上侧边栏上传的图。
 	Candidates []publishExternalCoverCandidate `json:"candidates,omitempty"`
+	// Captions 超了这个平台图注上限的图注缩成的（原图注 → 缩写），推的时候按原图注换上；文章改了、对不上的不用
+	// （publish_external_captions.go）。
+	Captions map[string]string `json:"captions,omitempty"`
 }
 
 type publishExternalIssue struct {

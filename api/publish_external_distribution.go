@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"regexp"
 	"strings"
 	"time"
@@ -509,14 +510,19 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		issues     []publishExternalIssue
 		candidates []publishExternalCoverCandidate
 		autoCover  string // 自动放大后换上的封面（publish_external_cover.go）
+		// 超长图注缩成的（publish_external_captions.go）；captionsChanged 是和记下的不一样，要存回去。
+		captions        map[string]string
+		captionsChanged bool
 	}
 	var checked []preflightResult
 	draftEditedAt := map[string]string{}
 	material := externalDraftMaterial(job)
 	for _, target := range chosen {
 		// 交过分发服务的按原来的冻结内容和幂等键再交：管理员重发待核对的，卡片重试草稿已存好、发布没成的。
+		// 冻结的图注超了平台现在的上限（发布时平台会拦）就不再按原来的交，往下按现在的内容重建、换键另存一篇。
 		if old, ok := externalLaneFor(job, target.ID); ok && old.Driver == externalDriverRobot && strings.TrimSpace(old.IntentKey) != "" &&
-			(mode == externalQueueReplaceReconcile || (mode == externalQueueCard && externalLaneDraftSaved(old))) {
+			(mode == externalQueueReplaceReconcile || (mode == externalQueueCard && externalLaneDraftSaved(old) &&
+				!robotFrozenCaptionsOver(old, platformForAccount(target)))) {
 			lane, resendErr := robotResendFrozenLane(job.ID, old, actor, requestedAt)
 			if resendErr != nil {
 				failures = append(failures, target.label()+"："+resendErr.Error())
@@ -540,7 +546,13 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 				autoCover = cover.URL
 			}
 		}
-		checked = append(checked, preflightResult{target: target, issues: issues, candidates: candidates, autoCover: autoCover})
+		result := preflightResult{target: target, issues: issues, candidates: candidates, autoCover: autoCover}
+		if len(issues) == 0 {
+			result.captions = p.externalCaptionsFor(snapshot, platformForAccount(target), draft)
+			result.captionsChanged = !maps.Equal(result.captions, draft.Captions)
+			draft.Captions = result.captions
+		}
+		checked = append(checked, result)
 		if len(issues) > 0 {
 			fixNames = append(fixNames, target.label()+"："+externalIssueSummaryText(issues))
 			continue
@@ -601,8 +613,13 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			}
 		}
 		for _, result := range checked {
-			if _, exists := externalDraftFor(*current, result.target.ID); exists || len(result.issues) > 0 || result.autoCover != "" {
+			if _, exists := externalDraftFor(*current, result.target.ID); exists || len(result.issues) > 0 || result.autoCover != "" || result.captionsChanged {
 				recordExternalPreflight(current, result.target, result.issues, result.candidates, material, requestedAt)
+			}
+			if result.captionsChanged {
+				draft, _ := externalDraftFor(*current, result.target.ID)
+				draft.Captions = result.captions
+				setExternalDraft(current, draft)
 			}
 			if result.autoCover != "" {
 				draft, _ := externalDraftFor(*current, result.target.ID)

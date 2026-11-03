@@ -73,6 +73,10 @@
       "status": 422,
       "outcome": "rejected"
     },
+    "caption_too_long": {
+      "status": 422,
+      "outcome": "rejected"
+    },
     "image_unavailable": {
       "status": 422,
       "outcome": "rejected"
@@ -177,6 +181,7 @@
         "accounts_unavailable",
         "idempotency_key_reused",
         "needs_reconcile",
+        "caption_too_long",
         "cover_unavailable",
         "cover_too_large",
         "cover_too_small",
