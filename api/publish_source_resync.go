@@ -217,7 +217,12 @@ func (p *publishPipeline) runSourceResync(jobID int64) {
 		return
 	}
 	preserveFoodTalksLiveMetadata(&nextNews, live)
-	if live.Content == nextNews.Content && live.TOC == nextNews.TOC {
+	sourceCorrected, err := p.followSiteSourceJudgement(ctx, &nextNews, live, job, candidate)
+	if err != nil {
+		p.markSourceResyncFailed(job, err)
+		return
+	}
+	if live.Content == nextNews.Content && live.TOC == nextNews.TOC && !sourceCorrected {
 		p.finishSourceResync(job, candidate, nextNews, publishSourceResyncPreparing, "")
 		return
 	}
@@ -229,13 +234,14 @@ func (p *publishPipeline) prepareSourceResync(ctx context.Context, job publishJo
 	if err != nil {
 		return job, foodTalksNews{}, err
 	}
-	blocksJSON, originalSourceURL, err := p.fetchSourceResyncBlocks(ctx, job, rulePackID)
+	fetched, err := p.fetchSourceResyncBlocks(ctx, job, rulePackID)
 	if err != nil {
 		return job, foodTalksNews{}, err
 	}
 	candidate := job
-	candidate.BlocksJSON = strings.TrimSpace(blocksJSON)
-	candidate.OriginalSourceURL = preferOriginalSourceURL(originalSourceURL, job.OriginalSourceURL)
+	candidate.BlocksJSON = fetched.BlocksJSON
+	candidate.SourceRepostedFrom = strings.TrimSpace(fetched.RepostedFrom)
+	candidate.OriginalSourceURL = preferOriginalSourceURL(fetched.OriginalSourceURL, job.OriginalSourceURL)
 	p.ensureRepostOriginalURL(ctx, &candidate)
 	result, err := p.render(publishRenderContext(ctx, rulePackID, candidate), candidate.Title, publishRenderSourceURL(candidate), candidate.BlocksJSON, true)
 	if err != nil {
@@ -271,23 +277,47 @@ func (p *publishPipeline) prepareSourceResync(ctx context.Context, job publishJo
 	return candidate, news, err
 }
 
-func (p *publishPipeline) fetchSourceResyncBlocks(ctx context.Context, job publishJob, rulePackID string) (string, string, error) {
+func (p *publishPipeline) fetchSourceResyncBlocks(ctx context.Context, job publishJob, rulePackID string) (publishFetchedArticle, error) {
 	if p.fetch == nil {
-		return "", "", errors.New("排版工具缺少公众号原文抓取内核")
+		return publishFetchedArticle{}, errors.New("排版工具缺少公众号原文抓取内核")
 	}
 	fetched, err := p.fetch(withPublishRulePackID(ctx, rulePackID), job.SourceURL)
-	title, originalSourceURL, blocksJSON := fetched.Title, fetched.OriginalSourceURL, fetched.BlocksJSON
 	if err != nil {
-		return "", "", fmt.Errorf("从公众号原文重新抓取失败: %w", err)
+		return publishFetchedArticle{}, fmt.Errorf("从公众号原文重新抓取失败: %w", err)
 	}
-	blocksJSON = strings.TrimSpace(blocksJSON)
-	if blocksJSON == "" {
-		return "", "", errors.New("公众号原文未解析出可排版正文")
+	fetched.BlocksJSON = strings.TrimSpace(fetched.BlocksJSON)
+	if fetched.BlocksJSON == "" {
+		return publishFetchedArticle{}, errors.New("公众号原文未解析出可排版正文")
 	}
-	if strings.TrimSpace(title) != "" && normalizeSiteTitle(title) != normalizeSiteTitle(job.Title) {
-		return "", "", fmt.Errorf("公众号标题已变为“%s”，为防止链接错配未覆盖网站稿", strings.TrimSpace(title))
+	if title := strings.TrimSpace(fetched.Title); title != "" && normalizeSiteTitle(title) != normalizeSiteTitle(job.Title) {
+		return publishFetchedArticle{}, fmt.Errorf("公众号标题已变为“%s”，为防止链接错配未覆盖网站稿", title)
 	}
-	return blocksJSON, originalSourceURL, nil
+	return fetched, nil
+}
+
+// followSiteSourceJudgement 网站上的来源类型、来源跟着这次重新抓到的判定走：现稿上还是我们按旧判定写的（没人手改），
+// 新判定又不一样，就照新判定改，来源类型变了分类一起改（2026-11-03 #337：公众号「转载」功能转来的轻食online，
+// 旧判定把来源记成了自家号）。有人在后台改过来源的不动。回 true 是改了。
+func (p *publishPipeline) followSiteSourceJudgement(ctx context.Context, news *foodTalksNews, live foodTalksNewsDetail, before, after publishJob) (bool, error) {
+	oldType, oldName := siteSourceFor(before)
+	newType, newName := siteSourceFor(after)
+	sameName := func(a, b string) bool { return normalizeFoodTalksSourceName(a) == normalizeFoodTalksSourceName(b) }
+	if oldType == newType && sameName(oldName, newName) {
+		return false, nil
+	}
+	if live.SourceType != oldType || !sameName(live.SourceName, oldName) {
+		return false, nil
+	}
+	if newType != oldType {
+		primary, categories, err := siteCategoryIDsFor(newType)
+		if err != nil {
+			return false, err
+		}
+		news.PrimaryCategoryID, news.CategoryIDs = primary, categories
+	}
+	news.SourceType = newType
+	news.SourceName, news.SourceID = newName, p.articleSourceID(ctx, newName)
+	return true, nil
 }
 
 func (p *publishPipeline) mirrorSourceResyncImages(ctx context.Context, rawHTML, rawMap, cover string) (string, string, error) {
@@ -388,6 +418,7 @@ func (p *publishPipeline) finishSourceResync(job, candidate publishJob, news foo
 			current.SourceResyncRequestedAt == job.SourceResyncRequestedAt && current.SourceResyncIntentKey == intentKey
 	}, func(current *publishJob) {
 		current.OriginalSourceURL = candidate.OriginalSourceURL
+		current.SourceRepostedFrom = candidate.SourceRepostedFrom
 		current.OriginalSourceTitle = candidate.OriginalSourceTitle
 		current.OriginalSourceTitleURL = candidate.OriginalSourceTitleURL
 		current.BlocksJSON = candidate.BlocksJSON

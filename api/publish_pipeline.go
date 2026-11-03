@@ -451,7 +451,8 @@ type publishFetchedArticle struct {
 	BlocksJSON        string
 	CoverURL          string
 	Digest            string
-	DeclaredOriginal  bool // 公众号标了「原创」
+	DeclaredOriginal  bool   // 公众号标了「原创」
+	RepostedFrom      string // 用公众号「转载」功能转的：原号名
 }
 
 func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, articleURL string) (publishFetchedArticle, error) {
@@ -470,7 +471,7 @@ func fetchSiteArticleWithContext(ctx context.Context, rules *rulePresetStore, ar
 	return publishFetchedArticle{
 		Title: direct.Title, SourceName: direct.SourceName, Byline: direct.Byline, CanonicalURL: direct.CanonicalURL,
 		OriginalSourceURL: direct.OriginalSourceURL, BlocksJSON: string(raw), CoverURL: direct.CoverURL, Digest: direct.Digest,
-		DeclaredOriginal: direct.DeclaredOriginal,
+		DeclaredOriginal: direct.DeclaredOriginal, RepostedFrom: direct.RepostedFrom,
 	}, nil
 }
 
@@ -812,6 +813,7 @@ func applyWechatSourceMeta(job *publishJob, fetched publishFetchedArticle) {
 	job.SourceCoverURL = strings.TrimSpace(fetched.CoverURL)
 	job.SourceDigest = strings.TrimSpace(fetched.Digest)
 	job.SourceDeclaredOriginal = fetched.DeclaredOriginal
+	job.SourceRepostedFrom = strings.TrimSpace(fetched.RepostedFrom)
 }
 
 var publishRuleConfigHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -2336,8 +2338,8 @@ func siteRepostDisclosure(text string) bool {
 // publishArticleProvenance 所有渠道共用的「是不是 FBIF 原创、转载自谁、凭什么」：网站来源类型、排版开头署名与文末声明、
 // 审核卡上的原创/转载、外发第三方平台都只问它（2026-11-03 用户：「为什么我们的原创文章你标注成了转载？然后我们的转载你标注为原创？」）。
 //
-// 先看转载：明写「本文为转载文章」的、别家公众号的、出处是别家的（AI 读出的，或头尾声明「来源：X」「转载自：X」
-// 「本文经X授权转载」，publishDeclaredSource），压过原创声明。再看原创要有明说：自家公众号上标了「原创」
+// 先看转载：明写「本文为转载文章」的、别家公众号的、出处是别家的（公众号「转载」功能记的原号 SourceRepostedFrom、
+// AI 读出的，或头尾声明「来源：X」「转载自：X」「本文经X授权转载」，publishDeclaredSource），压过原创声明。再看原创要有明说：自家公众号上标了「原创」
 // （SourceDeclaredOriginal），或正文里有一行「本文为<自家>原创」。自家号发了却什么都没声明的也是转载（#340 是读者投稿）——
 // 判成转载只是不外发，判成原创会把别人的稿子当 FBIF 原创发到第三方平台。
 // 只认整行的声明，不在正文里搜「转载」二字：#338 参考文献里一条「经济日报（人民政协网转载）」曾让原创判成转载、没外发。
@@ -2347,8 +2349,9 @@ func publishArticleProvenance(job publishJob) (original bool, source, evidence s
 	name := strings.TrimSpace(job.SourceName)
 	aiSource := strings.TrimSpace(job.AISource)
 	// 转载自谁：AI 读出的出处、头尾声明的出处，先取别家的那个；都没有就是发这篇的公众号。
+	// 公众号「转载」功能转来的，页面自己记着原号，比正文里的说法准，排第一。
 	repostSource := name
-	for _, candidate := range []string{aiSource, publishDeclaredSource(job.BlocksJSON)} {
+	for _, candidate := range []string{job.SourceRepostedFrom, aiSource, publishDeclaredSource(job.BlocksJSON)} {
 		if candidate != "" && !isOwn(candidate) {
 			repostSource = candidate
 			break
@@ -2396,7 +2399,7 @@ func articleProvenanceFor(job publishJob) articleProvenance {
 
 // articleBlocksProvenance 抓到的文章（网页导入、排版接口）用发布流程同一个判定；没有块不判。
 // declaredOriginal 是公众号上标了「原创」。
-func articleBlocksProvenance(sourceName string, blocks []Block, declaredOriginal bool) *articleProvenance {
+func articleBlocksProvenance(sourceName string, blocks []Block, declaredOriginal bool, repostedFrom string) *articleProvenance {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -2404,7 +2407,8 @@ func articleBlocksProvenance(sourceName string, blocks []Block, declaredOriginal
 	if err != nil {
 		return nil
 	}
-	provenance := articleProvenanceFor(publishJob{SourceName: sourceName, BlocksJSON: string(raw), SourceDeclaredOriginal: declaredOriginal})
+	provenance := articleProvenanceFor(publishJob{SourceName: sourceName, BlocksJSON: string(raw), SourceDeclaredOriginal: declaredOriginal,
+		SourceRepostedFrom: repostedFrom})
 	return &provenance
 }
 

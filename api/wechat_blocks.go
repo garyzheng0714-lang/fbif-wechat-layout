@@ -170,6 +170,39 @@ func wechatDeclaredOriginal(rawHTML string) bool {
 	return len(m) > 1 && m[1] == "1"
 }
 
+// 用公众号「转载」功能转的文章（_copyright_stat 是 2），页面开头有张「以下文章来源于X，作者Y」的卡片，
+// 页面数据 copyright_info 里记着原号名（platform）和原号原文（reprint_url）。
+var (
+	wxCopyrightInfoRe  = regexp.MustCompile(`copyright_info:\s*\{\s*copyright_stat:\s*'2'[^}]*`)
+	wxRepostPlatformRe = regexp.MustCompile(`\bplatform:\s*'((?:[^'\\]|\\.)*)'`)
+	wxRepostURLRe      = regexp.MustCompile(`\breprint_url:\s*'((?:[^'\\]|\\.)*)'`)
+	wxRepostCardNameRe = regexp.MustCompile(`class="original_primary_nickname">([^<]+)<`)
+)
+
+// wechatRepostSource 用公众号「转载」功能转来的文章：转自哪个号、那个号的原文地址（2026-11-03 #337：
+// 自家号转了轻食online，正文只写「本文为转载文章」，网站来源被记成自家号）。不是转载的回两个空串。
+func wechatRepostSource(rawHTML string) (from, originalURL string) {
+	if m := wxCopyrightStatRe.FindStringSubmatch(rawHTML); len(m) < 2 || m[1] != "2" {
+		return "", ""
+	}
+	if info := wxCopyrightInfoRe.FindString(rawHTML); info != "" {
+		if m := wxRepostPlatformRe.FindStringSubmatch(info); len(m) > 1 {
+			from = strings.TrimSpace(html.UnescapeString(unescapeJSString(m[1])))
+		}
+		if m := wxRepostURLRe.FindStringSubmatch(info); len(m) > 1 {
+			if u := strings.TrimSpace(html.UnescapeString(unescapeJSString(m[1]))); isHTTPURL(u) {
+				originalURL = u
+			}
+		}
+	}
+	if from == "" {
+		if m := wxRepostCardNameRe.FindStringSubmatch(rawHTML); len(m) > 1 {
+			from = strings.TrimSpace(html.UnescapeString(m[1]))
+		}
+	}
+	return from, originalURL
+}
+
 // extractArticleBlocks walks WeChat article HTML into a sequence of Blocks
 // (article_blocks.go). It reads the visual signals (font-size, color, align,
 // bold) to tell heading, pullquote, caption and body apart, which Markdown

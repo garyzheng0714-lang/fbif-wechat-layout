@@ -79,6 +79,8 @@ func TestArticleProvenanceNeedsExplicitOriginalDeclaration(t *testing.T) {
 		{"自家号、AI 抽到别家出处", publishJob{SourceName: own, AISource: "小食代", BlocksJSON: line("正文")}, false, "小食代"},
 		{"自家号、文末「本文为新零售原创」", publishJob{SourceName: own, BlocksJSON: line("正文", "本文为新零售原创，作者：张三")}, false, "新零售"},
 		{"别家公众号标了原创", publishJob{SourceName: "小食代", SourceDeclaredOriginal: true, BlocksJSON: line("正文")}, false, "小食代"},
+		{"自家号用公众号「转载」功能转的、正文只写转载（#337）", publishJob{SourceName: own, SourceRepostedFrom: "轻食online", BlocksJSON: line("正文", "* 本文为转载文章。")}, false, "轻食online"},
+		{"公众号「转载」记的原号压过 AI 读出的出处", publishJob{SourceName: own, SourceRepostedFrom: "轻食online", AISource: "ONICHA官网", BlocksJSON: line("正文")}, false, "轻食online"},
 		{"正文里引文带「转载」二字不算声明", publishJob{SourceName: own, SourceDeclaredOriginal: true, BlocksJSON: line("[3] 某报道，经济日报（人民政协网转载）", "转载请在后台回复“转载”了解规则")}, true, own},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -113,5 +115,50 @@ func TestWechatDeclaredOriginalReadsCopyrightStat(t *testing.T) {
 	applyWechatSourceMeta(&job, publishFetchedArticle{DeclaredOriginal: true})
 	if !job.SourceDeclaredOriginal {
 		t.Fatal("抓到公众号标了原创要记下")
+	}
+}
+
+// #337 页面里摘下来的几处：公众号「转载」功能转来的文章，页面数据和开头卡片都记着原号。
+const wechatRepostPage = `<div class="original_area_primary"><p role="option" class="original_primary_card_tips">
+<span>以下文章来源于轻食online</span><span>，作者hanyuting</span></p>
+<a class="weui-flex original_primary_card" href="#" id="copyright_info"><div class="weui-flex__bd">
+<strong class="original_primary_nickname">轻食online</strong></div></a></div>
+<script>window.cgiData = { author: 'hanyuting',
+  copyright_info: {
+    copyright_stat: '2' * 1,
+    platform: '轻食online',
+    reprint_url: 'http://mp.weixin.qq.com/s?__biz=Mzk2NDM4OTQ1NA%3D%3D\x26amp;mid=2247503223\x26amp;idx=1\x26amp;sn=86950d343e0859f03537768183e79478',
+    source_username: 'gh_7960b6c488a0',
+  },
+};</script>
+<script>var _copyright_stat = "2"; var nickname = htmlDecode("FBIF食品饮料创新"); var msg_source_url = '';</script>`
+
+func TestWechatRepostSourceReadsRepostCard(t *testing.T) {
+	from, url := wechatRepostSource(wechatRepostPage)
+	if from != "轻食online" {
+		t.Fatalf("原号 = %q，应为轻食online", from)
+	}
+	if want := "http://mp.weixin.qq.com/s?__biz=Mzk2NDM4OTQ1NA%3D%3D&mid=2247503223&idx=1&sn=86950d343e0859f03537768183e79478"; url != want {
+		t.Fatalf("原文 = %q，应为 %q", url, want)
+	}
+	// 页面数据缺了，开头卡片上的号名也认。
+	cardOnly := strings.Replace(wechatRepostPage, "platform: '轻食online',", "", 1)
+	if from, _ := wechatRepostSource(cardOnly); from != "轻食online" {
+		t.Fatalf("只有卡片时原号 = %q", from)
+	}
+	// 不是转载（原创、没声明）的，卡片样式类名、旧数据都不算。
+	for _, stat := range []string{"1", "0"} {
+		page := strings.Replace(wechatRepostPage, `var _copyright_stat = "2"`, `var _copyright_stat = "`+stat+`"`, 1)
+		if from, url := wechatRepostSource(page); from != "" || url != "" {
+			t.Fatalf("_copyright_stat=%s 不是转载，却读出 %q %q", stat, from, url)
+		}
+	}
+	job := publishJob{SourceRepostedFrom: "旧号"}
+	applyWechatSourceMeta(&job, publishFetchedArticle{})
+	if job.SourceRepostedFrom != "" {
+		t.Fatal("重新抓到的原文不是转载，要照新抓的记")
+	}
+	if p := articleBlocksProvenance("FBIF食品饮料创新", []Block{{K: "txt", Text: "正文"}}, false, "轻食online"); p == nil || p.Original || p.Source != "轻食online" {
+		t.Fatalf("网页导入的判定 = %+v，应为转载、来源轻食online", p)
 	}
 }

@@ -380,3 +380,50 @@ func TestPublishNotificationExpiredCardIsTerminal(t *testing.T) {
 		t.Fatalf("别的死信不动：%+v", other)
 	}
 }
+
+// #337：公众号「转载」功能转来的稿，旧判定把网站来源记成了发文的号。重新同步照页面记的原号改来源、
+// 正文开头和文末跟着新判定排；有人在后台改过来源的不动。
+func TestSourceResyncFollowsRepostCardSource(t *testing.T) {
+	for _, edited := range []bool{false, true} {
+		env, published := publishedSourceResyncTestJob(t)
+		seedSourceResyncLiveNews(t, env, published, "")
+		if edited {
+			env.ft.mu.Lock()
+			live := env.ft.newsByID[published.FoodTalksNewsID]
+			live.SourceName, live.SourceID = "编辑手填的来源", 999
+			env.ft.newsByID[published.FoodTalksNewsID] = live
+			env.ft.mu.Unlock()
+		}
+		const reprintURL = "http://mp.weixin.qq.com/s?__biz=Mzk2NDM4OTQ1NA%3D%3D&mid=2247503223&idx=1&sn=86950d343e0859f03537768183e79478"
+		env.pipeline.fetch = func(context.Context, string) (publishFetchedArticle, error) {
+			return publishFetchedArticle{Title: published.Title, SourceName: published.SourceName, CanonicalURL: published.SourceURL,
+				BlocksJSON: published.BlocksJSON, RepostedFrom: "轻食online", OriginalSourceURL: reprintURL}, nil
+		}
+		var renderedSource string
+		env.pipeline.render = func(ctx context.Context, _ string, source string, _ string, _ bool) (publishRenderResult, error) {
+			provenance, _ := ctx.Value(publishRenderProvenanceContextKey{}).(articleProvenance)
+			renderedSource = provenance.Source + "|" + source
+			return successfulPublishRenderResult(`<section><p>本文为轻食online原创</p></section>`, testPublishResolvedRule()), nil
+		}
+		updated, err := env.pipeline.requestSourceResync(published.ID, "ou_resync_editor", publishSourceResyncCardVersion(published))
+		if err != nil || updated.SourceResyncState != publishSourceResyncSucceeded {
+			t.Fatalf("重新同步应完成：%+v err=%v", updated, err)
+		}
+		if renderedSource != "轻食online|"+reprintURL {
+			t.Fatalf("排版拿到的来源|原文 = %q", renderedSource)
+		}
+		if updated.SourceRepostedFrom != "轻食online" || updated.OriginalSourceURL != reprintURL {
+			t.Fatalf("原号和原文要落库：%q %q", updated.SourceRepostedFrom, updated.OriginalSourceURL)
+		}
+		env.ft.mu.Lock()
+		put := env.ft.lastPut
+		env.ft.mu.Unlock()
+		want := "轻食online"
+		if edited {
+			want = "编辑手填的来源"
+		}
+		if put.SourceType != 1 || put.SourceName != want {
+			t.Fatalf("edited=%v：网站来源 = %d %q，应为转载 %q", edited, put.SourceType, put.SourceName, want)
+		}
+	}
+}

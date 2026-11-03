@@ -376,7 +376,8 @@ type layoutFetchedArticle struct {
 	SourceName        string
 	Byline            string
 	OriginalSourceURL string
-	DeclaredOriginal  bool // 公众号标了「原创」
+	DeclaredOriginal  bool   // 公众号标了「原创」
+	RepostedFrom      string // 用公众号「转载」功能转的：原号名
 }
 
 // articleLayoutFetcher 生产用：直抓（最多 3 次）+ Jina 阅读模式，与网页导入链接一致；
@@ -389,7 +390,7 @@ func (articleLayoutFetcher) FetchArticle(ctx context.Context, url string, opts a
 	}
 	direct, err := fetchDirectBlocksWithOptions(url, opts)
 	return layoutFetchedArticle{Title: direct.Title, Blocks: direct.Blocks, SourceName: direct.SourceName, Byline: direct.Byline,
-		OriginalSourceURL: direct.OriginalSourceURL, DeclaredOriginal: direct.DeclaredOriginal}, err
+		OriginalSourceURL: direct.OriginalSourceURL, DeclaredOriginal: direct.DeclaredOriginal, RepostedFrom: direct.RepostedFrom}, err
 }
 
 func (articleLayoutFetcher) FetchReader(ctx context.Context, url string) (string, string, error) {
@@ -467,7 +468,7 @@ func (a *layoutAPI) prepareURL(ctx context.Context, req layoutRequest, view layo
 		input.Blocks = article.Blocks
 		input.FetchMeta = layoutFetchMeta{Title: article.Title, Source: req.URL, SourceName: article.SourceName,
 			Byline: article.Byline, OriginalSourceURL: article.OriginalSourceURL,
-			Provenance: articleBlocksProvenance(article.SourceName, article.Blocks, article.DeclaredOriginal)}
+			Provenance: articleBlocksProvenance(article.SourceName, article.Blocks, article.DeclaredOriginal, article.RepostedFrom)}
 		view.SourceName = article.SourceName
 		return layoutPrepared{Input: input, View: view}, nil
 	}

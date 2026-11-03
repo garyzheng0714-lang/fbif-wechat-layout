@@ -566,7 +566,7 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 				writeError(w, 502, "FoodTalks 文章读取失败，请稍后重试")
 				return
 			}
-			news.Provenance = articleBlocksProvenance(news.SourceName, news.Blocks, false)
+			news.Provenance = articleBlocksProvenance(news.SourceName, news.Blocks, false, "")
 			writeJSON(w, 200, news)
 			return
 		}
@@ -575,7 +575,7 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 		if derr == nil && len(blocks) > 0 {
 			writeJSON(w, 200, articleBlocksResponse{Title: direct.Title, Blocks: blocks, Source: req.URL,
 				SourceName: direct.SourceName, Byline: direct.Byline, OriginalSourceURL: direct.OriginalSourceURL,
-				Provenance: articleBlocksProvenance(direct.SourceName, blocks, direct.DeclaredOriginal)})
+				Provenance: articleBlocksProvenance(direct.SourceName, blocks, direct.DeclaredOriginal, direct.RepostedFrom)})
 			return
 		}
 		// Do not hand attacker-controlled URLs to an external reader process:
@@ -618,7 +618,8 @@ func handleFetchArticleWithStore(store *rulePresetStore) http.HandlerFunc {
 type directArticle struct {
 	Title, SourceName, Byline, CanonicalURL, OriginalSourceURL, CoverURL, Digest string
 	Blocks                                                                       []Block
-	DeclaredOriginal                                                             bool // 公众号标了「原创」
+	DeclaredOriginal                                                             bool   // 公众号标了「原创」
+	RepostedFrom                                                                 string // 用公众号「转载」功能转的：原号名（OriginalSourceURL 是原号原文）
 }
 
 func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (directArticle, error) {
@@ -644,9 +645,10 @@ func fetchDirectBlocksWithOptions(url string, opts articleBlockOptions) (directA
 		t, bs, _ := extractArticleBlocksWithOptions(raw, opts)
 		if len(bs) > 0 {
 			nickname, by, msgSourceURL := extractWechatArticleMeta(raw)
+			repostedFrom, repostURL := wechatRepostSource(raw)
 			return directArticle{Title: t, Blocks: bs, SourceName: nickname, Byline: by, CanonicalURL: articleSourceURL(url, finalURL, raw),
-				OriginalSourceURL: msgSourceURL, CoverURL: extractArticleCover(raw), Digest: extractArticleDigest(raw),
-				DeclaredOriginal: wechatDeclaredOriginal(raw)}, nil
+				OriginalSourceURL: firstNonEmpty(repostURL, msgSourceURL), CoverURL: extractArticleCover(raw), Digest: extractArticleDigest(raw),
+				DeclaredOriginal: wechatDeclaredOriginal(raw), RepostedFrom: repostedFrom}, nil
 		}
 		// 传输成功但无内容：可能是反爬中间页，重试一次可能拿到真正文。
 		transportErr = nil
