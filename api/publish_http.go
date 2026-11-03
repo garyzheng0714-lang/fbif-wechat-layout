@@ -922,6 +922,33 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "retried": true})
 	})
 
+	// 替人点卡片上某个号的「同步至X」「重新同步至X」（2026-11-03）：运维和助手点不了飞书卡片。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/external-distribution/sync", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		var body struct {
+			AccountID string `json:"account_id"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil || strings.TrimSpace(body.AccountID) == "" {
+			writeError(w, http.StatusBadRequest, "请求体必须是 JSON：{\"account_id\":\"rec…\"}（多维表格「平台账号」的 record_id）")
+			return
+		}
+		job, err := p.syncExternalAccountAsAdmin(id, body.AccountID)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "job": newPublishSyncJobSummary(job)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": newPublishSyncJobSummary(job), "queued": true})
+	})
+
 	// 存量原创补发到 auto 账号（2026-10-10 用户裁定）：只记待办，由自动外发按补发配额
 	// 逐日推送；dry_run 只列名单。since 为 RFC3339，按公开时间筛选。
 	mux.HandleFunc("POST /api/publish/external-distribution/auto-backfill", func(w http.ResponseWriter, r *http.Request) {

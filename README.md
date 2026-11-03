@@ -262,6 +262,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/news/{id}/repair-links` | 按资讯 id 补链接（流水线稿与编辑手工稿都行）：系列声明/合集链→系列标签页，Mote 公众号文章链→站内稿；只链已有标签，`?dry_run=1` 只报告 |
 | `POST` | `/api/publish/jobs/{id}/retry-external-distribution` | 管理员确认待核对的平台草稿箱里没有这篇（或已删掉）后，只为待核对的平台按当前网站稿重新存草稿 |
 | `POST` | `/api/publish/external-distribution/auto-backfill` | 把 `since`（RFC3339）之后公开、还有 auto 账号没有记录的原创记为补发待办，按各平台补发配额逐日推送；`dry_run:true` 只列名单 |
+| `POST` | `/api/publish/jobs/{id}/external-distribution/sync` | 管理员替人点卡片上某个号的「同步至X」「重新同步至X」（`account_id` 是「平台账号」的 record_id）：和卡片按钮同一段受理，只推这一个号，已在平台上、正在同步的不重复同步 |
 | `POST` | `/api/publish/jobs/{id}/external-distribution/manual` | 管理员登记某平台人工已发（`account_id` + 平台域名 `url`，或 `lookup:true` 自动找头条号），或给已发布的平台补链接；登记后自动外发不再推这个平台；`dry_run:true` 只报告 |
 | `GET` / `PUT` | `/api/publish/jobs/{id}/external-distribution/draft?t=` | 外发改稿页（`/distribute.html`，审核卡链接在飞书侧边栏打开）：GET 返回每个平台的状态、字数上限、建议与可选封面；PUT `{account, title?, summary?, cover_url?}`（`account` 是「平台账号」的 record_id） 只改这个平台推出去的版本，服务端重查，通过即推。需飞书登录 + 这篇的签名 `t`，或规则管理员 |
 | `POST` | `/api/publish/jobs/{id}/external-distribution/cover?t=` | 改稿页上传封面（multipart `account` + `file`，可带页面里已改好的 `title`/`summary`；JPG/PNG ≤10MB，须达到平台封面下限）：转存后即换成这个平台的封面，问题都清了就推 |

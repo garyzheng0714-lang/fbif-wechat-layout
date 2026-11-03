@@ -388,6 +388,30 @@ func (p *publishPipeline) requestExternalDistribution(jobID int64, actor, expect
 	return p.queueExternalDistribution(jobID, actor, expectedVersion, externalQueueCard, nil)
 }
 
+const publishExternalAdminSyncActor = "system:admin_sync"
+
+// syncExternalAccountAsAdmin 管理员替人点卡片上这个号的「同步至X」「重新同步至X」（2026-11-03）：运维和助手点不了
+// 飞书卡片。和卡片按钮同一段受理（卡片模式、只推这一个号、按现在的卡片版本），已在平台上、正在同步的不重复同步。
+func (p *publishPipeline) syncExternalAccountAsAdmin(jobID int64, accountID string) (publishJob, error) {
+	job, err := p.store.byID(jobID)
+	if err != nil {
+		return job, err
+	}
+	cfg, err := loadExternalTargets()
+	if err != nil {
+		return job, err
+	}
+	target, ok := cfg.jobTarget(job, strings.TrimSpace(accountID))
+	if !ok {
+		return job, fmt.Errorf("这篇不能同步到 %s：不是这篇能发的号", strings.TrimSpace(accountID))
+	}
+	if lane, ok := externalLaneFor(job, target.ID); ok && !externalLaneCanSafeRetry(lane) {
+		return job, fmt.Errorf("%s%s，不会重复同步", target.label(), externalPlatformStatus(job, target).Status)
+	}
+	return p.queueExternalDistribution(jobID, publishExternalAdminSyncActor, publishExternalDistributionCardVersion(job), externalQueueCard,
+		map[string]bool{target.ID: true})
+}
+
 // replaceExternalDistributionAfterReconcile 管理员在平台草稿箱核对、删掉多出来的稿之后再存一次：
 // 交过分发服务的按原来的冻结内容和幂等键再交（robotResendFrozenLane），云梭旧 lane 用当前代码重建。
 // 不接受飞书卡片 callback。

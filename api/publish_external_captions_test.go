@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -156,60 +158,90 @@ func TestExternalCaptionsShortenedBeforePush(t *testing.T) {
 }
 
 // TestCardRetryRebuildsDraftWhoseCaptionsPlatformBlocks #340：草稿存好了、发布时平台因图注超长不出「确认发布」。
-// 按原来的键再交还是那篇发不出去的草稿，卡片「重新同步」要按现在的内容重建：图注缩好、换键另存一篇再发。
+// 按原来的键再交还是那篇发不出去的草稿，「重新同步」（卡片上点，或管理员替人点）要按现在的内容重建：图注缩好、
+// 换键另存一篇再发；发出去以后再点不重复同步。
 func TestCardRetryRebuildsDraftWhoseCaptionsPlatformBlocks(t *testing.T) {
-	setTestExternalAccounts(t, testArticleAccount(testToutiaoAccountID, "toutiao", false))
-	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
-	stubDistributionImageSize(t, map[string][2]int{})
-	items, err := readTestDistributionPlatforms()
-	if err != nil {
-		t.Fatal(err)
+	retries := map[string]func(t *testing.T, env *publishTestEnv, job publishJob) string{
+		"卡片": func(t *testing.T, env *publishTestEnv, job publishJob) string {
+			out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, job, testToutiaoAccountID))
+			if out.toastType != "success" {
+				t.Fatalf("重新同步应受理：%+v", out)
+			}
+			return "ou_reviewer_1"
+		},
+		"管理员接口": func(t *testing.T, env *publishTestEnv, job publishJob) string {
+			mux := newPublishTestMux(t, env)
+			target := fmt.Sprintf("/api/publish/jobs/%d/external-distribution/sync", job.ID)
+			body := `{"account_id":"` + testToutiaoAccountID + `"}`
+			if rec := doPublishReq(mux, http.MethodPost, target, body, false); rec.Code != http.StatusUnauthorized {
+				t.Fatalf("没管理员令牌应 401：%d", rec.Code)
+			}
+			if rec := doPublishReq(mux, http.MethodPost, target, `{"account_id":"recNotThisOne01"}`, true); rec.Code != http.StatusConflict ||
+				!strings.Contains(rec.Body.String(), "不是这篇能发的号") {
+				t.Fatalf("不是这篇能发的号不受理：%d %s", rec.Code, rec.Body.String())
+			}
+			if rec := doPublishReq(mux, http.MethodPost, target, body, true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"queued":true`) {
+				t.Fatalf("管理员替人点应受理：%d %s", rec.Code, rec.Body.String())
+			}
+			if rec := doPublishReq(mux, http.MethodPost, target, body, true); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "不会重复同步") {
+				t.Fatalf("发出去以后再点不重复同步：%d %s", rec.Code, rec.Body.String())
+			}
+			return publishExternalAdminSyncActor
+		},
 	}
-	unlimited := append([]distributionPlatformInfo(nil), items...)
-	for i := range unlimited {
-		if unlimited[i].ID == "toutiao" {
-			unlimited[i].Caption.Max = 0 // 那时还不知道头条号图注有上限
-		}
-	}
-	setTestDistributionPlatforms(t, unlimited...)
-	env := newPublishTestEnv(t)
-	robot := useFakeRobot(env)
-	failedPublish := testRobotSavedRecord(testRobotArticleID)
-	failedPublish.Action = &robotDraftAction{ID: "act-1", Kind: robotActionPublish, Status: robotActionFailed, Error: "头条号页面上没找到「确认发布」（已点了「预览并发布」）"}
-	robot.publishRecord = &failedPublish
-	env.pipeline.externalCaptionAI = func(context.Context, string, int, string) (string, error) {
-		return "奥地利New Originals Company把豆腐和天贝做成精致Tapas，拓展了餐饮渠道的吃法。", nil
-	}
-	job := createPublishedDistributionJobWithKey(t, env, "site:340", "FBIF食品饮料创新")
-	seedLivePublishedNews(t, env, foodTalksNewsDetail{
-		ID: testDistributionNewsID, Title: job.Title, CoverImg: job.CoverURL, Content: testCaptionHTML(testLongCaptionDesc),
-		Summary: job.Summary, SourceName: "FBIF食品饮料创新", PublishStatus: foodTalksPublishStatusPublished,
-	})
-	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
-		t.Fatal(err)
-	}
-	failed := mustJob(t, env, job.ID)
-	old := mustLane(t, failed, testToutiaoAccountID)
-	if old.State != publishExternalDistributionFailed || !externalLaneDraftSaved(old) {
-		t.Fatalf("草稿存好了、发布没做成：%+v", old)
-	}
+	for name, retry := range retries {
+		t.Run(name, func(t *testing.T) {
+			setTestExternalAccounts(t, testArticleAccount(testToutiaoAccountID, "toutiao", false))
+			t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+			stubDistributionImageSize(t, map[string][2]int{})
+			items, err := readTestDistributionPlatforms()
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlimited := append([]distributionPlatformInfo(nil), items...)
+			for i := range unlimited {
+				if unlimited[i].ID == "toutiao" {
+					unlimited[i].Caption.Max = 0 // 那时还不知道头条号图注有上限
+				}
+			}
+			setTestDistributionPlatforms(t, unlimited...)
+			env := newPublishTestEnv(t)
+			robot := useFakeRobot(env)
+			failedPublish := testRobotSavedRecord(testRobotArticleID)
+			failedPublish.Action = &robotDraftAction{ID: "act-1", Kind: robotActionPublish, Status: robotActionFailed, Error: "头条号页面上没找到「确认发布」（已点了「预览并发布」）"}
+			robot.publishRecord = &failedPublish
+			env.pipeline.externalCaptionAI = func(context.Context, string, int, string) (string, error) {
+				return "奥地利New Originals Company把豆腐和天贝做成精致Tapas，拓展了餐饮渠道的吃法。", nil
+			}
+			job := createPublishedDistributionJobWithKey(t, env, "site:340", "FBIF食品饮料创新")
+			seedLivePublishedNews(t, env, foodTalksNewsDetail{
+				ID: testDistributionNewsID, Title: job.Title, CoverImg: job.CoverURL, Content: testCaptionHTML(testLongCaptionDesc),
+				Summary: job.Summary, SourceName: "FBIF食品饮料创新", PublishStatus: foodTalksPublishStatusPublished,
+			})
+			if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+				t.Fatal(err)
+			}
+			failed := mustJob(t, env, job.ID)
+			old := mustLane(t, failed, testToutiaoAccountID)
+			if old.State != publishExternalDistributionFailed || !externalLaneDraftSaved(old) {
+				t.Fatalf("草稿存好了、发布没做成：%+v", old)
+			}
 
-	setTestDistributionPlatforms(t, items...) // 分发服务给了图注上限 50 字
-	robot.publishRecord = nil
-	out := env.pipeline.reviewCardAction(context.Background(), "ou_reviewer_1", "", mustDistributeValue(t, failed, testToutiaoAccountID))
-	if out.toastType != "success" {
-		t.Fatalf("重新同步应受理：%+v", out)
-	}
-	if len(robot.saves) != 2 || robot.saves[1].IdempotencyKey == old.IntentKey {
-		t.Fatalf("换键另存一篇，不按原来的键再交：%+v", robot.saves)
-	}
-	for _, block := range robot.saves[1].Blocks {
-		if block.K == "cap" && block.Text != "奥地利New Originals Company把豆腐和天贝做成精致Tapas，拓展了餐饮渠道的吃法。图片来源：作者拍摄" {
-			t.Fatalf("另存的那篇图注缩好了：%q", block.Text)
-		}
-	}
-	retried := mustLane(t, mustJob(t, env, job.ID), testToutiaoAccountID)
-	if retried.State != publishExternalDistributionSucceeded || retried.IntentKey != robot.saves[1].IdempotencyKey {
-		t.Fatalf("另存的那篇发出去：%+v", retried)
+			setTestDistributionPlatforms(t, items...) // 分发服务给了图注上限 50 字
+			robot.publishRecord = nil
+			actor := retry(t, env, failed)
+			if len(robot.saves) != 2 || robot.saves[1].IdempotencyKey == old.IntentKey {
+				t.Fatalf("换键另存一篇，不按原来的键再交：%+v", robot.saves)
+			}
+			for _, block := range robot.saves[1].Blocks {
+				if block.K == "cap" && block.Text != "奥地利New Originals Company把豆腐和天贝做成精致Tapas，拓展了餐饮渠道的吃法。图片来源：作者拍摄" {
+					t.Fatalf("另存的那篇图注缩好了：%q", block.Text)
+				}
+			}
+			retried := mustLane(t, mustJob(t, env, job.ID), testToutiaoAccountID)
+			if retried.State != publishExternalDistributionSucceeded || retried.IntentKey != robot.saves[1].IdempotencyKey || retried.RequestedBy != actor {
+				t.Fatalf("另存的那篇发出去，记下是谁点的：%+v", retried)
+			}
+		})
 	}
 }
