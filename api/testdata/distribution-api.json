@@ -129,6 +129,52 @@
   "routes": [
     {
       "method": "GET",
+      "path": "/v1/platforms/{platform}/posts/{key}/updates",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "internal_error",
+        "unknown_platform",
+        "not_supported",
+        "wrong_state",
+        "busy",
+        "unknown_account",
+        "accounts_unavailable",
+        "wrong_account",
+        "image_unavailable",
+        "image_too_large",
+        "fill_mismatch",
+        "login_required",
+        "platform_error",
+        "button_not_found"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/platforms/{platform}/posts/{key}/updates",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "invalid_request",
+        "too_large",
+        "internal_error",
+        "unknown_platform",
+        "not_supported",
+        "wrong_state",
+        "busy",
+        "unknown_account",
+        "accounts_unavailable",
+        "wrong_account",
+        "image_unavailable",
+        "image_too_large",
+        "fill_mismatch",
+        "login_required",
+        "platform_error",
+        "button_not_found"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/healthz",
       "errors": [
         "not_found",
