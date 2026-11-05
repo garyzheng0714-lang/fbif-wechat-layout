@@ -35,12 +35,12 @@ func testArticleAccount(id, platform string, auto bool) externalAccount {
 // TestExternalTargetsComeFromAccountTable 2026-10-24 分发框架：账号只在多维表格「平台账号」里。
 // 只挑在用、载体是文章的号；每篇只发「来源公众号」是它的号；同一平台不止一个号时用账号名区分。
 func TestExternalTargetsComeFromAccountTable(t *testing.T) {
-	trial := testArticleAccount("recTrial", "toutiao", false)
-	trial.Status, trial.Name = "测试", "头条号 · 黑桃游戏"
+	off := testArticleAccount("recOff", "toutiao", false)
+	off.Status, off.Name = "停用", "头条号 · 停掉的"
 	post := externalAccount{ID: "recDouyin", Platform: "douyin", Carrier: "post", Status: externalAccountLive, Source: "FBIF食品创新展"}
 	expo := testArticleAccount("recExpo", "toutiao", false)
 	expo.Source, expo.Name = "FBIF食品创新展", "头条号 · 会展"
-	setTestExternalAccounts(t, testArticleAccount("recBaijia", "baijiahao", false), testArticleAccount("recToutiao", "toutiao", false), trial, post, expo)
+	setTestExternalAccounts(t, testArticleAccount("recBaijia", "baijiahao", false), testArticleAccount("recToutiao", "toutiao", false), off, post, expo)
 
 	cfg, err := loadExternalTargets()
 	if err != nil {
@@ -51,7 +51,7 @@ func TestExternalTargetsComeFromAccountTable(t *testing.T) {
 		ids = append(ids, target.ID)
 	}
 	if strings.Join(ids, ",") != "recBaijia,recToutiao,recExpo" {
-		t.Fatalf("测试号、贴图号不该被挑上，按表里的顺序：%v", ids)
+		t.Fatalf("不在用的号、贴图号不该被挑上，按表里的顺序：%v", ids)
 	}
 	jobTargets := cfg.forJob(publishJob{SourceName: "FBIF食品饮料创新"})
 	if len(jobTargets) != 2 || jobTargets[0].ID != "recBaijia" || jobTargets[1].ID != "recToutiao" {

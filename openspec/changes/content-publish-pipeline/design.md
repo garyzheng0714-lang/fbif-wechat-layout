@@ -228,5 +228,5 @@ created → fetching（fetch-article 拉 blocks）
 - ~~`publishStatus` 的「前台完全不可见」正确组合？~~ **已实测**：0=草稿/2=下线均不可见，1=发布可见，单向门 1↛0（`docs/foodtalks-api-contract.md`）。仍待后端确认：`isPublic` 真实语义、`sourceType`/`isLatest`/`commentEnable` 枚举、publishStatus 2 vs 3 官方口径、「有料」categoryId 表。
 - ~~FBIF 订阅号运营日常动作是「群发」还是「发布」？~~ 已确认两者都有且不固定；Phase 5 必须覆盖两条独立路径。
 - 网站文章的 `categoryIds` 由谁定：固定默认？LLM 按内容选？人在审核卡片上改？（MVP 先可配置默认值，卡片改分类留到 Phase 4+）
-- 资讯订阅生产环境出口 IP 是否已在公众号 IP 白名单？（agent-publish-pipeline 用的是测试号 Ecooo，正式号白名单需另配）
+- 资讯订阅生产环境出口 IP 是否已在公众号 IP 白名单？（正式号白名单需另配）
 - 审核群 chat_id（等群建好、机器人入群后获取）。

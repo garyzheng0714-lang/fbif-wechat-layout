@@ -82,7 +82,7 @@ func TestHubBundleFeedAsksWithETagAndWait(t *testing.T) {
 	}{
 		{hubAnswerBody(http.StatusOK, `{"version":3,"items":{"platform_accounts":[
 			{"code":"recToutiao","platform_code":"toutiao","carrier":"article","display_name":"头条号 · FBIF","status":"在用","source_wechat_account":"FBIF食品饮料创新","notify_chat":"oc_1","auto_distribute":false},
-			{"code":"recDouyin","platform_code":"douyin","carrier":"post","display_name":"抖音 · 测试","status":"测试","source_wechat_account":"FBIF食品创新展","notify_chat":"oc_2","auto_distribute":true}]},"warnings":[]}`,
+			{"code":"recDouyin","platform_code":"douyin","carrier":"post","display_name":"抖音 · FBIF食品创新展","status":"在用","source_wechat_account":"FBIF食品创新展","notify_chat":"oc_2","auto_distribute":true}]},"warnings":[]}`,
 			"ETag", `"layout-v3"`), hubWaiting},
 		{hubAnswer(http.StatusNotModified), hubAnswered},
 		{hubAnswerBody(http.StatusUnauthorized, `{"error":"request_error","message":"缺少或无效的 API key"}`), hubDenied},
@@ -108,7 +108,7 @@ func TestHubBundleFeedAsksWithETagAndWait(t *testing.T) {
 	if len(changes) != 2 || !changes[0].first || changes[1].first || changes[1].accounts != nil {
 		t.Fatalf("换了版本才交出账号（第二版缺这一项交 nil），同一版不再交：%+v", changes)
 	}
-	want := externalAccount{ID: "recDouyin", Platform: "douyin", Carrier: "post", Name: "抖音 · 测试", Status: "测试", Source: "FBIF食品创新展", NotifyChat: "oc_2", Auto: true}
+	want := externalAccount{ID: "recDouyin", Platform: "douyin", Carrier: "post", Name: "抖音 · FBIF食品创新展", Status: "在用", Source: "FBIF食品创新展", NotifyChat: "oc_2", Auto: true}
 	if got := changes[0].accounts; len(got) != 2 || got[1].ID != want.ID || got[1].Platform != want.Platform || got[1].Carrier != want.Carrier ||
 		got[1].Name != want.Name || got[1].Status != want.Status || got[1].Source != want.Source || got[1].NotifyChat != want.NotifyChat || got[1].Auto != want.Auto {
 		t.Fatalf("配置包的列对到账号上：%+v", got)
