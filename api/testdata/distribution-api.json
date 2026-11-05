@@ -284,7 +284,8 @@
         "not_supported",
         "button_not_found",
         "login_required",
-        "platform_error"
+        "platform_error",
+        "already_posted"
       ]
     },
     {

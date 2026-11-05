@@ -481,6 +481,7 @@ func TestRobotPublishOutcomes(t *testing.T) {
 		{name: "要人核对（outcome human）", err: &robotReconcileError{Code: "needs_reconcile", Message: "草稿箱里有 2 篇这次新建的同名稿"}, state: publishExternalDistributionReconciliationRequired, reason: "草稿箱里有 2 篇这次新建的同名稿", status: "待核对"},
 		{name: "草稿被人改过", err: rejected(409, "draft_changed", "草稿被人改过"), state: publishExternalDistributionReconciliationRequired, reason: "分发工具没发布：草稿被人改过；请到百家号后台核对", status: "待核对"},
 		{name: "已不是草稿", err: rejected(409, "wrong_state", "这篇现在是已撤回"), state: publishExternalDistributionReconciliationRequired, reason: "请到百家号后台核对", status: "待核对"},
+		{name: "号里已经有同名的", err: rejected(409, "already_posted", "百家号上最近已经有同名的 2 篇：222（11/4 09:20，publish）；333（11/4 10:00，publish），没再发。确实要再发，先在后台删掉旧的"), state: publishExternalDistributionReconciliationRequired, reason: "分发工具没发布：百家号上最近已经有同名的 2 篇", status: "待核对"},
 		{name: "服务器没登录", err: rejected(503, "login_required", "没登录"), state: publishExternalDistributionFailed, reason: "远程画面里登录后重新同步", status: "失败", retry: true},
 		{name: "找不到发布按钮", err: rejected(422, "button_not_found", "找不到「发布」"), state: publishExternalDistributionFailed, reason: "分发工具没发布：找不到「发布」", status: "失败", retry: true},
 		{name: "这篇正在做别的", err: rejected(409, "busy", "这篇正在做别的"), state: publishExternalDistributionPublishing, status: "发布中"},

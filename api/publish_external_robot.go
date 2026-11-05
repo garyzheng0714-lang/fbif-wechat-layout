@@ -270,8 +270,9 @@ func robotPublishResultOf(lane publishExternalLane, record robotDraftRecord, err
 			case "busy":
 				// 这篇正在做别的动作：留在发布中，下一轮再看。
 				return robotLaneResult{Reason: rejected.Message, Uncertain: true}
-			case "draft_changed", "wrong_state", "not_saved", "not_found":
-				// 平台上这篇被人改过、已不是草稿，或分发服务里对不上：不能自己再发，要人去后台看。
+			case "draft_changed", "wrong_state", "not_saved", "not_found", "already_posted":
+				// 平台上这篇被人改过、已不是草稿，号里已经有同名的发出去了（发前查重认不成：不止一篇、或不在审核中和已发布），
+				// 或分发服务里对不上：不能自己再发，要人去后台看。
 				return robotLaneResult{
 					State:    publishExternalDistributionReconciliationRequired,
 					Reason:   "分发工具没发布：" + rejected.Message + "；请到" + profile.Name + "后台核对",
