@@ -144,6 +144,8 @@
         "image_unavailable",
         "image_too_large",
         "fill_mismatch",
+        "platform_rejected",
+        "verify_required",
         "login_required",
         "platform_error",
         "button_not_found"
@@ -168,6 +170,8 @@
         "image_unavailable",
         "image_too_large",
         "fill_mismatch",
+        "platform_rejected",
+        "verify_required",
         "login_required",
         "platform_error",
         "button_not_found"
