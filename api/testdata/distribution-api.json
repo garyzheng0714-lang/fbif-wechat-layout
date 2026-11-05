@@ -41,6 +41,10 @@
       "status": 409,
       "outcome": "rejected"
     },
+    "already_posted": {
+      "status": 409,
+      "outcome": "rejected"
+    },
     "needs_reconcile": {
       "status": 409,
       "outcome": "human"
@@ -336,6 +340,7 @@
         "unknown_account",
         "accounts_unavailable",
         "idempotency_key_reused",
+        "already_posted",
         "needs_reconcile",
         "wrong_account",
         "image_unavailable",
