@@ -175,7 +175,7 @@ test('ft-default：原文单独一行的章节号「01」不进网站，下一�
   assert.equal(headingN, 2);
 });
 
-test('ft-default：公众号的灰斜体小字和段内换行写进 CMS 还能认的标签', async () => {
+test('ft-default：公众号的斜体小字和段内换行写进 CMS 还能认的标签，原文字色不带', async () => {
   const { html } = await renderArticle({
     packId: 'ft-default',
     title: '世界茶叶简史',
@@ -193,10 +193,14 @@ test('ft-default：公众号的灰斜体小字和段内换行写进 CMS 还能�
         { type: 'txt', text: '\n' },
         { type: 'txt', text: '乙' },
       ] },
+      // 2026-11-05「为什么日本人不反感预制菜？」：原文金色加粗的强调句，网站只留加粗
+      { k: 'txt', runs: [{ type: 'txt', text: '工业食品表面上卖的是食物，而真正卖的是时间。', bold: true, color: 'b49361' }] },
     ],
   });
-  assert.match(html, /<p style="text-align: justify;"><span style="font-size: 14px; color: #8f959e;"><em>温馨提示：这篇简史不简，大约3\.2万字。<\/em><\/span><\/p>/);
-  assert.match(html, /<strong>也就是谁白谁赢，谁的沫子先散谁输。<\/strong>”<span style="color: #8f959e;"><em>（杜长风教的小学生孙理说的，儿童演员陈尚均饰）<\/em><\/span>/);
+  assert.match(html, /<p style="text-align: justify;"><span style="font-size: 14px;"><em>温馨提示：这篇简史不简，大约3\.2万字。<\/em><\/span><\/p>/);
+  assert.match(html, /<strong>也就是谁白谁赢，谁的沫子先散谁输。<\/strong>”<em>（杜长风教的小学生孙理说的，儿童演员陈尚均饰）<\/em><\/p>/);
+  assert.match(html, /<p style="text-align: justify;"><strong>工业食品表面上卖的是食物，而真正卖的是时间。<\/strong><\/p>/);
+  assert.doesNotMatch(html, /8f959e|b49361/i);
   assert.match(html, /<p style="text-align: justify;">甲<br>乙<\/p>/);
   assert.doesNotMatch(html, /<p style="text-align: justify;">甲<\/p>\n<p style="text-align: justify;"><br><\/p>\n<p style="text-align: justify;">乙<\/p>/);
 });

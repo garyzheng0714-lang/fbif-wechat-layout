@@ -375,14 +375,11 @@ function markTocEntries(elems) {
   return out;
 }
 
+// 原文的字色不进 FoodTalks（2026-11-05 用户：「不需要保留颜色，可以保留加粗」），
+// 彩色强调句只剩加粗；斜体、跟正文不一样的字号照留。
 function runEmphasisStyle(r) {
-  const parts = [];
   const size = Number(r && r.fontSize);
-  if (Number.isFinite(size) && size > 0) parts.push('font-size: ' + size + 'px');
-  const color = String((r && r.color) || '').replace(/^#/, '');
-  if (/^[0-9a-fA-F]{6}$/.test(color)) parts.push('color: #' + color.toLowerCase());
-  if (!parts.length) return '';
-  return parts.join('; ') + ';';
+  return Number.isFinite(size) && size > 0 ? 'font-size: ' + size + 'px;' : '';
 }
 
 function wrapRunEmphasis(html, r) {
