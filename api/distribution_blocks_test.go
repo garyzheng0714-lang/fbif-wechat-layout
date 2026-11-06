@@ -186,8 +186,30 @@ func TestDistributionBlocksFollowContract(t *testing.T) {
 				if run.Type != "txt" || run.Href != "" || run.Text == "" {
 					t.Errorf("%s 第 %d 块有不是纯文字的片段：%+v", name, i+1, run)
 				}
+				// 片段只有文字和加粗：原文字色、字号、斜体都不外发（2026-11-06 用户：「头条号、百家号外发也去掉原文字色」）。
+				raw, _ := json.Marshal(run)
+				var runFields map[string]any
+				_ = json.Unmarshal(raw, &runFields)
+				for field := range runFields {
+					if !containsString([]string{"type", "text", "bold"}, field) {
+						t.Errorf("%s 第 %d 块的片段多了 %s：%+v", name, i+1, field, run)
+					}
+				}
 			}
 		}
+	}
+	colored := manualLayoutTestJob()
+	colored.BlocksJSON = `[{"k":"txt","runs":[` +
+		`{"type":"txt","text":"但是，她们亲眼看见。","bold":true,"color":"359ba3"},` +
+		`{"type":"txt","text":"表内为单体数据。","color":"8f959e","italic":true,"fontSize":14}]},` +
+		strings.TrimPrefix(strings.TrimSpace(colored.BlocksJSON), "[")
+	coloredContent, err := buildDistributionContent(colored, testPlatform(t, "toutiao"), publishExternalDraft{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("带原文字色的那篇", coloredContent.Blocks)
+	if raw, _ := json.Marshal(coloredContent.Blocks); !strings.Contains(string(raw), `{"type":"txt","text":"但是，她们亲眼看见。","bold":true}`) {
+		t.Errorf("彩色加粗的强调句要只留加粗：%s", raw)
 	}
 	content, err := buildDistributionContent(manualLayoutTestJob(), testPlatform(t, "toutiao"), publishExternalDraft{})
 	if err != nil {
