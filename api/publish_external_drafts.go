@@ -9,7 +9,7 @@ package main
 // 草稿存进平台后系统不再改它，所以检查放在存草稿前：每个平台按分发服务给的限制
 // （distribution_platforms.go）查标题、摘要字数与封面尺寸，有问题这个平台先不推、不占
 // 名额，记成「待修改」；审核卡（feishu_review_card_distribution.go）在这个平台的块里直接给出
-// 现在是什么、要求多少、建议改成什么，并 @ 分发负责人（publish_external_reminders.go）。
+// 现在是什么、要求多少、建议改成什么，并 @ 署名里的作者、对不上才 @ 分发负责人（publish_external_reminders.go）。
 // 改的只是这个平台推出去的版本，公众号和网站上的文章不动。改好后马上重新检查，通过即推
 // （auto 账号仍按平台配额排队）。
 

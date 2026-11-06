@@ -3,8 +3,9 @@ package main
 // publish_distribution_owners.go — 分发负责人、校对负责人与手改周报接收人（2026-10-12 用户裁定：@ 固定负责人；
 // 2026-10-13 校对提醒「@对应的人」；2026-10-15 手改周报私发）。
 //
-// 外发平台的标题、摘要或封面不合要求时，系统在审核卡下回复一条提醒并 @ 分发负责人
-// （publish_external_reminders.go）；风险检查发现确定无疑的错误时 @ 校对负责人（publish_proofread.go）；
+// 外发平台的标题、摘要或封面不合要求时，系统在审核卡下回复一条提醒，风险检查发现确定无疑的错误时也回复一条
+// （publish_external_reminders.go、publish_proofread.go）：原创稿 @ 署名里的作者与编辑，没署名或对不上群里的人才
+// @ 分发负责人、校对负责人（publish_proofread_authors.go）；
 // 每周一把上周编辑手改最多的问题私信发给手改周报接收人（publish_edit_report_delivery.go）。
 // 人只能从审核群成员里选：成员目录由审核应用实时读取，存的是这个应用下的 open_id，换审核应用后要重新选。
 
