@@ -785,46 +785,27 @@ test('括号：URL 里的括号不动（转了链接就废了）', () => {
   assert.ok(html.includes('https://a.com/x(y)'), html);
 });
 
-// ---- 飞书云文档格式保真（用户报告：灰色列表被排成正文黑、项目符号消失）----
+// ---- 原文字色不带（2026-11-06 用户：「公众号排版这里的原文字体颜色也希望去掉，保留加粗」）----
+// 样稿「好奇心过去后，新鲜零食还是一门好生意吗？」：原文青色加粗的强调句；飞书的灰色注释同样不带。
 
-test('a run that carries an explicit DOCX color keeps that color', () => {
+test('原文字色不带：彩色加粗只留加粗，灰色注释排成正文色', async () => {
   const html = renderDocx([
+    docxBody('但是，她们亲眼看见。', {
+      runs: [{ type: 'txt', text: '但是，她们亲眼看见。', bold: true, color: '3d9ea0' }],
+    }),
     docxBody('表内为伊藤园单体数据。', {
       runs: [{ type: 'txt', text: '表内为伊藤园单体数据。', color: '8f959e' }],
     }),
   ]);
 
-  assert.match(html, /style="color: #8f959e;"/);
-});
+  assert.match(html, /<span textstyle="" class="wx-t wx-bold">但是，她们亲眼看见。<\/span>/);
+  assert.match(html, /<span textstyle="" class="wx-t">表内为伊藤园单体数据。<\/span>/);
+  assert.doesNotMatch(html, /3d9ea0|8f959e/i);
 
-test('an uncolored run stays on the rule text color — no inline color at all', () => {
-  const html = renderDocx([docxBody('我有4个问题：')]);
-
-  assert.doesNotMatch(html, /style="color:/);
-});
-
-test("'auto' and default black are not authoring intent and must not override the rule color", () => {
-  for (const color of ['auto', '000000', '#000000']) {
-    const html = renderDocx([
-      docxBody('正文', { runs: [{ type: 'txt', text: '正文', color }] }),
-    ]);
-    assert.doesNotMatch(html, /style="color:/, `color=${color} 不该产生 inline 着色`);
-  }
-});
-
-test('the run color survives CSS inlining and beats .wx-t on the copy path', async () => {
-  const html = renderDocx([
-    docxBody('表内为伊藤园单体数据。', {
-      runs: [{ type: 'txt', text: '表内为伊藤园单体数据。', color: '8f959e' }],
-    }),
-  ]);
   const themeCSS = await fs.readFile(new URL('../public/css/wx-theme.css', import.meta.url), 'utf8');
   const copyHtml = processForCopy(html, themeCSS, DEFAULT_RULE_CONFIG);
-
-  const span = copyHtml.slice(copyHtml.indexOf('<span textstyle'), copyHtml.indexOf('</span>'));
-  const colors = [...span.matchAll(/color:\s*(#[0-9a-fA-F]{6})/g)].map(m => m[1].toLowerCase());
-  // class 样式在前、inline 在后 → 合并后最后一个 color 生效。
-  assert.equal(colors[colors.length - 1], '#8f959e');
+  assert.doesNotMatch(copyHtml, /3d9ea0|8f959e/i, '复制到微信的 HTML 也不带原文字色');
+  assert.match(copyHtml, /font-weight:\s*(bold|700)[^"]*">但是，她们亲眼看见。/, '加粗照留');
 });
 
 test('a bullet list item renders its bullet, an ordinary paragraph does not', () => {

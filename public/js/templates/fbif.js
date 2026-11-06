@@ -131,14 +131,11 @@ function attributionText(role, name, baseContext, behavior) {
   return role + '：' + name;
 }
 
-// DOCX run 的显式着色（<w:rPr><w:color w:val="..">）→ inline style。
-// 不着色的 run 一个字节都不变，继续吃 .wx-t 的规则正文色；css-inline 把 class 样式排在
+// 列表符号的颜色（numbering.xml 里的原值）→ inline style；css-inline 把 class 样式排在
 // inline style 之前合并，所以这里写的颜色在预览和微信复制层都赢过正文色。
-// 两个值【不算】着色意图，必须忽略，否则整篇正文会盖掉规则包的正文色：
-//   - 'auto'：OOXML 明确表示「跟随默认前景色」；
-//   - '000000'：Word/WPS 在作者没动过颜色时也会给每个 run 补一份的默认黑。
-// 飞书导出只在作者真正改过颜色处才写 w:color（本文 613 段里仅 5 处灰 #8f959e），
-// 这正是导入后灰色注释被排成正文黑的根因。
+// 'auto'（跟随默认前景色）和 '000000'（Word/WPS 默认补的黑）不算着色，照吃正文色。
+// 正文片段不带原文字色（2026-11-06 用户：「公众号排版这里的原文字体颜色也希望去掉，保留加粗」），
+// 公众号原文的彩色强调句、飞书的灰色注释都排成规则正文色，加粗照留。
 const RUN_HEX_COLOR_RE = /^[0-9a-fA-F]{6}$/;
 function runColorStyle(color) {
   const v = String(color || '').trim().replace(/^#/, '');
@@ -164,7 +161,7 @@ function renderRuns(runs, opts) {
   return runs.filter(r => r.type !== 'img').map(r => {
     if (r.type === 'txt') {
       const cls = r.bold ? textCls + ' wx-bold' : textCls;
-      return leafWrap('<span textstyle="" class="' + cls + '"' + runColorStyle(r.color) + '>' + esc(r.text) + '</span>');
+      return leafWrap('<span textstyle="" class="' + cls + '">' + esc(r.text) + '</span>');
     }
     if (r.type === 'link') {
       const h = (r.href || '');
