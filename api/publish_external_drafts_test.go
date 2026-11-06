@@ -353,6 +353,100 @@ func TestExternalReminderMentionsOwnersInThread(t *testing.T) {
 	}
 }
 
+// TestExternalReminderMentionsOriginalAuthors 2026-11-06 群里 Bobo：「这个流程看能不能艾特当篇的作者」，用户：
+// 「原创文章艾特当篇作者，如果是非原创的话还是艾特你」。外发待修改的提醒照校对提醒的办法：署名的笔名对上群里的人就
+// @ 他们、不 @ 分发负责人；对不上照旧 @ 分发负责人并说没找到谁；读不到群成员不 @ 错人，记失败等重试。
+func TestExternalReminderMentionsOriginalAuthors(t *testing.T) {
+	members := []proofreadMember{
+		{OpenID: "ou_riri", Names: []string{"甘甜", "Riri"}},
+		{OpenID: "ou_sage", Names: []string{"冷思真", "Sage"}},
+		{OpenID: "ou_owner_1", Names: []string{"朱未", "Bobo"}},
+	}
+	cases := []struct {
+		name, byline  string
+		membersErr    error
+		want, notWant []string
+	}{
+		{"署名对上群里的人：@ 作者和编辑", "作者：Riri，编辑：Sage",
+			nil, []string{`"user_id":"ou_riri"`, `"user_id":"ou_sage"`}, []string{`"user_id":"ou_owner_1"`, "没在审核群里找到"}},
+		{"署名对不上：@ 分发负责人并说没找到谁", "作者：Nova",
+			nil, []string{`"user_id":"ou_owner_1"`, "没在审核群里找到署名里的「Nova」"}, []string{`"user_id":"ou_riri"`}},
+		{"没写署名：@ 分发负责人", "",
+			nil, []string{`"user_id":"ou_owner_1"`}, []string{"没在审核群里找到"}},
+		{"读不到群成员：不发，记失败等重试", "作者：Riri", errors.New("飞书群成员接口不可达"), nil, nil},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setTestDistributionAccounts(t)
+			t.Setenv(publishNotificationAppsEnv, "")
+			t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
+			stubDistributionImageSize(t, map[string][2]int{})
+			env := newPublishTestEnv(t)
+			env.pipeline.deliverySettings = newPublishDeliverySettingsStore(filepath.Join(t.TempDir(), "delivery.json"))
+			if err := env.pipeline.deliverySettings.write(publishDeliverySettings{
+				AppProfileID: "review-app", ChatIDs: []string{"oc_review"},
+				DistributionOwners:    []publishDistributionOwner{{OpenID: "ou_owner_1", Name: "朱未"}},
+				DistributionOwnersApp: "review-app",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			env.pipeline.proofreadMemberLister = func(context.Context, string, string) ([]proofreadMember, error) {
+				return members, tc.membersErr
+			}
+			var sent []sentReminder
+			env.pipeline.externalReminderSender = func(_ context.Context, _ publishJob, chatID, kind string, post map[string]any) (string, error) {
+				sent = append(sent, sentReminder{chatID: chatID, kind: kind, post: panelJSON(t, post)})
+				return fmt.Sprintf("om_reminder_%d", len(sent)), nil
+			}
+			env.pipeline.reviewCardSentAt = func(context.Context, publishJob, string, string) (time.Time, error) {
+				return pipelineNow(env.pipeline).Add(-time.Hour), nil
+			}
+			job := createLongTitleDistributionJob(t, env, fmt.Sprintf("site:reminder-author-%d", i))
+			if _, err := env.store.update(job.ID, func(current *publishJob) {
+				current.ReviewDeliveryAppID = "review-app"
+				current.ReviewDeliveryChatIDs = []string{"oc_review"}
+				current.ReviewCardMsgIDs = map[string]string{"oc_review": "om_review_card"}
+				if tc.byline != "" {
+					var blocks []map[string]any
+					if err := json.Unmarshal([]byte(current.BlocksJSON), &blocks); err != nil {
+						t.Fatal(err)
+					}
+					raw, err := json.Marshal(append([]map[string]any{{"k": "txt", "text": tc.byline}}, blocks...))
+					if err != nil {
+						t.Fatal(err)
+					}
+					current.BlocksJSON = string(raw)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(mustJob(t, env, job.ID))); err != nil &&
+				!errors.Is(err, errExternalLanesNeedFix) {
+				t.Fatal(err)
+			}
+			if tc.membersErr != nil {
+				if r := mustJob(t, env, job.ID).ExternalDistributionReminder; len(sent) != 0 || len(r.MessageIDs) != 0 || !strings.Contains(r.Error, "飞书群成员接口不可达") {
+					t.Fatalf("读不到群成员时不该发、应记失败：sent=%+v reminder=%+v", sent, r)
+				}
+				return
+			}
+			if len(sent) != 1 || sent[0].kind != externalReminderKindOpen {
+				t.Fatalf("应发一条开场：%+v", sent)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(sent[0].post, want) {
+					t.Fatalf("开场缺少 %q：%s", want, sent[0].post)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(sent[0].post, notWant) {
+					t.Fatalf("开场不该有 %q：%s", notWant, sent[0].post)
+				}
+			}
+		})
+	}
+}
+
 // TestExternalReminderCoverOptions 封面太小时给的做法：话题发图开通了就请人直接发图到话题里，
 // 没开通时给侧边栏上传链接——不给点了没反应的选项。
 func TestExternalReminderCoverOptions(t *testing.T) {
@@ -370,7 +464,7 @@ func TestExternalReminderCoverOptions(t *testing.T) {
 		Issues:    []publishExternalIssue{{Field: publishExternalIssueTitle, Current: "一个很长的标题", Length: 45, Min: 15, Max: 40}},
 	}}}
 	owners := []publishDistributionOwner{{OpenID: "ou_a"}}
-	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, true))
+	plain := panelJSON(t, buildExternalReminderOpening(job, cfg, owners, nil, true))
 	for _, want := range []string{"同步到头条号、百家号前，还差 2 处要改：", "1. 头条号封面太小（头条号至少 452×352，现在 300×200）",
 		"在卡片里点选一张正文大图，或者", `"tag":"a","text":"上传一张"`, "（传上去就换上）", "2. 百家号标题超了 5 字（百家号最多 40 字）",
 		"在卡片输入框里改到 40 字以内", "「保存并同步至头条号」「保存并同步至百家号」"} {

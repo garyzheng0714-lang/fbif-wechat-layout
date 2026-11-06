@@ -289,7 +289,7 @@ func (p *publishPipeline) runProofreadReminder(ctx context.Context, claimed publ
 	if err != nil {
 		return round, nil, "", err
 	}
-	owners, missing, err := p.proofreadRecipients(ctx, claimed, settings)
+	owners, missing, err := p.bylineRecipients(ctx, claimed, settings, p.publishProofreadOwners(settings.AppProfileID))
 	if err != nil {
 		return round, nil, "", err
 	}
@@ -368,8 +368,7 @@ func buildProofreadReminder(job publishJob, owners []publishDistributionOwner, m
 		}
 	}
 	if len(missing) > 0 {
-		lines = append(lines, []any{postText(fmt.Sprintf("没在审核群里找到署名里的「%s」：请把作者拉进群，并在飞书资料里填上笔名。",
-			strings.Join(missing, "」「")), false)})
+		lines = append(lines, bylineMissingLine(missing))
 	}
 	lines = append(lines, []any{postText("不影响同步和发布，确认后改正即可。", false)})
 	return postMessage(lines)
@@ -543,7 +542,7 @@ func registerPublishProofreadRoutes(mux *http.ServeMux, p *publishPipeline, auth
 				writeError(w, http.StatusBadGateway, err.Error())
 				return
 			}
-			mentions, missing, err := p.proofreadRecipients(ctx, job, settings)
+			mentions, missing, err := p.bylineRecipients(ctx, job, settings, p.publishProofreadOwners(settings.AppProfileID))
 			if err != nil {
 				writeError(w, http.StatusBadGateway, err.Error())
 				return

@@ -3,7 +3,8 @@ package main
 // publish_external_reminders.go — 外发待修改的提醒与后台准备。
 //
 // 2026-10-12 用户裁定：超限时「在群里 @ 对应的人」，@ 的是后台「发布链路」里设的固定分发
-// 负责人；改在审核卡里完成。同日补充：「不应该直接在卡片里@人，因为在卡片里@人可能收不到。
+// 负责人；改在审核卡里完成。2026-11-06 起原创稿 @ 署名里的作者与编辑，对不上才 @ 分发负责人
+// （publish_proofread_authors.go）。同日补充：「不应该直接在卡片里@人，因为在卡片里@人可能收不到。
 // 它应该在这个卡片消息的话题下创建一个对话，@对应的人，告诉他下一步要做什么」「自动化不要让人
 // 过多思考，简单直接地告诉他要干什么……给他选项」。所以提醒是审核卡话题里的普通富文本消息
 // （post，@ 才提醒得到），不是卡片，也不在群里单独刷屏（红线 36 只管运维播报）。
@@ -262,7 +263,10 @@ func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJ
 	if err != nil {
 		return result, err
 	}
-	owners := p.externalDistributionOwners(settings.AppProfileID)
+	// @ 谁要读群成员，只在真要发开场时读一次。
+	var owners []publishDistributionOwner
+	var missing []string
+	recipientsRead := false
 	var failures []string
 	for _, chatID := range settings.ChatIDs {
 		chatID = strings.TrimSpace(chatID)
@@ -273,6 +277,13 @@ func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJ
 		var post map[string]any
 		switch {
 		case r.Want == publishExternalReminderOpen && r.MessageIDs[chatID] == "":
+			if !recipientsRead {
+				owners, missing, err = p.bylineRecipients(ctx, job, settings, p.externalDistributionOwners(settings.AppProfileID))
+				if err != nil {
+					return result, err
+				}
+				recipientsRead = true
+			}
 			if len(owners) == 0 {
 				result.skipped = "没有设置分发负责人，未发提醒"
 				continue
@@ -283,7 +294,7 @@ func (p *publishPipeline) sendExternalReminder(ctx context.Context, job publishJ
 				result.skipped = "审核卡里改不了，也没有改稿页链接，未发提醒"
 				continue
 			}
-			kind, post = externalReminderKindOpen, buildExternalReminderOpening(job, cfg, owners, inCard)
+			kind, post = externalReminderKindOpen, buildExternalReminderOpening(job, cfg, owners, missing, inCard)
 		case r.Want == publishExternalReminderResolved && r.MessageIDs[chatID] != "" && r.ClosedIDs[chatID] == "":
 			kind, post = externalReminderKindClose, buildExternalReminderClosing(job, cfg)
 		default:
@@ -436,10 +447,10 @@ func externalReminderPlatformNames(cfg externalTargets, drafts []publishExternal
 	return names
 }
 
-// buildExternalReminderOpening 话题开场：@ 负责人，一句话说清哪篇、要同步到哪、差几处；
-// 每处一行粗体写不合要求的地方，下一行给能选的做法；最后一行说改完点哪里。
+// buildExternalReminderOpening 话题开场：@ 作者编辑或分发负责人，一句话说清哪篇、要同步到哪、差几处；
+// 每处一行粗体写不合要求的地方，下一行给能选的做法；署名没对上群里的人时说一句没找到谁；最后一行说改完点哪里。
 // inCard=false（审核卡改不了）时每一步都在改稿页里做，最后一行给改稿页链接。
-func buildExternalReminderOpening(job publishJob, cfg externalTargets, owners []publishDistributionOwner, inCard bool) map[string]any {
+func buildExternalReminderOpening(job publishJob, cfg externalTargets, owners []publishDistributionOwner, missing []string, inCard bool) map[string]any {
 	drafts := externalPendingFixes(job, cfg)
 	names := externalReminderPlatformNames(cfg, drafts)
 	total := 0
@@ -516,6 +527,9 @@ func buildExternalReminderOpening(job publishJob, cfg externalTargets, owners []
 			}
 			lines = append(lines, []any{postText(problem, true)}, options)
 		}
+	}
+	if len(missing) > 0 {
+		lines = append(lines, bylineMissingLine(missing))
 	}
 	if inCard {
 		lines = append(lines, []any{postText("改好后点上面卡片里的"+buttons+"，就会同步。", false)})

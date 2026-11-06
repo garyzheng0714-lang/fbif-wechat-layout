@@ -1,11 +1,12 @@
 package main
 
-// publish_proofread_authors.go — 原创稿的校对提醒 @ 署名里的作者与编辑（2026-10-30 用户裁定：「这篇文章
-// 如果是我们的原创文章……有错误的地方你就直接在底下@他，别@我」）。
+// publish_proofread_authors.go — 原创稿的校对提醒、外发待修改提醒 @ 署名里的作者与编辑（2026-10-30 用户裁定：
+// 「这篇文章如果是我们的原创文章……有错误的地方你就直接在底下@他，别@我」；2026-11-06 群里 Bobo：「这个流程看能不能
+// 艾特当篇的作者」，用户：「原创文章艾特当篇作者，如果是非原创的话还是艾特你」，外发提醒照办）。
 //
 // 署名写的是笔名（Sage、Bobo、Mote莫特），审核群成员接口只给真名；笔名在各人的飞书资料里（英文名或别名），
-// 审核应用读通讯录对上。对不上的——转载稿、原创稿没写署名、署名的人不在群里或资料里没填笔名——照旧 @ 校对负责人；
-// 原创稿写了署名却一个都没对上时，提醒里说一句没找到谁。
+// 审核应用读通讯录对上。对不上的——转载稿、原创稿没写署名、署名的人不在群里或资料里没填笔名——照旧 @ 这类提醒的
+// 负责人（校对负责人、分发负责人）；原创稿写了署名却一个都没对上时，提醒里说一句没找到谁。
 
 import (
 	"context"
@@ -141,12 +142,12 @@ func proofreadMembersWith(members []proofreadMember, match func(string) bool) []
 	return out
 }
 
-// proofreadRecipients 这条提醒 @ 谁：原创稿对上署名的人就 @ 他们；否则 @ 校对负责人，原创稿写了署名
+// bylineRecipients 这条提醒 @ 谁：原创稿对上署名的人就 @ 他们；否则 @ owners（这类提醒的负责人），原创稿写了署名
 // 却没对上时一并返回没找到的名字。
-func (p *publishPipeline) proofreadRecipients(ctx context.Context, job publishJob, settings publishDeliverySettings) ([]publishDistributionOwner, []string, error) {
+func (p *publishPipeline) bylineRecipients(ctx context.Context, job publishJob, settings publishDeliverySettings, owners []publishDistributionOwner) ([]publishDistributionOwner, []string, error) {
 	names := proofreadBylineNames(job)
 	if len(names) == 0 {
-		return p.publishProofreadOwners(settings.AppProfileID), nil, nil
+		return owners, nil, nil
 	}
 	members, err := p.proofreadReviewMembers(ctx, job, settings)
 	if err != nil {
@@ -156,7 +157,13 @@ func (p *publishPipeline) proofreadRecipients(ctx context.Context, job publishJo
 	if len(matched) > 0 {
 		return matched, nil, nil
 	}
-	return p.publishProofreadOwners(settings.AppProfileID), missing, nil
+	return owners, missing, nil
+}
+
+// bylineMissingLine 原创稿署名一个都没对上群里的人时，提醒里说一句没找到谁。
+func bylineMissingLine(missing []string) []any {
+	return []any{postText(fmt.Sprintf("没在审核群里找到署名里的「%s」：请把作者拉进群，并在飞书资料里填上笔名。",
+		strings.Join(missing, "」「")), false)}
 }
 
 // proofreadReviewMembers 这篇审核群的全部成员（去重）。
