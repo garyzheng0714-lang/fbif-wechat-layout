@@ -288,10 +288,7 @@ func defaultSubscribeFeedWechatArticle(ctx context.Context, sourceName, articleU
 	if token == "" {
 		return fmt.Errorf("同步服务令牌未配置")
 	}
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("FOODTALKS_FEED_BASE_URL")), "/")
-	if base == "" {
-		base = defaultFoodTalksFeedBase
-	}
+	base := foodTalksFeedBaseURL()
 	payload, err := json.Marshal(map[string]any{
 		"source_name": strings.TrimSpace(sourceName),
 		"url":         strings.TrimSpace(articleURL),

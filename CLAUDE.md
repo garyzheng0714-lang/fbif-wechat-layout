@@ -60,6 +60,7 @@
 1. 两个机器入口只收链接（红线 33），五个正文旁路字段必须 400。
 2. 不改两个监控端代码；发现问题只报告给其负责人。
 3. 健康探针、告警、失败计数归监控端；本项目仅提供 `GET /api/publish/monitoring`，不主动探外部服务（红线 30）。
+4. 任务状态推给资讯订阅（2026-11-08 资讯订阅按用户「不轮询、有改动才同步」提的需求）：提交时带了 `status_callback_url`（只许指向 `FOODTALKS_FEED_BASE_URL` 同一个源）的任务，`sync-status` 那份摘要每变一次就带签名 POST 过去；签名照 Standard Webhooks、密钥用现有 `PUBLISH_SYNC_SERVICE_TOKEN`，不新建；不带就和以前一样，`sync-status` 不动。约定只在 [docs/publish-status-callback.md](docs/publish-status-callback.md)，代码 `api/publish_status_callback.go`：任务库每次写盘比一次摘要指纹、同一次写里排上新版本，所以任何代码改了状态都不用另调推送。
 
 ## 工作入口
 
@@ -127,6 +128,7 @@
 - 19–24：`site-footer-parity/series-blocks-fidelity/foodtalks-site-config-flow/table-renderer-shared/foodtalks-site-docx`；原文字色不带 `tests/render-service-site.test.mjs`、`tests/fbif-template.test.mjs`（`原文字色不带`）、`api/distribution_blocks_test.go`（`TestDistributionBlocksFollowContract`）。
 - 26：`api/publish_duplicate_guard_test.go`、`api/publish_auto_publish_test.go`、`api/publish_mirror_retry_test.go`（搬图自动重试、失败过或超 24 小时不自动发布、失败任务列表）、`tests/admin-failed-jobs.test.mjs`；27/36：`tests/deploy-transaction.test.mjs`。
 - 30：`.github/workflows/p0-monitoring-contract.yml`。
+- 三系统边界 4（状态推给资讯订阅）：`api/publish_status_callback_test.go`（签名与 Standard Webhooks 官方测试数据一致、不带地址行为不变、外域地址 400、每变一次推且与 sync-status 同一份、只推最新版、退避 8 次放弃、Retry-After、410 停推、重启补推同一版）。
 - 31：`e2e-preview-speed/e2e-feishu-import-progress/preview-dom/preview-image-loader/feishu-doc-ready/import-progress`、`api/feishu_export_jobs_test.go`。
 - 33：`api/publish_http_test.go` 中 `TestPublishOfficialSyncFetchesFromURL` 及三个 reject 测试。
 - 34：`api/feishu_review_card_test.go`、`api/feishu_review_card_icons_test.go`（聚合卡：编辑选的方形封面 + 四个独立单行块、按钮 Lucide/微信图标、已分发稿仍可重新同步、同步结果单独一行）；35：`api/publish_risk_layers_test.go`；30 第三方失败近期口径：`TestPublishMonitoringExternalFailureRecencyUsesLaneFailureTime`；过期卡与补同步：`api/publish_source_resync_test.go`（`TestPublishNotificationExpiredCardIsTerminal`、`TestSourceResyncAdminEndpoint`）。

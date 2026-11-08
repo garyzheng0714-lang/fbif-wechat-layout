@@ -17,6 +17,7 @@
 
 - **三系统边界**（2026-08-06 用户裁定，真身在 [CLAUDE](../CLAUDE.md) 顶部）：FBIF 内容链路由三个互相独立的系统组成——本项目**只做加工**，`FoodTalks_Feed` 做**实时监控**，`fbif-wechat-article` 做 **T+1 归档监控**。只经 HTTP 通信，不共享存储；本项目不碰监控端代码，也不主动探别人的死活。
 - [发布接入契约](publish-intake-contract.md)：**上游怎么把文章交进来**——只接收链接的红线、鉴权头、类型证据、`mp.weixin.qq.com` 约束、状态码与长/短链幂等差异。改 `POST /api/publish/{site,official}-sync` 必须同步改这份。
+- [任务状态推送约定](publish-status-callback.md)：**状态怎么推回去**——提交时带 `status_callback_url`，状态每变一次带 Standard Webhooks 签名 POST 给资讯订阅（密钥是现有同步令牌），重试与放弃规则。改 `api/publish_status_callback.go` 必须同步改这份。
 - [飞书云文档导入与 Markdown 输入](feishu-document-import.md)：2026-07-28 三路调研（项目链路 / 开源方案 / 飞书 API）的持久事实，含飞书导出 docx 主路线、授权 scope、已知丢失项与 Markdown 补齐未决事项。
 - [多平台分发框架](adr/2026-10-24-distribution-framework.md)：Feed、排版工具、分发服务、多维表格各管什么，两边接口传什么，迁移顺序（2026-10-24 用户裁定，迁移中）。
 - [共用与隔离的四层模型](adr/2026-07-10-share-vs-isolate-boundary.md)

@@ -233,10 +233,10 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/layout/v1/render` | 排版接口：交一篇、拿成品 HTML（或 202 + `poll_url`），需 `Authorization: Bearer flk_…`；`GET /api/layout/v1/operations/{id}` 取 202 的那篇；`GET /api/layout/v1/docs`、`/openapi.json` 是说明书，不用钥匙 |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
-| `POST` | `/api/publish/site-sync` | **只接收文章链接**：`url` + 可选 `rule_pack_id` + 分类证据。可选 `content_source_url` 只补「阅读原文」出处。带 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400（见下方红线）。机器调用需 `X-Publish-Sync-Token` 与普通图文正向分类证据、有效 classifier version |
+| `POST` | `/api/publish/site-sync` | **只接收文章链接**：`url` + 可选 `rule_pack_id` + 分类证据。可选 `content_source_url` 只补「阅读原文」出处；可选 `status_callback_url`（只许指向 Feed 自己的域名）登记后，任务状态每变一次带签名推过去，见 [任务状态推送约定](docs/publish-status-callback.md)。带 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400（见下方红线）。机器调用需 `X-Publish-Sync-Token` 与普通图文正向分类证据、有效 classifier version |
 | `POST` | `/api/publish/official-sync` | 同样只接收链接，红线与判定同 site-sync；机器调用需要服务令牌与 fail-closed 证据 |
-| `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文 |
-| `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权。任一任务仍在 processing、审核通知仍 pending/sending、审核卡缺失或失败/对账积压时均 `ready=false`；最近一次 FoodTalks 调用被 401 拒绝时报 `foodtalks_credential_invalid`（进 `alert_issues`，换 token 后下一次成功调用即清除）；外发保真核对 7 天内对不上或取不到线上正文的只进 `warnings`（`external_fidelity_mismatch` / `external_fidelity_unavailable`，不影响 `ready`）；进程存活不等于业务完成 |
+| `POST` | `/api/publish/sync-status` | 批量读取同步中心所需的紧凑任务状态；服务令牌或管理员鉴权，不返回正文、blocks 或模型原文。登记了 `status_callback_url` 的任务，同一份状态会主动推过去，这里只作兜底 |
+| `GET` | `/api/publish/monitoring` | 跨系统监控摘要；服务令牌或管理员鉴权。任一任务仍在 processing、审核通知仍 pending/sending、审核卡缺失或失败/对账积压时均 `ready=false`；最近一次 FoodTalks 调用被 401 拒绝时报 `foodtalks_credential_invalid`（进 `alert_issues`，换 token 后下一次成功调用即清除）；外发保真核对 7 天内对不上或取不到线上正文的只进 `warnings`（`external_fidelity_mismatch` / `external_fidelity_unavailable`，不影响 `ready`）；任务状态推送 7 天内连续 8 次推不出去、已放弃的也只进 `warnings`（`status_callback_dead_letters`）；进程存活不等于业务完成 |
 | `POST` | `/api/publish/monitor-alert` | 监控端用同步服务令牌提交结构化告警，本服务只负责转发到独立飞书私聊；不主动外检 |
 | `GET` | `/api/publish/jobs` | 查询发布任务摘要，需管理员/超级管理员登录，或部署专用 `PUBLISH_ADMIN_SERVICE_TOKEN` |
 | `GET` | `/api/publish/readiness` | 部署/运维只读验收：生成物存在/一致性、存储、目标环境、分类、渲染、飞书、AI 与 worker 暂停状态；需管理员角色或部署专用服务令牌，且只返回布尔/模式信息 |
@@ -293,7 +293,7 @@ curl http://127.0.0.1:9000/api/health
 | `LAYOUT_RENDER_URL` / `LAYOUT_IMAGE_HOSTS` | 可选。排版接口的排版程序地址（默认 `http://127.0.0.1:19098`）与成品里可原样留的 FBIF 自己图床（默认两个 OSS 桶加 `static.foodtalks.cn`） |
 | `PUBLISH_JOBS_PATH` | 发布任务 JSON 存储路径；默认跟随规则存储目录 |
 | `PUBLISH_SYNC_SERVICE_TOKEN` | `FoodTalks_Feed` 与 `fbif-wechat-article` 调用发布提交、紧凑状态和监控端点的独立服务令牌；不能访问完整任务、审核、重试、对账或规则管理接口 |
-| `FOODTALKS_FEED_BASE_URL` | 向 Feed 查转载原文；缺省 `https://feed.foodtalks.cn`；鉴权共用上面的同步令牌 |
+| `FOODTALKS_FEED_BASE_URL` | 向 Feed 查转载原文；缺省 `https://feed.foodtalks.cn`；鉴权共用上面的同步令牌。`status_callback_url` 只许和它同一个源，推送的签名密钥也是上面的同步令牌 |
 | `TIKHUB_API_KEY` / `TIKHUB_API_BASE_URL` | 可选，按次计费（0.01$/次）。Feed 未订该公众号、自家号转发又没填「阅读原文」时，用 TikHub 广域搜（搜一搜）按标题+出处补微信链接；Mote 正文的公众号长链微信只回验证页时，用文章详情接口取标题与发文时间，换成站内稿；国内默认 `https://api.tikhub.dev`。失败只降级 |
 | `JINA_OUTBOUND_PROXY` | 可选，免费。非公众号网页直抓拿不到正文（站点反爬，如和讯的腾讯云 EdgeOne）时，`/api/fetch-article` 改用 Jina Reader 免费档取 Markdown 正文（图片留在原位）；国内直连 r.jina.ai 被墙，填 socks5 出站代理（与 Feed 同一出口）。公众号链接不走 Jina。都失败才提示编辑走飞书云文档 |
 | `REDFOX_API_KEY` / `REDFOX_API_BASE_URL` | 旧红狐兼容键；本服务不再读取，只为旧 `publish.env` 过渡保留 |

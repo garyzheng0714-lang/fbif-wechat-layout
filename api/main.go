@@ -166,9 +166,10 @@ func main() {
 	// 接受该 release 后再解除暂停。这样 rollback 窗口内不会自动恢复任务、发通知或
 	// 续跑不可逆外调。正常启动仍先扫描再开放 HTTP，避免与人工 retry 争抢。
 	if publishWorkersPaused() {
-		log.Printf("publish: 候选部署暂停态，跳过任务恢复、通知 outbox 与飞书长连接")
+		log.Printf("publish: 候选部署暂停态，跳过任务恢复、通知 outbox、状态推送与飞书长连接")
 	} else {
 		publishPipe.recoverJobs()
+		publishStore.statusCallbacks.startSending()
 		publishPipe.startCMSPublicationSync()
 		publishPipe.startExternalAutoDistribution()
 		publishPipe.startPublishEditReport()

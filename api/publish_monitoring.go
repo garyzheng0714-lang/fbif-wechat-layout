@@ -30,26 +30,28 @@ type publishMonitoringStatus struct {
 	Processing                 int    `json:"processing"`
 	OldestProcessingAgeSeconds int64  `json:"oldest_processing_age_seconds"`
 	// 第三方平台发布中、审核中的最久一条（只看分发服务的 lane，不进 oldest_processing_age_seconds）。
-	OldestExternalPublishingAgeSeconds int64    `json:"oldest_external_publishing_age_seconds"`
-	OldestExternalReviewingAgeSeconds  int64    `json:"oldest_external_reviewing_age_seconds"`
-	Queued                             int      `json:"queued"`
-	OldestQueueAgeSeconds              int64    `json:"oldest_queue_age_seconds"`
-	NotificationPending                int      `json:"notification_pending"`
-	OldestNotificationAgeSeconds       int64    `json:"oldest_notification_age_seconds"`
-	NotificationErrors                 int      `json:"notification_errors"`
-	NotificationDeadLetters            int      `json:"notification_dead_letters"`
-	ReviewCardsMissing                 int      `json:"review_cards_missing"`
-	DuplicateSourceKeys                int      `json:"duplicate_source_keys"`
-	Failed                             int      `json:"failed"`
-	FailedRecent                       int      `json:"failed_recent"`
-	ReconciliationRequired             int      `json:"reconciliation_required"`
-	OldestReconciliationAgeSeconds     int64    `json:"oldest_reconciliation_age_seconds"`
-	ContentConflicts                   int      `json:"content_conflicts"`
-	FoodTalksCredentialInvalid         bool     `json:"foodtalks_credential_invalid"`
-	ExternalFidelityMismatches         int      `json:"external_fidelity_mismatches"`
-	ExternalFidelityUnavailable        int      `json:"external_fidelity_unavailable"`
-	Issues                             []string `json:"issues,omitempty"`
-	Warnings                           []string `json:"warnings,omitempty"`
+	OldestExternalPublishingAgeSeconds int64 `json:"oldest_external_publishing_age_seconds"`
+	OldestExternalReviewingAgeSeconds  int64 `json:"oldest_external_reviewing_age_seconds"`
+	Queued                             int   `json:"queued"`
+	OldestQueueAgeSeconds              int64 `json:"oldest_queue_age_seconds"`
+	NotificationPending                int   `json:"notification_pending"`
+	OldestNotificationAgeSeconds       int64 `json:"oldest_notification_age_seconds"`
+	NotificationErrors                 int   `json:"notification_errors"`
+	NotificationDeadLetters            int   `json:"notification_dead_letters"`
+	ReviewCardsMissing                 int   `json:"review_cards_missing"`
+	DuplicateSourceKeys                int   `json:"duplicate_source_keys"`
+	Failed                             int   `json:"failed"`
+	FailedRecent                       int   `json:"failed_recent"`
+	ReconciliationRequired             int   `json:"reconciliation_required"`
+	OldestReconciliationAgeSeconds     int64 `json:"oldest_reconciliation_age_seconds"`
+	ContentConflicts                   int   `json:"content_conflicts"`
+	FoodTalksCredentialInvalid         bool  `json:"foodtalks_credential_invalid"`
+	ExternalFidelityMismatches         int   `json:"external_fidelity_mismatches"`
+	ExternalFidelityUnavailable        int   `json:"external_fidelity_unavailable"`
+	// 7 天内连续推不出去、已放弃的任务状态推送（资讯订阅还有兜底回查，不是 P0）。
+	StatusCallbackDeadLetters int      `json:"status_callback_dead_letters"`
+	Issues                    []string `json:"issues,omitempty"`
+	Warnings                  []string `json:"warnings,omitempty"`
 	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
 	// 把 issues 当 P0，于是正常处理中的稿也会被喊成事故。
 	AlertIssues []string `json:"alert_issues"`
@@ -106,6 +108,9 @@ func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, no
 		status.ExternalFidelityUnavailable += unavailable
 		if job.ContentConflict {
 			status.ContentConflicts++
+		}
+		if statusCallbackDeadLetterRecent(job, now) {
+			status.StatusCallbackDeadLetters++
 		}
 	}
 	finalizePublishMonitoring(&status)
@@ -278,6 +283,7 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		// 草稿读回对不上（平台编辑器改了），或分发服务没读回：要有人看，但不是 P0、不挡 ready。
 		{status.ExternalFidelityMismatches > 0, fmt.Sprintf("external_fidelity_mismatch:%d", status.ExternalFidelityMismatches), publishMonitoringWarning},
 		{status.ExternalFidelityUnavailable > 0, fmt.Sprintf("external_fidelity_unavailable:%d", status.ExternalFidelityUnavailable), publishMonitoringWarning},
+		{status.StatusCallbackDeadLetters > 0, fmt.Sprintf("status_callback_dead_letters:%d", status.StatusCallbackDeadLetters), publishMonitoringWarning},
 	}
 	appendPublishMonitoringSignals(status, signals)
 	sort.Strings(status.Issues)

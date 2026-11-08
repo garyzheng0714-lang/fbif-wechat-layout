@@ -158,10 +158,7 @@ func defaultLookupFeedOriginalArticleDetail(ctx context.Context, title, sourceNa
 	if token == "" {
 		return feedOriginalArticleHit{}
 	}
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("FOODTALKS_FEED_BASE_URL")), "/")
-	if base == "" {
-		base = defaultFoodTalksFeedBase
-	}
+	base := foodTalksFeedBaseURL()
 	payload, err := json.Marshal(map[string]string{
 		"title":       title,
 		"source_name": sourceName,

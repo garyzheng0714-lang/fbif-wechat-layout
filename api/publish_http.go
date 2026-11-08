@@ -253,6 +253,8 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			// 官方接口「阅读原文」：不是正文旁路，只补出处链接。
 			ContentSourceURL  string `json:"content_source_url"`
 			OriginalSourceURL string `json:"original_source_url"`
+			// 可选：状态一变就 POST 到这里（docs/publish-status-callback.md）；不带就和以前一样。
+			StatusCallbackURL string `json:"status_callback_url"`
 
 			// 以下字段只为「显式拒绝」而保留，绝不参与排版（红线，见函数头注释）。
 			// 静默忽略比拒绝更危险：调用方会以为自己传的正文生效了。
@@ -285,6 +287,11 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 				writeError(w, http.StatusUnprocessableEntity, evidenceErr.Error())
 				return
 			}
+		}
+		callbackURL, callbackErr := publishStatusCallbackTarget(req.StatusCallbackURL)
+		if callbackErr != nil {
+			writeError(w, http.StatusBadRequest, callbackErr.Error())
+			return
 		}
 		job, created, err := p.submitWithRulePackAndMetadataContext(
 			r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion,
@@ -329,13 +336,16 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 				return
 			}
 		}
+		response := map[string]any{"existing": !created, "rerendered": rerendered}
+		if !registerPublishStatusCallback(w, p, &job, callbackURL, response) {
+			return
+		}
+		response["job"] = newPublishSyncJobSummary(job)
 		status := http.StatusOK
 		if created {
 			status = http.StatusCreated
 		}
-		writeJSON(w, status, map[string]any{
-			"job": newPublishSyncJobSummary(job), "existing": !created, "rerendered": rerendered,
-		})
+		writeJSON(w, status, response)
 	})
 
 	// 微信官方来源的已发布文章提交口。**只接收链接**（红线，见
@@ -361,6 +371,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			ClassifierVersion string `json:"classifier_version"`
 			ContentSourceURL  string `json:"content_source_url"`
 			OriginalSourceURL string `json:"original_source_url"`
+			StatusCallbackURL string `json:"status_callback_url"`
 
 			// 以下字段只为「显式拒绝」而保留，绝不参与排版（红线）。
 			ContentHTML string `json:"content_html"`
@@ -397,6 +408,11 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 				return
 			}
 		}
+		callbackURL, callbackErr := publishStatusCallbackTarget(req.StatusCallbackURL)
+		if callbackErr != nil {
+			writeError(w, http.StatusBadRequest, callbackErr.Error())
+			return
+		}
 		job, created, err := p.submitWithRulePackAndMetadataContext(
 			r.Context(), req.URL, rulePackID, req.Classification, req.ClassifierVersion,
 			firstNonEmpty(req.ContentSourceURL, req.OriginalSourceURL))
@@ -416,11 +432,16 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		response := map[string]any{"existing": !created}
+		if !registerPublishStatusCallback(w, p, &job, callbackURL, response) {
+			return
+		}
+		response["job"] = newPublishSyncJobSummary(job)
 		status := http.StatusOK
 		if created {
 			status = http.StatusCreated
 		}
-		writeJSON(w, status, map[string]any{"job": newPublishSyncJobSummary(job), "existing": !created})
+		writeJSON(w, status, response)
 	})
 
 	// 同步中心批量读取紧凑状态。只返回跨系统编排所需字段，不返回正文、blocks、
@@ -1151,6 +1172,22 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"job": job})
 	})
+}
+
+// registerPublishStatusCallback 两个提交口共用：带了回调地址就登记到任务上（登记即推一次当前状态），
+// 并在响应里回显 status_callback_url，调用方据此确认这边认了这个字段。没带什么都不做。
+func registerPublishStatusCallback(w http.ResponseWriter, p *publishPipeline, job *publishJob, callbackURL string, response map[string]any) bool {
+	if callbackURL == "" {
+		return true
+	}
+	registered, err := p.store.registerStatusCallback(job.ID, callbackURL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	*job = registered
+	response["status_callback_url"] = callbackURL
+	return true
 }
 
 type publishSyncJobSummary struct {

@@ -233,8 +233,10 @@ type publishJob struct {
 	// 居中裁出，thumbFeishuCoverJPEG）。由建聚合卡前的 prepareReviewThumbs 按需补传，
 	// 失败时聚合卡退回 ReviewCoverImgKey（补成正方形的横版封面）。
 	ReviewThumbImgKey string `json:"review_thumb_img_key,omitempty"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
+	// StatusCallback 资讯订阅登记的回调：状态（sync-status 那份摘要）每变一次推一次（publish_status_callback.go）。
+	StatusCallback publishStatusCallback `json:"status_callback,omitzero"`
+	CreatedAt      string                `json:"created_at"`
+	UpdatedAt      string                `json:"updated_at"`
 }
 
 // terminal 终态判定：published / rejected / abandoned 之后任务盖棺；failed 不算终态（可 retry 续跑），
@@ -253,6 +255,8 @@ type publishJobDocument struct {
 type publishJobStore struct {
 	mu   sync.Mutex
 	path string
+	// statusCallbacks 写盘后有新的一版状态要推就叫醒它（nil 时不推，测试装配默认如此）。
+	statusCallbacks *publishStatusCallbacks
 }
 
 // publishJobsPath 存储路径：env PUBLISH_JOBS_PATH 优先；否则跟随规则存储所在目录
@@ -508,19 +512,30 @@ func (s *publishJobStore) update(id int64, mutate func(*publishJob)) (publishJob
 
 // updateIf 是存储层原子 compare-and-swap：predicate 与 mutate 在同一把锁、同一份
 // 文档快照内执行。swapped=false 时返回当前任务且不写盘，供 review/retry 报冲突。
+//
+// 登记过状态回调的任务，摘要变了就在同一次写盘里排上新的一版（stampPublishStatusCallback），
+// 放锁后再叫醒发送器——调用方不用管推送。
 func (s *publishJobStore) updateIf(id int64, predicate func(publishJob) bool, mutate func(*publishJob)) (job publishJob, swapped bool, err error) {
+	job, swapped, queued, err := s.updateIfLocked(id, predicate, mutate)
+	if queued && s.statusCallbacks != nil {
+		s.statusCallbacks.queued(job)
+	}
+	return job, swapped, err
+}
+
+func (s *publishJobStore) updateIfLocked(id int64, predicate func(publishJob) bool, mutate func(*publishJob)) (job publishJob, swapped, queued bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := s.readLocked()
 	if err != nil {
-		return publishJob{}, false, err
+		return publishJob{}, false, false, err
 	}
 	for i := range doc.Jobs {
 		if doc.Jobs[i].ID != id {
 			continue
 		}
 		if !predicate(doc.Jobs[i]) {
-			return doc.Jobs[i], false, nil
+			return doc.Jobs[i], false, false, nil
 		}
 		wasFailed := doc.Jobs[i].Stage == publishStageFailed
 		mutate(&doc.Jobs[i])
@@ -528,12 +543,13 @@ func (s *publishJobStore) updateIf(id int64, predicate func(publishJob) bool, mu
 			doc.Jobs[i].FailedBefore = true
 		}
 		doc.Jobs[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		queued := stampPublishStatusCallback(&doc.Jobs[i])
 		if err := s.writeLocked(doc); err != nil {
-			return publishJob{}, false, err
+			return publishJob{}, false, false, err
 		}
-		return doc.Jobs[i], true, nil
+		return doc.Jobs[i], true, queued, nil
 	}
-	return publishJob{}, false, fmt.Errorf("发布任务 #%d 不存在", id)
+	return publishJob{}, false, false, fmt.Errorf("发布任务 #%d 不存在", id)
 }
 
 // setStage 推进阶段（清空上次失败痕迹，避免旧 error 粘在推进后的任务上误导排障）。

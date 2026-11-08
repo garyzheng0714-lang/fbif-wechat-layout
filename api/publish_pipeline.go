@@ -358,6 +358,8 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 	}
 	if store != nil {
 		p.repostSources = newPublishRepostSourceStore(publishRepostSourcesPath(store.path))
+		// 任务状态推给资讯订阅：挂在任务库上，写盘即排队；由 main 在非暂停态启动发送。
+		newPublishStatusCallbacks(store)
 	}
 	p.fetch = func(ctx context.Context, articleURL string) (publishFetchedArticle, error) {
 		return fetchSiteArticleWithContext(ctx, rules, articleURL)
@@ -1579,6 +1581,7 @@ func (p *publishPipeline) recoverJobs() {
 	}
 	p.recoverRepostSourceSubscribe()
 	for _, job := range jobs {
+		p.store.statusCallbacks.queued(job) // 没送达的那一版补推
 		p.recoverPublishNotification(job)
 		p.recoverExternalDistribution(job)
 		p.recoverProofreadReminder(job)

@@ -46,6 +46,7 @@ X-Publish-Sync-Token: <本服务的 PUBLISH_SYNC_SERVICE_TOKEN>
 | `rule_pack_id` | 可选 | 网站规则包 id，默认 `ft-default`。必须是 `api/account_catalog.go` 里登记的 `ft` 渠道 + `foodtalks-site` 模板的包，否则 400。兼容更短的字段名 `rule_id`。 |
 | `rerender_latest` | 可选 | 对已存在的任务用新规则包重排。 |
 | `refetch_latest` | 可选 | 对已存在的任务重新回源抓取再重排。 |
+| `status_callback_url` | 可选 | 任务状态每变一次就带签名 POST 到这里，只许指向资讯订阅自己的域名；不带就和以前一样，靠 `sync-status` 回查。字段、签名、重试见 [任务状态推送约定](publish-status-callback.md)。 |
 
 **"机器提交"的判定**：请求带了 `X-Publish-Sync-Token` 头即为机器提交，三项类型证据一个都不能少。
 
@@ -84,7 +85,7 @@ X-Publish-Sync-Token: <本服务的 PUBLISH_SYNC_SERVICE_TOKEN>
 
 | 码 | 含义 | 你该怎么办 |
 | --- | --- | --- |
-| `201` | 新任务已创建 | 记下 `job.id`，之后用 `/api/publish/sync-status` 批量查状态 |
+| `201` | 新任务已创建 | 记下 `job.id`。带了 `status_callback_url` 的，状态变了会推给你（响应里回显这个字段即已登记，见 [任务状态推送约定](publish-status-callback.md)）；`/api/publish/sync-status` 照旧可批量查 |
 | `200` | **同一原文已存在任务**（`existing: true`） | 正常幂等命中，不是错误，不要重投 |
 | `400` | 传了被拒字段 / 缺 `url` / body 超 64KB / 规则包不存在 | 读响应里的中文说明，它会点名是哪几个字段 |
 | `401` | token 缺失或错误 | 检查是不是还在发 `X-Admin-Password` |

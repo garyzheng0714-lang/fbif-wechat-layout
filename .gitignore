@@ -28,6 +28,9 @@ docs/*
 # 排版接口：对外说明书由测试从代码生成、测试也拿它比对；维护说明是给维护者（含 AI）看的
 !docs/layout-api.md
 !docs/layout-api-maintenance.md
+# 跨系统接口约定：资讯订阅照它们对接，必须随仓库走
+!docs/publish-intake-contract.md
+!docs/publish-status-callback.md
 
 # Local debug captures and test artifacts (never commit)
 .playwright-mcp/
