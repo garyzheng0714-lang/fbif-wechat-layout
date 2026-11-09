@@ -29,47 +29,117 @@ func TestSameOriginRequiresBrowserEvidence(t *testing.T) {
 	}
 }
 
-func TestHandleImageUploadRejectsAnonymousRequestWithoutOrigin(t *testing.T) {
+// expensiveUploadRequest 一个最小的 base64 图片转存请求（不配上游时原样回 base64，不出网）。
+func expensiveUploadRequest(path string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
+	req.Host = "layout.example"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func serveExpensiveUpload(auth *authService, req *http.Request) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	expensiveRoute(auth, newRequestCostGuard(100, time.Minute, 4), handleImageUpload)(rec, req)
+	return rec
+}
+
+func expensiveTestSession(t *testing.T) (*authService, string) {
+	t.Helper()
+	auth := newTestAuthService(t, &fakeFeishuProvider{})
+	token := mustSessionForUser(t, auth, authUser{
+		ID: "feishu:ou_editor", Name: "编辑", AuthMode: authModeFeishu, Status: authUserActive, FeishuOpenID: "ou_editor",
+	})
+	return auth, token
+}
+
+// 2026-11-09 安全审计：Origin/Referer 谁都能填，不登录只带同源头不能写公司 OSS。
+func TestExpensiveRouteRejectsForgedOriginWithoutSession(t *testing.T) {
 	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
 	t.Setenv("EXPENSIVE_API_TOKEN", "")
-	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	t.Setenv("RENDER_TOKEN", "")
+	auth, _ := expensiveTestSession(t)
 
-	handleImageUpload(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	for _, path := range []string{"/api/oss-upload", "/api/wechat-upload"} {
+		req := expensiveUploadRequest(path)
+		req.Header.Set("Origin", "https://layout.example")
+		req.Header.Set("Referer", "https://layout.example/ft/ft-default")
+		if rec := serveExpensiveUpload(auth, req); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s 伪造同源头不登录 status = %d, body = %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := serveExpensiveUpload(auth, expensiveUploadRequest("/api/oss-upload")); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("什么都不带 status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec := serveExpensiveUpload(nil, expensiveUploadRequest("/api/oss-upload")); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("没有登录服务也要拒 status = %d", rec.Code)
 	}
 }
 
-func TestHandleImageUploadAllowsServerTokenWithoutBrowserOrigin(t *testing.T) {
+func TestExpensiveRouteAllowsLoggedInBrowser(t *testing.T) {
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
+	t.Setenv("EXPENSIVE_API_TOKEN", "")
+	auth, token := expensiveTestSession(t)
+
+	cookieReq := expensiveUploadRequest("/api/oss-upload")
+	cookieReq.AddCookie(&http.Cookie{Name: authSessionCookieName, Value: token})
+	cookieReq.Header.Set("Origin", "https://layout.example")
+	if rec := serveExpensiveUpload(auth, cookieReq); rec.Code != http.StatusOK {
+		t.Fatalf("登录 cookie + 同源 status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	headerReq := expensiveUploadRequest("/api/oss-upload")
+	headerReq.Header.Set("X-Session-Token", token)
+	if rec := serveExpensiveUpload(auth, headerReq); rec.Code != http.StatusOK {
+		t.Fatalf("飞书内嵌窗口带 X-Session-Token status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// 登录了也不许别的站借 cookie 跨站提交。
+func TestExpensiveRouteRejectsCrossSiteCookie(t *testing.T) {
+	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
+	t.Setenv("EXPENSIVE_API_TOKEN", "")
+	auth, token := expensiveTestSession(t)
+
+	req := expensiveUploadRequest("/api/oss-upload")
+	req.AddCookie(&http.Cookie{Name: authSessionCookieName, Value: token})
+	req.Header.Set("Origin", "https://evil.layout.example")
+	if rec := serveExpensiveUpload(auth, req); rec.Code != http.StatusForbidden {
+		t.Fatalf("跨站借 cookie status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestExpensiveRouteAllowsServerTokenWithoutSession(t *testing.T) {
 	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
 	t.Setenv("EXPENSIVE_API_TOKEN", "server-secret")
-	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
-	req.Header.Set("Content-Type", "application/json")
+	req := expensiveUploadRequest("/api/oss-upload")
 	req.Header.Set("Authorization", "Bearer server-secret")
-	rec := httptest.NewRecorder()
-
-	handleImageUpload(rec, req)
-
-	if rec.Code != http.StatusOK {
+	if rec := serveExpensiveUpload(nil, req); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestHandleImageUploadAllowsRenderServiceToken(t *testing.T) {
+func TestExpensiveRouteAllowsRenderServiceToken(t *testing.T) {
 	t.Setenv("WECHAT_UPLOAD_ENDPOINT", "")
 	t.Setenv("EXPENSIVE_API_TOKEN", "")
 	t.Setenv("RENDER_TOKEN", "render-service-secret")
-	req := httptest.NewRequest(http.MethodPost, "/api/oss-upload", bytes.NewBufferString(`{"base64_images":{"tiny":"data:image/png;base64,AA=="}}`))
-	req.Header.Set("Content-Type", "application/json")
+	req := expensiveUploadRequest("/api/oss-upload")
 	req.Header.Set("Authorization", "Bearer render-service-secret")
+	if rec := serveExpensiveUpload(nil, req); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDocToDocxRouteRejectsForgedOriginWithoutSession(t *testing.T) {
+	t.Setenv("EXPENSIVE_API_TOKEN", "")
+	auth, _ := expensiveTestSession(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/doc-to-docx", bytes.NewBufferString("x"))
+	req.Host = "layout.example"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("Origin", "https://layout.example")
 	rec := httptest.NewRecorder()
-
-	handleImageUpload(rec, req)
-
-	if rec.Code != http.StatusOK {
+	expensiveRoute(auth, newRequestCostGuard(10, time.Minute, 2), handleDocToDocx)(rec, req)
+	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }

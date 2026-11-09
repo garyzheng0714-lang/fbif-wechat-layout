@@ -16,6 +16,7 @@ import {
 } from './more-articles-config.js';
 import { getRulePackByPath, DEFAULT_RULE_PACK_ID } from './rule-packs/registry.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { authFetch } from './auth-session.js';
 import { isMmbizUrl } from './uploader.js';
 import { PLACEHOLDER_DATA_URL } from './more-articles-placeholder.js';
 
@@ -481,7 +482,7 @@ export async function uploadDataUrl(dataUrl, key) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ base64_images: { [key]: dataUrl } }),
-  }, { timeoutMs: 20000 });
+  }, { timeoutMs: 20000, fetchImpl: authFetch });
   if (!resp.ok) {
     const err = await resp.text().catch(() => '');
     throw new Error('oss-upload HTTP ' + resp.status + ' ' + err);

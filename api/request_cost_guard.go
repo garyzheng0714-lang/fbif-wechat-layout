@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/subtle"
+	"errors"
 	"net"
 	"net/http"
 	"net/netip"
@@ -139,25 +140,51 @@ func constantTimeCredentialMatch(got, want string) bool {
 		subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
-func authorizeExpensiveRequest(w http.ResponseWriter, r *http.Request, guard *requestCostGuard) (func(), bool) {
-	if !sameOrigin(r) && !validExpensiveCredential(r) {
-		writeError(w, http.StatusForbidden, "same-origin browser request or server API token required")
-		return nil, false
-	}
+// expensiveRoute 给写公司 OSS、占转换资源的接口把门，只放两类调用方：
+//   - 登录的同事：会话有效；靠 cookie 的还得同源（SameSite=Lax 挡不住同站别的子域名借 cookie）；
+//   - 持服务钥匙的服务器：EXPENSIVE_API_TOKEN，图片转存另认 RENDER_TOKEN。
+//
+// Origin/Referer 谁都能填，只当防跨站的补充，不当登录（2026-11-09 安全审计）。
+func expensiveRoute(auth *authService, guard *requestCostGuard, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !validExpensiveCredential(r) {
+			if status, code, message := expensiveSessionDenial(auth, r); status != 0 {
+				writeAuthError(w, status, code, message)
+				return
+			}
+		}
 
-	release, reason := guard.acquire(expensiveClientKey(r), time.Now())
-	switch reason {
-	case costGuardRateLimited:
-		w.Header().Set("Retry-After", "60")
-		writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后重试")
-		return nil, false
-	case costGuardBusy:
-		w.Header().Set("Retry-After", "2")
-		writeError(w, http.StatusServiceUnavailable, "服务正忙，请稍后重试")
-		return nil, false
-	default:
-		return release, true
+		release, reason := guard.acquire(expensiveClientKey(r), time.Now())
+		switch reason {
+		case costGuardRateLimited:
+			w.Header().Set("Retry-After", "60")
+			writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后重试")
+			return
+		case costGuardBusy:
+			w.Header().Set("Retry-After", "2")
+			writeError(w, http.StatusServiceUnavailable, "服务正忙，请稍后重试")
+			return
+		}
+		defer release()
+		next(w, r)
 	}
+}
+
+// expensiveSessionDenial 没有服务钥匙时看登录会话；放行回 status 0。
+func expensiveSessionDenial(auth *authService, r *http.Request) (int, string, string) {
+	if auth == nil {
+		return http.StatusUnauthorized, "authentication_required", "请先登录"
+	}
+	if _, err := auth.currentUser(r); err != nil {
+		if errors.Is(err, errAuthenticationRequired) {
+			return http.StatusUnauthorized, "authentication_required", "请先登录"
+		}
+		return http.StatusServiceUnavailable, "auth_unavailable", "账号服务暂不可用，请稍后重试"
+	}
+	if strings.TrimSpace(r.Header.Get("X-Session-Token")) == "" && !sameOrigin(r) {
+		return http.StatusForbidden, "invalid_request_origin", "请求来源无效，请刷新页面后重试"
+	}
+	return 0, "", ""
 }
 
 func expensiveClientKey(r *http.Request) string {

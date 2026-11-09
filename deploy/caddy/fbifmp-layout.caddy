@@ -5,9 +5,10 @@
 # 服务器主 Caddyfile（15 个站点共用）只保留一行 `import sites/fbifmp-layout.caddy`，
 # 本项目部署不再对主文件做注入式 patch（旧脚本曾因此连修 6 次路由）。
 #
-# 仅 /api/wechat-draft、/api/oss-presign 仍是 localhost:9000 的显式遗留端点；
-# 其余 /api 全部交给 Go 9001，未知 API 由 Go 统一返回 JSON 404，
+# /api 全部交给 Go 9001，未知 API 由 Go 统一返回 JSON 404，
 # 绝不落到 SPA 静态 fallback 形成 HTML 假 200。
+# 9000 的旧 Python 程序只留给 Go 本机转存图片，不对公网（2026-11-09 安全审计摘掉
+# /api/wechat-draft、/api/oss-presign：它只看 Origin/Referer，能被伪造）。
 
 fbifmp-layout.foodtalks.cn {
 	header {
@@ -46,13 +47,6 @@ fbifmp-layout.foodtalks.cn {
 	}
 
 	encode gzip zstd
-
-	handle /api/wechat-draft {
-		reverse_proxy localhost:9000
-	}
-	handle /api/oss-presign {
-		reverse_proxy localhost:9000
-	}
 
 	@fbifAuth path /auth/feishu/* /auth/password/login
 	handle @fbifAuth {

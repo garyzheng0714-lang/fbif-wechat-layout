@@ -231,14 +231,17 @@ jobs:
             "${SITE_ORIGIN}/version.json?deploy=${GITHUB_SHA}")
           echo "$version_json" | jq -e --arg sha "$GITHUB_SHA" '.commit == $sha and .build == $sha' >/dev/null
 
-          # 上游会把非法 URL 记为单图失败并返回空 results，不写 OSS；用它验收
-          # 「公网 Go → 本机上传服务」整条链路。缺配置或上游不可达都会阻止部署。
-          image_upload_json=$(curl --silent --show-error --fail --retry 3 --retry-delay 1 --retry-all-errors \
+          # 图片转存要登录（2026-11-09 安全审计）：公网不登录、只带同源头必须 401，证明 Caddy 把它交给
+          # Go 且 Origin/Referer 不能冒充登录。「Go → 本机上传服务」整条链路由事务脚本在服务器本机带
+          # RENDER_TOKEN 调一次：非法 URL 上游记单图失败、返回空 results，不写 OSS；缺配置或上游不可达都阻止部署。
+          upload_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             --header 'Content-Type: application/json' \
             --header "Origin: ${SITE_ORIGIN}" \
             --header "Referer: ${SITE_ORIGIN}/ft/ft-default" \
             --data '{"urls":["not-a-url"]}' \
             "${SITE_ORIGIN}/api/oss-upload")
+          [ "$upload_status" = "401" ]
+          image_upload_json=$(remote_transaction upload-probe)
           echo "$image_upload_json" | jq -e '.results | type == "object"' >/dev/null
 
           rules_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \

@@ -123,7 +123,7 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   const finalizeAt = workflow.indexOf('remote_transaction finalize');
   const versionCheckAt = workflow.indexOf("'.commit == $sha and .build == $sha'");
   const readinessAt = workflow.indexOf('readiness_json=$(remote_transaction readiness)');
-  const imageUploadAt = workflow.indexOf("image_upload_json=$(curl");
+  const imageUploadAt = workflow.indexOf('image_upload_json=$(remote_transaction upload-probe)');
   const acceptAt = workflow.indexOf('release_accepted=1');
   const unpauseAt = workflow.indexOf('remote_transaction unpause');
   const prepareMonitoringAt = workflow.indexOf('remote_transaction prepare-monitoring');
@@ -195,6 +195,10 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   assert.match(workflow, /\.image_upload\.configured == true/);
   assert.match(workflow, /'\{"urls":\["not-a-url"\]\}'/,
     '上传服务整链路探针不得写入 OSS');
+  assert.match(workflow, /\[ "\$upload_status" = "401" \]/,
+    '图片转存公网不登录、只带同源头必须 401（2026-11-09 安全审计）');
+  assert.match(workflow, /image_upload_json=\$\(remote_transaction upload-probe\)/,
+    '「Go → 本机上传服务」整链路改在服务器本机带服务钥匙验');
   assert.match(workflow, /deploy\/systemd\//,
     'API/render systemd 单元必须与 release 一起上传');
   assert.match(workflow, /deploy\/config\//,
@@ -337,10 +341,11 @@ test('Caddy sends every API to Go before static fallback and keeps only named le
 
   assert.match(routed, /@fbifAPI path \/api \/api\/\*/,
     '所有 API 必须先落 Go，未知路由 Go 返回 JSON 404');
-  assert.match(routed, /handle \/api\/wechat-draft[\s\S]*?localhost:9000/);
-  assert.match(routed, /handle \/api\/oss-presign[\s\S]*?localhost:9000/);
-  assert.doesNotMatch(routed, /handle \/api\/(?:oss-upload|wechat-upload)[\s\S]*?localhost:9000/,
-    '已由 Go 代理的上传端点不得保留永不命中的死路由');
+  // 2026-11-09 安全审计：9000 的旧 Python 程序只看 Origin/Referer，/api/wechat-draft、/api/oss-presign
+  // 已从公网摘掉；它只留给 Go 本机转存图片（WECHAT_UPLOAD_ENDPOINT），站点里不许再有转给 9000 的路由。
+  const directives = vhost.split('\n').filter(line => !line.trim().startsWith('#')).join('\n');
+  assert.doesNotMatch(directives, /:9000\b/, '公网不得再直通 9000 的旧程序');
+  assert.doesNotMatch(directives, /wechat-draft|oss-presign/);
 
   for (const route of ['/api/*', '/preview/*', '/mp/*', '/ft/*']) {
     assert.ok(routed.includes(route), `${route} 必须在静态 fallback 前代理`);
@@ -421,6 +426,7 @@ async function hubHarness() {
     await chmod(join(bin, name), 0o755);
   }
   const readinessURL = script.match(/^API_READINESS_URL=(.+)$/m)?.[1];
+  const uploadURL = script.match(/^API_UPLOAD_URL=(.+)$/m)?.[1];
   const layoutEnv = join(directory, 'layout.env');
   const run = (body, env = {}) => execFileAsync('bash', ['-c', [
     'set -Eeuo pipefail',
@@ -428,8 +434,10 @@ async function hubHarness() {
     shellFunction(script, 'hub_env_value'),
     shellFunction(script, 'require_hub_env'),
     shellFunction(script, 'publish_readiness'),
+    shellFunction(script, 'upload_probe'),
     `HUB_LAYOUT_ENV='${layoutEnv}'`,
     `API_READINESS_URL='${readinessURL}'`,
+    `API_UPLOAD_URL='${uploadURL}'`,
     body,
   ].join('\n')], {
     env: {
@@ -442,7 +450,7 @@ async function hubHarness() {
       ...env,
     },
   });
-  return { script, directory, layoutEnv, readinessURL, run };
+  return { script, directory, layoutEnv, readinessURL, uploadURL, run };
 }
 
 test('hub env files are checked before any env validation and overlaid like systemd', async () => {
@@ -470,6 +478,7 @@ test('hub env files are checked before any env validation and overlaid like syst
   assert.doesNotMatch(script, /(?:grep|sed|cut|awk)[^\n]*_(?:TOKEN|SECRET|KEY)\b/,
     '事务脚本不得用文本工具从 env 文件里抠密钥值');
   assert.match(script, /^  readiness\)\n    publish_readiness\n    ;;$/m);
+  assert.match(script, /^  upload-probe\)\n    upload_probe\n    ;;$/m);
 });
 
 test('require_hub_env fails in Chinese when the hub file is missing, not root 0600, or not read last', async () => {
@@ -541,6 +550,34 @@ test('readiness action prints only the response JSON and never exposes the hub t
       assert.match(error.stderr, /里没有 PUBLISH_ADMIN_SERVICE_TOKEN/);
       return true;
     });
+    await assert.rejects(readFile(join(directory, 'curl-argv.log'), 'utf8'), '缺令牌时不得发请求');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('upload-probe calls the local upload chain with the hub RENDER_TOKEN and never exposes it', async () => {
+  const { directory, layoutEnv, uploadURL, run } = await hubHarness();
+  const token = 'render-token-must-stay-secret';
+  const reply = '{"results":{}}';
+  try {
+    assert.equal(uploadURL, 'http://127.0.0.1:9001/api/oss-upload', '整链路探针只在服务器本机调');
+    await writeFile(layoutEnv, `PUBLISH_ADMIN_SERVICE_TOKEN=admin\nRENDER_TOKEN=${token}\n`, 'utf8');
+    const result = await run('upload_probe', { FAKE_READINESS: reply });
+    assert.equal(result.stdout, reply, '标准输出只能是响应 JSON');
+    assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
+
+    const argv = (await readFile(join(directory, 'curl-argv.log'), 'utf8')).split('\n');
+    assert.ok(!argv.some(arg => arg.includes(token)), '令牌不得出现在 curl 命令行');
+    assert.ok(argv.includes(uploadURL));
+    assert.ok(argv.includes('--fail'));
+    assert.ok(argv.includes('{"urls":["not-a-url"]}'), '探针只发非法 URL，不写 OSS');
+    const headers = await readFile(join(directory, 'curl-stdin.log'), 'utf8');
+    assert.equal(headers, `Authorization: Bearer ${token}\n`);
+
+    await writeFile(layoutEnv, 'PUBLISH_ADMIN_SERVICE_TOKEN=admin\n', 'utf8');
+    await rm(join(directory, 'curl-argv.log'));
+    await assert.rejects(run('upload_probe', { FAKE_READINESS: reply }), /里没有 RENDER_TOKEN/);
     await assert.rejects(readFile(join(directory, 'curl-argv.log'), 'utf8'), '缺令牌时不得发请求');
   } finally {
     await rm(directory, { recursive: true, force: true });

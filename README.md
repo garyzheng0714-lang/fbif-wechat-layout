@@ -205,9 +205,9 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/fetch-article` | 抓取文章正文并返回结构化内容或 Markdown |
 | `POST` | `/api/fetch-article-meta` | 获取文章标题、封面、规范链接和正文媒体图列表，用于“更多文章”卡片与选图弹窗 |
 | `GET` | `/api/image-proxy` | 代理图片，绕过浏览器跨域限制 |
-| `POST` | `/api/oss-upload` | 图片上传入口；未配置上游时返回原 base64 |
-| `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口 |
-| `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx` |
+| `POST` | `/api/oss-upload` | 图片上传入口；未配置上游时返回原 base64。要登录会话（cookie 须同源，或 `X-Session-Token`）或服务钥匙（`EXPENSIVE_API_TOKEN`、`RENDER_TOKEN`），只带 Origin/Referer 一律 401 |
+| `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口，门禁同上 |
+| `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx`；要登录会话或 `EXPENSIVE_API_TOKEN`，付费的 CloudConvert 兜底只认 `EXPENSIVE_API_TOKEN` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
 | `GET` | `/api/feishu/docs/search?q=&limit=` | 按关键词搜索当前飞书登录用户可见的云文档，供编辑器 `@` 导入下拉使用；需飞书登录 |
 | `POST` | `/api/feishu/docs/export/jobs` | 创建飞书云文档导出作业，立即返回 `job_id` 与 `status_url` / `result_url`；导出、剥图与图片镜像在后台执行 |
@@ -278,7 +278,7 @@ curl http://127.0.0.1:9000/api/health
 | --- | --- |
 | `ENV` | 运行环境；生产必须显式为 `production`，此时账号/区块生成注册表缺失或不可读会拒绝启动 |
 | `FBIF_CONFIG_SCHEMA_VERSION` | 运行配置结构版本；当前必须为 `1`，API 生产启动、renderer 健康检查和 publish readiness 都会 fail closed |
-| `WECHAT_UPLOAD_ENDPOINT` | 图片上传代理上游；生产由部署托管为本机 `127.0.0.1:9000` 上传服务。未设置时仅保留 base64 预览降级，网站 URL 图片转存会明确失败 |
+| `WECHAT_UPLOAD_ENDPOINT` | 图片上传代理上游；生产由部署托管为本机 `127.0.0.1:9000` 上传服务（A 机 `wechat-api.service`，`/opt/wechat-api/server.py`，只监听本机、不对公网；2026-11-09 起 Caddy 不再把任何路径转给它）。未设置时仅保留 base64 预览降级，网站 URL 图片转存会明确失败 |
 | `LIBREOFFICE_URL` | `.doc` 转 `.docx` 的 LibreOffice 转换服务地址 |
 | `LIBREOFFICE_TOKEN` | LibreOffice 转换服务鉴权 token |
 | `CLOUDCONVERT_API_KEY` | LibreOffice 不可用时的 CloudConvert fallback |

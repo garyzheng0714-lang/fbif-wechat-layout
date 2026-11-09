@@ -113,9 +113,9 @@ func main() {
 	registerFeishuDocumentRoutes(mux, authService)
 	registerFeishuChatRoutes(mux, authService)
 
-	// Image upload to OSS (base64 from DOCX)
-	mux.HandleFunc("POST /api/oss-upload", handleImageUpload)
-	mux.HandleFunc("POST /api/wechat-upload", handleImageUpload) // legacy alias
+	// Image upload to OSS (base64 from DOCX)：登录会话或服务钥匙才放行（expensiveRoute）
+	mux.HandleFunc("POST /api/oss-upload", expensiveRoute(authService, imageUploadCostGuard, handleImageUpload))
+	mux.HandleFunc("POST /api/wechat-upload", expensiveRoute(authService, imageUploadCostGuard, handleImageUpload)) // legacy alias
 
 	// Article fetch (direct; non-WeChat pages without a body fall back to Jina Reader)
 	mux.HandleFunc("POST /api/fetch-article", handleFetchArticleWithStore(ruleStore))
@@ -127,7 +127,7 @@ func main() {
 	mux.HandleFunc("GET /api/image-proxy", handleImageProxy)
 
 	// Legacy .doc (OLE2) → stub .docx conversion via LibreOffice + image cache
-	mux.HandleFunc("POST /api/doc-to-docx", handleDocToDocx)
+	mux.HandleFunc("POST /api/doc-to-docx", expensiveRoute(authService, docConvertCostGuard, handleDocToDocx))
 
 	// Cached image payload for images stripped from converted docx
 	mux.HandleFunc("GET /api/doc-cache/{hash}/{filename}", handleDocImageCache)
@@ -371,13 +371,8 @@ const maxImageUploadBodyBytes = 50 << 20
 
 var uploadProxyHTTPClient = &http.Client{Timeout: 65 * time.Second}
 
+// handleImageUpload 只管转存；谁能调由注册处的 expensiveRoute 把门。
 func handleImageUpload(w http.ResponseWriter, r *http.Request) {
-	release, ok := authorizeExpensiveRequest(w, r, imageUploadCostGuard)
-	if !ok {
-		return
-	}
-	defer release()
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxImageUploadBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -1700,9 +1695,8 @@ var ole2Magic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 const maxDocUploadBytes = 50 << 20 // 50 MB cap for /api/doc-to-docx
 
-// sameOrigin is the browser half of the expensive-endpoint boundary. Missing
-// Origin/Referer fails closed; non-browser callers must use EXPENSIVE_API_TOKEN
-// (or the existing admin credential) instead of being treated as trusted.
+// sameOrigin 只防浏览器跨站借 cookie：Origin/Referer 谁都能填，不能当登录。
+// 缺这两个头一律不算同源。
 func sameOrigin(r *http.Request) bool {
 	expectedScheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
 	if comma := strings.IndexByte(expectedScheme, ','); comma >= 0 {
@@ -1738,12 +1732,9 @@ func sameOrigin(r *http.Request) bool {
 // OLE2 (.doc) binary and returns real .docx bytes. Tries the self-hosted
 // LibreOffice service first (fast, unlimited, private); falls back to
 // CloudConvert if that's not configured or fails (network/5xx).
+//
+// 谁能调由注册处的 expensiveRoute 把门。
 func handleDocToDocx(w http.ResponseWriter, r *http.Request) {
-	release, ok := authorizeExpensiveRequest(w, r, docConvertCostGuard)
-	if !ok {
-		return
-	}
-	defer release()
 	// Hard cap the request body before ParseMultipartForm so Go doesn't
 	// spill arbitrarily large uploads to temp files.
 	r.Body = http.MaxBytesReader(w, r.Body, maxDocUploadBytes)

@@ -1,6 +1,7 @@
 // Image upload — base64 images (from DOCX) are uploaded to OSS.
 // Website-channel WeChat image CDN URLs are optionally re-hosted to our CDN.
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { authFetch } from './auth-session.js';
 
 const WECHAT_IMAGE_HOSTS = new Set([
   'mmbiz.qpic.cn',
@@ -83,7 +84,7 @@ async function uploadOne(task) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
-    }, { timeoutMs: 20000 });
+    }, { timeoutMs: 20000, fetchImpl: authFetch });
     if (!resp.ok) return null;
     const { results } = await resp.json();
     const url = results[task.key] || Object.values(results)[0] || null;
@@ -193,7 +194,7 @@ export async function uploadNonCdnImages(articleCopy, footerCopy, { onProgress, 
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ urls: urlList }),
-        }, { timeoutMs: 60000, timeoutMessage: '图床转存超时' });
+        }, { timeoutMs: 60000, timeoutMessage: '图床转存超时', fetchImpl: authFetch });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const { results } = await resp.json();
         let done = 0;

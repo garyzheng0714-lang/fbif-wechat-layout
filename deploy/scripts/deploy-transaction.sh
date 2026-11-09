@@ -37,6 +37,7 @@ RENDER_ENV_TARGET=/var/www/render-service.env
 HUB_LAYOUT_ENV=/etc/fbif-hub/env/layout.env
 HUB_RENDER_ENV=/etc/fbif-hub/env/render.env
 API_READINESS_URL=http://127.0.0.1:9001/api/publish/readiness
+API_UPLOAD_URL=http://127.0.0.1:9001/api/oss-upload
 CADDY_TARGET=/etc/caddy/sites/fbifmp-layout.caddy
 API_SERVICE_TARGET=/etc/systemd/system/fbif-api.service
 RENDER_SERVICE_TARGET=/etc/systemd/system/fbif-render.service
@@ -125,6 +126,20 @@ publish_readiness() {
   [[ -n "$token" ]] || die "中台文件 $HUB_LAYOUT_ENV 里没有 PUBLISH_ADMIN_SERVICE_TOKEN"
   printf 'X-Publish-Admin-Token: %s\n' "$token" |
     curl --silent --show-error --fail --max-time 15 --header @- "$API_READINESS_URL"
+}
+
+# upload_probe 在服务器本机经 Go 的 /api/oss-upload 调一次上传服务，把响应 JSON 原样写到标准输出：
+# 非法 URL 上游记单图失败、不写 OSS，用它验收「Go → 本机上传服务」整条链路。公网这条路要登录
+# （2026-11-09 安全审计），所以带中台下发的 RENDER_TOKEN 从本机调；令牌同 readiness 一样经标准输入
+# 交给 curl，不进命令行、不打印。
+upload_probe() {
+  local token
+  require_hub_env fbif-api "$HUB_LAYOUT_ENV"
+  token=$(hub_env_value "$HUB_LAYOUT_ENV" RENDER_TOKEN)
+  [[ -n "$token" ]] || die "中台文件 $HUB_LAYOUT_ENV 里没有 RENDER_TOKEN"
+  printf 'Authorization: Bearer %s\n' "$token" |
+    curl --silent --show-error --fail --max-time 30 --header @- \
+      --header 'Content-Type: application/json' --data '{"urls":["not-a-url"]}' "$API_UPLOAD_URL"
 }
 
 validate_release() {
@@ -491,6 +506,9 @@ case "$ACTION" in
   readiness)
     publish_readiness
     ;;
+  upload-probe)
+    upload_probe
+    ;;
   prepare-monitoring)
     cleanup_legacy_watchdog
     cleanup_group_broadcast
@@ -504,6 +522,6 @@ case "$ACTION" in
     finalize_release
     ;;
   *)
-    die "usage: $0 {preflight|activate|readiness|prepare-monitoring|unpause|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
+    die "usage: $0 {preflight|activate|readiness|upload-probe|prepare-monitoring|unpause|rollback|finalize} RELEASE_DIR PUBLIC_TARGET DEPLOY_ID"
     ;;
 esac
