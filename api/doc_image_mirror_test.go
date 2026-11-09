@@ -73,12 +73,11 @@ func TestFeishuDocumentExportMirrorsEachImageConcurrentlyAndReusesCache(t *testi
 	}
 	service := newTestAuthService(t, provider)
 	session := mustSessionForUser(t, service, authUser{
-		ID:                     "feishu:ou_mirror_batch",
-		Name:                   "张三",
-		AuthMode:               authModeFeishu,
-		Status:                 authUserActive,
-		FeishuOpenID:           "ou_mirror_batch",
-		FeishuRefreshTokenSeal: "test-refresh-seal",
+		ID:           "feishu:ou_mirror_batch",
+		Name:         "张三",
+		AuthMode:     authModeFeishu,
+		Status:       authUserActive,
+		FeishuOpenID: "ou_mirror_batch",
 	})
 	service.putAccessToken("feishu:ou_mirror_batch", "u-test", service.now().Add(time.Hour))
 	mux := registerTestAuthMux(service)

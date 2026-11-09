@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import JSZip from 'jszip';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
-const LOGIN = { username: 'e2e', password: 'e2e-local-session-password', remember: false };
+const LOGIN = { username: 'e2e', name: 'E2E 测试账号' };
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const IMAGE_COUNT = 24;
 const IMAGE_DELAY_MS = 600;
@@ -69,7 +69,7 @@ async function authenticatedContext(browser) {
     viewport: { width: 1440, height: 900 },
     permissions: ['clipboard-read', 'clipboard-write'],
   });
-  const response = await context.request.post(`${BASE}/auth/password/login`, { data: LOGIN });
+  const response = await context.request.post(`${BASE}/auth/dev-login`, { data: LOGIN });
   if (!response.ok()) {
     const body = await response.text();
     await context.close();

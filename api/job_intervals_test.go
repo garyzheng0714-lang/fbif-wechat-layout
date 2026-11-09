@@ -18,7 +18,7 @@ func TestJobIntervalsDefaultsWhenHubSendsNothing(t *testing.T) {
 	}
 	want := "间隔（总账本「定时任务和回调」）：CMS_RECONCILE_PEAK_WINDOW=08:30-18:00（默认） CMS_RECONCILE_PEAK_SECONDS=120（默认） " +
 		"CMS_RECONCILE_QUIET_SECONDS=1800（默认） AUTO_DISTRIBUTE_SECONDS=600（默认） DISTRIBUTION_FOLLOW_SECONDS=60（默认） " +
-		"EDIT_REPORT_CHECK_SECONDS=1800（默认） PLATFORMS_FALLBACK_SECONDS=21600（默认） TOKEN_REFRESH_CHECK_SECONDS=3600（默认）"
+		"EDIT_REPORT_CHECK_SECONDS=1800（默认） PLATFORMS_FALLBACK_SECONDS=21600（默认）"
 	if line != want {
 		t.Fatalf("启动日志：\n%s\n要\n%s", line, want)
 	}
@@ -34,12 +34,11 @@ func TestJobIntervalsReadHubValues(t *testing.T) {
 		"DISTRIBUTION_FOLLOW_SECONDS": "120",
 		"EDIT_REPORT_CHECK_SECONDS":   "3600",
 		"PLATFORMS_FALLBACK_SECONDS":  "43200",
-		"TOKEN_REFRESH_CHECK_SECONDS": "7200",
 	}))
 	want := jobIntervals{
 		cmsPeak: 5 * time.Minute, cmsPeakWindow: dayWindow{7 * 60, 23 * 60}, cmsQuiet: time.Hour,
 		autoDistribute: 15 * time.Minute, distributionFollow: 2 * time.Minute, editReportCheck: time.Hour,
-		platformsFallback: 12 * time.Hour, tokenRefreshCheck: 2 * time.Hour,
+		platformsFallback: 12 * time.Hour,
 	}
 	if got != want {
 		t.Fatalf("换上中台的值：%+v", got)
@@ -63,8 +62,8 @@ func TestJobIntervalsIgnoreWhatTheyCannotRead(t *testing.T) {
 			t.Fatalf("%q 看不懂要用默认、不写原值：%+v %s", raw, got, line)
 		}
 	}
-	if _, line := loadJobIntervals(envOf(map[string]string{"AUTO_DISTRIBUTE_SECONDS": "60", "PLATFORMS_FALLBACK_SECONDS": "2592000"})); !strings.Contains(line, "AUTO_DISTRIBUTE_SECONDS=60 ") ||
-		!strings.Contains(line, "PLATFORMS_FALLBACK_SECONDS=2592000 ") {
+	if _, line := loadJobIntervals(envOf(map[string]string{"AUTO_DISTRIBUTE_SECONDS": "60", "PLATFORMS_FALLBACK_SECONDS": "2592000"})); !strings.Contains(line+" ", "AUTO_DISTRIBUTE_SECONDS=60 ") ||
+		!strings.Contains(line+" ", "PLATFORMS_FALLBACK_SECONDS=2592000 ") {
 		t.Fatalf("1 分钟和 30 天两头都认：%s", line)
 	}
 }

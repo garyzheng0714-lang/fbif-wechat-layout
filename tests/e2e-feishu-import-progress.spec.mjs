@@ -14,7 +14,7 @@ import { test, expect } from '@playwright/test';
 import JSZip from 'jszip';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
-const LOGIN = { username: 'e2e', password: 'e2e-local-session-password', remember: false };
+const LOGIN = { username: 'e2e', name: 'E2E 测试账号' };
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const IMAGE_COUNT = 24;
 const ARTICLE_TEXT = 'FEISHU_ATOMIC_TEXT：飞书正文与图片必须一次出现';
@@ -91,19 +91,20 @@ test('飞书导入走异步作业：真实分阶段进度推进，正文与图�
     viewport: { width: 1440, height: 900 },
     permissions: ['clipboard-read', 'clipboard-write'],
   });
-  const loginResponse = await context.request.post(`${BASE}/auth/password/login`, { data: LOGIN });
+  const loginResponse = await context.request.post(`${BASE}/auth/dev-login`, { data: LOGIN });
   expect(loginResponse.ok(), 'E2E 登录必须成功').toBeTruthy();
   const page = await context.newPage();
 
   const calls = [];
   let stageIndex = -1;
 
-  // 让本地密码账号具备飞书能力，才能走 @ 搜索入口。
-  await page.route('**/api/me', async route => {
+  // 让本地开发登录的账号具备飞书能力、且已授权飞书，才能走 @ 搜索入口。
+  await page.route('**/api/auth/me', async route => {
     const response = await route.fetch();
     const body = await response.json().catch(() => ({}));
     const user = { ...(body.user || {}) };
     user.auth_mode = 'feishu';
+    user.feishu = 'ok';
     user.capabilities = { ...(user.capabilities || {}), feishu_documents: true };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...body, user }) });
   });

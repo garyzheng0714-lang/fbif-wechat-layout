@@ -181,7 +181,7 @@ func expensiveSessionDenial(auth *authService, r *http.Request) (int, string, st
 		}
 		return http.StatusServiceUnavailable, "auth_unavailable", "账号服务暂不可用，请稍后重试"
 	}
-	if strings.TrimSpace(r.Header.Get("X-Session-Token")) == "" && !sameOrigin(r) {
+	if !sameOrigin(r) {
 		return http.StatusForbidden, "invalid_request_origin", "请求来源无效，请刷新页面后重试"
 	}
 	return 0, "", ""

@@ -16,15 +16,16 @@ import path from 'path';
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
 const AUTH_USERS_PATH = path.resolve('test-results/e2e-data/auth-users.json');
 
-const ADMIN = { username: 'e2e-admin', password: 'e2e-local-admin-password' };
-const PLAIN = { username: 'e2e', password: 'e2e-local-session-password' };
+const ADMIN = { username: 'e2e-admin', name: 'E2E 管理员' };
+const PLAIN = { username: 'e2e', name: 'E2E 测试账号' };
 
-// 密码账号配置里没有角色字段，角色住在用户库 JSON 里。首次登录写入记录后把它改成
-// admin，用户库每次读盘，重新登录即可拿到 rule_admin。生产的超级管理员仍然只能来自
+// 登录只带身份，角色住在用户库 JSON 里。首次登录写入记录后把它改成 admin，用户库每次
+// 请求都读盘，改完下一个请求就拿到 rule_admin。生产的超级管理员仍然只能来自
 // RULE_SUPER_ADMIN_OPEN_IDS，这里提到的 admin 拿不到 rule_super_admin。
+// 本地测试用开发登录（go run -tags devlogin，AUTH_DEV_LOGIN=true）：直接登成 account:<username>。
 async function signIn(context, credentials) {
-  const response = await context.request.post(`${BASE}/auth/password/login`, {
-    data: { ...credentials, remember: false },
+  const response = await context.request.post(`${BASE}/auth/dev-login`, {
+    data: credentials,
   });
   if (!response.ok()) throw new Error(`登录失败（${response.status()}）：${await response.text()}`);
 }
@@ -36,14 +37,14 @@ async function promoteToRuleAdmin(context) {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   const doc = JSON.parse(fs.readFileSync(AUTH_USERS_PATH, 'utf8'));
-  const target = doc.users.find(user => user.username === ADMIN.username || user.id === `password:${ADMIN.username}`);
+  const target = doc.users.find(user => user.id === `account:${ADMIN.username}`);
   if (!target) throw new Error(`用户库里没有 ${ADMIN.username}：${JSON.stringify(doc.users.map(u => u.id))}`);
   if (target.role !== 'admin') {
     target.role = 'admin';
     fs.writeFileSync(AUTH_USERS_PATH, JSON.stringify(doc, null, 2));
   }
   await signIn(context, ADMIN);
-  const me = await (await context.request.get(`${BASE}/api/me`)).json();
+  const me = await (await context.request.get(`${BASE}/api/auth/me`)).json();
   expect(me.user?.capabilities?.rule_admin, '提权后必须拿到 rule_admin').toBe(true);
 }
 
@@ -110,7 +111,7 @@ test.describe('规则后台 — 端到端覆盖', () => {
   test('普通账号看不到规则后台入口，后台接口也拒绝', async ({ browser }) => {
     const context = await browser.newContext();
     await signIn(context, PLAIN);
-    const me = await (await context.request.get(`${BASE}/api/me`)).json();
+    const me = await (await context.request.get(`${BASE}/api/auth/me`)).json();
     expect(me.user?.capabilities?.rule_admin, '普通账号不得有 rule_admin').toBeFalsy();
 
     const forbidden = await context.request.get(`${BASE}/api/rules/admin/presets`);

@@ -103,13 +103,12 @@ func main() {
 		log.Fatalf("规则库校验失败：%v", err)
 	}
 
-	authService, err := newRuntimeAuthService(*rulesPath)
+	// 登录走 FBIF 统一登录、调飞书用本人授权（auth_login.go）；飞书授权的后台续期只支持单实例，部署是原地重启。
+	authService, err := newRuntimeAuthService(context.Background(), *rulesPath)
 	if err != nil {
 		log.Fatalf("登录服务启动失败：%v", err)
 	}
-	registerAuthRoutes(mux, authService)
-	// 部署候选暂停态下不轮换：refresh_token 只能用一次，新旧进程同时轮换会互相作废。
-	authService.startFeishuTokenKeepAlive(publishWorkersPaused)
+	authService.Register(mux)
 	registerFeishuDocumentRoutes(mux, authService)
 	registerFeishuChatRoutes(mux, authService)
 
@@ -223,10 +222,13 @@ func main() {
 
 	addr := net.JoinHostPort(*host, strconv.Itoa(*port))
 	log.Printf("FBIF server listening on %s (API + static from %s)", addr, publicDir)
-	srv := newHTTPServer(addr, withSecurityHeaders(mux))
+	srv := newHTTPServer(addr, authService.Wrap(withSecurityHeaders(mux)))
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	if err := serveUntilShutdown(shutdownSignal, srv, publishPipe.shutdownWorkers); err != nil {
+	shutdownHook := func(ctx context.Context) error {
+		return errors.Join(publishPipe.shutdownWorkers(ctx), authService.Shutdown(ctx))
+	}
+	if err := serveUntilShutdown(shutdownSignal, srv, shutdownHook); err != nil {
 		log.Fatal(err)
 	}
 }

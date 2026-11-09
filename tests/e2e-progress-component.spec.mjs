@@ -6,14 +6,14 @@
 import { test, expect } from '@playwright/test';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
-const LOGIN = { username: 'e2e', password: 'e2e-local-session-password', remember: false };
+const LOGIN = { username: 'e2e', name: 'E2E 测试账号' };
 
 async function shell(browser, { width = 1440, reducedMotion } = {}) {
   const context = await browser.newContext({
     viewport: { width, height: 900 },
     ...(reducedMotion ? { reducedMotion: 'reduce' } : {}),
   });
-  const login = await context.request.post(`${BASE}/auth/password/login`, { data: LOGIN });
+  const login = await context.request.post(`${BASE}/auth/dev-login`, { data: LOGIN });
   expect(login.ok(), 'E2E 登录必须成功').toBeTruthy();
   const page = await context.newPage();
   await page.goto(`${BASE}/mp/fbif`, { waitUntil: 'networkidle' });

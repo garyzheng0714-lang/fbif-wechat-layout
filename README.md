@@ -64,7 +64,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - 解析 DOCX / Markdown，保留标题、正文、图片、超链接、列表、引用和参考来源等结构。
 - 粘贴正文逐行排成正文，只排正文不加页脚；行首记号与行内链接、加粗照 Markdown 认，选中复制网页时补回列表圆点与序号；带图片链接的按 Markdown 文档排。
 - 粘贴微信公众号文章或网页链接后，由 Go API 抓取并转换为结构化内容；失败时回退到备用读取路径。
-- 导入飞书云文档：在导入框输入 `@` 搜索，或直接粘贴飞书文档链接。服务端以异步作业导出 Word、剥离正文图并一次性批量镜像到 OSS，前端按作业上报的真实阶段推进进度条；正文与图片在离屏准备就绪后整帧上屏，导入期间旧文章保持可见。需使用飞书登录。登录会话 30 天滑动续期（每次打开页面续到 30 天后）；飞书授权（refresh_token 约 7 天、只能用一次）由服务端在会话有效期内每 3 天左右自动轮换，连续 30 天没用才停。只有授权被撤销、满 365 天等飞书明确拒绝时，导入框才提示「重新用飞书登录」。
+- 导入飞书云文档：在导入框输入 `@` 搜索，或直接粘贴飞书文档链接。服务端以异步作业导出 Word、剥离正文图并一次性批量镜像到 OSS，前端按作业上报的真实阶段推进进度条；正文与图片在离屏准备就绪后整帧上屏，导入期间旧文章保持可见。需用 FBIF 的飞书账号登录，并授权飞书一次（身份菜单或导入框里的「授权飞书…」）。授权（refresh_token）由服务端替他续（授权模板 `api/internal/feishugrant`，每 6 小时看一次谁该轮换），连续 30 天没用才停；授权被撤销、飞书明确拒绝续期时，导入框再给「授权飞书…」。
 - URL 导入会保留微信文章的图片说明组：`图片 -> 图注 -> 图片来源` 必须连续渲染为浅灰图注，不得把 `图片来源：` 当成正文或文章来源。
 - 使用 `public/js/templates/fbif.js` 和 `public/css/wx-theme.css` 生成 FBIF 公众号样式。
 - 区分预览层与复制层：预览可使用原图；复制按钮点击时立即写入当前可粘贴 HTML，CSS 内联、微信兼容结构和已准备好的图片结果会进入复制层。
@@ -205,22 +205,23 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/fetch-article` | 抓取文章正文并返回结构化内容或 Markdown |
 | `POST` | `/api/fetch-article-meta` | 获取文章标题、封面、规范链接和正文媒体图列表，用于“更多文章”卡片与选图弹窗 |
 | `GET` | `/api/image-proxy` | 代理图片，绕过浏览器跨域限制 |
-| `POST` | `/api/oss-upload` | 图片上传入口；未配置上游时返回原 base64。要登录会话（cookie 须同源，或 `X-Session-Token`）或服务钥匙（`EXPENSIVE_API_TOKEN`、`RENDER_TOKEN`），只带 Origin/Referer 一律 401 |
+| `POST` | `/api/oss-upload` | 图片上传入口；未配置上游时返回原 base64。要登录会话（cookie 须同源）或服务钥匙（`EXPENSIVE_API_TOKEN`、`RENDER_TOKEN`），只带 Origin/Referer 一律 401 |
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口，门禁同上 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx`；要登录会话或 `EXPENSIVE_API_TOKEN`，付费的 CloudConvert 兜底只认 `EXPENSIVE_API_TOKEN` |
 | `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
-| `GET` | `/api/feishu/docs/search?q=&limit=` | 按关键词搜索当前飞书登录用户可见的云文档，供编辑器 `@` 导入下拉使用；需飞书登录 |
+| `GET` | `/api/feishu/docs/search?q=&limit=` | 按关键词搜索当前飞书登录用户可见的云文档，供编辑器 `@` 导入下拉使用；需 FBIF 飞书登录并授权过飞书（没授权回 403 `feishu_grant_required`） |
 | `POST` | `/api/feishu/docs/export/jobs` | 创建飞书云文档导出作业，立即返回 `job_id` 与 `status_url` / `result_url`；导出、剥图与图片镜像在后台执行 |
 | `GET` | `/api/feishu/docs/export/jobs/{job_id}?after=&wait_ms=` | long-poll 读取作业进度：服务端在 `version` 超过 `after` 时立即返回，逐阶段上报真实 `phase`/`done`/`total`（resolve、create、export_wait、download、optimize、image_enumerate、image_upload、image_map） |
 | `GET` | `/api/feishu/docs/export/jobs/{job_id}/result` | 取回作业产物 DOCX；正文图已镜像成公网 URL，响应头带 `X-FBIF-Images-Mirrored` 与 `X-FBIF-Image-Count` |
 | `DELETE` | `/api/feishu/docs/export/jobs/{job_id}` | 取消作业；前端切换或放弃导入时调用，服务端也会自行过期回收 |
 | `POST` | `/api/feishu/docs/export` | 同步导出兼容入口（无进度）；交互式导入禁止使用，只走上面的异步作业接口 |
-| `GET` | `/api/feishu/chats` | 读取当前飞书登录用户所在群列表，供规则后台选择审核群；需飞书登录 |
-| `GET` | `/auth/feishu/fbif/login` | 发起飞书 OAuth 登录；`return_to` 由签名 state 约束 |
-| `GET` | `/auth/feishu/fbif/callback` | 飞书 OAuth 回调，换取用户会话后回到受控站内路径 |
-| `POST` | `/auth/password/login` | 可选的本地密码账号登录；账号只从受保护的 Base64 配置同步 |
-| `POST` | `/auth/feishu/logout` | 使当前会话失效并清除会话 cookie |
-| `GET` | `/api/me` | 读取当前登录用户、登录方式、角色与飞书能力 |
+| `GET` | `/api/feishu/chats` | 读取当前飞书登录用户所在群列表，供规则后台选择审核群；需 FBIF 飞书登录并授权过飞书 |
+| `GET` | `/auth/login?next=` | 没登录时去的地方：FBIF 统一登录（登录模板 `api/internal/auth`），送去登录中心 login.fbif.com（账号密码、飞书都在那页），登录完回到 `next`；本项目没有登录页 |
+| `GET` | `/auth/feishu/fbif/login?next=` | 直接用飞书登录（飞书客户端里没登录时前端走这条，不用再点） |
+| `POST` | `/auth/feishu/logout` | 退出统一登录 |
+| `GET` | `/auth/feishu-grant?next=` | 本人授权飞书一次（读云文档、列群），之后服务端自动续；回调 `/auth/feishu/fbif/qr-callback`，没授权成回 `next` 时带 `feishu_grant=denied/failed/mismatch/unavailable` |
+| `GET` | `/api/auth/me` | 读取当前登录用户、登录方式、角色、飞书能力与飞书授权状态（`feishu`：`ok` / `required` / `none`）；没登录 401 带 `login_url`，登录服务连不上 503 |
+| `GET` | `/api/me` | 登录模板的「我是谁」（统一登录身份），本项目页面用上面的 `/api/auth/me` |
 | `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/foodtalks-mp/ft-default/ft-series`）当前规则；未传 `account` 时默认读取 FBIF |
 | `GET` | `/api/rules/presets` | 读取可供编辑器使用的规则预设目录 |
 | `POST` | `/api/rules/admin/login` | 已退役的共享密码入口，固定返回 `410 Gone`；后台只认登录会话和角色 |
@@ -284,9 +285,12 @@ curl http://127.0.0.1:9000/api/health
 | `CLOUDCONVERT_API_KEY` | LibreOffice 不可用时的 CloudConvert fallback |
 | `PUBLISH_ADMIN_SERVICE_TOKEN` | 部署/运维调用发布管理接口的机器服务令牌；不作为网页登录密码，也不下发到浏览器 |
 | `RULE_SUPER_ADMIN_OPEN_IDS` | 超级管理员飞书 `open_id` 白名单，逗号分隔；真实身份值只放秘密配置，不写入仓库文档 |
-| `AUTH_SESSION_SECRET` / `AUTH_USERS_PATH` | 登录会话签名密钥与账号 JSON 存储；生产密钥至少 24 字节，账号文件默认与规则存储同目录 |
-| `FEISHU_LOGIN_APP_ID` / `FEISHU_LOGIN_APP_SECRET` / `FEISHU_LOGIN_REDIRECT_URI` | 网页飞书登录应用及回调；生产必须完整配置 |
-| `FEISHU_LOGIN_SCOPES` / `AUTH_PASSWORD_USERS_B64` | 可选登录 scope 覆盖与本地密码账号种子；scope 必须保留 `offline_access`，账号种子只放秘密配置 |
+| `AUTH_SESSION_SECRET` | 未上架预览页、外发改稿页签名用的密钥（派生独立子密钥）；不再用于登录 |
+| `AUTH_USERS_PATH` | 本项目用户库（角色、停用）JSON；默认与规则存储同目录，统一登录的会话（`sso-sessions.json`）、飞书授权（`feishu-grants.json`）放在同一目录 |
+| `SSO_*` | FBIF 统一登录（登录模板 v7，`api/internal/auth`）：`SSO_REDIRECT_URL`、`SSO_HUB_URL`、`SSO_OUTBOX_FILE` 由部署写，其余六个由中台下发；缺一个就拒绝启动 |
+| `FEISHU_LOGIN_APP_ID` / `FEISHU_LOGIN_APP_SECRET` / `FEISHU_LOGIN_REDIRECT_URI` | 本项目的飞书应用：本人授权飞书（读云文档、列群）与回调 `/auth/feishu/fbif/qr-callback`；生产必须完整配置 |
+| `FEISHU_LOGIN_SCOPES` | 可选，覆盖授权飞书时要的权限（`offline_access` 会自动加上） |
+| `AUTH_DEV_LOGIN` | 只给本地端到端测试：`go run -tags devlogin .` 时设 `true` 开 `POST /auth/dev-login`；生产编译里没有，`ENV=production` 也拒绝启动 |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
 | `RENDER_TOKEN` / `RENDER_SERVICE_URL` | 程序化排版 API 鉴权与 Node 渲染服务地址 |
 | `RENDER_PORT` / `RULES_API_ORIGIN` / `ASSET_ORIGIN` / `RENDER_BUILD_SHA` | renderer 的端口、规则 API、素材域名和可追溯构建 SHA；生产由流水线生成 `render-service.env`（排版接口的 `fbif-render-layout` 读同一份，端口由单元固定 `LAYOUT_PORT=19098`） |
@@ -331,7 +335,6 @@ FBIF 中台下发（2026-10-26 起）：`CLOUDCONVERT_API_KEY`、`FEISHU_LOGIN_A
 | `DISTRIBUTION_FOLLOW_SECONDS` | 分发进度跟进（没有在途的不问分发服务） | `60` |
 | `EDIT_REPORT_CHECK_SECONDS` | 编辑周报检查 | `1800` |
 | `PLATFORMS_FALLBACK_SECONDS` | 平台限制兜底 | `21600` |
-| `TOKEN_REFRESH_CHECK_SECONDS` | 飞书登录续期（满 3 天换一次不变） | `3600` |
 
 秒数在 60 到 2592000 之间。
 
@@ -381,7 +384,7 @@ go test ./...
 规则后台权限配置流程：
 
 1. 在 GitHub Secret `RULE_SUPER_ADMIN_OPEN_IDS` 中维护超级管理员飞书 `open_id`；人员变更只更新秘密配置，不把真实身份值写入文档。
-2. 超级管理员登录后打开“规则后台 → 权限管理”，把已经登录过的账号切换为“管理员”。
+2. 超级管理员用飞书登录、授权飞书一次（按授权时的 `open_id` 认超级管理员）后打开“规则后台 → 权限管理”，把已经登录过的账号切换为“管理员”。
 3. 规则后台所有网页请求复用登录会话；旧的密码接口不再提供后台权限。
 4. 部署/运维脚本使用独立的 `PUBLISH_ADMIN_SERVICE_TOKEN`（中台下发），它与网页角色权限分离。
 

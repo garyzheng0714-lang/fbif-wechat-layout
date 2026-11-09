@@ -1,4 +1,4 @@
-import { authFetch } from './auth-session.js';
+import { authFetch, feishuGrantURL } from './auth-session.js';
 import {
   bindImportProgressDom,
   createImportProgressTracker,
@@ -118,8 +118,10 @@ export function parseFeishuDocumentUrl(value) {
 }
 
 function responseErrorMessage(payload, fallback) {
-  if (payload?.code === 'feishu_login_required') return '飞书云文档功能需要使用飞书登录';
+  if (payload?.code === 'feishu_login_required') return '飞书云文档功能需要用 FBIF 的飞书账号登录';
+  if (payload?.code === 'feishu_grant_required') return '要先授权飞书';
   if (payload?.code === 'authentication_required') return '登录状态已失效，请重新登录';
+  if (payload?.code === 'login_service_unavailable') return '登录服务暂时连不上，请稍后重试';
   if (payload?.code === 'feishu_export_timeout') return '飞书生成 Word 超时，请稍后重试';
   if (payload?.code === 'feishu_export_too_large') return '文档或图片过多，飞书无法导出，请精简后重试';
   if (payload?.code === 'feishu_document_permission_denied') return '当前账号没有导出这篇文档的权限';
@@ -203,7 +205,6 @@ export function mountFeishuDocumentImport({
   windowRef = globalThis.window,
   user,
   fetchImpl,
-  storage,
   FileCtor = globalThis.File,
   BlobCtor = globalThis.Blob,
   AbortControllerCtor = globalThis.AbortController,
@@ -253,7 +254,7 @@ export function mountFeishuDocumentImport({
 
   const doFetch = fetchImpl
     ? (url, options) => fetchImpl(url, options)
-    : (url, options) => authFetch(url, options, { storage });
+    : (url, options) => authFetch(url, options);
 
   function stale(ticket, accountID) {
     return destroyed || ticket !== generation || String(getAccountID() || '') !== accountID;
@@ -354,7 +355,7 @@ export function mountFeishuDocumentImport({
     showPanel();
   }
 
-  function renderLoginPrompt(titleText, detailText, linkText) {
+  function renderLoginPrompt(titleText, detailText, linkText, href) {
     panel.replaceChildren();
     const box = documentRef.createElement('div');
     box.className = 'feishu-doc-locked';
@@ -366,23 +367,42 @@ export function mountFeishuDocumentImport({
     detail.textContent = detailText;
     copy.append(title, detail);
     const link = documentRef.createElement('a');
-    const location = windowRef?.location;
-    const stripped = stripBuildVersionSearch(location?.search || '');
-    const returnTo = `${location?.pathname || '/mp/fbif'}${stripped.search}`;
-    link.href = `/auth/feishu/fbif/login?return_to=${encodeURIComponent(returnTo)}`;
+    link.href = href;
     link.textContent = linkText;
     box.append(copy, link);
     panel.append(box);
     showPanel();
   }
 
-  function renderLocked(action = '搜索') {
-    renderLoginPrompt(`${action}飞书文档需要使用飞书登录`, '仍可上传文件、粘贴正文和文章链接。', '改用飞书登录');
+  function currentReturnTo() {
+    const location = windowRef?.location;
+    const stripped = stripBuildVersionSearch(location?.search || '');
+    return `${location?.pathname || '/mp/fbif'}${stripped.search}`;
   }
 
-  // 飞书授权平时由服务端自动续期；只有被撤销、满 365 天等情况才会走到这里。
-  function renderReauth() {
-    renderLoginPrompt('飞书授权已失效', '重新用飞书登录一次即可，之后会自动续期。', '重新用飞书登录');
+  // 不是用 FBIF 飞书登录的（账号密码、别家企业）：改用飞书登录，登录中心认完回到这页。
+  function renderLocked(action = '搜索') {
+    renderLoginPrompt(
+      `${action}飞书文档需要用 FBIF 的飞书账号登录`,
+      '仍可上传文件、粘贴正文和文章链接。',
+      '改用飞书登录',
+      `/auth/feishu/fbif/login?next=${encodeURIComponent(currentReturnTo())}`,
+    );
+  }
+
+  // 还没授权飞书，或授权被撤销、知识库权限不够：去授权一次，之后服务端自动续期。
+  function renderGrant(error) {
+    const wiki = error?.code === 'feishu_wiki_access_denied';
+    renderLoginPrompt(
+      wiki ? '飞书拒绝访问这篇知识库文档' : '要先授权飞书',
+      wiki ? error.message : '授权一次，之后自动续期。',
+      wiki ? '重新授权飞书…' : '授权飞书…',
+      feishuGrantURL(windowRef),
+    );
+  }
+
+  function needsGrant(error) {
+    return error?.code === 'feishu_grant_required' || error?.code === 'feishu_wiki_access_denied';
   }
 
   function updateActiveResult(nextIndex) {
@@ -628,7 +648,7 @@ export function mountFeishuDocumentImport({
       tracker?.cancel('failed');
       stopImportProgress();
       hideSelectedDocument();
-      if (error?.code === 'feishu_reauth_required') renderReauth();
+      if (needsGrant(error)) renderGrant(error);
       else renderMessage('导入失败', error?.message || '飞书文档导入失败', 'error');
       return false;
     } finally {
@@ -699,7 +719,7 @@ export function mountFeishuDocumentImport({
       renderResults(documents, query, ticket);
     } catch (error) {
       if (stale(ticket, accountID)) return;
-      if (error?.code === 'feishu_reauth_required') renderReauth();
+      if (needsGrant(error)) renderGrant(error);
       else renderMessage('搜索失败', error?.message || '飞书文档搜索失败', 'error');
     }
   }

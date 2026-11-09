@@ -82,16 +82,18 @@ func TestExpensiveRouteAllowsLoggedInBrowser(t *testing.T) {
 	auth, token := expensiveTestSession(t)
 
 	cookieReq := expensiveUploadRequest("/api/oss-upload")
-	cookieReq.AddCookie(&http.Cookie{Name: authSessionCookieName, Value: token})
+	cookieReq = cookieReq.WithContext(withLayoutUser(cookieReq.Context(), token))
 	cookieReq.Header.Set("Origin", "https://layout.example")
 	if rec := serveExpensiveUpload(auth, cookieReq); rec.Code != http.StatusOK {
-		t.Fatalf("登录 cookie + 同源 status = %d, body = %s", rec.Code, rec.Body.String())
+		t.Fatalf("登录 + 同源 status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 
+	// 换统一登录后只认会话 cookie，原来飞书内嵌窗口带 X-Session-Token 免同源检查的口子没了。
 	headerReq := expensiveUploadRequest("/api/oss-upload")
+	headerReq = headerReq.WithContext(withLayoutUser(headerReq.Context(), token))
 	headerReq.Header.Set("X-Session-Token", token)
-	if rec := serveExpensiveUpload(auth, headerReq); rec.Code != http.StatusOK {
-		t.Fatalf("飞书内嵌窗口带 X-Session-Token status = %d, body = %s", rec.Code, rec.Body.String())
+	if rec := serveExpensiveUpload(auth, headerReq); rec.Code != http.StatusForbidden {
+		t.Fatalf("登录了但说不出是同源 status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -102,7 +104,7 @@ func TestExpensiveRouteRejectsCrossSiteCookie(t *testing.T) {
 	auth, token := expensiveTestSession(t)
 
 	req := expensiveUploadRequest("/api/oss-upload")
-	req.AddCookie(&http.Cookie{Name: authSessionCookieName, Value: token})
+	req = req.WithContext(withLayoutUser(req.Context(), token))
 	req.Header.Set("Origin", "https://evil.layout.example")
 	if rec := serveExpensiveUpload(auth, req); rec.Code != http.StatusForbidden {
 		t.Fatalf("跨站借 cookie status = %d, body = %s", rec.Code, rec.Body.String())

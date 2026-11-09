@@ -20,18 +20,6 @@ type controlledFeishuProvider struct {
 	export func(context.Context, string, feishuDocumentRef) (feishuExportedFile, error)
 }
 
-func (p *controlledFeishuProvider) ExchangeCode(context.Context, string, string) (feishuUserToken, error) {
-	return feishuUserToken{}, nil
-}
-
-func (p *controlledFeishuProvider) RefreshUserToken(context.Context, string) (feishuUserToken, error) {
-	return feishuUserToken{}, nil
-}
-
-func (p *controlledFeishuProvider) GetUserProfile(context.Context, string) (feishuUserProfile, error) {
-	return feishuUserProfile{}, nil
-}
-
 func (p *controlledFeishuProvider) SearchDocuments(context.Context, string, string, int) ([]feishuDocument, error) {
 	return nil, nil
 }
@@ -48,16 +36,18 @@ func (p *controlledFeishuProvider) ExportDocument(
 	return p.export(ctx, accessToken, ref)
 }
 
+// feishuSessionForTestUser 放一个已登录、已授权飞书的人，返回他的用户 ID。
 func feishuSessionForTestUser(t *testing.T, service *authService, id string) string {
 	t.Helper()
-	return mustSessionForUser(t, service, authUser{
-		ID:                     id,
-		Name:                   id,
-		AuthMode:               authModeFeishu,
-		Status:                 authUserActive,
-		FeishuOpenID:           strings.TrimPrefix(id, "feishu:"),
-		FeishuRefreshTokenSeal: "test-refresh-seal",
+	session := mustSessionForUser(t, service, authUser{
+		ID:           id,
+		Name:         id,
+		AuthMode:     authModeFeishu,
+		Status:       authUserActive,
+		FeishuOpenID: strings.TrimPrefix(id, "feishu:"),
 	})
+	service.putAccessToken(id, "u-"+id, time.Time{})
+	return session
 }
 
 func createFeishuExportJobForTest(
@@ -86,10 +76,11 @@ func createFeishuExportJobForTest(
 	return status
 }
 
-func requestWithSessionCookie(method, target, token string, body []byte, contentType, origin string) *http.Request {
+// requestWithSessionCookie 造一个浏览器请求：userID 不为空就当这个人已登录，origin 是浏览器带的 Origin。
+func requestWithSessionCookie(method, target, userID string, body []byte, contentType, origin string) *http.Request {
 	req := httptest.NewRequest(method, target, bytes.NewReader(body))
-	if token != "" {
-		req.AddCookie(&http.Cookie{Name: authSessionCookieName, Value: token, Path: "/"})
+	if userID != "" {
+		req = req.WithContext(withLayoutUser(req.Context(), userID))
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)

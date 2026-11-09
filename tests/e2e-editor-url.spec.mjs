@@ -2,11 +2,10 @@ import { test, expect } from '@playwright/test';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
 const E2E_USERNAME = 'e2e';
-const E2E_PASSWORD = 'e2e-local-session-password';
 
 async function login(page) {
-  const response = await page.request.post(`${BASE}/auth/password/login`, {
-    data: { username: E2E_USERNAME, password: E2E_PASSWORD, remember: false },
+  const response = await page.request.post(`${BASE}/auth/dev-login`, {
+    data: { username: E2E_USERNAME },
   });
   expect(response.ok(), `E2E 登录失败（${response.status()}）`).toBeTruthy();
 }

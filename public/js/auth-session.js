@@ -1,63 +1,24 @@
-export const SESSION_STORAGE_KEY = 'fbif.auth.session_token';
-
-function usableStorage(storage) {
-  if (storage) return storage;
-  try {
-    return globalThis.sessionStorage || null;
-  } catch {
-    return null;
-  }
-}
-
-export function getStoredSessionToken(storage) {
-  try {
-    return usableStorage(storage)?.getItem(SESSION_STORAGE_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
-export function storeSessionToken(token, storage) {
-  const target = usableStorage(storage);
-  if (!target) return;
-  try {
-    if (token) target.setItem(SESSION_STORAGE_KEY, token);
-    else target.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // Cookie is still the primary session transport. Storage failure only
-    // disables the WebView fallback and must not break the editor.
-  }
-}
+// 登录走 FBIF 统一登录（后端 api/auth_login.go）：本项目没有登录页、不存令牌，会话只在 HttpOnly cookie 里。
+// 没登录时去 /auth/login?next=（飞书客户端里直接走飞书登录），后端再送去登录中心；登录完回到 next。
 
 export async function authFetch(input, init = {}, {
   fetchImpl = globalThis.fetch,
-  storage,
 } = {}) {
-  const token = getStoredSessionToken(storage);
-  const headers = { ...(init.headers || {}) };
-  if (token) headers['X-Session-Token'] = token;
   return fetchImpl(input, {
     ...init,
-    headers,
     credentials: 'same-origin',
   });
 }
 
 export async function loadCurrentUser({
   fetchImpl = globalThis.fetch,
-  storage,
 } = {}) {
-  const response = await authFetch('/api/me', { method: 'GET' }, { fetchImpl, storage });
-  if (response.status === 401) {
-    storeSessionToken('', storage);
-    return null;
-  }
+  const response = await authFetch('/api/auth/me', { method: 'GET', cache: 'no-store' }, { fetchImpl });
+  if (response.status === 401) return null;
   if (!response.ok) {
     throw new Error('账号服务暂不可用');
   }
   const payload = await response.json();
-  const renewedToken = String(payload.session_token || response.headers.get('X-Session-Token') || '');
-  if (renewedToken) storeSessionToken(renewedToken, storage);
   return payload.user || null;
 }
 
@@ -66,8 +27,44 @@ function currentReturnTo(windowRef) {
   if (!location) return '/mp/fbif';
   const params = new URLSearchParams(location.search || '');
   params.delete('v');
+  params.delete('feishu_grant');
   const search = params.toString();
   return `${location.pathname || '/mp/fbif'}${search ? `?${search}` : ''}${location.hash || ''}`;
+}
+
+function inFeishu(windowRef) {
+  return /Lark|Feishu/i.test(String(windowRef?.navigator?.userAgent || ''));
+}
+
+// loginURL 是没登录时去的地方：浏览器里去登录中心（账号密码、飞书都在那页），飞书客户端里直接走飞书登录、不用点。
+export function loginURL(windowRef = globalThis.window) {
+  const start = inFeishu(windowRef) ? '/auth/feishu/fbif/login' : '/auth/login';
+  return `${start}?next=${encodeURIComponent(currentReturnTo(windowRef))}`;
+}
+
+// feishuGrantURL 是授权飞书的地址：授权一次，之后服务端替他续，回到当前页面。
+export function feishuGrantURL(windowRef = globalThis.window) {
+  return `/auth/feishu-grant?next=${encodeURIComponent(currentReturnTo(windowRef))}`;
+}
+
+const FEISHU_GRANT_RESULTS = {
+  denied: '飞书授权没完成：你没有同意授权',
+  failed: '飞书授权没成功，请稍后再试',
+  mismatch: '授权的飞书账号和登录的不是同一个人，请用自己的飞书账号授权',
+  unavailable: '这个账号授权不了飞书',
+};
+
+// takeFeishuGrantResult 读授权回来时地址上的 feishu_grant=（没成功的那几种），读到就从地址上去掉，返回要提示的话。
+export function takeFeishuGrantResult(windowRef = globalThis.window) {
+  const location = windowRef?.location;
+  if (!location) return '';
+  const params = new URLSearchParams(location.search || '');
+  const result = params.get('feishu_grant');
+  if (!result) return '';
+  params.delete('feishu_grant');
+  const search = params.toString();
+  windowRef.history?.replaceState?.(windowRef.history.state, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash || ''}`);
+  return FEISHU_GRANT_RESULTS[result] || '';
 }
 
 function navigate(windowRef, target) {
@@ -82,13 +79,11 @@ export async function ensureAuthenticatedSession({
   windowRef = globalThis.window,
   documentRef = globalThis.document,
   fetchImpl = globalThis.fetch,
-  storage,
 } = {}) {
   try {
-    const user = await loadCurrentUser({ fetchImpl, storage });
+    const user = await loadCurrentUser({ fetchImpl });
     if (!user) {
-      const returnTo = currentReturnTo(windowRef);
-      navigate(windowRef, `/login.html?return_to=${encodeURIComponent(returnTo)}`);
+      navigate(windowRef, loginURL(windowRef));
       return null;
     }
     documentRef?.body?.classList.remove('auth-pending');
@@ -102,13 +97,8 @@ export async function ensureAuthenticatedSession({
 
 export async function logoutSession({
   fetchImpl = globalThis.fetch,
-  storage,
 } = {}) {
-  try {
-    await authFetch('/auth/feishu/logout', { method: 'POST' }, { fetchImpl, storage });
-  } finally {
-    storeSessionToken('', storage);
-  }
+  await authFetch('/auth/feishu/logout', { method: 'POST' }, { fetchImpl });
 }
 
 function makeAvatar(documentRef, user, large = false) {
@@ -205,11 +195,21 @@ function makeActionChevronIcon(documentRef) {
   return icon;
 }
 
+// feishuState 把「我是谁」里的飞书授权状态（user.feishu）换成菜单上的说法；grant=要给「授权飞书」。
+function feishuState(user) {
+  if (!user.capabilities?.feishu_documents || user.feishu === 'none') {
+    return { ok: false, grant: false, short: '云文档不可用', long: '飞书云文档不可用' };
+  }
+  if (user.feishu === 'ok') {
+    return { ok: true, grant: false, short: '云文档已连接', long: '飞书云文档已连接' };
+  }
+  return { ok: false, grant: true, short: '云文档未授权', long: '飞书云文档未授权' };
+}
+
 export function mountUserIdentity(container, user, {
   documentRef = globalThis.document,
   windowRef = globalThis.window,
   fetchImpl = globalThis.fetch,
-  storage,
 } = {}) {
   if (!container || !user) return { destroy() {} };
   container.replaceChildren();
@@ -226,13 +226,12 @@ export function mountUserIdentity(container, user, {
   const summary = documentRef.createElement('span');
   summary.className = 'user-identity-summary';
   appendTextLine(documentRef, summary, 'user-identity-name', user.name || '未命名用户');
+  const feishu = feishuState(user);
   appendTextLine(
     documentRef,
     summary,
     'user-identity-capability',
-    `${user.auth_mode === 'password' ? '账号登录' : '飞书登录'} · ${
-      user.capabilities?.feishu_documents ? '云文档已连接' : '云文档不可用'
-    }`,
+    `${user.auth_mode === 'password' ? '账号登录' : '飞书登录'} · ${feishu.short}`,
   );
   trigger.append(summary);
   const caret = documentRef.createElement('span');
@@ -274,18 +273,32 @@ export function mountUserIdentity(container, user, {
   menu.append(profile);
 
   const capability = documentRef.createElement('div');
-  capability.className = `user-identity-status${user.capabilities?.feishu_documents ? '' : ' is-locked'}`;
+  capability.className = `user-identity-status${feishu.ok ? '' : ' is-locked'}`;
   const statusDot = documentRef.createElement('span');
   statusDot.className = 'user-identity-status-dot';
   statusDot.setAttribute('aria-hidden', 'true');
   const statusText = documentRef.createElement('span');
-  statusText.textContent = user.capabilities?.feishu_documents
-    ? '飞书云文档已连接'
-    : '飞书云文档不可用';
+  // 刚从飞书授权页回来、没授权成：状态行写原因，菜单打开一次让他看到（「授权飞书…」还在，可以再点）。
+  const grantResult = takeFeishuGrantResult(windowRef);
+  statusText.textContent = grantResult || feishu.long;
+  if (grantResult) capability.classList.add('is-locked');
   capability.append(statusDot, statusText);
   capability.setAttribute('role', 'status');
   capability.setAttribute('aria-live', 'polite');
   menu.append(capability);
+
+  if (feishu.grant) {
+    const grantButton = documentRef.createElement('button');
+    grantButton.type = 'button';
+    grantButton.className = 'user-identity-grant';
+    grantButton.setAttribute('role', 'menuitem');
+    grantButton.textContent = '授权飞书…';
+    grantButton.addEventListener('click', () => {
+      setOpen(false);
+      navigate(windowRef, feishuGrantURL(windowRef));
+    });
+    menu.append(grantButton);
+  }
 
   const divider = documentRef.createElement('div');
   divider.className = 'user-identity-divider';
@@ -321,9 +334,9 @@ export function mountUserIdentity(container, user, {
     logoutButton.disabled = true;
     setOpen(false);
     try {
-      await logoutSession({ fetchImpl, storage });
+      await logoutSession({ fetchImpl });
     } finally {
-      navigate(windowRef, `/login.html?return_to=${encodeURIComponent(currentReturnTo(windowRef))}`);
+      navigate(windowRef, `/auth/login?next=${encodeURIComponent(currentReturnTo(windowRef))}`);
     }
   });
   menu.append(logoutButton);
@@ -382,6 +395,7 @@ export function mountUserIdentity(container, user, {
   documentRef.addEventListener('click', onDocumentClick);
   documentRef.addEventListener('keydown', onDocumentKeydown);
   container.append(trigger, menu);
+  if (grantResult) setOpen(true);
 
   return {
     destroy() {

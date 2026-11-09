@@ -1,5 +1,8 @@
 package main
 
+// auth_users.go — 排版工具自己的用户库（auth-users.json）：只记「这个人是谁、什么角色、停没停用」。
+// 登录会话归统一登录模板（sso-sessions.json），飞书授权归授权模板（feishu-grants.json），这里都不存。
+
 import (
 	"encoding/json"
 	"errors"
@@ -9,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 type authMode string
@@ -30,34 +31,24 @@ const (
 	authRoleSuperAdmin authRole = "super_admin"
 )
 
+// authUser 的 ID 定下就不改：2026-11-10 换统一登录前用飞书登录过的人是 feishu:<open_id>，
+// 之后新来的是统一登录的「企业编号:sub」，账号密码登录的是 account:<账号表 record_id>。
 type authUser struct {
-	ID                     string    `json:"id"`
-	Name                   string    `json:"name"`
-	AvatarURL              string    `json:"avatar_url,omitempty"`
-	Email                  string    `json:"email,omitempty"`
-	Username               string    `json:"username,omitempty"`
-	PasswordHash           string    `json:"password_hash,omitempty"`
-	AuthMode               authMode  `json:"auth_mode"`
-	Role                   authRole  `json:"role,omitempty"`
-	Status                 string    `json:"status"`
-	FeishuOpenID           string    `json:"feishu_open_id,omitempty"`
-	FeishuUnionID          string    `json:"feishu_union_id,omitempty"`
-	FeishuRefreshTokenSeal string    `json:"feishu_refresh_token_seal,omitempty"`
-	SessionVersion         int64     `json:"session_version"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
-	LastLoginAt            time.Time `json:"last_login_at,omitempty"`
-	// LastSeenAt 是最近一次打开页面（/api/me 续期会话）的时间，按小时节流写入。
-	// 会话 30 天滑动续期，飞书授权保活只覆盖这 30 天内用过的人。
-	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
-	// FeishuTokenRefreshedAt / FeishuRefreshExpiresAt：refresh_token 上次轮换
-	// 时间与飞书给的到期时间。refresh_token 约 7 天、只能用一次，后台保活据此
-	// 在过期前替用户轮换。
-	FeishuTokenRefreshedAt time.Time `json:"feishu_token_refreshed_at,omitempty"`
-	FeishuRefreshExpiresAt time.Time `json:"feishu_refresh_expires_at,omitempty"`
-	// FeishuReauthRequired：飞书明确拒绝了 refresh_token（过期、撤销、满 365
-	// 天等），只能让用户重新用飞书登录；登录成功即清除。
-	FeishuReauthRequired bool `json:"feishu_reauth_required,omitempty"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	AvatarURL string   `json:"avatar_url,omitempty"`
+	Email     string   `json:"email,omitempty"`
+	AuthMode  authMode `json:"auth_mode"`
+	// CompanyCode 是统一登录给的企业编号（FBIF 是 FJY632B9P3E），账号密码登录是 account；换统一登录前的老记录是空的（都是 FBIF）。
+	CompanyCode string   `json:"company_code,omitempty"`
+	Role        authRole `json:"role,omitempty"`
+	Status      string   `json:"status"`
+	// FeishuOpenID 是这个人在本项目飞书应用下的 open_id：超级管理员名单按它认，授权飞书时补上。
+	FeishuOpenID  string    `json:"feishu_open_id,omitempty"`
+	FeishuUnionID string    `json:"feishu_union_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	LastLoginAt   time.Time `json:"last_login_at,omitempty"`
 }
 
 type authUserDocument struct {
@@ -144,7 +135,9 @@ func normalizeAuthUser(user authUser, existing *authUser, now time.Time) authUse
 	user.Name = strings.TrimSpace(user.Name)
 	user.AvatarURL = strings.TrimSpace(user.AvatarURL)
 	user.Email = strings.TrimSpace(user.Email)
-	user.Username = strings.ToLower(strings.TrimSpace(user.Username))
+	user.CompanyCode = strings.TrimSpace(user.CompanyCode)
+	user.FeishuOpenID = strings.TrimSpace(user.FeishuOpenID)
+	user.FeishuUnionID = strings.TrimSpace(user.FeishuUnionID)
 	rawRole := strings.TrimSpace(string(user.Role))
 	user.Role = normalizeAuthRole(user.Role)
 	user.Status = strings.TrimSpace(user.Status)
@@ -155,30 +148,14 @@ func normalizeAuthUser(user authUser, existing *authUser, now time.Time) authUse
 		if user.CreatedAt.IsZero() {
 			user.CreatedAt = existing.CreatedAt
 		}
-		if user.SessionVersion == 0 {
-			user.SessionVersion = existing.SessionVersion
+		if user.FeishuOpenID == "" {
+			user.FeishuOpenID = existing.FeishuOpenID
 		}
-		if user.PasswordHash == "" {
-			user.PasswordHash = existing.PasswordHash
-		}
-		if user.FeishuRefreshTokenSeal == "" {
-			user.FeishuRefreshTokenSeal = existing.FeishuRefreshTokenSeal
-			// 沿用旧令牌时，它的续期时间与失效标记也一并沿用。
-			if user.FeishuTokenRefreshedAt.IsZero() {
-				user.FeishuTokenRefreshedAt = existing.FeishuTokenRefreshedAt
-			}
-			if user.FeishuRefreshExpiresAt.IsZero() {
-				user.FeishuRefreshExpiresAt = existing.FeishuRefreshExpiresAt
-			}
-			if !user.FeishuReauthRequired {
-				user.FeishuReauthRequired = existing.FeishuReauthRequired
-			}
-		}
-		if user.LastSeenAt.Before(existing.LastSeenAt) {
-			user.LastSeenAt = existing.LastSeenAt
+		if user.FeishuUnionID == "" {
+			user.FeishuUnionID = existing.FeishuUnionID
 		}
 		if rawRole == "" {
-			// 登录回调只携带身份资料，不应把已授权的管理员降级成普通用户。
+			// 登录只带身份资料，不应把已授权的管理员降级成普通用户。
 			// 显式的降级由权限管理接口完成，并传入新的角色。
 			if existing.Role == authRoleAdmin || existing.Role == authRoleSuperAdmin {
 				user.Role = existing.Role
@@ -223,6 +200,88 @@ func (s *authUserStore) Upsert(user authUser) error {
 	}
 	doc.Users = append(doc.Users, normalizeAuthUser(user, nil, now))
 	return s.saveLocked(doc)
+}
+
+// RecordLogin 把统一登录的人对上用户库并记下这次登录，返回库里的那一条：
+// 飞书登录的人先按 union_id 认（换统一登录前的老用户 ID 是 feishu:<open_id>，ID、角色、停用都跟着走），
+// 认不出再按 ID 认，都没有就新建。资料（名字、头像、邮箱）以这次登录为准，空的不覆盖。
+func (s *authUserStore) RecordLogin(login authUser, now time.Time) (authUser, error) {
+	if strings.TrimSpace(login.ID) == "" {
+		return authUser{}, errors.New("auth user id is required")
+	}
+	now = now.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadLocked()
+	if err != nil {
+		return authUser{}, err
+	}
+	match := -1
+	if union := strings.TrimSpace(login.FeishuUnionID); union != "" && login.AuthMode == authModeFeishu {
+		for idx := range doc.Users {
+			if doc.Users[idx].AuthMode == authModeFeishu && doc.Users[idx].FeishuUnionID == union {
+				match = idx
+				break
+			}
+		}
+	}
+	if match < 0 {
+		for idx := range doc.Users {
+			if doc.Users[idx].ID == login.ID {
+				match = idx
+				break
+			}
+		}
+	}
+	if match < 0 {
+		login.LastLoginAt = now
+		login = normalizeAuthUser(login, nil, now)
+		doc.Users = append(doc.Users, login)
+		return login, s.saveLocked(doc)
+	}
+	user := doc.Users[match]
+	for _, field := range []struct {
+		dst *string
+		src string
+	}{
+		{&user.Name, login.Name}, {&user.AvatarURL, login.AvatarURL}, {&user.Email, login.Email},
+		{&user.CompanyCode, login.CompanyCode}, {&user.FeishuUnionID, login.FeishuUnionID},
+	} {
+		if v := strings.TrimSpace(field.src); v != "" {
+			*field.dst = v
+		}
+	}
+	user.AuthMode = login.AuthMode
+	user.LastLoginAt = now
+	user.UpdatedAt = now
+	doc.Users[match] = user
+	return user, s.saveLocked(doc)
+}
+
+// SetFeishuOpenID 记下这个人授权飞书时的 open_id（超级管理员名单按它认）。已经是这个值就不写盘。
+func (s *authUserStore) SetFeishuOpenID(id, openID string, now time.Time) error {
+	openID = strings.TrimSpace(openID)
+	if openID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	for idx := range doc.Users {
+		if doc.Users[idx].ID != id {
+			continue
+		}
+		if doc.Users[idx].FeishuOpenID == openID {
+			return nil
+		}
+		doc.Users[idx].FeishuOpenID = openID
+		doc.Users[idx].UpdatedAt = now.UTC()
+		return s.saveLocked(doc)
+	}
+	return errors.New("auth user not found")
 }
 
 func (s *authUserStore) Get(id string) (authUser, bool, error) {
@@ -271,171 +330,4 @@ func (s *authUserStore) UpdateRole(id string, role authRole, now time.Time) (aut
 		return doc.Users[idx], nil
 	}
 	return authUser{}, errors.New("auth user not found")
-}
-
-func (s *authUserStore) FindByUsername(username string) (authUser, bool, error) {
-	username = strings.ToLower(strings.TrimSpace(username))
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	doc, err := s.loadLocked()
-	if err != nil {
-		return authUser{}, false, err
-	}
-	for _, user := range doc.Users {
-		if user.AuthMode == authModePassword && user.Username == username {
-			return user, true, nil
-		}
-	}
-	return authUser{}, false, nil
-}
-
-func (s *authUserStore) IncrementSessionVersion(id string, now time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	doc, err := s.loadLocked()
-	if err != nil {
-		return err
-	}
-	for idx := range doc.Users {
-		if doc.Users[idx].ID != id {
-			continue
-		}
-		doc.Users[idx].SessionVersion++
-		doc.Users[idx].UpdatedAt = now.UTC()
-		return s.saveLocked(doc)
-	}
-	return errors.New("auth user not found")
-}
-
-func (s *authUserStore) UpdateFeishuTokens(id, refreshSeal string, lastLoginAt time.Time) (authUser, error) {
-	return s.updateFeishuTokens(id, refreshSeal, lastLoginAt, time.Time{}, time.Time{})
-}
-
-// RotateFeishuRefreshToken 原子替换轮换后的 refresh_token，记下轮换时间与
-// 飞书给的到期时间，并清除「需重新授权」标记。只在库里仍是这次刷新用掉的那份
-// 令牌（usedSeal）时才写：刷新期间这个人重新登录过、或别的进程已换上更新的
-// 授权，就不拿旧授权链的结果覆盖它，返回 false。
-func (s *authUserStore) RotateFeishuRefreshToken(id, usedSeal, refreshSeal string, refreshedAt, expiresAt time.Time) (authUser, bool, error) {
-	if refreshSeal == "" {
-		return authUser{}, false, errors.New("refresh token seal is required")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	doc, err := s.loadLocked()
-	if err != nil {
-		return authUser{}, false, err
-	}
-	for idx := range doc.Users {
-		if doc.Users[idx].ID != id {
-			continue
-		}
-		if doc.Users[idx].FeishuRefreshTokenSeal != usedSeal {
-			return doc.Users[idx], false, nil
-		}
-		doc.Users[idx].FeishuRefreshTokenSeal = refreshSeal
-		doc.Users[idx].FeishuReauthRequired = false
-		doc.Users[idx].FeishuTokenRefreshedAt = refreshedAt.UTC()
-		doc.Users[idx].FeishuRefreshExpiresAt = expiresAt.UTC()
-		doc.Users[idx].UpdatedAt = time.Now().UTC()
-		if err := s.saveLocked(doc); err != nil {
-			return authUser{}, false, err
-		}
-		return doc.Users[idx], true, nil
-	}
-	return authUser{}, false, errors.New("auth user not found")
-}
-
-func (s *authUserStore) updateFeishuTokens(id, refreshSeal string, lastLoginAt, refreshedAt, expiresAt time.Time) (authUser, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	doc, err := s.loadLocked()
-	if err != nil {
-		return authUser{}, err
-	}
-	for idx := range doc.Users {
-		if doc.Users[idx].ID != id {
-			continue
-		}
-		if refreshSeal != "" {
-			doc.Users[idx].FeishuRefreshTokenSeal = refreshSeal
-			doc.Users[idx].FeishuReauthRequired = false
-		}
-		if !refreshedAt.IsZero() {
-			doc.Users[idx].FeishuTokenRefreshedAt = refreshedAt.UTC()
-			doc.Users[idx].FeishuRefreshExpiresAt = expiresAt.UTC()
-		}
-		if !lastLoginAt.IsZero() {
-			doc.Users[idx].LastLoginAt = lastLoginAt.UTC()
-		}
-		doc.Users[idx].UpdatedAt = time.Now().UTC()
-		if err := s.saveLocked(doc); err != nil {
-			return authUser{}, err
-		}
-		return doc.Users[idx], nil
-	}
-	return authUser{}, errors.New("auth user not found")
-}
-
-// MarkFeishuReauthRequired 在飞书明确拒绝 refresh_token 后清掉它并标记需重新
-// 授权。只在库里仍是这次用掉的那份令牌时才生效：并发轮换（另一请求或进程
-// 已换上新令牌）时返回 false，调用方应改用新令牌重试，不能误伤。
-func (s *authUserStore) MarkFeishuReauthRequired(id, usedSeal string, now time.Time) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	doc, err := s.loadLocked()
-	if err != nil {
-		return false, err
-	}
-	for idx := range doc.Users {
-		if doc.Users[idx].ID != id {
-			continue
-		}
-		if doc.Users[idx].FeishuRefreshTokenSeal != usedSeal {
-			return false, nil
-		}
-		doc.Users[idx].FeishuRefreshTokenSeal = ""
-		doc.Users[idx].FeishuReauthRequired = true
-		doc.Users[idx].UpdatedAt = now.UTC()
-		return true, s.saveLocked(doc)
-	}
-	return false, errors.New("auth user not found")
-}
-
-// TouchLastSeen 记录用户最近一次使用；距上次记录不足 minInterval 时不写盘。
-func (s *authUserStore) TouchLastSeen(id string, now time.Time, minInterval time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	doc, err := s.loadLocked()
-	if err != nil {
-		return err
-	}
-	for idx := range doc.Users {
-		if doc.Users[idx].ID != id {
-			continue
-		}
-		if now.Sub(doc.Users[idx].LastSeenAt) < minInterval {
-			return nil
-		}
-		doc.Users[idx].LastSeenAt = now.UTC()
-		return s.saveLocked(doc)
-	}
-	return errors.New("auth user not found")
-}
-
-func hashPassword(password string) (string, error) {
-	if len(password) < 8 {
-		return "", errors.New("password must be at least 8 characters")
-	}
-	body, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
-}
-
-func verifyPassword(hash, password string) bool {
-	if hash == "" || password == "" {
-		return false
-	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }

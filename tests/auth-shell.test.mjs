@@ -7,8 +7,6 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const app = fs.readFileSync(path.join(root, 'public/app.html'), 'utf8');
 const site = fs.readFileSync(path.join(root, 'public/site.html'), 'utf8');
-const login = fs.readFileSync(path.join(root, 'public/login.html'), 'utf8');
-const loginCSS = fs.readFileSync(path.join(root, 'public/css/auth-login.css'), 'utf8');
 const caddy = fs.readFileSync(path.join(root, 'deploy/caddy/fbifmp-layout.caddy'), 'utf8');
 
 test('both editor shells put the publishing target inside the import card and the signed-in identity in the rail footer', () => {
@@ -45,30 +43,15 @@ test('both editor shells put the publishing target inside the import card and th
   assert.match(siteToolbar, /id="copyBtn"/, 'site copy action stays in the top bar');
 });
 
-test('login page reuses the approved production mascot gate with the password-account variant', () => {
-  assert.match(login, /\/assets\/door-login\.webp/);
-  assert.match(login, /\/assets\/fbif-login-logo\.png/);
-  assert.match(login, />使用飞书登录</);
-  assert.match(login, /id="passwordLoginForm"/);
-  assert.match(login, /autocomplete="username"/);
-  assert.match(login, /autocomplete="current-password"/);
-  assert.match(login, /class="auth-pill-field/);
-  assert.match(login, /30 天内保持登录/);
-  assert.match(login, /data-account-help/);
-  assert.match(login, /不能搜索、提取或生成飞书云文档/);
-  assert.doesNotMatch(login, /注册账号/);
+test('本项目没有登录页：登录页只在登录中心，旧的登录页、回调页都删了', () => {
+  for (const file of ['public/login.html', 'public/auth-callback.html', 'public/js/login.js', 'public/css/auth-login.css']) {
+    assert.equal(fs.existsSync(path.join(root, file)), false, `${file} 不该再有`);
+  }
 });
 
-test('password login keeps the mascot illustration at the approved half-card width', () => {
-  assert.match(loginCSS, /@media \(min-width:\s*1024px\)[\s\S]*?\.auth-login-card\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
-  assert.doesNotMatch(loginCSS, /\.auth-login-card\s*\{[^}]*grid-template-columns:\s*2fr 3fr;/s);
-  assert.match(loginCSS, /\.auth-pill-field\s*\{[^}]*height:\s*48px;[^}]*border-radius:\s*999px;/s);
-  assert.match(loginCSS, /\.auth-password-submit\s*\{[^}]*height:\s*48px;[^}]*border-radius:\s*999px;[^}]*background:\s*#1f2329;/s);
-});
-
-test('production routes login APIs to Go while keeping the browser callback static', () => {
-  assert.match(caddy, /@fbifAuth path \/auth\/feishu\/\* \/auth\/password\/login/);
+test('线上把统一登录的路由都交给 Go，登录健康检查不对外', () => {
+  assert.match(caddy, /@fbifAuth \{\s*path \/auth\/login \/auth\/center\/\* \/auth\/feishu\/\* \/auth\/feishu-grant \/internal\/auth\/\*\s*not path \/internal\/auth\/health\s*\}/);
   assert.match(caddy, /handle @fbifAuth\s*\{\s*reverse_proxy localhost:9001\s*\}/s);
-  assert.match(caddy, /@fbifAppShell path[^\n]*\/login\.html[^\n]*\/auth-callback\.html/);
-  assert.doesNotMatch(caddy, /@fbifAuth path[^\n]*\/auth-callback/);
+  assert.match(caddy, /@fbifLoginHealth path \/internal\/auth\/health\s*handle @fbifLoginHealth\s*\{\s*respond 404\s*\}/);
+  assert.doesNotMatch(caddy, /login\.html|auth-callback|\/auth\/password/);
 });

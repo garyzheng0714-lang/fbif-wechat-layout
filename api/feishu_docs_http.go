@@ -41,17 +41,19 @@ func feishuExportErrorResponse(err error) (int, string, string) {
 				"飞书找不到这篇知识库文档：可能已被删除、移动，或当前登录的飞书账号看不到它。请先确认你自己在飞书里能打开这条链接"
 		}
 		return http.StatusForbidden, "feishu_wiki_access_denied",
-			"飞书拒绝访问这篇知识库文档。如果你在飞书里能打开它，请退出登录后重新用飞书登录（授予「查看知识库节点」权限）再试"
+			"飞书拒绝访问这篇知识库文档。如果你在飞书里能打开它，请重新授权飞书（授予「查看知识库节点」权限）再试"
 	case errors.Is(err, errFeishuWikiNotDocument):
 		return http.StatusBadRequest, "feishu_wiki_not_document",
 			"这个知识库节点不是文档（可能是表格、多维表格或目录），暂不支持导入"
 	case errors.Is(err, errAuthenticationRequired):
 		return http.StatusUnauthorized, "authentication_required", "请先登录"
+	case errors.Is(err, errLoginUnavailable):
+		return http.StatusServiceUnavailable, "login_service_unavailable", "登录服务暂时连不上，请稍后重试"
 	case errors.Is(err, errFeishuLoginRequired):
-		return http.StatusForbidden, "feishu_login_required", "飞书云文档功能需要使用飞书登录"
-	case errors.Is(err, errFeishuReauthRequired):
+		return http.StatusForbidden, "feishu_login_required", "飞书云文档功能需要用 FBIF 的飞书账号登录"
+	case errors.Is(err, errFeishuGrantRequired):
 		// 2026-10-15：refresh_token 失效曾被兜底成「服务暂不可用」，用户无从下手。
-		return http.StatusForbidden, "feishu_reauth_required", "飞书授权已失效，请重新用飞书登录一次"
+		return http.StatusForbidden, "feishu_grant_required", "要先授权飞书，授权一次之后会自动续期"
 	case errors.Is(err, errFeishuExportTimeout):
 		return http.StatusGatewayTimeout, "feishu_export_timeout", "飞书生成 Word 超时，请稍后重试"
 	case errors.Is(err, context.DeadlineExceeded):
@@ -87,10 +89,8 @@ func writeFeishuCapabilityError(w http.ResponseWriter, err error) {
 }
 
 func requireFeishuMutationRequest(w http.ResponseWriter, r *http.Request, requireJSON bool) bool {
-	// X-Session-Token is the explicit WebView/server bearer transport. Browsers
-	// using the cookie must prove same-origin; SameSite=Lax alone still permits
-	// requests from another subdomain on the same registrable site.
-	if strings.TrimSpace(r.Header.Get("X-Session-Token")) == "" && !sameOrigin(r) {
+	// 登录只认会话 cookie：浏览器必须证明是同源请求，SameSite=Lax 拦不住同一主域下别的子域名发来的请求。
+	if !sameOrigin(r) {
 		writeAuthError(w, http.StatusForbidden, "invalid_request_origin", "请求来源无效，请刷新页面后重试")
 		return false
 	}
@@ -144,8 +144,10 @@ func feishuExportErrorLabel(err error) string {
 		return "authentication_required"
 	case errors.Is(err, errFeishuLoginRequired):
 		return "feishu_login_required"
-	case errors.Is(err, errFeishuReauthRequired):
-		return "feishu_reauth_required"
+	case errors.Is(err, errLoginUnavailable):
+		return "login_service_unavailable"
+	case errors.Is(err, errFeishuGrantRequired):
+		return "feishu_grant_required"
 	case errors.Is(err, errFeishuExportTimeout):
 		return "export_timeout"
 	case errors.As(err, &taskErr):

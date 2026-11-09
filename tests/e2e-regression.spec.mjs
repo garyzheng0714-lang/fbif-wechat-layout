@@ -15,7 +15,6 @@ const VISUAL_ENABLED = process.env.E2E_SKIP_VISUAL !== '1';
 const DOCX_PATH = path.resolve('tests/fixtures/tea-pyramid.docx');
 const SCREENSHOT_DIR = path.resolve('tests/e2e-screenshots');
 const E2E_USERNAME = 'e2e';
-const E2E_PASSWORD = 'e2e-local-session-password';
 
 // Ensure screenshot directory
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -32,12 +31,8 @@ const RESULTS = [];
 
 async function newAuthenticatedContext(browser, options = {}) {
   const context = await browser.newContext(options);
-  const response = await context.request.post(`${BASE}/auth/password/login`, {
-    data: {
-      username: E2E_USERNAME,
-      password: E2E_PASSWORD,
-      remember: false,
-    },
+  const response = await context.request.post(`${BASE}/auth/dev-login`, {
+    data: { username: E2E_USERNAME },
   });
   if (!response.ok()) {
     const body = await response.text();

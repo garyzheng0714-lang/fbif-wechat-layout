@@ -71,7 +71,6 @@ type jobIntervals struct {
 	distributionFollow time.Duration // 分发进度跟进
 	editReportCheck    time.Duration // 编辑周报检查
 	platformsFallback  time.Duration // 平台限制兜底
-	tokenRefreshCheck  time.Duration // 飞书登录续期
 }
 
 var defaultJobIntervals = jobIntervals{
@@ -82,7 +81,6 @@ var defaultJobIntervals = jobIntervals{
 	distributionFollow: time.Minute,
 	editReportCheck:    30 * time.Minute,
 	platformsFallback:  6 * time.Hour,
-	tokenRefreshCheck:  time.Hour,
 }
 
 // intervals 进程里实际用的间隔：main 在起任何循环之前用 loadJobIntervals 换上一次，之后只读。
@@ -121,7 +119,6 @@ func (s *jobIntervals) vars() []intervalVar {
 		secondsVar("DISTRIBUTION_FOLLOW_SECONDS", &s.distributionFollow),
 		secondsVar("EDIT_REPORT_CHECK_SECONDS", &s.editReportCheck),
 		secondsVar("PLATFORMS_FALLBACK_SECONDS", &s.platformsFallback),
-		secondsVar("TOKEN_REFRESH_CHECK_SECONDS", &s.tokenRefreshCheck),
 	}
 }
 

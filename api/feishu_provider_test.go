@@ -322,7 +322,7 @@ func TestHTTPFeishuProviderWikiResolveDeniedMapsToReloginHint(t *testing.T) {
 	if status != http.StatusForbidden || code != "feishu_wiki_access_denied" {
 		t.Fatalf("status=%d code=%q", status, code)
 	}
-	if !strings.Contains(message, "重新用飞书登录") {
+	if !strings.Contains(message, "重新授权飞书") {
 		t.Fatalf("message=%q", message)
 	}
 }
@@ -388,5 +388,19 @@ func TestHTTPFeishuProviderWikiNotFoundSurvivesHTTPStatusError(t *testing.T) {
 	}
 	if !strings.Contains(message, "找不到这篇知识库文档") {
 		t.Fatalf("message=%q", message)
+	}
+}
+
+func TestHTTPFeishuProviderStatusErrorKeepsFeishuCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"code":1069914,"msg":"file token invalid"}`)
+	}))
+	defer server.Close()
+	provider := newHTTPFeishuProvider(server.Client())
+	provider.apiBaseURL = server.URL
+	_, err := provider.ExportDocument(context.Background(), "u-user-token", feishuDocumentRef{Token: "doccn_test", Type: "docx"})
+	if err == nil || !strings.Contains(err.Error(), "code=1069914") {
+		t.Fatalf("err=%v", err)
 	}
 }

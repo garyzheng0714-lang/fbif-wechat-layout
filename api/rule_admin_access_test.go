@@ -68,15 +68,8 @@ func TestRuleAdminAccessUsesFeishuSessionRoles(t *testing.T) {
 		t.Fatalf("super admin role update status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
-	adminUser, ok, err := service.users.Get("feishu:ou_member")
-	if err != nil || !ok {
-		t.Fatalf("read promoted user: ok=%v err=%v", ok, err)
-	}
-	adminToken, err := service.issueSession(adminUser)
-	if err != nil {
-		t.Fatalf("issue admin session: %v", err)
-	}
-	if rec := request(http.MethodGet, "/api/rules/admin/presets", adminToken, nil); rec.Code != http.StatusOK {
+	// 角色每个请求都从用户库读：提权后不用重新登录。
+	if rec := request(http.MethodGet, "/api/rules/admin/presets", memberToken, nil); rec.Code != http.StatusOK {
 		t.Fatalf("promoted admin rule admin status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	if rec := request(http.MethodPut, "/api/rules/admin/access-users/feishu:ou_super", superToken, []byte(`{"role":"admin"}`)); rec.Code != http.StatusBadRequest {
@@ -93,7 +86,7 @@ func TestRuleAdminPublicIdentityExposesEffectiveRole(t *testing.T) {
 	})
 	mux := registerTestAuthMux(service)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, requestWithSession(http.MethodGet, "/api/me", token, nil))
+	mux.ServeHTTP(rec, requestWithSession(http.MethodGet, "/api/auth/me", token, nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("current user status=%d body=%s", rec.Code, rec.Body.String())
 	}

@@ -67,6 +67,7 @@ body.auth-unavailable::before {
 
 .user-identity-trigger:focus-visible,
 .user-identity-action:focus-visible,
+.user-identity-grant:focus-visible,
 .user-identity-logout:focus-visible,
 .feishu-doc-result:focus-visible,
 .feishu-doc-locked a:focus-visible {
@@ -358,6 +359,7 @@ body.auth-unavailable::before {
   line-height: 1.4;
 }
 
+.user-identity-grant,
 .user-identity-logout {
   width: 100%;
   min-height: 40px;
@@ -378,6 +380,15 @@ body.auth-unavailable::before {
 
 .user-identity-logout:hover {
   background: var(--fs-danger-soft);
+}
+
+.user-identity-grant {
+  margin-bottom: 4px;
+  color: var(--fs-brand);
+}
+
+.user-identity-grant:hover {
+  background: var(--fs-bg-hover);
 }
 
 .user-identity-divider {

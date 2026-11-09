@@ -17,10 +17,12 @@ func feishuChatErrorResponse(err error) (int, string, string) {
 	switch {
 	case errors.Is(err, errAuthenticationRequired):
 		return http.StatusUnauthorized, "authentication_required", "请先登录"
+	case errors.Is(err, errLoginUnavailable):
+		return http.StatusServiceUnavailable, "login_service_unavailable", "登录服务暂时连不上，请稍后重试。已保存的审核群不受影响。"
 	case errors.Is(err, errFeishuLoginRequired):
-		return http.StatusForbidden, "feishu_login_required", "读取审核群需要使用飞书账号登录。请退出后用飞书登录。"
-	case errors.Is(err, errFeishuReauthRequired):
-		return http.StatusForbidden, "feishu_reauth_required", "飞书授权已失效，请重新用飞书登录一次。已保存的审核群不受影响。"
+		return http.StatusForbidden, "feishu_login_required", "读取审核群需要用 FBIF 的飞书账号登录。"
+	case errors.Is(err, errFeishuGrantRequired):
+		return http.StatusForbidden, "feishu_grant_required", "要先授权飞书才能读审核群，授权一次之后会自动续期。已保存的审核群不受影响。"
 	default:
 		return http.StatusBadGateway, "feishu_chat_list_failed", "飞书群列表暂时读不到，请稍后重试。已保存的审核群不受影响。"
 	}

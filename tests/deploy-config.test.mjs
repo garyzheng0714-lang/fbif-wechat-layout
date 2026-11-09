@@ -46,13 +46,14 @@ test('versioned env schema validates every checked-in example without exposing v
 });
 
 // FBIF 中台统一管共用密钥（2026-10-26）：一个变量只有一个出处。中台下发的 10 个（渲染服务 1 个）
-// 只出现在中台文件的示例里，CI 生成的 api.env / render.env 和手工 publish.env 都不再写。
+// 和统一登录的 6 个 SSO_*（2026-11-10）只出现在中台文件的示例里，CI 生成的 api.env / render.env 和手工 publish.env 都不再写。
 test('hub-managed variables live only in the hub file examples', async () => {
   const hubLayout = envNames(await text('deploy/config/hub-layout.env.example'));
   assert.deepEqual([...hubLayout].sort(), [
     'CLOUDCONVERT_API_KEY', 'DISTRIBUTION_API_TOKEN', 'FEISHU_APP_SECRET', 'FEISHU_LOGIN_APP_SECRET',
     'FOODTALKS_TOKEN', 'HUB_KEY', 'PUBLISH_ADMIN_SERVICE_TOKEN', 'PUBLISH_SYNC_SERVICE_TOKEN',
-    'RENDER_TOKEN', 'TIKHUB_API_KEY',
+    'RENDER_TOKEN', 'SSO_CENTER_CLIENT_SECRET', 'SSO_CENTER_ISSUER', 'SSO_CLIENT_ID', 'SSO_HUB_KEY',
+    'SSO_ISSUER', 'SSO_TOKEN_KEY', 'TIKHUB_API_KEY',
   ]);
   assert.deepEqual(envNames(await text('deploy/config/hub-render.env.example')), ['RENDER_TOKEN']);
   for (const filename of ['api.env.example', 'publish.env.example']) {

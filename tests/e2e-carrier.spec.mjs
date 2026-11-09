@@ -7,7 +7,6 @@ import { test, expect } from '@playwright/test';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
 const E2E_USERNAME = 'e2e';
-const E2E_PASSWORD = 'e2e-local-session-password';
 
 const SAMPLE = '“这是啥？”\n\n“马冬莓。”\n\n……行了，别问了。\n\n大九酿造展位：3C馆 K30（3楼，「马冬莓」等你！）';
 const STICKER_HTML = '<p>“这是啥？”<br><br>“马冬莓。”<br><br>……行了，别问了。<br><br>大九酿造展位：3C馆 K30（3楼，「马冬莓」等你！）</p>';
@@ -17,8 +16,8 @@ async function newAuthenticatedContext(browser) {
     viewport: { width: 1440, height: 900 },
     permissions: ['clipboard-read', 'clipboard-write'],
   });
-  const resp = await context.request.post(`${BASE}/auth/password/login`, {
-    data: { username: E2E_USERNAME, password: E2E_PASSWORD, remember: false },
+  const resp = await context.request.post(`${BASE}/auth/dev-login`, {
+    data: { username: E2E_USERNAME },
   });
   if (!resp.ok()) throw new Error(`E2E 登录失败（${resp.status()}）：${await resp.text()}`);
   return context;

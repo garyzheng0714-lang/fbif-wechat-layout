@@ -230,13 +230,14 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   }
 });
 
-// FBIF 中台统一管共用密钥（2026-10-26）：这 10 个变量（渲染服务 1 个）由中台本机代理写进
+// FBIF 中台统一管共用密钥（2026-10-26）：这 10 个变量（渲染服务 1 个）和统一登录的 6 个 SSO_*（2026-11-10）由中台本机代理写进
 // /etc/fbif-hub/env/layout.env、render.env，systemd drop-in 让服务最后读、同名为准。CI 再从
 // GitHub Secrets 写一份，中台换值后 GitHub 那份就过期了，所以 CI 既不持有也不写它们。
 const HUB_LAYOUT_VARIABLES = [
   'CLOUDCONVERT_API_KEY', 'FEISHU_LOGIN_APP_SECRET', 'PUBLISH_ADMIN_SERVICE_TOKEN', 'RENDER_TOKEN',
   'DISTRIBUTION_API_TOKEN', 'FEISHU_APP_SECRET', 'FOODTALKS_TOKEN', 'HUB_KEY',
   'PUBLISH_SYNC_SERVICE_TOKEN', 'TIKHUB_API_KEY',
+  'SSO_ISSUER', 'SSO_CLIENT_ID', 'SSO_CENTER_ISSUER', 'SSO_TOKEN_KEY', 'SSO_HUB_KEY', 'SSO_CENTER_CLIENT_SECRET',
 ];
 
 test('deploy workflow neither holds nor writes hub-managed variables; readiness goes through the server', async () => {
@@ -251,8 +252,19 @@ test('deploy workflow neither holds nor writes hub-managed variables; readiness 
   for (const name of HUB_LAYOUT_VARIABLES) {
     assert.ok(!required[1].split(' ').includes(name), `${name} 不得再是必需的 GitHub Secret`);
   }
-  for (const name of ['RULE_SUPER_ADMIN_OPEN_IDS', 'AUTH_SESSION_SECRET', 'AUTH_PASSWORD_USERS_B64', 'FEISHU_LOGIN_APP_ID']) {
+  for (const name of ['RULE_SUPER_ADMIN_OPEN_IDS', 'AUTH_SESSION_SECRET', 'FEISHU_LOGIN_APP_ID']) {
     assert.ok(required[1].split(' ').includes(name), `${name} 不归中台，仍由 CI 必需`);
+  }
+  // 2026-11-10 换统一登录：本项目不再收密码，密码账号名单不再下发。
+  assert.doesNotMatch(workflow, /AUTH_PASSWORD_USERS_B64/);
+  // 统一登录里按本项目定的三个（回调地址、中台入口、待办文件）由部署写，钥匙和集成平台编号归中台。
+  for (const line of [
+    'SSO_REDIRECT_URL=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/callback',
+    'SSO_HUB_URL=http://127.0.0.1:13199/hub-auth/layout',
+    'SSO_OUTBOX_FILE=/var/www/api/data/sso-outbox.json',
+    'FEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback',
+  ]) {
+    assert.ok(workflow.includes(`${line}\\n`), `api.env 要写 ${line}`);
   }
   assert.match(workflow, /LIBREOFFICE_TOKEN: \$\{\{ secrets\.LIBREOFFICE_TOKEN \}\}/);
   assert.doesNotMatch(workflow, /X-Publish-Admin-Token/,

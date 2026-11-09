@@ -89,7 +89,10 @@ test('password login shows a real locked state and never calls the Feishu API', 
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(calls, 0);
   assert.equal(document.getElementById('feishuDocSearch').hidden, false);
-  assert.match(document.getElementById('feishuDocSearch').textContent, /需要使用飞书登录/);
+  assert.match(document.getElementById('feishuDocSearch').textContent, /需要用 FBIF 的飞书账号登录/);
+  const login = document.querySelector('#feishuDocSearch .feishu-doc-locked a');
+  assert.equal(login.textContent, '改用飞书登录');
+  assert.equal(login.getAttribute('href'), `/auth/feishu/fbif/login?next=${encodeURIComponent('/mp/fbif')}`);
 });
 
 test('password login recognizes a Feishu document link and offers Feishu login instead of generic URL import', () => {
@@ -115,7 +118,7 @@ test('password login recognizes a Feishu document link and offers Feishu login i
   assert.equal(handled, true);
   assert.equal(calls, 0);
   assert.equal(document.getElementById('feishuDocSearch').hidden, false);
-  assert.match(document.getElementById('feishuDocSearch').textContent, /导入飞书文档需要使用飞书登录/);
+  assert.match(document.getElementById('feishuDocSearch').textContent, /导入飞书文档需要用 FBIF 的飞书账号登录/);
   controller.destroy();
 });
 
@@ -623,10 +626,10 @@ test('superseding a Feishu export job cancels its tracker and never commits 100'
 });
 
 // 2026-10-15：飞书授权失效曾被报成「飞书云文档服务暂不可用」，用户只能找人排查。
-// 授权失效必须给出「重新用飞书登录」入口，且登录后回到当前页面。
-test('expired Feishu authorization offers a one-click relogin instead of a service error', async () => {
+// 2026-11-10 换统一登录后：没授权、授权被撤销都回 feishu_grant_required，给「授权飞书…」入口，授权完回到当前页面。
+test('还没授权飞书（或授权被撤销）给「授权飞书…」入口，不报服务出错', async () => {
   const { document, window } = makeShell();
-  const reauth = { error: '飞书授权已失效，请重新用飞书登录一次', code: 'feishu_reauth_required' };
+  const reauth = { error: '要先授权飞书，授权一次之后会自动续期', code: 'feishu_grant_required' };
   const controller = mountFeishuDocumentImport({
     documentRef: document,
     windowRef: window,
@@ -663,15 +666,41 @@ test('expired Feishu authorization offers a one-click relogin instead of a servi
   document.getElementById('urlInput').value = link;
   assert.equal(controller.importValue(link), true);
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert.match(panel.textContent, /飞书授权已失效/);
+  assert.match(panel.textContent, /要先授权飞书/);
   assert.doesNotMatch(panel.textContent, /服务暂不可用|导入失败/);
-  const relogin = panel.querySelector('.feishu-doc-locked a');
-  assert.equal(relogin.textContent, '重新用飞书登录');
-  assert.equal(relogin.getAttribute('href'), `/auth/feishu/fbif/login?return_to=${encodeURIComponent('/mp/fbif')}`);
+  const grant = panel.querySelector('.feishu-doc-locked a');
+  assert.equal(grant.textContent, '授权飞书…');
+  assert.equal(grant.getAttribute('href'), `/auth/feishu-grant?next=${encodeURIComponent('/mp/fbif')}`);
 
   input(window, document.getElementById('urlInput'), '@茶馆');
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert.match(panel.textContent, /飞书授权已失效/);
-  assert.equal(panel.querySelector('.feishu-doc-locked a').textContent, '重新用飞书登录');
+  assert.match(panel.textContent, /要先授权飞书/);
+  assert.equal(panel.querySelector('.feishu-doc-locked a').textContent, '授权飞书…');
+  controller.destroy();
+});
+
+test('知识库被拒（缺「查看知识库节点」权限）给「重新授权飞书…」，原因照服务端写', async () => {
+  const { document, window } = makeShell();
+  const denied = { error: '飞书拒绝访问这篇知识库文档。如果你在飞书里能打开它，请重新授权飞书（授予「查看知识库节点」权限）再试', code: 'feishu_wiki_access_denied' };
+  const controller = mountFeishuDocumentImport({
+    documentRef: document,
+    windowRef: window,
+    user: { auth_mode: 'feishu', feishu: 'ok', capabilities: { feishu_documents: true } },
+    fetchImpl: async (url) => {
+      if (url === '/api/feishu/docs/export/jobs') return jsonResponse(denied, 403);
+      throw new Error(`unexpected request: ${url}`);
+    },
+    createProgressTracker: () => ({ updatePhase() {}, completePhase() {}, cancel() {}, commit() { return true; } }),
+    getHandleFile: () => async () => true,
+    FileCtor: window.File,
+    debounceMs: 0,
+  });
+  const panel = document.getElementById('feishuDocSearch');
+  assert.equal(controller.importValue('https://foodtalks.feishu.cn/wiki/HZQswdqYJirjPskb1wCczyb0nHb'), true);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.match(panel.textContent, /查看知识库节点/);
+  const grant = panel.querySelector('.feishu-doc-locked a');
+  assert.equal(grant.textContent, '重新授权飞书…');
+  assert.equal(grant.getAttribute('href'), `/auth/feishu-grant?next=${encodeURIComponent('/mp/fbif')}`);
   controller.destroy();
 });

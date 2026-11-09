@@ -18,7 +18,7 @@ fbifmp-layout.foodtalks.cn {
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	@fbifAppShell path / /index.html /app.html /login.html /auth-callback.html /distribute.html /version.json
+	@fbifAppShell path / /index.html /app.html /distribute.html /version.json
 	header @fbifAppShell Cache-Control "no-cache"
 
 	@fbifVersionedAssets {
@@ -48,7 +48,19 @@ fbifmp-layout.foodtalks.cn {
 
 	encode gzip zstd
 
-	@fbifAuth path /auth/feishu/* /auth/password/login
+	# 登录走 FBIF 统一登录（api/auth_login.go）：去登录中心、回调、飞书登录与授权、退出都在 Go。
+	# 登录健康检查只给本机看（在服务器上 curl 127.0.0.1:9001/internal/auth/health）；
+	# 叫醒接口 /internal/auth/*-changed 是中台和集成平台从外网调的，照常放行。
+	# 两个 handle 互不重叠（handle 比 respond 先跑，单写 respond 挡不住）。
+	@fbifLoginHealth path /internal/auth/health
+	handle @fbifLoginHealth {
+		respond 404
+	}
+
+	@fbifAuth {
+		path /auth/login /auth/center/* /auth/feishu/* /auth/feishu-grant /internal/auth/*
+		not path /internal/auth/health
+	}
 	handle @fbifAuth {
 		reverse_proxy localhost:9001
 	}

@@ -29,7 +29,6 @@ export {
 const punctuationModule = await import('./punctuation.js' + assetQuery);
 export const { convertRuns, convertText, endsWithEnglishAbbreviation } = punctuationModule;
 
-import { getStoredSessionToken } from './auth-session.js';
 import { copyByClipboardApi, copyByClipboardEvent } from './clipboard.js';
 import { readImportLinks, writeImportLinks } from './clipboard-links.js';
 import { createCopySession } from './copy-session.js';
@@ -147,9 +146,7 @@ function convertDocToDocxFile(file, onProgress) {
     };
     xhr.onerror = () => reject(new Error('DOC 转换失败: 网络错误'));
     xhr.open('POST', '/api/doc-to-docx');
-    // 转换要登录：同源 cookie 自动带上；飞书内嵌窗口 cookie 不可靠时补会话头（同 authFetch）。
-    const sessionToken = getStoredSessionToken();
-    if (sessionToken) xhr.setRequestHeader('X-Session-Token', sessionToken);
+    // 转换要登录：同源请求自动带上登录 cookie。
     const fd = new FormData();
     fd.append('file', file);
     xhr.send(fd);
