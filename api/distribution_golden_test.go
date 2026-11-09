@@ -247,6 +247,20 @@ func TestDistributionGoldenBuild(t *testing.T) {
 				URL: "https://zhuanlan.zhihu.com/p/" + zh.ID, Title: zh.Title, HTML: cleanDistributionGoldenHTML(zh.Content),
 			}
 		}
+		// 腾讯号：tools/distribution-golden/fetch_tencent.mjs 抓的 tx-<编号>.json（图和图注已按读者看到的写成 img、figure/figcaption）。
+		if data, err := os.ReadFile(filepath.Join(raw, "tx-"+id+".json")); err == nil {
+			var tx struct {
+				ID      string `json:"id"`
+				Title   string `json:"title"`
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(data, &tx); err != nil {
+				t.Fatal(err)
+			}
+			manuals["tencent"] = distributionGoldenManual{
+				URL: "https://news.qq.com/rain/a/" + tx.ID, Title: tx.Title, HTML: cleanDistributionGoldenHTML(tx.Content),
+			}
+		}
 		if len(manuals) == 0 {
 			t.Fatalf("#%s 没有任何平台的编辑稿", id)
 		}
