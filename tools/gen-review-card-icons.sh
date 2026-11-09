@@ -63,6 +63,10 @@ echo "$OUT/platform-toutiao.png"
 curl -fsSL -o "$SRC/baijiahao.ico" "https://baijiahao.baidu.com/favicon.ico"
 sips -s format png "$SRC/baijiahao.ico" --out "$OUT/platform-baijiahao.png" >/dev/null
 echo "$OUT/platform-baijiahao.png"
+# 知乎 favicon 也只有 32px，原样用（2026-11-09 接知乎号）。
+curl -fsSL -o "$SRC/zhihu.ico" "https://static.zhihu.com/heifetz/favicon.ico"
+sips -s format png "$SRC/zhihu.ico" --out "$OUT/platform-zhihu.png" >/dev/null
+echo "$OUT/platform-zhihu.png"
 
 # 网站图标：mp.weixin.qq.com 首页声明的 shortcut icon。
 curl -fsS -o "$SRC/wechat.ico" "https://res.wx.qq.com/a/wx_fed/assets/res/NTI4MWU5.ico"

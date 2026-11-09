@@ -107,13 +107,13 @@ hub_env_value() {
 require_hub_env() {
   local unit=$1 file=$2 owner_mode last_env
   [[ -f "$file" && ! -L "$file" ]] ||
-    die "缺中台文件 $file：它由 FBIF 中台的本机代理（hub-agent）写，先在中台给 $unit 配好变量、等代理写出来再部署"
+    die "缺中台文件 ${file}：它由 FBIF 中台的本机代理（hub-agent）写，先在中台给 $unit 配好变量、等代理写出来再部署"
   owner_mode=$(stat -c '%u %a' -- "$file")
   [[ "$owner_mode" == "0 600" ]] ||
-    die "中台文件 $file 必须归 root、权限 600（现在 uid 和权限是 $owner_mode）；它由中台代理写，别手改，查 hub-agent"
+    die "中台文件 $file 必须归 root、权限 600（现在 uid 和权限是 ${owner_mode}）；它由中台代理写，别手改，查 hub-agent"
   last_env=$(systemctl show --property=EnvironmentFiles --value "$unit" | tail -n 1)
   [[ "$last_env" == "$file (ignore_errors="* ]] ||
-    die "$unit 最后读的不是中台文件 $file：检查 /etc/systemd/system/$unit.service.d/zz-fbif-hub.conf，改完 systemctl daemon-reload"
+    die "$unit 最后读的不是中台文件 ${file}：检查 /etc/systemd/system/$unit.service.d/zz-fbif-hub.conf，改完 systemctl daemon-reload"
 }
 
 # publish_readiness 在服务器本机取管理员 readiness，把响应 JSON 原样写到标准输出，部署工作流经
