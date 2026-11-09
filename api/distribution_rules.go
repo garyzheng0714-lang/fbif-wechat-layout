@@ -41,7 +41,12 @@ var (
 	bylineSegmentRe   = regexp.MustCompile(`^(作者|撰文|撰稿|文|编辑|责编|责任编辑|编审|主编|总编辑|新媒体编辑|中文编辑|英文来源|美编|视觉|新视觉|创意|策划|监制|排版|设计|校对|审校|审核|选题|翻译|编译|采访|统筹)\s*[：:｜|]\s*(\S.*)$`)
 	referenceHeaderRe = regexp.MustCompile(`^(参考来源|参考资料|参考文献|参考链接|资料来源)\s*[：:]?$`)
 	bareURLRe         = regexp.MustCompile(`https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+`)
+	// 公众号里几张图左右滑着看，图注带「（向左滑动查看更多）」；外发平台上图一张张竖着排，这句不对，去掉
+	// （#349 兼职在知乎号上手发时删了）。带括号的连括号去掉，不带的连前面的逗号、分号去掉。
+	swipeHintRe = regexp.MustCompile(`[（(]\s*` + swipeHint + `\s*[）)]|[，,；;]?\s*` + swipeHint)
 )
+
+const swipeHint = `(?:请)?(?:向|往)?(?:左右|上下|[左右上下])?(?:滑动|滑)(?:屏幕)?(?:查看|看|浏览)(?:更多|全部|下一张)?(?:图片)?`
 
 // distributionImageSize 读图片尺寸，只用于判断文末无图注的图是不是名片。测试可替换。
 var distributionImageSize = fetchImageSize
@@ -312,14 +317,14 @@ func uncaptionedImage(blocks []Block, i int) bool {
 	return i+1 >= len(blocks) || canonicalBlockKind(blocks[i+1].K) != "cap"
 }
 
-// mergedCaption 说明与图片来源并成一条（人工稿口径「说明；图片来源：X」），各平台一样不截短（头条号图注上限 50 字，
+// mergedCaption 说明与图片来源并成一条（人工稿口径「说明；图片来源：X」，公众号专用的左右滑动提示去掉），各平台一样不截短（头条号图注上限 50 字，
 // 超了推之前只给它缩写，publish_external_captions.go）：编辑手发的
 // 头条图注有 55 字的（#280）。前一句以句号、感叹号、问号收尾（后面可跟引号）就留着它、不再加分号
 // （#321「…的年份。」、#323「…碳酸水。感觉十分满足。“图片来源」）。
 func mergedCaption(blocks []Block) string {
 	caption := ""
 	for _, block := range blocks {
-		text := strings.TrimRight(strings.TrimSpace(stripBareURLs(blockPlainText(block))), "；;")
+		text := strings.Trim(strings.TrimSpace(swipeHintRe.ReplaceAllString(stripBareURLs(blockPlainText(block)), "")), "；;，, ")
 		if text == "" {
 			continue
 		}

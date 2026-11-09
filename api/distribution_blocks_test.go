@@ -573,3 +573,22 @@ func TestBylineSplitsTranslatorCredits(t *testing.T) {
 		t.Fatal("数据出处「来源：」不是署名")
 	}
 }
+
+// 公众号里左右滑着看的几张图，外发平台上竖着排，图注里的滑动提示去掉（#349 知乎号兼职手发时删了）。
+func TestDistributionCaptionDropsSwipeHint(t *testing.T) {
+	cases := map[string][]string{
+		"百奇的包装变化；图片来源：格力高": {"百奇的包装变化（向左滑动查看更多）", "图片来源：格力高"},
+		"新品一览；图片来源：品牌":     {"新品一览，左滑查看更多", "图片来源：品牌"},
+		"图片来源：品牌":          {"(左右滑动查看)", "图片来源：品牌"},
+		"滑雪场一角；图片来源：雪场":    {"滑雪场一角", "图片来源：雪场"},
+	}
+	for want, texts := range cases {
+		var blocks []Block
+		for _, text := range texts {
+			blocks = append(blocks, Block{K: "cap", Text: text})
+		}
+		if got := mergedCaption(blocks); got != want {
+			t.Errorf("%q 并成 %q，要 %q", texts, got, want)
+		}
+	}
+}

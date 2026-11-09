@@ -233,6 +233,20 @@ func TestDistributionGoldenBuild(t *testing.T) {
 			manual.HTML = cleanDistributionGoldenHTML(manual.HTML)
 			manuals["baijiahao"] = manual
 		}
+		// 知乎号：tools/distribution-golden/fetch_zhihu.mjs 抓的 zh-<编号>.json。
+		if data, err := os.ReadFile(filepath.Join(raw, "zh-"+id+".json")); err == nil {
+			var zh struct {
+				ID      string `json:"id"`
+				Title   string `json:"title"`
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(data, &zh); err != nil {
+				t.Fatal(err)
+			}
+			manuals["zhihu"] = distributionGoldenManual{
+				URL: "https://zhuanlan.zhihu.com/p/" + zh.ID, Title: zh.Title, HTML: cleanDistributionGoldenHTML(zh.Content),
+			}
+		}
 		if len(manuals) == 0 {
 			t.Fatalf("#%s 没有任何平台的编辑稿", id)
 		}
