@@ -70,6 +70,30 @@
         "max": 20,
         "count": "ascii_half"
       }
+    },
+    {
+      "id": "zhihu",
+      "name": "知乎号",
+      "carrier": "article",
+      "title": {
+        "min": 1,
+        "max": 100,
+        "count": "chars"
+      },
+      "cover": {
+        "min_width": 0,
+        "min_height": 0,
+        "max_bytes": 10485760
+      },
+      "caption": {
+        "max": 0,
+        "count": "chars"
+      },
+      "daily_limit": 5,
+      "hosts": [
+        "zhuanlan.zhihu.com"
+      ],
+      "manage_url": "https://zhuanlan.zhihu.com/drafts"
     }
   ]
 }
