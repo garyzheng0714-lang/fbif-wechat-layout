@@ -94,6 +94,32 @@
         "zhuanlan.zhihu.com"
       ],
       "manage_url": "https://zhuanlan.zhihu.com/drafts"
+    },
+    {
+      "id": "tencent",
+      "name": "腾讯号",
+      "carrier": "article",
+      "title": {
+        "min": 5,
+        "max": 64,
+        "count": "chars"
+      },
+      "cover": {
+        "min_width": 0,
+        "min_height": 0,
+        "max_bytes": 20971520
+      },
+      "caption": {
+        "max": 0,
+        "count": "chars"
+      },
+      "daily_limit": 5,
+      "hosts": [
+        "news.qq.com",
+        "page.om.qq.com",
+        "new.qq.com"
+      ],
+      "manage_url": "https://om.qq.com/main/management/articleManage"
     }
   ]
 }

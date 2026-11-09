@@ -67,6 +67,10 @@ echo "$OUT/platform-baijiahao.png"
 curl -fsSL -o "$SRC/zhihu.ico" "https://static.zhihu.com/heifetz/favicon.ico"
 sips -s format png "$SRC/zhihu.ico" --out "$OUT/platform-zhihu.png" >/dev/null
 echo "$OUT/platform-zhihu.png"
+# 腾讯号（腾讯内容开放平台 om.qq.com）首页声明的图标是 om.gtimg.cn 上这个，也只有 32px，原样用（2026-11-10 接腾讯号）。
+curl -fsSL -o "$SRC/tencent.ico" "https://om.gtimg.cn/om/om_2.0/images/favicon_om.ico"
+sips -s format png "$SRC/tencent.ico" --out "$OUT/platform-tencent.png" >/dev/null
+echo "$OUT/platform-tencent.png"
 
 # 网站图标：mp.weixin.qq.com 首页声明的 shortcut icon。
 curl -fsS -o "$SRC/wechat.ico" "https://res.wx.qq.com/a/wx_fed/assets/res/NTI4MWU5.ico"
