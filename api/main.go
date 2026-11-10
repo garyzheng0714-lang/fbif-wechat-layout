@@ -206,7 +206,7 @@ func main() {
 	mux.HandleFunc("/api", handleUnknownAPI)
 	mux.HandleFunc("/api/", handleUnknownAPI)
 
-	registerChannelRoutes(mux, publicDir)
+	registerChannelRoutes(mux, publicDir, authService.Page)
 
 	// Root → /mp/fbif (portal removed; landing goes straight to the WeChat editor)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -1884,30 +1884,32 @@ func convertViaLibreOffice(ctx context.Context, baseURL, token string, docBytes 
 //
 //	/mp 系列 serve app.html（公众号工具）
 //	/ft 系列 serve site.html（网站工具）
-//	/app, /app.html 兼容 serve app.html
+//	/app, /app.html 兼容 serve app.html；/site.html serve site.html
 //
+// 都套 page：没登录打开当场跳去登录（飞书里走飞书登录），不先把页面发下来，就不会先闪一下「未登录」。
 // 路径下的 channel/packId 解析由前端 JS 完成（rule-packs/url.js）。
-func registerChannelRoutes(mux *http.ServeMux, publicDir string) {
-	serveFile := func(filename string) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
+func registerChannelRoutes(mux *http.ServeMux, publicDir string, page func(http.Handler) http.Handler) {
+	serveFile := func(filename string) http.Handler {
+		return page(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeFile(w, r, filepath.Join(publicDir, filename))
-		}
+		}))
 	}
 	serveApp := serveFile("app.html")
 	serveSite := serveFile("site.html")
 
 	// 兼容旧 URL
-	mux.HandleFunc("GET /app", serveApp)
-	mux.HandleFunc("GET /app.html", serveApp)
+	mux.Handle("GET /app", serveApp)
+	mux.Handle("GET /app.html", serveApp)
+	mux.Handle("GET /site.html", serveSite)
 
 	// 公众号渠道
-	mux.HandleFunc("GET /mp", serveApp)
-	mux.HandleFunc("GET /mp/{packId}", serveApp)
+	mux.Handle("GET /mp", serveApp)
+	mux.Handle("GET /mp/{packId}", serveApp)
 
 	// 网站渠道
-	mux.HandleFunc("GET /ft", serveSite)
-	mux.HandleFunc("GET /ft/{packId}", serveSite)
+	mux.Handle("GET /ft", serveSite)
+	mux.Handle("GET /ft/{packId}", serveSite)
 }
 
 // cloudConvertPollDelay 第 attempt 次问 CloudConvert 还没转完，隔多久再问：1、2、4、8 秒，之后每 8 秒。

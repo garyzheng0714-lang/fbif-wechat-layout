@@ -20,4 +20,4 @@ go build -o "$WORK/server" .
 export LAYOUT_CONFORMANCE_BIN="$WORK/server"
 cd "$ROOT"
 node "$HOME/.claude/skills/feishu-login-guide/templates/backend/anycross-sso/conformance/run.mjs" \
-  --start "$ROOT/tools/sso-conformance.sh start" --protected /api/auth/me --report docs/sso-conformance.json
+  --start "$ROOT/tools/sso-conformance.sh start" --protected /api/auth/me --page /mp/fbif --report docs/sso-conformance.json

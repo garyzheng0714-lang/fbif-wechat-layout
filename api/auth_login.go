@@ -36,6 +36,8 @@ type loginBackend interface {
 	register(mux *http.ServeMux)
 	// wrap 包住整个服务：认出请求上的人（withLayoutUser），记请求日志。
 	wrap(next http.Handler) http.Handler
+	// page 包住发页面的处理：没登录打开页面当场跳去登录、登完回到这一页。
+	page(next http.Handler) http.Handler
 	shutdown(ctx context.Context) error
 }
 
@@ -130,6 +132,14 @@ func (s *authService) Wrap(next http.Handler) http.Handler {
 		return next
 	}
 	return s.login.wrap(next)
+}
+
+// Page 包住发页面的处理（app.html、site.html）：没登录打开当场跳去登录，不先把页面发下来。没装配登录（单元测试）不包。
+func (s *authService) Page(next http.Handler) http.Handler {
+	if s.login == nil {
+		return next
+	}
+	return s.login.page(next)
 }
 
 // Shutdown 在 http.Server.Shutdown 之后调：把登录日志的待写队列落盘。
@@ -295,6 +305,8 @@ func (l *ssoLogin) register(mux *http.ServeMux) {
 }
 
 func (l *ssoLogin) shutdown(ctx context.Context) error { return l.sso.Shutdown(ctx) }
+
+func (l *ssoLogin) page(next http.Handler) http.Handler { return l.sso.RequirePage(next) }
 
 // machinePathPrefixes 是机器调的接口（监控端交稿、飞书卡片回调、排版接口、程序化排版、监控告警），各用自己的钥匙，
 // 不是人的操作：不认人、不记登录日志。

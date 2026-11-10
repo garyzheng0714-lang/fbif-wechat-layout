@@ -528,6 +528,37 @@ func (s *SSO) RequireUser(next http.Handler) http.Handler { return s.require(nex
 // RequireFreshUser 给 HR、盖章、改权限、敏感导出：每次当场找集成平台核对，核对不了就拒绝；账号密码会话一律 403。
 func (s *SSO) RequireFreshUser(next http.Handler) http.Handler { return s.require(next, true) }
 
+// RequirePage 包住发页面的处理（index.html、前端路由回退），不包公开页面和静态资源：浏览器打开页面时没登录，当场 302 去登录、
+// 登完回到这一页。页面不先发下来，就不会先闪一下「未登录」再跳（同阿里云、火山引擎的控制台）。飞书客户端里直接走飞书登录、不用点。
+// 只拦 GET、HEAD；会话一时查不了（存储、名单出错）照常发页面，由页面上的接口报错。
+func (s *SSO) RequirePage(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if sess, status := s.authenticate(r.Context(), r, false); sess == nil && status == http.StatusUnauthorized {
+				setCookie(w, sessionCookie, "", -1)
+				w.Header().Set("Cache-Control", "no-store")
+				http.Redirect(w, r, pageLoginURL(r), http.StatusFound)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+var feishuClientUA = regexp.MustCompile(`(?i)Lark|Feishu`)
+
+// pageLoginURL 是没登录打开页面时去的地方：飞书客户端里去飞书登录（端内免登），别处去登录中心；都带上原来要去的页面。
+func pageLoginURL(r *http.Request) string {
+	start := centerLoginPath
+	if feishuClientUA.MatchString(r.UserAgent()) {
+		start = loginPath
+	}
+	if next := safeNext(r.URL.RequestURI()); next != "" {
+		return start + "?next=" + url.QueryEscape(next)
+	}
+	return start
+}
+
 type userKey struct{}
 
 func CurrentUser(r *http.Request) *User {

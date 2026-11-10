@@ -18,8 +18,9 @@ fbifmp-layout.foodtalks.cn {
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	@fbifAppShell path / /index.html /app.html /distribute.html /version.json
-	header @fbifAppShell Cache-Control "no-cache"
+	# ?：Go 自己给了就不改（没登录打开页面那次 302 是 no-store，不能被改成 no-cache）
+	@fbifAppShell path / /index.html /app.html /site.html /distribute.html /version.json
+	header @fbifAppShell ?Cache-Control "no-cache"
 
 	@fbifVersionedAssets {
 		path /js/* /css/*
@@ -33,7 +34,9 @@ fbifmp-layout.foodtalks.cn {
 	@fbifImageAssets path *.png *.jpg *.jpeg *.webp *.gif *.svg *.ico
 	header @fbifImageAssets >Cache-Control "public, max-age=86400"
 
-	@fbifChannels path /mp /mp/* /ft /ft/*
+	# 页面都交给 Go：没登录打开当场 302 去登录（不先发页面、不闪「未登录」）；/ 由 Go 跳 /mp/fbif。
+	# distribute.html（带签名、飞书侧边栏打开）、footer.html 这些公开页面不在这里，照旧由下面的静态文件发。
+	@fbifChannels path / /index.html /app /app.html /site.html /mp /mp/* /ft /ft/*
 	handle @fbifChannels {
 		reverse_proxy localhost:9001
 	}

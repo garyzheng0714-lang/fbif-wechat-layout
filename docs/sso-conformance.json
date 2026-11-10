@@ -1,5 +1,5 @@
 {
-  "at": "2026-11-10T06:13:02.861Z",
+  "at": "2026-11-10T06:53:55.316Z",
   "start": "/Users/simba/Agentic-Engineering/FBIF-排版工具/tools/sso-conformance.sh start",
   "hub_module": null,
   "results": [
@@ -13,6 +13,10 @@
     },
     {
       "name": "没登录访问受保护接口一律被拒",
+      "ok": true
+    },
+    {
+      "name": "没登录打开页面：服务端当场跳去登录、带上原来那一页，不先把页面发下来（免得先闪一下「未登录」再跳）；飞书客户端里直接去飞书登录；登着的人照常拿到页面",
       "ok": true
     },
     {
