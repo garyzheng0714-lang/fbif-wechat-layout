@@ -17,6 +17,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -46,9 +47,53 @@ func buildReviewBatchCard(jobs []publishJob) map[string]any {
 	return buildReviewBatchCardWithIcons(jobs, nil)
 }
 
+// feishuCardElementLimit 飞书卡片 JSON 2.0：「一张卡片最多支持 200 个元素（如 tag 为 plain_text 的文本元素）
+// 或组件」（open.feishu.cn 卡片 JSON 2.0 结构），超了发卡、更新都被拒（11310 element exceeds the limit）。
+const feishuCardElementLimit = 200
+
 // buildReviewBatchCardWithIcons icons 为当前审核应用的按钮图标 img_key；缺图标的按钮
-// 照常无图标（见 feishu_review_card_icons.go）。
+// 照常无图标（见 feishu_review_card_icons.go）。图标是点缀，不能把卡顶过飞书的组件上限：
+// 超了就整张不带图标（2026-11-10 #326–#328 一天两篇原创、四个平台，带图标 209 个，更新被拒、
+// 卡片停在接腾讯号之前的样子）；不带图标还超只记日志，交给人看要不要再精简版式。
 func buildReviewBatchCardWithIcons(jobs []publishJob, icons reviewCardIcons) map[string]any {
+	card := composeReviewBatchCard(jobs, icons)
+	if len(icons) > 0 && feishuCardElementCount(card) > feishuCardElementLimit {
+		card = composeReviewBatchCard(jobs, nil)
+	}
+	if n := feishuCardElementCount(card); n > feishuCardElementLimit {
+		ids := make([]string, 0, len(jobs))
+		for _, job := range jobs {
+			ids = append(ids, "#"+strconv.FormatInt(job.ID, 10))
+		}
+		log.Printf("publish: WARN 审核卡 %s 有 %d 个组件，超过飞书上限 %d，发卡或更新会被拒", strings.Join(ids, " "), n, feishuCardElementLimit)
+	}
+	return card
+}
+
+// feishuCardElementCount 按飞书的数法数卡里的元素和组件：带 tag 的都算（文本元素、图标也算）。
+func feishuCardElementCount(node any) int {
+	n := 0
+	switch value := node.(type) {
+	case map[string]any:
+		if _, ok := value["tag"].(string); ok {
+			n++
+		}
+		for _, child := range value {
+			n += feishuCardElementCount(child)
+		}
+	case []any:
+		for _, child := range value {
+			n += feishuCardElementCount(child)
+		}
+	case []map[string]any:
+		for _, child := range value {
+			n += feishuCardElementCount(child)
+		}
+	}
+	return n
+}
+
+func composeReviewBatchCard(jobs []publishJob, icons reviewCardIcons) map[string]any {
 	elements := make([]any, 0, len(jobs)+1)
 	pending, published := 0, 0
 	for _, job := range jobs {

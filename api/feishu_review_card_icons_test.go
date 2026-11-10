@@ -90,13 +90,15 @@ func TestReviewBatchCardEveryButtonHasLucideIcon(t *testing.T) {
 	for i := range jobs {
 		jobs[i].ID = int64(300 + i)
 	}
-	card := buildReviewBatchCardWithIcons(jobs, icons)
-	body := cardJSON(t, card)
-	if strings.Contains(body, reviewCardIconField) {
-		t.Fatalf("内部图标标记不得留在卡里: %s", body)
-	}
+	// 一篇一张卡：十几篇挤一张会超飞书的组件上限，那时整张不带图标（TestReviewBatchCardStaysWithinFeishuElementLimit）。
 	var buttons []map[string]any
-	reviewCardButtons(card, &buttons)
+	for _, job := range jobs {
+		card := buildReviewBatchCardWithIcons([]publishJob{job}, icons)
+		if body := cardJSON(t, card); strings.Contains(body, reviewCardIconField) {
+			t.Fatalf("内部图标标记不得留在卡里: %s", body)
+		}
+		reviewCardButtons(card, &buttons)
+	}
 	// 只表示状态的按钮已去掉（2026-10-10），这里覆盖发布、强制发布、检查未完成、下线、
 	// 重新同步（含已分发置灰）、重新发布这几类可见按钮。
 	if len(buttons) < 6 {
@@ -300,5 +302,58 @@ func TestPrepareReviewThumbsUploadsOnceAndBacksOff(t *testing.T) {
 	env.pipeline.prepareReviewThumbs(context.Background(), got)
 	if calls != 2 {
 		t.Fatalf("已有小图不应重传，calls=%d", calls)
+	}
+}
+
+// TestReviewBatchCardStaysWithinFeishuElementLimit 飞书一张卡最多 200 个元素或组件（2026-11-10 #326–#328：一天两篇
+// 原创、四个平台，带图标 209 个，更新被拒、卡片停在接腾讯号之前的样子）。图标是点缀：超了整张不带图标，没超照常带；
+// 只有名字一行的平台行不再包竖排分栏（每行省 2 个，样子不变）。
+func TestReviewBatchCardStaysWithinFeishuElementLimit(t *testing.T) {
+	setTestExternalAccounts(t,
+		testArticleAccount(testToutiaoAccountID, "toutiao", false), testArticleAccount(testBaijiaAccountID, "baijiahao", false),
+		testArticleAccount("recTestZhihu0001", "zhihu", false), testArticleAccount("recTestTencent01", "tencent", false))
+	icons := reviewCardTestIconKeys(t)
+	original := func(id int64) publishJob {
+		job := reviewCardTestJob(publishStagePublished)
+		job.ID, job.FoodTalksNewsID, job.PublicationAction = id, 7000+id, publishPublicationActionPublish
+		return job
+	}
+
+	jobs := []publishJob{original(1)}
+	one := buildReviewBatchCardWithIcons(jobs, icons)
+	if body := cardJSON(t, one); !strings.Contains(body, `"img_key":"img_platform-tencent"`) || !strings.Contains(body, "custom_icon") {
+		t.Fatalf("没超上限时照常带平台图标和按钮图标: %s", body)
+	}
+	elements := one["body"].(map[string]any)["elements"].([]any)
+	box := elements[len(elements)-1].(map[string]any)
+	rows := 0
+	for _, row := range box["elements"].([]any) {
+		body := cardJSON(t, row.(map[string]any))
+		if !strings.Contains(body, "同步至") {
+			continue // 几篇一张卡时块里先是「#编号 标题」表头
+		}
+		rows++
+		if strings.Count(body, `"tag":"column_set"`) != 1 {
+			t.Fatalf("只有名字一行的平台行不再包竖排分栏: %s", body)
+		}
+	}
+	if rows != 4 {
+		t.Fatalf("四个平台应各一行: %s", cardJSON(t, box))
+	}
+
+	for len(jobs) < 20 && feishuCardElementCount(composeReviewBatchCard(jobs, icons)) <= feishuCardElementLimit {
+		jobs = append(jobs, original(int64(len(jobs)+1)))
+	}
+	if feishuCardElementCount(composeReviewBatchCard(jobs, nil)) > feishuCardElementLimit {
+		t.Fatalf("造的卡不带图标也超了，测不到去图标这一步（%d 篇）", len(jobs))
+	}
+	card := buildReviewBatchCardWithIcons(jobs, icons)
+	body := cardJSON(t, card)
+	if n := feishuCardElementCount(card); n > feishuCardElementLimit || strings.Contains(body, "custom_icon") ||
+		strings.Contains(body, `"img_key":"img_platform-`) || strings.Contains(body, reviewCardIconField) {
+		t.Fatalf("带图标超上限时整张去掉图标、不留标记（%d 篇，%d 个组件）: %s", len(jobs), n, body)
+	}
+	if !strings.Contains(body, "同步至腾讯号") {
+		t.Fatalf("去掉图标不能去掉按钮: %s", body)
 	}
 }

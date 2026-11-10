@@ -216,6 +216,11 @@ func reviewCardPlatformRow(job publishJob, target externalAccount, configured, c
 		draft, _ := externalDraftFor(job, target.ID)
 		elements = append(elements, reviewCardFixFields(job, draft, profile, name, target.ID, editLink)...)
 	}
+	if len(elements) == 1 {
+		// 只有名字这一行就不再包竖排分栏：外层只为行内间距比平台之间小，一行用不上，
+		// 还白占飞书一张卡 200 个组件里的 2 个（见 feishuCardElementLimit）。
+		return elements[0].(map[string]any), fixing
+	}
 	return map[string]any{
 		"tag": "column_set", "flex_mode": "none",
 		"columns": []any{map[string]any{
