@@ -1,5 +1,5 @@
 {
-  "at": "2026-11-09T17:43:18.279Z",
+  "at": "2026-11-10T06:13:02.861Z",
   "start": "/Users/simba/Agentic-Engineering/FBIF-排版工具/tools/sso-conformance.sh start",
   "hub_module": null,
   "results": [
@@ -60,7 +60,11 @@
       "ok": true
     },
     {
-      "name": "不是 FBIF/富的的租户：拒绝登录",
+      "name": "令牌里的企业编号不是 FBIF/富的：拒绝登录",
+      "ok": true
+    },
+    {
+      "name": "令牌里没有企业编号（应用没开关联组织访问）：按签发方的企业登录，和带编号时是同一个人",
       "ok": true
     },
     {

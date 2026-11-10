@@ -126,6 +126,7 @@ const (
 const accountCompanyCode = "account"
 
 // 同一个人在 FBIF 和富的是两个不同的 sub，靠 company_code 区分。
+// 应用没开「关联组织访问」时，集成平台不在 id_token 里写 company_code（实测），这时按签发方地址末尾的企业编号认。
 var allowedCompanyCodes = map[string]bool{
 	"FJY632B9P3E": true, // FBIF
 	"FMZYRL01RNE": true, // 富的
@@ -269,6 +270,7 @@ type Options struct {
 type SSO struct {
 	oauth          oauth2.Config // 不带密钥：每次换码、刷新用手上的 SSO 密钥现配一份（oauthWith）
 	verifier       *oidc.IDTokenVerifier
+	issuerCompany  string // SSO_ISSUER 末尾的企业编号：id_token 里没写 company_code 时按它认
 	userInfoURL    string
 	revokeURL      string
 	aead           cipher.AEAD
@@ -432,6 +434,11 @@ func New(ctx context.Context, opt Options) (*SSO, error) {
 		return nil, err
 	}
 
+	// 签发方地址形如 https://anycross.feishu.cn/sso/FJY632B9P3E，末尾是开这个集成平台的企业。
+	issuerCompany := env["SSO_ISSUER"][strings.LastIndex(env["SSO_ISSUER"], "/")+1:]
+	if !allowedCompanyCodes[issuerCompany] {
+		return nil, errors.New("sso: SSO_ISSUER must end with /sso/<FBIF or 富的 company code>, like https://anycross.feishu.cn/sso/FJY632B9P3E")
+	}
 	provider, err := oidc.NewProvider(ctx, env["SSO_ISSUER"])
 	if err != nil {
 		return nil, fmt.Errorf("sso: discovery: %w", err)
@@ -460,6 +467,7 @@ func New(ctx context.Context, opt Options) (*SSO, error) {
 		},
 		// 集成平台也声明了 HS256，只认 RS256，避免拿 client secret 伪造签名。
 		verifier:       provider.Verifier(&oidc.Config{ClientID: env["SSO_CLIENT_ID"], SupportedSigningAlgs: []string{oidc.RS256}}),
+		issuerCompany:  issuerCompany,
 		userInfoURL:    provider.UserInfoEndpoint(),
 		revokeURL:      meta.Revocation,
 		aead:           aead,
@@ -898,6 +906,12 @@ func (s *SSO) verifyLogin(ctx context.Context, tok *oauth2.Token, nonce string) 
 	}
 	// Apps 只给账号密码会话：飞书登录的人不受限，令牌里万一带了同名字段也不认。
 	claims.Apps = nil
+	// 没开「关联组织访问」的应用，令牌里没有 company_code，能登进来的只有签发方企业自己的人：按签发方认。
+	// 2026-11-10 缺了就拒，把合同盖章、HR 的 FBIF 自己人全挡在门外。写了但不是 FBIF/富的，下面照拒。
+	if claims.CompanyCode == "" {
+		claims.CompanyCode = s.issuerCompany
+		log.Printf("sso: id_token has no company_code, using the issuer's %s for sub %s", s.issuerCompany, claims.Sub)
+	}
 	// 下面几种失败把 claims 一并返回，日志里能看出是谁被拒。
 	if !allowedCompanyCodes[claims.CompanyCode] {
 		return claims, "unauthorized_tenant", "不是 FBIF 或富的：" + cleanCode(claims.CompanyCode), fmt.Errorf("company_code %q not allowed", claims.CompanyCode)

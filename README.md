@@ -288,7 +288,7 @@ curl http://127.0.0.1:9000/api/health
 | `AUTH_SESSION_SECRET` | 未上架预览页、外发改稿页签名用的密钥（派生独立子密钥）；不再用于登录 |
 | `AUTH_USERS_PATH` | 本项目用户库（角色、停用）JSON；默认与规则存储同目录，统一登录的会话（`sso-sessions.json`）、飞书授权（`feishu-grants.json`）放在同一目录 |
 | `SSO_*` | FBIF 统一登录（登录模板 v7，`api/internal/auth`）：`SSO_REDIRECT_URL`、`SSO_HUB_URL`、`SSO_OUTBOX_FILE` 由部署写，其余六个由中台下发；缺一个就拒绝启动 |
-| `FEISHU_LOGIN_APP_ID` / `FEISHU_LOGIN_APP_SECRET` / `FEISHU_LOGIN_REDIRECT_URI` | 本项目的飞书应用：本人授权飞书（读云文档、列群）与回调 `/auth/feishu/fbif/qr-callback`；生产必须完整配置 |
+| `FEISHU_LOGIN_APP_ID` / `FEISHU_LOGIN_APP_SECRET` / `FEISHU_LOGIN_REDIRECT_URI` | 本项目的飞书应用：本人授权飞书（读云文档、列群）与回调 `/auth/feishu/fbif/qr-callback`；生产必须完整配置，飞书应用「安全设置 → 重定向 URL」里要有 `https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback`（2026-11-10 统一登录上线时补上，缺了授权回不来） |
 | `FEISHU_LOGIN_SCOPES` | 可选，覆盖授权飞书时要的权限（`offline_access` 会自动加上） |
 | `AUTH_DEV_LOGIN` | 只给本地端到端测试：`go run -tags devlogin .` 时设 `true` 开 `POST /auth/dev-login`；生产编译里没有，`ENV=production` 也拒绝启动 |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
