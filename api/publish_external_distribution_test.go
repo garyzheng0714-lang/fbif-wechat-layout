@@ -268,6 +268,57 @@ func TestExternalDistributionRejectsRepostInCardAndServer(t *testing.T) {
 	}
 }
 
+// TestExternalDistributionSkipsWeeklyReport 2026-11-10 用户：「创新周报不需要同步分发」。
+// 卡上不给同步按钮、说明原因，服务端拒绝，自动外发不记待办；之前已经发过的号照旧列出结果，没发过的号不列。
+func TestExternalDistributionSkipsWeeklyReport(t *testing.T) {
+	for title, want := range map[string]bool{
+		"盒马推出酸奶；叮咚买菜上新香蕉 | 创新周报": true,
+		"本周两条新品｜创新周报":            true,
+		"本周两条新品 |创新周报 ":          true,
+		"中国食品品牌如何用产品创新打开新市场":     false,
+		"创新周报回顾：一年里的 50 款新品":     false,
+	} {
+		if got := externalDistributionExcluded(publishJob{Title: title}) != ""; got != want {
+			t.Fatalf("%q 是否创新周报：got %v want %v", title, got, want)
+		}
+	}
+
+	setTestDistributionAccounts(t)
+	env := newPublishTestEnv(t)
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	job, _ = env.store.update(job.ID, func(current *publishJob) {
+		current.Title = "盒马推出酸奶；叮咚买菜上新香蕉 | 创新周报"
+		current.ApprovedRiskVersion = publishReviewCardVersion(*current)
+	})
+	seedLivePublishedNews(t, env, foodTalksNewsDetail{
+		ID: testDistributionNewsID, Title: job.Title, CoverImg: job.CoverURL,
+		Content: testDistributionLiveHTML, Summary: job.Summary, SourceName: "FBIF食品饮料创新",
+		PublishStatus: foodTalksPublishStatusPublished,
+	})
+	robot := useFakeRobot(env)
+
+	card := cardJSON(t, buildReviewDoneCard(job))
+	if strings.Contains(card, feishuCardActionDistributeExternal) || !strings.Contains(card, "创新周报只发 FoodTalks") {
+		t.Fatalf("创新周报的卡必须隐藏同步按钮并说明：%s", card)
+	}
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err == nil || !strings.Contains(err.Error(), "创新周报") || len(robot.saves) != 0 {
+		t.Fatalf("服务端也必须拒绝创新周报：err=%v saves=%d", err, len(robot.saves))
+	}
+	setTestAutoAccounts(t)
+	pending := job
+	pending.ExternalDistributionAutoPending = ""
+	markExternalAutoDistributionPending(&pending)
+	if pending.ExternalDistributionAutoPending != "" {
+		t.Fatalf("创新周报不得记自动外发待办，实际 %q", pending.ExternalDistributionAutoPending)
+	}
+
+	job = setTestLanes(t, env, job.ID, testLane(testToutiaoAccountID, "头条号", publishExternalDistributionSucceeded))
+	card = cardJSON(t, buildReviewDoneCard(job))
+	if strings.Contains(card, feishuCardActionDistributeExternal) || !strings.Contains(card, "头条号") || strings.Contains(card, "百家号") {
+		t.Fatalf("发过头条号的周报只列头条号的结果、不给百家号按钮：%s", card)
+	}
+}
+
 func TestExternalDistributionFailsClosedOnExplicitAttribution(t *testing.T) {
 	setTestDistributionAccounts(t)
 	env := newPublishTestEnv(t)

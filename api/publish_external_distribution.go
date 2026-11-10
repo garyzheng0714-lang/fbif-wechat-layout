@@ -200,10 +200,26 @@ func externalDistributionEligibility(job publishJob) error {
 	if original, _, evidence := publishArticleProvenance(job); !original {
 		return fmt.Errorf("转载文章只发 FoodTalks，不同步到第三方平台（%s）", evidence)
 	}
+	if why := externalDistributionExcluded(job); why != "" {
+		return errors.New(why)
+	}
 	if strings.TrimSpace(job.BlocksJSON) == "" {
 		return errors.New("文章缺少中立正文，不能生成外部分发内容")
 	}
 	return nil
+}
+
+// weeklyReportTitle 创新周报的标题：编辑一直写成「本周两条新品 | 创新周报」（2026-11-10 看过的 16 期都是）。
+var weeklyReportTitle = regexp.MustCompile(`[|｜]\s*创新周报\s*$`)
+
+// externalDistributionExcluded 原创里也只发 FoodTalks、不往第三方平台发的稿，返回给人看的原因；能发返回空。
+// 创新周报（2026-11-10 用户：「创新周报不需要同步分发」）：卡片不给同步按钮，自动外发、管理员同步、改稿页都不推；
+// 之前已经发出去的照旧显示结果。
+func externalDistributionExcluded(job publishJob) string {
+	if weeklyReportTitle.MatchString(strings.TrimSpace(job.Title)) {
+		return "创新周报只发 FoodTalks，不同步到第三方平台"
+	}
+	return ""
 }
 
 // externalDistributionApprovalOK 外发仍要人审过；人工在后台公开的稿，

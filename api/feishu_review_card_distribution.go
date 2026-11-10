@@ -69,12 +69,17 @@ func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allo
 		return nil
 	}
 	original, _, evidence := publishArticleProvenance(job)
-	if !started && !original {
-		// 聚合卡里转载稿没有这一区；单篇卡说一句为什么不外发。
+	excluded := externalDistributionExcluded(job)
+	open := original && excluded == "" // 能从卡上发起：转载、创新周报都不行
+	if !started && !open {
+		// 聚合卡里不外发的稿没有这一区；单篇卡说一句为什么不外发。
 		if !allowStart || aggregate {
 			return nil
 		}
 		message := "转载文章仅发布至 FoodTalks，不同步外部平台（" + evidence + "）。"
+		if original {
+			message = excluded + "。"
+		}
 		return []any{map[string]any{
 			"tag": "markdown", "text_size": "notation",
 			"content": "<font color='grey'>" + reviewCardSafeText(message, 180) + "</font>",
@@ -84,14 +89,14 @@ func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allo
 		// 没开始分发、又不能从这张卡发起（进度卡、缺配置）：不渲染一个必失败的入口。
 		return nil
 	}
-	canStart := allowStart && original
+	canStart := allowStart && open
 	var rows []any
 	fixing := false
 	seen := map[string]bool{}
 	for _, target := range targets {
 		seen[strings.TrimSpace(target.ID)] = true
-		if _, ok := externalLaneFor(job, target.ID); !ok && !original {
-			continue
+		if _, ok := externalLaneFor(job, target.ID); !ok && !open {
+			continue // 不外发的稿只列已经发过的号
 		}
 		row, rowFixing := reviewCardPlatformRow(job, target, true, canStart, icons)
 		rows = append(rows, row)

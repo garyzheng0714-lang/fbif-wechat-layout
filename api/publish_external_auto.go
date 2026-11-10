@@ -36,7 +36,7 @@ const (
 var publishExternalAutoZone = time.FixedZone("CST", 8*3600)
 
 // markExternalAutoDistributionPending 在任务落为已发布的同一次写入里调用：配置了 auto
-// 账号、从未外发过、按外发口径是原创，才记待办。转载与待核原创一律不记；外发过的稿
+// 账号、从未外发过、按外发口径是原创、不是只发 FoodTalks 的（创新周报），才记待办。转载与待核原创一律不记；外发过的稿
 // 重新发布也不记，后加的 auto 账号只经管理员补发。
 func markExternalAutoDistributionPending(j *publishJob) {
 	if j == nil || externalDistributionStarted(*j) || j.ExternalDistributionAutoPending != "" {
@@ -46,7 +46,7 @@ func markExternalAutoDistributionPending(j *publishJob) {
 	if err != nil || len(cfg.autoTargets()) == 0 {
 		return
 	}
-	if original, _, _ := publishArticleProvenance(*j); !original {
+	if original, _, _ := publishArticleProvenance(*j); !original || externalDistributionExcluded(*j) != "" {
 		return
 	}
 	j.ExternalDistributionAutoPending = publishExternalAutoKindPublish
