@@ -1,5 +1,5 @@
 {
-  "at": "2026-11-10T06:53:55.316Z",
+  "at": "2026-11-10T08:44:34.863Z",
   "start": "/Users/simba/Agentic-Engineering/FBIF-排版工具/tools/sso-conformance.sh start",
   "hub_module": null,
   "results": [
@@ -93,6 +93,14 @@
     },
     {
       "name": "refresh_token 被集成平台拒绝（400 invalid_grant）：会话作废；刷新回说不清的 4xx（纯文本 403、不认识的 error）：会话 503，不宽限、不删、不撤销 refresh_token，过了 30 秒退避照常",
+      "ok": true
+    },
+    {
+      "name": "刷新一直回说不清的 4xx（比如 refresh_token 已作废，集成平台回 400 invalid_request）：先回 503，从第一次起过了一个核对周期还这样就下线、回 401、记「被收回」，重新登录照常；不能一直 503、怎么刷新都进不来",
+      "ok": true
+    },
+    {
+      "name": "核对途中浏览器断开（刷新、关页面）：集成平台已经换好的新 refresh_token 照样收下存好，之后照常用（旧的已作废，没收下这个会话就再也刷新不了）",
       "ok": true
     },
     {

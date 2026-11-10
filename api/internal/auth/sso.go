@@ -342,10 +342,12 @@ type SSO struct {
 // hubConfig 是中台给本系统的地址（…/hub-auth/<系统编号>）和 pqk_ 钥匙。
 type hubConfig struct{ url, key string }
 
-// retryNote 是一个会话这次核对失败后多久内不再去查，grace 是这期间能不能按宽限放行（只有「暂时不可用」能）。
+// retryNote 是一个会话这次核对失败后多久内不再去查，grace 是这期间能不能按宽限放行（只有「暂时不可用」能）；
+// unclearSince 是刷新从什么时候起一直回说不清的 4xx（没有就是零值）。
 type retryNote struct {
-	until time.Time
-	grace bool
+	until        time.Time
+	grace        bool
+	unclearSince time.Time
 }
 
 // New 读环境变量（九个必填）：SSO_ISSUER、SSO_CLIENT_ID、SSO_REDIRECT_URL、SSO_TOKEN_KEY、
@@ -1070,7 +1072,9 @@ func (s *SSO) authenticate(ctx context.Context, r *http.Request, fresh bool) (*S
 		}
 		return nil, http.StatusServiceUnavailable
 	}
-	cctx, cancel := context.WithTimeout(ctx, upstreamLimit)
+	// 刷新不跟着这个请求取消：浏览器刷新、关页面时请求被取消，集成平台可能已经换了新的 refresh_token、
+	// 旧的作废，回包却没人收，这个会话就再也刷新不了（2026-11-10 HR 生产，之后一直回 400 invalid_request）。
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), upstreamLimit)
 	defer cancel()
 	checked, err := s.check(cctx, r, sess.IDHash, fresh)
 	switch {
@@ -1078,7 +1082,17 @@ func (s *SSO) authenticate(ctx context.Context, r *http.Request, fresh bool) (*S
 		s.retryAfter.Delete(sess.IDHash)
 		return checked, http.StatusOK
 	case errors.Is(err, errUnclear):
-		s.retryAfter.Store(sess.IDHash, retryNote{until: time.Now().Add(outageBackoff)})
+		// 说不清的拒绝先回 503 等它好；从第一次起过了一个核对周期还是这样，就当被拒：下线、回 401，让人重新登录，
+		// 不能一直 503、怎么刷新都进不来。
+		since := time.Now()
+		if n, ok := s.retryAfter.Load(sess.IDHash); ok && !n.(retryNote).unclearSince.IsZero() {
+			since = n.(retryNote).unclearSince
+		}
+		if time.Since(since) >= s.checkEvery {
+			s.revokeSession(cctx, r, sess.IDHash, "集成平台一直拒绝刷新（原因说不清）")
+			return nil, http.StatusUnauthorized
+		}
+		s.retryAfter.Store(sess.IDHash, retryNote{until: time.Now().Add(outageBackoff), unclearSince: since})
 		return nil, http.StatusServiceUnavailable
 	case errors.Is(err, errUnavailable):
 		s.retryAfter.Store(sess.IDHash, retryNote{until: time.Now().Add(outageBackoff), grace: true})
@@ -1523,7 +1537,7 @@ const (
 	tokenSecret = "secret"
 	// 429、5xx、断线、超时、回包不对：暂时不可用，给宽限。
 	tokenUnavailable = "unavailable"
-	// 其余 4xx（含纯文本 403）：说不清，会话回 503，不宽限，不删会话。
+	// 其余 4xx（含纯文本 403）：说不清，会话回 503，不宽限；从第一次起过了一个核对周期还这样就当被拒、下线。
 	tokenUnclear = "unclear"
 )
 
