@@ -218,7 +218,8 @@ curl http://127.0.0.1:9000/api/health
 | `GET` | `/api/feishu/chats` | 读取当前飞书登录用户所在群列表，供规则后台选择审核群；需 FBIF 飞书登录并授权过飞书 |
 | `GET` | `/auth/login?next=` | 没登录时去的地方：FBIF 统一登录（登录模板 `api/internal/auth`），送去登录中心 login.fbif.com（账号密码、飞书都在那页），登录完回到 `next`；本项目没有登录页 |
 | `GET` | `/auth/feishu/fbif/login?next=` | 直接用飞书登录（飞书客户端里没登录时前端走这条，不用再点） |
-| `POST` | `/auth/feishu/logout` | 退出统一登录 |
+| `POST` | `/auth/feishu/logout` | 退出统一登录（浏览器里经登录中心飞书登录的，同一浏览器的其他项目一起退出） |
+| `POST` | `/auth/backchannel-logout` | 登录中心送来的退出通知（别的项目退出了同一浏览器的飞书登录），登录模板自己处理；公网要能访问，Caddy 已放行 |
 | `GET` | `/auth/feishu-grant?next=` | 本人授权飞书一次（读云文档、列群），之后服务端自动续；回调 `/auth/feishu/fbif/qr-callback`，没授权成回 `next` 时带 `feishu_grant=denied/failed/mismatch/unavailable` |
 | `GET` | `/api/auth/me` | 读取当前登录用户、登录方式、角色、飞书能力与飞书授权状态（`feishu`：`ok` / `required` / `none`）；没登录 401 带 `login_url`，登录服务连不上 503 |
 | `GET` | `/api/me` | 登录模板的「我是谁」（统一登录身份），本项目页面用上面的 `/api/auth/me` |

@@ -50,7 +50,7 @@ test('本项目没有登录页：登录页只在登录中心，旧的登录页�
 });
 
 test('线上把统一登录的路由都交给 Go，登录健康检查不对外', () => {
-  assert.match(caddy, /@fbifAuth \{\s*path \/auth\/login \/auth\/center\/\* \/auth\/feishu\/\* \/auth\/feishu-grant \/internal\/auth\/\*\s*not path \/internal\/auth\/health\s*\}/);
+  assert.match(caddy, /@fbifAuth \{\s*path \/auth\/login \/auth\/center\/\* \/auth\/feishu\/\* \/auth\/feishu-grant \/auth\/backchannel-logout \/internal\/auth\/\*\s*not path \/internal\/auth\/health\s*\}/);
   assert.match(caddy, /handle @fbifAuth\s*\{\s*reverse_proxy localhost:9001\s*\}/s);
   assert.match(caddy, /@fbifLoginHealth path \/internal\/auth\/health\s*handle @fbifLoginHealth\s*\{\s*respond 404\s*\}/);
   assert.doesNotMatch(caddy, /login\.html|auth-callback|\/auth\/password/);
