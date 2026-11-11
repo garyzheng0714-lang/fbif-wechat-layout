@@ -97,6 +97,44 @@ function autoGrantFeishu(windowRef, user) {
   return true;
 }
 
+// 已打开的标签页切回来时查一次登录：别处退出后，这里不用等用户点什么才发现。
+// 只在 visibilitychange（变可见）和 pageshow（整页从缓存还原）时各问一次，不轮询；
+// 只有 401 才跳登录，断网、超时、5xx 都当没发生；上一次还没回来就不再发。返回卸载函数。
+export function watchLoginOnReturn({
+  windowRef = globalThis.window,
+  documentRef = globalThis.document,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  if (!documentRef?.addEventListener || !windowRef?.addEventListener) return () => {};
+  let inflight = false;
+  const check = async () => {
+    if (inflight) return;
+    inflight = true;
+    try {
+      const response = await authFetch('/api/auth/me', { method: 'GET', cache: 'no-store' }, { fetchImpl });
+      if (response.status === 401) navigate(windowRef, loginURL(windowRef));
+    } catch {
+      // 断网、超时：不能当没登录
+    } finally {
+      inflight = false;
+    }
+  };
+  const onVisible = () => {
+    if (documentRef.visibilityState === 'visible') check();
+  };
+  const onPageShow = (event) => {
+    if (event?.persisted) check();
+  };
+  documentRef.addEventListener('visibilitychange', onVisible);
+  windowRef.addEventListener('pageshow', onPageShow);
+  return () => {
+    documentRef.removeEventListener('visibilitychange', onVisible);
+    windowRef.removeEventListener('pageshow', onPageShow);
+  };
+}
+
+let stopWatching = null;
+
 export async function ensureAuthenticatedSession({
   windowRef = globalThis.window,
   documentRef = globalThis.document,
@@ -109,6 +147,7 @@ export async function ensureAuthenticatedSession({
       return null;
     }
     if (autoGrantFeishu(windowRef, user)) return null;
+    stopWatching ??= watchLoginOnReturn({ windowRef, documentRef, fetchImpl });
     documentRef?.body?.classList.remove('auth-pending');
     return user;
   } catch (error) {

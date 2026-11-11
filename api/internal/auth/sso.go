@@ -143,15 +143,15 @@ const (
 // 账号密码登录的人没有集成平台身份，company_code 记成这个，和 FBIF、富的分开。
 const accountCompanyCode = "account"
 
-// sessionGen 记在每个新会话上（Session.Gen）：有它的会话是浏览器一处登录处处登录（2026-11-11）上线后建的。
-const sessionGen = 1
-
-// staleBrowserSession：一处登录处处登录上线前在浏览器里飞书登录的会话，没挂登录中心（没有 SID），别的项目退出管不到它
-// （2026-11-11 用户在 Tools 退出，排版工具 11-10 登的会话照样能用）。当没登录、请他经登录中心重登一次：中心认得这个浏览器
-// 就直接送去飞书登录、不用点，登完就挂上了。飞书客户端里的、账号密码的会话照旧。
-func staleBrowserSession(sess *Session, r *http.Request) bool {
-	return sess.Gen == 0 && !sess.Account && sess.SID == "" && !feishuClientUA.MatchString(r.UserAgent())
+// unlinkedBrowserSession：浏览器里用的飞书会话没挂登录中心（没有 SID），别的项目退出管不到它。不管什么时候、从哪条路登的，
+// 一律当没登录（2026-11-11：用户在一个项目退出，另一个标签页的项目还能用；没挂中心的会话就是漏洞）。
+// 请他经登录中心重登一次：中心认得这个浏览器就直接送去飞书登录、不用点，登完就挂上了。飞书客户端里的、账号密码的会话照旧。
+func unlinkedBrowserSession(sess *Session, r *http.Request) bool {
+	return !sess.Account && sess.SID == "" && !feishuClientUA.MatchString(r.UserAgent())
 }
+
+// unlinkedReason 是这种会话被收回时日志里的原因。
+const unlinkedReason = "浏览器里的飞书登录没挂登录中心（别处退出管不到），请重新登录"
 
 // 同一个人在 FBIF 和富的是两个不同的 sub，靠 company_code 区分。
 // 应用没开「关联组织访问」时，集成平台不在 id_token 里写 company_code（实测），这时按签发方地址末尾的企业编号认。
@@ -250,8 +250,6 @@ type Session struct {
 	// SID 是登录中心给的浏览器会话编号：只有在浏览器里经登录中心飞书登录的会话有。同一个 SID 的会话（同一个浏览器里各项目的）
 	// 一处退出、处处退出；账号密码会话、飞书客户端里登的、不经中心直接飞书登录的没有，退出只退本项目。
 	SID string `json:"sid,omitempty"`
-	// Gen 是建会话的模板代数（sessionGen）。没有的（0）是浏览器一处登录处处登录上线前留下的，见 staleBrowserSession。
-	Gen int `json:"gen,omitempty"`
 }
 
 type BlockEntry struct {
@@ -657,28 +655,42 @@ func (s *SSO) centerTxn(r *http.Request, state string) (loginTxn, bool) {
 }
 
 // handleCenterFeishu 是登录中心登录页上的「使用飞书登录」，也是这个浏览器用飞书登过时中心直接送回来的地方：
-// 按 state 找回这次登录要回的页面，走本项目原来的飞书登录。找不到（换了浏览器、放太久）就登完回首页：和直接打开飞书登录一样，不多放任何东西。
-// 带着 sid_hint（中心签的这个浏览器的会话编号）且验得过（签名、typ、发证方、受众是本系统、没过期、state 对得上），就记进飞书登录事务，
-// 登成了记在会话上（一处退出、处处退出）；验不过只记 stderr，照常登，只是这个会话退出只退本项目。
+// 按 state 找回这次登录要回的页面，走本项目原来的飞书登录。
+// 浏览器里必须带着 sid_hint（中心签的这个浏览器的会话编号）且验得过（这次登录的事务在、签名、typ、发证方、受众是本系统、没过期、
+// state 对得上），记进飞书登录事务，登成了记在会话上（一处退出、处处退出）。验不过、没带就不送去飞书，回登录页（error=expired）
+// 重新来：不挂中心的会话别处退出管不到（2026-11-11）。飞书客户端里不要 sid_hint（端内登录只退本项目），找不到事务就登完回首页。
 // 中心的事务留着：飞书那边退回来，还能在同一个登录页用账号密码登。
 func (s *SSO) handleCenterFeishu(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	t, ok := s.centerTxn(r, q.Get("state"))
-	sid := ""
-	if hint := q.Get("sid_hint"); hint != "" && ok {
-		ctx, cancel := context.WithTimeout(r.Context(), centerLogoutTimeout)
-		c, err := s.centerToken(ctx, hint, "fbif-sid+jwt")
-		cancel()
-		switch {
-		case err != nil:
-			log.Printf("sso: sid_hint refused: %v", err)
-		case c.State != t.State || !sidFormat.MatchString(c.SID):
-			log.Printf("sso: sid_hint refused: state or sid does not match")
-		default:
-			sid = c.SID
-		}
+	if feishuClientUA.MatchString(r.UserAgent()) {
+		s.startFeishuWith(w, r, t.Next, "")
+		return
 	}
-	s.startFeishuWith(w, r, t.Next, sid)
+	refuse := func(why string, args ...any) {
+		log.Printf("sso: sid_hint refused: "+why, args...)
+		http.Redirect(w, r, centerLoginPath+"?error=expired", http.StatusFound)
+	}
+	hint := q.Get("sid_hint")
+	switch {
+	case !ok:
+		refuse("no center login txn for this state")
+		return
+	case hint == "":
+		refuse("none in a browser")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), centerLogoutTimeout)
+	c, err := s.centerToken(ctx, hint, "fbif-sid+jwt")
+	cancel()
+	switch {
+	case err != nil:
+		refuse("%v", err)
+	case c.State != t.State || !sidFormat.MatchString(c.SID):
+		refuse("state or sid does not match")
+	default:
+		s.startFeishuWith(w, r, t.Next, c.SID)
+	}
 }
 
 // handleCenterCallback 是账号密码在登录中心登对了之后回来的地方：核对事务、拿客户端密钥和 PKCE 换码、验 id_token，建账号会话。
@@ -782,7 +794,7 @@ func (s *SSO) handleCenterCallback(w http.ResponseWriter, r *http.Request) {
 		checkedAt = now
 	}
 	sess := Session{IDHash: hashID(sid), UserID: userID, Identity: id, CreatedAt: now, CheckedAt: checkedAt, LastSeenAt: now, Version: 1,
-		Account: true, AccountCredential: acct.credential, Gen: sessionGen}
+		Account: true, AccountCredential: acct.credential}
 	if err := s.store.CreateSession(ctx, sess); err != nil {
 		fail("failed", "建会话失败", "create session: %v", err)
 		return
@@ -929,6 +941,11 @@ func (s *SSO) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ev.Next = t.Next
+	// 浏览器里回来的飞书登录必须挂着登录中心（事务里有 SID）：不建别处退出管不到的会话。
+	if t.SID == "" && !feishuClientUA.MatchString(r.UserAgent()) {
+		fail("expired", "浏览器里的飞书登录没经登录中心", "no sid in a browser")
+		return
+	}
 	// shortcut: 只防同一实例内的并发回调；多实例要防，就把登录事务放进共享库原子消费。
 	if !s.consumeState(state, t.Expires) {
 		fail("expired", "登录事务已用过", "login txn already used")
@@ -987,7 +1004,7 @@ func (s *SSO) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	sid := randToken()
 	now := time.Now()
-	sess := Session{IDHash: hashID(sid), UserID: userID, Identity: id, RefreshSeal: s.seal("refresh-token", []byte(tok.RefreshToken)), CreatedAt: now, CheckedAt: now, LastSeenAt: now, Version: 1, SID: t.SID, Gen: sessionGen}
+	sess := Session{IDHash: hashID(sid), UserID: userID, Identity: id, RefreshSeal: s.seal("refresh-token", []byte(tok.RefreshToken)), CreatedAt: now, CheckedAt: now, LastSeenAt: now, Version: 1, SID: t.SID}
 	if err := s.store.CreateSession(ctx, sess); err != nil {
 		s.revoke(ctx, tok.RefreshToken)
 		fail("failed", "建会话失败", "create session: %v", err)
@@ -1129,8 +1146,8 @@ func (s *SSO) authenticate(ctx context.Context, r *http.Request, fresh bool) (*S
 		s.endSession(ctx, sess.IDHash)
 		return nil, http.StatusUnauthorized
 	}
-	if staleBrowserSession(sess, r) {
-		s.revokeSession(ctx, r, sess.IDHash, "一处登录处处登录上线前的浏览器会话，请重新登录")
+	if unlinkedBrowserSession(sess, r) {
+		s.revokeSession(ctx, r, sess.IDHash, unlinkedReason)
 		return nil, http.StatusUnauthorized
 	}
 	if sess.Account {

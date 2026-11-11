@@ -7,6 +7,7 @@ import {
   feishuGrantURL,
   loadCurrentUser,
   mountUserIdentity,
+  watchLoginOnReturn,
 } from '../public/js/auth-session.js';
 
 function jsonResponse(payload, status = 200, headers = {}) {
@@ -269,4 +270,54 @@ test('identity menu puts rule admin in the user popup and supports keyboard navi
   logoutButton.dispatchEvent(escape);
   assert.equal(menu.hidden, true);
   assert.equal(document.activeElement, trigger, 'Escape 关闭后焦点回到身份触发器');
+});
+
+// 切回标签页：造一个带事件的 document / window，手动触发 visibilitychange。
+async function returnToTab(status) {
+  const { windowRef, assigned } = locationRef();
+  const handlers = {};
+  const documentRef = {
+    visibilityState: 'visible',
+    addEventListener(name, fn) { handlers[name] = fn; },
+    removeEventListener() {},
+  };
+  windowRef.addEventListener = (name, fn) => { handlers[name] = fn; };
+  windowRef.removeEventListener = () => {};
+  let calls = 0;
+  watchLoginOnReturn({
+    windowRef,
+    documentRef,
+    fetchImpl: async () => { calls += 1; return jsonResponse({}, status); },
+  });
+  handlers.visibilitychange();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return { assigned, get calls() { return calls; }, handlers };
+}
+
+test('切回标签页：401 去登录', async () => {
+  const { assigned, calls } = await returnToTab(401);
+  assert.equal(calls, 1);
+  assert.deepEqual(assigned, [`/auth/login?next=${encodeURIComponent('/mp/fbif?account=legacy')}`]);
+});
+
+test('切回标签页：200 不跳', async () => {
+  const { assigned, calls } = await returnToTab(200);
+  assert.equal(calls, 1);
+  assert.deepEqual(assigned, []);
+});
+
+test('切回标签页：503 不跳', async () => {
+  const { assigned } = await returnToTab(503);
+  assert.deepEqual(assigned, []);
+});
+
+test('pageshow 只有从缓存还原才查', async () => {
+  const tab = await returnToTab(200);
+  const { handlers } = tab;
+  handlers.pageshow({ persisted: false });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(tab.calls, 1);
+  handlers.pageshow({ persisted: true });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(tab.calls, 2);
 });
