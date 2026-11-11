@@ -143,6 +143,16 @@ const (
 // 账号密码登录的人没有集成平台身份，company_code 记成这个，和 FBIF、富的分开。
 const accountCompanyCode = "account"
 
+// sessionGen 记在每个新会话上（Session.Gen）：有它的会话是浏览器一处登录处处登录（2026-11-11）上线后建的。
+const sessionGen = 1
+
+// staleBrowserSession：一处登录处处登录上线前在浏览器里飞书登录的会话，没挂登录中心（没有 SID），别的项目退出管不到它
+// （2026-11-11 用户在 Tools 退出，排版工具 11-10 登的会话照样能用）。当没登录、请他经登录中心重登一次：中心认得这个浏览器
+// 就直接送去飞书登录、不用点，登完就挂上了。飞书客户端里的、账号密码的会话照旧。
+func staleBrowserSession(sess *Session, r *http.Request) bool {
+	return sess.Gen == 0 && !sess.Account && sess.SID == "" && !feishuClientUA.MatchString(r.UserAgent())
+}
+
 // 同一个人在 FBIF 和富的是两个不同的 sub，靠 company_code 区分。
 // 应用没开「关联组织访问」时，集成平台不在 id_token 里写 company_code（实测），这时按签发方地址末尾的企业编号认。
 var allowedCompanyCodes = map[string]bool{
@@ -240,6 +250,8 @@ type Session struct {
 	// SID 是登录中心给的浏览器会话编号：只有在浏览器里经登录中心飞书登录的会话有。同一个 SID 的会话（同一个浏览器里各项目的）
 	// 一处退出、处处退出；账号密码会话、飞书客户端里登的、不经中心直接飞书登录的没有，退出只退本项目。
 	SID string `json:"sid,omitempty"`
+	// Gen 是建会话的模板代数（sessionGen）。没有的（0）是浏览器一处登录处处登录上线前留下的，见 staleBrowserSession。
+	Gen int `json:"gen,omitempty"`
 }
 
 type BlockEntry struct {
@@ -770,7 +782,7 @@ func (s *SSO) handleCenterCallback(w http.ResponseWriter, r *http.Request) {
 		checkedAt = now
 	}
 	sess := Session{IDHash: hashID(sid), UserID: userID, Identity: id, CreatedAt: now, CheckedAt: checkedAt, LastSeenAt: now, Version: 1,
-		Account: true, AccountCredential: acct.credential}
+		Account: true, AccountCredential: acct.credential, Gen: sessionGen}
 	if err := s.store.CreateSession(ctx, sess); err != nil {
 		fail("failed", "建会话失败", "create session: %v", err)
 		return
@@ -845,9 +857,20 @@ func (s *SSO) verifyCenterLogin(ctx context.Context, tok *oauth2.Token, nonce st
 	return hubAccount{recordID: idt.Subject, name: clip(c.Name, 100), apps: apps, credential: c.Credential, verifiedAt: float64(c.VerifiedAt)}, nil
 }
 
-// handleLogin 是飞书登录（/auth/feishu/fbif/login?next=…）：项目自己的 SSO 应用，直连集成平台。
+// handleLogin 是飞书客户端里的飞书登录（/auth/feishu/fbif/login?next=…，端内免登）：项目自己的 SSO 应用，直连集成平台。
+// 浏览器里打开的转去登录中心：浏览器里的飞书登录都要挂上登录中心，别的项目退出才管得到（2026-11-11）。
 func (s *SSO) handleLogin(w http.ResponseWriter, r *http.Request) {
-	s.startFeishu(w, r, safeNext(r.URL.Query().Get("next")))
+	next := safeNext(r.URL.Query().Get("next"))
+	if !feishuClientUA.MatchString(r.UserAgent()) {
+		to := centerLoginPath
+		if next != "" {
+			to += "?next=" + url.QueryEscape(next)
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, to, http.StatusFound)
+		return
+	}
+	s.startFeishu(w, r, next)
 }
 
 func (s *SSO) startFeishu(w http.ResponseWriter, r *http.Request, next string) {
@@ -964,7 +987,7 @@ func (s *SSO) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	sid := randToken()
 	now := time.Now()
-	sess := Session{IDHash: hashID(sid), UserID: userID, Identity: id, RefreshSeal: s.seal("refresh-token", []byte(tok.RefreshToken)), CreatedAt: now, CheckedAt: now, LastSeenAt: now, Version: 1, SID: t.SID}
+	sess := Session{IDHash: hashID(sid), UserID: userID, Identity: id, RefreshSeal: s.seal("refresh-token", []byte(tok.RefreshToken)), CreatedAt: now, CheckedAt: now, LastSeenAt: now, Version: 1, SID: t.SID, Gen: sessionGen}
 	if err := s.store.CreateSession(ctx, sess); err != nil {
 		s.revoke(ctx, tok.RefreshToken)
 		fail("failed", "建会话失败", "create session: %v", err)
@@ -1104,6 +1127,10 @@ func (s *SSO) authenticate(ctx context.Context, r *http.Request, fresh bool) (*S
 	// 滑动续期的时间每小时才写一次，多留一小时，保证 30 天没用才过期。
 	if time.Since(sess.LastSeenAt) > sessionIdle+touchEvery {
 		s.endSession(ctx, sess.IDHash)
+		return nil, http.StatusUnauthorized
+	}
+	if staleBrowserSession(sess, r) {
+		s.revokeSession(ctx, r, sess.IDHash, "一处登录处处登录上线前的浏览器会话，请重新登录")
 		return nil, http.StatusUnauthorized
 	}
 	if sess.Account {
