@@ -52,9 +52,17 @@ const (
 	centerLoginPath    = "/auth/login"
 	centerCallbackPath = "/auth/center/callback"
 	centerFeishuPath   = "/auth/center/feishu"
+	// 浏览器里经登录中心的飞书登录一处退出、处处退出：中心把退出令牌送到这里（OpenID Connect Back-Channel Logout 1.0）；
+	// 本项目退出带 sid 的会话时调中心的 /api/logout，中心再通知其他项目。
+	backchannelPath  = "/auth/backchannel-logout"
+	centerLogoutPath = "/api/logout"
+	backchannelEvent = "http://schemas.openid.net/event/backchannel-logout"
 
 	sessionCookie   = "__Host-fbif_sid"
 	txnCookiePrefix = "__Host-fbif_sso_"
+	// 刚在本项目退出：这之后 5 分钟内去登录中心都带 prompt=login，出登录页，不让中心自动走飞书又登回来；登录成功就清掉。
+	signedOutCookie = "__Host-fbif_signed_out"
+	signedOutTTL    = 5 * time.Minute
 
 	sessionIdle  = 30 * 24 * time.Hour
 	touchEvery   = time.Hour
@@ -120,6 +128,16 @@ const (
 	// 登录中心 id_token 里的中台核验时间：最早 2 分钟前（中台核密码 → 跳回本项目 → 换码），最晚比本机快 1 分钟（时钟误差）。
 	centerVerifiedBefore = 2 * time.Minute
 	centerVerifiedAfter  = time.Minute
+
+	// 登录中心签的 sid_hint、退出令牌：发证时间最多比本机快 1 分钟（时钟误差）。
+	centerClockSkew = time.Minute
+	// 退出带 sid 的会话后告诉登录中心：一次最多等 5 秒；连不上、5xx 在后台退避重试（5 秒起翻倍、最长 5 分钟），1 小时还不成就放弃（记 stderr）。
+	centerLogoutTimeout  = 5 * time.Second
+	centerLogoutFirstGap = 5 * time.Second
+	centerLogoutMaxGap   = 5 * time.Minute
+	centerLogoutGiveUp   = time.Hour
+	// 退出令牌整个进程每分钟最多收这么多张：不用登录就能送来，验一张要找中心取一次公钥。
+	backchannelPerMinute = 120
 )
 
 // 账号密码登录的人没有集成平台身份，company_code 记成这个，和 FBIF、富的分开。
@@ -179,6 +197,8 @@ var (
 	centerIssuerFormat = regexp.MustCompile(`^(?:https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?|http://(?:127\.0\.0\.1|localhost|\[::1\]):[0-9]{1,5})$`)
 	// 中台发的登录中心客户端密钥。
 	centerSecretFormat = regexp.MustCompile(`^[A-Za-z0-9_-]{32,200}$`)
+	// 登录中心给的浏览器会话编号（中心 cookie 的哈希）。
+	sidFormat = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 )
 
 // loginHints 是 /auth/login?error= 能带给登录页的出错代号（登录页只认这几个）。
@@ -217,6 +237,9 @@ type Session struct {
 	Account bool `json:"account,omitempty"`
 	// AccountCredential 是中台给的凭据版本（密码的指纹，不是密码本身）：表里改了密码中台给的就变，会话就下线。
 	AccountCredential string `json:"account_credential,omitempty"`
+	// SID 是登录中心给的浏览器会话编号：只有在浏览器里经登录中心飞书登录的会话有。同一个 SID 的会话（同一个浏览器里各项目的）
+	// 一处退出、处处退出；账号密码会话、飞书客户端里登的、不经中心直接飞书登录的没有，退出只退本项目。
+	SID string `json:"sid,omitempty"`
 }
 
 type BlockEntry struct {
@@ -249,6 +272,8 @@ type Store interface {
 	DeleteSession(ctx context.Context, idHash string) (*Session, error)
 	// DeleteSessionsBySub 删掉这些 sub 的全部会话并返回它们；账号密码会话（Account=true）不归名单管，不删。
 	DeleteSessionsBySub(ctx context.Context, subs map[string]BlockEntry) ([]Session, error)
+	// DeleteSessionsBySID 删掉 Session.SID 等于 sid 的全部会话并返回它们（登录中心送来的退出令牌：一处退出、处处退出）。
+	DeleteSessionsBySID(ctx context.Context, sid string) ([]Session, error)
 	// AccountSessions 返回全部账号密码会话（Account=true；sub 是账号表那一行的 record_id），变更提醒、被停和兜底对账用。
 	AccountSessions(ctx context.Context) ([]Session, error)
 	// BlocklistRevision 返回库里名单的版本；synced=false 表示从没成功同步过。
@@ -300,6 +325,8 @@ type SSO struct {
 	syncWake    chan struct{}
 	syncFailing bool
 	syncedAt    time.Time
+
+	backchannelQuota *perMinute // 登录中心的退出令牌：整个进程每分钟收几张
 
 	changeQuota *perMinute // 账号表变更提醒：整个进程处理的次数（含处理完再来一遍）
 	changedMu   sync.Mutex
@@ -496,6 +523,8 @@ func New(ctx context.Context, opt Options) (*SSO, error) {
 		changeQuota:  newPerMinute(accountsChangedPerMinute),
 		changing:     map[string]bool{},
 		checkedHere:  map[string]bool{},
+
+		backchannelQuota: newPerMinute(backchannelPerMinute),
 	}
 	go s.syncLoop()
 	go ob.saveLoop()
@@ -504,7 +533,8 @@ func New(ctx context.Context, opt Options) (*SSO, error) {
 	return s, nil
 }
 
-// Register 挂十条路由：去登录中心、中心回调、中心登录页上的飞书按钮、飞书登录、飞书回调、退出、/api/me、名单提醒、账号变更提醒、健康检查。
+// Register 挂十一条路由：去登录中心、中心回调、中心登录页上的飞书按钮、飞书登录、飞书回调、退出、登录中心的退出通知、/api/me、
+// 名单提醒、账号变更提醒、健康检查。
 // 要记请求日志，再用 Middleware 包住整个 mux。
 func (s *SSO) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+centerLoginPath, s.handleCenterLogin)
@@ -513,6 +543,7 @@ func (s *SSO) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+loginPath, s.handleLogin)
 	mux.HandleFunc("GET "+callbackPath, s.handleCallback)
 	mux.HandleFunc("POST "+logoutPath, s.handleLogout)
+	mux.HandleFunc("POST "+backchannelPath, s.handleBackchannelLogout)
 	mux.Handle("GET "+mePath, s.RequireUser(http.HandlerFunc(s.handleMe)))
 	mux.HandleFunc("POST "+blocklistPath, s.handleBlocklistChanged)
 	mux.HandleFunc("POST "+accountsChangedPath, s.handleAccountsChanged)
@@ -576,6 +607,7 @@ type loginTxn struct {
 	Verifier string `json:"verifier"`
 	Next     string `json:"next"`
 	Expires  int64  `json:"expires"`
+	SID      string `json:"sid,omitempty"` // 登录中心给的浏览器会话编号（验过的 sid_hint），登成了记在会话上
 }
 
 // handleCenterLogin 是没登录时去的地方（前端、/api/me 回的 login_url 都指这里）：建一个登录事务，跳到登录中心的登录页。
@@ -589,6 +621,10 @@ func (s *SSO) handleCenterLogin(w http.ResponseWriter, r *http.Request) {
 	opts := []oauth2.AuthCodeOption{oidc.Nonce(t.Nonce), oauth2.S256ChallengeOption(t.Verifier)}
 	if hint := q.Get("error"); loginHints[hint] {
 		opts = append(opts, oauth2.SetAuthURLParam("fbif_error", hint))
+	}
+	// 刚在本项目退出：要中心出登录页，别自动走飞书又登回来。
+	if c, err := r.Cookie(signedOutCookie); err == nil && c.Value != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("prompt", "login"))
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, s.center.AuthCodeURL(t.State, opts...), http.StatusFound)
@@ -608,12 +644,29 @@ func (s *SSO) centerTxn(r *http.Request, state string) (loginTxn, bool) {
 	return t, true
 }
 
-// handleCenterFeishu 是登录中心登录页上的「使用飞书登录」：按 state 找回这次登录要回的页面，走本项目原来的飞书登录。
-// 找不到（换了浏览器、放太久）就登完回首页：和直接打开飞书登录一样，不多放任何东西。
+// handleCenterFeishu 是登录中心登录页上的「使用飞书登录」，也是这个浏览器用飞书登过时中心直接送回来的地方：
+// 按 state 找回这次登录要回的页面，走本项目原来的飞书登录。找不到（换了浏览器、放太久）就登完回首页：和直接打开飞书登录一样，不多放任何东西。
+// 带着 sid_hint（中心签的这个浏览器的会话编号）且验得过（签名、typ、发证方、受众是本系统、没过期、state 对得上），就记进飞书登录事务，
+// 登成了记在会话上（一处退出、处处退出）；验不过只记 stderr，照常登，只是这个会话退出只退本项目。
 // 中心的事务留着：飞书那边退回来，还能在同一个登录页用账号密码登。
 func (s *SSO) handleCenterFeishu(w http.ResponseWriter, r *http.Request) {
-	t, _ := s.centerTxn(r, r.URL.Query().Get("state"))
-	s.startFeishu(w, r, t.Next)
+	q := r.URL.Query()
+	t, ok := s.centerTxn(r, q.Get("state"))
+	sid := ""
+	if hint := q.Get("sid_hint"); hint != "" && ok {
+		ctx, cancel := context.WithTimeout(r.Context(), centerLogoutTimeout)
+		c, err := s.centerToken(ctx, hint, "fbif-sid+jwt")
+		cancel()
+		switch {
+		case err != nil:
+			log.Printf("sso: sid_hint refused: %v", err)
+		case c.State != t.State || !sidFormat.MatchString(c.SID):
+			log.Printf("sso: sid_hint refused: state or sid does not match")
+		default:
+			sid = c.SID
+		}
+	}
+	s.startFeishuWith(w, r, t.Next, sid)
 }
 
 // handleCenterCallback 是账号密码在登录中心登对了之后回来的地方：核对事务、拿客户端密钥和 PKCE 换码、验 id_token，建账号会话。
@@ -737,6 +790,7 @@ func (s *SSO) handleCenterCallback(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	setCookie(w, sessionCookie, sid, sessionIdle+touchEvery)
+	setCookie(w, signedOutCookie, "", -1)
 	log.Printf("sso: login %s user=%s", id.Key(), userID)
 	ev.Event, ev.Session = eventLoginOK, sessionTag(sess.IDHash)
 	s.record(ev)
@@ -750,13 +804,18 @@ func (s *SSO) handleCenterCallback(w http.ResponseWriter, r *http.Request) {
 // centerHTTP 找登录中心取公钥不跟跳转。
 var centerHTTP = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
+// centerVerifier 验登录中心签的令牌（id_token、sid_hint、退出令牌）：签名（RS256）、发证方是中心、受众是本系统、没过期。
+// 公钥每次现取：go-oidc 的 RemoteKeySet 对见过的钥匙一直缓存，中心撤掉的那把要马上不认。
+func (s *SSO) centerVerifier(ctx context.Context) *oidc.IDTokenVerifier {
+	keys := oidc.NewRemoteKeySet(oidc.ClientContext(ctx, centerHTTP), s.centerIssuer+"/keys")
+	return oidc.NewVerifier(s.centerIssuer, keys, &oidc.Config{ClientID: s.center.ClientID, SupportedSigningAlgs: []string{oidc.RS256}})
+}
+
 // verifyCenterLogin 验登录中心的 id_token：签名（RS256）、发证方、受众是本系统、没过期、nonce 对得上，
 // 再读中台核密码时给的身份：sub 是账号表那一行的记录 ID，fbif_credential 是凭据版本，fbif_verified_at 是中台核验时间（毫秒）。
 func (s *SSO) verifyCenterLogin(ctx context.Context, tok *oauth2.Token, nonce string) (hubAccount, error) {
 	rawID, _ := tok.Extra("id_token").(string)
-	// 公钥每次登录现取：go-oidc 的 RemoteKeySet 对见过的钥匙一直缓存，中心撤掉的那把要马上不认。
-	keys := oidc.NewRemoteKeySet(oidc.ClientContext(ctx, centerHTTP), s.centerIssuer+"/keys")
-	idt, err := oidc.NewVerifier(s.centerIssuer, keys, &oidc.Config{ClientID: s.center.ClientID, SupportedSigningAlgs: []string{oidc.RS256}}).Verify(ctx, rawID)
+	idt, err := s.centerVerifier(ctx).Verify(ctx, rawID)
 	if err != nil {
 		return hubAccount{}, fmt.Errorf("center id_token: %w", err)
 	}
@@ -792,6 +851,11 @@ func (s *SSO) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *SSO) startFeishu(w http.ResponseWriter, r *http.Request, next string) {
+	s.startFeishuWith(w, r, next, "")
+}
+
+// startFeishuWith 建飞书登录事务、跳集成平台；sid 是登录中心给的浏览器会话编号（没有就空着）。
+func (s *SSO) startFeishuWith(w http.ResponseWriter, r *http.Request, next, sid string) {
 	// 手上没有能用的 SSO 密钥就不送去扫码：扫完了也换不了令牌。
 	if _, ok := s.secretFor(r.Context()); !ok {
 		http.Redirect(w, r, centerLoginPath+"?error=unavailable", http.StatusFound)
@@ -803,6 +867,7 @@ func (s *SSO) startFeishu(w http.ResponseWriter, r *http.Request, next string) {
 		Verifier: oauth2.GenerateVerifier(),
 		Next:     next,
 		Expires:  time.Now().Add(txnTTL).Unix(),
+		SID:      sid,
 	}
 	raw, _ := json.Marshal(t)
 	// 登录事务加密放在发起登录的浏览器里：回调换了浏览器就对不上，防止把别人登进自己的账号。
@@ -899,7 +964,7 @@ func (s *SSO) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	sid := randToken()
 	now := time.Now()
-	sess := Session{IDHash: hashID(sid), UserID: userID, Identity: id, RefreshSeal: s.seal("refresh-token", []byte(tok.RefreshToken)), CreatedAt: now, CheckedAt: now, LastSeenAt: now, Version: 1}
+	sess := Session{IDHash: hashID(sid), UserID: userID, Identity: id, RefreshSeal: s.seal("refresh-token", []byte(tok.RefreshToken)), CreatedAt: now, CheckedAt: now, LastSeenAt: now, Version: 1, SID: t.SID}
 	if err := s.store.CreateSession(ctx, sess); err != nil {
 		s.revoke(ctx, tok.RefreshToken)
 		fail("failed", "建会话失败", "create session: %v", err)
@@ -913,6 +978,7 @@ func (s *SSO) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCookie(w, sessionCookie, sid, sessionIdle+touchEvery)
+	setCookie(w, signedOutCookie, "", -1)
 	log.Printf("sso: login %s user=%s", id.Key(), userID)
 	ev.Event = eventLoginOK
 	s.record(ev)
@@ -1228,7 +1294,8 @@ func (s *SSO) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, me)
 }
 
-// handleLogout 只退出这个项目在这个浏览器里的会话；飞书和其他项目不受影响。
+// handleLogout 退出这个项目在这个浏览器里的会话。会话带 SID（浏览器里经登录中心飞书登录的）就告诉登录中心，
+// 中心再通知其他项目删掉同一个 SID 的会话（一处退出、处处退出）；账号密码会话、飞书客户端里登的只退本项目。飞书本身不受影响。
 func (s *SSO) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		ctx, cancel := context.WithTimeout(r.Context(), upstreamLimit)
@@ -1241,10 +1308,152 @@ func (s *SSO) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 		if gone != nil {
 			s.record(s.sessionEvent(requestEvent(r, ""), gone, eventLogout, ""))
+			if gone.SID != "" {
+				s.tellCenterLogout(gone.SID)
+			}
 		}
 	}
 	setCookie(w, sessionCookie, "", -1)
+	setCookie(w, signedOutCookie, "1", signedOutTTL)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// tellCenterLogout 在后台告诉登录中心这个浏览器的飞书会话退出了（POST /api/logout，HTTP Basic 用中心客户端密钥，表单 sid）。
+// 连不上、429、5xx 退避重试，1 小时还不成就放弃；中心回别的 4xx（不认本应用的客户端密钥、sid 不对）不重试。都只记 stderr。
+// shortcut: 只在内存里重试，进程重启就丢（其他项目的会话留到各自退出或过期）；要必达，就把它也放进持久待写队列。
+func (s *SSO) tellCenterLogout(sid string) {
+	go func() {
+		start, gap := time.Now(), centerLogoutFirstGap
+		for {
+			retry, why := s.centerLogout(sid)
+			if !retry {
+				if why != "" {
+					log.Printf("sso: tell login center about logout: %s", why)
+				}
+				return
+			}
+			if time.Since(start) >= centerLogoutGiveUp {
+				log.Printf("sso: tell login center about logout: gave up after %s: %s", centerLogoutGiveUp, why)
+				return
+			}
+			log.Printf("sso: tell login center about logout: %s, retry in %s", why, gap)
+			time.Sleep(gap)
+			gap = min(gap*2, centerLogoutMaxGap)
+		}
+	}()
+}
+
+func (s *SSO) centerLogout(sid string) (retry bool, why string) {
+	ctx, cancel := context.WithTimeout(context.Background(), centerLogoutTimeout)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, s.centerIssuer+centerLogoutPath, strings.NewReader(url.Values{"sid": {sid}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(s.center.ClientID, s.center.ClientSecret)
+	resp, err := centerHTTP.Do(req)
+	if err != nil {
+		return true, "login center unreachable"
+	}
+	resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		return false, ""
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+		return true, fmt.Sprintf("HTTP %d", resp.StatusCode)
+	}
+	return false, fmt.Sprintf("HTTP %d, not retrying", resp.StatusCode)
+}
+
+// handleBackchannelLogout 收登录中心的退出通知（OpenID Connect Back-Channel Logout 1.0）：POST 表单 logout_token=…。
+// 验过（中心签的 RS256、typ logout+jwt、iss 是中心、aud 是本系统、没过期、发证时间不在将来、有 jti、sid、events 里有退出事件、没有 nonce）
+// 就删掉带这个 sid 的全部会话、后台撤销它们的 refresh_token，每个记一条「退出」（原因「在别的项目退出」）。
+// 200 {ok}（一个都没有也算）；400 invalid_request（令牌不对，中心不再送）；429 rate_limited；503 unavailable（存储出错，中心会重送）。
+func (s *SSO) handleBackchannelLogout(w http.ResponseWriter, r *http.Request) {
+	if !s.backchannelQuota.allow("") {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "rate_limited"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	raw := ""
+	if r.ParseForm() == nil {
+		raw = r.PostForm.Get("logout_token")
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), upstreamLimit)
+	defer cancel()
+	c, err := s.centerToken(ctx, raw, "logout+jwt")
+	if err == nil {
+		_, hasEvent := c.Events[backchannelEvent]
+		switch {
+		case !hasEvent:
+			err = errors.New("events lacks the back-channel logout event")
+		case c.JTI == "":
+			err = errors.New("no jti")
+		case !sidFormat.MatchString(c.SID):
+			err = errors.New("no sid")
+		}
+	}
+	if err != nil {
+		log.Printf("sso: backchannel logout refused: %v", err)
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
+		return
+	}
+	gone, err := s.store.DeleteSessionsBySID(ctx, c.SID)
+	if err != nil {
+		log.Printf("sso: backchannel logout: %v", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "unavailable"})
+		return
+	}
+	for i := range gone {
+		s.locks.Delete(gone[i].IDHash)
+		s.retryAfter.Delete(gone[i].IDHash)
+		s.record(s.sessionEvent(loginEvent{}, &gone[i], eventLogout, "在别的项目退出"))
+	}
+	go func() {
+		for _, sess := range gone {
+			if rt, err := s.open("refresh-token", sess.RefreshSeal); err == nil {
+				rctx, cancel := context.WithTimeout(context.Background(), upstreamLimit)
+				s.revoke(rctx, string(rt))
+				cancel()
+			}
+		}
+	}()
+	log.Printf("sso: backchannel logout: %d sessions ended", len(gone))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// centerClaims 是登录中心签的 sid_hint、退出令牌里本项目要看的几样。
+type centerClaims struct {
+	JTI    string                     `json:"jti"`
+	SID    string                     `json:"sid"`
+	State  string                     `json:"state"`
+	Events map[string]json.RawMessage `json:"events"`
+}
+
+// centerToken 验登录中心签的 sid_hint 或退出令牌：头里 typ 对得上（不能拿 id_token 或另一种冒充）、centerVerifier 那几样、
+// 有发证时间且不在将来、没有 nonce。
+func (s *SSO) centerToken(ctx context.Context, raw, typ string) (centerClaims, error) {
+	var c centerClaims
+	head, _, _ := strings.Cut(raw, ".")
+	hb, err := base64.RawURLEncoding.DecodeString(head)
+	var h struct {
+		Typ string `json:"typ"`
+	}
+	if err != nil || json.Unmarshal(hb, &h) != nil || !strings.EqualFold(h.Typ, typ) {
+		return c, fmt.Errorf("not a %s", typ)
+	}
+	tok, err := s.centerVerifier(ctx).Verify(ctx, raw)
+	if err != nil {
+		return c, fmt.Errorf("%s: %w", typ, err)
+	}
+	if tok.IssuedAt.IsZero() || tok.IssuedAt.After(time.Now().Add(centerClockSkew)) {
+		return c, fmt.Errorf("%s: iat missing or in the future", typ)
+	}
+	if tok.Nonce != "" {
+		return c, fmt.Errorf("%s: nonce not allowed", typ)
+	}
+	if err := tok.Claims(&c); err != nil {
+		return c, fmt.Errorf("%s: %w", typ, err)
+	}
+	return c, nil
 }
 
 // shortcut: 撤销失败只记日志不重试（令牌只在服务端，会话已删）；要做到必撤，就把加密的令牌连同删除一起写进待撤销表。
@@ -2447,7 +2656,7 @@ func (s *SSO) record(e loginEvent) {
 // 本模板自己的路由不记请求日志：登录、退出另有登录日志，/api/me 和两个提醒、健康检查是探针。
 var ownPaths = map[string]bool{
 	loginPath: true, callbackPath: true, centerLoginPath: true, centerCallbackPath: true, centerFeishuPath: true, logoutPath: true, mePath: true,
-	blocklistPath: true, accountsChangedPath: true, healthPath: true,
+	blocklistPath: true, accountsChangedPath: true, healthPath: true, backchannelPath: true,
 }
 
 type noteKey struct{}
@@ -2931,6 +3140,29 @@ func (fs *FileStore) DeleteSessionsBySub(_ context.Context, subs map[string]Bloc
 	var gone []Session
 	for id, s := range fs.data.Sessions {
 		if _, ok := subs[s.Identity.Sub]; ok && !s.Account {
+			gone = append(gone, s)
+			delete(fs.data.Sessions, id)
+		}
+	}
+	if len(gone) == 0 {
+		return nil, nil
+	}
+	if err := fs.commit(func() {
+		for _, s := range gone {
+			fs.data.Sessions[s.IDHash] = s
+		}
+	}); err != nil {
+		return nil, err
+	}
+	return gone, nil
+}
+
+func (fs *FileStore) DeleteSessionsBySID(_ context.Context, sid string) ([]Session, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	var gone []Session
+	for id, s := range fs.data.Sessions {
+		if sid != "" && s.SID == sid {
 			gone = append(gone, s)
 			delete(fs.data.Sessions, id)
 		}
