@@ -1,6 +1,6 @@
 module fbif-wechat-layout/api
 
-go 1.26.10
+go 1.26.11
 
 require golang.org/x/net v0.62.0
 
