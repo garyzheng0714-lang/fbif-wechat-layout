@@ -1,5 +1,6 @@
 // 登录走 FBIF 统一登录（后端 api/auth_login.go）：本项目没有登录页、不存令牌，会话只在 HttpOnly cookie 里。
 // 没登录时去 /auth/login?next=（飞书客户端里直接走飞书登录），后端再送去登录中心；登录完回到 next。
+// 飞书登录了还没授权云文档的，接着自动去授权（autoGrantFeishu）。
 
 export async function authFetch(input, init = {}, {
   fetchImpl = globalThis.fetch,
@@ -75,6 +76,27 @@ function navigate(windowRef, target) {
   }
 }
 
+const AUTO_GRANT_KEY = 'fbif_feishu_grant_auto_at';
+const AUTO_GRANT_QUIET_MS = 10 * 60 * 1000;
+
+// autoGrantFeishu：飞书登录的人默认授权云文档（2026-11-11 用户：「飞书云文档授权应该是默认授权的」）——还没授权就直接去授权页，
+// 飞书客户端里不用点，浏览器里飞书问一次同不同意，之后服务端替他续。刚从授权页回来没授权成（地址上带 feishu_grant=）不再跳、
+// 菜单里写原因；同一个标签页 10 分钟内只自动跳一次，记不下来就不跳，免得来回跳。
+function autoGrantFeishu(windowRef, user) {
+  if (user.auth_mode !== 'feishu' || user.feishu !== 'required' || !user.capabilities?.feishu_documents) return false;
+  if (new URLSearchParams(windowRef?.location?.search || '').has('feishu_grant')) return false;
+  try {
+    const store = windowRef.sessionStorage;
+    const now = Date.now();
+    if (now - Number(store.getItem(AUTO_GRANT_KEY) || 0) < AUTO_GRANT_QUIET_MS) return false;
+    store.setItem(AUTO_GRANT_KEY, String(now));
+  } catch {
+    return false;
+  }
+  navigate(windowRef, feishuGrantURL(windowRef));
+  return true;
+}
+
 export async function ensureAuthenticatedSession({
   windowRef = globalThis.window,
   documentRef = globalThis.document,
@@ -86,6 +108,7 @@ export async function ensureAuthenticatedSession({
       navigate(windowRef, loginURL(windowRef));
       return null;
     }
+    if (autoGrantFeishu(windowRef, user)) return null;
     documentRef?.body?.classList.remove('auth-pending');
     return user;
   } catch (error) {

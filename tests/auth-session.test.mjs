@@ -85,6 +85,41 @@ test('loadCurrentUser 只带同源 cookie、不带令牌，读 /api/auth/me', as
   assert.deepEqual(result, user);
 });
 
+function memoryStorage() {
+  const items = new Map();
+  return {
+    getItem: key => (items.has(key) ? items.get(key) : null),
+    setItem: (key, value) => items.set(key, String(value)),
+  };
+}
+
+const notGranted = { id: 'FJY632B9P3E:on_test', name: '张三', auth_mode: 'feishu', feishu: 'required', capabilities: { feishu_documents: true } };
+
+test('飞书登录了还没授权云文档：一打开就去授权，回到当前页面；同一个标签页 10 分钟内只自动跳一次', async () => {
+  const { windowRef, assigned } = locationRef();
+  windowRef.sessionStorage = memoryStorage();
+  const open = () => ensureAuthenticatedSession({ windowRef, documentRef: bodyRef, fetchImpl: async () => jsonResponse({ user: notGranted }) });
+  assert.equal(await open(), null);
+  assert.deepEqual(assigned, [`/auth/feishu-grant?next=${encodeURIComponent('/mp/fbif?account=legacy')}`]);
+  assert.deepEqual(await open(), notGranted);
+  assert.equal(assigned.length, 1);
+});
+
+test('不自动去授权：刚从授权页回来没授权成、记不下跳过没有、已授权、账号密码登录', async () => {
+  const cases = [
+    ['?feishu_grant=denied', notGranted, memoryStorage()],
+    ['', notGranted, undefined],
+    ['', { ...notGranted, feishu: 'ok' }, memoryStorage()],
+    ['', { ...notGranted, auth_mode: 'password', feishu: 'none', capabilities: { feishu_documents: false } }, memoryStorage()],
+  ];
+  for (const [search, user, storage] of cases) {
+    const { windowRef, assigned } = locationRef(search);
+    windowRef.sessionStorage = storage;
+    assert.deepEqual(await ensureAuthenticatedSession({ windowRef, documentRef: bodyRef, fetchImpl: async () => jsonResponse({ user }) }), user);
+    assert.deepEqual(assigned, []);
+  }
+});
+
 test('授权飞书地址带回当前页面', () => {
   const { windowRef } = locationRef('?v=abc&account=foodtalks-mp&feishu_grant=denied');
   assert.equal(feishuGrantURL(windowRef), `/auth/feishu-grant?next=${encodeURIComponent('/mp/fbif?account=foodtalks-mp')}`);
