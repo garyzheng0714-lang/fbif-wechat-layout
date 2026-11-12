@@ -3,8 +3,8 @@ package main
 // publish_external_auto.go — 原创稿公开后自动外发（2026-10-10 用户裁定：原创自动同步头条号）。
 //
 // 只对多维表格「平台账号」里勾了「自动外发」的号生效；其余账号仍只走审核卡按钮。
-// 各平台分开推（publish_external_lanes.go）：只推这篇还没推过的 auto 账号，推过的账号
-// 不论结果都不自动再推。任务落为已发布的同一次写入里记下待办（external_distribution_auto_pending），
+// 各平台分开推（publish_external_lanes.go）：只推这篇还没推过的 auto 账号；推过没成的由
+// publish_external_retry.go 按退避自己重推，这里不管。任务落为已发布的同一次写入里记下待办（external_distribution_auto_pending），
 // 再由 runExternalAutoDistribution 消化：进程在两步之间重启也不会漏发，每 AUTO_DISTRIBUTE_SECONDS（默认 10 分钟）兜底扫一次。
 //
 // 平台有每天的文章上限（头条号约 5 篇），超出会被拒绝，还会挤掉当天新稿，所以按账号各自配额推：
@@ -71,6 +71,7 @@ func (p *publishPipeline) startExternalAutoDistribution() {
 	go func() {
 		for {
 			p.runExternalAutoDistribution()
+			p.retryExternalLanes()
 			p.refreshExternalDistributionResults()
 			time.Sleep(intervals.autoDistribute)
 		}

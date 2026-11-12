@@ -96,7 +96,11 @@ func externalPlatformStatus(job publishJob, target externalAccount) externalPlat
 		case lane.State == publishExternalLaneManual:
 			state.Status, state.Tone = "人工已发", "green"
 		case lane.Driver == externalDriverRobot:
-			return robotPlatformState(lane, platformForAccount(target))
+			state := robotPlatformState(lane, platformForAccount(target))
+			if at, ok := externalLaneNextAutoRetry(lane, target, externalCardNow()); ok {
+				noteExternalAutoRetry(&state, lane, at)
+			}
+			return state
 		// 以下是云梭（2026-10-24 下线）留下的旧 lane，只显示；失败的可以重新同步。
 		case lane.State == publishExternalDistributionSucceeded:
 			state.Status, state.Tone = "已发布", "green"

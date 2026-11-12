@@ -336,7 +336,7 @@ func TestRobotLaneHoldsDraftThatDoesNotMatch(t *testing.T) {
 	}
 	body := distributionSectionJSON(t, buildReviewDoneCard(got))
 	for _, want := range []string{"<font color='orange'>未发布</font>", "**百家号**　[去百家号草稿箱查看](" + testRobotDraftURL(testRobotArticleID) + ")",
-		"<font color='grey'>草稿与原文对不上，没有发布：小标题：送去 2 处，读回 1 处</font>"} {
+		"自动重试；草稿与原文对不上，没有发布：小标题：送去 2 处，读回 1 处</font>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("卡片缺少 %q: %s", want, body)
 		}

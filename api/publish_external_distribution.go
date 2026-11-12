@@ -311,6 +311,8 @@ const (
 	externalQueueCard externalDistributionQueueMode = iota
 	externalQueueReplaceReconcile
 	externalQueueAuto
+	// externalQueueAutoRetry 系统按退避自己重推没成的平台（publish_external_retry.go）。
+	externalQueueAutoRetry
 )
 
 // externalDistributionIneligibleError 表示这篇文章按规则就不该外发（未公开、转载、
@@ -380,7 +382,7 @@ func (p *publishPipeline) replaceExternalDistributionAfterReconcile(jobID int64,
 }
 
 // queueAutoExternalDistribution 系统按配置把原创稿推给还没推过的 auto 账号；only 限定本次
-// 可推的账号（各平台当天还有配额的），nil 表示不限。推过的账号不论结果都不自动再推。
+// 可推的账号（各平台当天还有配额的），nil 表示不限。推过没成的不走这里，由 retryExternalLanes 按退避重推。
 func (p *publishPipeline) queueAutoExternalDistribution(jobID int64, actor string, only map[string]bool) (publishJob, error) {
 	return p.queueExternalDistribution(jobID, actor, "", externalQueueAuto, only)
 }
@@ -410,11 +412,13 @@ func externalDistributionLaneEligible(job publishJob, target externalAccount, cf
 	lane, exists := externalLaneFor(job, target.ID)
 	if !exists {
 		_, coversAll := externalDistributionCoveredAccounts(job)
-		return mode != externalQueueReplaceReconcile && !coversAll
+		return (mode == externalQueueCard || mode == externalQueueAuto) && !coversAll
 	}
 	switch mode {
 	case externalQueueCard:
 		return externalLaneCanSafeRetry(lane)
+	case externalQueueAutoRetry:
+		return externalLaneAutoRetryState(lane)
 	case externalQueueReplaceReconcile:
 		return lane.State == publishExternalDistributionReconciliationRequired
 	default:
@@ -439,6 +443,10 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	case externalQueueReplaceReconcile:
 		if !publishExternalDistributionCanReplaceReconcile(job) {
 			return job, fmt.Errorf("只有对账中的已发布任务才能由管理员重发外部分发，当前为 %s/%s", job.Stage, externalDistributionSummaryState(job))
+		}
+	case externalQueueAutoRetry:
+		if len(externalDistributionTargetsFor(job, cfg, mode, only)) == 0 {
+			return job, externalDistributionIneligible(errors.New("没有要重推的平台"))
 		}
 	case externalQueueAuto:
 		if len(cfg.autoTargets()) == 0 {
@@ -507,16 +515,20 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 	draftEditedAt := map[string]string{}
 	material := externalDraftMaterial(job)
 	for _, target := range chosen {
-		// 交过分发服务的按原来的冻结内容和幂等键再交：管理员重发待核对的，卡片重试草稿已存好、发布没成的。
-		// 冻结的图注超了平台现在的上限（发布时平台会拦）就不再按原来的交，往下按现在的内容重建、换键另存一篇。
-		if old, ok := externalLaneFor(job, target.ID); ok && old.Driver == externalDriverRobot && strings.TrimSpace(old.IntentKey) != "" &&
-			(mode == externalQueueReplaceReconcile || (mode == externalQueueCard && externalLaneDraftSaved(old) &&
-				!robotFrozenCaptionsOver(old, platformForAccount(target)))) {
+		old, hadOld := externalLaneFor(job, target.ID)
+		// 交过分发服务的按原来的冻结内容和幂等键再交：管理员重发待核对的，卡片重试、系统自己重推草稿已存好、发布没成的。
+		// 冻结的图注超了平台现在的上限（发布时平台会拦）就不再按原来的交，往下按现在的内容重建、换键另存一篇；
+		// 存好却读回没对上的那篇不能发，也往下另存一篇。
+		retryFrozen := (mode == externalQueueCard || (mode == externalQueueAutoRetry && old.State == publishExternalDistributionFailed)) &&
+			externalLaneDraftSaved(old) && !robotFrozenCaptionsOver(old, platformForAccount(target))
+		if hadOld && old.Driver == externalDriverRobot && strings.TrimSpace(old.IntentKey) != "" &&
+			(mode == externalQueueReplaceReconcile || retryFrozen) {
 			lane, resendErr := robotResendFrozenLane(job.ID, old, actor, requestedAt)
 			if resendErr != nil {
 				failures = append(failures, target.label()+"："+resendErr.Error())
 				continue
 			}
+			continueExternalLane(&lane, old, mode, false)
 			queuedAccounts = append(queuedAccounts, target.ID)
 			lanes = append(lanes, lane)
 			continue
@@ -557,6 +569,9 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		}
 		if lane.ContentVersion == 0 {
 			lane.ContentVersion = job.ContentVersion
+		}
+		if hadOld {
+			continueExternalLane(&lane, old, mode, true)
 		}
 		lane.Driver = externalDriverRobot
 		payloadJSON, platformTitle, buildErr := buildExternalLanePayload(snapshot, target, draft)

@@ -201,6 +201,10 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 		if lane.State != publishExternalDistributionFailed && lane.State != publishExternalDistributionRejected {
 			continue
 		}
+		// 系统还会自己重推的（前 3 次退避没用完）先不算失败：连续 3 次没成才找人。
+		if externalLaneAwaitingAutoRetry(job, lane, now) {
+			continue
+		}
 		externalFailed = true
 		if at, err := time.Parse(time.RFC3339, lane.CompletedAt); err == nil && at.After(externalFailedAt) {
 			externalFailedAt = at

@@ -111,6 +111,20 @@ func robotIdempotencyKey(jobID int64, accountID, payloadHash string) string {
 	return string(key)
 }
 
+// robotLaneIntentKey 这条 lane 交给分发服务的键：读回没对上、另存的第 n 篇（DraftAttempt ≥ 2）在后面加 .r<n>，
+// 内容一样也是新的一篇；第一篇不加，和以前交的键一样。
+func robotLaneIntentKey(jobID int64, lane publishExternalLane) string {
+	key := robotIdempotencyKey(jobID, lane.AccountID, lane.PayloadHash)
+	if lane.DraftAttempt < 2 {
+		return key
+	}
+	suffix := fmt.Sprintf(".r%d", lane.DraftAttempt)
+	if len(key)+len(suffix) > 128 {
+		key = key[:128-len(suffix)]
+	}
+	return key + suffix
+}
+
 // robotFrozenCaptionsOver 冻结的内容里有图注超了这个平台现在的上限：草稿存是存上了，发布时平台会拦
 // （2026-11-03 #340 头条号），同一个键再交也发不出去，卡片重试要按现在的内容重建、换键另存一篇。
 func robotFrozenCaptionsOver(lane publishExternalLane, profile distributionPlatform) bool {
@@ -128,7 +142,7 @@ func robotFrozenCaptionsOver(lane publishExternalLane, profile distributionPlatf
 func robotResendFrozenLane(jobID int64, old publishExternalLane, actor, requestedAt string) (publishExternalLane, error) {
 	var payload robotDraftPayload
 	if err := json.Unmarshal([]byte(old.PayloadJSON), &payload); err != nil || len(payload.Blocks) == 0 ||
-		robotIdempotencyKey(jobID, old.AccountID, old.PayloadHash) != old.IntentKey {
+		robotLaneIntentKey(jobID, old) != old.IntentKey {
 		// 2026-10-24 前按旧格式交的：分发服务已不收旧格式，没法按原来的键再问，也不能换键重存。
 		return old, errors.New("上次是按旧格式交给分发服务的，没法按原来的幂等键再核对；请到" + old.Name + "草稿箱核对后人工处理")
 	}
@@ -169,7 +183,7 @@ func (p *publishPipeline) pushRobotLane(job publishJob, lane publishExternalLane
 		p.failExternalLaneBeforePush(job.ID, lane.AccountID, err.Error())
 		return
 	}
-	intentKey := robotIdempotencyKey(job.ID, lane.AccountID, lane.PayloadHash)
+	intentKey := robotLaneIntentKey(job.ID, lane)
 	if !p.claimExternalLanePush(job.ID, lane, intentKey) {
 		return
 	}

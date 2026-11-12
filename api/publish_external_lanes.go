@@ -58,6 +58,10 @@ type publishExternalLane struct {
 	// ActionID 已经落到 lane 上的那次发布动作（分发服务记的编号）。卡片重试、管理员重发后又看到同一个
 	// 编号的失败或没看清，是上一次的结果，不是这次的：这次还没发，要调发布。
 	ActionID string `json:"action_id,omitempty"`
+	// AutoRetries 这次请求以来系统自己重推了几次（publish_external_retry.go）；人在卡片上点一次从头算。
+	AutoRetries int `json:"auto_retries,omitempty"`
+	// DraftAttempt 平台上第几篇草稿：读回没对上、按现在的内容另存一篇时加一，幂等键跟着换（robotIdempotencyKey）。0、1 都是第一篇。
+	DraftAttempt int `json:"draft_attempt,omitempty"`
 }
 
 func externalLaneIndex(job publishJob, accountID string) int {
