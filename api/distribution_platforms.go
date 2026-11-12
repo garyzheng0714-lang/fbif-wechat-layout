@@ -44,6 +44,7 @@ type distributionPlatformInfo struct {
 	Title      distributionTitleRule `json:"title"`
 	Cover      distributionCoverRule `json:"cover"`
 	Caption    distributionTextRule  `json:"caption"`
+	Images     distributionImageRule `json:"images"`
 	DailyLimit int                   `json:"daily_limit"`
 	Hosts      []string              `json:"hosts"`
 	ManageURL  string                `json:"manage_url"`
@@ -59,6 +60,12 @@ type distributionTitleRule struct {
 type distributionTextRule struct {
 	Max   int    `json:"max"`
 	Count string `json:"count"`
+}
+
+// distributionImageRule 正文每张图最大几字节；0 是不限，GIFMaxBytes 是 0 时动图照 MaxBytes。
+type distributionImageRule struct {
+	MaxBytes    int64 `json:"max_bytes"`
+	GIFMaxBytes int64 `json:"gif_max_bytes"`
 }
 
 type distributionCoverRule struct {
@@ -93,8 +100,8 @@ func validateDistributionPlatforms(items []distributionPlatformInfo) error {
 		if p.Caption.Max < 0 || p.Caption.Max > 0 && !distributionCountKnown(p.Caption.Count) {
 			return fmt.Errorf("%s（%s）图注上限 %d、数法「%s」排版工具不认得", where, p.ID, p.Caption.Max, p.Caption.Count)
 		}
-		if p.Cover.MinWidth < 0 || p.Cover.MinHeight < 0 || p.DailyLimit < 0 {
-			return fmt.Errorf("%s（%s）封面下限或每天上限是负数", where, p.ID)
+		if p.Cover.MinWidth < 0 || p.Cover.MinHeight < 0 || p.DailyLimit < 0 || p.Images.MaxBytes < 0 || p.Images.GIFMaxBytes < 0 {
+			return fmt.Errorf("%s（%s）封面下限、正文图上限或每天上限是负数", where, p.ID)
 		}
 		for _, host := range p.Hosts {
 			if strings.TrimSpace(host) == "" || strings.ContainsAny(host, "/: ") {
@@ -156,6 +163,8 @@ type distributionPlatform struct {
 	// 图注每条最多几个字（按 CaptionCount 的数法）；0 表示平台不限。超了推之前缩写（publish_external_captions.go）。
 	CaptionMax   int
 	CaptionCount string
+	// 正文每张图最大几字节，0 是不限；动图另有上限的看 GIFMaxBytes（0 照 ImageMaxBytes）。超了的动图推之前压小（publish_external_images.go）。
+	ImageMaxBytes, GIFMaxBytes int64
 	// 摘要字数上限：分发服务现在不收摘要、也不给上限，所以是 0（不查）；哪天平台要摘要，接口加上再填。
 	SummaryMax int
 	// 平台每天的文章上限，自动外发按账号各自计数（人工按钮发的也计入）；0 表示不自动发。
@@ -172,6 +181,7 @@ func (i distributionPlatformInfo) platform() distributionPlatform {
 		CoverMinWidth: i.Cover.MinWidth, CoverMinHeight: i.Cover.MinHeight,
 		TitleMin: i.Title.Min, TitleMax: i.Title.Max, TitleHalfWidthASCII: i.Title.Count == titleCountASCIIHalf,
 		CaptionMax: i.Caption.Max, CaptionCount: i.Caption.Count,
+		ImageMaxBytes: i.Images.MaxBytes, GIFMaxBytes: i.Images.GIFMaxBytes,
 		DailyLimit: i.DailyLimit, URLHosts: append([]string(nil), i.Hosts...), ManageURL: i.ManageURL,
 	}
 }
@@ -244,6 +254,14 @@ func (p distributionPlatform) titleLength(title string) int {
 // captionLength 按这个平台数图注的法子数（与分发服务 captionsOver 同一口径）。
 func (p distributionPlatform) captionLength(caption string) int {
 	return distributionTextLength(p.CaptionCount, caption)
+}
+
+// gifMaxBytes 正文动图最大几字节（没单给就照每张图的上限）；0 是不限。
+func (p distributionPlatform) gifMaxBytes() int64 {
+	if p.GIFMaxBytes > 0 {
+		return p.GIFMaxBytes
+	}
+	return p.ImageMaxBytes
 }
 
 // captionFits 这条图注没超这个平台的上限（平台不限就都算没超）。

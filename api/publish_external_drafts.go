@@ -60,6 +60,9 @@ type publishExternalDraft struct {
 	// Captions 超了这个平台图注上限的图注缩成的（原图注 → 缩写），推的时候按原图注换上；文章改了、对不上的不用
 	// （publish_external_captions.go）。
 	Captions map[string]string `json:"captions,omitempty"`
+	// Images 超了这个平台正文图上限的动图压小转存的（原地址 → 压小的地址），推的时候按原地址换上
+	// （publish_external_images.go）。
+	Images map[string]string `json:"images,omitempty"`
 }
 
 type publishExternalIssue struct {

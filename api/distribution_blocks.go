@@ -33,7 +33,8 @@ func decodeDistributionSource(blocksJSON, imageMapJSON string) ([]Block, map[str
 }
 
 // buildDistributionContent 推给这个平台的正文块与封面：各平台同一套规则，platform 只用来挑封面
-// （正文里够得上平台下限的图）；draft 里人给这个平台换的封面优先，超了平台上限的图注换成 draft 里缩好的。
+// （正文里够得上平台下限的图）；draft 里人给这个平台换的封面优先，超了平台上限的图注换成 draft 里缩好的，
+// 超了平台上限的动图换成 draft 里压小的。
 func buildDistributionContent(job publishJob, platform distributionPlatform, draft publishExternalDraft) (distributionContent, error) {
 	decoded, imageMap, err := decodeDistributionSource(job.BlocksJSON, job.ImageMap)
 	if err != nil {
@@ -51,6 +52,9 @@ func buildDistributionContent(job publishJob, platform distributionPlatform, dra
 	for i := range blocks {
 		if short, ok := draft.Captions[blocks[i].Text]; ok && blocks[i].K == "cap" {
 			blocks[i].Text = short
+		}
+		if small, ok := draft.Images[blocks[i].Src]; ok && blocks[i].K == "img" {
+			blocks[i].Src = small
 		}
 	}
 	return distributionContent{Blocks: blocks, Cover: dist.Cover}, nil

@@ -129,7 +129,15 @@ func (p *publishPipeline) storeExternalCoverBytes(ctx context.Context, jobID int
 		return publishExternalCoverCandidate{}, errors.New("只支持 JPG、PNG 图片")
 	}
 	digest := sha256.Sum256(data)
-	name := fmt.Sprintf("distribution-cover-%d-%x.%s", jobID, digest[:8], ext)
+	stored, err := p.storeExternalMedia(ctx, fmt.Sprintf("distribution-cover-%d-%x.%s", jobID, digest[:8], ext), mime, data)
+	if err != nil {
+		return publishExternalCoverCandidate{}, err
+	}
+	return publishExternalCoverCandidate{URL: stored, Width: width, Height: height, UploadedBy: actor}, nil
+}
+
+// storeExternalMedia 外发用的图（封面、压小的动图）转存 OSS，返回公网地址。
+func (p *publishPipeline) storeExternalMedia(ctx context.Context, name, mime string, data []byte) (string, error) {
 	var stored string
 	var err error
 	if p.externalCoverStore != nil {
@@ -140,11 +148,11 @@ func (p *publishPipeline) storeExternalCoverBytes(ctx context.Context, jobID int
 		stored = results[name]
 	}
 	if err != nil {
-		return publishExternalCoverCandidate{}, fmt.Errorf("图片转存失败：%w", err)
+		return "", fmt.Errorf("图片转存失败：%w", err)
 	}
 	stored = publicMediaURL(strings.TrimSpace(stored))
 	if stored == "" {
-		return publishExternalCoverCandidate{}, errors.New("图片转存失败，请重试")
+		return "", errors.New("图片转存失败，请重试")
 	}
-	return publishExternalCoverCandidate{URL: stored, Width: width, Height: height, UploadedBy: actor}, nil
+	return stored, nil
 }

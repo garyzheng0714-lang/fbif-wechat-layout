@@ -213,7 +213,7 @@ type publishPipeline struct {
 	proofreadMemberLister func(ctx context.Context, appProfileID, chatID string) ([]proofreadMember, error)
 	// distributionOwnerLister 仅测试注入：读取审核群成员（默认用审核应用调飞书）。
 	distributionOwnerLister func(ctx context.Context, appProfileID, chatID string) ([]publishDistributionOwner, error)
-	// externalCoverStore 仅测试注入：侧边栏上传的封面转存（默认 OSS）。
+	// externalCoverStore 仅测试注入：外发用的图（侧边栏上传的封面、放大的封面、压小的动图）转存（默认 OSS）。
 	externalCoverStore func(ctx context.Context, name string, body []byte) (string, error)
 	// 审核聚合卡按钮图标的 img_key，按审核应用缓存（见 feishu_review_card_icons.go）。
 	reviewCardIconCache reviewCardIconCache

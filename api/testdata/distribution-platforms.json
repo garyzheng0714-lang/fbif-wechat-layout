@@ -18,6 +18,10 @@
         "max": 0,
         "count": "chars"
       },
+      "images": {
+        "max_bytes": 0,
+        "gif_max_bytes": 0
+      },
       "daily_limit": 5,
       "hosts": [
         "baijiahao.baidu.com",
@@ -42,6 +46,10 @@
       "caption": {
         "max": 50,
         "count": "bytes_half"
+      },
+      "images": {
+        "max_bytes": 0,
+        "gif_max_bytes": 0
       },
       "daily_limit": 5,
       "hosts": [
@@ -89,6 +97,10 @@
         "max": 0,
         "count": "chars"
       },
+      "images": {
+        "max_bytes": 0,
+        "gif_max_bytes": 0
+      },
       "daily_limit": 5,
       "hosts": [
         "zhuanlan.zhihu.com"
@@ -112,6 +124,10 @@
       "caption": {
         "max": 0,
         "count": "chars"
+      },
+      "images": {
+        "max_bytes": 20971520,
+        "gif_max_bytes": 5242880
       },
       "daily_limit": 5,
       "hosts": [

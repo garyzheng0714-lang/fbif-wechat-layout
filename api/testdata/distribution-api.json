@@ -239,6 +239,8 @@
         "cover_unavailable",
         "cover_too_large",
         "cover_too_small",
+        "image_unavailable",
+        "image_too_large",
         "login_required",
         "platform_error"
       ]

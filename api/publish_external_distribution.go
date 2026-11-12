@@ -499,6 +499,9 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 		// 超长图注缩成的（publish_external_captions.go）；captionsChanged 是和记下的不一样，要存回去。
 		captions        map[string]string
 		captionsChanged bool
+		// 超限动图压小的（publish_external_images.go）；imagesChanged 同上。
+		images        map[string]string
+		imagesChanged bool
 	}
 	var checked []preflightResult
 	draftEditedAt := map[string]string{}
@@ -537,6 +540,9 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			result.captions = p.externalCaptionsFor(snapshot, platformForAccount(target), draft)
 			result.captionsChanged = !maps.Equal(result.captions, draft.Captions)
 			draft.Captions = result.captions
+			result.images = p.externalImagesFor(snapshot, platformForAccount(target), draft)
+			result.imagesChanged = !maps.Equal(result.images, draft.Images)
+			draft.Images = result.images
 		}
 		checked = append(checked, result)
 		if len(issues) > 0 {
@@ -599,12 +605,17 @@ func (p *publishPipeline) queueExternalDistribution(jobID int64, actor, expected
 			}
 		}
 		for _, result := range checked {
-			if _, exists := externalDraftFor(*current, result.target.ID); exists || len(result.issues) > 0 || result.autoCover != "" || result.captionsChanged {
+			if _, exists := externalDraftFor(*current, result.target.ID); exists || len(result.issues) > 0 || result.autoCover != "" || result.captionsChanged || result.imagesChanged {
 				recordExternalPreflight(current, result.target, result.issues, result.candidates, material, requestedAt)
 			}
 			if result.captionsChanged {
 				draft, _ := externalDraftFor(*current, result.target.ID)
 				draft.Captions = result.captions
+				setExternalDraft(current, draft)
+			}
+			if result.imagesChanged {
+				draft, _ := externalDraftFor(*current, result.target.ID)
+				draft.Images = result.images
 				setExternalDraft(current, draft)
 			}
 			if result.autoCover != "" {
