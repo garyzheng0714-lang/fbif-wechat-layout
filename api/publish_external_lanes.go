@@ -4,8 +4,8 @@ package main
 //
 // 2026-10-12 用户裁定：各平台分开发布（「他们这个发布不应该是分开的吗？」）。每个账号一条 lane，
 // 各自冻结 payload 与 intent、各自存草稿再发布、各自对账。红线 37 的安全规则逐条落在 lane 上：结果
-// 不明的按幂等键向分发服务查（publish_external_robot.go），系统自己不再提交；只有失败的 lane 可以从
-// 卡片重新同步；推过的账号（不论结果）不会被自动外发再推。
+// 不明的按幂等键向分发服务查（publish_external_robot.go），系统自己不再提交；失败的 lane 可以从
+// 卡片重新同步；推过的账号（不论结果）自动外发不再推，没成的（失败、停在草稿）由 publish_external_retry.go 按退避重推。
 //
 // 2026-10-24 云梭下线：它留下的 lane（Driver 为空）只显示；已发布的照旧显示已发布，失败的可以从卡片
 // 重新同步（换成一条经分发服务的 lane）。
@@ -117,8 +117,8 @@ func externalDistributionAnyProcessing(job publishJob) bool {
 	return false
 }
 
-// externalDistributionCoveredAccounts 有 lane 的账号（不论结果）：失败的也算，自动外发不再推，
-// 只从卡片人工重存。账号为空的 lane（按平台拆开之前缺账号的旧数据）视为覆盖全部。
+// externalDistributionCoveredAccounts 有 lane 的账号（不论结果）：失败的也算，自动外发不再推（没成的由
+// publish_external_retry.go 按退避重推，或从卡片重新同步）。账号为空的 lane（按平台拆开之前缺账号的旧数据）视为覆盖全部。
 func externalDistributionCoveredAccounts(job publishJob) (map[string]bool, bool) {
 	covered := map[string]bool{}
 	for _, lane := range job.ExternalDistributionLanes {
