@@ -166,8 +166,11 @@ jobs:
 
           # Upload every artifact into the isolated release. render dependencies are resolved
           # from render-service/package-lock.json in staging, never inside the live directory.
+          # 静态文件以线上目录为底（--copy-dest：在服务器上复制、只传差异，不碰线上文件）：GitHub 到主力服务器
+          # 偶尔每秒只有十几 KB，17MB 的字体从头传会超 20 分钟被取消（2026-11-12）。
           rsync -avz \
             -e "ssh -i ~/.ssh/deploy_key" \
+            --copy-dest="${DEPLOY_PATH}/" \
             public/ \
             "${USER}@${HOST}:${RELEASE_DIR}/public/"
 

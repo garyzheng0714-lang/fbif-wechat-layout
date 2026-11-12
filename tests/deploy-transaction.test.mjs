@@ -147,6 +147,8 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     '运行时 ssh-keyscan 是 TOFU，不能作为生产主机身份依据');
   assert.doesNotMatch(workflow, /\$\{USER\}@\$\{HOST\}:\$\{DEPLOY_PATH\}\//,
     '静态文件不得直接覆盖 live DEPLOY_PATH');
+  assert.match(workflow, /--copy-dest="\$\{DEPLOY_PATH\}\/"/,
+    '静态文件以线上目录为底只传差异：网慢时 17MB 字体从头传会超 20 分钟（2026-11-12）');
   assert.doesNotMatch(workflow, /\$\{USER\}@\$\{HOST\}:\/var\/www\/render-service\//,
     'render 不得直接覆盖 live 目录');
   assert.match(workflow, /npm ci --omit=dev --no-audit --no-fund/,
